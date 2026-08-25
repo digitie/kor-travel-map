@@ -2,8 +2,8 @@
 
 이 runbook은 issue #741·#785와 `T-VN-15`의 남은 production 증거를 한 번의 owned
 Feature lane에서 검증한다. strict `T-ADM-C7`의 상태·증거에는 mutation을 섞지 않지만,
-실행 전 신뢰 경계는 C7 host attestation v4와 pinned runtime manifest v5 + rebuild
-journal v7을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
+실행 전 신뢰 경계는 C7 host attestation v4와 pinned runtime manifest v6 + rebuild
+journal v8을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
 
 ## 1. 불변식
 
@@ -87,8 +87,8 @@ export E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION='<deployed-alembic-rev
 export E2E_LIVE_ALLOW_PROD=1
 export E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1
 export E2E_C7_EXPECTED_GIT_COMMIT='<40-hex>'
-export E2E_C7_PINNED_RUNTIME_MANIFEST='<root-owned-pinned-runtime-generation-v5.json>'
-export E2E_C7_REBUILD_JOURNAL='<root-owned-pinned-runtime-rebuild-v7-<pinset>.json>'
+export E2E_C7_PINNED_RUNTIME_MANIFEST='<root-owned-pinned-runtime-generation-v6.json>'
+export E2E_C7_REBUILD_JOURNAL='<root-owned-pinned-runtime-rebuild-v8-<pinset>.json>'
 export E2E_C7_PLAYWRIGHT_IMAGE='sha256:<64-hex>'
 export E2E_C7_EXPECTED_UI_ORIGIN_SHA256='<64-hex>'
 export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256='<64-hex>'
@@ -102,7 +102,7 @@ export E2E_C7_PINVI_WEB_SERVICE='<compose-service>'
 export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 ```
 
-> 두 attested input은 ktdm이 rebuildable transaction에서 만든 v5/v7 문서의 **root 소유
+> 두 attested input은 ktdm이 rebuildable transaction에서 만든 v6/v8 문서의 **root 소유
 > 0600 사본**이어야 한다. ktdm의 state root는 Manager owner 소유 `0700`이라 그대로는
 > verifier의 root-owned 요구를 만족하지 않는다. 사본을 만들 때 내용은 바꾸지 않는다 —
 > verifier가 두 파일의 SHA256을 attestation과 대조하므로 한 바이트만 달라도 멈춘다.
@@ -110,10 +110,12 @@ export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 root snapshot의 C7 verifier는 mutation 전에 다음을 actual runtime과 exact 비교한다.
 
 - host machine ID·hostname, compose project, 공개 UI/API/Dagster origin
-- v5 active generation의 일곱 immutable image ID(Map API/UI/Dagster web/daemon,
-  PinVi API/web/dagster)와 세 schema head(map application·map dagster·pinvi), pinset digest
-- v7 rebuild journal이 **이 세대를 commit했다는 것** — phase `committed`, candidate가
-  manifest active generation과 전체 동등, cancel probe `finalized`
+- v6 active generation의 일곱 immutable image ID(Map API/UI/Dagster web/daemon,
+  PinVi API/web/dagster), 세 schema head(map application·map dagster·pinvi), pinset digest,
+  application `300` paired candidate evidence
+- v8 rebuild journal이 **이 세대를 commit했다는 것** — phase `committed`, candidate 전체
+  동등, candidate evidence 중복 결박, application/Dagster DB identity와 identity digest,
+  root/finalize result, application/metadata permit, cancel probe `finalized`
 - Map/PinVi source commit, OCI source revision, command hash, environment hash
 - Playwright executor image와 base image identity
 - Map API의 `profile=production`, features route `true`, 중복 없는 cursor signing secret

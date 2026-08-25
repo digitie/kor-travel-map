@@ -1,218 +1,138 @@
-# T-VN-H46H — Alembic `300` baseline 및 `0236 → 300` 비파기 handoff 설계
+# T-VN-H46H — Alembic `300` baseline과 fresh-only 재구축 설계
 
 작성일: 2026-08-24
+최종 결정 갱신: 2026-08-25
 
 ## 결정
 
-현재 Map application schema를 Alembic active graph의 유일한 root `300`으로
-재정본화한다. `0200_schema_baseline`부터
-`0236_tvn41s_compaction_drained`까지의 현재 active migration source는 실행 graph와
-runtime image 밖의 byte-pinned retired archive로 보존한다. 과거 revision으로의
-downgrade, snapshot restore, migration replay는 지원하지 않는다.
+현재 Map application schema를 Alembic active graph의 유일한 root/head `300`으로
+재정본화한다. `0200_schema_baseline`부터 `0236_tvn41s_compaction_drained`까지의 과거
+migration source는 실행 graph와 production image 밖의 byte-pinned retired archive로만
+보존한다.
 
-기존 n150 Map application DB는 DDL/data migration을 다시 실행하지 않는다. 정확히 한 번의
-`0236_tvn41s_compaction_drained → 300` Alembic metadata handoff만 허용하며, 일반
-`upgrade`, `stamp`, entrypoint 자동 migration, 수동 `public.alembic_version` 편집은
-계속 fail-close한다.
+기존 DB의 `0236 → 300` stamp나 in-place upgrade는 지원하지 않는다. n150을 포함한 배포
+환경은 Docker Manager의 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm` transaction으로
+application DB, Dagster metadata DB, PinVi DB를 파기·재생성하고 고정 candidate를 fresh-only로
+적용한다. 과거 revision downgrade·restore·replay와 수동 `public.alembic_version` 편집도
+지원하지 않는다.
 
-## 범위와 비범위
+이 문서는 2026-08-24 초안의 비파기 handoff 결정을 대체한다. 과거 handoff source와 rehearsal은
+감사 자료일 뿐 실행 authority가 아니며 current candidate image에 executable로 포함하지 않는다.
 
-이 작업은 Map application DB의 active Alembic lineage와 새 DB bootstrap을 바꾼다.
-Map Dagster metadata DB와 PinVi DB의 Alembic revision을 변경하지 않는다. PinVi의 진행 중
-Alembic WIP는 candidate source로 쓰지 않으며, deployment transaction에는 변경 없는
-immutable PinVi revision만 결박한다.
+## 범위
 
-`ktdctl pinvi-pair rebuild-pinned --confirm`는 이번 전환의 대안이 아니다. 이 명령은
-Map application·Map Dagster·PinVi DB를 재생성하는 파기형 workflow다. raw production
-Compose와 수동 version-table SQL도 후보 source/image/head와 transition 증거를 남기지
-못하므로 사용하지 않는다.
+- application active Alembic graph를 단일 root/head `300`으로 축소한다.
+- final role·membership·ACL·extension·schema·seed 계약을 fresh bootstrap에 봉인한다.
+- API와 Dagster candidate를 동일 Map commit/tree 및 immutable image ID에 결박한다.
+- application root/finalize와 Dagster storage migration의 응답 유실을 DB-atomic receipt로
+  수렴시킨다.
+- Docker Manager manifest v6/journal v8과 Map C7 host attestation v4를 exact 결선한다.
+- n150에서 고정 release candidate를 destructive fresh rebuild하고 login과 live UI E2E를
+  검증한다.
 
-## source baseline 생성 규칙
+## 비범위
 
-`scripts/build-baseline.sh`는 세 application schema의 non-empty table 전체를
-`seed.sql`에 넣는다. 따라서 다음 DB는 source로 사용하면 안 된다.
+- 기존 DB의 in-place stamp·upgrade
+- 과거 revision으로 downgrade 또는 stamp-back
+- dump/PITR/volume 교체를 이용한 rollback이나 release gate
+- n150 DB나 backup clone을 baseline 생성 source로 사용하는 행위
+- 일반 API/Dagster startup의 schema 자동 수리
+- Map 작업 중인 변경 가능한 PinVi source를 candidate에 포함하는 행위
 
-- n150 production DB
-- n150 backup clone
-- live acceptance DB
-- provider ingestion, UI fixture, acceptance cleanup 잔재가 남은 DB
+## baseline 생성과 정적 계약
 
-source는 오직 disposable PostGIS에서 다음 순서로 만든 data-free isolated reference DB다.
+baseline은 provider 적재, live fixture, acceptance 잔재가 없는 격리 fresh `0236` reference에서
+한 번 생성한다. 생성 결과는 review 가능한 SQL과 canonical receipt SQL로 저장하며 런타임이
+reference DB에 의존하지 않게 한다.
 
-1. #1063의 exact role-contract 변경을 포함한 old active graph를 fresh DB에서
-   `0236_tvn41s_compaction_drained`까지 올린다.
-2. M01/M04/M05 final role graph와 object ownership repair를 적용한다.
-3. provider ingestion, live fixture, browser acceptance를 한 번도 실행하지 않았음을
-   seed manifest·row count·canonical hash로 확인한다.
-4. `0236` data semantic closure를 확인한다. compaction-drained 미표시 empty material,
-   orphan 미표시 material, drained인데 item이 남은 material은 각각 0이어야 한다.
-5. 이 reference DB에서만 `schema.sql`과 `seed.sql`을 생성한다. 같은 DB에서 두 번째
-   dump가 byte-identical하지 않으면 warning으로 계속하지 않고 생성 자체를 실패시킨다.
-6. final bootstrap을 선행한 별도 fresh DB에 `300`을 적용하고, reference `0236`와
-   relation·column·constraint·index·routine·trigger·owner·ACL·extension·seed 및
-   role/membership contract를 독립 비교한다.
+candidate에는 다음을 포함한다.
 
-## 현재 구현 checkpoint의 재현 증거
+- `alembic/versions/300_schema_baseline.py`
+- application catalog, seed, source/destination Alembic facet, runtime invariant SQL
+- final role bootstrap과 exact application contract
+- application fresh root/finalize one-shot
+- mutation entrypoint가 없는 root-owned `0444` DB contract module
 
-isolated clean `0236` reference에서 생성한 sidecar는 다음 byte digest를 갖는다.
+candidate에는 다음을 포함하지 않는다.
 
-| artifact | 줄 수 | SHA-256 |
-|---|---:|---|
-| `alembic/baseline/schema.sql` | 26,332 | `01b5c8709145a31176ec3753fd32b4c91febc1011c0d7cbb4a931b4737f53d2c` |
-| `alembic/baseline/seed.sql` | 426 | `1872473b75e79d940a8cae0821418e3e14f8f445a48aa144d6bb6cf8bfabd80f` |
+- `ktm-application-schema-handoff`
+- `0236 → 300` transition writer
+- source oracle나 handoff rehearsal을 production proof authority로 실행하는 경로
+- 과거 Alembic migration graph
 
-seed는 final catalog의 non-empty application table 9개만 포함한다. fresh `300` target은
-새 `baseline-300` role bootstrap 이후 fixed `fresh-300 migrate`로 restricted root
-migration과 source receipt를 만들고, 별도 fixed `fresh-300-finalize`가 ACL 재조정과
-destination catalog 확인을 한 transaction으로 완료했다. 그 뒤 raw version row와
-`alembic current`/`heads`가 모두 `300` 하나임을 확인했다. reference와 target의 core catalog는 9,901행,
-`45e391eb0c6f4e136995fdd1d95b72cde09a0da3d743235fb3af880280100ec7`로 같았다.
+paired builder는 sealed Git archive에서 API와 Dagster image를 함께 만들고, Map commit/tree,
+두 image ID, PostgreSQL image ID, Dagster config·launch contract, application contract, build
+receipt digest를 exact candidate evidence로 발행한다. 현재 checkout의 mutable 파일이나
+caller가 만든 대체 receipt는 허용하지 않는다.
 
-catalog comparator가 별도로 남긴 네 CHECK constraint의 여덟 deparse line은 PostgreSQL의
-AND 평탄화 표현 차이다. 이 차이를 comparator에서 지우지 않는다. ORM CHECK semantic
-oracle과 one-shot handoff regression으로 같은 의미임을 독립 검증한 뒤에만 이 checkpoint를
-완성으로 취급한다.
+## destructive fresh transaction
 
-## active graph와 archive
+Docker Manager는 host-global mutation lock과 immutable candidate attestation 뒤 다음 순서로만
+진행한다.
 
-새 active graph는 아래 하나뿐이다.
+1. 외부 Geo·Concierge·RustFS prerequisite를 mutation 전에 읽기 전용으로 확인한다.
+2. stale one-shot container를 제거하고 부재를 확인한다.
+3. Map/PinVi PostgreSQL image와 candidate source/image를 고정한다.
+4. 세 DB를 파기·재생성한다.
+5. application DB를 만들고 final role bootstrap을 적용한다.
+6. restricted migrator로 fresh root `300`을 한 transaction에 적용하고 DB-atomic operation
+   receipt를 확정한다.
+7. 별도 fence의 finalize가 source catalog를 검증하고 final ACL·destination catalog·receipt를
+   한 transaction에서 확정한다.
+8. application final permit과 Dagster metadata permit을 root-owned read-only mount로 발행한다.
+9. Dagster 세 storage를 session advisory lock 아래 migrate/reindex하고 exact catalog와 v3
+   receipt를 확정한다.
+10. Map runtime, PinVi schema/API, cancel probe, 일곱 runtime을 명시 순서와 `--no-deps`로
+    기동·검증한다.
+11. manifest v6과 journal v8을 commit한다.
 
-```text
-300_schema_baseline.py
-  revision = "300"
-  down_revision = None
-```
+application root와 finalize의 operation ID는 rebuild journal transaction ID 및 writer-fence
+transaction ID와 분리한다. 응답 유실 시 같은 operation ID의 append-only DB receipt를 먼저
+read-only recover한다. finalize receipt가 없을 때는 같은 DB advisory lock 뒤 exact pre-state를
+증명하는 typed `probe-missing`이 성공한 경우에만 fence를 갱신해 재실행한다. raw head `300`,
+stderr 문자열 또는 단순 exit code만으로 성공·재실행을 추론하지 않는다.
 
-`0200`~`0236`은 `alembic/retired_versions/0200-0236/`처럼 active
-`alembic/versions/` 밖의 cohort에 둔다. `0104_tvn36_final_fence`는 이미 pre-squash
-archive에도 존재하므로 retired cohort와 기존 109개 archive의 revision manifest를 합치거나
-normal `version_locations`로 동시에 load하지 않는다. cohort별 source digest manifest를
-독립적으로 유지한다.
+Dagster는 receipt 없는 final head를 성공으로 승격하지 않는다. 세 storage의 exact table·column·
+index·필수 migration marker를 대조하며 장기 runtime은 `should_autocreate_tables: false`로
+무영수증 DDL을 수행하지 않는다.
 
-최종 API image는 retired Python migration, transition-only Alembic config, old M01/M05
-runtime helper를 포함하지 않는다. DB=`300`일 때만 normal startup을 허용하고,
-DB=`0236`은 “controlled baseline handoff required”로 명확히 거부한다. 그 밖의
-archive/unknown version은 unsupported lineage로 거부한다.
+## runtime과 attestation
 
-## final bootstrap contract
+API entrypoint는 raw `300`과 exact contract만 정상 startup으로 허용한다. `0236`이나 알 수 없는
+revision은 어떤 stamp/upgrade도 실행하지 않고 승인된 destructive fresh rebuild만 안내한다.
 
-`300` baseline 적용 전에 bootstrap은 다음 21개 application role의 존재와 attribute를
-정확히 확정한다. password material은 계약에 포함하지 않는다.
+manifest v6은 일곱 runtime image, Map/PinVi source revision, 세 schema head, pinset, application
+`300` paired candidate evidence를 고정한다. journal v8은 candidate 전체, application create/final
+DB identity, root/finalize operation plan과 result, application/metadata permit, Dagster metadata
+DB/role identity, cancel probe와 committed phase를 고정한다. 구 v5/v7 문서는 호환 입력이 아니다.
 
-| 구분 | role |
-|---|---|
-| base NOLOGIN | `ktm_feature_schema_owner`, `ktm_feature_state_procedure_owner`, `ktm_feature_audit_writer`, `ktm_feature_runtime`, `ktm_curation_command_owner`, `ktm_curation_audit_writer`, `ktm_curation_admin_executor`, `ktm_curation_provider_executor` |
-| LOGIN | `ktm_feature_migrator`, `ktm_feature_api_runtime`, `ktm_feature_dagster_runtime` |
-| M01/M04 | `ktm_manual_feature_procedure_owner`, `ktm_manual_feature_admin_executor`, `ktm_feature_create_provider_executor`, `ktm_feature_request_procedure_owner`, `ktm_feature_request_service_executor`, `ktm_feature_request_admin_executor` |
-| M05 | `ktm_manual_provider_dedup_procedure_owner`, `ktm_manual_provider_dedup_detector_executor`, `ktm_manual_provider_dedup_admin_executor`, `ktm_feature_reference_reconciliation_service_executor` |
+C7 verifier는 root-owned manifest/journal/host attestation을 읽고 다음을 mutation 전에 exact
+대조한다.
 
-contract는 role 존재만 보지 않는다. LOGIN/INHERIT/SUPERUSER/CREATEDB/CREATEROLE/BYPASSRLS/
-REPLICATION attribute, PostgreSQL 16 membership의 `admin_option`/`inherit_option`/
-`set_option`, DB와 `feature`/`provider_sync`/`ops`/`x_extension` owner, required extension의
-namespace와 required `USAGE`를 모두 exact하게 확인한다. `ktm_feature_%`,
-`ktm_curation_%`, `ktm_manual_%` 범위에 여분 membership edge가 있으면 거부한다.
+- manifest candidate와 journal candidate의 전체 동등
+- candidate evidence의 generation/journal 중복 결박
+- application/Dagster DB identity와 canonical digest
+- root/finalize result 및 application/metadata permit digest
+- 세 schema head와 pinset
+- 일곱 running container의 immutable image ID, command, environment, OCI source revision
+- Map UI admin password hash의 비어 있지 않은 runtime 전달
+- Map API 전용 cursor secret과 다른 credential의 분리
+- finalized cancel probe
 
-routine ACL digest의 grantee axis는 과거 5-role 목록으로 고정하지 않는다. clean `0236`
-reference의 effective direct grantee set을 정본으로 하고, `PUBLIC`, final owner/executor,
-direct `EXECUTE`를 받는 runtime LOGIN role을 빠짐없이 측정한다. 새 direct grantee가
-발견되면 digest가 이를 조용히 생략하지 않고 baseline 생성/적용을 거부해야 한다.
+## n150 완료 조건
 
-## one-shot `0236 → 300` handoff
+Map과 Manager PR은 다음 조건을 모두 만족하기 전 Draft를 유지한다.
 
-old revision source가 active graph 밖에 있으면 일반 `stamp --purge 300`은 current `0236`을
-새 `ScriptDirectory`에서 해석하려다 실패한다. 따라서 `alembic/env.py`에는 generic bypass가
-아닌 exact one-shot branch만 남긴다.
+1. 최신 `main`에 rebase하고 두 저장소 CI가 green이다.
+2. 두 전문 적대 리뷰어가 exact final commit pair에서 P0/P1=0을 확인한다.
+3. 고정 Map/PinVi release candidate로 `rebuild-pinned --confirm`을 실행한다.
+4. manifest v6/journal v8, 세 DB identity/head, 일곱 image를 exact 검증한다.
+5. UI login POST가 `200 + Set-Cookie`, 잘못된 credential이 `401`임을 확인한다.
+6. protected route, logout 뒤 재차단, Admin Feature main/recovery, PinVi paired acceptance와
+   WebSocket 안정성을 live UI E2E로 확인한다.
+7. API-owned pending request, fixture row/FK, transient container, raw browser artifact와
+   credential residue가 0이다.
+8. redacted hash/count evidence만 남기고 비밀·URL·host identity를 커밋하지 않는다.
 
-허용 전제는 모두 참이어야 한다.
-
-1. online migration function이 `do_stamp`다.
-2. `purge=True`, target revision이 정확히 `("300",)`이며 SQL 출력 mode가 아니다.
-3. raw `public.alembic_version`은 정확히 한 행이고 값은
-   `0236_tvn41s_compaction_drained`다.
-4. explicit handoff discriminator/tag가 있다. normal API entrypoint는 이 값을 설정하지
-   않는다.
-5. installed graph의 root/head가 유일하게 `300`이다.
-6. writer fence, final role/extension/ACL contract, expected catalog fingerprint 및
-   `0236` data semantic closure가 통과했다.
-
-이 branch는 old `0236`을 `ScriptDirectory._stamp_revs()`에 전달하지 않는다. 같은 DB
-connection의 outer transaction 안에서 preflight → Alembic `context.run_migrations()` →
-postflight 순서로 실행한다. postflight failure까지 rollback되어 version row가 `0236`으로
-보존돼야 한다.
-
-postflight는 unique `300`, unique active `heads/current`, 동일한 application catalog,
-role/membership, extension/ACL, index validity, constraint validation, trigger enablement,
-data semantic closure를 재확인한다. 변경이 허용된 것은 Alembic metadata row 하나뿐이다.
-
-다음은 모두 무변경 거부 대상이다.
-
-- tag 없는 `stamp --purge 300`
-- `--purge` 없는 stamp
-- target `head`, `base`, old revision, range 또는 multi-target
-- `0200`, `0104`, `0235`, unknown revision, empty/multi-row version table
-- normal `upgrade head`가 `0236` DB를 자동 handoff하려는 시도
-- 모든 downgrade 및 old archive replay
-
-## runtime 전환 checkpoint
-
-새 dedicated DB는 `docker compose -f docker-compose.yml -f docker-compose.host.yml
---profile fresh-init run --rm db-application-schema-fresh-300`으로만 한 번 준비한다.
-Compose의 normal startup은 이 연속 one-shot을
-dependency로 두지 않으므로, persistent `300` DB의 recreate/restart가 fresh-only guard에
-막히지 않는다. 과거 M01~M05 boundary·pre/repair service와 image helper는 제거했고,
-외부 DB/infra overlay도 fresh bootstrap을 자동 기동하지 않는다.
-`docker/api-entrypoint.sh`는 raw `300`만 normal migration으로 처리하며, exact `0236`이면
-controlled handoff executable을 명시적으로 안내하고 어떤 `upgrade`나 generic `stamp`도
-실행하지 않는다.
-
-image에는 `/usr/local/bin/ktm-application-schema-handoff`가 포함된다. 이 executable은
-`--confirm-0236-to-300` 및 Docker Manager writer-fence receipt를 요구하고, migrator의
-동일 outer transaction 안에서 source row·role/membership·ACL/extension·catalog·data
-closure preflight, Alembic controlled stamp, target `300` postflight를 수행한다. 출력은
-receipt 자체가 아니라 SHA-256을 포함한 redacted JSON이다.
-
-로컬 일회성 PostGIS container에서 fresh `baseline-300` shell bootstrap을 실제 실행해
-`alembic_version` 부재, 21개 application role, `postgis`의 `x_extension` namespace를
-확인한 뒤 container를 폐기했다. 이는 n150 DB나 기존 reference DB를 사용하지 않은
-검증이다. 기존 `schema_version=3` backup evidence는 감사 보존용으로만 남기고, 이전
-Alembic revision restore/replay 및 old role repair는 fail-close한다.
-
-## n150 candidate deployment
-
-Map PR을 merge하기 전 n150에서는 Docker Manager의 별도 Map in-place transition transaction을
-사용한다. 기존 v7 destructive rebuild journal을 재사용하거나 in-place 결과를 rebuild로 기록하지
-않는다. 새 typed journal은 최소한 다음을 redacted form으로 남긴다.
-
-- `transition_kind = in_place_alembic_baseline_stamp`
-- exact Map draft commit과 변경 없는 PinVi commit
-- seven runtime immutable image ID 및 candidate head
-- Map application pre/post head, Map Dagster/PinVi head
-- writer-fence receipt
-- expected/pre/post catalog and role/ACL fingerprint
-- candidate execution identity, phase progression, committed terminal state
-
-순서는 host-global lock → immutable source/image/head attestation → writer quiesce →
-exact `0236`/catalog preflight → controlled stamp → `300`/post-catalog attestation →
-candidate runtime start다. stamp 성공 뒤에는 old image 재기동이나 `0236` stamp-back을
-하지 않는다. 실패 수정은 `300` 위의 forward fix만 허용한다.
-
-candidate runtime health 뒤에는 Map UI login POST가 `200 + Set-Cookie`, invalid credential이
-`401`인지 확인한다. 이어 exact candidate snapshot의 isolated fixture helper와 browser
-main/recovery를 실행해 live UI E2E의 passed/recovered, cleanup/FK/container residue `0`,
-`BLOCKED.json`/`ACTIVE.json` 부재를 확인한다. source SHA, transition-journal hash, head,
-redacted result와 residue count만 evidence로 남기며 URL, credential, cookie, trace/video,
-screenshot, fixture identifier, container identifier는 즉시 폐기한다.
-
-## 완료 전 검증
-
-- active root/head는 `300` 하나이고 generated application graph도 동일하다.
-- retired source/archive manifest는 byte-pinned이고 normal runtime image에 없다.
-- clean `0236`와 fresh `300`의 full catalog, final role graph, effective routine ACL,
-  extension namespace 및 seed contract가 동등하다.
-- exact handoff positive case와 모든 rejection/rollback case가 integration test로
-  `0236` preservation을 증명한다.
-- Docker image/entrypoint, role bootstrap, Compose wiring, current 운영 문서가
-  `300`/no-old-restore 정책과 일치한다.
-- Map baseline 누적 delta와 Docker Manager transition delta를 각각 두 전문 적대 리뷰가
-  독립적으로 재검토해 P0=0을 확인한다.
-- candidate deployment와 live UI E2E가 완료되기 전 Map baseline PR은 병합하지 않는다.
+백업·복구점은 위 조건이 아니며 rollback 경로를 제공하지 않는다. 실패 시 DB를 과거 revision으로
+되돌리지 않고 새 forward-fix candidate를 만들어 transaction을 다시 수행한다.

@@ -176,19 +176,24 @@ production compatible pair에 반영됐다. sparse weather batch처럼 생산자
 cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 compatible
 pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
-**2026-08-20(ADR-094) 이후 정본은 docker-manager의 pinned runtime manifest version 5와
-rebuild journal version 7이다.** v4 compatible-pair manifest는 C7 신뢰 경계에서 퇴역했다.
+**2026-08-25 이후 정본은 docker-manager의 pinned runtime manifest version 6과 rebuild
+journal version 8이다.** v4 compatible-pair와 manifest v5/journal v7은 C7 신뢰 경계에서
+호환 변환 없이 퇴역했다.
 
-- v5 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
+- v6 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
   image ID(Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster), Map/PinVi source
   revision, 세 schema head(`map_application_head`·`map_dagster_head`·`pinvi_head`),
-  `pinset_sha256`, `recorded_at`의 exact 14-field다. rollback slot은 v5에 없다.
-- v7 journal은 그 세대를 commit한 transaction의 receipt다. C7은 phase `committed`,
-  candidate가 manifest `active_generation`과 **전체 동등**, cancel probe `finalized`를 요구한다.
+  `pinset_sha256`, application `300` paired candidate evidence와 `recorded_at`의 exact
+  15-field다. rollback slot은 없다.
+- v8 journal은 그 세대를 commit한 transaction의 receipt다. C7은 phase `committed`,
+  candidate가 manifest `active_generation`과 **전체 동등**, candidate evidence의 중복 결박,
+  application create/final DB identity, root/finalize operation result, application/metadata
+  permit digest, Dagster metadata DB/LOGIN role identity, cancel probe `finalized`를 exact
+  schema로 요구한다.
 - Map C7 attestation(host document version 4)은 일곱 image ID를 실제 compose runtime과 각각
   비교하고, 세 schema head·`pinset_sha256`·journal `transaction_id`를 generation과 exact
   대조한다. Map application head는 runner가 측정한 실제 Alembic head와도 대조한다.
-  v4 manifest나 누락·추가 필드는 호환 변환 없이 거부한다.
+  v4/v5 manifest, v7 journal이나 누락·추가 필드는 호환 변환 없이 거부한다.
 
 C7P 코드 병합만으로 production 활성화가 되지는 않는다. initial C6c/C7 cutover는
 producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드한 뒤 2026-07-27

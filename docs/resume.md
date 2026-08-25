@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-41F1D-E manifest v6/journal v8 exact attestation (Draft)
+
+C7 live verifier를 구 manifest v5/journal v7에서 Manager의 canonical v6/v8로 올렸다. generation의
+application `300` paired candidate evidence와 journal의 중복 결박, application create/final DB
+identity와 canonical digest, root/finalize operation result, application/metadata permit, Dagster
+metadata DB·LOGIN role identity를 exact field set으로 검사한다. 누락·추가 필드와 구 version은
+호환 변환 없이 mutation 전에 거부한다.
+
+실행형 양·음수 회귀 `76 passed`와 관련 runner contract를 통과했다. integration-map, Admin live
+runbook, backup policy, H46H 설계 정본과 tasks의 중복 final rebuild 설명도 fresh-only/v6/v8로
+정렬했다.
+
+### 이 PR의 다음 한 작업
+
+Manager의 orphan bootstrap credential, stale candidate tag, committed resume DB/image 재검증을
+결선하고 새 Map SHA를 pinset에 고정한다.
+
 ## 2026-08-25 — T-VN-H46H production in-place writer 제거 checkpoint (Draft)
 
 fresh-only 정책과 충돌하던 `0236→300` production mutation surface를 제거했다. API candidate

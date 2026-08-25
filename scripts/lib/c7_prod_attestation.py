@@ -21,6 +21,8 @@ SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SCHEMA_HEAD_PATTERN = re.compile(r"^[0-9a-z][0-9a-z_.-]{0,127}$")
+DATABASE_IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+POSTGRES_SYSTEM_IDENTIFIER_PATTERN = re.compile(r"^[0-9]{1,32}$")
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -30,7 +32,7 @@ ORCHESTRATOR_PATHS = (
     "scripts/lib/c7_prod_attestation.py",
     "scripts/run-c7-prod-live-e2e.sh",
 )
-# v5 generation은 Map 4개와 PinVi 3개를 **함께** 고정한다. v4 pair는 PinVi web/dagster를
+# v6 generation은 Map 4개와 PinVi 3개를 **함께** 고정한다. v4 pair는 PinVi web/dagster를
 # 담지 않아 두 runtime이 세대 밖에서 흔들려도 통과했다. 일곱 전부를 compose service로
 # 실측 대조하려고 role을 일곱으로 늘린다.
 GENERATION_RUNTIME_IMAGE_FIELDS = (
@@ -53,7 +55,25 @@ _PINVI_ROLES = frozenset({"pinvi_api", "pinvi_web", "pinvi_dagster"})
 _GENERATION_KEYS = frozenset(
     {field for _, field in GENERATION_RUNTIME_IMAGE_FIELDS}
     | set(GENERATION_SCHEMA_HEAD_FIELDS)
-    | {"map_source_revision", "pinvi_source_revision", "pinset_sha256", "recorded_at"}
+    | {
+        "map_source_revision",
+        "pinvi_source_revision",
+        "pinset_sha256",
+        "map_application_300_candidate_evidence",
+        "recorded_at",
+    }
+)
+_MAP_APPLICATION_300_CANDIDATE_EVIDENCE_KEYS = frozenset(
+    {
+        "paired_receipt_sha256",
+        "api_receipt_sha256",
+        "candidate_git_tree",
+        "postgres_image_id",
+        "dagster_config_sha256",
+        "dagster_yaml_sha256",
+        "application_contract_sha256",
+        "launch_contract_sha256",
+    }
 )
 # ktdm `PinnedRuntimeRebuildJournal`의 exact key 집합과 최종 phase.
 _JOURNAL_KEYS = frozenset(
@@ -62,14 +82,74 @@ _JOURNAL_KEYS = frozenset(
         "transaction_id",
         "phase",
         "candidate",
+        "map_application_300_candidate_evidence",
         "environment_sha256",
         "compose_sha256",
         "resolved_compose_sha256",
         "created_at",
+        "journal_generation",
+        "map_application_300_execution_evidence",
         "cancel_probe",
     }
 )
 _JOURNAL_COMMITTED_PHASE = "committed"
+_JOURNAL_COMMITTED_MIN_GENERATION = 27
+_MAP_APPLICATION_300_EXECUTION_EVIDENCE_KEYS = frozenset(
+    {
+        "application_create_database_identity",
+        "application_create_database_identity_sha256",
+        "application_database_identity",
+        "application_database_identity_sha256",
+        "fresh_root_operation_plan",
+        "fresh_finalize_operation_plan",
+        "app_final_permit_sha256",
+        "dagster_metadata_database_identity",
+        "dagster_metadata_database_identity_sha256",
+        "metadata_permit_sha256",
+    }
+)
+_APPLICATION_DATABASE_IDENTITY_KEYS = frozenset(
+    {
+        "database_name",
+        "database_oid",
+        "database_owner",
+        "postgres_system_identifier",
+    }
+)
+_DAGSTER_METADATA_DATABASE_IDENTITY_KEYS = frozenset(
+    {
+        "system_identifier",
+        "name",
+        "oid",
+        "owner",
+        "login_role",
+        "login_role_attributes",
+    }
+)
+_DAGSTER_METADATA_ROLE_ATTRIBUTE_KEYS = frozenset(
+    {
+        "can_login",
+        "inherit",
+        "superuser",
+        "create_database",
+        "create_role",
+        "replication",
+        "bypass_rls",
+        "granted_role_count",
+        "member_role_count",
+    }
+)
+_APPLICATION_OPERATION_PLAN_KEYS = frozenset(
+    {
+        "transaction_id",
+        "operation_id",
+        "basis_journal_sha256",
+        "basis_journal_generation",
+        "writer_fence_expires_at",
+        "fence_sha256",
+        "result_sha256",
+    }
+)
 # ktdm `PinnedRuntimeCancelProbeReceipt.to_payload()` / `PinnedRuntimeCancelProbeOutcome`의
 # exact key 집합. 다른 sub-document와 같은 강도로 고정한다 — 여기만 느슨하면 ktdm에서
 # 계약이 갈려도 감지되지 않는다.
@@ -119,6 +199,22 @@ def _sha256_text(value: str) -> str:
 
 def _canonical_json(value: object) -> bytes:
     return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+
+def _canonical_document_sha256(value: object) -> str:
+    """Manager의 canonical evidence payload digest(JSON + LF)를 재현한다."""
+
+    return _sha256_bytes(
+        (
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode("utf-8")
+    )
 
 
 def _exact_dict(value: object, keys: set[str]) -> bool:
@@ -358,7 +454,7 @@ def _compose_container(
 
 
 def _validate_generation(value: object) -> None:
-    """v5 ``PinnedRuntimeGeneration`` payload를 exact shape으로 검증한다."""
+    """v6 ``PinnedRuntimeGeneration`` payload를 exact shape으로 검증한다."""
 
     if not _exact_dict(value, set(_GENERATION_KEYS)):
         raise AttestationError("generation shape")
@@ -378,7 +474,190 @@ def _validate_generation(value: object) -> None:
     pinset = value["pinset_sha256"]
     if not isinstance(pinset, str) or SHA256_PATTERN.fullmatch(pinset) is None:
         raise AttestationError("generation pinset")
+    _validate_candidate_evidence(value["map_application_300_candidate_evidence"])
     _validate_utc_timestamp(value["recorded_at"], "generation recorded_at")
+
+
+def _validate_candidate_evidence(value: object) -> None:
+    if not _exact_dict(value, set(_MAP_APPLICATION_300_CANDIDATE_EVIDENCE_KEYS)):
+        raise AttestationError("generation candidate evidence shape")
+    assert isinstance(value, dict)
+    for field in _MAP_APPLICATION_300_CANDIDATE_EVIDENCE_KEYS - {
+        "candidate_git_tree",
+        "postgres_image_id",
+    }:
+        digest = value[field]
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise AttestationError("generation candidate evidence digest")
+    tree = value["candidate_git_tree"]
+    postgres_image = value["postgres_image_id"]
+    if not isinstance(tree, str) or COMMIT_PATTERN.fullmatch(tree) is None:
+        raise AttestationError("generation candidate git tree")
+    if not isinstance(postgres_image, str) or IMAGE_PATTERN.fullmatch(postgres_image) is None:
+        raise AttestationError("generation candidate PostgreSQL image")
+
+
+def _validate_application_database_identity(value: object, *, label: str) -> None:
+    if not _exact_dict(value, set(_APPLICATION_DATABASE_IDENTITY_KEYS)):
+        raise AttestationError(f"{label} shape")
+    assert isinstance(value, dict)
+    if (
+        not isinstance(value["database_name"], str)
+        or DATABASE_IDENTIFIER_PATTERN.fullmatch(value["database_name"]) is None
+        or type(value["database_oid"]) is not int
+        or value["database_oid"] <= 0
+        or not isinstance(value["database_owner"], str)
+        or DATABASE_IDENTIFIER_PATTERN.fullmatch(value["database_owner"]) is None
+        or not isinstance(value["postgres_system_identifier"], str)
+        or POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(
+            value["postgres_system_identifier"]
+        )
+        is None
+    ):
+        raise AttestationError(label)
+
+
+def _validate_dagster_metadata_database_identity(value: object) -> None:
+    if not _exact_dict(value, set(_DAGSTER_METADATA_DATABASE_IDENTITY_KEYS)):
+        raise AttestationError("journal Dagster metadata identity shape")
+    assert isinstance(value, dict)
+    role = value["login_role_attributes"]
+    if not _exact_dict(role, set(_DAGSTER_METADATA_ROLE_ATTRIBUTE_KEYS)):
+        raise AttestationError("journal Dagster metadata role shape")
+    assert isinstance(role, dict)
+    canonical_flags = {
+        "can_login": True,
+        "inherit": False,
+        "superuser": False,
+        "create_database": False,
+        "create_role": False,
+        "replication": False,
+        "bypass_rls": False,
+    }
+    if any(
+        type(role[field]) is not bool or role[field] is not expected
+        for field, expected in canonical_flags.items()
+    ):
+        raise AttestationError("journal Dagster metadata role privilege")
+    if (
+        type(role["granted_role_count"]) is not int
+        or role["granted_role_count"] != 0
+        or type(role["member_role_count"]) is not int
+        or role["member_role_count"] != 0
+    ):
+        raise AttestationError("journal Dagster metadata role membership")
+    if (
+        not isinstance(value["system_identifier"], str)
+        or POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(value["system_identifier"])
+        is None
+        or type(value["oid"]) is not int
+        or value["oid"] <= 0
+    ):
+        raise AttestationError("journal Dagster metadata identity")
+    for field in ("name", "owner", "login_role"):
+        identifier = value[field]
+        if (
+            not isinstance(identifier, str)
+            or DATABASE_IDENTIFIER_PATTERN.fullmatch(identifier) is None
+        ):
+            raise AttestationError("journal Dagster metadata identity")
+    if value["owner"] != value["login_role"]:
+        raise AttestationError("journal Dagster metadata owner")
+
+
+def _validate_operation_plan(value: object, *, label: str) -> None:
+    if not _exact_dict(value, set(_APPLICATION_OPERATION_PLAN_KEYS)):
+        raise AttestationError(f"journal {label} operation plan shape")
+    assert isinstance(value, dict)
+    for field in ("transaction_id", "operation_id"):
+        identifier = value[field]
+        if not isinstance(identifier, str) or UUID_PATTERN.fullmatch(identifier) is None:
+            raise AttestationError(f"journal {label} operation identity")
+    if value["transaction_id"] == value["operation_id"]:
+        raise AttestationError(f"journal {label} operation identity")
+    for field in ("basis_journal_sha256", "fence_sha256", "result_sha256"):
+        digest = value[field]
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise AttestationError(f"journal {label} operation digest")
+    if (
+        type(value["basis_journal_generation"]) is not int
+        or value["basis_journal_generation"] < 0
+    ):
+        raise AttestationError(f"journal {label} operation generation")
+    _validate_utc_timestamp(
+        value["writer_fence_expires_at"],
+        f"journal {label} operation fence expiry",
+    )
+
+
+def _validate_application_execution_evidence(
+    value: object,
+    *,
+    journal_generation: int,
+) -> None:
+    if not _exact_dict(value, set(_MAP_APPLICATION_300_EXECUTION_EVIDENCE_KEYS)):
+        raise AttestationError("journal application execution evidence shape")
+    assert isinstance(value, dict)
+    create_identity = value["application_create_database_identity"]
+    application_identity = value["application_database_identity"]
+    dagster_identity = value["dagster_metadata_database_identity"]
+    _validate_application_database_identity(
+        create_identity,
+        label="journal application create identity",
+    )
+    _validate_application_database_identity(
+        application_identity,
+        label="journal application identity",
+    )
+    _validate_dagster_metadata_database_identity(dagster_identity)
+    assert isinstance(create_identity, dict)
+    assert isinstance(application_identity, dict)
+    if any(
+        create_identity[field] != application_identity[field]
+        for field in ("database_name", "database_oid", "postgres_system_identifier")
+    ):
+        raise AttestationError("journal application database identity changed")
+    for identity_field, digest_field, label in (
+        (
+            "application_create_database_identity",
+            "application_create_database_identity_sha256",
+            "journal application create identity digest",
+        ),
+        (
+            "application_database_identity",
+            "application_database_identity_sha256",
+            "journal application identity digest",
+        ),
+        (
+            "dagster_metadata_database_identity",
+            "dagster_metadata_database_identity_sha256",
+            "journal Dagster metadata identity digest",
+        ),
+    ):
+        digest = value[digest_field]
+        if (
+            not isinstance(digest, str)
+            or SHA256_PATTERN.fullmatch(digest) is None
+            or digest != _canonical_document_sha256(value[identity_field])
+        ):
+            raise AttestationError(label)
+    for field in ("app_final_permit_sha256", "metadata_permit_sha256"):
+        digest = value[field]
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise AttestationError("journal application permit digest")
+    root_plan = value["fresh_root_operation_plan"]
+    finalize_plan = value["fresh_finalize_operation_plan"]
+    _validate_operation_plan(root_plan, label="root")
+    _validate_operation_plan(finalize_plan, label="finalize")
+    assert isinstance(root_plan, dict)
+    assert isinstance(finalize_plan, dict)
+    if (
+        root_plan["operation_id"] == finalize_plan["operation_id"]
+        or root_plan["transaction_id"] == finalize_plan["transaction_id"]
+        or root_plan["basis_journal_generation"] >= journal_generation
+        or finalize_plan["basis_journal_generation"] >= journal_generation
+    ):
+        raise AttestationError("journal application operation lineage")
 
 
 def _validate_utc_timestamp(value: object, label: str) -> None:
@@ -398,7 +677,7 @@ def _validate_utc_timestamp(value: object, label: str) -> None:
 
 
 def _validate_committed_journal(value: object, *, generation: Mapping[str, object]) -> None:
-    """v7 rebuild journal이 **이 세대를 commit한 그 transaction**인지 확인한다.
+    """v8 rebuild journal이 **이 세대를 commit한 그 transaction**인지 확인한다.
 
     manifest만 보면 "어떤 세대가 active인가"는 알아도 "그 세대가 파괴적 rebuild를
     끝까지 통과했는가"는 알 수 없다. journal의 phase가 ``committed``이고 candidate가
@@ -406,7 +685,7 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
     앞뒤라는 것이 증명된다. 그래서 부분 비교가 아니라 전체 동등성을 요구한다.
     """
 
-    if not _exact_dict(value, set(_JOURNAL_KEYS)) or value["version"] != 7:
+    if not _exact_dict(value, set(_JOURNAL_KEYS)) or value["version"] != 8:
         raise AttestationError("journal shape")
     assert isinstance(value, dict)
     transaction_id = value["transaction_id"]
@@ -414,6 +693,12 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
         raise AttestationError("journal transaction identity")
     if value["phase"] != _JOURNAL_COMMITTED_PHASE:
         raise AttestationError("journal is not committed")
+    journal_generation = value["journal_generation"]
+    if (
+        type(journal_generation) is not int
+        or journal_generation < _JOURNAL_COMMITTED_MIN_GENERATION
+    ):
+        raise AttestationError("journal generation")
     for field in ("environment_sha256", "compose_sha256", "resolved_compose_sha256"):
         digest = value[field]
         if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
@@ -422,6 +707,14 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
     _validate_generation(value["candidate"])
     if value["candidate"] != generation:
         raise AttestationError("journal candidate is not the active generation")
+    candidate_evidence = value["map_application_300_candidate_evidence"]
+    _validate_candidate_evidence(candidate_evidence)
+    if candidate_evidence != generation["map_application_300_candidate_evidence"]:
+        raise AttestationError("journal candidate evidence differs")
+    _validate_application_execution_evidence(
+        value["map_application_300_execution_evidence"],
+        journal_generation=journal_generation,
+    )
     cancel_probe = value["cancel_probe"]
     if not _exact_dict(cancel_probe, set(_CANCEL_PROBE_KEYS)):
         raise AttestationError("journal cancel probe shape")
@@ -533,7 +826,7 @@ def verify_runtime_attestation_payloads(
 
     manifest_sha256 = _sha256_bytes(manifest_bytes)
     journal_sha256 = _sha256_bytes(journal_bytes)
-    if not _exact_dict(manifest, {"active_generation", "version"}) or manifest["version"] != 5:
+    if not _exact_dict(manifest, {"active_generation", "version"}) or manifest["version"] != 6:
         raise AttestationError("manifest shape")
     assert isinstance(manifest, dict)
     active = manifest["active_generation"]

@@ -68,17 +68,16 @@ DB dump에는 민감한 운영 데이터가 들어갈 수 있다. artifact와 ma
 끝난다. retire된 HTTP URI는 `410 RESTORE_UNSUPPORTED`를 반환한다. 이 fail-closed
 동작을 우회하기 위해 DB나 Docker volume을 직접 변경해서는 안 된다.
 
-## `0236 → 300` handoff와의 구분
+## application `300` 전환과의 구분
 
-기존 production application DB의 `0236_tvn41s_compaction_drained → 300` 전환은
-backup restore가 아니다. Docker Manager가 writer fence와 고정 candidate image를 결박한
-상태에서 실행하는 한 번의 Alembic metadata handoff다. DDL, data rewrite, dump restore,
-일반 `alembic stamp`, 직접 version-table SQL은 그 전환의 대안이 아니다.
+기존 production application DB의 `0236_tvn41s_compaction_drained → 300` in-place handoff는
+지원하지 않는다. Docker Manager가 고정 candidate를 먼저 봉인한 뒤 application DB를 파기·
+재생성하고, final role bootstrap → restricted fresh root `300` → DB-atomic receipt →
+finalize·permit 순서로 완성하는 fresh-only rebuild가 유일한 전환 경로다.
 
-Manager가 handoff receipt를 Map image에 전달할 때 receipt는 secret이 없는 integrity
-evidence이며, root 소유 mode `0444` read-only mount여야 한다. API image는 non-root
-`appuser`로 실행되므로 root 소유 `0600` 파일은 허용되지 않는다. Map helper는 receipt의
-소유자·mode·symlink·candidate image·DB identity·만료 시각을 fail-close로 확인한다.
+backup artifact는 이 rebuild의 선행 gate, rollback 근거 또는 복원점이 아니다. 일반
+`alembic stamp`, 직접 version-table SQL, dump restore, 기존 DB/volume 재채택은 모두 지원
+경로가 아니며, 실패는 새 forward-fix candidate로만 해소한다.
 
 ## 향후 recovery를 설계하려면
 

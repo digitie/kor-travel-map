@@ -518,8 +518,9 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
     assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
     assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 5' in attestation
-    assert 'value["version"] != 7' in attestation
+    assert 'manifest["version"] != 6' in attestation
+    assert 'value["version"] != 8' in attestation
+    assert '_validate_application_execution_evidence(' in attestation
     # 모듈 상수가 기대 목록과 **정확히** 같아야 한다. 빠지면 그 runtime이 검사 밖에
     # 남고(그것이 v4의 결함이었다), 늘면 테스트가 모르는 runtime이 생긴 것이다.
     assert (

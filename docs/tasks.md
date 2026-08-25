@@ -35,7 +35,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
+  - [~] `T-VN-41F1D-E`(v6/v8 attestation 전환 — **저장소측 갱신 중 2026-08-25**, live 실행은 배리어 대기)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [~] `T-FE-MOCK-FLAKE`(`/v1/ops/logs` — mocked checkpoint 고정, n150 live GET-only 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
@@ -590,7 +590,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     Docker-manager pinset과 n150 isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과
     후속 reconciliation/cutover로 진행한다.
   - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
-    **선행: `T-VN-FINAL-REBUILD`** — v5/v7 문서가 없으면 새 live runner가 읽을 attested
+    **선행: `T-VN-FINAL-REBUILD`** — 현 candidate의 v6/v8 문서가 없으면 새 live runner가 읽을 attested
     input 자체가 없다(사용자 결정 2026-08-20으로 주요 개발 완료 후로 미뤘다).
     후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
     gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
@@ -620,7 +620,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   source/ETL을 새로 적재한다. 이전 C3의 pin·smoke는 새 schema acceptance 증거로 재사용하지
   않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
   API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
-  provenance가 candidate에 attest되어야 한다. v5 active generation과 v7 journal만 실행
+  provenance가 candidate에 attest되어야 한다. v6 active generation과 v8 journal만 실행
   authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
 
 - [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
@@ -636,30 +636,28 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
   "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
 
-- [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
+- [~] **T-VN-41F1D-E — 구 generation 퇴역·v6/v8 attestation 전환**
 
-  > 2026-08-20 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
+  > 2026-08-25 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
   > n150 data-dependent 실행뿐이다. `E2E_C7_COMPATIBLE_PAIR_MANIFEST`가
   > `E2E_C7_PINNED_RUNTIME_MANIFEST` + `E2E_C7_REBUILD_JOURNAL`로 바뀌었고, runtime role은
   > 다섯에서 **일곱**으로(PinVi web/dagster 추가), host attestation은 version 3 → 4로,
-  > 세 schema head와 pinset이 generation 값과 exact 대조된다. journal은 phase
-  > `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
+  > 세 schema head와 pinset이 generation 값과 exact 대조된다. 2026-08-25에는 Manager의
+  > manifest v6/journal v8에 맞춰 application `300` candidate evidence, application/Dagster
+  > DB identity, root/finalize result, application/metadata permit까지 exact 검증하도록 올렸다.
+  > journal은 phase `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
   > 넣어 통과하는 경로는 만들지 않았고, runner 계약 테스트가 v4 env 부재를 단언한다.
-  > 변이 8종(phase/candidate/cancel probe/schema head/journal digest/pinset/image 대조/
-  > manifest version)이 전부 red임을 실측했다. 실행 전제: v5/v7은
+  > 변이(phase/candidate/candidate evidence/DB identity/result/permit/cancel probe/schema
+  > head/journal digest/pinset/image 대조/manifest version)가 전부 red임을 실측했다. 실행 전제: v6/v8은
   > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
-  > **2026-08-20 정정**: 앞서 "n150에 두 파일이 없다"고 적었으나 틀렸다. `digitie` 홈만
-  > 봤고 실제로는 **root 홈**(`/root/.local/state/kor-travel-docker-manager/…`)에
-  > `pinned-runtime-generation-v5.json`·`pinned-runtime-rebuild-v7-93dd4ac0….json`이
-  > root:root `0600`으로 실재한다 — runner의 소유권 요구는 이미 만족한다. 다만 그
-  > generation은 `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설
-  > 세대라 현 prod head `0225`와 exact 대조에서 red다. **재사용할 수 없을 뿐 없는 것이
-  > 아니다.** 현 세대 문서는 D1의 파괴적 rebuild가 만든다.
+  > 과거 v5/v7 파일은 보존 이력일 뿐 current runner 입력이 아니며, 현 세대 v6/v8 문서는
+  > D1의 파괴적 rebuild가 새로 만든다.
 
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
-  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
+  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v6
   `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
-  head·pinset을 확인하고 v7 journal/host attestation과 함께 발행한다. v4 manifest를 억지 입력해
+  head·pinset·application `300` candidate evidence를 확인하고 v8 journal/host attestation과
+  함께 발행한다. v4/v5 manifest와 v7 journal을 억지 입력해
   통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
   contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
   (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
@@ -673,11 +671,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 - [ ] **T-VN-FINAL-REBUILD — 파괴적 재구축 + 전량 재적재 배리어**
 
   `ktdctl pinvi-pair rebuild-pinned --confirm`은 Map application·Map Dagster·PinVi **세 DB를
-  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v5
-  `pinned-runtime-generation-v5.json`과 v7 `pinned-runtime-rebuild-v7-<pinset>.json`을 남긴다.
+  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v6
+  `pinned-runtime-generation-v6.json`과 v8 `pinned-runtime-rebuild-v8-<pinset>.json`을 남긴다.
   이어서 final schema 위로 provider source·ETL을 전량 재적재한다.
 
-  **왜 미루는가.** v5 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
+  **왜 미루는가.** v6 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
   계속되는 동안 실행하면 (a) 다음 머지 즉시 세대가 낡아 attestation 증거가 무효가 되고,
   (b) 전량 재적재 비용을 그때마다 다시 낸다. 이 acceptance는 두 번 돌릴 값이 아니다.
 
@@ -692,26 +690,20 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     PinVi API/web/dagster). frontend·Dockerfile·의존 pin 변경 포함.
 
   **선행 준비.**
-  - [ ] 세 DB의 백업/복구점 확보. 파기형이므로 되돌리기는 백업뿐이다(`ktdctl db-backup create`).
   - [ ] n150 디스크 여유 — 일곱 image 재빌드 분. 2026-08-20 기준 101G free(78%)이고
     dangling volume 52GB·구 playwright image 약 43GB가 추가 회수 가능하다.
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
 
   **이 배리어가 푸는 것 (순서대로).**
-  1. **현 세대 기준의** v5/v7 문서가 생긴다. (2026-08-20 정정 — 앞선 "두 파일 모두 부재"는
-     틀렸다. `digitie` 홈만 봤고 실제로는 **root 홈**에 있다:
-     `/root/.local/state/kor-travel-docker-manager/kor-travel-docker-manager/`에
-     `pinned-runtime-generation-v5.json`과 `pinned-runtime-rebuild-v7-93dd4ac0….json`이
-     root:root `0600`으로 실재한다.) 다만 그 generation은
-     `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설 세대라 현 prod
-     head `0225`와 exact 대조에서 red다 — **재사용할 수 없을 뿐 없는 것이 아니다.**
+  1. **현 세대 기준의** v6/v8 문서가 생긴다. 구 v5/v7 문서는 퇴역 입력이며 현재
+     verifier에 사용할 수 없다.
   2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
   3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
   4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.
   5. `T-VN-41C` receipt `pending → candidate_verified` → 최종 prod gate·production
      consumer enable.
 
-  **실행 전제.** v5/v7은 `require_rebuildable_mode` 아래에서만 생성된다(n150은
+  **실행 전제.** v6/v8은 `require_rebuildable_mode` 아래에서만 생성된다(n150은
   `rehearsal`/`rebuildable`이라 해당). ktdm의 state root는 Manager owner 소유 `0700`이라
   runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
   만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).

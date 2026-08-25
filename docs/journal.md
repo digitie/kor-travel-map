@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-41F1D-E v6/v8 live attestation 정렬 (Draft)
+
+두 번째 전문 적대 리뷰에서 Map C7 verifier가 구 manifest v5/journal v7만 허용해 Manager의
+canonical v6/v8 generation을 mutation 전에 무조건 거부하는 P1을 확인했다.
+
+- generation에 application `300` paired candidate evidence exact schema 추가
+- journal v8의 candidate evidence 중복 결박과 committed generation 전체 동등 확인
+- application create/final DB identity 및 canonical digest 검증
+- root/finalize operation ID·fence·result와 application final permit digest 검증
+- Dagster metadata DB·LOGIN role identity 및 metadata permit digest 검증
+- 구 manifest/journal version과 누락·추가 field를 compatibility shim 없이 거부
+- integration-map, Admin live runbook, backup policy, H46H 설계 보고서와 tasks 정본을
+  fresh-only/v6/v8로 정렬하고 backup/복구점 release gate 삭제
+
+실행형 C7 attestation 양·음수 회귀 `76 passed`와 Ruff를 통과했다. 실제 n150 실행은 고정
+release candidate와 Manager 최종 commit pair를 만든 뒤 수행한다.
+
 ## 2026-08-25 — T-VN-H46H 퇴역 in-place production capability 제거 (Draft)
 
 두 번째 전문 적대 리뷰에서 fresh-only 결정 뒤에도 API image가 실제
