@@ -36,8 +36,8 @@ barrier로 직렬화한다.
   - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
-  - [~] `T-VN-41F1D-E`(v6/v8 attestation 전환 — **저장소측 갱신 중 2026-08-25**, live 실행은 배리어 대기)
-  - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
+  - [~] `T-VN-41F1D-E`(v6/v8 attestation 전환 — **저장소측 계약 완료**, data-dependent live 실행은 후속 순서)
+  - **배리어**: [~] `T-VN-FINAL-REBUILD`(H46H fresh rebuild committed, 최종 acceptance barrier 잔여)
   - [~] `T-FE-MOCK-FLAKE`(`/v1/ops/logs` — mocked checkpoint 고정, n150 live GET-only 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
@@ -581,26 +581,25 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 - [~] **T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation** *(공동, docs-only)*
 
-  > **착수 보류 (사용자 결정 2026-08-20)**: 파괴적 rebuild는 모든 주요 개발이 끝난 뒤에
-  > 실행한다. 실행 시점·선행조건은 `T-VN-FINAL-REBUILD`가 소유한다.
+  > H46H의 fresh rebuild와 data-independent UI/provenance subset은 committed됐다. 남은 D1
+  > 후속은 `T-VN-FINAL-REBUILD` barrier가 현재 candidate를 유지한다고 판정한 뒤 실행한다.
 
   C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 **데이터
   비의존** 관리자 UI smoke(로그인 포함)를 기록한다. 2026-08-06 n150 rebuild는 committed했고
   Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와
   fixture `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다.
 
-  **선행**: T-VN-33 merge. 실행 순서는 `T-VN-33 merge → final Map source/image/OpenAPI
-  provenance pin·attestation → destructive rebuild-pinned(세 DB 재생성+F1J) → final-schema
-  ETL 재적재`까지다. 서비스 전 단계이므로 중간 DB 데이터 복구는 수행하지 않고 final schema에서
-  source/ETL을 새로 적재한다. 이전 C3의 pin·smoke는 새 schema acceptance 증거로 재사용하지
-  않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
+  **선행**: T-VN-33 merge와 `T-VN-FINAL-REBUILD`의 current candidate 확인이다. H46H가 이미
+  수행한 `rebuild-pinned --confirm`의 v6/v8 evidence를 사용하되, 이전 C3의 pin·smoke는 새
+  schema acceptance 증거로 재사용하지 않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
   API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
   provenance가 candidate에 attest되어야 한다. v6 active generation과 v8 journal만 실행
   authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
 
 - [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
 
-  > D1을 따라 `T-VN-FINAL-REBUILD` 뒤로 밀린다(사용자 결정 2026-08-20).
+  > D1/F1D-E와 `T-VN-FINAL-REBUILD` current-candidate 확인 뒤에 실행한다. H46H baseline 완료만으로
+  > 이 data-dependent acceptance를 완료 처리하지 않는다.
 
   비어 있는 새 DB에서 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를
   재실행한다. D1이 적재한 final-schema 데이터 위에서 돈다.
@@ -629,7 +628,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   > head/journal digest/pinset/image 대조/manifest version)가 전부 red임을 실측했다. 실행 전제: v6/v8은
   > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
   > 과거 v5/v7 파일은 보존 이력일 뿐 current runner 입력이 아니며, 현 세대 v6/v8 문서는
-  > D1의 파괴적 rebuild가 새로 만든다.
+  > H46H의 committed fresh rebuild가 이미 만들었고, D1/F1D-E가 이를 후속 검증에 사용한다.
 
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
   `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v6
