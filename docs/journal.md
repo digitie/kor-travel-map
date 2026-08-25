@@ -19,9 +19,15 @@ backup-only 정책(`execute=false`), 운영 홈, 운영 로그 **11개 테스트
 초기 목록·검색·필터·정렬·반응형·딥링크도 통과했지만, 고정 ID·컬렉션·두 번째 페이지를 요구하는
 테스트는 빈 fresh schema의 데이터 의존 항목이므로 이 baseline 수락 게이트에서 제외했다.
 
+후속 범위 확인으로 `ops-c7-read-auth.live.spec.ts`의 실제 logout UI 단일 시나리오도 n150에서
+통과했다. 현재 socket이 logout 응답 전에 닫히고 `/login`으로 이동하는 것만 확인했으며, 이
+실행은 application row를 쓰지 않았다. PinVi WebSocket/mutating loop·consumer reconciliation과
+data-dependent D2는 별도 순서의 active acceptance로 남긴다.
+
 이 기록으로 H46H의 schema/bootstrap·runtime provenance·data-independent UI 조건은 완료한다.
-T-VN-41C, M01~M05, T-VN-FINAL-REBUILD의 별도 live/consumer/cutover 조건은 계속 열린 task로
-유지한다.
+전체 운영 순서는 `T-VN-FINAL-REBUILD` 후속 barrier → `T-VN-41F1D-D1`/`T-VN-41F1D-E`
+→ `T-VN-41F1D-D2` → `T-VN-41C`이며, logout/re-block·PinVi paired/WebSocket·consumer
+reconciliation과 M01~M05·T-VN-39 cutover 조건은 계속 열린 task로 유지한다.
 
 ## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
 

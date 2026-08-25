@@ -16,9 +16,10 @@ merge `ecfbddb7b3d1afbd74646abbaa4082dd70b53a42`를 고정한 paired candidate�
 
 ### 이 변경의 다음 한 작업
 
-`T-VN-41C`의 exact pair consumer acceptance/reconciliation을 진행하고, `T-VN-M01`~`M05`의
-독립 live 잔여와 `T-VN-39` 최종 cutover 선행조건을 순서대로 정리한다. H46H baseline 완료와
-무관한 데이터 적재·이전 revision 복구는 수행하지 않는다.
+`T-VN-FINAL-REBUILD`의 남은 주요 개발 barrier를 먼저 정리한 뒤
+`T-VN-41F1D-D1`/`T-VN-41F1D-E` → `T-VN-41F1D-D2` → `T-VN-41C` 순서로
+전체 logout/re-block·PinVi paired/WebSocket·consumer reconciliation acceptance를 진행한다.
+H46H baseline 완료와 무관한 데이터 적재·이전 revision 복구는 수행하지 않는다.
 
 ## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
 

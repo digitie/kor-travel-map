@@ -119,20 +119,33 @@ C7 verifier는 root-owned manifest/journal/host attestation을 읽고 다음을 
 - Map API 전용 cursor secret과 다른 credential의 분리
 - finalized cancel probe
 
-## n150 완료 조건
+## n150 완료 조건과 후속 acceptance 범위
 
-Map과 Manager PR은 다음 조건을 모두 만족하기 전 Draft를 유지한다.
+2026-08-26 사용자 결정에 따라 H46H의 완료 단위를 `300` schema baseline·fresh rebuild·runtime
+provenance·data-independent UI smoke로 한정한다. 일반 application row의 내용·건수·업무상
+무결성 비교와 이전 revision/기존 DB restore는 release gate가 아니며, 필요한 경우에만 fresh
+schema에 source/ETL을 처음부터 재적재한다. 이 범위의 H46H는 Map PR #1066·Manager PR #207의
+exact pair와 n150 committed journal v8/generation 32로 완료 이관됐다.
+
+H46H baseline 완료 조건은 다음과 같다.
 
 1. 최신 `main`에 rebase하고 두 저장소 CI가 green이다.
 2. 두 전문 적대 리뷰어가 exact final commit pair에서 P0/P1=0을 확인한다.
 3. 고정 Map/PinVi release candidate로 `rebuild-pinned --confirm`을 실행한다.
-4. manifest v6/journal v8, 세 DB identity/head, 일곱 image를 exact 검증한다.
-5. UI login POST가 `200 + Set-Cookie`, 잘못된 credential이 `401`임을 확인한다.
-6. protected route, logout 뒤 재차단, Admin Feature main/recovery, PinVi paired acceptance와
-   WebSocket 안정성을 live UI E2E로 확인한다.
-7. API-owned pending request, fixture row/FK, transient container, raw browser artifact와
-   credential residue가 0이다.
-8. redacted hash/count evidence만 남기고 비밀·URL·host identity를 커밋하지 않는다.
+4. manifest v6/journal v8, 세 DB identity/head, 일곱 image와 candidate provenance를 exact 검증한다.
+5. UI login POST가 `200 + Set-Cookie`이고, protected route가 실제 브라우저에서 열린다.
+6. data-independent 운영 홈·scenario catalog·backup-only 정책·로그 UI smoke가 통과한다.
+7. API-owned pending request, transient container, raw browser artifact와 credential residue를
+   허용된 redacted evidence 범위에서 정리한다.
+
+다음 전체 운영 acceptance는 H46H와 별도 task로 순서를 고정한다.
+
+`T-VN-FINAL-REBUILD`(주요 개발 barrier) → `T-VN-41F1D-D1`/`T-VN-41F1D-E` →
+`T-VN-41F1D-D2`(고정 ID를 요구하는 data-dependent admin/PinVi E2E) →
+`T-VN-41C`(receipt·consumer enable·reconciliation) 순서다. 이 후속 단계가 logout 후
+재차단, Admin Feature main/recovery, PinVi paired/WebSocket 안정성, consumer reconciliation을
+소유하며, H46H 완료를 이 항목들의 완료로 해석하지 않는다. 실행하지 않은 후속 gate를
+H46H evidence로 재사용하지 않는다.
 
 백업·복구점은 위 조건이 아니며 rollback 경로를 제공하지 않는다. 실패 시 DB를 과거 revision으로
 되돌리지 않고 새 forward-fix candidate를 만들어 transaction을 다시 수행한다.
