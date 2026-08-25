@@ -26,6 +26,12 @@ locale-sensitive ACL·text ordering은 `COLLATE "C"`로 고정하고 artifact/ma
 정합성 증명이 아니라 schema·role·ACL·extension·필수 고정 seed 및 operation replay 경계만
 확인하는 bootstrap 증명으로 유지한다.
 
+적대 Compose/security 리뷰의 P2를 반영해 통합 fixture의 credential-bearing 환경 파일은
+`docker exec` argv가 아닌 stdin으로 container에 설치하고, bootstrap 종료 시 삭제하도록
+보강했다.
+또한 role-bootstrap target을 `template0`으로 맞추고, large-object residue를 첫 mutation
+전에 거부하는 guard와 전후 snapshot 회귀를 추가했다.
+
 ## 2026-08-25 — T-VN-H46H fresh-root missing-receipt typed proof (Draft)
 
 fresh root migration이 DB transaction과 operation receipt를 커밋한 뒤 stdout 또는 host artifact만

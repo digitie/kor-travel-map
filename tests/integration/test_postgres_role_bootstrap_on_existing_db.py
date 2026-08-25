@@ -99,6 +99,24 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                     )
                 ).one()
             )
+            large_objects = [
+                (
+                    int(row.oid),
+                    str(row.owner),
+                    str(row.acl or ""),
+                )
+                for row in (
+                    await connection.execute(
+                        text(
+                            "SELECT metadata.oid, "
+                            "pg_catalog.pg_get_userbyid(metadata.lomowner) AS owner, "
+                            "metadata.lomacl::text AS acl "
+                            "FROM pg_catalog.pg_largeobject_metadata AS metadata "
+                            "ORDER BY metadata.oid"
+                        )
+                    )
+                ).mappings()
+            ]
             relations = {
                 str(row.qualified): (str(row.relkind), str(row.owner))
                 for row in (
@@ -291,6 +309,7 @@ async def _snapshot(dsn: str) -> dict[str, object]:
     return {
         "database_owner": database_owner,
         "database_profile": database_profile,
+        "large_objects": large_objects,
         "relations": relations,
         "routines": routines,
         "types": types,
@@ -340,8 +359,8 @@ async def _copy_bootstrap_scripts(container_id: str) -> None:
     )
 
 
-def _preflight_environment(container_dsn: str, database: str) -> tuple[list[str], str]:
-    """preflight가 요구하는 credential graph를 테스트 프로세스에 주입한다."""
+def _preflight_environment(container_dsn: str, database: str) -> str:
+    """preflight가 요구하는 credential graph를 container stdin용으로 만든다."""
 
     from shlex import quote
 
@@ -356,7 +375,8 @@ def _preflight_environment(container_dsn: str, database: str) -> tuple[list[str]
     dagster_credential = f"ktm-integration-dagster-{suffix}"
     metadata_credential = f"ktm-integration-metadata-{suffix}"
     credential_word = "PASS" + "WORD"
-    dsn_values = {
+    environment_values = {
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": container_dsn,
         "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
             f"postgresql+asyncpg://ktm_feature_migrator:"
             f"{migrator_credential}@{authority}/{database}"
@@ -376,18 +396,40 @@ def _preflight_environment(container_dsn: str, database: str) -> tuple[list[str]
             f"{metadata_credential}@{authority}/ktm_dagster_metadata"
         ),
     }
-    credential_values = {
-        f"KOR_TRAVEL_MAP_POSTGRES_{credential_word}": root_credential,
-        f"KOR_TRAVEL_MAP_MIGRATOR_{credential_word}": migrator_credential,
-        f"KOR_TRAVEL_MAP_API_RUNTIME_{credential_word}": api_credential,
-        f"KOR_TRAVEL_MAP_DAGSTER_RUNTIME_{credential_word}": dagster_credential,
-        f"KOR_TRAVEL_MAP_DAGSTER_METADATA_{credential_word}": metadata_credential,
-    }
-    env_args = [arg for key, value in dsn_values.items() for arg in ("-e", f"{key}={value}")]
-    exports = "; ".join(
-        f"export {key}={quote(value)}" for key, value in credential_values.items()
+    environment_values.update(
+        {
+            f"KOR_TRAVEL_MAP_POSTGRES_{credential_word}": root_credential,
+            f"KOR_TRAVEL_MAP_MIGRATOR_{credential_word}": migrator_credential,
+            f"KOR_TRAVEL_MAP_API_RUNTIME_{credential_word}": api_credential,
+            f"KOR_TRAVEL_MAP_DAGSTER_RUNTIME_{credential_word}": dagster_credential,
+            f"KOR_TRAVEL_MAP_DAGSTER_METADATA_{credential_word}": metadata_credential,
+        }
     )
-    return env_args, f"{exports}; exec /tmp/bootstrap.sh"
+    exports = "; ".join(
+        f"export {key}={quote(value)}" for key, value in environment_values.items()
+    )
+    return f"{exports}\n"
+
+
+async def _install_preflight_environment(container_id: str, script: str) -> None:
+    """credential-bearing fixture script는 docker exec argv가 아닌 stdin으로 보낸다."""
+
+    await asyncio.to_thread(
+        subprocess.run,  # noqa: S603 - 대상 테스트 컨테이너에만 임시 환경을 주입한다
+        [
+            "docker",
+            "exec",
+            "-i",
+            container_id,
+            "sh",
+            "-c",
+            "umask 077; cat > /tmp/bootstrap-preflight-env.sh",
+        ],
+        input=script,
+        text=True,
+        check=True,
+        capture_output=True,
+    )
 
 
 async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str]:
@@ -399,7 +441,9 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
             await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
-            await autocommit.execute(text(f'CREATE DATABASE "{_DATABASE}"'))
+            await autocommit.execute(
+                text(f'CREATE DATABASE "{_DATABASE}" TEMPLATE template0')
+            )
     finally:
         await admin_engine.dispose()
 
@@ -413,7 +457,8 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
     await _copy_bootstrap_scripts(container_id)
-    preflight_env_args, bootstrap_script = _preflight_environment(container_dsn, _DATABASE)
+    preflight_script = _preflight_environment(container_dsn, _DATABASE)
+    await _install_preflight_environment(container_id, preflight_script)
     command = [
         "docker",
         "exec",
@@ -421,7 +466,6 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", container_dsn),
                 ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
                 ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
                 ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
@@ -431,11 +475,13 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
             )
             for arg in ("-e", f"{key}={value}")
         ),
-        *preflight_env_args,
         container_id,
         "sh",
         "-c",
-        bootstrap_script,
+        (
+            "trap 'rm -f /tmp/bootstrap-preflight-env.sh' EXIT; "
+            ". /tmp/bootstrap-preflight-env.sh; sh /tmp/bootstrap.sh"
+        ),
     ]
     return target_dsn, command, raw_dsn
 
@@ -466,7 +512,9 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
             await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
-            await autocommit.execute(text(f'CREATE DATABASE "{_DATABASE}"'))
+            await autocommit.execute(
+                text(f'CREATE DATABASE "{_DATABASE}" TEMPLATE template0')
+            )
     finally:
         await admin_engine.dispose()
 
@@ -483,7 +531,8 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
     await _copy_bootstrap_scripts(container_id)
-    preflight_env_args, bootstrap_script = _preflight_environment(container_dsn, _DATABASE)
+    preflight_script = _preflight_environment(container_dsn, _DATABASE)
+    await _install_preflight_environment(container_id, preflight_script)
     bootstrap_command = [
         "docker",
         "exec",
@@ -491,7 +540,6 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", container_dsn),
                 ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
                 ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
                 ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
@@ -501,11 +549,13 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
             )
             for arg in ("-e", f"{key}={value}")
         ),
-        *preflight_env_args,
         container_id,
         "sh",
         "-c",
-        bootstrap_script,
+        (
+            "trap 'rm -f /tmp/bootstrap-preflight-env.sh' EXIT; "
+            ". /tmp/bootstrap-preflight-env.sh; sh /tmp/bootstrap.sh"
+        ),
     ]
     result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
 
@@ -564,6 +614,30 @@ async def test_bootstrap_rejects_any_unlisted_reserved_role_before_mutation(
     finally:
         await engine.dispose()
         await _drop_target_and_roles(raw_dsn, (role,))
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_large_object_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """database-wide large object residue도 role bootstrap 전에 fail-close한다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text("SELECT lo_create(424242)"))
+            await autocommit.execute(text("GRANT SELECT ON LARGE OBJECT 424242 TO PUBLIC"))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "large object residue exists" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
 
 
 @pytest.mark.integration

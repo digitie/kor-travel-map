@@ -128,6 +128,15 @@ BEGIN
             USING ERRCODE = '55000';
     END IF;
 
+    -- large object는 application schema 밖의 database-wide residue이므로 relation
+    -- inventory만 검사하는 fresh guard를 통과해서는 안 된다. root probe의 뒤늦은
+    -- 검증까지 role/schema mutation을 진행시키지 않고, 첫 mutation 전에 닫는다.
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_largeobject_metadata) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; large object residue exists'
+            USING ERRCODE = '55000';
+    END IF;
+
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_namespace AS namespace

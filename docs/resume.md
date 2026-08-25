@@ -16,6 +16,10 @@ executable `27 passed`, 관련 unit contract `86 passed`, Ruff와 `git diff --ch
 이번 cutover는 기존 application row의 데이터 무결성을 검증하는 작업이 아니다. 필요하면
 새 `300` schema에 원천 데이터를 처음부터 재적재한다. immutable catalog/seed receipt는
 schema·role·ACL·extension·필수 고정 seed와 operation replay의 bootstrap 계약만 확인한다.
+통합 fixture가 만드는 credential-bearing 환경 파일은 `docker exec` 명령행이 아니라
+container stdin으로 설치하고 실행 뒤 삭제한다.
+role-bootstrap도 `template0` target을 사용하고 large-object residue를 첫 mutation 전에
+거부하도록 보강했다.
 
 ### 이 PR의 다음 한 작업
 
