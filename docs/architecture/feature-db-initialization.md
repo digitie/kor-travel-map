@@ -18,12 +18,16 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 4. candidate image의 고정 `ktm-application-schema-fresh-300 migrate`만 LOGIN
    `ktm_feature_migrator` connection에서 `SET ROLE ktm_feature_schema_owner`로 실행한다. API
    daemon entrypoint나 generic `alembic upgrade head`가 blank production DB를 처리하지 않는다.
-5. 같은 restricted migrator one-shot이 `python -m kortravelmap.infra.runtime_privileges`를 실행해
-   closed table ACL inventory를 다시 부여한다. 이 late ACL transaction이 중단되어 raw `300`만
-   남으면 final permit은 발급되지 않는다. Docker Manager가 candidate/reference/DB identity와
-   pre/post receipt를 다시 확인한 뒤 fixed `fresh-300-finalize` one-shot으로만 completion을
-   재시도할 수 있다. PostgreSQL default privilege는 사용하지 않는다.
+5. restricted root migration은 source catalog를 확인하고 raw `300` result까지만 남긴다.
+   Docker Manager는 그 result와 candidate/reference/DB identity를 외부 durable journal에 결박한
+   다음, 별도 fixed `fresh-300-finalize` one-shot에서 closed table ACL inventory 재조정과
+   destination catalog 확인을 **한 DB transaction**으로 완료한다. raw `300`과 source receipt만
+   남은 중간 상태에는 final permit을 발급하지 않으며 runtime도 기동하지 않는다. PostgreSQL
+   default privilege는 사용하지 않는다.
 6. API/Dagster는 각 LOGIN runtime DSN으로만 연결하고 실제 catalog preflight를 통과한다.
+   Dagster metadata DSN은 별도 root-owned identity permit의 system ID/name/OID/owner/login과
+   대조하며, application DB identity·raw `300`·application schema를 가리키면 migration이나
+   runtime 기동 전에 중단한다.
 7. (선택) 객체 저장소 client + provider client를 주입하고 `AsyncKorTravelMapClient`를 만든다.
 ```
 
@@ -62,8 +66,12 @@ procedure만 사용하며 runtime의 raw override `UPDATE`/`DELETE`는 허용하
 ## 4. Alembic 마이그레이션
 
 ```bash
-# fresh DB: candidate image의 fixed one-shot만 migration과 ACL reconciliation을 함께 수행한다.
+# fresh DB 1단계: candidate image의 fixed one-shot이 root migration과 source receipt만 만든다.
 ktm-application-schema-fresh-300 migrate
+
+# production 2단계: Manager fence 아래 ACL 재조정+destination receipt를 한 transaction으로 완료한다.
+ktm-application-schema-fresh-finalize finalize --writer-fence-receipt \
+  /run/kor-travel-map-application-fresh-finalize/fence.json
 
 # 현재 revision 확인
 alembic current
@@ -83,8 +91,8 @@ receipt와 `300_schema_baseline.py`가 함께 검증한다.
 `ktm-application-schema-fresh-300 migrate`만, exact `0236` DB의 전환은 Docker Manager가
 writer fence 아래 한 번만 실행하는 controlled handoff만 허용한다. 이 두 경우 외의
 `alembic stamp`, generic `upgrade`, version-table 수동 생성·수정은 `300` boundary를
-우회하므로 금지한다. fresh root의 ACL late failure 뒤에는 raw `300`·candidate·reference·DB
-identity·receipt를 Manager가 다시 exact 확인한 경우에만
+우회하므로 금지한다. fresh root 뒤 finalization의 ACL/destination 확인이 실패하면 raw
+`300`·candidate·reference·DB identity·source receipt를 Manager가 다시 exact 확인한 경우에만
 `ktm-application-schema-fresh-finalize finalize --writer-fence-receipt ...`가 허용된다.
 이 completion은 migration/restore/stamp가 아니며 성공 뒤에도 Manager의 privileged postflight와
 새 final permit 발급 전에는 runtime 기동 권한을 만들지 않는다.

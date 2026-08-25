@@ -114,14 +114,28 @@ SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-paired-candidate.XXXXXX")"
 SEALED_ROOT="$SEALED_PARENT/source"
 mkdir "$SEALED_ROOT"
 cleanup() {
-  status=$?
+  local status=$?
+  local cleanup_failed=0
+  local temporary
   for temporary in \
     "$EXPECTED_RECEIPT" "$APP_MANIFEST" "$IMAGE_APP_MANIFEST" \
     "$RUNTIME_MANIFEST" "$IMAGE_RUNTIME_MANIFEST" "$PROOF_MANIFEST" \
     "$IMAGE_PROOF_MANIFEST" "$DEPENDENCY_SBOM" "$RECEIPT_TMP"; do
-    [ -z "$temporary" ] || rm -f -- "$temporary"
+    if [ -n "$temporary" ] && ! rm -f -- "$temporary"; then
+      cleanup_failed=1
+    fi
   done
-  [ -z "$SEALED_PARENT" ] || rm -rf -- "$SEALED_PARENT"
+  if [ -n "$SEALED_PARENT" ] && [ -d "$SEALED_PARENT" ]; then
+    if ! chmod -R u+rwX -- "$SEALED_PARENT"; then
+      printf 'build-application-300-paired-candidate: sealed temp mode cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+    if ! rm -rf -- "$SEALED_PARENT"; then
+      printf 'build-application-300-paired-candidate: sealed temp cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+  fi
+  [ "$status" -ne 0 ] || [ "$cleanup_failed" -eq 0 ] || status=1
   exit "$status"
 }
 trap cleanup EXIT
@@ -402,6 +416,9 @@ for value in (
 cmp -s "$PROOF_MANIFEST" "$IMAGE_PROOF_MANIFEST" || \
   die "Dagster entrypoint/proof tool tree가 sealed candidate와 다르다"
 candidate_proof_manifest_sha256="$(sha256sum "$PROOF_MANIFEST" | awk '{print $1}')"
+candidate_dagster_yaml_sha256="$(sha256sum "$SEALED_ROOT/docker/dagster.yaml" | awk '{print $1}')"
+[[ "$candidate_dagster_yaml_sha256" =~ ^[0-9a-f]{64}$ ]] || \
+  die "sealed Dagster config SHA-256을 얻지 못했다"
 
 DEPENDENCY_SBOM="$(mktemp "${TMPDIR:-/tmp}/ktm300-dagster-sbom.XXXXXX")"
 docker run --pull=never --rm --network=none --read-only \
@@ -467,7 +484,7 @@ python3 - "$EXPECTED_RECEIPT" "$api_candidate_json" "$api_receipt_sha256" \
   "$candidate_app_manifest_sha256" "$candidate_runtime_manifest_sha256" \
   "$candidate_proof_manifest_sha256" "$candidate_dependency_sbom_sha256" \
   "$candidate_config_sha256" "$dagster_application_contract" "$application_contract_sha256" \
-  "$builder_script_sha256" <<'PY'
+  "$builder_script_sha256" "$candidate_dagster_yaml_sha256" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -497,21 +514,55 @@ value = {
         "candidate_proof_manifest_sha256": sys.argv[15],
         "candidate_dependency_sbom_sha256": sys.argv[16],
         "candidate_config_sha256": sys.argv[17],
+        "candidate_dagster_yaml_sha256": sys.argv[21],
         "application_contract": json.loads(sys.argv[18]),
         "application_contract_sha256": sys.argv[19],
     },
     "launch_contract": {
         "schema": "kor-travel-map.application-300-dagster-launch.v1",
         "requires_same_image_id": True,
+        "application_final_permit_consumers": ["webserver", "daemon"],
         "webserver_image_id": dagster_image_id,
         "daemon_image_id": dagster_image_id,
-        "webserver_argv": [
+        "storage_migration_image_id": dagster_image_id,
+        "webserver_argv_policy": {
+            "fixed_prefix": [
+                "/usr/local/bin/dagster-webserver", "-m",
+                "kortravelmap.dagster.definitions", "-h", "0.0.0.0", "-p",
+            ],
+            "port_decimal_minimum": 1,
+            "port_decimal_maximum": 65535,
+        },
+        "image_default_webserver_argv": [
             "/usr/local/bin/dagster-webserver", "-m", "kortravelmap.dagster.definitions",
             "-h", "0.0.0.0", "-p", "12702",
         ],
         "daemon_argv": [
             "/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions",
         ],
+        "storage_migration": {
+            "scope": "dagster-metadata-only-excluded-from-application-final-permit",
+            "argv": ["/usr/local/bin/ktm-dagster-storage", "migrate"],
+        },
+        "metadata_database_identity_permit": {
+            "schema": "kor-travel-map.dagster-storage-database-permit.v1",
+            "path": "/run/kor-travel-map-dagster-storage-permit/permit.json",
+            "production_authority": "docker-manager",
+            "canonical_dagster_home": "/opt/dagster/dagster_home",
+            "canonical_storage_env": "KOR_TRAVEL_MAP_DAGSTER_PG_URL",
+            "candidate_binding_fields": [
+                "dagster_image_id", "paired_candidate_build_receipt_sha256",
+                "dagster_config_sha256",
+            ],
+            "dagster_config_receipt_field": "candidate_dagster_yaml_sha256",
+            "database_identity_fields": [
+                "system_identifier", "name", "oid", "owner", "login_role",
+            ],
+            "forbidden_application_identity_fields": [
+                "system_identifier", "name", "oid", "owner",
+            ],
+            "forbidden_application_raw_revision": "300",
+        },
     },
 }
 if api_candidate["candidate_commit"] != value["candidate_commit"]:

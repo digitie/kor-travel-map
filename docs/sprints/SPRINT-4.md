@@ -101,6 +101,9 @@ package), `_steps.py` (4단계), `_slugs.py` (195 슬러그 + PROMOTED 42 분류
 Sprint 4 진입과 함께 `src/kortravelmap/cli/` 폴더 신설 + 첫 CLI 명령부터
 PostgreSQL advisory lock 기반 mutex 박음:
 
+> 이 Sprint의 `alembic upgrade head` 항목은 당시 구현 이력이다. active `300`
+> production에서는 generic Alembic command를 실행하지 않고 Manager fixed transition만 쓴다.
+
 - `src/kortravelmap/cli/mutex.py` — `async with mutex_lock(session, key)` async
   context manager. `pg_try_advisory_lock(hash(key))` + `pg_advisory_unlock`.
 - mutex 적용 대상 (Sprint 4 시점):

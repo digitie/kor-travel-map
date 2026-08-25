@@ -19,6 +19,35 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
 
+## 2026-08-25 — T-VN-H46H paired candidate와 v6 handoff 연속성
+
+API application-300 candidate receipt를 입력으로 받아 같은 commit·Git tree의 Dagster
+webserver/daemon image를 봉인하는 paired builder를 추가했다. Dagster image의 static
+application contract, provenance/RootFS/config/runtime manifest, proof tool, SBOM과 실제 image
+ID를 API 후보와 함께 재검증한다. webserver와 daemon은 같은 image ID를 쓰며 final permit
+consumer로 명시하고, Dagster metadata storage migration은 동일 image의 fixed argv를 쓰되
+application permit 범위에서는 제외했다.
+
+handoff rehearsal은 API receipt만 받지 않고 paired receipt도 필수로 받아 builder `--verify`를
+다시 실행한다. paired receipt 원문 SHA-256, Dagster image ID, candidate Git tree를 terminal
+receipt v6에 기록하고 `build-baseline.sh`가 API candidate provenance와 다시 결박한다. launch
+contract의 webserver port 정책·default argv·daemon argv·storage argv도 exact 값으로 검사한다.
+
+적대 리뷰에서 metadata-only 선언만으로는 DSN 오지정을 막지 못하며 alternate
+`DAGSTER_HOME`으로 storage target을 바꿀 수 있는 P0를 확인했다. 별도 root-owned metadata DB
+identity permit을 도입해 storage migration은 쓰기 전에, webserver/daemon은 기동 전에 canonical
+config와 같은 DSN의 system ID/name/OID/owner/login을 대조한다. application DB identity, raw
+`300`, application schema를 관측하면 중단한다. production permit은 Manager authority와 exact
+Dagster image ID·paired receipt SHA-256·`dagster.yaml` SHA-256을 결박한다. local-dev DB-init도
+bootstrap login이 아니라 dedicated metadata DSN으로 최종 login identity를 관측해 permit을 쓴다.
+
+첫 실제 paired build는 API image 생성 뒤 sealed temp tree의 0444/0555 mode 때문에 cleanup이
+실패해 receipt 생성 전에 중단됐다. 실패 산출물을 성공으로 사용하지 않았고, 두 builder의
+cleanup이 mode를 복구하고 원래 실패 status를 보존하도록 수정했다. production Dagster 두
+service에는 누락됐던 geo URL, MOIS source path, object/offline prefix를 명시하고 root `.env`나
+application privileged credential은 허용하지 않는다. 관련 application-300·Dagster unit
+`203 passed`, shell syntax·diff check가 통과했다. 아직 n150 배포·live UI E2E 증거는 아니다.
+
 ## 2026-08-24 — T-VN-H46H `300` runtime transition checkpoint
 
 old staged bootstrap/M01/M05 runtime helper를 제거하고 normal Compose를

@@ -72,9 +72,10 @@
   - `pytest tests/unit -q`             (코드 단계 진입 후)
 - **다음 명령**:
   - `PLAN_ONLY=1 bash scripts/check_indexes.sh` (사용자 검토 대기)
-  - 사용자 승인 후 `alembic upgrade head`
+  - migration-bearing 작업이면 active head와 Manager fixed transition runbook 확인
 - **금지선**:
-  - 운영 DB에 직접 ALTER 금지 — Alembic migration 필수
+  - 운영 DB에 직접 ALTER 또는 generic Alembic upgrade/stamp/downgrade 금지
+  - `300` production은 Manager의 fixed fresh/handoff/finalize transaction만 허용
   - data/ 디렉토리에 새 파일 commit 금지
 - **참고 문서**:
   - `docs/architecture/data-model.md` §11 ID 생성 규약

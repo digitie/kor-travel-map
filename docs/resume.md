@@ -14,6 +14,39 @@ candidate frontend 이미지를 격리 Map 스택에 적용해 정상 BFF 승인
 reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 CI green 전에는 머지하지
 않는다.
 
+## 2026-08-25 — T-VN-H46H paired candidate·인계 영수증 연속성 보강
+
+Map draft PR #1064의 API candidate와 Dagster webserver/daemon candidate를 같은 commit·Git
+tree에 결박하는 paired builder를 추가했다. 두 image의 immutable application contract와
+실제 image ID를 다시 검증하고, Dagster metadata migration은 application final permit
+consumer에서 분리한다. API와 두 Dagster runtime만 final permit을 소비하며, production
+Compose의 장기 실행 Dagster service에는 root `.env`와 application privileged credential을
+전달하지 않는다.
+
+별도 metadata DB 경계는 root-owned identity permit으로 보강했다. storage migration은 쓰기
+전에, webserver/daemon은 기동 전에 canonical `DAGSTER_HOME`/root-owned `dagster.yaml`, 같은
+DSN의 system ID/name/OID/owner/login을 확인한다. application DB identity·raw `300`·application
+schema를 가리키면 중단한다. production permit은 Docker Manager authority, exact Dagster image,
+paired receipt와 `dagster.yaml` digest를 결박하고, local-dev permit은 dedicated metadata DSN으로
+관측한 identity만 별도 local authority로 기록한다.
+
+fresh production 경로는 이제 두 단계다. fixed `fresh-300 migrate`가 restricted root
+migration과 source receipt를 남기고, Docker Manager가 외부 durable journal과 writer fence
+아래 fixed `fresh-300-finalize`를 실행해 ACL 재조정과 destination catalog 확인을 한 DB
+transaction으로 완료한다. raw `300` 중간 상태에는 permit을 발급하거나 runtime을 기동하지
+않는다. exact `0236` 경로는 별도 controlled handoff만 허용하며 downgrade·old restore는 없다.
+
+첫 실제 paired build는 sealed source를 0444/0555로 만든 뒤 임시 디렉터리를 원래 mode로
+복구하지 못해 cleanup에서 중단됐다. 해당 실패는 image/receipt 성공으로 승격하지 않았고,
+cleanup이 원래 exit status를 보존하면서 mode 복구 후 제거하도록 고쳤다. 관련 application
+300·Dagster unit 최신 묶음은 `203 passed`다. n150 배포나 live UI E2E 증거는 아직 아니다.
+
+### 다음 한 작업
+
+두 전문 적대 리뷰의 최종 P0/P1을 반영해 checkpoint를 push한 뒤, 새 commit으로 API+Dagster
+paired candidate를 실제 재빌드하고 receipt를 검증한다. 이어 Docker Manager의 Map-only
+transition/journal과 v6 handoff rehearsal을 같은 candidate pair에 결박한다. n150 exact
+deploy, 로그인 POST+cookie, browser live UI E2E와 CI green 전에는 PR #1064를 병합하지 않는다.
 
 ## 2026-08-24 — T-VN-H46H `300` runtime checkpoint 완료, 배포 전 적대 검토 진행
 
@@ -47,7 +80,8 @@ type-check/build가 모두 green이었고, 누적 변경은 독립 적대 검토
 
 이후 작업은 새 열린 `T-VN-H46H`가 소유한다. active graph는 local branch에서 `300` 단일
 root로 전환했고, source sidecar는 data-free isolated `0236` reference에서 생성했다.
-fresh target의 final bootstrap → restricted migrator → schema owner `upgrade head`와 core
+fresh target의 final bootstrap 뒤 fixed root migration으로 raw `300`과 source catalog를
+만들고, 별도 finalization에서 ACL+destination catalog를 같은 transaction으로 확정해 core
 catalog fingerprint 동등성까지 확인했다. n150의 exact
 `0236_tvn41s_compaction_drained` DB는 controlled `stamp --purge 300` handoff만 허용한다.
 `rebuild-pinned`, raw production Compose, 수동 `alembic_version` 편집, archive replay는 이

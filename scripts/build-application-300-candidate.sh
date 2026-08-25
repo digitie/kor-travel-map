@@ -116,17 +116,28 @@ SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-candidate-sealed.XXXXXX")"
 SEALED_ROOT="$SEALED_PARENT/source"
 mkdir "$SEALED_ROOT"
 cleanup() {
-  status=$?
-  [ -z "$APP_MANIFEST" ] || rm -f -- "$APP_MANIFEST"
-  [ -z "$IMAGE_APP_MANIFEST" ] || rm -f -- "$IMAGE_APP_MANIFEST"
-  [ -z "$RUNTIME_MANIFEST" ] || rm -f -- "$RUNTIME_MANIFEST"
-  [ -z "$IMAGE_RUNTIME_MANIFEST" ] || rm -f -- "$IMAGE_RUNTIME_MANIFEST"
-  [ -z "$ENTRYPOINT_MANIFEST" ] || rm -f -- "$ENTRYPOINT_MANIFEST"
-  [ -z "$IMAGE_ENTRYPOINT_MANIFEST" ] || rm -f -- "$IMAGE_ENTRYPOINT_MANIFEST"
-  [ -z "$DEPENDENCY_SBOM" ] || rm -f -- "$DEPENDENCY_SBOM"
-  [ -z "$PROOF_TOOLS_MANIFEST" ] || rm -f -- "$PROOF_TOOLS_MANIFEST"
-  [ -z "$RECEIPT_TMP" ] || rm -f -- "$RECEIPT_TMP"
-  [ -z "$SEALED_PARENT" ] || rm -rf -- "$SEALED_PARENT"
+  local status=$?
+  local cleanup_failed=0
+  local temporary
+  for temporary in \
+    "$APP_MANIFEST" "$IMAGE_APP_MANIFEST" "$RUNTIME_MANIFEST" \
+    "$IMAGE_RUNTIME_MANIFEST" "$ENTRYPOINT_MANIFEST" "$IMAGE_ENTRYPOINT_MANIFEST" \
+    "$DEPENDENCY_SBOM" "$PROOF_TOOLS_MANIFEST" "$RECEIPT_TMP"; do
+    if [ -n "$temporary" ] && ! rm -f -- "$temporary"; then
+      cleanup_failed=1
+    fi
+  done
+  if [ -n "$SEALED_PARENT" ] && [ -d "$SEALED_PARENT" ]; then
+    if ! chmod -R u+rwX -- "$SEALED_PARENT"; then
+      printf 'build-application-300-candidate: sealed temp mode cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+    if ! rm -rf -- "$SEALED_PARENT"; then
+      printf 'build-application-300-candidate: sealed temp cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+  fi
+  [ "$status" -ne 0 ] || [ "$cleanup_failed" -eq 0 ] || status=1
   exit "$status"
 }
 trap cleanup EXIT

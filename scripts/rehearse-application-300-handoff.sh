@@ -23,6 +23,7 @@ SOURCE_CERTIFICATE=""
 CANDIDATE_IMAGE=""
 CANDIDATE_COMMIT=""
 CANDIDATE_BUILD_RECEIPT=""
+PAIRED_BUILD_RECEIPT=""
 RECEIPT=""
 FENCE_VOLUME=""
 POSITIVE_DATABASE=""
@@ -46,6 +47,7 @@ while [ $# -gt 0 ]; do
     --candidate-image) CANDIDATE_IMAGE="${2:?--candidate-image needs a value}"; shift 2 ;;
     --candidate-commit) CANDIDATE_COMMIT="${2:?--candidate-commit needs a value}"; shift 2 ;;
     --candidate-build-receipt) CANDIDATE_BUILD_RECEIPT="${2:?--candidate-build-receipt needs a value}"; shift 2 ;;
+    --paired-build-receipt) PAIRED_BUILD_RECEIPT="${2:?--paired-build-receipt needs a value}"; shift 2 ;;
     --receipt) RECEIPT="${2:?--receipt needs a value}"; shift 2 ;;
     -*) die "알 수 없는 옵션: $1" ;;
     *) die "위치 인자는 허용하지 않는다: $1" ;;
@@ -54,7 +56,7 @@ done
 
 for required_name in \
   SOURCE_CONTAINER SOURCE_DATABASE SOURCE_CERTIFICATE CANDIDATE_IMAGE \
-  CANDIDATE_COMMIT CANDIDATE_BUILD_RECEIPT RECEIPT; do
+  CANDIDATE_COMMIT CANDIDATE_BUILD_RECEIPT PAIRED_BUILD_RECEIPT RECEIPT; do
   [ -n "${!required_name}" ] || die "--$(tr '[:upper:]_' '[:lower:]-' <<<"$required_name")가 필요하다"
 done
 [[ "$SOURCE_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "source container 이름이 잘못됐다"
@@ -64,6 +66,8 @@ done
   die "source certificate는 absolute regular file이어야 한다"
 [[ "$CANDIDATE_BUILD_RECEIPT" == /* && -f "$CANDIDATE_BUILD_RECEIPT" && ! -L "$CANDIDATE_BUILD_RECEIPT" ]] || \
   die "candidate build receipt는 absolute regular file이어야 한다"
+[[ "$PAIRED_BUILD_RECEIPT" == /* && -f "$PAIRED_BUILD_RECEIPT" && ! -L "$PAIRED_BUILD_RECEIPT" ]] || \
+  die "paired build receipt는 absolute regular file이어야 한다"
 [[ "$RECEIPT" == /* ]] || die "rehearsal receipt는 absolute path여야 한다"
 
 canonicalize_receipt_target() {
@@ -121,7 +125,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for receipt_path in "$SOURCE_CERTIFICATE" "$CANDIDATE_BUILD_RECEIPT"; do
+for receipt_path in "$SOURCE_CERTIFICATE" "$CANDIDATE_BUILD_RECEIPT" "$PAIRED_BUILD_RECEIPT"; do
   python3 - "$receipt_path" "$(id -u)" <<'PY'
 import stat
 import sys
@@ -300,6 +304,143 @@ candidate_commit="${candidate_identity[2]}"
 reference_manifest_sha256="${candidate_identity[3]}"
 candidate_proof_tools_manifest_sha256="${candidate_identity[4]}"
 [ "$candidate_image" = "$CANDIDATE_IMAGE" ] || die "candidate image attestation이 입력 image와 다르다"
+
+paired_dagster_image="$(python3 - "$PAIRED_BUILD_RECEIPT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    image = value["dagster_candidate"]["candidate_image"]
+except (KeyError, OSError, TypeError, ValueError) as exc:
+    raise SystemExit(f"paired build receipt cannot identify Dagster image: {exc}") from exc
+if not isinstance(image, str) or not image or any(character.isspace() for character in image):
+    raise SystemExit("paired build receipt Dagster image name is invalid")
+print(image)
+PY
+)"
+paired_provenance_json="$(bash "$SCRIPT_DIR/build-application-300-paired-candidate.sh" \
+  --verify --candidate-commit "$CANDIDATE_COMMIT" \
+  --api-image "$CANDIDATE_IMAGE" --dagster-image "$paired_dagster_image" \
+  --git-root "$REPOSITORY_ROOT" --api-receipt "$CANDIDATE_BUILD_RECEIPT" \
+  --receipt "$PAIRED_BUILD_RECEIPT")"
+candidate_build_receipt_sha256="$(sha256sum "$CANDIDATE_BUILD_RECEIPT" | awk '{print $1}')"
+paired_build_receipt_sha256="$(sha256sum "$PAIRED_BUILD_RECEIPT" | awk '{print $1}')"
+mapfile -t paired_identity < <(python3 - "$paired_provenance_json" \
+  "$candidate_provenance_json" "$candidate_build_receipt_sha256" <<'PY'
+from __future__ import annotations
+
+import json
+import re
+import sys
+
+paired = json.loads(sys.argv[1])
+api_candidate = json.loads(sys.argv[2])
+expected_top_level = {
+    "schema", "candidate_commit", "candidate_git_tree", "paired_builder_script_sha256",
+    "api_candidate", "api_candidate_build_receipt_sha256", "dagster_candidate",
+    "launch_contract",
+}
+if not isinstance(paired, dict) or set(paired) != expected_top_level:
+    raise SystemExit("paired build receipt has an unexpected field set")
+if paired["schema"] != "kor-travel-map.application-300-paired-candidate-build.v1":
+    raise SystemExit("paired build receipt schema is invalid")
+if paired["api_candidate"] != api_candidate:
+    raise SystemExit("paired build receipt does not contain the rehearsed API candidate")
+if paired["api_candidate_build_receipt_sha256"] != sys.argv[3]:
+    raise SystemExit("paired build receipt does not bind the API receipt bytes")
+if (
+    paired["candidate_commit"] != api_candidate.get("candidate_commit")
+    or paired["candidate_git_tree"] != api_candidate.get("candidate_git_tree")
+):
+    raise SystemExit("paired build receipt API commit/tree continuity is invalid")
+dagster = paired["dagster_candidate"]
+expected_dagster = {
+    "candidate_image", "candidate_image_id", "candidate_commit", "candidate_git_tree",
+    "candidate_dockerfile_sha256", "candidate_base_image_reference",
+    "candidate_base_image_id", "candidate_base_rootfs_layers_sha256",
+    "candidate_full_rootfs_layers_sha256", "candidate_app_manifest_sha256",
+    "candidate_runtime_manifest_sha256", "candidate_proof_manifest_sha256",
+    "candidate_dependency_sbom_sha256", "candidate_config_sha256",
+    "candidate_dagster_yaml_sha256",
+    "application_contract", "application_contract_sha256",
+}
+if not isinstance(dagster, dict) or set(dagster) != expected_dagster:
+    raise SystemExit("paired build receipt Dagster candidate field set is invalid")
+if (
+    dagster["candidate_commit"] != paired["candidate_commit"]
+    or dagster["candidate_git_tree"] != paired["candidate_git_tree"]
+    or not isinstance(dagster["candidate_image_id"], str)
+    or not re.fullmatch(r"sha256:[0-9a-f]{64}", dagster["candidate_image_id"])
+    or not isinstance(dagster["candidate_dagster_yaml_sha256"], str)
+    or not re.fullmatch(r"[0-9a-f]{64}", dagster["candidate_dagster_yaml_sha256"])
+):
+    raise SystemExit("paired build receipt Dagster identity is invalid")
+launch = paired["launch_contract"]
+expected_launch = {
+    "schema", "requires_same_image_id", "application_final_permit_consumers",
+    "webserver_image_id", "daemon_image_id", "storage_migration_image_id",
+    "webserver_argv_policy", "image_default_webserver_argv", "daemon_argv",
+    "storage_migration", "metadata_database_identity_permit",
+}
+if not isinstance(launch, dict) or set(launch) != expected_launch:
+    raise SystemExit("paired build receipt launch field set is invalid")
+if (
+    launch["schema"] != "kor-travel-map.application-300-dagster-launch.v1"
+    or launch["requires_same_image_id"] is not True
+    or launch["application_final_permit_consumers"] != ["webserver", "daemon"]
+    or any(
+        launch[key] != dagster["candidate_image_id"]
+        for key in ("webserver_image_id", "daemon_image_id", "storage_migration_image_id")
+    )
+    or launch["storage_migration"] != {
+        "scope": "dagster-metadata-only-excluded-from-application-final-permit",
+        "argv": ["/usr/local/bin/ktm-dagster-storage", "migrate"],
+    }
+    or launch["webserver_argv_policy"] != {
+        "fixed_prefix": [
+            "/usr/local/bin/dagster-webserver", "-m",
+            "kortravelmap.dagster.definitions", "-h", "0.0.0.0", "-p",
+        ],
+        "port_decimal_minimum": 1,
+        "port_decimal_maximum": 65535,
+    }
+    or launch["image_default_webserver_argv"] != [
+        "/usr/local/bin/dagster-webserver", "-m", "kortravelmap.dagster.definitions",
+        "-h", "0.0.0.0", "-p", "12702",
+    ]
+    or launch["daemon_argv"] != [
+        "/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions",
+    ]
+    or launch["metadata_database_identity_permit"] != {
+        "schema": "kor-travel-map.dagster-storage-database-permit.v1",
+        "path": "/run/kor-travel-map-dagster-storage-permit/permit.json",
+        "production_authority": "docker-manager",
+        "canonical_dagster_home": "/opt/dagster/dagster_home",
+        "canonical_storage_env": "KOR_TRAVEL_MAP_DAGSTER_PG_URL",
+        "candidate_binding_fields": [
+            "dagster_image_id", "paired_candidate_build_receipt_sha256",
+            "dagster_config_sha256",
+        ],
+        "dagster_config_receipt_field": "candidate_dagster_yaml_sha256",
+        "database_identity_fields": [
+            "system_identifier", "name", "oid", "owner", "login_role",
+        ],
+        "forbidden_application_identity_fields": [
+            "system_identifier", "name", "oid", "owner",
+        ],
+        "forbidden_application_raw_revision": "300",
+    }
+):
+    raise SystemExit("paired build receipt launch identity is invalid")
+print(dagster["candidate_image_id"])
+print(paired["candidate_git_tree"])
+PY
+)
+[ "${#paired_identity[@]}" -eq 2 ] || die "paired candidate identity를 읽지 못했다"
+paired_dagster_image_id="${paired_identity[0]}"
+paired_candidate_git_tree="${paired_identity[1]}"
 
 candidate_postgres_image_id="$(docker run --pull=never --rm --entrypoint python "$candidate_image_id" -c '
 from __future__ import annotations
@@ -696,7 +837,8 @@ python3 - "$terminal_receipt_tmp" "$candidate_provenance_json" "$source_certific
   "$negative_before_source_alembic_version_sha256" \
   "$negative_after_source_alembic_version_sha256" \
   "$positive_fence_journal_sha256" "$positive_fence_journal_generation" \
-  "$expected_destination_catalog_sha256" <<'PY'
+  "$expected_destination_catalog_sha256" "$paired_build_receipt_sha256" \
+  "$paired_dagster_image_id" "$paired_candidate_git_tree" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -774,6 +916,7 @@ for key in (
     "candidate_build_receipt_sha256", "candidate_proof_tools_manifest_sha256",
     "source_certificate_sha256", "positive_writer_fence_receipt_sha256",
     "negative_writer_fence_receipt_sha256", "positive_result_sha256",
+    "paired_candidate_build_receipt_sha256",
 ):
     value = {
         "candidate_build_receipt_sha256": candidate["candidate_build_receipt_sha256"],
@@ -782,14 +925,22 @@ for key in (
         "positive_writer_fence_receipt_sha256": sys.argv[9],
         "negative_writer_fence_receipt_sha256": sys.argv[20],
         "positive_result_sha256": hashlib.sha256(positive_raw).hexdigest(),
+        "paired_candidate_build_receipt_sha256": sys.argv[41],
     }[key]
     if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
         raise SystemExit(f"terminal handoff receipt digest is invalid: {key}")
+if not re.fullmatch(r"sha256:[0-9a-f]{64}", sys.argv[42]):
+    raise SystemExit("terminal handoff receipt paired Dagster image ID is invalid")
+if not re.fullmatch(r"[0-9a-f]{40}", sys.argv[43]):
+    raise SystemExit("terminal handoff receipt paired Git tree is invalid")
 value = {
-    "schema": "kor-travel-map.application-300-handoff-rehearsal.v5",
+    "schema": "kor-travel-map.application-300-handoff-rehearsal.v6",
     "candidate_commit": candidate["candidate_commit"],
+    "candidate_git_tree": sys.argv[43],
     "candidate_image_id": candidate["candidate_image_id"],
     "candidate_build_receipt_sha256": candidate["candidate_build_receipt_sha256"],
+    "paired_candidate_build_receipt_sha256": sys.argv[41],
+    "paired_dagster_image_id": sys.argv[42],
     "candidate_proof_tools_manifest_sha256": candidate["candidate_proof_tools_manifest_sha256"],
     "source_certificate_sha256": sys.argv[3],
     "source_database_identity": source_identity,

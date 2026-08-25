@@ -50,6 +50,29 @@ set -euo pipefail
 
 die() { printf 'build-baseline: %s\n' "$1" >&2; exit 1; }
 
+cleanup() {
+  local status=$?
+  local cleanup_failed=0
+  rm -f "${RAW:-}" "${RAW2:-}" "${SEED_LIST:-}" || cleanup_failed=1
+  if [ -n "${BUILD_DIR:-}" ] && [ -e "$BUILD_DIR" ]; then
+    rm -rf -- "$BUILD_DIR" || cleanup_failed=1
+  fi
+  if [ -n "${CANDIDATE_SEALED_PARENT:-}" ] && [ -d "$CANDIDATE_SEALED_PARENT" ]; then
+    if ! chmod -R u+rwX -- "$CANDIDATE_SEALED_PARENT"; then
+      printf 'build-baseline: sealed candidate mode cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+    if ! rm -rf -- "$CANDIDATE_SEALED_PARENT"; then
+      printf 'build-baseline: sealed candidate cleanup failed\n' >&2
+      cleanup_failed=1
+    fi
+  fi
+  [ "$status" -ne 0 ] || [ "$cleanup_failed" -eq 0 ] || status=1
+  exit "$status"
+}
+
+trap cleanup EXIT
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 OUT_DIR=""
@@ -365,7 +388,6 @@ PY
   CANDIDATE_SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-baseline-candidate.XXXXXX")"
   CANDIDATE_SEALED_ROOT="$CANDIDATE_SEALED_PARENT/source"
   mkdir "$CANDIDATE_SEALED_ROOT"
-  trap 'rm -f "${RAW:-}" "${RAW2:-}" "${SEED_LIST:-}"; [ -z "${BUILD_DIR:-}" ] || rm -rf -- "$BUILD_DIR"; [ -z "${CANDIDATE_SEALED_PARENT:-}" ] || rm -rf -- "$CANDIDATE_SEALED_PARENT"' EXIT
   if ! git -C "$REPOSITORY_ROOT" archive --format=tar "$CANDIDATE_COMMIT_EXPECTED" \
     | tar -x -C "$CANDIDATE_SEALED_ROOT"; then
     die "candidate Git archive를 만들지 못했다"
@@ -777,7 +799,9 @@ source_catalog_sha, destination_catalog_sha, seed_sha, privileged_sha, source_al
     sys.argv[8:14]
 )
 expected_fields = {
-    "schema", "candidate_commit", "candidate_image_id", "candidate_build_receipt_sha256",
+    "schema", "candidate_commit", "candidate_git_tree", "candidate_image_id",
+    "candidate_build_receipt_sha256", "paired_candidate_build_receipt_sha256",
+    "paired_dagster_image_id",
     "candidate_proof_tools_manifest_sha256", "source_certificate_sha256",
     "source_database_identity", "source_catalog_sha256", "source_seed_sha256",
     "source_privileged_residue_sha256", "source_alembic_version_sha256",
@@ -802,10 +826,11 @@ expected_fields = {
 }
 if not isinstance(receipt, dict) or set(receipt) != expected_fields:
     raise SystemExit("handoff rehearsal receipt has an unexpected field set")
-if receipt["schema"] != "kor-travel-map.application-300-handoff-rehearsal.v5":
+if receipt["schema"] != "kor-travel-map.application-300-handoff-rehearsal.v6":
     raise SystemExit("handoff rehearsal receipt schema is invalid")
 for receipt_key, candidate_key in (
     ("candidate_commit", "candidate_commit"),
+    ("candidate_git_tree", "candidate_git_tree"),
     ("candidate_image_id", "candidate_image_id"),
     ("candidate_build_receipt_sha256", "candidate_build_receipt_sha256"),
     ("candidate_proof_tools_manifest_sha256", "candidate_proof_tools_manifest_sha256"),
@@ -892,9 +917,14 @@ for key in (
     "candidate_build_receipt_sha256", "candidate_proof_tools_manifest_sha256",
     "source_certificate_sha256", "positive_writer_fence_receipt_sha256",
     "positive_result_sha256", "negative_writer_fence_receipt_sha256",
+    "paired_candidate_build_receipt_sha256",
 ):
     if not isinstance(receipt[key], str) or not re.fullmatch(r"[0-9a-f]{64}", receipt[key]):
         raise SystemExit(f"handoff rehearsal receipt digest is invalid: {key}")
+if not isinstance(receipt["paired_dagster_image_id"], str) or not re.fullmatch(
+    r"sha256:[0-9a-f]{64}", receipt["paired_dagster_image_id"]
+):
+    raise SystemExit("handoff rehearsal paired Dagster image ID is invalid")
 for key in ("positive_writer_fence_transaction_id", "negative_writer_fence_transaction_id"):
     try:
         UUID(str(receipt[key]))
@@ -1192,7 +1222,6 @@ fi
 
 BUILD_DIR="$(mktemp -d "$(dirname -- "$OUT_DIR")/.ktm300-baseline.XXXXXX")"
 RAW="$(mktemp)"
-trap 'rm -f "$RAW" "${RAW2:-}" "${SEED_LIST:-}"; [ -z "${BUILD_DIR:-}" ] || rm -rf -- "$BUILD_DIR"; [ -z "${CANDIDATE_SEALED_PARENT:-}" ] || rm -rf -- "$CANDIDATE_SEALED_PARENT"' EXIT
 
 printf '=== pg_dump --schema-only (feature / provider_sync / ops) ===\n'
 docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" \

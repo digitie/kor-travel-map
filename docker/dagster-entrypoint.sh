@@ -104,8 +104,21 @@ if [ "$dagster_profile" = "production" ] \
   echo "production Dagster requires the sealed runtime PATH" >&2
   exit 1
 fi
+if [ "$dagster_profile" = "production" ] \
+  && [ "${DAGSTER_HOME:-}" != "/opt/dagster/dagster_home" ]; then
+  echo "production Dagster requires the sealed DAGSTER_HOME" >&2
+  exit 1
+fi
 
 runtime_preflight() {
+  # webserver와 daemon이 실제로 읽을 canonical dagster.yaml, metadata DSN과
+  # root-owned metadata DB identity permit을 migration one-shot과 같은 verifier로
+  # 먼저 결박한다. application final permit만으로 metadata target은 증명되지 않는다.
+  if ! /usr/local/bin/python -I \
+    /usr/local/bin/ktm-dagster-storage verify-identity >/dev/null; then
+    echo "Dagster runtime requires a valid metadata database identity permit" >&2
+    exit 1
+  fi
   if [ "$dagster_profile" = "production" ]; then
     # API permit만 확인하면 Dagster webserver/daemon이 같은 Map DB에 permit 없이
     # 직접 연결할 수 있다. consumer-specific immutable Dagster image ID와 자기 runtime

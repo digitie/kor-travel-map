@@ -60,17 +60,23 @@ ktm-dagster-storage migrate
   package의 단일 Postgres storage migration head를 한 줄 JSON으로 stdout에 낸다.
   head가 없거나 여러 개면 실패한다.
 - `migrate`는 `DAGSTER_HOME`과 그 아래 `dagster.yaml`,
-  `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. 이 입력 그대로
+  `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. production `DAGSTER_HOME`은
+  root-owned `/opt/dagster/dagster_home` exact path만 허용하고, `dagster.yaml`은 mode `0444`
+  regular non-symlink이며 storage target이 해당 env 하나인지 확인한다. 별도 root-owned metadata
+  identity permit의 system ID/name/OID/owner/login과 같은 DSN 관측값을 대조하고 application DB
+  identity·raw `300`·application schema이면 **쓰기 전에** 중단한다. production permit은
+  Docker Manager authority, paired candidate receipt SHA-256, exact Dagster image ID와
+  `dagster.yaml` SHA-256을 함께 결박한다. 검증 뒤 이 입력 그대로
   `dagster instance migrate`를 실행한 뒤, 같은 DSN으로
   `public.alembic_version`을 직접 읽는다. 행은 정확히 하나여야 하고
   `version_num`은 후보 이미지의 head와 같아야 성공한다.
 - 명령의 stdout은 성공 JSON만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
   진단 출력은 전달하지 않는다. 실패는 DSN·비밀번호·token을 반사하지 않는 유형화된
   오류로 종료한다.
-- Dagster webserver/daemon entrypoint는 migration을 실행하거나 Map 애플리케이션
-  Alembic revision을 storage readiness로 검사하지 않는다. Compose의
-  `dagster-storage-migrate` one-shot service가 성공한 뒤에만 두 장기 실행 service를
-  시작한다.
+- Dagster webserver/daemon entrypoint는 migration을 실행하지 않는다. 다만 one-shot과 같은
+  canonical config/metadata identity permit verifier를 기동 전에 다시 실행하고, application
+  final permit도 별도로 확인한다. Compose의 `dagster-storage-migrate` one-shot service가
+  성공한 뒤에만 두 장기 실행 service를 시작한다.
 
 이 경계는 v5 pinned runtime candidate를 attest할 때 Manager가 이미지 내부에서 head를
 읽고, reset 뒤 같은 후보 이미지로 정확한 Dagster storage migration을 수행하도록 만든다.

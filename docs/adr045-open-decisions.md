@@ -13,10 +13,12 @@ ADR-045 구현(`docs/adr045-standalone-plan.md`)에 필요한 D-1~D-16 결정 �
 - 질문: `kor_travel_map_dagster`를 같은 Postgres container 내 별도 DB로 둘 때
   `DAGSTER_HOME`/storage 설정, 생성·init 순서는?
 - **결정: (a) 같은 Postgres container, 별도 DB `kor_travel_map_dagster`** (ADR-045 §4
-  기본값). 기동 순서 = postgres ready → 앱 `alembic upgrade head`(`kor_travel_map`) →
-  `kor_travel_map_dagster` DB 생성(initdb/entrypoint) → Dagster instance 자체 schema
-  자동 생성 → api/dagster 기동. `DAGSTER_HOME`은 컨테이너 볼륨, `dagster.yaml`의
-  run/event_log/schedule storage를 `kor_travel_map_dagster`로.
+  기본값). **`300` 개정 순서** = postgres ready → Manager의 fixed application
+  fresh/handoff/finalize transaction과 final permit → 별도 `kor_travel_map_dagster` DB identity
+  permit → 같은 candidate image의 fixed Dagster metadata migration → api/dagster 기동.
+  production `DAGSTER_HOME`은 image의 root-owned `/opt/dagster/dagster_home`으로 고정하고,
+  `dagster.yaml`은 permit에 결박된 `KOR_TRAVEL_MAP_DAGSTER_PG_URL`만 읽는다. generic
+  `alembic upgrade head`와 Dagster schema 자동 생성에 의존하지 않는다.
 - 차단 해소: T-208a, T-209b. 반영: `dagster-boundary.md` + docker-compose(T-209a).
 
 ### D-6 — feature-update 큐 실행 모델 + cardinality + lock 정책 ✅ **결정: 권고대로**

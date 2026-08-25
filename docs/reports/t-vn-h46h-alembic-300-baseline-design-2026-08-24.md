@@ -62,9 +62,10 @@ isolated clean `0236` reference에서 생성한 sidecar는 다음 byte digest를
 | `alembic/baseline/seed.sql` | 426 | `1872473b75e79d940a8cae0821418e3e14f8f445a48aa144d6bb6cf8bfabd80f` |
 
 seed는 final catalog의 non-empty application table 9개만 포함한다. fresh `300` target은
-새 `baseline-300` role bootstrap 이후 restricted migrator → schema owner 경로로 실제
-`alembic upgrade head`를 통과했고, raw version row와 `alembic current`/`heads`가 모두
-`300` 하나임을 확인했다. reference와 target의 core catalog는 9,901행,
+새 `baseline-300` role bootstrap 이후 fixed `fresh-300 migrate`로 restricted root
+migration과 source receipt를 만들고, 별도 fixed `fresh-300-finalize`가 ACL 재조정과
+destination catalog 확인을 한 transaction으로 완료했다. 그 뒤 raw version row와
+`alembic current`/`heads`가 모두 `300` 하나임을 확인했다. reference와 target의 core catalog는 9,901행,
 `45e391eb0c6f4e136995fdd1d95b72cde09a0da3d743235fb3af880280100ec7`로 같았다.
 
 catalog comparator가 별도로 남긴 네 CHECK constraint의 여덟 deparse line은 PostgreSQL의

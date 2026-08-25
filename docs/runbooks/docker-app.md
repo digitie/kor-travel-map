@@ -122,7 +122,13 @@ Alembic revision에는 만들거나 기록하지 않는다. local-dev API만
 수 없다.
 
 Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_dagster`를 쓴다.
-`dagster-db-init` 서비스가 기동 때마다 DB 존재를 보장하고, Dagster webserver/daemon은
+local-dev의 `dagster-db-init` 서비스는 DB 존재를 보장하고 dedicated metadata DSN으로 관측한
+system ID/name/OID/owner/login identity를 root-owned read-only permit으로 기록한다. production은
+Docker Manager가 paired receipt의 Dagster image ID·config digest와 DB identity를 결박한
+`docker-manager` authority permit을 별도 volume에 발급한다. Dagster storage migration은 쓰기
+전에, webserver/daemon은 기동 전에 같은 permit과 canonical root-owned
+`/opt/dagster/dagster_home/dagster.yaml`을 검증한다. application DB identity, raw `300`,
+`feature`/`provider_sync`/`ops` schema를 관측하면 중단한다. 세 process는 검증된
 `KOR_TRAVEL_MAP_DAGSTER_PG_URL`(`KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
 `dagster-postgres` storage에 연결한다. 이 login도 bootstrap owner와 재사용하지 않으며
 ignored deployment env/vault에만 둔다. host network overlay는 같은 값을
@@ -370,15 +376,20 @@ Docker Manager의 Map-only controlled transaction이다.
    Manager가 candidate/reference/DB identity와 pre receipt를 다시 검증한 fixed
    fresh-300-finalize one-shot만 실행할 수 있다. generic Alembic command, `stamp`, backup
    restore, old image restart는 이 경계의 대안이 아니다.
-3. Manager가 catalog/seed/privileged/runtime receipt와 DB identity를 다시 확인한 뒤
+3. Manager가 catalog/seed/privileged/runtime receipt와 application DB identity를 다시 확인한 뒤
    root-owned read-only final permit을 atomically publish한다.
-4. API가 permit과 raw `public.alembic_version = 300`을 확인해 health가 된 뒤, Manager가
-   Map UI·Dagster webserver·Dagster daemon을 candidate image로 기동한다.
+4. Manager가 별도 Dagster metadata DB system ID/name/OID/owner/login, paired receipt,
+   Dagster image/config digest를 확인해 metadata identity permit을 publish한다. 같은 candidate
+   image의 fixed storage migration이 그 permit을 검증한 뒤에만 Dagster metadata를 전진시킨다.
+5. API가 application permit과 raw `public.alembic_version = 300`을 확인해 health가 된 뒤,
+   Manager가 Map UI·Dagster webserver·Dagster daemon을 candidate image로 기동한다. 두 Dagster
+   runtime은 application permit과 metadata permit을 모두 검증한다.
 
 따라서 production API/Dagster의 service recreate는 migration이나 DB recovery를 수행하지
 않는다. final permit, raw revision, candidate image, DB identity 중 하나라도 불일치하면
 Map service는 fail-closed하며 writer fence를 유지한 새 forward-fix candidate가 필요하다.
-`dagster-db-init`는 `kor_travel_map_dagster` metadata DB 존재만 보장한다. `dagster`는
+local-dev `dagster-db-init`는 `kor_travel_map_dagster` metadata DB 존재와 local identity permit만
+보장하며 production authority가 아니다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
 `kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `12700` 공유 DB를 쓰려면
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로
@@ -646,17 +657,20 @@ SELECT count(*) FILTER (
 FROM feature.feature_weather_values AS w;
 ```
 
+> 아래 판정·SQL은 0060 당시 사고 분석용 보존 이력이다. active `300` production에서
+> 실행하거나 generic migration/restore 절차로 재사용하지 않는다.
+
 정상은 index boolean 네 값과 세 `convalidated`가 모두 true이고 **post-check의**
 `duplicate_losers=0`, violation 세 값이 모두 0이다. 최초 preflight의 duplicate 수는 migration이
 제거할 예상 loser이므로 0보다 클 수 있다. 실패하면 service fence를 유지하고 Alembic
 current, 위 index, 세 constraint validity를 다시 캡처한다.
 
-- violation이 하나라도 남으면 같은 corrupt row를 둔 재시도를 금지한다. authoritative source 기반
-  repair 또는 cutover 전 restore/PITR 후 preflight부터 다시 수행한다.
+- violation이 하나라도 남았던 경우 당시에는 같은 corrupt row를 둔 재시도를 금지하고
+  authoritative source 기반 repair를 요구했다. active `300`에서는 이 old restore/PITR 경로를
+  사용하지 않고 새 forward-fix candidate와 fresh 검증 자원으로 진행한다.
 - current가 0059인데 valid UNIQUE와 NOT VALID/일부 VALID constraint가 있으면 VALIDATE lock timeout
-  등 autocommit 뒤 실패다. violation 0과 active writer 0을 다시 확인한 뒤 **같은 immutable image**의
-  `upgrade head`를 재실행한다. 0060은 exact 세 constraint/index를 별도 짧은 retry transaction으로
-  정규화한 뒤 writer-only main cutover를 다시 수행한다.
+  등 autocommit 뒤 실패였다는 과거 판정이다. 당시 `upgrade head` 재실행 절차는 active `300`에서
+  실행 금지다. 현재는 fixed fresh/handoff/finalize executable과 Manager journal만 허용한다.
 - 동명 INVALID index가 있으면 과거 concurrent 구현의 잔재다. 다음 원자 cleanup 뒤 preflight와 같은
   immutable image migration을 재실행한다.
 
@@ -671,10 +685,9 @@ COMMIT;
 새 API/Dagster image와 migration head/check, semantic upsert smoke가 모두 성공한 뒤에만
 Dagster web/daemon→API→frontend 순서로 재기동한다. 구 writer image는 다시 기동하지 않는다.
 
-0060 `alembic downgrade`는 지원하지 않는다. dedup loser와 semantic conflict-target writer를
-DDL만으로 원자 복원할 수 없기 때문이다. 0060 이전으로 돌아가야 하면 writer fence를 유지한 채
-cutover 전 backup/PITR과 그 backup에 대응하는 구 API·Dagster image를 함께 복원하고, old semantic
-writer smoke가 성공한 뒤에만 서비스를 연다.
+0060 `alembic downgrade`도 당시부터 지원하지 않았다. active `300`은 이전 revision DB와 구
+API·Dagster image를 복원하는 운영 계획 자체가 없으며, writer fence를 유지한 새 forward-fix
+candidate만 허용한다.
 
 ## 9. T-108 양 노드 배포 경계
 

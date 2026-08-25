@@ -43,19 +43,52 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert '"api_candidate": api_candidate' in script
     assert '"dagster_candidate": {' in script
     assert '"requires_same_image_id": True' in script
+    assert '"application_final_permit_consumers": ["webserver", "daemon"]' in script
     assert '"webserver_image_id": dagster_image_id' in script
     assert '"daemon_image_id": dagster_image_id' in script
+    assert '"storage_migration_image_id": dagster_image_id' in script
+    assert '"webserver_argv_policy": {' in script
+    assert '"port_decimal_minimum": 1' in script
+    assert '"port_decimal_maximum": 65535' in script
+    assert '"image_default_webserver_argv": [' in script
+    assert '"scope": "dagster-metadata-only-excluded-from-application-final-permit"' in script
+    assert '["/usr/local/bin/ktm-dagster-storage", "migrate"]' in script
+    assert '"metadata_database_identity_permit": {' in script
+    assert '"production_authority": "docker-manager"' in script
+    assert '"forbidden_application_raw_revision": "300"' in script
+    assert '"dagster_config_receipt_field": "candidate_dagster_yaml_sha256"' in script
     assert '"candidate_commit"' in script
     assert '"candidate_git_tree"' in script
     assert "candidate_full_rootfs_layers_sha256" in script
     assert "candidate_runtime_manifest_sha256" in script
     assert "candidate_dependency_sbom_sha256" in script
     assert "candidate_config_sha256" in script
+    assert "candidate_dagster_yaml_sha256" in script
     assert "candidate_proof_manifest_sha256" in script
     assert "application_contract_sha256" in script
     assert "--network=none --read-only" in script
     assert "PYTHONPATH" in script
     assert "PYTHONHOME" in script
+    for builder in (
+        "scripts/build-application-300-candidate.sh",
+        "scripts/build-application-300-paired-candidate.sh",
+    ):
+        source = (ROOT / builder).read_text(encoding="utf-8")
+        assert 'chmod -R u+rwX -- "$SEALED_PARENT"' in source
+        assert 'rm -rf -- "$SEALED_PARENT"' in source
+
+    rehearsal = (ROOT / "scripts" / "rehearse-application-300-handoff.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "--paired-build-receipt" in rehearsal
+    assert "build-application-300-paired-candidate.sh" in rehearsal
+    assert "paired_candidate_build_receipt_sha256" in rehearsal
+    assert "paired_dagster_image_id" in rehearsal
+    assert "kor-travel-map.application-300-handoff-rehearsal.v6" in rehearsal
+    assert 'launch["webserver_argv_policy"] != {' in rehearsal
+    assert 'launch["image_default_webserver_argv"] != [' in rehearsal
+    assert 'launch["daemon_argv"] != [' in rehearsal
+    assert 'launch["metadata_database_identity_permit"] != {' in rehearsal
 
 
 @pytest.mark.unit

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -88,6 +91,10 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     for service in (dagster, daemon):
         assert service["build"]["dockerfile"] == "docker/dagster.Dockerfile"
         assert "entrypoint" not in service
+        assert (
+            "kor-travel-map-dagster-storage-permit:"
+            "/run/kor-travel-map-dagster-storage-permit:ro" in service["volumes"]
+        )
 
     assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
@@ -497,7 +504,14 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         assert shared_provider_keys <= set(environment), service_name
         assert "env_file" not in services[service_name]
 
-    assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in services["dagster-daemon"]["environment"]
+    for service_name in ("dagster", "dagster-daemon"):
+        environment = services[service_name]["environment"]
+        assert environment["KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL"].endswith(
+            "http://host.docker.internal:12501}"
+        )
+        assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in environment
+        assert "KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX" in environment
+        assert "KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX" in environment
 
     frontend_environment = services["frontend"]["environment"]
     assert {
@@ -3483,14 +3497,16 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
 
 def _dagster_production_runtime_stub_path(
     tmp_path: Path,
-) -> tuple[str, Path, Path]:
+) -> tuple[str, Path, Path, Path]:
     """production permit argv와 실제 runtime DSN을 함께 기록하는 PATH다."""
 
     bin_dir = tmp_path / "dagster-production-bin"
     bin_dir.mkdir()
     permit_marker = tmp_path / "dagster-final-permit-argv"
+    storage_permit_marker = tmp_path / "dagster-storage-permit-argv"
     runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
     final_permit = bin_dir / "ktm-application-schema-final-permit"
+    storage_permit = bin_dir / "ktm-dagster-storage"
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
         f"if [ \"${{1:-}}\" = \"-I\" ] "
@@ -3528,6 +3544,16 @@ def _dagster_production_runtime_stub_path(
         "exit 0\n",
         encoding="utf-8",
     )
+    storage_permit.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib\n"
+        "import sys\n"
+        "if sys.argv[1:] != ['verify-identity']:\n"
+        "    raise SystemExit(73)\n"
+        f"pathlib.Path({str(storage_permit_marker)!r}).write_text("
+        "'verify-identity\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
     for command in ("dagster-webserver", "dagster-daemon"):
         target = bin_dir / command
         target.write_text(
@@ -3537,7 +3563,13 @@ def _dagster_production_runtime_stub_path(
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
     final_permit.chmod(0o755)
-    return f"{bin_dir}:{os.environ['PATH']}", permit_marker, runtime_dsn_marker
+    storage_permit.chmod(0o755)
+    return (
+        f"{bin_dir}:{os.environ['PATH']}",
+        permit_marker,
+        storage_permit_marker,
+        runtime_dsn_marker,
+    )
 
 
 @pytest.mark.unit
@@ -3614,6 +3646,7 @@ def test_dagster_production_rejects_runtime_dsn_split_brain(
         command,
         {
             "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "DAGSTER_HOME": "/opt/dagster/dagster_home",
             "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
             "KOR_TRAVEL_MAP_PG_DSN": "postgresql://dagster@example.invalid/different",
         },
@@ -3653,8 +3686,8 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
 ) -> None:
     """같은 DSN으로 verifier와 Dagster runtime을 순서대로 결박한다."""
 
-    path, permit_marker, runtime_dsn_marker = _dagster_production_runtime_stub_path(
-        tmp_path
+    path, permit_marker, storage_permit_marker, runtime_dsn_marker = (
+        _dagster_production_runtime_stub_path(tmp_path)
     )
     verified_dsn = "postgresql://dagster@example.invalid/verified"
     result = _run_dagster_entrypoint(
@@ -3663,6 +3696,7 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
         command,
         {
             "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "DAGSTER_HOME": "/opt/dagster/dagster_home",
             "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
             # 직접 실행/overlay도 compose와 똑같이 맞춘 경우에는 허용한다.
             "KOR_TRAVEL_MAP_PG_DSN": verified_dsn,
@@ -3671,7 +3705,185 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
 
     assert result.returncode == 0, result.stderr
     assert permit_marker.read_text(encoding="utf-8") == "verify-dagster\n"
+    assert storage_permit_marker.read_text(encoding="utf-8") == "verify-identity\n"
     assert runtime_dsn_marker.read_text(encoding="utf-8") == verified_dsn
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "dagster_home",
+    ["/tmp/alternate-dagster-home", "", "/opt/dagster/dagster_home/../other"],
+)
+def test_dagster_production_rejects_alternate_dagster_home(
+    tmp_path: Path, dagster_home: str
+) -> None:
+    """production은 attacker-controlled dagster.yaml로 storage target을 바꾸지 못한다."""
+
+    path = _dagster_runtime_command_stub_path(tmp_path)
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        [
+            "/usr/local/bin/dagster-webserver",
+            "-m",
+            "kortravelmap.dagster.definitions",
+            "-h",
+            "0.0.0.0",
+            "-p",
+            "12702",
+        ],
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "DAGSTER_HOME": dagster_home,
+        },
+    )
+
+    assert result.returncode != 0
+    assert "production Dagster requires the sealed DAGSTER_HOME" in result.stderr
+
+
+def _load_dagster_storage_module() -> Any:
+    path = ROOT / "docker" / "dagster-storage-migrate.py"
+    spec = importlib.util.spec_from_file_location("dagster_storage_migrate_test", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    dagster_module = ModuleType("dagster")
+    dagster_core_module = ModuleType("dagster._core")
+    dagster_storage_module = ModuleType("dagster._core.storage")
+    dagster_sql_module = ModuleType("dagster._core.storage.sql")
+    dagster_sql_module.ALEMBIC_SCRIPTS_LOCATION = "/nonexistent-test-dagster-alembic"  # type: ignore[attr-defined]
+    with patch.dict(
+        sys.modules,
+        {
+            "dagster": dagster_module,
+            "dagster._core": dagster_core_module,
+            "dagster._core.storage": dagster_storage_module,
+            "dagster._core.storage.sql": dagster_sql_module,
+        },
+    ):
+        spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.unit
+def test_dagster_storage_rejects_literal_alternate_config_target() -> None:
+    module = _load_dagster_storage_module()
+    raw = b"storage:\n  postgres:\n    postgres_url: postgresql://alternate.invalid/db\n"
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(raw)
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+def test_dagster_storage_rejects_application_database_before_migration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """metadata DSN이 application identity/raw 300이면 writer 호출 전에 중단한다."""
+
+    module = _load_dagster_storage_module()
+    dagster_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 200,
+        "owner": "dagster_owner",
+        "login_role": "dagster_runtime",
+    }
+    application_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map",
+        "oid": 100,
+        "owner": "ktm_feature_schema_owner",
+    }
+    observed_application = {**application_identity, "login_role": "dagster_runtime"}
+    migrated = False
+
+    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
+    monkeypatch.setattr(
+        module,
+        "_require_migration_environment",
+        lambda environment: ("postgresql://redacted/application", "production", "a" * 64),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_permit",
+        lambda environment, **kwargs: (dagster_identity, application_identity),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_observed_identity",
+        lambda dsn: (observed_application, ("300",), (True, True, True)),
+    )
+
+    def record_migration(environment: dict[str, str]) -> None:
+        nonlocal migrated
+        migrated = True
+
+    monkeypatch.setattr(module, "_run_dagster_instance_migrate", record_migration)
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._migrate({})
+
+    assert caught.value.code == "dagster_storage_targets_application_database"
+    assert migrated is False
+
+
+@pytest.mark.unit
+def test_dagster_storage_migrates_only_after_metadata_identity_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 metadata identity는 검증 전후 같은 DSN/head일 때만 성공한다."""
+
+    module = _load_dagster_storage_module()
+    dagster_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 200,
+        "owner": "dagster_owner",
+        "login_role": "dagster_runtime",
+    }
+    application_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map",
+        "oid": 100,
+        "owner": "ktm_feature_schema_owner",
+    }
+    calls: list[str] = []
+
+    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
+    monkeypatch.setattr(
+        module,
+        "_require_migration_environment",
+        lambda environment: ("postgresql://redacted/metadata", "production", "a" * 64),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_permit",
+        lambda environment, **kwargs: (dagster_identity, application_identity),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_observed_identity",
+        lambda dsn: (dagster_identity, (), (False, False, False)),
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_dagster_instance_migrate",
+        lambda environment: calls.append("migrate"),
+    )
+    monkeypatch.setattr(module, "_read_version_rows", lambda dsn: ("dagster_head",))
+
+    result = module._migrate({})
+
+    assert calls == ["migrate"]
+    assert result == {
+        "schema": "kor-travel-map.dagster-storage-migration.v1",
+        "status": "migrated",
+        "head": "dagster_head",
+        "version_num": "dagster_head",
+    }
 
 
 @pytest.mark.unit
@@ -3733,8 +3945,41 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     ]
     assert migration["environment"]["DAGSTER_HOME"] == "/opt/dagster/dagster_home"
     assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
+    assert "KOR_TRAVEL_MAP_DAGSTER_PROFILE" in migration["environment"]
+    assert "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID" in migration["environment"]
+    assert (
+        "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256"
+        in migration["environment"]
+    )
+    assert "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256" in migration["environment"]
+    assert migration["volumes"] == [
+        "kor-travel-map-dagster-storage-permit:"
+        "/run/kor-travel-map-dagster-storage-permit:ro"
+    ]
     assert migration["depends_on"]["dagster-db-init"]["condition"] == (
         "service_completed_successfully"
+    )
+
+    db_init = services["dagster-db-init"]
+    assert (
+        "kor-travel-map-dagster-storage-permit:"
+        "/run/kor-travel-map-dagster-storage-permit" in db_init["volumes"]
+    )
+    init_command = _command_text(db_init["command"])
+    assert "pg_control_system()" in init_command
+    assert "local-compose-db-init" in init_command
+    assert "dagster-storage-database-permit.v1" in init_command
+    assert 'psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in init_command
+    assert 'session_user' in init_command
+
+    host_overlay = _script("docker-compose.host.yml")
+    host_init_block = host_overlay.split("  db-role-bootstrap-300:", maxsplit=1)[0]
+    assert "    command:" not in host_init_block
+    assert "KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1" in host_init_block
+    assert (
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL: "
+        "${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?"
+        "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}" in host_init_block
     )
 
     for service_name in ("dagster", "dagster-daemon"):
@@ -3743,6 +3988,75 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
             "service_completed_successfully"
         )
         assert depends_on["api"]["condition"] == "service_healthy", service_name
+
+
+@pytest.mark.unit
+def test_host_overlay_inherits_dagster_identity_permit_producer(
+    tmp_path: Path,
+) -> None:
+    """host overlay도 base DB-init command를 교체하지 않고 dedicated DSN만 바꾼다."""
+
+    reset_overlay = tmp_path / "reset-env-file.yml"
+    reset_overlay.write_text(
+        "services:\n  api:\n    env_file: !reset []\n",
+        encoding="utf-8",
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "COMPOSE_DISABLE_ENV_FILE": "1",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": _MANUAL_FEATURE_CREATE_TOKEN,
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+            _MANUAL_FEATURE_CREATE_DIGEST
+        ),
+        "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
+        "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            "postgresql://dagster@example.invalid/ktm"
+        ),
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
+        "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL": (
+            "postgresql://metadata@127.0.0.1:12700/ktm_dagster"
+        ),
+    }
+    resolved = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "-f",
+            str(ROOT / "docker-compose.yml"),
+            "-f",
+            str(ROOT / "docker-compose.host.yml"),
+            "-f",
+            str(reset_overlay),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    init = json.loads(resolved.stdout)["services"]["dagster-db-init"]
+    command = _command_text(init["command"])
+
+    assert "local-compose-db-init" in command
+    assert "pg_control_system()" in command
+    assert init["environment"]["KOR_TRAVEL_MAP_POSTGRES_INIT_HOST"] == "127.0.0.1"
+    assert init["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"].endswith(
+        "/ktm_dagster"
+    )
 
 
 @pytest.mark.unit
