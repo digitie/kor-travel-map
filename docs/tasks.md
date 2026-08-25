@@ -17,13 +17,14 @@
 `T-VN-41C`·`T-VN-41F1D-*`·`T-VN-FINAL-REBUILD`·`T-VN-M01`~`M05`의 활성화/paired
 검증은 각각의 현재 계약을 소유하며, 완료된 T-VN-40 선행 작업을 다시 열지 않는다.
 
-2026-08-22 교차 저장소 계약 pair는 Map #1051 service `db319a47`/SHA
-`99ba6c17…`, Map #1054 full/admin `fadc029c`/SHA `2c02ecfe…`, PinVi #465 merge
-`27fe2043`로 정합화됐다. Map #1057·#1059에서 검증한 Map 코드 baseline은
-`813a8a76…`이며, 이후 #1060·#1061은 문서 전용 병합이다.
-Docker-manager #189가 Map `e420c89e…`·PinVi `27fe2043…`를 v5 source pinset으로
-재고정해 canonical digest `de5206dc…`를 남겼다. isolated live acceptance·receipt
-승격 전에는 완료로 올리지 않는다.
+2026-08-26 교차 저장소 계약 pair는 Map PR #1066 exact head
+`cc81081ff2e540a6ad9c428a296515e1d79bc316`, PinVi #465 merge
+`27fe2043b7b8e747fbb42d91e461ea462f930bb7`, Docker-manager PR #207 merge
+`ecfbddb7b3d1afbd74646abbaa4082dd70b53a42`로 정합화됐다. canonical v5 pinset digest는
+`14a9a512836a48489146dc2bb0a04de309cf451b274b934d79805d171f83a193`이며, n150의
+committed journal·runtime provenance·data-independent live UI acceptance가 이 exact pair를
+사용했다. 일반 application row의 내용·건수·업무상 무결성 검증은 release gate가 아니고,
+필요하면 fresh `300` schema에 source/ETL을 처음부터 재적재한다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -43,42 +44,11 @@ barrier로 직렬화한다.
   - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge 잔여)
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
-- **Lane H — Alembic 세대 재정본화**
-  - [ ] `T-VN-H46H` — `0236_tvn41s_compaction_drained` 정본에서 생성한 `300` 단일 root baseline·fresh 재구축
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
-
-### T-VN-H46H: Alembic `300` root baseline과 fresh application 재구축
-
-- [ ] T-VN-H46H — **현재 Map application schema를 `300` 단일 root baseline으로 재정본화**
-
-  `0236_tvn41s_compaction_drained`까지의 active migration은 실행 graph 밖의 byte-pinned
-  archive로 보존하고, 새 DB는 final role·membership·ACL bootstrap 뒤 `300` 하나만 적용한다.
-  source sidecar는 provider 적재·live fixture·acceptance 잔재가 전혀 없는 격리 fresh
-  `0236` 참조 DB에서만 생성한다. n150 DB, n150 backup clone, live acceptance DB를
-  생성 source로 사용하지 않는다.
-
-  n150을 포함한 기존 application DB를 `0236 → 300`으로 stamp하거나 in-place upgrade하지
-  않는다. Docker Manager의 승인된 `rebuild-pinned --confirm`이 exact candidate를 먼저
-  봉인한 뒤 application DB를 새로 만들고, final role bootstrap → restricted root `300` →
-  DB-atomic operation receipt → finalize·permit 순서로만 완성한다. 응답 유실은 같은 operation
-  ID의 append-only DB receipt를 read-only recover하고, receipt 부재와 exact pre-state가 함께
-  증명될 때만 같은 operation을 재실행한다. downgrade·이전 revision restore·수동 version-table
-  SQL은 범위 밖이다.
-
-  완료 조건은 Map baseline PR의 CI·두 전문 적대 리뷰·Docker Manager의 destructive fresh
-  candidate/journal/outbox 경로·n150 exact candidate 배포·로그인 POST를 포함한
-  live UI E2E·cleanup residue 0·redacted evidence다. 이 task는 Map PR이 실제 병합된
-  뒤에만 `tasks-done.md`로 이관하며, 데이터 재적재와 M01~M05의 독립 live 잔여를
-  완료 처리하지 않는다. `300` cutover 뒤 기존 application row의 데이터 무결성 검증은
-  완료 조건에 포함하지 않으며, 필요하면 새 schema에 원천 데이터를 처음부터 재적재한다.
-  이때 immutable catalog/seed receipt는 row 데이터의 정합성 증명이 아니라 fresh DB의
-  schema·role·ACL·extension과 필수 고정 seed 계약 및 operation replay 경계를 확인하는
-  bootstrap 증명으로만 유지한다. 설계 정본은
-  [`docs/reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md`](reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md)다.
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -106,9 +76,9 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: T-VN-H46H candidate의 active graph는 `300` single root이고 source
-  archive terminal revision은 `0236_tvn41s_compaction_drained`다. Map `main`은 PR #1064가
-  merge되기 전까지 기존 head를 유지한다. n150 application DB는 기존 head를 handoff하지 않고
+- migration 정본: 완료된 T-VN-H46H candidate의 active graph는 `300` single root이고 source
+  archive terminal revision은 `0236_tvn41s_compaction_drained`다. Map `main`은 PR #1066의
+  exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`를 정본으로 사용한다. n150 application DB는 기존 head를 handoff하지 않고
   approved Manager rebuild가 새 DB로 교체해 exact `300`만 적용한다. 배포 전에는 candidate의
   active head·PostgreSQL image·paired receipt를 다시 확인한다.
   후속 migration 소유자는 PR 직전 single active head를 확인하고 `300`의 child로 번호를
@@ -552,8 +522,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
     T-VN-41S로 Map service OpenAPI SHA가 바뀐 뒤 PinVi #465가 service/full-admin exact vendor를
-    새 Map artifact에 다시 고정했고, Docker-manager #189가 v5 source pinset과
-    canonical digest `de5206dc…`를 병합했다. 남은 것은 isolated live acceptance다.
+    새 Map artifact에 다시 고정했고, Docker-manager #207이 v5 source pinset과
+    canonical digest `14a9a512836a48489146dc2bb0a04de309cf451b274b934d79805d171f83a193`를
+    병합했다. 남은 것은 isolated live acceptance다.
 
     **조사 기록(2026-08-21) — service spec `410` 선언(T-VN-41S에서 이월)과 당시 대응안.**
     아래의 “아직/막는 것” 표현은 조사 당시 상태를 기록한 것이며, 현재 반영 상태는 마지막 문단을 따른다.

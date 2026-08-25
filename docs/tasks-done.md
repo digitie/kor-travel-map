@@ -3,6 +3,27 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-26 — T-VN-H46H application `300` 최종 수락
+
+- [x] **T-VN-H46H — `0236` archive 기반 `300` 단일 root baseline·fresh rebuild 완료**
+
+  Map PR #1066 exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 Docker-manager PR #207
+  merge `ecfbddb7b3d1afbd74646abbaa4082dd70b53a42`를 고정한 paired candidate를 사용했다. PinVi
+  `27fe2043b7b8e747fbb42d91e461ea462f930bb7`를 포함한 canonical pinset digest는
+  `14a9a512836a48489146dc2bb0a04de309cf451b274b934d79805d171f83a193`다.
+
+  n150에서 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`을 trusted Manager 설치본으로
+  재개했고, durable journal `version=8`, generation `32`, transaction
+  `5121a6d2-692d-4bd9-a5b0-d572d58c0f8f`, 최종 `phase=committed`를 확인했다. Map·PinVi
+  runtime과 세 DB의 identity/provenance/readiness를 확인하고, 실제 브라우저에서 scenario
+  catalog·backup-only 정책·운영 홈·운영 로그의 data-independent live UI 11개 테스트를 통과했다.
+
+  사용자가 정한 정책에 따라 기존 application row의 내용·건수·업무상 무결성은 검증하지 않았고,
+  이전 revision/기존 DB restore도 수행하지 않았다. 필요하면 fresh `300` schema에 source/ETL을
+  처음부터 재적재한다. Features의 고정 ID·두 번째 페이지·컬렉션을 요구하는 data-dependent
+  시나리오는 이 baseline 수락 범위에 포함하지 않는다. M01~M05·41C·최종 cutover의 독립 운영
+  잔여도 이 task의 완료로 닫지 않는다.
+
 ## 2026-08-25 — active backlog 완료 하위 항목 정합성 이관
 
 - [x] **범용 Feature 갱신 식별자에서 PinVi 전용 이름 제거** — 일반 feature-update,
