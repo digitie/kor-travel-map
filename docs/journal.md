@@ -1,5 +1,25 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H full integration cluster 격리 보강 (Draft)
+
+PR #1064의 unit matrix는 통과했지만 full PostGIS integration에서 role-bootstrap 6건이
+실패했다. 원인은 application row가 아니라 session `pg_engine`·`migrated_engine`이 cluster 전역
+`ALTER ROLE CURRENT_USER SET search_path`를 남겨 fresh `template0` target의 database/role
+setting precondition을 오염시킨 것이었다. 두 fixture 모두 fixture 전용 database-level setting으로
+전환했다.
+
+role·membership·password·default ACL은 database가 아니라 cluster 전역이므로, bootstrap guard
+테스트는 shared integration cluster에서 분리한 동일 digest PostGIS module fixture를 사용한다.
+target DB를 먼저 `DROP DATABASE ... WITH (FORCE)`한 뒤 disposable role만 `DROP ROLE`하며, shared
+admin DB에서 `DROP OWNED`를 실행하지 않는다. 그 명령은 다른 fixture의 feature/ops/x_extension
+schema와 extension dependency를 건드릴 수 있다.
+
+- migrated_engine 선행 후 role-bootstrap 회귀: `20 passed`
+- 변경 파일 Ruff·`git diff --check`: 통과
+- 두 `uv.lock`은 열람·수정·stage하지 않음
+- 일반 application row 무결성은 여전히 release gate가 아니며, 필요하면 fresh `300` schema에
+  source/ETL을 처음부터 재적재한다.
+
 ## 2026-08-25 — T-VN-H46H PostGIS CI image drift·teardown 재현 및 수정 (Draft)
 
 PR #1064의 최신 PostGIS 게이트는 단위 테스트는 통과했지만 통합 단계에서만 실패했다.

@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H full integration cluster 격리 보강 (Draft)
+
+PostGIS full integration에서 role-bootstrap만 먼저 실패한 원인을 재현했다. `pg_engine`와
+`migrated_engine`의 cluster 전역 role-level `search_path`가 `template0` fresh DB에도 보이는
+설정 잔여를 만들어 bootstrap precondition을 먼저 발동시켰고, shared base DB에서 실행한
+`DROP OWNED`가 다른 fixture의 application schema/extension dependency를 삭제하려 했다.
+
+두 공용 fixture는 database-level setting으로 바꾸고, role-bootstrap 모듈은 같은 immutable
+PostGIS image의 별도 cluster fixture를 사용하도록 격리했다. target DB 삭제 뒤에는 disposable
+role만 직접 삭제해 shared DB 객체를 건드리지 않는다. migrated_engine을 선행하는 로컬 순서에서
+role-bootstrap 회귀 `20 passed`, Ruff와 diff check를 통과했다.
+
+### 이 PR의 다음 한 작업
+
+최신 Map 커밋을 원격 CI에서 다시 검증한다. CI green 뒤 Manager release source/pinset을 해당
+exact Map SHA로 회전하고, 두 전문 적대 리뷰어의 exact pair P0/P1=0을 다시 확인한다.
+
 ## 2026-08-25 — T-VN-H46H PostGIS CI image drift·teardown 수정 (Draft)
 
 PR #1064 최신 CI에서 단위 게이트는 모두 통과했으나 PostGIS 통합 fixture가 부동
