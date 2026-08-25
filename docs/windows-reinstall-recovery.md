@@ -169,7 +169,10 @@ count가 0이 아니면 purge job이 멈춰 있을 가능성 — kor-travel-map 
 - [ ] `.wslconfig` 적용
 - [ ] Docker Desktop + WSL2 backend
 - [ ] git clone + `.env` 복원 (외장 백업에서)
-- [ ] PostGIS 컨테이너 + Alembic upgrade
+- [ ] local-dev 빈 DB는 host/bridge topology를 명시하고 `fresh-init`의 fixed
+      `db-application-schema-fresh-300` 연속 one-shot 완료 후 공식 launcher로 기동
+- [ ] production DB/schema/Dagster storage는 generic Alembic/Compose가 아니라 Docker Manager의
+      fixed candidate·writer fence·permit flow로만 준비
 - [ ] `pytest tests/unit -q` 통과
 - [ ] `pytest tests/integration -q` 통과
 - [ ] `lint-imports` 통과
