@@ -401,6 +401,7 @@ docker run --pull=never --rm --network=none --read-only \
   --entrypoint /usr/local/bin/python "$image_id" -I -c '
 import hashlib
 from pathlib import Path
+filesystem_root = Path("/")
 for value in (
     "/usr/local/bin/dagster-entrypoint.sh",
     "/usr/local/bin/ktm-dagster-storage",
@@ -411,7 +412,7 @@ for value in (
     path = Path(value)
     if not path.is_file() or path.is_symlink():
         raise SystemExit(f"Dagster proof tool is missing or symlinked: {value}")
-    print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to('/').as_posix()}")
+    print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(filesystem_root).as_posix()}")
 ' >"$IMAGE_PROOF_MANIFEST"
 cmp -s "$PROOF_MANIFEST" "$IMAGE_PROOF_MANIFEST" || \
   die "Dagster entrypoint/proof tool tree가 sealed candidate와 다르다"

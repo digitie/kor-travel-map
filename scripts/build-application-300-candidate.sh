@@ -486,6 +486,7 @@ docker run --pull=never --rm --entrypoint python "$image_id" -c '
 from __future__ import annotations
 import hashlib
 from pathlib import Path
+filesystem_root = Path("/")
 for path in (
     Path("/usr/local/bin/ktm-application-schema-handoff"),
     Path("/usr/local/bin/ktm-application-schema-fresh-300"),
@@ -496,7 +497,7 @@ for path in (
 ):
     if not path.is_file() or path.is_symlink():
         raise SystemExit(f"candidate executable is missing or symlinked: {path}")
-    print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to('/')}" )
+    print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(filesystem_root)}" )
 ' >"$IMAGE_ENTRYPOINT_MANIFEST"
 cmp -s "$ENTRYPOINT_MANIFEST" "$IMAGE_ENTRYPOINT_MANIFEST" || \
   die "candidate image migration executable tree가 sealed Git archive와 다르다"

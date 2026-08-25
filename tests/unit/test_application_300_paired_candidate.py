@@ -88,6 +88,16 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert "--entrypoint sha256sum" in api_builder
     assert "image_sidecar_sha256=\"${image_sidecar_digest_line%% *}\"" in api_builder
     assert "awk '{print \\\\\\$1}'" not in api_builder
+    assert 'filesystem_root = Path("/")' in api_builder
+    assert "relative_to(filesystem_root)" in api_builder
+    assert "relative_to('/')" not in api_builder
+
+    paired_builder = (
+        ROOT / "scripts" / "build-application-300-paired-candidate.sh"
+    ).read_text(encoding="utf-8")
+    assert 'filesystem_root = Path("/")' in paired_builder
+    assert "relative_to(filesystem_root).as_posix()" in paired_builder
+    assert "relative_to('/').as_posix()" not in paired_builder
 
     rehearsal = (ROOT / "scripts" / "rehearse-application-300-handoff.sh").read_text(
         encoding="utf-8"
@@ -101,6 +111,38 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert 'launch["image_default_webserver_argv"] != [' in rehearsal
     assert 'launch["daemon_argv"] != [' in rehearsal
     assert 'launch["metadata_database_identity_permit"] != {' in rehearsal
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "build-application-300-candidate.sh",
+        "build-application-300-paired-candidate.sh",
+    ],
+)
+def test_embedded_python_does_not_break_its_shell_single_quote(
+    script_name: str,
+) -> None:
+    source = (ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+    inside_python = False
+    block_count = 0
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        if not inside_python and line.endswith("-c '") and "entrypoint" in line:
+            inside_python = True
+            block_count += 1
+            continue
+        if not inside_python:
+            continue
+        if line.startswith("'"):
+            inside_python = False
+            continue
+        assert "'" not in line, (
+            f"{script_name}:{line_number}: shell single-quoted Python block contains "
+            "an unescaped single quote"
+        )
+    assert not inside_python
+    assert block_count > 0
 
 
 @pytest.mark.unit
