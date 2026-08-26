@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — Docker Manager legacy Compose boundary remediation 대기
+
+n150에서 새 PinVi #477 pinset의 승인된 rebuild가 DB reset 전에 멈춘 직접 선행 원인은 legacy
+`docker-compose.override.yml`였다. 이 파일은 Geo backup의 알려진 값을 덮고 Concierge UI에 전체
+source `.env`를 주입해 single-file Compose contract를 위반했다. Docker Manager PR
+[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 root-only
+`compose-boundary retire-legacy-override --confirm`과 archive 뒤 재시도 전용
+`compose-boundary activate-concierge --confirm`을 추가한다. 둘은 production C6c global lock 아래에서
+actual raw/resolved Compose, UI/API host network, API loopback command/port, UI auth guard·production
+command를 확인한다. Manager backend 전체 612개 테스트와 전문 적대 리뷰 2건은 통과했으나 #223은 아직
+GitHub 승인·병합·n150 배포 전이다.
+
+### 이 변경의 다음 한 작업
+
+#223이 승인·병합된 뒤에만 Manager 공식 배포 절차로 설치하고, 수동 Docker/Compose/SQL 없이 legacy
+override 이관·Concierge 로그인/BFF/로그아웃 live acceptance를 실행한다. 그 결과와 새 v6/v8 candidate의
+비밀 비포함 failure stage 또는 committed 증적을 확보하기 전에는 `rebuild-pinned`를 추가 실행하지 않고,
+`T-VN-FINAL-REBUILD`/D1/D2/41C를 재개하지 않는다.
+
 ## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint 재고정 (Draft)
 
 PR [#1077](https://github.com/digitie/kor-travel-map/pull/1077)는 과거 285개 mocked failure
