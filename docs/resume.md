@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — PinVi #477 source 회전 뒤 다음 후보 preflight
+
+Docker-manager PR #219가 PinVi #477 squash merge
+`10efb21ad84b23db2eeb6d09856cda16d3337822`와 canonical pinset
+`cb8d15591480111d7f4cd70398ad46b129e814ad3b9375dfa0fc83562b366752`를 다음 후보의 source
+authority로 병합했다. Map source는 H46H에서 수락한
+`cc81081ff2e540a6ad9c428a296515e1d79bc316`를 유지한다. 기존 H300 v6/v8 generation은 이전
+pinset의 immutable history이며 새 source를 입증하거나 재개하는 receipt가 아니다.
+
+### 이 변경의 다음 한 작업
+
+Manager local runbook 기준의 read-only preflight로 새 source pinset의 detached checkout,
+candidate build 입력, H300과의 journal namespace 분리, 세 DB·image·schema attestation 경계를
+확인한다. 새 candidate가 v6/v8으로 `committed`되기 전에는 `T-VN-41F1D-D2`·`T-VN-41C` 또는
+logs live acceptance를 이전 H300 evidence로 재개하지 않는다. 승인된 읽기 전용 logs 자격증명과
+허용 origin은 별도의 계속된 blocker다.
+
 ## 2026-08-26 — T-FE-MOCK-FLAKE n150 실제 logs는 인증 승인 근거 대기
 
 n150의 배포된 Map source에서 `/ops/logs` `GET` 전용 실제 spec을 단일 워커·무재시도로
