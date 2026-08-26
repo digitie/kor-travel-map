@@ -19,7 +19,9 @@ SHA-256은 `0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d`다
 
 Map draft PR을 원격 checkpoint로 올리고 CI를 확인한다. PinVi는 위 exact Admin artifact와 artifact-code source
 commit을 re-vendor하고, provenance `feature_uuid`를 M05 case의 manual/old UUID와 각각 대조하도록 consumer를
-고친 뒤에만 M04/M05 live gate에 사용한다. 현 candidate의 이전 evidence는 재사용하지 않는다.
+고친 뒤에만 M04/M05 live gate에 사용한다. 두 독립 적대 리뷰의 Map 내부 P0/P1은 0건이고, UUID 불일치가 GET
+경계에서 partial evidence 없이 RFC7807 500으로 닫히는 회귀도 추가했다. 현 candidate의 이전 evidence는 재사용하지
+않는다.
 
 ## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
 

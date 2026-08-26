@@ -20,6 +20,11 @@ source SHA-256은 `256b4e668bae8e5d3f81ec1a45d401a79d0a2f5a`의 full/admin artif
 각각 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`/
 `99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d`로 변하지 않았다.
 
+독립 적대 리뷰 두 건은 Map 내부 P0/P1이 없음을 재확인했다. 한 리뷰 지적으로 reader UUID 또는 immutable claim
+UUID 불일치가 helper에서만 아니라 실제 GET 경계에서도 partial evidence 없이 민감 정보를 뺀 RFC7807 500으로 닫히는
+회귀를 추가했다. PinVi의 기존 UUID-only consumer/vendored artifact는 그대로 P0 release blocker이며 Map PR의
+병합 SHA에서 재-vendor한 뒤에만 consumer/live 작업을 진행한다.
+
 ## 2026-08-27 — T-VN-H34A MOIS 인허가 분류 책임 경계 조사
 
 MOIS 인허가 업종과 실제 시설 성격이 다르게 보이는 H34A를 위해 Map source·문서와 로컬

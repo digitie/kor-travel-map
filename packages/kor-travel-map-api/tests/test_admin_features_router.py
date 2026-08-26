@@ -984,6 +984,69 @@ def test_feature_creation_provenance_rejects_claim_identity_mismatch() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("mismatch", ["reader", "claim"])
+def test_feature_creation_provenance_route_sanitizes_identity_mismatch(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    """불변 UUID 불일치는 HTTP 경계에서도 evidence를 노출하지 않고 닫는다."""
+
+    from kortravelmap.infra.feature_identity import FeatureIdentity
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    feature_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    mismatched_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a892"
+
+    async def _resolve(_session: Any, _ref: str) -> FeatureIdentity:
+        return FeatureIdentity(feature_id="feature-m04-approved", feature_uuid=feature_uuid)
+
+    async def _read(_session: Any, *, feature_uuid: str) -> AdminManualFeatureProvenance:
+        return AdminManualFeatureProvenance(
+            feature_id=mismatched_uuid if mismatch == "reader" else feature_uuid,
+            claim=(
+                None
+                if mismatch == "reader"
+                else ManualFeatureIdentityClaim(
+                    feature_id=mismatched_uuid,
+                    feature_kind="place",
+                    name_key="m02 mismatch 장소",
+                    lon_e6=127_500_000,
+                    lat_e6=36_500_000,
+                    claim_basis="manual_create",
+                    claimed_at=datetime(2026, 8, 20, tzinfo=UTC),
+                    claimed_by_command_id=71,
+                )
+            ),
+            origin=None,
+        )
+
+    monkeypatch.setattr(router_mod, "resolve_feature_ref_or_error", _resolve)
+    monkeypatch.setattr(router_mod, "get_admin_manual_feature_provenance", _read)
+    probe = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=False,
+        headers=client.headers,
+    )
+    response = probe.get("/v1/admin/features/feature-m04-approved/creation-provenance")
+    probe.close()
+
+    assert response.status_code == 500
+    assert response.headers["content-type"].startswith("application/problem+json")
+    body = response.json()
+    assert body["code"] == "INTERNAL_ERROR"
+    assert body["status"] == 500
+    assert body["detail"] == "서버 내부 오류가 발생했습니다."
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    assert body["errors"] == []
+    assert "data" not in body
+    assert "feature-m04-approved" not in response.text
+    assert "immutable claim UUID" not in response.text
+
+
+@pytest.mark.unit
 def test_create_feature_authors_typed_override_receipt(
     client: TestClient,
     session: _FakeSession,
