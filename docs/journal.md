@@ -1,20 +1,24 @@
 # journal.md — 작업 일지 (역시간순)
 
-## 2026-08-26 — legacy Compose boundary remediation PR #223 대기
+## 2026-08-26 — trusted/runtime boundary follow-up PR #224 대기
 
 새 PinVi #477 pinset의 승인된 Manager rebuild가 DB reset 전 single-file Compose boundary에서 멈춘 뒤,
 읽기 전용 topology 확인으로 legacy `docker-compose.override.yml`가 Geo backup 값을 덮고 Concierge UI에
-전체 source `.env`를 전달한다는 사실을 확정했다. Docker Manager PR
-[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 이 알려진 shape만 root `.env`의
-제한된 authority로 이관한다. candidate `.env` write·실제 raw/resolved Compose C6c 검증·owner-only archive·
-Concierge API/MCP/scheduler/UI 정확한 네 service 재생성을 production global lock 하나로 직렬화한다.
+전체 source `.env`를 전달한다는 사실을 확정했다. Docker Manager
+[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 병합·trusted `/opt` deployment까지
+완료했지만, installed shim의 project root를 retirement가 blanket 거부해 공식 명령은 Docker/DB/runtime 변경
+전에 fail-close했다. home Compose YAML과 parent가 user-writable이므로 home root 허용·자동 병합은 P0가 된다.
+후속 [#224](https://github.com/digitie/kor-travel-docker-manager/pull/224)는 `/opt` canonical Compose execution
+root를 유지하고, legacy override와 고정 Concierge source를 `O_NOFOLLOW`/`fstat` protected C6c stage에 one-way
+snapshot한 뒤 그 staged pair만 candidate `.env` write·실제 raw/resolved C6c 검증·owner-only archive·Concierge
+API/MCP/scheduler/UI 정확한 네 service 재생성의 입력으로 쓴다.
 
 UI는 더 이상 전체 source `.env`를 받지 않고 exact allowlist, same-origin BFF와 production command만 받는다.
 API/UI host network, API loopback command/`12601`, UI auth guard와 build/start command/`12605`도 raw/resolved
-계약으로 fail-close한다. archive 뒤 재생성만 실패하면 candidate와 archive를 유지하며 root-only official retry를
-사용한다. Manager backend 612개 테스트와 전문 적대 리뷰 두 건은 통과했으나, 이 기록 시점에는 #223이 GitHub
-승인·병합·n150 배포 전이다. 따라서 legacy override 수동 삭제, raw Docker/Compose/SQL, 새
-`rebuild-pinned` 재시도는 하지 않았고 application row·건수·업무상 무결성이나 이전 revision 복구도 범위에 넣지 않았다.
+계약으로 fail-close한다. pending stage가 있으면 activation도 거부하고 archive 뒤 재생성만 실패하면 candidate와
+archive를 유지하며 root-only official retry를 사용한다. #224의 전문 적대 리뷰·전체 gate·병합·n150 deployment와
+stage/retire 증적 전까지 legacy override 수동 삭제, raw Docker/Compose/SQL, 새 `rebuild-pinned` 재시도는 하지
+않았고 application row·건수·업무상 무결성이나 이전 revision 복구도 범위에 넣지 않았다.
 
 ## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint inventory 재고정 (Draft)
 

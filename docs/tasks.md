@@ -42,14 +42,14 @@ D1/D2/41C acceptance를 재개하지 않는다. 이는 기존 H300 committed gen
 
 2026-08-26 읽기 전용 topology 조사로 위 공식 재개의 선행 차단 하나가 확정됐다. n150의 legacy
 `docker-compose.override.yml`가 Geo backup 설정을 덮고 Concierge UI에 전체 source `.env`를 주입해
-single-file boundary가 fail-close된 것이다. Docker Manager PR
-[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 이 알려진 override만 root
-`.env`의 제한된 source로 이관하고, 실제 raw/resolved Compose·host network·API/UI command를 검증한 뒤
-owner-only archive와 Concierge 네 service 재생성을 같은 production lock으로 수행한다. 두 전문 적대
-리뷰와 Manager 전체 backend 612개 검증은 통과했지만, 이 문서 작성 시점에는 GitHub 승인·병합·n150
-배포 전이다. 그 전에는 override를 수동 삭제하거나 `rebuild-pinned`를 다시 실행하지 않는다. #223 병합·배포
-후 공식 `compose-boundary retire-legacy-override --confirm` 결과가 비밀 비포함으로 기록되기 전에는 현
-새 pinset의 FINAL-REBUILD/D1/D2/41C를 재개하지 않는다.
+single-file boundary가 fail-close된 것이다. Docker Manager [#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은
+병합되어 trusted `/opt` release로 배포됐지만, 그 설치 shim이 고정한 project root를 retirement가 blanket
+거부하여 공식 명령은 Docker/DB/runtime 변경 전에 다시 fail-close했다. home Compose는 user-writable이므로 이
+거부만 제거하거나 home root를 Compose 입력으로 허용하면 P0가 된다. 후속 [Manager #224](https://github.com/digitie/kor-travel-docker-manager/pull/224)는
+`/opt` canonical execution root를 유지하고, legacy override와 고정 Concierge source를 protected C6c state에
+descriptor-safe stage한 뒤 그 snapshot만 retire·archive·Concierge 네 service 재생성에 사용한다. #224의 전문
+적대 리뷰·검증·병합·trusted 배포와 stage/retire의 비밀 비포함 성공 증적 전에는 override를 수동 삭제하거나
+`rebuild-pinned`를 재실행하지 않으며, 현재 새 pinset의 FINAL-REBUILD/D1/D2/41C도 재개하지 않는다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
