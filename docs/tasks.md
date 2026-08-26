@@ -33,6 +33,13 @@ H300의 이전 exact pair·committed journal을 변경하거나 새 후보의 ac
 않는다. 다음 후보는 별도 build·seven-image/three-schema attestation·새 v6/v8 evidence가
 `committed`가 된 뒤에만 이 pinset을 runtime·live acceptance에 사용할 수 있다.
 
+2026-08-26에 신뢰된 Manager의 승인된 rebuild와 동일 공식 재개는 새 pinset별 journal을
+`map_runtime_ready` 미종결 상태에 남기고 각각 0이 아닌 종료로 끝났다. 두 전문 적대 리뷰의
+현재 판정은 추가 재시도·수동 Docker/Compose/SQL·DB/journal/permit 조작의 금지다. v8 journal에는
+실패 지점의 비밀 비포함 durable receipt가 없어 외부 인시던트 증적 전에는 원인을 단정하거나
+D1/D2/41C acceptance를 재개하지 않는다. 이는 기존 H300 committed generation을 새 pinset의
+증거로 바꾸지 않는다.
+
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.

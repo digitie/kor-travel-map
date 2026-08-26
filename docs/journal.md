@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — PinVi #477 새 pinset rebuild 미종결 인시던트 기록
+
+Docker-manager PR #219가 회전한 정규 pinset
+`cb8d15591480111d7f4cd70398ad46b129e814ad3b9375dfa0fc83562b366752`으로 신뢰된 n150
+Manager의 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`을 실행했다. 최초 실행 뒤
+동일한 공식 재개를 한 번만 추가로 실행했으나, 두 경우 모두 0이 아닌 종료로 끝났다. 새 pinset의
+v8 journal은 `phase=map_runtime_ready`, `journal_generation=20`이며 `committed` generation을
+만들지 못했다. journal의 Map SHA `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 PinVi #477
+squash SHA `10efb21ad84b23db2eeb6d09856cda16d3337822`는 expected source authority와 일치한다.
+
+두 전문 적대 리뷰어가 독립적으로 재검토했다. 현 journal에는 bootstrap 실패·schema 확인 실패·Map
+runtime 기동 실패를 구분할 비밀 비포함 durable failure receipt가 없으므로, raw 출력 폐기 뒤에는
+원인을 안전하게 특정할 수 없다는 결론이다. 추가 `rebuild-pinned` 재시도, raw Docker/Compose/SQL
+조작, DB/journal/permit 삭제·수정은 모두 하지 않는다. 읽기 전용 상태에서 두 PostgreSQL만
+healthy/running이고 seven runtime은 fail-closed 정리 뒤 종료된 것, OOM과 Docker
+`State.Error`가 없는 것만 확인했다.
+
+기존 H300 committed generation은 이전 pinset의 immutable 이력으로 보존하며 새 후보 acceptance에
+소급 사용하지 않는다. 새 v6/v8 evidence가 committed되기 전 `T-VN-FINAL-REBUILD`,
+`T-VN-41F1D-D1/D2`, `T-VN-41C`, `T-FE-MOCK-FLAKE`의 새 후보 기반 live acceptance는 진행하지
+않는다. 이번 incident에서 application row·건수·업무상 무결성은 조회·대조하지 않았고, 이전
+revision 또는 DB restore도 수행하지 않았다.
+
 ## 2026-08-26 — PinVi #477 다음 후보 source authority 회전 기록
 
 Docker-manager PR #219가 PinVi #477의 squash merge commit
