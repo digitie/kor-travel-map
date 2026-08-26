@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e1e38dda9cf170b95e990062d40c70523056f63d357a7a8fd8977042ba04a015"
+      "sha256": "0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-27",
+      "task": "T-VN-M02/M05 provenance identity",
+      "change": "Admin manual creation provenance의 최상위 identity를 opaque feature_id와 별도 feature_uuid로 명시하고 reader/immutable claim UUID 교차검증을 추가했다. user/service spec bytes와 Wave 2 목표 operation 집합은 변하지 않는다. PinVi는 이 full-admin artifact를 다시 vendor하고 provenance UUID를 M05 case의 양 UUID와 실제 대조하기 전에는 paired receipt를 승격할 수 없다."
+    },
     {
       "date": "2026-08-25",
       "task": "PR-1064 rebase",
@@ -415,7 +420,7 @@
         "enum_changes": 4,
         "status_changes": 6,
         "error_changes": 7,
-        "schema_changes": 5,
+        "schema_changes": 6,
         "deferred": 2
       },
       "added": [
@@ -717,6 +722,11 @@
           "operation": "GET /v1/admin/curations/{collection_id}",
           "detail": "collection representation_etag + collection_etag, item row_revision/item_etag",
           "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/features/{feature_id}/creation-provenance",
+          "detail": "최상위 Feature identity는 opaque feature_id와 별도 feature_uuid이며, immutable claim UUID도 이 UUID와 교차검증한다",
+          "basis": "ADR-083, T-VN-M02/M05"
         }
       ],
       "deferred": [

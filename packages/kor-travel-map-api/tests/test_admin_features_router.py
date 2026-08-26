@@ -953,6 +953,37 @@ def test_feature_creation_provenance_rejects_reader_identity_mismatch() -> None:
 
 
 @pytest.mark.unit
+def test_feature_creation_provenance_rejects_claim_identity_mismatch() -> None:
+    """immutable claim UUID도 outer Feature identity와 같아야 한다."""
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    feature_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    provenance = AdminManualFeatureProvenance(
+        feature_id=feature_uuid,
+        claim=ManualFeatureIdentityClaim(
+            feature_id="0198d9f1-7a31-7e52-8ea8-cb2548d3a892",
+            feature_kind="place",
+            name_key="m02 mismatch 장소",
+            lon_e6=127_500_000,
+            lat_e6=36_500_000,
+            claim_basis="manual_create",
+            claimed_at=datetime(2026, 8, 20, tzinfo=UTC),
+            claimed_by_command_id=71,
+        ),
+        origin=None,
+    )
+
+    with pytest.raises(AdminManualFeatureInvariantError, match="immutable claim UUID"):
+        router_mod._manual_feature_provenance_response(
+            provenance,
+            feature_id="feature-m04-approved",
+            feature_uuid=feature_uuid,
+            started_at=0.0,
+        )
+
+
+@pytest.mark.unit
 def test_create_feature_authors_typed_override_receipt(
     client: TestClient,
     session: _FakeSession,

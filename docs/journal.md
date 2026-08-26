@@ -8,9 +8,14 @@ M05 reconciliation event/evidence의 `feature_id: string`/`feature_uuid: uuid` �
 이는 storage reader가 아니라 HTTP projection의 `UUID(provenance.feature_id)` 변환 문제다.
 
 resolver가 canonical opaque ID와 UUID를 같은 identity로 반환하고 reader가 UUID로 evidence를 결박하는 현재
-구조를 유지한 채, 응답은 opaque `feature_id`와 별도 `feature_uuid`를 필수로 반환하도록 정정한다. reader의
-claim/origin UUID 저장 계약·DB schema·과거 revision 복구는 변경하지 않는다. 생성 OpenAPI와 source SHA-256은
-전문 적대 리뷰 및 router/OpenAPI 회귀 뒤 exact artifact로 기록한다.
+구조를 유지한 채, 응답은 opaque `feature_id`와 별도 `feature_uuid`를 필수로 반환하도록 정정한다. reader UUID와
+immutable claim UUID도 응답 UUID와 각각 대조해 불일치면 fail-close한다. claim/origin UUID 저장 계약·DB schema·과거
+revision 복구는 변경하지 않는다.
+
+PinVi PR487은 새 Admin artifact만 vendor해서는 충분하지 않다. attestation이 `provenance.feature_uuid`를 필수
+canonical UUID로 파싱해 M05 map-case의 manual/old UUID와 각각 비교하고, 검증된 provenance UUID를 receipt에
+기록하는 별도 consumer 수정이 선행돼야 한다. 그 전에는 paired live gate가 fail-close로 유지된다. 생성 OpenAPI와
+source SHA-256은 전문 적대 리뷰 및 router/OpenAPI 회귀 뒤 exact artifact로 기록한다.
 
 ## 2026-08-27 — T-VN-H34A MOIS 인허가 분류 책임 경계 조사
 

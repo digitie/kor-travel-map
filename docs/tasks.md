@@ -971,7 +971,9 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
   immutable claim/origin ACL과 named hard-purge fence, unit/integration 회귀가 정본이다. evidence를
   남긴 상태에서의 purge 정책·backup/restore 실측 및 live acceptance가 남아 있다. PinVi M05 paired
   attestation이 소비하는 Admin provenance 최상위 identity는 opaque `feature_id`와 별도 `feature_uuid`를
-  함께 반환해야 하며, UUID-only projection을 재사용하지 않는다.
+  함께 반환해야 하며, UUID-only projection을 재사용하지 않는다. reader/immutable claim UUID는 모두
+  최상위 `feature_uuid`와 같지 않으면 fail-close한다. PinVi consumer도 이 반환 UUID를 M05 case의
+  manual/old UUID와 각각 대조하기 전에는 paired live receipt를 승격할 수 없다.
 - [~] **T-VN-M03 — curated 동시 생성** (결정 3, 구현 병합). #1029의 `0228` combined
   Feature+curation writer가 SERIALIZABLE 원자성, exact conflict, `manual_curation` origin과
   runtime/Dagster 권한 분리를 고정했다. import 행별 child-command와 격리 live acceptance를 남긴다.

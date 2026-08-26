@@ -7,13 +7,14 @@ M05 event/evidence schema와 달리 최상위 `data.feature_id`를 UUID로 치�
 않았다. repository reader는 이미 UUID 축을 읽고 있고 `FeatureIdentity` resolver도 opaque ID와 UUID를
 모두 보유하므로, DB/claim 스키마를 바꾸지 않고 HTTP 경계에서 opaque `feature_id`와 별도 UUID
 `feature_uuid`를 함께 반환하도록 정정한다. UUID claim 내부 값은 immutable evidence 저장 계약으로
-유지한다.
+유지하며, reader UUID·claim UUID·응답 UUID가 다르면 fail-close한다.
 
 ### 이 변경의 다음 한 작업
 
 admin/user OpenAPI를 재생성해 Admin artifact SHA-256과 source commit을 확정한다. 전문 적대 리뷰 두 건,
 router/OpenAPI 회귀와 contract pin 대조가 통과한 뒤 Map draft PR을 올린다. PinVi는 그 exact Admin artifact와
-source commit만 re-vendor하여 M04/M05 live gate에 사용하며, 현 candidate의 이전 evidence는 재사용하지 않는다.
+source commit을 re-vendor하고, provenance `feature_uuid`를 M05 case의 manual/old UUID와 각각 대조하도록
+consumer를 고친 뒤에만 M04/M05 live gate에 사용한다. 현 candidate의 이전 evidence는 재사용하지 않는다.
 
 ## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
 

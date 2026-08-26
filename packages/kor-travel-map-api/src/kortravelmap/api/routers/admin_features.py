@@ -464,7 +464,9 @@ class AdminManualFeatureIdentityClaimRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: UUID
+    feature_id: UUID = Field(
+        description="불변 claim의 UUID 축. 상위 data.feature_uuid와 같아야 한다."
+    )
     feature_kind: Literal["place", "event"]
     name_key: str
     lon_e6: int
@@ -1209,6 +1211,10 @@ def _manual_feature_provenance_response(
     if UUID(provenance.feature_id) != resolved_feature_uuid:
         raise AdminManualFeatureInvariantError(
             "수동 Feature provenance UUID가 해석된 Feature identity와 다릅니다."
+        )
+    if claim is not None and UUID(claim.feature_id) != resolved_feature_uuid:
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature immutable claim UUID가 해석된 Feature identity와 다릅니다."
         )
     return AdminManualFeatureProvenanceResponse(
         data=AdminManualFeatureProvenanceData(

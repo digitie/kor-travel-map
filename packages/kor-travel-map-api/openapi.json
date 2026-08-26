@@ -4532,6 +4532,7 @@
             "type": "integer"
           },
           "feature_id": {
+            "description": "불변 claim의 UUID 축. 상위 data.feature_uuid와 같아야 한다.",
             "format": "uuid",
             "title": "Feature Id",
             "type": "string"
