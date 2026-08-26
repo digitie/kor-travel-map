@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — PinVi #477 다음 후보 source authority 회전 기록
+
+Docker-manager PR #219가 PinVi #477의 squash merge commit
+`10efb21ad84b23db2eeb6d09856cda16d3337822`을 다음 v5 candidate의 source authority로 고정하고
+canonical pinset을 `cb8d15591480111d7f4cd70398ad46b129e814ad3b9375dfa0fc83562b366752`로
+회전했다. Map source `cc81081ff2e540a6ad9c428a296515e1d79bc316`는 유지한다.
+
+이 source 회전은 n150 runtime, H300 committed generation, 기존 v8 journal이나 그 acceptance
+근거를 변경하지 않는다. 새 pinset은 detached exact source build, seven-image/three-schema
+attestation, 새 v6/v8 evidence와 승인된 rebuild가 `committed`가 되기 전에는 runtime 반영 또는
+live acceptance 완료로 주장하지 않는다. 일반 application row·건수·업무상 무결성 검증은 이
+후보 전환의 gate가 아니다.
+
 ## 2026-08-26 — T-FE-MOCK-FLAKE n150 logs live 인증 blocker 재확인
 
 n150의 현재 Map source에서 `logs.live.spec.ts` 하나를 실제 공개 UI 대상으로 단일 워커,
