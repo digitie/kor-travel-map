@@ -8,7 +8,7 @@ PR [#1077](https://github.com/digitie/kor-travel-map/pull/1077)는 기준선 경
 mocked checkpoint D를 실행해 284개 브라우저 시나리오가 모두 통과했지만, 이전 285개 manifest와
 불일치해 reporter gate가 fail-closed 되는 것을 재현했다.
 
-PR head `b2eafbd3`의 새 clean checkout에서 exact npm 12.0.1 install·dependency tree 검증 뒤
+구현 commit `b2eafbd3`의 새 clean checkout에서 exact npm 12.0.1 install·dependency tree 검증 뒤
 자기 소유 frontend image/container/internal network만 사용한 checkpoint D를 단일 worker로 다시
 실행했다. 결과는 **284/284 passed**, manifest 일치, expected/actual failure·flake 0,
 reporter gate true와 runner exit 0이다. 실행 뒤 owned container·network·image와 임시 runtime
