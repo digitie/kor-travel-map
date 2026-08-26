@@ -860,7 +860,8 @@ def test_feature_creation_provenance_returns_explicit_evidence_absence(
 
     assert response.status_code == 200
     assert response.json()["data"] == {
-        "feature_id": _expected_uuid("feature-1"),
+        "feature_id": "feature-1",
+        "feature_uuid": _expected_uuid("feature-1"),
         "claim": None,
         "origin": None,
     }
@@ -871,7 +872,7 @@ def test_feature_creation_provenance_returns_claim_and_origin(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """manual evidence는 UUID canonical path와 legacy alias 양쪽에서 같은 snapshot이다."""
+    """manual evidence는 opaque ID/UUID 쌍을 같은 snapshot으로 반환한다."""
 
     from kortravelmap.api.routers import admin_features as router_mod
 
@@ -903,7 +904,8 @@ def test_feature_creation_provenance_returns_claim_and_origin(
         )
 
     monkeypatch.setattr(router_mod, "get_admin_manual_feature_provenance", _read)
-    # canonical ref를 써도 DB reader는 resolve된 canonical UUID만 받는다.
+
+    # UUID path를 써도 response는 해석된 opaque ID와 UUID를 각각 돌려준다.
     async def _resolve(_session: Any, _ref: str) -> Any:
         from kortravelmap.infra.feature_identity import FeatureIdentity
 
@@ -915,7 +917,8 @@ def test_feature_creation_provenance_returns_claim_and_origin(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["feature_id"] == feature_uuid
+    assert data["feature_id"] == "manual-feature"
+    assert data["feature_uuid"] == feature_uuid
     assert data["claim"]["claimed_by_command_id"] == 71
     assert data["origin"] == {
         "origin_kind": "manual_admin",
@@ -926,6 +929,27 @@ def test_feature_creation_provenance_returns_claim_and_origin(
         "invoker_role": "ktm_feature_api_runtime",
         "procedure_definer": "ktm_manual_feature_procedure_owner",
     }
+
+
+@pytest.mark.unit
+def test_feature_creation_provenance_rejects_reader_identity_mismatch() -> None:
+    """reader UUID와 resolver UUID가 다르면 opaque ID를 투영하지 않는다."""
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    provenance = AdminManualFeatureProvenance(
+        feature_id="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+        claim=None,
+        origin=None,
+    )
+
+    with pytest.raises(AdminManualFeatureInvariantError, match="해석된 Feature identity"):
+        router_mod._manual_feature_provenance_response(
+            provenance,
+            feature_id="feature-m04-approved",
+            feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a892",
+            started_at=0.0,
+        )
 
 
 @pytest.mark.unit

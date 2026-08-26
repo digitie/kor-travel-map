@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — PinVi M05 Admin provenance identity 계약 정정 진행
+
+PinVi M05 attestation이 실제로 읽는 Map Admin `GET /v1/admin/features/{feature_id}/creation-provenance`는
+M05 event/evidence schema와 달리 최상위 `data.feature_id`를 UUID로 치환하고 `feature_uuid`를 주지
+않았다. repository reader는 이미 UUID 축을 읽고 있고 `FeatureIdentity` resolver도 opaque ID와 UUID를
+모두 보유하므로, DB/claim 스키마를 바꾸지 않고 HTTP 경계에서 opaque `feature_id`와 별도 UUID
+`feature_uuid`를 함께 반환하도록 정정한다. UUID claim 내부 값은 immutable evidence 저장 계약으로
+유지한다.
+
+### 이 변경의 다음 한 작업
+
+admin/user OpenAPI를 재생성해 Admin artifact SHA-256과 source commit을 확정한다. 전문 적대 리뷰 두 건,
+router/OpenAPI 회귀와 contract pin 대조가 통과한 뒤 Map draft PR을 올린다. PinVi는 그 exact Admin artifact와
+source commit만 re-vendor하여 M04/M05 live gate에 사용하며, 현 candidate의 이전 evidence는 재사용하지 않는다.
+
 ## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
 
 MOIS 인허가 업종과 여행자용 시설 성격이 다르게 보이는 H34A를 source·문서만 읽어

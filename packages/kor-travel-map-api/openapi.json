@@ -4572,7 +4572,7 @@
       },
       "AdminManualFeatureProvenanceData": {
         "additionalProperties": false,
-        "description": "M02 admin-only provenance reader의 현재 Feature snapshot.",
+        "description": "M02 admin-only provenance reader의 현재 Feature identity/evidence snapshot.",
         "properties": {
           "claim": {
             "anyOf": [
@@ -4585,8 +4585,12 @@
             ]
           },
           "feature_id": {
-            "format": "uuid",
             "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
             "type": "string"
           },
           "origin": {
@@ -4602,6 +4606,7 @@
         },
         "required": [
           "feature_id",
+          "feature_uuid",
           "claim",
           "origin"
         ],

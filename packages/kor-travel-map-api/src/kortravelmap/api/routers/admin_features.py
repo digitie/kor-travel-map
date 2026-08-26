@@ -489,11 +489,15 @@ class AdminFeatureCreationOriginRecord(BaseModel):
 
 
 class AdminManualFeatureProvenanceData(BaseModel):
-    """M02 admin-only provenance reader의 현재 Feature snapshot."""
+    """M02 admin-only provenance reader의 현재 Feature identity/evidence snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_id: UUID
+    # ``feature_id``는 요청 표기가 아니라 해석된 opaque storage identity다.
+    # UUID 정본은 별도 ``feature_uuid``로 항상 함께 보낸다. M05 consumer가
+    # 두 축을 서로 다른 용도로 결박하므로 UUID를 feature_id에 치환하지 않는다.
+    feature_id: str
+    feature_uuid: UUID
     claim: AdminManualFeatureIdentityClaimRecord | None
     origin: AdminFeatureCreationOriginRecord | None
 
@@ -1188,15 +1192,28 @@ def _manual_feature_create_response(
 def _manual_feature_provenance_response(
     provenance: AdminManualFeatureProvenance,
     *,
+    feature_id: str,
+    feature_uuid: str,
     started_at: float,
 ) -> AdminManualFeatureProvenanceResponse:
-    """repo immutable snapshot을 public/admin response shape로만 투영한다."""
+    """repo immutable snapshot을 public/admin response shape로만 투영한다.
+
+    Reader의 ``provenance.feature_id``는 immutable claim/origin relation이 보관한
+    UUID 축이다. HTTP 응답의 opaque ``feature_id``는 경계 resolver가 feature
+    정본에서 되돌린 값이고, UUID 축은 ``feature_uuid``로 명시한다.
+    """
 
     claim = provenance.claim
     origin = provenance.origin
+    resolved_feature_uuid = UUID(feature_uuid)
+    if UUID(provenance.feature_id) != resolved_feature_uuid:
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature provenance UUID가 해석된 Feature identity와 다릅니다."
+        )
     return AdminManualFeatureProvenanceResponse(
         data=AdminManualFeatureProvenanceData(
-            feature_id=UUID(provenance.feature_id),
+            feature_id=feature_id,
+            feature_uuid=resolved_feature_uuid,
             claim=(
                 None
                 if claim is None
@@ -1703,7 +1720,12 @@ async def get_feature_creation_provenance_route(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
-    return _manual_feature_provenance_response(provenance, started_at=started_at)
+    return _manual_feature_provenance_response(
+        provenance,
+        feature_id=identity.feature_id,
+        feature_uuid=identity.feature_uuid,
+        started_at=started_at,
+    )
 
 
 @router.get(
