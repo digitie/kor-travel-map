@@ -40,6 +40,17 @@ H300의 이전 exact pair·committed journal을 변경하거나 새 후보의 ac
 D1/D2/41C acceptance를 재개하지 않는다. 이는 기존 H300 committed generation을 새 pinset의
 증거로 바꾸지 않는다.
 
+2026-08-26 읽기 전용 topology 조사로 위 공식 재개의 선행 차단 하나가 확정됐다. n150의 legacy
+`docker-compose.override.yml`가 Geo backup 설정을 덮고 Concierge UI에 전체 source `.env`를 주입해
+single-file boundary가 fail-close된 것이다. Docker Manager PR
+[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 이 알려진 override만 root
+`.env`의 제한된 source로 이관하고, 실제 raw/resolved Compose·host network·API/UI command를 검증한 뒤
+owner-only archive와 Concierge 네 service 재생성을 같은 production lock으로 수행한다. 두 전문 적대
+리뷰와 Manager 전체 backend 612개 검증은 통과했지만, 이 문서 작성 시점에는 GitHub 승인·병합·n150
+배포 전이다. 그 전에는 override를 수동 삭제하거나 `rebuild-pinned`를 다시 실행하지 않는다. #223 병합·배포
+후 공식 `compose-boundary retire-legacy-override --confirm` 결과가 비밀 비포함으로 기록되기 전에는 현
+새 pinset의 FINAL-REBUILD/D1/D2/41C를 재개하지 않는다.
+
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.

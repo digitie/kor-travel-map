@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — legacy Compose boundary remediation PR #223 대기
+
+새 PinVi #477 pinset의 승인된 Manager rebuild가 DB reset 전 single-file Compose boundary에서 멈춘 뒤,
+읽기 전용 topology 확인으로 legacy `docker-compose.override.yml`가 Geo backup 값을 덮고 Concierge UI에
+전체 source `.env`를 전달한다는 사실을 확정했다. Docker Manager PR
+[#223](https://github.com/digitie/kor-travel-docker-manager/pull/223)은 이 알려진 shape만 root `.env`의
+제한된 authority로 이관한다. candidate `.env` write·실제 raw/resolved Compose C6c 검증·owner-only archive·
+Concierge API/MCP/scheduler/UI 정확한 네 service 재생성을 production global lock 하나로 직렬화한다.
+
+UI는 더 이상 전체 source `.env`를 받지 않고 exact allowlist, same-origin BFF와 production command만 받는다.
+API/UI host network, API loopback command/`12601`, UI auth guard와 build/start command/`12605`도 raw/resolved
+계약으로 fail-close한다. archive 뒤 재생성만 실패하면 candidate와 archive를 유지하며 root-only official retry를
+사용한다. Manager backend 612개 테스트와 전문 적대 리뷰 두 건은 통과했으나, 이 기록 시점에는 #223이 GitHub
+승인·병합·n150 배포 전이다. 따라서 legacy override 수동 삭제, raw Docker/Compose/SQL, 새
+`rebuild-pinned` 재시도는 하지 않았고 application row·건수·업무상 무결성이나 이전 revision 복구도 범위에 넣지 않았다.
+
 ## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint inventory 재고정 (Draft)
 
 PR [#1077](https://github.com/digitie/kor-travel-map/pull/1077)는 기준선 경계 정리 뒤
