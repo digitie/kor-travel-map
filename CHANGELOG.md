@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### T-VN-M02/M05 — Admin provenance identity를 opaque ID/UUID 쌍으로 명시 (2026-08-27)
+
+- **CHANGED (admin API)**: `GET /v1/admin/features/{feature_id}/creation-provenance`의
+  최상위 `data.feature_id`는 UUID 치환값이 아니라 해석된 opaque Feature ID를 반환한다.
+  UUID 정본은 새 필수 `data.feature_uuid`로 별도 반환한다. M05의 paired attestation은
+  두 값을 각각 opaque reference와 canonical UUID로 결박해야 한다. immutable claim 내부의
+  `feature_id` UUID 저장 계약은 바꾸지 않는다.
+
 ### T-VN-41S 후속 — compaction·orphan 배출 상태와 ACL 실패 안내 (2026-08-22)
 
 - **ADDED (DB)**: migration `0236_tvn41s_compaction_drained`가

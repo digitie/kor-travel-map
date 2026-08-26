@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — PinVi M05 Admin provenance identity 계약 정정 진행
+
+PinVi M05 attestation이 실제로 읽는 Map Admin `GET /v1/admin/features/{feature_id}/creation-provenance`는
+M05 event/evidence schema와 달리 최상위 `data.feature_id`를 UUID로 치환하고 `feature_uuid`를 주지
+않았다. repository reader는 이미 UUID 축을 읽고 있고 `FeatureIdentity` resolver도 opaque ID와 UUID를
+모두 보유하므로, DB/claim 스키마를 바꾸지 않고 HTTP 경계에서 opaque `feature_id`와 별도 UUID
+`feature_uuid`를 함께 반환하도록 정정한다. UUID claim 내부 값은 immutable evidence 저장 계약으로
+유지하며, reader UUID·claim UUID·응답 UUID가 다르면 fail-close한다.
+
+artifact-code commit `256b4e668bae8e5d3f81ec1a45d401a79d0a2f5a`의 generated full/admin OpenAPI
+SHA-256은 `0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d`다. user/service artifact는
+각각 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`/
+`99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d`로 불변이다. Map source/contract
+전문 적대 리뷰 두 건은 GO를 판정했지만, PinVi consumer UUID binding이 아직 없다.
+
+### 이 변경의 다음 한 작업
+
+Map draft PR을 원격 checkpoint로 올리고 CI를 확인한다. PinVi는 위 exact Admin artifact와 artifact-code source
+commit을 re-vendor하고, provenance `feature_uuid`를 M05 case의 manual/old UUID와 각각 대조하도록 consumer를
+고친 뒤에만 M04/M05 live gate에 사용한다. 두 독립 적대 리뷰의 Map 내부 P0/P1은 0건이고, UUID 불일치가 GET
+경계에서 partial evidence 없이 RFC7807 500으로 닫히는 회귀도 추가했다. 현 candidate의 이전 evidence는 재사용하지
+않는다.
+
 ## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
 
 MOIS 인허가 업종과 여행자용 시설 성격이 다르게 보이는 H34A를 source·문서만 읽어

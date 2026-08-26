@@ -4532,6 +4532,7 @@
             "type": "integer"
           },
           "feature_id": {
+            "description": "불변 claim의 UUID 축. 상위 data.feature_uuid와 같아야 한다.",
             "format": "uuid",
             "title": "Feature Id",
             "type": "string"
@@ -4572,7 +4573,7 @@
       },
       "AdminManualFeatureProvenanceData": {
         "additionalProperties": false,
-        "description": "M02 admin-only provenance reader의 현재 Feature snapshot.",
+        "description": "M02 admin-only provenance reader의 현재 Feature identity/evidence snapshot.",
         "properties": {
           "claim": {
             "anyOf": [
@@ -4585,8 +4586,12 @@
             ]
           },
           "feature_id": {
-            "format": "uuid",
             "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
             "type": "string"
           },
           "origin": {
@@ -4602,6 +4607,7 @@
         },
         "required": [
           "feature_id",
+          "feature_uuid",
           "claim",
           "origin"
         ],
