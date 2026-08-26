@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — Manager #229 신뢰된 release installer의 오프라인 wheelhouse fail-close
+
+Manager [#229](https://github.com/digitie/kor-travel-docker-manager/pull/229)는 fresh PinVi DB role 여섯 값을
+신뢰된 root `.env`에만 원자 초기화하고, write 전 lifecycle/C6c/journal admission, 원문 environment snapshot,
+`map_runtime_ready` 한정 단 한 번의 rebind receipt를 결선했다. 전체 backend 657건·Ruff·strict Mypy와 보안/Manager
+계약 전문 적대 리뷰 2건의 GO 뒤 병합했다.
+
+병합 commit의 깨끗한 checkout만을 source로 공식 신뢰 installer를 실행했으나, root 소유 오프라인 wheelhouse에
+`poetry-core` build dependency wheel이 없어 활성화 전에 fail-close했다. installer가 만든 staging/rollback tree는
+정리됐고, 활성 Manager release·canonical `.env`·Docker/Compose·candidate/journal·runtime·세 DB를 바꾸지 않았다.
+네트워크 의존 설치, 임의 wheel 생성, raw Docker/Compose/SQL, journal/DB 조작은 하지 않았다.
+
+따라서 현재 선행 조건은 검증된 root 소유 오프라인 wheelhouse의 공급 절차다. 그 절차를 별도로 확정하기 전에는
+installer나 승인된 `rebuild-pinned --confirm`을 재시도하지 않으며, 새 pinset의 D1/D2/41C acceptance도 재개하지 않는다.
+
 ## 2026-08-26 — trusted/runtime boundary follow-up PR #224 대기
 
 새 PinVi #477 pinset의 승인된 Manager rebuild가 DB reset 전 single-file Compose boundary에서 멈춘 뒤,
