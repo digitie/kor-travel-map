@@ -424,9 +424,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     뜻인데 여기서는 맞는 Feature가 **있고 링크도 그것을 가리킨다**. 틀린 것은 그 Feature의
     category다(MOIS가 휴게음식점으로 인허가). 해제하면 맞는 링크를 지우고 문제는 그대로
     남는다.
-    - [ ] **T-VN-H34A — Feature category 보정** — MOIS 인허가 업종이 실제 시설 성격과 다른 경우.
-      같은 형태가 더 있는지 조사가 선행돼야 한다(박물관·미술관이 부속 카페 인허가로
-      `02020100`에 묶이는 패턴).
+    - [~] **T-VN-H34A — Feature category 보정** — MOIS 인허가 업종이 실제 시설 성격과 다른 경우.
+      2026-08-27의 [책임 경계 조사](reports/t-vn-h34a-category-ownership-audit-2026-08-27.md)는
+      source category를 Map에서 덮어쓰지 않는다는 결론을 확정했다. 다음은 승인된 read-only
+      source snapshot에서 같은 패턴의 후보·원천 record reference를 전수화하고, 각 후보를
+      provider 정합성 수정 또는 별도 Map 표시/큐레이션 정책 설계로 분리하는 일이다. 박물관·미술관이
+      부속 카페 인허가로 `02020100`에 묶이는 사례를 keyword 자동보정하지 않는다.
 
     **부수로 고친 것 — manifest 카운트가 파생되지 않았다.** `refresh_manifest`의 docstring이
     "손으로 유지하면 CSV를 고칠 때마다 어긋난다, 그러니 **파생시킨다**"고 하는데 실제로
