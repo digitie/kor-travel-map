@@ -52,6 +52,14 @@ descriptor-safe stage한 뒤 그 snapshot만 retire·archive·Concierge 네 serv
 override를 수동 삭제하거나 `rebuild-pinned`를 재실행하지 않으며, 현재 새 pinset의 FINAL-REBUILD/D1/D2/41C도
 재개하지 않는다.
 
+2026-08-26 후속 Manager [#228](https://github.com/digitie/kor-travel-docker-manager/pull/228)은 신뢰된 배포 뒤
+stage/retire와 Concierge 로그인 → 인증된 BFF → 로그아웃 → 재차단 acceptance까지 완료했다. 역할 credential
+부트스트랩을 결선한 [#229](https://github.com/digitie/kor-travel-docker-manager/pull/229)도 전문 적대 리뷰 2건과
+전체 backend 검증 뒤 병합됐다. 그러나 #229의 깨끗한 release를 공식 installer로 설치하는 단계는 root 소유 오프라인
+wheelhouse에 `poetry-core` build dependency wheel이 없어 활성화 전에 fail-close했다. staging/rollback tree는
+정리됐고 활성 release·`.env`·Docker/Compose·candidate/journal·runtime·세 DB는 바뀌지 않았다. 검증된 오프라인
+wheelhouse 공급 절차가 확정되기 전에는 installer/rebuild를 재시도하거나 D1/D2/41C를 재개하지 않는다.
+
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.

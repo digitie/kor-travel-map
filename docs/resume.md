@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — Manager #229 병합 뒤 신뢰된 설치기 wheelhouse 선행 조건 대기
+
+Concierge legacy boundary는 Manager [#228](https://github.com/digitie/kor-travel-docker-manager/pull/228)에서
+신뢰된 배포·승인된 stage/retire·공개 HTTP와 실제 브라우저 로그인 → 인증된 BFF → 로그아웃 → 재차단까지
+완료됐다. 이어 승인된 `rebuild-pinned --confirm`이 여섯 PinVi DB role 값 미선언에서 fail-close한 경계를
+Manager [#229](https://github.com/digitie/kor-travel-docker-manager/pull/229)로 보정했다. #229는 서로 독립적인
+보안·Manager 계약 적대 리뷰의 GO, 전체 backend 657건, Ruff·strict Mypy를 통과해 병합됐다. 이 변경은 trusted
+`/opt` root pair만 사용하고, lifecycle/C6c admission 전에 role 값을 쓰지 않으며, 호출자 environment와 dotenv
+보간을 차단한 원문 snapshot 및 `map_runtime_ready` 한정 단 한 번의 rebind receipt를 사용한다.
+
+병합 commit의 깨끗한 checkout과 기존 root 소유 오프라인 wheelhouse로 공식 installer를 실행했으나,
+활성화 전에 build dependency `poetry-core` wheel 부재로 중단됐다. installer의 staging/rollback tree는 정리됐고,
+활성 release·canonical `.env`·Docker/Compose·candidate/journal·runtime·세 DB는 바꾸지 않았다. 네트워크 다운로드,
+수동 wheel 생성, Docker/Compose/SQL, journal/DB 복구는 실행하지 않았다.
+
+### 이 변경의 다음 한 작업
+
+검증된 root 소유 오프라인 wheelhouse에 build dependency를 공급하는 별도 신뢰 운영 절차를 확정한 뒤에만 #229
+깨끗한 release 설치를 다시 시도한다. 설치가 성공하면 이미 승인된 단일
+`ktdctl pinvi-pair rebuild-pinned --confirm`만 실행하고, 새 v6/v8 candidate의 비밀 비포함 `committed` 증적을
+확보하기 전에는 `T-VN-FINAL-REBUILD`/D1/D2/41C를 재개하지 않는다.
+
 ## 2026-08-26 — Docker Manager trusted/runtime boundary 후속 대기
 
 n150에서 새 PinVi #477 pinset의 승인된 rebuild가 DB reset 전에 멈춘 직접 선행 원인은 legacy
