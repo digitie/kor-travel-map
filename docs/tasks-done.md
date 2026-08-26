@@ -175,6 +175,10 @@
 - [x] `T-FE-MOCK-MANIFEST` — mocked checkpoint manifest를 실측 인벤토리 285,
   baseline `5c647f69…`, `expected-failures=0`으로 재고정했다(PR #1038). 남은
   `/v1/ops/logs` 간헐 실패는 `T-FE-MOCK-FLAKE`로 분리해 `tasks.md`에서 추적한다.
+  여기의 285와 `5c647f69…`는 PR #1038 당시 suite 기준의 역사적 완료 증거이며 현재
+  manifest 값이 아니다. baseline 경계 정리 뒤의 현행 284개·`0905c853…` 관측값은 PR #1077에서
+  별도 재고정했고, 실제 logs acceptance의 잔여 인증 blocker는 계속 `T-FE-MOCK-FLAKE`가
+  소유한다.
 
 ## 2026-08-21 — T-VN-37D notice empty range 표현
 

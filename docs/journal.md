@@ -19,6 +19,10 @@ rebuild journal은 읽거나 쓰지 않았다.
 자격증명과 허용 origin이 없어 중단된 n150 실제 `/ops/logs` GET-only acceptance는 별도
 blocker로 남긴다. 이 PR은 그 live blocker를 우회하거나 완료로 바꾸지 않는다.
 
+전문 적대 리뷰 두 건은 P0/P1/P3 0으로 GO를 판정했다. source/provenance 검토가 발견한
+`tasks-done.md`의 285개 기록이 현행 값처럼 읽힐 수 있다는 P2는, 그 값이 PR #1038 당시의
+역사적 baseline이고 현행 284개 재고정과 별개임을 같은 PR에서 명시해 해소했다.
+
 ## 2026-08-26 — PinVi #477 새 pinset rebuild 미종결 인시던트 기록
 
 Docker-manager PR #219가 회전한 정규 pinset
