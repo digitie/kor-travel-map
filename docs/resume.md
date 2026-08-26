@@ -9,12 +9,17 @@ M05 event/evidence schema와 달리 최상위 `data.feature_id`를 UUID로 치�
 `feature_uuid`를 함께 반환하도록 정정한다. UUID claim 내부 값은 immutable evidence 저장 계약으로
 유지하며, reader UUID·claim UUID·응답 UUID가 다르면 fail-close한다.
 
+artifact-code commit `256b4e668bae8e5d3f81ec1a45d401a79d0a2f5a`의 generated full/admin OpenAPI
+SHA-256은 `0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d`다. user/service artifact는
+각각 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`/
+`99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d`로 불변이다. Map source/contract
+전문 적대 리뷰 두 건은 GO를 판정했지만, PinVi consumer UUID binding이 아직 없다.
+
 ### 이 변경의 다음 한 작업
 
-admin/user OpenAPI를 재생성해 Admin artifact SHA-256과 source commit을 확정한다. 전문 적대 리뷰 두 건,
-router/OpenAPI 회귀와 contract pin 대조가 통과한 뒤 Map draft PR을 올린다. PinVi는 그 exact Admin artifact와
-source commit을 re-vendor하고, provenance `feature_uuid`를 M05 case의 manual/old UUID와 각각 대조하도록
-consumer를 고친 뒤에만 M04/M05 live gate에 사용한다. 현 candidate의 이전 evidence는 재사용하지 않는다.
+Map draft PR을 원격 checkpoint로 올리고 CI를 확인한다. PinVi는 위 exact Admin artifact와 artifact-code source
+commit을 re-vendor하고, provenance `feature_uuid`를 M05 case의 manual/old UUID와 각각 대조하도록 consumer를
+고친 뒤에만 M04/M05 live gate에 사용한다. 현 candidate의 이전 evidence는 재사용하지 않는다.
 
 ## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
 

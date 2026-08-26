@@ -15,7 +15,10 @@ revision 복구는 변경하지 않는다.
 PinVi PR487은 새 Admin artifact만 vendor해서는 충분하지 않다. attestation이 `provenance.feature_uuid`를 필수
 canonical UUID로 파싱해 M05 map-case의 manual/old UUID와 각각 비교하고, 검증된 provenance UUID를 receipt에
 기록하는 별도 consumer 수정이 선행돼야 한다. 그 전에는 paired live gate가 fail-close로 유지된다. 생성 OpenAPI와
-source SHA-256은 전문 적대 리뷰 및 router/OpenAPI 회귀 뒤 exact artifact로 기록한다.
+source SHA-256은 `256b4e668bae8e5d3f81ec1a45d401a79d0a2f5a`의 full/admin artifact
+`0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d`로 확정했다. user/service bytes는
+각각 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`/
+`99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d`로 변하지 않았다.
 
 ## 2026-08-27 — T-VN-H34A MOIS 인허가 분류 책임 경계 조사
 

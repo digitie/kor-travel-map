@@ -432,6 +432,31 @@ operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를
 - **권한**: 서비스 제출·admin 승인/거절·raw table DML은 각 SECURITY DEFINER routine 및 executor ACL로
   분리한다. runtime은 queue relation을 직접 읽거나 쓰지 못한다.
 
+### 3.7 Admin 수동 Feature provenance identity (T-VN-M02/M05)
+
+`GET /v1/admin/features/{feature_id}/creation-provenance`의 최상위 `data.feature_id`는 path의 raw
+입력 echo가 아니다. Map boundary resolver가 `feature.features` 정본에서 해석한 **opaque Feature ID**이며,
+legacy alias·UUID 어느 경로 입력도 같은 canonical opaque 값으로 수렴한다. `data.feature_uuid`는 그
+Feature의 별도 canonical UUID이고 항상 필수다. reader는 UUID로 immutable claim/origin evidence를 읽고,
+응답 조립 전에 reader UUID와 resolver UUID를, claim이 있으면 claim UUID도 다시 대조한다. 하나라도 다르면
+응답을 만들지 않고 fail-close한다.
+
+`data.claim.feature_id`는 역사적 immutable claim relation의 UUID 열로서 상위 opaque `data.feature_id`와
+같은 이름이지만 다른 축이다. claim UUID는 반드시 `data.feature_uuid`와 같아야 하며, 그 저장 계약을
+opaque ID로 바꾸지 않는다.
+
+PinVi M05 attestation은 다음 세 조건을 모두 만족하기 전까지 paired receipt를 승격하거나 live gate를
+통과시킬 수 없다.
+
+1. vendored full/admin OpenAPI와 pair provenance를 Map source revision·artifact SHA-256에 exact 재고정한다.
+2. provenance의 opaque `feature_id`를 M04 approved request의 resolved reference와 대조한다.
+3. provenance `feature_uuid`를 canonical UUID로 파싱해 M05 case의 `manual_feature.feature_uuid`와
+   `event.old_feature.feature_uuid` 양쪽과 각각 대조하고, **검증된 provenance UUID**를 receipt에 기록한다.
+
+누락·비정규 UUID·양쪽 UUID 중 하나라도 불일치하면 PinVi는 fail-close한다. 이 규칙은 ADR-083의 batch
+echo 예외가 아니라, admin provenance가 해석된 Feature identity/evidence를 반환하는 별도 cross-repo
+계약이다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
@@ -442,6 +467,7 @@ operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를
 | canonical curation item → PinVi curated trip plans | 본 repo ADR-092 + service `openapi.service.json`의 `/v1/service/curation-items/{curation_item_id}/detail-snapshot`; 전용 `pinvi:curation-snapshot:read` ServiceToken만 허용하고 AdminBFF secret/CIDR은 공유하지 않음 | PinVi `docs/kor-travel-map-requirements.md`의 canonical curation item import 절과 vendored service contract |
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
+| **PinVi M05 수동 Feature provenance attestation** | 본 repo `GET /v1/admin/features/{feature_id}/creation-provenance`의 full/admin OpenAPI + 본 문서 §3.7; top-level opaque `feature_id`/`feature_uuid` 쌍 | PinVi `m05_activation_attestation.py`와 vendored full/admin OpenAPI·pair provenance. 두 UUID의 semantic equality를 actual attestation에서 강제 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/rest-api.md` (T-217f) | PinVi UX 기획 |
 | cache-target Map writer-drain | `docs/architecture/cache-target-writer-drain.md` + Map API image private typed runner (public OpenAPI 미노출) | Docker Manager T-049F frozen Compose receipt parser |
 | **C6c cancel-probe fixture** | `docs/architecture/c6c-cancel-probe-fixture.md` + `openapi.service.json`의 `ops:fixture` 3 route + ADR-084 | Docker Manager F1D orchestrator; PinVi는 기존 cancel relay만 소비 |
