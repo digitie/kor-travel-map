@@ -47,9 +47,10 @@ single-file boundary가 fail-close된 것이다. Docker Manager [#223](https://g
 거부하여 공식 명령은 Docker/DB/runtime 변경 전에 다시 fail-close했다. home Compose는 user-writable이므로 이
 거부만 제거하거나 home root를 Compose 입력으로 허용하면 P0가 된다. 후속 [Manager #224](https://github.com/digitie/kor-travel-docker-manager/pull/224)는
 `/opt` canonical execution root를 유지하고, legacy override와 고정 Concierge source를 protected C6c state에
-descriptor-safe stage한 뒤 그 snapshot만 retire·archive·Concierge 네 service 재생성에 사용한다. #224의 전문
-적대 리뷰·검증·병합·trusted 배포와 stage/retire의 비밀 비포함 성공 증적 전에는 override를 수동 삭제하거나
-`rebuild-pinned`를 재실행하지 않으며, 현재 새 pinset의 FINAL-REBUILD/D1/D2/41C도 재개하지 않는다.
+descriptor-safe stage한 뒤 그 snapshot만 retire·archive·Concierge 네 service 재생성에 사용한다. #224는 전문
+적대 리뷰·전체 backend 검증을 통과해 병합됐다. n150 trusted 배포와 stage/retire의 비밀 비포함 성공 증적 전에는
+override를 수동 삭제하거나 `rebuild-pinned`를 재실행하지 않으며, 현재 새 pinset의 FINAL-REBUILD/D1/D2/41C도
+재개하지 않는다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의

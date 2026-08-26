@@ -16,9 +16,9 @@ API/MCP/scheduler/UI 정확한 네 service 재생성의 입력으로 쓴다.
 UI는 더 이상 전체 source `.env`를 받지 않고 exact allowlist, same-origin BFF와 production command만 받는다.
 API/UI host network, API loopback command/`12601`, UI auth guard와 build/start command/`12605`도 raw/resolved
 계약으로 fail-close한다. pending stage가 있으면 activation도 거부하고 archive 뒤 재생성만 실패하면 candidate와
-archive를 유지하며 root-only official retry를 사용한다. #224의 전문 적대 리뷰·전체 gate·병합·n150 deployment와
-stage/retire 증적 전까지 legacy override 수동 삭제, raw Docker/Compose/SQL, 새 `rebuild-pinned` 재시도는 하지
-않았고 application row·건수·업무상 무결성이나 이전 revision 복구도 범위에 넣지 않았다.
+archive를 유지하며 root-only official retry를 사용한다. #224는 전문 적대 리뷰와 전체 backend gate 뒤 병합됐다.
+n150 trusted deployment와 stage/retire 증적 전까지 legacy override 수동 삭제, raw Docker/Compose/SQL, 새
+`rebuild-pinned` 재시도는 하지 않았고 application row·건수·업무상 무결성이나 이전 revision 복구도 범위에 넣지 않았다.
 
 ## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint inventory 재고정 (Draft)
 
