@@ -510,7 +510,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   0건을 확인했다. 이후 self-owned mock backend가 로그 두 stream을 응답하지 않아
   `aria-busy=true`가 15초 유지되던 경계를 PR #1059에서 생성 OpenAPI 타입 기반 BFF mock으로
   고정했다. targeted `/v1/ops/logs` 1회와 5회 반복(총 6/6)이 통과했다. mocked checkpoint
-  부분은 해소됐다. 2026-08-26 n150에서 현재 local-only 런북 자격증명으로
+  부분은 해소됐다. 이후 기준선 경계 정리로 현재 suite가 284개가 됐는데 failure manifest가
+  285개로 남아 reporter gate를 fail-closed 한 drift를 PR #1077에서 재고정했다. exact clean
+  checkout의 self-owned checkpoint D는 284/284 passed, manifest 일치, reporter gate true와
+  runner exit 0으로 끝났고, owned container·network·image·임시 runtime은 모두 정리됐다.
+  2026-08-26 n150에서 현재 local-only 런북 자격증명으로
   `logs.live.spec.ts`만 `--workers=1 --retries=0`으로 다시 실행했으나, auth setup이
   다시 `401`으로 중단되어 두 `GET` 전용 본문은 시작하지 않았다. 임시 브라우저 세션·실패
   산출물은 즉시 폐기했다. 따라서 현 배포 runtime과 일치하는 승인된 읽기 전용 자격증명과

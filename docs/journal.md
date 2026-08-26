@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint inventory 재고정 (Draft)
+
+PR [#1077](https://github.com/digitie/kor-travel-map/pull/1077)는 기준선 경계 정리 뒤
+285개로 남아 있던 모의 failure manifest를 현재 suite의 284개와 관측 inventory SHA-256으로
+재고정한다. 이 값은 임의로 수를 맞춘 것이 아니다. 변경 전 exact clean checkout에서 전수
+mocked checkpoint D를 실행해 284개 브라우저 시나리오가 모두 통과했지만, 이전 285개 manifest와
+불일치해 reporter gate가 fail-closed 되는 것을 재현했다.
+
+구현 commit `b2eafbd3`의 새 clean checkout에서 exact npm 12.0.1 install·dependency tree 검증 뒤
+자기 소유 frontend image/container/internal network만 사용한 checkpoint D를 단일 worker로 다시
+실행했다. 결과는 **284/284 passed**, manifest 일치, expected/actual failure·flake 0,
+reporter gate true와 runner exit 0이다. 실행 뒤 owned container·network·image와 임시 runtime
+디렉터리가 모두 0임도 확인했다. 운영 UI·기존 runtime·n150 application DB·source pinset과
+rebuild journal은 읽거나 쓰지 않았다.
+
+따라서 `T-FE-MOCK-FLAKE`의 mocked 부분은 현재 source에서도 green이지만, 승인된 읽기 전용
+자격증명과 허용 origin이 없어 중단된 n150 실제 `/ops/logs` GET-only acceptance는 별도
+blocker로 남긴다. 이 PR은 그 live blocker를 우회하거나 완료로 바꾸지 않는다.
+
+전문 적대 리뷰 두 건은 P0/P1/P3 0으로 GO를 판정했다. source/provenance 검토가 발견한
+`tasks-done.md`의 285개 기록이 현행 값처럼 읽힐 수 있다는 P2는, 그 값이 PR #1038 당시의
+역사적 baseline이고 현행 284개 재고정과 별개임을 같은 PR에서 명시해 해소했다.
+
 ## 2026-08-26 — PinVi #477 새 pinset rebuild 미종결 인시던트 기록
 
 Docker-manager PR #219가 회전한 정규 pinset
