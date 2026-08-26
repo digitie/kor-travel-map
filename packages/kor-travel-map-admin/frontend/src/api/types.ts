@@ -4627,6 +4627,7 @@ export interface components {
             /**
              * Feature Id
              * Format: uuid
+             * @description 불변 claim의 UUID 축. 상위 data.feature_uuid와 같아야 한다.
              */
             feature_id: string;
             /**
@@ -4643,15 +4644,17 @@ export interface components {
         };
         /**
          * AdminManualFeatureProvenanceData
-         * @description M02 admin-only provenance reader의 현재 Feature snapshot.
+         * @description M02 admin-only provenance reader의 현재 Feature identity/evidence snapshot.
          */
         AdminManualFeatureProvenanceData: {
             claim: components["schemas"]["AdminManualFeatureIdentityClaimRecord"] | null;
+            /** Feature Id */
+            feature_id: string;
             /**
-             * Feature Id
+             * Feature Uuid
              * Format: uuid
              */
-            feature_id: string;
+            feature_uuid: string;
             origin: components["schemas"]["AdminFeatureCreationOriginRecord"] | null;
         };
         /**
