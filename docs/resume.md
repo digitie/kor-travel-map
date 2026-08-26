@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — T-FE-MOCK-FLAKE mocked checkpoint 재고정 (Draft)
+
+PR [#1077](https://github.com/digitie/kor-travel-map/pull/1077)는 과거 285개 mocked failure
+manifest를 실제 suite 284개와 관측 inventory SHA-256으로 갱신한다. exact clean checkout과
+npm 12.0.1 dependency tree에서 self-owned checkpoint D를 단일 worker로 재실행해 **284/284
+passed**, manifest 일치, reporter gate true, runner exit 0을 확인했다. 실행이 만든
+container·network·image·임시 runtime은 모두 제거됐으며, 운영 UI·DB·source pinset·rebuild
+journal은 건드리지 않았다.
+
+### 이 변경의 다음 한 작업
+
+모의 gate는 현재 source에서 다시 green이지만 `T-FE-MOCK-FLAKE`는 `[~]`를 유지한다. 현 배포
+runtime과 일치하는 승인된 읽기 전용 logs credential 및 허용 origin을 값 비노출으로 확보한 뒤에만
+`logs.live.spec.ts`를 재실행한다. credential을 추측·회전·우회하거나 기존 스모크 credential을
+재사용하지 않는다. 이 조건은 새 pinset의 D1/D2/41C acceptance와도 별개다.
+
 ## 2026-08-26 — PinVi #477 새 pinset rebuild 미종결 인시던트
 
 Docker-manager PR #219의 PinVi #477 source 회전 뒤 신뢰된 n150 Manager에서 새 정규
