@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — T-VN-H34A 분류 책임 경계 조사 완료, 후보 전수 조사 대기
+
+MOIS 인허가 업종과 여행자용 시설 성격이 다르게 보이는 H34A를 source·문서만 읽어
+재평가했다. [조사 보고서](reports/t-vn-h34a-category-ownership-audit-2026-08-27.md)는
+`rest_cafes`가 인허가 service slug이고 Map 변환이 이를 의도적으로 `02020100`으로 보존한다는
+점을 확인했다. 따라서 공식 curation link가 맞는 `진해보타닉뮤지엄` 같은 사례만으로 provider
+오류나 Map source category overwrite를 주장할 수 없다.
+
+### 이 변경의 다음 한 작업
+
+H34A는 승인된 read-only source snapshot 또는 n150 read-only 경계에서 후보를 전수화한 뒤에만
+계속한다. 원천 해석 오류는 `python-mois-api` PR, 원천은 정상이나 별도 여행 표시 의미가 필요한
+경우는 ADR과 별도 Map 정책 PR로 분리한다. 운영 DB·CSV·curation link를 수정하거나 H34B import를
+앞당기지 않는다. 전역 최우선 작업은 여전히 Manager의 검증된 offline wheelhouse 공급 절차다.
+
 ## 2026-08-26 — Manager #229 병합 뒤 신뢰된 설치기 wheelhouse 선행 조건 대기
 
 Concierge legacy boundary는 Manager [#228](https://github.com/digitie/kor-travel-docker-manager/pull/228)에서

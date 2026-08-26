@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — T-VN-H34A MOIS 인허가 분류 책임 경계 조사 (Draft)
+
+MOIS 인허가 업종과 실제 시설 성격이 다르게 보이는 H34A를 위해 Map source·문서와 로컬
+`python-mois-api` catalog를 read-only로 대조했다. `rest_cafes`는 `식품_휴게음식점 데이터 조회`,
+`museums_and_art_galleries`는 `문화_박물관 및 미술관 데이터 조회`라는 서로 다른 인허가 service다.
+Map의 `PROMOTED_CATEGORY_BY_SLUG`도 이 service slug를 하나의 source category로 보존하며,
+시설명·주소·curation 이름으로 원천 의미를 재해석하지 않는다.
+
+따라서 `진해보타닉뮤지엄`처럼 curation link는 맞지만 `02020100`으로 보이는 사례는, 현재 증거만으로
+provider bug가 아니다. Map에서 source category를 keyword 또는 사례별로 덮어쓰지 않고, raw record를
+포함한 후보 전수 조사 뒤 provider 정합성 PR과 별도 표시/큐레이션 정책 ADR 중 하나로 소유를
+결정한다. 운영 DB·CSV·Feature·curation link는 읽거나 쓰지 않았으며 H34B import와도 합치지 않았다.
+상세 판단과 다음 read-only 산출물은
+[H34A 책임 경계 조사](reports/t-vn-h34a-category-ownership-audit-2026-08-27.md)에 기록했다.
+
 ## 2026-08-26 — Manager #229 신뢰된 release installer의 오프라인 wheelhouse fail-close
 
 Manager [#229](https://github.com/digitie/kor-travel-docker-manager/pull/229)는 fresh PinVi DB role 여섯 값을
