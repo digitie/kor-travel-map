@@ -1,5 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — PinVi #477 새 pinset rebuild 미종결 인시던트
+
+Docker-manager PR #219의 PinVi #477 source 회전 뒤 신뢰된 n150 Manager에서 새 정규
+pinset `cb8d15591480111d7f4cd70398ad46b129e814ad3b9375dfa0fc83562b366752`에 대해 승인된
+`ktdctl pinvi-pair rebuild-pinned --confirm`을 최초 실행과 같은 공식 재개로 두 번 실행했다.
+두 실행 모두 0이 아닌 종료로 끝났고, 새 pinset별 v8 journal은
+`phase=map_runtime_ready`, `journal_generation=20`에 남았다. Map source
+`cc81081ff2e540a6ad9c428a296515e1d79bc316`와 PinVi #477 squash SHA
+`10efb21ad84b23db2eeb6d09856cda16d3337822`의 결박은 journal에서 확인했지만, 새 generation은
+`committed`되지 않았다.
+
+두 전문 적대 리뷰는 세 번째 재시도, raw Docker/Compose/SQL 조작, journal·permit·DB 변경을
+모두 금지했다. 현 v8 형식에는 실패 단계의 비밀 비포함 durable receipt가 없어, 폐기한 raw
+출력 없이 Map runtime startup·PinVi bootstrap one-shot·PinVi schema 확인 중 어느 지점인지를
+구별할 수 없다. 두 PostgreSQL만 healthy/running이고 일반 runtime은 fail-closed 정리로
+종료된 상태는 확인했으나, 이것만으로 원인을 단정하지 않는다.
+
+### 이 변경의 다음 한 작업
+
+새 후보의 `T-VN-FINAL-REBUILD`/D1/D2/41C acceptance는 중단한다. 기존 H300 committed
+generation은 이전 pinset의 immutable 이력일 뿐 새 후보의 증거로 재사용하지 않는다. 외부 운영
+인시던트 절차에서 값·로그 원문이 아닌 허용목록 failure stage 또는 service-level 상태 증적을
+확보한 뒤에만 원인별 후속 조치를 결정한다. 이 판단 전에는 재시도·수동 복구·이전 revision 복구를
+수행하지 않으며, 300 이후 application row·건수·업무상 무결성 검증도 범위 밖으로 유지한다.
+
 ## 2026-08-26 — PinVi #477 source 회전 뒤 다음 후보 preflight
 
 Docker-manager PR #219가 PinVi #477 squash merge
