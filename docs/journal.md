@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 provenance 재결박과 새 one-shot candidate
+
+`030b12fc…`은 Map `9c64e862…` 및 committed API/UI image identity를 사용한 generation으로 보존하며 재실행하지
+않는다. PinVi `a90b1f06…`은 M05 attestation pair를 이 committed Map runtime에 맞췄고, Manager `87fe2abc…`는
+그 exact PinVi/Map source와 canonical hash를 고정한다. 두 전문 적대 리뷰는 source·OpenAPI·runtime image·pinset
+결박에 P0/P1 없음을 확인했다. 다음 official rebuild는 이 새 pinset에서 단 한 번이며, 성공한 committed generation만
+isolated M04/M05 live mutating E2E와 signed activation attestation에 사용한다.
+
 ## 2026-08-28 — M05 scoped cleanup generation committed
 
 Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 `030b12fc…` pinset은 trusted n150 release에서
