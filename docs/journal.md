@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 external membership terminal의 불변성 보존
+
+`c6c73cdf…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` 뒤
+`role_catalog_reset_failed/foreign_membership` terminal로 보존됐다. raw stderr·membership row·catalog 값은 열지 않았고
+같은 candidate를 재실행하지 않는다. PostgreSQL `DROP ROLE`는 membership을 자동 철회하지만 target 밖 role이 얽히면
+외부 principal의 authorization 관계가 바뀐다. 따라서 target 네 role 내부 edge만 수용하고 외부 membership은
+계속 fail-close한다. 두 전문 적대 리뷰에서 이 판단을 재확인했으며, 운영 권한 결정 전에는 새 candidate를 만들지 않는다.
+
 ## 2026-08-27 — M05 target 내부 membership grantor terminal 보정
 
 `b22bfb8c…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
