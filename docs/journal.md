@@ -3,9 +3,10 @@
 ## 2026-08-28 — M05 provenance 재결박과 새 one-shot candidate
 
 `030b12fc…`은 Map `9c64e862…` 및 committed API/UI image identity를 사용한 generation으로 보존하며 재실행하지
-않는다. PinVi `61dffcb5…`은 M05 attestation pair를 이 committed Map runtime에 맞췄고, Manager `6269138f…`는
-그 exact PinVi/Map source와 canonical hash를 고정한다. 두 전문 적대 리뷰는 source·OpenAPI·runtime image·pinset
-결박에 P0/P1 없음을 확인했다. 다음 official rebuild는 이 새 pinset에서 단 한 번이며, 성공한 committed generation만
+않는다. `6269138f…`은 durable journal/manifest를 남기지 못한 pre-journal 단회 시도로 보존하며 raw stderr를 읽거나
+재실행하지 않는다. PinVi `55687a4f…`은 M05 attestation pair와 이 실행 경계를 기록하고, Manager `53d4639f…`는
+그 exact PinVi/Map source와 canonical hash를 고정한다. 다음 official rebuild는 root-owned structured result launcher로
+이 새 pinset에서 단 한 번이며, 성공한 committed generation만
 isolated M04/M05 live mutating E2E와 signed activation attestation에 사용한다.
 
 ## 2026-08-28 — M05 scoped cleanup generation committed
