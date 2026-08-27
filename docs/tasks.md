@@ -78,6 +78,9 @@ barrier로 직렬화한다.
   - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge 잔여)
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
+    - 현재 `872e3262…` fresh candidate는 n150 Docker image store의 immutable Python base 부재로 API receipt 전
+      fail-close했다. 동일 pinset 재시도·manual Docker pull은 금지하며, trusted Manager base preflight와 새 source
+      pinset의 committed evidence 뒤에만 PinVi M05 live E2E를 진행한다.
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
