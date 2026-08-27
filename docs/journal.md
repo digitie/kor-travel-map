@@ -4,8 +4,8 @@
 
 `030b12fc…`은 Map `9c64e862…` 및 committed API/UI image identity를 사용한 generation으로 보존하며 재실행하지
 않는다. `6269138f…`은 durable journal/manifest를 남기지 못한 pre-journal 단회 시도로 보존하며 raw stderr를 읽거나
-재실행하지 않는다. PinVi `55687a4f…`은 M05 attestation pair와 이 실행 경계를 기록하고, Manager `53d4639f…`는
-그 exact PinVi/Map source와 canonical hash를 고정한다. 다음 official rebuild는 root-owned structured result launcher로
+재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 끝났고 durable output·ledger·raw stderr가 없어 재시도하지 않는다. PinVi `41a36ee6…`은 M05 attestation pair와 이 실행 경계를 기록하고, Manager `c1ad5a3e…`는
+그 exact PinVi/Map source와 canonical hash를 고정한다. 다음 official rebuild는 installer가 executable로 보존한 root-owned structured result launcher로
 이 새 pinset에서 단 한 번이며, 성공한 committed generation만
 isolated M04/M05 live mutating E2E와 signed activation attestation에 사용한다.
 
