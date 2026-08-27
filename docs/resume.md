@@ -1,17 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-28 — M05 scoped external membership cleanup candidate
+## 2026-08-28 — M05 scoped external membership cleanup generation committed
 
 사용자의 완주 지시에 따라 target 밖 stale membership cleanup은 Manager root-owned v2 permit에
 `revoke_external_memberships` scope가 있을 때만 수행한다. permit은 transaction·pinset·PinVi DB identity에 결박되며,
 PinVi는 target→external 및 external→target 두 edge를 실제 PostGIS에서 검증해 target membership만 제거하고 external
-role은 보존한다. Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 새 pinset은 `030b12fc…`이다.
+role은 보존한다. Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 pinset `030b12fc…`은 trusted n150
+release에서 정확히 한 번 실행돼 committed 됐다. seven-runtime generation과 Map application `300`·Map Dagster·PinVi
+`20260824_0101` schema head를 함께 확인했다.
 
 ### 이 변경의 다음 한 작업
 
-두 PR의 최신 CI·전문 리뷰를 확인한 뒤 trusted Manager release를 n150에 설치한다. 이 pinset의 official
-`rebuild-pinned --confirm --json`은 정확히 한 번만 실행하며, committed 증적과 isolated M04/M05 live mutating E2E가
-모두 성공하기 전에는 코드를 merge하지 않는다.
+committed generation과 정확히 같은 Map/PinVi immutable pair로 n150 isolated M04 승인 → Map `rebind` 결정 → PinVi
+terminal receipt/Map ACK의 live mutating E2E 및 서명 activation attestation을 실행한다. 이 증적과 두 코드 PR의 최신
+CI·승인이 모두 성공하기 전에는 코드를 merge하지 않는다.
 
 ## 2026-08-27 — M05 external membership terminal 보존
 

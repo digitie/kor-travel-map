@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 scoped cleanup generation committed
+
+Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 `030b12fc…` pinset은 trusted n150 release에서
+official `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 committed 됐다. seven-runtime generation과 Map
+application `300`·Map Dagster·PinVi `20260824_0101` schema head를 고정 필드만으로 확인했다. historical candidate와
+원문 stderr·DB catalog 값은 읽거나 재사용하지 않았다. 다음 단계는 같은 immutable pair의 isolated M04/M05 live
+mutating E2E와 activation attestation이며, 성공 전 두 코드 PR은 병합하지 않는다.
+
 ## 2026-08-28 — M05 v2 permit scoped external membership cleanup
 
 사용자의 완주 지시에 따라 target 밖 stale membership 철회는 Manager root-owned v2 permit의 exact
