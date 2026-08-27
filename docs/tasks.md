@@ -5,8 +5,8 @@
 [`docs/tasks-done.md`](tasks-done.md), 현재 실행 증적과 다음 한 작업은
 [`docs/resume.md`](resume.md)가 정본이다.
 
-- [/] T-VN-M05-ROLE-CATALOG-RESET — PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `25e7f3ef…`에서 public type-only residue fail-close와 reset 뒤 sealed canonical PostgreSQL 16 회귀를 통과했다. Manager의 durable-boundary P1을 닫고 CI green을 확인할 때까지 merge하지 않는다.
-- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi `25e7f3ef…`와 pinset `59651224…`을 결박했다. DB recreate→intent write와 reset success→completed write 사이 crash가 reset 우회·재실행으로 이어지지 않도록 atomic journal/fail-closed resume P1과 parser ordering P1을 보정·재리뷰·push한다.
+- [/] T-VN-M05-ROLE-CATALOG-RESET — PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `d23d072f…`에서 public type-only residue fail-close와 reset 뒤 sealed canonical PostgreSQL 16 회귀를 통과했고 CI green을 확인했다. n150 live E2E가 통과할 때까지 merge하지 않는다.
+- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi `d23d072f…`와 pinset `68d99705…`을 결박했다. atomic journal/fail-closed resume와 parser ordering P1은 전문 재리뷰까지 통과했으며, n150 공식 candidate 실행만 남았다.
 - [ ] T-VN-FINAL-REBUILD — 두 PR의 CI·전문 리뷰를 통과한 새 pinset Manager release를 n150에 공식 설치하고 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적을 만든다. historical `cbb`·`52`·`06045` candidate는 재시도하지 않는다.
 - [ ] T-VN-M05-ACTIVATION — committed candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 통과한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
