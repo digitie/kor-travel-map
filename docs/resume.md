@@ -4,8 +4,9 @@
 
 Map `cf65e973…`와 PinVi `97d2f924…`의 fresh pinset `872e3262…`를 Manager trusted
 release에서 공식 `rebuild-pinned --confirm`으로 정확히 한 번 실행했다. candidate journal·DB/runtime
-mutation 전에 API candidate receipt가 없어 fail-close했고, 동일 pinset은 재시도하지 않는다. 원문 builder
-출력·credential·path는 저장하거나 출력하지 않았다.
+mutation 전에 generic paired builder 오류로 fail-close했고, 동일 pinset은 재시도하지 않는다. 원문 builder
+출력·credential·path는 저장하거나 출력하지 않았다. 이후 안전 진단은 API receipt 부재를 fixed class로만
+분류할 수 있으나, 이를 당시 실행의 원문 오류로 소급하지 않는다.
 
 동일 sealed Map API candidate builder는 로컬 Docker에서 receipt까지 정상 발행했다. n150에서는 API
 Dockerfile이 요구하는 immutable Python base image가 local cache에 없어 첫 `docker image inspect`가 실패함을
