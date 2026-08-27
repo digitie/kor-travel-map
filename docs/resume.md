@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 template0 candidate 준비
+
+`68d99705…` candidate는 n150에서 정확히 한 번 실행되어 PinVi role-catalog reset terminal로 끝났고 재시도하지
+않는다. Manager `dd42a150…`은 PinVi target만 `template0`으로 생성하며, PinVi `0b903701…`과 Map `9c64e862…`의
+새 pinset은 `285618c0…`이다. 두 전문 적대 리뷰는 최종 Manager source/pin rotation에 P0/P1 없음을 확인했다.
+
+### 이 변경의 다음 한 작업
+
+PinVi #500의 새 CI를 완료한 뒤 Manager #243의 trusted release를 n150에 설치한다. 새 `285618c0…` pinset에서만
+official `rebuild-pinned --confirm --json`을 정확히 한 번 실행한다. `committed` 증적이 생기기 전에는 M04/M05
+live mutating E2E나 코드 PR merge를 시작하지 않는다.
+
 ## 2026-08-27 — M05 fresh candidate의 immutable Python base 선행 조건 확인
 
 Map `cf65e973…`와 PinVi `97d2f924…`의 fresh pinset `872e3262…`를 Manager trusted

@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 `template0` fresh candidate로 재결박
+
+n150에서 `68d99705…` pinset의 approved `rebuild-pinned --confirm --json`을 정확히 한 번 실행한 결과는
+`map_runtime_ready` 뒤 PinVi role-catalog reset terminal이었다. journal·tombstone·DB·permit을 보존하며 해당
+pinset을 재시도하지 않는다. 두 전문 적대 리뷰는 Manager가 PinVi DB를 기본 `template1`에서 만들지만 PinVi reset이
+`template0` 수준의 empty catalog만 허용한 P1 계약 불일치를 확인했다.
+
+Manager [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi create에만
+`--template template0`을 적용했고, PinVi [#500](https://github.com/digitie/pinvi/pull/500)은 같은 source
+precondition을 immutable `0b903701…`에 기록했다. Map `9c64e862…`·PinVi `0b903701…`의 새 pinset
+`285618c0…`은 old terminal namespace와 분리된다. PinVi CI, trusted Manager release, 새 pinset candidate 1회,
+committed evidence와 n150 live E2E가 모두 성공하기 전에는 두 코드 PR을 merge하지 않는다.
+
 ## 2026-08-27 — M05 fresh candidate의 immutable base image fail-close 원인 확정
 
 Map `cf65e973…`·PinVi `97d2f924…` v5 pinset `872e3262…`의 trusted 공식 candidate는 API receipt 발행 전
