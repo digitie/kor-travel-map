@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 identity DTO terminal을 새 pinset으로 분리
+
+`37932169…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/unclassified` terminal로 보존됐다. result receipt가 없으므로 PinVi reset one-shot은
+실행되지 않았으며, candidate·journal·DB·permit을 재시도하거나 수정하지 않는다. 원인은 Manager가 live
+`PinnedDatabaseIdentity`와 journal `PinnedRuntimeDatabaseIdentity`를 직접 비교해 equality가 항상 false가 된
+경계 오류였다.
+
+Manager [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 live identity를 journal DTO로
+변환한 뒤 비교하도록 보정했다. PinVi [#500](https://github.com/digitie/pinvi/pull/500)의 immutable
+`28ca250d…`과 Map `9c64e862…`의 새 pinset `31fe73ad…`만 이후 trusted n150 candidate가 될 수 있다.
+
 ## 2026-08-27 — M05 result receipt source·pinset 재회전
 
 PinVi [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `fc01e5d6…`은 Manager-owned `0600`
