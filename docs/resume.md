@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 reset isolation refusal의 안전한 세분화
+
+`31fe73ad…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/target_not_isolated` terminal로 보존됐다. raw database 값·psql 출력·stderr는 읽지 않았다.
+PinVi `58e82daf…`은 같은 transaction lock 안에서 fixed enum 하나만 root-owned receipt에 기록하고,
+Manager `48d83f8…`은 그 enum과 inode·transaction·pinset binding을 strict parse한다. Map `9c64e862…`과의
+새 pinset은 `247fe014…`이다.
+
+### 이 변경의 다음 한 작업
+
+두 전문 적대 재리뷰와 최신 CI가 성공한 뒤에만 trusted Manager release를 n150에 설치한다. 새 pinset의 official
+`rebuild-pinned --confirm --json`은 정확히 한 번만 실행하며, committed 증적과 isolated M04/M05 live mutating
+E2E가 모두 성공하기 전에는 코드를 merge하지 않는다.
+
 ## 2026-08-27 — M05 identity DTO 후보 준비
 
 `37932169…` candidate는 PinVi one-shot 전 identity admission에서 terminal 처리됐으며 재시도하지 않는다.

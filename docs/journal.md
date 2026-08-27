@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 reset isolation terminal의 고정 원인 영수증
+
+`31fe73ad…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/target_not_isolated` terminal로 보존됐다. 같은 pinset의 journal·DB·permit·result는
+재사용하거나 수정하지 않았다. 진단은 허용된 durable journal 필드만 사용했으며 raw stdout/stderr와 DB catalog
+값은 열지 않았다.
+
+PinVi [#500](https://github.com/digitie/pinvi/pull/500)의 `58e82daf…`은 identity, namespace, extension, object,
+role dependency를 고정 enum 하나로만 영수증에 쓴다. Manager [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)는
+transaction·pinset·inode 결박을 통과한 enum만 terminal journal에 보존한다. PinVi unit 19건 및 PostGIS integration
+1건, Manager focused 회귀 170건을 통과했다. Map `9c64e862…`·PinVi `58e82daf…`의 `247fe014…`만 다음 official
+candidate이며, CI·두 전문 적대 재리뷰·n150 committed/live E2E가 모두 성공하기 전에는 두 코드 PR을 merge하지 않는다.
+
 ## 2026-08-27 — M05 identity DTO terminal을 새 pinset으로 분리
 
 `37932169…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
