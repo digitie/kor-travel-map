@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — `c1ad5a3e…` root-owned one-shot committed
+
+PinVi `41a36ee6…`·Map `9c64e862…`의 `c1ad5a3e…` candidate는 exact Manager trusted release에서
+root-owned structured launcher로 정확히 한 번 실행돼 `committed` 됐다. durable result는 generation
+`8eedf171…`, Map application `300`, Map Dagster `29b539ebc72a`, PinVi `20260824_0101`을 확인한다.
+이제 이 immutable pair에서만 isolated M04 승인·Map `rebind`·PinVi terminal receipt/ACK과 signed M05
+activation attestation을 실행한다.
+
 ## 2026-08-28 — M05 provenance 재결박과 새 one-shot candidate
 
 `030b12fc…`은 Map `9c64e862…` 및 committed API/UI image identity를 사용한 generation으로 보존하며 재실행하지
