@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 identity DTO 후보 준비
+
+`37932169…` candidate는 PinVi one-shot 전 identity admission에서 terminal 처리됐으며 재시도하지 않는다.
+Manager는 live `PinnedDatabaseIdentity`를 journal DTO로 변환해 비교하도록 보정했고, PinVi `28ca250d…`·
+Map `9c64e862…`의 새 pinset은 `31fe73ad…`이다.
+
+### 이 변경의 다음 한 작업
+
+두 코드 PR의 최신 CI·전문 적대 재리뷰를 확인한 뒤 Manager trusted release를 n150에 설치한다. 새 pinset의
+official `rebuild-pinned --confirm --json`은 정확히 한 번만 실행하며, committed 증적과 isolated M04/M05
+live mutating E2E가 모두 성공하기 전에는 코드를 merge하지 않는다.
+
 ## 2026-08-27 — M05 result receipt candidate 준비
 
 PinVi `fc01e5d6…`은 fresh reset의 result receipt를 transaction/pinset-bound fixed JSON으로 발행하고,
