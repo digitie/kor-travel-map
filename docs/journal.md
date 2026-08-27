@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 result receipt source·pinset 재회전
+
+PinVi [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `fc01e5d6…`은 Manager-owned `0600`
+result file에 transaction/pinset-bound fixed JSON만 기록하며, disposable PostGIS Compose에서 strict
+target isolation 거부와 성공 영수증을 모두 확인했다. Manager [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)는
+그 파일의 owner-only metadata와 최초 inode를 확인한 뒤 fixed JSON을 strict parse한다. stdout/stderr는
+진단 입력이 아니다.
+
+Map `9c64e862…`·PinVi `fc01e5d6…`의 새 pinset은 `37932169…`이다. historical `cbb`·`52`·`06045`·
+`68d99705`·`285618c0` candidate는 모두 재시도하지 않는다. 두 코드 PR의 CI·전문 적대 리뷰·trusted Manager
+release가 모두 준비된 뒤 이 새 pinset을 n150에서 정확히 한 번 실행하고, committed live E2E가 통과하기 전에는
+merge하지 않는다.
+
 ## 2026-08-27 — M05 `template0` fresh candidate로 재결박
 
 n150에서 `68d99705…` pinset의 approved `rebuild-pinned --confirm --json`을 정확히 한 번 실행한 결과는

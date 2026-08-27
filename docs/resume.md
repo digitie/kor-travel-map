@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 result receipt candidate 준비
+
+PinVi `fc01e5d6…`은 fresh reset의 result receipt를 transaction/pinset-bound fixed JSON으로 발행하고,
+Manager는 root-owned `0600` file의 inode 보존과 strict parse를 확인한다. Map `9c64e862…`와의 새 pinset은
+`37932169…`이며, 과거 후보를 재사용하지 않는다.
+
+### 이 변경의 다음 한 작업
+
+PinVi/Manager CI와 두 전문 적대 리뷰를 완료한 뒤 Manager trusted release를 n150에 설치한다. 이 pinset으로만
+official `rebuild-pinned --confirm --json`을 정확히 한 번 실행한다. committed 증적과 isolated M04/M05 live
+mutating E2E가 모두 성공하기 전에는 코드 PR을 merge하지 않는다.
+
 ## 2026-08-27 — M05 template0 candidate 준비
 
 `68d99705…` candidate는 n150에서 정확히 한 번 실행되어 PinVi role-catalog reset terminal로 끝났고 재시도하지
