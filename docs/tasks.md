@@ -5,10 +5,9 @@
 [`docs/tasks-done.md`](tasks-done.md), 현재 실행 증적과 다음 한 작업은
 [`docs/resume.md`](resume.md)가 정본이다.
 
-- [/] T-VN-M05-ROLE-CATALOG-RESET — `31fe73ad…`·`b22bfb8c…`·`c6c73cdf…` n150 candidate는 각각 `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하며 재시도하지 않는다. target 네 role 내부 membership edge만 수용하고 roleid/member가 target 밖에 닿으면 계속 fail-close한다.
-- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi result receipt의 transaction·pinset·inode binding과 pre-journal 고정 오류 분류를 strict 처리한다. `c6c73cdf…`은 완료했으나 external membership terminal로 보존됐다.
-- [ ] T-VN-M05-EXTERNAL-MEMBERSHIP-DECISION — n150 target 밖 role membership을 보존할지, permit-bound reset에서 명시적으로 철회할지 운영 권한 결정을 확정한다. 결정 전에는 새 candidate를 만들거나 `rebuild-pinned`를 재실행하지 않는다.
-- [ ] T-VN-FINAL-REBUILD — external membership 결정 뒤 두 PR의 CI·전문 리뷰를 통과한 새 pinset Manager release를 n150에 공식 설치하고 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적을 만든다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0`·`37932169`·`31fe73ad`·`b22bfb8c`·`89330403`·`c6c73cdf` candidate는 재시도하지 않는다.
+- [/] T-VN-M05-ROLE-CATALOG-RESET — `31fe73ad…`·`b22bfb8c…`·`c6c73cdf…` n150 candidate는 각각 `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하며 재시도하지 않는다.
+- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 v2 permit에 transaction·pinset·PinVi DB identity·`revoke_external_memberships` scope를 결박한다. PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 `69a5ac65…`와 Map `9c64e862…`의 새 pinset은 `030b12fc…`이다.
+- [ ] T-VN-FINAL-REBUILD — 두 PR의 최신 CI·전문 리뷰 뒤 새 pinset Manager release를 n150에 공식 설치하고 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적을 만든다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0`·`37932169`·`31fe73ad`·`b22bfb8c`·`89330403`·`c6c73cdf` candidate는 재시도하지 않는다.
 - [ ] T-VN-M05-ACTIVATION — committed candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 통과한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
