@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 external membership terminal 보존
+
+`c6c73cdf…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/foreign_membership` terminal로 보존됐다. raw membership row·catalog 값·stderr는 읽지 않았다.
+PostgreSQL이 target role의 membership을 자동 철회하더라도 target 밖 role이 얽히면 외부 principal의 권한 관계가
+변하므로, PinVi와 Manager는 이를 계속 fail-close한다. 두 전문 적대 리뷰는 이 결론에 동의했다.
+
+### 이 변경의 다음 한 작업
+
+target 밖 membership을 보존할지 permit-bound reset으로 철회할지 운영 권한 결정을 받는다. 결정 전에는 새 pinset이나
+n150 rebuild를 만들지 않는다.
+
 ## 2026-08-27 — M05 target 내부 membership grantor 과잉 차단 보정
 
 `b22bfb8c…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
