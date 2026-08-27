@@ -4,9 +4,9 @@
 
 `31fe73ad…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
 `role_catalog_reset_failed/target_not_isolated` terminal로 보존됐다. raw database 값·psql 출력·stderr는 읽지 않았다.
-PinVi `0bc1b5e8…`은 같은 transaction lock 안에서 fixed enum 하나만 root-owned receipt에 기록하고,
-Manager `3a4d178…`은 그 enum과 inode·transaction·pinset binding을 strict parse한다. Map `9c64e862…`과의
-새 pinset은 `6af965d5…`이다.
+PinVi `9e438611…`은 같은 transaction lock 안에서 fixed enum 하나만 root-owned receipt에 기록하고,
+Manager `541fa41…`은 그 enum과 inode·transaction·pinset binding을 strict parse한다. Map `9c64e862…`과의
+새 pinset은 `b22bfb8c…`이다.
 
 ### 이 변경의 다음 한 작업
 
