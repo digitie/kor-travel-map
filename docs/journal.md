@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 v2 permit scoped external membership cleanup
+
+사용자의 완주 지시에 따라 target 밖 stale membership 철회는 Manager root-owned v2 permit의 exact
+`revoke_external_memberships` scope로만 허용한다. permit은 transaction·pinset·PinVi DB identity에 결박되고, PinVi는
+legacy permit 또는 다른 scope를 reset 전에 거부한다. PostGIS 회귀는 target→external·external→target 두 방향 모두에서
+target membership만 제거되고 external role은 보존됨을 확인한다. Manager `519edd9…`, PinVi `69a5ac65…`, Map
+`9c64e862…`의 `030b12fc…`만 다음 n150 official candidate다.
+
 ## 2026-08-27 — M05 external membership terminal의 불변성 보존
 
 `c6c73cdf…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` 뒤
