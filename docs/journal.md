@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 provenance 재결박과 새 one-shot candidate
+
+`030b12fc…`은 Map `9c64e862…` 및 committed API/UI image identity를 사용한 generation으로 보존하며 재실행하지
+않는다. `6269138f…`은 durable journal/manifest를 남기지 못한 pre-journal 단회 시도로 보존하며 raw stderr를 읽거나
+재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 끝났고 durable output·ledger·raw stderr가 없어 재시도하지 않는다. PinVi `41a36ee6…`은 M05 attestation pair와 이 실행 경계를 기록하고, Manager `c1ad5a3e…`는
+그 exact PinVi/Map source와 canonical hash를 고정한다. 다음 official rebuild는 installer가 executable로 보존한 root-owned structured result launcher로
+이 새 pinset에서 단 한 번이며, 성공한 committed generation만
+isolated M04/M05 live mutating E2E와 signed activation attestation에 사용한다.
+
+## 2026-08-28 — M05 scoped cleanup generation committed
+
+Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 `030b12fc…` pinset은 trusted n150 release에서
+official `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 committed 됐다. seven-runtime generation과 Map
+application `300`·Map Dagster·PinVi `20260824_0101` schema head를 고정 필드만으로 확인했다. historical candidate와
+원문 stderr·DB catalog 값은 읽거나 재사용하지 않았다. 다음 단계는 같은 immutable pair의 isolated M04/M05 live
+mutating E2E와 activation attestation이며, 성공 전 두 코드 PR은 병합하지 않는다.
+
 ## 2026-08-28 — M05 v2 permit scoped external membership cleanup
 
 사용자의 완주 지시에 따라 target 밖 stale membership 철회는 Manager root-owned v2 permit의 exact
