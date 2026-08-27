@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 fresh candidate의 immutable base image fail-close 원인 확정
+
+Map `cf65e973…`·PinVi `97d2f924…` v5 pinset `872e3262…`의 trusted 공식 candidate는 API receipt 발행 전
+generic paired builder 오류로 fail-close했다. 이후 안전 진단은 output을 파싱하지 않고 private receipt 존재만으로
+API receipt 부재를 fixed class로 분류할 수 있지만, 이를 당시 실행 원문으로 소급하지 않는다. 동일 pinset의
+자동·수동 재시도, raw builder 로그·credential·path의 기록은 하지 않았다.
+
+같은 exact Map source의 sealed API candidate builder는 로컬 Docker에서 receipt와 immutable image를 정상
+발행했다. n150 read-only 확인에서는 API Dockerfile의 exact `python@sha256:…` base가 Docker image store에
+없었다. candidate script가 `--pull=false`와 exact base inspect를 강제하므로 Docker/Compose/DB/journal mutation
+전에 닫힌 것이다. 다음 변경은 manual pull이 아니라 trusted Manager preflight가 digest-pinned base를 provision·
+재관측하도록 하는 별도 PR이며, fresh source pinset에서만 다시 실행한다.
+
 ## 2026-08-27 — PinVi M05가 소비하는 Admin provenance identity 계약 정정
 
 PinVi M05 paired attestation의 실제 reader는 `GET /v1/admin/features/{feature_id}/creation-provenance`다.

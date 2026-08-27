@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 fresh candidate의 immutable Python base 선행 조건 확인
+
+Map `cf65e973…`와 PinVi `97d2f924…`의 fresh pinset `872e3262…`를 Manager trusted
+release에서 공식 `rebuild-pinned --confirm`으로 정확히 한 번 실행했다. candidate journal·DB/runtime
+mutation 전에 generic paired builder 오류로 fail-close했고, 동일 pinset은 재시도하지 않는다. 원문 builder
+출력·credential·path는 저장하거나 출력하지 않았다. 이후 안전 진단은 API receipt 부재를 fixed class로만
+분류할 수 있으나, 이를 당시 실행의 원문 오류로 소급하지 않는다.
+
+동일 sealed Map API candidate builder는 로컬 Docker에서 receipt까지 정상 발행했다. n150에서는 API
+Dockerfile이 요구하는 immutable Python base image가 local cache에 없어 첫 `docker image inspect`가 실패함을
+read-only로 확인했다. 따라서 source/receipt 계약이나 PinVi evidence를 우회하지 않고, Manager가 exact digest
+base를 trusted candidate preflight에서 provision하도록 별도 PR로 보강한다.
+
+### 이 변경의 다음 한 작업
+
+Manager preflight가 Map API·Dagster Dockerfile의 immutable Python base를 exact digest로 확보하고
+재관측하도록 구현·검증한다. 이 변경과 Map execution journal의 merge 뒤 새 source pinset으로만 fresh candidate를
+한 번 실행하며, `committed` evidence가 생기기 전에는 M05 PinVi live E2E를 시작하지 않는다.
+
 ## 2026-08-27 — PinVi M05 Admin provenance identity 계약 정정 진행
 
 PinVi M05 attestation이 실제로 읽는 Map Admin `GET /v1/admin/features/{feature_id}/creation-provenance`는
