@@ -6,9 +6,9 @@
 [`docs/resume.md`](resume.md)가 정본이다.
 
 - [/] T-VN-M05-ROLE-CATALOG-RESET — `31fe73ad…`·`b22bfb8c…`·`c6c73cdf…` n150 candidate는 각각 `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하며 재시도하지 않는다.
-- [/] T-VN-M05-MANAGER-PIN-ROTATION — `030b12fc…` committed generation은 재실행하지 않는다. 그 Map runtime identity를 재결박한 PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 `a90b1f06…`·Map `9c64e862…`와 Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)의 canonical pinset `87fe2abc…`만 다음 n150 trusted candidate다. 이 새 pinset의 green·승인 뒤 rebuild를 정확히 한 번 실행한다.
+- [/] T-VN-M05-MANAGER-PIN-ROTATION — `030b12fc…` committed generation은 재실행하지 않는다. current main rebase를 반영한 PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 `61dffcb5…`·Map `9c64e862…`와 Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)의 canonical pinset `6269138f…`만 다음 n150 trusted candidate다. 이 새 pinset의 green·승인 뒤 rebuild를 정확히 한 번 실행한다.
 - [x] T-VN-FINAL-REBUILD — `030b12fc…`의 공식 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적, Map application `300`·Map Dagster·PinVi `20260824_0101` schema head를 확인했다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0`·`37932169`·`31fe73ad`·`b22bfb8c`·`89330403`·`c6c73cdf` candidate는 재시도하지 않는다.
-- [ ] T-VN-M05-ACTIVATION — committed `87fe2abc…` candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 실행한다.
+- [ ] T-VN-M05-ACTIVATION — committed `6269138f…` candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 실행한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
 - [ ] T-VN-41C — relay, reconciliation, consumer enable의 paired acceptance를 완료한다.
