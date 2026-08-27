@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-27 — M05 target 내부 membership grantor terminal 보정
+
+`b22bfb8c…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/foreign_membership` terminal로 보존됐다. raw membership row·catalog 값·stderr는 열지
+않았고 같은 candidate를 재시도하지 않는다. 원인은 reset이 target 네 role 내부 membership edge도 grantor가
+bootstrap owner가 아니면 외부 의존으로 오판한 조건이었다.
+
+PinVi [#500](https://github.com/digitie/pinvi/pull/500)의 `a619d037…`은 roleid/member가 모두 target 네 role인 edge만
+수용하고, 어느 하나라도 target 밖이면 계속 fail-close한다. Manager [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)의
+`fd75950…`은 이를 Map `9c64e862…`와 새 pinset `89330403…`으로 결박한다. PinVi unit 19건·PostGIS integration
+1건과 Manager focused 회귀 179건, 두 전문 적대 리뷰가 모두 통과했다. 새 source CI·n150 committed/live E2E가
+성공하기 전에는 두 코드 PR을 merge하지 않는다.
+
 ## 2026-08-27 — M05 reset isolation terminal의 고정 원인 영수증
 
 `31fe73ad…` n150 candidate는 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤

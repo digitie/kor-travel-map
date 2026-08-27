@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-27 — M05 target 내부 membership grantor 과잉 차단 보정
+
+`b22bfb8c…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
+`role_catalog_reset_failed/foreign_membership` terminal로 보존됐다. raw membership 값은 읽지 않았다. PinVi
+`a619d037…`은 target 네 role 내부 edge의 grantor provenance를 external dependency로 보지 않고, roleid/member
+중 하나라도 target 밖에 닿는 edge는 계속 fail-close한다. Manager `fd75950…`과 Map `9c64e862…`의 새 pinset은
+`89330403…`이다. 두 전문 적대 리뷰는 P0/P1 없이 GO를 냈다.
+
+### 이 변경의 다음 한 작업
+
+새 source CI가 성공한 뒤 trusted Manager release를 n150에 설치한다. 새 pinset의 official
+`rebuild-pinned --confirm --json`은 정확히 한 번만 실행하며, committed 증적과 isolated M04/M05 live mutating
+E2E가 모두 성공하기 전에는 코드를 merge하지 않는다.
+
 ## 2026-08-27 — M05 reset isolation refusal의 안전한 세분화
 
 `31fe73ad…` candidate는 n150에서 정확히 한 번 실행되어 `map_runtime_ready` reset intent 뒤
