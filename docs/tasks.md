@@ -5,9 +5,9 @@
 [`docs/tasks-done.md`](tasks-done.md), 현재 실행 증적과 다음 한 작업은
 [`docs/resume.md`](resume.md)가 정본이다.
 
-- [/] T-VN-M05-ROLE-CATALOG-RESET — PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `0b903701…`은 fresh reset target이 `template0`이어야 한다는 source 계약을 고정했다. `68d99705…` n150 candidate는 reset terminal로 보존하고 재시도하지 않으며, 새 PinVi CI와 live E2E가 통과할 때까지 merge하지 않는다.
-- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi create에만 `--template template0`을 적용했고 두 전문 재리뷰을 통과했다. PinVi `0b903701…`·Map `9c64e862…`의 새 pinset은 `285618c0…`이다.
-- [ ] T-VN-FINAL-REBUILD — 두 PR의 CI·전문 리뷰를 통과한 새 pinset Manager release를 n150에 공식 설치하고 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적을 만든다. historical `cbb`·`52`·`06045`·`68d99705` candidate는 재시도하지 않는다.
+- [/] T-VN-M05-ROLE-CATALOG-RESET — PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 immutable `fc01e5d6…`은 Manager-owned 0600 result receipt의 fixed JSON 계약과 fresh reset target `template0` 계약을 고정했다. `68d99705…`·`285618c0…` n150 candidate는 terminal로 보존하고 재시도하지 않으며, 새 PinVi CI와 live E2E가 통과할 때까지 merge하지 않는다.
+- [/] T-VN-M05-MANAGER-PIN-ROTATION — Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)은 PinVi create에만 `--template template0`을 적용하고 root-owned result receipt inode·fixed JSON을 검증한다. PinVi `fc01e5d6…`·Map `9c64e862…`의 새 pinset은 `37932169…`이다.
+- [ ] T-VN-FINAL-REBUILD — 두 PR의 CI·전문 리뷰를 통과한 새 pinset Manager release를 n150에 공식 설치하고 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적을 만든다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0` candidate는 재시도하지 않는다.
 - [ ] T-VN-M05-ACTIVATION — committed candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 통과한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
