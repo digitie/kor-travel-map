@@ -1,5 +1,16 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 Docker Manager runtime pin registry 반영
+
+Docker Manager #251은 Map·PinVi revision과 terminal pinset lifecycle의 정본을 source 상수에서
+trusted release 밖 root-owned runtime pin registry로 옮겼다. Map `e6c08e25…`와 PinVi
+`932fb140…`은 추적되는 seed를 편집하지 않고 host에서 `pin init` 뒤 Map→PinVi 순서로 회전해
+`a3f6a8f3…` candidate를 만든다. `cbb577d3…` seed는 terminal historical evidence로 보존한다.
+
+새 candidate는 `pin verify`의 registry·공개 사본 gate, root-owned Manager provenance, PinVi pair의
+source/OpenAPI/image identity가 모두 맞을 때만 한 번 실행한다. intermediate state, static image digest
+추측, 과거 terminal candidate 재실행은 허용하지 않는다.
+
 ## 2026-08-28 — M05 PostGIS baseline digest source 병합
 
 Map PR #1099는 `e6c08e2598a6f8b6fda605be271e8d384213de58`로 병합됐다. Compose `postgres`는
@@ -8,7 +19,8 @@ repository·image ID와 Compose 값을 exact 비교한다. 전문 적대 리뷰 
 OpenAPI, fixture replay, Python 3.11/3.12/3.13 및 PostGIS 통합 CI가 모두 통과했다.
 
 기존 `29fbcdd…` terminal candidate는 그대로 보존하고 재실행하지 않는다. 다음 단계는 이 병합 revision의
-paired application candidate를 PinVi `admin`·`full` provenance에 결박한 뒤 Manager pinset을 회전하는 것이다.
+ paired application candidate를 PinVi `admin`·`full` provenance에 결박한 뒤 Manager runtime pin registry를
+ 회전하는 것이다.
 그 새 candidate만 n150 isolated M04/M05 live E2E를 정확히 한 번 실행할 수 있다.
 
 ## 2026-08-28 — M05 fresh baseline PostGIS image drift 원인 확정
