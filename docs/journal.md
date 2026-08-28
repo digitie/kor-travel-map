@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 Docker Manager 공개 generation 계약 정렬
+
+M05의 runtime pinning·Map/PinVi pair 결박·one-shot 실행 정본을 trusted Docker Manager
+`ktdctl`로 통일했다. 새 후보는 `pin rotate-pair`의 원자 회전만 사용하며, 인증된
+`/api/v1/runtime-pins`와 `/api/v1/pinned-runtime/generation` 공개 사본에서
+`pinset_binding=match`를 확인하기 전에는 live gate를 열지 않는다. private manifest/journal,
+raw launcher output, 기존 terminal artifact는 Map이 읽지 않는다.
+
+Map C7 attestation의 manifest v6/journal v8 exact schema·키·version은 Docker Manager 공개
+generation 계약과 paired PR로만 바꾼다. 이 문서 정렬 자체는 새 n150 candidate나 one-shot을 만들지
+않으며, 이전 terminal pinset을 재실행하지 않는다.
+
 ## 2026-08-28 — M05 `b46743ea…` terminal 보존 후 대기
 
 Map `6bfa47038b439845662f89524531d2ef72374c2a`·PinVi
