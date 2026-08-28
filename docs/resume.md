@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — terminal `c700bd2e…` 보존, fresh source pair 대기
+
+Map `bbb29d177…`·PinVi `663e21b4…`·pinset `c700bd2e…`은 trusted Manager `4a6e1b0…` release의
+registry/public-copy 검증 뒤 n150 isolated M04/M05 launcher에서 정확히 한 번 실행돼
+`map_health_http_failed` terminal로 차단됐다. cleanup은 통과했고 원문 HTTP·컨테이너·환경 출력은 읽지 않았다.
+이 pinset·Manager source·output leaf는 `a3f6a8f3…`·`22563762…`와 함께 절대 재시도하지 않는다.
+
+### 이 변경의 다음 한 작업
+
+새 Manager source와 이 terminal 기록을 포함한 새 Map revision·새 PinVi `admin`·`full` provenance revision을
+atomic pinset으로 함께 회전한다. 최신 CI, 전문 적대 리뷰 두 건, registry/public-copy 무결성이 모두 정합할
+때만 새 root-owned output leaf에서 n150 M04/M05 isolated E2E를 정확히 한 번 실행한다.
+
 ## 2026-08-28 — terminal `22563762…` 보존, HTTP 단계 분류 candidate 준비
 
 Map `b8d108bd…`·PinVi `50c875f5…`·pinset `22563762…`은 registry/public-copy gate 뒤 n150 isolated

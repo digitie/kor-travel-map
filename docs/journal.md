@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 Map health terminal 보존
+
+Map `bbb29d17751aa0ece0b76f3c8724a0073aa9dafc`·PinVi `663e21b4fdc2a4fc5e51a07f7a7532282aaa5423`·
+pinset `c700bd2ec2d2c181e60c1dd99a13022ff8a2ce30bb19de3bb871806be80ee1ef`은 최신 CI와 전문 적대
+리뷰 두 건의 GO, trusted Manager `4a6e1b0…` release, atomic pair rotation과 registry/public-copy 검증 뒤
+n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. durable safe result는 `map_health_http_failed`이고
+cleanup은 통과했다. HTTP 원문·컨테이너 로그·환경값은 읽거나 보관하지 않았다.
+
+driver는 이 pinset을 root registry에 조건 없이 terminal 차단했고 이후 `pin verify`가 재실행 불가를 확인했다.
+`a3f6a8f3…`·`22563762…`·`c700bd2e…`의 source pair·Manager revision·output leaf는 절대 재실행하지 않는다.
+다음 후보는 이 terminal 기록을 포함한 새 Map revision과 새 PinVi provenance·새 Manager source를 새 atomic
+pinset으로 결박한 경우에만 만들 수 있다.
+
 ## 2026-08-28 — M05 HTTP terminal 보존과 단계 고정 분류 보정
 
 Map `b8d108bd…`·PinVi `50c875f5…`·pinset `22563762…`은 root registry/public-copy gate를 통과한 뒤
