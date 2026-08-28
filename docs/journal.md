@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 `5592a1d4…` terminal 보존과 phase 수렴 보정
+
+Map `757623973c2e6c082b78332fa25c278ef94f9bab`·PinVi
+`358f607a039ffab2dabaadc2eddfc19a7e126f5c`·Manager
+`a4d60d16650926c0ac5e5b9a3703c14797259ab4`·pinset
+`5592a1d4d98d6757b6a5390a7283b64dc1302abb93ab2dc3b58ef1aed84066c0`는 모든 CI와
+전문 적대 재리뷰 두 건의 GO 뒤 trusted `ktdctl pin rotate-pair`로 결박했다. 새 source의
+`run-pinned-rebuild-once`와 registry/public generation `match` gate를 통과한 뒤, 새 root-owned
+leaf의 n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. launcher는 terminal이었고 root
+registry의 exact unconditional entry는 원문 없이 고정 phase `driver_contract_failed`만 공개한다.
+
+HTTP·container·환경·output leaf 원문은 열지 않았으며, 이 pinset·source pair·Manager source·output
+leaf는 재실행하지 않는다. 후속 Manager는 unexpected ordinary exception을 무조건 generic phase로
+덮어쓰지 않고, 이미 추적 중인 allowlist phase로만 수렴시켜 raw detail 없이 다음 immutable candidate의
+수정 범위를 좁힌다. 이 문서의 merge revision은 PinVi `admin`·`full` provenance에 다시 결박한다.
+
 ## 2026-08-28 — M05 `5ad3b08c…` terminal 보존과 안전 phase 진단
 
 Map `053904cebdb004ef1376c0c4cf0255efb02e5ba3`·PinVi
