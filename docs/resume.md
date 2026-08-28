@@ -8,12 +8,11 @@ PinVi는 target→external 및 external→target 두 edge를 실제 PostGIS에�
 role은 보존한다. Manager `519edd9…`, PinVi `69a5ac65…`, Map `9c64e862…`의 pinset `030b12fc…`은 trusted n150
 release에서 정확히 한 번 실행돼 committed 됐다. seven-runtime generation과 Map application `300`·Map Dagster·PinVi
 `20260824_0101` schema head를 함께 확인했다. 이 generation의 exact Map source/image identity를 PinVi
-current main rebase를 반영한 PinVi `41a36ee6…`과 Manager pinset `c1ad5a3e…`에 재결박했으므로, 기존 generation은 activation 근거로 재사용하지 않는다. `6269138f…`은 durable journal/manifest를 남기지 못한 pre-journal 단회 시도로 보존하며 raw stderr를 읽지 않고 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했으므로 durable output·ledger·raw stderr 없이 재실행하지 않는다.
+current main rebase를 반영한 PinVi `41a36ee6…`과 Manager pinset `c1ad5a3e…`은 root-owned structured result launcher로 정확히 한 번 실행돼 committed 됐다(generation `8eedf171…`, Map application `300`, Map Dagster `29b539ebc72a`, PinVi `20260824_0101`). `6269138f…`은 durable journal/manifest를 남기지 못한 pre-journal 단회 시도로 보존하며 raw stderr를 읽지 않고 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했으므로 durable output·ledger·raw stderr 없이 재실행하지 않는다.
 
 ### 이 변경의 다음 한 작업
 
-새 `c1ad5a3e…` pinset을 root-owned structured result launcher로 n150에서 정확히 한 번 committed generation으로 만든 뒤, 그 exact Map/PinVi immutable
-pair로 isolated M04 승인 → Map `rebind` 결정 → PinVi terminal receipt/Map ACK의 live mutating E2E 및 서명
+committed `c1ad5a3e…`의 exact Map/PinVi immutable pair로 isolated M04 승인 → Map `rebind` 결정 → PinVi terminal receipt/Map ACK의 live mutating E2E 및 서명
 activation attestation을 실행한다. 이 증적과 두 코드 PR의 최신 CI·승인이 모두 성공하기 전에는 코드를 merge하지 않는다.
 
 ## 2026-08-27 — M05 external membership terminal 보존

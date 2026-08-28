@@ -6,7 +6,7 @@
 [`docs/resume.md`](resume.md)가 정본이다.
 
 - [/] T-VN-M05-ROLE-CATALOG-RESET — `31fe73ad…`·`b22bfb8c…`·`c6c73cdf…` n150 candidate는 각각 `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하며 재시도하지 않는다.
-- [/] T-VN-M05-MANAGER-PIN-ROTATION — `030b12fc…` committed generation과 `6269138f…`·`53d4639f…` 단회 시도는 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했고 durable output·ledger·raw stderr가 없다. PinVi draft PR [#500](https://github.com/digitie/pinvi/pull/500)의 `41a36ee6…`·Map `9c64e862…`와 Manager draft PR [#243](https://github.com/digitie/kor-travel-docker-manager/pull/243)의 canonical pinset `c1ad5a3e…`만 다음 n150 trusted candidate다. installer가 executable로 보존한 root-owned structured result launcher로 이 새 pinset을 정확히 한 번 실행한다.
+- [x] T-VN-M05-MANAGER-PIN-ROTATION — `030b12fc…` committed generation과 `6269138f…`·`53d4639f…` 단회 시도는 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했고 durable output·ledger·raw stderr가 없다. PinVi `41a36ee6…`·Map `9c64e862…`와 Manager canonical pinset `c1ad5a3e…`은 root-owned structured result launcher로 정확히 한 번 실행돼 `committed` 됐다(generation `8eedf171…`, Map application `300`, Map Dagster `29b539ebc72a`, PinVi `20260824_0101`).
 - [x] T-VN-FINAL-REBUILD — `030b12fc…`의 공식 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적, Map application `300`·Map Dagster·PinVi `20260824_0101` schema head를 확인했다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0`·`37932169`·`31fe73ad`·`b22bfb8c`·`89330403`·`c6c73cdf` candidate는 재시도하지 않는다.
 - [ ] T-VN-M05-ACTIVATION — committed `c1ad5a3e…` candidate에서만 isolated n150 M04/M05 live mutating E2E와 activation attestation을 실행한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
