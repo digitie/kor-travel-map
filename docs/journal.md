@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 finalization receipt P1 보정
+
+전문 data-contract 적대 재리뷰는 이전 Manager `862e8bf…`가 main `try`의 unexpected ordinary exception만
+`driver_contract_failed` receipt로 수렴하고 cleanup·terminal block의 ordinary exception은 result 없이 전파할 수
+있다는 P1을 확인했다. 이 문제는 terminal `41be91fe…`의 raw artifact를 열거나 재실행하지 않고 정적 경계 검토로만
+발견했다.
+
+Manager `00c33ad…`는 main·cleanup·terminal block의 ordinary exception을 `BaseException`과 구분해 원문 없이
+동일 fixed terminal receipt로 수렴시킨다. cleanup 및 terminal block 오류 주입 회귀도 추가했다. 다음 후보는 이
+terminal 기록을 포함한 새 Map revision과 새 PinVi provenance, 이 Manager source를 fresh atomic pinset으로 결박하고
+CI·정확한 head 전문 적대 리뷰 두 건을 통과한 경우에만 만든다.
+
 ## 2026-08-28 — M05 `41be91fe…` safe launcher terminal 보존
 
 Map `fa55316d858d95367b6a1ca6f17094408b543afe`·PinVi
@@ -13,7 +25,7 @@ n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. launcher는 ex
 후속 gate는 exact Map·PinVi·pinset의 unconditional terminal entry와 public copy를 확인했다. 이 candidate와
 source pair·Manager source·output leaf는 절대 재실행하지 않는다. 다음 후보는 이 terminal 기록을 포함한 새 Map
 revision, PinVi `admin`·`full` paired provenance revision, 예상하지 못한 ordinary driver exception도 원문 없이
-`driver_contract_failed` fixed receipt로 남기는 Manager `862e8bf…` source를 새 atomic pinset으로 결박하고 최신
+`driver_contract_failed` fixed receipt로 남기는 Manager `00c33ad…` source를 새 atomic pinset으로 결박하고 최신
 CI와 전문 적대 리뷰 두 건을 다시 통과한 경우에만 만들 수 있다.
 
 ## 2026-08-28 — M05 `5512ce12…` safe launcher terminal 보존

@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 finalization receipt 경계 보강
+
+전문 data-contract 적대 재리뷰가 Manager `862e8bf…`의 cleanup·terminal block ordinary exception은 fixed driver
+receipt 없이 전파될 수 있는 P1을 발견했다. terminal `41be91fe…`는 열거나 재실행하지 않았다. Manager `00c33ad…`는
+main·cleanup·terminal block의 ordinary exception을 모두 원문 없이 `driver_contract_failed` fixed terminal receipt로
+수렴시키며, cleanup 및 terminal block 오류 주입 회귀로 경계를 고정한다.
+
+### 이 변경의 다음 한 작업
+
+이 기록을 포함한 새 Map revision과 PinVi `admin`·`full` provenance revision을 Manager `00c33ad…` source와 새 atomic
+pinset으로 만든다. 최신 CI, 전문 적대 리뷰 두 건, registry/public-copy 무결성이 모두 정합할 때만 새 root-owned
+output leaf에서 n150 M04/M05 isolated E2E를 정확히 한 번 실행한다.
+
 ## 2026-08-28 — terminal `41be91fe…` 보존, fixed driver receipt source 준비
 
 Map `fa55316d…`·PinVi `f9fce72f…`·Manager `cd8b3054…`·pinset `41be91fe…`은 trusted clean release의
@@ -11,7 +24,7 @@ pinset·source pair·Manager source·output leaf는 `a3f6a8f3…`·`22563762…`
 
 ### 이 변경의 다음 한 작업
 
-이 terminal 기록을 포함한 새 Map revision과 PinVi `admin`·`full` provenance revision을 Manager `862e8bf…`의
+이 terminal 기록을 포함한 새 Map revision과 PinVi `admin`·`full` provenance revision을 Manager `00c33ad…`의
 unexpected ordinary exception도 `driver_contract_failed` fixed terminal receipt로 수렴하는 source와 새 atomic
 pinset으로 만든다. 최신 CI, 전문 적대 리뷰 두 건, registry/public-copy 무결성이 모두 정합할 때만 새 root-owned
 output leaf에서 n150 M04/M05 isolated E2E를 정확히 한 번 실행한다.
