@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — terminal `5512ce12…` 보존, fresh source trio 준비
+
+Map `73150672…`·PinVi `d8dc386d…`·Manager `c31c8448…`·pinset `5512ce12…`은 trusted clean release의
+registry/public-copy 검증과 atomic pair rotation 뒤 n150 isolated M04/M05 launcher에서 정확히 한 번 실행됐다.
+launcher는 exit 1이었고 권위 있는 고정 결과는 `launcher_safe_result_unavailable`이었다. 원문 HTTP·컨테이너·환경
+출력과 output leaf는 읽지 않았으며, 후속 gate가 exact unconditional terminal 차단과 public copy를 확인했다. 이
+pinset·source pair·Manager source·output leaf는 `a3f6a8f3…`·`22563762…`·`c700bd2e…`·`fa28a6e7…`과 함께 절대
+재시도하지 않는다.
+
+### 이 변경의 다음 한 작업
+
+이 terminal 기록을 포함한 새 Map revision, PinVi `admin`·`full` provenance revision, Manager source를 새 atomic
+pinset으로 만든다. 최신 CI, 전문 적대 리뷰 두 건, registry/public-copy 무결성이 모두 정합할 때만 새 root-owned
+output leaf에서 n150 M04/M05 isolated E2E를 정확히 한 번 실행한다.
+
 ## 2026-08-28 — terminal `fa28a6e7…` 보존, safe-result envelope 보강 준비
 
 Map `f90b7c28…`·PinVi `fdff06ba…`·pinset `fa28a6e7…`은 trusted Manager `b45f54d5…` release의
