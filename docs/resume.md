@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-29 — M05 `3d8d63e1…` rebuild 완료 뒤의 제어면 terminal 보존
+
+Map `0cb126fc…`·PinVi `9372137e…`·Manager `712ae8c…`·pinset `3d8d63e1…`은 모든 CI와
+exact-head 전문 적대 재리뷰 두 건의 GO 뒤 clean trusted Manager release, root 원자
+`ktdctl pin rotate-pair`, 공개 registry·generation `pending_rebuild` gate를 통과했다. 새 root-owned
+leaf의 pinned rebuild는 시작 뒤 root-global mutation lock이 유지되는 동안 원격 호출의 즉시 종료 상태만으로
+실패처럼 보였다. raw leaf를 열지 않고 lock 해제 뒤 공개 `pin verify`만 다시 확인한 결과 generation은
+`match`였다. 그러나 lock 보유 중에 이미 root registry에 unconditional terminal block을 기록했으므로 이
+pinset은 M04/M05 launcher를 실행하지 않고 영구 재시도 금지로 보존한다.
+
+이는 Map·PinVi runtime 계약의 실패 증거가 아니다. 반복 방지 규율은 launcher/rebuild의 원격 호출 결과가
+즉시 확정되지 않으면 root-global mutation lock이 해제될 때까지 기다리고, 그 뒤 공개 `pin verify`의
+exact pair·`current` generation을 확인한 다음에만 terminal을 분류하거나 block을 쓰는 것이다. private
+leaf·stdout/stderr·HTTP·container·환경 원문은 읽지 않는다.
+
+### 다음 한 작업
+
+이 문서 PR을 즉시 병합하고 그 merge revision을 PinVi admin·full provenance에 재결박한다. 같은 제어면
+대기·판정 규율을 Docker Manager 문서에 고정한 새 Manager source와 새 PinVi provenance의 CI·exact-head
+전문 적대 재리뷰 두 건이 GO일 때만 fresh pair를 만든다. 새 후보에서만 trusted `ktdctl` atomic rotation,
+단발 rebuild/public generation gate, 새 root-owned M04/M05 one-shot을 순서대로 실행한다. `3d8d63e1…`과
+기존 terminal pinset·source pair·Manager source·leaf는 재실행하지 않는다.
+
 ## 2026-08-29 — M05 `7035b0b1…` terminal 보존과 admission 보정
 
 Map `3916ebfd…`·PinVi `73870e52…`·Manager `291bd161…`·pinset `7035b0b1…`은 CI·전문 적대 재리뷰 두

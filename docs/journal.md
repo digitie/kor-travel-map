@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-29 — M05 `3d8d63e1…` 제어면 terminal 보존
+
+Map `0cb126fc5537f29fd3385a89faadde909649c30c`·PinVi
+`9372137edf28ecaf1db2adfa9d956fe99d371e8a`·Manager
+`712ae8c9acccf02c4e0015116d3c6e070ba7ca71`·pinset
+`3d8d63e18dc61c34dc19b465d0b969799ba5d14f0701a19d7dd865232db6fb5b`은 clean trusted release,
+root 원자 `ktdctl pin rotate-pair`, 공개 registry·generation `pending_rebuild` gate 뒤 새 root-owned
+pinned rebuild를 정확히 한 번 시작했다. 원격 호출의 즉시 종료 상태로 완료를 판정하지 않고, raw leaf를
+열지 않은 채 root-global mutation lock 해제 후 공개 `pin verify`를 확인했을 때 generation은 `match`였다.
+
+다만 lock 보유 중 이미 exact pair의 unconditional terminal block이 root registry에 기록돼 이 후보는
+M04/M05 launcher를 실행하지 않는다. 이는 runtime 계약의 terminal phase가 아니라 제어면 완료 판정의
+실패이며, 해당 pinset·source pair·Manager source·rebuild leaf를 재실행하지 않는다. 후속 후보는 반드시
+lock 해제와 공개 exact-pair/generation gate를 먼저 확인한 뒤 terminal block을 기록한다. HTTP·container·환경·
+output leaf·private receipt 원문은 열거나 보관하지 않았다.
+
 ## 2026-08-29 — M05 `7035b0b1…` terminal 보존과 admission 경계
 
 Map `3916ebfd601d97166c55dadfec938c3eeed6bc45`·PinVi
