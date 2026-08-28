@@ -1,5 +1,15 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-29 — M05 반복 후보 억제와 Docker Manager 단일 mutation 경계
+
+사소한 문서 정정이 Map/PinVi provenance와 pinset을 재결박해 CI·전문 리뷰·one-shot을 반복 소비하지 않도록,
+runtime source tuple을 candidate 형성 시 동결하는 규율을 정했다. 이후 문서 전용 PR은 즉시 병합해 동결된
+candidate를 참조만 하며, 코드·Compose·계약·빌드 입력을 바꿀 때만 새 candidate를 만든다.
+
+pinning·pair 결박·public-copy·rollback·rebuild/E2E는 Docker Manager `ktdctl` 단일 경계에서 수행한다. Manager
+`03a3300…`은 모든 runtime pin mutation을 active global mutation과 직렬화하고, 검증된 launcher inherited-lock
+terminal fallback 외 외부 write를 거절한다. n150 또는 terminal candidate의 원문 artifact는 건드리지 않았다.
+
 ## 2026-08-29 — M05 `3d8d63e1…` 제어면 terminal 보존
 
 Map `0cb126fc5537f29fd3385a89faadde909649c30c`·PinVi
