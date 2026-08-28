@@ -1,5 +1,19 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 fresh baseline PostGIS image drift 원인 확정
+
+`29fbcdd…` isolated candidate는 `baseline_reference_invalid`로 terminal 처리됐고 재실행하지 않는다.
+원문 Docker log·stderr·환경값은 읽지 않았다. exact Map `9c64e862…`의
+`application-reference.json`, manifest sidecar, 그리고 tracked baseline artifact를 정적으로 재검증한
+결과, 이전에 기록한 `application-seed.sql` 불일치는 없었으며 모든 declared digest가 실제 bytes와
+일치했다. 따라서 그 주장은 철회한다.
+
+n150의 읽기 전용 image identity 확인에서는 Map Compose의 부동 `postgis/postgis:16-3.5-alpine`
+태그가 baseline reference가 결박한 immutable PostGIS image와 달랐다. 이 baseline은 catalog receipt를
+exact image identity에 결박하므로, 새 fresh DB가 다른 image에서 생성되면 receipt mismatch로
+fail-close하는 것이 정상이다. Map Compose를 baseline reference digest에 직접 고정하고, committed
+Map revision을 PinVi pair·Manager pinset에 재결박한 새 candidate만 실행한다.
+
 ## 2026-08-28 — `c1ad5a3e…` root-owned one-shot committed
 
 PinVi `41a36ee6…`·Map `9c64e862…`의 `c1ad5a3e…` candidate는 exact Manager trusted release에서

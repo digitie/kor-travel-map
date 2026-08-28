@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 fresh baseline의 PostGIS image drift 원인 확정
+
+`29fbcdd…` isolated candidate는 Map fresh-init에서 `baseline_reference_invalid`로 terminal 처리됐으며
+재실행하지 않는다. Map `9c64e862…`의 `application-reference.json`과 모든 tracked baseline
+sidecar를 다시 정적으로 대조한 결과, manifest·sidecar·SQL artifact byte hash는 정합했다.
+
+원인은 application baseline이 고정한 PostGIS immutable image와 실제 n150 Compose가 사용한 부동
+`postgis/postgis:16-3.5-alpine` 태그가 서로 다른 image identity를 가리킨 데 있다. 이 차이는
+catalog receipt를 달라지게 할 수 있으며, 이미 통합 fixture가 같은 drift를 방지하려 source digest를
+사용하고 있다. Map Compose도 baseline reference의 exact digest를 사용하도록 고정한다.
+
+### 이 변경의 다음 한 작업
+
+Map source PR의 CI·전문 적대 리뷰·병합 뒤 그 committed revision을 PinVi paired provenance와
+Manager pinset에 재결박한다. 새 root-owned one-shot candidate에서만 n150 isolated M04/M05 live
+mutating E2E를 정확히 한 번 실행하며, 성공 전에는 PinVi·Manager 코드 PR을 merge하지 않는다.
+
 ## 2026-08-28 — M05 scoped external membership cleanup generation committed
 
 사용자의 완주 지시에 따라 target 밖 stale membership cleanup은 Manager root-owned v2 permit에
