@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 `41be91fe…` safe launcher terminal 보존
+
+Map `fa55316d858d95367b6a1ca6f17094408b543afe`·PinVi
+`f9fce72fbc6ef73f3ec1700ef76995fdfc068e88`·Manager
+`cd8b3054d9f49af88ef6f58e9319343c1453df27`·pinset
+`41be91feb62feff039452e23a0d889c3b32c3e97e08c28e86ad0a1068ec8ad67`는 최신 CI와 exact-head 전문
+적대 리뷰 두 건의 GO, trusted clean Manager release, atomic pair rotation과 registry/public-copy 검증 뒤
+n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. launcher는 exit 1이었고 권위 있는 고정 결과는
+`launcher_safe_result_unavailable`이었다. HTTP 원문·컨테이너 로그·환경값·output leaf는 읽거나 보관하지 않았다.
+
+후속 gate는 exact Map·PinVi·pinset의 unconditional terminal entry와 public copy를 확인했다. 이 candidate와
+source pair·Manager source·output leaf는 절대 재실행하지 않는다. 다음 후보는 이 terminal 기록을 포함한 새 Map
+revision, PinVi `admin`·`full` paired provenance revision, 예상하지 못한 ordinary driver exception도 원문 없이
+`driver_contract_failed` fixed receipt로 남기는 Manager `862e8bf…` source를 새 atomic pinset으로 결박하고 최신
+CI와 전문 적대 리뷰 두 건을 다시 통과한 경우에만 만들 수 있다.
+
 ## 2026-08-28 — M05 `5512ce12…` safe launcher terminal 보존
 
 Map `73150672d26866122e231c085e9beefe81bfd776`·PinVi
