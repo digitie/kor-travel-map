@@ -22,6 +22,7 @@ Dockerfile을 쓰고 command만 다르므로, "Dockerfile 종류가 같다"로�
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[2]
 _COMPOSE = _ROOT / "docker-compose.yml"
+_BASELINE_REFERENCE = _ROOT / "alembic" / "baseline" / "application-reference.json"
 _BUILD_SH = _ROOT / "scripts" / "docker-build.sh"
 _BUILDX_SH = _ROOT / "scripts" / "docker-buildx.sh"
 
@@ -95,7 +97,6 @@ def test_both_build_scripts_produce_the_same_image_set() -> None:
     assert not unknown, (
         f"docker-build.sh가 compose에 build 블록이 없는 서비스를 빌드하려 한다: {unknown}"
     )
-
     expected = sorted(dockerfiles[name] for name in services)
     actual = sorted(_buildx_dockerfiles())
     assert actual == expected, (
@@ -104,6 +105,19 @@ def test_both_build_scripts_produce_the_same_image_set() -> None:
         f"  docker-build.sh({', '.join(services)}) -> {expected}\n"
         f"  docker-buildx.sh                      -> {actual}"
     )
+
+
+def test_postgres_image_binds_application_baseline_source_identity() -> None:
+    """fresh `300` receipt는 source baseline과 다른 mutable image에서 생성하지 않는다."""
+
+    document: Any = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
+    reference: Any = json.loads(_BASELINE_REFERENCE.read_text(encoding="utf-8"))
+    postgres = document["services"]["postgres"]
+    source = reference["source"]
+    repository, separator, _ = source["container_image"].partition(":")
+
+    assert separator, "baseline source image는 tag를 포함해야 한다"
+    assert postgres["image"] == f"{repository}@{source['container_image_id']}"
 
 
 def test_the_dagster_daemon_image_is_built() -> None:
