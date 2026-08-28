@@ -208,6 +208,13 @@ trusted `ktdctl`만이 pinning·Map/PinVi pair 결박·one-shot 실행 계약의
 후보는 `ktdctl pin rotate-pair` 한 번으로 두 revision을 함께 회전한다. role별 `pin rotate`와
 기존 terminal pinset의 재사용은 금지한다.
 
+PinVi의 isolated Compose 경로도 이 권한 경계를 우회하지 않는다. Manager가 해당
+transaction·pinset·Manager/Map/PinVi revision에 결박해 private `0600`으로 만든 admission
+receipt를 PinVi가 no-follow로 검증할 때만 실행을 허용한다. 호출자가 준 환경변수 marker,
+수동 Compose 명령, 임의 receipt는 admission이 아니며 legacy marker는 명시적으로 거절한다.
+이 receipt 생성·주입과 검증 계약의 정본 역시 Docker Manager `ktdctl` release와 PinVi paired
+PR이다.
+
 회전 뒤에는 인증된 Manager API `GET /api/v1/runtime-pins`와
 `GET /api/v1/pinned-runtime/generation`의 공개 사본을 확인한다. 후자의 `pinset_binding`은
 새 pair 회전 직후에는 직전의 완전한 committed generation 또는 Manager registry가 Map·PinVi

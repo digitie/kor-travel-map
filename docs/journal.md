@@ -1,5 +1,14 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 Manager isolated admission 계약 명시
+
+PinVi의 isolated Compose 경로는 trusted Docker Manager `ktdctl`가 transaction·pinset·Manager/Map/PinVi
+revision에 exact 결박해 private `0600`으로 발급한 admission receipt를 no-follow 검증할 때만
+열리도록 정렬했다. 호출자 환경변수 marker, 수동 Compose, 임의 receipt는 실행 권한이 아니며
+legacy marker는 거절한다. receipt 발급·주입은 Manager #256, verifier와 실행 gate는 PinVi #500의
+paired 변경이고, 본 문서는 Map 소비자 계약을 같은 규율로 갱신한다. 이 문서 변경은 새 pinset이나
+n150 one-shot을 만들지 않는다.
+
 ## 2026-08-28 — M05 Docker Manager 공개 generation 계약 정렬
 
 M05의 runtime pinning·Map/PinVi pair 결박·one-shot 실행 정본을 trusted Docker Manager

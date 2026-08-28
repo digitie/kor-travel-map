@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 Manager isolated admission 경계 보강
+
+PinVi의 isolated Compose 허용이 호출자 환경변수만으로 열리지 않도록, trusted Docker Manager
+`ktdctl`가 transaction·pinset·Manager/Map/PinVi revision에 결박한 private `0600` admission
+receipt를 만들고 PinVi가 no-follow로 검증하는 paired 계약을 추가했다. legacy environment marker와
+수동 Compose는 명시적으로 거절한다. Map은 이 계약의 소비자 문서를 같은 정본으로 맞추며,
+PinVi #500과 Docker Manager #256은 이 admission 계약을 서로 검증한다.
+
+### 다음 한 작업
+
+이 Map 문서 PR을 CI green 뒤 즉시 병합하고, 병합 revision을 PinVi `admin`·`full` provenance에
+재결박한다. 그 뒤 PinVi #500과 Manager #256의 최신 CI 및 exact-head 전문 적대 리뷰 두 건이 모두
+GO일 때만 새 atomic `ktdctl pin rotate-pair` candidate를 만들 수 있다. 기존 terminal pinset·raw
+artifact·output leaf는 열거나 재실행하지 않는다.
+
 ## 2026-08-28 — M05 Docker Manager 공개 generation 계약 정렬
 
 M05 runtime pinning, Map·PinVi source pair 결박, one-shot 실행의 유일한 운영 정본을 trusted
