@@ -4,9 +4,12 @@
 
 M05 runtime pinning, Map·PinVi source pair 결박, one-shot 실행의 유일한 운영 정본을 trusted
 Docker Manager `ktdctl`로 명시했다. 후속 candidate는 atomic `pin rotate-pair` 뒤 인증된
-`/api/v1/runtime-pins` 및 `/api/v1/pinned-runtime/generation` 공개 사본에서
-`pinset_binding=match`를 확인해야 한다. private manifest/journal·raw launcher output은 소비하지
+`/api/v1/runtime-pins` 및 `/api/v1/pinned-runtime/generation` 공개 사본에서 완전한 이전
+generation의 `pending_rebuild` 또는 `match`를 확인해야 한다. 새 launcher 뒤에는
+`pinset_binding=match`를 다시 요구한다. private manifest/journal·raw launcher output은 소비하지
 않으며, Map C7의 v6/v8 exact schema 변경은 Manager와 paired PR로만 진행한다.
+이번 paired 변경은 v8 journal 16키와 committed PinVi role extension의 의미까지 같은 strict
+validator로 고정한다.
 
 ### 다음 한 작업
 

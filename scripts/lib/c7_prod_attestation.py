@@ -91,10 +91,22 @@ _JOURNAL_KEYS = frozenset(
         "journal_generation",
         "map_application_300_execution_evidence",
         "cancel_probe",
+        "pinvi_role_credential_environment_rebind",
+        "pinvi_role_catalog_reset",
+        "pinvi_role_lifecycle_block",
     }
 )
 _JOURNAL_COMMITTED_PHASE = "committed"
 _JOURNAL_COMMITTED_MIN_GENERATION = 27
+_PINVI_ROLE_CREDENTIAL_ENVIRONMENT_REBIND_KEYS = frozenset(
+    {
+        "previous_environment_sha256",
+        "previous_resolved_compose_sha256",
+        "current_environment_sha256",
+        "current_resolved_compose_sha256",
+    }
+)
+_PINVI_ROLE_CATALOG_RESET_KEYS = frozenset({"state"})
 _MAP_APPLICATION_300_EXECUTION_EVIDENCE_KEYS = frozenset(
     {
         "application_create_database_identity",
@@ -751,6 +763,31 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
         journal_generation=journal_generation,
     )
     _validate_pinned_database_identity(value["pinvi_database_identity"])
+    rebind = value["pinvi_role_credential_environment_rebind"]
+    if rebind is not None:
+        if not _exact_dict(rebind, set(_PINVI_ROLE_CREDENTIAL_ENVIRONMENT_REBIND_KEYS)):
+            raise AttestationError("journal PinVi credential rebind shape")
+        assert isinstance(rebind, dict)
+        for field in _PINVI_ROLE_CREDENTIAL_ENVIRONMENT_REBIND_KEYS:
+            digest = rebind[field]
+            if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+                raise AttestationError("journal PinVi credential rebind digest")
+        if (
+            rebind["previous_environment_sha256"]
+            == rebind["current_environment_sha256"]
+            or rebind["current_environment_sha256"] != value["environment_sha256"]
+            or rebind["current_resolved_compose_sha256"]
+            != value["resolved_compose_sha256"]
+        ):
+            raise AttestationError("journal PinVi credential rebind binding")
+    catalog_reset = value["pinvi_role_catalog_reset"]
+    if not _exact_dict(catalog_reset, set(_PINVI_ROLE_CATALOG_RESET_KEYS)):
+        raise AttestationError("journal PinVi role catalog reset")
+    assert isinstance(catalog_reset, dict)
+    if catalog_reset["state"] != "completed":
+        raise AttestationError("journal PinVi role catalog reset")
+    if value["pinvi_role_lifecycle_block"] is not None:
+        raise AttestationError("committed journal has PinVi role lifecycle block")
     cancel_probe = value["cancel_probe"]
     if not _exact_dict(cancel_probe, set(_CANCEL_PROBE_KEYS)):
         raise AttestationError("journal cancel probe shape")

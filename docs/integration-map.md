@@ -210,14 +210,16 @@ trusted `ktdctl`만이 pinning·Map/PinVi pair 결박·one-shot 실행 계약의
 
 회전 뒤에는 인증된 Manager API `GET /api/v1/runtime-pins`와
 `GET /api/v1/pinned-runtime/generation`의 공개 사본을 확인한다. 후자의 `pinset_binding`은
-`match`여야 하며, `pending_rebuild`·`drift`·`unknown`은 live gate를 열지 않는다. private
+새 pair 회전 직후에는 직전의 완전한 committed generation을 가리키는 `pending_rebuild`만 허용할
+수 있다. partial·malformed generation, `drift`, `unknown`은 gate를 열지 않는다. 새 launcher가
+완료된 뒤 C7 attestation·live acceptance로 나아가려면 반드시 `match`여야 한다. private
 manifest/journal과 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다. Map C7 attestation이
 소비하는 manifest v6/journal v8의 exact dict schema·키·version 변경은
 `scripts/lib/c7_prod_attestation.py`와 Docker Manager의 paired PR에서만 함께 변경한다.
 
 따라서 새 M04/M05 n150 isolated E2E의 순서는 Manager release와 Map·PinVi source CI, exact-head
-전문 적대 리뷰 두 건, `rotate-pair`, registry/public generation `match`, 새 root-owned leaf의
-정확히 한 번인 launcher다. terminal receipt가 나오면 그 exact pinset은 Manager registry에서
+전문 적대 리뷰 두 건, `rotate-pair`, registry와 완전한 public generation 확인, 새 root-owned leaf의
+정확히 한 번인 launcher, 이후 generation `match`다. terminal receipt가 나오면 그 exact pinset은 Manager registry에서
 즉시 block하고 어떤 consumer도 재실행하지 않는다.
 
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
