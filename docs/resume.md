@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-29 — M05 `7035b0b1…` terminal 보존과 admission 보정
+
+Map `3916ebfd…`·PinVi `73870e52…`·Manager `291bd161…`·pinset `7035b0b1…`은 CI·전문 적대 재리뷰 두
+건의 GO 뒤 trusted `ktdctl pin rotate-pair`, 단발 pinned rebuild, public generation `match`를 통과했다.
+새 root-owned leaf의 n150 isolated M04/M05 launcher는 정확히 한 번 실행되어 terminal로 차단됐고, 공개
+registry의 raw-free fixed phase는 `runtime_setup_admission`이다. HTTP·container·환경·output leaf·private
+receipt 원문은 열거나 재사용하지 않는다.
+
+### 다음 한 작업
+
+이 Map 문서 PR을 즉시 병합하고 merge revision을 PinVi admin·full provenance에 재결박한다. Manager는
+private admission 생성·전달·no-follow consumer verification 경계에서 원문 없이 fixed phase를 보존할 수 있게
+정적으로 보정한다. 새 Manager source·새 PinVi provenance의 CI와 exact-head 전문 적대 재리뷰 두 건이 GO일
+때만 atomic `ktdctl pin rotate-pair`, 단발 rebuild/public generation gate, 새 root-owned M04/M05 one-shot을
+순서대로 진행한다. 모든 terminal pinset·source pair·Manager source·output leaf는 재실행하지 않는다.
+
 ## 2026-08-28 — M05 `82850711…` terminal 보존과 runtime setup 세분화
 
 Map `35a43317…`·PinVi `fed16a5c…`·Manager `eed1920…`·pinset `82850711…`은 필수 CI·전문

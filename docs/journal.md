@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-29 — M05 `7035b0b1…` terminal 보존과 admission 경계
+
+Map `3916ebfd601d97166c55dadfec938c3eeed6bc45`·PinVi
+`73870e52fe6e02d02096a2a2dc82346f09be9a3c`·Manager
+`291bd161a36e580003ef99dedafd77ee5d400a7e`·pinset
+`7035b0b1c62f22fa2f1b93858a0b97de60082d4698966693705f365bd66eb639`는 모든 CI와 exact-head 전문
+적대 재리뷰 두 건의 GO 뒤 clean trusted Manager release, 원자 `ktdctl pin rotate-pair`, 단발 pinned
+rebuild, 공개 generation `match` gate를 통과했다. 새 root-owned leaf의 n150 isolated M04/M05 launcher는
+정확히 한 번 실행됐고, root registry의 exact unconditional terminal entry가 공개한 raw-free fixed phase는
+`runtime_setup_admission`이다.
+
+HTTP·container·환경·output leaf·private receipt 원문은 열거나 보관하지 않았으며, 이 pinset·source pair·
+Manager source·두 one-shot leaf는 재실행하지 않는다. 이 결과는 runtime setup 전체가 아니라 Manager가 private
+admission을 만들고 PinVi가 no-follow로 검증하는 경계로 다음 immutable source 보정 범위를 좁힌다. 이 문서의
+merge revision을 PinVi admin·full provenance에 재결박하고, admission 경계를 raw detail 없이 검증·분류하는 새
+Manager source의 CI와 exact-head 전문 적대 재리뷰 두 건이 GO일 때만 다음 pair를 만든다.
+
 ## 2026-08-28 — M05 `82850711…` terminal 보존과 runtime setup 진단
 
 Map `35a433173dbd42c096ef08adceb1ae3c142444b4`·PinVi
