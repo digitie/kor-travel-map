@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 `5592a1d4…` terminal 보존과 다음 Docker Manager phase 수렴
+
+Map `75762397…`·PinVi `358f607a…`·Manager `a4d60d1…`·pinset `5592a1d4…`은 모든 CI·전문
+적대 재리뷰 두 건의 GO와 trusted `ktdctl pin rotate-pair`, 단발 pinned rebuild, registry/public
+generation `match` 뒤 n150 isolated M04/M05 launcher에서 정확히 한 번 실행되어 terminal로 차단됐다.
+공개 registry에는 raw detail 대신 `driver_contract_failed` fixed phase만 있고, HTTP·container·환경·output
+leaf 원문은 열거나 재사용하지 않는다.
+
+### 다음 한 작업
+
+이 Map 문서 PR을 즉시 병합하고 merge revision을 PinVi `admin`·`full` provenance에 재결박한다. Manager는
+unexpected ordinary exception을 현재 allowlist phase로만 수렴하도록 보정한다. 그 새 Manager source와
+새 PinVi head의 CI·exact-head 전문 적대 리뷰 두 건이 GO일 때만 새 atomic `ktdctl pin rotate-pair`, pinned
+rebuild/public generation gate, 새 root-owned M04/M05 one-shot을 순서대로 진행한다. terminal pinset·source
+pair·output leaf는 열거나 재실행하지 않는다.
+
 ## 2026-08-28 — M05 terminal 보존과 다음 Docker Manager 결박
 
 Map `053904ce…`·PinVi `1b29bfea…`·Manager `8f41a9bd…`·pinset `5ad3b08c…`은 trusted
