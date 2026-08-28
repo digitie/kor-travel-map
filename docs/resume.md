@@ -12,14 +12,16 @@ pinset은 M04/M05 launcher를 실행하지 않고 영구 재시도 금지로 보
 
 이는 Map·PinVi runtime 계약의 실패 증거가 아니다. 반복 방지 규율은 launcher/rebuild의 원격 호출 결과가
 즉시 확정되지 않으면 root-global mutation lock이 해제될 때까지 기다리고, 그 뒤 공개 `pin verify`의
-exact pair·`current` generation을 확인한 다음에만 terminal을 분류하거나 block을 쓰는 것이다. private
-leaf·stdout/stderr·HTTP·container·환경 원문은 읽지 않는다.
+exact pair·`current` generation을 확인한 다음에만 terminal을 분류한다. 외부 root `pin block`은 active
+global mutation에서 코드로 거절하며, trusted launcher의 inherited-lock fallback만 예외다. private leaf·
+stdout/stderr·HTTP·container·환경 원문은 읽지 않는다.
 
 ### 다음 한 작업
 
-이 문서 PR을 즉시 병합하고 그 merge revision을 PinVi admin·full provenance에 재결박한다. 같은 제어면
-대기·판정 규율을 Docker Manager 문서에 고정한 새 Manager source와 새 PinVi provenance의 CI·exact-head
-전문 적대 재리뷰 두 건이 GO일 때만 fresh pair를 만든다. 새 후보에서만 trusted `ktdctl` atomic rotation,
+이 문서 PR을 즉시 병합하고 그 merge revision을 PinVi admin·full provenance에 재결박한다. Docker Manager는
+외부 root `pin block`을 active global mutation과 코드로 직렬화해 거절하고, trusted launcher의 inherited-lock
+fallback만 허용하도록 보정한다. 이 새 Manager source와 새 PinVi provenance의 CI·exact-head 전문 적대 재리뷰
+두 건이 GO일 때만 fresh pair를 만든다. 새 후보에서만 trusted `ktdctl` atomic rotation,
 단발 rebuild/public generation gate, 새 root-owned M04/M05 one-shot을 순서대로 실행한다. `3d8d63e1…`과
 기존 terminal pinset·source pair·Manager source·leaf는 재실행하지 않는다.
 
