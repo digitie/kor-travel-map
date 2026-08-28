@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-29 — M05 Map health transport 반복 terminal의 범위 확정
+
+`9b6eab1e…`는 Map `86d38d46…`·PinVi `3b9d6026…`·Manager `1dbd7cc…`를 Docker Manager trusted
+`ktdctl`로 pair 결박하고 rebuild/public generation `match` 뒤 M04/M05 E2E를 정확히 한 번 실행한 결과다.
+root registry의 terminal phase는 `map_health_transport_failed`, cleanup은 성공이었다. 같은 phase가
+`41be91fe…`·`5512ce12…`·`b46743ea…`에서 반복됐으며 모두 PinVi runtime과 M04/M05 business flow 전에
+종료했다. 따라서 이 네 후보는 PinVi consumer/provenance 오류가 아니라 Map API container health 이후 host
+loopback publish transport 경계의 반복 failure로 분류한다.
+
+Manager `bc99ce1…`은 이 경계의 일시 경합만 동일 candidate 안에서 1초 간격 최대 6회 흡수한다. HTTP status와
+응답 계약 오류는 즉시 terminal로 유지한다. Map은 runtime source의 문서 전용 업데이트를 즉시 병합하되, CI와
+전문 적대 리뷰를 다시 소비해야 하는 새 candidate는 Manager/PinVi의 실제 입력 변경 뒤에만 만든다.
+
 ## 2026-08-29 — M05 반복 후보 억제와 Docker Manager 단일 mutation 경계
 
 사소한 문서 정정이 Map/PinVi provenance와 pinset을 재결박해 CI·전문 리뷰·one-shot을 반복 소비하지 않도록,

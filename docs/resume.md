@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-29 — M05 `9b6eab1e…` terminal과 Map health transport 보정
+
+Map `86d38d469dacfc74ca7c2cf811e5296ed3aead82`·PinVi
+`3b9d60261ea69318270392291103b88ff9ed0a6e`·Manager
+`1dbd7cc2b71cb7eb70bcc069330f8c9db61fb06d`·pinset
+`9b6eab1eeb04bae4d96d4d738bfa2600bd86e5c83adf58307350c0eccfbc6a85`는 trusted `ktdctl`의 atomic pair
+rotation, 단발 rebuild와 공개 generation `match` 뒤 새 root-owned leaf에서 M04/M05 E2E를 정확히 한 번
+실행했다. root registry의 exact terminal phase는 `map_health_transport_failed`이며 cleanup은 통과했다.
+
+서로 다른 후보 `41be91fe…`·`5512ce12…`·`b46743ea…`도 PinVi/M04/M05 이전의 같은 Map host loopback
+health transport 단계에서 종료했다. Manager `bc99ce1…`은 container 내부 health와 host publish socket의
+짧은 경합만 같은 immutable candidate 안에서 최대 6회 재시도한다. HTTP status·응답 계약 오류는 재시도하지
+않는다. 새 Manager exact-head CI·전문 적대 리뷰 두 건·새 Map/PinVi provenance가 모두 충족될 때만 fresh
+`ktdctl pin rotate-pair` 후보를 만들며, 이 pinset과 output leaf는 재실행하지 않는다.
+
 ## 2026-08-29 — M05 후보 동결과 Docker Manager 단일 실행 경계
 
 M05 runtime candidate는 Map `86d38d469dacfc74ca7c2cf811e5296ed3aead82`, PinVi runtime source
