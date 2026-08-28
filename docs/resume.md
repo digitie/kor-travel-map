@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — terminal `22563762…` 보존, HTTP 단계 분류 candidate 준비
+
+Map `b8d108bd…`·PinVi `50c875f5…`·pinset `22563762…`은 registry/public-copy gate 뒤 n150 isolated
+M04/M05 launcher에서 정확히 한 번 실행돼 `runtime_http_failed` terminal로 차단됐다. cleanup은 통과했고
+원문 HTTP·컨테이너·환경 출력은 읽지 않았다. 해당 pinset·Manager source·output leaf는 절대 재시도하지 않는다.
+
+### 이 변경의 다음 한 작업
+
+Manager #253의 호출 단계별 고정 HTTP 분류 보정과 이 Map 기록 revision, PinVi 후속 `admin`·`full`
+provenance revision을 새 atomic pinset으로 회전한다. PinVi 최신 CI와 전문 적대 재리뷰 두 건,
+registry/public-copy 무결성이 모두 정합할 때만 새 root-owned output leaf에서 n150 M04/M05 isolated E2E를
+정확히 한 번 실행한다.
+
 ## 2026-08-28 — terminal a3 candidate 보존, 새 immutable pair 준비
 
 Map `e6c08e25…`·PinVi `932fb140…`·pinset `a3f6a8f3…`은 n150 isolated launcher의 installed-wheel
