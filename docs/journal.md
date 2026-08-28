@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 HTTP terminal 보존과 단계 고정 분류 보정
+
+Map `b8d108bd…`·PinVi `50c875f5…`·pinset `22563762…`은 root registry/public-copy gate를 통과한 뒤
+n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. durable result의 고정 분류는
+`runtime_http_failed`였고 cleanup은 통과했다. raw HTTP 응답·컨테이너 로그·환경 출력은 읽지 않으며,
+동일 pinset·Manager source·output leaf는 어떤 사유로도 재실행하지 않는다. root registry는 이
+candidate를 같은 고정 분류로 즉시 terminal 차단했다.
+
+Manager #253은 다음 fresh candidate에서 HTTP 실패를 호출 단계별 허용 enum으로만 기록하도록 보정한다.
+새 Map 기록 revision과 PinVi `admin`·`full` paired provenance revision을 atomic `pin rotate-pair`로 함께
+회전하고, CI·전문 적대 재리뷰 두 건·registry/public-copy gate가 모두 정합할 때만 새 root-owned
+output leaf에서 M04/M05 live E2E를 정확히 한 번 실행한다.
+
 ## 2026-08-28 — M05 installed-wheel preflight terminal 보존과 새 pair 조건
 
 Map `e6c08e25…`·PinVi `932fb140…`·pinset `a3f6a8f3…`의 isolated launcher는 trusted release 검증 뒤,
