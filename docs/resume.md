@@ -4,13 +4,13 @@
 
 Docker Manager #251은 Map·PinVi source revision과 terminal candidate lifecycle을 source 상수가 아니라
 trusted release 밖 root-owned runtime pin registry로 이관했다. 이후 보안 재리뷰 P1을 반영한 Manager
-`28e7c2a…`에서 Map `e6c08e25…`와 PinVi `932fb140…`은 read-only seed를 수정하지 않고 `pin init` 뒤
+PR #253 source `02cc8de…`에서 Map `e6c08e25…`와 PinVi `932fb140…`은 read-only seed를 수정하지 않고 `pin init` 뒤
 atomic `pin rotate-pair` 한 번으로 재결박한다. seed의 `cbb577d3…`은 terminal historical evidence로 보존하고, final pinset
 `a3f6a8f3…`만 새 `(Manager revision, pinset)` one-shot ledger candidate가 된다.
 
 ### 이 변경의 다음 한 작업
 
-Manager PR #250의 exact source를 trusted n150 isolated 환경에 설치한 뒤 registry의 root/공개 사본
+Manager PR #253의 exact source를 trusted n150 isolated 환경에 설치한 뒤 registry의 root/공개 사본
 무결성과 final pinset을 확인한다. 그때만 M04/M05 live E2E를 정확히 한 번 실행한다. source의 seed,
 static image digest, terminal candidate는 수정·추측·재실행하지 않는다.
 

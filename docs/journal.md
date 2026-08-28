@@ -3,7 +3,7 @@
 ## 2026-08-28 — M05 atomic pair rotation과 ledger 선행 gate 반영
 
 Manager 전문 보안 재리뷰는 terminal seed에서 Map·PinVi를 role별로 회전하면 intermediate pinset이
-one-shot ledger를 소비할 수 있음을 P1으로 확인했다. Manager `28e7c2a…`는 terminal current의
+one-shot ledger를 소비할 수 있음을 P1으로 확인했다. Manager PR #253 source `02cc8de…`는 terminal current의
 single-role 회전을 거부하고 `pin rotate-pair`의 단일 registry replace로 두 source를 함께 회전한다.
 M05 launcher도 source pair preflight 뒤에만 ledger를 claim한다.
 
