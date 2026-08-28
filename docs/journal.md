@@ -1,5 +1,19 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 safe-result 부재 terminal 보존
+
+Map `f90b7c28ee0a51cc5e2dce7a332e7feef9afe477`·PinVi
+`fdff06ba746bf2de198fab075a356f88b9f228c9`·pinset
+`fa28a6e7d7ee27b7bb6be6cd6c0a04ffc458cda329beca339a4ce6d038480381`은 최신 CI와 전문 적대
+리뷰 두 건의 GO, trusted Manager `b45f54d5…` release, atomic pair rotation과 registry/public-copy 검증 뒤
+n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. launcher는 exit 1이었고 허용된 durable safe result는
+없었다. 원문 HTTP·컨테이너 로그·환경값·output leaf는 읽거나 보관하지 않았다.
+
+후속 `pin verify`는 exact pinset이 terminal로 차단됐음을 확인했다. 따라서 `fa28a6e7…`과
+`a3f6a8f3…`·`22563762…`·`c700bd2e…`의 source pair·Manager revision·output leaf는 절대 재실행하지 않는다.
+다음 후보는 이 terminal 기록을 포함한 새 Map revision과 새 PinVi provenance·새 Manager source를 새 atomic
+pinset으로 결박하고, safe result 부재도 원문 없이 고정 분류·보존할 수 있을 때만 만들 수 있다.
+
 ## 2026-08-28 — M05 Map health terminal 보존
 
 Map `bbb29d17751aa0ece0b76f3c8724a0073aa9dafc`·PinVi `663e21b4fdc2a4fc5e51a07f7a7532282aaa5423`·
