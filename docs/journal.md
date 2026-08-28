@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 installed-wheel preflight terminal 보존과 새 pair 조건
+
+Map `e6c08e25…`·PinVi `932fb140…`·pinset `a3f6a8f3…`의 isolated launcher는 trusted release 검증 뒤,
+installed wheel의 project-root 계산이 runtime registry보다 먼저 실패해 종료했다. Docker·Compose·DB·driver
+ledger 전이었지만 단회 실행권은 이미 사용됐으므로, Manager root registry는 이를 `launcher_preflight` terminal
+evidence로 차단했다. 같은 pinset·Manager source·output leaf는 어떤 사유로도 재실행하지 않는다.
+
+Manager #253은 trusted venv의 `python -I`가 `sys.prefix`로 canonical `/opt` root를 인식해 external registry와
+public copy를 선택하도록 보정했고 전문 적대 재리뷰 두 건의 GO를 받았다. 다음 candidate는 이 Map 기록 revision과
+PinVi 후속 provenance revision을 atomic pair rotation으로 새 pinset에 결박한 뒤, CI와 registry/public-copy gate를
+다시 통과해야만 n150 M04/M05 isolated E2E를 정확히 한 번 실행할 수 있다.
+
 ## 2026-08-28 — M05 atomic pair rotation과 ledger 선행 gate 반영
 
 Manager 전문 보안 재리뷰는 terminal seed에서 Map·PinVi를 role별로 회전하면 intermediate pinset이
