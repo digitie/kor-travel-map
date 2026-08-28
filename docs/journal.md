@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 `82850711…` terminal 보존과 runtime setup 진단
+
+Map `35a433173dbd42c096ef08adceb1ae3c142444b4`·PinVi
+`fed16a5c0f6e78ee32306b3733a7dc1c8a5641f9`·Manager
+`eed1920186b5cb61182a955a6281e49230b80a84`·pinset
+`8285071126a58e4807a035753261b0d1f0f4e713fa5934e9d1efa7cbf16f3af9`는 필수 CI와 exact-head
+전문 적대 재리뷰 두 건의 GO 뒤 trusted `ktdctl pin rotate-pair`로 결박했다. 새 source의 단발
+`run-pinned-rebuild-once`와 registry/public generation `match` gate를 통과한 뒤, 새 root-owned
+leaf의 n150 isolated M04/M05 launcher를 정확히 한 번 실행했다. exact unconditional terminal entry의
+공개 고정 phase는 `runtime_setup`이다.
+
+따라서 pair rotation·source materialization·Map/PinVi HTTP 계약 이전의 isolated runtime 준비 경계가
+후속 Docker Manager 보정 범위다. HTTP·container·환경·output leaf·private receipt 원문은 열거나
+보관하지 않았고, 이 pinset·source pair·Manager source·output leaf는 재실행하지 않는다. 후속 Manager는
+setup 내부의 안전한 세부 경계만 공개 phase로 분리하고 raw exception은 기록하지 않는다. 이 문서의 merge
+revision을 PinVi `admin`·`full` provenance에 다시 결박한 새 pair만 다음 one-shot 후보가 될 수 있다.
+
 ## 2026-08-28 — M05 `5592a1d4…` terminal 보존과 phase 수렴 보정
 
 Map `757623973c2e6c082b78332fa25c278ef94f9bab`·PinVi
