@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 `b46743ea…` terminal 보존 후 대기
+
+Map `6bfa4703…`·PinVi `340717de…`·Manager `00c33ad…`·pinset `b46743ea…`은 trusted clean release의
+registry/public-copy 검증과 atomic pair rotation 뒤 n150 isolated M04/M05 launcher에서 정확히 한 번 실행됐다.
+권위 있는 고정 결과는 `launcher_safe_result_unavailable`이었다. 원문 HTTP·컨테이너·환경 출력과 output leaf는 읽지
+않았으며, 후속 gate가 exact unconditional terminal 차단과 public copy를 확인했다. 이 pinset·source pair·Manager
+source·output leaf는 앞선 모든 terminal candidate와 함께 절대 재시도하지 않는다.
+
+### 현재 상태
+
+사용자 지시에 따라 이 terminal 기록까지 문서화한 뒤 대기한다. 새 source·pair·pinset 생성, PR ready·merge, n150
+실행은 명시적 재개 지시 전까지 수행하지 않는다.
+
 ## 2026-08-28 — M05 finalization receipt 경계 보강
 
 전문 data-contract 적대 재리뷰가 Manager `862e8bf…`의 cleanup·terminal block ordinary exception은 fixed driver
