@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 `5ad3b08c…` terminal 보존과 안전 phase 진단
+
+Map `053904cebdb004ef1376c0c4cf0255efb02e5ba3`·PinVi
+`1b29bfea86af92ad8fd946b967fe6cce331c797f`·Manager
+`8f41a9bd797440bc867462da70be0d2dddf085f7`·pinset
+`5ad3b08c762db115efe113f2254bea415e674d09677c47e28ba6c197b37bafe0`는 trusted `ktdctl
+pin rotate-pair`, `run-pinned-rebuild-once`, registry/public generation `match` gate 뒤 n150 isolated
+M04/M05 launcher를 정확히 한 번 실행해 root registry의 exact unconditional terminal entry로 차단됐다.
+HTTP·container·환경·output leaf 원문은 열지 않았고 해당 source pair·Manager source·output leaf는 재실행하지
+않는다.
+
+후속 Manager `a4d60d1…`은 terminal registry의 공개 reason에 raw detail을 쓰지 않고 allowlist fixed phase만
+남긴다. 이 Map 기록 revision을 새 PinVi `admin`·`full` provenance와 함께 다시 결박하고, Manager·PinVi CI와
+exact-head 전문 적대 리뷰 두 건이 GO인 fresh pair만 다음 one-shot 실행권을 가진다.
+
 ## 2026-08-28 — M05 Manager isolated admission 계약 명시
 
 PinVi의 isolated Compose 경로는 trusted Docker Manager `ktdctl`가 transaction·pinset·Manager/Map/PinVi

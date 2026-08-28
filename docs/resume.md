@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-28 — M05 terminal 보존과 다음 Docker Manager 결박
+
+Map `053904ce…`·PinVi `1b29bfea…`·Manager `8f41a9bd…`·pinset `5ad3b08c…`은 trusted
+`ktdctl pin rotate-pair`와 `run-pinned-rebuild-once`, registry/public generation `match` 뒤 n150 isolated
+M04/M05 launcher에서 정확히 한 번 실행되어 terminal로 차단됐다. HTTP·container·환경·output leaf 원문은
+열거나 재사용하지 않는다. Manager `a4d60d1…`은 다음 terminal registry 기록을 raw detail 대신 allowlist
+fixed phase로 수렴시킨다.
+
+### 다음 한 작업
+
+이 Map 문서 PR을 즉시 병합하고 그 merge revision을 PinVi `admin`·`full` provenance에 재결박한다. Manager
+`a4d60d1…`과 새 PinVi head의 CI·exact-head 전문 적대 리뷰 두 건이 GO일 때만 trusted release, atomic
+`ktdctl pin rotate-pair`, pinned rebuild/public generation gate, 새 root-owned M04/M05 one-shot을 순서대로
+진행한다. 기존 terminal pinset·source pair·Manager source·output leaf는 열거나 재실행하지 않는다.
+
 ## 2026-08-28 — M05 Manager isolated admission 경계 보강
 
 PinVi의 isolated Compose 허용이 호출자 환경변수만으로 열리지 않도록, trusted Docker Manager
