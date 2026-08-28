@@ -1,10 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 atomic pair rotation과 ledger 선행 gate 반영
+
+Manager 전문 보안 재리뷰는 terminal seed에서 Map·PinVi를 role별로 회전하면 intermediate pinset이
+one-shot ledger를 소비할 수 있음을 P1으로 확인했다. Manager `28e7c2a…`는 terminal current의
+single-role 회전을 거부하고 `pin rotate-pair`의 단일 registry replace로 두 source를 함께 회전한다.
+M05 launcher도 source pair preflight 뒤에만 ledger를 claim한다.
+
+따라서 Map `e6c08e25…`·PinVi `932fb140…`의 final `a3f6a8f3…`만 새 candidate가 된다. invalid pair,
+intermediate state, static image digest 추측, 과거 terminal candidate 재실행은 여전히 허용하지 않는다.
+
 ## 2026-08-28 — M05 Docker Manager runtime pin registry 반영
 
 Docker Manager #251은 Map·PinVi revision과 terminal pinset lifecycle의 정본을 source 상수에서
 trusted release 밖 root-owned runtime pin registry로 옮겼다. Map `e6c08e25…`와 PinVi
-`932fb140…`은 추적되는 seed를 편집하지 않고 host에서 `pin init` 뒤 Map→PinVi 순서로 회전해
+`932fb140…`은 추적되는 seed를 편집하지 않고 host에서 `pin init` 뒤 atomic `pin rotate-pair`로
 `a3f6a8f3…` candidate를 만든다. `cbb577d3…` seed는 terminal historical evidence로 보존한다.
 
 새 candidate는 `pin verify`의 registry·공개 사본 gate, root-owned Manager provenance, PinVi pair의
