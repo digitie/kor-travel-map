@@ -13,8 +13,9 @@ pinned rebuild를 정확히 한 번 시작했다. 원격 호출의 즉시 종료
 다만 lock 보유 중 이미 exact pair의 unconditional terminal block이 root registry에 기록돼 이 후보는
 M04/M05 launcher를 실행하지 않는다. 이는 runtime 계약의 terminal phase가 아니라 제어면 완료 판정의
 실패이며, 해당 pinset·source pair·Manager source·rebuild leaf를 재실행하지 않는다. 후속 후보는 반드시
-lock 해제와 공개 exact-pair/generation gate를 먼저 확인한 뒤 terminal block을 기록한다. HTTP·container·환경·
-output leaf·private receipt 원문은 열거나 보관하지 않았다.
+lock 해제와 공개 exact-pair/generation gate를 먼저 확인한다. 외부 root `pin block`은 active global mutation에서
+코드로 거절하며 trusted launcher의 inherited-lock fallback만 예외다. HTTP·container·환경·output leaf·private
+receipt 원문은 열거나 보관하지 않았다.
 
 ## 2026-08-29 — M05 `7035b0b1…` terminal 보존과 admission 경계
 
