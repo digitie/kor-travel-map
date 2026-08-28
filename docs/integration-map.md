@@ -200,6 +200,30 @@ producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드�
 완료했다(당시 v4 capture 경로). 후속 세대는 rebuildable transaction → attestation → live
 인수 순서를 반복한다.
 
+#### M05 runtime pinning·결박 정본 (2026-08-28)
+
+M05의 새 후보를 만들 때 Map·PinVi 어느 저장소도 현재 runtime pinset을 수동 SHA 전사,
+source 상수, 또는 자체 Compose 명령으로 바꾸지 않는다. **`kor-travel-docker-manager`의
+trusted `ktdctl`만이 pinning·Map/PinVi pair 결박·one-shot 실행 계약의 정본**이다. 새
+후보는 `ktdctl pin rotate-pair` 한 번으로 두 revision을 함께 회전한다. role별 `pin rotate`와
+기존 terminal pinset의 재사용은 금지한다.
+
+회전 뒤에는 인증된 Manager API `GET /api/v1/runtime-pins`와
+`GET /api/v1/pinned-runtime/generation`의 공개 사본을 확인한다. 후자의 `pinset_binding`은
+새 pair 회전 직후에는 직전의 완전한 committed generation 또는 Manager registry가 Map·PinVi
+revision과 pinset까지 exact로 일치시킨 unconditional terminal generation을 가리키는
+`pending_rebuild`만 허용할 수 있다. partial·malformed generation, phase-scoped block, `drift`,
+`unknown`은 gate를 열지 않는다. 새 launcher가
+완료된 뒤 C7 attestation·live acceptance로 나아가려면 반드시 `match`여야 한다. private
+manifest/journal과 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다. Map C7 attestation이
+소비하는 manifest v6/journal v8의 exact dict schema·키·version 변경은
+`scripts/lib/c7_prod_attestation.py`와 Docker Manager의 paired PR에서만 함께 변경한다.
+
+따라서 새 M04/M05 n150 isolated E2E의 순서는 Manager release와 Map·PinVi source CI, exact-head
+전문 적대 리뷰 두 건, `rotate-pair`, registry와 완전한 public generation 확인, 새 root-owned leaf의
+정확히 한 번인 launcher, 이후 generation `match`다. terminal receipt가 나오면 그 exact pinset은 Manager registry에서
+즉시 block하고 어떤 consumer도 재실행하지 않는다.
+
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
 |---|---|---|
 | ops datasets/pipeline | **완료** — canonical caller, 최소 service/operator principal, 삭제 경로 0건 | **완료** — commit pair 인증·응답 smoke와 C7 |

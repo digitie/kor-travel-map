@@ -452,6 +452,9 @@ def _runtime_fixture() -> tuple[
         "environment_sha256": "e" * 64,
         "journal_generation": 27,
         "phase": "committed",
+        "pinvi_role_catalog_reset": {"state": "completed"},
+        "pinvi_role_credential_environment_rebind": None,
+        "pinvi_role_lifecycle_block": None,
         "resolved_compose_sha256": "f" * 64,
         "transaction_id": transaction_id,
         "version": 8,
@@ -732,6 +735,7 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
     [
         (lambda value: value.update({"version": 7}), "journal shape"),
         (lambda value: value.pop("cancel_probe"), "journal shape"),
+        (lambda value: value.pop("pinvi_role_catalog_reset"), "journal shape"),
         (lambda value: value.update({"phase": "manifest_committing"}), "journal is not committed"),
         (lambda value: value.update({"transaction_id": "not-a-uuid"}), "journal transaction"),
         (lambda value: value.update({"environment_sha256": "short"}), "journal input digest"),
@@ -810,6 +814,43 @@ def test_runtime_attestation_rejects_journal_that_did_not_commit_this_generation
     하나라도 어긋나면 통과시키지 않는다.
     """
 
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    mutation(journal)
+    attestation["rebuild_journal_sha256"] = _sha256_bytes(_canonical_json(journal))
+
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (
+            lambda value: value.update({"pinvi_role_catalog_reset": {"state": "intent"}}),
+            "journal PinVi role catalog reset",
+        ),
+        (
+            lambda value: value.update({"pinvi_role_lifecycle_block": {}}),
+            "committed journal has PinVi role lifecycle block",
+        ),
+        (
+            lambda value: value.update(
+                {
+                    "pinvi_role_credential_environment_rebind": {
+                        "previous_environment_sha256": "0" * 64,
+                        "previous_resolved_compose_sha256": "1" * 64,
+                        "current_environment_sha256": "2" * 64,
+                        "current_resolved_compose_sha256": "3" * 64,
+                    }
+                }
+            ),
+            "journal PinVi credential rebind binding",
+        ),
+    ],
+)
+def test_runtime_attestation_rejects_invalid_pinvi_role_journal_extensions(
+    mutation: Callable[[dict[str, object]], None], expected: str
+) -> None:
     attestation, manifest, journal, environ, run_command = _runtime_fixture()
     mutation(journal)
     attestation["rebuild_journal_sha256"] = _sha256_bytes(_canonical_json(journal))
