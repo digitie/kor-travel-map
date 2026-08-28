@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-29 — M05 후보 동결과 Docker Manager 단일 실행 경계
+
+M05 runtime candidate는 Map `86d38d469dacfc74ca7c2cf811e5296ed3aead82`, PinVi runtime source
+`3b9d60261ea69318270392291103b88ff9ed0a6e`, Docker Manager `03a3300…`을 한 번 확정해 동결한다. 이후
+문서 전용 Map/PinVi/Manager PR은 즉시 병합하되 Map/PinVi provenance, `ktdctl pin rotate-pair`, pinset을
+재결박하지 않고 동결된 candidate만 참조한다. 코드·Compose·계약·빌드 입력 변경만 새 candidate와 한 번의
+CI·전문 리뷰·one-shot을 소비한다.
+
+runtime pinning, pair 결박, public generation 복사, rollback, rebuild/E2E는 Docker Manager `ktdctl`만 수행한다.
+`init`, `publish-generation`, `rotate`, `rotate-pair`, `apply-pending`, `rollback`, `block` 전체는 active global
+mutation에서 write 전에 거절되고 trusted launcher의 검증된 inherited-lock terminal fallback만 예외다. 관측자는
+lock 해제 뒤 공개 `pin verify`를 읽어 판정하며 terminal pinset·원문 artifact는 재실행·열람하지 않는다.
+
 ## 2026-08-29 — M05 `3d8d63e1…` rebuild 완료 뒤의 제어면 terminal 보존
 
 Map `0cb126fc…`·PinVi `9372137e…`·Manager `712ae8c…`·pinset `3d8d63e1…`은 모든 CI와
@@ -18,9 +31,9 @@ stdout/stderr·HTTP·container·환경 원문은 읽지 않는다.
 
 ### 다음 한 작업
 
-이 문서 PR을 즉시 병합하고 그 merge revision을 PinVi admin·full provenance에 재결박한다. Docker Manager는
-외부 root `pin block`을 active global mutation과 코드로 직렬화해 거절하고, trusted launcher의 inherited-lock
-fallback만 허용하도록 보정한다. 이 새 Manager source와 새 PinVi provenance의 CI·exact-head 전문 적대 재리뷰
+문서 전용 PR은 즉시 병합하되 동결된 runtime candidate provenance에는 영향을 주지 않는다. Docker Manager는
+모든 runtime pin mutation을 active global mutation과 코드로 직렬화해 거절하고, trusted launcher의 inherited-lock
+fallback만 허용하도록 보정한다. 이 새 Manager source와 동결된 PinVi runtime source의 CI·exact-head 전문 적대 재리뷰
 두 건이 GO일 때만 fresh pair를 만든다. 새 후보에서만 trusted `ktdctl` atomic rotation,
 단발 rebuild/public generation gate, 새 root-owned M04/M05 one-shot을 순서대로 실행한다. `3d8d63e1…`과
 기존 terminal pinset·source pair·Manager source·leaf는 재실행하지 않는다.
