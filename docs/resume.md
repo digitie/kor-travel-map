@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-28 — M05 fresh baseline의 PostGIS image drift 원인 확정
+## 2026-08-28 — M05 PostGIS digest 고정 병합과 다음 provenance 회전
 
 `29fbcdd…` isolated candidate는 Map fresh-init에서 `baseline_reference_invalid`로 terminal 처리됐으며
 재실행하지 않는다. Map `9c64e862…`의 `application-reference.json`과 모든 tracked baseline
@@ -13,8 +13,9 @@ catalog receipt를 달라지게 할 수 있으며, 이미 통합 fixture가 같�
 
 ### 이 변경의 다음 한 작업
 
-Map source PR의 CI·전문 적대 리뷰·병합 뒤 그 committed revision을 PinVi paired provenance와
-Manager pinset에 재결박한다. 새 root-owned one-shot candidate에서만 n150 isolated M04/M05 live
+전문 적대 리뷰 두 건과 모든 CI를 통과한 Map PR #1099는 `e6c08e2598a6f8b6fda605be271e8d384213de58`로
+병합됐다. 이 revision의 paired application candidate를 PinVi `admin`·`full` provenance와 Manager
+pinset에 순서대로 재결박한다. 새 root-owned one-shot candidate에서만 n150 isolated M04/M05 live
 mutating E2E를 정확히 한 번 실행하며, 성공 전에는 PinVi·Manager 코드 PR을 merge하지 않는다.
 
 ## 2026-08-28 — M05 scoped external membership cleanup generation committed
