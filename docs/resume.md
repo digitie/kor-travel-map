@@ -3,9 +3,9 @@
 ## 2026-08-28 — M05 Manager runtime pin registry 순서 반영
 
 Docker Manager #251은 Map·PinVi source revision과 terminal candidate lifecycle을 source 상수가 아니라
-trusted release 밖 root-owned runtime pin registry로 이관했다. 따라서 Map `e6c08e25…`와 PinVi
-`932fb140…`은 read-only seed를 수정하지 않고 `pin init` 뒤 Map→PinVi 순서의 `pin rotate`로
-재결박한다. seed의 `cbb577d3…`은 terminal historical evidence로 보존하고, final pinset
+trusted release 밖 root-owned runtime pin registry로 이관했다. 이후 보안 재리뷰 P1을 반영한 Manager
+`28e7c2a…`에서 Map `e6c08e25…`와 PinVi `932fb140…`은 read-only seed를 수정하지 않고 `pin init` 뒤
+atomic `pin rotate-pair` 한 번으로 재결박한다. seed의 `cbb577d3…`은 terminal historical evidence로 보존하고, final pinset
 `a3f6a8f3…`만 새 `(Manager revision, pinset)` one-shot ledger candidate가 된다.
 
 ### 이 변경의 다음 한 작업
@@ -29,7 +29,7 @@ catalog receipt를 달라지게 할 수 있으며, 이미 통합 fixture가 같�
 
 전문 적대 리뷰 두 건과 모든 CI를 통과한 Map PR #1099는 `e6c08e2598a6f8b6fda605be271e8d384213de58`로
 병합됐다. 이 revision의 paired application candidate를 PinVi `admin`·`full` provenance와 Manager
-runtime pin registry에 순서대로 재결박한다. 새 root-owned one-shot candidate에서만 n150 isolated
+runtime pin registry의 atomic pair rotation으로 재결박한다. 새 root-owned one-shot candidate에서만 n150 isolated
 M04/M05 live mutating E2E를 정확히 한 번 실행하며, 성공 전에는 PinVi·Manager 코드 PR을 merge하지 않는다.
 
 ## 2026-08-28 — M05 scoped external membership cleanup generation committed
