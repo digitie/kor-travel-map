@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-29 — M05 execution identity v6로 terminal 반복 제거
+
+같은 Map·PinVi pair에서 Docker Manager 코드만 고쳤을 때 v5 `pinset_sha256` terminal block이 그대로 남아 문서
+전용 source revision을 바꿔 새 후보를 만드는 반복을 확인했다. 이를 우회하지 않는다. Map·PinVi source
+materialization identity인 v5 pinset은 과거 registry/history/block 증거와 함께 보존하고, trusted Manager release
+revision을 추가로 결박한 v6 execution identity를 새 execution ledger·terminal block·generation binding의 정본으로
+도입한다.
+
+Manager revision은 operator CLI·환경 입력이 아니라 trusted installer의 `.ktdm-source-revision`과
+`.ktdm-release-manifest.json`이 exact match할 때만 인정한다. Map attestation과 PinVi isolated admission은 Map/PinVi
+source SHA·v5 pinset·Manager revision·v6 execution digest를 모두 exact 대조한다. 따라서 Manager-only fix는 새
+immutable execution candidate가 되지만, 동일 v6 execution은 계속 한 번만 실행할 수 있다. terminal raw output은
+완주 전까지 gitignored local forensic 문서에만 상세 기록한다.
+
 ## 2026-08-29 — M05 `9b6eab1e…` terminal과 Map health transport 보정
 
 Map `86d38d469dacfc74ca7c2cf811e5296ed3aead82`·PinVi
