@@ -1,5 +1,16 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-28 — M05 PostGIS baseline digest source 병합
+
+Map PR #1099는 `e6c08e2598a6f8b6fda605be271e8d384213de58`로 병합됐다. Compose `postgres`는
+application `300` baseline reference의 immutable PostGIS digest를 직접 사용하고, unit gate는 reference의
+repository·image ID와 Compose 값을 exact 비교한다. 전문 적대 리뷰 두 건은 P0/P1 없이 GO했고 lint,
+OpenAPI, fixture replay, Python 3.11/3.12/3.13 및 PostGIS 통합 CI가 모두 통과했다.
+
+기존 `29fbcdd…` terminal candidate는 그대로 보존하고 재실행하지 않는다. 다음 단계는 이 병합 revision의
+paired application candidate를 PinVi `admin`·`full` provenance에 결박한 뒤 Manager pinset을 회전하는 것이다.
+그 새 candidate만 n150 isolated M04/M05 live E2E를 정확히 한 번 실행할 수 있다.
+
 ## 2026-08-28 — M05 fresh baseline PostGIS image drift 원인 확정
 
 `29fbcdd…` isolated candidate는 `baseline_reference_invalid`로 terminal 처리됐고 재실행하지 않는다.

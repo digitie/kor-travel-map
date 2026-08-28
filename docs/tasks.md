@@ -8,7 +8,7 @@
 - [/] T-VN-M05-ROLE-CATALOG-RESET — `31fe73ad…`·`b22bfb8c…`·`c6c73cdf…` n150 candidate는 각각 `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하며 재시도하지 않는다.
 - [x] T-VN-M05-MANAGER-PIN-ROTATION — `030b12fc…` committed generation과 `6269138f…`·`53d4639f…` 단회 시도는 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했고 durable output·ledger·raw stderr가 없다. PinVi `41a36ee6…`·Map `9c64e862…`와 Manager canonical pinset `c1ad5a3e…`은 root-owned structured result launcher로 정확히 한 번 실행돼 `committed` 됐다(generation `8eedf171…`, Map application `300`, Map Dagster `29b539ebc72a`, PinVi `20260824_0101`).
 - [x] T-VN-FINAL-REBUILD — `030b12fc…`의 공식 `rebuild-pinned --confirm --json`을 정확히 한 번 실행해 seven-runtime과 v6/v8 committed 증적, Map application `300`·Map Dagster·PinVi `20260824_0101` schema head를 확인했다. historical `cbb`·`52`·`06045`·`68d99705`·`285618c0`·`37932169`·`31fe73ad`·`b22bfb8c`·`89330403`·`c6c73cdf` candidate는 재시도하지 않는다.
-- [ ] T-VN-M05-ACTIVATION — Map application fresh baseline의 기준 PostGIS image digest를 Compose에 고정한 committed Map revision을 PinVi pair·Manager pinset에 재결박하고, 그 새 candidate에서만 n150 isolated M04/M05 live mutating E2E와 activation attestation을 실행한다.
+- [ ] T-VN-M05-ACTIVATION — baseline PostGIS digest를 Compose에 고정해 병합한 Map `e6c08e25…`를 PinVi pair·Manager pinset에 재결박하고, 그 새 candidate에서만 n150 isolated M04/M05 live mutating E2E와 activation attestation을 실행한다.
 - [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
 - [ ] T-VN-41C — relay, reconciliation, consumer enable의 paired acceptance를 완료한다.
