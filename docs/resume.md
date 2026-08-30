@@ -1,5 +1,46 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-31 — `301` 적재와 head 값 고정 해제 (Map PR #1124 / Manager PR #276)
+
+`T-VN-M03`의 linkage migration `301_m03_import_children`을 얹었다. 그것을 막던 것은 배포
+계약이 아니라 `application_head = "300"` 리터럴 **Map 6곳 + Manager 11곳**이었고, 양쪽에서
+head를 파생값으로 바꿨다.
+
+- Map: `kortravelmap.infra.application_schema_head.application_schema_head()`가 migration
+  graph에서 단일 head를 유도(0개/2개면 fail-close). 배포 executable 넷 + `env.py` +
+  `api-entrypoint.sh` + `dagster-storage-migrate.py` + `run-admin-stack.sh`가 읽는다.
+- Manager: head는 paired receipt의 baseline contract와 candidate API image의 installed
+  graph **두 출처가 일치할 때만** 받는다(ADR-42).
+- `300`은 `BASELINE_ROOT_REVISION`으로만 남는다 — head가 아니라 역사적 좌표다.
+
+닫은 잠복 파손: `env.py`의 fresh 설치 facet 검증이 head가 움직이면 **조용히 꺼지던** 조건
+(봉인을 `on_version_apply` 콜백으로 옮기고 fail-close 추가), `api-entrypoint.sh`의 기동
+차단, `dagster-storage-migrate.py`의 DB 판정 arm, `run-admin-stack.sh`의 자기 DB 거절.
+
+게이트는 **열거에서 전수로** 바꿨다(`docker/`+`scripts/` 82개). 열거가 그 자체로
+사각지대였고 실제로 `run-admin-stack.sh`를 놓쳤다. 면제는 사유와 함께 선언해야 하고 죽은
+면제 항목도 실패다.
+
+### 다음 한 작업
+
+**`T-VN-M03` child command 발급.** `301` linkage 표와 identity 유도
+(`curation_import_children.py`), typed `manual_feature` payload(CSV opt-in 헤더 3개)는
+모두 있다. 남은 것은 **commit 경로가 실제로 child를 발급하고 linkage에 기록하는 것**이다.
+
+설계 §6.3이 child 하나에 `claim → Feature/core/initial state → origin → subtype/override →
+curation item → accepted link decision → child terminal result`를 귀속시킨다. 실행 순서에
+제약이 하나 있다 — `feature.create_manual_curation_item_with_feature_command`가
+`collection_id`를 요구하는데 collection은 `import_curation_rows` 안에서 만들어진다. 따라서
+child 발급 지점은 route가 아니라 **`import_curation_rows` 내부, collection 확정 직후 ·
+item upsert 직전**이다.
+
+`301` FK 6축의 대상 unique는 전부 실재를 확인했다
+(`uq_manual_feature_identity_claims_feature_command`,
+`uq_curation_import_rows_item_pointer`, `curation_import_plan_rows_pkey`,
+`pk_domain_commands`, 그리고 `301`이 스스로 더하는 둘). `_record_import_provenance`가
+행별 `(import_row_id, curation_item_id, decision_id)`를 **반환하지 않으므로** linkage를
+쓰려면 그 반환을 확장하는 것이 선행 증분이다.
+
 ## 2026-08-30 — provider 핀 동기화 완료, task 원장 무결성 복구
 
 PR #1123이 provider 핀 전수 동기화, Protocol 적합성 게이트, 페이지네이션 절단 보정,

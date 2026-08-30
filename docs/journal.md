@@ -1,5 +1,69 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — `301`을 얹고, 그것을 막던 head 값 고정을 양 저장소에서 걷어냈다
+
+`T-VN-M03`의 linkage migration(`ops.curation_import_manual_feature_children`)을 올리자
+무너진 것은 테스트 스냅샷이 아니라 **배포 계약**이었다.
+
+```
+fresh application 300 migration refused:
+installed active Alembic graph head is not exactly 300
+```
+
+`application_head = "300"`이 Map 6곳 + Manager 11곳에 리터럴로 박혀 있었다. 같은 값의
+사본이 서로 일치한다는 것을 **아무것도 강제하지 않았고**, migration을 하나 더하려면
+열일곱 곳을 한꺼번에 고쳐야 했다. 스키마 진화를 막은 것은 배포 안전성이 아니라 값
+고정이다.
+
+**head를 파생값으로.** `kortravelmap.infra.application_schema_head.application_schema_head()`가
+`_application_migration_graph.json`에서 단일 head를 유도하고, head가 0개거나 2개 이상이면
+fail-close한다. 배포 executable 넷과 `env.py`, `api-entrypoint.sh`,
+`dagster-storage-migrate.py`, `run-admin-stack.sh`가 이것을 읽는다. `300`은
+`BASELINE_ROOT_REVISION`으로 이름을 따로 받아 남는다 — `0236 → 300` handoff의 stamp
+목적지이자 Dagster metadata 격리 선언이 가리키는 역사적 좌표이고, head가 아니다.
+
+**가장 위험했던 것은 계약 검증이 아니라 조용히 꺼지는 자리들이었다.**
+
+`env.py:424`의 fresh 설치 facet 검증이 `raw_heads_before == () and raw_heads_after ==
+("300",)` 조건을 달고 있었다. child migration이 생기면 뒤 절이 **영구히 False**가 되어
+검증이 예외도 로그도 없이 사라진다. 조건을 넓히는 것은 답이 아니다 — 계약 SQL이
+`alembic_version = ARRAY['300']`을 못 박고 그 파일은 reference manifest digest로 봉인돼
+편집할 수 없다. 봉인을 **`300` 도달 순간**으로 옮겼다(`on_version_apply` 콜백; alembic이
+`update_to_step()`을 콜백보다 먼저 부르므로 그 시점 version row는 이미 `300`이다).
+콜백이 돌지 않은 fresh 설치는 `run_migrations()` 뒤에 raise한다 — 옮긴 것이지 없앤 것이
+아니다.
+
+`api-entrypoint.sh`와 `dagster-storage-migrate.py`도 같은 부류였다. 전자는 head!=300이면
+**프로덕션 API가 기동 실패**, 후자는 application DB 판정 arm이 조용히 False가 된다.
+Manager 쪽 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` 리터럴 셋도 같은 종류다(ADR-42).
+
+**게이트의 열거가 그 자체로 사각지대였다.** `docker/` 넷만 훑던 스캔이 `env.py`를
+두 번 놓쳤고, 넷을 여섯으로 늘린 뒤에도 `scripts/run-admin-stack.sh`의
+`revisions != [("300",)]`를 놓쳤다 — 그것을 찾은 것은 게이트가 아니라 손으로 판
+blast-radius 조사였다. 그래서 **열거를 버리고 `docker/`+`scripts/` 82개 파일 전수로**
+바꿨다. 면제는 파일 단위로 **사유와 함께** 선언해야 하고, 죽은 면제 항목도 실패다.
+
+**receipt CHECK는 열거로 남기되 갱신을 강제한다.**
+`ck_application_schema_operation_receipts_head`는 같은 표의 다른 CHECK 열 개와 달리 값
+열거다. 형식 검사로 낮추면 간단하지만 DB 층 fail-close 하나가 사라진다. 문제는 열거가
+아니라 **갱신 의무를 아무것도 강제하지 않는다는 것**이었다 — 잊으면 코드는 전부 통과하고
+프로덕션 fresh 설치만 죽는다. 그 의무를 정적 게이트로 옮겼고, 형식 검사로 낮추는 것까지
+함께 막는다.
+
+**변이로 확인했다.** head 리터럴 재고정(2건) · m05 harness 재고정(1건) · 두 출처 합의
+제거(1건) · 문법 검증 제거(6건) · `301`이 자기 head를 열거에서 뺌(1건) · CHECK를 형식
+검사로 낮춤(3건) · 면제 목록의 죽은 항목(1건). 전부 물었다.
+
+Manager 쪽은 값을 풀되 결박을 강화했다 — head는 paired receipt의 baseline
+contract(digest로 journal까지 결박)와 candidate API image의 installed
+graph(`ktm-application-schema head`) **두 출처가 일치할 때만** 받는다. 둘이 다르면
+재빌드 없이 receipt를 재사용한 상태이므로 거절한다. Manager PR #276 / ADR-42.
+
+미확인: `301`의 실 PostGIS 적용은 CI integration job이 본다(`unit` 통과가 선행 조건이라
+이번 반복까지 돌지 않았다). `scripts/create-application-300-fresh-oracle.sh`는 baseline
+재봉인 기계이며 `300` 고정이 정의상 맞지만, 그것이 candidate fresh installer(이제 head까지
+올린다)와 어긋나는지는 baseline 재cut 때 확인해야 한다.
+
 ## 2026-08-30 — provider 핀 전수 동기화와 Protocol 적합성 게이트
 
 형제 `python-*-api` 18개를 핀↔HEAD로 전수 대조했다. 핀 11개를 올리고 **2개는 의도적으로
