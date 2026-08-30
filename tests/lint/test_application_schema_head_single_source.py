@@ -218,35 +218,108 @@ def test_fresh_install_facet_verification_cannot_be_silently_skipped() -> None:
 #
 # 스캔 범위를 넓혀 같은 부류가 다시 생기지 못하게 한다.
 
-_EXTRA_DEPLOY_ASSETS = (
-    "api-entrypoint.sh",
-    "dagster-storage-migrate.py",
-)
+# 열거는 그 자체가 사각지대였다. `api-entrypoint.sh`/`dagster-storage-migrate.py`를
+# 더한 뒤에도 `scripts/run-admin-stack.sh`가 `revisions != [("300",)]`로 자기 DB를
+# 거절하고 있었고, 그것을 찾아낸 것은 이 게이트가 아니라 손으로 판 blast-radius
+# 조사였다. 그래서 **열거를 버리고 전수로 훑는다.**
+#
+# 훑는 대상은 `docker/`와 `scripts/`의 모든 executable이다. 면제는 파일 단위로
+# **사유와 함께** 선언해야 한다 — 새 파일이 조용히 사각지대에 들어가지 못한다.
+
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+
+_BASELINE_MACHINERY: dict[str, str] = {
+    "build-baseline.sh": (
+        "baseline 제작기. 정의상 `300` baseline만 만든다 — 다른 head의 baseline은 "
+        "재squash라는 별도 결정이다."
+    ),
+    "create-application-300-fresh-oracle.sh": (
+        "`0236 → 300` baseline artifact 검증용 disposable oracle. 검증 대상이 "
+        "baseline 그 자체이므로 목적지가 baseline root다."
+    ),
+    "rehearse-application-300-handoff.sh": (
+        "`0236 → 300` handoff 리허설. handoff의 목적지가 baseline root다."
+    ),
+    "build-application-300-paired-candidate.sh": (
+        "paired candidate receipt의 `forbidden_application_raw_revision`은 "
+        "'Dagster metadata DB는 application raw revision을 갖지 않는다'는 격리 "
+        "선언이며 baseline root를 가리킨다 — head가 아니다."
+    ),
+    "transition-application-schema-0236-to-300.py": (
+        "handoff executable. stamp 목적지가 baseline root다 "
+        "(`test_handoff_stamps_the_baseline_root_not_the_head`가 따로 고정한다)."
+    ),
+    "application-schema-fresh-300.py": (
+        "baseline root 도달 시점의 facet 봉인 분기에서 `BASELINE_ROOT_REVISION`을 "
+        "비교한다 — 상수를 통한 비교이므로 리터럴이 아니다."
+    ),
+}
+"""head 리터럴 비교가 **정당한** 파일과 그 사유.
+
+사유 없는 면제는 두지 않는다. 여기 이름을 더하는 것은 "이 파일의 `300`은 head가
+아니라 baseline root다"라는 주장이고, 그 주장이 틀리면 프로덕션이 죽는다.
+"""
+
+_COMPARISON_TOKENS = ("!=", "==", "= ANY", " -eq ", " = ", "= [", "!= [")
 
 
-@pytest.mark.parametrize("name", _EXTRA_DEPLOY_ASSETS)
-def test_deploy_assets_do_not_pin_the_head_literal(name: str) -> None:
-    """배포 자산이 head를 리터럴로 비교하지 않아야 한다.
+def _deploy_assets() -> list[Path]:
+    assets = [
+        path
+        for path in sorted(DOCKER_DIR.iterdir())
+        if path.is_file() and path.suffix in {".py", ".sh"}
+    ]
+    assets += [
+        path
+        for path in sorted(SCRIPTS_DIR.iterdir())
+        if path.is_file() and path.suffix in {".py", ".sh"}
+    ]
+    return assets
 
-    baseline root(`_BASELINE_ROOT_REVISION`) 선언은 허용한다 — 그것은 움직이지 않는
-    역사적 좌표다. 금지하는 것은 **비교**에 리터럴을 쓰는 것이다.
+
+def test_the_exemption_list_has_no_dead_entries() -> None:
+    """면제 목록이 실재하는 파일만 담아야 한다.
+
+    죽은 항목이 남으면 "면제됐다"는 착각으로 새 파일이 그 이름을 물려받을 수 있다.
     """
-    path = DOCKER_DIR / name
-    assert path.exists(), f"배포 자산이 사라졌다: {name}"
+    names = {path.name for path in _deploy_assets()}
+    dead = sorted(set(_BASELINE_MACHINERY) - names)
 
+    assert not dead, f"면제 목록에 존재하지 않는 파일이 있다: {dead}"
+
+
+def test_every_exemption_states_a_reason() -> None:
+    """사유 없는 면제를 금지한다."""
+    empty = sorted(
+        name for name, reason in _BASELINE_MACHINERY.items() if not reason.strip()
+    )
+
+    assert not empty, f"사유 없는 면제: {empty}"
+
+
+def test_no_deploy_asset_pins_the_head_literal() -> None:
+    """**이 게이트의 본체 — 전수.**
+
+    `docker/`와 `scripts/`의 모든 executable을 훑는다. baseline root 상수를 통한
+    비교는 허용하고, 금지하는 것은 **리터럴 비교**다.
+    """
     offenders: list[str] = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith(("#", "--")):
+    for path in _deploy_assets():
+        if path.name in _BASELINE_MACHINERY:
             continue
-        if "_BASELINE_ROOT_REVISION" in line:
-            continue
-        if not _HEAD_LITERAL.search(line) and "'300'" not in line:
-            continue
-        if any(token in line for token in ("!=", "==", "= ANY", " -eq ", " = ")):
-            offenders.append(f"{name}:{number}: {stripped[:80]}")
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith(("#", "--")):
+                continue
+            if "BASELINE_ROOT_REVISION" in line:
+                continue
+            if not _HEAD_LITERAL.search(line) and "'300'" not in line:
+                continue
+            if any(token in line for token in _COMPARISON_TOKENS):
+                offenders.append(f"{path.name}:{number}: {stripped[:80]}")
 
     assert not offenders, (
         "배포 자산이 application head를 리터럴로 비교한다 — head가 움직이면 "
-        "프로덕션이 죽거나 가드가 조용히 꺼진다:\n  " + "\n  ".join(offenders)
+        "프로덕션이 죽거나 가드가 조용히 꺼진다. 정당한 baseline root 비교라면 "
+        "`_BASELINE_MACHINERY`에 사유와 함께 선언할 것:\n  " + "\n  ".join(offenders)
     )
