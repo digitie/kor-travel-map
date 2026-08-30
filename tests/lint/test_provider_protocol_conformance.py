@@ -26,6 +26,27 @@ CI(``pip install -e ".[dev]"``)에 **설치조차 되지 않는다.**
    ``PROVIDER_MODEL_BINDINGS`` 또는 ``PROTOCOLS_WITHOUT_PROVIDER_MODEL`` 중
    정확히 한쪽에만 있어야 한다. 새 Protocol이 선언 없이 끼어들 수 없다.
 3. **결박된 Protocol의 모든 멤버가 실모델에 있다.** 이것이 본체다.
+
+## 무엇을 보지 못하는가 (과신 금지)
+
+이 게이트는 **모델 클래스의 멤버 *이름*** 만 본다. 아래는 통과시킨다 — provider 핀을
+올릴 때 사람이 따로 봐야 한다.
+
+- **타입 변경**: 이번 bump에서 knps ``KnpsGeoRecord.raw``가 ``dict[str, Any]`` →
+  ``dict[str, str | None]``으로 좁아졌다. 이름은 그대로라 green이다.
+- **alias 변경**: manifest는 field 이름을 담고 ``Field(alias=...)``는 담지 않는다.
+  krheritage가 ``manager``를 지우는 대신 ``ccbaAdmin`` alias를 바꿨다면 ``owner``는
+  그대로 있고 값만 전부 ``None``이 됐을 것이다.
+- **client 메서드·예외 이름**: ``restarea.list_all``/``oceans_beach_info``/
+  ``stations``/``iter_stations_in_bbox``와 ``getattr``로 해석하는 예외 이름들
+  (``_airkorea_retryable_types`` 등)은 결박 대상이 아니다.
+- **``raw`` dict 키**: kma 경로 전부가 여기 해당하며 ``PROTOCOLS_WITHOUT_PROVIDER_MODEL``
+  에 사유와 함께 면제돼 있다.
+- **provider 내부 동작**: 페이지네이션 종료 조건이나 파싱 관용도 변경(이번에
+  datagokr·krheritage 핀을 보류하게 만든 것)은 표면이 아니라 로직이다.
+
+즉 이 게이트는 "``HeritageDetail.manager``가 사라졌다" 부류만 확실히 잡는다.
+그것이 실제로 터진 부류이므로 값이 있지만, provider 감사를 대체하지는 않는다.
 """
 
 from __future__ import annotations
