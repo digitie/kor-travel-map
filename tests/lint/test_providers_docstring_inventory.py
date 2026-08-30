@@ -25,6 +25,7 @@ _PROVIDERS_DIR = Path(providers_pkg.__file__).parent
 _NOT_IN_TABLE = {
     "feature_operation_registry",  # operation key -> Dagster handler registry (T-VN-33)
     "knps_name_translations",  # knps가 쓰는 이름 대역표
+    "_source_models",  # Protocol <-> provider 실모델 결박 선언표 (적합성 게이트 입력)
 }
 
 
