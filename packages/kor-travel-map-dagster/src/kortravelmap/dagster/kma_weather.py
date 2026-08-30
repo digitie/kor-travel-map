@@ -369,6 +369,18 @@ class KmaGridTargets:
     membership_fingerprint: str
     """target 좌표·extra 좌표·dedupe 전량 격자 membership의 SHA-256."""
 
+    coords_out_of_grid: tuple[tuple[float, float], ...] = ()
+    """KMA DFS 격자 범위 밖이라 제외된 ``(lon, lat)`` — silent drop 금지.
+
+    ``python-kma-api`` ``0868b76b → a75d1e15``의 ``to_grid``가 투영 뒤
+    ``validate_grid(nx, ny)``(nx 1..149 / ny 1..253)를 호출해 범위 밖이면
+    ``ValueError``를 던진다. 종전에는 범위 밖 격자를 조용히 반환했다.
+
+    이 좌표들은 KMA 예보가 애초에 존재하지 않는 지점이므로 asset을 실패시키지
+    않는다 — 좌표 1건 때문에 전체 날씨 적재가 멈추는 것이 훨씬 나쁘다. 대신
+    호출부가 건수와 표본을 경고로 남긴다.
+    """
+
 
 def _grid_membership_fingerprint(
     *,
@@ -403,8 +415,16 @@ def map_grid_targets(
         raise ValueError("max_grids must be positive")
     ordered: list[tuple[int, int]] = []
     seen: set[tuple[int, int]] = set()
+    out_of_grid: list[tuple[float, float]] = []
     for lon, lat in [*target_coords, *extra_points]:
-        cell = to_grid(lat, lon)
+        try:
+            cell = to_grid(lat, lon)
+        except ValueError:
+            # provider ``kma.grid``의 ``validate_latlon``/``validate_grid``가
+            # 던지는 유일한 예외형이다. KMA 격자 밖 지점에는 예보가 없으므로
+            # 제외하되 조용히 버리지 않는다(``coords_out_of_grid``).
+            out_of_grid.append((lon, lat))
+            continue
         if cell not in seen:
             seen.add(cell)
             ordered.append(cell)
@@ -413,6 +433,7 @@ def map_grid_targets(
     return KmaGridTargets(
         grids=tuple(capped),
         grids_dropped=dropped,
+        coords_out_of_grid=tuple(out_of_grid),
         membership_fingerprint=_grid_membership_fingerprint(
             target_coords=target_coords,
             extra_points=extra_points,
@@ -645,6 +666,15 @@ async def _run_kma_weather_asset(
         to_grid=_kma_grid,
         max_grids=max_grids,
     )
+    if targets.coords_out_of_grid:
+        sample = ", ".join(f"({lon:.5f},{lat:.5f})" for lon, lat in targets.coords_out_of_grid[:5])
+        context.log.warning(
+            "KMA 격자 범위 밖 좌표 %d건을 대상에서 제외했다 (표본: %s). "
+            "해당 지점에는 KMA 예보가 존재하지 않는다 — 좌표 오류인지 "
+            "국외 지점인지 확인할 것.",
+            len(targets.coords_out_of_grid),
+            sample,
+        )
     if targets.grids_dropped:
         await _raise_kma_refresh_failure(
             context,

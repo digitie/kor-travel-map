@@ -197,3 +197,37 @@ def test_bound_protocol_members_exist_on_pinned_model(protocol_key: str) -> None
         return
 
     pytest.fail(f"{protocol_key}: manifest에 패키지 {package}가 없다")
+
+
+def test_contract_table_pins_match_pyproject() -> None:
+    """``provider-contract.md`` §12 표의 sha가 ``pyproject.toml`` 핀과 같아야 한다.
+
+    표는 사람이 provider 상태를 확인하는 유일한 1장 정본인데, 두 번이나 실제 핀의
+    **조상**을 가리킨 채 방치됐다(knps ``@5e88fb4``, airkorea ``@22996a4``).
+    낡은 표는 없는 표보다 나쁘다 — 대조했다고 착각하게 만든다.
+
+    표는 축약 sha를 쓰므로 접두사 일치로 본다.
+    """
+    contract = (REPO_ROOT / "docs" / "architecture" / "provider-contract.md").read_text(
+        encoding="utf-8"
+    )
+    declared = _declared_pins()
+
+    row_re = re.compile(
+        r"^\| (?P<dist>python-[a-z0-9-]+) \| `@(?P<sha>[0-9a-f]{7,40})`",
+        re.MULTILINE,
+    )
+    documented = {m.group("dist"): m.group("sha") for m in row_re.finditer(contract)}
+    assert documented, "provider-contract.md §12에서 핀 행을 하나도 읽지 못했다"
+
+    mismatched = [
+        f"{dist}: 표=@{sha} pyproject=@{declared[dist][: len(sha)]}"
+        for dist, sha in sorted(documented.items())
+        if dist in declared and not declared[dist].startswith(sha)
+    ]
+    assert not mismatched, (
+        "provider-contract.md §12 표와 pyproject.toml 핀이 어긋난다:\n  " + "\n  ".join(mismatched)
+    )
+
+    undocumented = sorted(set(declared) - set(documented))
+    assert not undocumented, f"pyproject에 핀이 있으나 §12 표에 행이 없다: {undocumented}"

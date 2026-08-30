@@ -1471,21 +1471,37 @@ def _enumerate_opinet_stations(
 
     bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
     """
+    invalid_parameter = _opinet_invalid_parameter_error_type()
     seen: set[str] = set()
     for min_lon, min_lat, max_lon, max_lat in bboxes:
-        for station in client.iter_stations_in_bbox(
-            min_lon=min_lon,
-            min_lat=min_lat,
-            max_lon=max_lon,
-            max_lat=max_lat,
-            radius_m=radius_m,
-        ):
-            uni_id = getattr(station, "uni_id", None)
-            if isinstance(uni_id, str):
-                if uni_id in seen:
-                    continue
-                seen.add(uni_id)
-            yield station
+        try:
+            stations = client.iter_stations_in_bbox(
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
+                radius_m=radius_m,
+            )
+            for station in stations:
+                uni_id = getattr(station, "uni_id", None)
+                if isinstance(uni_id, str):
+                    if uni_id in seen:
+                        continue
+                    seen.add(uni_id)
+                yield station
+        except invalid_parameter as exc:
+            # provider가 bbox 격자 셀 수 상한(`_MAX_BBOX_GRID_CELLS`)을 넘으면
+            # `OpinetInvalidParameterError`를 던진다. 셀 수는 bbox 넓이와
+            # radius_m의 함수인데 provider의 계산이 private이라 Map이 복제하면
+            # drift가 난다. 대신 실패를 **실제 설정 이름으로 번역**해, run 중간의
+            # 불투명한 provider 예외가 아니라 조치 가능한 설정 오류로 만든다.
+            raise RuntimeError(
+                "opinet bbox 격자가 provider 상한을 넘었다 — "
+                f"bbox=({min_lon},{min_lat},{max_lon},{max_lat}), "
+                f"opinet_scope_radius_m={radius_m}. "
+                "반경을 키우거나(기본 5000은 전국 bbox에서 안전) "
+                "OPINET_SCOPE_BBOX를 좁게 나눌 것."
+            ) from exc
 
 
 def _center_radius_to_bbox(
@@ -1766,6 +1782,22 @@ def _opinet_sample_grid_centers() -> Iterator[tuple[float, float]]:
                 yield center
             lon += _OPINET_SAMPLE_GRID_STEP_DEGREES
         lat += _OPINET_SAMPLE_GRID_STEP_DEGREES
+
+
+def _opinet_invalid_parameter_error_type() -> type[Exception]:
+    """``OpinetInvalidParameterError``를 lazy resolve한다 (ADR-006 — 직접 import 금지).
+
+    provider에 없으면 아무것도 잡지 않도록 절대 매칭되지 않는 예외형을 돌려준다.
+    """
+    opinet = importlib.import_module("opinet")
+    resolved = getattr(opinet, "OpinetInvalidParameterError", None)
+    if isinstance(resolved, type) and issubclass(resolved, Exception):
+        return resolved
+    return _NeverRaised
+
+
+class _NeverRaised(Exception):
+    """provider 예외형을 해석하지 못했을 때의 no-op sentinel."""
 
 
 def _opinet_no_data_error_type() -> type[Exception]:

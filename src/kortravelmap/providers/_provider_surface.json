@@ -69,13 +69,29 @@
             "dataset_name",
             "endpoint",
             "method_names",
+            "optional_params",
             "portal_url",
+            "required_params",
             "service_key_param",
             "service_key_url",
             "service_label",
             "service_name",
             "to_dict",
             "url"
+          ]
+        },
+        "airkorea.catalog.ParamSpec": {
+          "external_bases": [],
+          "members": [
+            "default",
+            "help",
+            "kind",
+            "label",
+            "min_value",
+            "name",
+            "options",
+            "required",
+            "to_dict"
           ]
         },
         "airkorea.client.AirKoreaClient": {
@@ -658,14 +674,53 @@
         }
       },
       "package": "airkorea",
-      "pinned_sha": "a206282c4aff574dcb5689f97cca301072c09095"
+      "pinned_sha": "c4c8d122743522268df38f20128ec5d1a6e84455"
     },
     "python-datagokr-api": {
       "classes": {
+        "datagokr.catalog.ApiCatalogEntry": {
+          "external_bases": [],
+          "members": [
+            "bound_args",
+            "data_source",
+            "default_num_of_rows",
+            "description_lines",
+            "endpoint",
+            "key",
+            "label",
+            "list_method",
+            "num_rows_kwarg",
+            "num_rows_wire_param",
+            "optional_params",
+            "page_no_wire_param",
+            "required_params",
+            "response_type_choices",
+            "response_type_param",
+            "service_attr",
+            "service_key_env_names",
+            "service_key_param",
+            "service_key_url",
+            "supports_response_type",
+            "title"
+          ]
+        },
+        "datagokr.catalog.ParamSpec": {
+          "external_bases": [],
+          "members": [
+            "choices",
+            "default",
+            "help",
+            "kind",
+            "label",
+            "name",
+            "required"
+          ]
+        },
         "datagokr.client.DataGoKrClient": {
           "external_bases": [],
           "members": [
             "close",
+            "debug_fetch",
             "save_to_local",
             "save_to_rustfs"
           ]
@@ -682,6 +737,20 @@
             "rustfs_region_name",
             "rustfs_secret_access_key",
             "timeout"
+          ]
+        },
+        "datagokr.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace"
           ]
         },
         "datagokr.exceptions.ApiErrorResponse": {
@@ -710,6 +779,20 @@
         "datagokr.exceptions.TransportError": {
           "external_bases": [
             "Exception"
+          ],
+          "members": []
+        },
+        "datagokr.exceptions.UnknownDatasetError": {
+          "external_bases": [
+            "Exception",
+            "KeyError"
+          ],
+          "members": []
+        },
+        "datagokr.exceptions.ValidationError": {
+          "external_bases": [
+            "Exception",
+            "ValueError"
           ],
           "members": []
         },
@@ -1008,13 +1091,27 @@
           "members": [
             "iter_all",
             "iter_pages",
-            "list"
+            "list",
+            "num_rows_param",
+            "page_no_param"
           ]
         },
         "datagokr.services.openapi.KwaterSluiceService": {
           "external_bases": [],
           "members": [
-            "hour_list"
+            "day_list",
+            "hour_list",
+            "ten_minute_list"
+          ]
+        },
+        "datagokr.services.pagination._PageLike": {
+          "external_bases": [
+            "Protocol"
+          ],
+          "members": [
+            "items",
+            "num_of_rows",
+            "total_pages"
           ]
         },
         "datagokr.services.standard.CulturalFestivalService": {
@@ -1095,7 +1192,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "48e458b1f06656a94474f9b08e87cefc3c9c9526"
+      "pinned_sha": "b8f1254871b28e9fbb10bfdd79a89580b8c0d76d"
     },
     "python-khoa-api": {
       "classes": {
@@ -1416,6 +1513,7 @@
             "detail_address",
             "forecasts",
             "id",
+            "index_type",
             "lat",
             "latitude",
             "legal_dong_code",
@@ -1428,7 +1526,6 @@
             "road_address",
             "road_address_code",
             "road_name_code",
-            "service_key",
             "zipcode"
           ]
         },
@@ -1636,7 +1733,7 @@
         }
       },
       "package": "khoa",
-      "pinned_sha": "20c720741c4c041a49332ca2b26703801f0de1a9"
+      "pinned_sha": "bc6fe221ceada92abf808c91dec6dafc90d5f225"
     },
     "python-kma-api": {
       "classes": {
@@ -1661,13 +1758,16 @@
             "adiscover_services",
             "aio",
             "aio_from_env",
+            "aiter_pages",
             "aopen_api",
             "arequest_path",
             "arequest_query_parts",
             "close",
+            "debug_fetch_endpoint",
             "discover_endpoints",
             "discover_services",
             "from_env",
+            "iter_pages",
             "open_api",
             "request_path",
             "request_query_parts"
@@ -1748,6 +1848,7 @@
             "discover_endpoints",
             "discover_services",
             "from_env",
+            "iter_pages",
             "open_api",
             "request_path",
             "request_query_parts"
@@ -1769,6 +1870,7 @@
             "air_info_service_get_air_info",
             "air_metar_dec",
             "air_port_service_get_air_port",
+            "aiter_pages",
             "alw_aws_aws_obs_pnt",
             "alw_aws_aws_ww_pnt",
             "alw_sea_sea_obs_pnt",
@@ -1863,6 +1965,7 @@
             "coms_stn_ca",
             "coms_stns",
             "coms_stns_vars",
+            "debug_fetch_endpoint",
             "dfs_latlon_api",
             "dfs_latlon_file_down",
             "dfs_nph_dfs_shrt_ana_5d_test",
@@ -1944,6 +2047,7 @@
             "ifs_ilvl_zone_cnt_3",
             "ifs_ilvl_zone_cnt_4",
             "image_endpoint",
+            "iter_pages",
             "kim_grib_pt_tmef",
             "kim_grib_pt_tmfc",
             "kim_grib_pt_txt1",
@@ -2260,12 +2364,17 @@
             "credential_param",
             "dataset_id",
             "dataset_name",
+            "endpoint_path",
             "gateway",
             "has_apihub_equivalent",
             "label",
             "operation",
+            "optional_params",
             "page",
+            "param_defaults",
             "portal_url",
+            "required_params",
+            "response_kind",
             "service",
             "service_key_url"
           ]
@@ -2309,6 +2418,7 @@
             "forecast_short",
             "from_env",
             "now",
+            "session",
             "version"
           ]
         },
@@ -2364,6 +2474,7 @@
             "dataset",
             "dataset_items",
             "datasets",
+            "debug_fetch",
             "earthquake_info",
             "earthquake_message",
             "earthquake_message_list",
@@ -2414,6 +2525,20 @@
             "portal_url",
             "service",
             "title"
+          ]
+        },
+        "kma.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace"
           ]
         },
         "kma.enums.ForecastPrecipitationType": {
@@ -2524,6 +2649,14 @@
           ]
         },
         "kma.exceptions.KmaServerError": {
+          "external_bases": [
+            "Exception"
+          ],
+          "members": [
+            "metadata"
+          ]
+        },
+        "kma.exceptions.KmaValidationError": {
           "external_bases": [
             "Exception"
           ],
@@ -2801,10 +2934,16 @@
           "members": [
             "model_config"
           ]
+        },
+        "kma.pagination.PaginationLimitWarning": {
+          "external_bases": [
+            "RuntimeWarning"
+          ],
+          "members": []
         }
       },
       "package": "kma",
-      "pinned_sha": "0868b76bd4b7de96b20f667e431c3f43b67cb537"
+      "pinned_sha": "a75d1e15ef1965f4d874f23b9e8f5610f6e0ad93"
     },
     "python-knps-api": {
       "classes": {
@@ -2834,10 +2973,29 @@
             "text"
           ]
         },
-        "knps._ratelimit.AsyncTokenBucket": {
+        "knps._ratelimit.AsyncRateLimiter": {
           "external_bases": [],
           "members": [
             "acquire"
+          ]
+        },
+        "knps.catalog.DatasetOperation": {
+          "external_bases": [],
+          "members": [
+            "description",
+            "key",
+            "label",
+            "params"
+          ]
+        },
+        "knps.catalog.OperationParam": {
+          "external_bases": [],
+          "members": [
+            "default",
+            "help",
+            "kind",
+            "name",
+            "required"
           ]
         },
         "knps.client.KnpsClient": {
@@ -2863,6 +3021,20 @@
             "timeout"
           ]
         },
+        "knps.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace"
+          ]
+        },
         "knps.exceptions.KnpsApiError": {
           "external_bases": [
             "Exception"
@@ -2872,14 +3044,6 @@
           ]
         },
         "knps.exceptions.KnpsAuthError": {
-          "external_bases": [
-            "Exception"
-          ],
-          "members": [
-            "metadata"
-          ]
-        },
-        "knps.exceptions.KnpsNoDataError": {
           "external_bases": [
             "Exception"
           ],
@@ -3140,7 +3304,7 @@
         }
       },
       "package": "knps",
-      "pinned_sha": "16e395463e9ae510e1c484bfa00be3fc486af082"
+      "pinned_sha": "43f2917ee3727e8d615aa85ab6ae35dcf3e75fd3"
     },
     "python-krairport-api": {
       "classes": {
@@ -3218,6 +3382,7 @@
             "from_env",
             "iiac_raw_items",
             "iter_pages",
+            "kac_flight_status_detail_raw_items",
             "kac_raw_items",
             "nearest_airport",
             "parking_fees",
@@ -3261,6 +3426,7 @@
             "from_env",
             "iiac_raw_items",
             "iter_pages",
+            "kac_flight_status_detail_raw_items",
             "kac_raw_items",
             "nearest_airport",
             "parking_fees",
@@ -3795,6 +3961,7 @@
             "arrivals",
             "departures",
             "flight_schedules",
+            "flight_status_detail_raw_items",
             "jeju_taxi_wait",
             "parking_fees",
             "parking_status",
@@ -3811,6 +3978,7 @@
             "close",
             "departures",
             "flight_schedules",
+            "flight_status_detail_raw_items",
             "jeju_taxi_wait",
             "parking_fees",
             "parking_status",
@@ -3819,7 +3987,7 @@
         }
       },
       "package": "krairport",
-      "pinned_sha": "b8854137f26be4ae14c1693b83b425ee37c60655"
+      "pinned_sha": "cbe4d1380dc0388c078e8ae4622d3e580717064b"
     },
     "python-krex-api": {
       "classes": {
@@ -4473,7 +4641,7 @@
         }
       },
       "package": "krex",
-      "pinned_sha": "ddd69cd29cb3b1ce811bfe5e8550399655bba06e"
+      "pinned_sha": "c6d8717ec2b712cc952bc566b351f07a7cd3824a"
     },
     "python-krforest-api": {
       "classes": {
@@ -4541,7 +4709,6 @@
           "external_bases": [],
           "members": [
             "aclose",
-            "aio",
             "catalog",
             "debug_endpoint",
             "endpoints",
@@ -4678,7 +4845,9 @@
             "model_config",
             "notes",
             "operation",
+            "optional_params",
             "provider",
+            "required_params",
             "response_format",
             "response_type_param",
             "service",
@@ -4715,8 +4884,11 @@
             "key",
             "kind",
             "model_config",
+            "notes",
             "operation",
+            "optional_params",
             "provider",
+            "required_params",
             "response_format",
             "response_type_param",
             "service",
@@ -4959,7 +5131,7 @@
         }
       },
       "package": "krforest",
-      "pinned_sha": "4681bc7892239adc28aeeab19dba707aefb1dbde"
+      "pinned_sha": "05676f35b0b79cce6ce0705d32d5146c6a7a0bbb"
     },
     "python-krheritage-api": {
       "classes": {
@@ -5915,7 +6087,8 @@
         },
         "mois.exceptions.MoisRequestError": {
           "external_bases": [
-            "Exception"
+            "Exception",
+            "ValueError"
           ],
           "members": []
         },
@@ -5931,6 +6104,7 @@
             "aclose",
             "download",
             "download_bytes",
+            "download_to_rustfs",
             "iter",
             "iter_file",
             "load",
@@ -5944,6 +6118,7 @@
             "close",
             "download",
             "download_bytes",
+            "download_to_rustfs",
             "iter",
             "iter_file",
             "load",
@@ -6191,6 +6366,8 @@
             "info_operation",
             "info_url",
             "name",
+            "optional_params",
+            "required_params",
             "service_name",
             "slug",
             "title"
@@ -6250,10 +6427,44 @@
             "to_geojson_position",
             "to_wkt"
           ]
+        },
+        "mois.rustfs.AsyncFileChunkIterator": {
+          "external_bases": [],
+          "members": []
+        },
+        "mois.rustfs.AsyncRustfsClient": {
+          "external_bases": [],
+          "members": [
+            "ensure_bucket",
+            "put_file"
+          ]
+        },
+        "mois.rustfs.EffectiveRustfsConfig": {
+          "external_bases": [],
+          "members": [
+            "access_key",
+            "bucket",
+            "credentials_configured",
+            "enabled",
+            "endpoint_url",
+            "force_path_style",
+            "from_env",
+            "object_key",
+            "prefix",
+            "region",
+            "secret_key"
+          ]
+        },
+        "mois.rustfs.RustfsClient": {
+          "external_bases": [],
+          "members": [
+            "ensure_bucket",
+            "put_file"
+          ]
         }
       },
       "package": "mois",
-      "pinned_sha": "bc6f742feb8b6e28c9b889aa71a4cac9c489091c"
+      "pinned_sha": "f44c2d0985e89d7f59302dd80debc2211fda9d4f"
     },
     "python-opinet-api": {
       "classes": {
@@ -6301,6 +6512,14 @@
             "get"
           ]
         },
+        "opinet._http._CertkeyLogFilter": {
+          "external_bases": [
+            "Filter"
+          ],
+          "members": [
+            "filter"
+          ]
+        },
         "opinet.catalog.ApiCatalogItem": {
           "external_bases": [],
           "members": [
@@ -6325,6 +6544,7 @@
             "allowed_values",
             "default",
             "description",
+            "kind",
             "label",
             "name",
             "required"
@@ -6350,6 +6570,7 @@
             "aio",
             "close",
             "debug",
+            "debug_fetch",
             "get_area_codes",
             "get_lowest_price_top20",
             "get_national_average_price",
@@ -6425,7 +6646,6 @@
           "external_bases": [],
           "members": [
             "api_key",
-            "base_url",
             "from_env",
             "max_retries",
             "retry_backoff",
@@ -6454,11 +6674,18 @@
         "opinet.debug.OpinetDebugClient": {
           "external_bases": [],
           "members": [
+            "debug_fetch",
             "get_area_codes",
             "get_lowest_price_top20",
             "get_national_average_price",
             "get_station_detail",
             "search_stations_around"
+          ]
+        },
+        "opinet.debug._RecordingTransport": {
+          "external_bases": [],
+          "members": [
+            "get"
           ]
         },
         "opinet.exceptions.OpinetAuthError": {
@@ -6748,6 +6975,7 @@
         },
         "opinet.vworld._OpinetAreaClient": {
           "external_bases": [
+            "Hashable",
             "Protocol"
           ],
           "members": [
@@ -6764,7 +6992,7 @@
         }
       },
       "package": "opinet",
-      "pinned_sha": "bb6385caebe204b781a3ba9544efa04d5fe68671"
+      "pinned_sha": "356cb0eaad46e4d1896092b164ff4ba08ede25c0"
     },
     "python-visitkorea-api": {
       "classes": {
@@ -6894,6 +7122,20 @@
             "search_festival",
             "search_keyword",
             "search_stay"
+          ]
+        },
+        "visitkorea.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace"
           ]
         },
         "visitkorea.display.CopyrightDisplayInfo": {
@@ -7134,6 +7376,7 @@
             "call",
             "catalog",
             "close",
+            "debug_fetch",
             "from_env",
             "iter_pages",
             "related_tour",
@@ -7560,7 +7803,7 @@
         }
       },
       "package": "visitkorea",
-      "pinned_sha": "cebf543d331423910cf7d2748c022665e538c201"
+      "pinned_sha": "2406531315495e8b1158348ee3503e08a6717958"
     }
   },
   "version": 1
