@@ -252,9 +252,18 @@ def _guard_application_schema_operation() -> bool:
             "0236_tvn41s_compaction_drained"
         )
 
+    # handoff는 baseline root로 **stamp**한다. graph의 head가 아니라 그 목적지가
+    # graph에 있는지를 본다 — head로 결박하면 child migration을 하나 더하는 순간 이
+    # 다리가 막힌다. `docker/transition-application-schema-0236-to-300.py`도 같은
+    # 이유로 이미 고쳤는데 여기가 남아 있었다.
     script = ScriptDirectory.from_config(config)
-    if tuple(script.get_heads()) != (_BASELINE_300_REVISION,):
-        raise RuntimeError("0236-to-300 handoff requires active graph head exactly 300")
+    try:
+        script.get_revision(_BASELINE_300_REVISION)
+    except Exception as exc:
+        raise RuntimeError(
+            "0236-to-300 handoff requires the active graph to contain "
+            f"{_BASELINE_300_REVISION}"
+        ) from exc
     _require_application_handoff_capability()
 
     def stamp_baseline_300_after_purge(
@@ -421,7 +430,27 @@ def do_run_migrations(connection: Connection) -> None:
         raw_heads_before = _raw_alembic_heads(connection)
         context.run_migrations()
         raw_heads_after = _raw_alembic_heads(connection)
-        if raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,):
+        if raw_heads_before == ():
+            # fresh 설치의 destination facet 봉인. **조건을 좁히지 마라** —
+            # 종전에는 `raw_heads_after == (_BASELINE_300_REVISION,)`을 함께 요구했는데,
+            # active graph에 child migration이 하나라도 생기면 그 조건이 영구히 False가
+            # 되어 이 검증이 **예외도 로그도 없이 사라진다.** 그 상태에서 배포
+            # executable 경로를 타지 않는 모든 설치(통합 fixture, local-dev
+            # `alembic upgrade head`, oracle 생성 스크립트의 raw upgrade)가 facet 검증
+            # 없이 통과한다.
+            #
+            # facet 계약(`application-destination-alembic-version.sql`)은 아직
+            # `ARRAY['300']`으로 baseline root를 못 박고 있으므로, baseline root가 아닌
+            # 곳에 도달한 fresh 설치는 **지원하지 않는다고 시끄럽게 말한다.** 조용히
+            # 건너뛰는 것과 명시적으로 거절하는 것 사이에서 후자를 고른다.
+            if raw_heads_after != (_BASELINE_300_REVISION,):
+                raise RuntimeError(
+                    "fresh install landed on "
+                    f"{raw_heads_after!r} instead of the baseline root "
+                    f"{_BASELINE_300_REVISION!r}; the destination facet contract still "
+                    "pins the baseline root, so this path is unsupported until the "
+                    "contract checkpoint moves"
+                )
             _verify_fresh_300_destination_facet(connection)
         if sanctioned_handoff and raw_heads_after != (_BASELINE_300_REVISION,):
             raise RuntimeError(

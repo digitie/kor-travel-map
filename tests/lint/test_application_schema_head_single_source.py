@@ -139,3 +139,60 @@ def test_head_consumer_module_imports_cleanly(name: str) -> None:
 
     declared = getattr(module, "_HEAD", None) or getattr(module, "_DESTINATION_HEAD", None)
     assert declared == application_schema_head()
+
+
+# -- alembic/env.py --------------------------------------------------------
+#
+# 이 파일은 `_HEAD_CONSUMERS`(docker/)에 없어서 위 스캔이 훑지 않는다. 실제로 그
+# 사각지대에서 두 가지가 놓쳤다 — handoff가 graph head로 결박된 채 남아 있었고, fresh
+# 설치 facet 검증이 head가 바뀌면 **조용히 꺼지는** 조건을 달고 있었다.
+
+_ENV = Path(__file__).resolve().parents[2] / "alembic" / "env.py"
+
+
+def test_env_baseline_constant_matches_the_shared_root() -> None:
+    """`env.py`의 baseline 상수가 공유 정본과 같아야 한다.
+
+    리터럴로 두는 것 자체는 문제가 아니다(retired revision 스캔이 정적으로 해소해야
+    한다). 사본이 정본과 **어긋나는 것**이 문제다.
+    """
+    source = _ENV.read_text(encoding="utf-8")
+
+    assert f'_BASELINE_300_REVISION = "{BASELINE_ROOT_REVISION}"' in source
+
+
+def test_env_handoff_is_not_bound_to_the_graph_head() -> None:
+    """handoff는 stamp 목적지가 graph에 있는지만 보아야 한다.
+
+    `docker/transition-...`은 고쳤는데 `env.py`가 같은 결박을 들고 남아 있었다.
+    """
+    source = _ENV.read_text(encoding="utf-8")
+
+    assert "script.get_heads()) != (_BASELINE_300_REVISION,)" not in source, (
+        "env.py handoff가 graph head로 결박돼 있다 — child migration 하나면 막힌다"
+    )
+
+
+def test_fresh_install_facet_verification_cannot_be_silently_skipped() -> None:
+    """**이 게이트의 본체.**
+
+    종전 조건은 `raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,)`
+    이었다. child migration이 생기면 뒤 절이 영구히 False가 되어
+    `_verify_fresh_300_destination_facet`이 예외도 로그도 없이 **호출되지 않는다.**
+    배포 executable 경로를 타지 않는 모든 설치가 facet 검증 없이 통과하게 된다.
+
+    조용히 꺼지는 대신 시끄럽게 거절해야 한다.
+    """
+    source = _ENV.read_text(encoding="utf-8")
+
+    assert (
+        "if raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,):"
+        not in source
+    ), (
+        "fresh 설치 facet 검증이 head 일치를 조건에 달고 있다 — head가 움직이면 "
+        "검증이 조용히 사라진다. 도달점이 baseline root가 아니면 raise할 것"
+    )
+    assert "if raw_heads_before == ():" in source, (
+        "fresh 설치 판정은 `raw_heads_before == ()` 하나여야 한다"
+    )
+    assert "_verify_fresh_300_destination_facet(connection)" in source
