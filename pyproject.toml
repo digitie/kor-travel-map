@@ -127,7 +127,10 @@ providers = [
   "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@4681bc7892239adc28aeeab19dba707aefb1dbde",
   # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
   # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@6076b523fac9226d365136518db4d219cb6339c6",
+  # 8cde3af: HeritageDetail.manager 삭제 — 부모 HeritageSummary.owner(같은 alias
+  # ccbaAdmin)로 일원화(provider 1492954). Map providers/krheritage.py의
+  # KrHeritageItem.manager → owner 재결박 필요(BREAKING, 값 의미는 동일).
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c",
   "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@b8854137f26be4ae14c1693b83b425ee37c60655",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
