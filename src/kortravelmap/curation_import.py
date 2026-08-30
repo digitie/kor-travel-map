@@ -6,6 +6,7 @@ import csv
 import io
 import json
 from dataclasses import dataclass, replace
+from decimal import Decimal, InvalidOperation
 from typing import Final, Literal, cast
 
 CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
@@ -31,6 +32,22 @@ CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
     "item_summary",
     "metadata_json",
 )
+CURATION_CSV_OPTIONAL_HEADERS: Final[tuple[str, ...]] = (
+    "manual_feature_kind",
+    "manual_feature_lon",
+    "manual_feature_lat",
+)
+"""T-VN-M03 — 행이 manual Feature를 **만들도록** 지시하는 선택 header.
+
+파일 단위 opt-in이다. 없으면 기존 CSV가 그대로 유효하고, 있으면 세 개가 함께 있어야
+한다. 좌표를 `metadata_json`에 숨기지 않고 **typed 열**로 받는 이유는 설계
+§6.1이 "`metadata_json`에 untyped input을 숨기지 않는다"를 요구하기 때문이고,
+주소에서 좌표를 추론하지 않는 이유는 §7이 "CSV 제목·주소 기반 Feature 추정 생성"을
+비목표로 명시하기 때문이다 — 그래서 좌표는 **명시적으로 실려야** 한다.
+"""
+
+_MANUAL_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"place", "event"})
+
 CURATION_CSV_MAX_BYTES: Final = 2 * 1024 * 1024
 CURATION_CSV_MAX_ROWS: Final = 2_000
 CURATION_CSV_MAX_CELL_LENGTH: Final = 10_000
@@ -88,6 +105,11 @@ class CurationImportRow:
     item_title: str
     item_summary: str
     metadata_json: dict[str, object]
+    manual_feature_kind: str
+    """비면 이 행은 manual Feature를 만들지 않는다. 아니면 ``place``/``event``."""
+
+    manual_feature_lon: Decimal | None
+    manual_feature_lat: Decimal | None
     issues: tuple[CurationImportIssue, ...]
 
     @property
@@ -224,8 +246,22 @@ def _validate_headers(headers: tuple[str, ...]) -> tuple[CurationImportIssue, ..
                     column=header,
                 )
             )
+    known = set(CURATION_CSV_HEADERS) | set(CURATION_CSV_OPTIONAL_HEADERS)
+    optional_present = sorted(h for h in CURATION_CSV_OPTIONAL_HEADERS if h in seen)
+    if optional_present and len(optional_present) != len(CURATION_CSV_OPTIONAL_HEADERS):
+        missing = sorted(set(CURATION_CSV_OPTIONAL_HEADERS) - set(optional_present))
+        issues.append(
+            CurationImportIssue(
+                code="partial_manual_feature_headers",
+                message=(
+                    "manual Feature header는 전부 함께 있어야 합니다. "
+                    f"없는 header: {', '.join(missing)}"
+                ),
+                column=missing[0],
+            )
+        )
     for header in headers:
-        if header not in CURATION_CSV_HEADERS:
+        if header not in known:
             issues.append(
                 CurationImportIssue(
                     code="unexpected_header",
@@ -251,10 +287,13 @@ def _parse_row(
             )
         )
 
-    values = {
-        header: (cells[index].strip() if index < len(cells) else "")
-        for index, header in enumerate(headers)
-    }
+    values = dict.fromkeys(CURATION_CSV_OPTIONAL_HEADERS, "")
+    values.update(
+        {
+            header: (cells[index].strip() if index < len(cells) else "")
+            for index, header in enumerate(headers)
+        }
+    )
     for index, cell in enumerate(cells):
         if len(cell) > CURATION_CSV_MAX_CELL_LENGTH:
             column = headers[index] if index < len(headers) else None
@@ -286,6 +325,49 @@ def _parse_row(
             )
         )
 
+    manual_kind = values["manual_feature_kind"]
+    manual_lon = manual_lat = None
+    if manual_kind:
+        if manual_kind not in _MANUAL_FEATURE_KINDS:
+            issues.append(
+                CurationImportIssue(
+                    code="invalid_manual_feature_kind",
+                    message="manual_feature_kind는 place 또는 event여야 합니다.",
+                    row_number=row_number,
+                    column="manual_feature_kind",
+                )
+            )
+        if values["feature_id"]:
+            # 기존 Feature를 가리키면서 동시에 새로 만들 수는 없다. 둘 다 주면
+            # 어느 쪽이 이기는지 파일만 보고 알 수 없으므로 거절한다.
+            issues.append(
+                CurationImportIssue(
+                    code="manual_feature_conflicts_with_feature_id",
+                    message="feature_id와 manual_feature_kind는 함께 쓸 수 없습니다.",
+                    row_number=row_number,
+                    column="manual_feature_kind",
+                )
+            )
+        manual_lon = _parse_coordinate(
+            values["manual_feature_lon"], row_number, "manual_feature_lon", 180, issues
+        )
+        manual_lat = _parse_coordinate(
+            values["manual_feature_lat"], row_number, "manual_feature_lat", 90, issues
+        )
+    else:
+        for column in ("manual_feature_lon", "manual_feature_lat"):
+            if values[column]:
+                issues.append(
+                    CurationImportIssue(
+                        code="manual_feature_kind_missing",
+                        message=(
+                            f"{column}이 있으면 manual_feature_kind도 있어야 합니다."
+                        ),
+                        row_number=row_number,
+                        column=column,
+                    )
+                )
+
     integers = {
         column: _parse_integer(values[column], row_number, column, issues)
         for column in _INTEGER_COLUMNS
@@ -315,8 +397,59 @@ def _parse_row(
         item_title=values["item_title"],
         item_summary=values["item_summary"],
         metadata_json=metadata,
+        manual_feature_kind=manual_kind,
+        manual_feature_lon=manual_lon,
+        manual_feature_lat=manual_lat,
         issues=tuple(issues),
     )
+
+
+def _parse_coordinate(
+    value: str,
+    row_number: int,
+    column: str,
+    limit: int,
+    issues: list[CurationImportIssue],
+) -> Decimal | None:
+    """WGS84 좌표 한 성분을 ``Decimal``로 읽는다.
+
+    ``float``가 아니라 ``Decimal``인 이유는 CSV에 적힌 자릿수를 그대로 보존해야
+    canonical payload SHA-256이 재현 가능하기 때문이다 — ``0.1`` 같은 값이 float
+    왕복에서 달라지면 같은 파일이 다른 SHA를 낸다.
+    """
+    if not value:
+        issues.append(
+            CurationImportIssue(
+                code="manual_feature_coordinate_missing",
+                message=f"manual Feature에는 {column}이 필요합니다.",
+                row_number=row_number,
+                column=column,
+            )
+        )
+        return None
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation:
+        issues.append(
+            CurationImportIssue(
+                code="invalid_coordinate",
+                message=f"좌표 형식이 아닙니다: {column}",
+                row_number=row_number,
+                column=column,
+            )
+        )
+        return None
+    if not parsed.is_finite() or abs(parsed) > limit:
+        issues.append(
+            CurationImportIssue(
+                code="coordinate_out_of_range",
+                message=f"{column}은 -{limit}~{limit} 범위여야 합니다.",
+                row_number=row_number,
+                column=column,
+            )
+        )
+        return None
+    return parsed
 
 
 def _parse_integer(

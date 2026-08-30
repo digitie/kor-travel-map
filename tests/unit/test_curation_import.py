@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from decimal import Decimal
 
 import pytest
 
@@ -12,6 +13,7 @@ from kortravelmap.curation_import import (
     CURATION_CSV_MAX_BYTES,
     CURATION_CSV_MAX_CELL_LENGTH,
     CURATION_CSV_MAX_ROWS,
+    CURATION_CSV_OPTIONAL_HEADERS,
     CURATION_INTEGER_MAX,
     parse_curation_csv,
 )
@@ -273,3 +275,127 @@ def _csv_bytes(
     writer.writerows(rows)
     content = stream.getvalue().encode("utf-8")
     return (b"\xef\xbb\xbf" + content) if bom else content
+
+
+# -- T-VN-M03 manual Feature 선택 header -----------------------------------
+#
+# 좌표를 `metadata_json`이 아니라 typed 열로 받는다(설계 §6.1). 주소에서 추론하지
+# 않는다(§7). 그래서 파일이 좌표를 **명시적으로** 실어야 하고, 그 계약을 여기서
+# 고정한다.
+
+_MANUAL_HEADERS = (*CURATION_CSV_HEADERS, *CURATION_CSV_OPTIONAL_HEADERS)
+
+
+def test_manual_feature_headers_are_optional() -> None:
+    """선택 header가 없는 기존 CSV는 그대로 유효하고 manual Feature를 만들지 않는다."""
+    preview = parse_curation_csv(_csv_bytes(_valid_row()))
+
+    assert preview.has_errors is False
+    row = preview.rows[0]
+    assert row.manual_feature_kind == ""
+    assert row.manual_feature_lon is None
+    assert row.manual_feature_lat is None
+
+
+def test_manual_feature_row_parses_typed_coordinates() -> None:
+    """좌표는 CSV에 적힌 자릿수 그대로 ``Decimal``로 보존된다.
+
+    canonical payload SHA-256이 재현 가능해야 하므로 float 왕복을 쓰지 않는다.
+    """
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                manual_feature_kind="place",
+                manual_feature_lon="126.99100",
+                manual_feature_lat="37.57960",
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    assert preview.has_errors is False
+    row = preview.rows[0]
+    assert row.manual_feature_kind == "place"
+    assert row.manual_feature_lon == Decimal("126.99100")
+    assert row.manual_feature_lat == Decimal("37.57960")
+    assert str(row.manual_feature_lon) == "126.99100"
+
+
+def test_manual_feature_headers_must_appear_together() -> None:
+    """셋 중 일부만 있으면 거절한다 — 좌표 없는 kind는 만들 수 없다."""
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(),
+            headers=(*CURATION_CSV_HEADERS, "manual_feature_kind"),
+        )
+    )
+
+    codes = {issue.code for issue in preview.issues}
+    assert "partial_manual_feature_headers" in codes
+
+
+@pytest.mark.parametrize(
+    ("kind", "lon", "lat", "expected_code"),
+    [
+        ("shop", "127.0", "37.5", "invalid_manual_feature_kind"),
+        ("place", "", "37.5", "manual_feature_coordinate_missing"),
+        ("place", "127.0", "", "manual_feature_coordinate_missing"),
+        ("place", "동경", "37.5", "invalid_coordinate"),
+        ("place", "181.0", "37.5", "coordinate_out_of_range"),
+        ("place", "127.0", "91.0", "coordinate_out_of_range"),
+    ],
+)
+def test_manual_feature_row_rejects_bad_values(
+    kind: str, lon: str, lat: str, expected_code: str
+) -> None:
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                manual_feature_kind=kind,
+                manual_feature_lon=lon,
+                manual_feature_lat=lat,
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    row = preview.rows[0]
+    assert row.status == "invalid"
+    assert expected_code in {issue.code for issue in row.issues}
+
+
+def test_manual_feature_cannot_coexist_with_feature_id() -> None:
+    """기존 Feature를 가리키면서 새로 만들 수는 없다.
+
+    둘 다 주면 어느 쪽이 이기는지 파일만 보고 알 수 없으므로 거절한다 — 조용히
+    한쪽을 고르면 import 결과가 파일과 다른 것을 뜻하게 된다.
+    """
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                feature_id="place:kto:visit_korea_100:1",
+                manual_feature_kind="place",
+                manual_feature_lon="127.0",
+                manual_feature_lat="37.5",
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    row = preview.rows[0]
+    assert row.status == "invalid"
+    assert "manual_feature_conflicts_with_feature_id" in {i.code for i in row.issues}
+
+
+def test_coordinates_without_kind_are_rejected() -> None:
+    """좌표만 있고 kind가 없으면 만들 의도인지 알 수 없다 — 조용히 무시하지 않는다."""
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(manual_feature_lon="127.0", manual_feature_lat="37.5"),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    row = preview.rows[0]
+    assert row.status == "invalid"
+    assert "manual_feature_kind_missing" in {i.code for i in row.issues}
