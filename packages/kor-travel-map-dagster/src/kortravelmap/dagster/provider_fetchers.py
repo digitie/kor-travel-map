@@ -36,6 +36,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
+from .provider_pagination import ProviderPage, iter_paginated_items
 from .upstream_retry import retry_upstream
 
 if TYPE_CHECKING:
@@ -296,9 +297,11 @@ def fetch_krex_rest_areas(
     이므로 EX key가 아닌 **go key**를 쓴다.
 
     이 dataset에는 안정 식별자가 없어 krtour 변환부가 name+route_name+direction
-    으로 자연키를 파생한다(ADR-044). 페이지네이션은 빈 페이지 / 마지막 페이지
-    (``len(items) < num_of_rows``) / ``total_count`` 도달 중 먼저 만나는 조건에서
-    멈춘다. generator 소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
+    으로 자연키를 파생한다(ADR-044). 페이지네이션 종료 판정은
+    :func:`~kortravelmap.dagster.provider_pagination.iter_paginated_items`가
+    소유한다 — ``total_count``가 권위이고 짧은 페이지는 그것이 없을 때만 쓰는
+    대체 휴리스틱이다(provider가 파싱 실패 행을 걸러도 조용히 절단되지 않게).
+    generator 소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_go_api_key
     if secret is None:
@@ -317,21 +320,16 @@ def fetch_krex_rest_areas(
     client = krex.KrexClient(go_api_key=api_key)
     num_of_rows = 1000
     try:
-        page_no = 1
-        seen = 0
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             page = client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
-            items = list(page.items)
-            if not items:
-                break
-            yield from items
-            seen += len(items)
-            total_count = page.total_count
-            if len(items) < num_of_rows:
-                break
-            if total_count is not None and seen >= total_count:
-                break
-            page_no += 1
+            return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="krex restarea.list_all",
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -646,21 +644,16 @@ def fetch_krex_rest_area_fuel_prices(
     client = krex.KrexClient(ex_api_key=api_key)
     num_of_rows = 1000
     try:
-        page_no = 1
-        seen = 0
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             page = client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
-            items = list(page.items)
-            if not items:
-                break
-            yield from items
-            seen += len(items)
-            total_count = page.total_count
-            if len(items) < num_of_rows:
-                break
-            if total_count is not None and seen >= total_count:
-                break
-            page_no += 1
+            return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="krex restarea.fuel_prices",
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -1139,8 +1132,7 @@ def fetch_kma_weather_alerts(
     budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
     try:
-        page_no = 1
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             # H45: 페이지 단건 호출만 유한 재시도 (kma ``retryable`` 규약 분류 —
             # quota/rate_limit 제외는 default predicate 소관).
             items = retry_upstream(
@@ -1157,12 +1149,16 @@ def fetch_kma_weather_alerts(
                 budget=budget,
                 on_retry=_LOGGER.warning,
             )
-            if not items:
-                break
-            yield from items
-            if len(items) < num_of_rows:
-                break
-            page_no += 1
+            # ``weather_warning_list``는 Page가 아니라 list를 돌려주므로 upstream
+            # 선언 건수를 알 수 없다 — 짧은 페이지 휴리스틱만 쓸 수 있다.
+            return ProviderPage(items=items, total_count=None)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="kma weather_warning_list",
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -1218,9 +1214,9 @@ def fetch_khoa_beaches(
     num_of_rows = 100
     try:
         for sido in sido_names:
-            page_no = 1
-            while True:
-                items = retry_upstream(
+
+            def _page(page_no: int, sido: str = sido) -> ProviderPage:
+                return retry_upstream(
                     partial(
                         _khoa_beach_page,
                         client,
@@ -1233,12 +1229,13 @@ def fetch_khoa_beaches(
                     budget=budget,
                     on_retry=_LOGGER.warning,
                 )
-                if not items:
-                    break
-                yield from items
-                if len(items) < num_of_rows:
-                    break
-                page_no += 1
+
+            yield from iter_paginated_items(
+                _page,
+                num_of_rows=num_of_rows,
+                label=f"khoa oceans_beach_info {sido}",
+                warn=_LOGGER.warning,
+            )
     finally:
         client.close()
 
@@ -1249,15 +1246,19 @@ def _khoa_beach_page(
     *,
     page_no: int,
     num_of_rows: int,
-) -> list[Any]:
-    """KHOA 해수욕장 한 페이지를 재시도 경계 안에서 완전히 소진한다."""
+) -> ProviderPage:
+    """KHOA 해수욕장 한 페이지를 재시도 경계 안에서 완전히 소진한다.
+
+    ``khoa.models.Page.total_count``는 ``int = 0``이라 미제공과 0을 구분하지 못한다.
+    그 판정은 :attr:`ProviderPage.declared_total`이 소유한다(0 이하 = 없음).
+    """
 
     page = client.oceans_beach_info(
         sido,
         page_no=page_no,
         num_of_rows=num_of_rows,
     )
-    return list(page.items)
+    return ProviderPage(items=list(page.items), total_count=page.total_count)
 
 
 _AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
@@ -1353,9 +1354,9 @@ def fetch_airkorea_stations(
     retryable_types = _airkorea_retryable_types()
     budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
-    page_no = 1
     try:
-        while True:
+
+        def _page(page_no: int) -> ProviderPage:
             # H45(리뷰 1 M-3): air_quality asset이 stations를 먼저 읽으므로 이
             # 경계도 동일 재시도 — 절반만 고치면 증상이 그대로 남는다.
             items = retry_upstream(
@@ -1366,12 +1367,17 @@ def fetch_airkorea_stations(
                 budget=budget,
                 on_retry=_LOGGER.warning,
             )
-            if not items:
-                break
-            yield from items
-            if len(items) < num_of_rows:
-                break
-            page_no += 1
+            # ``client.stations``는 Page가 아니라 iterable을 돌려주므로 선언 건수를
+            # 알 수 없다. 대신 provider가 totalCount 결측 + 만재 페이지에서
+            # ``AirKoreaParseError``로 fail-close한다(핀 a206282→…).
+            return ProviderPage(items=items, total_count=None)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="airkorea stations",
+            warn=_LOGGER.warning,
+        )
     finally:
         _airkorea_close(client)
 
@@ -1400,8 +1406,8 @@ def fetch_airkorea_air_quality(
     num_of_rows = 100
     try:
         for sido in _AIRKOREA_SIDO_NAMES:
-            page_no = 1
-            while True:
+
+            def _page(page_no: int, sido: str = sido) -> ProviderPage:
                 # H45: 시도×페이지 단건 호출만 유한 재시도 — 17개 시도 순회가
                 # upstream 간헐 504(실측 SERVICETIMEOUT_ERROR)에 전멸하지 않게.
                 items = retry_upstream(
@@ -1418,12 +1424,14 @@ def fetch_airkorea_air_quality(
                     budget=budget,
                     on_retry=_LOGGER.warning,
                 )
-                if not items:
-                    break
-                yield from items
-                if len(items) < num_of_rows:
-                    break
-                page_no += 1
+                return ProviderPage(items=items, total_count=None)
+
+            yield from iter_paginated_items(
+                _page,
+                num_of_rows=num_of_rows,
+                label=f"airkorea sido_measurements {sido}",
+                warn=_LOGGER.warning,
+            )
     finally:
         _airkorea_close(client)
 
