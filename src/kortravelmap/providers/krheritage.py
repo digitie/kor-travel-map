@@ -213,8 +213,13 @@ class KrHeritageItem(Protocol):
         ...
 
     @property
-    def manager(self) -> str | None:
-        """관리자/관리기관 (``ccbaAdmin``)."""
+    def owner(self) -> str | None:
+        """관리자/관리기관 (``ccbaAdmin``).
+
+        provider가 ``HeritageDetail.manager``를 삭제하고 부모
+        ``HeritageSummary.owner``(같은 alias ``ccbaAdmin``)로 일원화했다.
+        이름만 바뀌었고 값 의미는 같다.
+        """
         ...
 
     @property
@@ -559,7 +564,7 @@ async def _heritage_item_to_bundle(
         "latitude": str(item.latitude) if item.latitude is not None else None,
         "location_text": item.location_text,
         "designated_at": item.designated_at,
-        "manager": item.manager,
+        "manager": item.owner,
         "image_url": item.image_url,
     }
     if raw_boundary_wkt is not None:
@@ -614,14 +619,14 @@ async def _heritage_item_to_bundle(
             boundary_source=_text_attr(item, "boundary_source", "geometry_source")
             or "krheritage_gis",
             area_square_meters=area_square_meters,
-            administrative_office=normalize_korean_text(item.manager),
+            administrative_office=normalize_korean_text(item.owner),
             payload=detail_payload,
         )
     else:
         detail = PlaceDetail(
             feature_id=feature_id,
             place_kind=_place_kind(item),
-            payload={**detail_payload, "manager": normalize_korean_text(item.manager)},
+            payload={**detail_payload, "manager": normalize_korean_text(item.owner)},
         )
 
     feature = Feature(

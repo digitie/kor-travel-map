@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION 완료 이관
+
+- [x] **T-VN-M05-MANAGER-PIN-ROTATION — Manager pin rotation 단회 실행 완료**
+
+  `030b12fc…` committed generation과 `6269138f…`·`53d4639f…` 단회 시도는 재실행하지 않는다. `53d4639f…`은 installed launcher execute bit 미보존으로 admission 이전에 종료했고 durable output·ledger·raw stderr가 없다. PinVi `41a36ee6…`·Map `9c64e862…`와 Manager canonical pinset `c1ad5a3e…`은 root-owned structured result launcher로 정확히 한 번 실행돼 `committed` 됐다(generation `8eedf171…`, Map application `300`, Map Dagster `29b539ebc72a`, PinVi `20260824_0101`).
+
+  이 항목은 `tasks.md`에 `[x]`로 남아 있었으나 완료 원장에 엔트리가 없었다
+  (`7fdad44c`가 `[/]`→`[x]`로 바꿨을 뿐 이관하지 않았다). `docs/tasks-rule.md` §4와
+  `tasks.md` 서문("완료되지 않은 작업만 나열한다")에 맞춰 여기로 옮긴다. 내용 자체는
+  `docs/resume.md`의 generation `8eedf171…` 기록이 뒷받침한다.
+
+  같은 정합성 점검에서 `T-VN-FINAL-REBUILD`의 `[x]`도 발견했으나 그쪽은 **이관하지
+  않았다** — 해제 조건 B1~B4가 충족된 것이 아니라 평면화(`6d671ef1`)로 삭제된 뒤
+  완료 처리된 것이어서, `tasks.md`에서 열린 상태로 되돌렸다. 근거는
+  [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다.
+
 ## 2026-08-26 — T-VN-H46H application `300` 최종 수락
 
 - [x] **T-VN-H46H — `0236` archive 기반 `300` 단일 root baseline·fresh rebuild 완료**

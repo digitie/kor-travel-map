@@ -177,7 +177,7 @@ class _HeritageItem:
     latitude: Decimal | float | None = None
     location_text: str | None = None
     designated_at: str | None = None
-    manager: str | None = None
+    owner: str | None = None
     image_url: str | None = None
 
 
@@ -445,7 +445,7 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                     latitude=Decimal("35.795"),
                     location_text="경상북도 경주시 진현동",
                     designated_at="19621220",
-                    manager="불국사",
+                    owner="불국사",
                 )
             ],
         ),

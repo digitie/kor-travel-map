@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-30 — provider 핀 동기화 완료, task 원장 무결성 복구
+
+PR #1123이 provider 핀 전수 동기화, Protocol 적합성 게이트, 페이지네이션 절단 보정,
+task 해제 조건 복원을 담는다. 핀 11개 상향 / 2개 보류(datagokr·krheritage — provider가
+종료 조건을 휴리스틱으로 바꿔 조용한 절단을 만든다).
+
+`T-VN-FINAL-REBUILD`가 해제 조건 B1~B4가 **삭제된 뒤** 완료 처리된 것을 확인해 열린
+상태로 되돌렸다. B3/B4는 generation `8eedf171` 이후 5개 pinset 재빌드로 반복 false다.
+열린 16개 task의 해제 조건을 `docs/tasks-acceptance.md`로 복원하고, 조건 없는 task를
+막는 게이트를 뒀다(첫 실행에서 5건 적발).
+
+### 다음 한 작업
+
+`T-VN-M03` import child-command의 다음 증분. linkage migration(`301`)은
+`feat/m03-import-child-commands`에 있고, child를 **실행**하려면 preview가 행마다 좌표를
+포함한 typed `manual_feature` payload와 canonical SHA를 plan에 저장해야 한다(설계 §6.1).
+현재 `ResolvedCurationImportRow`에 좌표가 없고 §7이 주소 기반 추정 생성을 금지하므로
+**import 포맷 확장 결정이 선행**이다. 그 결정 없이 repo/route를 먼저 쓰면 좌표를
+추론하는 경로가 생긴다.
+
 ## 2026-08-29 — M05 execution identity v6로 terminal 반복 제거
 
 같은 Map·PinVi pair에서 Docker Manager 코드만 고쳤을 때 v5 `pinset_sha256` terminal block이 그대로 남아 문서

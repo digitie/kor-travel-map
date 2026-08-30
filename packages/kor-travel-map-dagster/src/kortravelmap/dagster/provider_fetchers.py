@@ -36,6 +36,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
+from .provider_pagination import ProviderPage, iter_paginated_items
 from .upstream_retry import retry_upstream
 
 if TYPE_CHECKING:
@@ -296,9 +297,11 @@ def fetch_krex_rest_areas(
     이므로 EX key가 아닌 **go key**를 쓴다.
 
     이 dataset에는 안정 식별자가 없어 krtour 변환부가 name+route_name+direction
-    으로 자연키를 파생한다(ADR-044). 페이지네이션은 빈 페이지 / 마지막 페이지
-    (``len(items) < num_of_rows``) / ``total_count`` 도달 중 먼저 만나는 조건에서
-    멈춘다. generator 소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
+    으로 자연키를 파생한다(ADR-044). 페이지네이션 종료 판정은
+    :func:`~kortravelmap.dagster.provider_pagination.iter_paginated_items`가
+    소유한다 — ``total_count``가 권위이고 짧은 페이지는 그것이 없을 때만 쓰는
+    대체 휴리스틱이다(provider가 파싱 실패 행을 걸러도 조용히 절단되지 않게).
+    generator 소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_go_api_key
     if secret is None:
@@ -317,21 +320,17 @@ def fetch_krex_rest_areas(
     client = krex.KrexClient(go_api_key=api_key)
     num_of_rows = 1000
     try:
-        page_no = 1
-        seen = 0
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             page = client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
-            items = list(page.items)
-            if not items:
-                break
-            yield from items
-            seen += len(items)
-            total_count = page.total_count
-            if len(items) < num_of_rows:
-                break
-            if total_count is not None and seen >= total_count:
-                break
-            page_no += 1
+            return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="krex restarea.list_all",
+            end_of_pages=_krex_end_of_pages_types(krex),
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -646,21 +645,17 @@ def fetch_krex_rest_area_fuel_prices(
     client = krex.KrexClient(ex_api_key=api_key)
     num_of_rows = 1000
     try:
-        page_no = 1
-        seen = 0
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             page = client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
-            items = list(page.items)
-            if not items:
-                break
-            yield from items
-            seen += len(items)
-            total_count = page.total_count
-            if len(items) < num_of_rows:
-                break
-            if total_count is not None and seen >= total_count:
-                break
-            page_no += 1
+            return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="krex restarea.fuel_prices",
+            end_of_pages=_krex_end_of_pages_types(krex),
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -1139,8 +1134,7 @@ def fetch_kma_weather_alerts(
     budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
     try:
-        page_no = 1
-        while True:
+        def _page(page_no: int) -> ProviderPage:
             # H45: 페이지 단건 호출만 유한 재시도 (kma ``retryable`` 규약 분류 —
             # quota/rate_limit 제외는 default predicate 소관).
             items = retry_upstream(
@@ -1157,12 +1151,16 @@ def fetch_kma_weather_alerts(
                 budget=budget,
                 on_retry=_LOGGER.warning,
             )
-            if not items:
-                break
-            yield from items
-            if len(items) < num_of_rows:
-                break
-            page_no += 1
+            # ``weather_warning_list``는 Page가 아니라 list를 돌려주므로 upstream
+            # 선언 건수를 알 수 없다 — 짧은 페이지 휴리스틱만 쓸 수 있다.
+            return ProviderPage(items=items, total_count=None)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="kma weather_warning_list",
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
 
@@ -1218,9 +1216,9 @@ def fetch_khoa_beaches(
     num_of_rows = 100
     try:
         for sido in sido_names:
-            page_no = 1
-            while True:
-                items = retry_upstream(
+
+            def _page(page_no: int, sido: str = sido) -> ProviderPage:
+                return retry_upstream(
                     partial(
                         _khoa_beach_page,
                         client,
@@ -1233,12 +1231,13 @@ def fetch_khoa_beaches(
                     budget=budget,
                     on_retry=_LOGGER.warning,
                 )
-                if not items:
-                    break
-                yield from items
-                if len(items) < num_of_rows:
-                    break
-                page_no += 1
+
+            yield from iter_paginated_items(
+                _page,
+                num_of_rows=num_of_rows,
+                label=f"khoa oceans_beach_info {sido}",
+                warn=_LOGGER.warning,
+            )
     finally:
         client.close()
 
@@ -1249,15 +1248,29 @@ def _khoa_beach_page(
     *,
     page_no: int,
     num_of_rows: int,
-) -> list[Any]:
-    """KHOA 해수욕장 한 페이지를 재시도 경계 안에서 완전히 소진한다."""
+) -> ProviderPage:
+    """KHOA 해수욕장 한 페이지를 재시도 경계 안에서 완전히 소진한다.
+
+    ``page.total_count``를 쓰지 않고 **raw body의 ``totalCount``를 직접 읽는다.**
+    provider가 ``total_count=parsed if parsed is not None else len(rows)``로
+    대체하기 때문이다(``khoa/client.py``). 만재 100행 페이지에서 upstream이
+    ``totalCount``를 빠뜨리면 대체값이 100이 되고, 그것을 권위로 믿으면
+    ``seen >= declared``가 참이라 **첫 페이지에서 종료**한다 — 종전 짧은 페이지
+    휴리스틱보다도 나쁘다(적대 리뷰 실증). raw에 없으면 없는 것으로 둔다.
+    """
 
     page = client.oceans_beach_info(
         sido,
         page_no=page_no,
         num_of_rows=num_of_rows,
     )
-    return list(page.items)
+    raw = getattr(page, "raw", None)
+    declared = raw.get("totalCount") if isinstance(raw, dict) else None
+    try:
+        total_count = int(declared) if declared is not None else None
+    except (TypeError, ValueError):
+        total_count = None
+    return ProviderPage(items=list(page.items), total_count=total_count)
 
 
 _AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
@@ -1296,6 +1309,34 @@ def _airkorea_client(settings: KorTravelMapSettings, *, label: str) -> Any:
         timeout=settings.provider_http_timeout_seconds,
         retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
     )
+
+
+def _krex_end_of_pages_types(krex: Any) -> tuple[type[BaseException], ...]:
+    """krex가 "더 이상 페이지 없음"을 알리는 예외형 (ADR-006 — 직접 import 금지).
+
+    krex는 data.go.kr resultCode ``03``과 EX ``NO_DATA``를 모두
+    ``KrexNotFoundError``로 올린다(``_http.py``의 ``_raise_go_code``/``_raise_ex_code``).
+    빈 페이지가 아니라 예외이므로, 마지막 페이지 다음 요청은 이것을 종료로 읽어야
+    한다 — krex 자신도 ``RestareaService``에서 같은 예외를 종료로 잡는다.
+    """
+    resolved = getattr(krex, "KrexNotFoundError", None)
+    if isinstance(resolved, type) and issubclass(resolved, BaseException):
+        return (resolved,)
+    return ()
+
+
+def _airkorea_end_of_pages_types() -> tuple[type[BaseException], ...]:
+    """airkorea가 "더 이상 데이터 없음"을 알리는 예외형.
+
+    ``_http.py``가 resultCode ``03``에 ``AirKoreaNoDataError``를 올리고, provider의
+    ``pagination.py``도 그것을 종료로 잡는다. 재시도 대상이 아니므로
+    ``AIRKOREA_RETRYABLE_EXCEPTION_NAMES``와는 별개다.
+    """
+    airkorea = cast(Any, importlib.import_module("airkorea"))
+    resolved = getattr(airkorea, "AirKoreaNoDataError", None)
+    if isinstance(resolved, type) and issubclass(resolved, BaseException):
+        return (resolved,)
+    return ()
 
 
 AIRKOREA_RETRYABLE_EXCEPTION_NAMES: Final[tuple[str, ...]] = (
@@ -1353,9 +1394,9 @@ def fetch_airkorea_stations(
     retryable_types = _airkorea_retryable_types()
     budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
-    page_no = 1
     try:
-        while True:
+
+        def _page(page_no: int) -> ProviderPage:
             # H45(리뷰 1 M-3): air_quality asset이 stations를 먼저 읽으므로 이
             # 경계도 동일 재시도 — 절반만 고치면 증상이 그대로 남는다.
             items = retry_upstream(
@@ -1366,12 +1407,20 @@ def fetch_airkorea_stations(
                 budget=budget,
                 on_retry=_LOGGER.warning,
             )
-            if not items:
-                break
-            yield from items
-            if len(items) < num_of_rows:
-                break
-            page_no += 1
+            # ``client.stations``는 Page가 아니라 iterable을 돌려주므로 선언 건수를
+            # 알 수 없다. provider의 totalCount fail-close(``_raw_page``)는 이 경로에
+            # **없다** — ``stations``/``sido_measurements``는 ``_items(body)``에서
+            # 바로 만들고 ``_raw_page``를 거치지 않는다(적대 리뷰 실증). 따라서 짧은
+            # 페이지 휴리스틱과 아래 종료 예외만이 판정 근거다.
+            return ProviderPage(items=items, total_count=None)
+
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="airkorea stations",
+            end_of_pages=_airkorea_end_of_pages_types(),
+            warn=_LOGGER.warning,
+        )
     finally:
         _airkorea_close(client)
 
@@ -1400,8 +1449,8 @@ def fetch_airkorea_air_quality(
     num_of_rows = 100
     try:
         for sido in _AIRKOREA_SIDO_NAMES:
-            page_no = 1
-            while True:
+
+            def _page(page_no: int, sido: str = sido) -> ProviderPage:
                 # H45: 시도×페이지 단건 호출만 유한 재시도 — 17개 시도 순회가
                 # upstream 간헐 504(실측 SERVICETIMEOUT_ERROR)에 전멸하지 않게.
                 items = retry_upstream(
@@ -1418,12 +1467,15 @@ def fetch_airkorea_air_quality(
                     budget=budget,
                     on_retry=_LOGGER.warning,
                 )
-                if not items:
-                    break
-                yield from items
-                if len(items) < num_of_rows:
-                    break
-                page_no += 1
+                return ProviderPage(items=items, total_count=None)
+
+            yield from iter_paginated_items(
+                _page,
+                num_of_rows=num_of_rows,
+                label=f"airkorea sido_measurements {sido}",
+                end_of_pages=_airkorea_end_of_pages_types(),
+                warn=_LOGGER.warning,
+            )
     finally:
         _airkorea_close(client)
 
@@ -1463,21 +1515,39 @@ def _enumerate_opinet_stations(
 
     bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
     """
+    invalid_parameter = _opinet_invalid_parameter_error_type()
     seen: set[str] = set()
     for min_lon, min_lat, max_lon, max_lat in bboxes:
-        for station in client.iter_stations_in_bbox(
-            min_lon=min_lon,
-            min_lat=min_lat,
-            max_lon=max_lon,
-            max_lat=max_lat,
-            radius_m=radius_m,
-        ):
-            uni_id = getattr(station, "uni_id", None)
-            if isinstance(uni_id, str):
-                if uni_id in seen:
-                    continue
-                seen.add(uni_id)
-            yield station
+        try:
+            stations = client.iter_stations_in_bbox(
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
+                radius_m=radius_m,
+            )
+            for station in stations:
+                uni_id = getattr(station, "uni_id", None)
+                if isinstance(uni_id, str):
+                    if uni_id in seen:
+                        continue
+                    seen.add(uni_id)
+                yield station
+        except invalid_parameter as exc:
+            # `OpinetInvalidParameterError`는 격자 셀 수 상한만이 아니라 radius_m
+            # 범위(1..5000), bbox min>max, 좌표 변환 실패에서도 올라온다. 원인을
+            # 단정하면 잘못된 조치를 안내하게 되므로(예: radius_m>5000인데 "반경을
+            # 키우라"), **provider 원문을 그대로 싣고 관련 설정만 덧붙인다.**
+            # 셀 수 계산은 provider private이라 Map이 복제하면 drift가 난다.
+            raise RuntimeError(
+                "opinet bbox enumerate가 provider 파라미터 검증에 걸렸다: "
+                f"{exc}. "
+                f"bbox=({min_lon},{min_lat},{max_lon},{max_lat}), "
+                f"opinet_scope_radius_m={radius_m} "
+                "(provider 허용 1..5000, 격자 셀 수 상한 20,000). "
+                "셀 수 초과라면 반경을 키우거나 OPINET_SCOPE_BBOX를 좁게 나누고, "
+                "범위 위반이라면 해당 설정값을 고칠 것."
+            ) from exc
 
 
 def _center_radius_to_bbox(
@@ -1758,6 +1828,25 @@ def _opinet_sample_grid_centers() -> Iterator[tuple[float, float]]:
                 yield center
             lon += _OPINET_SAMPLE_GRID_STEP_DEGREES
         lat += _OPINET_SAMPLE_GRID_STEP_DEGREES
+
+
+def _opinet_invalid_parameter_error_type() -> type[Exception]:
+    """``OpinetInvalidParameterError``를 lazy resolve한다 (ADR-006 — 직접 import 금지).
+
+    provider 모듈에 그 **이름이 없으면** 아무것도 잡지 않도록 절대 매칭되지 않는
+    예외형을 돌려준다. 모듈 자체가 없는 경우는 덮지 않는다 —
+    ``importlib.import_module``이 먼저 ``ModuleNotFoundError``를 낸다. 실제로는
+    호출자가 이 함수 전에 ``opinet``을 import하고 client를 만들므로 도달하지 않는다.
+    """
+    opinet = importlib.import_module("opinet")
+    resolved = getattr(opinet, "OpinetInvalidParameterError", None)
+    if isinstance(resolved, type) and issubclass(resolved, Exception):
+        return resolved
+    return _NeverRaised
+
+
+class _NeverRaised(Exception):
+    """provider 예외형을 해석하지 못했을 때의 no-op sentinel."""
 
 
 def _opinet_no_data_error_type() -> type[Exception]:

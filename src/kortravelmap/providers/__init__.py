@@ -31,6 +31,9 @@ gateway 신규 생성 금지 (ADR-006).
 
 - ``feature_operation_registry`` — DB operation key → Dagster handler 결박 registry (T-VN-33)
 - ``knps_name_translations`` — ``knps``가 쓰는 이름 대역표
+- ``_source_models`` — 위 변환 모듈들의 ``Protocol``이 어느 provider 실모델과 결박되는지
+  선언하는 표. ``tests/lint/test_provider_protocol_conformance.py``가 이 선언과
+  ``_provider_surface.json``(핀된 SHA의 provider 표면)을 대조한다.
 
 ADR-034의 9단계 **계획 순서**와 krforest dataset의 정본은
 ``docs/architecture/provider-contract.md``다. C05A route와 C05B~D 안전·기상 변환은

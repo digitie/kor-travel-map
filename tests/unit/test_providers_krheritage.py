@@ -63,7 +63,7 @@ class _Item:
     latitude: Decimal | float | None = None
     location_text: str | None = None
     designated_at: str | None = None
-    manager: str | None = None
+    owner: str | None = None
     image_url: str | None = None
     geom_wkt: str | None = None
     boundary_source: str | None = None
@@ -150,7 +150,7 @@ async def test_place_bundle_mapping() -> None:
         latitude=35.795,
         location_text="경상북도 경주시 진현동",
         designated_at="19621220",
-        manager="불국사",
+        owner="불국사",
     )
     [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
     feat = bundle.feature
@@ -238,7 +238,7 @@ async def test_historic_site_without_geometry_is_place() -> None:
         category="사적",
         longitude=127.01,
         latitude=37.28,
-        manager="수원시",
+        owner="수원시",
     )
     [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
     feat = bundle.feature
@@ -260,7 +260,7 @@ async def test_area_bundle_with_polygon_geometry() -> None:
         category="사적",
         longitude=127.01,
         latitude=37.28,
-        manager="수원시",
+        owner="수원시",
         boundary_source="gis_spca",
         geom_wkt=(
             "POLYGON((127.00 37.27, 127.02 37.27, 127.02 37.29, "
