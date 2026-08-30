@@ -144,26 +144,31 @@ def test_end_of_pages_exception_propagates_when_not_declared() -> None:
 
 
 def test_page_ceiling_is_derived_from_declared_total() -> None:
-    """상한은 선언 건수에서 유도한다 — 전역 상한은 그보다 작을 때만 의미가 있다.
+    """상한은 선언 건수에서 유도하고, 닿으면 조용히 자르지 않고 실패한다.
 
-    ``pageNo``를 무시하고 같은 페이지를 반복하는 upstream에서 조용히 자르지 않고
-    시끄럽게 실패해야 한다.
+    provider가 행을 과도하게 걸러 내면 "짧은 페이지에서 계속" 규칙이 영원히 끝나지
+    않을 수 있다. 선언 1,000건 / 100행이면 10 페이지면 충분한데 매 페이지가 1건만
+    주므로 절대 도달하지 못한다 — 유도 상한(10 × 2 + 1 = 21)에서 멈춰야 한다.
+    ``max_pages``를 크게 줘도 **유도 상한이 더 작으면 그쪽이 이기지 않는다**는 것도
+    함께 본다(둘 중 큰 쪽을 쓴다).
     """
+    calls: list[int] = []
 
-    def repeating(page_no: int) -> ProviderPage:
-        return ProviderPage(items=["x"] * 100, total_count=1_000_000)
+    def starving(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        return ProviderPage(items=["x"], total_count=1_000)
 
     with pytest.raises(ProviderPaginationOverrun) as excinfo:
         list(
             iter_paginated_items(
-                repeating,
+                starving,
                 num_of_rows=100,
-                label="repeating",
-                max_pages=5,
+                label="starving",
+                max_pages=21,
             )
         )
-    # 선언 1,000,000 / 100행 = 10,000 페이지 * slack 2 + 1 이 상한이 된다.
     assert "상한" in str(excinfo.value)
+    assert len(calls) == 21, f"상한 21에서 멈춰야 한다 (실제 {len(calls)})"
 
 
 def test_unknown_total_uses_the_conservative_default_ceiling() -> None:
