@@ -367,6 +367,9 @@ class KmaGridTargets:
     grids_dropped: int
     """run 상한 초과로 제외된 격자 수 (운영 로그용 — silent cap 금지)."""
 
+    membership_fingerprint: str
+    """target 좌표·extra 좌표·dedupe 전량 격자 membership의 SHA-256."""
+
     coords_rejected: tuple[str, ...] = ()
     """KMA 격자로 투영할 수 없던 좌표의 진단 문자열 — silent drop 금지.
 
@@ -378,11 +381,6 @@ class KmaGridTargets:
     본 순수 함수는 판정만 하고 실패는 호출부가 typed refresh failure로 올린다 —
     ``grids_dropped``와 같은 규약이다.
     """
-
-    membership_fingerprint: str
-    """target 좌표·extra 좌표·dedupe 전량 격자 membership의 SHA-256."""
-
-
 
 
 def _grid_membership_fingerprint(
