@@ -71,3 +71,6 @@ node_modules/
 docs/deploy-runbook.local.md
 docs/prod-access.local.md
 .security-audit-patterns.local
+
+# Windows에서 docker runtime 테스트가 cwd에 남기는 산출물 (Linux에서는 tmp_path).
+*-entrypoint-under-test.sh

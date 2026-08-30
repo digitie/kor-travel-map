@@ -19,6 +19,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, TextIO
 
+from kortravelmap.infra.application_schema_head import application_schema_head
+
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
 _INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
 _MAX_ARTIFACT_BYTES: Final = 4 * 1024 * 1024
@@ -26,7 +28,9 @@ _REFERENCE_SCHEMA: Final = "kor-travel-map.application-baseline-reference.v1"
 _CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _ERROR_SCHEMA: Final = "kor-travel-map.application-baseline-contract-error.v1"
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
-_HEAD: Final = "300"
+#: 배포가 기대하는 현재 application head. 리터럴이 아니라 active migration graph에서
+#: 파생한다 — 사본이 여러 파일에 흩어지면 서로 어긋나도 아무것도 잡지 못한다.
+_HEAD: Final = application_schema_head()
 _RECEIPT_ARTIFACTS: Final = {
     "source_catalog_sha256": (
         "source_catalog_contract_sha256",

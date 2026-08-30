@@ -27,6 +27,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import make_async_engine
 
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-application-final-permit/permit.json")
@@ -43,6 +44,8 @@ _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
 _INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
+#: 배포가 기대하는 현재 application head. active migration graph에서 파생한다.
+_HEAD: Final = application_schema_head()
 _STATIC_CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _TOP_LEVEL_FIELDS: Final = frozenset(
     {
@@ -191,7 +194,7 @@ def _static_contract() -> Mapping[str, str]:
         raise FinalPermitError("installed application baseline contract is invalid") from exc
     if not isinstance(value, Mapping) or set(value) != _CONTRACT_FIELDS:
         raise FinalPermitError("installed application baseline contract field set is invalid")
-    if value["schema"] != _STATIC_CONTRACT_SCHEMA or value["application_head"] != "300":
+    if value["schema"] != _STATIC_CONTRACT_SCHEMA or value["application_head"] != _HEAD:
         raise FinalPermitError("installed application baseline contract identity is invalid")
     for key in _CONTRACT_FIELDS - {"schema", "application_head", "postgres_image_id"}:
         _require_sha256(value[key], f"installed baseline {key}")
@@ -393,7 +396,7 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         or not _IMAGE_ID_PATTERN.fullmatch(candidate["dagster_image_id"])
         or not isinstance(candidate["postgres_image_id"], str)
         or not _IMAGE_ID_PATTERN.fullmatch(candidate["postgres_image_id"])
-        or candidate["application_head"] != "300"
+        or candidate["application_head"] != _HEAD
     ):
         raise FinalPermitError("final permit candidate identity is invalid")
     _require_sha256(candidate["reference_manifest_sha256"], "reference manifest")
@@ -595,7 +598,7 @@ async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None
         or str(row[6]) != database["owner"]
         or str(row[7]) != database["system_identifier"]
         or observed_identity != database["identity_sha256"]
-        or versions != ("300",)
+        or versions != (_HEAD,)
         or live_destination_facet
         != payload["receipts"]["observed_destination_alembic_version_sha256"]
         or live_destination_facet

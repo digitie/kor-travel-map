@@ -31,12 +31,20 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import (
     reconcile_runtime_privileges_in_transaction,
 )
 
 _SOURCE_HEAD: Final = "0236_tvn41s_compaction_drained"
+#: 이 handoff가 stamp하는 목적지. **현재 head가 아니라 baseline root**다 —
+#: `0236 → 300` 다리이므로 migration이 더 쌓여도 이 값은 바뀌지 않는다.
+#:
+#: 파생값이 아니라 **리터럴**로 둔다. retired revision 스캔
+#: (`test_active_runnable_paths_never_target_legacy_revision`)이 이 값을 정적으로
+#: 해소해 archive revision이 아님을 증명해야 하고, 해소하지 못하면 fail-close한다.
+#: `BASELINE_ROOT_REVISION`과 같다는 것은 게이트가 단언한다.
 _DESTINATION_HEAD: Final = "300"
 _HANDOFF_TAG: Final = "application-schema-0236-to-300"
 _SCHEMA_OWNER_ROLE: Final = "ktm_feature_schema_owner"
@@ -1480,8 +1488,18 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
     if not dsn:
         raise HandoffError("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required")
     config = _config(dsn)
-    if tuple(ScriptDirectory.from_config(config).get_heads()) != (_DESTINATION_HEAD,):
-        raise HandoffError("installed active Alembic graph head is not exactly 300")
+    # graph의 **head**가 아니라 stamp 목적지가 graph에 있는지를 본다. 이 handoff는
+    # `300`으로 stamp하고, 그 뒤 child migration은 평범한 `alembic upgrade`가 올린다.
+    # head로 결박하면 migration을 하나 더하는 순간 이 다리가 막힌다.
+    script = ScriptDirectory.from_config(config)
+    try:
+        script.get_revision(_DESTINATION_HEAD)
+    except Exception as exc:
+        raise HandoffError(
+            f"installed active Alembic graph does not contain {_DESTINATION_HEAD}"
+        ) from exc
+    if application_schema_head() is None:  # pragma: no cover - 방어
+        raise HandoffError("active Alembic graph head is undecidable")
     expected = _verify_reference_artifacts()
     writer_fence_receipt, writer_fence_receipt_sha256 = _load_writer_fence_receipt(
         writer_fence_receipt_path

@@ -32,10 +32,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
-_DESTINATION_HEAD: Final = "300"
+#: `command.upgrade(config, "head")`가 도달해야 하는 revision. graph에서 파생한다.
+_DESTINATION_HEAD: Final = application_schema_head()
 _MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
 _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
