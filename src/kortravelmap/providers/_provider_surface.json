@@ -678,49 +678,10 @@
     },
     "python-datagokr-api": {
       "classes": {
-        "datagokr.catalog.ApiCatalogEntry": {
-          "external_bases": [],
-          "members": [
-            "bound_args",
-            "data_source",
-            "default_num_of_rows",
-            "description_lines",
-            "endpoint",
-            "key",
-            "label",
-            "list_method",
-            "num_rows_kwarg",
-            "num_rows_wire_param",
-            "optional_params",
-            "page_no_wire_param",
-            "required_params",
-            "response_type_choices",
-            "response_type_param",
-            "service_attr",
-            "service_key_env_names",
-            "service_key_param",
-            "service_key_url",
-            "supports_response_type",
-            "title"
-          ]
-        },
-        "datagokr.catalog.ParamSpec": {
-          "external_bases": [],
-          "members": [
-            "choices",
-            "default",
-            "help",
-            "kind",
-            "label",
-            "name",
-            "required"
-          ]
-        },
         "datagokr.client.DataGoKrClient": {
           "external_bases": [],
           "members": [
             "close",
-            "debug_fetch",
             "save_to_local",
             "save_to_rustfs"
           ]
@@ -737,20 +698,6 @@
             "rustfs_region_name",
             "rustfs_secret_access_key",
             "timeout"
-          ]
-        },
-        "datagokr.debug.DebugRun": {
-          "external_bases": [],
-          "members": [
-            "catalog",
-            "error",
-            "function",
-            "input",
-            "parsed",
-            "processed",
-            "request",
-            "response",
-            "trace"
           ]
         },
         "datagokr.exceptions.ApiErrorResponse": {
@@ -779,20 +726,6 @@
         "datagokr.exceptions.TransportError": {
           "external_bases": [
             "Exception"
-          ],
-          "members": []
-        },
-        "datagokr.exceptions.UnknownDatasetError": {
-          "external_bases": [
-            "Exception",
-            "KeyError"
-          ],
-          "members": []
-        },
-        "datagokr.exceptions.ValidationError": {
-          "external_bases": [
-            "Exception",
-            "ValueError"
           ],
           "members": []
         },
@@ -1091,27 +1024,13 @@
           "members": [
             "iter_all",
             "iter_pages",
-            "list",
-            "num_rows_param",
-            "page_no_param"
+            "list"
           ]
         },
         "datagokr.services.openapi.KwaterSluiceService": {
           "external_bases": [],
           "members": [
-            "day_list",
-            "hour_list",
-            "ten_minute_list"
-          ]
-        },
-        "datagokr.services.pagination._PageLike": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "items",
-            "num_of_rows",
-            "total_pages"
+            "hour_list"
           ]
         },
         "datagokr.services.standard.CulturalFestivalService": {
@@ -1192,7 +1111,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "b8f1254871b28e9fbb10bfdd79a89580b8c0d76d"
+      "pinned_sha": "48e458b1f06656a94474f9b08e87cefc3c9c9526"
     },
     "python-khoa-api": {
       "classes": {
@@ -5149,15 +5068,9 @@
             "label",
             "method",
             "model_hint",
-            "optional_params",
-            "param_enum",
-            "param_help",
             "path",
             "portal_url",
-            "required_params",
-            "requires_custom_path",
             "response_format",
-            "returns",
             "service_key_url"
           ]
         },
@@ -5171,8 +5084,7 @@
           "external_bases": [],
           "members": [
             "aio",
-            "close",
-            "debug_fetch"
+            "close"
           ]
         },
         "krheritage.codes._compat.StrEnum": {
@@ -5326,26 +5238,15 @@
             "max_rps"
           ]
         },
-        "krheritage.debug.DebugRun": {
-          "external_bases": [],
-          "members": [
-            "catalog",
-            "error",
-            "function",
-            "input",
-            "parsed",
-            "processed",
-            "request",
-            "response",
-            "trace",
-            "validation_errors"
-          ]
-        },
         "krheritage.exceptions.ApiErrorResponse": {
           "external_bases": [
             "Exception"
           ],
-          "members": []
+          "members": [
+            "code",
+            "message",
+            "payload"
+          ]
         },
         "krheritage.exceptions.ConfigError": {
           "external_bases": [
@@ -5355,12 +5256,6 @@
           "members": []
         },
         "krheritage.exceptions.KrHeritageError": {
-          "external_bases": [
-            "Exception"
-          ],
-          "members": []
-        },
-        "krheritage.exceptions.PayloadParseError": {
           "external_bases": [
             "Exception"
           ],
@@ -5473,6 +5368,7 @@
             "license",
             "location_text",
             "longitude",
+            "manager",
             "model_config",
             "name_en",
             "name_ko",
@@ -5724,14 +5620,6 @@
             "get"
           ]
         },
-        "krheritage.transport.ratelimit.SyncTokenBucket": {
-          "external_bases": [],
-          "members": [
-            "acquire",
-            "capacity",
-            "max_rps"
-          ]
-        },
         "krheritage.transport.ratelimit.TokenBucket": {
           "external_bases": [],
           "members": [
@@ -5742,7 +5630,7 @@
         }
       },
       "package": "krheritage",
-      "pinned_sha": "8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c"
+      "pinned_sha": "6076b523fac9226d365136518db4d219cb6339c6"
     },
     "python-mois-api": {
       "classes": {
@@ -7805,6 +7693,9 @@
       "package": "visitkorea",
       "pinned_sha": "2406531315495e8b1158348ee3503e08a6717958"
     }
+  },
+  "providers_without_protocols": {
+    "python-mcst-api": "``providers/mcst.py``는 typed 모델이 아니라 CSV row(``Mapping[str, Any]``)를 받는다. 결박할 ``Protocol``이 없으므로 표면 대조 대상이 아니다 — 이 경계의 취약점은 모델 속성이 아니라 CSV 컬럼 이름이다."
   },
   "version": 1
 }

@@ -103,6 +103,7 @@ __all__ = [
     "KmaNowcastRow",
     "KmaWeatherTargetScopeEmptyError",
     "KmaWeatherGridLimitExceeded",
+    "KmaWeatherGridCoordinateInvalid",
     "KmaWeatherLoadResult",
     "feature_notice_kma_weather_alerts",
     "feature_weather_kma_mid_forecast",
@@ -366,20 +367,22 @@ class KmaGridTargets:
     grids_dropped: int
     """run 상한 초과로 제외된 격자 수 (운영 로그용 — silent cap 금지)."""
 
+    coords_rejected: tuple[str, ...] = ()
+    """KMA 격자로 투영할 수 없던 좌표의 진단 문자열 — silent drop 금지.
+
+    ``to_grid``는 투영 뒤 ``validate_grid``(nx 1..149 / ny 1..253)를 호출해 범위 밖이면
+    ``ValueError``를 던진다(``python-kma-api`` ``a75d1e15``). 마라도·이어도·백령도·
+    가거도·울릉도·독도까지 한국 영토 극단점이 **모두 격자 안**이므로(실측), 격자 밖
+    좌표는 국외 지점이 아니라 **좌표 데이터 오류**다.
+
+    본 순수 함수는 판정만 하고 실패는 호출부가 typed refresh failure로 올린다 —
+    ``grids_dropped``와 같은 규약이다.
+    """
+
     membership_fingerprint: str
     """target 좌표·extra 좌표·dedupe 전량 격자 membership의 SHA-256."""
 
-    coords_out_of_grid: tuple[tuple[float, float], ...] = ()
-    """KMA DFS 격자 범위 밖이라 제외된 ``(lon, lat)`` — silent drop 금지.
 
-    ``python-kma-api`` ``0868b76b → a75d1e15``의 ``to_grid``가 투영 뒤
-    ``validate_grid(nx, ny)``(nx 1..149 / ny 1..253)를 호출해 범위 밖이면
-    ``ValueError``를 던진다. 종전에는 범위 밖 격자를 조용히 반환했다.
-
-    이 좌표들은 KMA 예보가 애초에 존재하지 않는 지점이므로 asset을 실패시키지
-    않는다 — 좌표 1건 때문에 전체 날씨 적재가 멈추는 것이 훨씬 나쁘다. 대신
-    호출부가 건수와 표본을 경고로 남긴다.
-    """
 
 
 def _grid_membership_fingerprint(
@@ -415,15 +418,22 @@ def map_grid_targets(
         raise ValueError("max_grids must be positive")
     ordered: list[tuple[int, int]] = []
     seen: set[tuple[int, int]] = set()
-    out_of_grid: list[tuple[float, float]] = []
+    rejected: list[str] = []
     for lon, lat in [*target_coords, *extra_points]:
         try:
             cell = to_grid(lat, lon)
-        except ValueError:
-            # provider ``kma.grid``의 ``validate_latlon``/``validate_grid``가
-            # 던지는 유일한 예외형이다. KMA 격자 밖 지점에는 예보가 없으므로
-            # 제외하되 조용히 버리지 않는다(``coords_out_of_grid``).
-            out_of_grid.append((lon, lat))
+        except ValueError as exc:
+            # ``python-kma-api`` ``a75d1e15``의 ``to_grid``는 투영 뒤
+            # ``validate_latlon``/``validate_grid``(nx 1..149 / ny 1..253)를 호출해
+            # 범위 밖이면 ``ValueError``를 던진다. 종전에는 조용히 반환했다.
+            #
+            # **이것을 건너뛰지 않는다.** 마라도·이어도·백령도·가거도·울릉도·독도까지
+            # 한국 영토 극단점이 모두 격자 안이므로(실측), 격자 밖 좌표는 "국외
+            # 지점"이 아니라 **잘못된 데이터**다 — lon/lat 뒤바뀜, null island,
+            # 손상된 행. 건너뛰면 그 target은 영영 날씨를 받지 못하고 run은 성공
+            # cursor를 남겨 아무도 눈치채지 못한다. 이 모듈은 다른 곳에서도
+            # 부분 실행을 금지한다(``grids_dropped``).
+            rejected.append(f"(lon={lon!r}, lat={lat!r}): {exc}")
             continue
         if cell not in seen:
             seen.add(cell)
@@ -433,7 +443,7 @@ def map_grid_targets(
     return KmaGridTargets(
         grids=tuple(capped),
         grids_dropped=dropped,
-        coords_out_of_grid=tuple(out_of_grid),
+        coords_rejected=tuple(rejected),
         membership_fingerprint=_grid_membership_fingerprint(
             target_coords=target_coords,
             extra_points=extra_points,
@@ -496,6 +506,10 @@ class KmaWeatherTargetScopeEmptyError(ProviderDatasetRefreshFailure):
 
 class KmaWeatherGridLimitExceeded(ProviderDatasetRefreshFailure):
     """KMA target 격자가 실행 상한을 초과해 전체 실행을 거부했다."""
+
+
+class KmaWeatherGridCoordinateInvalid(ProviderDatasetRefreshFailure):
+    """대상 좌표를 KMA DFS 격자로 투영할 수 없다 — 좌표 데이터 오류."""
 
 
 async def _exact_kma_sync_membership(
@@ -666,14 +680,25 @@ async def _run_kma_weather_asset(
         to_grid=_kma_grid,
         max_grids=max_grids,
     )
-    if targets.coords_out_of_grid:
-        sample = ", ".join(f"({lon:.5f},{lat:.5f})" for lon, lat in targets.coords_out_of_grid[:5])
-        context.log.warning(
-            "KMA 격자 범위 밖 좌표 %d건을 대상에서 제외했다 (표본: %s). "
-            "해당 지점에는 KMA 예보가 존재하지 않는다 — 좌표 오류인지 "
-            "국외 지점인지 확인할 것.",
-            len(targets.coords_out_of_grid),
-            sample,
+    if targets.coords_rejected:
+        await _raise_kma_refresh_failure(
+            context,
+            kor_travel_map_client,
+            membership,
+            KmaWeatherGridCoordinateInvalid(
+                provider_dataset_id=membership.provider_dataset_id,
+                sync_scope=sync_scope.value,
+                operation_key=membership.operation_key,
+                message=(
+                    "KMA target coordinates cannot be projected onto the DFS grid; "
+                    "partial execution is forbidden: "
+                    f"count={len(targets.coords_rejected)}, "
+                    f"sample={'; '.join(targets.coords_rejected[:5])}. "
+                    "Korean territory maps entirely inside nx 1..149 / ny 1..253, "
+                    "so these are coordinate data errors (lon/lat swap, null island), "
+                    "not overseas points."
+                ),
+            ),
         )
     if targets.grids_dropped:
         await _raise_kma_refresh_failure(

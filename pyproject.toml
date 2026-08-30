@@ -86,7 +86,7 @@ providers = [
   # 원문은 raw 보존 (provider #8/PR#9, T-212e live 실측 addUnitCharge='200+400').
   # 48e458b: curated source 보강(T-223b) — fileData 4종 + 전국지역특화거리
   # 표준데이터 service/model 추가(provider PR#10).
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@b8f1254871b28e9fbb10bfdd79a89580b8c0d76d",
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@48e458b1f06656a94474f9b08e87cefc3c9c9526",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `kortravelmap.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
@@ -127,10 +127,15 @@ providers = [
   "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@05676f35b0b79cce6ce0705d32d5146c6a7a0bbb",
   # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
   # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
-  # 8cde3af: HeritageDetail.manager 삭제 — 부모 HeritageSummary.owner(같은 alias
-  # ccbaAdmin)로 일원화(provider 1492954). Map providers/krheritage.py의
-  # KrHeritageItem.manager → owner 재결박 필요(BREAKING, 값 의미는 동일).
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c",
+  # 8cde3af 상향 보류(2026-08-30): HeritageDetail.manager 삭제 자체는 Map이 이미
+  # owner로 재결박해 대응했으나(두 필드는 @6076b52에 공존하므로 현 핀에서도 동작),
+  # 같은 커밋 범위가 services/search.py:iter_all의 종료 조건을
+  # `page * result.size >= result.total`(권위) → `len(result.items) < page_size`
+  # (짧은 페이지 휴리스틱)로 바꿨다. krheritage는 결측 key row를 skip하므로
+  # (PR#6) 두 성질이 겹치면 목록이 조용히 절단된다. Map은 이 경로를 provider
+  # iter_all에 위임하므로 dagster/provider_pagination 보호가 닿지 않는다.
+  # provider 측에서 total 기반 종료를 복구한 뒤 상향한다.
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@6076b523fac9226d365136518db4d219cb6339c6",
   "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@cbe4d1380dc0388c078e8ae4622d3e580717064b",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────

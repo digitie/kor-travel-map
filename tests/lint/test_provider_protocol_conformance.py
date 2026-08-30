@@ -85,21 +85,68 @@ def _protocol_members(node: ast.ClassDef) -> set[str]:
     return members
 
 
+def _base_names(node: ast.ClassDef) -> list[str]:
+    """``class X(Protocol)`` / ``class X(typing.Protocol)`` / ``class X(Y)``의 base 이름."""
+    names: list[str] = []
+    for base in node.bases:
+        if isinstance(base, ast.Name):
+            names.append(base.id)
+        elif isinstance(base, ast.Attribute):
+            names.append(base.attr)
+    return names
+
+
 def _discover_protocols() -> dict[str, set[str]]:
     """``providers/`` 안의 모든 ``Protocol``을 reflection으로 찾는다.
 
     선언 표를 읽는 것이 아니라 소스를 훑는다 — 표에 빠진 Protocol이 있으면
     그 사실 자체가 드러나야 하기 때문이다.
+
+    **상속을 편다.** ``OpinetStationDetailItem``은 ``OpinetStationItem``을 상속해
+    ``prices`` 하나만 직접 선언하지만, 실모델은 상속분(``uni_id``/``name``/``lon`` …)도
+    만족해야 한다. 직접 선언만 보면 그 7개가 결박 대상 클래스에서 검증되지 않은 채
+    green이 된다(적대 리뷰).
+
+    Protocol 판정도 ``Protocol``/``typing.Protocol``과 **다른 Protocol의 하위**까지
+    본다 — 그러지 않으면 Protocol을 상속한 Protocol이 "선언 전수" 검사를 조용히
+    빠져나간다.
     """
+    declared: dict[str, tuple[set[str], list[str]]] = {}
+    for path in sorted(PROVIDERS_DIR.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                declared[node.name] = (_protocol_members(node), _base_names(node))
+
+    def is_protocol(name: str, seen: frozenset[str] = frozenset()) -> bool:
+        if name == "Protocol":
+            return True
+        if name in seen or name not in declared:
+            return False
+        return any(
+            is_protocol(base, seen | {name}) for base in declared[name][1]
+        )
+
     found: dict[str, set[str]] = {}
-    for path in sorted(PROVIDERS_DIR.glob("*.py")):
+    for path in sorted(PROVIDERS_DIR.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.ClassDef):
                 continue
-            if not any(isinstance(b, ast.Name) and b.id == "Protocol" for b in node.bases):
+            bases = _base_names(node)
+            if not any(is_protocol(base) for base in bases):
                 continue
-            found[f"{path.stem}.{node.name}"] = _protocol_members(node)
+            members = set(_protocol_members(node))
+            pending = [b for b in bases if b != "Protocol"]
+            seen_bases: set[str] = {node.name}
+            while pending:
+                base = pending.pop()
+                if base in seen_bases or base not in declared:
+                    continue
+                seen_bases.add(base)
+                members |= declared[base][0]
+                pending.extend(declared[base][1])
+            found[f"{path.stem}.{node.name}"] = members
     return found
 
 
@@ -127,6 +174,20 @@ def test_manifest_matches_declared_pins() -> None:
         "`python scripts/generate_provider_surface_manifest.py`로 재생성할 것:\n  "
         + "\n  ".join(stale)
     )
+
+    # 역방향도 본다. 이 검사가 없으면 새 provider를 핀하면서 표면 추출 대상에
+    # 넣는 것을 잊어도 게이트가 아무 말도 하지 않는다 — 실제로 python-mcst-api가
+    # 13개 핀 중 12개만 검사받는 상태였고, manifest만 훑는 검사는 그것을 볼 수 없었다.
+    exempt = manifest.get("providers_without_protocols", {})
+    assert isinstance(exempt, dict)
+    uncovered = sorted(set(declared) - set(providers) - set(exempt))
+    assert not uncovered, (
+        "핀은 있으나 표면 대조도 면제 선언도 없는 provider다 — `Protocol` 결박이 "
+        "있으면 PROVIDER_PACKAGES에, 없으면 사유와 함께 PROVIDERS_WITHOUT_PROTOCOLS에 "
+        f"넣고 manifest를 재생성할 것: {uncovered}"
+    )
+    silent = sorted(name for name, reason in exempt.items() if not str(reason).strip())
+    assert not silent, f"사유가 비어 있는 provider 면제: {silent}"
 
 
 def test_every_protocol_is_declared_exactly_once() -> None:

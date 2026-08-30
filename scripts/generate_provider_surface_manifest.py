@@ -50,7 +50,21 @@ PROVIDER_PACKAGES: Mapping[str, str] = {
     "python-opinet-api": "opinet",
     "python-visitkorea-api": "visitkorea",
 }
-"""핀 이름 → import 패키지 이름. ``Protocol`` 소비가 없는 provider는 넣지 않는다."""
+"""핀 이름 → import 패키지 이름. ``Protocol`` 결박이 있는 provider만 넣는다."""
+
+PROVIDERS_WITHOUT_PROTOCOLS: Mapping[str, str] = {
+    "python-mcst-api": (
+        "``providers/mcst.py``는 typed 모델이 아니라 CSV row(``Mapping[str, Any]``)를 "
+        "받는다. 결박할 ``Protocol``이 없으므로 표면 대조 대상이 아니다 — 이 경계의 "
+        "취약점은 모델 속성이 아니라 CSV 컬럼 이름이다."
+    ),
+}
+"""핀은 있으나 ``Protocol`` 결박이 없어 표면을 뽑지 않는 provider와 그 사유.
+
+**빠뜨린 것과 면제한 것을 구분하기 위해 존재한다.** 이 표가 없으면 새 provider를
+핀하면서 ``PROVIDER_PACKAGES``에 넣는 것을 잊어도 게이트가 아무 말도 하지 않는다 —
+실제로 ``python-mcst-api``가 그렇게 12/13만 검사받는 상태였다.
+"""
 
 _PIN_RE = re.compile(
     r'"(?P<dist>python-[a-z0-9-]+)\s*@\s*git\+https://github\.com/digitie/'
@@ -187,6 +201,13 @@ def build_manifest() -> dict[str, object]:
     missing = sorted(set(PROVIDER_PACKAGES) - set(pins))
     if missing:
         raise ManifestError("PROVIDER_PACKAGES에 있으나 pyproject 핀이 없다: " + ", ".join(missing))
+    undeclared = sorted(set(pins) - set(PROVIDER_PACKAGES) - set(PROVIDERS_WITHOUT_PROTOCOLS))
+    if undeclared:
+        raise ManifestError(
+            "pyproject에 핀이 있으나 표면 추출 대상인지 선언되지 않은 provider다 — "
+            "``Protocol`` 결박이 있으면 PROVIDER_PACKAGES에, 없으면 사유와 함께 "
+            "PROVIDERS_WITHOUT_PROTOCOLS에 넣을 것: " + ", ".join(undeclared)
+        )
 
     providers: dict[str, object] = {}
     for dist, package in sorted(PROVIDER_PACKAGES.items()):
@@ -205,6 +226,7 @@ def build_manifest() -> dict[str, object]:
         "version": 1,
         "generated_by": "scripts/generate_provider_surface_manifest.py",
         "providers": providers,
+        "providers_without_protocols": dict(sorted(PROVIDERS_WITHOUT_PROTOCOLS.items())),
     }
 
 

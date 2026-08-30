@@ -2,7 +2,7 @@
 
 ## 왜 필요한가
 
-data.go.kr 계열 provider 페이지네이션은 본 저장소 7곳에서 같은 관용구를 썼다::
+data.go.kr 계열 provider 페이지네이션은 본 저장소 6곳에서 같은 관용구를 썼다::
 
     items = fetch(page_no)
     if not items:
@@ -32,8 +32,15 @@ python-krex-api ``ddd69cd2 → c6d8717e``의 ``_parse_page``가 "행 하나라�
 빈 페이지                      종료                  종료
 ``seen >= total_count``       종료                  (판정 불가)
 짧은 페이지, seen < total      **계속 + 경고**        종료
-``page_no > max_pages``       예외                  예외
+``page_no > 상한``            예외                  예외
+"더 없음" 예외                 종료(+경고)            종료
 ===========================  ===================  ==========================
+
+마지막 줄이 ``end_of_pages``다. 빈 페이지 대신 **예외로** 끝을 알리는 provider가 있다 —
+krex는 resultCode ``03``/``NO_DATA``에 ``KrexNotFoundError``를, airkorea는
+``AirKoreaNoDataError``를 던진다. 두 라이브러리 모두 자기 내부 페이지네이션에서 그
+예외를 종료로 잡는다. 이 훅이 없으면 "짧은 페이지에서 계속 진행" 규칙이 마지막 페이지
+다음 요청을 만들어 asset을 실패시킨다(적대 리뷰).
 
 "짧은 페이지인데 아직 다 못 받았다"에서 계속 진행하는 것이 이번 보정의 본체다.
 그리고 그 상황은 **반드시 경고로 드러난다** — provider가 행을 걸렀다는 유일한 신호이기
@@ -49,12 +56,26 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-DEFAULT_MAX_PAGES: Final = 10_000
-"""페이지 상한 — 무한 루프 방지용 안전장치이지 정상 종료 조건이 아니다.
+DEFAULT_MAX_PAGES: Final = 200
+"""``total_count``를 모를 때의 페이지 상한.
 
-page_no가 범위를 넘으면 upstream이 빈 페이지를 주는 것이 정상이다. 그러지 않고
-마지막 페이지를 반복해 주는 upstream에서 루프가 갇히지 않게 한다. 1000 rows/page
-기준 1000만 건이라 실 데이터셋에서 걸릴 값이 아니다.
+무한 루프 방지용 안전장치이지 정상 종료 조건이 아니다. page_no가 범위를 넘으면
+upstream이 빈 페이지를 주거나 "더 없음" 예외를 던지는 것이 정상이고, 그러지 않고
+마지막 페이지를 반복해 주는 upstream에서 루프가 갇히지 않게 한다.
+
+**전역 10,000은 상한 구실을 하지 못한다**(적대 리뷰). Dagster job의
+``dagster/max_runtime``은 7,200초이고 요청당 0.3~1초이므로, 10,000 페이지에 도달하기
+훨씬 전에 run monitoring이 run을 죽인다 — 즉 "시끄럽게 실패한다"는 설계 목표가
+달성되지 않는다. data.go.kr 일일 쿼터도 그 전에 소진된다. 100 rows/page 기준 2만 건인
+200으로 낮추고, ``total_count``를 아는 경로는 아래처럼 선언 건수에서 유도한다.
+"""
+
+_DECLARED_PAGE_SLACK: Final = 2
+"""``total_count``를 알 때 허용하는 여유 배수.
+
+provider가 행을 걸러 낼 수 있으므로 ``ceil(declared / num_of_rows)``보다 많은 페이지가
+정상적으로 필요할 수 있다. 그러나 무한정은 아니다 — 절반이 걸러지는 상황이면 상한에
+걸려 시끄럽게 실패하는 편이 낫다.
 """
 
 
@@ -94,6 +115,7 @@ def iter_paginated_items(
     num_of_rows: int,
     label: str,
     max_pages: int = DEFAULT_MAX_PAGES,
+    end_of_pages: tuple[type[BaseException], ...] = (),
     warn: Callable[[str], None] | None = None,
 ) -> Iterator[Any]:
     """``fetch_page(page_no)``를 소진하며 item을 lazily yield한다.
@@ -108,7 +130,16 @@ def iter_paginated_items(
     label:
         경고 문구에 넣을 호출 경계 이름 (예: ``"krex restarea.list_all"``).
     max_pages:
-        안전 상한. 넘기면 :class:`ProviderPaginationOverrun`.
+        ``total_count``를 모를 때의 안전 상한. 넘기면
+        :class:`ProviderPaginationOverrun`. 아는 경우에는
+        ``ceil(total_count / num_of_rows) * _DECLARED_PAGE_SLACK + 1``과 이 값 중
+        **큰 쪽**을 쓴다 — 선언 건수가 상한을 정하게 한다.
+    end_of_pages:
+        "더 이상 페이지가 없다"를 **예외로 알리는** provider의 예외형들. 빈 페이지
+        대신 예외를 던지는 provider가 있다 — krex는 resultCode ``03``/``NO_DATA``에
+        ``KrexNotFoundError``를, airkorea는 ``AirKoreaNoDataError``를 던지고, 두
+        라이브러리 모두 **자기 내부 페이지네이션에서 그 예외를 종료로 잡는다.**
+        이 훅이 없으면 마지막 페이지 다음 요청이 asset 실패가 된다.
     warn:
         완성된 경고 문구를 받는 싱크(보통 ``logger.warning``). 경고는 드물게만
         발생하므로 lazy 포매팅 대신 문구를 만들어 넘긴다. 생략하면 경고가 사라지므로
@@ -126,12 +157,34 @@ def iter_paginated_items(
     """
     seen = 0
     declared: int | None = None
+    ceiling = max_pages
 
-    for page_no in range(1, max_pages + 1):
-        page = fetch_page(page_no)
+    page_no = 0
+    while True:
+        page_no += 1
+        if page_no > ceiling:
+            raise ProviderPaginationOverrun(
+                f"{label}: page 상한 {ceiling}를 넘겼다 (수신 {seen}건, 선언 {declared}). "
+                "upstream이 범위 밖 page에 빈 페이지를 주지 않거나 행을 과도하게 "
+                "걸러내는지 확인할 것."
+            )
+        try:
+            page = fetch_page(page_no)
+        except end_of_pages:
+            # provider가 "더 없음"을 예외로 알렸다. 정상 종료다.
+            if declared is not None and seen < declared:
+                _emit(
+                    warn,
+                    f"{label}: upstream이 선언한 {declared}건 중 {seen}건에서 "
+                    f"페이지 종료를 알렸다 — provider 파싱 실패 행 가능성",
+                )
+            return
         items = list(page.items)
         if page.declared_total is not None:
             declared = page.declared_total
+            # 선언 건수가 상한을 정한다. 전역 상한은 그보다 작을 때만 의미가 있다.
+            needed = -(-declared // num_of_rows) if num_of_rows > 0 else 1
+            ceiling = max(ceiling, needed * _DECLARED_PAGE_SLACK + 1)
 
         if not items:
             if declared is not None and seen < declared:
@@ -163,11 +216,6 @@ def iter_paginated_items(
         if len(items) < num_of_rows:
             # total_count가 없으면 짧은 페이지 외에 판정 근거가 없다.
             return
-
-    raise ProviderPaginationOverrun(
-        f"{label}: page 상한 {max_pages}를 넘겼다 (수신 {seen}건, "
-        f"선언 {declared}). upstream이 범위 밖 page에 빈 페이지를 주지 않는지 확인할 것."
-    )
 
 
 def _emit(warn: Callable[[str], None] | None, message: str) -> None:

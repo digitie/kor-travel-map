@@ -447,7 +447,7 @@ def test_no_provider_wrapper_classes():
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | kor-travel-geo | REST 서비스(직접 의존 없음) | `KorTravelGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12501` 기준 |
-| python-datagokr-api | `@b8f1254` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
+| python-datagokr-api | `@48e458b` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
 | python-kma-api | `@a75d1e1` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#24, PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). `0868b76`: `resultCode=22`를 비재시도 quota로 분류하고 HTTP 200 XML `OpenAPI_ServiceResponse`의 `03`은 빈 결과, 임의 XML은 parse error로 fail-close(provider PR#24, T-VN-H45 후속). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@c4c8d12` | `AirQualityStationItem`/`AirQualityMeasurementItem` | — | PM10/PM2.5/CAI. `c4c8d12`: base URL http→https, totalCount 결측+만재 페이지 `AirKoreaParseError` |
 | python-khoa-api | `@bc6fe22` | (후속 PR) | PR#8 | 해수욕장·해양 지수. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump). `20c7207`: `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환(provider PR#8, T-VN-H45 후속). C03에서 46개 ODMI catalog에 notice event/model이 없음을 확인해 coastal notice 계획 폐기 |
@@ -456,11 +456,22 @@ def test_no_provider_wrapper_classes():
 | python-krex-api | `@c6d8717` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱. `realTimeSMSList`와 0 이상 `count`가 없는 HTTP 200 본문은 authoritative empty가 아니라 `KrexParseError`(krex#11) |
 | python-visitkorea-api | `@2406531` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
 | python-knps-api | `@43f2917` | `KnpsPointRecord`/`KnpsGeometryRecord` | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25. `16e3954`: trails vertex 행 → 코스 단위 LINESTRING 조립(provider PR#10) |
-| python-krheritage-api | `@8cde3af` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380), `manager`→`owner` (8cde3af) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). `8cde3af`: `HeritageDetail.manager` 삭제 → 부모 `HeritageSummary.owner`(동일 alias `ccbaAdmin`)로 일원화 — **BREAKING**, Protocol 재결박함. GIS 경계(geom) 보강은 후속. media → RustFS |
+| python-krheritage-api | `@6076b52` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380), `manager`→`owner` (8cde3af) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). `8cde3af` **상향 보류(2026-08-30)**: `HeritageDetail.manager` 삭제 → 부모 `HeritageSummary.owner`(동일 alias `ccbaAdmin`)로 일원화 — Protocol은 `owner`로 재결박했고 두 필드가 `@6076b52`에 공존하므로 현 핀에서도 동작한다. 보류 사유는 같은 범위가 `iter_all` 종료 조건을 `page * size >= total` → `len(items) < page_size`로 바꾼 것이다(결측 key row skip과 겹쳐 조용한 절단). GIS 경계(geom) 보강은 후속. media → RustFS |
 | python-krairport-api | `@cbe4d13` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@f44c2d0` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
 | python-mcst-api | `@c620d63` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/etl/mcst-feature-etl.md` §7) |
+
+**상향 보류 중인 핀 (2026-08-30)** — provider HEAD가 Map에 회귀를 일으켜 의도적으로 올리지 않는다:
+
+| provider | 올리지 않은 HEAD | 보류 사유 |
+|---|---|---|
+| python-datagokr-api | HEAD `b8f1254` | `services/standard.py`가 pydantic 검증 실패 행을 `except ValidationError: continue`로 **조용히 건너뛰고**, `services/pagination.py`가 종료 조건에서 `reached_known_end`(`total_count <= page_no * num_of_rows`) 논리곱을 지워 `len(items) < num_of_rows`만으로 멈춘다. 두 성질이 겹치면 만재 페이지에서 1행만 실패해도 나머지 데이터셋을 조용히 버린다. Map은 축제·박물관미술관·관광지·특화거리·주차장 5개를 provider `iter_all()`에 위임하므로 `provider_pagination` 보호가 닿지 않는다. |
+| python-krheritage-api | HEAD `8cde3af` | `services/search.py:iter_all`이 `page * result.size >= result.total`(권위) → `len(result.items) < page_size`(짧은 페이지 휴리스틱)로 바뀌었다. 결측 key row skip(PR#6)과 겹치면 같은 절단이 된다. |
+
+두 건 모두 **provider 라이브러리에서 total 기반 종료를 복구**하는 것이 정본 수정이다(ADR-044 — 데이터 정합성 1차 책임은 provider). 그때까지 Map은 옛 핀을 유지한다.
+
+`krforest`·`visitkorea`는 같은 감사를 받았으나 `page.has_next_page`(total 유래 술어)로 끝내므로 안전함을 확인했다.
 
 **최신 sha 갱신 절차**:
 1. provider 저장소에서 안정 commit sha 확인 (사용자 모니터링).
