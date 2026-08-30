@@ -1106,7 +1106,12 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert "alembic upgrade head" not in script
     assert "loopback local-dev smoke launcher" in script
     assert "must be one strict loopback PostgreSQL DSN" in script
-    assert "pre-provisioned exact application revision 300" in script
+    # 기대 revision은 **파생값**이어야 한다. 리터럴 `300`을 다시 박으면 migration 하나에
+    # admin stack이 자기 DB를 거절한다 — 종전에 실제로 그런 상태였다.
+    assert "pre-provisioned exact application revision " in script
+    assert "pre-provisioned exact application revision 300" not in script
+    assert "_application_schema_head()" in script
+    assert "KOR_TRAVEL_MAP_APPLICATION_GRAPH" in script
     assert "Dagster metadata database identity is not dedicated" in script
     assert "dagster-webserver" in script
     assert "dagster-daemon" in script
