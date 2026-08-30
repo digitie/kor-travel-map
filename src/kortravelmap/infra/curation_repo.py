@@ -568,6 +568,25 @@ class CurationImportRevisionExpectation:
     expected_revision: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class ImportRowReceipt:
+    """provenance 단계가 한 행에 대해 확정한 immutable 좌표.
+
+    `301` linkage(`ops.curation_import_manual_feature_children`)가 이 셋을 그대로
+    결박한다 — `(import_row_id, curation_item_id)`는 import receipt를,
+    `(link_decision_id, curation_item_id, import_row_id)`는 accepted decision을 가리킨다.
+
+    종전에는 provenance가 이 값들을 만들어 놓고 `import_batch_id` 하나만 돌려줬다.
+    그러면 linkage를 쓰려는 caller가 **DB를 다시 조회해 추론**해야 하는데, 같은
+    transaction 안에서 방금 만든 것을 되찾는 조회는 결박이 아니라 추측이다.
+    """
+
+    row_number: int
+    import_row_id: str
+    curation_item_id: str
+    accepted_link_decision_id: str | None
+
+
 class CurationImportResult(TypedDict):
     """원자적 CSV replace가 실제 반영한 item 변화."""
 
@@ -578,6 +597,7 @@ class CurationImportResult(TypedDict):
     removed: int
     removals: tuple[CurationItem, ...]
     import_batch_id: str | None
+    row_receipts: tuple[ImportRowReceipt, ...]
 
 
 _COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("count_pf")
@@ -5361,8 +5381,12 @@ async def _record_import_provenance(
     source_content_sha256: str | None,
     batch_kind: str | None,
     command_id: int | None,
-) -> str:
-    """current item을 exact immutable import row/decision으로 전진시킨다."""
+) -> tuple[str, tuple[ImportRowReceipt, ...]]:
+    """current item을 exact immutable import row/decision으로 전진시킨다.
+
+    ``import_batch_id``와 함께 **행별 좌표**를 돌려준다. `301` linkage가 그 셋을
+    결박하므로, caller가 나중에 DB를 되짚어 추론하지 않게 한다.
+    """
 
     effective_actor = (actor or "system:curation-import").strip()
     if not effective_actor:
@@ -5442,6 +5466,7 @@ async def _record_import_provenance(
     import_rows: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []
     pointers: list[dict[str, Any]] = []
+    receipts: list[ImportRowReceipt] = []
     for row, row_payload in zip(rows, canonical_rows, strict=True):
         identity = identities[row.row_number]
         item_is_archived = identity["archived_at"] is not None
@@ -5514,6 +5539,14 @@ async def _record_import_provenance(
                 "accepted_link_decision_id": accepted_decision_id,
             }
         )
+        receipts.append(
+            ImportRowReceipt(
+                row_number=row.row_number,
+                import_row_id=import_row_id,
+                curation_item_id=str(identity["curation_item_id"]),
+                accepted_link_decision_id=accepted_decision_id,
+            )
+        )
 
     await session.execute(
         text(_INSERT_IMPORT_ROWS_SQL),
@@ -5534,7 +5567,7 @@ async def _record_import_provenance(
         text(_ADVANCE_IMPORT_POINTERS_SQL),
         {"pointers": json.dumps(pointers, ensure_ascii=False)},
     )
-    return import_batch_id
+    return import_batch_id, tuple(receipts)
 
 
 async def _record_manual_link_decision(
@@ -6142,6 +6175,11 @@ async def _apply_curation_import_items_command(
         "removed": len(removed_ids),
         "removals": removals,
         "import_batch_id": str(result["o_import_batch_id"]),
+        # 이 경로는 DB procedure가 행 반영을 통째로 소유하므로 행별 좌표를 돌려받지
+        # 못한다. 비우는 것이 정확하다 — 추측한 값을 채우면 `301` linkage가 잘못된
+        # import row에 결박된다. manual row를 이 경로로 보내면 child가 조용히 빠지므로,
+        # child를 발급하는 caller가 `row_receipts` 부재를 **거절**해야 한다.
+        "row_receipts": (),
     }
 
 
@@ -6453,7 +6491,7 @@ async def import_curation_rows(
                 ),
                 {"collection_ids": collection_ids, "actor": actor},
             )
-    import_batch_id = await _record_import_provenance(
+    import_batch_id, row_receipts = await _record_import_provenance(
         session,
         rows=rows,
         actor=actor,
@@ -6469,4 +6507,5 @@ async def import_curation_rows(
         "removed": counts["removed"],
         "removals": removals,
         "import_batch_id": import_batch_id,
+        "row_receipts": row_receipts,
     }

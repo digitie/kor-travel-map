@@ -2095,7 +2095,9 @@ async def preview_admin_curation_import(
             "removed": len(change_plan.removals),
             "collections": change_plan.collections,
             "removals": change_plan.removals,
+            # dry-run은 아무것도 확정하지 않는다 — batch도 행 좌표도 없다.
             "import_batch_id": None,
+            "row_receipts": (),
         }
     except IntegrityError as exc:
         raise _conflict(exc) from exc
