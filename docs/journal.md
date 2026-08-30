@@ -1,5 +1,36 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-30 — provider 핀 전수 동기화와 Protocol 적합성 게이트
+
+형제 `python-*-api` 18개를 핀↔HEAD로 전수 대조했다. 핀 11개를 올리고 **2개는 의도적으로
+보류**했다. datagokr는 검증 실패 행을 조용히 건너뛰게 되면서 동시에 종료 조건에서
+`reached_known_end` 논리곱을 지웠고, krheritage는 `page * size >= total`을 짧은 페이지
+휴리스틱으로 바꿨다. 둘 다 Map이 provider `iter_all()`에 위임하는 경로라 본 저장소의
+페이지네이션 보호가 닿지 않는다. 정본 수정은 provider 쪽 total 기반 종료 복구다(ADR-044).
+같은 감사를 받은 krforest·visitkorea는 `has_next_page`를 써서 안전함을 확인했다.
+
+`HeritageDetail.manager` 삭제가 mypy·import-linter·단위 테스트를 모두 green으로 통과한 채
+live에서만 터진 이유를 구조로 정리했다. 45개 Protocol의 실모델 결박이 docstring 산문에만
+있었고, `cast(Any, ...)` 지연 로드라 정적 검사가 보지 못하며, provider extra가 CI에 설치된
+적이 없고, 단위 테스트는 자체 fake를 쓴다. 핀된 SHA에서 provider 표면을 뽑아 굳히는
+manifest와 기계가 읽는 결박 선언표를 도입해 CI가 provider 설치 없이 실제 표면을 보게 했다.
+
+Dagster 페이지네이션 6곳의 `len(items) < num_of_rows` 종료 조건을 공용 헬퍼로 옮겼다.
+`total_count`가 권위이고 짧은 페이지는 그것이 없을 때만 쓰는 대체 휴리스틱이며, "짧은
+페이지인데 아직 다 못 받았다"는 계속 + 경고다. krex/airkorea처럼 끝을 **예외로** 알리는
+provider를 위해 `end_of_pages` 훅을 뒀다.
+
+kma `to_grid`가 격자 범위 밖에서 `ValueError`를 던지게 됐다. 한국 영토 극단점 9개를 실제
+투영해 전부 격자 안임을 확인했으므로, 격자 밖 좌표는 국외 지점이 아니라 좌표 데이터
+오류다. 건너뛰지 않고 typed `KmaWeatherGridCoordinateInvalid`로 실패시킨다.
+
+적대 리뷰 2명이 내가 만든 회귀 둘(khoa 절단, krex 종료 예외)과 내 게이트의 구멍 둘
+(mcst 미검사, 상속 Protocol 멤버 미검사)을 찾았다. 전부 실증 후 반영했다.
+
+n150 CI-parity 게이트에서 하위 패키지 테스트가 체크아웃이 아니라 venv 편집형 설치가
+가리키는 `/tmp/ktm-lint`(다른 커밋)를 import해 온 것을 실측으로 확인했다. `-c pyproject.toml`로
+루트 config를 강제해 고쳤다 — 그 전 판정은 테스트 대상이 아닌 트리에 대한 것이었다.
+
 ## 2026-08-29 — Manager-aware M05 execution identity 계약 착수
 
 Map/PinVi v5 source pinset이 Manager revision을 digest에 넣지 않아, Manager의 terminal 보정을 배포해도 같은 source
