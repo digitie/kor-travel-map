@@ -15,6 +15,8 @@ from kortravelmap.curation_import import (
     CURATION_CSV_MAX_ROWS,
     CURATION_CSV_OPTIONAL_HEADERS,
     CURATION_INTEGER_MAX,
+    manual_feature_payload,
+    manual_feature_payload_sha256,
     parse_curation_csv,
 )
 
@@ -399,3 +401,84 @@ def test_coordinates_without_kind_are_rejected() -> None:
     row = preview.rows[0]
     assert row.status == "invalid"
     assert "manual_feature_kind_missing" in {i.code for i in row.issues}
+
+
+def test_manual_feature_payload_is_none_without_kind() -> None:
+    preview = parse_curation_csv(_csv_bytes(_valid_row()))
+
+    assert manual_feature_payload(preview.rows[0]) is None
+
+
+def test_manual_feature_payload_preserves_written_precision() -> None:
+    """canonical SHA가 재현 가능하려면 CSV에 적힌 자릿수가 살아 있어야 한다.
+
+    JSON number로 담으면 ``126.99100``이 ``126.991``로 정규화돼 같은 파일이 다른
+    child identity를 만들 수 있다.
+    """
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                manual_feature_kind="place",
+                manual_feature_lon="126.99100",
+                manual_feature_lat="37.57960",
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    payload = manual_feature_payload(preview.rows[0])
+
+    assert payload == {
+        "kind": "place",
+        "coord": {"lon": "126.99100", "lat": "37.57960"},
+    }
+
+
+def test_manual_feature_payload_sha256_is_stable_and_precision_sensitive() -> None:
+    same = manual_feature_payload_sha256(
+        {"kind": "place", "coord": {"lon": "127.0", "lat": "37.5"}}
+    )
+    reordered = manual_feature_payload_sha256(
+        {"coord": {"lat": "37.5", "lon": "127.0"}, "kind": "place"}
+    )
+    trimmed = manual_feature_payload_sha256(
+        {"kind": "place", "coord": {"lon": "127.00", "lat": "37.5"}}
+    )
+
+    assert same == reordered, "key 순서가 identity를 바꾸면 안 된다"
+    assert same != trimmed, "자릿수가 다르면 다른 payload다"
+    assert len(same) == 64
+
+
+def test_manual_feature_payload_omits_server_owned_fields() -> None:
+    """서버가 소유하는 값을 payload에 넣지 않는다.
+
+    ``create_manual_curation_item_with_feature_command``가 명시적으로 거절하는 키들이라,
+    여기서 만들지 않는 것이 그 계약과 일치한다.
+    """
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                manual_feature_kind="event",
+                manual_feature_lon="127.0",
+                manual_feature_lat="37.5",
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+
+    payload = manual_feature_payload(preview.rows[0])
+
+    assert payload is not None
+    forbidden = {
+        "feature_id",
+        "feature_uuid",
+        "origin_kind",
+        "creator_principal_id",
+        "lifecycle_state",
+        "publication_state",
+        "quality_state",
+        "operator",
+        "idempotency_key",
+    }
+    assert forbidden.isdisjoint(payload)

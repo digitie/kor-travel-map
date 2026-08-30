@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from typing import Final, Literal, cast
@@ -402,6 +404,43 @@ def _parse_row(
         manual_feature_lat=manual_lat,
         issues=tuple(issues),
     )
+
+
+def manual_feature_payload(row: CurationImportRow) -> dict[str, object] | None:
+    """행이 지시하는 manual Feature의 **typed** payload. 지시가 없으면 ``None``.
+
+    ``create_manual_curation_item_with_feature_command``가 요구하는 최소 shape이다 —
+    ``kind``와 ``coord``. 나머지(이름·상세)는 curation item 쪽 인자가 소유하므로 여기
+    넣지 않는다. 서버가 소유하는 값(``feature_id``/``origin_kind``/상태)은 그 함수가
+    명시적으로 거절하므로 애초에 만들지 않는다.
+
+    좌표를 ``Decimal``의 **문자열**로 담는 이유는 canonical SHA-256 때문이다. JSON
+    number로 담으면 ``126.99100``이 ``126.991``로 정규화돼 CSV에 적힌 자릿수가 사라지고,
+    같은 파일이 다른 SHA를 낼 수 있다.
+    """
+    if not row.manual_feature_kind:
+        return None
+    if row.manual_feature_lon is None or row.manual_feature_lat is None:
+        return None
+    return {
+        "kind": row.manual_feature_kind,
+        "coord": {
+            "lon": str(row.manual_feature_lon),
+            "lat": str(row.manual_feature_lat),
+        },
+    }
+
+
+def manual_feature_payload_sha256(payload: Mapping[str, object]) -> str:
+    """typed manual payload의 canonical SHA-256.
+
+    child idempotency identity가 이 값에서 유도되므로(설계 §6.2) 직렬화가 결정적이어야
+    한다 — key 정렬, 공백 없음, 비ASCII 그대로.
+    """
+    encoded = json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _parse_coordinate(
