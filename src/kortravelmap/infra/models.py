@@ -3292,6 +3292,15 @@ class CurationLinkDecisionRow(Base):
             "feature_id",
             name=conv("uq_curation_link_decisions_item_target"),
         ),
+        UniqueConstraint(
+            "decision_id",
+            "curation_item_id",
+            "import_row_id",
+            name=conv("uq_curation_link_decisions_import_row_pointer"),
+            # T-VN-M03: import child linkage가 "이 accepted decision이 그 item의,
+            # 그리고 **그 import row의** 것"임을 FK 하나로 결박하려면 이 triple이
+            # unique여야 한다. 기존 두 unique는 import row 축을 담지 않는다.
+        ),
         Index(
             "idx_curation_link_decisions_item_time",
             "curation_item_id",

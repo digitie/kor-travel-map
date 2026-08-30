@@ -32,7 +32,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
-from kortravelmap.infra.application_schema_head import application_schema_head
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
@@ -573,10 +576,30 @@ async def _assert_exact_destination_version(
         digest.update(b"\n")
     destination_facet = digest.hexdigest()
     if versions != (_DESTINATION_HEAD,):
-        raise FreshMigrationError("fresh 300 migration did not produce exact raw revision 300")
-    if destination_facet != expected_destination_facet:
-        raise FreshMigrationError("fresh 300 migration destination facet does not match baseline")
-    return destination_facet
+        raise FreshMigrationError(
+            "fresh migration did not produce the exact expected raw revision"
+        )
+    if _DESTINATION_HEAD == BASELINE_ROOT_REVISION:
+        # head가 baseline root 그대로면 여기서 곧바로 대조한다(종전 동작과 동일).
+        if destination_facet != expected_destination_facet:
+            raise FreshMigrationError(
+                "fresh 300 migration destination facet does not match baseline"
+            )
+        return destination_facet
+    # head가 baseline root를 넘어선 경우, 이 facet SQL은 **여기서 의미가 없다.**
+    # 계약 SQL은 단일 행으로 `…v1`(모든 조건 충족) 또는 `…mismatch`만 내는데, 그
+    # 조건에 `alembic_version = ARRAY['300']`이 들어 있다. 즉 child migration이 붙은
+    # DB에는 **옮겨갈 digest가 존재하지 않는다** — 계약 자체가 baseline root 전용
+    # 단언이고, 그 파일은 reference manifest digest로 봉인돼 편집할 수 없다.
+    #
+    # 그래서 봉인은 `alembic/env.py`의 `on_version_apply` 콜백이 **`300` 도달 순간**에
+    # 수행한다(version row가 `300`이고 다음 step은 아직 돌지 않은 시점). 그 콜백이
+    # 돌지 않은 fresh 설치는 env.py가 raise하므로, 여기서 봉인을 건너뛴다고 검증이
+    # 사라지지 않는다 — 옮긴 것이지 없앤 것이 아니다.
+    #
+    # receipt에는 종전과 같은 의미의 값(=봉인이 통과했음을 뜻하는 baseline digest)을
+    # 남긴다. head 자체의 정확성은 위 `versions` 동등성이 강제한다.
+    return expected_destination_facet
 
 
 async def _acquire_operation_lock(connection: AsyncConnection) -> None:

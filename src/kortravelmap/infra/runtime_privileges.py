@@ -179,6 +179,7 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_concierge_legacy_owner_manifest": (),
     "curation_import_collection_effects": (),
     "curation_import_collection_touches": (),
+    "curation_import_manual_feature_children": (),
     "curation_import_plan_claims": (),
     "curation_import_plan_commits": (),
     "curation_provider_root_receipts": (),

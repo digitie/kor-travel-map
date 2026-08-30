@@ -189,10 +189,20 @@ def test_fresh_install_facet_verification_cannot_be_silently_skipped() -> None:
         "if raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,):"
         not in source
     ), (
-        "fresh 설치 facet 검증이 head 일치를 조건에 달고 있다 — head가 움직이면 "
-        "검증이 조용히 사라진다. 도달점이 baseline root가 아니면 raise할 것"
+        "fresh 설치 facet 검증이 최종 head 일치를 조건에 달고 있다 — head가 움직이면 "
+        "검증이 조용히 사라진다"
     )
-    assert "if raw_heads_before == ():" in source, (
-        "fresh 설치 판정은 `raw_heads_before == ()` 하나여야 한다"
+
+    # 봉인은 `300` step 콜백이 한다. 계약 SQL이 `alembic_version = ARRAY['300']`을
+    # 요구하므로 그 순간에만 의미가 있고, alembic이 `update_to_step()`을 콜백보다
+    # 먼저 부르므로 version row는 이미 `300`이다.
+    assert "on_version_apply=[" in source, (
+        "facet 봉인이 step 콜백으로 걸려 있지 않다 — `run_migrations()` 이후에 검증하면 "
+        "child migration이 붙는 순간 계약이 어긋난다"
     )
     assert "_verify_fresh_300_destination_facet(connection)" in source
+
+    # 콜백이 돌지 않았는데도 통과하는 자리가 있으면 안 된다.
+    assert "and not facet_verified:" in source, (
+        "봉인이 실제로 수행됐는지 확인하는 fail-close가 없다 — 조용히 꺼질 자리가 남는다"
+    )

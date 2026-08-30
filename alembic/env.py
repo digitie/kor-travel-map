@@ -396,6 +396,25 @@ def do_run_migrations(connection: Connection) -> None:
     # L416-417). 즉 search_path SET 등 어떤 execute()도 configure() 이전에
     # 하면 SQLAlchemy 2.0 autobegin으로 트랜잭션이 열려 → migration이 적용은
     # 되지만 connection close 시 rollback → 빈 DB. (Alembic ≤1.17에선 무증상.)
+    # fresh 설치의 destination facet은 **`300` 도달 순간**에 봉인해야 한다.
+    # 계약 SQL(`application-destination-alembic-version.sql`)이 `alembic_version`
+    # 내용을 `ARRAY['300']`으로 못 박고 있고, 그 파일은 reference manifest digest로
+    # 봉인돼 있어 편집할 수 없다. child migration이 붙으면 `run_migrations()`가 끝난
+    # 시점의 version row는 head이므로 그때 검증하면 반드시 어긋난다.
+    #
+    # Alembic은 step마다 `head_maintainer.update_to_step()`을 **먼저** 하고
+    # `on_version_apply` 콜백을 부른다(`alembic/runtime/migration.py`). 따라서 이
+    # 콜백 안에서는 version row가 이미 `300`이고 다음 step은 아직 돌지 않았다 —
+    # 정확히 필요한 checkpoint다.
+    facet_verified: list[str] = []
+
+    def _seal_baseline_root_destination(**kwargs: object) -> None:
+        heads = kwargs.get("heads")
+        if not isinstance(heads, set) or heads != {_BASELINE_300_REVISION}:
+            return
+        _verify_fresh_300_destination_facet(connection)
+        facet_verified.append(_BASELINE_300_REVISION)
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -405,6 +424,7 @@ def do_run_migrations(connection: Connection) -> None:
         compare_server_default=True,
         # 비-app·미모델 객체 제외 (ADR-075 D-12-2, T-VN-19 alembic check gate).
         include_object=_include_object,
+        on_version_apply=[_seal_baseline_root_destination],
     )
     with context.begin_transaction():
         use_schema_owner_role = os.environ.get(_USE_SCHEMA_OWNER_ROLE_ENV, "false")
@@ -430,28 +450,18 @@ def do_run_migrations(connection: Connection) -> None:
         raw_heads_before = _raw_alembic_heads(connection)
         context.run_migrations()
         raw_heads_after = _raw_alembic_heads(connection)
-        if raw_heads_before == ():
-            # fresh 설치의 destination facet 봉인. **조건을 좁히지 마라** —
-            # 종전에는 `raw_heads_after == (_BASELINE_300_REVISION,)`을 함께 요구했는데,
-            # active graph에 child migration이 하나라도 생기면 그 조건이 영구히 False가
-            # 되어 이 검증이 **예외도 로그도 없이 사라진다.** 그 상태에서 배포
-            # executable 경로를 타지 않는 모든 설치(통합 fixture, local-dev
-            # `alembic upgrade head`, oracle 생성 스크립트의 raw upgrade)가 facet 검증
-            # 없이 통과한다.
-            #
-            # facet 계약(`application-destination-alembic-version.sql`)은 아직
-            # `ARRAY['300']`으로 baseline root를 못 박고 있으므로, baseline root가 아닌
-            # 곳에 도달한 fresh 설치는 **지원하지 않는다고 시끄럽게 말한다.** 조용히
-            # 건너뛰는 것과 명시적으로 거절하는 것 사이에서 후자를 고른다.
-            if raw_heads_after != (_BASELINE_300_REVISION,):
-                raise RuntimeError(
-                    "fresh install landed on "
-                    f"{raw_heads_after!r} instead of the baseline root "
-                    f"{_BASELINE_300_REVISION!r}; the destination facet contract still "
-                    "pins the baseline root, so this path is unsupported until the "
-                    "contract checkpoint moves"
-                )
-            _verify_fresh_300_destination_facet(connection)
+        if raw_heads_before == () and not facet_verified:
+            # fresh 설치인데 `300` step을 지나지 않았다 = 봉인이 **일어나지 않았다.**
+            # 종전에는 이 자리에서 `raw_heads_after == ("300",)`을 조건으로 검증을
+            # 호출했는데, child migration이 생기면 그 조건이 영구히 False가 되어
+            # 검증이 **예외도 로그도 없이 사라졌다.** 이제는 검증을 step 콜백이
+            # 수행하고, 여기서는 "실제로 수행됐는가"만 확인한다 — 조용히 꺼질 자리를
+            # 없앤다.
+            raise RuntimeError(
+                "fresh install did not pass through the baseline root "
+                f"{_BASELINE_300_REVISION!r}; destination facet was never sealed "
+                f"(heads={raw_heads_after!r})"
+            )
         if sanctioned_handoff and raw_heads_after != (_BASELINE_300_REVISION,):
             raise RuntimeError(
                 "0236-to-300 handoff did not leave exactly one raw 300 head"
