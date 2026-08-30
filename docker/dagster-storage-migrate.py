@@ -27,6 +27,9 @@ from alembic.script import ScriptDirectory
 from dagster._core.storage.sql import ALEMBIC_SCRIPTS_LOCATION
 from sqlalchemy import create_engine, text
 
+#: application active graph의 유일한 root. head와 달리 움직이지 않는다.
+_BASELINE_ROOT_REVISION: Final = "300"
+
 _DAGSTER_HOME_ENV: Final = "DAGSTER_HOME"
 _DAGSTER_PG_URL_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
 _DAGSTER_PROFILE_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PROFILE"
@@ -460,14 +463,31 @@ def _read_observed_identity(
                         )
                     ).all()
                 )
+                # application DB 판정. 종전에는 `version_num = '300'` 하나만 봤는데,
+                # `public.alembic_version`은 **현재 head 한 행만** 담으므로 application
+                # graph에 child migration이 붙는 순간 이 arm이 조용히 False가 된다 —
+                # `_verify_database_identity`의 세 방벽 중 하나를 예외도 로그도 없이
+                # 잃는다.
+                #
+                # 이 파일은 의도적으로 ``kortravelmap``을 import하지 않으므로(위 모듈
+                # docstring) graph에서 head를 파생할 수 없다. 대신 compose가 이미
+                # 주입하는 기대 head를 함께 본다. env가 없으면 baseline root만 보므로
+                # 종전과 동일하게 동작한다.
+                application_revisions = {_BASELINE_ROOT_REVISION}
+                expected_head = os.environ.get(
+                    "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD", ""
+                ).strip()
+                if expected_head:
+                    application_revisions.add(expected_head)
                 has_application_300 = bool(
                     connection.execute(
                         text(
                             "SELECT EXISTS ("
                             "SELECT 1 FROM public.alembic_version "
-                            "WHERE version_num::text = '300'"
+                            "WHERE version_num::text = ANY(:revisions)"
                             ")"
-                        )
+                        ),
+                        {"revisions": sorted(application_revisions)},
                     ).scalar_one()
                 )
     except Exception as exc:

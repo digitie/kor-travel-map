@@ -206,3 +206,47 @@ def test_fresh_install_facet_verification_cannot_be_silently_skipped() -> None:
     assert "and not facet_verified:" in source, (
         "봉인이 실제로 수행됐는지 확인하는 fail-close가 없다 — 조용히 꺼질 자리가 남는다"
     )
+
+
+# -- head 리터럴이 숨을 수 있는 나머지 배포 자산 -----------------------------
+#
+# `_HEAD_CONSUMERS`(docker/*.py 4개)와 `alembic/env.py` 밖에도 head를 리터럴로 박은
+# 자리가 있었고, 둘 다 **프로덕션을 죽이거나 가드를 조용히 끄는** 종류였다.
+#
+#   docker/api-entrypoint.sh          — production API가 head!=300이면 기동 실패
+#   docker/dagster-storage-migrate.py — application DB 판정 arm이 조용히 False
+#
+# 스캔 범위를 넓혀 같은 부류가 다시 생기지 못하게 한다.
+
+_EXTRA_DEPLOY_ASSETS = (
+    "api-entrypoint.sh",
+    "dagster-storage-migrate.py",
+)
+
+
+@pytest.mark.parametrize("name", _EXTRA_DEPLOY_ASSETS)
+def test_deploy_assets_do_not_pin_the_head_literal(name: str) -> None:
+    """배포 자산이 head를 리터럴로 비교하지 않아야 한다.
+
+    baseline root(`_BASELINE_ROOT_REVISION`) 선언은 허용한다 — 그것은 움직이지 않는
+    역사적 좌표다. 금지하는 것은 **비교**에 리터럴을 쓰는 것이다.
+    """
+    path = DOCKER_DIR / name
+    assert path.exists(), f"배포 자산이 사라졌다: {name}"
+
+    offenders: list[str] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith(("#", "--")):
+            continue
+        if "_BASELINE_ROOT_REVISION" in line:
+            continue
+        if not _HEAD_LITERAL.search(line) and "'300'" not in line:
+            continue
+        if any(token in line for token in ("!=", "==", "= ANY", " -eq ", " = ")):
+            offenders.append(f"{name}:{number}: {stripped[:80]}")
+
+    assert not offenders, (
+        "배포 자산이 application head를 리터럴로 비교한다 — head가 움직이면 "
+        "프로덕션이 죽거나 가드가 조용히 꺼진다:\n  " + "\n  ".join(offenders)
+    )

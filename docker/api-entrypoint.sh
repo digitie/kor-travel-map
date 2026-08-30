@@ -401,8 +401,15 @@ if [ "$api_profile" = "production" ]; then
   # permit verifier가 이 API runtime DSN에서 candidate/DB identity와 exact raw ``300``을
   # 한 번에 확인한다. 그 뒤 migrator DSN으로 별도 `alembic current`를 읽으면 서로 다른
   # DB가 각각 통과하는 split-brain이 생기므로 production에는 generic Alembic probe가 없다.
-  if [ "$expected_head" != "300" ]; then
-    echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300" >&2
+  # 종전에는 여기서 `expected_head != "300"`을 하드 거절했다. 그것은 위
+  # `alembic heads` 대조(이 블록 앞, 무조건 실행)와 **중복**이면서 revision 값을
+  # 리터럴로 박아, migration을 하나 더하는 순간 production API가 기동 실패한다.
+  #
+  # 진짜 성질은 "expected_head가 이미지의 유일한 alembic head와 같다"이고 그것은
+  # 위에서 이미 강제한다 — 그쪽이 graph JSON과 **다른 출처**(alembic 자신)로 head를
+  # 재계산하는 배포경로의 유일한 게이트이므로 반드시 남긴다.
+  if [ -z "$expected_head" ]; then
+    echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD" >&2
     exit 1
   fi
   if ! /usr/local/bin/python -I \
