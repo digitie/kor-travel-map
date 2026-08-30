@@ -159,6 +159,11 @@ CREATE TRIGGER trg_curation_import_manual_feature_children_append_only
 # 값을 **열거**한다. 형식만 검사하도록 푸는 편이 간단하지만, 그러면 DB 층의
 # fail-close 하나가 사라진다 — 정확한 head 동등성은 executable·finalize·permit 셋이
 # 이미 강제하지만 중복 방어를 스스로 줄이지 않는다. migration마다 자기 head를 더한다.
+#
+# 그 "더한다"를 사람 기억에 맡기지 않는다.
+# `tests/lint/test_receipt_head_check_covers_the_graph_head.py`가 현재 graph head가
+# 이 열거에 없으면 실패한다 — 잊으면 CI에서 잡히고, 프로덕션 fresh 설치가 CHECK
+# 위반으로 죽는 일은 생기지 않는다.
 _RECEIPT_HEAD_CHECK: Final = """
 ALTER TABLE ops.application_schema_operation_receipts
     DROP CONSTRAINT ck_application_schema_operation_receipts_head,

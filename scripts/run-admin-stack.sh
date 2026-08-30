@@ -622,9 +622,13 @@ fi
 
 echo "verify pre-provisioned local application and Dagster databases"
 (
-  "$PYTHON_BIN" - <<'PY'
+  # 기대 revision은 migration graph에서 파생한다. 리터럴로 두면 migration을 하나
+  # 더하는 순간 admin stack이 자기 DB를 거절한다. `PYTHON_BIN`이 system python으로
+  # 떨어질 수 있으므로 package import가 아니라 생성물 경로를 넘긴다.
+  KOR_TRAVEL_MAP_APPLICATION_GRAPH="$ROOT_DIR/src/kortravelmap/_application_migration_graph.json"   "$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
 
+import json
 import os
 from urllib.parse import urlsplit
 
@@ -655,6 +659,24 @@ def _require_loopback_dsn(name: str) -> str:
     return _psycopg_dsn(value)
 
 
+def _application_schema_head() -> str:
+    """설치본이 도달해야 하는 유일한 head를 migration graph에서 유도한다."""
+    payload = json.loads(
+        open(os.environ["KOR_TRAVEL_MAP_APPLICATION_GRAPH"], encoding="utf-8").read()
+    )
+    revisions = payload["revisions"]
+    declared = {str(entry["revision"]) for entry in revisions}
+    referenced = {
+        str(parent)
+        for entry in revisions
+        for parent in (entry.get("down_revision") or ())
+    }
+    heads = sorted(declared - referenced)
+    if len(heads) != 1 or not referenced.issubset(declared):
+        raise SystemExit("application migration graph does not have exactly one head")
+    return heads[0]
+
+
 app_dsn = _require_loopback_dsn("KOR_TRAVEL_MAP_PG_DSN_SYNC")
 metadata_dsn = _require_loopback_dsn("KOR_TRAVEL_MAP_DAGSTER_PG_URL")
 metadata_url = urlsplit(os.environ["KOR_TRAVEL_MAP_DAGSTER_PG_URL"])
@@ -675,8 +697,12 @@ with psycopg.connect(app_dsn) as connection:
     revisions = connection.execute(
         "SELECT version_num FROM public.alembic_version ORDER BY version_num"
     ).fetchall()
-if application_identity is None or revisions != [("300",)]:
-    raise SystemExit("admin:stack requires a pre-provisioned exact application revision 300")
+expected_head = _application_schema_head()
+if application_identity is None or revisions != [(expected_head,)]:
+    raise SystemExit(
+        "admin:stack requires a pre-provisioned exact application revision "
+        f"{expected_head}"
+    )
 
 with psycopg.connect(metadata_dsn) as connection:
     metadata = connection.execute(
