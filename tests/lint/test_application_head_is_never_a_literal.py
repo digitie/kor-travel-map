@@ -71,9 +71,6 @@ _EXEMPT: dict[str, str] = {
         "`0236 → 300` baseline artifact 검증용 disposable oracle. 검증 대상이 baseline "
         "그 자체이므로 목적지가 baseline root다."
     ),
-    "create-application-0236-source-oracle.sh": (
-        "retired `0236` source oracle. baseline 재봉인 입력이며 head와 무관하다."
-    ),
     "rehearse-application-300-handoff.sh": (
         "`0236 → 300` handoff 리허설. handoff의 목적지가 baseline root다."
     ),
@@ -81,9 +78,6 @@ _EXEMPT: dict[str, str] = {
         "paired candidate receipt의 `forbidden_application_raw_revision`은 'Dagster "
         "metadata DB는 application raw revision을 갖지 않는다'는 격리 선언이며 baseline "
         "root를 가리킨다 — head가 아니다."
-    ),
-    "build-application-300-candidate.sh": (
-        "candidate 이미지 제작기. baseline root 산출물을 다룬다."
     ),
     "transition-application-schema-0236-to-300.py": (
         "handoff executable. stamp 목적지가 baseline root이며 "
