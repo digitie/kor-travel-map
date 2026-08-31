@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — M03 302: import 행별 manual Feature child 발급 완주 (실 DB green)
+
+`301`이 만든 linkage 표를 실제로 채우는 쓰기 계약 셋을 `302`로 확장하고, repo·route를
+결선해 통합 테스트가 실 PostGIS에서 완주했다.
+
+- **CSV**: `manual_feature_category`(8자리) typed 열 추가 — writer가 category를
+  요구하는데 item 인자에 원천이 없다. 이름은 `place_name`이 소유(비면 preview 거절).
+  typed payload가 {kind, category, coord}로 확장돼 child identity에 category가 결박.
+- **302 migration**: (1) writer operation 검사를 child operation까지 확장,
+  (2) apply가 manual 행 item upsert를 건너뛰고(EXCLUDED.feature_id=NULL이 writer의
+  feature 결박을 지우는 경로 차단) 행별 좌표(o_row_receipts)를 반환하며 manual 행의
+  decision을 accepted/manual_feature_child로 기록(종전 분기면 'revoked'로 강등됐다),
+  (3) linkage 전용 SECURITY DEFINER 기록기(ops, 소유권은 임시 스키마 CREATE grant로
+  command owner에 이전), (4) match_basis·receipt head CHECK 확장. 프로시저 본문은
+  baseline에서 기계 파생한 sidecar — diff가 수정 지점만 보이고 downgrade가 원본
+  바이트로 복원된다.
+- **repo/route**: 결정적 child identity(§6.2)로 lock→claim→writer→apply→linkage→
+  child result를 한 SERIALIZABLE transaction에 배선. manual 행은 command 경로
+  전용(가드), 부분 성공 없음. 부모 응답에 ordered `manual_children` — 요청 JSON이
+  아니라 transaction 확정값에서 구성. OpenAPI 재생성.
+- **검증**: 신규 통합 테스트가 child command identity·feature/origin·linkage 5축·
+  decision 종류·item feature 결박 생존·child terminal result를 실 DB에서 확인.
+  mypy --strict core/api green, 통합 회귀(dict 동등 단언 4곳) 반영.
 ## 2026-08-31 — 적대 리뷰 라운드2: 원장 게이트 3종을 파싱 정본 위에 재작성
 
 라운드1 게이트는 각자 다른 구멍을 갖고 있었다 — 삭제 게이트는 diff 줄 정규식이라
@@ -48,6 +71,7 @@ acceptance 본문 도달은 0건 — 후보 예산 전부가 인프라 단계에
 
 Manager 쪽 채택분(I-1/I-2/I-4/I-5/I-8/I-9)은 Manager PR #278, PinVi 쪽(I-10)은
 PinVi #505가 소유한다.
+||||||| parent of 09d018d8 (docs: M03 302 완주 기록과 다음 작업(격리 live acceptance))
 
 ## 2026-08-31 — head 값 고정을 걷어내고, `301`이 왜 아직 못 올라가는지 실증했다
 
