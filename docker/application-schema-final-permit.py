@@ -315,11 +315,18 @@ def _validate_operation_evidence(
     *,
     transition_kind: str,
     transaction_id: str,
-    source_catalog_sha256: str,
+    source_catalog_sha256: str | None,
     destination_catalog_sha256: str,
     destination_alembic_version_sha256: str,
 ) -> Mapping[str, Any]:
-    """transition 종류별 증거를 disjoint exact schema로 고정한다."""
+    """transition 종류별 증거를 disjoint exact schema로 고정한다.
+
+    ``source_catalog_sha256``가 ``None``이면 head가 baseline root 너머라는 뜻이다.
+    그 경우 pre catalog는 봉인 계약이 서술하지 않는 상태이므로 잘 형성된 digest임만
+    강제한다(아래 ``digest_fields`` 루프). post catalog 기대값은 호출자가 head 인지로
+    고른다 — root에서는 봉인 destination 계약, 그 너머에서는 finalize receipt의
+    observed catalog(교차 결박).
+    """
 
     if transition_kind != _PERMIT_TRANSITION:
         raise FinalPermitError("final permit transition evidence kind is invalid")
@@ -341,7 +348,10 @@ def _validate_operation_evidence(
         or type(evidence.get("journal_generation")) is not int
         or evidence["journal_generation"]
         <= evidence["prior_fresh_migration_generation"]
-        or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
+        or (
+            source_catalog_sha256 is not None
+            and evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
+        )
         or evidence.get("post_destination_catalog_sha256")
         != destination_catalog_sha256
         or evidence.get("post_destination_alembic_version_sha256")
@@ -423,12 +433,28 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         or not _SHA256_PATTERN.fullmatch(destination_catalog_sha256)
     ):
         raise FinalPermitError("installed application baseline catalog facets are invalid")
+    # fresh finalize evidence의 catalog는 아래 receipts 블록과 같은 원리로 head 인지
+    # 대조한다. baseline root에서는 pre/post 모두 봉인 계약과 같아야 한다. 그 너머에서는
+    # 봉인 digest가 서술하는 상태가 존재하지 않으므로(새 migration이 객체를 더한다)
+    # post를 finalize receipt의 observed catalog와 교차 결박하고 pre는 잘 형성된
+    # digest임만 요구한다. 이 완화의 실제 앵커는 둘이다: producer 쪽에서 Manager가
+    # pre == 직전 fresh migration의 post를 결박하고, 이 파일의 _verify_database가
+    # live alembic versions/destination facet을 runtime login으로 재관측한다.
+    # 봉인 대조 복원(head별 destination catalog 재컷)은 후속 과제다.
+    if _HEAD == BASELINE_ROOT_REVISION:
+        evidence_source_catalog: str | None = source_catalog_sha256
+        evidence_destination_catalog = destination_catalog_sha256
+    else:
+        evidence_source_catalog = None
+        evidence_destination_catalog = _require_sha256(
+            receipts["observed_catalog_sha256"], "observed_catalog_sha256"
+        )
     _validate_operation_evidence(
         payload["operation_evidence"],
         transition_kind=str(payload["transition_kind"]),
         transaction_id=str(payload["transaction_id"]),
-        source_catalog_sha256=source_catalog_sha256,
-        destination_catalog_sha256=destination_catalog_sha256,
+        source_catalog_sha256=evidence_source_catalog,
+        destination_catalog_sha256=evidence_destination_catalog,
         destination_alembic_version_sha256=str(
             candidate["destination_alembic_version_sha256"]
         ),

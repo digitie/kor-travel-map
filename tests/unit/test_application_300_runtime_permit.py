@@ -923,3 +923,129 @@ def test_final_permit_binds_all_static_contract_facets(
 
     with pytest.raises(module.FinalPermitError, match="contract is inconsistent"):
         module._read_reference()
+
+
+def test_final_permit_accepts_observed_catalogs_beyond_baseline_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """baseline root 너머에서는 실측 catalog가 봉인 계약과 달라도 permit이 성립한다.
+
+    2026-08-31 실측: head 302에서 fresh finalize의 pre/post catalog는 봉인된
+    300 계약(source/destination_catalog_contract_sha256)과 다를 수밖에 없는데,
+    operation evidence 대조만 head 인지가 아니어서 production rebuild가
+    `up` 단계에서 전멸했다. 이 테스트가 그 현실(봉인값 ≠ 실측, post ↔ observed
+    교차 결박)을 그대로 모델링한다.
+    """
+
+    module = _load_script(
+        "application_schema_final_permit_beyond_root",
+        "docker/application-schema-final-permit.py",
+    )
+    if module._HEAD == module.BASELINE_ROOT_REVISION:
+        pytest.skip("head가 baseline root면 봉인 대조 경로가 정본이다")
+    payload = _valid_permit(module)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID", "sha256:" + "b" * 64
+    )
+    observed_catalog = "7" * 64
+    payload["receipts"]["expected_catalog_sha256"] = observed_catalog
+    payload["receipts"]["observed_catalog_sha256"] = observed_catalog
+    payload["operation_evidence"]["pre_source_catalog_sha256"] = "8" * 64
+    payload["operation_evidence"]["post_destination_catalog_sha256"] = observed_catalog
+
+    assert module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")[
+        "state"
+    ] == "finalized"
+
+
+def test_final_permit_rejects_evidence_catalog_detached_from_receipt_beyond_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """root 너머에서도 evidence post catalog는 finalize receipt와 결박되어야 한다."""
+
+    module = _load_script(
+        "application_schema_final_permit_detached_evidence",
+        "docker/application-schema-final-permit.py",
+    )
+    if module._HEAD == module.BASELINE_ROOT_REVISION:
+        pytest.skip("head가 baseline root면 봉인 대조 경로가 정본이다")
+    payload = _valid_permit(module)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID", "sha256:" + "b" * 64
+    )
+    observed_catalog = "7" * 64
+    payload["receipts"]["expected_catalog_sha256"] = observed_catalog
+    payload["receipts"]["observed_catalog_sha256"] = observed_catalog
+    payload["operation_evidence"]["pre_source_catalog_sha256"] = "8" * 64
+    payload["operation_evidence"]["post_destination_catalog_sha256"] = "9" * 64
+
+    with pytest.raises(module.FinalPermitError, match="fresh finalize generation"):
+        module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")
+
+
+def test_operation_evidence_sealed_mode_still_binds_pre_source_catalog() -> None:
+    """baseline root 모드(봉인 대조)는 pre catalog 불일치를 여전히 거부한다."""
+
+    module = _load_script(
+        "application_schema_final_permit_sealed_mode",
+        "docker/application-schema-final-permit.py",
+    )
+    payload = _valid_permit(module)
+    evidence = dict(payload["operation_evidence"])
+    sealed_source = evidence["pre_source_catalog_sha256"]
+    sealed_destination = evidence["post_destination_catalog_sha256"]
+    sealed_alembic = evidence["post_destination_alembic_version_sha256"]
+
+    assert module._validate_operation_evidence(
+        evidence,
+        transition_kind="map-fresh-300-finalize",
+        transaction_id=str(payload["transaction_id"]),
+        source_catalog_sha256=sealed_source,
+        destination_catalog_sha256=sealed_destination,
+        destination_alembic_version_sha256=sealed_alembic,
+    )
+
+    with pytest.raises(module.FinalPermitError, match="fresh finalize generation"):
+        module._validate_operation_evidence(
+            {**evidence, "pre_source_catalog_sha256": "8" * 64},
+            transition_kind="map-fresh-300-finalize",
+            transaction_id=str(payload["transaction_id"]),
+            source_catalog_sha256=sealed_source,
+            destination_catalog_sha256=sealed_destination,
+            destination_alembic_version_sha256=sealed_alembic,
+        )
+
+
+def test_final_permit_rejects_malformed_pre_source_catalog_beyond_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """root 너머에서 pre catalog에 남는 유일한 계약(well-formed digest)을 고정한다.
+
+    digest_fields 루프에서 pre가 제외되는 회귀가 생기면 이 테스트만 조용히
+    깨진다 — 완화된 필드의 잔여 계약을 무방비로 두지 않는다.
+    """
+
+    module = _load_script(
+        "application_schema_final_permit_malformed_pre",
+        "docker/application-schema-final-permit.py",
+    )
+    if module._HEAD == module.BASELINE_ROOT_REVISION:
+        pytest.skip("head가 baseline root면 봉인 대조 경로가 정본이다")
+    payload = _valid_permit(module)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID", "sha256:" + "b" * 64
+    )
+    observed_catalog = "7" * 64
+    payload["receipts"]["expected_catalog_sha256"] = observed_catalog
+    payload["receipts"]["observed_catalog_sha256"] = observed_catalog
+    payload["operation_evidence"]["post_destination_catalog_sha256"] = observed_catalog
+    payload["operation_evidence"]["pre_source_catalog_sha256"] = "z" * 64
+
+    with pytest.raises(
+        module.FinalPermitError,
+        match="pre_source_catalog_sha256 digest is invalid",
+    ):
+        module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")
