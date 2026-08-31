@@ -85,6 +85,7 @@ from kortravelmap.api.identity_projection import response_feature_id, uuid_subst
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import (
     AdminCurationItemView,
+    _admin_item_view,
     curation_item_response_feature_id,
 )
 from kortravelmap.api.routers.features import (
@@ -1018,14 +1019,11 @@ def _detail_response(
                 _state_transition_audit(item) for item in row.state_transitions
             ],
             files=[_detail_file(item) for item in row.files],
-            curations=[
-                AdminCurationItemView.model_validate(
-                    item, from_attributes=True
-                ).model_copy(
-                    update={"feature_id": curation_item_response_feature_id(item)}
-                )
-                for item in curations
-            ],
+            # `_admin_item_view`가 view 계약(command_etag·str row_revision)의 정본이다.
+            # 종전의 from_attributes 직검증은 CurationItem에 없는 command_etag 때문에
+            # curation item이 달린 모든 feature 상세를 500으로 만들었다(M03 live
+            # acceptance가 최초로 노출한 잠복 결함).
+            curations=[_admin_item_view(item) for item in curations],
         ),
         meta=make_meta(started_at=started_at),
     )

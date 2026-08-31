@@ -679,6 +679,43 @@ def test_get_admin_feature_detail_returns_linked_operational_data(
 
 
 @pytest.mark.unit
+
+def test_feature_detail_renders_curation_items_with_the_view_contract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """curation item이 달린 feature 상세는 `_admin_item_view` 계약으로 렌더된다.
+
+    종전에는 `AdminCurationItemView.model_validate(item, from_attributes=True)`가
+    CurationItem에 없는 `command_etag`(그리고 int `row_revision`) 때문에 **항상**
+    500이었다 — 기존 테스트가 전부 빈 tuple을 mock해 잠복했고, M03 manual-child
+    live acceptance가 최초로 노출했다.
+    """
+    from kortravelmap.api.routers import admin_features as router_mod
+    from test_curations_router import _item as _curation_item
+
+    _patch_admin_resolved_identity(monkeypatch)
+
+    async def _detail(_session: Any, feature_id: str) -> Any:
+        return _feature_detail()
+
+    async def _curations(_session: Any, **_kwargs: Any) -> dict[str, tuple[Any, ...]]:
+        return {"feature-1": (_curation_item(item_id="item-1", edition="2026"),)}
+
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+    monkeypatch.setattr(
+        router_mod.curation_repo,
+        "list_curation_items_by_feature_ids",
+        _curations,
+    )
+
+    response = client.get("/v1/admin/features/feature-1")
+
+    assert response.status_code == 200
+    curations = response.json()["data"]["curations"]
+    assert len(curations) == 1
+    assert curations[0]["row_revision"] == "1"
+    assert curations[0]["command_etag"].startswith('"')
+
 def test_get_admin_feature_detail_returns_404(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

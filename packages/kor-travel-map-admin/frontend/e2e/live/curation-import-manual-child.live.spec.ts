@@ -18,12 +18,12 @@ type Envelope<T> = { data: T };
 
 const FLOW_TIMEOUT = 120_000;
 const EXECUTE = process.env.E2E_MANUAL_IMPORT_WRITE === "1";
-// 격리 스택의 seed catalog에 실재하는 pair여야 preview가 422로 끊지 않는다.
-const PROVIDER = process.env.E2E_MANUAL_IMPORT_PROVIDER ?? "data.go.kr-standard";
-const DATASET_KEY =
-  process.env.E2E_MANUAL_IMPORT_DATASET_KEY ?? "datagokr_museums";
 
-function manualCsv(suffix: string): string {
+function manualCsv(
+  suffix: string,
+  provider: string,
+  datasetKey: string,
+): string {
   const headers = [
     "collection_key",
     "theme_slug",
@@ -59,9 +59,9 @@ function manualCsv(suffix: string): string {
     "M03 live 수동 생성 acceptance",
     "2026",
     "",
-    PROVIDER,
-    DATASET_KEY,
-    "M03 live acceptance",
+    provider,
+    datasetKey,
+    `M03 live acceptance ${suffix}`,
     "",
     `manual-${suffix}`,
     "primary",
@@ -91,6 +91,44 @@ test.describe("M03 manual child 격리 live acceptance", () => {
     );
     test.setTimeout(5 * 60_000);
     const suffix = `${Date.now().toString(36)}`;
+    const idempotency = () => crypto.randomUUID();
+
+    // ── 사전 조건: theme·source는 retained catalog에 선존재해야 한다 ─────
+    // (import는 catalog를 생성하지 않는다 — preview가 422 fail-close.)
+    const datasets = await page.request.get("/api/proxy/v1/ops/datasets");
+    expect(datasets.status()).toBe(200);
+    const grid = (await datasets.json()) as Envelope<{
+      items: Array<{
+        provider: string;
+        dataset_key: string;
+        provider_dataset_id: number;
+      }>;
+    }>;
+    expect(grid.data.items.length).toBeGreaterThan(0);
+    const dataset = grid.data.items[0];
+
+    const theme = await page.request.post("/api/proxy/v1/admin/curated-themes", {
+      headers: { "Idempotency-Key": idempotency() },
+      data: {
+        theme_slug: `m03-live-${suffix}`,
+        theme_name: "M03 live 수동 생성",
+        theme_group: "test",
+      },
+    });
+    expect([200, 201]).toContain(theme.status());
+
+    const source = await page.request.post(
+      "/api/proxy/v1/admin/curated-sources",
+      {
+        headers: { "Idempotency-Key": idempotency() },
+        data: {
+          provider_dataset_id: dataset.provider_dataset_id,
+          source_name: `M03 live acceptance ${suffix}`,
+          source_kind: "manual",
+        },
+      },
+    );
+    expect([200, 201]).toContain(source.status());
 
     await page.goto("/admin/features/curated");
     await expect(
@@ -100,7 +138,10 @@ test.describe("M03 manual child 격리 live acceptance", () => {
     await page.getByLabel("CSV 파일").setInputFiles({
       name: `m03-manual-${suffix}.csv`,
       mimeType: "text/csv",
-      buffer: Buffer.from(manualCsv(suffix), "utf-8"),
+      buffer: Buffer.from(
+        manualCsv(suffix, dataset.provider, dataset.dataset_key),
+        "utf-8",
+      ),
     });
 
     const previewResponse = page.waitForResponse(
