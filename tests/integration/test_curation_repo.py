@@ -858,6 +858,8 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 0,
         "removals": (),
         "import_batch_id": first["import_batch_id"],
+        "row_receipts": first["row_receipts"],
+        "manual_children": (),
     }
     assert second == {
         "rows": 3,
@@ -867,6 +869,8 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 0,
         "removals": (),
         "import_batch_id": second["import_batch_id"],
+        "row_receipts": second["row_receipts"],
+        "manual_children": (),
     }
     assert no_op_plan.inserted == 0
     assert no_op_plan.updated == 0
@@ -884,6 +888,8 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 1,
         "removals": replacement_plan.removals,
         "import_batch_id": replaced["import_batch_id"],
+        "row_receipts": replaced["row_receipts"],
+        "manual_children": (),
     }
     counts = (
         await migrated_session.execute(
@@ -2634,6 +2640,8 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
         "removed": 0,
         "removals": (),
         "import_batch_id": adopted["import_batch_id"],
+        "row_receipts": adopted["row_receipts"],
+        "manual_children": (),
     }
     after_rows = (
         (
