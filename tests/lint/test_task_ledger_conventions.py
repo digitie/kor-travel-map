@@ -79,11 +79,27 @@ def test_every_open_task_has_recorded_acceptance_criteria() -> None:
     open_tasks = sorted({task for marker, task in _items()})
 
     # 세부 task는 상위 task 섹션이 조건을 소유할 수 있다(T-VN-H49-PINVI → T-VN-H49).
+    # 다만 그것을 **이름 접두사로 추론하지 않는다.** 종전 판정은 부모 ID가 파일 어딘가에
+    # 있기만 하면 자식을 덮인 것으로 봤는데, `T-VN-M05-ACTIVATION`은 그렇게 통과하면서도
+    # 파일 전체에 `ACTIVATION`이 **0번** 나온다 — 부모 `T-VN-M05` 섹션은 provider dedup
+    # 이야기이고 activation과 아무 관계가 없다. 게이트가 초록인 채로 아무것도 보지 않았다.
+    #
+    # 덮임은 **선언**이어야 한다. 부모가 자식을 덮으려면 자식 ID를 자기 섹션에 적어야
+    # 하고, 그래야 읽는 사람도 판정 근거를 찾아갈 수 있다.
+    sections: dict[str, str] = {}
+    current: str | None = None
+    for line in criteria.splitlines():
+        if line.startswith("## "):
+            current = line[3:].strip()
+            sections[current] = ""
+        elif current is not None:
+            sections[current] += line + "\n"
+
     def covered(task: str) -> bool:
-        if task in criteria:
+        if task in sections:
             return True
         parent = task.rsplit("-", 1)[0]
-        return parent != task and parent in criteria
+        return parent != task and task in sections.get(parent, "")
 
     missing = [task for task in open_tasks if not covered(task)]
     assert not missing, (

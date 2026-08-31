@@ -330,6 +330,35 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   consumer rebind 계약을 소유한다.
 ```
 
+## T-VN-M05-ACTIVATION
+
+> 이 task는 `6d671ef1` 평면화 **이후**에 만들어져 복원할 원문이 없다. 아래는
+> `docs/tasks.md`의 해당 줄이 이미 산문으로 서술하고 있는 재개 조건을 판정 가능한
+> 형태로 옮긴 것이며, 새로 지어낸 조건은 없다.
+>
+> 종전에 이 task는 해제 조건이 **하나도 없는 채로** 게이트를 통과했다. 게이트가 이름
+> 접두사만 보고 부모 `T-VN-M05`가 덮는다고 판정했는데, 그 섹션은 provider dedup
+> 이야기이고 activation과 아무 관계가 없다.
+
+```markdown
+- [ ] **A1 — 회전은 원자적이다.** 재개는 새 Map revision·새 PinVi provenance·새 Manager
+  source를 trusted `ktdctl pin rotate-pair`로 **함께** 결박한 새 pinset에서만 시작한다.
+  terminal로 차단된 pinset·source pair·Manager source·output leaf는 재실행하지 않는다.
+- [ ] **A2 — 실행은 단 한 번이다.** 회전 뒤 trusted `run-pinned-rebuild-once`가 current
+  public generation을 만든 다음, 새 root-owned leaf에서 n150 isolated M04/M05 launcher를
+  정확히 한 번 실행한다.
+- [ ] **A3 — 승격 전제 셋을 모두 만족한다.** 최신 CI green · 전문 적대 리뷰 두 건 GO ·
+  terminal 아님. 셋 중 하나라도 아니면 M04/M05 live acceptance attestation을 승격하지 않는다.
+- [ ] **A4 — 경계는 공개 API만 쓴다.** pinning·pair 결박·one-shot 계약은 Docker Manager
+  trusted `ktdctl`과 `runtime-pins`·`pinned-runtime/generation` 공개 API만 사용한다.
+  PinVi isolated Compose는 Manager가 transaction·pinset·세 source revision에 결박해 private
+  `0600`으로 발급한 admission receipt를 no-follow 검증할 때만 허용하며, legacy 환경변수
+  marker·수동 Compose는 권한이 아니다.
+```
+
+AC: A1~A4가 모두 참인 단일 실행에서 M04/M05 live acceptance attestation이 승격돼야 한다.
+공개 registry의 고정 phase가 `runtime_setup`인 동안에는 이 task가 열려 있다.
+
 ## T-VN-H34
 
 ```markdown
@@ -512,12 +541,14 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 - [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
   다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
   수렴하는지는 운영 증거가 더 필요하다. application DB에 standalone cron을 중복 설치하지 않는다.
-- [ ] 별도 `geo_dagster` metadata DB와 concierge(`12600`)·pinvi(`12800`)에 standalone
+- [ ] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
+  concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
   manifest 증거를 남긴다.
-- [ ] off-box 사본 자동화를 결선한다. Map application/Dagster 주기화는 #148의 재적재 정책
-  결정을 따르며 이 task가 임의로 활성화하지 않는다.
-- [ ] 위 운영 AC를 닫은 뒤 `docs/backup-restore.md` §1의 외부 instance 경고를 현행화한다.
+- [ ] off-box 사본 자동화를 결선한다(`T-VN-H49-OFFBOX`). Map application/Dagster 주기화는
+  #148의 재적재 정책 결정을 따르며 이 task가 임의로 활성화하지 않는다.
+- [ ] 위 운영 AC를 닫은 뒤 `docs/backup-restore.md` §1의 외부 instance 경고를 현행화한다
+  (`T-VN-H49-OFFBOX`).
 
 AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 보존 GC, off-box 사본
 증거가 있고 절차가 문서화되어야 한다. PR #181 병합만으로 H49를 완료 처리하지 않는다.
@@ -803,6 +834,8 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 
 ## T-VN-M05-EXECUTION-IDENTITY-V6
 
+> **완료 — 2026-08-31 `docs/tasks-done.md`로 이관.** 아래는 판정 근거 보존용이다.
+
 **문제**: v5 `pinset_sha256`의 해시 입력은 `(release_version, Map revision, PinVi
 revision)`뿐이고 **Manager revision이 빠져 있다.** terminal은 pinset 기준 무조건·영구
 차단이므로, Manager만 고치면 같은 pinset이 나와 이미 차단된 상태가 된다. 새 candidate를
@@ -856,6 +889,8 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
   성공 종료 receipt로 한 번 더 고정한다.
 
 ## T-VN-M05-ROLE-CATALOG-RESET
+
+> **완료 — 2026-08-31 `docs/tasks-done.md`로 이관.** 아래는 판정 근거 보존용이다.
 
 - [x] D1. `31fe73ad`·`b22bfb8c`·`c6c73cdf` 세 candidate를 각각 `target_not_isolated`·
   `foreign_membership`·`foreign_membership` terminal로 보존하고 재시도하지 않는다.

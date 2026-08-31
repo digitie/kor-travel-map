@@ -3,6 +3,27 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-31 — 원장이 이미 충족으로 판정한 두 M05 task 이관
+
+`docs/tasks-acceptance.md`가 두 task를 각각 **판정: 충족**으로 기록하고 하나는 명시적으로
+"`tasks-done.md` 이관 대상"이라고 적어 두었는데, `docs/tasks.md`에는 `[~]`로 남아 있고
+완료 원장에는 엔트리가 없었다. 새 판정을 내리는 것이 아니라 그 드리프트를 해소한다.
+
+- [x] **T-VN-M05-EXECUTION-IDENTITY-V6 — v6 execution identity 도입 완료**
+
+  A1~A4 모두 충족(`docs/tasks-acceptance.md` 해당 절). 판정 근거는 A4다 —
+  2026-08-29~30에 같은 Map/PinVi pair(`3916ebfd`/`b6af59f2`) 위에서 **Map 커밋 0개로
+  9개 candidate**가 실행되고 phase가 단조 전진했다. v5 시대에는 candidate마다 의미 없는
+  Map 문서 커밋이 nonce로 필요했고, 그것을 없애는 것이 이 task의 목적이었다.
+  수용 판정문은 "남은 것은 문서 이관뿐이다"라고 적고 있었다 — 이 항목이 그 이관이다.
+
+- [x] **T-VN-M05-ROLE-CATALOG-RESET — terminal 셋 보존 선언 완료**
+
+  D1/D2 모두 충족. `31fe73ad`·`b22bfb8c`·`c6c73cdf` 세 candidate를 각각
+  `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하고
+  재시도하지 않는다는 것이 문서로 선언돼 있다. 수용 판정문은 "실행 잔여 없음 —
+  `tasks-done.md` 이관 대상"이며, 왜 열려 있었는지는 문서에 근거가 없다고 적고 있었다.
+
 ## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION 완료 이관
 
 - [x] **T-VN-M05-MANAGER-PIN-ROTATION — Manager pin rotation 단회 실행 완료**
