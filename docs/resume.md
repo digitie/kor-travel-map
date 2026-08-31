@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-31 — M05-ACTIVATION 재개: 회전 완료, rebuild는 packaging에서 실패 → #1128
+
+Manager trusted release(main 5f70770d) 설치 + `ktdctl pin rotate-pair`(Map 13407ba9 /
+PinVi e0750505, 이전 pinset block) 완료 — `pin verify` rc=0. `run-pinned-rebuild-once`가
+`application_builder`에서 prejournal 실패했고, 근본원인은 `_provider_surface.json`
+package-data 미등록(wheel 누락)이다. #1128(fix + sealed runtime tree 선적 lint)이
+draft로 떠 있다. n150에서 sealed builder를 fix 커밋으로 재실행해 green을 확인한다.
+
+### 다음 한 작업
+
+**#1128 머지 → 새 Map revision으로 `pin rotate-pair` 재회전 → `run-pinned-rebuild-once`
+재실행 → 성공 시 `run-m05-isolated-e2e-once` 1회 실행.** infra 실패는 phase-scoped
+record로 남으니 같은 pinset으로 재시도 가능하다. one-shot green이면 T-VN-M05-ACTIVATION
+승격 조건(최신 CI·적대 리뷰 2건·비-terminal)을 판정한다.
+
 ## 2026-08-31 — M03 child 발급(302) 구현·실 DB green, 다음은 격리 live acceptance
 
 `chain/301-carrier`(#1125)와 Manager `chain/head-state-receipt`(#277)를 live e2e

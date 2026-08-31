@@ -1,5 +1,23 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — M05 activation rebuild 실패의 근본원인: wheel에 안 실린 package-data
+
+Manager main(5f70770d)을 trusted release로 설치하고 pinset을 원자 회전(Map 13407ba9
+· PinVi e0750505)한 뒤 `run-pinned-rebuild-once`를 돌렸더니 `application_builder`
+단계 prejournal 실패(수리된 phase-scoped 기계 덕에 pinset은 안 탔다). envelope은
+stage만 말하므로, sealed builder를 수동 재현(digitie 권한, 로그 캡처)해 원문을 얻었다:
+**"candidate image installed runtime tree가 sealed Git archive와 다르다"** — expected
+/observed manifest를 직접 재생성·diff하니 정확히 한 줄, `providers/_provider_surface.json`.
+
+689aecce(Protocol 결박 게이트)가 이 JSON을 `src/kortravelmap/providers/`에 추가했지만
+`[tool.setuptools.package-data]`에 등록하지 않아 wheel에서 빠졌다. sealed 게이트는
+소스 트리 **전 파일**을 기대하고 이미지에선 `.py`/`.json`/`py.typed`만 관측하므로,
+이 클래스(미선언 package-data / 비가시 확장자 / 데이터 전용 디렉터리)는 PR CI 전부
+green인 채 Manager rebuild에서만 터진다 — "오랜 기간 진전 없음"을 만들던 late-failure
+패턴 그 자체다. #1128이 package-data 한 줄 + 정적 lint 3종
+(`tests/lint/test_sealed_runtime_tree_ship.py`)으로 클래스 전체를 PR 시점으로 끌어온다.
+negative case 실측: 수정 전 pyproject로 되돌리면 정확히 그 lint 1건만 실패한다.
+
 ## 2026-08-31 — 적대 리뷰 2인(opus·xhigh)의 16건 실측 발견과 수리
 
 두 리뷰어가 전부 **실행으로** 검증했다(n150 실 DB probe, 뮤테이션 주입, TestClient).
