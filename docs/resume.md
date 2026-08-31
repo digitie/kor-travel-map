@@ -12,48 +12,49 @@
 
 ### 다음 한 작업
 
-**배포 계약을 baseline 너머로 확장한다.** 이것이 `301`의 유일한 선행 조건이다.
+**`chain/301-carrier`에서 catalog digest 체인을 완성한다.** facet 쪽은 끝났다.
 
-통합 실행이 실증한 차단점 — sealed baseline은 `300` 시점의 물리 catalog와
-`alembic_version` facet을 고정하는데, 세 지점이 live DB를 그 digest와 exact 대조한다.
+#### 끝난 것 — facet
 
-| 지점 | 대조 대상 | head > root일 때 |
+`application-destination-alembic-version.sql`이 담고 있던
+`alembic_version = ARRAY['300']`을 걷어냈다. 이 SQL의 산출물은 성공/실패 두 문자열뿐인
+**단일 boolean**이고 기대 digest는 성공 sentinel의 sha256이라, 조건을 빼도 기대값이 한
+글자도 바뀌지 않는다. 재봉인은 SQL 바이트와 reference manifest뿐이라 PostGIS oracle이
+필요 없었다. revision 동등성은 배포 executable 넷이 파생 head로 이미 대조한다.
+
+#### 남은 것 — catalog
+
+`application-catalog.sql`은 객체마다 한 행을 내므로 digest가 **진짜 상태 의존**이다.
+`301`이 표·제약·함수·트리거를 더하면 baseline digest와 반드시 어긋난다. 세 지점이 걸린다.
+
+| 지점 | 현재 대조 | 필요한 것 |
 |---|---|---|
-| `docker/application-schema-fresh-300.py:940` | `contract["source_catalog_sha256"]` | 새 객체가 catalog digest를 바꾼다 |
-| `docker/application-schema-fresh-finalize.py:418` | `expected["destination_catalog_sha256"]` | 같음 |
-| `docker/application-schema-final-permit.py:602` | `payload["candidate"]["destination_alembic_version_sha256"]` | facet SQL이 `mismatch` 상수만 낸다 |
-
-facet 계약 SQL은 조건에 `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이다.
-head가 움직이면 `mismatch` 한 값만 나오므로 **옮겨갈 digest가 존재하지 않는다.** 그
-파일은 reference manifest digest로 봉인돼 편집할 수 없다.
-
-확정된 방향(사용자 선택, 2026-08-31): **baseline digest는 `300` 도달 순간에만 대조하고,
-그 이후 상태는 fresh-install operation receipt가 관측 digest를 정본으로 남겨
-finalize·final-permit이 그것과 대조한다.** receipt는 이미 fence → journal → Manager
-evidence로 결박돼 있으므로 신뢰 사슬은 끊기지 않는다. 대안이던 baseline 재cut은 다음
-migration에서 또 재cut을 요구하므로 같은 덫을 다시 놓는다.
+| `application-schema-fresh-300.py:940` | `contract["source_catalog_sha256"]` | `300` 체크포인트에서 대조하고, head 상태를 관측해 receipt에 남긴다 |
+| `application-schema-fresh-finalize.py:418` | `expected["destination_catalog_sha256"]` | root receipt가 남긴 head 값과 대조하고, 자기 관측(post-ACL)을 finalize receipt에 남긴다 |
+| `application-schema-final-permit.py:490` | `expected["catalog"]` | permit payload의 `receipts` 블록을 finalize receipt 값과 대조한다 |
 
 구현 순서:
 
-1. `application-schema-fresh-300.py` — `command.upgrade`를 `300`에서 한 번 끊는다.
-   그 지점에서 baseline catalog/seed/facet을 exact 대조하고, 이어서 head까지 올린 뒤
-   **head 상태의 catalog digest를 receipt에 기록**한다.
-2. `application-schema-fresh-finalize.py` — 기대값 출처를 baseline에서 root receipt로
-   바꾸고, 자기 관측(post-ACL) digest를 finalize receipt에 남긴다.
-3. `application-schema-final-permit.py` — live 상태를 finalize receipt 기록값과 대조한다.
-   현행 `live_destination_facet` 대조는 head > root에서 `mismatch == mismatch`가 되어
-   **무의미해지므로** 반드시 교체해야 한다.
-4. result schema 버전 상향 + `ck_application_schema_operation_receipts_result_schema`
-   열거 확장(= 그 자체가 migration이므로 `301`과 같은 PR).
-5. Manager `FreshRootResult`/`FreshFinalizeResult` 필드와 permit payload 반영.
+1. `command.upgrade`를 `300`에서 한 번 끊는다. 목적지는 **파라미터가 아니라 함수 둘로**
+   나눈다 — `test_active_runnable_paths_never_target_legacy_revision`이 upgrade 대상을
+   정적으로 해소해야 한다.
+2. root result에 head 상태 catalog/seed digest를 더한다. Manager가 exact field set으로
+   파싱하므로(`_FRESH_ROOT_RESULT_FIELDS`) **result schema 버전 상향**이 함께 필요하고,
+   그러면 `ck_application_schema_operation_receipts_result_schema` 열거도 넓혀야 한다 —
+   즉 그 ALTER 자체가 `301`과 같은 PR에 들어간다.
+3. finalize가 fence의 `prior_fresh_migration_operation_id`로 root receipt를 읽어
+   기대값으로 쓴다(`_find_operation_receipt`가 이미 `result_payload`를 읽는다).
+4. Manager `FreshRootResult`/`FreshFinalizeResult` 필드와 `build_application_final_permit`
+   payload 반영.
 
-현재 안전판: `application-schema-fresh-300.py`가 head > baseline root이면 **fail-close**
-한다. 위 작업 없이 migration을 올리면 fresh 설치 자체가 거부되므로, 프로덕션이 조용히
-깨지는 경로는 없다.
+체인의 신뢰 근거: head 상태 스키마는 content-addressed candidate image 안의 migration이
+결정하고, receipt는 fence → journal → Manager evidence로 이미 결박돼 있다. 즉 "봉인된
+digest가 미리 선언한다"에서 "attest된 이미지가 만든 것을 receipt가 봉인한다"로 근거가
+옮겨갈 뿐, 사슬은 끊기지 않는다.
 
-`301`과 M03 linkage는 `chain/301-carrier`에 보존돼 있다. receipt head CHECK 게이트도
-거기서 되살아나며, 그때 적대 리뷰가 실증한 우회 셋(`_UPGRADE_STATEMENTS` 미배선 ·
-docstring 전용 선언 · 열거 결손)을 함께 막아야 한다.
+`chain/301-carrier` 현재 상태: `301` 복원 · receipt head 게이트를 **실행 기준**으로 강화
+(모듈 import해 `_UPGRADE_STATEMENTS` 확인, graph 위상 순서, 열거 결손 탐지) · facet 값
+고정 해제 · 그 재고정을 막는 게이트. 아직 catalog 때문에 배포 가능하지 않다.
 
 ## 2026-08-30 — provider 핀 동기화 완료, task 원장 무결성 복구
 
