@@ -167,7 +167,7 @@ async def _insert_prior_root_receipt(
         "postgres_system_identifier": fence["postgres_system_identifier"],
     }
     payload = {
-        "schema": "kor-travel-map.application-fresh-300-root.v2",
+        "schema": "kor-travel-map.application-fresh-300-root.v3",
         "outcome": "root-committed",
         "authorization": "manager-fence",
         "operation_id": fence["prior_fresh_migration_operation_id"],
@@ -186,6 +186,9 @@ async def _insert_prior_root_receipt(
         "journal_generation": fence["prior_fresh_migration_generation"],
         "database_identity": database_identity,
         "post_source_catalog_sha256": fence["source_catalog_sha256"],
+        # head 상태 관측값. baseline root에서는 source catalog/seed와 같다.
+        "post_head_catalog_sha256": fence["source_catalog_sha256"],
+        "post_head_seed_sha256": fence["seed_sha256"],
         "post_seed_sha256": fence["seed_sha256"],
         "expected_privileged_residue_sha256": fence[
             "privileged_residue_sha256"
@@ -218,7 +221,7 @@ async def _insert_prior_root_receipt(
                     "destination_head, database_name, database_oid, database_owner, "
                     "postgres_system_identifier, result_payload) VALUES ("
                     "CAST(:operation_id AS uuid), 'application-root-300', "
-                    "'kor-travel-map.application-fresh-300-root.v2', :result_sha256, "
+                    "'kor-travel-map.application-fresh-300-root.v3', :result_sha256, "
                     ":map_commit, :map_image, :postgres_image, :fence_sha256, "
                     ":journal_sha256, :journal_generation, '300', :database_name, "
                     ":database_oid, :database_owner, :system_identifier, "

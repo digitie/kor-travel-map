@@ -58,7 +58,7 @@ _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
 _OPERATION_KIND: Final = "application-finalize-300"
 _ROOT_OPERATION_KIND: Final = "application-root-300"
-_ROOT_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v2"
+_ROOT_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v3"
 _RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-finalize.v4"
 _MISSING_RECEIPT_SCHEMA: Final = (
     "kor-travel-map.application-fresh-300-finalize-missing-receipt.v1"
