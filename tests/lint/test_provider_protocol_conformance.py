@@ -274,8 +274,7 @@ def test_bound_protocol_members_exist_on_pinned_model(protocol_key: str) -> None
             f"{protocol_key} → {model_path}: 실모델에 없는 Protocol 멤버 {missing}. "
             f"provider가 필드를 지웠거나 이름을 바꿨다면 Protocol과 사용처를 "
             f"함께 재결박할 것. (평탄화하지 못한 외부 base: "
-            f"{surface['external_bases']})
-"
+            f"{surface['external_bases']})\n"
             "**`_provider_surface.json`을 손으로 고쳐 통과시키지 말 것** — 그것은 "
             "생성물이고, 멤버를 손으로 더하면 이 게이트만 초록이 되고 핀된 provider에는 "
             "여전히 그 멤버가 없다. "
