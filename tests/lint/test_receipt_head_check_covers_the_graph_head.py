@@ -90,7 +90,8 @@ def _graph_order() -> tuple[str, ...]:
 
 def _load(path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(f"_migration_probe_{path.stem}", path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -101,7 +102,8 @@ def _revision_modules() -> dict[str, ModuleType]:
     for path in sorted(VERSIONS.glob("*.py")):
         module = _load(path)
         revision = getattr(module, "revision", None)
-        assert isinstance(revision, str) and revision, f"{path.name}: revision이 없다"
+        assert isinstance(revision, str), f"{path.name}: revision이 문자열이 아니다"
+        assert revision, f"{path.name}: revision이 비었다"
         assert revision not in modules, f"revision 중복: {revision}"
         modules[revision] = module
     return modules

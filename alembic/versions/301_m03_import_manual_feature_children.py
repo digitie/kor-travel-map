@@ -180,8 +180,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         CHECK (result_schema IN (
             'kor-travel-map.application-fresh-300-root.v2',
             'kor-travel-map.application-fresh-300-root.v3',
-            'kor-travel-map.application-fresh-300-finalize.v4',
-            'kor-travel-map.application-fresh-300-finalize.v5'
+            'kor-travel-map.application-fresh-300-finalize.v4'
         ))
 """
 

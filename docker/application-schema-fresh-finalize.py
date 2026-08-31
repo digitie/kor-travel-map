@@ -29,7 +29,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from kortravelmap.infra.application_schema_head import application_schema_head
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import (
     reconcile_runtime_privileges_in_transaction,
@@ -379,12 +382,65 @@ async def _assert_restricted_migrator_and_database(
         raise FreshFinalizeError("fresh finalize DB session or identity is invalid")
 
 
+def _sealed_destination_catalog(expected: Mapping[str, str]) -> str | None:
+    """head가 baseline root일 때만 봉인된 destination catalog가 기대값이다.
+
+    그 너머에서는 ``None``을 돌려 "미리 선언된 기대값이 없다"를 명시한다. 봉인된 값을
+    그대로 쓰면 새 migration이 더한 객체 때문에 반드시 어긋나고, 그 실패는 계약 위반이
+    아니라 **비교 대상이 틀린 것**이다.
+    """
+    if _DESTINATION_HEAD == BASELINE_ROOT_REVISION:
+        return expected["destination_catalog_sha256"]
+    return None
+
+
+async def _root_receipt_head_catalog(
+    connection: AsyncConnection,
+    fence: Mapping[str, Any],
+    expected: Mapping[str, str],
+) -> str:
+    """root 설치가 남긴 head 상태 catalog digest.
+
+    fence가 담은 `prior_fresh_migration_operation_id`로 root receipt를 찾는다. 그
+    receipt는 fence → journal → Manager evidence로 이미 결박돼 있으므로, 기대값의
+    출처가 봉인 파일에서 receipt로 옮겨가도 사슬은 끊기지 않는다.
+
+    root receipt가 head 필드를 갖지 않으면(v2 이하) 봉인된 source catalog로 되돌린다 —
+    그 세대에서는 head가 baseline root였으므로 같은 값이다.
+    """
+    operation_id = fence.get("prior_fresh_migration_operation_id")
+    if operation_id is None:
+        return expected["source_catalog_sha256"]
+    receipt = await _find_operation_receipt(connection, UUID(str(operation_id)))
+    if receipt is None:
+        raise FreshFinalizeError("fresh finalize prior root receipt is missing")
+    payload = receipt["result_payload"]
+    if not isinstance(payload, Mapping):
+        raise FreshFinalizeError("fresh finalize prior root receipt payload is invalid")
+    recorded = payload.get("post_head_catalog_sha256")
+    if recorded is None:
+        return expected["source_catalog_sha256"]
+    if not isinstance(recorded, str) or not _SHA256_PATTERN.fullmatch(recorded):
+        raise FreshFinalizeError("fresh finalize prior root head catalog is invalid")
+    return recorded
+
+
 async def _assert_raw_300_and_receipts(
     connection: AsyncConnection,
     expected: Mapping[str, str],
     *,
-    expected_catalog_sha256: str,
+    expected_catalog_sha256: str | None,
 ) -> tuple[str, str, str]:
+    """raw revision·catalog·seed·facet을 한 snapshot에서 읽고 대조한다.
+
+    ``expected_catalog_sha256``이 ``None``이면 catalog는 **관측만** 한다. 봉인된
+    baseline digest는 `300` 시점만 서술하므로, head가 그 너머일 때의 post-ACL 상태에는
+    미리 선언된 기대값이 존재하지 않는다 — 그 값은 finalize receipt가 정본이 되고
+    final permit이 그것과 대조한다.
+
+    ``None``을 넘기는 것은 **호출자의 명시적 선언**이다. 기본값을 두지 않는 이유가
+    그것이다 — 기대값을 잊어서 검사가 사라지는 일이 없어야 한다.
+    """
     module = _load_database_contract_module()
     try:
         # migrator는 NOINHERIT LOGIN이다. receipt query는 handoff와 같은 명시
@@ -415,10 +471,14 @@ async def _assert_raw_300_and_receipts(
         raise FreshFinalizeError("fresh finalize cannot verify raw 300 receipts") from exc
     if versions != (_DESTINATION_HEAD,):
         raise FreshFinalizeError("fresh finalize requires exact raw revision 300")
-    if catalog != expected_catalog_sha256 or seed != expected["seed_sha256"]:
+    if seed != expected["seed_sha256"]:
         raise FreshFinalizeError(
-            "fresh finalize catalog or seed receipt does not match baseline "
-            f"(catalog={catalog}, seed={seed})"
+            f"fresh finalize seed receipt does not match baseline (seed={seed})"
+        )
+    if expected_catalog_sha256 is not None and catalog != expected_catalog_sha256:
+        raise FreshFinalizeError(
+            "fresh finalize catalog receipt does not match the expected state "
+            f"(catalog={catalog})"
         )
     if (
         destination_alembic_version
@@ -564,10 +624,15 @@ async def _finalize() -> Mapping[str, Any]:
             # 이 transaction의 첫 SQL에서 restricted LOGIN과 DB identity를 고정한다.
             await _assert_restricted_migrator_and_database(connection, fence)
             await _acquire_operation_lock(connection)
+            # pre-ACL 기대값은 **root receipt가 관측한 head 상태**다. head가 baseline
+            # root면 그 값은 봉인된 source catalog와 같으므로 분기가 필요 없다 —
+            # root 설치가 체크포인트에서 이미 봉인값과 exact 대조를 마쳤다.
             pre_catalog, pre_seed, _ = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
-                expected_catalog_sha256=expected["source_catalog_sha256"],
+                expected_catalog_sha256=await _root_receipt_head_catalog(
+                    connection, fence, expected
+                ),
             )
             # source receipt가 오래 걸리는 동안 fence가 만료될 수 있다. 실제 ACL
             # mutation 직전에 same-byte·unexpired generation을 다시 읽는다.
@@ -582,10 +647,13 @@ async def _finalize() -> Mapping[str, Any]:
                 raise FreshFinalizeError(
                     "fresh finalize runtime ACL reconciliation failed"
                 ) from exc
+            # post-ACL 상태는 finalize가 **처음** 관측한다. head가 baseline root면
+            # 봉인된 destination catalog가 그 기대값이지만, 그 너머에는 미리 선언된
+            # 값이 없다 — 이 관측이 finalize receipt에 실려 정본이 된다.
             post_catalog, post_seed, destination_facet = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
-                expected_catalog_sha256=expected["destination_catalog_sha256"],
+                expected_catalog_sha256=_sealed_destination_catalog(expected),
             )
             # destination receipt와 최종 fence 확인까지 같은 outer transaction이다.
             # 여기서 실패하면 ACL과 catalog가 source facet으로 함께 rollback된다.
@@ -728,7 +796,7 @@ async def _recover(operation_id: UUID) -> Mapping[str, Any]:
             catalog, seed, _ = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
-                expected_catalog_sha256=expected["destination_catalog_sha256"],
+                expected_catalog_sha256=_sealed_destination_catalog(expected),
             )
             if (
                 payload.get("post_destination_catalog_sha256") != catalog
@@ -816,7 +884,9 @@ async def _probe_missing(operation_id: UUID) -> Mapping[str, Any]:
             catalog, seed, destination_facet = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
-                expected_catalog_sha256=expected["source_catalog_sha256"],
+                expected_catalog_sha256=await _root_receipt_head_catalog(
+                    connection, fence, expected
+                ),
             )
             return {
                 "schema": _MISSING_RECEIPT_SCHEMA,

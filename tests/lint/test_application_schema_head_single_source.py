@@ -41,6 +41,9 @@ _HEAD_CONSUMERS = (
 
 _HEAD_LITERAL = re.compile(r'(?<![0-9])"300"(?![0-9])')
 
+_BASELINE_ROOT_CHECKPOINT = 'command.upgrade(config, "300")'
+"""fresh installer가 봉인된 계약을 대조하려고 baseline root에서 한 번 끊는 자리."""
+
 
 def test_head_consumers_do_not_hardcode_the_revision() -> None:
     """head를 쓰는 executable은 리터럴 대신 파생값을 써야 한다."""
@@ -50,6 +53,14 @@ def test_head_consumers_do_not_hardcode_the_revision() -> None:
         assert path.exists(), f"배포 executable이 사라졌다: {name}"
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.lstrip().startswith("#"):
+                continue
+            if line.strip() == _BASELINE_ROOT_CHECKPOINT:
+                # baseline root **체크포인트**의 목적지다. head가 아니다.
+                # 리터럴이어야 하는 이유는
+                # `test_active_runnable_paths_never_target_legacy_revision`이
+                # upgrade 대상을 정적으로 해소해 retired revision이 아님을 증명하기
+                # 때문이다 — 상수로 바꾸면 그 증명이 무력해진다. 값이 실제로 baseline
+                # root인지는 `test_the_baseline_root_checkpoint_targets_the_root`가 본다.
                 continue
             if _HEAD_LITERAL.search(line):
                 offenders.append(f"{name}:{number}: {line.strip()[:80]}")
@@ -322,4 +333,22 @@ def test_no_deploy_asset_pins_the_head_literal() -> None:
         "배포 자산이 application head를 리터럴로 비교한다 — head가 움직이면 "
         "프로덕션이 죽거나 가드가 조용히 꺼진다. 정당한 baseline root 비교라면 "
         "`_BASELINE_MACHINERY`에 사유와 함께 선언할 것:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_baseline_root_checkpoint_targets_the_root() -> None:
+    """체크포인트 리터럴이 실제로 baseline root인지 본다.
+
+    `test_head_consumers_do_not_hardcode_the_revision`이 이 한 줄을 면제하므로, 그
+    면제가 정당한지는 여기서 값으로 확인한다. 면제와 확인을 같은 파일에 두어 한쪽만
+    바뀌는 일을 막는다.
+    """
+    expected = f'command.upgrade(config, "{BASELINE_ROOT_REVISION}")'
+    assert expected == _BASELINE_ROOT_CHECKPOINT
+
+    source = (DOCKER_DIR / "application-schema-fresh-300.py").read_text(encoding="utf-8")
+
+    assert _BASELINE_ROOT_CHECKPOINT in source, (
+        "fresh installer가 baseline root 체크포인트를 잃었다 — 봉인된 catalog digest는 "
+        "`300` 시점만 서술하므로, head까지 한 번에 올리면 대조할 대상이 사라진다"
     )
