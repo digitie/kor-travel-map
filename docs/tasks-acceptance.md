@@ -290,6 +290,14 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   route 활성화 전 fresh restore/ACL/live gate다.
 ```
 
+**2026-08-31 live gate green**: fresh 설치(302 head) + 운영 ACL bootstrap/reconcile 스택에서
+kill-switch on + 전용 token으로 `/admin/features/new` UI 생성 완주(201), 같은 identity 재제출
+409 exact-conflict — `admin-manual-feature-create.live.spec.ts`(격리 스택 2/2). 잔여:
+fresh **restore**(backup manifest 경유) 실측은 H43/H49 backup 실측과 함께 닫는다.
+
+```markdown
+```
+
 ## T-VN-M02
 
 ```markdown
@@ -301,6 +309,11 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   최상위 `feature_uuid`와 같지 않으면 fail-close한다. PinVi consumer도 이 반환 UUID를 M05 case의
   manual/old UUID와 각각 대조하기 전에는 paired live receipt를 승격할 수 없다.
 ```
+
+**2026-08-31 reader live acceptance green**: 격리 스택에서 opaque `feature_id`+`feature_uuid`
+최상위 병행 반환, claim UUID == 최상위 UUID, origin(manual_admin·단건 principal·
+invoker/definer role) 계약을 실측 — `admin-manual-feature-create.live.spec.ts`. 잔여:
+purge 정책·backup/restore 실측(H43 연동)과 PinVi M05 paired 대조.
 
 ## T-VN-M03
 
