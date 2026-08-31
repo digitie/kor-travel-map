@@ -9,6 +9,12 @@
         "300"
       ],
       "revision": "301_m03_import_children"
+    },
+    {
+      "down_revision": [
+        "301_m03_import_children"
+      ],
+      "revision": "302_m03_child_issuance"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

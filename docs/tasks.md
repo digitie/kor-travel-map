@@ -17,7 +17,6 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 - [ ] T-FE-MOCK-FLAKE — n150 live GET-only로 mocked checkpoint 잔여를 해소한다.
 - [ ] T-VN-M01 — admin Feature 생성 API의 live clean-cutover를 완료한다.
 - [ ] T-VN-M02 — Feature origin/provenance 보존·불변성의 live acceptance를 완료한다.
-- [ ] T-VN-M03 — curated 동시 생성의 import 및 live acceptance를 완료한다.
 - [~] T-VN-M04 — 범용 Feature 요청 큐의 paired consumer acceptance를 완료한다.
 - [~] T-VN-M05 — provider 발행 Feature 중복 판정과 paired reconciliation을 완료한다.
 - [ ] T-VN-H34 — 공식 curation 미연결 membership의 남은 acceptance criteria를 마무리한다.

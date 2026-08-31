@@ -310,6 +310,11 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   runtime/Dagster 권한 분리를 고정했다. import 행별 child-command와 격리 live acceptance를 남긴다.
 ```
 
+**판정: 충족 — 2026-08-31 `docs/tasks-done.md`로 이관.** 남겼던 두 조건이 닫혔다:
+import 행별 child-command는 `302_m03_child_issuance` + `curation_repo` 발급 배선
+(실 PostGIS 통합 2/2), 격리 live acceptance는
+`curation-import-manual-child.live.spec.ts`(n150 격리 스택, 2 passed).
+
 ## T-VN-M04
 
 ```markdown

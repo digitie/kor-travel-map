@@ -1,5 +1,78 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — 적대 리뷰 2인(opus·xhigh)의 16건 실측 발견과 수리
+
+두 리뷰어가 전부 **실행으로** 검증했다(n150 실 DB probe, 뮤테이션 주입, TestClient).
+CONFIRMED HIGH 2건이 특히 무거웠다.
+
+- **F1 부팅 실패**: 302의 recorder EXECUTE grant가 ADR-090 preflight의 exact-set을
+  깨서 head=302 DB에서 API가 기동 불가였다(compose는 preflight 강제). 격리 live
+  green이 이 게이트를 통과한 증거가 아니었다 — 스택이 preflight를 안 켰던 것.
+  db.py 허용 목록에 recorder를 추가했다.
+- **F2 kill-switch 우회**: import preview/commit이 단건 manual 생성의
+  kill-switch·전용 token을 우회했다. 조건부 가드(assert_manual_feature_create_for_import)
+  + BFF의 import 경로 token 부착(구성 시)으로 닫았다.
+- **H1/H2/F3 재수렴**: '이미 반영된 manual 행이 든 CSV는 영구 재commit 불가(원문
+  DB 메시지 409)' + '완결성 검사가 이전 batch의 item으로도 통과' — 재수렴 설계로
+  해소: 같은 typed payload면 이전 child linkage를 재사용(reused=true), linkage 없는
+  동일 identity/payload 변경은 원인을 말하는 오류. coverage 가드가 no-op 발급을
+  중단시킨다. 통합 테스트가 재수렴(동일 child 재사용, linkage 1개 유지)을 실 DB로
+  검증한다.
+- **H3 recorder 교차검증**: FK 일곱을 전부 만족하는 '교차된' linkage가 통과하던
+  것을 5축(행번호↔receipt·plan payload digest·decision 종류·item↔feature·부모
+  actor) fail-close로 봉인.
+- **H4/F4 집계**: fresh 생성이 updated로 계상되던 것을 inserted로 보정(preview와
+  정합). **F5**: manual 행이 'unmatched/미연결로 남습니다'로 통보되던 것을
+  valid→imported(+resolved UUID)로. **F6**: manual_children.feature_id의 legacy
+  `f_*` 노출(신규 live spec이 그걸 못박고 있었다)을 UUID 정본 + reused·
+  terminal_status로 교체. **F7**: import child origin의 거짓 principal — CHECK
+  widen + writer CASE. **F9**: 좌표 서비스 범위(124~132/33~39.5)를 preview가 반환.
+  **F10/F11**: 자기참조 단언 실질화, manual_children 라우터 계약 테스트(뮤테이션
+  M2 검출). L7은 NOT VALID+VALIDATE로.
+- 부수 발견: **충돌 PR은 pull_request 워크플로가 조용히 0건**이다(merge ref 생성
+  불가) — #1127이 CI 침묵의 원인이었고 리베이스로 해소했다.
+
+수리 후: mypy --strict core/api·lint-imports·ruff green, M03 통합 3/3(재수렴 포함),
+격리 live acceptance 2/2(수리된 계약 — token 가드·UUID 뷰·inserted 보정 실측).
+
+## 2026-08-31 — M03 격리 live acceptance green + 잠복 500 수리
+
+사상 첫 manual-create live harness가 n150 격리 스택(302 head)에서 완주했다:
+UI CSV 업로드 → preview(201) → commit(200, `manual_children` 확정값) → admin REST에서
+생성 Feature 관측. 전제 두 가지를 실측으로 확인했다 — (1) theme/source는 retained
+catalog에 선존재해야 한다(import는 catalog를 만들지 않고 preview가 422 fail-close),
+(2) Idempotency-Key는 BFF가 허용 목록으로 전달한다.
+
+acceptance가 최초로 노출한 **잠복 결함**: feature 상세 라우트가 curation item을
+`AdminCurationItemView.model_validate(item, from_attributes=True)`로 직검증해
+CurationItem에 없는 `command_etag`(그리고 int `row_revision`) 때문에 **curation이
+달린 모든 feature 상세가 500**이었다. 기존 테스트가 전부 빈 tuple을 mock해 숨어
+있었다. curations 라우터의 `_admin_item_view`(정본)로 교체하고, 실제 item을 실은
+회귀 테스트를 추가했다.
+
+## 2026-08-31 — M03 302: import 행별 manual Feature child 발급 완주 (실 DB green)
+
+`301`이 만든 linkage 표를 실제로 채우는 쓰기 계약 셋을 `302`로 확장하고, repo·route를
+결선해 통합 테스트가 실 PostGIS에서 완주했다.
+
+- **CSV**: `manual_feature_category`(8자리) typed 열 추가 — writer가 category를
+  요구하는데 item 인자에 원천이 없다. 이름은 `place_name`이 소유(비면 preview 거절).
+  typed payload가 {kind, category, coord}로 확장돼 child identity에 category가 결박.
+- **302 migration**: (1) writer operation 검사를 child operation까지 확장,
+  (2) apply가 manual 행 item upsert를 건너뛰고(EXCLUDED.feature_id=NULL이 writer의
+  feature 결박을 지우는 경로 차단) 행별 좌표(o_row_receipts)를 반환하며 manual 행의
+  decision을 accepted/manual_feature_child로 기록(종전 분기면 'revoked'로 강등됐다),
+  (3) linkage 전용 SECURITY DEFINER 기록기(ops, 소유권은 임시 스키마 CREATE grant로
+  command owner에 이전), (4) match_basis·receipt head CHECK 확장. 프로시저 본문은
+  baseline에서 기계 파생한 sidecar — diff가 수정 지점만 보이고 downgrade가 원본
+  바이트로 복원된다.
+- **repo/route**: 결정적 child identity(§6.2)로 lock→claim→writer→apply→linkage→
+  child result를 한 SERIALIZABLE transaction에 배선. manual 행은 command 경로
+  전용(가드), 부분 성공 없음. 부모 응답에 ordered `manual_children` — 요청 JSON이
+  아니라 transaction 확정값에서 구성. OpenAPI 재생성.
+- **검증**: 신규 통합 테스트가 child command identity·feature/origin·linkage 5축·
+  decision 종류·item feature 결박 생존·child terminal result를 실 DB에서 확인.
+  mypy --strict core/api green, 통합 회귀(dict 동등 단언 4곳) 반영.
 ## 2026-08-31 — 적대 리뷰 라운드2: 원장 게이트 3종을 파싱 정본 위에 재작성
 
 라운드1 게이트는 각자 다른 구멍을 갖고 있었다 — 삭제 게이트는 diff 줄 정규식이라
@@ -48,6 +121,7 @@ acceptance 본문 도달은 0건 — 후보 예산 전부가 인프라 단계에
 
 Manager 쪽 채택분(I-1/I-2/I-4/I-5/I-8/I-9)은 Manager PR #278, PinVi 쪽(I-10)은
 PinVi #505가 소유한다.
+||||||| parent of 09d018d8 (docs: M03 302 완주 기록과 다음 작업(격리 live acceptance))
 
 ## 2026-08-31 — head 값 고정을 걷어내고, `301`이 왜 아직 못 올라가는지 실증했다
 

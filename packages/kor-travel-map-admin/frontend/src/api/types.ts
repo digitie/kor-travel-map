@@ -7389,6 +7389,8 @@ export interface components {
             issues: components["schemas"]["CurationImportIssueView"][];
             /** Items */
             items: components["schemas"]["CurationImportRowView"][];
+            /** Manual Children */
+            manual_children?: components["schemas"]["CurationImportManualChildView"][];
             /** Plan Etag */
             plan_etag: string;
             /** Removals */
@@ -7429,6 +7431,35 @@ export interface components {
             message: string;
             /** Row Number */
             row_number?: number | null;
+        };
+        /**
+         * CurationImportManualChildView
+         * @description import 행 하나가 발급한 manual Feature child의 확정 좌표(설계 §6.3).
+         *
+         *     부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로
+         *     구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을
+         *     영구 결박한다. ``feature_id``는 응답 규약(T-VN-32C/ADR-068 §3)대로 **UUID
+         *     정본**이다 — legacy `f_*` 문자열은 응답에 싣지 않는다(적대 리뷰 F6).
+         */
+        CurationImportManualChildView: {
+            /** Child Command Id */
+            child_command_id: number;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Reused */
+            reused: boolean;
+            /** Row Number */
+            row_number: number;
+            /** Terminal Status */
+            terminal_status: number;
         };
         /** CurationImportResponse */
         CurationImportResponse: {

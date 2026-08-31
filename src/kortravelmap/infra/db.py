@@ -115,6 +115,11 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         _MANUAL_CURATION_FEATURE_CREATE_PROCEDURE,
         "feature.apply_curation_import_items_command(jsonb,text,text,bigint,text)",
+        # 302 — import 행별 manual child linkage 기록기 (admin executor 전용).
+        (
+            "ops.record_curation_import_manual_feature_child("
+            "uuid,integer,text,text,bigint,uuid,uuid,uuid,uuid)"
+        ),
         # 0222 — canonical collections lock. admin executor만(dedup review 라우터·ktmctl).
         "feature.merge_lock_curation_collections(text,text)",
         "feature.archive_curated_source_command(uuid,bigint,bigint,text,text)",

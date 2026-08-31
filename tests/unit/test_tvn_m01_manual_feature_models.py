@@ -152,7 +152,9 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
             "(origin_kind = 'manual_admin' "
             "AND creator_principal_id = 'admin-ui-bff.manual-feature-create.v1') "
             "OR (origin_kind = 'manual_curation' "
-            "AND creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1') "
+            "AND creator_principal_id IN ("
+            "'admin-ui-bff.manual-curation-feature-create.v1', "
+            "'admin-ui-bff.curation-import.manual-feature-row.v1')) "
             "OR (origin_kind = 'manual_request' "
             "AND creator_principal_id = 'feature-request.approval.v1')"
         ),

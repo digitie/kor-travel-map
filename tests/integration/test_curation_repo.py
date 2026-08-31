@@ -10,7 +10,7 @@ import unicodedata
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -156,6 +156,17 @@ async def _confirm_quarantine_as_api(
             command_id=command_id,
             actor=actor,
         )
+
+
+
+def _assert_row_receipts_cover(result: CurationImportResult) -> None:
+    """command 경로 결과의 행 좌표가 batch의 모든 행을 실제 UUID로 커버하는지."""
+    receipts = result["row_receipts"]
+    assert len(receipts) == result["rows"], (len(receipts), result["rows"])
+    for receipt in receipts:
+        assert receipt.row_number >= 2
+        UUID(receipt.import_row_id)
+        UUID(receipt.curation_item_id)
 
 
 def _payload_hash(seed: str) -> str:
@@ -858,7 +869,12 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 0,
         "removals": (),
         "import_batch_id": first["import_batch_id"],
+        "row_receipts": first["row_receipts"],
+        "manual_children": (),
     }
+    # 적대 리뷰 F10: 자기참조 단언은 receipts를 검증하지 않는다 — 행 좌표의
+    # 실질 성질(모든 행 커버, UUID 형태)을 별도로 단언한다.
+    _assert_row_receipts_cover(first)
     assert second == {
         "rows": 3,
         "collections": 1,
@@ -867,7 +883,12 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 0,
         "removals": (),
         "import_batch_id": second["import_batch_id"],
+        "row_receipts": second["row_receipts"],
+        "manual_children": (),
     }
+    # 적대 리뷰 F10: 자기참조 단언은 receipts를 검증하지 않는다 — 행 좌표의
+    # 실질 성질(모든 행 커버, UUID 형태)을 별도로 단언한다.
+    _assert_row_receipts_cover(second)
     assert no_op_plan.inserted == 0
     assert no_op_plan.updated == 0
     assert no_op_plan.removals == ()
@@ -884,7 +905,12 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         "removed": 1,
         "removals": replacement_plan.removals,
         "import_batch_id": replaced["import_batch_id"],
+        "row_receipts": replaced["row_receipts"],
+        "manual_children": (),
     }
+    # 적대 리뷰 F10: 자기참조 단언은 receipts를 검증하지 않는다 — 행 좌표의
+    # 실질 성질(모든 행 커버, UUID 형태)을 별도로 단언한다.
+    _assert_row_receipts_cover(replaced)
     counts = (
         await migrated_session.execute(
             text(
@@ -2634,7 +2660,12 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
         "removed": 0,
         "removals": (),
         "import_batch_id": adopted["import_batch_id"],
+        "row_receipts": adopted["row_receipts"],
+        "manual_children": (),
     }
+    # 적대 리뷰 F10: 자기참조 단언은 receipts를 검증하지 않는다 — 행 좌표의
+    # 실질 성질(모든 행 커버, UUID 형태)을 별도로 단언한다.
+    _assert_row_receipts_cover(adopted)
     after_rows = (
         (
             await migrated_session.execute(

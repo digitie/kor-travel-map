@@ -323,20 +323,11 @@ def require_admin_frontend(
     return AdminProxyContext(actor=actor)
 
 
-def require_admin_manual_feature_create(
-    request: Request,
-    admin_context: Annotated[
-        AdminProxyContext,
-        Depends(require_admin_frontend),
-    ],
-    token: Annotated[
-        str | None,
-        Security(_admin_feature_create_token_scheme),
-    ] = None,
-) -> AdminManualFeatureCreateContext:
-    """기존 AdminBFF와 생성 전용 token을 모두 검증한다."""
+def _assert_manual_feature_create_authorized(
+    settings: ApiSettings, token: str | None
+) -> None:
+    """manual Feature 생성 kill-switch와 전용 token을 검증한다(단일 정본)."""
 
-    settings = _settings(request)
     if not settings.admin_manual_feature_create_enabled:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -362,6 +353,36 @@ def require_admin_manual_feature_create(
                 "details": {"required_scope": "admin:feature:create"},
             },
         )
+
+
+def assert_manual_feature_create_for_import(request: Request) -> None:
+    """CSV import가 manual Feature 행을 실었을 때의 조건부 가드(적대 리뷰 F2).
+
+    단건 route와 같은 kill-switch·전용 token 계약을 적용한다 — import 경로가
+    이 둘을 우회해 Feature를 만들 수 없게 한다. manual 행이 없는 CSV는 이 가드를
+    타지 않는다(기존 계약 불변).
+    """
+
+    settings = _settings(request)
+    token = request.headers.get(ADMIN_FEATURE_CREATE_TOKEN_HEADER)
+    _assert_manual_feature_create_authorized(settings, token)
+
+
+def require_admin_manual_feature_create(
+    request: Request,
+    admin_context: Annotated[
+        AdminProxyContext,
+        Depends(require_admin_frontend),
+    ],
+    token: Annotated[
+        str | None,
+        Security(_admin_feature_create_token_scheme),
+    ] = None,
+) -> AdminManualFeatureCreateContext:
+    """기존 AdminBFF와 생성 전용 token을 모두 검증한다."""
+
+    settings = _settings(request)
+    _assert_manual_feature_create_authorized(settings, token)
 
     return AdminManualFeatureCreateContext(
         principal_id="admin-ui-bff.manual-feature-create.v1",

@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-31 — M03 child 발급(302) 구현·실 DB green, 다음은 격리 live acceptance
+
+`chain/301-carrier`(#1125)와 Manager `chain/head-state-receipt`(#277)를 live e2e
+green(8/8, prod build) 후 함께 머지했다. 그 위에서 `feat/m03-child-command-issuance`가
+CSV category 열 → 302 migration → repo/route 결선 → 통합 테스트 완주까지 담는다.
+
+### 다음 한 작업
+
+**M03 격리 live acceptance** — manual 행이 든 CSV를 admin UI(또는 BFF 경로)로
+preview→plan→commit까지 실제 스택에서 한 번 완주시키고, linkage/summary를 증거로
+남긴다(사상 첫 manual-create 격리 harness — n150 ~/ktm-live-301 스택과 c7-playwright
+이미지를 재사용할 수 있다). 그 전에 적대 리뷰 2인(opus5·xhigh)이 302/발급 경로를
+다각도로 친다.
+
 ## 2026-08-31 — head 값 고정 해제 (Map PR #1124 / Manager PR #276), `301`은 분리
 
 `application_head = "300"` 리터럴 Map 6곳 + Manager 11곳을 파생값으로 바꿨다. `300`은

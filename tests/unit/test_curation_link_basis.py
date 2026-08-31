@@ -21,12 +21,13 @@ from kortravelmap.infra.curation_link_basis import (
     trusted_basis_sql,
 )
 
+#: DB CHECK의 현행 정본 — `302`가 `manual_feature_child`를 widen했다(T-VN-M03).
+#: 종전 정본이던 legacy `0073`은 아카이브 이력이다.
 _MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "alembic"
-    # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
-    / "legacy_versions"
-    / "0073_curation_source_rule_provenance.py"
+    / "versions"
+    / "302_m03_import_child_issuance.py"
 )
 
 
@@ -46,13 +47,15 @@ def _check_values(clause: str) -> set[str]:
 def test_db_check_and_python_definition_agree() -> None:
     """DB CHECK가 허용하는 값과 Python이 아는 값이 같아야 한다."""
     migration = _load_migration()
-    assert _check_values(migration._NEW_BASIS) == set(ALL_LINK_BASES)
+    assert _check_values(migration._MATCH_BASIS_ADD_NOT_VALID) == set(ALL_LINK_BASES)
 
 
 def test_downgrade_check_drops_exactly_the_new_basis() -> None:
-    """downgrade CHECK는 `source_rule`만 빠진 집합이어야 한다."""
+    """downgrade CHECK는 `manual_feature_child`만 빠진 집합이어야 한다."""
     migration = _load_migration()
-    assert _check_values(migration._OLD_BASIS) == set(ALL_LINK_BASES) - {"source_rule"}
+    assert _check_values(migration._MATCH_BASIS_NARROW) == set(ALL_LINK_BASES) - {
+        "manual_feature_child"
+    }
 
 
 def test_unattributed_basis_is_never_trusted() -> None:
