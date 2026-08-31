@@ -32,7 +32,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
-from kortravelmap.infra.application_schema_head import application_schema_head
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
@@ -58,6 +61,9 @@ _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
 _OPERATION_KIND: Final = "application-root-300"
+#: 같은 DB의 finalize receipt. recovery가 post-ACL 상태를 정당한 것으로 인정하려면
+#: 그 상태를 실제로 기록한 receipt가 있어야 한다.
+_FINALIZE_OPERATION: Final = "application-finalize-300"
 _RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v3"
 """v2 → v3: head 상태 catalog/seed digest 두 필드를 더했다.
 
@@ -1213,6 +1219,56 @@ async def _migrate() -> Mapping[str, Any]:
                 os.environ[name] = previous
 
 
+async def _recoverable_catalogs(
+    connection: AsyncConnection,
+    contract: Mapping[str, str],
+    payload: Mapping[str, Any],
+) -> frozenset[str]:
+    """recovery 시점에 **정당한** catalog 상태들.
+
+    recovery는 이미 설치된 DB를 읽으므로 그 DB는 `300`이 아니라 **head**에 있다. 그리고
+    finalize 전일 수도 후일 수도 있으므로 pre-ACL과 post-ACL 둘 다 정당하다 — 종전에
+    봉인된 source/destination 쌍을 받은 이유가 그것이다.
+
+    head가 baseline root면 그 쌍이 그대로 두 상태다(체크포인트가 이미 증명했다).
+    그 너머에서는 봉인값이 이 상태를 서술하지 않으므로 정본이 receipt로 옮겨간다.
+
+    - pre-ACL: 이 root receipt 자신이 기록한 `post_head_catalog_sha256`
+    - post-ACL: 같은 DB의 finalize receipt가 기록한 `post_destination_catalog_sha256`
+
+    finalize receipt가 없으면 pre-ACL 하나만 정당하다 — **넓히지 않는다.** 넓히면
+    "아직 finalize하지 않은 DB가 post-ACL 상태로 보이는" 모순을 통과시키게 된다.
+    """
+    if _DESTINATION_HEAD == BASELINE_ROOT_REVISION:
+        return frozenset(
+            {contract["source_catalog_sha256"], contract["destination_catalog_sha256"]}
+        )
+
+    head_catalog = payload.get("post_head_catalog_sha256")
+    if not isinstance(head_catalog, str) or _SHA256_PATTERN.fullmatch(head_catalog) is None:
+        raise FreshMigrationError(
+            "fresh 300 recovery cannot read the recorded head catalog digest"
+        )
+    catalogs = {head_catalog}
+
+    finalized = (
+        await connection.execute(
+            text(
+                "SELECT result_payload FROM "
+                f"{_OPERATION_RECEIPT_TABLE} WHERE operation = :operation"
+            ),
+            {"operation": _FINALIZE_OPERATION},
+        )
+    ).scalars().all()
+    for finalize_payload in finalized:
+        if not isinstance(finalize_payload, Mapping):
+            continue
+        observed = finalize_payload.get("post_destination_catalog_sha256")
+        if isinstance(observed, str) and _SHA256_PATTERN.fullmatch(observed):
+            catalogs.add(observed)
+    return frozenset(catalogs)
+
+
 async def _recover(operation_id: UUID) -> Mapping[str, Any]:
     """exact operation row를 read-only로 재검증해 원 canonical result를 돌려준다."""
 
@@ -1258,11 +1314,8 @@ async def _recover(operation_id: UUID) -> Mapping[str, Any]:
             await _assert_application_receipts(
                 connection,
                 contract,
-                expected_catalogs=frozenset(
-                    {
-                        contract["source_catalog_sha256"],
-                        contract["destination_catalog_sha256"],
-                    }
+                expected_catalogs=await _recoverable_catalogs(
+                    connection, contract, payload
                 ),
             )
             return dict(payload)
