@@ -274,7 +274,12 @@ def test_bound_protocol_members_exist_on_pinned_model(protocol_key: str) -> None
             f"{protocol_key} → {model_path}: 실모델에 없는 Protocol 멤버 {missing}. "
             f"provider가 필드를 지웠거나 이름을 바꿨다면 Protocol과 사용처를 "
             f"함께 재결박할 것. (평탄화하지 못한 외부 base: "
-            f"{surface['external_bases']})"
+            f"{surface['external_bases']})
+"
+            "**`_provider_surface.json`을 손으로 고쳐 통과시키지 말 것** — 그것은 "
+            "생성물이고, 멤버를 손으로 더하면 이 게이트만 초록이 되고 핀된 provider에는 "
+            "여전히 그 멤버가 없다. "
+            "`test_manifest_is_regenerable_and_not_hand_edited`가 그 조작을 잡는다."
         )
         return
 
@@ -313,3 +318,54 @@ def test_contract_table_pins_match_pyproject() -> None:
 
     undocumented = sorted(set(declared) - set(documented))
     assert not undocumented, f"pyproject에 핀이 있으나 §12 표에 행이 없다: {undocumented}"
+
+
+# -- manifest가 손으로 고쳐지지 않았는지 ------------------------------------
+#
+# 적대 리뷰가 실증한 구멍: `test_bound_protocol_members_exist_on_pinned_model`이
+# 실패하면 메시지가 manifest 파일을 가리키고, **거기에 멤버 이름을 손으로 더하면
+# 초록이 된다.** 핀된 provider에는 그 멤버가 실제로 없는데도 게이트가 통과한다.
+#
+# manifest는 생성물이다. 손으로 고치는 것은 계약을 고치는 것이 아니라 계약이 검사하는
+# 대상을 지우는 것이다. 여기서 그 재생성 가능성을 직접 확인한다.
+
+
+def test_manifest_is_regenerable_and_not_hand_edited() -> None:
+    """생성기를 실제로 돌려 manifest가 바이트 단위로 같은지 확인한다.
+
+    형제 체크아웃이 없으면 재생성이 불가능하므로 건너뛰되, **조용히 넘어가지 않는다** —
+    건너뛴 사실이 출력에 남아야 "게이트가 돌았다"는 착각이 생기지 않는다.
+    """
+    import subprocess
+    import sys
+
+    script = REPO_ROOT / "scripts" / "generate_provider_surface_manifest.py"
+    assert script.exists(), "manifest 생성기가 사라졌다"
+
+    result = subprocess.run(
+        [sys.executable, str(script), "--check"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+
+    combined = f"{result.stdout}\n{result.stderr}"
+    if "git" in combined and "실패" in combined:
+        pytest.skip(
+            "형제 `python-*-api` 로컬 체크아웃이 없어 manifest 재생성을 확인하지 못했다 "
+            "(ADR-044). 이 게이트는 provider 핀을 바꾸는 개발 환경에서 반드시 초록이어야 "
+            f"한다: {combined.strip()[:200]}"
+        )
+
+    raise AssertionError(
+        "provider 표면 manifest가 생성기 출력과 다르다. **손으로 고치지 말 것** — "
+        "manifest는 핀된 SHA의 소스에서 유도되는 생성물이고, 손으로 멤버를 더하면 "
+        "게이트는 초록이 되지만 핀된 provider에는 그 멤버가 없다. "
+        "`python scripts/generate_provider_surface_manifest.py`로 재생성할 것:\n"
+        f"{combined.strip()[:600]}"
+    )
