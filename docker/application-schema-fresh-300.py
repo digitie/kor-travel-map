@@ -1263,6 +1263,14 @@ async def _recoverable_catalogs(
     for finalize_payload in finalized:
         if not isinstance(finalize_payload, Mapping):
             continue
+        # **이 root의** finalize만 정당하다. receipt 표는 append-only라 세대가 다른
+        # finalize receipt가 공존할 수 있고(301이 head CHECK를 넓혀 명시적으로 허용),
+        # operation 이름만으로 받으면 낡은 세대의 post-ACL digest가 현재 상태를
+        # 정당화한다 — 적대 리뷰가 지적한 세탁 경로다. finalize payload가 이미
+        # `prior_fresh_migration_operation_id`로 계승을 선언하므로 그것으로 결박한다.
+        prior_op = finalize_payload.get("prior_fresh_migration_operation_id")
+        if prior_op != payload.get("operation_id"):
+            continue
         observed = finalize_payload.get("post_destination_catalog_sha256")
         if isinstance(observed, str) and _SHA256_PATTERN.fullmatch(observed):
             catalogs.add(observed)

@@ -413,9 +413,17 @@ async def _root_receipt_head_catalog(
         return expected["source_catalog_sha256"]
     # migrator는 NOINHERIT LOGIN이다 — receipt 조회는 명시 schema-owner role이 필요하다.
     # 이 helper는 `_assert_raw_300_and_receipts`의 **인자 위치**에서 평가되므로, 그 함수의
-    # SET ROLE보다 먼저 돈다. 여기서 직접 전환한다(이후 코드가 다시 SET하므로 무해하다).
+    # SET ROLE보다 먼저 돈다. 승격을 이 조회에 한정하려고 finally에서 되돌린다 —
+    # "호출자가 곧 다시 SET한다"는 위치 불변식에 기대면 인자 순서 변경 한 번에 승격된
+    # role로 임의 문이 돈다(적대 리뷰 지적).
     await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
-    receipt = await _find_operation_receipt(connection, UUID(str(operation_id)))
+    try:
+        receipt = await _find_operation_receipt(connection, UUID(str(operation_id)))
+    finally:
+        try:
+            await connection.execute(text("RESET ROLE"))
+        except Exception:  # noqa: BLE001 - aborted tx에서 원래 예외를 가리지 않는다
+            pass
     if receipt is None:
         raise FreshFinalizeError("fresh finalize prior root receipt is missing")
     payload = receipt["result_payload"]
