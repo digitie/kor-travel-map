@@ -151,6 +151,28 @@ async def _write_fence(
     return payload
 
 
+async def _observe_head_catalog(module: ModuleType, admin_dsn: str) -> str:
+    """live DB의 head 상태 catalog digest — 실제 root 설치가 receipt에 적는 그 값."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    contract_module = module._load_database_contract_module()
+    engine = make_async_engine(admin_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"SET ROLE {module._DATABASE_OWNER}"))
+            await connection.execute(text("SET search_path = public, x_extension"))
+            return str(
+                await contract_module.contract_sha256(
+                    connection, "application-catalog.sql"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
 async def _insert_prior_root_receipt(
     module: ModuleType,
     admin_dsn: str,
@@ -186,8 +208,11 @@ async def _insert_prior_root_receipt(
         "journal_generation": fence["prior_fresh_migration_generation"],
         "database_identity": database_identity,
         "post_source_catalog_sha256": fence["source_catalog_sha256"],
-        # head 상태 관측값. baseline root에서는 source catalog/seed와 같다.
-        "post_head_catalog_sha256": fence["source_catalog_sha256"],
+        # head 상태는 **실제로 관측**한다. 봉인값을 그대로 적으면 head가 baseline
+        # root를 넘는 순간 fixture가 거짓말이 된다 — 실제 root 설치도 관측값을 적는다.
+        # finalize의 pre-ACL 검사가 이 값과 live 관측을 대조하므로, 여기서 지어낸 값은
+        # 그 대조에서 바로 드러난다(실제로 드러났다).
+        "post_head_catalog_sha256": await _observe_head_catalog(module, admin_dsn),
         "post_head_seed_sha256": fence["seed_sha256"],
         "post_seed_sha256": fence["seed_sha256"],
         "expected_privileged_residue_sha256": fence[
