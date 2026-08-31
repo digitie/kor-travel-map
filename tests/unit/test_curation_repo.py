@@ -1167,9 +1167,9 @@ async def test_preview_import_empty_counts_updates_and_removals() -> None:
 async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.MonkeyPatch) -> None:
     provenance = AsyncMock(
         side_effect=[
-            "00000000-0000-4000-8000-000000000090",
-            "00000000-0000-4000-8000-000000000091",
-            "00000000-0000-4000-8000-000000000092",
+            ("00000000-0000-4000-8000-000000000090", ()),
+            ("00000000-0000-4000-8000-000000000091", ()),
+            ("00000000-0000-4000-8000-000000000092", ()),
         ]
     )
     monkeypatch.setattr(repo, "_record_import_provenance", provenance)
@@ -1181,6 +1181,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         "removed": 0,
         "removals": (),
         "import_batch_id": "00000000-0000-4000-8000-000000000090",
+        "row_receipts": (),
     }
 
     rows = (
