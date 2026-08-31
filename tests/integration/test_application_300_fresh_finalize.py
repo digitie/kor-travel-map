@@ -223,13 +223,17 @@ async def _insert_prior_root_receipt(
                     "CAST(:operation_id AS uuid), 'application-root-300', "
                     "'kor-travel-map.application-fresh-300-root.v3', :result_sha256, "
                     ":map_commit, :map_image, :postgres_image, :fence_sha256, "
-                    ":journal_sha256, :journal_generation, '300', :database_name, "
+                    ":journal_sha256, :journal_generation, :destination_head, "
+                    ":database_name, "
                     ":database_oid, :database_owner, :system_identifier, "
                     "CAST(:result_payload AS jsonb))"
                 ),
                 {
                     "operation_id": fence["prior_fresh_migration_operation_id"],
                     "result_sha256": result_sha256,
+                    # 컬럼도 payload와 같은 파생 head다. 종전 리터럴 '300'은
+                    # payload(_EXPECTED_HEAD)와 어긋나 probe의 column 대조에서 죽었다.
+                    "destination_head": _EXPECTED_HEAD,
                     "map_commit": fence["map_candidate_commit"],
                     "map_image": fence["map_candidate_image_id"],
                     "postgres_image": fence["postgres_image_id"],
