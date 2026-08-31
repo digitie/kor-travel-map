@@ -1182,6 +1182,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         "removals": (),
         "import_batch_id": "00000000-0000-4000-8000-000000000090",
         "row_receipts": (),
+        "manual_children": (),
     }
 
     rows = (

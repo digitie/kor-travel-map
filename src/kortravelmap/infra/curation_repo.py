@@ -20,6 +20,15 @@ from sqlalchemy.engine import RowMapping
 
 from kortravelmap.core import make_feature_id
 from kortravelmap.core.address import normalize_korean_text
+from kortravelmap.curation_import_children import (
+    ParentCommandIdentity,
+    derive_child_command_identity,
+)
+from kortravelmap.infra.domain_command_repo import (
+    create_domain_command_claim,
+    create_domain_command_record,
+    lock_domain_command,
+)
 from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
     address_hint_matches,
@@ -569,6 +578,21 @@ class CurationImportRevisionExpectation:
 
 
 @dataclass(frozen=True, slots=True)
+class ManualImportChild:
+    """import 행 하나가 발급한 manual Feature child command의 확정 좌표.
+
+    부모 summary(설계 §6.3)는 요청 JSON이 아니라 이 값(그리고 `301` linkage 표)에서
+    순서대로 구성한다.
+    """
+
+    row_number: int
+    child_command_id: int
+    feature_id: str
+    feature_uuid: str
+    curation_item_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class ImportRowReceipt:
     """provenance 단계가 한 행에 대해 확정한 immutable 좌표.
 
@@ -598,6 +622,7 @@ class CurationImportResult(TypedDict):
     removals: tuple[CurationItem, ...]
     import_batch_id: str | None
     row_receipts: tuple[ImportRowReceipt, ...]
+    manual_children: tuple[ManualImportChild, ...]
 
 
 _COLLECTION_COUNT_NOTICE_FILTER_SQL: Final[str] = public_active_notice_filter_sql("count_pf")
@@ -6124,6 +6149,187 @@ async def _touch_curation_import_collection_command(
     return int(result["o_collection_revision"])
 
 
+def _manual_import_rows(
+    rows: Sequence[ResolvedCurationImportRow],
+) -> tuple[ResolvedCurationImportRow, ...]:
+    """typed manual payload가 실린 행만, 행 번호 순서로."""
+
+    return tuple(
+        sorted(
+            (row for row in rows if row.manual_feature is not None),
+            key=lambda row: row.row_number,
+        )
+    )
+
+
+async def _issue_manual_feature_children(
+    session: AsyncSession,
+    *,
+    manual_rows: Sequence[ResolvedCurationImportRow],
+    collections: Mapping[str, str],
+    actor: str,
+    parent: ParentCommandIdentity,
+    import_plan_id: str,
+    plan_sha256: str,
+) -> tuple[ManualImportChild, ...]:
+    """manual 행마다 결정적 identity의 child command를 발급하고 writer를 돌린다.
+
+    child 하나가 claim → Feature → origin → subtype → item → accepted decision을
+    소유한다(설계 §6.3). 하나라도 실패하면 예외로 전체 batch가 rollback된다(§6.4).
+    exact conflict(같은 identity의 manual Feature 존재)도 실패다 — 부분 성공한
+    import는 존재하지 않는다.
+    """
+
+    issued: list[ManualImportChild] = []
+    for row in manual_rows:
+        payload = row.manual_feature or {}
+        sha = row.manual_feature_sha256
+        if not sha:
+            raise ValueError(
+                f"manual 행 {row.row_number}: typed payload SHA가 없다 — "
+                "plan이 §6.1 이전 세대다. 다시 preview할 것."
+            )
+        identity = derive_child_command_identity(
+            parent=parent,
+            import_plan_id=import_plan_id,
+            plan_sha256=plan_sha256,
+            plan_row_number=row.row_number,
+            manual_payload_sha256=sha,
+        )
+        await lock_domain_command(
+            session,
+            actor=actor,
+            operation=identity.operation,
+            idempotency_key=str(identity.idempotency_key),
+        )
+        claim = await create_domain_command_claim(
+            session,
+            actor=actor,
+            operation=identity.operation,
+            idempotency_key=str(identity.idempotency_key),
+            request_fingerprint=identity.request_fingerprint,
+        )
+        coord = payload.get("coord") or {}
+        manual_feature = {
+            "kind": payload.get("kind"),
+            "category": payload.get("category"),
+            # Feature 이름은 place_name이 소유한다(§6.1). preview가 비어 있는
+            # place_name을 이미 거절했다.
+            "name": row.place_name,
+            # canonical SHA는 문자열 자릿수를 보존하지만, writer는 JSON number를
+            # 요구한다. float 왕복은 최단 표현으로 같은 십진값을 유지한다.
+            "coord": {
+                "lon": float(str(coord.get("lon"))),
+                "lat": float(str(coord.get("lat"))),
+            },
+        }
+        created = await create_manual_curation_item_with_feature_command(
+            session,
+            collection_id=collections[row.collection_key],
+            manual_feature=manual_feature,
+            external_item_id=row.source_item_key,
+            external_component_id=row.source_component_key,
+            place_name=row.place_name,
+            address_hint=row.address_hint,
+            sort_order=row.sort_order,
+            item_title=row.item_title,
+            item_summary=row.item_summary,
+            metadata=row.metadata,
+            command_id=claim.command_id,
+            principal=actor,
+        )
+        if isinstance(created, CurationManualFeatureExactDuplicate):
+            raise ValueError(
+                f"manual 행 {row.row_number}: 같은 identity의 manual Feature가 이미 "
+                f"있다(feature_uuid={created.existing_feature_uuid}). import는 부분 "
+                "성공하지 않는다 — 행을 feature_id 참조로 바꾸거나 좌표를 확인할 것."
+            )
+        issued.append(
+            ManualImportChild(
+                row_number=row.row_number,
+                child_command_id=claim.command_id,
+                feature_id=created.feature_id,
+                feature_uuid=created.feature_uuid,
+                curation_item_id=created.item.curation_item_id,
+            )
+        )
+    return tuple(issued)
+
+
+_RECORD_MANUAL_CHILD_SQL: Final = (
+    "CALL ops.record_curation_import_manual_feature_child("
+    "CAST(:import_plan_id AS uuid), :plan_row_number, :plan_sha256, "
+    ":manual_payload_sha256, :child_command_id, CAST(:feature_uuid AS uuid), "
+    "CAST(:import_row_id AS uuid), CAST(:curation_item_id AS uuid), "
+    "CAST(:link_decision_id AS uuid))"
+)
+
+
+async def _record_manual_children_linkage(
+    session: AsyncSession,
+    *,
+    issued: Sequence[ManualImportChild],
+    receipts: Mapping[int, ImportRowReceipt],
+    manual_rows: Mapping[int, ResolvedCurationImportRow],
+    import_plan_id: str,
+    plan_sha256: str,
+) -> None:
+    """child ↔ import receipt ↔ decision을 `301` linkage 표에 결박하고 child를 닫는다.
+
+    좌표는 이 transaction이 방금 확정해 돌려준 값(o_row_receipts)이다 — DB를 되짚어
+    추론하지 않는다. 결박의 정합(FK 일곱)은 표가 원자적으로 강제한다.
+    """
+
+    for child in issued:
+        receipt = receipts.get(child.row_number)
+        if receipt is None:
+            raise ValueError(
+                f"manual 행 {child.row_number}: apply가 행 좌표를 돌려주지 않았다 — "
+                "linkage를 결박할 수 없다(302 이전 procedure?)"
+            )
+        if receipt.curation_item_id != child.curation_item_id:
+            raise ValueError(
+                f"manual 행 {child.row_number}: writer가 만든 item과 import receipt의 "
+                "item이 다르다 — 같은 행이 두 item에 걸쳐 있다."
+            )
+        if receipt.accepted_link_decision_id is None:
+            raise ValueError(
+                f"manual 행 {child.row_number}: import decision이 accepted가 아니다 — "
+                "linkage evidence를 결박할 수 없다."
+            )
+        row = manual_rows[child.row_number]
+        await session.execute(
+            text(_RECORD_MANUAL_CHILD_SQL),
+            {
+                "import_plan_id": import_plan_id,
+                "plan_row_number": child.row_number,
+                "plan_sha256": plan_sha256,
+                "manual_payload_sha256": row.manual_feature_sha256,
+                "child_command_id": child.child_command_id,
+                "feature_uuid": child.feature_uuid,
+                "import_row_id": receipt.import_row_id,
+                "curation_item_id": receipt.curation_item_id,
+                "link_decision_id": receipt.accepted_link_decision_id,
+            },
+        )
+        # child terminal result — §6.3의 마지막 소유물. 외부 HTTP replay route는
+        # 없지만, immutable claim/result 짝은 다른 command와 같은 원장에 남긴다.
+        await create_domain_command_record(
+            session,
+            command_id=child.child_command_id,
+            response_status=201,
+            response_body={
+                "feature_id": child.feature_id,
+                "feature_uuid": child.feature_uuid,
+                "curation_item_id": child.curation_item_id,
+                "import_plan_id": import_plan_id,
+                "plan_row_number": child.row_number,
+                "plan_sha256": plan_sha256,
+            },
+            response_headers={},
+        )
+
+
 async def _apply_curation_import_items_command(
     session: AsyncSession,
     *,
@@ -6140,7 +6346,7 @@ async def _apply_curation_import_items_command(
             text(
                 "CALL feature.apply_curation_import_items_command("
                 "CAST(:items AS jsonb), :content_sha256, :batch_kind, "
-                ":command_id, :principal, NULL, NULL, NULL, NULL)"
+                ":command_id, :principal, NULL, NULL, NULL, NULL, NULL)"
             ),
             {
                 "items": json.dumps(list(items), ensure_ascii=False),
@@ -6169,6 +6375,22 @@ async def _apply_curation_import_items_command(
             .all()
         )
         removals = tuple(_item(row) for row in removal_rows)
+    raw_receipts = result["o_row_receipts"]
+    if isinstance(raw_receipts, str):
+        raw_receipts = json.loads(raw_receipts)
+    row_receipts = tuple(
+        ImportRowReceipt(
+            row_number=int(entry["row_number"]),
+            import_row_id=str(entry["import_row_id"]),
+            curation_item_id=str(entry["curation_item_id"]),
+            accepted_link_decision_id=(
+                str(entry["accepted_link_decision_id"])
+                if entry.get("accepted_link_decision_id") is not None
+                else None
+            ),
+        )
+        for entry in (raw_receipts or [])
+    )
     return {
         "rows": len(items),
         "collections": len({str(item["collection_id"]) for item in items}),
@@ -6177,11 +6399,10 @@ async def _apply_curation_import_items_command(
         "removed": len(removed_ids),
         "removals": removals,
         "import_batch_id": str(result["o_import_batch_id"]),
-        # 이 경로는 DB procedure가 행 반영을 통째로 소유하므로 행별 좌표를 돌려받지
-        # 못한다. 비우는 것이 정확하다 — 추측한 값을 채우면 `301` linkage가 잘못된
-        # import row에 결박된다. manual row를 이 경로로 보내면 child가 조용히 빠지므로,
-        # child를 발급하는 caller가 `row_receipts` 부재를 **거절**해야 한다.
-        "row_receipts": (),
+        # `302`부터 procedure가 행별 immutable 좌표를 직접 돌려준다 — caller는 DB를
+        # 되짚어 추론하지 않는다. `301` linkage가 이 셋을 결박한다.
+        "row_receipts": row_receipts,
+        "manual_children": (),
     }
 
 
@@ -6194,6 +6415,9 @@ async def import_curation_rows(
     batch_kind: str | None = None,
     frozen_h35_schema: bool = False,
     command_id: int | None = None,
+    parent_identity: ParentCommandIdentity | None = None,
+    import_plan_id: str | None = None,
+    plan_sha256: str | None = None,
 ) -> CurationImportResult:
     """검증·Feature 해소가 끝난 CSV 행을 한 transaction에서 멱등 upsert한다.
 
@@ -6205,6 +6429,12 @@ async def import_curation_rows(
     """
     _ensure_resolved_curation_identities(rows)
     _ensure_curation_dataset_identity(rows, frozen_h35_schema=frozen_h35_schema)
+    manual_rows = _manual_import_rows(rows)
+    if manual_rows and (command_id is None or frozen_h35_schema):
+        # manual Feature 생성은 child command·writer·linkage가 한 transaction에서
+        # 함께 확정돼야 한다(설계 §6). command 없는 경로로 보내면 item이 feature
+        # 없이 만들어져 계보가 조용히 끊긴다.
+        raise ValueError("manual Feature 행은 command 경로에서만 반영할 수 있습니다.")
     collections: dict[str, str] = {}
     created_collections: set[str] = set()
     before_item_hashes: dict[str, str] = {}
@@ -6396,7 +6626,26 @@ async def import_curation_rows(
                 [_canonical_import_row_payload(row) for row in rows]
             )
         )
-        return await _apply_curation_import_items_command(
+        issued: tuple[ManualImportChild, ...] = ()
+        if manual_rows:
+            if parent_identity is None or import_plan_id is None or plan_sha256 is None:
+                raise ValueError(
+                    "manual 행은 부모 command identity와 plan 결박(import_plan_id·"
+                    "plan_sha256)이 있어야 child를 발급할 수 있습니다 — plan commit "
+                    "경로로만 import할 것."
+                )
+            # child writer가 item을 먼저 만들어야 apply의 provenance가 그 item을
+            # 관측한다. apply는 manual 행의 item upsert를 건너뛴다(302).
+            issued = await _issue_manual_feature_children(
+                session,
+                manual_rows=manual_rows,
+                collections=collections,
+                actor=principal,
+                parent=parent_identity,
+                import_plan_id=import_plan_id,
+                plan_sha256=plan_sha256,
+            )
+        result = await _apply_curation_import_items_command(
             session,
             items=item_values,
             actor=principal,
@@ -6404,6 +6653,21 @@ async def import_curation_rows(
             batch_kind=batch_kind or "normalized_rows",
             command_id=command_id,
         )
+        if issued:
+            assert import_plan_id is not None and plan_sha256 is not None
+            await _record_manual_children_linkage(
+                session,
+                issued=issued,
+                receipts={
+                    receipt.row_number: receipt
+                    for receipt in result["row_receipts"]
+                },
+                manual_rows={row.row_number: row for row in manual_rows},
+                import_plan_id=import_plan_id,
+                plan_sha256=plan_sha256,
+            )
+        result["manual_children"] = issued
+        return result
     counts = {"inserted": 0, "updated": 0, "removed": 0}
     removals: tuple[CurationItem, ...] = ()
     if item_values:
@@ -6510,4 +6774,5 @@ async def import_curation_rows(
         "removals": removals,
         "import_batch_id": import_batch_id,
         "row_receipts": row_receipts,
+        "manual_children": (),
     }

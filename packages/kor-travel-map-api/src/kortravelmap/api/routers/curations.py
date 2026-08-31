@@ -23,6 +23,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import Response
+from kortravelmap.curation_import_children import ParentCommandIdentity
 from kortravelmap.curation_import import (
     CURATION_CSV_HEADERS,
     CURATION_CSV_MAX_BYTES,
@@ -710,6 +711,23 @@ class CurationImportRowView(BaseModel):
     issues: list[CurationImportIssueView]
 
 
+class CurationImportManualChildView(BaseModel):
+    """import 행 하나가 발급한 manual Feature child의 확정 좌표(설계 §6.3).
+
+    부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로
+    구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을
+    영구 결박한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    row_number: int
+    child_command_id: int
+    feature_id: str
+    feature_uuid: UUID
+    curation_item_id: UUID
+
+
 class CurationImportData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -729,6 +747,7 @@ class CurationImportData(BaseModel):
     removals: list[AdminCurationItemView]
     items: list[CurationImportRowView]
     issues: list[CurationImportIssueView]
+    manual_children: list[CurationImportManualChildView] = Field(default_factory=list)
 
 
 class CurationImportResponse(BaseModel):
@@ -2245,6 +2264,16 @@ async def commit_admin_curation_import_plan(
                 source_content_sha256=content_sha256,
                 batch_kind="csv_upload",
                 command_id=command.command_id,
+                # child idempotency identity는 잠긴 부모의 4축과 immutable plan
+                # 결박에서 결정적으로 유도된다(설계 §6.2).
+                parent_identity=ParentCommandIdentity(
+                    actor=command.actor,
+                    operation=command.operation,
+                    idempotency_key=command.idempotency_key,
+                    request_fingerprint=command.request_fingerprint,
+                ),
+                import_plan_id=str(import_plan_id),
+                plan_sha256=plan_sha256,
             )
             import_batch_id = result["import_batch_id"]
             if import_batch_id is None:
@@ -2279,6 +2308,16 @@ async def commit_admin_curation_import_plan(
                     removals=[_admin_item_view(item) for item in result["removals"]],
                     items=item_views,
                     issues=issues,
+                    manual_children=[
+                        CurationImportManualChildView(
+                            row_number=child.row_number,
+                            child_command_id=child.child_command_id,
+                            feature_id=child.feature_id,
+                            feature_uuid=UUID(child.feature_uuid),
+                            curation_item_id=UUID(child.curation_item_id),
+                        )
+                        for child in result["manual_children"]
+                    ],
                 ),
                 meta=make_meta(request, started_at=started_at),
             )

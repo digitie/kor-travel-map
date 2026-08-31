@@ -11208,6 +11208,13 @@
             "title": "Items",
             "type": "array"
           },
+          "manual_children": {
+            "items": {
+              "$ref": "#/components/schemas/CurationImportManualChildView"
+            },
+            "title": "Manual Children",
+            "type": "array"
+          },
           "plan_etag": {
             "title": "Plan Etag",
             "type": "string"
@@ -11349,6 +11356,43 @@
           "message"
         ],
         "title": "CurationImportIssueView",
+        "type": "object"
+      },
+      "CurationImportManualChildView": {
+        "additionalProperties": false,
+        "description": "import 행 하나가 발급한 manual Feature child의 확정 좌표(설계 §6.3).\n\n부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로\n구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을\n영구 결박한다.",
+        "properties": {
+          "child_command_id": {
+            "title": "Child Command Id",
+            "type": "integer"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
+            "type": "string"
+          },
+          "row_number": {
+            "title": "Row Number",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row_number",
+          "child_command_id",
+          "feature_id",
+          "feature_uuid",
+          "curation_item_id"
+        ],
+        "title": "CurationImportManualChildView",
         "type": "object"
       },
       "CurationImportResponse": {

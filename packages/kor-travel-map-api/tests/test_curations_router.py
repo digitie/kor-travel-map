@@ -426,6 +426,7 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
             ),
             "import_batch_id": "55555555-5555-4555-8555-555555555555",
             "row_receipts": (),
+            "manual_children": (),
         }
 
     async def _preview(_session: object, **_kwargs: Any) -> CurationImportPlan:
@@ -706,6 +707,7 @@ def test_official_lighthouse_import_persists_validated_row_provenance(
             "removals": (),
             "import_batch_id": "55555555-5555-4555-8555-555555555555",
             "row_receipts": (),
+            "manual_children": (),
         }
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
@@ -1005,6 +1007,7 @@ def test_csv_accepts_mixed_component_resolution(
             "removals": (),
             "import_batch_id": "55555555-5555-4555-8555-555555555555",
             "row_receipts": (),
+            "manual_children": (),
         }
 
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
