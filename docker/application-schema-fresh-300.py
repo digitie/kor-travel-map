@@ -579,27 +579,37 @@ async def _assert_exact_destination_version(
         raise FreshMigrationError(
             "fresh migration did not produce the exact expected raw revision"
         )
-    if _DESTINATION_HEAD == BASELINE_ROOT_REVISION:
-        # head가 baseline root 그대로면 여기서 곧바로 대조한다(종전 동작과 동일).
-        if destination_facet != expected_destination_facet:
-            raise FreshMigrationError(
-                "fresh 300 migration destination facet does not match baseline"
-            )
-        return destination_facet
-    # head가 baseline root를 넘어선 경우, 이 facet SQL은 **여기서 의미가 없다.**
-    # 계약 SQL은 단일 행으로 `…v1`(모든 조건 충족) 또는 `…mismatch`만 내는데, 그
-    # 조건에 `alembic_version = ARRAY['300']`이 들어 있다. 즉 child migration이 붙은
-    # DB에는 **옮겨갈 digest가 존재하지 않는다** — 계약 자체가 baseline root 전용
-    # 단언이고, 그 파일은 reference manifest digest로 봉인돼 편집할 수 없다.
-    #
-    # 그래서 봉인은 `alembic/env.py`의 `on_version_apply` 콜백이 **`300` 도달 순간**에
-    # 수행한다(version row가 `300`이고 다음 step은 아직 돌지 않은 시점). 그 콜백이
-    # 돌지 않은 fresh 설치는 env.py가 raise하므로, 여기서 봉인을 건너뛴다고 검증이
-    # 사라지지 않는다 — 옮긴 것이지 없앤 것이 아니다.
-    #
-    # receipt에는 종전과 같은 의미의 값(=봉인이 통과했음을 뜻하는 baseline digest)을
-    # 남긴다. head 자체의 정확성은 위 `versions` 동등성이 강제한다.
-    return expected_destination_facet
+    if _DESTINATION_HEAD != BASELINE_ROOT_REVISION:
+        # **head를 baseline root 너머로 올리려면 배포 계약 자체를 확장해야 한다.**
+        #
+        # sealed baseline(`alembic/baseline/*.sha256`)은 `300` 시점의 물리 catalog와
+        # `alembic_version` facet을 고정한다. facet 계약 SQL은 조건에
+        # `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이라, head가 움직이면
+        # 언제나 `…mismatch` 한 값만 낸다 — 옮겨갈 digest가 존재하지 않는다. catalog도
+        # 새 migration이 객체를 더하는 순간 baseline digest와 어긋난다.
+        #
+        # 그래서 이 자리에서 "facet 대조를 건너뛰고 baseline digest를 receipt에 적는"
+        # 우회를 한 적이 있는데, 그것은 실패를 downstream으로 미룰 뿐이었다.
+        # `application-schema-fresh-finalize.py:418`과
+        # `application-schema-final-permit.py:602`가 **live DB를 같은 baseline digest와**
+        # 다시 대조하므로, fresh 설치가 통과해도 프로덕션 API/Dagster 컨테이너가
+        # 기동을 거부한다.
+        #
+        # 올바른 해법은 계약을 baseline 너머로 **확장**하는 것이다 — baseline digest는
+        # `300` 도달 순간에만 대조하고, 그 이후 상태는 fresh-install operation receipt가
+        # 관측 digest를 정본으로 남겨 finalize·final-permit이 그것과 대조한다. receipt는
+        # 이미 fence → journal → Manager evidence로 결박돼 있으므로 신뢰 사슬은 끊기지
+        # 않는다. 그 작업이 끝나기 전까지는 **조용히 통과시키지 않는다.**
+        raise FreshMigrationError(
+            "application head is beyond the sealed baseline root; the deployment "
+            "contract must be extended past the baseline before a migration can "
+            "ship (see docs/reports/m03-child-migration-blast-radius-2026-08-31.md)"
+        )
+    if destination_facet != expected_destination_facet:
+        raise FreshMigrationError(
+            "fresh 300 migration destination facet does not match baseline"
+        )
+    return destination_facet
 
 
 async def _acquire_operation_lock(connection: AsyncConnection) -> None:

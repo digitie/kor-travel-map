@@ -3056,25 +3056,7 @@ async def test_feature_curation_lookup_uses_membership_index(
 
     public_lookup_indexes = index_names(plan)
     assert "idx_curation_items_feature_status_collection" in public_lookup_indexes
-    # link decision 쪽은 **이름이 아니라 성질**로 단언한다.
-    #
-    # 이 표는 이 테스트에서 1행이고 `ANALYZE` 대상이 아니라 `reltuples = -1`이다.
-    # 그 상태에서 planner가 고르는 인덱스는 tie-break이고, 그 표에 **아무 인덱스나**
-    # 하나 생기면(`ALTER TABLE … ADD CONSTRAINT … UNIQUE`가 인덱스를 빌드하면서
-    # `pg_class.relpages/reltuples`를 갱신한다) correlated SubPlan이 `hashed SubPlan`으로
-    # decorrelate되며 다른 인덱스가 선택된다. M03과 무관한 더미 인덱스 하나로도 재현되고,
-    # `ANALYZE feature.curation_link_decisions` 한 번이면 다시 같아진다 — 즉 종전
-    # 이름 고정은 조회 경로가 아니라 통계 상태를 박아둔 것이었다.
-    #
-    # 보장하려는 것은 "trusted-link 조회가 seq scan으로 떨어지지 않는다"이므로 그것을
-    # 그대로 단언한다.
-    link_decision_indexes = {
-        name for name in public_lookup_indexes if "curation_link_decisions" in name
-    }
-    assert link_decision_indexes, (
-        "trusted-link 조회가 curation_link_decisions 인덱스를 하나도 쓰지 않았다: "
-        f"{sorted(public_lookup_indexes)}"
-    )
+    assert "idx_curation_link_decisions_item_time" in public_lookup_indexes
 
     match_plan = (
         await migrated_session.execute(

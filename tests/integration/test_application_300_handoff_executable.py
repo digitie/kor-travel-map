@@ -16,7 +16,7 @@ from alembic.config import Config
 from sqlalchemy import text
 
 from tests.integration._application_300_bootstrap import (
-    upgrade_head_with_application_300_bootstrap,
+    upgrade_baseline_root_with_application_300_bootstrap,
 )
 from tests.integration.test_alembic_metadata_consistency import (
     _HANDOFF_SOURCE,
@@ -202,7 +202,13 @@ async def _database_identity(dsn: str) -> tuple[str, int, str, str]:
 async def application_300_config(
     pg_container: object,
 ) -> AsyncIterator[tuple[Config, str]]:
-    """executable 전용 fresh `300` DB를 만들고 teardown한다."""
+    """executable 전용 fresh `300` DB를 만들고 teardown한다.
+
+    **head가 아니라 baseline root에서 멈춘다.** 이 파일의 모든 테스트는
+    `0236 → 300` handoff를 검증하고, handoff 계약은 exact physical catalog/seed
+    facet을 대조한다. child migration이 붙은 DB는 실제 `0236` source를 재현하지
+    못하므로 대조가 무의미해진다.
+    """
 
     from kortravelmap.infra.db import normalize_async_dsn
 
@@ -214,7 +220,7 @@ async def application_300_config(
     config.set_main_option("script_location", str(_ROOT / "alembic"))
     config.set_main_option("sqlalchemy.url", admin_dsn)
     try:
-        await upgrade_head_with_application_300_bootstrap(config, admin_dsn)
+        await upgrade_baseline_root_with_application_300_bootstrap(config, admin_dsn)
         yield config, admin_dsn
     finally:
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')

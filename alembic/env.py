@@ -407,8 +407,21 @@ def do_run_migrations(connection: Connection) -> None:
     # 콜백 안에서는 version row가 이미 `300`이고 다음 step은 아직 돌지 않았다 —
     # 정확히 필요한 checkpoint다.
     facet_verified: list[str] = []
+    fresh_install: list[bool] = []
 
     def _seal_baseline_root_destination(**kwargs: object) -> None:
+        # **fresh 설치에서만** 봉인한다. 콜백은 `300`에 닿는 모든 step에서 불리는데,
+        # `0236 → 300` handoff도 그 중 하나다. handoff는 stamp 직후에 아직
+        # `ktm_feature_runtime` SELECT GRANT를 주지 않았고, 계약 SQL은
+        # `has_table_privilege('ktm_feature_runtime', …)`와 `8 = count(aclexplode(relacl))`를
+        # 요구하므로 그 시점엔 반드시 `mismatch`다. handoff는 GRANT 뒤에 **스스로**
+        # 같은 facet을 대조한다(`transition-...:1552`). 여기서 또 보면 다리가 막힌다.
+        #
+        # 종전 조건(`raw_heads_before == () and raw_heads_after == ("300",)`)도 fresh
+        # 설치만 봉인했다. 그 의미를 그대로 유지하되, 뒤 절이 head와 함께 움직이며
+        # 검증을 조용히 끄던 성질만 없앤다.
+        if not fresh_install:
+            return
         heads = kwargs.get("heads")
         if not isinstance(heads, set) or heads != {_BASELINE_300_REVISION}:
             return
@@ -448,6 +461,8 @@ def do_run_migrations(connection: Connection) -> None:
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
         connection.execute(text("SET search_path = public, x_extension"))
         raw_heads_before = _raw_alembic_heads(connection)
+        if raw_heads_before == ():
+            fresh_install.append(True)
         context.run_migrations()
         raw_heads_after = _raw_alembic_heads(connection)
         if raw_heads_before == () and not facet_verified:
