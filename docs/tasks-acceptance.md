@@ -54,8 +54,11 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   committed generation에서는 data-dependent/consumer acceptance만 순서대로 진행한다.
 
   **배리어 해제 조건.** 종전의 B1~B3(head·OpenAPI·image 입력에 대한 "미반영 변경이
-  없을 것")는 **삭제했다** — 같은 문단의 실행 시점 대조가 셋을 정확히 덮는다(B1↔schema
-  head, B2↔OpenAPI SHA, B3↔candidate SHA·image ID). 사람이 "미반영 변경 없음"을
+  없을 것")는 **삭제했다** — 같은 문단의 실행 시점 대조가 셋을 정확히 덮는다. 덮임의
+  실제 메커니즘(R1-S7 정밀화): B1은 schema head equality, B2는 source pair preflight
+  (`_source_pair_preflight`)가 대조하는 **pinned-release OpenAPI blob SHA**, B3은
+  **`pinset_sha256` equality**(candidate SHA와 일곱 image ID를 한 digest로 결박)다.
+  사람이 "미반영 변경 없음"을
   선언하는 조건은 검증 불가능한 채로 매 병합마다 배리어를 다시 닫아 반복 단가만 키웠다
   (`docs/reports/map-stall-root-cause-2026-08-31.md` §2·§3 I-3, 적대 검증 STRENGTHENED).
   판정은 아래 한 문장이 소유한다.
@@ -875,7 +878,7 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
 - [x] B3. 후속 candidate가 Map health를 통과한다. 2026-08-30 Compose `!override` 보정
   이후 phase가 `map_subscription_http_failed` → `runtime_command_failed` → PinVi 경계로
   전진했다.
-- [x] B4. Map `/health`의 성공 종료 관측 의무는 그 사건을 소유한
+- (귀속) B4. Map `/health`의 성공 종료 관측 의무는 그 사건을 소유한
   `T-VN-M05-ACTIVATION`의 A3에 귀속했다 — 같은 사건 하나를 두 task가 각자 기다리는
   중복 부기였다(`docs/reports/map-stall-root-cause-2026-08-31.md` §3 I-6).
 
@@ -888,7 +891,7 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
   재실행 금지 목록과 함께 보존한다.
 - [x] C2. Manager `03a3300…`이 모든 runtime pin mutation을 active global mutation에서
   거절하고 trusted launcher의 inherited-lock fallback만 허용한다.
-- [x] C3. 후속 candidate에서 admission 경계 통과가 확인됐다 — 2026-08-30 Compose
+- (귀속) C3. 후속 candidate에서 admission 경계 통과가 확인됐다 — 2026-08-30 Compose
   `!override` 보정 이후 admission을 넘어 Map subscription·PinVi runtime까지 도달했다.
   성공 종료 receipt로의 최종 고정 의무는 그 사건을 소유한 `T-VN-M05-ACTIVATION` A3에
   귀속했다(중복 부기 해소, 위 MAP-HEALTH-TRANSPORT B4와 같은 근거).

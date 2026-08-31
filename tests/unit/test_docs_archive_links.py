@@ -94,22 +94,22 @@ def test_archive_markdown_files_stay_within_readable_limit() -> None:
     )
 
 
-def test_live_journal_and_resume_stay_within_readable_limit() -> None:
-    """규약 §8은 live 문서 분리를 요구하는데 게이트는 archive만 보고 있었다.
+def test_every_docs_markdown_stays_within_readable_limit() -> None:
+    """규약 §8의 분리 의무는 docs 전체에 걸린다 — 이름 열거는 다음 사각지대를 만든다.
 
-    그 사각지대에서 journal.md가 568KB, resume.md가 376KB까지 자랐고 — 에이전트
-    read 한도(256KB)를 넘어 통째로 읽히지 않았다. 정체 근본원인 감사에서 세 분석가가
-    모두 이 두 파일을 1차 근거로 삼았으므로, 이 결함은 진단 품질의 상류 원인이다
+    이름 열거(journal.md, resume.md)의 사각지대에서 tasks-done.md가 374KB까지
+    자랐다(적대 리뷰 R2-S8) — 에이전트 read 한도(256KB)를 넘으면 통째로 읽히지
+    않고, 그 문서가 판정 근거일 때 진단 품질의 상류 원인이 된다
     (`docs/reports/map-stall-root-cause-2026-08-31.md` §3 I-7c).
     """
-    live = pathlib.Path(__file__).resolve().parents[2] / "docs"
+    docs = pathlib.Path(__file__).resolve().parents[2] / "docs"
     oversized = [
-        f"docs/{name} = {(live / name).stat().st_size:,} bytes"
-        for name in ("journal.md", "resume.md")
-        if (live / name).stat().st_size > _MAX_ARCHIVE_BYTES
+        f"{document.relative_to(docs.parent)} = {document.stat().st_size:,} bytes"
+        for document in sorted(docs.rglob("*.md"))
+        if document.stat().st_size > _MAX_ARCHIVE_BYTES
     ]
 
     assert not oversized, (
-        f"live 문서가 {_MAX_ARCHIVE_BYTES:,} bytes를 넘었다 — 규약 §8대로 "
+        f"docs Markdown이 {_MAX_ARCHIVE_BYTES:,} bytes를 넘었다 — 규약 §8대로 "
         "docs/archive/로 분리할 것:\n" + "\n".join(oversized)
     )

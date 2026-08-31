@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — 적대 리뷰 라운드2: 원장 게이트 3종을 파싱 정본 위에 재작성
+
+라운드1 게이트는 각자 다른 구멍을 갖고 있었다 — 삭제 게이트는 diff 줄 정규식이라
+bold/들여쓰기/fence를 못 봤고(R2-S3/S6), coverage 게이트의 covered()는 substring이라
+부모 섹션의 산문 언급으로 우회됐고(R2-S2), 사이즈 게이트는 이름 열거라 그 사각지대에서
+`tasks-done.md`가 374KB까지 자랐다(R2-S8).
+
+수리: (1) `scripts/task_ledger_lint.py` — fence/HTML 주석 제외·malformed 표기
+fail-closed·bold/backtick 허용 ID 추출을 가진 **파싱 단일 정본**. 게이트 전부 이걸
+import한다. (2) 삭제 게이트는 diff 줄이 아니라 **base/HEAD 전체 파일의 체크박스 집합
+비교**로 전환 — tasks.md 삭제는 done의 `[x]` 실질 엔트리(stub 거부, 40자), acceptance
+삭제는 추가 줄의 ID 명시(삭제 근거)를 요구하고, `tasks-acceptance.md`도 감시한다(R2-S7).
+push 이벤트 base는 `github.event.before` 우선(all-zero면 origin/main 폴백, R2-S11).
+(3) covered()는 정확-토큰 + **list 항목 선언**만 인정(연속 들여쓰기 줄 포함) — 산문
+언급·부정문은 덮임이 아니다. (4) 사이즈 게이트는 `docs/**/*.md` rglob. `tasks-done.md`는
+2026-08 live + 아카이브 2샤드로 분리했다. (5) journal 훅은 당월 shard + 추가 줄>0만
+기록으로 인정(R2-S10). (6) 배리어 덮임 주장은 실제 메커니즘 이름(B2↔pinned-release
+OpenAPI blob SHA, B3↔pinset_sha256 equality)으로 정밀화하고(R1-S7), 귀속 부기 B4/C3의
+체크박스를 해제했다(R1-S11 — `[x]`는 "기준 충족"으로 읽힌다).
+
+검증: 뮤테이션 4종(무이관 삭제·미언급 기준 삭제·fence 은닉·malformed 표기)과 coverage
+뮤테이션 3종(헤딩 제거·산문 언급·list 선언)을 실제로 주입해 전부 잡히는 것을 확인했다.
+
 ## 2026-08-31 — 정체 근본원인 감사와 채택 개선 (5-agent 워크플로우)
 
 분석 3인(타임라인 포렌식 / 결박 전수 / 트레드밀 구조) + 적대 리뷰 2인이 진단 4건을

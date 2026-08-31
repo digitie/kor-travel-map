@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +24,10 @@ TASKS = REPO_ROOT / "docs" / "tasks.md"
 TASKS_DONE = REPO_ROOT / "docs" / "tasks-done.md"
 ACCEPTANCE = REPO_ROOT / "docs" / "tasks-acceptance.md"
 
-_ITEM_RE = re.compile(r"^- \[(?P<marker>.)\] (?P<task>T-[A-Z0-9-]+)", re.MULTILINE)
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from task_ledger_lint import parse_checkboxes  # noqa: E402
+
 _ALLOWED_MARKERS = frozenset({" ", "~"})
 """``docs/tasks-rule.md`` §4는 ``[ ]``·``[x]``·``[~]`` 셋을 정의한다.
 
@@ -33,8 +37,18 @@ _ALLOWED_MARKERS = frozenset({" ", "~"})
 
 
 def _items() -> list[tuple[str, str]]:
+    """활성 원장의 (marker, task) 목록 — 파싱 정본은 scripts/task_ledger_lint.py.
+
+    종전 정규식은 열 0의 non-bold 항목만 봤다(R2-S2) — 들여쓰기·bold·backtick
+    변형이 세 테스트 전부에서 보이지 않았다. 공유 파서는 fence/주석도 제외하고
+    malformed 표기는 오류로 만든다.
+    """
     text = TASKS.read_text(encoding="utf-8")
-    return [(m.group("marker"), m.group("task")) for m in _ITEM_RE.finditer(text)]
+    return [
+        (item.state, item.task_id)
+        for item in parse_checkboxes(text, source="docs/tasks.md")
+        if item.task_id is not None
+    ]
 
 
 def test_active_backlog_uses_defined_markers_only() -> None:
@@ -95,11 +109,39 @@ def test_every_open_task_has_recorded_acceptance_criteria() -> None:
         elif current is not None:
             sections[current] += line + "\n"
 
+    def exact_token(task: str, text: str) -> bool:
+        # `T-VN-M05`가 `T-VN-M05-ACTIVATION`의 substring으로 매칭되지 않게
+        # ID 문자 클래스([A-Z0-9-]) 경계를 직접 건다(R2-S2 — substring covered()).
+        return re.search(rf"(?<![A-Z0-9-]){re.escape(task)}(?![A-Z0-9-])", text) is not None
+
     def covered(task: str) -> bool:
-        if task in sections:
+        if any(exact_token(task, heading) for heading in sections):
             return True
         parent = task.rsplit("-", 1)[0]
-        return parent != task and task in sections.get(parent, "")
+        if parent == task:
+            return False
+        for heading, body in sections.items():
+            if not exact_token(parent, heading):
+                continue
+            # 덮임 선언은 list 항목이어야 한다 — 산문 속 우연 언급이나 "다루지
+            # 않는다" 부정문이 덮임으로 읽히지 않게 한다. 항목은 `- `로 시작하는
+            # 줄 + 그 들여쓰기 연속 줄(markdown continuation)로 구성된다.
+            item_lines: list[str] = []
+            in_item = False
+            for line in body.splitlines():
+                stripped = line.strip().lstrip(">").strip()
+                if stripped.startswith("- "):
+                    in_item = True
+                    item_lines.append(stripped)
+                elif in_item and line[:1].isspace() and stripped:
+                    item_lines.append(stripped)
+                elif not stripped:
+                    continue
+                else:
+                    in_item = False
+            if any(exact_token(task, line) for line in item_lines):
+                return True
+        return False
 
     missing = [task for task in open_tasks if not covered(task)]
     assert not missing, (
