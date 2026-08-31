@@ -51,9 +51,42 @@ def test_pre_commit_runner_uses_required_static_gates() -> None:
 @pytest.mark.unit
 def test_journal_hook_requires_journal_for_source_or_test_changes() -> None:
     module = _load_journal_module()
+    # 실제 staged diff 대신 주입 — journal이 스테이징돼 있고 실제로 줄이 추가된 상황.
+    added = lambda path: 3  # noqa: E731
 
-    assert module.requires_journal_update(["src/kortravelmap/dto.py"])
-    assert module.requires_journal_update(["tests/unit/test_dto.py"])
-    assert module.requires_journal_update(["packages/kor-travel-map-dagster/src/kortravelmap/x.py"])
-    assert not module.requires_journal_update(["src/kortravelmap/dto.py", "docs/journal.md"])
-    assert not module.requires_journal_update(["docs/tasks.md", "README.md"])
+    assert module.requires_journal_update(["src/kortravelmap/dto.py"], added_lines=added)
+    assert module.requires_journal_update(["tests/unit/test_dto.py"], added_lines=added)
+    assert module.requires_journal_update(
+        ["packages/kor-travel-map-dagster/src/kortravelmap/x.py"], added_lines=added
+    )
+    assert not module.requires_journal_update(
+        ["src/kortravelmap/dto.py", "docs/journal.md"], added_lines=added
+    )
+    assert not module.requires_journal_update(
+        ["docs/tasks.md", "README.md"], added_lines=added
+    )
+
+
+def test_journal_hook_rejects_zero_added_lines_and_stale_month_shards() -> None:
+    """이름만 스테이징(추가 0줄)이나 과거 달 shard 편집은 기록이 아니다(R2-S10)."""
+    import datetime
+
+    module = _load_journal_module()
+    none_added = lambda path: 0  # noqa: E731
+    some_added = lambda path: 5  # noqa: E731
+    month = datetime.date.today().strftime("%Y-%m")
+
+    # journal이 스테이징돼 있어도 추가 줄이 0이면 기록이 아니다.
+    assert module.requires_journal_update(
+        ["src/kortravelmap/dto.py", "docs/journal.md"], added_lines=none_added
+    )
+    # 당월 shard 추가 기록은 인정.
+    assert not module.requires_journal_update(
+        ["src/kortravelmap/dto.py", f"docs/archive/journal-{month}a.md"],
+        added_lines=some_added,
+    )
+    # 과거 달 shard는 인정하지 않는다.
+    assert module.requires_journal_update(
+        ["src/kortravelmap/dto.py", "docs/archive/journal-2026-05a.md"],
+        added_lines=some_added,
+    )

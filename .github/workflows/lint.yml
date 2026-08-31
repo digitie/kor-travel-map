@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # task 원장 삭제 게이트가 base와의 diff를 본다.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -28,6 +31,14 @@ jobs:
             pyproject.toml
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
+
+      - name: task 원장 체크박스 삭제 게이트
+        # tasks.md에서 체크박스 줄이 삭제되면 tasks-done.md 이관이 함께 있어야 한다.
+        # 선례: 6d671ef1 평면화가 해제 조건을 지운 다음 날 완료 처리가 일어났다.
+        # push 이벤트에서 origin/main과 HEAD가 같으면 diff가 비어 게이트가 no-op이
+        # 된다(R2-S11) — push에는 event.before(직전 tip)를 첫 후보로 준다. 브랜치
+        # 생성 등으로 before가 all-zero면 스크립트가 origin/main으로 내려간다.
+        run: python scripts/check_task_ledger_deletions.py "${{ github.event.before || '' }}" "origin/${{ github.base_ref || 'main' }}"
 
       - name: docs prod-endpoint redaction guard (#508)
         # 커밋된 docs에 prod 도메인(digitie.mywire.org)·사설 호스트 IP(192.168.x.x)가
