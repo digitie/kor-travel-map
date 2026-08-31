@@ -7,6 +7,7 @@ import datetime
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 
 JOURNAL_PATH = "docs/journal.md"
 
@@ -39,17 +40,21 @@ def _added_line_count(path: str) -> int:
     return total
 
 
-def requires_journal_update(paths: list[str]) -> bool:
+def requires_journal_update(
+    paths: list[str],
+    *,
+    added_lines: "Callable[[str], int]" = _added_line_count,
+) -> bool:
     normalized_paths = {normalize_path(path) for path in paths}
     # 이름만 스테이징돼 있고 추가 줄이 0이면(삭제/공백 정리) 기록이 아니다(R2-S10).
-    if JOURNAL_PATH in normalized_paths and _added_line_count(JOURNAL_PATH) > 0:
+    if JOURNAL_PATH in normalized_paths and added_lines(JOURNAL_PATH) > 0:
         return False
     # 규약 §8 분리 직후에는 **당월** archive shard에 쓰는 것도 기록이다 — 이걸
     # 인정하지 않으면 hook이 분리하자마자 live 파일을 도로 부풀린다. 과거 달 shard는
     # 기록이 아니라 아카이브 정리다(R2-S10 — 임의 shard로 hook을 만족하던 구멍).
     month = datetime.date.today().strftime("%Y-%m")
     if any(
-        path.startswith(f"docs/archive/journal-{month}") and _added_line_count(path) > 0
+        path.startswith(f"docs/archive/journal-{month}") and added_lines(path) > 0
         for path in normalized_paths
     ):
         return False

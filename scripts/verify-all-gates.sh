@@ -204,6 +204,7 @@ echo "===== lint.yml"
 # 이 스크립트는 `git ls-files`를 쓴다. 워크트리의 `.git`이 Windows 경로를 담고 있어
 # WSL/컨테이너에서는 "not a git repository"로 죽는다 — Git Bash 쪽에서 돌려야 한다.
 run_gate "check_prod_redaction" host_py 'python scripts/check_prod_redaction.py'
+run_gate "task 원장 삭제 게이트" host_py 'python scripts/check_task_ledger_deletions.py "" origin/main'
 run_gate "ruff check (CI 경로)" py 'python -m ruff check src tests packages/kor-travel-map-api/src packages/kor-travel-map-api/tests packages/kor-travel-map-dagster/src packages/kor-travel-map-dagster/tests'
 run_gate "mypy core"    py 'python -m mypy --strict -p kortravelmap'
 run_gate "mypy api"     py 'python -m mypy --strict -p kortravelmap.api'
