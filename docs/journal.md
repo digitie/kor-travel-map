@@ -1,5 +1,40 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — 적대 리뷰 2인(opus·xhigh)의 16건 실측 발견과 수리
+
+두 리뷰어가 전부 **실행으로** 검증했다(n150 실 DB probe, 뮤테이션 주입, TestClient).
+CONFIRMED HIGH 2건이 특히 무거웠다.
+
+- **F1 부팅 실패**: 302의 recorder EXECUTE grant가 ADR-090 preflight의 exact-set을
+  깨서 head=302 DB에서 API가 기동 불가였다(compose는 preflight 강제). 격리 live
+  green이 이 게이트를 통과한 증거가 아니었다 — 스택이 preflight를 안 켰던 것.
+  db.py 허용 목록에 recorder를 추가했다.
+- **F2 kill-switch 우회**: import preview/commit이 단건 manual 생성의
+  kill-switch·전용 token을 우회했다. 조건부 가드(assert_manual_feature_create_for_import)
+  + BFF의 import 경로 token 부착(구성 시)으로 닫았다.
+- **H1/H2/F3 재수렴**: '이미 반영된 manual 행이 든 CSV는 영구 재commit 불가(원문
+  DB 메시지 409)' + '완결성 검사가 이전 batch의 item으로도 통과' — 재수렴 설계로
+  해소: 같은 typed payload면 이전 child linkage를 재사용(reused=true), linkage 없는
+  동일 identity/payload 변경은 원인을 말하는 오류. coverage 가드가 no-op 발급을
+  중단시킨다. 통합 테스트가 재수렴(동일 child 재사용, linkage 1개 유지)을 실 DB로
+  검증한다.
+- **H3 recorder 교차검증**: FK 일곱을 전부 만족하는 '교차된' linkage가 통과하던
+  것을 5축(행번호↔receipt·plan payload digest·decision 종류·item↔feature·부모
+  actor) fail-close로 봉인.
+- **H4/F4 집계**: fresh 생성이 updated로 계상되던 것을 inserted로 보정(preview와
+  정합). **F5**: manual 행이 'unmatched/미연결로 남습니다'로 통보되던 것을
+  valid→imported(+resolved UUID)로. **F6**: manual_children.feature_id의 legacy
+  `f_*` 노출(신규 live spec이 그걸 못박고 있었다)을 UUID 정본 + reused·
+  terminal_status로 교체. **F7**: import child origin의 거짓 principal — CHECK
+  widen + writer CASE. **F9**: 좌표 서비스 범위(124~132/33~39.5)를 preview가 반환.
+  **F10/F11**: 자기참조 단언 실질화, manual_children 라우터 계약 테스트(뮤테이션
+  M2 검출). L7은 NOT VALID+VALIDATE로.
+- 부수 발견: **충돌 PR은 pull_request 워크플로가 조용히 0건**이다(merge ref 생성
+  불가) — #1127이 CI 침묵의 원인이었고 리베이스로 해소했다.
+
+수리 후: mypy --strict core/api·lint-imports·ruff green, M03 통합 3/3(재수렴 포함),
+격리 live acceptance 2/2(수리된 계약 — token 가드·UUID 뷰·inserted 보정 실측).
+
 ## 2026-08-31 — M03 격리 live acceptance green + 잠복 500 수리
 
 사상 첫 manual-create live harness가 n150 격리 스택(302 head)에서 완주했다:
