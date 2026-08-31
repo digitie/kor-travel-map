@@ -29,6 +29,8 @@ from kortravelmap.curation_import import (
     CURATION_INTEGER_MAX,
     CurationImportIssue,
     CurationImportRow,
+    manual_feature_payload,
+    manual_feature_payload_sha256,
     parse_curation_csv,
 )
 from kortravelmap.curation_provenance import (
@@ -1982,6 +1984,9 @@ async def preview_admin_curation_import(
                     f"{row.provider}/{row.dataset_key}"
                 ),
             )
+        # T-VN-M03 — 행이 manual Feature 생성을 지시하면 typed payload와 canonical
+        # SHA를 plan에 함께 굳힌다. child idempotency identity가 이 SHA에서 유도된다.
+        manual_payload = manual_feature_payload(row)
         resolved_rows.append(
             curation_repo.ResolvedCurationImportRow(
                 row_number=row.row_number,
@@ -2015,6 +2020,12 @@ async def preview_admin_curation_import(
                 item_summary=row.item_summary or None,
                 metadata=_import_metadata(row),
                 provenance=provenance_by_row.get(row.row_number),
+                manual_feature=manual_payload,
+                manual_feature_sha256=(
+                    manual_feature_payload_sha256(manual_payload)
+                    if manual_payload is not None
+                    else None
+                ),
             )
         )
         item_views.append(

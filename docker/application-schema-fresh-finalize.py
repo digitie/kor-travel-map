@@ -29,12 +29,14 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import (
     reconcile_runtime_privileges_in_transaction,
 )
 
-_DESTINATION_HEAD: Final = "300"
+#: finalize가 DB `alembic_version`에서 기대하는 revision. graph에서 파생한다.
+_DESTINATION_HEAD: Final = application_schema_head()
 _MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
 _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"

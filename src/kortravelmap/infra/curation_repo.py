@@ -529,6 +529,15 @@ class ResolvedCurationImportRow:
     source_component_key: str = "primary"
     provenance: dict[str, Any] | None = None
     frozen_h35_dataset: tuple[str, str] | None = None
+    manual_feature: dict[str, Any] | None = None
+    """T-VN-M03 — 이 행이 만들 manual Feature의 typed payload. 지시가 없으면 ``None``.
+
+    ``metadata``에 섞지 않는다. 설계 §6.1이 "``metadata_json``에 untyped input을 숨기지
+    않는다"를 요구하므로 typed 자리를 따로 둔다.
+    """
+
+    manual_feature_sha256: str | None = None
+    """``manual_feature``의 canonical SHA-256. child idempotency identity의 입력이다."""
 
 
 @dataclass(frozen=True)
@@ -5320,6 +5329,8 @@ def _canonical_import_row_payload(
         "item_title": row.item_title,
         "item_summary": row.item_summary,
         "metadata": row.metadata,
+        "manual_feature": row.manual_feature,
+        "manual_feature_sha256": row.manual_feature_sha256,
     }
 
 
@@ -5845,6 +5856,16 @@ def _resolved_import_row_from_payload(payload: Mapping[str, Any]) -> ResolvedCur
         ),
         metadata=dict(payload["metadata"]),
         provenance=(dict(payload["provenance"]) if payload.get("provenance") is not None else None),
+        manual_feature=(
+            dict(payload["manual_feature"])
+            if payload.get("manual_feature") is not None
+            else None
+        ),
+        manual_feature_sha256=(
+            str(payload["manual_feature_sha256"])
+            if payload.get("manual_feature_sha256") is not None
+            else None
+        ),
     )
 
 

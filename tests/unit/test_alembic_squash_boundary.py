@@ -22,6 +22,7 @@ _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
 _SOURCE_ORACLE = _ROOT / "scripts" / "create-application-0236-source-oracle.sh"
 _SOURCE_ORACLE_ARCHIVE_MANIFEST = "alembic/retired_versions/0200-0236/manifest.sha256"
+#: active graph가 가져야 하는 유일한 root. child migration은 이 위에 붙는다.
 _EXPECTED_REVISIONS = ("300",)
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
@@ -298,17 +299,35 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
 
 
 def test_active_graph_has_only_the_300_root() -> None:
+    """active graph의 root는 ``300`` **하나**이고, head도 하나여야 한다.
+
+    squash 직후에는 "revision이 300 하나뿐"과 "root가 300 하나뿐"이 같은 말이었다.
+    스키마가 진화하면 갈라지므로, 지키려는 성질(두 번째 root 금지, 분기 금지)로
+    단언한다 — revision 목록을 그대로 못 박으면 정상적인 child 추가가 막힌다.
+    """
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
-    revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents_by_revision = {
         str(_literal(path, "revision")): _literal(path, "down_revision") for path in paths
     }
 
-    assert revisions == _EXPECTED_REVISIONS
-    assert parents_by_revision == {"300": None}
-    assert json.loads(_GRAPH.read_text(encoding="utf-8"))["revisions"] == [
-        {"revision": "300", "down_revision": []}
-    ]
+    roots = sorted(rev for rev, parent in parents_by_revision.items() if parent is None)
+    assert roots == list(_EXPECTED_REVISIONS), (
+        f"active graph의 root는 {_EXPECTED_REVISIONS}뿐이어야 한다: {roots}"
+    )
+
+    referenced = {parent for parent in parents_by_revision.values() if parent is not None}
+    heads = sorted(set(parents_by_revision) - referenced)
+    assert len(heads) == 1, f"active graph는 단일 head여야 한다: {heads}"
+
+    graph = json.loads(_GRAPH.read_text(encoding="utf-8"))["revisions"]
+    assert {entry["revision"] for entry in graph} == set(parents_by_revision), (
+        "migration graph가 versions/ 와 어긋난다 — "
+        "`python scripts/generate_application_migration_graph.py --write`로 재생성할 것"
+    )
+    graph_roots = sorted(
+        entry["revision"] for entry in graph if not entry["down_revision"]
+    )
+    assert graph_roots == list(_EXPECTED_REVISIONS)
 
 
 def test_active_forward_only_boundary_allows_only_exact_handoff() -> None:

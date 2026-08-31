@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration._application_300_bootstrap import (
     bootstrap_application_300_roles,
     bootstrapped_application_300_migrator_dsn,
@@ -129,7 +130,7 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
             "map_candidate_commit": "a" * 40,
             "map_candidate_image_id": "sha256:" + "b" * 64,
             "postgres_image_id": expected["postgres_image_id"],
-            "destination_head": "300",
+            "destination_head": application_schema_head(),
             "reference_manifest_sha256": expected["reference_manifest_sha256"],
             "source_catalog_sha256": expected["source_catalog_sha256"],
             "destination_catalog_sha256": expected["destination_catalog_sha256"],

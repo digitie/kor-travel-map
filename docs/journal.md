@@ -1,5 +1,68 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — head 값 고정을 걷어내고, `301`이 왜 아직 못 올라가는지 실증했다
+
+`T-VN-M03`의 linkage migration을 올리자 무너진 것은 테스트 스냅샷이 아니라 **배포
+계약**이었다. `application_head = "300"`이 Map 6곳 + Manager 11곳에 리터럴로 박혀 있었고,
+같은 값의 사본이 서로 일치한다는 것을 아무것도 강제하지 않았다.
+
+**head를 파생값으로.** `application_schema_head()`가 migration graph에서 단일 head를
+유도하고 head가 0개거나 2개 이상이면 fail-close한다. 배포 executable 넷 + `env.py` +
+`api-entrypoint.sh` + `dagster-storage-migrate.py` + `run-admin-stack.sh`가 읽는다. `300`은
+`BASELINE_ROOT_REVISION`으로 이름을 따로 받아 남는다 — head가 아니라 역사적 좌표다.
+
+닫은 잠복 파손: `env.py`의 fresh 설치 facet 검증이 head가 움직이면 **조용히 꺼지던** 조건,
+`api-entrypoint.sh`의 프로덕션 기동 차단, `dagster-storage-migrate.py`의 DB 판정 arm,
+`run-admin-stack.sh`가 자기 DB를 거절하던 자리.
+
+### `301`은 왜 아직 못 올라가는가 — 통합 실행이 실증했다
+
+PostGIS 통합 6건 실패 중 둘이 결정적이다. sealed baseline(`alembic/baseline/*.sha256`)은
+`300` 시점의 물리 catalog와 `alembic_version` facet을 고정하는데, **세 지점이 live DB를 그
+digest와 exact 대조한다** — fresh installer `:940`, finalize `:418`, final-permit `:602`.
+
+facet 계약 SQL은 조건에 `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이라 head가
+움직이면 언제나 `mismatch` 한 값만 낸다. 옮겨갈 digest가 존재하지 않는다.
+
+내가 먼저 넣었던 우회 — facet 대조를 건너뛰고 baseline digest를 receipt에 그대로 적기 —
+는 **실패를 downstream으로 미룰 뿐이었다.** finalize와 final-permit이 같은 digest와 다시
+대조하므로, fresh 설치가 통과해도 프로덕션 API/Dagster 컨테이너가 기동을 거부한다. 이
+결함은 내가 만들었고 적대 리뷰가 잡았다.
+
+우회를 걷어내고 **fail-close**로 바꿨다 — head가 baseline root를 넘어서면 fresh 설치가
+거부된다. `301`은 계약을 baseline 너머로 확장하는 작업과 **함께** 올라가야 하므로
+`chain/301-carrier`에 분리해 보존한다.
+
+부수 확인: `on_version_apply` 봉인이 `0236 → 300` handoff에서도 불렸다. handoff는 stamp
+직후 아직 runtime GRANT를 주지 않았고 facet SQL이 그 ACL을 요구하므로 반드시 mismatch였다
+— handoff는 GRANT 뒤에 스스로 같은 facet을 대조하므로 중복이자 파손이었다. 봉인을 fresh
+설치로 한정했다. handoff fixture도 baseline root에서 멈추게 했다 — head까지 올린 DB는
+실제 `0236` source를 재현하지 못한다.
+
+### 게이트: "비교에 쓰였나"에서 "존재하나"로
+
+스캔을 `docker/` 넷 → 여섯 → 82개로 넓혔는데도 적대 리뷰가 **실행으로 열네 가지**를
+우회했다. `iterdir()`이 한 단계만 훑고, 확장자 `.py`/`.sh`만 열고, SQL 주석용
+`startswith("--")`가 CLI 장옵션 줄을 통째로 건너뛰고, 비교 토큰 목록이 있었다.
+
+결정적인 것은 마지막이다 — **리터럴과 비교를 다른 줄에 두는 것은 우회가 아니라 그냥
+평범한 코드다.** `EXPECTED_HEAD="300"` 다음 줄에 `!= "$EXPECTED_HEAD"`를 쓰면 어느 줄에도
+"리터럴 + 비교"가 없다. 그러니 "비교에 쓰였나"를 묻는 규칙은 원리적으로 완결될 수 없다.
+
+묻는 것을 바꿨다 — **리터럴이 존재하나.** 존재만 보면 토큰 목록도, 줄 단위 문맥도,
+포매터 reflow도 무관해진다. 훑는 대상도 `rglob` + 텍스트로 읽히는 모든 파일로 바꿔
+Dockerfile·compose·확장자 없는 실행 스크립트가 전부 들어온다. 정당한 baseline root
+언급만 파일 단위로 **사유와 함께** 면제하고, 죽은 면제·불필요한 면제도 실패다.
+
+Manager 쪽도 같은 규칙으로 바꿨다. 거기서는 `--wait-timeout "300"` 때문에 파일 단위 면제를
+뒀다가 그 면제가 곧바로 우회 통로가 됐고(상수 둘을 나란히 두면 통과), **초 단위 인자를
+정수 상수로** 바꿔 면제 자체를 없앴다 — head는 revision 문자열이라 형이 다르다.
+
+우회 형태를 하나씩 되짚어 확인했다: CLI 장옵션 · 변수 경유 · 하위 디렉터리 · Dockerfile
+`ENV` · 멤버십 튜플 · 확장자 없는 스크립트 · compose · Manager 새 모듈 · `services/` 밖 —
+전부 걸리고, 파생값만 쓰는 대조군은 통과한다. Manager `.env.example`에 오래 죽은 head
+`0084_c6c_cancel_probe_fixtures`가 실제로 박혀 있던 것도 이때 드러나 제거했다.
+
 ## 2026-08-30 — provider 핀 전수 동기화와 Protocol 적합성 게이트
 
 형제 `python-*-api` 18개를 핀↔HEAD로 전수 대조했다. 핀 11개를 올리고 **2개는 의도적으로

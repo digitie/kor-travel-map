@@ -16,6 +16,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import text
 
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration._application_300_bootstrap import (
     upgrade_head_with_application_300_bootstrap,
 )
@@ -26,6 +27,9 @@ from tests.integration.test_alembic_metadata_consistency import (
 )
 
 pytestmark = pytest.mark.integration
+
+#: fresh 설치는 `upgrade(head)`로 끝나므로 기대값은 파생 head다.
+_EXPECTED_HEAD = application_schema_head()
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "docker" / "application-schema-fresh-finalize.py"
@@ -118,7 +122,7 @@ async def _write_fence(
         "map_candidate_commit": "a" * 40,
         "map_candidate_image_id": "sha256:" + "b" * 64,
         "postgres_image_id": expected["postgres_image_id"],
-        "destination_head": "300",
+        "destination_head": _EXPECTED_HEAD,
         "reference_manifest_sha256": expected["reference_manifest_sha256"],
         "source_catalog_sha256": expected["source_catalog_sha256"],
         "destination_catalog_sha256": expected["destination_catalog_sha256"],
@@ -167,7 +171,7 @@ async def _insert_prior_root_receipt(
         "outcome": "root-committed",
         "authorization": "manager-fence",
         "operation_id": fence["prior_fresh_migration_operation_id"],
-        "destination_head": "300",
+        "destination_head": _EXPECTED_HEAD,
         "map_candidate_commit": fence["map_candidate_commit"],
         "map_candidate_image_id": fence["map_candidate_image_id"],
         "postgres_image_id": fence["postgres_image_id"],
@@ -279,7 +283,7 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
     )
     command = ["finalize", "--writer-fence-receipt", str(fence)]
     assert await module.async_main(command) == 1
-    assert await _raw_version(admin_dsn) == ("300",)
+    assert await _raw_version(admin_dsn) == (_EXPECTED_HEAD,)
     assert "runtime ACL reconciliation failed" in capsys.readouterr().err
 
     monkeypatch.setattr(
@@ -314,14 +318,14 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
         _destination_postflight_failure,
     )
     assert await module.async_main(command) == 1
-    assert await _raw_version(admin_dsn) == ("300",)
+    assert await _raw_version(admin_dsn) == (_EXPECTED_HEAD,)
     assert "controlled destination catalog postflight failure" in capsys.readouterr().err
 
     # ACL reconcile가 성공한 뒤 postflight가 실패해도 같은 outer transaction이
     # source catalog로 rollback한다. 따라서 fixed finalizer를 그대로 재시도할 수 있다.
     monkeypatch.setattr(module, "_assert_raw_300_and_receipts", original_receipts)
     assert await module.async_main(command) == 0
-    assert await _raw_version(admin_dsn) == ("300",)
+    assert await _raw_version(admin_dsn) == (_EXPECTED_HEAD,)
     finalized = json.loads(capsys.readouterr().out)
     assert await module.async_main(
         ["recover", "--operation-id", finalized["operation_id"]]

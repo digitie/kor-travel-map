@@ -11,6 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from kortravelmap.infra.application_schema_head import application_schema_head
+
+#: 배포가 파생하는 현재 application head. 리터럴 사본을 두지 않는다 —
+#: migration을 더할 때마다 이 fixture가 함께 깨지던 자리다.
+_EXPECTED_HEAD = application_schema_head()
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -41,7 +47,7 @@ def _valid_permit(module: object) -> dict[str, object]:
             "api_image_id": "sha256:" + "b" * 64,
             "dagster_image_id": "sha256:" + "c" * 64,
             "postgres_image_id": reference["source"]["container_image_id"],
-            "application_head": "300",
+            "application_head": _EXPECTED_HEAD,
             "reference_manifest_sha256": reference_sha256,
             "source_alembic_version_sha256": artifacts[
                 "source_alembic_version_contract_sha256"
@@ -381,7 +387,7 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     )
     contract = {
         "schema": "kor-travel-map.application-baseline-contract.v1",
-        "application_head": "300",
+        "application_head": _EXPECTED_HEAD,
         "reference_manifest_sha256": "1" * 64,
         "postgres_image_id": "sha256:" + "2" * 64,
         "source_catalog_sha256": "3" * 64,
@@ -411,7 +417,7 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     class _Script:
         @staticmethod
         def get_heads() -> tuple[str, ...]:
-            return ("300",)
+            return (_EXPECTED_HEAD,)
 
     def _fence_once_then_expired() -> tuple[dict[str, object], str]:
         nonlocal calls
@@ -712,7 +718,7 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
     )
     contract = {
         "schema": "kor-travel-map.application-baseline-contract.v1",
-        "application_head": "300",
+        "application_head": _EXPECTED_HEAD,
         "reference_manifest_sha256": "c" * 64,
         "postgres_image_id": "sha256:" + "d" * 64,
         "source_catalog_sha256": "e" * 64,
@@ -735,7 +741,7 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         "map_candidate_commit": "a" * 40,
         "map_candidate_image_id": "sha256:" + "b" * 64,
         "postgres_image_id": contract["postgres_image_id"],
-        "destination_head": "300",
+        "destination_head": _EXPECTED_HEAD,
         "reference_manifest_sha256": contract["reference_manifest_sha256"],
         "source_catalog_sha256": contract["source_catalog_sha256"],
         "destination_catalog_sha256": contract["destination_catalog_sha256"],
@@ -826,7 +832,7 @@ def test_static_baseline_contract_attests_all_manager_consumed_receipts() -> Non
     artifacts = reference["artifacts"]
     assert contract == {
         "schema": "kor-travel-map.application-baseline-contract.v1",
-        "application_head": "300",
+        "application_head": _EXPECTED_HEAD,
         "reference_manifest_sha256": module._sha256_bytes(
             (_ROOT / "alembic/baseline/application-reference.json").read_bytes()
         ),

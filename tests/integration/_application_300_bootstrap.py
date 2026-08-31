@@ -344,6 +344,33 @@ async def upgrade_head_with_application_300_bootstrap(
         await asyncio.to_thread(command.upgrade, config, "head")
 
 
+async def upgrade_baseline_root_with_application_300_bootstrap(
+    config: Config,
+    admin_dsn: str,
+) -> None:
+    """`0236 → 300` handoff를 검증하는 fixture 전용 — **baseline root에서 멈춘다.**
+
+    handoff 계약은 exact **physical** catalog/seed facet을 대조한다. 그 digest는
+    `300` 시점 카탈로그를 고정하므로, head까지 올린 DB와 비교하면 당연히 어긋난다 —
+    계약이 틀린 것이 아니라 비교 대상이 틀린 것이다. child migration이 하나만 붙어도
+    이 fixture는 실제 `0236` source를 더 이상 재현하지 못한다.
+
+    목적지를 파라미터로 받지 않고 함수를 **둘로 나눈다.**
+    `test_active_runnable_paths_never_target_legacy_revision`이 upgrade 대상을 정적으로
+    해소해 retired revision이 아님을 증명하는데, 파라미터는 그 증명을 무력화한다.
+    """
+    import asyncio
+
+    from alembic import command
+
+    config.set_main_option(
+        "sqlalchemy.url",
+        await bootstrapped_application_300_migrator_dsn(admin_dsn),
+    )
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "300")
+
+
 @contextlib.contextmanager
 def alembic_schema_owner_role() -> Iterator[None]:
     """restricted migrator가 migration 동안만 schema owner로 전환하게 한다."""

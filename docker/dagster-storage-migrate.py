@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 import sys
+import sysconfig
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, TextIO
@@ -26,6 +27,9 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from dagster._core.storage.sql import ALEMBIC_SCRIPTS_LOCATION
 from sqlalchemy import create_engine, text
+
+#: application active graph의 유일한 root. head와 달리 움직이지 않는다.
+_BASELINE_ROOT_REVISION: Final = "300"
 
 _DAGSTER_HOME_ENV: Final = "DAGSTER_HOME"
 _DAGSTER_PG_URL_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
@@ -460,14 +464,32 @@ def _read_observed_identity(
                         )
                     ).all()
                 )
+                # application DB 판정. 종전에는 `version_num = '300'` 하나만 봤는데,
+                # `public.alembic_version`은 **현재 head 한 행만** 담으므로 application
+                # graph에 child migration이 붙는 순간 이 arm이 조용히 False가 된다 —
+                # `_verify_database_identity`의 세 방벽 중 하나를 예외도 로그도 없이
+                # 잃는다.
+                #
+                # 한 번은 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` env로 넓혔는데,
+                # **그 변수는 `kor-travel-map-api` 서비스에만 주입된다.** dagster
+                # 서비스에는 없으므로 프로덕션에서 이 arm은 여전히 baseline root만
+                # 보았다 — 고친 것처럼 보이지만 아무것도 고치지 않은 상태였다.
+                #
+                # 설치본이 담고 있는 graph를 직접 읽는다. 이 파일은 의도적으로
+                # ``kortravelmap``을 import하지 않지만(위 모듈 docstring), 그것은
+                # **패키지를 import하지 않는다**는 뜻이지 설치본의 데이터 파일을 읽지
+                # 않는다는 뜻이 아니다 — `docker/application-schema-head.py`도 같은
+                # 파일을 같은 방식으로 읽는다.
+                application_revisions = _installed_application_revisions()
                 has_application_300 = bool(
                     connection.execute(
                         text(
                             "SELECT EXISTS ("
                             "SELECT 1 FROM public.alembic_version "
-                            "WHERE version_num::text = '300'"
+                            "WHERE version_num::text = ANY(:revisions)"
                             ")"
-                        )
+                        ),
+                        {"revisions": sorted(application_revisions)},
                     ).scalar_one()
                 )
     except Exception as exc:
@@ -506,6 +528,37 @@ def _read_observed_identity(
         (bool(row["has_feature"]), bool(row["has_provider_sync"]), bool(row["has_ops"])),
         has_application_300,
     )
+
+
+def _installed_application_revisions() -> set[str]:
+    """설치된 Map package의 migration graph가 담은 revision 전부.
+
+    ``public.alembic_version``에는 현재 head 한 행만 있으므로, "이 DB가 application
+    DB인가"를 판정하려면 **graph의 모든 revision**을 후보로 봐야 한다. head 하나만
+    보면 중간 revision에서 멈춘 DB를 놓친다.
+
+    설치본을 읽지 못하면 baseline root로 좁힌다 — 판정이 넓어져 격리 가드가 느슨해지는
+    것보다 좁아져 시끄러운 편이 안전하다.
+    """
+    paths = sysconfig.get_paths()
+    for key in ("purelib", "platlib"):
+        raw_path = paths.get(key)
+        if not raw_path:
+            continue
+        manifest = Path(raw_path) / "kortravelmap" / "_application_migration_graph.json"
+        if not manifest.is_file():
+            continue
+        try:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        revisions = payload.get("revisions")
+        if not isinstance(revisions, list) or not revisions:
+            continue
+        declared = {str(entry["revision"]) for entry in revisions}
+        if _BASELINE_ROOT_REVISION in declared:
+            return declared
+    return {_BASELINE_ROOT_REVISION}
 
 
 def _verify_database_identity(

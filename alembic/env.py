@@ -252,9 +252,18 @@ def _guard_application_schema_operation() -> bool:
             "0236_tvn41s_compaction_drained"
         )
 
+    # handoff는 baseline root로 **stamp**한다. graph의 head가 아니라 그 목적지가
+    # graph에 있는지를 본다 — head로 결박하면 child migration을 하나 더하는 순간 이
+    # 다리가 막힌다. `docker/transition-application-schema-0236-to-300.py`도 같은
+    # 이유로 이미 고쳤는데 여기가 남아 있었다.
     script = ScriptDirectory.from_config(config)
-    if tuple(script.get_heads()) != (_BASELINE_300_REVISION,):
-        raise RuntimeError("0236-to-300 handoff requires active graph head exactly 300")
+    try:
+        script.get_revision(_BASELINE_300_REVISION)
+    except Exception as exc:
+        raise RuntimeError(
+            "0236-to-300 handoff requires the active graph to contain "
+            f"{_BASELINE_300_REVISION}"
+        ) from exc
     _require_application_handoff_capability()
 
     def stamp_baseline_300_after_purge(
@@ -387,6 +396,38 @@ def do_run_migrations(connection: Connection) -> None:
     # L416-417). 즉 search_path SET 등 어떤 execute()도 configure() 이전에
     # 하면 SQLAlchemy 2.0 autobegin으로 트랜잭션이 열려 → migration이 적용은
     # 되지만 connection close 시 rollback → 빈 DB. (Alembic ≤1.17에선 무증상.)
+    # fresh 설치의 destination facet은 **`300` 도달 순간**에 봉인해야 한다.
+    # 계약 SQL(`application-destination-alembic-version.sql`)이 `alembic_version`
+    # 내용을 `ARRAY['300']`으로 못 박고 있고, 그 파일은 reference manifest digest로
+    # 봉인돼 있어 편집할 수 없다. child migration이 붙으면 `run_migrations()`가 끝난
+    # 시점의 version row는 head이므로 그때 검증하면 반드시 어긋난다.
+    #
+    # Alembic은 step마다 `head_maintainer.update_to_step()`을 **먼저** 하고
+    # `on_version_apply` 콜백을 부른다(`alembic/runtime/migration.py`). 따라서 이
+    # 콜백 안에서는 version row가 이미 `300`이고 다음 step은 아직 돌지 않았다 —
+    # 정확히 필요한 checkpoint다.
+    facet_verified: list[str] = []
+    fresh_install: list[bool] = []
+
+    def _seal_baseline_root_destination(**kwargs: object) -> None:
+        # **fresh 설치에서만** 봉인한다. 콜백은 `300`에 닿는 모든 step에서 불리는데,
+        # `0236 → 300` handoff도 그 중 하나다. handoff는 stamp 직후에 아직
+        # `ktm_feature_runtime` SELECT GRANT를 주지 않았고, 계약 SQL은
+        # `has_table_privilege('ktm_feature_runtime', …)`와 `8 = count(aclexplode(relacl))`를
+        # 요구하므로 그 시점엔 반드시 `mismatch`다. handoff는 GRANT 뒤에 **스스로**
+        # 같은 facet을 대조한다(`transition-...:1552`). 여기서 또 보면 다리가 막힌다.
+        #
+        # 종전 조건(`raw_heads_before == () and raw_heads_after == ("300",)`)도 fresh
+        # 설치만 봉인했다. 그 의미를 그대로 유지하되, 뒤 절이 head와 함께 움직이며
+        # 검증을 조용히 끄던 성질만 없앤다.
+        if not fresh_install:
+            return
+        heads = kwargs.get("heads")
+        if not isinstance(heads, set) or heads != {_BASELINE_300_REVISION}:
+            return
+        _verify_fresh_300_destination_facet(connection)
+        facet_verified.append(_BASELINE_300_REVISION)
+
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -396,6 +437,7 @@ def do_run_migrations(connection: Connection) -> None:
         compare_server_default=True,
         # 비-app·미모델 객체 제외 (ADR-075 D-12-2, T-VN-19 alembic check gate).
         include_object=_include_object,
+        on_version_apply=[_seal_baseline_root_destination],
     )
     with context.begin_transaction():
         use_schema_owner_role = os.environ.get(_USE_SCHEMA_OWNER_ROLE_ENV, "false")
@@ -419,10 +461,22 @@ def do_run_migrations(connection: Connection) -> None:
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
         connection.execute(text("SET search_path = public, x_extension"))
         raw_heads_before = _raw_alembic_heads(connection)
+        if raw_heads_before == ():
+            fresh_install.append(True)
         context.run_migrations()
         raw_heads_after = _raw_alembic_heads(connection)
-        if raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,):
-            _verify_fresh_300_destination_facet(connection)
+        if raw_heads_before == () and not facet_verified:
+            # fresh 설치인데 `300` step을 지나지 않았다 = 봉인이 **일어나지 않았다.**
+            # 종전에는 이 자리에서 `raw_heads_after == ("300",)`을 조건으로 검증을
+            # 호출했는데, child migration이 생기면 그 조건이 영구히 False가 되어
+            # 검증이 **예외도 로그도 없이 사라졌다.** 이제는 검증을 step 콜백이
+            # 수행하고, 여기서는 "실제로 수행됐는가"만 확인한다 — 조용히 꺼질 자리를
+            # 없앤다.
+            raise RuntimeError(
+                "fresh install did not pass through the baseline root "
+                f"{_BASELINE_300_REVISION!r}; destination facet was never sealed "
+                f"(heads={raw_heads_after!r})"
+            )
         if sanctioned_handoff and raw_heads_after != (_BASELINE_300_REVISION,):
             raise RuntimeError(
                 "0236-to-300 handoff did not leave exactly one raw 300 head"

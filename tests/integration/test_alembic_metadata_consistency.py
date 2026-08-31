@@ -20,6 +20,7 @@ from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
 
 from alembic import command
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration._application_300_bootstrap import (
     alembic_schema_owner_role,
     bootstrapped_application_300_migrator_dsn,
@@ -31,7 +32,8 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-_HEAD = "300"
+#: 배포가 파생하는 현재 application head. 리터럴 사본을 두지 않는다.
+_HEAD = application_schema_head()
 _HANDOFF_SOURCE = "0236_tvn41s_compaction_drained"
 _HANDOFF_TAG = "application-schema-0236-to-300"
 

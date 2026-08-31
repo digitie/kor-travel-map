@@ -72,6 +72,15 @@ _PIN_RE = re.compile(
 )
 
 
+class SourceUnavailableError(RuntimeError):
+    """핀된 소스를 읽을 수 없다 — manifest가 낡았다는 뜻이 **아니다.**
+
+    이 둘을 구분하지 않으면 호출자가 "확인할 수 없었다"와 "어긋났다"를 같은 실패로
+    보게 된다. 전자를 후자로 읽으면 게이트가 시끄러워져 무시되고, 후자를 전자로
+    읽으면 조작이 통과한다. exit code로 구분한다 — 2는 "확인 불가", 1은 "어긋남".
+    """
+
+
 class ManifestError(RuntimeError):
     """manifest 생성이 불가능한 상태 — 조용히 넘어가지 않는다."""
 
@@ -213,7 +222,7 @@ def build_manifest() -> dict[str, object]:
     for dist, package in sorted(PROVIDER_PACKAGES.items()):
         repo = SIBLING_ROOT / dist
         if not (repo / ".git").exists():
-            raise ManifestError(
+            raise SourceUnavailableError(
                 f"형제 체크아웃이 없다: {repo} (ADR-044 — 로컬 우선 조회가 전제다)"
             )
         sha = pins[dist]
@@ -239,7 +248,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    manifest = build_manifest()
+    try:
+        manifest = build_manifest()
+    except SourceUnavailableError as exc:
+        # exit 2 = "확인할 수 없었다". 호출자(lint 게이트)가 "어긋났다"(exit 1)와
+        # 구분해 건너뛸 수 있어야 한다.
+        print(f"provider 소스를 읽을 수 없다: {exc}", file=sys.stderr)
+        return 2
     rendered = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
     if args.check:

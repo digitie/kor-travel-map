@@ -32,10 +32,15 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
-_DESTINATION_HEAD: Final = "300"
+#: `command.upgrade(config, "head")`가 도달해야 하는 revision. graph에서 파생한다.
+_DESTINATION_HEAD: Final = application_schema_head()
 _MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
 _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
@@ -571,9 +576,39 @@ async def _assert_exact_destination_version(
         digest.update(b"\n")
     destination_facet = digest.hexdigest()
     if versions != (_DESTINATION_HEAD,):
-        raise FreshMigrationError("fresh 300 migration did not produce exact raw revision 300")
+        raise FreshMigrationError(
+            "fresh migration did not produce the exact expected raw revision"
+        )
+    if _DESTINATION_HEAD != BASELINE_ROOT_REVISION:
+        # **head를 baseline root 너머로 올리려면 배포 계약 자체를 확장해야 한다.**
+        #
+        # sealed baseline(`alembic/baseline/*.sha256`)은 `300` 시점의 물리 catalog와
+        # `alembic_version` facet을 고정한다. facet 계약 SQL은 조건에
+        # `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이라, head가 움직이면
+        # 언제나 `…mismatch` 한 값만 낸다 — 옮겨갈 digest가 존재하지 않는다. catalog도
+        # 새 migration이 객체를 더하는 순간 baseline digest와 어긋난다.
+        #
+        # 그래서 이 자리에서 "facet 대조를 건너뛰고 baseline digest를 receipt에 적는"
+        # 우회를 한 적이 있는데, 그것은 실패를 downstream으로 미룰 뿐이었다.
+        # `application-schema-fresh-finalize.py:418`과
+        # `application-schema-final-permit.py:602`가 **live DB를 같은 baseline digest와**
+        # 다시 대조하므로, fresh 설치가 통과해도 프로덕션 API/Dagster 컨테이너가
+        # 기동을 거부한다.
+        #
+        # 올바른 해법은 계약을 baseline 너머로 **확장**하는 것이다 — baseline digest는
+        # `300` 도달 순간에만 대조하고, 그 이후 상태는 fresh-install operation receipt가
+        # 관측 digest를 정본으로 남겨 finalize·final-permit이 그것과 대조한다. receipt는
+        # 이미 fence → journal → Manager evidence로 결박돼 있으므로 신뢰 사슬은 끊기지
+        # 않는다. 그 작업이 끝나기 전까지는 **조용히 통과시키지 않는다.**
+        raise FreshMigrationError(
+            "application head is beyond the sealed baseline root; the deployment "
+            "contract must be extended past the baseline before a migration can "
+            "ship (see docs/reports/m03-child-migration-blast-radius-2026-08-31.md)"
+        )
     if destination_facet != expected_destination_facet:
-        raise FreshMigrationError("fresh 300 migration destination facet does not match baseline")
+        raise FreshMigrationError(
+            "fresh 300 migration destination facet does not match baseline"
+        )
     return destination_facet
 
 
