@@ -7438,7 +7438,8 @@ export interface components {
          *
          *     부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로
          *     구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을
-         *     영구 결박한다.
+         *     영구 결박한다. ``feature_id``는 응답 규약(T-VN-32C/ADR-068 §3)대로 **UUID
+         *     정본**이다 — legacy `f_*` 문자열은 응답에 싣지 않는다(적대 리뷰 F6).
          */
         CurationImportManualChildView: {
             /** Child Command Id */
@@ -7448,15 +7449,17 @@ export interface components {
              * Format: uuid
              */
             curation_item_id: string;
-            /** Feature Id */
-            feature_id: string;
             /**
-             * Feature Uuid
+             * Feature Id
              * Format: uuid
              */
-            feature_uuid: string;
+            feature_id: string;
+            /** Reused */
+            reused: boolean;
             /** Row Number */
             row_number: number;
+            /** Terminal Status */
+            terminal_status: number;
         };
         /** CurationImportResponse */
         CurationImportResponse: {
