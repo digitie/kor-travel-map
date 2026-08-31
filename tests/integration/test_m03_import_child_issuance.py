@@ -320,9 +320,9 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             origin_kind = await connection.scalar(
                 text(
                     "SELECT origin_kind FROM feature.feature_creation_origins "
-                    "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
+                    "WHERE feature_id = :feature_id"
                 ),
-                {"feature_uuid": child.feature_uuid},
+                {"feature_id": child.feature_id},
             )
             assert origin_kind == "manual_curation"
 
