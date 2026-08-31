@@ -5435,7 +5435,9 @@ async def _record_import_provenance(
         ).scalar_one()
     )
     if not rows:
-        return import_batch_id
+        # 반환형을 tuple로 바꾸면서 이 조기 반환을 놓쳤다. 빈 CSV면 호출부의
+        # `import_batch_id, row_receipts = await …` 언패킹이 ValueError로 죽는다.
+        return import_batch_id, ()
 
     identity_payload = json.dumps(
         [
