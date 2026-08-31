@@ -166,6 +166,25 @@ ALTER TABLE ops.application_schema_operation_receipts
         CHECK (destination_head IN ('300', '301_m03_import_children'))
 """
 
+# `300` 너머 head를 지원하려면 fresh root/finalize result가 head 상태 관측값을 실어야
+# 하고, 필드 추가는 Manager의 exact field set 파싱을 깨므로 schema 버전을 올린다.
+# 그 새 값을 receipt 표가 받아야 한다.
+#
+# 열거는 **넓히기만** 한다 — 기존 v2/v4 receipt 행이 이미 존재하므로 좁히면 ALTER 자체가
+# 실패한다. `test_receipt_head_check_covers_the_graph_head`가 head 열거에서 같은 결손을
+# 잡는 것과 같은 이유다.
+_RESULT_SCHEMA_CHECK: Final = """
+ALTER TABLE ops.application_schema_operation_receipts
+    DROP CONSTRAINT ck_application_schema_operation_receipts_result_schema,
+    ADD CONSTRAINT ck_application_schema_operation_receipts_result_schema
+        CHECK (result_schema IN (
+            'kor-travel-map.application-fresh-300-root.v2',
+            'kor-travel-map.application-fresh-300-root.v3',
+            'kor-travel-map.application-fresh-300-finalize.v4',
+            'kor-travel-map.application-fresh-300-finalize.v5'
+        ))
+"""
+
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _CLAIM_PLAN_SHA_UNIQUE,
     _DECISION_IMPORT_ROW_UNIQUE,
@@ -176,12 +195,18 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _APPEND_ONLY_FUNCTION,
     _APPEND_ONLY_TRIGGER,
     _RECEIPT_HEAD_CHECK,
+    _RESULT_SCHEMA_CHECK,
 )
 
 _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     # receipt CHECK를 baseline 전용으로 되돌린다. 되돌린 뒤 head가 `300`이 아닌
     # receipt 행이 남아 있으면 이 문장이 실패한다 — 그게 맞다. 조용히 넘어가면
     # CHECK가 거짓이 된 표를 남긴다.
+    "ALTER TABLE ops.application_schema_operation_receipts"
+    " DROP CONSTRAINT ck_application_schema_operation_receipts_result_schema,"
+    " ADD CONSTRAINT ck_application_schema_operation_receipts_result_schema"
+    " CHECK (result_schema IN ('kor-travel-map.application-fresh-300-root.v2',"
+    " 'kor-travel-map.application-fresh-300-finalize.v4'))",
     "ALTER TABLE ops.application_schema_operation_receipts"
     " DROP CONSTRAINT ck_application_schema_operation_receipts_head,"
     " ADD CONSTRAINT ck_application_schema_operation_receipts_head"
