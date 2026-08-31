@@ -1,5 +1,31 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — 정체 근본원인 감사와 채택 개선 (5-agent 워크플로우)
+
+분석 3인(타임라인 포렌식 / 결박 전수 / 트레드밀 구조) + 적대 리뷰 2인이 진단 4건을
+반박하고 완화안 4건을 기각한 뒤 남은 것만 채택했다. 정본은
+`docs/reports/map-stall-root-cause-2026-08-31.md` — 기각 처방 9건도 §5에 남겨 재제안을
+막는다.
+
+**판정: 정체는 livelock이 아니라 반복 단가의 발산이다.** 한 사이클(pair 회전 + 단발
+rebuild + one-shot 실행)의 산출이 terminal phase enum 1개였고, terminal 27개 중
+acceptance 본문 도달은 0건 — 후보 예산 전부가 인프라 단계에서 소진됐다. 단가를 만든 세
+인자: 관측 결핍(`ports: !reset` 한 줄이 4개 candidate를 태움) × 무조건 소각(phase-scoped
+기계가 있는데 배선 안 됨) × 값/상태 고정(head 리터럴 17곳, 봉인 digest 3지점).
+
+이 저장소의 채택분:
+
+- **배리어 B1~B3 삭제**(I-3, STRENGTHENED) — 같은 문단의 실행 시점 exact-equality가
+  셋을 정확히 덮는다. B4는 유지 — env/compose/role·ACL 표면은 런타임 대조가 안 덮는다.
+- **동일 사건 중복 부기 접기**(I-6) — MAP-HEALTH-TRANSPORT B4·ADMISSION-TERMINAL C3를
+  ACTIVATION A3로 귀속, 두 task 완료 이관. 열린 task 25 → 21.
+- **원장 게이트 3종**(I-7) — 체크박스 삭제 게이트(선례: 6d671ef1 평면화 다음 날 완료
+  처리), live journal(568KB)/resume(376KB) 분리 + 220KB 게이트를 live에도, archive
+  shard 기입 인정.
+
+Manager 쪽 채택분(I-1/I-2/I-4/I-5/I-8/I-9)은 Manager PR #278, PinVi 쪽(I-10)은
+PinVi #505가 소유한다.
+
 ## 2026-08-31 — head 값 고정을 걷어내고, `301`이 왜 아직 못 올라가는지 실증했다
 
 `T-VN-M03`의 linkage migration을 올리자 무너진 것은 테스트 스냅샷이 아니라 **배포
