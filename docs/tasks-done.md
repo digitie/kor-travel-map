@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-31 — T-VN-M03 import child·격리 live acceptance 완료 이관
+
+- [x] **T-VN-M03 — curated 동시 생성의 import 및 live acceptance 완료.**
+  `302_m03_child_issuance`가 writer operation 확장·apply의 manual-skip/행별 좌표
+  반환·linkage SECURITY DEFINER 기록기를 만들고, `curation_repo`가 결정적 child
+  identity(§6.2)로 lock→claim→writer→apply→linkage→child result를 한 SERIALIZABLE
+  transaction에 배선했다(PR #1127). 판정 근거: (1) 실 PostGIS 통합
+  `test_m03_import_child_issuance.py` 2/2 — linkage 5축·decision
+  종류(accepted/manual_feature_child)·item feature 결박 생존·child terminal result,
+  (2) 사상 첫 manual-create 격리 live harness
+  (`curation-import-manual-child.live.spec.ts`)가 n150 스택(302 head)에서 UI CSV
+  업로드→preview→commit→admin REST 관측을 완주(2 passed). acceptance가 노출한
+  feature 상세의 잠복 500(빈 tuple mock에 숨음)도 함께 수리했다.
 
 > **과거 기록 아카이브** (규약 §8 — 과거 검색은 `rg <패턴> docs/archive/`)
 >
@@ -49,6 +62,7 @@ receipt"라는 **같은 사건 하나**에 종속된 중복 부기였다. 그 �
   `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하고
   재시도하지 않는다는 것이 문서로 선언돼 있다. 수용 판정문은 "실행 잔여 없음 —
   `tasks-done.md` 이관 대상"이며, 왜 열려 있었는지는 문서에 근거가 없다고 적고 있었다.
+||||||| parent of c7360b8e (docs(ledger): T-VN-M03 완료 이관 — import child·격리 live acceptance 판정 근거)
 
 ## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION 완료 이관
 
