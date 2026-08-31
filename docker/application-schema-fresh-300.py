@@ -61,7 +61,16 @@ _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
 _OPERATION_KIND: Final = "application-root-300"
-_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v2"
+#: 같은 DB의 finalize receipt. recovery가 post-ACL 상태를 정당한 것으로 인정하려면
+#: 그 상태를 실제로 기록한 receipt가 있어야 한다.
+_FINALIZE_OPERATION: Final = "application-finalize-300"
+_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v3"
+"""v2 → v3: head 상태 catalog/seed digest 두 필드를 더했다.
+
+봉인된 baseline digest는 `300` 시점만 서술한다. head가 그 너머면 미리 선언된 기대값이
+없으므로, 설치가 관측한 값이 receipt에 실려 정본이 되고 finalize·final permit이 그것과
+대조한다. Manager가 exact field set으로 파싱하므로 필드 추가는 계약 변경이다.
+"""
 _MISSING_RECEIPT_SCHEMA: Final = (
     "kor-travel-map.application-fresh-300-root-missing-receipt.v1"
 )
@@ -575,35 +584,15 @@ async def _assert_exact_destination_version(
         digest.update(str(item).encode("utf-8"))
         digest.update(b"\n")
     destination_facet = digest.hexdigest()
+    # revision 동등성은 **여기서** 파생 head로 본다. 종전에는 facet 계약 SQL이
+    # `alembic_version = ARRAY['300']`을 함께 담고 있었는데, 그 SQL의 산출물은 성공/실패
+    # 두 문자열뿐인 단일 boolean이라 head가 움직이면 영원히 `mismatch`가 되고 옮겨갈
+    # digest가 존재하지 않았다. facet은 ACL/identity만 증명하도록 풀고, 값 대조는 이
+    # 자리에 남긴다 — 얼린 리터럴이 아니라 현재 graph에서 유도한 값과 비교하므로
+    # 종전보다 강하다.
     if versions != (_DESTINATION_HEAD,):
         raise FreshMigrationError(
             "fresh migration did not produce the exact expected raw revision"
-        )
-    if _DESTINATION_HEAD != BASELINE_ROOT_REVISION:
-        # **head를 baseline root 너머로 올리려면 배포 계약 자체를 확장해야 한다.**
-        #
-        # sealed baseline(`alembic/baseline/*.sha256`)은 `300` 시점의 물리 catalog와
-        # `alembic_version` facet을 고정한다. facet 계약 SQL은 조건에
-        # `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이라, head가 움직이면
-        # 언제나 `…mismatch` 한 값만 낸다 — 옮겨갈 digest가 존재하지 않는다. catalog도
-        # 새 migration이 객체를 더하는 순간 baseline digest와 어긋난다.
-        #
-        # 그래서 이 자리에서 "facet 대조를 건너뛰고 baseline digest를 receipt에 적는"
-        # 우회를 한 적이 있는데, 그것은 실패를 downstream으로 미룰 뿐이었다.
-        # `application-schema-fresh-finalize.py:418`과
-        # `application-schema-final-permit.py:602`가 **live DB를 같은 baseline digest와**
-        # 다시 대조하므로, fresh 설치가 통과해도 프로덕션 API/Dagster 컨테이너가
-        # 기동을 거부한다.
-        #
-        # 올바른 해법은 계약을 baseline 너머로 **확장**하는 것이다 — baseline digest는
-        # `300` 도달 순간에만 대조하고, 그 이후 상태는 fresh-install operation receipt가
-        # 관측 digest를 정본으로 남겨 finalize·final-permit이 그것과 대조한다. receipt는
-        # 이미 fence → journal → Manager evidence로 결박돼 있으므로 신뢰 사슬은 끊기지
-        # 않는다. 그 작업이 끝나기 전까지는 **조용히 통과시키지 않는다.**
-        raise FreshMigrationError(
-            "application head is beyond the sealed baseline root; the deployment "
-            "contract must be extended past the baseline before a migration can "
-            "ship (see docs/reports/m03-child-migration-blast-radius-2026-08-31.md)"
         )
     if destination_facet != expected_destination_facet:
         raise FreshMigrationError(
@@ -913,6 +902,26 @@ async def _find_operation_receipt_if_present(
         raise FreshMigrationError("fresh 300 operation receipt cannot be inspected") from exc
 
 
+def _upgrade_to_baseline_root_on_existing_connection(
+    connection: Connection, config: Config
+) -> None:
+    """봉인된 catalog 계약이 **의미를 갖는 유일한 지점**까지만 올린다.
+
+    `alembic/baseline/application-catalog.sql`은 객체마다 한 행을 내므로 그 digest는
+    진짜 상태 의존 값이다. head까지 한 번에 올리면 새 migration이 더한 객체 때문에
+    baseline digest와 반드시 어긋나고, **대조할 대상이 영영 사라진다.**
+
+    목적지를 파라미터로 받지 않고 함수를 **둘로 나눈다.**
+    `test_active_runnable_paths_never_target_legacy_revision`이 upgrade 대상을 정적으로
+    해소해 retired revision이 아님을 증명하는데, 파라미터는 그 증명을 무력화한다.
+    """
+    config.attributes["connection"] = connection
+    try:
+        command.upgrade(config, "300")
+    finally:
+        config.attributes.pop("connection", None)
+
+
 def _upgrade_on_existing_connection(connection: Connection, config: Config) -> None:
     """Alembic root와 receipt insert가 하나의 outer transaction을 공유한다."""
 
@@ -947,11 +956,54 @@ async def _assert_application_receipts(
         await module.verify_runtime_projection_invariants(connection)
     except Exception as exc:
         raise FreshMigrationError("fresh 300 cannot verify committed application receipts") from exc
-    if catalog not in expected_catalogs or seed != expected["seed_sha256"]:
-        raise FreshMigrationError("fresh 300 catalog or seed receipt does not match baseline")
+    # 둘을 한 메시지로 뭉치면 무엇이 어긋났는지 알 수 없다 — facet 계약 SQL이 조건
+    # 스무 개를 단일 boolean으로 뭉쳐 같은 문제를 만들었고, 그것을 고치는 PR에서
+    # 같은 실수를 남겨 둘 이유가 없다. 관측값을 함께 싣되 digest는 비밀이 아니다.
+    if catalog not in expected_catalogs:
+        raise FreshMigrationError(
+            "fresh 300 catalog receipt does not match baseline "
+            f"(observed={catalog}, expected={sorted(expected_catalogs)})"
+        )
+    if seed != expected["seed_sha256"]:
+        raise FreshMigrationError(
+            "fresh 300 seed receipt does not match baseline "
+            f"(observed={seed}, expected={expected['seed_sha256']})"
+        )
     if destination != expected["destination_alembic_version_sha256"]:
         raise FreshMigrationError("fresh 300 destination metadata receipt does not match baseline")
     return catalog, seed, destination
+
+
+async def _observe_application_catalog(
+    connection: AsyncConnection,
+) -> tuple[str, str]:
+    """현재 상태의 catalog/seed digest를 **대조 없이** 관측한다.
+
+    baseline digest는 `300` 시점만 서술하므로 head 상태에는 미리 선언된 기대값이 없다.
+    여기서 관측한 값이 operation receipt에 실려 정본이 되고, finalize와 final permit이
+    그것과 대조한다.
+
+    신뢰 근거가 "봉인된 digest가 미리 선언한다"에서 "attest된 candidate image가 만든
+    것을 receipt가 봉인한다"로 옮겨갈 뿐 사슬은 끊기지 않는다 — head 상태 스키마는
+    image 안의 migration이 결정론적으로 만들고, receipt는 fence → journal → Manager
+    evidence로 이미 결박돼 있다.
+    """
+    module = _load_database_contract_module()
+    try:
+        await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
+        await connection.execute(text("SET search_path = public, x_extension"))
+        catalog = await module.contract_sha256(connection, "application-catalog.sql")
+        seed = await module.contract_sha256(connection, "application-seed.sql")
+        # runtime projection invariant는 **head 상태에서도** 성립해야 한다.
+        # `_assert_application_receipts`가 baseline 체크포인트에서 한 번 보지만, 그
+        # 뒤 migration이 projection을 깨뜨릴 수 있다. 체크포인트로 옮기면서 이 검사가
+        # head를 못 보게 되는 것이 이 helper를 만들며 생긴 사각지대였다.
+        await module.verify_runtime_projection_invariants(connection)
+    except Exception as exc:
+        raise FreshMigrationError(
+            "fresh 300 cannot observe the installed application catalog"
+        ) from exc
+    return catalog, seed
 
 
 def _canonical_result_bytes(result: Mapping[str, Any]) -> bytes:
@@ -1065,28 +1117,48 @@ async def _migrate() -> Mapping[str, Any]:
                         raise FreshMigrationError(
                             "fresh 300 migrate fence changed before root migration"
                         )
+                # ① 봉인된 baseline까지만 올린다. catalog digest가 의미를 갖는
+                #    유일한 지점이다.
+                await connection.run_sync(
+                    _upgrade_to_baseline_root_on_existing_connection, config
+                )
+                baseline_catalog: str | None = None
+                baseline_seed: str | None = None
+                if fence is not None:
+                    # production 경로만 봉인된 catalog/seed와 exact 대조한다. 이 대조는
+                    # **`300` 상태**에 대한 것이므로 여기서 끝내야 한다.
+                    (
+                        baseline_catalog,
+                        baseline_seed,
+                        _baseline_facet,
+                    ) = await _assert_application_receipts(
+                        connection,
+                        contract,
+                        expected_catalogs=frozenset(
+                            {contract["source_catalog_sha256"]}
+                        ),
+                    )
+                # ② head까지 마저 올린다. `300`이 head면 no-op이다.
                 await connection.run_sync(_upgrade_on_existing_connection, config)
                 destination_facet = await _assert_exact_destination_version(
                     connection, contract["destination_alembic_version_sha256"]
                 )
+                # ③ head 상태를 관측한다 — 미리 선언된 기대값이 없으므로 receipt가 정본이다.
+                head_catalog, head_seed = await _observe_application_catalog(connection)
                 if fence is None:
                     result: Mapping[str, Any] = {
-                        "schema": "kor-travel-map.application-fresh-300-migration.v2",
+                        "schema": "kor-travel-map.application-fresh-300-migration.v3",
                         "outcome": "migrated",
                         "authorization": "local-dev",
                         "destination_head": _DESTINATION_HEAD,
                         "post_destination_alembic_version_sha256": destination_facet,
+                        "post_head_catalog_sha256": head_catalog,
+                        "post_head_seed_sha256": head_seed,
                     }
                 else:
-                    source_catalog, seed_sha256, destination_facet = (
-                        await _assert_application_receipts(
-                            connection,
-                            contract,
-                            expected_catalogs=frozenset(
-                                {contract["source_catalog_sha256"]}
-                            ),
-                        )
-                    )
+                    assert baseline_catalog is not None
+                    assert baseline_seed is not None
+                    source_catalog, seed_sha256 = baseline_catalog, baseline_seed
                     live_fence, live_fence_sha256 = _require_fixed_fence()
                     if live_fence != fence or live_fence_sha256 != fence_sha256:
                         raise FreshMigrationError(
@@ -1118,6 +1190,11 @@ async def _migrate() -> Mapping[str, Any]:
                             "destination_alembic_version_sha256"
                         ],
                         "post_destination_alembic_version_sha256": destination_facet,
+                        # head 상태 관측값. baseline digest는 `300`만 서술하므로 그
+                        # 너머에는 미리 선언된 기대값이 없다 — 이 둘이 finalize와
+                        # final permit의 정본이 된다.
+                        "post_head_catalog_sha256": head_catalog,
+                        "post_head_seed_sha256": head_seed,
                     }
                     await _insert_operation_receipt(
                         connection,
@@ -1140,6 +1217,64 @@ async def _migrate() -> Mapping[str, Any]:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = previous
+
+
+async def _recoverable_catalogs(
+    connection: AsyncConnection,
+    contract: Mapping[str, str],
+    payload: Mapping[str, Any],
+) -> frozenset[str]:
+    """recovery 시점에 **정당한** catalog 상태들.
+
+    recovery는 이미 설치된 DB를 읽으므로 그 DB는 `300`이 아니라 **head**에 있다. 그리고
+    finalize 전일 수도 후일 수도 있으므로 pre-ACL과 post-ACL 둘 다 정당하다 — 종전에
+    봉인된 source/destination 쌍을 받은 이유가 그것이다.
+
+    head가 baseline root면 그 쌍이 그대로 두 상태다(체크포인트가 이미 증명했다).
+    그 너머에서는 봉인값이 이 상태를 서술하지 않으므로 정본이 receipt로 옮겨간다.
+
+    - pre-ACL: 이 root receipt 자신이 기록한 `post_head_catalog_sha256`
+    - post-ACL: 같은 DB의 finalize receipt가 기록한 `post_destination_catalog_sha256`
+
+    finalize receipt가 없으면 pre-ACL 하나만 정당하다 — **넓히지 않는다.** 넓히면
+    "아직 finalize하지 않은 DB가 post-ACL 상태로 보이는" 모순을 통과시키게 된다.
+    """
+    if _DESTINATION_HEAD == BASELINE_ROOT_REVISION:
+        return frozenset(
+            {contract["source_catalog_sha256"], contract["destination_catalog_sha256"]}
+        )
+
+    head_catalog = payload.get("post_head_catalog_sha256")
+    if not isinstance(head_catalog, str) or _SHA256_PATTERN.fullmatch(head_catalog) is None:
+        raise FreshMigrationError(
+            "fresh 300 recovery cannot read the recorded head catalog digest"
+        )
+    catalogs = {head_catalog}
+
+    finalized = (
+        await connection.execute(
+            text(
+                "SELECT result_payload FROM "
+                f"{_OPERATION_RECEIPT_TABLE} WHERE operation = :operation"
+            ),
+            {"operation": _FINALIZE_OPERATION},
+        )
+    ).scalars().all()
+    for finalize_payload in finalized:
+        if not isinstance(finalize_payload, Mapping):
+            continue
+        # **이 root의** finalize만 정당하다. receipt 표는 append-only라 세대가 다른
+        # finalize receipt가 공존할 수 있고(301이 head CHECK를 넓혀 명시적으로 허용),
+        # operation 이름만으로 받으면 낡은 세대의 post-ACL digest가 현재 상태를
+        # 정당화한다 — 적대 리뷰가 지적한 세탁 경로다. finalize payload가 이미
+        # `prior_fresh_migration_operation_id`로 계승을 선언하므로 그것으로 결박한다.
+        prior_op = finalize_payload.get("prior_fresh_migration_operation_id")
+        if prior_op != payload.get("operation_id"):
+            continue
+        observed = finalize_payload.get("post_destination_catalog_sha256")
+        if isinstance(observed, str) and _SHA256_PATTERN.fullmatch(observed):
+            catalogs.add(observed)
+    return frozenset(catalogs)
 
 
 async def _recover(operation_id: UUID) -> Mapping[str, Any]:
@@ -1187,11 +1322,8 @@ async def _recover(operation_id: UUID) -> Mapping[str, Any]:
             await _assert_application_receipts(
                 connection,
                 contract,
-                expected_catalogs=frozenset(
-                    {
-                        contract["source_catalog_sha256"],
-                        contract["destination_catalog_sha256"],
-                    }
+                expected_catalogs=await _recoverable_catalogs(
+                    connection, contract, payload
                 ),
             )
             return dict(payload)

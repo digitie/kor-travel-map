@@ -27,7 +27,10 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from kortravelmap.infra.application_schema_head import application_schema_head
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from kortravelmap.infra.db import make_async_engine
 
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-application-final-permit/permit.json")
@@ -485,10 +488,19 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         for value in expected.values()
     ):
         raise FinalPermitError("installed application baseline receipt is invalid")
+    # catalog는 head가 baseline root일 때만 봉인된 값과 대조한다. 그 너머에서는 봉인된
+    # digest가 서술하는 상태가 존재하지 않으므로(새 migration이 객체를 더한다),
+    # **permit이 실어 온 두 값이 서로 일치하는지**만 본다 — 그 값은 finalize receipt에서
+    # 왔고, receipt sha256은 Manager가 이미 결박한다.
+    sealed_catalog = (
+        expected["catalog"]
+        if _HEAD == BASELINE_ROOT_REVISION
+        else receipts["observed_catalog_sha256"]
+    )
     if (
         candidate["reference_manifest_sha256"] != reference_sha256
-        or receipts["expected_catalog_sha256"] != expected["catalog"]
-        or receipts["observed_catalog_sha256"] != expected["catalog"]
+        or receipts["expected_catalog_sha256"] != sealed_catalog
+        or receipts["observed_catalog_sha256"] != sealed_catalog
         or receipts["expected_seed_sha256"] != expected["seed"]
         or receipts["observed_seed_sha256"] != expected["seed"]
         or receipts["expected_privileged_residue_sha256"] != expected["privileged_residue"]

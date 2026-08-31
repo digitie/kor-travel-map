@@ -39,6 +39,9 @@ UNMAPPED_APP_TABLES = frozenset(
         ("ops", "curation_import_collection_touches"),
         ("ops", "curation_import_plan_claims"),
         ("ops", "curation_import_plan_commits"),
+        # T-VN-M03 import child linkage — immutable command evidence이므로 ORM에
+        # 매핑하지 않는다. 구조 계약은 `301` 통합 테스트가 가진다.
+        ("ops", "curation_import_manual_feature_children"),
         ("ops", "curation_provider_root_receipts"),
         ("ops", "curation_provider_snapshot_receipts"),
         ("ops", "curation_source_observation_receipts"),

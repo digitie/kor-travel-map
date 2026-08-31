@@ -1976,6 +1976,70 @@ def test_frontend_dotenv_validator_replays_private_process_env_expansion(
     assert _MANUAL_FEATURE_CREATE_DIGEST not in combined_output
 
 
+_PBKDF2_HASH_BODY = "pbkdf2_sha256$310000$c2FsdC1zYWx0LXNhbHQ$ZGlnZXN0LWRpZ2VzdC1kaWdlc3Q"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("hash_value", "expect_ok"),
+    [
+        pytest.param(
+            _PBKDF2_HASH_BODY,
+            False,
+            id="unescaped-dollar-destroyed-by-expansion",
+        ),
+        pytest.param(
+            "'" + _PBKDF2_HASH_BODY + "'",
+            False,
+            id="single-quotes-do-not-prevent-expansion",
+        ),
+        pytest.param(
+            _PBKDF2_HASH_BODY.replace("$", "\\$"),
+            True,
+            id="backslash-escaped-hash-survives",
+        ),
+    ],
+)
+def test_frontend_dotenv_validator_rejects_expansion_destroyed_password_hash(
+    tmp_path: Path,
+    hash_value: str,
+    expect_ok: bool,
+) -> None:
+    r"""dotenv-expand가 pbkdf2 hash의 `$`를 확장해 파괴하면 조용한 401 대신 기동 실패.
+
+    실측(2026-08-31 live e2e): 홑따옴표도 보호하지 못하고 87자 hash가 45자로
+    붕괴했다. 유일한 생존 경로는 `\$` 이스케이프다.
+    """
+    (tmp_path / ".env.development.local").write_text(
+        f"KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH={hash_value}\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "node",
+            "scripts/validate-frontend-manual-create-env.mjs",
+            str(tmp_path),
+        ],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "NODE_ENV": "development",
+        },
+        input="\0\0",
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    if expect_ok:
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0
+        assert "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH is not a valid" in result.stderr
+
+
 @pytest.mark.unit
 def test_admin_launcher_runs_exact_next_dotenv_validator_before_children() -> None:
     launcher = _script("scripts/run-admin-stack.sh")

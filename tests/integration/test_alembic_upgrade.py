@@ -236,6 +236,18 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("plan_sha256", "text", True),
         ("claimed_at", "timestamp with time zone", True),
     },
+    ("ops", "curation_import_manual_feature_children"): {
+        ("import_plan_id", "uuid", True),
+        ("plan_row_number", "integer", True),
+        ("plan_sha256", "text", True),
+        ("manual_payload_sha256", "text", True),
+        ("child_command_id", "bigint", True),
+        ("feature_uuid", "uuid", True),
+        ("import_row_id", "uuid", True),
+        ("curation_item_id", "uuid", True),
+        ("link_decision_id", "uuid", True),
+        ("recorded_at", "timestamp with time zone", True),
+    },
     ("ops", "curation_import_plan_commits"): {
         ("import_plan_id", "uuid", True),
         ("command_id", "bigint", True),
@@ -428,6 +440,20 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("curation_import_collection_touches_pkey", "p"),
         ("curation_import_collection_touche_command_id_collection_id_fkey", "f"),
     },
+    ("ops", "curation_import_manual_feature_children"): {
+        ("pk_curation_import_manual_feature_children", "p"),
+        ("uq_curation_import_manual_feature_children_command", "u"),
+        ("uq_curation_import_manual_feature_children_import_row", "u"),
+        ("ck_curation_import_manual_feature_children_plan_sha256", "c"),
+        ("ck_curation_import_manual_feature_children_payload_sha256", "c"),
+        ("ck_curation_import_manual_feature_children_row_number", "c"),
+        ("fk_curation_import_manual_feature_children_plan_claim", "f"),
+        ("fk_curation_import_manual_feature_children_plan_row", "f"),
+        ("fk_curation_import_manual_feature_children_command", "f"),
+        ("fk_curation_import_manual_feature_children_claim", "f"),
+        ("fk_curation_import_manual_feature_children_receipt", "f"),
+        ("fk_curation_import_manual_feature_children_decision", "f"),
+    },
     ("ops", "curation_import_plan_claims"): {
         ("curation_import_plan_claims_pkey", "p"),
         ("curation_import_plan_claims_import_plan_id_fkey", "f"),
@@ -435,6 +461,7 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("curation_import_plan_claims_command_id_key", "u"),
         ("curation_import_plan_claims_import_plan_id_command_id_key", "u"),
         ("curation_import_plan_claims_plan_sha256_check", "c"),
+        ("uq_curation_import_plan_claims_plan_sha256", "u"),
     },
     ("ops", "curation_import_plan_commits"): {
         ("curation_import_plan_commits_pkey", "p"),
@@ -573,10 +600,16 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
     ("ops", "curation_import_collection_touches"): {
         "curation_import_collection_touches_pkey",
     },
+    ("ops", "curation_import_manual_feature_children"): {
+        "pk_curation_import_manual_feature_children",
+        "uq_curation_import_manual_feature_children_command",
+        "uq_curation_import_manual_feature_children_import_row",
+    },
     ("ops", "curation_import_plan_claims"): {
         "curation_import_plan_claims_pkey",
         "curation_import_plan_claims_command_id_key",
         "curation_import_plan_claims_import_plan_id_command_id_key",
+        "uq_curation_import_plan_claims_plan_sha256",
     },
     ("ops", "curation_import_plan_commits"): {
         "curation_import_plan_commits_pkey",
@@ -641,7 +674,7 @@ _TVN40_RAW_SQL_CATALOG_SHA256: dict[tuple[str, str], str] = {
         "b55dea3a3fdd17744281cc1fdadd16000251db76d3052fac855310eb0c868214"
     ),
     ("ops", "curation_import_plan_claims"): (
-        "1a1e40ea9f266833facf386e56968e9391b6c14a313afd668ede4525a9d75bdc"
+        "7136d74e3a8ef4e95b8d006ea353a4f0605c78bcf92fd95061766a9c5654ea06"
     ),
     ("ops", "curation_import_plan_commits"): (
         "3cfdb8dea520650d4bd4d53dc4903b80694ebc909f167e92e4ff82ef8667bd10"

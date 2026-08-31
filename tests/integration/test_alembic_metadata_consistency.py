@@ -20,7 +20,10 @@ from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
 
 from alembic import command
-from kortravelmap.infra.application_schema_head import application_schema_head
+from kortravelmap.infra.application_schema_head import (
+    BASELINE_ROOT_REVISION,
+    application_schema_head,
+)
 from tests.integration._application_300_bootstrap import (
     alembic_schema_owner_role,
     bootstrapped_application_300_migrator_dsn,
@@ -212,11 +215,17 @@ async def application_300_config(
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
 
 
-async def _prepare_logical_0236(config: Config, admin_dsn: str) -> None:
-    """retired source를 실행하지 않고 exact source version facet을 fixture로 만든다."""
+async def _prepare_logical_0236(
+    config: Config, admin_dsn: str, *, expected_before: str = _HEAD
+) -> None:
+    """retired source를 실행하지 않고 exact source version facet을 fixture로 만든다.
 
+    ``expected_before``는 호출자가 **선언**한다. handoff fixture는 baseline root에서
+    멈추고 metadata fixture는 head까지 올리므로, 여기서 하나로 가정하면 둘 중 하나가
+    반드시 틀린다.
+    """
     del config
-    assert await _raw_version(admin_dsn) == (_HEAD,)
+    assert await _raw_version(admin_dsn) == (expected_before,)
     await _admin_execute(
         admin_dsn,
         "SET ROLE ktm_feature_schema_owner; "
@@ -292,7 +301,10 @@ async def test_fresh_upgrade_rolls_back_when_public_text_search_residue_appears_
 async def _stamp(
     config: Config,
     *,
-    revision: str = _HEAD,
+    # handoff의 목적지는 **baseline root**다. head가 아니다. 기본값을 `_HEAD`로 두면
+    # migration이 하나 붙는 순간 `is_sanctioned`가 거짓이 되어, 이 helper를 쓰는 음성
+    # 테스트들이 자기가 노리던 오류 대신 "generic Alembic stamp is unsupported"를 받는다.
+    revision: str = BASELINE_ROOT_REVISION,
     purge: bool = True,
     tag: str | None = _HANDOFF_TAG,
 ) -> None:

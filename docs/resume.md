@@ -12,48 +12,42 @@
 
 ### 다음 한 작업
 
-**배포 계약을 baseline 너머로 확장한다.** 이것이 `301`의 유일한 선행 조건이다.
+**`chain/301-carrier`를 PostGIS 통합으로 검증한다.** 계약 확장은 구현이 끝났다.
 
-통합 실행이 실증한 차단점 — sealed baseline은 `300` 시점의 물리 catalog와
-`alembic_version` facet을 고정하는데, 세 지점이 live DB를 그 digest와 exact 대조한다.
+#### 구현된 것
 
-| 지점 | 대조 대상 | head > root일 때 |
+| 갈래 | 무엇이 문제였나 | 어떻게 풀었나 |
 |---|---|---|
-| `docker/application-schema-fresh-300.py:940` | `contract["source_catalog_sha256"]` | 새 객체가 catalog digest를 바꾼다 |
-| `docker/application-schema-fresh-finalize.py:418` | `expected["destination_catalog_sha256"]` | 같음 |
-| `docker/application-schema-final-permit.py:602` | `payload["candidate"]["destination_alembic_version_sha256"]` | facet SQL이 `mismatch` 상수만 낸다 |
+| facet | `application-destination-alembic-version.sql`이 `alembic_version = ARRAY['300']`을 담고 있었다. 이 SQL의 산출물은 성공/실패 두 문자열뿐인 **단일 boolean**이고 기대 digest는 성공 sentinel의 sha256이라, head가 움직이면 영원히 `mismatch`가 되고 **옮겨갈 digest가 없었다.** | 술어를 제거했다. 기대 digest는 **한 글자도 바뀌지 않는다** — 바뀌는 것은 SQL 바이트와 reference manifest뿐이라 PostGIS oracle 없이 재봉인했다. revision 동등성은 배포 executable 넷이 파생 head로 이미 대조한다. |
+| catalog | `application-catalog.sql`은 객체마다 한 행을 내므로 digest가 **진짜 상태 의존**이다. | 봉인값은 `300` 도달 순간에만 대조한다. `command.upgrade`를 `300`에서 끊고 exact 대조를 끝낸 뒤 head까지 올려 관측값을 receipt에 남긴다. 그 이후의 정본은 receipt다. |
 
-facet 계약 SQL은 조건에 `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이다.
-head가 움직이면 `mismatch` 한 값만 나오므로 **옮겨갈 digest가 존재하지 않는다.** 그
-파일은 reference manifest digest로 봉인돼 편집할 수 없다.
+```
+baseline digest ──(300 체크포인트)── root receipt ──(pre-ACL)── finalize receipt
+                                                                    │
+                                                          (post-ACL) └── final permit
+```
 
-확정된 방향(사용자 선택, 2026-08-31): **baseline digest는 `300` 도달 순간에만 대조하고,
-그 이후 상태는 fresh-install operation receipt가 관측 digest를 정본으로 남겨
-finalize·final-permit이 그것과 대조한다.** receipt는 이미 fence → journal → Manager
-evidence로 결박돼 있으므로 신뢰 사슬은 끊기지 않는다. 대안이던 baseline 재cut은 다음
-migration에서 또 재cut을 요구하므로 같은 덫을 다시 놓는다.
+`300`에서의 엄격함은 **하나도 잃지 않는다.** 세 지점 모두 head == baseline root일 때
+종전과 동일한 봉인값 대조를 한다. 근거가 옮겨가는 것은 그 너머뿐이다(Manager ADR-43).
 
-구현 순서:
+형제 저장소: `kor-travel-docker-manager` 브랜치 `chain/head-state-receipt`
+(root result v3 필드 + permit의 head 인지 catalog 기대값). n150 CI-parity 초록.
 
-1. `application-schema-fresh-300.py` — `command.upgrade`를 `300`에서 한 번 끊는다.
-   그 지점에서 baseline catalog/seed/facet을 exact 대조하고, 이어서 head까지 올린 뒤
-   **head 상태의 catalog digest를 receipt에 기록**한다.
-2. `application-schema-fresh-finalize.py` — 기대값 출처를 baseline에서 root receipt로
-   바꾸고, 자기 관측(post-ACL) digest를 finalize receipt에 남긴다.
-3. `application-schema-final-permit.py` — live 상태를 finalize receipt 기록값과 대조한다.
-   현행 `live_destination_facet` 대조는 head > root에서 `mismatch == mismatch`가 되어
-   **무의미해지므로** 반드시 교체해야 한다.
-4. result schema 버전 상향 + `ck_application_schema_operation_receipts_result_schema`
-   열거 확장(= 그 자체가 migration이므로 `301`과 같은 PR).
-5. Manager `FreshRootResult`/`FreshFinalizeResult` 필드와 permit payload 반영.
+#### 남은 것
 
-현재 안전판: `application-schema-fresh-300.py`가 head > baseline root이면 **fail-close**
-한다. 위 작업 없이 migration을 올리면 fresh 설치 자체가 거부되므로, 프로덕션이 조용히
-깨지는 경로는 없다.
+1. **PostGIS 통합 실행.** `301`이 실제로 적용되고 fresh 설치 → finalize → final permit이
+   완주하는지는 통합 job만 답할 수 있다. `feat/m03-import-child-commands`가 머지되면
+   이 브랜치를 main 위로 rebase하고 PR을 연다.
+2. 통합에서 드러날 fixture 갱신 — 특히 `tests/integration/test_alembic_upgrade.py`의
+   `_TVN40_RAW_SQL_CATALOG_SHA256`(`uq_curation_import_plan_claims_plan_sha256`이 catalog를
+   바꾼다)과 새 표의 exact-catalog 핀.
+3. 그 뒤에야 `T-VN-M03`의 child command 발급 증분(`feat/m03-child-command-issuance`가
+   provenance 반환 확장까지 담고 있다).
 
-`301`과 M03 linkage는 `chain/301-carrier`에 보존돼 있다. receipt head CHECK 게이트도
-거기서 되살아나며, 그때 적대 리뷰가 실증한 우회 셋(`_UPGRADE_STATEMENTS` 미배선 ·
-docstring 전용 선언 · 열거 결손)을 함께 막아야 한다.
+#### 확인하지 않은 것
+
+- 실 프로덕션 rebuild.
+- baseline을 다시 cut할 때 `build-baseline.sh`가 새 facet SQL과 정합한지.
 
 ## 2026-08-30 — provider 핀 동기화 완료, task 원장 무결성 복구
 

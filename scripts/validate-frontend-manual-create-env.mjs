@@ -86,3 +86,22 @@ if (effectiveManualCreateRaw !== "" || manualCreateDigest !== "") {
     }
   }
 }
+
+// dotenv-expand는 값 안의 `$`를 변수참조로 확장한다 — 홑따옴표로도 보호되지 않으므로
+// `pbkdf2_sha256$…` hash가 dotenv file에 있으면 조용히 파괴돼 로그인이 전부 401이
+// 된다(값을 `\$`로 이스케이프해야 한다). 파괴된 결과는 여기서 fail-closed로 잡는다.
+const ADMIN_HASH_KEY = "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH";
+const adminPasswordHash = loaded.combinedEnv[ADMIN_HASH_KEY];
+if (adminPasswordHash !== undefined && adminPasswordHash.trim() !== "") {
+  const shape = /^pbkdf2_sha256\$\d+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/;
+  const iterations = Number(adminPasswordHash.trim().split("$")[1]);
+  if (!shape.test(adminPasswordHash.trim()) || !(iterations >= 100000)) {
+    process.stderr.write(
+      `${ADMIN_HASH_KEY} is not a valid pbkdf2_sha256 hash after Next dotenv ` +
+        "expansion; escape every `$` in the dotenv value as `\\$` " +
+        "(single quotes do NOT prevent expansion), or pass the hash via " +
+        "process environment\n",
+    );
+    process.exit(1);
+  }
+}
