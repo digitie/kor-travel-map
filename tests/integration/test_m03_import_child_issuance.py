@@ -319,10 +319,11 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             assert feature["category"] == "12010000"
             origin_kind = await connection.scalar(
                 text(
+                    # origins 표의 feature_id 열은 UUID(3축 identity의 physical key)다.
                     "SELECT origin_kind FROM feature.feature_creation_origins "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_uuid AS uuid)"
                 ),
-                {"feature_id": child.feature_id},
+                {"feature_uuid": child.feature_uuid},
             )
             assert origin_kind == "manual_curation"
 
