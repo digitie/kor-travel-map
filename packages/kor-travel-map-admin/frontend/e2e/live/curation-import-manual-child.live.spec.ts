@@ -105,7 +105,6 @@ test.describe("M03 manual child 격리 live acceptance", () => {
       }>;
     }>;
     expect(grid.data.items.length).toBeGreaterThan(0);
-    const dataset = grid.data.items[0];
 
     const theme = await page.request.post("/api/proxy/v1/admin/curated-themes", {
       headers: { "Idempotency-Key": idempotency() },
@@ -117,18 +116,31 @@ test.describe("M03 manual child 격리 live acceptance", () => {
     });
     expect([200, 201]).toContain(theme.status());
 
-    const source = await page.request.post(
-      "/api/proxy/v1/admin/curated-sources",
-      {
-        headers: { "Idempotency-Key": idempotency() },
-        data: {
-          provider_dataset_id: dataset.provider_dataset_id,
-          source_name: `M03 live acceptance ${suffix}`,
-          source_kind: "manual",
+    // curated_sources는 dataset당 1개다 — 이미 소스가 붙은 dataset은 409를
+    // 돌려주므로, 소스 생성이 성공하는 첫 dataset을 찾는다.
+    let dataset: (typeof grid.data.items)[number] | null = null;
+    for (const candidate of grid.data.items) {
+      const source = await page.request.post(
+        "/api/proxy/v1/admin/curated-sources",
+        {
+          headers: { "Idempotency-Key": idempotency() },
+          data: {
+            provider_dataset_id: candidate.provider_dataset_id,
+            source_name: `M03 live acceptance ${suffix}`,
+            source_kind: "manual",
+          },
         },
-      },
-    );
-    expect([200, 201]).toContain(source.status());
+      );
+      if ([200, 201].includes(source.status())) {
+        dataset = candidate;
+        break;
+      }
+      expect(source.status()).toBe(409);
+    }
+    expect(dataset).not.toBeNull();
+    if (dataset === null) {
+      throw new Error("소스를 붙일 수 있는 dataset이 없다");
+    }
 
     await page.goto("/admin/features/curated");
     await expect(
