@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d"
+      "sha256": "6419c1332ba95ab03b8ec794d9d2e7c2a6f2e6da012d23118708e4e4bc5343bb"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-31",
+      "task": "T-VN-M03 import manual child",
+      "change": "admin baseline sha256 재고정 — import commit 응답에 ordered manual_children(UUID 정본·reused·terminal_status, CurationImportManualChildView)를 추가했다. additive 응답 확장이며 user/service bytes는 불변, 목표 diff 항목·counts도 무변경이다."
+    },
     {
       "date": "2026-08-27",
       "task": "T-VN-M02/M05 provenance identity",

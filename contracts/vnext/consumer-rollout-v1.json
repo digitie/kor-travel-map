@@ -168,7 +168,7 @@
         "state": "pending",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "map_service_openapi_sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d",
-        "map_full_openapi_sha256": "0a1548a94c80bab1af6ab79c10b6f07eba32450adccd8ec2751a8c5256144c1d",
+        "map_full_openapi_sha256": "6419c1332ba95ab03b8ec794d9d2e7c2a6f2e6da012d23118708e4e4bc5343bb",
         "blocking_reason": "T-VN-40 pending receipt remains pending: Map Admin provenance now has an opaque feature_id plus required feature_uuid. Re-vendor the exact full-admin artifact, require PinVi M05 attestation to compare provenance.feature_uuid with both case UUIDs, then re-run paired acceptance before restoring the complete receipt.",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"

@@ -50,12 +50,12 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-27 T-VN-M02/M05 — Admin provenance가 opaque ID와 명시 UUID를
     # 병행 반환하도록 contract pin까지 원자 갱신했다.
     "openapi-diff-v1.json": (
-        "b03c86921d3116df0557f9c44412141d92d3fa6d291d8d76b96ace4ecf5dadde"
+        "a595eff7ec23d92f188d71ea4f80d987887dd3a489a2686ae58cc2acef122da6"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
     "consumer-rollout-v1.json": (
-        "3968745a8b5cd1f88056fd1cea84fd0f51c245ad77501f77c1dc00e1c0f0da18"
+        "34ba858303f8bd60856094d4a01b3b8cd0c01a84599b5b1bff1ee3b36db94fa2"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
