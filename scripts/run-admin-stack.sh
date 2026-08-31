@@ -648,7 +648,10 @@ def _require_loopback_dsn(name: str) -> str:
     if (
         parsed.scheme not in {"postgresql", "postgresql+psycopg", "postgresql+asyncpg"}
         or parsed.hostname not in {"127.0.0.1", "localhost"}
-        or parsed.port not in {None, 5432}
+        # 포트는 고정하지 않는다 — 이 검사가 지키는 성질은 "로컬 스택이 원격 DB를
+        # 가리키지 않는다"이고 그것은 loopback host 검사가 소유한다. 5432 고정은
+        # 같은 호스트에서 disposable DB(예: 다른 포트의 검증용 PostGIS)를 쓰는 것까지
+        # 막는 과결박이었다(정체 근본원인 감사 §2의 값 고정 계열).
         or not parsed.username
         or not parsed.password
         or not parsed.path.startswith("/")
