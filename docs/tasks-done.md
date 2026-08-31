@@ -3,6 +3,13 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+> **과거 기록 아카이브** (규약 §8 — 과거 검색은 `rg <패턴> docs/archive/`)
+>
+> | 기간 | 파일 |
+> | --- | --- |
+> | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
+> | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
+
 ## 2026-08-31 — T-VN-M03 import child·격리 live acceptance 완료 이관
 
 - [x] **T-VN-M03 — curated 동시 생성의 import 및 live acceptance 완료.**
@@ -16,13 +23,6 @@
   (`curation-import-manual-child.live.spec.ts`)가 n150 스택(302 head)에서 UI CSV
   업로드→preview→commit→admin REST 관측을 완주(2 passed). acceptance가 노출한
   feature 상세의 잠복 500(빈 tuple mock에 숨음)도 함께 수리했다.
-
-> **과거 기록 아카이브** (규약 §8 — 과거 검색은 `rg <패턴> docs/archive/`)
->
-> | 기간 | 파일 |
-> | --- | --- |
-> | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
-> | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
 ## 2026-08-31 — 수리 완료·관측 의무 귀속으로 두 M05 task 이관
 
