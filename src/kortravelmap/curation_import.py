@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
@@ -36,13 +37,16 @@ CURATION_CSV_HEADERS: Final[tuple[str, ...]] = (
 )
 CURATION_CSV_OPTIONAL_HEADERS: Final[tuple[str, ...]] = (
     "manual_feature_kind",
+    "manual_feature_category",
     "manual_feature_lon",
     "manual_feature_lat",
 )
 """T-VN-M03 — 행이 manual Feature를 **만들도록** 지시하는 선택 header.
 
-파일 단위 opt-in이다. 없으면 기존 CSV가 그대로 유효하고, 있으면 세 개가 함께 있어야
-한다. 좌표를 `metadata_json`에 숨기지 않고 **typed 열**로 받는 이유는 설계
+파일 단위 opt-in이다. 없으면 기존 CSV가 그대로 유효하고, 있으면 **전부 함께** 있어야
+한다. ``manual_feature_category``는 Feature의 8자리 category code다 — writer가
+category를 요구하는데 item 쪽 인자에는 그 원천이 없어 typed 열로 받는다
+(이름은 ``place_name``이 소유한다). 좌표를 `metadata_json`에 숨기지 않고 **typed 열**로 받는 이유는 설계
 §6.1이 "`metadata_json`에 untyped input을 숨기지 않는다"를 요구하기 때문이고,
 주소에서 좌표를 추론하지 않는 이유는 §7이 "CSV 제목·주소 기반 Feature 추정 생성"을
 비목표로 명시하기 때문이다 — 그래서 좌표는 **명시적으로 실려야** 한다.
@@ -109,6 +113,9 @@ class CurationImportRow:
     metadata_json: dict[str, object]
     manual_feature_kind: str
     """비면 이 행은 manual Feature를 만들지 않는다. 아니면 ``place``/``event``."""
+
+    manual_feature_category: str
+    """manual 행이면 8자리 category code, 아니면 빈 문자열."""
 
     manual_feature_lon: Decimal | None
     manual_feature_lat: Decimal | None
@@ -350,6 +357,26 @@ def _parse_row(
                     column="manual_feature_kind",
                 )
             )
+        if not re.fullmatch(r"[0-9]{8}", values["manual_feature_category"]):
+            issues.append(
+                CurationImportIssue(
+                    code="invalid_manual_feature_category",
+                    message="manual_feature_category는 8자리 숫자 code여야 합니다.",
+                    row_number=row_number,
+                    column="manual_feature_category",
+                )
+            )
+        if not values["place_name"]:
+            # writer의 Feature name은 place_name이 소유한다(§6.1 typed 원칙 —
+            # metadata_json에 숨기지 않는다). 비면 만들 이름이 없다.
+            issues.append(
+                CurationImportIssue(
+                    code="manual_feature_name_missing",
+                    message="manual 행은 place_name이 Feature 이름이 됩니다 — 비울 수 없습니다.",
+                    row_number=row_number,
+                    column="place_name",
+                )
+            )
         manual_lon = _parse_coordinate(
             values["manual_feature_lon"], row_number, "manual_feature_lon", 180, issues
         )
@@ -357,7 +384,7 @@ def _parse_row(
             values["manual_feature_lat"], row_number, "manual_feature_lat", 90, issues
         )
     else:
-        for column in ("manual_feature_lon", "manual_feature_lat"):
+        for column in ("manual_feature_lon", "manual_feature_lat", "manual_feature_category"):
             if values[column]:
                 issues.append(
                     CurationImportIssue(
@@ -400,6 +427,9 @@ def _parse_row(
         item_summary=values["item_summary"],
         metadata_json=metadata,
         manual_feature_kind=manual_kind,
+        manual_feature_category=(
+            values["manual_feature_category"] if manual_kind else ""
+        ),
         manual_feature_lon=manual_lon,
         manual_feature_lat=manual_lat,
         issues=tuple(issues),
@@ -422,8 +452,11 @@ def manual_feature_payload(row: CurationImportRow) -> dict[str, object] | None:
         return None
     if row.manual_feature_lon is None or row.manual_feature_lat is None:
         return None
+    if not row.manual_feature_category:
+        return None
     return {
         "kind": row.manual_feature_kind,
+        "category": row.manual_feature_category,
         "coord": {
             "lon": str(row.manual_feature_lon),
             "lat": str(row.manual_feature_lat),

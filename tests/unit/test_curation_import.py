@@ -308,6 +308,7 @@ def test_manual_feature_row_parses_typed_coordinates() -> None:
         _csv_bytes(
             _valid_row(
                 manual_feature_kind="place",
+                manual_feature_category="12010000",
                 manual_feature_lon="126.99100",
                 manual_feature_lat="37.57960",
             ),
@@ -318,6 +319,7 @@ def test_manual_feature_row_parses_typed_coordinates() -> None:
     assert preview.has_errors is False
     row = preview.rows[0]
     assert row.manual_feature_kind == "place"
+    assert row.manual_feature_category == "12010000"
     assert row.manual_feature_lon == Decimal("126.99100")
     assert row.manual_feature_lat == Decimal("37.57960")
     assert str(row.manual_feature_lon) == "126.99100"
@@ -409,6 +411,57 @@ def test_manual_feature_payload_is_none_without_kind() -> None:
     assert manual_feature_payload(preview.rows[0]) is None
 
 
+def test_manual_feature_category_must_be_an_eight_digit_code() -> None:
+    """writer가 category를 요구하므로 manual 행은 8자리 code가 있어야 한다."""
+    for bad in ("", "1201", "abcd1234", "120100001"):
+        preview = parse_curation_csv(
+            _csv_bytes(
+                _valid_row(
+                    manual_feature_kind="place",
+                    manual_feature_category=bad,
+                    manual_feature_lon="127.0",
+                    manual_feature_lat="37.5",
+                ),
+                headers=_MANUAL_HEADERS,
+            )
+        )
+        assert "invalid_manual_feature_category" in {
+            issue.code for issue in preview.rows[0].issues
+        }, bad
+
+
+def test_manual_feature_row_requires_place_name_for_the_feature_name() -> None:
+    """Feature 이름은 place_name이 소유한다 — manual 행에서 비울 수 없다."""
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(
+                place_name="",
+                manual_feature_kind="place",
+                manual_feature_category="12010000",
+                manual_feature_lon="127.0",
+                manual_feature_lat="37.5",
+            ),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+    assert "manual_feature_name_missing" in {
+        issue.code for issue in preview.rows[0].issues
+    }
+
+
+def test_category_without_manual_kind_is_rejected() -> None:
+    """kind 없는 category는 지시가 불완전하다."""
+    preview = parse_curation_csv(
+        _csv_bytes(
+            _valid_row(manual_feature_category="12010000"),
+            headers=_MANUAL_HEADERS,
+        )
+    )
+    assert "manual_feature_kind_missing" in {
+        issue.code for issue in preview.rows[0].issues
+    }
+
+
 def test_manual_feature_payload_preserves_written_precision() -> None:
     """canonical SHA가 재현 가능하려면 CSV에 적힌 자릿수가 살아 있어야 한다.
 
@@ -419,6 +472,7 @@ def test_manual_feature_payload_preserves_written_precision() -> None:
         _csv_bytes(
             _valid_row(
                 manual_feature_kind="place",
+                manual_feature_category="12010000",
                 manual_feature_lon="126.99100",
                 manual_feature_lat="37.57960",
             ),
@@ -430,6 +484,7 @@ def test_manual_feature_payload_preserves_written_precision() -> None:
 
     assert payload == {
         "kind": "place",
+        "category": "12010000",
         "coord": {"lon": "126.99100", "lat": "37.57960"},
     }
 
@@ -460,6 +515,7 @@ def test_manual_feature_payload_omits_server_owned_fields() -> None:
         _csv_bytes(
             _valid_row(
                 manual_feature_kind="event",
+                manual_feature_category="15020000",
                 manual_feature_lon="127.0",
                 manual_feature_lat="37.5",
             ),
