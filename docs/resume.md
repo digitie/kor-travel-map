@@ -1,45 +1,59 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-31 — `301` 적재와 head 값 고정 해제 (Map PR #1124 / Manager PR #276)
+## 2026-08-31 — head 값 고정 해제 (Map PR #1124 / Manager PR #276), `301`은 분리
 
-`T-VN-M03`의 linkage migration `301_m03_import_children`을 얹었다. 그것을 막던 것은 배포
-계약이 아니라 `application_head = "300"` 리터럴 **Map 6곳 + Manager 11곳**이었고, 양쪽에서
-head를 파생값으로 바꿨다.
+`application_head = "300"` 리터럴 Map 6곳 + Manager 11곳을 파생값으로 바꿨다. `300`은
+`BASELINE_ROOT_REVISION`으로만 남는다 — head가 아니라 `0236 → 300` handoff의 stamp
+목적지다. Manager는 head를 **두 독립 출처가 일치할 때만** 받는다(ADR-42).
 
-- Map: `kortravelmap.infra.application_schema_head.application_schema_head()`가 migration
-  graph에서 단일 head를 유도(0개/2개면 fail-close). 배포 executable 넷 + `env.py` +
-  `api-entrypoint.sh` + `dagster-storage-migrate.py` + `run-admin-stack.sh`가 읽는다.
-- Manager: head는 paired receipt의 baseline contract와 candidate API image의 installed
-  graph **두 출처가 일치할 때만** 받는다(ADR-42).
-- `300`은 `BASELINE_ROOT_REVISION`으로만 남는다 — head가 아니라 역사적 좌표다.
-
-닫은 잠복 파손: `env.py`의 fresh 설치 facet 검증이 head가 움직이면 **조용히 꺼지던** 조건
-(봉인을 `on_version_apply` 콜백으로 옮기고 fail-close 추가), `api-entrypoint.sh`의 기동
-차단, `dagster-storage-migrate.py`의 DB 판정 arm, `run-admin-stack.sh`의 자기 DB 거절.
-
-게이트는 **열거에서 전수로** 바꿨다(`docker/`+`scripts/` 82개). 열거가 그 자체로
-사각지대였고 실제로 `run-admin-stack.sh`를 놓쳤다. 면제는 사유와 함께 선언해야 하고 죽은
-면제 항목도 실패다.
+게이트 규칙을 **"비교에 쓰였나"에서 "존재하나"로** 바꿨다. 리터럴과 비교를 다른 줄에 두는
+것은 우회가 아니라 평범한 코드이므로, 비교를 탐지하는 규칙은 원리적으로 완결될 수 없다.
+적대 리뷰가 실행으로 뚫은 14가지를 되짚어 전부 막히는 것을 확인했다.
 
 ### 다음 한 작업
 
-**`T-VN-M03` child command 발급.** `301` linkage 표와 identity 유도
-(`curation_import_children.py`), typed `manual_feature` payload(CSV opt-in 헤더 3개)는
-모두 있다. 남은 것은 **commit 경로가 실제로 child를 발급하고 linkage에 기록하는 것**이다.
+**배포 계약을 baseline 너머로 확장한다.** 이것이 `301`의 유일한 선행 조건이다.
 
-설계 §6.3이 child 하나에 `claim → Feature/core/initial state → origin → subtype/override →
-curation item → accepted link decision → child terminal result`를 귀속시킨다. 실행 순서에
-제약이 하나 있다 — `feature.create_manual_curation_item_with_feature_command`가
-`collection_id`를 요구하는데 collection은 `import_curation_rows` 안에서 만들어진다. 따라서
-child 발급 지점은 route가 아니라 **`import_curation_rows` 내부, collection 확정 직후 ·
-item upsert 직전**이다.
+통합 실행이 실증한 차단점 — sealed baseline은 `300` 시점의 물리 catalog와
+`alembic_version` facet을 고정하는데, 세 지점이 live DB를 그 digest와 exact 대조한다.
 
-`301` FK 6축의 대상 unique는 전부 실재를 확인했다
-(`uq_manual_feature_identity_claims_feature_command`,
-`uq_curation_import_rows_item_pointer`, `curation_import_plan_rows_pkey`,
-`pk_domain_commands`, 그리고 `301`이 스스로 더하는 둘). `_record_import_provenance`가
-행별 `(import_row_id, curation_item_id, decision_id)`를 **반환하지 않으므로** linkage를
-쓰려면 그 반환을 확장하는 것이 선행 증분이다.
+| 지점 | 대조 대상 | head > root일 때 |
+|---|---|---|
+| `docker/application-schema-fresh-300.py:940` | `contract["source_catalog_sha256"]` | 새 객체가 catalog digest를 바꾼다 |
+| `docker/application-schema-fresh-finalize.py:418` | `expected["destination_catalog_sha256"]` | 같음 |
+| `docker/application-schema-final-permit.py:602` | `payload["candidate"]["destination_alembic_version_sha256"]` | facet SQL이 `mismatch` 상수만 낸다 |
+
+facet 계약 SQL은 조건에 `alembic_version = ARRAY['300']`을 담은 **단일 boolean**이다.
+head가 움직이면 `mismatch` 한 값만 나오므로 **옮겨갈 digest가 존재하지 않는다.** 그
+파일은 reference manifest digest로 봉인돼 편집할 수 없다.
+
+확정된 방향(사용자 선택, 2026-08-31): **baseline digest는 `300` 도달 순간에만 대조하고,
+그 이후 상태는 fresh-install operation receipt가 관측 digest를 정본으로 남겨
+finalize·final-permit이 그것과 대조한다.** receipt는 이미 fence → journal → Manager
+evidence로 결박돼 있으므로 신뢰 사슬은 끊기지 않는다. 대안이던 baseline 재cut은 다음
+migration에서 또 재cut을 요구하므로 같은 덫을 다시 놓는다.
+
+구현 순서:
+
+1. `application-schema-fresh-300.py` — `command.upgrade`를 `300`에서 한 번 끊는다.
+   그 지점에서 baseline catalog/seed/facet을 exact 대조하고, 이어서 head까지 올린 뒤
+   **head 상태의 catalog digest를 receipt에 기록**한다.
+2. `application-schema-fresh-finalize.py` — 기대값 출처를 baseline에서 root receipt로
+   바꾸고, 자기 관측(post-ACL) digest를 finalize receipt에 남긴다.
+3. `application-schema-final-permit.py` — live 상태를 finalize receipt 기록값과 대조한다.
+   현행 `live_destination_facet` 대조는 head > root에서 `mismatch == mismatch`가 되어
+   **무의미해지므로** 반드시 교체해야 한다.
+4. result schema 버전 상향 + `ck_application_schema_operation_receipts_result_schema`
+   열거 확장(= 그 자체가 migration이므로 `301`과 같은 PR).
+5. Manager `FreshRootResult`/`FreshFinalizeResult` 필드와 permit payload 반영.
+
+현재 안전판: `application-schema-fresh-300.py`가 head > baseline root이면 **fail-close**
+한다. 위 작업 없이 migration을 올리면 fresh 설치 자체가 거부되므로, 프로덕션이 조용히
+깨지는 경로는 없다.
+
+`301`과 M03 linkage는 `chain/301-carrier`에 보존돼 있다. receipt head CHECK 게이트도
+거기서 되살아나며, 그때 적대 리뷰가 실증한 우회 셋(`_UPGRADE_STATEMENTS` 미배선 ·
+docstring 전용 선언 · 열거 결손)을 함께 막아야 한다.
 
 ## 2026-08-30 — provider 핀 동기화 완료, task 원장 무결성 복구
 
