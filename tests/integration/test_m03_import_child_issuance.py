@@ -309,7 +309,7 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             feature = (
                 await connection.execute(
                     text(
-                        "SELECT name, category, origin_kind FROM feature.features "
+                        "SELECT name, category FROM feature.features "
                         "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
                     ),
                     {"feature_uuid": child.feature_uuid},
@@ -317,7 +317,14 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             ).mappings().one()
             assert feature["name"] == "수동 생성 장소"
             assert feature["category"] == "12010000"
-            assert feature["origin_kind"] == "manual_curation"
+            origin_kind = await connection.scalar(
+                text(
+                    "SELECT origin_kind FROM feature.feature_creation_origins "
+                    "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
+                ),
+                {"feature_uuid": child.feature_uuid},
+            )
+            assert origin_kind == "manual_curation"
 
             # `301` linkage가 다섯 축을 전부 결박했다(FK 일곱이 정합을 강제).
             linkage = (
