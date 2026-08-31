@@ -568,8 +568,9 @@ def test_manual_row_commit_reports_children_with_the_uuid_contract(
 
     적대 리뷰 F11의 뮤테이션 M2(항상 빈 manual_children)를 이 테스트가 잡는다.
     """
-    from kortravelmap.api.routers import curations as module
     from kortravelmap.infra.curation_repo import ManualImportChild
+
+    from kortravelmap.api.routers import curations as module
 
     _enable_manual_create(client)
     feature_uuid = "0189aaaa-bbbb-7ccc-8ddd-eeeeffff0001"
