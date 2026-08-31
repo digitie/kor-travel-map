@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — M03 격리 live acceptance green + 잠복 500 수리
+
+사상 첫 manual-create live harness가 n150 격리 스택(302 head)에서 완주했다:
+UI CSV 업로드 → preview(201) → commit(200, `manual_children` 확정값) → admin REST에서
+생성 Feature 관측. 전제 두 가지를 실측으로 확인했다 — (1) theme/source는 retained
+catalog에 선존재해야 한다(import는 catalog를 만들지 않고 preview가 422 fail-close),
+(2) Idempotency-Key는 BFF가 허용 목록으로 전달한다.
+
+acceptance가 최초로 노출한 **잠복 결함**: feature 상세 라우트가 curation item을
+`AdminCurationItemView.model_validate(item, from_attributes=True)`로 직검증해
+CurationItem에 없는 `command_etag`(그리고 int `row_revision`) 때문에 **curation이
+달린 모든 feature 상세가 500**이었다. 기존 테스트가 전부 빈 tuple을 mock해 숨어
+있었다. curations 라우터의 `_admin_item_view`(정본)로 교체하고, 실제 item을 실은
+회귀 테스트를 추가했다.
+
 ## 2026-08-31 — M03 302: import 행별 manual Feature child 발급 완주 (실 DB green)
 
 `301`이 만든 linkage 표를 실제로 채우는 쓰기 계약 셋을 `302`로 확장하고, repo·route를
