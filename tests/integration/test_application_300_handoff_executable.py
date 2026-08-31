@@ -15,6 +15,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import text
 
+from kortravelmap.infra.application_schema_head import BASELINE_ROOT_REVISION
 from tests.integration._application_300_bootstrap import (
     upgrade_baseline_root_with_application_300_bootstrap,
 )
@@ -234,7 +235,9 @@ async def test_handoff_executable_accepts_exact_source_contract(
     tmp_path: Path,
 ) -> None:
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -338,7 +341,9 @@ async def test_handoff_executable_rejects_source_contract_drift_without_stamping
     """raw `0236` label만 맞춘 full catalog/seed drift는 metadata 변경 전 거부한다."""
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -377,7 +382,9 @@ async def test_mutable_provider_catalog_data_does_not_change_handoff_contract(
     """provider/curated 운영 데이터는 immutable handoff receipt가 아니다."""
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -422,7 +429,9 @@ async def test_handoff_rejects_superuser_even_with_a_valid_manager_receipt(
     """`SET ROLE` 이전 session_user gate가 superuser direct execution을 막는다."""
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     module = _handoff_module()
     fence_receipt = await _writer_fence_receipt(
         module, admin_dsn, tmp_path, monkeypatch
@@ -456,7 +465,9 @@ async def test_handoff_rolls_back_real_post_stamp_failure_to_exact_0236_state(
     """
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -515,7 +526,9 @@ async def test_handoff_rejects_expired_or_wrong_database_manager_receipt(
     """expiry와 DB identity는 metadata transaction 전에 fail-close여야 한다."""
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -752,7 +765,9 @@ async def test_handoff_rejects_any_application_prefixed_role_before_stamp(
     """
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
@@ -792,7 +807,9 @@ async def test_handoff_rejects_manager_observed_hidden_user_mapping_before_stamp
     """
 
     config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
+    await _prepare_logical_0236(
+        config, admin_dsn, expected_before=BASELINE_ROOT_REVISION
+    )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)

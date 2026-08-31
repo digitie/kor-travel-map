@@ -950,8 +950,19 @@ async def _assert_application_receipts(
         await module.verify_runtime_projection_invariants(connection)
     except Exception as exc:
         raise FreshMigrationError("fresh 300 cannot verify committed application receipts") from exc
-    if catalog not in expected_catalogs or seed != expected["seed_sha256"]:
-        raise FreshMigrationError("fresh 300 catalog or seed receipt does not match baseline")
+    # 둘을 한 메시지로 뭉치면 무엇이 어긋났는지 알 수 없다 — facet 계약 SQL이 조건
+    # 스무 개를 단일 boolean으로 뭉쳐 같은 문제를 만들었고, 그것을 고치는 PR에서
+    # 같은 실수를 남겨 둘 이유가 없다. 관측값을 함께 싣되 digest는 비밀이 아니다.
+    if catalog not in expected_catalogs:
+        raise FreshMigrationError(
+            "fresh 300 catalog receipt does not match baseline "
+            f"(observed={catalog}, expected={sorted(expected_catalogs)})"
+        )
+    if seed != expected["seed_sha256"]:
+        raise FreshMigrationError(
+            "fresh 300 seed receipt does not match baseline "
+            f"(observed={seed}, expected={expected['seed_sha256']})"
+        )
     if destination != expected["destination_alembic_version_sha256"]:
         raise FreshMigrationError("fresh 300 destination metadata receipt does not match baseline")
     return catalog, seed, destination
