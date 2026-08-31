@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from kortravelmap.curation_import import manual_feature_payload_sha256
 from kortravelmap.curation_import_children import (
