@@ -17,7 +17,7 @@
   반환·linkage SECURITY DEFINER 기록기를 만들고, `curation_repo`가 결정적 child
   identity(§6.2)로 lock→claim→writer→apply→linkage→child result를 한 SERIALIZABLE
   transaction에 배선했다(PR #1127). 판정 근거: (1) 실 PostGIS 통합
-  `test_m03_import_child_issuance.py` 2/2 — linkage 5축·decision
+  `test_tvn_m03_import_child_issuance.py` 2/2 — linkage 5축·decision
   종류(accepted/manual_feature_child)·item feature 결박 생존·child terminal result,
   (2) 사상 첫 manual-create 격리 live harness
   (`curation-import-manual-child.live.spec.ts`)가 n150 스택(302 head)에서 UI CSV

@@ -28,6 +28,10 @@ UNATTRIBUTED_LINK_BASIS: Final[str] = "legacy_unattributed"
 #: - ``forward_recovery``        — merge가 승자에게 이어붙인 결정
 #: - ``source_rule``             — provider source record + 선택 rule로 재구성되는 근거
 #:                                 (`0073`, T-VN-H40)
+#: - ``manual_feature_child``    — 운영자가 승인한 import commit의 child command가
+#:                                 만든 manual Feature 결박 (`302`, T-VN-M03). 같은
+#:                                 transaction의 writer decision(admin_review)을
+#:                                 승계하므로 신뢰 수준이 동일하다.
 #:
 #: DB CHECK ``ck_curation_link_decisions_basis``와 짝을 이룬다. 값을 늘릴 때는
 #: 마이그레이션의 CHECK와 이 집합을 함께 고친다 — 한쪽만 고치면
@@ -38,6 +42,7 @@ TRUSTED_LINK_BASES: Final[frozenset[str]] = frozenset(
         "admin_review",
         "forward_recovery",
         "source_rule",
+        "manual_feature_child",
     }
 )
 

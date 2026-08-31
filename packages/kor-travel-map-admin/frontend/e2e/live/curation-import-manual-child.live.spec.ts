@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  * 완주시키고, commit 응답의 ordered `manual_children`(transaction 확정값)과 생성된
  * Feature/item이 admin REST에서 관측되는 것까지 확인한다. linkage 표 자체는 command
  * owner 전용이라 API 표면이 없다 — DB 결박은 통합 테스트
- * (tests/integration/test_m03_import_child_issuance.py)가 소유하고, 여기서는
+ * (tests/integration/test_tvn_m03_import_child_issuance.py)가 소유하고, 여기서는
  * 부모 응답 summary와 읽기 표면의 정합만 판정한다.
  *
  * 쓰기 스펙이므로 명시 opt-in: E2E_MANUAL_IMPORT_WRITE=1 (격리 스택 전용 —

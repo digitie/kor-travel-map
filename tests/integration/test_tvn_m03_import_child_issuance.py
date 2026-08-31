@@ -1,5 +1,10 @@
 """T-VN-M03 — import 행별 manual Feature child 발급의 실제 DB 경계(302).
 
+> 파일명이 `test_tvn_*` 접두인 이유: 이 테스트는 실제 Feature/claim/origin 행을
+> 남긴다(append-only 계보 — 삭제 불가). 전역 개수를 세는 이웃(test_mois_loader,
+> test_tvn_m01_*)이 **먼저** 돌아야 오염되지 않으므로, 알파벳 정렬로 그 뒤에
+> 서도록 기존 tvn_m03 파일들과 같은 접두를 쓴다(CI 실측 5건 회귀의 원인).
+
 plan 생성 → claim → `import_curation_rows`(parent identity 결박)의 실경로로
 manual 행 하나가 child command·Feature·item·decision·`301` linkage를 한
 transaction에서 확정하는지 검증한다. 격리 수준·role 경계는 실제 LOGIN
