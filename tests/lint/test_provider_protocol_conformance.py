@@ -354,10 +354,12 @@ def test_manifest_is_regenerable_and_not_hand_edited() -> None:
         return
 
     combined = f"{result.stdout}\n{result.stderr}"
-    if "git" in combined and "실패" in combined:
+    if result.returncode == 2:
+        # 생성기가 "확인할 수 없었다"를 exit 2로 명시한다. 문자열 대조가 아니라
+        # 종료 코드로 구분해야 문구가 바뀌어도 조작이 skip으로 새지 않는다.
         pytest.skip(
-            "형제 `python-*-api` 로컬 체크아웃이 없어 manifest 재생성을 확인하지 못했다 "
-            "(ADR-044). 이 게이트는 provider 핀을 바꾸는 개발 환경에서 반드시 초록이어야 "
+            "형제 `python-*-api` 로컬 체크아웃이 없어 manifest 재생성을 확인하지 "
+            "못했다(ADR-044). provider 핀을 바꾸는 개발 환경에서는 반드시 초록이어야 "
             f"한다: {combined.strip()[:200]}"
         )
 
