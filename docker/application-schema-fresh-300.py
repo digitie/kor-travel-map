@@ -977,6 +977,11 @@ async def _observe_application_catalog(
         await connection.execute(text("SET search_path = public, x_extension"))
         catalog = await module.contract_sha256(connection, "application-catalog.sql")
         seed = await module.contract_sha256(connection, "application-seed.sql")
+        # runtime projection invariant는 **head 상태에서도** 성립해야 한다.
+        # `_assert_application_receipts`가 baseline 체크포인트에서 한 번 보지만, 그
+        # 뒤 migration이 projection을 깨뜨릴 수 있다. 체크포인트로 옮기면서 이 검사가
+        # head를 못 보게 되는 것이 이 helper를 만들며 생긴 사각지대였다.
+        await module.verify_runtime_projection_invariants(connection)
     except Exception as exc:
         raise FreshMigrationError(
             "fresh 300 cannot observe the installed application catalog"
