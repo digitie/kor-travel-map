@@ -435,15 +435,20 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         raise FinalPermitError("installed application baseline catalog facets are invalid")
     # fresh finalize evidence의 catalog는 아래 receipts 블록과 같은 원리로 head 인지
     # 대조한다. baseline root에서는 pre/post 모두 봉인 계약과 같아야 한다. 그 너머에서는
-    # 봉인 digest가 서술하는 상태가 존재하지 않으므로(새 migration이 객체를 더한다),
-    # post는 finalize receipt의 observed catalog와 교차 결박하고(그 receipt sha256은
-    # Manager가 이미 결박한다) pre는 잘 형성된 digest임만 요구한다.
+    # 봉인 digest가 서술하는 상태가 존재하지 않으므로(새 migration이 객체를 더한다)
+    # post를 finalize receipt의 observed catalog와 교차 결박하고 pre는 잘 형성된
+    # digest임만 요구한다. 이 완화의 실제 앵커는 둘이다: producer 쪽에서 Manager가
+    # pre == 직전 fresh migration의 post를 결박하고, 이 파일의 _verify_database가
+    # live alembic versions/destination facet을 runtime login으로 재관측한다.
+    # 봉인 대조 복원(head별 destination catalog 재컷)은 후속 과제다.
     if _HEAD == BASELINE_ROOT_REVISION:
         evidence_source_catalog: str | None = source_catalog_sha256
         evidence_destination_catalog = destination_catalog_sha256
     else:
         evidence_source_catalog = None
-        evidence_destination_catalog = str(receipts["observed_catalog_sha256"])
+        evidence_destination_catalog = _require_sha256(
+            receipts["observed_catalog_sha256"], "observed_catalog_sha256"
+        )
     _validate_operation_evidence(
         payload["operation_evidence"],
         transition_kind=str(payload["transition_kind"]),

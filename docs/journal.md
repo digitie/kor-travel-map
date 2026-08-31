@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-31 — M05 rebuild 두 번째 벽: permit evidence의 반쪽 head-인지
+
+#1128로 sealed builder를 고치고 pinset을 재회전(Map 58158472)해 rebuild를 다시
+돌렸더니 이번엔 API/Dagster `up`에서 전멸했다 — 컨테이너 로그의 원문은 "final
+permit fresh finalize generation is invalid". permit 실물과 레포 계약을 나란히
+대조해 확정했다: receipts 블록은 이미 head 인지("root 너머에서는 봉인 digest가
+서술하는 상태가 존재하지 않는다")로 고쳐져 있는데, **operation evidence 블록만
+pre/post catalog를 봉인 계약과 무조건 대조**하고 있었다. head 302의 fresh 실측
+(pre fc32b351/post 00800ab7)은 300 시절 봉인값(5d39c2b2/e7fbf7e7)과 다를 수밖에
+없다 — 이전 green permit들(head 300)은 정확히 봉인값과 일치했다.
+
+#1129가 receipts와 같은 원리로 정렬한다: root 너머에서는 post를 receipts의
+observed catalog와 교차 결박하고 pre는 well-formed digest만 요구. 적대 리뷰
+2인(opus·xhigh) 모두 approve — 반영: 사용 지점 `_require_sha256`(순서 의존 제거),
+주석의 앵커를 실제(Manager의 pre==직전 post 결박 + `_verify_database`의 live
+재관측)로 교정, malformed pre 음성 테스트 추가. 리뷰가 남긴 후속 과제: head별
+destination catalog 재컷으로 봉인 대조 복원, Manager 쪽 동일 교차 검사 대칭.
+
+단위 fixture가 아티팩트 값으로 evidence를 만들어 이 결함을 못 보던 것도 고쳤다
+— beyond-root 현실(봉인값 ≠ 실측)을 그대로 모델링하는 테스트가 이제 원본 코드를
+정확히 1건 실패시킨다.
+
 ## 2026-08-31 — M05 activation rebuild 실패의 근본원인: wheel에 안 실린 package-data
 
 Manager main(5f70770d)을 trusted release로 설치하고 pinset을 원자 회전(Map 13407ba9

@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-31 — M05 rebuild 연쇄 수리 2건: #1128(packaging) → #1129(permit)
+
+pinset 재회전(Map 58158472 / PinVi e0750505) 후 rebuild가 candidate·계약 단계를
+전부 통과하고 fresh finalize까지 완주했으나, permit 검증기의 반쪽 head-인지
+(evidence 블록)로 API/Dagster 기동이 거부됐다. #1129(head-인지 정렬 + beyond-root
+테스트)가 draft로 떠 있고 적대 리뷰 2인 approve, 반영 완료.
+
+### 다음 한 작업
+
+**#1129 CI green → 머지 → 새 Map revision으로 `pin rotate-pair` → rebuild →
+`run-m05-isolated-e2e-once` 1회.** 후속(리뷰 유래): head별 destination catalog
+재컷으로 봉인 대조 복원, Manager 쪽 evidence↔receipts 교차 검사 대칭.
+
 ## 2026-08-31 — M05-ACTIVATION 재개: 회전 완료, rebuild는 packaging에서 실패 → #1128
 
 Manager trusted release(main 5f70770d) 설치 + `ktdctl pin rotate-pair`(Map 13407ba9 /
