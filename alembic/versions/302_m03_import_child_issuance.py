@@ -217,7 +217,11 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _RECORDER,
     f"REVOKE ALL ON PROCEDURE {_RECORDER_SIGNATURE} FROM PUBLIC",
     f"GRANT ALL ON PROCEDURE {_RECORDER_SIGNATURE} TO ktm_curation_admin_executor",
+    # 소유권 이전은 새 소유자가 담는 스키마의 CREATE 권한을 요구한다 — 이전
+    # 동안만 잠깐 부여하고 즉시 회수한다(영구 CREATE는 role 설계 위반).
+    "GRANT CREATE ON SCHEMA ops TO ktm_curation_command_owner",
     f"ALTER PROCEDURE {_RECORDER_SIGNATURE} OWNER TO ktm_curation_command_owner",
+    "REVOKE CREATE ON SCHEMA ops FROM ktm_curation_command_owner",
 )
 
 _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
