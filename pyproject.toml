@@ -163,6 +163,7 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "kortravelmap" = ["py.typed", "_application_migration_graph.json"]
+"kortravelmap.providers" = ["_provider_surface.json"]
 
 # =============================================================================
 # Lint / Type / Test
