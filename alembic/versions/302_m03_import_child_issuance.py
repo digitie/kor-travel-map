@@ -71,13 +71,67 @@ _RECEIPT_HEAD_NARROW: Final = (
     " CHECK (destination_head IN ('300', '301_m03_import_children'))"
 )
 
-_MATCH_BASIS_WIDEN: Final = (
+#: append-only decision log 전체를 ACCESS EXCLUSIVE로 재검증하지 않게(L7)
+#: NOT VALID로 추가하고 별도 문장으로 VALIDATE한다(SHARE UPDATE EXCLUSIVE).
+#: 순수 widen이므로 기존 행이 실패할 수 없어 VALIDATE는 형식적이다.
+_MATCH_BASIS_DROP: Final = (
     "ALTER TABLE feature.curation_link_decisions"
-    " DROP CONSTRAINT ck_curation_link_decisions_ck_curation_link_decisions_basis,"
+    " DROP CONSTRAINT ck_curation_link_decisions_ck_curation_link_decisions_basis"
+)
+
+_MATCH_BASIS_ADD_NOT_VALID: Final = (
+    "ALTER TABLE feature.curation_link_decisions"
     " ADD CONSTRAINT ck_curation_link_decisions_ck_curation_link_decisions_basis"
     " CHECK (match_basis = ANY (ARRAY['csv_explicit_feature_id'::text,"
     " 'admin_review'::text, 'legacy_unattributed'::text, 'forward_recovery'::text,"
-    " 'source_rule'::text, 'manual_feature_child'::text]))"
+    " 'source_rule'::text, 'manual_feature_child'::text])) NOT VALID"
+)
+
+_MATCH_BASIS_VALIDATE: Final = (
+    "ALTER TABLE feature.curation_link_decisions"
+    " VALIDATE CONSTRAINT ck_curation_link_decisions_ck_curation_link_decisions_basis"
+)
+
+#: 적대 리뷰 F7 — import child가 만든 Feature의 origin principal을 별도 값으로
+#: 기록할 수 있게 CHECK을 widen한다(writer가 operation으로 분기).
+_ORIGIN_PRINCIPAL_WIDEN: Final = (
+    "ALTER TABLE feature.feature_creation_origins"
+    " DROP CONSTRAINT ck_feature_creation_origins_principal,"
+    " ADD CONSTRAINT ck_feature_creation_origins_principal CHECK ("
+    "((origin_kind = 'manual_admin'::text) AND"
+    " (creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'::text))"
+    " OR ((origin_kind = 'manual_curation'::text) AND"
+    " (creator_principal_id = ANY (ARRAY["
+    "'admin-ui-bff.manual-curation-feature-create.v1'::text,"
+    " 'admin-ui-bff.curation-import.manual-feature-row.v1'::text])))"
+    " OR ((origin_kind = 'manual_request'::text) AND"
+    " (creator_principal_id = 'feature-request.approval.v1'::text)))"
+)
+
+_ORIGIN_PRINCIPAL_NARROW: Final = (
+    # import child origin 행이 남아 있으면 실패한다 — 그게 맞다(301 원칙).
+    "ALTER TABLE feature.feature_creation_origins"
+    " DROP CONSTRAINT ck_feature_creation_origins_principal,"
+    " ADD CONSTRAINT ck_feature_creation_origins_principal CHECK ("
+    "((origin_kind = 'manual_admin'::text) AND"
+    " (creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'::text))"
+    " OR ((origin_kind = 'manual_curation'::text) AND"
+    " (creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1'::text))"
+    " OR ((origin_kind = 'manual_request'::text) AND"
+    " (creator_principal_id = 'feature-request.approval.v1'::text)))"
+)
+
+#: 부모 summary와 재수렴 판정은 linkage 표를 **읽어야** 한다(설계 §6.5). 쓰기는
+#: 여전히 recorder 하나뿐이다. ADR-090 reconcile은 ktm_feature_runtime의 grant만
+#: 재조정하므로 executor grant는 유지된다.
+_LINKAGE_SELECT_GRANT: Final = (
+    "GRANT SELECT ON TABLE ops.curation_import_manual_feature_children"
+    " TO ktm_curation_admin_executor"
+)
+
+_LINKAGE_SELECT_REVOKE: Final = (
+    "REVOKE SELECT ON TABLE ops.curation_import_manual_feature_children"
+    " FROM ktm_curation_admin_executor"
 )
 
 _MATCH_BASIS_NARROW: Final = (
@@ -172,8 +226,56 @@ BEGIN
         RAISE EXCEPTION 'import child linkage digests are not canonical'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_digest';
     END IF;
-    -- 나머지 결박(plan claim/plan row/claim causation/receipt/decision evidence)은
-    -- 전부 `301` FK가 원자적으로 강제한다 — 여기서 중복 검증하지 않는다.
+    -- 존재 결박(plan claim/plan row/claim causation/receipt/decision evidence)은
+    -- `301` FK가 강제한다. FK가 못 보는 **인자 사이 정합**은 여기서 fail-close한다
+    -- (적대 리뷰 H3 — 교차된 linkage가 FK 일곱을 전부 만족한 채 통과했다).
+    IF NOT EXISTS (
+        SELECT 1 FROM feature.curation_import_rows AS import_row
+        WHERE import_row.import_row_id = p_import_row_id
+          AND import_row.curation_item_id = p_curation_item_id
+          AND import_row.row_number = p_plan_row_number
+    ) THEN
+        RAISE EXCEPTION 'import receipt does not match the plan row number'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_row_number';
+    END IF;
+    IF (
+        SELECT plan_row.normalized_payload ->> 'manual_feature_sha256'
+        FROM feature.curation_import_plan_rows AS plan_row
+        WHERE plan_row.import_plan_id = p_import_plan_id
+          AND plan_row.row_number = p_plan_row_number
+    ) IS DISTINCT FROM p_manual_payload_sha256 THEN
+        RAISE EXCEPTION 'manual payload digest does not match the immutable plan row'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_payload';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM feature.curation_link_decisions AS decision
+        WHERE decision.decision_id = p_link_decision_id
+          AND decision.decision_kind = 'accepted'
+          AND decision.match_basis = 'manual_feature_child'
+    ) THEN
+        RAISE EXCEPTION 'linkage decision must be an accepted manual_feature_child decision'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_decision';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM feature.curation_items AS item
+        JOIN feature.features AS feature_row ON feature_row.feature_id = item.feature_id
+        WHERE item.curation_item_id = p_curation_item_id
+          AND feature_row.feature_uuid = p_feature_uuid
+    ) THEN
+        RAISE EXCEPTION 'curation item is not bound to the linkage feature'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_feature';
+    END IF;
+    IF v_command.actor IS DISTINCT FROM (
+        SELECT parent.actor
+        FROM ops.curation_import_plan_claims AS claim
+        JOIN ops.domain_commands AS parent ON parent.command_id = claim.command_id
+        WHERE claim.import_plan_id = p_import_plan_id
+          AND claim.plan_sha256 = p_plan_sha256
+    ) THEN
+        RAISE EXCEPTION 'child actor does not match the claimed plan actor'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_actor';
+    END IF;
     INSERT INTO ops.curation_import_manual_feature_children (
         import_plan_id, plan_row_number, plan_sha256, manual_payload_sha256,
         child_command_id, feature_uuid, import_row_id, curation_item_id,
@@ -201,7 +303,10 @@ _REVOKE_APPLY_OLD, _GRANT_APPLY_OLD = _apply_acl(with_receipts=False)
 
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _RECEIPT_HEAD_WIDEN,
-    _MATCH_BASIS_WIDEN,
+    _MATCH_BASIS_DROP,
+    _MATCH_BASIS_ADD_NOT_VALID,
+    _MATCH_BASIS_VALIDATE,
+    _ORIGIN_PRINCIPAL_WIDEN,
     # procedure 소유자는 ktm_curation_command_owner다 — REPLACE/DROP/CREATE와
     # ACL은 소유자 role로 수행한다(0228과 같은 패턴, schema owner가 멤버십 보유).
     "SET ROLE ktm_curation_command_owner",
@@ -222,6 +327,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "GRANT CREATE ON SCHEMA ops TO ktm_curation_command_owner",
     f"ALTER PROCEDURE {_RECORDER_SIGNATURE} OWNER TO ktm_curation_command_owner",
     "REVOKE CREATE ON SCHEMA ops FROM ktm_curation_command_owner",
+    _LINKAGE_SELECT_GRANT,
 )
 
 _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
@@ -233,6 +339,8 @@ _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _GRANT_APPLY_OLD,
     _sidecar("_302_writer_original.sql"),
     "SET ROLE ktm_feature_schema_owner",
+    _LINKAGE_SELECT_REVOKE,
+    _ORIGIN_PRINCIPAL_NARROW,
     _MATCH_BASIS_NARROW,
     _RECEIPT_HEAD_NARROW,
 )

@@ -384,6 +384,31 @@ def _parse_row(
         manual_lat = _parse_coordinate(
             values["manual_feature_lat"], row_number, "manual_feature_lat", 90, issues
         )
+        # DB fail-close 경계(ck_features_coord_pair: lon 124~132, lat 33~39.5)를
+        # preview가 미리 돌려준다 — 여기서 통과시키면 plan이 굳은 뒤 commit에서
+        # batch 전체가 죽는다(적대 리뷰 F9).
+        if manual_lon is not None and not (
+            Decimal("124") <= manual_lon <= Decimal("132")
+        ):
+            issues.append(
+                CurationImportIssue(
+                    code="manual_feature_coord_out_of_service_bounds",
+                    message="manual_feature_lon은 서비스 좌표 범위(124~132) 안이어야 합니다.",
+                    row_number=row_number,
+                    column="manual_feature_lon",
+                )
+            )
+        if manual_lat is not None and not (
+            Decimal("33") <= manual_lat <= Decimal("39.5")
+        ):
+            issues.append(
+                CurationImportIssue(
+                    code="manual_feature_coord_out_of_service_bounds",
+                    message="manual_feature_lat은 서비스 좌표 범위(33~39.5) 안이어야 합니다.",
+                    row_number=row_number,
+                    column="manual_feature_lat",
+                )
+            )
     else:
         for column in ("manual_feature_lon", "manual_feature_lat", "manual_feature_category"):
             if values[column]:

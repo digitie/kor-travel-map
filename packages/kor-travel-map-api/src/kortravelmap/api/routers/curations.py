@@ -51,6 +51,7 @@ from kortravelmap.api import domain_command_service
 from kortravelmap.api.auth import (
     AdminManualFeatureCreateContext,
     AdminProxyContext,
+    assert_manual_feature_create_for_import,
     require_admin_frontend,
     require_admin_manual_feature_create,
 )
@@ -716,16 +717,22 @@ class CurationImportManualChildView(BaseModel):
 
     부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로
     구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을
-    영구 결박한다.
+    영구 결박한다. ``feature_id``는 응답 규약(T-VN-32C/ADR-068 §3)대로 **UUID
+    정본**이다 — legacy `f_*` 문자열은 응답에 싣지 않는다(적대 리뷰 F6).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     row_number: int
     child_command_id: int
-    feature_id: str
-    feature_uuid: UUID
+    feature_id: UUID
     curation_item_id: UUID
+    #: 재수렴(re-import) — 이전 commit의 child를 재사용했고 새 command를 발급하지
+    #: 않았다.
+    reused: bool
+    #: child terminal result의 response_status(설계 §6.3). 성공 외의 child는
+    #: transaction 전체와 함께 롤백되므로 성공 status만 관측된다.
+    terminal_status: int
 
 
 class CurationImportData(BaseModel):
@@ -1951,6 +1958,10 @@ async def preview_admin_curation_import(
     # CSV의 자연키를 이 DB의 surrogate로 해석한다(질의 1회). CSV가 자연키를 들고
     # 있으므로 해석은 적재 시점 몫이고, 해석 못 한 pair는 조용히 넘기지 않는다 —
     # 통과시키면 curation이 대상 dataset 없이 적재된다.
+    if any(manual_feature_payload(row) is not None for row in preview.rows):
+        # manual Feature를 만드는 CSV는 단건 route와 같은 kill-switch·전용 token
+        # 계약을 통과해야 한다(적대 리뷰 F2 — import가 그 둘을 우회하고 있었다).
+        assert_manual_feature_create_for_import(request)
     dataset_ids_by_pair = await _provider_dataset_ids_by_pair(session, preview.rows)
     resolved_rows: list[curation_repo.ResolvedCurationImportRow] = []
 
@@ -1981,7 +1992,13 @@ async def preview_admin_curation_import(
         match = _adopted_match(row, matches)
         row_status: ImportRowStatus
         row_issues: list[CurationImportIssueView]
-        if match is not None:
+        if manual_feature_payload(row) is not None:
+            # manual 행은 Feature를 **만든다** — 기존 Feature 미연결은 상태가 아니라
+            # 전제다. unmatched/unresolved로 세면 운영자에게 "미연결로 남습니다"라는
+            # 거짓 통보가 나간다(적대 리뷰 F5).
+            row_status = "valid"
+            row_issues = []
+        elif match is not None:
             row_status = "valid" if dry_run else "imported"
             row_issues = []
         else:
@@ -2258,6 +2275,8 @@ async def commit_admin_curation_import_plan(
                 command_id=command.command_id,
                 principal=context.actor,
             )
+            if any(row.manual_feature is not None for row in resolved_rows):
+                assert_manual_feature_create_for_import(request)
             result = await curation_repo.import_curation_rows(
                 session,
                 rows=resolved_rows,
@@ -2283,9 +2302,25 @@ async def commit_admin_curation_import_plan(
                 CurationImportRowView.model_validate(payload)
                 for payload in stored_response_rows
             ]
+            children_by_row = {
+                child.row_number: child for child in result["manual_children"]
+            }
             item_views = [
-                item.model_copy(update={"status": "imported"})
-                if item.status == "valid" and item.resolved_feature_id is not None
+                item.model_copy(
+                    update={
+                        "status": "imported",
+                        "resolved_feature_id": (
+                            children_by_row[item.row_number].feature_uuid
+                            if item.row_number in children_by_row
+                            else item.resolved_feature_id
+                        ),
+                    }
+                )
+                if item.status == "valid"
+                and (
+                    item.resolved_feature_id is not None
+                    or item.row_number in children_by_row
+                )
                 else item
                 for item in item_views
             ]
@@ -2313,9 +2348,10 @@ async def commit_admin_curation_import_plan(
                         CurationImportManualChildView(
                             row_number=child.row_number,
                             child_command_id=child.child_command_id,
-                            feature_id=child.feature_id,
-                            feature_uuid=UUID(child.feature_uuid),
+                            feature_id=UUID(child.feature_uuid),
                             curation_item_id=UUID(child.curation_item_id),
+                            reused=child.reused,
+                            terminal_status=201,
                         )
                         for child in result["manual_children"]
                     ],

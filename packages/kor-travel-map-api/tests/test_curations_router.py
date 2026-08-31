@@ -16,7 +16,11 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
+from kortravelmap.curation_import import (
+    CURATION_CSV_HEADERS,
+    CURATION_CSV_OPTIONAL_HEADERS,
+    parse_curation_csv,
+)
 from kortravelmap.infra.curation_candidate_repo import (
     ThemeCandidatePage,
     ThemeCandidateRecord,
@@ -112,6 +116,7 @@ _CATALOG_ROWS: tuple[_FakeCatalogRow, ...] = (
     _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-museum-curations", 101),
     _FakeCatalogRow("korea-lighthouse-museum", "lighthouse-stamp-tour-season-5", 102),
     _FakeCatalogRow("korea-tourism-organization", "tourism-100-2026", 103),
+    _FakeCatalogRow("m03-test", "m03-manual", 104),
 )
 
 #: ``_lighthouse_dataset_pairs``의 ``LIKE`` 술어와 같은 축. 공식 등대 판정은
@@ -495,6 +500,177 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
 
 
 @pytest.mark.unit
+def _manual_csv_content() -> bytes:
+    headers = [*CURATION_CSV_HEADERS, *CURATION_CSV_OPTIONAL_HEADERS]
+    values = dict.fromkeys(headers, "")
+    values.update(
+        {
+            "collection_key": "m03:manual",
+            "theme_slug": "m03-manual",
+            "theme_name": "M03 manual",
+            "theme_group": "test",
+            "title": "M03 manual",
+            "edition_key": "2026",
+            "provider": "m03-test",
+            "dataset_key": "m03-manual",
+            "source_name": "M03",
+            "source_item_key": "manual-1",
+            "source_component_key": "primary",
+            "place_name": "수동 생성 장소",
+            "manual_feature_kind": "place",
+            "manual_feature_category": "12010000",
+            "manual_feature_lon": "126.991",
+            "manual_feature_lat": "37.579",
+        }
+    )
+    lines = [",".join(headers), ",".join(values[h] for h in headers)]
+    return ("\ufeff" + "\n".join(lines) + "\n").encode("utf-8")
+
+
+_MANUAL_CREATE_TOKEN = "m03-manual-create-token-0123456789abcdef"
+
+
+def _enable_manual_create(client: TestClient) -> None:
+    client.app.state.settings.admin_manual_feature_create_enabled = True
+    client.app.state.settings.admin_feature_create_token_sha256 = hashlib.sha256(
+        _MANUAL_CREATE_TOKEN.encode("utf-8")
+    ).hexdigest()
+
+
+@pytest.mark.unit
+def test_manual_rows_require_the_create_token_and_kill_switch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """manual 행이 실린 CSV는 단건 route와 같은 가드를 통과해야 한다(F2)."""
+    from kortravelmap.api.routers import curations as module
+
+    monkeypatch.setattr(
+        module.curation_repo, "resolve_feature_matches", AsyncMock(return_value={})
+    )
+    files = {"file": ("manual.csv", _manual_csv_content(), "text/csv")}
+
+    # kill-switch 꺼짐 → 503 (기본 설정)
+    disabled = client.post("/v1/admin/curations/imports/preview", files=files)
+    assert disabled.status_code == 503
+
+    # 켜졌지만 token 없음 → 403
+    _enable_manual_create(client)
+    missing_token = client.post("/v1/admin/curations/imports/preview", files=files)
+    assert missing_token.status_code == 403
+
+
+@pytest.mark.unit
+def test_manual_row_commit_reports_children_with_the_uuid_contract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """manual_children은 UUID 정본·reused·terminal_status를 실어야 하고(F6),
+    manual 행은 unmatched가 아니라 valid→imported로 보고돼야 한다(F5).
+
+    적대 리뷰 F11의 뮤테이션 M2(항상 빈 manual_children)를 이 테스트가 잡는다.
+    """
+    from kortravelmap.api.routers import curations as module
+    from kortravelmap.infra.curation_repo import ManualImportChild
+
+    _enable_manual_create(client)
+    feature_uuid = "0189aaaa-bbbb-7ccc-8ddd-eeeeffff0001"
+    item_uuid = "0189aaaa-bbbb-7ccc-8ddd-eeeeffff0002"
+
+    async def _import(_session: object, **kwargs: Any) -> CurationImportResult:
+        assert kwargs["parent_identity"] is not None
+        assert kwargs["import_plan_id"] is not None
+        return {
+            "rows": 1,
+            "collections": 1,
+            "inserted": 1,
+            "updated": 0,
+            "removed": 0,
+            "removals": (),
+            "import_batch_id": "55555555-5555-4555-8555-555555555555",
+            "row_receipts": (),
+            "manual_children": (
+                ManualImportChild(
+                    row_number=2,
+                    child_command_id=77,
+                    feature_id="f_global_p_deadbeefcafe0000",
+                    feature_uuid=feature_uuid,
+                    curation_item_id=item_uuid,
+                ),
+            ),
+        }
+
+    monkeypatch.setattr(
+        module.curation_repo, "resolve_feature_matches", AsyncMock(return_value={})
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "preview_curation_import",
+        AsyncMock(
+            return_value=CurationImportPlan(
+                collections=1, inserted=1, updated=0, removals=()
+            )
+        ),
+    )
+    monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
+
+    files = {"file": ("manual.csv", _manual_csv_content(), "text/csv")}
+    token_header = {"X-Kor-Travel-Map-Admin-Feature-Create-Token": _MANUAL_CREATE_TOKEN}
+    preview = client.post(
+        "/v1/admin/curations/imports/preview", files=files, headers=token_header
+    )
+    assert preview.status_code == 201
+    preview_data = preview.json()["data"]
+    # F5: manual 행은 미연결 상태가 아니다.
+    assert preview_data["unresolved_rows"] == 0
+    assert preview_data["items"][0]["status"] == "valid"
+    assert preview_data["items"][0]["issues"] == []
+
+    create_plan = module.curation_repo.create_curation_import_plan_command
+    resolved_rows = create_plan.await_args.kwargs["rows"]
+    expires_at = create_plan.await_args.kwargs["expires_at"]
+    monkeypatch.setattr(
+        module.curation_repo,
+        "claim_curation_import_plan_command",
+        AsyncMock(
+            return_value=(
+                "a" * 64,
+                resolved_rows,
+                {
+                    "rows_total": preview_data["rows_total"],
+                    "valid_rows": preview_data["valid_rows"],
+                    "invalid_rows": preview_data["invalid_rows"],
+                    "unresolved_rows": preview_data["unresolved_rows"],
+                },
+                preview_data["items"],
+                expires_at,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        module.curation_repo, "complete_curation_import_plan_command", AsyncMock()
+    )
+
+    committed = client.post(
+        f"/v1/admin/curations/import-plans/{preview_data['import_plan_id']}/commit",
+        headers={"If-Match": preview_data["plan_etag"], **token_header},
+    )
+    assert committed.status_code == 200
+    data = committed.json()["data"]
+    # F6: legacy f_* 문자열이 아니라 UUID 정본.
+    assert data["manual_children"] == [
+        {
+            "row_number": 2,
+            "child_command_id": 77,
+            "feature_id": feature_uuid,
+            "curation_item_id": item_uuid,
+            "reused": False,
+            "terminal_status": 201,
+        }
+    ]
+    # F5: commit 응답에서 manual 행은 imported + resolved UUID.
+    assert data["items"][0]["status"] == "imported"
+    assert data["items"][0]["resolved_feature_id"] == feature_uuid
+
+
 def test_official_lighthouse_import_requires_provenance_sidecar(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

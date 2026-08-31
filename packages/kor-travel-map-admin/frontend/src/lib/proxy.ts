@@ -15,6 +15,11 @@ const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
 const ALLOWED_PROXY_BASE_PROTOCOLS = new Set(["http:", "https:"]);
 const ADMIN_FEATURE_REQUEST_RESOLUTION_PATH =
   /^\/v1\/admin\/feature-requests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:approve|reject)$/i;
+// CSV import는 manual_feature_* 열이 실릴 때만 API가 생성 token을 요구한다(F2).
+// BFF는 multipart 본문을 열지 않으므로 두 import 경로에는 token이 **구성돼 있으면**
+// 항상 부착한다 — 미구성 스택에서 manual 없는 CSV가 죽지 않게 optional이다.
+const ADMIN_CURATION_IMPORT_PATHS =
+  /^\/v1\/admin\/curations\/(?:imports\/preview|import-plans\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/commit)$/i;
 
 export type ProxyRequestInit = RequestInit & { duplex?: "half" };
 
@@ -160,10 +165,20 @@ export function appendManualFeatureCreateHeaders(
   const requiresManualFeatureCreateCredential =
     pathname === ADMIN_FEATURE_CREATE_PATH ||
     ADMIN_FEATURE_REQUEST_RESOLUTION_PATH.test(pathname);
+  const isCurationImport = ADMIN_CURATION_IMPORT_PATHS.test(pathname);
   if (
     method.toUpperCase() !== "POST" ||
-    !requiresManualFeatureCreateCredential
+    (!requiresManualFeatureCreateCredential && !isCurationImport)
   ) {
+    return headers;
+  }
+  if (isCurationImport && !requiresManualFeatureCreateCredential) {
+    try {
+      headers.set(ADMIN_FEATURE_CREATE_TOKEN_HEADER, manualFeatureCreateToken(env));
+    } catch {
+      // token 미구성 스택: manual 행 없는 CSV는 그대로 동작해야 한다. manual 행이
+      // 실리면 API 가드가 403으로 fail-close한다.
+    }
     return headers;
   }
   const token = manualFeatureCreateToken(env);

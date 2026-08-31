@@ -590,6 +590,10 @@ class ManualImportChild:
     feature_id: str
     feature_uuid: str
     curation_item_id: str
+    #: 재수렴(re-import) — 이전 commit의 child linkage를 그대로 재사용했고 새
+    #: child command를 발급하지 않았다(적대 리뷰 H2/F3: authoritative replace가
+    #: manual 행에서 영구히 깨지던 결함의 해소 경로).
+    reused: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -6189,6 +6193,61 @@ async def _issue_manual_feature_children(
                 f"manual 행 {row.row_number}: typed payload SHA가 없다 — "
                 "plan이 §6.1 이전 세대다. 다시 preview할 것."
             )
+        # ── 재수렴 판정(H2/F3): 같은 item identity가 이미 있으면 이번 batch는
+        # 새 child를 만들 수 없다(writer의 item 선검사가 23505로 죽는다). 이전
+        # child linkage가 같은 typed payload를 결박했으면 그 child를 재사용하고,
+        # 아니면 원인을 정확히 말하는 오류로 fail-close한다.
+        prior = (
+            await session.execute(
+                text(
+                    "SELECT item.curation_item_id, item.feature_id, "
+                    "feature_row.feature_uuid, linkage.child_command_id, "
+                    "linkage.manual_payload_sha256 "
+                    "FROM feature.curation_items AS item "
+                    "LEFT JOIN feature.features AS feature_row "
+                    "  ON feature_row.feature_id = item.feature_id "
+                    "LEFT JOIN ops.curation_import_manual_feature_children AS linkage "
+                    "  ON linkage.curation_item_id = item.curation_item_id "
+                    "WHERE item.collection_id = CAST(:collection_id AS uuid) "
+                    "  AND item.external_item_id = :external_item_id "
+                    "  AND item.external_component_id = :external_component_id "
+                    "ORDER BY linkage.recorded_at ASC NULLS LAST LIMIT 1"
+                ),
+                {
+                    "collection_id": collections[row.collection_key],
+                    "external_item_id": row.source_item_key,
+                    "external_component_id": row.source_component_key,
+                },
+            )
+        ).mappings().one_or_none()
+        if prior is not None:
+            if prior["child_command_id"] is None:
+                raise ValueError(
+                    f"manual 행 {row.row_number}: 같은 item identity가 manual 생성이 "
+                    "아닌 경로로 이미 존재한다 — 이 행을 feature_id 참조로 바꿀 것."
+                )
+            if prior["manual_payload_sha256"] != sha:
+                raise ValueError(
+                    f"manual 행 {row.row_number}: 이전 반영과 typed payload가 다르다 "
+                    "(좌표/category 변경은 재수렴할 수 없다) — 이 행을 feature_id "
+                    "참조로 바꾸고 변경은 admin PATCH로 수행할 것."
+                )
+            if prior["feature_uuid"] is None or prior["feature_id"] is None:
+                raise ValueError(
+                    f"manual 행 {row.row_number}: 이전 child의 item이 feature 결박을 "
+                    "잃었다 — 계보가 손상됐으므로 수동 확인이 필요하다."
+                )
+            issued.append(
+                ManualImportChild(
+                    row_number=row.row_number,
+                    child_command_id=int(prior["child_command_id"]),
+                    feature_id=str(prior["feature_id"]),
+                    feature_uuid=str(prior["feature_uuid"]),
+                    curation_item_id=str(prior["curation_item_id"]),
+                    reused=True,
+                )
+            )
+            continue
         identity = derive_child_command_identity(
             parent=parent,
             import_plan_id=import_plan_id,
@@ -6277,10 +6336,38 @@ async def _record_manual_children_linkage(
     """child ↔ import receipt ↔ decision을 `301` linkage 표에 결박하고 child를 닫는다.
 
     좌표는 이 transaction이 방금 확정해 돌려준 값(o_row_receipts)이다 — DB를 되짚어
-    추론하지 않는다. 결박의 정합(FK 일곱)은 표가 원자적으로 강제한다.
+    추론하지 않는다. 존재 결박(FK)은 표가, 인자 사이 정합은 recorder가 강제한다.
+
+    **coverage 가드(적대 리뷰 H1)**: 이 batch의 모든 manual 행은 fresh 발급 또는
+    재수렴 중 하나여야 한다. 발급 단계가 무력화(no-op)돼도 여기서 fail-close한다 —
+    child 없는 `manual_feature_child` decision이 조용히 남는 경로를 막는다.
     """
 
+    covered = {child.row_number for child in issued}
+    uncovered = sorted(set(manual_rows) - covered)
+    if uncovered:
+        raise ValueError(
+            f"manual 행 {uncovered}: child 발급도 재수렴도 되지 않았다 — "
+            "발급 단계가 건너뛰어졌다. batch를 중단한다."
+        )
+
     for child in issued:
+        if child.reused:
+            # 재수렴: linkage는 생성 시점의 것 하나뿐이다(UNIQUE(child_command_id)).
+            # 이번 import row의 decision은 apply가 이미 accepted/manual_feature_child로
+            # 남겼고, receipt 존재만 확인한다.
+            reused_receipt = receipts.get(child.row_number)
+            if reused_receipt is None:
+                raise ValueError(
+                    f"manual 행 {child.row_number}: 재수렴인데 apply가 행 좌표를 "
+                    "돌려주지 않았다."
+                )
+            if reused_receipt.curation_item_id != child.curation_item_id:
+                raise ValueError(
+                    f"manual 행 {child.row_number}: 재수렴 item과 import receipt의 "
+                    "item이 다르다."
+                )
+            continue
         receipt = receipts.get(child.row_number)
         if receipt is None:
             raise ValueError(
@@ -6653,7 +6740,7 @@ async def import_curation_rows(
             batch_kind=batch_kind or "normalized_rows",
             command_id=command_id,
         )
-        if issued:
+        if manual_rows:
             assert import_plan_id is not None
             assert plan_sha256 is not None
             await _record_manual_children_linkage(
@@ -6667,6 +6754,12 @@ async def import_curation_rows(
                 import_plan_id=import_plan_id,
                 plan_sha256=plan_sha256,
             )
+            # 적대 리뷰 H4: apply는 manual 행의 item upsert를 건너뛰므로 fresh
+            # 생성이 `updated`(provenance_only)로 계상된다. writer가 이 transaction
+            # 에서 만든 item은 의미상 insert다 — preview 집계와도 이 보정이 맞다.
+            fresh = sum(1 for child in issued if not child.reused)
+            result["inserted"] += fresh
+            result["updated"] = max(0, result["updated"] - fresh)
         result["manual_children"] = issued
         return result
     counts = {"inserted": 0, "updated": 0, "removed": 0}

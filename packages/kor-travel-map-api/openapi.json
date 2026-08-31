@@ -11360,7 +11360,7 @@
       },
       "CurationImportManualChildView": {
         "additionalProperties": false,
-        "description": "import 행 하나가 발급한 manual Feature child의 확정 좌표(설계 §6.3).\n\n부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로\n구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을\n영구 결박한다.",
+        "description": "import 행 하나가 발급한 manual Feature child의 확정 좌표(설계 §6.3).\n\n부모 응답의 이 목록은 요청 JSON이 아니라 transaction이 확정한 값에서 순서대로\n구성된다 — `ops.curation_import_manual_feature_children` linkage가 같은 셋을\n영구 결박한다. ``feature_id``는 응답 규약(T-VN-32C/ADR-068 §3)대로 **UUID\n정본**이다 — legacy `f_*` 문자열은 응답에 싣지 않는다(적대 리뷰 F6).",
         "properties": {
           "child_command_id": {
             "title": "Child Command Id",
@@ -11372,16 +11372,20 @@
             "type": "string"
           },
           "feature_id": {
+            "format": "uuid",
             "title": "Feature Id",
             "type": "string"
           },
-          "feature_uuid": {
-            "format": "uuid",
-            "title": "Feature Uuid",
-            "type": "string"
+          "reused": {
+            "title": "Reused",
+            "type": "boolean"
           },
           "row_number": {
             "title": "Row Number",
+            "type": "integer"
+          },
+          "terminal_status": {
+            "title": "Terminal Status",
             "type": "integer"
           }
         },
@@ -11389,8 +11393,9 @@
           "row_number",
           "child_command_id",
           "feature_id",
-          "feature_uuid",
-          "curation_item_id"
+          "curation_item_id",
+          "reused",
+          "terminal_status"
         ],
         "title": "CurationImportManualChildView",
         "type": "object"
