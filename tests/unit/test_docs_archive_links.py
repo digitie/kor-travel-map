@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -90,4 +91,25 @@ def test_archive_markdown_files_stay_within_readable_limit() -> None:
     ]
     assert not oversized, (
         f"archive Markdown은 {_MAX_ARCHIVE_BYTES:,} bytes 이하여야 함:\n" + "\n".join(oversized)
+    )
+
+
+def test_live_journal_and_resume_stay_within_readable_limit() -> None:
+    """규약 §8은 live 문서 분리를 요구하는데 게이트는 archive만 보고 있었다.
+
+    그 사각지대에서 journal.md가 568KB, resume.md가 376KB까지 자랐고 — 에이전트
+    read 한도(256KB)를 넘어 통째로 읽히지 않았다. 정체 근본원인 감사에서 세 분석가가
+    모두 이 두 파일을 1차 근거로 삼았으므로, 이 결함은 진단 품질의 상류 원인이다
+    (`docs/reports/map-stall-root-cause-2026-08-31.md` §3 I-7c).
+    """
+    live = pathlib.Path(__file__).resolve().parents[2] / "docs"
+    oversized = [
+        f"docs/{name} = {(live / name).stat().st_size:,} bytes"
+        for name in ("journal.md", "resume.md")
+        if (live / name).stat().st_size > _MAX_ARCHIVE_BYTES
+    ]
+
+    assert not oversized, (
+        f"live 문서가 {_MAX_ARCHIVE_BYTES:,} bytes를 넘었다 — 규약 §8대로 "
+        "docs/archive/로 분리할 것:\n" + "\n".join(oversized)
     )

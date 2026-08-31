@@ -53,34 +53,30 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   결박된다. 후보가 바뀌면 H46H rebuild를 새 generation으로 다시 수행해야 하지만, 현재
   committed generation에서는 data-dependent/consumer acceptance만 순서대로 진행한다.
 
-  **배리어 해제 조건 (각 acceptance 직전에 전부 참이어야 한다).** "주요 개발 완료"나 열린
-  task 수가 아니라, **현 exact candidate를 낡게 만드는 미반영 변경**만 아래 넷으로 판정한다.
-  따라서 구현이 이미 병합된 `T-VN-41C`·`T-VN-M01`~`M05`의 activation/paired acceptance,
-  완료 이관된 `T-VN-C05A`~`C05D`, 그리고 41C/M activation 뒤의 downstream `T-VN-39`는
-  그 자체로 candidate invalidation이 아니다. 단, 이 activation이 아래 candidate/runtime
-  입력을 바꾸면 해당 예외를 적용하지 않는다.
-  - [ ] B1. **현 candidate의 active migration head를 바꾸는 미반영 변경이 없다.** 새 child
-    migration이 병합되거나 pinset에 반영될 때만 false가 된다.
-  - [ ] B2. **현 candidate의 service/user OpenAPI bytes를 바꾸는 미반영 변경이 없다.** PinVi
-    vendor 또는 Map service 정본이 달라져 재-vendor가 필요할 때만 false가 된다.
-  - [ ] B3. **현 candidate의 일곱 image 입력을 바꾸는 미반영 변경이 없다.** Map API/UI/Dagster
-    web·daemon 또는 PinVi API/web/dagster의 source, Dockerfile, 의존 pin, Manager pinset이
-    달라질 때만 false가 된다.
+  **배리어 해제 조건.** 종전의 B1~B3(head·OpenAPI·image 입력에 대한 "미반영 변경이
+  없을 것")는 **삭제했다** — 같은 문단의 실행 시점 대조가 셋을 정확히 덮는다(B1↔schema
+  head, B2↔OpenAPI SHA, B3↔candidate SHA·image ID). 사람이 "미반영 변경 없음"을
+  선언하는 조건은 검증 불가능한 채로 매 병합마다 배리어를 다시 닫아 반복 단가만 키웠다
+  (`docs/reports/map-stall-root-cause-2026-08-31.md` §2·§3 I-3, 적대 검증 STRENGTHENED).
+  판정은 아래 한 문장이 소유한다.
+
+  **각 실행은 candidate SHA·image ID·schema head·OpenAPI SHA와 v6/v8/host-attestation
+  digest를 단순 기록하지 않고 active generation과 exact equality로 대조하며, 누락·불일치면
+  시작·receipt 승격·consumer enable을 모두 거부한다.** candidate가 낡았으면 그 대조가
+  실행 시작 시점에 fail-close하고, 그때만 새 pinset을 고정해 H46H rebuild를 새
+  generation으로 다시 수행한다.
+
   - [ ] B4. **현 candidate의 runtime/attestation 입력을 바꾸는 미반영 변경이 없다.** raw/resolved
     Compose hash, profile, container command, 값 비노출 environment/보안 환경 매핑 hash, mount/network,
     runtime role·ACL, Manager runner와 attestation/verifier contract가 달라지면 false다.
     image·migration·OpenAPI가 같아도 이 입력이 달라지면 이전 v6/v8 journal/evidence를 재사용하지
-    않는다.
+    않는다. **B4만 유지하는 이유**: 이 표면들은 위 실행 시점 대조 4축(candidate SHA·image
+    ID·schema head·OpenAPI SHA)에 포함되지 않아 중복 논증이 성립하지 않는다.
 
-  B1~B3 중 하나라도 false면 정확한 Map/PinVi source와 일곱 image를 새 pinset으로 고정하고
-  H46H rebuild를 새 generation으로 다시 수행해 새 immutable v6/v8 journal을 발행한다. B4만
-  false인 경우에도 기존 journal을 새 host attestation으로 덮거나 재사용할 수 없다. 이 경우
-  acceptance는 중단하고, 별도 검토된 runtime/generation 계약이 새 immutable v6/v8 journal을
-  exact 결박해 발행하기 전에는 재개하지 않는다. 모두 true면 이미 committed된 generation을
-  재구축하지 않고 D1/F1D-E → D2 → 41C acceptance만 진행한다. 각 실행은 candidate SHA·image
-  ID·schema head·OpenAPI SHA와 v6/v8/host-attestation digest를 단순 기록하지 않고 active
-  generation과 exact equality로 대조하며, 누락·불일치면 시작·receipt 승격·consumer enable을
-  모두 거부한다.
+  B4가 false면 이전 journal을 재사용하지 않고 새 immutable v6/v8 journal을 발행한 뒤
+  진행한다. 실측상 이 조건이 막는 것은 디버깅이 아니라 **낡은 verifier 계약 아래 발행된
+  journal의 재사용**뿐이다(2026-08-27~29 Manager 코드 커밋 132건이 B4 아래에서 그대로
+  진행됐다).
 
   **새 candidate rebuild가 필요한 경우에만 하는 선행 준비.**
   - [ ] n150 디스크 여유 — 일곱 image 재빌드 분. 2026-08-20 기준 101G free(78%)이고
@@ -349,6 +345,9 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   정확히 한 번 실행한다.
 - [ ] **A3 — 승격 전제 셋을 모두 만족한다.** 최신 CI green · 전문 적대 리뷰 두 건 GO ·
   terminal 아님. 셋 중 하나라도 아니면 M04/M05 live acceptance attestation을 승격하지 않는다.
+  성공 종료 receipt는 완료 이관된 `T-VN-M05-MAP-HEALTH-TRANSPORT`(Map `/health` 통과)와
+  `T-VN-M05-ADMISSION-TERMINAL`(admission 경계 통과)의 관측 의무를 **함께 봉인한다** —
+  같은 사건 하나를 세 task가 각자 기다리던 중복 부기를 여기 하나로 접었다.
 - [ ] **A4 — 경계는 공개 API만 쓴다.** pinning·pair 결박·one-shot 계약은 Docker Manager
   trusted `ktdctl`과 `runtime-pins`·`pinned-runtime/generation` 공개 API만 사용한다.
   PinVi isolated Compose는 Manager가 transaction·pinset·세 source revision에 결박해 private
@@ -869,14 +868,19 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
 
 - [x] B1. rendered Compose override가 Map API의 host loopback publish를 실제로 남긴다
   (`!reset` → `!override`).
-- [x] B2. 같은 결함을 execution 소비 전에 잡는 preflight가 있다 — `1f20ab36`의
-  `runtime_loopback_publish_invalid`(Docker inspect 바인딩 확인)와
-  `runtime_loopback_publish_config_invalid`(rendered config 확인).
-- [x] B3. 후속 candidate가 Map health를 통과한다. `02168ad5` 이후 phase가
-  `map_subscription_http_failed` → `runtime_command_failed` → PinVi 경계로 전진했다.
-- [ ] B4. Map `/health` 통과가 **성공 종료**의 일부로 한 번 이상 기록된다(M05 완주 시).
+- [x] B2. 같은 결함을 execution 소비 전에 잡는 preflight가 있다 — Manager
+  `scripts/m05_isolated_e2e.py`의 `runtime_loopback_publish_invalid`(Docker inspect
+  바인딩 확인)와 `runtime_loopback_publish_config_invalid`(rendered config 확인).
+  (원 인용 SHA `1f20ab36`은 세 저장소 어디서도 해석되지 않아 file 참조로 교체했다.)
+- [x] B3. 후속 candidate가 Map health를 통과한다. 2026-08-30 Compose `!override` 보정
+  이후 phase가 `map_subscription_http_failed` → `runtime_command_failed` → PinVi 경계로
+  전진했다.
+- [x] B4. Map `/health`의 성공 종료 관측 의무는 그 사건을 소유한
+  `T-VN-M05-ACTIVATION`의 A3에 귀속했다 — 같은 사건 하나를 두 task가 각자 기다리는
+  중복 부기였다(`docs/reports/map-stall-root-cause-2026-08-31.md` §3 I-6).
 
-**판정: 원인 규명·보정 완료. B4는 M05 완주에 종속.**
+**판정: 충족(수리 측 완료, 관측 의무는 ACTIVATION에 귀속) — 2026-08-31
+`docs/tasks-done.md`로 이관.**
 
 ## T-VN-M05-ADMISSION-TERMINAL
 
@@ -884,9 +888,13 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
   재실행 금지 목록과 함께 보존한다.
 - [x] C2. Manager `03a3300…`이 모든 runtime pin mutation을 active global mutation에서
   거절하고 trusted launcher의 inherited-lock fallback만 허용한다.
-- [ ] C3. 후속 candidate에서 admission 경계를 통과하는 것을 확인한다. `02168ad5` 이후
-  admission을 넘어 Map subscription·PinVi runtime까지 도달했으므로 사실상 확인됐으나,
-  성공 종료 receipt로 한 번 더 고정한다.
+- [x] C3. 후속 candidate에서 admission 경계 통과가 확인됐다 — 2026-08-30 Compose
+  `!override` 보정 이후 admission을 넘어 Map subscription·PinVi runtime까지 도달했다.
+  성공 종료 receipt로의 최종 고정 의무는 그 사건을 소유한 `T-VN-M05-ACTIVATION` A3에
+  귀속했다(중복 부기 해소, 위 MAP-HEALTH-TRANSPORT B4와 같은 근거).
+
+**판정: 충족(수리 측 완료, 관측 의무는 ACTIVATION에 귀속) — 2026-08-31
+`docs/tasks-done.md`로 이관.**
 
 ## T-VN-M05-ROLE-CATALOG-RESET
 

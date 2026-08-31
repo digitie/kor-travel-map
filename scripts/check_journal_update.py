@@ -27,6 +27,10 @@ def requires_journal_update(paths: list[str]) -> bool:
     normalized_paths = {normalize_path(path) for path in paths}
     if JOURNAL_PATH in normalized_paths:
         return False
+    # 규약 §8 분리 직후에는 당월 archive shard에 쓰는 것도 기록이다 — 이걸 인정하지
+    # 않으면 hook이 분리하자마자 live 파일을 도로 부풀린다.
+    if any(path.startswith("docs/archive/journal-") for path in normalized_paths):
+        return False
     return any(is_source_or_test_path(path) for path in normalized_paths)
 
 

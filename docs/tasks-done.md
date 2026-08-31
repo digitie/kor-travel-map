@@ -3,6 +3,24 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-31 — 수리 완료·관측 의무 귀속으로 두 M05 task 이관
+
+`T-VN-M05-MAP-HEALTH-TRANSPORT`와 `T-VN-M05-ADMISSION-TERMINAL`은 수리 측
+조건(B1~B3, C1~C2)이 전부 `[x]`였고, 남은 한 칸(B4·C3)은 둘 다 "M05 성공 종료
+receipt"라는 **같은 사건 하나**에 종속된 중복 부기였다. 그 관측 의무를 사건을 소유한
+`T-VN-M05-ACTIVATION`의 A3에 귀속시키고 두 task를 닫는다
+(`docs/reports/map-stall-root-cause-2026-08-31.md` §3 I-6, 적대 검증 CONFIRMED).
+
+- [x] **T-VN-M05-MAP-HEALTH-TRANSPORT — `map_health_transport_failed` terminal 원인
+  규명·보정 완료.** 원인은 Compose override의 `ports: !reset`(빈 값으로 되돌리는 태그,
+  의도는 `!override`) 한 줄. host publish socket이 애초에 존재하지 않아 네 candidate가
+  서로 다른 revision에서 동일 지점에 멈췄다 — source와 무관한 정적 결함이므로 source
+  회전으로는 통과 불가능했다. 보정 후 phase가 PinVi 경계까지 전진했다.
+
+- [x] **T-VN-M05-ADMISSION-TERMINAL — admission terminal 두 사례 보존·경계 통과 확인
+  완료.** `7035b0b1`·`3d8d63e1`을 재실행 금지 목록과 함께 보존했고, 보정 후 후속
+  candidate가 admission을 넘어 Map subscription·PinVi runtime까지 도달했다.
+
 ## 2026-08-31 — 원장이 이미 충족으로 판정한 두 M05 task 이관
 
 `docs/tasks-acceptance.md`가 두 task를 각각 **판정: 충족**으로 기록하고 하나는 명시적으로
