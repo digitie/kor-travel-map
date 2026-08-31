@@ -2117,6 +2117,7 @@ async def preview_admin_curation_import(
             # dry-run은 아무것도 확정하지 않는다 — batch도 행 좌표도 없다.
             "import_batch_id": None,
             "row_receipts": (),
+            "manual_children": (),
         }
     except IntegrityError as exc:
         raise _conflict(exc) from exc
