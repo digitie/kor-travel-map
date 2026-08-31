@@ -690,7 +690,7 @@ if metadata_url.username != metadata_identity or metadata_url.path != f"/{metada
 with psycopg.connect(app_dsn) as connection:
     application_identity = connection.execute(
         """
-        SELECT current_database(), pg_control_system().system_identifier::text,
+        SELECT current_database(), (SELECT system_identifier::text FROM pg_control_system()),
                owner.rolname
         FROM pg_database AS database
         JOIN pg_roles AS owner ON owner.oid = database.datdba
@@ -715,7 +715,7 @@ with psycopg.connect(metadata_dsn) as connection:
                role.rolreplication, role.rolbypassrls,
                (SELECT count(*) FROM pg_auth_members WHERE member = role.oid),
                (SELECT count(*) FROM pg_auth_members WHERE roleid = role.oid),
-               pg_control_system().system_identifier::text,
+               (SELECT system_identifier::text FROM pg_control_system()),
                (SELECT count(*) FROM pg_tables WHERE schemaname = 'public')
         FROM pg_database AS database
         JOIN pg_roles AS owner ON owner.oid = database.datdba
