@@ -411,6 +411,10 @@ async def _root_receipt_head_catalog(
     operation_id = fence.get("prior_fresh_migration_operation_id")
     if operation_id is None:
         return expected["source_catalog_sha256"]
+    # migrator는 NOINHERIT LOGIN이다 — receipt 조회는 명시 schema-owner role이 필요하다.
+    # 이 helper는 `_assert_raw_300_and_receipts`의 **인자 위치**에서 평가되므로, 그 함수의
+    # SET ROLE보다 먼저 돈다. 여기서 직접 전환한다(이후 코드가 다시 SET하므로 무해하다).
+    await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
     receipt = await _find_operation_receipt(connection, UUID(str(operation_id)))
     if receipt is None:
         raise FreshFinalizeError("fresh finalize prior root receipt is missing")
