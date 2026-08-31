@@ -156,9 +156,12 @@ test.describe("M03 manual child 격리 live acceptance", () => {
     const previewBody = (await preview.json()) as Envelope<{
       rows_total: number;
       invalid_rows: number;
+      unresolved_rows: number;
     }>;
     expect(previewBody.data.rows_total).toBe(1);
     expect(previewBody.data.invalid_rows).toBe(0);
+    // F5: manual 행은 미연결(unresolved)이 아니다 — Feature를 만드는 행이다.
+    expect(previewBody.data.unresolved_rows).toBe(0);
 
     const commitResponse = page.waitForResponse(
       (response) =>
@@ -177,21 +180,29 @@ test.describe("M03 manual child 격리 live acceptance", () => {
         row_number: number;
         child_command_id: number;
         feature_id: string;
-        feature_uuid: string;
         curation_item_id: string;
+        reused: boolean;
+        terminal_status: number;
       }>;
     }>;
 
     // ── 부모 summary는 transaction 확정값이다(설계 §6.3) ────────────────
+    // F6: feature_id는 legacy f_*가 아니라 UUID 정본이다.
     expect(commitBody.data.manual_children).toHaveLength(1);
+    // H4: fresh 생성은 inserted로 계상된다.
+    expect(commitBody.data.inserted).toBeGreaterThanOrEqual(1);
     const child = commitBody.data.manual_children[0];
     expect(child.row_number).toBe(2);
     expect(child.child_command_id).toBeGreaterThan(0);
-    expect(child.feature_id).toMatch(/^f_/);
+    expect(child.reused).toBe(false);
+    expect(child.terminal_status).toBe(201);
+    expect(child.feature_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
 
     // ── 생성된 Feature가 admin 읽기 표면에서 관측된다 ───────────────────
     const feature = await page.request.get(
-      `/api/proxy/v1/admin/features/${child.feature_uuid}`,
+      `/api/proxy/v1/admin/features/${child.feature_id}`,
     );
     expect(feature.status()).toBe(200);
     const featureBody = (await feature.json()) as Envelope<{

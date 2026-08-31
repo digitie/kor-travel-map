@@ -395,6 +395,144 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
         await api.dispose()
 
 
+async def _run_import(
+    engine: AsyncEngine,
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    actor: str,
+    rows: tuple[ResolvedCurationImportRow, ...],
+) -> tuple[dict[str, object], str, str]:
+    """plan 생성→claim→import 한 사이클. (result, plan_id, plan_sha) 반환."""
+
+    preview_command = await _domain_command(
+        engine,
+        actor=actor,
+        operation="admin.curation-import.preview",
+        idempotency_key=str(uuid4()),
+        request_fingerprint="c" * 64,
+    )
+    import_plan_id = str(uuid4())
+    plan_sha256 = uuid4().hex + uuid4().hex
+    content_sha256 = uuid4().hex + uuid4().hex
+    async with session_factory() as session, session.begin():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        revisions = await build_curation_import_revision_vector(session, rows=rows)
+        await create_curation_import_plan_command(
+            session,
+            import_plan_id=import_plan_id,
+            content_sha256=content_sha256,
+            provenance_sha256=None,
+            plan_sha256=plan_sha256,
+            summary={"has_errors": False, "valid": len(rows)},
+            rows=rows,
+            response_rows=tuple(
+                {"row_number": row.row_number, "valid": True} for row in rows
+            ),
+            revisions=revisions,
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+            command_id=preview_command,
+            principal=actor,
+        )
+    parent_key = str(uuid4())
+    parent_command = await _domain_command(
+        engine,
+        actor=actor,
+        operation="admin.curation.import",
+        idempotency_key=parent_key,
+        request_fingerprint="d" * 64,
+    )
+    parent = ParentCommandIdentity(
+        actor=actor,
+        operation="admin.curation.import",
+        idempotency_key=parent_key,
+        request_fingerprint="d" * 64,
+    )
+    async with session_factory() as session, session.begin():
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        claimed_sha, stored_rows, _summary, _response, _expires = (
+            await claim_curation_import_plan_command(
+                session,
+                import_plan_id=import_plan_id,
+                plan_sha256=plan_sha256,
+                command_id=parent_command,
+                principal=actor,
+            )
+        )
+        result = await import_curation_rows(
+            session,
+            rows=stored_rows,
+            actor=actor,
+            source_content_sha256=claimed_sha,
+            batch_kind="csv_upload",
+            command_id=parent_command,
+            parent_identity=parent,
+            import_plan_id=import_plan_id,
+            plan_sha256=plan_sha256,
+        )
+    return dict(result), import_plan_id, plan_sha256
+
+
+async def test_reimporting_the_same_manual_row_reuses_the_child(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """재수렴(적대 리뷰 H2/F3): 같은 manual CSV의 재commit은 이전 child를 재사용한다.
+
+    authoritative replace가 manual 행에서 영구히 깨지지 않아야 한다 — 새 child
+    command·linkage를 만들지 않고, 계보는 원 생성의 linkage 하나로 유지된다.
+    """
+    suffix = uuid4().hex[:12]
+    actor = f"admin:m03-reuse-{suffix}"
+    dataset_id = await _seed_dataset(migrated_engine, suffix=suffix)
+    manual = _row(
+        suffix=suffix,
+        dataset_id=dataset_id,
+        row_number=2,
+        source_item_key="manual-1",
+        place_name="재수렴 장소",
+        manual_feature={
+            "kind": "place",
+            "category": "12010000",
+            "coord": {"lon": "127.10000", "lat": "37.40000"},
+        },
+    )
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    session_factory = async_sessionmaker(api, expire_on_commit=False)
+    try:
+        first, _plan1, _sha1 = await _run_import(
+            migrated_engine, session_factory, actor=actor, rows=(manual,)
+        )
+        first_children = first["manual_children"]
+        assert len(first_children) == 1
+        assert first_children[0].reused is False
+        # H4: fresh 생성은 inserted다.
+        assert first["inserted"] == 1
+
+        second, _plan2, _sha2 = await _run_import(
+            migrated_engine, session_factory, actor=actor, rows=(manual,)
+        )
+        second_children = second["manual_children"]
+        assert len(second_children) == 1
+        assert second_children[0].reused is True
+        assert (
+            second_children[0].child_command_id
+            == first_children[0].child_command_id
+        )
+        assert second_children[0].feature_uuid == first_children[0].feature_uuid
+        assert second["inserted"] == 0
+
+        async with migrated_engine.connect() as connection:
+            linkage_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM ops.curation_import_manual_feature_children "
+                    "WHERE child_command_id = :command_id"
+                ),
+                {"command_id": first_children[0].child_command_id},
+            )
+            assert linkage_count == 1
+    finally:
+        await api.dispose()
+
+
 async def test_manual_row_is_rejected_outside_the_command_path(
     migrated_engine: AsyncEngine,
 ) -> None:
