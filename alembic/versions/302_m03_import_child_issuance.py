@@ -210,16 +210,20 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _sidecar("_302_apply_upgraded.sql"),
     _REVOKE_APPLY_NEW,
     _GRANT_APPLY_NEW,
+    "SET ROLE ktm_feature_schema_owner",
+    # command owner는 ops 스키마에 CREATE 권한이 없다 — schema owner가 만들고
+    # 소유권을 이전한다(0228의 표 OWNER TO 패턴과 동일). 명시 ACL은 이전 후에도
+    # 유지된다.
     _RECORDER,
     f"REVOKE ALL ON PROCEDURE {_RECORDER_SIGNATURE} FROM PUBLIC",
     f"GRANT ALL ON PROCEDURE {_RECORDER_SIGNATURE} TO ktm_curation_admin_executor",
-    "SET ROLE ktm_feature_schema_owner",
+    f"ALTER PROCEDURE {_RECORDER_SIGNATURE} OWNER TO ktm_curation_command_owner",
 )
 
 _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_curation_command_owner",
     f"DROP PROCEDURE {_RECORDER_SIGNATURE}",
-    _DROP_APPLY_NEW,
+    _DROP_APPLY_NEW,  # noqa: E501 — recorder DROP은 소유자(command owner)로 실행
     _sidecar("_302_apply_original.sql"),
     _REVOKE_APPLY_OLD,
     _GRANT_APPLY_OLD,
