@@ -690,8 +690,9 @@ def test_feature_detail_renders_curation_items_with_the_view_contract(
     500이었다 — 기존 테스트가 전부 빈 tuple을 mock해 잠복했고, M03 manual-child
     live acceptance가 최초로 노출했다.
     """
-    from kortravelmap.api.routers import admin_features as router_mod
     from test_curations_router import _item as _curation_item
+
+    from kortravelmap.api.routers import admin_features as router_mod
 
     _patch_admin_resolved_identity(monkeypatch)
 

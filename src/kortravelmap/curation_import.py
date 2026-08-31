@@ -46,7 +46,8 @@ CURATION_CSV_OPTIONAL_HEADERS: Final[tuple[str, ...]] = (
 파일 단위 opt-in이다. 없으면 기존 CSV가 그대로 유효하고, 있으면 **전부 함께** 있어야
 한다. ``manual_feature_category``는 Feature의 8자리 category code다 — writer가
 category를 요구하는데 item 쪽 인자에는 그 원천이 없어 typed 열로 받는다
-(이름은 ``place_name``이 소유한다). 좌표를 `metadata_json`에 숨기지 않고 **typed 열**로 받는 이유는 설계
+(이름은 ``place_name``이 소유한다). 좌표를 `metadata_json`에 숨기지 않고
+**typed 열**로 받는 이유는 설계
 §6.1이 "`metadata_json`에 untyped input을 숨기지 않는다"를 요구하기 때문이고,
 주소에서 좌표를 추론하지 않는 이유는 §7이 "CSV 제목·주소 기반 Feature 추정 생성"을
 비목표로 명시하기 때문이다 — 그래서 좌표는 **명시적으로 실려야** 한다.

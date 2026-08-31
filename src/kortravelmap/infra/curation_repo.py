@@ -20,15 +20,6 @@ from sqlalchemy.engine import RowMapping
 
 from kortravelmap.core import make_feature_id
 from kortravelmap.core.address import normalize_korean_text
-from kortravelmap.curation_import_children import (
-    ParentCommandIdentity,
-    derive_child_command_identity,
-)
-from kortravelmap.infra.domain_command_repo import (
-    create_domain_command_claim,
-    create_domain_command_record,
-    lock_domain_command,
-)
 from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
     address_hint_matches,
@@ -37,7 +28,16 @@ from kortravelmap.core.curation_cutover_mapping import (
     CurationCutoverIdentityMappingDigestInput,
     curation_cutover_identity_mapping_root,
 )
+from kortravelmap.curation_import_children import (
+    ParentCommandIdentity,
+    derive_child_command_identity,
+)
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
+from kortravelmap.infra.domain_command_repo import (
+    create_domain_command_claim,
+    create_domain_command_record,
+    lock_domain_command,
+)
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 from kortravelmap.infra.feature_subtype import write_subtype
@@ -6654,7 +6654,8 @@ async def import_curation_rows(
             command_id=command_id,
         )
         if issued:
-            assert import_plan_id is not None and plan_sha256 is not None
+            assert import_plan_id is not None
+            assert plan_sha256 is not None
             await _record_manual_children_linkage(
                 session,
                 issued=issued,

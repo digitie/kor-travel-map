@@ -86,7 +86,6 @@ from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import (
     AdminCurationItemView,
     _admin_item_view,
-    curation_item_response_feature_id,
 )
 from kortravelmap.api.routers.features import (
     FeaturePriceResponse,

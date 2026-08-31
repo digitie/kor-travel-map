@@ -23,7 +23,6 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import Response
-from kortravelmap.curation_import_children import ParentCommandIdentity
 from kortravelmap.curation_import import (
     CURATION_CSV_HEADERS,
     CURATION_CSV_MAX_BYTES,
@@ -34,6 +33,7 @@ from kortravelmap.curation_import import (
     manual_feature_payload_sha256,
     parse_curation_csv,
 )
+from kortravelmap.curation_import_children import ParentCommandIdentity
 from kortravelmap.curation_provenance import (
     CURATION_PROVENANCE_MAX_BYTES,
     CurationProvenanceError,

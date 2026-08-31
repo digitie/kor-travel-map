@@ -214,7 +214,13 @@ BEGIN
         v_feature_uuid,
         'manual_curation',
         p_domain_command_id,
-        'admin-ui-bff.manual-curation-feature-create.v1',
+        -- 적대 리뷰 F7: import child가 만든 Feature의 origin principal이 단건
+        -- admin 생성과 같으면 provenance 원장이 경로를 구분하지 못한다.
+        CASE v_command.operation
+            WHEN 'admin.curation-import.manual-feature-row.create-v1'
+                THEN 'admin-ui-bff.curation-import.manual-feature-row.v1'
+            ELSE 'admin-ui-bff.manual-curation-feature-create.v1'
+        END,
         v_command.actor,
         clock_timestamp(),
         session_user,
