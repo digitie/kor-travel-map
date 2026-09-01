@@ -1,5 +1,51 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-02 — e2e17 사전조치 완료, 실행은 보류(소유자 지시)
+
+소각 경로 수리를 마치고 n150 재설치까지 끝냈다. **실행(rotate-pair → rebuild →
+e2e17)은 소유자 지시로 보류** — PinVi·Manager의 신규 PR 머지가 끝난 뒤 진행한다.
+
+### 이번에 닫은 소각 경로 (Manager #297/#298)
+
+적대 리뷰 2인 + `tasks.md` 후속 조사가 같은 결함 클래스의 인스턴스를 다섯 개 더
+찾았다. 원칙 하나로 정리했다 — **launcher는 실행권이 소비됐다는 양성 증거가 있을
+때만 태운다.**
+
+| 결함 | 결과 |
+|---|---|
+| 디렉터리 fsync 실패가 전파돼 **통과한 실행**이 무조건 소각 | 파일은 이미 durable한데 driver가 1을 반환해 Tier 1이 걸렸다. `_unlink_private` 쪽은 launcher를 거치지도 않고 driver가 직접 소각 |
+| 관측 실패가 receipt를 읽지도 않고 소각 | 첫 수정은 "읽지도 않고 **안** 태운다"로 방향만 바꿔 본문 이중 실행을 열었다(리뷰 blocker). 최종: 게이트만 무효화하고 receipt는 항상 읽는다 |
+| `{0,3,4,5}` 외 **모든 값**이 소각 (126/127/137/미포착 예외) | `case`로 통합. receipt를 못 읽으면 driver가 claim 직후 남기는 root 0600 마커로 소비 여부를 판정 |
+| ktdctl 딸꾹질이 "기록 없음"으로 접혀 scoped 차단을 무조건 소각으로 승격 | 두 헬퍼를 tri-state로(있음/없음/판독 불가) |
+| `pin block-execution` 실패가 `set -e`에 먹혀 fallback 봉투에도 도달 못 함 | 상태 포착 + 명시 진단 |
+
+### GM 트랙 신규 기능 조사 (소유자 지시)
+
+`secure_state_file.fsync_directory`(GM-10)가 정본화한 규칙을 채택했다 —
+"이 단계의 실패로 이미 끝난 파일 교체를 실패로 되돌리면 안 된다". 함수를 직접
+쓰지는 **않았다**: driver 쪽 open이 `O_DIRECTORY|O_NOFOLLOW`로 더 강해 바꾸면
+하향 평준화다(그 모듈 자신의 docstring이 세운 잣대).
+
+**13건은 "하지 말 것"으로 닫았다.** 특히 `compose_service` 채택은 소각을 부를
+뻔했다 — `registry.py`가 import 시점에 `docker-targets.yml`을 여는데 driver는
+ktdctl shim을 거치지 않아 **phase도 receipt도 없이 import에서 죽는다**.
+
+### e2e17 사전조치 (완료)
+
+1. Manager `1e2c49fa` 재설치 — origin/main → clone → 설치본 3단계 모두 grep 검증
+2. 백업 크론과 시간 충돌 없음(03:15/03:55 UTC, 실행 직전 재확인)
+3. Map python base `57cd7c3a` · Playwright runner `dcc5531e` 둘 다 n150에 존재
+4. `pin verify`는 `manager_drift` — 예상된 상태이고 `rotate-pair`가 해소.
+   stale rotation intent 없음, execution `terminal: False`
+5. output leaf는 `/root/m05-once-017` — STATE_ROOT 아래 두면 off-box rsync가
+   forensic leaf와 미정리 credential을 원격에 영구 복제한다
+
+### 다음 한 작업
+
+**PinVi·Manager 신규 PR 머지 완료 대기.** 그 뒤 `pin rotate-pair`(Map `d325f541` +
+새 PinVi revision) → `run-pinned-rebuild-once` → **e2e17**.
+
+
 ## 2026-09-02 — 공허 게이트 차단 + 참조 짝 불변식, e2e17은 아직 이르다
 
 하네스 3종이 선 뒤 "이제 태워도 되는가"를 점검하다 **e2e를 태워도 핵심을 증명하지
