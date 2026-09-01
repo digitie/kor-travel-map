@@ -1,21 +1,27 @@
 {
-  "revisions": [
-    {
-      "down_revision": [],
-      "revision": "300"
-    },
-    {
-      "down_revision": [
-        "300"
-      ],
-      "revision": "301_m03_import_children"
-    },
-    {
-      "down_revision": [
-        "301_m03_import_children"
-      ],
-      "revision": "302_m03_child_issuance"
-    }
-  ],
-  "schema": "kor-travel-map.application-migration-graph.v1"
+ "revisions": [
+  {
+   "down_revision": [],
+   "revision": "300"
+  },
+  {
+   "down_revision": [
+    "300"
+   ],
+   "revision": "301_m03_import_children"
+  },
+  {
+   "down_revision": [
+    "301_m03_import_children"
+   ],
+   "revision": "302_m03_child_issuance"
+  },
+  {
+   "down_revision": [
+    "302_m03_child_issuance"
+   ],
+   "revision": "303_m05_payload_hash_domain"
+  }
+ ],
+ "schema": "kor-travel-map.application-migration-graph.v1"
 }

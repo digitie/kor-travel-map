@@ -879,7 +879,9 @@ class ManualProviderDedupCaseRow(Base):
         CheckConstraint(
             "evidence_fingerprint ~ '^[0-9a-f]{64}$' "
             "AND scorer_input_sha256 ~ '^[0-9a-f]{64}$' "
-            "AND source_record_raw_payload_hash ~ '^[0-9a-f]{64}$'",
+            # 사본 도메인은 원본(source_records, 1~64 prefix 규약)과 같아야 한다
+            # — 303 참조.
+            "AND source_record_raw_payload_hash ~ '^[0-9a-f]{1,64}$'",
             name=conv("ck_manual_provider_dedup_cases_hashes"),
         ),
         CheckConstraint(
