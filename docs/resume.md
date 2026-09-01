@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-01 - e2e13 본문 진입, runner 이미지 소각 후 새 pinset 준비
+
+M05 isolated one-shot이 역대 최초로 본문에 진입했다(journal 참조). body
+실패는 무조건 소각이므로 새 pinset이 필요하다 - 이 문서 커밋이 새 Map
+revision을 만든다.
+
+### 다음 한 작업
+
+rotate-pair(Map=이 커밋 머지, PinVi c402a80b) -> run-pinned-rebuild-once
+-> run-m05-isolated-e2e-once(e2e14). Manager는 #289(runner digest claim 전
+보장)까지 설치/rebind.
+
 ## 2026-08-31 — M05 rebuild 연쇄 수리 2건: #1128(packaging) → #1129(permit)
 
 pinset 재회전(Map 58158472 / PinVi e0750505) 후 rebuild가 candidate·계약 단계를
