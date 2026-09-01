@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-01 — 303: M05 dedup case의 payload hash 도메인 정합
+
+e2e16(사상 첫 dedup case 기록 경로 실주행)이 적발한 실계약 비정합:
+`source_record_raw_payload_hash`(사본)만 64-hex를 강제해, 기본
+`make_payload_hash`(32-hex prefix) 규약으로 적재된 **모든** provider
+레코드가 M05 case 기록에서 CheckViolation으로 죽는다. 303이 사본 도메인을
+원본(`^[0-9a-f]{1,64}$`)과 정합시킨다. 적대 리뷰 2인이 critical을 추가
+적발했다 — receipt head CHECK 열거에 303을 더하지 않으면 fresh 설치의
+receipt 기록이 프로덕션에서 죽는다(널리기-전용 열거 + `_UPGRADE_STATEMENTS`
+모듈 상수 규약 반영). graph artifact는 generator canonical(`--write`)로
+재직렬화했고, 사본-도메인 갈라짐을 잡는 lint를 추가했다.
+
+cross-repo 선행 순서(리뷰 지적): 이 head 이동은 Manager committed
+generation과 어긋나므로 머지 → rotate-pair → pinned rebuild로 generation을
+303으로 재커밋한 뒤에만 isolated one-shot이 성립한다.
+
 ## 2026-09-01 - M05 isolated one-shot, 역대 최초 본문 진입 (e2e13)
 
 pair 재핀(#506) 이후 one-shot을 13회 돌리며 잠재 결함을 층위별로 소거했다.

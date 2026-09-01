@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-01 — e2e16: m04 UI 완주 + dedup 계약 비정합 적발 → 303
+
+식별자 축 짝 수정(#291/#509) 검증 완료 — e2e16이 m04 Playwright UI 흐름을
+재완주하고 한 층 더 깊은 Map 스키마 결함(사본 hash 도메인)을 적발했다.
+
+### 다음 한 작업
+
+**#1131(303) 머지 → PinVi pair revision 재핀 → rotate → rebuild →
+e2e17.** 남은 미지 표면: m05 rebind UI 흐름 + receipt 서명.
+
 ## 2026-09-01 - e2e13 본문 진입, runner 이미지 소각 후 새 pinset 준비
 
 M05 isolated one-shot이 역대 최초로 본문에 진입했다(journal 참조). body
