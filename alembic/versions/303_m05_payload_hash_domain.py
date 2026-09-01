@@ -14,8 +14,13 @@ isolated one-shot(e2e16)이 사상 처음 이 경로를 실주행해 적발했�
 
 사본 필드의 도메인을 원본과 동일하게 넓힌다. ``evidence_fingerprint``와
 ``scorer_input_sha256``는 이 계약 자체가 full SHA-256을 정의하므로 64-hex를
-유지한다. 넓히는 방향이므로 기존 행은 전부 새 제약을 만족한다 —
-``NOT VALID`` + ``VALIDATE``로 lock 창을 최소화한다(302 L7과 동일 규약).
+유지한다. 넓히는 방향이므로 기존 행은 전부 새 제약을 만족한다. DROP+ADD ``NOT
+VALID``+``VALIDATE``는 302 L7과 동일 규약을 따른다(env.py가 run 전체를
+단일 트랜잭션으로 감싸므로 lock 최소화 효과는 없다 — 규약 일관성 목적).
+
+`301`의 규약대로 receipt head CHECK 열거에 자기 head를 더한다 — 열거는
+**넓히기만** 한다(현재 head만 남기면 기존 receipt 행 때문에 ADD 자체가
+실패한다).
 
 DDL은 문장 하나씩 실행한다(asyncpg prepared statement 제약, `301`과 동일).
 """
@@ -55,22 +60,48 @@ _HASHES_VALIDATE: Final[str] = (
     "VALIDATE CONSTRAINT ck_manual_provider_dedup_cases_hashes"
 )
 
+# `301`의 규약: migration마다 receipt head CHECK 열거에 자기 head를 더한다 —
+# 결손은 `test_receipt_head_check_covers_the_graph_head`가 잡고, 빠뜨리면
+# fresh 설치의 receipt 기록이 CheckViolation으로 죽는다(적대 리뷰 critical).
+_RECEIPT_HEAD_WIDEN: Final[str] = (
+    "ALTER TABLE ops.application_schema_operation_receipts"
+    " DROP CONSTRAINT ck_application_schema_operation_receipts_head,"
+    " ADD CONSTRAINT ck_application_schema_operation_receipts_head"
+    " CHECK (destination_head IN ('300', '301_m03_import_children',"
+    " '302_m03_child_issuance', '303_m05_payload_hash_domain'))"
+)
+
+_RECEIPT_HEAD_NARROW: Final[str] = (
+    # 되돌린 뒤 303 head receipt가 남아 있으면 실패한다 — 그게 맞다(301과 동일 원칙).
+    "ALTER TABLE ops.application_schema_operation_receipts"
+    " DROP CONSTRAINT ck_application_schema_operation_receipts_head,"
+    " ADD CONSTRAINT ck_application_schema_operation_receipts_head"
+    " CHECK (destination_head IN ('300', '301_m03_import_children',"
+    " '302_m03_child_issuance'))"
+)
+
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _HASHES_DROP,
+    _HASHES_ADD_WIDENED_NOT_VALID,
+    _HASHES_VALIDATE,
+    _RECEIPT_HEAD_WIDEN,
+)
+
+_DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _RECEIPT_HEAD_NARROW,
+    _HASHES_DROP,
+    _HASHES_ADD_ORIGINAL_NOT_VALID,
+    _HASHES_VALIDATE,
+)
+
 
 def upgrade() -> None:
-    for statement in (
-        _HASHES_DROP,
-        _HASHES_ADD_WIDENED_NOT_VALID,
-        _HASHES_VALIDATE,
-    ):
+    for statement in _UPGRADE_STATEMENTS:
         op.execute(statement)
 
 
 def downgrade() -> None:
     # 좁히는 방향이라 32-hex 사본이 이미 기록됐다면 VALIDATE에서 fail-close
     # 한다 — 조용한 데이터 손실 대신 운영자가 결정한다(302 downgrade 규약).
-    for statement in (
-        _HASHES_DROP,
-        _HASHES_ADD_ORIGINAL_NOT_VALID,
-        _HASHES_VALIDATE,
-    ):
+    for statement in _DOWNGRADE_STATEMENTS:
         op.execute(statement)
