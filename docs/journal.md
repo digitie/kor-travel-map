@@ -1,5 +1,37 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-01 - M05 isolated one-shot, 역대 최초 본문 진입 (e2e13)
+
+pair 재핀(#506) 이후 one-shot을 13회 돌리며 잠재 결함을 층위별로 소거했다.
+매 회 더 깊이 침투했고, 각 층은 적대 리뷰 2인(opus/xhigh)을 거쳐 Manager/
+PinVi에 머지됐다.
+
+- e2e1-2 pair_contract_invalid -> PinVi pair 재핀(#506).
+- e2e3 PinVi->Map 네트워크 불통(컨테이너 내부 probe로 timeout 실측) ->
+  PinVi docker-app.sh 범용 overlay(#507) + Manager가 첫 up부터 override
+  전달(#280; 리뷰가 !reset의 정적 IP 삼킴, /29 만석, stale-pin 무음 우회
+  3연쇄를 추가 적발).
+- e2e4 정적 IP를 postgres가 동적 선점 -> 상단 배치 규칙(#281).
+- e2e5 host publish 포트가 kernel ephemeral 대역과 충돌 -> 20000-29999
+  이동 + 하한 런타임 계약(#282).
+- e2e6 profile-scoped dagster 잔존이 cleanup 검증을 깨고 실제 phase를
+  가림 -> cleanup 프로파일 모델 파생 + driver_phase 정본 복원(#283 -
+  리뷰가 '첫 PASS가 receipt 무효로 소각되는' 잠복 critical까지 적발).
+- e2e7-9 무증거 실패 -> forensic 전면화: 모든 명령 stderr(#284), ordinary
+  exception traceback(#286), scrub 실효화(생성 즉시 등록).
+- e2e8 이미지명 추측('No such image') -> rendered compose 모델 파생(#285).
+- e2e12 traceback이 익명 예외의 정체를 적중: Ports 키 정확일치가 EXPOSE
+  메타데이터(prod 12701)와 원리적으로 충돌 -> published(실 binding) 집합
+  비교(#288 + PinVi 이미지 프로젝트 스코프, pair admin==full 가드).
+- e2e13: 사상 처음 m04_m05_e2e 본문 진입. 실패는 호스트 정리가 지운
+  Playwright runner 이미지 부재 - body라 execution이 무조건 소각됐고,
+  runner 핀 digest를 claim 전에 보장하는 #289로 클래스를 제거했다.
+
+일관된 패턴: "PR CI는 green인데 한 번도 실행된 적 없는 경로"의 잠재 결함
+들이 침투 깊이에 비례해 드러났다. 남은 미지 표면은 본문 내부(m04 승인
+흐름 -> m05 rebind 흐름 -> receipt 서명)뿐이다. 다음 pinset(이 문서 커밋
+포함)으로 e2e14를 실행한다.
+
 ## 2026-08-31 — M05 rebuild 두 번째 벽: permit evidence의 반쪽 head-인지
 
 #1128로 sealed builder를 고치고 pinset을 재회전(Map 58158472)해 rebuild를 다시
