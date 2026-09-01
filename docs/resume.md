@@ -1,5 +1,41 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-02 — 공허 게이트 차단 + 참조 짝 불변식, e2e17은 아직 이르다
+
+하네스 3종이 선 뒤 "이제 태워도 되는가"를 점검하다 **e2e를 태워도 핵심을 증명하지
+못한다**는 것을 발견했다. 격리 fixture가 Map 쪽 provider feature만 만들고 PinVi에
+참조 행을 한 줄도 만들지 않아 `impact_count`가 구조적으로 0이고, 그러면 live spec의
+중심 단언 `expect(impacts).toHaveLength(0)`이 공허하게 참이 되어 **per-impact 단언
+본문이 한 줄도 실행되지 않는다.** 배관이 도는 것만 증명하고 pinset 하나를 태우는
+셈이었다.
+
+### 머지 (Manager #296 · PinVi #513/#514)
+
+- **#296**: Map decision 커밋 직전에 PinVi에 참조를 심는다. 일부러 일상적인 사용자
+  경로(`POST /trips` → `POST .../pois`)를 써서 `feature_uuid`가 NULL인 행을 만든다 —
+  리바인드가 legacy 축만 있는 행을 처리하는지까지 같이 증명된다. `impact_count`가
+  심은 수보다 적으면 `m05_pinvi_impact_missing`으로 죽는다.
+- **#514**: PinVi reconciliation이 "UUID shadow가 NULL"을 "값이 어긋났다"로 읽어
+  평범한 행 하나가 피드를 영구히 세우던 결함. 적대 리뷰 2인이 **정반대 방향의 결함을
+  하나씩** 잡았다 — 한쪽은 미검증 client 문자열로 canonical UUID를 주조하던 것,
+  다른 쪽은 canonical UUID 일치를 conflict로 막던 것. 최종 규칙: UUID 일치 → 리바인드
+  (주조 없음) · UUID NULL → legacy 축 판정(주조 없음) · UUID가 다른 feature → block.
+- **#513**: playwright image 도메인이 세 선언 중 하나만 tag 필수였던 것.
+
+### 하네스가 값을 했다
+
+#296을 넣자 full-path 시뮬레이션이 **즉시 17건 실패**로 잡았고, 고치는 과정에서 제
+`phase` 대입이 본문 phase를 강등시켜 무조건 소각 표면을 깨뜨린다는 것까지 드러났다.
+전부 실행 없이 잡혔다.
+
+### 다음 한 작업
+
+**남은 이중 선언 결박 → Manager release 재설치 → `pin rotate-pair` → rebuild → e2e17.**
+PinVi 활성화 게이트는 별건으로 분리했다(impact before-image 정직성·blocked 상세 평문
+보존은 DB 컬럼이 필요해 alembic 핀에 걸린다. worker는 꺼져 있고 prod 세 테이블은
+실측 0행).
+
+
 ## 2026-09-01 — 시뮬레이션 하네스 3종 도입, e2e 없이 blocker 5건 선적발
 
 M05 isolated one-shot 1회가 pinset 소각 + 1~2시간이라, **실행 없이 코드 레벨에서
