@@ -1,5 +1,59 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-01 — e2e 없이 소각 blocker 5건 선적발: 시뮬레이션 하네스 3종
+
+**문제.** M05 isolated one-shot은 1회에 pinset 소각 + 1~2시간이 든다. 게다가
+본문(`m04_m05_e2e`) 진입 후 실패는 **무조건 소각**이라 3개 저장소 revision을
+새로 만들고 rebuild부터 다시 해야 한다. e2e13~e2e16이 모두 "한 층 더 깊은
+결함 1건 적발 후 소각"으로 끝났고, 결함이 하나씩만 드러나 진척이 선형이었다.
+
+**전환.** 실행 없이 코드 레벨에서 계약을 검증하는 하네스를 세 층으로 세웠다.
+
+1. **정적 parity**(실행 없음) — 두 곳에 따로 선언된 같은 사실을 문자 단위로
+   대조하는 테스트. 기존 `_PUBLIC_TERMINAL_PHASES` ↔ launcher `PHASES` 관례를
+   일반화했다.
+2. **로직 시뮬레이션**(fake docker/HTTP, 실 driver 코드) — Manager 하네스 A.
+   mini Compose 렌더러와 fake docker CLI를 붙여 driver 전 경로를 실행하고,
+   launcher heredoc에서 receipt 검증기를 추출해 같은 프로세스에서 재현한다.
+3. **DB 실행 시뮬레이션**(CI PostGIS testcontainer) — Map 하네스 B. M05 DB
+   시나리오 전체를 실 PostGIS에서 재생한다.
+
+**비-vacuous 검증.** 세 하네스 모두 mutation testing으로 확인했다. A는 과거
+결함 13건을 재적발했고, C는 34개 mutation 중 11건을 잡았다.
+
+**적발.** 대부분이 같은 결함 클래스였다 — *같은 사실이 두 곳에 따로 선언되고
+둘을 잇는 기계가 없다*.
+
+- **`PINVI_M05_LIVE_E2E` 미주입**(PinVi #511): M04 쌍둥이 경로에는 있는데 M05
+  경로에만 빠져 있었다. spec이 `beforeAll`에서 중단된다 — 소각.
+- **isolated에서 `reviews.json`/`restore.json` 강요**(PinVi #511): 사람 리뷰·복구
+  드릴의 외부 증거라 격리 harness는 생산할 수 없는데 생산자·검증자 양쪽이
+  6키를 요구했다. UI가 green이어도 봉인에서 죽는다 — 소각.
+- **receipt 단발 GET**(Manager #292): 이름과 달리 재시도가 없어 Map decision
+  commit과 PinVi worker polling 사이 창에서 404로 죽는다. 수리하며 계약을 다시
+  읽어보니 status는 `blocked|applied` 두 값뿐이고 "아직 도착 안 함"은 404였다 —
+  종전 구현이 보던 `pending`은 **존재하지 않는 상태**였다.
+- **pre-claim phase 집합 분기**(Manager #293): driver는 31개 phase로 claim 전
+  종료할 수 있는데 launcher는 5개만 알았다. 보정 가능한 실패가 무조건 소각으로
+  승격된다. 적대 리뷰가 내 첫 수정에서 claim **이후**에만 도달 가능한 phase 3개를
+  잡아냈다 — 그대로 뒀으면 "실행권 미소비" 주장이 소비 증명 phase를 달고 검증을
+  통과했을 것이다.
+- **`map_fresh_init_reason` 자유형 진단**(Manager #295): driver가 사람이 읽는
+  문자열을 receipt에 싣는데 launcher는 16개 닫힌 enum으로만 받는다. 벗어나면
+  ValueError → fallback `pin block-execution` → 소각. #293의 수리가 이 경로에서는
+  통째로 무력화된다. 하네스 A가 playwright driverVersion 불일치 경로에서 실측
+  재현했다. 어휘를 exit map에서 파생시켜 한 번만 선언하고, 어휘 밖 값은
+  `unclassified`로 바꾸지 않고 **필드를 생략**한다 — `unclassified`는 "fresh-init
+  runner가 미상 exit code로 죽었다"는 다른 사실이라 무관한 진단에 붙이면 receipt가
+  거짓을 주장한다.
+- **playwright image 도메인**(PinVi #513): 같은 정규식이 세 곳에 있는데
+  `config.py`만 tag를 필수로 요구했다. Manager가 고정한 핀은 digest-only라 같은
+  값이 한쪽에서만 거부된다.
+
+**정리.** 소각 blocker 5건이 실행 전에 잡혔다. e2e13~e2e16이 4회에 걸쳐 4건을
+잡은 것과 대비된다.
+
+
 ## 2026-09-01 — 303: M05 dedup case의 payload hash 도메인 정합
 
 e2e16(사상 첫 dedup case 기록 경로 실주행)이 적발한 실계약 비정합:

@@ -1,5 +1,43 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-01 — 시뮬레이션 하네스 3종 도입, e2e 없이 blocker 5건 선적발
+
+M05 isolated one-shot 1회가 pinset 소각 + 1~2시간이라, **실행 없이 코드 레벨에서
+계약을 검증하는 하네스 3종**을 세워 소각 전에 결함을 잡는 체제로 전환했다.
+
+- **하네스 A**(Manager `test_m05_isolated_e2e_full_path.py`, #294) — mini Compose
+  렌더러 + fake docker/HTTP로 driver 전 경로를 실행. launcher heredoc을 추출해
+  receipt 검증기까지 같은 프로세스에서 재현한다.
+- **하네스 B**(Map `test_tvn_m05_provider_bundle_dedup_scenario.py`, #1132 머지됨)
+  — CI PostGIS job에서 M05 DB 시나리오 전체를 실 DB로 재생한다.
+- **하네스 C**(PinVi `test_m05_attestation_map_contract_simulation.py`, #512 머지됨)
+  — attestation ↔ Map 계약을 실행 없이 대조한다.
+
+셋 다 mutation testing으로 비-vacuous를 확인했다(A는 과거 결함 13건, C는 34개
+mutation 중 11건 적발).
+
+### 이번에 선적발한 결함
+
+`AGENTS.md`가 쫓는 **이중 선언**(같은 사실이 두 곳에 따로 선언되고 둘을 잇는
+기계가 없음) 클래스가 대부분이었다.
+
+| 결함 | 소각 여부 |
+|---|---|
+| `PINVI_M05_LIVE_E2E` 미주입 → spec이 `beforeAll`에서 중단 | 소각 |
+| isolated에서 `reviews.json`/`restore.json` 강요 → UI green 후 봉인 실패 | 소각 |
+| receipt 단발 GET → worker polling 창에서 404 | 소각 |
+| pre-claim phase 집합이 driver/launcher에서 갈라짐 | 소각 |
+| `map_fresh_init_reason` 자유형 진단 → launcher 검증 ValueError → pinset 소각 | 소각 |
+| playwright image 도메인이 세 선언 중 하나만 tag 필수 | 잠재 |
+
+### 다음 한 작업
+
+**Manager #295·#294 머지 → Manager release 설치 → `pin rotate-pair` → rebuild →
+e2e17.** 별건으로 PinVi identifier 짝 불변식(`trip_day_pois`/`curated_plan_pois`/
+`feature_suggestions`에 pair CHECK 부재)과 isolated `impact_count` 구조적 0
+(리바인드 증명이 공허) 조사 중.
+
+
 ## 2026-09-01 — e2e16: m04 UI 완주 + dedup 계약 비정합 적발 → 303
 
 식별자 축 짝 수정(#291/#509) 검증 완료 — e2e16이 m04 Playwright UI 흐름을
