@@ -1,5 +1,65 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-02 — rebuild를 실제로 태웠고, 그게 결함 두 개를 드러냈다
+
+보류가 풀려 `rotate-pair → rebuild → e2e17`로 갔다. **첫 rebuild가 실패했고**,
+그 실패가 준비 중이던 수정의 실제 사례이자 PinVi 쪽 별개 결함의 발견 경로였다.
+
+### 실측
+
+pinset `cc3c516f`(Map `f58de9f4` + PinVi `5cf41d20`) rebuild가 29분 실행 후
+`{"status":"failed","classification":"unclassified"}`로 닫혔다. `stderr.log`는
+**0바이트** — `--json`이 원문을 억제한다. journal 미생성,
+`generation_public_copy: pending_rebuild`. 아무것도 소비하지 않았는데 launcher는
+claim을 유지했다.
+
+### 결함 1 — 봉인 밖 실패가 회전 사이클을 태운다 (Manager #302)
+
+launcher는 `classification` 하나로 claim 해제를 판정한다. 그래서 봉인 밖에서
+새는 오류는 곧 소비하지 않은 pinset 소각이다. 그 경로에 **fresh candidate 빌드
+분기 전체**가 들어 있었다 — 이 흐름에서 가장 오래 걸리고 가장 잘 실패하는 구간이
+하필 분류를 잃는 구간이었다.
+
+고치는 방식도 두 번 틀렸다. 봉인 밖 지점을 **열거**하는 방식은 셋째·넷째가
+계속 나왔고, lock 획득처럼 `with` 문으로는 표시조차 못 하는 것도 있었다.
+선언을 버리고 **관측**으로 갔다 — journal 경로를 알게 되면 적어 두고 실패 시
+그 파일의 존재를 본다.
+
+### 결함 2 — PinVi 프로덕션 web 이미지가 서지 않았다 (PinVi #518)
+
+원문은 비-JSON으로 한 번 더 돌려 얻었다:
+`pinned runtime rebuild Compose build command failed (exit 1)`. `pinvi-web`이었고,
+원인은 셋이 겹친 것이다.
+
+1. deps 스테이지가 workspace manifest를 **손으로 나열**하는데 `apps/mobile`이
+   빠져 있었다 — 루트 `workspaces` glob과의 이중 선언.
+2. `npm install`은 그 불일치에서 lockfile 트리를 **조용히 버린다**
+   (`npm ci`는 exit 254로 거부한다 — 실측).
+3. 그 트리에서 루트는 `tailwindcss@3`, `apps/web`이 쓰는 `4`는 중첩됐는데
+   build 스테이지가 루트만 복사했다.
+
+그리고 **CI가 이 이미지를 빌드한 적이 없었다.** 전체 체크아웃에서 `npm ci` 후
+`npm run build`만 하므로 *다른 트리*를 검증한다 — CI는 초록인데 이미지는 서지
+않고, 그 사실이 1~2시간짜리 rebuild에서야 드러났다. `docker-image` job을
+신설해 required로 넣었다.
+
+### 적대 리뷰가 내 수정에서 다시 찾은 것
+
+3회에 걸쳐 리뷰어가 mutation으로 **내 테스트가 공허함**을 증명했다.
+
+- 관측 배선을 어떤 테스트도 걸지 않아 `observe()` 삭제·이동이 통과했다
+- `postjournal_failure`를 지워도 1535건이 통과했다
+- pinset 식별 **뒤** 경로 계산 실패가 소비된 후보를 해제하고 있었다
+- PinVi 쪽에서는 "열거하지 않는다"고 써 놓고 런타임 스테이지에 workspace
+  하나를 결박해, 그 중첩이 사라지면 프로덕션 빌드가 죽게 만들어 놨다
+
+전부 반영하고 mutation으로 잡히는 것을 재측정했다.
+
+### 현재
+
+새 pinset `4516a107`(Map `f58de9f4` + PinVi `448f6a3e`)로 회전하고 rebuild
+재실행 중. 다음은 e2e17.
+
 ## 2026-09-01 — e2e 없이 소각 blocker 5건 선적발: 시뮬레이션 하네스 3종
 
 **문제.** M05 isolated one-shot은 1회에 pinset 소각 + 1~2시간이 든다. 게다가
