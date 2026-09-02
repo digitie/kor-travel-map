@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-02 — rebuild 재실행 중, 다음은 e2e17
+
+보류가 풀려 실행에 들어갔다. 첫 rebuild가 실패했고 그 실패가 결함 두 개를
+드러냈다 — 상세는 `docs/journal.md` 최신 항목.
+
+| 항목 | 상태 |
+|---|---|
+| Manager #302 `ec27f65d` | 머지·설치·3단계 검증 완료 |
+| PinVi #518 `448f6a3e` | 머지 완료(`docker-image` job 신설, required) |
+| pinset | **`4516a107`** = Map `f58de9f4` + PinVi `448f6a3e` |
+| `pin verify` | `execution_binding: current`, `pair_rotation: idle` |
+| rebuild | 12:34 UTC 시작, 진행 중 |
+
+### 다음 한 작업
+
+rebuild 성공 확인 → `run-m05-isolated-e2e-once ec27f65d… /root/m05-once-017`.
+
+실패하면 `result.json`의 `stage`(+ `candidate_compose_build`면 `service`)가
+지점을 짚는다. **원문을 캐려고 플래그 없는 `rebuild-pinned --confirm`을 돌리지
+말 것** — 그건 진단이 아니라 전체 destructive 재시도이고 원장에 claim을 남기지
+않는다(Manager `docs/runtime-pin-registry.md` §9).
+
+---
+
 ## 2026-09-02 — e2e17 사전조치 완료, 실행은 보류(소유자 지시)
 
 소각 경로 수리를 마치고 n150 재설치까지 끝냈다. **실행(rotate-pair → rebuild →
