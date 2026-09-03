@@ -49,13 +49,16 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-27 T-VN-M02/M05 — Admin provenance가 opaque ID와 명시 UUID를
     # 병행 반환하도록 contract pin까지 원자 갱신했다.
+    # 2026-09-03 T-VN-M05 — `/v1/debug/*` 표면 제거로 admin baseline sha256 재고정.
+    # 계약이 운영이 제공하지 않는 라우트를 기술해 M05 live attestation이 구조적으로
+    # 통과 불가였다(실측: 이미지 161 path / 계약 162 path).
     "openapi-diff-v1.json": (
-        "a595eff7ec23d92f188d71ea4f80d987887dd3a489a2686ae58cc2acef122da6"
+        "7d0b6d03e44ce5139d3f7cbd6fb6ed944abcee3f2b626b97d504c2498b2d35f1"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
     "consumer-rollout-v1.json": (
-        "34ba858303f8bd60856094d4a01b3b8cd0c01a84599b5b1bff1ee3b36db94fa2"
+        "8da391b64f87fc877fd332a5f37060cf26f52b81d5c8a55ba2f5864d6cc94dcf"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

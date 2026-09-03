@@ -1137,16 +1137,28 @@ PinVi는 기존 import-job cancel route로 한 번만 호출한다. Manager 성�
   §`WS /ops/live`가 산문 계약 정본이다. 인증·상태·무효화 adapter 상세는
   `docs/reports/admin-ops-c7a-live-contract-2026-07-17.md`를 따른다.
 
-### 2.7 `/v1/debug/*`
+### 2.7 `/v1/debug/*` — 없음
+
 ```
-GET /v1/debug/mois-license/{license_id}
-✅ /debug/health · /debug/version 제거됨(T-214h, clean cut). 상태확인은 /health·/version·
-   /v1/ops/health-deep로 수렴. dataset preview는 `/v1/ops/datasets/preview` fixture-only다.
+✅ /v1/debug/* 표면 없음. /debug/health · /debug/version은 T-214h(clean cut)에서,
+   /debug/mois-license/{license_id}는 2026-09-03에 제거됐다. 상태확인은
+   /health·/version·/v1/ops/health-deep로, dataset preview는
+   `/v1/ops/datasets/preview` fixture-only로 수렴한다.
 ```
-MOIS route는 원본 provider payload를 포함하므로 `local-dev`에서
-`debug_routes_enabled=true`일 때만 mount하고, mount 뒤에도 trusted admin BFF를 요구한다.
-production은 `debug_routes_enabled=false`를 기동 조건으로 강제해 route 자체가 없으며,
-debug token·legacy header·경로 alias는 제공하지 않는다.
+
+`GET /v1/debug/mois-license/{license_id}`(SPRINT-4 Step D)는 `debug_routes_enabled`
+뒤에 있었다. 그 flag의 코드 기본값은 `true`(local-dev)이고 Docker image 기본
+profile은 `production`이며, production은 인증이 없다는 이유로 `false`를 강제한다.
+그래서 기본 설정으로 생성한 `openapi.json`은 **운영이 절대 제공하지 않는 라우트**를
+기술했고, 실행 중 표면과 계약을 바이트 비교하는 M05 live attestation은 운영
+구성에서 통과할 수 없었다(2026-09-03 격리 e2e: 이미지 161 path / 계약 162 path).
+
+도입 이후 admin frontend에 호출부가 한 번도 생기지 않았고 운영에서는 도달할 수 없는
+표면이었으므로 라우트를 제거했다. `debug_routes_enabled` flag와 production 거부
+규칙은 남긴다 — 미래에 `/debug` 표면이 생기면 운영이 그것을 거부해야 한다.
+표면이 다시 계약에 들어오는 것은
+`packages/kor-travel-map-api/tests/test_openapi_contract_is_the_production_surface.py`가
+막는다.
 
 `GET /v1/curations*`를 포함한 모든
 public-keyed operation은 같은 `require_public_api_key` 경계다. production keyless 요청은

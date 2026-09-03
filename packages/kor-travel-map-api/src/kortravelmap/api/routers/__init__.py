@@ -72,7 +72,6 @@ from kortravelmap.api.routers.feature_requests import (
 from kortravelmap.api.routers.features import (
     router as features_router,
 )
-from kortravelmap.api.routers.mois_detail import router as mois_detail_router
 from kortravelmap.api.routers.offline_uploads import router as offline_uploads_router
 from kortravelmap.api.routers.ops import router as ops_router
 from kortravelmap.api.routers.ops_contract_fixtures import (
@@ -113,7 +112,6 @@ __all__ = [
     "admin_manual_provider_dedup_cases_router",
     "features_router",
     "categories_router",
-    "mois_detail_router",
     "offline_uploads_router",
     "ops_router",
     "ops_contract_fixtures_router",

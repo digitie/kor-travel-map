@@ -129,7 +129,6 @@ __all__ = [
     "public_active_notice_feature_identities",
     "list_active_place_coords",
     "list_primary_place_locator",
-    "get_primary_source_detail",
     "find_place_features_without_phone",
     "set_feature_phones",
     "features_in_bbox",
@@ -1176,50 +1175,6 @@ FROM feature.public_features AS f
 WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
   AND f.kind = 'notice'
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-"""
-
-# primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
-# + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
-# 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
-#
-# 공개 표면(`/v1/mois/licenses/...`)이 소비하므로 ADR-067 공개 projection
-# (``feature.public_features``)만 조인한다. caller(mois_detail)는 public-only를
-# 기대하므로 suppression/retirement/quality 판정을 따로 재구현하지 않는다.
-#
-# 정합성(issue #509 Problem B): 같은 안정 식별자에 구/신 feature가 둘 다 primary
-# link로 남을 수 있다(re-key 정리 직전/직후). view가 non-active를 제거한 뒤에도
-# active 동률이 남을 수 있으므로 결정적 ``ORDER BY``(imported_at 최신 → feature_id)
-# 후 LIMIT 1로 deterministic하게 반환한다.
-_GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
-SELECT
-    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-    f.kind, f.name, f.category,
-    core.lifecycle_state, core.publication_state, core.quality_state,
-    x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
-    f.address, f.detail,
-    sr.source_record_key, pd.provider, pd.dataset_key,
-    se.source_entity_type, se.source_entity_id,
-    sr.raw_data, sr.fetched_at, sr.imported_at, head.observed_at, head.expires_at
-FROM provider_sync.source_entities AS se
-JOIN provider_sync.provider_datasets AS pd
-  ON pd.provider_dataset_id = se.provider_dataset_id
-JOIN provider_sync.source_entity_heads AS head
-  ON head.source_entity_key = se.source_entity_key
-JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = head.current_source_record_key
-JOIN provider_sync.source_links AS sl
-  ON sl.source_entity_key = se.source_entity_key
-JOIN feature.public_features AS f
-  ON f.feature_id = sl.feature_id
-JOIN feature.features AS core
-  ON core.feature_id = f.feature_id
-WHERE pd.provider = :provider
-  AND pd.dataset_key = :dataset_key
-  AND se.source_entity_type = :source_entity_type
-  AND se.source_entity_id = :source_entity_id
-  AND sl.source_role = 'primary'
-ORDER BY head.observed_at DESC, sr.imported_at DESC, f.feature_id
-LIMIT 1
 """
 
 # bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. 공개 여부는
@@ -4916,43 +4871,6 @@ async def list_primary_place_locator(
         (str(row.source_entity_id), str(row.feature_id), float(row.lon), float(row.lat))
         for row in rows
     ]
-
-
-async def get_primary_source_detail(
-    session: AsyncSession,
-    *,
-    provider: str,
-    dataset_key: str,
-    source_entity_type: str,
-    source_entity_id: str,
-) -> dict[str, Any] | None:
-    """primary source 1건의 on-demand 상세 (feature core + source_record raw_data).
-
-    ``source_entity_id``(provider/dataset/entity_type 한정)로 primary link 1건을 찾아
-    원본 provider payload(``raw_data``) + 연결 feature의 핵심 필드를 묶어 반환한다.
-    Step D(on-demand detail) 등 단건 조회용 — **읽기 전용**(적재 없음). 없으면
-    ``None``. JSONB(``address``/``detail``/``raw_data``)는 dict로 디시리얼라이즈.
-    """
-    import json
-
-    result = await session.execute(
-        text(_GET_PRIMARY_SOURCE_DETAIL_SQL),
-        {
-            "provider": provider,
-            "dataset_key": dataset_key,
-            "source_entity_type": source_entity_type,
-            "source_entity_id": source_entity_id,
-        },
-    )
-    row = result.mappings().first()
-    if row is None:
-        return None
-    data = dict(row)
-    for col in ("address", "detail", "raw_data"):
-        value = data.get(col)
-        if isinstance(value, str):
-            data[col] = json.loads(value)
-    return data
 
 
 # T-VN-35(ADR-086): 전화번호 정본은 ``feature_places.phones``(text[])다.

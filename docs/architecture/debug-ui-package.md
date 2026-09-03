@@ -87,7 +87,6 @@ packages/kor-travel-map-api/
 │   │   ├── admin_issues.py        — /admin/issues/{issue_id}
 │   │   ├── admin_backups.py
 │   │   ├── offline_uploads.py
-│   │   ├── mois_detail.py
 │   │   ├── ops_datasets.py        — /ops/datasets/*
 │   │   ├── ops_pipeline.py        — /ops/pipeline/*
 │   │   ├── ops.py / ops_live.py   — 관측 read / WS invalidation
@@ -157,7 +156,7 @@ class ApiSettings(BaseSettings):
     host: str = "127.0.0.1"                   # 외부 노출 금지 default (ADR-005)
     port: int = 12701
     log_level: str = "info"
-    debug_routes_enabled: bool = True         # /debug/* 활성
+    debug_routes_enabled: bool = True         # 현재 가리는 라우터 없음(2026-09-03)
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
     admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
     ops_routes_enabled: bool | None = None    # /ops/* 활성. None이면 features flag 추종

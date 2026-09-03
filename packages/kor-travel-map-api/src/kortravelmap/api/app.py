@@ -67,6 +67,7 @@ from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_requ
 from kortravelmap.api.response import request_id as response_request_id
 from kortravelmap.api.route_policy import (
     RoutePolicy,
+    RoutePolicyError,
     RoutePolicyMatrixRow,
     assert_route_policy_wiring,
     build_route_policy_matrix,
@@ -93,7 +94,6 @@ from kortravelmap.api.routers import (
     feature_dedup_review_router,
     feature_enrichment_review_router,
     features_router,
-    mois_detail_router,
     offline_uploads_router,
     ops_cache_target_streams_router,
     ops_contract_fixtures_router,
@@ -208,7 +208,6 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
         "/v1/ops/system-logs",
     }
 )
-_MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
 _OPS_FIXTURE_PATH_PREFIX = "/v1/ops/contract-fixtures/c6c-cancel-probe/"
 _ADMIN_MANUAL_FEATURE_CREATE_PATH = "/v1/admin/features"
@@ -408,8 +407,8 @@ def _apply_route_security_contract(
 
     FastAPI는 router dependency의 여러 ``Security`` scheme을 operation 단위 권한으로
     정확히 분리하지 못한다. canonical ops와 잔여 관측 GET은 BFF 또는 read
-    principal, exact import-job cancel만 cancel principal, 나머지 ops mutation과
-    MOIS raw debug는 BFF만 허용한다. 조립된 route policy matrix의 모든
+    principal, exact import-job cancel만 cancel principal, 나머지 ops mutation은
+    BFF만 허용한다. 조립된 route policy matrix의 모든
     ``public-keyed`` operation은 public key와 trusted service principal을 OR로,
     ``service`` operation은 service principal만으로 선언한다.
     ``public-unauthenticated`` operation은 security 요구를 제거한다. trusted admin BFF
@@ -481,11 +480,6 @@ def _apply_route_security_contract(
             continue
         canonical_ops = path.startswith(_OPS_CANONICAL_PREFIXES)
         observability_ops = path in _OPS_OBSERVABILITY_PATHS
-        if path == _MOIS_DEBUG_PATH:
-            operation = path_item.get("get")
-            if isinstance(operation, dict):
-                operation["security"] = _ADMIN_BFF_SECURITY
-            continue
         if not canonical_ops and not observability_ops:
             continue
         for method, operation in path_item.items():
@@ -728,6 +722,40 @@ async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings
             _logger.warning("kor-travel-geo 자격증명 확인 불가 — 기동은 계속한다: %s", exc)
 
 
+def _assert_no_production_debug_surface(
+    application: FastAPI, settings: ApiSettings
+) -> None:
+    """production에서 ``/v1/debug`` 표면이 마운트되면 기동을 거부한다.
+
+    ``debug_routes_enabled``는 **flag**를 거부할 뿐 표면을 거부하지 않는다. 그
+    차이가 실제 결함을 냈다 — flag 뒤에 있던 라우트가 계약에는 들어가고 운영
+    이미지에는 없어서, 실행 중 표면과 계약을 바이트 비교하는 M05 live
+    attestation이 구조적으로 통과 불가였다(2026-09-03).
+
+    그 라우트를 지운 뒤 flag를 보는 코드가 하나도 남지 않았다. 그러면 flag는
+    "아무것도 막지 않는 게이트"가 되고, 문서만 막는다고 말한다. 그래서 불변식을
+    **표면 위로** 옮긴다 — 조건부로 마운트하든 무조건 마운트하든, production은
+    ``/v1/debug`` 아래의 어떤 경로도 제공하지 않는다.
+
+    거부이지 삭제가 아니다. local-dev debug 표면이 다시 필요해지면 만들 수 있고,
+    다만 그것이 운영 계약에 들어가려는 순간 여기서 멈춘다.
+    """
+
+    if not settings.is_production:
+        return
+    mounted = sorted(
+        path
+        for route in application.routes
+        if isinstance(path := getattr(route, "path", None), str)
+        and (path == "/v1/debug" or path.startswith("/v1/debug/"))
+    )
+    if mounted:
+        raise RoutePolicyError(
+            "production must not serve a /v1/debug surface (ADR-005/ADR-066): "
+            + ", ".join(mounted)
+        )
+
+
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
     """FastAPI application factory.
 
@@ -740,7 +768,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     -------
     FastAPI
         liveness ``/health``·``/version``(public) + ``/v1/features/...``·``/admin/...``·
-        ``/ops/...``·``/debug/...`` 라우터가 설정 flag에 따라 마운트된 app.
+        ``/ops/...`` 라우터가 설정 flag에 따라 마운트된 app.
 
     Notes
     -----
@@ -795,9 +823,9 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         title="kor-travel-map-api",
         version=__version__,
         description=(
-            "Debug + admin + public REST API for `kor-travel-map`. "
+            "Admin + public REST API for `kor-travel-map`. "
             "Intranet-only (no auth in code, ADR-005). 운영 범위는 ADR-035 — "
-            "/debug, /admin, /ops, /features prefix로 분리."
+            "/admin, /ops, /features prefix로 분리."
         ),
         # ADR-031 — `--check` mode drift gate 안정성을 위해 ``servers``는 OpenAPI
         # spec에 포함하지 않는다 (호스트별 차이로 drift 발생 우려).
@@ -1156,15 +1184,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             service_feature_reference_reconciliations_router,
             prefix="/v1",
         )
-        # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
-        # raw provider payload이므로 local-dev debug mount에서도 operator BFF를
-        # 요구한다. production은 debug_routes_enabled=false라 route 자체가 없다.
-        if settings.debug_routes_enabled:
-            application.include_router(
-                mois_detail_router,
-                prefix="/v1",
-                dependencies=[Depends(require_admin_frontend)],
-            )
 
     if admin_routes_enabled:
         admin_dependencies = [Depends(require_admin_frontend)]
@@ -1336,6 +1355,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     # dependency 배선을 startup에서 함께 검증한다. 미분류·miswire·stale exception은
     # 앱을 실행하기 전에 실패한다.
     route_policy_matrix = assert_route_policy_wiring(application)
+    _assert_no_production_debug_surface(application, settings)
 
     # ADR-066 T-VN-H03 — surface별 CORS 분리. route policy matrix(T-VN-02)의
     # 분류를 재사용해 browser-facing public 표면(public-unauthenticated·

@@ -162,7 +162,6 @@
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
 | kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-map C6c contract fixture (`/v1/ops/contract-fixtures/c6c-cancel-probe/*`) | Docker Manager만 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:fixture`; AdminBFF·PinVi·read/cancel token은 불허 | `{data, meta}` durable fixture receipt | RFC7807 `problem+json` |
-| kor-travel-map raw debug (`/v1/debug/mois-license/*`) | production에서는 route 자체를 mount하지 않는다. local-dev에서만 mount하며 AdminBFF 인증을 요구한다 | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 

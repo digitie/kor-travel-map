@@ -69,7 +69,7 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 - OpenAPI 산출물은 admin/debug/ops를 포함한 전체 admin spec
   `packages/kor-travel-map-api/openapi.json`과 PinVi/user-facing subset spec
   `packages/kor-travel-map-api/openapi.user.json` 두 개다.
-- admin 전체 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
+- admin 전체 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops` API다.
 - user subset은 PinVi가 호출하는 사용자/서비스 read API(`/features/*`,
   `/categories`, `/providers/*`, `/health`, `/version`)와 batch read API만 포함한다.
   전 표면이 `/v1/*` prefix 하에 있다 — ADR-048 무-호환 clean cut(구 unprefixed
@@ -138,7 +138,8 @@ list 성공 예:
 ```
 
 > 단건 meta 비고: `/ops/metrics`는 metric 본문이 `data` + `meta.duration_ms`.
-> `/debug/mois-license/{id}`는 cache hit 플래그가 `meta.cached`로 이동.
+> (`/debug/mois-license/{id}`의 `meta.cached`는 2026-09-03 그 라우트 제거와 함께
+> 사라졌다 — `docs/architecture/rest-api.md` §2.7.)
 
 ## 4. API tag 구조
 
@@ -154,10 +155,10 @@ list 성공 예:
 | `ops-datasets` | `/ops/datasets` | provider×dataset 상태·정책·fixture preview 통합 |
 | `ops-pipeline` | `/ops/pipeline` | 실행·event·Dagster·schedule 조회와 조작 통합 |
 | `ops` | `/ops` | metrics, consistency, health-deep, system/API log 관측 read |
-| `debug` | `/debug` | MOIS 적재 raw detail read. ETL preview는 ops-datasets로 이동 |
+| ~~`debug`~~ | ~~`/debug`~~ | 2026-09-03 제거 — MOIS raw detail은 운영에서 도달 불가였고 admin UI 호출부도 없었다(`rest-api.md` §2.7) |
 
 라우터 노출은 `ApiSettings` flag로 제어한다. `/debug/*`는
-`debug_routes_enabled`, `/features/*`는 `features_routes_enabled`,
+`features_routes_enabled`(`/v1/debug` 표면은 2026-09-03 제거됐고 production은 그 표면을 기동에서 거부한다), `/features/*`는 `features_routes_enabled`,
 `/admin/*`는 `admin_routes_enabled`, `/ops/*`는
 `ops_routes_enabled`가 담당한다. `admin_routes_enabled`와
 `ops_routes_enabled`가 `None`이면 `features_routes_enabled` 값을 따른다. 따라서 DB 없는

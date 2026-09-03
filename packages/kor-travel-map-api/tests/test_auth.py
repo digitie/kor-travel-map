@@ -1175,9 +1175,6 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
             {"ServiceToken": []},
         ]
 
-    mois = spec["paths"]["/v1/debug/mois-license/{license_id}"]["get"]
-    assert mois["security"] == [{"AdminBFF": []}]
-
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
