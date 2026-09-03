@@ -15,6 +15,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from kortravelmap.infra.feature_update_active_repo import (
+    _driver_constraint_identity,
+)
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,10 +165,7 @@ CALL feature.resolve_manual_provider_dedup_case_v2(
 def _procedure_error(error: DBAPIError) -> NoReturn:
     """DB detail을 노출하지 않는 M05 error allow-list."""
 
-    sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
-    constraint = getattr(
-        getattr(getattr(error, "orig", None), "diag", None), "constraint_name", None
-    )
+    sqlstate, constraint = _driver_constraint_identity(error)
     if sqlstate == "P0002":
         raise FeatureReferenceReconciliationUnavailable(
             "Feature 참조 reconciliation subscription이 아직 provision되지 않았습니다."

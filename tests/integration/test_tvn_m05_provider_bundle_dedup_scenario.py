@@ -58,6 +58,9 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
 )
+from kortravelmap.infra.feature_update_active_repo import (
+    _driver_constraint_identity,
+)
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_TOURIST_ATTRACTIONS,
     STANDARD_DATA_PROVIDER_NAME,
@@ -143,14 +146,12 @@ WHERE conrelid = CAST(:relation AS regclass) AND conname = :constraint_name
 
 
 def _sqlstate(error: DBAPIError) -> str | None:
-    sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+    sqlstate, _ = _driver_constraint_identity(error)
     return str(sqlstate) if sqlstate is not None else None
 
 
 def _constraint_name(error: DBAPIError) -> str | None:
-    name = getattr(
-        getattr(getattr(error, "orig", None), "diag", None), "constraint_name", None
-    )
+    _, name = _driver_constraint_identity(error)
     return str(name) if name is not None else None
 
 
