@@ -19,6 +19,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core import make_feature_id
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.feature_subtype import SubtypeDetailError, write_subtype
+from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,10 +110,7 @@ WHERE feature_uuid = CAST(:feature_uuid AS uuid)
 def _procedure_error(error: DBAPIError) -> NoReturn:
     """DB diagnostic 원문을 HTTP까지 보내지 않는 M04 closed mapper."""
 
-    sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
-    constraint = getattr(
-        getattr(getattr(error, "orig", None), "diag", None), "constraint_name", None
-    )
+    sqlstate, constraint = _driver_constraint_identity(error)
     if constraint == "ck_feature_request_pending":
         raise FeatureRequestStateConflict("Feature 요청이 이미 처리되었습니다.") from error
     if sqlstate in {"23514", "23505", "22003", "22P02"}:
