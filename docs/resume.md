@@ -1,5 +1,44 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-03 — 침묵사 셋을 걷어내고 e2e가 본문까지 갔다, 다음은 계약 재핀
+
+격리 e2e 두 번과 pinned rebuild 한 번이 **로그 0바이트**로 사라지던 것을 걷어냈다.
+관측(`systemd-run` + journald)과 실행권 소각(claim 재취득)을 고치자 e2e21이 처음으로
+Map 9 + PinVi 7 컨테이너를 모두 띄우고 M04/M05 본문까지 갔다. 거기서 만난 것이 다음
+벽이고, 그 벽은 이제 고쳐졌다 — 상세는 `docs/journal.md` 최신 항목.
+
+| 항목 | 상태 |
+|---|---|
+| Map #1137·#1138·#1139 | 머지 완료 — main이 며칠 만에 완전 green |
+| Map #1140 `/v1/debug` 표면 제거 | CI 대기 |
+| PinVi #522~#524 | 머지 완료 |
+| PinVi #525 계약 생성기 봉투 보존 | CI 대기 |
+| Manager #308·#309·#310 | 머지 완료 |
+| pinset | **`03562bba`** = Map `f58de9f4` + PinVi `170636f9` (rebuild 완료, generation `match`) |
+
+### 다음 한 작업
+
+**Map #1140을 머지한 뒤 PinVi 재벤더 → pinset 회전 → rebuild → e2e** 순서다.
+순서를 건너뛰면 e2e가 정확히 어디서 죽는지까지 적대 리뷰가 예측해 뒀다:
+
+1. Map #1140 머지 → 새 Map revision.
+2. PinVi 재벤더 — `apps/api/tests/contract/kor-travel-map-openapi-admin.json`,
+   `apps/api/tests/unit/_kor_travel_map_snapshot_pin.py`의 `UPSTREAM_COMMIT`·
+   `SNAPSHOT_SHA256`, `test_kor_travel_map_admin_contract.py`의 중복 리터럴,
+   그리고 `contracts/kor-travel-map-m05-pair-provenance-v1.json`의 `admin`·`full`
+   10개 필드.
+3. `rotate-pinned-pair <새 Map> <새 PinVi> "<사유>"` → `run-pinned-rebuild-once`
+   → `run-m05-isolated-e2e-once`.
+
+**`generate_m05_pair_contract.py --write`는 #525 머지 전에는 쓰지 말 것** — 그 전
+버전은 v2 봉투를 쓰고, PinVi API는 `version == 1`을 모듈 스코프에서 요구하므로
+71분짜리 rebuild를 태운 뒤 컨테이너가 뜨지 않는다.
+
+**긴 원격 작업은 `systemd-run --unit=...`으로 띄울 것.** `python -I`가 `-E`를
+함의해 `PYTHONUNBUFFERED`가 무효이고 런처가 stdout을 따로 돌리므로, 로그인 세션에
+매달아 두면 죽었을 때 아무 기록도 남지 않는다(2026-09-03 침묵사 3회).
+
+---
 ## 2026-09-02 — rebuild 재실행 중, 다음은 e2e17
 
 보류가 풀려 실행에 들어갔다. 첫 rebuild가 실패했고 그 실패가 결함 두 개를

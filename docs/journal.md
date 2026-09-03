@@ -1,5 +1,137 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-03 — 침묵사 세 번의 정체와, 이틀 묵은 red의 진짜 이유
+
+격리 e2e가 두 번(18·19), pinned rebuild가 한 번(021) **로그 0바이트**로 사라졌다.
+실패가 아니라 침묵이었으므로 먼저 관측을 고쳐야 했다.
+
+### 관측이 먼저 결함이었다
+
+하네스와 런처는 `python -I`로 돈다. `-I`는 `-E`를 함의하므로 `PYTHONUNBUFFERED`가
+**무시된다**. stdout이 파이프면 블록 버퍼링이 되고, 프로세스가 시그널로 죽으면
+버퍼째 사라진다. 30분을 돌고도 한 줄도 안 남는다. 게다가 rebuild 런처는 자기
+stdout을 `result.json`/`stderr.log`로 따로 돌리므로, pty를 물려도 그 두 파일이
+0바이트면 아무것도 알 수 없다.
+
+`systemd-run`으로 옮기자 세 번의 침묵이 감추던 것이 **한 줄로** 나왔다:
+
+    run-pinned-rebuild-once[1390161]: pinned rebuild candidate was already claimed
+
+로그인 세션이 아니라 `system.slice`에서 돌고, 종료 사유·시그널·exit code가
+journald에 반드시 남는다. 이 저장소의 긴 원격 작업은 앞으로 이 방식으로 띄운다.
+
+### 진단을 한 번 틀렸고, 그대로 적는다
+
+처음에는 **다중 타깃 bake**를 원인으로 봤다. e2e19의 dockerd 트레이스가 그것을
+뒷받침했다 — trace `c41fa490…` 하나에 `app-api`의 apt 단계와 `app-web`의
+`npm ci`가 동시에 살아 있었고, 2초 뒤 `only one connection allowed`, 5초 뒤
+`healthcheck failed fatally`였다. 그 관찰 자체는 사실이고, `compose build`가
+타깃을 하나로 묶는 것도 사실이라 PinVi `docker-app.sh`를 서비스별로 나눴다.
+
+그런데 rebuild-021은 **단일 타깃·단일 trace**인데도 죽었다. 더 결정적으로,
+`only one connection allowed`는 **성공하는 빌드에서도** 15분에 8건씩 난다(실측).
+즉 그 경고는 잡음이었고, rebuild-021의 죽음은 별개다 — 프로세스가 사라졌고
+그 결과 claim이 소각됐다. 직렬화 수정은 여전히 옳지만(요청을 나누면 세션이
+겹치지 않는다) 침묵사의 원인은 아니었다.
+
+### 소각이 기본값이 아니라 유일한 결과였다
+
+`run-pinned-rebuild-once`는 `ktdctl` 실행 전에 `O_EXCL` claim을 쓰고, 해제는
+**자기 프로세스가 살아서 결과를 분류할 때만** 한다. 프로세스 그룹이 죽으면
+분류기 자체가 돌지 않으므로 해제 경로는 실행될 수 없다. registry는 이 pinset의
+generation이 아직 오르지 않았다고 말하는데도 다음 실행이 `already claimed`로
+거부됐다 — 아무것도 소비하지 않은 실행권이 근거 없이 죽었다.
+
+소각은 **소비했다는 양성 증거**가 있을 때만 정당하다. 대칭으로, 반대 방향에도
+양성 증거가 있으면 되찾을 수 있어야 한다. 증인 둘(registry의 `pending_rebuild`
++ 이전 output에 `result.json` 없음)이 함께 참일 때만 되찾는다(Manager #309).
+전역 lock이 동시 실행을 이미 막으므로 그 둘이 함께 참이면 이전 실행은 죽은 것이다.
+
+### main이 이틀째 red였던 진짜 이유는 스키마가 아니었다
+
+`test_dedup_candidate_rejects_uuid_identity_and_accepts_text_feature_id`가
+2026-09-01(#1132에서 추가된 날)부터 계속 깨져 있었고 문서에도 없었다. 로컬
+PostGIS로 재현해 예외 원문을 보니 스키마는 내내 정상이었다 —
+`manual/provider candidate Feature proof is not eligible`, 즉
+`ck_m05_candidate_feature_proof`가 제대로 발화했다.
+
+틀린 것은 **읽는 쪽**이다. 이 저장소는 `postgresql+asyncpg`로 도는데, asyncpg
+예외는 `.sqlstate`와 `.constraint_name`을 직접 들고 있고 `.diag`가 없다 —
+`.diag`는 psycopg의 API다. 세 곳이 `getattr(orig, "diag", None)`으로 constraint
+이름을 읽었으니 런타임에서 항상 `None`이었다. 바로 윗줄의 sqlstate는 같은
+자리에서 잘 읽히므로 아무도 이상을 느끼지 못한다.
+
+테스트만의 문제가 아니었다. `feature_request_repo`의 `ck_feature_request_pending`
+분기가 한 번도 발화하지 않아 이미 처리된 요청 재제출에 상태 충돌 대신 검증
+오류가 나갔고, `feature_reference_reconciliation_repo`의 M05 allow-list는 아홉 개
+제약이 통째로 죽어 generic writer 오류로 떨어졌다. 정본은 이미 있었다 —
+`feature_update_active_repo._driver_constraint_identity`가 두 드라이버를 모두
+다루고 예외 체인까지 걷고, 두 모듈은 이미 그것을 import한다. 같은 사실이 네 곳에
+선언돼 있었고 그중 셋이 틀렸을 뿐이다(#1139).
+
+여기에 `anyio` 드리프트가 겹쳐 있었다. 미고정 anyio가 새 릴리스로 올라오며
+starlette testclient의 `anyio.abc.BlockingPortal` 별칭이 deprecated가 됐고,
+`filterwarnings=error`가 그것을 **수집 오류**로 승격시켜 파일 하나가 unit job
+전체를 중단시켰다. 같은 커밋 `acd1ff61`이 09-02 12:40에는 통과하고 09-03 04:11
+재실행에서 3.11/3.12/3.13 전부 깨지는 것으로 드리프트를 확정했다(#1138).
+
+### 게이트가 있는데 아무것도 막지 않던 것 셋
+
+- **`frontend.Dockerfile`이 워크스페이스 셋 중 둘만 복사했다.** `npm ci
+  --workspaces`는 선언된 것을 전부 설치하라는 뜻인데, 매니페스트가 없으면 npm은
+  조용히 뺀 트리를 만든다. `frontend.yml`은 전체 체크아웃에서 같은 명령을 돌리므로
+  영원히 통과한다 — **Dockerfile 경로는 Map CI에서 한 번도 빌드되지 않는다**(#1137).
+- **geo 검증기가 psql 실패를 "완료"로 보고했다.** `psql | tr` 파이프가 종료
+  상태를 가렸고 `case`에 빈 값 분기가 없어 `*)`로 떨어졌다(Manager #310).
+- **ETL 헬스체크가 `/server_info`를 봤다.** 정적 버전 문서라 code location이
+  죽어도 200이다 — PII 보존 job이 멈춰도 컨테이너는 끝까지 healthy였다(PinVi #524).
+
+### 그리고 e2e21이 본문까지 가서, 다음 벽을 보여 줬다
+
+수정을 얹은 e2e21은 처음으로 Map 9 + PinVi 7 컨테이너를 모두 띄우고 M04/M05
+본문까지 갔다(1시간 41분). 거기서 남긴 실패는 의미가 있었다 —
+`live Map admin OpenAPI does not match the pinned source artifact`.
+
+계약의 digest는 핀된 revision의 blob과 정확히 일치했으므로, 어긋난 것은 **런타임
+문서 대 계약**이었다. 핀된 이미지 안에서 직접 문서를 생성해 보니 161 path,
+계약은 162 path — 차이는 `/v1/debug/mois-license/{license_id}` 하나였다.
+
+그 라우트는 `debug_routes_enabled` 뒤에 있었다. 그 flag의 **코드 기본값은
+`true`**(local-dev)인데 Docker image 기본 profile은 `production`이고, production은
+"``/debug`` routes have no authentication"을 이유로 `false`를 강제한다. 즉
+`export_openapi.py`가 기본 설정으로 만든 계약은 **운영이 절대 제공하지 않는
+라우트**를 기술했고, 실행 중 표면과 계약을 바이트 비교하는 attestation은 운영
+구성에서 구조적으로 통과할 수 없었다.
+
+라우트를 지웠다. 도입 이후 admin frontend에 호출부가 한 번도 없었고, 같은 raw
+payload는 운영에서 도달 가능한 `/v1/features/{feature_id}/sources`가 이미 준다.
+삭제된 라우터만을 위해 있던 `feature_repo.get_primary_source_detail`도 함께
+지웠다 — 운영 caller가 0이었고 주석은 존재하지 않는 표면 둘을 가리키고 있었다.
+
+**불변식은 flag가 아니라 표면 위로 옮겼다.** 라우트를 지우면 그 flag를 읽는 코드가
+하나도 남지 않는다. 그러면 flag는 아무것도 막지 않는데 문서만 막는다고 말한다 —
+오늘 내내 고쳐 온 바로 그 모양이다. production은 이제 마운트된 `/v1/debug` 경로
+자체를 기동에서 거부한다.
+
+### 적대 리뷰가 71분짜리 함정을 미리 잡았다
+
+전문 리뷰어 둘(보안·계약 / attestation 체인)이 붙었고, 후자가 **내가 걸어 들어갈
+경로**를 짚었다. PinVi의 `generate_m05_pair_contract.py --write`는 v2 봉투를 쓰는데
+소비자 `config.py`는 `version == 1`을 **모듈 스코프에서** 요구한다. Manager의 격리
+preflight는 v1/v2를 함께 읽으므로 회전 전에 잡지 못하고, 실패는 71분짜리 rebuild를
+태운 뒤 "컨테이너가 뜨지 않는다"로만 드러났을 것이다. 생성기가 봉투 판을 정하지
+않도록 고쳤다.
+
+전자는 flag가 무력해진 것과 게이트가 정책표 금지로 **교착**을 만드는 것을 짚었다.
+둘 다 반영했다 — 강제는 표면 위로, 게이트는 grep이 아니라 AST route 선언 분석으로.
+
+### 이 결함 계열이 하루에 다섯 번 더 나왔다
+
+다중 타깃 bake(두 경로가 같은 교훈을 각자 알아야 했다), Dockerfile 워크스페이스
+목록(두 파일이 각자 선언), `docker-app.sh`의 build/verify 목록(한 함수 안에서 두
+번), 그리고 constraint reader(네 곳). 규칙은 이미 `AGENTS.md` DO NOT 15에 있다 —
+유도 → 결박 → 탐지, 그리고 결박은 가장 이른 지점에.
+
 ## 2026-09-02 — rebuild를 실제로 태웠고, 그게 결함 두 개를 드러냈다
 
 보류가 풀려 `rotate-pair → rebuild → e2e17`로 갔다. **첫 rebuild가 실패했고**,
