@@ -76,5 +76,9 @@ def test_dockerfile_copies_every_declared_workspace_manifest(name: str) -> None:
             re.MULTILINE,
         )
     }
-    missing = sorted(manifest for manifest in _declared_workspace_manifests() if manifest not in copied)
+    missing = sorted(
+        manifest
+        for manifest in _declared_workspace_manifests()
+        if manifest not in copied
+    )
     assert missing == [], f"{name}이 복사하지 않는 워크스페이스 매니페스트: {missing}"
