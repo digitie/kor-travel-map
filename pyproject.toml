@@ -225,6 +225,13 @@ filterwarnings = [
   # module 필터는 caller에 붙어 안 맞음). pytest-asyncio/pytest는 pin하지 않는다 —
   # 진짜 통합 blocker는 이 deprecation 하나였다(hook traceback은 wrapper frame).
   "ignore:testcontainers.postgres is deprecated:DeprecationWarning",
+  # anyio 4.x가 `anyio.abc.BlockingPortal`을 `anyio.from_thread.BlockingPortal`
+  # 별칭으로 deprecate했다. 경고를 내는 것은 우리 코드가 아니라 starlette/httpx의
+  # test client이므로 caller를 고칠 수 없고, filterwarnings=error가 이것을 **수집
+  # 오류**로 승격시켜 `test_curated_catalog_routes.py` 하나가 전체 unit job을
+  # 중단시켰다(2026-09-03: 미고정 anyio가 새 릴리스로 올라오며 모든 PR이 red).
+  # 위 testcontainers 건과 같은 이유로 module 필터가 아니라 message로 막는다.
+  "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
 ]
 
 [tool.coverage.run]
