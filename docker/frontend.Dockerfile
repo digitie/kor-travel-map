@@ -14,6 +14,7 @@ COPY package-lock.json ./
 COPY .npmrc ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
+COPY packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-user-client/package.json
 COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
 COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
 COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
@@ -35,6 +36,7 @@ COPY --from=deps /app/.npmrc ./.npmrc
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
+COPY --from=deps /app/packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-user-client/package.json
 
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
