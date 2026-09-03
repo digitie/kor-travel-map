@@ -389,9 +389,13 @@ class ApiSettings(BaseSettings):
     debug_routes_enabled: bool = Field(
         default=True,
         description=(
-            "``/debug/...`` 라우터 활성 여부. 현재 MOIS raw route는 mount 뒤에도 "
-            "admin BFF 인증을 요구하지만 production은 이 flag를 False로 강제해 route "
-            "자체를 내린다. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
+            "``/debug/...`` 라우터 활성 여부. 2026-09-03 현재 이 flag가 가리는 "
+            "라우터는 없다 — 마지막 하나였던 MOIS raw detail은 제거됐다. flag와 "
+            "production 거부는 남긴다: 표면이 다시 생길 때 운영이 거부해야 한다. "
+            "다만 **실제 경계는 flag가 아니라 표면**이므로 production은 마운트된 "
+            "``/v1/debug`` 경로 자체를 기동에서 거부한다"
+            "(``app._assert_no_production_debug_surface``). "
+            "``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
         ),
     )
     features_routes_enabled: bool = Field(

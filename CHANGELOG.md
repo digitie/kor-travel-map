@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+### `/v1/debug/mois-license/{license_id}` 제거 — 계약이 운영 표면과 갈라져 있었다 (2026-09-03)
+
+- **REMOVED (admin API)**: `GET /v1/debug/mois-license/{license_id}`(SPRINT-4 Step D)와
+  그 `/v1/debug/*` 표면 전체를 제거했다. 이 라우트는 `debug_routes_enabled` 뒤에
+  있었고, 그 flag의 코드 기본값은 `true`(local-dev)인 반면 Docker image 기본
+  profile은 `production`이며 production은 **인증이 없다는 이유로** `false`를 강제한다.
+  따라서 운영에서는 도달할 수 없었고, admin frontend에는 생성 타입만 있을 뿐 호출부가
+  한 번도 없었다.
+- **FIXED (M05 attestation)**: 기본 설정으로 생성한 `openapi.json`이 운영이 제공하지
+  않는 라우트를 기술했기 때문에, 실행 중 표면과 계약을 바이트 비교하는 M05 live
+  attestation이 운영 구성에서 **구조적으로 통과할 수 없었다**. 2026-09-03 격리 e2e가
+  `live Map admin OpenAPI does not match the pinned source artifact`로 막혔고, 실측하니
+  핀된 이미지는 161 path, 계약은 162 path였다 — 그 하나만 차이였다. 라우트 제거 후
+  기본 자세가 만드는 문서와 배포 이미지가 만드는 문서의 canonical digest가 같아졌다.
+- **ADDED (fail-closed)**: production은 마운트된 `/v1/debug` 경로 자체를 기동에서
+  거부한다(`app._assert_no_production_debug_surface`). `debug_routes_enabled`는
+  **flag**를 거부할 뿐 표면을 거부하지 않아서, 라우트를 지운 뒤에는 그 flag를 읽는
+  코드가 하나도 없었다 — 무조건 마운트된 `/v1/debug` 라우터라면 운영에서 그대로
+  제공됐을 것이다. 불변식을 flag가 아니라 표면 위로 옮긴다. 금지가 아니라 결정
+  지점이다: local-dev debug 표면은 여전히 만들 수 있고, 그것이 운영 계약에
+  들어가려는 순간 멈춘다.
+- **NOTE (consumer)**: `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40
+  `map_full_openapi_sha256`은 PinVi의 **재벤더 대상**이다. 이 변경으로 그 대상이
+  `de41961d…`로 이동했으므로, PinVi의 `apps/api/tests/contract/` 스냅샷과 pair
+  provenance 계약도 새 Map revision으로 함께 재핀해야 한다.
+
 ### T-VN-M02/M05 — Admin provenance identity를 opaque ID/UUID 쌍으로 명시 (2026-08-27)
 
 - **CHANGED (admin API)**: `GET /v1/admin/features/{feature_id}/creation-provenance`의

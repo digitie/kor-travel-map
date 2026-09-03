@@ -19,7 +19,7 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 >   `provider_sync_state` cursor 전진, `infra/sync_state_repo.py`).
 > - Step C closed: `mois.run_mois_license_closed_job` → `inactivate_features_by_
 >   source_entity_ids` (status='inactive', ADR-017).
-> - Step D detail: debug-ui `GET /debug/mois-license/{license_id}` +
+> - ~~Step D detail: debug-ui `GET /debug/mois-license/{license_id}`~~ (2026-09-03 제거 — 운영에서 도달 불가였고 UI 호출부도 없었다. raw payload는 `GET /v1/features/{feature_id}/sources`가 제공한다) +
 >   `feature_repo.get_primary_source_detail` (캐시만, 적재 없음).
 > - CLI: `ktmctl import mois <file> --mode {bulk|incremental|closed} [--cursor]`.
 

@@ -1532,23 +1532,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/debug/mois-license/{license_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** MOIS 인허가 on-demand 상세 (Step D, detail 우선) */
-        get: operations["get_mois_license_detail_v1_debug_mois_license__license_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/features": {
         parameters: {
             query?: never;
@@ -10163,58 +10146,6 @@ export interface components {
              * @default
              */
             request_id: string;
-        };
-        /**
-         * MoisLicenseDetailData
-         * @description ``GET /debug/mois-license/{license_id}`` data — 단건 on-demand 상세.
-         */
-        MoisLicenseDetailData: {
-            /** Address */
-            address: {
-                [key: string]: unknown;
-            };
-            /**
-             * Cached
-             * @description 프로세스 캐시 히트 여부.
-             * @default false
-             */
-            cached: boolean;
-            /** Category */
-            category: string;
-            /** Detail */
-            detail: {
-                [key: string]: unknown;
-            };
-            /** Feature Id */
-            feature_id: string;
-            /** Lat */
-            lat?: number | null;
-            /**
-             * License Id
-             * @description source_entity_id ({slug}::{mng_no}).
-             */
-            license_id: string;
-            /** Lon */
-            lon?: number | null;
-            /** Name */
-            name: string;
-            /**
-             * Raw
-             * @description 원본 MOIS payload (source_records.raw_data).
-             */
-            raw: {
-                [key: string]: unknown;
-            };
-            /** Status */
-            status: string;
-        };
-        /**
-         * MoisLicenseDetailResponse
-         * @description ``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope).
-         */
-        MoisLicenseDetailResponse: {
-            data: components["schemas"]["MoisLicenseDetailData"];
-            meta: components["schemas"]["Meta"];
         };
         /**
          * NearbyFeatureSummary
@@ -19795,55 +19726,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureCurationGroupResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    get_mois_license_detail_v1_debug_mois_license__license_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                license_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MoisLicenseDetailResponse"];
-                };
-            };
-            /** @description license_id(source_entity_id) 미적재 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description Validation Error */

@@ -163,7 +163,9 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/openapi.json": RoutePolicy.PUBLIC_UNAUTHENTICATED,
     # -- debug — 인증 없는 interactive docs UI. production에서 내린다
     #    (app.py의 ``docs_url``/``redoc_url``=None). debug policy의 enforcing
-    #    경계는 dependency가 아니라 production-off이며 ``/v1/debug/*``와 같다.
+    #    경계는 dependency가 아니라 production-off다. ``/v1/debug/*`` 표면은
+    #    2026-09-03에 사라졌고, 다시 생기면 production 기동이 거부한다
+    #    (``app._assert_no_production_debug_surface``).
     "/docs": RoutePolicy.DEBUG,
     "/docs/oauth2-redirect": RoutePolicy.DEBUG,
     "/redoc": RoutePolicy.DEBUG,
@@ -227,10 +229,6 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     # Docker Manager ops:fixture principal을 요구하지만 service artifact에만 노출한다.
     "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": RoutePolicy.SERVICE,
     "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize": (RoutePolicy.SERVICE),
-    # -- operator/debug — raw provider payload은 local-dev debug mount에서만
-    #    노출하되 mount된 route도 trusted admin BFF를 요구한다. production은
-    #    debug_routes_enabled=false로 route 자체를 내린다.
-    "/v1/debug/mois-license/{license_id}": RoutePolicy.OPERATOR,
     # -- operator — feature raw lineage(관측/source). T-VN-05(ADR-073/D-9-1):
     #    raw_data/raw_payload_hash/source_record_key는 공개 detail에서 제거하고
     #    admin BFF 인증 표면으로 이동했다.
@@ -494,8 +492,9 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
     """관측된 enforcing dependency가 정책 요구를 충족하는지 판정한다.
 
     - ``public-unauthenticated``/``debug``: 앱 인증 dependency가 없어야 한다.
-      (debug의 enforcing 경계는 ``debug_routes_enabled`` flag + T-VN-01
-      production 거부 — dependency가 아니라 mount 여부로 검증한다.)
+      (debug의 enforcing 경계는 dependency가 아니라 production-off다.
+      ``/docs``·``/redoc``은 ``is_production``으로, ``/v1/debug`` 표면은
+      ``app._assert_no_production_debug_surface``의 기동 거부로 막는다.)
     - ``public-keyed``: ``require_public_api_key``.
     - ``service``: ``require_service_token`` 또는 fixture 전용
       ``require_ops_fixture_principal``.

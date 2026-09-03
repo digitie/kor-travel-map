@@ -406,19 +406,29 @@ def test_debug_policy_covers_interactive_docs_only() -> None:
 
 
 @pytest.mark.unit
-def test_mois_debug_route_is_operator_gated_and_disappears_with_debug_flag() -> None:
-    matrix = build_route_policy_matrix(_representative_app())
-    mois = next(row for row in matrix if row.path == "/v1/debug/mois-license/{license_id}")
-    assert mois.policy is RoutePolicy.OPERATOR
-    assert mois.observed_enforcement == ("require_admin_frontend",)
+def test_no_v1_debug_surface_is_mounted_in_either_posture() -> None:
+    """``/v1/debug/*``는 어느 자세에서도 없어야 한다.
 
-    # ``debug_routes_enabled=False``는 ``/v1/debug/*``만 내린다. interactive docs
-    # UI는 별도로 ``is_production``으로 gate되므로 local-dev에서는 그대로 남는다.
-    disabled_matrix = build_route_policy_matrix(_representative_app(debug_routes_enabled=False))
-    mounted_paths = {row.path for row in disabled_matrix}
-    debug_paths = {row.path for row in disabled_matrix if row.policy is RoutePolicy.DEBUG}
-    assert "/v1/debug/mois-license/{license_id}" not in mounted_paths
-    assert {"/docs", "/redoc", "/docs/oauth2-redirect"} <= debug_paths
+    종전에는 `/v1/debug/mois-license/{license_id}` 하나가 `debug_routes_enabled`
+    뒤에 있었다. 그 flag의 코드 기본값은 `True`이고 운영은 `False`를 강제하므로,
+    기본값으로 만든 OpenAPI 계약이 운영 표면과 갈라졌고 M05 live attestation이
+    구조적으로 통과 불가능해졌다(2026-09-03). 라우트를 지운 뒤 그 표면이 다시
+    생기지 않는 것을 두 자세 모두에서 확인한다.
+
+    interactive docs UI는 `/v1/debug/*`가 아니라 `is_production`으로 gate되므로
+    local-dev에서는 그대로 남는다 — 그 경계도 함께 고정한다.
+    """
+    for application in (
+        _representative_app(),
+        _representative_app(debug_routes_enabled=False),
+    ):
+        matrix = build_route_policy_matrix(application)
+        mounted = {row.path for row in matrix}
+        assert not [path for path in mounted if path.startswith("/v1/debug/")], sorted(
+            path for path in mounted if path.startswith("/v1/debug/")
+        )
+        debug_paths = {row.path for row in matrix if row.policy is RoutePolicy.DEBUG}
+        assert {"/docs", "/redoc", "/docs/oauth2-redirect"} <= debug_paths
 
 
 @pytest.mark.unit
@@ -455,7 +465,7 @@ def test_docs_uis_absent_in_production_openapi_contract_kept() -> None:
     paths = {row.path for row in matrix}
     assert not (paths & {"/docs", "/redoc", "/docs/oauth2-redirect"})
     assert "/openapi.json" in paths
-    assert "/v1/debug/mois-license/{license_id}" not in paths
+    assert not [path for path in paths if path.startswith("/v1/debug/")]
     openapi_row = next(row for row in matrix if row.path == "/openapi.json")
     assert openapi_row.policy is RoutePolicy.PUBLIC_UNAUTHENTICATED
 

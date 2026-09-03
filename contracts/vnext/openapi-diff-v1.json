@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "6419c1332ba95ab03b8ec794d9d2e7c2a6f2e6da012d23118708e4e4bc5343bb"
+      "sha256": "de41961d04c86225de48259fb86caa18e08efcd9cbd21820cfb3b0d768b6de0c"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-09-03",
+      "task": "T-VN-M05 debug surface removal",
+      "change": "admin baseline sha256 재고정 — `/v1/debug/mois-license/{license_id}`를 제거했다. 이 라우트는 `debug_routes_enabled` 뒤에 있었고 그 flag의 코드 기본값은 true(local-dev)인 반면 배포 이미지는 production profile로 돌며 production은 인증 부재를 이유로 false를 강제한다. 그래서 계약이 운영이 제공하지 않는 라우트를 기술했고, 실행 중 표면과 계약을 바이트 비교하는 M05 live attestation이 구조적으로 통과 불가였다(실측: 이미지 161 path / 계약 162 path). admin bytes만 바뀌며 user/service bytes와 목표 diff 항목·counts는 무변경이다 — 제거된 표면이 admin 전용이었기 때문이다. `info.description`에서 `/debug` prefix 언급도 함께 제거했다 — 계약이 없는 표면을 기술하면 안 된다. user/service bytes는 프로필별로 description을 덮어쓰므로 무변경이다(실측)."
+    },
     {
       "date": "2026-08-31",
       "task": "T-VN-M03 import manual child",
