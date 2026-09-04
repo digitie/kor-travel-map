@@ -232,6 +232,29 @@ attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 �
 - C7 executor image → `sha256:2c5ee9ef4a9c5809c3d4b090fe25ad13fd09688e2fbac47cccf16fa0a4b53ded`
   (`io.kortravelmap.c7.repository-commit = 8078b110…`)
 - 구세대 attestation은 `.bak-e420c89e-20260904T123809Z`로 보존했다.
+- admin lane snapshot도 `8078b110`으로 설치했다 —
+  `/usr/local/lib/kor-travel-map/admin-feature-live-acceptance/8078b110…/`(디렉터리 0555,
+  py·manifest 0444, 러너 0555, root:root). `admin_feature_live_state.py`는 구세대와 해시가
+  같고(`412ec717…`) 나머지 셋만 바뀌었다.
+
+**D2 실행 준비 상태 (2026-09-04).** 신뢰 경계와 snapshot은 전부 갖춰졌고, 남은 것은 운영자만
+줄 수 있는 값 하나다.
+
+| 필요 | 상태 |
+|---|---|
+| host attestation v4 (현 세대) | 발행 완료, 검증기 PASS |
+| v6/v8 root 0600 사본 | 설치 완료 |
+| c7-runner snapshot `8078b110` | 설치 완료 |
+| admin lane snapshot `8078b110` | 설치 완료 |
+| C7 executor image | 빌드 완료 (`sha256:2c5ee9ef…`) |
+| `E2E_C7_*` env 9종 | 값 전부 확정 |
+| `E2E_ADMIN_USERNAME` / `E2E_ADMIN_PASSWORD` | 확보 |
+| **`E2E_ADMIN_FEATURE_FIXTURE_PG_DSN`** | **없음 — root 전용 fixture login role의 DSN** |
+| `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE` | 없음(위 role 이름) |
+
+`CONFIRM_DATABASE`는 `kor_travel_map`, `CONFIRM_ALEMBIC_REVISION`은
+`303_m05_payload_hash_domain`으로 v6/v8이 이미 밝힌다. root 소유 파일을 뒤져 자격증명을 찾지
+않았다 — 런북도 그 값을 운영자가 shell env로만 넘기라고 정한다.
 
 **착수 전 소유자 판정이 필요한 것 셋.** 아래는 측정으로 풀리지 않는다.
 
