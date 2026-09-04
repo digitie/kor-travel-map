@@ -1,0 +1,78 @@
+name: docker-images
+
+# 프로덕션 Dockerfile을 CI에서 **실제로 빌드**한다 (T-CI-DOCKERFILE-BUILD).
+#
+# 2026-09-03까지 이 저장소의 `.github/workflows/`에는 `docker build`가 **0건**이었다.
+# 그래서 Dockerfile 결함은 n150 격리 e2e나 pinned rebuild에서야 드러났고, 그 피드백
+# 루프는 한 시간이다. `frontend.Dockerfile`이 선언된 워크스페이스 셋 중 둘만 복사하던
+# 결함(#1137)이 정확히 그렇게 숨어 있었다 — `frontend.yml`은 전체 체크아웃에서 같은
+# npm 명령을 돌리므로 영원히 통과했다.
+#
+# `scripts/docker-buildx.sh`를 **경유**한다. 그 스크립트를 호출하는 곳이 저장소에 하나도
+# 없어 스크립트 자체가 검증되지 않고 있었다 — CI에서 돌리면 Dockerfile과 빌드 스크립트가
+# 함께 산다. 이미지 다중집합 계약(`dagster`와 `dagster-daemon`이 같은 빌드의 두 태그)도
+# 여기서 실행된다.
+#
+# **path 필터를 두지 않는다.** 필터를 두면 그 목록이 Dockerfile의 `COPY` 대상을 두 번째로
+# 선언하는 것이 되어, 한쪽만 늘어나면 조용히 빠진다(이 저장소가 결함으로 규정한 이중 선언,
+# AGENTS.md DO NOT 15). 필터가 없으면 파생할 것도 뒤처질 것도 없다. 비용은 PR당 job 하나이고
+# 기존 unit job(20분)과 병렬로 돌아 전체 대기시간을 늘리지 않는다.
+
+on:
+  push:
+    branches: [main, integration/t-vn]
+  pull_request:
+    branches: [main, integration/t-vn]
+
+concurrency:
+  group: docker-images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: production Dockerfiles build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build every production image
+        # `oci` 출력은 registry도 `--load`도 요구하지 않는다 — 빌드가 성공하는지만 본다.
+        # 단일 platform으로 고정한다: 배포 대상은 amd64뿐이고, 기본값
+        # `linux/amd64,linux/arm64`는 CI 시간을 두 배로 쓰면서 아무것도 더 막지 못한다.
+        #
+        # `GITHUB_TOKEN`은 dagster Dockerfile의 **선택적** BuildKit secret이다. provider
+        # 저장소를 미인증으로 clone하면 rate limit에 걸릴 수 있어 넘기지만, 없어도 빌드는
+        # 성립한다(`docker/dagster.Dockerfile`의 주석 참조).
+        env:
+          KOR_TRAVEL_MAP_DOCKER_PLATFORMS: linux/amd64
+          KOR_TRAVEL_MAP_BUILDX_OUTPUT: oci
+          KOR_TRAVEL_MAP_BUILDX_OCI_DIR: ${{ runner.temp }}/kor-travel-map-images-oci
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `bash`로 부른다. 이 저장소의 `scripts/*.sh`는 32개 중 26개가 git index에서
+        # `100644`이고(실행 비트 없음) `docker-buildx.sh`도 그중 하나다 — 직접 실행하면
+        # `Permission denied`(126)로 끝난다. 모드를 바꾸는 대신 관행을 따른다.
+        run: bash scripts/docker-buildx.sh
+
+      - name: Every declared image produced an archive
+        # 빌드가 조용히 일부만 굽는 것을 막는다. 기대 집합은 손으로 적지 않고
+        # `scripts/docker-buildx.sh`의 `build_one` 호출에서 **파생**한다 —
+        # `tests/unit/test_build_script_image_coverage.py`가 그 목록을 이미 고정한다.
+        env:
+          KOR_TRAVEL_MAP_BUILDX_OCI_DIR: ${{ runner.temp }}/kor-travel-map-images-oci
+        run: |
+          set -euo pipefail
+          expected="$(grep -cE '^build_one ' scripts/docker-buildx.sh)"
+          produced="$(find "$KOR_TRAVEL_MAP_BUILDX_OCI_DIR" -maxdepth 1 -name '*.oci' | wc -l)"
+          echo "build_one 호출 ${expected}건 / OCI 산출물 ${produced}건"
+          if [[ "$produced" != "$expected" ]]; then
+            echo "산출물 수가 build_one 호출 수와 다르다" >&2
+            find "$KOR_TRAVEL_MAP_BUILDX_OCI_DIR" -maxdepth 1 -name '*.oci' -printf '  %f\n' >&2
+            exit 1
+          fi
