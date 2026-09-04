@@ -1,5 +1,58 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — B4를 선언이 아니라 측정으로 바꿨다, 그리고 원장 중복 넷을 정리했다
+
+### B4는 재계산으로 판정된다
+
+`T-VN-FINAL-REBUILD`의 마지막 남은 조건 B4("현 candidate의 runtime/attestation 입력을
+바꾸는 미반영 변경이 없다")는 종전에 사람의 선언이었다. 그런데 v8 rebuild journal이 그
+입력 중 셋을 **해시로 담고 있다** — `compose_sha256`, `resolved_compose_sha256`,
+`environment_sha256`. 그러면 판정은 재계산이다.
+
+측정(2026-09-04, n150 읽기 전용):
+
+    environment_sha256   journal b670154a…  재계산 b670154a…  동일
+    compose_sha256       journal 1cd6f2e0…  재계산 1cd6f2e0…  동일
+
+`.env`는 mtime이 오늘로 바뀌었지만 바이트가 같다 — installer가 바이트 보존을 스냅샷으로
+단언한다. `resolved_compose_sha256`은 (원본 compose + `.env` + 렌더링 코드)의 함수인데
+앞의 둘이 동일하므로 렌더링 코드만 변수다. generation 직전 커밋 `c4b509c`부터 현재
+`main`까지 Manager 소스 변경은 **정확히 세 파일**이고, resolved compose·profile·container
+command·환경 매핑·mount/network·runtime role/ACL과 journal 발행 verifier를 소유하는 네
+모듈(`compose_service.py`·`c6c_deployment.py`·`pinned_runtime_generation.py`·
+`runtime_execution_registry.py`)은 **무변경**이다. `docker compose config`는 쓰지 않았다 —
+금지 명령이고, 이 유도가 그것을 대신한다.
+
+`pinned_runtime_sources.py` 변경도 materialize 결과를 바꾸지 않는다. diff가 **303 추가 /
+1 삭제**이고 그 한 줄은 독스트링이다. 본문이 바뀐 기존 함수는 넷뿐이며 전부 fail-close
+추가이거나 `GIT_OPTIONAL_LOCKS=0` 추가다. revision·tree·clean 검증 경로는 한 줄도 바뀌지
+않았다.
+
+판정 초안은 **TRUE 권고**이며 `docs/tasks-acceptance.md`의 `T-VN-FINAL-REBUILD` 절에
+근거와 함께 뒀다. 남은 판단은 한 가지다 — 조문의 "Manager runner와 verifier contract가
+달라지면 false"를 문자 그대로 읽을지 여부. 문자 그대로면 매 Manager 커밋마다 false가 되어,
+B1~B3를 삭제하며 이 절이 명시적으로 배격한 병리를 그대로 재생산한다. 소유자 서명이 남았다.
+
+### 원장 중복 넷 — 셋은 낱말 문제, 하나는 실제 위임
+
+조사해 보니 "중복"의 성격이 서로 달랐다.
+
+- **`T-VN-M04` ↔ `T-VN-41C`**: 실제 위임이다. M04의 해제 조건이 이미
+  "paired request→approval receipt와 isolated acceptance는 `T-VN-41C`에서 완료한다"고
+  적는다. M04 줄이 그 범위를 다시 세고 있었다 → 위임을 줄에 명시했다.
+- **`T-VN-M05` / `T-VN-41C` / `T-VN-M05-ACTIVATION`**: 삼중 계상이 아니라 **낱말 충돌**이었다.
+  M05의 reconciliation은 dedup 판정 결과의 전파, 41C의 reconciliation은 relay/DB 대조,
+  ACTIVATION은 그것을 태우는 실행 수단이다 — 셋 다 다른 것이다 → 각 줄이 자기 범위를
+  말하게 했다.
+- **`T-VN-H49` 부모/자식**: 부모의 해제 조건이 자식 넷을 자기 체크리스트로 열거한다.
+  미배정 잔여는 Geo application DB의 `scheduled_backup`/retention 수렴 증거 하나뿐 →
+  부모 줄을 그 잔여로 좁혔다.
+- **`T-VN-H49-OFFBOX` ↔ `T-VN-H43`**: H43의 유일한 잔여가 `[보류]`이고
+  "현 환경에서 수행하지 않는다"(사용자 지시 2026-08-06)이다. 열린 작업이 아닌데 줄은
+  활성처럼 읽혔다 → 보류와 사유·재개 조건·현 소유자(`H49-OFFBOX`)를 줄에 박았다.
+
+넷 다 task를 지우지 않았다. 지워야 할 중복이 아니라 **범위가 흐린 문장**이었기 때문이다.
+
 ## 2026-09-04 — 격리 M04/M05가 새 하네스에서 통과했고, 봉인 트리가 처음으로 깨끗이 남았다
 
 `e2e025`가 `status: passed`로 닫혔다. 중요한 것은 통과 자체보다 **끝난 뒤의 상태**다.

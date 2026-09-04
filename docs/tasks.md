@@ -17,11 +17,11 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 - [ ] T-FE-MOCK-FLAKE — n150 live GET-only로 mocked checkpoint 잔여를 해소한다.
 - [ ] T-VN-M01 — admin Feature 생성 API의 live clean-cutover를 완료한다.
 - [ ] T-VN-M02 — Feature origin/provenance 보존·불변성의 live acceptance를 완료한다.
-- [~] T-VN-M04 — 범용 Feature 요청 큐의 paired consumer acceptance를 완료한다.
-- [~] T-VN-M05 — provider 발행 Feature 중복 판정과 paired reconciliation을 완료한다.
+- [~] T-VN-M04 — 범용 Feature 요청 큐. 구현은 병합됐고(#1029, PinVi #458·#465), **남은 paired request→approval receipt와 isolated acceptance는 `T-VN-41C`가 소유한다** — 해제 조건이 그렇게 위임하고 있어 이 줄은 그 범위를 다시 세지 않는다(2026-09-04 중복 정리). 2026-09-04 `e2e025`의 M04 attestation이 submit→pending receipt→PinVi approval 사슬을 `m04_server_side_chain_verified: true`로 닫았다.
+- [~] T-VN-M05 — provider 발행 Feature의 **중복 판정 계약**(ADR-097)과 그 판정 결과의 paired 전파를 완료한다. `T-VN-41C`의 reconciliation은 relay/DB 대조라 **다른 것**이고, live acceptance를 실제로 태우는 실행 수단은 `T-VN-M05-ACTIVATION`이다(2026-09-04 중복 정리 — 삼중 계상은 낱말 충돌이었고 범위는 셋 다 다르다).
 - [ ] T-VN-H34 — 공식 curation 미연결 membership의 남은 acceptance criteria를 마무리한다.
-- [ ] T-VN-H43 — production backup의 정기 dump, SHA-256, 보존, rollback 기준선을 확정한다.
-- [ ] T-VN-H49 — 4분할 인스턴스 backup의 주기 실행, bounded retention, off-box 증거를 완료한다.
+- [ ] T-VN-H43 — **보류**(사용자 지시 2026-08-06). 기준선 dump·sha256·rollback 기준선은 완료됐고 남은 정기화·2차 외부 사본 자동화는 **현 환경에서 수행하지 않는다**(n150은 실 production이 아니며 손상 시 재적재가 정책). 실 prod 전환 시 manager #148로 재개한다. off-box 자동화의 현 소유자는 `T-VN-H49-OFFBOX`다 — 규약 §보류에 따라 잔여로 세지 않는다(2026-09-04 중복 정리).
+- [ ] T-VN-H49 — **Geo application DB**의 `scheduled_backup`·retention janitor가 최근 성공과 bounded retention으로 수렴하는지 운영 증거를 남긴다. 나머지 세 인스턴스와 off-box는 아래 `-GEO-DAGSTER`/`-CONCIERGE`/`-PINVI`/`-OFFBOX`가 소유한다 — 해제 조건이 그것들을 자기 체크리스트로 열거하므로 이 줄은 자식 범위를 다시 세지 않는다(2026-09-04 중복 정리).
 - [ ] T-VN-H49-GEO-DAGSTER — geo_dagster metadata DB의 standalone backup을 검증한다.
 - [ ] T-VN-H49-CONCIERGE — Concierge의 standalone backup을 검증한다.
 - [ ] T-VN-H49-PINVI — PinVi의 standalone backup을 검증한다.
