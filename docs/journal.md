@@ -1,5 +1,75 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-05 — D2를 실제로 돌렸고, M04가 깨뜨린 계약에서 막혔다
+
+D2(`ktdm-d2-001`)를 배포 스택에 실행했다. 13분 만에 `fixture-seed-failed`로 막혔고, 원인을
+끝까지 추적했다. **배포 DB 잔여물은 0건**이다(`feature.features`에서 run id·`e2e_live_acceptance`
+모두 0). seed가 쓰기 전에 죽었다.
+
+### 오늘 발행한 신뢰 경계는 전부 통과했다
+
+`BLOCKED.json`이 그것을 기록한다 — `host_attestation_sha256 40bde4b8…`,
+`pinned_runtime_manifest_sha256 9f6ddfc4…`, `rebuild_journal_sha256 9a52683b…`,
+`playwright_image_id sha256:2c5ee9ef…`, `source_commit 8078b110…`. attestation·snapshot 둘·
+executor image·env가 실제 러너에게 수용됐다.
+
+`owned_feature_ids`도 기록됐다 — `e2e_live_acceptance::<run_id>::{marker::draft, marker::inactive,
+marker::hidden, correction, weather, price, search::alpha, search::beta}` **8개**. 런북 §1의
+"8-ID" 서술은 소유 참조 키 기준으로 **정확했다**. 앞선 조사가 "API 1 + helper 2"라 한 것은
+*행 수*를 센 것이고, 둘은 서로 다른 것을 세고 있었다.
+
+### 진짜 원인 — M04가 helper의 FK 계약을 조용히 무효화했다
+
+러너는 실패 사유를 가린다(`values redacted`). 게다가 supervisor는 helper 컨테이너의 **stdout만**
+`direct-seed.json`에 쓰고 **stderr는 버린다**(`admin_feature_live_supervisor.py:349-360`). 그래서
+파일이 0바이트였고 사유가 남지 않았다 — 이번 세션에서 고친 Manager preflight 침묵과 같은 계열의
+관측 결함이다.
+
+supervisor의 `docker create` 인자를 그대로 재현해(`--entrypoint python`, `--read-only`,
+`--volumes-from <api>:ro`, API 런타임 env + `KOR_TRAVEL_MAP_PG_DSN=<fixture DSN>`) 읽기 전용
+`audit`을 돌려 사유를 꺼냈다. 재현이 세 번 불완전했고 그때마다 다른 오류가 나왔다 — env만 준
+경우 `ADMIN_PROXY_SECRET`, 볼륨을 뺀 경우 `final permit unavailable`. 둘 다 내 재현의 인공물이었다.
+
+충실히 재현하니 진짜 사유가 나왔다:
+
+    RuntimeError: feature FK topology가 단일 feature_id 계약과 다릅니다
+    (admin_feature_live_fixture.py:525)
+
+실측으로 범인을 특정했다:
+
+    ops.feature_requests.resolved_feature_id (uuid) -> feature.features.feature_uuid (uuid)
+
+helper는 "`feature.features`로 들어오는 **단일 컬럼** FK는 모두 `feature_id`를 가리킨다"고
+단언한다(composite FK는 이미 제외한다). 그런데 이 FK는 단일 컬럼이면서 `feature_uuid`를
+가리키고, **타입이 uuid↔uuid로 정당하다.** 스키마가 틀린 게 아니라 helper의 계약이 낡았다.
+
+출처도 확정했다 — `alembic/retired_versions/0200-0236/0233_tvn_m04_feature_request_queue.py`,
+즉 **`T-VN-M04`의 feature request 큐**가 넣었다. helper는 그 속성을 단언만 하고 스키마에
+**결박하지 않았고**, migration이 조용히 무효화했다. D2가 그 뒤로 돌지 않아 아무도 몰랐다.
+이 저장소가 DO NOT 15로 규정한 결함 계열 그대로다.
+
+### 부수로 고친 것 — fixture login role 권한
+
+전용 fixture login role이 배포에 **없어서** `ktm_feature_migrator`를 썼다(멤버십상 유일하게
+`SET ROLE ktm_feature_schema_owner`가 가능한 LOGIN role이고, `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`의
+role과도 일치했다). 그런데 confirm 쿼리가 `SET ROLE` **전에** `public.alembic_version`을 읽는데
+그 권한이 없었다. 모든 role이 `rolinherit=false`(의도된 설계)라 멤버십으로는 안 된다.
+
+    GRANT SELECT ON public.alembic_version TO ktm_feature_migrator;
+
+새 권한을 준 것이 아니다 — migrator는 이미 `SET ROLE`로 그 테이블을 읽을 수 있었다. 되돌리려면
+`REVOKE SELECT ON public.alembic_version FROM ktm_feature_migrator`.
+
+### 남은 판정
+
+helper를 고치면 Map revision이 바뀌고, 그러면 pinset·generation·attestation이 전부 따라
+바뀐다(attestation의 `repository_commit`·`source_commits.map`이 v6의 `map_source_revision`과
+exact여야 한다). 즉 **helper 한 줄을 고치는 값이 rotate-pair → rebuild(일곱 image) → 재발행 →
+D1 재실행 → D2**다. 그 판단은 소유자 몫이다.
+
+lane은 `BLOCKED`(`phase: fixture-seed-failed`, `recovery_attempt: 0`)로 남아 있다. 잔여물이
+0건이므로 `recover`는 깨끗하게 끝날 것이나, 런북 §5가 운영자 확정을 요구하므로 실행하지 않았다.
+
 ## 2026-09-04 — 구세대 artifact를 퇴역시키고 41C를 재분류했다
 
 ### 퇴역 (F1D-E 위생)
