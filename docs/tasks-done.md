@@ -10,6 +10,17 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## T-VN-FINAL-REBUILD — 최종 acceptance 배리어 (2026-09-04 해제)
+
+- [x] T-VN-FINAL-REBUILD — B4를 재판정해 최종 acceptance 배리어를 **열었다**. 소유자 서명 2026-09-04.
+  근거는 선언이 아니라 재계산 대조다 — v8 journal이 담은 `environment_sha256`·
+  `compose_sha256`을 n150에서 재계산해 동일함을 확인했고,
+  `resolved_compose_sha256`은 원본 compose·`.env`가 동일하고 렌더링을 소유하는 네 모듈
+  (`compose_service.py`·`c6c_deployment.py`·`pinned_runtime_generation.py`·
+  `runtime_execution_registry.py`)이 무변경이므로 구성상 불변이다. 상세는
+  [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 B4 절과 `docs/journal.md` 2026-09-04.
+- 이 배리어가 푸는 순서: `T-VN-41F1D-D1` → `T-VN-41F1D-E` → `T-VN-41F1D-D2` → `T-VN-41C`.
+
 ## T-CI-DOCKERFILE-BUILD — 프로덕션 Dockerfile을 CI에서 실제로 빌드한다 (2026-09-04 완료)
 
 - [x] 신설한 `docker-images.yml` job이 실제 PR에서 초록으로 도는 것을 확인했다 —

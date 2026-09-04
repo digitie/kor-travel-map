@@ -8,9 +8,8 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 2026-08-27 평면화(`6d671ef1`)가 열린 항목의 판정 근거까지 지웠고, 그 직후
 `T-VN-FINAL-REBUILD`가 조건이 사라진 상태로 완료 처리된 사고가 있었다.
 
-- [~] T-VN-FINAL-REBUILD — B4를 재판정해 최종 acceptance 배리어를 연다(아직 열리지 않았다). 착수 전 [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 재시도 금지 candidate 목록을 확인한다.
 - [~] T-VN-M05-ACTIVATION — 새 pinset 한 번의 실행으로 M04/M05 live acceptance attestation을 승격한다. **2026-09-04 실측**: `e2e025`가 pinset `e6b52db4`·Manager `b3217edc`에서 `status: passed`로 닫혔고(m04 `f08620a9…`, m05 `37320bb5…`, provenance `25a80946…`, `m04_server_side_chain_verified: true`), 실행 후에도 봉인 트리가 `_validate_immutable_tree` ACCEPT라 **같은 pinset 재실행이 가능하다** — 이전 두 번은 그렇지 않았다. 승격 판정은 소유자 몫이다. 착수 전 [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 A1~A4와 terminal 재실행 금지 목록을 확인한다.
-- [ ] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다.
+- [~] T-VN-41F1D-D1 — 최종 격리 리허설과 provenance attestation을 기록한다. **2026-09-04**: 여섯 요구 중 다섯이 현 candidate에서 측정됐다(일곱 image ID가 실행 컨테이너와 일치, 세 schema head, `409` cancel receipt, finalize, resolved compose/pinset/OpenAPI provenance). 잔여는 **데이터 비의존 admin UI smoke 11건**뿐이며 admin 자격증명과 핀 revision 체크아웃이 필요하다 — 상세는 `docs/journal.md` 2026-09-04.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
 - [ ] T-VN-41C — relay, reconciliation, consumer enable의 paired acceptance를 완료한다.
 - [ ] T-VN-41F1D-E — 이전 generation을 퇴역하고 v6/v8 attestation 전환을 완료한다.
