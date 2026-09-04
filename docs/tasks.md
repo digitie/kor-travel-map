@@ -28,4 +28,4 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 - [ ] T-VN-H49-OFFBOX — off-box 복제 자동화를 결선하고 backup 문서를 현행화한다.
 - [ ] T-VN-39 — KTM·PinVi write-fence cutover를 수행한다.
 - [ ] T-101 — cluster rollup materialized view 도입 조건을 재검토한다.
-- [~] T-CI-DOCKERFILE-BUILD — Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/workflows/`에 `docker build` 0건). 그래서 Dockerfile 결함은 n150 격리 e2e나 pinned rebuild에서야 드러나고, 그 피드백 루프는 한 시간이다 — 2026-09-03 `frontend.Dockerfile`의 워크스페이스 매니페스트 누락(#1137)이 그렇게 숨어 있었다. `scripts/docker-buildx.sh`는 `KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci` + 단일 platform으로 registry 없이 돌릴 수 있고, 현재 그 스크립트를 **호출하는 곳이 저장소에 없다** — CI에서 돌리면 Dockerfile과 빌드 스크립트를 함께 살린다. trigger 경로는 파생 대신 **필터를 두지 않는** 쪽으로 해결했다(필터가 없으면 뒤처질 것이 없다). `.github/workflows/docker-images.yml` 신설 + 게이트 6건. **남은 것**: 이 job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다.
+- [~] T-CI-DOCKERFILE-BUILD — 신설한 `docker-images.yml` job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다. 착수 전 [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 C1~C6을 확인한다.
