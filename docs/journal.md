@@ -1,5 +1,37 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — T-VN-41F1D-D1 완료: 데이터 비의존 live UI가 현 generation에서 통과했다
+
+D1의 마지막 요구였던 데이터 비의존 admin UI smoke가 배포 스택에서 **11 passed (1.3m)**로
+닫혔다. 이로써 D1의 여섯 요구가 전부 현 candidate `e6b52db4`에서 충족된다.
+
+    [setup]  authenticate admin (live)
+    scenario catalog   taxonomy route/API/reflection/risk · admin surface 메타 ·
+                       pipeline datasets catalog + 조건부 MOIS precheck · 대표 route smoke
+    backups            300 baseline 정책(backup만 opt-in, restore/hot swap 부재) ·
+                       backup plan `execute=false` 결과와 UI live region
+    운영 홈            pipeline overview·root 목록 실제 응답 렌더 · 존치 화면만 내비게이션 노출
+    운영 로그          system/API 목록 실제 REST 렌더 · 필터·페이지 크기 GET-only 조작
+
+실행 spec 4개와 `auth.setup.ts`·`_auth-state.ts`·`playwright.live.config.ts`가 핀 revision
+`8078b110`의 것과 **바이트 동일**함을 먼저 확인하고 돌렸다(그래서 낡은 사본으로 검사하는
+함정을 피했다). `-write` 접미 spec은 넣지 않았다 — 전체 live suite는 실제 Feature를
+생성·삭제한다.
+
+### 운영 메모: n150에서 Playwright를 호스트로 돌리는 법
+
+두 번 헛돌았고 둘 다 환경 문제였다. 다음 사람이 반복하지 않도록 적는다.
+
+- **root로 돌리지 마라.** 브라우저 캐시는 `/home/digitie/.cache/ms-playwright`에 있고
+  root 캐시는 비어 있다. root로 돌리면 `chromium_headless_shell-1223 실행파일 없음`으로 죽는다.
+- **호스트에 설치할 수 없다.** Playwright 1.60.0은 `ubuntu26.04-x64`를 지원하지 않아
+  `playwright install chromium`이 거부된다. 기존 캐시를 쓰는 것 외의 길이 없다(격리 e2e가
+  runner **컨테이너**를 쓰는 이유이기도 하다).
+- **아티팩트 경로를 넘겨라.** 기본값이 `/tmp/kor-travel-map-playwright/...`인데 root가 한 번
+  만들면 digitie가 쓰지 못한다. `PLAYWRIGHT_ARTIFACT_ROOT`로 홈 아래를 지정한다.
+
+자격증명은 0600 파일로만 두고 실행 후 삭제했으며 로그에 남지 않았다(`grep -c PASSWORD` = 0).
+
 ## 2026-09-04 — B4 서명, 그리고 D1이 실제로 무엇을 남겼는지
 
 소유자가 B4에 서명해 `T-VN-FINAL-REBUILD` 배리어가 열렸다. 판정 근거는

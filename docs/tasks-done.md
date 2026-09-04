@@ -10,6 +10,17 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation (2026-09-04 완료)
+
+- [x] T-VN-41F1D-D1 — 여섯 요구가 전부 현 candidate `e6b52db4`에서 충족됐다.
+  일곱 image ID가 실행 중 컨테이너와 일치(전부 healthy), 세 schema head
+  (`303_m05_payload_hash_domain`·`29b539ebc72a`·`20260824_0101`), v8 `cancel_probe`의
+  canonical `409 PIPELINE_CANCELLATION_UNSAFE`/`finalized`, `fresh_finalize_operation_plan`,
+  `resolved_compose_sha256 b8a504d6…`·`pinset e6b52db4…`·`e2e025`의 OpenAPI exact 대조,
+  그리고 데이터 비의존 admin UI smoke **11 passed**(2026-09-04, 배포 스택).
+  격리 M04/M05 attestation은 `e2e025`가 `status: passed`로 발행했다. 상세는
+  `docs/journal.md` 2026-09-04.
+
 ## T-VN-FINAL-REBUILD — 최종 acceptance 배리어 (2026-09-04 해제)
 
 - [x] T-VN-FINAL-REBUILD — B4를 재판정해 최종 acceptance 배리어를 **열었다**. 소유자 서명 2026-09-04.
