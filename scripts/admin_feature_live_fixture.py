@@ -520,24 +520,54 @@ async def _foreign_key_reference_counts(
         )
     ).mappings()
     counts: dict[str, int] = {}
+    # 소유 행의 uuid는 필요할 때 한 번만 푼다. `feature_uuid`를 가리키는 **단일 컬럼**
+    # FK가 실재하기 때문이다 — `ops.feature_requests.resolved_feature_id`(uuid)가
+    # T-VN-M04의 `0233`에서 그렇게 들어왔고 타입상 정당하다. 종전에는 이 함수가 그것을
+    # 계약 위반으로 보고 raise했다. 그 단언은 스키마에 결박돼 있지 않아 migration이
+    # 조용히 무효화했고, D2가 그 뒤로 돌지 않아 2026-09-05까지 아무도 몰랐다.
+    #
+    # 건너뛰지 않고 **세는** 이유: 이 함수의 목적이 cleanup 뒤 남은 참조를 정확히
+    # 계수하는 것이라, uuid로 참조하는 표를 빼면 잔여물 탐지에 사각이 생긴다.
+    owned_uuids: list[str] | None = None
+
     for constraint in constraints:
-        if str(constraint["target_column_name"]) != "feature_id":
-            raise RuntimeError("feature FK topology가 단일 feature_id 계약과 다릅니다")
+        target_column_name = str(constraint["target_column_name"])
+        if target_column_name not in {"feature_id", "feature_uuid"}:
+            raise RuntimeError("feature FK topology가 알려진 identity 계약과 다릅니다")
         schema_name = str(constraint["schema_name"])
         table_name = str(constraint["table_name"])
         column_name = str(constraint["column_name"])
         key = f"{schema_name}.{table_name}.{column_name}"
         if key in counts:
             raise RuntimeError("같은 feature FK column에 중복 constraint가 있습니다")
+        if target_column_name == "feature_id":
+            cast_type = "text[]"
+            identities: list[str] = list(feature_ids)
+        else:
+            if owned_uuids is None:
+                owned_uuids = [
+                    str(value)
+                    for value in (
+                        await session.execute(
+                            text(
+                                "SELECT feature_uuid FROM feature.features "
+                                "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+                            ),
+                            {"feature_ids": list(feature_ids)},
+                        )
+                    )
+                    .scalars()
+                    .all()
+                ]
+            cast_type = "uuid[]"
+            identities = owned_uuids
         statement = text(
             "SELECT count(*) FROM "
             f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)} "
-            f"WHERE {_quote_identifier(column_name)} = ANY(CAST(:feature_ids AS text[]))"
+            f"WHERE {_quote_identifier(column_name)} = ANY(CAST(:identities AS {cast_type}))"
         )
         counts[key] = int(
-            (await session.execute(statement, {"feature_ids": list(feature_ids)}))
-            .scalars()
-            .one()
+            (await session.execute(statement, {"identities": identities})).scalars().one()
         )
     required = {
         "feature.feature_price_values.feature_id",
