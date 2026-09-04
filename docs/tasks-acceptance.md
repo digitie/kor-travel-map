@@ -331,6 +331,30 @@ attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 �
   [`admin-feature-live-acceptance.md`](runbooks/admin-feature-live-acceptance.md)의 Map-owned
   root helper와 격리 DB 경계만 사용하며 direct table `INSERT`는 허용하지 않는다.
 
+  **DB 경계 개정 (2026-09-04, 소유자 판정 — 대상은 배포 DB다).** 위 문단의 "승인된 일회용
+  non-production DB"와 실행 런북의 `E2E_LIVE_ALLOW_PROD=1` + 배포 DB `CONFIRM_*` exact 일치가
+  정면으로 충돌했다(2026-09-04 조사). 소유자는 **배포 DB**를 대상으로 정했다. 두 문장이
+  실제로는 충돌하지 않는다 — 이 저장소는 이미 **n150을 실 production이 아니라고** 못박아 뒀다
+  (`T-VN-H43`: "n150은 실 production이 아니며 손상 시 재적재가 정책이다", 사용자 지시
+  2026-08-06). 따라서:
+
+  - D2의 대상은 n150 **배포** Map/PinVi DB이고, 실행 수단은
+    [`admin-feature-live-acceptance.md`](runbooks/admin-feature-live-acceptance.md)의
+    `E2E_LIVE_ALLOW_PROD=1` lane이다. 격리 대안
+    (`scripts/run-admin-feature-clone-live-acceptance.sh`, 18701/18705)은 런북이 없으므로 정본이 아니다.
+  - "production DB identity·자격증명과 같으면 즉시 중단한다"는 **실 production**을 가리키는 것으로
+    읽는다. n150 배포 DB는 그 대상이 아니다. 런북이 요구하는
+    `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`/`_LOGIN_ROLE`/`_ALEMBIC_REVISION` exact 대조가
+    "엉뚱한 DB에 쓰지 않는다"는 보호를 그대로 수행한다.
+  - 나머지 불변식(fixture만 소유, direct `INSERT` 금지, Map API runtime role read-only 유지,
+    root-only DSN을 browser/API route에 넘기지 않음, 종료 시 소유 row 0건 확인)은 **그대로 유지한다.**
+    바뀐 것은 대상 DB의 분류뿐이다.
+
+  **아직 열린 판정**: 런북 §1의 fixture 소유 모델(8-ID, place 6 + weather/price 2)은 2026-07-20
+  계약이고 실제 spec은 2026-08-09~12에 **단수 name-keyed**(API 1 + helper 2, ID는 서버 발급)로
+  재작성됐다. `fixed`/`run_scoped_owned` mode 결박도 코드에 0건이다. 원장과 구현 중 어느 쪽을
+  정본으로 삼을지는 아직 판정되지 않았다 — 착수 전에 정해야 한다.
+
   fixture manifest에는 source/seed identity와 checksum, 허용 ID 목록, active generation,
   v6 manifest digest, v8 journal/host-attestation digest, exact Map/PinVi pair SHA, 일곱 image
   ID, 세 schema head, service OpenAPI SHA를 기록한다. 이 값은 실행 직전 active v6/v8와
