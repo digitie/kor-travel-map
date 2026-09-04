@@ -55,7 +55,10 @@ jobs:
           KOR_TRAVEL_MAP_BUILDX_OUTPUT: oci
           KOR_TRAVEL_MAP_BUILDX_OCI_DIR: ${{ runner.temp }}/kor-travel-map-images-oci
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: scripts/docker-buildx.sh
+        # `bash`로 부른다. 이 저장소의 `scripts/*.sh`는 32개 중 26개가 git index에서
+        # `100644`이고(실행 비트 없음) `docker-buildx.sh`도 그중 하나다 — 직접 실행하면
+        # `Permission denied`(126)로 끝난다. 모드를 바꾸는 대신 관행을 따른다.
+        run: bash scripts/docker-buildx.sh
 
       - name: Every declared image produced an archive
         # 빌드가 조용히 일부만 굽는 것을 막는다. 기대 집합은 손으로 적지 않고
