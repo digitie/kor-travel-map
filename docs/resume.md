@@ -24,7 +24,7 @@ map task가 오래 진전하지 못한 직접 원인은 코드 결함이 아니�
 명시하고, D1이 요구하는 일곱 image ID·schema head 대조는 격리 e2e attestation이 아니라
 **generation attestation**의 산출물이기 때문이다. 이번 실행은 그 판정을 대신하지 않는다.
 
-barrier가 열리면 순서는 `T-VN-41F1D-D1` → `D2` → `T-VN-41C` → `T-VN-41F1D-E`다.
+barrier가 열리면 순서는 `T-VN-41F1D-D1` → **`T-VN-41F1D-E`** → `D2` → `T-VN-41C`다(2026-09-04 정정 — D2 자기 조항이 F1D-E를 선행으로 박고, 배리어 해제 목록도 같은 순서다. 앞서 이 줄이 적었던 D2→41C→E는 틀렸다).
 `GM-17`(Manager production compose required-set 완화)은 소유자 지시로 **가장 마지막**이다.
 
 ### 열려 있는 소유자 판정 (원장 중복)

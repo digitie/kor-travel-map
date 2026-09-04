@@ -40,7 +40,7 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
 ## T-VN-FINAL-REBUILD
 
 ```markdown
-- [~] **T-VN-FINAL-REBUILD — fresh rebuild 완료 후 최종 acceptance 배리어**
+- [x] **T-VN-FINAL-REBUILD — fresh rebuild 완료 후 최종 acceptance 배리어** (2026-09-04 해제)
 
   H46H가 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`으로 Map application·Map Dagster·PinVi
   **세 DB를 fresh 재생성**하고 일곱 runtime을 고정 candidate로 재기동했으며, v6
@@ -69,7 +69,7 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   실행 시작 시점에 fail-close하고, 그때만 새 pinset을 고정해 H46H rebuild를 새
   generation으로 다시 수행한다.
 
-  - [ ] B4. **현 candidate의 runtime/attestation 입력을 바꾸는 미반영 변경이 없다.** raw/resolved
+  - [x] B4. **현 candidate의 runtime/attestation 입력을 바꾸는 미반영 변경이 없다.** raw/resolved
     Compose hash, profile, container command, 값 비노출 environment/보안 환경 매핑 hash, mount/network,
     runtime role·ACL, Manager runner와 attestation/verifier contract가 달라지면 false다.
     image·migration·OpenAPI가 같아도 이 입력이 달라지면 이전 v6/v8 journal/evidence를 재사용하지
@@ -100,9 +100,10 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
   만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).
 
-### B4 판정 초안 (2026-09-04) — **TRUE 권고**
+### B4 판정 (2026-09-04) — **TRUE, 소유자 서명 완료**
 
-> 소유자 서명 전이다. 아래는 근거이고, 마지막 한 문단만 판단을 요구한다.
+> 소유자가 2026-09-04에 서명했다. 아래가 그 근거이며, 마지막 문단의 해석 문제도 함께
+> TRUE로 정리됐다. 배리어는 열렸고 `docs/tasks-done.md`가 완료 이력을 소유한다.
 
 B4는 "현 candidate의 runtime/attestation **입력**을 바꾸는 미반영 변경이 없다"이다.
 그 입력 중 셋은 v8 journal이 **해시로 담고 있어** 산문이 아니라 재계산으로 판정된다.
