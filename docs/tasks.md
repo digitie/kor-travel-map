@@ -10,7 +10,7 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 
 - [~] T-VN-M05-ACTIVATION — 새 pinset 한 번의 실행으로 M04/M05 live acceptance attestation을 승격한다. **2026-09-04 실측**: `e2e025`가 pinset `e6b52db4`·Manager `b3217edc`에서 `status: passed`로 닫혔고(m04 `f08620a9…`, m05 `37320bb5…`, provenance `25a80946…`, `m04_server_side_chain_verified: true`), 실행 후에도 봉인 트리가 `_validate_immutable_tree` ACCEPT라 **같은 pinset 재실행이 가능하다** — 이전 두 번은 그렇지 않았다. 승격 판정은 소유자 몫이다. 착수 전 [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 A1~A4와 terminal 재실행 금지 목록을 확인한다.
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
-- [ ] T-VN-41C — relay, reconciliation, consumer enable의 paired acceptance를 완료한다.
+- [ ] T-VN-41C — relay·reconciliation·consumer enable. **acceptance가 아니라 구현이 먼저다**(2026-09-04 재분류). 조사 결과 reconciliation은 구현이 남아 있고(인용된 #1026은 버그픽스이며 인용문 자체가 reconciliation을 잔여로 명시), cache-target 1-b/1-c는 현 런타임에 env/principal이 하나도 없어 실행조차 되지 않으며, 1-a는 production 호출자가 0건이다. GC 실측 근거는 폐기 세대(head `0225`)의 것이다. 반면 `T-VN-M04`가 위임한 격리 범위(paired request→approval receipt)는 `e2e025`로 값까지 재현 확인됐다. receipt `pending → candidate_verified` 승격과 production consumer enable은 그 구현이 선 뒤의 일이다.
 - [ ] T-VN-41F1D-E — 이전 generation을 퇴역하고 v6/v8 attestation 전환을 완료한다.
 - [ ] T-FE-MOCK-FLAKE — n150 live GET-only로 mocked checkpoint 잔여를 해소한다.
 - [ ] T-VN-M01 — admin Feature 생성 API의 live clean-cutover를 완료한다.
