@@ -1,5 +1,44 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — B4 서명, 그리고 D1이 실제로 무엇을 남겼는지
+
+소유자가 B4에 서명해 `T-VN-FINAL-REBUILD` 배리어가 열렸다. 판정 근거는
+`docs/tasks-acceptance.md`의 B4 절(재계산 대조)이 소유한다.
+
+배리어가 열리자 `T-VN-41F1D-D1`의 잔여가 정확히 드러났다. D1이 요구하는 것은 여섯이고
+그중 다섯은 **이미 현 generation에서 측정된다.**
+
+| D1 요구 | 현 candidate `e6b52db4` 증거 | 판정 |
+|---|---|---|
+| 일곱 image의 immutable ID | v6 generation 기록과 **실행 중 컨테이너가 일치** (`9c9aeca8`/`af4bdd39`/`6f62557b`×2/`20f83ba4`/`c0ee992d`/`12cd37ad`), 전부 healthy | 측정 |
+| 세 schema head | `303_m05_payload_hash_domain` · `29b539ebc72a` · `20260824_0101` | 기록 |
+| canonical `409` receipt | v8 `cancel_probe`: `PIPELINE_CANCELLATION_UNSAFE` / `409` / `stage: finalized` | 기록 |
+| finalize | v8 `fresh_finalize_operation_plan` + `map_application_300_execution_evidence` | 기록 |
+| resolved compose·pinset·OpenAPI provenance | `resolved_compose_sha256 b8a504d6…`, `pinset e6b52db4…`, `e2e025`의 `_pair` OpenAPI exact 대조 | 측정 |
+| **데이터 비의존 admin UI smoke(로그인 포함)** | generation **32**에서만 통과했다(11개 테스트, 2026-08-26) | **미실행** |
+
+### 남은 하나가 왜 생략되지 않는가
+
+`e2e025`가 admin UI를 로그인부터 실제로 몰았지만 그것은 **격리 스택**이다. 배포 스택은
+같은 일곱 image를 쓰되 origin·reverse proxy·session cookie 등 wiring이 다르고, D1이
+attest하려는 것이 바로 그 배포 runtime이다. image·compose·env 해시가 같다는 사실은
+**이미지가 같다**는 것이지 **배포 wiring이 산다**는 것이 아니다.
+
+### 무엇이 막고 있나
+
+실행에는 두 가지가 필요하고 둘 다 내가 임의로 만들 수 없다.
+
+1. **admin 자격증명** — 런북이 `export E2E_ADMIN_PASSWORD='<admin-password>'`로 적는다.
+   운영자가 넣는 값이며, root 소유 파일을 뒤져 찾지 않았다.
+2. **핀 revision `8078b110`의 실행 가능한 체크아웃** — n150의
+   `/home/digitie/kor-travel-map`은 `.git`이 없는 낡은 사본(live spec 36개 vs 현재 37개)이고,
+   봉인된 핀 worktree에는 `node_modules`가 없다.
+
+실행 범위는 이전 통과 기록과 동일하게 고정한다 — login setup + `admin-scenario-catalog` ·
+`backups-restore`(`execute=false`) · `home-dashboard-roundtrip` · `logs` 네 spec(11개 테스트),
+`--workers=1`. `-write` 접미 spec은 넣지 않는다(전체 live suite는 실제 Feature를 생성·삭제한다 —
+`docs/reports/pr-552-563-review-2026-06-28.md`).
+
 ## 2026-09-04 — B4를 선언이 아니라 측정으로 바꿨다, 그리고 원장 중복 넷을 정리했다
 
 ### B4는 재계산으로 판정된다
