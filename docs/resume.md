@@ -1,5 +1,43 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-04 — 사이클을 태우던 원인이 제거됐다, 다음은 barrier 판정
+
+map task가 오래 진전하지 못한 직접 원인은 코드 결함이 아니라 **재시도 불가**였다.
+격리 e2e가 봉인된 핀 소스 worktree를 오염시켜, 통과하든 실패하든 같은 pinset을 다시
+돌릴 수 없게 만들었다(2026-09-03·04 연속, 각 약 1.5시간). Manager #315가 실행 루트를
+일회용 체크아웃으로 옮겨 이것을 끝냈고, `e2e025`가 통과한 뒤에도 봉인 트리는 깨끗하다.
+
+| 항목 | 상태 |
+|---|---|
+| pinset | **`e6b52db4`** = Map `8078b110` + PinVi `357da189` |
+| Manager 설치본 | `b3217edc` (execution identity `148f76b1`) |
+| 격리 M04/M05 live E2E | **passed** (`e2e025`) — m04 `f08620a9…`, m05 `37320bb5…`, provenance `25a80946…` |
+| 봉인 트리 | 실행 후에도 `_validate_immutable_tree` ACCEPT (pinvi/map) — **같은 pinset 재실행 가능** |
+| Map #1142 프로덕션 Dockerfile CI 빌드 | 머지 `cac35134` (job 13분 55초 pass) |
+| Map #1144 T-CI-DOCKERFILE-BUILD 종결 | 머지 `f549fc28` |
+| Manager #315·#316 | 머지 `b3217edc`·`a326d066` |
+
+### 다음 한 작업
+
+**`T-VN-FINAL-REBUILD`의 B4 재판정** — 이것이 열리기 전에는 `T-VN-41F1D-D1`을 닫을 수
+없다. D1의 해제 조건이 "barrier가 현재 candidate를 유지한다고 판정한 뒤 실행"이라고
+명시하고, D1이 요구하는 일곱 image ID·schema head 대조는 격리 e2e attestation이 아니라
+**generation attestation**의 산출물이기 때문이다. 이번 실행은 그 판정을 대신하지 않는다.
+
+barrier가 열리면 순서는 `T-VN-41F1D-D1` → `D2` → `T-VN-41C` → `T-VN-41F1D-E`다.
+`GM-17`(Manager production compose required-set 완화)은 소유자 지시로 **가장 마지막**이다.
+
+### 열려 있는 소유자 판정 (원장 중복)
+
+착수 전 정리가 필요한 중복이 넷 있다. 전부 보고했고 고치지 않았다 — 어느 쪽을 정본으로
+둘지가 판정이기 때문이다.
+
+- `T-VN-M04` ↔ `T-VN-41C`
+- `T-VN-M05` / `T-VN-41C` / `T-VN-M05-ACTIVATION` 삼중 계상
+- `T-VN-H49` 부모/자식 이중 계상
+- `T-VN-H49-OFFBOX` ↔ `T-VN-H43`
+
+
 ## 2026-09-03 — 침묵사 셋을 걷어내고 e2e가 본문까지 갔다, 다음은 계약 재핀
 
 격리 e2e 두 번과 pinned rebuild 한 번이 **로그 0바이트**로 사라지던 것을 걷어냈다.
