@@ -10,6 +10,12 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## T-CI-DOCKERFILE-BUILD — 프로덕션 Dockerfile을 CI에서 실제로 빌드한다 (2026-09-04 완료)
+
+- [x] 신설한 `docker-images.yml` job이 실제 PR에서 초록으로 도는 것을 확인했다 —
+  #1142에서 `production Dockerfiles build` 13분 55초 pass, `cac35134`로 머지.
+  해제 조건 C1~C6은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다.
+
 ## 2026-08-31 — T-VN-M03 import child·격리 live acceptance 완료 이관
 
 - [x] **T-VN-M03 — curated 동시 생성의 import 및 live acceptance 완료.**

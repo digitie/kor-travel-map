@@ -28,4 +28,3 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 - [ ] T-VN-H49-OFFBOX — off-box 복제 자동화를 결선하고 backup 문서를 현행화한다.
 - [ ] T-VN-39 — KTM·PinVi write-fence cutover를 수행한다.
 - [ ] T-101 — cluster rollup materialized view 도입 조건을 재검토한다.
-- [~] T-CI-DOCKERFILE-BUILD — 신설한 `docker-images.yml` job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다. 착수 전 [`docs/tasks-acceptance.md`](tasks-acceptance.md)의 C1~C6을 확인한다.
