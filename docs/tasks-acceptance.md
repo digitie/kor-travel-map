@@ -181,6 +181,57 @@ B4 조문은 "Manager runner와 attestation/verifier contract가 달라지면 fa
 1회(일곱 image 재빌드)다. 어느 쪽이든 **이번 실행의 attestation은 폐기되지 않는다** —
 pinset과 execution identity가 그대로이기 때문이다.
 
+### F1D-E blocker — host attestation v4 재발행 절차 (2026-09-04 설계, 미실행)
+
+`docs/runbooks/admin-feature-live-acceptance.md` 서두는 "실행 전 신뢰 경계는 C7 host
+attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 재사용한다"고 적는다.
+그런데 n150의 `/etc/kor-travel-map/c7-prod-live-e2e-attestation.json`(root 0600)은 **구세대
+전체**다 — `repository_commit e420c89e`, `source_commits.pinvi 27fe2043`,
+`pinned_runtime_pinset_sha256 de5206dc`, heads `0236_tvn41s_compaction_drained`/`20260821_0061`,
+`rebuild_transaction_id 0c523fc4`. 현 candidate `e6b52db4`용 v4는 존재하지 않는다.
+
+저장소에는 **검증기만** 있다 — `scripts/lib/c7_prod_attestation.py`의
+`verify_runtime_attestation_payloads`가 18개 top-level 키를 `_exact_dict`로 검사하고
+`version != 4`를 거부한다. 생성기·런북·ktdctl 명령은 두 저장소 어디에도 없다. 이 파일은
+**운영자가 직접 쓰는 선언**이고, 검증기가 그 선언을 살아 있는 runtime과 exact 대조해
+증명한다. 그래서 "서명 위조"가 아니라 선언을 짓는 일이며, 값이 틀리면 검증이 fail-close한다.
+
+필드별 출처는 이렇게 확정된다.
+
+| 필드 | 현 candidate 값 / 출처 | 상태 |
+|---|---|---|
+| `version` | `4` | 확정 |
+| `repository_commit`, `source_commits.map` | `8078b110db4bedd89cf2e6ee7a9d57b210cd224c` | 확정 |
+| `source_commits.pinvi` | `357da1897c2df2c86e5f3376e212451cf0f019ab` | 확정 |
+| `pinned_runtime_pinset_sha256` | `e6b52db4…` | 확정 |
+| `rebuild_transaction_id` | `4ee990ca-2676-4188-ada3-369ddc579911` (v8 journal) | 확정 |
+| `schema_heads` 3종 | `303_m05_payload_hash_domain` · `29b539ebc72a` · `20260824_0101` | 확정 |
+| `machine_id_sha256`, `hostname_sha256` | n150에서 측정 | 측정 가능 |
+| `ui_origin_sha256`, `api_ws_origin_sha256`, `dagster_graphql_url_sha256` | 배포 origin에서 측정 | 측정 가능 |
+| `compose_project_sha256` | 배포 compose project 이름에서 측정 | 측정 가능 |
+| `service_runtime` 7 role | 실행 중 컨테이너에서 측정(command/image 등) | 측정 가능 |
+| `pinned_runtime_manifest_sha256`, `rebuild_journal_sha256` | **v6/v8의 root-owned 0600 사본**의 sha256 | **선행 작업 필요** |
+| `orchestrator_files` 4종 | `8078b110`의 `audit-c7-prod-live-state.py`·`lib/c7-prod-runner-lifecycle.sh`·`lib/c7_prod_attestation.py`·`run-c7-prod-live-e2e.sh` sha256 | **snapshot 설치 필요** |
+| `playwright_base`, `playwright_image_id` | `8078b110`으로 빌드한 C7 executor image | **빌드 필요** |
+
+즉 18키 중 **13키는 지금 값이 확정되거나 측정 가능**하고, 남은 5키가 세 가지 선행 작업
+(v6/v8 0600 사본 · `8078b110` snapshot 설치 · C7 executor image 빌드)에 달려 있다.
+
+**착수 전 소유자 판정이 필요한 것 셋.** 아래는 측정으로 풀리지 않는다.
+
+1. **C7 런북은 퇴역했는데 그 attestation은 D2의 신뢰 경계로 남아 있다.**
+   `docs/runbooks/c7-prod-live-e2e.md` 머리글은 `[보존 이력 · 실행 금지]`이고 "`300` baseline의
+   n150 배포에는 사용하지 않는다"고 적는다. 그런데 admin-feature lane이 그 산출물을 재사용한다.
+   신뢰 경계를 C7에서 떼어낼지, C7 attestation만 현행 세대로 재발행할지가 판정이다.
+2. **D2 조문과 실행 런북이 정면 충돌한다.** 조문은 대상 DB가 non-production 일회용이고
+   production identity와 같으면 즉시 중단하라 하고, 런북은 `E2E_LIVE_ALLOW_PROD=1`과 배포 DB
+   `CONFIRM_*` exact 일치를 요구한다. 격리 대안(`run-admin-feature-clone-live-acceptance.sh`,
+   18701/18705)은 런북이 없다. 어느 쪽이 정본인가.
+3. **attestation 발행을 누가 소유하는가.** 이 파일은 지금 사람이 손으로 쓴다. 생성기를 만들면
+   "선언"이 "유도"가 되어 검증의 독립성이 약해진다 — 검증기가 대조할 대상이 같은 코드에서
+   나오기 때문이다(이 저장소가 DO NOT 15로 규정한 이중 선언의 반대 방향 위험). 손으로 유지할지,
+   유도하되 검증 입력과 분리할지가 설계 판정이다.
+
 ## Wave 2 상세 — 구조 전환
 
 > 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.
