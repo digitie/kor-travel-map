@@ -234,7 +234,16 @@ def _identifying_fragments(command: str) -> list[str] | None:
             flag for flag in ("--check", "--profile all") if flag in command
         )
         return fragments
-    script_call = re.search(r"(scripts/[\w./-]+\.py)", command)
+    if "build_one" in command:
+        # 산출물 수 대조 스텝(docker-images.yml). 로컬이 빌드만 하고 대조를 빼면
+        # "일부만 구워도 통과"가 그대로 남는다. 아래 일반 script 분기보다 **먼저**
+        # 와야 한다 — 이 블록도 `scripts/docker-buildx.sh`를 담고 있어서, 순서가
+        # 뒤바뀌면 빌드 스텝과 같은 조각으로 접혀 대조가 사라져도 침묵한다.
+        return ["build_one", ".oci"]
+    # `.sh`도 본다. 종전에는 `.py`만 봐서 CI가 셸 스크립트를 게이트로 돌리면
+    # 감사기가 그 형태를 **식별하지 못했다** — 그러면 면제표로 밀어 넣는 것 외에
+    # 길이 없었고, 면제는 곧 사각이다(docker-images.yml에서 실제로 밟았다).
+    script_call = re.search(r"(scripts/[\w./-]+\.(?:py|sh))", command)
     if script_call is not None:
         return [script_call.group(1)]
     if command.startswith("pytest "):

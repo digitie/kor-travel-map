@@ -188,6 +188,35 @@ doctor_on_native_fs() {
   "
 }
 
+# docker-images.yml 전용: CI와 **같은 스크립트를 같은 환경변수로** 돌린다.
+# `oci` 출력은 registry도 `--load`도 요구하지 않고, `docker-buildx.sh`가 자기 buildx
+# builder를 만들므로 로컬에서도 그대로 성립한다.
+#
+# 비싸다(CI 실측 14분 29초). 그래도 면제하지 않는 이유는, 이 게이트가 막으려는 결함이
+# 정확히 **"로컬에서 안 돌려서 n150 격리 e2e에서야 드러나는 Dockerfile 결함"**이기
+# 때문이다. 여기서 빼면 게이트를 만든 이유가 사라진다.
+docker_images_build() {
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc "
+    set -e
+    cd $WSL_ROOT
+    rm -rf /tmp/ktm-images-oci
+    KOR_TRAVEL_MAP_DOCKER_PLATFORMS=linux/amd64 KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci       KOR_TRAVEL_MAP_BUILDX_OCI_DIR=/tmp/ktm-images-oci bash scripts/docker-buildx.sh
+  "
+}
+
+# 빌드가 조용히 일부만 굽는 것을 막는다. 기대 집합은 손으로 적지 않고
+# `docker-buildx.sh`의 `build_one` 호출에서 파생한다 — CI 스텝과 같은 방식이다.
+# 두 조각(`build_one`·`.oci`)은 **한 줄에** 있어야 감사기가 이 게이트를 실재로 본다.
+docker_images_count() {
+  MSYS_NO_PATHCONV=1 wsl -e bash -lc "
+    set -e
+    cd $WSL_ROOT
+    expected=\$(grep -cE '^build_one ' scripts/docker-buildx.sh); produced=\$(find /tmp/ktm-images-oci -maxdepth 1 -name '*.oci' | wc -l)
+    echo \"build_one 호출 \$expected건 / OCI 산출물 \$produced건\"
+    [ \"\$produced\" = \"\$expected\" ]
+  "
+}
+
 # vitest 전용: react-doctor와 같은 이유로 네이티브 fs 사본에서 돌린다.
 vitest_on_native_fs() {
   MSYS_NO_PATHCONV=1 wsl -e bash -lc "
@@ -256,6 +285,10 @@ run_gate "admin type-check (app+e2e)" repo "$NPM -w $ADMIN run type-check"
 # 호출은 없고 임의 값이면 된다 — 안 넘기면 prerender가 "required in production"으로
 # 죽어 코드 결함처럼 보인다.
 run_gate "admin next build" repo   "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:8087    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201    $NPM -w $ADMIN run build"
+
+echo "===== docker-images.yml"
+run_gate "production Dockerfiles build" docker_images_build
+run_gate "선언한 이미지가 모두 산출됐다" docker_images_count
 
 echo
 if [ ${#FAILED[@]} -eq 0 ]; then
