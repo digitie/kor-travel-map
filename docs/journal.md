@@ -1,5 +1,36 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — 구세대 artifact를 퇴역시키고 41C를 재분류했다
+
+### 퇴역 (F1D-E 위생)
+
+`/etc/kor-travel-map/`의 구세대 셋을 활성 경로에서 뺐다 — `c7-compatible-pair-v4.json`,
+`c7-pinned-runtime-generation-v5-pr197.json`, `c7-pinned-runtime-rebuild-v7-pr197.json`.
+셋 다 pinset `de5206dc` / Map `e420c89e` / PinVi `27fe2043`의 것이고 Map 저장소에 참조가 없다.
+
+**삭제가 아니라 `retired-de5206dc/`(root 0700)로 옮겼다.** 퇴역의 목적은 활성 경로에서 빼는
+것이고, 이 파일들은 과거 세대의 증거이기도 하다. 옮기면 목적을 달성하면서 되돌릴 수 있다.
+옮긴 뒤 검증기를 다시 돌려 현 세대 attestation이 여전히 PASS임을 확인했다 — 신뢰 경계를
+건드리지 않았다는 것을 주장이 아니라 실행으로 확인했다.
+
+활성 경로에 남은 것은 현 세대 셋(v6 사본·v8 사본·attestation)과 오늘 재발행의 롤백용 백업뿐이다.
+
+### 41C 재분류
+
+`T-VN-41C`의 줄은 "paired acceptance를 **완료한다**"였는데, 조사와 반증이 확립한 사실은 다르다.
+
+- reconciliation은 **구현이 남아 있다**. 충족 근거로 인용된 #1026은 버그픽스이고, 인용문
+  자체가 reconciliation을 잔여로 명시한다.
+- cache-target 1-b/1-c는 현 런타임에 env/principal이 **하나도 없어** 실행조차 되지 않는다.
+- 1-a는 production 호출자가 **0건**이라 전환할 흐름 자체가 없다.
+- GC 실측 근거는 폐기 세대(head `0225`)의 것이고 그 스크립트는 exit 2 stub이다.
+
+즉 41C는 acceptance task가 아니라 **구현 후 acceptance**다. acceptance로 이름 붙여 두면
+백로그가 남은 일을 실제보다 작게 말한다. 줄을 그렇게 고쳤다.
+
+다만 `T-VN-M04`가 41C에 위임한 격리 범위(paired request→approval receipt)는 `e2e025`로 값까지
+재현 확인됐다 — 이 한 조각은 실재하는 성과이고, 41C 전체가 미착수라는 뜻이 아니다.
+
 ## 2026-09-04 — 사슬의 단일 blocker를 풀었다: attestation v4 재발행, 검증기 PASS
 
 E와 D2의 첫 검증이 참조하는 host attestation v4가 구세대(`e420c89e`/pinset `de5206dc`)여서
