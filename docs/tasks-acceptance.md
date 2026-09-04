@@ -100,6 +100,86 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
   만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).
 
+### B4 판정 초안 (2026-09-04) — **TRUE 권고**
+
+> 소유자 서명 전이다. 아래는 근거이고, 마지막 한 문단만 판단을 요구한다.
+
+B4는 "현 candidate의 runtime/attestation **입력**을 바꾸는 미반영 변경이 없다"이다.
+그 입력 중 셋은 v8 journal이 **해시로 담고 있어** 산문이 아니라 재계산으로 판정된다.
+active generation은 `e6b52db4`(Map `8078b110` + PinVi `357da189`), `recorded_at`
+`2026-09-03T14:07:27Z`, v8 journal `created_at` `2026-09-03T14:07:28Z`, `phase: committed`,
+`journal_generation 33`이다.
+
+**1. 측정한 것 (2026-09-04 n150, 읽기 전용)**
+
+| 입력 | journal 기록 | 재계산 | 판정 |
+|---|---|---|---|
+| `environment_sha256` | `b670154a…` | `sha256(/opt/kor-travel-docker-manager/.env)` = `b670154a…` | 동일 |
+| `compose_sha256` | `1cd6f2e0…` | `sha256(/opt/kor-travel-docker-manager/docker-compose.yml)` = `1cd6f2e0…` | 동일 |
+
+`.env`는 mtime이 오늘로 바뀌었지만(설치가 재검증하며 만졌다) **바이트가 동일**하다 —
+installer가 `.env` 바이트 보존을 스냅샷으로 단언한다.
+
+**2. 유도한 것 — `resolved_compose_sha256`**
+
+resolved 문서는 (원본 compose 바이트 + `.env` 바이트 + Manager 렌더링 코드)의 함수다.
+앞의 둘이 동일함을 측정했으므로 남는 변수는 렌더링 코드뿐이다. generation 시점 직전
+커밋(`c4b509c`)부터 현재 `main`까지의 소스 변경은 **정확히 세 파일**이다:
+
+    backend/src/kor_travel_docker_manager/services/pinned_runtime_sources.py
+    scripts/m05_isolated_e2e.py
+    scripts/run-m05-isolated-e2e-once
+
+그리고 다음 네 모듈은 **무변경**이다 — resolved compose·profile·container command·
+환경 매핑·mount/network·runtime role/ACL과 generation/journal 발행 verifier를 소유하는
+모듈 전부다:
+
+    compose_service.py · c6c_deployment.py · pinned_runtime_generation.py
+    runtime_execution_registry.py
+
+따라서 `resolved_compose_sha256`은 구성상 변할 수 없다. `docker compose config`로
+확인하지 않았다 — 이 저장소가 금지하는 명령이고, 위 유도가 그것을 대신한다.
+
+**3. `pinned_runtime_sources.py` 변경이 materialize 결과를 바꾸는가 — 아니다**
+
+diff는 **303 추가 / 1 삭제**이고, 삭제된 한 줄은 `_promote_staging_worktree`의 독스트링이다.
+본문이 바뀐 기존 함수는 넷뿐이며 전부 비-의미론적이다:
+
+- `_promote_staging_worktree` — "등록만 남고 경로가 없는" 상태를 **진단으로 올리는
+  선판정 추가**(fail-close만 늘린다)
+- `_root_git_environment` / `_source_owner_git_environment` — `GIT_OPTIONAL_LOCKS=0` 추가
+  (index 쓰기 억제. 체크아웃 내용에 영향 없음)
+- 나머지는 격리 harness 전용 신규 함수(일회용 worktree 3종 + 헬퍼)
+
+revision·tree·clean 검증 경로는 한 줄도 바뀌지 않았다.
+
+**4. 실행 시점 대조가 새 verifier 아래에서 통과했다**
+
+이 절이 B1~B3를 삭제하며 판정을 넘긴 "실행 시점 대조"가 현재 verifier로 실제 돌았다.
+`e2e025`(Manager `b3217edc`)의 `_source_pair_preflight`가 committed generation manifest의
+`pinset_sha256`과 `map_application_head`를 exact 대조해 통과했고, M04/M05 attestation이
+`status: passed`로 발행됐다(`scope: isolated`, `version: 4`,
+`m04_server_side_chain_verified: true`).
+
+**5. 판단이 필요한 한 가지**
+
+B4 조문은 "Manager runner와 attestation/verifier contract가 달라지면 false"라고 적는다.
+문자 그대로면 위 세 파일이 바뀌었으니 false다. 그러나 같은 절이 그 조문의 실효를
+**"낡은 verifier 계약 아래 발행된 journal의 재사용"**으로 한정하고, 실측 근거로
+"2026-08-27~29 Manager 코드 커밋 132건이 B4 아래에서 그대로 진행됐다"를 든다. v6/v8 journal을
+발행하는 verifier는 `compose_service.py`/`pinned_runtime_generation.py`이고 **둘 다
+무변경**이다. 바뀐 셋은 journal을 발행하지 않고 **소비**하며, 소비 대조는 4번에서
+통과했다.
+
+문자 그대로 읽으면 B4가 매 Manager 커밋마다 false가 되어, B1~B3를 삭제하며 이 절이
+명시적으로 배격한 병리("검증 불가능한 선언이 매 병합마다 배리어를 다시 닫아 반복 단가만
+키웠다")를 그대로 재생산한다. 그래서 **TRUE를 권고한다.**
+
+반대 판정(strict reading)을 택하면 조치는 하나다 — `ktdctl pinvi-pair rebuild-pinned
+--confirm`으로 현재 Manager 아래 새 v6/v8 journal을 발행한 뒤 진행한다. 비용은 rebuild
+1회(일곱 image 재빌드)다. 어느 쪽이든 **이번 실행의 attestation은 폐기되지 않는다** —
+pinset과 execution identity가 그대로이기 때문이다.
+
 ## Wave 2 상세 — 구조 전환
 
 > 실행 순서는 31A~C(freeze) → 32~38(shadow, 두 lane 병렬) → 40 → 39(cutover 마지막)다.
