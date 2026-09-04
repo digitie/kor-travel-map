@@ -181,7 +181,7 @@ B4 조문은 "Manager runner와 attestation/verifier contract가 달라지면 fa
 1회(일곱 image 재빌드)다. 어느 쪽이든 **이번 실행의 attestation은 폐기되지 않는다** —
 pinset과 execution identity가 그대로이기 때문이다.
 
-### F1D-E blocker — host attestation v4 재발행 절차 (2026-09-04 설계, 미실행)
+### F1D-E blocker — host attestation v4 재발행 (2026-09-04 **완료, 검증기 PASS**)
 
 `docs/runbooks/admin-feature-live-acceptance.md` 서두는 "실행 전 신뢰 경계는 C7 host
 attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 재사용한다"고 적는다.
@@ -216,6 +216,22 @@ attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 �
 
 즉 18키 중 **13키는 지금 값이 확정되거나 측정 가능**하고, 남은 5키가 세 가지 선행 작업
 (v6/v8 0600 사본 · `8078b110` snapshot 설치 · C7 executor image 빌드)에 달려 있다.
+
+**실행 결과 (2026-09-04).** 선행 셋을 모두 수행하고 attestation을 재발행했다. 저장소의
+검증기가 살아 있는 runtime과 대조해 **통과**했다 — 선언이 맞다는 것을 내 주장이 아니라
+`verify_trusted_runtime_attestation`이 증명한다.
+
+    manifest_sha256    9f6ddfc4d57135a672a1934ba9525bd9119da19da0d301b47e4c50771ca79bab
+    journal_sha256     9a52683bfb181983f393b6f354b6eedb34496caec305cfc4119da09c7f1c0c61
+    attestation_sha256 40bde4b8718f25af0f7c1f8163c8ebd72e07a55a4ee0bcac85299f8d41da2d6a
+
+- v6/v8 root:root 0600 사본 → `/etc/kor-travel-map/c7-pinned-runtime-{generation-v6,rebuild-v8}-e6b52db4.json`
+- `8078b110` c7-runner snapshot → 4파일 147KB, 디렉터리 0755 / 파일 0555 root:root.
+  4개 중 **3개는 구세대와 해시가 같다** — 바뀐 것은 `c7_prod_attestation.py`
+  (`6e6765b8…` → `ca17c8d7…`) 하나뿐이다.
+- C7 executor image → `sha256:2c5ee9ef4a9c5809c3d4b090fe25ad13fd09688e2fbac47cccf16fa0a4b53ded`
+  (`io.kortravelmap.c7.repository-commit = 8078b110…`)
+- 구세대 attestation은 `.bak-e420c89e-20260904T123809Z`로 보존했다.
 
 **착수 전 소유자 판정이 필요한 것 셋.** 아래는 측정으로 풀리지 않는다.
 

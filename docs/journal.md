@@ -1,5 +1,44 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — 사슬의 단일 blocker를 풀었다: attestation v4 재발행, 검증기 PASS
+
+E와 D2의 첫 검증이 참조하는 host attestation v4가 구세대(`e420c89e`/pinset `de5206dc`)여서
+n150 실행이 한 줄도 진행되지 않았다. 현 candidate `e6b52db4`용으로 재발행했고 저장소의
+검증기가 **살아 있는 runtime과 대조해 통과**했다.
+
+    manifest_sha256    9f6ddfc4…
+    journal_sha256     9a52683b…
+    attestation_sha256 40bde4b8…
+
+선행 셋을 순서대로 했다 — v6/v8의 root:root 0600 사본, `8078b110` c7-runner snapshot(4파일
+147KB), C7 executor image 빌드(`sha256:2c5ee9ef…`, 라벨 `repository-commit = 8078b110`).
+`service_runtime` 21개 값은 검증기의 정의(`_canonical_json` + `sorted(Config.Env)`)를 그대로
+재현해 직접 계산했고, 독립 조사가 낸 값과 전부 일치했다. attestation 파일은 전사 오류를 피하려
+**측정에서 직접 생성**했다.
+
+### 내 비판이 반증됐다
+
+착수 전에 나는 이 작업을 "돌지 않을 C7 orchestrator를 결박하는 낭비"로 규정하고, 신뢰 경계를
+C7에서 떼는 쪽(분리)을 권고했다. 실측이 그것을 뒤집었다.
+
+- 러너 bootstrap은 **검증 모듈 자신의 해시를 attestation의 `orchestrator_files`와 대조한
+  bytes만 exec**한다(자기참조 봉인). orchestrator를 바꿔치기할 수 없게 하는 장치다.
+- 그리고 **admin lane이 바로 그 snapshot에서 `c7_prod_attestation.py`를 로드하고**,
+  `E2E_C7_PLAYWRIGHT_IMAGE`를 넘겨 그 executor image로 Playwright를 돌린다.
+
+즉 내가 "vestigial"이라 부른 두 필드는 퇴역한 C7이 아니라 **D2 자신의 실행을 보호**한다.
+분리는 단순화가 아니라 보안 약화였을 것이다. 권고를 철회한다.
+
+비용 추정도 틀렸다. 18키 중 17키가 이미 확정 가능했고, snapshot 4파일 중 3개는 구세대와
+해시가 같았다. 실제로 무거운 것은 이미지 빌드 하나뿐이었다.
+
+### 부수 교훈: 포그라운드 타임아웃은 빌드 실패가 아니다
+
+이미지 빌드 명령이 10분 포그라운드 한도를 넘겨 백그라운드로 갔다가 종료됐고, 출력 파일이
+0바이트라 실패로 보였다. 실제로는 docker 데몬이 이어받아 **11:34:01Z에 정상 완료**했다
+(스크립트 시작 11:20:52). 상태를 명령의 종료코드가 아니라 **결과물의 타임스탬프와 라벨**로
+확인해서 알았다. 죽은 명령을 재실행했다면 1.6GB를 한 번 더 구울 뻔했다.
+
 ## 2026-09-04 — 사슬 잔여를 조사했더니 "충족" 주장 20건이 반증됐다
 
 `T-VN-41F1D-E`/`D2`/`T-VN-41C`의 잔여 범위를 확정하려고 조사 3건 + 각 "이미 충족" 주장에 대한
