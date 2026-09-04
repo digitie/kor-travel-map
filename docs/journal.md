@@ -1,5 +1,69 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — 격리 M04/M05가 새 하네스에서 통과했고, 봉인 트리가 처음으로 깨끗이 남았다
+
+`e2e025`가 `status: passed`로 닫혔다. 중요한 것은 통과 자체보다 **끝난 뒤의 상태**다.
+
+    phase                                completed
+    driver_phase                         completed
+    status                               passed
+    m04_attestation_sha256               f08620a9…
+    m05_attestation_sha256               37320bb5…
+    runtime_provenance_sha256            25a80946…
+    pinset_sha256                        e6b52db4… (Map 8078b110 + PinVi 357da189)
+    execution_identity_sha256            148f76b1…
+    manager_source_revision              b3217edc…
+    cleanup_failed                       false
+    disposable_run_worktree_retained     false
+
+attestation 본문은 `scope: isolated`, `version: 4`, `m04_server_side_chain_verified: true`,
+`impact_count: 1`이다. M04 UI는 `runner_exit_code 0` · `runtime_identity_verified true`,
+M05 UI는 assertion 6건 통과다. M04는 admin UI에서 feature request를 실제로 제출했고
+(`map_action: submit`, `map_review_mode: feature_request_queue`) pending receipt와 PinVi
+approval 해시가 이어졌다 — 데이터가 실제로 흐른 증거다.
+
+### 이번에 달라진 것: 같은 pinset을 다시 돌릴 수 있다
+
+2026-09-03·04에 두 번, **통과 여부와 무관하게** 같은 pinset의 재실행이 불가능해졌다.
+러너가 저장소 루트를 컨테이너에 root RW로 마운트해 봉인된 핀 worktree에
+`apps/web/node_modules`와 마운트포인트 셋을 남겼고, 다음 preflight의
+`_validate_immutable_tree`가 정당하게 거부했기 때문이다. 각각 약 1.5시간을 태웠다.
+
+Manager #315가 실행 루트를 **일회용 체크아웃**으로 옮겼다(같은 bare의 object store에서
+재유도 — 사본이 아니다). 이번 실행 후 실측:
+
+    봉인 트리 잔여물          0건
+    _validate_immutable_tree  pinvi ACCEPT / map ACCEPT
+    일회용 worktree 등록      제거됨 (bare + 핀 worktree만 남음)
+    일회용 디렉터리           제거됨
+    격리 스택                 컨테이너 0개
+
+즉 `e6b52db4`는 지금 **다시 실행 가능한 상태로 남아 있다.** 이전 두 번은 그렇지 않았다.
+
+### 그리고 그 잔여물이 처음으로 관측됐다
+
+새 receipt 증거 `disposable-run-worktree.json`:
+
+    ignored_entries    3
+    untracked_entries  0
+    tracked_changes    0
+    top_level_names    ["apps", "node_modules"]
+
+이 세 건이 봉인 트리를 오염시키던 바로 그 잔여물이다. `node_modules/`·`test-results/`는
+`.gitignore`에 있고 `playwright-report`는 빈 디렉터리라, 러너의 `--untracked-files=all`도
+attestation의 `_assert_clean_checkout`도 **넷 전부에 눈이 멀어 있었다** — 유일한 탐지기가
+다음 실행의 모드 검사였고 그때는 이미 사이클을 태운 뒤였다. 봉인 트리를 실행에서 빼면서
+그 탐지기마저 사라지므로, 삭제 **전에** `--ignored=matching`까지 세어 증거로 남기게 했다.
+`tracked_changes 0`은 실행이 추적 파일을 건드리지 않았다는 뜻이다.
+
+### 남은 것은 소유자 판정이다
+
+`T-VN-41F1D-D1`은 자체 해제 조건이 **`T-VN-FINAL-REBUILD` barrier(B4 재판정)가 현재
+candidate를 유지한다고 판정한 뒤 실행**하라고 정한다. 그 barrier는 아직 열리지 않았고
+(`docs/tasks.md`의 `[~]`), 이번 실행이 그것을 대신하지 않는다. D1이 요구하는 일곱 image
+ID·schema head 대조는 격리 e2e attestation이 아니라 **generation attestation**의
+산출물이다. 그래서 D1/D2/41C/E는 열어 둔다 — 판정은 소유자 몫이다.
+
 ## 2026-09-03 — 침묵사 세 번의 정체와, 이틀 묵은 red의 진짜 이유
 
 격리 e2e가 두 번(18·19), pinned rebuild가 한 번(021) **로그 0바이트**로 사라졌다.
