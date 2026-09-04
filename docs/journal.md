@@ -1,5 +1,67 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-04 — 사슬 잔여를 조사했더니 "충족" 주장 20건이 반증됐다
+
+`T-VN-41F1D-E`/`D2`/`T-VN-41C`의 잔여 범위를 확정하려고 조사 3건 + 각 "이미 충족" 주장에 대한
+반증 20건을 돌렸다. 결과는 원장이 시사하던 것보다 훨씬 멀다.
+
+### 단일 최대 blocker — host attestation v4를 **발행하는 절차가 없다**
+
+E와 D2의 첫 검증 단계가 여기서 fail-close한다. n150에 v4 산출물이 있긴 하나 그것은
+**구세대**의 것이다(`repository_commit e420c89e`, pinset `de5206dc`). 현 candidate
+`e6b52db4`용 v4를 만드는 명령·스크립트·런북이 Map·Manager 두 저장소 어디에도 없다.
+필요한 결박값은 알고 있다 — `repository_commit`=`8078b110`, `source_commits.pinvi`=`357da189`,
+`pinned_runtime_pinset_sha256`=`e6b52db4`, `rebuild_transaction_id`=`4ee990ca-…`, schema head 3개,
+v6/v8 root-owned 0600 사본의 sha256 2개, C7 attested 4파일의 sha256, `service_runtime` 7 role.
+**값은 다 있는데 그것을 서명된 v4로 묶는 절차가 없다.** 이것이 열리기 전에는 n150 실행이
+한 줄도 진행되지 않는다.
+
+### 실행 순서가 틀려 있었다 (내 오류)
+
+D2 자기 조항이 "D1/F1D-E와 배리어 확인 뒤에 실행한다"고 **F1D-E를 선행으로 박는다**. 배리어
+해제 목록도 D1 → E → D2 → 41C다. 그런데 2026-09-04에 내가 `docs/resume.md`에 적은 순서는
+D1 → D2 → 41C → E였다. 정정했다.
+
+### D2는 조문과 구현이 정면으로 충돌한다
+
+- D2 조문은 대상 DB가 **non-production 일회용**이고 production identity와 같으면 즉시 중단하라고
+  적는다. 그런데 실행 런북(`admin-feature-live-acceptance.md`)은 `E2E_LIVE_ALLOW_PROD=1`과
+  배포 DB의 `CONFIRM_*` exact 일치를 요구한다. 격리 대안
+  (`scripts/run-admin-feature-clone-live-acceptance.sh`, 18701/18705)에는 런북이 없다.
+- 런북 §1의 fixture 소유 모델(8-ID, place 6 + weather/price 2)은 2026-07-20 계약이고, 실제 spec은
+  2026-08-09~12에 **단수 name-keyed**(API 1 + helper 2)로 재작성됐다. 원장이 stale하다.
+- fixture manifest와 `fixed`/`run_scoped_owned` mode 결박은 코드에 **0건**이다.
+- PinVi mutating 절반의 실행 수단이 없다(`admin_feature_live_fixture.py`에 pinvi 참조 0건).
+- lane state의 `BLOCKED.json` 부재는 정상 종료가 아니라 **상태기계 밖 수동 삭제** 흔적이다
+  (recovery가 result 없이 끝났고 `direct-audit.json`·`direct-cleanup.json`이 0바이트).
+
+### 41C도 "구현 충족"이 반증됐다
+
+- relay/reconciliation 충족 근거로 인용된 #1026은 버그픽스이고, 인용문 자체가 reconciliation을
+  잔여로 명시한다. GC 실측 근거는 폐기 세대(head `0225`)의 것이고 그 스크립트는 exit 2 stub이다.
+- 1-a는 production 호출자가 **0건**이라 전환할 흐름 자체가 없다.
+- 1-b/1-c는 구현·회귀만 있고 live가 없으며, 현 런타임에 cache-target env/principal이 **하나도
+  없어** 지금은 실행조차 불가능하다.
+- receipt는 `pending`이고 production consumer enable은 PinVi 코드가 fail-close한다.
+- 다만 `T-VN-M04`가 41C에 위임한 격리 범위(paired request→approval receipt)는 `e2e025`로
+  값까지 재현 확인됐다 — 이 한 건은 살아남았다.
+
+### 내 오류 셋을 정정했다
+
+1. B4 서명이 **정본 파일에 반영되지 않았다.** `tasks-acceptance.md`의 배리어가 `[~]`, B4가 `[ ]`,
+   "소유자 서명 전이다"가 그대로였다. 판정을 소유한다고 내가 지정한 바로 그 파일이 미갱신이었다 —
+   이 저장소가 DO NOT 15로 규정한 이중 선언 결함 그 자체다.
+2. `m04_server_side_chain_verified`는 **M05** attestation payload에 있다. M04 payload에는 없다
+   (실측 확인). 내가 `tasks.md`의 M04 줄에 M04 증거로 적었다.
+3. 위 실행 순서.
+
+### 반증하지 않은 것
+
+조사가 올린 지적 중 ADR 포인터(`ADR-086`→`ADR-084`)와 스크립트 문구 건은 **검증되지 않았다** —
+해당 ADR 파일이 존재하지 않고 인용된 줄 번호도 다른 내용이었다. 근거 없이 고치지 않았다.
+`c7-prod-live-e2e.md`의 v5/v7 언급은 파일 머리글이 `[보존 이력 · 실행 금지]`로 명시한 과거
+기록이므로 그대로 둔다.
+
 ## 2026-09-04 — T-VN-41F1D-D1 완료: 데이터 비의존 live UI가 현 generation에서 통과했다
 
 D1의 마지막 요구였던 데이터 비의존 admin UI smoke가 배포 스택에서 **11 passed (1.3m)**로
