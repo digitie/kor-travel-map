@@ -419,14 +419,10 @@ class Supervisor:
             "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256",
             "--env",
             "E2E_LIVE_WORKERS=1",
-            # evidence 격리를 **선언한다**. 사실이다 — 아래 `--mount`가 run마다
-            # 새로 만든 root 0700 디렉터리를 `/evidence`에 붙이고
-            # `PLAYWRIGHT_ARTIFACT_ROOT`가 그것을 가리킨다. `playwright.live.config`는
-            # acceptance run ID로 감사 마커를 붙이기 전에 이 선언을 요구하고,
-            # 스펙은 이것이 있을 때만 safe-debug artifact를 남긴다. 종전에는 lane이
-            # 이 선언을 하지 않아 executor가 config 평가에서 곧바로 죽었다.
-            "--env",
-            "E2E_ISOLATED_LIVE_EVIDENCE=1",
+            # `E2E_ISOLATED_LIVE_EVIDENCE=1`은 여기서 **선언하지 않는다.** 그 플래그는
+            # "증거가 감독된 디렉터리로 간다"가 아니라 "대상이 localhost 격리 후보다"를
+            # 뜻한다(`assertNotProdUnlessOptedIn`이 `isLocalHost`를 요구한다). 이
+            # lane은 공개 HTTPS prod origin을 쓰므로 그 선언은 거짓이 된다.
             "--env",
             "PLAYWRIGHT_ARTIFACT_ROOT=/evidence",
             "--env",

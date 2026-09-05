@@ -71,15 +71,24 @@ def _guard_body() -> str:
 
 
 def _required_envs() -> set[str]:
-    """가드가 실제로 요구하는 env 이름을 유도한다."""
+    """가드가 실제로 요구하는 env 이름을 유도한다.
+
+    세 형태를 모두 본다: 모듈 스코프 플래그(`!isolatedEvidence`), 가드 안에서
+    직접 읽는 `process.env[CONST]`, 그리고 run ID 상수. 하나라도 빠뜨리면 supervisor가
+    선언하지 않아도 조용히 통과한다.
+    """
 
     body = _guard_body()
+    constants = _env_constants()
     required = {
         env
         for flag, env in _flag_to_env().items()
         if re.search(r"!\s*" + re.escape(flag) + r"\b", body)
     }
-    constants = _env_constants()
+    for match in re.finditer(r"process\.env\[(?P<const>[A-Z][A-Z0-9_]*)\]", body):
+        value = constants.get(match.group("const"))
+        if value is not None:
+            required.add(value)
     for name, value in constants.items():
         if re.search(r"\b" + re.escape(name) + r"\b", body) and "RUN_ID" in name:
             required.add(value)
@@ -116,14 +125,27 @@ def test_executor_declares_every_env_the_guard_requires() -> None:
     )
 
 
-def test_the_flag_that_broke_this_is_declared() -> None:
-    """이 게이트를 만들게 한 실제 사례가 계속 덮이는지 본다."""
+def test_the_guard_does_not_require_a_topology_this_lane_cannot_have() -> None:
+    """가드가 prod lane이 만족할 수 없는 topology 선언을 요구하지 않아야 한다.
 
-    assert "E2E_ISOLATED_LIVE_EVIDENCE=1" in _executor_source(), (
-        "executor가 evidence 격리를 선언하지 않는다. 2026-09-05에 이것이 빠져 "
-        "executor 두 개가 3초 만에 죽었다."
+    `E2E_ISOLATED_LIVE_EVIDENCE`는 `assertNotProdUnlessOptedIn`에서 `isLocalHost`
+    대상을 요구한다. D2 lane은 공개 HTTPS prod origin을 쓰므로 그 선언은 **거짓**이고,
+    거짓으로 통과시키는 대신 가드가 실제로 필요한 것만 요구해야 한다. 2026-09-05에
+    이 결박이 executor를 구조적으로 통과 불가로 만들었다.
+    """
+
+    required = _required_envs()
+    forbidden = sorted(
+        env
+        for env in ("E2E_ISOLATED_LIVE_EVIDENCE", "E2E_ISOLATED_LIVE_DOCKER_NETWORK")
+        if env in required
     )
-    assert "E2E_ISOLATED_LIVE_EVIDENCE" in _required_envs(), (
-        "config 가드가 evidence 격리를 더 이상 요구하지 않는다 — 요구를 없앴다면 "
-        "이 게이트도 함께 다시 판단하라."
+    assert forbidden == [], (
+        f"acceptance 감사 마커 가드가 topology 선언을 요구한다: {forbidden}. "
+        "그 선언은 localhost 대상에서만 참이라 prod lane이 만족할 수 없다 — "
+        "거짓 선언으로 통과시키지 말고 가드가 실제로 필요한 것만 요구하게 하라."
+    )
+    assert "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE" in required, (
+        "가드가 acceptance write opt-in을 더 이상 요구하지 않는다. 그러면 아무 live "
+        "실행이나 감사 마커를 붙일 수 있고 cleanup·audit의 소유 회계가 오염된다."
     )

@@ -24,6 +24,7 @@ const ISOLATED_DOCKER_NETWORK_ENV = "E2E_ISOLATED_LIVE_DOCKER_NETWORK";
 const ADMIN_FEATURE_RUN_ID_ENV = "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID";
 const ADMIN_FEATURE_RECOVERY_ENV =
   "E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY";
+const ADMIN_FEATURE_WRITE_ENV = "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE";
 const ADMIN_FEATURE_RUN_ID_PATTERN = /^[a-z0-9][a-z0-9-]{15,79}$/;
 const isolatedEvidenceRaw = process.env[ISOLATED_EVIDENCE_ENV];
 const isolatedEvidence = isolatedEvidenceRaw === "1";
@@ -64,19 +65,28 @@ function expectedSha256(envName: string): string {
  * run과 phase로 라벨링할 뿐이며, cleanup·audit이 소유 행을 그것으로 찾는다. 아무
  * live 실행이나 붙이면 그 회계가 오염된다.
  *
- * 그 목적에 필요한 것은 **evidence 격리**다 — 산출물이 감독되는 evidence root로
- * 간다는 사실. `isolatedDockerNetwork`는 `http://candidate-ui`·
- * `http://localhost:12705` origin을 신뢰할지 정하는 플래그이고 헤더와 무관하다.
- * 그런데 종전에는 그것까지 요구해서, **공개 HTTPS origin을 쓰는 D2 prod lane이
+ * 종전에는 그 목적을 `isolatedEvidence` + `isolatedDockerNetwork`로 대신 표현했다.
+ * 그런데 두 플래그는 **대상 topology**를 말한다 — `assertNotProdUnlessOptedIn`이
+ * `isolatedEvidence`에 `isLocalHost` 대상을 요구하고, `isolatedDockerNetwork`는
+ * `candidate-ui`/`localhost:12705` origin의 신뢰 여부를 정한다. 즉 clone lane
+ * (loopback 후보)만 만족할 수 있고, **공개 HTTPS prod origin을 쓰는 D2 lane은
  * 구조적으로 통과할 수 없었다**(2026-09-05 실측: executor 두 개가 config 평가에서
- * 3초 만에 exit 1). 관계 없는 축을 묶은 과결박이라 풀었다.
+ * 3초 만에 exit 1, evidence 디렉터리는 빈 채).
+ *
+ * 마커를 안전하게 만드는 조건은 topology가 아니라 **이 실행이 acceptance 실행이라는
+ * 사실**이다. 그래서 well-formed run ID와 acceptance write opt-in을 요구한다 —
+ * 두 lane 모두 그 둘을 준다. 마커는 자기가 만드는 write를 라벨링하는 것이므로,
+ * write하지 않는 실행이 라벨을 붙일 이유도 없다.
  */
 function isolatedAuthRequestHeaders(): Record<string, string> {
   const runId = process.env[ADMIN_FEATURE_RUN_ID_ENV];
   if (runId === undefined) {
     return {};
   }
-  if (!isolatedEvidence || !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)) {
+  if (
+    process.env[ADMIN_FEATURE_WRITE_ENV] !== "1" ||
+    !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)
+  ) {
     throw new Error(
       `[playwright.live] ${ADMIN_FEATURE_RUN_ID_ENV}은 검증된 격리 실행의 run ID여야 합니다`,
     );
