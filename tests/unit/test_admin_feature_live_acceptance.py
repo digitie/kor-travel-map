@@ -94,6 +94,11 @@ class _FixturePreflightResult:
     def scalar_one(self) -> object:
         return self._scalar
 
+    def scalar_one_or_none(self) -> object:
+        # 빈 `alembic_version`에서 `NoResultFound` 대신 계약 메시지가 나오도록
+        # 프로덕션 코드가 이 형태를 쓴다.
+        return self._scalar
+
 
 class _FixturePreflightConnection:
     """preflight의 **statement 순서까지** 관측하는 stub.

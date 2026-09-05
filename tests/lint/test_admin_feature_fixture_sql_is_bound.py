@@ -120,10 +120,19 @@ def _sql_literals(node: ast.AST) -> list[tuple[int, int, str]]:
     """`node` 아래의 SQL 리터럴을 (줄, 열, 본문)으로 소스 순서대로 뽑는다.
 
     f-string(`JoinedStr`)도 본다 — `SET ROLE {_FIXTURE_SCHEMA_OWNER}`가 그 형태다.
+    독스트링과 떠 있는 문자열 표현식은 **뺀다** — 실행되는 SQL이 아니라 산문이라,
+    거기 적힌 관계 이름이 순서 검사를 거짓으로 red로 만든다.
     """
 
+    prose = {
+        id(child.value)
+        for child in ast.walk(node)
+        if isinstance(child, ast.Expr) and isinstance(child.value, ast.Constant)
+    }
     found: list[tuple[int, int, str]] = []
     for child in ast.walk(node):
+        if id(child) in prose:
+            continue
         if isinstance(child, ast.Constant) and isinstance(child.value, str):
             found.append((child.lineno, child.col_offset, child.value))
         elif isinstance(child, ast.JoinedStr):
