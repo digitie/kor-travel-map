@@ -758,8 +758,8 @@ async def _seed(
                     JOIN provider_sync.source_entity_heads AS head
                       ON head.source_entity_key = entity.source_entity_key
                     WHERE dataset.provider_dataset_id = :dataset_id
-                      AND entity.provider = :provider
-                      AND entity.dataset_key = :dataset_key
+                      AND dataset.provider = :provider
+                      AND dataset.dataset_key = :dataset_key
                       AND entity.source_entity_type = :source_entity_type
                       AND entity.source_entity_id = :source_entity_id
                     """
@@ -828,9 +828,7 @@ async def _seed(
                     ),
                 },
             )
-            .mappings()
-            .one()
-        )
+        ).mappings().one()
         # source_links와 value rows는 schema-owner SQL로만 계속 쓴다. CALL이
         # 실패하면 transaction이 abort되어 SET LOCAL도 transaction 종료와 함께
         # 사라지므로, 실패한 transaction에서 억지 reset을 시도하지 않는다.
@@ -1586,9 +1584,22 @@ def _required_fixture_target() -> tuple[str, str, str]:
 
 
 async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
-    """mutation 전 fixture writer DB·LOGIN role·head·effective role을 fail-close한다."""
+    """mutation 전 fixture writer DB·LOGIN role·effective role·head를 fail-close한다.
+
+    순서가 곧 계약이다. DB·LOGIN role은 권한 없이 읽히므로 role 전환 **전에**
+    본다. schema head는 `public.alembic_version` 읽기라 baseline이 소유자와
+    `ktm_feature_runtime`에만 SELECT를 주고 LOGIN role은 `rolinherit=false`라
+    그 권한을 자동으로 갖지 않는다 — 그래서 전환 **뒤에** 본다. 넷 다 어떤
+    mutation보다도 앞이고, 하나라도 어긋나면 commit 없이 멈춘다.
+    """
 
     expected_database, expected_login_role, expected_revision = _required_fixture_target()
+    # role 전환 **전에는 권한 없이 읽히는 session identity만** 본다. LOGIN role은
+    # `rolinherit=false`라 자기 membership의 권한을 자동으로 갖지 않고,
+    # `public.alembic_version`의 SELECT는 baseline이 소유자
+    # `ktm_feature_schema_owner`와 `ktm_feature_runtime`에만 준다
+    # (`alembic/versions/300_schema_baseline.py`). 그래서 revision 확인은 아래
+    # `SET ROLE` 뒤로 간다 — 여전히 모든 mutation보다 앞이다.
     observed = (
         await connection.execute(
             text(
@@ -1596,9 +1607,7 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
                 SELECT
                     current_database() AS database_name,
                     session_user AS session_user,
-                    current_user AS current_user,
-                    (SELECT version_num FROM public.alembic_version)
-                        AS alembic_revision
+                    current_user AS current_user
                 """
             )
         )
@@ -1609,8 +1618,6 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
         raise RuntimeError("fixture target login-role confirmation mismatch")
     if observed["current_user"] != expected_login_role:
         raise RuntimeError("fixture target initial effective-role mismatch")
-    if observed["alembic_revision"] != expected_revision:
-        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
 
     await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
     effective_role = (
@@ -1618,6 +1625,29 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     ).scalar_one()
     if effective_role != _FIXTURE_SCHEMA_OWNER:
         raise RuntimeError("fixture schema-owner role assumption failed")
+    # `scalar_one()`은 빈 테이블에서 `NoResultFound`를 던져 운영자에게 계약
+    # 메시지 대신 SQLAlchemy 예외를 보인다. 비어 있으면 None으로 받아 아래
+    # 이름 붙은 실패로 떨어뜨린다.
+    observed_revision = (
+        await connection.execute(
+            text("SELECT version_num FROM public.alembic_version")
+        )
+    ).scalar_one_or_none()
+    if observed_revision != expected_revision:
+        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
+    # 두 번째 role 가정도 **여기서** 증명한다. `_seed`는 provider Feature를 만들 때
+    # `SET LOCAL ROLE {_FIXTURE_PROCEDURE_EXECUTOR}`로 한 번 더 전환하는데, 그것이
+    # 처음 실행되는 시점은 이미 dataset과 source record를 쓴 뒤다. 실패해도
+    # transaction이 롤백돼 잔여물은 없지만, 배포 스택 사이클을 한 번 태운 뒤에야
+    # 알게 된다 — 2026-09-05에 preflight의 첫 role 가정이 정확히 그렇게 드러났다.
+    # 여기서는 아직 아무것도 쓰지 않았으므로 값싸게 증명하고 되돌린다.
+    await connection.execute(text(f"SET ROLE {_FIXTURE_PROCEDURE_EXECUTOR}"))
+    procedure_role = (
+        await connection.execute(text("SELECT current_user"))
+    ).scalar_one()
+    if procedure_role != _FIXTURE_PROCEDURE_EXECUTOR:
+        raise RuntimeError("fixture procedure-executor role assumption failed")
+    await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
     # SET ROLE is session state. Persist only this read-only setup transaction;
     # every fixture action itself is in the following explicit transaction.
     await connection.commit()
@@ -1628,16 +1658,24 @@ async def _run(
     run_id: str,
 ) -> dict[str, object]:
     settings = KorTravelMapSettings()
+    # supervisor가 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮어쓴다. 비어 있으면
+    # engine 생성 대신 여기서 멈춰 원인을 이름으로 말한다.
+    pg_dsn = settings.pg_dsn
+    if pg_dsn is None:
+        raise RuntimeError("fixture writer DSN이 없습니다: KOR_TRAVEL_MAP_PG_DSN")
     # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
     # asyncpg dialect로 정규화한다. raw create_async_engine을 쓰면 배포 env가
     # plain scheme일 때 컨테이너 안에서 sync psycopg2 dialect를 로드하려다
     # 실패한다 (Codex PR #792 사후 적대 리뷰 R792-3).
-    engine = make_async_engine(settings.pg_dsn)
+    engine = make_async_engine(pg_dsn)
     try:
         # The supervisor replaces the API container's read-only DSN with the
-        # root-only fixture DSN. Before any role change or mutation, prove that
-        # this separate writer connection is the confirmed API target at the
-        # confirmed schema head. No application runtime role receives writes.
+        # root-only fixture DSN. Before any mutation, prove that this separate
+        # writer connection is the confirmed API target at the confirmed schema
+        # head. The head read needs the schema-owner role, so it lands just
+        # after the role change and still before every write — see
+        # `_prepare_fixture_connection`. No application runtime role receives
+        # writes.
         async with engine.connect() as connection:
             await _prepare_fixture_connection(connection)
             async with AsyncSession(bind=connection) as session, session.begin():

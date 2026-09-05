@@ -1,5 +1,64 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-05 — 새 DB가 helper의 미결박 가정 셋을 한꺼번에 드러냈다
+
+`af6d7061`로 rebuild한 뒤 D1은 통과했고 D2는 seed에서 9.8초 만에 죽었다. 원인은 셋이고
+전부 같은 계열이다 — helper가 **단언만 하고 결박하지 않은** 가정들이다.
+
+    1. preflight가 `SET ROLE` 전에 `public.alembic_version`을 읽었다 → permission denied
+    2. `entity.provider`/`entity.dataset_key`가 `source_entities`에 없다 (provider_datasets의 컬럼)
+    3. `await session.execute(...).mappings()`가 coroutine에 `.mappings()`를 불렀다
+
+### 왜 지금까지 안 드러났나
+
+1번은 어제 배포 DB에 손으로 준 `GRANT SELECT ON public.alembic_version TO
+ktm_feature_migrator`가 가려 주고 있었다. **rebuild가 DB를 계약대로 새로 만들면서 그
+grant를 지웠다.** 즉 아래 "부수로 고친 것" 절이 적은 REVOKE는 이미 불필요하다 — 오늘
+실측: `public.alembic_version`의 aclitem은 정확히 8개이고 소유자와 `ktm_feature_runtime`
+밖의 항목이 없다. `application-destination-alembic-version.sql`의 exact-ACL 계약을
+그대로 만족하므로 final permit도 성공 sentinel을 낸다.
+
+여기서 배울 것은 **out-of-band DB 패치는 다음 rebuild에 증발한다**는 것이다. DB가 선언된
+계약으로 수렴하는 건 좋은 성질이지만, 그런 패치에 기대는 순간 그 위의 green은 근거를 잃는다.
+
+2·3번 경로는 **한 번도 실행된 적이 없었다.** D2가 늘 그 앞에서 죽었기 때문이다.
+
+### 값을 치른 방식 — 그리고 그것도 고쳤다
+
+원인 셋을 알아내는 데 배포 스택에서 `docker create`를 손으로 세 번 재현해야 했고,
+불완전한 재현은 매번 **다른 틀린 오류**를 냈다. 이유는 supervisor가 helper 컨테이너의
+stdout만 증거 파일에 쓰고 **stderr를 버렸기** 때문이다 — helper는 실패 원인을 stderr에
+내므로 남는 것은 0바이트 파일이었다. 같은 파일의 probe/executor 경로는 처음부터 두
+스트림을 함께 읽는다. 계약은 있었고 helper 경로만 어긋나 있었다. 이제 stderr를
+`<output>.stderr`에 root 0600으로 남기고, 게이트가 `docker logs`를 거두는 **모든** 경로가
+stderr를 소비하는지 본다.
+
+### 붙인 탐지기
+
+- `tests/lint/test_admin_feature_fixture_sql_is_bound.py` — helper SQL에서 alias→관계를
+  유도해 baseline 컬럼 집합과 대조하고, preflight가 role escalation 전에 관계를 읽지
+  않는지 AST로 본다. 덮지 못하는 범위(bare column 목록·뷰·모호한 alias)를 독스트링에
+  명시하고, 대신 실제 결함 형태를 되살려 red가 되는지 매 실행 확인한다.
+- `tests/lint/test_d2_lane_is_type_checked.py` — 러너가 적재하는 Python 파일을 유도해
+  CI·로컬 mypy 인자와 대조한다. lane에 파일이 늘면 mypy도 늘라고 말한다.
+- `tests/lint/test_admin_feature_lane_preserves_failure_diagnostics.py` — 위의 stderr 계약.
+- lane 세 모듈을 `mypy --strict`에 편입했다. 3번 결함을 mypy가
+  `Maybe you forgot to use "await"?`로 즉시 잡는 것을 변이로 실측했다. 편입 비용은
+  오류 1건(`SecretStr | None` 미검사)이었다.
+- preflight가 이제 **두 번째** role 가정(`ktm_manual_feature_procedure_owner`)도 증명한다.
+  그 가정은 종전에 `_seed` 한복판, 이미 쓰기가 일어난 뒤에야 실행됐다.
+
+### 적대 리뷰 2인
+
+리뷰어가 게이트 자신의 함수를 실행해 사각 다섯을 실증했다(숫자 포함 관계 2개를 파서가
+놓침, `_REFERENCE`에 IGNORECASE 부재로 대문자 SQL이 자기검사를 전부 통과한 채 공허해짐,
+`FROM a AS x, b AS y`의 둘째 항 누락, alias 충돌 시 last-write-wins로 인한 오탐,
+escalation 순서 검사가 주석에 속음). 전부 재측정하고 고쳤다.
+
+두 번째 리뷰어의 CRITICAL(임시 GRANT가 남아 프로덕션 API/Dagster 기동을 막는다)은
+journal 기록에 근거한 타당한 추론이었으나 **실측으로 반증됐다** — 위에 적은 대로 rebuild가
+이미 지웠다. 미러 감사의 경로형 mypy 사각(L2)과 낡아버린 코드 주석(L3)은 실재해서 고쳤다.
+
 ## 2026-09-05 — D2를 실제로 돌렸고, M04가 깨뜨린 계약에서 막혔다
 
 D2(`ktdm-d2-001`)를 배포 스택에 실행했다. 13분 만에 `fixture-seed-failed`로 막혔고, 원인을
@@ -59,6 +118,11 @@ role과도 일치했다). 그런데 confirm 쿼리가 `SET ROLE` **전에** `pub
 
 새 권한을 준 것이 아니다 — migrator는 이미 `SET ROLE`로 그 테이블을 읽을 수 있었다. 되돌리려면
 `REVOKE SELECT ON public.alembic_version FROM ktm_feature_migrator`.
+
+> **2026-09-05 정정 — 이 REVOKE는 이미 불필요하다.** `af6d7061` rebuild가 DB를 계약대로 새로
+> 만들면서 이 grant를 지웠다(실측: aclitem 정확히 8개, 계약 두 arm 밖 항목 없음). 그리고 이
+> grant가 사라졌기 때문에 helper의 진짜 결함이 드러났다. 정본 해결은 위 2026-09-05 항목의
+> preflight 순서 수정이다 — DB를 계약 밖으로 미는 대신 코드를 계약에 맞췄다.
 
 ### 남은 판정
 

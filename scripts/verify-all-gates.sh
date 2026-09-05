@@ -238,6 +238,7 @@ run_gate "ruff check (CI 경로)" py 'python -m ruff check src tests packages/ko
 run_gate "mypy core"    py 'python -m mypy --strict -p kortravelmap'
 run_gate "mypy api"     py 'python -m mypy --strict -p kortravelmap.api'
 run_gate "mypy dagster" py 'python -m mypy --strict -p kortravelmap.dagster'
+run_gate "mypy d2 lane" py 'python -m mypy --strict scripts/admin_feature_live_fixture.py scripts/admin_feature_live_state.py scripts/admin_feature_live_supervisor.py'
 run_gate "import-linter" py 'python -c "from importlinter.cli import lint_imports_command; lint_imports_command.main([])"'
 
 echo "===== openapi.yml"

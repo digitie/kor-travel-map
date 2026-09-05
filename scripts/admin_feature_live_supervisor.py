@@ -59,6 +59,22 @@ def _write_all(descriptor: int, body: bytes) -> None:
         offset += os.write(descriptor, body[offset:])
 
 
+def _write_root_only_file(path: str, body: bytes) -> None:
+    """root 0600 파일을 **새로** 만들어 쓴다(기존 파일이 있으면 실패한다)."""
+
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        os.fchown(descriptor, 0, 0)
+        _write_all(descriptor, body)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _unique_environment(items: object) -> dict[str, str]:
     if not isinstance(items, list):
         raise RuntimeError("API runtime environment shape is unsafe")
@@ -349,17 +365,14 @@ class Supervisor:
         log = _run(["docker", "logs", "--", self.container_id], capture=True)
         if log.returncode != 0:
             raise RuntimeError("helper output capture failed")
-        descriptor = os.open(
-            self.args.output,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            0o600,
-        )
-        try:
-            os.fchown(descriptor, 0, 0)
-            _write_all(descriptor, log.stdout)
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+        # helper는 결과 JSON을 stdout에, 실패 원인을 stderr에 낸다. 종전에는
+        # stdout만 남겨 seed가 죽으면 **0바이트 파일**만 남았고, 원인을 알려면
+        # 배포 스택에서 `docker create`를 손으로 재현해야 했다(2026-09-05에 세 번,
+        # 매번 다른 틀린 오류를 얻었다). stderr는 JSON 계약을 깨지 않도록 형제
+        # 파일에 남긴다 — probe/executor 경로는 이미 두 스트림을 함께 읽는다.
+        _write_root_only_file(self.args.output, log.stdout)
+        if log.stderr:
+            _write_root_only_file(f"{self.args.output}.stderr", log.stderr)
         self.remove("helper")
         return status
 
