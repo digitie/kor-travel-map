@@ -12,6 +12,7 @@ criteria)은 [`docs/tasks-acceptance.md`](tasks-acceptance.md)가 소유한다**
 - [ ] T-VN-41F1D-D2 — data-dependent Map/PinVi admin live E2E를 통과하고 receipt를 승격한다.
 - [ ] T-VN-41C — relay·reconciliation·consumer enable. **acceptance가 아니라 구현이 먼저다**(2026-09-04 재분류). 조사 결과 reconciliation은 구현이 남아 있고(인용된 #1026은 버그픽스이며 인용문 자체가 reconciliation을 잔여로 명시), cache-target 1-b/1-c는 현 런타임에 env/principal이 하나도 없어 실행조차 되지 않으며, 1-a는 production 호출자가 0건이다. GC 실측 근거는 폐기 세대(head `0225`)의 것이다. 반면 `T-VN-M04`가 위임한 격리 범위(paired request→approval receipt)는 `e2e025`로 값까지 재현 확인됐다. receipt `pending → candidate_verified` 승격과 production consumer enable은 그 구현이 선 뒤의 일이다.
 - [ ] T-VN-41F1D-E — 이전 generation을 퇴역하고 v6/v8 attestation 전환을 완료한다.
+- [ ] T-VN-PAIR-V2 — PinVi의 M05 pair 계약을 v2로 올려 **Map revision의 이중 선언을 없앤다**. 현 v1 계약(`contracts/kor-travel-map-m05-pair-provenance-v1.json`)은 `map.full.source_revision`을 스스로 선언하고 Manager의 회전 preflight가 그것을 pinned Map revision과 exact 대조한다. 그래서 **Map이 한 줄만 바뀌어도 PinVi 커밋이 강제된다** — 2026-09-05에도 그랬고, Manager 주석은 2026-09-01 이후 같은 이유로 네 번(그중 하나는 커밋 제목이 스스로 docs-only bump라고 적었다) rebuild를 태웠다고 적는다. Manager는 이미 v1·v2를 **dual-read**하고(`scripts/m05_isolated_e2e.py`), v2는 그 선언을 계약에서 걷어내 생산자를 pin registry 하나로 남긴다. PinVi가 v2로 올라가 회전·격리 e2e가 green이면 Manager의 v1 분기를 뗀다. 이중 선언 결함 계열이므로 `AGENTS.md` DO NOT 15에 해당한다.
 - [ ] T-FE-MOCK-FLAKE — n150 live GET-only로 mocked checkpoint 잔여를 해소한다.
 - [ ] T-VN-M01 — admin Feature 생성 API의 live clean-cutover를 완료한다.
 - [ ] T-VN-M02 — Feature origin/provenance 보존·불변성의 live acceptance를 완료한다.

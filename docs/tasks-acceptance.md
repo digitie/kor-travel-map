@@ -412,6 +412,36 @@ attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 �
   data-dependent 계약을 각각 소유한다.
 ```
 
+## T-VN-PAIR-V2
+
+```markdown
+- [ ] T-VN-PAIR-V2 — PinVi M05 pair 계약 v2 이행
+```
+
+**왜 여는가.** Map revision이 두 곳에서 선언된다 — pin registry(정본)와 PinVi가
+vendoring한 pair 계약. Manager의 회전 preflight가 둘을 exact 대조하므로, 어긋나면
+회전이 거부된다. 거부 자체는 옳다(2026-09-02에 71분 rebuild를 다 태운 뒤 거부당한
+사고를 앞으로 당긴 것이다). 문제는 **Map의 어떤 변경이든 PinVi 커밋을 강제한다**는
+것이고, 그것이 곧 새 pinset과 rebuild다. 이중 선언 결함 계열(`AGENTS.md` DO NOT 15).
+
+**해제 조건.**
+
+1. PinVi의 `scripts/generate_m05_pair_contract.py`가 `version: 2` 계약을 낸다 —
+   `map.full`/`map.admin`에서 `source_revision`이 **사라진다**. 나머지 digest
+   (`openapi_sha256`·`source_canonical_sha256`·`source_operation_contract_sha256`·
+   `runtime_operation_contract_sha256`)는 그대로다.
+2. PinVi 쪽 게이트가 v2 계약에 `source_revision` 키가 **없음**을 단언한다. 되살리면
+   red가 되는 것을 변이로 보인다.
+3. Manager `--rotation-preflight`가 **PinVi 커밋 없이** 새 Map revision을 수용한다.
+   실측으로 보인다 — 같은 PinVi revision + 다른 Map revision으로 preflight를 통과시킨다.
+4. 그 pinset으로 회전 → rebuild → 격리 M05 e2e가 `status: passed`.
+5. 4가 green인 뒤에야 Manager의 v1 분기를 뗀다. **먼저 떼지 않는다** — 현재 pinset으로의
+   재개 경로가 즉시 막힌다(Manager 주석이 그 이유를 적는다).
+
+**하지 않는 것.** v1 계약 파일을 지우지 않는다. 파일명이 `-v1`을 담고 있으나 그것은
+경로이지 버전 선언이 아니다 — 버전은 문서 안의 `version` 필드다. 경로를 바꾸면 Manager가
+읽는 위치와 갈라진다.
+
 ## T-VN-41C
 
 ```markdown
