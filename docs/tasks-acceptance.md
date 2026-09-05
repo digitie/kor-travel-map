@@ -424,18 +424,38 @@ vendoring한 pair 계약. Manager의 회전 preflight가 둘을 exact 대조하�
 사고를 앞으로 당긴 것이다). 문제는 **Map의 어떤 변경이든 PinVi 커밋을 강제한다**는
 것이고, 그것이 곧 새 pinset과 rebuild다. 이중 선언 결함 계열(`AGENTS.md` DO NOT 15).
 
+**진짜 관문은 생성기가 아니라 소비자다(2026-09-05 실측).** PinVi의
+`scripts/generate_m05_pair_contract.py`는 **이미 v2를 계산한다** — `build_contract`가
+`{"map": surfaces, "version": 2}`를 만든다. 그런데 곧바로 `_in_committed_envelope`가
+커밋된 v1 봉투로 되돌린다. 이유가 코드에 적혀 있다: 소비자
+`apps/api/app/core/config.py`의 `_load_m05_pair_provenance`가 **모듈 스코프**에서
+`set(raw) == {"map", "runtime_image_digests", "version"}`과 `version == 1`을 단언하고,
+surface마다 `source_revision`을 요구한다. 계약만 뒤집으면 PinVi API 컨테이너가
+**import에서** 죽는다. Manager 격리 preflight는 v1/v2를 함께 읽으므로 회전 전에 잡지
+못하고, 실패는 rebuild를 태운 뒤에야 드러난다.
+
+즉 이 작업의 크기는 "생성기 한 줄"이 아니라 **소비자 이행**이다.
+`_load_m05_pair_provenance`가 돌려주는 `source_revision`과 `runtime_image_digests`의
+downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestation.py`,
+`apps/api/tests/unit/test_m05_*`).
+
 **해제 조건.**
 
-1. PinVi의 `scripts/generate_m05_pair_contract.py`가 `version: 2` 계약을 낸다 —
-   `map.full`/`map.admin`에서 `source_revision`이 **사라진다**. 나머지 digest
-   (`openapi_sha256`·`source_canonical_sha256`·`source_operation_contract_sha256`·
-   `runtime_operation_contract_sha256`)는 그대로다.
-2. PinVi 쪽 게이트가 v2 계약에 `source_revision` 키가 **없음**을 단언한다. 되살리면
-   red가 되는 것을 변이로 보인다.
-3. Manager `--rotation-preflight`가 **PinVi 커밋 없이** 새 Map revision을 수용한다.
+1. 소비자 이행이 먼저다. `apps/api/app/core/config.py`가 v1·v2를 **함께** 읽고, v2에서는
+   `source_revision`·`runtime_image_digests` 없이 동작한다. 그 두 값의 downstream
+   사용처가 전부 대체되거나 제거된 것을 사용처 열거로 보인다.
+2. 1이 병합돼 PinVi API 컨테이너가 **v1 계약 그대로** 정상 기동한다. dual-read이므로
+   이 시점에 계약은 아직 v1이다 — 소비자만 앞서 나간다.
+3. 그 뒤에 계약을 v2로 재생성한다(`--write`). `map.full`/`map.admin`에서
+   `source_revision`이, 최상위에서 `runtime_image_digests`가 사라진다. 나머지 digest는
+   그대로다.
+4. PinVi 게이트가 v2 계약에 `source_revision`이 **없음**을 단언한다. 되살리면 red가
+   되는 것을 변이로 보인다. 그리고 `config.py`를 v1-only로 되돌리면 red가 되는 것도
+   함께 보인다 — 소비자와 계약이 한쪽만 움직이면 깨져야 한다.
+5. Manager `--rotation-preflight`가 **PinVi 커밋 없이** 새 Map revision을 수용한다.
    실측으로 보인다 — 같은 PinVi revision + 다른 Map revision으로 preflight를 통과시킨다.
-4. 그 pinset으로 회전 → rebuild → 격리 M05 e2e가 `status: passed`.
-5. 4가 green인 뒤에야 Manager의 v1 분기를 뗀다. **먼저 떼지 않는다** — 현재 pinset으로의
+6. 그 pinset으로 회전 → rebuild → 격리 M05 e2e가 `status: passed`.
+7. 6이 green인 뒤에야 Manager의 v1 분기를 뗀다. **먼저 떼지 않는다** — 현재 pinset으로의
    재개 경로가 즉시 막힌다(Manager 주석이 그 이유를 적는다).
 
 **하지 않는 것.** v1 계약 파일을 지우지 않는다. 파일명이 `-v1`을 담고 있으나 그것은
