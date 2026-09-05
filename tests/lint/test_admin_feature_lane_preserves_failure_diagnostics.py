@@ -27,23 +27,29 @@ _ROOT = Path(__file__).resolve().parents[2]
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
 
 
-def _captures_docker_logs(node: ast.AST) -> bool:
-    """`node` 아래에서 `docker logs` 출력을 거두는 호출이 있는지 본다."""
+def _runs_docker_verb(node: ast.AST, verb: str) -> bool:
+    """`node` 아래에 `["docker", <verb>, ...]` 형태의 명령 리스트가 있는지 본다.
+
+    호출 인자만 보면 안 된다 — 이 파일은 명령 리스트를 `command = [...]`로
+    **변수에 대입**한 뒤 넘긴다. 인자만 보던 초판은 그래서 `docker create` 경로를
+    하나도 찾지 못했고, 그 위의 단언이 조용히 공허했다(2026-09-05 실측).
+    """
 
     for child in ast.walk(node):
-        if not isinstance(child, ast.Call):
+        if not isinstance(child, ast.List):
             continue
-        for argument in child.args:
-            if not isinstance(argument, ast.List):
-                continue
-            literals = [
-                item.value
-                for item in argument.elts
-                if isinstance(item, ast.Constant) and isinstance(item.value, str)
-            ]
-            if "docker" in literals and "logs" in literals:
-                return True
+        literals = [
+            item.value
+            for item in child.elts
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        ]
+        if "docker" in literals and verb in literals:
+            return True
     return False
+
+
+def _captures_docker_logs(node: ast.AST) -> bool:
+    return _runs_docker_verb(node, "logs")
 
 
 def _functions() -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -69,26 +75,7 @@ def _reads_stderr(node: ast.AST) -> bool:
 def _container_runners() -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
     """컨테이너를 만들어 돌리는 함수 — 즉 실패 원인을 남길 **책임이 있는** 경로."""
 
-    found: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
-    for node in _functions():
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Call):
-                continue
-            for argument in child.args:
-                if not isinstance(argument, ast.List):
-                    continue
-                literals = [
-                    item.value
-                    for item in argument.elts
-                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
-                ]
-                if "docker" in literals and "create" in literals:
-                    found.append(node)
-                    break
-            else:
-                continue
-            break
-    return found
+    return [node for node in _functions() if _runs_docker_verb(node, "create")]
 
 
 def test_the_gate_finds_real_capture_sites() -> None:
@@ -112,8 +99,16 @@ def test_every_container_runner_captures_output_at_all() -> None:
     "버리는" 경로만 보면 "애초에 줍지 않는" 경로를 놓친다.
     """
 
+    runners = _container_runners()
+    # 2026-09-05 실측: helper·executor·probe 셋이 컨테이너를 만든다. 0건이면
+    # 파서가 형태를 놓친 것이고, 그러면 아래 단언이 조용히 공허해진다 —
+    # 이 게이트의 초판이 실제로 그랬다.
+    assert len(runners) >= 3, (
+        f"`docker create`로 컨테이너를 만드는 함수를 {len(runners)}개만 찾았다 — "
+        f"파서를 의심하라. 찾은 것={[node.name for node in runners]}"
+    )
     capturing = {node.name for node in _capture_sites()}
-    blind = sorted(node.name for node in _container_runners() if node.name not in capturing)
+    blind = sorted(node.name for node in runners if node.name not in capturing)
     assert blind == [], (
         f"컨테이너를 돌리면서 출력을 전혀 거두지 않는 경로가 있다: {blind}. "
         "실패하면 남는 증거가 exit code뿐이라, 원인을 알려면 배포 스택에서 컨테이너를 "
