@@ -8,8 +8,10 @@ const ENV_NAMES = [
   "E2E_C7_EXPECTED_UI_ORIGIN_SHA256",
   "E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY",
   "E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID",
+  "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE",
   "E2E_ISOLATED_LIVE_DOCKER_NETWORK",
   "E2E_ISOLATED_LIVE_EVIDENCE",
+  "E2E_LIVE_ALLOW_PROD",
 ] as const;
 
 afterEach(() => {
@@ -142,6 +144,9 @@ describe("isolated Live evidence config", () => {
     process.env.E2E_BASE_URL = "http://127.0.0.1:18706";
     process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
     process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+    // clone lane도 실제로 write opt-in을 준다
+    // (`scripts/run-admin-feature-clone-live-acceptance.sh`).
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE = "1";
     process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID = runId;
     process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RECOVERY_ONLY = "1";
 
@@ -157,6 +162,39 @@ describe("isolated Live evidence config", () => {
     process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
     process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID =
       "clone-20260729000000-abcdef123456";
+
+    await expect(loadConfig()).rejects.toThrow("검증된 격리 실행의 run ID");
+  });
+
+  it("공개 HTTPS prod lane도 acceptance write opt-in이면 감사 마커를 붙인다", async () => {
+    // D2 prod lane의 실제 형태다. 이 lane은 `E2E_ISOLATED_LIVE_EVIDENCE`를 쓸 수
+    // **없다** — 그 플래그는 `assertNotProdUnlessOptedIn`에서 localhost 대상을
+    // 요구하기 때문이다. 종전에는 가드가 그것을 요구해서 이 lane이 구조적으로
+    // 통과할 수 없었다(2026-09-05 실측: executor가 config 평가에서 3초 만에 exit 1).
+    const runId = "live-20260905082851-e7a018131e9a";
+    process.env.E2E_BASE_URL = "https://map.example.test";
+    process.env.E2E_LIVE_ALLOW_PROD = "1";
+    delete process.env.E2E_ISOLATED_LIVE_EVIDENCE;
+    delete process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK;
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE = "1";
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID = runId;
+
+    const config = await loadConfig();
+    const setup = config.projects?.find((project) => project.name === "setup");
+
+    expect(setup?.use?.extraHTTPHeaders).toEqual({
+      "x-request-id": `e2e_live_acceptance::${runId}::auth::main`,
+    });
+  });
+
+  it("acceptance write opt-in 없이는 감사 마커를 붙이지 않는다", async () => {
+    // 가드의 목적은 그대로다 — 일반 live 실행이 acceptance 감사 마커를 흘리면
+    // cleanup·audit의 소유 회계가 오염된다.
+    process.env.E2E_BASE_URL = "https://map.example.test";
+    process.env.E2E_LIVE_ALLOW_PROD = "1";
+    delete process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE;
+    process.env.E2E_ADMIN_FEATURE_ACCEPTANCE_RUN_ID =
+      "live-20260905082851-e7a018131e9a";
 
     await expect(loadConfig()).rejects.toThrow("검증된 격리 실행의 run ID");
   });
