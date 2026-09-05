@@ -119,11 +119,28 @@ async def _role_checks(connection: AsyncConnection) -> list[Check]:
 
 
 async def _relation_checks(connection: AsyncConnection) -> list[Check]:
+    """claim/origin의 owner와 direct 접근 부재를 본다.
+
+    `'feature.x'::regclass` 캐스트는 schema USAGE를 요구한다. 이 스크립트는
+    `rolinherit=false`인 LOGIN role로도 돌아야 하므로(§8.3이 "두 runtime login을 실제
+    DSN으로 접속해" 확인하라고 한다) 캐스트 대신 catalog를 직접 조인해 oid를 얻고,
+    oid를 받는 `has_table_privilege` 오버로드를 쓴다. `pg_class`/`pg_namespace`는
+    schema 권한과 무관하게 읽힌다.
+    """
+
     checks: list[Check] = []
     for relation in PROTECTED_RELATIONS:
+        schema_name, _, relation_name = relation.partition(".")
+        locate = (
+            "SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            f"WHERE n.nspname = '{schema_name}' AND c.relname = '{relation_name}'"
+        )
+        oid = await _scalar(connection, locate)
+        checks.append(Check(f"exists.{relation}", "found" if oid else None, "found"))
+        if oid is None:
+            continue
         observed = await _scalar(
-            connection,
-            f"SELECT relowner::regrole::text FROM pg_class WHERE oid = '{relation}'::regclass",
+            connection, f"SELECT relowner::regrole::text FROM pg_class WHERE oid = {oid}"
         )
         checks.append(Check(f"owner.{relation}", observed, SCHEMA_OWNER))
         for grantee in (API_LOGIN, DAGSTER_LOGIN, "public"):
@@ -131,7 +148,7 @@ async def _relation_checks(connection: AsyncConnection) -> list[Check]:
                 observed = await _scalar(
                     connection,
                     "SELECT (NOT has_table_privilege("
-                    f"'{grantee}', '{relation}', '{privilege}'))::text",
+                    f"'{grantee}', {oid}, '{privilege}'))::text",
                 )
                 checks.append(
                     Check(f"{grantee}.no_{privilege.lower()}.{relation}", observed, "true")
