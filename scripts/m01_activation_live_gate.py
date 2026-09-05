@@ -100,7 +100,7 @@ async def _counts(connection: AsyncConnection) -> dict[str, int]:
 
 
 async def _attempts(base_url: str, secret: str, token: str) -> list[Attempt]:
-    cases = (
+    cases: tuple[tuple[str, dict[str, str]], ...] = (
         ("no_credential", {}),
         ("admin_proxy_secret_only", {ADMIN_PROXY_SECRET_HEADER: secret}),
         ("create_token_only", {ADMIN_FEATURE_CREATE_TOKEN_HEADER: token}),
