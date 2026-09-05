@@ -79,7 +79,12 @@ _REFERENCE = re.compile(
     r"\b(?P<alias>" + _NAME + r")\.(?P<column>" + _NAME + r")\b", re.IGNORECASE
 )
 _STATEMENT = re.compile(r"\b(?:SELECT|INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
-_FROM_ANY = re.compile(r"\bFROM\s+(?:ONLY\s+)?(?P<name>" + _NAME + r"(?:\." + _NAME + r")?)", re.IGNORECASE)
+#: 수식 여부와 무관하게 `FROM` 뒤의 이름을 잡는다 — 비수식 `FROM alembic_version`은
+#: DB의 `search_path`로 해석되므로 점이 없다고 안전하지 않다.
+_FROM_ANY = re.compile(
+    r"\bFROM\s+(?:ONLY\s+)?(?P<name>" + _NAME + r"(?:\." + _NAME + r")?)",
+    re.IGNORECASE,
+)
 
 #: alias 자리에 올 수 없는 SQL 예약어. 이것들을 alias로 잡으면 대조가 공허해진다.
 _KEYWORDS = frozenset(
