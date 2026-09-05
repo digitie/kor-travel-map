@@ -545,6 +545,31 @@ downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestat
   route 활성화 전 fresh restore/ACL/live gate다.
 ```
 
+**활성화 전제 셋** (설계 문서 §1). 셋을 모두 만족하기 전에는 플래그를 `true`로 바꾸지 않는다.
+
+| 전제 | 상태 |
+|---|---|
+| PinVi `new_place` 직접 create 제거 배포 | **완료** (PinVi #458) |
+| M01 DB/API/admin UI + 최소 backup·restore·ACL reconciliation 배포 | DB/API/UI 완료(#1029). ACL reconciler는 API 부팅마다 실행. **restore 축 미확인** |
+| 전용 BFF 자격 성공 · PinVi/일반 AdminBFF 거부 · DB zero-write smoke | **미실행** — 성공 케이스는 플래그가 켜져야 관측 가능 |
+
+**ACL 축 — 2026-09-05 배포 런타임 실측 통과(55/55).** `scripts/m01_activation_preflight.py`가
+설계 §8.1~8.3을 재실행 가능한 형태로 확인한다. 아무것도 쓰지 않으므로(catalog
+`has_*_privilege`/`pg_has_role`만) 활성화 전 프로덕션에서 그대로 돌린다. §8.2가
+**"restore 뒤 동일"**을 요구하므로 restore·rebuild 뒤에도 다시 돌린다. 확인 내용:
+
+    role 속성(NOLOGIN NOINHERIT) · membership exact option(admin/inherit/set)
+    교차 멤버십 부재 · runtime login의 owner SET ROLE 불가
+    claim/origin direct SELECT/INSERT/UPDATE/DELETE/TRUNCATE 부재(API·Dagster·PUBLIC)
+    relation owner = ktm_feature_schema_owner
+    wrapper  create_admin_manual_feature_with_initial_state  api=true  dagster=false public=false
+    generic  create_feature_with_initial_state               api=false dagster=true  public=false
+
+**남은 순서.** (1) restore 축 — same-snapshot 4관계 count/root, no-owner/no-ACL restore 뒤
+owner/ACL repair, 그리고 repair 뒤 위 preflight 재통과(§10.3, §11 복구 행). (2) 소유자가
+플래그를 켠다. (3) live gate 셋. (4) 그 뒤에야 `T-VN-41F1D-D2`가 실행 가능하다 —
+D2의 첫 write가 `POST /v1/admin/features`라 그 전에는 503으로 막힌다.
+
 ## T-VN-M02
 
 ```markdown
