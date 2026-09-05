@@ -550,7 +550,7 @@ downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestat
 | 전제 | 상태 |
 |---|---|
 | PinVi `new_place` 직접 create 제거 배포 | **완료** (PinVi #458) |
-| M01 DB/API/admin UI + 최소 backup·restore·ACL reconciliation 배포 | DB/API/UI 완료(#1029). ACL reconciler는 API 부팅마다 실행. **restore 축 미확인** |
+| M01 DB/API/admin UI + 최소 backup·restore·ACL reconciliation 배포 | DB/API/UI 완료(#1029). ACL reconciler는 API 부팅마다 실행. **restore 축은 300 baseline이 대체**(아래) |
 | 전용 BFF 자격 성공 · PinVi/일반 AdminBFF 거부 · DB zero-write smoke | **미실행** — 성공 케이스는 플래그가 켜져야 관측 가능 |
 
 **ACL 축 — 2026-09-05 배포 런타임 실측 통과(55/55).** `scripts/m01_activation_preflight.py`가
@@ -565,10 +565,32 @@ downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestat
     wrapper  create_admin_manual_feature_with_initial_state  api=true  dagster=false public=false
     generic  create_feature_with_initial_state               api=false dagster=true  public=false
 
-**남은 순서.** (1) restore 축 — same-snapshot 4관계 count/root, no-owner/no-ACL restore 뒤
-owner/ACL repair, 그리고 repair 뒤 위 preflight 재통과(§10.3, §11 복구 행). (2) 소유자가
-플래그를 켠다. (3) live gate 셋. (4) 그 뒤에야 `T-VN-41F1D-D2`가 실행 가능하다 —
-D2의 첫 write가 `POST /v1/admin/features`라 그 전에는 503으로 막힌다.
+**restore 축 — 300 baseline이 대체했다(소유자 판정 2026-09-06).** 설계 §10.3은
+`pg_restore --no-owner --no-privileges` 뒤 owner repair·ACL reconciler·§8.3 재통과를
+요구한다. 그런데 그 설계(2026-08-19) **이후**의 300 baseline 결정이 복구 경로를 없앴다 —
+`scripts/docker-restore.sh`·`docker-restore-verify.sh`·`docker-restore-swap.sh` 셋 다 본문
+없이 종료하며 이유를 이렇게 적는다:
+
+    restore is disabled: backup artifacts are audit-only under the 300 baseline
+    Alembic archive replay, previous-revision restore, and hot swap are unsupported
+
+즉 검증된 복구 형식이 존재하지 않으므로 이 전제는 **수행 가능한 형태가 아니다.** 같은
+방향의 운영 결정이 원장에 이미 있다 — `T-VN-H43`이 "n150은 실 production이 아니며 손상 시
+재적재가 정책"이라 적는다. 그래서 restore 축을 활성화 전제에서 **뺀다.**
+
+되살릴 조건: 300 baseline에 맞는 검증된 restore 경로가 생기면 §10.3을 그대로 다시 세운다.
+그때 §8.3 재통과는 `scripts/m01_activation_preflight.py`가 그대로 수행한다 — 그 스크립트를
+남긴 이유가 이것이다.
+
+**남은 순서.** (1) 소유자가 플래그를 켠다(`.env` 변경이므로 `environment_sha256`이 바뀌어
+rebuild가 따라온다). (2) live gate 셋 — 전용 BFF 자격 성공, PinVi·일반 AdminBFF 거부,
+DB zero-write smoke. (3) 그 뒤에야 `T-VN-41F1D-D2`가 실행 가능하다 — D2의 첫 write가
+`POST /v1/admin/features`라 그 전에는 503으로 막힌다.
+
+**아직 이 배포에서 한 번도 돌지 않은 것.** backup 축은 저장소에 구현돼 있으나
+(`scripts/docker-backup.sh`가 4관계 count·PK 순 canonical JSONL SHA-256 root를 manifest에
+쓴다) 이 배포에는 backup root 설정도 산출물도 없다(2026-09-06 실측). 활성화 전제로 세지
+않지만 사실로 남긴다 — `T-VN-H49` 계열이 소유한다.
 
 ## T-VN-M02
 
