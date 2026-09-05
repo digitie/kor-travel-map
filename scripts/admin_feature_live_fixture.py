@@ -758,8 +758,8 @@ async def _seed(
                     JOIN provider_sync.source_entity_heads AS head
                       ON head.source_entity_key = entity.source_entity_key
                     WHERE dataset.provider_dataset_id = :dataset_id
-                      AND entity.provider = :provider
-                      AND entity.dataset_key = :dataset_key
+                      AND dataset.provider = :provider
+                      AND dataset.dataset_key = :dataset_key
                       AND entity.source_entity_type = :source_entity_type
                       AND entity.source_entity_id = :source_entity_id
                     """
@@ -828,9 +828,7 @@ async def _seed(
                     ),
                 },
             )
-            .mappings()
-            .one()
-        )
+        ).mappings().one()
         # source_links와 value rows는 schema-owner SQL로만 계속 쓴다. CALL이
         # 실패하면 transaction이 abort되어 SET LOCAL도 transaction 종료와 함께
         # 사라지므로, 실패한 transaction에서 억지 reset을 시도하지 않는다.
@@ -1589,6 +1587,12 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     """mutation 전 fixture writer DB·LOGIN role·head·effective role을 fail-close한다."""
 
     expected_database, expected_login_role, expected_revision = _required_fixture_target()
+    # role 전환 **전에는 권한 없이 읽히는 session identity만** 본다. LOGIN role은
+    # `rolinherit=false`라 자기 membership의 권한을 자동으로 갖지 않고,
+    # `public.alembic_version`의 SELECT는 baseline이 소유자
+    # `ktm_feature_schema_owner`와 `ktm_feature_runtime`에만 준다
+    # (`alembic/versions/300_schema_baseline.py`). 그래서 revision 확인은 아래
+    # `SET ROLE` 뒤로 간다 — 여전히 모든 mutation보다 앞이다.
     observed = (
         await connection.execute(
             text(
@@ -1596,9 +1600,7 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
                 SELECT
                     current_database() AS database_name,
                     session_user AS session_user,
-                    current_user AS current_user,
-                    (SELECT version_num FROM public.alembic_version)
-                        AS alembic_revision
+                    current_user AS current_user
                 """
             )
         )
@@ -1609,8 +1611,6 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
         raise RuntimeError("fixture target login-role confirmation mismatch")
     if observed["current_user"] != expected_login_role:
         raise RuntimeError("fixture target initial effective-role mismatch")
-    if observed["alembic_revision"] != expected_revision:
-        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
 
     await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
     effective_role = (
@@ -1618,6 +1618,13 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     ).scalar_one()
     if effective_role != _FIXTURE_SCHEMA_OWNER:
         raise RuntimeError("fixture schema-owner role assumption failed")
+    observed_revision = (
+        await connection.execute(
+            text("SELECT version_num FROM public.alembic_version")
+        )
+    ).scalar_one()
+    if observed_revision != expected_revision:
+        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
     # SET ROLE is session state. Persist only this read-only setup transaction;
     # every fixture action itself is in the following explicit transaction.
     await connection.commit()
