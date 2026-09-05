@@ -56,16 +56,27 @@ function expectedSha256(envName: string): string {
   return value;
 }
 
+/**
+ * acceptance run ID가 있으면 감사 마커 헤더를 붙인다.
+ *
+ * 가드의 목적은 **일반 live 실행이 acceptance 감사 마커를 흘리지 못하게** 막는
+ * 것이다. 그 마커(`x-request-id`)는 권한을 주지 않고 `ops.admin_auth_events` 행을
+ * run과 phase로 라벨링할 뿐이며, cleanup·audit이 소유 행을 그것으로 찾는다. 아무
+ * live 실행이나 붙이면 그 회계가 오염된다.
+ *
+ * 그 목적에 필요한 것은 **evidence 격리**다 — 산출물이 감독되는 evidence root로
+ * 간다는 사실. `isolatedDockerNetwork`는 `http://candidate-ui`·
+ * `http://localhost:12705` origin을 신뢰할지 정하는 플래그이고 헤더와 무관하다.
+ * 그런데 종전에는 그것까지 요구해서, **공개 HTTPS origin을 쓰는 D2 prod lane이
+ * 구조적으로 통과할 수 없었다**(2026-09-05 실측: executor 두 개가 config 평가에서
+ * 3초 만에 exit 1). 관계 없는 축을 묶은 과결박이라 풀었다.
+ */
 function isolatedAuthRequestHeaders(): Record<string, string> {
   const runId = process.env[ADMIN_FEATURE_RUN_ID_ENV];
   if (runId === undefined) {
     return {};
   }
-  if (
-    !isolatedEvidence ||
-    !isolatedDockerNetwork ||
-    !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)
-  ) {
+  if (!isolatedEvidence || !ADMIN_FEATURE_RUN_ID_PATTERN.test(runId)) {
     throw new Error(
       `[playwright.live] ${ADMIN_FEATURE_RUN_ID_ENV}은 검증된 격리 실행의 run ID여야 합니다`,
     );

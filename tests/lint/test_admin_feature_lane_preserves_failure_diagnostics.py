@@ -66,15 +66,58 @@ def _reads_stderr(node: ast.AST) -> bool:
     )
 
 
+def _container_runners() -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """컨테이너를 만들어 돌리는 함수 — 즉 실패 원인을 남길 **책임이 있는** 경로."""
+
+    found: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+    for node in _functions():
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            for argument in child.args:
+                if not isinstance(argument, ast.List):
+                    continue
+                literals = [
+                    item.value
+                    for item in argument.elts
+                    if isinstance(item, ast.Constant) and isinstance(item.value, str)
+                ]
+                if "docker" in literals and "create" in literals:
+                    found.append(node)
+                    break
+            else:
+                continue
+            break
+    return found
+
+
 def test_the_gate_finds_real_capture_sites() -> None:
     """대조 대상이 실제로 잡혔는지부터 본다 — 0건이면 아래 단언이 공허하다."""
 
     sites = _capture_sites()
-    # 2026-09-05 실측: helper 경로와 probe/executor 경로 둘이다. 이 수가 줄면
-    # 파서가 형태를 놓친 것이고, 그러면 아래 단언이 조용히 공허해진다.
-    assert len(sites) >= 2, (
+    # 2026-09-05 실측: helper·probe·executor 셋이다. 이 수가 줄면 파서가 형태를
+    # 놓친 것이고, 그러면 아래 단언이 조용히 공허해진다.
+    assert len(sites) >= 3, (
         f"`docker logs` 출력을 거두는 함수를 {len(sites)}개만 찾았다 — 파서를 의심하라. "
         f"찾은 것={[node.name for node in sites]}"
+    )
+
+
+def test_every_container_runner_captures_output_at_all() -> None:
+    """컨테이너를 돌리는 경로는 출력을 **거두기라도 해야** 한다.
+
+    executor는 종전에 `docker logs`를 한 번도 부르지 않았다. 그래서 아래
+    `test_every_docker_logs_capture_consumes_stderr`의 대조 대상에도 들지 못했고,
+    Playwright가 config 평가에서 죽었을 때 남은 것은 빈 디렉터리와 exit code뿐이었다.
+    "버리는" 경로만 보면 "애초에 줍지 않는" 경로를 놓친다.
+    """
+
+    capturing = {node.name for node in _capture_sites()}
+    blind = sorted(node.name for node in _container_runners() if node.name not in capturing)
+    assert blind == [], (
+        f"컨테이너를 돌리면서 출력을 전혀 거두지 않는 경로가 있다: {blind}. "
+        "실패하면 남는 증거가 exit code뿐이라, 원인을 알려면 배포 스택에서 컨테이너를 "
+        "손으로 재현해야 한다 — 이 lane이 실제로 치른 값이다."
     )
 
 

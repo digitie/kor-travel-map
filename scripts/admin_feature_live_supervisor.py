@@ -419,6 +419,14 @@ class Supervisor:
             "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256",
             "--env",
             "E2E_LIVE_WORKERS=1",
+            # evidence 격리를 **선언한다**. 사실이다 — 아래 `--mount`가 run마다
+            # 새로 만든 root 0700 디렉터리를 `/evidence`에 붙이고
+            # `PLAYWRIGHT_ARTIFACT_ROOT`가 그것을 가리킨다. `playwright.live.config`는
+            # acceptance run ID로 감사 마커를 붙이기 전에 이 선언을 요구하고,
+            # 스펙은 이것이 있을 때만 safe-debug artifact를 남긴다. 종전에는 lane이
+            # 이 선언을 하지 않아 executor가 config 평가에서 곧바로 죽었다.
+            "--env",
+            "E2E_ISOLATED_LIVE_EVIDENCE=1",
             "--env",
             "PLAYWRIGHT_ARTIFACT_ROOT=/evidence",
             "--env",
@@ -444,6 +452,17 @@ class Supervisor:
         self.lifecycle("prepared", "executor")
         self.active("prepared", "active")
         status = self.start_wait("executor")
+        # executor는 종전에 출력을 **한 줄도** 남기지 않았다. Playwright가 config
+        # 평가 단계에서 죽으면 `/evidence`에 아무것도 쓰지 못하므로, 남는 증거는
+        # 빈 디렉터리와 exit code 1뿐이었다. 원인을 알려면 배포 스택에서
+        # `docker create` 인자를 손으로 재현해야 했고 그것이 이 lane의 반복 단가였다
+        # (2026-09-05). 제거 **전에** 두 스트림을 evidence로 옮긴다.
+        log = _run(["docker", "logs", "--", self.container_id], capture=True)
+        if log.returncode == 0:
+            _write_root_only_file(
+                os.path.join(self.args.artifact_dir, "executor.log"),
+                log.stdout + log.stderr,
+            )
         self.remove("executor")
         return status
 
