@@ -169,7 +169,8 @@ async def _routine_checks(connection: AsyncConnection) -> list[Check]:
                 text(
                     "SELECT p.oid::regprocedure::text AS signature, "
                     f"has_function_privilege('{API_LOGIN}', p.oid, 'EXECUTE')::text AS api, "
-                    f"has_function_privilege('{DAGSTER_LOGIN}', p.oid, 'EXECUTE')::text AS dagster, "
+                    f"has_function_privilege('{DAGSTER_LOGIN}', p.oid, 'EXECUTE')::text "
+                    "AS dagster, "
                     "has_function_privilege('public', p.oid, 'EXECUTE')::text AS anyone, "
                     "p.proowner::regrole::text AS owner "
                     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "

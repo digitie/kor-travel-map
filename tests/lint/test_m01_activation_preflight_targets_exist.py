@@ -34,7 +34,11 @@ def _constant(name: str) -> str:
 
 
 def _tuple_constant(name: str) -> tuple[str, ...]:
-    match = re.search(rf"^{name} = \((?P<body>.*?)\)$", _preflight_source(), re.MULTILINE | re.DOTALL)
+    match = re.search(
+        rf"^{name} = \((?P<body>.*?)\)$",
+        _preflight_source(),
+        re.MULTILINE | re.DOTALL,
+    )
     assert match is not None, f"{name} 상수를 찾지 못했다 — 이 게이트가 공허해졌다"
     return tuple(re.findall(r'"([^"]+)"', match.group("body")))
 
