@@ -1584,7 +1584,14 @@ def _required_fixture_target() -> tuple[str, str, str]:
 
 
 async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
-    """mutation 전 fixture writer DB·LOGIN role·head·effective role을 fail-close한다."""
+    """mutation 전 fixture writer DB·LOGIN role·effective role·head를 fail-close한다.
+
+    순서가 곧 계약이다. DB·LOGIN role은 권한 없이 읽히므로 role 전환 **전에**
+    본다. schema head는 `public.alembic_version` 읽기라 baseline이 소유자와
+    `ktm_feature_runtime`에만 SELECT를 주고 LOGIN role은 `rolinherit=false`라
+    그 권한을 자동으로 갖지 않는다 — 그래서 전환 **뒤에** 본다. 넷 다 어떤
+    mutation보다도 앞이고, 하나라도 어긋나면 commit 없이 멈춘다.
+    """
 
     expected_database, expected_login_role, expected_revision = _required_fixture_target()
     # role 전환 **전에는 권한 없이 읽히는 session identity만** 본다. LOGIN role은
@@ -1618,11 +1625,14 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     ).scalar_one()
     if effective_role != _FIXTURE_SCHEMA_OWNER:
         raise RuntimeError("fixture schema-owner role assumption failed")
+    # `scalar_one()`은 빈 테이블에서 `NoResultFound`를 던져 운영자에게 계약
+    # 메시지 대신 SQLAlchemy 예외를 보인다. 비어 있으면 None으로 받아 아래
+    # 이름 붙은 실패로 떨어뜨린다.
     observed_revision = (
         await connection.execute(
             text("SELECT version_num FROM public.alembic_version")
         )
-    ).scalar_one()
+    ).scalar_one_or_none()
     if observed_revision != expected_revision:
         raise RuntimeError("fixture target Alembic revision confirmation mismatch")
     # SET ROLE is session state. Persist only this read-only setup transaction;
@@ -1647,9 +1657,12 @@ async def _run(
     engine = make_async_engine(pg_dsn)
     try:
         # The supervisor replaces the API container's read-only DSN with the
-        # root-only fixture DSN. Before any role change or mutation, prove that
-        # this separate writer connection is the confirmed API target at the
-        # confirmed schema head. No application runtime role receives writes.
+        # root-only fixture DSN. Before any mutation, prove that this separate
+        # writer connection is the confirmed API target at the confirmed schema
+        # head. The head read needs the schema-owner role, so it lands just
+        # after the role change and still before every write — see
+        # `_prepare_fixture_connection`. No application runtime role receives
+        # writes.
         async with engine.connect() as connection:
             await _prepare_fixture_connection(connection)
             async with AsyncSession(bind=connection) as session, session.begin():

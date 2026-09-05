@@ -240,6 +240,26 @@ def _identifying_fragments(command: str) -> list[str] | None:
         # 와야 한다 — 이 블록도 `scripts/docker-buildx.sh`를 담고 있어서, 순서가
         # 뒤바뀌면 빌드 스텝과 같은 조각으로 접혀 대조가 사라져도 침묵한다.
         return ["build_one", ".oci"]
+    if re.search(r"(?:^|\s)mypy\s", command):
+        # mypy는 `-p <package>`와 **파일 경로** 두 형태로 쓰인다. 이 분기는 아래
+        # 일반 script 분기보다 **먼저 와야 한다** — 경로 형태가 거기에 먼저 잡히면
+        # 경로만 조각이 되어 `--strict`가 사라져도 감사가 침묵한다. 종전에는
+        # `mypy --strict -p ...`만 보는 분기가 script 분기 **뒤에** 있어서, 파일을
+        # mypy에 편입한 순간 변이 N4가 그 형태로 되살아났다(적대 리뷰 9라운드).
+        tokens = command.split()
+        rest = tokens[tokens.index("mypy") + 1 :]
+        fragments = [token for token in rest if token.startswith("--")]
+        position = 0
+        while position < len(rest):
+            token = rest[position]
+            if token == "-p" and position + 1 < len(rest):
+                fragments.append(f"-p {rest[position + 1]}")
+                position += 2
+                continue
+            if not token.startswith("-"):
+                fragments.append(token)
+            position += 1
+        return fragments
     # `.sh`도 본다. 종전에는 `.py`만 봐서 CI가 셸 스크립트를 게이트로 돌리면
     # 감사기가 그 형태를 **식별하지 못했다** — 그러면 면제표로 밀어 넣는 것 외에
     # 길이 없었고, 면제는 곧 사각이다(docker-images.yml에서 실제로 밟았다).
@@ -266,10 +286,6 @@ def _identifying_fragments(command: str) -> list[str] | None:
         # 경로를 전부 요구한다. `ruff check` 하나만 보면 로컬이 7경로 중 1개로
         # 좁혀도 통과한다(적대 리뷰 7라운드 변이 N3).
         return ["ruff check", *command.split()[2:]]
-    mypy = re.search(r"mypy --strict -p ([\w.]+)", command)
-    if mypy is not None:
-        # `--strict`를 조각에 넣는다. 빼면 로컬이 느슨한 mypy로 통과한다(변이 N4).
-        return ["--strict", f"-p {mypy.group(1)}"]
     if "lint_imports_command" in command:
         return ["lint_imports_command"]
     return None
