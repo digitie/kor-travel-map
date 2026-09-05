@@ -96,9 +96,23 @@ class _FixturePreflightResult:
 
 
 class _FixturePreflightConnection:
-    def __init__(self, row: dict[str, object], effective_role: str) -> None:
+    """preflight의 **statement 순서까지** 관측하는 stub.
+
+    `public.alembic_version`은 baseline이 소유자와 `ktm_feature_runtime`에만
+    SELECT를 준다. LOGIN role은 `rolinherit=false`라 membership 권한을 자동으로
+    갖지 않으므로 그 읽기는 `SET ROLE` **뒤**에 와야 한다 — 이 stub이 순서를
+    기록해 그 계약을 고정한다.
+    """
+
+    def __init__(
+        self,
+        row: dict[str, object],
+        effective_role: str,
+        revision: str = "300",
+    ) -> None:
         self.row = row
         self.effective_role = effective_role
+        self.revision = revision
         self.statements: list[str] = []
         self.committed = False
 
@@ -106,9 +120,17 @@ class _FixturePreflightConnection:
         sql = str(statement)
         self.statements.append(sql)
         if "current_database()" in sql:
+            assert "alembic_version" not in sql, (
+                "role escalation 전 확인 쿼리가 privileged relation을 읽는다"
+            )
             return _FixturePreflightResult(row=self.row)
         if sql == "SELECT current_user":
             return _FixturePreflightResult(scalar=self.effective_role)
+        if "public.alembic_version" in sql:
+            assert "SET ROLE ktm_feature_schema_owner" in self.statements, (
+                "alembic_version을 role escalation 전에 읽고 있다"
+            )
+            return _FixturePreflightResult(scalar=self.revision)
         assert sql == "SET ROLE ktm_feature_schema_owner"
         return _FixturePreflightResult()
 
@@ -136,13 +158,12 @@ def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
         "database_name": "kor_travel_map",
         "session_user": "ktm_fixture_writer",
         "current_user": "ktm_fixture_writer",
-        "alembic_revision": "300",
     }
+    # 이 셋은 권한 없이 읽히므로 role escalation **전에** 거절한다.
     cases = (
         ("database_name", "wrong_database", "database confirmation"),
         ("session_user", "wrong_login", "login-role confirmation"),
         ("current_user", "wrong_effective", "initial effective-role"),
-        ("alembic_revision", "wrong_revision", "Alembic revision confirmation"),
     )
     for field, value, message in cases:
         observed = {**expected, field: value}
@@ -155,6 +176,18 @@ def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
         assert all("SET ROLE" not in statement for statement in connection.statements)
         assert connection.committed is False
 
+    # revision은 privileged read라 escalation 뒤에 본다. 그래도 **모든 mutation
+    # 앞**이어야 하므로 commit 없이 거절하는지 함께 고정한다.
+    connection = _FixturePreflightConnection(
+        dict(expected),
+        "ktm_feature_schema_owner",
+        revision="wrong_revision",
+    )
+    with pytest.raises(RuntimeError, match="Alembic revision confirmation"):
+        asyncio.run(_FIXTURE_MODULE._prepare_fixture_connection(connection))  # noqa: SLF001
+    assert "SET ROLE ktm_feature_schema_owner" in connection.statements
+    assert connection.committed is False
+
 
 def test_fixture_target_preflight_confirms_schema_owner_before_action(
     monkeypatch: pytest.MonkeyPatch,
@@ -165,7 +198,6 @@ def test_fixture_target_preflight_confirms_schema_owner_before_action(
             "database_name": "kor_travel_map",
             "session_user": "ktm_fixture_writer",
             "current_user": "ktm_fixture_writer",
-            "alembic_revision": "300",
         },
         "ktm_feature_schema_owner",
     )
@@ -173,10 +205,12 @@ def test_fixture_target_preflight_confirms_schema_owner_before_action(
     asyncio.run(_FIXTURE_MODULE._prepare_fixture_connection(connection))  # noqa: SLF001
 
     assert "current_database()" in connection.statements[0]
-    assert "public.alembic_version" in connection.statements[0]
+    # privileged relation은 escalation 전 쿼리에 들어 있으면 안 된다.
+    assert "public.alembic_version" not in connection.statements[0]
     assert connection.statements[1:] == [
         "SET ROLE ktm_feature_schema_owner",
         "SELECT current_user",
+        "SELECT version_num FROM public.alembic_version",
     ]
     assert connection.committed is True
 
