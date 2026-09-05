@@ -114,10 +114,16 @@ class _FixturePreflightConnection:
         row: dict[str, object],
         effective_role: str,
         revision: str = "300",
+        denied: tuple[str, ...] = (),
     ) -> None:
         self.row = row
         self.effective_role = effective_role
         self.revision = revision
+        #: `SET ROLE`이 조용히 실패하는 role — 권한이 없는 상황을 흉내낸다.
+        self.denied = frozenset(denied)
+        #: 실제 세션처럼 현재 role을 **추적한다**. 고정값을 돌려주면 두 번째
+        #: role 가정을 증명하는 코드가 무엇을 하든 통과해 버린다.
+        self.current_role = str(row.get("current_user", ""))
         self.statements: list[str] = []
         self.committed = False
 
@@ -130,13 +136,17 @@ class _FixturePreflightConnection:
             )
             return _FixturePreflightResult(row=self.row)
         if sql == "SELECT current_user":
-            return _FixturePreflightResult(scalar=self.effective_role)
+            return _FixturePreflightResult(scalar=self.current_role)
         if "public.alembic_version" in sql:
-            assert "SET ROLE ktm_feature_schema_owner" in self.statements, (
-                "alembic_version을 role escalation 전에 읽고 있다"
+            assert self.current_role == self.effective_role, (
+                "alembic_version을 schema owner가 아닌 role로 읽고 있다 — "
+                "baseline은 그 SELECT를 소유자와 `ktm_feature_runtime`에만 준다"
             )
             return _FixturePreflightResult(scalar=self.revision)
-        assert sql == "SET ROLE ktm_feature_schema_owner"
+        assert sql.startswith("SET ROLE "), sql
+        target = sql.removeprefix("SET ROLE ")
+        if target not in self.denied:
+            self.current_role = target
         return _FixturePreflightResult()
 
     async def commit(self) -> None:
@@ -193,6 +203,19 @@ def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
     assert "SET ROLE ktm_feature_schema_owner" in connection.statements
     assert connection.committed is False
 
+    # 두 번째 role 가정도 preflight가 증명한다. 권한이 없으면 이름 붙은 실패로,
+    # 그리고 여전히 commit 없이 멈춰야 한다 — `_seed` 한복판에서 알게 되면
+    # 배포 스택 사이클을 한 번 태운 뒤다.
+    connection = _FixturePreflightConnection(
+        dict(expected),
+        "ktm_feature_schema_owner",
+        denied=("ktm_manual_feature_procedure_owner",),
+    )
+    with pytest.raises(RuntimeError, match="procedure-executor role assumption"):
+        asyncio.run(_FIXTURE_MODULE._prepare_fixture_connection(connection))  # noqa: SLF001
+    assert "SET ROLE ktm_manual_feature_procedure_owner" in connection.statements
+    assert connection.committed is False
+
 
 def test_fixture_target_preflight_confirms_schema_owner_before_action(
     monkeypatch: pytest.MonkeyPatch,
@@ -216,7 +239,13 @@ def test_fixture_target_preflight_confirms_schema_owner_before_action(
         "SET ROLE ktm_feature_schema_owner",
         "SELECT current_user",
         "SELECT version_num FROM public.alembic_version",
+        # `_seed`가 provider Feature를 만들 때 쓰는 두 번째 role을 여기서 증명하고
+        # 되돌린다 — 아직 아무것도 쓰지 않은 시점이라 값이 싸다.
+        "SET ROLE ktm_manual_feature_procedure_owner",
+        "SELECT current_user",
+        "SET ROLE ktm_feature_schema_owner",
     ]
+    assert connection.current_role == "ktm_feature_schema_owner"
     assert connection.committed is True
 
 

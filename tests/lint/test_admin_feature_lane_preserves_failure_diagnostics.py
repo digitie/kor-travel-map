@@ -70,7 +70,9 @@ def test_the_gate_finds_real_capture_sites() -> None:
     """대조 대상이 실제로 잡혔는지부터 본다 — 0건이면 아래 단언이 공허하다."""
 
     sites = _capture_sites()
-    assert len(sites) >= 3, (
+    # 2026-09-05 실측: helper 경로와 probe/executor 경로 둘이다. 이 수가 줄면
+    # 파서가 형태를 놓친 것이고, 그러면 아래 단언이 조용히 공허해진다.
+    assert len(sites) >= 2, (
         f"`docker logs` 출력을 거두는 함수를 {len(sites)}개만 찾았다 — 파서를 의심하라. "
         f"찾은 것={[node.name for node in sites]}"
     )

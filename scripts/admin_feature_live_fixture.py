@@ -1635,6 +1635,19 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     ).scalar_one_or_none()
     if observed_revision != expected_revision:
         raise RuntimeError("fixture target Alembic revision confirmation mismatch")
+    # 두 번째 role 가정도 **여기서** 증명한다. `_seed`는 provider Feature를 만들 때
+    # `SET LOCAL ROLE {_FIXTURE_PROCEDURE_EXECUTOR}`로 한 번 더 전환하는데, 그것이
+    # 처음 실행되는 시점은 이미 dataset과 source record를 쓴 뒤다. 실패해도
+    # transaction이 롤백돼 잔여물은 없지만, 배포 스택 사이클을 한 번 태운 뒤에야
+    # 알게 된다 — 2026-09-05에 preflight의 첫 role 가정이 정확히 그렇게 드러났다.
+    # 여기서는 아직 아무것도 쓰지 않았으므로 값싸게 증명하고 되돌린다.
+    await connection.execute(text(f"SET ROLE {_FIXTURE_PROCEDURE_EXECUTOR}"))
+    procedure_role = (
+        await connection.execute(text("SELECT current_user"))
+    ).scalar_one()
+    if procedure_role != _FIXTURE_PROCEDURE_EXECUTOR:
+        raise RuntimeError("fixture procedure-executor role assumption failed")
+    await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
     # SET ROLE is session state. Persist only this read-only setup transaction;
     # every fixture action itself is in the following explicit transaction.
     await connection.commit()
