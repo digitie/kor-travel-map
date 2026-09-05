@@ -1635,11 +1635,16 @@ async def _run(
     run_id: str,
 ) -> dict[str, object]:
     settings = KorTravelMapSettings()
+    # supervisor가 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮어쓴다. 비어 있으면
+    # engine 생성 대신 여기서 멈춰 원인을 이름으로 말한다.
+    pg_dsn = settings.pg_dsn
+    if pg_dsn is None:
+        raise RuntimeError("fixture writer DSN이 없습니다: KOR_TRAVEL_MAP_PG_DSN")
     # make_async_engine은 normalize_async_dsn으로 plain `postgresql://` DSN도
     # asyncpg dialect로 정규화한다. raw create_async_engine을 쓰면 배포 env가
     # plain scheme일 때 컨테이너 안에서 sync psycopg2 dialect를 로드하려다
     # 실패한다 (Codex PR #792 사후 적대 리뷰 R792-3).
-    engine = make_async_engine(settings.pg_dsn)
+    engine = make_async_engine(pg_dsn)
     try:
         # The supervisor replaces the API container's read-only DSN with the
         # root-only fixture DSN. Before any role change or mutation, prove that

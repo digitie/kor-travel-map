@@ -73,6 +73,13 @@ jobs:
       - name: mypy --strict (Dagster 패키지)
         run: mypy --strict -p kortravelmap.dagster
 
+      - name: mypy --strict (프로덕션 DB를 바꾸는 acceptance helper)
+        # 이 helper는 prod DB에 직접 쓰는데 2026-09-05까지 타입 검사 밖에 있었다.
+        # `await`가 속성 접근 뒤에 묶여 coroutine에 `.mappings()`를 부르는 결함이
+        # 배포 스택 seed 도중에야 드러났다 — mypy는 그것을 "Maybe you forgot to
+        # use await?"로 즉시 말한다.
+        run: mypy --strict scripts/admin_feature_live_fixture.py
+
       - name: import-linter (의존 계층 + forbidden contracts)
         # ADR-002 layered + ADR-020 fastapi/uvicorn 금지 + ADR-030 cache 금지 +
         # ADR-103 kafka 금지. 위반 시 exit 1.
