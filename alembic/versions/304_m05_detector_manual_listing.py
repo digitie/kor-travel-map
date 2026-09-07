@@ -32,6 +32,22 @@ manual"이 0행이 되어 다음 페이지 cursor가 사라지고, 그 뒤 manua
 대상에서 빠진다. 이 함수는 manual 한 건당 정확히 한 행을 돌려주므로 그 결함이
 생기지 않는다 — 이웃 여부는 호출자가 따로 묻는다(설계의 "따로 읽는다").
 
+**배포 순서가 강제된다 — 양방향 모두.** `db.py`의 SECURITY DEFINER 허용목록은
+기대 집합과 실제 집합을 **양쪽으로** 대조한다(`missing_functions` /
+`unexpected_functions`). 그래서 이 함수는 코드와 lockstep이다:
+
+- 코드가 먼저 가고 DB가 303이면 → `missing`으로 Dagster가 안 뜬다.
+- DB가 먼저 304가 되고 코드가 옛것이면 → `unexpected`로 Dagster가 안 뜬다.
+- **downgrade하면 코드가 그대로인 한 Dagster가 안 뜬다.** 되돌리려면 코드도 함께
+  되돌려야 한다.
+
+이것은 이 함수의 성질이 아니라 허용목록의 성질이다(`_M05_CANDIDATE_PROCEDURE` 등
+기존 항목 전부가 같다). pinned pair 배포가 schema와 코드를 함께 옮기므로 정상 경로에서는
+문제가 아니지만, **downgrade는 코드 없이 하면 안 된다.**
+
+`runtime_privileges.py`의 새 ACL 문장은 `to_regprocedure` 존재 확인 뒤에만 돈다 —
+그러지 않으면 304 미만 DB의 ACL 재조정이 42883으로 통째로 죽는다.
+
 DDL은 문장 하나씩 실행한다(asyncpg prepared statement 제약, 301~303과 동일).
 """
 

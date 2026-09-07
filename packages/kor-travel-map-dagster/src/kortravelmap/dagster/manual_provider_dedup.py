@@ -55,19 +55,26 @@ async def run_manual_provider_dedup_detection(
 ) -> DetectionOutcome:
     """탐지 1회 — op/테스트 공용 헬퍼.
 
-    한 트랜잭션으로 묶는다. 프로시저가 READ COMMITTED를 요구하므로(격리 수준을
-    올리면 `ck_m05_detector_isolation`으로 거부한다) 기본 격리 수준을 바꾸지 않는다.
+    프로시저가 READ COMMITTED를 요구하므로(격리 수준을 올리면
+    `ck_m05_detector_isolation`으로 거부한다) 기본 격리 수준을 바꾸지 않는다.
     """
 
     engine = make_async_engine(require_pg_dsn(settings))
     try:
-        async with AsyncSession(engine) as session, session.begin():
-            return await detect_manual_provider_candidates(
+        # **런 전체를 한 트랜잭션으로 묶지 않는다.** 후보 기록 프로시저가 호출마다
+        # xact-scoped advisory fence(`feature-curation-m05`)를 잡으므로, 하나로 묶으면
+        # 첫 후보에서 잡은 fence가 런 끝까지 유지돼 admin의 판정 경로가 막힌다.
+        # 탐지기가 case 단위로 커밋한다. READ COMMITTED라 하나로 묶어도 읽기 일관성
+        # 이득은 애초에 없었다.
+        async with AsyncSession(engine) as session:
+            outcome = await detect_manual_provider_candidates(
                 session,
                 run_id=run_id,
                 radius_meters=radius_meters,
                 block_limit=block_limit,
             )
+            await session.commit()
+            return outcome
     finally:
         await engine.dispose()
 
@@ -96,6 +103,7 @@ async def detect_manual_provider_dedup_candidates_op(
         "created_case_count": len(outcome.created_case_ids),
         "idempotent_case_count": len(outcome.idempotent_case_ids),
         "incomplete_block_count": len(outcome.incomplete_blocks),
+        "raced_pair_count": outcome.raced_pair_count,
         "manual_scan_truncated": outcome.manual_scan_truncated,
         # 이 한 값이 "후보가 이게 전부다"라고 말할 수 있는지를 정한다.
         "complete_set": outcome.complete_set,

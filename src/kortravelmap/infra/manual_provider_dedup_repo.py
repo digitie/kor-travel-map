@@ -54,6 +54,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.scoring import (
     THRESHOLD_MANUAL,
@@ -84,6 +85,38 @@ class ManualProviderDedupError(RuntimeError):
     """탐지 경로가 계약을 위반했다."""
 
 
+#: 쌍 하나가 레이스로 거부되는 CONSTRAINT 집합.
+#:
+#: 이 셋은 **탐지기가 읽은 뒤 기록하기 전에 세상이 바뀌었다**는 뜻이지 탐지기의
+#: 결함이 아니다(예: Feature가 그 사이 retire됐다, provider link가 둘이 됐다).
+#: 그 쌍만 버리고 계속 간다 — 런을 죽이면 이미 기록한 후보까지 사라지고, Dagster
+#: `RetryPolicy`가 같은 레이스로 재진입한다.
+_RACED_CANDIDATE_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_m05_candidate_feature_proof",
+        "ck_m05_candidate_manual_origin",
+        "ck_m05_candidate_provider_source",
+    }
+)
+
+
+def _constraint_name(error: BaseException) -> str | None:
+    """`RAISE ... USING CONSTRAINT`가 실은 곳.
+
+    SQLAlchemy가 asyncpg 예외를 번역하면서 `constraint_name`을 옮기지 않는다 —
+    원본은 `__cause__`에 있다. 번역된 쪽만 보면 항상 `None`이라 **어떤 CONSTRAINT든
+    통과하는** 판정이 된다.
+    """
+
+    seen: list[BaseException | None] = [error, getattr(error, "orig", None)]
+    seen.append(getattr(seen[1], "__cause__", None) if seen[1] is not None else None)
+    for candidate in seen:
+        name = getattr(candidate, "constraint_name", None)
+        if name:
+            return str(name)
+    return None
+
+
 #: manual Feature 하나를 둘러싼 공간 block의 반경(m).
 #:
 #: 설계는 "행정구역/공간 grid로 먼저 block"만 정하고 값을 정하지 않았다. 공간
@@ -106,13 +139,20 @@ _SCORER_ID: Final[str] = "manual-provider-v1"
 
 @dataclass(frozen=True)
 class CandidateFeature:
-    """탐지에 필요한 최소 Feature 투영."""
+    """탐지에 필요한 최소 Feature 투영.
+
+    `distance_meters`는 provider 쪽에만 있다 — **block 술어와 같은 질의가 낸 값**이다.
+    Python에서 따로 haversine을 돌리면 block(EPSG:5179 평면)과 기록된 거리(구면)가
+    서로 다른 의미가 되어, 반경 안이라고 뽑아 놓고 반경 밖 거리를 receipt에 싣는
+    일이 생긴다.
+    """
 
     feature_id: str
     name: str
     category: str | None
     lon: float
     lat: float
+    distance_meters: float | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +166,7 @@ class DetectionOutcome:
     idempotent_case_ids: tuple[str, ...]
     incomplete_blocks: tuple[str, ...]
     manual_scan_truncated: bool = False
+    raced_pair_count: int = 0
 
     @property
     def complete_set(self) -> bool:
@@ -134,7 +175,11 @@ class DetectionOutcome:
         block 상한에 한 번도 안 걸렸고 manual 스캔도 안 잘렸을 때만 참이다.
         둘 중 하나라도 걸리면 "후보가 이게 전부다"라고 말할 수 없다.
         """
-        return not self.incomplete_blocks and not self.manual_scan_truncated
+        return (
+            not self.incomplete_blocks
+            and not self.manual_scan_truncated
+            and self.raced_pair_count == 0
+        )
 
 
 # ─── SQL 상수 ──────────────────────────────────────────────────────────────
@@ -154,21 +199,40 @@ FROM feature.list_manual_provider_dedup_detector_manuals(
 #: provider-linked Feature. 프로시저가 요구하는 "현재 primary source 정확히 1건"을
 #: 여기서도 강제해, 프로시저가 거부할 쌍을 애초에 점수 내지 않는다.
 #:
-#: 공간 block은 `ST_DWithin`(geography)으로 건다 — 술어에 `ST_Transform`을 쓰지
-#: 않는다(ADR-012: 인덱스 무효화).
+#: 공간 block은 저장소 정본 형태 — **저장 컬럼 `coord_5179`를 그대로 두고 파라미터
+#: 쪽만 `ST_Transform`한다**(ADR-012). 처음엔 `f.coord::geography`로 썼는데 그것은
+#: 컬럼에 건 함수식이라 `idx_features_coord_5179_gist`도 `idx_features_coord_gist`도
+#: 쓸 수 없고(geography 인덱스는 없다) manual 한 건마다 `feature.features` 전체
+#: seq scan이 됐다 — 적대 리뷰가 잡았다.
+#:
+#: **정렬은 거리순이다.** `feature_id` 순으로 자르면 `limit`에 걸렸을 때 찾으려던
+#: 최근접 후보를 정확히 버린다. 부분 인덱스의 WHERE(`active`/`published`/`valid`)를
+#: 술어가 그대로 갖고 있어야 인덱스가 잡히므로 세 항을 지우면 안 된다.
 _PROVIDER_NEAR_SQL: Final[str] = """
+WITH input AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS pt
+)
 SELECT f.feature_id, f.name, f.category,
-       ST_X(f.coord) AS lon, ST_Y(f.coord) AS lat
-FROM feature.features AS f
+       x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+       x_extension.ST_Distance(f.coord_5179, i.pt) AS distance_meters
+FROM feature.features AS f, input AS i
 WHERE f.lifecycle_state = 'active'
   AND f.publication_state = 'published'
   AND f.quality_state = 'valid'
   AND f.coord IS NOT NULL
+  AND f.coord_5179 IS NOT NULL
   AND f.feature_id <> :manual_feature_id
-  AND ST_DWithin(
-        f.coord::geography,
-        ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
-        :radius_meters
+  AND x_extension.ST_DWithin(
+        f.coord_5179, i.pt, CAST(:radius_meters AS double precision)
       )
   AND (
     SELECT count(*)
@@ -183,7 +247,7 @@ WHERE f.lifecycle_state = 'active'
     WHERE link.feature_id = f.feature_id
       AND link.source_role = 'primary'
   ) = 1
-ORDER BY f.feature_id
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) i.pt, f.feature_id
 LIMIT :limit
 """
 
@@ -197,12 +261,14 @@ CALL feature.record_manual_provider_dedup_candidate(
 
 
 def _row_to_feature(row: Any) -> CandidateFeature:
+    distance = getattr(row, "distance_meters", None)
     return CandidateFeature(
         feature_id=row.feature_id,
         name=row.name,
         category=row.category,
         lon=float(row.lon),
         lat=float(row.lat),
+        distance_meters=None if distance is None else float(distance),
     )
 
 
@@ -272,15 +338,6 @@ def _scorer_input_sha256(manual: CandidateFeature, provider: CandidateFeature) -
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _haversine_meters(a: CandidateFeature, b: CandidateFeature) -> float:
-    from math import asin, cos, radians, sin, sqrt
-
-    lat1, lon1, lat2, lon2 = map(radians, (a.lat, a.lon, b.lat, b.lon))
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    return 2 * 6_371_000.0 * asin(sqrt(h))
-
-
 def score_manual_provider_pair(
     manual: CandidateFeature, provider: CandidateFeature
 ) -> dict[str, Any]:
@@ -310,7 +367,8 @@ def score_manual_provider_pair(
             ),
             6,
         ),
-        "distance_meters": round(_haversine_meters(manual, provider), 3),
+        # block 술어가 낸 값을 그대로 싣는다 — 두 번 재지 않는다.
+        "distance_meters": round(provider.distance_meters or 0.0, 3),
         "scorer_input_sha256": _scorer_input_sha256(manual, provider),
     }
 
@@ -384,6 +442,7 @@ async def detect_manual_provider_candidates(
     manual_total = 0
     provider_total = 0
     scored = 0
+    raced = 0
     after: str | None = None
     truncated = True
 
@@ -426,13 +485,29 @@ async def detect_manual_provider_candidates(
                     },
                     "threshold_manual": THRESHOLD_MANUAL,
                 }
-                case_id, outcome = await record_manual_provider_candidate(
-                    session,
-                    manual_feature_id=manual.feature_id,
-                    provider_feature_id=provider.feature_id,
-                    scores=scores,
-                    detector_causation=causation,
-                )
+                try:
+                    case_id, outcome = await record_manual_provider_candidate(
+                        session,
+                        manual_feature_id=manual.feature_id,
+                        provider_feature_id=provider.feature_id,
+                        scores=scores,
+                        detector_causation=causation,
+                    )
+                except DBAPIError as error:
+                    if _constraint_name(error) not in _RACED_CANDIDATE_CONSTRAINTS:
+                        raise
+                    # 이 쌍만 버린다. 롤백 없이 다음으로 가면 PostgreSQL이
+                    # "current transaction is aborted"로 이후 전부를 거부한다.
+                    await session.rollback()
+                    raced += 1
+                    continue
+                # **case 하나만큼만 fence를 쥔다.** 프로시저는 호출마다
+                # `pg_advisory_xact_lock('feature-curation-m05')`을 잡는데 그것은
+                # xact-scoped라, 런 전체를 한 트랜잭션으로 묶으면 첫 후보에서 잡은
+                # fence가 런 끝까지 유지돼 admin의 resolve 경로가 그동안 막힌다
+                # (두 Feature 행의 FOR UPDATE도 같이 쌓인다). 형제 job
+                # `file_registry_scan`의 "단위별 독립 커밋"과 같은 규약이다.
+                await session.commit()
                 (created if outcome == "created" else idempotent).append(case_id)
 
         if len(manuals) < manual_page_size:
@@ -447,4 +522,5 @@ async def detect_manual_provider_candidates(
         idempotent_case_ids=tuple(idempotent),
         incomplete_blocks=tuple(incomplete),
         manual_scan_truncated=truncated,
+        raced_pair_count=raced,
     )

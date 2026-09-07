@@ -241,7 +241,7 @@ async def test_the_detector_records_a_candidate_and_reports_the_scope_it_scanned
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     run_id = f"itest-{uuid4().hex[:12]}"
     try:
-        async with AsyncSession(dagster) as session, session.begin():
+        async with AsyncSession(dagster) as session:
             outcome = await detect_manual_provider_candidates(session, run_id=run_id)
 
         assert outcome.manual_input_count >= 1
@@ -287,22 +287,27 @@ async def test_the_detector_reports_its_scope_even_when_nothing_survives(
     """후보가 0건이어도 훑은 범위는 보고한다.
 
     이 단언이 없으면 "후보가 없다"와 "manual 질의가 조용히 비었다"가 증거상
-    구별되지 않는다 — 이 저장소가 반복해 겪은 실패 양상이다. 임계값을 1.01로
-    올려 어떤 쌍도 통과하지 못하게 만든 뒤, 그래도 집계가 남는지 본다.
+    구별되지 않는다 — 이 저장소가 반복해 겪은 실패 양상이다. **반경을 1m로 좁혀**
+    block에 이웃이 하나도 안 잡히게 만든 뒤, 그래도 manual을 훑었다는 사실이
+    남는지 본다(임계값이 아니라 이웃 0건이 이 테스트의 축이다).
     """
 
     await _seed_manual_provider_pair(migrated_engine, index=13)
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
-        async with AsyncSession(dagster) as session, session.begin():
+        async with AsyncSession(dagster) as session:
             # 반경을 1m로 좁히면 이웃이 사라진다 — 후보 0건, 그러나 manual은 훑었다.
             outcome = await detect_manual_provider_candidates(
                 session, run_id=f"empty-{uuid4().hex[:8]}", radius_meters=1.0
             )
         assert outcome.created_case_ids == ()
         assert outcome.idempotent_case_ids == ()
-        assert outcome.manual_input_count >= 1
         assert outcome.scored_pair_count == 0
+        # 이 둘이 핵심이다 — 후보가 0인데 **훑기는 했다**는 사실이 남아야
+        # "manual 질의가 조용히 비었다"와 구별된다. 0과 0을 비교하면 아무것도
+        # 지키지 않는다(적대 리뷰가 잡았다).
+        assert outcome.manual_input_count == len(await _listing_rows(dagster))
+        assert outcome.manual_input_count > 0
     finally:
         await dagster.dispose()
 
@@ -317,8 +322,11 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
     1로 놓고 여러 manual을 심어, 마지막 manual까지 실제로 도달하는지 잰다.
     """
 
+    # index=0은 기존 테스트 파일의 기본값이라 겹치면
+    # `uq_manual_feature_identity_claims_exact`로 그쪽을 깨뜨린다.
     pairs = [
-        await _seed_manual_provider_pair(migrated_engine, index=i) for i in range(3)
+        await _seed_manual_provider_pair(migrated_engine, index=30 + i)
+        for i in range(3)
     ]
     wanted = {str(pair["manual_feature_id"]) for pair in pairs}
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
@@ -356,7 +364,7 @@ async def test_the_detector_loop_reaches_every_manual_page(
     wanted = {str(pair["manual_feature_id"]) for pair in pairs}
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
-        async with AsyncSession(dagster) as session, session.begin():
+        async with AsyncSession(dagster) as session:
             outcome = await detect_manual_provider_candidates(
                 session, run_id=f"paged-{uuid4().hex[:8]}", manual_page_size=1
             )
@@ -374,5 +382,107 @@ async def test_the_detector_loop_reaches_every_manual_page(
                 )
             }
         assert wanted <= reached
+    finally:
+        await dagster.dispose()
+
+
+async def test_the_detector_says_it_did_not_see_everything_when_it_was_capped(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """절단 보고를 **참 방향으로** 잰다.
+
+    `manual_scan_truncated`/`incomplete_blocks`는 이 모듈의 핵심 불변식인데,
+    다른 테스트는 전부 `False`/빈 튜플만 확인한다 — 상수 `False`를 돌려줘도
+    전부 초록이다. 여기서는 실제로 상한에 걸리게 만들고 참이 되는지 본다.
+    """
+
+    await _seed_manual_provider_pair(migrated_engine, index=40)
+    await _seed_manual_provider_pair(migrated_engine, index=41)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        async with AsyncSession(dagster) as session:
+            # 페이지 하나만 보고 멈춘다 — manual이 더 있는데 안 봤다.
+            capped = await detect_manual_provider_candidates(
+                session,
+                run_id=f"capped-{uuid4().hex[:8]}",
+                manual_page_size=1,
+                max_manual_pages=1,
+            )
+        assert capped.manual_scan_truncated is True
+        assert capped.complete_set is False
+        assert capped.manual_input_count == 1
+
+        async with AsyncSession(dagster) as session:
+            # block 상한을 1로 두면 이웃이 하나뿐이어도 "다 보지 않았다"가 된다.
+            blocked = await detect_manual_provider_candidates(
+                session, run_id=f"blocked-{uuid4().hex[:8]}", block_limit=1
+            )
+        assert blocked.incomplete_blocks
+        assert blocked.complete_set is False
+    finally:
+        await dagster.dispose()
+
+
+async def test_the_listing_refuses_a_page_size_outside_its_range(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """`p_limit` 가드도 결박한다 — 본문 가드를 통째로만 재면 이 절이 사라진다."""
+
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        for bad in (0, -1, 10001):
+            with pytest.raises(DBAPIError) as refused:
+                await _listing_rows(dagster, limit=bad)
+            assert _constraint_of(refused.value) == "ck_m05_detector_manuals_limit", bad
+    finally:
+        await dagster.dispose()
+
+
+async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """eligibility 네 항을 결박한다.
+
+    `coord IS NOT NULL`이 특히 중요하다 — 이 항이 빠지면 좌표 없는 manual이
+    목록에 실려 탐지기가 `float(None)`으로 죽는다. 나머지 셋은 프로시저의
+    `ck_m05_candidate_feature_proof`와 같은 진실이라, 목록이 넓어지면 23514가 난다.
+    """
+
+    pair = await _seed_manual_provider_pair(migrated_engine, index=50)
+    manual_id = str(pair["manual_feature_id"])
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        assert manual_id in await _listing_rows(dagster)
+        for column, value in (
+            ("lifecycle_state", "retired"),
+            ("publication_state", "draft"),
+            ("quality_state", "invalid"),
+            ("coord", None),
+        ):
+            async with migrated_engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        f"UPDATE feature.features SET {column} = :value "  # noqa: S608
+                        "WHERE feature_id = :feature_id"
+                    ),
+                    {"value": value, "feature_id": manual_id},
+                )
+            assert manual_id not in await _listing_rows(dagster), column
+            async with migrated_engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE feature.features SET lifecycle_state = 'active', "
+                        "publication_state = 'published', quality_state = 'valid', "
+                        "coord = x_extension.ST_SetSRID("
+                        "  x_extension.ST_MakePoint(:lon, :lat), 4326) "
+                        "WHERE feature_id = :feature_id"
+                    ),
+                    {
+                        "feature_id": manual_id,
+                        "lon": 127.111111 + 50 * 0.01,
+                        "lat": 37.511111 + 50 * 0.01,
+                    },
+                )
+            assert manual_id in await _listing_rows(dagster), column
     finally:
         await dagster.dispose()

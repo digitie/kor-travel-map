@@ -474,6 +474,30 @@ _M05_STATE_OWNER_DEPENDENCY_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
 )
 
+#: migration 304의 산물에만 적용되는 ACL. `to_regprocedure`가 NULL이면 그 DB는
+#: 아직(또는 더 이상) 304가 아니므로 조용히 건너뛴다 — 조용한 건너뜀이 안전한 이유는
+#: 함수가 없으면 지킬 대상도 없기 때문이다. 함수가 **있는데** 이 문장이 안 돌면
+#: `tests/integration`의 executor 전용 단언이 빨개진다.
+_M05_DETECTOR_LISTING_ACL_SQL = """
+DO $$
+BEGIN
+    IF to_regprocedure(
+        'feature.list_manual_provider_dedup_detector_manuals(text,integer)'
+    ) IS NOT NULL THEN
+        REVOKE ALL ON FUNCTION
+            feature.list_manual_provider_dedup_detector_manuals(text, integer)
+            FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+                 ktm_feature_dagster_runtime,
+                 ktm_manual_provider_dedup_admin_executor,
+                 ktm_feature_reference_reconciliation_service_executor;
+        GRANT EXECUTE ON FUNCTION
+            feature.list_manual_provider_dedup_detector_manuals(text, integer)
+            TO ktm_manual_provider_dedup_detector_executor;
+    END IF;
+END
+$$
+"""
+
 _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
@@ -512,12 +536,12 @@ _M05_WRITER_ACL = (
     # 경로다. 함수 본문의 session_user 검사와 이 ACL이 **둘 다** 막는다 — 하나가
     # 지워졌을 때 다른 하나가 남게 하려는 것이고, 그래서 본문 검사를 가리지
     # 않도록 owner role로 호출하는 게이트를 따로 둔다.
-    "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals("
-    "text, integer) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor, "
-    "ktm_feature_reference_reconciliation_service_executor",
-    "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals("
-    "text, integer) TO ktm_manual_provider_dedup_detector_executor",
+    #
+    # **존재할 때만 적용한다.** 이 조정기는 baseline root(300)에서 올라오는 DB에서도
+    # 돌고(`docker/transition-application-schema-0236-to-300.py`), 304를 되돌린 DB에서도
+    # 돈다. 함수 이름을 무조건 쓰면 그런 DB에서 42883이 나 **ACL 재조정 트랜잭션
+    # 전체가 무효화된다** — 이 두 문장과 무관한 grant까지 같이 날아간다.
+    _M05_DETECTOR_LISTING_ACL_SQL,
     "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
     "uuid, text, text, bigint, bigint, text, text, text, bigint), "
     "feature.resolve_manual_provider_dedup_case_v2("
