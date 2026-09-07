@@ -14,7 +14,7 @@
  * 그래서 기본값은 `kept`이고, 파괴적 판정은 확인 문구를 따로 받는다.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   formatUnackedAge,
@@ -126,11 +126,19 @@ function CaseDecisionPanel({
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
 
+  // `Date.now()`를 렌더 중에 부르면 불순 호출이고, 한 번 고정하면 밀린 시간이
+  // 화면에 남아 있는 동안 낡는다. effect에서 재고, 1분마다 갱신한다.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const data = detail.data?.data;
-  const subscriptions = data?.subscriptions ?? [];
-  const now = Date.now();
+  const subscriptions = useMemo(() => data?.subscriptions ?? [], [data]);
   const unacked = useMemo(
-    () => unackedAges(subscriptions, now),
+    () => (now === null ? [] : unackedAges(subscriptions, now)),
     [subscriptions, now],
   );
 
@@ -170,7 +178,9 @@ function CaseDecisionPanel({
 
       <section aria-label="미확인 consumer">
         <h3>미확인 consumer</h3>
-        {unacked.length === 0 ? (
+        {now === null ? (
+          <p>계산 중…</p>
+        ) : unacked.length === 0 ? (
           <p>밀린 consumer가 없다.</p>
         ) : (
           <ul>
