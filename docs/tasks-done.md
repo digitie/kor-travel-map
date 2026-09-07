@@ -10,6 +10,21 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-07 — T-VN-PAIR-V2
+
+- [x] T-VN-PAIR-V2 — PinVi M05 pair 계약 v2 이행 (**2026-09-07 완료**). 계약에서
+  `source_revision`·`runtime_image_digests`를 걷어 **Map revision·image digest의 이중
+  선언**을 없앴다(`AGENTS.md` DO NOT 15). 값의 정본은 Manager pin registry와 PinVi
+  service-provenance 계약이고, 표면마다 생산자를 이름 대어 배선했다.
+  **성과**: Map 문서 한 줄이 PinVi 커밋 → 새 pinset → 71분 rebuild를 부르던 연쇄가
+  끊겼다(2026-09-01 이후 재핀 12건 중 10건은 상류 OpenAPI 바이트 무변경).
+  **실증**: pinset `b229446a`에서 회전 → rebuild(`phase: committed`) → 격리 M05 e2e
+  `status: passed`. 회전 preflight가 Map 5커밋 전진을 **PinVi 커밋 없이** 수용.
+  **적대 리뷰 2라운드**가 P0 2건을 잡았고(v2로 receipt 생성 불가 / service revision
+  생산자 오지목 → 71분 뒤 기동 실패) 픽스처가 둘 다 가리고 있었다. 변이 검증 PinVi
+  9건 · Manager 12건 전부 red. 상세는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
+  PR: PinVi #538 #539, Manager #321 #322 #323, Map #1181 #1182.
+
 ## T-VN-D2-API-AUDIT — helper의 api-audit 경로 활성화 (2026-09-06 완료)
 
 - [x] T-VN-D2-API-AUDIT — 러너가 `api-audit`을 실제로 부르고 배포 스택에서 통과했다

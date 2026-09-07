@@ -552,7 +552,7 @@ rebuild 동반**. 그중 **10건은 상류 admin OpenAPI가 바이트 동일**�
 
 
 ```markdown
-- [ ] T-VN-PAIR-V2 — PinVi M05 pair 계약 v2 이행
+- [x] T-VN-PAIR-V2 — PinVi M05 pair 계약 v2 이행 (2026-09-07 완료)
 ```
 
 **왜 여는가.** Map revision이 두 곳에서 선언된다 — pin registry(정본)와 PinVi가
@@ -576,21 +576,21 @@ surface마다 `source_revision`을 요구한다. 계약만 뒤집으면 PinVi AP
 downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestation.py`,
 `apps/api/tests/unit/test_m05_*`).
 
-**진행 상황 (2026-09-07).**
+**완료 (2026-09-07).** §1~§7 전부 닫혔다.
 
 | 항목 | 상태 |
 |---|---|
 | §1 소비자 dual-read | **완료** — PinVi #538 |
-| §2 v1 계약 그대로 기동 | **완료** — pinset `78cad481…` rebuild 후 배포 컨테이너에서 직접 확인 |
-| §3 계약 v2 재생성 | **완료** — PinVi #539. version 2, `runtime_image_digests` 제거, `source_revision` 0건, digest 16개 무변경 |
-| §4 v2 게이트 + 변이 | **완료** — PinVi 9건 · Manager 8건 전부 red (아래 표) |
-| §5 PinVi 커밋 없이 새 Map 수용 | **정적으로 성립** — 실행 증명은 §6과 함께 |
-| §6 회전 → rebuild → 격리 e2e | 대기 (머지 순서 아래) |
-| §7 Manager v1 분기 제거 | §6 green 뒤 |
+| §2 v1 계약 그대로 기동 | **완료** — pinset `78cad481…` |
+| §3 계약 v2 재생성 | **완료** — PinVi #539 (version 2, `runtime_image_digests` 제거, `source_revision` 0건, digest 16개 무변경) |
+| §4 v2 게이트 + 변이 | **완료** — PinVi 9건 · Manager 12건 전부 red |
+| §5 PinVi 커밋 없이 새 Map 수용 | **완료** — 정적·실행 양쪽 |
+| §6 회전 → rebuild → 격리 e2e | **완료** — `status: passed` |
+| §7 Manager v1 분기 제거 | **완료** — Manager #323 |
 
-**§3의 실제 선행은 "생산자 배선"이었고, 그 배선을 두 번 틀렸다.** 원장은 소비자를
-하나로 봤지만 셋이었고(2026-09-07 1차 정정), 배선을 하고 나서도 **전문 리뷰어 2명의
-적대 검토**가 P0 두 건을 잡았다. 둘 다 "사본을 걷어냈으면 정본을 가리켜야 한다"를
+**§3의 실제 선행은 "생산자 배선"이었고, 그것을 두 번 틀렸다.** 원장은 소비자를
+하나로 봤지만 셋이었고(1차 정정), 배선을 하고 나서도 **전문 리뷰어 2명의 적대
+검토**가 P0 두 건을 잡았다. 둘 다 "사본을 걷어냈으면 정본을 가리켜야 한다"를
 반쯤만 한 데서 나왔다.
 
 | # | 무엇을 틀렸나 | 어떻게 드러났을 것인가 |
@@ -606,46 +606,48 @@ downstream 사용처를 먼저 세어야 한다(`scripts/m05_activation_attestat
 | admin·full·user | 계약이 선언 | Map pinned revision (Manager pin registry) |
 | service | 계약이 선언 | PinVi service-provenance 계약 |
 
+**픽스처가 두 P0을 다 가리고 있었다.** receipt 테스트가 evidence의 표면 블록을 손으로
+적어 **실제 생산자가 낼 수 없는 문서**를 만들고 있었다. 이제 vendored 계약에서 그대로
+가져온다 — 계약이 v1이든 v2든 픽스처가 자동으로 그 모양을 따른다.
+
 **Manager 안전 공백도 함께 닫았다.** 종전 원장이 지목한 대로
-(`m05_isolated_e2e.py`의 v2 회전 preflight가 무조건 통과) 회전 대상 Map revision의 네
-표면 blob digest를 계약과 대조하도록 앞으로 당겼다 — 격리 e2e가 rebuild **뒤에** 하던
-그 대조다. 같은 값의 두 번째 선언(`_PAIR_CONTRACT_PATH`, `_PAIR_SURFACE_PATHS`)도
-함께 걷었다.
+(v2 회전 preflight가 무조건 통과) 회전 대상 Map revision의 네 표면 blob digest를
+계약과 대조하도록 앞으로 당겼다 — 격리 e2e가 rebuild **뒤에** 하던 그 대조다.
 
-**변이 검증 (게이트가 공허하지 않다는 증거 — 전부 red).**
+**§5 — v1이었다면 71분이 따라왔을 자리.** Map `main`이 pinned `631f1abc`에서 5커밋
+앞섰는데 세 표면 blob이 전부 바이트 동일하고 v2 계약의 네 digest와 일치했다.
+회전 preflight가 그 Map revision을 **PinVi 커밋 없이** exit 0으로 수용했고, 어긋난
+revision(`db319a47`)에는 두 digest를 찍으며 거부했다(음성 대조).
 
-| PinVi | Manager |
+**§6 실측 (pinset `b229446a`).**
+
+| 단계 | 결과 |
 |---|---|
-| receipt entry 스키마 유도 → 리터럴 5키 (P0-1 원상) | 회전 preflight v2 분기 전체 (종전 무조건 통과) |
-| attestation service 정본 → pin registry (P0-2 원상) | service revision 생산자 → pin registry (P0-2 원상) |
-| receipt entry 필드 대조 | 표면 digest 대조 |
-| receipt runtime artifact revision 결박 | blob 읽기 실패 거부 |
-| receipt runtime image revision 결박 | digest 형식 검증 |
-| 컨테이너 라벨 대조 표면 → full | service revision 형식 검증 |
-| `_live` checkout allowlist 배선 | fetch 대상 저장소 map → pinvi |
-| config 표면 revision 동일성 (admin=full=user) | blob 읽기 revision 회전대상 → pinned |
-| config revision 40-hex 형식 | |
+| 회전 | rotation #40, pinset `b229446ac273…` |
+| rebuild | `success: true`, `phase: committed` |
+| 격리 M05 e2e | **`status: passed`**, `phase: completed`, m04·m05 attestation 해시 존재, cleanup 정상 |
 
-**§5는 지금 정적으로 성립한다 — 2026-09-07 실측.** Map `main`은 pinned
-`631f1abc…`에서 **4커밋 앞서** 있는데 세 표면 blob이 전부 바이트 동일하고, v2 계약의
-네 digest와 정확히 일치한다.
+**§6에서 PAIR-V2와 무관한 선행 결함 하나가 드러났다.** Playwright runner 이미지 핀이
+v1.62.1인데 PinVi lockfile은 1.63.0이었다(회전 **전** pinned PinVi도 이미 1.63.0이었으므로
+이 회전이 만든 드리프트가 아니다). 두 값이 어긋나면 `/ms-playwright` 캐시가 적중하지
+않아 본문 브라우저 기동에서 무조건 소각인데,
+`_assert_playwright_runner_matches_pinned_source`가 **실행권 소비 전에** 잡았다 —
+게이트가 설계대로 동작해 한 사이클을 아꼈다(Manager #322).
 
-| 표면 | pinned `631f1abc` | main `221153a7` | v2 계약 |
-|---|---|---|---|
-| `openapi.json` | `de41961d…` | `de41961d…` | `de41961d…` |
-| `openapi.service.json` | `99ba6c17…` | `99ba6c17…` | `99ba6c17…` |
-| `openapi.user.json` | `489b05d3…` | `489b05d3…` | `489b05d3…` |
+**§7 — 걷어낸 뒤 변이 검증이 공허한 게이트 둘을 찾았다.**
 
-v1이었다면 이 4커밋은 계약의 `source_revision` 한 줄 때문에 PinVi 커밋 → 새 pinset →
-71분 rebuild를 불렀다. v2에서는 계약이 바뀌지 않고, 새 Manager 회전 preflight도
-digest가 같으므로 통과한다.
+1. `_pair`가 v1을 다시 받도록 되돌려도 초록이었다 — v1 거부를 확인하는 테스트가 없었다.
+2. `"pair contract v2 must not declare a source revision"` 전용 검사는 **도달할 수
+   없었다.** 바로 위 entry 스키마 검사가 먼저 잡기 때문이고, dual-read 도입 때부터
+   그랬다. 그 검사와 어휘를 걷고 기존 테스트가 실제 진단을 단언하게 고쳤다.
 
-**⚠️ 머지 순서가 강제된다 — Manager가 먼저다.** Manager `origin/main`은 P0-2 결함
-(`service_source_revision = pinned_map_revision`)을 이미 갖고 있고 v2 회전 preflight도
-무조건 통과다. PinVi 계약이 먼저 v2가 되면 preflight 통과 → 71분 rebuild → PinVi 기동
-실패이고, 되돌리려면 PinVi 커밋 하나 → pinset 하나 → 71분이 또 든다.
+진단 어휘 게이트도 양방향으로 만들었다(allowlist 항목이 실제로 발신되는지도 본다) —
+한 방향만 보니 죽은 어휘가 넷 쌓여 있었다.
 
-    kor-travel-docker-manager#321 머지 → Manager 배포 → pinvi#539 머지 → 회전(§6)
+**§7 뒤 확인 실행.** v1 분기를 걷어낸 Manager(`0406b14d`)로 같은 pinset에서 격리 M05 e2e를 한 번 더 돌려 `status: passed`를 다시 받았다 — 걷어낸 것이 회귀를 만들지 않았다는 증거다(rebuild는 pinset이 그대로라 불필요했다).
+
+**되돌리는 방법.** v1 pinset으로 재개해야 하면 Manager #323을 revert한다. 그 판단에
+필요한 신호는 거부 메시지가 낸다: `pair contract version is unsupported`.
 
 **해제 조건.**
 

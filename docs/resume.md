@@ -16,55 +16,15 @@
 
 ### 다음 한 작업
 
-**`T-VN-PAIR-V2` §6 — 회전 → rebuild → 격리 M05 e2e.** §1~§4는 닫혔고 §5는 정적으로
-성립한다(Map main이 pinned에서 4커밋 앞섰는데 세 표면 blob이 바이트 동일 — v1이었다면
-71분 rebuild가 따라왔을 자리다). 남은 것은 실행 증명 하나다.
+**`T-VN-PAIR-V2`는 2026-09-07에 §1~§7 전부 닫혔다.** 다음 한 작업은 `docs/tasks.md`
+상단 열린 항목 인덱스에서 고른다.
 
-**머지 순서가 강제된다**: `kor-travel-docker-manager#321` → Manager 배포 →
-`pinvi#539` → 회전. Manager main이 P0-2 결함을 갖고 있어 PinVi가 먼저 머지되면 71분
-rebuild 뒤 PinVi가 기동에 실패한다. 근거는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
+PAIR-V2가 남긴 것: Map 문서 한 줄이 PinVi 커밋 → 새 pinset → 71분 rebuild를 부르던
+연쇄가 끊겼다(2026-09-01 이후 12건 중 10건은 상류 OpenAPI가 바이트 동일했다).
+실측·적대 리뷰 2라운드·변이 검증표는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
 
-<!-- 아래는 2026-09-07 §3 선행 조사 기록이다 -->
-**종전: `T-VN-PAIR-V2` §3의 선행 — attestation의 Map revision 생산자 배선.** §1·§2는
-2026-09-07에 닫혔다(PinVi #538, pinset `78cad481…`에서 배포 컨테이너로 실증). §3은
-해제 조건이 적지 않은 선행 하나에 걸려 있다: `m05_activation_attestation.py`가
-`source_revision`을 `git show`의 revision 인자로 쓰므로, 계약에서 그 필드를 빼려면 그
-값을 줄 생산자가 먼저 있어야 한다. **대체 생산자는 이미 존재한다** — 격리 envelope의
-`map.source_revision`(Manager가 pin registry에서 만든 값)이고, 배선만 없다.
-자세한 순서는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2의 "진행 상황"이 갖는다.
-
-<!-- 아래는 이 항목을 고른 근거다 -->
-**`T-VN-PAIR-V2`** — PinVi의 M05 pair 계약을 v2로 올려 **Map revision의 이중 선언을
-없앤다.** 41C는 2026-09-07 소유자 판정으로 **보류**다(실 production 전환까지 enable 유예 —
-현 lifecycle에서 enable과 pinned rebuild가 상호배타라 rebuild 능력을 잃는 값이 맞지 않다).
-
-PAIR-V2를 다음으로 두는 이유는 **비용을 이미 값으로 치렀기 때문**이다. 2026-09-01 이후
-Map 변경으로 강제된 PinVi 재핀은 **12건**이고 **12건 전부가 rebuild를 끌고 왔다**. 그중
-**10건은 상류 admin OpenAPI가 바이트 동일한 채 revision 라벨만 옮긴 것**이다(상류 blob
-sha256이 12개 핀에 걸쳐 두 값뿐이었다). 2026-09-06 하루만 봐도 4건이다 — 이 줄이 종전에
-"두 번"이라 적었던 것은 오기다(2026-09-07 실측 정정).
-
-Manager는 이미 v1·v2를 dual-read하고 **그것이 n150에도 배포돼 있다**. PinVi 생성기도 이미
-v2를 계산하지만 `_in_committed_envelope`가 커밋된 v1 봉투로 되돌린다 — 그 되돌림은 커밋된
-JSON이 v2가 되는 순간 **스스로 무장해제**되므로 생성기 변경은 순서상 마지막이다.
-
-막고 있는 것은 **소비자 셋**이다(원장이 종전에 하나라고 적었다):
-`apps/api/app/core/config.py`(모듈 스코프 `version == 1` — 계약만 뒤집으면 컨테이너가
-**기동에 실패**한다, 실측 재현), `scripts/m05_activation_attestation.py`,
-`scripts/m05_activation_receipt.py`.
-
-`GM-17`은 소유자 지시로 **가장 마지막**이다.
-
-### 이번에 배운 것
-
-- **흔적을 남기지 않는 실패는 진단을 한 겹 멀게 한다.** supervisor의 argparse
-  `--helper-action` choices에 새 action이 빠지면 exit 2로 죽는데, 그것은 lifecycle도
-  출력 파일도 쓰기 **전**이다. lane 실패는 "owned fixture cleanup left residue"라는
-  엉뚱한 곳을 가리켰고 실제 잔여물은 0이었다. 이제 CI 게이트가 그 다섯째 결선 지점을
-  러너 호출부에서 유도해 결박한다.
-- **pinned rebuild는 application DB를 새로 만든다.** 이전 실행이 남긴 Feature는 다음
-  rebuild에 사라진다 — "suppressed 행이 쌓인다"는 종전 debt 서술은 사실이 아니었다.
-
+자세한 경위는 `docs/journal.md` 2026-09-07 엔트리와 `docs/tasks-acceptance.md`
+§T-VN-PAIR-V2가 갖는다.
 
 ## 2026-09-06 — D2 통과, receipt 승격
 
