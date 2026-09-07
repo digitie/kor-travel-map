@@ -26,9 +26,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [~] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
 
   승격 정의를 2026-09-07 판정으로 바꿨다 — 문서 행위가 아니라 Manager `--verify-leaf`가
-  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 그 exit 0을
-  2026-09-07 실측했다(Manager `51b39b26` 배포 후 `pairv2-e2e-02`·`-03` 둘 다 L1~L8 통과,
-  `is_installed=False`). 남은 것은 새 정의에 대한 적대 리뷰 두 건 GO다.
+  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 적대 리뷰 3차까지
+  전부 NO_GO였고 그 P0들이 검증기를 13축으로 키웠다(Manager #330·#331). **강화 이전
+  실측은 근거로 쓰지 않는다** — 그때 검증기는 아무 디렉터리나 받았다. 남은 것은 4차 GO다.
 
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
@@ -51,6 +51,12 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   조문 M05-1~M05-7을 세웠고 2026-09-07 실측으로 넷이 충족이다. M05-3(후보 발행)은
   migration 304의 detector reader로 채웠다(#1189). 남은 것은 M05-5(admin 판정 UI)와,
   300 baseline 정책이 바뀌어야 판정 가능한 M05-2다.
+
+- [ ] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
+
+  `--verify-leaf`는 print만 하고 아무것도 쓰지 않아, 승격 근거가 원장에 붙인 출력
+  텍스트로만 남는다. pin 회전·history 500칸 링·identity 소각 중 무엇이 먼저 와도 재현이
+  불가능해진다. 검증 결과를 root-owned receipt로 남기는 것이 이 항목이다.
 
 - [ ] T-VN-M05-RELITIGATION — **admin이 판정한 쌍이 다시 올라오지 않게 한다**
 
