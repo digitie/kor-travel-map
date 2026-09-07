@@ -320,7 +320,7 @@ describe("M05-5 admin 판정 화면", () => {
     await screen.findByRole("region", { name: "판정 결과" });
   });
 
-  it("멱등 키를 헤더에 싣고 slot 이름이 admin. 접두를 지킨다", async () => {
+  it("멱등 키를 헤더에 싣는다", async () => {
     const calls = await openCase();
     fillReason("중복 아님");
     fireEvent.click(screen.getByRole("button", { name: "판정 제출" }));
@@ -332,11 +332,21 @@ describe("M05-5 admin 판정 화면", () => {
     expect(headers.get("Idempotency-Key")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
+  });
+
+  it("멱등 slot 이름이 admin. 접두를 지킨다 — 그 접두로만 청소된다", async () => {
+    // 성공하면 slot이 해제되므로 **실패 경로**에서 본다. 재시도가 같은 key를 쓰도록
+    // 남겨 두는 그 순간이 slot 이름을 관측할 수 있는 유일한 지점이다.
+    await openCase(503);
+    fillReason("중복 아님");
+    fireEvent.click(screen.getByRole("button", { name: "판정 제출" }));
+    await screen.findByText(/일시적으로 닫혀 있다/);
+
     // `Storage`는 `Object.keys`로 열거되지 않는다 — `key(i)`로 읽어야 한다.
     const slots: string[] = [];
     for (let index = 0; index < window.sessionStorage.length; index += 1) {
       const key = window.sessionStorage.key(index);
-      if (key && key.includes("manual-provider-dedup")) {
+      if (key !== null && key.includes("manual-provider-dedup")) {
         slots.push(key);
       }
     }
