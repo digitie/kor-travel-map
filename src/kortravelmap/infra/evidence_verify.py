@@ -97,6 +97,16 @@ def _digest(path: Path) -> tuple[int, str]:
     return raw.count(b"\n"), hashlib.sha256(raw).hexdigest()
 
 
+def _require(row: dict[str, Any], *keys: str) -> bool:
+    """손상된 행은 **실패로 보고**하지 예외로 죽지 않는다.
+
+    손상된 번들을 검증하는 것이 이 도구의 일이므로, 그 입력에 traceback으로 죽으면
+    "무엇이 손상됐는지"를 말하지 못한다.
+    """
+
+    return all(key in row for key in keys)
+
+
 def compute_acked_through(
     *,
     subscriptions: list[dict[str, Any]],
@@ -117,10 +127,14 @@ def compute_acked_through(
     """
 
     sequence_by_event: dict[str, int] = {
-        str(event["event_id"]): int(event["event_sequence"]) for event in events
+        str(event["event_id"]): int(event["event_sequence"])
+        for event in events
+        if _require(event, "event_id", "event_sequence")
     }
     acked_sequences: dict[str, set[int]] = {}
     for ack in acks:
+        if not _require(ack, "principal_id", "event_id"):
+            continue
         principal = str(ack["principal_id"])
         sequence = sequence_by_event.get(str(ack["event_id"]))
         if sequence is not None:
@@ -128,9 +142,12 @@ def compute_acked_through(
 
     ordered = sorted(sequence_by_event.values())
     cursors: list[SubscriptionCursor] = []
-    for subscription in sorted(
-        subscriptions, key=lambda row: str(row["principal_id"])
-    ):
+    usable = [
+        row
+        for row in subscriptions
+        if _require(row, "principal_id", "initial_event_sequence")
+    ]
+    for subscription in sorted(usable, key=lambda row: str(row["principal_id"])):
         principal = str(subscription["principal_id"])
         initial = int(subscription["initial_event_sequence"])
         seen = acked_sequences.get(principal, set())
@@ -165,14 +182,24 @@ def _check_ack_continuity(
     """불연속 ACK와 initial cursor 이전 ACK는 fail-loud다."""
 
     sequence_by_event = {
-        str(event["event_id"]): int(event["event_sequence"]) for event in events
+        str(event["event_id"]): int(event["event_sequence"])
+        for event in events
+        if _require(event, "event_id", "event_sequence")
     }
     initial_by_principal = {
         str(row["principal_id"]): int(row["initial_event_sequence"])
         for row in subscriptions
+        if _require(row, "principal_id", "initial_event_sequence")
     }
 
+    for row in [*events, *subscriptions, *acks]:
+        if not isinstance(row, dict):
+            result.failures.append("evidence 행이 JSON 객체가 아니다")
+
     for ack in acks:
+        if not _require(ack, "principal_id", "event_id"):
+            result.failures.append(f"ACK 행에 필수 키가 없다: {sorted(ack)}")
+            continue
         principal = str(ack["principal_id"])
         sequence = sequence_by_event.get(str(ack["event_id"]))
         if sequence is None:
@@ -216,9 +243,13 @@ def _check_ack_event_hash(
     """
 
     hash_by_event = {
-        str(event["event_id"]): str(event["event_sha256"]) for event in events
+        str(event["event_id"]): str(event["event_sha256"])
+        for event in events
+        if _require(event, "event_id", "event_sha256")
     }
     for ack in acks:
+        if not _require(ack, "event_id"):
+            continue
         event_id = str(ack["event_id"])
         expected = hash_by_event.get(event_id)
         if expected is None:
