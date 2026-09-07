@@ -14,7 +14,7 @@
  * 그래서 기본값은 `kept`이고, 파괴적 판정은 확인 문구를 따로 받는다.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   formatUnackedAge,
@@ -36,6 +36,27 @@ const DECISION_LABELS: Record<ManualProviderDedupDecision, string> = {
 
 /** 파괴적 판정을 실행하려면 이 문구를 그대로 입력해야 한다. */
 const DESTRUCTIVE_CONFIRMATION = "폐기를 확인합니다";
+
+const MINUTE_MS = 60_000;
+
+/**
+ * 분 단위로 흐르는 시계.
+ *
+ * `Date.now()`를 렌더 중에 부르면 불순 호출이고, effect에서 state로 넣는 것도
+ * 금지돼 있다(`react-hooks/set-state-in-effect`). 값을 분 경계로 양자화해
+ * snapshot을 안정시킨다 — 그래야 `useSyncExternalStore`가 매 렌더 재구독하지 않는다.
+ * SSR snapshot은 `0`이고, 호출부는 그것을 "아직 모른다"로 읽는다.
+ */
+function useMinuteClock(): number {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const timer = setInterval(onStoreChange, MINUTE_MS);
+      return () => clearInterval(timer);
+    },
+    () => Math.floor(Date.now() / MINUTE_MS) * MINUTE_MS,
+    () => 0,
+  );
+}
 
 export function ManualProviderDedupClient() {
   const [status, setStatus] = useState<ManualProviderDedupStatus>("pending");
@@ -126,19 +147,12 @@ function CaseDecisionPanel({
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
 
-  // `Date.now()`를 렌더 중에 부르면 불순 호출이고, 한 번 고정하면 밀린 시간이
-  // 화면에 남아 있는 동안 낡는다. effect에서 재고, 1분마다 갱신한다.
-  const [now, setNow] = useState<number | null>(null);
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
+  const now = useMinuteClock();
 
   const data = detail.data?.data;
   const subscriptions = useMemo(() => data?.subscriptions ?? [], [data]);
   const unacked = useMemo(
-    () => (now === null ? [] : unackedAges(subscriptions, now)),
+    () => (now === 0 ? [] : unackedAges(subscriptions, now)),
     [subscriptions, now],
   );
 
@@ -178,7 +192,7 @@ function CaseDecisionPanel({
 
       <section aria-label="미확인 consumer">
         <h3>미확인 consumer</h3>
-        {now === null ? (
+        {now === 0 ? (
           <p>계산 중…</p>
         ) : unacked.length === 0 ? (
           <p>밀린 consumer가 없다.</p>
