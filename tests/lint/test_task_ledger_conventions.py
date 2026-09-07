@@ -207,7 +207,9 @@ def test_active_entries_do_not_duplicate_acceptance_bodies() -> None:
     assert entries, "docs/tasks.md에서 entry를 하나도 읽지 못했다"
 
     too_long_title = [
-        f"{task}: 제목 {len(title)}자" for task, title, _ in entries if len(title) > _MAX_ENTRY_TITLE
+        f"{task}: 제목 {len(title)}자"
+        for task, title, _ in entries
+        if len(title) > _MAX_ENTRY_TITLE
     ]
     assert not too_long_title, (
         "tasks-rule.md §5: 제목 줄이 상한을 넘는다 — "
