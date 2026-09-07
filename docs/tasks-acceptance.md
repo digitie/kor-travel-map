@@ -1191,7 +1191,7 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 움직인다** — 새로 드러나는 사실은 "어느 Feature가 manual origin인가"이며 그 이상은 아니다.
 
 - [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
-  manual origin은 304의 reader로, provider는 `ST_DWithin(::geography)`로 **따로** 읽고,
+  manual origin은 304의 reader로, provider는 `ST_DWithin(f.coord_5179, …)`로 **따로** 읽고,
   ADR-016 가중치로 낸 `THRESHOLD_MANUAL` 이상 쌍을 점수와 무관하게 candidate로만
   기록한다(`classify_decision()`·`select_master()`를 부르지 않는다). detector input
   count와 blocking 사실은 case receipt에 싣고, **후보가 0건이어도** 훑은 범위를
@@ -1205,6 +1205,65 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 
 **남은 둘의 성격은 2026-09-07 초 판정 그대로다** — M05-5는 UI 구현 공백(M05-3이
 선행이었고 이제 풀렸다), M05-2는 300 baseline 정책이 바뀌기 전에는 판정할 수 없다.
+
+**2026-09-08 — M05-2 부분 충족(다섯 중 셋). 소유자 판정으로 300 baseline restore 정책부터 검토했다.**
+
+조사가 앞선 판정 둘을 뒤집었다.
+
+1. **"전부 새로 지어야 하는 코드다"는 틀렸다.** 다섯 단계는 커밋 `b2543d68` 직전에
+   거의 조문 그대로 있었고 그 커밋이 지웠다(`docker-restore-verify.sh` 416줄 → 7줄,
+   `docker-restore.sh` 442줄 → 8줄, `docs/backup-restore.md` 1020줄 → 94줄).
+2. **"정책 근거가 스크립트 두 줄이 전부다"도 틀렸다.** `docs/backup-restore.md`,
+   H46H 설계 리포트, 저널에 있고 **2026-08-26 소유자 결정**("이전 revision/기존 DB
+   restore는 release gate가 아니다")까지 남아 있다.
+
+**지배적 손실은 사고가 아니라 계획된 재구축이었다.** `pinvi-pair rebuild-pinned`가
+Map revision이 바뀔 때마다 application DB를 `dropdb --force` 후 재생성하고, `.env` 값
+하나가 바뀌어도 그 경로를 탄다. 그런데 manual-feature writer는 2026-09-05T20:27:59Z에
+prod에서 켜졌고, **그 evidence를 담은 backup이 n150에서 한 번도 만들어진 적이 없었다.**
+실측 당시 유일한 `map_application` 백업은 `0232_tvn37d_notice_empty_range` — 300
+baseline보다 **앞선 세대**였다.
+
+**restore를 켜도 이 손실은 막히지 않는다** — rebuild lifecycle 문제이지 restore 문제가
+아니다. 그래서 evidence를 담는 것(A)이 선행이다.
+
+| 조문 요구 | 상태 | 근거 |
+|---|---|---|
+| ownership/ACL repair | **닫힘(C)** | 리허설이 소유권을 벗기지 않고 복원하고, 복원본 카탈로그가 운영 DB와 바이트 단위로 같음을 실측했다(Manager #334) |
+| catalog preflight | **닫힘(C)** | 같은 카탈로그 지문이 relation·routine·schema의 소유자·ACL·`prosecdef`·extension을 덮는다 |
+| evidence root 재계산 | **닫힘(A+B)** | 열 relation을 하나의 스냅숏에서 canonical JSONL로 뽑고(#1194), manifest의 행 수·SHA-256과 대조한다 |
+| 불연속 ack·event/hash 불일치 fail-loud | **닫힘(B)** | 다섯 종을 실패로 보고한다 |
+| live lease holder/expiry 무효화 | **열림** | 아래 참조 |
+| 연속 prefix에서 `acked_through` 재구축 | **열림** | 아래 참조 |
+
+**앞선 판정 초안에서 이 항목을 `[x]`로 적었다가 되돌렸다. 조문을 다시 읽으니 내
+근거가 두 요구를 비껴갔다.**
+
+초안은 "`lease`를 evidence root에 담지 않으므로 fencing token이 되살아날 자리가
+없다"고 적었다. 그것은 **번들에 대해서만** 참이다. `pg_dump`는 스키마 전체를 담으므로
+**복원된 DB에는 `ops.feature_reference_reconciliation_leases`가 그대로 살아 돌아온다** —
+dump 시점의 `worker_id`·`lease_epoch`·`lease_expires_at`을 달고. 조문이 말하는
+"live lease holder/expiry 무효화"는 바로 그 행을 가리키지 번들을 가리키지 않는다.
+무효화하지 않으면 복원 직후 죽은 worker의 fencing token이 유효해 holder가 둘이 된다.
+
+`acked_through_sequence`도 같은 행에 있다(`leases`의 컬럼이지 `subscriptions`의 것이
+아니다). B단계는 그 값을 Python으로 **계산**하지만 복원된 DB에 **쓰지 않는다.** 조문은
+"재구축"을 요구한다.
+
+즉 남은 둘은 과결박이 아니라 **진짜 안전 요구**다 — split-brain과 cursor 후퇴를 막는다.
+조문을 완화할 일이 아니라 D단계로 닫을 일이다(`T-VN-M05-2-RESTORE-REPAIR`).
+그때까지 이 항목은 열려 있다.
+
+**실행이 아니면 못 찾았을 결함 셋**(전부 C단계에서, n150 실측으로):
+`--no-owner --no-privileges`가 질문 자체를 불가능하게 하고 있었고, `search_path`
+미고정으로 PostGIS 함수 495건이 거짓 양성이었으며, ACL 미정규화로 1건이 더 남았다.
+거짓 양성은 진짜 drift를 덮으므로 없는 것보다 나쁘다.
+
+**주장하지 않는 것.** 이 검증은 artifact 무결성과 복원된 카탈로그 정합까지다. 복원된
+DB의 mutable lease 행, RustFS 실물, evidence root 밖 relation, 그리고 **rebuild 경계를
+넘는 데이터 연속성**은 다루지 않는다 — 그 연속성은 이 절이 아니라 backup 주기화(`T-VN-H43`, 소유자 지시로 보류)와
+off-box 사본(`T-VN-H49-OFFBOX`)이 소유한다. restore/swap은 여전히 닫혀 있고 이 작업이
+그것을 열지 않는다.
 
 ## T-VN-M05-ACTIVATION
 
