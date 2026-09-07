@@ -23,6 +23,7 @@ from kortravelmap.infra.manual_provider_dedup_repo import (
 )
 
 from .test_tvn_m05_manual_provider_dedup import (
+    _open_command,
     _runtime_engine,
     _seed_manual_provider_pair,
 )
@@ -47,19 +48,12 @@ async def _resolve_case(
     (`ck_manual_provider_dedup_resolutions_causation`)가 요구하는 모양은 지킨다.
     """
 
+    command_id = await _open_command(
+        engine,
+        actor=f"admin:m05-fence-{uuid4().hex[:8]}",
+        operation="admin.manual-provider-dedup.resolve-v1",
+    )
     async with engine.begin() as connection:
-        command_id = int(
-            await connection.scalar(
-                text(
-                    "INSERT INTO ops.domain_commands (actor, operation) "
-                    "VALUES (:actor, :operation) RETURNING command_id"
-                ),
-                {
-                    "actor": f"admin:m05-fence-{uuid4().hex[:8]}",
-                    "operation": "admin.manual-provider-dedup.resolve-v1",
-                },
-            )
-        )
         await connection.execute(
             text(
                 "INSERT INTO ops.manual_provider_dedup_resolutions "
