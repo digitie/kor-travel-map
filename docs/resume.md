@@ -16,15 +16,38 @@
 
 ### 다음 한 작업
 
-**`T-VN-PAIR-V2`는 2026-09-07에 §1~§7 전부 닫혔다.** 다음 한 작업은 `docs/tasks.md`
-상단 열린 항목 인덱스에서 고른다.
+**남은 것은 대부분 엔지니어링이 아니라 소유자 판정이다.** 2026-09-07 전수 조사(8축
+병렬 + 판정마다 반증)가 열린 15항목을 실측했고, 원장 서술과 실제가 다른 곳 55건을
+찾았다. 정정은 `docs/tasks-acceptance.md` 각 절의 "2026-09-07 전수 조사" 블록에 있다.
 
-PAIR-V2가 남긴 것: Map 문서 한 줄이 PinVi 커밋 → 새 pinset → 71분 rebuild를 부르던
-연쇄가 끊겼다(2026-09-01 이후 12건 중 10건은 상류 OpenAPI가 바이트 동일했다).
-실측·적대 리뷰 2라운드·변이 검증표는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
+**지금 바로 착수 가능한 것 — 셋뿐이다.**
 
-자세한 경위는 `docs/journal.md` 2026-09-07 엔트리와 `docs/tasks-acceptance.md`
-§T-VN-PAIR-V2가 갖는다.
+| 항목 | 남은 일 | 비용 |
+|---|---|---|
+| `T-VN-H49-GEO-DAGSTER` | 복원 리허설 1회 + 기록 | `ktdctl db-backup rehearse-restore geo_dagster` |
+| `T-VN-H49-CONCIERGE` | 〃 | 〃 (`concierge`) |
+| `T-VN-H49-PINVI` | 〃 | 〃 (`pinvi`) |
+
+cron 시각(03:15/03:30/03:55 UTC)은 `_role_lock` 충돌 때문에 피한다. 기록 위치는
+아래 판정 (5)에 걸려 있다.
+
+**소유자 판정을 기다리는 것 — 여섯.**
+
+1. `T-VN-M05-ACTIVATION` — 승격 근거로 삼을 실행(e2e-02 / e2e-03 / 현 Manager에서 재실행).
+   승격은 문서가 아니라 PinVi 서명 receipt 발급이다.
+2. `T-FE-MOCK-FLAKE` — admin 자격증명으로 돈 D1 스모크가 "승인된 **읽기 전용**
+   자격증명" 요건을 갚는가. 갚지 않으면 그 자격증명은 소유자만 줄 수 있다.
+3. `T-VN-M02` — purge 정책과 backup/restore 소유권. (선행: 미병합 브랜치
+   `feat/m01-m02-live-acceptance` 회수 — **유실 위험**이라 판정과 무관하게 먼저 한다.)
+4. `T-VN-H34` — 범위를 저장소 CSV 수준으로 재정의할 것인가. prod 데이터를 전제한
+   조건은 **pinned rebuild가 매번 DB를 새로 만들어** 구조적으로 닫히지 않는다.
+5. `T-VN-H49`(부모)·`-OFFBOX` — 고착 `load_jobs` 해소를 위한 prod 쓰기 승인, off-box
+   목적지 호스트·계정·ssh 키, 그리고 복원 리허설 기록을 어느 문서에 남길지.
+6. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가(새 선행 항목 신설
+   vs removal manifest 개정). 이 백로그에서 가장 큰 축이다.
+
+**보류/제외 셋**(잔여로 세지 않음): `T-VN-41C`·`T-VN-H43`·`T-101`.
+**외부 추적 하나**: `GM-17` — 소유자 지시로 가장 마지막.
 
 ## 2026-09-06 — D2 통과, receipt 승격
 
