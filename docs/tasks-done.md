@@ -10,6 +10,27 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-08 — M05 활성화 승격
+
+- [x] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
+  (**2026-09-08 완료**). 승격 정의를 "문서 행위"에서 "Manager `--verify-leaf`가 해시
+  사슬과 살아 있는 pin registry를 다시 계산해 대조한다"로 바꾸고, 그 명령이 `ktdctl`
+  설치본에서 두 승격 후보 leaf에 대해 exit 0을 내는 것을 실측했다(P1). 전문 적대 리뷰가
+  **5라운드** 돌아 5차에서 두 건 모두 GO였다(P2). 상세는 `docs/tasks-acceptance.md`
+  §T-VN-M05-ACTIVATION — 정의표 15축, 프로그램 출력 원문, 재현 절차, 승격 근거의 수명.
+
+  **매 라운드 실제 결함이 나왔고 검증기는 8축 → 15축이 됐다.** 1·2차는 "승격이 문서
+  행위였다"와 "검증기가 정의의 근거를 확인하지 않았다"(leaf 소유자·권한을 한 번도 안 봐
+  아무 디렉터리나 받았고, 대조값이 전부 world-readable이었으며, M04를 해시만 하고 열지
+  않았다)를 잡았다. 3·4·5차가 잡은 것 중 **둘은 앞 라운드 수정이 만든 회귀**였고
+  **셋은 픽스처가 결함을 가린 것**이었다.
+
+  **잔여를 이름 붙여 넘겼다**: `T-VN-M05-VERIFY-RECEIPT`(검증이 durable 기록을 남기지
+  않아 승격 근거가 pin 회전·history 링·identity 소각 중 무엇에도 재현 불가가 된다),
+  `T-VN-M05-ONESHOT-CONSUME`(성공이 execution identity를 소비하지 않는다).
+  위조 문턱은 "root"까지이며 그 이상을 주장하지 않는다.
+
+
 ## 2026-09-07 — M04와 H49 자식 셋
 
 - [x] T-VN-M04 — 범용 Feature 요청 큐 (**2026-09-07 완료**). 위임("41C가 완료한다")이
