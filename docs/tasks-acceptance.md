@@ -2205,3 +2205,37 @@ leaf가 `--verify-leaf`의 L8("terminal 차단 아님")에서 실패한다. 승�
    거부**한다. 복구 경로는 rebind 또는 회전이며 그 사실을 진단 메시지가 말한다.
 3. `--verify-leaf`의 L8이 소비된 identity의 leaf를 계속 통과시킨다.
 4. 변이 검증: 성공 시 소비 기록을 지우면 red, 소비를 소각으로 취급하면 L8 게이트가 red.
+## T-VN-M05-RELITIGATION
+
+**2026-09-07 신설.** #1189가 M05-3 탐지기를 붙이면서 드러난 것이다 — 계약 자체의
+성질이지 탐지기의 결함이 아니다.
+
+`feature.record_manual_provider_dedup_candidate`의 멱등성은 `evidence_fingerprint`가
+같고 **그 case가 아직 미해결일 때만** 성립한다(baseline `schema.sql` 8180~8186행:
+`LEFT JOIN ... resolutions` + `WHERE resolution.case_id IS NULL`). 그래서 admin이
+`kept`로 판정한 쌍을 탐지기가 다시 보면 지문이 같아도 **새 case가 만들어진다.**
+그 상태로 탐지를 주기화하면 admin 큐가 쳇바퀴가 되므로 #1189의 job에는 스케줄을
+달지 않았다.
+
+**어느 방향으로도 틀릴 수 있다는 것이 이 항목의 어려운 점이다.**
+너무 세게 막으면 증거가 **실제로 바뀌었는데도** 새 후보가 안 올라오는 영구 침묵이
+되고, 너무 약하게 막으면 무관한 필드 patch가 `row_revision`을 올릴 때마다 supersede
+폭풍이 난다. 둘 다 조용히 실패한다.
+
+- [ ] **R1 — 판정된 쌍이 같은 증거로 다시 올라오지 않는다.**
+  admin이 `kept`/`merged`/`manual_retired`로 판정한 case와 **지문이 같은** 후보는
+  새 case를 만들지 않는다. 억눌렸다는 사실은 삼키지 않고 receipt나 실행 요약에 남는다.
+- [ ] **R2 — 증거가 바뀌면 다시 올라온다.**
+  Feature의 score-facing 값(`kind`/`name`/`category`/`lon`/`lat`)이나 provider의
+  current source head가 바뀌면 지문이 달라져 새 후보가 된다. R1의 차단이 이것을
+  덮지 않는다. **두 방향 모두 게이트가 있어야 한다** — 한 방향만 재면 반대 방향
+  결함이 조용히 통과한다.
+- [ ] **R3 — 무관한 변경이 재발행을 부르지 않는다.**
+  score와 무관한 필드 patch로 `row_revision`만 올라간 경우 새 case가 생기지 않는다.
+- [ ] **R4 — 차단이 detector 권한을 넓히지 않는다.**
+  탐지 로그인은 `ops.manual_provider_dedup_cases`를 읽을 수 없다(`_OPS_TABLE_PRIVILEGES`가
+  빈 튜플). 그러므로 차단은 프로시저 안에서 일어나야 하고, detector에게 case 조회
+  권한을 주는 방식은 채택하지 않는다.
+- [ ] **R5 — 차단이 켜진 뒤에야 스케줄을 단다.**
+  R1~R4가 충족되면 #1189의 `manual_provider_dedup_detection` job에 스케줄을 붙이고,
+  그때 job description의 "스케줄 없음" 문구를 함께 걷는다.
