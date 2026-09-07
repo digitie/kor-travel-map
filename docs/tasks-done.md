@@ -19,10 +19,22 @@
   **다섯째는 이 조사가 만들었다** — reject가 라우터·프로시저·ACL·OpenAPI에 전부 있는데
   호출하는 테스트가 없었다. 통합 테스트로 상태 전이·사유 보존·Feature 부재를 결박했고
   CI `pytest integration (PostGIS)`가 통과했다(#1185).
-- [x] T-VN-H49-GEO-DAGSTER · T-VN-H49-CONCIERGE · T-VN-H49-PINVI — standalone backup
-  검증 (**2026-09-07 완료**). 셋 다 복원 리허설 `verified: true`. 기록은 Manager
-  `docs/docker-management.md`. **그 리허설은 한 번도 성공한 적이 없었다** — `docker cp`
-  소유권 보존 대 컨테이너 postgres uid 불일치(Manager #324로 수정).
+세 자식은 한 원인으로 같이 막혀 있었다. `rehearse-restore`는 **한 번도 성공한 적이
+없었다** — `docker cp`가 호스트 소유권(`root:root 0600`)을 보존하는데 `pg_restore`는
+`--user postgres`(uid 999)로 돌아 덤프를 읽지 못했다. Manager #324가 `docker exec --user
+root chown` 인계를 넣어 셋 다 처음으로 통과했다. 기록 위치는 Manager
+`docs/docker-management.md` §복원 리허설 실측 기록.
+
+- [x] T-VN-H49-PINVI — PinVi standalone backup 복원 검증 (**2026-09-07 완료**).
+  복원 리허설 `verified: true`, 덤프 12.1MB. 셋 중 가장 작아 소유권 인계 수정을 처음
+  실측한 대상이었다.
+- [x] T-VN-H49-GEO-DAGSTER — geo Dagster standalone backup 복원 검증 (**2026-09-07 완료**).
+  복원 리허설 `verified: true`, 덤프 59.8MB. 이 자식은 백업 자체가 12일간 멈춰 있었고
+  원인은 "막힌 행"이 아니라 **디스크 고갈**이었다(2026-08-26 `insufficient disk space`
+  7연속, 44.1GB 필요 대비 29.8~36GB 여유). 98GB 회수 후 새 job이 정상 진입했다.
+- [x] T-VN-H49-CONCIERGE — concierge standalone backup 복원 검증 (**2026-09-07 완료**).
+  복원 리허설 `verified: true`, 덤프 78.9MB. 셋 중 가장 크며 같은 소유권 인계 수정으로
+  통과했다.
 
 
 ## 2026-09-07 — 소유자 판정으로 닫은 둘
