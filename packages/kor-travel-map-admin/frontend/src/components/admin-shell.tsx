@@ -64,6 +64,11 @@ const NAV_GROUPS = [
         icon: GitCompareArrowsIcon,
       },
       {
+        href: "/admin/manual-provider-dedup",
+        label: "수동/provider 판정",
+        icon: GitCompareArrowsIcon,
+      },
+      {
         href: "/admin/features/enrichment-reviews",
         label: "보강 검토",
         icon: LinkIcon,

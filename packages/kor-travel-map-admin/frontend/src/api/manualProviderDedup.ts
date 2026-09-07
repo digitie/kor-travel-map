@@ -104,8 +104,11 @@ export function useManualProviderDedupCase(caseId: string | null) {
 /**
  * 판정 제출.
  *
- * 멱등 slot을 **case_id로** 고정한다 — 같은 case에 대한 재제출이 새 판정을
- * 만들지 않아야 한다. submission fingerprint가 달라지면
+ * 멱등 slot 이름은 **`admin.` 접두를 지킨다.** 그 접두로 slot이 청소되므로 빠뜨리면
+ * 이 slot만 로그아웃 뒤에도 남는다(적대 리뷰가 잡았다 — 앱 전체에서 이것 하나만
+ * 어긋나 있었다).
+ *
+ * slot을 **case_id로** 고정한다 — 같은 case에 대한 재제출이 새 판정을 만들지 않아야 한다. submission fingerprint가 달라지면
  * `DomainIdempotencySubmissionMismatchError`가 나므로, 사용자가 reason이나
  * decision을 바꾼 뒤 다시 누르면 그것이 **다른 명령**임이 드러난다.
  */
@@ -114,7 +117,7 @@ export function useSubmitManualProviderDedupDecision(caseId: string) {
   return useMutation({
     mutationFn: (submission: ManualProviderDedupDecisionInput) =>
       withDomainIdempotencySubmission(
-        domainCommandSlot("manual-provider-dedup-decision", caseId),
+        domainCommandSlot("admin.manual-provider-dedup.decide", caseId),
         submission,
         (payload, idempotencyKey) =>
           postJson<ManualProviderDedupDecisionResponse>(
