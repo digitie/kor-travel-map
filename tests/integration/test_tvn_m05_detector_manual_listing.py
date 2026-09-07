@@ -148,10 +148,13 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
             )
             is True
         )
+        # asyncpg의 extended protocol은 한 execute에 두 문장을 못 넣는다(42601).
+        await connection.execute(
+            text("SET LOCAL ROLE ktm_manual_provider_dedup_procedure_owner")
+        )
         with pytest.raises(DBAPIError) as by_body:
             await connection.execute(
                 text(
-                    "SET LOCAL ROLE ktm_manual_provider_dedup_procedure_owner; "
                     "SELECT feature_id FROM "
                     "feature.list_manual_provider_dedup_detector_manuals(NULL, 10)"
                 )
@@ -176,7 +179,7 @@ async def test_the_listing_cannot_write_because_the_engine_forbids_it(
     async with migrated_engine.connect() as connection:
         volatility = await connection.scalar(
             text(
-                "SELECT provolatile FROM pg_catalog.pg_proc "
+                "SELECT provolatile::text FROM pg_catalog.pg_proc "
                 f"WHERE oid = '{_LISTING}'::regprocedure"
             )
         )
@@ -307,9 +310,8 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
         seen: list[str] = []
         after: str | None = None
         for _ in range(50):
-            page = await manual_origin_features(
-                AsyncSession(dagster), after=after, limit=1
-            )
+            async with AsyncSession(dagster) as session:
+                page = await manual_origin_features(session, after=after, limit=1)
             if not page:
                 break
             seen.append(page[0].feature_id)

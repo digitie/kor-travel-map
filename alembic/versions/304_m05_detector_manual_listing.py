@@ -81,8 +81,11 @@ BEGIN
         RAISE EXCEPTION 'manual/provider dedup detector page size is outside its canonical range'
             USING ERRCODE = '22023', CONSTRAINT = 'ck_m05_detector_manuals_limit';
     END IF;
+    -- `feature.features`의 세 컬럼은 `character varying`이다. RETURNS TABLE이
+    -- `text`이므로 명시 캐스트가 없으면 42804(structure of query does not match
+    -- function result type)로 죽는다 — n150 실측으로 잡았다.
     RETURN QUERY
-    SELECT f.feature_id, f.name, f.category,
+    SELECT f.feature_id::text, f.name::text, f.category::text,
            ST_X(f.coord) AS lon, ST_Y(f.coord) AS lat
     FROM feature.features AS f
     JOIN feature.feature_creation_origins AS o ON o.feature_id = f.feature_uuid
