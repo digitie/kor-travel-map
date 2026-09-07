@@ -885,6 +885,10 @@ class ManualProviderDedupCaseRow(Base):
             name=conv("ck_manual_provider_dedup_cases_hashes"),
         ),
         CheckConstraint(
+            "decision_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_manual_provider_dedup_cases_decision_fingerprint"),
+        ),
+        CheckConstraint(
             "jsonb_typeof(manual_feature_snapshot) = 'object' "
             "AND jsonb_typeof(provider_feature_snapshot) = 'object' "
             "AND jsonb_typeof(detector_causation) = 'object'",
@@ -954,6 +958,14 @@ class ManualProviderDedupCaseRow(Base):
             "provider_feature_id",
             text("created_at DESC"),
         ),
+        # 재심 차단 조회가 이 세 값으로 들어간다(migration 305). 없으면 case가
+        # 쌓일수록 후보 하나마다 전체 스캔이 된다.
+        Index(
+            "idx_manual_provider_dedup_cases_decision_fence",
+            "manual_feature_uuid",
+            "provider_feature_uuid",
+            "decision_fingerprint",
+        ),
         {"schema": "ops"},
     )
 
@@ -986,6 +998,10 @@ class ManualProviderDedupCaseRow(Base):
     total_score: Mapped[float] = mapped_column(Numeric(9, 8), nullable=False)
     distance_meters: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
     evidence_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    #: 재심 차단 키(migration 305). `evidence_fingerprint`와 **다르다** — 그 지문은
+    #: `row_revision`과 source head 관측 시각을 포함해 score와 무관한 patch 하나에도
+    #: 달라지므로 차단에 쓸 수 없다. 여기에는 판정을 좌우하는 것만 들어간다.
+    decision_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     detector_causation: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
