@@ -26,7 +26,6 @@ import {
   type ManualProviderDedupDecision,
   type ManualProviderDedupStatus,
 } from "@/api/manualProviderDedup";
-import { AdminShell } from "@/components/admin-shell";
 
 const DECISION_LABELS: Record<ManualProviderDedupDecision, string> = {
   kept: "유지 — 중복이 아니다",
@@ -89,12 +88,11 @@ export function ManualProviderDedupClient() {
     setSelectedCaseId(null);
   };
 
+  // `AdminShell`은 **page**가 두른다. 여기서 두르면 `usePathname`이 붙어 이 화면의
+  // 안전장치를 재는 컴포넌트 테스트가 라우터 없이는 돌지 않는다 — 셸은 라우트의
+  // 관심사이고, 이 컴포넌트의 관심사는 "무엇을 막는가"다.
   return (
-    <AdminShell
-      description="탐지기가 올린 수동/provider 중복 후보를 판정합니다. 자동으로 병합되지 않습니다."
-      title="수동/provider 중복 판정"
-    >
-      <div>
+    <div>
         <label>
           상태
           <select
@@ -168,9 +166,8 @@ export function ManualProviderDedupClient() {
             caseId={selectedCaseId}
             onResolved={() => setSelectedCaseId(null)}
           />
-        ) : null}
-      </div>
-    </AdminShell>
+      ) : null}
+    </div>
   );
 }
 
