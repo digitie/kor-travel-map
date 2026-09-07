@@ -25,9 +25,10 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 - [~] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
 
-  격리 본문이 현 pinset `b229446a`(Manager `0406b14d`)에서 통과했고 m04·m05
-  attestation이 그 실행의 산출물로 남아 있다. 승격은 문서 행위가 아니라 PinVi의
-  서명 activation receipt 발급·배포이며, 그 실행 여부가 소유자 판정이다.
+  승격 정의를 2026-09-07 판정으로 바꿨다 — 문서 행위가 아니라 Manager `--verify-leaf`가
+  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 남은 것은 그 명령의
+  exit 0 기록과, 새 정의에 대한 적대 리뷰 두 건 GO다.
+
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 
@@ -36,18 +37,13 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   시점까지 미룬다.
 
 
-- [ ] T-VN-M02 — **Feature origin/provenance 보존·불변성 live acceptance**
+- [ ] T-VN-M02 — **Feature origin/provenance live acceptance 실행**
 
-  spec이 **미병합 브랜치**(`feat/m01-m02-live-acceptance`)에만 있어 유실 위험이 있다 —
-  회수가 먼저다. backup/restore 축은 2026-09-07 소유자 판정으로 이 절에서 삭제했다
-  (소유는 `T-VN-H49` 계열). 남은 purge 정책은 소유자 판정 대기다.
+  구현 축은 전부 충족이고(2026-09-07 4축 실측) purge 정책은 소유자 판정으로
+  `T-VN-H49` 계열로 이관했다. 남은 것은 회수한 `admin-manual-feature-create.live.spec.ts`를
+  격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
 
 
-- [~] T-VN-M04 — **범용 Feature 요청 큐**
-
-  구현은 병합됐다(#1029, PinVi #458·#465). 남은 paired request→approval receipt를
-  `T-VN-41C`에 위임한다고 적혀 있었으나 **받는 절이 그 범위를 수락한 적이 없다**
-  (dangling pointer) — 위임을 걷고 자기 해제 조건을 갖는 것이 선행이다.
 
 - [~] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
 
@@ -61,30 +57,33 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   수행하지 않는다(n150은 실 production이 아니며 손상 시 재적재가 정책).
   off-box 자동화의 현 소유자는 `T-VN-H49-OFFBOX`다.
 
-- [ ] T-VN-H49 — **Geo application DB backup/retention 운영 증거**
+- [ ] T-VN-H49 — **Geo application DB backup/retention 운영 증거 + hard purge 정책**
 
-  `scheduled_backup`·retention janitor가 최근 성공과 bounded retention으로
-  수렴하는지 보인다. 고착된 queued `load_jobs` 행 해소에 prod DB 쓰기 또는 geo
-  admin API 호출이 필요해 소유자 승인이 선행한다.
+  `scheduled_backup`·retention janitor의 수렴을 보인다. 2026-09-07 판정으로 manual
+  Feature hard purge 정책도 이 계열이 수납한다 — fence의 무조건 거부가 잠정이라고
+  코드가 적고 그 전제인 restore proof를 이 축이 소유하기 때문이다.
 
-- [ ] T-VN-H49-GEO-DAGSTER — **geo_dagster metadata DB standalone backup 검증**
 
-  잔여는 복원 리허설 1회와 그 기록이다. `ktdctl db-backup rehearse-restore
-  geo_dagster`로 즉시 착수 가능하다.
 
-- [ ] T-VN-H49-CONCIERGE — **Concierge standalone backup 검증**
 
-  잔여는 복원 리허설 1회와 그 기록이다. 즉시 착수 가능하다.
-
-- [ ] T-VN-H49-PINVI — **PinVi standalone backup 검증**
-
-  잔여는 복원 리허설 1회와 그 기록이다. 즉시 착수 가능하다.
 
 - [ ] T-VN-H49-OFFBOX — **off-box 복제 자동화 결선과 backup 문서 현행화**
 
   코드가 아니라 운영 결선이 남았다 — 목적지 호스트·계정·ssh 키가 소유자/운영자
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
+
+- [ ] T-VN-M05-ONESHOT-CONSUME — **격리 acceptance 성공이 execution identity를 소비하게 한다**
+
+  one-shot은 본문 **실패에만** 강제된다 — 성공 분기에 `pin block-execution`이 없어 같은
+  identity에서 본문을 두 번 돌릴 수 있다(2026-09-07 실측). 성공에 무조건 차단을 걸면
+  방금 성공한 leaf가 `--verify-leaf` L8에서 실패하므로 소각과 소비를 구분해야 한다.
+
+- [ ] T-VN-M02-TRUNCATE-FENCE — **hard-purge fence의 TRUNCATE 우회**
+
+  fence는 `feature.features`의 BEFORE DELETE row trigger인데 BEFORE TRUNCATE 문
+  트리거가 없어 `TRUNCATE ... CASCADE`가 통째로 우회한다(2026-09-07 실측).
+  통합 테스트 24곳이 그 경로에 의존해 무비용이 아니다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 

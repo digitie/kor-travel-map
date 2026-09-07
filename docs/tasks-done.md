@@ -10,6 +10,21 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-07 — M04와 H49 자식 셋
+
+- [x] T-VN-M04 — 범용 Feature 요청 큐 (**2026-09-07 완료**). 위임("41C가 완료한다")이
+  **dangling pointer**였다 — §T-VN-41C 어디에도 M04가 없고 41C는 보류라 잔여도 세지
+  않는다. 위임을 걷고 판정 가능한 조문 다섯을 세웠다. 넷은 이미 산출된 증거로 충족이고
+  (`/root/pairv2-e2e-03`의 두 서명이 같은 `feature_request_id`로 서로를 가리킨다),
+  **다섯째는 이 조사가 만들었다** — reject가 라우터·프로시저·ACL·OpenAPI에 전부 있는데
+  호출하는 테스트가 없었다. 통합 테스트로 상태 전이·사유 보존·Feature 부재를 결박했고
+  CI `pytest integration (PostGIS)`가 통과했다(#1185).
+- [x] T-VN-H49-GEO-DAGSTER · T-VN-H49-CONCIERGE · T-VN-H49-PINVI — standalone backup
+  검증 (**2026-09-07 완료**). 셋 다 복원 리허설 `verified: true`. 기록은 Manager
+  `docs/docker-management.md`. **그 리허설은 한 번도 성공한 적이 없었다** — `docker cp`
+  소유권 보존 대 컨테이너 postgres uid 불일치(Manager #324로 수정).
+
+
 ## 2026-09-07 — 소유자 판정으로 닫은 둘
 
 - [x] T-FE-MOCK-FLAKE — admin UI logs acceptance (**2026-09-07 완료**). mocked 절반은
