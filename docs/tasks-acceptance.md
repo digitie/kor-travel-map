@@ -1156,6 +1156,42 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
 
 **착수 순서**: M05-3 → M05-5 → (정책이 바뀌면) M05-2.
 
+**2026-09-07 — M05-3 충족. 무엇을 고쳤나.**
+
+M05-3이 미충족이던 이유는 "구현을 안 했다"가 아니라 **구현할 수 없었다**였다.
+detector executor가 EXECUTE할 수 있는 routine은
+`record_manual_provider_dedup_candidate` 하나뿐인데 그것은 *이미 아는* 쌍을 기록한다.
+쌍을 찾으려면 manual origin을 증명하는 두 표를 읽어야 하는데, `runtime_privileges.py`의
+`_MANUAL_FEATURE_TABLE_ACL`이 `ktm_feature_dagster_runtime`을 **이름으로** REVOKE한다.
+
+| relation | dagster 읽기 | 근거 |
+|---|---|---|
+| `feature.features` | 가능 | `_CORE_FEATURE_GRANTS` |
+| `provider_sync.*` 넷 | 가능 | `_ORDINARY_SCHEMA_PRIVILEGES['provider_sync']` |
+| `feature_creation_origins` | 불가 | `_MANUAL_FEATURE_TABLE_ACL` |
+| `manual_feature_identity_claims` | 불가 | 동일 |
+
+migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detector_manuals`를
+추가한다(STABLE SECURITY DEFINER, EXECUTE는 detector executor만). 판정만 돌려주고
+생성 command·principal·actor·시각은 돌려주지 않는다. **ADR-090 경계는 딱 그만큼
+움직인다** — 새로 드러나는 사실은 "어느 Feature가 manual origin인가"이며 그 이상은 아니다.
+
+- [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
+  manual origin은 304의 reader로, provider는 `ST_DWithin(::geography)`로 **따로** 읽고,
+  ADR-016 가중치로 낸 `THRESHOLD_MANUAL` 이상 쌍을 점수와 무관하게 candidate로만
+  기록한다(`classify_decision()`·`select_master()`를 부르지 않는다). detector input
+  count와 blocking 사실은 case receipt에 싣고, **후보가 0건이어도** 훑은 범위를
+  `DetectionOutcome`으로 돌려준다. detector relation 직접 INSERT/UPDATE 권한은
+  종전대로 executor procedure만 갖는다.
+
+**아직 남은 것, 숨기지 않는다.** 탐지 job에는 **스케줄이 없다.** 프로시저의 멱등성이
+미해결 case에만 성립해 admin이 `kept`로 판정한 쌍이 다음 실행에서 새 case가 된다.
+차단 없이 주기화하면 admin 큐가 쳇바퀴가 되므로 `T-VN-M05-RELITIGATION`이 그것을
+소유한다. 그전까지 운영자가 명시 실행한다.
+
+**남은 둘의 성격은 2026-09-07 초 판정 그대로다** — M05-5는 UI 구현 공백(M05-3이
+선행이었고 이제 풀렸다), M05-2는 300 baseline 정책이 바뀌기 전에는 판정할 수 없다.
+
 ## T-VN-M05-ACTIVATION
 
 > 이 task는 `6d671ef1` 평면화 **이후**에 만들어져 복원할 원문이 없다. 아래는

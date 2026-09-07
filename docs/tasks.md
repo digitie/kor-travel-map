@@ -26,8 +26,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [~] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
 
   승격 정의를 2026-09-07 판정으로 바꿨다 — 문서 행위가 아니라 Manager `--verify-leaf`가
-  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 남은 것은 그 명령의
-  exit 0 기록과, 새 정의에 대한 적대 리뷰 두 건 GO다.
+  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 그 exit 0을
+  2026-09-07 실측했다(Manager `51b39b26` 배포 후 `pairv2-e2e-02`·`-03` 둘 다 L1~L8 통과,
+  `is_installed=False`). 남은 것은 새 정의에 대한 적대 리뷰 두 건 GO다.
 
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
@@ -47,8 +48,15 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 - [~] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
 
-  판정 계약과 그 결과의 paired 전파가 대상이다. acceptance 절에 판정 가능한 해제
-  조건 문단이 없어 ADR-097 §후속 4항목을 옮기는 것이 선행이다.
+  조문 M05-1~M05-7을 세웠고 2026-09-07 실측으로 넷이 충족이다. M05-3(후보 발행)은
+  migration 304의 detector reader로 채웠다(#1189). 남은 것은 M05-5(admin 판정 UI)와,
+  300 baseline 정책이 바뀌어야 판정 가능한 M05-2다.
+
+- [ ] T-VN-M05-RELITIGATION — **admin이 판정한 쌍이 다시 올라오지 않게 한다**
+
+  프로시저의 멱등성은 evidence 지문이 같고 **그 case가 미해결**일 때만 성립해, `kept`로
+  판정한 쌍이 다음 탐지에서 새 case가 된다. 그래서 #1189의 탐지 job에는 스케줄을 달지
+  않았다 — 차단 없이 주기화하면 admin 큐가 쳇바퀴가 된다. 차단은 프로시저 변경이 필요하다.
 
 
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
