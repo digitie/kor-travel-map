@@ -247,3 +247,54 @@ async def test_the_detector_login_still_cannot_read_the_case_table(
                 )
                 is False
             ), relation
+
+async def test_a_new_provider_source_record_releases_the_fence(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """provider의 **현재 source 내용**이 바뀌면 차단이 풀린다.
+
+    이 축이 없으면 provider가 데이터를 갱신해도 판정이 영구히 굳는다 — R2가 잡는
+    "score-facing 값" 방향과 별개의 해제 경로다. 차단 지문에서 source 축을 빼는
+    변이가 이 테스트로만 빨개진다.
+    """
+
+    manual_id, _ = await _seed_and_decide(migrated_engine, index=74)
+
+    async with migrated_engine.begin() as connection:
+        entity_key = str(
+            await connection.scalar(
+                text(
+                    "SELECT link.source_entity_key FROM provider_sync.source_links AS link "
+                    "JOIN feature.features AS f ON f.feature_id = link.feature_id "
+                    "WHERE link.source_role = 'primary' "
+                    "  AND f.feature_id <> :manual_feature_id "
+                    "  AND f.name LIKE 'M05 Provider 후보 74%'"
+                ),
+                {"manual_feature_id": manual_id},
+            )
+        )
+        fresh_record = f"{entity_key}_next"
+        # 새 record를 만들고 head를 그쪽으로 옮긴다 — provider가 데이터를 갱신한 모양이다.
+        await connection.execute(
+            text(
+                "INSERT INTO provider_sync.source_records "
+                "(source_record_key, source_entity_key, raw_payload_hash, raw_data, "
+                " fetched_at, imported_at) "
+                "VALUES (:record_key, :entity_key, repeat('c', 64), CAST('{}' AS jsonb), "
+                "        clock_timestamp(), clock_timestamp())"
+            ),
+            {"record_key": fresh_record, "entity_key": entity_key},
+        )
+        await connection.execute(
+            text(
+                "UPDATE provider_sync.source_entity_heads "
+                "SET current_source_record_key = :record_key, observed_at = clock_timestamp() "
+                "WHERE source_entity_key = :entity_key"
+            ),
+            {"record_key": fresh_record, "entity_key": entity_key},
+        )
+
+    again = await _detect_once(migrated_engine, run_id=f"fence-r5-{uuid4().hex[:8]}")
+    assert (
+        await _case_id_for(migrated_engine, again.created_case_ids, manual_id) is not None
+    )
