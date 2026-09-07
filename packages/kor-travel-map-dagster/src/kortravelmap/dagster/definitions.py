@@ -26,7 +26,10 @@ from .file_registry_scan import (
 )
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
-from .manual_provider_dedup import MANUAL_PROVIDER_DEDUP_JOBS
+from .manual_provider_dedup import (
+    MANUAL_PROVIDER_DEDUP_JOBS,
+    MANUAL_PROVIDER_DEDUP_SCHEDULES,
+)
 from .mcst_features import MCST_FEATURE_ASSETS
 from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
@@ -210,6 +213,7 @@ defs = Definitions(
         *FEATURE_LOAD_SCHEDULES,
         *MAINTENANCE_SCHEDULES,
         *MOIS_SOURCE_SYNC_SCHEDULES,
+        *MANUAL_PROVIDER_DEDUP_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
     ],
     sensors=[*FEATURE_UPDATE_SENSORS, *FEATURE_OPERATION_TRACKING_SENSORS],

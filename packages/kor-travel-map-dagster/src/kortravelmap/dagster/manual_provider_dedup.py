@@ -4,13 +4,12 @@
 (2026-09-07 실측: `feature.record_manual_provider_dedup_candidate`의 프로덕션
 호출자 0건). 이 모듈이 그 호출자다.
 
-**스케줄을 달지 않는다 — 의도적이다.**
-프로시저의 멱등성은 `evidence_fingerprint`가 같고 **그 case가 아직 미해결**일
-때만 성립한다(baseline `schema.sql` 8180~8186행). 그래서 admin이 `kept`로 판정한
-쌍은 다음 실행에서 **새 case로 다시 올라온다** — 스케줄을 달면 admin 큐가
-쳇바퀴가 된다. 그 재심 차단은 프로시저 쪽 변경이 필요하고 별도 task가 소유한다
-(`T-VN-M05-RELITIGATION`). 그전까지 이 job은 운영자가 명시적으로 실행한다.
-숨기지 않고 job description에도 적는다.
+**스케줄은 재심 차단이 켜진 뒤에 붙였다(migration 305).**
+프로시저의 멱등성은 `evidence_fingerprint`가 같고 **그 case가 아직 미해결**일 때만
+성립하므로, 차단이 없던 동안에는 admin이 `kept`로 판정한 쌍이 다음 실행에서 새
+case로 다시 올라왔다 — 그 상태로 주기화하면 admin 큐가 쳇바퀴가 된다. 305의
+`decision_fingerprint` 차단이 그것을 막고, 억눌린 수는 `suppressed_case_count`로
+보고된다(`T-VN-M05-RELITIGATION` R5).
 
 **집계는 case와 무관하게 남긴다.** 후보가 0건이어도 훑은 manual 수·provider 수·
 점수 낸 쌍 수·잘림 여부를 materialization metadata로 남긴다. case에만 실으면
@@ -32,10 +31,22 @@ from kortravelmap.infra.manual_provider_dedup_repo import (
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from dagster import JobDefinition, OpExecutionContext, RetryPolicy, job, op
+from dagster import (
+    DefaultScheduleStatus,
+    JobDefinition,
+    OpExecutionContext,
+    RetryPolicy,
+    ScheduleDefinition,
+    job,
+    op,
+)
+
+from .schedule_overrides import cron_for_schedule
+from .schedules import KST_TIMEZONE
 
 __all__ = [
     "MANUAL_PROVIDER_DEDUP_JOBS",
+    "MANUAL_PROVIDER_DEDUP_SCHEDULES",
     "detect_manual_provider_dedup_candidates_op",
     "manual_provider_dedup_detection_job",
     "run_manual_provider_dedup_detection",
@@ -119,9 +130,9 @@ async def detect_manual_provider_dedup_candidates_op(
     name="manual_provider_dedup_detection",
     tags=MANUAL_PROVIDER_DEDUP_JOB_TAGS,
     description=(
-        "manual/provider dedup 후보 탐지. **스케줄 없음** — 프로시저의 멱등성이 "
-        "미해결 case에만 성립해 admin이 kept로 판정한 쌍이 다시 올라온다. "
-        "재심 차단(T-VN-M05-RELITIGATION) 전까지는 운영자가 명시적으로 실행한다."
+        "manual/provider dedup 후보 탐지. 자동 병합하지 않고 후보로만 올린다. "
+        "admin이 판정한 쌍은 migration 305의 재심 차단이 막고, 억눌린 수는 "
+        "suppressed_case_count로 보고된다."
     ),
 )
 def manual_provider_dedup_detection_job() -> None:
@@ -132,4 +143,22 @@ def manual_provider_dedup_detection_job() -> None:
 
 MANUAL_PROVIDER_DEDUP_JOBS: Final[list[JobDefinition]] = [
     manual_provider_dedup_detection_job
+]
+
+#: 하루 한 번이면 충분하다 — 후보는 provider 적재와 수동 생성이 만들고 둘 다
+#: 분 단위로 쏟아지지 않는다. 기본 상태는 `STOPPED`다(저장소의 다른 스케줄과 같다):
+#: 운영자가 켜는 행위가 곧 "이 환경에서 M05 판정을 받겠다"는 선언이다.
+MANUAL_PROVIDER_DEDUP_SCHEDULES: Final[list[ScheduleDefinition]] = [
+    ScheduleDefinition(
+        name="manual_provider_dedup_detection_daily_schedule",
+        job=manual_provider_dedup_detection_job,
+        cron_schedule=cron_for_schedule(
+            "manual_provider_dedup_detection_daily_schedule",
+            "20 4 * * *",
+        ),
+        execution_timezone=KST_TIMEZONE,
+        default_status=DefaultScheduleStatus.STOPPED,
+        tags=MANUAL_PROVIDER_DEDUP_JOB_TAGS,
+        description="manual/provider dedup 후보 탐지를 매일 04:20 KST에 실행한다.",
+    )
 ]
