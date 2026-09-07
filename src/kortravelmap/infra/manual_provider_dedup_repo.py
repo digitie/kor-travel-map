@@ -164,8 +164,8 @@ class DetectionOutcome:
     scored_pair_count: int
     created_case_ids: tuple[str, ...]
     idempotent_case_ids: tuple[str, ...]
-    suppressed_case_ids: tuple[str, ...] = ()
     incomplete_blocks: tuple[str, ...]
+    suppressed_case_ids: tuple[str, ...] = ()
     manual_scan_truncated: bool = False
     raced_pair_count: int = 0
 
