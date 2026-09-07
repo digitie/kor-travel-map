@@ -16,7 +16,16 @@
 
 ### 다음 한 작업
 
-**`T-VN-PAIR-V2` §3의 선행 — attestation의 Map revision 생산자 배선.** §1·§2는
+**`T-VN-PAIR-V2` §6 — 회전 → rebuild → 격리 M05 e2e.** §1~§4는 닫혔고 §5는 정적으로
+성립한다(Map main이 pinned에서 4커밋 앞섰는데 세 표면 blob이 바이트 동일 — v1이었다면
+71분 rebuild가 따라왔을 자리다). 남은 것은 실행 증명 하나다.
+
+**머지 순서가 강제된다**: `kor-travel-docker-manager#321` → Manager 배포 →
+`pinvi#539` → 회전. Manager main이 P0-2 결함을 갖고 있어 PinVi가 먼저 머지되면 71분
+rebuild 뒤 PinVi가 기동에 실패한다. 근거는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
+
+<!-- 아래는 2026-09-07 §3 선행 조사 기록이다 -->
+**종전: `T-VN-PAIR-V2` §3의 선행 — attestation의 Map revision 생산자 배선.** §1·§2는
 2026-09-07에 닫혔다(PinVi #538, pinset `78cad481…`에서 배포 컨테이너로 실증). §3은
 해제 조건이 적지 않은 선행 하나에 걸려 있다: `m05_activation_attestation.py`가
 `source_revision`을 `git show`의 revision 인자로 쓰므로, 계약에서 그 필드를 빼려면 그
