@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from kortravelmap.infra.manual_provider_dedup_repo import (
     detect_manual_provider_candidates,
     manual_origin_features,
+    provider_features_near,
 )
 
 from .test_tvn_m05_manual_provider_dedup import (
@@ -495,5 +496,34 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
                     },
                 )
             assert manual_id in await _listing_rows(dagster), label
+    finally:
+        await dagster.dispose()
+
+
+async def test_the_block_keeps_the_nearest_provider_when_it_is_capped(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """상한에 걸릴 때 **거리순으로** 남긴다.
+
+    `feature_id` 순으로 자르면 찾으려던 최근접 후보를 정확히 버린다. feature_id는
+    무작위 접미사라 그 순서로는 어느 쪽이 남을지 알 수 없다 — 그래서 두 manual
+    각각에 대해 "자기 짝이 남는가"를 잰다. feature_id 순이면 **둘 다** 사전순으로
+    작은 같은 provider를 돌려주므로 최소 한쪽이 반드시 깨진다.
+    """
+
+    near = await _seed_manual_provider_pair(migrated_engine, index=60)
+    far = await _seed_manual_provider_pair(migrated_engine, index=61)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        async with AsyncSession(dagster) as session:
+            manuals = {m.feature_id: m for m in await manual_origin_features(session)}
+            for pair in (near, far):
+                manual = manuals[str(pair["manual_feature_id"])]
+                # 반경을 넓혀 두 provider가 모두 block에 들어오게 한 뒤 1건만 남긴다.
+                block = await provider_features_near(
+                    session, manual=manual, radius_meters=5000.0, limit=1
+                )
+                assert len(block) == 1
+                assert block[0].feature_id == pair["provider_feature_id"]
     finally:
         await dagster.dispose()
