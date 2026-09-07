@@ -160,3 +160,65 @@ def test_done_ledger_is_not_empty() -> None:
     assert "- [x]" in TASKS_DONE.read_text(encoding="utf-8"), (
         "docs/tasks-done.md에 완료 엔트리가 하나도 없다"
     )
+
+
+#: `docs/tasks-rule.md` §5가 정한 entry 본문 상한(문자).
+#:
+#: 규약은 "1~3문장"이라고 적지만 문장 세기는 한국어에서 신뢰할 수 없다(인용·목록·
+#: 코드 백틱이 종결부호를 흉내낸다). 길이는 셀 수 있고, 3문장이 이 상한을 넘는 일은
+#: 실제로 없다 — 넘는 것은 acceptance 본문을 옮겨 온 경우다.
+_MAX_ENTRY_BODY = 300
+
+#: 제목 줄(`- [ ] T-ID — **제목**`) 상한.
+_MAX_ENTRY_TITLE = 110
+
+
+def _entries() -> list[tuple[str, str, str]]:
+    """(task_id, 제목 줄, 본문) — 본문은 다음 체크박스 전까지의 들여쓴 단락."""
+    lines = TASKS.read_text(encoding="utf-8").splitlines()
+    out: list[tuple[str, str, str]] = []
+    current: tuple[str, str] | None = None
+    body: list[str] = []
+    for line in lines:
+        match = re.match(r"^- \[([ x~/])\] ([A-Z0-9-]+) — (.*)$", line)
+        if match:
+            if current is not None:
+                out.append((current[0], current[1], "\n".join(body).strip()))
+            current = (match.group(2), match.group(3))
+            body = []
+        elif current is not None:
+            body.append(line)
+    if current is not None:
+        out.append((current[0], current[1], "\n".join(body).strip()))
+    return out
+
+
+def test_active_entries_do_not_duplicate_acceptance_bodies() -> None:
+    """``tasks.md`` entry는 짧게 유지한다 — 해제 조건 본문의 자리는 여기가 아니다.
+
+    2026-09-07 정리 직전 6개 항목이 최대 703자까지 부풀어 있었고, 그 중복본 안에서
+    ``T-VN-M05-ACTIVATION``이 **두 pinset 전의 식별자**를 현재형으로 적고 있었다.
+    한 사실이 두 곳에 적히면 한 곳만 갱신되고, 갱신되지 않은 쪽을 읽은 사람이
+    틀린 작업을 한다(`T-VN-PAIR-V2` 착수 때 실제로 그렇게 됐다).
+
+    길이 상한은 그 재발을 **탐지 가능한 형태로** 고정한다.
+    """
+    entries = _entries()
+    assert entries, "docs/tasks.md에서 entry를 하나도 읽지 못했다"
+
+    too_long_title = [
+        f"{task}: 제목 {len(title)}자" for task, title, _ in entries if len(title) > _MAX_ENTRY_TITLE
+    ]
+    assert not too_long_title, (
+        "tasks-rule.md §5: 제목 줄이 상한을 넘는다 — "
+        f"{_MAX_ENTRY_TITLE}자 이하로 줄이고 상세는 tasks-acceptance.md로 옮겨라: {too_long_title}"
+    )
+
+    too_long_body = [
+        f"{task}: 본문 {len(body)}자" for task, _, body in entries if len(body) > _MAX_ENTRY_BODY
+    ]
+    assert not too_long_body, (
+        "tasks-rule.md §5: entry 본문이 상한을 넘는다 — "
+        f"{_MAX_ENTRY_BODY}자 이하로 줄이고 해제 조건은 tasks-acceptance.md가 소유한다: "
+        f"{too_long_body}"
+    )

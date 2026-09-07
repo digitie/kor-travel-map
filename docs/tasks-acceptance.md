@@ -826,6 +826,12 @@ v1.62.1인데 PinVi lockfile은 1.63.0이었다(회전 **전** pinned PinVi도 �
 > transaction ID만 전달한다. PinVi에는 기존 `ops:cancel` 외 권한을 주지 않는다(ADR-084).
 ```
 
+**2026-09-07 조사 — 구현 위치를 여기 박아 둔다.** relay·reconciliation은 구현이 끝나
+있다: lease·retry·dead-letter·replay 4/4가 `cache_target_outbox_repo.py`에, 5-status
+상태기계와 DB 대조(server-cursor scan 2회 + Merkle root)가
+`cache_target_reconciliation_repo.py`에 있고 라우터가 끝까지 부른다. 종전에
+`docs/tasks.md` 한 줄이 이 사실을 들고 있었으나 규약 §5 정리로 여기로 옮겼다.
+
 ## T-VN-M01
 
 ```markdown
@@ -905,6 +911,19 @@ rebuild 앞뒤로 각각 돌려 **두 번 다 55/55**였다. 즉 플래그 활�
   manual/old UUID와 각각 대조하기 전에는 paired live receipt를 승격할 수 없다.
 ```
 
+**2026-09-07 전수 조사 — spec이 미병합 브랜치에만 있다(유실 위험).**
+
+live acceptance spec은 `origin/feat/m01-m02-live-acceptance`에만 있고 main에는 없다
+(main 대비 **64 behind / 2 ahead**, 2파일 +138줄). 그 브랜치가 정리되면 작업이
+사라진다 — **회수가 가장 먼저다.** 병합만으로는 닫히지 않는다: spec은
+`E2E_MANUAL_CREATE_WRITE=1` opt-in 격리 스택 전용이라 기본 skip이다.
+
+이 절이 세는 것 중 **backup/restore 축은 이 항목의 것이 아니다** — §T-VN-M01이 그 축을
+자기 전제에서 빼면서 `T-VN-H49` 계열로 넘겼다. 이 절만 계속 세고 있어 과대 계상이다.
+
+**소유자 판정** 둘: purge 정책(evidence cascade/orphan·권한·409 계약)과
+backup/restore 소유권.
+
 ## T-VN-M03
 
 ```markdown
@@ -927,6 +946,20 @@ import 행별 child-command는 `302_m03_child_issuance` + `curation_repo` 발급
   request→approval receipt와 isolated acceptance는 `T-VN-41C`에서 완료한다.
 ```
 
+**2026-09-07 전수 조사 — 위임이 dangling pointer다.**
+
+`docs/tasks.md`와 이 문서가 "남은 paired request→approval receipt와 isolated
+acceptance는 `T-VN-41C`가 소유한다"고 적어 왔다. 그런데 **§T-VN-41C 어디에도 "M04"가
+없다** — 받는 절이 그 범위를 수락한 적이 없다. 게다가 41C는 보류라 잔여를 세지
+않으므로, 위임이 유효했다면 이 범위는 아무도 세지 않는 상태였다.
+
+위임한 물건은 이미 산출됐다 — `T-VN-PAIR-V2` §6의 e2e-03 m04 attestation이
+`scope: isolated`·`status: passed`이고 `map_pending_receipt_sha256`·
+`pinvi_approval_sha256`을 담는다.
+
+**선행**: 위임 문장을 걷고 이 절이 자기 해제 조건을 갖는다. 그 조건은 위 산출물로
+판정 가능해야 한다.
+
 ## T-VN-M05
 
 ```markdown
@@ -936,6 +969,13 @@ import 행별 child-command는 `302_m03_child_issuance` + `curation_repo` 발급
   `t-vn-m05-manual-provider-dedup-design-2026-08-21.md`가 immutable evidence·service event/ack·첫
   consumer rebind 계약을 소유한다.
 ```
+
+**2026-09-07 전수 조사 — 판정 문단이 없다.**
+
+이 절은 복원 블록만 있고 "무엇이 충족이면 닫히는가"를 적은 문단이 없다. 같은 형태의
+§T-VN-M03이 실제로 판정돼 충족 처리된 선례가 있으므로 형식 자체가 무효인 것은
+아니지만, ADR-097 §후속 4항목을 이 절로 옮겨 판정 가능한 조건으로 만드는 것이
+선행이다.
 
 ## T-VN-M05-ACTIVATION
 
@@ -978,6 +1018,34 @@ AC: A1~A4가 모두 참인 단일 실행에서 M04/M05 live acceptance attestati
 > 그 본문을 **원문 그대로** 옮긴 것이다 — 요약·축약·삭제 없음(2026-09-04 이관).
 
 `a3f6a8f3…`·`22563762…`·`c700bd2e…`·`fa28a6e7…`·`5512ce12…`·`41be91fe…`·`b46743ea…`·`5ad3b08c…`·`5592a1d4…`에 이어 Map `35a43317…`·PinVi `fed16a5c…`·Manager `eed1920…`·pinset `82850711…`도 trusted `ktdctl pin rotate-pair`, 단발 pinned rebuild, registry/public generation `match` gate 뒤 n150 isolated M04/M05 launcher를 정확히 한 번 실행해 terminal로 차단됐다. 공개 registry의 고정 phase는 `runtime_setup`이며 HTTP·컨테이너·환경·output leaf 원문은 열지 않는다. 모든 terminal pinset과 각 source pair·Manager source·output leaf는 재실행하지 않는다. 후속 Manager는 isolated runtime setup의 ordinary exception을 raw detail 없이 더 좁은 allowlist phase로 수렴시켜 다음 immutable candidate의 보정 범위만 좁힌다. 이후 pinning·pair 결박·one-shot 계약은 Docker Manager trusted `ktdctl`과 `runtime-pins`·`pinned-runtime/generation` 공개 API만 사용한다. PinVi isolated Compose는 Manager가 transaction·pinset·세 source revision에 결박해 private `0600`으로 발급한 admission receipt를 no-follow 검증할 때만 허용하며, legacy 환경변수 marker·수동 Compose는 권한이 아니다. 재개 시에만 새 Map revision·새 PinVi provenance·새 Manager source를 atomic `pin rotate-pair`로 함께 결박한다. 회전 뒤에는 trusted `run-pinned-rebuild-once`가 current public generation을 만든 후 새 root-owned leaf에서 한 번만 실행하며, 최신 CI·전문 적대 리뷰 두 건·terminal 아님을 모두 만족해야 M04/M05 live acceptance attestation을 승격한다.
+
+**2026-09-07 전수 조사 — 원장이 두 pinset 전 값을 현재형으로 적고 있었다.**
+
+`docs/tasks.md`가 인용하던 식별자는 전부 `e2e025`(pinset `e6b52db4`, Manager
+`b3217edc`, m04 `f08620a9…`, m05 `37320bb5…`, provenance `25a80946…`)의 것이었다.
+그 실행 자체는 2026-09-04에 실제로 있었고 여기 기록으로 남긴다 — 다만 **현재가
+아니다.**
+
+현재 승격 후보는 `T-VN-PAIR-V2` §6·§7이 만든 실행이다:
+
+| | e2e-02 | e2e-03 |
+|---|---|---|
+| pinset | `b229446a` | `b229446a` |
+| Manager | `d36847e2` | `0406b14d` |
+| m04 attestation | `293bb31f…` | `950762d6…` |
+| m05 attestation | `60ad8168…` | `ac818411…` |
+| status | passed | passed |
+
+둘 다 정당하다 — Manager 기계는 execution identity별 one-shot이고 두 실행은 서로 다른
+execution identity를 가졌다(각각 `c5791dfd…` 이전/이후 rebind).
+
+**승격은 문서 행위가 아니다.** PinVi의 서명 activation receipt 발급·배포
+(`pinvi/scripts/m05_activation_receipt.py`)이고 신뢰근거는
+`pinvi/contracts/pinvi-m05-activation-receipt-trust-v1.json`이다. 기계가 강제하므로
+"승격했다"고 적는 것만으로는 아무것도 승격되지 않는다.
+
+**소유자 판정.** 위 두 실행 중 어느 것을 승격 근거로 삼는가(또는 현 Manager
+`0406b14d`에서 한 번 더 받는가).
 
 ## T-VN-H34
 
@@ -1148,6 +1216,22 @@ AC: A1~A4가 모두 참인 단일 실행에서 M04/M05 live acceptance attestati
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 ```
 
+**2026-09-07 전수 조사 — 남은 두 조건이 존재하지 않는 데이터를 전제한다.**
+
+n150 `kor_travel_map`은 2026-09-07 03:23 UTC에 pinned rebuild가 새로 만든 **빈 DB**다
+(`feature.features` 0행). 남은 H34A(전수 후보 조사)와 H34B(prod import)는 둘 다 prod
+데이터를 전제하므로 지금은 판정 자체가 불가능하다.
+
+그리고 "재적재하면 된다"가 성립하지 않는다 — **pinned rebuild가 매번 application DB를
+새로 만든다.** 재적재는 다음 rebuild까지만 유효하므로, lifecycle을 바꾸지 않는 한
+prod 데이터를 전제한 해제 조건은 구조적으로 닫히지 않는다.
+
+코드는 남아 있지 않다 — preview/commit 엔드포인트, provenance 3표, manual-feature
+writer, kill-switch 전부 배포 완료다.
+
+**소유자 판정.** 범위를 저장소 CSV 수준으로 재정의할 것인가, 아니면 lifecycle 변경을
+선행 항목으로 세울 것인가.
+
 ## T-VN-H49
 
 ```markdown
@@ -1172,6 +1256,28 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 
 AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 보존 GC, off-box 사본
 증거가 있고 절차가 문서화되어야 한다. PR #181 병합만으로 H49를 완료 처리하지 않는다.
+
+**2026-09-07 전수 조사 — 자식 셋은 즉시 착수 가능, 부모는 prod 쓰기에 막혀 있다.**
+
+`-GEO-DAGSTER`·`-CONCIERGE`·`-PINVI`의 유일 잔여는 **복원 리허설 1회와 그 기록**이다.
+`ktdctl db-backup rehearse-restore <instance>`로 각 1회 돌리면 되고, cron 시각
+(03:15/03:30/03:55 UTC)은 `_role_lock` 충돌 때문에 피한다.
+
+부모(geo application DB)는 고착된 queued `load_jobs` 행 해소가 필요하고 그것은 prod DB
+쓰기 또는 geo admin API 호출이다 — 소유자 승인이 선행한다.
+
+원장이 세지 않던 운영 결함 하나: `/opt/kor-travel-docker-manager/.env`에
+`KTDM_BACKUP_ROOT`가 없어 trusted installer의 `install_backup_logrotate()`가 skip됐고
+`/etc/logrotate.d/kor-travel-docker-manager`가 설치되지 않았다. `-OFFBOX`에서 함께
+닫는다.
+
+`-OFFBOX`의 잔여는 코드가 아니라 **운영 결선**이다 — 목적지 호스트·계정·ssh 키가
+소유자/운영자 몫이고(Manager GM-08 문서가 그렇게 규정한다), 그 뒤는 env 4개와 root
+crontab 한 줄(04:45 UTC)이다.
+
+**기록 위치가 미정이다.** 자식들의 E4는 "docs/backup-restore*"에 남기라고 적지만 Map의
+그 파일은 94행으로 축소돼 외부 instance 절차를 담지 않고, 스스로 "n150 운영 backup은
+Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소유자 판정이다.
 
 ## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
 
@@ -1243,6 +1349,26 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
   `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
 
+**2026-09-07 전수 조사 — 아래 §의 2026-08-26 서술이 낡았다. 그러나 항목은 열려 있다.**
+
+낡은 부분: "auth setup이 401로 중단되어 두 GET 전용 본문이 시작조차 못 했다"는 현재
+사실이 아니다. n150 실측으로 `logs.live.spec.ts:30`(system/API 목록 실제 REST 렌더)과
+`:50`(필터·페이지 크기 GET-only 조작)이 배포 스택에서 **4회** 통과했다 —
+`~/d1-live.log`(2026-09-04, `11 passed 1.3m`), `~/d1-live-{c72456f6,bbd65766,2127bcf7}.log`
+(09-05~06, 각 `11 passed`). 전부 `Running 11 tests using 1 worker`이고 CI env 미설정이라
+`retries: 0`이다.
+
+낡지 **않은** 부분: 그 실행이 이 항목을 닫지는 않는다. 2026-08-26 기록이 같은 겹침을
+이미 검토하고 **명시적으로 기각**했다 — "H46H의 data-independent 실제 UI 11개 통과를
+무효화하지 않지만, 실제 logs acceptance를 완료로 승격할 근거도 아니다". 해제 조건은
+"승인된 **읽기 전용** 자격증명"을 요구하는데 D1 스모크는 admin 자격증명으로 돌았다.
+
+mocked 절반은 HEAD에서 재확인했다 — `e2e/mocked-failure-manifest.json`의
+`discoveredTests` 284와 `testInventorySha256`이 현 suite와 exact 일치한다.
+
+**소유자 판정.** admin 자격증명으로 돈 D1 스모크가 조문의 "승인된 읽기 전용
+자격증명" 요건을 갚는가. 갚지 않는다면 그 자격증명은 소유자만 줄 수 있다.
+
 ## Lane B 상세 — b1 PinVi 결합·후속
 
 ### T-VN-41 — cache-target generation·outbox 전파
@@ -1264,6 +1390,22 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   migration에서 이미 물리 삭제한다.** 따라서 이 task는 T-VN-33 보존·rollback·removal을
   소유하지 않는다. 이후 task가 만든 held component만 그 task의 manifest와 함께 판단하며,
   intermediate data는 backup/restore가 아니라 최종 schema ETL로 재생성한다.
+
+**2026-09-07 전수 조사 — 유일한 실질 blocker는 미구현 대체물이다.**
+
+removal manifest (c)의 대체물 `provider_sync.notice_states`가 **구현된 적이 없고, 그
+구현을 소유하는 열린 항목이 없다.** 대체 대상 두 테이블은 현행 정상 writer 경로이므로
+그것부터 옮기지 않으면 물리 제거가 성립하지 않는다.
+
+규모 실측(prod): text/varchar `%feature_id%` 컬럼 40개, `feature.features` 참조 FK
+34개, `feature_id`를 언급하는 인덱스 57개, baseline `schema.sql`에서 `feature_id`
+언급 900줄. **이 백로그에서 가장 큰 축이다.**
+
+manifest (b) provider_sync source lineage는 **이미 제거 완료**이므로 충족 처리해도
+된다.
+
+**소유자 판정.** `notice_states` 통합을 새 선행 항목으로 세울 것인가, 아니면 removal
+manifest에서 (c)를 빼도록 계약을 개정할 것인가.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
@@ -1451,6 +1593,20 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 처음부터 없었다는 뜻이고, 그래서 "무엇이 참이면 닫히는가"를 아무도 판정할 수 없었다.
 `m05-e2e-analysis.local.md`(gitignored forensic)와 공개 receipt에서 확인한 사실로
 여기에 처음 적는다. 원시 terminal 출력·private 값은 옮기지 않는다.
+
+**2026-09-07 — 소유자 지시로 하지 않는다(보류/제외).**
+
+규약 §6에 따라 잔여로 계산하지 않는다. 재개하려면 두 선행이 필요하다:
+
+1. **목표 SLO가 저장소 어디에도 정의돼 있지 않다.** 도입 여부를 판단할 기준이 없다.
+2. **exact-viewport vs region-total은 의미 택일이다.** 현행은 ADR-073(accepted)이
+   "exact spatial predicate"로 못 박은 계약이고, MV는 region-total이다. 바꾸려면
+   ADR-073 개정 + PinVi `FeatureCluster` 소비자 계약 변경이 함께 온다 — 시범 PR
+   재량이 아니다.
+
+부수 정정: 도입 조건 4(일관성 게이트)는 이미 충족이다. `dagster-boundary.md` Phase
+1.5의 "swap 차단 안 함" 서술은 게이트가 아니라 별개 job `consistency_dedup_refresh`를
+가리키는 것이므로 drift가 아니다.
 
 ## T-VN-M05-EXECUTION-IDENTITY-V6
 
