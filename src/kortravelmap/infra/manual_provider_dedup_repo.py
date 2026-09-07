@@ -164,6 +164,7 @@ class DetectionOutcome:
     scored_pair_count: int
     created_case_ids: tuple[str, ...]
     idempotent_case_ids: tuple[str, ...]
+    suppressed_case_ids: tuple[str, ...] = ()
     incomplete_blocks: tuple[str, ...]
     manual_scan_truncated: bool = False
     raced_pair_count: int = 0
@@ -383,8 +384,12 @@ async def record_manual_provider_candidate(
 ) -> tuple[str, str]:
     """후보 하나를 evidence로 남긴다. ``(case_id, outcome)``을 돌려준다.
 
-    ``outcome``은 ``created`` 또는 ``idempotent``다 — 같은 evidence 지문의 미해결
-    case가 이미 있으면 새로 만들지 않는다.
+    ``outcome``은 셋 중 하나다:
+
+    - ``created`` — 새 case
+    - ``idempotent`` — 같은 evidence 지문의 **미해결** case가 이미 있다
+    - ``suppressed`` — admin이 이미 판정한 쌍이고 판정을 좌우하는 증거가 그대로다
+      (migration 305). 이것을 세지 않으면 "후보가 없다"와 "이미 판정됐다"가 같아 보인다.
     """
 
     row = (
@@ -400,7 +405,7 @@ async def record_manual_provider_candidate(
     ).one()
     outcome = row.o_outcome
     case_id = row.o_case_id
-    if outcome not in {"created", "idempotent"} or case_id is None:
+    if outcome not in {"created", "idempotent", "suppressed"} or case_id is None:
         raise ManualProviderDedupError(
             "manual/provider dedup candidate receipt is not canonical"
         )
@@ -438,6 +443,7 @@ async def detect_manual_provider_candidates(
 
     created: list[str] = []
     idempotent: list[str] = []
+    suppressed: list[str] = []
     incomplete: list[str] = []
     manual_total = 0
     provider_total = 0
@@ -508,7 +514,12 @@ async def detect_manual_provider_candidates(
                 # (두 Feature 행의 FOR UPDATE도 같이 쌓인다). 형제 job
                 # `file_registry_scan`의 "단위별 독립 커밋"과 같은 규약이다.
                 await session.commit()
-                (created if outcome == "created" else idempotent).append(case_id)
+                if outcome == "created":
+                    created.append(case_id)
+                elif outcome == "suppressed":
+                    suppressed.append(case_id)
+                else:
+                    idempotent.append(case_id)
 
         if len(manuals) < manual_page_size:
             truncated = False
@@ -520,6 +531,7 @@ async def detect_manual_provider_candidates(
         scored_pair_count=scored,
         created_case_ids=tuple(created),
         idempotent_case_ids=tuple(idempotent),
+        suppressed_case_ids=tuple(suppressed),
         incomplete_blocks=tuple(incomplete),
         manual_scan_truncated=truncated,
         raced_pair_count=raced,

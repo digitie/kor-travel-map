@@ -27,6 +27,12 @@
         "303_m05_payload_hash_domain"
       ],
       "revision": "304_m05_detector_manuals"
+    },
+    {
+      "down_revision": [
+        "304_m05_detector_manuals"
+      ],
+      "revision": "305_m05_relitigation_fence"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

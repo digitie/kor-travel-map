@@ -102,6 +102,9 @@ async def detect_manual_provider_dedup_candidates_op(
         "scored_pair_count": outcome.scored_pair_count,
         "created_case_count": len(outcome.created_case_ids),
         "idempotent_case_count": len(outcome.idempotent_case_ids),
+        # admin이 이미 판정해 억눌린 쌍. 세지 않으면 "후보가 없다"와
+        # "이미 판정됐다"가 같아 보인다(T-VN-M05-RELITIGATION R1).
+        "suppressed_case_count": len(outcome.suppressed_case_ids),
         "incomplete_block_count": len(outcome.incomplete_blocks),
         "raced_pair_count": outcome.raced_pair_count,
         "manual_scan_truncated": outcome.manual_scan_truncated,
