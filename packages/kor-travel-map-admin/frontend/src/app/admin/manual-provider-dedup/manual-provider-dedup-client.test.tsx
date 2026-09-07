@@ -10,8 +10,14 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -147,12 +153,13 @@ async function openCase() {
   const { calls, wrapper } = context();
   render(<ManualProviderDedupClient />, { wrapper });
   const summary = await screen.findByRole("button", { name: /f_manual_1/ });
-  await userEvent.click(summary);
+  fireEvent.click(summary);
   await screen.findByRole("heading", { name: "판정" });
   return calls;
 }
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -172,36 +179,32 @@ describe("M05-5 admin 판정 화면", () => {
   it("사유가 비어 있으면 제출을 막는다", async () => {
     await openCase();
     expect(screen.getByRole("button", { name: "판정 제출" })).toBeDisabled();
-    await userEvent.type(screen.getByRole("textbox", { name: /사유/ }), "중복 아님");
+    fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "중복 아님" } });
     expect(screen.getByRole("button", { name: "판정 제출" })).toBeEnabled();
   });
 
   it("파괴적 판정은 확인 문구를 그대로 받아야 열린다", async () => {
     await openCase();
-    await userEvent.type(screen.getByRole("textbox", { name: /사유/ }), "provider가 정본");
-    await userEvent.click(screen.getByRole("radio", { name: /수동본 폐기/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "provider가 정본" } });
+    fireEvent.click(screen.getByRole("radio", { name: /수동본 폐기/ }));
 
     const submit = screen.getByRole("button", { name: "판정 제출" });
     expect(submit).toBeDisabled();
 
     const confirmation = screen.getByRole("textbox", { name: /폐기를 확인합니다/ });
-    await userEvent.type(confirmation, "폐기");
+    fireEvent.change(confirmation, { target: { value: "폐기" } });
     expect(submit).toBeDisabled();
 
-    await userEvent.clear(confirmation);
-    await userEvent.type(confirmation, "폐기를 확인합니다");
+    fireEvent.change(confirmation, { target: { value: "폐기를 확인합니다" } });
     expect(submit).toBeEnabled();
   });
 
   it("survivor는 provider로 고정이다 — 고를 수 없고 제출 payload에도 provider가 실린다", async () => {
     const calls = await openCase();
-    await userEvent.type(screen.getByRole("textbox", { name: /사유/ }), "provider가 정본");
-    await userEvent.click(screen.getByRole("radio", { name: /수동본 폐기/ }));
-    await userEvent.type(
-      screen.getByRole("textbox", { name: /폐기를 확인합니다/ }),
-      "폐기를 확인합니다",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "판정 제출" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "provider가 정본" } });
+    fireEvent.click(screen.getByRole("radio", { name: /수동본 폐기/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: /폐기를 확인합니다/ }), { target: { value: "폐기를 확인합니다" } });
+    fireEvent.click(screen.getByRole("button", { name: "판정 제출" }));
 
     await waitFor(() => {
       expect(calls.some((call) => call.url.includes("/decisions"))).toBe(true);
@@ -221,8 +224,8 @@ describe("M05-5 admin 판정 화면", () => {
 
   it("멱등 키를 헤더에 싣는다", async () => {
     const calls = await openCase();
-    await userEvent.type(screen.getByRole("textbox", { name: /사유/ }), "중복 아님");
-    await userEvent.click(screen.getByRole("button", { name: "판정 제출" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "중복 아님" } });
+    fireEvent.click(screen.getByRole("button", { name: "판정 제출" }));
     await waitFor(() => {
       expect(calls.some((call) => call.url.includes("/decisions"))).toBe(true);
     });
