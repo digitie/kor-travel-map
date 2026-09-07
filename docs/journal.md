@@ -1,5 +1,44 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-07 — pair 계약 v2: 이중 선언 하나를 걷는 데 적대 리뷰 두 라운드가 들었다
+
+`T-VN-PAIR-V2` 완주. 계약에서 필드 둘을 빼는 일이었는데, 실제 작업은 **그 값을 누가
+만드는가를 표면마다 이름 대어 정하는 것**이었고 나는 그것을 두 번 틀렸다.
+
+**틀린 것 하나 — evidence는 Manager 산출물이 아니었다.** receipt의 스키마 검사가
+evidence 표면 블록에 `source_revision`을 요구했다. 나는 주석에 "evidence는 v1·v2 모두
+revision을 싣는다"고 적었는데 사실이 아니었다 — 그 블록은 **attestation이 계약을 그대로
+복사한 것**이다. v2 계약에서는 그 키가 없으므로 v2로는 **어떤 receipt도 만들 수 없었다.**
+
+**틀린 것 둘 — service 표면의 정본은 pin registry가 아니었다.** 네 표면을 뭉뚱그려
+pinned Map revision으로 채웠는데, service의 정본은 PinVi
+`kor-travel-map-service-provenance-v1.json`이고 v1 pair 계약이 그것을 세 번째로 선언하고
+있었을 뿐이다. digest는 전부 일치해서 회전 preflight도 격리 preflight도 통과하고,
+**71분 rebuild가 끝난 뒤 PinVi 컨테이너가 기동에 실패**했을 것이다.
+
+**두 결함을 픽스처가 가리고 있었다.** receipt 테스트가 evidence의 표면 블록을 손으로
+적어 실제 생산자가 낼 수 없는 문서를 만들고 있었다. 이제 vendored 계약에서 그대로
+가져온다 — 계약이 v1이든 v2든 픽스처가 자동으로 그 모양을 따른다. **소비자의 기대에
+맞춘 픽스처는 생산자의 출력을 검증하지 않는다.**
+
+**변이 검증이 공허한 게이트를 네 번 잡았다.** §7에서 둘(`_pair`의 v1 거부에 테스트가
+없었고, 전용 검사 하나는 **도달할 수 없는 코드**였다 — 위의 스키마 검사가 먼저 잡는다),
+그리고 회전 게이트에서 둘(대역이 인자를 무시해 저장소·revision을 잘못 지목해도 초록).
+게이트를 쓴 다음 **되돌려서 빨간불을 보는 것**이 게이트를 쓰는 일의 절반이다.
+
+**내 게이트가 CI를 한 번 빨갛게 만들었다.** `assert "expected_revision=map_source_revision," not in source`가
+너무 넓어서, 같은 문자열의 **정당한 다른 용법**(checkout HEAD 대조)까지 금지했다. 원인은
+절차 누락이다 — 단언을 추가한 뒤 변이 하네스만 돌리고 깨끗한 통과 실행을 하지 않았다.
+
+**§6에서 무관한 선행 결함 하나가 드러났고, 그것도 좋은 실패였다.** Playwright runner 핀이
+1.62.1인데 PinVi lockfile은 1.63.0이었다(회전 전부터 그랬다). 어긋나면 본문 브라우저
+기동에서 무조건 소각인데 `_assert_playwright_runner_matches_pinned_source`가 **실행권
+소비 전에** 잡았다.
+
+측정: 회전 preflight가 Map 5커밋 전진을 PinVi 커밋 없이 수용(exit 0), 어긋난 revision에는
+두 digest를 찍으며 거부. rebuild `phase: committed`, 격리 M05 e2e `status: passed` —
+v1 분기를 걷어낸 Manager로 한 번 더 돌려 같은 결과를 받았다.
+
 ## 2026-09-06 — 원장이 나를 틀린 작업으로 보냈다. 41C는 구현이 남은 게 아니었다
 
 D2를 닫고 `docs/resume.md`가 적은 "다음 한 작업"을 따라 `T-VN-41C`에 착수했다. 다섯 축을
