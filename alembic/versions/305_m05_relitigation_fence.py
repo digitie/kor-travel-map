@@ -22,7 +22,7 @@ Revises: 304_m05_detector_manuals
 판정을 실제로 좌우하는 것만 넣는다:
 
 - 두 snapshot에서 `row_revision`을 뺀 것 — `kind`·`name`·`category`·`lon`·`lat`와 식별자
-- provider의 **현재 source 내용** — `source_record_key` + `source_record_raw_payload_hash`
+- provider의 **현재 source 내용** — `source_record_raw_payload_hash`
 - `scorer_id`
 
 넣지 **않는** 것과 그 이유:
@@ -30,6 +30,9 @@ Revises: 304_m05_detector_manuals
 - `source_head_observed_at` — 내용이 그대로인데 head 관측 시각만 갱신되는 경로가
   실재한다(`_UPSERT_SOURCE_ENTITY_HEAD_SQL`이 더 새 `observed_at`에 갱신한다).
   넣으면 그 갱신마다 차단이 풀린다.
+- `source_record_key` — 같은 내용을 다시 fetch하면 record key만 바뀐다. 처음엔
+  넣었는데 **변이 검증이 그것이 churn 원인임을 드러냈다** — 내용을 뜻하는 것은
+  `raw_payload_hash`다.
 - 점수 **값** — 부동소수 잡음이 차단을 흔들면 안 된다. scorer가 바뀌면 `scorer_id`가
   바뀌어 다시 올라온다.
 
@@ -87,7 +90,6 @@ SET decision_fingerprint = encode(
             jsonb_build_object(
                 'manual', manual_feature_snapshot - 'row_revision',
                 'provider', provider_feature_snapshot - 'row_revision',
-                'source_record_key', source_record_key,
                 'source_record_raw_payload_hash', source_record_raw_payload_hash,
                 'scorer_id', scorer_id
             )::text,

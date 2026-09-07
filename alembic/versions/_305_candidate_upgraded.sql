@@ -184,9 +184,12 @@ BEGIN
     -- `row_revision`과 source head 관측 시각을 포함하므로, score와 무관한 필드 patch
     -- 하나에도 달라져 차단이 무력해진다(R3). 대신 판정을 실제로 좌우하는 것만 넣는다:
     -- 두 snapshot에서 `row_revision`을 뺀 것(= kind·name·category·lon·lat와 식별자),
-    -- provider의 **현재 source 내용**(record key + raw payload hash), 그리고
-    -- `scorer_id`. head 관측 시각은 넣지 않는다 — 내용이 그대로인데 head만 갱신되면
-    -- 다시 올릴 이유가 없다. 점수 **값**도 넣지 않는다 — 부동소수 잡음이 차단을
+    -- provider의 **현재 source 내용**(`raw_payload_hash`), 그리고 `scorer_id`.
+    --
+    -- 넣지 않는 것과 이유: `source_head_observed_at`은 내용이 그대로인데 head만
+    -- 갱신되는 경로가 실재한다. `source_record_key`도 넣지 않는다 — 같은 내용을
+    -- 다시 fetch하면 record key만 바뀌므로, 넣으면 그때마다 차단이 풀린다(변이
+    -- 검증이 이것을 드러냈다). 점수 **값**도 넣지 않는다 — 부동소수 잡음이 차단을
     -- 흔들면 안 된다. scorer가 바뀌면 `scorer_id`가 바뀌어 다시 올라온다.
     --
     -- 반대 방향은 R2가 진다: score-facing 값이나 provider source 내용이 바뀌면 이
@@ -197,7 +200,6 @@ BEGIN
                 jsonb_build_object(
                     'manual', v_manual_snapshot - 'row_revision',
                     'provider', v_provider_snapshot - 'row_revision',
-                    'source_record_key', v_source.source_record_key,
                     'source_record_raw_payload_hash',
                         v_source.source_record_raw_payload_hash,
                     'scorer_id', 'manual-provider-v1'
