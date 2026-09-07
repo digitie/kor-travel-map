@@ -374,3 +374,5 @@ async def test_the_detector_loop_reaches_every_manual_page(
                 )
             }
         assert wanted <= reached
+    finally:
+        await dagster.dispose()
