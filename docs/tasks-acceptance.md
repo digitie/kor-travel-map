@@ -1288,7 +1288,7 @@ grep이었다.
 | L1 | harness / `status=passed` / `phase=completed` |
 | L2 | `result.json`의 세 해시 == 그 파일들의 sha256 (**재계산**) |
 | L3 | pinset: attestation == result == **살아 있는 registry** |
-| L4 | Manager source revision: attestation == result == 설치된 trusted revision |
+| L4 | Manager source revision: attestation == result == **registry binding** (설치본과의 일치는 `is_installed=`로 보고만) |
 | L5 | execution identity가 registry(`current`+`history`)에 있고 **그 binding이 현재 pinset·Map·PinVi revision에 결박**돼 있다 |
 | L6 | provenance의 Map/PinVi revision == pinned revision |
 | L7 | `m04_server_side_chain_verified` |
@@ -1346,11 +1346,46 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
 
 ### 남은 해제 조건
 
-- [ ] **P1 — `--verify-leaf`가 승격 후보 leaf에 대해 exit 0.** 출력을 이 절에 기록한다.
+- [x] **P1 — `--verify-leaf`가 승격 후보 leaf에 대해 exit 0.** (2026-09-07 실측)
+
+      Manager #330(신뢰 경계·닻 강화본)으로 두 후보가 모두 통과했다:
+
+      ```
+      /root/pairv2-e2e-03  L0 PASS · L7b PASS · L9 present=True
+                           L8 leaf_execution_blocked=False → PASSED
+      /root/pairv2-e2e-02  L0 PASS · L7b PASS · L9 present=True
+                           L8 leaf_execution_blocked=False → PASSED
+      ```
+
+      두 leaf 모두 `is_installed=False`다 — L4가 설치본이 아니라 registry binding에서
+      파생하지 않았다면 이 둘은 영원히 검증 불가였다는 뜻이다(#327이 고친 결함).
+      **강화 전 결과는 근거로 쓰지 않는다.** 강화 전 검증기는 아무 디렉터리나 받았으므로
+      그때의 exit 0은 이 조건을 만족시키지 않았다.
 - [ ] **P2 — 전문 적대 리뷰 두 건이 이 새 정의에 대해 GO.** 2026-09-07 1차는 두 건 모두
       NO_GO였고 그 P0가 이 정의 변경을 불렀다. 그 P1들의 처분도 함께 적는다 —
       CI green(재실행으로 해소), 서명의 사후 검증 불가(정의에서 근거로 쓰지 않음),
       A2 성공 미소비(별도 항목으로 분리).
+
+      **2026-09-07 2차도 두 건 모두 NO_GO였다.** P0가 셋 겹쳤고 전부 정당했다 —
+      검증기가 정의의 근거를 실제로 확인하지 않고 있었다. Manager #330이 넷을 고쳤다:
+
+      | P0 | 무엇이었나 | 고침 |
+      |---|---|---|
+      | leaf 신뢰 경계 부재 | `lstat`/`st_uid`/`O_NOFOLLOW`가 **하나도 없어** `--verify-leaf`가 아무 디렉터리나 받았다 | `L0` 신설 + 모든 읽기를 신뢰 읽기로 |
+      | 공개값 조립으로 통과 | L3~L6 입력이 전부 `-public` 0644 사본에서 읽힌다(리뷰어가 비-root로 실측) | `L9` — root-only 0700 ledger claim 실재 요구 |
+      | 사슬에 M04 없음 | M04 증적을 해시만 하고 **한 번도 열지 않았다**. L7은 자유 불리언 | `L7b` — payload의 `m04_attestation_sha256`을 L2 재계산 값과 대조 |
+      | L8이 current만 봄 | 승격 후보는 **둘 다 current가 아닌 identity**라 소각돼도 통과했다 | leaf 자신의 identity 차단을 본다 |
+
+      **P0 하나는 이 문서의 결함이었다** — 위 L4 행이 "설치된 trusted revision"을
+      요구하는데 코드는 `641dde6`(#327) 이후 registry binding과 대조한다. 그 상태로
+      `is_installed=False` 출력을 P1 근거로 기록하면 **충족되지 않은 조건을 충족했다고
+      적는 것**이 된다 — 이 정의 변경이 없애려던 바로 그 실패다. 위 행을 코드에 맞췄다.
+
+      **위조 문턱을 정직하게 적는다.** `L9`가 올리는 것은 "공개값 베끼기"에서 "root"까지다.
+      claim 이름 자체는 공개값에서 계산되고, 예측 불가 값(`transaction_id`)을 claim
+      payload에 넣는 더 강한 닻은 기존 leaf를 무효화하므로 후속으로 남겼다.
+
+      3차 리뷰가 남았다.
 - [x] **P3 — 최신 CI green.** 핀된 PinVi `f62e7ef1`의 `api` 워크플로가 재실행으로
       success. 실패는 문서화된 flaky
       (`test_restore_backup_hotswap_cancellation_kills_script_process_group`)였다.
