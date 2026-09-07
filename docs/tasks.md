@@ -35,18 +35,13 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   lifecycle에서 enable과 pinned rebuild가 **상호배타**다. 실 production 전환
   시점까지 미룬다.
 
-- [~] T-FE-MOCK-FLAKE — **admin UI logs acceptance의 live 절반**
-
-  mocked checkpoint는 PR #1045·#1059·#1077로 해소됐다(HEAD에서 재계산 확인: 284
-  tests, manifest sha 일치). live 절반은 `logs.live.spec.ts` 2건이 배포 스택에서
-  4회 통과했으나, 해제 조건이 요구하는 "승인된 읽기 전용 자격증명" 해석이 소유자
-  판정으로 남아 있다.
 
 - [ ] T-VN-M02 — **Feature origin/provenance 보존·불변성 live acceptance**
 
-  spec이 **미병합 브랜치**(`feat/m01-m02-live-acceptance`, main 대비 64 behind /
-  2 ahead)에만 있어 유실 위험이 있다 — 회수가 먼저다. purge 정책과
-  backup/restore 소유권 두 조건은 소유자 판정이다.
+  spec이 **미병합 브랜치**(`feat/m01-m02-live-acceptance`)에만 있어 유실 위험이 있다 —
+  회수가 먼저다. backup/restore 축은 2026-09-07 소유자 판정으로 이 절에서 삭제했다
+  (소유는 `T-VN-H49` 계열). 남은 purge 정책은 소유자 판정 대기다.
+
 
 - [~] T-VN-M04 — **범용 Feature 요청 큐**
 
@@ -59,11 +54,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   판정 계약과 그 결과의 paired 전파가 대상이다. acceptance 절에 판정 가능한 해제
   조건 문단이 없어 ADR-097 §후속 4항목을 옮기는 것이 선행이다.
 
-- [ ] T-VN-H34 — **공식 curation 미연결 membership**
-
-  코드·엔드포인트는 배포 완료다. 남은 두 조건(전수 후보 조사, prod import)이 현
-  prod에 없는 데이터를 전제하는데 **pinned rebuild가 매번 DB를 새로 만든다** —
-  범위를 저장소 CSV 수준으로 재정의할지가 소유자 판정이다.
 
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
 

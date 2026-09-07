@@ -924,6 +924,20 @@ live acceptance spec은 `origin/feat/m01-m02-live-acceptance`에만 있고 main�
 **소유자 판정** 둘: purge 정책(evidence cascade/orphan·권한·409 계약)과
 backup/restore 소유권.
 
+**2026-09-07 소유자 판정 — 과대 계상분을 삭제한다.**
+
+이 절이 세던 **backup/restore 축은 이 항목의 것이 아니다.** §T-VN-M01이 그 축을 자기
+전제에서 빼면서 `T-VN-H49` 계열로 넘겼는데 이 절만 계속 세고 있었다. 소유자 판정으로
+이 절의 범위에서 삭제한다 — 소유는 `T-VN-H49`(+ 자식들)이다.
+
+**이 절에 남는 것은 둘이다.**
+
+1. **live acceptance spec 회수** — spec이 `origin/feat/m01-m02-live-acceptance`에만
+   있고 main에 없다(main 대비 64 behind / 2 ahead, 2파일 +138줄). 브랜치가 정리되면
+   작업이 사라지므로 판정과 무관하게 먼저 한다. 회수해도 닫히지 않는다: spec은
+   `E2E_MANUAL_CREATE_WRITE=1` opt-in 격리 스택 전용이라 기본 skip이다.
+2. **purge 정책** — evidence cascade/orphan·권한·409 계약. **소유자 판정 대기.**
+
 ## T-VN-M03
 
 ```markdown
@@ -1107,7 +1121,7 @@ execution identity를 가졌다(각각 `c5791dfd…` 이전/이후 rebind).
 ## T-VN-H34
 
 ```markdown
-- [ ] T-VN-H34 — **H25A/H25B 미충족 AC 마무리**
+- [x] T-VN-H34 — **H25A/H25B 미충족 AC 마무리**
 
   H25A가 H25B로, H25B가 다시 여기로 넘긴 항목들이다. **어느 열린 task도 소유하지 않는 상태를
   만들지 않기 위해** 명시적으로 모은다.
@@ -1289,6 +1303,38 @@ writer, kill-switch 전부 배포 완료다.
 **소유자 판정.** 범위를 저장소 CSV 수준으로 재정의할 것인가, 아니면 lifecycle 변경을
 선행 항목으로 세울 것인가.
 
+**2026-09-07 소유자 판정 — 범위는 저장소 CSV까지다. 그 범위에서 닫는다.**
+
+prod 데이터를 전제하던 조건들은 **구조적으로 닫히지 않는다** — pinned rebuild가 매번
+application DB를 새로 만들기 때문에 재적재해도 다음 rebuild까지만 유효하다. 소유자가
+범위를 저장소 CSV 수준으로 한정했다.
+
+**범위 안 — 충족(4/4).**
+
+| 조건 | 근거 |
+|---|---|
+| (1) 주소 축 시군구 대조 | `scripts/h25b_verify_links.py:210-313`의 `_sigungu_*`와 `axes["sigungu"]` 판정 + `tests/unit/test_h25b_verify_links.py` |
+| (2) provider provenance | #910 import-act 축으로 해소 — `alembic/versions/301_m03_import_manual_feature_children.py`, 배포 DB에 세 표 실재 |
+| (4) 판정 축 3개 도구화 | 같은 스크립트의 행정구역·카테고리·동명 유일성 3축(`--scope public/approved`) |
+| (5) 카테고리 모순 8건 처리 + manifest 파생 | CSV 실측 — 재연결 1(김해가야테마파크)·유지 1(진해보타닉뮤지엄)·해제 6, `manifest.json` linked 216 / unresolved 270 |
+
+**범위 밖으로 밀려난 것 — 지우지 않고 여기 남긴다.**
+
+아래 넷은 **미완이며, 재개하려면 lifecycle 판정이 선행한다**(현 rehearsal/rebuildable
+lifecycle에서는 prod 데이터가 rebuild마다 사라진다). 다시 세울 때 이 목록에서 꺼낸다.
+
+- (3) preview/commit·REST/UI **실데이터** 검증 — 현 prod는 `curation_items` 0행,
+  `curation_collections` 0행이라 같은 응답이 나올 수 없다. 원장이 지정한 측정 수단
+  `T-VN-36-live`의 기반 `0104` 계보는 `300` baseline이 흡수했다.
+- (6) `T-VN-H34A` 카테고리 충돌 후보 **전수화** — 책임 경계 조사(#1082)만 병합됐고,
+  다음 단계는 `feature.features` 0행·`provider_sync.source_records` 0행이라 수행 불가.
+- (7) `T-VN-H34B` prod curation import — 전제("공개 표면 3,265건에서 6행이 사라진다")가
+  이미 거짓이다. FK `curation_items_feature_id_fkey` 때문에 features가 빈 동안 CSV의
+  linked 216행은 착지할 수 없다. **실행 경로 자체는 배포돼 있다.**
+- 잔여 절 "없는 것은 Feature로 추가"(태화강 국가정원·반디랜드&태권도원·청풍호 3건) —
+  수단은 갖춰졌다(`CURATION_CSV_OPTIONAL_HEADERS`, `ops.curation_import_manual_feature_children`,
+  배포 API의 manual-feature create 활성). 실행이 prod 데이터에 걸린다.
+
 ## T-VN-H49
 
 ```markdown
@@ -1376,7 +1422,7 @@ Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소
 ## T-FE-MOCK-FLAKE
 
 ```markdown
-- [~] **T-FE-MOCK-FLAKE** — mocked checkpoint 해소, n150 live GET-only 잔여
+- [x] **T-FE-MOCK-FLAKE** — mocked checkpoint 해소, n150 live GET-only 잔여
 
   **초기 관찰(2026-08-21)**: System logs 표의 첫 columnheader `생성`이 15초 안에
   보이지 않았다(`admin-ops.spec.ts:744`, 당시 위치). 앞선 filter control 단언은 모두
@@ -1425,6 +1471,32 @@ mocked 절반은 HEAD에서 재확인했다 — `e2e/mocked-failure-manifest.jso
 
 **소유자 판정.** admin 자격증명으로 돈 D1 스모크가 조문의 "승인된 읽기 전용
 자격증명" 요건을 갚는가. 갚지 않는다면 그 자격증명은 소유자만 줄 수 있다.
+
+**2026-09-07 소유자 판정 — D1 실측이 자격증명 요건을 갚는다. 항목을 닫는다.**
+
+AC7이 요구한 "배포 runtime과 일치하는 승인된 자격증명 + 허용 origin"은
+`T-VN-41F1D-D1` 실행이 갚는다는 판정이다. 그 실행에서 `[setup] authenticate admin (live)`이
+통과했고(로그인 POST 200 = 공개 origin 허용까지 통과), 자격증명은 0600 파일로만 두고
+실행 후 삭제됐으며 로그에 남지 않았다(`grep -c PASSWORD = 0`).
+
+**충족 근거.**
+
+| 조건 | 상태 | 근거 |
+|---|---|---|
+| AC1 mocked flake 근본 수리 | 충족 | `admin-ops.spec.ts`의 표별 locator scope + `aria-busy` 해제 대기(PR #1045) |
+| AC2 생성 OpenAPI 타입 기반 BFF mock | 충족 | PR #1059. `e2e/tsconfig.json`이 mock을 `src/api/types.ts`에 컴파일 타임 결박하고 CI `type-check`가 매 PR 검사 |
+| AC4 reporter gate drift 해소 | 충족 | **HEAD에서 재계산 확인** — `mocked-failure-manifest.json` `discoveredTests` 284, `testInventorySha256`이 현 suite와 exact 일치 |
+| AC6 n150 live GET-only 실행 | 충족 | `logs.live.spec.ts:30`·`:50`이 배포 스택에서 **4회** 통과(`~/d1-live.log` 외 3건, 각 `Running 11 tests using 1 worker`, CI env 미설정이라 `retries: 0`) |
+| AC7 승인된 자격증명 | **충족(소유자 판정)** | 위 |
+
+**남는 잔여를 감추지 않는다.** AC3(mocked targeted 6/6)과 AC5(284/284 전량 통과)의
+receipt는 2026-08-21~26 것이고, 그 체크아웃은 현 HEAD보다 frontend/src 커밋 5개 뒤다
+(`8078b110` `/v1/debug` 표면 제거 등이 `src/api/types.ts` 158줄·`src/lib/proxy.ts` 17줄을
+바꿨다). mocked checkpoint는 CI job이 아니라 **수동 게이트**라 자동 재검증이 없다.
+
+그 위험을 기계가 덮는 범위는 분명하다 — CI `type-check`가 매 PR에서 mock↔생성 타입
+drift를 잡고, AC4의 manifest 결박은 HEAD에서 방금 재계산했다. 덮지 못하는 것은
+"현 HEAD에서 284개가 실제로 통과하는가"이며, 그것이 이 항목의 잔여 위험이다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 

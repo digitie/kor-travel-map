@@ -10,6 +10,26 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-07 — 소유자 판정으로 닫은 둘
+
+- [x] T-FE-MOCK-FLAKE — admin UI logs acceptance (**2026-09-07 완료**). mocked 절반은
+  PR #1045·#1059·#1077로 해소됐고 HEAD에서 manifest 결박을 재계산해 확인했다(284 tests,
+  `testInventorySha256` exact 일치). live 절반은 `logs.live.spec.ts` 2건이 배포 스택에서
+  **4회** 통과했다(`workers=1`, `retries=0`). 마지막까지 열려 있던 AC7("승인된 읽기 전용
+  자격증명")은 **소유자 판정으로 `T-VN-41F1D-D1` 실측이 갚는다.**
+  **잔여 위험(감추지 않는다)**: AC3·AC5의 receipt는 현 HEAD보다 frontend/src 커밋 5개
+  뒤 체크아웃 것이고 mocked checkpoint는 CI job이 아니라 수동 게이트다. CI `type-check`가
+  mock↔생성 타입 drift는 매 PR 잡는다. 상세는 `docs/tasks-acceptance.md` §T-FE-MOCK-FLAKE.
+- [x] T-VN-H34 — 공식 curation 미연결 membership (**2026-09-07 완료, 범위: 저장소 CSV**).
+  소유자 판정으로 범위를 저장소 CSV까지로 한정했다 — prod 데이터를 전제하던 조건들은
+  **pinned rebuild가 매번 DB를 새로 만들어** 구조적으로 닫히지 않는다. CSV 범위 4개 조건
+  전부 충족(주소 축 시군구 대조 도구화, provider provenance는 #910 import-act로 해소,
+  판정 축 3개 도구화, 카테고리 모순 8건 처리 + manifest linked 216 / unresolved 270).
+  **범위 밖으로 밀려난 넷**(preview/commit 실데이터 검증, H34A 전수화, H34B prod import,
+  "없는 것은 Feature로 추가" 3건)은 지우지 않고 acceptance 절에 남겼다 — 재개하려면
+  lifecycle 판정이 선행한다.
+
+
 ## 2026-09-07 — T-VN-PAIR-V2
 
 - [x] T-VN-PAIR-V2 — PinVi M05 pair 계약 v2 이행 (**2026-09-07 완료**). 계약에서
