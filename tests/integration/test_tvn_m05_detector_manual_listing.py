@@ -336,3 +336,41 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
         assert len(seen) == len(set(seen))
     finally:
         await dagster.dispose()
+
+
+async def test_the_detector_loop_reaches_every_manual_page(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """탐지기 **루프**의 cursor도 전진해야 한다.
+
+    앞의 cursor 테스트는 reader의 `p_after`만 잰다 — 루프가 `after`를 갱신하지
+    않아도 초록이었다(변이로 확인했다). 페이지 크기를 1로 놓고 이웃 있는 manual을
+    여럿 심어, 각 manual마다 case가 생기는지 본다. 루프가 제자리를 돌면 첫
+    manual의 case만 나오고 나머지는 영영 안 나온다.
+    """
+
+    pairs = [
+        await _seed_manual_provider_pair(migrated_engine, index=20 + i)
+        for i in range(3)
+    ]
+    wanted = {str(pair["manual_feature_id"]) for pair in pairs}
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        async with AsyncSession(dagster) as session, session.begin():
+            outcome = await detect_manual_provider_candidates(
+                session, run_id=f"paged-{uuid4().hex[:8]}", manual_page_size=1
+            )
+        assert outcome.created_case_ids
+
+        async with migrated_engine.connect() as connection:
+            reached = {
+                str(row.manual_feature_id)
+                for row in await connection.execute(
+                    text(
+                        "SELECT manual_feature_id FROM ops.manual_provider_dedup_cases "
+                        "WHERE case_id = ANY(CAST(:case_ids AS uuid[]))"
+                    ),
+                    {"case_ids": list(outcome.created_case_ids)},
+                )
+            }
+        assert wanted <= reached
