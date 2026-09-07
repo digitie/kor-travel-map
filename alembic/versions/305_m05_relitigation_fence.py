@@ -149,31 +149,36 @@ _RECEIPT_HEAD_NARROW: Final[str] = (
 )
 
 
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _COLUMN_ADD,
+    _COLUMN_BACKFILL,
+    _COLUMN_NOT_NULL,
+    _COLUMN_CHECK,
+    _INDEX_ADD,
+    # 이 프로시저의 소유자는 `ktm_manual_provider_dedup_procedure_owner`다 —
+    # `CREATE OR REPLACE`는 소유자만 할 수 있다(302와 같은 패턴, schema owner가
+    # 멤버십을 갖는다).
+    "SET ROLE ktm_manual_provider_dedup_procedure_owner",
+    _sidecar("_305_candidate_upgraded.sql"),
+    "SET ROLE ktm_feature_schema_owner",
+    _RECEIPT_HEAD_WIDEN,
+)
+
+_DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _RECEIPT_HEAD_NARROW,
+    "SET ROLE ktm_manual_provider_dedup_procedure_owner",
+    _sidecar("_305_candidate_original.sql"),
+    "SET ROLE ktm_feature_schema_owner",
+    _INDEX_DROP,
+    _COLUMN_DROP,
+)
+
+
 def upgrade() -> None:
-    for statement in (
-        _COLUMN_ADD,
-        _COLUMN_BACKFILL,
-        _COLUMN_NOT_NULL,
-        _COLUMN_CHECK,
-        _INDEX_ADD,
-        # 이 프로시저의 소유자는 `ktm_manual_provider_dedup_procedure_owner`다 —
-        # `CREATE OR REPLACE`는 소유자만 할 수 있다(302와 같은 패턴, schema owner가
-        # 멤버십을 갖는다).
-        "SET ROLE ktm_manual_provider_dedup_procedure_owner",
-        _sidecar("_305_candidate_upgraded.sql"),
-        "SET ROLE ktm_feature_schema_owner",
-        _RECEIPT_HEAD_WIDEN,
-    ):
+    for statement in _UPGRADE_STATEMENTS:
         op.execute(statement)
 
 
 def downgrade() -> None:
-    for statement in (
-        _RECEIPT_HEAD_NARROW,
-        "SET ROLE ktm_manual_provider_dedup_procedure_owner",
-        _sidecar("_305_candidate_original.sql"),
-        "SET ROLE ktm_feature_schema_owner",
-        _INDEX_DROP,
-        _COLUMN_DROP,
-    ):
+    for statement in _DOWNGRADE_STATEMENTS:
         op.execute(statement)
