@@ -508,6 +508,16 @@ _M05_WRITER_ACL = (
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate("
     "text, text, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
+    # T-VN-M05-3(migration 304). detector가 manual origin 대상을 여는 유일한
+    # 경로다. 함수 본문의 session_user 검사와 이 ACL이 **둘 다** 막는다 — 하나가
+    # 지워졌을 때 다른 하나가 남게 하려는 것이고, 그래서 본문 검사를 가리지
+    # 않도록 owner role로 호출하는 게이트를 따로 둔다.
+    "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals("
+    "text, integer) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals("
+    "text, integer) TO ktm_manual_provider_dedup_detector_executor",
     "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
     "uuid, text, text, bigint, bigint, text, text, text, bigint), "
     "feature.resolve_manual_provider_dedup_case_v2("

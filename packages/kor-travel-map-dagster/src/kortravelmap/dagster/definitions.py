@@ -26,6 +26,7 @@ from .file_registry_scan import (
 )
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
+from .manual_provider_dedup import MANUAL_PROVIDER_DEDUP_JOBS
 from .mcst_features import MCST_FEATURE_ASSETS
 from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
@@ -202,6 +203,7 @@ defs = Definitions(
             *MOIS_SOURCE_SYNC_JOBS,
             *OFFLINE_UPLOAD_JOBS,
             *FILE_REGISTRY_SCAN_JOBS,
+            *MANUAL_PROVIDER_DEDUP_JOBS,
         ],
     ),
     schedules=[

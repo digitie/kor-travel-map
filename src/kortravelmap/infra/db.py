@@ -110,6 +110,12 @@ _M05_CASE_READ_FUNCTION = "feature.read_manual_provider_dedup_case(uuid)"
 _M05_CASE_LIST_FUNCTION = (
     "feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)"
 )
+#: T-VN-M05-3 detector가 manual origin 대상을 여는 유일한 경로(migration 304).
+#: dagster 허용목록이 종전 **빈 집합**이었으므로, 이 등록이 없으면 함수가
+#: 배포되는 순간 모든 Dagster 프로세스가 기동 preflight에서 죽는다.
+_M05_DETECTOR_MANUAL_LIST_FUNCTION = (
+    "feature.list_manual_provider_dedup_detector_manuals(text,integer)"
+)
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -266,7 +272,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
             _M05_CASE_LIST_FUNCTION,
         }
     ),
-    "ktm_feature_dagster_runtime": frozenset(),
+    "ktm_feature_dagster_runtime": frozenset({_M05_DETECTOR_MANUAL_LIST_FUNCTION}),
 }
 
 
