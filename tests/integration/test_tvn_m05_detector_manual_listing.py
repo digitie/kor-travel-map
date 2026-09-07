@@ -39,6 +39,21 @@ pytestmark = [
 _LISTING = "feature.list_manual_provider_dedup_detector_manuals(text,integer)"
 
 
+def _constraint_of(error: DBAPIError) -> str | None:
+    """`RAISE ... USING CONSTRAINT`가 실은 곳을 찾는다.
+
+    SQLAlchemy가 asyncpg 예외를 자기 타입으로 번역하면서 `constraint_name`을
+    옮기지 않는다 — 원본은 `__cause__`에 있다. 이걸 모르고 번역된 예외에서
+    읽으면 항상 `None`이라 **어떤 CONSTRAINT든 통과하는 공허한 단언**이 된다.
+    """
+
+    for candidate in (error.orig, getattr(error.orig, "__cause__", None)):
+        name = getattr(candidate, "constraint_name", None)
+        if name:
+            return str(name)
+    return None
+
+
 async def _listing_rows(
     engine: AsyncEngine, *, after: str | None = None, limit: int = 1000
 ) -> list[str]:
@@ -105,10 +120,7 @@ async def test_the_listing_and_the_procedure_agree_on_manual_origin(
                     },
                 )
             await connection.rollback()
-        assert (
-            getattr(rejected.value.orig, "constraint_name", None)
-            == "ck_m05_candidate_manual_origin"
-        )
+        assert _constraint_of(rejected.value) == "ck_m05_candidate_manual_origin"
     finally:
         await dagster.dispose()
 
@@ -132,7 +144,8 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
         with pytest.raises(DBAPIError) as by_acl:
             await _listing_rows(api)
         assert getattr(by_acl.value.orig, "sqlstate", None) == "42501"
-        assert getattr(by_acl.value.orig, "constraint_name", None) is None
+        # ACL 거부에는 CONSTRAINT가 없다 — 이 값으로 두 실패를 구별한다.
+        assert _constraint_of(by_acl.value) is None
     finally:
         await api.dispose()
 
@@ -161,10 +174,7 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
             )
         await connection.rollback()
     assert getattr(by_body.value.orig, "sqlstate", None) == "42501"
-    assert (
-        getattr(by_body.value.orig, "constraint_name", None)
-        == "ck_m05_detector_manuals_executor"
-    )
+    assert _constraint_of(by_body.value) == "ck_m05_detector_manuals_executor"
 
 
 async def test_the_listing_cannot_write_because_the_engine_forbids_it(
@@ -236,21 +246,27 @@ async def test_the_detector_records_a_candidate_and_reports_the_scope_it_scanned
 
         assert outcome.manual_input_count >= 1
         assert outcome.scored_pair_count >= 1
-        assert len(outcome.created_case_ids) == 1
+        assert outcome.created_case_ids
         assert outcome.complete_set is True
 
+        # 탐지기는 그 DB의 **모든** manual origin Feature를 훑는다(앞선 테스트가
+        # 심은 것 포함). 그래서 "정확히 1건"이 아니라 "내 쌍이 그 안에 있다"를 잰다.
         async with migrated_engine.connect() as connection:
             row = (
                 await connection.execute(
                     text(
                         "SELECT manual_feature_id, provider_feature_id, scorer_id, "
                         "detector_causation, total_score "
-                        "FROM ops.manual_provider_dedup_cases WHERE case_id = :case_id"
+                        "FROM ops.manual_provider_dedup_cases "
+                        "WHERE case_id = ANY(CAST(:case_ids AS uuid[])) "
+                        "  AND manual_feature_id = :manual_feature_id"
                     ),
-                    {"case_id": outcome.created_case_ids[0]},
+                    {
+                        "case_ids": list(outcome.created_case_ids),
+                        "manual_feature_id": pair["manual_feature_id"],
+                    },
                 )
             ).one()
-        assert row.manual_feature_id == pair["manual_feature_id"]
         assert row.provider_feature_id == pair["provider_feature_id"]
         assert row.scorer_id == "manual-provider-v1"
         assert float(row.total_score) >= 0.65
