@@ -1285,17 +1285,32 @@ grep이었다.
 
 | | 검사 |
 |---|---|
-| L0 | leaf 트리가 검증기를 돌리는 특권 신원 소유의 정확 0700이고 symlink가 아니다 (증적 하위 디렉터리 포함) |
+| L0 | leaf 트리가 검증기를 돌리는 특권 신원 소유의 **정확 0700**이고 symlink가 아니다 (증적 하위 디렉터리 포함) |
 | L1 | harness 이름 / `status=passed` / `phase=completed` |
-| L2 | 세 evidence 파일의 SHA-256을 **다시 계산**해 `result.json`과 대조 (O_NOFOLLOW·정확 0600·nlink 1·dev/ino 재확인으로 읽고, 해시한 그 바이트를 그대로 파싱) |
+| L2 | 세 evidence 파일의 SHA-256을 **다시 계산**해 `result.json`이 적은 값과 대조 (O_NOFOLLOW·정확 0600·nlink 1·dev/ino 재확인으로 읽고, 해시한 그 바이트를 그대로 파싱) — **세 줄로 찍힌다** |
 | L3 | pinset: attestation == result == 살아 있는 registry |
-| L4 | Manager source revision: attestation == result == **registry binding** (설치본과의 일치는 `is_installed=`로 보고만) |
-| L5 | execution identity가 registry(`current`+`history`)에 있고 그 binding이 현재 pinset·Map·PinVi revision에 결박 |
-| L6 | provenance의 Map/PinVi revision == pinned revision |
+| L5 | execution identity: attestation == result, 그리고 registry(`current`+`history`)의 **한 binding**이 그 identity·현재 pinset·Map·PinVi revision을 동시에 들고 있다 |
+| L4 | Manager source revision: attestation == result == **그 binding**의 값 (설치본과의 일치는 `is_installed=`로 보고만) |
+| L6 | provenance의 Map·PinVi revision == pinned revision (**둘 다** 출력에 찍는다) |
+| L6b | provenance가 **이 실행의 것**이다 — `execution_identity_sha256`·`manager_source_revision`·`pinset_sha256`·`transaction_id` 넷이 `result.json`과 같다. `transaction_id`는 실행마다 `secrets.token_hex(16)`이라 **예측 불가**다 |
 | L7 | `m04_server_side_chain_verified` |
-| L7b | m05 attestation payload의 `m04_attestation_sha256`이 L2가 재계산한 M04 해시와 같다 (M04를 사슬에 넣는다) |
-| L8 | pinset이 terminal 차단이 아니고, **leaf 자신의** execution identity에 **무조건**(`phase is None`) 소각 기록이 없다 — scoped 기록은 소각이 아니고, `current`의 소각은 보지 않는다 |
+| L7b | m05 attestation payload의 `m04_attestation_sha256`이 `result.json`의 그 값과 같고 hex다 — L2가 그 값을 재계산해 대조하므로 M04 증적이 사슬 안에 들어온다 |
 | L9 | leaf 값에서 재계산한 ledger claim이 root-only 0700 ledger에 실재한다 |
+| L8 | pinset이 terminal 차단이 아니고, **leaf 자신의** execution identity에 **무조건**(`phase is None`) 소각 기록이 없다 — scoped 기록은 소각이 아니고, `current`의 소각은 보지 않는다 |
+
+행 순서는 프로그램 출력 순서 그대로다(L5가 L4보다, L9가 L8보다 먼저 찍힌다).
+L2가 파일 셋에 대해 세 줄이므로 **출력은 leaf당 14줄**이다.
+
+**재현 절차.** 호스트 `n150`. `ktdctl`이 설치한 트리에서 그대로 실행한다:
+
+```
+sudo /opt/kor-travel-docker-manager/backend/.venv/bin/python     /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py --verify-leaf <leaf>
+```
+
+`<leaf>`는 `/root/pairv2-e2e-03`·`/root/pairv2-e2e-02`. 검증기는 `KTDM_RUNTIME_PINS_FILE`/
+`KTDM_RUNTIME_EXECUTIONS_FILE`이 없을 때 `/var/lib/kor-travel-docker-manager*`의 registry를
+읽는다 — env로 갈아끼울 수 있으므로 **환경을 비운 채** 실행해야 위 출력과 같은 것을 본다.
+검증기 자신의 revision은 `/opt/kor-travel-docker-manager/.ktdm-source-revision`이다.
 
 **서명은 근거가 아니다.** 드라이버는 실행마다 `openssl genpkey`로 Ed25519 키를 새로
 만들어 서명하고 실행 종료와 함께 지운다 — 공개키가 어디에도 남지 않아 사후 제3자
@@ -1351,12 +1366,19 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
 
 - [x] **P1 — `--verify-leaf`가 승격 후보 leaf에 대해 exit 0.** (2026-09-07 실측)
 
-      Manager #331(phase 회귀까지 고친 것)로 두 후보가 모두 통과했다. **프로그램이 낸
-      출력을 그대로 싣는다** — 손으로 요약하면 그것이 곧 이 정의가 배격한 '문서 행위'다.
+      **`ktdctl`이 설치한 Manager**로 두 후보가 모두 통과했다. 4차 적대 리뷰가
+      P0로 잡은 것이 이 지점이다 — 그전 기록은 브랜치 체크아웃의 스크립트로 낸 것이라
+      정의의 문언("설치한 Manager의 …")을 만족시키지 않았다. 아래는 **프로그램이 낸
+      출력 그대로**다.
 
       ```
-      # manager revision: 6cf86a8558c4eef4cfe20a0983fab4c9ddf430b5
-      $ sudo m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-03
+      # host: n150
+      # installed Manager (ktdctl trusted release): 44562d989441e7122e7aafcbe6bae7ad5a03feab
+      # verifier: /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py
+      # date: 2026-09-07T15:13:46Z
+
+      $ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/python \
+          /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-03
       PASS L0 leaf 신뢰 경계 — root-owned 0700 트리 /root/pairv2-e2e-03 (증적 하위 디렉터리 포함)
       PASS L1 harness/status/phase — harness=m05-isolated-bridge-v1 status=passed phase=completed
       PASS L2 runtime/m04/m04-attestation.json — result.m04_attestation_sha256=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de recomputed=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de
@@ -1364,8 +1386,9 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       PASS L2 runtime/isolated-runtime-provenance.json — result.runtime_provenance_sha256=652ac5bef4e37a8e8f8ae1a3ff212b15f83eb878f4462fbd71e9b316d7759209 recomputed=652ac5bef4e37a8e8f8ae1a3ff212b15f83eb878f4462fbd71e9b316d7759209
       PASS L3 pinset — attestation=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 result=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 registry=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0
       PASS L5 execution identity — attestation=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 result=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 registry_binding=found is_current=False
-      PASS L4 Manager source revision — attestation=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 result=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 binding=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 installed=51b39b269c2a7422a2a1f33b3ab62f269ec2adf2 is_installed=False
-      PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693
+      PASS L4 Manager source revision — attestation=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 result=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 binding=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 installed=44562d989441e7122e7aafcbe6bae7ad5a03feab is_installed=False
+      PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9
+      PASS L6b provenance가 이 실행의 것이다 — execution_identity_sha256=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6==5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 manager_source_revision=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7==0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 pinset_sha256=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0==b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 transaction_id=c3341ca0150445c43fe024cf44e08f90==c3341ca0150445c43fe024cf44e08f90
       PASS L7 M04 server-side chain — m04_server_side_chain_verified=True
       PASS L7b M04 증적이 사슬 안에 있다 — attestation=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de result=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de
       PASS L9 root-only ledger claim — ledger=/var/lib/kor-travel-docker-manager/m05-isolated-once claim=f021c8cf3f36b20e… present=True
@@ -1373,7 +1396,8 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       leaf verification PASSED
       exit=0
 
-      $ sudo m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-02
+      $ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/python \
+          /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-02
       PASS L0 leaf 신뢰 경계 — root-owned 0700 트리 /root/pairv2-e2e-02 (증적 하위 디렉터리 포함)
       PASS L1 harness/status/phase — harness=m05-isolated-bridge-v1 status=passed phase=completed
       PASS L2 runtime/m04/m04-attestation.json — result.m04_attestation_sha256=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03 recomputed=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03
@@ -1381,8 +1405,9 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       PASS L2 runtime/isolated-runtime-provenance.json — result.runtime_provenance_sha256=36665196b4801ababa61e480a24f62b67e1dac104da0ecab8e438815dbfbae30 recomputed=36665196b4801ababa61e480a24f62b67e1dac104da0ecab8e438815dbfbae30
       PASS L3 pinset — attestation=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 result=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 registry=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0
       PASS L5 execution identity — attestation=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae result=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae registry_binding=found is_current=False
-      PASS L4 Manager source revision — attestation=d36847e2f2e1b821c8e87e238561a64c0706a275 result=d36847e2f2e1b821c8e87e238561a64c0706a275 binding=d36847e2f2e1b821c8e87e238561a64c0706a275 installed=51b39b269c2a7422a2a1f33b3ab62f269ec2adf2 is_installed=False
-      PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693
+      PASS L4 Manager source revision — attestation=d36847e2f2e1b821c8e87e238561a64c0706a275 result=d36847e2f2e1b821c8e87e238561a64c0706a275 binding=d36847e2f2e1b821c8e87e238561a64c0706a275 installed=44562d989441e7122e7aafcbe6bae7ad5a03feab is_installed=False
+      PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9
+      PASS L6b provenance가 이 실행의 것이다 — execution_identity_sha256=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae==c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae manager_source_revision=d36847e2f2e1b821c8e87e238561a64c0706a275==d36847e2f2e1b821c8e87e238561a64c0706a275 pinset_sha256=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0==b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 transaction_id=d4612b88ff2422b5f4323dd03ba4ea78==d4612b88ff2422b5f4323dd03ba4ea78
       PASS L7 M04 server-side chain — m04_server_side_chain_verified=True
       PASS L7b M04 증적이 사슬 안에 있다 — attestation=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03 result=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03
       PASS L9 root-only ledger claim — ledger=/var/lib/kor-travel-docker-manager/m05-isolated-once claim=d8c711b2c5b60e27… present=True
@@ -1435,7 +1460,7 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
 
       | 무엇이 | 어느 축을 깨는가 |
       |---|---|
-      | `pin rotate-pair` 한 번 | L3·L5·L6 (이것은 **의도된** 성질이다) |
+      | `pin rotate-pair` 한 번 | L3·L5·L6, 그리고 L4(binding 파생) (이것은 **의도된** 성질이다) |
       | execution history 500칸 링에서 두 binding이 밀려남 | L5, 그리고 L4(binding 파생) |
       | 두 후보 leaf 자신의 identity가 소각됨 | L8 |
 
@@ -1443,7 +1468,31 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       **검증기가 durable receipt를 남기게 하는 것**은 별도 항목이 소유한다
       (`T-VN-M05-VERIFY-RECEIPT`).
 
-      4차 리뷰가 남았다.
+      **4차는 갈렸다 — 코드 리뷰어 GO, 조문 리뷰어 NO_GO.** 조문 쪽 P0는
+      "기록된 실측이 조문이 정의한 명령이 아니다"였고 정당했다. 그전 기록은 브랜치
+      체크아웃의 스크립트로 낸 것이고, 그 호스트의 **설치본**은 조문이 근거로 쓰지
+      않는다고 못 박은 강화 전 8축 검증기였다. Manager main(`44562d98`)을 `ktdctl`
+      설치 경로로 배포한 뒤 **설치본으로** 다시 받아 위에 실었다.
+
+      코드 쪽 P1은 #332가 전부 고쳤다:
+
+      | 무엇이 | 고침 |
+      |---|---|
+      | 14축 중 넷(L1·L3·L6·L7)에 고립 게이트가 없었다 — 지워도 전부 초록 | 픽스처 knob + 고립 테스트 넷 |
+      | 정확 mode 요구가 무방비(테스트가 0644/0755만 써서 `& 0o077`로 되돌려도 초록) | 0400·0500으로 잰다 |
+      | `claim_name` 테스트가 planner를 안 부르고 **손복사본 세 번째**를 쓰고 있었다 | `ledger_filename`을 실제로 부른다 |
+      | provenance의 결박 넷을 버리고 있었다 | **L6b 신설** — `transaction_id`가 예측 불가라 그 실행에 묶는다 |
+      | L6 출력이 map만 찍어 증적에 PinVi revision이 없었다 | 둘 다 찍는다 |
+
+      **승격을 정의하는 산출물의 CI.** Manager #330·#331·#332가 각각 백엔드·프론트엔드
+      검사 green으로 병합됐고, 그 시점의 `pytest -q backend/tests`는 각각 1622·1624·1630
+      passed / 3 skipped다.
+
+      **P3·P4·P5의 측정 시점은 2026-09-07이다.** 셋 다 그 시점의 관측이며, `ktdctl pin
+      verify`의 terminal 상태(P4)와 CI green(P3)은 시간이 지나면 변한다 — 재확인 없이
+      현재형으로 읽으면 안 된다.
+
+      5차 리뷰가 남았다.
 - [x] **P3 — 최신 CI green.** 핀된 PinVi `f62e7ef1`의 `api` 워크플로가 재실행으로
       success. 실패는 문서화된 flaky
       (`test_restore_backup_hotswap_cancellation_kills_script_process_group`)였다.
