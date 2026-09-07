@@ -149,6 +149,13 @@ function context() {
   return { calls, wrapper };
 }
 
+/** `@testing-library/jest-dom`을 쓰지 않으므로 속성을 직접 읽는다. */
+function submitButton(): boolean {
+  return (
+    screen.getByRole("button", { name: "판정 제출" }) as HTMLButtonElement
+  ).disabled;
+}
+
 async function openCase() {
   const { calls, wrapper } = context();
   render(<ManualProviderDedupClient />, { wrapper });
@@ -178,9 +185,9 @@ describe("M05-5 admin 판정 화면", () => {
 
   it("사유가 비어 있으면 제출을 막는다", async () => {
     await openCase();
-    expect(screen.getByRole("button", { name: "판정 제출" })).toBeDisabled();
+    expect(submitButton()).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "중복 아님" } });
-    expect(screen.getByRole("button", { name: "판정 제출" })).toBeEnabled();
+    expect(submitButton()).toBe(false);
   });
 
   it("파괴적 판정은 확인 문구를 그대로 받아야 열린다", async () => {
@@ -188,15 +195,14 @@ describe("M05-5 admin 판정 화면", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /사유/ }), { target: { value: "provider가 정본" } });
     fireEvent.click(screen.getByRole("radio", { name: /수동본 폐기/ }));
 
-    const submit = screen.getByRole("button", { name: "판정 제출" });
-    expect(submit).toBeDisabled();
+    expect(submitButton()).toBe(true);
 
     const confirmation = screen.getByRole("textbox", { name: /폐기를 확인합니다/ });
     fireEvent.change(confirmation, { target: { value: "폐기" } });
-    expect(submit).toBeDisabled();
+    expect(submitButton()).toBe(true);
 
     fireEvent.change(confirmation, { target: { value: "폐기를 확인합니다" } });
-    expect(submit).toBeEnabled();
+    expect(submitButton()).toBe(false);
   });
 
   it("survivor는 provider로 고정이다 — 고를 수 없고 제출 payload에도 provider가 실린다", async () => {
