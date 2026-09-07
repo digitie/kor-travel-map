@@ -446,6 +446,11 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
     `coord IS NOT NULL`이 특히 중요하다 — 이 항이 빠지면 좌표 없는 manual이
     목록에 실려 탐지기가 `float(None)`으로 죽는다. 나머지 셋은 프로시저의
     `ck_m05_candidate_feature_proof`와 같은 진실이라, 목록이 넓어지면 23514가 난다.
+
+    각 상태의 실제 도메인은 좁다 — `quality_state`는 `valid|quarantined`,
+    `lifecycle_state`는 `active|retired`이고 `ck_features_state_tuple`이
+    `active OR suppressed`를 강제한다. 도메인 밖 값으로 재면 테스트가
+    **목록이 아니라 CHECK에** 걸려 아무것도 지키지 않는다.
     """
 
     pair = await _seed_manual_provider_pair(migrated_engine, index=50)
@@ -462,7 +467,7 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
                 {},
             ),
             ("publication_state", "publication_state = 'suppressed'", {}),
-            ("quality_state", "quality_state = 'invalid'", {}),
+            ("quality_state", "quality_state = 'quarantined'", {}),
             ("coord", "coord = NULL", {}),
         ):
             async with migrated_engine.begin() as connection:
