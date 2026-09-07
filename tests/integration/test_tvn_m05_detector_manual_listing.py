@@ -66,7 +66,7 @@ async def test_the_listing_and_the_procedure_agree_on_manual_origin(
     그 CONSTRAINT로 거부해야 한다.
     """
 
-    pair = await _seed_manual_provider_pair(migrated_engine)
+    pair = await _seed_manual_provider_pair(migrated_engine, index=10)
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         listed = await _listing_rows(dagster)
@@ -124,7 +124,7 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
     본문 검사만 CONSTRAINT 이름을 남긴다.
     """
 
-    await _seed_manual_provider_pair(migrated_engine)
+    await _seed_manual_provider_pair(migrated_engine, index=11)
 
     # (a) EXECUTE 없음 — ACL이 막는다.
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
@@ -224,7 +224,7 @@ async def test_the_detector_records_a_candidate_and_reports_the_scope_it_scanned
 ) -> None:
     """탐지기가 후보를 남기고, 그 case가 **어떤 범위를 본 결과인지**를 싣는다."""
 
-    pair = await _seed_manual_provider_pair(migrated_engine)
+    pair = await _seed_manual_provider_pair(migrated_engine, index=12)
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     run_id = f"itest-{uuid4().hex[:12]}"
     try:
@@ -272,7 +272,7 @@ async def test_the_detector_reports_its_scope_even_when_nothing_survives(
     올려 어떤 쌍도 통과하지 못하게 만든 뒤, 그래도 집계가 남는지 본다.
     """
 
-    await _seed_manual_provider_pair(migrated_engine)
+    await _seed_manual_provider_pair(migrated_engine, index=13)
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         async with AsyncSession(dagster) as session, session.begin():
@@ -298,7 +298,9 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
     1로 놓고 여러 manual을 심어, 마지막 manual까지 실제로 도달하는지 잰다.
     """
 
-    pairs = [await _seed_manual_provider_pair(migrated_engine) for _ in range(3)]
+    pairs = [
+        await _seed_manual_provider_pair(migrated_engine, index=i) for i in range(3)
+    ]
     wanted = {str(pair["manual_feature_id"]) for pair in pairs}
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:

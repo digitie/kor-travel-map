@@ -58,10 +58,23 @@ async def _open_command(engine: AsyncEngine, *, actor: str, operation: str) -> i
         )
 
 
-async def _seed_manual_provider_pair(engine: AsyncEngine) -> dict[str, object]:
-    """manual origin/claim과 provider current source proof를 모두 심는다."""
+async def _seed_manual_provider_pair(
+    engine: AsyncEngine, *, index: int = 0
+) -> dict[str, object]:
+    """manual origin/claim과 provider current source proof를 모두 심는다.
+
+    `index`는 identity claim의 exact 좌표/이름을 흩는다. 그것을 고정하면
+    `uq_manual_feature_identity_claims_exact` 때문에 한 DB에서 **두 번 부를 수
+    없다** — 여러 manual을 심어야 하는 탐지기 테스트가 그래서 필요로 한다.
+    manual과 provider를 같은 만큼 옮기므로 둘 사이 거리는 그대로다.
+    """
 
     suffix = uuid4().hex
+    lon_offset = index * 0.01
+    lat_offset = index * 0.01
+    manual_name = f"M05 수동 후보 {index}"
+    manual_lon_e6 = 127111111 + int(round(lon_offset * 1_000_000))
+    manual_lat_e6 = 37511111 + int(round(lat_offset * 1_000_000))
     manual_feature_id = f"f_global_p_m05manual{suffix[:10]}"
     provider_feature_id = f"f_global_p_m05provider{suffix[:10]}"
     source_entity_key = f"se_m05_{suffix[:12]}"
@@ -74,8 +87,13 @@ async def _seed_manual_provider_pair(engine: AsyncEngine) -> dict[str, object]:
     )
     async with engine.begin() as connection:
         for feature_id, name, lon, lat in (
-            (manual_feature_id, "M05 수동 후보", 127.111111, 37.511111),
-            (provider_feature_id, "M05 Provider 후보", 127.111222, 37.511222),
+            (manual_feature_id, manual_name, 127.111111 + lon_offset, 37.511111 + lat_offset),
+            (
+                provider_feature_id,
+                f"M05 Provider 후보 {index}",
+                127.111222 + lon_offset,
+                37.511222 + lat_offset,
+            ),
         ):
             await connection.execute(
                 text(
@@ -130,12 +148,18 @@ async def _seed_manual_provider_pair(engine: AsyncEngine) -> dict[str, object]:
                   feature_id, feature_kind, name_key, lon_e6, lat_e6,
                   claimed_by_command_id, claim_basis, claimed_at
                 ) VALUES (
-                  :feature_uuid, 'place', 'm05 수동 후보', 127111111, 37511111,
+                  :feature_uuid, 'place', :name_key, :lon_e6, :lat_e6,
                   :command_id, 'manual_create', clock_timestamp()
                 )
                 """
             ),
-            {"feature_uuid": manual_uuid, "command_id": manual_command_id},
+            {
+                "feature_uuid": manual_uuid,
+                "command_id": manual_command_id,
+                "name_key": manual_name.lower(),
+                "lon_e6": manual_lon_e6,
+                "lat_e6": manual_lat_e6,
+            },
         )
         await connection.execute(
             text(
