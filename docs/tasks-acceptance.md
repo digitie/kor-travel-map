@@ -1285,7 +1285,8 @@ grep이었다.
 
 | | 검사 |
 |---|---|
-| L0 | leaf 트리가 검증기를 돌리는 특권 신원 소유의 **정확 0700**이고 symlink가 아니다 (증적 하위 디렉터리 포함) |
+| L0 | leaf 루트와 **증적 파일의 부모 디렉터리들**이 검증기를 돌리는 특권 신원 소유의 정확 0700이고 symlink가 아니다 — leaf 안 **전체**를 재지는 않는다(그 잔여는 L0b가 진다) |
+| L0b | 일회용 PinVi 체크아웃이 leaf 안에 남지 않았다 (`disposable_run_worktree_retained`) — 남으면 L0이 재지 않는 임의 모드 트리가 leaf 안에 있다 |
 | L1 | harness 이름 / `status=passed` / `phase=completed` |
 | L2 | 세 evidence 파일의 SHA-256을 **다시 계산**해 `result.json`이 적은 값과 대조 (O_NOFOLLOW·정확 0600·nlink 1·dev/ino 재확인으로 읽고, 해시한 그 바이트를 그대로 파싱) — **세 줄로 찍힌다** |
 | L3 | pinset: attestation == result == 살아 있는 registry |
@@ -1299,7 +1300,7 @@ grep이었다.
 | L8 | pinset이 terminal 차단이 아니고, **leaf 자신의** execution identity에 **무조건**(`phase is None`) 소각 기록이 없다 — scoped 기록은 소각이 아니고, `current`의 소각은 보지 않는다 |
 
 행 순서는 프로그램 출력 순서 그대로다(L5가 L4보다, L9가 L8보다 먼저 찍힌다).
-L2가 파일 셋에 대해 세 줄이므로 **출력은 leaf당 14줄**이다.
+L2가 파일 셋에 대해 세 줄이므로 **출력은 leaf당 15줄**이다.
 
 **재현 절차.** 호스트 `n150`. `ktdctl`이 설치한 트리에서 그대로 실행한다:
 
@@ -1366,27 +1367,26 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
 
 - [x] **P1 — `--verify-leaf`가 승격 후보 leaf에 대해 exit 0.** (2026-09-07 실측)
 
-      **`ktdctl`이 설치한 Manager**로 두 후보가 모두 통과했다. 4차 적대 리뷰가
-      P0로 잡은 것이 이 지점이다 — 그전 기록은 브랜치 체크아웃의 스크립트로 낸 것이라
-      정의의 문언("설치한 Manager의 …")을 만족시키지 않았다. 아래는 **프로그램이 낸
-      출력 그대로**다.
+      **`ktdctl`이 설치한 Manager**로 두 후보가 모두 통과했다. 아래는 **프로그램이
+      낸 출력 그대로**다 — 손으로 요약하면 그것이 곧 이 정의가 배격한 '문서 행위'다.
 
       ```
       # host: n150
-      # installed Manager (ktdctl trusted release): 44562d989441e7122e7aafcbe6bae7ad5a03feab
+      # installed Manager (ktdctl trusted release): f22f1a546b978f2dfbd1de4f547cc1fe80d69557
       # verifier: /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py
-      # date: 2026-09-07T15:13:46Z
+      # date: 2026-09-07T16:19:04Z
 
       $ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/python \
           /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-03
-      PASS L0 leaf 신뢰 경계 — root-owned 0700 트리 /root/pairv2-e2e-03 (증적 하위 디렉터리 포함)
+      PASS L0 leaf 신뢰 경계 — root-owned 0700: /root/pairv2-e2e-03 와 증적 파일의 부모 디렉터리 ['runtime', 'runtime/m04', 'runtime/m05']
+      PASS L0b 일회용 worktree가 남지 않았다 — disposable_run_worktree_retained=False
       PASS L1 harness/status/phase — harness=m05-isolated-bridge-v1 status=passed phase=completed
       PASS L2 runtime/m04/m04-attestation.json — result.m04_attestation_sha256=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de recomputed=950762d61116df96cee71c9364abfff4c847e1f576e2dce8aebc1898295074de
       PASS L2 runtime/m05/attestation.json — result.m05_attestation_sha256=ac8184114459a3f249ef974e382b548100b9985bfa8229d456e2ecf5b6f6df9c recomputed=ac8184114459a3f249ef974e382b548100b9985bfa8229d456e2ecf5b6f6df9c
       PASS L2 runtime/isolated-runtime-provenance.json — result.runtime_provenance_sha256=652ac5bef4e37a8e8f8ae1a3ff212b15f83eb878f4462fbd71e9b316d7759209 recomputed=652ac5bef4e37a8e8f8ae1a3ff212b15f83eb878f4462fbd71e9b316d7759209
       PASS L3 pinset — attestation=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 result=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 registry=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0
       PASS L5 execution identity — attestation=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 result=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 registry_binding=found is_current=False
-      PASS L4 Manager source revision — attestation=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 result=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 binding=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 installed=44562d989441e7122e7aafcbe6bae7ad5a03feab is_installed=False
+      PASS L4 Manager source revision — attestation=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 result=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 binding=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 installed=f22f1a546b978f2dfbd1de4f547cc1fe80d69557 is_installed=False
       PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9
       PASS L6b provenance가 이 실행의 것이다 — execution_identity_sha256=5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6==5014f0c6874fd51d26c853876a738eebe822476b2931f5f69534483cfe1beba6 manager_source_revision=0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7==0406b14d0bcbdf9762a2027ff42c11a1bf17e5a7 pinset_sha256=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0==b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 transaction_id=c3341ca0150445c43fe024cf44e08f90==c3341ca0150445c43fe024cf44e08f90
       PASS L7 M04 server-side chain — m04_server_side_chain_verified=True
@@ -1398,14 +1398,15 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
 
       $ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/python \
           /opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py --verify-leaf /root/pairv2-e2e-02
-      PASS L0 leaf 신뢰 경계 — root-owned 0700 트리 /root/pairv2-e2e-02 (증적 하위 디렉터리 포함)
+      PASS L0 leaf 신뢰 경계 — root-owned 0700: /root/pairv2-e2e-02 와 증적 파일의 부모 디렉터리 ['runtime', 'runtime/m04', 'runtime/m05']
+      PASS L0b 일회용 worktree가 남지 않았다 — disposable_run_worktree_retained=False
       PASS L1 harness/status/phase — harness=m05-isolated-bridge-v1 status=passed phase=completed
       PASS L2 runtime/m04/m04-attestation.json — result.m04_attestation_sha256=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03 recomputed=293bb31f639f3065c79dceb55ea3ce34805debc3724416a4753959d2fdc00b03
       PASS L2 runtime/m05/attestation.json — result.m05_attestation_sha256=60ad816859ce25f591edae9f866a5fe51617ed53cf0157b280a0a128b6e967b3 recomputed=60ad816859ce25f591edae9f866a5fe51617ed53cf0157b280a0a128b6e967b3
       PASS L2 runtime/isolated-runtime-provenance.json — result.runtime_provenance_sha256=36665196b4801ababa61e480a24f62b67e1dac104da0ecab8e438815dbfbae30 recomputed=36665196b4801ababa61e480a24f62b67e1dac104da0ecab8e438815dbfbae30
       PASS L3 pinset — attestation=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 result=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 registry=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0
       PASS L5 execution identity — attestation=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae result=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae registry_binding=found is_current=False
-      PASS L4 Manager source revision — attestation=d36847e2f2e1b821c8e87e238561a64c0706a275 result=d36847e2f2e1b821c8e87e238561a64c0706a275 binding=d36847e2f2e1b821c8e87e238561a64c0706a275 installed=44562d989441e7122e7aafcbe6bae7ad5a03feab is_installed=False
+      PASS L4 Manager source revision — attestation=d36847e2f2e1b821c8e87e238561a64c0706a275 result=d36847e2f2e1b821c8e87e238561a64c0706a275 binding=d36847e2f2e1b821c8e87e238561a64c0706a275 installed=f22f1a546b978f2dfbd1de4f547cc1fe80d69557 is_installed=False
       PASS L6 Map/PinVi source revision — provenance map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9 registry map=2099b8a671b4f5ddd4cc736e074d97b581675693 pinvi=f62e7ef1f2d898d1e71aafb12a2b17577eb689f9
       PASS L6b provenance가 이 실행의 것이다 — execution_identity_sha256=c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae==c5791dfd40f1003da2d3aa6bff0758f90363bfc53ad9ac2906675170526aa0ae manager_source_revision=d36847e2f2e1b821c8e87e238561a64c0706a275==d36847e2f2e1b821c8e87e238561a64c0706a275 pinset_sha256=b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0==b229446ac27382b48ad52d2022f2e9049d10350c8e13934e87cd7b1d973007e0 transaction_id=d4612b88ff2422b5f4323dd03ba4ea78==d4612b88ff2422b5f4323dd03ba4ea78
       PASS L7 M04 server-side chain — m04_server_side_chain_verified=True
@@ -1420,7 +1421,7 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       파생하지 않았다면 이 둘은 영원히 검증 불가였다는 뜻이다(#327이 고친 결함).
       **강화 전 결과는 근거로 쓰지 않는다.** 강화 전 검증기는 아무 디렉터리나 받았으므로
       그때의 exit 0은 이 조건을 만족시키지 않았다.
-- [ ] **P2 — 전문 적대 리뷰 두 건이 이 새 정의에 대해 GO.** 2026-09-07 1차는 두 건 모두
+- [x] **P2 — 전문 적대 리뷰 두 건이 이 새 정의에 대해 GO.** (2026-09-08 5차에서 충족) 2026-09-07 1차는 두 건 모두
       NO_GO였고 그 P0가 이 정의 변경을 불렀다. 그 P1들의 처분도 함께 적는다 —
       CI green(재실행으로 해소), 서명의 사후 검증 불가(정의에서 근거로 쓰지 않음),
       A2 성공 미소비(별도 항목으로 분리).
@@ -1492,7 +1493,31 @@ identity에서 본문을 두 번 돌릴 수 있다.** 메우려면 "소각(burne
       verify`의 terminal 상태(P4)와 CI green(P3)은 시간이 지나면 변한다 — 재확인 없이
       현재형으로 읽으면 안 된다.
 
-      5차 리뷰가 남았다.
+      **5차에서 두 건 모두 GO다 — P0 없음.** P2가 요구한 "전문 적대 리뷰 두 건이 이
+      새 정의에 대해 GO"가 충족됐다.
+
+      다만 코드 리뷰어가 **직접 변이를 돌려** 14축 중 여럿이 무방비임을 보였고, GO여도
+      고쳤다(Manager #333). 그 부류가 이 절에서 반복된 것이기 때문이다:
+
+      | 무방비였던 것 | 왜 안 잡혔나 |
+      |---|---|
+      | **L5 축 전체** | L5를 떨어뜨리던 세 테스트가 전부 다른 축을 함께 떨어뜨렸고, 단언이 **PASS 줄에도 찍히는 문자열**이라 축을 구분하지 못했다 |
+      | L8의 pinset 절반과 fail-close 분기 | 픽스처가 항상 False를 냈다 |
+      | L6b의 `transaction_id`·`manager`·`pinset`과 None 가드 | result와 함께 움직여 어긋낼 수 없었다 |
+
+      `transaction_id`가 특히 뼈아프다 — 실제 위협(같은 pinset·같은 Manager의 **다른
+      실행**이 만든 provenance 끼워넣기)에서는 나머지 세 필드가 전부 같으므로 **그
+      필드만이 그 공격을 잡는다.** L6b를 신설한 바로 그 PR에서 게이트 없이 들어왔다.
+
+      함께 고친 것: 정본 provenance 스키마와 검증기 키의 미결박(L9에서 이미 고친 결함의
+      쌍둥이), 판독 실패 시 이미 잰 축이 한 줄도 안 찍히던 것, 그리고 L0 문구가 재는
+      범위보다 넓던 것 — 그 잔여를 **L0b**로 올렸다.
+
+      **다섯 라운드의 정직한 총평.** 매 라운드 실제 결함이 나왔고 검증기는 8축 → 15축이
+      됐다. 그중 **둘은 앞 라운드 수정이 만든 회귀**였고 **셋은 픽스처가 결함을 가린
+      것**이었다 — 실제에 없는 키를 지어내거나, duck-type 스텁으로 검사 축을 표현 불가능하게
+      만들거나, 한 knob이 두 축을 함께 떨어뜨려 고립을 막았다. 이 절이 남기는 교훈은
+      승격 조건 자체보다 **픽스처가 게이트를 조용히 무력화하는 방식**이다.
 - [x] **P3 — 최신 CI green.** 핀된 PinVi `f62e7ef1`의 `api` 워크플로가 재실행으로
       success. 실패는 문서화된 flaky
       (`test_restore_backup_hotswap_cancellation_kills_script_process_group`)였다.
@@ -2393,7 +2418,7 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 
 - [ ] **V1 — 검증이 root-owned receipt를 남긴다.**
   `--verify-leaf`가 통과·실패 모두에 대해 검증 시각·검증기 revision·leaf 경로·읽은
-  registry 파일 경로·13축 각각의 결과와 detail을 root-owned 0600 파일로 남긴다.
+  registry 파일 경로·정의표의 **모든 축**(현재 15줄) 각각의 결과와 detail을 root-owned 0600 파일로 남긴다 — 축이 늘면 receipt도 함께 는다.
   **실패도 남긴다** — 통과만 남기면 "검증한 적 없다"와 "검증했는데 떨어졌다"가 같아 보인다.
 - [ ] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.**
   pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을 값으로 싣는다.

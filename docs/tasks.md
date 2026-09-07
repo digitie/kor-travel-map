@@ -23,13 +23,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
-- [~] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
-
-  승격 정의를 2026-09-07 판정으로 바꿨다 — 문서 행위가 아니라 Manager `--verify-leaf`가
-  해시 사슬과 살아 있는 pin registry를 다시 계산해 대조하는 것이다. 적대 리뷰 3차까지
-  전부 NO_GO였고 그 P0들이 검증기를 13축으로 키웠다(Manager #330·#331). **강화 이전
-  실측은 근거로 쓰지 않는다** — 그때 검증기는 아무 디렉터리나 받았다. 남은 것은 4차 GO다.
-
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 
@@ -43,7 +36,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   구현 축은 전부 충족이고(2026-09-07 4축 실측) purge 정책은 소유자 판정으로
   `T-VN-H49` 계열로 이관했다. 남은 것은 회수한 `admin-manual-feature-create.live.spec.ts`를
   격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
-
 
 
 - [~] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
@@ -76,9 +68,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   `scheduled_backup`·retention janitor의 수렴을 보인다. 2026-09-07 판정으로 manual
   Feature hard purge 정책도 이 계열이 수납한다 — fence의 무조건 거부가 잠정이라고
   코드가 적고 그 전제인 restore proof를 이 축이 소유하기 때문이다.
-
-
-
 
 
 - [ ] T-VN-H49-OFFBOX — **off-box 복제 자동화 결선과 backup 문서 현행화**
