@@ -21,6 +21,12 @@
         "302_m03_child_issuance"
       ],
       "revision": "303_m05_payload_hash_domain"
+    },
+    {
+      "down_revision": [
+        "303_m05_payload_hash_domain"
+      ],
+      "revision": "304_m05_detector_manuals"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
