@@ -92,3 +92,42 @@ backup artifact는 이 rebuild의 선행 gate, rollback 근거 또는 복원점�
 
 그 설계와 검증이 merge되기 전에는 이 문서의 backup artifact를 recovery에 사용하지
 않는다.
+
+## M05 evidence — 지금 있는 것 (2026-09-08)
+
+restore는 **여전히 비활성이다.** 위 §명시적으로 지원하지 않는 동작은 그대로다. 아래는
+그 정책을 바꾸는 것이 아니라, §향후 recovery를 설계하려면의 항목 일부가 이미 코드로
+있고 실측됐다는 기록이다.
+
+| 위 절의 요구 | 지금 있는 것 |
+|---|---|
+| recovery artifact format과 독립 verifier | `kortravelmap.infra.evidence_export`(canonical JSONL + manifest fragment) / `evidence_verify.verify_bundle()`(번들만 보고 DB에 쓰지 않는다) |
+| identity·checksum 검증 | manifest의 relation별 행 수·SHA-256 대조. exporter와 `scripts/docker-backup.sh`의 SELECT를 테스트가 문자 그대로 대조한다 |
+| 불변 데이터와 mutable projection의 복구 의미 | `evidence_restore` — 아래 참조 |
+| writer fence | `evidence_restore.invalidate_leases()` |
+| 격리된 disposable target에서의 acceptance | Docker Manager의 standalone backup 리허설(카탈로그 지문 대조) |
+
+### 복원본을 받았을 때 (`evidence_restore`)
+
+`pg_dump`는 스키마 전체를 담으므로 복원본에는
+`ops.feature_reference_reconciliation_leases`가 dump 시점의 `worker_id`·`lease_epoch`·
+`lease_expires_at`을 달고 그대로 살아 돌아온다. 복원본은 원본의 **사본**이라 같은
+`(worker_id, lease_epoch)` 쌍이 양쪽에서 동시에 유효하다 — 원본을 향해 돌던 worker가
+복원본의 cursor도 밀 수 있다.
+
+`repair_restored_database(connection, apply=...)`가 세 단계를 순서대로 한다.
+
+1. **preflight** — 필수 relation 존재, 그 relation에 달린 트리거가 **켜져 있는지**
+   (`--disable-triggers` 복원은 append-only 보호를 꺼 둔 채로 남긴다), 그리고 행 수준
+   그래프 정합.
+2. **cursor 재구축** — 불변 ACK/event의 연속 prefix에서 `acked_through_sequence`를
+   다시 만든다. 정합한 스냅숏에는 drift가 0이어야 하므로 어느 방향이든 drift는 실패로
+   보고한다(보고하면서 수리한다).
+3. **lease 무효화** — holder와 만료를 지우고 `lease_epoch`을 **올린다.** epoch을 올리지
+   않으면 복원 전 worker의 fencing token이 복원본에서도 유효하다.
+
+`apply=False`면 아무것도 쓰지 않는다. **preflight가 실패하면 수리하지 않는다** —
+검증되지 않은 상태를 고치는 것은 손상을 되돌릴 수 없게 확정하는 일이다.
+
+이 도구는 복원 자체(`pg_restore` 실행)를 하지 않는다. 이미 복원된 연결을 받아 M05
+delivery 상태만 본다. evidence root 밖 relation과 RustFS 실물은 다루지 않는다.
