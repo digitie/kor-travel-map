@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from kortravelmap.infra.feature_reference_reconciliation_repo import (
@@ -308,3 +309,49 @@ async def test_admin_stale_decision_persists_terminal_409_before_returning(
     assert result.status_code == 409
     complete.assert_awaited_once()
     assert complete.await_args.kwargs["status_code"] == 409
+
+def test_survivor_is_a_merge_only_field() -> None:
+    """`survivor_feature_id`는 `merged` 전용이다 — 교차필드 규칙을 여기서 못 박는다.
+
+    이 규칙은 **OpenAPI에 표현되지 않는다**(survivor는 `anyOf[string,null]`이고
+    required도 아니다). 그래서 생성 타입으로는 tsc가 잡지 못하고, 실제로 admin UI가
+    `manual_retired`에 survivor를 실어 그 판정이 100% 422가 되는 결함이 났다
+    (2026-09-08 적대 리뷰 BLOCKER). 저장소 어디에도 `manual_retired`를 태우는 테스트가
+    없어 그것이 배포 직전까지 보이지 않았다.
+
+    DB의 `ck_m05_decision_input`이 같은 조건을 다시 막지만, **요청이 거기까지 가기 전에**
+    거부되는 것이 계약이다.
+    """
+
+    for decision in ("kept", "manual_retired"):
+        with pytest.raises(ValidationError):
+            router.ManualProviderDedupCaseDecisionInput(
+                decision=decision,
+                expected_case_fingerprint="f" * 64,
+                expected_manual_row_revision=3,
+                expected_provider_row_revision=4,
+                reason="provider가 정본",
+                survivor_feature_id="f_global_p_provider",
+            )
+
+    # survivor 없이는 셋 다 받는다.
+    for decision in ("kept", "merged", "manual_retired"):
+        accepted = router.ManualProviderDedupCaseDecisionInput(
+            decision=decision,
+            expected_case_fingerprint="f" * 64,
+            expected_manual_row_revision=3,
+            expected_provider_row_revision=4,
+            reason="사유",
+        )
+        assert accepted.survivor_feature_id is None
+
+    # `merged`만 survivor를 받는다.
+    merged = router.ManualProviderDedupCaseDecisionInput(
+        decision="merged",
+        expected_case_fingerprint="f" * 64,
+        expected_manual_row_revision=3,
+        expected_provider_row_revision=4,
+        reason="provider가 정본",
+        survivor_feature_id="f_global_p_provider",
+    )
+    assert merged.survivor_feature_id == "f_global_p_provider"
