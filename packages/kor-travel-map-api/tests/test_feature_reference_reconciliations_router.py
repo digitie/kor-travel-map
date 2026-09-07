@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from kortravelmap.infra.feature_reference_reconciliation_repo import (
@@ -17,6 +16,7 @@ from kortravelmap.infra.feature_reference_reconciliation_repo import (
     ManualProviderDedupCase,
     ManualProviderDedupCaseResolution,
 )
+from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import FeatureReferenceReconciliationServiceContext
@@ -319,6 +319,7 @@ def test_survivor_is_a_merge_only_field() -> None:
     (2026-09-08 적대 리뷰 BLOCKER). 저장소 어디에도 `manual_retired`를 태우는 테스트가
     없어 그것이 배포 직전까지 보이지 않았다.
 
+    규칙은 **양방향**이다 — `merged`는 survivor를 요구하고 나머지 둘은 금지한다.
     DB의 `ck_m05_decision_input`이 같은 조건을 다시 막지만, **요청이 거기까지 가기 전에**
     거부되는 것이 계약이다.
     """
@@ -334,8 +335,18 @@ def test_survivor_is_a_merge_only_field() -> None:
                 survivor_feature_id="f_global_p_provider",
             )
 
-    # survivor 없이는 셋 다 받는다.
-    for decision in ("kept", "merged", "manual_retired"):
+    # 규칙은 **양방향**이다 — `merged`는 survivor를 요구한다.
+    with pytest.raises(ValidationError):
+        router.ManualProviderDedupCaseDecisionInput(
+            decision="merged",
+            expected_case_fingerprint="f" * 64,
+            expected_manual_row_revision=3,
+            expected_provider_row_revision=4,
+            reason="사유",
+        )
+
+    # survivor 없이 받는 것은 나머지 둘이다.
+    for decision in ("kept", "manual_retired"):
         accepted = router.ManualProviderDedupCaseDecisionInput(
             decision=decision,
             expected_case_fingerprint="f" * 64,
