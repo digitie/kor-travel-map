@@ -453,21 +453,27 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         assert manual_id in await _listing_rows(dagster)
-        for column, value in (
-            ("lifecycle_state", "retired"),
-            ("publication_state", "draft"),
-            ("quality_state", "invalid"),
-            ("coord", None),
+        # `ck_features_state_tuple`이 `lifecycle_state='active' OR
+        # publication_state='suppressed'`를 강제하므로 retire는 짝을 지어 바꾼다.
+        for label, assignment, params in (
+            (
+                "lifecycle_state",
+                "lifecycle_state = 'retired', publication_state = 'suppressed'",
+                {},
+            ),
+            ("publication_state", "publication_state = 'suppressed'", {}),
+            ("quality_state", "quality_state = 'invalid'", {}),
+            ("coord", "coord = NULL", {}),
         ):
             async with migrated_engine.begin() as connection:
                 await connection.execute(
                     text(
-                        f"UPDATE feature.features SET {column} = :value "  # noqa: S608
+                        f"UPDATE feature.features SET {assignment} "  # noqa: S608
                         "WHERE feature_id = :feature_id"
                     ),
-                    {"value": value, "feature_id": manual_id},
+                    {"feature_id": manual_id, **params},
                 )
-            assert manual_id not in await _listing_rows(dagster), column
+            assert manual_id not in await _listing_rows(dagster), label
             async with migrated_engine.begin() as connection:
                 await connection.execute(
                     text(
@@ -483,6 +489,6 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
                         "lat": 37.511111 + 50 * 0.01,
                     },
                 )
-            assert manual_id in await _listing_rows(dagster), column
+            assert manual_id in await _listing_rows(dagster), label
     finally:
         await dagster.dispose()
