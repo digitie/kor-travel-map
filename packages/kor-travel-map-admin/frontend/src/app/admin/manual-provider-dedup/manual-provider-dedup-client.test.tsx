@@ -332,9 +332,14 @@ describe("M05-5 admin 판정 화면", () => {
     expect(headers.get("Idempotency-Key")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
-    const slots = Object.keys(window.sessionStorage).filter((key) =>
-      key.includes("manual-provider-dedup"),
-    );
+    // `Storage`는 `Object.keys`로 열거되지 않는다 — `key(i)`로 읽어야 한다.
+    const slots: string[] = [];
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (key && key.includes("manual-provider-dedup")) {
+        slots.push(key);
+      }
+    }
     expect(slots.length).toBeGreaterThan(0);
     for (const slot of slots) {
       expect(slot).toContain("admin.");
@@ -357,8 +362,9 @@ describe("M05-5 admin 판정 화면", () => {
     expect(submitDisabled()).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: /f_manual_2/ }));
+    // 패널이 remount되므로 상세를 다시 불러온다 — 라디오가 그 뒤에 나타난다.
     await waitFor(() => {
-      expect(screen.getAllByText("f_manual_2").length).toBeGreaterThan(0);
+      expect(screen.queryByRole("radio", { name: /유지/ })).not.toBeNull();
     });
     expect(
       (screen.getByRole("radio", { name: /유지/ }) as HTMLInputElement).checked,
