@@ -53,9 +53,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 - [ ] T-VN-H49 — **Geo application DB backup/retention 운영 증거 + hard purge 정책**
 
-  `scheduled_backup`·retention janitor의 수렴을 보인다. 2026-09-07 판정으로 manual
-  Feature hard purge 정책도 이 계열이 수납한다 — fence의 무조건 거부가 잠정이라고
-  코드가 적고 그 전제인 restore proof를 이 축이 소유하기 때문이다.
+  `scheduled_backup`·retention janitor의 수렴을 보인다. 수납했던 manual Feature hard
+  purge 정책은 2026-09-08 소유자 판정으로 열려 migration 306이 구현했다. 남은 것은
+  off-box 사본 결선(`T-VN-H49-OFFBOX`)과 geo 예약 성공 누적이다.
 
 
 - [ ] T-VN-H49-OFFBOX — **off-box 복제 자동화 결선과 backup 문서 현행화**

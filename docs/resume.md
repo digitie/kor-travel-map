@@ -34,13 +34,16 @@ token이 되살아날 자리가 없다"는 **번들에 대해서만** 참이었�
    데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
 5. **`T-VN-H49` 잔여** — `geo` 예약 성공 2건 더 쌓이기를 기다리는 것과 문서 갱신뿐이다.
 
-### 소유자 판정 대기 — 셋
+### 소유자 판정 대기 — 둘
 
-1. `T-VN-H49` **manual Feature hard purge 정책** — 제품 기능으로 열 것인가, 연다면
-   claim/origin을 남길 것인가, 거부의 HTTP 의미.
-2. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키. 코드는 이미 있다
+~~`T-VN-H49` manual Feature hard purge 정책~~ — **2026-09-08 판정·구현 완료**(migration
+306). 감사되는 운영 명령으로 열되 UI 버튼이 아니고, purge가 자기 복구점을 담아 H43
+보류에 묶이지 않게 했다. claim의 두 역할을 갈라 tombstone을 관리 가능하게 했고 ADR-093에
+개정 한 문장을 박았다. 상세는 `docs/tasks-acceptance.md` §T-VN-H49.
+
+1. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키. 코드는 이미 있다
    (`offbox_backup_sync.py`, CLI, 상태 API). `/opt` `.env`에 `KTDM_OFFBOX*` 0개.
-3. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가. 새 선행 항목을 세울
+2. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가. 새 선행 항목을 세울
    것인가, 아니면 removal manifest에서 (c)를 뺄 것인가(frozen 계약 개정).
 
 **보류/제외 셋**: `T-VN-41C`·`T-VN-H43`·`T-101` — 셋 다 재개 조건이 아직 발화하지 않았다
