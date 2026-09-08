@@ -326,10 +326,18 @@ SELECT EXISTS (SELECT 1 FROM upserted)
        ) AS became_current
 """
 
-#: 이 source entity의 **primary Feature**를 묻는다. ADR-068 결정 2가 정한 provider
-#: identity(`uq_source_entities_provider_identity` → `source_entity_key`)에서
-#: Feature로 가는 유일한 방향이고, 308의 `uq_source_links_primary_entity`가 그 답이
-#: 최대 하나임을 DB 선언으로 보장한다.
+#: 이 source entity의 primary Feature**들**을 묻는다 — 복수형이 요점이다.
+#:
+#: 2026-09-08에 `UNIQUE (source_entity_key) WHERE source_role='primary'`를 심었다가
+#: 통합 17건이 빨개져 되돌렸다. 그리고 2026-09-09 조사가 **축 자체가 틀렸다**는 것을
+#: 보였다: opinet은 `source_entity_id = f"{uni_id}:{prodcd}"`(제품별 N개)인데
+#: `source_natural_key = uni_id`(주유소별 1개)이고, 공개 함수 docstring이 "단일 제품
+#: 가격을 **같은 price anchor feature에 누적**"이라 명시한다. entity를 identity 축으로
+#: 삼으면 새 제품코드가 등장할 때마다 새 Feature가 주조된다 — 재키가 고치려던 중복을
+#: 재키가 만든다.
+#:
+#: 올바른 축은 `(provider_dataset_id, feature_kind, natural_key)`이고 그것은 T-VN-39가
+#: `provider_sync.provider_feature_identities`로 착지시킨다.
 _RESOLVE_PRIMARY_FEATURE_SQL: Final[str] = """
 SELECT feature_id
 FROM provider_sync.source_links
