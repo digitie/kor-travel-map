@@ -523,3 +523,207 @@ async def test_an_unknown_reason_code_never_reaches_the_database(
     # **어느 층이 거부했는지**를 본다. DB까지 갔다면 오류가 프로시저의 문장이라
     # 파라미터 이름을 말하지 않는다 — 그러면 호출자가 무엇을 고쳐야 할지 한 겹 멀어진다.
     assert "reason_code" in str(refused.value)
+
+
+async def test_a_request_approved_feature_is_refused_by_name_not_a_raw_fk_error(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**적대 리뷰 P1.** `ops.feature_requests.resolved_feature_id`는 NO ACTION이다.
+
+    지연되지 않은 FK에서 NO ACTION은 RESTRICT와 똑같이 삭제를 거부한다. probe가 `'r'`만
+    보면 그런 참조자가 통과한 뒤 DELETE에서 raw 23503으로 죽고, "이름을 대는 거부"라는
+    이 설계의 요지가 그 경로에서만 조용히 무효가 된다.
+
+    그리고 이것은 드문 경로가 아니다 — `approve_feature_request_with_initial_state`가
+    claim을 심고 **같은 트랜잭션에서** `resolved_feature_id`를 세우므로, M04 승인으로
+    태어난 manual Feature **전부**에 달린다.
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_id = str(pair["manual_feature_id"])
+    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+
+    async with migrated_engine.begin() as connection:
+        command_id = await connection.scalar(
+            text(
+                "INSERT INTO ops.domain_commands ("
+                " actor, operation, idempotency_key, request_fingerprint"
+                ") VALUES ('service:feature-request',"
+                " 'service.feature-request.submit.v1',"
+                " x_extension.gen_random_uuid(), repeat('9', 64))"
+                " RETURNING command_id"
+            )
+        )
+        resolution_command = await connection.scalar(
+            text(
+                "INSERT INTO ops.domain_commands ("
+                " actor, operation, idempotency_key, request_fingerprint"
+                ") VALUES ('admin:purge-probe',"
+                " 'admin.feature-request.resolve.v1',"
+                " x_extension.gen_random_uuid(), repeat('a', 64))"
+                " RETURNING command_id"
+            )
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO ops.feature_requests ("
+                " request_id, submitted_by_principal, request_payload, status,"
+                " submission_command_id, resolved_at, resolved_by_actor,"
+                " resolution_command_id, resolved_feature_id"
+                ") VALUES (x_extension.gen_random_uuid(), 'service:feature-request',"
+                " jsonb_build_object('kind', 'place', 'name', 'purge probe'),"
+                " 'approved', :submit, clock_timestamp(), 'admin:purge-probe',"
+                " :resolve, CAST(:feature_uuid AS uuid))"
+            ),
+            {
+                "submit": command_id,
+                "resolve": resolution_command,
+                "feature_uuid": feature_uuid,
+            },
+        )
+
+    purge_command = await _purge_command(migrated_engine, str(pair["actor"]))
+    with pytest.raises(ManualFeaturePurgeBlocked) as blocked:
+        await _purge_via_repo(
+            migrated_engine,
+            feature_uuid=feature_uuid,
+            reason_code="mistaken_creation",
+            release_identity=True,
+            actor=str(pair["actor"]),
+            command_id=purge_command,
+        )
+    assert "feature_requests" in str(blocked.value)
+    assert await _feature_exists(migrated_engine, feature_id)
+
+
+async def test_set_null_referrers_are_captured_before_they_are_nulled(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**적대 리뷰 P1의 짝.** cascade는 행을 지우고 SET NULL은 행을 고친다.
+
+    복구점의 관점에서는 둘 다 되돌릴 수 없는 변경이다. 담지 않으면 어느 행의 어느 컬럼이
+    NULL이 됐는지 알 수 없다. `ops.data_integrity_violations`가 그런 참조자다.
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_id = str(pair["manual_feature_id"])
+    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO ops.data_integrity_violations ("
+                " feature_id, violation_type, severity, message"
+                ") VALUES (:feature_id, 'purge-capture-probe', 'warning',"
+                " 'purge capture probe')"
+            ),
+            {"feature_id": feature_id},
+        )
+
+    purge_command = await _purge_command(migrated_engine, str(pair["actor"]))
+    await _purge_via_repo(
+        migrated_engine,
+        feature_uuid=feature_uuid,
+        reason_code="mistaken_creation",
+        release_identity=True,
+        actor=str(pair["actor"]),
+        command_id=purge_command,
+    )
+
+    record = await _record(migrated_engine, feature_uuid)
+    captured = record["captured_rows"]
+    assert isinstance(captured, dict)
+    assert "ops.data_integrity_violations" in captured, sorted(captured)
+    assert captured["ops.data_integrity_violations"][0]["feature_id"] == feature_id
+
+
+async def test_a_released_identity_is_not_returned_as_the_exact_duplicate(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**적대 리뷰 P1.** 306이 exact 키를 부분 유니크로 좁히면서 fallback이 남았다.
+
+    306 이전에는 그 키가 전역 유일이라 fallback `SELECT ... INTO`가 한 행만 볼 수 있었다.
+    이제는 **살아 있는 claim 중에서만** 유일하므로, purge-with-release 뒤 같은 자리에 다시
+    만들면 두 행이 생긴다. `INTO`(STRICT 아님)는 그중 하나를 조용히 고르고, 물리적으로
+    앞선 행은 **지워진 Feature의 것**이다.
+
+    그러면 exact_conflict가 존재하지 않는 Feature의 UUID를 돌려준다 — 승인 경로에서는
+    FK가 즉시 터지고, admin 경로에서는 UI가 없는 Feature를 가리키는 409를 받는다.
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    claim = await _claim(migrated_engine, feature_uuid)
+
+    purge_command = await _purge_command(migrated_engine, str(pair["actor"]))
+    await _purge_via_repo(
+        migrated_engine,
+        feature_uuid=feature_uuid,
+        reason_code="mistaken_creation",
+        release_identity=True,
+        actor=str(pair["actor"]),
+        command_id=purge_command,
+    )
+    # 같은 exact identity를 다시 예약한다 — 이제 두 행이 있다.
+    await _reclaim_exact_identity(migrated_engine, claim, actor=str(pair["actor"]))
+
+    # 프로시저의 fallback과 **같은 술어**로 조회한다. 해제된 것을 거르지 않으면 두 행이
+    # 나오고, 그중 하나가 지워진 Feature의 UUID다.
+    async with migrated_engine.connect() as connection:
+        live = (
+            await connection.execute(
+                text(
+                    "SELECT claim.feature_id"
+                    " FROM feature.manual_feature_identity_claims AS claim"
+                    " WHERE (claim.feature_kind, claim.name_key, claim.lon_e6,"
+                    "        claim.lat_e6) = (:kind, :name_key, :lon_e6, :lat_e6)"
+                    "   AND NOT claim.identity_released"
+                ),
+                {
+                    "kind": claim["feature_kind"],
+                    "name_key": claim["name_key"],
+                    "lon_e6": claim["lon_e6"],
+                    "lat_e6": claim["lat_e6"],
+                },
+            )
+        ).scalars().all()
+    assert len(live) == 1, live
+    assert live[0] != feature_uuid
+
+    # 술어가 없으면 둘이라는 것까지 못 박는다 — 이 사실이 곧 결함의 이유다.
+    async with migrated_engine.connect() as connection:
+        every = (
+            await connection.execute(
+                text(
+                    "SELECT count(*)"
+                    " FROM feature.manual_feature_identity_claims AS claim"
+                    " WHERE (claim.feature_kind, claim.name_key, claim.lon_e6,"
+                    "        claim.lat_e6) = (:kind, :name_key, :lon_e6, :lat_e6)"
+                ),
+                {
+                    "kind": claim["feature_kind"],
+                    "name_key": claim["name_key"],
+                    "lon_e6": claim["lon_e6"],
+                    "lat_e6": claim["lat_e6"],
+                },
+            )
+        ).scalar_one()
+    assert every == 2
+
+
+def test_the_creation_procedures_filter_released_claims_in_their_fallback() -> None:
+    """세 프로시저의 fallback이 전부 해제된 claim을 거르는지 **원문으로** 확인한다.
+
+    위 테스트는 술어 자체를 재지만, 그 술어가 **프로시저 안에** 있는지는 재지 못한다.
+    셋 중 하나만 빠져도 그 경로에서 결함이 그대로 남는다.
+    """
+
+    import pathlib
+
+    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    sidecars = sorted(versions.glob("_306_*_upgraded.sql"))
+    assert len(sidecars) == 3, [p.name for p in sidecars]
+    for sidecar in sidecars:
+        body = sidecar.read_text(encoding="utf-8")
+        assert "INTO o_existing_feature_uuid" in body, sidecar.name
+        assert "AND NOT claim.identity_released" in body, sidecar.name

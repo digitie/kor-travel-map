@@ -32,7 +32,18 @@ M05-2 C·D단계가 증명한 것은 **복원 메커니즘**이다(복원본 카
 생길 때마다 목록을 갱신해야 한다면 **갱신을 잊는 순간 purge가 조용히 데이터를 잃는다.**
 그래서 프로시저가 `pg_constraint`에서 런타임에 유도한다(AGENTS.md DO NOT 15).
 
-## RESTRICT는 막는 것이 맞다
+## 삭제를 막는 것과 되돌릴 수 없게 바꾸는 것을 **둘 다** 본다
+
+`feature.features`를 참조하는 FK 34개의 삭제 동작은 넷으로 갈린다(실측):
+CASCADE 25 · RESTRICT 5 · SET NULL 3 · **NO ACTION 1**.
+
+- **막는 것**(probe): `RESTRICT`와 **`NO ACTION`**. 지연되지 않은 FK에서 NO ACTION은
+  RESTRICT와 똑같이 거부한다 — `'r'`만 보면 그런 참조자가 probe를 통과한 뒤 DELETE에서
+  raw 23503으로 죽는다. 그 하나가 `ops.feature_requests.resolved_feature_id`이고,
+  **M04 승인으로 태어난 manual Feature 전부**에 달리므로 드문 경로가 아니다
+  (2026-09-08 적대 리뷰 P1).
+- **담는 것**(capture): `CASCADE`와 **`SET NULL`**. 전자는 행을 지우고 후자는 행을
+  고치지만, 복구점의 관점에서는 둘 다 되돌릴 수 없는 변경이다.
 
 `theme_feature_candidates`·`feature_reference_reconciliation_events`·
 `manual_provider_dedup_cases`가 `ON DELETE RESTRICT`로 참조한다. 그 셋은 이 Feature의
@@ -453,7 +464,16 @@ BEGIN
         CROSS JOIN LATERAL feature.count_rows_dynamic(built.statement) AS counted(tally)
         WHERE constraint_row.confrelid = 'feature.features'::regclass
           AND constraint_row.contype = 'f'
-          AND constraint_row.confdeltype = 'r'
+          -- **`'a'`(NO ACTION)도 막는다.** 지연되지 않은 FK에서 NO ACTION은 RESTRICT와
+          -- 똑같이 삭제를 거부한다. `'r'`만 보면 그런 참조자가 probe를 통과한 뒤
+          -- DELETE에서 raw 23503으로 죽고, 그러면 "이름을 대는 거부"라는 이 설계의
+          -- 요지가 그 경로에서만 조용히 무효가 된다.
+          --
+          -- 지금 그런 FK는 정확히 하나다 — `ops.feature_requests.resolved_feature_id`.
+          -- 그리고 그것은 **M04 승인으로 태어난 manual Feature 전부**에 달린다
+          -- (`approve_feature_request_with_initial_state`가 claim을 심고 같은
+          -- 트랜잭션에서 `resolved_feature_id`를 세운다). 즉 드문 경로가 아니다.
+          AND constraint_row.confdeltype IN ('r', 'a')
           AND counted.tally > 0
         GROUP BY constraint_row.conrelid
     ) AS blocked;
@@ -489,7 +509,10 @@ BEGIN
             FROM pg_catalog.pg_constraint AS constraint_row
             WHERE constraint_row.confrelid = 'feature.features'::regclass
               AND constraint_row.contype = 'f'
-              AND constraint_row.confdeltype = 'c'
+              -- **`'n'`(SET NULL)도 담는다.** cascade는 행을 지우고 SET NULL은 행을
+              -- 고치지만, 복구점의 관점에서는 둘 다 "이 삭제가 되돌릴 수 없게 바꾸는
+              -- 것"이다. 담지 않으면 어느 행의 어느 컬럼이 NULL이 됐는지 알 수 없다.
+              AND constraint_row.confdeltype IN ('c', 'n')
             GROUP BY constraint_row.conrelid
             ORDER BY feature.qualified_relation_name(constraint_row.conrelid)
         LOOP

@@ -175,7 +175,8 @@ BEGIN
         SELECT claim.feature_id INTO o_existing_feature_uuid
         FROM feature.manual_feature_identity_claims AS claim
         WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6)
-            = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6);
+            = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6)
+          AND NOT claim.identity_released;
         IF o_existing_feature_uuid IS NULL THEN
             RAISE EXCEPTION 'manual curation exact winner disappeared'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
