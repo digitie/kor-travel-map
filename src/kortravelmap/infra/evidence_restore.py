@@ -143,9 +143,19 @@ _GRAPH_CHECKS: Final[tuple[tuple[str, str], ...]] = (
     (
         "command가 없는 manual origin",
         "SELECT count(*) FROM feature.feature_creation_origins AS origin"
-        " WHERE origin.command_id IS NOT NULL AND NOT EXISTS ("
+        " WHERE NOT EXISTS ("
         " SELECT 1 FROM ops.domain_commands AS command"
-        " WHERE command.command_id = origin.command_id)",
+        " WHERE command.command_id = origin.creation_command_id)",
+    ),
+    (
+        # exporter가 `domain_commands`를 담는 이유가 이것이다 — 잃으면 origin과
+        # claim이 orphan이 되어 append-only 불변 자체가 깨진다.
+        "identity claim이 없는 manual origin",
+        "SELECT count(*) FROM feature.feature_creation_origins AS origin"
+        " WHERE NOT EXISTS ("
+        " SELECT 1 FROM feature.manual_feature_identity_claims AS claim"
+        " WHERE claim.feature_id = origin.feature_id"
+        " AND claim.claimed_by_command_id = origin.creation_command_id)",
     ),
 )
 
