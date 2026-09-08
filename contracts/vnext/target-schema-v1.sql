@@ -1595,6 +1595,15 @@ CREATE TRIGGER trg_current_summary_runs_terminal_immutable
 -- =============================================================================
 -- 현행 provider_sync.notice_lineage_states(문자열 시각·anti-join hot path)의
 -- 목표형. feature 연결(공개 판정 join 경로)의 표현: 미정(T-VN-37A 구현 소관)
+-- **채택되지 않음 (2026-09-08, 소유자 승인).** 이 표는 목표 상태 기술로만 남는다.
+-- consumer-rollout-v1.json의 removal manifest에서 "notice_lineage_states·
+-- notice_lifecycle_scopes를 이것으로 대체" 항목을 뺐다 — 대체를 정당화한 결함
+-- ("문자열 시각 판정")이 T-VN-35B/T-VN-37D로 이미 없어졌고, 그 항목의 fenced_by
+-- (T-VN-37B)는 원장에 존재한 적이 없다. 두 표는 prod 0행이고 성능 문제는 T-VN-37이
+-- 해결했다. 사유 전문은 그 manifest의 amendments에 있다.
+--
+-- 지우지 않는 이유: 이 DDL이 담은 설계(현재 partial UNIQUE, range GiST)는 정합성
+-- 요구가 생기면 다시 꺼낼 값이 있다. 지우면 같은 논의를 처음부터 다시 해야 한다.
 CREATE TABLE provider_sync.notice_states (
     notice_state_id bigint GENERATED ALWAYS AS IDENTITY,
     provider_dataset_id bigint NOT NULL,
