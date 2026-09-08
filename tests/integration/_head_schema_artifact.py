@@ -63,7 +63,7 @@ _HEADER = """\
 -- `test_head_schema_artifact_matches_head`가 CI에서 강제한다.
 --
 -- 이 파일은 **오라클이지 migration 입력이 아니다.** 실행하지 마라.
--- 유도형 검사기는 `alembic/baseline/schema.sql`(rev 300 덤프) 대신 이 파일을 읽는다.
+-- 유도형 검사기는 rev 300 시점 덤프 대신 이 파일을 읽는다.
 """
 
 

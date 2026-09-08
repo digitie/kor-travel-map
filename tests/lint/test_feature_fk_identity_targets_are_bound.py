@@ -24,7 +24,14 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[2]
-_SCHEMA = _ROOT / "alembic" / "baseline" / "schema.sql"
+#: **head 오라클**이다. `alembic/baseline/schema.sql`은 rev 300 시점 덤프라
+#: 301~ 이후 migration이 담기지 않는다 — 실측하면 306의 `purge_manual_feature`가
+#: baseline에 0건이고, 306이 UNIQUE 제약을 부분 유니크 **인덱스**로 바꾼
+#: `uq_manual_feature_identity_claims_exact`는 baseline에서 아직 제약으로 보인다.
+#: 그 낡음 위에서 유도하면 검사기는 **모양 자체를 틀리게** 본다.
+#: 최신성은 `tests/integration/test_alembic_metadata_consistency.py`의
+#: `test_head_schema_artifact_matches_head`가 강제한다.
+_SCHEMA = _ROOT / "alembic" / "head-schema.sql"
 _HELPER = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 
 #: `ADD CONSTRAINT <name> FOREIGN KEY (<cols>) REFERENCES feature.features(<targets>)`

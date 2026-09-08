@@ -132,7 +132,7 @@ _DROPPED_RELATIONS = tuple(
 # 실행되지 않으므로, 목록이 낡아도 이 파일만 보면 알 길이 없다 — 누가 `deleted_at`을
 # 같은 이름으로 되살리면 차단선이 **살아 있는 컬럼을 금지**하게 되고, 그 오류는 조용하다.
 # `alembic/baseline/schema.sql`은 head의 기계 덤프이므로 여기서 부재를 직접 확인한다.
-_BASELINE_SCHEMA = _read_or_empty(_ROOT / "alembic/baseline/schema.sql")
+_BASELINE_SCHEMA = _read_or_empty(_ROOT / "alembic/head-schema.sql")
 _FEATURES_DDL = re.search(
     r"^CREATE TABLE feature\.features \(\n(.*?)^\);", _BASELINE_SCHEMA, re.DOTALL | re.MULTILINE
 )
