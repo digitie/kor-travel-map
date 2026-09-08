@@ -13,13 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.cli import import_lock_key
 from kortravelmap.cli.main import build_parser
 from kortravelmap.infra.advisory_lock import advisory_lock
-from kortravelmap.infra.models import FeatureRow
 from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
@@ -69,11 +68,31 @@ async def container_dsn(
         await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
+#: MOIS 적재분만 고른다. `migrated_engine`은 session scope이고 이 모듈의 TRUNCATE는
+#: **teardown**에만 있어, 앞서 돈 모듈이 커밋한 Feature가 그대로 보인다 — 전역 count는
+#: "CLI가 둘을 적재했다"가 아니라 "DB가 비어 있다"를 재고 있었다(2026-09-08 적대 리뷰가
+#: 지적했고, M05 계열 seed가 늘자 실제로 깨졌다).
+_MOIS_ENTITY_TYPE = "license_place"
+_MOIS_SCOPE = (
+    "EXISTS (SELECT 1 FROM provider_sync.source_links AS sl"
+    "  JOIN provider_sync.source_entities AS se"
+    "    ON se.source_entity_key = sl.source_entity_key"
+    "  WHERE sl.feature_id = f.feature_id"
+    "    AND se.source_entity_type = :entity_type)"
+)
+
+
 async def _feature_count(engine: AsyncEngine) -> int:
     async with AsyncSession(engine) as session:
         return int(
             (
-                await session.execute(select(func.count()).select_from(FeatureRow))
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM feature.features AS f"
+                        f" WHERE {_MOIS_SCOPE}"
+                    ),
+                    {"entity_type": _MOIS_ENTITY_TYPE},
+                )
             ).scalar_one()
         )
 
@@ -172,9 +191,10 @@ async def _active_feature_count(engine: AsyncEngine) -> int:
                     text(
                         # 0097이 `deleted_at`을 물리 삭제했다. soft-delete의
                         # 3축 등가물은 lifecycle 축이다.
-                        "SELECT count(*) FROM feature.features "
-                        "WHERE lifecycle_state = 'active'"
-                    )
+                        "SELECT count(*) FROM feature.features AS f"
+                        f" WHERE f.lifecycle_state = 'active' AND {_MOIS_SCOPE}"
+                    ),
+                    {"entity_type": _MOIS_ENTITY_TYPE},
                 )
             ).scalar_one()
         )

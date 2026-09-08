@@ -216,7 +216,19 @@ relation_sha256() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+# manifest가 "이 evidence는 어느 스키마에서 나왔나"를 말하지 못하면, 나중에 번들을
+# 받은 쪽이 그것을 지금 코드로 읽어도 되는지 알 수 없다. 값으로 실어 둔다.
+capture_scalar() {
+  "${compose[@]}" exec -T postgres psql \
+    -X -A -t -q -v ON_ERROR_STOP=1 \
+    -U "$KOR_TRAVEL_MAP_POSTGRES_USER" \
+    -d "$KOR_TRAVEL_MAP_POSTGRES_DB" \
+    -c "$1" | tr -d '\r' | head -1
+}
+
 mkdir -p "$backup_dir/$evidence_dir"
+alembic_revision="$(capture_scalar "SELECT coalesce(string_agg(version_num, ',' ORDER BY version_num), 'unknown') FROM public.alembic_version")"
+server_version="$(capture_scalar "SHOW server_version")"
 start_app_snapshot
 dump_db "$KOR_TRAVEL_MAP_POSTGRES_DB" "$app_dump" "$app_snapshot_id"
 dump_db "$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" "$dagster_dump"
@@ -324,6 +336,8 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
     "schema_version": 4,
     "recovery_status": "audit_only_no_restore",
     "snapshot_consistency": "pg_export_snapshot",
+    "alembic_revision": "$alembic_revision",
+    "server_version": "$server_version",
     "relations": {
       "manual_feature_identity_claims": {"path": "$claim_jsonl", "row_count": $claim_count, "sha256": "$claim_sha256"},
       "feature_creation_origins": {"path": "$origin_jsonl", "row_count": $origin_count, "sha256": "$origin_sha256"},
@@ -340,12 +354,16 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
 }
 EOF
 
+# manifest 자신도 해시 대상이다. 빠지면 relation별 기대 지문을 담은 파일이 보호되지
+# 않아, 그 값을 고친 번들이 그대로 "검증 통과"한다 — 대조의 기준이 대조되지 않으면
+# 사슬 전체가 anchor를 잃는다. `SHA256SUMS`가 유일한 신뢰 뿌리다.
 (
   cd "$backup_dir"
   sha256sum "$app_dump" "$dagster_dump" "$rustfs_archive" \
     "$claim_jsonl" "$origin_jsonl" "$commands_jsonl" "$results_jsonl" "$requests_jsonl" \
     "$cases_jsonl" "$resolutions_jsonl" "$events_jsonl" "$acks_jsonl" \
     "$subscriptions_jsonl" \
+    meta/manifest.json \
     > meta/SHA256SUMS
 )
 

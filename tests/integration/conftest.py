@@ -347,11 +347,146 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
         await session.rollback()
 
 
-@pytest.fixture
-async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> None:
-    """호환 fixture 이름. `300` bootstrap은 이미 final M01~M05 graph를 만든다."""
+@pytest.fixture(scope="session")
+async def m05_pristine_provisioning(migrated_engine: AsyncEngine) -> dict[str, object]:
+    """정본 구독을 **딱 한 번** 만들고, pristine DB에서만 볼 수 있는 것을 그때 본다.
 
-    del migrated_engine
+    `ops.feature_reference_reconciliation_subscriptions`는 append-only singleton이라
+    한 번 provision되면 되돌릴 수 없다. 그래서 아래 둘은 **구독이 생기기 전에만**
+    관찰 가능하다.
+
+    1. 구독 없이 판정하면 `resolve_manual_provider_dedup_case_v2`가 거부한다.
+    2. 동시 provision 둘 중 하나만 `provisioned`, 나머지는 `already_provisioned`다.
+
+    이것을 개별 테스트에 두면 "먼저 도는 쪽이 이긴다"가 된다 — 다른 모듈이 구독을
+    먼저 만드는 순간 두 성질이 조용히 사라진다(2026-09-08 실측: M05-2 D단계 테스트가
+    알파벳 순으로 먼저 돌면서 정확히 그렇게 지웠다). session scope로 올려 순서에
+    기대지 않게 하고, 관찰 결과만 돌려준다 — 단언은 그것을 소유한 테스트가 한다.
+    """
+
+    import asyncio
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.db import make_async_engine
+
+    principal_id = "service:feature-reference-reconciliation"
+    operation = "admin.feature-reference-reconciliation-subscription.provision.v1"
+    dsn = migrated_engine.url.set(
+        username="ktm_feature_api_runtime",
+        password=_TEST_RUNTIME_PASSWORD,
+    ).render_as_string(hide_password=False)
+    engine = make_async_engine(dsn, pool_size=2)
+
+    async def open_command() -> int:
+        async with migrated_engine.begin() as connection:
+            return int(
+                await connection.scalar(
+                    text(
+                        "INSERT INTO ops.domain_commands ("
+                        " actor, operation, idempotency_key, request_fingerprint"
+                        ") VALUES ('admin:m05-subscription', :operation,"
+                        " x_extension.gen_random_uuid(), repeat('d', 64))"
+                        " RETURNING command_id"
+                    ),
+                    {"operation": operation},
+                )
+            )
+
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            )
+            try:
+                await connection.execute(
+                    text(
+                        "CALL feature.resolve_manual_provider_dedup_case_v2("
+                        "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1,"
+                        " NULL::text, 'activation gate', 'admin:m05-subscription',"
+                        " 1, NULL::text, NULL::uuid, NULL::uuid, NULL::text,"
+                        " NULL::bigint)"
+                    ),
+                    {"case_id": str(uuid4())},
+                )
+            except DBAPIError as error:
+                gate_sqlstate = str(getattr(error.orig, "sqlstate", None))
+            else:  # pragma: no cover — 게이트가 사라졌다는 뜻이다
+                gate_sqlstate = "no-error"
+            await connection.rollback()
+
+        first_ready = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def provision_once(
+            command_id: int,
+            *,
+            ready: asyncio.Event | None = None,
+            release: asyncio.Event | None = None,
+        ) -> dict[str, object]:
+            async with engine.begin() as connection:
+                await connection.execute(
+                    text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                )
+                receipt = dict(
+                    (
+                        await connection.execute(
+                            text(
+                                "CALL feature."
+                                "provision_feature_reference_reconciliation_"
+                                "subscription(:principal_id, 0,"
+                                " 'admin:m05-subscription', :command_id,"
+                                " NULL::text, NULL::bigint)"
+                            ),
+                            {
+                                "principal_id": principal_id,
+                                "command_id": command_id,
+                            },
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                if ready is not None:
+                    ready.set()
+                if release is not None:
+                    await release.wait()
+                return receipt
+
+        first_task = asyncio.create_task(
+            provision_once(
+                await open_command(), ready=first_ready, release=release_first
+            )
+        )
+        await asyncio.wait_for(first_ready.wait(), timeout=5)
+        second_task = asyncio.create_task(provision_once(await open_command()))
+        done, _pending = await asyncio.wait({second_task}, timeout=0.1)
+        blocked_while_first_held = not done
+        release_first.set()
+        provisioned, raced = await asyncio.gather(first_task, second_task)
+    finally:
+        await engine.dispose()
+
+    return {
+        "gate_sqlstate": gate_sqlstate,
+        "blocked_while_first_held": blocked_while_first_held,
+        "provisioned": provisioned,
+        "raced": raced,
+    }
+
+
+@pytest.fixture
+async def tvn_m01_m05_role_graph(
+    migrated_engine: AsyncEngine, m05_pristine_provisioning: dict[str, object]
+) -> None:
+    """호환 fixture 이름. `300` bootstrap은 이미 final M01~M05 graph를 만든다.
+
+    pristine 관찰을 함께 끌어와, 어떤 M05 테스트가 먼저 돌든 정본 구독이 만들어지기
+    전에 그 관찰이 끝나 있게 한다.
+    """
+
+    del migrated_engine, m05_pristine_provisioning
 
 
 @pytest.fixture(scope="session")

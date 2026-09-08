@@ -67,3 +67,18 @@ retired identity를 계속 보관한다. 반대로 Map이 소비자 DB를 직접
 - 첫 consumer가 durable reference reconciliation receipt와 exact vendor를 구현한다.
 - 두 전문 적대 리뷰와 isolated Map/consumer live UI E2E가 모두 통과한 뒤에만 completion
   receipt를 만든다.
+
+## 구현 기록 (2026-09-08 추가)
+
+위 §후속은 결정 당시의 계획이라 그대로 둔다. **다만 거기 적힌 식별자는 더 이상 현재형이
+아니다** — 낡은 식별자가 현재형으로 서 있으면 그것을 읽은 사람이 없는 것을 찾는다.
+
+| §후속의 계획 | 실제로 어디에 |
+|---|---|
+| `0234_m05_manual_provider_dedup` · `0235_m05_reconciliation_delivery` | `300` baseline에 흡수됐다(`alembic/retired_versions/0200-0236/`). 이후 M05 변경은 `303`(payload hash 도메인) · `304`(detector manual reader) · `305`(재심 차단) |
+| admin list/detail/decision · service event/ack contract | 구현·동결(M05-4). admin UI는 `src/app/admin/manual-provider-dedup/`(M05-5) |
+| 첫 consumer의 durable receipt와 exact vendor | PinVi `feature_reference_reconciliation` 세 테이블(M05-6) |
+| 적대 리뷰 2건 + isolated live UI E2E | M05-7 통과. 판정 정본은 `docs/tasks-acceptance.md` §T-VN-M05 |
+| `restore` | **구현되지 않았고 정책상 지원하지 않는다.** 300 baseline 결정(2026-08-26)이 restore/swap을 닫았다. 그 대신 evidence를 담고(`evidence_export`) 번들을 검증하고(`evidence_verify`) **복원본을 받았을 때 lease를 무효화하고 cursor를 재구축하는**(`evidence_restore`) 경로가 M05-2를 충족한다 |
+
+M05-1~M05-7 일곱 조문 전부 2026-09-08로 충족이다.

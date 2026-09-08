@@ -166,3 +166,31 @@ restore 뒤에도 그 불변식을 되살린다.
 - T-VN-M03: curation item 생성 중 missing Feature를 같은 transaction으로 생성.
 - T-VN-M04: 범용 Feature 요청 queue와 별도 인증 경계 뒤 `manual_request` 추가. PinVi는 첫 consumer다.
 - T-VN-M05: provider Feature가 나중에 발행한 같은 실체를 dedup 후보로 올리고 자동 병합하지 않음.
+
+## 개정 (2026-09-08, migration 306) — purge를 열고 claim의 두 역할을 나눈다
+
+§41과 §150이 "claim은 Feature purge 뒤에도 append-only로 남는다"고 적었고 스키마가 그것을
+전제로 지어졌다(claim·origin에 `features` FK가 없다). §123의 "M02 purge 계약 **전**에는
+닫는다"는 그 계약이 생길 때까지의 임시 마개였고, 그 마개의 술어(`claim이 있으면 거부`)가
+하필 항상 참인 조건이라 **영구 차단**처럼 작동해 왔다.
+
+소유자 판정으로 purge를 감사되는 운영 명령으로 연다. 이 ADR의 결정 중 **하나만** 바뀐다.
+
+**claim의 append-only는 유지하되, 단조 전이 하나를 허용한다.** claim은 지금까지 (i) 생성
+증거이자 (ii) 살아 있는 exact 유일성 예약이었다. purge는 (ii)만 놓아야 한다 — (i)까지
+지우면 append-only가 깨지고, (ii)를 쥔 채 purge하면 예약이 **영구 tombstone**이 되어 같은
+이름·좌표를 다시 만들 수 없다.
+
+- `purged_by_command_id`/`purged_at` — purge 승인이자 기록. hard-purge fence가 이것을 본다.
+- `identity_released` — 예약 해제. purge의 명시 파라미터다.
+- exact 유일성은 `WHERE NOT identity_released` 부분 인덱스가 된다.
+
+트리거는 위 셋의 `NULL → 값`, `false → true` 전이 **하나**만 허용한다. `feature_id`·
+`name_key`·`lon_e6`·`lat_e6`·`claimed_by_command_id`·`claim_basis`·`claimed_at`은 여전히
+불변이고, 전이는 `domain_commands`가 원인이라 감사된다.
+
+**origin은 손대지 않는다.** §150 그대로 purge 뒤에도 남는다.
+
+정본 계약은 `docs/tasks-acceptance.md` §T-VN-H49, 구현은
+`alembic/versions/306_m02_manual_feature_purge.py`와
+`kortravelmap.infra.manual_feature_purge_repo`다.

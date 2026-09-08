@@ -974,9 +974,19 @@ backup/restore가 갚히기 전에는 **원리적으로 판정할 수 없다.**
   `E2E_MANUAL_CREATE_WRITE=1`로 격리 스택에서 완주한다. **배포 prod에서 돌리지 않는다**
   — prod UI는 `KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=admin`이라 spec의
   `created_by_actor === "e2e-admin"` 단언이 구조적으로 실패하고, spec은 cleanup을 하지
-  않아 지워지지 않는 write를 prod DB에 남긴다. 실행처는 n150 `~/ktm-live-301`이며
-  그 스택은 이미 `e2e-admin`·create token·flag가 spec과 맞다(현재 정지 상태 —
-  재기동이 선행한다).
+  않아 지워지지 않는 write를 prod DB에 남긴다.
+
+  **왜 지워지지 않나(2026-09-08 규명).** admin API의 `DELETE /{feature_id}`는 soft
+  `action="retire"`이고 hard purge는 `trg_features_manual_feature_hard_purge_fence`가
+  거부한다. 즉 이 항목의 prod 불가는 `T-VN-M02-TRUNCATE-FENCE`와 **같은 fence**에서 온다 —
+  두 항목을 따로 판정하면 안 된다.
+
+  실행처는 n150 `~/ktm-live-301`이다. ~~그 스택은 이미 `e2e-admin`·create token·flag가
+  spec과 맞다(현재 정지 상태 — 재기동이 선행한다).~~ **2026-09-08 재실측 — 정지가 아니라
+  없다.** 컨테이너도 볼륨도 존재하지 않고(`ktm-live-301-pg` 부재, `ktm_live_301` 볼륨 부재),
+  그 체크아웃은 alembic head **302**(저장소는 305)이며 `e2e/live/`에 해당 spec 자체가 없다.
+  설정 산물(`~/.ktm-live-301-admin-pw`, `.env`, `live301-start.sh`)과 runner 이미지는
+  남아 있으므로 재구축은 가능하지만 **재기동이 아니라 재구축이 선행이다.**
 
 ## T-VN-M03
 
@@ -1103,12 +1113,12 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
   case list·read), append-only 트리거, 네 M05 role의 two-phase bootstrap, 그리고
   case·resolution·event·ack·subscription의 canonical JSONL count+SHA-256 backup root가
   배포 baseline에 있다. (ADR-097 §후속 1 전단)
-- [ ] **M05-2 — restore가 이 evidence를 복원 가능한 형태로 검증한다.**
+- [x] **M05-2 — restore가 이 evidence를 복원 가능한 형태로 검증한다.** (2026-09-08 충족)
   ownership/ACL/procedure repair → catalog preflight → evidence root 재계산 → live lease
   holder/expiry 무효화 → subscription별 immutable ack의 **연속 prefix**에서 `acked_through`
   재구축까지가 실행 가능해야 하고, 불연속 ack와 event/hash 불일치는 fail-loud여야 한다.
   (ADR-097 §후속 1 후단)
-- [ ] **M05-3 — candidate가 운영 경로에서 발행된다.**
+- [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
   manual origin Feature와 provider Feature를 **따로** 읽는 전용 detector가 `THRESHOLD_MANUAL`
   이상 쌍을 점수와 무관하게 `candidate`로만 기록하고(자동 병합하지 않는다), detector input
   count와 대규모 scope의 blocking 사실을 case receipt에 남긴다. detector relation에 대한
@@ -1120,10 +1130,14 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
   구현·동결되고, `merged`/`manual_retired`는 DB session 생성 **전에** destructive
   kill-switch를 통과하며 stale 요청은 어떤 M05 행도 쓰지 않고 409를 durable하게 남긴다.
   (ADR-097 §후속 2 · 설계 §admin 판단과 동시성)
-- [ ] **M05-5 — Map admin UI가 판정을 안전하게 받는다.**
+- [x] **M05-5 — Map admin UI가 판정을 안전하게 받는다.** (2026-09-08 충족, #1193)
   default `kept`, provider survivor 고정, destructive confirmation과 비어 있지 않은 reason,
   principal별 unacked age를 보여주며 generic dedup 화면을 재사용하지 않는다.
   (설계 §paired rollout과 검증 4)
+  전용 라우트 `src/app/admin/manual-provider-dedup/`가 실재하고, `decision` 초기값이
+  `"kept"`, survivor는 `decision === "merged"`일 때만 실린다(계약이 교차필드로 **양방향**
+  막는다 — `manual_retired` + survivor도 422다). reason 공백과 확인 문구 불일치가 제출을
+  막고, case를 바꾸면 `key`로 remount해 이전 판정이 남지 않는다.
 - [x] **M05-6 — 첫 consumer가 durable receipt와 exact vendor를 갖는다.**
   immutable `delivery_attempt`(blocked|applied), unique final applied receipt, impact row가
   있고 exact vendor 핀이 걸려 있다. (ADR-097 §후속 3)
@@ -1149,6 +1163,20 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
 - **M05-2**는 이 절의 고유 결함이 **아니다.** restore 비활성은 300 baseline 정책이고
   그 정책은 다른 절이 소유한다. 이 조건은 그 정책이 바뀌기 전에는 판정할 수 없다 —
   `T-VN-M02`의 purge가 restore proof에 걸린 것과 같은 구조다.
+
+  **다만 "정책이 바뀌면 저절로 충족된다"는 뜻이 아니다(2026-09-08 정정).** 그 문구가
+  잔여 작업량을 말하지 않아 오해를 낳았다. 실측하면 갈린다:
+
+  | 축 | 상태 |
+  |---|---|
+  | backup | **있다.** `docker-backup.sh`가 M05 relation을 같은 repeatable-read 스냅숏에서 canonical JSONL + SHA-256으로 담는다(M05-1 충족의 근거) |
+  | restore | **없다.** `docker-restore.sh`(8줄)·`docker-restore-verify.sh`(7줄)는 본문 없이 `exit 2` |
+  | M05-2가 요구하는 다섯 단계 | **어디에도 없다.** `scripts/`·`docker/` 전체에서 `acked_through` 0건, "catalog preflight" 0건, restore 경로에 M05 relation 0건 |
+
+  즉 정책이 풀려도 M05-2는 참이 되지 않는다. 그 정책은 "복구 경로를 만들 것인가"를
+  열 뿐이고, M05-2가 요구하는 것은 그 위에 얹는 **M05 전용 복구 검증**이다 —
+  전부 새로 지어야 하는 코드다. 정확한 상태는 "정책이 선행이고, 정책이 풀려도
+  M05 전용 검증을 새로 지어야 한다"이다.
 - **M05-3**은 실제 구현 공백이다. 계약·스키마·ACL은 다 있는데 **탐지기를 부르는 곳이
   없어** 후보가 한 건도 발행되지 않는다. 이것을 채우지 않으면 M05의 요지(자동 병합하지
   않고 후보로 올린다)가 운영에서 한 번도 일어나지 않는다.
@@ -1176,21 +1204,109 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 생성 command·principal·actor·시각은 돌려주지 않는다. **ADR-090 경계는 딱 그만큼
 움직인다** — 새로 드러나는 사실은 "어느 Feature가 manual origin인가"이며 그 이상은 아니다.
 
-- [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
-  manual origin은 304의 reader로, provider는 `ST_DWithin(::geography)`로 **따로** 읽고,
+**M05-3이 어떻게 채워졌나**(판정 자체는 위 조문 목록이 소유한다 — 체크박스를 두 곳에
+두면 한 곳만 갱신된다):
+
+  manual origin은 304의 reader로, provider는 `ST_DWithin(f.coord_5179, …)`로 **따로** 읽고,
   ADR-016 가중치로 낸 `THRESHOLD_MANUAL` 이상 쌍을 점수와 무관하게 candidate로만
   기록한다(`classify_decision()`·`select_master()`를 부르지 않는다). detector input
   count와 blocking 사실은 case receipt에 싣고, **후보가 0건이어도** 훑은 범위를
   `DetectionOutcome`으로 돌려준다. detector relation 직접 INSERT/UPDATE 권한은
   종전대로 executor procedure만 갖는다.
 
-**아직 남은 것, 숨기지 않는다.** 탐지 job에는 **스케줄이 없다.** 프로시저의 멱등성이
-미해결 case에만 성립해 admin이 `kept`로 판정한 쌍이 다음 실행에서 새 case가 된다.
-차단 없이 주기화하면 admin 큐가 쳇바퀴가 되므로 `T-VN-M05-RELITIGATION`이 그것을
-소유한다. 그전까지 운영자가 명시 실행한다.
+**당시 남아 있던 것은 스케줄이었다.** 프로시저의 멱등성이 미해결 case에만 성립해
+admin이 `kept`로 판정한 쌍이 다음 실행에서 새 case가 됐다. `T-VN-M05-RELITIGATION`이
+migration 305의 `decision_fingerprint`로 그것을 막고 일간 스케줄(04:20 KST, 기본
+`STOPPED`)을 붙였다 — 2026-09-08 해소.
 
-**남은 둘의 성격은 2026-09-07 초 판정 그대로다** — M05-5는 UI 구현 공백(M05-3이
-선행이었고 이제 풀렸다), M05-2는 300 baseline 정책이 바뀌기 전에는 판정할 수 없다.
+**2026-09-08로 둘 다 닫혔다.** M05-5는 전용 라우트로(#1193), M05-2는 아래 A~D단계로.
+2026-09-07의 "정책이 바뀌기 전에는 판정할 수 없다"는 판정 자체가 틀렸다 — 정책을 바꾸지
+않고도 조문이 요구하는 것을 지을 수 있었다. restore/swap은 여전히 닫혀 있다.
+
+**2026-09-08 — M05-2 충족. 소유자 판정으로 300 baseline restore 정책부터 검토했다.**
+
+조사가 앞선 판정 둘을 뒤집었다.
+
+1. **"전부 새로 지어야 하는 코드다"는 틀렸다.** 다섯 단계는 커밋 `b2543d68` 직전에
+   거의 조문 그대로 있었고 그 커밋이 지웠다(`docker-restore-verify.sh` 416줄 → 7줄,
+   `docker-restore.sh` 442줄 → 8줄, `docs/backup-restore.md` 1020줄 → 94줄).
+2. **"정책 근거가 스크립트 두 줄이 전부다"도 틀렸다.** `docs/backup-restore.md`,
+   H46H 설계 리포트, 저널에 있고 **2026-08-26 소유자 결정**("이전 revision/기존 DB
+   restore는 release gate가 아니다")까지 남아 있다.
+
+**지배적 손실은 사고가 아니라 계획된 재구축이었다.** `pinvi-pair rebuild-pinned`가
+Map revision이 바뀔 때마다 application DB를 `dropdb --force` 후 재생성하고, `.env` 값
+하나가 바뀌어도 그 경로를 탄다. 그런데 manual-feature writer는 2026-09-05T20:27:59Z에
+prod에서 켜졌고, **그 evidence를 담은 backup이 n150에서 한 번도 만들어진 적이 없었다.**
+실측 당시 유일한 `map_application` 백업은 `0232_tvn37d_notice_empty_range` — 300
+baseline보다 **앞선 세대**였다.
+
+**restore를 켜도 이 손실은 막히지 않는다** — rebuild lifecycle 문제이지 restore 문제가
+아니다. 그래서 evidence를 담는 것(A)이 선행이다.
+
+| 조문 요구 | 상태 | 근거 |
+|---|---|---|
+| ownership/ACL repair | **닫힘(C)** | 리허설이 소유권을 벗기지 않고 복원하고, 복원본 카탈로그가 운영 DB와 바이트 단위로 같음을 실측했다(Manager #334) |
+| catalog preflight | **닫힘(C)** | 같은 카탈로그 지문이 relation·routine·schema의 소유자·ACL·`prosecdef`·extension을 덮는다 |
+| evidence root 재계산 | **닫힘(A+B)** | 열 relation을 하나의 스냅숏에서 canonical JSONL로 뽑고(#1194), manifest의 행 수·SHA-256과 대조한다 |
+| 불연속 ack·event/hash 불일치 fail-loud | **닫힘(B)** | 다섯 종을 실패로 보고한다 |
+| live lease holder/expiry 무효화 | **닫힘(D)** | `evidence_restore.invalidate_leases()` |
+| 연속 prefix에서 `acked_through` 재구축 | **닫힘(D)** | `evidence_restore.rebuild_acked_through()` |
+
+**초안에서 이 항목을 `[x]`로 적었다가 되돌리고, D단계를 지어 다시 닫았다. 조문을 다시
+읽으니 내 근거가 두 요구를 비껴갔다.**
+
+초안은 "`lease`를 evidence root에 담지 않으므로 fencing token이 되살아날 자리가
+없다"고 적었다. 그것은 **번들에 대해서만** 참이다. `pg_dump`는 스키마 전체를 담으므로
+**복원된 DB에는 `ops.feature_reference_reconciliation_leases`가 그대로 살아 돌아온다** —
+dump 시점의 `worker_id`·`lease_epoch`·`lease_expires_at`을 달고. 조문이 말하는
+"live lease holder/expiry 무효화"는 바로 그 행을 가리키지 번들을 가리키지 않는다.
+무효화하지 않으면 복원 직후 죽은 worker의 fencing token이 유효해 holder가 둘이 된다.
+
+`acked_through_sequence`도 같은 행에 있다(`leases`의 컬럼이지 `subscriptions`의 것이
+아니다). B단계는 그 값을 Python으로 **계산**하지만 복원된 DB에 **쓰지 않는다.** 조문은
+"재구축"을 요구한다.
+
+즉 남은 둘은 과결박이 아니라 **진짜 안전 요구**다 — split-brain과 cursor 후퇴를 막는다.
+조문을 완화할 일이 아니라 지을 일이었다.
+
+**D단계(`kortravelmap.infra.evidence_restore`)가 그 둘을 복원본 DB에 대고 닫는다.**
+`repair_restored_database()`가 preflight → cursor 재구축 → lease 무효화를 순서대로 한다.
+`apply=False`면 아무것도 쓰지 않고, **preflight가 실패하면 수리하지 않는다**(검증되지
+않은 상태를 고치는 것은 손상을 되돌릴 수 없게 확정하는 일이다).
+
+무효화는 holder와 만료를 지우는 데서 그치지 않고 `lease_epoch`을 **올린다.** 복원본은
+원본의 사본이라 epoch이 그대로면 원본을 향해 돌던 worker의 토큰이 복원본에서도 유효하다.
+n150 실측으로 잰다 — 무효화 뒤 옛 `(worker_id, lease_epoch)`로 부른 진짜 ack 프로시저가
+`lease_conflict`를 돌려주고 cursor가 밀리지 않는다.
+
+preflight는 행 그래프에 더해 **트리거가 켜져 있는지**를 본다. `--disable-triggers` 복원은
+append-only 보호를 지우지 않고 꺼 둔 채로 남기므로 행도 다 있고 카탈로그에 트리거도 있어
+겉보기에는 멀쩡하다. 이름을 열거하지 않고 필수 relation에서 유도한다(DO NOT 15).
+
+**n150 실측이 잡은 것.** 좌표를 유효 범위 밖으로 미는 index, 물려받은 provisioning에
+기댄 테스트, ack가 holder를 놓아 주지 않는다는 사실, 그리고 **내가 지어낸 컬럼
+이름**(`origin.command_id` — 실제는 `creation_command_id`). mutation 열 축은 전부
+RED다(epoch·holder·expiry·prefix·drift·gate·trigger·dryrun·missing·claim). 그중 둘은
+처음에 공허했다 — dry-run 단언이 롤백되는 트랜잭션에서 돌아 몰래 쓰는 구현을 못 잡았고,
+연속 prefix 축은 정상 이력에 구멍이 없어 `max(...)`와 갈리지 않았다. 둘 다 고쳤다.
+
+**부수로 드러난 순서 의존.** D단계 모듈이 알파벳 순으로 먼저 돌면서 정본 구독을 만들자
+기존 M05 테스트의 두 단언이 조용히 무의미해졌다(`P0002` → `23514`, `provisioned` →
+`already_provisioned`). 구독은 append-only singleton이라 그 성질들은 pristine DB에서만
+관찰 가능하다. 관찰과 구독 생성을 session scope fixture 하나가 소유하게 바꿔 순서에
+기대지 않게 했다 — 세 배치 순서에서 36건 모두 통과한다.
+
+**실행이 아니면 못 찾았을 결함 셋**(전부 C단계에서, n150 실측으로):
+`--no-owner --no-privileges`가 질문 자체를 불가능하게 하고 있었고, `search_path`
+미고정으로 PostGIS 함수 495건이 거짓 양성이었으며, ACL 미정규화로 1건이 더 남았다.
+거짓 양성은 진짜 drift를 덮으므로 없는 것보다 나쁘다.
+
+**주장하지 않는 것.** 이 검증은 artifact 무결성, 복원된 카탈로그 정합, 그리고 복원본의
+M05 delivery 상태까지다. 복원 자체(`pg_restore` 실행)도, RustFS 실물도, evidence root 밖
+relation도, **rebuild 경계를 넘는 데이터 연속성**도 다루지 않는다 — 그 연속성은 이 절이 아니라 backup 주기화(`T-VN-H43`, 소유자 지시로 보류)와
+off-box 사본(`T-VN-H49-OFFBOX`)이 소유한다. restore/swap은 여전히 닫혀 있고 이 작업이
+그것을 열지 않는다.
 
 ## T-VN-M05-ACTIVATION
 
@@ -1278,8 +1394,26 @@ grep이었다.
 ### 승격의 새 정의
 
 > `ktdctl`이 설치한 Manager의
-> `scripts/m05_isolated_e2e.py --verify-leaf <leaf>`가 **exit 0**을 내고, 그 출력을
-> 이 절에 기록한다.
+> `scripts/m05_isolated_e2e.py --verify-leaf <leaf>`가 **exit 0**을 내고, 그 검증
+> **receipt의 경로와 sha256**을 이 절에 기록한다.
+
+**2026-09-08 개정(소유자 승인).** 종전 문구는 "그 **출력**을 이 절에 기록한다"였다.
+그런데 `--verify-leaf`는 아무것도 쓰지 않았으므로, 승격 근거가 **사람이 옮겨 적은
+문장**으로만 남았다 — 위 P0가 무효라고 지목한 바로 그 상태("기계 증적 없이 사람이 옮긴
+문장")가 정의를 고치는 과정에서 검증 **결과** 쪽에 그대로 재생산됐다.
+`T-VN-M05-VERIFY-RECEIPT` V3가 그것을 지적했고, 두 문장이 서로를 무효화한 채 남아
+있었다(한쪽은 옮겨 적으라 명령하고 한쪽은 옮겨 적기가 사라져야 한다고 했다).
+
+개정 근거 셋:
+
+1. **정의의 의도를 더 잘 지킨다.** "재계산 가능한 대조"를 택한 이유가 옮겨 적은 문장을
+   배격하는 것이었는데, 출력 텍스트 전사는 그 배격 대상 자체다. receipt sha256은 옮겨
+   적을 수 없다 — 위조하려면 root-owned 0600 파일을 만들어야 한다.
+2. **V4가 안전을 보장한다.** receipt는 통과 조건이 **아니므로**(`--verify-leaf`가 그
+   존재를 보지 않는다) 인용해도 "receipt를 만들어 두면 승격된다"가 되지 않는다.
+3. **재현 가능성이 는다.** 출력 15줄은 pin이 움직이면 무엇과 대조한 것이었는지 말하지
+   못한다. receipt는 pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을
+   값으로 들고 있다.
 
 그 명령이 보는 것(전부 지금 다시 계산할 수 있는 것뿐이다):
 
@@ -1819,6 +1953,84 @@ Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소
    없어, 라우터 경로로 도달하면 409가 아니라 **catch-all 500**이 된다. 같은 종류의
    사고가 `ck_features_state_tuple`에서 한 번 있었다고 코드 주석이 기록한다.
 
+**2026-09-08 소유자 판정 — 셋 다 결론이 났다(migration 306).**
+
+**질문 셋 중 둘은 이미 좁혀져 있었다.** Q2는 ADR-093이 두 번 답했다("claim은 Feature
+purge 뒤에도 append-only로 남는다" §41, "purge 뒤에도 evidence가 남는다" §150) — 스키마
+주석도 claim·origin에 `features` FK를 **의도적으로** 두지 않은 이유를 그렇게 적는다.
+"남기지 않는다"는 답은 ADR-093 핵심 결정을 뒤집는 새 ADR을 요구하고 그럴 이유가 없다.
+Q3은 정책이 아니라 결함이었다(아래 별도 항).
+
+**Q1 — 연다. 단 UI 버튼이 아니라 자기 복구점을 남기는 운영 명령으로.**
+
+`retire`가 이미 있는 일(오류·중복·품질)에는 쓰지 않는다. purge는 **행이 존재하면 안 되는
+경우**로 한정한다. UI 버튼으로 열면 `retire`가 맡아야 할 일이 이쪽으로 샌다.
+
+**소유자가 건 순서 전제는 문자 그대로는 아직 안 맞는다.** "되돌릴 수 없는 삭제 경로를
+restore proof보다 먼저 열 수 없다"였는데, M05-2 C·D가 증명한 것은 **복원 메커니즘**이지
+복원할 대상이 있다는 것이 아니다 — `map_application`은 어느 주기 백업에도 없고(H43 보류)
+restore/swap은 300 baseline 정책으로 닫혀 있다. 그래서 **purge가 자기 복구점을 들고
+다니게** 했다: 지우기 전에 cascade로 사라질 행을 전부
+`feature.manual_feature_purge_records`에 담는다. 이 우회를 소유자가 승인했고, 그 덕에 이
+항목이 H43 보류에 묶이지 않는다.
+
+담을 relation은 `pg_constraint`에서 런타임에 유도한다 — 목록을 박으면 자식이 늘 때마다
+갱신을 잊는 순간 purge가 **조용히 데이터를 잃는다**(DO NOT 15).
+
+**Q2 — 남긴다. 다만 tombstone을 관리 가능하게 만든다.**
+
+claim의 두 역할을 나눈다: `purged_by_command_id`(purge 승인 — fence가 이것을 본다)와
+`identity_released`(예약 해제 — purge의 **명시 파라미터**). exact 유일성은
+`WHERE NOT identity_released` 부분 인덱스가 된다. 해제가 없으면 "잘못돼서 지웠으니 같은
+자리에 제대로 다시" 가 영원히 막히고, 그때 복구 수단은 감사 없는 DBA 수술뿐이다.
+
+`mistaken_creation`은 보통 해제하고 payload를 담는다. `erasure_required`는 보통 **쥐고**
+payload를 담지 **않는다** — 담으면 삭제의 목적이 무너진다. 두 동기가 정반대를 원하므로
+기본값을 두지 않고 운영자가 의도를 말하게 한다.
+
+**append-only 완화 한 줄이 함께 간다**(소유자 승인): claim의 트리거가 저 세 컬럼의
+**단조 전이 하나**만 허용한다. 증거 필드는 여전히 불변이고 전이는 command가 원인이라
+감사된다. ADR-093에 한 문장을 박았다.
+
+**RESTRICT는 막는 것이 맞다.** `manual_provider_dedup_cases`·
+`feature_reference_reconciliation_events`·`theme_feature_candidates`가 이 Feature의
+identity를 불변 증거로 인용한다. 다만 raw 23503으로 죽으면 이유를 못 말하므로 프로시저가
+먼저 조회해 **무엇이 막는지 이름을 대는** 거부를 낸다.
+
+**definer는 schema owner다.** 이 명령은 본질적으로 `feature.features`의 cascade 자식
+전부를 읽고 지운다. 좁은 owner에게 그만큼을 GRANT로 주면 목록이 드리프트하므로, 권한이
+아니라 **도달 가능성**으로 좁힌다 — EXECUTE를 PUBLIC에서 회수하고 아무에게도 주지 않는다.
+
+**T-VN-M02와 같은 fence다.** M02 live acceptance의 "지워지지 않는 write"는 바로 이 fence가
+유일한 삭제 경로를 거부해서 생긴다. purge가 열리면서 그 cleanup 이야기가 함께 풀린다.
+
+**n150 실측이 잡은 것 넷.** `ON CONFLICT ON CONSTRAINT`가 partial unique index를 가리킬 수
+없어 생성 경로 셋이 깨졌고(그중 하나는 302가 이미 교체한 프로시저라 baseline에서 뽑았으면
+302를 되돌릴 뻔했다), `::regclass`가 `search_path` 상대라 복구점 키가 스키마 없이
+저장됐고, 새 relation은 runtime ACL 선언 없이는 배포되지 않았고, 좌표 index 상한을 두 번
+넘겼다. 변이 11축 전부 RED(그중 둘은 처음에 공허해 판별 가능한 축으로 고쳤다).
+
+**아직 아닌 것.** HTTP 라우트는 만들지 않았다 — 제안이 "UI 버튼이 아니라 운영 명령"이었고
+호출부는 `kortravelmap.infra.manual_feature_purge_repo`다. 운영 스크립트가
+`admin.manual-feature.purge.v1` command를 열어 부른다.
+
+**Q3 — 정책이 아니라 결함이었고, 그 구멍은 한 이름짜리가 아니었다.**
+
+admin state 경로에서 도달 가능한 제약 23개 중 **14개가 분류돼 있지 않았다.** 그중 넷은
+프로시저가 명시적으로 raise한다. 그리고 코드 주석이 근거로 인용한 fail-close 테스트
+`test_admin_state_error_mapping_names_exist_in_ddl`은 **저장소에 없었다**.
+
+세 집합으로 분류를 강제한다 — conflict(409) / validation(422) / unexpected(버그, raw
+재던짐). 셋째는 동작을 바꾸지 않는다. "이건 버그다"라는 **판단**과 "분류를 잊었다"를
+구별하려고 있고, 그 구별이 없는 것이 2026-08-12 사고의 구조적 원인이었다. 게이트는 이름을
+박지 않고 baseline schema에서 폐포를 유도한다(진입 프로시저 → 호출 추적 → raise되는 이름 +
+쓰는 relation의 CHECK). purge 경로에는 같은 모양의 게이트를 처음부터 붙였다.
+
+**분류 하나를 실 DB로 재 보고 되돌렸다.** `ck_feature_reactivation_explicit`를 conflict로
+넣었는데, `reactivate_admin_feature_state`가 `reactivation_evidence`를 항상 넣고 patch는
+lifecycle_state 변경을 호출부에서 막아 **admin 경로로는 도달할 수 없다.** unexpected로
+옮겼다 — 도달 불가능한 값을 conflict로 등록해 두면 "구분되고 있다"는 오해가 남는다.
+
 **2026-09-07 — 자식 셋의 복원 리허설을 실행했다. 셋 다 `verified: true`.**
 
 기록 위치는 소유자 판정으로 **Manager `docs/docker-management.md`**다.
@@ -1834,9 +2046,10 @@ Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소
 이 셋의 마지막 해제 조건을 막고 있던 것은 원장이 적은 무엇도 아니라 **그 결함**이었다
 (Manager #324).
 
-**부모 절의 전제가 성립하지 않는다(2026-09-07 실측).** `geo_dagster`·`concierge`는
-백업 0건이라 `create`가 선행해야 했다. root crontab 없음, backup systemd timer 없음,
-logrotate 미설치. 그리고 geo application DB의 backup은 **2026-08-25 이후 실패했다** —
+**부모 절의 전제가 성립하지 않는다(2026-09-07 실측).** ~~`geo_dagster`·`concierge`는
+백업 0건이라 `create`가 선행해야 했다.~~ **2026-09-08 정정 — 아래 §측정 오류 참조.**
+root crontab 없음, backup systemd timer 없음, logrotate 미설치는 사실이다.
+그리고 geo application DB의 backup은 **2026-08-25 이후 실패했다** —
 `db_backup` job이 디스크 부족으로 7연속 실패(`db=33.9GB × 1.3 = 44.1GB` 요구, 여유
 29.8~36.0GB)한 뒤 마지막 job이 `queued`로 12일간 고착됐다. 소유자 승인으로 빌드 캐시와
 과거 격리 실행 이미지를 정리해 여유를 49GB → **119GB**로 올리고 그 고착 행을 만료
@@ -2273,6 +2486,37 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
 **판정: 충족. 실행 잔여 없음 — `tasks-done.md` 이관 대상이다.** (이 항목이 왜 열려
 있었는지는 문서에 근거가 없었다. 조건을 적고 나니 닫을 수 있다는 것이 드러난다.)
 
+### 측정 오류 정정 (2026-09-08)
+
+**"n150에 예약 백업이 아예 없다"는 틀렸다.** `digitie`의 crontab에 셋이 매일 돈다:
+
+```
+CRON_TZ=UTC
+15 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh geo_dagster 4
+30 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh concierge  7
+55 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh pinvi      7
+```
+
+`/home/digitie/backups`에 세 role 모두 dump + `.sha256` + `.manifest` 삼종이 보존 정책대로
+있고(각 12·21·23 파일), 로그는 2026-08-21부터 **18일 연속 성공, 실패 0건**이며 GC가 하루
+한 건씩 지운다. 즉 "주기 백업이 최근 성공과 bounded retention으로 수렴한다"는 부모 전제는
+**수렴할 대상이 돌지 않는 상태가 아니라 이미 돌고 있었다.**
+
+**왜 틀렸나.** `backup_root_for_role()`은 `KTDM_BACKUP_ROOT`가 없으면 `~/backups`로 떨어진다.
+cron은 그 값을 명시하지만, **root로 실행한 `ktdctl db-backup list`는 `/root/backups`를 본다.**
+2026-09-07 실측이 root로 돌았고, 그래서 "백업 0건"으로 읽혔다 — 실제로는 다른 디렉터리를
+보고 있었다. `sudo ls /root/backups`는 지금도 원장이 적은 그대로다(`map_application` 1건,
+`map_dagster` 1건, `pinvi` 2건).
+
+**이 정정이 뒤집지 않는 것.** `map_application`은 어느 cron에도 없다 — 그것은 `T-VN-H43`의
+의도된 보류다. 그리고 M05-2가 근거로 삼은 사실, 즉 **manual-feature evidence를 담은
+`map_application` backup이 만들어진 적이 없다**는 그대로다: home root의 것은 2026-08-22
+(614MB, 300 이전 세대), root의 최신 것은 2026-09-07 23:26에 내가 만든 것이다.
+
+**교훈은 도구가 아니라 관측 지점이다.** 같은 명령이 실행 사용자에 따라 다른 곳을 본다.
+"없다"를 기록하기 전에 **어디를 봤는지**를 함께 기록해야 한다.
+
+
 ## T-VN-H49-GEO-DAGSTER
 
 - [ ] E1. `geo_dagster` metadata DB의 standalone dump가 주기 실행된다.
@@ -2330,15 +2574,42 @@ Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/
 
 ## T-VN-M02-TRUNCATE-FENCE
 
-- [ ] **T-VN-M02-TRUNCATE-FENCE — hard-purge fence의 TRUNCATE 우회를 닫거나, 닫지 않는 이유를 박는다**
+- [x] **T-VN-M02-TRUNCATE-FENCE — hard-purge fence의 TRUNCATE 우회를 닫거나, 닫지 않는 이유를 박는다** (2026-09-08 충족, migration 307)
 
 **2026-09-07 실측으로 드러난 구멍이다.** manual Feature hard-purge fence는
 `feature.features`의 **BEFORE DELETE row trigger**다. 그런데 같은 표에 BEFORE TRUNCATE
-문 트리거가 없어 **`TRUNCATE feature.features CASCADE`가 fence를 통째로 우회한다.**
-claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있어 대비된다.
+문 트리거가 없다. claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있다.
 
-**무비용이 아니다.** 통합 테스트 24곳이 `TRUNCATE ... CASCADE`에 의존하므로 트리거를
-그냥 더하면 그 테스트들이 깨진다.
+**2026-09-08 재실측 — 위 서술의 두 문장이 틀렸다.**
+
+1. ~~`TRUNCATE feature.features CASCADE`가 fence를 통째로 우회한다~~ — **실제로는
+   중단된다.** `feature.features`만 TRUNCATE하는 것은 FK 때문에 불가능하고, `CASCADE`가
+   끌어오는 30-table 폐포 중 **10개에 켜진 BEFORE TRUNCATE 가드**가 있다
+   (`feature_aliases`·`curation_import_rows`·`curation_link_decisions`·
+   `theme_feature_candidates`·`curation_cutover_identity_mappings`·
+   `curation_import_manual_feature_children`·M05 evidence 넷). **진짜 결함은 다른 것이다** —
+   fence는 그 거부에 아무 기여도 하지 않고, 호출자가 받는 진단은
+   `T-VN-32C legacy write fence: feature_aliases TRUNCATE 금지`라 manual Feature와 무관한
+   이유를 댄다.
+2. ~~통합 테스트 24곳이 그 경로에 의존해 무비용이 아니다~~ — **14곳이고, 비용은 0이다.**
+   전부 `tests/integration/_db_cleanup.py`를 지나고 그 헬퍼가
+   `SET LOCAL session_replication_role = replica`(`:49`)로 돌아 origin 트리거를 전부
+   억제한다. 저장소 안에 증거가 있다 — `test_db_cleanup.py`가 위 가드 7개를 포함한
+   CASCADE를 **성공으로** 단언하고 CI에서 초록이다.
+
+**원장이 놓친 더 큰 구멍.** `ops.feature_requests`(M04 외부 제출)는 TRUNCATE 가드도
+append-only row 가드도 **아예 없다**. `ops.feature_update_requests`·`_datasets`는 DELETE
+가드만 있고 TRUNCATE 가드가 없다.
+
+**실제 노출은 훨씬 작다.** 121개 테이블에서 TRUNCATE 권한을 가진 로그인 롤은 컨테이너
+superuser 하나뿐이고(`schema.sql`에 `GRANT ... TRUNCATE`가 0건), 그 행위자는
+`SET session_replication_role`이나 `ALTER TABLE ... DISABLE TRIGGER`로 **기존 DELETE
+fence도 똑같이** 무력화한다. 따라서 origin-enabled 트리거는 보안 바닥을 0만큼 올린다 —
+정직한 위협 모델은 적대자가 아니라 **실수**다. 바닥을 실제로 올리는 것은 `ENABLE ALWAYS`
+뿐이고, 그것은 `_db_cleanup.py`에 명시 `DISABLE TRIGGER` 네 줄을 요구한다.
+
+**변이 검증의 함정.** "트리거 제거 → red"는 **공허하다** — 이웃 가드가 먼저 raise하므로
+지금도 red다. 새 트리거의 **고유 제약 이름/메시지**를 단언해야 한다.
 
 **해제 조건.**
 
@@ -2348,10 +2619,55 @@ claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있어 대�
 2. (a)를 택하면 우회가 실제로 막히는지 **변이 검증**으로 보인다 — 트리거를 되돌리면
    red가 되어야 한다.
 3. 어느 쪽이든 `docs/adr/`의 관련 결정문에 fence의 적용 범위를 한 문장으로 박는다.
+4. `ops.feature_requests`를 함께 판정한다 — 위 재실측이 드러낸, 원장이 몰랐던 구멍이다.
+
+**2026-09-08 충족 — (a)를 택했다(migration 307).**
+
+**(a)를 택한 이유는 진단이다.** 재실측이 보인 대로 TRUNCATE는 이미 중단됐고, 결함은
+fence가 그 거부에 기여하지 않고 진단이 엉뚱한 이유를 댄다는 것이었다. (b)를 택하면
+그 오진이 계약으로 굳는다.
+
+**`ENABLE ALWAYS`다.** origin-enabled 트리거는 보안 바닥을 0만큼 올린다 — TRUNCATE
+가능한 로그인 롤은 superuser 하나뿐이고 그 행위자는 `SET session_replication_role` 한
+줄로 기존 DELETE fence까지 무력화한다. 정직한 위협 모델은 적대자가 아니라 **실수**이고,
+실수를 막는 유일한 변형이 ALWAYS다.
+
+대가인 `_db_cleanup.py`의 명시 DISABLE은 **비용이 아니라 개선**이다. 종전에는 `replica`
+한 줄이 무엇을 우회하는지 말하지 않은 채 전부 껐다. 되돌릴 때 `ENABLE ALWAYS`를 써야
+한다는 것까지 게이트가 결박한다 — 그냥 `ENABLE`이면 origin으로 내려앉아 남은 세션 내내
+우회 가능해지고, 그 상태는 겉보기에 정상이라 아무 테스트도 실패하지 않는다.
+
+**306이 열린 뒤라 이 선택이 가능해졌다.** 이전이라면 더 강한 fence는 "지울 방법이 아예
+없다"를 굳히는 것이었다. 이제는 감사되는 삭제 경로가 있으므로 **감사되지 않는 경로만**
+막는 것이 된다. 그래서 이 항목과 §T-VN-H49의 purge 판정은 함께 읽어야 한다.
+
+**4항 — `ops.feature_requests`.** TRUNCATE와 DELETE를 막는다. `UPDATE`는 막지 **않는다**
+— 라우터가 `status`/`resolved_at`/`resolved_by_actor`를 정당하게 갱신하고
+(`_FEATURE_REQUEST_TABLE_ACL`이 그 컬럼만 GRANT한다), 여기서 막으면 M04 해결 경로가
+통째로 죽는다. 그 과잉을 막는 축을 따로 뒀다. `feature_update_requests`·`_datasets`는
+TRUNCATE만 더한다(DELETE 가드는 이미 있다).
+
+**2항의 함정을 피했다.** "트리거 제거 → red"는 공허하다 — 이웃 가드가 먼저 raise하므로
+지금도 red다. 그래서 모든 단언이 **고유 제약 이름**을 본다. 변이 8축 전부 RED
+(features_trigger · features_origin_only · requests_truncate · requests_delete ·
+update_requests_truncate · delete_guard_overreaches · cleanup_downgrades ·
+preflight_rejects_always).
+
+**실측이 잡은 것 셋.** 새 SECURITY DEFINER 함수는 `db.py` startup preflight가 배포를
+막았고, 회수는 **소유자만** 할 수 있어 audit writer 소유로 만들어야 했다(기존 guard
+주석이 같은 함정을 적어 뒀다). `ENABLE ALWAYS`는 `tgenabled='A'`인데 M05-2 D단계
+preflight가 그것을 "꺼짐"으로 읽고 있었다 — `'A'`는 origin보다 **강한** 상태다. 그리고
+`test_mois_loader`의 다섯 번째 전역 조회를 찾았다.
+
+3항의 ADR 기재는 ADR-093 개정문(2026-09-08)이 purge 경계를 적으면서 함께 담는다.
+
+**T-VN-M02와 같은 fence다.** `T-VN-M02`의 "지워지지 않는 write"는 바로 이 fence가 유일한
+삭제 경로를 거부하기 때문에 생긴다(admin API의 `DELETE`는 soft retire다). (a)를 `ENABLE
+ALWAYS`로 택하면 그 되돌릴 수 없음이 **더 강해진다** — 두 항목을 따로 판정하면 안 된다.
 
 ## T-VN-M05-ONESHOT-CONSUME
 
-- [ ] **T-VN-M05-ONESHOT-CONSUME — 격리 acceptance 성공이 execution identity를 소비하게 한다**
+- [x] **T-VN-M05-ONESHOT-CONSUME — 격리 acceptance 성공이 execution identity를 소비하게 한다** (2026-09-08 충족, Manager #335)
 
 **2026-09-07 실측으로 드러난 구멍이다.** 격리 M05 one-shot은 **본문 실패에만** 강제된다
 — `_block_terminal_m05_execution`이 본문 phase에 `phase=None`(무조건 차단)을 남기지만,
@@ -2372,6 +2688,30 @@ leaf가 `--verify-leaf`의 L8("terminal 차단 아님")에서 실패한다. 승�
    거부**한다. 복구 경로는 rebind 또는 회전이며 그 사실을 진단 메시지가 말한다.
 3. `--verify-leaf`의 L8이 소비된 identity의 leaf를 계속 통과시킨다.
 4. 변이 검증: 성공 시 소비 기록을 지우면 red, 소비를 소각으로 취급하면 L8 게이트가 red.
+
+**2026-09-08 충족 — 넷 다(Manager #335).**
+
+scoped phase `execution_identity_consumed`로 남긴다. 그러면 셋이 동시에 성립한다:
+`is_unconditionally_blocked_current()`가 소각으로 세지 않아 배포·회전이 안 막히고(소비는
+"승격됐다"이지 "오염됐다"가 아니다), L8이 `entry.phase is None`만 보므로 통과한 leaf가
+계속 검증되고, runnable assert가 이것만 따로 보고 재실행을 막는다.
+
+**`result.json`에 키를 더하지 않았다.** 런처가 키 집합을 정확히 강제해
+(`set(value) != expected_keys` → degraded → 무조건 소각) 그 계약을 건드리면 통과한
+1~2시간 실행이 타 버린다.
+
+**적대 리뷰가 내 변이 검증이 놓친 축을 잡았다(P1).** `has_block_for_current(phase=...)`
+에서 `phase=`를 떼면 그 술어가 **모든** 차단 기록을 잡아, 인프라 phase로 scoped 기록이
+남은 identity가 영구히 거부되고 진단은 엉뚱하게 `execution_identity_consumed`가 된다 —
+#330이 넣고 #331이 되돌린 회귀와 같은 부류다. **내 9축은 "지우기"만 쟀고 "약화"를 재지
+않았다.** 갈리는 유일한 상태(소비가 아닌 scoped 기록 하나)를 만드는 축을 더했다.
+
+그리고 리뷰가 내 테스트 하나를 공허하다고 잡았다 — "아무 문자열이나 phase면 scoped
+기록이 된다"를 재는 것이라 어떤 줄도 빨갛게 만들지 못했다. 지웠다.
+
+**2항의 진단**은 `_PAIR_DIAGNOSTICS`가 아니라 상위 집합에 넣는다. 그 집합은 pair 실패
+전용이고 "안의 모든 문자열이 발신된다"를 기존 테스트가 양방향으로 결박하므로, 다른
+phase의 진단을 섞으면 그 결박이 거짓이 된다.
 ## T-VN-M05-RELITIGATION
 
 **2026-09-07 신설.** #1189가 M05-3 탐지기를 붙이면서 드러난 것이다 — 계약 자체의
@@ -2446,16 +2786,71 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 그리고 그 근거는 셋 중 무엇이 먼저 와도 재현 불가가 된다: `pin rotate-pair`(의도된
 성질), execution history 500칸 링에서 binding이 밀려남, leaf identity 소각.
 
-- [ ] **V1 — 검증이 root-owned receipt를 남긴다.**
+- [x] **V1 — 검증이 root-owned receipt를 남긴다.** (2026-09-08, Manager #335)
   `--verify-leaf`가 통과·실패 모두에 대해 검증 시각·검증기 revision·leaf 경로·읽은
   registry 파일 경로·정의표의 **모든 축**(현재 15줄) 각각의 결과와 detail을 root-owned 0600 파일로 남긴다 — 축이 늘면 receipt도 함께 는다.
   **실패도 남긴다** — 통과만 남기면 "검증한 적 없다"와 "검증했는데 떨어졌다"가 같아 보인다.
-- [ ] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.**
+- [x] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.** (2026-09-08, Manager #335)
   pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을 값으로 싣는다.
   나중에 pin이 움직여 재현이 불가능해져도 **무엇과 대조해 통과했는지**는 남는다.
-- [ ] **V3 — receipt가 원장 인용을 대체한다.**
+- [x] **V3 — receipt가 원장 인용을 대체한다.** (2026-09-08 충족)
   조문이 출력 텍스트를 옮겨 적는 대신 receipt 경로와 그 sha256을 인용한다. 옮겨 적기가
   사라져야 이 항목의 요지가 달성된다.
-- [ ] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.**
+
+  **2026-09-08 — 승격 정의를 개정하고(소유자 승인) 배포된 빌드로 실측했다.**
+
+  `install-ktdm-trusted-release`로 `ee281b5`(#335)를 n150에 설치하고
+  `pin rebind-execution`으로 재결박한 뒤(`execution_binding: manager_drift → current`)
+  두 승격 후보를 검증했다. **둘 다 15축 전부 PASS, exit 0.**
+
+  | leaf | receipt | sha256 |
+  |---|---|---|
+  | `/root/pairv2-e2e-02` | `/var/lib/kor-travel-docker-manager/m05-verify-receipts/pairv2-e2e-02-20260908T045824773930Z.json` | `b65b1d79ccca2c30fe989625bba8c23b9e49f69cbc7ffd3a8ae93220e5ba027c` |
+  | `/root/pairv2-e2e-03` | `…/m05-verify-receipts/pairv2-e2e-03-20260908T045803209001Z.json` | `06f8383d54afd157b1923f170cec7bf323ab74603b3a287d423b07228e9a6365` |
+
+  디렉터리와 파일 모두 `root:root`, 각각 `0700`/`0600`.
+
+  **재배포가 과거 증적을 무효화하지 않았다** — 설치본은 `ee281b5`인데 두 leaf의 binding
+  Manager revision은 `d36847e2`/`0406b14d`다(`is_installed=False`). L4·L5가 설치 revision이
+  아니라 **registry binding**에서 파생하도록 만든 설계가 정확히 이 경우를 위한 것이었고,
+  이번 배포가 그것을 처음으로 실증했다.
+
+  receipt가 싣는 것: `pinned_pair`(pinset·Map·PinVi revision), `leaf_binding`(execution
+  identity·binding Manager revision·`is_current_execution`), `ledger_claim_name`,
+  `registry_paths` 셋, `verifier`(설치 revision + **검증기 스크립트 자신의 sha256**
+  `8ef83e0a…`), `coverage`, 축 15개 각각의 결과와 detail.
+
+  **이 표가 종전의 30줄 전사를 대체한다.** 해시는 옮겨 적을 수 없다 — 위조하려면
+  root-owned 0600 파일을 만들어야 하고, V4가 receipt를 통과 조건에서 배제하므로 그렇게
+  만들어 둬도 승격되지 않는다.
+- [x] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.** (2026-09-08, Manager #335)
   receipt는 검증의 **기록**이지 근거가 아니다. `--verify-leaf`가 receipt의 존재를
   통과 조건으로 삼지 않는다(그러면 receipt를 만들어 두는 것으로 통과할 수 있다).
+
+**2026-09-08 — V1·V2·V4 충족, V3는 열려 있다(Manager #335).**
+
+`--verify-leaf`는 정말로 아무것도 쓰지 않았다. **V2가 요구하는 값은 전부 이미
+지역변수로 살아 있었고** print 문자열에만 들어갔다 버려지고 있었다 — 모아서 receipt로
+내는 것이 대부분의 일이었다.
+
+**가장 날카로운 지점은 신뢰 경계 거부였다.** 그 경로는 한 문장만 인쇄하고 `return 1`이라
+`checks`가 빈 채로 끝났다. receipt를 붙였어도 내용이 비었을 것이고, "실패도 남긴다"가
+가장 필요한 실패 종류가 바로 그것(leaf가 가짜라는 판정)이다.
+
+**조문 문구 하나를 정정한다.** V1이 "정의표의 **모든 축**(현재 15줄)"이라 적었는데,
+15줄은 **full-pass 경로에서만** 맞다. 조기 종료 경로는 16번째 식별자를 내고 L3~L8을
+억제해 4~8줄이 된다. receipt는 잰 축을 그대로 싣고 `coverage`로 **어디서 멈췄는지**를
+말한다 — 그것이 "모든 축"의 실현 가능한 형태다.
+
+**V3가 남은 이유.** 이 조문은 receipt **경로와 sha256을 원장이 인용**할 것을 요구하는데,
+그러려면 배포된 빌드로 실제 검증을 한 번 돌려야 한다. #335가 머지되고
+`install-ktdm-trusted-release`로 배포한 뒤(그 자체가 execution identity를 바꿔 rebind를
+부른다) 실행할 일이다.
+
+**그리고 V3는 조문끼리 충돌한다.** §T-VN-M05-ACTIVATION의 승격 정의가 "**그 출력을 이
+절에 기록한다**"고 **명령**한다. V3를 채우려면 그 문장도 함께 고쳐야 하며, 그것은 승격
+정의의 개정이므로 소유자 판정이다.
+
+**변이 검증**(초기 9축 + 적대 리뷰 후속 5축 = 14축 전부 RED). 넷은 처음에 공허했다 —
+소비·marker 배선이 `finally` 안에 인라인이라 직접 잴 수 없었다. 이 파일이 이미 같은
+이유로 `driver_exit_code`를 꺼낸 전례가 있어 같은 방식으로 추출했다.

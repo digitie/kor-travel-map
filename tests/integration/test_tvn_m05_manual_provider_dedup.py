@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from uuid import UUID, uuid4
@@ -70,6 +69,15 @@ async def _seed_manual_provider_pair(
     """
 
     suffix = uuid4().hex
+    # `ck_features_coord_pair`와 claim의 lon/lat CHECK가 좌표를 한반도 범위로 묶는다
+    # (lon 124~132, lat 33~39.5). index가 그 밖으로 밀면 PostGIS `Invalid coordinate`나
+    # CHECK 위반으로 죽는데, 그 오류는 **index 때문이라고 말하지 않는다** — 2026-09-08에
+    # 두 모듈이 차례로 그것에 걸렸다. 여기서 먼저 말한다.
+    if not 0 <= index <= 190:
+        raise ValueError(
+            f"index가 좌표 유효 범위를 벗어난다(0~190): {index}."
+            " 좌표를 index * 0.01도씩 밀기 때문이다."
+        )
     lon_offset = index * 0.01
     lat_offset = index * 0.01
     manual_name = f"M05 수동 후보 {index}"
@@ -180,6 +188,11 @@ async def _seed_manual_provider_pair(
                 "actor": actor,
             },
         )
+        # **dataset을 호출마다 새로 만들지 않는다.** `provider_datasets`는 dimension이고,
+        # `test_t212d_perf_explain`이 그 표가 작게 유지되는지(H50 small-table Seq Scan
+        # 예외) 감시한다. 호출마다 하나씩 만들면 M05 테스트가 늘 때마다 그 canary가
+        # 터진다 — 2026-09-08에 114건으로 실제로 터졌다. 한 행을 공유해도 entity/record는
+        # 여전히 호출마다 다르므로 시나리오는 그대로다.
         dataset_id = int(
             await connection.scalar(
                 text(
@@ -188,18 +201,18 @@ async def _seed_manual_provider_pair(
                       provider, dataset_key, display_name, source_kind, is_active,
                       capabilities
                     ) VALUES (
-                      :provider, :dataset_key, 'M05 integration', 'system', true,
+                      'python-m05-integration', 'm05-integration',
+                      'M05 integration', 'system', true,
                       jsonb_build_object(
                         'schema_version', 1, 'produces', '[]'::jsonb,
                         'extensions', '{}'::jsonb
                       )
-                    ) RETURNING provider_dataset_id
+                    )
+                    ON CONFLICT ON CONSTRAINT uq_provider_datasets_identity
+                    DO UPDATE SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
                     """
-                ),
-                {
-                    "provider": f"python-m05-{suffix[:8]}",
-                    "dataset_key": f"m05-{suffix[:8]}",
-                },
+                )
             )
         )
         await connection.execute(
@@ -399,84 +412,29 @@ async def _preflight_ack(
 
 
 async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
-    migrated_engine: AsyncEngine,
+    migrated_engine: AsyncEngine, m05_pristine_provisioning: dict[str, object]
 ) -> None:
-    """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다."""
+    """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다.
+
+    앞의 세 성질은 **pristine DB에서만** 관찰할 수 있다(구독은 append-only
+    singleton이다). 그래서 관찰 자체는 session scope fixture가 어떤 M05 테스트보다
+    먼저 해 두고, 여기서는 그 결과를 단언한다 — 이 테스트가 직접 부르면 다른 모듈이
+    구독을 먼저 만드는 순간 세 단언이 조용히 사라진다.
+    """
 
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     principal_id = "service:feature-reference-reconciliation"
     try:
-        async with api.connect() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            with pytest.raises(DBAPIError) as not_ready:
-                await connection.execute(
-                    text(
-                        "CALL feature.resolve_manual_provider_dedup_case_v2("
-                        "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1, NULL::text, "
-                        "'activation gate', 'admin:m05-subscription', 1, NULL::text, "
-                        "NULL::uuid, NULL::uuid, NULL::text, NULL::bigint)"
-                    ),
-                    {"case_id": str(uuid4())},
-                )
-            await connection.rollback()
-        assert getattr(not_ready.value.orig, "sqlstate", None) == "P0002"
-
-        first_command_id = await _open_command(
-            migrated_engine,
-            actor="admin:m05-subscription",
-            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-        )
-        second_command_id = await _open_command(
-            migrated_engine,
-            actor="admin:m05-subscription",
-            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-        )
-        first_ready = asyncio.Event()
-        release_first = asyncio.Event()
-
-        async def provision_once(
-            command_id: int,
-            *,
-            ready: asyncio.Event | None = None,
-            release: asyncio.Event | None = None,
-        ) -> dict[str, object]:
-            async with api.begin() as connection:
-                await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-                receipt = dict(
-                    (
-                        await connection.execute(
-                            text(
-                                "CALL feature."
-                                "provision_feature_reference_reconciliation_subscription("
-                                ":principal_id, 0, 'admin:m05-subscription', :command_id, "
-                                "NULL::text, NULL::bigint)"
-                            ),
-                            {"principal_id": principal_id, "command_id": command_id},
-                        )
-                    )
-                    .mappings()
-                    .one()
-                )
-                if ready is not None:
-                    ready.set()
-                if release is not None:
-                    await release.wait()
-                return receipt
-
-        first_task = asyncio.create_task(
-            provision_once(first_command_id, ready=first_ready, release=release_first)
-        )
-        await asyncio.wait_for(first_ready.wait(), timeout=5)
-        second_task = asyncio.create_task(provision_once(second_command_id))
-        done, _pending = await asyncio.wait({second_task}, timeout=0.1)
-        assert not done
-        release_first.set()
-        provisioned, raced = await asyncio.gather(first_task, second_task)
-        assert provisioned == {
+        # 구독 없이 판정하면 거부된다.
+        assert m05_pristine_provisioning["gate_sqlstate"] == "P0002"
+        # 먼저 잡은 트랜잭션이 커밋할 때까지 두 번째 provision은 막혀 있다.
+        assert m05_pristine_provisioning["blocked_while_first_held"] is True
+        # 동시 둘 중 하나만 만들고 나머지는 기존 것을 본다.
+        assert m05_pristine_provisioning["provisioned"] == {
             "o_outcome": "provisioned",
             "o_initial_event_sequence": 0,
         }
-        assert raced == {
+        assert m05_pristine_provisioning["raced"] == {
             "o_outcome": "already_provisioned",
             "o_initial_event_sequence": 0,
         }

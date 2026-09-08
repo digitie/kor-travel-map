@@ -270,6 +270,9 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "feature_base_field_values",
         "feature_state_transitions",
         "manual_feature_identity_claims",
+        # purge의 복구점. 런타임 role에는 보이지 않는다 — 지워진 Feature의 payload를
+        # 통째로 들고 있으므로 origin/claim과 같은 등급이다.
+        "manual_feature_purge_records",
         "theme_candidate_generation_observations",
         "theme_candidate_generations",
         "theme_feature_candidate_transitions",
@@ -396,14 +399,49 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
     "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
+    # 307의 TRUNCATE 가드 둘. trigger function은 발화 시 EXECUTE 권한을 보지 않으므로
+    # 회수해도 fence는 그대로 돈다 — 회수하지 않으면 `db.py`의 startup preflight가
+    # "unexpected SECURITY DEFINER function"으로 배포를 막는다(실측으로 잡혔다).
+    #
+    # 307이 만들므로 그 표가 없는 head에서도 도는 이 조정기는 존재 여부를 보고 건다.
+    "DO $$ BEGIN"
+    " IF to_regprocedure('feature.reject_manual_feature_truncate()') IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON FUNCTION feature.reject_manual_feature_truncate()"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner,"
+    " ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor';"
+    " END IF;"
+    " IF to_regprocedure('feature.reject_feature_request_evidence_mutation()')"
+    " IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON FUNCTION feature.reject_feature_request_evidence_mutation()"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner,"
+    " ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor';"
+    " END IF; END $$",
 )
 
 _MANUAL_FEATURE_TABLE_ACL = (
     "REVOKE ALL ON TABLE feature.manual_feature_identity_claims, "
     "feature.feature_creation_origins FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    # `manual_feature_purge_records`는 306이 만든다. 이 조정기는 `300` head에서도
+    # 도는데(0236 → 300 handoff 검증), 그 시점에는 표가 없어 이름을 그대로 쓰면
+    # `UndefinedTable`로 죽는다 — 304의 함수 REVOKE가 pre-304 DB에서 42883으로 죽은
+    # 것과 같은 부류다. 존재할 때만 적용한다.
+    "DO $$ BEGIN"
+    " IF to_regclass('feature.manual_feature_purge_records') IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON TABLE feature.manual_feature_purge_records"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime';"
+    " EXECUTE 'GRANT SELECT, INSERT ON TABLE feature.manual_feature_purge_records"
+    " TO ktm_manual_feature_procedure_owner';"
+    " END IF; END $$",
     "GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims, "
     "feature.feature_creation_origins TO ktm_manual_feature_procedure_owner",
+    # purge 프로시저는 schema owner가 definer다(306) — 이 명령이 본질적으로
+    # `feature.features`의 cascade 자식 전부를 읽고 지우기 때문이다. 그래서 여기서
+    # 좁은 owner에게 추가 권한을 주지 않는다. 좁히는 축은 권한이 아니라 **도달 가능성**이다:
+    # 프로시저의 EXECUTE가 PUBLIC에서 회수돼 있고 아무에게도 부여되지 않는다.
 )
 
 _FEATURE_REQUEST_TABLE_ACL = (

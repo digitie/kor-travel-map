@@ -1,5 +1,115 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-08 (2) — purge를 열고, TRUNCATE fence와 소비 기록을 닫았다
+
+| 항목 | 상태 |
+|---|---|
+| `T-VN-H49` hard purge 정책 | **완료** — migration 306, 소유자 승인 |
+| `T-VN-M02-TRUNCATE-FENCE` | **완료** — migration 307, `ENABLE ALWAYS` |
+| `T-VN-M05-ONESHOT-CONSUME` | **완료** — Manager #335 |
+| `T-VN-M05-VERIFY-RECEIPT` | V1·V2·V4 완료, **V3만 남음**(소유자 판정 포함) |
+| 열린 항목 | 8 → **5**(보류 셋 포함) |
+
+**purge가 자기 복구점을 들고 다닌다.** 소유자가 건 "restore proof 먼저" 전제는 문자
+그대로는 아직 안 맞는다(복원 메커니즘은 증명됐지만 복구점이 없다). 지우기 전에 cascade로
+사라질 행을 전부 담게 해서 그 전제를 우회했고, 그 우회를 소유자가 승인했다.
+
+**TRUNCATE fence는 `ENABLE ALWAYS`다.** origin이면 `replica` 한 줄로 사라지고, 그 한 줄은
+이 표를 TRUNCATE할 수 있는 유일한 행위자가 언제든 쓴다 — 정직한 위협 모델은 적대자가
+아니라 실수다.
+
+### 적대 리뷰 둘이 내 변이 검증의 구멍을 잡았다
+
+Manager 리뷰(14건 → 2 확정)의 P1이 결정적이었다 — 소비 검사의 phase 필터를 **약화**하는
+변이가 초록이었다. **내 변이 축은 "지우기"만 재고 "약화"를 재지 않았다.** 그 부류를
+전부 다시 봐야 한다. Map 306/307 리뷰는 이 글 쓰는 시점에 진행 중이다.
+
+### 착수 가능 — 소유자 판정 없이
+
+1. **`T-VN-39`의 TEXT `feature_id` PK 제거** — 가장 큰 축이고 소유자 판정 대상이 아니다.
+   대체 identity와 fence가 이미 prod에 있고 `feature.features`가 0행이라 데이터 이행
+   위험이 없다. 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
+2. **`T-VN-M02` live acceptance** — `~/ktm-live-301`을 **재구축**해야 한다(정지가 아니라
+   사라졌고, 체크아웃은 302 head이며 spec 자체가 없다). purge가 열려 cleanup 이야기는
+   풀렸다.
+3. **`T-VN-H49` 잔여** — `geo` 예약 성공 2건 더 쌓이기를 기다리는 것과 문서 갱신.
+
+### 소유자 판정 대기 — 셋
+
+1. `T-VN-M05-VERIFY-RECEIPT` **V3** — receipt 인용이 승격 정의의 "출력을 이 절에
+   기록한다"와 충돌한다. 그 문장의 개정이 함께 가야 한다.
+2. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키.
+3. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가.
+
+
+## 2026-09-08 — T-VN-M05 완주. 열린 항목은 여섯이고 소유자 판정은 셋이다
+
+| 항목 | 상태 |
+|---|---|
+| `T-VN-M05` | **완료** — 조문 M05-1~M05-7 전부 충족 |
+| M05-2 | evidence export(A)·오프라인 검증(B)·리허설 소유권 증명(C)·**복원본 수리(D)** |
+| M05-5 | 전용 admin 라우트 `src/app/admin/manual-provider-dedup/` |
+| 실측 | n150 M05 통합 42건, 세 배치 순서 36건, 변이 14축 전부 RED |
+| restore 정책 | **변함없이 닫혀 있다**(2026-08-26 소유자 결정) |
+
+M05-2를 닫으면서 판정을 한 번 되돌렸다. "lease를 evidence root에 담지 않으니 fencing
+token이 되살아날 자리가 없다"는 **번들에 대해서만** 참이었다 — `pg_dump`는 스키마 전체를
+담으므로 복원본에는 lease 행이 dump 시점 `(worker_id, lease_epoch)`를 달고 살아 돌아오고,
+복원본은 사본이라 그 토큰이 양쪽에서 동시에 유효하다.
+
+### 착수 가능 — 소유자 판정 없이 지금 할 수 있는 것
+
+1. **`T-VN-M05-VERIFY-RECEIPT`** — V1·V2·V3 미충족. `verify_leaf`는 정말 아무것도 쓰지
+   않는다(`m05_isolated_e2e.py:2388-2405`). 다만 **V2가 요구하는 값은 전부 이미 지역변수로
+   살아 있다**(pinset·Map/PinVi revision·binding의 Manager revision·claim). 두 갈래 함정:
+   신뢰 경계 거부 경로(`:2445`/`:2448`)는 axis를 하나도 안 남기고 `return 1`하므로 "실패도
+   남긴다"가 가장 필요한 곳이 비어 있고, V3는 조문 `:1386-1388`이 "출력을 이 절에
+   기록한다"고 **명령**하고 있어 조문 정정이 함께 간다.
+2. **`T-VN-M05-ONESHOT-CONSUME`** — 성공 분기가 아무것도 안 남긴다. **소비를 scoped
+   `phase`로 기록하면 L8 호환이 공짜로 풀린다**(L8은 `entry.phase is None`만 본다).
+   **`result.json`에 키를 추가하면 안 된다** — 런처가 정확한 키 집합을 강제해
+   (`run-m05-isolated-e2e-once:505-519`) 불일치가 성공한 실행을 무조건 소각한다.
+3. **`T-VN-M02-TRUNCATE-FENCE`** — 원장 서술 둘이 틀렸다(아래 §정정). 트리거를 더하는
+   비용은 통합 테스트 **0곳**이다.
+4. **`T-VN-39`의 TEXT `feature_id` PK 제거** — 소유자 판정 대상이 아니다. 대체 identity
+   (`feature_uuid` + unique 둘)와 fence 트리거가 이미 prod에 있고 `feature.features`는 0행이라
+   데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
+5. **`T-VN-H49` 잔여** — `geo` 예약 성공 2건 더 쌓이기를 기다리는 것과 문서 갱신뿐이다.
+
+### 소유자 판정 대기 — 둘
+
+~~`T-VN-H49` manual Feature hard purge 정책~~ — **2026-09-08 판정·구현 완료**(migration
+306). 감사되는 운영 명령으로 열되 UI 버튼이 아니고, purge가 자기 복구점을 담아 H43
+보류에 묶이지 않게 했다. claim의 두 역할을 갈라 tombstone을 관리 가능하게 했고 ADR-093에
+개정 한 문장을 박았다. 상세는 `docs/tasks-acceptance.md` §T-VN-H49.
+
+1. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키. 코드는 이미 있다
+   (`offbox_backup_sync.py`, CLI, 상태 API). `/opt` `.env`에 `KTDM_OFFBOX*` 0개.
+2. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가. 새 선행 항목을 세울
+   것인가, 아니면 removal manifest에서 (c)를 뺄 것인가(frozen 계약 개정).
+
+**보류/제외 셋**: `T-VN-41C`·`T-VN-H43`·`T-101` — 셋 다 재개 조건이 아직 발화하지 않았다
+(41C·H43은 실 production 전환, T-101은 SLO 정의와 ADR-073 의미 택일).
+**외부 추적**: `GM-17`(가장 마지막).
+
+### 정정 — 이전 실측 둘이 틀렸다
+
+- **"n150에 예약 백업이 아예 없다"는 틀렸다.** `digitie` crontab에 `geo_dagster`·
+  `concierge`·`pinvi` 셋이 매일 돌고 2026-08-21부터 **18일 연속 성공**했다. root로 실행한
+  조회가 `/root/backups`를 봤고 cron은 `KTDM_BACKUP_ROOT=/home/digitie/backups`를 쓴다 —
+  **다른 디렉터리를 보고 "없다"고 적었다.** `map_application`이 어느 cron에도 없는 것은
+  `T-VN-H43`의 의도된 보류다.
+- **"TRUNCATE CASCADE가 hard-purge fence를 통째로 우회한다"도 틀렸다.** CASCADE 폐포 30개
+  중 10개에 BEFORE TRUNCATE 가드가 켜져 있어 실제로는 중단된다. fence가 그 거부에 기여하지
+  않고 진단이 엉뚱한 이유를 대는 것이 진짜 결함이다. "통합 테스트 24곳"도 **14곳**이고,
+  `_db_cleanup.py:49`가 이미 `session_replication_role = replica`로 돌아 트리거를 더해도
+  **0곳이 깨진다**. 원장이 놓친 더 큰 구멍은 `ops.feature_requests`로, TRUNCATE 가드도
+  append-only 가드도 없다.
+- **`~/ktm-live-301`은 "정지"가 아니라 사라졌다** — 컨테이너도 볼륨도 없고, 그 체크아웃은
+  302 head이며 해당 spec 자체가 없다. `T-VN-M02` live acceptance는 재기동이 아니라 재구축이
+  선행이다.
+
+
 ## 2026-09-06 — D2 lane이 api-audit까지 완주했다
 
 | 항목 | 상태 |
