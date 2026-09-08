@@ -1108,7 +1108,7 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
   holder/expiry 무효화 → subscription별 immutable ack의 **연속 prefix**에서 `acked_through`
   재구축까지가 실행 가능해야 하고, 불연속 ack와 event/hash 불일치는 fail-loud여야 한다.
   (ADR-097 §후속 1 후단)
-- [ ] **M05-3 — candidate가 운영 경로에서 발행된다.**
+- [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
   manual origin Feature와 provider Feature를 **따로** 읽는 전용 detector가 `THRESHOLD_MANUAL`
   이상 쌍을 점수와 무관하게 `candidate`로만 기록하고(자동 병합하지 않는다), detector input
   count와 대규모 scope의 blocking 사실을 case receipt에 남긴다. detector relation에 대한
@@ -1194,7 +1194,9 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 생성 command·principal·actor·시각은 돌려주지 않는다. **ADR-090 경계는 딱 그만큼
 움직인다** — 새로 드러나는 사실은 "어느 Feature가 manual origin인가"이며 그 이상은 아니다.
 
-- [x] **M05-3 — candidate가 운영 경로에서 발행된다.** (2026-09-07 충족, #1189)
+**M05-3이 어떻게 채워졌나**(판정 자체는 위 조문 목록이 소유한다 — 체크박스를 두 곳에
+두면 한 곳만 갱신된다):
+
   manual origin은 304의 reader로, provider는 `ST_DWithin(f.coord_5179, …)`로 **따로** 읽고,
   ADR-016 가중치로 낸 `THRESHOLD_MANUAL` 이상 쌍을 점수와 무관하게 candidate로만
   기록한다(`classify_decision()`·`select_master()`를 부르지 않는다). detector input
@@ -1202,10 +1204,10 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
   `DetectionOutcome`으로 돌려준다. detector relation 직접 INSERT/UPDATE 권한은
   종전대로 executor procedure만 갖는다.
 
-**아직 남은 것, 숨기지 않는다.** 탐지 job에는 **스케줄이 없다.** 프로시저의 멱등성이
-미해결 case에만 성립해 admin이 `kept`로 판정한 쌍이 다음 실행에서 새 case가 된다.
-차단 없이 주기화하면 admin 큐가 쳇바퀴가 되므로 `T-VN-M05-RELITIGATION`이 그것을
-소유한다. 그전까지 운영자가 명시 실행한다.
+**당시 남아 있던 것은 스케줄이었다.** 프로시저의 멱등성이 미해결 case에만 성립해
+admin이 `kept`로 판정한 쌍이 다음 실행에서 새 case가 됐다. `T-VN-M05-RELITIGATION`이
+migration 305의 `decision_fingerprint`로 그것을 막고 일간 스케줄(04:20 KST, 기본
+`STOPPED`)을 붙였다 — 2026-09-08 해소.
 
 **2026-09-08로 둘 다 닫혔다.** M05-5는 전용 라우트로(#1193), M05-2는 아래 A~D단계로.
 2026-09-07의 "정책이 바뀌기 전에는 판정할 수 없다"는 판정 자체가 틀렸다 — 정책을 바꾸지

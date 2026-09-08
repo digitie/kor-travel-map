@@ -10,6 +10,16 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-08 — M05 계약 완주
+
+- [x] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
+  (**2026-09-08 완료**). 조문 M05-1~M05-7 전부 충족. 마지막으로 닫힌 둘은 M05-5(전용
+  admin 라우트, #1193)와 M05-2다. M05-2는 evidence를 canonical JSONL로 뽑고(A) 번들을
+  검증하고(B) 리허설이 소유권·ACL 복원을 증명하고(C) **복원본 DB의 lease를 무효화하고
+  cursor를 재구축한다**(D). 2026-09-07의 "300 baseline 정책이 바뀌어야 판정 가능"은
+  틀린 판정이었다 — 정책을 바꾸지 않고도 조문이 요구하는 것을 지을 수 있었고,
+  restore/swap은 여전히 닫혀 있다. 상세는 `docs/tasks-acceptance.md` §T-VN-M05.
+
 ## 2026-09-08 — M05 재심 차단
 
 - [x] T-VN-M05-RELITIGATION — **admin이 판정한 쌍이 다시 올라오지 않게 한다**

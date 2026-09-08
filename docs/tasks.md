@@ -38,12 +38,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
 
 
-- [~] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
-
-  조문 M05-1~M05-7을 세웠고 2026-09-08 기준 여섯이 충족이다. M05-3은 migration 304의
-  detector reader(#1189), M05-5는 admin 판정 UI, M05-2는 evidence export·검증·복원본
-  수리 A~D단계로 닫혔다. 남은 것은 M05-6·M05-7이다.
-
 - [ ] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
 
   `--verify-leaf`는 print만 하고 아무것도 쓰지 않아, 승격 근거가 원장에 붙인 출력
