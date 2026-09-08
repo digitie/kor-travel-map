@@ -552,6 +552,49 @@ async def test_an_ack_orphaned_from_its_event_is_caught(
         await connection.close()
 
 
+async def test_an_origin_without_its_identity_claim_is_caught(
+    migrated_engine: AsyncEngine, delivery: dict[str, object]
+) -> None:
+    """origin과 claim이 갈리면 append-only 불변 자체가 깨진다.
+
+    exporter가 `domain_commands`를 담는 이유가 이것이다. 정상 스키마에서는 복합 FK와
+    append-only 트리거가 이 상태를 막으므로, 재현하려면 둘 다 떼야 한다 — data-only
+    복원이나 post-data 단계 실패가 남기는 DB가 정확히 그 모양이다.
+    """
+
+    del delivery  # 이력이 있어야 origin이 하나라도 있다.
+    connection = await _rollback_scope(migrated_engine)
+    try:
+        await connection.execute(
+            text(
+                "ALTER TABLE feature.manual_feature_identity_claims"
+                " DISABLE TRIGGER trg_manual_feature_identity_claims_append_only"
+            )
+        )
+        await connection.execute(
+            text(
+                "ALTER TABLE feature.feature_creation_origins"
+                " DROP CONSTRAINT fk_feature_creation_origins_claim"
+            )
+        )
+        removed = await connection.execute(
+            text(
+                "DELETE FROM feature.manual_feature_identity_claims"
+                " WHERE feature_id IN ("
+                " SELECT feature_id FROM feature.feature_creation_origins LIMIT 1)"
+            )
+        )
+        assert removed.rowcount == 1
+
+        failures = await preflight_evidence_graph(connection)
+        assert any(
+            "identity claim이 없는 manual origin" in failure for failure in failures
+        ), failures
+    finally:
+        await connection.rollback()
+        await connection.close()
+
+
 async def test_a_missing_relation_stops_before_the_row_checks(
     migrated_engine: AsyncEngine,
 ) -> None:
