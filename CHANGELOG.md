@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### backup artifact — manifest가 해시 대상에 들어가고 스키마 출처를 싣는다 (2026-09-08)
+
+- **FIXED (backup artifact 무결성)**: `meta/manifest.json`이 `meta/SHA256SUMS`에
+  **없었다.** 검증기는 evidence 파일을 manifest가 선언한 지문과 맞춰 보므로, 그 manifest가
+  보호되지 않으면 선언된 지문을 고친 번들이 그대로 "검증 통과"한다 — 대조의 기준이
+  대조되지 않아 사슬 전체가 anchor를 잃는 상태였다. 이제 `SHA256SUMS`가 manifest도 덮고,
+  그것이 유일한 신뢰 뿌리다. **기존 artifact를 검증할 때는 manifest 줄이 없다** —
+  `sha256sum -c`는 없는 줄을 검사하지 않으므로 옛 번들의 검증은 그대로 통과한다.
+- **ADDED (backup manifest)**: `manual_feature_evidence`에 `alembic_revision`과
+  `server_version`이 실린다. 없으면 번들을 받은 쪽이 그 evidence를 지금 코드로 읽어도
+  되는지 알 수 없다.
+- **ADDED (M05 evidence 복구 경로)**: `kortravelmap.infra.evidence_export`(canonical JSONL
+  추출), `evidence_verify`(번들만 보고 DB에 쓰지 않는 검증), `evidence_restore`(**복원된**
+  DB의 lease 무효화와 cursor 재구축). `repair_restored_database()`는 `apply=False`면 아무
+  것도 쓰지 않고, preflight가 실패하면 수리하지 않는다. **restore/swap 정책은 그대로
+  닫혀 있다** — 이 경로는 복원을 실행하지 않는다(`docs/backup-restore.md`).
+
 ### `/v1/debug/mois-license/{license_id}` 제거 — 계약이 운영 표면과 갈라져 있었다 (2026-09-03)
 
 - **REMOVED (admin API)**: `GET /v1/debug/mois-license/{license_id}`(SPRINT-4 Step D)와
