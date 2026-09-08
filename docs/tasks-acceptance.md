@@ -1915,17 +1915,36 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 - [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
   다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
   수렴하는지는 운영 증거가 더 필요하다. application DB에 standalone cron을 중복 설치하지 않는다.
-- [ ] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
+- [x] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
   manifest 증거를 남긴다.
 - [ ] off-box 사본 자동화를 결선한다(`T-VN-H49-OFFBOX`). Map application/Dagster 주기화는
   #148의 재적재 정책 결정을 따르며 이 task가 임의로 활성화하지 않는다.
-- [ ] 위 운영 AC를 닫은 뒤 `docs/backup-restore.md` §1의 외부 instance 경고를 현행화한다
-  (`T-VN-H49-OFFBOX`).
+- [ ] 위 운영 AC를 닫은 뒤 ~~`docs/backup-restore.md` §1의~~ 외부 instance 경고를
+  현행화한다(`T-VN-H49-OFFBOX`). **2026-09-08 정정 — 그 §1은 존재하지 않는다.**
+  `b2543d68`이 그 파일을 1020줄 → 94줄로 줄이면서 번호 절을 통째로 없앴다(현재 제목은
+  전부 무번호다). 갱신 대상은 그 파일의 §현재 지원 범위와, `b2543d68`이 지운 원문을
+  되살린 `docs/archive/backup-restore-pre-300.md`의 헤더다.
 
 AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 보존 GC, off-box 사본
 증거가 있고 절차가 문서화되어야 한다. PR #181 병합만으로 H49를 완료 처리하지 않는다.
+
+**2026-09-08 실측 — 자식 셋은 충족, geo 부모는 아직 하나가 모자란다.**
+
+`geo_dagster`·`concierge`·`pinvi` 셋 다 `digitie` crontab으로 매일 돌고 **2026-08-21 →
+2026-09-08, 19/19 성공·오류 0**이다. GC도 실제로 지운다(각각 18·14·15회). dump +
+`.sha256` + `.manifest` 삼종이 보존 정책대로 남아 있다(각 4·7·7건, keep 4·7·7). 이
+조문이 요구한 "주기 실행과 보존 GC"가 실측으로 성립하므로 **충족 처리한다.**
+
+geo application DB는 다르다. 예약 artifact가 셋(08-24, 08-25, **09-07**)인데 그중
+2026-09-07 것만 디스크 부족 해소 **뒤**의 성공이다. **bounded retention은 이미
+보인다** — TTL 7일이 지난 08-24·08-25가 `keep_min=3` 때문에 남아 있는 것이 정확히 그
+정책의 동작이다. 남은 것은 "최근 성공으로 수렴한다"뿐이고 그것은 **작업이 아니라
+기다림**이다(하루 1회, 2회 더).
+
+**hard purge 정책은 2026-09-08 판정·구현으로 이 계열에서 빠졌다**(migration 306).
+이 절에 남는 것은 위 geo 수렴과 off-box 결선 둘이며, **후자만 소유자 판정 대기**다.
 
 **2026-09-07 전수 조사 — 자식 셋은 즉시 착수 가능, 부모는 prod 쓰기에 막혀 있다.**
 

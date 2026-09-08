@@ -16,6 +16,11 @@
 > dump 시점 fencing token을 달고 살아 돌아온다), 그때 이 기록이 이미 있었다는 사실을
 > 뒤늦게 알았다. 지운 것을 다시 배우느라 든 비용이 이 파일의 존재 이유다.
 >
+> **주기 백업의 현행 상태는 여기가 아니다** — `docs/backup-restore.md` §외부 instance의
+> 주기 백업이 정본이다(2026-09-08 실측: `geo_dagster`·`concierge`·`pinvi` 19/19).
+> 이 문서의 §9(n150 prod 수동 기준선)는 그 시점의 **수동** 기준선이고 지금 도는 주기와
+> 다르다.
+>
 > 되살아난 부분: evidence export/검증은 `kortravelmap.infra.evidence_export`·
 > `evidence_verify`, 복원본 수리는 `evidence_restore`, 소유권·ACL 복원 증명은 Docker
 > Manager의 standalone backup 리허설(카탈로그 지문 대조)이 소유한다.

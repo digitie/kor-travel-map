@@ -17,6 +17,35 @@ artifact**다. 현재 배포물에는 이를 복원하거나 이전 revision으�
 - n150의 운영 backup 보존 위치·권한·실행 주체는 Docker Manager runbook이 정본이다.
   Map 저장소의 standalone compose 명령을 운영 환경에 대입하지 않는다.
 
+### 외부 instance의 주기 백업 — 현행 (2026-09-08 실측)
+
+`T-VN-H49` 계열이 요구한 "필요한 외부 DB마다 주기 실행과 보존 GC"는 셋에 대해 돌고 있다.
+`digitie` crontab이 정본이고 root crontab·systemd timer가 아니다 — **조회를 root로 하면
+다른 backup root(`/root/backups`)를 보게 되므로 "백업이 없다"로 잘못 읽힌다**(2026-09-07에
+실제로 그렇게 오독했다).
+
+| role | 주기 (UTC) | keep | 실측 |
+|---|---|---|---|
+| `geo_dagster` | 03:15 | 4 | 19/19 성공, 오류 0, GC 18회 |
+| `concierge` | 03:30 | 7 | 19/19 성공, 오류 0, GC 14회 |
+| `pinvi` | 03:55 | 7 | 19/19 성공, 오류 0, GC 15회 |
+
+기간은 2026-08-21 → 2026-09-08이고, 각 role은 dump + `.sha256` + `.manifest` 삼종을 남긴다.
+`KTDM_BACKUP_ROOT=/home/digitie/backups`가 cron 줄에 명시돼 있다.
+
+**geo application DB는 다른 경로다** — Manager의 `scheduled_backup`이 24시간 주기로
+`~/kor-travel-geo/data/backups`에 `.tar.zst`를 남기고 TTL 7일 / `keep_min` 3으로 정리한다.
+2026-08-25 이후 디스크 부족으로 멈췄다가 2026-09-07에 재개됐으므로, "최근 성공으로
+수렴한다"는 아직 증거가 모자란다(그것이 `T-VN-H49`에 남은 잔여다).
+
+**`map_application`/`map_dagster`는 어느 주기에도 없다.** 그것은 누락이 아니라
+`T-VN-H43`의 의도된 보류다(2026-08-06 소유자 지시) — n150은 실 production이 아니고 손상
+시 재적재가 정책이다.
+
+**off-box 사본은 아직 없다.** 코드는 있고(`offbox_backup_sync.py`, CLI, 상태 API)
+`/opt/.../.env`에 `KTDM_OFFBOX*`가 0개다 — 목적지 호스트·계정·root ssh 키가 소유자 몫이다
+(`T-VN-H49-OFFBOX`).
+
 백업 생성은 기본적으로 writer가 멈춘 상태를 요구한다. 의도적인 best-effort snapshot은
 명시 opt-in으로만 남길 수 있지만, 그것도 recovery point나 cutover rollback 근거가 되지
 않는다.
