@@ -399,27 +399,17 @@ async def _preflight_ack(
 
 
 async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
-    migrated_engine: AsyncEngine,
+    migrated_engine: AsyncEngine, m05_activation_gate_sqlstate: str
 ) -> None:
     """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다."""
 
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     principal_id = "service:feature-reference-reconciliation"
     try:
-        async with api.connect() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            with pytest.raises(DBAPIError) as not_ready:
-                await connection.execute(
-                    text(
-                        "CALL feature.resolve_manual_provider_dedup_case_v2("
-                        "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1, NULL::text, "
-                        "'activation gate', 'admin:m05-subscription', 1, NULL::text, "
-                        "NULL::uuid, NULL::uuid, NULL::text, NULL::bigint)"
-                    ),
-                    {"case_id": str(uuid4())},
-                )
-            await connection.rollback()
-        assert getattr(not_ready.value.orig, "sqlstate", None) == "P0002"
+        # 구독 없이 판정하면 거부된다. 이 관찰은 pristine DB에서만 가능하므로
+        # session scope fixture가 **어떤 M05 테스트보다 먼저** 해 둔 것을 읽는다 —
+        # 여기서 직접 부르면 다른 모듈이 구독을 먼저 만드는 순간 조용히 사라진다.
+        assert m05_activation_gate_sqlstate == "P0002"
 
         first_command_id = await _open_command(
             migrated_engine,

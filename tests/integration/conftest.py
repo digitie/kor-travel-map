@@ -347,11 +347,66 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
         await session.rollback()
 
 
-@pytest.fixture
-async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> None:
-    """호환 fixture 이름. `300` bootstrap은 이미 final M01~M05 graph를 만든다."""
+@pytest.fixture(scope="session")
+async def m05_activation_gate_sqlstate(migrated_engine: AsyncEngine) -> str:
+    """정본 구독이 provision되기 **전에** activation gate를 한 번 관찰한다.
 
-    del migrated_engine
+    `resolve_manual_provider_dedup_case_v2`는 소비자 구독이 없으면 판정을 거부한다.
+    그것은 **pristine DB에서만** 관찰할 수 있는 성질이다 — 구독은 append-only
+    singleton이라 한 번 provision되면 되돌릴 수 없다.
+
+    그래서 이 관찰을 개별 테스트에 두면 "먼저 도는 쪽이 이긴다"가 되어, 다른 모듈이
+    구독을 먼저 만드는 순간 조용히 사라진다(2026-09-08 실측: D단계 테스트가 정확히
+    그렇게 이 게이트를 지웠다). session scope로 올려 순서에 기대지 않게 한다.
+    """
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.db import make_async_engine
+
+    dsn = migrated_engine.url.set(
+        username="ktm_feature_api_runtime",
+        password=_TEST_RUNTIME_PASSWORD,
+    ).render_as_string(hide_password=False)
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+            )
+            try:
+                await connection.execute(
+                    text(
+                        "CALL feature.resolve_manual_provider_dedup_case_v2("
+                        "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1,"
+                        " NULL::text, 'activation gate', 'admin:m05-subscription',"
+                        " 1, NULL::text, NULL::uuid, NULL::uuid, NULL::text,"
+                        " NULL::bigint)"
+                    ),
+                    {"case_id": str(uuid4())},
+                )
+            except DBAPIError as error:
+                observed = str(getattr(error.orig, "sqlstate", None))
+            else:  # pragma: no cover — 게이트가 사라졌다는 뜻이다
+                observed = "no-error"
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    return observed
+
+
+@pytest.fixture
+async def tvn_m01_m05_role_graph(
+    migrated_engine: AsyncEngine, m05_activation_gate_sqlstate: str
+) -> None:
+    """호환 fixture 이름. `300` bootstrap은 이미 final M01~M05 graph를 만든다.
+
+    activation gate 관찰을 함께 끌어와, 어떤 M05 테스트가 먼저 돌든 정본 구독이
+    만들어지기 전에 그 관찰이 끝나 있게 한다.
+    """
+
+    del migrated_engine, m05_activation_gate_sqlstate
 
 
 @pytest.fixture(scope="session")
