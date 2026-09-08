@@ -190,6 +190,87 @@ async def test_feature_requests_refuses_delete_but_still_allows_the_status_updat
         )
 
 
+@pytest.mark.parametrize(
+    "relation",
+    [
+        "feature_requests",
+        "feature_update_requests",
+        "feature_update_request_datasets",
+    ],
+)
+async def test_replica_role_does_not_lift_the_request_evidence_guards(
+    migrated_engine: AsyncEngine, relation: str
+) -> None:
+    """**적대 리뷰 P1.** `ENABLE ALWAYS` 문장 넷이 결박돼 있지 않았다.
+
+    `feature.features`의 것만 replica 축이 있었고 나머지는 카탈로그 상태만 봤는데, 정리
+    도우미가 끝나며 `ENABLE ALWAYS`로 되돌리므로 **migration에서 그 문장을 지워도** 도우미가
+    한 번 돌고 나면 `'A'`가 된다 — 카탈로그를 보는 테스트는 이미 고쳐진 상태를 본다.
+    전형적인 fixture masking이고, 공유 session DB에서는 순서에 따라 가려진다.
+
+    그래서 **행동으로** 잰다. origin이면 이 한 줄로 사라지므로, 여기서 이름 붙은 거부가
+    나온다는 것이 곧 그 트리거가 ALWAYS라는 뜻이다.
+    """
+
+    async def _truncate_as_replica() -> None:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("SET LOCAL session_replication_role = replica")
+            )
+            await connection.execute(text(f"TRUNCATE ops.{relation} CASCADE"))
+
+    with pytest.raises(DBAPIError) as refused:
+        await _truncate_as_replica()
+    assert _constraint(refused.value) == _REQUEST_EVIDENCE
+    # **어느 표가 막았는지**까지 본다. 세 표가 가드 하나를 공유하므로 제약 이름만 보면
+    # 이웃이 대신 raise해 준 것을 자기 축이 통과한 것으로 읽는다 — 변이 검증이 정확히
+    # 그것을 드러냈다(`update_requests_always_dropped`가 초록이었다).
+    assert relation in str(refused.value.orig)
+
+
+async def test_replica_role_does_not_lift_the_request_delete_guard(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """DELETE 가드도 같은 이유로 행동으로 잰다."""
+
+    async with migrated_engine.begin() as connection:
+        command_id = await connection.scalar(
+            text(
+                "INSERT INTO ops.domain_commands ("
+                " actor, operation, idempotency_key, request_fingerprint"
+                ") VALUES ('service:feature-request',"
+                " 'service.feature-request.submit.v1',"
+                " x_extension.gen_random_uuid(), repeat('6', 64))"
+                " RETURNING command_id"
+            )
+        )
+        request_id = await connection.scalar(
+            text(
+                "INSERT INTO ops.feature_requests ("
+                " request_id, submitted_by_principal, request_payload, status,"
+                " submission_command_id"
+                ") VALUES (x_extension.gen_random_uuid(), 'service:feature-request',"
+                " jsonb_build_object('kind', 'place', 'name', 'replica delete probe'),"
+                " 'pending', :command_id) RETURNING request_id"
+            ),
+            {"command_id": command_id},
+        )
+
+    async def _delete_as_replica() -> None:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("SET LOCAL session_replication_role = replica")
+            )
+            await connection.execute(
+                text("DELETE FROM ops.feature_requests WHERE request_id = :rid"),
+                {"rid": request_id},
+            )
+
+    with pytest.raises(DBAPIError) as refused:
+        await _delete_as_replica()
+    assert _constraint(refused.value) == _REQUEST_EVIDENCE
+
+
 async def test_the_cleanup_helper_restores_the_guards_as_always_not_origin(
     migrated_engine: AsyncEngine,
 ) -> None:

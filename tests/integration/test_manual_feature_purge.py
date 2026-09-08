@@ -727,3 +727,156 @@ def test_the_creation_procedures_filter_released_claims_in_their_fallback() -> N
         body = sidecar.read_text(encoding="utf-8")
         assert "INTO o_existing_feature_uuid" in body, sidecar.name
         assert "AND NOT claim.identity_released" in body, sidecar.name
+
+
+async def test_the_capture_set_equals_what_the_catalog_says_not_a_fixed_list(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**적대 리뷰 P1.** 앞의 capture 테스트들은 "이것과 저것이 담겼다"만 잰다.
+
+    그러면 `pg_constraint` 유도를 하드코딩된 이름 목록으로 바꿔도 초록이다 — 이 설계가
+    내세운 요지("목록을 손으로 적지 않는다")가 정작 결박돼 있지 않았다.
+
+    그래서 **동등성**을 잰다: 담긴 relation 집합이, 카탈로그가 말하는 "이 Feature를
+    참조하고 행이 실제로 있는" 집합과 정확히 같아야 한다. 새 자식이 생기면 이 단언이
+    저절로 넓어지고, 유도가 죽으면 저절로 좁아진다.
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_id = str(pair["manual_feature_id"])
+    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+
+    # 담길 것을 카탈로그로 **독립 계산**한다 — 프로시저와 같은 코드를 부르지 않는다.
+    async with migrated_engine.connect() as connection:
+        expected = set(
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT feature.qualified_relation_name(child.conrelid)
+                        FROM pg_catalog.pg_constraint AS child
+                        WHERE child.confrelid = 'feature.features'::regclass
+                          AND child.contype = 'f'
+                          AND child.confdeltype IN ('c', 'n')
+                          AND feature.count_rows_dynamic(
+                                format(
+                                    'SELECT count(*) FROM %s AS c WHERE (%s) IN'
+                                    ' (SELECT %s FROM feature.features'
+                                    '  WHERE feature_uuid = %L)',
+                                    feature.qualified_relation_name(child.conrelid),
+                                    (SELECT string_agg(format('c.%I', a.attname), ', '
+                                                       ORDER BY o.ordinality)
+                                     FROM unnest(child.conkey) WITH ORDINALITY
+                                          AS o(attnum, ordinality)
+                                     JOIN pg_catalog.pg_attribute AS a
+                                       ON a.attrelid = child.conrelid
+                                      AND a.attnum = o.attnum),
+                                    (SELECT string_agg(format('%I', a.attname), ', '
+                                                       ORDER BY o.ordinality)
+                                     FROM unnest(child.confkey) WITH ORDINALITY
+                                          AS o(attnum, ordinality)
+                                     JOIN pg_catalog.pg_attribute AS a
+                                       ON a.attrelid = child.confrelid
+                                      AND a.attnum = o.attnum),
+                                    CAST(:feature_uuid AS uuid)
+                                )
+                              ) > 0
+                        """
+                    ),
+                    {"feature_uuid": feature_uuid},
+                )
+            )
+            .scalars()
+            .all()
+        )
+    # 유도가 비면 이 단언 자체가 공허해진다.
+    assert expected, "카탈로그가 자식을 하나도 못 찾았다 — 이 게이트가 죽었다"
+
+    command_id = await _purge_command(migrated_engine, str(pair["actor"]))
+    await _purge_via_repo(
+        migrated_engine,
+        feature_uuid=feature_uuid,
+        reason_code="mistaken_creation",
+        release_identity=True,
+        actor=str(pair["actor"]),
+        command_id=command_id,
+    )
+
+    captured = (await _record(migrated_engine, feature_uuid))["captured_rows"]
+    assert isinstance(captured, dict)
+    # core는 자식이 아니라 별도로 담긴다.
+    assert set(captured) - {"feature.features"} == expected
+
+
+async def test_a_purged_identity_can_still_be_released_later(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**적대 리뷰 P1.** `erasure_required`는 예약을 쥔 채 purge한다.
+
+    그 뒤에 놓아야 할 수 있는데, 완화가 최초 승인 전이 하나만 허용하면 그 claim은
+    **영원히** 해제할 수 없다 — 조문이 피하라는 영구 tombstone이 정확히 그 모양으로
+    되살아난다. 두 번째 단조 전이를 허용하되 승인 필드는 여전히 못 바꾸게 한다.
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    claim = await _claim(migrated_engine, feature_uuid)
+
+    await _purge_via_repo(
+        migrated_engine,
+        feature_uuid=feature_uuid,
+        reason_code="erasure_required",
+        release_identity=False,
+        actor=str(pair["actor"]),
+        command_id=await _purge_command(migrated_engine, str(pair["actor"])),
+    )
+    assert (await _claim(migrated_engine, feature_uuid))["identity_released"] is False
+
+    # 뒤늦은 해제가 가능해야 한다.
+    await _direct_claim_update(migrated_engine, feature_uuid, "identity_released = true")
+    assert (await _claim(migrated_engine, feature_uuid))["identity_released"] is True
+    await _reclaim_exact_identity(migrated_engine, claim, actor=str(pair["actor"]))
+
+    # 그래도 **되돌리기**는 막힌다 — 단조롭다.
+    with pytest.raises(DBAPIError) as reverted:
+        await _direct_claim_update(
+            migrated_engine, feature_uuid, "identity_released = false"
+        )
+    assert getattr(reverted.value.orig, "sqlstate", None) == "42501"
+
+    # 승인 필드 재작성도 막힌다.
+    with pytest.raises(DBAPIError) as rewritten:
+        await _direct_claim_update(
+            migrated_engine, feature_uuid, "purged_at = clock_timestamp()"
+        )
+    assert getattr(rewritten.value.orig, "sqlstate", None) == "42501"
+
+
+async def test_a_late_release_cannot_smuggle_a_rewritten_approval(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """뒤늦은 해제에 **승인 필드 재작성이 묻어 오면** 안 된다.
+
+    앞 테스트의 "승인 필드 재작성" 축은 이것을 가려 준다 — 순수 재작성은 해제 조건에
+    애초에 걸리지 않아 다른 검사가 먼저 막는다. 여기서는 **유효한 해제와 함께** 바꾼다.
+    변이 검증이 그 가림을 드러냈다(`late_release_too_wide`가 초록이었다).
+    """
+
+    pair = await _seed_manual(migrated_engine)
+    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    await _purge_via_repo(
+        migrated_engine,
+        feature_uuid=feature_uuid,
+        reason_code="erasure_required",
+        release_identity=False,
+        actor=str(pair["actor"]),
+        command_id=await _purge_command(migrated_engine, str(pair["actor"])),
+    )
+
+    with pytest.raises(DBAPIError) as smuggled:
+        await _direct_claim_update(
+            migrated_engine,
+            feature_uuid,
+            "identity_released = true, purged_at = clock_timestamp()",
+        )
+    assert getattr(smuggled.value.orig, "sqlstate", None) == "42501"

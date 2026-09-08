@@ -91,7 +91,11 @@ CREATE FUNCTION feature.reject_feature_request_evidence_mutation() RETURNS trigg
     SET search_path TO 'pg_catalog'
     AS $$
 BEGIN
-    RAISE EXCEPTION 'feature request evidence is append-only'
+    -- **어느 표가 막았는지 말한다.** 세 표가 이 가드 하나를 공유하므로, 표 이름이
+    -- 없으면 CASCADE 폐포 안에서 어느 것이 raise했는지 호출자도 게이트도 구별하지
+    -- 못한다 — 그러면 이웃이 대신 raise해 준 것을 자기 축이 통과한 것으로 읽는다
+    -- (조문이 경고한 함정이 게이트 안쪽에서 되살아난다, 2026-09-08 변이 검증).
+    RAISE EXCEPTION 'feature request evidence is append-only: %', TG_TABLE_NAME
         USING ERRCODE = '42501',
             CONSTRAINT = 'ck_feature_request_evidence_append_only';
 END

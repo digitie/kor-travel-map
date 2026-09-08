@@ -61,9 +61,14 @@ purge하면 exact 예약이 **영구 tombstone**이 되어 같은 이름·좌표
   `mistaken_creation`은 보통 놓고, `erasure_required`는 보통 쥔다(같은 것이 다시 만들어지면
   안 되므로). 두 동기가 정반대를 원하므로 운영자가 의도를 말해야 한다.
 
-append-only 트리거는 이 셋의 **단조 전이 하나**만 허용하도록 완화한다 — 증거 필드는
+append-only 트리거는 이 셋의 **단조 전이 둘**만 허용하도록 완화한다 — 증거 필드는
 여전히 불변이고, 전이는 command가 원인이라 감사된다. ADR-093 개정 한 문장이 함께 간다
 (소유자 승인 2026-09-08).
+
+전이가 둘인 이유: (a) 최초 purge 승인, (b) **뒤늦은 예약 해제**. `erasure_required`처럼
+예약을 쥔 채 purge한 claim을 나중에 놓아야 할 수 있는데, (a)만 허용하면 그 claim은
+영원히 해제할 수 없어 조문이 피하라는 영구 tombstone이 그 모양으로 되살아난다
+(2026-09-08 적대 리뷰 P1). (b)도 단조롭다 — 승인 필드는 못 바꾸고 `true → false`도 막는다.
 
 ## fence는 지속 상태의 순수 함수로 남는다
 
@@ -221,6 +226,41 @@ CREATE TABLE feature.manual_feature_purge_records (
 )
 """
 
+#: **되돌리기는 복구점을 조용히 지우면 안 된다.**
+#:
+#: `DROP TABLE`은 purge된 Feature의 payload를 통째로 없앤다 — 그 표가 존재하는 유일한
+#: 이유가 "이 삭제를 되돌릴 수 있게 한다"인데, 되돌리기가 그것을 먼저 지우면 남는 것이
+#: 없다. 그리고 exact 제약 복원은 해제된 claim이 있으면 어차피 23505로 죽는다.
+#:
+#: 그래서 둘 다 **먼저 확인하고 이름 붙여 거부한다.** 실패가 맞다 — 이 상태에서
+#: 되돌리려면 무엇을 잃는지 사람이 알고 결정해야 한다.
+_DOWNGRADE_REFUSES_ON_EVIDENCE: Final[str] = """
+DO $$
+DECLARE
+    v_records bigint;
+    v_released bigint;
+BEGIN
+    SELECT count(*) INTO v_records FROM feature.manual_feature_purge_records;
+    IF v_records > 0 THEN
+        RAISE EXCEPTION
+            'downgrade would destroy % manual Feature purge record(s)', v_records
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_manual_feature_purge_downgrade_would_lose_evidence';
+    END IF;
+    SELECT count(*) INTO v_released
+    FROM feature.manual_feature_identity_claims
+    WHERE identity_released;
+    IF v_released > 0 THEN
+        RAISE EXCEPTION
+            'downgrade cannot restore the global exact constraint: % released claim(s)',
+            v_released
+            USING ERRCODE = '23514',
+                CONSTRAINT = 'ck_manual_feature_purge_downgrade_would_lose_evidence';
+    END IF;
+END
+$$
+"""
+
 _PURGE_RECORDS_TABLE_DROP: Final[str] = "DROP TABLE feature.manual_feature_purge_records"
 
 _PURGE_RECORDS_OWNER: Final[str] = (
@@ -265,12 +305,29 @@ BEGIN
            AND NEW.claimed_by_command_id IS NOT DISTINCT FROM OLD.claimed_by_command_id
            AND NEW.claim_basis IS NOT DISTINCT FROM OLD.claim_basis
            AND NEW.claimed_at IS NOT DISTINCT FROM OLD.claimed_at
-           AND OLD.purged_by_command_id IS NULL
-           AND NEW.purged_by_command_id IS NOT NULL
-           AND NEW.purged_at IS NOT NULL
-           AND (NEW.identity_released OR NOT OLD.identity_released)
         THEN
-            RETURN NEW;
+            -- 전이 (a) — **최초 purge 승인.** 아직 승인이 없던 claim에 승인과 시각을
+            -- 함께 남긴다. 해제 여부는 호출자가 정한다.
+            IF OLD.purged_by_command_id IS NULL
+               AND NEW.purged_by_command_id IS NOT NULL
+               AND NEW.purged_at IS NOT NULL
+            THEN
+                RETURN NEW;
+            END IF;
+            -- 전이 (b) — **뒤늦은 예약 해제.** `erasure_required`처럼 예약을 쥔 채
+            -- purge한 뒤 나중에 놓아야 할 수 있다. (a)만 허용하면 그 claim은 영원히
+            -- 해제할 수 없고, 조문이 피하라는 **영구 tombstone**이 정확히 그 모양으로
+            -- 되살아난다(2026-09-08 적대 리뷰 P1).
+            --
+            -- 여전히 단조롭다 — 승인 필드는 못 바꾸고, `true → false`도 막는다.
+            IF OLD.purged_by_command_id IS NOT NULL
+               AND NEW.purged_by_command_id IS NOT DISTINCT FROM OLD.purged_by_command_id
+               AND NEW.purged_at IS NOT DISTINCT FROM OLD.purged_at
+               AND NOT OLD.identity_released
+               AND NEW.identity_released
+            THEN
+                RETURN NEW;
+            END IF;
         END IF;
         RAISE EXCEPTION 'manual Feature identity claims are append-only'
             USING ERRCODE = '42501',
@@ -688,6 +745,8 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 )
 
 _DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    # 무엇을 잃게 되는지 **먼저** 본다. 아무것도 지우기 전에 거부해야 의미가 있다.
+    _DOWNGRADE_REFUSES_ON_EVIDENCE,
     _RECEIPT_HEAD_NARROW,
     _PURGE_PROCEDURE_DROP,
     _COUNT_HELPER_DROP,
