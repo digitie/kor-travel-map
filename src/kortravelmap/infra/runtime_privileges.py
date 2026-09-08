@@ -403,9 +403,20 @@ _AUDIT_WRITER_FUNCTION_ACL = (
 
 _MANUAL_FEATURE_TABLE_ACL = (
     "REVOKE ALL ON TABLE feature.manual_feature_identity_claims, "
-    "feature.feature_creation_origins, feature.manual_feature_purge_records "
-    "FROM PUBLIC, ktm_feature_runtime, "
+    "feature.feature_creation_origins FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    # `manual_feature_purge_records`는 306이 만든다. 이 조정기는 `300` head에서도
+    # 도는데(0236 → 300 handoff 검증), 그 시점에는 표가 없어 이름을 그대로 쓰면
+    # `UndefinedTable`로 죽는다 — 304의 함수 REVOKE가 pre-304 DB에서 42883으로 죽은
+    # 것과 같은 부류다. 존재할 때만 적용한다.
+    "DO $$ BEGIN"
+    " IF to_regclass('feature.manual_feature_purge_records') IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON TABLE feature.manual_feature_purge_records"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime';"
+    " EXECUTE 'GRANT SELECT, INSERT ON TABLE feature.manual_feature_purge_records"
+    " TO ktm_manual_feature_procedure_owner';"
+    " END IF; END $$",
     "GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims, "
     "feature.feature_creation_origins TO ktm_manual_feature_procedure_owner",
     # purge 프로시저는 schema owner가 definer다(306) — 이 명령이 본질적으로

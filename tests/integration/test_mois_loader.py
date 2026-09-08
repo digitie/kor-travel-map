@@ -15,9 +15,9 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
-from kortravelmap.infra.models import FeatureRow, SourceLinkRow
+from kortravelmap.infra.models import FeatureRow, SourceEntityRow, SourceLinkRow
 from kortravelmap.infra.sync_state_repo import get_sync_state
 from kortravelmap.mois import (
     close_mois_license_features,
@@ -101,9 +101,26 @@ class _Record:
     medical_subject_names: str | None = None
 
 
+#: MOIS 적재분만 세는 조건. 세 헬퍼가 같은 술어를 쓴다 — 한 곳에 둔다.
+_MOIS_SCOPE = (
+    "EXISTS (SELECT 1 FROM provider_sync.source_links AS sl"
+    "  JOIN provider_sync.source_entities AS se"
+    "    ON se.source_entity_key = sl.source_entity_key"
+    "  WHERE sl.feature_id = f.feature_id"
+    "    AND se.source_entity_type = :entity_type)"
+)
+
+
 async def _feature_count(session: AsyncSession) -> int:
+    """**MOIS 적재분만** 센다 — `_active_entity_ids`와 같은 이유다(위 주석)."""
+
     return int(
-        (await session.execute(select(func.count()).select_from(FeatureRow))).scalar_one()
+        (
+            await session.execute(
+                text(f"SELECT count(*) FROM feature.features AS f WHERE {_MOIS_SCOPE}"),
+                {"entity_type": _MOIS_ENTITY_TYPE},
+            )
+        ).scalar_one()
     )
 
 
@@ -161,9 +178,17 @@ async def test_loader_persists_promoted_and_skips_others(
         )
     ).scalar_one() == "restaurant"
 
-    # ③ source_link FK 정합 (PRIMARY).
+    # ③ source_link FK 정합 (PRIMARY). **MOIS 적재분만** 본다 — 전역 조회는 다른
+    # 모듈이 커밋한 link까지 세어 "MOIS가 둘을 만들었다"가 아니라 "DB가 비어 있다"를 잰다.
     links = (
-        await migrated_session.execute(select(SourceLinkRow))
+        await migrated_session.execute(
+            select(SourceLinkRow)
+            .join(
+                SourceEntityRow,
+                SourceEntityRow.source_entity_key == SourceLinkRow.source_entity_key,
+            )
+            .where(SourceEntityRow.source_entity_type == _MOIS_ENTITY_TYPE)
+        )
     ).scalars().all()
     assert len(links) == 2
     assert all(link.source_role == "primary" for link in links)
@@ -204,12 +229,22 @@ async def test_loader_empty_when_all_skipped(migrated_session: AsyncSession) -> 
     await migrated_session.flush()
     assert result.bundles_total == 0
     assert result.features_inserted == 0
+    # **MOIS가 만든 것만** 센다. 전역 count는 다른 모듈이 커밋한 Feature까지 세어
+    # "MOIS가 아무것도 안 만들었다"가 아니라 "DB가 비어 있다"를 재게 된다.
     count = (
         await migrated_session.execute(
-            text("SELECT count(*) FROM feature.features")
+            text(f"SELECT count(*) FROM feature.features AS f WHERE {_MOIS_SCOPE}"),
+            {"entity_type": _MOIS_ENTITY_TYPE},
         )
     ).scalar_one()
     assert int(count) == 0
+
+
+#: MOIS 적재분만 고른다. `migrated_engine`은 session scope라 다른 모듈이 커밋한
+#: Feature가 이 조회에 섞인다 — 종전에는 전역 조회라 "MOIS가 무엇을 적재했나"가 아니라
+#: "DB가 거의 비어 있나"를 재고 있었고, M05 계열이 seed를 늘리자 그것이 드러났다
+#: (2026-09-08). `source_entity_type`이 정확한 구분자다.
+_MOIS_ENTITY_TYPE = "license_place"
 
 
 async def _active_entity_ids(session: AsyncSession) -> set[str]:
@@ -221,8 +256,10 @@ async def _active_entity_ids(session: AsyncSession) -> set[str]:
                 "JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id "
                 "JOIN provider_sync.source_entities se "
                 "  ON se.source_entity_key = sl.source_entity_key "
-                "WHERE f.lifecycle_state = 'active' AND sl.source_role = 'primary'"
-            )
+                "WHERE f.lifecycle_state = 'active' AND sl.source_role = 'primary' "
+                "  AND se.source_entity_type = :entity_type"
+            ),
+            {"entity_type": _MOIS_ENTITY_TYPE},
         )
     ).scalars().all()
     return set(rows)
@@ -432,14 +469,16 @@ async def test_sync_bulk_streaming_batches_equivalent(
 
 
 async def _active_count(session: AsyncSession) -> int:
-    from sqlalchemy import func, select
+    """**MOIS 적재분만** 센다 — `_active_entity_ids`와 같은 이유다(위 주석)."""
 
     return int(
         (
             await session.execute(
-                select(func.count())
-                .select_from(FeatureRow)
-                .where(FeatureRow.lifecycle_state == "active")
+                text(
+                    "SELECT count(*) FROM feature.features AS f"
+                    f" WHERE f.lifecycle_state = 'active' AND {_MOIS_SCOPE}"
+                ),
+                {"entity_type": _MOIS_ENTITY_TYPE},
             )
         ).scalar_one()
     )
