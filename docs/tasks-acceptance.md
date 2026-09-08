@@ -974,9 +974,19 @@ backup/restore가 갚히기 전에는 **원리적으로 판정할 수 없다.**
   `E2E_MANUAL_CREATE_WRITE=1`로 격리 스택에서 완주한다. **배포 prod에서 돌리지 않는다**
   — prod UI는 `KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=admin`이라 spec의
   `created_by_actor === "e2e-admin"` 단언이 구조적으로 실패하고, spec은 cleanup을 하지
-  않아 지워지지 않는 write를 prod DB에 남긴다. 실행처는 n150 `~/ktm-live-301`이며
-  그 스택은 이미 `e2e-admin`·create token·flag가 spec과 맞다(현재 정지 상태 —
-  재기동이 선행한다).
+  않아 지워지지 않는 write를 prod DB에 남긴다.
+
+  **왜 지워지지 않나(2026-09-08 규명).** admin API의 `DELETE /{feature_id}`는 soft
+  `action="retire"`이고 hard purge는 `trg_features_manual_feature_hard_purge_fence`가
+  거부한다. 즉 이 항목의 prod 불가는 `T-VN-M02-TRUNCATE-FENCE`와 **같은 fence**에서 온다 —
+  두 항목을 따로 판정하면 안 된다.
+
+  실행처는 n150 `~/ktm-live-301`이다. ~~그 스택은 이미 `e2e-admin`·create token·flag가
+  spec과 맞다(현재 정지 상태 — 재기동이 선행한다).~~ **2026-09-08 재실측 — 정지가 아니라
+  없다.** 컨테이너도 볼륨도 존재하지 않고(`ktm-live-301-pg` 부재, `ktm_live_301` 볼륨 부재),
+  그 체크아웃은 alembic head **302**(저장소는 305)이며 `e2e/live/`에 해당 spec 자체가 없다.
+  설정 산물(`~/.ktm-live-301-admin-pw`, `.env`, `live301-start.sh`)과 runner 이미지는
+  남아 있으므로 재구축은 가능하지만 **재기동이 아니라 재구축이 선행이다.**
 
 ## T-VN-M03
 
@@ -1940,9 +1950,10 @@ Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소
 이 셋의 마지막 해제 조건을 막고 있던 것은 원장이 적은 무엇도 아니라 **그 결함**이었다
 (Manager #324).
 
-**부모 절의 전제가 성립하지 않는다(2026-09-07 실측).** `geo_dagster`·`concierge`는
-백업 0건이라 `create`가 선행해야 했다. root crontab 없음, backup systemd timer 없음,
-logrotate 미설치. 그리고 geo application DB의 backup은 **2026-08-25 이후 실패했다** —
+**부모 절의 전제가 성립하지 않는다(2026-09-07 실측).** ~~`geo_dagster`·`concierge`는
+백업 0건이라 `create`가 선행해야 했다.~~ **2026-09-08 정정 — 아래 §측정 오류 참조.**
+root crontab 없음, backup systemd timer 없음, logrotate 미설치는 사실이다.
+그리고 geo application DB의 backup은 **2026-08-25 이후 실패했다** —
 `db_backup` job이 디스크 부족으로 7연속 실패(`db=33.9GB × 1.3 = 44.1GB` 요구, 여유
 29.8~36.0GB)한 뒤 마지막 job이 `queued`로 12일간 고착됐다. 소유자 승인으로 빌드 캐시와
 과거 격리 실행 이미지를 정리해 여유를 49GB → **119GB**로 올리고 그 고착 행을 만료
@@ -2379,6 +2390,37 @@ Map/PinVi/Manager revision에서 **동일 지점**에 멈춘 이유다 — Map/P
 **판정: 충족. 실행 잔여 없음 — `tasks-done.md` 이관 대상이다.** (이 항목이 왜 열려
 있었는지는 문서에 근거가 없었다. 조건을 적고 나니 닫을 수 있다는 것이 드러난다.)
 
+### 측정 오류 정정 (2026-09-08)
+
+**"n150에 예약 백업이 아예 없다"는 틀렸다.** `digitie`의 crontab에 셋이 매일 돈다:
+
+```
+CRON_TZ=UTC
+15 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh geo_dagster 4
+30 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh concierge  7
+55 3 * * * KTDM_BACKUP_ROOT=/home/digitie/backups ... run-standalone-backup.sh pinvi      7
+```
+
+`/home/digitie/backups`에 세 role 모두 dump + `.sha256` + `.manifest` 삼종이 보존 정책대로
+있고(각 12·21·23 파일), 로그는 2026-08-21부터 **18일 연속 성공, 실패 0건**이며 GC가 하루
+한 건씩 지운다. 즉 "주기 백업이 최근 성공과 bounded retention으로 수렴한다"는 부모 전제는
+**수렴할 대상이 돌지 않는 상태가 아니라 이미 돌고 있었다.**
+
+**왜 틀렸나.** `backup_root_for_role()`은 `KTDM_BACKUP_ROOT`가 없으면 `~/backups`로 떨어진다.
+cron은 그 값을 명시하지만, **root로 실행한 `ktdctl db-backup list`는 `/root/backups`를 본다.**
+2026-09-07 실측이 root로 돌았고, 그래서 "백업 0건"으로 읽혔다 — 실제로는 다른 디렉터리를
+보고 있었다. `sudo ls /root/backups`는 지금도 원장이 적은 그대로다(`map_application` 1건,
+`map_dagster` 1건, `pinvi` 2건).
+
+**이 정정이 뒤집지 않는 것.** `map_application`은 어느 cron에도 없다 — 그것은 `T-VN-H43`의
+의도된 보류다. 그리고 M05-2가 근거로 삼은 사실, 즉 **manual-feature evidence를 담은
+`map_application` backup이 만들어진 적이 없다**는 그대로다: home root의 것은 2026-08-22
+(614MB, 300 이전 세대), root의 최신 것은 2026-09-07 23:26에 내가 만든 것이다.
+
+**교훈은 도구가 아니라 관측 지점이다.** 같은 명령이 실행 사용자에 따라 다른 곳을 본다.
+"없다"를 기록하기 전에 **어디를 봤는지**를 함께 기록해야 한다.
+
+
 ## T-VN-H49-GEO-DAGSTER
 
 - [ ] E1. `geo_dagster` metadata DB의 standalone dump가 주기 실행된다.
@@ -2440,11 +2482,38 @@ Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/
 
 **2026-09-07 실측으로 드러난 구멍이다.** manual Feature hard-purge fence는
 `feature.features`의 **BEFORE DELETE row trigger**다. 그런데 같은 표에 BEFORE TRUNCATE
-문 트리거가 없어 **`TRUNCATE feature.features CASCADE`가 fence를 통째로 우회한다.**
-claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있어 대비된다.
+문 트리거가 없다. claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있다.
 
-**무비용이 아니다.** 통합 테스트 24곳이 `TRUNCATE ... CASCADE`에 의존하므로 트리거를
-그냥 더하면 그 테스트들이 깨진다.
+**2026-09-08 재실측 — 위 서술의 두 문장이 틀렸다.**
+
+1. ~~`TRUNCATE feature.features CASCADE`가 fence를 통째로 우회한다~~ — **실제로는
+   중단된다.** `feature.features`만 TRUNCATE하는 것은 FK 때문에 불가능하고, `CASCADE`가
+   끌어오는 30-table 폐포 중 **10개에 켜진 BEFORE TRUNCATE 가드**가 있다
+   (`feature_aliases`·`curation_import_rows`·`curation_link_decisions`·
+   `theme_feature_candidates`·`curation_cutover_identity_mappings`·
+   `curation_import_manual_feature_children`·M05 evidence 넷). **진짜 결함은 다른 것이다** —
+   fence는 그 거부에 아무 기여도 하지 않고, 호출자가 받는 진단은
+   `T-VN-32C legacy write fence: feature_aliases TRUNCATE 금지`라 manual Feature와 무관한
+   이유를 댄다.
+2. ~~통합 테스트 24곳이 그 경로에 의존해 무비용이 아니다~~ — **14곳이고, 비용은 0이다.**
+   전부 `tests/integration/_db_cleanup.py`를 지나고 그 헬퍼가
+   `SET LOCAL session_replication_role = replica`(`:49`)로 돌아 origin 트리거를 전부
+   억제한다. 저장소 안에 증거가 있다 — `test_db_cleanup.py`가 위 가드 7개를 포함한
+   CASCADE를 **성공으로** 단언하고 CI에서 초록이다.
+
+**원장이 놓친 더 큰 구멍.** `ops.feature_requests`(M04 외부 제출)는 TRUNCATE 가드도
+append-only row 가드도 **아예 없다**. `ops.feature_update_requests`·`_datasets`는 DELETE
+가드만 있고 TRUNCATE 가드가 없다.
+
+**실제 노출은 훨씬 작다.** 121개 테이블에서 TRUNCATE 권한을 가진 로그인 롤은 컨테이너
+superuser 하나뿐이고(`schema.sql`에 `GRANT ... TRUNCATE`가 0건), 그 행위자는
+`SET session_replication_role`이나 `ALTER TABLE ... DISABLE TRIGGER`로 **기존 DELETE
+fence도 똑같이** 무력화한다. 따라서 origin-enabled 트리거는 보안 바닥을 0만큼 올린다 —
+정직한 위협 모델은 적대자가 아니라 **실수**다. 바닥을 실제로 올리는 것은 `ENABLE ALWAYS`
+뿐이고, 그것은 `_db_cleanup.py`에 명시 `DISABLE TRIGGER` 네 줄을 요구한다.
+
+**변이 검증의 함정.** "트리거 제거 → red"는 **공허하다** — 이웃 가드가 먼저 raise하므로
+지금도 red다. 새 트리거의 **고유 제약 이름/메시지**를 단언해야 한다.
 
 **해제 조건.**
 
@@ -2454,6 +2523,11 @@ claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있어 대�
 2. (a)를 택하면 우회가 실제로 막히는지 **변이 검증**으로 보인다 — 트리거를 되돌리면
    red가 되어야 한다.
 3. 어느 쪽이든 `docs/adr/`의 관련 결정문에 fence의 적용 범위를 한 문장으로 박는다.
+4. `ops.feature_requests`를 함께 판정한다 — 위 재실측이 드러낸, 원장이 몰랐던 구멍이다.
+
+**T-VN-M02와 같은 fence다.** `T-VN-M02`의 "지워지지 않는 write"는 바로 이 fence가 유일한
+삭제 경로를 거부하기 때문에 생긴다(admin API의 `DELETE`는 soft retire다). (a)를 `ENABLE
+ALWAYS`로 택하면 그 되돌릴 수 없음이 **더 강해진다** — 두 항목을 따로 판정하면 안 된다.
 
 ## T-VN-M05-ONESHOT-CONSUME
 

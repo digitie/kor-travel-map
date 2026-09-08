@@ -73,8 +73,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [ ] T-VN-M02-TRUNCATE-FENCE — **hard-purge fence의 TRUNCATE 우회**
 
   fence는 `feature.features`의 BEFORE DELETE row trigger인데 BEFORE TRUNCATE 문
-  트리거가 없어 `TRUNCATE ... CASCADE`가 통째로 우회한다(2026-09-07 실측).
-  통합 테스트 24곳이 그 경로에 의존해 무비용이 아니다.
+  트리거가 없다. 2026-09-08 재실측으로 "통째로 우회"와 "테스트 24곳"이 둘 다 틀린 것이
+  드러났다 — 진짜 결함은 진단이 엉뚱한 이유를 대는 것이고, 트리거 추가 비용은 0이다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 

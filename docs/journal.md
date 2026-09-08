@@ -60,6 +60,12 @@ session scope fixture 하나가 소유하게 바꿨다 — 세 배치 순서에�
 없다**(crontab·timer·logrotate 전부 부재, 세 인스턴스는 백업 0건). H49 부모의 전제인
 "주기 백업이 수렴한다"는 수렴할 대상이 돌지 않는다.
 
+> **2026-09-08 정정.** 굵게 쓴 저 문장이 틀렸다. `digitie` crontab에 셋이 매일 돌고
+> 2026-08-21부터 18일 연속 성공했다. root로 실행한 조회가 `/root/backups`를 봤고 cron은
+> `KTDM_BACKUP_ROOT=/home/digitie/backups`를 쓴다 — **다른 디렉터리를 보고 "없다"고 적었다.**
+> `crontab·timer·logrotate 부재`는 root에 대해서만 사실이다. 상세는
+> `docs/tasks-acceptance.md` §T-VN-H49 측정 오류 정정.
+
 **승격이 기계적으로 불가능했다.** M04/M05 승격을 판정하려고 적대 리뷰 2건을 돌렸더니
 둘 다 NO_GO였고, P0는 "원장이 정의한 승격 경로(PinVi 서명 receipt 발급)가 isolated
 scope를 받지 않는다"였다 — 그 분기는 어느 진입점에서도 도달 불가한 死코드이고, 덮는다는
