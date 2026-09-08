@@ -250,3 +250,64 @@ def test_backup_restore_runbook_documents_audit_only_bundle_and_handoff_boundary
     assert "npm run docker:restore" not in runbook
     assert "kor_travel_map_restore" not in runbook
     assert "docker-restore-verify.sh" in runbook
+
+
+def _checksum_arguments(script: str) -> list[str]:
+    """`sha256sum ... > meta/SHA256SUMS` 호출의 인자를 뽑는다.
+
+    문자열 포함이 아니라 **그 호출의 인자**를 봐야 한다. `meta/manifest.json`은
+    스크립트 어디에나 나오므로(생성하니까) 포함 검사로는 이 축을 잴 수 없다.
+    """
+
+    start = script.index("sha256sum \"$app_dump\"")
+    end = script.index("> meta/SHA256SUMS", start)
+    body = script[start:end].replace("\\n", " ")
+    return [token for token in body.split() if token != "sha256sum"]
+
+
+@pytest.mark.unit
+def test_the_manifest_is_itself_covered_by_the_checksum_file() -> None:
+    """manifest가 해시 대상에서 빠지면 대조의 기준이 대조되지 않는다.
+
+    검증기는 파일을 manifest가 선언한 지문과 맞춰 본다. 그 manifest 자체가 보호되지
+    않으면, 선언된 지문을 고친 번들이 그대로 "검증 통과"한다 — 사슬이 anchor를 잃는다.
+    """
+
+    arguments = _checksum_arguments(_read("scripts/docker-backup.sh"))
+
+    assert "meta/manifest.json" in arguments
+    # dump·archive·evidence JSONL도 여전히 덮는지 함께 본다.
+    assert '"$app_dump"' in arguments
+    assert '"$subscriptions_jsonl"' in arguments
+
+
+@pytest.mark.unit
+def test_the_manifest_records_the_schema_the_evidence_came_from() -> None:
+    """어느 revision·서버에서 뽑았는지 모르면 지금 코드로 읽어도 되는지 알 수 없다."""
+
+    script = _read("scripts/docker-backup.sh")
+
+    assert '"alembic_revision": "$alembic_revision"' in script
+    assert '"server_version": "$server_version"' in script
+    # 값이 **manifest보다 먼저** 채워져야 한다 — 순서가 뒤집히면 빈 문자열이 실린다.
+    assert script.index("alembic_revision=\"$(capture_scalar") < script.index(
+        '"alembic_revision": "$alembic_revision"'
+    )
+    assert script.index("server_version=\"$(capture_scalar") < script.index(
+        '"server_version": "$server_version"'
+    )
+
+
+@pytest.mark.unit
+def test_the_exporter_manifest_fragment_carries_the_same_provenance_keys() -> None:
+    """스크립트와 Python exporter가 같은 키를 써야 한 검증기로 볼 수 있다."""
+
+    from kortravelmap.infra.evidence_export import manifest_fragment, relation_digest
+
+    fragment = manifest_fragment(
+        {"x": relation_digest("x", b"")},
+        alembic_revision="305_m05_relitigation_fence",
+        server_version="17.0",
+    )
+    assert fragment["alembic_revision"] == "305_m05_relitigation_fence"
+    assert fragment["server_version"] == "17.0"
