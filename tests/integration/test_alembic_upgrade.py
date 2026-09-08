@@ -1028,6 +1028,7 @@ async def test_alembic_creates_source_tables(
         "provider_dataset_operation_scopes",
         "provider_dataset_operations",
         "provider_datasets",
+        "provider_feature_identities",
         "provider_sync_state",
         "source_entities",
         "source_entity_heads",

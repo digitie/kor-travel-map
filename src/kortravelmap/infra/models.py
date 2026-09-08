@@ -1747,7 +1747,10 @@ class ProviderFeatureIdentityRow(Base):
         ),
         CheckConstraint(
             "btrim(natural_key) = natural_key AND natural_key <> '' "
-            "AND position('|' in natural_key) = 0",
+            # SQL 표준 구문 `position(x in y)`는 PostgreSQL이 그 형태로 보존해
+            # deparse하므로 migration의 함수형과 갈린다 — `alembic check`가 CHECK
+            # expression drift로 잡았다(2026-09-09 실측). 양쪽을 `strpos`로 맞춘다.
+            "AND strpos(natural_key, '|') = 0",
             name=conv("ck_provider_feature_identities_natural_key"),
         ),
         CheckConstraint(

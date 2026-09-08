@@ -106,7 +106,7 @@ CREATE TABLE provider_sync.provider_feature_identities (
     CONSTRAINT ck_provider_feature_identities_natural_key
         CHECK (btrim(natural_key) = natural_key
                AND natural_key <> ''
-               AND "position"(natural_key, '|') = 0),
+               AND strpos(natural_key, '|') = 0),
     CONSTRAINT ck_provider_feature_identities_operation
         CHECK (btrim(bound_by_operation) = bound_by_operation
                AND bound_by_operation <> '')
