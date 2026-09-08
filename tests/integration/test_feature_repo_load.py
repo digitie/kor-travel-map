@@ -1456,3 +1456,119 @@ async def test_resolve_active_provider_dataset_id_refuses_inactive_catalog_rows(
             await feature_repo.resolve_active_provider_dataset_id(
                 migrated_session, provider=provider, dataset_key=dataset_key, lock=lock
             )
+
+
+async def _primary_link_census(session: AsyncSession, source_entity_key: str) -> dict[str, int]:
+    """이 source entity에 매달린 primary 링크와 그것이 가리키는 Feature 수.
+
+    **`feature_id`로 세지 않는다.** T-VN-39 재키 후 중복 Feature는 *다른* `feature_id`를
+    갖는다 — `WHERE feature_id = :fid`로 스코프하면 중복을 **원리적으로** 볼 수 없다.
+    기존 `test_load_bundle_is_idempotent`(:311~)가 정확히 그 모양이고, 그래서 이 게이트를
+    따로 둔다. 세는 축은 재키를 건너 살아남는 `source_entity_key`다.
+    """
+
+    row = (
+        await session.execute(
+            text(
+                "SELECT count(*) AS links,"
+                "       count(DISTINCT feature_id) AS features"
+                "  FROM provider_sync.source_links"
+                " WHERE source_entity_key = :key AND source_role = 'primary'"
+            ),
+            {"key": source_entity_key},
+        )
+    ).mappings().one()
+    return {"links": int(row["links"]), "features": int(row["features"])}
+
+
+async def _entity_key_of(session: AsyncSession, source_record_key: str) -> str:
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT source_entity_key FROM provider_sync.source_records"
+                    " WHERE source_record_key = :k"
+                ),
+                {"k": source_record_key},
+            )
+        ).scalar_one()
+    )
+
+
+async def test_the_same_provider_entity_never_yields_a_second_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    """**T-VN-39 멱등 앵커 게이트.** 같은 provider entity는 Feature 하나만 낳는다.
+
+    오늘 이 성질을 지탱하는 것은 `ON CONFLICT (feature_id)`이고 그 `feature_id`는
+    `make_feature_id(...)`가 만든 결정적 `f_*`다. 재키 후 `feature_id`가 무작위
+    UUIDv7이 되면 그 축이 사라지므로, 308이 `uq_source_links_primary_entity`로
+    같은 성질을 **entity 쪽에서** 다시 못 박았다.
+
+    이 게이트는 재키 전후로 **문장이 바뀌지 않는다** — 그것이 요점이다. 세는 축이
+    `source_entity_key`라 양쪽 세계에서 같은 뜻을 갖는다.
+    """
+
+    bundle = await _bundle("FEST-ANCHOR-ONE")
+    first = await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.flush()
+    assert first.features_inserted == 1
+
+    entity_key = await _entity_key_of(
+        migrated_session, bundle.source_record.source_record_key
+    )
+    assert (await _primary_link_census(migrated_session, entity_key)) == {
+        "links": 1,
+        "features": 1,
+    }
+
+    # 같은 원천을 다시 적재한다. 본문만 달라진다.
+    again = bundle.model_copy(
+        update={
+            "feature": bundle.feature.model_copy(update={"name": "재적재에서 바뀐 이름"})
+        }
+    )
+    second = await feature_repo.load_bundle(migrated_session, again)
+    await migrated_session.flush()
+    assert second.features_inserted == 0
+
+    census = await _primary_link_census(migrated_session, entity_key)
+    assert census == {"links": 1, "features": 1}, (
+        "같은 provider entity가 두 Feature의 primary가 됐다 — 멱등 앵커가 뚫렸다."
+    )
+
+
+async def test_the_anchor_refuses_a_loader_that_computes_a_different_feature_id(
+    migrated_session: AsyncSession,
+) -> None:
+    """앵커와 loader가 어긋나면 **조용히 통과하지 않는다**.
+
+    이 게이트가 없으면 앵커는 장식이다. 재키 후에는 이 어긋남이 곧 중복 Feature이므로,
+    지금 그것을 시끄럽게 만들어 둔다.
+
+    어긋남을 만드는 방법이 요점이다 — `make_feature_id`는 `bjd_code`와 `category`를
+    해시 입력에 쓰므로(`core/ids.py`), **주소만 바꿔도** 같은 provider entity에 대해
+    다른 `feature_id`가 나온다. ADR-068이 `f_*`를 정본 PK로 쓸 수 없다고 판정한
+    이유가 바로 이것이고, 여기서 그 성질을 그대로 이용한다.
+    """
+
+    from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
+
+    bundle = await _bundle("FEST-ANCHOR-DRIFT")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.flush()
+
+    # 같은 source_record_key(= 같은 entity)를 유지한 채 feature_id만 바꾼다.
+    drifted = bundle.model_copy(
+        update={
+            "feature": bundle.feature.model_copy(
+                update={"feature_id": bundle.feature.feature_id + "x"}
+            ),
+            "source_link": bundle.source_link.model_copy(
+                update={"feature_id": bundle.feature.feature_id + "x"}
+            ),
+        }
+    )
+    with pytest.raises(FeatureIdentityAnchorError) as drift:
+        await feature_repo.load_bundle(migrated_session, drifted)
+    assert bundle.feature.feature_id in str(drift.value)

@@ -45,6 +45,12 @@
         "306_m02_manual_feature_purge"
       ],
       "revision": "307_m02_truncate_fence"
+    },
+    {
+      "down_revision": [
+        "307_m02_truncate_fence"
+      ],
+      "revision": "308_t39_provider_identity_anchor"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

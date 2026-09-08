@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FeatureIdentity",
+    "FeatureIdentityAnchorError",
     "FeatureIdentityRefError",
     "FeatureIdentityInvariantError",
     "MAX_FEATURE_REF_LENGTH",
@@ -81,6 +82,24 @@ _UUID_HYPHEN_POSITIONS: Final[tuple[int, ...]] = (8, 13, 18, 23)
 
 class FeatureIdentityRefError(ValueError):
     """경계가 받은 feature 참조 문자열이 형식 계약을 위반했다 (HTTP 422 대응)."""
+
+
+class FeatureIdentityAnchorError(RuntimeError):
+    """provider identity 앵커와 loader가 계산한 Feature identity가 어긋났다.
+
+    **T-VN-39 착지선.** 재키 후 ``feature.features.feature_id``는 무작위 UUIDv7이
+    되므로, 오늘 멱등을 지탱하는 ``ON CONFLICT (feature_id)``의 결정적 축이 사라진다.
+    대체 앵커는 ADR-068 결정 2가 이미 정한 provider identity —
+    ``provider_sync.source_links``의 ``source_role='primary'`` 링크다.
+
+    308은 그 앵커를 DB 제약으로 심고(``uq_source_links_primary_entity``) writer에는
+    **관측만** 넣는다. 이 예외가 나면 "이 source entity의 primary Feature"와 "loader가
+    ``make_feature_id``로 계산한 Feature"가 다르다는 뜻이고, 그것은 재키 뒤에
+    **중복 Feature가 생길 자리**를 지금 미리 가리키는 것이다.
+
+    재키가 끝나면 이 관측은 관측이 아니라 **정본 조회**가 된다 — resolve 결과가 곧
+    ``feature_id``다. 그때까지는 두 축의 동치를 실측으로 증명하는 장치다.
+    """
 
 
 class FeatureIdentityInvariantError(RuntimeError):

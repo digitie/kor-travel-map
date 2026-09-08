@@ -75,6 +75,7 @@ from kortravelmap.infra.domain_command_repo import (
     lock_domain_command,
 )
 from kortravelmap.infra.feature_identity import (
+    FeatureIdentityAnchorError,
     candidate_feature_uuid,
     verify_feature_uuid,
 )
@@ -324,6 +325,17 @@ SELECT EXISTS (SELECT 1 FROM upserted)
            OR (SELECT current_source_record_key FROM prior)
               IS DISTINCT FROM :source_record_key
        ) AS became_current
+"""
+
+#: 이 source entity의 **primary Feature**를 묻는다. ADR-068 결정 2가 정한 provider
+#: identity(`uq_source_entities_provider_identity` → `source_entity_key`)에서
+#: Feature로 가는 유일한 방향이고, 308의 `uq_source_links_primary_entity`가 그 답이
+#: 최대 하나임을 DB 선언으로 보장한다.
+_RESOLVE_PRIMARY_FEATURE_SQL: Final[str] = """
+SELECT feature_id
+FROM provider_sync.source_links
+WHERE source_entity_key = :source_entity_key
+  AND source_role = 'primary'
 """
 
 _UPSERT_SOURCE_LINK_SQL: Final[str] = """
@@ -2982,6 +2994,37 @@ async def _retire_provider_candidates(
     return retired
 
 
+async def _assert_provider_identity_anchor_agrees(
+    session: AsyncSession,
+    *,
+    source_entity_key: str,
+    computed_feature_id: str,
+) -> None:
+    """앵커가 가리키는 Feature와 loader가 계산한 Feature가 같은지 관측한다.
+
+    **T-VN-39 착지선(308).** 오늘 이 함수는 아무것도 바꾸지 않는다 — 두 축이 같다는
+    것을 실측으로 증명할 뿐이다. 재키 후에는 이 조회 결과가 곧 ``feature_id``가 되므로,
+    지금 어긋나 있는 곳이 있다면 그것이 그대로 **중복 Feature가 생길 자리**다.
+
+    앵커가 아직 없는 경우(첫 적재)는 어긋남이 아니다 — 비교할 대상이 없다.
+    """
+
+    resolved = (
+        await session.execute(
+            text(_RESOLVE_PRIMARY_FEATURE_SQL),
+            {"source_entity_key": source_entity_key},
+        )
+    ).scalar_one_or_none()
+    if resolved is None or str(resolved) == computed_feature_id:
+        return
+    raise FeatureIdentityAnchorError(
+        "provider identity 앵커가 loader와 다른 Feature를 가리킨다 — "
+        f"source_entity_key={source_entity_key!r}의 primary는 {resolved!r}인데 "
+        f"loader는 {computed_feature_id!r}를 계산했다. "
+        "재키(T-VN-39) 후에는 이 어긋남이 중복 Feature로 나타난다."
+    )
+
+
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
@@ -2997,6 +3040,11 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         session, bundle.source_record
     )
     record_inserted = record_state.inserted
+    await _assert_provider_identity_anchor_agrees(
+        session,
+        source_entity_key=record_state.source_entity_key,
+        computed_feature_id=bundle.feature.feature_id,
+    )
     feature_inserted = False
     feature_updated = False
     feature_state = await _feature_load_state(session, bundle.feature.feature_id)
