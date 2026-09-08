@@ -101,3 +101,20 @@ admin UI는 `412`를 자동 재시도하지 않는다. 작성 중인 draft와 �
 
 ADR-065의 POI target ETag·generation 의미를 확장하고, canonical pipeline/schedule의 기존
 append-only audit와 exact-scope 제약을 회귀 기준선으로 유지한다.
+
+## 현재 상태 (2026-09-08 추가)
+
+이 ADR의 backup 규칙은 그대로 유효하다. **restore/swap 규칙은 실행 경로가 없는 상태로
+동결돼 있다** — 300 baseline 정책(2026-08-26 소유자 결정)이 `scripts/docker-restore.sh`·
+`docker-restore-swap.sh`·`docker-restore-verify.sh`를 본문 없이 `exit 2`로 만들었고, 옛
+`/v1/admin/restore/{backup_id}`와 hot-swap URI는 `410 RESTORE_UNSUPPORTED`를 낸다. 정본은
+`docs/backup-restore.md`다.
+
+여기 적힌 restore 안전 규칙(`source_generation`/restore epoch, `effect_token`, reservation,
+`maintenance:backup-restore` session lock)은 **뒤집힌 것이 아니라 잠들어 있다.** recovery를
+다시 설계할 때 이 문서가 그 설계의 입력이다.
+
+그동안 M05 evidence의 복구 의미는 별도 경로가 소유한다 — artifact 무결성은
+`kortravelmap.infra.evidence_verify`, 복원본의 mutable lease 무효화와 cursor 재구축은
+`evidence_restore`, 소유권·ACL이 복원에서 살아남는지는 Docker Manager의 standalone backup
+리허설(카탈로그 지문 대조)이다. 셋 다 restore 자체를 실행하지 않는다.
