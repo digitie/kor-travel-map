@@ -9,6 +9,7 @@ A·B는 artifact만 본다. 여기서는 진짜 delivery 이력(판정 → event
 
 from __future__ import annotations
 
+from itertools import count
 from uuid import UUID, uuid4
 
 import pytest
@@ -36,6 +37,12 @@ pytestmark = [
 ]
 
 _ACK_OPERATION = "service.feature-reference-reconciliation.ack.v1"
+
+#: `_seed_manual_provider_pair`의 `index`는 좌표를 `index * 0.01`도씩 민다.
+#: 크면 위경도 범위를 벗어나 PostGIS가 `Invalid coordinate`로 죽고, 겹치면
+#: `uq_manual_feature_identity_claims_exact`에 걸린다 — DB가 session-scope라
+#: 다른 모듈이 쓰는 0·10~13·20번대·30번대·40·41·50·60·61을 피해 100부터 센다.
+_PAIR_INDEX = count(100)
 
 
 async def _publish_event(
@@ -202,8 +209,12 @@ async def delivery(migrated_engine: AsyncEngine) -> dict[str, object]:
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
-        first = await _publish_event(migrated_engine, api, dagster, index=7100)
-        second = await _publish_event(migrated_engine, api, dagster, index=7200)
+        first = await _publish_event(
+            migrated_engine, api, dagster, index=next(_PAIR_INDEX)
+        )
+        second = await _publish_event(
+            migrated_engine, api, dagster, index=next(_PAIR_INDEX)
+        )
         principal_id = f"service:m05-restore-{uuid4().hex}"
         await _provision_principal(
             migrated_engine,
