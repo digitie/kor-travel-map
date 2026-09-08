@@ -1120,10 +1120,14 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
   구현·동결되고, `merged`/`manual_retired`는 DB session 생성 **전에** destructive
   kill-switch를 통과하며 stale 요청은 어떤 M05 행도 쓰지 않고 409를 durable하게 남긴다.
   (ADR-097 §후속 2 · 설계 §admin 판단과 동시성)
-- [ ] **M05-5 — Map admin UI가 판정을 안전하게 받는다.**
+- [x] **M05-5 — Map admin UI가 판정을 안전하게 받는다.** (2026-09-08 충족, #1193)
   default `kept`, provider survivor 고정, destructive confirmation과 비어 있지 않은 reason,
   principal별 unacked age를 보여주며 generic dedup 화면을 재사용하지 않는다.
   (설계 §paired rollout과 검증 4)
+  전용 라우트 `src/app/admin/manual-provider-dedup/`가 실재하고, `decision` 초기값이
+  `"kept"`, survivor는 `decision === "merged"`일 때만 실린다(계약이 교차필드로 **양방향**
+  막는다 — `manual_retired` + survivor도 422다). reason 공백과 확인 문구 불일치가 제출을
+  막고, case를 바꾸면 `key`로 remount해 이전 판정이 남지 않는다.
 - [x] **M05-6 — 첫 consumer가 durable receipt와 exact vendor를 갖는다.**
   immutable `delivery_attempt`(blocked|applied), unique final applied receipt, impact row가
   있고 exact vendor 핀이 걸려 있다. (ADR-097 §후속 3)
@@ -1203,8 +1207,9 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 차단 없이 주기화하면 admin 큐가 쳇바퀴가 되므로 `T-VN-M05-RELITIGATION`이 그것을
 소유한다. 그전까지 운영자가 명시 실행한다.
 
-**남은 둘의 성격은 2026-09-07 초 판정 그대로다** — M05-5는 UI 구현 공백(M05-3이
-선행이었고 이제 풀렸다), M05-2는 300 baseline 정책이 바뀌기 전에는 판정할 수 없다.
+**2026-09-08로 둘 다 닫혔다.** M05-5는 전용 라우트로(#1193), M05-2는 아래 A~D단계로.
+2026-09-07의 "정책이 바뀌기 전에는 판정할 수 없다"는 판정 자체가 틀렸다 — 정책을 바꾸지
+않고도 조문이 요구하는 것을 지을 수 있었다. restore/swap은 여전히 닫혀 있다.
 
 **2026-09-08 — M05-2 충족. 소유자 판정으로 300 baseline restore 정책부터 검토했다.**
 
