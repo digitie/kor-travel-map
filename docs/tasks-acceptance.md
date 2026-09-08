@@ -1935,6 +1935,84 @@ Docker Manager runbook이 정본"이라고 위임한다. 어디에 쓸지가 소
    없어, 라우터 경로로 도달하면 409가 아니라 **catch-all 500**이 된다. 같은 종류의
    사고가 `ck_features_state_tuple`에서 한 번 있었다고 코드 주석이 기록한다.
 
+**2026-09-08 소유자 판정 — 셋 다 결론이 났다(migration 306).**
+
+**질문 셋 중 둘은 이미 좁혀져 있었다.** Q2는 ADR-093이 두 번 답했다("claim은 Feature
+purge 뒤에도 append-only로 남는다" §41, "purge 뒤에도 evidence가 남는다" §150) — 스키마
+주석도 claim·origin에 `features` FK를 **의도적으로** 두지 않은 이유를 그렇게 적는다.
+"남기지 않는다"는 답은 ADR-093 핵심 결정을 뒤집는 새 ADR을 요구하고 그럴 이유가 없다.
+Q3은 정책이 아니라 결함이었다(아래 별도 항).
+
+**Q1 — 연다. 단 UI 버튼이 아니라 자기 복구점을 남기는 운영 명령으로.**
+
+`retire`가 이미 있는 일(오류·중복·품질)에는 쓰지 않는다. purge는 **행이 존재하면 안 되는
+경우**로 한정한다. UI 버튼으로 열면 `retire`가 맡아야 할 일이 이쪽으로 샌다.
+
+**소유자가 건 순서 전제는 문자 그대로는 아직 안 맞는다.** "되돌릴 수 없는 삭제 경로를
+restore proof보다 먼저 열 수 없다"였는데, M05-2 C·D가 증명한 것은 **복원 메커니즘**이지
+복원할 대상이 있다는 것이 아니다 — `map_application`은 어느 주기 백업에도 없고(H43 보류)
+restore/swap은 300 baseline 정책으로 닫혀 있다. 그래서 **purge가 자기 복구점을 들고
+다니게** 했다: 지우기 전에 cascade로 사라질 행을 전부
+`feature.manual_feature_purge_records`에 담는다. 이 우회를 소유자가 승인했고, 그 덕에 이
+항목이 H43 보류에 묶이지 않는다.
+
+담을 relation은 `pg_constraint`에서 런타임에 유도한다 — 목록을 박으면 자식이 늘 때마다
+갱신을 잊는 순간 purge가 **조용히 데이터를 잃는다**(DO NOT 15).
+
+**Q2 — 남긴다. 다만 tombstone을 관리 가능하게 만든다.**
+
+claim의 두 역할을 나눈다: `purged_by_command_id`(purge 승인 — fence가 이것을 본다)와
+`identity_released`(예약 해제 — purge의 **명시 파라미터**). exact 유일성은
+`WHERE NOT identity_released` 부분 인덱스가 된다. 해제가 없으면 "잘못돼서 지웠으니 같은
+자리에 제대로 다시" 가 영원히 막히고, 그때 복구 수단은 감사 없는 DBA 수술뿐이다.
+
+`mistaken_creation`은 보통 해제하고 payload를 담는다. `erasure_required`는 보통 **쥐고**
+payload를 담지 **않는다** — 담으면 삭제의 목적이 무너진다. 두 동기가 정반대를 원하므로
+기본값을 두지 않고 운영자가 의도를 말하게 한다.
+
+**append-only 완화 한 줄이 함께 간다**(소유자 승인): claim의 트리거가 저 세 컬럼의
+**단조 전이 하나**만 허용한다. 증거 필드는 여전히 불변이고 전이는 command가 원인이라
+감사된다. ADR-093에 한 문장을 박았다.
+
+**RESTRICT는 막는 것이 맞다.** `manual_provider_dedup_cases`·
+`feature_reference_reconciliation_events`·`theme_feature_candidates`가 이 Feature의
+identity를 불변 증거로 인용한다. 다만 raw 23503으로 죽으면 이유를 못 말하므로 프로시저가
+먼저 조회해 **무엇이 막는지 이름을 대는** 거부를 낸다.
+
+**definer는 schema owner다.** 이 명령은 본질적으로 `feature.features`의 cascade 자식
+전부를 읽고 지운다. 좁은 owner에게 그만큼을 GRANT로 주면 목록이 드리프트하므로, 권한이
+아니라 **도달 가능성**으로 좁힌다 — EXECUTE를 PUBLIC에서 회수하고 아무에게도 주지 않는다.
+
+**T-VN-M02와 같은 fence다.** M02 live acceptance의 "지워지지 않는 write"는 바로 이 fence가
+유일한 삭제 경로를 거부해서 생긴다. purge가 열리면서 그 cleanup 이야기가 함께 풀린다.
+
+**n150 실측이 잡은 것 넷.** `ON CONFLICT ON CONSTRAINT`가 partial unique index를 가리킬 수
+없어 생성 경로 셋이 깨졌고(그중 하나는 302가 이미 교체한 프로시저라 baseline에서 뽑았으면
+302를 되돌릴 뻔했다), `::regclass`가 `search_path` 상대라 복구점 키가 스키마 없이
+저장됐고, 새 relation은 runtime ACL 선언 없이는 배포되지 않았고, 좌표 index 상한을 두 번
+넘겼다. 변이 11축 전부 RED(그중 둘은 처음에 공허해 판별 가능한 축으로 고쳤다).
+
+**아직 아닌 것.** HTTP 라우트는 만들지 않았다 — 제안이 "UI 버튼이 아니라 운영 명령"이었고
+호출부는 `kortravelmap.infra.manual_feature_purge_repo`다. 운영 스크립트가
+`admin.manual-feature.purge.v1` command를 열어 부른다.
+
+**Q3 — 정책이 아니라 결함이었고, 그 구멍은 한 이름짜리가 아니었다.**
+
+admin state 경로에서 도달 가능한 제약 23개 중 **14개가 분류돼 있지 않았다.** 그중 넷은
+프로시저가 명시적으로 raise한다. 그리고 코드 주석이 근거로 인용한 fail-close 테스트
+`test_admin_state_error_mapping_names_exist_in_ddl`은 **저장소에 없었다**.
+
+세 집합으로 분류를 강제한다 — conflict(409) / validation(422) / unexpected(버그, raw
+재던짐). 셋째는 동작을 바꾸지 않는다. "이건 버그다"라는 **판단**과 "분류를 잊었다"를
+구별하려고 있고, 그 구별이 없는 것이 2026-08-12 사고의 구조적 원인이었다. 게이트는 이름을
+박지 않고 baseline schema에서 폐포를 유도한다(진입 프로시저 → 호출 추적 → raise되는 이름 +
+쓰는 relation의 CHECK). purge 경로에는 같은 모양의 게이트를 처음부터 붙였다.
+
+**분류 하나를 실 DB로 재 보고 되돌렸다.** `ck_feature_reactivation_explicit`를 conflict로
+넣었는데, `reactivate_admin_feature_state`가 `reactivation_evidence`를 항상 넣고 patch는
+lifecycle_state 변경을 호출부에서 막아 **admin 경로로는 도달할 수 없다.** unexpected로
+옮겼다 — 도달 불가능한 값을 conflict로 등록해 두면 "구분되고 있다"는 오해가 남는다.
+
 **2026-09-07 — 자식 셋의 복원 리허설을 실행했다. 셋 다 `verified: true`.**
 
 기록 위치는 소유자 판정으로 **Manager `docs/docker-management.md`**다.
