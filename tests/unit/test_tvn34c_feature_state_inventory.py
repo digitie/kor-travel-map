@@ -24,13 +24,34 @@ _SOURCE_ROOTS = (
 _FEATURE_RELATION_MENTION = re.compile(r"feature\.(?:features|public_features)")
 
 
-def _owned_feature_readers() -> tuple[Path, ...]:
-    found: list[Path] = []
+def _readers_by_root() -> dict[Path, tuple[Path, ...]]:
+    """탐색 루트**별로** 찾은 모듈을 돌려준다.
+
+    합쳐서 세면 안 된다 — 루트 하나가 옮겨지거나 이름이 바뀌어도 나머지 둘이 채워서
+    "하나도 못 찾았다" 단언이 통과한다(2026-09-08 변이 검증에서 실측). 그러면 그 루트의
+    모듈은 차단선 밖으로 조용히 빠진다. 루트마다 따로 재야 그 사건이 빨개진다.
+    """
+
+    by_root: dict[Path, tuple[Path, ...]] = {}
     for root in _SOURCE_ROOTS:
+        hits: list[Path] = []
         for path in sorted(root.rglob("*.py")):
             if _FEATURE_RELATION_MENTION.search(path.read_text(encoding="utf-8")):
-                found.append(path)
-    assert found, "Feature relation을 읽는 모듈을 하나도 찾지 못했다 — 탐색 경로가 틀렸다"
+                hits.append(path)
+        by_root[root] = tuple(hits)
+    return by_root
+
+
+_READERS_BY_ROOT = _readers_by_root()
+
+
+def _owned_feature_readers() -> tuple[Path, ...]:
+    found: list[Path] = []
+    for hits in _READERS_BY_ROOT.values():
+        found.extend(hits)
+    # 비어 있으면 여기서 죽이지 않는다 — `test_derivation_sources_are_live`가 잡는다.
+    # 모듈 최상위에서 죽으면 collection error가 되어 **이 파일의 모든 차단선이 통째로
+    # 실행되지 않고**, 그 침묵이 "통과"로 읽힌다(T-VN-39 착수 시 실측).
     return tuple(found)
 
 
@@ -49,6 +70,27 @@ _CUTOVER_MIGRATIONS = (
     _ROOT / "alembic/legacy_versions/0097_tvn34c_final_state_cutover.py",
     _ROOT / "alembic/legacy_versions/0104_tvn36_final_fence.py",
 )
+
+
+def _read_or_empty(path: Path) -> str:
+    """유도원을 읽되, 없으면 빈 문자열을 돌려준다.
+
+    모듈 최상위에서 ``read_text``가 던지면 collection error가 되어 **이 파일의 차단선
+    전부가 실행되지 않는다.** 유도원이 사라진 것은 실패로 보고해야 할 사실이지
+    파일을 못 여는 사고가 아니다 — `test_derivation_sources_are_live`가 잰다.
+    """
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+_MISSING_DERIVATION_SOURCES = tuple(
+    str(path.relative_to(_ROOT)).replace("\\", "/")
+    for path in _CUTOVER_MIGRATIONS
+    if not path.is_file()
+)
 _DROPPED_COLUMNS = tuple(
     sorted(
         {
@@ -56,14 +98,20 @@ _DROPPED_COLUMNS = tuple(
             for migration in _CUTOVER_MIGRATIONS
             for column in re.findall(
                 r"ALTER TABLE feature\.features DROP COLUMN ([a-z_]+)",
-                migration.read_text(encoding="utf-8"),
+                _read_or_empty(migration),
             )
         }
     )
 )
-assert len(_DROPPED_COLUMNS) >= 10, f"cutover DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
-assert {"data_origin", "data_version"} <= set(_DROPPED_COLUMNS), _DROPPED_COLUMNS
-_LEGACY_COLUMNS = "(?:" + "|".join(re.escape(c) for c in _DROPPED_COLUMNS) + ")"
+# 유도가 비면 정규식이 `(?:)`가 되어 **아무것도 매칭하지 않는 차단선**이 된다.
+# 그 상태를 모듈 최상위 assert로 막으면 collection error가 되므로, 아래
+# `test_derivation_sources_are_live`가 잰다. 여기서는 매칭 불가능한 패턴을 넣어
+# "조용히 전부 통과"가 아니라 "명시적으로 아무것도 못 잡는다"로 만든다.
+_LEGACY_COLUMNS = (
+    "(?:" + "|".join(re.escape(c) for c in _DROPPED_COLUMNS) + ")"
+    if _DROPPED_COLUMNS
+    else "(?!x)x"
+)
 
 # 컬럼만 보면 **테이블 통째 삭제**를 놓친다. 0104는 `feature.feature_versions`와
 # `ops.feature_change_requests`를 지우는데, 컬럼 축 차단선은 이 이름을 아예 모르므로
@@ -75,38 +123,79 @@ _DROPPED_RELATIONS = tuple(
             for migration in _CUTOVER_MIGRATIONS
             for relation in re.findall(
                 r"DROP TABLE ([a-z_]+\.[a-z_]+)",
-                migration.read_text(encoding="utf-8"),
+                _read_or_empty(migration),
             )
         }
     )
 )
-assert {"feature.feature_versions", "ops.feature_change_requests"} <= set(
-    _DROPPED_RELATIONS
-), _DROPPED_RELATIONS
-
 # 아카이브에서 읽은 목록이 **현행 head와 여전히 맞는지** 확인한다. 아카이브는 다시
 # 실행되지 않으므로, 목록이 낡아도 이 파일만 보면 알 길이 없다 — 누가 `deleted_at`을
 # 같은 이름으로 되살리면 차단선이 **살아 있는 컬럼을 금지**하게 되고, 그 오류는 조용하다.
 # `alembic/baseline/schema.sql`은 head의 기계 덤프이므로 여기서 부재를 직접 확인한다.
-_BASELINE_SCHEMA = (_ROOT / "alembic/baseline/schema.sql").read_text(encoding="utf-8")
+_BASELINE_SCHEMA = _read_or_empty(_ROOT / "alembic/baseline/schema.sql")
 _FEATURES_DDL = re.search(
     r"^CREATE TABLE feature\.features \(\n(.*?)^\);", _BASELINE_SCHEMA, re.DOTALL | re.MULTILINE
 )
-assert _FEATURES_DDL, "baseline에서 feature.features DDL을 찾지 못했다"
 _HEAD_FEATURE_COLUMNS = frozenset(
     re.findall(r"^    ([a-z_]+) ", _FEATURES_DDL.group(1), re.MULTILINE)
+    if _FEATURES_DDL
+    else ()
 )
-assert "feature_id" in _HEAD_FEATURE_COLUMNS, _HEAD_FEATURE_COLUMNS
 _RESURRECTED = _HEAD_FEATURE_COLUMNS & set(_DROPPED_COLUMNS)
-assert not _RESURRECTED, (
-    f"금지 컬럼이 head에 되살아났다 — 차단선이 살아 있는 컬럼을 막고 있다: {sorted(_RESURRECTED)}"
-)
 _RESURRECTED_RELATIONS = tuple(
     relation
     for relation in _DROPPED_RELATIONS
     if re.search(rf"^CREATE TABLE {re.escape(relation)} \(", _BASELINE_SCHEMA, re.MULTILINE)
 )
-assert not _RESURRECTED_RELATIONS, _RESURRECTED_RELATIONS
+
+
+def test_derivation_sources_are_live() -> None:
+    """이 파일의 차단선이 **실제 원문에서 유도됐는지**를 잰다.
+
+    2026-09-08(T-VN-39 착수)까지 이 검사들은 모듈 최상위 ``assert`` 8개였다. 그러면
+    유도가 깨진 순간 pytest가 **collection error**를 내고, 이 파일의 차단선 세 개가
+    통째로 실행되지 않는다. 실패가 "차단선이 무엇을 잡았다"가 아니라 "파일이 안 열린다"로
+    나타나면, 큰 변경 중에는 그것이 변경 탓인지 검사기 탓인지 구분할 수 없다.
+
+    함수로 내리면 나머지 차단선은 계속 돌고, 이 하나만 빨개진다.
+    """
+
+    assert not _MISSING_DERIVATION_SOURCES, (
+        f"유도원 파일이 사라졌다 — 차단선이 빈 목록으로 돌고 있다: "
+        f"{list(_MISSING_DERIVATION_SOURCES)}"
+    )
+    # 루트별 **hit 수**를 재면 안 된다. `packages/kor-travel-map-dagster/src`는 오늘
+    # 정당하게 0건이다(그 패키지는 raw SQL로 `feature.features`를 부르지 않고 repo 층을
+    # 거친다). hit 0을 실패로 삼으면 그 사실 자체가 빨개져 게이트를 끄게 만든다.
+    #
+    # 진짜 위험은 **경로가 죽는 것**이다 — 루트가 옮겨지거나 이름이 바뀌면 `rglob`는
+    # 조용히 0건을 돌려주고, 그 패키지 전체가 차단선 밖으로 빠진다. 그 사건만 잰다.
+    dead_roots = sorted(
+        str(root.relative_to(_ROOT)).replace("\\", "/")
+        for root in _SOURCE_ROOTS
+        if not any(root.rglob("*.py"))
+    )
+    assert not dead_roots, (
+        "이 탐색 루트에 파이썬 모듈이 하나도 없다 — 경로가 옮겨졌거나 이름이 바뀌었고, "
+        f"그 패키지 전체가 차단선 밖이다: {dead_roots}"
+    )
+    assert _OWNED_FEATURE_READERS, (
+        "Feature relation을 읽는 모듈을 하나도 찾지 못했다 — 탐색 경로가 틀렸다"
+    )
+    assert len(_DROPPED_COLUMNS) >= 10, (
+        f"cutover DROP COLUMN 목록을 읽지 못했다: {_DROPPED_COLUMNS}"
+    )
+    assert {"data_origin", "data_version"} <= set(_DROPPED_COLUMNS), _DROPPED_COLUMNS
+    assert {"feature.feature_versions", "ops.feature_change_requests"} <= set(
+        _DROPPED_RELATIONS
+    ), _DROPPED_RELATIONS
+    assert _FEATURES_DDL, "유도원에서 feature.features DDL을 찾지 못했다"
+    assert "feature_id" in _HEAD_FEATURE_COLUMNS, _HEAD_FEATURE_COLUMNS
+    assert not _RESURRECTED, (
+        "금지 컬럼이 head에 되살아났다 — 차단선이 살아 있는 컬럼을 막고 있다: "
+        f"{sorted(_RESURRECTED)}"
+    )
+    assert not _RESURRECTED_RELATIONS, _RESURRECTED_RELATIONS
 
 
 # f-string 보간 자리를 대신하는 식별자. **식별자로 유효한 형태**여야 alias 바인딩
