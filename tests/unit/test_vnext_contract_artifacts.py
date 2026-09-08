@@ -43,7 +43,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
     "target-schema-fingerprints-v1.json": (
-        "084986b9b7764be8098401b6ef26dd48ed174288bec5c7a5a84b3fb63ea1313e"
+        "dd436d1024a77c892a987bf0bedaf12ca78425ffc917db31f5cc94f7bbeeddad"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
