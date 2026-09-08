@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 from uuid import UUID, uuid4
@@ -399,74 +398,29 @@ async def _preflight_ack(
 
 
 async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
-    migrated_engine: AsyncEngine, m05_activation_gate_sqlstate: str
+    migrated_engine: AsyncEngine, m05_pristine_provisioning: dict[str, object]
 ) -> None:
-    """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다."""
+    """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다.
+
+    앞의 세 성질은 **pristine DB에서만** 관찰할 수 있다(구독은 append-only
+    singleton이다). 그래서 관찰 자체는 session scope fixture가 어떤 M05 테스트보다
+    먼저 해 두고, 여기서는 그 결과를 단언한다 — 이 테스트가 직접 부르면 다른 모듈이
+    구독을 먼저 만드는 순간 세 단언이 조용히 사라진다.
+    """
 
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     principal_id = "service:feature-reference-reconciliation"
     try:
-        # 구독 없이 판정하면 거부된다. 이 관찰은 pristine DB에서만 가능하므로
-        # session scope fixture가 **어떤 M05 테스트보다 먼저** 해 둔 것을 읽는다 —
-        # 여기서 직접 부르면 다른 모듈이 구독을 먼저 만드는 순간 조용히 사라진다.
-        assert m05_activation_gate_sqlstate == "P0002"
-
-        first_command_id = await _open_command(
-            migrated_engine,
-            actor="admin:m05-subscription",
-            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-        )
-        second_command_id = await _open_command(
-            migrated_engine,
-            actor="admin:m05-subscription",
-            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-        )
-        first_ready = asyncio.Event()
-        release_first = asyncio.Event()
-
-        async def provision_once(
-            command_id: int,
-            *,
-            ready: asyncio.Event | None = None,
-            release: asyncio.Event | None = None,
-        ) -> dict[str, object]:
-            async with api.begin() as connection:
-                await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-                receipt = dict(
-                    (
-                        await connection.execute(
-                            text(
-                                "CALL feature."
-                                "provision_feature_reference_reconciliation_subscription("
-                                ":principal_id, 0, 'admin:m05-subscription', :command_id, "
-                                "NULL::text, NULL::bigint)"
-                            ),
-                            {"principal_id": principal_id, "command_id": command_id},
-                        )
-                    )
-                    .mappings()
-                    .one()
-                )
-                if ready is not None:
-                    ready.set()
-                if release is not None:
-                    await release.wait()
-                return receipt
-
-        first_task = asyncio.create_task(
-            provision_once(first_command_id, ready=first_ready, release=release_first)
-        )
-        await asyncio.wait_for(first_ready.wait(), timeout=5)
-        second_task = asyncio.create_task(provision_once(second_command_id))
-        done, _pending = await asyncio.wait({second_task}, timeout=0.1)
-        assert not done
-        release_first.set()
-        provisioned, raced = await asyncio.gather(first_task, second_task)
-        assert provisioned == {
+        # 구독 없이 판정하면 거부된다.
+        assert m05_pristine_provisioning["gate_sqlstate"] == "P0002"
+        # 먼저 잡은 트랜잭션이 커밋할 때까지 두 번째 provision은 막혀 있다.
+        assert m05_pristine_provisioning["blocked_while_first_held"] is True
+        # 동시 둘 중 하나만 만들고 나머지는 기존 것을 본다.
+        assert m05_pristine_provisioning["provisioned"] == {
             "o_outcome": "provisioned",
             "o_initial_event_sequence": 0,
         }
-        assert raced == {
+        assert m05_pristine_provisioning["raced"] == {
             "o_outcome": "already_provisioned",
             "o_initial_event_sequence": 0,
         }

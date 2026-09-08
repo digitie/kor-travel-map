@@ -56,7 +56,6 @@ async def _publish_event(
     """
 
     pair = await _seed_manual_provider_pair(engine, index=index)
-    await _provision_canonical_subscription(engine, api, actor=str(pair["actor"]))
     recorded = await _record_candidate(
         dagster,
         manual_feature_id=str(pair["manual_feature_id"]),
@@ -128,41 +127,6 @@ async def _publish_event(
             )
         ).mappings().one()
     return dict(event)
-
-
-async def _provision_canonical_subscription(
-    engine: AsyncEngine, api: AsyncEngine, *, actor: str
-) -> None:
-    """판정이 event를 낼 수 있으려면 정본 구독이 먼저 있어야 한다.
-
-    `resolve_manual_provider_dedup_case_v2`는 구독이 없으면
-    `feature reference reconciliation subscription is not provisioned`로 죽는다.
-    다른 M05 테스트는 이미 provision된 DB를 물려받아 그 사실이 가려져 있었다 —
-    이 파일만 돌리면 드러난다.
-    """
-
-    command_id = await _open_command(
-        engine,
-        actor=actor,
-        operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-    )
-    async with api.begin() as connection:
-        await connection.execute(
-            text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-        )
-        outcome = (
-            await connection.execute(
-                text(
-                    "CALL feature."
-                    "provision_feature_reference_reconciliation_subscription("
-                    " 'service:feature-reference-reconciliation', 0,"
-                    " CAST(:actor AS text), CAST(:command_id AS bigint),"
-                    " NULL::text, NULL::bigint)"
-                ),
-                {"actor": actor, "command_id": command_id},
-            )
-        ).mappings().one()
-    assert outcome["o_outcome"] in {"provisioned", "already_provisioned"}, outcome
 
 
 async def _provision_principal(
