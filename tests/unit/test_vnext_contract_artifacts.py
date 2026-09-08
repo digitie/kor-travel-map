@@ -35,14 +35,15 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("11fb6a2ec85d87ca7e32bb63155ede380ced6ebce46e3ebe6c8b34e9cfb756f4"),
+    # 2026-09-08 T-VN-39 — notice_states를 "채택되지 않음"으로 표시(소유자 승인).
+    "target-schema-v1.sql": ("c60bdddb411fc38087976df5398f968e9255074797d98d485c2341c30988dc8d"),
     "target-invariants-v1.sql": (
         "971f656169cb1d2f21f9286d22e732daf16a3a9d79456e0f221bae4c04b86e26"
     ),
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
     "target-schema-fingerprints-v1.json": (
-        "084986b9b7764be8098401b6ef26dd48ed174288bec5c7a5a84b3fb63ea1313e"
+        "dd436d1024a77c892a987bf0bedaf12ca78425ffc917db31f5cc94f7bbeeddad"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
@@ -57,8 +58,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
+# 2026-09-08 T-VN-39 — removal manifest에서 notice_states 대체 항목을 뺐다.
     "consumer-rollout-v1.json": (
-        "8da391b64f87fc877fd332a5f37060cf26f52b81d5c8a55ba2f5864d6cc94dcf"
+        "148d2f8e710c8d8c136eb5931829716ecf45bfbfdc58debcdd07b344d80ff442"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

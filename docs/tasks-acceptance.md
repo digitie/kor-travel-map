@@ -903,8 +903,10 @@ rebuild 앞뒤로 각각 돌려 **두 번 다 55/55**였다. 즉 플래그 활�
 
 ```markdown
 - [~] **T-VN-M02 — origin 보존과 불변** (결정 4, 구현 병합). #1029의 `0227` provenance reader,
-  immutable claim/origin ACL과 named hard-purge fence, unit/integration 회귀가 정본이다. evidence를
-  남긴 상태에서의 purge 정책·backup/restore 실측 및 live acceptance가 남아 있다. PinVi M05 paired
+  immutable claim/origin ACL과 named hard-purge fence, unit/integration 회귀가 정본이다.
+  ~~evidence를 남긴 상태에서의 purge 정책·backup/restore 실측 및 live acceptance가 남아
+  있다.~~ **2026-09-08 정정 — 셋 중 둘은 이미 이 절의 것이 아니다**(아래 §잔여 참조).
+  남은 것은 live acceptance 하나다. PinVi M05 paired
   attestation이 소비하는 Admin provenance 최상위 identity는 opaque `feature_id`와 별도 `feature_uuid`를
   함께 반환해야 하며, UUID-only projection을 재사용하지 않는다. reader/immutable claim UUID는 모두
   최상위 `feature_uuid`와 같지 않으면 fail-close한다. PinVi consumer도 이 반환 UUID를 M05 case의
@@ -940,6 +942,28 @@ backup/restore 소유권.
 
 **2026-09-07 소유자 판정 — purge 정책을 `T-VN-H49` 계열로 이관한다. 이 절에는 live
 acceptance 축만 남는다.**
+
+**2026-09-08 잔여 정정 — 이 절이 세던 셋 중 둘이 해소됐는데 문장이 따라가지 않았다.**
+
+| 이 절이 잔여로 적던 것 | 실제 |
+|---|---|
+| purge 정책 | **닫혔다** — 2026-09-08 소유자 판정과 migration 306(§T-VN-H49) |
+| backup/restore 실측 | **이 항목의 것이 아니다** — 2026-09-07 판정으로 `T-VN-H49` 계열 |
+| live acceptance spec 회수 | **끝났다** — spec이 main에 있다(`packages/kor-travel-map-admin/frontend/e2e/live/admin-manual-feature-create.live.spec.ts`) |
+| live acceptance **실행** | **유일한 잔여** |
+
+**그 하나가 막힌 이유는 셋이고, 그중 하나는 306이 절반 풀었다.**
+
+1. prod에서 돌리면 안 된다 — prod UI가 `admin`이라 spec의
+   `created_by_actor === "e2e-admin"`이 구조적으로 실패한다. 이 축은 그대로다.
+2. ~~cleanup이 없어 지워지지 않는 write가 남는다~~ — **306이 풀었다.** 그 되돌릴 수
+   없음은 hard-purge fence가 유일한 삭제 경로를 거부해서 생긴 것이었고, 이제 감사되는
+   `feature.purge_manual_feature`가 있다. 다만 1번 때문에 여전히 prod에서 돌리지 않는다.
+3. 격리 스택이 **사라졌다**(2026-09-08 실측). `~/ktm-live-301`은 정지가 아니라
+   컨테이너도 볼륨도 없고, 체크아웃은 alembic head `302`(저장소는 `307`)이며 `e2e/live/`에
+   그 spec 자체가 없다. **재기동이 아니라 재구축이 선행이다.**
+
+그리고 spec은 `E2E_MANUAL_CREATE_WRITE=1` opt-in이라 병합만으로는 돌지 않는다.
 
 **왜 이관인가 — 순서 때문이다.** hard-purge fence의 무조건 거부는 코드가 스스로
 **잠정**이라고 적는다(`tests/integration/test_tvn_m01_manual_feature_create.py:180`
@@ -2206,8 +2230,47 @@ removal manifest (c)의 대체물 `provider_sync.notice_states`가 **구현된 �
 manifest (b) provider_sync source lineage는 **이미 제거 완료**이므로 충족 처리해도
 된다.
 
-**소유자 판정.** `notice_states` 통합을 새 선행 항목으로 세울 것인가, 아니면 removal
-manifest에서 (c)를 빼도록 계약을 개정할 것인가.
+**2026-09-08 소유자 판정 — 계약을 개정해 (c)를 뺐다.**
+
+**대체를 정당화한 결함이 이미 없다.** manifest 항목이 대는 이유는 하나,
+"문자열 시각 판정"이다. 그런데 두 표의 시각 컬럼은 전부 typed다 —
+`notice_lineage_states.changed_at`·`valid_until`, `notice_lifecycle_scopes.applied_at`이
+모두 `timestamp with time zone`이고 writer도 `CAST(:closed_at AS timestamptz)`와
+`>= scope.applied_at`로 typed 비교를 쓴다. 저장소에 남은 `pg_input_is_valid`는
+`_frozen_h35_ended_notice_hidden_sql` 하나뿐이고, 그것은 0079 세대 표면을 리허설용으로
+**일부러 글자 그대로 보존한** 함수다(그 docstring이 "현행 코드가 이 형태를 되살리는 것을
+막기 위해 이 함수 안에만 존재한다"고 적는다). 즉 살아 있는 결함이 아니라 박제다.
+문자열 시각 판정은 `T-VN-35B`와 `T-VN-37D`가 이미 없앴다.
+
+**fence가 처음부터 없었다.** 이 항목의 `fenced_by`는 `T-VN-37B`인데 그런 항목은 원장에
+**존재한 적이 없다.** 다른 여섯 entry는 전부 실재하는 fence를 가리킨다(34C·32C·33C·
+36D·38C·40C) — (c)만 유일하게 fence 없이 등록돼 있었다. 그 fence가 소유했어야 할
+`tstzrange` 표현은 `T-VN-37D`가 다른 표(`feature.feature_notices.valid_during`)에 이미
+착지시켰다.
+
+**새로 짓는 쪽의 값이 없다.** `notice_states`가 주는 것은 정규화(`valid_during` +
+`is_current` 부분 유니크 + GiST)인데, 그 값을 사려면 살아 있는 writer 경로
+(`feature_repo.py:3226-3500`)를 통째로 재작성하고 freeze 계약을 재계산해야 한다. 그런데
+두 표 모두 **prod 0행**이고, 성능 문제는 `T-VN-37`이 이미 해결했다(20.4초 → 0.19초,
+118.4초 → 0.36초). 해결된 문제를 위해 살아 있는 경로를 재작성하는 셈이고, 그 근거 문장은
+이미 거짓이다.
+
+**목표 상태 기술은 지우지 않는다.** `contracts/vnext/target-schema-v1.sql`의
+`notice_states` DDL과 invariant는 "**채택되지 않음**" 표시만 달고 남긴다 — 정합성 요구가
+생기면 다시 꺼낼 값이 있고, 지우면 같은 논의를 처음부터 다시 해야 한다(오늘
+`b2543d68`이 지운 실측 기록을 되살린 것과 같은 이유다).
+
+**이 판정이 틀릴 수 있는 지점.** `notice_states`가 성능이 아니라 **정합성**을 위한
+것이었다면 판단이 뒤집힌다 — `is_current` 부분 유니크와 range 중첩 금지는 지금 두 표가
+선언적으로 강제하지 못하는 불변식이다. 다만 그것을 요구하는 조문을 저장소에서 찾지
+못했고, manifest가 대는 이유도 "문자열 시각 판정" 하나뿐이었다.
+
+**남은 것.** 이 항목의 소유자 판정 대기는 사라졌다. `T-VN-39`에 남는 것은 legacy TEXT
+`feature_id` PK 제거 하나이고, **그것은 판정 대상이 아니다** — 대체 identity
+(`feature_uuid` + unique 둘)와 fence 트리거가 이미 prod에 있고 `feature.features`가
+0행이라 데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다
+(2026-09-07 조문이 적은 "컬럼 40개"는 `pg_catalog`/`information_schema`를 뺀 실측에서
+37개다).
 
 ## T-101 — Materialized View 도입 검토 (보류)
 ```

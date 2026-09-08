@@ -237,11 +237,6 @@
         "removed_by": "T-VN-36D"
       },
       {
-        "object": "provider_sync.notice_lineage_states·notice_lifecycle_scopes(문자열 시각 판정) — notice_states로 대체",
-        "fenced_by": "T-VN-37B",
-        "removed_by": "T-VN-39"
-      },
-      {
         "object": "T-VN-38C rollback shadow index (weather/price old query 경로)",
         "fenced_by": "T-VN-38C",
         "removed_by": "T-VN-39"
@@ -250,6 +245,14 @@
         "object": "feature.curated_features overlay/snapshot table·단방향 trigger·repository·legacy_projection_id·0074 curation_item_id rekey CASCADE/append-only 예외와 legacy route(/v1/curated-features*, /v1/admin/features/curated*)",
         "fenced_by": "T-VN-40C",
         "removed_by": "T-VN-40C"
+      }
+    ],
+    "amendments": [
+      {
+        "date": "2026-09-08",
+        "removed_entry": "provider_sync.notice_lineage_states·notice_lifecycle_scopes(문자열 시각 판정) — notice_states로 대체",
+        "reason": "대체를 정당화한 결함('문자열 시각 판정')이 이미 없다. notice_lineage_states.changed_at/valid_until과 notice_lifecycle_scopes.applied_at은 전부 timestamptz이고 writer도 typed 비교를 쓴다. 저장소에 남은 pg_input_is_valid는 _frozen_h35_ended_notice_hidden_sql 하나뿐이며 그것은 0079 세대 표면을 리허설용으로 일부러 보존한 박제다. 문자열 시각 판정은 T-VN-35B와 T-VN-37D가 없앴다. 이 entry의 fenced_by(T-VN-37B)는 원장에 존재한 적이 없는 유일한 항목이었고, 그 fence가 소유했어야 할 tstzrange 표현은 T-VN-37D가 feature.feature_notices에 이미 착지시켰다. 두 표는 prod 0행이고 성능 문제는 T-VN-37이 해결했다(20.4s → 0.19s, 118.4s → 0.36s). 해결된 문제를 위해 살아 있는 writer 경로를 재작성할 근거가 없다. 소유자 승인 2026-09-08.",
+        "target_state_kept": "provider_sync.notice_states의 target DDL과 invariant는 contracts에 남긴다 — 설계 기록을 지우면 같은 논의를 다시 해야 한다. '채택되지 않음'으로 표시만 한다."
       }
     ]
   }

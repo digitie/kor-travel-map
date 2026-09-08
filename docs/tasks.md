@@ -38,12 +38,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
 
 
-- [ ] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
-
-  V1·V2·V4는 Manager #335로 충족. 남은 V3는 배포된 빌드로 검증을 한 번 돌려
-  receipt 경로·sha256을 원장이 인용하는 것이고, 승격 정의("출력을 이 절에
-  기록한다")의 개정이 함께 간다 — 소유자 판정이다.
-
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
 
   기준선 dump·sha256·rollback은 완료됐다. 남은 정기화·2차 외부 사본은 현 환경에서
@@ -66,8 +60,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
   legacy TEXT `feature_id` PK 물리 제거가 본체이고 이 백로그에서 가장 큰 축이다.
-  removal manifest (c)의 대체물 `provider_sync.notice_states`가 **미구현이고 소유
-  항목이 없다** — 그것을 어디가 소유할지가 소유자 판정이다.
+  2026-09-08 소유자 판정으로 removal manifest (c)(`notice_states` 대체)를 계약에서
+  뺐다 — 대체를 정당화한 "문자열 시각 판정"이 이미 없다. **소유자 판정 대기는 없고**
+  남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 

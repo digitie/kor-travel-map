@@ -10,6 +10,16 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-08 (2) — 승격 검증이 durable 기록을 남긴다
+
+- [x] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
+  (**2026-09-08 완료**, Manager #335). V1·V2·V4는 코드로, V3는 승격 정의 개정(소유자
+  승인)과 n150 실측으로 닫았다. `--verify-leaf`는 정말로 아무것도 쓰지 않았고, V2가
+  요구하는 값은 전부 이미 지역변수로 살아 있다가 print 문자열에만 들어가고 버려지고
+  있었다. 가장 날카로운 지점은 신뢰 경계 거부 경로였다 — 한 문장만 인쇄하고 축을 하나도
+  남기지 않아, receipt를 붙였어도 내용이 비었을 것이다.
+  상세는 `docs/tasks-acceptance.md` §T-VN-M05-VERIFY-RECEIPT.
+
 ## 2026-09-08 — purge 개방·TRUNCATE fence·소비 기록
 
 - [x] T-VN-H49(hard purge 정책) — **manual Feature hard purge를 감사되는 운영 명령으로
