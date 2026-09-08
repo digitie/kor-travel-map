@@ -302,7 +302,9 @@ async def test_a_dry_run_reports_the_holder_without_writing_anything(
         )
     before = await _read_lease(migrated_engine, principal_id)
 
-    async with migrated_engine.connect() as connection:
+    # **커밋되는** 트랜잭션에서 부른다. `connect()`로 부르면 종료 시 롤백되므로,
+    # 몰래 쓰는 구현도 흔적을 남기지 않아 이 단언이 공허해진다.
+    async with migrated_engine.begin() as connection:
         report = await repair_restored_database(connection, apply=False)
 
     assert report.preflight_failures == []
