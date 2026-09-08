@@ -632,12 +632,31 @@ class ManualFeatureIdentityClaimRow(Base):
             "claim_basis IN ('manual_create','legacy_admin_route')",
             name=conv("ck_manual_feature_identity_claims_basis"),
         ),
-        UniqueConstraint(
+        # exact 예약은 **살아 있는 claim만** 대상으로 한다(306). 해제된 claim은 증거로
+        # 남되 같은 이름·좌표의 재생성을 막지 않는다 — 그러지 않으면 purge가 영구
+        # tombstone을 남긴다.
+        Index(
+            "uq_manual_feature_identity_claims_exact",
             "feature_kind",
             "name_key",
             "lon_e6",
             "lat_e6",
-            name=conv("uq_manual_feature_identity_claims_exact"),
+            unique=True,
+            postgresql_where=text("NOT identity_released"),
+        ),
+        CheckConstraint(
+            "(purged_by_command_id IS NULL) = (purged_at IS NULL)",
+            name=conv("ck_manual_feature_identity_claims_purge_pair"),
+        ),
+        CheckConstraint(
+            "NOT identity_released OR purged_by_command_id IS NOT NULL",
+            name=conv("ck_manual_feature_identity_claims_release_needs_purge"),
+        ),
+        ForeignKeyConstraint(
+            ["purged_by_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_manual_feature_identity_claims_purge_command"),
+            ondelete="RESTRICT",
         ),
         UniqueConstraint(
             "claimed_by_command_id",
@@ -671,6 +690,90 @@ class ManualFeatureIdentityClaimRow(Base):
     claimed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
+    )
+    #: purge 승인이자 기록. **fence가 이것을 본다** — 이 값이 있어야 Feature를 지울 수
+    #: 있다. 지속 상태의 순수 함수로 남기려고 세션 GUC 같은 표식을 쓰지 않는다.
+    purged_by_command_id: Mapped[int | None] = mapped_column(BigInteger)
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 예약 해제. purge의 **명시 파라미터**이지 자동이 아니다 — `mistaken_creation`은
+    #: 보통 놓고 `erasure_required`는 보통 쥔다(같은 것이 다시 만들어지면 안 되므로).
+    identity_released: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+
+
+class ManualFeaturePurgeRecordRow(Base):
+    """purge가 들고 다니는 **자기 복구점**의 append-only 기록.
+
+    DB 수준 restore 경로에 기대지 않으려고 있다 — `map_application`은 어느 주기 백업에도
+    없고(T-VN-H43 보류) restore/swap은 300 baseline 정책으로 닫혀 있다. 그 상태에서
+    되돌릴 수 없는 삭제를 열려면 삭제 자신이 복구점을 남겨야 한다.
+
+    `captured_rows`가 NULL인 것은 결손이 아니라 `erasure_required`의 **의도된 부재**다 —
+    법적 삭제 요구에 payload를 담으면 삭제의 목적이 무너진다. `captured_sha256`이 그
+    사실을 증언한다.
+    """
+
+    __tablename__ = "manual_feature_purge_records"
+    __table_args__ = (
+        CheckConstraint(
+            "reason_code IN ('mistaken_creation', 'erasure_required')",
+            name=conv("ck_manual_feature_purge_records_reason"),
+        ),
+        CheckConstraint(
+            "btrim(purged_by_actor) <> '' AND char_length(purged_by_actor) <= 200",
+            name=conv("ck_manual_feature_purge_records_actor"),
+        ),
+        CheckConstraint(
+            "captured_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_manual_feature_purge_records_digest"),
+        ),
+        CheckConstraint(
+            "(reason_code = 'mistaken_creation' AND captured_rows IS NOT NULL "
+            "AND jsonb_typeof(captured_rows) = 'object') "
+            "OR (reason_code = 'erasure_required' AND captured_rows IS NULL)",
+            name=conv("ck_manual_feature_purge_records_payload"),
+        ),
+        CheckConstraint(
+            "captured_relation_count >= 0 AND captured_row_count >= 0",
+            name=conv("ck_manual_feature_purge_records_counts"),
+        ),
+        UniqueConstraint(
+            "feature_uuid",
+            name=conv("uq_manual_feature_purge_records_feature"),
+        ),
+        UniqueConstraint(
+            "purged_by_command_id",
+            name=conv("uq_manual_feature_purge_records_command"),
+        ),
+        ForeignKeyConstraint(
+            ["purged_by_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_manual_feature_purge_records_command"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "feature"},
+    )
+
+    purge_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_released: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    purged_by_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    purged_by_actor: Mapped[str] = mapped_column(Text, nullable=False)
+    captured_rows: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    captured_relation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    captured_row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    captured_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    purged_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
     )
 
 

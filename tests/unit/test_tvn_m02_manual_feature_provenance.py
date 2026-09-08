@@ -31,6 +31,12 @@ def test_m02_migration_is_forward_only_and_closed_to_manual_admin_reader() -> No
 
 
 def test_m02_reader_is_current_feature_driven_and_purge_fence_is_named() -> None:
+    """**은퇴한 `0227`의 원문**을 고정한다 — 현행 동작이 아니다.
+
+    306이 fence를 조건부로 바꿨고 제약 이름도 `ck_manual_feature_purge_unauthorised`로
+    갈렸다. 현행 계약은 `tests/integration/test_manual_feature_purge.py`가 잰다.
+    """
+
     source = _MIGRATION.read_text(encoding="utf-8")
 
     assert "FROM feature.features AS core" in source

@@ -26,6 +26,17 @@
 
 셋의 합집합이 이 경로에서 도달 가능한 후보다. 각각은 conflict / validation / unexpected
 중 **정확히 하나**에 있어야 한다.
+
+## 이 게이트가 보지 **못하는** 것
+
+`alembic/baseline/schema.sql`은 `300` 시점의 덤프이고 그 뒤 migration(301~)은 담기지
+않는다. 그러므로 **나중 migration이 admin state 프로시저를 교체하며 새 제약을 들여오면
+이 게이트는 그것을 못 본다.** 지금은 그런 migration이 없다.
+
+베이스라인 대신 `alembic/versions/*.py` 전체를 훑으면 이 경로와 무관한 제약까지 분류를
+강요하게 되어 "구분되고 있다"는 오해를 새로 만든다(도달 불가능한 값을 미리 등록하는
+것의 대칭 문제다). 그래서 경계를 넓히는 대신 **여기 적어 둔다** — admin state 경로의
+프로시저를 교체하는 migration을 쓰는 사람은 이 파일을 함께 봐야 한다.
 """
 
 from __future__ import annotations

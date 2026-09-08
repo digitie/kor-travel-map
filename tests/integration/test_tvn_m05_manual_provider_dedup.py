@@ -69,6 +69,15 @@ async def _seed_manual_provider_pair(
     """
 
     suffix = uuid4().hex
+    # `ck_features_coord_pair`와 claim의 lon/lat CHECK가 좌표를 한반도 범위로 묶는다
+    # (lon 124~132, lat 33~39.5). index가 그 밖으로 밀면 PostGIS `Invalid coordinate`나
+    # CHECK 위반으로 죽는데, 그 오류는 **index 때문이라고 말하지 않는다** — 2026-09-08에
+    # 두 모듈이 차례로 그것에 걸렸다. 여기서 먼저 말한다.
+    if not 0 <= index <= 190:
+        raise ValueError(
+            f"index가 좌표 유효 범위를 벗어난다(0~190): {index}."
+            " 좌표를 index * 0.01도씩 밀기 때문이다."
+        )
     lon_offset = index * 0.01
     lat_offset = index * 0.01
     manual_name = f"M05 수동 후보 {index}"

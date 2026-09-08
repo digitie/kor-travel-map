@@ -150,8 +150,11 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
                     text(
                         """
                         SELECT
-                            (SELECT count(*) FROM feature.manual_feature_identity_claims),
-                            (SELECT count(*) FROM feature.feature_creation_origins),
+                            (SELECT count(*)
+                             FROM feature.manual_feature_identity_claims
+                             WHERE feature_id = CAST(:feature_uuid AS uuid)),
+                            (SELECT count(*) FROM feature.feature_creation_origins
+                             WHERE feature_id = CAST(:feature_uuid AS uuid)),
                             (SELECT count(*) FROM feature.features
                              WHERE feature_uuid = CAST(:feature_uuid AS uuid))
                         """
@@ -175,10 +178,14 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
             "ktm_feature_api_runtime",
             "ktm_manual_feature_procedure_owner",
         )
+        # **이 Feature의** 것만 센다. 전역 count로 재면 "한 번만 썼다"라는 뜻이 아니라
+        # "DB가 거의 비어 있다"를 재게 되고, 다른 모듈이 행을 남기는 순간 깨진다
+        # (2026-09-08 실측: 52건이 쌓여 있었다).
         assert counts == (1, 1, 1)
 
-        # M02 hard-purge fence — evidence를 orphan으로 남길 정책/restore proof가
-        # 생기기 전에는 privileged raw delete도 named DB constraint로 닫는다.
+        # M02 hard-purge fence — 프로시저 밖의 raw delete는 여전히 named DB constraint로
+        # 닫힌다. 306이 fence를 **없앤 것이 아니라 조건부로** 바꿨다: 승인된 purge command가
+        # claim에 기록돼야만 통과한다.
         async with migrated_engine.begin() as connection:
             with pytest.raises(DBAPIError) as blocked:
                 await connection.execute(
@@ -192,6 +199,6 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
         assert (
             getattr(driver_error, "constraint_name", None)
             or getattr(getattr(driver_error, "__cause__", None), "constraint_name", None)
-        ) == "ck_manual_feature_purge_not_ready"
+        ) == "ck_manual_feature_purge_unauthorised"
     finally:
         await api_engine.dispose()
