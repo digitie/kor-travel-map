@@ -259,7 +259,9 @@ async def delivery(migrated_engine: AsyncEngine) -> dict[str, object]:
         )
         held = await _deliver_one(migrated_engine, api, principal_id=principal_id)
         # 두 번째 event를 잡아 두고 ack하지 않는다 — 복원 시점의 in-flight holder다.
-        worker_id = uuid4()
+        # **같은 worker로** 잡는다. ack는 holder를 놓아 주지 않으므로 다른 worker가
+        # 오면 `lease_conflict`가 맞다(그것 자체가 lease가 살아 있다는 증거다).
+        worker_id = UUID(str(held["worker_id"]))
         leased = await _lease_event(
             api, principal_id=principal_id, worker_id=worker_id
         )
