@@ -283,7 +283,23 @@ async def delivery(migrated_engine: AsyncEngine) -> dict[str, object]:
 async def test_a_dry_run_reports_the_holder_without_writing_anything(
     migrated_engine: AsyncEngine, delivery: dict[str, object]
 ) -> None:
+    """**고칠 것이 있는 상태에서** dry-run을 잰다.
+
+    정합한 상태에서 재면 공허하다 — 고칠 것이 없으니 몰래 쓰는 구현도 아무것도 쓰지
+    않아 초록이다. 그래서 cursor를 일부러 밀어 두고, dry-run이 그 손상을 **보고만**
+    하고 되돌리지 않는지 본다.
+    """
+
     principal_id = str(delivery["principal_id"])
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE ops.feature_reference_reconciliation_leases"
+                " SET acked_through_sequence = acked_through_sequence - 1"
+                " WHERE principal_id = :principal_id"
+            ),
+            {"principal_id": principal_id},
+        )
     before = await _read_lease(migrated_engine, principal_id)
 
     async with migrated_engine.connect() as connection:
@@ -291,6 +307,10 @@ async def test_a_dry_run_reports_the_holder_without_writing_anything(
 
     assert report.preflight_failures == []
     assert report.applied is False
+    assert any(
+        f"cursor drift(behind): {principal_id}" in failure
+        for failure in report.failures
+    ), report.failures
     mine = next(
         row for row in report.invalidated if row.principal_id == principal_id
     )
