@@ -40,10 +40,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 - [ ] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
 
-  `--verify-leaf`는 print만 하고 아무것도 쓰지 않아, 승격 근거가 원장에 붙인 출력
-  텍스트로만 남는다. pin 회전·history 500칸 링·identity 소각 중 무엇이 먼저 와도 재현이
-  불가능해진다. 검증 결과를 root-owned receipt로 남기는 것이 이 항목이다.
-
+  V1·V2·V4는 Manager #335로 충족. 남은 V3는 배포된 빌드로 검증을 한 번 돌려
+  receipt 경로·sha256을 원장이 인용하는 것이고, 승격 정의("출력을 이 절에
+  기록한다")의 개정이 함께 간다 — 소유자 판정이다.
 
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
 
@@ -63,18 +62,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   코드가 아니라 운영 결선이 남았다 — 목적지 호스트·계정·ssh 키가 소유자/운영자
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
-
-- [ ] T-VN-M05-ONESHOT-CONSUME — **격리 acceptance 성공이 execution identity를 소비하게 한다**
-
-  one-shot은 본문 **실패에만** 강제된다 — 성공 분기에 `pin block-execution`이 없어 같은
-  identity에서 본문을 두 번 돌릴 수 있다(2026-09-07 실측). 성공에 무조건 차단을 걸면
-  방금 성공한 leaf가 `--verify-leaf` L8에서 실패하므로 소각과 소비를 구분해야 한다.
-
-- [ ] T-VN-M02-TRUNCATE-FENCE — **hard-purge fence의 TRUNCATE 우회**
-
-  fence는 `feature.features`의 BEFORE DELETE row trigger인데 BEFORE TRUNCATE 문
-  트리거가 없다. 2026-09-08 재실측으로 "통째로 우회"와 "테스트 24곳"이 둘 다 틀린 것이
-  드러났다 — 진짜 결함은 진단이 엉뚱한 이유를 대는 것이고, 트리거 추가 비용은 0이다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 

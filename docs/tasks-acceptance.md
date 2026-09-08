@@ -2556,7 +2556,7 @@ Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/
 
 ## T-VN-M02-TRUNCATE-FENCE
 
-- [ ] **T-VN-M02-TRUNCATE-FENCE — hard-purge fence의 TRUNCATE 우회를 닫거나, 닫지 않는 이유를 박는다**
+- [x] **T-VN-M02-TRUNCATE-FENCE — hard-purge fence의 TRUNCATE 우회를 닫거나, 닫지 않는 이유를 박는다** (2026-09-08 충족, migration 307)
 
 **2026-09-07 실측으로 드러난 구멍이다.** manual Feature hard-purge fence는
 `feature.features`의 **BEFORE DELETE row trigger**다. 그런데 같은 표에 BEFORE TRUNCATE
@@ -2603,13 +2603,53 @@ fence도 똑같이** 무력화한다. 따라서 origin-enabled 트리거는 보�
 3. 어느 쪽이든 `docs/adr/`의 관련 결정문에 fence의 적용 범위를 한 문장으로 박는다.
 4. `ops.feature_requests`를 함께 판정한다 — 위 재실측이 드러낸, 원장이 몰랐던 구멍이다.
 
+**2026-09-08 충족 — (a)를 택했다(migration 307).**
+
+**(a)를 택한 이유는 진단이다.** 재실측이 보인 대로 TRUNCATE는 이미 중단됐고, 결함은
+fence가 그 거부에 기여하지 않고 진단이 엉뚱한 이유를 댄다는 것이었다. (b)를 택하면
+그 오진이 계약으로 굳는다.
+
+**`ENABLE ALWAYS`다.** origin-enabled 트리거는 보안 바닥을 0만큼 올린다 — TRUNCATE
+가능한 로그인 롤은 superuser 하나뿐이고 그 행위자는 `SET session_replication_role` 한
+줄로 기존 DELETE fence까지 무력화한다. 정직한 위협 모델은 적대자가 아니라 **실수**이고,
+실수를 막는 유일한 변형이 ALWAYS다.
+
+대가인 `_db_cleanup.py`의 명시 DISABLE은 **비용이 아니라 개선**이다. 종전에는 `replica`
+한 줄이 무엇을 우회하는지 말하지 않은 채 전부 껐다. 되돌릴 때 `ENABLE ALWAYS`를 써야
+한다는 것까지 게이트가 결박한다 — 그냥 `ENABLE`이면 origin으로 내려앉아 남은 세션 내내
+우회 가능해지고, 그 상태는 겉보기에 정상이라 아무 테스트도 실패하지 않는다.
+
+**306이 열린 뒤라 이 선택이 가능해졌다.** 이전이라면 더 강한 fence는 "지울 방법이 아예
+없다"를 굳히는 것이었다. 이제는 감사되는 삭제 경로가 있으므로 **감사되지 않는 경로만**
+막는 것이 된다. 그래서 이 항목과 §T-VN-H49의 purge 판정은 함께 읽어야 한다.
+
+**4항 — `ops.feature_requests`.** TRUNCATE와 DELETE를 막는다. `UPDATE`는 막지 **않는다**
+— 라우터가 `status`/`resolved_at`/`resolved_by_actor`를 정당하게 갱신하고
+(`_FEATURE_REQUEST_TABLE_ACL`이 그 컬럼만 GRANT한다), 여기서 막으면 M04 해결 경로가
+통째로 죽는다. 그 과잉을 막는 축을 따로 뒀다. `feature_update_requests`·`_datasets`는
+TRUNCATE만 더한다(DELETE 가드는 이미 있다).
+
+**2항의 함정을 피했다.** "트리거 제거 → red"는 공허하다 — 이웃 가드가 먼저 raise하므로
+지금도 red다. 그래서 모든 단언이 **고유 제약 이름**을 본다. 변이 8축 전부 RED
+(features_trigger · features_origin_only · requests_truncate · requests_delete ·
+update_requests_truncate · delete_guard_overreaches · cleanup_downgrades ·
+preflight_rejects_always).
+
+**실측이 잡은 것 셋.** 새 SECURITY DEFINER 함수는 `db.py` startup preflight가 배포를
+막았고, 회수는 **소유자만** 할 수 있어 audit writer 소유로 만들어야 했다(기존 guard
+주석이 같은 함정을 적어 뒀다). `ENABLE ALWAYS`는 `tgenabled='A'`인데 M05-2 D단계
+preflight가 그것을 "꺼짐"으로 읽고 있었다 — `'A'`는 origin보다 **강한** 상태다. 그리고
+`test_mois_loader`의 다섯 번째 전역 조회를 찾았다.
+
+3항의 ADR 기재는 ADR-093 개정문(2026-09-08)이 purge 경계를 적으면서 함께 담는다.
+
 **T-VN-M02와 같은 fence다.** `T-VN-M02`의 "지워지지 않는 write"는 바로 이 fence가 유일한
 삭제 경로를 거부하기 때문에 생긴다(admin API의 `DELETE`는 soft retire다). (a)를 `ENABLE
 ALWAYS`로 택하면 그 되돌릴 수 없음이 **더 강해진다** — 두 항목을 따로 판정하면 안 된다.
 
 ## T-VN-M05-ONESHOT-CONSUME
 
-- [ ] **T-VN-M05-ONESHOT-CONSUME — 격리 acceptance 성공이 execution identity를 소비하게 한다**
+- [x] **T-VN-M05-ONESHOT-CONSUME — 격리 acceptance 성공이 execution identity를 소비하게 한다** (2026-09-08 충족, Manager #335)
 
 **2026-09-07 실측으로 드러난 구멍이다.** 격리 M05 one-shot은 **본문 실패에만** 강제된다
 — `_block_terminal_m05_execution`이 본문 phase에 `phase=None`(무조건 차단)을 남기지만,
@@ -2630,6 +2670,30 @@ leaf가 `--verify-leaf`의 L8("terminal 차단 아님")에서 실패한다. 승�
    거부**한다. 복구 경로는 rebind 또는 회전이며 그 사실을 진단 메시지가 말한다.
 3. `--verify-leaf`의 L8이 소비된 identity의 leaf를 계속 통과시킨다.
 4. 변이 검증: 성공 시 소비 기록을 지우면 red, 소비를 소각으로 취급하면 L8 게이트가 red.
+
+**2026-09-08 충족 — 넷 다(Manager #335).**
+
+scoped phase `execution_identity_consumed`로 남긴다. 그러면 셋이 동시에 성립한다:
+`is_unconditionally_blocked_current()`가 소각으로 세지 않아 배포·회전이 안 막히고(소비는
+"승격됐다"이지 "오염됐다"가 아니다), L8이 `entry.phase is None`만 보므로 통과한 leaf가
+계속 검증되고, runnable assert가 이것만 따로 보고 재실행을 막는다.
+
+**`result.json`에 키를 더하지 않았다.** 런처가 키 집합을 정확히 강제해
+(`set(value) != expected_keys` → degraded → 무조건 소각) 그 계약을 건드리면 통과한
+1~2시간 실행이 타 버린다.
+
+**적대 리뷰가 내 변이 검증이 놓친 축을 잡았다(P1).** `has_block_for_current(phase=...)`
+에서 `phase=`를 떼면 그 술어가 **모든** 차단 기록을 잡아, 인프라 phase로 scoped 기록이
+남은 identity가 영구히 거부되고 진단은 엉뚱하게 `execution_identity_consumed`가 된다 —
+#330이 넣고 #331이 되돌린 회귀와 같은 부류다. **내 9축은 "지우기"만 쟀고 "약화"를 재지
+않았다.** 갈리는 유일한 상태(소비가 아닌 scoped 기록 하나)를 만드는 축을 더했다.
+
+그리고 리뷰가 내 테스트 하나를 공허하다고 잡았다 — "아무 문자열이나 phase면 scoped
+기록이 된다"를 재는 것이라 어떤 줄도 빨갛게 만들지 못했다. 지웠다.
+
+**2항의 진단**은 `_PAIR_DIAGNOSTICS`가 아니라 상위 집합에 넣는다. 그 집합은 pair 실패
+전용이고 "안의 모든 문자열이 발신된다"를 기존 테스트가 양방향으로 결박하므로, 다른
+phase의 진단을 섞으면 그 결박이 거짓이 된다.
 ## T-VN-M05-RELITIGATION
 
 **2026-09-07 신설.** #1189가 M05-3 탐지기를 붙이면서 드러난 것이다 — 계약 자체의
@@ -2704,16 +2768,44 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 그리고 그 근거는 셋 중 무엇이 먼저 와도 재현 불가가 된다: `pin rotate-pair`(의도된
 성질), execution history 500칸 링에서 binding이 밀려남, leaf identity 소각.
 
-- [ ] **V1 — 검증이 root-owned receipt를 남긴다.**
+- [x] **V1 — 검증이 root-owned receipt를 남긴다.** (2026-09-08, Manager #335)
   `--verify-leaf`가 통과·실패 모두에 대해 검증 시각·검증기 revision·leaf 경로·읽은
   registry 파일 경로·정의표의 **모든 축**(현재 15줄) 각각의 결과와 detail을 root-owned 0600 파일로 남긴다 — 축이 늘면 receipt도 함께 는다.
   **실패도 남긴다** — 통과만 남기면 "검증한 적 없다"와 "검증했는데 떨어졌다"가 같아 보인다.
-- [ ] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.**
+- [x] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.** (2026-09-08, Manager #335)
   pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을 값으로 싣는다.
   나중에 pin이 움직여 재현이 불가능해져도 **무엇과 대조해 통과했는지**는 남는다.
 - [ ] **V3 — receipt가 원장 인용을 대체한다.**
   조문이 출력 텍스트를 옮겨 적는 대신 receipt 경로와 그 sha256을 인용한다. 옮겨 적기가
   사라져야 이 항목의 요지가 달성된다.
-- [ ] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.**
+- [x] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.** (2026-09-08, Manager #335)
   receipt는 검증의 **기록**이지 근거가 아니다. `--verify-leaf`가 receipt의 존재를
   통과 조건으로 삼지 않는다(그러면 receipt를 만들어 두는 것으로 통과할 수 있다).
+
+**2026-09-08 — V1·V2·V4 충족, V3는 열려 있다(Manager #335).**
+
+`--verify-leaf`는 정말로 아무것도 쓰지 않았다. **V2가 요구하는 값은 전부 이미
+지역변수로 살아 있었고** print 문자열에만 들어갔다 버려지고 있었다 — 모아서 receipt로
+내는 것이 대부분의 일이었다.
+
+**가장 날카로운 지점은 신뢰 경계 거부였다.** 그 경로는 한 문장만 인쇄하고 `return 1`이라
+`checks`가 빈 채로 끝났다. receipt를 붙였어도 내용이 비었을 것이고, "실패도 남긴다"가
+가장 필요한 실패 종류가 바로 그것(leaf가 가짜라는 판정)이다.
+
+**조문 문구 하나를 정정한다.** V1이 "정의표의 **모든 축**(현재 15줄)"이라 적었는데,
+15줄은 **full-pass 경로에서만** 맞다. 조기 종료 경로는 16번째 식별자를 내고 L3~L8을
+억제해 4~8줄이 된다. receipt는 잰 축을 그대로 싣고 `coverage`로 **어디서 멈췄는지**를
+말한다 — 그것이 "모든 축"의 실현 가능한 형태다.
+
+**V3가 남은 이유.** 이 조문은 receipt **경로와 sha256을 원장이 인용**할 것을 요구하는데,
+그러려면 배포된 빌드로 실제 검증을 한 번 돌려야 한다. #335가 머지되고
+`install-ktdm-trusted-release`로 배포한 뒤(그 자체가 execution identity를 바꿔 rebind를
+부른다) 실행할 일이다.
+
+**그리고 V3는 조문끼리 충돌한다.** §T-VN-M05-ACTIVATION의 승격 정의가 "**그 출력을 이
+절에 기록한다**"고 **명령**한다. V3를 채우려면 그 문장도 함께 고쳐야 하며, 그것은 승격
+정의의 개정이므로 소유자 판정이다.
+
+**변이 검증**(초기 9축 + 적대 리뷰 후속 5축 = 14축 전부 RED). 넷은 처음에 공허했다 —
+소비·marker 배선이 `finally` 안에 인라인이라 직접 잴 수 없었다. 이 파일이 이미 같은
+이유로 `driver_exit_code`를 꺼낸 전례가 있어 같은 방식으로 추출했다.

@@ -1,5 +1,47 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-08 (2) — purge를 열고, TRUNCATE fence와 소비 기록을 닫았다
+
+| 항목 | 상태 |
+|---|---|
+| `T-VN-H49` hard purge 정책 | **완료** — migration 306, 소유자 승인 |
+| `T-VN-M02-TRUNCATE-FENCE` | **완료** — migration 307, `ENABLE ALWAYS` |
+| `T-VN-M05-ONESHOT-CONSUME` | **완료** — Manager #335 |
+| `T-VN-M05-VERIFY-RECEIPT` | V1·V2·V4 완료, **V3만 남음**(소유자 판정 포함) |
+| 열린 항목 | 8 → **5**(보류 셋 포함) |
+
+**purge가 자기 복구점을 들고 다닌다.** 소유자가 건 "restore proof 먼저" 전제는 문자
+그대로는 아직 안 맞는다(복원 메커니즘은 증명됐지만 복구점이 없다). 지우기 전에 cascade로
+사라질 행을 전부 담게 해서 그 전제를 우회했고, 그 우회를 소유자가 승인했다.
+
+**TRUNCATE fence는 `ENABLE ALWAYS`다.** origin이면 `replica` 한 줄로 사라지고, 그 한 줄은
+이 표를 TRUNCATE할 수 있는 유일한 행위자가 언제든 쓴다 — 정직한 위협 모델은 적대자가
+아니라 실수다.
+
+### 적대 리뷰 둘이 내 변이 검증의 구멍을 잡았다
+
+Manager 리뷰(14건 → 2 확정)의 P1이 결정적이었다 — 소비 검사의 phase 필터를 **약화**하는
+변이가 초록이었다. **내 변이 축은 "지우기"만 재고 "약화"를 재지 않았다.** 그 부류를
+전부 다시 봐야 한다. Map 306/307 리뷰는 이 글 쓰는 시점에 진행 중이다.
+
+### 착수 가능 — 소유자 판정 없이
+
+1. **`T-VN-39`의 TEXT `feature_id` PK 제거** — 가장 큰 축이고 소유자 판정 대상이 아니다.
+   대체 identity와 fence가 이미 prod에 있고 `feature.features`가 0행이라 데이터 이행
+   위험이 없다. 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
+2. **`T-VN-M02` live acceptance** — `~/ktm-live-301`을 **재구축**해야 한다(정지가 아니라
+   사라졌고, 체크아웃은 302 head이며 spec 자체가 없다). purge가 열려 cleanup 이야기는
+   풀렸다.
+3. **`T-VN-H49` 잔여** — `geo` 예약 성공 2건 더 쌓이기를 기다리는 것과 문서 갱신.
+
+### 소유자 판정 대기 — 셋
+
+1. `T-VN-M05-VERIFY-RECEIPT` **V3** — receipt 인용이 승격 정의의 "출력을 이 절에
+   기록한다"와 충돌한다. 그 문장의 개정이 함께 가야 한다.
+2. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키.
+3. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가.
+
+
 ## 2026-09-08 — T-VN-M05 완주. 열린 항목은 여섯이고 소유자 판정은 셋이다
 
 | 항목 | 상태 |

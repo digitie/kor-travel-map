@@ -10,6 +10,20 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-08 — purge 개방·TRUNCATE fence·소비 기록
+
+- [x] T-VN-H49(hard purge 정책) — **manual Feature hard purge를 감사되는 운영 명령으로
+  연다**(migration 306). fence의 이름은 처음부터 `_not_ready`였고 ADR-093도 "M02 purge
+  계약 **전**에는 닫는다"고 적었다 — 정책이 아니라 임시 마개였는데 그 술어가 항상 참인
+  조건이었다. purge가 **자기 복구점을 들고 다녀** H43 보류에 묶이지 않는다. claim의 두
+  역할을 갈라 tombstone을 관리 가능하게 했다. 상세는 acceptance §T-VN-H49.
+- [x] T-VN-M02-TRUNCATE-FENCE — **(a) `ENABLE ALWAYS` 트리거**(migration 307). 원장의
+  "통째로 우회"와 "테스트 24곳"이 둘 다 틀렸고, 진짜 결함은 진단이 엉뚱한 이유를 대는
+  것이었다. 원장이 몰랐던 `ops.feature_requests` 구멍도 함께 닫는다.
+- [x] T-VN-M05-ONESHOT-CONSUME — **성공이 scoped phase로 실행권을 소비한다**
+  (Manager #335). 소각으로 남기면 방금 성공한 leaf가 L8에서 죽는다. 적대 리뷰가 내
+  변이 검증이 놓친 축(필터 **약화**)을 잡았다.
+
 ## 2026-09-08 — M05 계약 완주
 
 - [x] T-VN-M05 — **provider 발행 Feature 중복 판정 계약(ADR-097)**
