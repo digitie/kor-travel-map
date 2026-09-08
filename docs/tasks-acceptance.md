@@ -1103,7 +1103,7 @@ Map `2099b8a6`, PinVi `f62e7ef1`):
   case list·read), append-only 트리거, 네 M05 role의 two-phase bootstrap, 그리고
   case·resolution·event·ack·subscription의 canonical JSONL count+SHA-256 backup root가
   배포 baseline에 있다. (ADR-097 §후속 1 전단)
-- [ ] **M05-2 — restore가 이 evidence를 복원 가능한 형태로 검증한다.**
+- [x] **M05-2 — restore가 이 evidence를 복원 가능한 형태로 검증한다.** (2026-09-08 충족)
   ownership/ACL/procedure repair → catalog preflight → evidence root 재계산 → live lease
   holder/expiry 무효화 → subscription별 immutable ack의 **연속 prefix**에서 `acked_through`
   재구축까지가 실행 가능해야 하고, 불연속 ack와 event/hash 불일치는 fail-loud여야 한다.
@@ -1206,7 +1206,7 @@ migration 304가 그 공백만 여는 `feature.list_manual_provider_dedup_detect
 **남은 둘의 성격은 2026-09-07 초 판정 그대로다** — M05-5는 UI 구현 공백(M05-3이
 선행이었고 이제 풀렸다), M05-2는 300 baseline 정책이 바뀌기 전에는 판정할 수 없다.
 
-**2026-09-08 — M05-2 부분 충족(다섯 중 셋). 소유자 판정으로 300 baseline restore 정책부터 검토했다.**
+**2026-09-08 — M05-2 충족. 소유자 판정으로 300 baseline restore 정책부터 검토했다.**
 
 조사가 앞선 판정 둘을 뒤집었다.
 
@@ -1233,11 +1233,11 @@ baseline보다 **앞선 세대**였다.
 | catalog preflight | **닫힘(C)** | 같은 카탈로그 지문이 relation·routine·schema의 소유자·ACL·`prosecdef`·extension을 덮는다 |
 | evidence root 재계산 | **닫힘(A+B)** | 열 relation을 하나의 스냅숏에서 canonical JSONL로 뽑고(#1194), manifest의 행 수·SHA-256과 대조한다 |
 | 불연속 ack·event/hash 불일치 fail-loud | **닫힘(B)** | 다섯 종을 실패로 보고한다 |
-| live lease holder/expiry 무효화 | **열림** | 아래 참조 |
-| 연속 prefix에서 `acked_through` 재구축 | **열림** | 아래 참조 |
+| live lease holder/expiry 무효화 | **닫힘(D)** | `evidence_restore.invalidate_leases()` |
+| 연속 prefix에서 `acked_through` 재구축 | **닫힘(D)** | `evidence_restore.rebuild_acked_through()` |
 
-**앞선 판정 초안에서 이 항목을 `[x]`로 적었다가 되돌렸다. 조문을 다시 읽으니 내
-근거가 두 요구를 비껴갔다.**
+**초안에서 이 항목을 `[x]`로 적었다가 되돌리고, D단계를 지어 다시 닫았다. 조문을 다시
+읽으니 내 근거가 두 요구를 비껴갔다.**
 
 초안은 "`lease`를 evidence root에 담지 않으므로 fencing token이 되살아날 자리가
 없다"고 적었다. 그것은 **번들에 대해서만** 참이다. `pg_dump`는 스키마 전체를 담으므로
@@ -1251,17 +1251,43 @@ dump 시점의 `worker_id`·`lease_epoch`·`lease_expires_at`을 달고. 조문�
 "재구축"을 요구한다.
 
 즉 남은 둘은 과결박이 아니라 **진짜 안전 요구**다 — split-brain과 cursor 후퇴를 막는다.
-조문을 완화할 일이 아니라 D단계로 닫을 일이다(`T-VN-M05-2-RESTORE-REPAIR`).
-그때까지 이 항목은 열려 있다.
+조문을 완화할 일이 아니라 지을 일이었다.
+
+**D단계(`kortravelmap.infra.evidence_restore`)가 그 둘을 복원본 DB에 대고 닫는다.**
+`repair_restored_database()`가 preflight → cursor 재구축 → lease 무효화를 순서대로 한다.
+`apply=False`면 아무것도 쓰지 않고, **preflight가 실패하면 수리하지 않는다**(검증되지
+않은 상태를 고치는 것은 손상을 되돌릴 수 없게 확정하는 일이다).
+
+무효화는 holder와 만료를 지우는 데서 그치지 않고 `lease_epoch`을 **올린다.** 복원본은
+원본의 사본이라 epoch이 그대로면 원본을 향해 돌던 worker의 토큰이 복원본에서도 유효하다.
+n150 실측으로 잰다 — 무효화 뒤 옛 `(worker_id, lease_epoch)`로 부른 진짜 ack 프로시저가
+`lease_conflict`를 돌려주고 cursor가 밀리지 않는다.
+
+preflight는 행 그래프에 더해 **트리거가 켜져 있는지**를 본다. `--disable-triggers` 복원은
+append-only 보호를 지우지 않고 꺼 둔 채로 남기므로 행도 다 있고 카탈로그에 트리거도 있어
+겉보기에는 멀쩡하다. 이름을 열거하지 않고 필수 relation에서 유도한다(DO NOT 15).
+
+**n150 실측이 잡은 것.** 좌표를 유효 범위 밖으로 미는 index, 물려받은 provisioning에
+기댄 테스트, ack가 holder를 놓아 주지 않는다는 사실, 그리고 **내가 지어낸 컬럼
+이름**(`origin.command_id` — 실제는 `creation_command_id`). mutation 열 축은 전부
+RED다(epoch·holder·expiry·prefix·drift·gate·trigger·dryrun·missing·claim). 그중 둘은
+처음에 공허했다 — dry-run 단언이 롤백되는 트랜잭션에서 돌아 몰래 쓰는 구현을 못 잡았고,
+연속 prefix 축은 정상 이력에 구멍이 없어 `max(...)`와 갈리지 않았다. 둘 다 고쳤다.
+
+**부수로 드러난 순서 의존.** D단계 모듈이 알파벳 순으로 먼저 돌면서 정본 구독을 만들자
+기존 M05 테스트의 두 단언이 조용히 무의미해졌다(`P0002` → `23514`, `provisioned` →
+`already_provisioned`). 구독은 append-only singleton이라 그 성질들은 pristine DB에서만
+관찰 가능하다. 관찰과 구독 생성을 session scope fixture 하나가 소유하게 바꿔 순서에
+기대지 않게 했다 — 세 배치 순서에서 36건 모두 통과한다.
 
 **실행이 아니면 못 찾았을 결함 셋**(전부 C단계에서, n150 실측으로):
 `--no-owner --no-privileges`가 질문 자체를 불가능하게 하고 있었고, `search_path`
 미고정으로 PostGIS 함수 495건이 거짓 양성이었으며, ACL 미정규화로 1건이 더 남았다.
 거짓 양성은 진짜 drift를 덮으므로 없는 것보다 나쁘다.
 
-**주장하지 않는 것.** 이 검증은 artifact 무결성과 복원된 카탈로그 정합까지다. 복원된
-DB의 mutable lease 행, RustFS 실물, evidence root 밖 relation, 그리고 **rebuild 경계를
-넘는 데이터 연속성**은 다루지 않는다 — 그 연속성은 이 절이 아니라 backup 주기화(`T-VN-H43`, 소유자 지시로 보류)와
+**주장하지 않는 것.** 이 검증은 artifact 무결성, 복원된 카탈로그 정합, 그리고 복원본의
+M05 delivery 상태까지다. 복원 자체(`pg_restore` 실행)도, RustFS 실물도, evidence root 밖
+relation도, **rebuild 경계를 넘는 데이터 연속성**도 다루지 않는다 — 그 연속성은 이 절이 아니라 backup 주기화(`T-VN-H43`, 소유자 지시로 보류)와
 off-box 사본(`T-VN-H49-OFFBOX`)이 소유한다. restore/swap은 여전히 닫혀 있고 이 작업이
 그것을 열지 않는다.
 
