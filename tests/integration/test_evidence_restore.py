@@ -359,6 +359,61 @@ async def test_a_drifted_cursor_is_fail_loud_and_repaired_to_the_prefix(
     ] == acked
 
 
+async def test_the_rebuild_stops_at_the_gap_not_at_the_maximum_ack(
+    migrated_engine: AsyncEngine, delivery: dict[str, object]
+) -> None:
+    """끊긴 뒤의 ack는 cursor를 밀지 못한다.
+
+    이 축은 앞의 테스트들이 **가려 준다.** 정상 이력에는 구멍이 없어서 연속 prefix와
+    최댓값이 늘 같기 때문이다 — 그 상태만 재면 `max(...)`로 바꿔도 초록이다.
+    그래서 여기서만 구멍을 만든다: event 셋 중 첫째는 프로시저로 ack하고, 둘째는
+    건너뛰고, 셋째의 ack 행만 직접 심는다(ack는 append-only라 INSERT가 열려 있다).
+
+    최댓값을 쓰면 cursor가 셋째까지 밀려 **둘째가 영영 배달되지 않는다.**
+    """
+
+    principal_id = str(delivery["principal_id"])
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        third = await _publish_event(
+            migrated_engine, api, dagster, index=next(_PAIR_INDEX)
+        )
+    finally:
+        await api.dispose()
+        await dagster.dispose()
+
+    skipped_command = await _open_command(
+        migrated_engine, actor=principal_id, operation=_ACK_OPERATION
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO ops.feature_reference_reconciliation_acks ("
+                " event_id, principal_id, event_sha256, local_receipt_sha256,"
+                " command_id"
+                ") VALUES (CAST(:event_id AS uuid), :principal_id, :event_sha256,"
+                " repeat('d', 64), :command_id)"
+            ),
+            {
+                "event_id": third["event_id"],
+                "principal_id": principal_id,
+                "event_sha256": third["event_sha256"],
+                "command_id": skipped_command,
+            },
+        )
+
+    async with migrated_engine.connect() as connection:
+        rebuilt, _ = await rebuild_acked_through(connection, apply=False)
+
+    mine = next(row for row in rebuilt if row.principal_id == principal_id)
+    assert mine.first_missing_sequence == delivery["pending_sequence"]
+    # 최댓값이면 third["event_sequence"]가 됐을 자리다.
+    assert mine.rebuilt_sequence == delivery["acked_sequence"]
+    assert mine.rebuilt_sequence < int(str(third["event_sequence"]))
+    assert mine.drifted is False
+
+
 async def test_invalidation_breaks_the_pre_restore_fencing_token(
     migrated_engine: AsyncEngine, delivery: dict[str, object]
 ) -> None:
