@@ -79,6 +79,19 @@ backup artifact는 이 rebuild의 선행 gate, rollback 근거 또는 복원점�
 `alembic stamp`, 직접 version-table SQL, dump restore, 기존 DB/volume 재채택은 모두 지원
 경로가 아니며, 실패는 새 forward-fix candidate로만 해소한다.
 
+## 300 이전 기록은 지운 것이 아니라 옮겼다
+
+커밋 `b2543d68`이 이 문서에서 지운 926줄 중 실측으로만 알 수 있었던 부분을
+[`docs/archive/backup-restore-pre-300.md`](archive/backup-restore-pre-300.md)에 남겼다 —
+§2.1(per-database dump가 담지 않는 것), §8.1(prod 복구, 특히 ④ "role·ACL을 다시 맞춘다"),
+§9(n150 수동 기준선), §10(복원 리허설 드릴과 함정 목록).
+
+**그 명령들을 그대로 실행하지 말 것.** restore/swap은 위 §명시적으로 지원하지 않는 동작
+그대로 닫혀 있다. 남긴 이유는 절차가 아니라 **거기 적힌 실패 양상** 때문이다 —
+2026-09-08 M05-2 작업이 같은 결함 둘을 다시 만났고(소유권을 벗기는 `pg_restore` 옵션,
+dump 시점 fencing token을 달고 살아 돌아오는 lease), 그 기록이 이미 있었다는 사실을
+뒤늦게 알았다.
+
 ## 향후 recovery를 설계하려면
 
 `300`용 recovery가 필요해지면 별도 설계와 별도 PR에서 처음부터 정의한다. 최소한 다음을
