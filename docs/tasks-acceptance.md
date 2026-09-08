@@ -2493,23 +2493,53 @@ leaf가 `--verify-leaf`의 L8("terminal 차단 아님")에서 실패한다. 승�
 되고, 너무 약하게 막으면 무관한 필드 patch가 `row_revision`을 올릴 때마다 supersede
 폭풍이 난다. 둘 다 조용히 실패한다.
 
-- [ ] **R1 — 판정된 쌍이 같은 증거로 다시 올라오지 않는다.**
+- [x] **R1 — 판정된 쌍이 같은 증거로 다시 올라오지 않는다.**
   admin이 `kept`/`merged`/`manual_retired`로 판정한 case와 **지문이 같은** 후보는
   새 case를 만들지 않는다. 억눌렸다는 사실은 삼키지 않고 receipt나 실행 요약에 남는다.
-- [ ] **R2 — 증거가 바뀌면 다시 올라온다.**
+- [x] **R2 — 증거가 바뀌면 다시 올라온다.**
   Feature의 score-facing 값(`kind`/`name`/`category`/`lon`/`lat`)이나 provider의
   current source head가 바뀌면 지문이 달라져 새 후보가 된다. R1의 차단이 이것을
   덮지 않는다. **두 방향 모두 게이트가 있어야 한다** — 한 방향만 재면 반대 방향
   결함이 조용히 통과한다.
-- [ ] **R3 — 무관한 변경이 재발행을 부르지 않는다.**
+- [x] **R3 — 무관한 변경이 재발행을 부르지 않는다.**
   score와 무관한 필드 patch로 `row_revision`만 올라간 경우 새 case가 생기지 않는다.
-- [ ] **R4 — 차단이 detector 권한을 넓히지 않는다.**
+- [x] **R4 — 차단이 detector 권한을 넓히지 않는다.**
   탐지 로그인은 `ops.manual_provider_dedup_cases`를 읽을 수 없다(`_OPS_TABLE_PRIVILEGES`가
   빈 튜플). 그러므로 차단은 프로시저 안에서 일어나야 하고, detector에게 case 조회
   권한을 주는 방식은 채택하지 않는다.
-- [ ] **R5 — 차단이 켜진 뒤에야 스케줄을 단다.**
+- [x] **R5 — 차단이 켜진 뒤에야 스케줄을 단다.**
   R1~R4가 충족되면 #1189의 `manual_provider_dedup_detection` job에 스케줄을 붙이고,
   그때 job description의 "스케줄 없음" 문구를 함께 걷는다.
+**2026-09-08 — R1~R5 충족(migration 305).**
+
+차단 키를 `evidence_fingerprint`로 잡으면 안 됐다. 그 지문에는 두 Feature의
+`row_revision`과 `source_head_observed_at`이 들어 있어 **score와 무관한 필드 patch
+하나**로 달라진다. 판정을 실제로 좌우하는 것만 넣은 `decision_fingerprint`를 따로
+뒀다 — snapshot에서 `row_revision`을 뺀 것 + provider의 현재 source 내용
+(`raw_payload_hash`) + `scorer_id`.
+
+**변이 검증이 설계를 한 번 고쳤다.** 처음엔 `source_record_key`도 넣었는데, 그것을
+빼는 변이가 초록이어서 왜인지 보니 **같은 내용을 다시 fetch하면 record key만
+바뀐다** — 넣으면 그때마다 차단이 풀린다. 내용을 뜻하는 것은 `raw_payload_hash`
+하나다.
+
+`superseded`는 차단 근거가 아니다. 탐지기가 만든 resolution이므로 그것으로 차단하면
+탐지기가 자기 자신을 영구히 침묵시킨다.
+
+**두 방향 모두 게이트가 있다**(통합 6건, 변이 다섯 축 전부 RED):
+
+| 되돌린 것 | 어느 방향이 깨지나 | 결과 |
+|---|---|---|
+| 차단 자체 제거 | 과소차단(쳇바퀴) | RED ×2 |
+| 지문에 `row_revision` 복원 | 과소차단 | RED |
+| 지문을 `feature_uuid`만으로 축소 | **과잉차단(영구 침묵)** | RED |
+| provider `raw_payload_hash` 제거 | 과잉차단 | RED |
+| `superseded`도 차단 근거로 | 탐지기 자기 침묵 | RED |
+
+R5로 탐지 job에 일간 스케줄(04:20 KST, 기본 `STOPPED`)을 붙였고, job description의
+"스케줄 없음" 문구를 걷었다. 억눌린 수는 `suppressed_case_count`로 보고된다 —
+세지 않으면 "후보가 없다"와 "이미 판정됐다"가 같아 보인다.
+
 ## T-VN-M05-VERIFY-RECEIPT
 
 **2026-09-07 신설.** 3차 적대 리뷰가 잡았다 — `--verify-leaf`는 **아무것도 쓰지 않는다.**

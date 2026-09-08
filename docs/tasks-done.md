@@ -10,6 +10,17 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-08 — M05 재심 차단
+
+- [x] T-VN-M05-RELITIGATION — **admin이 판정한 쌍이 다시 올라오지 않게 한다**
+  (**2026-09-08 완료**, migration 305). 프로시저의 멱등성이 미해결 case에만 성립해
+  `kept` 판정 쌍이 매 실행 새 case가 됐다 — #1189의 탐지 job에 스케줄을 못 단 이유다.
+  판정을 좌우하는 것만 넣은 `decision_fingerprint`로 차단하고, R5로 일간 스케줄
+  (04:20 KST, 기본 `STOPPED`)을 붙였다. **변이 검증이 설계를 고쳤다** — 처음 넣었던
+  `source_record_key`는 같은 내용의 재fetch로도 바뀌어 churn 원인이었다.
+  상세는 `docs/tasks-acceptance.md` §T-VN-M05-RELITIGATION.
+
+
 ## 2026-09-08 — M05 활성화 승격
 
 - [x] T-VN-M05-ACTIVATION — **M04/M05 live acceptance attestation 승격**
