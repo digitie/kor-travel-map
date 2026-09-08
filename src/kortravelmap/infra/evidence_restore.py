@@ -93,8 +93,9 @@ _REQUIRED_RELATIONS: Final[tuple[str, ...]] = (
 #:
 #: 이름을 열거하지 않고 relation에서 유도한다. `tgisinternal`을 빼는 이유는 그것이
 #: 제약이 만든 내부 트리거(FK 등)라 `tgenabled`가 사용자 트리거와 다른 뜻이기
-#: 때문이다. `'O'`는 origin — 정상 상태다. `'D'`는 꺼짐, `'R'`/`'A'`는 replica 전용이라
-#: origin 세션의 쓰기를 막지 못한다.
+#: 때문이다. `'O'`(origin)와 `'A'`(always)가 정상이다 — `'A'`는 replica 세션에서도
+#: 도는 **더 강한** 상태이고, 307이 실수로 인한 TRUNCATE를 막으려고 그것을 쓴다.
+#: `'D'`는 꺼짐, `'R'`은 replica 전용이라 origin 세션의 쓰기를 막지 못한다.
 _DISABLED_TRIGGER_SQL: Final[str] = """
 SELECT (relation.relnamespace::regnamespace)::text || '.' || relation.relname
            AS relation_name,
@@ -103,7 +104,7 @@ SELECT (relation.relnamespace::regnamespace)::text || '.' || relation.relname
 FROM pg_catalog.pg_trigger AS trigger_row
 JOIN pg_catalog.pg_class AS relation ON relation.oid = trigger_row.tgrelid
 WHERE NOT trigger_row.tgisinternal
-  AND trigger_row.tgenabled <> 'O'
+  AND trigger_row.tgenabled NOT IN ('O', 'A')
   AND (relation.relnamespace::regnamespace)::text || '.' || relation.relname
       = ANY(CAST(:relations AS text[]))
 ORDER BY relation_name, trigger_name

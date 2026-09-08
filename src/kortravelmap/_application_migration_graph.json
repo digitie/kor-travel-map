@@ -39,6 +39,12 @@
         "305_m05_relitigation_fence"
       ],
       "revision": "306_m02_manual_feature_purge"
+    },
+    {
+      "down_revision": [
+        "306_m02_manual_feature_purge"
+      ],
+      "revision": "307_m02_truncate_fence"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

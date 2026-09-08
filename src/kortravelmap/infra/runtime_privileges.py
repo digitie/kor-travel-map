@@ -399,6 +399,25 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
     "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
+    # 307의 TRUNCATE 가드 둘. trigger function은 발화 시 EXECUTE 권한을 보지 않으므로
+    # 회수해도 fence는 그대로 돈다 — 회수하지 않으면 `db.py`의 startup preflight가
+    # "unexpected SECURITY DEFINER function"으로 배포를 막는다(실측으로 잡혔다).
+    #
+    # 307이 만들므로 그 표가 없는 head에서도 도는 이 조정기는 존재 여부를 보고 건다.
+    "DO $$ BEGIN"
+    " IF to_regprocedure('feature.reject_manual_feature_truncate()') IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON FUNCTION feature.reject_manual_feature_truncate()"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner,"
+    " ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor';"
+    " END IF;"
+    " IF to_regprocedure('feature.reject_feature_request_evidence_mutation()')"
+    " IS NOT NULL THEN"
+    " EXECUTE 'REVOKE ALL ON FUNCTION feature.reject_feature_request_evidence_mutation()"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
+    " ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner,"
+    " ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor';"
+    " END IF; END $$",
 )
 
 _MANUAL_FEATURE_TABLE_ACL = (

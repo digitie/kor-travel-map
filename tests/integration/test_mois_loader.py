@@ -298,11 +298,15 @@ async def test_snapshot_absence_retires_missing_features(
     assert again == 0
 
     # legacy timestamp/status 없이 retired/suppressed tuple만 확인한다.
+    # **MOIS 적재분만** 본다 — 전역 조회는 다른 모듈이 은퇴시킨 Feature까지 세어
+    # "MOIS가 하나를 은퇴시켰다"가 아니라 "DB에 은퇴 행이 하나뿐이다"를 잰다.
     states = (
         await migrated_session.execute(
             text(
-                "SELECT lifecycle_state, publication_state FROM feature.features"
-            )
+                "SELECT f.lifecycle_state, f.publication_state"
+                f" FROM feature.features AS f WHERE {_MOIS_SCOPE}"
+            ),
+            {"entity_type": _MOIS_ENTITY_TYPE},
         )
     ).all()
     retired_rows = [row for row in states if row.lifecycle_state == "retired"]
