@@ -1,6 +1,6 @@
 """T-VN-39 ① — provider Feature identity를 담을 자리를 만든다.
 
-Revision ID: 308_t39_provider_feature_identities
+Revision ID: 308_t39_provider_identities
 Revises: 307_m02_truncate_fence
 
 ## 재키의 본체는 재타입이 아니라 멱등 앵커 교체다
@@ -76,7 +76,11 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: Final[str] = "308_t39_provider_feature_identities"
+#: **32자 이하여야 한다** — `public.alembic_version.version_num`이 `varchar(32)`다.
+#: 첫 이름 `308_t39_provider_feature_identities`(35자)는 통합 전량을 setup error로
+#: 뒤덮었고(2026-09-09), 진단은 `StringDataRightTruncationError`라 revision 이름을
+#: 가리키지 않는다.
+revision: Final[str] = "308_t39_provider_identities"
 down_revision: Final[str] = "307_m02_truncate_fence"
 branch_labels: None = None
 depends_on: None = None
@@ -143,7 +147,7 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
     " '302_m03_child_issuance', '303_m05_payload_hash_domain',"
     " '304_m05_detector_manuals', '305_m05_relitigation_fence',"
     " '306_m02_manual_feature_purge', '307_m02_truncate_fence',"
-    " '308_t39_provider_feature_identities'))"
+    " '308_t39_provider_identities'))"
 )
 
 _RECEIPT_HEAD_NARROW: Final[str] = (

@@ -50,7 +50,7 @@
       "down_revision": [
         "307_m02_truncate_fence"
       ],
-      "revision": "308_t39_provider_feature_identities"
+      "revision": "308_t39_provider_identities"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
