@@ -2150,19 +2150,6 @@ class SourceLinkRow(Base):
             "feature_id",
             postgresql_where=text("source_role = 'primary'"),
         ),
-        # T-VN-39(308) provider 멱등 앵커. **방향이 요점이다** — 위의
-        # `idx_source_links_primary`는 `(feature_id)`이고 비-유니크라 "이 Feature의
-        # primary link들"을 찾는다. 여기 필요한 것은 반대 방향, "이 entity의 primary
-        # Feature는 하나"다. ADR-068 결정 2가 provider identity의 정본으로 지목한
-        # `uq_source_entities_provider_identity`에서 나온 `source_entity_key`가
-        # 저장소에서 유일하게 bjd/category 드리프트에 불변인 키이고, 재키 후
-        # `feature_id`가 무작위 UUIDv7이 되면 이것 말고 멱등을 지탱할 축이 없다.
-        Index(
-            "uq_source_links_primary_entity",
-            "source_entity_key",
-            unique=True,
-            postgresql_where=text("source_role = 'primary'"),
-        ),
         {"schema": "provider_sync"},
     )
 

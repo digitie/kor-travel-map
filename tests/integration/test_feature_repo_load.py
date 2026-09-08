@@ -1538,37 +1538,62 @@ async def test_the_same_provider_entity_never_yields_a_second_feature(
     )
 
 
-async def test_the_anchor_refuses_a_loader_that_computes_a_different_feature_id(
+async def test_one_source_entity_can_still_be_primary_for_two_features_today(
     migrated_session: AsyncSession,
 ) -> None:
-    """앵커와 loader가 어긋나면 **조용히 통과하지 않는다**.
+    """**오늘의 현실을 못 박는다** — 이 성질이 T-VN-39가 없애는 결함이다.
 
-    이 게이트가 없으면 앵커는 장식이다. 재키 후에는 이 어긋남이 곧 중복 Feature이므로,
-    지금 그것을 시끄럽게 만들어 둔다.
+    ADR-068 결정 2는 provider identity를
+    ``(provider_dataset_id, source_entity_type, source_entity_id)``의 UNIQUE로 정했다.
+    그런데 Feature identity는 ``make_feature_id``가 만든 ``f_*``이고, 그것은
+    ``bjd_code``·``category``를 해시 입력에 쓴다. 재분류가 일어나면 **같은 source
+    entity에서 새 Feature가 주조되고 둘 다 primary가 된다.**
 
-    어긋남을 만드는 방법이 요점이다 — `make_feature_id`는 `bjd_code`와 `category`를
-    해시 입력에 쓰므로(`core/ids.py`), **주소만 바꿔도** 같은 provider entity에 대해
-    다른 `feature_id`가 나온다. ADR-068이 `f_*`를 정본 PK로 쓸 수 없다고 판정한
-    이유가 바로 이것이고, 여기서 그 성질을 그대로 이용한다.
+    2026-09-08에 `uq_source_links_primary_entity`(`(source_entity_key)
+    WHERE source_role='primary'`)를 재키 **앞에** 심었다가 통합 전량에서 17건이
+    빨개졌다. `test_notice_lifecycle.py`와 `test_khoa_rekey_hardening.py`가 정확히
+    이 상태를 **의도적으로** 재현하기 때문이다. 즉 그 인덱스는 오늘의 불변식이 아니라
+    **재키 후의 목표 상태**다.
+
+    이 테스트는 그 사실을 코드에 박아 둔다. 재키가 착지해 이 시나리오가 불가능해지면
+    이 테스트가 빨개지고, 그때 지우는 것이 옳다 — 그 빨간불이 곧 재키가 실제로
+    identity churn을 없앴다는 증거다.
     """
 
-    from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
-
-    bundle = await _bundle("FEST-ANCHOR-DRIFT")
+    bundle = await _bundle("FEST-ENTITY-1N")
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
-
-    # 같은 source_record_key(= 같은 entity)를 유지한 채 feature_id만 바꾼다.
-    drifted = bundle.model_copy(
-        update={
-            "feature": bundle.feature.model_copy(
-                update={"feature_id": bundle.feature.feature_id + "x"}
-            ),
-            "source_link": bundle.source_link.model_copy(
-                update={"feature_id": bundle.feature.feature_id + "x"}
-            ),
-        }
+    entity_key = await _entity_key_of(
+        migrated_session, bundle.source_record.source_record_key
     )
-    with pytest.raises(FeatureIdentityAnchorError) as drift:
-        await feature_repo.load_bundle(migrated_session, drifted)
-    assert bundle.feature.feature_id in str(drift.value)
+
+    # 재분류가 만드는 것과 같은 모양 — 같은 entity, 다른 Feature.
+    reclassified = bundle.feature.feature_id + "_reclassified"
+    await migrated_session.execute(
+        text(
+            "INSERT INTO feature.features ("
+            " feature_id, kind, name, category, coord, coord_precision_digits,"
+            " lifecycle_state, publication_state, quality_state)"
+            " SELECT :new_id, kind, name, category, coord, coord_precision_digits,"
+            "        lifecycle_state, publication_state, quality_state"
+            "   FROM feature.features WHERE feature_id = :old_id"
+        ),
+        {"new_id": reclassified, "old_id": bundle.feature.feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.source_links ("
+            " feature_id, source_entity_key, source_role, match_method, confidence)"
+            " VALUES (:fid, :key, 'primary', 'natural_key', 100)"
+        ),
+        {"fid": reclassified, "key": entity_key},
+    )
+    await migrated_session.flush()
+
+    resolved = await feature_repo.resolve_primary_features_for_entity(
+        migrated_session, source_entity_key=entity_key
+    )
+    assert sorted(resolved) == sorted([bundle.feature.feature_id, reclassified]), (
+        "한 source entity가 두 Feature의 primary인 상태를 더 이상 만들 수 없다면 "
+        "T-VN-39 재키가 착지한 것이다 — 이 테스트를 지우고 앵커 게이트로 대체하라."
+    )

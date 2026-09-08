@@ -75,7 +75,6 @@ from kortravelmap.infra.domain_command_repo import (
     lock_domain_command,
 )
 from kortravelmap.infra.feature_identity import (
-    FeatureIdentityAnchorError,
     candidate_feature_uuid,
     verify_feature_uuid,
 )
@@ -2994,35 +2993,32 @@ async def _retire_provider_candidates(
     return retired
 
 
-async def _assert_provider_identity_anchor_agrees(
-    session: AsyncSession,
-    *,
-    source_entity_key: str,
-    computed_feature_id: str,
-) -> None:
-    """앵커가 가리키는 Feature와 loader가 계산한 Feature가 같은지 관측한다.
+async def resolve_primary_features_for_entity(
+    session: AsyncSession, *, source_entity_key: str
+) -> tuple[str, ...]:
+    """이 source entity의 primary link가 가리키는 Feature들.
 
-    **T-VN-39 착지선(308).** 오늘 이 함수는 아무것도 바꾸지 않는다 — 두 축이 같다는
-    것을 실측으로 증명할 뿐이다. 재키 후에는 이 조회 결과가 곧 ``feature_id``가 되므로,
-    지금 어긋나 있는 곳이 있다면 그것이 그대로 **중복 Feature가 생길 자리**다.
+    **오늘은 하나가 아닐 수 있다.** ADR-068 결정 2는 provider identity를
+    ``(provider_dataset_id, source_entity_type, source_entity_id)``의 UNIQUE로
+    정했지만, 지금 Feature identity는 ``make_feature_id``가 만든 ``f_*``이고 그것은
+    ``bjd_code``·``category``를 해시 입력에 쓴다. 재분류나 행정구역 변경이 일어나면
+    **새 Feature가 주조되고 같은 entity가 구·신 양쪽의 primary가 된다** — 뒤따르는
+    cleanup이 구 링크를 강등할 때까지. 그 형태를
+    ``tests/integration/test_notice_lifecycle.py``와
+    ``tests/integration/test_khoa_rekey_hardening.py``가 재현한다.
 
-    앵커가 아직 없는 경우(첫 적재)는 어긋남이 아니다 — 비교할 대상이 없다.
+    그래서 이 함수는 **튜플을 돌려준다.** 하나로 좁히는 것은 T-VN-39 재키가
+    ``feature_id``를 안정 uuid로 만든 뒤의 일이고, 그때 이 조회가 identity 해석의
+    정본이 된다(:class:`FeatureIdentityAnchorError` 참조).
     """
 
-    resolved = (
+    rows = (
         await session.execute(
             text(_RESOLVE_PRIMARY_FEATURE_SQL),
             {"source_entity_key": source_entity_key},
         )
-    ).scalar_one_or_none()
-    if resolved is None or str(resolved) == computed_feature_id:
-        return
-    raise FeatureIdentityAnchorError(
-        "provider identity 앵커가 loader와 다른 Feature를 가리킨다 — "
-        f"source_entity_key={source_entity_key!r}의 primary는 {resolved!r}인데 "
-        f"loader는 {computed_feature_id!r}를 계산했다. "
-        "재키(T-VN-39) 후에는 이 어긋남이 중복 Feature로 나타난다."
-    )
+    ).scalars().all()
+    return tuple(str(row) for row in rows)
 
 
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
@@ -3040,11 +3036,6 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         session, bundle.source_record
     )
     record_inserted = record_state.inserted
-    await _assert_provider_identity_anchor_agrees(
-        session,
-        source_entity_key=record_state.source_entity_key,
-        computed_feature_id=bundle.feature.feature_id,
-    )
     feature_inserted = False
     feature_updated = False
     feature_state = await _feature_load_state(session, bundle.feature.feature_id)
