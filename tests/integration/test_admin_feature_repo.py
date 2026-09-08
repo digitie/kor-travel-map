@@ -604,3 +604,45 @@ async def test_retired_feature_publication_patch_is_a_conflict_not_a_500(
             action="patch",
             publication_state="published",
         )
+
+
+async def test_reactivating_a_retired_feature_without_evidence_is_a_conflict_not_a_500(
+    migrated_session: AsyncSession,
+) -> None:
+    """``ck_feature_reactivation_explicit``도 도메인 오류로 보존되는지 **실 DB로** 본다.
+
+    이 이름은 2026-09-08까지 두 매핑 집합 어디에도 없었다 — 프로시저가 명시적으로
+    raise하는데도 그랬다. 분류를 강제하는 게이트
+    (`tests/lint/test_admin_state_constraint_mapping.py`)를 만들며 같은 부류를 넷 찾았고,
+    그중 admin 경로로 가장 곧게 도달하는 것이 이것이다.
+
+    정적 게이트만으로는 부족하다 — 이름이 집합에 있어도 constraint 추출이 죽어 있으면
+    (실제로 한 번 그랬다: asyncpg는 이름을 `error.orig.__cause__`에 둔다) 매핑 전체가
+    죽은 코드다. 그래서 실 DB로 한 번 더 잰다.
+    """
+
+    feature_id = "feature-retired-reactivation-patch"
+    await _seed_feature(migrated_session, feature_id)
+    revision = await get_feature_row_revision(migrated_session, feature_id)
+    assert revision is not None
+
+    retired = await transition_admin_feature_state(
+        migrated_session,
+        feature_id,
+        expected_row_revision=revision,
+        reason_code="admin_retire",
+        operator="local-admin",
+        action="retire",
+    )
+    assert retired.lifecycle_state == "retired"
+
+    with pytest.raises(AdminFeatureStateConflict):
+        await transition_admin_feature_state(
+            migrated_session,
+            feature_id,
+            expected_row_revision=retired.row_revision,
+            reason_code="admin_reactivate_without_evidence",
+            operator="local-admin",
+            action="patch",
+            lifecycle_state="active",
+        )

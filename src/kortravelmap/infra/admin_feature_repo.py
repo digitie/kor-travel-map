@@ -2298,6 +2298,14 @@ _ADMIN_STATE_CONFLICT_CONSTRAINTS: Final[frozenset[str]] = frozenset(
         # 같은 부류다. 이 이름이 빠져 있는 동안 raw IntegrityError가 라우터의 except를
         # 전부 통과해 catch-all 500이 됐다 — 선언된 응답 집합에도 없는 상태였다.
         "ck_features_state_tuple",
+        # retired → active는 명시 reingest 근거가 있을 때만 된다. 현재
+        # lifecycle_state에 의존하므로 conflict다.
+        "ck_feature_reactivation_explicit",
+        # **이름이 두 뜻으로 쓰인다.** 같은 constraint가 (i) 타입 인자 검증과
+        # (ii) "override source가 현재 상태 또는 정확한 감사 전이와 맞아야 한다"
+        # 양쪽에서 raise된다. (i)은 API schema가 먼저 거르므로 실제로 도달하는 것은
+        # (ii)이고 그것은 상태 의존이다. 이름을 쪼개려면 DB 변경이 필요하다.
+        "ck_feature_lifecycle_override_command",
     }
 )
 
@@ -2312,6 +2320,40 @@ _ADMIN_STATE_VALIDATION_CONSTRAINTS: Final[frozenset[str]] = frozenset(
         "ck_features_lifecycle_state",
         "ck_features_publication_state",
         "ck_features_quality_state",
+        # context jsonb의 모양·키·kind/reason. 현재 상태와 무관하게 거부된다.
+        "ck_feature_state_transition_context",
+        # transition_kind가 mode(create/transition)에 맞지 않는다. mode는 요청에서
+        # 나오므로 상태 의존이 아니다.
+        "ck_feature_state_transition_kind",
+        # lifecycle override 값 enum. 프로시저가 먼저 거르지만 그 가드와 DDL이
+        # 갈리는 순간 이쪽으로 새므로 위 세 axis enum과 같은 2차 방어다.
+        "ck_feature_overrides_lifecycle_state_value",
+    }
+)
+
+# **이 경로가 위반하면 그것은 버그다.** raw로 다시 던진다(아래 함수의 기본 동작).
+#
+# 이 집합은 동작을 바꾸지 않는다 — 분류를 **강제**하려고 있다. 아래 fail-close
+# 게이트가 "admin state 경로에서 도달 가능한 제약이 세 집합 중 정확히 하나에
+# 있다"를 요구하므로, 새 CHECK가 생기면 저자가 셋 중 하나를 **고르게** 된다.
+# 지금까지는 아무 데도 없는 것이 기본값이었고, 그 기본값이 catch-all 500이었다
+# (2026-08-12 `ck_features_state_tuple`, 2026-09-08 이 집합을 만들며 찾은 넷).
+_ADMIN_STATE_UNEXPECTED_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        # 상태 전이는 coord/kind를 쓰지 않는다.
+        "ck_features_ck_features_coord_pair",
+        "ck_features_ck_features_coord_precision",
+        "ck_features_ck_features_kind",
+        # 프로시저가 row_revision + 1만 쓰므로 1 미만이 될 수 없다.
+        "ck_features_row_revision",
+        # override INSERT가 base_revision을 세팅하지 않는다(NULL).
+        "ck_feature_overrides_base_revision",
+        # status는 리터럴 'active'다.
+        "ck_feature_overrides_ck_overrides_status",
+        # status가 'revoked'가 아니므로 revocation 쌍 조건이 발화하지 않는다.
+        "ck_feature_overrides_revocation_pair",
+        # value_geometry를 쓰지 않는다.
+        "ck_feature_overrides_value_storage",
     }
 )
 
@@ -2325,8 +2367,18 @@ def _raise_admin_state_procedure_error(
     """0097 state procedure의 DB contract를 HTTP-domain 오류로 보존한다.
 
     매핑에 없는 23514는 raw로 다시 던진다 — 조용히 도메인 오류로 바꾸면 진짜
-    불변식 위반(=버그)이 정상 응답처럼 보인다. 대신 이름이 실제 DDL에 존재하는지는
-    ``test_admin_state_error_mapping_names_exist_in_ddl``이 fail-close로 지킨다.
+    불변식 위반(=버그)이 정상 응답처럼 보인다.
+
+    **그 기본값이 위험한 이유는 "분류를 잊는 것"과 "버그다"가 구별되지 않기
+    때문이다.** 2026-08-12에 ``ck_features_state_tuple``이 그렇게 새어 catch-all
+    500이 됐고, 그 사고 뒤 적힌 fail-close 테스트
+    ``test_admin_state_error_mapping_names_exist_in_ddl``은 **저장소에 없었다** —
+    docstring이 있지도 않은 안전망을 인용하고 있었다(2026-09-08 실측).
+
+    그래서 이제 세 집합이 분류를 **강제**한다: conflict(409) / validation(422) /
+    unexpected(버그, raw). ``tests/lint/test_admin_state_constraint_mapping.py``가
+    baseline schema에서 이 경로의 제약 폐포를 유도해 셋의 분할을 fail-close로
+    검사한다. 그 게이트를 만들며 raise되는데 어디에도 없던 제약 **넷**을 찾았다.
     """
 
     sqlstate, constraint = _driver_constraint_identity(error)
