@@ -188,6 +188,11 @@ async def _seed_manual_provider_pair(
                 "actor": actor,
             },
         )
+        # **dataset을 호출마다 새로 만들지 않는다.** `provider_datasets`는 dimension이고,
+        # `test_t212d_perf_explain`이 그 표가 작게 유지되는지(H50 small-table Seq Scan
+        # 예외) 감시한다. 호출마다 하나씩 만들면 M05 테스트가 늘 때마다 그 canary가
+        # 터진다 — 2026-09-08에 114건으로 실제로 터졌다. 한 행을 공유해도 entity/record는
+        # 여전히 호출마다 다르므로 시나리오는 그대로다.
         dataset_id = int(
             await connection.scalar(
                 text(
@@ -196,18 +201,18 @@ async def _seed_manual_provider_pair(
                       provider, dataset_key, display_name, source_kind, is_active,
                       capabilities
                     ) VALUES (
-                      :provider, :dataset_key, 'M05 integration', 'system', true,
+                      'python-m05-integration', 'm05-integration',
+                      'M05 integration', 'system', true,
                       jsonb_build_object(
                         'schema_version', 1, 'produces', '[]'::jsonb,
                         'extensions', '{}'::jsonb
                       )
-                    ) RETURNING provider_dataset_id
+                    )
+                    ON CONFLICT ON CONSTRAINT uq_provider_datasets_identity
+                    DO UPDATE SET display_name = EXCLUDED.display_name
+                    RETURNING provider_dataset_id
                     """
-                ),
-                {
-                    "provider": f"python-m05-{suffix[:8]}",
-                    "dataset_key": f"m05-{suffix[:8]}",
-                },
+                )
             )
         )
         await connection.execute(

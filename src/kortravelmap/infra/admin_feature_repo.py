@@ -2298,9 +2298,6 @@ _ADMIN_STATE_CONFLICT_CONSTRAINTS: Final[frozenset[str]] = frozenset(
         # 같은 부류다. 이 이름이 빠져 있는 동안 raw IntegrityError가 라우터의 except를
         # 전부 통과해 catch-all 500이 됐다 — 선언된 응답 집합에도 없는 상태였다.
         "ck_features_state_tuple",
-        # retired → active는 명시 reingest 근거가 있을 때만 된다. 현재
-        # lifecycle_state에 의존하므로 conflict다.
-        "ck_feature_reactivation_explicit",
         # **이름이 두 뜻으로 쓰인다.** 같은 constraint가 (i) 타입 인자 검증과
         # (ii) "override source가 현재 상태 또는 정확한 감사 전이와 맞아야 한다"
         # 양쪽에서 raise된다. (i)은 API schema가 먼저 거르므로 실제로 도달하는 것은
@@ -2340,6 +2337,12 @@ _ADMIN_STATE_VALIDATION_CONSTRAINTS: Final[frozenset[str]] = frozenset(
 # (2026-08-12 `ck_features_state_tuple`, 2026-09-08 이 집합을 만들며 찾은 넷).
 _ADMIN_STATE_UNEXPECTED_CONSTRAINTS: Final[frozenset[str]] = frozenset(
     {
+        # retired → active는 명시 reingest 근거가 있을 때만 된다. 그런데
+        # `reactivate_admin_feature_state`가 `reactivation_evidence`를 **항상** 넣고
+        # `patch`는 lifecycle_state 변경 자체를 호출부에서 막는다. 즉 admin 경로로는
+        # 도달할 수 없다 — 처음엔 conflict로 분류했다가 실 DB로 재 보고 되돌렸다.
+        # 도달 불가능한 값을 conflict로 등록해 두면 "구분되고 있다"는 오해가 남는다.
+        "ck_feature_reactivation_explicit",
         # 상태 전이는 coord/kind를 쓰지 않는다.
         "ck_features_ck_features_coord_pair",
         "ck_features_ck_features_coord_precision",
