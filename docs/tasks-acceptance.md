@@ -1394,8 +1394,26 @@ grep이었다.
 ### 승격의 새 정의
 
 > `ktdctl`이 설치한 Manager의
-> `scripts/m05_isolated_e2e.py --verify-leaf <leaf>`가 **exit 0**을 내고, 그 출력을
-> 이 절에 기록한다.
+> `scripts/m05_isolated_e2e.py --verify-leaf <leaf>`가 **exit 0**을 내고, 그 검증
+> **receipt의 경로와 sha256**을 이 절에 기록한다.
+
+**2026-09-08 개정(소유자 승인).** 종전 문구는 "그 **출력**을 이 절에 기록한다"였다.
+그런데 `--verify-leaf`는 아무것도 쓰지 않았으므로, 승격 근거가 **사람이 옮겨 적은
+문장**으로만 남았다 — 위 P0가 무효라고 지목한 바로 그 상태("기계 증적 없이 사람이 옮긴
+문장")가 정의를 고치는 과정에서 검증 **결과** 쪽에 그대로 재생산됐다.
+`T-VN-M05-VERIFY-RECEIPT` V3가 그것을 지적했고, 두 문장이 서로를 무효화한 채 남아
+있었다(한쪽은 옮겨 적으라 명령하고 한쪽은 옮겨 적기가 사라져야 한다고 했다).
+
+개정 근거 셋:
+
+1. **정의의 의도를 더 잘 지킨다.** "재계산 가능한 대조"를 택한 이유가 옮겨 적은 문장을
+   배격하는 것이었는데, 출력 텍스트 전사는 그 배격 대상 자체다. receipt sha256은 옮겨
+   적을 수 없다 — 위조하려면 root-owned 0600 파일을 만들어야 한다.
+2. **V4가 안전을 보장한다.** receipt는 통과 조건이 **아니므로**(`--verify-leaf`가 그
+   존재를 보지 않는다) 인용해도 "receipt를 만들어 두면 승격된다"가 되지 않는다.
+3. **재현 가능성이 는다.** 출력 15줄은 pin이 움직이면 무엇과 대조한 것이었는지 말하지
+   못한다. receipt는 pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을
+   값으로 들고 있다.
 
 그 명령이 보는 것(전부 지금 다시 계산할 수 있는 것뿐이다):
 
@@ -2775,9 +2793,36 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 - [x] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.** (2026-09-08, Manager #335)
   pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을 값으로 싣는다.
   나중에 pin이 움직여 재현이 불가능해져도 **무엇과 대조해 통과했는지**는 남는다.
-- [ ] **V3 — receipt가 원장 인용을 대체한다.**
+- [x] **V3 — receipt가 원장 인용을 대체한다.** (2026-09-08 충족)
   조문이 출력 텍스트를 옮겨 적는 대신 receipt 경로와 그 sha256을 인용한다. 옮겨 적기가
   사라져야 이 항목의 요지가 달성된다.
+
+  **2026-09-08 — 승격 정의를 개정하고(소유자 승인) 배포된 빌드로 실측했다.**
+
+  `install-ktdm-trusted-release`로 `ee281b5`(#335)를 n150에 설치하고
+  `pin rebind-execution`으로 재결박한 뒤(`execution_binding: manager_drift → current`)
+  두 승격 후보를 검증했다. **둘 다 15축 전부 PASS, exit 0.**
+
+  | leaf | receipt | sha256 |
+  |---|---|---|
+  | `/root/pairv2-e2e-02` | `/var/lib/kor-travel-docker-manager/m05-verify-receipts/pairv2-e2e-02-20260908T045824773930Z.json` | `b65b1d79ccca2c30fe989625bba8c23b9e49f69cbc7ffd3a8ae93220e5ba027c` |
+  | `/root/pairv2-e2e-03` | `…/m05-verify-receipts/pairv2-e2e-03-20260908T045803209001Z.json` | `06f8383d54afd157b1923f170cec7bf323ab74603b3a287d423b07228e9a6365` |
+
+  디렉터리와 파일 모두 `root:root`, 각각 `0700`/`0600`.
+
+  **재배포가 과거 증적을 무효화하지 않았다** — 설치본은 `ee281b5`인데 두 leaf의 binding
+  Manager revision은 `d36847e2`/`0406b14d`다(`is_installed=False`). L4·L5가 설치 revision이
+  아니라 **registry binding**에서 파생하도록 만든 설계가 정확히 이 경우를 위한 것이었고,
+  이번 배포가 그것을 처음으로 실증했다.
+
+  receipt가 싣는 것: `pinned_pair`(pinset·Map·PinVi revision), `leaf_binding`(execution
+  identity·binding Manager revision·`is_current_execution`), `ledger_claim_name`,
+  `registry_paths` 셋, `verifier`(설치 revision + **검증기 스크립트 자신의 sha256**
+  `8ef83e0a…`), `coverage`, 축 15개 각각의 결과와 detail.
+
+  **이 표가 종전의 30줄 전사를 대체한다.** 해시는 옮겨 적을 수 없다 — 위조하려면
+  root-owned 0600 파일을 만들어야 하고, V4가 receipt를 통과 조건에서 배제하므로 그렇게
+  만들어 둬도 승격되지 않는다.
 - [x] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.** (2026-09-08, Manager #335)
   receipt는 검증의 **기록**이지 근거가 아니다. `--verify-leaf`가 receipt의 존재를
   통과 조건으로 삼지 않는다(그러면 receipt를 만들어 두는 것으로 통과할 수 있다).
