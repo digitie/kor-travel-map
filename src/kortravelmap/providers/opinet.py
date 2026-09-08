@@ -542,6 +542,7 @@ async def _station_detail_to_price_bundle_and_values(
     name_normalized = normalize_korean_text(detail.name) or detail.name
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=detail.uni_id,
         kind=FeatureKind.PRICE,
         name=f"{name_normalized} 유가",
         coord=station_feature.coord,
@@ -700,6 +701,7 @@ async def _station_price_to_bundle_and_value(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=item.uni_id,
         kind=FeatureKind.PRICE,
         name=f"{name_normalized} 유가",
         coord=station_feature.coord,
@@ -904,6 +906,7 @@ async def _station_item_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=item.uni_id,
         kind=FeatureKind.PLACE,
         name=normalized_name,
         coord=coord,

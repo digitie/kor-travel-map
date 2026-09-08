@@ -550,6 +550,7 @@ async def _rest_area_item_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
         name=name_normalized,
         coord=coord,
@@ -891,6 +892,7 @@ def _fuel_price_record_to_bundle_and_values(
                 parent_feature_id, coord = matched
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=service_area_code,
         kind=FeatureKind.PRICE,
         name=f"{display_name} 유가",
         coord=coord,
@@ -1104,6 +1106,7 @@ async def _rest_area_weather_record_to_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.WEATHER,
         name=name,
         coord=coord,
@@ -1421,6 +1424,7 @@ async def _traffic_notice_item_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.NOTICE,
         name=title_normalized,
         coord=coord,

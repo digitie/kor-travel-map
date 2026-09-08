@@ -94,6 +94,22 @@ class Feature(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     feature_id: str = Field(min_length=1, description="``make_feature_id(...)`` 결과.")
+    #: provider 원천의 **안정 자연키** — ``make_feature_id``에 넘긴
+    #: ``source_natural_key`` 그대로다. T-VN-39 재키 후 Feature identity를 결정하는 축
+    #: ``(provider_dataset_id, kind, natural_key)``의 세 번째 성분이다.
+    #:
+    #: ``FeatureBundle.source_record.source_entity_id``로 **대신할 수 없다** —
+    #: ``providers/opinet.py``에서 entity id는 제품별(``f"{uni_id}:{prodcd}"``)이고
+    #: 자연키는 주유소별(``uni_id``)이며, 그 가격들이 같은 price anchor Feature에
+    #: 누적된다. 두 값의 grain이 다르므로 따로 실어야 한다.
+    #:
+    #: manual 경로(admin/curation/M04)는 ``manual_feature_identity_claims``가
+    #: identity를 소유하므로 ``None``이다.
+    provider_natural_key: str | None = Field(
+        default=None,
+        min_length=1,
+        description="provider 원천의 안정 자연키 (make_feature_id의 source_natural_key).",
+    )
     kind: FeatureKind
     name: str = Field(min_length=1)
     coord: Coordinate | None = None

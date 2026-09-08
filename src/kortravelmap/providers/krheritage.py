@@ -631,6 +631,7 @@ async def _heritage_item_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=kind,
         name=name,
         coord=coord,
@@ -797,6 +798,7 @@ async def _event_to_bundle(
     name = normalize_korean_text(event.title) or natural_key
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.EVENT,
         name=name,
         coord=coord,

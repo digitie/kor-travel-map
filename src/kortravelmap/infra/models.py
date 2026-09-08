@@ -1714,6 +1714,69 @@ class FeatureAliasRow(Base):
 # =============================================================================
 
 
+# ---------------------------------------------------------------------------
+# provider_sync.provider_feature_identities  (T-VN-39, ADR-068 결정 2)
+# ---------------------------------------------------------------------------
+class ProviderFeatureIdentityRow(Base):
+    """provider 원천 → Feature identity 결박. **재키가 부순 멱등의 대체 앵커다.**
+
+    ``feature.features.feature_id``가 uuid가 되면
+    ``create_feature_with_initial_state``의 ``ON CONFLICT (feature_id)``가 결정성을
+    잃는다(writer가 매 호출 새 UUIDv7을 만들기 때문). 이 표의 PK가 그 자리를 받는다.
+
+    **축 선택의 근거**: ``make_feature_id``는
+    ``bjd_code|kind|category|source_type|source_natural_key``를 해시하는데, ADR-068
+    결정 2가 ``bjd_code``·``category``를 identity 입력에서 배제하라고 정했다. 남는
+    셋이 이 PK다.
+
+    ``source_entity_key``를 축으로 쓰면 **안 된다** — ``providers/opinet.py``는
+    주유소 하나(natural key 1개)가 제품코드마다 다른 source entity를 갖고 그 가격들이
+    같은 price anchor Feature에 누적된다. entity 축이면 제품코드가 늘 때마다 Feature가
+    갈라진다.
+
+    ``feature.features``로 가는 FK를 두지 **않는다** — claim이 Feature보다 먼저 서야
+    하기 때문이고, ``ManualFeatureIdentityClaimRow``가 같은 이유로 같은 모양이다.
+    """
+
+    __tablename__ = "provider_feature_identities"
+    __table_args__ = (
+        CheckConstraint(
+            "feature_kind IN ('place', 'event', 'notice', 'price', "
+            "'weather', 'route', 'area')",
+            name=conv("ck_provider_feature_identities_kind"),
+        ),
+        CheckConstraint(
+            "btrim(natural_key) = natural_key AND natural_key <> '' "
+            "AND position('|' in natural_key) = 0",
+            name=conv("ck_provider_feature_identities_natural_key"),
+        ),
+        CheckConstraint(
+            "btrim(bound_by_operation) = bound_by_operation "
+            "AND bound_by_operation <> ''",
+            name=conv("ck_provider_feature_identities_operation"),
+        ),
+        Index("idx_provider_feature_identities_feature", "feature_id"),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id",
+            ondelete="RESTRICT",
+            name="fk_provider_feature_identities_dataset",
+        ),
+        primary_key=True,
+    )
+    feature_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    natural_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    bound_by_operation: Mapped[str] = mapped_column(Text, nullable=False)
+    bound_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("clock_timestamp()"), nullable=False
+    )
+
+
 class ProviderDatasetRow(Base):
     """DB가 소유하는 provider×dataset identity와 산출 capability."""
 

@@ -309,6 +309,7 @@ async def _station_to_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.WEATHER,
         name=name,
         coord=coord,
