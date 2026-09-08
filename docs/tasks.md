@@ -61,10 +61,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
   legacy TEXT `feature_id` PK 물리 제거가 본체이고 이 백로그에서 가장 큰 축이다.
   본체는 재타입이 아니라 **멱등 앵커 교체**다 — 재키가 `ON CONFLICT (feature_id)`의
-  결정적 축을 없애므로 `(provider_dataset_id, feature_kind, natural_key)`가 대체해야
-  한다(2026-09-09 실측). 규모는 숫자를 박지 않고 산출 쿼리로 둔다:
-  `information_schema.columns`의 `%feature_id%` 비-uuid 컬럼, `pg_constraint`의
-  `confrelid='feature.features'::regclass`, `pg_indexes`의 `feature_id|feature_uuid` 언급.
+  결정적 축을 없앤다. 규모·축 선택 근거는 acceptance가 소유한다.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 

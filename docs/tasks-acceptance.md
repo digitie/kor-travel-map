@@ -2284,6 +2284,45 @@ manifest (b) provider_sync source lineage는 **이미 제거 완료**이므로 �
 선언적으로 강제하지 못하는 불변식이다. 다만 그것을 요구하는 조문을 저장소에서 찾지
 못했고, manifest가 대는 이유도 "문자열 시각 판정" 하나뿐이었다.
 
+**2026-09-09 실측 — 본체는 재타입이 아니라 멱등 앵커 교체다.**
+
+`feature_id`를 uuid로 바꾸면 둘 중 하나가 **반드시** 일어난다. provider가 계산한
+`f_*`를 그대로 보내면 22P02이고, 새 UUIDv7을 보내면
+`create_feature_with_initial_state`의 `ON CONFLICT (feature_id) DO NOTHING`이 **영원히
+걸리지 않아** 매 ETL마다 중복 Feature가 생긴다. 후자는 DDL 초록·1회 적재 테스트 전부
+초록이고, 증상은 **두 번째 ETL**에서 처음 나온다.
+
+**앵커 축을 두 번 틀렸고 두 번 다 실측이 잡았다.**
+
+1차(09-08): `provider_sync.source_links`의 `source_role='primary'`에
+`UNIQUE (source_entity_key)`를 심었다가 **통합 1179건 중 17건이 빨개졌다** —
+identity 이행 중에는 구·신 Feature가 둘 다 primary이고
+`tests/integration/test_notice_lifecycle.py:529`가 그 형태를 의도적으로 재현한다.
+
+2차(09-09): 되돌린 뒤 조사가 **축 자체가 틀렸다**는 것을 보였다.
+`src/kortravelmap/providers/opinet.py`는 `source_entity_id`가 제품별
+(`f"{uni_id}:{prodcd}"`, :689)이고 `source_natural_key`는 주유소별(`uni_id`, :697)이며,
+그 경로 docstring이 "단일 제품 가격을 **같은 price anchor feature에 누적**"이라
+명시한다(:762). entity → Feature가 정당하게 **N:1**이므로, entity를 축으로 삼으면 새
+제품코드마다 새 Feature가 주조된다 — 재키가 고치려던 중복을 재키가 만든다.
+
+**확정 축**: `(provider_dataset_id, feature_kind, natural_key)`.
+`make_feature_id` 입력(`bjd_code|kind|category|source_type|source_natural_key`)에서
+ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다. 착지처는
+`provider_sync.provider_feature_identities`(308)이고, `feature.features`로 가는 FK를
+두지 않는다 — claim이 Feature보다 먼저 서야 하기 때문이며
+`feature.manual_feature_identity_claims`가 같은 이유로 같은 모양이다.
+
+**규모**는 숫자를 박지 않는다(2026-09-08의 "인덱스 57"이 실측 59와 어긋났다). 산출
+쿼리로 둔다 — `information_schema.columns`의 `%feature_id%` 비-uuid 컬럼,
+`pg_constraint`의 `confrelid='feature.features'::regclass`, `pg_indexes`의
+`feature_id|feature_uuid` 언급.
+
+**부수 발견**: `tests/integration/test_khoa_{rekey_hardening,recategorize_cleanup}.py`는
+제품 코드를 0줄도 타지 않았다 — `_cleanup_sql()`이 아카이브 상수를 읽어 부분문자열만
+확인하고 자기 파일의 SQL을 반환한다. 삭제했고, 삭제 전후 유닛·lint가
+`244 failed / 2508 passed`로 동일했다.
+
 **남은 것.** 이 항목의 소유자 판정 대기는 사라졌다. `T-VN-39`에 남는 것은 legacy TEXT
 `feature_id` PK 제거 하나이고, **그것은 판정 대상이 아니다** — 대체 identity
 (`feature_uuid` + unique 둘)와 fence 트리거가 이미 prod에 있고 `feature.features`가
