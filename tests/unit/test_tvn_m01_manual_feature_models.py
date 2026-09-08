@@ -48,6 +48,8 @@ def test_manual_feature_identity_claim_metadata_matches_m00_contract() -> None:
 
     assert table.schema == "feature"
     assert table.name == "manual_feature_identity_claims"
+    # 306이 셋을 더했다 — purge 승인 둘과 예약 해제 하나. claim의 두 역할을 가르는
+    # 컬럼들이고, 증거 컬럼과 **성질이 다르다**(아래 nullable 단언 참조).
     assert tuple(table.columns.keys()) == (
         "feature_id",
         "feature_kind",
@@ -57,8 +59,27 @@ def test_manual_feature_identity_claim_metadata_matches_m00_contract() -> None:
         "claimed_by_command_id",
         "claim_basis",
         "claimed_at",
+        "purged_by_command_id",
+        "purged_at",
+        "identity_released",
     )
-    assert all(column.nullable is False for column in table.columns)
+    # **증거 컬럼은 전부 NOT NULL이고 불변이다.** 그것이 M00 계약의 핵심이고 306이
+    # 건드리지 않았다. 새 셋만 성질이 다르다 — purge 승인 둘은 "아직 purge되지 않았다"를
+    # NULL로 표현해야 하고, 해제 플래그는 기본 false다.
+    _EVIDENCE_COLUMNS = (
+        "feature_id",
+        "feature_kind",
+        "name_key",
+        "lon_e6",
+        "lat_e6",
+        "claimed_by_command_id",
+        "claim_basis",
+        "claimed_at",
+    )
+    assert all(table.c[name].nullable is False for name in _EVIDENCE_COLUMNS)
+    assert table.c.purged_by_command_id.nullable is True
+    assert table.c.purged_at.nullable is True
+    assert table.c.identity_released.nullable is False
     assert table.primary_key.name == "pk_manual_feature_identity_claims"
     assert tuple(table.primary_key.columns.keys()) == ("feature_id",)
 
@@ -85,16 +106,19 @@ def test_manual_feature_identity_claim_metadata_matches_m00_contract() -> None:
         "ck_manual_feature_identity_claims_basis": (
             "claim_basis IN ('manual_create','legacy_admin_route')"
         ),
+        # 306 — 두 컬럼은 항상 함께 채워지고, 살아 있는 Feature의 identity는 놓을 수 없다.
+        "ck_manual_feature_identity_claims_purge_pair": (
+            "(purged_by_command_id IS NULL) = (purged_at IS NULL)"
+        ),
+        "ck_manual_feature_identity_claims_release_needs_purge": (
+            "NOT identity_released OR purged_by_command_id IS NOT NULL"
+        ),
     }
 
     unique = _named_constraints(table, UniqueConstraint)
+    # `uq_..._exact`는 306에서 **부분 유니크 인덱스**가 됐으므로 UniqueConstraint가 아니다
+    # — 해제된 claim은 증거로 남되 같은 이름·좌표의 재생성을 막지 않아야 한다.
     assert {name: _column_names(constraint) for name, constraint in unique.items()} == {
-        "uq_manual_feature_identity_claims_exact": (
-            "feature_kind",
-            "name_key",
-            "lon_e6",
-            "lat_e6",
-        ),
         "uq_manual_feature_identity_claims_command": ("claimed_by_command_id",),
         "uq_manual_feature_identity_claims_feature_command": (
             "feature_id",
@@ -102,8 +126,21 @@ def test_manual_feature_identity_claim_metadata_matches_m00_contract() -> None:
         ),
     }
 
+    exact = next(
+        index for index in table.indexes
+        if index.name == "uq_manual_feature_identity_claims_exact"
+    )
+    assert exact.unique is True
+    assert tuple(exact.columns.keys()) == ("feature_kind", "name_key", "lon_e6", "lat_e6")
+    assert "NOT identity_released" in str(
+        exact.dialect_options["postgresql"]["where"]
+    )
+
     foreign_keys = _named_constraints(table, ForeignKeyConstraint)
-    assert set(foreign_keys) == {"fk_manual_feature_identity_claims_command"}
+    assert set(foreign_keys) == {
+        "fk_manual_feature_identity_claims_command",
+        "fk_manual_feature_identity_claims_purge_command",
+    }
     command_fk = foreign_keys["fk_manual_feature_identity_claims_command"]
     assert _column_names(command_fk) == ("claimed_by_command_id",)
     assert _foreign_targets(command_fk) == ("ops.domain_commands.command_id",)
