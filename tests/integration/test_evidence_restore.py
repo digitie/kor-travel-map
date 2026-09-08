@@ -553,38 +553,56 @@ async def test_an_ack_orphaned_from_its_event_is_caught(
 
 
 async def test_an_origin_without_its_identity_claim_is_caught(
-    migrated_engine: AsyncEngine, delivery: dict[str, object]
+    migrated_engine: AsyncEngine,
 ) -> None:
     """origin과 claim이 갈리면 append-only 불변 자체가 깨진다.
 
-    exporter가 `domain_commands`를 담는 이유가 이것이다. 정상 스키마에서는 복합 FK와
-    append-only 트리거가 이 상태를 막으므로, 재현하려면 둘 다 떼야 한다 — data-only
-    복원이나 post-data 단계 실패가 남기는 DB가 정확히 그 모양이다.
+    exporter가 `domain_commands`를 담는 이유가 이것이다. 정상 스키마에서는 복합 FK가
+    이 상태를 막으므로, 재현하려면 그 FK를 떼야 한다 — data-only 복원이나 post-data
+    단계 실패가 남기는 DB가 정확히 그 모양이고, 그때 이 점검만이 사실을 말한다.
+
+    claim을 **지우는** 대신 claim 없는 origin을 **넣는다.** claim은
+    `manual_provider_dedup_cases`도 참조하므로 지우려면 관계 없는 FK까지 떼야 하고,
+    그러면 재현이 실제 복원 실패와 멀어진다.
     """
 
-    del delivery  # 이력이 있어야 origin이 하나라도 있다.
     connection = await _rollback_scope(migrated_engine)
     try:
-        await connection.execute(
-            text(
-                "ALTER TABLE feature.manual_feature_identity_claims"
-                " DISABLE TRIGGER trg_manual_feature_identity_claims_append_only"
-            )
-        )
+        assert await preflight_evidence_graph(connection) == []
         await connection.execute(
             text(
                 "ALTER TABLE feature.feature_creation_origins"
                 " DROP CONSTRAINT fk_feature_creation_origins_claim"
             )
         )
-        removed = await connection.execute(
-            text(
-                "DELETE FROM feature.manual_feature_identity_claims"
-                " WHERE feature_id IN ("
-                " SELECT feature_id FROM feature.feature_creation_origins LIMIT 1)"
+        orphan_command = int(
+            str(
+                await connection.scalar(
+                    text(
+                        "INSERT INTO ops.domain_commands ("
+                        " actor, operation, idempotency_key, request_fingerprint"
+                        ") VALUES ('admin:m05-restore-orphan',"
+                        " 'admin.manual-feature.create.v1',"
+                        " x_extension.gen_random_uuid(), repeat('e', 64))"
+                        " RETURNING command_id"
+                    )
+                )
             )
         )
-        assert removed.rowcount == 1
+        await connection.execute(
+            text(
+                "INSERT INTO feature.feature_creation_origins ("
+                " feature_id, origin_kind, creation_command_id,"
+                " creator_principal_id, created_by_actor, created_at,"
+                " invoker_role, procedure_definer"
+                ") VALUES ("
+                " x_extension.gen_random_uuid(), 'manual_admin', :command_id,"
+                " 'admin-ui-bff.manual-feature-create.v1',"
+                " 'admin:m05-restore-orphan', clock_timestamp(),"
+                " 'ktm_feature_api_runtime', 'ktm_manual_feature_procedure_owner')"
+            ),
+            {"command_id": orphan_command},
+        )
 
         failures = await preflight_evidence_graph(connection)
         assert any(
