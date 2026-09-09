@@ -1818,9 +1818,12 @@ def _weather_batch_item_out(
     *,
     echo_feature_id: str | None = None,
 ) -> WeatherBatchItemOut:
-    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 legacy 키).
+    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 정본 키).
+    # 미해석 참조는 조회 키가 ``None``이라 uuid map에도 없다 — echo만 남는다.
     feature_id = echo_feature_id if echo_feature_id is not None else item.feature_id
-    feature_uuid = feature_uuid_map.get(item.feature_id)
+    feature_uuid = (
+        None if item.feature_id is None else feature_uuid_map.get(item.feature_id)
+    )
     if item.state == "found":
         if item.card_key is None:
             raise RuntimeError("found weather batch item has no card key")
@@ -1993,9 +1996,11 @@ async def get_feature_weather_batch(
         session, _wellformed_refs(all_refs)
     )
 
-    def _lookup_id(ref: str) -> str:
-        identity = resolved_refs.get(ref)
-        return identity.feature_id if identity is not None else ref
+    def _lookup_id(ref: str) -> str | None:
+        # service batch와 같은 규율 — 정본 키로 못 푼 참조는 원문을 흘리지 않고
+        # ``None``으로 보낸다. `weather_repo`가 NULL 원소를 그대로 한 행으로 만들어
+        # 그 item만 ``no_data``가 되고, echo는 ``echo_feature_id=ref``가 지킨다.
+        return feature_identity.resolved_uuid_or_none(ref, resolved_refs)
 
     try:
         snapshots = await weather_repo.get_weather_batch_snapshots(
@@ -2016,7 +2021,12 @@ async def get_feature_weather_batch(
     # T-VN-32B additive — weather batch 조회 SQL을 재작성하지 않고 item feature
     # 참조에 UUID 정본을 병행 노출한다(존재하지 않는 parent는 map에서 빠져 None).
     item_feature_ids = sorted(
-        {item.feature_id for snapshot in snapshots for item in snapshot.items}
+        {
+            item.feature_id
+            for snapshot in snapshots
+            for item in snapshot.items
+            if item.feature_id is not None
+        }
     )
     feature_uuid_map = await feature_identity.get_feature_uuid_map(
         session, item_feature_ids

@@ -167,7 +167,7 @@ class WeatherBatchItem:
     있는 상태(found/no_data)에서 채워지고 retired면 ``None``.
     """
 
-    feature_id: str
+    feature_id: str | None
     state: WeatherBatchItemState
     card_key: str | None
     feature_uuid: str | None = None
@@ -190,7 +190,11 @@ class WeatherBatchTarget:
     """한 target 시각에 조회할 순서 보존 Feature ID 집합."""
 
     target_at: datetime
-    feature_ids: tuple[str, ...]
+    #: ``None`` 원소는 정본 키로 풀지 못한 참조다(T-VN-39). 라우터가 원문 문자열을
+    #: 흘리는 대신 그렇게 바꾼다 — `CAST(:feature_ids AS uuid[])`에 legacy `f_*`가
+    #: 닿으면 22P02로 batch **전체**가 죽기 때문이다. NULL 원소는 `unnest`가 한 행으로
+    #: 만들고 LEFT JOIN이 무매칭이라 그 item만 `no_data`가 된다.
+    feature_ids: tuple[str | None, ...]
 
 
 @dataclass(frozen=True)
@@ -2202,7 +2206,7 @@ async def get_weather_batch_snapshots(
     if not 0 < query_timeout_seconds <= WEATHER_BATCH_QUERY_TIMEOUT_SECONDS:
         raise ValueError("weather batch query timeout is out of range")
 
-    feature_ids: list[str] = []
+    feature_ids: list[str | None] = []
     target_ats: list[datetime] = []
     previous_target_at: datetime | None = None
     for target in targets:
@@ -2216,7 +2220,8 @@ async def get_weather_batch_snapshots(
         if len(target.feature_ids) != len(set(target.feature_ids)):
             raise ValueError("weather batch target feature_ids must be unique")
         if any(
-            len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
+            feature_id is not None
+            and len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
             for feature_id in target.feature_ids
         ):
             raise ValueError("weather batch feature_id length exceeds limit")
@@ -2293,7 +2298,7 @@ async def get_weather_batch_snapshots(
     timeline_by_card: dict[int, list[WeatherMetric]] = {}
     state_by_ordinal: dict[int, WeatherBatchItemState] = {}
     card_by_ordinal: dict[int, int | None] = {}
-    feature_by_ordinal: dict[int, str] = {}
+    feature_by_ordinal: dict[int, str | None] = {}
     feature_uuid_by_ordinal: dict[int, str | None] = {}
     valid_states: frozenset[str] = frozenset({"found", "no_data", "retired"})
     for row in rows:
@@ -2313,7 +2318,10 @@ async def get_weather_batch_snapshots(
                 raise RuntimeError("non-found weather batch item references a card")
             state_by_ordinal[ordinal] = cast(WeatherBatchItemState, raw_state)
             card_by_ordinal[ordinal] = card_ordinal
-            feature_by_ordinal[ordinal] = str(row["feature_id"])
+            observed_feature_id = row["feature_id"]
+            feature_by_ordinal[ordinal] = (
+                None if observed_feature_id is None else str(observed_feature_id)
+            )
             raw_feature_uuid = row.get("feature_uuid")
             feature_uuid_by_ordinal[ordinal] = (
                 str(raw_feature_uuid) if raw_feature_uuid is not None else None

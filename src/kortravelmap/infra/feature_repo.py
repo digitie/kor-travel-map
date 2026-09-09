@@ -4844,13 +4844,18 @@ async def get_public_feature_rows_by_ids(
 
 async def get_service_feature_batch_items(
     session: AsyncSession,
-    items: Sequence[tuple[str, int | None]],
+    items: Sequence[tuple[str | None, int | None]],
 ) -> tuple[FeatureBatchItemRow, ...]:
     """service batch 5-state item을 요청 순서대로 한 SQL snapshot에서 반환한다.
 
     base table은 존재/lifecycle 상태와 ``row_revision`` 판정에만 사용한다.
     ``trip_card``는 반드시 ``feature.public_features``에서만 만들며 retired,
     suppressed, missing item에는 비공개 payload를 싣지 않는다.
+
+    ``feature_id``가 ``None``인 item은 정본 키로 풀지 못한 참조다(T-VN-39 이후
+    라우터가 그것을 원문 문자열로 흘리지 않고 ``None``으로 바꾼다). ``unnest``가
+    NULL 원소도 한 행으로 만들고 LEFT JOIN이 무매칭이라 그 item만 ``missing``이
+    되며, 요청 순서 echo는 ``WITH ORDINALITY``가 지킨다.
     """
     if not items:
         return ()
@@ -4875,6 +4880,7 @@ async def get_service_feature_batch_items(
         trip_card = None
         if state == "found":
             trip_card = {
+                # ``state == "found"``면 매칭된 행이 있으므로 NULL이 아니다.
                 "feature_id": str(row["feature_id"]),
                 "kind": str(row["kind"]),
                 "name": str(row["name"]),
@@ -4886,9 +4892,13 @@ async def get_service_feature_batch_items(
                 "marker_color": row["marker_color"],
             }
         feature_uuid = row.get("feature_uuid")
+        # 미해석 참조(NULL)로 만들어진 missing 행은 정본 키가 없다. `str(None)`을
+        # 흘리면 응답에 리터럴 `'None'`이 실린다 — 요청 순서 echo는 라우터가
+        # 원문 ref로 맞추므로 여기서는 빈 값이 옳다.
+        row_feature_id = row["feature_id"]
         batch.append(
             FeatureBatchItemRow(
-                feature_id=str(row["feature_id"]),
+                feature_id="" if row_feature_id is None else str(row_feature_id),
                 state=cast(FeatureBatchItemState, state),
                 row_revision=revision,
                 trip_card=trip_card,
