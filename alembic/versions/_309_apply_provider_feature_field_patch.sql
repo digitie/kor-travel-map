@@ -3,8 +3,8 @@
 --   p_feature_id / o_feature_id : text → uuid
 --     (feature.features.feature_id 가 uuid 이고, 두 callee
 --      lock_current_provider_feature_source_evidence · has_active_feature_override
---      가 이미 uuid 를 받는다. infra/feature_repo.py 는 이미 CAST(:feature_id AS uuid)
---      로 부른다 — 이 프로시저만 text 로 남아 있었다.)
+--      가 이미 uuid 를 받는다. infra/feature_repo.py 도 이미 uuid 캐스트로
+--      부른다 — 이 프로시저만 text 로 남아 있었다.)
 --   p_source_entity_key / p_source_record_key : text 그대로 (Feature id 가 아니다)
 --   feature.feature_base_field_values.feature_uuid : 309 _SHADOW_DROP 이 지운다.
 --     INSERT 컬럼 목록과 ON CONFLICT SET 에서 함께 뺀다 — feature_id 가 그 값이다.
