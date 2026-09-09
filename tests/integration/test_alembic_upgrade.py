@@ -34,7 +34,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
 ] = {
     ("feature", "feature_weather_values"): {
         ("weather_value_key", "text", True),
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("weather_domain", "text", True),
         ("forecast_style", "text", True),
@@ -61,7 +61,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
     },
     ("feature", "feature_price_values"): {
         ("price_value_key", "text", True),
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("price_domain", "text", True),
         ("product_key", "text", True),
@@ -93,7 +93,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("detail", "jsonb", True),
     },
     ("feature", "current_weather_summary"): {
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("weather_domain", "text", True),
         ("forecast_style", "text", True),
@@ -106,7 +106,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("receipt_status", "text", True),
     },
     ("feature", "current_price_summary"): {
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("price_domain", "text", True),
         ("product_key", "text", True),
@@ -979,7 +979,7 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
                     INSERT INTO feature.features (
                         feature_id, kind, name, category, coord
                     ) VALUES (
-                        'feature:precision-trigger',
+                        '00000000-0000-7000-8000-0000000f0001',
                         'place',
                         'precision trigger',
                         '01070100',
@@ -996,7 +996,7 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
                     text(
                         "SELECT coord_precision_digits "
                         "FROM feature.features "
-                        "WHERE feature_id = 'feature:precision-trigger'"
+                        "WHERE feature_id = '00000000-0000-7000-8000-0000000f0001'"
                     )
                 )
             ).one()
