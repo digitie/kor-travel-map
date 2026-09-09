@@ -3,14 +3,22 @@
 read 응답의 ``feature_id`` 필드 값은 legacy ``f_*`` 표기가 아니라 UUID 정본
 문자열을 담는다. 치환은 **응답 조립 경계에서만** 일어난다:
 
-- projection은 legacy ``feature_id``와 ``feature_uuid``를 병행 select한다.
-- cursor/keyset encode·내부 join 키·batch echo 키는 치환 **전** row의 legacy
-  값을 그대로 쓴다 — keyset 술어(``feature_id > :cursor``)는 legacy 축이다.
+- projection은 정본 키를 ``feature_uuid`` **이름으로** 함께 내보낸다. T-VN-39
+  재키 전에는 그것이 shadow 컬럼이었고, 재키 후에는 같은 이름의 출력 별칭이
+  ``CAST(feature_id AS text)``에서 온다 — 나가는 이름은 바뀌지 않았고 원천만 바뀌었다.
+- cursor/keyset encode·내부 join 키는 치환 **전** row의 값을 쓴다. 재키 후 그 축은
+  더 이상 legacy가 아니라 정본 키(uuid) 자신이다.
 - echo 예외(요청 표기 보존): batch found/missing 키·item ``feature_id``,
-  weather-batch target echo, path-param echo. 이들은 치환 대상이 아니다.
+  weather-batch target echo, path-param echo. 이들은 치환 대상이 아니다 — 요청이
+  legacy ``f_*``로 물었으면 응답의 그 자리는 물어본 표기를 되돌려준다.
 
-projection에 ``feature_uuid``가 빠졌거나 NULL이면 fail-close(ValueError) —
-DB 컬럼이 NOT NULL(0080 backfill 100%)이므로 결측은 projection 누락 버그다.
+projection에 ``feature_uuid``가 빠졌거나 NULL이면 fail-close(ValueError). 재키 후
+그 이름은 컬럼이 아니라 출력 별칭이므로, 결측은 **repo가 별칭을 빠뜨렸다**는 뜻이고
+여전히 projection 누락 버그다.
+
+이 모듈은 재키 후 사실상 항등 치환이다(``feature_id``가 이미 정본 키다). 걷어내는
+것은 8개 라우터 ~30개 호출부가 걸린 독립 정리 항목이라 T-VN-39 범위에 넣지 않았다 —
+``docs/reports/t-vn-39-routine-open-defects.md`` "남은 것"에 기록돼 있다.
 """
 
 from __future__ import annotations
