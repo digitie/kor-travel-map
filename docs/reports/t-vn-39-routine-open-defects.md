@@ -21,6 +21,35 @@ DDL 상수는 전부 유도됐고(재타입 34 · shadow 13 · FK drop 40 · 재
 착지 조건: 아래 blocking 12건 반영 + `_UPGRADE_STATEMENTS` 조립 + `db.py`/
 `runtime_privileges.py`/`feature_subtype.py` 동반 수정.
 
+
+## ★ 범위 누락 — 재작성 대상은 23개가 아니라 35개다 (2026-09-09 실측)
+
+`db.py`의 시그니처 리터럴을 사이드카에서 유도해 대조하다 찾았다. text `feature_id`
+인자를 든 루틴 **12개가 재작성 세트에 없었다**:
+
+| 루틴 | 줄 | 비고 |
+|---|---|---|
+| `feature.author_feature_field_overrides` | 497 | |
+| `feature.revoke_feature_field_overrides` | 452 | |
+| `feature.patch_curation_item_command` | 203 | |
+| `feature.transition_feature_state` | 86 | **계약이 `(uuid,text,text,text,bigint,jsonb)`로 못 박았다** |
+| `feature.reactivate_admin_feature_state` | 85 | |
+| `feature.author_lifecycle_override` | 71 | |
+| `feature.transition_admin_feature_state` | 69 | |
+| `feature.revoke_lifecycle_override` | 34 | |
+| `feature.append_theme_feature_candidate_transition` | 29 | `p_from_feature_id`/`p_to_feature_id` |
+| `feature.lock_current_provider_feature_source_evidence` | 25 | |
+| `feature.feature_uuid_from_legacy` | 23 | head 참조 0건 — **DROP 대상** |
+| `feature.has_active_feature_override` | 8 | |
+
+**왜 놓쳤나**: 1차 조사가 "본문에 `feature_uuid` 22개 · text 시그니처 20개"로 셌는데,
+재작성 그룹을 짤 때 **두 집합의 합집합이 아니라 앞쪽 위주로** 20개를 골랐다. 위 12개는
+본문에 `feature_uuid`가 **0건**이라(순수 시그니처·지역변수 타입 문제) 그 눈금에서 빠졌다.
+
+**어떻게 잡았나**: `db.py`의 시그니처 리터럴 61개를 사이드카가 정의하는 21개와
+대조하니 12개가 남았다. 유도로 대조하지 않았으면 재키 후 첫 호출에서 42883으로
+드러났을 것이다.
+
 ## 실행자 노트 — 아래 결함 일부는 **다른 DDL 접근**을 전제한다
 
 에이전트들은 shadow 짝이 있는 표를 `DROP COLUMN feature_id` + `RENAME feature_uuid TO
