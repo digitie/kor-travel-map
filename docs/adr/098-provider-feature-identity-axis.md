@@ -99,6 +99,35 @@ ADR-096이 경고한 그대로다 — 대리키는 DB-local이고 실제로 base
 DB 사이에서 비교하지 않는다. 이식이 필요하면 `(provider, dataset_key)`로 풀어서 옮긴다.
 `uq_source_entities_provider_identity`가 이미 같은 규율로 산다.
 
+**6. `feature_aliases`는 "모든 Feature의 두 번째 이름"이 아니라, 바깥에서 이 Feature를
+가리킨 적이 있는 주소의 등록부다.**
+
+재키(`309`) 뒤 alias를 발급하는 주체는 둘뿐이다 — 이전 세대가 실제로 발행했던 `f_*`를
+옮겨 싣는 backfill과, provider 생성 경로 `create_provider_feature_with_initial_state`.
+**admin 수동·요청 승인·큐레이션·core 네 경로가 만든 Feature는 alias를 갖지 않으며 그것이
+정상 상태다** — 결손이 아니다.
+
+근거는 정보량이다. provider `f_*`는 `sha1(bjd|kind|category|source_type|natural_key)`라
+provider 레코드를 가진 제3자가 Map을 한 번도 본 적 없어도 계산해 들고 오는 주소이고,
+결정 1 아래에서 재분류로 그 값이 바뀌어도 옛 주소가 alias로 남아 구 URL이 산다. manual
+`f_*`는 `sha1(…|manual::{서버가 방금 발급한 UUIDv7})`라 **정본 키의 순수 함수**다 — 밖에서
+계산할 수 없고, 계산할 수 있는 사람은 이미 정본 키를 쥐고 있으며, uuid는 드리프트하지
+않으므로 "재분류마다 alias가 한 행 는다"는 이득이 원리적으로 발생하지 않는다. 등록부에
+실을 **바깥 주소가 애초에 없다.**
+
+ADR-068 결정 3 원문은 "**기존** `f_*` 값은 … 보존한다"로 **보존 규칙이지 발급 규칙이
+아니다.** "모든 Feature가 alias를 갖는다"는 보편 명제는 원문에 없었고, 사라진 트리거
+`trg_features_legacy_alias`와 `consumer-rollout-v1.json` 32B 문안이 만든 산물이었다. 이
+결정은 그 원문의 범위로 되돌리는 것이지 ADR-068을 개정하는 것이 아니다.
+
+계약 층의 착지점도 함께 옮긴다. `target-invariants-v1.sql`의 `[INV-068-01]`을 완전성
+불변식("backfill 후 모든 feature는 alias를 1개 이상 가진다")에서 **형태** 불변식("정본
+키(uuid) 표기를 alias로 되풀이하지 않는다")으로 교체한다. head에서 같은 규칙을 강제하는
+`ck_feature_aliases_legacy_alias_shape`는 309가 되살릴 수 없이 내린
+`ck_feature_aliases_legacy_identity`(`alias = feature_id`)의 **구조적 후계자**다.
+`uuid = text` 연산자가 없어 값 관계로는 재부착이 영구 불가능해진 자리를, legacy alias의
+형태(`f_{bjd|global}_{kind[0]}_{sha1[:16]}`)로 받는다.
+
 ## 근거
 
 identity를 **변하지 않는 것**에 매단다. `bjd_code`는 reverse geocoder가 주고 geocoder
@@ -127,7 +156,8 @@ Feature가 *무엇인지*를 말하지 않고 *어떻게 보이는지*를 말한
 ## 기존 결정과의 관계
 
 - **ADR-068** 결정 1·2를 되돌리지 않고 **빈자리를 채운다.** 결정 2의 UNIQUE는 source
-  entity의 identity로 그대로 유효하다.
+  entity의 identity로 그대로 유효하다. 결정 3도 개정하지 않는다 — 원문이 "기존 `f_*`
+  값은 … 보존한다"는 **보존 규칙**이라 결정 6의 발급 규칙과 충돌하지 않는다.
 - **ADR-083**의 비파생 UUIDv7 generator를 유지한다. `feature_uuid_from_legacy`(uuid5 파생)로
   되돌리는 안은 기각한다 — ADR-083이 그것을 의도적으로 버렸고,
   `admin_feature_repo`의 `_canonical_uuid7_or_invariant`가 `version != 7`을 거부한다.
@@ -147,3 +177,8 @@ Feature가 *무엇인지*를 말하지 않고 *어떻게 보이는지*를 말한
 측정 방법: `provider_feature_identities`의 한 행이 가리키는 Feature의 좌표·이름이
 `bound_at` 이후 **급격히** 바뀌는지 감시한다. 그런 사건이 실제로 관측되면 축에
 `source_entity_type`을 더하거나 provider별 재사용 정책을 명시해야 한다.
+
+결정 6은 더 약하다 — 재키 후에도 manual Feature를 `f_*`로 부르는 운영 관행(옛 로그·티켓)이
+남아 있다면, 같은 주소로 조회했을 때 provider만 찾히고 manual만 사라지는 비대칭이 운영
+문제로 돌아온다. 측정 방법: 전환·복구 경계의 alias lookup에서 `f_*` miss를 세고 manual
+계열에 몰리면, 발급 규칙을 되돌리는 대신 정본 키에서 표시용 옛 주소를 만드는 번역기를 둔다.

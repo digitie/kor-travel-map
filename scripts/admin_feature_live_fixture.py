@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final, NamedTuple
 
+from kortravelmap.api.domain_command_registry import command_policy
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -33,7 +34,6 @@ from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.api.domain_command_registry import command_policy
 from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
@@ -834,7 +834,9 @@ async def _seed(
                         CAST(:publication_state AS text),
                         CAST(:quality_state AS text),
                         CAST(:state_context AS jsonb),
-                        NULL, NULL, NULL, NULL
+                        -- OUT 셋: o_feature_id(uuid) · o_row_revision · o_inserted.
+                        -- T-VN-39가 legacy 문자열 축을 없애면서 넷에서 셋이 됐다.
+                        NULL, NULL, NULL
                     )
                     """
                 ),

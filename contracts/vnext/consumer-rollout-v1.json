@@ -19,7 +19,7 @@
       "title": "UUID identity shadow 전환",
       "consumer_first_order": [
         "32A: UUID/alias shadow schema + deterministic backfill (읽기 경로 무변경)",
-        "32B: Map consumer-first dual read/write — UUID 정본 읽기, alias는 경계 해석, 신규 write는 UUID+alias 원자 생성",
+        "32B: Map consumer-first dual read/write — UUID 정본 읽기, alias는 경계 해석, 신규 write 중 provider 경로는 UUID와 alias를 원자 생성 (manual·요청승인·큐레이션·core 경로가 만든 Feature는 legacy 주소를 갖지 않는다 — T-VN-39/ADR-098 결정 6)",
         "32C: PinVi를 UUID+alias contract로 선전환(검증된 alias map DB-to-DB 이관) → 양 저장소 checksum 일치 후 Map 응답 UUID 전환"
       ],
       "write_fence": "32C에서 legacy-only write를 fence한다. alias map 이관·checksum 검증 window 동안 fence 유지",

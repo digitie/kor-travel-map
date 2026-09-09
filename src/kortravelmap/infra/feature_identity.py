@@ -66,7 +66,7 @@ from sqlalchemy import text
 from kortravelmap.core.ids import feature_uuid_from_legacy, make_feature_uuid
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +82,7 @@ __all__ = [
     "verify_feature_uuid",
     "resolve_feature_identity",
     "resolve_feature_identities_bulk",
+    "resolved_uuid_or_none",
     "legacy_id_for_filter",
     "is_canonical_uuid_ref",
     "feature_uuid_in_use",
@@ -296,16 +297,29 @@ FROM feature.features
 WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
-# INV-068-01(모든 feature는 alias ≥ 1)과 정본 키 결측을 현행 스키마에서 관측한다.
-# 309 재키 뒤 축마다 **보장의 출처가 다르다**:
+# INV-068-01(**주소가 있어야 하는 Feature만** 등록부에 있다 — ADR-098 결정 6의
+# 재정의)과 정본 키 결측을 현행 스키마에서 관측한다. 309 재키 뒤 축마다 **보장의
+# 출처가 다르다**:
 #   missing_uuid         ``pk_features PRIMARY KEY (feature_id)``의 NOT NULL —
 #                        구조상 0.
-#   missing_alias        **DB 보장이 없다.** 309가 ``trg_features_legacy_alias``와
-#                        ``feature.ensure_features_legacy_alias()``를 영구 제거해
-#                        alias를 넣는 것은 writer뿐이다(DB 안에서는
-#                        ``create_provider_feature_with_initial_state`` 하나가
-#                        넣는다). 0이 아니면 "DB 보장이 뚫렸다"가 아니라
-#                        "writer가 alias를 안 넣었다"는 뜻이다.
+#   missing_alias        **features 전수가 아니라 provider claim 기준이다.**
+#                        ``feature_aliases``는 "모든 Feature의 두 번째 이름"이 아니라
+#                        **바깥에서 이 Feature를 가리킨 적이 있는 주소의 등록부**이고,
+#                        재키 뒤 주소를 발급하는 주체는 둘뿐이다 — 이전 세대가 실제로
+#                        발행했던 ``f_*``를 옮겨 싣는 backfill과 provider 생성 경로
+#                        ``create_provider_feature_with_initial_state``. 그래서 이
+#                        축은 ``provider_sync.provider_feature_identities`` claim 중
+#                        legacy alias가 등록부에 없는 것만 센다.
+#                        **admin 수동·요청 승인·큐레이션·core 경로가 만든 Feature에
+#                        alias가 없는 것은 정상이라 이 축에 잡히지 않는다** — provider
+#                        ``f_*``는 ``sha1(bjd|kind|category|source_type|natural_key)``라
+#                        제3자가 Map을 본 적 없어도 계산해 들고 오는 주소지만, manual
+#                        ``f_*``는 ``sha1(…|manual::{서버가 방금 발급한 UUIDv7})``라
+#                        정본 키의 순수 함수여서 밖에서 계산할 수 없고 드리프트하지도
+#                        않는다(발급할 이득이 원리적으로 없다).
+#                        DB 보장은 없다 — 309가 ``trg_features_legacy_alias``와
+#                        ``feature.ensure_features_legacy_alias()``를 영구 제거했다.
+#                        0이 아니면 provider writer가 alias를 안 넣었다는 뜻이다.
 #   alias_pair_mismatch  조인 등식 ``a.feature_id = f.feature_id``의 자기검증이라
 #                        구조상 0. shadow 사본이 있던 세계(0083)에서는 사본 불일치
 #                        관측이었는데 309가 alias 쪽 사본 컬럼을 지웠다.
@@ -314,7 +328,14 @@ WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 _MISSING_IDENTITY_SQL: Final[str] = """
 SELECT
     count(*) FILTER (WHERE f.feature_id IS NULL) AS missing_uuid,
-    count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias,
+    (
+        SELECT count(*)
+        FROM provider_sync.provider_feature_identities AS claim
+        LEFT JOIN feature.feature_aliases AS pa
+               ON pa.feature_id = claim.feature_id
+              AND pa.alias_kind = 'legacy_feature_id'
+        WHERE pa.alias IS NULL
+    ) AS missing_alias,
     count(*) FILTER (
         WHERE a.alias IS NOT NULL
           AND a.feature_id IS DISTINCT FROM f.feature_id
@@ -508,6 +529,31 @@ async def resolve_feature_identities_bulk(
     return resolved
 
 
+def resolved_uuid_or_none(
+    ref: str, resolved: Mapping[str, FeatureIdentity]
+) -> str | None:
+    """해석된 정본 키(uuid 문자열)를 돌려주고, 없으면 ``None``.
+
+    **왜 ``None``인가.** 309 재키 뒤 batch/CSV 조회 표면의 **대상 열이 전부
+    uuid**다. 미해석 참조를 원문 문자열 그대로 바인드에 흘리면 DB가
+    ``CAST(... AS uuid)``에서 22P02로 멎고, 그 실패는 그 항목 하나가 아니라
+    **요청 전체**를 죽인다 — 한 줄의 오타가 나머지 정상 항목의 결과까지 지운다.
+    표면이 약속한 per-item 격리(잘못된 항목만 "찾을 수 없음"으로 떨어진다)를
+    지키는 유일한 방법이 uuid로 풀 수 없는 참조를 ``NULL``로 바꿔 넘기는
+    것이라, 라우터는 대상 열 바인드마다 이 헬퍼를 통과시킨다.
+
+    ``resolved``는 :func:`resolve_feature_identities_bulk`의 결과다. 거기서
+    miss한 참조라도 **canonical UUID 문자열 자체**는 그대로 통과시킨다 —
+    uuid로 캐스팅되므로 22P02를 내지 않고, 존재하지 않는 정본 키에 대한 조회는
+    빈 결과가 되어 "존재하지 않는 참조"와 동등한 semantics가 된다
+    (:func:`legacy_id_for_filter`가 필터 표면에서 쓰는 것과 같은 규율).
+    """
+    identity = resolved.get(ref)
+    if identity is not None:
+        return identity.feature_id
+    return _parse_canonical_uuid(ref)
+
+
 def is_canonical_uuid_ref(ref: str) -> bool:
     """참조 문자열이 canonical UUID(lowercase hyphenated 36자) 형태인지 판별."""
     return _parse_canonical_uuid(ref) is not None
@@ -560,13 +606,18 @@ async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | 
 async def count_features_missing_identity(
     session: AsyncSession,
 ) -> tuple[int, int, int, int]:
-    """(uuid 결측, alias 결측, alias 쌍 불일치, orphan alias) — 정상 ``(0,0,0,0)``.
+    """(uuid 결측, 주소 결측, alias 쌍 불일치, orphan alias) — 정상 ``(0,0,0,0)``.
 
     freeze INV-068-01의 현행 스키마 판이다. 회귀 테스트와 운영 점검이 사용하고,
     0이 아니면 write 경로를 계속 신뢰하지 말고 fail-close해야 한다
-    (:class:`FeatureIdentityInvariantError`의 사전 관측판). **둘째 축은 309가
-    ``trg_features_legacy_alias``를 지운 뒤로 DB 보장이 아니라 writer 보장이다** —
-    0이 아니면 DB가 아니라 alias를 안 넣은 writer를 봐야 한다. 셋째 축(사본
+    (:class:`FeatureIdentityInvariantError`의 사전 관측판). **둘째 축이 세는 것은
+    "alias 없는 Feature"가 아니라 "주소가 있어야 하는데 등록부에 없는
+    Feature"다** (ADR-098 결정 6) — 모집단은 ``feature.features`` 전수가 아니라
+    ``provider_sync.provider_feature_identities`` claim이고, admin 수동·요청
+    승인·큐레이션·core 경로가 만든 Feature는 alias가 없는 것이 **정상 상태**라
+    결손으로 세지 않는다. 그 축은 309가 ``trg_features_legacy_alias``를 지운 뒤로
+    DB 보장이 아니라 writer 보장이므로, 0이 아니면 DB가 아니라 alias를 안 넣은
+    provider writer를 봐야 한다. 셋째 축(사본
     불일치)은 alias 쪽 uuid 사본이 있던 세계의 관측이었고, 309가 그 컬럼을 지워
     지금은 조인 등식의 자기검증(구조상 0)으로만 남는다 — 축을 빼면 호출자의
     4-튜플 계약이 깨지므로 자리는 유지한다. 넷째 축(부모 없는 orphan alias —

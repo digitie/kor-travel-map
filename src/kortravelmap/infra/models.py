@@ -759,7 +759,11 @@ class ManualFeaturePurgeRecordRow(Base):
     feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     #: 옛 ``feature_id``. legacy 문자열을 **증거로** 남기는 자리라 uuid로 옮기지
     #: 않고 이름만 정직하게 바꿨다(309 `_EVIDENCE_RENAME`).
-    legacy_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    #:
+    #: RENAME은 NOT NULL을 보존하지만 309 `_EVIDENCE_RENAME`이 곧바로
+    #: `DROP NOT NULL`을 낸다 — 재키 뒤 태어난 Feature는 legacy 주소를 애초에 갖지
+    #: 않으므로(ADR-098 결정 6) 여기의 NULL은 결손이 아니라 참이다.
+    legacy_feature_id: Mapped[str | None] = mapped_column(Text)
     reason_code: Mapped[str] = mapped_column(Text, nullable=False)
     identity_released: Mapped[bool] = mapped_column(Boolean, nullable=False)
     purged_by_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -1633,10 +1637,28 @@ class FeatureAliasRow(Base):
     - FK ON DELETE — ``CASCADE`` (alias는 파생값·재계산 가능)
     - backfill generator — ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)``
 
-    행 생성은 0079 AFTER INSERT 트리거(``trg_features_legacy_alias``)가 맡았으나
-    309가 그 트리거를 영구 삭제했다 — 이제 provider writer 프로시저가 Feature
-    INSERT와 같은 transaction에서 alias 행을 명시적으로 넣는다
-    (``_309_create_provider_feature_with_initial_state.sql``).
+    **alias는 "모든 Feature의 두 번째 이름"이 아니라 바깥에서 이 Feature를 가리킨
+    적이 있는 주소의 등록부다** (ADR-098 결정 6). 행 생성은 0079 AFTER INSERT
+    트리거(``trg_features_legacy_alias``)가 Feature 전수에 대해 맡았으나 309가 그
+    트리거를 영구 삭제했고, 재키 뒤 alias를 발급하는 주체는 둘뿐이다:
+
+    1. 이전 세대가 **실제로 발행했던** ``f_*``를 옮겨 싣는 backfill,
+    2. provider 생성 경로 ``feature.create_provider_feature_with_initial_state``
+       — Feature INSERT와 같은 transaction에서 명시적으로 넣는다
+       (``_309_create_provider_feature_with_initial_state.sql``; alias INSERT는
+       core CALL **뒤**에 있다 — 앞에 두면 FK가 즉시 검사되어 신규 provider
+       Feature마다 23503이 난다).
+
+    **admin 수동·요청 승인·큐레이션·core 경로가 만든 Feature는 alias를 갖지 않으며
+    그것이 정상 상태다** — 결손이 아니다. 근거는 정보량이다: provider ``f_*``는
+    ``sha1(bjd|kind|category|source_type|natural_key)``라 provider 레코드를 가진
+    제3자가 Map을 본 적 없어도 계산할 수 있는 주소이고, 재분류로 값이 바뀌어도 옛
+    주소가 alias로 남아 구 URL이 산다. 반면 manual ``f_*``는
+    ``sha1(…|manual::{서버가 방금 발급한 UUIDv7})``이라 **정본 키의 순수 함수**다 —
+    밖에서 계산할 수 없고, 계산할 수 있는 사람은 이미 정본 키를 쥐고 있으며, uuid는
+    드리프트하지 않으므로 "재분류마다 alias가 는다"는 이득이 원리적으로 없다.
+    ADR-068 결정 3 원문("**기존** ``f_*`` 값은 … 보존한다")은 **보존 규칙이지 발급
+    규칙이 아니다**.
     """
 
     __tablename__ = "feature_aliases"
@@ -1652,6 +1674,26 @@ class FeatureAliasRow(Base):
         CheckConstraint(
             "alias_kind IN ('legacy_feature_id')",
             name=conv("ck_feature_aliases_ck_feature_aliases_alias_kind"),
+        ),
+        # 309 `_COLLATERAL_RECREATE`. 삭제된 `ck_feature_aliases_legacy_identity`
+        # (`alias = feature_id`)의 자리를 값 관계가 아니라 **형태**로 받는다 —
+        # legacy alias는 `make_feature_id` 산출물
+        # (`f_{bjd|global}_{kind[0]}_{sha1[:16]}`)만 담고 uuid 표기는 이 형태에
+        # 걸리지 않으므로 "정본 키를 alias로 되풀이하지 않는다"가 DB 층에서
+        # 강제된다. bjd 자리가 `.+`인 것은 의도다 — `make_feature_id`는 `bjd_code`를
+        # 검증하지 않아 밑줄 섞인 값이 원리적으로 가능하고, `[^_]+`로 조이면 그런
+        # provider 하나가 전량 23514로 멎는다.
+        #
+        # `conv()`는 접두를 **붙이는** 것이 아니라 naming_convention 적용을 **막는**
+        # 마커다. 리터럴 이름을 주면 이 metadata의 `ck_%(table_name)s_%(constraint_name)s`가
+        # 덧붙어 `ck_feature_aliases_ck_feature_aliases_legacy_alias_shape`가 되고,
+        # 309 `_COLLATERAL_RECREATE`가 DB에 만드는 이름과 글자 단위로 어긋난다.
+        # 위 3건이 이중 접두인 것은 conv 때문이 아니라, 컨벤션에 이미 걸려 이중이 된
+        # DB 이름을 conv로 그대로 고정하고 있기 때문이다.
+        CheckConstraint(
+            "alias_kind <> 'legacy_feature_id' "
+            "OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$'",
+            name=conv("ck_feature_aliases_legacy_alias_shape"),
         ),
         # identity 사본 일치 FK(``fk_feature_aliases_identity_pair``)와
         # ``ck_feature_aliases_legacy_identity``(``alias = feature_id``)는 309가

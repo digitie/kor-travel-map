@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias, cast
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from kortravelmap.core import make_feature_id
 from kortravelmap.infra.feature_identity import (
     FeatureIdentityInvariantError,
     candidate_feature_uuid,
@@ -2650,10 +2649,14 @@ def _raise_field_override_procedure_error(
 #   fk_feature_aliases_identity_pair
 #     ← 영구 삭제되는 composite FK 6개 중 하나(`_FK_DROP`에 있고 `_FK_RECREATE`에
 #       없다). ``fk_feature_aliases_feature``가 덮는다.
+#   pk_feature_aliases
+#     ← 제약은 살아 있지만 이 경로에서 도달 불가능하다. ADR-098 결정 6대로 admin
+#       수동 생성은 alias를 발급하지 않으므로(alias 발급자는 backfill과
+#       ``create_provider_feature_with_initial_state`` 둘뿐) 이 writer가
+#       ``feature_aliases``에 INSERT하는 문장 자체가 없다.
 _MANUAL_FEATURE_CREATE_IDENTITY_CONSTRAINTS: Final[frozenset[str]] = frozenset(
     {
         "ck_manual_feature_create_core_identity",
-        "pk_feature_aliases",
         "pk_feature_creation_origins",
         "pk_features",
         "pk_manual_feature_identity_claims",
@@ -2915,10 +2918,11 @@ async def create_admin_feature_with_field_overrides(
 ) -> AdminManualFeatureCreateResult:
     """검증된 admin command로 수동 Feature와 exact claim/origin을 생성한다.
 
-    canonical UUIDv7과 current legacy bridge ID는 request가 아니라 이 repository
-    경계에서 한 번 발급한다. DB wrapper가 exact claim, core initial tuple,
-    ``manual_admin`` origin을 먼저 원자화하고, winner에만 subtype과 field override를
-    같은 외부 transaction에서 이어 쓴다.
+    정본 키(canonical UUIDv7)는 request가 아니라 이 repository 경계에서 한 번
+    발급하며, 그것이 이 경로가 만드는 유일한 식별자다 — ADR-098 결정 6대로 admin
+    수동 생성은 legacy ``f_*`` alias를 발급하지 않는다. DB wrapper가 exact claim,
+    core initial tuple, ``manual_admin`` origin을 먼저 원자화하고, winner에만
+    subtype과 field override를 같은 외부 transaction에서 이어 쓴다.
     """
 
     if not operator.strip():
@@ -2950,17 +2954,12 @@ async def create_admin_feature_with_field_overrides(
     if supplied_forbidden:
         raise AdminManualFeatureValidationError(field=supplied_forbidden[0])
 
+    # ADR-098 결정 6: 이 경로는 alias를 발급하지 않는다. legacy ``f_*``를 계산해도
+    # 실을 곳이 없다 — 사이드카 payload allow-list에 ``feature_uuid``가 없고
+    # ``feature_id``는 uuid로 캐스팅된다. 정본 키는 아래 UUIDv7 하나뿐이다.
     feature_uuid = _canonical_uuid7_or_invariant(
         candidate_feature_uuid(),
         field="candidate feature_uuid",
-    )
-    feature_id = make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category="manual_feature_v1",
-        source_type="user_request",
-        source_natural_key=f"manual::{feature_uuid}",
-        content_hash=None,
     )
     initial_payload = {
         key: value
@@ -2989,8 +2988,7 @@ async def create_admin_feature_with_field_overrides(
         "coord_precision_digits",
         6,
     )
-    initial_payload["feature_id"] = feature_id
-    initial_payload["feature_uuid"] = feature_uuid
+    initial_payload["feature_id"] = feature_uuid
     try:
         wrapper_result = (
             await session.execute(
@@ -3044,14 +3042,14 @@ async def create_admin_feature_with_field_overrides(
         raise AdminManualFeatureInvariantError(
             "created 결과의 initial row revision이 유효하지 않습니다."
         )
-    if observed_feature_id != feature_id:
+    if observed_feature_id != feature_uuid:
         raise AdminManualFeatureIdentityConflict(
             feature_uuid=feature_uuid,
             constraint="ck_manual_feature_create_core_identity",
         )
     try:
         verify_feature_uuid(
-            feature_id,
+            feature_uuid,
             observed_feature_uuid,
             sent_feature_uuid=feature_uuid,
             inserted=True,
@@ -3064,7 +3062,7 @@ async def create_admin_feature_with_field_overrides(
     try:
         await write_subtype(
             session,
-            feature_id=feature_id,
+            feature_id=feature_uuid,
             kind=kind,
             detail=payload.get("detail"),
         )
@@ -3072,7 +3070,7 @@ async def create_admin_feature_with_field_overrides(
         raise AdminManualFeatureValidationError(field="detail") from exc
     try:
         values, geometry_wkt = _override_payload_for_change(
-            feature_id=feature_id,
+            feature_id=feature_uuid,
             feature_uuid=observed_feature_uuid,
             kind=kind,
             payload=dict(payload),
@@ -3085,7 +3083,7 @@ async def create_admin_feature_with_field_overrides(
     try:
         command = await author_admin_feature_field_overrides(
             session,
-            feature_id,
+            feature_uuid,
             expected_row_revision=initial_row_revision,
             reason_code=reason_code,
             operator=operator,
@@ -3109,7 +3107,7 @@ async def create_admin_feature_with_field_overrides(
         ) from exc
     expected_applied_field_count = len(values) + len(geometry_wkt)
     if (
-        command.feature_id != feature_id
+        command.feature_id != feature_uuid
         or command.command_id != command_id
         or command.row_revision <= initial_row_revision
         or command.applied_field_count != expected_applied_field_count
@@ -3118,7 +3116,7 @@ async def create_admin_feature_with_field_overrides(
             "수동 Feature override receipt가 command/core causation과 다릅니다."
         )
     return AdminManualFeatureCreated(
-        feature_id=feature_id,
+        feature_id=feature_uuid,
         feature_uuid=observed_feature_uuid,
         row_revision=command.row_revision,
         command_id=command_id,
@@ -3165,9 +3163,11 @@ async def patch_admin_feature_with_field_overrides(
     )
 
 
-# feature_uuid는 Python 경계가 발급한 비파생 UUIDv7이고, current legacy ID는
-# 그 UUID만 재료로 만든 opaque bridge다. DB wrapper가 exact claim과
-# ``manual_admin`` origin을 core initial insert와 먼저 원자화한다.
+# 정본 키는 Python 경계가 발급한 비파생 UUIDv7 하나이고, payload의 ``feature_id``가
+# 곧 그 값이다 — 사이드카 allow-list에 ``feature_uuid`` 키가 없고 ``feature_id``는
+# uuid로 캐스팅·UUIDv7 검사된다(ADR-098 결정 6: 이 경로는 alias를 만들지 않는다).
+# DB wrapper가 exact claim과 ``manual_admin`` origin을 core initial insert와 먼저
+# 원자화한다.
 # T-VN-35(0086): core에 ``detail``/``geom`` 컬럼이 없다. kind별 값은
 # subtype(``feature_places``/``feature_events``)이 **유일한 정본**이며 core
 # INSERT 직후 같은 트랜잭션에서 ``feature_subtype.write_subtype``이 쓴다. admin mutation은
@@ -3178,7 +3178,10 @@ _CREATE_ADMIN_MANUAL_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
 CALL feature.create_admin_manual_feature_with_initial_state(
     CAST(:feature_payload AS jsonb),
     CAST(:domain_command_id AS bigint),
-    NULL, NULL, NULL, NULL, NULL
+    -- OUT 넷: o_outcome · o_feature_id(uuid) · o_row_revision · o_existing_feature_id(uuid).
+    -- T-VN-39가 legacy 문자열 축을 없애면서 다섯에서 넷이 됐다. CALL은 OUT까지 세어
+    -- 프로시저를 찾으므로 자리 하나가 남으면 42883으로 생성 전량이 실패한다.
+    NULL, NULL, NULL, NULL
 )
 """
 

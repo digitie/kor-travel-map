@@ -16,7 +16,6 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from kortravelmap.core import make_feature_id
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.feature_subtype import SubtypeDetailError, write_subtype
 from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
@@ -83,10 +82,13 @@ CALL feature.submit_feature_request(
     NULL::text, NULL::timestamptz
 )
 """
+# T-VN-39: OUT이 다섯에서 넷으로 줄었다 — legacy 문자열 축(`o_feature_id text`)이
+# 사라지고 uuid 하나만 남는다. PG의 CALL은 OUT까지 세어 프로시저를 찾으므로 자리표시자
+# 수가 어긋나면 42883으로 **승인 전량이 실패**한다.
 _APPROVE_SQL: Final = """
 CALL feature.approve_feature_request_with_initial_state(
     CAST(:request_id AS uuid), CAST(:feature_payload AS jsonb), CAST(:command_id AS bigint),
-    NULL::text, NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
+    NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
 )
 """
 _REJECT_SQL: Final = """
@@ -100,10 +102,12 @@ SELECT * FROM feature.read_feature_request(CAST(:request_id AS uuid))
 _LIST_SQL: Final = """
 SELECT * FROM feature.list_feature_requests(CAST(:status AS text), CAST(:limit AS integer))
 """
+# T-VN-39 `_SHADOW_DROP`: `features.feature_uuid` 컬럼은 없다. 출력 이름은
+# 호출부 계약이라 유지하고 원천만 정본 키로 옮긴다.
 _EXACT_CONFLICT_FEATURE_SQL: Final = """
-SELECT feature_uuid, row_revision
+SELECT CAST(feature_id AS text) AS feature_uuid, row_revision
 FROM feature.features
-WHERE feature_uuid = CAST(:feature_uuid AS uuid)
+WHERE feature_id = CAST(:feature_uuid AS uuid)
 """
 
 
@@ -257,18 +261,12 @@ async def approve_feature_request(
         raise FeatureRequestValidationError("승인 Feature 값이 올바르지 않습니다.")
     if not all(isinstance(value, str) for value in (category, marker_color, marker_icon)):
         raise FeatureRequestValidationError("승인 Feature 값이 올바르지 않습니다.")
+    # ADR-098 결정 6: 요청 승인은 alias를 발급하지 않으므로 legacy ``f_*``를 만들
+    # 이유가 없다. 사이드카 payload allow-list에 ``feature_uuid`` 키가 없고
+    # ``feature_id``는 uuid 캐스팅 + UUIDv7 검사를 거친다 — 정본 키 하나만 보낸다.
     feature_uuid = candidate_feature_uuid()
-    feature_id = make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category="manual_request_v1",
-        source_type="user_request",
-        source_natural_key=f"feature-request::{request.request_id}",
-        content_hash=None,
-    )
     feature_payload = {
-        "feature_id": feature_id,
-        "feature_uuid": feature_uuid,
+        "feature_id": feature_uuid,
         "kind": kind,
         "name": name,
         "category": category,
@@ -335,7 +333,7 @@ async def approve_feature_request(
     try:
         await write_subtype(
             session,
-            feature_id=feature_id,
+            feature_id=feature_uuid,
             kind=kind,
             detail=None,
         )
@@ -344,7 +342,7 @@ async def approve_feature_request(
             "Feature subtype 값이 올바르지 않습니다."
         ) from error
     return FeatureRequestCreated(
-        feature_id=feature_id,
+        feature_id=feature_uuid,
         feature_uuid=str(observed_id),
         row_revision=revision,
     )

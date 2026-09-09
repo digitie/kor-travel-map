@@ -18,7 +18,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
-from kortravelmap.core import make_feature_id
 from kortravelmap.core.address import normalize_korean_text
 from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
@@ -3932,9 +3931,10 @@ async def create_manual_curation_item_with_feature_command(
 ) -> CurationManualFeatureItem | CurationManualFeatureExactDuplicate:
     """M03 combined procedure로 explicit manual Feature와 item을 함께 만든다.
 
-    caller가 UUID, legacy ID, origin/claim/상태 tuple을 고를 수 없게 이 경계에서
-    새 UUIDv7과 opaque bridge를 한 번 발급한다. detail subtype은 같은 outer
-    SERIALIZABLE command transaction에서만 뒤이어 materialize된다.
+    caller가 UUID, origin/claim/상태 tuple을 고를 수 없게 이 경계에서 새 UUIDv7을
+    한 번 발급한다 — 그것이 이 경로의 유일한 식별자다(ADR-098 결정 6: 큐레이션
+    수동 생성은 alias를 만들지 않는다). detail subtype은 같은 outer SERIALIZABLE
+    command transaction에서만 뒤이어 materialize된다.
     """
 
     if command_id < 1 or not principal.strip():
@@ -3965,14 +3965,6 @@ async def create_manual_curation_item_with_feature_command(
     if lon is None or lat is None:
         raise ValueError("manual_feature.coord is required")
     feature_uuid = candidate_feature_uuid()
-    feature_id = make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category="manual_feature_v1",
-        source_type="user_request",
-        source_natural_key=f"manual::{feature_uuid}",
-        content_hash=None,
-    )
     feature_payload = {
         key: value
         for key, value in manual_feature.items()
@@ -3982,7 +3974,9 @@ async def create_manual_curation_item_with_feature_command(
     # `create_manual_curation_item_with_feature_command`는 payload 키 집합에서
     # ``feature_uuid``를 아예 배제하고(`ck_manual_curation_create_payload`),
     # ``feature_id``를 uuid로 파싱해 UUIDv7 여부까지 검사한다. legacy ``f_*``는
-    # 여전히 `make_feature_id()`가 만들지만 그 값은 alias 축으로만 산다.
+    # 아예 만들지 않는다 — ADR-098 결정 6대로 이 경로는 alias를 발급하지 않으므로
+    # (발급자는 backfill과 `create_provider_feature_with_initial_state` 둘뿐)
+    # 계산해 봐야 실을 축이 없다.
     feature_payload.update(
         {
             "feature_id": feature_uuid,
@@ -4058,8 +4052,11 @@ async def create_manual_curation_item_with_feature_command(
     )
     if created is None:
         raise RuntimeError("manual curation item could not be read")
+    # DTO의 ``feature_id``는 재수렴 경로(``item.feature_id``, uuid)와 같은 축이어야
+    # 한다 — 여기만 legacy ``f_*``를 담으면 같은 필드가 경로마다 다른 축을 실어
+    # 소비자(child command response_body 등)가 둘을 구분할 수 없다.
     return CurationManualFeatureItem(
-        feature_id=feature_id,
+        feature_id=feature_uuid,
         feature_uuid=feature_uuid,
         feature_row_revision=feature_revision,
         item=created,

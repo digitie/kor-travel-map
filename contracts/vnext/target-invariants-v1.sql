@@ -29,12 +29,15 @@
 -- ADR-068 — Feature UUID identity + legacy alias (T-VN-32)
 -- -----------------------------------------------------------------------------
 
--- [INV-068-01] backfill 후 모든 feature는 alias를 1개 이상 가진다
--- (T-VN-32B — 신규 write는 UUID와 alias를 원자 생성).
+-- [INV-068-01] legacy alias는 **발행된 적 있는 외부 주소**만 담는다 — 정본 키(uuid)
+-- 표기를 alias로 되풀이하지 않는다 (T-VN-39/ADR-098 결정 6). 종전 문안 "backfill 후
+-- 모든 feature는 alias를 1개 이상 가진다"는 309가 trg_features_legacy_alias를 영구
+-- 제거하면서 거짓이 됐고, alias를 발급하는 경로는
+-- create_provider_feature_with_initial_state 하나만 남았다. head는 같은 규칙을
+-- ck_feature_aliases_legacy_alias_shape로 강제한다.
 SELECT count(*)
-FROM feature.features AS f
-LEFT JOIN feature.feature_aliases AS a ON a.feature_id = f.feature_id
-WHERE a.alias IS NULL; -- expect: 0 -- phase: post-backfill
+FROM feature.feature_aliases AS a
+WHERE a.alias = CAST(a.feature_id AS text); -- expect: 0 -- phase: both
 
 -- [INV-068-02] alias 전역 중복 없음 (UNIQUE 연결 전 preflight).
 SELECT count(*)
