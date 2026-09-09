@@ -88,6 +88,14 @@ _RETYPE_IDENTITY: Final[tuple[str, ...]] = (
 )
 
 #: shadow가 있으면 그 값을 승계하고, 없으면 alias로 푼다.
+#:
+#: **표 단위로 한 문장에 묶는다.** 같은 표의 두 컬럼을 따로 ALTER하면 그 둘을 함께
+#: 보는 CHECK가 중간 상태에서 재검사되어 `uuid = text`로 죽는다 — 2026-09-09 n150
+#: 실측: `theme_feature_candidate_transitions`의
+#: `ck_candidate_transition_initial_shape`가 `from_feature_id IS DISTINCT FROM
+#: to_feature_id`를 본다. `dedup_review_queue`(a/b) · `feature_merge_history`
+#: (master/loser) · `feature_reference_reconciliation_events`(old/replacement) ·
+#: `manual_provider_dedup_cases`(manual/provider)도 같은 모양이다.
 _RETYPE_REST: Final[tuple[str, ...]] = (
     "ALTER TABLE feature.curation_items ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
     "ALTER TABLE feature.curation_link_decisions ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
@@ -104,21 +112,16 @@ _RETYPE_REST: Final[tuple[str, ...]] = (
     "ALTER TABLE feature.feature_weather_values ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
     "ALTER TABLE feature.features ALTER COLUMN parent_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(parent_feature_id)",
     "ALTER TABLE feature.theme_candidate_generation_observations ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
-    "ALTER TABLE feature.theme_feature_candidate_transitions ALTER COLUMN from_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(from_feature_id)",
-    "ALTER TABLE feature.theme_feature_candidate_transitions ALTER COLUMN to_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(to_feature_id)",
+    "ALTER TABLE feature.theme_feature_candidate_transitions ALTER COLUMN from_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(from_feature_id), ALTER COLUMN to_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(to_feature_id)",
     "ALTER TABLE feature.theme_feature_candidates ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
     "ALTER TABLE ops.data_integrity_violations ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
-    "ALTER TABLE ops.dedup_review_queue ALTER COLUMN feature_id_a TYPE uuid USING feature.t39_uuid_for_legacy(feature_id_a)",
-    "ALTER TABLE ops.dedup_review_queue ALTER COLUMN feature_id_b TYPE uuid USING feature.t39_uuid_for_legacy(feature_id_b)",
+    "ALTER TABLE ops.dedup_review_queue ALTER COLUMN feature_id_a TYPE uuid USING feature.t39_uuid_for_legacy(feature_id_a), ALTER COLUMN feature_id_b TYPE uuid USING feature.t39_uuid_for_legacy(feature_id_b)",
     "ALTER TABLE ops.enrichment_review_queue ALTER COLUMN target_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(target_feature_id)",
-    "ALTER TABLE ops.feature_merge_history ALTER COLUMN loser_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(loser_feature_id)",
-    "ALTER TABLE ops.feature_merge_history ALTER COLUMN master_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(master_feature_id)",
+    "ALTER TABLE ops.feature_merge_history ALTER COLUMN loser_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(loser_feature_id), ALTER COLUMN master_feature_id TYPE uuid USING feature.t39_uuid_for_legacy(master_feature_id)",
     "ALTER TABLE ops.feature_overrides ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
-    "ALTER TABLE ops.feature_reference_reconciliation_events ALTER COLUMN old_feature_id TYPE uuid USING old_feature_uuid",
-    "ALTER TABLE ops.feature_reference_reconciliation_events ALTER COLUMN replacement_feature_id TYPE uuid USING replacement_feature_uuid",
+    "ALTER TABLE ops.feature_reference_reconciliation_events ALTER COLUMN old_feature_id TYPE uuid USING old_feature_uuid, ALTER COLUMN replacement_feature_id TYPE uuid USING replacement_feature_uuid",
     "ALTER TABLE ops.import_job_events ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
-    "ALTER TABLE ops.manual_provider_dedup_cases ALTER COLUMN manual_feature_id TYPE uuid USING manual_feature_uuid",
-    "ALTER TABLE ops.manual_provider_dedup_cases ALTER COLUMN provider_feature_id TYPE uuid USING provider_feature_uuid",
+    "ALTER TABLE ops.manual_provider_dedup_cases ALTER COLUMN manual_feature_id TYPE uuid USING manual_feature_uuid, ALTER COLUMN provider_feature_id TYPE uuid USING provider_feature_uuid",
     "ALTER TABLE ops.poi_cache_target_feature_links ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
     "ALTER TABLE provider_sync.source_links ALTER COLUMN feature_id TYPE uuid USING feature.t39_uuid_for_legacy(feature_id)",
 )
