@@ -2768,6 +2768,39 @@ class _FeatureLoadState:
     last_publication_from_state: str | None = None
 
 
+#: ADR-098: provider Feature의 identity는 `(provider_dataset_id, feature_kind,
+#: natural_key)` claim이다. DTO의 `feature_id`는 provider 라이브러리가 유도한 legacy
+#: `f_*` 문자열이라 재키 후 정본 키가 아니다 — 그것을 uuid로 캐스트하면 22P02다.
+_RESOLVE_PROVIDER_FEATURE_ID_SQL: Final[str] = """
+SELECT claim.feature_id
+FROM provider_sync.provider_feature_identities AS claim
+WHERE claim.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+  AND claim.feature_kind = CAST(:feature_kind AS text)
+  AND claim.natural_key = CAST(:natural_key AS text)
+"""
+
+
+async def _resolve_provider_feature_id(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    feature_kind: str,
+    natural_key: str,
+) -> str | None:
+    """claim 축으로 정본 키를 푼다. 첫 적재라 claim이 없으면 ``None``."""
+    row = (
+        await session.execute(
+            text(_RESOLVE_PROVIDER_FEATURE_ID_SQL),
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "feature_kind": feature_kind,
+                "natural_key": natural_key,
+            },
+        )
+    ).mappings().one_or_none()
+    return None if row is None else str(row["feature_id"])
+
+
 async def _feature_load_state(
     session: AsyncSession, feature_id: str
 ) -> _FeatureLoadState:
@@ -3062,7 +3095,29 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     record_inserted = record_state.inserted
     feature_inserted = False
     feature_updated = False
-    feature_state = await _feature_load_state(session, bundle.feature.feature_id)
+    if not bundle.feature.provider_natural_key:
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {bundle.feature.feature_id!r}에 provider_natural_key가 "
+            "없다 — identity claim 축(ADR-098)의 세 번째 성분이 비어 있다."
+        )
+    resolved_feature_id = await _resolve_provider_feature_id(
+        session,
+        provider_dataset_id=record_state.provider_dataset_id,
+        feature_kind=bundle.feature.kind.value,
+        natural_key=bundle.feature.provider_natural_key,
+    )
+    feature_state = (
+        _FeatureLoadState(
+            exists=False,
+            lifecycle_state=None,
+            publication_state=None,
+            quality_state=None,
+            row_revision=None,
+            has_provider_reactivation_override=False,
+        )
+        if resolved_feature_id is None
+        else await _feature_load_state(session, resolved_feature_id)
+    )
     feature_missing = not feature_state.exists
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
@@ -3089,21 +3144,25 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         # provider Feature도 base ledger와 effective materializer를 반드시 거치게
         # 한다. intermediate head는 배포하지 않는 single-release 규율이라 외부
         # reader가 direct-create 값을 볼 경계는 없다.
-        created = await _feature_load_state(session, bundle.feature.feature_id)
-        assert created.row_revision is not None
-        stored_feature_uuid = (
-            await session.execute(
-                text(
-                    "SELECT feature_id::text FROM feature.features "
-                    "WHERE feature_id = :feature_id"
-                ),
-                {"feature_id": bundle.feature.feature_id},
+        # wrapper가 claim을 확정했으니 이제 claim 축이 정본 키를 돌려준다. 여기서
+        # `bundle.feature.feature_id`(legacy `f_*`)를 쓰면 uuid 캐스트에서 22P02다.
+        stored_feature_uuid = await _resolve_provider_feature_id(
+            session,
+            provider_dataset_id=record_state.provider_dataset_id,
+            feature_kind=bundle.feature.kind.value,
+            natural_key=bundle.feature.provider_natural_key,
+        )
+        if stored_feature_uuid is None:
+            raise FeatureIdentityAnchorError(
+                f"provider Feature {bundle.feature.feature_id!r} 생성 직후에도 "
+                "identity claim이 없다 — wrapper가 claim을 남기지 않았다."
             )
-        ).scalar_one()
+        created = await _feature_load_state(session, stored_feature_uuid)
+        assert created.row_revision is not None
         await _apply_provider_feature_field_patch(
             session,
             bundle.feature,
-            feature_uuid=str(stored_feature_uuid),
+            feature_uuid=stored_feature_uuid,
             provider_dataset_id=record_state.provider_dataset_id,
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
@@ -3111,9 +3170,20 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             ),
             expected_row_revision=created.row_revision,
         )
+    lifecycle_feature_id = resolved_feature_id or await _resolve_provider_feature_id(
+        session,
+        provider_dataset_id=record_state.provider_dataset_id,
+        feature_kind=bundle.feature.kind.value,
+        natural_key=bundle.feature.provider_natural_key,
+    )
+    if lifecycle_feature_id is None:
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {bundle.feature.feature_id!r}에 identity claim이 없다 — "
+            "lifecycle 전이는 정본 키를 필요로 한다."
+        )
     state_updated = await _transition_provider_lifecycle_if_needed(
         session,
-        feature_id=bundle.feature.feature_id,
+        feature_id=lifecycle_feature_id,
         desired_state=_provider_feature_state(bundle.feature),
         provider_dataset_id=record_state.provider_dataset_id,
         source_membership=_ProviderSourceMembership(
