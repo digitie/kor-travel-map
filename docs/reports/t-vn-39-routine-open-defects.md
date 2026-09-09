@@ -215,3 +215,81 @@ caller_impact가 소비자 목록의 완결성을 주장하는데("in-DB 호출�
 
 [2] feature.purge_manual_feature — 0개
   원
+
+---
+
+## n150 실행이 잡은 것 (2026-09-09)
+
+설계 리뷰가 아니라 **실행**이 잡은 결함들이다. 순서가 그대로 진단의 순서다 — 앞의
+것이 막고 있어서 뒤의 것이 안 보인다.
+
+### 1. `permission denied for schema ops`
+
+`ALTER PROCEDURE ops.record_curation_import_manual_feature_child(...) OWNER TO
+ktm_curation_command_owner`. 소유권 이전은 새 소유자가 담는 스키마의 CREATE 권한을
+요구한다. 302가 같은 함정을 만나 "이전 동안만 GRANT하고 즉시 REVOKE"로 풀었는데, 그
+형태는 **이미 CREATE를 가진 롤에서 권한을 빼앗는다.** 29건 전부를 자기 상태를 보고
+되돌리는 `DO` 블록으로 감쌌다.
+
+실측으로 범위가 확정됐다: `feature` 스키마는 소유자 롤 전부가 `ALL`을 갖고
+(`alembic/head-schema.sql:24731-24737`), `ops`만 `ktm_curation_audit_writer` 하나를
+빼고 USAGE뿐이다(`:24745-24752`). 그래서 이 문제는 사실 `ops` 한 건짜리였다.
+
+### 2. 사이드카 배선 구멍 11건
+
+2차 스코프에서 찾은 11개 루틴의 사이드카를 다 써 놓고 `_ROUTINE_STATEMENTS`에 넣지
+않았다. **아무것도 빨개지지 않는다** — 마이그레이션은 통과하고, 시그니처 린트는
+사이드카 파일을 원천으로 읽으므로 그것도 초록이다. 첫 실패는 한참 뒤 런타임이다.
+
+`tests/lint/test_migration_sidecars_are_wired_into_their_migration.py`가 막는다.
+배선을 정규식으로 찾으면 검사 자신이 같은 함정에 빠지므로(306은 이름을 f-string으로
+조립해서 읽는다) `pathlib.Path.read_text`를 계측한 채 모듈을 import해서 실제로 열린
+파일을 센다.
+
+### 3. `must be owner of function derive_subtype_public_ready`
+
+파일 하나의 결함이 아니라 **배치**의 결함이다. 루틴 사이드카를 소유자 롤별로 바깥에서
+묶었는데, 그 그룹 안에 자기 `SET ROLE ...; ...; SET ROLE ktm_feature_schema_owner;`
+쌍을 이미 들고 있는 파일이 섞여 있었다(pg_dump가 그렇게 뱉는다). 그 파일이 끝나는
+순간 롤이 스키마 소유자로 돌아가고, 뒤따르는 파일이 엉뚱한 롤로 실행된다.
+
+각 파일도 옳고 목록도 옳은데 합성이 틀린다. 그리고 목록에서 파일 하나를 옮기는
+것만으로 다른 파일이 깨진다 — 계약이 아니라 함정이다.
+
+바깥 그룹을 없애고 18개 사이드카가 각자 창을 열고 닫게 했다. 이제
+`_ROUTINE_STATEMENTS`의 순서에는 의미가 없다.
+`tests/lint/test_routine_ddl_runs_under_its_owner_role.py`가 문장열을 그대로 흉내 내
+롤 상태를 따라가며 지킨다.
+
+`ops.record_curation_import_manual_feature_child`는 예외가 될 뻔했으나 — `ops`에서
+소유자 롤이 CREATE를 못 가진다 — 창을 셋으로 쪼개(소유자 롤로 DROP → 스키마 소유자로
+CREATE+이전 → 소유자 롤로 GRANT) 예외를 없앴다.
+
+### 4. 통과, 그리고 테스트 추종
+
+여기서 `alembic upgrade head`가 통과했다(13 passed / 2 failed). 남은 둘은 마이그레이션이
+아니라 테스트다: `_UNMAPPED_TABLE_COLUMNS`의 `feature_id text` 핀 4개와 uuid 컬럼에
+들어가는 문자열 리터럴. 다섯 번째 핀
+`ops.tvn36_legacy_freeze_preflight_manifest.feature_id`는 legacy `f_*`를 보존하는
+freeze manifest라 **text 그대로 둔다.**
+
+## 되짚어 본 것 — 이미 옳았던 것
+
+- **FK 참조 액션 34개 전부 보존됨.** §12이 하드 선결조건으로 올린
+  `fk_feature_aliases_feature`의 `ON DELETE CASCADE`를 포함해 `ON DELETE`/`ON UPDATE`/
+  `MATCH`/`DEFERRABLE`이 head와 글자 단위로 일치한다. 조용히 깨지는 부류라
+  `tests/lint/test_dropped_and_recreated_fks_keep_their_actions.py`로 못 박았다.
+- **target-schema 계약은 이미 `feature_id uuid`다.** `contracts/vnext/target-schema-v1.sql`에
+  `feature_id text`가 0건이다 — 309는 계약을 벗어나는 게 아니라 계약을 향해 간다.
+  계약이 `feature_uuid`를 말하는 두 자리는 산문 주석이고, 둘 다 "current head는 아직
+  shadow를 들고 있다"는 **경과 서술**이다.
+- **ADR-098 write 경로 완결.** 18개 provider 전부가 `provider_natural_key`를 싣고,
+  `tests/lint/test_provider_features_carry_their_natural_key.py`가 그것을 지킨다.
+
+## 남은 것
+
+- `packages/kor-travel-map-api/.../identity_projection.py`는 재키 후 **항등 치환**이 된다.
+  `feature_id`가 이미 UUID라 `row["feature_uuid"]`로 갈아끼울 것이 없다. 8개 라우터
+  ~30개 호출부가 걸려 있어 T-VN-39 범위에서 걷어내지 않는다 — 재키가 초록이 된 뒤의
+  독립 정리 항목이다. 지금은 무해하게 계속 통한다(repo가 여전히
+  `CAST(feature_id AS text) AS feature_uuid`를 투영한다).
