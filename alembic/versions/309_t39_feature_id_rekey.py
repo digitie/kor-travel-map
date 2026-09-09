@@ -552,6 +552,7 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_lock_current_provider_feature_source_evidence.sql"),
     *_sidecar("_309_materialize_theme_candidate_generation.sql"),
     *_sidecar("_309_reactivate_admin_feature_state.sql"),
+    *_sidecar("_309_resolve_provider_feature_id.sql"),
     *_sidecar("_309_revoke_feature_field_overrides.sql"),
     *_sidecar("_309_revoke_lifecycle_override.sql"),
     *_sidecar("_309_transition_admin_feature_state.sql"),

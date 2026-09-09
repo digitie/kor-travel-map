@@ -2771,12 +2771,17 @@ class _FeatureLoadState:
 #: ADR-098: provider Feature의 identity는 `(provider_dataset_id, feature_kind,
 #: natural_key)` claim이다. DTO의 `feature_id`는 provider 라이브러리가 유도한 legacy
 #: `f_*` 문자열이라 재키 후 정본 키가 아니다 — 그것을 uuid로 캐스트하면 22P02다.
+#:
+#: claim 표를 여기서 **직접 읽지 않는다.** runtime 롤은 `provider_sync`의 어떤 표에도
+#: 직접 접근하지 않으므로(인벤토리가 그 스키마 전체를 runtime에서 회수한다) 직접
+#: SELECT는 마이그레이터 롤로 도는 통합 테스트에서만 통과하고 운영에서 permission
+#: denied가 난다. 해석은 SECURITY DEFINER 함수가 맡는다.
 _RESOLVE_PROVIDER_FEATURE_ID_SQL: Final[str] = """
-SELECT claim.feature_id
-FROM provider_sync.provider_feature_identities AS claim
-WHERE claim.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
-  AND claim.feature_kind = CAST(:feature_kind AS text)
-  AND claim.natural_key = CAST(:natural_key AS text)
+SELECT feature.resolve_provider_feature_id(
+    CAST(:provider_dataset_id AS bigint),
+    CAST(:feature_kind AS text),
+    CAST(:natural_key AS text)
+) AS feature_id
 """
 
 
@@ -2797,8 +2802,9 @@ async def _resolve_provider_feature_id(
                 "natural_key": natural_key,
             },
         )
-    ).mappings().one_or_none()
-    return None if row is None else str(row["feature_id"])
+    ).mappings().one()
+    resolved = row["feature_id"]
+    return None if resolved is None else str(resolved)
 
 
 async def _feature_load_state(

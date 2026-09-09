@@ -161,12 +161,35 @@ _RECEIPT_HEAD_NARROW: Final[str] = (
 )
 
 
+#: claim 표를 실제로 읽고 쓰는 주체에게 권한을 준다.
+#:
+#: 표를 만들기만 하고 GRANT를 빠뜨리면 DDL은 조용히 성공하고, 첫 provider 적재에서
+#: `permission denied for table provider_feature_identities`로 죽는다 — 2026-09-09
+#: 통합 런에서 이것 하나가 71개 테스트를 끌고 내려갔다.
+#:
+#: `create_provider_feature_with_initial_state`는 SECURITY DEFINER이고 소유자가
+#: `ktm_feature_state_procedure_owner`다. 그 롤이 claim을 INSERT하고 경합 시 재조회한다.
+#: 읽기만 하는 쪽(정합성 관측·provider 적재의 존재 확인)은 runtime과 형제 owner 롤들이며,
+#: 형제 표(`provider_sync.source_links` 등)의 부여 형태를 그대로 따른다.
+_GRANTS: Final[tuple[str, ...]] = (
+    "GRANT SELECT, INSERT ON TABLE provider_sync.provider_feature_identities"
+    " TO ktm_feature_state_procedure_owner",
+    "GRANT SELECT ON TABLE provider_sync.provider_feature_identities"
+    " TO ktm_curation_command_owner",
+    "GRANT SELECT ON TABLE provider_sync.provider_feature_identities"
+    " TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE provider_sync.provider_feature_identities"
+    " TO ktm_feature_runtime",
+)
+
+
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     _CREATE_TABLE,
     _CREATE_DATASET_FK,
     _CREATE_FEATURE_INDEX,
     _OWNER,
+    *_GRANTS,
     _RECEIPT_HEAD_WIDEN,
 )
 
