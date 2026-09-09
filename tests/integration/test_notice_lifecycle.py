@@ -190,6 +190,39 @@ _MULTI_LINEAGE_B = "2026.07.03::10:05:00::0020::부산방향::다중계보-b::01
 #: notice bbox/in-area 테스트가 공유하는 area geometry (T-VN-35 이후 subtype 정본).
 _AREA_WKT = "POLYGON((127.0 37.3,127.2 37.3,127.2 37.5,127.0 37.5,127.0 37.3))"
 
+#: 이 파일이 raw SQL로 직접 심는 두 행의 정본 키. T-VN-39 재키 뒤
+#: ``feature.features.feature_id``는 uuid이고 값을 채워 주던 트리거도 없으므로
+#: seed가 직접 넣는다. provider 경로가 발급하는 UUIDv7(타임스탬프 선두)보다 확실히
+#: 작은 대역을 골라, "id 정렬만으로는 구세대가 이긴다"는 아래 tie-break 시나리오의
+#: 전제를 값으로 보장한다.
+_LEGACY_TIE_KEY = "00000000-0000-7000-8000-00000000ff01"
+_SPLIT_MAX_AREA_KEY = "00000000-0000-7000-8000-00000000ff02"
+_PUBLIC_READ_AREA_KEY = "00000000-0000-7000-8000-00000000ff03"
+
+
+async def _key(session: AsyncSession, ref: FeatureBundle | str) -> str:
+    """provider 경로가 이 bundle(또는 legacy ``f_*``)에 발급한 정본 키(uuid text).
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 서버가 발급한
+    UUIDv7이고, provider 변환기가 만든 ``f_*``는 ``feature_aliases``에 등록된
+    **주소**다(ADR-098 결정 6). DTO의 ``feature.feature_id``는 그 주소이므로, DB 행을
+    가리키거나 read 응답과 비교할 때는 여기서 한 번 정본 키로 바꾼다 — 재키가 옮긴
+    것은 그 한 걸음뿐이고, 이 파일이 지키는 계보 latest·종료 판정은 그대로다.
+    """
+    alias = ref.feature.feature_id if isinstance(ref, FeatureBundle) else ref
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": alias},
+            )
+        ).scalar_one()
+    )
+
 
 async def _seed_dup_lineage(
     session: AsyncSession,
@@ -254,14 +287,14 @@ async def _seed_multi_lineage_feature(
                 confidence, created_at
             )
             SELECT
-                :feature_id, source_entity_key, 'primary',
+                CAST(:feature_id AS uuid), source_entity_key, 'primary',
                 'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
         ),
         {
-            "feature_id": shared.feature.feature_id,
+            "feature_id": await _key(session, shared),
             "seen_at": _NOW,
             "source_record_key": shared_b_source.source_record.source_record_key,
         },
@@ -275,7 +308,7 @@ async def _seed_multi_lineage_feature(
             " WHERE feature_id = :feature_id"
         ),
         {
-            "feature_id": shared_b_source.feature.feature_id,
+            "feature_id": await _key(session, shared_b_source),
         },
     )
     await session.flush()
@@ -285,13 +318,16 @@ async def _seed_multi_lineage_feature(
 async def _attach_cross_scope_winner(
     session: AsyncSession,
     *,
-    feature_id: str,
+    feature_key: str,
     source_entity_id: str,
     provider: str = _CROSS_PROVIDER,
     dataset_key: str = _CROSS_DS,
     source_entity_type: str = _CROSS_ET,
 ) -> FeatureBundle:
-    """다른 provider/dataset의 유일한 winner 계보를 기존 feature에 연결한다."""
+    """다른 provider/dataset의 유일한 winner 계보를 기존 feature에 연결한다.
+
+    ``feature_key``는 정본 키(uuid text)다 — 호출자가 :func:`_key`로 풀어 넘긴다.
+    """
     await _ensure_active_provider_dataset(
         session, provider=provider, dataset_key=dataset_key
     )
@@ -311,36 +347,35 @@ async def _attach_cross_scope_winner(
                 confidence, created_at
             )
             SELECT
-                :feature_id, source_entity_key, 'primary',
+                CAST(:feature_id AS uuid), source_entity_key, 'primary',
                 'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
         ),
         {
-            "feature_id": feature_id,
+            "feature_id": feature_key,
             "seen_at": _NOW,
             "source_record_key": cross_scope.source_record.source_record_key,
         },
     )
     # cross-scope entity의 임시 원 feature는 감사 이력으로만 남기고, 전달받은
     # feature가 이 계보의 유일한 공개 winner가 되게 한다.
+    cross_scope_key = await _key(session, cross_scope)
     await session.execute(
         text(
             "UPDATE feature.features"
             " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
             " WHERE feature_id = :feature_id"
         ),
-        {
-            "feature_id": cross_scope.feature.feature_id,
-        },
+        {"feature_id": cross_scope_key},
     )
     await session.execute(
         text(
             "DELETE FROM provider_sync.source_links "
             "WHERE feature_id = :feature_id"
         ),
-        {"feature_id": cross_scope.feature.feature_id},
+        {"feature_id": cross_scope_key},
     )
     await session.flush()
     return cross_scope
@@ -394,14 +429,14 @@ async def _seed_split_max_tuple_lineage(
                 confidence, created_at
             )
             SELECT
-                :feature_id, source_entity_key, 'primary',
+                CAST(:feature_id AS uuid), source_entity_key, 'primary',
                 'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
             """
         ),
         {
-            "feature_id": low.feature.feature_id,
+            "feature_id": await _key(session, low),
             "seen_at": _NOW,
             "source_record_key": high.source_record.source_record_key,
         },
@@ -413,7 +448,7 @@ async def _seed_split_max_tuple_lineage(
             " WHERE feature_id = :feature_id"
         ),
         {
-            "feature_id": high.feature.feature_id,
+            "feature_id": await _key(session, high),
         },
     )
     await session.flush()
@@ -424,6 +459,9 @@ async def _feature_state(
     session: AsyncSession, feature_id: str
 ) -> tuple[str, str, Any]:
     """(lifecycle, publication, notice valid_end).
+
+    ``feature_id``는 정본 키(uuid text)다 — provider bundle에서 온 legacy ``f_*``는
+    호출 전에 :func:`_key`로 푼다.
 
     0097이 ``status``/``deleted_at``을 물리 삭제했다. notice supersede의 soft-delete는
     3축에서 ``lifecycle_state='retired'``다 — 값이 아니라 **의미**를 옮긴다.
@@ -512,12 +550,12 @@ async def test_supersede_soft_deletes_non_latest_per_lineage(
     assert result.superseded == 1
     assert result.closed == 0
     lifecycle, publication, _ = await _feature_state(
-        migrated_session, old_gen.feature.feature_id
+        migrated_session, await _key(migrated_session, old_gen)
     )
     assert lifecycle == "retired"
     assert publication == "suppressed"
     lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, new_gen.feature.feature_id
+        migrated_session, await _key(migrated_session, new_gen)
     )
     assert lifecycle == "active"
     assert valid_end is None  # 계보가 살아 있으면 닫지 않는다.
@@ -531,14 +569,19 @@ async def test_reconcile_exact_tie_prefers_current_identity(
     identity 이행 중 하나의 current source entity가 구/신 feature 양쪽에
     primary link로 남은 실제 형태를 재현한다. ``feature_id ASC``만으로
     고르면 구세대가 이기도록 구 ID를 작게 정해 canonical 판정을 검증한다.
+
+    T-VN-39: 그 "작은 ID"는 이제 uuid다. provider 경로가 발급하는 UUIDv7은 선두
+    48비트가 현재 시각이므로, 0으로 시작하는 대역을 고르면 정렬 전제가 값으로
+    보장된다 — 아래 단언이 그것을 실제로 확인한다.
     """
     current = _krex_notice_bundle(
         source_entity_id=_LINEAGE,
         raw_data={**_CLUES, "gen": "current"},
     )
     await feature_repo.load_bundles(migrated_session, [current])
-    legacy_feature_id = "f_global_n_0000000000000000"
-    assert legacy_feature_id < current.feature.feature_id
+    current_key = await _key(migrated_session, current)
+    legacy_feature_id = _LEGACY_TIE_KEY
+    assert legacy_feature_id < current_key
     # T-VN-35(ADR-086): core에 detail이 없다 — 구세대 사본은 core 축만 복제하고
     # kind별 값은 notice subtype에 같은 규칙으로 복제한다.
     await migrated_session.execute(
@@ -550,7 +593,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
                 lifecycle_state, publication_state, quality_state
             )
             SELECT
-                :legacy_feature_id, kind, name, category, coord,
+                CAST(:legacy_feature_id AS uuid), kind, name, category, coord,
                 coord_precision_digits, marker_icon, marker_color,
                 lifecycle_state, publication_state, quality_state
             FROM feature.features
@@ -559,18 +602,18 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         ),
         {
             "legacy_feature_id": legacy_feature_id,
-            "current_feature_id": current.feature.feature_id,
+            "current_feature_id": current_key,
         },
     )
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.feature_notices (
-                feature_id, feature_uuid, kind, notice_type, severity,
+                feature_id, kind, notice_type, severity,
                 valid_start_time, valid_end_time, source_agency, officer_name, payload
             )
             SELECT
-                legacy.feature_id, legacy.feature_uuid, legacy.kind,
+                legacy.feature_id, legacy.kind,
                 source.notice_type, source.severity, source.valid_start_time,
                 source.valid_end_time, source.source_agency, source.officer_name,
                 source.payload
@@ -582,7 +625,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         ),
         {
             "legacy_feature_id": legacy_feature_id,
-            "current_feature_id": current.feature.feature_id,
+            "current_feature_id": current_key,
         },
     )
     await migrated_session.execute(
@@ -593,7 +636,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
                 confidence, created_at
             )
             SELECT
-                :legacy_feature_id, source_entity_key, 'primary',
+                CAST(:legacy_feature_id AS uuid), source_entity_key, 'primary',
                 'identity_migration', 100, :seen_at
             FROM provider_sync.source_records
             WHERE source_record_key = :source_record_key
@@ -616,7 +659,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         max_lat=37.8,
         kinds=["notice"],
     )
-    assert {row["feature_id"] for row in rows} == {current.feature.feature_id}
+    assert {str(row["feature_id"]) for row in rows} == {current_key}
 
     result = await feature_repo.supersede_stale_notice_features(
         migrated_session,
@@ -626,7 +669,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
     )
     assert result.superseded == 1
     assert await _is_retired(migrated_session, legacy_feature_id)
-    assert not await _is_retired(migrated_session, current.feature.feature_id)
+    assert not await _is_retired(migrated_session, current_key)
 
     # 같은 snapshot/reconcile을 다시 적용해도 winner가 바뀌지 않는다.
     again = await feature_repo.supersede_stale_notice_features(
@@ -636,7 +679,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         source_entity_type=_KREX_ET,
     )
     assert again.superseded == 0
-    assert not await _is_retired(migrated_session, current.feature.feature_id)
+    assert not await _is_retired(migrated_session, current_key)
 
 
 async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
@@ -644,16 +687,16 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
 ) -> None:
     """분리된 max 값으로 존재하지 않는 tuple을 만들지 않고 실제 row 하나를 고른다."""
     synthesized_winner, actual_winner = await _seed_split_max_tuple_lineage(migrated_session)
-    expected_ids = {actual_winner.feature.feature_id}
+    expected_ids = {await _key(migrated_session, actual_winner)}
     candidate_ids = {
-        synthesized_winner.feature.feature_id,
-        actual_winner.feature.feature_id,
+        await _key(migrated_session, synthesized_winner),
+        await _key(migrated_session, actual_winner),
     }
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
             " SET sido_code = '11', name = '[테스트] 동일 교통 공지'"
-            " WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+            " WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
         ),
         {"feature_ids": list(candidate_ids)},
     )
@@ -664,7 +707,7 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
                 feature_id, kind, name, category, coord,
                 lifecycle_state, publication_state, quality_state
             ) VALUES (
-                'notice-split-max-area', 'area', '공지 lexicographic 테스트 영역',
+                CAST(:area_key AS uuid), 'area', '공지 lexicographic 테스트 영역',
                 '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
@@ -672,12 +715,13 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
                 'active', 'published', 'valid'
             )
             """
-        )
+        ),
+        {"area_key": _SPLIT_MAX_AREA_KEY},
     )
     # T-VN-35(ADR-086): area geometry 정본은 ``feature_areas``(MultiPolygon NOT NULL).
     await seed_feature_subtype(
         migrated_session,
-        feature_id="notice-split-max-area",
+        feature_id=_SPLIT_MAX_AREA_KEY,
         kind="area",
         geom_wkt=_AREA_WKT,
     )
@@ -702,7 +746,7 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
             kinds=["notice"],
             include_geometry=include_geometry,
         )
-        assert {row["feature_id"] for row in rows} == expected_ids
+        assert {str(row["feature_id"]) for row in rows} == expected_ids
 
     search_by_bbox = await feature_repo.search_features(
         migrated_session,
@@ -746,11 +790,11 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
 
     contained = await feature_repo.features_contained_in_area(
         migrated_session,
-        feature_id="notice-split-max-area",
+        feature_id=_SPLIT_MAX_AREA_KEY,
         kinds=["notice"],
         limit=20,
     )
-    assert {row["feature_id"] for row in contained} == expected_ids
+    assert {str(row["feature_id"]) for row in contained} == expected_ids
 
     clusters = await feature_repo.cluster_features_in_bbox(
         migrated_session,
@@ -779,10 +823,14 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         source_entity_type=_KREX_ET,
     )
     assert result.superseded == 1
-    assert not await _is_retired(migrated_session, actual_winner.feature.feature_id)
-    assert (await _feature_state(migrated_session, synthesized_winner.feature.feature_id))[
-        1
-    ] is not None
+    assert not await _is_retired(
+        migrated_session, await _key(migrated_session, actual_winner)
+    )
+    assert (
+        await _feature_state(
+            migrated_session, await _key(migrated_session, synthesized_winner)
+        )
+    )[1] is not None
 
 
 async def test_multi_lineage_winner_survives_public_read_and_reconcile(
@@ -790,7 +838,10 @@ async def test_multi_lineage_winner_survives_public_read_and_reconcile(
 ) -> None:
     """한 계보 winner/다른 계보 loser인 feature 전체를 숨기거나 삭제하지 않는다."""
     shared, older_a, newer_b = await _seed_multi_lineage_feature(migrated_session)
-    expected = {shared.feature.feature_id, newer_b.feature.feature_id}
+    expected = {
+        await _key(migrated_session, shared),
+        await _key(migrated_session, newer_b),
+    }
 
     # reconcile 전 공개 필터도 "모든 계보에서 loser"인 older_a만 숨긴다.
     assert await _public_notice_ids(migrated_session) == expected
@@ -802,9 +853,11 @@ async def test_multi_lineage_winner_survives_public_read_and_reconcile(
         source_entity_type=_KREX_ET,
     )
     assert result == feature_repo.NoticeReconcileResult(superseded=1)
-    assert not await _is_retired(migrated_session, shared.feature.feature_id)
-    assert await _is_retired(migrated_session, older_a.feature.feature_id)
-    assert not await _is_retired(migrated_session, newer_b.feature.feature_id)
+    assert not await _is_retired(migrated_session, await _key(migrated_session, shared))
+    assert await _is_retired(migrated_session, await _key(migrated_session, older_a))
+    assert not await _is_retired(
+        migrated_session, await _key(migrated_session, newer_b)
+    )
     assert await _public_notice_ids(migrated_session) == expected
 
 
@@ -832,7 +885,7 @@ async def test_snapshot_preserves_winner_differing_in_each_scope_dimension(
     await feature_repo.load_bundles(migrated_session, [scoped])
     cross = await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=scoped.feature.feature_id,
+        feature_key=await _key(migrated_session, scoped),
         source_entity_id=f"cross-dimension::{different_dimension}",
         provider=provider,
         dataset_key=dataset_key,
@@ -858,7 +911,7 @@ async def test_snapshot_preserves_winner_differing_in_each_scope_dimension(
     )
     assert scoped_absent == feature_repo.NoticeReconcileResult()
     lifecycle, publication, valid_end = await _feature_state(
-        migrated_session, scoped.feature.feature_id
+        migrated_session, await _key(migrated_session, scoped)
     )
     assert lifecycle == "active"
     assert publication == "published"
@@ -908,14 +961,16 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         migrated_session,
         [cross_scope_winner, scoped_winner, close_guard],
     )
+    cross_scope_winner_key = await _key(migrated_session, cross_scope_winner)
+    close_guard_key = await _key(migrated_session, close_guard)
     await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=cross_scope_winner.feature.feature_id,
+        feature_key=cross_scope_winner_key,
         source_entity_id="cross-provider-delete-winner",
     )
     await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=close_guard.feature.feature_id,
+        feature_key=close_guard_key,
         source_entity_id="cross-provider-close-winner",
     )
     cross_present = await feature_repo.supersede_stale_notice_features(
@@ -932,9 +987,9 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
     assert cross_present == feature_repo.NoticeReconcileResult()
 
     expected = {
-        cross_scope_winner.feature.feature_id,
-        scoped_winner.feature.feature_id,
-        close_guard.feature.feature_id,
+        cross_scope_winner_key,
+        await _key(migrated_session, scoped_winner),
+        close_guard_key,
     }
     assert await _public_notice_ids(migrated_session) == expected
 
@@ -947,9 +1002,7 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         source_entity_type=_KREX_ET,
     )
     assert dedup == feature_repo.NoticeReconcileResult()
-    assert not await _is_retired(
-        migrated_session, cross_scope_winner.feature.feature_id
-    )
+    assert not await _is_retired(migrated_session, cross_scope_winner_key)
 
     # 과거 scope-local close/dedup 잔존을 재현한다. 현재 KREX 계보에서는
     # loser지만 다른 scope의 explicit true winner이므로 다시 열어야 한다.
@@ -980,7 +1033,7 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         ),
         {
             "ended_at": _NOW + timedelta(minutes=6),
-            "feature_id": cross_scope_winner.feature.feature_id,
+            "feature_id": cross_scope_winner_key,
         },
     )
 
@@ -997,13 +1050,13 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
     assert snapshot == feature_repo.NoticeReconcileResult(reopened=1)
     lifecycle, publication, valid_end = await _feature_state(
         migrated_session,
-        cross_scope_winner.feature.feature_id,
+        cross_scope_winner_key,
     )
     assert lifecycle == "active"
     assert publication == "published"
     assert valid_end is None
     lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, close_guard.feature.feature_id
+        migrated_session, close_guard_key
     )
     assert lifecycle == "active"
     assert valid_end is None
@@ -1020,9 +1073,10 @@ async def test_cross_scope_snapshot_state_closes_after_last_winner_disappears(
         feature_suffix="cross-snapshot-shared",
     )
     await feature_repo.load_bundles(migrated_session, [scope_a])
+    scope_a_key = await _key(migrated_session, scope_a)
     scope_b = await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=scope_a.feature.feature_id,
+        feature_key=scope_a_key,
         source_entity_id="cross-snapshot-scope-b",
     )
     t0 = _NOW + timedelta(minutes=30)
@@ -1060,7 +1114,7 @@ async def test_cross_scope_snapshot_state_closes_after_last_winner_disappears(
         source_entity_type=scope_a.source_record.source_entity_type,
         lineage_key=scope_a.source_record.source_entity_id,
     )) == (False, a_absent_at, None)
-    assert (await _feature_state(migrated_session, scope_a.feature.feature_id))[2] is None
+    assert (await _feature_state(migrated_session, scope_a_key))[2] is None
 
     # 마지막 present winner B까지 사라진 호출만 정확히 한 번 닫는다.
     b_absent_at = t0 + timedelta(minutes=3)
@@ -1104,7 +1158,7 @@ async def test_cross_scope_snapshot_state_closes_after_last_winner_disappears(
         closed_at=reappeared_at,
     )
     assert reappeared == feature_repo.NoticeReconcileResult(reopened=1)
-    assert await _public_notice_ids(migrated_session) == {scope_a.feature.feature_id}
+    assert await _public_notice_ids(migrated_session) == {scope_a_key}
     repeated = await feature_repo.supersede_stale_notice_features(
         migrated_session,
         provider=scope_a.source_record.provider,
@@ -1130,6 +1184,7 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
     entity_a = f"entity-a-{suffix}"
     entity_b = f"entity-b-{suffix}"
     feature_ids: list[str] = []
+    scope_a_key = ""
     scope_a: FeatureBundle | None = None
     scope_b: FeatureBundle | None = None
     first_session = AsyncSession(migrated_engine, expire_on_commit=False)
@@ -1149,18 +1204,16 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
                 source_entity_type="notice",
             )
             await feature_repo.load_bundles(setup, [scope_a])
+            scope_a_key = await _key(setup, scope_a)
             scope_b = await _attach_cross_scope_winner(
                 setup,
-                feature_id=scope_a.feature.feature_id,
+                feature_key=scope_a_key,
                 source_entity_id=entity_b,
                 provider=provider_b,
                 dataset_key=dataset_b,
                 source_entity_type="notice",
             )
-            feature_ids = [
-                scope_a.feature.feature_id,
-                scope_b.feature.feature_id,
-            ]
+            feature_ids = [scope_a_key, await _key(setup, scope_b)]
             for bundle, checked_at in (
                 (scope_a, _NOW + timedelta(hours=1)),
                 (scope_b, _NOW + timedelta(hours=1, minutes=1)),
@@ -1208,7 +1261,7 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
 
         async with AsyncSession(migrated_engine) as verify:
             lifecycle, _publication, valid_end = await _feature_state(
-                verify, scope_a.feature.feature_id
+                verify, scope_a_key
             )
         assert lifecycle == "active"
         assert valid_end is not None
@@ -1240,7 +1293,7 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
                 await connection.execute(
                     text(
                         "DELETE FROM feature.features "
-                        "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+                        "WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
                     ),
                     {"feature_ids": feature_ids},
                 )
@@ -1291,6 +1344,9 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
 ) -> None:
     """패배 계보만 active면 닫고, 승리 계보가 active일 때만 reopen한다."""
     shared, older_a, newer_b = await _seed_multi_lineage_feature(migrated_session)
+    shared_key = await _key(migrated_session, shared)
+    older_a_key = await _key(migrated_session, older_a)
+    newer_b_key = await _key(migrated_session, newer_b)
     closed_at = _NOW + timedelta(minutes=10)
 
     # shared는 A winner/B loser다. B만 active이므로 shared의 승리 계보 A는
@@ -1305,18 +1361,18 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
     )
     assert b_only == feature_repo.NoticeReconcileResult(superseded=1, closed=1)
     shared_lifecycle, shared_publication, shared_end = await _feature_state(
-        migrated_session, shared.feature.feature_id
+        migrated_session, shared_key
     )
     assert shared_lifecycle == "active"
     assert shared_publication == "published"
     assert shared_end == closed_at
-    assert await _is_retired(migrated_session, older_a.feature.feature_id)
+    assert await _is_retired(migrated_session, older_a_key)
     newer_lifecycle, _newer_publication, newer_end = await _feature_state(
-        migrated_session, newer_b.feature.feature_id
+        migrated_session, newer_b_key
     )
     assert newer_lifecycle == "active"
     assert newer_end is None
-    assert await _public_notice_ids(migrated_session) == {newer_b.feature.feature_id}
+    assert await _public_notice_ids(migrated_session) == {newer_b_key}
 
     # 반대로 A만 active면 shared를 reopen하고, 사라진 B winner를 닫는다.
     a_only = await feature_repo.supersede_stale_notice_features(
@@ -1329,16 +1385,16 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
     )
     assert a_only == feature_repo.NoticeReconcileResult(closed=1, reopened=1)
     shared_lifecycle, _shared_publication, shared_end = await _feature_state(
-        migrated_session, shared.feature.feature_id
+        migrated_session, shared_key
     )
     assert shared_lifecycle == "active"
     assert shared_end is None
     newer_lifecycle, _newer_publication, newer_end = await _feature_state(
-        migrated_session, newer_b.feature.feature_id
+        migrated_session, newer_b_key
     )
     assert newer_lifecycle == "active"
     assert newer_end == closed_at + timedelta(minutes=10)
-    assert await _public_notice_ids(migrated_session) == {shared.feature.feature_id}
+    assert await _public_notice_ids(migrated_session) == {shared_key}
 
     # 모든 승리 계보가 absent면 열린 shared만 한 번 닫혀 metric도 row 변화와 같다.
     empty = await feature_repo.supersede_stale_notice_features(
@@ -1357,6 +1413,7 @@ async def test_supersede_closes_lineage_missing_from_feed(
     migrated_session: AsyncSession,
 ) -> None:
     _, new_gen = await _seed_dup_lineage(migrated_session)
+    new_gen_key = await _key(migrated_session, new_gen)
     closed_at = _NOW + timedelta(minutes=10)
 
     result = await feature_repo.supersede_stale_notice_features(
@@ -1372,7 +1429,7 @@ async def test_supersede_closes_lineage_missing_from_feed(
     assert result.closed == 1
     assert result.reopened == 0
     lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, new_gen.feature.feature_id
+        migrated_session, new_gen_key
     )
     assert lifecycle == "active"  # latest는 retire가 아니라 '종료'.
     assert valid_end is not None
@@ -1391,7 +1448,7 @@ async def test_supersede_closes_lineage_missing_from_feed(
     assert reappeared.closed == 0
     assert reappeared.reopened == 1
     lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, new_gen.feature.feature_id
+        migrated_session, new_gen_key
     )
     assert lifecycle == "active"
     assert valid_end is None
@@ -1414,6 +1471,8 @@ async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
 ) -> None:
     """현재 feed의 canonical winner가 과거 soft-delete돼도 즉시 복구한다."""
     old_gen, current = await _seed_dup_lineage(migrated_session)
+    old_gen_key = await _key(migrated_session, old_gen)
+    current_key = await _key(migrated_session, current)
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
@@ -1422,7 +1481,7 @@ async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
             " WHERE feature_id = :feature_id"
         ),
         {
-            "feature_id": current.feature.feature_id,
+            "feature_id": current_key,
         },
     )
 
@@ -1439,12 +1498,12 @@ async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
     assert result.closed == 0
     assert result.superseded == 1
     old_lifecycle, _old_publication, _ = await _feature_state(
-        migrated_session, old_gen.feature.feature_id
+        migrated_session, old_gen_key
     )
     assert old_lifecycle == "retired"
     assert old_lifecycle != "active"
     lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, current.feature.feature_id
+        migrated_session, current_key
     )
     assert lifecycle == "active"
     assert valid_end is None
@@ -1684,9 +1743,10 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
 
     # 같은 Feature의 다른 provider 계보가 explicit present면 공유 Feature는
     # 다시 열리되, 원 provider의 최신 false state 자체는 유지한다.
+    bundle_key = await _key(migrated_session, bundle)
     cross_bundle = await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=bundle.feature.feature_id,
+        feature_key=bundle_key,
         source_entity_id="event-lineage-cross-provider",
         provider="python-test-notice-events-cross",
         dataset_key="test_notice_events_cross",
@@ -1723,7 +1783,7 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
                 "AND se.source_entity_type = :source_entity_type"
             ),
             {
-                "feature_id": bundle.feature.feature_id,
+                "feature_id": bundle_key,
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "source_entity_type": source_entity_type,
@@ -1768,7 +1828,7 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
                 "AND se.source_entity_type = :source_entity_type"
             ),
             {
-                "feature_id": bundle.feature.feature_id,
+                "feature_id": bundle_key,
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "source_entity_type": source_entity_type,
@@ -1780,13 +1840,11 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     assert after_stale.severity != "5"
     lifecycle, _publication, valid_end = await _feature_state(
         migrated_session,
-        bundle.feature.feature_id,
+        bundle_key,
     )
     assert lifecycle == "active"
     assert valid_end is None
-    assert await _public_notice_ids(migrated_session) == {
-        bundle.feature.feature_id
-    }
+    assert await _public_notice_ids(migrated_session) == {bundle_key}
     assert await _snapshot_state(
         migrated_session,
         provider=provider,
@@ -1814,7 +1872,6 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         dataset_key=dataset_key,
         source_entity_type=source_entity_type,
     )
-    feature_id = bundle.feature.feature_id
     wall_now = datetime.now(_KST)
     first_at = wall_now - timedelta(minutes=10)
     await feature_repo.load_notice_event_bundles(
@@ -1826,9 +1883,12 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         lineage_events={lineage_key: (True, first_at, None)},
         observed_at=first_at,
     )
+    # provider 경로가 이 load에서 발급한 정본 키. 아래 raw SQL·상태 단언은 모두
+    # 그 키를 가리킨다(legacy ``f_*``는 alias 등록부에만 있다).
+    feature_id = await _key(migrated_session, bundle)
     await _attach_cross_scope_winner(
         migrated_session,
-        feature_id=feature_id,
+        feature_key=feature_id,
         source_entity_id="truth-unknown-lineage",
         provider="python-test-notice-unknown",
         dataset_key="test_notice_unknown",
@@ -2147,8 +2207,9 @@ async def test_close_notice_features_kma_lift_roundtrip(
     )
     assert announced.load.bundles_total == 1
     assert announced.reconcile == feature_repo.NoticeReconcileResult()
-    feature_id = kma_alert_notice_feature_id("stn:108", "폭염")
-    assert bundles[0].feature.feature_id == feature_id
+    legacy_ref = kma_alert_notice_feature_id("stn:108", "폭염")
+    assert bundles[0].feature.feature_id == legacy_ref
+    feature_id = await _key(migrated_session, legacy_ref)
     assert (await _feature_state(migrated_session, feature_id))[2] == scheduled_end
     assert await _snapshot_state(
         migrated_session,
@@ -2224,6 +2285,8 @@ async def test_bbox_read_hides_non_latest_and_ended(
     migrated_session: AsyncSession,
 ) -> None:
     old_gen, new_gen = await _seed_dup_lineage(migrated_session)
+    old_gen_key = await _key(migrated_session, old_gen)
+    new_gen_key = await _key(migrated_session, new_gen)
     bbox = {
         "min_lon": 127.0,
         "min_lat": 37.0,
@@ -2232,10 +2295,10 @@ async def test_bbox_read_hides_non_latest_and_ended(
         "limit": 50,
     }
     rows = await feature_repo.features_in_bbox(migrated_session, kinds=["notice"], **bbox)
-    ids = {row["feature_id"] for row in rows}
+    ids = {str(row["feature_id"]) for row in rows}
     # 계보 latest만 — 구세대는 soft-delete 전이라도 read에서 숨는다.
-    assert new_gen.feature.feature_id in ids
-    assert old_gen.feature.feature_id not in ids
+    assert new_gen_key in ids
+    assert old_gen_key not in ids
 
     # 종료된 notice는 숨는다.
     await migrated_session.execute(
@@ -2243,11 +2306,11 @@ async def test_bbox_read_hides_non_latest_and_ended(
             "UPDATE feature.feature_notices SET valid_end_time = :t"
             " WHERE feature_id = :fid"
         ),
-        {"t": _NOW + timedelta(hours=1), "fid": new_gen.feature.feature_id},
+        {"t": _NOW + timedelta(hours=1), "fid": new_gen_key},
     )
     rows = await feature_repo.features_in_bbox(migrated_session, kinds=["notice"], **bbox)
-    ids = {row["feature_id"] for row in rows}
-    assert new_gen.feature.feature_id not in ids
+    ids = {str(row["feature_id"]) for row in rows}
+    assert new_gen_key not in ids
 
 
 async def test_public_active_reads_share_latest_and_ended_notice_filter(
@@ -2272,16 +2335,18 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         lat=37.41,
     )
     await feature_repo.load_bundles(migrated_session, [ended])
+    new_gen_key = await _key(migrated_session, new_gen)
+    ended_key = await _key(migrated_session, ended)
     all_ids = {
-        old_gen.feature.feature_id,
-        new_gen.feature.feature_id,
-        ended.feature.feature_id,
+        await _key(migrated_session, old_gen),
+        new_gen_key,
+        ended_key,
     }
-    expected_ids = {new_gen.feature.feature_id}
+    expected_ids = {new_gen_key}
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET sido_code = '11'"
-            " WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+            " WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
         ),
         {"feature_ids": list(all_ids)},
     )
@@ -2293,7 +2358,7 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         ),
         {
             "ended_at": _NOW + timedelta(hours=1),
-            "ended_id": ended.feature.feature_id,
+            "ended_id": ended_key,
         },
     )
     await migrated_session.execute(
@@ -2303,18 +2368,19 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
                 feature_id, kind, name, category, coord,
                 lifecycle_state, publication_state, quality_state
             ) VALUES (
-                'notice-public-read-area', 'area', '공지 조회 테스트 영역', '03000000',
+                CAST(:area_key AS uuid), 'area', '공지 조회 테스트 영역', '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
                 ),
                 'active', 'published', 'valid'
             )
             """
-        )
+        ),
+        {"area_key": _PUBLIC_READ_AREA_KEY},
     )
     await seed_feature_subtype(
         migrated_session,
-        feature_id="notice-public-read-area",
+        feature_id=_PUBLIC_READ_AREA_KEY,
         kind="area",
         geom_wkt=_AREA_WKT,
     )
@@ -2329,7 +2395,7 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         max_lat=bbox[3],
         kinds=["notice"],
     )
-    assert {row["feature_id"] for row in bbox_rows} == expected_ids
+    assert {str(row["feature_id"]) for row in bbox_rows} == expected_ids
 
     search_page = await feature_repo.search_features(
         migrated_session,
@@ -2354,11 +2420,11 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
 
     contained = await feature_repo.features_contained_in_area(
         migrated_session,
-        feature_id="notice-public-read-area",
+        feature_id=_PUBLIC_READ_AREA_KEY,
         kinds=["notice"],
         limit=20,
     )
-    assert {row["feature_id"] for row in contained} == expected_ids
+    assert {str(row["feature_id"]) for row in contained} == expected_ids
 
     clusters = await feature_repo.cluster_features_in_bbox(
         migrated_session,
@@ -2414,8 +2480,10 @@ async def test_purge_expired_notices(migrated_session: AsyncSession) -> None:
     purged = await feature_repo.purge_expired_notices(migrated_session)
 
     assert purged == 1
-    assert await _is_retired(migrated_session, stale.feature.feature_id)
-    assert not await _is_retired(migrated_session, fresh.feature.feature_id)
+    assert await _is_retired(migrated_session, await _key(migrated_session, stale))
+    assert not await _is_retired(
+        migrated_session, await _key(migrated_session, fresh)
+    )
 
 
 async def test_read_paths_exclude_ended_notice_by_default(
@@ -2437,8 +2505,8 @@ async def test_read_paths_exclude_ended_notice_by_default(
         raw_data={"occurred_date": "2026.07.03", "route_no": "0020", "point_name": "나"},
     )
     await feature_repo.load_bundles(migrated_session, [active, ended])
-    active_id = active.feature.feature_id
-    ended_id = ended.feature.feature_id
+    active_id = await _key(migrated_session, active)
+    ended_id = await _key(migrated_session, ended)
     category = active.feature.category
 
     counts_before = dict(await feature_repo.category_feature_counts(migrated_session))
@@ -2474,7 +2542,7 @@ async def test_read_paths_exclude_ended_notice_by_default(
     # infra raw by-id는 admin/감사를 위해 종료돼도 반환한다.
     row = await feature_repo.get_feature_row(migrated_session, ended_id)
     assert row is not None
-    assert row["feature_id"] == ended_id
+    assert str(row["feature_id"]) == ended_id
     # public 단건/batch가 사용하는 필터는 ID 직접 조회 우회를 허용하지 않는다.
     assert set(
         await feature_repo.public_active_notice_feature_identities(
@@ -2511,7 +2579,7 @@ async def test_reconcile_empty_snapshot_closes_all_active_lineages(
     assert result.reopened == 0
     for bundle in (a, b):
         lifecycle, _publication, valid_end = await _feature_state(
-            migrated_session, bundle.feature.feature_id
+            migrated_session, await _key(migrated_session, bundle)
         )
         assert valid_end is not None
         assert lifecycle == "active"

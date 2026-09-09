@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo, public_views_repo
 from kortravelmap.providers.khoa import beaches_to_bundles
@@ -16,6 +17,32 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 12, 12, 0, tzinfo=_KST)
+
+
+async def _canonical_uuid_for_alias(session: Any, legacy_feature_id: str) -> str:
+    """provider가 계산한 legacy ``f_*``가 가리키는 정본 키(uuid의 text 표기).
+
+    T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 uuid이고, 그 값은
+    서버가 발급하는 비파생 UUIDv7이다(ADR-098) — provider 라이브러리가 유도한
+    ``bundle.feature.feature_id``는 정본 키가 **아니다.** legacy 문자열에서
+    정본 키로 가는 유일한 입구가 ``feature_aliases``이고, ADR-098 결정 6에 따라
+    그 주소를 발급하는 것이 바로 이 두 테스트가 쓰는 provider 적재 경로다.
+
+    응답의 ``feature_id``/``feature_uuid`` 슬롯은 이름도 값도 uuid의 text
+    표기이므로(경계 규칙) 비교 대상을 여기서 같은 표기로 맞춘다.
+    """
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one()
+    )
 
 
 @dataclass(frozen=True)
@@ -77,14 +104,19 @@ async def test_public_beaches_use_place_kind_not_category(migrated_session: Any)
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
+    feature_uuid = await _canonical_uuid_for_alias(
+        migrated_session, bundle.feature.feature_id
+    )
+
     page = await public_views_repo.list_public_beaches(
         migrated_session,
         q="통합테스트",
         page_size=10,
     )
     ids = {row.feature_id for row in page.items}
-    assert bundle.feature.feature_id in ids
-    row = next(item for item in page.items if item.feature_id == bundle.feature.feature_id)
+    assert feature_uuid in ids
+    row = next(item for item in page.items if item.feature_id == feature_uuid)
+    assert row.feature_uuid == feature_uuid
     assert row.detail["place_kind"] == "beach"
     assert row.source_raw_data["image_url"] == "https://example.test/beach.jpg"
     assert "python-khoa-api" in row.source_providers
@@ -119,6 +151,10 @@ async def test_public_festivals_monthly_uses_date_overlap(migrated_session: Any)
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
+    feature_uuid = await _canonical_uuid_for_alias(
+        migrated_session, bundle.feature.feature_id
+    )
+
     page = await public_views_repo.list_public_festivals_monthly(
         migrated_session,
         month_start=date(2026, 5, 1),
@@ -127,8 +163,9 @@ async def test_public_festivals_monthly_uses_date_overlap(migrated_session: Any)
         include_months=True,
     )
     ids = {row.feature_id for row in page.items}
-    assert bundle.feature.feature_id in ids
-    row = next(item for item in page.items if item.feature_id == bundle.feature.feature_id)
+    assert feature_uuid in ids
+    row = next(item for item in page.items if item.feature_id == feature_uuid)
+    assert row.feature_uuid == feature_uuid
     assert row.detail["starts_on"] == "2026-04-25"
     assert row.detail["ends_on"] == "2026-05-03"
     assert row.source_raw_data["fstvl_co"] == "봄꽃 축제 상세"

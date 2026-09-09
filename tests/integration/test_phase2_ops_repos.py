@@ -54,6 +54,25 @@ _MOIS_DATASET = "mois_license_features_bulk"
 _KMA_PROVIDER = "python-kma-api"
 _KMA_DATASET = "kma_weather_alerts"
 
+# T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 uuid다 — 이 파일이 심는
+# seed identity도 그 형태여야 한다. 종전의 ``feature:poi:1`` 류 문자열은 legacy
+# ``f_*``조차 아닌 테스트 전용 리터럴이었고, 재키 후에는 uuid 컬럼에 text를 넣는
+# 자리가 된다. 값 자체는 opaque(ADR-068 결정 3)이므로 무엇을 가리키는지는 상수
+# 이름이 지고, 마지막 마디만 파일 안에서 유일하게 둔다.
+#
+# ``ops.poi_cache_target_feature_links.feature_id`` ·
+# ``ops.data_integrity_violations.feature_id``도 309가 함께 uuid로 옮겼으므로
+# repository 인자로 넘어가는 값도 같은 상수다.
+_FEATURE_POI = "39020001-0000-4000-8000-000000000001"
+_FEATURE_POI_MANUAL = "39020001-0000-4000-8000-000000000002"
+_FEATURE_POI_RESOLVER = "39020001-0000-4000-8000-000000000003"
+_FEATURE_POI_RESOLVER_NEXT = "39020001-0000-4000-8000-000000000004"
+_FEATURE_VIOLATION = "39020001-0000-4000-8000-000000000005"
+_FEATURE_VIOLATION_BY_SUFFIX = {
+    "old": "39020001-0000-4000-8000-000000000006",
+    "new": "39020001-0000-4000-8000-000000000007",
+}
+
 
 async def _dataset_id(
     session: AsyncSession, *, provider: str, dataset_key: str
@@ -88,15 +107,22 @@ async def _dataset_id(
     )
 
 
-async def _insert_feature(session: AsyncSession, feature_id: str) -> None:
+async def _insert_feature(session: AsyncSession, feature_id: str, *, name: str) -> None:
+    """FK 대상 Feature 하나를 심는다.
+
+    ``feature_id``와 ``name``은 재키 뒤 **다른 타입의 열**이다(uuid / text).
+    종전에는 같은 바인드 하나를 두 열에 꽂았는데, 그러면 파라미터 하나에
+    uuid와 text가 동시에 유도되어 문장이 파스 단계에서 죽는다. 열마다 제 바인드를
+    주고 정본 키 쪽만 uuid로 캐스팅한다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES (:feature_id, 'place', :feature_id, 'test')
+            VALUES (CAST(:feature_id AS uuid), 'place', :name, 'test')
             """
         ),
-        {"feature_id": feature_id},
+        {"feature_id": feature_id, "name": name},
     )
 
 
@@ -224,7 +250,7 @@ async def test_provider_refresh_policy_upsert_get_list(
 async def test_poi_cache_target_upsert_move_delete_and_links(
     migrated_session: AsyncSession,
 ) -> None:
-    await _insert_feature(migrated_session, "feature:poi:1")
+    await _insert_feature(migrated_session, _FEATURE_POI, name="poi cache target 대상")
 
     target = await upsert_poi_cache_target(
         migrated_session,
@@ -259,7 +285,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     link = await upsert_poi_cache_target_feature_link(
         migrated_session,
         target_id=target.target_id,
-        feature_id="feature:poi:1",
+        feature_id=_FEATURE_POI,
         provider_dataset_id=await _dataset_id(
             migrated_session, provider=_MOIS_PROVIDER, dataset_key=_MOIS_DATASET
         ),
@@ -347,9 +373,11 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     migrated_session: AsyncSession,
 ) -> None:
     """resolver link만 교체하는 snapshot sync가 manual link를 보존한다 (#699 패턴)."""
-    await _insert_feature(migrated_session, "feature:poi:manual")
-    await _insert_feature(migrated_session, "feature:poi:resolver")
-    await _insert_feature(migrated_session, "feature:poi:resolver-next")
+    await _insert_feature(migrated_session, _FEATURE_POI_MANUAL, name="수동 link 대상")
+    await _insert_feature(migrated_session, _FEATURE_POI_RESOLVER, name="resolver link 대상")
+    await _insert_feature(
+        migrated_session, _FEATURE_POI_RESOLVER_NEXT, name="다음 resolver link 대상"
+    )
 
     target = await upsert_poi_cache_target(
         migrated_session,
@@ -362,13 +390,13 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     resolver_link = await upsert_poi_cache_target_feature_link(
         migrated_session,
         target_id=target.target_id,
-        feature_id="feature:poi:resolver",
+        feature_id=_FEATURE_POI_RESOLVER,
     )
     assert resolver_link is not None
     manual_link = await upsert_poi_cache_target_feature_link(
         migrated_session,
         target_id=target.target_id,
-        feature_id="feature:poi:manual",
+        feature_id=_FEATURE_POI_MANUAL,
         relation="manual",
     )
     assert manual_link is not None
@@ -379,11 +407,11 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
         candidates=(
             PoiCacheTargetFeatureLinkCandidate(
                 target_id=target.target_id,
-                feature_id="feature:poi:resolver-next",
+                feature_id=_FEATURE_POI_RESOLVER_NEXT,
             ),
         ),
     )
-    assert [link.feature_id for link in synced] == ["feature:poi:resolver-next"]
+    assert [link.feature_id for link in synced] == [_FEATURE_POI_RESOLVER_NEXT]
 
     links = {
         link.feature_id: link
@@ -393,10 +421,10 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
             active_only=False,
         )
     }
-    assert links["feature:poi:manual"].active is True
-    assert links["feature:poi:manual"].relation == "manual"
-    assert links["feature:poi:resolver"].active is False
-    assert links["feature:poi:resolver-next"].active is True
+    assert links[_FEATURE_POI_MANUAL].active is True
+    assert links[_FEATURE_POI_MANUAL].relation == "manual"
+    assert links[_FEATURE_POI_RESOLVER].active is False
+    assert links[_FEATURE_POI_RESOLVER_NEXT].active is True
 
     # resolver snapshot이 같은 (target, feature)를 재-upsert해도 활성 manual 분류를
     # 되돌리지 않는다.
@@ -406,7 +434,7 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
         candidates=(
             PoiCacheTargetFeatureLinkCandidate(
                 target_id=target.target_id,
-                feature_id="feature:poi:manual",
+                feature_id=_FEATURE_POI_MANUAL,
                 relation="within_radius",
             ),
         ),
@@ -417,7 +445,7 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     reclassified_direct = await upsert_poi_cache_target_feature_link(
         migrated_session,
         target_id=target.target_id,
-        feature_id="feature:poi:manual",
+        feature_id=_FEATURE_POI_MANUAL,
         relation="within_radius",
     )
     assert reclassified_direct is not None
@@ -426,7 +454,7 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
     restored_manual = await upsert_poi_cache_target_feature_link(
         migrated_session,
         target_id=target.target_id,
-        feature_id="feature:poi:manual",
+        feature_id=_FEATURE_POI_MANUAL,
         relation="manual",
     )
     assert restored_manual is not None
@@ -443,7 +471,7 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
         candidates=(
             PoiCacheTargetFeatureLinkCandidate(
                 target_id=target.target_id,
-                feature_id="feature:poi:manual",
+                feature_id=_FEATURE_POI_MANUAL,
                 relation="within_radius",
             ),
         ),
@@ -467,15 +495,15 @@ async def test_link_snapshot_sync_preserves_operator_manual_links(
             active_only=False,
         )
     }
-    assert links["feature:poi:manual"].active is False
-    assert links["feature:poi:manual"].relation == "within_radius"
-    assert links["feature:poi:resolver-next"].active is False
+    assert links[_FEATURE_POI_MANUAL].active is False
+    assert links[_FEATURE_POI_MANUAL].relation == "within_radius"
+    assert links[_FEATURE_POI_RESOLVER_NEXT].active is False
 
 
 async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     migrated_session: AsyncSession,
 ) -> None:
-    await _insert_feature(migrated_session, "feature:violation:1")
+    await _insert_feature(migrated_session, _FEATURE_VIOLATION, name="무결성 이슈 대상")
     await _insert_source_record(migrated_session, "src:violation:1")
     provider_dataset_id = await _dataset_id(
         migrated_session, provider=_MOIS_PROVIDER, dataset_key=_MOIS_DATASET
@@ -485,7 +513,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
         migrated_session,
         provider_dataset_id=provider_dataset_id,
         source_record_key="src:violation:1",
-        feature_id="feature:violation:1",
+        feature_id=_FEATURE_VIOLATION,
         violation_type="provider_address_mismatch",
         severity="warning",
         message="provider 주소와 reverse geocode 주소가 다름",
@@ -559,7 +587,8 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert after_source_delete.source_record_key is None
 
     await migrated_session.execute(
-        text("DELETE FROM feature.features WHERE feature_id = 'feature:violation:1'")
+        text("DELETE FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)"),
+        {"feature_id": _FEATURE_VIOLATION},
     )
     after_feature_delete = await get_data_integrity_violation(
         migrated_session, violation.issue_id
@@ -574,7 +603,11 @@ async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
     provider = _MOIS_PROVIDER
     dataset_key = _MOIS_DATASET
     for suffix in ("old", "new"):
-        await _insert_feature(migrated_session, f"feature:violation:{suffix}")
+        await _insert_feature(
+            migrated_session,
+            _FEATURE_VIOLATION_BY_SUFFIX[suffix],
+            name=f"재발 추적 대상 {suffix}",
+        )
         await _insert_source_record(migrated_session, f"src:violation:{suffix}")
     provider_dataset_id = await _dataset_id(
         migrated_session, provider=provider, dataset_key=dataset_key
@@ -593,7 +626,7 @@ async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
             "provider": provider,
             "dataset_key": dataset_key,
             "source_record_key": f"src:violation:{suffix}",
-            "feature_id": f"feature:violation:{suffix}",
+            "feature_id": _FEATURE_VIOLATION_BY_SUFFIX[suffix],
             "violation_type": "missing_address",
             "severity": "warning",
             "message": suffix,
@@ -619,4 +652,4 @@ async def test_integrity_finding_recurrence_tracks_latest_fk_targets(
     matched = [row for row in rows if row.payload.get("dedupe_key") == dedupe_key]
     assert len(matched) == 1
     assert matched[0].source_record_key == "src:violation:new"
-    assert matched[0].feature_id == "feature:violation:new"
+    assert matched[0].feature_id == _FEATURE_VIOLATION_BY_SUFFIX["new"]

@@ -909,7 +909,17 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
 
     from kortravelmap.infra.models import FeatureRow
 
-    fid = "f_issue_bbox"
+    # T-VN-39: `feature.features.feature_id`는 uuid다. legacy `f_issue_bbox`는
+    # `feature_aliases.alias`에서만 사는 문자열이라 identity 열에 넣을 수 없고,
+    # ADR-098 결정 6에 따르면 이 fixture처럼 provider 경로를 거치지 않고 태어난
+    # Feature는 alias를 갖지 않는 것이 정상이다 — 그래서 legacy 주소를 따로
+    # 심지 않고 정본 키만 둔다.
+    #
+    # 값이 임의의 uuid가 아니라 **앞 8자리가 이 테스트에서만 나오는** uuid인 것은
+    # 아래 `q` 부분일치 단언 때문이다. 재키 전에는 `q="issue_bbox"`가 feature_id
+    # 문자열의 일부와 맞았고, 그 축(운영 이슈를 feature 식별자 조각으로 찾는다)은
+    # 재키 뒤에도 살아 있어야 한다. 다만 이제 그 문자열은 uuid의 text 표기다.
+    fid = "7d3f1b90-0000-7000-8000-000000000001"
     migrated_session.add(
         FeatureRow(
             feature_id=fid,
@@ -983,11 +993,13 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
     )
     assert {item.issue_id for item in matched.items} == {in_bbox.issue_id}
 
-    # q: feature_id 부분일치.
+    # q: feature_id 부분일치. 재키 뒤 그 축은 uuid의 **text 표기** 위에서 산다 —
+    # 앞 8자리는 이 fixture에만 있고 message/source_record_key 어디에도 없으므로
+    # "feature 식별자 조각으로 이슈를 찾는다"는 성질을 종전과 같은 힘으로 잰다.
     by_fid = await list_ops_integrity_issues(
         migrated_session,
         provider_dataset_id=membership.provider_dataset_id,
-        q="issue_bbox",
+        q=fid[:8],
     )
     assert by_fid.items
     assert all(item.feature_id == fid for item in by_fid.items)

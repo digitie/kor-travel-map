@@ -19,6 +19,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import md5
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from sqlalchemy import text
@@ -49,6 +50,26 @@ _SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 _BBOX = {"min_lon": 126.9, "min_lat": 37.5, "max_lon": 127.1, "max_lat": 37.7}
 
 
+def _fixture_feature_uuid(label: str) -> str:
+    """fixture 표찰(``pfv:paths:active`` 류)을 결정적 uuid로 옮긴다 (T-VN-39).
+
+    재키(309) 뒤 ``feature.features.feature_id``는 uuid다. 이 파일이 쓰던 표찰은
+    uuid 표기가 아니라 identity 열에 애초에 들어갈 수 없고, ADR-098에서 정본 키는
+    **서버가 발급하는 랜덤 UUIDv7**이라 값이 뜻을 담지도 않는다. 표찰이 지니던
+    "어느 fixture인가"는 ``name``과 각 테스트의 ``ids`` 매핑이 이미 들고 있으므로
+    여기서 필요한 것은 표찰마다 유일하고 재현 가능한 uuid 하나뿐이다.
+
+    ``uuid5``로 접는 이유는 실패 메시지의 uuid를 표찰로 되짚기 위해서다 — 같은
+    표찰이면 항상 같은 값이고, ``test_alias_map_collation_glibc``가 이미 같은 방식을
+    쓴다. version/variant 니블만 v7로 다시 찍어 재키 뒤 실제로 흐르는 값과 **모양까지**
+    같게 둔다(정본 키가 v7이라는 것이 ADR-098의 선언이다).
+    """
+    raw = bytearray(uuid5(NAMESPACE_URL, label).bytes)
+    raw[6] = (raw[6] & 0x0F) | 0x70
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(UUID(bytes=bytes(raw)))
+
+
 async def _ins_feature(
     session: AsyncSession,
     *,
@@ -76,7 +97,7 @@ async def _ins_feature(
                 sido_code, sigungu_code, legal_dong_code, updated_at
             )
             VALUES (
-                :feature_id, :kind, :name, :category,
+                CAST(:feature_id AS uuid), :kind, :name, :category,
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         CAST(:lon AS double precision),
@@ -133,12 +154,17 @@ _STATE_MATRIX: tuple[tuple[str, str, str, str, bool], ...] = (
 async def _seed_matrix(
     session: AsyncSession, prefix: str, *, name_token: str, **kw: Any
 ) -> dict[str, str]:
-    """유효 3축 상태 matrix 8종을 넣고 suffix→feature_id 매핑을 돌려준다."""
+    """유효 3축 상태 matrix 8종을 넣고 suffix→feature_id 매핑을 돌려준다.
+
+    ``prefix``는 더 이상 ``feature_id``의 접두사가 아니다(재키 뒤 그 열은 uuid다) —
+    표찰 namespace로만 남아 테스트끼리 uuid가 겹치지 않게 한다. 어느 행이 어느
+    상태인지는 반환하는 ``ids`` 매핑이 정본이다.
+    """
     ids: dict[str, str] = {}
     for i, (suffix, lifecycle_state, publication_state, quality_state, _public) in enumerate(
         _STATE_MATRIX
     ):
-        fid = f"{prefix}:{suffix}"
+        fid = _fixture_feature_uuid(f"{prefix}:{suffix}")
         await _ins_feature(
             session,
             feature_id=fid,
@@ -182,12 +208,17 @@ async def test_view_exists_with_single_predicate(migrated_session: AsyncSession)
 
 async def test_view_membership_matches_state_matrix(migrated_session: AsyncSession) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:member", name_token="멤버십장소")
+    # 재키 전에는 seed를 ``feature_id LIKE 'pfv:member:%'``로 다시 집었다. 정본 키가
+    # uuid가 된 지금 그 축은 존재하지 않으므로(그리고 되살려서도 안 된다 — 키에 뜻을
+    # 담지 않는 것이 ADR-098의 요지다) 방금 심은 8행을 명시적으로 건다. 재는 것은
+    # 종전과 같다: 그 8행 중 view가 통과시키는 것은 active tuple 하나뿐이다.
     rows = (
         await migrated_session.execute(
             text(
-                "SELECT feature_id FROM feature.public_features "
-                "WHERE feature_id LIKE 'pfv:member:%'"
-            )
+                "SELECT CAST(feature_id AS text) FROM feature.public_features "
+                "WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
+            ),
+            {"feature_ids": list(ids.values())},
         )
     ).scalars()
     assert set(rows) == _expected_public(ids) == {ids["active"]}
@@ -200,15 +231,19 @@ async def test_bbox_cluster_search_nearby_share_projection(
     ids = await _seed_matrix(migrated_session, "pfv:paths", name_token="교차로장소")
     public = _expected_public(ids)
 
+    # bbox reader는 DTO가 아니라 raw row를 돌려주므로 ``feature_id`` 슬롯은 재키 뒤
+    # uuid 값이다 — 경계로 나가는 text 표기는 ``feature_uuid`` 슬롯이 계속 진다
+    # (309 뷰 재생성). 여기서 재는 것은 membership이므로 text로 맞춰 비교한다.
     bbox_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_rows} == public
+    assert {str(r["feature_id"]) for r in bbox_rows} == public
+    assert {r["feature_uuid"] for r in bbox_rows} == public
 
     bbox_geom_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, include_geometry=True, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_geom_rows} == public
+    assert {str(r["feature_id"]) for r in bbox_geom_rows} == public
 
     clusters = await feature_repo.cluster_features_in_bbox(
         migrated_session, **_BBOX, cluster_unit="sigungu"
@@ -252,7 +287,11 @@ async def test_detail_and_batch_rows_use_projection(migrated_session: AsyncSessi
         row = await feature_repo.get_public_feature_row(migrated_session, ids[suffix])
         assert (row is not None) is public, f"single read mismatch for {suffix}"
 
-    all_ids = [ids[suffix] for suffix, *_ in _STATE_MATRIX] + ["pfv:detail:ghost"]
+    # ghost는 "심지 않은 정본 키"다 — 재키 뒤 이 자리는 uuid[]로 캐스팅되므로
+    # 표찰이 아니라 실재하지 않는 uuid여야 한다.
+    all_ids = [ids[suffix] for suffix, *_ in _STATE_MATRIX] + [
+        _fixture_feature_uuid("pfv:detail:ghost")
+    ]
     rows = await feature_repo.get_public_feature_rows_by_ids(migrated_session, all_ids)
     assert set(rows) == _expected_public(ids)
     # raw read(admin/감사)는 기존 계약 유지 — 전 상태 반환.
@@ -264,7 +303,7 @@ async def test_service_batch_classifies_five_states_in_request_order(
     migrated_session: AsyncSession,
 ) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:service", name_token="서비스장소")
-    unchanged_id = "pfv:service:unchanged"
+    unchanged_id = _fixture_feature_uuid("pfv:service:unchanged")
     await _ins_feature(
         migrated_session,
         feature_id=unchanged_id,
@@ -280,7 +319,7 @@ async def test_service_batch_classifies_five_states_in_request_order(
         (ids["draft"], None),
         (ids["suppressed"], None),
         (ids["quarantined"], None),
-        ("pfv:service:ghost", None),
+        (_fixture_feature_uuid("pfv:service:ghost"), None),
         (unchanged_id, int(unchanged_row["row_revision"])),
     )
     batch = await feature_repo.get_service_feature_batch_items(migrated_session, requested)
@@ -337,9 +376,11 @@ async def test_nearby_by_target_uses_projection(migrated_session: AsyncSession) 
 async def test_contained_in_area_uses_projection(migrated_session: AsyncSession) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:area", name_token="구역내장소")
     polygon = "POLYGON((126.9 37.5, 127.1 37.5, 127.1 37.7, 126.9 37.7, 126.9 37.5))"
+    zone_id = _fixture_feature_uuid("pfv:area:zone")
+    zone_off_id = _fixture_feature_uuid("pfv:area:zone-off")
     for area_id, lifecycle_state, publication_state in (
-        ("pfv:area:zone", "active", "published"),
-        ("pfv:area:zone-off", "retired", "suppressed"),
+        (zone_id, "active", "published"),
+        (zone_off_id, "retired", "suppressed"),
     ):
         # T-VN-35(ADR-086): geometry 정본은 ``feature_areas``다(core에 geom 없음).
         await migrated_session.execute(
@@ -350,7 +391,7 @@ async def test_contained_in_area_uses_projection(migrated_session: AsyncSession)
                     lifecycle_state, publication_state, quality_state, updated_at
                 )
                 VALUES (
-                    :fid, 'area', '검증 구역', '03000000',
+                    CAST(:fid AS uuid), 'area', '검증 구역', '03000000',
                     :lifecycle_state, :publication_state, 'valid', :ts
                 )
                 """
@@ -372,13 +413,15 @@ async def test_contained_in_area_uses_projection(migrated_session: AsyncSession)
     await migrated_session.flush()
 
     rows = await feature_repo.features_contained_in_area(
-        migrated_session, feature_id="pfv:area:zone", kinds=["place"]
+        migrated_session, feature_id=zone_id, kinds=["place"]
     )
-    assert {r["feature_id"] for r in rows} == _expected_public(ids)
+    # ``features_contained_in_area``는 raw row를 그대로 돌려주므로 ``feature_id``는
+    # 재키 뒤 uuid 값이다(경계 text 표기는 ``feature_uuid`` 슬롯이 진다).
+    assert {str(r["feature_id"]) for r in rows} == _expected_public(ids)
 
     # 비공개 area 자체는 공개 in-area 조회의 기준이 될 수 없다.
     off_rows = await feature_repo.features_contained_in_area(
-        migrated_session, feature_id="pfv:area:zone-off", kinds=["place"]
+        migrated_session, feature_id=zone_off_id, kinds=["place"]
     )
     assert off_rows == []
 
@@ -401,12 +444,16 @@ async def test_public_beach_views_use_projection(migrated_session: AsyncSession)
         category="01050100",
         detail='{"place_kind": "beach"}',
     )
+    # 재키 전에는 "이 테스트가 심은 행"을 feature_id 접두사로 걸러냈다. 정본 키가
+    # uuid가 된 뒤 그 축은 없으므로 심은 키 집합 자체로 거른다 — 걸러내는 목적
+    # (같은 DB에 있는 다른 해수욕장 행과 섞이지 않게)은 그대로다.
+    seeded = set(ids.values())
     page = await public_views_repo.list_public_beaches(migrated_session)
-    listed = {row.feature_id for row in page.items if row.feature_id.startswith("pfv:beach:")}
+    listed = {row.feature_id for row in page.items if row.feature_id in seeded}
     assert listed == _expected_public(ids)
 
     markers = await public_views_repo.list_public_beach_markers(migrated_session)
-    marker_ids = {m.feature_id for m in markers if m.feature_id.startswith("pfv:beach:")}
+    marker_ids = {m.feature_id for m in markers if m.feature_id in seeded}
     assert marker_ids == _expected_public(ids)
 
     for suffix, _lifecycle, _publication, _quality, public in _STATE_MATRIX:
@@ -421,7 +468,7 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
 
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:bbox:place",
+        feature_id=_fixture_feature_uuid("pfv:bbox:place"),
         name="bbox 장소",
         kind="place",
         category="06020000",
@@ -432,6 +479,11 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
     # it does not prove the 4326 bbox access path.  These core-only place rows
     # are valid detailed-view inputs and keep the one in-bounds point highly
     # selective without coupling this planner test to any subtype payload.
+    #
+    # T-VN-39: ``feature_id``는 uuid다. 연속열 seed를 종전처럼 문자열로 이어 붙이면
+    # PostgreSQL이 대입 문맥에서 text를 uuid로 **암묵 변환하지 않으므로** 문장이
+    # 선다. 이 행들에 필요한 것은 카디널리티뿐이라 값에 뜻이 없고, 이 테스트 전용
+    # 접두 니블로 다른 seed와 겹치지 않는 3,200개를 결정적으로 만든다.
     await migrated_session.execute(
         text(
             """
@@ -440,7 +492,9 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
                 lifecycle_state, publication_state, quality_state
             )
             SELECT
-                'pfv:bbox:bulk:' || g::text,
+                CAST(
+                    'bb000000-0000-7000-8000-' || lpad(g::text, 12, '0') AS uuid
+                ),
                 'place', 'bbox planner noncandidate', '06020000',
                 x_extension.st_setsrid(
                     x_extension.st_makepoint(128.0 + g * 0.00001, 35.0), 4326
@@ -453,7 +507,7 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
 
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:bbox:route",
+        feature_id=_fixture_feature_uuid("pfv:bbox:route"),
         name="bbox 경로",
         kind="route",
         category="06070000",
@@ -461,7 +515,7 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
     )
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:bbox:area",
+        feature_id=_fixture_feature_uuid("pfv:bbox:area"),
         name="bbox 구역",
         kind="area",
         category="06050000",
@@ -539,9 +593,9 @@ async def test_public_festival_views_use_projection(migrated_session: AsyncSessi
         month_start=date(2026, 7, 1),
         month_end=date(2026, 7, 31),
     )
-    listed = {
-        row.feature_id for row in page.items if row.feature_id.startswith("pfv:festival:")
-    }
+    # 접두사 필터가 아니라 심은 키 집합으로 거른다 — 재키 뒤 feature_id는 uuid다.
+    seeded = set(ids.values())
+    listed = {row.feature_id for row in page.items if row.feature_id in seeded}
     assert listed == _expected_public(ids)
 
     markers = await public_views_repo.list_public_festival_markers(
@@ -550,9 +604,7 @@ async def test_public_festival_views_use_projection(migrated_session: AsyncSessi
         month_end=date(2026, 7, 31),
     )
     marker_ids = {
-        marker.feature_id
-        for marker in markers
-        if marker.feature_id.startswith("pfv:festival:")
+        marker.feature_id for marker in markers if marker.feature_id in seeded
     }
     assert marker_ids == _expected_public(ids)
 
@@ -567,9 +619,12 @@ async def test_weather_anchor_skips_non_public_features(
     migrated_session: AsyncSession,
 ) -> None:
     """nearest weather anchor가 비공개 feature를 건너뛴다 (공개 표면 feature_id 노출)."""
+    center_id = _fixture_feature_uuid("pfv:wx:center")
+    suppressed_near_id = _fixture_feature_uuid("pfv:wx:suppressed-near")
+    active_far_id = _fixture_feature_uuid("pfv:wx:active-far")
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:wx:center",
+        feature_id=center_id,
         name="날씨 중심",
         lon=126.978,
         lat=37.5665,
@@ -577,7 +632,7 @@ async def test_weather_anchor_skips_non_public_features(
     # 더 가까운 suppressed anchor + 더 먼 public anchor — 전자가 이기면 leak.
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:wx:suppressed-near",
+        feature_id=suppressed_near_id,
         name="비공개 관측점",
         publication_state="suppressed",
         lon=126.9781,
@@ -585,7 +640,7 @@ async def test_weather_anchor_skips_non_public_features(
     )
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:wx:active-far",
+        feature_id=active_far_id,
         name="공개 관측점",
         lon=126.99,
         lat=37.57,
@@ -611,7 +666,7 @@ async def test_weather_anchor_skips_non_public_features(
     )
     raw_data = {
         "metric": "T1H",
-        "feature_ids": ["pfv:wx:suppressed-near", "pfv:wx:active-far"],
+        "feature_ids": [suppressed_near_id, active_far_id],
     }
     payload_hash = make_payload_hash(raw_data)
     source_entity_id = f"pfv-weather:{payload_hash[:20]}"
@@ -646,7 +701,7 @@ async def test_weather_anchor_skips_non_public_features(
                 issued_at=selected_at,
                 valid_at=selected_at,
             )
-            for feature_id in ("pfv:wx:suppressed-near", "pfv:wx:active-far")
+            for feature_id in (suppressed_near_id, active_far_id)
         ],
         provider_dataset_id=dataset_id,
         source_record=source_record,
@@ -658,17 +713,17 @@ async def test_weather_anchor_skips_non_public_features(
         migrated_session, lon=126.978, lat=37.5665, radius_m=50_000
     )
     assert anchor is not None
-    assert anchor.feature_id == "pfv:wx:active-far"
+    assert anchor.feature_id == active_far_id
 
     by_feature = await weather_repo.nearest_weather_feature_for_feature(
-        migrated_session, feature_id="pfv:wx:center", radius_m=50_000
+        migrated_session, feature_id=center_id, radius_m=50_000
     )
     assert by_feature is not None
-    assert by_feature.feature_id == "pfv:wx:active-far"
+    assert by_feature.feature_id == active_far_id
 
     # 비공개 feature를 target으로 한 anchor 탐색은 빈 결과(존재 은닉).
     suppressed_target = await weather_repo.nearest_weather_feature_for_feature(
-        migrated_session, feature_id="pfv:wx:suppressed-near", radius_m=50_000
+        migrated_session, feature_id=suppressed_near_id, radius_m=50_000
     )
     assert suppressed_target is None
 
@@ -770,6 +825,10 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
     # 공개 밖으로 나갔을 때 공개 read에서 사라지는가"이므로, 공개 상태에서 연결한 뒤
     # feature만 목표 축으로 옮겨야 의도한 최종 상태가 된다(draft는 가드가 허용하므로
     # 두 단계 어느 쪽이든 같지만, 세 경우를 한 경로로 둔다).
+    curated = {
+        suffix: _fixture_feature_uuid(f"pfv:cur:{suffix}")
+        for suffix in ("active", "suppressed", "draft")
+    }
     for suffix, publication_state in (
         ("active", "published"),
         ("suppressed", "suppressed"),
@@ -777,13 +836,13 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
     ):
         await _ins_feature(
             migrated_session,
-            feature_id=f"pfv:cur:{suffix}",
+            feature_id=curated[suffix],
             name=f"큐레이션 {suffix}",
         )
         await curation_repo.add_curation_item(
             migrated_session,
             collection_id=collection.collection_id,
-            feature_id=f"pfv:cur:{suffix}",
+            feature_id=curated[suffix],
             external_item_id=f"pfv-{suffix}",
             status="included",
             sort_order=1,
@@ -792,11 +851,11 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
             await migrated_session.execute(
                 text(
                     "UPDATE feature.features SET publication_state = :publication_state "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {
                     "publication_state": publication_state,
-                    "feature_id": f"pfv:cur:{suffix}",
+                    "feature_id": curated[suffix],
                 },
             )
             await migrated_session.flush()
@@ -804,13 +863,13 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
     groups, _cursor = await curation_repo.list_feature_curation_groups(
         migrated_session, public_only=True, theme_slug="pfv-matrix-theme"
     )
-    assert {g.feature_id for g in groups} == {"pfv:cur:active"}
+    assert {g.feature_id for g in groups} == {curated["active"]}
 
     active_group = await curation_repo.get_feature_curation_group(
-        migrated_session, feature_id="pfv:cur:active", public_only=True
+        migrated_session, feature_id=curated["active"], public_only=True
     )
     assert active_group is not None
-    for hidden in ("pfv:cur:suppressed", "pfv:cur:draft"):
+    for hidden in (curated["suppressed"], curated["draft"]):
         group = await curation_repo.get_feature_curation_group(
             migrated_session, feature_id=hidden, public_only=True
         )
@@ -824,7 +883,7 @@ async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
 ) -> None:
     """종료 notice가 feature detail 밖 큐레이션 표면에서 재노출되지 않는다 (S2)."""
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
-    feature_id = "pfv:notice:ended"
+    feature_id = _fixture_feature_uuid("pfv:notice:ended")
     await _ins_feature(
         migrated_session,
         feature_id=feature_id,
@@ -898,10 +957,14 @@ async def test_collection_items_redact_non_public_linked_features(
     )
     # 먼저 모두 public tuple로 연결한 뒤, 연결 후 3축 상태가 바뀌어도 public read가
     # 비공개 feature 자체를 redaction하는지 검증한다.
+    item_ids = {
+        suffix: _fixture_feature_uuid(f"pfv:item:{suffix}")
+        for suffix, *_rest in _STATE_MATRIX
+    }
     for i, (suffix, *_rest) in enumerate(_STATE_MATRIX):
         await _ins_feature(
             migrated_session,
-            feature_id=f"pfv:item:{suffix}",
+            feature_id=item_ids[suffix],
             name=f"아이템장소 {suffix}",
             lon=126.978 + i * 0.0001,
             lat=37.5665 + i * 0.0001,
@@ -909,7 +972,7 @@ async def test_collection_items_redact_non_public_linked_features(
         await curation_repo.add_curation_item(
             migrated_session,
             collection_id=collection.collection_id,
-            feature_id=f"pfv:item:{suffix}",
+            feature_id=item_ids[suffix],
             external_item_id=f"pfv-item-{suffix}",
             place_name=f"복제 장소명 {suffix}",
             address_hint=f"복제 주소 {suffix}",
@@ -936,14 +999,14 @@ async def test_collection_items_redact_non_public_linked_features(
                 SET lifecycle_state = :lifecycle_state,
                     publication_state = :publication_state,
                     quality_state = :quality_state
-                WHERE feature_id = :fid
+                WHERE feature_id = CAST(:fid AS uuid)
                 """
             ),
             {
                 "lifecycle_state": lifecycle_state,
                 "publication_state": publication_state,
                 "quality_state": quality_state,
-                "fid": f"pfv:item:{suffix}",
+                "fid": item_ids[suffix],
             },
         )
     await migrated_session.flush()
@@ -956,7 +1019,7 @@ async def test_collection_items_redact_non_public_linked_features(
     by_external = {item.external_item_id: item for item in items}
     assert set(by_external) == {"pfv-item-active"}
     active = by_external["pfv-item-active"]
-    assert active.feature_id == "pfv:item:active"
+    assert active.feature_id == item_ids["active"]
     assert active.feature_name == "아이템장소 active"
     assert active.lon is not None
     assert active.lat is not None
@@ -984,9 +1047,11 @@ async def test_weather_alert_history_hides_non_public_anchor(
     migrated_session: AsyncSession,
 ) -> None:
     """특보 이력은 alert row를 보존하되 비공개 anchor의 feature 필드는 NULL이다 (리뷰 S2)."""
+    alert_active_id = _fixture_feature_uuid("pfv:alert:active")
+    alert_suppressed_id = _fixture_feature_uuid("pfv:alert:suppressed")
     for fid, publication_state in (
-        ("pfv:alert:active", "published"),
-        ("pfv:alert:suppressed", "suppressed"),
+        (alert_active_id, "published"),
+        (alert_suppressed_id, "suppressed"),
     ):
         await _ins_feature(
             migrated_session,
@@ -996,7 +1061,7 @@ async def test_weather_alert_history_hides_non_public_anchor(
             kind="notice",
         )
     dataset_id = await _dataset_id(migrated_session, "python-kma-api", "kma_weather_alerts")
-    for i, fid in enumerate(["pfv:alert:active", "pfv:alert:suppressed"]):
+    for i, fid in enumerate([alert_active_id, alert_suppressed_id]):
         entity_key = f"se_pfv_alert_{i}"
         raw_data = {
             "alert_id": f"PFV-{i}",
@@ -1071,7 +1136,9 @@ async def test_weather_alert_history_hides_non_public_anchor(
                     feature_id, source_entity_key, source_role, match_method,
                     confidence
                 )
-                VALUES (:fid, :entity_key, 'primary', 'natural_key', 100)
+                VALUES (
+                    CAST(:fid AS uuid), :entity_key, 'primary', 'natural_key', 100
+                )
                 """
             ),
             {"fid": fid, "entity_key": entity_key},
@@ -1084,7 +1151,7 @@ async def test_weather_alert_history_hides_non_public_anchor(
     by_key = {row.source_record_key: row for row in rows}
     # alert row 2건 모두 생존 — 기상특보 자체는 anchor 공개 여부와 무관한 정보다.
     assert set(by_key) == {"sr_pfv_alert_0", "sr_pfv_alert_1"}
-    assert by_key["sr_pfv_alert_0"].feature_id == "pfv:alert:active"
+    assert by_key["sr_pfv_alert_0"].feature_id == alert_active_id
     assert by_key["sr_pfv_alert_0"].feature_name == "특보 published"
     # 비공개 anchor는 feature 필드가 NULL로 떨어진다 (이름/상태 leak 차단).
     assert by_key["sr_pfv_alert_1"].feature_id is None

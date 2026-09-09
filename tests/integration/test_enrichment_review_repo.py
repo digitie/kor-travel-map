@@ -9,6 +9,10 @@
 - accept → ENRICHMENT ``SourceLink`` 적재(1차 feature에 source만 추가) + status 갱신.
 - reject/ignore는 상태만 갱신, 이미 검토된 행은 changed=False.
 - FK — 존재하지 않는 target feature 참조 시 IntegrityError.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와
+``ops.enrichment_review_queue.target_feature_id``는 **uuid**다. 그래서 아래 seed id는
+legacy ``f_*``가 아니라 고정 UUIDv7이고, 그 값이 무엇을 가리키는지는 상수 이름이 진다.
 """
 
 from __future__ import annotations
@@ -55,7 +59,15 @@ pytestmark = pytest.mark.integration
 
 KST = timezone(timedelta(hours=9))
 _FESTIVAL_CAT = "01010100"  # event/festival 카테고리(임의 유효값)
-_TARGET_ID = "f_1100000000_e_springfest0000000000"
+#: enrichment 대상 1차 축제 feature. 재키 뒤 정본 키는 uuid다(ADR-098).
+_TARGET_ID = "00000000-0000-7000-8000-0000000e0001"
+#: 정렬/페이징 회귀용 두 축제 — 이름 점수로만 순서가 갈려야 한다.
+_EVT_GANADA = "00000000-0000-7000-8000-0000000e0011"
+_EVT_SPRING = "00000000-0000-7000-8000-0000000e0012"
+#: 좌표가 멀리 떨어진 축제(거리 underflow 회귀).
+_EVT_FAR = "00000000-0000-7000-8000-0000000e0021"
+#: features에 적재하지 않는다 — FK 위반을 관측하는 probe.
+_EVT_GHOST = "00000000-0000-7000-8000-0000000e00f1"
 
 
 def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 축제") -> FeatureRow:
@@ -171,7 +183,7 @@ async def test_enqueue_inserts_pending(migrated_session: AsyncSession) -> None:
         await migrated_session.execute(
             text(
                 """
-                SELECT q.target_feature_id, pd.provider, q.source_name,
+                SELECT q.target_feature_id::text, pd.provider, q.source_name,
                        q.name_score, q.status
                 FROM ops.enrichment_review_queue AS q
                 JOIN provider_sync.source_entities AS se
@@ -216,15 +228,15 @@ async def test_reenqueue_updates_then_preserves_reviewed(
 async def test_pending_sorted_desc_and_float(
     migrated_session: AsyncSession,
 ) -> None:
-    await _add_festival(migrated_session, "f_a_evt", "가나다 축제")
-    await _add_festival(migrated_session, "f_b_evt", "서울 봄꽃 축제")
+    await _add_festival(migrated_session, _EVT_GANADA, "가나다 축제")
+    await _add_festival(migrated_session, _EVT_SPRING, "서울 봄꽃 축제")
     await migrated_session.flush()
 
     high = _as_input(
-        _review_candidate("서울 봄꽃 축", target="f_b_evt", target_name="서울 봄꽃 축제")
+        _review_candidate("서울 봄꽃 축", target=_EVT_SPRING, target_name="서울 봄꽃 축제")
     )
     low = _as_input(
-        _review_candidate("가나", target="f_a_evt", target_name="가나다 축제")
+        _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
     )
     await enqueue_review_candidates(migrated_session, [low, high])
 
@@ -315,18 +327,18 @@ async def test_decide_rejects_invalid_decision(
 async def test_list_enrichment_reviews_admin_query(
     migrated_session: AsyncSession,
 ) -> None:
-    await _add_festival(migrated_session, "f_a_evt", "가나다 축제")
-    await _add_festival(migrated_session, "f_b_evt", "서울 봄꽃 축제")
+    await _add_festival(migrated_session, _EVT_GANADA, "가나다 축제")
+    await _add_festival(migrated_session, _EVT_SPRING, "서울 봄꽃 축제")
     await migrated_session.flush()
     await enqueue_review_candidates(
         migrated_session,
         [
             _as_input(
-                _review_candidate("가나", target="f_a_evt", target_name="가나다 축제")
+                _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
             ),
             _as_input(
                 _review_candidate(
-                    "서울 봄꽃 축", target="f_b_evt", target_name="서울 봄꽃 축제"
+                    "서울 봄꽃 축", target=_EVT_SPRING, target_name="서울 봄꽃 축제"
                 )
             ),
         ],
@@ -388,7 +400,7 @@ async def test_list_enrichment_reviews_admin_query(
 async def test_list_enrichment_reviews_far_distance_does_not_underflow(
     migrated_session: AsyncSession,
 ) -> None:
-    await _add_festival(migrated_session, "f_far_evt", "서울 봄꽃 축제")
+    await _add_festival(migrated_session, _EVT_FAR, "서울 봄꽃 축제")
     await migrated_session.flush()
     await enqueue_review_candidates(
         migrated_session,
@@ -398,7 +410,7 @@ async def test_list_enrichment_reviews_far_distance_does_not_underflow(
                     "서울 봄꽃 축",
                     map_x=0.0,
                     map_y=0.0,
-                    target="f_far_evt",
+                    target=_EVT_FAR,
                     target_name="서울 봄꽃 축제",
                 )
             ),
@@ -423,7 +435,7 @@ async def test_list_enrichment_reviews_far_distance_does_not_underflow(
 async def test_fk_requires_existing_target_feature(
     migrated_session: AsyncSession,
 ) -> None:
-    candidate = _as_input(_review_candidate("서울 봄꽃", target="ghost_evt"))
+    candidate = _as_input(_review_candidate("서울 봄꽃", target=_EVT_GHOST))
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
         async with migrated_session.begin_nested():
             await enqueue_review_candidate(migrated_session, candidate)

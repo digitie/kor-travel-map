@@ -24,7 +24,7 @@ T-VN-35(ADR-086, alembic 0085)가 그 실패 모드를 **구조적으로 제거*
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 from sqlalchemy import text
@@ -47,6 +47,30 @@ _SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 _NOW = datetime(2026, 7, 19, 12, 0, tzinfo=_KST)
 
 _BBOX = {"min_lon": 126.9, "min_lat": 37.5, "max_lon": 127.1, "max_lat": 37.7}
+
+# T-VN-39 재키(alembic 309): ``feature.features.feature_id``는 uuid다 — 종전
+# ``'ndc:past-end'`` 같은 라벨 문자열은 값으로 들어갈 수 없다. 라벨은 파이썬 쪽
+# 이름으로 남기고 값은 이 파일 전용 대역에서 순번으로 뽑는다.
+#
+# 이 파일의 단언들은 **자기 seed 집합과의 교집합**으로 판정한다(세션 공유 DB에는
+# 다른 파일이 커밋한 fixture가 남아 있다). 따라서 값에 요구되는 성질은 하나뿐이다 —
+# 다른 파일의 id와 겹치지 않을 것. 대역을 하나 잡아 그것을 보장한다.
+_NDC_UUID_NAMESPACE: Final[str] = "0dc00000-0000-7000-8000-"
+
+
+def _ndc_feature_id(slot: int) -> str:
+    return f"{_NDC_UUID_NAMESPACE}{slot:012d}"
+
+
+_NDC_IDS: Final[dict[str, str]] = {
+    "future-end": _ndc_feature_id(1),
+    "past-end": _ndc_feature_id(2),
+    "no-end": _ndc_feature_id(3),
+    "place": _ndc_feature_id(4),
+    "typed-reject": _ndc_feature_id(5),
+    "cur:healthy": _ndc_feature_id(6),
+    "cur:ended": _ndc_feature_id(7),
+}
 
 # 종전 오염 변형: 빈 문자열 / garbage / 형태만 그럴듯한 달력 불가값 / 불가능한
 # timezone. (마지막 둘은 정규식 shape 가드가 놓치던 부류 — 그래서
@@ -96,7 +120,7 @@ async def _ins_notice(
                 sido_code, sigungu_code, updated_at
             )
             VALUES (
-                :feature_id, :kind, :name, '99000000',
+                CAST(:feature_id AS uuid), :kind, :name, '99000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         CAST(:lon AS double precision),
@@ -143,7 +167,7 @@ async def _seed_notice_matrix(session: AsyncSession) -> dict[str, str]:
         ("no-end", None),
     )
     for i, (suffix, end_time) in enumerate(rows):
-        fid = f"ndc:{suffix}"
+        fid = _NDC_IDS[suffix]
         await _ins_notice(
             session,
             feature_id=fid,
@@ -156,7 +180,7 @@ async def _seed_notice_matrix(session: AsyncSession) -> dict[str, str]:
     # 대조군 place — notice 감산과 무관하게 place read는 계속 동작해야 한다.
     await _ins_notice(
         session,
-        feature_id="ndc:place",
+        feature_id=_NDC_IDS["place"],
         # 이름은 notice 검색어와 트라이그램이 겹치지 않게 완전히 다르게 둔다.
         name="대조군일반장소",
         valid_end_time=None,
@@ -164,7 +188,7 @@ async def _seed_notice_matrix(session: AsyncSession) -> dict[str, str]:
         lon=126.99,
         lat=37.57,
     )
-    ids["place"] = "ndc:place"
+    ids["place"] = _NDC_IDS["place"]
     return ids
 
 
@@ -187,33 +211,38 @@ async def test_corrupted_timestamp_cannot_reach_the_typed_column(
     # 이 행은 오염 값을 붙일 자리(부모 feature)일 뿐이라 상태축은 판정에 관여하지
     # 않는다 — 단언은 write 시점 타입 거부다. 다만 파일 안의 다른 seed와 같은
     # 무감산 tuple로 통일해 "상태 때문에 안 보이는 것"이라는 오독을 막는다.
+    parent_id = _NDC_IDS["typed-reject"]
     await migrated_session.execute(
         text(
             "INSERT INTO feature.features "
             "(feature_id, kind, name, category, "
             "lifecycle_state, publication_state, quality_state) "
-            "VALUES ('ndc:typed-reject', 'notice', '타입 거부 공지', '99000000', "
-            "'active', 'published', 'valid')"
-        )
+            "VALUES (CAST(:feature_id AS uuid), 'notice', '타입 거부 공지', "
+            "'99000000', 'active', 'published', 'valid')"
+        ),
+        {"feature_id": parent_id},
     )
     await migrated_session.flush()
 
     with pytest.raises(DBAPIError):
         async with migrated_session.begin_nested():
+            # T-VN-39: subtype의 사본 컬럼 ``feature_uuid``는 309 ``_SHADOW_DROP``이
+            # 지웠다. 심는 identity는 core의 정본 키 하나뿐이고, 이 단언이 겨누는
+            # 것은 그 옆의 ``valid_end_time`` 타입 거부다.
             await migrated_session.execute(
                 text(
                     """
                     INSERT INTO feature.feature_notices (
-                        feature_id, feature_uuid, kind, notice_type, valid_end_time
+                        feature_id, kind, notice_type, valid_end_time
                     )
                     SELECT
-                        f.feature_id, f.feature_uuid, f.kind, 'traffic',
+                        f.feature_id, f.kind, 'traffic',
                         CAST(:corrupted AS timestamptz)
                     FROM feature.features AS f
-                    WHERE f.feature_id = 'ndc:typed-reject'
+                    WHERE f.feature_id = CAST(:feature_id AS uuid)
                     """
                 ),
-                {"corrupted": corrupted},
+                {"corrupted": corrupted, "feature_id": parent_id},
             )
 
 
@@ -229,15 +258,18 @@ async def test_bbox_and_search_apply_typed_end_time_filter(
     # 같은 방식이다.
     seeded = set(ids.values())
 
+    # raw dict row의 ``feature_id``는 uuid 컬럼이라 드라이버가 UUID 객체로 준다 —
+    # seed가 든 text 표기와 비교하려면 한 번 낮춘다(typed row 계열은 repo가 이미
+    # ``str(...)``로 낮춰 돌려준다).
     bbox_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_rows} & seeded == expected
+    assert {str(r["feature_id"]) for r in bbox_rows} & seeded == expected
 
     bbox_geom_rows = await feature_repo.features_in_bbox(
         migrated_session, **_BBOX, include_geometry=True, price_stale_hide_days=None
     )
-    assert {r["feature_id"] for r in bbox_geom_rows} & seeded == expected
+    assert {str(r["feature_id"]) for r in bbox_geom_rows} & seeded == expected
 
     search = await feature_repo.search_features(
         migrated_session,
@@ -369,19 +401,19 @@ async def _seed_two_notices(session: AsyncSession) -> tuple[str, str]:
     """(healthy 미래종료, ended 과거종료) notice 2건을 심고 id를 돌려준다."""
     await _ins_notice(
         session,
-        feature_id="ndc:cur:healthy",
+        feature_id=_NDC_IDS["cur:healthy"],
         name="큐레이션 정상공지",
         valid_end_time="2999-01-01T00:00:00+09:00",
     )
     await _ins_notice(
         session,
-        feature_id="ndc:cur:ended",
+        feature_id=_NDC_IDS["cur:ended"],
         name="큐레이션 종료공지",
         valid_end_time="2000-01-01T00:00:00+09:00",
         lon=126.9781,
         lat=37.5666,
     )
-    return "ndc:cur:healthy", "ndc:cur:ended"
+    return _NDC_IDS["cur:healthy"], _NDC_IDS["cur:ended"]
 
 
 

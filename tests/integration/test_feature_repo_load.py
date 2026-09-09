@@ -6,6 +6,12 @@
 검증: ① upsert 카운트(신규/갱신) ② idempotent 재적재(ON CONFLICT, §4.4)
 ③ coord_5179 STORED generated(ADR-012) ④ source_link FK ⑤ source_record 이력
 보존(DO NOTHING) ⑥ get_feature_row round-trip.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid이고, provider
+경로가 발급하는 그 값은 **서버가 정한다**(ADR-098). ``FeatureBundle``이 들고 오는
+``f_*``는 legacy alias일 뿐 정본 키가 아니므로, 이 파일의 DB 조회 키는 전부
+:func:`_canonical_id`가 alias로 되찾은 uuid다. raw SQL로 직접 심는 seed는 고정
+UUIDv7 상수를 쓴다.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra import admin_feature_repo, feature_repo
+from kortravelmap.infra import admin_feature_repo, feature_identity, feature_repo
 from kortravelmap.providers.kor_travel_concierge import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
@@ -48,6 +54,41 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)
 _SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
+
+#: 어떤 Feature도 갖지 않는 canonical uuid. 재키 뒤 read 표면의 조회 키는 uuid /
+#: uuid[]로 캐스팅되므로 "없는 참조" probe도 문자열이 아니라 uuid여야 한다 —
+#: 문자열을 넣으면 miss 관측이 아니라 22P02가 된다.
+_ABSENT_UUID = "00000000-0000-7000-8000-00000000dead"
+
+#: raw SQL로 직접 심는 seed의 정본 키. provider 경로를 타지 않으므로 alias도 없고,
+#: 값이 무엇을 가리키는지는 상수 이름이 진다.
+_NOTICE_OLD_REVISION = "00000000-0000-7000-8000-0000000a0001"
+_NOTICE_NEW_REVISION = "00000000-0000-7000-8000-0000000a0002"
+_ROUTE_BBOX_GEOMETRY = "00000000-0000-7000-8000-0000000a0011"
+_AREA_BBOX_GEOMETRY = "00000000-0000-7000-8000-0000000a0012"
+_AREA_CONTAINS_QUERY = "00000000-0000-7000-8000-0000000a0021"
+_AREA_INSIDE_POINT = "00000000-0000-7000-8000-0000000a0022"
+_AREA_OUTSIDE_POINT = "00000000-0000-7000-8000-0000000a0023"
+_ROUTE_GEOM_ONLY_NULL_COORD = "00000000-0000-7000-8000-0000000a0031"
+_ROUTE_GEOM_ONLY_COORD_OUTSIDE = "00000000-0000-7000-8000-0000000a0032"
+
+
+async def _canonical_id(session: AsyncSession, legacy_ref: str) -> str:
+    """provider 경로가 발급한 정본 키(uuid)를 legacy alias로 되찾는다.
+
+    ADR-098: ``Feature`` DTO의 ``feature_id``는 provider 라이브러리가 유도한
+    ``f_*``이고 **정본 키가 아니다** — 정본 키는 서버가 claim
+    ``(provider_dataset_id, feature_kind, natural_key)`` 안에서 발급하는 UUIDv7이다.
+    바깥에서 그 값을 되찾는 입구는 ``feature_aliases``를 보는
+    :func:`~kortravelmap.infra.feature_identity.resolve_feature_identity` 하나뿐이고
+    (ADR-068 결정 3), 이 파일의 DB 조회 키는 전부 그 해석 결과다.
+    """
+    identity = await feature_identity.resolve_feature_identity(session, legacy_ref)
+    assert identity is not None, (
+        f"legacy alias {legacy_ref!r}가 정본 키로 해석되지 않았다 — "
+        "provider 경로가 alias를 남기지 않았거나 Feature가 적재되지 않았다."
+    )
+    return identity.feature_id
 
 
 @dataclass(frozen=True)
@@ -123,6 +164,10 @@ def _first_probe_notice_bundle(
     feature_id = "f_global_n_first_probe_notice"
     feature = Feature(
         feature_id=feature_id,
+        # ADR-098 identity claim 축의 세 번째 성분. 이 값이 없으면 writer가
+        # ``FeatureIdentityAnchorError``로 선다 — 재키 뒤 provider seed는 반드시
+        # 자연키를 실어야 한다(정본 키는 서버가 이 claim 안에서 발급한다).
+        provider_natural_key=raw_data["natural_key"],
         kind=FeatureKind.NOTICE,
         name="[경부고속도로] 공사",
         address=Address(),
@@ -235,10 +280,9 @@ async def test_load_bundle_inserts_and_roundtrips(
     assert result.source_records_inserted == 1
     assert result.source_links_inserted == 1
 
-    # get_feature_row round-trip
-    row = await feature_repo.get_feature_row(
-        migrated_session, bundle.feature.feature_id
-    )
+    # get_feature_row round-trip — 조회 키는 서버가 발급한 정본 uuid다.
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
+    row = await feature_repo.get_feature_row(migrated_session, feature_uuid)
     assert row is not None
     assert row["kind"] == "event"
     assert row["name"] == bundle.feature.name
@@ -264,7 +308,7 @@ async def test_load_bundle_inserts_and_roundtrips(
                 "ON head.source_entity_key = se.source_entity_key "
                 "WHERE sl.feature_id = :fid"
             ),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     ).one()
     assert link.source_record_key == bundle.source_record.source_record_key
@@ -309,17 +353,18 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     assert second.source_links_updated == 1
 
     # 각 테이블 1행씩만 존재
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
     fcount = (
         await migrated_session.execute(
             text("SELECT count(*) FROM feature.features WHERE feature_id = :fid"),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     ).scalar_one()
     assert fcount == 1
     feature_name = (
         await migrated_session.execute(
             text("SELECT name FROM feature.features WHERE feature_id = :fid"),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     ).scalar_one()
     assert feature_name == bundle.feature.name
@@ -346,6 +391,7 @@ async def test_identical_provider_bundle_reactivates_retired_once(
     suffix = "RETIRED"
     bundle = await _bundle(f"FEST-REPO-REAPPEARED-{suffix}")
     await feature_repo.load_bundle(migrated_session, bundle)
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
@@ -354,7 +400,7 @@ async def test_identical_provider_bundle_reactivates_retired_once(
             " WHERE feature_id = :feature_id"
         ),
         {
-            "feature_id": bundle.feature.feature_id,
+            "feature_id": feature_uuid,
         },
     )
 
@@ -368,7 +414,7 @@ async def test_identical_provider_bundle_reactivates_retired_once(
                 "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert state.lifecycle_state == "active"
@@ -385,6 +431,7 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
 ) -> None:
     bundle = await _bundle("FEST-REPO-OVERRIDE")
     await feature_repo.load_bundle(migrated_session, bundle)
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
@@ -392,7 +439,7 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
             "updated_at = now()"
             " WHERE feature_id = :feature_id"
         ),
-        {"feature_id": bundle.feature.feature_id},
+        {"feature_id": feature_uuid},
     )
     await migrated_session.execute(
         text(
@@ -405,7 +452,7 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
             )
             """
         ),
-        {"feature_id": bundle.feature.feature_id},
+        {"feature_id": feature_uuid},
     )
 
     protected = await feature_repo.load_bundle(migrated_session, bundle)
@@ -416,7 +463,7 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
                 "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert row.lifecycle_state == "retired"
@@ -511,6 +558,7 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     loaded = await feature_repo.load_bundle(migrated_session, bundle)
     assert loaded.features_inserted == 1
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     assert await _retire_concierge_items(
         migrated_session, [{**item, "operation": "tombstone"}]
@@ -521,7 +569,7 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
                 "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert state.lifecycle_state == "retired"
@@ -536,7 +584,7 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
                 "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert recovered_state.lifecycle_state == "active"
@@ -550,7 +598,7 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
             text(
                 "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).scalar_one() == 1
 
@@ -567,6 +615,7 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
     item = _concierge_item(candidate_id=9102)
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     await feature_repo.load_bundle(migrated_session, bundle)
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     assert await _retire_concierge_items(
         migrated_session, [{**item, "operation": "reject"}]
@@ -594,7 +643,7 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
                 "LEFT JOIN feature.feature_places AS p ON p.feature_id = f.feature_id "
                 "WHERE f.feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert row.lifecycle_state == "active"
@@ -605,7 +654,7 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
             text(
                 "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).scalar_one() == 1
 
@@ -617,14 +666,15 @@ async def test_kor_travel_concierge_revert_respects_admin_prevention(
     item = _concierge_item(candidate_id=9103)
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     await feature_repo.load_bundle(migrated_session, bundle)
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     revision = await admin_feature_repo.get_feature_row_revision(
-        migrated_session, bundle.feature.feature_id
+        migrated_session, feature_uuid
     )
     assert revision is not None
     retired = await admin_feature_repo.transition_admin_feature_state(
         migrated_session,
-        bundle.feature.feature_id,
+        feature_uuid,
         expected_row_revision=revision,
         reason_code="operator_retire",
         operator="integration-test",
@@ -640,7 +690,7 @@ async def test_kor_travel_concierge_revert_respects_admin_prevention(
                 "SELECT lifecycle_state, publication_state FROM feature.features "
                 "WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert row.lifecycle_state == "retired"
@@ -664,14 +714,15 @@ async def test_provider_reingest_restores_the_operator_publication_not_a_default
     item = _concierge_item(candidate_id=9104)
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     await feature_repo.load_bundle(migrated_session, bundle)
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     revision = await admin_feature_repo.get_feature_row_revision(
-        migrated_session, bundle.feature.feature_id
+        migrated_session, feature_uuid
     )
     assert revision is not None
     drafted = await admin_feature_repo.transition_admin_feature_state(
         migrated_session,
-        bundle.feature.feature_id,
+        feature_uuid,
         expected_row_revision=revision,
         reason_code="operator_hold",
         operator="integration-test",
@@ -691,7 +742,7 @@ async def test_provider_reingest_restores_the_operator_publication_not_a_default
                 "SELECT lifecycle_state, publication_state FROM feature.features "
                 "WHERE feature_id = :feature_id"
             ),
-            {"feature_id": bundle.feature.feature_id},
+            {"feature_id": feature_uuid},
         )
     ).one()
     assert row.lifecycle_state == "active"
@@ -725,7 +776,7 @@ async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
                 ") AS detail "
                 "FROM feature.feature_notices AS n WHERE n.feature_id = :fid"
             ),
-            {"fid": first.feature.feature_id},
+            {"fid": await _canonical_id(migrated_session, first.feature.feature_id)},
         )
     ).scalar_one()
 
@@ -753,7 +804,9 @@ async def test_load_bundles_aggregates_counts(
 async def test_get_feature_row_missing_returns_none(
     migrated_session: AsyncSession,
 ) -> None:
-    row = await feature_repo.get_feature_row(migrated_session, "does-not-exist")
+    # 조회 키가 uuid이므로 "없는 참조" probe도 uuid여야 한다 — 문자열을 넣으면
+    # miss 관측이 아니라 22P02가 된다.
+    row = await feature_repo.get_feature_row(migrated_session, _ABSENT_UUID)
     assert row is None
 
 
@@ -763,6 +816,7 @@ async def test_features_in_bbox_finds_loaded_feature(
     bundle = await _bundle("FEST-BBOX")
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     lon = float(bundle.feature.coord.lon)
     lat = float(bundle.feature.coord.lat)
@@ -773,9 +827,10 @@ async def test_features_in_bbox_finds_loaded_feature(
         min_lon=lon - 0.1, min_lat=lat - 0.1,
         max_lon=lon + 0.1, max_lat=lat + 0.1,
     )
-    ids = {r["feature_id"] for r in rows}
-    assert bundle.feature.feature_id in ids
-    hit = next(r for r in rows if r["feature_id"] == bundle.feature.feature_id)
+    # raw row repo는 uuid 컴럼을 드라이버 값(UUID 객체) 그대로 돌려준다 — 표기를 맞춰 비교한다.
+    ids = {str(r["feature_id"]) for r in rows}
+    assert feature_uuid in ids
+    hit = next(r for r in rows if str(r["feature_id"]) == feature_uuid)
     assert abs(float(hit["lon"]) - lon) < 1e-6
     assert hit["kind"] == "event"
 
@@ -786,7 +841,7 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 0.1, max_lat=lat + 0.1,
         kinds=["place"],
     )
-    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_place}
+    assert feature_uuid not in {str(r["feature_id"]) for r in rows_place}
 
     # category 필터 mismatch면 제외
     rows_category = await feature_repo.features_in_bbox(
@@ -795,7 +850,7 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 0.1, max_lat=lat + 0.1,
         categories=["does-not-match"],
     )
-    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_category}
+    assert feature_uuid not in {str(r["feature_id"]) for r in rows_category}
 
     # provider(소스) 필터: primary source provider와 일치하면 포함
     rows_provider = await feature_repo.features_in_bbox(
@@ -804,7 +859,7 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 0.1, max_lat=lat + 0.1,
         providers=[bundle.source_record.provider],
     )
-    assert bundle.feature.feature_id in {r["feature_id"] for r in rows_provider}
+    assert feature_uuid in {str(r["feature_id"]) for r in rows_provider}
 
     # provider 필터 mismatch면 제외
     rows_provider_miss = await feature_repo.features_in_bbox(
@@ -813,8 +868,8 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 0.1, max_lat=lat + 0.1,
         providers=["does-not-match-provider"],
     )
-    assert bundle.feature.feature_id not in {
-        r["feature_id"] for r in rows_provider_miss
+    assert feature_uuid not in {
+        str(r["feature_id"]) for r in rows_provider_miss
     }
 
     # feature 밖 bbox면 빈 결과
@@ -823,7 +878,7 @@ async def test_features_in_bbox_finds_loaded_feature(
         min_lon=lon + 1.0, min_lat=lat + 1.0,
         max_lon=lon + 1.1, max_lat=lat + 1.1,
     )
-    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
+    assert feature_uuid not in {str(r["feature_id"]) for r in rows_far}
 
 
 async def test_features_in_bbox_hides_stale_notice_revisions(
@@ -842,21 +897,22 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             )
             VALUES
             (
-                'f_notice_legacy_old', 'notice', '이전 교통 공지', '99000000',
+                :old_id, 'notice', '이전 교통 공지', '99000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
                 6, 'warning', 'P-05', 'active', 'published', 'valid'
             ),
             (
-                'f_notice_legacy_new', 'notice', '최신 교통 공지', '99000000',
+                :new_id, 'notice', '최신 교통 공지', '99000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
                 6, 'warning', 'P-05', 'active', 'published', 'valid'
             )
             """
-        )
+        ),
+        {"old_id": _NOTICE_OLD_REVISION, "new_id": _NOTICE_NEW_REVISION},
     )
-    for suffix, message, series_no, seen_at in (
-        ("old", "공사 시작", "100", old_seen),
-        ("new", "공사 내용 수정", "101", new_seen),
+    for feature_uuid, suffix, message, series_no, seen_at in (
+        (_NOTICE_OLD_REVISION, "old", "공사 시작", "100", old_seen),
+        (_NOTICE_NEW_REVISION, "new", "공사 내용 수정", "101", new_seen),
     ):
         source_entity_id = f"legacy-hash-key-{suffix}"
         raw_data = {
@@ -961,7 +1017,7 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
                 """
             ),
             {
-                "feature_id": f"f_notice_legacy_{suffix}",
+                "feature_id": feature_uuid,
                 "source_entity_key": source_entity_key,
                 "seen_at": seen_at,
             },
@@ -976,10 +1032,10 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
         max_lat=36.2,
         kinds=["notice"],
     )
-    ids = {row["feature_id"] for row in rows}
+    ids = {str(row["feature_id"]) for row in rows}
 
-    assert "f_notice_legacy_new" in ids
-    assert "f_notice_legacy_old" not in ids
+    assert _NOTICE_NEW_REVISION in ids
+    assert _NOTICE_OLD_REVISION not in ids
 
 
 async def test_features_in_bbox_include_geometry_returns_route_area_shape(
@@ -987,7 +1043,7 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
 ) -> None:
     await _insert_geometry_feature(
         migrated_session,
-        feature_id="f_route_bbox_geometry",
+        feature_id=_ROUTE_BBOX_GEOMETRY,
         kind="route",
         name="탐방로",
         category="02000000",
@@ -997,7 +1053,7 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
     )
     await _insert_geometry_feature(
         migrated_session,
-        feature_id="f_area_bbox_geometry",
+        feature_id=_AREA_BBOX_GEOMETRY,
         kind="area",
         name="국립공원",
         category="03000000",
@@ -1015,13 +1071,13 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
         max_lat=37.7,
         include_geometry=True,
     )
-    by_id = {row["feature_id"]: row for row in rows}
+    by_id = {str(row["feature_id"]): row for row in rows}
 
-    route = by_id["f_route_bbox_geometry"]
+    route = by_id[_ROUTE_BBOX_GEOMETRY]
     assert route["geometry"]["type"] in {"LineString", "MultiLineString"}
     assert route["area_square_meters"] is None
 
-    area = by_id["f_area_bbox_geometry"]
+    area = by_id[_AREA_BBOX_GEOMETRY]
     assert area["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     assert float(area["area_square_meters"]) > 0
 
@@ -1031,7 +1087,7 @@ async def test_features_contained_in_area_returns_points_inside_polygon(
 ) -> None:
     await _insert_geometry_feature(
         migrated_session,
-        feature_id="f_area_contains_query",
+        feature_id=_AREA_CONTAINS_QUERY,
         kind="area",
         name="포함 영역",
         category="03000000",
@@ -1050,31 +1106,32 @@ async def test_features_contained_in_area_returns_points_inside_polygon(
             )
             VALUES
             (
-                'f_area_inside_point', 'place', '안쪽 장소', '01000000',
+                :inside_id, 'place', '안쪽 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.04, 37.54), 4326),
                 6, 'star', 'P-03', 'active', 'published', 'valid'
             ),
             (
-                'f_area_outside_point', 'place', '바깥 장소', '01000000',
+                :outside_id, 'place', '바깥 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5, 37.9), 4326),
                 6, 'star', 'P-03', 'active', 'published', 'valid'
             )
             """
-        )
+        ),
+        {"inside_id": _AREA_INSIDE_POINT, "outside_id": _AREA_OUTSIDE_POINT},
     )
-    for point_id in ("f_area_inside_point", "f_area_outside_point"):
+    for point_id in (_AREA_INSIDE_POINT, _AREA_OUTSIDE_POINT):
         await seed_feature_subtype(migrated_session, feature_id=point_id, kind="place")
     await migrated_session.flush()
 
     rows = await feature_repo.features_contained_in_area(
         migrated_session,
-        feature_id="f_area_contains_query",
+        feature_id=_AREA_CONTAINS_QUERY,
     )
-    ids = {row["feature_id"] for row in rows}
+    ids = {str(row["feature_id"]) for row in rows}
 
-    assert "f_area_inside_point" in ids
-    assert "f_area_outside_point" not in ids
-    inside = next(row for row in rows if row["feature_id"] == "f_area_inside_point")
+    assert _AREA_INSIDE_POINT in ids
+    assert _AREA_OUTSIDE_POINT not in ids
+    inside = next(row for row in rows if str(row["feature_id"]) == _AREA_INSIDE_POINT)
     assert inside["kind"] == "place"
 
 
@@ -1092,7 +1149,7 @@ async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
     """
     await _insert_geometry_feature(
         migrated_session,
-        feature_id="f_route_geom_only_null_coord",
+        feature_id=_ROUTE_GEOM_ONLY_NULL_COORD,
         kind="route",
         name="좌표미상 탐방로",
         category="02000000",
@@ -1102,7 +1159,7 @@ async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
     )
     await _insert_geometry_feature(
         migrated_session,
-        feature_id="f_route_geom_only_coord_outside",
+        feature_id=_ROUTE_GEOM_ONLY_COORD_OUTSIDE,
         kind="route",
         name="밖 좌표 탐방로",
         category="02000000",
@@ -1120,16 +1177,16 @@ async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
         max_lat=37.7,
         include_geometry=True,
     )
-    by_id = {row["feature_id"]: row for row in rows}
+    by_id = {str(row["feature_id"]): row for row in rows}
 
     # coord=NULL이지만 geom이 bbox를 교차 → geom-only 분기로 반환.
-    null_coord = by_id["f_route_geom_only_null_coord"]
+    null_coord = by_id[_ROUTE_GEOM_ONLY_NULL_COORD]
     assert null_coord["geometry"]["type"] in {"LineString", "MultiLineString"}
     assert null_coord["lon"] is None
     assert null_coord["lat"] is None
 
     # coord는 bbox 밖(129.5, 35.1)이지만 geom은 bbox 교차 → geom-only 분기로 반환.
-    coord_outside = by_id["f_route_geom_only_coord_outside"]
+    coord_outside = by_id[_ROUTE_GEOM_ONLY_COORD_OUTSIDE]
     assert coord_outside["geometry"]["type"] in {"LineString", "MultiLineString"}
 
 
@@ -1153,9 +1210,16 @@ async def test_features_in_bbox_returns_stable_feature_id_subset(
 
     first = await feature_repo.features_in_bbox(migrated_session, **params)
     second = await feature_repo.features_in_bbox(migrated_session, **params)
-    expected = sorted(bundle.feature.feature_id for bundle in bundles)[:2]
-    assert [row["feature_id"] for row in first] == expected
-    assert [row["feature_id"] for row in second] == expected
+    # keyset은 정본 키(uuid) 오름차순이다 — canonical 소문자 표기라
+    # 파이썬 문자열 정렬과 Postgres uuid 정렬이 같은 순서를 낸다.
+    expected = sorted(
+        [
+            await _canonical_id(migrated_session, bundle.feature.feature_id)
+            for bundle in bundles
+        ]
+    )[:2]
+    assert [str(row["feature_id"]) for row in first] == expected
+    assert [str(row["feature_id"]) for row in second] == expected
 
 
 async def test_get_feature_rows_by_ids_and_search_features(
@@ -1166,17 +1230,22 @@ async def test_get_feature_rows_by_ids_and_search_features(
     third = await _bundle("FEST-SEARCH-C")
     await feature_repo.load_bundles(migrated_session, [first, second, third])
     await migrated_session.flush()
+    first_uuid = await _canonical_id(migrated_session, first.feature.feature_id)
+    second_uuid = await _canonical_id(migrated_session, second.feature.feature_id)
+    third_uuid = await _canonical_id(migrated_session, third.feature.feature_id)
 
+    # batch lookup은 ``uuid[]``로 캐스팅한다 — 미존재 probe도 uuid여야
+    # 그 키가 결과에서 빠졌다는 것을 관측할 수 있다.
     rows = await feature_repo.get_feature_rows_by_ids(
         migrated_session,
-        [first.feature.feature_id, "missing"],
+        [first_uuid, _ABSENT_UUID],
     )
-    assert set(rows) == {first.feature.feature_id}
+    assert set(rows) == {first_uuid}
     persisted_updated_at = await migrated_session.scalar(
         text("SELECT updated_at FROM feature.features WHERE feature_id = :feature_id"),
-        {"feature_id": first.feature.feature_id},
+        {"feature_id": first_uuid},
     )
-    assert rows[first.feature.feature_id]["updated_at"] == persisted_updated_at
+    assert rows[first_uuid]["updated_at"] == persisted_updated_at
 
     # retired feature도 non-public raw lookup에는 남아, "철회/폐업됨"과
     # "미존재"를 소비자가 구분한다.
@@ -1190,10 +1259,10 @@ async def test_get_feature_rows_by_ids_and_search_features(
     assert retired == 1
     rows_after = await feature_repo.get_feature_rows_by_ids(
         migrated_session,
-        [second.feature.feature_id, "missing"],
+        [second_uuid, _ABSENT_UUID],
     )
-    assert set(rows_after) == {second.feature.feature_id}
-    retired_row = rows_after[second.feature.feature_id]
+    assert set(rows_after) == {second_uuid}
+    retired_row = rows_after[second_uuid]
     assert retired_row["lifecycle_state"] == "retired"
     assert retired_row["publication_state"] == "suppressed"
     # 검색(목록 read)은 선택 가능 feature만 — 아래 search 루프가 3건 전제를 깨지
@@ -1204,7 +1273,7 @@ async def test_get_feature_rows_by_ids_and_search_features(
             "publication_state='published', quality_state='valid' "
             "WHERE feature_id = :fid"
         ),
-        {"fid": second.feature.feature_id},
+        {"fid": second_uuid},
     )
 
     lon = float(first.feature.coord.lon)
@@ -1229,13 +1298,8 @@ async def test_get_feature_rows_by_ids_and_search_features(
         seen.append(page.items[0].feature_id)
         cursor = page.next_cursor
 
-    assert seen == sorted(
-        [
-            first.feature.feature_id,
-            second.feature.feature_id,
-            third.feature.feature_id,
-        ]
-    )
+    # 세 Feature의 이름이 같아 점수가 동점이다 — tie-break 축은 정본 키(uuid).
+    assert seen == sorted([first_uuid, second_uuid, third_uuid])
     assert cursor is None
 
     bbox_only = await feature_repo.search_features(
@@ -1246,7 +1310,7 @@ async def test_get_feature_rows_by_ids_and_search_features(
         cursor_signing_key=_SEARCH_CURSOR_KEY,
     )
     assert bbox_only.total_count == 3
-    assert first.feature.feature_id in {item.feature_id for item in bbox_only.items}
+    assert first_uuid in {item.feature_id for item in bbox_only.items}
 
 
 async def test_search_features_include_total_false_skips_count_in_postgres(
@@ -1297,30 +1361,33 @@ async def test_retire_geometryless_area_features_by_source(
     place = await _bundle("AREA-PLACE")
     await feature_repo.load_bundles(migrated_session, [geometryless, with_geom, place])
     await migrated_session.flush()
+    geometryless_uuid = await _canonical_id(
+        migrated_session, geometryless.feature.feature_id
+    )
+    with_geom_uuid = await _canonical_id(migrated_session, with_geom.feature.feature_id)
+    place_uuid = await _canonical_id(migrated_session, place.feature.feature_id)
 
     # T-VN-35(ADR-086): kind 전이는 subtype 행이 있으면 배타 arc FK가 막는다.
     # 0086 이전에 적재된 "geometry 없는 area" 잔재를 재현하려면 event subtype을
     # 먼저 지우고 core kind를 옮긴 뒤 area subtype을 (있는 경우만) 만든다.
-    for bundle in (geometryless, with_geom):
+    for feature_uuid in (geometryless_uuid, with_geom_uuid):
         await migrated_session.execute(
             text("DELETE FROM feature.feature_events WHERE feature_id = :fid"),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     await migrated_session.execute(
-        text("UPDATE feature.features SET kind = 'area' WHERE feature_id = ANY(:fids)"),
-        {
-            "fids": [
-                geometryless.feature.feature_id,
-                with_geom.feature.feature_id,
-            ]
-        },
+        text(
+            "UPDATE feature.features SET kind = 'area' "
+            "WHERE feature_id = ANY(CAST(:fids AS uuid[]))"
+        ),
+        {"fids": [geometryless_uuid, with_geom_uuid]},
     )
     await migrated_session.flush()
     # geometry가 있는 쪽만 area subtype 행을 갖는다 — "geometry 없음"은 이제
     # ``feature_areas`` 행 부재로 판정된다.
     await seed_feature_subtype(
         migrated_session,
-        feature_id=with_geom.feature.feature_id,
+        feature_id=with_geom_uuid,
         kind="area",
         geom_wkt=(
             "POLYGON((126.9 37.5, 126.91 37.5, 126.91 37.51, "
@@ -1339,16 +1406,12 @@ async def test_retire_geometryless_area_features_by_source(
 
     rows = await feature_repo.get_feature_rows_by_ids(
         migrated_session,
-        [
-            geometryless.feature.feature_id,
-            with_geom.feature.feature_id,
-            place.feature.feature_id,
-        ],
+        [geometryless_uuid, with_geom_uuid, place_uuid],
     )
-    assert rows[geometryless.feature.feature_id]["lifecycle_state"] == "retired"
-    assert rows[geometryless.feature.feature_id]["publication_state"] == "suppressed"
-    assert rows[with_geom.feature.feature_id]["lifecycle_state"] == "active"
-    assert rows[place.feature.feature_id]["lifecycle_state"] == "active"
+    assert rows[geometryless_uuid]["lifecycle_state"] == "retired"
+    assert rows[geometryless_uuid]["publication_state"] == "suppressed"
+    assert rows[with_geom_uuid]["lifecycle_state"] == "active"
+    assert rows[place_uuid]["lifecycle_state"] == "active"
 
 
 async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:
@@ -1376,6 +1439,7 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
 
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
+    feature_uuid = await _canonical_id(migrated_session, bundle.feature.feature_id)
 
     # T-VN-35(ADR-086): geometry 정본은 ``feature_areas.geom``(MultiPolygon 4326)이고
     # 조립 뷰가 같은 값을 ``geom``으로 제공한다.
@@ -1386,7 +1450,7 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
                 "x_extension.GeometryType(geom) AS gtype "
                 "FROM feature.feature_areas WHERE feature_id = :fid"
             ),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     ).one()
     assert row.srid == 4326
@@ -1397,15 +1461,13 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
                 "SELECT x_extension.GeometryType(geom) AS gtype "
                 "FROM feature.feature_areas WHERE feature_id = :fid"
             ),
-            {"fid": bundle.feature.feature_id},
+            {"fid": feature_uuid},
         )
     ).one()
     assert projection_row.gtype == "MULTIPOLYGON"
 
     # get_feature_row는 coord(centroid) 기반 lon/lat 반환.
-    got = await feature_repo.get_feature_row(
-        migrated_session, bundle.feature.feature_id
-    )
+    got = await feature_repo.get_feature_row(migrated_session, feature_uuid)
     assert got is not None
     assert got["kind"] == "area"
     assert got["lon"] is not None  # centroid
@@ -1535,65 +1597,4 @@ async def test_the_same_provider_entity_never_yields_a_second_feature(
     census = await _primary_link_census(migrated_session, entity_key)
     assert census == {"links": 1, "features": 1}, (
         "같은 provider entity가 두 Feature의 primary가 됐다 — 멱등 앵커가 뚫렸다."
-    )
-
-
-async def test_one_source_entity_can_still_be_primary_for_two_features_today(
-    migrated_session: AsyncSession,
-) -> None:
-    """**오늘의 현실을 못 박는다** — 이 성질이 T-VN-39가 없애는 결함이다.
-
-    ADR-068 결정 2는 provider identity를
-    ``(provider_dataset_id, source_entity_type, source_entity_id)``의 UNIQUE로 정했다.
-    그런데 Feature identity는 ``make_feature_id``가 만든 ``f_*``이고, 그것은
-    ``bjd_code``·``category``를 해시 입력에 쓴다. 재분류가 일어나면 **같은 source
-    entity에서 새 Feature가 주조되고 둘 다 primary가 된다.**
-
-    2026-09-08에 `uq_source_links_primary_entity`(`(source_entity_key)
-    WHERE source_role='primary'`)를 재키 **앞에** 심었다가 통합 전량에서 17건이
-    빨개졌다. `test_notice_lifecycle.py`와 `test_khoa_rekey_hardening.py`가 정확히
-    이 상태를 **의도적으로** 재현하기 때문이다. 즉 그 인덱스는 오늘의 불변식이 아니라
-    **재키 후의 목표 상태**다.
-
-    이 테스트는 그 사실을 코드에 박아 둔다. 재키가 착지해 이 시나리오가 불가능해지면
-    이 테스트가 빨개지고, 그때 지우는 것이 옳다 — 그 빨간불이 곧 재키가 실제로
-    identity churn을 없앴다는 증거다.
-    """
-
-    bundle = await _bundle("FEST-ENTITY-1N")
-    await feature_repo.load_bundle(migrated_session, bundle)
-    await migrated_session.flush()
-    entity_key = await _entity_key_of(
-        migrated_session, bundle.source_record.source_record_key
-    )
-
-    # 재분류가 만드는 것과 같은 모양 — 같은 entity, 다른 Feature.
-    reclassified = bundle.feature.feature_id + "_reclassified"
-    await migrated_session.execute(
-        text(
-            "INSERT INTO feature.features ("
-            " feature_id, kind, name, category, coord, coord_precision_digits,"
-            " lifecycle_state, publication_state, quality_state)"
-            " SELECT :new_id, kind, name, category, coord, coord_precision_digits,"
-            "        lifecycle_state, publication_state, quality_state"
-            "   FROM feature.features WHERE feature_id = :old_id"
-        ),
-        {"new_id": reclassified, "old_id": bundle.feature.feature_id},
-    )
-    await migrated_session.execute(
-        text(
-            "INSERT INTO provider_sync.source_links ("
-            " feature_id, source_entity_key, source_role, match_method, confidence)"
-            " VALUES (:fid, :key, 'primary', 'natural_key', 100)"
-        ),
-        {"fid": reclassified, "key": entity_key},
-    )
-    await migrated_session.flush()
-
-    resolved = await feature_repo.resolve_primary_features_for_entity(
-        migrated_session, source_entity_key=entity_key
-    )
-    assert sorted(resolved) == sorted([bundle.feature.feature_id, reclassified]), (
-        "한 source entity가 두 Feature의 primary인 상태를 더 이상 만들 수 없다면 "
-        "T-VN-39 재키가 착지한 것이다 — 이 테스트를 지우고 앵커 게이트로 대체하라."
     )

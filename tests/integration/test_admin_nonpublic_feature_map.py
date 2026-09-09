@@ -103,6 +103,14 @@ async def _insert_feature(
     ``(active, suppressed, valid)``라는 tuple 자체이지, 따로 저장되는 별도 값이 아니다.
     이 테스트가 지키려는 명제("비공개 feature는 admin 표면에 보이고 공개 표면에는
     없다")는 축 tuple로 그대로 쓸 수 있으므로 번역 계층을 두지 않는다.
+
+    T-VN-39 재키 뒤 ``:feature_id``는 **한 문장에서 두 타입으로 읽히는 자리**다 —
+    ``feature.features.feature_id``는 uuid고 ``name``은 text다. 맨몸으로 두면
+    PostgreSQL이 자리마다 다른 타입을 유도해 ``inconsistent types deduced for
+    parameter $1``(42P08)로 parse 단계에서 죽고, 한 자리에만 캐스트를 붙여도 남은
+    맨몸 자리가 같은 오류를 낸다. 그래서 **두 자리 모두** 명시 캐스트를 단다:
+    바인드 타입은 첫 자리의 uuid 하나로 고정되고 ``name``은 그 uuid의 text 표현이
+    된다(재키 전에도 name은 feature_id와 같은 값이었으므로 뜻이 바뀌지 않는다).
     """
 
     await session.execute(
@@ -113,10 +121,14 @@ async def _insert_feature(
                 lifecycle_state, publication_state, quality_state,
                 sido_code, sigungu_code, legal_dong_code, updated_at
             ) VALUES (
-                :feature_id, :kind, :feature_id, '06020000',
+                CAST(:feature_id AS uuid), :kind, CAST(:feature_id AS text),
+                '06020000',
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                      ELSE x_extension.ST_SetSRID(
-                         x_extension.ST_MakePoint(:lon, :lat), 4326
+                         x_extension.ST_MakePoint(
+                             CAST(:lon AS double precision),
+                             CAST(:lat AS double precision)
+                         ), 4326
                      ) END,
                 :lifecycle_state, :publication_state, :quality_state,
                 '11', '11110', '1111010100', :updated_at
