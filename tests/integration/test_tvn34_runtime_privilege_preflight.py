@@ -622,7 +622,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                         """
                         CALL feature.create_feature_with_initial_state(
                             CAST(:payload AS jsonb), 'active', 'draft', 'valid',
-                            CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                            CAST(:context AS jsonb), NULL, NULL, NULL
                         )
                         """
                     ),

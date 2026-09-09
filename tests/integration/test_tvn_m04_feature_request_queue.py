@@ -149,7 +149,9 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
                         """
                         CALL feature.approve_feature_request_with_initial_state(
                           CAST(:request_id AS uuid), CAST(:feature_payload AS jsonb), :command_id,
-                          NULL::text, NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
+                          -- OUT 넷: outcome · feature_id(uuid) · row_revision
+                          -- · existing_feature_id(uuid). T-VN-39로 다섯에서 넷이 됐다.
+                          NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
@@ -464,7 +466,8 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
                     text(
                         "CALL feature.approve_feature_request_with_initial_state("
                         "CAST(:request_id AS uuid), CAST(:payload AS jsonb), :command_id, "
-                        "NULL::text, NULL::text, NULL::uuid, NULL::bigint, NULL::uuid)"
+                        # OUT 넷 — T-VN-39로 다섯에서 넷이 됐다.
+                        "NULL::text, NULL::uuid, NULL::bigint, NULL::uuid)"
                     ),
                     {
                         "request_id": str(request_id),

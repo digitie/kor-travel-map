@@ -67,7 +67,7 @@ async def _call_create(
             CALL feature.create_feature_with_initial_state(
                 CAST(:payload AS jsonb), :lifecycle_state, :publication_state,
                 :quality_state, CAST(:context AS jsonb),
-                NULL, NULL, NULL, NULL
+                NULL, NULL, NULL
             )
             """
         ),
@@ -735,7 +735,7 @@ async def test_tvn34_provider_create_rejects_legacy_and_user_provenance_payload_
                         """
                         CALL feature.create_feature_with_initial_state(
                             CAST(:payload AS jsonb), 'active', 'draft', 'valid',
-                            CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                            CAST(:context AS jsonb), NULL, NULL, NULL
                         )
                         """
                     ),

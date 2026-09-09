@@ -147,8 +147,12 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
@@ -201,8 +205,12 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
@@ -240,8 +248,12 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),

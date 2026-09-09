@@ -73,7 +73,7 @@ async def _create_as_provider_executor(
                 """
                 CALL feature.create_feature_with_initial_state(
                     CAST(:payload AS jsonb), :lifecycle_state, :publication_state,
-                    :quality_state, CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                    :quality_state, CAST(:context AS jsonb), NULL, NULL, NULL
                 )
                 """
             ),

@@ -51,7 +51,10 @@ _SIDECAR_SIGNATURE = re.compile(
     r"CREATE (?:OR REPLACE )?PROCEDURE ([a-z_]+\.[a-z_0-9]+)\((.*?)\)\s*\n\s*LANGUAGE",
     re.DOTALL,
 )
-_SEARCH_ROOTS = ("src", "scripts", "packages")
+#: 테스트도 같은 프로시저를 부른다. 처음에 뺐더니 통합 스위트에서 자리표시자
+#: 불일치 13건이 `procedure ... does not exist`로 나왔다 — 검사가 안 보는 곳에
+#: 같은 결함이 그대로 살아 있었다.
+_SEARCH_ROOTS = ("src", "scripts", "packages", "tests")
 
 
 def _split_top_level(text: str) -> list[str]:
