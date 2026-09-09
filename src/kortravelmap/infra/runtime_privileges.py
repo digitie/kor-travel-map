@@ -85,7 +85,6 @@ _FEATURE_VIEW_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "feature_routes": (
         "feature_id",
-        "feature_uuid",
         "kind",
         "geom",
         "route_type",
@@ -102,7 +101,6 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     ),
     "feature_areas": (
         "feature_id",
-        "feature_uuid",
         "kind",
         "geom",
         "area_kind",
@@ -117,7 +115,7 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
 
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
-        column for column in columns if column not in {"feature_id", "feature_uuid", "kind"}
+        column for column in columns if column not in {"feature_id", "kind"}
     )
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }

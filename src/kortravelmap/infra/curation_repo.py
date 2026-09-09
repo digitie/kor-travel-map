@@ -4003,7 +4003,6 @@ async def create_manual_curation_item_with_feature_command(
     await write_subtype(
         session,
         feature_id=feature_id,
-        feature_uuid=feature_uuid,
         kind=kind,
         detail=manual_feature.get("detail"),
     )

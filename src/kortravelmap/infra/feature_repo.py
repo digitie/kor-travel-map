@@ -2334,7 +2334,6 @@ def _provider_field_patch_payload(
 
     subtype = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid=feature_uuid,
         kind=feature.kind.value,
         detail=feature.detail,
     )
@@ -2509,7 +2508,6 @@ async def _upsert_feature_subtype(
     await write_subtype(
         session,
         feature_id=feature.feature_id,
-        feature_uuid=stored_feature_uuid,
         kind=feature.kind.value,
         detail=feature.detail,
         geom_wkt=geom_wkt,

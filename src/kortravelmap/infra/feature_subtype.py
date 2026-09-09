@@ -148,7 +148,6 @@ def _bind_jsonb(params: dict[str, Any]) -> dict[str, Any]:
 def subtype_params(
     *,
     feature_id: str,
-    feature_uuid: str,
     kind: str,
     detail: Any,
 ) -> dict[str, Any] | None:
@@ -170,7 +169,6 @@ def subtype_params(
     as_json = obj.model_dump(mode="json")
     common: dict[str, Any] = {
         "feature_id": feature_id,
-        "feature_uuid": feature_uuid,
         "kind": kind,
     }
     if isinstance(obj, PlaceDetail):
@@ -322,7 +320,7 @@ def subtype_upsert_sql(kind: str) -> str | None:
         return None
     columns = _SUBTYPE_COLUMNS[kind]
     geom_expr = _GEOM_EXPR.get(kind)
-    all_columns = ("feature_id", "feature_uuid", "kind", *columns)
+    all_columns = ("feature_id", "kind", *columns)
     values = [f":{name}" for name in all_columns]
     update_columns = list(columns)
     if geom_expr is not None:
@@ -433,7 +431,6 @@ async def write_subtype(
     session: AsyncSession,
     *,
     feature_id: str,
-    feature_uuid: str,
     kind: str,
     detail: Any,
     geom_wkt: str | None = None,
@@ -455,7 +452,6 @@ async def write_subtype(
     validated = _validated_detail(kind, feature_id, detail)
     params = subtype_params(
         feature_id=feature_id,
-        feature_uuid=feature_uuid,
         kind=kind,
         detail=validated,
     )

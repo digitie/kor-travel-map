@@ -3016,7 +3016,6 @@ async def create_admin_feature_with_field_overrides(
         await write_subtype(
             session,
             feature_id=feature_id,
-            feature_uuid=observed_feature_uuid,
             kind=kind,
             detail=payload.get("detail"),
         )
@@ -3254,7 +3253,6 @@ def _override_payload_for_change(
                 )
         params = subtype_params(
             feature_id=feature_id,
-            feature_uuid=feature_uuid,
             kind=kind,
             detail=payload.get("detail"),
         )

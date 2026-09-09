@@ -340,7 +340,6 @@ async def approve_feature_request(
         await write_subtype(
             session,
             feature_id=feature_id,
-            feature_uuid=str(observed_uuid),
             kind=kind,
             detail=None,
         )
