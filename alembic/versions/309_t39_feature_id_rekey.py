@@ -511,6 +511,7 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_append_theme_feature_candidate_transition.sql"),
     *_sidecar("_309_apply_provider_feature_field_patch.sql"),
+    *_sidecar("_309_archive_curated_source_command.sql"),
     *_sidecar("_309_apply_curation_import_items_command.sql"),
     *_sidecar("_309_create_curation_item_command.sql"),
     *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
@@ -530,6 +531,7 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_derive_subtype_public_ready.sql"),
     *_sidecar("_309_has_active_feature_override.sql"),
     *_sidecar("_309_lock_current_provider_feature_source_evidence.sql"),
+    *_sidecar("_309_materialize_theme_candidate_generation.sql"),
     *_sidecar("_309_reactivate_admin_feature_state.sql"),
     *_sidecar("_309_revoke_feature_field_overrides.sql"),
     *_sidecar("_309_revoke_lifecycle_override.sql"),

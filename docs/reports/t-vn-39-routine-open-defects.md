@@ -293,3 +293,62 @@ freeze manifest라 **text 그대로 둔다.**
   ~30개 호출부가 걸려 있어 T-VN-39 범위에서 걷어내지 않는다 — 재키가 초록이 된 뒤의
   독립 정리 항목이다. 지금은 무해하게 계속 통한다(repo가 여전히
   `CAST(feature_id AS text) AS feature_uuid`를 투영한다).
+
+---
+
+## 잔여 text 루틴 전수 판정 (2026-09-09)
+
+head 오라클을 직접 훑어 "사이드카가 없는데 `feature_id`를 만지면서 명시적 text가
+섞인" 루틴 7개를 뽑고, 각각을 두 에이전트가 독립 판정했다(하나는 판정, 하나는 반박).
+**"text가 보인다"는 곧 결함이 아니다** — 실제로 타입이 충돌하는 식만 결함이다.
+
+### 깨진다 — 사이드카 필요 (2)
+
+**`feature.archive_curated_source_command`** (head:1451·1483)
+```sql
+COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::text[])
+```
+`scope`의 UNION 두 갈래가 `theme_feature_candidates.feature_id`와
+`source_links.feature_id`인데 309가 둘 다 uuid로 옮긴다 →
+`42846: COALESCE could not convert type text[] to uuid[]`.
+
+배열 타입은 둘 다 typcategory 'A'라 42804 카테고리 검사를 통과하고, 그 다음
+`can_coerce_type(uuid[] → text[], IMPLICIT)`가 실패한다 — uuid는 pg_cast에 항목이
+하나도 없고 I/O fallback은 ASSIGNMENT 이상을 요구하기 때문이다. 그래서 공통타입이
+첫 인자 uuid[]로 굳고 두 번째 인자 변환에서 죽는다.
+
+재키 **전**에는 UNION이 text ∪ varchar였고 varchar가 text로 binary-coercible이라
+공통타입이 text였다. 즉 `ARRAY[]::text[]`는 실수가 아니라 재키가 무효화하는 계약이다.
+
+`INTO STRICT v_prelock_features`의 I/O 캐스트가 살려주지 않는다 — COALESCE는 SELECT
+문 **안**의 식이라 그 문장의 parse 단계에서 죽고, plpgsql 대입 캐스트는 그 뒤다.
+
+**`feature.materialize_theme_candidate_generation`** (head:5710·5729·5743)
+`SELECT 'feature'::text, link.feature_id`의 UNION이
+`42804: UNION types text and uuid cannot be matched`. 바깥 `EXCEPT`가
+`ops.curation_rule_reconcile_scope_members.member_key`(text, 이종 멤버 키를 담아
+309가 옮기지 않는다)와 비교하므로, 올바른 이전은 member_key를 uuid로 만드는 것이
+아니라 `link.feature_id::text`로 text 축을 유지하는 것이다. 바깥 EXCEPT의 불일치는
+독립 결함이 아니라 안쪽 UNION 공통타입 해석의 결과다.
+
+### 안 깨진다 — 근거 (5)
+
+- **`feature.archive_curated_theme_command`** · **`feature.patch_curated_theme_command`** —
+  UNION 두 갈래(`theme_feature_candidates` ∪ `source_links`)가 **함께** 재타입되므로
+  재키 전 text ∪ text가 재키 후 uuid ∪ uuid가 된다. 조인·필터에 feature_id 비교가
+  없고, `v_feature_id text`는 advisory lock 키로만 쓰인다.
+- **`feature.promote_theme_feature_candidate`** — 비교가 전부 uuid ↔ uuid.
+- **`feature.validate_feature_override_value`** — `ops.feature_overrides.feature_id`가
+  재키 후 uuid로 도착한다(`_309_author_feature_field_overrides.sql:16`이 `p_feature_id uuid`).
+- **`ops.is_valid_feature_update_scope_0052`** — `ARRAY[]::text[]`가 feature 식별자와
+  무관하다.
+
+### 통하는 형태 — 이것을 결함으로 세지 마라
+
+- `text[]` 변수에 `uuid[]` 대입, `FOR v_x IN SELECT <uuid 컬럼>`에서 `v_x`가 text —
+  plpgsql 대입은 I/O 캐스트를 한다.
+- `'literal' || <uuid 값>` — `text || anynonarray` 연산자가 있고, 결과가 uuid의
+  canonical 소문자 표기라 uuid 변수를 쓸 때와 **같은 문자열**이다. advisory lock 키
+  `'feature-write:' || ...` 15자리가 갈라지지 않는다는 뜻이고, 실측으로 확인했다
+  (사이드카 4곳 전부 같은 철자, `_309_patch_curation_item_command.sql:72`는 uuid 컬럼을
+  직접 이어 붙인다).
