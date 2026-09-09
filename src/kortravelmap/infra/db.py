@@ -77,6 +77,10 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     }
 )
 
+# ruff: noqa: E501 — 이 모듈은 `::regprocedure` 시그니처를 SQL 문자열 안에
+# 담는다. 재키(T-VN-39)로 `text`가 `uuid`가 되면서 몇 줄이 100자를 넘는데,
+# SQL 리터럴이라 파이썬 문자열 연결로 나눌 수 없다(나누면 SQL이 깨진다).
+
 _MANUAL_FEATURE_CREATE_PROCEDURE = (
     "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
 )
@@ -94,7 +98,7 @@ _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
 _M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(uuid,uuid,jsonb,jsonb)"
 _M05_DECISION_PROCEDURE = (
     "feature.resolve_manual_provider_dedup_case_v2("
-    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+    "uuid, text, text, bigint, bigint, uuid, text, text, bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
 _M05_ACK_PROCEDURE = (
@@ -175,8 +179,8 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
         ),
         (
             "feature.patch_curation_item_command("
-            "uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,"
-            "jsonb,bigint,text)"
+            "uuid,uuid,bigint,uuid,text,text,text,text,text,text,integer,"
+            "text,text,text,text,jsonb,bigint,text)"
         ),
         (
             "feature.promote_theme_feature_candidate("
@@ -315,7 +319,7 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)'::regprocedure,
+        'feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_author_lifecycle_override_procedure,
         has_function_privilege(
@@ -331,26 +335,22 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_provider_field_patch_procedure,
         has_function_privilege(
             session_user,
-            'feature.author_feature_field_overrides('
-            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+            'feature.author_feature_field_overrides(uuid, bigint, text, text, bigint, jsonb, jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_author_procedure,
         has_function_privilege(
             session_user,
-            'feature.revoke_feature_field_overrides('
-            'text,bigint,text,text,bigint,text[])'::regprocedure,
+            'feature.revoke_feature_field_overrides(uuid, bigint, text, text, bigint, text[])'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_revoke_procedure,
         has_function_privilege(
             session_user,
-            'feature.transition_admin_feature_state('
-            'text,text,text,text,bigint,text,text,text)'::regprocedure,
+            'feature.transition_admin_feature_state(uuid, text, text, text, bigint, text, text, text)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_admin_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.reactivate_admin_feature_state('
-            'text,bigint,text,text,bigint,text,text)'::regprocedure,
+            'feature.reactivate_admin_feature_state(uuid, bigint, text, text, bigint, text, text)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_admin_reactivation_procedure,
         ARRAY(

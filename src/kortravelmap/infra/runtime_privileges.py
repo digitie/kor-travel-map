@@ -350,39 +350,39 @@ _STATE_OWNER_FUNCTION_ACL = (
     "jsonb, text, text, text, jsonb) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime",
     "REVOKE ALL ON PROCEDURE feature.transition_feature_state("
-    "text, text, text, text, bigint, jsonb) FROM PUBLIC",
+    "uuid, text, text, text, bigint, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
-    "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
+    "uuid, text, text, boolean, text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(uuid,text,bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
     "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
-    "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
+    "uuid, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides("
-    "text, bigint, text, text, bigint, text[]) FROM PUBLIC",
+    "uuid, bigint, text, text, bigint, text[]) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state("
-    "text, text, text, text, bigint, text, text, text) FROM PUBLIC",
+    "uuid, text, text, text, bigint, text, text, text) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
-    "text, bigint, text, text, bigint, text, text) FROM PUBLIC",
+    "uuid, bigint, text, text, bigint, text, text) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
     "jsonb, text, text, text, jsonb) TO ktm_feature_create_provider_executor, "
     "ktm_manual_feature_procedure_owner",
     "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state("
-    "text, text, text, text, bigint, jsonb) TO ktm_feature_runtime",
+    "uuid, text, text, text, bigint, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_lifecycle_override("
-    "text, text, text, boolean, text, text, bigint) TO ktm_feature_runtime",
+    "uuid, text, text, boolean, text, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.revoke_lifecycle_override("
-    "text, text, bigint) TO ktm_feature_runtime",
+    "uuid, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.apply_provider_feature_field_patch("
     "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_feature_field_overrides("
-    "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
+    "uuid, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.revoke_feature_field_overrides("
-    "text, bigint, text, text, bigint, text[]) TO ktm_feature_runtime",
+    "uuid, bigint, text, text, bigint, text[]) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
-    "text, text, text, text, bigint, text, text, text) TO ktm_feature_runtime",
+    "uuid, text, text, text, bigint, text, text, text) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state("
-    "text, bigint, text, text, bigint, text, text) TO ktm_feature_runtime",
+    "uuid, bigint, text, text, bigint, text, text) TO ktm_feature_runtime",
 )
 
 _AUDIT_WRITER_FUNCTION_ACL = (
@@ -506,7 +506,7 @@ _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
 
 _M05_STATE_OWNER_DEPENDENCY_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
-    "text, text, text, text, bigint, text, text, text) "
+    "uuid, text, text, text, bigint, text, text, text) "
     "TO ktm_manual_provider_dedup_procedure_owner",
 )
 
@@ -554,20 +554,20 @@ _M05_WRITER_ACL = (
     "text, uuid, text, text) "
     "TO ktm_feature_reference_reconciliation_service_executor",
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases("
-    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "text, timestamp with time zone, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases("
-    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "text, timestamp with time zone, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
     "TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("
-    "text, text, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
+    "uuid, uuid, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate("
-    "text, text, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
+    "uuid, uuid, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
     # T-VN-M05-3(migration 304). detector가 manual origin 대상을 여는 유일한
     # 경로다. 함수 본문의 session_user 검사와 이 ACL이 **둘 다** 막는다 — 하나가
     # 지워졌을 때 다른 하나가 남게 하려는 것이고, 그래서 본문 검사를 가리지
@@ -579,15 +579,15 @@ _M05_WRITER_ACL = (
     # 전체가 무효화된다** — 이 두 문장과 무관한 grant까지 같이 날아간다.
     _M05_DETECTOR_LISTING_ACL_SQL,
     "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
-    "uuid, text, text, bigint, bigint, text, text, text, bigint), "
+    "uuid, text, text, bigint, bigint, uuid, text, text, bigint), "
     "feature.resolve_manual_provider_dedup_case_v2("
-    "uuid, text, text, bigint, bigint, text, text, text, bigint) FROM PUBLIC, "
+    "uuid, text, text, bigint, bigint, uuid, text, text, bigint) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
-    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+    "uuid, text, text, bigint, bigint, uuid, text, text, bigint) "
     "TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
     "text, bigint, text, bigint) FROM PUBLIC, ktm_feature_runtime, "
