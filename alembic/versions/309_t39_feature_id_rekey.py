@@ -463,11 +463,15 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     _sidecar("_309_fence_features_identity_update.sql"),
     _sidecar("_309_fill_features_feature_uuid.sql"),
     _sidecar("_309_purge_manual_feature.sql"),
-    # ktm_feature_state_procedure_owner (3)
+    # ktm_feature_state_procedure_owner (4 — provider wrapper 신설 포함)
     "SET ROLE ktm_feature_state_procedure_owner",
     _sidecar("_309_create_feature_with_initial_state.sql"),
     _sidecar("_309_derive_subtype_public_ready.sql"),
     _sidecar("_309_validate_feature_base_field_value.sql"),
+    # ADR-098의 착지처. core 프로시저가 재작성된 **뒤**여야 한다 — 이 wrapper가
+    # 그것을 CALL하고, plpgsql은 CREATE 시점에 의존을 검사하지 않지만 첫 호출에서
+    # 시그니처가 맞아야 한다.
+    _sidecar("_309_create_provider_feature_with_initial_state.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_manual_feature_procedure_owner (3)
     "SET ROLE ktm_manual_feature_procedure_owner",
