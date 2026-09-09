@@ -32,6 +32,7 @@ DECLARE
     v_alias text;
     v_candidate uuid;
     v_claimed uuid;
+    v_alias_owner uuid;
     v_created uuid;
     v_created_inserted boolean;
 BEGIN
@@ -72,13 +73,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- 재분류가 만든 새 `f_*`도 같은 Feature의 주소로 남는다. Feature는 갈라지지 않는다.
-    -- `DO UPDATE`를 쓰면 안 된다 — `fence_feature_aliases_write()`가 alias 행의
-    -- UPDATE를 무조건 거부한다(행 불변, ADR-068).
-    INSERT INTO feature.feature_aliases (alias, feature_id, alias_kind)
-    VALUES (v_alias, v_claimed, 'legacy_feature_id')
-    ON CONFLICT (alias) DO NOTHING;
-
     CALL feature.create_feature_with_initial_state(
         p_feature_payload || jsonb_build_object('feature_id', v_claimed::text),
         p_lifecycle_state,
@@ -98,6 +92,38 @@ BEGIN
             v_claimed, v_created
             USING ERRCODE = '23514',
                   CONSTRAINT = 'ck_provider_feature_create_core_identity';
+    END IF;
+
+    -- 재분류가 만든 새 `f_*`도 같은 Feature의 주소로 남는다. Feature는 갈라지지 않는다.
+    -- `DO UPDATE`를 쓰면 안 된다 — `fence_feature_aliases_write()`가 alias 행의
+    -- UPDATE를 무조건 거부한다(행 불변, ADR-068).
+    --
+    -- 이 INSERT는 core CALL **뒤에만** 설 수 있다. `fk_feature_aliases_feature`는
+    -- 309 `_FK_RECREATE`가 DEFERRABLE 없이 재생성하므로 문장 끝에서 즉시 검사되고,
+    -- 신규 claim 경로의 `v_claimed`는 core가 넣기 전까지 `feature.features`에 없다 —
+    -- 앞에 두면 첫 provider Feature 생성마다 23503이다. 재키 전에는 이 자리를
+    -- `trg_features_legacy_alias` AFTER INSERT 트리거가 맡아 순서가 저절로 옳았고,
+    -- 그것을 프로시저로 옮기면서 그 보호가 사라졌다.
+    INSERT INTO feature.feature_aliases (alias, feature_id, alias_kind)
+    VALUES (v_alias, v_claimed, 'legacy_feature_id')
+    ON CONFLICT (alias) DO NOTHING
+    RETURNING feature_id INTO v_alias_owner;
+
+    IF v_alias_owner IS NULL THEN
+        -- `ON CONFLICT`가 삼킨 경우다. 같은 Feature의 재적재면 정상이고, 다른
+        -- Feature가 이미 그 주소를 쥐고 있으면 identity 손상이다 — 재키 전에는
+        -- `ck_feature_aliases_legacy_identity`(alias = feature_id)가 원리적으로
+        -- 막던 상황이라 조용히 넘기면 그 자리가 무방비가 된다.
+        SELECT bound.feature_id INTO v_alias_owner
+        FROM feature.feature_aliases AS bound
+        WHERE bound.alias = v_alias;
+        IF v_alias_owner IS DISTINCT FROM v_claimed THEN
+            RAISE EXCEPTION
+                'provider legacy alias % is already bound to Feature % (claim=%)',
+                v_alias, v_alias_owner, v_claimed
+                USING ERRCODE = '23505',
+                      CONSTRAINT = 'ck_provider_feature_alias_bound_elsewhere';
+        END IF;
     END IF;
 
     o_feature_id := v_claimed;

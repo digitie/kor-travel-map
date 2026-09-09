@@ -364,6 +364,11 @@ _EVIDENCE_RENAME: Final[tuple[str, ...]] = (
     " RENAME COLUMN feature_id TO legacy_feature_id",
     "ALTER TABLE feature.manual_feature_purge_records"
     " RENAME COLUMN feature_uuid TO feature_id",
+    # RENAME은 NOT NULL을 보존한다. 재키 뒤 태어난 Feature는 legacy 주소를 애초에
+    # 갖지 않으므로(ADR-098 결정 6) 이 열의 NULL은 결손이 아니라 참이다 —
+    # `_309_purge_manual_feature.sql`이 스스로 적어 둔 계약 선결조건의 이행이다.
+    "ALTER TABLE feature.manual_feature_purge_records"
+    " ALTER COLUMN legacy_feature_id DROP NOT NULL",
     "ALTER TABLE ops.tvn36_legacy_freeze_preflight_manifest"
     " RENAME COLUMN feature_id TO legacy_feature_id",
     # 텍스트 짝이 없다 — 이 표의 진짜 identity다. 삭제가 아니라 개명.
@@ -382,6 +387,20 @@ _COLLATERAL_RECREATE: Final[tuple[str, ...]] = (
     "CREATE INDEX idx_manual_provider_dedup_cases_decision_fence"
     " ON ops.manual_provider_dedup_cases"
     " USING btree (manual_feature_id, provider_feature_id, decision_fingerprint)",
+    # `ck_feature_aliases_legacy_identity`(alias = feature_id)는 uuid = text가 되어
+    # 되살릴 수 없다. 그 자리를 값 관계가 아니라 **형태**로 받는다 — legacy alias는
+    # `make_feature_id` 산출물(`f_{bjd|global}_{kind[0]}_{sha1[:16]}`)만 담고,
+    # uuid 표기는 이 형태에 걸리지 않으므로 "정본 키를 alias로 되풀이하지 않는다"가
+    # DB 층에서 강제된다(새 INV-068-01의 착지점, ADR-098 결정 6).
+    #
+    # bjd 자리를 `.+`로 두는 이유: `make_feature_id`는 `bjd_code`를 검증하지 않아
+    # (`core/ids.py:150-155`가 kind/category/source_type/natural_key만 본다) 밑줄이
+    # 섞인 값이 원리적으로 가능하다. 더 좁은 `[^_]+`로 조이면 그런 provider 하나가
+    # 전량 23514로 멎는다 — 형태 검사가 적재를 막는 것은 이 CHECK의 목적이 아니다.
+    "ALTER TABLE feature.feature_aliases"
+    " ADD CONSTRAINT ck_feature_aliases_legacy_alias_shape"
+    " CHECK (alias_kind <> 'legacy_feature_id'"
+    "        OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$')",
 )
 
 _UNIQUE_RENAME: Final[str] = (
