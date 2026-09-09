@@ -106,11 +106,15 @@ def test_every_module_carries_as_many_natural_keys_as_it_computes() -> None:
         carried = text.count("provider_natural_key=")
         if computed != carried:
             mismatches[_relative(path)] = (computed, carried)
+    detail = {
+        name: {"source_natural_key": computed, "provider_natural_key": carried}
+        for name, (computed, carried) in mismatches.items()
+    }
     assert mismatches == {}, (
         "provider 모듈이 계산한 자연키 수와 Feature에 실은 수가 다르다. 빠진 쪽은 "
         "재키 후 identity claim을 얻지 못하고 **적재할 때마다 새 Feature가 생긴다** — "
         "DDL 오류도 타입 오류도 나지 않는다.\n"
-        f"{ {k: {'source_natural_key': a, 'provider_natural_key': b} for k, (a, b) in mismatches.items()} }"
+        f"{detail}"
     )
 
 

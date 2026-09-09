@@ -73,10 +73,9 @@ def _oracle_signatures() -> dict[str, set[str]]:
         name, args = match.group(1), " ".join(match.group(2).split())
         types: list[str] = []
         for piece in _split_args(args):
-            if re.match(r"^\s*(?:OUT|INOUT)\b", piece):
-                # `db.py`의 리터럴은 `::regprocedure` 표기라 IN 인자만 담는다.
-                if piece.lstrip().upper().startswith("OUT"):
-                    continue
+            # `db.py`의 리터럴은 `::regprocedure` 표기라 **IN 인자만** 담는다.
+            if piece.lstrip().upper().startswith("OUT "):
+                continue
             type_match = re.search(
                 r"\b(?:IN|INOUT|VARIADIC)?\s*[a-z_][a-z_0-9]*\s+"
                 r"([a-z][a-z ]*(?:\[\])?)\s*(?:DEFAULT.*)?$",

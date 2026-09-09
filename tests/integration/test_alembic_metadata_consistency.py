@@ -364,7 +364,8 @@ async def test_head_schema_artifact_matches_head(
     이 테스트가 그 재발을 막는다 — head가 바뀌면 여기서 빨개지고, 고치는 방법은
     아티팩트를 다시 뽑는 것뿐이다.
 
-        KTM_WRITE_HEAD_SCHEMA=1 pytest -q -m integration             tests/integration/test_alembic_metadata_consistency.py             -k head_schema_artifact
+        KTM_WRITE_HEAD_SCHEMA=1 pytest -q -m integration \
+            tests/integration/test_alembic_metadata_consistency.py \
     """
 
     _, admin_dsn = application_300_config
