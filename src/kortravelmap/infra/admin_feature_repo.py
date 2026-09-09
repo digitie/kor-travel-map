@@ -3195,7 +3195,9 @@ _ADMIN_FEATURE_CARD_TARGET_EXISTS_SQL: Final[str] = """
 SELECT EXISTS (
   SELECT 1
   FROM feature.features
-  WHERE feature_id = :feature_id
+  -- T-VN-39: 맨몸 바인딩은 파라미터 타입을 uuid로 추론시켜, 같은 이름을 text로
+  -- 쓰는 자리가 한 문장에 함께 있으면 42P08이 된다. 자리마다 붙여 고정한다.
+  WHERE feature_id = CAST(:feature_id AS uuid)
 )
 """
 

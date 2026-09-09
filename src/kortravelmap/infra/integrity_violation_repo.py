@@ -46,7 +46,10 @@ _MAX_LIST_LIMIT: Final[int] = 500
 
 _RETURN_COLUMNS: Final[str] = (
     "v.issue_id, v.provider_dataset_id, pd.provider, pd.dataset_key, "
-    "v.source_record_key, v.feature_id, "
+    "v.source_record_key, "
+    # DTO가 `feature_id: str | None`이다. 맨몸으로 뽑으면 asyncpg가 `uuid.UUID`를
+    # 주고 호출부의 문자열 비교가 조용히 어긋난다 — 출력 이름은 그대로 둔다.
+    "CAST(v.feature_id AS text) AS feature_id, "
     "v.violation_type, v.severity, v.message, v.payload, v.status, v.detected_at, "
     "v.last_seen_at, v.resolved_at"
 )
