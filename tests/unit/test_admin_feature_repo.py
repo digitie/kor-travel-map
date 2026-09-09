@@ -369,7 +369,9 @@ def test_manual_create_db_error_mapper_is_allow_listed_and_does_not_leak_driver_
     monkeypatch.setattr(
         repo,
         "_driver_constraint_identity",
-        lambda _error: ("23505", "uq_features_feature_uuid"),
+        # T-VN-39: `uq_features_feature_uuid`는 shadow 컬럼과 함께 사라졌다.
+        # identity 충돌의 현행 얼굴은 정본 키의 PK다.
+        lambda _error: ("23505", "pk_features"),
     )
     with pytest.raises(repo.AdminManualFeatureIdentityConflict) as identity:
         repo._raise_admin_manual_feature_create_procedure_error(
