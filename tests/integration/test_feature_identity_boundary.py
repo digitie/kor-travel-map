@@ -173,6 +173,22 @@ async def _canonical_uuid_for_alias(session: AsyncSession, feature_id: str) -> s
     )
 
 
+def _constraint_name(error: BaseException) -> str | None:
+    """PostgreSQL이 붙인 제약 이름을 꺼낸다.
+
+    plpgsql `RAISE ... USING CONSTRAINT=`가 준 이름은 **메시지 문자열에 들어가지
+    않는다.** `str(error)`로 찾으면 항상 실패하므로 driver metadata를 따라간다 —
+    `tests/integration/test_tvn34_feature_state_spine.py`가 쓰는 규약과 같다.
+    """
+    candidate: BaseException | None = getattr(error, "orig", None)
+    while candidate is not None:
+        name = getattr(candidate, "constraint_name", None)
+        if isinstance(name, str):
+            return name
+        candidate = candidate.__cause__
+    return None
+
+
 def _sqlstate(error: BaseException) -> str | None:
     """DBAPIError에서 PostgreSQL SQLSTATE를 꺼낸다 (driver 표기 차이 흡수)."""
     for candidate in (getattr(error, "orig", None), error):
@@ -624,9 +640,9 @@ async def test_manual_curation_create_issues_no_alias(
     engine 위에 격리 수준을 지정한 transaction을 따로 열고, 끝에서 rollback해 공용
     fixture와 같은 테스트 간 격리를 유지한다.
 
-    ``curation_repo``가 legacy ``f_*``를 **계산은 한다**(``feature_id`` 필드로 돌려
-    준다). 그러나 그 값을 등록부에 싣지 않는다 — 그것이 결정 6의 요지이므로 계산된
-    값이 실제로 조회되지 않는 것까지 함께 단언한다.
+    큐레이션 writer는 재키 뒤 legacy ``f_*``를 **계산조차 하지 않는다**. 응답 DTO의
+    ``feature_id``는 재수렴 경로와 같은 축(정본 uuid)이고, 그것이 결정 6의 귀결이다 —
+    등록부에 실을 주소가 애초에 만들어지지 않는다.
     """
     suffix = uuid_module.uuid4().hex[:12]
     actor = f"admin:idboundary-curation-{suffix}"
@@ -702,11 +718,15 @@ async def test_manual_curation_create_issues_no_alias(
         await _assert_manual_feature_carries_no_alias(
             session, feature_uuid=created.feature_uuid
         )
-        # 계산된 legacy 문자열은 어디로도 등록되지 않았다 — 해석 입구가 비어 있다.
-        assert (
-            await feature_identity.resolve_feature_identity(session, created.feature_id)
-            is None
+        # 두 필드가 같은 축이다 — fresh 경로가 legacy를, 재수렴 경로가 uuid를 싣던
+        # 비대칭이 사라졌다. 그리고 그 값은 정본 키라 해석 입구가 자기 자신을 돌려준다
+        # (legacy 문자열이었다면 alias가 없으므로 ``None``이었을 것이다).
+        assert created.feature_id == created.feature_uuid
+        identity = await feature_identity.resolve_feature_identity(
+            session, created.feature_id
         )
+        assert identity is not None
+        assert identity.feature_id == created.feature_uuid
     finally:
         await session.rollback()
         await session.close()
@@ -781,7 +801,10 @@ async def test_provider_create_rejects_alias_bound_to_another_feature(
                     ),
                 },
             )
-    assert "ck_provider_feature_alias_bound_elsewhere" in str(bound_elsewhere.value)
+    assert (
+        _constraint_name(bound_elsewhere.value)
+        == "ck_provider_feature_alias_bound_elsewhere"
+    )
     assert _sqlstate(bound_elsewhere.value) == "23505"
     # 거부는 원자적이다 — 등록부의 주인은 그대로다.
     assert await _canonical_uuid_for_alias(migrated_session, feature_id) == bound_uuid
