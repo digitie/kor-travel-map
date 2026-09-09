@@ -404,8 +404,9 @@ async def m05_pristine_provisioning(migrated_engine: AsyncEngine) -> dict[str, o
                     text(
                         "CALL feature.resolve_manual_provider_dedup_case_v2("
                         "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1,"
-                        " NULL::text, 'activation gate', 'admin:m05-subscription',"
-                        " 1, NULL::text, NULL::uuid, NULL::uuid, NULL::text,"
+                        # T-VN-39: p_survivor_feature_id·o_manual_feature_id가 uuid다.
+                        " NULL::uuid, 'activation gate', 'admin:m05-subscription',"
+                        " 1, NULL::text, NULL::uuid, NULL::uuid, NULL::uuid,"
                         " NULL::bigint)"
                     ),
                     {"case_id": str(uuid4())},
