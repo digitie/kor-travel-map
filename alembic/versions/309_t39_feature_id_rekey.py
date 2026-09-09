@@ -497,12 +497,17 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 #: 선례는 `305_m05_relitigation_fence.py:156-161` — 같은 프로시저에 대해
 #: 이 패턴이 이미 통한다.
 _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
-    # ktm_curation_command_owner (5)
+    # ktm_curation_audit_writer (1)
+    "SET ROLE ktm_curation_audit_writer",
+    *_sidecar("_309_append_theme_feature_candidate_transition.sql"),
+    "SET ROLE ktm_feature_schema_owner",
+    # ktm_curation_command_owner (6)
     "SET ROLE ktm_curation_command_owner",
     *_sidecar("_309_apply_curation_import_items_command.sql"),
     *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
     *_sidecar("_309_create_manual_curation_item_with_feature_command.sql"),
     *_sidecar("_309_current_theme_candidate_snapshot.sql"),
+    *_sidecar("_309_patch_curation_item_command.sql"),
     *_sidecar("_309_record_curation_import_manual_feature_child.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_feature_audit_writer (1)
@@ -518,10 +523,19 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_fence_features_identity_update.sql"),
     *_sidecar("_309_fill_features_feature_uuid.sql"),
     *_sidecar("_309_purge_manual_feature.sql"),
-    # ktm_feature_state_procedure_owner (4 — provider wrapper 신설 포함)
+    # ktm_feature_state_procedure_owner (13 — provider wrapper 신설 포함)
     "SET ROLE ktm_feature_state_procedure_owner",
+    *_sidecar("_309_author_feature_field_overrides.sql"),
+    *_sidecar("_309_author_lifecycle_override.sql"),
     *_sidecar("_309_create_feature_with_initial_state.sql"),
     *_sidecar("_309_derive_subtype_public_ready.sql"),
+    *_sidecar("_309_has_active_feature_override.sql"),
+    *_sidecar("_309_lock_current_provider_feature_source_evidence.sql"),
+    *_sidecar("_309_reactivate_admin_feature_state.sql"),
+    *_sidecar("_309_revoke_feature_field_overrides.sql"),
+    *_sidecar("_309_revoke_lifecycle_override.sql"),
+    *_sidecar("_309_transition_admin_feature_state.sql"),
+    *_sidecar("_309_transition_feature_state.sql"),
     *_sidecar("_309_validate_feature_base_field_value.sql"),
     # ADR-098의 착지처. core 프로시저가 재작성된 **뒤**여야 한다 — 이 wrapper가
     # 그것을 CALL하고, plpgsql은 CREATE 시점에 의존을 검사하지 않지만 첫 호출에서
@@ -575,7 +589,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _UNIQUE_RENAME,
     # M. FK 34 재생성 (composite 11 중 6은 기존 FK가 덮으므로 영구 삭제).
     *_FK_RECREATE,
-    # N. 루틴 23 — 소유자 롤별 `SET ROLE` 왕복.
+    # N. 루틴 34 — 소유자 롤별 `SET ROLE` 왕복.
     *_ROUTINE_STATEMENTS,
     # O. 트리거 재생성 — **재키 뒤여야 한다.** 앞에 두면 새 트리거가 아직
     #    text인 컬럼에 DEPENDENCY_AUTO를 걸고 곧바로 다시 사라진다.

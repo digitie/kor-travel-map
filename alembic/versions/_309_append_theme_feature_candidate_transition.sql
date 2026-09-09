@@ -45,7 +45,25 @@ BEGIN
 END
 $$;
 
-ALTER FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) OWNER TO ktm_curation_audit_writer;
+DO $t39_owner$
+DECLARE
+    had_create boolean;
+BEGIN
+    -- 소유권 이전은 새 소유자가 담는 스키마의 CREATE 권한을 요구한다.
+    -- 302_m03_child_issuance.py:324-330이 `ops`에서 같은 함정을 만났다. 다만 그
+    -- 형태는 이미 CREATE를 가진 롤에서 권한을 빼앗으므로, 여기서는 **자기 상태를
+    -- 보고** 되돌린다. 2026-09-09 n150 첫 실행이 이것을 잡았다
+    -- (`permission denied for schema ops`).
+    had_create := has_schema_privilege('ktm_curation_audit_writer', 'feature', 'CREATE');
+    IF NOT had_create THEN
+        EXECUTE 'GRANT CREATE ON SCHEMA feature TO ktm_curation_audit_writer';
+    END IF;
+    EXECUTE 'ALTER FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) OWNER TO ktm_curation_audit_writer';
+    IF NOT had_create THEN
+        EXECUTE 'REVOKE CREATE ON SCHEMA feature FROM ktm_curation_audit_writer';
+    END IF;
+END
+$t39_owner$;
 
 -- ACL은 정확히 그 소유자 role로 편집해야 한다. schema owner가 멤버십만으로
 -- REVOKE하면 경고만 나고 기본 PUBLIC EXECUTE가 남는다(0203:290-293 실측).
