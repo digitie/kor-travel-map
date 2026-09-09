@@ -6,7 +6,11 @@ dual read/write 단계의 identity 규약을 한 곳에 고정한다:
   32B dual을 거쳐, T-VN-39/alembic 309 재키가 shadow ``feature_uuid``의 값을
   ``feature_id``로 승계(text → uuid)하고 shadow 컬럼 13개를 DROP했다 — 이제
   ``feature_uuid`` 컬럼은 어느 표에도 없다.
-  legacy 문자열 ``f_*`` id는 ``feature.feature_aliases.alias``로만 남는다.
+  legacy 문자열 ``f_*`` id의 **해석 입구**는 ``feature.feature_aliases.alias``
+  하나다. 값 자체는 증거로도 남는다 — 309 ``_EVIDENCE_RENAME``가
+  ``feature.manual_feature_purge_records.legacy_feature_id``와
+  ``ops.tvn36_legacy_freeze_preflight_manifest.legacy_feature_id``를 text로
+  일부러 보존한다(개명은 legacy 문자열을 값이 아니라 이름으로 못 박기 위한 것).
 - **alias 해석은 경계 전용** (ADR-068 결정 3): API path/query가 받은 외부 참조
   문자열은 :func:`resolve_feature_identity` 한 곳에서만 UUID/alias 양쪽으로
   해석하고, 내부 전달·조인은 해석된 정본 키로만 한다. repository 내부에
@@ -124,9 +128,11 @@ class FeatureIdentityAnchorError(RuntimeError):
 class FeatureIdentityInvariantError(RuntimeError):
     """uuid 없는(또는 비정규·후보와 다른) 신규 feature 행 관측 — fail-close.
 
-    309가 0080 트리거를 지운 뒤 DB 층에 남은 보장은 ``pk_features``의 NOT NULL
-    하나다. 그것이 뚫린 상태로 write가 계속되면 alias-map checksum 대조가 조용히
-    갈라지므로, writer는 갱신을 계속하는 대신 즉시 실패한다.
+    309가 0080 트리거를 지운 뒤 **정본 키 결측**을 막는 DB 층 보장은
+    ``pk_features``의 NOT NULL 하나다(값 **변경**은 309 ``_TRIGGER_RECREATE``가
+    되살리는 ``trg_features_identity_fence``가 계속 봉인한다). 결측이 뚫린 상태로
+    write가 계속되면 alias-map checksum 대조가 조용히 갈라지므로, writer는
+    갱신을 계속하는 대신 즉시 실패한다.
     """
 
 
@@ -515,7 +521,7 @@ SELECT EXISTS (
 
 
 async def feature_uuid_in_use(session: AsyncSession, value: str) -> bool:
-    """값이 어떤 feature의 ``feature_uuid``와 충돌하는지 검사 (T-VN-32C W3 가드).
+    """값이 어떤 feature의 정본 키와 충돌하는지 검사 (T-VN-32C W3 가드).
 
     UUID 타입 입력 컬럼(예: sibling_group_id)에 응답에서 복사한 feature UUID를
     붙여넣는 오염을 형식 검증이 못 막으므로, 정본 UUID와의 충돌을 명시
@@ -530,7 +536,11 @@ async def feature_uuid_in_use(session: AsyncSession, value: str) -> bool:
 
 
 async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | None:
-    """조회 필터 값의 UUID 표기를 legacy 정본 키로 정규화한다 (T-VN-32C PR-2).
+    """조회 필터 값을 정본 키(uuid) 표기로 정규화한다 (T-VN-32C PR-2).
+
+    이름은 경계 이름이라 유지한다. 재키 뒤 돌려주는 값은 legacy ``f_*``가 아니라
+    ``features.feature_id``(uuid)이고, canonical UUID 입력에는 사실상 항등이며
+    UUID 표기의 **alias**만 그것이 가리키는 정본 키로 바뀐다.
 
     운영자가 응답에서 복사한 UUID를 필터/검색어로 붙여넣는 경로용. canonical
     UUID 형태가 아니면 원문 그대로(추가 왕복 없음), UUID 형태인데 해석
