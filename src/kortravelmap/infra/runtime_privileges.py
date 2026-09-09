@@ -355,7 +355,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, text, text, bigint, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
     "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
-    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(uuid,text,bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
     "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
@@ -520,16 +520,16 @@ _M05_DETECTOR_LISTING_ACL_SQL = """
 DO $$
 BEGIN
     IF to_regprocedure(
-        'feature.list_manual_provider_dedup_detector_manuals(text,integer)'
+        'feature.list_manual_provider_dedup_detector_manuals(uuid,integer)'
     ) IS NOT NULL THEN
         REVOKE ALL ON FUNCTION
-            feature.list_manual_provider_dedup_detector_manuals(text, integer)
+            feature.list_manual_provider_dedup_detector_manuals(uuid,integer)
             FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
                  ktm_feature_dagster_runtime,
                  ktm_manual_provider_dedup_admin_executor,
                  ktm_feature_reference_reconciliation_service_executor;
         GRANT EXECUTE ON FUNCTION
-            feature.list_manual_provider_dedup_detector_manuals(text, integer)
+            feature.list_manual_provider_dedup_detector_manuals(uuid,integer)
             TO ktm_manual_provider_dedup_detector_executor;
     END IF;
 END

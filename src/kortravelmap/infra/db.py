@@ -67,13 +67,13 @@ _GENERIC_FEATURE_CREATE_PROCEDURE = (
 _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     {
         "feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)",
-        "feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)",
-        "feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)",
-        "feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)",
-        "feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])",
-        "feature.revoke_lifecycle_override(text,text,bigint)",
-        "feature.transition_admin_feature_state(text,text,text,text,bigint,text,text,text)",
-        "feature.transition_feature_state(text,text,text,text,bigint,jsonb)",
+        "feature.author_feature_field_overrides(uuid,bigint,text,text,bigint,jsonb,jsonb)",
+        "feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)",
+        "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
+        "feature.revoke_feature_field_overrides(uuid,bigint,text,text,bigint,text[])",
+        "feature.revoke_lifecycle_override(uuid,text,bigint)",
+        "feature.transition_admin_feature_state(uuid,text,text,text,bigint,text,text,text)",
+        "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
     }
 )
 
@@ -91,7 +91,7 @@ _FEATURE_REQUEST_APPROVE_PROCEDURE = (
 _FEATURE_REQUEST_REJECT_PROCEDURE = "feature.reject_feature_request(uuid,text,bigint)"
 _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
-_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
+_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(uuid,uuid,jsonb,jsonb)"
 _M05_DECISION_PROCEDURE = (
     "feature.resolve_manual_provider_dedup_case_v2("
     "uuid,text,text,bigint,bigint,text,text,text,bigint)"
@@ -114,7 +114,7 @@ _M05_CASE_LIST_FUNCTION = (
 #: dagster 허용목록이 종전 **빈 집합**이었으므로, 이 등록이 없으면 함수가
 #: 배포되는 순간 모든 Dagster 프로세스가 기동 preflight에서 죽는다.
 _M05_DETECTOR_MANUAL_LIST_FUNCTION = (
-    "feature.list_manual_provider_dedup_detector_manuals(text,integer)"
+    "feature.list_manual_provider_dedup_detector_manuals(uuid,integer)"
 )
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
@@ -310,17 +310,17 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_manual_create_procedure,
         has_function_privilege(
             session_user,
-            'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
+            'feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
+            'feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_author_lifecycle_override_procedure,
         has_function_privilege(
             session_user,
-            'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
+            'feature.revoke_lifecycle_override(uuid,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_revoke_lifecycle_override_procedure,
         has_function_privilege(
