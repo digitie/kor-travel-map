@@ -618,6 +618,27 @@ def _coalescing_execution_fn(
     return _evaluate
 
 
+#: 자동 적재를 **끈** provider. 이름을 여기 두는 것 자체가 결정의 기록이다.
+#:
+#: `default_status=STOPPED`만으로는 "기본값이 중지"가 아니다 — Dagster UI에서 한 번
+#: 켜면 그 상태가 인스턴스에 저장되어 배포를 넘어 살아남고, 코드에는 그 사실이 남지
+#: 않는다. 여기 있는 이름은 schedule 자체가 만들어지지 않으므로 켤 대상이 없다.
+#:
+#: **job은 그대로 둔다.** 백필이나 일회성 재적재는 여전히 필요하고, 그것은 사람이
+#: 의도해서 한 번 돌리는 일이다. 끄는 것은 시계이지 능력이 아니다.
+#:
+#: 2026-09-09 — KMA(기상청)·AirKorea 자동 적재 중지(사용자 지시).
+DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
+    {
+        "feature_weather_airkorea_air_quality_hourly_schedule",
+        "feature_weather_kma_ultra_short_nowcast_hourly_schedule",
+        "feature_weather_kma_ultra_short_forecast_hourly_schedule",
+        "feature_weather_kma_short_forecast_hourly_schedule",
+        "feature_weather_kma_mid_forecast_hourly_schedule",
+        "feature_notice_kma_weather_alerts_hourly_schedule",
+    }
+)
+
 FEATURE_LOAD_SCHEDULES: Final = [
     ScheduleDefinition(
         name=spec.schedule_name,
@@ -635,5 +656,10 @@ FEATURE_LOAD_SCHEDULES: Final = [
         description=spec.description,
     )
     for spec, job in zip(FEATURE_LOAD_SCHEDULE_SPECS, FEATURE_LOAD_JOBS, strict=True)
+    if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
 ]
-"""Provider별 KST cron schedule 목록."""
+"""Provider별 KST cron schedule 목록.
+
+``DISABLED_FEATURE_LOAD_SCHEDULES``에 있는 이름은 여기 만들어지지 않는다 — 대응 job은
+``FEATURE_LOAD_JOBS``에 그대로 남아 수동 실행이 가능하다.
+"""
