@@ -107,7 +107,9 @@ source.source_name,
 source.provider_dataset_id,
 candidate.source_entity_key,
 candidate.feature_id,
-core.feature_uuid::text,
+-- T-VN-39 재키 후 정본 키는 features.feature_id(uuid)다 (309 _SHADOW_DROP이
+-- features.feature_uuid를 지웠다). 출력 이름과 text 표현은 소비자 계약이라 고정한다.
+CAST(core.feature_id AS text) AS feature_uuid,
 core.name AS feature_name,
 core.kind AS feature_kind,
 core.category AS feature_category,

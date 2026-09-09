@@ -745,7 +745,7 @@ candidates AS (
   (
     SELECT
         f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
+        CAST(f.feature_id AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -767,7 +767,7 @@ candidates AS (
   (
     SELECT
         f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
+        CAST(f.feature_id AS text) AS feature_uuid,
         f.kind,
         f.name,
         f.category,
@@ -1031,14 +1031,20 @@ def _normalize_query(q: str | None) -> str | None:
     return normalized or None
 
 
-# 완전한 ``feature_id``(``f_{bjd}_{kind}_{sha1[:16]}``, core.ids.make_feature_id)
-# 형태의 검색어를 감지한다. 이 경우 PK 등가 fast-path로 ILIKE 전체 스캔 +
-# source_records 상관 서브쿼리(1M feature 대상 14~60s)를 건너뛴다.
+# 완전한 legacy id(``f_{bjd}_{kind}_{sha1[:16]}``, core.ids.make_feature_id)
+# 형태의 검색어를 감지한다.
+#
+# **이 문자열은 T-VN-39 재키 후 PK가 아니다.** ``feature.features.feature_id``는
+# uuid가 됐고 ``f_*``는 ``feature.feature_aliases.alias``(그 표의 PK, text 유지)에만
+# 산다. 그래도 fast-path인 이유는 alias PK 단건 조회로 uuid를 얻어 features PK 등가로
+# 내려가기 때문이다 — ILIKE 전체 스캔 + source_records 상관 서브쿼리(1M feature 대상
+# 14~60s)를 그대로 건너뛴다.
 _FEATURE_ID_QUERY_RE: Final = re.compile(r"^f_[^_]+_[a-z]_[0-9a-f]{16}$")
 
-# canonical UUID(lowercase hyphenated 36자) 검색어 — T-VN-32C 값 전환 후 응답
-# feature_id가 UUID라 운영자가 그 값을 그대로 검색한다. ``uq_features_feature_uuid``
-# 인덱스 등가 fast-path로 처리하지 않으면 ILIKE 풀스캔(#639 회귀)이 된다.
+# canonical UUID(lowercase hyphenated 36자) 검색어 — T-VN-39 재키로 ``feature_id``
+# 자체가 uuid라 운영자가 응답 값을 그대로 검색한다. shadow ``feature_uuid``와 그
+# ``uq_features_feature_uuid``는 함께 사라졌으므로 이제 PK(``pk_features``) 등가
+# fast-path이며, 이것 없이는 ILIKE 풀스캔(#639 회귀)이 된다.
 _FEATURE_UUID_QUERY_RE: Final = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -1316,18 +1322,50 @@ def _review_cursor_params(
     return params
 
 
-# 완전한 feature_id fast-path: PK 등가로 ILIKE 전체 스캔 + source_records EXISTS를 건너뛴다.
-_ADMIN_FEATURES_Q_EXACT_CLAUSE: Final = "AND f.feature_id = CAST(:q_exact AS text)"
+# 완전한 legacy id fast-path: alias PK 단건 조회 → features PK 등가. ILIKE 전체 스캔 +
+# source_records EXISTS를 건너뛴다.
+#
+# 재키 전에는 ``f.feature_id = :q_exact``가 그 자체로 PK 등가였다. 재키 후 그 비교는
+# ``uuid = text``라 42883으로 **파스 단계에서** 죽으므로, legacy 문자열을 그것이 실제로
+# 사는 곳(``feature_aliases.alias`` = ``pk_feature_aliases``)에서 uuid로 풀어 넘긴다.
+# 무상관 스칼라 서브쿼리라 planner가 InitPlan으로 한 번만 돌리고 바깥은 그대로
+# ``pk_features`` 등가로 남는다. ``alias``가 PK라 두 행이 나올 수 없다. 매칭 alias가
+# 없으면 NULL → 0행이고, 그것은 재키 전 "그 text id를 가진 feature가 없다"와 같다.
+_ADMIN_FEATURES_Q_EXACT_CLAUSE: Final = """AND f.feature_id = (
+        SELECT qa.feature_id
+        FROM feature.feature_aliases AS qa
+        WHERE qa.alias = CAST(:q_exact AS text)
+      )"""
 
-# canonical UUID fast-path: ``uq_features_feature_uuid`` 인덱스 등가 (T-VN-32C).
+# canonical UUID fast-path: PK(``pk_features``) 등가 — T-VN-39 재키 후 feature_id가 uuid다.
 _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE: Final = (
-    "AND f.feature_uuid = CAST(:q_exact_uuid AS uuid)"
+    "AND f.feature_id = CAST(:q_exact_uuid AS uuid)"
 )
 
-# 부분 검색: feature_id/name/address + source_records 상관 서브쿼리 ILIKE.
+# 부분 검색: 식별자(uuid 정본 + legacy alias)/name/address + source_records 상관
+# 서브쿼리 ILIKE.
+#
+# **식별자 갈래가 둘인 이유(T-VN-39).** 재키 후 ``f.feature_id``는 uuid라
+# ``uuid ILIKE text``가 42883이다. 이 절의 다른 갈래(name·address·source_entity_id)가
+# 전부 "운영자가 손에 든 문자열 조각"을 받는다는 것이 이 절의 뜻이므로 식별자 갈래도
+# 같은 뜻을 유지해야 하고, 조각 검색이라 ``CAST(... AS uuid)`` 등호로 바꾸는 선택지는
+# 애초에 없다. 운영자가 손에 드는 식별자는 두 가지다 — 응답이 돌려주는
+# uuid(``CAST(f.feature_id AS text)``)와, 과거 링크·로그에 남은 legacy ``f_*``
+# (``feature_aliases.alias``, text 유지). 그래서 둘 다 본다. 위 exact fast-path가 완전한
+# ``f_*``를 이미 alias로 풀므로, 조각만 여기로 오는데 그것이 빠지면 "완전한 id는 찾히고
+# 한 글자 짧은 조각은 안 찾힌다"는 비대칭이 남는다.
+#
+# alias EXISTS는 ``idx_feature_aliases_feature``(feature_id) 단건 조회 + 그 한 행에 대한
+# ILIKE라, 바로 아래 source_records 상관 서브쿼리에 비하면 무시할 수 있다.
 _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
         CAST(:q_like AS text) IS NULL
-        OR f.feature_id ILIKE CAST(:q_like AS text)
+        OR CAST(f.feature_id AS text) ILIKE CAST(:q_like AS text)
+        OR EXISTS (
+            SELECT 1
+            FROM feature.feature_aliases AS qa
+            WHERE qa.feature_id = f.feature_id
+              AND qa.alias ILIKE CAST(:q_like AS text)
+        )
         OR f.name ILIKE CAST(:q_like AS text)
         OR f.address::text ILIKE CAST(:q_like AS text)
         OR EXISTS (
@@ -1365,7 +1403,7 @@ def _admin_features_sql(
 WITH base AS (
     SELECT
         f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
+        CAST(f.feature_id AS text) AS feature_uuid,
         f.kind,
         f.name,
         lower(f.name) AS sort_name,
@@ -1517,7 +1555,7 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
 _ADMIN_FEATURE_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.kind,
     f.name,
     f.category,
@@ -1544,7 +1582,12 @@ SELECT
     f.sigungu_code,
     f.marker_icon,
     f.marker_color,
-    f.parent_feature_id,
+    -- T-VN-39: ``parent_feature_id``도 uuid로 재타입됐다(309 `_RETYPE_REST`).
+    -- 바깥 계약은 그대로여야 하므로(``AdminFeatureDetailFeature.parent_feature_id:
+    -- str | None`` → API ``parent_feature_id: str | None``) 값의 출처만 바뀌고 표기는
+    -- 아래 sibling_group_id와 같이 text로 고정한다. 캐스트가 없으면 드라이버가
+    -- ``uuid.UUID``를 돌려주고 응답 model_validate가 그 자리에서 깨진다.
+    CAST(f.parent_feature_id AS text) AS parent_feature_id,
     f.sibling_group_id::text AS sibling_group_id,
     f.row_revision,
     f.created_at,
@@ -2594,18 +2637,27 @@ def _raise_field_override_procedure_error(
     raise error
 
 
+# T-VN-39 재키가 없앤 이름은 여기 남기지 않는다. 남겨도 동작은 안전하지만(매칭이 안 될
+# 뿐이다) 이 목록이 "이 경로에서 도달 가능한 identity 제약"이라는 뜻을 잃고, 다음 사람이
+# 없는 것을 찾게 된다. 309에서 각각:
+#   uq_features_feature_uuid / uq_features_identity_pair
+#     ← ``UNIQUE (feature_uuid)`` / ``UNIQUE (feature_id, feature_uuid)``라
+#       ``ALTER TABLE feature.features DROP COLUMN feature_uuid``(`_SHADOW_DROP`)가
+#       함께 지운다.
+#   ck_feature_aliases_legacy_identity
+#     ← ``alias = feature_id``. text와 uuid 사이에 ``=``가 없어 재부착이 불가능하고,
+#       309 `_ALIAS_IDENTITY_CHECK_DROP`이 영구 삭제한다.
+#   fk_feature_aliases_identity_pair
+#     ← 영구 삭제되는 composite FK 6개 중 하나(`_FK_DROP`에 있고 `_FK_RECREATE`에
+#       없다). ``fk_feature_aliases_feature``가 덮는다.
 _MANUAL_FEATURE_CREATE_IDENTITY_CONSTRAINTS: Final[frozenset[str]] = frozenset(
     {
-        "ck_feature_aliases_legacy_identity",
         "ck_manual_feature_create_core_identity",
-        "fk_feature_aliases_identity_pair",
         "pk_feature_aliases",
         "pk_feature_creation_origins",
         "pk_features",
         "pk_manual_feature_identity_claims",
         "uq_feature_creation_origins_command",
-        "uq_features_feature_uuid",
-        "uq_features_identity_pair",
         "uq_manual_feature_identity_claims_command",
         "uq_manual_feature_identity_claims_feature_command",
     }
@@ -3278,7 +3330,7 @@ async def _state_for_conflict(
         await session.execute(
             text(
                 """
-                SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid, kind,
+                SELECT feature_id, CAST(feature_id AS text) AS feature_uuid, kind,
                        lifecycle_state, publication_state, quality_state, row_revision
                 FROM feature.features
                 WHERE feature_id = :feature_id
@@ -3354,7 +3406,7 @@ WITH reviews AS MATERIALIZED (
 expanded AS (
     SELECT
         r.*,
-        CAST(fa.feature_uuid AS text) AS feature_uuid_a,
+        CAST(fa.feature_id AS text) AS feature_uuid_a,
         fa.name AS name_a,
         fa.kind AS kind_a,
         fa.category AS category_a,
@@ -3362,7 +3414,7 @@ expanded AS (
         x_extension.ST_Y(fa.coord) AS lat_a,
         psa.provider AS provider_a,
         psa.dataset_key AS dataset_key_a,
-        CAST(fb.feature_uuid AS text) AS feature_uuid_b,
+        CAST(fb.feature_id AS text) AS feature_uuid_b,
         fb.name AS name_b,
         fb.kind AS kind_b,
         fb.category AS category_b,
@@ -3416,8 +3468,17 @@ SELECT *
 FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
-    OR feature_id_a ILIKE CAST(:q_like AS text)
-    OR feature_id_b ILIKE CAST(:q_like AS text)
+    -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
+    OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
+    OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
+    OR EXISTS (
+        SELECT 1
+        FROM feature.feature_aliases AS qa
+        WHERE qa.feature_id IN (feature_id_a, feature_id_b)
+          AND qa.alias ILIKE CAST(:q_like AS text)
+    )
     OR name_a ILIKE CAST(:q_like AS text)
     OR name_b ILIKE CAST(:q_like AS text)
 )
@@ -3518,8 +3579,17 @@ SELECT count(*)::integer AS total_count
 FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
-    OR feature_id_a ILIKE CAST(:q_like AS text)
-    OR feature_id_b ILIKE CAST(:q_like AS text)
+    -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
+    OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
+    OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
+    OR EXISTS (
+        SELECT 1
+        FROM feature.feature_aliases AS qa
+        WHERE qa.feature_id IN (feature_id_a, feature_id_b)
+          AND qa.alias ILIKE CAST(:q_like AS text)
+    )
     OR name_a ILIKE CAST(:q_like AS text)
     OR name_b ILIKE CAST(:q_like AS text)
 )
@@ -3824,10 +3894,17 @@ async def merge_dedup_review(
         raise MergeConflictError(
             f"이미 검토된 후보(status={row.status!r}) — {review_id!r}"
         )
-    if master_feature_id == row.feature_id_a:
-        loser_id = row.feature_id_b
-    elif master_feature_id == row.feature_id_b:
-        loser_id = row.feature_id_a
+    # T-VN-39: 재키로 두 컬럼이 uuid가 됐고 드라이버는 그것을 ``uuid.UUID``로 돌려준다.
+    # 호출자가 주는 ``master_feature_id``는 문자열이라 raw 비교가 **항상 False**가 되고,
+    # 유효한 master가 "후보 쌍에 없음" 409로 거절된다 — 파스 오류가 아니라 조용한
+    # 오답이다. 같은 파일의 다른 reader들(``_dedup_feature``·``get_dedup_review_detail``)
+    # 이 이미 ``str()``로 경계를 맞추므로 여기서도 같게 한다.
+    feature_id_a = str(row.feature_id_a)
+    feature_id_b = str(row.feature_id_b)
+    if master_feature_id == feature_id_a:
+        loser_id = feature_id_b
+    elif master_feature_id == feature_id_b:
+        loser_id = feature_id_a
     else:
         raise MergeConflictError(
             "master_feature_id가 review 후보 쌍에 없음 — "
@@ -3996,7 +4073,16 @@ WITH reviews AS MATERIALIZED (
 {provider_filter.rstrip()}
       AND (
         CAST(:q_like AS text) IS NULL
-        OR q.target_feature_id ILIKE CAST(:q_like AS text)
+        -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
+        OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
+        OR EXISTS (
+            SELECT 1
+            FROM feature.feature_aliases AS qa
+            WHERE qa.feature_id = q.target_feature_id
+              AND qa.alias ILIKE CAST(:q_like AS text)
+        )
         OR q.target_name ILIKE CAST(:q_like AS text)
         OR q.source_name ILIKE CAST(:q_like AS text)
         OR se.source_entity_id ILIKE CAST(:q_like AS text)
@@ -4014,7 +4100,7 @@ SELECT
     q.status,
     q.name_score,
     q.target_feature_id,
-    CAST(f.feature_uuid AS text) AS target_feature_uuid,
+    CAST(f.feature_id AS text) AS target_feature_uuid,
     q.target_name,
     q.source_provider,
     q.source_dataset_key,
@@ -4132,7 +4218,16 @@ JOIN provider_sync.provider_datasets AS pd
 {provider_filter.rstrip()}
       AND (
         CAST(:q_like AS text) IS NULL
-        OR q.target_feature_id ILIKE CAST(:q_like AS text)
+        -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
+        OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
+        OR EXISTS (
+            SELECT 1
+            FROM feature.feature_aliases AS qa
+            WHERE qa.feature_id = q.target_feature_id
+              AND qa.alias ILIKE CAST(:q_like AS text)
+        )
         OR q.target_name ILIKE CAST(:q_like AS text)
         OR q.source_name ILIKE CAST(:q_like AS text)
         OR se.source_entity_id ILIKE CAST(:q_like AS text)
@@ -4191,7 +4286,7 @@ SELECT
     q.status,
     q.name_score,
     q.target_feature_id,
-    CAST(f.feature_uuid AS text) AS target_feature_uuid,
+    CAST(f.feature_id AS text) AS target_feature_uuid,
     q.target_name,
     q.source_record_key,
     pd.provider AS source_provider,

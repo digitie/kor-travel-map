@@ -2,36 +2,53 @@
 
 dual read/write 단계의 identity 규약을 한 곳에 고정한다:
 
-- **정본 키는 ``feature.features.feature_uuid``** (T-VN-32A shadow → 32B dual).
-  현행 문자열 ``f_*`` id는 ``feature.feature_aliases``의 legacy alias다.
+- **정본 키는 ``feature.features.feature_id``** (uuid). T-VN-32A shadow →
+  32B dual을 거쳐, T-VN-39/alembic 309 재키가 shadow ``feature_uuid``의 값을
+  ``feature_id``로 승계(text → uuid)하고 shadow 컬럼 13개를 DROP했다 — 이제
+  ``feature_uuid`` 컬럼은 어느 표에도 없다.
+  legacy 문자열 ``f_*`` id는 ``feature.feature_aliases.alias``로만 남는다.
 - **alias 해석은 경계 전용** (ADR-068 결정 3): API path/query가 받은 외부 참조
   문자열은 :func:`resolve_feature_identity` 한 곳에서만 UUID/alias 양쪽으로
   해석하고, 내부 전달·조인은 해석된 정본 키로만 한다. repository 내부에
   alias lookup을 흩뿌리지 않는다.
-- **정본 신규 행 generator (T-VN-32C·alembic 0083)** — 신규 행의
-  ``feature_uuid``는 **비파생 UUIDv7**이다
+- **정본 신규 행 generator (T-VN-32C·alembic 0083)** — 신규 행의 정본 키
+  ``feature.features.feature_id``는 **비파생 UUIDv7**이다
   (:func:`candidate_feature_uuid` → :func:`kortravelmap.core.ids.make_feature_uuid`).
+  309 뒤로 그 후보를 **누가 만드는지는 경로마다 다르다**: manual 3형제는 payload의
+  ``feature_id``를 그대로 claim에 넣으므로 이 함수가 여전히 원천이고, provider
+  경로는 ``feature.create_provider_feature_with_initial_state``가
+  ``provider_sync.provider_feature_identities`` claim 안에서
+  ``feature.uuid_generate_v7()``으로 직접 만든다(ADR-098) — 그 경로의 writer는
+  자기 후보를 ``sent_feature_uuid``로 보내면 안 된다.
   32A/32B의 dual 기간에는 uuid5 파생이 유일 generator였고 그 근거는 KTM/PinVi
   양 저장소 독립 계산·checksum 대조였는데, 2026-08-05 실측으로 checksum이
   일치해 그 전제가 소진됐다 — 이후 이관 검증은 파생 재계산이 아니라 저장값
   기반 merkle 대조 + DB 복합 FK 사본 일치로 한다. 기존 backfill 세대의 파생값은
   영구 보존되며(0082 identity fence) :func:`expected_feature_uuid`는 그 세대의
   **참조 전용**으로 남는다.
-- **legacy-only 신규 행 차단의 계약화**: DB 층은 0080 트리거 2종이 이미 원자
-  보장한다. 그 위에 repo writer가 ``feature_uuid`` 후보를 명시 INSERT하고,
-  RETURNING 관측값이 canonical UUID가 아니거나(legacy-only) 신규 insert인데
-  보낸 후보와 다르면(generator 이원화) :class:`FeatureIdentityInvariantError`로
+- **정본 키 결측 차단의 계약화**: 309가 0080 fill 트리거를 영구 제거해 DB 층의
+  자동 채움이 사라졌고, 남은 DB 보장은 ``pk_features PRIMARY KEY (feature_id)``의
+  NOT NULL뿐이다. 그래서 repo writer가 정본 키(``feature_id``) 후보를 명시
+  INSERT하고, RETURNING 관측값이 canonical UUID가 아니거나 신규 insert인데 보낸
+  후보와 다르면(generator 이원화) :class:`FeatureIdentityInvariantError`로
   fail-close한다 (:func:`candidate_feature_uuid` / :func:`verify_feature_uuid`).
 
-32C PR-1(값 전환)이 긋는 범위 경계 (이월 명시):
+32C PR-1(값 전환)이 그었던 범위 경계는 **309가 셋 다 넘었다**:
 
-- 응답의 ``feature_id`` 값 자체는 legacy 유지, ``feature_uuid``는 additive 병행
-  노출 — 응답 UUID 전환(PinVi cutover)은 후속 PR 소관이다.
-- 내부 FK 체인(source_links/curation/price/weather 등)의 UUID 조인 재작성은
-  T-VN-39 소관.
-- 0080 fill/alias 트리거 제거(writer 원자 생성으로 완전 대체)는 raw SQL seed
-  경로가 남아 있는 동안 하지 않는다 — 0083은 트리거를 유지하되 본문을 app과
-  같은 v7 레이아웃(``feature.uuid_generate_v7()``)으로 맞춰 이원화만 막았다.
+- **응답 컬럼 이름은 그대로고 값이 uuid가 됐다.** 309 ``_VIEW_RECREATE``가
+  ``feature.public_features``를 ``SELECT core.feature_id,
+  CAST(core.feature_id AS text) AS feature_uuid``로 재생성한다 — 26열의 이름·순서는
+  소비자 계약(INV-34C-04)이라 고정이고, ``feature_id`` 슬롯에 담기는 **값**이
+  legacy ``f_*``에서 canonical uuid로 바뀌었다. 두 슬롯은 이제 같은 값의
+  uuid/text 표기다.
+- 내부 FK 체인(source_links/curation/price/weather 등)의 UUID 조인 재작성은 309
+  ``_RETYPE_REST`` + ``_FK_RECREATE``가 끝냈다.
+- **0080 fill/alias 트리거 2종은 영구 제거됐다.** 309 ``_TRIGGER_DROP``이
+  ``trg_features_feature_uuid_fill``·``trg_features_legacy_alias``를 내리고
+  사이드카 ``_309_fill_features_feature_uuid.sql``/
+  ``_309_ensure_features_legacy_alias.sql``이 ``DROP FUNCTION``까지 낸다.
+  ``_TRIGGER_RECREATE``는 그 둘을 되살리지 않는다 — 정본 키 생성도 legacy alias
+  삽입도 이제 **writer 책임**이다.
 """
 
 from __future__ import annotations
@@ -107,15 +124,20 @@ class FeatureIdentityAnchorError(RuntimeError):
 class FeatureIdentityInvariantError(RuntimeError):
     """uuid 없는(또는 비정규·후보와 다른) 신규 feature 행 관측 — fail-close.
 
-    DB 층(0080 트리거 + NOT NULL)이 뚫린 상태로 write가 계속되면 alias-map
-    checksum 대조가 조용히 갈라지므로, writer는 갱신을 계속하는 대신 즉시
-    실패한다.
+    309가 0080 트리거를 지운 뒤 DB 층에 남은 보장은 ``pk_features``의 NOT NULL
+    하나다. 그것이 뚫린 상태로 write가 계속되면 alias-map checksum 대조가 조용히
+    갈라지므로, writer는 갱신을 계속하는 대신 즉시 실패한다.
     """
 
 
 @dataclass(frozen=True)
 class FeatureIdentity:
-    """경계 해석 결과 — legacy 키와 UUID 정본 키 쌍."""
+    """경계 해석 결과 — 정본 키 하나의 두 표기.
+
+    309 재키 뒤 두 필드는 모두 ``features.feature_id``(uuid)에서 나오므로 같은
+    canonical uuid를 담는다. 필드 이름 ``feature_id``/``feature_uuid``는 바깥
+    계약(DTO·응답 키)이라 그대로 유지한다 — 바뀐 것은 값의 출처뿐이다.
+    """
 
     feature_id: str
     feature_uuid: str
@@ -132,10 +154,10 @@ def expected_feature_uuid(feature_id: str) -> str:
 
 
 def candidate_feature_uuid() -> str:
-    """신규 행 INSERT 후보 ``feature_uuid`` — 비파생 UUIDv7 (0083 정본 generator).
+    """신규 행 INSERT 후보 정본 키 ``feature_id`` — 비파생 UUIDv7 (0083 정본 generator).
 
     upsert의 ON CONFLICT 경로에서는 이 후보가 **버려지고** 기존 저장값이
-    정본으로 남는다(``feature_uuid``는 ON CONFLICT 갱신 대상이 아님 + 0082
+    정본으로 남는다(``feature_id``는 ON CONFLICT 갱신 대상이 아님 + 0082
     identity fence). 관측 정합은 :func:`verify_feature_uuid`가 맡는다.
     """
     return str(make_feature_uuid())
@@ -148,15 +170,17 @@ def verify_feature_uuid(
     sent_feature_uuid: str | None = None,
     inserted: bool | None = None,
 ) -> str:
-    """write 경로가 ``RETURNING``으로 관측한 ``feature_uuid``를 검증한다 (fail-close).
+    """write 경로가 ``RETURNING``으로 관측한 정본 키(``feature_id``)를 검증한다 (fail-close).
 
     0083(비파생 generator) 이후의 불변식:
 
-    - 관측값은 **비어 있지 않은 canonical UUID**여야 한다 — legacy-only 행
-      (트리거·명시 INSERT 모두 실패) 탐지는 유지된다.
+    - 관측값은 **비어 있지 않은 canonical UUID**여야 한다. 309 뒤로 ``feature_id``
+      컬럼 자체가 uuid라 legacy 문자열은 저장이 불가능하므로, 이 축이 실제로 잡는
+      것은 관측 결측(``RETURNING`` 행 없음 / ``None``)과 비정규 표기다.
     - ``inserted=True``(``xmax = 0``)이면 관측값은 우리가 보낸 후보와 같아야
-      한다 — 트리거/타 경로가 후보를 바꿔치기하면 generator 이원화이므로
-      fail-close.
+      한다 — 후보를 바꿔치기하는 경로가 있으면 generator 이원화이므로
+      fail-close. 309가 fill 트리거를 지운 뒤 그 자리는 identity claim을 쥔
+      프로시저(provider/manual)가 갖는다.
     - ``inserted=False``(conflict-update)면 **기존 저장값이 정본**이다 — 후보와
       달라도 정상(파생 대조는 폐기: 기존 행은 파생값, 신규 행은 비파생값이
       공존하는 세계).
@@ -164,7 +188,10 @@ def verify_feature_uuid(
     Parameters
     ----------
     feature_id
-        legacy feature id (write 대상 행의 PK — 진단용).
+        예외 메시지에만 쓰는 진단용 식별자. 309 재키 뒤 write 대상 행의 PK는
+        uuid ``feature_id``(``pk_features``)이고 legacy ``f_*``는 PK가 아니라
+        ``feature_aliases.alias``다 — 호출부가 어느 쪽을 넘기든 검증에는 쓰이지
+        않는다.
     observed_feature_uuid
         INSERT/UPSERT ``RETURNING``으로 관측한 값 (driver에 따라 str/UUID).
     sent_feature_uuid
@@ -241,15 +268,16 @@ def validate_feature_ref(ref: str) -> str:
 
 
 # UUID 정본 조회 — features가 정본이고 alias table은 경계 해석 입구다.
-# alias 행의 feature_uuid 사본이 아니라 features의 정본 값을 읽는다.
+# 309 재키 뒤 alias 행에는 uuid 사본이 없다(shadow DROP) — 정본은
+# ``features.feature_id``(uuid) 하나이고, 출력 별칭 ``feature_uuid``는 유지한다.
 _RESOLVE_BY_UUID_SQL: Final[str] = """
-SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+SELECT feature_id, CAST(feature_id AS text) AS feature_uuid
 FROM feature.features
-WHERE feature_uuid = CAST(:feature_uuid AS uuid)
+WHERE feature_id = CAST(:feature_uuid AS uuid)
 """
 
 _RESOLVE_BY_ALIAS_SQL: Final[str] = """
-SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
+SELECT f.feature_id, CAST(f.feature_id AS text) AS feature_uuid
 FROM feature.feature_aliases AS a
 JOIN feature.features AS f
   ON f.feature_id = a.feature_id
@@ -257,23 +285,33 @@ WHERE a.alias = :alias
 """
 
 _FEATURE_UUID_MAP_SQL: Final[str] = """
-SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+SELECT feature_id, CAST(feature_id AS text) AS feature_uuid
 FROM feature.features
 WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
-# INV-068-01(모든 feature는 alias ≥ 1)과 uuid 결측을 현행 스키마에서 관측한다.
-# feature_uuid는 NOT NULL이라 정상 세계에서 셋 다 0이다 — 0이 아니면 DB 층
-# 보장이 뚫린 것이므로 호출자는 fail-close한다. alias_pair_mismatch는 0083의
-# 비파생 세계에서 새로 열리는 결함 계열(replica-mode orphan alias + 재-INSERT
-# → 사본 불일치 — FK는 child DML에서만 검사)의 보상 관측이다 (적대 리뷰 1 H3).
+# INV-068-01(모든 feature는 alias ≥ 1)과 정본 키 결측을 현행 스키마에서 관측한다.
+# 309 재키 뒤 축마다 **보장의 출처가 다르다**:
+#   missing_uuid         ``pk_features PRIMARY KEY (feature_id)``의 NOT NULL —
+#                        구조상 0.
+#   missing_alias        **DB 보장이 없다.** 309가 ``trg_features_legacy_alias``와
+#                        ``feature.ensure_features_legacy_alias()``를 영구 제거해
+#                        alias를 넣는 것은 writer뿐이다(DB 안에서는
+#                        ``create_provider_feature_with_initial_state`` 하나가
+#                        넣는다). 0이 아니면 "DB 보장이 뚫렸다"가 아니라
+#                        "writer가 alias를 안 넣었다"는 뜻이다.
+#   alias_pair_mismatch  조인 등식 ``a.feature_id = f.feature_id``의 자기검증이라
+#                        구조상 0. shadow 사본이 있던 세계(0083)에서는 사본 불일치
+#                        관측이었는데 309가 alias 쪽 사본 컬럼을 지웠다.
+#   orphan_alias         309가 재생성한 ``fk_feature_aliases_feature``가 막는다.
+# 출력 4축은 호출자 계약이라 자리를 유지한다 (적대 리뷰 1 H3의 원래 축).
 _MISSING_IDENTITY_SQL: Final[str] = """
 SELECT
-    count(*) FILTER (WHERE f.feature_uuid IS NULL) AS missing_uuid,
+    count(*) FILTER (WHERE f.feature_id IS NULL) AS missing_uuid,
     count(*) FILTER (WHERE a.alias IS NULL) AS missing_alias,
     count(*) FILTER (
         WHERE a.alias IS NOT NULL
-          AND a.feature_uuid IS DISTINCT FROM f.feature_uuid
+          AND a.feature_id IS DISTINCT FROM f.feature_id
     ) AS alias_pair_mismatch,
     (
         SELECT count(*)
@@ -296,7 +334,7 @@ async def resolve_feature_identity(
 
     해석 규칙 (결정적 우선순위):
 
-    1. canonical UUID 형태(36자 hyphenated)면 ``features.feature_uuid`` 정본
+    1. canonical UUID 형태(36자 hyphenated)면 ``features.feature_id`` 정본
        조회를 먼저 시도한다.
     2. 그 외(또는 1이 miss면) ``feature_aliases`` alias 조회로 해석한다 —
        legacy id는 임의 문자열일 수 있으므로 UUID처럼 보이는 alias도 놓치지
@@ -352,10 +390,15 @@ async def resolve_feature_identity(
 async def get_feature_uuid_map(
     session: AsyncSession, feature_ids: Sequence[str]
 ) -> dict[str, str]:
-    """legacy id 목록 → ``feature_uuid`` 정본 map (additive 병행 노출용).
+    """정본 키 목록 → ``{feature_id: feature_uuid}`` map (존재 확인 + 표기 정규화).
 
-    복잡한 조회 SQL(예: weather batch)을 재작성하지 않고 응답에 ``feature_uuid``
-    를 병행 노출할 때 사용한다. 존재하지 않는 id는 결과에서 빠진다.
+    309 재키 뒤 ``_FEATURE_UUID_MAP_SQL``의 WHERE가 ``uuid[]`` 바인드라 **입력은
+    canonical uuid 문자열이어야 한다** — legacy ``f_*``를 넘기면 DB가 uuid 파싱에서
+    거부한다(그 부류는 :func:`resolve_feature_identities_bulk`가 alias로 해석하는
+    입력이다). 두 슬롯이 같은 ``features.feature_id``에서 나오므로 반환은 존재하는
+    키에 대한 항등 사상이고, 실질 쓸모는 존재 확인과 canonical 소문자 정규화다.
+    복잡한 조회 SQL(예: weather batch)을 재작성하지 않고 응답의 ``feature_uuid``
+    슬롯을 채울 때 그대로 쓴다. 존재하지 않는 키는 결과에서 빠진다.
     """
     normalized = [feature_id for feature_id in feature_ids if feature_id]
     if not normalized:
@@ -373,13 +416,13 @@ async def get_feature_uuid_map(
 
 
 _RESOLVE_BULK_BY_UUID_SQL: Final[str] = """
-SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
+SELECT feature_id, CAST(feature_id AS text) AS feature_uuid
 FROM feature.features
-WHERE feature_uuid = ANY(CAST(:feature_uuids AS uuid[]))
+WHERE feature_id = ANY(CAST(:feature_uuids AS uuid[]))
 """
 
 _RESOLVE_BULK_BY_ALIAS_SQL: Final[str] = """
-SELECT a.alias, f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
+SELECT a.alias, f.feature_id, CAST(f.feature_id AS text) AS feature_uuid
 FROM feature.feature_aliases AS a
 JOIN feature.features AS f
   ON f.feature_id = a.feature_id
@@ -466,7 +509,7 @@ def is_canonical_uuid_ref(ref: str) -> bool:
 
 _FEATURE_UUID_EXISTS_SQL: Final[str] = """
 SELECT EXISTS (
-    SELECT 1 FROM feature.features WHERE feature_uuid = CAST(:feature_uuid AS uuid)
+    SELECT 1 FROM feature.features WHERE feature_id = CAST(:feature_uuid AS uuid)
 ) AS in_use
 """
 
@@ -509,12 +552,16 @@ async def count_features_missing_identity(
 ) -> tuple[int, int, int, int]:
     """(uuid 결측, alias 결측, alias 쌍 불일치, orphan alias) — 정상 ``(0,0,0,0)``.
 
-    freeze INV-068-01의 현행 스키마 판(post-backfill)이다. 회귀 테스트와
-    운영 점검이 사용하고, 0이 아니면 write 경로를 계속 신뢰하지 말고
-    fail-close해야 한다 (:class:`FeatureIdentityInvariantError`의 사전 관측판).
-    셋째 축(사본 불일치)·넷째 축(부모 없는 orphan alias — replica-mode DELETE
-    잔재이자 0083 FK 추가가 실패하는 유일 시나리오, 재판정 M7)은 비파생
-    세계의 신규 결함 계열 보상 관측이다 — 0083 배포 사전 점검 쿼리와 동일 축.
+    freeze INV-068-01의 현행 스키마 판이다. 회귀 테스트와 운영 점검이 사용하고,
+    0이 아니면 write 경로를 계속 신뢰하지 말고 fail-close해야 한다
+    (:class:`FeatureIdentityInvariantError`의 사전 관측판). **둘째 축은 309가
+    ``trg_features_legacy_alias``를 지운 뒤로 DB 보장이 아니라 writer 보장이다** —
+    0이 아니면 DB가 아니라 alias를 안 넣은 writer를 봐야 한다. 셋째 축(사본
+    불일치)은 alias 쪽 uuid 사본이 있던 세계의 관측이었고, 309가 그 컬럼을 지워
+    지금은 조인 등식의 자기검증(구조상 0)으로만 남는다 — 축을 빼면 호출자의
+    4-튜플 계약이 깨지므로 자리는 유지한다. 넷째 축(부모 없는 orphan alias —
+    replica-mode DELETE 잔재, 재판정 M7)은 309가 재생성한
+    ``fk_feature_aliases_feature``가 막는 계열의 보상 관측이다.
     """
     row = (await session.execute(text(_MISSING_IDENTITY_SQL))).mappings().one()
     return (

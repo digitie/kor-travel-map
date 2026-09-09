@@ -386,7 +386,7 @@ _PUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
 """
 
 _NONPUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = f"""
-    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.feature_id, CAST(f.feature_id AS text) AS feature_uuid,
     f.kind, f.name, f.category,
     f.lifecycle_state, f.publication_state, f.quality_state,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
@@ -1052,7 +1052,7 @@ WITH requested AS (
 )
 SELECT
     requested.feature_id,
-    CAST(base.feature_uuid AS text) AS feature_uuid,
+    CAST(base.feature_id AS text) AS feature_uuid,
     CASE
       WHEN base.feature_id IS NULL THEN 'missing'
       WHEN base.lifecycle_state = 'retired' THEN 'retired'
@@ -1189,8 +1189,9 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
 """
 
 
-# notice lineage 가시성 read — T-VN-32B dual: feature 참조를 legacy id와 UUID
-# 정본 쌍으로 병행 반환한다(0080이 view에 feature_uuid를 노출).
+# notice lineage 가시성 read — 응답 계약인 ``feature_uuid`` 슬롯을 함께 반환한다.
+# T-VN-39 재키 뒤 ``feature_id``가 곧 uuid라 두 값은 같고, view는 그 슬롯을
+# ``CAST(feature_id AS text)``로 계속 노출한다(309 뷰 재생성).
 _PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL: Final[str] = f"""
 SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
 FROM feature.public_features AS f
@@ -2505,9 +2506,10 @@ async def _upsert_feature_subtype(
 ) -> None:
     """kind별 typed subtype upsert (core upsert와 **같은 트랜잭션**).
 
-    ``feature_uuid``는 core upsert의 RETURNING 값을 그대로 쓴다. conflict-update
-    경로에서 정본은 이미 저장돼 있던 UUID이므로 후보를 재계산하면 identity 사본
-    FK(``fk_*_identity_pair``)가 깨진다 — 파생 계산 금지.
+    subtype 행이 참조하는 identity는 core의 ``feature_id``(uuid) 하나뿐이다 —
+    T-VN-39 재키(309)가 subtype의 identity 사본 컬럼과 ``fk_*_identity_pair`` FK를
+    함께 없앴으므로 재계산할 파생 identity 자체가 존재하지 않는다
+    (``stored_feature_uuid``는 호출부 계약으로 남아 있고 여기서 쓰지 않는다).
     """
     await write_subtype(
         session,
@@ -2529,16 +2531,15 @@ async def upsert_feature(
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
 
-    T-VN-32C(0083): ``feature_uuid``는 writer가 비파생 UUIDv7 후보를 명시
-    INSERT하고(fill 트리거는 raw SQL 경로 안전망), RETURNING 관측값을
-    fail-close 검증한다 — 신규 insert면 보낸 후보와 동일해야 하고(generator
-    이원화 차단), conflict-update면 기존 저장값이 정본이다
-    (``FeatureIdentityInvariantError``).
+    T-VN-39(309): identity 사본 컬럼 ``features.feature_uuid``와 그 fill 트리거는
+    재키가 없앴다. 정본 키는 wrapper가 ``(provider_dataset_id, feature_kind,
+    natural_key)``로 claim해 ``o_feature_id``로 돌려주는 ``feature_id``(uuid)
+    하나이고, claim과 core 결과의 일치는 DB 안에서 검증된다(ADR-098).
 
     T-VN-35(ADR-086): core는 kind 공통 축만 쓰고 kind별 상세·geometry는 subtype이
     정본이다. 두 write는 **한 트랜잭션**이며 순서가 강제된다 — subtype의
-    ``(feature_id, kind)``/``(feature_id, feature_uuid)`` FK가 core 행을 먼저
-    요구하기 때문이다(commit 경계는 종전처럼 호출자 책임).
+    ``(feature_id, kind)`` FK가 core 행을 먼저 요구하기 때문이다(commit 경계는
+    종전처럼 호출자 책임).
 
     base INSERT와 3축 initial state는 ``create_feature_with_initial_state``만
     수행한다. existing row의 provider 본문 갱신은 상태 축을 전혀 건드리지 않는
@@ -3093,7 +3094,7 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         stored_feature_uuid = (
             await session.execute(
                 text(
-                    "SELECT feature_uuid::text FROM feature.features "
+                    "SELECT feature_id::text FROM feature.features "
                     "WHERE feature_id = :feature_id"
                 ),
                 {"feature_id": bundle.feature.feature_id},
@@ -4833,8 +4834,9 @@ async def public_active_notice_feature_identities(
 ) -> dict[str, str]:
     """public에서 노출 가능한 active/latest notice의 ``{feature_id: feature_uuid}``.
 
-    notice lineage read의 T-VN-32B dual 표면 — 같은 감산 술어를 쓰되 feature
-    참조를 legacy id와 UUID 정본 쌍으로 병행 반환한다. 목록·검색·nearby와 같은
+    notice lineage read의 dual 표면 — 같은 감산 술어를 쓰되 응답 계약대로
+    ``feature_uuid`` 슬롯을 함께 반환한다. T-VN-39 재키 뒤 두 값은 같은 uuid이고
+    ``feature_uuid``는 그 text 표현이다. 목록·검색·nearby와 같은
     ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유해 종료된 notice와 같은 계보의
     구버전 feature가 ID 직접 조회로 다시 노출되지 않게 한다. 일반
     ``get_feature_row(s)``는 admin/감사용 raw read 계약을 유지한다.

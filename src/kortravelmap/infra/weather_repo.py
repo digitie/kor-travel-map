@@ -93,7 +93,7 @@ WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET: Final[int] = 200
 """target group 하나의 Feature ID 상한."""
 
 WEATHER_BATCH_MAX_FEATURE_ID_LENGTH: Final[int] = 256
-"""request body와 PostgreSQL text[] 메모리를 제한하는 Feature ID 문자 상한."""
+"""request body와 PostgreSQL uuid[] 메모리를 제한하는 Feature ID 문자 상한."""
 
 WEATHER_BATCH_MAX_PAIRS: Final[int] = 2_000
 """한 요청에서 실제 조회하는 ``target_at × feature_id`` pair 상한."""
@@ -515,7 +515,7 @@ _DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL: Final[str] = """
 WITH desired AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:identities AS jsonb)) AS row(
-        feature_id text,
+        feature_id uuid,
         provider_dataset_id bigint,
         weather_domain text,
         forecast_style text,
@@ -720,7 +720,6 @@ parents AS (
         requested.target_at,
         requested.ordinality,
         visible.feature_id AS visible_feature_id,
-        visible.feature_uuid,
         visible.coord_5179
     FROM requested
     LEFT JOIN feature.public_features AS visible
@@ -896,7 +895,7 @@ source_bundles AS (
         coalesce(
             array_agg(source.source_feature_id ORDER BY source.tier, source.source_feature_id)
                 FILTER (WHERE source.source_feature_id IS NOT NULL),
-            CAST(ARRAY[] AS text[])
+            CAST(ARRAY[] AS uuid[])
         ) AS source_feature_ids
     FROM parents AS parent
     LEFT JOIN sources AS source USING (ordinality, target_at)
@@ -1143,7 +1142,7 @@ weather_response_size AS (
             'value_number', value_number,
             'value_text', value_text
         ) AS text))), 0)
-        + (SELECT coalesce(sum(256 + octet_length(feature_id)), 0) FROM parents)
+        + (SELECT coalesce(sum(256 + octet_length(CAST(feature_id AS text))), 0) FROM parents)
         + (SELECT count(*) * 256 FROM cards)
     )::bigint AS value
     FROM weather_rows
@@ -1162,7 +1161,7 @@ batch_rows AS (
         'item'::text AS row_kind,
         parent.ordinality AS item_ordinality,
         parent.feature_id,
-        CAST(parent.feature_uuid AS text) AS feature_uuid,
+        CAST(parent.visible_feature_id AS text) AS feature_uuid,
         CASE WHEN parent.visible_feature_id IS NOT NULL AND state.has_weather
              THEN parent_card.card_ordinal END AS card_ordinal,
         CASE
@@ -1200,7 +1199,7 @@ batch_rows AS (
     SELECT
         'metric'::text,
         NULL::bigint,
-        NULL::text,
+        NULL::uuid,
         NULL::text,
         weather.card_ordinal,
         NULL::text,
@@ -1521,7 +1520,7 @@ WITH input AS (
 )
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1551,7 +1550,7 @@ WITH target AS (
 )
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1577,7 +1576,7 @@ WITH alert_records AS (
     SELECT
         sr.source_record_key,
         f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
+        CAST(f.feature_id AS text) AS feature_uuid,
         f.name AS feature_name,
         sr.raw_data,
         sr.raw_data->>'region_code' AS region_code,
@@ -2074,9 +2073,10 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
     feature_uuid = row.get("feature_uuid")
+    feature_id = row["feature_id"]
     return WeatherAlertHistoryRow(
         source_record_key=str(row["source_record_key"]),
-        feature_id=row["feature_id"],
+        feature_id=str(feature_id) if feature_id is not None else None,
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         feature_name=row["feature_name"],
         region_code=row["region_code"],

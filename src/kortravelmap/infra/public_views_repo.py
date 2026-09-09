@@ -192,7 +192,7 @@ fp.place_kind = 'beach'
 _PUBLIC_BEACH_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -236,7 +236,7 @@ LIMIT :limit
 _PUBLIC_BEACH_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -262,7 +262,7 @@ WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
 _PUBLIC_BEACH_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -316,7 +316,7 @@ _PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = f"""
 _PUBLIC_FESTIVAL_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -355,7 +355,7 @@ LIMIT :limit
 _PUBLIC_FESTIVAL_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -381,7 +381,7 @@ WHERE {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
 _PUBLIC_FESTIVAL_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
