@@ -57,6 +57,11 @@ _ALLOWED = {
     "scripts/build-baseline.sh",
     # head 오라클이 baseline보다 새롭다는 것을 **대조로 증명**하는 이 파일.
     "tests/lint/test_baseline_schema_is_not_a_contract_oracle.py",
+    # `runtime_privileges.py`의 ACL 인벤토리는 head와 **rev 300 두 시점**에서 돈다
+    # (0236 → 300 handoff가 stamp 직후 부른다). "이 루틴은 `300`에 아직 없어도 된다"는
+    # 선언이 실제 `300` 상태와 맞는지는 head 오라클로는 잴 수 없다 — 재는 대상이 head가
+    # 아니라 baseline root 그 자체다. 이 파일은 head 대조도 **함께** 한다.
+    "tests/lint/test_db_procedure_signatures_exist_in_head.py",
 }
 
 #: 검색 대상. 생성물·아카이브는 뺀다.
