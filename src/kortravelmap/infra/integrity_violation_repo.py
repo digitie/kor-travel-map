@@ -241,7 +241,7 @@ WHERE (CAST(:status AS text) IS NULL OR v.status = CAST(:status AS text))
   AND (CAST(:severity AS text) IS NULL OR v.severity = CAST(:severity AS text))
   AND (CAST(:violation_type AS text) IS NULL
        OR v.violation_type = CAST(:violation_type AS text))
-  AND (CAST(:feature_id AS text) IS NULL OR v.feature_id = CAST(:feature_id AS text))
+  AND (CAST(:feature_id AS uuid) IS NULL OR v.feature_id = CAST(:feature_id AS uuid))
   AND (
       CAST(:provider_dataset_id AS bigint) IS NULL
       OR v.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
@@ -382,7 +382,7 @@ SELECT finding.*, statement_timestamp()
 FROM unnest(
         CAST(:provider_dataset_ids AS bigint[]),
         CAST(:source_record_keys AS text[]),
-        CAST(:feature_ids AS text[]),
+        CAST(:feature_ids AS uuid[]),
         CAST(:violation_types AS text[]),
         CAST(:severities AS text[]),
         CAST(:messages AS text[]),

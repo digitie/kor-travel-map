@@ -143,7 +143,7 @@ WITH ranked AS (
       CAST(:cursor_updated_at AS timestamptz) IS NULL
       OR (f.updated_at, f.feature_id) < (
         CAST(:cursor_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
       )
     )
 )

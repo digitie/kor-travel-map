@@ -692,7 +692,7 @@ RETURNING item.curation_item_id
 
 _TRANSITION_LOSER_LIFECYCLE_SQL: Final[str] = """
 CALL feature.transition_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     'retired',
     'suppressed',
     CAST(:quality_state AS text),
@@ -704,7 +704,7 @@ CALL feature.transition_feature_state(
 
 _AUTHOR_LOSER_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
 CALL feature.author_lifecycle_override(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:source_lifecycle_state AS text),
     'retired',
     true,

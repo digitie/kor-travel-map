@@ -406,7 +406,7 @@ INSERT INTO ops.import_job_events (
 SELECT
     job.job_id,
     CAST(:import_job_dataset_id AS uuid),
-    COALESCE(CAST(:feature_id AS text), job.payload ->> 'feature_id'),
+    COALESCE(CAST(:feature_id AS uuid), job.payload ->> 'feature_id'),
     COALESCE(CAST(:stage AS text), job.current_stage),
     :level,
     CAST(:code AS text),

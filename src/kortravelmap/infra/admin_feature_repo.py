@@ -1188,20 +1188,20 @@ def _keyset_condition(*, sort: str, order: str) -> str:
     op = ">" if order == "asc" else "<"
     if sort in _TEXT_SORTS:
         return (
-            "(CAST(:cursor_feature_id AS text) IS NULL OR "
+            "(CAST(:cursor_feature_id AS uuid) IS NULL OR "
             f"({column}, feature_id) {op} "
-            "(CAST(:cursor_text AS text), CAST(:cursor_feature_id AS text)))"
+            "(CAST(:cursor_text AS text), CAST(:cursor_feature_id AS uuid)))"
         )
     if sort in _DATETIME_SORTS:
         return (
-            "(CAST(:cursor_feature_id AS text) IS NULL OR "
+            "(CAST(:cursor_feature_id AS uuid) IS NULL OR "
             f"({column}, feature_id) {op} "
-            "(CAST(:cursor_dt AS timestamptz), CAST(:cursor_feature_id AS text)))"
+            "(CAST(:cursor_dt AS timestamptz), CAST(:cursor_feature_id AS uuid)))"
         )
     return (
-        "(CAST(:cursor_feature_id AS text) IS NULL OR "
+        "(CAST(:cursor_feature_id AS uuid) IS NULL OR "
         f"({column}, feature_id) {op} "
-        "(CAST(:cursor_int AS integer), CAST(:cursor_feature_id AS text)))"
+        "(CAST(:cursor_int AS integer), CAST(:cursor_feature_id AS uuid)))"
     )
 
 
@@ -2178,7 +2178,7 @@ async def list_admin_features(
 
 _TRANSITION_FEATURE_STATE_SQL: Final[str] = """
 CALL feature.transition_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
@@ -2190,7 +2190,7 @@ CALL feature.transition_feature_state(
 
 _AUTHOR_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
 CALL feature.author_lifecycle_override(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:source_lifecycle_state AS text),
     CAST(:override_lifecycle_state AS text),
     CAST(:prevent_provider_reactivation AS boolean),
@@ -2237,7 +2237,7 @@ def _feature_override(row: Any) -> FeatureOverride:
 
 _TRANSITION_ADMIN_FEATURE_STATE_SQL: Final[str] = """
 CALL feature.transition_admin_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
@@ -2251,7 +2251,7 @@ CALL feature.transition_admin_feature_state(
 
 _REACTIVATE_ADMIN_FEATURE_STATE_SQL: Final[str] = """
 CALL feature.reactivate_admin_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:provider_dataset_id AS bigint),
     CAST(:source_entity_key AS text),
     CAST(:source_record_key AS text),
@@ -2538,7 +2538,7 @@ async def reactivate_admin_feature_state(
 
 _AUTHOR_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
 CALL feature.author_feature_field_overrides(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text),
     CAST(:reason_code AS text),
@@ -2551,7 +2551,7 @@ CALL feature.author_feature_field_overrides(
 
 _REVOKE_ADMIN_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
 CALL feature.revoke_feature_field_overrides(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text),
     CAST(:reason_code AS text),

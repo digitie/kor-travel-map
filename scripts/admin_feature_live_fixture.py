@@ -277,7 +277,7 @@ async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[s
                 """
                 SELECT
                   (SELECT count(*) FROM feature.features
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[]))) AS features,
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))) AS features,
                   (SELECT count(*) FROM feature.feature_weather_values
                    WHERE feature_id = :weather_id) AS weather_values,
                   (SELECT count(*) FROM feature.feature_price_values
@@ -351,7 +351,7 @@ async def _assert_owned_or_absent(
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
                 FROM feature.features
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY feature_id
                 """
                 + lock_clause
@@ -466,7 +466,7 @@ async def _assert_owned_source_links(
                   ON dataset.provider_dataset_id = entity.provider_dataset_id
                 JOIN provider_sync.source_entity_heads AS head
                   ON head.source_entity_key = entity.source_entity_key
-                WHERE link.feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE link.feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY link.feature_id
                 """
                 + lock_clause
@@ -578,7 +578,7 @@ async def _foreign_key_reference_counts(
                         await session.execute(
                             text(
                                 "SELECT feature_uuid FROM feature.features "
-                                "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+                                "WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
                             ),
                             {"feature_ids": list(feature_ids)},
                         )
@@ -1114,7 +1114,7 @@ SELECT
   transition_kind, reason_code, principal, causation_ref,
   provider_dataset_id, source_entity_key, source_record_key, provider_evidence
 FROM feature.feature_state_transitions
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 ORDER BY feature_id, occurred_at, transition_id
 """
 
@@ -1126,7 +1126,7 @@ SELECT
   source_record_key, source_provider_dataset_id, source_entity_key,
   source_raw_payload_hash
 FROM ops.feature_overrides
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 ORDER BY feature_id, field_path
 FOR UPDATE
 """
@@ -1400,7 +1400,7 @@ async def _purge_api_owned(
         text(
             """
             DELETE FROM feature.features
-            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
             """
         ),
         {"feature_ids": list(inspection.feature_ids)},
@@ -1411,13 +1411,13 @@ async def _purge_api_owned(
                 """
                 SELECT
                   (SELECT count(*) FROM feature.features
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS features,
                   (SELECT count(*) FROM ops.feature_overrides
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS field_overrides,
                   (SELECT count(*) FROM feature.feature_state_transitions
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS state_transitions
                 """
             ),

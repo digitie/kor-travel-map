@@ -226,7 +226,7 @@ WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
       f.feature_id
     ) < (
       CAST(:cursor_updated_at AS timestamptz),
-      CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid)
     )
   )
 ORDER BY f.updated_at DESC, f.feature_id DESC
@@ -256,7 +256,7 @@ FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
-  AND f.feature_id = CAST(:feature_id AS text)
+  AND f.feature_id = CAST(:feature_id AS uuid)
 """
 
 _PUBLIC_BEACH_MARKERS_SQL: Final[str] = f"""
@@ -345,7 +345,7 @@ WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
     ) > (
       CAST(:cursor_start_date AS date),
       CAST(:cursor_updated_at AS timestamptz),
-      CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid)
     )
   )
 ORDER BY fe.starts_on ASC, f.updated_at ASC, f.feature_id ASC
@@ -375,7 +375,7 @@ FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
-  AND f.feature_id = CAST(:feature_id AS text)
+  AND f.feature_id = CAST(:feature_id AS uuid)
 """
 
 _PUBLIC_FESTIVAL_MARKERS_SQL: Final[str] = f"""

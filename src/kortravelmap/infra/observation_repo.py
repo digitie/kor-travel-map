@@ -110,7 +110,7 @@ JOIN provider_sync.source_entity_heads AS head
   ON head.source_entity_key = se.source_entity_key
 JOIN provider_sync.source_records AS sr
   ON sr.source_record_key = head.current_source_record_key
-WHERE sl.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE sl.feature_id = ANY(CAST(:feature_ids AS uuid[]))
 ORDER BY
     sl.feature_id,
     pd.provider,

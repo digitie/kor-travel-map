@@ -259,7 +259,7 @@ WHERE a.alias = :alias
 _FEATURE_UUID_MAP_SQL: Final[str] = """
 SELECT feature_id, CAST(feature_uuid AS text) AS feature_uuid
 FROM feature.features
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
 # INV-068-01(모든 feature는 alias ≥ 1)과 uuid 결측을 현행 스키마에서 관측한다.

@@ -210,7 +210,7 @@ CALL feature.create_feature_with_initial_state(
 
 _TRANSITION_FEATURE_STATE_SQL: Final[str] = """
 CALL feature.transition_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
@@ -222,7 +222,7 @@ CALL feature.transition_feature_state(
 
 _APPLY_PROVIDER_FIELD_PATCH_SQL: Final[str] = """
 CALL feature.apply_provider_feature_field_patch(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:provider_dataset_id AS bigint),
     CAST(:source_entity_key AS text),
     CAST(:source_record_key AS text),
@@ -413,7 +413,7 @@ _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT {_NONPUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features AS f
 {typed_feature_detail_joins_sql("f")}
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
 # 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
@@ -428,7 +428,7 @@ WHERE feature_id = :feature_id
 _GET_PUBLIC_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT {_PUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.public_features
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
 _FEATURE_LOAD_STATE_SQL: Final[str] = """
@@ -466,7 +466,7 @@ SELECT
         ORDER BY t.transition_id DESC
         LIMIT 1
     ) AS last_publication_from_state
-FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
+FROM (VALUES (CAST(:feature_id AS uuid))) AS wanted(feature_id)
 LEFT JOIN feature.features AS f
   ON f.feature_id = wanted.feature_id
 """
@@ -1043,7 +1043,7 @@ WITH requested AS (
         item.known_row_revision,
         item.ordinality
     FROM unnest(
-        CAST(:feature_ids AS text[]),
+        CAST(:feature_ids AS uuid[]),
         CAST(:known_row_revisions AS bigint[])
     ) WITH ORDINALITY AS item(feature_id, known_row_revision, ordinality)
 )
@@ -1191,7 +1191,7 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
 _PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL: Final[str] = f"""
 SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
 FROM feature.public_features AS f
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND f.kind = 'notice'
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 """
@@ -1360,8 +1360,8 @@ WITH candidates AS MATERIALIZED (
     WHERE {_bbox_candidate_predicate_sql("f")}
     {_bbox_attribute_filter_sql("f")}
       AND (
-        CAST(:cursor_feature_id AS text) IS NULL
-        OR f.feature_id > CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS uuid)
       )
     {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
     ORDER BY f.feature_id ASC
@@ -1408,8 +1408,8 @@ WITH candidates AS MATERIALIZED (
     WHERE {_bbox_candidate_predicate_sql("f")}
     {_bbox_attribute_filter_sql("f")}
       AND (
-        CAST(:cursor_feature_id AS text) IS NULL
-        OR f.feature_id > CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS uuid)
       )
     {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
     ORDER BY f.feature_id ASC
@@ -1647,7 +1647,7 @@ WHERE (
         -- feature_id tiebreak로 넘어가 커서 행 자신이 다음 페이지에 재등장(같은 feature_id
         -- 중복)하는 float8 정밀도 버그를 막는다.
         -CAST(:cursor_score AS real),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY score DESC, feature_id ASC
@@ -1661,8 +1661,8 @@ _FEATURE_SEARCH_BY_ID_SQL: Final[str] = (
 SELECT *
 FROM candidates
 WHERE (
-    CAST(:cursor_feature_id AS text) IS NULL
-    OR feature_id > CAST(:cursor_feature_id AS text)
+    CAST(:cursor_feature_id AS uuid) IS NULL
+    OR feature_id > CAST(:cursor_feature_id AS uuid)
 )
 ORDER BY feature_id ASC
 LIMIT :limit_plus_one
@@ -1752,7 +1752,7 @@ WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
     OR (distance_m, feature_id) > (
         CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY distance_m ASC, feature_id ASC
@@ -1769,7 +1769,7 @@ WHERE (
     CAST(:cursor_name AS text) IS NULL
     OR (name, feature_id) > (
         CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY name ASC, feature_id ASC
@@ -1786,7 +1786,7 @@ WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
     OR (last_updated_at, feature_id) < (
         CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY last_updated_at DESC, feature_id DESC
@@ -1869,7 +1869,7 @@ WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
     OR (distance_m, feature_id) > (
         CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY distance_m ASC, feature_id ASC
@@ -1886,7 +1886,7 @@ WHERE (
     CAST(:cursor_name AS text) IS NULL
     OR (name, feature_id) > (
         CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY name ASC, feature_id ASC
@@ -1903,7 +1903,7 @@ WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
     OR (last_updated_at, feature_id) < (
         CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY last_updated_at DESC, feature_id DESC
@@ -4176,7 +4176,7 @@ SELECT f.feature_id
 FROM feature.features AS f
 LEFT JOIN feature.feature_notices AS n
   ON n.feature_id = f.feature_id
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND NOT (
       f.lifecycle_state = 'active'
       AND (
@@ -4952,7 +4952,7 @@ FOR UPDATE
 
 _AUTHOR_PHONE_OVERRIDE_SQL: Final[str] = """
 CALL feature.author_feature_field_overrides(
-    CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
+    CAST(:feature_id AS uuid), CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text), 'phone_enrichment', CAST(:command_id AS bigint),
     CAST(:values AS jsonb), '{}'::jsonb, NULL, NULL, NULL, NULL
 )

@@ -399,7 +399,7 @@ class SigunguByRadiusResolver(Protocol):
 _RESOLVE_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id, ord
-    FROM unnest(CAST(:feature_ids AS text[])) WITH ORDINALITY AS r(feature_id, ord)
+    FROM unnest(CAST(:feature_ids AS uuid[])) WITH ORDINALITY AS r(feature_id, ord)
 )
 SELECT f.feature_id, f.sigungu_code
 FROM requested AS r
@@ -414,7 +414,7 @@ LIMIT CAST(:limit AS integer)
 _COUNT_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id
-    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+    FROM unnest(CAST(:feature_ids AS uuid[])) AS r(feature_id)
 )
 SELECT count(*)::int
 FROM requested AS r
@@ -427,7 +427,7 @@ WHERE f.lifecycle_state = 'active'
 _MATCHED_SIGUNGU_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id
-    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+    FROM unnest(CAST(:feature_ids AS uuid[])) AS r(feature_id)
 )
 SELECT DISTINCT f.sigungu_code
 FROM requested AS r
@@ -843,7 +843,7 @@ JOIN provider_sync.provider_dataset_operations AS operation
  AND operation.operation_key = operation_scope.operation_key
  AND operation.operation_kind = operation_scope.operation_kind
 WHERE sl.source_role = 'primary'
-  AND sl.feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND sl.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND pd.is_active
   AND operation.is_enabled
 GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,

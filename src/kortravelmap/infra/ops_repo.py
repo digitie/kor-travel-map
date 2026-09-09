@@ -558,7 +558,7 @@ WHERE (CAST(:status AS text) IS NULL OR issue.status = CAST(:status AS text))
     CAST(:provider_dataset_id AS bigint) IS NULL
     OR issue.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   )
-  AND (CAST(:feature_id AS text) IS NULL OR issue.feature_id = CAST(:feature_id AS text))
+  AND (CAST(:feature_id AS uuid) IS NULL OR issue.feature_id = CAST(:feature_id AS uuid))
   AND (
     CAST(:q_like AS text) IS NULL
     OR issue.message ILIKE CAST(:q_like AS text)

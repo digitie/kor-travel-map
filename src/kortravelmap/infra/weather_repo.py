@@ -710,7 +710,7 @@ _WEATHER_BATCH_SQL: Final[str] = """
 WITH requested AS (
     SELECT item.feature_id, item.target_at, item.ordinality
     FROM unnest(
-        CAST(:feature_ids AS text[]),
+        CAST(:feature_ids AS uuid[]),
         CAST(:target_ats AS timestamptz[])
     ) WITH ORDINALITY AS item(feature_id, target_at, ordinality)
 ),

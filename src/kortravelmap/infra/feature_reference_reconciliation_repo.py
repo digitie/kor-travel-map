@@ -155,7 +155,7 @@ CALL feature.resolve_manual_provider_dedup_case_v2(
     CAST(:expected_case_fingerprint AS text),
     CAST(:expected_manual_row_revision AS bigint),
     CAST(:expected_provider_row_revision AS bigint),
-    CAST(:survivor_feature_id AS text), CAST(:reason AS text), CAST(:actor AS text),
+    CAST(:survivor_feature_id AS uuid), CAST(:reason AS text), CAST(:actor AS text),
     CAST(:command_id AS bigint), NULL::text, NULL::uuid, NULL::uuid, NULL::text,
     NULL::bigint
 )

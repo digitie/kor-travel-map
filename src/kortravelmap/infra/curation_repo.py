@@ -1249,7 +1249,7 @@ ORDER BY c.edition_key DESC, c.title, i.sort_order, i.curation_item_id
 _LIST_FEATURE_ITEMS_BATCH_SQL: Final[str] = (
     _ITEM_SELECT
     + f"""
-WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE i.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND i.archived_at IS NULL
   AND i.source_present
   AND c.archived_at IS NULL
@@ -1334,8 +1334,8 @@ WHERE (
         )
   )
   AND (
-      CAST(:cursor_feature_id AS text) IS NULL
-      OR f.feature_id > CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid) IS NULL
+      OR f.feature_id > CAST(:cursor_feature_id AS uuid)
   )
   {public_active_notice_filter_sql("f")}
 ORDER BY f.feature_id
@@ -1387,7 +1387,7 @@ SELECT
     core.quality_state
 FROM feature.public_features AS f
 {_PUBLIC_FEATURE_STATE_JOIN_SQL}
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
 {public_active_notice_filter_sql("f")}
 """
 
@@ -6546,7 +6546,7 @@ async def import_curation_rows(
                     await session.execute(
                         text(
                             "SELECT feature_id FROM feature.features AS f "
-                            "WHERE f.feature_id = ANY(CAST(:feature_ids AS text[])) "
+                            "WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[])) "
                             f"AND {active_state_sql} "
                             "ORDER BY f.feature_id FOR UPDATE"
                         ),
