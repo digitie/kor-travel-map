@@ -1,3 +1,10 @@
+-- 이 사이드카는 자기 역할 창을 스스로 연다 — 소유자는 alembic/head-schema.sql이
+-- 정본이다. 바깥에서 `SET ROLE`로 묶으면 순서에 결박되고, 자기 창을 가진 사이드카가
+-- 끝에서 스키마 소유자로 되돌리는 순간 뒤따르는 파일이 엉뚱한 롤로 실행된다.
+-- 이 파일은 소유권을 바꾸지 않으므로 `ALTER ... OWNER TO`가 없다. 그래도 `CREATE OR
+-- REPLACE`와 `DROP`은 소유자만 할 수 있고 롤은 NOINHERIT라 창이 필요하다.
+SET ROLE ktm_feature_state_procedure_owner;
+
 CREATE OR REPLACE FUNCTION feature.validate_feature_base_field_value() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
@@ -78,3 +85,5 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
+SET ROLE ktm_feature_schema_owner;

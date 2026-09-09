@@ -491,40 +491,37 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 )
 
 
-#: 루틴 사이드카를 소유자 롤별로 묶어 실행한다. `SET ROLE`이 필요한 이유는
-#: `CREATE OR REPLACE`와 `DROP`이 **소유자만** 할 수 있기 때문이고, schema
-#: owner가 그 롤들의 멤버십을 갖는다(`302_m03_child_issuance.py:310-311`).
-#: 선례는 `305_m05_relitigation_fence.py:156-161` — 같은 프로시저에 대해
-#: 이 패턴이 이미 통한다.
+#: 루틴 사이드카. **순서에 의미가 없다** — 각 파일이 자기 `SET ROLE` 창을 열고 닫는다.
+#:
+#: 처음에는 소유자 롤별로 바깥에서 묶었다. 그 형태는 조용히 깨진다: 자기 창을 이미
+#: 가진 사이드카(pg_dump가 그렇게 뱉는다)가 끝에서 `SET ROLE ktm_feature_schema_owner`로
+#: 되돌리면, 뒤따르는 파일은 바깥 그룹이 지정한 롤이 아니라 스키마 소유자로 실행된다.
+#: 2026-09-09 n150 실행이 `must be owner of function derive_subtype_public_ready`로
+#: 그것을 잡았다. 파일 하나를 목록에서 옮기는 것만으로 다른 파일이 깨지는 배치는
+#: 계약이 아니라 함정이다.
+#:
+#: `SET ROLE`이 필요한 이유는 `CREATE OR REPLACE`와 `DROP`이 **소유자만** 할 수 있고
+#: 이 롤들이 NOINHERIT이기 때문이다. schema owner가 멤버십을 갖는다
+#: (`302_m03_child_issuance.py:310-311`). `feature` 스키마는 소유자 롤 전부가 `ALL`을
+#: 가지므로 창 안에서 CREATE도 성립한다(`alembic/head-schema.sql:24731-24737`).
+#:
+#: 예외는 `ops.record_curation_import_manual_feature_child` 하나다. `ops`에서
+#: `ktm_curation_command_owner`는 USAGE만 갖고(`head-schema.sql:24749`) CREATE가 없어
+#: 창을 열 수 없다. 그 파일은 스키마 소유자로 돌고 소유권만 이전한다 — 실측으로 통한다.
 _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
-    # ktm_curation_audit_writer (1)
-    "SET ROLE ktm_curation_audit_writer",
     *_sidecar("_309_append_theme_feature_candidate_transition.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_curation_command_owner (6)
-    "SET ROLE ktm_curation_command_owner",
     *_sidecar("_309_apply_curation_import_items_command.sql"),
     *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
     *_sidecar("_309_create_manual_curation_item_with_feature_command.sql"),
     *_sidecar("_309_current_theme_candidate_snapshot.sql"),
     *_sidecar("_309_patch_curation_item_command.sql"),
     *_sidecar("_309_record_curation_import_manual_feature_child.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_feature_audit_writer (1)
-    "SET ROLE ktm_feature_audit_writer",
     *_sidecar("_309_write_feature_state_transition.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_feature_request_procedure_owner (1)
-    "SET ROLE ktm_feature_request_procedure_owner",
     *_sidecar("_309_approve_feature_request_with_initial_state.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_feature_schema_owner — 마이그레이션 기본 role이라 전환이 필요 없다.
     *_sidecar("_309_ensure_features_legacy_alias.sql"),
     *_sidecar("_309_fence_features_identity_update.sql"),
     *_sidecar("_309_fill_features_feature_uuid.sql"),
     *_sidecar("_309_purge_manual_feature.sql"),
-    # ktm_feature_state_procedure_owner (13 — provider wrapper 신설 포함)
-    "SET ROLE ktm_feature_state_procedure_owner",
     *_sidecar("_309_author_feature_field_overrides.sql"),
     *_sidecar("_309_author_lifecycle_override.sql"),
     *_sidecar("_309_create_feature_with_initial_state.sql"),
@@ -541,22 +538,15 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     # 그것을 CALL하고, plpgsql은 CREATE 시점에 의존을 검사하지 않지만 첫 호출에서
     # 시그니처가 맞아야 한다.
     *_sidecar("_309_create_provider_feature_with_initial_state.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_manual_feature_procedure_owner (3)
-    "SET ROLE ktm_manual_feature_procedure_owner",
     *_sidecar("_309_create_admin_manual_feature_with_initial_state.sql"),
     *_sidecar("_309_read_admin_manual_feature_provenance.sql"),
     *_sidecar("_309_reject_manual_feature_hard_purge.sql"),
-    "SET ROLE ktm_feature_schema_owner",
-    # ktm_manual_provider_dedup_procedure_owner (6)
-    "SET ROLE ktm_manual_provider_dedup_procedure_owner",
     *_sidecar("_309_list_manual_provider_dedup_cases.sql"),
     *_sidecar("_309_list_manual_provider_dedup_detector_manuals.sql"),
     *_sidecar("_309_read_manual_provider_dedup_case.sql"),
     *_sidecar("_309_record_manual_provider_dedup_candidate.sql"),
     *_sidecar("_309_resolve_manual_provider_dedup_case.sql"),
     *_sidecar("_309_resolve_manual_provider_dedup_case_v2.sql"),
-    "SET ROLE ktm_feature_schema_owner",
 )
 
 

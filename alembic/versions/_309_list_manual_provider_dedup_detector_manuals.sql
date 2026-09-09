@@ -1,3 +1,15 @@
+-- 이 사이드카는 자기 역할 창을 스스로 연다.
+--
+-- 바깥에서 `SET ROLE`로 묶으면 순서에 결박된다 — 자기 창을 가진 사이드카가 끝에서
+-- 스키마 소유자로 되돌리는 순간, 뒤따르는 파일은 바깥 그룹이 지정한 롤이 아니라
+-- 스키마 소유자로 실행된다. 2026-09-09 n150 실행이 그것을 잡았다
+-- (`must be owner of function derive_subtype_public_ready`).
+--
+-- 롤은 NOINHERIT라 멤버십만으로는 소유자 검사를 통과하지 못한다. `feature` 스키마는
+-- 모든 소유자 롤이 `ALL`을 가지므로(alembic/head-schema.sql:24731-24737) 이 창 안에서
+-- DROP·CREATE·GRANT가 모두 성립한다.
+SET ROLE ktm_manual_provider_dedup_procedure_owner;
+
 DROP FUNCTION feature.list_manual_provider_dedup_detector_manuals(text, integer);
 
 CREATE FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid DEFAULT NULL::uuid, p_limit integer DEFAULT 1000) RETURNS TABLE(feature_id uuid, name text, category text, lon double precision, lat double precision)
@@ -63,3 +75,5 @@ $t39_owner$;
 
 REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor, ktm_feature_reference_reconciliation_service_executor;
 GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) TO ktm_manual_provider_dedup_detector_executor;
+
+SET ROLE ktm_feature_schema_owner;

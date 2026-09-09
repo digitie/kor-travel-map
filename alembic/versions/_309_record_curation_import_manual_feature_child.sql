@@ -1,4 +1,20 @@
+-- 이 사이드카는 창을 셋으로 나눈다 — `ops`에서 `ktm_curation_command_owner`는
+-- USAGE만 갖고 CREATE가 없기 때문이다(alembic/head-schema.sql:24749).
+--
+--   ① 소유자 롤로 DROP  — 삭제는 소유자만 할 수 있다(롤은 NOINHERIT).
+--   ② 스키마 소유자로 CREATE + 소유권 이전 — 새 CREATE는 스키마 CREATE만 요구하고
+--      만든 롤이 소유자가 되므로, 만든 뒤 넘긴다.
+--   ③ 소유자 롤로 GRANT/REVOKE — 권한 부여도 소유자만 할 수 있다.
+--
+-- 같은 패턴을 `_309_append_theme_feature_candidate_transition.sql`,
+-- `_309_patch_curation_item_command.sql`,
+-- `_309_lock_current_provider_feature_source_evidence.sql`이 이미 쓴다.
+
+SET ROLE ktm_curation_command_owner;
 DROP PROCEDURE ops.record_curation_import_manual_feature_child(uuid, integer, text, text, bigint, uuid, uuid, uuid, uuid);
+
+SET ROLE ktm_feature_schema_owner;
+
 
 
 CREATE PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid)
@@ -116,5 +132,9 @@ END
 $t39_owner$;
 
 
+SET ROLE ktm_curation_command_owner;
+
 REVOKE ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) FROM PUBLIC;
 GRANT ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) TO ktm_curation_admin_executor;
+
+SET ROLE ktm_feature_schema_owner;

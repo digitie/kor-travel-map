@@ -1,3 +1,10 @@
+-- 이 사이드카는 자기 역할 창을 스스로 연다 — 소유자는 alembic/head-schema.sql이
+-- 정본이다. 바깥에서 `SET ROLE`로 묶으면 순서에 결박되고, 자기 창을 가진 사이드카가
+-- 끝에서 스키마 소유자로 되돌리는 순간 뒤따르는 파일이 엉뚱한 롤로 실행된다.
+-- 이 파일은 소유권을 바꾸지 않으므로 `ALTER ... OWNER TO`가 없다. 그래도 `CREATE OR
+-- REPLACE`와 `DROP`은 소유자만 할 수 있고 롤은 NOINHERIT라 창이 필요하다.
+SET ROLE ktm_curation_command_owner;
+
 CREATE OR REPLACE PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[], OUT o_row_receipts jsonb)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
@@ -412,3 +419,5 @@ BEGIN
   END LOOP;
 END
 $_$;
+
+SET ROLE ktm_feature_schema_owner;

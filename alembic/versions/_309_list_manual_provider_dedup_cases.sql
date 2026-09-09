@@ -1,3 +1,10 @@
+-- 이 사이드카는 자기 역할 창을 스스로 연다 — 소유자는 alembic/head-schema.sql이
+-- 정본이다. 바깥에서 `SET ROLE`로 묶으면 순서에 결박되고, 자기 창을 가진 사이드카가
+-- 끝에서 스키마 소유자로 되돌리는 순간 뒤따르는 파일이 엉뚱한 롤로 실행된다.
+-- 이 파일은 소유권을 바꾸지 않으므로 `ALTER ... OWNER TO`가 없다. 그래도 `CREATE OR
+-- REPLACE`와 `DROP`은 소유자만 할 수 있고 롤은 NOINHERIT라 창이 필요하다.
+SET ROLE ktm_manual_provider_dedup_procedure_owner;
+
 CREATE OR REPLACE FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) RETURNS TABLE(o_case_id uuid, o_status text, o_created_at timestamp with time zone, o_evidence_fingerprint text, o_manual_feature jsonb, o_provider_feature jsonb, o_scores jsonb)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
@@ -60,3 +67,5 @@ BEGIN
     LIMIT p_limit;
 END
 $$;
+
+SET ROLE ktm_feature_schema_owner;
