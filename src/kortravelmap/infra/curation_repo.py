@@ -3982,19 +3982,20 @@ async def create_manual_curation_item_with_feature_command(
     ).mappings().one()
     outcome = result.get("o_outcome")
     if outcome == "exact_conflict":
-        winner = result.get("o_existing_feature_uuid")
+        winner = result.get("o_existing_feature_id")
         if not isinstance(winner, (str, UUID)):
             raise RuntimeError("manual curation exact conflict has no winner UUID")
         return CurationManualFeatureExactDuplicate(existing_feature_uuid=str(winner))
     if outcome != "created":
         raise RuntimeError("manual curation writer returned an unknown outcome")
+    # T-VN-39: `o_feature_id`가 곧 uuid다 — `o_feature_uuid`는 사라졌고, 두 축을
+    # 따로 검증하던 자리는 하나로 접힌다. 검증의 뜻은 그대로다("writer가 claim한
+    # identity와 프로시저가 돌려준 identity가 같은가").
     observed_feature_id = result.get("o_feature_id")
-    observed_feature_uuid = result.get("o_feature_uuid")
     item_id = result.get("o_curation_item_id")
     feature_revision = result.get("o_feature_row_revision")
     if (
-        observed_feature_id != feature_id
-        or str(observed_feature_uuid) != feature_uuid
+        str(observed_feature_id) != feature_uuid
         or not isinstance(item_id, (str, UUID))
         or type(feature_revision) is not int
         or feature_revision < 1

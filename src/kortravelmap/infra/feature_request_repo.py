@@ -297,7 +297,7 @@ async def approve_feature_request(
         _procedure_error(error)
     outcome = row.get("o_outcome")
     if outcome == "exact_conflict":
-        winner = row.get("o_existing_feature_uuid")
+        winner = row.get("o_existing_feature_id")
         if not isinstance(winner, UUID):
             raise FeatureRequestError("Feature request exact conflict winner가 없습니다.")
         existing = (
@@ -325,16 +325,12 @@ async def approve_feature_request(
         )
     if outcome != "created":
         raise FeatureRequestError("Feature request approval writer outcome이 올바르지 않습니다.")
-    observed_uuid = row.get("o_feature_uuid")
+    # T-VN-39: `o_feature_id`가 곧 uuid다 — 두 축을 따로 받던 자리가 하나로 접힌다.
     revision = row.get("o_row_revision")
     observed_id = row.get("o_feature_id")
-    if (
-        not isinstance(observed_uuid, UUID)
-        or not isinstance(revision, int)
-        or not isinstance(observed_id, str)
-    ):
+    if not isinstance(revision, int) or not isinstance(observed_id, UUID):
         raise FeatureRequestError("Feature request approval receipt가 불완전합니다.")
-    if str(observed_uuid) != str(feature_uuid) or observed_id != feature_id or revision < 1:
+    if str(observed_id) != str(feature_uuid) or revision < 1:
         raise FeatureRequestError("Feature request approval identity receipt가 일치하지 않습니다.")
     try:
         await write_subtype(
@@ -349,7 +345,7 @@ async def approve_feature_request(
         ) from error
     return FeatureRequestCreated(
         feature_id=feature_id,
-        feature_uuid=str(observed_uuid),
+        feature_uuid=str(observed_id),
         row_revision=revision,
     )
 

@@ -2961,14 +2961,14 @@ async def create_admin_feature_with_field_overrides(
     if outcome == "exact_conflict":
         if any(
             wrapper_result.get(field) is not None
-            for field in ("o_feature_id", "o_feature_uuid", "o_row_revision")
+            for field in ("o_feature_id", "o_row_revision")
         ):
             raise AdminManualFeatureInvariantError(
                 "exact conflict 결과에 success OUT 값이 함께 반환됐습니다."
             )
         return AdminManualFeatureExactDuplicate(
             existing_feature_uuid=_canonical_uuid7_or_invariant(
-                wrapper_result.get("o_existing_feature_uuid"),
+                wrapper_result.get("o_existing_feature_id"),
                 field="exact-conflict winner UUID",
             )
         )
@@ -2976,20 +2976,17 @@ async def create_admin_feature_with_field_overrides(
         raise AdminManualFeatureInvariantError(
             "수동 Feature wrapper가 알 수 없는 outcome을 반환했습니다."
         )
-    if wrapper_result.get("o_existing_feature_uuid") is not None:
+    if wrapper_result.get("o_existing_feature_id") is not None:
         raise AdminManualFeatureInvariantError(
             "created 결과에 exact-conflict winner UUID가 함께 반환됐습니다."
         )
-    observed_feature_id_raw = wrapper_result.get("o_feature_id")
-    if not isinstance(observed_feature_id_raw, str):
-        raise AdminManualFeatureInvariantError(
-            "created 결과에 legacy identity가 없습니다."
-        )
-    observed_feature_id = observed_feature_id_raw
+    # T-VN-39: `o_feature_id`가 곧 uuid다 — legacy 문자열 축이 사라져 두 검증이
+    # 하나로 접힌다. `_canonical_uuid7_or_invariant`가 v7 여부까지 계속 확인한다.
     observed_feature_uuid = _canonical_uuid7_or_invariant(
-        wrapper_result.get("o_feature_uuid"),
-        field="created feature_uuid",
+        wrapper_result.get("o_feature_id"),
+        field="created feature_id",
     )
+    observed_feature_id = observed_feature_uuid
     initial_row_revision = wrapper_result.get("o_row_revision")
     if type(initial_row_revision) is not int or initial_row_revision < 1:
         raise AdminManualFeatureInvariantError(
