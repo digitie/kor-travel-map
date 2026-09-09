@@ -74,10 +74,7 @@ from kortravelmap.infra.domain_command_repo import (
     create_domain_command_record,
     lock_domain_command,
 )
-from kortravelmap.infra.feature_identity import (
-    candidate_feature_uuid,
-    verify_feature_uuid,
-)
+from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
 from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
@@ -197,14 +194,20 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
 # T-VN-34: base INSERT와 세 상태축 쓰기는 procedure만 수행한다.
-_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
-CALL feature.create_feature_with_initial_state(
+#
+# T-VN-39/ADR-098: provider 경로는 core 프로시저를 **직접 부르지 않는다.** 재키가
+# `ON CONFLICT (feature_id)`의 결정적 축을 없애므로, wrapper가
+# `(provider_dataset_id, feature_kind, natural_key)`로 identity를 먼저 claim하고
+# 그 uuid로 core를 부른다. manual 세 경로가 이미 같은 삼단으로 산다.
+_CREATE_PROVIDER_FEATURE_SQL: Final[str] = """
+CALL feature.create_provider_feature_with_initial_state(
     CAST(:feature_payload AS jsonb),
+    CAST(:identity AS jsonb),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
     CAST(:state_context AS jsonb),
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL
 )
 """
 
@@ -2214,10 +2217,11 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
     coord = feature.coord
     addr = feature.address
     return {
+        # T-VN-39/ADR-098: 이 값은 더 이상 identity가 아니라 **alias**다. wrapper가
+        # `(provider_dataset_id, kind, natural_key)`로 uuid를 claim하고, 이 문자열은
+        # 그 Feature의 legacy 주소로 `feature_aliases`에 append된다. 재분류로 값이
+        # 바뀌면 alias가 한 행 늘 뿐 Feature는 갈라지지 않는다.
         "feature_id": feature.feature_id,
-        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보. ON CONFLICT 경로에서는
-        # 버려지고 기존 저장값이 정본(0083, feature_identity 모듈 docstring).
-        "feature_uuid": candidate_feature_uuid(),
         "kind": feature.kind.value,
         "name": feature.name,
         "category": feature.category,
@@ -2552,11 +2556,27 @@ async def upsert_feature(
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
     initial_state = _provider_feature_state(feature)
+    if not feature.provider_natural_key:
+        # 이 값이 없으면 wrapper가 identity를 claim할 수 없다. 조용히 새 Feature를
+        # 만드는 대신 여기서 선다 — `tests/lint/test_provider_features_carry_their_natural_key.py`가
+        # provider 28곳을 결박하지만, 그 검사를 우회한 경로가 있으면 여기서 드러난다.
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {feature.feature_id!r}에 provider_natural_key가 없다 — "
+            "identity claim 축(ADR-098)의 세 번째 성분이 비어 있다."
+        )
     create_row = (
         await session.execute(
-            text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+            text(_CREATE_PROVIDER_FEATURE_SQL),
             {
                 "feature_payload": _provider_feature_payload(params),
+                "identity": json.dumps(
+                    {
+                        "provider_dataset_id": str(provider_dataset_id),
+                        "feature_kind": feature.kind.value,
+                        "natural_key": feature.provider_natural_key,
+                        "legacy_alias": feature.feature_id,
+                    }
+                ),
                 "lifecycle_state": initial_state.lifecycle_state,
                 "publication_state": initial_state.publication_state,
                 "quality_state": initial_state.quality_state,
@@ -2569,13 +2589,10 @@ async def upsert_feature(
         )
     ).mappings().one()
     inserted = bool(create_row["o_inserted"])
-    stored_feature_uuid = str(create_row["o_feature_uuid"])
-    verify_feature_uuid(
-        feature.feature_id,
-        stored_feature_uuid,
-        sent_feature_uuid=params["feature_uuid"],
-        inserted=inserted,
-    )
+    # T-VN-39: `o_feature_id`가 곧 uuid다. wrapper가 claim과 core 결과의 일치를
+    # 이미 DB 안에서 검증하므로(`ck_provider_feature_create_core_identity`), 여기서는
+    # 그 값을 받기만 한다 — 검증 지점이 둘이면 어느 쪽이 정본인지 흐려진다.
+    stored_feature_uuid = str(create_row["o_feature_id"])
     if inserted:
         await _upsert_feature_subtype(
             session,
