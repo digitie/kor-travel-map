@@ -76,8 +76,46 @@ depends_on: None = None
 _HERE: Final[Path] = Path(__file__).parent
 
 
-def _sidecar(name: str) -> str:
-    return (_HERE / name).read_text(encoding="utf-8")
+def _sidecar(name: str) -> tuple[str, ...]:
+    """사이드카를 **문장 단위로** 쪼갠다.
+
+    asyncpg는 prepared statement 하나에 여러 명령을 넣지 못한다
+    (`cannot insert multiple commands into a prepared statement`). 이 저장소의 기존
+    사이드카는 파일당 한 문장이라 그 제약이 드러나지 않았는데, T-VN-39의 사이드카는
+    시그니처가 바뀌어 `DROP` + `CREATE` + `ALTER OWNER` + `REVOKE` + `GRANT`를 함께
+    낸다. 2026-09-09 n150 첫 실행이 이것을 잡았다.
+
+    `$$ ... $$` 안의 세미콜론은 함수 본문이므로 세지 않는다 — 그것을 놓치면 plpgsql
+    본문이 중간에서 잘린다.
+    """
+
+    body = (_HERE / name).read_text(encoding="utf-8")
+    statements: list[str] = []
+    current: list[str] = []
+    in_dollar = False
+    index = 0
+    while index < len(body):
+        if body.startswith("$$", index):
+            in_dollar = not in_dollar
+            current.append("$$")
+            index += 2
+            continue
+        char = body[index]
+        if char == ";" and not in_dollar:
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement)
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    if not statements:
+        raise RuntimeError(f"사이드카에서 문장을 하나도 읽지 못했다: {name}")
+    return tuple(statements)
 
 # 재타입 선행 2 · 나머지 32 · shadow 13 · FK drop 40 · FK 재생성 34 · 영구삭제 6
 
@@ -447,49 +485,49 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     # ktm_curation_command_owner (5)
     "SET ROLE ktm_curation_command_owner",
-    _sidecar("_309_apply_curation_import_items_command.sql"),
-    _sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
-    _sidecar("_309_create_manual_curation_item_with_feature_command.sql"),
-    _sidecar("_309_current_theme_candidate_snapshot.sql"),
-    _sidecar("_309_record_curation_import_manual_feature_child.sql"),
+    *_sidecar("_309_apply_curation_import_items_command.sql"),
+    *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
+    *_sidecar("_309_create_manual_curation_item_with_feature_command.sql"),
+    *_sidecar("_309_current_theme_candidate_snapshot.sql"),
+    *_sidecar("_309_record_curation_import_manual_feature_child.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_feature_audit_writer (1)
     "SET ROLE ktm_feature_audit_writer",
-    _sidecar("_309_write_feature_state_transition.sql"),
+    *_sidecar("_309_write_feature_state_transition.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_feature_request_procedure_owner (1)
     "SET ROLE ktm_feature_request_procedure_owner",
-    _sidecar("_309_approve_feature_request_with_initial_state.sql"),
+    *_sidecar("_309_approve_feature_request_with_initial_state.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_feature_schema_owner — 마이그레이션 기본 role이라 전환이 필요 없다.
-    _sidecar("_309_ensure_features_legacy_alias.sql"),
-    _sidecar("_309_fence_features_identity_update.sql"),
-    _sidecar("_309_fill_features_feature_uuid.sql"),
-    _sidecar("_309_purge_manual_feature.sql"),
+    *_sidecar("_309_ensure_features_legacy_alias.sql"),
+    *_sidecar("_309_fence_features_identity_update.sql"),
+    *_sidecar("_309_fill_features_feature_uuid.sql"),
+    *_sidecar("_309_purge_manual_feature.sql"),
     # ktm_feature_state_procedure_owner (4 — provider wrapper 신설 포함)
     "SET ROLE ktm_feature_state_procedure_owner",
-    _sidecar("_309_create_feature_with_initial_state.sql"),
-    _sidecar("_309_derive_subtype_public_ready.sql"),
-    _sidecar("_309_validate_feature_base_field_value.sql"),
+    *_sidecar("_309_create_feature_with_initial_state.sql"),
+    *_sidecar("_309_derive_subtype_public_ready.sql"),
+    *_sidecar("_309_validate_feature_base_field_value.sql"),
     # ADR-098의 착지처. core 프로시저가 재작성된 **뒤**여야 한다 — 이 wrapper가
     # 그것을 CALL하고, plpgsql은 CREATE 시점에 의존을 검사하지 않지만 첫 호출에서
     # 시그니처가 맞아야 한다.
-    _sidecar("_309_create_provider_feature_with_initial_state.sql"),
+    *_sidecar("_309_create_provider_feature_with_initial_state.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_manual_feature_procedure_owner (3)
     "SET ROLE ktm_manual_feature_procedure_owner",
-    _sidecar("_309_create_admin_manual_feature_with_initial_state.sql"),
-    _sidecar("_309_read_admin_manual_feature_provenance.sql"),
-    _sidecar("_309_reject_manual_feature_hard_purge.sql"),
+    *_sidecar("_309_create_admin_manual_feature_with_initial_state.sql"),
+    *_sidecar("_309_read_admin_manual_feature_provenance.sql"),
+    *_sidecar("_309_reject_manual_feature_hard_purge.sql"),
     "SET ROLE ktm_feature_schema_owner",
     # ktm_manual_provider_dedup_procedure_owner (6)
     "SET ROLE ktm_manual_provider_dedup_procedure_owner",
-    _sidecar("_309_list_manual_provider_dedup_cases.sql"),
-    _sidecar("_309_list_manual_provider_dedup_detector_manuals.sql"),
-    _sidecar("_309_read_manual_provider_dedup_case.sql"),
-    _sidecar("_309_record_manual_provider_dedup_candidate.sql"),
-    _sidecar("_309_resolve_manual_provider_dedup_case.sql"),
-    _sidecar("_309_resolve_manual_provider_dedup_case_v2.sql"),
+    *_sidecar("_309_list_manual_provider_dedup_cases.sql"),
+    *_sidecar("_309_list_manual_provider_dedup_detector_manuals.sql"),
+    *_sidecar("_309_read_manual_provider_dedup_case.sql"),
+    *_sidecar("_309_record_manual_provider_dedup_candidate.sql"),
+    *_sidecar("_309_resolve_manual_provider_dedup_case.sql"),
+    *_sidecar("_309_resolve_manual_provider_dedup_case_v2.sql"),
     "SET ROLE ktm_feature_schema_owner",
 )
 
