@@ -355,7 +355,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "uuid, text, text, boolean, text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(uuid,text,bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
-    "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
+    "uuid, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
     "uuid, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides("
@@ -374,7 +374,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.revoke_lifecycle_override("
     "uuid, text, bigint) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.apply_provider_feature_field_patch("
-    "text, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
+    "uuid, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_feature_field_overrides("
     "uuid, bigint, text, text, bigint, jsonb, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.revoke_feature_field_overrides("

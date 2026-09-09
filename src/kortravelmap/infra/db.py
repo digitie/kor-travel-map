@@ -66,7 +66,7 @@ _GENERIC_FEATURE_CREATE_PROCEDURE = (
 
 _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     {
-        "feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)",
+        "feature.apply_provider_feature_field_patch(uuid,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_feature_field_overrides(uuid,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)",
         "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
@@ -158,7 +158,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
         ),
         (
             "feature.create_curation_item_command("
-            "uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
+            "uuid,uuid,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
         ),
         ("feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)"),
         (
@@ -330,7 +330,7 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         has_function_privilege(
             session_user,
             'feature.apply_provider_feature_field_patch('
-            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+            'uuid,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_provider_field_patch_procedure,
         has_function_privilege(

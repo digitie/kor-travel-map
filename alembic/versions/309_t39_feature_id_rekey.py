@@ -510,7 +510,9 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 #: 창을 열 수 없다. 그 파일은 스키마 소유자로 돌고 소유권만 이전한다 — 실측으로 통한다.
 _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_append_theme_feature_candidate_transition.sql"),
+    *_sidecar("_309_apply_provider_feature_field_patch.sql"),
     *_sidecar("_309_apply_curation_import_items_command.sql"),
+    *_sidecar("_309_create_curation_item_command.sql"),
     *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),
     *_sidecar("_309_create_manual_curation_item_with_feature_command.sql"),
     *_sidecar("_309_current_theme_candidate_snapshot.sql"),
