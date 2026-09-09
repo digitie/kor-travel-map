@@ -60,6 +60,7 @@ DDL은 문장 하나씩 실행한다(asyncpg prepared statement 제약).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Final
 
@@ -81,38 +82,51 @@ def _sidecar(name: str) -> tuple[str, ...]:
 
     asyncpg는 prepared statement 하나에 여러 명령을 넣지 못한다
     (`cannot insert multiple commands into a prepared statement`). 이 저장소의 기존
-    사이드카는 파일당 한 문장이라 그 제약이 드러나지 않았는데, T-VN-39의 사이드카는
+    사이드카는 파일당 한 문장이라 그 제약이 드러난 적이 없는데, T-VN-39의 사이드카는
     시그니처가 바뀌어 `DROP` + `CREATE` + `ALTER OWNER` + `REVOKE` + `GRANT`를 함께
     낸다. 2026-09-09 n150 첫 실행이 이것을 잡았다.
 
-    `$$ ... $$` 안의 세미콜론은 함수 본문이므로 세지 않는다 — 그것을 놓치면 plpgsql
-    본문이 중간에서 잘린다.
+    달러 인용 안의 세미콜론은 세지 않는다 — 그것을 놓치면 plpgsql 본문이 중간에서
+    잘리고, 그 실패는 "문법 오류"로 나타나 원인을 가리키지 않는다.
+
+    **태그를 `$$`로 가정하면 안 된다.** head 덤프는 `$_$`도 쓴다(실측: `$$` 60회,
+    `$_$` 8회). 첫 구현이 `$$`만 보다가 `unterminated dollar-quoted string`으로
+    죽었다 — 여는 태그를 읽어 **같은 태그**로 닫는다.
     """
 
     body = (_HERE / name).read_text(encoding="utf-8")
+    opener = re.compile(r"\$[A-Za-z_][A-Za-z_0-9]*\$|\$\$")
     statements: list[str] = []
     current: list[str] = []
-    in_dollar = False
     index = 0
+    tag: str | None = None
     while index < len(body):
-        if body.startswith("$$", index):
-            in_dollar = not in_dollar
-            current.append("$$")
-            index += 2
+        if tag is None:
+            match = opener.match(body, index)
+            if match is not None:
+                tag = match.group(0)
+                current.append(tag)
+                index = match.end()
+                continue
+            if body[index] == ";":
+                statement = "".join(current).strip()
+                if statement:
+                    statements.append(statement)
+                current = []
+                index += 1
+                continue
+        elif body.startswith(tag, index):
+            current.append(tag)
+            index += len(tag)
+            tag = None
             continue
-        char = body[index]
-        if char == ";" and not in_dollar:
-            statement = "".join(current).strip()
-            if statement:
-                statements.append(statement)
-            current = []
-            index += 1
-            continue
-        current.append(char)
+        current.append(body[index])
         index += 1
     tail = "".join(current).strip()
     if tail:
         statements.append(tail)
+    if tag is not None:
+        raise RuntimeError(f"사이드카의 달러 인용이 닫히지 않았다: {name} (태그 {tag})")
     if not statements:
         raise RuntimeError(f"사이드카에서 문장을 하나도 읽지 못했다: {name}")
     return tuple(statements)
