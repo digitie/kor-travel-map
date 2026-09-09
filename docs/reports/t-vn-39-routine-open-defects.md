@@ -3,6 +3,24 @@
 적대 검증 2회를 거친 뒤 남은 것. 마이그레이션 작성 시 반드시 반영한다.
 SQL 2차본은 `alembic/versions/_309_*.sql` 23개다.
 
+
+## 309 초안의 위치와 미완성 이유
+
+DDL 상수는 전부 유도됐고(재타입 34 · shadow 13 · FK drop 40 · 재생성 34 · 개명 4)
+뷰 재키판과 트리거 순서도 확정됐다. 그러나 **초안을 `alembic/versions/`에 두면 안 된다**
+— alembic이 그 디렉터리의 모든 `.py`를 실제 revision으로 읽으므로, `upgrade()`가
+미완성으로 raise하면 **DB를 쓰는 테스트가 전부 죽는다.**
+
+초안 위치(저장소 밖):
+`<scratchpad>/309_t39_feature_id_rekey.draft.py` (453줄)
+
+`tests/lint/test_receipt_head_check_covers_the_graph_head.py`가 이 미완성을 정확히
+잡았다 — receipt head CHECK가 309를 허용하는데 `_UPGRADE_STATEMENTS`가 그것을 실행하지
+않는다는 신호였다. 게이트가 의도대로 작동했다.
+
+착지 조건: 아래 blocking 12건 반영 + `_UPGRADE_STATEMENTS` 조립 + `db.py`/
+`runtime_privileges.py`/`feature_subtype.py` 동반 수정.
+
 ## 실행자 노트 — 아래 결함 일부는 **다른 DDL 접근**을 전제한다
 
 에이전트들은 shadow 짝이 있는 표를 `DROP COLUMN feature_id` + `RENAME feature_uuid TO

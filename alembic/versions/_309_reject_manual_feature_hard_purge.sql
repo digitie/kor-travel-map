@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.reject_manual_feature_hard_purge() RETURNS trigger
+CREATE OR REPLACE FUNCTION feature.reject_manual_feature_hard_purge() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$

@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[], OUT o_row_receipts jsonb)
+CREATE OR REPLACE PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[], OUT o_row_receipts jsonb)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $_$

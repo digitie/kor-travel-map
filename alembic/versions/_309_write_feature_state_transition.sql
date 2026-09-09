@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.write_feature_state_transition() RETURNS trigger
+CREATE OR REPLACE FUNCTION feature.write_feature_state_transition() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$

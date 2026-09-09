@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text) RETURNS uuid
+CREATE OR REPLACE FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $$

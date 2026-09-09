@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.derive_subtype_public_ready() RETURNS trigger
+CREATE OR REPLACE FUNCTION feature.derive_subtype_public_ready() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
