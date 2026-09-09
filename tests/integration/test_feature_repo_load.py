@@ -1598,3 +1598,12 @@ async def test_the_same_provider_entity_never_yields_a_second_feature(
     assert census == {"links": 1, "features": 1}, (
         "같은 provider entity가 두 Feature의 primary가 됐다 — 멱등 앵커가 뚫렸다."
     )
+
+    # 제품 쪽 관측자로도 같은 것을 본다. 이 함수가 튜플을 돌려주는 것은 재키 **전**
+    # 세계의 흔적이고, 둘 이상이 돌아오는 순간이 곧 앵커가 뚫렸다는 신호다.
+    resolved = await feature_repo.resolve_primary_features_for_entity(
+        migrated_session, source_entity_key=entity_key
+    )
+    assert len(resolved) == 1, (
+        f"primary Feature가 {len(resolved)}개다 — 재키 후에는 하나여야 한다: {resolved}"
+    )

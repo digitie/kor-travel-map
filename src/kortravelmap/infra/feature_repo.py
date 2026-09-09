@@ -3055,18 +3055,20 @@ async def resolve_primary_features_for_entity(
 ) -> tuple[str, ...]:
     """이 source entity의 primary link가 가리키는 Feature들.
 
-    **오늘은 하나가 아닐 수 있다.** ADR-068 결정 2는 provider identity를
-    ``(provider_dataset_id, source_entity_type, source_entity_id)``의 UNIQUE로
-    정했지만, 지금 Feature identity는 ``make_feature_id``가 만든 ``f_*``이고 그것은
-    ``bjd_code``·``category``를 해시 입력에 쓴다. 재분류나 행정구역 변경이 일어나면
-    **새 Feature가 주조되고 같은 entity가 구·신 양쪽의 primary가 된다** — 뒤따르는
-    cleanup이 구 링크를 강등할 때까지. 그 형태를
-    ``tests/integration/test_notice_lifecycle.py``와
-    ``tests/integration/test_khoa_rekey_hardening.py``가 재현한다.
+    **재키(T-VN-39/ADR-098) 후에는 하나여야 한다.** identity가
+    ``(provider_dataset_id, feature_kind, natural_key)`` claim으로 옮겨가면서
+    ``feature_id``는 서버가 한 번 발급하는 UUIDv7이 됐고, 재분류는 새 Feature를
+    주조하는 대신 alias를 한 줄 늘린다.
 
-    그래서 이 함수는 **튜플을 돌려준다.** 하나로 좁히는 것은 T-VN-39 재키가
-    ``feature_id``를 안정 uuid로 만든 뒤의 일이고, 그때 이 조회가 identity 해석의
-    정본이 된다(:class:`FeatureIdentityAnchorError` 참조).
+    재키 **전**에는 그렇지 않았다. Feature identity가 ``make_feature_id``의 ``f_*``
+    였고 그것이 ``bjd_code``·``category``를 해시 입력에 썼으므로, 재분류가 새 Feature를
+    주조해 같은 entity가 구·신 양쪽의 primary가 됐다. 이 함수가 **튜플을 돌려주는
+    것은 그 시절의 흔적**이다 — 시그니처를 좁히지 않고 남겨 둔 이유는, 둘 이상이
+    돌아오는 순간이 곧 앵커가 뚫렸다는 신호이기 때문이다. 하나로 좁히면 그 신호를
+    관측할 자리가 사라진다.
+
+    관측자는 ``tests/integration/test_feature_repo_load.py``의
+    ``test_the_same_provider_entity_never_yields_a_second_feature``다.
     """
 
     rows = (
