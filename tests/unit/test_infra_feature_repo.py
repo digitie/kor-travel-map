@@ -67,6 +67,11 @@ _SEARCH_CURSOR_KEY = b"unit-test-feature-search-cursor-signing-key-0001"
 def _place(coord: Coordinate | None, detail: PlaceDetail | None) -> Feature:
     return Feature(
         feature_id="place:abc123",
+        # ADR-098: provider Feature의 identity 축은
+        # `(provider_dataset_id, feature_kind, natural_key)`다. 셋째 성분이 비면
+        # write 경로가 `FeatureIdentityAnchorError`로 막는다 — 그 fail-close가
+        # 이 픽스처에도 적용된다.
+        provider_natural_key="abc123",
         kind=FeatureKind.PLACE,
         name="홍대 카페",
         category="02020101",
@@ -216,10 +221,17 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
         async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
             sql = str(statement)
             self.calls.append((sql, params))
-            if "create_feature_with_initial_state" in sql:
+            if "create_provider_feature_with_initial_state" in sql:
                 payload = json.loads(params["feature_payload"])
                 assert "status" not in payload
                 assert "deleted_at" not in payload
+                # ADR-098: identity 축 세 성분 + legacy alias가 wrapper로 간다.
+                assert json.loads(params["identity"]) == {
+                    "provider_dataset_id": "17",
+                    "feature_kind": "place",
+                    "natural_key": "abc123",
+                    "legacy_alias": "place:abc123",
+                }
                 assert json.loads(params["state_context"]) == {
                     "transition_kind": "provider_sync",
                     "reason_code": "provider_initial",
@@ -227,10 +239,11 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
                     "source_entity_key": "entity:17",
                     "source_record_key": "record:17",
                 }
+                # wrapper가 claim한 uuid를 돌려준다 — 호출자가 후보를 보내지 않는다.
                 return _Result(
                     {
                         "o_inserted": True,
-                        "o_feature_uuid": payload["feature_uuid"],
+                        "o_feature_id": "00000000-0000-7000-8000-00000000c0de",
                     }
                 )
             return _Result()
@@ -249,8 +262,10 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
     )
 
     assert inserted is True
+    # ADR-098 뒤로 provider 경로는 core를 직접 부르지 않는다 — wrapper가 identity를
+    # 먼저 claim하고 그 uuid로 core를 부른다.
     assert any(
-        "CALL feature.create_feature_with_initial_state" in sql
+        "CALL feature.create_provider_feature_with_initial_state" in sql
         for sql, _params in session.calls
     )
 
@@ -287,12 +302,14 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
         async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
             sql = str(statement)
             self.calls.append(sql)
-            if "create_feature_with_initial_state" in sql:
-                self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
+            if "create_provider_feature_with_initial_state" in sql:
+                # ADR-098 wrapper는 identity를 claim하고 그 uuid를 돌려준다.
+                # 호출자가 후보를 보내지 않으므로 여기서도 만들어 준다.
+                self.feature_uuid = "00000000-0000-7000-8000-00000000c0de"
                 return _Result(
                     {
                         "o_inserted": False,
-                        "o_feature_uuid": self.feature_uuid,
+                        "o_feature_id": self.feature_uuid,
                         "o_row_revision": 7,
                     }
                 )
@@ -562,7 +579,6 @@ def test_feature_detail_maps_to_typed_subtype_params() -> None:
     )
     params = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid="00000000-0000-4000-8000-000000000001",
         kind=feature.kind.value,
         detail=feature.detail,
     )
@@ -584,7 +600,6 @@ def test_feature_params_without_coord_is_none() -> None:
     # detail 미지정이어도 subtype 파라미터는 kind DTO 기본값으로 채워진다.
     subtype = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid="00000000-0000-4000-8000-000000000001",
         kind=feature.kind.value,
         detail=feature.detail,
     )
