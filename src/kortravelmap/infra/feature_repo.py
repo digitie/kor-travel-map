@@ -68,6 +68,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
@@ -2584,6 +2585,16 @@ async def upsert_feature(
 
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
+    # T-VN-39: core 생성 프로시저는 payload의 `parent_feature_id`를
+    # `nullif(... , '')::uuid`로 받는다(`alembic/head-schema.sql:3757`). provider가
+    # 그 자리에 싣는 것은 **부모의 legacy 주소**다 — opinet 유가처럼 자식 Feature를
+    # 매다는 데이터셋 전량이 여기서 22P02였다. 부모는 같은 적재에서 먼저 들어와
+    # alias/claim이 이미 있으므로 정본 키로 풀어 넘긴다.
+    if params.get("parent_feature_id"):
+        parents = await resolve_canonical_feature_ids(
+            session, [str(params["parent_feature_id"])]
+        )
+        params["parent_feature_id"] = parents[str(params["parent_feature_id"])]
     initial_state = _provider_feature_state(feature)
     if not feature.provider_natural_key:
         # 이 값이 없으면 wrapper가 identity를 claim할 수 없다. 조용히 새 Feature를
@@ -4342,13 +4353,22 @@ async def _hidden_notice_features(
     feature_ids: Collection[str],
     evaluated_at: datetime,
 ) -> frozenset[str]:
-    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합."""
+    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합.
+
+    입력은 provider가 준 legacy 주소일 수 있다(적재 **전**에 재므로 정본 키를
+    아직 모르는 것이 정상이다). 아직 존재하지 않는 참조는 결과에서 빠지고, 그것이
+    "아직 없다"의 정확한 표현이다 — 그 Feature는 `old_lifecycle_state`가 NULL이라
+    하류의 `was_visible` 판정에서 이미 거짓이다.
+    """
     if not feature_ids:
+        return frozenset()
+    canonical = await resolve_canonical_feature_ids(session, feature_ids, strict=False)
+    if not canonical:
         return frozenset()
     rows = await session.execute(
         text(_HIDDEN_NOTICE_FEATURES_SQL),
         {
-            "feature_ids": sorted(set(feature_ids)),
+            "feature_ids": sorted(set(canonical.values())),
             "evaluated_at": evaluated_at,
         },
     )

@@ -23,7 +23,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.advisory_lock import advisory_lock_key
-from kortravelmap.infra.value_feature_ids import resolve_value_feature_ids
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -1691,7 +1691,7 @@ def _weather_value_params(
         "weather_value_key": key,
         # T-VN-39: 컬럼은 uuid다. 값 키(`key`)는 **위에서 provider가 준 참조로**
         # 이미 만들어졌고 그것을 흔들면 기존 행 전체가 중복이 된다 — 바꾸는 것은
-        # 컬럼에 들어가는 값뿐이다(`infra/value_feature_ids.py`).
+        # 컬럼에 들어가는 값뿐이다(`infra/canonical_feature_ids.py`).
         "feature_id": canonical_feature_ids[value.feature_id],
         "provider_dataset_id": context.provider_dataset_id,
         "weather_domain": _enum_value(value.weather_domain),
@@ -1770,7 +1770,7 @@ async def load_weather_values(
         known_at=lineage["fetched_at"],
     )
     materialized = list(values)
-    canonical_feature_ids = await resolve_value_feature_ids(
+    canonical_feature_ids = await resolve_canonical_feature_ids(
         session, (v.feature_id for v in materialized)
     )
     params = [

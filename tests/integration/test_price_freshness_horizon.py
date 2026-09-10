@@ -56,7 +56,7 @@ async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -
 
     **적재에는 이 값을 쓰지 않는다.** ``PriceValue.feature_id``에는 provider
     변환기가 낸 legacy 주소를 그대로 실어 dagster ingest가 타는 바로 그
-    접합부를 태운다 — 적재기가 ``infra/value_feature_ids.py``로 해석한다.
+    접합부를 태운다 — 적재기가 ``infra/canonical_feature_ids.py``로 해석한다.
     여기서 푸는 정본 키는 **읽기·단언**에만 쓴다. 둘을 뒤섞으면 이 파일이
     지키던 "provider가 준 주소로 적재된다"가 사라진다(2026-09-10 적대 리뷰).
     """

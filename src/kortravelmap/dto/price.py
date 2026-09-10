@@ -62,7 +62,7 @@ class PriceValue(BaseModel):
             "price kind anchor feature 참조. provider 변환기는 "
             "`make_feature_id(...)`가 유도한 legacy `f_*`를 싣고, 이미 정본 키를 "
             "아는 호출자는 canonical uuid를 싣는다 — 적재기"
-            "(`infra/value_feature_ids.py`)가 둘 다 받아 컬럼에 들어갈 값만 정본 "
+            "(`infra/canonical_feature_ids.py`)가 둘 다 받아 컬럼에 들어갈 값만 정본 "
             "uuid로 고정한다(T-VN-39/ADR-098)."
         ),
     )

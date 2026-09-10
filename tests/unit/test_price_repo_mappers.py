@@ -94,7 +94,7 @@ def test_price_value_params_builds_deterministic_upsert_row() -> None:
         observed_at=datetime(2026, 7, 4, 3, 0, tzinfo=UTC),
     )
     # T-VN-39: 컬럼은 uuid다. 적재기가 legacy 주소를 정본 키로 풀어 넘긴다
-    # (`infra/value_feature_ids.py`) — 이 매퍼는 그 표를 받아 **컬럼에 들어갈
+    # (`infra/canonical_feature_ids.py`) — 이 매퍼는 그 표를 받아 **컬럼에 들어갈
     # 값만** 바꾸고, 값 키 해시에는 provider가 준 주소를 그대로 쓴다.
     canonical = "00000000-0000-7000-8000-0000000b0001"
     params = _price_value_params(

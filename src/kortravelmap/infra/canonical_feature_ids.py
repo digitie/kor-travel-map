@@ -1,4 +1,4 @@
-"""값 적재(weather·price)가 받은 feature 참조를 **정본 키**로 고정한다.
+"""적재 경로가 받은 feature 참조를 **정본 키**로 고정한다.
 
 ## 왜 이 모듈이 있는가
 
@@ -27,6 +27,13 @@
    **컬럼에 들어가는 값**뿐이고 키는 producer가 만든 그대로다.
 3. **한 자리에서 모든 producer를 덮는다.** 네 경로가 같은 결함을 갖고 있었다.
 
+## 값 말고 또 어디에 쓰나
+
+``Feature.parent_feature_id``. provider가 자식 Feature(예: opinet 유가)를 부모
+측정소에 매다는 자리인데, 그 값 역시 변환기가 아는 legacy 주소다. core 생성
+프로시저는 ``nullif(p_feature ->> 'parent_feature_id','')::uuid``로 받으므로
+(alembic/head-schema.sql:3757) 그대로 넘기면 22P02다.
+
 ## 무엇을 받아들이나
 
 legacy `f_*`와 canonical uuid를 **둘 다** 받는다 — 해석 우선순위는
@@ -44,17 +51,23 @@ from collections.abc import Iterable, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["UnresolvedValueFeatureRefError", "resolve_value_feature_ids"]
+__all__ = ["UnresolvedFeatureRefError", "resolve_canonical_feature_ids"]
 
 
-class UnresolvedValueFeatureRefError(ValueError):
-    """값이 가리키는 Feature 참조를 정본 키로 풀지 못했다."""
+class UnresolvedFeatureRefError(ValueError):
+    """적재 입력이 가리키는 Feature 참조를 정본 키로 풀지 못했다."""
 
 
-async def resolve_value_feature_ids(
-    session: AsyncSession, refs: Iterable[str]
+async def resolve_canonical_feature_ids(
+    session: AsyncSession, refs: Iterable[str], *, strict: bool = True
 ) -> Mapping[str, str]:
-    """``ref → canonical uuid`` 표. 왕복은 참조 개수와 무관하게 2회다."""
+    """``ref → canonical uuid`` 표. 왕복은 참조 개수와 무관하게 2회다.
+
+    ``strict=False``는 **아직 존재하지 않아도 되는** 자리를 위한 것이다 — 적재
+    직전에 "이 참조들 중 지금 보이지 않는 것"을 재는 경로가 그렇다. 그 자리에서
+    미해석은 오류가 아니라 "아직 없다"이고, 결과 표에서 빠지는 것이 그 사실의
+    정확한 표현이다.
+    """
     from kortravelmap.infra.feature_identity import resolve_feature_identities_bulk
 
     unique = sorted({ref for ref in refs})
@@ -62,10 +75,10 @@ async def resolve_value_feature_ids(
         return {}
     identities = await resolve_feature_identities_bulk(session, unique)
     missing = [ref for ref in unique if ref not in identities]
-    if missing:
-        raise UnresolvedValueFeatureRefError(
-            "값이 가리키는 Feature를 정본 키로 풀지 못했습니다: "
+    if missing and strict:
+        raise UnresolvedFeatureRefError(
+            "입력이 가리키는 Feature를 정본 키로 풀지 못했습니다: "
             + ", ".join(missing[:5])
             + (f" 외 {len(missing) - 5}건" if len(missing) > 5 else "")
         )
-    return {ref: identities[ref].feature_id for ref in unique}
+    return {ref: identities[ref].feature_id for ref in unique if ref in identities}
