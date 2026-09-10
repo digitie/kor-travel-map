@@ -760,3 +760,42 @@ uuid라고 적극적으로 말하지 않는다"가 되어 `_SAME_AXIS`로 사면
 FK 모델에 `INITIALLY DEFERRED` 축이 없다 …). 전부 **사실이지만 이 델타가 만든 것이
 아니고**, 지금 도달 가능한 결함으로 이어지지 않는다는 것이 반박자들의 판정이었다.
 기록으로 남긴다 — 다음에 이 검사기들을 넓힐 때 시작점이다.
+
+### 그리고 그 과정에서 더 깊은 것이 나왔다 — autouse echo가 축을 통째로 가린다
+
+새 라우터 테스트가 계속 200을 내서 파고들었더니, 원인이 코드가 아니라
+`packages/kor-travel-map-api/tests/conftest.py`의 **autouse** fixture였다.
+
+```python
+async def _resolve(_session, ref):
+    feature_identity.validate_feature_ref(ref)
+    return feature_identity.FeatureIdentity(
+        feature_id=ref,                                # ← 재키 이전의 등식
+        feature_uuid=str(feature_uuid_from_legacy(ref)),
+    )
+monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
+```
+
+이 patch는 DB 없는 패키지에서 경계 해석을 태우기 위한 것이고, 재키 전에는 옳았다 —
+참조 문자열이 곧 정본 키였다. **지금은 `feature_id=ref`가 거짓이다.** 그리고 이
+echo는 *모든* 참조를 "해석 성공"으로 만들기 때문에, 그것이 깔린 채로는 다음 둘을
+관측할 수 없다:
+
+- legacy 주소가 정본 uuid로 바뀌어 repo로 내려가는가
+- 어떤 Feature도 가리키지 않는 참조가 422가 되는가
+
+바로 그 두 축이 이번 major #1이 깨뜨린 것이다. 즉 **결함을 만든 자리와 그것을
+가린 자리가 따로 있었고**, 검사기를 아무리 고쳐도 이 층에서는 보이지 않았다.
+
+conftest 자신이 그 한계를 이미 알고 적어 두었다("실 DB 기반 UUID 해석·404 회귀는
+본 패키지 unit에서 잡히지 않는다 — 그 축의 실효 검증은 통합이 소유한다"). 재키가
+그 문장을 한 칸 더 넓혔을 뿐이다.
+
+**처방.** conftest가 스스로 허용한 규약대로("각 테스트가 이 patch를 자기 resolver로
+덮어쓴다") 세 테스트가 재키 뒤 세계를 모사하는 resolver를 직접 설치한다
+(`_install_post_rekey_resolver`). 그리고 그 함정을 conftest docstring에 적었다 —
+다음 사람이 같은 자리에서 같은 시간을 쓰지 않게.
+
+echo 자체를 재키 뒤 모양(`feature_id`가 uuid)으로 바꾸는 것은 **별도 작업**이다.
+이 패키지 테스트 47곳이 참조 문자열을 그대로 기대하고 있고, 그 축의 실효 검증은
+설계상 통합이 소유한다. 지금 그것을 흔들면 재키와 무관한 변경이 이 PR에 섞인다.

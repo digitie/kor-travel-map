@@ -20,6 +20,21 @@ legacy 정본 키로 보고 짝이 되는 uuid를 돌려주되, 형식 계약
 회귀는 본 패키지 unit에서 잡히지 않는다** — 그 축의 실효 검증은
 ``tests/integration/test_feature_identity_boundary.py``(실 PostGIS)가 소유한다.
 경로에 해석을 새로 붙일 때는 반드시 통합 쪽에도 회귀를 더해라.
+
+**T-VN-39 뒤 이 echo는 재키 이전 세계를 모사한다.** ``feature_id=ref``는 참조
+문자열이 곧 정본 키이던 시절의 등식이고, 지금 정본 키는 uuid다. 그래서 이 patch가
+깔린 채로는 다음 둘을 **관측할 수 없다**:
+
+- legacy 주소가 정본 uuid로 바뀌어 repo로 내려가는가
+- 어떤 Feature도 가리키지 않는 참조가 422가 되는가
+  (:func:`~kortravelmap.infra.feature_identity.canonical_feature_id_for_filter`)
+
+echo는 모든 참조를 "해석 성공"으로 만들기 때문이다. 그 두 축을 재는 테스트는
+**자기 resolver를 설치해야 한다** — 위 규약대로 테스트 안 ``monkeypatch.setattr``이
+이 patch를 덮는다(예:
+``test_curations_router._install_post_rekey_resolver``). echo 자체를 재키 뒤 모양
+(``feature_id``가 uuid)으로 바꾸는 것은 이 패키지 테스트 47곳이 참조 문자열을 그대로
+기대하고 있어 별도 작업이다.
 """
 
 from __future__ import annotations
