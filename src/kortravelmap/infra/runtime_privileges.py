@@ -127,6 +127,43 @@ _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
 
+#: shadow 컬럼 ``feature_uuid``에 걸던 INSERT 권한 — **컬럼이 있을 때만** 건다.
+#:
+#: 이 조정기는 head에서만 도는 것이 아니다. `0236 → 300` handoff 실행자
+#: (`docker/transition-application-schema-0236-to-300.py`)가 **revision 300에서**
+#: 이것을 돌리고, 그 직후의 catalog를 image에 봉인된 immutable reference와
+#: sha256으로 대조한다. 그 catalog에는 **컬럼 단위 ACL이 들어 있다.**
+#:
+#: 309가 shadow 컬럼을 지우면서 이 자리의 `feature_uuid`를 목록에서 뺐더니,
+#: 컬럼이 아직 살아 있는 300에서 ACL 두 줄이 사라져 destination catalog가 어긋났다
+#: (2026-09-10 실측: `feature_areas`·`feature_routes`의
+#: `{ktm_feature_runtime=a/ktm_feature_schema_owner}` 두 행). handoff는
+#: "300 destination catalog or seed does not match the immutable reference"로 멎는다.
+#:
+#: reference는 release 절차(`scripts/build-baseline.sh`)만 다시 만들 수 있고 그것은
+#: 살아 있는 0236 컨테이너와 source certificate를 요구한다. 그러므로 **바꿀 수 없는
+#: 쪽은 reference이고, 맞춰야 하는 쪽은 조정기다.**
+#:
+#: 표 단위 선례(`manual_feature_purge_records`의 `to_regclass` 판정)와 같은 형태로
+#: 조건부로 만든다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
+_SHADOW_COLUMN_GRANTS = tuple(
+    "DO $shadow$ BEGIN"
+    " IF EXISTS ("
+    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
+    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
+    "   JOIN pg_catalog.pg_namespace AS namespace"
+    "     ON namespace.oid = relation.relnamespace"
+    "   WHERE namespace.nspname = 'feature'"
+    f"     AND relation.relname = '{relation}'"
+    "     AND attribute.attname = 'feature_uuid'"
+    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
+    " ) THEN"
+    f" EXECUTE 'GRANT INSERT (feature_uuid) ON feature.{relation}"
+    " TO ktm_feature_runtime';"
+    " END IF; END $shadow$"
+    for relation in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS
+)
+
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
     statement
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
@@ -139,7 +176,7 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
         f"ON feature.{relation} "
         "TO ktm_feature_state_procedure_owner",
     )
-)
+) + _SHADOW_COLUMN_GRANTS
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;

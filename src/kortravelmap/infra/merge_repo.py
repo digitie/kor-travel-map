@@ -110,7 +110,13 @@ WHERE f.feature_id = :feature_id
 
 # 검토 큐 행 조회(병합 진입점).
 _SELECT_REVIEW_SQL: Final[str] = """
-SELECT feature_id_a, feature_id_b, total_score, status
+SELECT
+    -- T-VN-39: 두 컬럼은 uuid다. 이 값들은 곧바로 바인드로 돌아가는데 이 모듈의
+    -- 바인드 타입은 text 하나로 고정돼 있다(위 이중 캐스트 절 참고) — 드라이버가
+    -- 주는 `uuid.UUID`를 그대로 흘리면 `expected str, got UUID`다.
+    CAST(feature_id_a AS text) AS feature_id_a,
+    CAST(feature_id_b AS text) AS feature_id_b,
+    total_score, status
 FROM ops.dedup_review_queue
 WHERE review_id = :review_id
 FOR UPDATE
