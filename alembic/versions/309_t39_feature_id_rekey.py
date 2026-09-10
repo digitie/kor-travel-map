@@ -543,6 +543,7 @@ _ROUTINE_STATEMENTS: Final[tuple[str, ...]] = (
     *_sidecar("_309_append_theme_feature_candidate_transition.sql"),
     *_sidecar("_309_apply_provider_feature_field_patch.sql"),
     *_sidecar("_309_archive_curated_source_command.sql"),
+    *_sidecar("_309_claim_curation_import_plan_command.sql"),
     *_sidecar("_309_apply_curation_import_items_command.sql"),
     *_sidecar("_309_create_curation_item_command.sql"),
     *_sidecar("_309_create_curation_rule_reconcile_receipt.sql"),

@@ -1025,9 +1025,11 @@ async def list_features_in_bbox(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     page_rows = rows[:page_size]
-    # cursor는 치환 전 legacy feature_id 축 — keyset 술어와 같은 축이어야 한다.
+    # cursor는 keyset 술어와 **같은 축**이어야 한다. T-VN-39 재키 뒤 그 축은 uuid이고
+    # (`CAST(:cursor_feature_id AS uuid)`), 드라이버는 그 컬럼을 `uuid.UUID` 객체로
+    #준다 — 커서는 JSON이므로 경계에서 문자열로 고정한다.
     next_cursor = (
-        feature_repo.encode_bbox_cursor(page_rows[-1]["feature_id"])
+        feature_repo.encode_bbox_cursor(str(page_rows[-1]["feature_id"]))
         if len(rows) > page_size and page_rows
         else None
     )

@@ -96,11 +96,18 @@ _FEATURE_REQUEST_REJECT_PROCEDURE = "feature.reject_feature_request(uuid,text,bi
 _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
 _M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(uuid,uuid,jsonb,jsonb)"
+#: 카탈로그가 돌려주는 표기에는 공백이 없다. 여기에만 공백을 두면 같은 프로시저가
+#: "빠졌다"와 "예상 밖이다" **양쪽**에 동시에 걸린다 — 2026-09-10 실측.
 _M05_DECISION_PROCEDURE = (
     "feature.resolve_manual_provider_dedup_case_v2("
-    "uuid, text, text, bigint, bigint, uuid, text, text, bigint)"
+    "uuid,text,text,bigint,bigint,uuid,text,text,bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
+#: T-VN-39/ADR-098 claim 축 해석기. 파이썬 repo가 직접 부르므로 EXECUTE가 공유 그룹
+#: `ktm_feature_runtime`에 있고, 따라서 두 런타임 로그인 모두 이것을 갖는다.
+_PROVIDER_FEATURE_ID_RESOLVER_FUNCTION = (
+    "feature.resolve_provider_feature_id(bigint,text,text)"
+)
 _M05_ACK_PROCEDURE = (
     "feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)"
 )
@@ -274,9 +281,12 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
             _M05_ACK_PREFLIGHT_FUNCTION,
             _M05_CASE_READ_FUNCTION,
             _M05_CASE_LIST_FUNCTION,
+            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
         }
     ),
-    "ktm_feature_dagster_runtime": frozenset({_M05_DETECTOR_MANUAL_LIST_FUNCTION}),
+    "ktm_feature_dagster_runtime": frozenset(
+        {_M05_DETECTOR_MANUAL_LIST_FUNCTION, _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION}
+    ),
 }
 
 
