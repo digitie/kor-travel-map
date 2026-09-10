@@ -69,6 +69,28 @@ _SAME_AXIS = re.compile(
     re.IGNORECASE,
 )
 
+#: 재키 뒤에도 **text**로 남은 식별자 열. 이름에 `feature_id`가 들어 있어서
+#: `_SAME_AXIS`의 `feature_id` 갈래가 이것들을 같은 축으로 읽었다 — 그 오인이
+#: 정확히 이 검사가 막으려던 부류다. `feature.features.feature_id`(uuid)와
+#: `manual_feature_purge_records.legacy_feature_id`(text)를 맞대면 42883이고,
+#: 사면 때문에 검사는 초록이었다. 적대 리뷰가 집었다.
+#:
+#: ADR-098 뒤 legacy `f_*`가 살아 있는 자리는 셋뿐이다 —
+#: `feature_aliases.alias`, `manual_feature_purge_records.legacy_feature_id`,
+#: `ops.tvn36_legacy_freeze_preflight_manifest.legacy_feature_id`. 여기에
+#: 큐레이션 import plan의 `resource_key`(주소를 담는 text)를 더한다.
+_TEXT_AXIS = re.compile(
+    r"legacy_feature_id|\bresource_key\b|\balias\b", re.IGNORECASE
+)
+
+#: 상대가 **uuid 축임을 적극적으로** 말하는 형태. `legacy_feature_id`가 여기
+#: 걸리지 않도록 `feature_id` 앞에 단어 문자가 오면 제외한다 — 그 한 글자가
+#: 두 축을 가른다.
+_UUID_AXIS = re.compile(
+    r"(?<![A-Za-z0-9_])feature_id\b|feature_uuid|::uuid|\bAS\s+uuid\b",
+    re.IGNORECASE,
+)
+
 #: plpgsql의 `... INTO <변수>`는 비교가 아니라 대입이다.
 _ASSIGNMENT_INTO = re.compile(r"\bINTO\b", re.IGNORECASE)
 
@@ -94,7 +116,16 @@ def test_routine_bodies_never_compare_a_feature_id_across_axes() -> None:
             continue
         for match in _COMPARISON.finditer(stripped):
             comparisons += 1
-            other = match.group(3)
+            column, other = match.group(2), match.group(3)
+            # 축을 **양쪽 다** 본다. 한쪽만 보면 `feature_id`가 들어간 이름이
+            # 전부 한 축으로 뭉개진다. 다만 "text가 아님"은 uuid라는 뜻이 아니다 —
+            # plpgsql 변수는 덤프에서 타입을 읽을 수 없으므로, 한쪽이 text 축이고
+            # **다른 쪽이 uuid 축이라고 적극적으로 말할 때만** 어긋난 것으로 본다.
+            text_axis = (bool(_TEXT_AXIS.search(column)), bool(_TEXT_AXIS.search(other)))
+            uuid_axis = (bool(_UUID_AXIS.search(column)), bool(_UUID_AXIS.search(other)))
+            if (text_axis[0] and uuid_axis[1]) or (uuid_axis[0] and text_axis[1]):
+                unjudged.append(f"head-schema.sql:{index + 1}: {stripped[:120]}")
+                continue
             if _SAME_AXIS.search(other):
                 continue
             if other.upper().startswith("CASE"):

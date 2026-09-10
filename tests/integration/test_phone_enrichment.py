@@ -145,15 +145,32 @@ async def test_candidates_only_without_phone(
         migrated_session, "p-hasphone", "general_restaurants::b", ["02-1-2"]
     )
     cands = await find_place_phone_candidates(migrated_session, limit=50)
-    # 후보의 ``feature_id``는 uuid 컬럼에서 온다. ``PhoneEnrichmentCandidate``는 그
-    # 값을 ``str``로 선언하지만 repo가 raw row를 그대로 실어 driver의 ``uuid.UUID``가
-    # 그대로 도착한다(제품 결함으로 보고). 이 테스트가 재는 것은 후보 선별 규칙이므로
-    # 비교 축만 text로 맞춘다 — 값 자체는 정본 키 그대로다.
-    ids = {str(c.feature_id) for c in cands}
+    # ``PhoneEnrichmentCandidate.feature_id``는 **text** 계약이고, 이 함수의
+    # docstring이 그 값을 그대로 ``apply_place_phone_enrichment``에 넘기라고
+    # 지시한다. 한동안 이 자리는 ``str(c.feature_id)``로 표기를 맞춰 놓았는데,
+    # 그 한 번의 변환이 계약 위반을 통째로 가렸다 — 재키 뒤 repo가 raw row를
+    # 그대로 실어 driver의 ``uuid.UUID``가 도착했고 테스트는 초록이었다
+    # (적대 리뷰가 집었다). 표기를 맞추지 말고 **표기를 잰다.**
+    assert all(isinstance(candidate.feature_id, str) for candidate in cands), (
+        "PhoneEnrichmentCandidate.feature_id는 text 계약이다 — "
+        f"{[type(candidate.feature_id).__name__ for candidate in cands]}"
+    )
+    ids = {candidate.feature_id for candidate in cands}
     assert no_phone in ids
     assert has_phone not in ids
-    cand = next(c for c in cands if str(c.feature_id) == no_phone)
+    cand = next(candidate for candidate in cands if candidate.feature_id == no_phone)
     assert cand.source_entity_id == "general_restaurants::a"
+    # 후보가 지시대로 **그대로** 다음 단계로 흘러가는지까지 본다. 계약이 깨지면
+    # 여기서 22P02가 나야 하고, 그것이 이 표면의 실제 사용법이다.
+    applied = await apply_place_phone_enrichment(
+        migrated_session,
+        feature_id=cand.feature_id,
+        phone="0212345678",
+        enrichment_provider="kakao-local-api",
+        source_entity_id=cand.source_entity_id,
+        fetched_at=_FETCHED,
+    )
+    assert applied.applied is True
 
 
 async def test_apply_enrichment_updates_phone_and_link(
