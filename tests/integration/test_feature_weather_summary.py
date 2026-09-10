@@ -163,6 +163,10 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         fetched_at=_NOW,
     )
     await feature_repo.load_bundles(migrated_session, [kma, airkorea])
+    # 값 변환에는 **provider가 낸 legacy 주소**를 그대로 넘긴다 — dagster ingest가
+    # 타는 바로 그 접합부다(`assets.py`의 `station_feature_ids`, `kma_weather.py`의
+    # `anchor`). 적재기가 `infra/value_feature_ids.py`로 정본 키를 푼다. 여기서
+    # 미리 풀어 넘기면 그 사슬을 태우는 테스트가 저장소에서 사라진다.
     kma_feature_id = await _canonical_feature_id(
         migrated_session, kma.feature.feature_id
     )
@@ -172,12 +176,12 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
 
     kma_values = ultra_short_nowcast_to_weather_values(
         [_KmaNowcast()],
-        feature_id=kma_feature_id,
+        feature_id=kma.feature.feature_id,
         source_record_key=kma.source_record.source_record_key,
     )
     airkorea_values = air_quality_to_weather_values(
         [_AirKoreaMeasurement()],
-        station_feature_ids={"중구::서울": airkorea_feature_id},
+        station_feature_ids={"중구::서울": airkorea.feature.feature_id},
         source_record_key=airkorea.source_record.source_record_key,
     )
     kma_dataset_id = await _dataset_id(

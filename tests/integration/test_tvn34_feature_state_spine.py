@@ -849,7 +849,8 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 request_id, feature_id, action, state, review_mode,
                 base_row_revision, payload, reason, requested_by
             ) VALUES (
-                CAST(:request_id AS uuid), :feature_id, 'update', 'applied', 'immediate',
+                CAST(:request_id AS uuid), CAST(:feature_id AS uuid),
+                'update', 'applied', 'immediate',
                 1, '{}'::jsonb, 'typed provenance fixture', 'admin:tvn34-test'
             )
             """
@@ -910,7 +911,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 SELECT version, origin, change_kind, request_id::text, created_by,
                        payload ->> 'data_origin' AS payload_data_origin
                 FROM feature.feature_versions
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -1004,7 +1005,8 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
                 """
                 SELECT version, change_kind, request_id::text,
                        payload #>> '{detail,place_kind}' AS place_kind
-                FROM feature.feature_versions WHERE feature_id = :feature_id
+                FROM feature.feature_versions
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": add_feature_id},
@@ -1087,7 +1089,8 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
             text(
                 """
                 SELECT version, change_kind, request_id::text, created_by
-                FROM feature.feature_versions WHERE feature_id = :feature_id
+                FROM feature.feature_versions
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": delete_feature_id},

@@ -53,6 +53,12 @@ async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -
     아니라 **주소**이고(ADR-098 결정 6), 그 주소에서 정본 키로 가는 유일한 입구가
     ``feature_aliases``다. 이 파일은 bundle을 provider 적재 경로로 심으므로 그
     주소가 발급돼 있다 — ``test_feature_identity_boundary``와 같은 규약이다.
+
+    **적재에는 이 값을 쓰지 않는다.** ``PriceValue.feature_id``에는 provider
+    변환기가 낸 legacy 주소를 그대로 실어 dagster ingest가 타는 바로 그
+    접합부를 태운다 — 적재기가 ``infra/value_feature_ids.py``로 해석한다.
+    여기서 푸는 정본 키는 **읽기·단언**에만 쓴다. 둘을 뒤섞으면 이 파일이
+    지키던 "provider가 준 주소로 적재된다"가 사라진다(2026-09-10 적대 리뷰).
     """
     return str(
         (
@@ -168,9 +174,8 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
     now = datetime.now(tz=_KST)
     bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = await _canonical_feature_id(
-        migrated_session, bundles[0].feature.feature_id
-    )
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
 
     fresh_at = now - timedelta(hours=1)
     stale_at = now - timedelta(days=10)
@@ -178,7 +183,7 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
         migrated_session,
         [
             _price_value(
-                feature_id, product_key="gasoline", observed_at=fresh_at, price=1700
+                ingest_ref, product_key="gasoline", observed_at=fresh_at, price=1700
             )
         ],
     )
@@ -186,7 +191,7 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
         migrated_session,
         [
             _price_value(
-                feature_id, product_key="diesel", observed_at=stale_at, price=1500
+                ingest_ref, product_key="diesel", observed_at=stale_at, price=1500
             ),
         ],
     )
@@ -225,14 +230,13 @@ async def test_price_card_series_queries_use_identity_indexes(
     now = datetime.now(tz=_KST)
     bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = await _canonical_feature_id(
-        migrated_session, bundles[0].feature.feature_id
-    )
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                feature_id,
+                ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(minutes=minute),
                 price=1700 + minute,
@@ -292,14 +296,13 @@ async def test_stale_only_feature_is_stale_and_current_empty(
 
     bundles = await rest_areas_to_bundles([_StaleArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = await _canonical_feature_id(
-        migrated_session, bundles[0].feature.feature_id
-    )
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                feature_id,
+                ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(days=10),
                 price=1650,
@@ -367,21 +370,22 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             source_record_key=bundles[0].source_record.source_record_key,
         ),
     )
+    price_ingest_ref = price_feature.feature_id
     price_feature_id = await _canonical_feature_id(
-        migrated_session, price_feature.feature_id
+        migrated_session, price_ingest_ref
     )
 
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                price_feature_id,
+                price_ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(hours=1),
                 price=1700,
             ),
             _price_value(
-                price_feature_id,
+                price_ingest_ref,
                 product_key="diesel",
                 observed_at=now - timedelta(days=10),
                 price=1500,
@@ -392,7 +396,7 @@ async def test_stale_price_excluded_from_bbox_price_summary(
         migrated_session,
         [
             _price_value(
-                price_feature_id,
+                price_ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(minutes=30),
                 price=1710,

@@ -239,7 +239,11 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
             "area",
             "INSERT INTO feature.feature_areas (feature_id, kind, geom, area_kind) "
             "SELECT feature_id, kind, "
-            "x_extension.ST_GeomFromText('POLYGON((127 37,127.1 37,127.1 37.1,127 37))', 4326), "
+            # `feature.feature_areas.geom`은 `geometry(MultiPolygon,4326)`다
+            # (baseline부터 그랬다 — 재키와 무관한 선행 결함). 이웃
+            # `test_tvn34_public_projection_spine._insert_subtype`은 MULTIPOLYGON을 쓴다.
+            "x_extension.ST_GeomFromText("
+            "'MULTIPOLYGON(((127 37,127.1 37,127.1 37.1,127 37)))', 4326), "
             "'district' FROM feature.features "
             "WHERE feature_id = CAST(:feature_id AS uuid)",
             "area_kind",
@@ -362,7 +366,8 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
             await verify_session.execute(
                 text(
                     """
-                    SELECT CAST(feature_id AS text), request_id::text, origin, change_kind,
+                    SELECT CAST(feature_id AS text) AS feature_id,
+                           request_id::text AS request_id, origin, change_kind,
                            payload ->> 'row_revision'
                     FROM feature.feature_versions
                     WHERE feature_id = CAST(:feature_id AS uuid)
