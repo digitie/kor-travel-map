@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+### npm 보안 권고 셋을 닫는다 — maplibre-gl 6 · Next 16.3.4 · sharp 0.35.4 (2026-09-10)
+
+- **SECURITY (배포 의존성)**: `npm audit --audit-level=high --omit=dev`가 세 건을
+  잡았다. 전부 새로 공개된 권고이고, 이 저장소의 lock은 바뀐 것이 없다.
+  - `maplibre-gl <=6.4.0` **critical** — `DOM.sanitize()`의 XSS sanitizer 우회
+    (GHSA-jrc7-96c5-q579). 5.x 전체가 영향 범위라 백포트가 없어 **6.9.0**으로 올린다.
+  - `next 15.6.0-canary.0 ~ 16.3.2` **critical** — Windows 호스트 RCE
+    (GHSA-p293-qw3h-jr36)와 AVIF 이미지 최적화 RCE (GHSA-2xp9-vwfh-vxw4). **16.3.4**.
+  - `sharp <0.35.4` **high** — libheif (GHSA-rgj7-g3m4-5g8c). override **0.35.4**.
+- **CHANGED (maplibre-gl 6 마이그레이션)**: v6는 default export를 없앴다.
+  `vworld-map-view.tsx`가 `maplibregl`을 값과 타입 네임스페이스 양쪽으로 쓰므로
+  namespace import로 바꿨다 — 그 한 줄이 타입 오류 11건 전부의 원인이었다.
+  다른 파일의 maplibre 참조는 전부 타입 전용이라 그대로다.
+- **CHANGED (`verify:next-sharp` 과결박 완화)**: 이 검사는 기대 Next/Sharp 버전을
+  리터럴로 들고 있었다. 그래서 권고 하나에 고칠 자리가 셋이 되고(선언 둘, 검사
+  하나), 하나를 잊으면 "검증되지 않은 Next 버전입니다"라는 **무관한 얼굴**로
+  죽는다 — 실제로 그렇게 죽었다. 검사가 지켜야 할 명제는 "선언한 핀과 설치된
+  트리가 같은가"이므로 기대값을 매니페스트에서 파생한다. ABI 스모크(실제 이미지
+  최적화 1회)는 그대로다. `tests/unit/test_frontend_dependency_security.py`도 같은
+  숫자를 네 번째로 들고 있었다 — 이제 "정확한 핀인가 · 선언들이 서로 같은가 ·
+  lock이 그것과 같은가" 셋만 재고, 그 셋은 버전이 움직여도 그대로 성립한다.
+  덤으로 lock의 workspace 키를 `as_posix()`로 읽어 Windows 체크아웃에서만 나던
+  `KeyError`를 없앴다.
+
 ### T-VN-39 — `feature_id`가 uuid가 된다 (2026-09-10)
 
 - **CHANGED (정본 키, alembic 309)**: `feature.features.feature_id`가 TEXT에서
@@ -28,6 +52,7 @@
   준 legacy 주소를 받아 정본 uuid로 푼다. 이 자리들은 재키 직후 전량 22P02였다.
 - **REMOVED (사본 열)**: 13개 `*_feature_uuid` shadow 열이 사라졌다. 두 표기를
   나란히 들고 있을 이유가 없어졌다 — 정본이 곧 uuid다.
+||||||| 7af1461a8
 
 ### backup artifact — manifest가 해시 대상에 들어가고 스키마 출처를 싣는다 (2026-09-08)
 
