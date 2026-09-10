@@ -177,6 +177,14 @@ async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget
     )
 
 
+#: scope anchor로 심는 feature의 정본 키. T-VN-39 뒤 이 축은 uuid다 —
+#: `_seed_scope_feature`가 이 값을 그대로 `feature.features.feature_id`에 넣는다.
+_SCOPE_ANCHOR_CACHE_TARGET = "00000000-0000-7000-8000-0000000f0001"
+_SCOPE_ANCHOR_QUEUED_CANCEL = "00000000-0000-7000-8000-0000000f0002"
+_SCOPE_ANCHOR_FENCED_REFRESH = "00000000-0000-7000-8000-0000000f0003"
+_SCOPE_ANCHOR_REFRESH_SERIAL = "00000000-0000-7000-8000-0000000f0004"
+
+
 async def _seed_scope_feature(
     session: AsyncSession,
     *,
@@ -4388,7 +4396,7 @@ async def test_service_source_read_and_refresh_request_idempotency(
     await _seed_scope_feature(
         migrated_session,
         membership=await _canonical_membership(migrated_session),
-        feature_id="f_cache_target_scope_anchor",
+        feature_id=_SCOPE_ANCHOR_CACHE_TARGET,
     )
     source = await get_cache_target_source(
         migrated_session,
@@ -4608,7 +4616,7 @@ async def test_queued_service_refresh_cancellation_emits_exact_tuple_status(
         await _seed_scope_feature(
             setup,
             membership=await _canonical_membership(setup),
-            feature_id="f_queued_refresh_cancellation_scope_anchor",
+            feature_id=_SCOPE_ANCHOR_QUEUED_CANCEL,
             # migrated_engine는 다음 테스트에도 commit을 남긴다. 카테고리 집계
             # 회귀 fixture와 충돌하지 않는 전용 코드로 격리한다.
             category="99999101",
@@ -4679,7 +4687,7 @@ async def test_restore_fence_rejects_previously_queued_service_refresh_status_ev
     await _seed_scope_feature(
         migrated_session,
         membership=await _canonical_membership(migrated_session),
-        feature_id="f_fenced_service_refresh_scope_anchor",
+        feature_id=_SCOPE_ANCHOR_FENCED_REFRESH,
     )
     request = await create_cache_target_refresh_request(
         migrated_session,
@@ -4771,7 +4779,7 @@ async def test_service_refresh_creation_serializes_stream_before_capture(
         await _seed_scope_feature(
             setup,
             membership=await _canonical_membership(setup),
-            feature_id="f_service_refresh_serialization_anchor",
+            feature_id=_SCOPE_ANCHOR_REFRESH_SERIAL,
             category="99999102",
         )
     assert created.target is not None
