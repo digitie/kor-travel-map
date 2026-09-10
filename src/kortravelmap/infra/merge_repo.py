@@ -87,7 +87,10 @@ class MergeOutcome:
 # master 선정 입력 — 좌표 보유 / updated_at / 1차 source provider.
 _SELECT_MASTER_INPUT_SQL: Final[str] = """
 SELECT
-    f.feature_id AS feature_id,
+    -- T-VN-39: `MasterCandidate.feature_id`는 text 계약이고 그 값이 다시
+    -- 바인드로 돌아간다. 드라이버가 주는 `uuid.UUID`를 그대로 두면
+    -- text 자리(증거 jsonb)에서 인코딩이 깨진다.
+    CAST(f.feature_id AS text) AS feature_id,
     (f.coord IS NOT NULL) AS has_coord,
     f.updated_at AS updated_at,
     (

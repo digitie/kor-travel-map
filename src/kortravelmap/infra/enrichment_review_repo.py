@@ -81,7 +81,9 @@ RETURNING (xmax = 0) AS inserted
 
 _PENDING_SQL: Final[str] = """
 SELECT
-    review.review_id, review.target_feature_id,
+    review.review_id,
+    -- 나가는 이름은 그대로, 원천만 uuid다(T-VN-39 경계 규칙).
+    CAST(review.target_feature_id AS text) AS target_feature_id,
     dataset.provider AS source_provider, dataset.dataset_key AS source_dataset_key,
     entity.source_entity_id, review.source_record_key,
     review.source_name, review.target_name, review.name_score, review.status,
@@ -102,7 +104,11 @@ LIMIT :limit
 # 이렇게 "상태 점유 → side-effect" 순서를 보장해 accepted link가 새는 것을 막는다.
 _SELECT_ROW_SQL: Final[str] = """
 SELECT
-    review_id, target_feature_id, source_record_key, name_score, status
+    review_id,
+    -- T-VN-39: 컬럼은 uuid다. 드라이버가 주는 `uuid.UUID`를 그대로 `SourceLink`
+    -- (`feature_id: str`)에 넣으면 pydantic이 거절한다 — 경계에서 text로 고정한다.
+    CAST(target_feature_id AS text) AS target_feature_id,
+    source_record_key, name_score, status
 FROM ops.enrichment_review_queue
 WHERE review_id = :review_id
 FOR UPDATE

@@ -115,8 +115,11 @@ _JOB_SELECT_COLUMNS: Final[str] = ", ".join(
     f"job.{column}" for column in _RETURN_COLUMNS.split(", ")
 )
 
+#: T-VN-39: `feature_id`는 uuid 컬럼이지만 `ImportJobEvent.feature_id`는 text
+#: 계약이다(API 응답 필드). 나가는 이름은 그대로 두고 원천만 캐스트한다.
 _EVENT_RETURN_COLUMNS: Final[str] = (
-    "event_id, job_id, import_job_dataset_id, feature_id, stage, level, code, "
+    "event_id, job_id, import_job_dataset_id, "
+    "CAST(feature_id AS text) AS feature_id, stage, level, code, "
     "message, payload, occurred_at"
 )
 
