@@ -1884,9 +1884,15 @@ class AsyncKorTravelMapClient:
         """cross-provider 중복 후보 탐지 + ``ops.dedup_review_queue`` 적재.
 
         ``find_dedup_candidates``(순수, ADR-016)로 ``left × right``를 cross-score한
-        뒤 후보를 큐에 upsert한다. ``left``/``right``의 feature(``feature_id``)는
-        이미 ``feature.features``에 적재돼 있어야 한다 (큐 FK CASCADE). 후보가
+        뒤 후보를 큐에 upsert한다. ``left``/``right``의 feature는 이미
+        ``feature.features``에 적재돼 있어야 한다 (큐 FK CASCADE). 후보가
         없으면 빈 큐 결과.
+
+        ``feature_id``는 정본 uuid와 legacy ``f_*`` 주소를 **둘 다** 받는다 —
+        ``Feature`` DTO가 그대로 이 표면을 만족하고 그 DTO가 아는 것은 변환기가
+        만든 주소뿐이기 때문이다. 해석은 repo가 한다
+        (:func:`~kortravelmap.infra.canonical_feature_ids.resolve_canonical_feature_ids`).
+        가리키는 Feature가 없으면 쓰기 전에 멈춘다.
 
         Parameters
         ----------
@@ -1914,6 +1920,9 @@ class AsyncKorTravelMapClient:
         안의 self-sibling(예: MOIS 같은 사업장이 2슬러그로 중복 등록)을 탐지해 큐에
         upsert한다. ``features``의 feature는 이미 ``feature.features``에 적재돼 있어야
         한다 (큐 FK). 후보가 없으면 빈 큐 결과.
+
+        ``sync_dedup_candidates``와 같이 정본 uuid와 legacy ``f_*`` 주소를 둘 다
+        받는다.
 
         Parameters
         ----------

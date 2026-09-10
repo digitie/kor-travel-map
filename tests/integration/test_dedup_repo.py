@@ -7,7 +7,9 @@
 - 재스캔 시 pending 행 점수 갱신(updated), 검토 완료(accepted) 행 보존(skipped).
 - reversed pair도 같은 canonical queue row로 수렴하며, self-pair는 skipped.
 - ``pending_dedup_reviews`` total_score 내림차순 + float 변환.
-- FK — 존재하지 않는 feature 참조 시 IntegrityError (CASCADE FK 강제).
+- 존재하지 않는 feature 참조는 **쓰기 전에** `UnresolvedFeatureRefError`로 멈춘다
+  (T-VN-39부터). FK(CASCADE)는 DB 층 보장으로 그대로 남아 repo를 우회한 직접
+  INSERT를 계속 막는다.
 
 T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와 그것을 참조하는
 ``ops.dedup_review_queue.feature_id_a/b``는 **uuid**다. 그래서 이 파일의 seed id는
@@ -24,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.core.dedup import DedupCandidate
+from kortravelmap.infra.canonical_feature_ids import UnresolvedFeatureRefError
 from kortravelmap.infra.dedup_repo import (
     DedupQueueResult,
     enqueue_dedup_candidate,
@@ -52,7 +55,7 @@ _F_SORT_A1 = "00000000-0000-7000-8000-0000000d0031"
 _F_SORT_B1 = "00000000-0000-7000-8000-0000000d0032"
 _F_SORT_A2 = "00000000-0000-7000-8000-0000000d0033"
 _F_SORT_B2 = "00000000-0000-7000-8000-0000000d0034"
-#: features에 적재하지 않는다 — FK 위반을 관측하는 probe.
+#: features에 적재하지 않는다 — "가리키는 Feature가 없다"를 관측하는 probe.
 _F_GHOST_A = "00000000-0000-7000-8000-0000000d00f1"
 _F_GHOST_B = "00000000-0000-7000-8000-0000000d00f2"
 
@@ -279,11 +282,44 @@ async def test_pending_dedup_reviews_sorted_desc(
     assert rows[0]["status"] == "pending"
 
 
-async def test_fk_requires_existing_features(
+async def test_unknown_features_fail_before_any_write(
     migrated_session: AsyncSession,
 ) -> None:
-    # 두 feature 모두 미적재 → FK(CASCADE) 위반.
+    """미적재 feature를 가리키는 후보는 **쓰기 전에** 멈춘다.
+
+    T-VN-39 전에는 FK 위반(IntegrityError)이 이것을 잡았다. 그 판정은 옳았지만
+    두 가지가 아쉬웠다 — 오류가 **어느 참조가 문제인지 말하지 않고**, FK 위반은
+    트랜잭션을 통째로 중단시켜 같은 배치의 앞선 적재까지 잃는다.
+
+    이제 repo가 후보의 참조를 정본 uuid로 풀면서 그 자리에서 멈춘다. FK는
+    사라지지 않았고 DB 층 보장으로 그대로 남는다 — 다만 정상 경로에서 그것이
+    울릴 일이 없어졌다.
+    """
     cand = _candidate(_F_GHOST_A, _F_GHOST_B)
+    with pytest.raises(UnresolvedFeatureRefError) as caught:
+        await enqueue_dedup_candidate(migrated_session, cand)
+    assert _F_GHOST_A in str(caught.value)
+    count = (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.dedup_review_queue")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_db_still_rejects_a_queue_row_without_its_features(
+    migrated_session: AsyncSession,
+) -> None:
+    """repo를 우회해 직접 넣으면 FK가 여전히 잡는다 — DB 층 보장은 그대로다."""
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
         async with migrated_session.begin_nested():
-            await enqueue_dedup_candidate(migrated_session, cand)
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO ops.dedup_review_queue "
+                    "(feature_id_a, feature_id_b, total_score, name_score, "
+                    " spatial_score, category_score, status, decision_reason) "
+                    "VALUES (CAST(:a AS uuid), CAST(:b AS uuid), "
+                    "        50, 50, 50, 50, 'pending', 'manual_review')"
+                ),
+                {"a": _F_GHOST_A, "b": _F_GHOST_B},
+            )
