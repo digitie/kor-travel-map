@@ -210,10 +210,10 @@ $$;
 ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: append_theme_feature_candidate_transition(uuid, text, text, uuid, text, text, text, boolean, boolean, text, text, uuid, text, bigint, bigint, text, text, uuid, bigint, text, text, uuid, uuid, bigint, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+-- Name: append_theme_feature_candidate_transition(uuid, uuid, uuid, uuid, text, text, text, boolean, boolean, text, text, uuid, text, bigint, bigint, text, text, uuid, bigint, text, text, uuid, uuid, bigint, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
 --
 
-CREATE FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) RETURNS bigint
+CREATE FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
@@ -248,7 +248,7 @@ END
 $$;
 
 
-ALTER FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) OWNER TO ktm_curation_audit_writer;
+ALTER FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) OWNER TO ktm_curation_audit_writer;
 
 --
 -- Name: apply_curation_import_items_command(jsonb, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -369,7 +369,7 @@ BEGIN
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
       row_number integer, collection_id uuid, collection_key text,
-      feature_id text, external_item_id text, external_component_id text,
+      feature_id uuid, external_item_id text, external_component_id text,
       place_name text, address_hint text, sort_order integer,
       item_title text, item_summary text, metadata jsonb,
       provenance jsonb, row_payload jsonb
@@ -412,7 +412,7 @@ BEGIN
 
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
-      collection_id uuid, feature_id text, external_item_id text,
+      collection_id uuid, feature_id uuid, external_item_id text,
       external_component_id text, place_name text, address_hint text,
       sort_order integer, item_title text, item_summary text, metadata jsonb
     )
@@ -456,7 +456,7 @@ BEGIN
 
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
-      collection_id uuid, feature_id text, external_item_id text,
+      collection_id uuid, feature_id uuid, external_item_id text,
       external_component_id text, place_name text, address_hint text,
       sort_order integer, item_title text, item_summary text, metadata jsonb,
       row_payload jsonb
@@ -545,7 +545,7 @@ BEGIN
 
   WITH incoming AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(p_items) AS value(
-      row_number integer, collection_id uuid, feature_id text,
+      row_number integer, collection_id uuid, feature_id uuid,
       external_item_id text, external_component_id text,
       provenance jsonb, row_payload jsonb
     )
@@ -673,10 +673,10 @@ $_$;
 ALTER PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[], OUT o_row_receipts jsonb) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: apply_provider_feature_field_patch(text, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: apply_provider_feature_field_patch(uuid, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer)
+CREATE PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_applied_field_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -766,16 +766,15 @@ BEGIN
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
         INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, feature_uuid, provider_dataset_id,
+            feature_id, field_path, provider_dataset_id,
             source_entity_key, source_record_key, source_raw_payload_hash,
             value_json, base_revision, observed_at
         ) VALUES (
-            p_feature_id, v_field_path, v_feature.feature_uuid, p_provider_dataset_id,
+            p_feature_id, v_field_path, p_provider_dataset_id,
             p_source_entity_key, p_source_record_key, v_source_hash,
             coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()
         ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET feature_uuid = EXCLUDED.feature_uuid,
-            provider_dataset_id = EXCLUDED.provider_dataset_id,
+        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
             source_entity_key = EXCLUDED.source_entity_key,
             source_record_key = EXCLUDED.source_record_key,
             source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
@@ -800,11 +799,11 @@ BEGIN
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
         INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, feature_uuid, provider_dataset_id,
+            feature_id, field_path, provider_dataset_id,
             source_entity_key, source_record_key, source_raw_payload_hash,
             value_json, value_geometry, base_revision, observed_at
         ) VALUES (
-            p_feature_id, v_field_path, v_feature.feature_uuid, p_provider_dataset_id,
+            p_feature_id, v_field_path, p_provider_dataset_id,
             p_source_entity_key, p_source_record_key, v_source_hash,
             CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
             CASE WHEN v_value = 'null'::jsonb THEN NULL
@@ -815,8 +814,7 @@ BEGIN
                  END END,
             v_base_revision, clock_timestamp()
         ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET feature_uuid = EXCLUDED.feature_uuid,
-            provider_dataset_id = EXCLUDED.provider_dataset_id,
+        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
             source_entity_key = EXCLUDED.source_entity_key,
             source_record_key = EXCLUDED.source_record_key,
             source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
@@ -915,7 +913,7 @@ BEGIN
         parent_feature_id = CASE
             WHEN p_values ? 'core.parent_feature_id'
              AND NOT feature.has_active_feature_override(p_feature_id, 'core.parent_feature_id')
-            THEN p_values ->> 'core.parent_feature_id'
+            THEN NULLIF(p_values ->> 'core.parent_feature_id', '')::uuid
             ELSE core.parent_feature_id
         END,
         sibling_group_id = CASE
@@ -1280,29 +1278,27 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: approve_feature_request_with_initial_state(uuid, jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_request_procedure_owner
 --
 
-CREATE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
     v_request ops.feature_requests%ROWTYPE;
-    v_feature_id text;
-    v_feature_uuid uuid;
+    v_feature_id uuid;
     v_feature_kind text;
     v_feature_name text;
     v_lon numeric;
     v_lat numeric;
     v_key record;
-    v_claimed_feature_uuid uuid;
-    v_created_feature_id text;
-    v_created_feature_uuid uuid;
+    v_claimed_feature_id uuid;
+    v_created_feature_id uuid;
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
@@ -1331,9 +1327,8 @@ BEGIN
     END IF;
     IF jsonb_typeof(p_feature_payload) IS DISTINCT FROM 'object'
        OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
-                  WHERE key_name NOT IN ('feature_id','feature_uuid','kind','name','category','lon','lat','coord_precision_digits','address','legal_dong_code','road_name_code','road_address_management_no','admin_dong_code','sido_code','sigungu_code','urls','marker_icon','marker_color','parent_feature_id','sibling_group_id','raw_refs'))
+                  WHERE key_name NOT IN ('feature_id','kind','name','category','lon','lat','coord_precision_digits','address','legal_dong_code','road_name_code','road_address_management_no','admin_dong_code','sido_code','sigungu_code','urls','marker_icon','marker_color','parent_feature_id','sibling_group_id','raw_refs'))
        OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
-       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
@@ -1346,62 +1341,62 @@ BEGIN
         RAISE EXCEPTION 'Feature request approval payload is not canonical request projection'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
     END IF;
-    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
     v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
     v_feature_name := nullif(btrim(p_feature_payload ->> 'name'), '');
-    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_feature_name IS NULL
+    IF nullif(btrim(p_feature_payload ->> 'feature_id'), '') IS NULL
+       OR v_feature_kind IS NULL OR v_feature_name IS NULL
        OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
         RAISE EXCEPTION 'Feature request approval Feature lacks required core values'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
     END IF;
     BEGIN
-        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_feature_id := (p_feature_payload ->> 'feature_id')::uuid;
         v_lon := (p_feature_payload ->> 'lon')::numeric;
         v_lat := (p_feature_payload ->> 'lat')::numeric;
     EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
         RAISE EXCEPTION 'Feature request approval Feature identity is invalid'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
     END;
-    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+    IF substring(v_feature_id::text FROM 15 FOR 1) <> '7' THEN
         RAISE EXCEPTION 'Feature request approval Feature UUID must be UUIDv7'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
     SELECT * INTO v_key FROM feature.manual_feature_identity_key(v_feature_kind, v_feature_name, v_lon, v_lat);
     INSERT INTO feature.manual_feature_identity_claims (feature_id, feature_kind, name_key, lon_e6, lat_e6, claimed_by_command_id, claim_basis, claimed_at)
-    VALUES (v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6, p_domain_command_id, 'manual_create', clock_timestamp())
-    ON CONFLICT (feature_kind, name_key, lon_e6, lat_e6) WHERE NOT identity_released DO NOTHING RETURNING feature_id INTO v_claimed_feature_uuid;
-    IF v_claimed_feature_uuid IS NULL THEN
-        SELECT claim.feature_id INTO o_existing_feature_uuid FROM feature.manual_feature_identity_claims AS claim
+    VALUES (v_feature_id, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6, p_domain_command_id, 'manual_create', clock_timestamp())
+    ON CONFLICT (feature_kind, name_key, lon_e6, lat_e6) WHERE NOT identity_released DO NOTHING RETURNING feature_id INTO v_claimed_feature_id;
+    IF v_claimed_feature_id IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_id FROM feature.manual_feature_identity_claims AS claim
         WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6) = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6) AND NOT claim.identity_released;
-        IF o_existing_feature_uuid IS NULL THEN
+        IF o_existing_feature_id IS NULL THEN
             RAISE EXCEPTION 'Feature request exact winner disappeared' USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
         END IF;
         UPDATE ops.feature_requests SET status = 'exact_conflict', resolved_at = clock_timestamp(),
             resolved_by_actor = v_command.actor, resolution_command_id = p_domain_command_id,
-            resolved_feature_id = o_existing_feature_uuid WHERE request_id = p_request_id;
+            resolved_feature_id = o_existing_feature_id WHERE request_id = p_request_id;
         o_outcome := 'exact_conflict';
         RETURN;
     END IF;
     CALL feature.create_feature_with_initial_state(p_feature_payload, 'active', 'published', 'valid',
         jsonb_build_object('transition_kind','initial','reason_code','feature_request_approved',
             'principal',v_command.actor,'causation_ref','domain-command:' || p_domain_command_id::text),
-        v_created_feature_id, v_created_feature_uuid, v_created_row_revision, v_created);
+        v_created_feature_id, v_created_row_revision, v_created);
     IF v_created IS DISTINCT FROM true OR v_created_feature_id IS DISTINCT FROM v_feature_id
-       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
+       OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
         RAISE EXCEPTION 'Feature request approval core result does not match claim' USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
     INSERT INTO feature.feature_creation_origins (feature_id, origin_kind, creation_command_id, creator_principal_id, created_by_actor, created_at, invoker_role, procedure_definer)
-    VALUES (v_feature_uuid, 'manual_request', p_domain_command_id, 'feature-request.approval.v1', v_command.actor, clock_timestamp(), session_user, current_user);
+    VALUES (v_feature_id, 'manual_request', p_domain_command_id, 'feature-request.approval.v1', v_command.actor, clock_timestamp(), session_user, current_user);
     UPDATE ops.feature_requests SET status = 'approved', resolved_at = clock_timestamp(),
         resolved_by_actor = v_command.actor, resolution_command_id = p_domain_command_id,
-        resolved_feature_id = v_feature_uuid WHERE request_id = p_request_id;
-    o_outcome := 'created'; o_feature_id := v_created_feature_id; o_feature_uuid := v_created_feature_uuid; o_row_revision := v_created_row_revision;
+        resolved_feature_id = v_feature_id WHERE request_id = p_request_id;
+    o_outcome := 'created'; o_feature_id := v_created_feature_id; o_row_revision := v_created_row_revision;
 END
 $$;
 
 
-ALTER PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_feature_request_procedure_owner;
+ALTER PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) OWNER TO ktm_feature_request_procedure_owner;
 
 --
 -- Name: archive_curated_source_command(uuid, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -1416,9 +1411,14 @@ DECLARE
   v_source feature.curated_sources%ROWTYPE;
   v_rule_id uuid;
   v_rule_revision bigint;
-  v_feature_id text;
-  v_prelock_features text[];
-  v_current_features text[];
+  -- 셋 다 재키 후 uuid를 담는다. text로 둬도 plpgsql 대입이 I/O 캐스트로 살려주지만,
+  -- 형제 `_309_materialize_theme_candidate_generation.sql`이 같은 UNION을 도는
+  -- 루프 변수를 uuid로 옮겼다 — 이 파일만 text로 남으면 다음 사람이 둘 중
+  -- 어느 쪽이 규칙인지 묻게 된다. lock 키는 `text || anynonarray`가 uuid의
+  -- canonical 표기를 내므로 바이트 단위로 같다.
+  v_feature_id uuid;
+  v_prelock_features uuid[];
+  v_current_features uuid[];
   v_before_hashes jsonb := '{}'::jsonb;
   v_before_hash text;
   v_after_input jsonb;
@@ -1448,7 +1448,7 @@ BEGIN
     RAISE EXCEPTION 'domain command does not match source archive'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
   END IF;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::text[])
+  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
   INTO STRICT v_prelock_features
   FROM (
     SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
@@ -1480,7 +1480,7 @@ BEGIN
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::text[])
+  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
   INTO STRICT v_current_features
   FROM (
     SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
@@ -2021,10 +2021,10 @@ $$;
 ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: author_feature_field_overrides(text, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: author_feature_field_overrides(uuid, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer)
+CREATE PROCEDURE feature.author_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -2038,7 +2038,7 @@ DECLARE
 BEGIN
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
-       OR coalesce(btrim(p_feature_id), '') = ''
+       OR p_feature_id IS NULL
        OR coalesce(btrim(p_principal), '') = ''
        OR coalesce(btrim(p_reason_code), '') = ''
        OR jsonb_typeof(p_values) <> 'object'
@@ -2230,7 +2230,7 @@ BEGIN
         END,
         parent_feature_id = CASE
             WHEN p_values ? 'core.parent_feature_id'
-            THEN p_values ->> 'core.parent_feature_id'
+            THEN NULLIF(p_values ->> 'core.parent_feature_id', '')::uuid
             ELSE core.parent_feature_id
         END,
         sibling_group_id = CASE
@@ -2527,13 +2527,13 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.author_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: author_lifecycle_override(text, text, text, boolean, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: author_lifecycle_override(uuid, text, text, boolean, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.author_lifecycle_override(IN p_feature_id text, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint)
+CREATE PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -2610,7 +2610,7 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.author_lifecycle_override(IN p_feature_id text, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: claim_curation_catalog_command_effect(bigint, text, text, uuid); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
@@ -2848,22 +2848,20 @@ ALTER FUNCTION feature.count_rows_dynamic(p_statement text) OWNER TO ktm_feature
 -- Name: create_admin_manual_feature_with_initial_state(jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_feature_procedure_owner
 --
 
-CREATE PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
-    v_feature_id text;
-    v_feature_uuid uuid;
+    v_feature_id uuid;
     v_feature_kind text;
     v_name text;
     v_lon numeric;
     v_lat numeric;
     v_key record;
-    v_claimed_feature_uuid uuid;
-    v_created_feature_id text;
-    v_created_feature_uuid uuid;
+    v_claimed_feature_id uuid;
+    v_created_feature_id uuid;
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
@@ -2900,7 +2898,7 @@ BEGIN
            SELECT 1
            FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
            WHERE key_name NOT IN (
-               'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+               'feature_id', 'kind', 'name', 'category',
                'lon', 'lat', 'coord_precision_digits', 'address',
                'legal_dong_code', 'road_name_code', 'road_address_management_no',
                'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
@@ -2909,7 +2907,6 @@ BEGIN
            )
        )
        OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
-       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
@@ -2918,23 +2915,23 @@ BEGIN
         RAISE EXCEPTION 'manual Feature payload is not canonical'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
-    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
     v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
     v_name := nullif(btrim(p_feature_payload ->> 'name'), '');
-    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_name IS NULL
+    IF nullif(btrim(p_feature_payload ->> 'feature_id'), '') IS NULL
+       OR v_feature_kind IS NULL OR v_name IS NULL
        OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
         RAISE EXCEPTION 'manual Feature payload lacks required core values'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
     BEGIN
-        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_feature_id := (p_feature_payload ->> 'feature_id')::uuid;
         v_lon := (p_feature_payload ->> 'lon')::numeric;
         v_lat := (p_feature_payload ->> 'lat')::numeric;
     EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
         RAISE EXCEPTION 'manual Feature payload has invalid identity values'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_coord_rounding';
     END;
-    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+    IF substring(v_feature_id::text FROM 15 FOR 1) <> '7' THEN
         RAISE EXCEPTION 'manual Feature UUID must be UUIDv7'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
@@ -2945,18 +2942,18 @@ BEGIN
         feature_id, feature_kind, name_key, lon_e6, lat_e6,
         claimed_by_command_id, claim_basis, claimed_at
     ) VALUES (
-        v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
+        v_feature_id, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
         p_domain_command_id, 'manual_create', clock_timestamp()
     ) ON CONFLICT (feature_kind, name_key, lon_e6, lat_e6) WHERE NOT identity_released DO NOTHING
-    RETURNING feature_id INTO v_claimed_feature_uuid;
+    RETURNING feature_id INTO v_claimed_feature_id;
 
-    IF v_claimed_feature_uuid IS NULL THEN
-        SELECT claim.feature_id INTO o_existing_feature_uuid
+    IF v_claimed_feature_id IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_id
         FROM feature.manual_feature_identity_claims AS claim
         WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6)
             = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6)
           AND NOT claim.identity_released;
-        IF o_existing_feature_uuid IS NULL THEN
+        IF o_existing_feature_id IS NULL THEN
             RAISE EXCEPTION 'manual Feature exact winner disappeared'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
         END IF;
@@ -2976,13 +2973,11 @@ BEGIN
             'causation_ref', 'domain-command:' || p_domain_command_id::text
         ),
         v_created_feature_id,
-        v_created_feature_uuid,
         v_created_row_revision,
         v_created
     );
     IF v_created IS DISTINCT FROM true
        OR v_created_feature_id IS DISTINCT FROM v_feature_id
-       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid
        OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
         RAISE EXCEPTION 'manual Feature core result does not match identity claim'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
@@ -2991,7 +2986,7 @@ BEGIN
         feature_id, origin_kind, creation_command_id, creator_principal_id,
         created_by_actor, created_at, invoker_role, procedure_definer
     ) VALUES (
-        v_feature_uuid,
+        v_feature_id,
         'manual_admin',
         p_domain_command_id,
         'admin-ui-bff.manual-feature-create.v1',
@@ -3002,13 +2997,12 @@ BEGIN
     );
     o_outcome := 'created';
     o_feature_id := v_created_feature_id;
-    o_feature_uuid := v_created_feature_uuid;
     o_row_revision := v_created_row_revision;
 END
 $$;
 
 
-ALTER PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_manual_feature_procedure_owner;
+ALTER PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) OWNER TO ktm_manual_feature_procedure_owner;
 
 --
 -- Name: create_curated_source_command(bigint, text, text, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -3406,10 +3400,10 @@ $_$;
 ALTER PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: create_curation_item_command(uuid, text, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: create_curation_item_command(uuid, uuid, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
+CREATE PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
@@ -3552,7 +3546,7 @@ END
 $$;
 
 
-ALTER PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+ALTER PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: create_curation_rule_reconcile_receipt(uuid, text, bigint, bigint, text, text, bigint, text); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
@@ -3584,9 +3578,9 @@ BEGIN
       ON head.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
     UNION
-    SELECT 'feature'::text, link.feature_id,
+    SELECT 'feature'::text, link.feature_id::text,
            encode(x_extension.digest(convert_to(jsonb_build_array(
-             link.feature_id, core.feature_uuid::text, core.row_revision,
+             link.feature_id, core.row_revision,
              core.lifecycle_state, core.publication_state, core.quality_state
            )::text, 'UTF8'), 'sha256'), 'hex')
     FROM provider_sync.source_entities AS entity
@@ -3652,9 +3646,9 @@ BEGIN
       ON head.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
     UNION
-    SELECT 'feature'::text, link.feature_id,
+    SELECT 'feature'::text, link.feature_id::text,
            encode(x_extension.digest(convert_to(jsonb_build_array(
-             link.feature_id, core.feature_uuid::text, core.row_revision,
+             link.feature_id, core.row_revision,
              core.lifecycle_state, core.publication_state, core.quality_state
            )::text, 'UTF8'), 'sha256'), 'hex')
     FROM provider_sync.source_entities AS entity
@@ -3676,13 +3670,12 @@ ALTER FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_
 -- Name: create_feature_with_initial_state(jsonb, text, text, text, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean)
+CREATE PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
 DECLARE
-    v_feature_id text;
-    v_feature_uuid uuid;
+    v_feature_id uuid;
     v_kind text;
     v_name text;
     v_category text;
@@ -3695,7 +3688,7 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM jsonb_object_keys(p_feature) AS key_name(key_name)
         WHERE key_name NOT IN (
-            'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+            'feature_id', 'kind', 'name', 'category',
             'lon', 'lat', 'coord_precision_digits', 'address',
             'legal_dong_code', 'road_name_code', 'road_address_management_no',
             'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
@@ -3712,16 +3705,13 @@ BEGIN
         RAISE EXCEPTION 'feature create payload has an invalid JSON field shape'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
     END IF;
-    v_feature_id := nullif(btrim(p_feature ->> 'feature_id'), '');
+    v_feature_id := nullif(btrim(p_feature ->> 'feature_id'), '')::uuid;
     v_kind := nullif(btrim(p_feature ->> 'kind'), '');
     v_name := nullif(btrim(p_feature ->> 'name'), '');
     v_category := nullif(btrim(p_feature ->> 'category'), '');
     IF v_feature_id IS NULL OR v_kind IS NULL OR v_name IS NULL OR v_category IS NULL THEN
         RAISE EXCEPTION 'feature create payload lacks required core fields'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
-    END IF;
-    IF p_feature ? 'feature_uuid' THEN
-        v_feature_uuid := nullif(btrim(p_feature ->> 'feature_uuid'), '')::uuid;
     END IF;
     IF (p_feature ? 'lon') <> (p_feature ? 'lat') THEN
         RAISE EXCEPTION 'feature coordinate requires both lon and lat'
@@ -3750,7 +3740,7 @@ BEGIN
         );
     END IF;
     INSERT INTO feature.features (
-        feature_id, feature_uuid, kind, name, category,
+        feature_id, kind, name, category,
         coord, coord_precision_digits,
         address, legal_dong_code, road_name_code, road_address_management_no,
         admin_dong_code, sido_code, sigungu_code,
@@ -3758,24 +3748,24 @@ BEGIN
         raw_refs, lifecycle_state, publication_state, quality_state,
         created_at, updated_at
     ) VALUES (
-        v_feature_id, v_feature_uuid, v_kind, v_name,
+        v_feature_id, v_kind, v_name,
         v_category, v_coord, (p_feature ->> 'coord_precision_digits')::smallint,
         coalesce(p_feature -> 'address', '{}'::jsonb), p_feature ->> 'legal_dong_code',
         p_feature ->> 'road_name_code', p_feature ->> 'road_address_management_no',
         p_feature ->> 'admin_dong_code', p_feature ->> 'sido_code', p_feature ->> 'sigungu_code',
         coalesce(p_feature -> 'urls', '{}'::jsonb), p_feature ->> 'marker_icon', p_feature ->> 'marker_color',
-        p_feature ->> 'parent_feature_id', nullif(p_feature ->> 'sibling_group_id', '')::uuid,
+        nullif(p_feature ->> 'parent_feature_id', '')::uuid, nullif(p_feature ->> 'sibling_group_id', '')::uuid,
         coalesce(p_feature -> 'raw_refs', '[]'::jsonb), p_lifecycle_state,
         p_publication_state, p_quality_state,
         clock_timestamp(), clock_timestamp()
     ) ON CONFLICT (feature_id) DO NOTHING
-    RETURNING feature_id, feature_uuid, row_revision
-         INTO o_feature_id, o_feature_uuid, o_row_revision;
+    RETURNING feature_id, row_revision
+         INTO o_feature_id, o_row_revision;
 
     o_inserted := FOUND;
     IF NOT o_inserted THEN
-        SELECT feature_id, feature_uuid, row_revision
-          INTO o_feature_id, o_feature_uuid, o_row_revision
+        SELECT feature_id, row_revision
+          INTO o_feature_id, o_row_revision
           FROM feature.features
          WHERE feature_id = v_feature_id;
     END IF;
@@ -3783,29 +3773,27 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: create_manual_curation_item_with_feature_command(jsonb, jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
     v_collection feature.curation_collections%ROWTYPE;
-    v_feature_id text;
-    v_feature_uuid uuid;
+    v_feature_id uuid;
     v_feature_kind text;
     v_feature_name text;
     v_lon numeric;
     v_lat numeric;
     v_key record;
-    v_claimed_feature_uuid uuid;
-    v_created_feature_id text;
-    v_created_feature_uuid uuid;
+    v_claimed_feature_id uuid;
+    v_created_feature_id uuid;
     v_created_row_revision bigint;
     v_created boolean;
     v_collection_id uuid;
@@ -3854,7 +3842,7 @@ BEGIN
        OR EXISTS (
            SELECT 1 FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
            WHERE key_name NOT IN (
-               'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+               'feature_id', 'kind', 'name', 'category',
                'lon', 'lat', 'coord_precision_digits', 'address',
                'legal_dong_code', 'road_name_code', 'road_address_management_no',
                'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
@@ -3863,7 +3851,6 @@ BEGIN
            )
        )
        OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
-       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
        OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
@@ -3883,16 +3870,16 @@ BEGIN
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
     END IF;
 
-    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
     v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
     v_feature_name := nullif(btrim(p_feature_payload ->> 'name'), '');
-    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_feature_name IS NULL
+    IF nullif(btrim(p_feature_payload ->> 'feature_id'), '') IS NULL
+       OR v_feature_kind IS NULL OR v_feature_name IS NULL
        OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
         RAISE EXCEPTION 'manual curation Feature lacks required core values'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
     END IF;
     BEGIN
-        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_feature_id := (p_feature_payload ->> 'feature_id')::uuid;
         v_lon := (p_feature_payload ->> 'lon')::numeric;
         v_lat := (p_feature_payload ->> 'lat')::numeric;
         v_collection_id := (p_item_payload ->> 'collection_id')::uuid;
@@ -3901,7 +3888,7 @@ BEGIN
         RAISE EXCEPTION 'manual curation identity is invalid'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
     END;
-    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+    IF substring(v_feature_id::text FROM 15 FOR 1) <> '7' THEN
         RAISE EXCEPTION 'manual curation Feature UUID must be UUIDv7'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
@@ -3958,17 +3945,17 @@ BEGIN
         feature_id, feature_kind, name_key, lon_e6, lat_e6,
         claimed_by_command_id, claim_basis, claimed_at
     ) VALUES (
-        v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
+        v_feature_id, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
         p_domain_command_id, 'manual_create', clock_timestamp()
     ) ON CONFLICT (feature_kind, name_key, lon_e6, lat_e6) WHERE NOT identity_released DO NOTHING
-    RETURNING feature_id INTO v_claimed_feature_uuid;
-    IF v_claimed_feature_uuid IS NULL THEN
-        SELECT claim.feature_id INTO o_existing_feature_uuid
+    RETURNING feature_id INTO v_claimed_feature_id;
+    IF v_claimed_feature_id IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_id
         FROM feature.manual_feature_identity_claims AS claim
         WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6)
             = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6)
           AND NOT claim.identity_released;
-        IF o_existing_feature_uuid IS NULL THEN
+        IF o_existing_feature_id IS NULL THEN
             RAISE EXCEPTION 'manual curation exact winner disappeared'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
         END IF;
@@ -3988,13 +3975,11 @@ BEGIN
             'causation_ref', 'domain-command:' || p_domain_command_id::text
         ),
         v_created_feature_id,
-        v_created_feature_uuid,
         v_created_row_revision,
         v_created
     );
     IF v_created IS DISTINCT FROM true
        OR v_created_feature_id IS DISTINCT FROM v_feature_id
-       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid
        OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
         RAISE EXCEPTION 'manual curation core result does not match identity claim'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
@@ -4003,7 +3988,7 @@ BEGIN
         feature_id, origin_kind, creation_command_id, creator_principal_id,
         created_by_actor, created_at, invoker_role, procedure_definer
     ) VALUES (
-        v_feature_uuid,
+        v_feature_id,
         'manual_curation',
         p_domain_command_id,
         -- 적대 리뷰 F7: import child가 만든 Feature의 origin principal이 단건
@@ -4046,7 +4031,7 @@ BEGIN
         'manual-curation-feature-v1', jsonb_build_object(
             'operation', v_command.operation,
             'command_id', p_domain_command_id,
-            'feature_uuid', v_feature_uuid
+            'feature_uuid', CAST(v_feature_id AS text)
         ), v_command.actor
     ) RETURNING decision_id INTO STRICT v_decision_id;
     UPDATE feature.curation_items AS item
@@ -4059,13 +4044,129 @@ BEGIN
     RETURNING collection.row_revision INTO STRICT o_collection_row_revision;
     o_outcome := 'created';
     o_feature_id := v_created_feature_id;
-    o_feature_uuid := v_created_feature_uuid;
     o_feature_row_revision := v_created_row_revision;
 END
 $$;
 
 
-ALTER PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_curation_command_owner;
+ALTER PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_provider_feature_with_initial_state(jsonb, jsonb, text, text, text, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature.create_provider_feature_with_initial_state(IN p_feature_payload jsonb, IN p_identity jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_dataset_id bigint;
+    v_kind text;
+    v_natural text;
+    v_alias text;
+    v_candidate uuid;
+    v_claimed uuid;
+    v_alias_owner uuid;
+    v_created uuid;
+    v_created_inserted boolean;
+BEGIN
+    v_dataset_id := nullif(btrim(p_identity ->> 'provider_dataset_id'), '')::bigint;
+    v_kind := nullif(btrim(p_identity ->> 'feature_kind'), '');
+    v_natural := nullif(btrim(p_identity ->> 'natural_key'), '');
+    v_alias := nullif(btrim(p_identity ->> 'legacy_alias'), '');
+
+    IF v_dataset_id IS NULL OR v_kind IS NULL OR v_natural IS NULL OR v_alias IS NULL THEN
+        RAISE EXCEPTION
+            'provider Feature identity is incomplete — dataset/kind/natural_key/alias가 모두 필요하다'
+            USING ERRCODE = '23514',
+                  CONSTRAINT = 'ck_provider_feature_identity_complete';
+    END IF;
+
+    -- claim이 직렬화 지점이다. 같은 축을 동시에 적재하는 둘 중 하나만 INSERT에
+    -- 성공하고, 진 쪽은 아래 재조회로 이긴 쪽의 uuid를 받는다.
+    v_candidate := feature.uuid_generate_v7();
+    INSERT INTO provider_sync.provider_feature_identities
+        (provider_dataset_id, feature_kind, natural_key, feature_id, bound_by_operation)
+    VALUES (v_dataset_id, v_kind, v_natural, v_candidate, 'provider_sync')
+    ON CONFLICT (provider_dataset_id, feature_kind, natural_key) DO NOTHING
+    RETURNING feature_id INTO v_claimed;
+
+    IF v_claimed IS NULL THEN
+        -- 이미 claim이 있다 = 이 원천은 전에 적재됐다. **제자리 갱신 경로**다.
+        -- READ COMMITTED에서 `DO NOTHING`은 미커밋 동시 행을 기다리지 않으므로,
+        -- 여기서 못 찾으면 조용히 통과시키지 않고 재시도 가능한 오류로 올린다.
+        SELECT claim.feature_id INTO v_claimed
+        FROM provider_sync.provider_feature_identities AS claim
+        WHERE (claim.provider_dataset_id, claim.feature_kind, claim.natural_key)
+            = (v_dataset_id, v_kind, v_natural);
+        IF v_claimed IS NULL THEN
+            RAISE EXCEPTION
+                'provider Feature identity claim raced a concurrent writer'
+                USING ERRCODE = '40001',
+                      CONSTRAINT = 'ck_provider_feature_identity_race';
+        END IF;
+    END IF;
+
+    CALL feature.create_feature_with_initial_state(
+        p_feature_payload || jsonb_build_object('feature_id', v_claimed::text),
+        p_lifecycle_state,
+        p_publication_state,
+        p_quality_state,
+        p_context,
+        v_created,
+        o_row_revision,
+        v_created_inserted
+    );
+
+    -- core가 claim과 다른 identity를 돌려주면 그것은 조용한 손상이다.
+    -- manual 세 형제가 같은 규율로 산다("core result does not match identity claim").
+    IF v_created IS DISTINCT FROM v_claimed THEN
+        RAISE EXCEPTION
+            'provider Feature core result does not match identity claim (claim=%, core=%)',
+            v_claimed, v_created
+            USING ERRCODE = '23514',
+                  CONSTRAINT = 'ck_provider_feature_create_core_identity';
+    END IF;
+
+    -- 재분류가 만든 새 `f_*`도 같은 Feature의 주소로 남는다. Feature는 갈라지지 않는다.
+    -- `DO UPDATE`를 쓰면 안 된다 — `fence_feature_aliases_write()`가 alias 행의
+    -- UPDATE를 무조건 거부한다(행 불변, ADR-068).
+    --
+    -- 이 INSERT는 core CALL **뒤에만** 설 수 있다. `fk_feature_aliases_feature`는
+    -- 309 `_FK_RECREATE`가 DEFERRABLE 없이 재생성하므로 문장 끝에서 즉시 검사되고,
+    -- 신규 claim 경로의 `v_claimed`는 core가 넣기 전까지 `feature.features`에 없다 —
+    -- 앞에 두면 첫 provider Feature 생성마다 23503이다. 재키 전에는 이 자리를
+    -- `trg_features_legacy_alias` AFTER INSERT 트리거가 맡아 순서가 저절로 옳았고,
+    -- 그것을 프로시저로 옮기면서 그 보호가 사라졌다.
+    INSERT INTO feature.feature_aliases (alias, feature_id, alias_kind)
+    VALUES (v_alias, v_claimed, 'legacy_feature_id')
+    ON CONFLICT (alias) DO NOTHING
+    RETURNING feature_id INTO v_alias_owner;
+
+    IF v_alias_owner IS NULL THEN
+        -- `ON CONFLICT`가 삼킨 경우다. 같은 Feature의 재적재면 정상이고, 다른
+        -- Feature가 이미 그 주소를 쥐고 있으면 identity 손상이다 — 재키 전에는
+        -- `ck_feature_aliases_legacy_identity`(alias = feature_id)가 원리적으로
+        -- 막던 상황이라 조용히 넘기면 그 자리가 무방비가 된다.
+        SELECT bound.feature_id INTO v_alias_owner
+        FROM feature.feature_aliases AS bound
+        WHERE bound.alias = v_alias;
+        IF v_alias_owner IS DISTINCT FROM v_claimed THEN
+            RAISE EXCEPTION
+                'provider legacy alias % is already bound to Feature % (claim=%)',
+                v_alias, v_alias_owner, v_claimed
+                USING ERRCODE = '23505',
+                      CONSTRAINT = 'ck_provider_feature_alias_bound_elsewhere';
+        END IF;
+    END IF;
+
+    o_feature_id := v_claimed;
+    o_inserted := v_created_inserted;
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_provider_feature_with_initial_state(IN p_feature_payload jsonb, IN p_identity jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: current_curation_rule_input(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
@@ -4182,10 +4283,10 @@ $$;
 ALTER FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint) OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: current_theme_candidate_snapshot(uuid, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: current_theme_candidate_snapshot(uuid, text, uuid); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) RETURNS TABLE(rule_row_revision bigint, rule_input_hash text, source_record_key text, source_record_hash text, candidate_input_hash text, match_evidence jsonb)
+CREATE FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) RETURNS TABLE(rule_row_revision bigint, rule_input_hash text, source_record_key text, source_record_hash text, candidate_input_hash text, match_evidence jsonb)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $$
@@ -4210,7 +4311,6 @@ WITH rule_scope AS MATERIALIZED (
 effective_feature AS MATERIALIZED (
   SELECT
     core.feature_id,
-    core.feature_uuid,
     core.row_revision AS feature_row_revision,
     core.kind,
     core.category,
@@ -4265,7 +4365,6 @@ current_input AS MATERIALIZED (
     head.current_source_record_key,
     record.raw_payload_hash,
     feature.feature_id,
-    feature.feature_uuid,
     feature.feature_row_revision,
     feature.kind,
     feature.category,
@@ -4292,7 +4391,7 @@ current_input AS MATERIALIZED (
       ),
       'feature', jsonb_build_object(
         'feature_id', feature.feature_id,
-        'feature_uuid', feature.feature_uuid::text,
+        'feature_uuid', feature.feature_id::text,
         'row_revision', feature.feature_row_revision,
         'kind', feature.kind,
         'category', feature.category,
@@ -4353,7 +4452,7 @@ SELECT
   jsonb_build_object(
     'schema_version', 1,
     'feature_row_revision', input.feature_row_revision,
-    'feature_uuid', input.feature_uuid::text,
+    'feature_uuid', input.feature_id::text,
     'source_role', input.source_role,
     'match_method', input.match_method,
     'confidence', input.confidence,
@@ -4363,7 +4462,7 @@ FROM current_input AS input
 $$;
 
 
-ALTER FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) OWNER TO ktm_curation_command_owner;
+ALTER FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: derive_subtype_public_ready(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -4384,7 +4483,6 @@ BEGIN
         -- the 1:1 subtype identity immutable instead of inventing a broad
         -- relation lock or a retry protocol.
         IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
-           OR NEW.feature_uuid IS DISTINCT FROM OLD.feature_uuid
            OR NEW.kind IS DISTINCT FROM OLD.kind THEN
             RAISE EXCEPTION 'route/area subtype identity is immutable'
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_subtype_identity_immutable';
@@ -4432,25 +4530,6 @@ $$;
 
 
 ALTER FUNCTION feature.derive_subtype_public_ready() OWNER TO ktm_feature_state_procedure_owner;
-
---
--- Name: ensure_features_legacy_alias(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE FUNCTION feature.ensure_features_legacy_alias() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog'
-    AS $$
-BEGIN
-    INSERT INTO feature.feature_aliases (alias, feature_id, feature_uuid, alias_kind)
-    VALUES (NEW.feature_id, NEW.feature_id, NEW.feature_uuid, 'legacy_feature_id')
-    ON CONFLICT (alias) DO NOTHING;
-    RETURN NULL;
-END;
-$$;
-
-
-ALTER FUNCTION feature.ensure_features_legacy_alias() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: feature_uuid_from_legacy(text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -4530,12 +4609,11 @@ CREATE FUNCTION feature.fence_features_identity_update() RETURNS trigger
     SET search_path TO 'pg_catalog'
     AS $$
 BEGIN
-    IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
-       OR NEW.feature_uuid IS DISTINCT FROM OLD.feature_uuid THEN
+    IF NEW.feature_id IS DISTINCT FROM OLD.feature_id THEN
         RAISE EXCEPTION
-            'T-VN-32C legacy write fence: feature identity(feature_id/'
-            'feature_uuid)는 불변입니다 — 재키잉은 soft-delete + 신규 행으로 '
-            '표현한다 (ADR-068).';
+            'T-VN-32C legacy write fence: feature identity(feature_id)는 '
+            '불변입니다 — 재키잉은 soft-delete + 신규 행으로 표현한다 '
+            '(ADR-068).';
     END IF;
     RETURN NEW;
 END;
@@ -4543,25 +4621,6 @@ $$;
 
 
 ALTER FUNCTION feature.fence_features_identity_update() OWNER TO ktm_feature_schema_owner;
-
---
--- Name: fill_features_feature_uuid(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE FUNCTION feature.fill_features_feature_uuid() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog'
-    AS $$
-BEGIN
-    IF NEW.feature_uuid IS NULL THEN
-        NEW.feature_uuid := feature.uuid_generate_v7();
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-
-ALTER FUNCTION feature.fill_features_feature_uuid() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: finalize_provider_curation_receipts(bigint, uuid, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -5082,10 +5141,10 @@ CREATE FUNCTION feature.force_features_row_revision() RETURNS trigger
 ALTER FUNCTION feature.force_features_row_revision() OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: has_active_feature_override(text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: has_active_feature_override(uuid, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_path text) RETURNS boolean
+CREATE FUNCTION feature.has_active_feature_override(p_feature_id uuid, p_field_path text) RETURNS boolean
     LANGUAGE sql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -5099,7 +5158,7 @@ CREATE FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_p
 $$;
 
 
-ALTER FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_path text) OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.has_active_feature_override(p_feature_id uuid, p_field_path text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: lease_feature_reference_reconciliation_event(text, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
@@ -5280,13 +5339,13 @@ BEGIN
         candidate.evidence_fingerprint,
         jsonb_build_object(
             'feature_id', candidate.manual_feature_id,
-            'feature_uuid', candidate.manual_feature_uuid,
+            'feature_uuid', CAST(candidate.manual_feature_id AS text),
             'row_revision', candidate.manual_feature_row_revision,
             'snapshot', candidate.manual_feature_snapshot
         ),
         jsonb_build_object(
             'feature_id', candidate.provider_feature_id,
-            'feature_uuid', candidate.provider_feature_uuid,
+            'feature_uuid', CAST(candidate.provider_feature_id AS text),
             'row_revision', candidate.provider_feature_row_revision,
             'snapshot', candidate.provider_feature_snapshot
         ),
@@ -5320,10 +5379,10 @@ $$;
 ALTER FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: list_manual_provider_dedup_detector_manuals(text, integer); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: list_manual_provider_dedup_detector_manuals(uuid, integer); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-CREATE FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after text DEFAULT NULL::text, p_limit integer DEFAULT 1000) RETURNS TABLE(feature_id text, name text, category text, lon double precision, lat double precision)
+CREATE FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid DEFAULT NULL::uuid, p_limit integer DEFAULT 1000) RETURNS TABLE(feature_id uuid, name text, category text, lon double precision, lat double precision)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
@@ -5339,18 +5398,19 @@ BEGIN
         RAISE EXCEPTION 'manual/provider dedup detector page size is outside its canonical range'
             USING ERRCODE = '22023', CONSTRAINT = 'ck_m05_detector_manuals_limit';
     END IF;
-    -- `feature.features`의 세 컬럼은 `character varying`이다. RETURNS TABLE이
-    -- `text`이므로 명시 캐스트가 없으면 42804(structure of query does not match
-    -- function result type)로 죽는다 — n150 실측으로 잡았다.
+    -- `feature.features`의 `name`·`category`는 `character varying`이다. RETURNS
+    -- TABLE이 `text`이므로 명시 캐스트가 없으면 42804(structure of query does not
+    -- match function result type)로 죽는다 — n150 실측으로 잡았다. `feature_id`는
+    -- T-VN-39 재키로 uuid이고 RETURNS TABLE도 uuid이므로 캐스트를 두지 않는다.
     RETURN QUERY
-    SELECT f.feature_id::text, f.name::text, f.category::text,
+    SELECT f.feature_id, f.name::text, f.category::text,
            ST_X(f.coord) AS lon, ST_Y(f.coord) AS lat
     FROM feature.features AS f
-    JOIN feature.feature_creation_origins AS o ON o.feature_id = f.feature_uuid
+    JOIN feature.feature_creation_origins AS o ON o.feature_id = f.feature_id
     WHERE o.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request')
       AND EXISTS (
           SELECT 1 FROM feature.manual_feature_identity_claims AS c
-          WHERE c.feature_id = f.feature_uuid
+          WHERE c.feature_id = f.feature_id
             AND c.claimed_by_command_id = o.creation_command_id
       )
       AND f.lifecycle_state = 'active'
@@ -5364,13 +5424,13 @@ END
 $$;
 
 
-ALTER FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after text, p_limit integer) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: lock_current_provider_feature_source_evidence(text, bigint, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: lock_current_provider_feature_source_evidence(uuid, bigint, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) RETURNS text
+CREATE FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id uuid, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) RETURNS text
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -5401,7 +5461,7 @@ END;
 $$;
 
 
-ALTER FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id uuid, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: lock_current_provider_source_evidence(bigint, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -5508,7 +5568,7 @@ DECLARE
   v_existing_generation feature.theme_candidate_generations%ROWTYPE;
   v_candidate feature.theme_feature_candidates%ROWTYPE;
   v_expected record;
-  v_feature_id text;
+  v_feature_id uuid;
   v_provider_dataset_id bigint;
   v_rule_input jsonb;
   v_rule_input_hash text;
@@ -5707,7 +5767,7 @@ BEGIN
     FROM provider_sync.source_entities AS entity
     WHERE entity.provider_dataset_id = v_provider_dataset_id
     UNION
-    SELECT 'feature'::text, link.feature_id
+    SELECT 'feature'::text, link.feature_id::text
     FROM provider_sync.source_entities AS entity
     JOIN provider_sync.source_links AS link
       ON link.source_entity_key = entity.source_entity_key
@@ -5726,7 +5786,7 @@ BEGIN
           FROM provider_sync.source_entities AS entity
           WHERE entity.provider_dataset_id = v_provider_dataset_id
           UNION
-          SELECT 'feature'::text, link.feature_id
+          SELECT 'feature'::text, link.feature_id::text
           FROM provider_sync.source_entities AS entity
           JOIN provider_sync.source_links AS link
             ON link.source_entity_key = entity.source_entity_key
@@ -5740,7 +5800,7 @@ BEGIN
           FROM provider_sync.source_entities AS entity
           WHERE entity.provider_dataset_id = v_provider_dataset_id
           UNION
-          SELECT 'feature'::text, link.feature_id
+          SELECT 'feature'::text, link.feature_id::text
           FROM provider_sync.source_entities AS entity
           JOIN provider_sync.source_links AS link
             ON link.source_entity_key = entity.source_entity_key
@@ -6767,10 +6827,10 @@ $$;
 ALTER PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: patch_curation_item_command(uuid, uuid, bigint, text, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: patch_curation_item_command(uuid, uuid, bigint, uuid, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
+CREATE PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
@@ -6979,7 +7039,7 @@ END
 $$;
 
 
-ALTER PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+ALTER PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: preflight_feature_reference_reconciliation_ack(text, uuid, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
@@ -7660,13 +7720,13 @@ ALTER PROCEDURE feature.provision_feature_reference_reconciliation_subscription(
 -- Name: purge_manual_feature(uuid, text, boolean, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE PROCEDURE feature.purge_manual_feature(IN p_feature_uuid uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer)
+CREATE PROCEDURE feature.purge_manual_feature(IN p_feature_id uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
 DECLARE
     v_claim feature.manual_feature_identity_claims%ROWTYPE;
-    v_feature_id text;
+    v_legacy_feature_id text;
     v_command ops.domain_commands%ROWTYPE;
     v_blockers text;
     v_relation text;
@@ -7677,7 +7737,7 @@ DECLARE
     v_row_count integer := 0;
     v_existing feature.manual_feature_purge_records%ROWTYPE;
 BEGIN
-    IF p_feature_uuid IS NULL
+    IF p_feature_id IS NULL
        OR p_reason_code NOT IN ('mistaken_creation', 'erasure_required')
        OR p_release_identity IS NULL
        OR coalesce(btrim(p_actor), '') = ''
@@ -7703,7 +7763,7 @@ BEGIN
 
     SELECT * INTO v_claim
     FROM feature.manual_feature_identity_claims AS claim
-    WHERE claim.feature_id = p_feature_uuid
+    WHERE claim.feature_id = p_feature_id
     FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'purge target has no manual identity claim'
@@ -7713,7 +7773,7 @@ BEGIN
     IF v_claim.purged_by_command_id IS NOT NULL THEN
         SELECT * INTO v_existing
         FROM feature.manual_feature_purge_records AS record
-        WHERE record.feature_uuid = p_feature_uuid;
+        WHERE record.feature_id = p_feature_id;
         o_purge_id := v_existing.purge_id;
         o_outcome := 'already_purged';
         o_captured_relation_count := v_existing.captured_relation_count;
@@ -7721,14 +7781,40 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT feature.feature_id INTO v_feature_id
+    PERFORM 1
     FROM feature.features AS feature
-    WHERE feature.feature_uuid = p_feature_uuid
+    WHERE feature.feature_id = p_feature_id
     FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'purge target Feature does not exist'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_purge_not_manual';
     END IF;
+
+    -- T-VN-39 뒤 legacy `f_*` 문자열은 `feature.features`에 남아 있지 않다. 유일한
+    -- 잔존처인 alias map에서 읽어 purge 증거의 `legacy_feature_id`에 남긴다.
+    --
+    -- **계약 선결조건**: `feature.manual_feature_purge_records.legacy_feature_id`는
+    -- nullable이어야 한다. legacy alias 발급이 멎은 뒤 태어난 Feature에는 legacy id가
+    -- 애초에 없고 그것은 결손이 아니라 참이다. 개명하며 NOT NULL을 함께 끌고 오면
+    -- 그런 Feature의 purge가 evidence INSERT에서 23502로 죽고,
+    -- `manual_feature_purge_repo._raise_purge_error`는 `{23514, 42501}` 밖 sqlstate를
+    -- 그대로 re-raise하므로 catch-all 500이 된다.
+    --
+    -- `alias <> p_feature_id::text`는 `feature.ensure_features_legacy_alias`가 재키
+    -- 뒤에도 살아남아 `alias = <uuid 문자열>` 행을 새로 심는 경우를 배제한다 — uuid를
+    -- `legacy_feature_id`로 적재하면 append-only 증거가 영구히 오염된다. 캐스트는
+    -- 파라미터에 붙으므로 `idx_feature_aliases_feature` 탐색은 그대로다.
+    --
+    -- `ck_feature_aliases_legacy_identity`(alias = feature_id)는 text=uuid가 되어
+    -- 재키와 함께 사라진다. 그러면 한 Feature에 legacy alias가 둘 이상일 수 있고
+    -- `SELECT ... INTO`는 다중 행에서 에러 없이 임의의 한 행을 고르므로 순서를 못 박는다.
+    SELECT legacy.alias INTO v_legacy_feature_id
+    FROM feature.feature_aliases AS legacy
+    WHERE legacy.feature_id = p_feature_id
+      AND legacy.alias_kind = 'legacy_feature_id'
+      AND legacy.alias <> p_feature_id::text
+    ORDER BY legacy.alias
+    LIMIT 1;
 
     SELECT string_agg(blocked.relation_name || '=' || blocked.tally::text, ', '
                       ORDER BY blocked.relation_name)
@@ -7740,7 +7826,7 @@ BEGIN
         CROSS JOIN LATERAL (
             SELECT format(
                 'SELECT count(*) FROM %s AS child WHERE (%s) IN'
-                ' (SELECT %s FROM feature.features WHERE feature_uuid = %L)',
+                ' (SELECT %s FROM feature.features WHERE feature_id = %L)',
                 feature.qualified_relation_name(constraint_row.conrelid),
                 (SELECT string_agg(format('child.%I', attribute.attname), ', '
                                    ORDER BY position.ordinality)
@@ -7754,7 +7840,7 @@ BEGIN
                  JOIN pg_catalog.pg_attribute AS attribute
                    ON attribute.attrelid = constraint_row.confrelid
                   AND attribute.attnum = position.attnum),
-                p_feature_uuid
+                p_feature_id
             ) AS statement
         ) AS built
         CROSS JOIN LATERAL feature.count_rows_dynamic(built.statement) AS counted(tally)
@@ -7785,7 +7871,7 @@ BEGIN
             SELECT feature.qualified_relation_name(constraint_row.conrelid),
                    string_agg(
                        format(
-                           '(%s) IN (SELECT %s FROM feature.features WHERE feature_uuid = %L)',
+                           '(%s) IN (SELECT %s FROM feature.features WHERE feature_id = %L)',
                            (SELECT string_agg(format('child.%I', attribute.attname), ', '
                                               ORDER BY position.ordinality)
                             FROM unnest(constraint_row.conkey) WITH ORDINALITY AS position(attnum, ordinality)
@@ -7798,7 +7884,7 @@ BEGIN
                             JOIN pg_catalog.pg_attribute AS attribute
                               ON attribute.attrelid = constraint_row.confrelid
                              AND attribute.attnum = position.attnum),
-                           p_feature_uuid
+                           p_feature_id
                        ),
                        ' OR '
                    )
@@ -7827,7 +7913,7 @@ BEGIN
             'feature.features',
             (SELECT jsonb_build_array(to_jsonb(feature))
              FROM feature.features AS feature
-             WHERE feature.feature_uuid = p_feature_uuid)
+             WHERE feature.feature_id = p_feature_id)
         );
         v_relation_count := v_relation_count + 1;
         v_row_count := v_row_count + 1;
@@ -7837,14 +7923,14 @@ BEGIN
     SET purged_by_command_id = p_command_id,
         purged_at = clock_timestamp(),
         identity_released = p_release_identity
-    WHERE feature_id = p_feature_uuid;
+    WHERE feature_id = p_feature_id;
 
     INSERT INTO feature.manual_feature_purge_records (
-        feature_uuid, feature_id, reason_code, identity_released,
+        feature_id, legacy_feature_id, reason_code, identity_released,
         purged_by_command_id, purged_by_actor, captured_rows,
         captured_relation_count, captured_row_count, captured_sha256
     ) VALUES (
-        p_feature_uuid, v_feature_id, p_reason_code, p_release_identity,
+        p_feature_id, v_legacy_feature_id, p_reason_code, p_release_identity,
         p_command_id, p_actor,
         CASE WHEN p_reason_code = 'mistaken_creation' THEN v_captured ELSE NULL END,
         v_relation_count, v_row_count,
@@ -7853,7 +7939,7 @@ BEGIN
                 convert_to(
                     CASE WHEN p_reason_code = 'mistaken_creation'
                          THEN v_captured::text
-                         ELSE p_feature_uuid::text
+                         ELSE p_feature_id::text
                     END,
                     'UTF8'
                 ),
@@ -7863,7 +7949,7 @@ BEGIN
         )
     ) RETURNING purge_id INTO o_purge_id;
 
-    DELETE FROM feature.features WHERE feature_uuid = p_feature_uuid;
+    DELETE FROM feature.features WHERE feature_id = p_feature_id;
 
     o_outcome := 'purged';
     o_captured_relation_count := v_relation_count;
@@ -7872,7 +7958,7 @@ END
 $$;
 
 
-ALTER PROCEDURE feature.purge_manual_feature(IN p_feature_uuid uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer) OWNER TO ktm_feature_schema_owner;
+ALTER PROCEDURE feature.purge_manual_feature(IN p_feature_id uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer) OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: qualified_relation_name(oid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -7893,10 +7979,10 @@ $$;
 ALTER FUNCTION feature.qualified_relation_name(p_relation oid) OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: reactivate_admin_feature_state(text, bigint, text, text, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: reactivate_admin_feature_state(uuid, bigint, text, text, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint)
+CREATE PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -7987,18 +8073,18 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: read_admin_manual_feature_provenance(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
 --
 
-CREATE FUNCTION feature.read_admin_manual_feature_provenance(p_feature_uuid uuid) RETURNS TABLE(feature_id uuid, feature_kind text, name_key text, lon_e6 integer, lat_e6 integer, claim_basis text, claimed_at timestamp with time zone, claimed_by_command_id bigint, origin_kind text, creation_command_id bigint, creator_principal_id text, created_by_actor text, origin_created_at timestamp with time zone, invoker_role text, procedure_definer text)
+CREATE FUNCTION feature.read_admin_manual_feature_provenance(p_feature_id uuid) RETURNS TABLE(feature_id uuid, feature_kind text, name_key text, lon_e6 integer, lat_e6 integer, claim_basis text, claimed_at timestamp with time zone, claimed_by_command_id bigint, origin_kind text, creation_command_id bigint, creator_principal_id text, created_by_actor text, origin_created_at timestamp with time zone, invoker_role text, procedure_definer text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
 BEGIN
-    IF p_feature_uuid IS NULL THEN
+    IF p_feature_id IS NULL THEN
         RAISE EXCEPTION 'manual Feature provenance requires a canonical UUID'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_provenance_input';
     END IF;
@@ -8007,7 +8093,7 @@ BEGIN
     -- 일반 admin detail/read route로 그 snapshot을 탐색할 수 없다.
     RETURN QUERY
     SELECT
-        core.feature_uuid,
+        core.feature_id,
         claim.feature_kind,
         claim.name_key,
         claim.lon_e6,
@@ -8024,16 +8110,16 @@ BEGIN
         origin.procedure_definer
     FROM feature.features AS core
     LEFT JOIN feature.manual_feature_identity_claims AS claim
-      ON claim.feature_id = core.feature_uuid
+      ON claim.feature_id = core.feature_id
     LEFT JOIN feature.feature_creation_origins AS origin
       ON origin.feature_id = claim.feature_id
      AND origin.creation_command_id = claim.claimed_by_command_id
-    WHERE core.feature_uuid = p_feature_uuid;
+    WHERE core.feature_id = p_feature_id;
 END
 $$;
 
 
-ALTER FUNCTION feature.read_admin_manual_feature_provenance(p_feature_uuid uuid) OWNER TO ktm_manual_feature_procedure_owner;
+ALTER FUNCTION feature.read_admin_manual_feature_provenance(p_feature_id uuid) OWNER TO ktm_manual_feature_procedure_owner;
 
 --
 -- Name: read_feature_request(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_request_procedure_owner
@@ -8079,14 +8165,14 @@ BEGIN
         'evidence_fingerprint', candidate.evidence_fingerprint,
         'manual_feature', jsonb_build_object(
             'feature_id', candidate.manual_feature_id,
-            'feature_uuid', candidate.manual_feature_uuid,
+            'feature_uuid', CAST(candidate.manual_feature_id AS text),
             'row_revision', candidate.manual_feature_row_revision,
             'creation_command_id', candidate.manual_creation_command_id,
             'snapshot', candidate.manual_feature_snapshot
         ),
         'provider_feature', jsonb_build_object(
             'feature_id', candidate.provider_feature_id,
-            'feature_uuid', candidate.provider_feature_uuid,
+            'feature_uuid', CAST(candidate.provider_feature_id AS text),
             'row_revision', candidate.provider_feature_row_revision,
             'dataset_id', candidate.provider_dataset_id,
             'source_entity_key', candidate.source_entity_key,
@@ -8374,10 +8460,10 @@ $$;
 ALTER PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: record_manual_provider_dedup_candidate(text, text, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: record_manual_provider_dedup_candidate(uuid, uuid, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-CREATE PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text)
+CREATE PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $_$
@@ -8411,8 +8497,8 @@ BEGIN
         RAISE EXCEPTION 'manual/provider dedup detector requires the Dagster-only executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_detector_executor';
     END IF;
-    IF p_manual_feature_id IS NULL OR btrim(p_manual_feature_id) = ''
-       OR p_provider_feature_id IS NULL OR btrim(p_provider_feature_id) = ''
+    IF p_manual_feature_id IS NULL
+       OR p_provider_feature_id IS NULL
        OR p_manual_feature_id = p_provider_feature_id
        OR jsonb_typeof(p_scores) IS DISTINCT FROM 'object'
        OR jsonb_typeof(p_detector_causation) IS DISTINCT FROM 'object'
@@ -8456,7 +8542,7 @@ BEGIN
     PERFORM 1
     FROM feature.features AS locked
     WHERE locked.feature_id IN (p_manual_feature_id, p_provider_feature_id)
-    ORDER BY locked.feature_uuid
+    ORDER BY locked.feature_id
     FOR UPDATE;
     SELECT * INTO v_manual
     FROM feature.features WHERE feature_id = p_manual_feature_id FOR UPDATE;
@@ -8472,11 +8558,11 @@ BEGIN
     END IF;
     SELECT * INTO v_origin
     FROM feature.feature_creation_origins AS origin
-    WHERE origin.feature_id = v_manual.feature_uuid
+    WHERE origin.feature_id = v_manual.feature_id
       AND origin.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request');
     IF NOT FOUND OR NOT EXISTS (
         SELECT 1 FROM feature.manual_feature_identity_claims AS claim
-        WHERE claim.feature_id = v_manual.feature_uuid
+        WHERE claim.feature_id = v_manual.feature_id
           AND claim.claimed_by_command_id = v_origin.creation_command_id
     ) THEN
         RAISE EXCEPTION 'manual Feature lacks immutable creation evidence'
@@ -8522,7 +8608,7 @@ BEGIN
 
     v_manual_snapshot := jsonb_build_object(
         'feature_id', v_manual.feature_id,
-        'feature_uuid', v_manual.feature_uuid,
+        'feature_uuid', CAST(v_manual.feature_id AS text),
         'row_revision', v_manual.row_revision,
         'kind', v_manual.kind,
         'name', v_manual.name,
@@ -8532,7 +8618,7 @@ BEGIN
     );
     v_provider_snapshot := jsonb_build_object(
         'feature_id', v_provider.feature_id,
-        'feature_uuid', v_provider.feature_uuid,
+        'feature_uuid', CAST(v_provider.feature_id AS text),
         'row_revision', v_provider.row_revision,
         'kind', v_provider.kind,
         'name', v_provider.name,
@@ -8593,8 +8679,8 @@ BEGIN
     FROM ops.manual_provider_dedup_cases AS candidate
     JOIN ops.manual_provider_dedup_resolutions AS resolution
       ON resolution.case_id = candidate.case_id
-    WHERE candidate.manual_feature_uuid = v_manual.feature_uuid
-      AND candidate.provider_feature_uuid = v_provider.feature_uuid
+    WHERE candidate.manual_feature_id = v_manual.feature_id
+      AND candidate.provider_feature_id = v_provider.feature_id
       AND candidate.decision_fingerprint = v_decision_fingerprint
       -- `superseded`는 탐지기가 만든 것이라 admin 판정이 아니다. 그것으로 차단하면
       -- 탐지기가 자기 자신을 영구히 침묵시킨다.
@@ -8618,16 +8704,16 @@ BEGIN
         RETURN;
     END IF;
     INSERT INTO ops.manual_provider_dedup_cases (
-        manual_feature_id, manual_feature_uuid, manual_creation_command_id,
-        manual_feature_row_revision, provider_feature_id, provider_feature_uuid,
+        manual_feature_id, manual_creation_command_id,
+        manual_feature_row_revision, provider_feature_id,
         provider_feature_row_revision, provider_dataset_id, source_entity_key,
         source_record_key, source_record_raw_payload_hash, source_head_observed_at,
         manual_feature_snapshot, provider_feature_snapshot, scorer_id,
         scorer_input_sha256, name_score, spatial_score, category_score, total_score,
         distance_meters, evidence_fingerprint, decision_fingerprint, detector_causation
     ) VALUES (
-        v_manual.feature_id, v_manual.feature_uuid, v_origin.creation_command_id,
-        v_manual.row_revision, v_provider.feature_id, v_provider.feature_uuid,
+        v_manual.feature_id, v_origin.creation_command_id,
+        v_manual.row_revision, v_provider.feature_id,
         v_provider.row_revision, v_source.provider_dataset_id, v_source.source_entity_key,
         v_source.source_record_key, v_source.source_record_raw_payload_hash,
         v_source.source_head_observed_at, v_manual_snapshot, v_provider_snapshot,
@@ -8640,8 +8726,8 @@ BEGIN
         FROM ops.manual_provider_dedup_cases AS candidate
         LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
           ON resolution.case_id = candidate.case_id
-        WHERE candidate.manual_feature_uuid = v_manual.feature_uuid
-          AND candidate.provider_feature_uuid = v_provider.feature_uuid
+        WHERE candidate.manual_feature_id = v_manual.feature_id
+          AND candidate.provider_feature_id = v_provider.feature_id
           AND candidate.case_id <> o_case_id
           AND resolution.case_id IS NULL
         FOR UPDATE OF candidate
@@ -8657,7 +8743,7 @@ END
 $_$;
 
 
-ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
 -- Name: refresh_curated_source_observation(bigint, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -8985,7 +9071,7 @@ DECLARE
 BEGIN
     SELECT * INTO v_claim
     FROM feature.manual_feature_identity_claims AS claim
-    WHERE claim.feature_id = OLD.feature_uuid;
+    WHERE claim.feature_id = OLD.feature_id;
     IF NOT FOUND THEN
         RETURN OLD;
     END IF;
@@ -9365,10 +9451,10 @@ $$;
 ALTER PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: resolve_manual_provider_dedup_case(uuid, text, text, bigint, bigint, text, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: resolve_manual_provider_dedup_case(uuid, text, text, bigint, bigint, uuid, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-CREATE PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint)
+CREATE PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $_$
@@ -9380,7 +9466,7 @@ DECLARE
     v_source record;
     v_primary_source_count integer;
     v_command ops.domain_commands%ROWTYPE;
-    v_transition_feature_id text;
+    v_transition_feature_id uuid;
     v_transition_row_revision bigint;
     v_transition_id bigint;
     v_action text;
@@ -9407,7 +9493,7 @@ BEGIN
        OR nullif(btrim(p_reason), '') IS NULL
        OR nullif(btrim(p_actor), '') IS NULL
        OR p_domain_command_id IS NULL OR p_domain_command_id < 1
-       OR (p_decision = 'merged' AND nullif(btrim(p_survivor_feature_id), '') IS NULL)
+       OR (p_decision = 'merged' AND p_survivor_feature_id IS NULL)
        OR (p_decision <> 'merged' AND p_survivor_feature_id IS NOT NULL) THEN
         RAISE EXCEPTION 'manual/provider dedup decision input is not canonical'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_decision_input';
@@ -9448,18 +9534,16 @@ BEGIN
 
     PERFORM 1
     FROM feature.features AS locked
-    WHERE locked.feature_uuid IN (v_case.manual_feature_uuid, v_case.provider_feature_uuid)
-    ORDER BY locked.feature_uuid
+    WHERE locked.feature_id IN (v_case.manual_feature_id, v_case.provider_feature_id)
+    ORDER BY locked.feature_id
     FOR UPDATE;
     SELECT * INTO v_manual
     FROM feature.features
     WHERE feature_id = v_case.manual_feature_id
-      AND feature_uuid = v_case.manual_feature_uuid
     FOR UPDATE;
     SELECT * INTO v_provider
     FROM feature.features
     WHERE feature_id = v_case.provider_feature_id
-      AND feature_uuid = v_case.provider_feature_uuid
     FOR UPDATE;
     IF NOT FOUND
        OR v_manual.row_revision <> v_case.manual_feature_row_revision
@@ -9473,12 +9557,12 @@ BEGIN
     END IF;
     SELECT origin.* INTO v_origin
     FROM feature.feature_creation_origins AS origin
-    WHERE origin.feature_id = v_manual.feature_uuid
+    WHERE origin.feature_id = v_manual.feature_id
       AND origin.creation_command_id = v_case.manual_creation_command_id
       AND origin.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request');
     IF NOT FOUND OR NOT EXISTS (
         SELECT 1 FROM feature.manual_feature_identity_claims AS claim
-        WHERE claim.feature_id = v_manual.feature_uuid
+        WHERE claim.feature_id = v_manual.feature_id
           AND claim.claimed_by_command_id = v_origin.creation_command_id
     ) THEN
         o_outcome := 'stale';
@@ -9569,12 +9653,12 @@ BEGIN
         'action', v_action,
         'old_feature', jsonb_build_object(
             'feature_id', v_manual.feature_id,
-            'feature_uuid', v_manual.feature_uuid,
+            'feature_uuid', CAST(v_manual.feature_id AS text),
             'row_revision', v_manual.row_revision
         ),
         'replacement_feature', CASE WHEN v_action = 'rebind' THEN jsonb_build_object(
             'feature_id', v_provider.feature_id,
-            'feature_uuid', v_provider.feature_uuid,
+            'feature_uuid', CAST(v_provider.feature_id AS text),
             'row_revision', v_provider.row_revision
         ) ELSE NULL END,
         'manual_retire_transition_id', v_transition_id,
@@ -9586,15 +9670,14 @@ BEGIN
     );
     INSERT INTO ops.feature_reference_reconciliation_events (
         event_id, event_sequence, case_id, resolution_id, action,
-        old_feature_id, old_feature_uuid, old_feature_row_revision_before_transition,
-        replacement_feature_id, replacement_feature_uuid, replacement_feature_row_revision,
+        old_feature_id, old_feature_row_revision_before_transition,
+        replacement_feature_id, replacement_feature_row_revision,
         manual_retire_transition_id, manual_retire_row_revision_after_transition,
         command_id, payload_schema_version, event_payload, event_sha256, occurred_at
     ) OVERRIDING SYSTEM VALUE VALUES (
         o_event_id, v_event_sequence, v_case.case_id, o_resolution_id, v_action,
-        v_manual.feature_id, v_manual.feature_uuid, v_manual.row_revision,
+        v_manual.feature_id, v_manual.row_revision,
         CASE WHEN v_action = 'rebind' THEN v_provider.feature_id END,
-        CASE WHEN v_action = 'rebind' THEN v_provider.feature_uuid END,
         CASE WHEN v_action = 'rebind' THEN v_provider.row_revision END,
         v_transition_id, v_transition_row_revision, p_domain_command_id,
         1, v_payload, v_event_sha256, v_occurred_at
@@ -9605,13 +9688,13 @@ END
 $_$;
 
 
-ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: resolve_manual_provider_dedup_case_v2(uuid, text, text, bigint, bigint, text, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: resolve_manual_provider_dedup_case_v2(uuid, text, text, bigint, bigint, uuid, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint)
+CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
@@ -9643,13 +9726,31 @@ END
 $$;
 
 
-ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
--- Name: revoke_feature_field_overrides(text, bigint, text, text, bigint, text[]); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: resolve_provider_feature_id(bigint, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer)
+CREATE FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+SELECT claim.feature_id
+FROM provider_sync.provider_feature_identities AS claim
+WHERE claim.provider_dataset_id = p_provider_dataset_id
+  AND claim.feature_kind = p_feature_kind
+  AND claim.natural_key = p_natural_key
+$$;
+
+
+ALTER FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: revoke_feature_field_overrides(uuid, bigint, text, text, bigint, text[]); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -9663,7 +9764,7 @@ DECLARE
 BEGIN
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
-       OR coalesce(btrim(p_feature_id), '') = ''
+       OR p_feature_id IS NULL
        OR coalesce(btrim(p_principal), '') = ''
        OR coalesce(btrim(p_reason_code), '') = ''
        OR p_field_paths IS NULL OR cardinality(p_field_paths) < 1
@@ -9810,7 +9911,7 @@ BEGIN
         END,
         parent_feature_id = CASE
             WHEN v_values ? 'core.parent_feature_id'
-            THEN v_values ->> 'core.parent_feature_id'
+            THEN NULLIF(v_values ->> 'core.parent_feature_id', '')::uuid
             ELSE core.parent_feature_id
         END,
         sibling_group_id = CASE
@@ -10107,13 +10208,13 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: revoke_lifecycle_override(text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: revoke_lifecycle_override(uuid, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint)
+CREATE PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -10153,7 +10254,7 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: seal_provider_curation_snapshot_receipt(uuid, bigint, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -10776,10 +10877,10 @@ $$;
 ALTER PROCEDURE feature.touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: transition_admin_feature_state(text, text, text, text, bigint, text, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: transition_admin_feature_state(uuid, text, text, text, bigint, text, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint)
+CREATE PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -10854,13 +10955,13 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: transition_feature_state(text, text, text, text, bigint, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: transition_feature_state(uuid, text, text, text, bigint, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-CREATE PROCEDURE feature.transition_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id text, OUT o_row_revision bigint)
+CREATE PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
@@ -10952,7 +11053,7 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.transition_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id text, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: uuid_generate_v7(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -11007,8 +11108,7 @@ BEGIN
     END IF;
     SELECT kind INTO v_feature_kind
       FROM feature.features
-     WHERE feature_id = NEW.feature_id
-       AND feature_uuid = NEW.feature_uuid;
+     WHERE feature_id = NEW.feature_id;
     IF NOT FOUND OR (v_registry.feature_kind <> '*' AND v_registry.feature_kind <> v_feature_kind) THEN
         RAISE EXCEPTION 'base field path % does not apply to Feature', NEW.field_path
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_target';
@@ -11249,7 +11349,7 @@ BEGIN
     END IF;
 
     INSERT INTO feature.feature_state_transitions (
-        feature_id, feature_uuid,
+        feature_id,
         from_lifecycle_state, from_publication_state, from_quality_state,
         to_lifecycle_state, to_publication_state, to_quality_state,
         transition_kind, reason_code, principal, causation_ref,
@@ -11257,7 +11357,7 @@ BEGIN
         occurred_at,
         row_revision, invoker_role, state_procedure_definer, audit_writer_definer
     ) VALUES (
-        NEW.feature_id, NEW.feature_uuid,
+        NEW.feature_id,
         CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.lifecycle_state END,
         CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.publication_state END,
         CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
@@ -12496,7 +12596,7 @@ ALTER FUNCTION ops.mark_snapshot_material_orphaned() OWNER TO ktm_feature_schema
 -- Name: record_curation_import_manual_feature_child(uuid, integer, text, text, bigint, uuid, uuid, uuid, uuid); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
 --
 
-CREATE PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_uuid uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid)
+CREATE PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $_$
@@ -12561,9 +12661,8 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM feature.curation_items AS item
-        JOIN feature.features AS feature_row ON feature_row.feature_id = item.feature_id
         WHERE item.curation_item_id = p_curation_item_id
-          AND feature_row.feature_uuid = p_feature_uuid
+          AND item.feature_id = p_feature_id
     ) THEN
         RAISE EXCEPTION 'curation item is not bound to the linkage feature'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_feature';
@@ -12580,18 +12679,18 @@ BEGIN
     END IF;
     INSERT INTO ops.curation_import_manual_feature_children (
         import_plan_id, plan_row_number, plan_sha256, manual_payload_sha256,
-        child_command_id, feature_uuid, import_row_id, curation_item_id,
+        child_command_id, feature_id, import_row_id, curation_item_id,
         link_decision_id
     ) VALUES (
         p_import_plan_id, p_plan_row_number, p_plan_sha256, p_manual_payload_sha256,
-        p_child_command_id, p_feature_uuid, p_import_row_id, p_curation_item_id,
+        p_child_command_id, p_feature_id, p_import_row_id, p_curation_item_id,
         p_link_decision_id
     );
 END
 $_$;
 
 
-ALTER PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_uuid uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) OWNER TO ktm_curation_command_owner;
+ALTER PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: reject_c6c_cancel_probe_event(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -15489,7 +15588,7 @@ ALTER TABLE feature.curation_import_rows OWNER TO ktm_feature_schema_owner;
 CREATE TABLE feature.curation_items (
     curation_item_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     collection_id uuid NOT NULL,
-    feature_id text,
+    feature_id uuid,
     source_record_key text,
     external_item_id text NOT NULL,
     place_name text NOT NULL,
@@ -15535,7 +15634,7 @@ ALTER TABLE feature.curation_items OWNER TO ktm_feature_schema_owner;
 CREATE TABLE feature.curation_link_decisions (
     decision_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     curation_item_id uuid NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     import_row_id uuid,
     decision_kind text NOT NULL,
     match_basis text NOT NULL,
@@ -15560,7 +15659,7 @@ ALTER TABLE feature.curation_link_decisions OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.current_price_summary (
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     price_domain text NOT NULL,
     product_key text NOT NULL,
@@ -15580,7 +15679,7 @@ ALTER TABLE feature.current_price_summary OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.current_weather_summary (
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     weather_domain text NOT NULL,
     forecast_style text NOT NULL,
@@ -15605,14 +15704,13 @@ ALTER TABLE feature.current_weather_summary OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE feature.feature_aliases (
     alias text NOT NULL,
-    feature_id text NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     alias_kind text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_feature_aliases_ck_feature_aliases_alias_canonical CHECK (((alias <> ''::text) AND (alias = btrim(alias)))),
     CONSTRAINT ck_feature_aliases_ck_feature_aliases_alias_kind CHECK ((alias_kind = 'legacy_feature_id'::text)),
     CONSTRAINT ck_feature_aliases_ck_feature_aliases_kind_canonical CHECK (((alias_kind <> ''::text) AND (alias_kind = btrim(alias_kind)))),
-    CONSTRAINT ck_feature_aliases_legacy_identity CHECK (((alias_kind <> 'legacy_feature_id'::text) OR (alias = feature_id)))
+    CONSTRAINT ck_feature_aliases_legacy_alias_shape CHECK (((alias_kind <> 'legacy_feature_id'::text) OR (alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$'::text)))
 );
 
 
@@ -15623,8 +15721,7 @@ ALTER TABLE feature.feature_aliases OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_areas (
-    feature_id character varying NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     geom x_extension.geometry(MultiPolygon,4326) NOT NULL,
     area_kind character varying NOT NULL,
@@ -15646,9 +15743,8 @@ ALTER TABLE feature.feature_areas OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_base_field_values (
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     field_path text NOT NULL,
-    feature_uuid uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     source_entity_key text NOT NULL,
     source_record_key text NOT NULL,
@@ -15693,8 +15789,7 @@ ALTER TABLE feature.feature_creation_origins OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_events (
-    feature_id character varying NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     event_kind character varying NOT NULL,
     starts_on date,
@@ -15720,8 +15815,7 @@ ALTER TABLE feature.feature_events OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_notices (
-    feature_id character varying NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     notice_type character varying NOT NULL,
     severity smallint,
@@ -15748,8 +15842,7 @@ ALTER TABLE feature.feature_notices OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_places (
-    feature_id character varying NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     place_kind character varying NOT NULL,
     phones text[] DEFAULT '{}'::text[] NOT NULL,
@@ -15771,7 +15864,7 @@ ALTER TABLE feature.feature_places OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE feature.feature_price_values (
     price_value_key text NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     price_domain text NOT NULL,
     product_key text NOT NULL,
@@ -15799,8 +15892,7 @@ ALTER TABLE feature.feature_price_values OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.feature_routes (
-    feature_id character varying NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     geom x_extension.geometry(MultiLineString,4326) NOT NULL,
     route_type character varying NOT NULL,
@@ -15827,8 +15919,7 @@ ALTER TABLE feature.feature_routes OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE feature.feature_state_transitions (
     transition_id bigint NOT NULL,
-    feature_id text NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     from_lifecycle_state text,
     from_publication_state text,
     from_quality_state text,
@@ -15881,7 +15972,7 @@ ALTER TABLE feature.feature_state_transitions ALTER COLUMN transition_id ADD GEN
 
 CREATE TABLE feature.feature_weather_values (
     weather_value_key text NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     provider_dataset_id bigint NOT NULL,
     weather_domain text NOT NULL,
     forecast_style text NOT NULL,
@@ -15919,7 +16010,7 @@ ALTER TABLE feature.feature_weather_values OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE feature.features (
-    feature_id character varying NOT NULL,
+    feature_id uuid NOT NULL,
     kind character varying NOT NULL,
     name character varying NOT NULL,
     category character varying NOT NULL,
@@ -15939,14 +16030,13 @@ END) STORED,
     urls jsonb DEFAULT '{}'::jsonb NOT NULL,
     marker_icon character varying,
     marker_color character varying,
-    parent_feature_id character varying,
+    parent_feature_id uuid,
     sibling_group_id uuid,
     raw_refs jsonb DEFAULT '[]'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     coord_precision_digits smallint,
     row_revision bigint DEFAULT 1 NOT NULL,
-    feature_uuid uuid NOT NULL,
     lifecycle_state text DEFAULT 'active'::text NOT NULL,
     publication_state text DEFAULT 'published'::text NOT NULL,
     quality_state text DEFAULT 'valid'::text NOT NULL,
@@ -15997,8 +16087,8 @@ ALTER TABLE feature.manual_feature_identity_claims OWNER TO ktm_feature_schema_o
 
 CREATE TABLE feature.manual_feature_purge_records (
     purge_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    feature_uuid uuid NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
+    legacy_feature_id text,
     reason_code text NOT NULL,
     identity_released boolean NOT NULL,
     purged_by_command_id bigint NOT NULL,
@@ -16024,7 +16114,7 @@ ALTER TABLE feature.manual_feature_purge_records OWNER TO ktm_feature_schema_own
 
 CREATE VIEW feature.public_features AS
  SELECT core.feature_id,
-    core.feature_uuid,
+    (core.feature_id)::text AS feature_uuid,
     core.kind,
     core.name,
     core.category,
@@ -16086,11 +16176,11 @@ CREATE VIEW feature.public_features AS
             ELSE NULL::jsonb
         END, '{}'::jsonb) AS detail
    FROM (((((feature.features core
-     LEFT JOIN feature.feature_places place ON (((place.feature_id)::text = (core.feature_id)::text)))
-     LEFT JOIN feature.feature_events event ON (((event.feature_id)::text = (core.feature_id)::text)))
-     LEFT JOIN feature.feature_notices notice ON (((notice.feature_id)::text = (core.feature_id)::text)))
-     LEFT JOIN feature.feature_routes route ON (((route.feature_id)::text = (core.feature_id)::text)))
-     LEFT JOIN feature.feature_areas area ON (((area.feature_id)::text = (core.feature_id)::text)))
+     LEFT JOIN feature.feature_places place ON ((place.feature_id = core.feature_id)))
+     LEFT JOIN feature.feature_events event ON ((event.feature_id = core.feature_id)))
+     LEFT JOIN feature.feature_notices notice ON ((notice.feature_id = core.feature_id)))
+     LEFT JOIN feature.feature_routes route ON ((route.feature_id = core.feature_id)))
+     LEFT JOIN feature.feature_areas area ON ((area.feature_id = core.feature_id)))
   WHERE ((core.lifecycle_state = 'active'::text) AND (core.publication_state = 'published'::text) AND (core.quality_state = 'valid'::text));
 
 
@@ -16104,7 +16194,7 @@ CREATE TABLE feature.theme_candidate_generation_observations (
     generation_id uuid NOT NULL,
     candidate_id uuid NOT NULL,
     source_entity_key text NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     source_record_key text NOT NULL,
     candidate_input_hash text NOT NULL,
     observed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
@@ -16154,8 +16244,8 @@ ALTER TABLE feature.theme_candidate_generations OWNER TO ktm_feature_schema_owne
 CREATE TABLE feature.theme_feature_candidate_transitions (
     transition_id bigint NOT NULL,
     candidate_id uuid NOT NULL,
-    from_feature_id text,
-    to_feature_id text,
+    from_feature_id uuid,
+    to_feature_id uuid,
     rule_id uuid NOT NULL,
     source_entity_key text NOT NULL,
     from_review_state text,
@@ -16225,7 +16315,7 @@ CREATE TABLE feature.theme_feature_candidates (
     candidate_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     rule_id uuid NOT NULL,
     source_entity_key text NOT NULL,
-    feature_id text NOT NULL,
+    feature_id uuid NOT NULL,
     source_record_key text NOT NULL,
     rule_row_revision bigint NOT NULL,
     rule_input_hash text NOT NULL,
@@ -16332,7 +16422,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -16576,7 +16666,7 @@ CREATE TABLE ops.curation_import_manual_feature_children (
     plan_sha256 text NOT NULL,
     manual_payload_sha256 text NOT NULL,
     child_command_id bigint NOT NULL,
-    feature_uuid uuid NOT NULL,
+    feature_id uuid NOT NULL,
     import_row_id uuid NOT NULL,
     curation_item_id uuid NOT NULL,
     link_decision_id uuid NOT NULL,
@@ -16909,7 +16999,7 @@ ALTER TABLE ops.dagster_schedule_overrides OWNER TO ktm_feature_schema_owner;
 CREATE TABLE ops.data_integrity_violations (
     issue_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     source_record_key character varying,
-    feature_id character varying,
+    feature_id uuid,
     violation_type text NOT NULL,
     severity text NOT NULL,
     message text NOT NULL,
@@ -16932,8 +17022,8 @@ ALTER TABLE ops.data_integrity_violations OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE ops.dedup_review_queue (
     review_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    feature_id_a character varying NOT NULL,
-    feature_id_b character varying NOT NULL,
+    feature_id_a uuid NOT NULL,
+    feature_id_b uuid NOT NULL,
     total_score numeric(5,2) NOT NULL,
     name_score numeric(5,2) NOT NULL,
     spatial_score numeric(5,2) NOT NULL,
@@ -17010,7 +17100,7 @@ ALTER TABLE ops.domain_commands ALTER COLUMN command_id ADD GENERATED ALWAYS AS 
 
 CREATE TABLE ops.enrichment_review_queue (
     review_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    target_feature_id character varying NOT NULL,
+    target_feature_id uuid NOT NULL,
     source_name character varying NOT NULL,
     target_name character varying NOT NULL,
     name_score numeric(5,2) NOT NULL,
@@ -17052,8 +17142,8 @@ ALTER TABLE ops.feature_consistency_reports OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE ops.feature_merge_history (
     merge_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    master_feature_id text NOT NULL,
-    loser_feature_id text NOT NULL,
+    master_feature_id uuid NOT NULL,
+    loser_feature_id uuid NOT NULL,
     score numeric(5,2),
     review_id uuid,
     merged_by text,
@@ -17098,7 +17188,7 @@ ALTER TABLE ops.feature_override_field_paths OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE ops.feature_overrides (
     override_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    feature_id character varying NOT NULL,
+    feature_id uuid NOT NULL,
     source_record_key character varying,
     field_path text NOT NULL,
     source_value jsonb,
@@ -17154,11 +17244,9 @@ CREATE TABLE ops.feature_reference_reconciliation_events (
     case_id uuid NOT NULL,
     resolution_id uuid NOT NULL,
     action text NOT NULL,
-    old_feature_id text NOT NULL,
-    old_feature_uuid uuid NOT NULL,
+    old_feature_id uuid NOT NULL,
     old_feature_row_revision_before_transition bigint NOT NULL,
-    replacement_feature_id text,
-    replacement_feature_uuid uuid,
+    replacement_feature_id uuid,
     replacement_feature_row_revision bigint,
     manual_retire_transition_id bigint NOT NULL,
     manual_retire_row_revision_after_transition bigint NOT NULL,
@@ -17169,7 +17257,7 @@ CREATE TABLE ops.feature_reference_reconciliation_events (
     occurred_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
     CONSTRAINT ck_feature_reference_reconciliation_events_action CHECK ((action = ANY (ARRAY['rebind'::text, 'detach'::text]))),
     CONSTRAINT ck_feature_reference_reconciliation_events_payload CHECK (((payload_schema_version = 1) AND (event_sha256 ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(event_payload) = 'object'::text))),
-    CONSTRAINT ck_feature_reference_reconciliation_events_replacement CHECK ((((action = 'rebind'::text) AND (replacement_feature_id IS NOT NULL) AND (replacement_feature_uuid IS NOT NULL) AND (replacement_feature_row_revision IS NOT NULL)) OR ((action = 'detach'::text) AND (replacement_feature_id IS NULL) AND (replacement_feature_uuid IS NULL) AND (replacement_feature_row_revision IS NULL)))),
+    CONSTRAINT ck_feature_reference_reconciliation_events_replacement CHECK ((((action = 'rebind'::text) AND (replacement_feature_id IS NOT NULL) AND (replacement_feature_row_revision IS NOT NULL)) OR ((action = 'detach'::text) AND (replacement_feature_id IS NULL) AND (replacement_feature_row_revision IS NULL)))),
     CONSTRAINT ck_feature_reference_reconciliation_events_revisions CHECK (((old_feature_row_revision_before_transition >= 1) AND (manual_retire_row_revision_after_transition >= 2)))
 );
 
@@ -17354,7 +17442,7 @@ ALTER TABLE ops.import_job_event_clock OWNER TO ktm_feature_schema_owner;
 CREATE TABLE ops.import_job_events (
     event_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     job_id uuid NOT NULL,
-    feature_id text,
+    feature_id uuid,
     stage text,
     level text NOT NULL,
     code text,
@@ -17623,12 +17711,10 @@ ALTER TABLE ops.managed_files ALTER COLUMN file_id ADD GENERATED ALWAYS AS IDENT
 
 CREATE TABLE ops.manual_provider_dedup_cases (
     case_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    manual_feature_id text NOT NULL,
-    manual_feature_uuid uuid NOT NULL,
+    manual_feature_id uuid NOT NULL,
     manual_creation_command_id bigint NOT NULL,
     manual_feature_row_revision bigint NOT NULL,
-    provider_feature_id text NOT NULL,
-    provider_feature_uuid uuid NOT NULL,
+    provider_feature_id uuid NOT NULL,
     provider_feature_row_revision bigint NOT NULL,
     provider_dataset_id bigint NOT NULL,
     source_entity_key text NOT NULL,
@@ -17856,7 +17942,7 @@ ALTER TABLE ops.pipeline_cancellations OWNER TO ktm_feature_schema_owner;
 
 CREATE TABLE ops.poi_cache_target_feature_links (
     target_id uuid NOT NULL,
-    feature_id character varying NOT NULL,
+    feature_id uuid NOT NULL,
     distance_m numeric(12,2),
     relation text DEFAULT 'within_radius'::text NOT NULL,
     active boolean DEFAULT true NOT NULL,
@@ -18401,7 +18487,7 @@ ALTER TABLE ops.system_log OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE ops.tvn36_legacy_freeze_preflight_manifest (
-    feature_id text NOT NULL,
+    legacy_feature_id text NOT NULL,
     request_id uuid,
     violation_code text NOT NULL,
     detail text NOT NULL,
@@ -18532,6 +18618,25 @@ ALTER TABLE provider_sync.provider_datasets ALTER COLUMN provider_dataset_id ADD
 
 
 --
+-- Name: provider_feature_identities; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE provider_sync.provider_feature_identities (
+    provider_dataset_id bigint NOT NULL,
+    feature_kind text NOT NULL,
+    natural_key text NOT NULL,
+    feature_id uuid NOT NULL,
+    bound_by_operation text NOT NULL,
+    bound_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_provider_feature_identities_kind CHECK ((feature_kind = ANY (ARRAY['place'::text, 'event'::text, 'notice'::text, 'price'::text, 'weather'::text, 'route'::text, 'area'::text]))),
+    CONSTRAINT ck_provider_feature_identities_natural_key CHECK (((btrim(natural_key) = natural_key) AND (natural_key <> ''::text) AND (strpos(natural_key, '|'::text) = 0))),
+    CONSTRAINT ck_provider_feature_identities_operation CHECK (((btrim(bound_by_operation) = bound_by_operation) AND (bound_by_operation <> ''::text)))
+);
+
+
+ALTER TABLE provider_sync.provider_feature_identities OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: provider_sync_state; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -18574,7 +18679,7 @@ ALTER TABLE provider_sync.source_entities OWNER TO ktm_feature_schema_owner;
 --
 
 CREATE TABLE provider_sync.source_links (
-    feature_id character varying NOT NULL,
+    feature_id uuid NOT NULL,
     source_role character varying DEFAULT 'enrichment'::character varying NOT NULL,
     match_method character varying NOT NULL,
     confidence integer NOT NULL,
@@ -18997,27 +19102,11 @@ ALTER TABLE ONLY feature.feature_creation_origins
 
 
 --
--- Name: features uq_features_feature_uuid; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: features uq_features_id_kind; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.features
-    ADD CONSTRAINT uq_features_feature_uuid UNIQUE (feature_uuid);
-
-
---
--- Name: features uq_features_identity_kind; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.features
-    ADD CONSTRAINT uq_features_identity_kind UNIQUE (feature_id, kind);
-
-
---
--- Name: features uq_features_identity_pair; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.features
-    ADD CONSTRAINT uq_features_identity_pair UNIQUE (feature_id, feature_uuid);
+    ADD CONSTRAINT uq_features_id_kind UNIQUE (feature_id, kind);
 
 
 --
@@ -19049,7 +19138,7 @@ ALTER TABLE ONLY feature.manual_feature_purge_records
 --
 
 ALTER TABLE ONLY feature.manual_feature_purge_records
-    ADD CONSTRAINT uq_manual_feature_purge_records_feature UNIQUE (feature_uuid);
+    ADD CONSTRAINT uq_manual_feature_purge_records_feature UNIQUE (feature_id);
 
 
 --
@@ -19785,7 +19874,7 @@ ALTER TABLE ONLY ops.system_log
 --
 
 ALTER TABLE ONLY ops.tvn36_legacy_freeze_preflight_manifest
-    ADD CONSTRAINT tvn36_legacy_freeze_preflight_manifest_pkey PRIMARY KEY (feature_id, violation_code, detail);
+    ADD CONSTRAINT tvn36_legacy_freeze_preflight_manifest_pkey PRIMARY KEY (legacy_feature_id, violation_code, detail);
 
 
 --
@@ -20173,6 +20262,14 @@ ALTER TABLE ONLY provider_sync.provider_datasets
 
 
 --
+-- Name: provider_feature_identities pk_provider_feature_identities; Type: CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY provider_sync.provider_feature_identities
+    ADD CONSTRAINT pk_provider_feature_identities PRIMARY KEY (provider_dataset_id, feature_kind, natural_key);
+
+
+--
 -- Name: provider_sync_state pk_provider_sync_state; Type: CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -20407,13 +20504,6 @@ CREATE INDEX idx_feature_aliases_alias_c ON feature.feature_aliases USING btree 
 --
 
 CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases USING btree (feature_id);
-
-
---
--- Name: idx_feature_aliases_feature_uuid; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_feature_aliases_feature_uuid ON feature.feature_aliases USING btree (feature_uuid);
 
 
 --
@@ -21127,7 +21217,7 @@ CREATE INDEX idx_managed_files_upload ON ops.managed_files USING btree (upload_i
 -- Name: idx_manual_provider_dedup_cases_decision_fence; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE INDEX idx_manual_provider_dedup_cases_decision_fence ON ops.manual_provider_dedup_cases USING btree (manual_feature_uuid, provider_feature_uuid, decision_fingerprint);
+CREATE INDEX idx_manual_provider_dedup_cases_decision_fence ON ops.manual_provider_dedup_cases USING btree (manual_feature_id, provider_feature_id, decision_fingerprint);
 
 
 --
@@ -21502,6 +21592,13 @@ CREATE INDEX idx_provider_dataset_operations_enabled ON provider_sync.provider_d
 
 
 --
+-- Name: idx_provider_feature_identities_feature; Type: INDEX; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_provider_feature_identities_feature ON provider_sync.provider_feature_identities USING btree (feature_id);
+
+
+--
 -- Name: idx_provider_sync_state_next_run; Type: INDEX; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -21782,24 +21879,10 @@ CREATE TRIGGER trg_features_coord_precision BEFORE INSERT OR UPDATE OF coord, co
 
 
 --
--- Name: features trg_features_feature_uuid_fill; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_features_feature_uuid_fill BEFORE INSERT ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.fill_features_feature_uuid();
-
-
---
 -- Name: features trg_features_identity_fence; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_features_identity_fence BEFORE UPDATE OF feature_id, feature_uuid ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.fence_features_identity_update();
-
-
---
--- Name: features trg_features_legacy_alias; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_features_legacy_alias AFTER INSERT ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.ensure_features_legacy_alias();
+CREATE TRIGGER trg_features_identity_fence BEFORE UPDATE OF feature_id ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.fence_features_identity_update();
 
 
 --
@@ -23221,27 +23304,11 @@ ALTER TABLE ONLY feature.feature_aliases
 
 
 --
--- Name: feature_aliases fk_feature_aliases_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_aliases
-    ADD CONSTRAINT fk_feature_aliases_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
-
-
---
 -- Name: feature_areas fk_feature_areas_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.feature_areas
     ADD CONSTRAINT fk_feature_areas_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
-
-
---
--- Name: feature_areas fk_feature_areas_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_areas
-    ADD CONSTRAINT fk_feature_areas_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
 
 
 --
@@ -23265,7 +23332,7 @@ ALTER TABLE ONLY feature.feature_base_field_values
 --
 
 ALTER TABLE ONLY feature.feature_base_field_values
-    ADD CONSTRAINT fk_feature_base_field_values_feature_identity FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
+    ADD CONSTRAINT fk_feature_base_field_values_feature_identity FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE;
 
 
 --
@@ -23309,27 +23376,11 @@ ALTER TABLE ONLY feature.feature_events
 
 
 --
--- Name: feature_events fk_feature_events_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_events
-    ADD CONSTRAINT fk_feature_events_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
-
-
---
 -- Name: feature_notices fk_feature_notices_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.feature_notices
     ADD CONSTRAINT fk_feature_notices_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
-
-
---
--- Name: feature_notices fk_feature_notices_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_notices
-    ADD CONSTRAINT fk_feature_notices_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
 
 
 --
@@ -23341,27 +23392,11 @@ ALTER TABLE ONLY feature.feature_places
 
 
 --
--- Name: feature_places fk_feature_places_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_places
-    ADD CONSTRAINT fk_feature_places_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
-
-
---
 -- Name: feature_routes fk_feature_routes_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.feature_routes
     ADD CONSTRAINT fk_feature_routes_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
-
-
---
--- Name: feature_routes fk_feature_routes_identity_pair; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_routes
-    ADD CONSTRAINT fk_feature_routes_identity_pair FOREIGN KEY (feature_id, feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE CASCADE;
 
 
 --
@@ -23713,7 +23748,7 @@ ALTER TABLE ONLY ops.feature_requests
 --
 
 ALTER TABLE ONLY ops.feature_requests
-    ADD CONSTRAINT feature_requests_resolved_feature_id_fkey FOREIGN KEY (resolved_feature_id) REFERENCES feature.features(feature_uuid);
+    ADD CONSTRAINT feature_requests_resolved_feature_id_fkey FOREIGN KEY (resolved_feature_id) REFERENCES feature.features(feature_id);
 
 
 --
@@ -24049,7 +24084,7 @@ ALTER TABLE ONLY ops.cache_target_writer_drain_runs
 --
 
 ALTER TABLE ONLY ops.curation_import_manual_feature_children
-    ADD CONSTRAINT fk_curation_import_manual_feature_children_claim FOREIGN KEY (feature_uuid, child_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_curation_import_manual_feature_children_claim FOREIGN KEY (feature_id, child_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
 
 
 --
@@ -24273,7 +24308,7 @@ ALTER TABLE ONLY ops.feature_reference_reconciliation_events
 --
 
 ALTER TABLE ONLY ops.feature_reference_reconciliation_events
-    ADD CONSTRAINT fk_feature_reference_reconciliation_events_old_identity FOREIGN KEY (old_feature_id, old_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_old_identity FOREIGN KEY (old_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
 
 
 --
@@ -24281,7 +24316,7 @@ ALTER TABLE ONLY ops.feature_reference_reconciliation_events
 --
 
 ALTER TABLE ONLY ops.feature_reference_reconciliation_events
-    ADD CONSTRAINT fk_feature_reference_reconciliation_events_replacement_identity FOREIGN KEY (replacement_feature_id, replacement_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_replacement_identity FOREIGN KEY (replacement_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
 
 
 --
@@ -24441,7 +24476,7 @@ ALTER TABLE ONLY ops.managed_files
 --
 
 ALTER TABLE ONLY ops.manual_provider_dedup_cases
-    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_claim FOREIGN KEY (manual_feature_uuid, manual_creation_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_claim FOREIGN KEY (manual_feature_id, manual_creation_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
 
 
 --
@@ -24449,7 +24484,7 @@ ALTER TABLE ONLY ops.manual_provider_dedup_cases
 --
 
 ALTER TABLE ONLY ops.manual_provider_dedup_cases
-    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_identity FOREIGN KEY (manual_feature_id, manual_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_identity FOREIGN KEY (manual_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
 
 
 --
@@ -24457,7 +24492,7 @@ ALTER TABLE ONLY ops.manual_provider_dedup_cases
 --
 
 ALTER TABLE ONLY ops.manual_provider_dedup_cases
-    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_origin FOREIGN KEY (manual_feature_uuid, manual_creation_command_id) REFERENCES feature.feature_creation_origins(feature_id, creation_command_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_origin FOREIGN KEY (manual_feature_id, manual_creation_command_id) REFERENCES feature.feature_creation_origins(feature_id, creation_command_id) ON DELETE RESTRICT;
 
 
 --
@@ -24473,7 +24508,7 @@ ALTER TABLE ONLY ops.manual_provider_dedup_cases
 --
 
 ALTER TABLE ONLY ops.manual_provider_dedup_cases
-    ADD CONSTRAINT fk_manual_provider_dedup_cases_provider_identity FOREIGN KEY (provider_feature_id, provider_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_provider_identity FOREIGN KEY (provider_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
 
 
 --
@@ -24669,6 +24704,14 @@ ALTER TABLE ONLY provider_sync.provider_dataset_operations
 
 
 --
+-- Name: provider_feature_identities fk_provider_feature_identities_dataset; Type: FK CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY provider_sync.provider_feature_identities
+    ADD CONSTRAINT fk_provider_feature_identities_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: provider_sync_state fk_provider_sync_state_exact_operation_scope; Type: FK CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -24779,11 +24822,11 @@ GRANT ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN 
 
 
 --
--- Name: FUNCTION append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+-- Name: FUNCTION append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
 --
 
-REVOKE ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) FROM PUBLIC;
-GRANT ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) TO ktm_curation_command_owner;
+REVOKE ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id uuid, p_to_feature_id uuid, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) TO ktm_curation_command_owner;
 
 
 --
@@ -24795,19 +24838,19 @@ GRANT ALL ON PROCEDURE feature.apply_curation_import_items_command(IN p_items js
 
 
 --
--- Name: PROCEDURE apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE apply_provider_feature_field_patch(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_applied_field_count integer) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
 
 
 --
--- Name: PROCEDURE approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+-- Name: PROCEDURE approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) TO ktm_feature_request_admin_executor;
+REVOKE ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) TO ktm_feature_request_admin_executor;
 
 
 --
@@ -24858,11 +24901,19 @@ REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cur
 
 
 --
--- Name: PROCEDURE author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE author_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
+
+
+--
+-- Name: PROCEDURE author_lifecycle_override(IN p_feature_id uuid, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) TO ktm_feature_runtime;
 
 
 --
@@ -24893,6 +24944,14 @@ GRANT ALL ON PROCEDURE feature.complete_curation_import_plan_command(IN p_import
 --
 
 REVOKE ALL ON FUNCTION feature.count_rows_dynamic(p_statement text) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid); Type: ACL; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid) TO ktm_manual_feature_admin_executor;
 
 
 --
@@ -24936,11 +24995,11 @@ GRANT ALL ON PROCEDURE feature.create_curation_import_plan_command(IN p_import_p
 
 
 --
--- Name: PROCEDURE create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: PROCEDURE create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+REVOKE ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
 
 
 --
@@ -24951,20 +25010,30 @@ REVOKE ALL ON FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id 
 
 
 --
--- Name: PROCEDURE create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_manual_feature_procedure_owner;
-GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_curation_command_owner;
-GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_request_procedure_owner;
+REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_manual_feature_procedure_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_curation_command_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_request_procedure_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_create_provider_executor;
 
 
 --
--- Name: PROCEDURE create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: PROCEDURE create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) TO ktm_curation_admin_executor;
+REVOKE ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_provider_feature_with_initial_state(IN p_feature_payload jsonb, IN p_identity jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_provider_feature_with_initial_state(IN p_feature_payload jsonb, IN p_identity jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_provider_feature_with_initial_state(IN p_feature_payload jsonb, IN p_identity jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_create_provider_executor;
 
 
 --
@@ -24983,11 +25052,11 @@ GRANT ALL ON FUNCTION feature.current_provider_curation_input_set(p_provider_dat
 
 
 --
--- Name: FUNCTION current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: FUNCTION current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) FROM PUBLIC;
-GRANT ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) TO ktm_feature_schema_owner;
+REVOKE ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) TO ktm_feature_schema_owner;
 
 
 --
@@ -25006,10 +25075,10 @@ GRANT ALL ON PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id 
 
 
 --
--- Name: FUNCTION has_active_feature_override(p_feature_id text, p_field_path text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: FUNCTION has_active_feature_override(p_feature_id uuid, p_field_path text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-REVOKE ALL ON FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_path text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION feature.has_active_feature_override(p_feature_id uuid, p_field_path text) FROM PUBLIC;
 
 
 --
@@ -25044,10 +25113,18 @@ GRANT ALL ON FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_
 
 
 --
--- Name: FUNCTION lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: FUNCTION list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-REVOKE ALL ON FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) TO ktm_manual_provider_dedup_detector_executor;
+
+
+--
+-- Name: FUNCTION lock_current_provider_feature_source_evidence(p_feature_id uuid, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id uuid, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) FROM PUBLIC;
 
 
 --
@@ -25114,11 +25191,11 @@ GRANT ALL ON PROCEDURE feature.patch_curation_collection_command(IN p_collection
 
 
 --
--- Name: PROCEDURE patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: PROCEDURE patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+REVOKE ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
 
 
 --
@@ -25153,18 +25230,18 @@ GRANT ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscr
 
 
 --
--- Name: PROCEDURE purge_manual_feature(IN p_feature_uuid uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: PROCEDURE purge_manual_feature(IN p_feature_id uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.purge_manual_feature(IN p_feature_uuid uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer) FROM PUBLIC;
+REVOKE ALL ON PROCEDURE feature.purge_manual_feature(IN p_feature_id uuid, IN p_reason_code text, IN p_release_identity boolean, IN p_actor text, IN p_command_id bigint, OUT o_purge_id uuid, OUT o_outcome text, OUT o_captured_relation_count integer, OUT o_captured_row_count integer) FROM PUBLIC;
 
 
 --
--- Name: PROCEDURE reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE reactivate_admin_feature_state(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
 
 
 --
@@ -25192,11 +25269,11 @@ GRANT ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quara
 
 
 --
--- Name: PROCEDURE record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: PROCEDURE record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) TO ktm_manual_provider_dedup_detector_executor;
+REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) TO ktm_manual_provider_dedup_detector_executor;
 
 
 --
@@ -25275,26 +25352,42 @@ GRANT ALL ON PROCEDURE feature.resolve_curation_import_collection_command(IN p_c
 
 
 --
--- Name: PROCEDURE resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+-- Name: PROCEDURE resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
-
-
---
--- Name: PROCEDURE resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
---
-
-REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) TO ktm_manual_provider_dedup_admin_executor;
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
 
 
 --
--- Name: PROCEDURE revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
+-- Name: FUNCTION resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) TO ktm_feature_runtime;
+
+
+--
+-- Name: PROCEDURE revoke_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id uuid, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
+
+
+--
+-- Name: PROCEDURE revoke_lifecycle_override(IN p_feature_id uuid, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) TO ktm_feature_runtime;
 
 
 --
@@ -25336,12 +25429,20 @@ GRANT ALL ON PROCEDURE feature.touch_curation_import_collection_command(IN p_col
 
 
 --
--- Name: PROCEDURE transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+-- Name: PROCEDURE transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
-GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_manual_provider_dedup_procedure_owner;
+REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
+GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: PROCEDURE transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) TO ktm_feature_runtime;
 
 
 --
@@ -25400,11 +25501,11 @@ GRANT ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_
 
 
 --
--- Name: PROCEDURE record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_uuid uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+-- Name: PROCEDURE record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_uuid uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) FROM PUBLIC;
-GRANT ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_uuid uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) TO ktm_curation_admin_executor;
+REVOKE ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) TO ktm_curation_admin_executor;
 
 
 --
@@ -25990,13 +26091,6 @@ GRANT SELECT(feature_id),UPDATE(feature_id) ON TABLE feature.feature_areas TO kt
 
 
 --
--- Name: COLUMN feature_areas.feature_uuid; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-GRANT INSERT(feature_uuid) ON TABLE feature.feature_areas TO ktm_feature_runtime;
-
-
---
 -- Name: COLUMN feature_areas.kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26343,13 +26437,6 @@ GRANT SELECT(feature_id),UPDATE(feature_id) ON TABLE feature.feature_routes TO k
 
 
 --
--- Name: COLUMN feature_routes.feature_uuid; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-GRANT INSERT(feature_uuid) ON TABLE feature.feature_routes TO ktm_feature_runtime;
-
-
---
 -- Name: COLUMN feature_routes.kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26652,13 +26739,6 @@ GRANT UPDATE(row_revision) ON TABLE feature.features TO ktm_curation_command_own
 
 
 --
--- Name: COLUMN features.feature_uuid; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-GRANT SELECT(feature_uuid) ON TABLE feature.features TO ktm_manual_feature_procedure_owner;
-
-
---
 -- Name: COLUMN features.lifecycle_state; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26687,13 +26767,6 @@ GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_manua
 GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_curation_command_owner;
 GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_feature_request_procedure_owner;
 GRANT SELECT ON TABLE feature.manual_feature_identity_claims TO ktm_manual_provider_dedup_procedure_owner;
-
-
---
--- Name: TABLE public_features; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-GRANT SELECT ON TABLE feature.public_features TO ktm_feature_runtime;
 
 
 --
@@ -27210,6 +27283,16 @@ GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_curation_command_ow
 
 GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
 GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE provider_feature_identities; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE provider_sync.provider_feature_identities TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_curation_command_owner;
+GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_feature_runtime;
 
 
 --

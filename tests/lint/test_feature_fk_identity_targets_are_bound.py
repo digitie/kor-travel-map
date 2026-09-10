@@ -97,12 +97,23 @@ def test_every_single_column_feature_fk_targets_a_handled_identity() -> None:
     )
 
 
-def test_the_uuid_target_that_broke_this_is_still_covered() -> None:
-    """이 게이트를 만들게 한 실제 사례가 계속 덮이는지 본다.
+def test_the_case_that_created_this_gate_is_recorded() -> None:
+    """이 게이트를 만들게 한 실제 사례가 어디로 갔는지 못 박는다.
 
-    `T-VN-M04`의 `0233`이 넣은 FK다. 회귀하면 D2가 다시 배포 스택 실행 도중에 죽는다.
+    `T-VN-M04`의 `0233`이 `ops.feature_requests.resolved_feature_id`를
+    `feature.features.feature_uuid`(uuid)로 걸었고, helper가 "대상은 언제나
+    `feature_id`"라고 단언만 하고 있었기에 D2가 2026-09-05 배포 스택 실행 13분째에
+    죽었다.
+
+    T-VN-39가 그 축을 없앴다 — `feature_uuid` 컬럼이 사라지면서 이 FK는
+    `feature.features(feature_id)`로 재타겟됐고, identity 열이 하나로 접혔다.
+    **게이트는 남긴다.** 축이 하나라는 것 자체가 결박 대상이고, 세 번째 열이 들어오는
+    순간 helper와 여기가 함께 깨져야 한다.
     """
 
     targets = _single_column_targets()
-    assert targets.get("feature_requests_resolved_feature_id_fkey") == "feature_uuid"
-    assert "feature_uuid" in _helper_identity_columns()
+    assert targets.get("feature_requests_resolved_feature_id_fkey") == "feature_id"
+    assert _helper_identity_columns() == {"feature_id"}, (
+        "helper가 다루는 identity 열이 하나가 아니다. 재키 후 축은 `feature_id` 하나이고, "
+        "늘어났다면 그것은 새 계약이므로 이 게이트와 helper를 함께 고쳐라."
+    )

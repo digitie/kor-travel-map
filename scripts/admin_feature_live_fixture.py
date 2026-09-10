@@ -547,19 +547,18 @@ async def _foreign_key_reference_counts(
         )
     ).mappings()
     counts: dict[str, int] = {}
-    # 소유 행의 uuid는 필요할 때 한 번만 푼다. `feature_uuid`를 가리키는 **단일 컬럼**
-    # FK가 실재하기 때문이다 — `ops.feature_requests.resolved_feature_id`(uuid)가
-    # T-VN-M04의 `0233`에서 그렇게 들어왔고 타입상 정당하다. 종전에는 이 함수가 그것을
-    # 계약 위반으로 보고 raise했다. 그 단언은 스키마에 결박돼 있지 않아 migration이
-    # 조용히 무효화했고, D2가 그 뒤로 돌지 않아 2026-09-05까지 아무도 몰랐다.
+    # T-VN-39 재키가 두 identity 축을 하나로 접었다. 종전에는 `feature_id`(text)와
+    # `feature_uuid`(uuid) 둘 다 FK 대상이었고 — `ops.feature_requests.resolved_feature_id`가
+    # `0233`에서 uuid 쪽으로 들어와 D2를 2026-09-05에 죽였다 — 이 함수가 대상 열에 따라
+    # 캐스트를 갈랐다. 재키 후 `feature_uuid` 컬럼이 사라지면서 그 FK도
+    # `feature.features(feature_id)`로 재타겟됐고, 남은 축은 하나다.
     #
-    # 건너뛰지 않고 **세는** 이유: 이 함수의 목적이 cleanup 뒤 남은 참조를 정확히
-    # 계수하는 것이라, uuid로 참조하는 표를 빼면 잔여물 탐지에 사각이 생긴다.
-    owned_uuids: list[str] | None = None
-
+    # 그래서 갈래를 없애되 **검사는 남긴다.** 세 번째 identity 열이 다시 들어오면
+    # 여기서 서고, 그 전에 `tests/lint/test_feature_fk_identity_targets_are_bound.py`가
+    # PR에서 잡는다 — 배포 스택 실행 도중이 아니라.
     for constraint in constraints:
         target_column_name = str(constraint["target_column_name"])
-        if target_column_name not in {"feature_id", "feature_uuid"}:
+        if target_column_name not in {"feature_id"}:
             raise RuntimeError("feature FK topology가 알려진 identity 계약과 다릅니다")
         schema_name = str(constraint["schema_name"])
         table_name = str(constraint["table_name"])
@@ -567,27 +566,8 @@ async def _foreign_key_reference_counts(
         key = f"{schema_name}.{table_name}.{column_name}"
         if key in counts:
             raise RuntimeError("같은 feature FK column에 중복 constraint가 있습니다")
-        if target_column_name == "feature_id":
-            cast_type = "text[]"
-            identities: list[str] = list(feature_ids)
-        else:
-            if owned_uuids is None:
-                owned_uuids = [
-                    str(value)
-                    for value in (
-                        await session.execute(
-                            text(
-                                "SELECT feature_uuid FROM feature.features "
-                                "WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
-                            ),
-                            {"feature_ids": list(feature_ids)},
-                        )
-                    )
-                    .scalars()
-                    .all()
-                ]
-            cast_type = "uuid[]"
-            identities = owned_uuids
+        cast_type = "uuid[]"
+        identities: list[str] = list(feature_ids)
         statement = text(
             "SELECT count(*) FROM "
             f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)} "
