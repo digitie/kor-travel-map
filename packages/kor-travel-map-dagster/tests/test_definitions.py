@@ -30,6 +30,7 @@ from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.schedules import (
     _KNPS_GEOMETRY_SCHEDULE,
     _KNPS_POINT_SCHEDULE,
+    DISABLED_FEATURE_LOAD_SCHEDULES,
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
     KST_TIMEZONE,
@@ -238,8 +239,29 @@ def test_feature_load_provider_guard_resources_registered() -> None:
 
 
 def test_feature_load_schedules_registered_with_kst_cron() -> None:
-    expected = {spec.schedule_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
+    # 자동 적재를 끈 provider의 schedule은 **만들어지지 않는다**
+    # (`DISABLED_FEATURE_LOAD_SCHEDULES`). 그 이름을 여기서 제외하는 것이 아니라
+    # **명시적으로 확인**한다 — 목록이 조용히 늘면 이 단언이 먼저 빨개져야 한다.
+    expected = {
+        spec.schedule_name: spec
+        for spec in FEATURE_LOAD_SCHEDULE_SPECS
+        if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
+    }
+    disabled = {
+        spec.schedule_name
+        for spec in FEATURE_LOAD_SCHEDULE_SPECS
+        if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES
+    }
+    assert disabled == set(DISABLED_FEATURE_LOAD_SCHEDULES), (
+        "끈 목록에 spec이 없는 이름이 있다 — 이름이 바뀌었거나 spec이 사라졌다. "
+        "그러면 '껐다'는 기록만 남고 실제로 끄는 대상이 없다."
+    )
     assert len(FEATURE_LOAD_SCHEDULES) == len(expected)
+    registered = {schedule.name for schedule in FEATURE_LOAD_SCHEDULES}
+    assert registered.isdisjoint(disabled), (
+        "끈 schedule이 정의에 남아 있다 — `default_status=STOPPED`만으로는 UI에서 "
+        "한 번 켜면 인스턴스 상태가 배포를 넘어 살아남는다."
+    )
 
     for schedule_name, spec in expected.items():
         schedule = defs.resolve_schedule_def(schedule_name)
@@ -382,6 +404,15 @@ def test_job_definition_tags_carry_the_execution_manifest_declaration() -> None:
     }
     for spec in declaring:
         job_tags = defs.resolve_job_def(spec.job_name).tags
+        if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES:
+            # 시계를 껐어도 **능력은 남는다** — 수동 launch가 여전히 manifest를
+            # 필요로 하므로 job 정의 tag는 그대로 검사한다. schedule 정의는 없다.
+            assert EXECUTION_SCOPES_TAG in job_tags
+            assert (
+                declared_execution_scopes(job_tags, boundary="test")
+                == spec.execution_scopes
+            )
+            continue
         schedule_tags = defs.resolve_schedule_def(spec.schedule_name).tags
         assert EXECUTION_SCOPES_TAG in job_tags, (
             f"{spec.job_name} 정의 tag에 실행 manifest 선언이 없다 — "
@@ -404,6 +435,8 @@ def test_specs_without_declaration_leave_the_manifest_tag_off() -> None:
         if spec.execution_scopes:
             continue
         assert EXECUTION_SCOPES_TAG not in defs.resolve_job_def(spec.job_name).tags
+        if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES:
+            continue  # 시계를 껐다 — schedule 정의 자체가 없다.
         assert EXECUTION_SCOPES_TAG not in defs.resolve_schedule_def(spec.schedule_name).tags
 
 
