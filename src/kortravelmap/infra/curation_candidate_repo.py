@@ -183,15 +183,17 @@ _LIST_SQL = f"""
 SELECT {_CANDIDATE_COLUMNS}
 {_CANDIDATE_FROM}
 WHERE candidate.disposition = 'active'
-  AND (:rule_id IS NULL OR candidate.rule_id = CAST(:rule_id AS uuid))
-  AND (:theme_id IS NULL OR rule.theme_id = CAST(:theme_id AS uuid))
-  AND (:source_id IS NULL OR rule.source_id = CAST(:source_id AS uuid))
-  AND (:review_state IS NULL OR candidate.review_state = :review_state)
-  AND (:eligibility_present IS NULL
-       OR candidate.eligibility_present = :eligibility_present)
-  AND (:feature_id IS NULL OR candidate.feature_id = :feature_id)
+  AND (CAST(:rule_id AS uuid) IS NULL OR candidate.rule_id = CAST(:rule_id AS uuid))
+  AND (CAST(:theme_id AS uuid) IS NULL OR rule.theme_id = CAST(:theme_id AS uuid))
+  AND (CAST(:source_id AS uuid) IS NULL OR rule.source_id = CAST(:source_id AS uuid))
+  AND (CAST(:review_state AS text) IS NULL
+       OR candidate.review_state = CAST(:review_state AS text))
+  AND (CAST(:eligibility_present AS boolean) IS NULL
+       OR candidate.eligibility_present = CAST(:eligibility_present AS boolean))
+  AND (CAST(:feature_id AS uuid) IS NULL
+       OR candidate.feature_id = CAST(:feature_id AS uuid))
   AND (
-    :cursor_updated_at IS NULL
+    CAST(:cursor_updated_at AS timestamptz) IS NULL
     OR (candidate.updated_at, candidate.candidate_id)
        < (CAST(:cursor_updated_at AS timestamptz), CAST(:cursor_candidate_id AS uuid))
   )
@@ -214,7 +216,8 @@ SELECT transition_id, candidate_id::text, transition_kind,
        actor, reason_code, causation_ref, occurred_at
 FROM feature.theme_feature_candidate_transitions
 WHERE candidate_id = CAST(:candidate_id AS uuid)
-  AND (:before_transition_id IS NULL OR transition_id < :before_transition_id)
+  AND (CAST(:before_transition_id AS bigint) IS NULL
+       OR transition_id < CAST(:before_transition_id AS bigint))
 ORDER BY transition_id DESC
 LIMIT :limit_plus_one
 """

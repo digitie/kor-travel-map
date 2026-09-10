@@ -156,8 +156,11 @@ CALL feature.resolve_manual_provider_dedup_case_v2(
     CAST(:expected_manual_row_revision AS bigint),
     CAST(:expected_provider_row_revision AS bigint),
     CAST(:survivor_feature_id AS uuid), CAST(:reason AS text), CAST(:actor AS text),
-    CAST(:command_id AS bigint), NULL::text, NULL::uuid, NULL::uuid, NULL::text,
-    NULL::bigint
+    CAST(:command_id AS bigint),
+    -- OUT 자리도 시그니처의 일부다(`CALL`은 OUT을 세어 프로시저를 고른다).
+    -- `o_manual_feature_id`는 T-VN-39로 uuid가 됐다 — text로 두면 이 CALL이
+    -- 어떤 프로시저와도 맞지 않아 42883이다.
+    NULL::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::bigint
 )
 """
 

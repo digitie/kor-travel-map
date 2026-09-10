@@ -3792,7 +3792,7 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     scope 자체의 winner는 ``ranked``에서 이미 계산하므로 cross-scope 보호 CTE에서
     다시 전수 비교하지 않는다.
 
-    ``close_missing=True``는 ``:hidden_before``(적재 이전에 안 보이던 feature_id
+    ``close_missing=True``는 ``hidden_before``(적재 이전에 안 보이던 feature_id
     배열)를 추가로 요구한다 — 같은 statement에서 읽는 상태는 이미 이번 적재가
     지나간 뒤라 "직전 가시성"을 스스로 관측할 수 없기 때문이다
     (``_hidden_notice_features``).
@@ -4203,9 +4203,9 @@ global_feature_wins AS MATERIALIZED (
             -- 열린다. 그러면 "직전에 안 보였다"가 관측 불가라 재등장 집계가
             -- 구조적으로 항상 0이 된다(실측: 적재 전 valid_end=03:20 → 적재 후
             -- NULL → reconcile 반환행 0건). 그래서 **적재 이전** 가시성은
-            -- 호출자가 재어 ``:hidden_before``로 넘긴다 — 적재가 없는 경로
+            -- 호출자가 재어 ``hidden_before``로 넘긴다 — 적재가 없는 경로
             -- (close/supersede)는 빈 배열이라 종전 판정 그대로다.
-            NOT (desired.feature_id = ANY(CAST(:hidden_before AS text[])))
+            NOT (desired.feature_id = ANY(CAST(:hidden_before AS uuid[])))
             AND desired.old_lifecycle_state = 'active'
             AND (
                 desired.old_valid_end_time IS NULL
@@ -4262,7 +4262,7 @@ global_feature_wins AS MATERIALIZED (
           -- 적재가 먼저 되살린 재등장은 여기 도달했을 때 core/subtype이 이미
           -- 최종 상태다(갱신할 컬럼이 없다). 그래도 RETURNING에 실어야 재등장
           -- 집계가 잡히므로 전이 자체를 갱신 조건에 포함한다. ``was_visible``이
-          -- ``:hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
+          -- ``hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
           -- 손댄 행 외에는 추가 갱신이 생기지 않는다.
           OR (
               NOT target.was_visible

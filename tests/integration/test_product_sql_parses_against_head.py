@@ -35,6 +35,8 @@ exist`(42703), `is of type uuid but expression is of type text`(42804),
 from __future__ import annotations
 
 import importlib
+import inspect
+import itertools
 import pkgutil
 import re
 from typing import Any, Final
@@ -66,9 +68,32 @@ _VERBS: Final[tuple[str, ...]] = (
 #: 앞머리의 SQL 주석과 공백. `--` 줄과 `/* */` 블록.
 _LEADING_NOISE = re.compile(r"\A(?:\s|--[^\n]*\n|/\*.*?\*/)+", re.DOTALL)
 
-#: Parse가 아니라 **실행 문맥**을 요구하는 문장. 이유를 같이 적는다 — 목록이 느는
-#: 것 자체가 리뷰 신호다.
-_NOT_PARSEABLE_WITHOUT_CONTEXT: Final[dict[str, str]] = {}
+#: head 오라클이 판정할 수 없는 문장. 이유를 같이 적는다 — 목록이 느는 것 자체가
+#: 리뷰 신호다.
+_OUTSIDE_THE_HEAD_ORACLE: Final[dict[str, str]] = {
+    # 런타임이 `to_regclass('feature.feature_files') IS NOT NULL`로 먼저 묻고
+    # 없으면 이 SQL을 아예 실행하지 않는다(선택적 관계). head에 그 표가 없는 것이
+    # 정상이므로 Parse 실패는 결함이 아니다.
+    "kortravelmap.infra.admin_feature_repo._ADMIN_FEATURE_FILES_SQL": (
+        "feature.feature_files는 선택적 관계 — 호출부가 to_regclass로 먼저 묻는다"
+    ),
+    "kortravelmap.infra.consistency._F8_FEATURE_FILE_METADATA_ROWS_SQL": (
+        "feature.feature_files는 선택적 관계 — 호출부가 to_regclass로 먼저 묻는다"
+    ),
+}
+
+#: **다른 스키마 세대**를 겨냥한 SQL. h35 cutover CLI가 0063~0079 고정 세대에서
+#: 같은 import 경로를 돌린다(ADR-075, 역사 표면 보존). 그 세대의 오라클은 head가
+#: 아니므로 여기서 판정하지 않는다.
+#:
+#: `curation_repo._pre_uuid_feature_id_recordset`의 docstring이 이 세대의 현재
+#: 상태를 들고 있다 — 재키 뒤 그 경로는 세대 분기가 없는 공용 표면 셋 때문에 이미
+#: 반쪽이고, 되살릴지 은퇴시킬지는 열린 결정이다.
+_FROZEN_GENERATION_MARKERS: Final[tuple[str, ...]] = (
+    "_FROZEN_H35_",
+    "_PRE_UUID_",
+    "_PRE_REVISION_",
+)
 
 
 def _statement(value: object) -> str | None:
@@ -80,6 +105,42 @@ def _statement(value: object) -> str | None:
         return None
     head = body.split(None, 1)[0].upper().rstrip("(")
     return value if head in _VERBS else None
+
+
+def _builder_results(builder: Any) -> list[tuple[str, str]]:
+    """SQL을 조립해 돌려주는 모듈 최상단 함수를 **실제로 불러** 결과를 얻는다.
+
+    상수만 모으면 함수 안에서 조립되는 문장이 통째로 시야 밖에 남는다. 실제로
+    그랬다 — `_supersede_stale_notice_sql(close_missing=True)`의
+    `CAST(:hidden_before AS text[])`(재키 뒤 42883)를 이 오라클의 첫 판이 놓쳤다.
+
+    부를 수 있는 것은 인자가 전부 bool이거나 기본값을 가진 순수 조립 함수뿐이다.
+    나머지는 건드리지 않는다.
+    """
+    try:
+        signature = inspect.signature(builder)
+    except (TypeError, ValueError):
+        return []
+    switches: list[str] = []
+    for parameter in signature.parameters.values():
+        if parameter.kind in {parameter.VAR_POSITIONAL, parameter.VAR_KEYWORD}:
+            return []
+        if parameter.annotation is bool or parameter.annotation == "bool":
+            switches.append(parameter.name)
+        elif parameter.default is inspect.Parameter.empty:
+            return []
+    if len(switches) > 3:  # 조합 폭발 방지 — 이 저장소에는 없다.
+        return []
+    results: list[tuple[str, str]] = []
+    for combination in itertools.product((False, True), repeat=len(switches)):
+        kwargs = dict(zip(switches, combination, strict=True))
+        try:
+            produced = builder(**kwargs)
+        except Exception:  # noqa: BLE001 — 부를 수 없는 함수는 이 검사 밖이다.
+            return []
+        suffix = "".join(f"[{k}={v}]" for k, v in kwargs.items())
+        results.append((suffix, produced if isinstance(produced, str) else ""))
+    return results
 
 
 def _collect() -> dict[str, str]:
@@ -100,12 +161,37 @@ def _collect() -> dict[str, str]:
                 continue
         for module in modules:
             for name, value in vars(module).items():
-                if not name.endswith("_SQL"):
-                    continue
-                statement = _statement(value)
-                if statement is not None:
-                    found[f"{module.__name__}.{name}"] = statement
+                if name.endswith("_SQL"):
+                    statement = _statement(value)
+                    if statement is not None:
+                        found[f"{module.__name__}.{name}"] = statement
+                elif (
+                    name.endswith("_sql")
+                    and inspect.isfunction(value)
+                    and value.__module__ == module.__name__
+                ):
+                    for suffix, produced in _builder_results(value):
+                        statement = _statement(produced)
+                        if statement is not None:
+                            found[f"{module.__name__}.{name}{suffix}"] = statement
     return found
+
+
+def _fragments(statements: dict[str, str]) -> set[str]:
+    """다른 문장 **안에** 통째로 들어가는 것은 조각이다.
+
+    조각(CTE 본문, INSERT 접두)은 그 자체로 Parse되지 않지만, 그것을 품는 완성
+    문장이 같이 수집돼 있으므로 판정은 그쪽에서 이미 이뤄진다. 이름 규약이 아니라
+    **포함 관계**로 가리는 이유는, 품는 문장이 사라지면 조각이 다시 검사 대상이
+    되게 하기 위해서다.
+    """
+    bodies = sorted(set(statements.values()), key=len, reverse=True)
+    fragment_bodies = {
+        body
+        for index, body in enumerate(bodies)
+        if any(body in longer for longer in bodies[:index])
+    }
+    return {name for name, body in statements.items() if body in fragment_bodies}
 
 
 async def test_every_product_sql_statement_parses_against_the_head_schema(
@@ -116,6 +202,7 @@ async def test_every_product_sql_statement_parses_against_the_head_schema(
         f"SQL 문장을 {len(statements)}개만 모았다 — `_..._SQL` 명명 규약이 바뀌었거나 "
         "import가 조용히 실패했다. 이 검사가 대상을 잃었다."
     )
+    skipped = _fragments(statements)
 
     failures: list[str] = []
     dialect = migrated_engine.dialect
@@ -123,7 +210,9 @@ async def test_every_product_sql_statement_parses_against_the_head_schema(
     try:
         driver: Any = raw.driver_connection
         for qualified_name, sql in sorted(statements.items()):
-            if qualified_name in _NOT_PARSEABLE_WITHOUT_CONTEXT:
+            if qualified_name in skipped or qualified_name in _OUTSIDE_THE_HEAD_ORACLE:
+                continue
+            if any(marker in qualified_name for marker in _FROZEN_GENERATION_MARKERS):
                 continue
             compiled = str(text(sql).compile(dialect=dialect))
             try:
