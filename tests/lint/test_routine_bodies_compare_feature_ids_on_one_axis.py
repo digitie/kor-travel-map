@@ -86,13 +86,14 @@ _JUDGED: Final[dict[str, str]] = {
 def test_routine_bodies_never_compare_a_feature_id_across_axes() -> None:
     lines = _HEAD_SCHEMA.read_text(encoding="utf-8").splitlines()
     unjudged: list[str] = []
-    seen = 0
+    comparisons = 0
 
     for index, line in enumerate(lines):
         stripped = line.strip()
         if _ASSIGNMENT_INTO.search(stripped):
             continue
         for match in _COMPARISON.finditer(stripped):
+            comparisons += 1
             other = match.group(3)
             if _SAME_AXIS.search(other):
                 continue
@@ -100,14 +101,16 @@ def test_routine_bodies_never_compare_a_feature_id_across_axes() -> None:
                 window = " ".join(lines[index : index + _CASE_WINDOW])
                 if "::uuid" in window or "as uuid" in window.lower():
                     continue
-            seen += 1
             if any(key in stripped for key in _JUDGED):
                 continue
             unjudged.append(f"head-schema.sql:{index + 1}: {stripped[:120]}")
 
-    assert seen >= 1, (
-        f"판단 대상을 {seen}개만 봤다 — head 오라클의 형태가 바뀌어 이 검사가 대상을 "
-        "잃었을 수 있다. `_COMPARISON`/`_SAME_AXIS` 패턴을 현행 덤프에 맞춰라."
+    # **하한은 "판단 대상"이 아니라 "비교 자체"에 건다.** 판단 대상이 0이 되는 것은
+    # 정상(전부 같은 축)이지만, 비교가 0이면 정규식이 덤프의 형태를 놓친 것이다 —
+    # 그 둘을 한 숫자로 재면 초록이 무엇을 뜻하는지 알 수 없다.
+    assert comparisons >= 50, (
+        f"feature 식별자 비교를 {comparisons}개만 봤다 — head 오라클의 형태가 바뀌어 "
+        "이 검사가 대상을 잃었을 수 있다. `_COMPARISON` 패턴을 현행 덤프에 맞춰라."
     )
     assert not unjudged, (
         "루틴 본문이 feature 식별자를 다른 축과 비교한다:\n  "

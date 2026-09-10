@@ -2737,7 +2737,12 @@ BEGIN
         SELECT core.row_revision
         FROM feature.features AS core
         WHERE expected.resource_kind = 'feature'
-          AND core.feature_id = expected.resource_key
+          -- T-VN-39: `core.feature_id`는 uuid이고 revision vector의
+          -- `resource_key`는 **바깥 계약의 text 키**다(theme/source/collection/
+          -- item 넷과 같은 자리). 바깥 이름을 바꾸지 않고 원천만 캐스트한다 —
+          -- 반대로 키를 uuid로 캐스트하면 잘못된 키가 '개정 벡터 불일치'가
+          -- 아니라 22P02로 죽는다.
+          AND CAST(core.feature_id AS text) = expected.resource_key
       ) AS current_row
     ) AS current ON true
     WHERE expected.import_plan_id = p_import_plan_id
