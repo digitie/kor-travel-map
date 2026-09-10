@@ -3062,14 +3062,18 @@ async def add_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     payload = body.model_dump()
-    # T-VN-32C PR-2 (W6) — 값 전환 후 admin이 복사한 UUID 참조를 legacy 정본
-    # 키로 정규화한다 (miss는 원문 유지 — 기존 "active Feature 아님" 422 계약
-    # 이 판정).
-    if payload.get("feature_id") is not None:
-        payload["feature_id"] = await feature_identity.legacy_id_for_filter(
-            session, payload["feature_id"]
-        )
     try:
+        # T-VN-32C PR-2 (W6) — admin이 복사한 참조를 정본 키로 정규화한다.
+        # T-VN-39: curation item의 feature 참조는 uuid 컬럼으로 들어간다.
+        # canonical uuid인데 없는 경우는 그대로 넘겨 기존 "active Feature 아님"
+        # 422가 판정하고, 어떤 Feature도 가리키지 않는 문자열은 여기서
+        # ValueError가 되어 아래 handler가 같은 422로 옮긴다 — 전에는 22P02였다.
+        if payload.get("feature_id") is not None:
+            payload["feature_id"] = (
+                await feature_identity.canonical_feature_id_for_filter(
+                    session, payload["feature_id"]
+                )
+            )
         async with domain_command_transaction(session):
             command = domain_command_service.current_domain_command()
             item = await curation_repo.create_curation_item_command(
@@ -3119,12 +3123,14 @@ async def patch_admin_curation_item(
     expected_revision = parse_revision_header(request, "If-Match", required=True)
     assert expected_revision is not None
     updates = body.model_dump(exclude_unset=True)
-    # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
-    if updates.get("feature_id") is not None:
-        updates["feature_id"] = await feature_identity.legacy_id_for_filter(
-            session, updates["feature_id"]
-        )
     try:
+        # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
+        if updates.get("feature_id") is not None:
+            updates["feature_id"] = (
+                await feature_identity.canonical_feature_id_for_filter(
+                    session, updates["feature_id"]
+                )
+            )
         async with domain_command_transaction(session):
             command = domain_command_service.current_domain_command()
             item = await curation_repo.patch_curation_item_command(

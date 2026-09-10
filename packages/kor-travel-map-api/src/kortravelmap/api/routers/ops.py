@@ -416,8 +416,11 @@ async def list_integrity_issues(
             severity=severity,
             violation_type=violation_type,
             provider_dataset_id=provider_dataset_id,
-            # T-VN-32C PR-2 — UUID 표기 필터를 legacy 정본 키로 정규화 (S7).
-            feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
+            # T-VN-32C PR-2 — 운영자가 복사한 참조를 정본 키로 정규화 (S7).
+            # T-VN-39: 이 자리는 uuid 바인드다 — `f_*`도 받되 uuid로 고정한다.
+            feature_id=await feature_identity.canonical_feature_id_for_filter(
+                session, feature_id
+            ),
             limit=page_size,
             cursor=cursor,
         )

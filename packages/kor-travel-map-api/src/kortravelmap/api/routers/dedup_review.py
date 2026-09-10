@@ -438,13 +438,21 @@ async def decide_review(
 ) -> DedupReviewDecisionResponse:
     started_at = perf_counter()
     if body.decision == "merged":
-        # T-VN-32C PR-2 (W4) — 값 전환 후 프론트가 응답에서 복사한 UUID를
-        # master_feature_id로 되돌린다. legacy 정본 키로 해석해야 review 후보
-        # 쌍(legacy 축) 등가 비교가 성립한다. 해석 miss는 원문 유지 — 기존
-        # 409(후보 쌍에 없음) 계약이 그대로 판정한다.
+        # T-VN-32C PR-2 (W4) — 프론트가 응답에서 복사한 참조를 master로
+        # 되돌린다. 후보 쌍 등가 비교가 성립하려면 정본 uuid여야 한다.
+        # canonical uuid인데 해석 miss면 원문 유지 — 기존 409(후보 쌍에 없음)
+        # 계약이 그대로 판정한다. 어떤 Feature도 가리키지 않는 문자열만 422다.
         master_ref = body.master_feature_id
         if master_ref is not None:
-            master_ref = await feature_identity.legacy_id_for_filter(session, master_ref)
+            try:
+                master_ref = await feature_identity.canonical_feature_id_for_filter(
+                    session, master_ref
+                )
+            except feature_identity.FeatureIdentityRefError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=str(exc),
+                ) from exc
         try:
             async with (
                 domain_command_transaction(session),

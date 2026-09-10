@@ -83,6 +83,7 @@ __all__ = [
     "resolve_feature_identity",
     "resolve_feature_identities_bulk",
     "resolved_uuid_or_none",
+    "canonical_feature_id_for_filter",
     "legacy_id_for_filter",
     "is_canonical_uuid_ref",
     "feature_uuid_in_use",
@@ -582,17 +583,24 @@ async def feature_uuid_in_use(session: AsyncSession, value: str) -> bool:
 
 
 async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | None:
-    """조회 필터 값을 정본 키(uuid) 표기로 정규화한다 (T-VN-32C PR-2).
+    """**text 검색어**를 정본 키 표기로 정규화한다 (T-VN-32C PR-2).
 
     이름은 경계 이름이라 유지한다. 재키 뒤 돌려주는 값은 legacy ``f_*``가 아니라
     ``features.feature_id``(uuid)이고, canonical UUID 입력에는 사실상 항등이며
     UUID 표기의 **alias**만 그것이 가리키는 정본 키로 바뀐다.
 
-    운영자가 응답에서 복사한 UUID를 필터/검색어로 붙여넣는 경로용. canonical
-    UUID 형태가 아니면 원문 그대로(추가 왕복 없음), UUID 형태인데 해석
-    miss거나 형식 계약 위반이면 역시 원문 유지 — 필터의 "결과 없음" 계약은
-    존재하지 않는 legacy id와 동일하게 동작해야 한다(fail-open이 아니라
-    동등 semantics).
+    운영자가 응답에서 복사한 UUID를 자유 검색어(``q``)에 붙여넣는 경로용.
+    canonical UUID 형태가 아니면 원문 그대로(추가 왕복 없음), UUID 형태인데
+    해석 miss거나 형식 계약 위반이면 역시 원문 유지 — 검색의 "결과 없음"
+    계약은 존재하지 않는 legacy id와 동일하게 동작해야 한다.
+
+    **결과는 uuid가 아닐 수 있다.** ``q``는 자유 문자열이므로 이 함수는 임의의
+    원문을 되돌려준다. 그러므로 이 값은 ``ILIKE`` 같은 **text 비교에만**
+    바인드해야 한다. uuid 컬럼을 거르는 자리에는
+    :func:`canonical_feature_id_for_filter`를 쓴다 — 그 구분이 없던 동안
+    ``f_*``를 필터에 넣은 운영자는 빈 목록이 아니라 22P02(500)를 받았다.
+    이 분리는 ``tests/lint/test_feature_ref_filters_bind_on_the_right_type.py``
+    가 고정한다.
     """
     if ref is None or _parse_canonical_uuid(ref) is None:
         return ref
@@ -601,6 +609,40 @@ async def legacy_id_for_filter(session: AsyncSession, ref: str | None) -> str | 
     except FeatureIdentityRefError:
         return ref
     return identity.feature_id if identity is not None else ref
+
+
+async def canonical_feature_id_for_filter(
+    session: AsyncSession, ref: str | None
+) -> str | None:
+    """**uuid 자리**에 바인드할 feature 참조를 정본 키로 고정한다 (T-VN-39).
+
+    받는 것은 canonical uuid와 legacy ``f_*`` 주소 둘 다다 — 운영자가 손에 쥔
+    것이 둘 중 무엇인지 표면이 고를 수 없기 때문이다. 돌려주는 것은 언제나
+    uuid 표기이거나 ``None``(필터 없음)이다.
+
+    세 갈래로 나뉘고, 갈래마다 이유가 다르다.
+
+    1. **해석되면** 정본 uuid. ``f_*``가 여기서 처음으로 실제 필터가 된다.
+    2. **canonical uuid인데 해석 miss**면 원문 그대로. 유효한 uuid이므로
+       바인드에 문제가 없고, "그런 Feature 없음"의 정확한 표현은 0행이다.
+       이 갈래가 기존 계약(빈 목록 · 422 "active Feature 아님" · 409 "후보 쌍에
+       없음")을 그대로 유지한다.
+    3. **uuid도 아니고 해석도 안 되면** :class:`FeatureIdentityRefError`.
+       이 값은 어떤 Feature도 가리키지 않으므로 uuid 자리에 넣을 표기가 없다.
+       조용히 ``None``으로 낮추면 "필터 없음"이 되어 **전체 목록**이 나가고,
+       원문을 그대로 넘기면 22P02로 죽는다 — 둘 다 틀렸다. 표면은 이 오류를
+       422로 옮긴다.
+    """
+    if ref is None:
+        return None
+    identity = await resolve_feature_identity(session, ref)
+    if identity is not None:
+        return identity.feature_id
+    if _parse_canonical_uuid(ref) is not None:
+        return ref
+    raise FeatureIdentityRefError(
+        f"feature 참조 {ref!r}는 이 시스템의 Feature를 가리키지 않습니다"
+    )
 
 
 async def count_features_missing_identity(

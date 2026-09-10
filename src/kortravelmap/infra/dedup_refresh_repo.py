@@ -171,10 +171,12 @@ async def list_dedup_refresh_features(
     """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다."""
     _validate_scope(scope)
     # T-VN-32C PR-2 — 운영자가 응답 UUID를 run config cursor에 붙여넣는 경로.
-    # T-VN-39 재키 뒤 keyset 축은 uuid이고 `legacy_id_for_filter`도 (자기
-    # docstring대로) 정본 uuid를 돌려준다 — 이름만 옛 세계의 것이다.
-    # miss는 원문 유지 — 기존 "범위 밖 cursor" semantics(적대 리뷰 F3).
-    cursor_feature_id = await feature_identity.legacy_id_for_filter(
+    # T-VN-39: keyset 축이 uuid가 됐으므로 cursor도 uuid 표기여야 한다.
+    # canonical uuid인데 해석 miss면 원문 유지 — 기존 "범위 밖 cursor"
+    # semantics(적대 리뷰 F3)가 그대로 남는다. 어떤 Feature도 가리키지 않는
+    # cursor는 run config가 깨졌다는 뜻이라 `_validate_scope`와 같은 부류의
+    # ValueError로 즉시 멈춘다 — 전에는 22P02로 죽었다.
+    cursor_feature_id = await feature_identity.canonical_feature_id_for_filter(
         session, scope.cursor_feature_id
     )
     rows = (

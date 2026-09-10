@@ -5112,7 +5112,11 @@ async def list_primary_place_locator(
 # ``feature_places`` 조인이 곧 ``kind = 'place'`` 필터이며, "번호 없음"은
 # jsonb 배열 길이가 아니라 배열 기수로 판정한다.
 _FIND_PLACE_NO_PHONE_SQL: Final[str] = """
-SELECT f.feature_id, f.name, f.address, se.source_entity_id
+-- T-VN-39: `PhoneEnrichmentCandidate.feature_id`는 text 계약이고, 이 함수의
+-- docstring이 그 값을 `apply_place_phone_enrichment`에 **그대로** 넘기라고
+-- 지시한다. 드라이버가 주는 `uuid.UUID`를 흘리면 그 다음 단계가 깨진다.
+SELECT CAST(f.feature_id AS text) AS feature_id, f.name, f.address,
+       se.source_entity_id
 FROM feature.features f
 JOIN feature.feature_places p
   ON p.feature_id = f.feature_id

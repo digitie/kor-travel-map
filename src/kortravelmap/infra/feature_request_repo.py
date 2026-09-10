@@ -310,7 +310,11 @@ async def approve_feature_request(
         )
         if (
             existing is None
-            or existing.get("feature_uuid") != winner
+            # T-VN-39: 위 SQL이 정본 키를 `CAST(... AS text)`로 내보내므로 이 값은
+            # **문자열**이고 `winner`는 프로시저가 준 `uuid.UUID`다. 표기를 맞추지
+            # 않으면 `str != UUID`가 **항상 참**이라 exact_conflict 분기가 언제나
+            # 실패한다 — 축은 같고 표기만 달랐다.
+            or str(existing.get("feature_uuid")) != str(winner)
             or not isinstance(existing.get("row_revision"), int)
             or existing["row_revision"] < 1
         ):
