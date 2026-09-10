@@ -39,8 +39,28 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     }
     assert root_package["packageManager"] == "npm@12.0.1"
     assert root_package["engines"] == expected_engines
-    assert root_package["dependencies"] == {"@next/env": "16.2.12"}
     assert frontend_package["engines"] == expected_engines
+
+    # 버전 **숫자**는 매니페스트가 정본이다. 예전에는 이 파일이 `16.2.12` /
+    # `0.35.3`을 리터럴로 들고 있었는데, 그러면 보안 권고 하나에 고칠 자리가 넷이
+    # 되고(선언 둘, 검사 스크립트, 이 테스트) 하나를 잊으면 무관한 얼굴로 죽는다 —
+    # 2026-09-10 maplibre/Next/sharp 권고에서 실제로 그렇게 죽었다.
+    #
+    # 이 테스트가 지켜야 할 명제는 "핀이 특정 숫자인가"가 아니라 셋이다:
+    # 정확한 핀인가(범위 금지) · 선언들이 서로 같은가 · lock이 그것과 같은가.
+    # 그 셋은 버전이 움직여도 그대로 성립한다.
+    declared_next = frontend_package["dependencies"]["next"]
+    declared_sharp = root_package["overrides"]["next"]["sharp"]
+    declared_postcss = root_package["overrides"]["next"]["postcss"]
+    for label, pinned in (
+        ("frontend dependencies.next", declared_next),
+        ("overrides.next.sharp", declared_sharp),
+        ("overrides.next.postcss", declared_postcss),
+    ):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", pinned), (
+            f"{label}는 범위가 아니라 정확한 핀이어야 한다: {pinned}"
+        )
+    assert root_package["dependencies"] == {"@next/env": declared_next}
     # 차단 게이트는 **배포되는 의존성만** 본다. dev 전용 빌드 도구의 취약점은
     # 사용자에게 나가지 않으므로 머지를 막지 않는다 —
     # `@redocly/openapi-core` 1.x는 패치가 없고 2.x는 타입 생성을 깨뜨린다
@@ -66,13 +86,12 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         "node scripts/verify-next-sharp.mjs"
     )
     assert root_package["overrides"] == {
-        "next": {"postcss": "8.5.23", "sharp": "0.35.3"},
+        "next": {"postcss": declared_postcss, "sharp": declared_sharp},
         "@redocly/openapi-core": {
             "js-yaml": "4.3.0",
             "minimatch": "10.2.5",
         },
     }
-    assert frontend_package["dependencies"]["next"] == "16.2.12"
     for unused in ("@hookform/resolvers", "react-hook-form", "zod"):
         assert unused not in frontend_package["dependencies"]
     assert "shadcn" not in frontend_package["devDependencies"]
@@ -84,13 +103,13 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert "reactDom.configs.recommended" in eslint_config
     assert '"import-x/no-anonymous-default-export": "warn"' in eslint_config
 
-    assert lock_packages["node_modules/next"]["version"] == "16.2.12"
-    assert lock_packages["node_modules/@next/env"]["version"] == "16.2.12"
+    assert lock_packages["node_modules/next"]["version"] == declared_next
+    assert lock_packages["node_modules/@next/env"]["version"] == declared_next
     assert lock_packages["node_modules/next"]["dependencies"]["@next/env"] == (
-        "16.2.12"
+        declared_next
     )
-    assert lock_packages["node_modules/postcss"]["version"] == "8.5.23"
-    assert lock_packages["node_modules/sharp"]["version"] == "0.35.3"
+    assert lock_packages["node_modules/postcss"]["version"] == declared_postcss
+    assert lock_packages["node_modules/sharp"]["version"] == declared_sharp
     assert lock_packages["node_modules/@playwright/test"]["version"] == "1.60.0"
     assert (
         lock_packages["node_modules/@redocly/openapi-core"]["version"]
@@ -99,8 +118,11 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert lock_packages["node_modules/minimatch"]["version"] == "10.2.5"
     assert lock_packages["node_modules/js-yaml"]["version"] == "4.3.0"
     assert lock_packages[""]["engines"] == expected_engines
-    assert lock_packages[""]["dependencies"] == {"@next/env": "16.2.12"}
-    assert lock_packages[str(FRONTEND.relative_to(ROOT))]["engines"] == (
+    assert lock_packages[""]["dependencies"] == {"@next/env": declared_next}
+    # lock의 workspace 키는 언제나 POSIX 구분자다. `str(...)`로 만들면 Windows
+    # 체크아웃에서만 `packages\...`가 되어 KeyError로 죽는다 — 검사가 옳은데
+    # 개발자 기계에서만 빨간 부류다.
+    assert lock_packages[FRONTEND.relative_to(ROOT).as_posix()]["engines"] == (
         expected_engines
     )
     for package_name, version in (
@@ -146,8 +168,21 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert "existsSync(packageJsonPath)" in installer
     assert "beforeCount !== 1 || afterCount !== 0" in installer
     assert "minimatch.minimatch(url, pattern)" in installer
-    assert 'const expectedNextVersion = "16.2.12";' in sharp_smoke
-    assert 'const expectedSharpVersion = "0.35.3";' in sharp_smoke
+    # ABI 스모크는 **숫자를 박지 않는다.** 기대값을 매니페스트에서 파생해야
+    # 보안 권고 하나가 세 자리를 흔들지 않는다. 그래서 여기서 재는 것은 "무슨
+    # 숫자인가"가 아니라 "숫자를 박지 않았는가 · 설치된 트리를 실제로 읽는가 ·
+    # 최적화를 한 번 돌리는가" 셋이다.
+    assert not re.search(r'const\s+expected\w*Version\s*=\s*"\d', sharp_smoke), (
+        "verify-next-sharp.mjs가 버전을 리터럴로 다시 박았다 — 기대값은 "
+        "매니페스트(frontend dependencies.next · root overrides.next.sharp)에서 "
+        "파생해야 한다."
+    )
+    assert "overrides?.next?.sharp" in sharp_smoke
+    assert (
+        "packages/kor-travel-map-admin/frontend/package.json" in sharp_smoke
+    ), "ABI 스모크가 프론트 매니페스트를 읽지 않는다 — 기대 Next 버전의 출처가 없다"
+    assert 'installedVersion("next")' in sharp_smoke
+    assert 'require("sharp").versions.sharp' in sharp_smoke
     assert "optimizeImage" in sharp_smoke
     assert 'contentType: "image/webp"' in sharp_smoke
     assert "const expectedProblems = [" not in npm_tree_verifier
