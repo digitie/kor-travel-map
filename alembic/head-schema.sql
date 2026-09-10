@@ -26579,6 +26579,13 @@ GRANT SELECT,UPDATE ON TABLE feature.features TO ktm_manual_provider_dedup_proce
 
 
 --
+-- Name: COLUMN features.feature_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(feature_id) ON TABLE feature.features TO ktm_manual_feature_procedure_owner;
+
+
+--
 -- Name: COLUMN features.kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
