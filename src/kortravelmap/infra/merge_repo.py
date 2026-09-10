@@ -113,23 +113,43 @@ WHERE review_id = :review_id
 FOR UPDATE
 """
 
+# ── `CAST(CAST(:x AS text) AS uuid)` 이중 캐스트에 대하여 (T-VN-39) ─────────
+#
+# 이 모듈은 `:master`/`:loser`를 한 문장 안에서 두 축으로 쓴다 — 재키 뒤 uuid가 된
+# 식별자 컬럼과 비교하는 자리, 그리고 증거 jsonb에 문자열로 박는 자리
+# (`'master_feature_id', CAST(:master AS text)`). 후자는 바깥으로 나가는 계약이라
+# text로 남는다.
+#
+# asyncpg 방언은 같은 이름의 바인드를 하나의 `$n`으로 접는다. 그래서 한쪽이
+# `$1::uuid`, 다른 쪽이 `$1::text`가 되면 PostgreSQL이 파라미터 타입을 하나로
+# 정하지 못하고 42P08 `inconsistent types deduced for parameter $1`로 죽는다.
+# 캐스트를 아예 빼도 마찬가지다 — 그때는 jsonb 쪽 `::text`가 파라미터를 text로
+# 정해 버려서 `SET feature_id = $1`이 42804가 된다(실측).
+#
+# 그래서 **파라미터 타입을 text 하나로 고정**하고, uuid가 필요한 자리에서만 한 번
+# 더 올린다. 바깥 계약에 가까운 쪽을 파라미터 타입으로 두는 편이 낫다.
+#
+# 이 규칙은 `tests/lint/test_merge_identifier_binds_have_one_parameter_type.py`가
+# 지킨다 — 맨 바인드가 하나라도 남으면 다음 사람이 jsonb 줄을 한 줄 늘리는 순간
+# 조용히 42P08이 돌아온다.
+
 # loser source_link 중 master가 아직 안 가진 것만 master로 재지정.
 # (rowcount 대신 RETURNING + fetchall — Result 타입 폭 회피, 코드베이스 컨벤션.)
 _MOVE_LINKS_SQL: Final[str] = """
 UPDATE provider_sync.source_links
-SET feature_id = :master
-WHERE feature_id = :loser
+SET feature_id = CAST(CAST(:master AS text) AS uuid)
+WHERE feature_id = CAST(CAST(:loser AS text) AS uuid)
   AND source_entity_key NOT IN (
       SELECT source_entity_key
       FROM provider_sync.source_links
-      WHERE feature_id = :master
+      WHERE feature_id = CAST(CAST(:master AS text) AS uuid)
   )
 RETURNING source_entity_key
 """
 
 # master가 이미 보유한 충돌 link(재지정 후 loser에 남은 것) drop.
 _DROP_LEFTOVER_LINKS_SQL: Final[str] = """
-DELETE FROM provider_sync.source_links WHERE feature_id = :loser
+DELETE FROM provider_sync.source_links WHERE feature_id = CAST(CAST(:loser AS text) AS uuid)
 RETURNING source_entity_key
 """
 
@@ -139,7 +159,7 @@ RETURNING source_entity_key
 _LOCK_FEATURES_SQL: Final[str] = """
 SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
-WHERE feature_id IN (:master, :loser)
+WHERE feature_id IN (CAST(CAST(:master AS text) AS uuid), CAST(CAST(:loser AS text) AS uuid))
 ORDER BY feature_id
 FOR UPDATE
 """
@@ -151,7 +171,10 @@ FOR UPDATE
 # 0222: runtime은 canonical 표에 lock 권한이 없으므로(0204 패턴) command_owner 소유
 # procedure 안에서 잠근다 — 행 잠금은 트랜잭션 범위라 반환 뒤에도 유지된다.
 _LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
-CALL feature.merge_lock_curation_collections(CAST(:master AS text), CAST(:loser AS text))
+CALL feature.merge_lock_curation_collections(
+    CAST(CAST(:master AS text) AS uuid),
+    CAST(CAST(:loser AS text) AS uuid)
+)
 """
 
 # 한 collection의 동일 official item에는 source에서 빠진 과거 component와 현재
@@ -164,7 +187,10 @@ WITH locked_items AS MATERIALIZED (
     SELECT
         item.*
     FROM feature.curation_items AS item
-    WHERE item.feature_id IN (:master, :loser)
+    WHERE item.feature_id IN (
+        CAST(CAST(:master AS text) AS uuid),
+        CAST(CAST(:loser AS text) AS uuid)
+    )
     ORDER BY
         item.collection_id,
         item.external_item_id,
@@ -216,7 +242,7 @@ WITH locked_items AS MATERIALIZED (
     JOIN canonical AS loser_item
       ON loser_item.collection_id = master_item.collection_id
      AND loser_item.external_item_id = master_item.external_item_id
-     AND loser_item.feature_id = :loser
+     AND loser_item.feature_id = CAST(CAST(:loser AS text) AS uuid)
     JOIN LATERAL (
         SELECT candidate.*
         FROM (VALUES
@@ -286,8 +312,11 @@ WITH locked_items AS MATERIALIZED (
     JOIN locked_items AS grouped
       ON grouped.collection_id = master_item.collection_id
      AND grouped.external_item_id = master_item.external_item_id
-     AND grouped.feature_id IN (:master, :loser)
-    WHERE master_item.feature_id = :master
+     AND grouped.feature_id IN (
+         CAST(CAST(:master AS text) AS uuid),
+         CAST(CAST(:loser AS text) AS uuid)
+     )
+    WHERE master_item.feature_id = CAST(CAST(:master AS text) AS uuid)
     GROUP BY
         master_item.collection_id,
         master_item.external_item_id,
@@ -305,7 +334,7 @@ WITH locked_items AS MATERIALIZED (
     JOIN plans AS plan
       ON plan.collection_id = loser_item.collection_id
      AND plan.external_item_id = loser_item.external_item_id
-    WHERE loser_item.feature_id = :loser
+    WHERE loser_item.feature_id = CAST(CAST(:loser AS text) AS uuid)
 ), revocations AS (
     INSERT INTO feature.curation_link_decisions (
         curation_item_id,
@@ -443,7 +472,7 @@ WITH candidates AS MATERIALIZED (
       ON current_decision.decision_id = item.accepted_link_decision_id
      AND current_decision.curation_item_id = item.curation_item_id
      AND current_decision.feature_id = item.feature_id
-    WHERE item.feature_id = :loser
+    WHERE item.feature_id = CAST(CAST(:loser AS text) AS uuid)
     FOR UPDATE OF item
 ), decisions AS (
     INSERT INTO feature.curation_link_decisions (
@@ -461,7 +490,7 @@ WITH candidates AS MATERIALIZED (
         CASE
             WHEN candidate.remains_active
              AND candidate.has_trusted_acceptance
-            THEN CAST(:master AS text)
+            THEN CAST(CAST(:master AS text) AS uuid)
             ELSE candidate.feature_id
         END,
         CASE
@@ -489,7 +518,7 @@ WITH candidates AS MATERIALIZED (
     RETURNING decision_id, curation_item_id, decision_kind
 )
 UPDATE feature.curation_items AS item
-SET feature_id = :master,
+SET feature_id = CAST(CAST(:master AS text) AS uuid),
     accepted_link_decision_id = CASE
         WHEN decision.decision_kind = 'accepted' THEN decision.decision_id
         ELSE NULL
@@ -673,7 +702,7 @@ RETURNING
 # 옮기며 source/current pointer는 건드리지 않는다.
 _MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL: Final[str] = """
 UPDATE feature.curation_items AS item
-SET feature_id = :master,
+SET feature_id = CAST(CAST(:master AS text) AS uuid),
     updated_at = now()
 WHERE item.feature_id IS NULL
   AND NOT item.source_present
@@ -719,7 +748,9 @@ _INSERT_HISTORY_SQL: Final[str] = """
 INSERT INTO ops.feature_merge_history (
     master_feature_id, loser_feature_id, score, review_id, merged_by, reason
 ) VALUES (
-    :master, :loser, :score, :review_id, :merged_by, :reason
+    CAST(CAST(:master AS text) AS uuid),
+    CAST(CAST(:loser AS text) AS uuid),
+    :score, :review_id, :merged_by, :reason
 )
 RETURNING merge_id
 """

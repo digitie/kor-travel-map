@@ -353,7 +353,7 @@ INSERT INTO provider_sync.source_links (
     feature_id, source_entity_key, source_role,
     match_method, confidence, created_at
 ) VALUES (
-    :feature_id,
+    CAST(:feature_id AS uuid),
     (SELECT source_entity_key
      FROM provider_sync.source_records
     WHERE source_record_key = :source_record_key),
@@ -563,6 +563,14 @@ def _canonical_notice_feature_sql(
     source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
     ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
     없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
+
+    T-VN-39 재키 뒤 ``feature_id``는 uuid라 유도한 ``f_*``와 **직접 비교할 수 없다**
+    (`operator does not exist: uuid = text`). 그 값이 실제로 사는 곳은
+    ``feature.feature_aliases.alias``이므로 등치 대신 그 등록부를 조회한다 — 판정의
+    뜻은 그대로다("이 feature가 현재 계보의 정본 주소를 갖는가").
+
+    이 술어는 여덟 자리에 인라인된다(모든 공개 read 경로). 하나가 깨지면 공개 조회가
+    통째로 죽는다.
     """
     # 물화된 계보를 넘기면 그것을 쓴다. 안 넘기면 재계산인데, read 경로에서는
     # raw_data JSON 추출이 행마다 붙어 T-VN-37이 없앤 비용이 되살아난다.
@@ -582,19 +590,26 @@ def _canonical_notice_feature_sql(
          AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
          AND {entity_alias}.source_entity_type = 'weather_alert')
       )
-      THEN {feature_alias}.feature_id = (
-        'f_global_n_' || left(
-          encode(
-            x_extension.digest(
-              'global|notice|99000000|'
-              || {dataset_alias}.provider || ':' || {dataset_alias}.dataset_key || '|'
-              || {lineage_sql} || '|',
-              'sha1'
-            ),
-            'hex'
-          ),
-          16
-        )
+      THEN EXISTS (
+        SELECT 1
+        FROM feature.feature_aliases AS canonical_notice_alias
+        WHERE canonical_notice_alias.feature_id = {feature_alias}.feature_id
+          AND canonical_notice_alias.alias_kind = 'legacy_feature_id'
+          AND canonical_notice_alias.alias = (
+            'f_global_n_' || left(
+              encode(
+                x_extension.digest(
+                  'global|notice|99000000|'
+                  || {dataset_alias}.provider || ':'
+                  || {dataset_alias}.dataset_key || '|'
+                  || {lineage_sql} || '|',
+                  'sha1'
+                ),
+                'hex'
+              ),
+              16
+            )
+          )
       )
       ELSE false
     END
@@ -2486,9 +2501,11 @@ def _make_source_entity_key(
     return "se_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _source_link_params(link: SourceLink) -> dict[str, Any]:
+def _source_link_params(
+    link: SourceLink, *, feature_id: str | None = None
+) -> dict[str, Any]:
     return {
-        "feature_id": link.feature_id,
+        "feature_id": feature_id if feature_id is not None else link.feature_id,
         "source_record_key": link.source_record_key,
         "source_role": link.source_role.value,
         "match_method": link.match_method,
@@ -2838,10 +2855,25 @@ async def _feature_load_state(
     )
 
 
-async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
-    """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``."""
+async def upsert_source_link(
+    session: AsyncSession, link: SourceLink, *, feature_id: str | None = None
+) -> bool:
+    """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``.
+
+    ``feature_id`` override는 **provider 적재 경로 전용**이다. T-VN-39 재키 뒤
+    ``provider_sync.source_links.feature_id``는 uuid이고, provider가 준
+    ``SourceLink.feature_id``는 provider 라이브러리가 유도한 legacy ``f_*``라
+    정본 키가 아니다(ADR-098). 그 경로는 claim 축
+    (:func:`_resolve_provider_feature_id`)이 푼 uuid를 여기로 넘긴다.
+
+    enrichment·리뷰 승인 경로는 이미 DB에서 읽은 정본 uuid를 DTO에 담아 오므로
+    override 없이 부른다 — 그래서 기본값이 DTO 값이다.
+    """
     await lock_feature_curation_write(session)
-    result = await session.execute(text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link))
+    result = await session.execute(
+        text(_UPSERT_SOURCE_LINK_SQL),
+        _source_link_params(link, feature_id=feature_id),
+    )
     return bool(result.scalar_one())
 
 
@@ -3132,7 +3164,10 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     # provider field-patch procedure. New Feature has no FK target until the
     # create procedure returns, so it creates this link immediately afterward.
     if not feature_missing:
-        link_inserted = await upsert_source_link(session, bundle.source_link)
+        assert resolved_feature_id is not None  # exists=True면 claim이 풀렸다.
+        link_inserted = await upsert_source_link(
+            session, bundle.source_link, feature_id=resolved_feature_id
+        )
     if record_state.became_current or feature_missing:
         feature_inserted = await upsert_feature(
             session,
@@ -3145,26 +3180,33 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         )
         feature_updated = not feature_inserted
     if feature_missing:
-        link_inserted = await upsert_source_link(session, bundle.source_link)
+        # create wrapper가 claim을 확정했으니 이제 claim 축이 정본 키를 돌려준다.
+        # link의 FK 대상은 그 uuid다 — DTO의 legacy ``f_*``를 그대로 넣으면 22P02다.
+        resolved_feature_id = await _resolve_provider_feature_id(
+            session,
+            provider_dataset_id=record_state.provider_dataset_id,
+            feature_kind=bundle.feature.kind.value,
+            natural_key=bundle.feature.provider_natural_key,
+        )
+        if resolved_feature_id is None:
+            raise FeatureIdentityAnchorError(
+                f"provider Feature {bundle.feature.feature_id!r} 생성 직후에도 "
+                "identity claim이 없다 — wrapper가 claim을 남기지 않았다."
+            )
+        link_inserted = await upsert_source_link(
+            session, bundle.source_link, feature_id=resolved_feature_id
+        )
     if feature_inserted:
         # Create procedure는 core identity/state를, subtype FK는 typed detail 행을
         # 먼저 만든다. 그 다음 같은 transaction에서 field patch를 실행해 신규
         # provider Feature도 base ledger와 effective materializer를 반드시 거치게
         # 한다. intermediate head는 배포하지 않는 single-release 규율이라 외부
         # reader가 direct-create 값을 볼 경계는 없다.
-        # wrapper가 claim을 확정했으니 이제 claim 축이 정본 키를 돌려준다. 여기서
+        # 정본 키는 바로 위 `feature_missing` 분기가 claim 축에서 이미 풀었다 —
+        # `feature_inserted`는 `feature_missing`을 함의하므로 여기서 다시 묻지 않는다.
         # `bundle.feature.feature_id`(legacy `f_*`)를 쓰면 uuid 캐스트에서 22P02다.
-        stored_feature_uuid = await _resolve_provider_feature_id(
-            session,
-            provider_dataset_id=record_state.provider_dataset_id,
-            feature_kind=bundle.feature.kind.value,
-            natural_key=bundle.feature.provider_natural_key,
-        )
-        if stored_feature_uuid is None:
-            raise FeatureIdentityAnchorError(
-                f"provider Feature {bundle.feature.feature_id!r} 생성 직후에도 "
-                "identity claim이 없다 — wrapper가 claim을 남기지 않았다."
-            )
+        assert resolved_feature_id is not None
+        stored_feature_uuid = resolved_feature_id
         created = await _feature_load_state(session, stored_feature_uuid)
         assert created.row_revision is not None
         await _apply_provider_feature_field_patch(

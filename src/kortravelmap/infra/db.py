@@ -131,7 +131,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
             "uuid,integer,text,text,bigint,uuid,uuid,uuid,uuid)"
         ),
         # 0222 — canonical collections lock. admin executor만(dedup review 라우터·ktmctl).
-        "feature.merge_lock_curation_collections(text,text)",
+        "feature.merge_lock_curation_collections(uuid,uuid)",
         "feature.archive_curated_source_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_source_rule_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_theme_command(uuid,bigint,bigint,text,text)",
