@@ -324,9 +324,14 @@ async def test_sync_dedup_candidates_persists(
 
     reviews = await map_client.pending_dedup_reviews()
     assert len(reviews) == 1
-    # 큐 컬럼이 uuid라 driver가 ``uuid.UUID``를 준다 — 쌍의 순서 단언은 그대로다.
-    assert str(reviews[0]["feature_id_a"]) == _F_DEDUP_KNPS
-    assert str(reviews[0]["feature_id_b"]) == _F_DEDUP_KRH
+    # 큐 컬럼은 uuid지만 이 표면은 dict를 그대로 돌려주고 상위가 JSON으로
+    # 직렬화한다. 그래서 SQL이 경계에서 text로 편다 — 여기서 `str(...)`로 표기를
+    # 맞추면 그 계약이 깨져도 초록이 된다(적대 리뷰가 짝인 전화번호 테스트에서
+    # 집은 부류다). 표기를 맞추지 말고 **표기를 잰다.**
+    assert isinstance(reviews[0]["feature_id_a"], str)
+    assert isinstance(reviews[0]["feature_id_b"], str)
+    assert reviews[0]["feature_id_a"] == _F_DEDUP_KNPS
+    assert reviews[0]["feature_id_b"] == _F_DEDUP_KRH
     assert reviews[0]["total_score"] >= 85.0
     assert reviews[0]["decision_reason"] == "auto_merge"
 
