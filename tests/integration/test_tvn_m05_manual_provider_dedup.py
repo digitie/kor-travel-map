@@ -290,7 +290,7 @@ async def _record_candidate(
                     text(
                         """
                         CALL feature.record_manual_provider_dedup_candidate(
-                          CAST(:manual_feature_id AS text), CAST(:provider_feature_id AS text),
+                          CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid),
                           CAST(:scores AS jsonb), CAST(:causation AS jsonb),
                           NULL::uuid, NULL::text
                         )
@@ -603,7 +603,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 await connection.execute(
                     text(
                         "CALL feature.record_manual_provider_dedup_candidate("
-                        "CAST(:manual_feature_id AS text), CAST(:provider_feature_id AS text), "
+                        "CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid), "
                         "CAST(:scores AS jsonb), CAST(:causation AS jsonb), "
                         "NULL::uuid, NULL::text)"
                     ),

@@ -129,7 +129,7 @@ async def _provider_patch(
         text(
             """
             CALL feature.apply_provider_feature_field_patch(
-                CAST(:feature_id AS text), CAST(:dataset_id AS bigint),
+                CAST(:feature_id AS uuid), CAST(:dataset_id AS bigint),
                 CAST(:entity_key AS text), CAST(:record_key AS text),
                 CAST(:expected_row_revision AS bigint), CAST(:values AS jsonb),
                 CAST(:geometry_wkt AS jsonb), NULL, NULL, NULL

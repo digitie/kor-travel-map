@@ -93,7 +93,7 @@ _CAUSATION: dict[str, Any] = {
 
 _RECORD_CANDIDATE_SQL = """
 CALL feature.record_manual_provider_dedup_candidate(
-    CAST(:manual_feature_id AS text), CAST(:provider_feature_id AS text),
+    CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid),
     CAST(:scores AS jsonb), CAST(:causation AS jsonb), NULL::uuid, NULL::text
 )
 """

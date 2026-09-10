@@ -401,6 +401,18 @@ _COLLATERAL_RECREATE: Final[tuple[str, ...]] = (
     " ADD CONSTRAINT ck_feature_aliases_legacy_alias_shape"
     " CHECK (alias_kind <> 'legacy_feature_id'"
     "        OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$')",
+    # `ALTER COLUMN TYPE`은 살아남은 CHECK의 식을 **다시 쓴다** — text 시절의
+    # `feature_id_a < feature_id_b`가 uuid 재타입 뒤 `(feature_id_a)::text <
+    # (feature_id_b)::text`로 catalog에 남는다. 값의 순서는 canonical uuid 표기에서
+    # 바이트 순서와 같아 바뀌지 않지만, ORM 선언(`models.py`의
+    # `CheckConstraint("feature_id_a < feature_id_b")`)과 catalog가 달라져
+    # `test_fresh_300_upgrade_is_metadata_clean`이 drift로 잡는다. 식을 uuid 축으로
+    # 되돌린다 — 캐스트가 남으면 인덱스도 못 쓴다.
+    "ALTER TABLE ops.dedup_review_queue"
+    " DROP CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order",
+    "ALTER TABLE ops.dedup_review_queue"
+    " ADD CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order"
+    " CHECK (feature_id_a < feature_id_b)",
 )
 
 _UNIQUE_RENAME: Final[str] = (
