@@ -301,6 +301,14 @@ class FeatureUpdateConnectionUnsafe(RuntimeError):
     """session lock backend의 pool 복귀 차단을 증명하지 못했다."""
 
 
+class FeatureUpdateExecutionBoundaryLost(RuntimeError):
+    """provider refresh runner가 executor의 실행 transaction을 되감았다.
+
+    회복이 불가능한 상태다 — 이 시점에 되감긴 것은 이번 phase의 쓰기 전부이고,
+    그것을 모른 채 계속 가면 이후 쓰기가 암묵 transaction에서 진짜로 commit된다.
+    """
+
+
 class _FeatureUpdateExecutionStopped(RuntimeError):
     """marker/status guard가 provider 실행보다 먼저 승리했다."""
 
@@ -690,6 +698,36 @@ async def _acquire_scope_lock(
     except BaseException as exc:
         await _hard_invalidate_connection(connection, cause=exc)
         raise
+
+
+def _require_intact_execution_transaction(
+    session: AsyncSession,
+    *,
+    scope: ProviderDatasetRefreshScope,
+) -> None:
+    """runner가 돌아온 자리에서 **이 phase의 transaction이 아직 우리 것인지** 본다.
+
+    runner의 client는 executor의 connection에 결합된다
+    (`join_transaction_mode="rollback_only"`). 그 안에서 난 실패가 삼켜지면 그
+    rollback은 **executor의 root transaction까지 되감고** 결합을 떼어 낸다. 그
+    상태로 루프가 계속 가면 이후 쓰기는 암묵 transaction에서 진짜로 commit되고,
+    되감긴 적재 위로 sync cursor가 전진한다 — 다음 run이 그 구간을 조용히 건너뛴다.
+
+    2026-09-10 적대 리뷰가 `provider_sync_state`가 살아남는 경로로 이것을 짚었다.
+    삼킴 자체는 호출부에서 막았지만(`IntegrityFindingPersistenceError.
+    transaction_destroyed`), **경계가 깨졌다는 사실은 여기서 재야 한다** — 같은
+    부류의 다음 사고는 다른 호출부에서 올 것이고, 그때도 조용하면 안 된다.
+
+    SQLAlchemy가 이 상태에서 내는 유일한 신호는 rollback 시점의 경고 한 줄이고
+    그것은 정리 경로에서 나온다(너무 늦다). 그래서 사실 자체를 직접 본다.
+    """
+    if session.in_transaction():
+        return
+    raise FeatureUpdateExecutionBoundaryLost(
+        "provider refresh runner가 실행 transaction을 되감았다: "
+        f"provider_dataset_id={scope.provider_dataset_id} "
+        f"sync_scope={scope.sync_scope!r} operation_key={scope.operation_key!r}"
+    )
 
 
 async def _release_scope_lock(
@@ -1180,6 +1218,7 @@ async def _execute_feature_update_request_locked(
                     ),
                 )
                 result = _require_runner_result_membership(await runner(session, scope), scope)
+                _require_intact_execution_transaction(session, scope=scope)
                 checkpoint_results = (*results, result)
                 checkpoint = _matched_scope(
                     plan.resolution,

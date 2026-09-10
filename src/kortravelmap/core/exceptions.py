@@ -161,7 +161,16 @@ class GeoRequestError(KorTravelMapError):
 
 
 class IntegrityFindingPersistenceError(KorTravelMapError):
-    """주소 검증 finding을 durable ledger에 기록하지 못했을 때 발생."""
+    """주소 검증 finding을 durable ledger에 기록하지 못했을 때 발생.
+
+    ``transaction_destroyed``는 **삼켜도 되는 실패인지**를 가른다. client가
+    executor의 transaction에 결합돼 있으면(dagster feature-update runner의
+    ``join_transaction_mode="rollback_only"``) 이 실패의 rollback이 **바깥
+    transaction까지 되감는다** — 그 뒤로 호출자가 계속 진행하면 이미 되감긴 적재
+    위에 sync cursor가 전진하고, 그 cursor를 보고 다음 run이 조용히 건너뛴다.
+
+    그래서 그 경우에는 호출자가 완화 모드(``off``/``drop``)라도 삼키면 안 된다.
+    """
 
     def __init__(
         self,
@@ -171,17 +180,20 @@ class IntegrityFindingPersistenceError(KorTravelMapError):
         observed_count: int,
         unique_count: int,
         error_type: str,
+        transaction_destroyed: bool = False,
     ) -> None:
         self.provider = provider
         self.dataset_key = dataset_key
         self.observed_count = observed_count
         self.unique_count = unique_count
         self.error_type = error_type
+        self.transaction_destroyed = transaction_destroyed
         super().__init__(
             "주소 검증 finding durable 기록 실패 "
             f"(provider={provider!r}, dataset_key={dataset_key!r}, "
             f"observed={observed_count}, unique={unique_count}, "
-            f"error_type={error_type})"
+            f"error_type={error_type}, "
+            f"transaction_destroyed={transaction_destroyed})"
         )
 
 
