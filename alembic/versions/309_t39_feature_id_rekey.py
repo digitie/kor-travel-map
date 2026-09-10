@@ -413,6 +413,19 @@ _COLLATERAL_RECREATE: Final[tuple[str, ...]] = (
     "ALTER TABLE ops.dedup_review_queue"
     " ADD CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order"
     " CHECK (feature_id_a < feature_id_b)",
+    # `DROP COLUMN`은 그 컬럼에 걸린 **컬럼 단위 ACL**도 함께 지운다. 그중 하나가
+    # baseline 300의 `GRANT SELECT(feature_uuid) ON feature.features TO
+    # ktm_manual_feature_procedure_owner`였다(alembic/baseline/schema.sql:25799).
+    #
+    # 그 롤은 `read_admin_manual_feature_provenance`의 definer이고, 그 함수는
+    # `feature.features`를 driving relation으로 쓴다. 재키 뒤 그것이 읽어야 하는
+    # 열은 `feature_id`이므로 같은 권한을 그 열로 옮긴다 — 옮기지 않으면 manual
+    # Feature provenance 조회 전량이 `permission denied for table features`다.
+    #
+    # 표 단위 SELECT를 주지 않는 이유: 이 롤에 필요한 것은 identity 한 열이고,
+    # 넓히면 manual writer가 core 전체를 읽게 된다.
+    "GRANT SELECT (feature_id) ON feature.features"
+    " TO ktm_manual_feature_procedure_owner",
 )
 
 _UNIQUE_RENAME: Final[str] = (

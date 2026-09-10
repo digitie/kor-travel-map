@@ -547,9 +547,14 @@ async def test_candidate_command_acl_and_cas_fail_closed(
                         """
                     ),
                     {
+                        # T-VN-39: 앞 세 인자가 `uuid,text,text` → `uuid,uuid,uuid`다
+                        # (`p_candidate_id`·`p_from_feature_id`·`p_to_feature_id`).
+                        # 시그니처가 어긋나면 `to_regprocedure`가 NULL을 내고 이
+                        # 질의가 `NoResultFound`로 죽는다 — ACL을 못 지키는 것이
+                        # 아니라 **볼 대상을 잃는다**.
                         "audit_signature": (
                             "feature.append_theme_feature_candidate_transition("
-                            "uuid,text,text,uuid,text,text,text,boolean,boolean,text,text,"
+                            "uuid,uuid,uuid,uuid,text,text,text,boolean,boolean,text,text,"
                             "uuid,text,bigint,bigint,text,text,uuid,bigint,text,text,uuid,"
                             "uuid,bigint,text,text,jsonb)"
                         )

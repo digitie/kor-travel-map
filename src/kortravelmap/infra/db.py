@@ -60,6 +60,12 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
     """실제 runtime DB session이 ADR-090 권한 경계를 벗어났을 때의 기동 오류."""
 
 
+#: ADR-098 provider wrapper. EXECUTE는 `ktm_feature_create_provider_executor`에만
+#: 있고 그 롤은 `ktm_feature_dagster_runtime`에만 부여된다
+#: (`docker/postgres-role-bootstrap.sh:732`) — provider 적재 identity 하나다.
+_PROVIDER_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_provider_feature_with_initial_state(jsonb,jsonb,text,text,text,jsonb)"
+)
 _GENERIC_FEATURE_CREATE_PROCEDURE = (
     "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)"
 )
@@ -265,7 +271,13 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     ),
     "ktm_feature_dagster_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE, _M05_CANDIDATE_PROCEDURE})
+        | frozenset(
+            {
+                _GENERIC_FEATURE_CREATE_PROCEDURE,
+                _PROVIDER_FEATURE_CREATE_PROCEDURE,
+                _M05_CANDIDATE_PROCEDURE,
+            }
+        )
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
