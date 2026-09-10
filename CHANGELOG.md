@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+### T-VN-39 — `feature_id`가 uuid가 된다 (2026-09-10)
+
+- **CHANGED (정본 키, alembic 309)**: `feature.features.feature_id`가 TEXT에서
+  **uuid**가 됐다. 그 값은 서버가 적재 시점에 발급하는 UUIDv7이고, 어떤 입력에서도
+  유도되지 않는다. 예전의 `f_<법정동>_<종류>_<해시>` 주소는 **주소 등록부**
+  (`feature.feature_aliases.alias`)로 옮겨 갔다 — 사라지지 않았고, 정본 키가
+  아니게 됐다(ADR-098).
+- **CHANGED (외부 표면의 값)**: 응답의 `feature_id`는 이제 uuid 표기다. **키 이름은
+  하나도 바뀌지 않았다** — jsonb 키, `RETURNS TABLE` 열 이름, DTO 필드, `feature_uuid`
+  별칭 전부 그대로다. 바뀐 것은 값의 출처뿐이다. `feature_id`를 불투명하게 다루는
+  소비자(T-VN-M02/M05 이후의 계약)는 손댈 것이 없다.
+- **ADDED (legacy 주소로도 찾을 수 있다)**: 조회·필터·상세 표면이 정본 uuid와 legacy
+  `f_*` 주소를 **둘 다** 받는다. `GET /v1/features/<f_*>`는 그 주소가 가리키는 Feature를
+  돌려주고, admin 목록의 feature 필터도 같은 규율을 쓴다
+  (`canonical_feature_id_for_filter`). 어떤 Feature도 가리키지 않는 값은 500이 아니라
+  422다.
+- **ADDED (provider identity 앵커)**: `provider_sync.provider_feature_identities`가
+  `(provider_dataset_id, feature_kind, natural_key) → feature_id` claim을 든다.
+  멱등 적재의 축이 문자열 유도에서 이 claim으로 옮겨 갔다(ADR-098).
+- **FIXED (값 경로)**: 날씨·유가 값 적재, 부모 Feature 연결, dedup 후보 큐가 변환기가
+  준 legacy 주소를 받아 정본 uuid로 푼다. 이 자리들은 재키 직후 전량 22P02였다.
+- **REMOVED (사본 열)**: 13개 `*_feature_uuid` shadow 열이 사라졌다. 두 표기를
+  나란히 들고 있을 이유가 없어졌다 — 정본이 곧 uuid다.
+
 ### backup artifact — manifest가 해시 대상에 들어가고 스키마 출처를 싣는다 (2026-09-08)
 
 - **FIXED (backup artifact 무결성)**: `meta/manifest.json`이 `meta/SHA256SUMS`에
