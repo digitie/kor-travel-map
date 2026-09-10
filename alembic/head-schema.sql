@@ -6287,10 +6287,10 @@ $$;
 ALTER PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean) OWNER TO ktm_curation_command_owner;
 
 --
--- Name: merge_lock_curation_collections(text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: merge_lock_curation_collections(uuid, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text)
+CREATE PROCEDURE feature.merge_lock_curation_collections(IN p_master uuid, IN p_loser uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
@@ -6316,7 +6316,7 @@ END;
 $$;
 
 
-ALTER PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) OWNER TO ktm_curation_command_owner;
+ALTER PROCEDURE feature.merge_lock_curation_collections(IN p_master uuid, IN p_loser uuid) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: patch_curated_source_command(uuid, bigint, text, text, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -17033,7 +17033,7 @@ CREATE TABLE ops.dedup_review_queue (
     reviewed_by character varying,
     reviewed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order CHECK (((feature_id_a)::text < (feature_id_b)::text)),
+    CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order CHECK ((feature_id_a < feature_id_b)),
     CONSTRAINT ck_dedup_review_queue_ck_dedup_scores CHECK (((total_score >= (0)::numeric) AND (total_score <= (100)::numeric) AND ((name_score >= (0)::numeric) AND (name_score <= (100)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (100)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (100)::numeric)))),
     CONSTRAINT ck_dedup_review_queue_ck_dedup_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('accepted'::character varying)::text, ('rejected'::character varying)::text, ('merged'::character varying)::text, ('ignored'::character varying)::text])))
 );
@@ -25151,11 +25151,11 @@ GRANT ALL ON PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_
 
 
 --
--- Name: PROCEDURE merge_lock_curation_collections(IN p_master text, IN p_loser text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+-- Name: PROCEDURE merge_lock_curation_collections(IN p_master uuid, IN p_loser uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-REVOKE ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) FROM PUBLIC;
-GRANT ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) TO ktm_curation_admin_executor;
+REVOKE ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master uuid, IN p_loser uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master uuid, IN p_loser uuid) TO ktm_curation_admin_executor;
 
 
 --
@@ -25371,6 +25371,7 @@ GRANT ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_i
 --
 
 REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) TO ktm_feature_create_provider_executor;
 GRANT ALL ON FUNCTION feature.resolve_provider_feature_id(p_provider_dataset_id bigint, p_feature_kind text, p_natural_key text) TO ktm_feature_runtime;
 
 

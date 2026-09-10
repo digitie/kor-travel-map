@@ -62,6 +62,12 @@ def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
     )
 
 
+#: T-VN-39: feature 식별자는 uuid다. `ck_dedup_pair_order`가 a < b를 요구하므로
+#: loser가 master보다 작아야 한다(종전 `'f_loser' < 'f_master'`와 같은 순서).
+_F_LOSER = "00000000-0000-7000-8000-0000000e0001"
+_F_MASTER = "00000000-0000-7000-8000-0000000e0002"
+
+
 async def _seed_pair(engine: AsyncEngine) -> str:
     async with AsyncSession(engine) as session, session.begin():
         # T-VN-33: entity identity의 dataset 소유는 provider_dataset_id 하나뿐이다.
@@ -77,8 +83,8 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                 )
             ).scalar_one()
         )
-        session.add(_feature("f_master", with_coord=True))
-        session.add(_feature("f_loser", with_coord=False))
+        session.add(_feature(_F_MASTER, with_coord=True))
+        session.add(_feature(_F_LOSER, with_coord=False))
         session.add(
             SourceEntityRow(
                 source_entity_key="SE1",
@@ -113,7 +119,7 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         await session.flush()
         session.add(
             SourceLinkRow(
-                feature_id="f_loser",
+                feature_id=_F_LOSER,
                 source_entity_key="SE1",
                 source_role="primary",
                 match_method="natural_key",
@@ -121,8 +127,8 @@ async def _seed_pair(engine: AsyncEngine) -> str:
             )
         )
         row = DedupReviewQueueRow(
-            feature_id_a="f_loser",
-            feature_id_b="f_master",
+            feature_id_a=_F_LOSER,
+            feature_id_b=_F_MASTER,
             total_score=90,
             name_score=95,
             spatial_score=88,
