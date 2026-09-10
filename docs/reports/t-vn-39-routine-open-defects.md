@@ -561,3 +561,58 @@ feature"를 거르는 bbox 화면이고 기본 뷰포트가 심은 좌표를 담
 빈 DB 생성 → `tests/integration/_application_300_bootstrap.upgrade_head_with_application_300_bootstrap`
 → 롤 비밀번호를 `.env`에 맞춤 → `reconcile_runtime_privileges` → uvicorn →
 provider 번들 적재 → `npx next build && npx next start` → Playwright 드라이브.
+
+## 적대 리뷰 — 12 에이전트 6축, 그리고 그것이 고친 것 (2026-09-10)
+
+live e2e가 초록이 된 뒤 머지 전에 적대 리뷰를 돌렸다(opus5/xhigh, 6축 × 2명:
+축 정합 · 경계 계약 · 마이그레이션/카탈로그 · 탐지기 품질 · 런타임 권한 ·
+트랜잭션 경계). blocker 2건과 major 8건이 나왔고 전부 닫았다.
+
+### blocker (커밋 `cb35cbcf`)
+
+| 자리 | 무엇이었나 |
+|---|---|
+| 값이 새는 자리 | DB가 준 `uuid.UUID`가 text 계약 DTO로 그대로 나갔다 |
+| 경계가 깨지는 자리 | 실행 트랜잭션이 조용히 deassociate된 채로 다음 단계가 이어졌다 |
+
+### major — 축 부류 (커밋 `c1b4f3a3`)
+
+1. `_FIND_PLACE_NO_PHONE_SQL` · `_PENDING_DEDUP_SQL` — 두 자리 모두 uuid를 밖으로
+   내보내고 있었다. 첫 열을 `CAST(... AS text)`로 고정했다.
+2. `ops.dedup_review_queue.feature_id_a/b`는 uuid인데 후보를 만든 `core.dedup`은
+   provider 변환기가 준 legacy 주소만 안다. weather/price 값 경로와 **같은 부류**라
+   같은 처방(`resolve_canonical_feature_ids`)을 썼다. 순서 정규화와 self-pair
+   판정을 해석 **후**로 옮긴 것이 덤이다 — 서로 다른 두 참조가 같은 Feature를
+   가리킬 수 있다.
+3. `feature_request_repo` — SQL이 text로 내보낸 값과 프로시저가 준 `uuid.UUID`를
+   맞대고 있었다. `str != UUID`가 **항상 참**이라 exact_conflict 분기가 언제나
+   실패했다. 축은 같고 표기만 달랐던 자리다.
+4. `legacy_id_for_filter`가 두 자리를 겸했다 — 자유 검색어(`q`, text 바인드)와
+   feature 필터(uuid 바인드). `q`에는 원문을 돌려주는 것이 옳지만 uuid 자리에는
+   그것이 곧 22P02(500)다. 표면을 둘로 갈랐고
+   (`canonical_feature_id_for_filter`), 새 표면은 legacy `f_*`도 받아 정본 uuid로
+   푼다 — 그 주소가 **여기서 처음으로 실제 필터가 된다**. 경계는
+   `tests/lint/test_feature_ref_filters_bind_on_the_right_type.py`가 고정한다.
+
+### major — 탐지기 부류 (커밋 `03cafa2a`)
+
+네 건 다 "결함을 못 보는데 초록"이라 같은 부류다. 이 브랜치가 여러 번 잘못된
+안심을 얻은 경로가 바로 여기다.
+
+| 탐지기 | 왜 못 봤나 | 무엇으로 바꿨나 |
+|---|---|---|
+| FK 액션 보존 | "이전"을 head-schema에서 읽었는데 그것이 마이그레이션과 **함께 움직이는** 덤프였다 — 항진명제 | 308 시점 FK 222개를 얼려 정본으로(`contracts/vnext/foreign-key-referential-actions-v1.json`, sha 핀). 실측: 309가 되살린 34개 전부 drift 0 |
+| head Parse 오라클 | 조립기 45개 중 **6개만** 불렀고 그 사실이 어디에도 없었다 | 인자 표 + `X \| None` 전조합 + 대역 호출 + "조용히 빠지는 길"을 없애는 fence. 43/45 호출, 수집 587 → **780** |
+| 축 비교 검사 | `_SAME_AXIS`의 `feature_id` 갈래가 `legacy_feature_id`(text)까지 삼켰다 | 양쪽 축을 다 본다. "text가 아님"은 uuid라는 뜻이 아니므로 **적극적 uuid 신호**가 있을 때만 어긋난 것으로 판정 |
+| 전화번호 보강 테스트 | `str(c.feature_id)`가 계약 위반을 덮었다 | 표기를 맞추지 않고 **표기를 잰다** + 후보를 지시대로 다음 단계에 그대로 흘린다 |
+
+FK 검사는 확인을 위해 `fk_feature_aliases_feature`의 CASCADE를 떼고 head-schema까지
+함께 고쳐(옛 판이 정확히 눈감던 조합) 돌려 봤다 — 새 축은 빨강, 옛 축은 초록이었다.
+
+### 이 리뷰가 남긴 규칙
+
+**검사가 초록인 것과 결함이 없는 것은 다른 사실이다.** 그 둘을 가르는 유일한 방법은
+검사에 결함을 **일부러 넣어 보는 것**이고, 이번에 그렇게 해서 항진명제 하나를
+찾았다. 그리고 하한(floor)은 "판단 대상 수"가 아니라 **"대상을 실제로 몇 개
+보았는가"**에 걸어야 한다 — 앞의 것은 결함이 고쳐지는 순간 0이 되어 빨개지고,
+뒤의 것만 "검사가 비었다"를 말한다.

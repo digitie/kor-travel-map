@@ -46,8 +46,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
+    # 2026-09-10 T-VN-39 — 재키가 `target_schema_sql_sha256`을 바꿨다. 이 핀은
+    # 그때 함께 갱신됐어야 했고, 로컬(CRLF)에서만 재면 값이 또 갈린다 —
+    # `.gitattributes`가 `eol=lf`라 **정본은 LF 바이트**다.
     "target-schema-fingerprints-v1.json": (
-        "dd436d1024a77c892a987bf0bedaf12ca78425ffc917db31f5cc94f7bbeeddad"
+        "b08ed8a7684799614ad02fb957aff5945b7a69e34080903dcdee06cf9c5150da"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"

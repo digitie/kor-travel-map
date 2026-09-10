@@ -11,23 +11,30 @@
 | `alembic upgrade head` + metadata 정합 10건 | **초록** |
 | lint 전량 · unit 2,826건 | **초록**(n150 node_modules 부재로 인한 frontend dotenv 13건 제외) |
 | `packages/*` 1,787건 | **초록** |
-| 제품 SQL 587문 head Parse | **초록** |
-| 통합 스위트 | 9묶음 중 **8묶음 초록**, 잔여 실패 **1건**(아래) |
+| 제품 SQL **780문** head Parse | **초록** (적대 리뷰 뒤 587 → 780) |
+| 통합 스위트 | 9묶음 중 **8묶음 초록**, 잔여 실패 1건 — 아래 blocker 수정으로 닫음 |
 | live e2e (DB→API→브라우저) | **통과** — 격리 스택에서 실측, 보고서 §live e2e |
 
-### 잔여 실패 하나
+### 적대 리뷰 — blocker 2 · major 8, 전부 닫음
 
-`test_feature_update_executor.py::test_production_asset_runner_rolls_back_load_when_checkpoint_fails`
-— checkpoint 실패 뒤 `provider_sync.provider_sync_state` 행이 살아남는다(feature는
-롤백된다). **이 경로는 이 브랜치에서 처음 도달 가능해졌다** — 앞선 legacy-id 결함들이
-적재를 그 전에 죽이고 있었다. 롤백 경계가 옳은지는 설계 판단이라 적대 리뷰에 넘겼다.
+머지 전에 6축 × 2명(opus5/xhigh)으로 적대 리뷰를 돌렸다. 세부는
+`docs/reports/t-vn-39-routine-open-defects.md` §적대 리뷰.
+
+- **blocker 2** (`cb35cbcf`) — uuid가 text 계약으로 새는 자리, 실행 트랜잭션이
+  조용히 끊긴 채 이어지는 자리. 뒤엣것이 남아 있던 통합 실패 1건의 원인이었다.
+- **major 축 부류 4** (`c1b4f3a3`) — 밖으로 uuid를 내보내던 SQL 둘, dedup 큐에
+  legacy 주소가 들어가던 자리, 표기가 달라 분기가 늘 실패하던 자리, 그리고
+  text 검색어와 uuid 필터를 겸하던 `legacy_id_for_filter`를 둘로 가른 것.
+- **major 탐지기 부류 4** (`03cafa2a`) — FK 액션 검사가 항진명제였고, Parse
+  오라클이 조립기 45개 중 6개만 불렀고, 축 검사의 사면이 `legacy_feature_id`를
+  삼켰고, 전화번호 테스트가 `str()`로 계약 위반을 덮었다. **넷 다 초록이면서
+  아무것도 못 보고 있었다.**
 
 ### 다음 한 작업
 
-1. 적대 리뷰(6차원 × 반박) 결과 반영.
-2. 잔여 실패 1건 판정.
-3. draft PR → 머지.
-4. 머지 **뒤** prod Map 배포 — Map revision이 바뀌면 D2 재핀 사이클 전체가 따라오므로
+1. n150 게이트 전량 재측정(lint·unit·packages·통합 9묶음).
+2. draft PR → 머지.
+3. 머지 **뒤** prod Map 배포 — Map revision이 바뀌면 D2 재핀 사이클 전체가 따라오므로
    별도 작업으로 분리한다.
 
 **T-VN-34C paired fresh-live 레인은 이 PR로 태울 수 없다.** 그 설치기는
