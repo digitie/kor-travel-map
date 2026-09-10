@@ -52,6 +52,7 @@ import pathlib
 import re
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
+_SELF = pathlib.Path(__file__).resolve()
 _VERSIONS = _ROOT / "alembic" / "versions"
 _HEAD_SCHEMA = _ROOT / "alembic" / "head-schema.sql"
 
@@ -177,6 +178,11 @@ def test_procedure_calls_pass_the_declared_number_of_arguments() -> None:
             continue
         for path in sorted(directory.rglob("*.py")):
             if "__pycache__" in path.parts:
+                continue
+            if path == _SELF:
+                # 이 파일의 docstring이 실패 예시로 `CALL ...`을 인용한다. 자기
+                # 자신을 세면 그 예시가 결함으로 잡힌다 — 검사기가 자기 설명을
+                # 검사 대상으로 삼는 자리다.
                 continue
             source = path.read_text(encoding="utf-8", errors="replace")
             # 파이썬 문자열 연결로 쪼개진 SQL을 한 덩어리로 본다.

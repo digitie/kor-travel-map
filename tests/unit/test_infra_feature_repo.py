@@ -314,9 +314,17 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
                     }
                 )
             if "apply_provider_feature_field_patch" in sql:
+                # T-VN-39: 이 프로시저는 **정본 키**를 받고 되돌려준다. 대역이
+                # DTO의 legacy `f_*`를 돌려주면 호출자의 identity 대조가
+                # 통과하고(둘 다 legacy), 운영에서만 22P02가 나는 상태를
+                # 이 테스트가 초록으로 덮는다. 실제로 그렇게 덮여 있었다.
+                assert params["feature_id"] == self.feature_uuid, (
+                    "field patch는 정본 키를 받아야 한다 — DTO의 legacy 주소는 "
+                    "uuid 캐스트에서 22P02다"
+                )
                 return _Result(
                     {
-                        "o_feature_id": feature.feature_id,
+                        "o_feature_id": self.feature_uuid,
                         "o_row_revision": 8,
                         "o_applied_field_count": 25,
                     }

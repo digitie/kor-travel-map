@@ -93,6 +93,10 @@ def test_price_value_params_builds_deterministic_upsert_row() -> None:
         unit="KRW/L",
         observed_at=datetime(2026, 7, 4, 3, 0, tzinfo=UTC),
     )
+    # T-VN-39: 컬럼은 uuid다. 적재기가 legacy 주소를 정본 키로 풀어 넘긴다
+    # (`infra/value_feature_ids.py`) — 이 매퍼는 그 표를 받아 **컬럼에 들어갈
+    # 값만** 바꾸고, 값 키 해시에는 provider가 준 주소를 그대로 쓴다.
+    canonical = "00000000-0000-7000-8000-0000000b0001"
     params = _price_value_params(
         value,
         context=_PriceValueWriteContext(
@@ -101,11 +105,12 @@ def test_price_value_params_builds_deterministic_upsert_row() -> None:
             source_record_key="sr_price_response",
             known_at=datetime(2026, 7, 4, 3, 5, tzinfo=UTC),
         ),
+        canonical_feature_ids={"f_1156010100_p_abc": canonical},
     )
 
     # price_domain enum은 문자열로 정규화된다.
     assert params["price_domain"] == "opinet_gas_station"
-    assert params["feature_id"] == "f_1156010100_p_abc"
+    assert params["feature_id"] == canonical
     assert params["provider_dataset_id"] == 17
     assert params["product_key"] == "gasoline"
     assert params["value_number"] == Decimal("1820.0")
