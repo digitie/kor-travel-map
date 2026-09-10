@@ -351,6 +351,17 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    # ADR-098 claim 축 해석기(309). provider 적재가 "이 원천이 이미 Feature를 갖고
+    # 있나"를 묻는 유일한 통로다 — runtime은 `provider_sync`의 표를 직접 못 읽으므로
+    # 이 SECURITY DEFINER 함수의 EXECUTE가 그 질문의 전부다.
+    "REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(...) "
+    "FROM PUBLIC, ktm_feature_api_runtime, ktm_manual_feature_procedure_owner, "
+    "ktm_manual_feature_admin_executor",
+    # 생성 wrapper와 **같은 집합**에 준다. 둘은 한 쌍으로 쓰이므로 — claim을 풀어
+    # 존재를 묻고, 없으면 wrapper로 만든다 — 한쪽만 부를 수 있는 롤이 있으면 적재가
+    # 반쪽으로 죽는다.
+    "GRANT EXECUTE ON FUNCTION feature.resolve_provider_feature_id(...) "
+    "TO ktm_feature_runtime, ktm_feature_create_provider_executor",
     "REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(...) "
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(...) "
@@ -407,17 +418,6 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
     "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
-    # ADR-098 claim 축 해석기(309). provider 적재가 "이 원천이 이미 Feature를 갖고
-    # 있나"를 묻는 유일한 통로다 — runtime은 `provider_sync`의 표를 직접 못 읽으므로
-    # 이 SECURITY DEFINER 함수의 EXECUTE가 그 질문의 전부다.
-    "REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(...) "
-    "FROM PUBLIC, ktm_feature_api_runtime, ktm_manual_feature_procedure_owner, "
-    "ktm_manual_feature_admin_executor",
-    # 생성 wrapper와 **같은 집합**에 준다. 둘은 한 쌍으로 쓰이므로 — claim을 풀어
-    # 존재를 묻고, 없으면 wrapper로 만든다 — 한쪽만 부를 수 있는 롤이 있으면 적재가
-    # 반쪽으로 죽는다.
-    "GRANT EXECUTE ON FUNCTION feature.resolve_provider_feature_id(...) "
-    "TO ktm_feature_runtime, ktm_feature_create_provider_executor",
 )
 
 _MANUAL_FEATURE_TABLE_ACL = (
