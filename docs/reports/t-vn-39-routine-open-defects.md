@@ -525,3 +525,39 @@ source certificate 필요)만 다시 만들 수 있다. **바꿀 수 없는 쪽�
 
 2026-09-10 실측에서 26,536줄 중 어긋난 것은 **둘**이었고, 그 둘이 handoff 전체를
 멈춰 세웠다.
+
+## live e2e — 격리 스택에서 실제로 돌렸다 (2026-09-10)
+
+머지 전에 "정말 도는가"를 재려면 실행이 필요하다. n150의 disposable 격리 스택
+(`~/ktm-live-301`, PG 127.0.0.1:15451 · API 13711 · admin web 13712)을 이 브랜치로
+세우고 다음을 실측했다. prod compose project·DB·volume·image에는 접근하지 않았다.
+
+| 단계 | 결과 |
+|---|---|
+| 빈 DB(`template0`) → `alembic upgrade head` | `HEAD=309_t39_feature_id_rekey`, `feature.features.feature_id` = **uuid** |
+| `reconcile_runtime_privileges` | OK |
+| API 기동(`ktm_feature_api_runtime` 로그인) | `/health` 200 — 기동 시 ADR-090 권한 preflight 통과 |
+| **provider 적재**(dagster runtime 로그인, `load_feature_bundles`) | `features_inserted=1` |
+| ↳ 정본 키 | `01a08a42-22ee-72bc-86d5-8c6d67deba82` (서버 발급 UUIDv7) |
+| ↳ claim | `(place, <자연키>) → 그 uuid` 1행 |
+| ↳ alias | `f_1156010100_p_17064ab452996653` 1행 — **주소 등록부** |
+| `GET /v1/features?min_lon=…` | 200 · `feature_id` = `feature_uuid` = 정본 uuid |
+| `GET /v1/features/search?q=…` | 200 · 1건 |
+| `GET /v1/features/<uuid>` | 200 |
+| `GET /v1/features/<legacy f_*>` | 200 · **같은 정본 키로 해석** |
+| admin UI 로그인(실제 브라우저) | OK |
+| admin `/features/<uuid>` | 이름 + 정본 uuid 렌더 |
+| admin `/features/<legacy f_*>` | **같은 Feature** 렌더 |
+
+핵심은 마지막 두 줄이다. ADR-098 결정 6("alias는 주소 등록부")이 DB·API·브라우저
+세 층에서 같은 답을 낸다 — legacy 주소로 들어가도 정본 uuid의 Feature가 나온다.
+
+`/features` **목록**은 이 스크립트에서 비어 보였다. 그 화면이 "현재 지도 범위의
+feature"를 거르는 bbox 화면이고 기본 뷰포트가 심은 좌표를 담지 않기 때문이다 —
+같은 질의를 API 층(`/v1/features?min_lon=…`)에서 하면 그 Feature가 나온다. 재키와
+무관하다.
+
+**재현 순서**(전부 `/tmp`의 disposable 스크립트, 리포지토리 밖):
+빈 DB 생성 → `tests/integration/_application_300_bootstrap.upgrade_head_with_application_300_bootstrap`
+→ 롤 비밀번호를 `.env`에 맞춤 → `reconcile_runtime_privileges` → uvicorn →
+provider 번들 적재 → `npx next build && npx next start` → Playwright 드라이브.

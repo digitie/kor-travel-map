@@ -12,16 +12,30 @@
 | lint 전량 · unit 2,826건 | **초록**(n150 node_modules 부재로 인한 frontend dotenv 13건 제외) |
 | `packages/*` 1,787건 | **초록** |
 | 제품 SQL 587문 head Parse | **초록** |
-| 통합 스위트 | 측정 중 — 직전 판 290 실패 → 마지막 결함 수정 후 재측정 |
-| live e2e UI | 미착수 |
+| 통합 스위트 | 9묶음 중 **8묶음 초록**, 잔여 실패 **1건**(아래) |
+| live e2e (DB→API→브라우저) | **통과** — 격리 스택에서 실측, 보고서 §live e2e |
+
+### 잔여 실패 하나
+
+`test_feature_update_executor.py::test_production_asset_runner_rolls_back_load_when_checkpoint_fails`
+— checkpoint 실패 뒤 `provider_sync.provider_sync_state` 행이 살아남는다(feature는
+롤백된다). **이 경로는 이 브랜치에서 처음 도달 가능해졌다** — 앞선 legacy-id 결함들이
+적재를 그 전에 죽이고 있었다. 롤백 경계가 옳은지는 설계 판단이라 적대 리뷰에 넘겼다.
 
 ### 다음 한 작업
 
-1. 통합 스위트 전량 초록 확인.
-2. **live e2e** — `scripts/install-tvn34c-n150-fresh-live-e2e.sh` +
-   `run-...sh`로 n150에 격리 fresh 스택을 세워 UI까지 태운다. prod Map 직접 배포는
-   D2 재핀 사이클 전체를 끌고 오므로 **머지 뒤**로 미룬다.
-3. 적대 리뷰 → draft PR → 머지.
+1. 적대 리뷰(6차원 × 반박) 결과 반영.
+2. 잔여 실패 1건 판정.
+3. draft PR → 머지.
+4. 머지 **뒤** prod Map 배포 — Map revision이 바뀌면 D2 재핀 사이클 전체가 따라오므로
+   별도 작업으로 분리한다.
+
+**T-VN-34C paired fresh-live 레인은 이 PR로 태울 수 없다.** 그 설치기는
+`consumer-rollout-v1.json`의 T-VN-40 paired consumer receipt가 `complete`일 것을
+요구하는데 지금 `pending`이고, 그 blocking_reason 자체가 "Map Admin provenance가
+opaque feature_id + required feature_uuid로 바뀌었으니 full-admin artifact를 다시
+vendoring하고 PinVi M05 attestation을 붙여 paired acceptance를 다시 돌려라"다 —
+별도 태스크다. 그래서 live e2e는 격리 스택으로 했다.
 
 ### 열린 결정 하나
 
