@@ -616,3 +616,78 @@ FK 검사는 확인을 위해 `fk_feature_aliases_feature`의 CASCADE를 떼고 
 찾았다. 그리고 하한(floor)은 "판단 대상 수"가 아니라 **"대상을 실제로 몇 개
 보았는가"**에 걸어야 한다 — 앞의 것은 결함이 고쳐지는 순간 0이 되어 빨개지고,
 뒤의 것만 "검사가 비었다"를 말한다.
+
+## 머지 직전 — 쪼갠 하네스가 가린 것 (2026-09-10)
+
+적대 리뷰 지적을 전부 닫고 9묶음 통합이 초록이 된 뒤 PR을 열었다. CI의 **한 세션
+전량 런**이 곧바로 4건을 빨갛게 만들었다.
+
+    tests/integration/test_feature_identity_boundary.py
+      test_provider_create_writes_uuid_and_alias_atomically
+      test_admin_manual_create_issues_no_alias
+      test_feature_request_approval_issues_no_alias
+      test_manual_curation_create_issues_no_alias
+    → assert (0, 21, 0, 0) == (0, 0, 0, 0)
+
+### 왜 묶음 런은 못 봤나
+
+묶음 런은 파일 묶음마다 **새 세션·새 컨테이너**다. 그래서 세션 공유 DB에 누적되는
+상태가 묶음 경계에서 사라진다. CI는 `pytest tests/integration -q` 한 줄로 전부를
+한 세션에 돌리므로 누적이 그대로 보인다.
+
+쪼갠 이유는 좋았다 — pytest-timeout이 없어 advisory lock 데드락 하나가 런 전체를
+무한정 붙들고, 파일마다 `timeout`을 걸면 그 파일만 잃는다. 실제로 19분짜리 정지 두
+번을 그 방식이 막았다. **그러나 빠른 하네스는 그 자체가 프록시다.** 이 작업이 오래
+걸린 근본 원인이 "범위를 프록시에서 유도했다"인데, 마지막에 같은 실수를 측정 방식에서
+한 번 더 했다.
+
+### 숫자만 돌려주는 단언은 절반만 일한다
+
+첫 실패는 `21`이라는 숫자 하나만 들고 있었다. 어느 claim인지 말하지 않았다 — 이
+저장소가 sha256 카탈로그 대조에서 이미 겪은 부류다.
+
+그래서 고치기 **전에** 진단을 붙였다(`_claims_missing_their_address`, 최대 12건을
+실패 메시지에 싣는다). 다시 돌리자 답이 한 번에 나왔다:
+
+    natural_key: 'DAGSTER-OPINET-001' / 'DAGSTER-KNPS-POINT-001' /
+                 '11-DAGSTER001-37' / '2026.07.13::10:00:00::0010::서울방향::양재::1' …
+    bound_by_operation: 'provider_sync'
+
+전부 dagster asset 테스트가 commit한 claim이었다.
+
+### 원인은 FK가 없다는 사실 하나
+
+`provider_sync.provider_feature_identities`에는 `feature.features`로 가는 FK가 없다
+(dataset FK 하나뿐). 그래서 정리 도우미가 도는
+
+    TRUNCATE feature.features, provider_sync.source_entities, ... CASCADE
+
+가 claim을 데려가지 않는다. commit하는 테스트가 지나간 자리마다 부모 없는 claim이
+남고, identity 불변식의 둘째 축이 그것을 "주소 없는 claim"으로 세므로 **다른 파일이
+대신 죽는다**.
+
+`test_notice_lifecycle.py`는 이 함정을 이미 밟고 자기 자리에 명시 DELETE를 넣어
+뒀는데(그 주석이 "claim은 CASCADE로 따라오지 않는다"고 정확히 적고 있다), 그 교훈이
+정리 목록을 각자 들고 있는 **열여섯 파일**로 퍼지지 않았다.
+
+### 처방 — 목록을 늘리지 않는다
+
+호출부마다 이름을 더 적게 하면 잊는 것이 기본값이 된다. 대신 도우미가 호출부
+TRUNCATE **뒤에** 부모 없는 claim만 거둔다:
+
+```sql
+DELETE FROM provider_sync.provider_feature_identities AS claim
+WHERE NOT EXISTS (
+    SELECT 1 FROM feature.features AS f WHERE f.feature_id = claim.feature_id
+)
+```
+
+feature가 살아 있는 claim은 건드리지 않으므로 어떤 테스트의 의미 있는 상태도 잃지
+않고, "feature는 있는데 주소가 없다"는 **진짜 결함**은 불변식이 계속 잡는다. 두 갈래를
+`test_db_cleanup.py`의 한 테스트가 함께 본다 — 거두는 것만 보면 "전부 지운다"와
+구분되지 않기 때문이다.
+
+### 남는 규칙
+
+쪼갠 하네스로 초록을 얻었으면 머지 전에 **한 번은 CI와 같은 방식으로** 돌린다.
+다르게 재면 다른 것을 재는 것이다.
