@@ -5,10 +5,16 @@ import {
   createMarkerElement,
   resolveMarkerColor,
 } from "@kor-travel-map/map-marker-react";
-import maplibregl, {
-  type Map as MapLibreMap,
-  type Marker as MapLibreMarker,
-  type Popup as MapLibrePopup,
+// maplibre-gl 6은 default export를 없앴다(보안 권고 GHSA-jrc7-96c5-q579 대응으로
+// 5.x에서 올라왔다). 이 파일은 `maplibregl`을 값(`new maplibregl.Marker`)과
+// 타입 네임스페이스(`maplibregl.GeoJSONSource`) 양쪽으로 쓰므로 namespace
+// import가 정확한 대체다 — 이름을 하나씩 풀면 같은 이름이 값과 타입 두 자리에서
+// 각각 필요해진다.
+import * as maplibregl from "maplibre-gl";
+import type {
+  Map as MapLibreMap,
+  Marker as MapLibreMarker,
+  Popup as MapLibrePopup,
 } from "maplibre-gl";
 import {
   createContext,
