@@ -35,6 +35,16 @@ ALTER FUNCTION feature.resolve_provider_feature_id(bigint, text, text)
     OWNER TO ktm_feature_state_procedure_owner;
 
 REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(bigint, text, text) FROM PUBLIC;
+
+-- 부여 대상은 provider 생성 wrapper와 **같은 집합**이다. 둘은 한 쌍으로 쓰인다 —
+-- 먼저 claim을 풀어 존재를 묻고, 없으면 wrapper로 만든다. 한쪽만 부를 수 있는 롤이
+-- 있으면 적재가 반쪽으로 죽는다.
+--
+-- `has_active_feature_override`처럼 REVOKE만 두는 형제들과 다른 이유: 그것들은 다른
+-- SECURITY DEFINER 프로시저 **안에서** 불려 definer 권한으로 돌지만, 이 함수는
+-- 파이썬 repo가 직접 부른다.
+GRANT EXECUTE ON FUNCTION feature.resolve_provider_feature_id(bigint, text, text)
+    TO ktm_feature_create_provider_executor;
 GRANT EXECUTE ON FUNCTION feature.resolve_provider_feature_id(bigint, text, text)
     TO ktm_feature_runtime;
 

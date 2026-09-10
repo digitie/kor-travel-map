@@ -413,8 +413,11 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(...) "
     "FROM PUBLIC, ktm_feature_api_runtime, ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor",
+    # 생성 wrapper와 **같은 집합**에 준다. 둘은 한 쌍으로 쓰이므로 — claim을 풀어
+    # 존재를 묻고, 없으면 wrapper로 만든다 — 한쪽만 부를 수 있는 롤이 있으면 적재가
+    # 반쪽으로 죽는다.
     "GRANT EXECUTE ON FUNCTION feature.resolve_provider_feature_id(...) "
-    "TO ktm_feature_runtime",
+    "TO ktm_feature_runtime, ktm_feature_create_provider_executor",
 )
 
 _MANUAL_FEATURE_TABLE_ACL = (
