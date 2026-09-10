@@ -696,9 +696,11 @@ async def _assert_owned_state(
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if present:
-        # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
-        # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
-        expected_references["feature.feature_aliases.feature_id"] = len(present)
+        # alias는 **기대하지 않는다.** T-VN-39/ADR-098 결정 6이 alias 발급을 provider
+        # 경로로 한정했고 309가 `trg_features_legacy_alias`를 영구 제거했다. 이 seed는
+        # core 프로시저를 직접 부르므로 alias가 생기지 않으며 그것이 정상이다 —
+        # 종전 주석의 "feature INSERT trigger가 canonical alias를 함께 만든다"는
+        # 그 트리거가 있던 시절의 이야기다.
         # provider procedure는 source evidence를 잠그지만 source link를 만들지
         # 않는다. fixture가 ingestion과 같은 primary lineage를 별도로 만들었는지
         # 확인하고, Feature CASCADE 뒤에는 이 reference도 0이어야 한다.
@@ -1341,11 +1343,10 @@ async def _inspect_api_owned(
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
-    if rows:
-        # feature INSERT trigger가 canonical alias를 함께 만든다. subtype
-        # (`feature.feature_places`)은 composite FK라 이 단일 열 감사에 잡히지
-        # 않는다 — 그쪽은 Feature 삭제 시 같은 CASCADE로 사라진다.
-        expected_references["feature.feature_aliases.feature_id"] = len(rows)
+    # 이 lane은 admin 수동 생성 경로를 감사한다. 그 경로는 어떤 경우에도 alias를
+    # 만들지 않으므로(ADR-098 결정 6) 기대하지 않는다. subtype
+    # (`feature.feature_places`)은 composite FK라 이 단일 열 감사에 잡히지 않는다 —
+    # 그쪽은 Feature 삭제 시 같은 CASCADE로 사라진다.
     if override_rows:
         expected_references["ops.feature_overrides.feature_id"] = len(override_rows)
     observed_references = {key: value for key, value in foreign_keys.items() if value}
