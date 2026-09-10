@@ -1,5 +1,36 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-10 — T-VN-39 재키가 착지 직전이다
+
+`feat/t-vn-39-rekey`가 `feature_id`를 text → uuid로 옮겼다. **마이그레이션·계약
+오라클·lint·unit·제품 SQL Parse 오라클이 전부 초록**이고, 남은 것은 통합 스위트
+전량 재측정과 live e2e다.
+
+| 게이트 | 상태 |
+|---|---|
+| `alembic upgrade head` + metadata 정합 10건 | **초록** |
+| lint 전량 · unit 2,826건 | **초록**(n150 node_modules 부재로 인한 frontend dotenv 13건 제외) |
+| `packages/*` 1,787건 | **초록** |
+| 제품 SQL 587문 head Parse | **초록** |
+| 통합 스위트 | 측정 중 — 직전 판 290 실패 → 마지막 결함 수정 후 재측정 |
+| live e2e UI | 미착수 |
+
+### 다음 한 작업
+
+1. 통합 스위트 전량 초록 확인.
+2. **live e2e** — `scripts/install-tvn34c-n150-fresh-live-e2e.sh` +
+   `run-...sh`로 n150에 격리 fresh 스택을 세워 UI까지 태운다. prod Map 직접 배포는
+   D2 재핀 사이클 전체를 끌고 오므로 **머지 뒤**로 미룬다.
+3. 적대 리뷰 → draft PR → 머지.
+
+### 열린 결정 하나
+
+**h35 고정 세대(`frozen_h35_schema`, ADR-075)를 되살릴지 은퇴시킬지.** 재키 뒤 그
+replay 경로는 세대 분기가 없는 공용 표면 셋 때문에 이미 반쪽이다. 목록은
+`curation_repo._pre_uuid_feature_id_recordset`의 docstring이 들고 있다. 되살리려면
+그 셋에도 세대 분기가 필요하고, 아니면 표면 자체를 은퇴시켜야 한다. 이 PR은 결정을
+내리지 않고 현행 세대만 정직하게 옮겼다 — head Parse 오라클도 그 세대를 제외한다.
+
 ## 2026-09-08 (3) — 원장이 밀려 있던 둘을 정리하고 계약 하나를 개정했다
 
 두 PR이 머지됐다 — Map #1194(9개 체크 전부 통과), Manager #335.
