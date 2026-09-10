@@ -30,6 +30,12 @@ pytestmark = pytest.mark.integration
 # 형식이다 — `from ... import seeded`는 아래 테스트 인자와 이름이 겹쳐 F811이다.
 seeded = _merge_repo_tests.seeded
 
+#: 시드가 쓰는 정본 키. T-VN-39 뒤 feature 식별자는 uuid다 — 이 파일이 문자열
+#: 리터럴을 따로 들면 시드와 조용히 어긋난다.
+_F_MASTER = _merge_repo_tests._F_MASTER
+_F_LOSER = _merge_repo_tests._F_LOSER
+_MERGE_IDS = {"master": _F_MASTER, "loser": _F_LOSER}
+
 
 async def test_apply_feature_merge_succeeds_as_api_runtime(
     seeded: str,
@@ -45,8 +51,8 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
         async with as_api_runtime(session):
             await apply_feature_merge(
                 session,
-                master_id="f_master",
-                loser_id="f_loser",
+                master_id=_F_MASTER,
+                loser_id=_F_LOSER,
                 review_id=seeded,
                 merged_by="runtime-role-test",
                 reason="ACL 회귀 가드",
@@ -55,8 +61,10 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
         row = (
             await session.execute(
                 text(
-                    "SELECT lifecycle_state FROM feature.features WHERE feature_id = 'f_loser'"
-                )
+                    "SELECT lifecycle_state FROM feature.features "
+                    "WHERE feature_id = CAST(:loser AS uuid)"
+                ),
+                {"loser": _F_LOSER},
             )
         ).one_or_none()
         assert row is not None
@@ -66,7 +74,8 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
 @pytest.mark.parametrize(
     "call",
     [
-        "CALL feature.merge_lock_curation_collections('f_master', 'f_loser')",
+        "CALL feature.merge_lock_curation_collections("
+        "CAST(:master AS uuid), CAST(:loser AS uuid))",
     ],
 )
 async def test_dagster_runtime_cannot_call_merge_procedures(
@@ -88,7 +97,7 @@ async def test_dagster_runtime_cannot_call_merge_procedures(
         # CM 종료가 `SET LOCAL SESSION AUTHORIZATION DEFAULT`를 내려 InFailedSQLTransaction이다.
         with pytest.raises(DBAPIError) as info:
             async with as_dagster_runtime(session):
-                await session.execute(text(call))
+                await session.execute(text(call), _MERGE_IDS)
         orig = info.value.orig
         # 어느 층이 거부했든 SQLSTATE는 42501이어야 한다. grant 층(EXECUTE가 admin executor에만)
         # 이면 "permission denied for procedure", 게이트 층이면 "requires the admin executor".
@@ -101,5 +110,5 @@ async def test_dagster_runtime_cannot_call_merge_procedures(
     async with AsyncSession(migrated_engine) as session:
         await session.begin()
         async with as_api_runtime(session):
-            await session.execute(text(call))
+            await session.execute(text(call), _MERGE_IDS)
         await session.rollback()

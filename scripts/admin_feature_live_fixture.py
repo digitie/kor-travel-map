@@ -696,8 +696,9 @@ async def _assert_owned_state(
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if present:
-        # alias는 **기대하지 않는다.** T-VN-39/ADR-098 결정 6이 alias 발급을 provider
-        # 경로로 한정했고 309가 `trg_features_legacy_alias`를 영구 제거했다. 이 seed는
+        # alias는 **기대하지 않는다.** T-VN-39/ADR-098 결정 6은
+        # alias 발급을 provider 경로로 한정했고,
+        # 309가 `trg_features_legacy_alias`를 영구 제거했다. 이 seed는
         # core 프로시저를 직접 부르므로 alias가 생기지 않으며 그것이 정상이다 —
         # 종전 주석의 "feature INSERT trigger가 canonical alias를 함께 만든다"는
         # 그 트리거가 있던 시절의 이야기다.
