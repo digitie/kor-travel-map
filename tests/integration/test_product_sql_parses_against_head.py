@@ -139,13 +139,39 @@ def _dedup_review_count_arguments(_module: Any, _builder: Any) -> list[dict[str,
     return [{"params": empty}, {"params": {**empty, "q_like": "%x%"}}]
 
 
-def _enrichment_filter_arguments(_module: Any, _builder: Any) -> list[dict[str, Any]]:
+def _enrichment_filter_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
+    """필터 조각은 모듈이 들고 있는 상수를 **호출부가 짝지은 그대로** 쓴다.
+
+    첫 판은 그럴듯한 조각을 지어냈고, head 오라클이 곧바로
+    `missing FROM-clause entry for table "review"`로 빨개졌다. 지어낸 조각이 없는
+    별칭을 참조한 것이다 — 이 파일이 스스로 적어 둔 규칙("값을 추측하지 말고
+    호출부가 실제로 넘기는 것을 보라")을 검사기 자신이 어겼다.
+
+    쌍을 교차곱으로 만들지 않는 것도 같은 이유다. scalar 조각과 optional 조각은
+    서로 다른 질의 모양을 전제하므로, 호출부가 만들지 않는 조합은 만들지 않는다.
+    """
+    optional = (
+        module._ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
+        module._ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER,
+    )
+    required = (
+        module._ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER,
+        module._ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER,
+    )
+    scalar = (
+        module._ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER,
+        module._ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER,
+    )
+    pairs = (
+        (optional[0], optional[1]),
+        (required[0], optional[1]),
+        (optional[0], required[1]),
+        (required[0], required[1]),
+        (scalar[0], scalar[1]),
+    )
     return [
-        {"status_filter": "", "provider_filter": ""},
-        {
-            "status_filter": "AND review.status = CAST(:status AS text)",
-            "provider_filter": "AND dataset.provider = CAST(:provider AS text)",
-        },
+        {"status_filter": status, "provider_filter": provider}
+        for status, provider in pairs
     ]
 
 
@@ -496,8 +522,11 @@ async def test_every_product_sql_statement_parses_against_the_head_schema(
     )
 
 
-def test_every_sql_builder_is_called_or_explained() -> None:
+async def test_every_sql_builder_is_called_or_explained() -> None:
     """이름이 ``_sql``로 끝나는 조립기가 **하나도 빠짐없이** 불렸는지 본다.
+
+    DB를 쓰지 않지만 ``async``다 — 이 모듈의 `pytestmark`가 `asyncio`를 걸어 두고
+    있고, 동기 함수에 그 표시가 붙으면 pytest-asyncio가 경고를 오류로 올린다.
 
     이 오라클의 첫 판은 "bool 아니면 기본값" 조건에 걸리지 않는 조립기를 조용히
     건너뛰었다. 45개 중 6개만 불렸고, 그 사실은 어디에도 나타나지 않았다 —
