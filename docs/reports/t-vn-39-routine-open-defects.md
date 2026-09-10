@@ -493,3 +493,35 @@ OUT 자리도 함수 해석에 넣는다. 검사를 넓히자 테스트 SQL에�
   결정**이다(`_pre_uuid_feature_id_recordset`의 docstring이 목록을 들고 있다).
 - **`feature.feature_files`** — 선택적 관계다. 호출부가 `to_regclass`로 먼저 묻고
   없으면 그 SQL을 실행하지 않는다. head에 없는 것이 정상이다.
+
+## 조정기는 head 전용이 아니다 (2026-09-10)
+
+`src/kortravelmap/infra/runtime_privileges.py`는 **revision 300에서도 돈다.**
+`0236 → 300` handoff 실행자가 stamp 직후 그것을 호출하고, 그 시점의 catalog를
+image에 봉인된 immutable reference와 sha256으로 대조한다. 그 catalog에는 **컬럼
+단위 ACL**이 들어 있다.
+
+그래서 "head에서 사라진 컬럼을 목록에서 뺀다"는 자명해 보이는 편집이 **300에서**
+계약을 깬다. 309가 shadow `feature_uuid`를 지우며 `_ROUTE_AREA_RUNTIME_INSERT_COLUMNS`
+에서 그 이름을 뺐고, 컬럼이 아직 살아 있는 300에서 ACL 두 줄이 사라졌다.
+
+reference는 release 절차(`scripts/build-baseline.sh`, 살아 있는 0236 컨테이너와
+source certificate 필요)만 다시 만들 수 있다. **바꿀 수 없는 쪽이 reference이고
+맞춰야 하는 쪽이 조정기다.** 따라서 이 인벤토리에 이름을 더하거나 빼는 편집은
+"head에서 맞는가"가 아니라 **"300과 head 양쪽에서 맞는가"**를 물어야 한다. 답이
+갈리면 조건부로 만든다 — 표는 `to_regclass`, 컬럼은 `pg_attribute`.
+
+### 진단 레시피 — sha256은 어느 줄인지 말하지 않는다
+
+이 부류의 실패 메시지는 언제나 "catalog does not match"다. 어긋난 줄을 보려면
+같은 절차를 재현해 **행을 그대로** 떨어뜨리고 두 판을 diff한다:
+
+1. `tests/integration/_application_300_bootstrap.py`의
+   `upgrade_baseline_root_with_application_300_bootstrap`으로 fresh 300 DB를 만든다.
+2. `ktm_feature_migrator`로 붙는다(조정기가 그 로그인을 요구한다).
+3. `reconcile_runtime_privileges_in_transaction` → `_set_canonical_contract_gucs`
+   → `alembic/baseline/application-catalog.sql` 실행 → scalars를 줄로 적는다.
+4. 의심되는 편집을 되돌린 판으로 같은 것을 한 번 더 하고 `diff`한다.
+
+2026-09-10 실측에서 26,536줄 중 어긋난 것은 **둘**이었고, 그 둘이 handoff 전체를
+멈춰 세웠다.
