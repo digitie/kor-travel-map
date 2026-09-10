@@ -13,6 +13,7 @@ from kortravelmap.core.ids import make_payload_hash
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import weather_repo
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,12 +28,12 @@ _DATASET = "tvn38_batch_forecast"
 
 async def _insert_feature(
     session: AsyncSession,
-    feature_id: str,
+    label: str,
     *,
     kind: str = "place",
     lon: float = 126.9784,
     lat: float = 37.5665,
-) -> None:
+) -> str:
     """batch 조회의 입력이 될 feature 1건을 공개 표면에 보이는 상태로 심는다.
 
     T-VN-34(0097)가 ``status``를 물리 삭제했다. 이 파일이 상태에 거는 요구는
@@ -41,22 +42,31 @@ async def _insert_feature(
     ``lifecycle='active' AND publication='published' AND quality='valid'``,
     즉 옛 ``status='active'``와 같은 뜻이다. 세 축의 컬럼 기본값이 정확히 그 조합이라
     별도 지정 없이 INSERT하는 것으로 등가가 성립한다.
+
+    T-VN-39(309): 이 INSERT는 provider claim 경로를 거치지 않는 **정본 축**이라
+    ``feature_id``가 uuid다. ``label``은 그 uuid의 씨앗이자 ``name``으로 남아
+    테스트를 읽는 사람이 batch item을 이름으로 계속 분간한다 — 옛 코드처럼
+    ``:feature_id`` 하나를 uuid 열과 varchar ``name``에 함께 쓰면 asyncpg가 두
+    타입을 한 ``$1``로 접어 42P18(inconsistent types)이므로 바인드도 나눈다.
+    반환값은 심은 정본 키다(값 표·batch 입력이 모두 그 uuid를 쓴다).
     """
+    feature_id = feature_uuid(label)
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord
             ) VALUES (
-                :feature_id, :kind, :feature_id, '00000000',
+                :feature_id, :kind, :name, '00000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(:lon, :lat), 4326
                 )
             )
             """
         ),
-        {"feature_id": feature_id, "kind": kind, "lon": lon, "lat": lat},
+        {"feature_id": feature_id, "kind": kind, "name": label, "lon": lon, "lat": lat},
     )
+    return feature_id
 
 
 async def _response(
@@ -129,16 +139,20 @@ async def test_batch_uses_final_facts_and_preserves_snapshot_source_tiers(
     _, future_response = await _response(
         migrated_session, suffix="b", fetched_at=known_at + timedelta(minutes=1)
     )
-    await _insert_feature(migrated_session, "batch-parent")
-    await _insert_feature(
+    parent_id = await _insert_feature(migrated_session, "batch-parent")
+    anchor_id = await _insert_feature(
         migrated_session,
         "batch-anchor",
         kind="weather",
         lon=126.9804,
         lat=37.5665,
     )
-    await _insert_feature(migrated_session, "batch-empty", lon=128.0, lat=37.5665)
-    await _insert_feature(migrated_session, "batch-retired", lon=126.9744, lat=37.5665)
+    empty_id = await _insert_feature(
+        migrated_session, "batch-empty", lon=128.0, lat=37.5665
+    )
+    retired_id = await _insert_feature(
+        migrated_session, "batch-retired", lon=126.9744, lat=37.5665
+    )
     # 옛 ``status='deleted' + deleted_at``의 뜻은 "더 이상 공개 표면에 없다"였고,
     # 0095 backfill이 그 조건을 그대로 ``lifecycle_state='retired'``로 옮겼다.
     # 삭제 시각 자체는 이 테스트가 단언하지 않으므로(단언 대상은 batch item이
@@ -151,15 +165,16 @@ async def test_batch_uses_final_facts_and_preserves_snapshot_source_tiers(
             """
             UPDATE feature.features
             SET lifecycle_state = 'retired', publication_state = 'suppressed'
-            WHERE feature_id = 'batch-retired'
+            WHERE feature_id = :feature_id
             """
         ),
+        {"feature_id": retired_id},
     )
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
-            _value("batch-anchor", "TMP", target_at=target_at, value="20"),
-            _value("batch-anchor", "POP", target_at=future_target_at, value="30"),
+            _value(anchor_id, "TMP", target_at=target_at, value="20"),
+            _value(anchor_id, "POP", target_at=future_target_at, value="30"),
         ],
         provider_dataset_id=dataset_id,
         source_record=first_response,
@@ -168,7 +183,7 @@ async def test_batch_uses_final_facts_and_preserves_snapshot_source_tiers(
     # 같은 target의 later knowledge correction은 첫 snapshot에 보이면 안 된다.
     assert await weather_repo.load_weather_values(
         migrated_session,
-        [_value("batch-anchor", "TMP", target_at=target_at, value="99")],
+        [_value(anchor_id, "TMP", target_at=target_at, value="99")],
         provider_dataset_id=dataset_id,
         source_record=future_response,
         selected_at=target_at,
@@ -180,12 +195,7 @@ async def test_batch_uses_final_facts_and_preserves_snapshot_source_tiers(
         targets=(
             weather_repo.WeatherBatchTarget(
                 target_at=target_at,
-                feature_ids=(
-                    "batch-parent",
-                    "batch-anchor",
-                    "batch-empty",
-                    "batch-retired",
-                ),
+                feature_ids=(parent_id, anchor_id, empty_id, retired_id),
             ),
         ),
         known_at=known_at,
@@ -216,12 +226,12 @@ async def test_batch_enforces_source_work_budget_before_metrics(
 ) -> None:
     target_at = _BASE + timedelta(hours=2)
     dataset_id, response = await _response(migrated_session, suffix="a", fetched_at=_BASE)
-    await _insert_feature(migrated_session, "batch-budget", kind="weather")
+    budget_id = await _insert_feature(migrated_session, "batch-budget", kind="weather")
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
-            _value("batch-budget", "TMP", target_at=target_at, value="20"),
-            _value("batch-budget", "POP", target_at=target_at, value="30"),
+            _value(budget_id, "TMP", target_at=target_at, value="20"),
+            _value(budget_id, "POP", target_at=target_at, value="30"),
         ],
         provider_dataset_id=dataset_id,
         source_record=response,
@@ -235,7 +245,7 @@ async def test_batch_enforces_source_work_budget_before_metrics(
             migrated_session,
             targets=(
                 weather_repo.WeatherBatchTarget(
-                    target_at=target_at, feature_ids=("batch-budget",)
+                    target_at=target_at, feature_ids=(budget_id,)
                 ),
             ),
             known_at=target_at,
@@ -252,8 +262,10 @@ async def test_batch_partial_own_weather_uses_next_kma_anchor_for_temperature(
     dataset_id, response = await _response(
         migrated_session, suffix="a", fetched_at=_BASE
     )
-    await _insert_feature(migrated_session, "batch-partial-own", kind="weather")
-    await _insert_feature(
+    partial_own_id = await _insert_feature(
+        migrated_session, "batch-partial-own", kind="weather"
+    )
+    next_anchor_id = await _insert_feature(
         migrated_session,
         "batch-next-kma-anchor",
         kind="weather",
@@ -263,8 +275,8 @@ async def test_batch_partial_own_weather_uses_next_kma_anchor_for_temperature(
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
-            _value("batch-partial-own", "SKY", target_at=target_at, value="1"),
-            _value("batch-next-kma-anchor", "TMP", target_at=target_at, value="22"),
+            _value(partial_own_id, "SKY", target_at=target_at, value="1"),
+            _value(next_anchor_id, "TMP", target_at=target_at, value="22"),
         ],
         provider_dataset_id=dataset_id,
         source_record=response,
@@ -276,7 +288,7 @@ async def test_batch_partial_own_weather_uses_next_kma_anchor_for_temperature(
         targets=(
             weather_repo.WeatherBatchTarget(
                 target_at=target_at,
-                feature_ids=("batch-partial-own",),
+                feature_ids=(partial_own_id,),
             ),
         ),
         known_at=target_at,

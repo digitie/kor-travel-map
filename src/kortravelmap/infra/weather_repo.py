@@ -9,7 +9,7 @@ raw SQL은 본 모듈에 모음(ADR-004). commit은 호출자 책임.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -23,6 +23,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.value_feature_ids import resolve_value_feature_ids
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -340,7 +341,8 @@ INSERT INTO feature.feature_weather_values (
     observed_at, target_at, known_at, normalization_version, payload,
     source_entity_key, source_record_key
 ) VALUES (
-    :weather_value_key, :feature_id, :provider_dataset_id, :weather_domain, :forecast_style,
+    :weather_value_key, CAST(:feature_id AS uuid), :provider_dataset_id,
+    :weather_domain, :forecast_style,
     :timeline_bucket, :metric_key, :metric_name, :source_metric_key, :source_metric_name,
     :value_number, :value_text, :unit, :severity, :issued_at, :valid_at,
     CASE WHEN CAST(:valid_from AS timestamptz) IS NULL
@@ -1670,7 +1672,10 @@ def _weather_target_at(value: WeatherValue) -> datetime:
 
 
 def _weather_value_params(
-    value: WeatherValue, *, context: _WeatherValueWriteContext
+    value: WeatherValue,
+    *,
+    context: _WeatherValueWriteContext,
+    canonical_feature_ids: Mapping[str, str],
 ) -> dict[str, Any]:
     target_at = _weather_target_at(value)
     key = make_weather_value_key(
@@ -1684,7 +1689,10 @@ def _weather_value_params(
     )
     return {
         "weather_value_key": key,
-        "feature_id": value.feature_id,
+        # T-VN-39: 컬럼은 uuid다. 값 키(`key`)는 **위에서 provider가 준 참조로**
+        # 이미 만들어졌고 그것을 흔들면 기존 행 전체가 중복이 된다 — 바꾸는 것은
+        # 컬럼에 들어가는 값뿐이다(`infra/value_feature_ids.py`).
+        "feature_id": canonical_feature_ids[value.feature_id],
         "provider_dataset_id": context.provider_dataset_id,
         "weather_domain": _enum_value(value.weather_domain),
         "forecast_style": _enum_value(value.forecast_style),
@@ -1761,7 +1769,16 @@ async def load_weather_values(
         source_record_key=source_record.source_record_key,
         known_at=lineage["fetched_at"],
     )
-    params = [_weather_value_params(v, context=context) for v in values]
+    materialized = list(values)
+    canonical_feature_ids = await resolve_value_feature_ids(
+        session, (v.feature_id for v in materialized)
+    )
+    params = [
+        _weather_value_params(
+            v, context=context, canonical_feature_ids=canonical_feature_ids
+        )
+        for v in materialized
+    ]
     if not params:
         return 0
     await session.execute(text(_IMMUTABLE_INSERT_SQL), params)

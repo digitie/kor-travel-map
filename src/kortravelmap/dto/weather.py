@@ -59,7 +59,13 @@ class WeatherValue(BaseModel):
 
     feature_id: str = Field(
         min_length=1,
-        description="`make_feature_id(...)` 결과. weather kind feature를 참조.",
+        description=(
+            "weather kind feature 참조. provider 변환기는 `make_feature_id(...)`가 "
+            "유도한 legacy `f_*`를 싣고, 이미 정본 키를 아는 호출자는 canonical "
+            "uuid를 싣는다 — 적재기(`infra/value_feature_ids.py`)가 둘 다 받아 "
+            "컬럼에 들어갈 값만 정본 uuid로 고정한다(T-VN-39/ADR-098). 값 키 "
+            "해시에는 여기 실린 값이 그대로 들어간다."
+        ),
     )
     provider: str = Field(
         min_length=1,

@@ -4,9 +4,11 @@
 값 전환의 계약을 고정한다:
 
 ① cursor 연속성 (R3 — 최중요) — bbox(``/features``)·search·nearby·public beach
-   목록 4계열 모두 2페이지 이상 걸치는 조건에서 누락·중복 0. cursor keyset은
-   치환 **전** legacy 축이고 응답 ``feature_id``는 UUID 정본이다 — repo 매퍼
-   단계에서 치환하면 keyset이 조용히 깨지는 회귀를 페이지 합집합으로 잡는다.
+   목록 4계열 모두 2페이지 이상 걸치는 조건에서 누락·중복 0. 재키 전에는 cursor
+   keyset이 치환 **전** legacy 축이고 응답 ``feature_id``만 UUID였다 — repo 매퍼
+   단계 치환이 keyset을 조용히 깨뜨릴 수 있는 자리였다. 309이 두 축을 하나의 uuid로
+   합친 뒤에도 이 축이 지키는 것은 같다: 전 페이지 합집합에 누락·중복이 0이고 모든
+   응답 값이 canonical UUID다.
 ② 응답 값 == 저장 정본 키 — 단건 상세·목록의 ``feature_id``가
    ``feature.features.feature_id`` 저장값과 문자열로 일치하고 ``feature_uuid``
    병행 필드와도 같다. T-VN-39 재키(alembic 309) 전에는 그 저장값이 사본 컬럼
@@ -17,9 +19,10 @@
 ③ batch echo 등식 (R2) — service feature batch·weather batch의 item
    ``feature_id``는 **요청 표기 그대로** 돌아온다(legacy in → legacy out,
    UUID in → UUID out). PinVi 클라이언트가 이 등식을 런타임 강제 중이다.
-④ write 해석 → legacy FK (R4) — M01 migration 전 admin create는 legacy UUID
-   해석·body validation·DB write보다 먼저 503으로 닫히고, update-request
-   scope.feature_ids는 UUID→legacy 해석과 미해석 422 fail-close를 유지한다.
+④ write 해석 → 정본 키 (R4) — M01 migration 전 admin create는 참조 해석·body
+   validation·DB write보다 먼저 503으로 닫히고, update-request의
+   scope.feature_ids는 **정본 uuid로** 해석되며 미해석 422 fail-close를
+   유지한다. T-VN-39 전에는 이 도착지가 legacy `f_*`였다.
 ⑤ admin 검색 UUID fast-path (R5) — ``list_admin_features(q=<uuid>)``가 해당
    feature 1건을 반환한다 (#639 풀스캔 회귀의 기능 축; EXPLAIN 등가는
    ``test_t212d_perf_explain``).
@@ -180,6 +183,14 @@ def _place_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        # T-VN-39/ADR-098: identity claim 축
+        # ``(provider_dataset_id, feature_kind, natural_key)``의 세 번째 성분.
+        # 정본 키는 서버가 발급하고 위 ``feature_id``는 alias(주소)로만 남으므로,
+        # claim 성분이 없으면 provider writer가 ``FeatureIdentityAnchorError``로
+        # fail-close한다. 이 fixture의 자연키는 legacy 주소 자신이다 —
+        # ``source_record``의 ``source_entity_id``·``raw_data['natural_key']``와
+        # 같은 값이라 seed 하나가 곧 계보 하나다.
+        provider_natural_key=feature_id,
         kind=FeatureKind.PLACE,
         name=name,
         address=Address(),
@@ -549,7 +560,7 @@ async def test_weather_batch_echoes_target_notation(
     assert items[2]["feature_uuid"] == second.feature_uuid
 
 
-# ── ④ write 해석 → legacy FK (R4) ──────────────────────────────────────────
+# ── ④ write 해석 → 정본 키 (R4) ────────────────────────────────────────────
 
 
 def _admin_create_body(**overrides: Any) -> dict[str, Any]:
@@ -802,6 +813,10 @@ async def test_admin_search_uuid_fast_path_returns_single_feature(
     # 두 표기이고, legacy ``f_*``는 alias 등록부에만 남는다.
     assert [item.feature_id for item in page.items] == [seeded.feature_uuid]
     assert page.items[0].feature_uuid == seeded.feature_uuid
+    # 위 두 단언의 기대값은 이제 **질의 입력과 같은 문자열**이다 — 재키 전에는
+    # 두 축이 달라 그 자체로 "해석됐다"를 증명했지만 지금은 아니다. 그래서
+    # 질의와 독립인 속성으로 "seed한 그 행"을 한 번 더 못박는다.
+    assert page.items[0].name == "T32C fast-path 표적"
     assert page.next_cursor is None
 
     # 대문자 표기도 같은 fast-path에 태운다 — 경계 해석·batch echo와 표면 간

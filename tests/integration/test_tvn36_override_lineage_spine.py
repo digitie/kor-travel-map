@@ -1,8 +1,18 @@
-"""T-VN-36A registry·provider base lineage의 실제 PostgreSQL 계약."""
+"""T-VN-36A registry·provider base lineage의 실제 PostgreSQL 계약.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features`` · ``feature.feature_places`` ·
+``feature.feature_base_field_values`` · ``ops.feature_overrides`` ·
+``provider_sync.source_links``의 feature 참조가 전부 uuid이고, 사본 컬럼
+``feature_uuid``는 DROP됐다. 이 파일의 seed는 provider 적재 경로를 타지 않는 raw
+SQL이라 정본 키를 스스로 발급한다 — 표찰에서 유도한 canonical uuid를 쓴다
+(:func:`tests.integration._feature_ids.feature_uuid`).
+"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import suppress
+from typing import Any
 
 import pytest
 from sqlalchemy import text
@@ -16,14 +26,30 @@ from kortravelmap.infra.admin_feature_repo import (
     author_admin_feature_field_overrides,
     revoke_admin_feature_field_overrides,
 )
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
 _SOURCE_HASH = "a" * 64
 
+#: 어떤 Feature도 갖지 않는 canonical uuid. 재키 뒤 override 경로의 조회 키는
+#: ``CAST(:feature_id AS uuid)``라, "없는 feature" probe도 legacy 표찰이 아니라
+#: **형식이 맞는 uuid**여야 한다 — 표찰을 넣으면 P0002 관측이 아니라 바인딩 오류다.
+_ABSENT_FEATURE_UUID = "00000000-0000-7000-8000-00000000dead"
+
 
 def _sqlstate(error: DBAPIError) -> str | None:
     return getattr(error.orig, "sqlstate", None)
+
+
+def _with_text_feature_id(row: Mapping[str, Any]) -> dict[str, Any]:
+    """CALL 결과의 uuid OUT을 text 표기로 정규화한다.
+
+    ``o_feature_id``가 재키로 uuid가 되어 asyncpg가 :class:`uuid.UUID` 객체를
+    준다. 기대값 dict 전체를 그대로 대조하려면 그 슬롯 하나만 text로 맞추면
+    된다 — 단언을 쪼개면 나머지 필드의 전수 대조가 사라진다.
+    """
+    return {**row, "o_feature_id": str(row["o_feature_id"])}
 
 
 def _constraint_name(error: DBAPIError) -> str | None:
@@ -37,7 +63,8 @@ def _constraint_name(error: DBAPIError) -> str | None:
 
 
 async def _seed_feature_source(session: AsyncSession) -> tuple[str, int]:
-    feature_id = "tvn36-lineage-place"
+    label = "tvn36-lineage-place"
+    feature_id = feature_uuid(label)
     dataset_id = int(
         (
             await session.execute(
@@ -70,26 +97,28 @@ async def _seed_feature_source(session: AsyncSession) -> tuple[str, int]:
             source_entity_key, current_source_record_key, observed_at
         ) VALUES ('tvn36-lineage-entity', 'tvn36-lineage-record', now())
         """,
+        # 재키(309) 뒤 정본 키는 ``feature_id``(uuid) 하나다 — 사본 컬럼
+        # ``feature_uuid``와 그것을 채우던 트리거가 함께 사라졌으므로 심을 값도 하나다.
         """
         INSERT INTO feature.features (
-            feature_id, feature_uuid, kind, name, category,
+            feature_id, kind, name, category,
             lifecycle_state, publication_state, quality_state
         ) VALUES (
-            :feature_id, x_extension.gen_random_uuid(), 'place', 'provider place',
+            CAST(:feature_id AS uuid), 'place', :name,
             '01010100', 'active', 'published', 'valid'
         )
         """,
         """
-        INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
-        SELECT feature_id, feature_uuid, kind, 'tourism'
+        INSERT INTO feature.feature_places (feature_id, kind, place_kind)
+        SELECT feature_id, kind, 'tourism'
         FROM feature.features
-        WHERE feature_id = :feature_id
+        WHERE feature_id = CAST(:feature_id AS uuid)
         """,
         """
         INSERT INTO provider_sync.source_links (
             feature_id, source_entity_key, source_role, match_method, confidence
         ) VALUES (
-            :feature_id, 'tvn36-lineage-entity', 'primary', 'fixture', 100
+            CAST(:feature_id AS uuid), 'tvn36-lineage-entity', 'primary', 'fixture', 100
         )
         """,
     ):
@@ -98,6 +127,7 @@ async def _seed_feature_source(session: AsyncSession) -> tuple[str, int]:
             {
                 "dataset_id": dataset_id,
                 "feature_id": feature_id,
+                "name": label,
                 "source_hash": _SOURCE_HASH,
             },
         )
@@ -123,14 +153,14 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
         text(
             """
             INSERT INTO feature.feature_base_field_values (
-                feature_id, field_path, feature_uuid, provider_dataset_id,
+                feature_id, field_path, provider_dataset_id,
                 source_entity_key, source_record_key, source_raw_payload_hash,
                 value_json, base_revision, observed_at
             )
-            SELECT :feature_id, 'core.name', feature_uuid, :dataset_id,
+            SELECT feature_id, 'core.name', :dataset_id,
                    'tvn36-lineage-entity', 'tvn36-lineage-record', :source_hash,
                    '"canonical provider name"'::jsonb, row_revision, now()
-            FROM feature.features WHERE feature_id = :feature_id
+            FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
         {
@@ -145,7 +175,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                 """
                 SELECT field_path, value_json, source_raw_payload_hash
                 FROM feature.feature_base_field_values
-                WHERE feature_id = :feature_id AND field_path = 'core.name'
+                WHERE feature_id = CAST(:feature_id AS uuid)
+                  AND field_path = 'core.name'
                 """
             ),
             {"feature_id": feature_id},
@@ -165,7 +196,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.apply_provider_feature_field_patch(
-                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            CAST(:feature_id AS uuid),
+                            :dataset_id, 'tvn36-lineage-entity',
                             'tvn36-lineage-record', 1,
                             CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
                             NULL, NULL, NULL
@@ -182,7 +214,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             ).mappings().one()
     finally:
         await migrated_session.execute(text("RESET ROLE"))
-    assert dict(applied) == {
+    assert _with_text_feature_id(applied) == {
         "o_feature_id": feature_id,
         "o_row_revision": 2,
         "o_applied_field_count": 2,
@@ -194,7 +226,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                 SELECT core.name, place.biz_number
                 FROM feature.features AS core
                 JOIN feature.feature_places AS place USING (feature_id)
-                WHERE core.feature_id = :feature_id
+                WHERE core.feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -212,7 +244,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.apply_provider_feature_field_patch(
-                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            CAST(:feature_id AS uuid),
+                            :dataset_id, 'tvn36-lineage-entity',
                             'tvn36-lineage-record', 2,
                             '{"core.name":"fresh provider name"}'::jsonb,
                             CAST(:cleared_geometry AS jsonb),
@@ -229,7 +262,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             ).mappings().one()
     finally:
         await migrated_session.execute(text("RESET ROLE"))
-    assert dict(cleared_coordinate) == {
+    assert _with_text_feature_id(cleared_coordinate) == {
         "o_feature_id": feature_id,
         "o_row_revision": 3,
         "o_applied_field_count": 2,
@@ -244,7 +277,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                 JOIN feature.feature_base_field_values AS base
                   ON base.feature_id = core.feature_id
                  AND base.field_path = 'core.coord'
-                WHERE core.feature_id = :feature_id
+                WHERE core.feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -264,7 +297,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.apply_provider_feature_field_patch(
-                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            CAST(:feature_id AS uuid),
+                            :dataset_id, 'tvn36-lineage-entity',
                             'tvn36-lineage-record', 3,
                             '{"route.route_type":"trail"}'::jsonb, '{}'::jsonb,
                             NULL, NULL, NULL
@@ -284,14 +318,14 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                 text(
                     """
                     INSERT INTO feature.feature_base_field_values (
-                        feature_id, field_path, feature_uuid, provider_dataset_id,
+                        feature_id, field_path, provider_dataset_id,
                         source_entity_key, source_record_key, source_raw_payload_hash,
                         value_json, base_revision, observed_at
                     )
-                    SELECT :feature_id, 'core.marker_color', feature_uuid, :dataset_id,
+                    SELECT feature_id, 'core.marker_color', :dataset_id,
                            'tvn36-lineage-entity', 'tvn36-lineage-record', :source_hash,
                            '7'::jsonb, row_revision, now()
-                    FROM feature.features WHERE feature_id = :feature_id
+                    FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
                     """
                 ),
                 {
@@ -330,7 +364,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.author_feature_field_overrides(
-                            :feature_id, 3, 'admin:tvn36', 'operator_correction',
+                            CAST(:feature_id AS uuid),
+                            3, 'admin:tvn36', 'operator_correction',
                             :command_id,
                             '{"core.name":"operator name"}'::jsonb, '{}'::jsonb,
                             NULL, NULL, NULL, NULL
@@ -342,7 +377,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             ).mappings().one()
     finally:
         await migrated_session.execute(text("RESET ROLE"))
-    assert dict(authored) == {
+    assert _with_text_feature_id(authored) == {
         "o_feature_id": feature_id,
         "o_row_revision": 4,
         "o_command_id": author_command_id,
@@ -356,7 +391,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.apply_provider_feature_field_patch(
-                            :feature_id, :dataset_id, 'tvn36-lineage-entity',
+                            CAST(:feature_id AS uuid),
+                            :dataset_id, 'tvn36-lineage-entity',
                             'tvn36-lineage-record', 4,
                             CAST(:values AS jsonb), CAST(:geometry_wkt AS jsonb),
                             NULL, NULL, NULL
@@ -373,7 +409,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             ).mappings().one()
     finally:
         await migrated_session.execute(text("RESET ROLE"))
-    assert dict(masked) == {
+    assert _with_text_feature_id(masked) == {
         "o_feature_id": feature_id,
         "o_row_revision": 5,
         "o_applied_field_count": 2,
@@ -388,7 +424,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                 JOIN feature.feature_base_field_values AS base
                   ON base.feature_id = core.feature_id
                  AND base.field_path = 'core.name'
-                WHERE core.feature_id = :feature_id
+                WHERE core.feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -426,7 +462,8 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     text(
                         """
                         CALL feature.revoke_feature_field_overrides(
-                            :feature_id, 5, 'admin:tvn36', 'operator_revoke',
+                            CAST(:feature_id AS uuid),
+                            5, 'admin:tvn36', 'operator_revoke',
                             :command_id, ARRAY['core.name'],
                             NULL, NULL, NULL, NULL
                         )
@@ -437,7 +474,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
             ).mappings().one()
     finally:
         await migrated_session.execute(text("RESET ROLE"))
-    assert dict(revoked) == {
+    assert _with_text_feature_id(revoked) == {
         "o_feature_id": feature_id,
         "o_row_revision": 6,
         "o_command_id": revoke_command_id,
@@ -453,7 +490,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                   ON override.feature_id = core.feature_id
                  AND override.field_path = 'core.name'
                  AND override.status = 'active'
-                WHERE core.feature_id = :feature_id
+                WHERE core.feature_id = CAST(:feature_id AS uuid)
                 GROUP BY core.name
                 """
             ),
@@ -472,7 +509,7 @@ async def test_tvn36_registry_base_lineage_and_override_type_fence(
                     INSERT INTO ops.feature_overrides (
                         feature_id, field_path, value_geometry, status, reason, created_by
                     ) VALUES (
-                        :feature_id, 'route.geom',
+                        CAST(:feature_id AS uuid), 'route.geom',
                         x_extension.ST_GeomFromText('MULTILINESTRING((126 37,126.1 37.1))', 4326),
                         'active', 'wrong subtype', 'admin:tvn36'
                     )
@@ -504,8 +541,10 @@ async def test_tvn36_runtime_cannot_mutate_lineage_relations(
             "allows_null, requires_source, provider_writable, operator_writable, sort_order) "
             "VALUES ('bad.path','*','features','name','text',false,true,true,true,1)",
             "UPDATE ops.feature_override_field_paths SET sort_order = sort_order WHERE FALSE",
+            # 값은 **형식이 맞는** uuid여야 한다. 재키 뒤 이 열은 uuid라, 표찰
+            # 문자열을 넣으면 권한 검사에 닿기 전 22P02로 죽어 42501을 못 본다.
             "INSERT INTO feature.feature_base_field_values (feature_id, field_path) "
-            "VALUES ('missing','core.name')",
+            f"VALUES ('{_ABSENT_FEATURE_UUID}','core.name')",
             "UPDATE ops.feature_overrides SET status = status WHERE FALSE",
         ):
             with pytest.raises(DBAPIError) as rejected:
@@ -558,7 +597,10 @@ async def test_field_override_procedure_errors_survive_as_domain_errors(
     revision = int(
         (
             await migrated_session.execute(
-                text("SELECT row_revision FROM feature.features WHERE feature_id = :fid"),
+                text(
+                    "SELECT row_revision FROM feature.features "
+                    "WHERE feature_id = CAST(:fid AS uuid)"
+                ),
                 {"fid": feature_id},
             )
         ).scalar_one()
@@ -572,7 +614,7 @@ async def test_field_override_procedure_errors_survive_as_domain_errors(
         async with migrated_session.begin_nested():
             await author_admin_feature_field_overrides(
                 migrated_session,
-                "tvn36-no-such-feature",
+                _ABSENT_FEATURE_UUID,
                 expected_row_revision=1,
                 reason_code="operator_correction",
                 operator=actor,

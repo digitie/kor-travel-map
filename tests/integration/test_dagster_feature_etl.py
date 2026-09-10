@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -289,6 +289,40 @@ async def map_client(
             await truncate_committed_test_rows(session, _TRUNCATE_SQL)
 
 
+async def _canonical_ids(
+    engine: Any, legacy_feature_ids: Sequence[str]
+) -> dict[str, str]:
+    """legacy ``f_*`` → 적재가 발급한 정본 키(uuid text) 매핑.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 서버가 발급하는
+    UUIDv7이다. asset이 metadata로 돌려주는 ``feature_ids``는 provider 변환기가
+    유도한 legacy 주소이고(그 바깥 이름과 값은 재키가 건드리지 않는다), DB 행을
+    가리키거나 read 응답과 비교할 때는 ``feature_aliases``에서 한 번 정본 키로
+    바꾼다 — 그 등록부가 legacy 문자열에서 정본 키로 가는 유일한 입구다
+    (ADR-098 결정 6).
+    """
+    wanted = list(dict.fromkeys(legacy_feature_ids))
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT a.alias, CAST(a.feature_id AS text) AS feature_id "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias_kind = 'legacy_feature_id' "
+                    "  AND a.alias = ANY(CAST(:aliases AS text[]))"
+                ),
+                {"aliases": wanted},
+            )
+        ).all()
+    mapping = {str(row.alias): str(row.feature_id) for row in rows}
+    missing = [alias for alias in wanted if alias not in mapping]
+    assert not missing, (
+        f"legacy 주소 {missing!r}가 정본 키로 해석되지 않았다 — provider 적재 "
+        "경로가 alias를 남기지 않았거나 Feature가 적재되지 않았다."
+    )
+    return mapping
+
+
 async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
@@ -521,8 +555,10 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
         for feature_id in result.feature_ids
     }
 
+    # 조회 키는 적재가 발급한 정본 키다 — asset이 돌려준 ``f_*``는 그 주소다.
+    canonical_ids = await _canonical_ids(migrated_engine, feature_ids)
     for feature_id in feature_ids:
-        row = await map_client.get_feature(feature_id)
+        row = await map_client.get_feature(canonical_ids[feature_id])
         assert row is not None
         if feature_id in notice_feature_ids:
             # coordless notice: 좌표·법정동코드 없이 적재됨.
@@ -580,6 +616,7 @@ async def _krex_notice_sync_cursor(client: AsyncKorTravelMapClient) -> dict[str,
 
 async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     map_client: AsyncKorTravelMapClient,
+    migrated_engine: Any,
 ) -> None:
     """seed→partial→empty→reappear snapshot이 종료/복구와 cursor를 함께 반영한다.
 
@@ -622,7 +659,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
         krex_traffic_notices=[a, b],
         fetched_at=first_seen,
     )
-    a_id, b_id = seeded.feature_ids
+    a_legacy, b_legacy = seeded.feature_ids
+    canonical = await _canonical_ids(migrated_engine, seeded.feature_ids)
+    a_id, b_id = canonical[a_legacy], canonical[b_legacy]
     assert await _notice_valid_end(map_client, a_id) is None
     assert await _notice_valid_end(map_client, b_id) is None
 
@@ -661,6 +700,7 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
 
 async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     map_client: AsyncKorTravelMapClient,
+    migrated_engine: Any,
 ) -> None:
     """내용이 바뀐 재등장도 종료를 되돌리고 ``notices_reopened``로 집계한다.
 
@@ -719,7 +759,11 @@ async def test_krex_notice_content_change_reappearance_reopens_and_counts(
         krex_traffic_notices=[target, bystander],
         fetched_at=seeded_at,
     )
-    seeded_ids = set(seeded.feature_ids)
+    # 재키 뒤 "같은 feature인가"는 정본 키로만 판정된다 — 유도 ``f_*``는 자연키가
+    # 같으면 언제나 같은 값이라 신규 적재와 재등장을 갈라내지 못한다.
+    seeded_ids = set(
+        (await _canonical_ids(migrated_engine, seeded.feature_ids)).values()
+    )
     assert len(seeded_ids) == 2
     assert seeded.load.features_inserted == 2
     seed_cursor = await _krex_notice_sync_cursor(map_client)
@@ -747,7 +791,8 @@ async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     )
     # 자연키가 같으니 새 feature가 아니라 닫혀 있던 그 feature여야 한다. 여기서
     # 갈라지면 아래 단언은 재등장이 아니라 신규 적재를 보게 된다.
-    (target_id,) = reappeared.feature_ids
+    (target_legacy,) = reappeared.feature_ids
+    target_id = (await _canonical_ids(migrated_engine, [target_legacy]))[target_legacy]
     assert target_id in seeded_ids
     (bystander_id,) = seeded_ids - {target_id}
     # 내용이 바뀌었으므로 이번엔 적재가 feature 본문을 실제로 다시 쓴다. byte 동일

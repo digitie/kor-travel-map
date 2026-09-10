@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
 from kortravelmap.providers.krex import (
@@ -37,6 +38,29 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 23, 12, 0, tzinfo=_KST)
+
+
+async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -> str:
+    """provider가 유도한 legacy ``f_*``가 가리키는 정본 키(uuid의 text 표기).
+
+    T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 서버가 발급한 UUIDv7이고
+    provider 변환기가 만든 ``f_*``는 그 Feature의 **주소**다(ADR-098 결정 6).
+    ``list_primary_place_locator``·``features_in_bbox``가 돌려주는 것은 정본 키이므로
+    DTO의 주소와 맞대기 전에 여기서 한 번 바꾼다. 이 조회가 성공한다는 것 자체가
+    "provider 경로로 실제 적재됐다"는 증거이기도 하다.
+    """
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one()
+    )
 
 
 @dataclass(frozen=True)
@@ -85,6 +109,9 @@ async def test_fuel_price_feature_inherits_place_coord_and_renders_in_bbox(
     await migrated_session.flush()
     place_feature = place_bundles[0].feature
     assert place_feature.coord is not None
+    place_feature_id = await _canonical_feature_id(
+        migrated_session, place_feature.feature_id
+    )
 
     # ② DB에서 자연키→(feature_id, 좌표) locator 조회 (#547 신규 repo 경로).
     rows = await feature_repo.list_primary_place_locator(
@@ -96,7 +123,9 @@ async def test_fuel_price_feature_inherits_place_coord_and_renders_in_bbox(
     locator = rest_area_place_locator_from_rows(rows)
     natural_key = place_bundles[0].source_record.source_entity_id
     assert natural_key in locator
-    assert locator[natural_key][0] == place_feature.feature_id
+    # locator가 실어 나르는 것은 DB가 쥔 정본 키(uuid text)다 — 유가 feature가
+    # 상속할 ``parent_feature_id``가 곧 이 값이어야 FK가 성립한다.
+    assert locator[natural_key][0] == place_feature_id
 
     # ③ 유가 record(좌표 없음) → locator로 place 좌표·parent 상속.
     record = _FuelPriceRecord(
@@ -120,11 +149,14 @@ async def test_fuel_price_feature_inherits_place_coord_and_renders_in_bbox(
     [price_bundle] = price_bundles
     price_feature = price_bundle.feature
     assert price_feature.coord is not None
-    assert price_feature.parent_feature_id == place_feature.feature_id
+    assert price_feature.parent_feature_id == place_feature_id
 
     # ④ 유가 bundle 적재 후 bbox 조회 → price feature가 결과에 노출(렌더 가능).
     await feature_repo.load_bundles(migrated_session, price_bundles)
     await migrated_session.flush()
+    price_feature_id = await _canonical_feature_id(
+        migrated_session, price_feature.feature_id
+    )
 
     lon = float(price_feature.coord.lon)
     lat = float(price_feature.coord.lat)
@@ -136,10 +168,12 @@ async def test_fuel_price_feature_inherits_place_coord_and_renders_in_bbox(
         max_lat=lat + 0.1,
         kinds=["price"],
     )
-    ids = {r["feature_id"] for r in rows_bbox}
-    assert price_feature.feature_id in ids
+    # bbox row의 ``feature_id``는 uuid 컬럼이라 driver가 ``uuid.UUID``를 준다 —
+    # text 표기와 맞대려면 읽는 자리에서 한 번 고정한다.
+    ids = {str(r["feature_id"]) for r in rows_bbox}
+    assert price_feature_id in ids
     hit = next(
-        r for r in rows_bbox if r["feature_id"] == price_feature.feature_id
+        r for r in rows_bbox if str(r["feature_id"]) == price_feature_id
     )
     assert abs(float(hit["lon"]) - lon) < 1e-6
     assert abs(float(hit["lat"]) - lat) < 1e-6
@@ -175,6 +209,11 @@ async def test_fuel_price_feature_coordless_without_locator(
     assert price_bundle.feature.coord is None
     await feature_repo.load_bundles(migrated_session, price_bundles)
     await migrated_session.flush()
+    # 정본 키를 먼저 확보한다 — 이 조회가 성공한다는 것이 "적재는 됐다"는 증거이고,
+    # 아래 부재 단언이 "저장되지 않아서 없다"로 조용히 참이 되는 것을 막는다.
+    price_feature_id = await _canonical_feature_id(
+        migrated_session, price_bundle.feature.feature_id
+    )
 
     # coord=None → bbox 쿼리(coord IS NOT NULL)에서 제외.
     rows_bbox = await feature_repo.features_in_bbox(
@@ -185,6 +224,4 @@ async def test_fuel_price_feature_coordless_without_locator(
         max_lat=38.0,
         kinds=["price"],
     )
-    assert price_bundle.feature.feature_id not in {
-        r["feature_id"] for r in rows_bbox
-    }
+    assert price_feature_id not in {str(r["feature_id"]) for r in rows_bbox}

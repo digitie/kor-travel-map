@@ -31,6 +31,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -43,11 +44,19 @@ _ENTITY = "license_place"
 
 
 async def _seed_place(
-    session: AsyncSession, feature_id: str, entity_id: str, phones: list[str]
-) -> None:
-    """MOIS bulk place feature 1건 + primary source_link 적재 (phones 지정)."""
-    source_entity_key = f"se-{feature_id}"
-    source_record_key = f"sr-{feature_id}"
+    session: AsyncSession, label: str, entity_id: str, phones: list[str]
+) -> str:
+    """MOIS bulk place feature 1건 + primary source_link 적재 (phones 지정).
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features``/``provider_sync.source_links``의
+    ``feature_id``는 uuid다. 이 seed는 loader를 태우지 않고 core 표에 직접 행을
+    만드는 **정본 축**이라 심는 값도 uuid여야 한다 — ``label``은 키가 아니라
+    씨앗이고, source entity/record key만 라벨을 그대로 이어 읽기 쉬움을 지킨다.
+    돌려주는 값이 이 feature의 정본 키다.
+    """
+    feature_id = feature_uuid(label)
+    source_entity_key = f"se-{label}"
+    source_record_key = f"sr-{label}"
     session.add(
         FeatureRow(
             feature_id=feature_id,
@@ -84,7 +93,7 @@ async def _seed_place(
         SourceRecordRow(
             source_record_key=source_record_key,
             source_entity_key=source_entity_key,
-            raw_payload_hash=md5(feature_id.encode()).hexdigest(),
+            raw_payload_hash=md5(label.encode()).hexdigest(),
             raw_data={},
             fetched_at=_FETCHED,
             imported_at=_FETCHED,
@@ -109,6 +118,7 @@ async def _seed_place(
         )
     )
     await session.flush()
+    return feature_id
 
 
 async def _enrichment_link_count(session: AsyncSession, feature_id: str) -> int:
@@ -128,25 +138,33 @@ async def _enrichment_link_count(session: AsyncSession, feature_id: str) -> int:
 async def test_candidates_only_without_phone(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_place(migrated_session, "p-nophone", "general_restaurants::a", [])
-    await _seed_place(
+    no_phone = await _seed_place(
+        migrated_session, "p-nophone", "general_restaurants::a", []
+    )
+    has_phone = await _seed_place(
         migrated_session, "p-hasphone", "general_restaurants::b", ["02-1-2"]
     )
     cands = await find_place_phone_candidates(migrated_session, limit=50)
-    ids = {c.feature_id for c in cands}
-    assert "p-nophone" in ids
-    assert "p-hasphone" not in ids
-    cand = next(c for c in cands if c.feature_id == "p-nophone")
+    # 후보의 ``feature_id``는 uuid 컬럼에서 온다. ``PhoneEnrichmentCandidate``는 그
+    # 값을 ``str``로 선언하지만 repo가 raw row를 그대로 실어 driver의 ``uuid.UUID``가
+    # 그대로 도착한다(제품 결함으로 보고). 이 테스트가 재는 것은 후보 선별 규칙이므로
+    # 비교 축만 text로 맞춘다 — 값 자체는 정본 키 그대로다.
+    ids = {str(c.feature_id) for c in cands}
+    assert no_phone in ids
+    assert has_phone not in ids
+    cand = next(c for c in cands if str(c.feature_id) == no_phone)
     assert cand.source_entity_id == "general_restaurants::a"
 
 
 async def test_apply_enrichment_updates_phone_and_link(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_place(migrated_session, "p1", "general_restaurants::c1", [])
+    feature_id = await _seed_place(
+        migrated_session, "p1", "general_restaurants::c1", []
+    )
     result = await apply_place_phone_enrichment(
         migrated_session,
-        feature_id="p1",
+        feature_id=feature_id,
         phone="0212345678",
         enrichment_provider="kakao-local-api",
         source_entity_id="general_restaurants::c1",
@@ -156,30 +174,31 @@ async def test_apply_enrichment_updates_phone_and_link(
     assert result.applied is True
     assert result.phone == "02-1234-5678"  # 정규화됨
 
-    row = await get_feature_row(migrated_session, "p1")
+    row = await get_feature_row(migrated_session, feature_id)
     assert row is not None
     assert row["detail"]["phones"] == ["02-1234-5678"]
     authored = await migrated_session.execute(
         text(
             "SELECT override_value, created_by, reason FROM ops.feature_overrides "
-            "WHERE feature_id = 'p1' AND field_path = 'place.phones' "
+            "WHERE feature_id = :feature_id AND field_path = 'place.phones' "
             "AND status = 'active'"
-        )
+        ),
+        {"feature_id": feature_id},
     )
     assert authored.one() == (["02-1234-5678"], "system:phone-enrichment", "phone_enrichment")
     # enrichment source_link 1건 생성.
-    assert await _enrichment_link_count(migrated_session, "p1") == 1
+    assert await _enrichment_link_count(migrated_session, feature_id) == 1
 
 
 async def test_apply_enrichment_duplicate_skips(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_place(
+    feature_id = await _seed_place(
         migrated_session, "p2", "general_restaurants::c2", ["02-1234-5678"]
     )
     result = await apply_place_phone_enrichment(
         migrated_session,
-        feature_id="p2",
+        feature_id=feature_id,
         phone="02-1234-5678",
         enrichment_provider="kakao-local-api",
         source_entity_id="general_restaurants::c2",
@@ -187,16 +206,18 @@ async def test_apply_enrichment_duplicate_skips(
     )
     assert result.applied is False
     assert result.reason == "duplicate"
-    assert await _enrichment_link_count(migrated_session, "p2") == 0
+    assert await _enrichment_link_count(migrated_session, feature_id) == 0
 
 
 async def test_apply_enrichment_invalid_phone(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_place(migrated_session, "p3", "general_restaurants::c3", [])
+    feature_id = await _seed_place(
+        migrated_session, "p3", "general_restaurants::c3", []
+    )
     result = await apply_place_phone_enrichment(
         migrated_session,
-        feature_id="p3",
+        feature_id=feature_id,
         phone="not-a-phone",
         enrichment_provider="kakao-local-api",
         source_entity_id="general_restaurants::c3",
@@ -209,9 +230,11 @@ async def test_apply_enrichment_invalid_phone(
 async def test_apply_enrichment_feature_not_found(
     migrated_session: AsyncSession,
 ) -> None:
+    # 어떤 행도 갖지 않는 정본 키. 조회가 uuid 컬럼을 겨누므로 "없는 참조" probe도
+    # 라벨 문자열이 아니라 uuid여야 한다 — 문자열이면 관측이 아니라 22P02다.
     result = await apply_place_phone_enrichment(
         migrated_session,
-        feature_id="missing",
+        feature_id=feature_uuid("missing"),
         phone="0212345678",
         enrichment_provider="kakao-local-api",
         source_entity_id="x::y",
@@ -224,7 +247,7 @@ async def test_apply_enrichment_feature_not_found(
 async def test_apply_enrichment_max_phones(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_place(
+    feature_id = await _seed_place(
         migrated_session,
         "p4",
         "general_restaurants::c4",
@@ -232,7 +255,7 @@ async def test_apply_enrichment_max_phones(
     )
     result = await apply_place_phone_enrichment(
         migrated_session,
-        feature_id="p4",
+        feature_id=feature_id,
         phone="0212345678",
         enrichment_provider="kakao-local-api",
         source_entity_id="general_restaurants::c4",

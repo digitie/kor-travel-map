@@ -38,6 +38,29 @@ _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 13, 12, 0, tzinfo=_KST)
 
 
+async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -> str:
+    """provider가 유도한 legacy ``f_*``가 가리키는 정본 키(uuid의 text 표기).
+
+    T-VN-39 재키(309) 뒤 ``feature.features.feature_id``와 그것을 참조하는
+    ``feature.feature_weather_values.feature_id``는 uuid다. provider 변환기가 만든
+    ``bundle.feature.feature_id``는 정본 키가 아니라 **주소**이고(ADR-098 결정 6),
+    그 주소에서 정본 키로 가는 유일한 입구가 ``feature_aliases``다. 값 변환기에
+    넘길 anchor는 그래서 여기서 한 번 정본 키로 바꾼다.
+    """
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one()
+    )
+
+
 async def _dataset_id(
     session: AsyncSession, *, provider: str, dataset_key: str
 ) -> int:
@@ -140,15 +163,21 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         fetched_at=_NOW,
     )
     await feature_repo.load_bundles(migrated_session, [kma, airkorea])
+    kma_feature_id = await _canonical_feature_id(
+        migrated_session, kma.feature.feature_id
+    )
+    airkorea_feature_id = await _canonical_feature_id(
+        migrated_session, airkorea.feature.feature_id
+    )
 
     kma_values = ultra_short_nowcast_to_weather_values(
         [_KmaNowcast()],
-        feature_id=kma.feature.feature_id,
+        feature_id=kma_feature_id,
         source_record_key=kma.source_record.source_record_key,
     )
     airkorea_values = air_quality_to_weather_values(
         [_AirKoreaMeasurement()],
-        station_feature_ids={"중구::서울": airkorea.feature.feature_id},
+        station_feature_ids={"중구::서울": airkorea_feature_id},
         source_record_key=airkorea.source_record.source_record_key,
     )
     kma_dataset_id = await _dataset_id(
@@ -194,9 +223,9 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET marker_icon = 'marker' "
-            "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
+            "WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))"
         ),
-        {"feature_ids": [kma.feature.feature_id, airkorea.feature.feature_id]},
+        {"feature_ids": [kma_feature_id, airkorea_feature_id]},
     )
     # actual database clock와 provider fixture business time을 분리한다. map current
     # reader의 expiry gate를 검증하므로 fixture summary를 현재 wall clock 기준 fresh로 둔다.
@@ -205,10 +234,10 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
             """
             UPDATE feature.current_weather_summary
             SET refresh_after = clock_timestamp() + interval '1 hour'
-            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
             """
         ),
-        {"feature_ids": [kma.feature.feature_id, airkorea.feature.feature_id]},
+        {"feature_ids": [kma_feature_id, airkorea_feature_id]},
     )
 
     for include_geometry in (False, True):
@@ -221,9 +250,11 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
             kinds=["weather"],
             include_geometry=include_geometry,
         )
-        by_id = {row["feature_id"]: row for row in rows}
+        # bbox row의 ``feature_id``는 uuid 컬럼이라 driver가 ``uuid.UUID``를 준다 —
+        # 정본 키의 text 표기로 색인해 아래 조회가 타입에서 어긋나지 않게 한다.
+        by_id = {str(row["feature_id"]): row for row in rows}
 
-        kma_summary = by_id[kma.feature.feature_id]["weather_summary"]
+        kma_summary = by_id[kma_feature_id]["weather_summary"]
         assert kma_summary["provider"] == "python-kma-api"
         assert kma_summary["provider_dataset_id"] == kma_dataset_id
         assert kma_summary["dataset_key"] == KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY
@@ -231,7 +262,7 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert float(kma_summary["value_number"]) == 27.5
         assert datetime.fromisoformat(kma_summary["refresh_after"]) > _NOW
 
-        airkorea_summary = by_id[airkorea.feature.feature_id]["weather_summary"]
+        airkorea_summary = by_id[airkorea_feature_id]["weather_summary"]
         assert airkorea_summary["provider"] == "python-airkorea-api"
         assert airkorea_summary["provider_dataset_id"] == airkorea_dataset_id
         assert airkorea_summary["dataset_key"] == DATASET_KEY_AIR_QUALITY
@@ -239,8 +270,8 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         assert float(airkorea_summary["value_number"]) == 42.0
         assert datetime.fromisoformat(airkorea_summary["refresh_after"]) > _NOW
 
-        assert by_id[kma.feature.feature_id]["marker_icon"] == "marker"
-        assert by_id[airkorea.feature.feature_id]["marker_icon"] == "marker"
+        assert by_id[kma_feature_id]["marker_icon"] == "marker"
+        assert by_id[airkorea_feature_id]["marker_icon"] == "marker"
 
     # derived row cleanup 전에 dataset을 비활성화해도 bbox normal reader가 즉시
     # fail-closed여야 한다. 다른 active dataset summary는 계속 보인다.
@@ -262,6 +293,6 @@ async def test_weather_summary_distinguishes_kma_and_airkorea_values(
         max_lat=37.7,
         kinds=["weather"],
     )
-    by_id = {row["feature_id"]: row for row in rows}
-    assert by_id[kma.feature.feature_id]["weather_summary"] is None
-    assert by_id[airkorea.feature.feature_id]["weather_summary"] is not None
+    by_id = {str(row["feature_id"]): row for row in rows}
+    assert by_id[kma_feature_id]["weather_summary"] is None
+    assert by_id[airkorea_feature_id]["weather_summary"] is not None

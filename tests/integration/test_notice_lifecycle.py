@@ -98,7 +98,9 @@ def _krex_notice_bundle(
 
     ``feature_suffix``를 주면 자연키에 suffix를 붙여 **다른 feature_id**를
     만든다 — 구세대(raw-hash/bjd-split) identity가 같은 계보(raw_data 단서)에
-    공존하던 상황 재현.
+    공존하던 상황 재현. T-VN-39 재키 뒤 그 "다름"을 실제로 결정하는 것은 유도된
+    ``f_*``가 아니라 identity claim 축의 ``natural_key``이므로, 두 값에 **같은**
+    ``key_for_id``를 싣는다(아래 ``provider_natural_key`` 주석).
     """
     key_for_id = f"{source_entity_id}::{feature_suffix}" if feature_suffix else source_entity_id
     feature_id = make_feature_id(
@@ -120,6 +122,15 @@ def _krex_notice_bundle(
     observed = observed_at or _NOW
     feature = Feature(
         feature_id=feature_id,
+        # T-VN-39/ADR-098: provider Feature의 identity는
+        # ``(provider_dataset_id, feature_kind, natural_key)`` claim이고 정본 키는
+        # 서버가 발급한다. 위 ``feature_id``(legacy ``f_*``)는 그 Feature의 **주소**로
+        # ``feature_aliases``에 등록될 뿐이다. claim의 세 번째 성분은 여기 실어야
+        # 하고 — 없으면 writer가 ``FeatureIdentityAnchorError``로 fail-close한다 —
+        # ``make_feature_id``에 넘긴 ``source_natural_key``와 같은 값이어야 한다.
+        # 그래야 "suffix가 다르면 다른 Feature"라는 이 헬퍼의 계약이 재키 뒤에도
+        # 유도값이 아니라 claim 축에서 성립한다.
+        provider_natural_key=key_for_id,
         kind=FeatureKind.NOTICE,
         name=f"[테스트] 교통 공지 {source_entity_id[-12:]}",
         coord=Coordinate(lon=lon, lat=lat),
@@ -244,6 +255,10 @@ async def _seed_dup_lineage(
         raw_data={**_CLUES, "gen": "new"},
     )
     assert old_gen.feature.feature_id != new_gen.feature.feature_id
+    # T-VN-39: 위 단언은 이제 **legacy 주소 둘이 다르다**는 것만 증명한다.
+    # 두 Feature를 실제로 가르는 것은 claim 축의 자연키이므로 그것을 함께
+    # 못박는다 — 헬퍼가 축을 바꾸면 여기가 먼저 빨개져야 한다.
+    assert old_gen.feature.provider_natural_key != new_gen.feature.provider_natural_key
     assert old_gen.source_record.source_entity_id != new_gen.source_record.source_entity_id
     await feature_repo.load_bundles(session, [old_gen, new_gen])
     return old_gen, new_gen

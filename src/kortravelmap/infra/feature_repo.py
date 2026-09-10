@@ -2391,7 +2391,11 @@ async def _apply_provider_feature_field_patch(
     )
     return await _apply_provider_field_values(
         session,
-        feature_id=feature.feature_id,
+        # T-VN-39: 프로시저는 `CAST(:feature_id AS uuid)`로 받는다. `feature.feature_id`는
+        # provider 라이브러리가 유도한 legacy `f_*`라 여기서 22P02다 — **정본 키는 이미
+        # 인자로 들어와 있다**(claim 축이 풀어 준 값). 기존 Feature 갱신 경로 전량이
+        # 이 한 줄에서 죽었고, SQL의 모양은 옳으므로 head 오라클이 볼 수 없었다.
+        feature_id=feature_uuid,
         provider_dataset_id=provider_dataset_id,
         source_membership=source_membership,
         expected_row_revision=expected_row_revision,

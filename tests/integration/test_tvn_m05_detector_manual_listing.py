@@ -359,9 +359,11 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
                 page = await manual_origin_features(session, after=after, limit=1)
             if not page:
                 break
-            # reader가 uuid를 돌려주므로 `CandidateFeature.feature_id`는 `UUID`
-            # 객체다. cursor로 되돌릴 때도, 중복 검사에도 같은 표현을 써야 한다 —
-            # 섞이면 `len(seen) == len(set(seen))`가 공허해진다.
+            # reader의 `feature_id`는 uuid지만 `CandidateFeature.feature_id`는 text
+            # 계약이다 — `manual_provider_dedup_repo._row_to_feature`가 경계에서
+            # `str()`로 고정한다(DTO를 canonical JSON으로 직렬화하기 때문). cursor로
+            # 되돌릴 때도 중복 검사에도 그 표현을 그대로 쓴다 — 섞이면
+            # `len(seen) == len(set(seen))`가 공허해진다.
             seen.append(str(page[0].feature_id))
             after = str(page[0].feature_id)
         assert wanted <= set(seen)
@@ -539,8 +541,9 @@ async def test_the_block_keeps_the_nearest_provider_when_it_is_capped(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         async with AsyncSession(dagster) as session:
-            # 키도 uuid의 text 표현으로 맞춘다 — `UUID` 객체를 키로 두면 아래
-            # 조회가 `KeyError`가 된다(재키 뒤 reader가 uuid를 돌려주므로).
+            # 키를 uuid의 text 표현으로 고정한다. `CandidateFeature.feature_id`는
+            # repo가 경계에서 text로 고정한 값이고 아래 조회 키도 text다 — 한쪽이라도
+            # `UUID` 객체가 되면 이 조회가 `KeyError`로 죽는다.
             manuals = {
                 str(m.feature_id): m for m in await manual_origin_features(session)
             }

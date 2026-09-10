@@ -27,7 +27,6 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from sqlalchemy import text
@@ -65,6 +64,7 @@ from kortravelmap.infra.feature_subtype import (
     subtype_upsert_sql,
 )
 from kortravelmap.infra.merge_repo import MergeConflictError
+from tests.integration._feature_ids import feature_uuid
 from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
@@ -85,27 +85,13 @@ _AREA_WKT = (
 # identity 헬퍼 — T-VN-39 재키(alembic 309) 뒤 두 축이 갈렸다.
 #
 # 정본 축: ``feature.features.feature_id``는 uuid이고 사본 컬럼 ``feature_uuid``는
-#   아홉 표 어디에도 없다. raw SQL seed는 그 키를 자기가 발급한다.
+#   아홉 표 어디에도 없다. raw SQL seed는 그 키를 자기가 발급한다 — 표찰에서
+#   결정적으로 유도하는 :func:`tests.integration._feature_ids.feature_uuid`가
+#   그 발급기의 단일 정본이다(파일마다 유도 규칙을 따로 두지 않는다).
 # legacy 축: ``Feature`` DTO의 ``feature_id``는 provider 라이브러리가 유도한
 #   ``f_*``이고 정본 키가 **아니다**(ADR-098). 그 값은 ``feature_aliases.alias``에
 #   text로 남고, 거기서 정본 키로 가는 입구가 ``resolve_feature_identity`` 하나다.
 # ---------------------------------------------------------------------------
-
-
-def _fixture_feature_uuid(label: str) -> str:
-    """fixture 표찰을 결정적 uuid로 옮긴다 — raw SQL seed의 정본 키.
-
-    provider 경로를 타지 않는 seed는 claim도 alias도 없고, ADR-098에서 정본 키는
-    **서버가 발급하는 랜덤 UUIDv7**이라 값이 뜻을 담지 않는다. 그래서 필요한 것은
-    표찰마다 유일하고 재현 가능한 uuid 하나뿐이다. ``uuid5``로 접는 이유는 실패
-    메시지의 uuid를 표찰로 되짚기 위해서고(같은 표찰이면 항상 같은 값),
-    version/variant 니블만 v7로 다시 찍어 재키 뒤 실제로 흐르는 값과 **모양까지**
-    같게 둔다. ``test_public_features_view``가 이미 같은 방식을 쓴다.
-    """
-    raw = bytearray(uuid5(NAMESPACE_URL, label).bytes)
-    raw[6] = (raw[6] & 0x0F) | 0x70
-    raw[8] = (raw[8] & 0x3F) | 0x80
-    return str(UUID(bytes=bytes(raw)))
 
 
 def _legacy_feature_id(kind: str, label: str) -> str:
@@ -339,7 +325,7 @@ async def test_core_kind_change_is_blocked_while_subtype_row_exists(
     조용히 교체할 수 있던 것)을 코드 규율이 아니라 DB 계약으로 닫은 것이 이
     단언의 대상이다. 참조 대상은 0084의 ``uq_features_identity_kind``.
     """
-    feature_id = _fixture_feature_uuid("tvn35:arc:kind")
+    feature_id = feature_uuid("tvn35:arc:kind")
     await _seed_place(migrated_session, feature_id)
 
     with pytest.raises(IntegrityError) as excinfo:
@@ -355,7 +341,7 @@ async def test_core_kind_change_is_blocked_while_subtype_row_exists(
 
     # subtype이 없는 kind(price)는 arc 밖이라 종전대로 자유롭다 — 배타 arc가
     # "subtype이 있는 동안"에만 kind를 묶는다는 것을 반대 방향으로 고정한다.
-    price_id = _fixture_feature_uuid("tvn35:arc:price")
+    price_id = feature_uuid("tvn35:arc:price")
     await _insert_core(
         migrated_session, feature_id=price_id, kind="price", category="06020000"
     )
@@ -378,7 +364,7 @@ async def test_second_subtype_insert_is_blocked_for_same_feature(
     ``(feature_id, kind)`` 복합 FK가 구조적으로 실패한다.
     """
     feature_id = await _seed_place(
-        migrated_session, _fixture_feature_uuid("tvn35:arc:double")
+        migrated_session, feature_uuid("tvn35:arc:double")
     )
 
     with pytest.raises(IntegrityError) as excinfo:
@@ -420,7 +406,7 @@ async def test_orphan_subtype_is_blocked(
         async with migrated_session.begin_nested():
             await _insert_subtype(
                 migrated_session,
-                feature_id=_fixture_feature_uuid("tvn35:arc:ghost"),
+                feature_id=feature_uuid("tvn35:arc:ghost"),
                 kind="place",
                 detail={"place_kind": "cafe"},
             )
@@ -430,7 +416,7 @@ async def test_orphan_subtype_is_blocked(
 async def test_core_delete_cascades_to_subtype(migrated_session: AsyncSession) -> None:
     """core 행 삭제는 subtype을 CASCADE로 데려간다(0083 ``feature_aliases`` 규약)."""
     feature_id = await _seed_place(
-        migrated_session, _fixture_feature_uuid("tvn35:arc:cascade")
+        migrated_session, feature_uuid("tvn35:arc:cascade")
     )
     await migrated_session.execute(
         text(
@@ -1292,11 +1278,11 @@ async def test_cross_kind_merge_is_rejected(migrated_session: AsyncSession) -> N
     옮기고 typed 값은 남기는" 상태가 되어 무결성을 직접 깬다(ADR-086 결과절).
     """
     place_id = await _seed_place(
-        migrated_session, _fixture_feature_uuid("tvn35:merge:place")
+        migrated_session, feature_uuid("tvn35:merge:place")
     )
     event_id = await _insert_core(
         migrated_session,
-        feature_id=_fixture_feature_uuid("tvn35:merge:event"),
+        feature_id=feature_uuid("tvn35:merge:event"),
         kind="event",
         category="01010100",
     )
@@ -1322,11 +1308,11 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
 ) -> None:
     """같은 kind 병합은 정상 동작하고, loser subtype은 ADR-017대로 남는다."""
     master_id = await _seed_place(
-        migrated_session, _fixture_feature_uuid("tvn35:merge:master"), place_kind="cafe"
+        migrated_session, feature_uuid("tvn35:merge:master"), place_kind="cafe"
     )
     loser_id = await _seed_place(
         migrated_session,
-        _fixture_feature_uuid("tvn35:merge:loser"),
+        feature_uuid("tvn35:merge:loser"),
         place_kind="restaurant",
     )
 

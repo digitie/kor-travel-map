@@ -25,14 +25,18 @@
 5. reconciliation feed repo(``lease`` / ``preflight`` / ``ack`` —
    ``/v1/service/feature-reference-reconciliations`` 라우터의 백엔드)까지 소비.
 
-식별자 축(2026-09-01 e2e15 클래스)도 같이 못박는다.
-``ops.feature_requests.resolved_feature_id``는 **uuid** 컬럼(FK →
-``feature.features.feature_uuid``)인데 승인 queue projection은 그 값을
-``feature_id``라는 이름으로 노출한다. 그 값을 그대로 dedup detector에 넘기면
-``feature.features.feature_id``(text)로 조회되지 않아 23514
-``ck_m05_candidate_feature_proof``("Feature proof is not eligible")가 난다 —
-NOT FOUND가 **eligibility 위반으로 위장**된다. writer receipt가 주는 text
-``feature_id``로만 성립한다는 것을 manual/provider 양축에서 단언한다.
+식별자 축(2026-09-01 e2e15 클래스)도 같이 못박는다 — 다만 **T-VN-39(alembic 309)
+재키가 그 결함의 지형을 바꿨다.** 종전에는 ``feature.features.feature_id``가 text이고
+``resolved_feature_id``만 uuid라, 승인 응답의 uuid를 detector에 넘기면 조회에 실패해
+23514 ``ck_m05_candidate_feature_proof``("Feature proof is not eligible")가 났다 —
+NOT FOUND가 **eligibility 위반으로 위장**됐다. 재키 뒤 두 축은 하나다: 승인 writer의
+receipt(``feature_id``)와 queue projection(``resolved_feature_id``)이 같은 정본
+uuid이고, detector의 두 인자도 uuid다. 그래서 이 모듈이 지키는 것은 셋으로 다시
+그어진다 — ① 그 두 값이 실제로 같은 정본 키라는 것(축 혼동이 재발할 자리 자체가
+없어졌다는 증거), ② **존재하지 않는 참조가 여전히 eligibility 위반으로 위장된다**는
+성질(위장 자체는 남았다), ③ provider 적재가 만든 legacy ``f_*``는 정본 키가 아니라
+alias 등록부의 주소이고, detector에 넣으면 경계에서 서지 조용히 통과하지 않는다는 것
+(ADR-098 결정 6).
 """
 
 from __future__ import annotations
@@ -144,6 +148,16 @@ FROM pg_catalog.pg_constraint
 WHERE conrelid = CAST(:relation AS regclass) AND conname = :constraint_name
 """
 
+#: legacy ``f_*`` → 정본 키. T-VN-39 뒤 provider DTO의 ``feature_id``는 여전히
+#: ``make_feature_id`` 산출물이고(그 경로가 claim을 만들고 서버가 uuid를 발급한다),
+#: 적재 뒤 정본 키가 필요하면 alias 등록부에서 되읽는다 — 이 저장소의 관행이다
+#: (``tests/integration/test_feature_identity_boundary.py``의 같은 helper).
+_CANONICAL_UUID_FOR_ALIAS_SQL = """
+SELECT CAST(alias_row.feature_id AS text)
+FROM feature.feature_aliases AS alias_row
+WHERE alias_row.alias = :alias AND alias_row.alias_kind = 'legacy_feature_id'
+"""
+
 
 def _sqlstate(error: DBAPIError) -> str | None:
     sqlstate, _ = _driver_constraint_identity(error)
@@ -175,12 +189,18 @@ class _DedupScenario:
     """한 dedup episode가 필요로 하는 두 Feature의 실제 identity."""
 
     actor: str
+    #: 승인 writer receipt의 ``feature_id``. T-VN-39 뒤 이것이 곧 정본 uuid다.
     manual_feature_id: str
+    #: 같은 값의 ``feature_uuid`` 슬롯 — 바깥 이름은 계약이라 남아 있다.
     manual_feature_uuid: str
     #: 승인 queue projection(``resolved_feature_id``)이 ``feature_id``라는 이름으로
-    #: 노출하는 값 — 실제로는 UUID 정본이다(e2e15).
+    #: 노출하는 값. e2e15 당시에는 receipt와 **다른 축**이었고, 재키 뒤에는 같다 —
+    #: 그 동일성 자체가 축 혼동이 재발할 수 없다는 증거라 계속 들고 다닌다.
     approval_projection_feature_id: str
+    #: provider Feature의 정본 키(uuid). alias 등록부에서 되읽은 값이다.
     provider_feature_id: str
+    #: provider 변환기가 ``make_feature_id``로 유도한 legacy 주소. 정본 키가 아니다.
+    provider_legacy_feature_id: str
     provider_payload_hash: str
 
 
@@ -212,8 +232,9 @@ async def _approve_requested_manual_feature(
 ) -> tuple[str, str, str, str]:
     """M04 queue 실경로로 ``manual_request`` origin Feature를 만든다.
 
-    반환은 ``(actor, text feature_id, feature_uuid, 승인 projection feature_id)``.
-    마지막 값이 e2e15가 밟은 UUID 정본이다.
+    반환은 ``(actor, receipt feature_id, receipt feature_uuid, 승인 projection
+    feature_id)``. T-VN-39 뒤 뒤의 셋은 **같은 정본 uuid**다 — e2e15가 밟은
+    "이름은 같은데 축이 다른" 상태가 사라졌다는 사실 자체를 값으로 들고 다닌다.
     """
 
     request_id = uuid4()
@@ -288,12 +309,19 @@ def _tourist_item(suffix: str) -> _TouristAttraction:
     )
 
 
-async def _load_provider_feature(engine: AsyncEngine, *, suffix: str) -> tuple[str, str]:
+async def _load_provider_feature(
+    engine: AsyncEngine, *, suffix: str
+) -> tuple[str, str, str]:
     """실 provider 변환 + 실 loader로 provider Feature를 적재한다.
 
     payload hash 규약을 테스트가 다시 쓰지 않는 것이 이 harness의 존재 이유다 —
     ``make_payload_hash``의 기본 32-hex prefix가 그대로
     ``provider_sync.source_records``에 들어가야 M05 사본 도메인이 실제로 검증된다.
+
+    반환은 ``(legacy f_* 주소, 정본 uuid, payload hash)``다. DTO의 ``feature_id``는
+    provider 라이브러리가 유도한 legacy 값이고 **그대로 적재 경로에 넣는 것이 맞다**
+    (ADR-098: 그 경로가 claim을 만들고 서버가 uuid를 발급한다). 그 뒤 정본 키가
+    필요한 자리에서는 alias 등록부에서 되읽는다 — 추측하지 않는다.
     """
 
     bundle = (
@@ -304,12 +332,24 @@ async def _load_provider_feature(engine: AsyncEngine, *, suffix: str) -> tuple[s
     )[0]
     assert bundle.source_record.provider == STANDARD_DATA_PROVIDER_NAME
     assert bundle.source_record.dataset_key == DATASET_KEY_TOURIST_ATTRACTIONS
+    legacy_feature_id = bundle.feature.feature_id
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         result = await feature_repo.load_bundle(session, bundle)
-    assert result.features_inserted == 1
-    assert result.source_records_inserted == 1
-    assert result.source_links_inserted == 1
-    return bundle.feature.feature_id, bundle.source_record.raw_payload_hash
+        assert result.features_inserted == 1
+        assert result.source_records_inserted == 1
+        assert result.source_links_inserted == 1
+        canonical_feature_id = str(
+            (
+                await session.execute(
+                    text(_CANONICAL_UUID_FOR_ALIAS_SQL), {"alias": legacy_feature_id}
+                )
+            ).scalar_one()
+        )
+    return (
+        legacy_feature_id,
+        canonical_feature_id,
+        bundle.source_record.raw_payload_hash,
+    )
 
 
 async def _seed_scenario(
@@ -321,15 +361,18 @@ async def _seed_scenario(
         manual_feature_uuid,
         projection_feature_id,
     ) = await _approve_requested_manual_feature(api, suffix=suffix)
-    provider_feature_id, payload_hash = await _load_provider_feature(
-        migrated_engine, suffix=suffix
-    )
+    (
+        provider_legacy_feature_id,
+        provider_feature_id,
+        payload_hash,
+    ) = await _load_provider_feature(migrated_engine, suffix=suffix)
     return _DedupScenario(
         actor=actor,
         manual_feature_id=manual_feature_id,
         manual_feature_uuid=manual_feature_uuid,
         approval_projection_feature_id=projection_feature_id,
         provider_feature_id=provider_feature_id,
+        provider_legacy_feature_id=provider_legacy_feature_id,
         provider_payload_hash=payload_hash,
     )
 
@@ -516,12 +559,16 @@ async def test_default_payload_hash_provider_bundle_reaches_case_decision_and_fe
 
         await _ensure_paired_consumer(api, actor=scenario.actor)
 
-        # 판정 축에서도 survivor는 text feature_id다 — UUID를 넘기면 성립하지 않는다.
+        # 판정 축: survivor는 **이 case의 provider Feature**여야 한다. 재키 전에는
+        # "text feature_id 대신 uuid를 넘기면 성립하지 않는다"가 이 자리의 뜻이었고,
+        # 재키 뒤 그 두 값은 같으므로 뜻이 사라진다. 남은 실질은 writer의 실제 가드다
+        # (`p_survivor_feature_id <> v_provider.feature_id` → stale): 같은 case의
+        # **다른 쪽**(manual) 정본 키를 넘기면 판정이 성립하지 않는다.
         stale_command = await _open_command(
             api,
             actor=scenario.actor,
             operation="admin.manual-provider-dedup-case.resolve.v1",
-            payload={"case_id": str(case_id), "survivor": provider_feature_uuid},
+            payload={"case_id": str(case_id), "survivor": scenario.manual_feature_id},
         )
         async with AsyncSession(api, expire_on_commit=False) as session, session.begin():
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
@@ -532,8 +579,8 @@ async def test_default_payload_hash_provider_bundle_reaches_case_decision_and_fe
                 expected_case_fingerprint=fingerprint,
                 expected_manual_row_revision=manual_revision,
                 expected_provider_row_revision=provider_revision,
-                survivor_feature_id=provider_feature_uuid,
-                reason="survivor를 UUID 축으로 넘기면 성립하지 않는다",
+                survivor_feature_id=scenario.manual_feature_id,
+                reason="survivor로 case의 다른 쪽을 넘기면 성립하지 않는다",
                 actor=scenario.actor,
                 command_id=stale_command,
             )
@@ -682,10 +729,27 @@ async def test_default_payload_hash_provider_bundle_reaches_case_decision_and_fe
         await dagster.dispose()
 
 
-async def test_dedup_candidate_rejects_uuid_identity_and_accepts_text_feature_id(
+async def test_dedup_candidate_identity_axis_is_the_canonical_uuid_only(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """승인 응답의 UUID를 detector에 넣으면 eligibility 위반으로 **위장**된다(e2e15)."""
+    """detector가 받는 축은 정본 uuid **하나**이고, 없는 참조는 여전히 위장된다.
+
+    e2e15(2026-09-01)가 밟은 결함은 "승인 응답의 uuid와 writer receipt의 text
+    ``feature_id``가 다른 축인데 이름이 같다"였고, 잘못된 값을 넣으면 NOT FOUND가
+    ``ck_m05_candidate_feature_proof``(eligibility 위반)로 **위장**됐다.
+
+    T-VN-39(alembic 309)가 그 두 축을 하나로 접었다. 그러므로 이 테스트가 지키는
+    것은 세 가지로 다시 그어진다 — 원래 결함이 재발할 수 없는 **이유**와, 재발
+    가능한 부분이 그대로라는 사실이다.
+
+    ① 승인 receipt와 queue projection이 같은 정본 uuid다(축이 하나다).
+    ② 그럼에도 **존재하지 않는 정본 키**는 여전히 NOT FOUND가 아니라 23514
+       ``ck_m05_candidate_feature_proof``로 위장된다 — 위장 성질 자체는 남았고,
+       그것이 이 진단의 어려움을 만드는 부분이다.
+    ③ provider 적재가 만든 legacy ``f_*``는 정본 키가 아니라 alias 등록부의
+       주소다(ADR-098 결정 6). detector에 넣으면 경계에서 서고, 등록부로 푼 값만
+       case를 만든다 — 조용히 통과하는 통로가 없다.
+    """
 
     suffix = uuid4().hex
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
@@ -693,28 +757,60 @@ async def test_dedup_candidate_rejects_uuid_identity_and_accepts_text_feature_id
     try:
         scenario = await _seed_scenario(migrated_engine, api, suffix=suffix)
 
-        # 승인 queue projection의 `feature_id`는 uuid 컬럼(resolved_feature_id)이다.
+        # ① 승인 receipt == queue projection == 정본 uuid.
         assert scenario.approval_projection_feature_id == scenario.manual_feature_uuid
-        assert scenario.approval_projection_feature_id != scenario.manual_feature_id
+        assert scenario.approval_projection_feature_id == scenario.manual_feature_id
         assert (
             str(UUID(scenario.approval_projection_feature_id))
             == scenario.approval_projection_feature_id
         )
-        assert scenario.manual_feature_id.startswith("f_")
+        # ③ provider 축: legacy 주소와 정본 키는 다른 값이고, 등록부가 둘을 잇는다.
+        assert scenario.provider_legacy_feature_id.startswith("f_")
+        assert scenario.provider_legacy_feature_id != scenario.provider_feature_id
+        assert (
+            str(UUID(scenario.provider_feature_id)) == scenario.provider_feature_id
+        )
 
         scores = _scores(
             manual_feature_id=scenario.manual_feature_id,
             provider_feature_id=scenario.provider_feature_id,
         )
-        with pytest.raises(DBAPIError) as manual_axis:
+
+        # ② 없는 정본 키는 "찾지 못했다"가 아니라 eligibility 위반으로 나온다.
+        absent_feature_id = str(uuid4())
+        with pytest.raises(DBAPIError) as absent_axis:
             await _record_candidate(
                 dagster,
-                manual_feature_id=scenario.approval_projection_feature_id,
+                manual_feature_id=absent_feature_id,
                 provider_feature_id=scenario.provider_feature_id,
                 scores=scores,
             )
-        assert _sqlstate(manual_axis.value) == "23514"
-        assert _constraint_name(manual_axis.value) == "ck_m05_candidate_feature_proof"
+        assert _sqlstate(absent_axis.value) == "23514"
+        assert _constraint_name(absent_axis.value) == "ck_m05_candidate_feature_proof"
+
+        # ③ legacy 주소는 경계에서 선다 — uuid로 파싱되지 않는다. 드라이버가
+        # 바인딩 단계에서 거절하므로 SQLSTATE가 붙지 않을 수 있다(asyncpg의
+        # ``DataError``는 ``ValueError``이기도 하다).
+        #
+        # 그래도 **예외 부류만** 고정하면 역할 오류·연결 실패·오타로 인한 어떤
+        # DBAPIError든 이 자리를 초록으로 삼킨다. 그래서 거절의 **이유**를 함께
+        # 못박는다 — 서버가 거절하면 22P02이고, 드라이버가 거절하면 메시지에
+        # 그 legacy 값과 uuid 파싱 실패가 함께 실린다.
+        with pytest.raises((DBAPIError, ValueError)) as legacy_axis:
+            await _record_candidate(
+                dagster,
+                manual_feature_id=scenario.manual_feature_id,
+                provider_feature_id=scenario.provider_legacy_feature_id,
+                scores=scores,
+            )
+        legacy_rejection = str(legacy_axis.value)
+        assert (
+            _sqlstate(legacy_axis.value) == "22P02"
+            or (
+                "uuid" in legacy_rejection.lower()
+                and scenario.provider_legacy_feature_id in legacy_rejection
+            )
+        ), legacy_rejection[:400]
 
         created = await _record_candidate(
             dagster,
@@ -730,18 +826,13 @@ async def test_dedup_candidate_rejects_uuid_identity_and_accepts_text_feature_id
                 session, case_id=case_id
             )
         assert detail is not None
-        provider_feature_uuid = str(detail.data["provider_feature"]["feature_uuid"])
-        assert provider_feature_uuid != scenario.provider_feature_id
-
-        with pytest.raises(DBAPIError) as provider_axis:
-            await _record_candidate(
-                dagster,
-                manual_feature_id=scenario.manual_feature_id,
-                provider_feature_id=provider_feature_uuid,
-                scores=scores,
-            )
-        assert _sqlstate(provider_axis.value) == "23514"
-        assert _constraint_name(provider_axis.value) == "ck_m05_candidate_feature_proof"
+        # case가 실은 축은 정본 키다 — 두 슬롯이 같은 값을 노출한다(바깥 이름만 둘).
+        assert detail.data["provider_feature"]["feature_id"] == (
+            scenario.provider_feature_id
+        )
+        assert str(detail.data["provider_feature"]["feature_uuid"]) == (
+            scenario.provider_feature_id
+        )
     finally:
         await api.dispose()
         await dagster.dispose()

@@ -535,9 +535,13 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         outcome = await merge_from_review(session, review_id, merged_by="op-1", reason="dup")
 
     # 좌표 보유 master 선정 (ADR-016 1순위).
-    # ``MergeOutcome``은 raw row 값을 그대로 실어 오므로 재키 뒤 uuid 객체다.
-    assert str(outcome.master_feature_id) == _F_MASTER
-    assert str(outcome.loser_feature_id) == _F_LOSER
+    # ``MergeOutcome``의 두 필드는 **바깥 계약이라 여전히 ``str``**이다 — 재키가 바꾼
+    # 것은 값의 출처(legacy ``f_*`` → canonical uuid)뿐이고 표기는 text로 남는다.
+    # ``merge_repo``가 그 계약을 SQL projection의 ``CAST(feature_id AS text)``로 지킨다.
+    # 여기서 ``str(...)``로 감싸면 드라이버가 준 ``uuid.UUID``가 새 들어와도 통과해
+    # 계약이 깨진 것을 못 본다 — 그래서 받은 값을 그대로 비교한다.
+    assert outcome.master_feature_id == _F_MASTER
+    assert outcome.loser_feature_id == _F_LOSER
     # SE2 이동(1), 충돌 SE1 drop(1).
     assert outcome.source_links_moved == 1
     assert outcome.source_links_dropped == 1

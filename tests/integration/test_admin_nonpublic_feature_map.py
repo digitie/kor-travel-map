@@ -20,6 +20,7 @@ from kortravelmap.infra import (
     price_repo,
     weather_repo,
 )
+from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -87,7 +88,7 @@ def _response_record(
 async def _insert_feature(
     session: AsyncSession,
     *,
-    feature_id: str,
+    label: str,
     lifecycle_state: str = "active",
     publication_state: str = "published",
     quality_state: str = "valid",
@@ -95,8 +96,8 @@ async def _insert_feature(
     lon: float | None = _TEST_LON,
     lat: float | None = _TEST_LAT,
     geom_wkt: str | None = None,
-) -> None:
-    """seed를 3축 tuple로 직접 받는다.
+) -> str:
+    """seed를 3축 tuple로 직접 받고, 심은 **정본 키(uuid)**를 돌려준다.
 
     0097이 ``status``/``deleted_at``/``user_deleted_at``을 물리 삭제해 legacy 어휘를
     받아 번역하는 seed는 더 이상 성립하지 않는다 — legacy ``hidden``은 3축에서
@@ -104,15 +105,15 @@ async def _insert_feature(
     이 테스트가 지키려는 명제("비공개 feature는 admin 표면에 보이고 공개 표면에는
     없다")는 축 tuple로 그대로 쓸 수 있으므로 번역 계층을 두지 않는다.
 
-    T-VN-39 재키 뒤 ``:feature_id``는 **한 문장에서 두 타입으로 읽히는 자리**다 —
-    ``feature.features.feature_id``는 uuid고 ``name``은 text다. 맨몸으로 두면
-    PostgreSQL이 자리마다 다른 타입을 유도해 ``inconsistent types deduced for
-    parameter $1``(42P08)로 parse 단계에서 죽고, 한 자리에만 캐스트를 붙여도 남은
-    맨몸 자리가 같은 오류를 낸다. 그래서 **두 자리 모두** 명시 캐스트를 단다:
-    바인드 타입은 첫 자리의 uuid 하나로 고정되고 ``name``은 그 uuid의 text 표현이
-    된다(재키 전에도 name은 feature_id와 같은 값이었으므로 뜻이 바뀌지 않는다).
+    T-VN-39 재키 뒤 ``feature.features.feature_id``는 uuid이고 ``name``은 text다.
+    종전에는 한 바인드가 두 자리에 함께 들어가 ``inconsistent types deduced for
+    parameter $1``(42P08)이 됐다. 여기서는 **바인드를 나눈다** — 식별자는 라벨에서
+    결정적으로 유도한 uuid(:func:`feature_uuid`)로 uuid 자리에 가고, 사람이 읽는
+    라벨은 ``name``으로 남는다. 재키 전 ``name``이 곧 라벨이었으므로 표시 계약도
+    그대로다.
     """
 
+    feature_id = feature_uuid(label)
     await session.execute(
         text(
             """
@@ -121,7 +122,7 @@ async def _insert_feature(
                 lifecycle_state, publication_state, quality_state,
                 sido_code, sigungu_code, legal_dong_code, updated_at
             ) VALUES (
-                CAST(:feature_id AS uuid), :kind, CAST(:feature_id AS text),
+                CAST(:feature_id AS uuid), :kind, :name,
                 '06020000',
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                      ELSE x_extension.ST_SetSRID(
@@ -137,6 +138,7 @@ async def _insert_feature(
         ),
         {
             "feature_id": feature_id,
+            "name": label,
             "kind": kind,
             "lon": lon,
             "lat": lat,
@@ -150,6 +152,7 @@ async def _insert_feature(
     await seed_feature_subtype(
         session, feature_id=feature_id, kind=kind, geom_wkt=geom_wkt
     )
+    return feature_id
 
 
 async def _current_dataset_id(
@@ -189,10 +192,11 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         "admin-map-quarantined": ("active", "published", "quarantined"),
         "admin-map-retired": ("retired", "suppressed", "valid"),
     }
-    for feature_id, (lifecycle, publication, quality) in seeded.items():
-        await _insert_feature(
+    ids: dict[str, str] = {}
+    for label, (lifecycle, publication, quality) in seeded.items():
+        ids[label] = await _insert_feature(
             migrated_session,
-            feature_id=feature_id,
+            label=label,
             lifecycle_state=lifecycle,
             publication_state=publication,
             quality_state=quality,
@@ -202,23 +206,26 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
     # card target은 공개 여부가 아니라 admin detail target의 실재(admin-any)를 묻는다.
     # `_ADMIN_FEATURE_DETAIL_SQL`이 축 술어 없이 feature_id로만 조회하고 retired도
     # reactivate 심사 대상이므로, 카드가 없어야 하는 것은 행이 없는 feature뿐이다.
-    for feature_id in seeded:
+    for feature_id in ids.values():
         assert await admin_feature_repo.admin_feature_card_target_exists(
             migrated_session, feature_id
         )
+    # "행이 없다"를 증명하는 값도 정본 축이어야 한다 — 재키 뒤 이 reader의 조회 키는
+    # ``CAST(:feature_id AS uuid)``라, 라벨을 그대로 넣으면 관측이 아니라 22P02다.
     assert not await admin_feature_repo.admin_feature_card_target_exists(
-        migrated_session, "admin-map-missing"
+        migrated_session, feature_uuid("admin-map-missing")
     )
 
     admin_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
         **_BBOX,
     )
-    admin_ids = {row["feature_id"] for row in admin_rows}
+    # asyncpg는 uuid 컬럼을 ``uuid.UUID``로 돌려준다 — 비교 축을 text로 맞춘다.
+    admin_ids = {str(row["feature_id"]) for row in admin_rows}
     # admin bbox는 공개 projection을 쓰지 않는다 — 축 filter를 주지 않으면 seed한 다섯
     # tuple이 모두 나온다. retired 제외를 여기 박으면 `lifecycle_state=retired` 필터가
     # 항상 빈 결과가 되어 admin in-bounds API의 축 filter 자체가 죽는다.
-    assert admin_ids == set(seeded)
+    assert admin_ids == set(ids.values())
 
     # lifecycle을 'active'로 좁히면 같은 suppressed 안에서 retired가 떨어진다 —
     # 두 축이 독립임을 이 한 쌍이 증명한다.
@@ -228,7 +235,9 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         lifecycle_states=["active"],
         publication_states=["suppressed"],
     )
-    assert [row["feature_id"] for row in suppressed_rows] == ["admin-map-suppressed"]
+    assert [str(row["feature_id"]) for row in suppressed_rows] == [
+        ids["admin-map-suppressed"]
+    ]
 
     suppressed_cluster = await admin_feature_repo.cluster_admin_features_in_bbox(
         migrated_session,
@@ -253,15 +262,17 @@ async def test_admin_bbox_and_cluster_include_nonpublic_statuses(
         **_BBOX,
         price_stale_hide_days=None,
     )
-    assert {row["feature_id"] for row in public_rows} == {"admin-map-published"}
+    assert {str(row["feature_id"]) for row in public_rows} == {
+        ids["admin-map-published"]
+    }
 
 
 async def test_admin_bbox_geometry_membership_is_serialization_only(
     migrated_session: AsyncSession,
 ) -> None:
-    await _insert_feature(
+    hidden_route_id = await _insert_feature(
         migrated_session,
-        feature_id="admin-map-hidden-route",
+        label="admin-map-hidden-route",
         kind="route",
         publication_state="suppressed",
         lon=None,
@@ -275,7 +286,7 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
     # route/area가 coord arm으로 우회하거나 MBR만 검사하면 잘못 포함된다.
     await _insert_feature(
         migrated_session,
-        feature_id="admin-map-hidden-false-positive",
+        label="admin-map-hidden-false-positive",
         kind="route",
         publication_state="suppressed",
         lon=_TEST_LON,
@@ -303,8 +314,8 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
         include_geometry=True,
     )
 
-    assert [row["feature_id"] for row in light] == ["admin-map-hidden-route"]
-    assert [row["feature_id"] for row in geometry] == ["admin-map-hidden-route"]
+    assert [str(row["feature_id"]) for row in light] == [hidden_route_id]
+    assert [str(row["feature_id"]) for row in geometry] == [hidden_route_id]
     assert light[0]["geometry"] is None
     # T-VN-35: subtype 컬럼 타입이 MultiLineString이라 단일 선분도 Multi로 승격된다.
     assert geometry[0]["geometry"]["type"] in {"LineString", "MultiLineString"}
@@ -326,14 +337,14 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
     migrated_session: AsyncSession,
 ) -> None:
     current = datetime.now(UTC)
-    await _insert_feature(
+    target_id = await _insert_feature(
         migrated_session,
-        feature_id="admin-hidden-target",
+        label="admin-hidden-target",
         publication_state="suppressed",
     )
-    await _insert_feature(
+    anchor_id = await _insert_feature(
         migrated_session,
-        feature_id="admin-hidden-weather-anchor",
+        label="admin-hidden-weather-anchor",
         publication_state="suppressed",
         kind="weather",
         lon=_TEST_LON + 0.000001,
@@ -343,7 +354,7 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
         migrated_session,
         [
             WeatherValue(
-                feature_id="admin-hidden-weather-anchor",
+                feature_id=anchor_id,
                 provider="python-kma-api",
                 weather_domain="kma_short_forecast",
                 forecast_style="short",
@@ -365,7 +376,7 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
             provider="python-kma-api",
             dataset_key="kma_short_forecast",
             source_entity_type="weather_response",
-            raw_data={"metric": "TMP", "feature_id": "admin-hidden-weather-anchor"},
+            raw_data={"metric": "TMP", "feature_id": anchor_id},
             fetched_at=current,
         ),
         selected_at=current,
@@ -374,11 +385,11 @@ async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
 
     public_card = await weather_repo.build_weather_card(
         migrated_session,
-        feature_id="admin-hidden-target",
+        feature_id=target_id,
     )
     admin_card = await weather_repo.build_admin_weather_card(
         migrated_session,
-        feature_id="admin-hidden-target",
+        feature_id=target_id,
     )
     map_rows = await admin_feature_repo.admin_features_in_bbox(
         migrated_session,
@@ -399,10 +410,9 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     migrated_session: AsyncSession,
 ) -> None:
     current = datetime.now(UTC)
-    feature_id = "admin-hidden-price"
-    await _insert_feature(
+    feature_id = await _insert_feature(
         migrated_session,
-        feature_id=feature_id,
+        label="admin-hidden-price",
         publication_state="suppressed",
         kind="price",
     )

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -23,6 +23,7 @@ from kortravelmap.infra.feature_repo import (
     DEFAULT_PRICE_STALE_HIDE_DAYS,
     FeatureLoadResult,
 )
+from kortravelmap.infra.value_feature_ids import resolve_value_feature_ids
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -141,7 +142,8 @@ INSERT INTO feature.feature_price_values (
     value_number, unit, normalization_version, payload, source_entity_key,
     source_record_key
 ) VALUES (
-    :price_value_key, :feature_id, :provider_dataset_id, :price_domain, :product_key,
+    :price_value_key, CAST(:feature_id AS uuid), :provider_dataset_id,
+    :price_domain, :product_key,
     :product_name, :source_product_key, :source_product_name, :observed_at, :known_at,
     :value_number, :unit, :normalization_version, CAST(:payload AS jsonb),
     :source_entity_key, :source_record_key
@@ -372,7 +374,10 @@ def _enum_value(value: Any) -> str:
 
 
 def _price_value_params(
-    value: PriceValue, *, context: _PriceValueWriteContext
+    value: PriceValue,
+    *,
+    context: _PriceValueWriteContext,
+    canonical_feature_ids: Mapping[str, str],
 ) -> dict[str, Any]:
     price_domain = _enum_value(value.price_domain)
     key = make_price_value_key(
@@ -385,7 +390,10 @@ def _price_value_params(
     )
     return {
         "price_value_key": key,
-        "feature_id": value.feature_id,
+        # T-VN-39: 컬럼은 uuid다. 값 키(`key`)는 provider가 준 참조로 이미
+        # 만들어졌고 그것을 흔들면 기존 행 전체가 중복이 된다 — 바꾸는 것은
+        # 컬럼에 들어가는 값뿐이다(`infra/value_feature_ids.py`).
+        "feature_id": canonical_feature_ids[value.feature_id],
         "provider_dataset_id": context.provider_dataset_id,
         "price_domain": price_domain,
         "product_key": value.product_key,
@@ -450,7 +458,16 @@ async def load_price_values(
         source_record_key=source_record.source_record_key,
         known_at=lineage["fetched_at"],
     )
-    params = [_price_value_params(v, context=context) for v in values]
+    materialized = list(values)
+    canonical_feature_ids = await resolve_value_feature_ids(
+        session, (v.feature_id for v in materialized)
+    )
+    params = [
+        _price_value_params(
+            v, context=context, canonical_feature_ids=canonical_feature_ids
+        )
+        for v in materialized
+    ]
     if not params:
         return 0
     await session.execute(text(_IMMUTABLE_INSERT_SQL), params)

@@ -1,4 +1,12 @@
-"""T-VN-34C final typed assembly, receipt, and cutover contract proof."""
+"""T-VN-34C final typed assembly, receipt, and cutover contract proof.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features`` · subtype 5표 ·
+``feature.feature_state_transitions`` · ``provider_sync.source_links`` ·
+``ops.feature_overrides``의 feature 참조가 uuid이고 사본 컬럼 ``feature_uuid``는
+DROP됐다(공개 뷰 ``feature.public_features``의 동명 슬롯만 26열 계약 때문에
+``CAST(feature_id AS text)``로 남는다). 이 파일의 fixture는 state procedure를
+직접 호출하므로 정본 키를 스스로 발급한다 — 표찰은 ``name``에 남긴다.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +22,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -42,12 +52,17 @@ def _contract_queries() -> list[str]:
     return parsed
 
 
-def _feature_payload(feature_id: str, kind: str) -> str:
+def _feature_payload(feature_id: str, kind: str, *, name: str) -> str:
+    """create procedure가 받는 core payload.
+
+    ``feature_id``는 재키 뒤 uuid로 읽힌다(``nullif(...)::uuid``) — 표찰은
+    ``name``에 실어 실패 메시지에서 어느 fixture인지 계속 보이게 둔다.
+    """
     return json.dumps(
         {
             "feature_id": feature_id,
             "kind": kind,
-            "name": f"T-VN-34C {kind}",
+            "name": name,
             "category": "tvn34c-contract",
             "address": {},
             "urls": {},
@@ -61,6 +76,7 @@ async def _create_as_provider_executor(
     *,
     feature_id: str,
     kind: str,
+    name: str,
     state: tuple[str, str, str] = ("active", "published", "valid"),
 ) -> None:
     # The executor is inherited by Dagster and deliberately cannot be SET
@@ -78,7 +94,7 @@ async def _create_as_provider_executor(
                 """
             ),
             {
-                "payload": _feature_payload(feature_id, kind),
+                "payload": _feature_payload(feature_id, kind, name=name),
                 "lifecycle_state": state[0],
                 "publication_state": state[1],
                 "quality_state": state[2],
@@ -100,7 +116,10 @@ async def _materialize_provider_as_runtime(session: AsyncSession, feature_id: st
     await session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
         await session.execute(
-            text("CALL feature.materialize_provider_feature_version(:feature_id)"),
+            text(
+                "CALL feature.materialize_provider_feature_version("
+                "CAST(:feature_id AS uuid))"
+            ),
             {"feature_id": feature_id},
         )
     finally:
@@ -151,12 +170,14 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
     await _require_tvn34c_provenance_bridge(migrated_session)
     tuple_ids: list[str] = []
     for number, state in enumerate(_LEGAL_TUPLES, start=1):
-        feature_id = f"tvn34c-tuple-{number}-{uuid4().hex}"
+        label = f"tvn34c-tuple-{number}-{uuid4().hex}"
+        feature_id = feature_uuid(label)
         tuple_ids.append(feature_id)
         await _create_as_provider_executor(
             migrated_session,
             feature_id=feature_id,
             kind="place",
+            name=label,
             state=state,
         )
 
@@ -168,7 +189,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
                     """
                     SELECT lifecycle_state, publication_state, quality_state
                     FROM feature.features
-                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                     """
                 ),
                 {"feature_ids": tuple_ids},
@@ -177,48 +198,50 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
     }
     assert observed_tuples == set(_LEGAL_TUPLES)
 
+    # 309가 subtype 5표의 사본 컬럼 ``feature_uuid``를 없앴다 — 심을 identity는
+    # core에서 그대로 가져오는 ``feature_id`` 하나다.
     subtype_rows = (
         (
             "place",
-            "INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind) "
-            "SELECT feature_id, feature_uuid, kind, 'cafe' FROM feature.features "
-            "WHERE feature_id = :feature_id",
+            "INSERT INTO feature.feature_places (feature_id, kind, place_kind) "
+            "SELECT feature_id, kind, 'cafe' FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)",
             "place_kind",
             "cafe",
         ),
         (
             "event",
-            "INSERT INTO feature.feature_events (feature_id, feature_uuid, kind, event_kind) "
-            "SELECT feature_id, feature_uuid, kind, 'festival' FROM feature.features "
-            "WHERE feature_id = :feature_id",
+            "INSERT INTO feature.feature_events (feature_id, kind, event_kind) "
+            "SELECT feature_id, kind, 'festival' FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)",
             "event_kind",
             "festival",
         ),
         (
             "notice",
-            "INSERT INTO feature.feature_notices (feature_id, feature_uuid, kind, notice_type) "
-            "SELECT feature_id, feature_uuid, kind, 'alert' FROM feature.features "
-            "WHERE feature_id = :feature_id",
+            "INSERT INTO feature.feature_notices (feature_id, kind, notice_type) "
+            "SELECT feature_id, kind, 'alert' FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)",
             "notice_type",
             "alert",
         ),
         (
             "route",
-            "INSERT INTO feature.feature_routes "
-            "(feature_id, feature_uuid, kind, geom, route_type) "
-            "SELECT feature_id, feature_uuid, kind, "
+            "INSERT INTO feature.feature_routes (feature_id, kind, geom, route_type) "
+            "SELECT feature_id, kind, "
             "x_extension.ST_GeomFromText('MULTILINESTRING((127 37,127.1 37.1))', 4326), "
-            "'walk' FROM feature.features WHERE feature_id = :feature_id",
+            "'walk' FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)",
             "route_type",
             "walk",
         ),
         (
             "area",
-            "INSERT INTO feature.feature_areas "
-            "(feature_id, feature_uuid, kind, geom, area_kind) "
-            "SELECT feature_id, feature_uuid, kind, "
+            "INSERT INTO feature.feature_areas (feature_id, kind, geom, area_kind) "
+            "SELECT feature_id, kind, "
             "x_extension.ST_GeomFromText('POLYGON((127 37,127.1 37,127.1 37.1,127 37))', 4326), "
-            "'district' FROM feature.features WHERE feature_id = :feature_id",
+            "'district' FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)",
             "area_kind",
             "district",
         ),
@@ -226,10 +249,13 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
     feature_ids: list[str] = []
     expected_detail: dict[str, tuple[str, str]] = {}
     for kind, insert_sql, detail_key, detail_value in subtype_rows:
-        feature_id = f"tvn34c-subtype-{kind}-{uuid4().hex}"
+        label = f"tvn34c-subtype-{kind}-{uuid4().hex}"
+        feature_id = feature_uuid(label)
         feature_ids.append(feature_id)
         expected_detail[feature_id] = (detail_key, detail_value)
-        await _create_as_provider_executor(migrated_session, feature_id=feature_id, kind=kind)
+        await _create_as_provider_executor(
+            migrated_session, feature_id=feature_id, kind=kind, name=label
+        )
         await migrated_session.execute(text(insert_sql), {"feature_id": feature_id})
         await _materialize_provider_as_runtime(migrated_session, feature_id)
 
@@ -239,7 +265,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
                 """
                 SELECT feature_id, kind, detail, geom
                 FROM feature.public_features
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY feature_id
                 """
             ),
@@ -248,7 +274,8 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
     ).mappings().all()
     assert len(public_rows) == len(subtype_rows)
     for row in public_rows:
-        detail_key, detail_value = expected_detail[row["feature_id"]]
+        # 뷰의 ``feature_id``는 uuid 컬럼이라 드라이버가 ``uuid.UUID``를 준다.
+        detail_key, detail_value = expected_detail[str(row["feature_id"])]
         assert row["detail"][detail_key] == detail_value
         if row["kind"] in {"route", "area"}:
             assert row["geom"] is not None
@@ -261,7 +288,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
                 """
                 SELECT payload
                 FROM feature.feature_versions
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[])) AND version = 0
+                WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])) AND version = 0
                 """
             ),
             {"feature_ids": feature_ids},
@@ -285,10 +312,13 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
     """동시 같은 request materialization은 하나의 durable receipt만 남긴다."""
 
     await _require_tvn34c_provenance_bridge_engine(migrated_engine)
-    feature_id = f"tvn34c-receipt-{uuid4().hex}"
+    label = f"tvn34c-receipt-{uuid4().hex}"
+    feature_id = feature_uuid(label)
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
-        await _create_as_provider_executor(setup_session, feature_id=feature_id, kind="place")
+        await _create_as_provider_executor(
+            setup_session, feature_id=feature_id, kind="place", name=label
+        )
         await setup_session.execute(
             text(
                 """
@@ -312,7 +342,7 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
                     text(
                         """
                         CALL feature.materialize_user_feature_change_provenance(
-                            :feature_id, 'update', CAST(:request_id AS uuid),
+                            CAST(:feature_id AS uuid), 'update', CAST(:request_id AS uuid),
                             'concurrent receipt fixture', 'admin:tvn34c-contract', 1, NULL, NULL
                         )
                         """
@@ -320,7 +350,9 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
                     {"feature_id": feature_id, "request_id": str(request_id)},
                 )
             ).one()
-            return row.o_feature_id, row.o_row_revision
+            # OUT ``o_feature_id``는 uuid다 — 드라이버가 주는 UUID 객체를 text 계약으로
+            # 고정해야 아래 tuple 비교가 성립한다.
+            return str(row.o_feature_id), row.o_row_revision
 
     receipts = await asyncio.gather(materialize_once(), materialize_once())
     assert receipts == [(feature_id, 2), (feature_id, 2)]
@@ -330,10 +362,11 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
             await verify_session.execute(
                 text(
                     """
-                    SELECT feature_id, request_id::text, origin, change_kind,
+                    SELECT CAST(feature_id AS text), request_id::text, origin, change_kind,
                            payload ->> 'row_revision'
                     FROM feature.feature_versions
-                    WHERE feature_id = :feature_id AND request_id = CAST(:request_id AS uuid)
+                    WHERE feature_id = CAST(:feature_id AS uuid)
+                      AND request_id = CAST(:request_id AS uuid)
                     """
                 ),
                 {"feature_id": feature_id, "request_id": str(request_id)},
@@ -345,7 +378,8 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
                 await verify_session.execute(
                     text(
                         "UPDATE feature.feature_versions SET created_by = 'forged' "
-                        "WHERE feature_id = :feature_id AND request_id = CAST(:request_id AS uuid)"
+                        "WHERE feature_id = CAST(:feature_id AS uuid) "
+                        "  AND request_id = CAST(:request_id AS uuid)"
                     ),
                     {"feature_id": feature_id, "request_id": str(request_id)},
                 )
@@ -369,10 +403,13 @@ async def test_tvn34c_request_lock_serializes_first_receipt_against_request_muta
     """first receipt는 locked applied request만 받아 immutable binding을 만든다."""
 
     await _require_tvn34c_provenance_bridge_engine(migrated_engine)
-    feature_id = f"tvn34c-receipt-race-{uuid4().hex}"
+    label = f"tvn34c-receipt-race-{uuid4().hex}"
+    feature_id = feature_uuid(label)
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
-        await _create_as_provider_executor(setup_session, feature_id=feature_id, kind="place")
+        await _create_as_provider_executor(
+            setup_session, feature_id=feature_id, kind="place", name=label
+        )
         await setup_session.execute(
             text(
                 """
@@ -405,7 +442,7 @@ async def test_tvn34c_request_lock_serializes_first_receipt_against_request_muta
                     text(
                         """
                         CALL feature.materialize_user_feature_change_provenance(
-                            :feature_id, 'update', CAST(:request_id AS uuid),
+                            CAST(:feature_id AS uuid), 'update', CAST(:request_id AS uuid),
                             'receipt race fixture', 'admin:tvn34c-contract', 1, NULL, NULL
                         )
                         """
@@ -426,7 +463,7 @@ async def test_tvn34c_request_lock_serializes_first_receipt_against_request_muta
             text(
                 """
                 SELECT count(*) FROM feature.feature_versions
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                   AND request_id = CAST(:request_id AS uuid)
                 """
             ),
@@ -441,7 +478,8 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
     """관리자 재활성화는 링크·current head를 검증하고 DB 산출 causation만 감사한다."""
 
     suffix = uuid4().hex
-    feature_id = f"tvn34c-reactivate-{suffix}"
+    label = f"tvn34c-reactivate-{suffix}"
+    feature_id = feature_uuid(label)
     entity_key = f"tvn34c-entity-{suffix}"
     record_key = f"tvn34c-record-{suffix}"
     raw_payload_hash = suffix * 2
@@ -499,6 +537,7 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
         migrated_session,
         feature_id=feature_id,
         kind="place",
+        name=label,
         state=("retired", "suppressed", "valid"),
     )
     await migrated_session.execute(
@@ -506,7 +545,9 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
             """
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method, confidence
-            ) VALUES (:feature_id, :entity_key, 'primary', 'fixture', 100)
+            ) VALUES (
+                CAST(:feature_id AS uuid), :entity_key, 'primary', 'fixture', 100
+            )
             """
         ),
         {"feature_id": feature_id, "entity_key": entity_key},
@@ -520,7 +561,8 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
                     text(
                         """
                         CALL feature.reactivate_admin_feature_state(
-                            :feature_id, :dataset_id, :entity_key, 'wrong-record', 1,
+                            CAST(:feature_id AS uuid),
+                            :dataset_id, :entity_key, 'wrong-record', 1,
                             'reactivate_after_evidence', 'admin:tvn34c-contract', NULL, NULL, NULL
                         )
                         """
@@ -534,7 +576,8 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
                 text(
                     """
                     CALL feature.reactivate_admin_feature_state(
-                        :feature_id, :dataset_id, :entity_key, :record_key, 1,
+                        CAST(:feature_id AS uuid),
+                        :dataset_id, :entity_key, :record_key, 1,
                         'reactivate_after_evidence', 'admin:tvn34c-contract', NULL, NULL, NULL
                     )
                     """
@@ -547,7 +590,8 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
                 },
             )
         ).one()
-        assert result.o_feature_id == feature_id
+        # OUT ``o_feature_id``는 uuid다 — 드라이버가 주는 UUID 객체를 text로 고정한다.
+        assert str(result.o_feature_id) == feature_id
         assert result.o_row_revision == 2
         assert result.o_transition_id is not None
     finally:
@@ -561,7 +605,7 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
                 SELECT principal, causation_ref, to_lifecycle_state, to_publication_state,
                        to_quality_state
                 FROM feature.feature_state_transitions
-                WHERE feature_id = :feature_id AND row_revision = 2
+                WHERE feature_id = CAST(:feature_id AS uuid) AND row_revision = 2
                 """
             ),
             {"feature_id": feature_id},
@@ -587,8 +631,10 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
     entity_key = f"tvn34c-race-entity-{suffix}"
     record_one = f"tvn34c-race-record-one-{suffix}"
     record_two = f"tvn34c-race-record-two-{suffix}"
-    admin_feature_id = f"tvn34c-race-admin-{suffix}"
-    provider_feature_id = f"tvn34c-race-provider-{suffix}"
+    admin_label = f"tvn34c-race-admin-{suffix}"
+    provider_label = f"tvn34c-race-provider-{suffix}"
+    admin_feature_id = feature_uuid(admin_label)
+    provider_feature_id = feature_uuid(provider_label)
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
         dataset_id = int(
             (
@@ -645,10 +691,14 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
             setup_session,
             feature_id=admin_feature_id,
             kind="place",
+            name=admin_label,
             state=("retired", "suppressed", "valid"),
         )
         await _create_as_provider_executor(
-            setup_session, feature_id=provider_feature_id, kind="place"
+            setup_session,
+            feature_id=provider_feature_id,
+            kind="place",
+            name=provider_label,
         )
         for feature_id in (admin_feature_id, provider_feature_id):
             await setup_session.execute(
@@ -656,7 +706,9 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                     """
                     INSERT INTO provider_sync.source_links (
                         feature_id, source_entity_key, source_role, match_method, confidence
-                    ) VALUES (:feature_id, :entity_key, 'primary', 'fixture', 100)
+                    ) VALUES (
+                        CAST(:feature_id AS uuid), :entity_key, 'primary', 'fixture', 100
+                    )
                     """
                 ),
                 {"feature_id": feature_id, "entity_key": entity_key},
@@ -690,7 +742,7 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                     """
                     UPDATE provider_sync.source_links
                     SET confidence = confidence
-                    WHERE feature_id = :feature_id
+                    WHERE feature_id = CAST(:feature_id AS uuid)
                       AND source_entity_key = :entity_key
                     """
                 ),
@@ -708,7 +760,8 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                 text(
                     """
                     CALL feature.reactivate_admin_feature_state(
-                        :feature_id, :dataset_id, :entity_key, :record_key, 1,
+                        CAST(:feature_id AS uuid),
+                        :dataset_id, :entity_key, :record_key, 1,
                         'current_source_required', 'admin:tvn34c-race', NULL, NULL, NULL
                     )
                     """
@@ -745,7 +798,8 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                 text(
                     """
                     CALL feature.transition_feature_state(
-                        :feature_id, 'retired', 'suppressed', 'valid', 1,
+                        CAST(:feature_id AS uuid),
+                        'retired', 'suppressed', 'valid', 1,
                         CAST(:context AS jsonb), NULL, NULL
                     )
                     """
@@ -776,7 +830,7 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
                     """
                     SELECT feature_id, lifecycle_state, row_revision
                     FROM feature.features
-                    WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                    WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                     ORDER BY feature_id
                     """
                 ),
@@ -799,15 +853,19 @@ async def test_tvn34c_generic_non_provider_retirement_writes_lifecycle_fence(
 ) -> None:
     """Generic non-provider transitions cannot leave a retirement unfenced."""
 
-    feature_id = f"tvn34c-retirement-fence-{transition_kind}"
-    await _create_as_provider_executor(migrated_session, feature_id=feature_id, kind="place")
+    label = f"tvn34c-retirement-fence-{transition_kind}"
+    feature_id = feature_uuid(label)
+    await _create_as_provider_executor(
+        migrated_session, feature_id=feature_id, kind="place", name=label
+    )
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
         await migrated_session.execute(
             text(
                 """
                 CALL feature.transition_feature_state(
-                    :feature_id, 'retired', 'suppressed', 'valid', 1,
+                    CAST(:feature_id AS uuid),
+                    'retired', 'suppressed', 'valid', 1,
                     CAST(:context AS jsonb), NULL, NULL
                 )
                 """
@@ -833,7 +891,7 @@ async def test_tvn34c_generic_non_provider_retirement_writes_lifecycle_fence(
                 """
                 SELECT override_value, prevent_provider_reactivation
                 FROM ops.feature_overrides
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                   AND field_path = 'lifecycle_state'
                   AND status = 'active'
                 """

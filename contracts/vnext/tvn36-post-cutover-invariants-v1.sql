@@ -35,8 +35,8 @@ WHERE to_regprocedure(removed_procedure.regprocedure_name) IS NOT NULL; -- expec
 -- [INV-36-04] runtime command surface는 request-free typed override procedures다.
 SELECT count(*)
 FROM (VALUES
-    ('feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)'),
-    ('feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])')
+    ('feature.author_feature_field_overrides(uuid,bigint,text,text,bigint,jsonb,jsonb)'),
+    ('feature.revoke_feature_field_overrides(uuid,bigint,text,text,bigint,text[])')
 ) AS required_procedure(regprocedure_name)
 WHERE to_regprocedure(required_procedure.regprocedure_name) IS NULL; -- expect: 0 -- phase: post-tvn36
 

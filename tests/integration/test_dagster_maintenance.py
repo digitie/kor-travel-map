@@ -22,6 +22,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -58,7 +59,7 @@ async def test_consistency_dedup_refresh_client_updates_queue_and_report(
 ) -> None:
     await _seed_feature_with_source(
         migrated_engine,
-        feature_id="dagster-knps-temple",
+        label="dagster-knps-temple",
         source_record_key="sr-knps-temple",
         provider="knps",
         dataset_key="knps_visitor_centers",
@@ -66,7 +67,7 @@ async def test_consistency_dedup_refresh_client_updates_queue_and_report(
     )
     await _seed_feature_with_source(
         migrated_engine,
-        feature_id="dagster-heritage-temple",
+        label="dagster-heritage-temple",
         source_record_key="sr-heritage-temple",
         provider="krheritage",
         dataset_key="krheritage_heritage_features",
@@ -151,12 +152,21 @@ async def _dataset_id(session: AsyncSession, *, provider: str, dataset_key: str)
 async def _seed_feature_with_source(
     engine: AsyncEngine,
     *,
-    feature_id: str,
+    label: str,
     source_record_key: str,
     provider: str,
     dataset_key: str,
     name: str,
 ) -> None:
+    """읽어서 알아볼 수 있는 ``label``로 feature 1건 + primary source를 심는다.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이 seed는
+    provider 적재 경로가 아니라 **직접 INSERT**이므로 정본 축이고, 종전에 라벨을
+    그대로 넣던 자리는 ``feature_uuid(label)``이 유도하는 결정적 uuid가 받는다.
+    라벨 자체는 source entity의 자연키(``source_entity_id``)로 남아 이 픽스처가
+    무엇을 심는지 계속 읽힌다 — 그 열은 재키와 무관한 provider 문자열이다.
+    """
+    feature_id = feature_uuid(label)
     source_entity_key = f"se-{source_record_key}"
     async with AsyncSession(engine) as session, session.begin():
         dataset_id = await _dataset_id(session, provider=provider, dataset_key=dataset_key)
@@ -185,7 +195,7 @@ async def _seed_feature_with_source(
                 source_entity_key=source_entity_key,
                 provider_dataset_id=dataset_id,
                 source_entity_type="place",
-                source_entity_id=feature_id,
+                source_entity_id=label,
                 first_seen_at=_NOW,
                 last_seen_at=_NOW,
             )
@@ -199,7 +209,7 @@ async def _seed_feature_with_source(
                 source_entity_key=source_entity_key,
                 # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
                 raw_payload_hash=md5(source_record_key.encode()).hexdigest(),
-                raw_data={"feature_id": feature_id, "name": name},
+                raw_data={"label": label, "name": name},
                 fetched_at=_NOW,
                 imported_at=_NOW,
             )

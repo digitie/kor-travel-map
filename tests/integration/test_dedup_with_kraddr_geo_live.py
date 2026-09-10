@@ -30,6 +30,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.dto import Coordinate, Feature
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     cached_reverse_geocoder,
@@ -56,6 +57,57 @@ def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str]:
         (feature_id_a, feature_id_b)
         if feature_id_a < feature_id_b
         else (feature_id_b, feature_id_a)
+    )
+
+
+@dataclass(frozen=True)
+class _DedupFeature:
+    """적재된 Feature를 ``DedupInput``으로 감싼 값 — 식별자만 정본 축이다.
+
+    종전에는 provider가 만든 ``Feature`` DTO를 그대로 ``sync_dedup_candidates``에
+    넘겼다. T-VN-39 재키(alembic 309)와 ADR-098 뒤 그 DTO의 ``feature_id``는 legacy
+    ``f_*`` **주소**이고, ``ops.dedup_review_queue.feature_id_a/b``는 uuid이며
+    ``feature.features``를 FK로 참조한다 — DTO를 그대로 넘기면 22P02다.
+    ``sync_dedup_candidates``의 계약("left/right의 feature는 이미
+    ``feature.features``에 적재돼 있어야 한다")이 가리키는 값이 곧 정본 키다.
+
+    점수 축(이름/좌표/카테고리)은 DTO 값을 그대로 옮긴다 — 이 파일이 재는 것은
+    실 geocoder 보강 뒤의 점수와 큐 전이이고, 그 축은 재키와 무관하다.
+    """
+
+    feature_id: str
+    name: str
+    coord: Coordinate | None
+    category: str
+
+
+_CANONICAL_FOR_ALIAS_SQL = """
+SELECT CAST(a.feature_id AS text)
+FROM feature.feature_aliases AS a
+WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'
+"""
+
+
+async def _dedup_input(engine: AsyncEngine, feature: Feature) -> _DedupFeature:
+    """적재된 provider Feature의 정본 키를 등록부에서 풀어 DedupInput으로 감싼다.
+
+    legacy 문자열에서 정본 키로 가는 유일한 입구가 ``feature.feature_aliases``이고,
+    그 주소를 발급하는 것이 바로 여기서 태운 provider 적재 경로다(ADR-098 결정 6).
+    """
+
+    async with AsyncSession(engine) as session:
+        canonical = str(
+            (
+                await session.execute(
+                    text(_CANONICAL_FOR_ALIAS_SQL), {"alias": feature.feature_id}
+                )
+            ).scalar_one()
+        )
+    return _DedupFeature(
+        feature_id=canonical,
+        name=feature.name,
+        coord=feature.coord,
+        category=feature.category,
     )
 
 
@@ -180,7 +232,9 @@ async def _enrich_and_load(
 
 
 async def test_dedup_auto_merge_with_real_geocoder(
-    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: AsyncEngine,
+    kor_travel_geo_base_url: str,
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-A1",
@@ -206,8 +260,10 @@ async def test_dedup_auto_merge_with_real_geocoder(
     assert "global" not in feat_a.feature_id
     assert "global" not in feat_b.feature_id
 
-    # find_dedup_candidates + 큐 적재.
-    sync = await map_client.sync_dedup_candidates([feat_a], [feat_b])
+    # find_dedup_candidates + 큐 적재. 큐가 참조하는 축은 정본 키다.
+    input_a = await _dedup_input(migrated_engine, feat_a)
+    input_b = await _dedup_input(migrated_engine, feat_b)
+    sync = await map_client.sync_dedup_candidates([input_a], [input_b])
     assert len(sync.candidates) == 1
     assert sync.candidates[0].decision == "auto_merge"
     assert sync.queue.inserted == 1
@@ -218,9 +274,11 @@ async def test_dedup_auto_merge_with_real_geocoder(
     row = reviews[0]
     assert row["decision_reason"] == "auto_merge"
     assert row["total_score"] >= 85.0
-    assert (row["feature_id_a"], row["feature_id_b"]) == _canonical_pair(
-        feat_a.feature_id,
-        feat_b.feature_id,
+    # ``pending_dedup_reviews``는 raw row를 그대로 돌려주므로 uuid 컬럼은
+    # ``uuid.UUID``로 온다 — 비교 축을 text 표기 하나로 맞춘다.
+    assert (str(row["feature_id_a"]), str(row["feature_id_b"])) == _canonical_pair(
+        input_a.feature_id,
+        input_b.feature_id,
     )
 
 
@@ -228,7 +286,9 @@ async def test_dedup_auto_merge_with_real_geocoder(
 
 
 async def test_dedup_keep_separate_far_coord(
-    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: AsyncEngine,
+    kor_travel_geo_base_url: str,
 ) -> None:
     seoul = _festival(
         no="LIVE-DEDUP-SEOUL", name="동명축제", lon="126.9779", lat="37.5663"
@@ -242,7 +302,10 @@ async def test_dedup_keep_separate_far_coord(
     assert feat_seoul.address.sido_code == "11"
     assert feat_busan.address.sido_code == "26"
 
-    sync = await map_client.sync_dedup_candidates([feat_seoul], [feat_busan])
+    sync = await map_client.sync_dedup_candidates(
+        [await _dedup_input(migrated_engine, feat_seoul)],
+        [await _dedup_input(migrated_engine, feat_busan)],
+    )
     # spatial exp(-(~325km*1000)/50) ≈ 0 → name 1.0*0.45 + spatial 0*0.35 + cat 1.0*0.20 = 0.65
     # 경계값에 걸려있음 — 본 lib THRESHOLD_MANUAL=0.65 boundary는 `score >= 0.65`
     # 이므로 manual_review가 될 수도 있다 — 결정은 라이브러리 정책 그대로 신뢰.
@@ -260,7 +323,9 @@ async def test_dedup_keep_separate_far_coord(
 
 
 async def test_dedup_different_name_same_coord(
-    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: AsyncEngine,
+    kor_travel_geo_base_url: str,
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-DIFF-A",
@@ -277,7 +342,10 @@ async def test_dedup_different_name_same_coord(
     bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
-    sync = await map_client.sync_dedup_candidates([feat_a], [feat_b])
+    sync = await map_client.sync_dedup_candidates(
+        [await _dedup_input(migrated_engine, feat_a)],
+        [await _dedup_input(migrated_engine, feat_b)],
+    )
     # name_sim≈0 + spatial=1.0 + category=1.0 → 0*0.45 + 1*0.35 + 1*0.2 = 0.55 < 0.65
     # → KEEP_SEPARATE, 큐 빈 상태.
     assert sync.queue.inserted == 0
@@ -301,28 +369,33 @@ async def test_dedup_rerun_updates_pending_preserves_reviewed(
     bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
+    input_a = await _dedup_input(migrated_engine, feat_a)
+    input_b = await _dedup_input(migrated_engine, feat_b)
+
     # 첫 sync — inserted=1.
-    s1 = await map_client.sync_dedup_candidates([feat_a], [feat_b])
+    s1 = await map_client.sync_dedup_candidates([input_a], [input_b])
     assert s1.queue.inserted == 1
 
     # 두 번째 sync — 같은 후보, 점수 동일 → updated=1.
-    s2 = await map_client.sync_dedup_candidates([feat_a], [feat_b])
+    s2 = await map_client.sync_dedup_candidates([input_a], [input_b])
     assert s2.queue.updated == 1
     assert s2.queue.inserted == 0
 
     # 운영자가 accepted로 표기 (commit 격리).
-    canonical_a, canonical_b = _canonical_pair(feat_a.feature_id, feat_b.feature_id)
+    canonical_a, canonical_b = _canonical_pair(
+        input_a.feature_id, input_b.feature_id
+    )
     async with AsyncSession(migrated_engine) as session, session.begin():
         await session.execute(
             text(
                 "UPDATE ops.dedup_review_queue SET status='accepted' "
-                "WHERE feature_id_a=:a AND feature_id_b=:b"
+                "WHERE feature_id_a=CAST(:a AS uuid) AND feature_id_b=CAST(:b AS uuid)"
             ),
             {"a": canonical_a, "b": canonical_b},
         )
 
     # 세 번째 sync — accepted 행이라 skipped.
-    s3 = await map_client.sync_dedup_candidates([feat_a], [feat_b])
+    s3 = await map_client.sync_dedup_candidates([input_a], [input_b])
     assert s3.queue.skipped == 1
     assert s3.queue.inserted == 0
     assert s3.queue.updated == 0
@@ -335,7 +408,9 @@ async def test_dedup_rerun_updates_pending_preserves_reviewed(
 
 
 async def test_dedup_exclude_auto_merge_via_kor_travel_geo(
-    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: AsyncEngine,
+    kor_travel_geo_base_url: str,
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-EXCL-A", name="제외 시험", lon="126.9779", lat="37.5663"
@@ -347,7 +422,9 @@ async def test_dedup_exclude_auto_merge_via_kor_travel_geo(
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
     sync = await map_client.sync_dedup_candidates(
-        [feat_a], [feat_b], include_auto_merge=False
+        [await _dedup_input(migrated_engine, feat_a)],
+        [await _dedup_input(migrated_engine, feat_b)],
+        include_auto_merge=False,
     )
     # 동일 쌍은 auto_merge — include_auto_merge=False면 후보 0건 → 큐 빈 상태.
     assert sync.candidates == []

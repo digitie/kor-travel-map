@@ -88,14 +88,18 @@ async def _publish_event(
             (
                 await connection.execute(
                     text(
+                        # T-VN-39 재키(alembic 309): 이 프로시저의 `p_survivor_feature_id`
+                        # (IN 6번)와 `o_manual_feature_id`(OUT 4번)가 text에서 uuid가 됐다.
+                        # `CALL`은 OUT 자리표시자의 타입까지 세어 프로시저를 고르므로,
+                        # 둘 중 하나라도 text로 두면 어떤 프로시저와도 맞지 않아 42883이다.
                         """
                         CALL feature.resolve_manual_provider_dedup_case_v2(
                           CAST(:case_id AS uuid), 'merged', CAST(:fingerprint AS text),
                           CAST(:manual_revision AS bigint),
                           CAST(:provider_revision AS bigint),
-                          CAST(:survivor_feature_id AS text), 'restore drill',
+                          CAST(:survivor_feature_id AS uuid), 'restore drill',
                           CAST(:actor AS text), CAST(:command_id AS bigint),
-                          NULL::text, NULL::uuid, NULL::uuid, NULL::text, NULL::bigint
+                          NULL::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::bigint
                         )
                         """
                     ),

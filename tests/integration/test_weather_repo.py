@@ -16,6 +16,7 @@ from kortravelmap.infra import weather_repo
 from kortravelmap.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,12 +36,12 @@ _KREX = "python-krex-api"
 
 async def _insert_feature(
     session: AsyncSession,
-    feature_id: str,
+    label: str,
     *,
     kind: str = "weather",
     lon: float | None = None,
     lat: float | None = None,
-) -> None:
+) -> str:
     """weather anchor/target 후보 1건을 **공개 표면에 보이는 상태로** 심는다.
 
     이 파일이 상태에 거는 요구는 단 하나 — ``weather_repo``의 card/anchor 조회가
@@ -54,7 +55,14 @@ async def _insert_feature(
     ``public_features`` 실재를 단언한다 — 테스트가 실제로 의존하는 사실이 그것이고,
     typed subtype 분해(0085~0087) 같은 projection 변경이 조용히 anchor 후보를
     지워버리면 weather 단언이 엉뚱하게 깨지기 전에 여기서 먼저 잡힌다.
+
+    T-VN-39(309): provider claim 경로가 아니라 core 표에 직접 심는 **정본 축**이라
+    ``feature_id``는 uuid다. ``label``은 그 uuid의 씨앗이자 ``name``으로 남는다 —
+    옛 코드처럼 ``:feature_id`` 하나를 uuid 열과 varchar ``name``에 함께 쓰면
+    asyncpg가 두 타입을 한 ``$1``로 접어 42P18이므로 바인드를 나눈다. 반환값은 심은
+    정본 키이고, fact 적재·card 조회·anchor 단언이 모두 그 값을 쓴다.
     """
+    feature_id = feature_uuid(label)
     await session.execute(
         text(
             """
@@ -62,7 +70,7 @@ async def _insert_feature(
                 feature_id, kind, name, category, coord,
                 lifecycle_state, publication_state, quality_state
             ) VALUES (
-                :feature_id, :kind, :feature_id, '00000000',
+                :feature_id, :kind, :name, '00000000',
                 CASE
                     WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                     ELSE x_extension.ST_SetSRID(
@@ -77,6 +85,7 @@ async def _insert_feature(
         {
             "feature_id": feature_id,
             "kind": kind,
+            "name": label,
             "lon": lon,
             "lat": lat,
         },
@@ -87,6 +96,7 @@ async def _insert_feature(
         ),
         {"feature_id": feature_id},
     ) == 1
+    return feature_id
 
 
 async def _dataset(
@@ -174,7 +184,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
     dataset_id = await _dataset(
         migrated_session, provider=_KMA, dataset_key=dataset_key
     )
-    await _insert_feature(migrated_session, "weather-current")
+    current_id = await _insert_feature(migrated_session, "weather-current")
     response = _response(
         provider=_KMA, dataset_key=dataset_key, suffix="a", fetched_at=_BASE
     )
@@ -182,7 +192,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
         migrated_session,
         [
             _value(
-                "weather-current",
+                current_id,
                 "TMP",
                 provider=_KMA,
                 domain="kma_short_forecast",
@@ -191,7 +201,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
                 value_number="20",
             ),
             _value(
-                "weather-current",
+                current_id,
                 "TMP",
                 provider=_KMA,
                 domain="kma_short_forecast",
@@ -200,7 +210,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
                 value_number="25",
             ),
             _value(
-                "weather-current",
+                current_id,
                 "FIRE_RISK",
                 provider=_KMA,
                 domain="kma_weather_alert",
@@ -215,7 +225,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
     ) == 3
 
     current = await weather_repo.build_weather_card(
-        migrated_session, feature_id="weather-current"
+        migrated_session, feature_id=current_id
     )
     current_by_key = {(item.forecast_style, item.metric_key): item for item in current.metrics}
     assert current_by_key[("short", "TMP")].value_number == Decimal("25")
@@ -227,7 +237,7 @@ async def test_current_card_uses_receipt_summary_and_snapshot_uses_raw_facts(
 
     snapshot = await weather_repo.build_weather_snapshot(
         migrated_session,
-        feature_id="weather-current",
+        feature_id=current_id,
         target_at=_BASE + timedelta(minutes=30),
         known_at=_TARGET,
     )
@@ -244,24 +254,24 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
     krex_key = "tvn38_krex_anchor"
     kma_id = await _dataset(migrated_session, provider=_KMA, dataset_key=kma_key)
     krex_id = await _dataset(migrated_session, provider=_KREX, dataset_key=krex_key)
-    await _insert_feature(
+    rural_id = await _insert_feature(
         migrated_session, "weather-rural", kind="place", lon=126.9784, lat=37.5665
     )
-    await _insert_feature(
+    kma_anchor_id = await _insert_feature(
         migrated_session, "weather-kma", lon=127.0684, lat=37.5665
     )
-    await _insert_feature(
+    krex_anchor_id = await _insert_feature(
         migrated_session, "weather-krex", lon=127.0124, lat=37.5665
     )
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
             _value(
-                "weather-kma", "SKY", provider=_KMA, domain="kma_mid_forecast",
+                kma_anchor_id, "SKY", provider=_KMA, domain="kma_mid_forecast",
                 style="mid", target_at=_TARGET, value_text="구름많음"
             ),
             _value(
-                "weather-kma", "TMP", provider=_KMA, domain="kma_short_forecast",
+                kma_anchor_id, "TMP", provider=_KMA, domain="kma_short_forecast",
                 style="short", target_at=_TARGET, value_number="21"
             ),
         ],
@@ -275,7 +285,7 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
         migrated_session,
         [
             _value(
-                "weather-krex", "T1H", provider=_KREX,
+                krex_anchor_id, "T1H", provider=_KREX,
                 domain="rest_area_weather", style="observed", target_at=_TARGET,
                 value_number="18", observed=True
             )
@@ -288,21 +298,21 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
     ) == 1
 
     rural = await weather_repo.build_weather_card(
-        migrated_session, feature_id="weather-rural"
+        migrated_session, feature_id=rural_id
     )
     by_key = {(item.forecast_style, item.metric_key): item for item in rural.metrics}
     assert by_key[("mid", "SKY")].value_text == "구름많음"
     assert by_key[("short", "TMP")].value_number == Decimal("21")
     assert by_key[("observed", "T1H")].value_number == Decimal("18")
 
-    await _insert_feature(
+    own_id = await _insert_feature(
         migrated_session, "weather-own", kind="place", lon=126.9794, lat=37.5665
     )
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
             _value(
-                "weather-own", "TMP", provider=_KMA, domain="kma_short_forecast",
+                own_id, "TMP", provider=_KMA, domain="kma_short_forecast",
                 style="short", target_at=_TARGET, value_number="22"
             )
         ],
@@ -312,12 +322,12 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
         ),
         selected_at=_TARGET,
     ) == 1
-    own = await weather_repo.build_weather_card(migrated_session, feature_id="weather-own")
+    own = await weather_repo.build_weather_card(migrated_session, feature_id=own_id)
     assert {(item.forecast_style, item.metric_key) for item in own.metrics} == {("short", "TMP")}
 
     # 자기 anchor가 SKY만 가진 KMA row여도 KMA tier가 자기 자신을 재선정하면 안 된다.
     # 다음 KMA anchor의 기온을 병합해 own → KMA → observed 순서를 완결한다.
-    await _insert_feature(
+    partial_own_id = await _insert_feature(
         migrated_session,
         "weather-partial-own",
         kind="place",
@@ -328,7 +338,7 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
         migrated_session,
         [
             _value(
-                "weather-partial-own",
+                partial_own_id,
                 "SKY",
                 provider=_KMA,
                 domain="kma_short_forecast",
@@ -347,7 +357,7 @@ async def test_current_card_merges_kma_and_observed_anchors_only_without_own_tem
         selected_at=_TARGET,
     ) == 1
     partial = await weather_repo.build_weather_card(
-        migrated_session, feature_id="weather-partial-own"
+        migrated_session, feature_id=partial_own_id
     )
     partial_by_key = {
         (item.forecast_style, item.metric_key): item for item in partial.metrics
@@ -363,12 +373,14 @@ async def test_nearest_weather_anchor_reads_current_summary_not_legacy_catalog(
     dataset_id = await _dataset(
         migrated_session, provider=_KMA, dataset_key=dataset_key
     )
-    await _insert_feature(migrated_session, "weather-nearest", lon=126.9784, lat=37.5665)
+    nearest_id = await _insert_feature(
+        migrated_session, "weather-nearest", lon=126.9784, lat=37.5665
+    )
     assert await weather_repo.load_weather_values(
         migrated_session,
         [
             _value(
-                "weather-nearest", "TMP", provider=_KMA,
+                nearest_id, "TMP", provider=_KMA,
                 domain="kma_short_forecast", style="short", target_at=_TARGET,
                 value_number="20"
             )
@@ -383,4 +395,6 @@ async def test_nearest_weather_anchor_reads_current_summary_not_legacy_catalog(
         migrated_session, lon=126.9794, lat=37.5665
     )
     assert anchor is not None
-    assert anchor.feature_id == "weather-nearest"
+    # ``WeatherAnchor.feature_id``는 공개 표면이 노출하는 정본 키의 text 표기다
+    # (repo가 uuid row 값을 ``str(...)``로 고정한다) — 심은 uuid와 그대로 맞선다.
+    assert anchor.feature_id == nearest_id

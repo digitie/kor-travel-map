@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,14 +19,24 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
+#: 이 파일의 seed 라벨. T-VN-39 재키 뒤 ``feature_id``는 uuid라 라벨이 값 안에
+#: 남지 않는다 — 그래서 ``LIKE 'cc:%'``로 "이 테스트가 심은 것"을 고를 수 없다.
+#: 라벨→uuid는 결정적이므로 집합을 직접 들고 다니고, 단언은 uuid를 다시 라벨로
+#: 되돌려 읽는 사람이 보던 이름을 그대로 본다.
+_LABELS: tuple[str, ...] = ("cc:1", "cc:2", "cc:3", "cc:4", "cc:5")
+_ID_BY_LABEL = {label: feature_uuid(label) for label in _LABELS}
+_LABEL_BY_ID = {value: label for label, value in _ID_BY_LABEL.items()}
+
 _VISIBLE_SEED_SQL = """
-SELECT feature_id FROM feature.public_features WHERE feature_id LIKE 'cc:%'
+SELECT CAST(feature_id AS text) AS feature_id
+FROM feature.public_features
+WHERE feature_id = ANY(CAST(:seed_ids AS uuid[]))
 """
 
 
 async def _ins(
     session: AsyncSession,
-    fid: str,
+    label: str,
     category: str,
     *,
     lifecycle_state: str = "active",
@@ -38,6 +49,8 @@ async def _ins(
     ``feature.public_features``가 세 축의 교집합(active/published/valid)으로
     정의한다. 따라서 이 헬퍼는 축 값을 그대로 받는다 — 예전 ``status='active'``
     기본값과 등가인 tuple이 위 세 기본값이다.
+
+    ``label``은 정본 키가 아니라 씨앗이다 — 심는 값은 그 라벨의 canonical uuid다.
     """
     await session.execute(
         text(
@@ -54,7 +67,7 @@ async def _ins(
             """
         ),
         {
-            "fid": fid,
+            "fid": _ID_BY_LABEL[label],
             "category": category,
             "lifecycle_state": lifecycle_state,
             "publication_state": publication_state,
@@ -96,7 +109,16 @@ async def test_category_feature_counts(migrated_session: AsyncSession) -> None:
 
     # 집계의 기준선이 공개 projection임을 먼저 고정한다 — 비공개 2건이 정말로
     # ``public_features``에 없어서 빠지는 것이지, 집계 쿼리가 따로 거른 게 아니다.
-    visible = set((await migrated_session.execute(text(_VISIBLE_SEED_SQL))).scalars().all())
+    visible = {
+        _LABEL_BY_ID[value]
+        for value in (
+            await migrated_session.execute(
+                text(_VISIBLE_SEED_SQL), {"seed_ids": list(_ID_BY_LABEL.values())}
+            )
+        )
+        .scalars()
+        .all()
+    }
     assert visible == {"cc:1", "cc:2", "cc:4"}
 
     counts = await feature_repo.category_feature_counts(migrated_session)

@@ -82,6 +82,56 @@ _TRUNCATE_SQL = (
 )
 
 
+#: legacy ``f_*`` → 정본 키(uuid text). T-VN-39 재키(alembic 309)와 ADR-098 뒤
+#: ``feature.features.feature_id``는 서버가 발급하는 uuid이고, ``_bundle``이 드는
+#: ``make_feature_id`` 산출물은 그 Feature의 legacy **주소**다. 적재 경로가 그 주소를
+#: ``feature.feature_aliases``에 남기므로 여기가 legacy에서 정본으로 가는 유일한
+#: 입구다.
+_CANONICAL_FOR_ALIAS_SQL = """
+SELECT CAST(a.feature_id AS text)
+FROM feature.feature_aliases AS a
+WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'
+"""
+
+#: "이 legacy 주소가 가리키는 Feature가 실재하는가"를 세는 형태. 적재되지 않았으면
+#: 주소도 없어 0이다 — 종전 ``WHERE feature_id = '<f_*>'``와 같은 질문이지만, 그
+#: 문자열을 uuid 컬럼에 대면 관측이 아니라 22P02가 된다.
+_FEATURE_COUNT_FOR_ALIAS_SQL = """
+SELECT count(*)
+FROM feature.features AS f
+JOIN feature.feature_aliases AS a
+  ON a.feature_id = f.feature_id
+ AND a.alias_kind = 'legacy_feature_id'
+WHERE a.alias = :alias
+"""
+
+
+async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -> str:
+    """적재된 Feature의 정본 키(uuid의 text 표기)."""
+
+    return str(
+        (
+            await session.execute(
+                text(_CANONICAL_FOR_ALIAS_SQL), {"alias": legacy_feature_id}
+            )
+        ).scalar_one()
+    )
+
+
+async def _feature_count_for_alias(
+    session: AsyncSession, legacy_feature_id: str
+) -> int:
+    """legacy 주소가 가리키는 Feature 행 수 (미적재면 0)."""
+
+    return int(
+        (
+            await session.execute(
+                text(_FEATURE_COUNT_FOR_ALIAS_SQL), {"alias": legacy_feature_id}
+            )
+        ).scalar_one()
+    )
+
+
 class _MemoryStore:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = objects
@@ -126,20 +176,22 @@ async def test_offline_upload_load_job_persists_feature_and_job(
     assert result.upload.status == "loaded"
 
     async with AsyncSession(migrated_engine) as session:
+        feature_id = await _canonical_feature_id(session, bundle.feature.feature_id)
         row = (
             await session.execute(
                 text(
-                    "SELECT f.feature_id, ou.status AS upload_status, ij.status AS job_status "
+                    "SELECT CAST(f.feature_id AS text) AS feature_id, "
+                    "ou.status AS upload_status, ij.status AS job_status "
                     "FROM feature.features AS f "
                     "JOIN ops.offline_uploads AS ou ON ou.upload_id = :upload_id "
                     "JOIN ops.import_jobs AS ij ON ij.job_id = ou.load_job_id "
-                    "WHERE f.feature_id = :feature_id"
+                    "WHERE f.feature_id = CAST(:feature_id AS uuid)"
                 ),
-                {"upload_id": upload_id, "feature_id": bundle.feature.feature_id},
+                {"upload_id": upload_id, "feature_id": feature_id},
             )
         ).one()
 
-    assert row.feature_id == bundle.feature.feature_id
+    assert row.feature_id == feature_id
     assert row.upload_status == "loaded"
     assert row.job_status == "done"
 
@@ -316,15 +368,9 @@ async def test_preclaimed_marker_race_stops_before_object_and_feature_io(
                 {"job_id": job.job_id},
             )
         ).one()
-        feature_count = (
-            await session.execute(
-                text(
-                    "SELECT count(*) FROM feature.features "
-                    "WHERE feature_id = :feature_id"
-                ),
-                {"feature_id": bundle.feature.feature_id},
-            )
-        ).scalar_one()
+        feature_count = await _feature_count_for_alias(
+            session, bundle.feature.feature_id
+        )
 
     assert state.job_status == "running"
     assert str(state.cancellation_id) == cancellation_id
@@ -452,12 +498,9 @@ async def test_offline_upload_load_job_records_checksum_failure(
                 {"upload_id": upload_id},
             )
         ).one()
-        feature_count = (
-            await session.execute(
-                text("SELECT count(*) FROM feature.features WHERE feature_id = :feature_id"),
-                {"feature_id": bundle.feature.feature_id},
-            )
-        ).scalar_one()
+        feature_count = await _feature_count_for_alias(
+            session, bundle.feature.feature_id
+        )
 
     assert row.upload_status == "load_failed"
     assert row.job_status == "failed"
@@ -2197,6 +2240,12 @@ def _bundle(source_id: str) -> FeatureBundle:
     )
     feature = Feature(
         feature_id=feature_id,
+        # ADR-098: provider Feature의 identity는
+        # ``(provider_dataset_id, feature_kind, natural_key)`` claim이고 서버가 그
+        # claim에 uuid를 발급한다. 이 값이 비면 writer가
+        # ``FeatureIdentityAnchorError``로 선다(fail-close) — 위 ``feature_id``는
+        # 정본 키가 아니라 legacy 주소이므로 claim을 대신하지 못한다.
+        provider_natural_key=source_id,
         kind=FeatureKind.PLACE,
         name="오프라인 통합 테스트 장소",
         coord=Coordinate(lon=Decimal("126.9780"), lat=Decimal("37.5665")),

@@ -170,9 +170,10 @@ async def list_dedup_refresh_features(
 ) -> list[DedupRefreshFeature]:
     """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다."""
     _validate_scope(scope)
-    # T-VN-32C PR-2 — 운영자가 응답 UUID를 run config cursor에 붙여넣는 경로:
-    # keyset은 legacy text 축이므로 UUID 표기는 legacy 키로 정규화한다
-    # (miss는 원문 유지 — 기존 "범위 밖 cursor" semantics, 적대 리뷰 F3).
+    # T-VN-32C PR-2 — 운영자가 응답 UUID를 run config cursor에 붙여넣는 경로.
+    # T-VN-39 재키 뒤 keyset 축은 uuid이고 `legacy_id_for_filter`도 (자기
+    # docstring대로) 정본 uuid를 돌려준다 — 이름만 옛 세계의 것이다.
+    # miss는 원문 유지 — 기존 "범위 밖 cursor" semantics(적대 리뷰 F3).
     cursor_feature_id = await feature_identity.legacy_id_for_filter(
         session, scope.cursor_feature_id
     )
