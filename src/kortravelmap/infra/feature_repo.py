@@ -2306,6 +2306,7 @@ def _provider_field_patch_payload(
     feature: Feature,
     *,
     feature_uuid: str,
+    parent_feature_id: str | None,
 ) -> tuple[str, str]:
     """Provider DTO를 registry의 고정 field path 입력으로 낮춘다.
 
@@ -2316,6 +2317,11 @@ def _provider_field_patch_payload(
     """
 
     params = _feature_params(feature)
+    # T-VN-39: registry의 `core.parent_feature_id`는 프로시저 안에서
+    # `NULLIF(p_values ->> 'core.parent_feature_id','')::uuid`로 착지한다
+    # (`alembic/head-schema.sql:916`). provider DTO가 든 것은 부모의 legacy
+    # **주소**이므로 호출부가 이미 푼 정본 키로 갈아 끼운다.
+    params["parent_feature_id"] = parent_feature_id
     values: dict[str, Any] = {
         f"core.{key}": (
             json.loads(value)
@@ -2387,8 +2393,12 @@ async def _apply_provider_feature_field_patch(
 ) -> int:
     """Existing provider Feature를 field-level base/effective procedure로 갱신한다."""
 
+    parent_feature_id: str | None = feature.parent_feature_id
+    if parent_feature_id:
+        parents = await resolve_canonical_feature_ids(session, [parent_feature_id])
+        parent_feature_id = parents[parent_feature_id]
     values, geometry_wkt = _provider_field_patch_payload(
-        feature, feature_uuid=feature_uuid
+        feature, feature_uuid=feature_uuid, parent_feature_id=parent_feature_id
     )
     return await _apply_provider_field_values(
         session,
