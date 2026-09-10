@@ -943,6 +943,12 @@ async def execute_feature_update_request(
             raise FeatureUpdateLockBusy(lock_key=request_lock_key)
         scope_acquired = False
         interrupted: asyncio.CancelledError | None = None
+        #: 정리 중에 난 오류가 **진짜 원인을 지우지 않게** 하려면 그 원인을
+        #: 손에 들고 있어야 한다. `finally` 안의 `raise`는 진행 중인 예외를
+        #: 대체하기 때문이다 — 2026-09-10 실측: rollback이 낸 경고 하나가
+        #: `RuntimeError: simulated provider checkpoint failure`를 지우고
+        #: 운영자에게 보이는 실패 사유가 됐다.
+        failure: BaseException | None = None
         try:
             try:
                 scope_acquired = await _acquire_scope_lock(
@@ -983,6 +989,9 @@ async def execute_feature_update_request(
         except asyncio.CancelledError as exc:
             interrupted = exc
             raise
+        except BaseException as exc:
+            failure = exc
+            raise
         finally:
             cleanup_error: BaseException | None = None
             try:
@@ -1013,14 +1022,21 @@ async def execute_feature_update_request(
                 except BaseException as exc:
                     cleanup_error = exc
             if cleanup_error is not None:
+                in_flight: BaseException | None = interrupted or failure
                 if isinstance(cleanup_error, FeatureUpdateConnectionUnsafe):
-                    if interrupted is not None:
-                        raise cleanup_error from interrupted
+                    # 연결이 안전하지 않다는 것은 그 자체로 상위 계약이다 — 이것만은
+                    # 진행 중인 예외를 대체해도 좋다(원인은 `from`으로 남는다).
+                    if in_flight is not None:
+                        raise cleanup_error from in_flight
                     raise cleanup_error
-                if interrupted is not None:
+                if in_flight is not None:
+                    # **원인이 이야기다.** 정리 실패는 부차적이므로 기록만 하고
+                    # 진행 중인 예외를 그대로 올라가게 둔다. 여기서 `raise`하면
+                    # 운영자가 보는 실패 사유가 정리 오류로 바뀐다.
                     _LOG.error(
-                        "feature update cleanup failed after interruption: "
+                        "feature update cleanup failed after %s: "
                         "request_id=%s error=%r",
+                        "interruption" if interrupted is not None else "failure",
                         request.request_id,
                         cleanup_error,
                     )

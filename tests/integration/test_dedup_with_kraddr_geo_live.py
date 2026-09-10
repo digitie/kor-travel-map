@@ -131,11 +131,21 @@ def _is_reachable(base_url: str) -> bool:
         return False
 
 
+#: geo public endpoint는 `X-KTG-API-Key` 헤더를 요구한다. 키가 없으면 클라이언트가
+#: 요청을 **보내기 전에** `GeoAuthNotConfiguredError`로 선다 — 서비스는 살아 있으므로
+#: 위 도달성 검사는 통과한다. 즉 "도달 가능하지만 인증 불가"라는 제3의 상태가 있고,
+#: 그것도 이 파일의 다른 환경 부재와 같은 부류다(2026-09-10 n150 실측: 5건이 전부
+#: 이 상태였다).
+_GEO_API_KEY_ENV = "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY"
+
+
 @pytest.fixture(scope="module")
 def kor_travel_geo_base_url() -> str:
     url = _resolve_base_url()
     if not _is_reachable(url):
         pytest.skip(f"kor-travel-geo 도달 불가: {url}")
+    if not os.environ.get(_GEO_API_KEY_ENV, "").strip():
+        pytest.skip(f"kor-travel-geo public API key 미설정: {_GEO_API_KEY_ENV}")
     return url
 
 
