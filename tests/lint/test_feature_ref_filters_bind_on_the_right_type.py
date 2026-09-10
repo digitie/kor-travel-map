@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from typing import Any
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SELF = pathlib.Path(__file__).resolve()
@@ -48,7 +49,11 @@ _TEXT_BIND_ARGUMENTS = frozenset({"q"})
 
 # 하한 — 검사가 재는 대상이 사라지면 초록이 아니라 빨강이어야 한다.
 _MINIMUM_TEXT_CALLS = 3
-_MINIMUM_UUID_CALLS = 5
+_MINIMUM_UUID_CALLS = 7
+
+# uuid 필터를 노출하는 표면의 하한. 개수 세기와 달리 아래 검사는 표면을 **열거해서**
+# 하나하나 확인하므로, 이 수는 "열거가 비지 않았다"만 보증한다.
+_MINIMUM_UUID_FILTER_SURFACES = 3
 
 
 def _sources() -> list[pathlib.Path]:
@@ -129,4 +134,66 @@ def test_uuid_filter_helper_covers_the_uuid_bound_surfaces() -> None:
     assert total >= _MINIMUM_UUID_CALLS, (
         f"`{_UUID_ONLY}` 호출부가 {total}개뿐입니다 — uuid 바인드 자리가 "
         f"`{_TEXT_ONLY}`로 되돌아갔는지 확인하세요."
+    )
+
+
+def _router_modules() -> list[pathlib.Path]:
+    return sorted((_ROOT / "packages").glob("*/src/kortravelmap/api/routers/*.py"))
+
+
+def _uuid_filter_parameters() -> list[tuple[pathlib.Path, Any, str]]:
+    """`Annotated[str | None, Query()]`로 선언된 `*feature_id` 질의 파라미터 전부.
+
+    **왜 이 모양만 고르나.** 형제 필터(`rule_id`·`theme_id`·`source_id`)는 `UUID`
+    타입이라 FastAPI가 경계에서 이미 거른다. `str`로 선언된 것만 자유 문자열이
+    그대로 통과하고, 그 값이 `CAST(:x AS uuid)`에 닿으면 22P02다. 경로 파라미터는
+    제외한다 — 그 자리는 필터가 아니라 상세 조회이고 해석 규율이 다르다.
+    """
+    found: list[tuple[pathlib.Path, Any, str]] = []
+    for path in _router_modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+                continue
+            for argument in [*node.args.args, *node.args.kwonlyargs]:
+                if not argument.arg.endswith("feature_id") or argument.annotation is None:
+                    continue
+                annotation = ast.unparse(argument.annotation)
+                if "Query" not in annotation or "str" not in annotation:
+                    continue
+                found.append((path, node, argument.arg))
+    return found
+
+
+def test_every_uuid_bound_feature_filter_is_normalized() -> None:
+    """uuid 필터를 노출하는 **표면을 열거해서** 하나씩 확인한다.
+
+    호출부 **개수**만 세면 "변환되지 않은 표면이 남아 있다"를 볼 수 없다. 실제로
+    그랬다 — 이 검사의 첫 판이 초록인 채로 `/admin/theme-feature-candidates`의
+    `feature_id`가 정규화 없이 `CAST(:feature_id AS uuid)`에 닿고 있었고, 그
+    라우터의 `except ValueError`는 22P02가 오는 `sqlalchemy.exc.DataError`를 잡지
+    못해 운영자에게 500이 나갔다. 적대 리뷰가 집었다.
+
+    개수 하한은 "검사가 비지 않았다"만 말한다. 명제는 **전칭**이어야 한다 —
+    이런 파라미터를 가진 handler는 전부 `canonical_feature_id_for_filter`를 지난다.
+    """
+    surfaces = _uuid_filter_parameters()
+    assert len(surfaces) >= _MINIMUM_UUID_FILTER_SURFACES, (
+        f"uuid 필터 표면을 {len(surfaces)}개만 찾았습니다 "
+        f"(하한 {_MINIMUM_UUID_FILTER_SURFACES}) — 열거가 깨졌는지 확인하세요."
+    )
+    unnormalized: list[str] = []
+    for path, node, name in surfaces:
+        body = ast.unparse(node)
+        if _UUID_ONLY not in body:
+            unnormalized.append(
+                f"{path.relative_to(_ROOT).as_posix()}:{node.lineno} "
+                f"{node.name}({name})"
+            )
+    assert not unnormalized, (
+        f"uuid로 바인드되는 feature 필터가 `{_UUID_ONLY}`를 지나지 않습니다: "
+        + ", ".join(unnormalized)
+        + " — 원문을 그대로 넘기면 legacy `f_*`도 오타 섞인 uuid도 22P02가 되고, "
+        "그 오류는 `ValueError`가 아니라 `sqlalchemy.exc.DataError`라 라우터의 "
+        "422 handler를 통과해 **500**으로 나갑니다."
     )

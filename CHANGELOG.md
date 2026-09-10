@@ -52,7 +52,6 @@
   준 legacy 주소를 받아 정본 uuid로 푼다. 이 자리들은 재키 직후 전량 22P02였다.
 - **REMOVED (사본 열)**: 13개 `*_feature_uuid` shadow 열이 사라졌다. 두 표기를
   나란히 들고 있을 이유가 없어졌다 — 정본이 곧 uuid다.
-||||||| 7af1461a8
 
 ### backup artifact — manifest가 해시 대상에 들어가고 스키마 출처를 싣는다 (2026-09-08)
 

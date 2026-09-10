@@ -73,23 +73,47 @@ _SAME_AXIS = re.compile(
 #: `_SAME_AXIS`의 `feature_id` 갈래가 이것들을 같은 축으로 읽었다 — 그 오인이
 #: 정확히 이 검사가 막으려던 부류다. `feature.features.feature_id`(uuid)와
 #: `manual_feature_purge_records.legacy_feature_id`(text)를 맞대면 42883이고,
-#: 사면 때문에 검사는 초록이었다. 적대 리뷰가 집었다.
+#: 사면 때문에 검사는 초록이었다.
 #:
 #: ADR-098 뒤 legacy `f_*`가 살아 있는 자리는 셋뿐이다 —
 #: `feature_aliases.alias`, `manual_feature_purge_records.legacy_feature_id`,
 #: `ops.tvn36_legacy_freeze_preflight_manifest.legacy_feature_id`. 여기에
 #: 큐레이션 import plan의 `resource_key`(주소를 담는 text)를 더한다.
-_TEXT_AXIS = re.compile(
-    r"legacy_feature_id|\bresource_key\b|\balias\b", re.IGNORECASE
+_TEXT_AXIS_NAMES: Final[frozenset[str]] = frozenset(
+    {"legacy_feature_id", "resource_key", "alias"}
 )
 
-#: 상대가 **uuid 축임을 적극적으로** 말하는 형태. `legacy_feature_id`가 여기
-#: 걸리지 않도록 `feature_id` 앞에 단어 문자가 오면 제외한다 — 그 한 글자가
-#: 두 축을 가른다.
-_UUID_AXIS = re.compile(
-    r"(?<![A-Za-z0-9_])feature_id\b|feature_uuid|::uuid|\bAS\s+uuid\b",
-    re.IGNORECASE,
-)
+#: 식별자 토큰. 축 판정을 정규식 **부분 일치**가 아니라 이름 단위로 한다.
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: 명시적 uuid 캐스트.
+_UUID_CAST = re.compile(r"::uuid|\bAS\s+uuid\b", re.IGNORECASE)
+
+
+def _axis_of(expression: str) -> str | None:
+    """이 표현식이 어느 축으로 읽히는가 — ``"text"`` / ``"uuid"`` / 판단 불가 ``None``.
+
+    **정규식 lookbehind로 하다 틀렸다.** 첫 판은 uuid 축을
+    ``(?<![A-Za-z0-9_])feature_id``로 판정했는데, 그 한 줄이 ``parent_feature_id`` ·
+    ``master_feature_id`` · ``loser_feature_id`` · ``from_feature_id`` 같은 **uuid**
+    열 열두 개를 uuid 축에서 통째로 지웠다. 그러면 그것들과 ``legacy_feature_id``의
+    교차 비교가 "한쪽이 uuid라고 적극적으로 말하지 않는다"가 되어 ``_SAME_AXIS``의
+    ``feature_id`` 갈래로 사면된다 — 고치려던 사면이 자리만 옮겨 그대로 남았다.
+    적대 리뷰가 집었다.
+
+    그래서 부분 일치를 버리고 **이름 단위**로 본다. text 축 이름을 먼저 보고,
+    그 다음에야 ``*feature_id`` / ``feature_uuid``를 uuid로 읽는다. 순서가
+    중요하다 — ``legacy_feature_id``도 ``feature_id``로 끝나기 때문이다.
+    """
+    names = {name.lower() for name in _IDENTIFIER.findall(expression)}
+    if names & _TEXT_AXIS_NAMES:
+        return "text"
+    if any(name == "feature_uuid" or name.endswith("feature_id") for name in names):
+        return "uuid"
+    if _UUID_CAST.search(expression):
+        return "uuid"
+    return None
+
 
 #: plpgsql의 `... INTO <변수>`는 비교가 아니라 대입이다.
 _ASSIGNMENT_INTO = re.compile(r"\bINTO\b", re.IGNORECASE)
@@ -121,9 +145,8 @@ def test_routine_bodies_never_compare_a_feature_id_across_axes() -> None:
             # 전부 한 축으로 뭉개진다. 다만 "text가 아님"은 uuid라는 뜻이 아니다 —
             # plpgsql 변수는 덤프에서 타입을 읽을 수 없으므로, 한쪽이 text 축이고
             # **다른 쪽이 uuid 축이라고 적극적으로 말할 때만** 어긋난 것으로 본다.
-            text_axis = (bool(_TEXT_AXIS.search(column)), bool(_TEXT_AXIS.search(other)))
-            uuid_axis = (bool(_UUID_AXIS.search(column)), bool(_UUID_AXIS.search(other)))
-            if (text_axis[0] and uuid_axis[1]) or (uuid_axis[0] and text_axis[1]):
+            left_axis, right_axis = _axis_of(column), _axis_of(other)
+            if None not in (left_axis, right_axis) and left_axis != right_axis:
                 unjudged.append(f"head-schema.sql:{index + 1}: {stripped[:120]}")
                 continue
             if _SAME_AXIS.search(other):

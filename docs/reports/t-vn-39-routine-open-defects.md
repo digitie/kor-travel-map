@@ -691,3 +691,72 @@ feature가 살아 있는 claim은 건드리지 않으므로 어떤 테스트의 
 
 쪼갠 하네스로 초록을 얻었으면 머지 전에 **한 번은 CI와 같은 방식으로** 돌린다.
 다르게 재면 다른 것을 재는 것이다.
+
+## 델타 적대 리뷰 — 고친 것을 다시 본다 (2026-09-10)
+
+앞선 적대 리뷰의 지적을 전부 닫은 **그 수정 자체**는 아무도 적대적으로 보지 않았다.
+그중 절반이 검사기·테스트 하네스를 바꾼 것이라 특히 위험하다 — 검사기가 틀리면
+초록이 거짓말을 한다. 그래서 델타(`cb35cbcfa..HEAD`, 커밋 11개·파일 33개)를 5축 ×
+2인(opus5/xhigh)으로 다시 걸고, 지적마다 서로 다른 렌즈 셋(정확성·반증·심각도)으로
+반박을 시도했다.
+
+**지적 25건 중 11건 생존, 14건 반박.** blocker 0. 중복을 걷어내면 서로 다른 결함
+여섯이다.
+
+### 1. uuid 필터 표면 하나가 변환을 못 받았다 (major, 3인이 독립 발견)
+
+`curations.py:2425` `list_admin_theme_candidates`가 `feature_id`를 정규화 없이
+`curation_candidate_repo._LIST_SQL`의 `CAST(:feature_id AS uuid)`로 넘긴다. 형제
+필터(`rule_id`·`theme_id`·`source_id`)는 `UUID` 타입이라 FastAPI가 걸러 주지만 이
+자리만 자유 문자열이다.
+
+**그리고 그 오류는 422로 가지 않는다.** 22P02는 `sqlalchemy.exc.DataError`로 오고
+그것은 `ValueError`가 아니므로 라우터의 `except ValueError`를 통과해 app 층
+catch-all에서 **500**이 된다. admin UI에는 이 필터를 그리는 자유 텍스트 상자가 있다
+(`curation-candidates-client.tsx:223`). 재키 전에는 그 자리가 text 열이라 `f_*`로
+정상 동작했으므로, 운영자 관점에서는 기능 손실이다.
+
+### 2. 그 구멍을 새 검사기가 볼 수 없었다 (major)
+
+`test_feature_ref_filters_bind_on_the_right_type.py`의 uuid 쪽 단언은 helper **호출
+개수 ≥ 5**뿐이었다(당시 6). "uuid에 바인드되는 feature 필터는 전부 이 helper를
+지난다"는 **전칭 명제**를 어디서도 재지 않으므로, 변환되지 않은 표면이 남아 있어도
+초록이다.
+
+개수 세기를 **표면 열거**로 바꿨다 — `Annotated[str | None, Query()]`로 선언된
+`*feature_id` 질의 파라미터를 라우터에서 전부 찾아 하나씩 확인한다. 경로 파라미터는
+제외한다(필터가 아니라 상세 조회이고 해석 규율이 다르다). 확인을 위해 고친 자리를
+되돌려 돌려 봤다 — 검사가 그 표면을 이름으로 집는다.
+
+### 3. 축 검사기의 lookbehind가 uuid 열 열두 개를 지웠다 (major)
+
+`_UUID_AXIS = (?<![A-Za-z0-9_])feature_id\b|...`는 `parent_feature_id` ·
+`master_feature_id` · `loser_feature_id` · `from_feature_id` 같은 **uuid** 열을 uuid
+축에서 통째로 뺐다. 그러면 그것들과 `legacy_feature_id`의 교차 비교가 "한쪽이
+uuid라고 적극적으로 말하지 않는다"가 되어 `_SAME_AXIS`로 사면된다 — 직전 라운드에서
+고친 사면이 자리만 옮겨 그대로 남아 있었다.
+
+정규식 부분 일치를 버리고 **이름 단위 분류**로 바꿨다(`_axis_of`). text 축 이름을
+먼저 보고 그 다음에 `*feature_id`/`feature_uuid`를 uuid로 읽는다 — 순서가 중요하다,
+`legacy_feature_id`도 `feature_id`로 끝나기 때문이다. 12개 사례로 양성·음성을
+확인했다.
+
+### 4. 머지 충돌 해소가 diff3 base 마커를 남겼다 (major)
+
+`CHANGELOG.md:55`에 `||||||| 7af1461a8`이 그대로 커밋됐다. 이 저장소의
+`merge.conflictStyle`이 `zdiff3`인데 해소 스크립트가 `<<<<<<<`/`=======`/`>>>>>>>`
+셋만 알았다. 내용 손실·중복은 없었고(공통 접미는 hoist된다) 마커 한 줄만 남았다.
+
+### 5·6. 표기를 맞추던 세 번째 자리와, 없는 knob를 가리키는 메시지 (minor)
+
+`test_dedup_with_kraddr_geo_live.py:287`이 `pending_dedup_reviews`의 text 계약을
+아직 `str()`로 가리고 있었고 주석은 이제 사실과 반대였다. Parse 오라클의 실패
+메시지는 존재하지 않는 `_NOT_PARSEABLE_WITHOUT_CONTEXT`를 가리켰다 — 둘 다 고쳤다.
+
+### 반박된 14건이 말해 주는 것
+
+반박된 지적 중 여럿이 "검사기가 이 변형을 못 본다" 부류였다(`INSERT INTO`가
+`_ASSIGNMENT_INTO`에 걸린다, `_fragments`가 컨테이너와 함께 사라질 수 있다,
+FK 모델에 `INITIALLY DEFERRED` 축이 없다 …). 전부 **사실이지만 이 델타가 만든 것이
+아니고**, 지금 도달 가능한 결함으로 이어지지 않는다는 것이 반박자들의 판정이었다.
+기록으로 남긴다 — 다음에 이 검사기들을 넓힐 때 시작점이다.

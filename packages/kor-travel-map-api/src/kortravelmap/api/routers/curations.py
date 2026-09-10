@@ -2422,7 +2422,16 @@ async def list_admin_theme_candidates(
             source_id=str(source_id) if source_id else None,
             review_state=review_state,
             eligibility_present=eligibility_present,
-            feature_id=feature_id,
+            # T-VN-39: 이 값은 `CAST(:feature_id AS uuid)`로 들어간다
+            # (`curation_candidate_repo._LIST_SQL`). 형제 필터 셋은 `UUID` 타입이라
+            # FastAPI가 걸러 주지만 이 자리만 자유 문자열이다 — 원문을 그대로 넘기면
+            # legacy `f_*`도, 오타 섞인 uuid도 22P02(`sqlalchemy.exc.DataError`)가
+            # 되고 아래 `except ValueError`는 그것을 잡지 못해 **500**이 나간다.
+            # 자매 표면(`/admin/issues`·`/ops/consistency/issues`)과 같은 처방으로
+            # 맞춘다.
+            feature_id=await feature_identity.canonical_feature_id_for_filter(
+                session, feature_id
+            ),
             limit=page_size,
             cursor=cursor,
         )

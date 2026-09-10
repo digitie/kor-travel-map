@@ -517,8 +517,10 @@ async def test_every_product_sql_statement_parses_against_the_head_schema(
         + "\n  ".join(failures)
         + "\n\n이 오류는 전부 PostgreSQL의 **Parse 단계** 산물이라 행 하나 없이도 난다. "
         "통합 테스트를 다 돌려서 발견할 부류가 아니었다는 뜻이다.\n"
-        "정말로 실행 문맥이 있어야만 Parse되는 문장이라면 "
-        "`_NOT_PARSEABLE_WITHOUT_CONTEXT`에 이유와 함께 적어라."
+        "head 오라클이 판정할 수 없는 문장이라면 `_OUTSIDE_THE_HEAD_ORACLE`에 "
+        "이유와 함께 적고, 다른 스키마 세대를 겨냥한 것이라면 이름에 "
+        "`_FROZEN_GENERATION_MARKERS`의 표식을 붙여라 — 두 목록이 느는 것 자체가 "
+        "리뷰 신호다."
     )
 
 

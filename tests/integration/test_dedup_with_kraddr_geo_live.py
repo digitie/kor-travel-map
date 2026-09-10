@@ -284,9 +284,14 @@ async def test_dedup_auto_merge_with_real_geocoder(
     row = reviews[0]
     assert row["decision_reason"] == "auto_merge"
     assert row["total_score"] >= 85.0
-    # ``pending_dedup_reviews``는 raw row를 그대로 돌려주므로 uuid 컬럼은
-    # ``uuid.UUID``로 온다 — 비교 축을 text 표기 하나로 맞춘다.
-    assert (str(row["feature_id_a"]), str(row["feature_id_b"])) == _canonical_pair(
+    # ``pending_dedup_reviews``는 dict를 그대로 돌려주고 상위가 JSON으로
+    # 직렬화한다 — 그래서 SQL이 경계에서 text로 편다(`_PENDING_DEDUP_SQL`).
+    # 여기서 ``str(...)``로 표기를 맞추면 그 계약이 깨져도 초록이 된다. 짝인
+    # `test_client_orchestration`·`test_phone_enrichment`에서 이미 걷어낸 부류라
+    # 이 자리도 표기를 맞추지 말고 **표기를 잰다.**
+    assert isinstance(row["feature_id_a"], str)
+    assert isinstance(row["feature_id_b"], str)
+    assert (row["feature_id_a"], row["feature_id_b"]) == _canonical_pair(
         input_a.feature_id,
         input_b.feature_id,
     )
