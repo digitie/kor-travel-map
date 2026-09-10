@@ -48,11 +48,23 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 #: 훑을 패키지. 제품 SQL이 사는 곳 전부.
+#:
+#: `kortravelmap.api`/`kortravelmap.dagster`를 **따로 적는다.** 둘은 별도 배포
+#: 패키지가 editable로 심는 하위 이름이라 `kortravelmap.__path__`에 경로가 아니라
+#: finder hook 문자열로 들어간다. `pkgutil.walk_packages`는 그 hook을 열거하지
+#: 못하므로 부모만 훑으면 API의 SQL이 통째로 시야 밖이다 — 첫 판이 정확히 그랬다
+#: (`kortravelmap.api` 수집 0건). 아래 하한 단언이 그 침묵을 다시 못 만들게 한다.
 _PACKAGES: Final[tuple[str, ...]] = (
     "kortravelmap",
-    "kor_travel_map_api",
+    "kortravelmap.api",
     "kortravelmap.dagster",
 )
+
+#: 패키지별 수집 하한. 숫자 자체가 목적이 아니라 **0이 아님**이 목적이다.
+_MINIMUM_STATEMENTS: Final[dict[str, int]] = {
+    "kortravelmap.infra": 300,
+    "kortravelmap.api": 10,
+}
 
 #: 문장으로 볼 시작 토큰. 조각(컬럼 목록·CTE 본문·술어)은 여기 걸리지 않는다.
 _VERBS: Final[tuple[str, ...]] = (
@@ -202,6 +214,13 @@ async def test_every_product_sql_statement_parses_against_the_head_schema(
         f"SQL 문장을 {len(statements)}개만 모았다 — `_..._SQL` 명명 규약이 바뀌었거나 "
         "import가 조용히 실패했다. 이 검사가 대상을 잃었다."
     )
+    for prefix, minimum in _MINIMUM_STATEMENTS.items():
+        seen = sum(1 for name in statements if name.startswith(prefix + "."))
+        assert seen >= minimum, (
+            f"`{prefix}`에서 SQL 문장을 {seen}개만 모았다(하한 {minimum}). "
+            "editable 설치의 finder hook은 `pkgutil.walk_packages`가 열거하지 못한다 — "
+            "`_PACKAGES`에 그 이름을 직접 적어야 한다."
+        )
     skipped = _fragments(statements)
 
     failures: list[str] = []

@@ -424,3 +424,72 @@ T-VN-39의 결함은 대부분 **`alembic upgrade head`가 통과한 뒤에야**
 4. **측정 하네스를 고쳤다.** pytest-timeout이 없어 데드락 하나가 전체 런을 무한정
    붙들던 것을, 파일 묶음 + 묶음별 `timeout`으로 바꿨다. 9묶음 20분이면 전체 표면을
    한 번 잰다.
+
+## 결정적 개선 — 이 부류는 **실행이 필요 없었다** (2026-09-10)
+
+### 관찰
+
+위 "근본원인 하나"는 이렇게 적혀 있다: *"T-VN-39의 결함은 대부분 `alembic upgrade
+head`가 통과한 뒤에야 보인다."* 절반만 맞았다. 마이그레이션이 통과해야 보이는 것은
+맞지만, 그 뒤에 필요한 것이 **통합 스위트 한 바퀴**라는 전제가 틀렸다.
+
+남아 있던 실패의 지배적 부류를 SQLSTATE로 보면 전부 한 곳을 가리킨다:
+
+| 코드 | 뜻 | 언제 나는가 |
+|---|---|---|
+| 42883 | `operator does not exist: uuid = text` | **Parse** |
+| 42P08 | `inconsistent types deduced for parameter $1` | **Parse** |
+| 42P18 | `could not determine data type of parameter $1` | **Parse** |
+| 42703 | `column "x" does not exist` | **Parse** |
+| 42804 | `column "x" is of type uuid but expression is of type text` | **Parse** |
+| 42P01 | `relation "x" does not exist` | **Parse** |
+
+전부 PostgreSQL이 **Parse 단계**에서 낸다. 행이 하나도 없어도, 픽스처를 하나도
+세우지 않아도 난다. 즉 이 부류를 찾는 데 **테스트 실행이 필요 없다.**
+
+### 무엇을 만들었나
+
+`tests/integration/test_product_sql_parses_against_head.py` — 제품 SQL 587개를
+모아 head 스키마에 물린 뒤 `prepare()`만 시킨다. 실행하지 않는다.
+
+수집은 **모듈을 import해서** `_..._SQL` 상수를 읽는다. AST로 문자열 리터럴을 긁으면
+f-string 합성과 `+` 연결을 놓치고 그것이 또 하나의 프록시가 된다 — 이 저장소가 네 번
+당한 실패 모드다. 조각(CTE 본문·INSERT 접두)은 이름 규약이 아니라 **포함 관계**로
+가린다: 다른 수집 문장 안에 통째로 들어가면 조각이고, 판정은 품는 쪽에서 이미
+이뤄진다. 품는 문장이 사라지면 조각이 자동으로 다시 검사 대상이 된다.
+
+### 결과
+
+첫 실행 **33초**, 20건. 그중 여덟이 진짜 결함이었다:
+
+- 42P08 둘 — `curation_candidate_repo`의 nullable 필터. 맨 바인드와 캐스트된 바인드가
+  한 문장에 섞였다.
+- 42883 하나 — `feature_reference_reconciliation_repo`. `CALL`의 **OUT 자리 타입**이
+  시그니처와 달라 그 CALL이 어떤 프로시저와도 맞지 않았다.
+- 42883 둘 — `manual_provider_dedup_repo`의 사라진 시그니처 호출, `feature_repo`의
+  `CAST(:hidden_before AS text[])`.
+- 나머지는 드라이버가 주는 `uuid.UUID`가 문자열 계약으로 새는 자리와 scope 검증.
+
+같은 여덟 건을 통합 스위트로 찾으면 9묶음 × 최대 20분이고, 그나마 실패 하나가 DB
+픽스처를 죽이면 그 뒤가 통째로 가려진다. 실제로 두 번 그렇게 가려졌다.
+
+### 이 오라클이 고쳐 준 두 번째 것 — 검사 자신의 틀린 전제
+
+`test_procedure_calls_match_their_signature.py`는 docstring에 이렇게 적어 두고
+개수만 셌다: *"인자의 타입은 보지 않는다. PostgreSQL은 OUT 자리의 타입을 해석에 쓰지
+않는다."* 그 전제가 틀렸다는 것을 head 오라클이 증명했다 — SQL에서 부르는 `CALL`은
+OUT 자리도 함수 해석에 넣는다. 검사를 넓히자 테스트 SQL에서 같은 부류 셋이 더 나왔다.
+
+**검사가 스스로 적어 둔 근거도 프록시일 수 있다.** 오라클에 물어야 한다.
+
+### 남은 사각과 그 이유
+
+- **테스트 SQL** — 이 오라클이 닿지 않는다. 대부분 함수 안에서 조립되고 픽스처
+  상태에 얽혀 있다. 그래서 `test_procedure_calls_match_their_signature.py`를 남기고
+  타입까지 보게 넓혔다.
+- **h35 고정 세대**(ADR-075) — `curation_repo`의 `_FROZEN_H35_*`/`_PRE_UUID_*`는
+  0063~0079 세대를 겨냥한다. 그 세대의 오라클은 head가 아니다. 재키 뒤 그 경로는
+  세대 분기가 없는 공용 표면 셋 때문에 이미 반쪽이고, **되살릴지 은퇴시킬지는 열린
+  결정**이다(`_pre_uuid_feature_id_recordset`의 docstring이 목록을 들고 있다).
+- **`feature.feature_files`** — 선택적 관계다. 호출부가 `to_regclass`로 먼저 묻고
+  없으면 그 SQL을 실행하지 않는다. head에 없는 것이 정상이다.
