@@ -223,6 +223,35 @@ async def _open_command(session: AsyncSession, *, actor: str, operation: str) ->
     return claim.command_id
 
 
+async def _claims_missing_their_address(
+    session: AsyncSession, *, limit: int = 12
+) -> list[dict[str, str]]:
+    """주소 없는 provider claim 목록 — 4축 관측이 0이 아닐 때 **누구인지** 말한다.
+
+    둘째 축은 숫자 하나만 돌려준다. 그 숫자가 0이 아닐 때 "어느 claim인가"를
+    사람이 다시 찾아야 하면, 실패는 원인을 가리키지 않는 채로 남는다 —
+    이 저장소가 sha256 대조에서 이미 겪은 부류다.
+    """
+    rows = (
+        await session.execute(
+            text(
+                "SELECT CAST(claim.feature_id AS text) AS feature_id, "
+                "       claim.feature_kind, claim.natural_key, "
+                "       claim.bound_by_operation "
+                "FROM provider_sync.provider_feature_identities AS claim "
+                "LEFT JOIN feature.feature_aliases AS a "
+                "       ON a.feature_id = claim.feature_id "
+                "      AND a.alias_kind = 'legacy_feature_id' "
+                "WHERE a.alias IS NULL "
+                "ORDER BY claim.natural_key "
+                "LIMIT :limit"
+            ),
+            {"limit": limit},
+        )
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 async def _assert_manual_feature_carries_no_alias(
     session: AsyncSession, *, feature_uuid: str
 ) -> None:
@@ -242,7 +271,11 @@ async def _assert_manual_feature_carries_no_alias(
         )
     ).scalar_one()
     assert alias_count == 0
-    assert await feature_identity.count_features_missing_identity(session) == (0, 0, 0, 0)
+    observed = await feature_identity.count_features_missing_identity(session)
+    assert observed == (0, 0, 0, 0), (
+        f"4축 관측이 {observed}다. 주소 없는 provider claim: "
+        f"{await _claims_missing_their_address(session)}"
+    )
 
 
 # ── ① 경계 alias 해석 ───────────────────────────────────────────────────────
@@ -440,11 +473,10 @@ async def test_provider_create_writes_uuid_and_alias_atomically(
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     assert await _canonical_uuid_for_alias(migrated_session, feature_id) == expected_uuid
 
-    assert await feature_identity.count_features_missing_identity(migrated_session) == (
-        0,
-        0,
-        0,
-        0,
+    observed = await feature_identity.count_features_missing_identity(migrated_session)
+    assert observed == (0, 0, 0, 0), (
+        f"4축 관측이 {observed}다. 주소 없는 provider claim: "
+        f"{await _claims_missing_their_address(migrated_session)}"
     )
 
 
