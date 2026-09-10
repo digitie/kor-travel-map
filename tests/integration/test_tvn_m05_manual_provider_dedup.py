@@ -83,8 +83,11 @@ async def _seed_manual_provider_pair(
     manual_name = f"M05 수동 후보 {index}"
     manual_lon_e6 = 127111111 + int(round(lon_offset * 1_000_000))
     manual_lat_e6 = 37511111 + int(round(lat_offset * 1_000_000))
-    manual_feature_id = f"f_global_p_m05manual{suffix[:10]}"
-    provider_feature_id = f"f_global_p_m05provider{suffix[:10]}"
+    # legacy alias의 형태 CHECK(`ck_feature_aliases_legacy_alias_shape`, 309)는
+    # 마지막 마디를 `make_feature_id`의 산출물 — 16자 hex — 로 고정한다. 읽기
+    # 좋은 이름을 그 자리에 넣으면 23514다. 구분은 hex 접두 한 글자로 한다.
+    manual_feature_id = f"f_global_p_a{suffix[:15]}"
+    provider_feature_id = f"f_global_p_b{suffix[:15]}"
     source_entity_key = f"se_m05_{suffix[:12]}"
     source_record_key = f"sr_m05_{suffix[:12]}_a"
     actor = f"admin:tvn-m05-{suffix}"

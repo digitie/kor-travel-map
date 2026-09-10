@@ -161,7 +161,9 @@ def _first_probe_notice_bundle(
         source_entity_id=raw_data["natural_key"],
         raw_payload_hash=raw_payload_hash,
     )
-    feature_id = "f_global_n_first_probe_notice"
+    # legacy alias의 형태 CHECK(309)는 마지막 마디를 `make_feature_id`의 산출물
+    # — 16자 hex — 로 고정한다. 읽기 좋은 이름을 그 자리에 넣으면 23514다.
+    feature_id = "f_global_n_f125700be0000001"
     feature = Feature(
         feature_id=feature_id,
         # ADR-098 identity claim 축의 세 번째 성분. 이 값이 없으면 writer가

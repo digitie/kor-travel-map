@@ -251,7 +251,7 @@ async def _assert_manual_feature_carries_no_alias(
 async def test_resolve_feature_identity_accepts_legacy_and_uuid_refs(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "f_1100000000_p_idboundary0001"
+    feature_id = "f_1100000000_p_1db0000000000001"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     expected_uuid = _assert_nonderived_uuid_v7(
         await _canonical_uuid_for_alias(migrated_session, feature_id),
@@ -308,7 +308,7 @@ async def test_resolve_feature_identity_fail_fast_on_malformed_ref(
 async def test_reads_expose_feature_uuid_additively(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "f_1100000000_p_idboundary0002"
+    feature_id = "f_1100000000_p_1db0000000000002"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     expected_uuid = _assert_nonderived_uuid_v7(
         await _canonical_uuid_for_alias(migrated_session, feature_id),
@@ -366,7 +366,7 @@ async def test_reads_expose_feature_uuid_additively(
 async def test_notice_lineage_read_exposes_uuid_pairs(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "f_global_n_idboundary00003"
+    feature_id = "f_global_n_1db0000000000003"
     bundle = _place_bundle(feature_id, name="identity 검증 공지")
     notice_feature = bundle.feature.model_copy(
         update={
@@ -411,7 +411,7 @@ async def test_provider_create_writes_uuid_and_alias_atomically(
     때문이다. 앞에 두면 신규 provider Feature마다 23503이다. 이 테스트가 그 순서를
     CI에서 붙잡는 자리다.
     """
-    feature_id = "f_1100000000_p_idboundary0004"
+    feature_id = "f_1100000000_p_1db0000000000004"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     expected_uuid = _assert_nonderived_uuid_v7(
         await _canonical_uuid_for_alias(migrated_session, feature_id),
@@ -500,7 +500,7 @@ async def test_provider_alias_loss_is_observed_by_the_claim_axis(
     alias 직접 DELETE는 0081 fence가 거부하므로(그 거부 자체를 먼저 단언한다) 결측
     상태는 fence 일시 해제로 만든다 — transaction rollback으로 원복된다.
     """
-    feature_id = "f_1100000000_p_idboundary0006"
+    feature_id = "f_1100000000_p_1db0000000000006"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
 
     # 등록부 행은 불변이다 — 지우려면 fence를 내려야 한다는 사실 자체가 계약이다.
@@ -746,7 +746,7 @@ async def test_provider_create_rejects_alias_bound_to_another_feature(
     두 번째 생성은 loader가 아니라 프로시저를 직접 호출한다 — 관측 대상이 wrapper의
     alias 분기 하나이고, claim 축(자연키)만 다르게 주면 그 분기에 정확히 닿는다.
     """
-    feature_id = "f_1100000000_p_idboundary0008"
+    feature_id = "f_1100000000_p_1db0000000000008"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     bound_uuid = await _canonical_uuid_for_alias(migrated_session, feature_id)
     dataset_id = (
@@ -824,7 +824,7 @@ async def test_legacy_alias_shape_admits_provider_ids_and_rejects_uuid_strings(
     가능하고, ``[^_]+``로 조이면 그런 provider가 전량 23514로 멎는다. 형태 검사가
     적재를 막는 것은 이 CHECK의 목적이 아니다.
     """
-    feature_id = "f_1100000000_p_idboundary0009"
+    feature_id = "f_1100000000_p_1db0000000000009"
     await feature_repo.load_bundle(migrated_session, _place_bundle(feature_id))
     bound_uuid = await _canonical_uuid_for_alias(migrated_session, feature_id)
 

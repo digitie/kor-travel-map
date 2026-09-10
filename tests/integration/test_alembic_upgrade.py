@@ -242,7 +242,9 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("plan_sha256", "text", True),
         ("manual_payload_sha256", "text", True),
         ("child_command_id", "bigint", True),
-        ("feature_uuid", "uuid", True),
+        # T-VN-39: 이 표에는 text 짝이 없었다 — shadow가 아니라 진짜 identity다.
+        # 309는 삭제가 아니라 `feature_uuid` → `feature_id` 개명으로 옮긴다.
+        ("feature_id", "uuid", True),
         ("import_row_id", "uuid", True),
         ("curation_item_id", "uuid", True),
         ("link_decision_id", "uuid", True),
