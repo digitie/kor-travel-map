@@ -2529,12 +2529,19 @@ async def _upsert_feature_subtype(
 
     subtype 행이 참조하는 identity는 core의 ``feature_id``(uuid) 하나뿐이다 —
     T-VN-39 재키(309)가 subtype의 identity 사본 컬럼과 ``fk_*_identity_pair`` FK를
-    함께 없앴으므로 재계산할 파생 identity 자체가 존재하지 않는다
-    (``stored_feature_uuid``는 호출부 계약으로 남아 있고 여기서 쓰지 않는다).
+    함께 없앴으므로 재계산할 파생 identity 자체가 존재하지 않는다.
+
+    그 하나가 ``stored_feature_uuid``다. ``feature.feature_id``는 provider
+    라이브러리가 유도한 legacy **주소**이고 subtype 컬럼은 uuid이므로 그것을 넣으면
+    22P02다 — 신규 provider Feature 적재 **전량**이 여기서 죽었다. 형제 갈래
+    (`_apply_provider_feature_field_patch`, 기존 Feature 갱신)가 같은 실수를 갖고
+    있었고 둘 다 같은 커밋에서 고쳤다. 다른 호출부 셋
+    (`admin_feature_repo`·`curation_repo`·`feature_request_repo`)은 처음부터
+    정본 키를 넘긴다.
     """
     await write_subtype(
         session,
-        feature_id=feature.feature_id,
+        feature_id=stored_feature_uuid,
         kind=feature.kind.value,
         detail=feature.detail,
         geom_wkt=geom_wkt,

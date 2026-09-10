@@ -354,6 +354,75 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
 
 
 @pytest.mark.asyncio
+async def test_new_provider_feature_writes_subtype_with_the_canonical_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """신규 provider Feature의 subtype writer는 **정본 키**를 받는다.
+
+    subtype 컬럼은 T-VN-39 재키(309) 뒤 uuid다. ``Feature.feature_id``는 provider
+    라이브러리가 유도한 legacy 주소이므로 그것을 넘기면 22P02이고, 그러면 **신규
+    provider Feature 적재 전량**이 죽는다 — 2026-09-10 통합 런이 그 상태를 잡았다.
+
+    기존 Feature 갱신 갈래는 형제 테스트
+    (`test_existing_provider_refresh_uses_typed_field_patch`)가 본다. 두 갈래가
+    같은 실수를 동시에 갖고 있었으므로 두 자리 다 못박는다.
+    """
+
+    canonical = "00000000-0000-7000-8000-00000000face"
+
+    class _Mappings:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def one(self) -> dict[str, Any]:
+            assert self._row is not None
+            return self._row
+
+        def one_or_none(self) -> dict[str, Any] | None:
+            return self._row
+
+    class _Result:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def mappings(self) -> _Mappings:
+            return _Mappings(self._row)
+
+    class _Session:
+        async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
+            sql = str(statement)
+            if "create_provider_feature_with_initial_state" in sql:
+                return _Result(
+                    {
+                        "o_inserted": True,
+                        "o_feature_id": canonical,
+                        "o_row_revision": 1,
+                    }
+                )
+            if "feature-curation-write" in sql:
+                return _Result(None)
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    seen: dict[str, Any] = {}
+
+    async def _record_subtype(*_args: Any, **kwargs: Any) -> None:
+        seen.update(kwargs)
+
+    monkeypatch.setattr(feature_repo, "write_subtype", _record_subtype)
+
+    inserted = await feature_repo.upsert_feature(
+        _Session(),  # type: ignore[arg-type]
+        _place(None, None),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+    )
+
+    assert inserted is True
+    assert seen["feature_id"] == canonical
+    assert seen["kind"] == "place"
+
+
+@pytest.mark.asyncio
 async def test_provider_reactivation_skips_preexisting_lifecycle_override() -> None:
     class _Session:
         async def execute(self, *_args: Any, **_kwargs: Any) -> None:
