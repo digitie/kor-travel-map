@@ -11,11 +11,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from sqlalchemy import text
+from sqlalchemy.exc import SAWarning
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
@@ -996,7 +998,21 @@ async def execute_feature_update_request(
             cleanup_error: BaseException | None = None
             try:
                 if session.in_transaction():
-                    await session.rollback()
+                    # 이 rollback은 **best-effort 정리**다. 안쪽
+                    # `async with session.begin()`이 이미 되돌린 뒤라면 SQLAlchemy가
+                    # "transaction already deassociated from connection" 경고를 낸다 —
+                    # 그것이 정확히 우리가 받아들이는 결과이므로 여기서만 침묵시킨다.
+                    #
+                    # 침묵시키지 않으면 `filterwarnings=error` 환경에서 이 경고가
+                    # 예외가 되고, `finally` 안의 예외는 **진행 중인 예외를 대체**해
+                    # 운영자가 보는 실패 사유를 정리 경고로 바꾼다(2026-09-10 실측).
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            message="transaction already deassociated",
+                            category=SAWarning,
+                        )
+                        await session.rollback()
             except BaseException as exc:
                 cleanup_error = exc
                 try:
