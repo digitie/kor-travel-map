@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta, timezone
 from hashlib import md5
 from typing import TYPE_CHECKING
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from sqlalchemy import text
@@ -34,6 +35,38 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)
+
+
+def _fixture_feature_uuid(label: str) -> str:
+    """fixture 표찰(``f6-violation`` 류)을 결정적 uuid로 옮긴다 (T-VN-39).
+
+    재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이 파일이 쓰던
+    표찰은 uuid 표기가 아니라 identity 열에 애초에 들어갈 수 없고, ADR-098에서
+    정본 키는 **서버가 발급하는 랜덤 UUIDv7**이라 값이 뜻을 담지도 않는다. 표찰이
+    지니던 "어느 fixture인가"는 각 테스트의 지역 변수 이름이 이미 들고 있으므로
+    여기서 필요한 것은 표찰마다 유일하고 재현 가능한 uuid 하나뿐이다.
+
+    ``uuid5``로 접는 이유는 실패 메시지의 uuid를 표찰로 되짚기 위해서다 — 같은
+    표찰이면 항상 같은 값이고, ``test_public_features_view``/
+    ``test_alias_map_collation_glibc``가 이미 같은 방식을 쓴다. version/variant
+    니블만 v7로 다시 찍어 재키 뒤 실제로 흐르는 값과 **모양까지** 같게 둔다.
+    """
+    raw = bytearray(uuid5(NAMESPACE_URL, label).bytes)
+    raw[6] = (raw[6] & 0x0F) | 0x70
+    raw[8] = (raw[8] & 0x3F) | 0x80
+    return str(UUID(bytes=bytes(raw)))
+
+
+def _ordered_feature_pair(label_a: str, label_b: str) -> tuple[str, str]:
+    """``ck_dedup_pair_order``(``feature_id_a < feature_id_b``)를 만족하는 쌍.
+
+    종전 표찰은 사전순이 곧 의도한 순서였지만(``f7-a`` < ``f7-b``) uuid로 접히면
+    그 순서가 더는 보장되지 않는다. 큐가 요구하는 정규화를 여기서 한 번만 하고,
+    sample id를 되짚는 검사도 같은 함수로 순서를 얻어 seed와 어긋나지 않게 한다.
+    """
+    left = _fixture_feature_uuid(label_a)
+    right = _fixture_feature_uuid(label_b)
+    return (left, right) if left < right else (right, left)
 
 
 def _clean_place(feature_id: str) -> FeatureRow:
@@ -173,12 +206,12 @@ async def test_f1_detected_and_report_persisted(
     migrated_session: AsyncSession,
 ) -> None:
     # 정상 feature (대조군)
-    await _add_clean_place(migrated_session, "clean-1")
+    await _add_clean_place(migrated_session, _fixture_feature_uuid("clean-1"))
 
     # F2 후보 — subtype 행이 없는 place feature (T-VN-35 이후의 "detail 결측").
     migrated_session.add(
         FeatureRow(
-            feature_id="f2-violation",
+            feature_id=_fixture_feature_uuid("f2-violation"),
             kind="place",
             name="detail 없는 장소",
             category="EAT.RESTAURANT",
@@ -224,9 +257,10 @@ async def test_f2_detects_feature_without_subtype_row(
     migrated_session: AsyncSession,
 ) -> None:
     """detail-bearing kind인데 subtype 행이 없는 feature를 F2가 잡아야 한다."""
+    violation_feature_id = _fixture_feature_uuid("f2-violation-only")
     migrated_session.add(
         FeatureRow(
-            feature_id="f2-violation-only",
+            feature_id=violation_feature_id,
             kind="place",
             name="subtype 없는 장소",
             category="EAT.RESTAURANT",
@@ -238,12 +272,13 @@ async def test_f2_detects_feature_without_subtype_row(
 
     by_code = {c.code: c for c in report.cases}
     assert by_code["F2"].count >= 1
-    assert "f2-violation-only" in by_code["F2"].sample_ids
+    assert violation_feature_id in by_code["F2"].sample_ids
 
 
 async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
     # 정상 feature + 그에 연결된 source_record (orphan 아님)
-    await _add_clean_place(migrated_session, "clean-2")
+    clean_feature_id = _fixture_feature_uuid("clean-2")
+    await _add_clean_place(migrated_session, clean_feature_id)
     await _seed_source_entity_record(
         migrated_session,
         entity_key="linked-se-1",
@@ -260,8 +295,9 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
             "INSERT INTO provider_sync.source_links "
             "(feature_id, source_entity_key, source_role, match_method, "
             " confidence) "
-            "VALUES ('clean-2','linked-se-1','primary','exact',100)"
-        )
+            "VALUES (CAST(:feature_id AS uuid),'linked-se-1','primary','exact',100)"
+        ),
+        {"feature_id": clean_feature_id},
     )
     await migrated_session.flush()
 
@@ -283,20 +319,22 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
 
 async def _seed_pending_dedup(session: AsyncSession, n: int) -> None:
     """정상 feature 2건 + pending dedup_review_queue n쌍 적재(서로 다른 pair)."""
-    await _add_clean_place(session, "f4-a")
-    await _add_clean_place(session, "f4-b")
+    await _add_clean_place(session, _fixture_feature_uuid("f4-a"))
+    await _add_clean_place(session, _fixture_feature_uuid("f4-b"))
     for i in range(n):
-        await _add_clean_place(session, f"f4-x{i}")
+        await _add_clean_place(session, _fixture_feature_uuid(f"f4-x{i}"))
     await session.flush()
     for i in range(n):
+        pair_a, pair_b = _ordered_feature_pair("f4-a", f"f4-x{i}")
         await session.execute(
             text(
                 "INSERT INTO ops.dedup_review_queue "
                 "(feature_id_a, feature_id_b, total_score, name_score, "
                 " spatial_score, category_score, status) "
-                "VALUES ('f4-a', :fb, 70, 70, 70, 70, 'pending')"
+                "VALUES (CAST(:fa AS uuid), CAST(:fb AS uuid), "
+                " 70, 70, 70, 70, 'pending')"
             ),
-            {"fb": f"f4-x{i}"},
+            {"fa": pair_a, "fb": pair_b},
         )
     await session.flush()
 
@@ -555,7 +593,8 @@ async def _seed_feature_with_primary_source(
             "INSERT INTO provider_sync.source_links "
             "(feature_id, source_entity_key, source_role, match_method, "
             " confidence) "
-            "VALUES (:feature_id, :source_entity_key, 'primary', 'exact', 100)"
+            "VALUES (CAST(:feature_id AS uuid), :source_entity_key, "
+            " 'primary', 'exact', 100)"
         ),
         {"feature_id": feature_id, "source_entity_key": source_entity_key},
     )
@@ -570,13 +609,19 @@ async def _seed_dedup_review(
     total_score: float,
     status: str = "pending",
 ) -> str:
+    """dedup 후보 1건을 적재하고 ``review_id``를 돌려준다.
+
+    두 인자는 ``ck_dedup_pair_order``를 이미 만족하는(작은 쪽이 앞) uuid 쌍이어야
+    한다 — 호출자는 :func:`_ordered_feature_pair`로 얻는다.
+    """
     row = (
         await session.execute(
             text(
                 "INSERT INTO ops.dedup_review_queue "
                 "(feature_id_a, feature_id_b, total_score, name_score, "
                 " spatial_score, category_score, status) "
-                "VALUES (:feature_id_a, :feature_id_b, :score, :score, "
+                "VALUES (CAST(:feature_id_a AS uuid), "
+                " CAST(:feature_id_b AS uuid), :score, :score, "
                 " :score, :score, :status) "
                 "RETURNING review_id::text"
             ),
@@ -597,42 +642,47 @@ async def test_f7_warns_when_current_cross_provider_score_regresses_from_baselin
 ) -> None:
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-a",
+        feature_id=_fixture_feature_uuid("f7-a"),
         provider="provider-a",
         name="가나다",
         category="CAT.A",
     )
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-b",
+        feature_id=_fixture_feature_uuid("f7-b"),
         provider="provider-b",
         name="XYZ",
         category="CAT.B",
     )
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-c",
+        feature_id=_fixture_feature_uuid("f7-c"),
         provider="provider-a",
         name="가나다",
         category="CAT.A",
     )
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-d",
+        feature_id=_fixture_feature_uuid("f7-d"),
         provider="provider-a",
         name="XYZ",
         category="CAT.B",
     )
+    # cross-provider 쌍(회귀 표본)과 same-provider 쌍(제외 대조군). 큐가 요구하는
+    # 순서 정규화는 uuid 기준이라 표찰 사전순과 다를 수 있어 여기서 얻어 둔다 —
+    # F7 sample id가 저장된 순서를 그대로 이어 붙이기 때문이다.
+    regressed_a, regressed_b = _ordered_feature_pair("f7-a", "f7-b")
+    same_provider_a, same_provider_b = _ordered_feature_pair("f7-c", "f7-d")
     regressed_key = await _seed_dedup_review(
         migrated_session,
-        feature_id_a="f7-a",
-        feature_id_b="f7-b",
+        feature_id_a=regressed_a,
+        feature_id_b=regressed_b,
         total_score=95.0,
     )
     await _seed_dedup_review(
         migrated_session,
-        feature_id_a="f7-c",
-        feature_id_b="f7-d",
+        feature_id_a=same_provider_a,
+        feature_id_b=same_provider_b,
         total_score=95.0,
     )
 
@@ -643,7 +693,9 @@ async def test_f7_warns_when_current_cross_provider_score_regresses_from_baselin
     assert f7.severity == "WARN"
     assert f7.count == 1
     assert len(f7.sample_ids) == 1
-    assert f7.sample_ids[0].startswith(f"{regressed_key}:f7-a:f7-b:95.00->")
+    assert f7.sample_ids[0].startswith(
+        f"{regressed_key}:{regressed_a}:{regressed_b}:95.00->"
+    )
     assert report.severity_max == "WARN"
 
 
@@ -652,22 +704,23 @@ async def test_f7_allows_current_score_within_baseline_delta(
 ) -> None:
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-e",
+        feature_id=_fixture_feature_uuid("f7-e"),
         provider="provider-a",
         name="서울특별시청",
         category="CAT.A",
     )
     await _seed_feature_with_primary_source(
         migrated_session,
-        feature_id="f7-f",
+        feature_id=_fixture_feature_uuid("f7-f"),
         provider="provider-b",
         name="서울특별시청",
         category="CAT.A",
     )
+    stable_a, stable_b = _ordered_feature_pair("f7-e", "f7-f")
     await _seed_dedup_review(
         migrated_session,
-        feature_id_a="f7-e",
-        feature_id_b="f7-f",
+        feature_id_a=stable_a,
+        feature_id_b=stable_b,
         total_score=95.0,
     )
 
@@ -684,9 +737,10 @@ async def test_f7_allows_current_score_within_baseline_delta(
 async def test_f6_detects_same_day_opening_hours_conflict(
     migrated_session: AsyncSession,
 ) -> None:
+    violation_feature_id = _fixture_feature_uuid("f6-violation")
     migrated_session.add(
         FeatureRow(
-            feature_id="f6-violation",
+            feature_id=violation_feature_id,
             kind="place",
             name="영업시간 모순 장소",
             category="EAT.RESTAURANT",
@@ -696,7 +750,7 @@ async def test_f6_detects_same_day_opening_hours_conflict(
     # T-VN-35(ADR-086): 영업시간 정본은 ``feature_places.business_hours``다.
     await seed_feature_subtype(
         migrated_session,
-        feature_id="f6-violation",
+        feature_id=violation_feature_id,
         kind="place",
         detail={
             "place_kind": "restaurant",
@@ -717,16 +771,17 @@ async def test_f6_detects_same_day_opening_hours_conflict(
     by_code = {c.code: c for c in report.cases}
     assert by_code["F6"].severity == "ERROR"
     assert by_code["F6"].count >= 1
-    assert "f6-violation" in by_code["F6"].sample_ids
+    assert violation_feature_id in by_code["F6"].sample_ids
     assert report.severity_max == "ERROR"
 
 
 async def test_f6_allows_normal_247_and_overnight_periods(
     migrated_session: AsyncSession,
 ) -> None:
+    clean_feature_id = _fixture_feature_uuid("f6-clean")
     migrated_session.add(
         FeatureRow(
-            feature_id="f6-clean",
+            feature_id=clean_feature_id,
             kind="place",
             name="정상 영업시간 장소",
             category="EAT.RESTAURANT",
@@ -735,7 +790,7 @@ async def test_f6_allows_normal_247_and_overnight_periods(
     await migrated_session.flush()
     await seed_feature_subtype(
         migrated_session,
-        feature_id="f6-clean",
+        feature_id=clean_feature_id,
         kind="place",
         detail={
             "place_kind": "restaurant",
@@ -780,8 +835,12 @@ async def test_f6_allows_normal_247_and_overnight_periods(
 async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
     migrated_session: AsyncSession,
 ) -> None:
-    active_feature = await _add_clean_place(migrated_session, "f8-active")
-    retired_feature = await _add_clean_place(migrated_session, "f8-retired")
+    active_feature = await _add_clean_place(
+        migrated_session, _fixture_feature_uuid("f8-active")
+    )
+    retired_feature = await _add_clean_place(
+        migrated_session, _fixture_feature_uuid("f8-retired")
+    )
     # T-VN-34(ADR-090): F8이 묻는 것은 "이 첨부의 주인이 아직 살아 있는가"이고,
     # 3축에서 그 술어는 ``lifecycle_state <> 'active'``다(0095 backfill이
     # ``deleted_at IS NOT NULL`` → ``retired``로 옮긴 그 축). 그래서 soft delete
@@ -795,9 +854,12 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
     await migrated_session.flush()
     await migrated_session.execute(
         text(
+            # T-VN-39 재키: 이 fixture 표는 아직 alembic head에 없어 여기서 만든다.
+            # ``feature_id``는 F8 SQL이 ``feature.features``와 직접 조인하는 열이라
+            # 정본과 같은 uuid여야 한다 — text로 두면 join 자체가 성립하지 않는다.
             "CREATE TABLE IF NOT EXISTS feature.feature_files ("
             "file_id TEXT PRIMARY KEY, "
-            "feature_id TEXT NOT NULL, "
+            "feature_id UUID NOT NULL, "
             "file_type TEXT NOT NULL DEFAULT 'image', "
             "storage_backend TEXT NOT NULL DEFAULT 's3', "
             "bucket TEXT NOT NULL, "
@@ -812,11 +874,15 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
             "INSERT INTO feature.feature_files "
             "(file_id, feature_id, file_type, storage_backend, bucket, object_key, role) "
             "VALUES "
-            "('f8-missing-object', 'f8-active', 'image', 's3', 'kor-travel-map', "
-            " 'missing-object.jpg', 'gallery'), "
-            "('f8-retired-feature', 'f8-retired', 'image', 's3', 'kor-travel-map', "
-            " 'retired-feature.jpg', 'gallery')"
-        )
+            "('f8-missing-object', CAST(:active_feature_id AS uuid), 'image', "
+            " 's3', 'kor-travel-map', 'missing-object.jpg', 'gallery'), "
+            "('f8-retired-feature', CAST(:retired_feature_id AS uuid), 'image', "
+            " 's3', 'kor-travel-map', 'retired-feature.jpg', 'gallery')"
+        ),
+        {
+            "active_feature_id": active_feature.feature_id,
+            "retired_feature_id": retired_feature.feature_id,
+        },
     )
     await migrated_session.flush()
 

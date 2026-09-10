@@ -37,7 +37,11 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_LISTING = "feature.list_manual_provider_dedup_detector_manuals(text,integer)"
+# T-VN-39 재키(309)가 reader를 `(p_after uuid, p_limit integer)`로 다시 만들었다.
+# `regprocedure` 리터럴은 **시그니처로** 함수를 찾으므로 옛 `(text,integer)`를 남기면
+# 함수를 못 찾아 42883으로 죽는다 — 아래 ACL·volatility·owner 단언이 "대상이 없다"를
+# "권한이 없다"로 오독하지 않도록 이름과 함께 시그니처도 따라간다.
+_LISTING = "feature.list_manual_provider_dedup_detector_manuals(uuid,integer)"
 
 
 def _constraint_of(error: DBAPIError) -> str | None:
@@ -58,12 +62,20 @@ def _constraint_of(error: DBAPIError) -> str | None:
 async def _listing_rows(
     engine: AsyncEngine, *, after: str | None = None, limit: int = 1000
 ) -> list[str]:
+    """reader가 돌려준 manual `feature_id`를 **text 표현으로** 모은다.
+
+    재키 뒤 `p_after`도 RETURNS TABLE의 `feature_id`도 uuid다. 바인드는 명시
+    캐스트로 uuid에 고정하고(맨몸으로 두면 `uuid = text` 42883이 난다), 돌아온
+    값은 asyncpg가 `UUID` 객체로 준다 — 호출부가 문자열과 비교하므로 여기서
+    한 번만 `str()`로 정규화한다.
+    """
+
     async with engine.connect() as connection:
         result = await connection.execute(
             text(
                 "SELECT feature_id FROM "
                 "feature.list_manual_provider_dedup_detector_manuals("
-                "CAST(:after AS text), CAST(:limit AS integer))"
+                "CAST(:after AS uuid), CAST(:limit AS integer))"
             ),
             {"after": after, "limit": limit},
         )
@@ -86,9 +98,11 @@ async def test_the_listing_and_the_procedure_agree_on_manual_origin(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         listed = await _listing_rows(dagster)
-        assert pair["manual_feature_id"] in listed
+        # `_listing_rows`가 uuid를 text 표현으로 돌려주므로 seed 쪽도 같은 표현으로
+        # 맞춘다 — `UUID('…') in ['…']`는 언제나 거짓이라 **공허하게 초록**이 된다.
+        assert str(pair["manual_feature_id"]) in listed
         # provider Feature는 manual origin이 아니므로 목록에 없어야 한다.
-        assert pair["provider_feature_id"] not in listed
+        assert str(pair["provider_feature_id"]) not in listed
 
         # 목록이 뺀 쪽을 manual 자리에 넣으면 프로시저가 그 CONSTRAINT로 거부한다.
         async with dagster.connect() as connection:
@@ -98,15 +112,18 @@ async def test_the_listing_and_the_procedure_agree_on_manual_origin(
             with pytest.raises(DBAPIError) as rejected:
                 await connection.execute(
                     text(
+                        # 재키 뒤 프로시저의 두 식별자 인자는 uuid다 — text로
+                        # 캐스트하면 함수 해석 자체가 42883으로 죽어 CONSTRAINT
+                        # 이름을 못 보게 된다.
                         "CALL feature.record_manual_provider_dedup_candidate("
-                        "CAST(:manual AS text), CAST(:provider AS text), "
+                        "CAST(:manual AS uuid), CAST(:provider AS uuid), "
                         "CAST(:scores AS jsonb), CAST(:causation AS jsonb), "
                         "NULL::uuid, NULL::text)"
                     ),
                     {
                         # 일부러 뒤집는다 — provider를 manual 자리에.
-                        "manual": pair["provider_feature_id"],
-                        "provider": pair["manual_feature_id"],
+                        "manual": str(pair["provider_feature_id"]),
+                        "provider": str(pair["manual_feature_id"]),
                         "scores": json.dumps(
                             {
                                 "name_score": 0.9,
@@ -170,7 +187,8 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
             await connection.execute(
                 text(
                     "SELECT feature_id FROM "
-                    "feature.list_manual_provider_dedup_detector_manuals(NULL, 10)"
+                    "feature.list_manual_provider_dedup_detector_manuals("
+                    "NULL::uuid, 10)"
                 )
             )
         await connection.rollback()
@@ -260,15 +278,17 @@ async def test_the_detector_records_a_candidate_and_reports_the_scope_it_scanned
                         "detector_causation, total_score "
                         "FROM ops.manual_provider_dedup_cases "
                         "WHERE case_id = ANY(CAST(:case_ids AS uuid[])) "
-                        "  AND manual_feature_id = :manual_feature_id"
+                        "  AND manual_feature_id = CAST(:manual_feature_id AS uuid)"
                     ),
                     {
                         "case_ids": list(outcome.created_case_ids),
-                        "manual_feature_id": pair["manual_feature_id"],
+                        "manual_feature_id": str(pair["manual_feature_id"]),
                     },
                 )
             ).one()
-        assert row.provider_feature_id == pair["provider_feature_id"]
+        # 재키 뒤 case의 두 식별자 컬럼은 uuid라 드라이버가 `UUID` 객체로 준다 —
+        # seed 값과 같은 표현으로 맞춰야 실제로 같은 Feature인지를 잰다.
+        assert str(row.provider_feature_id) == str(pair["provider_feature_id"])
         assert row.scorer_id == "manual-provider-v1"
         assert float(row.total_score) >= 0.65
 
@@ -339,8 +359,11 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
                 page = await manual_origin_features(session, after=after, limit=1)
             if not page:
                 break
-            seen.append(page[0].feature_id)
-            after = page[0].feature_id
+            # reader가 uuid를 돌려주므로 `CandidateFeature.feature_id`는 `UUID`
+            # 객체다. cursor로 되돌릴 때도, 중복 검사에도 같은 표현을 써야 한다 —
+            # 섞이면 `len(seen) == len(set(seen))`가 공허해진다.
+            seen.append(str(page[0].feature_id))
+            after = str(page[0].feature_id)
         assert wanted <= set(seen)
         assert len(seen) == len(set(seen))
     finally:
@@ -475,7 +498,7 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
                 await connection.execute(
                     text(
                         f"UPDATE feature.features SET {assignment} "  # noqa: S608
-                        "WHERE feature_id = :feature_id"
+                        "WHERE feature_id = CAST(:feature_id AS uuid)"
                     ),
                     {"feature_id": manual_id, **params},
                 )
@@ -487,7 +510,7 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
                         "publication_state = 'published', quality_state = 'valid', "
                         "coord = x_extension.ST_SetSRID("
                         "  x_extension.ST_MakePoint(:lon, :lat), 4326) "
-                        "WHERE feature_id = :feature_id"
+                        "WHERE feature_id = CAST(:feature_id AS uuid)"
                     ),
                     {
                         "feature_id": manual_id,
@@ -516,7 +539,11 @@ async def test_the_block_keeps_the_nearest_provider_when_it_is_capped(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
         async with AsyncSession(dagster) as session:
-            manuals = {m.feature_id: m for m in await manual_origin_features(session)}
+            # 키도 uuid의 text 표현으로 맞춘다 — `UUID` 객체를 키로 두면 아래
+            # 조회가 `KeyError`가 된다(재키 뒤 reader가 uuid를 돌려주므로).
+            manuals = {
+                str(m.feature_id): m for m in await manual_origin_features(session)
+            }
             for pair in (near, far):
                 manual = manuals[str(pair["manual_feature_id"])]
                 # 반경을 넓혀 두 provider가 모두 block에 들어오게 한 뒤 1건만 남긴다.
@@ -524,6 +551,6 @@ async def test_the_block_keeps_the_nearest_provider_when_it_is_capped(
                     session, manual=manual, radius_meters=5000.0, limit=1
                 )
                 assert len(block) == 1
-                assert block[0].feature_id == pair["provider_feature_id"]
+                assert str(block[0].feature_id) == str(pair["provider_feature_id"])
     finally:
         await dagster.dispose()

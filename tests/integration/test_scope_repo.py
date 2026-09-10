@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.dto import SourceRecord
 from kortravelmap.infra import feature_repo, scope_repo
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
@@ -20,6 +21,14 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
+
+#: 존재하지 않는 Feature를 가리키는 well-formed UUIDv7.
+#:
+#: T-VN-39 재키 뒤 resolver는 요청 id를 ``unnest(CAST(:feature_ids AS uuid[]))``로 받는다.
+#: 예전에 쓰던 ``"missing"`` 같은 문자열은 이제 "없는 id"가 아니라 22P02다 — "모르는
+#: id는 조용히 빠진다"를 재려면 **형태는 옳고 행만 없어야** 한다. 그래서 상수로 둔다:
+#: 우연히 존재할 수 있는 값을 그때그때 만들어 쓰면 이 축이 조용히 흔들린다.
+_ABSENT_FEATURE_ID: Final[str] = "00000000-0000-7000-8000-00005c09e001"
 
 _REFRESH_MEMBERSHIP_SQL = """
 SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
@@ -129,15 +138,58 @@ async def _bundle(
     )[0]
 
 
+@dataclass(frozen=True)
+class _Loaded:
+    """적재된 provider Feature 하나 — 정본 키와 그것을 낳은 원천 기록.
+
+    T-VN-39 재키 뒤 ``feature.features.feature_id``는 서버가 발급한 UUIDv7이고, DTO의
+    ``Feature.feature_id``는 provider 라이브러리가 유도한 legacy ``f_*`` **주소**일
+    뿐이다(ADR-098). scope resolver는 정본 키만 받고 정본 키만 돌려주므로 테스트도
+    bundle이 아니라 적재 결과를 들고 다닌다 — bundle을 그대로 돌려주면
+    ``bundle.feature.feature_id``가 어느 축인지 호출부에서 보이지 않는다.
+    """
+
+    feature_id: str
+    legacy_feature_id: str
+    source_record: SourceRecord
+
+
+async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -> str:
+    """provider가 유도한 legacy 주소 ``f_*``에서 정본 키(uuid의 text 표기)로 간다.
+
+    309 재키가 사본 컬럼 ``features.feature_uuid``를 영구히 없앴으므로 legacy 문자열에서
+    정본 키로 가는 유일한 입구가 alias 등록부다. ``feature_aliases.alias``는 재키 뒤에도
+    text로 남는 세 자리 중 하나라 여기서 text 비교가 맞다. provider 생성 wrapper가 그
+    행을 심으므로 provider 경로로 적재한 Feature에만 쓸 수 있다(ADR-098 결정 6) —
+    ``test_feature_identity_boundary._canonical_uuid_for_alias``와 같은 규약이다.
+    """
+
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(alias_row.feature_id AS text)"
+                    " FROM feature.feature_aliases AS alias_row"
+                    " WHERE alias_row.alias = :alias"
+                    "   AND alias_row.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one()
+    )
+
+
 async def _load(
     session: AsyncSession,
     seed: str,
     **kwargs: str,
-):
+) -> _Loaded:
     sigungu_code = kwargs.get("sigungu_code", "11560")
     bjd_code = kwargs.get("bjd_code", "1156011000")
     bundle = await _bundle(seed, **kwargs)
     await feature_repo.load_bundle(session, bundle)
+    legacy_feature_id = bundle.feature.feature_id
+    feature_id = await _canonical_feature_id(session, legacy_feature_id)
     await session.execute(
         text(
             """
@@ -145,18 +197,22 @@ async def _load(
             SET sigungu_code = :sigungu_code,
                 sido_code = :sido_code,
                 legal_dong_code = :bjd_code
-            WHERE feature_id = :feature_id
+            WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
         {
-            "feature_id": bundle.feature.feature_id,
+            "feature_id": feature_id,
             "sigungu_code": sigungu_code,
             "sido_code": bjd_code[:2],
             "bjd_code": bjd_code,
         },
     )
     await session.flush()
-    return bundle
+    return _Loaded(
+        feature_id=feature_id,
+        legacy_feature_id=legacy_feature_id,
+        source_record=bundle.source_record,
+    )
 
 
 async def test_resolve_feature_ids_filters_existing_and_preserves_order(
@@ -168,16 +224,16 @@ async def test_resolve_feature_ids_filters_existing_and_preserves_order(
     result = await scope_repo.resolve_feature_ids(
         migrated_session,
         [
-            "missing",
-            second.feature.feature_id,
-            first.feature.feature_id,
-            second.feature.feature_id,
+            _ABSENT_FEATURE_ID,
+            second.feature_id,
+            first.feature_id,
+            second.feature_id,
         ],
     )
 
     assert result.feature_ids == (
-        second.feature.feature_id,
-        first.feature.feature_id,
+        second.feature_id,
+        first.feature_id,
     )
     assert result.feature_count == 2
     assert result.sigungu_codes == ("11110", "11140")
@@ -196,10 +252,10 @@ async def test_count_feature_ids_excludes_retired_features_from_provider_counts(
             UPDATE feature.features
             SET lifecycle_state = 'retired',
                 publication_state = 'suppressed'
-            WHERE feature_id = :feature_id
+            WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
-        {"feature_id": retired.feature.feature_id},
+        {"feature_id": retired.feature_id},
     )
     await migrated_session.flush()
 
@@ -208,8 +264,8 @@ async def test_count_feature_ids_excludes_retired_features_from_provider_counts(
         {
             "type": "feature_ids",
             "feature_ids": [
-                active.feature.feature_id,
-                retired.feature.feature_id,
+                active.feature_id,
+                retired.feature_id,
             ],
         },
         preview_limit=10,
@@ -221,7 +277,7 @@ async def test_count_feature_ids_excludes_retired_features_from_provider_counts(
         dataset_key=active.source_record.dataset_key,
     )
 
-    assert result.feature_ids == (active.feature.feature_id,)
+    assert result.feature_ids == (active.feature_id,)
     assert result.feature_count == 1
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
@@ -261,7 +317,7 @@ async def test_resolve_center_radius_uses_coord_5179_distance(
         radius_km=1.0,
     )
 
-    assert result.feature_ids == (near.feature.feature_id,)
+    assert result.feature_ids == (near.feature_id,)
     assert result.sigungu_codes == ("11560",)
     assert result.matched_scope()["provider_datasets"][0]["feature_count"] == 1
 
@@ -269,7 +325,7 @@ async def test_resolve_center_radius_uses_coord_5179_distance(
 async def test_count_center_radius_uses_limited_preview_and_full_counts(
     migrated_session: AsyncSession,
 ) -> None:
-    bundles = [
+    loaded = [
         await _load(
             migrated_session,
             f"SCOPE-RADIUS-COUNT-{index}",
@@ -292,17 +348,17 @@ async def test_count_center_radius_uses_limited_preview_and_full_counts(
 
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
-        provider=bundles[0].source_record.provider,
-        dataset_key=bundles[0].source_record.dataset_key,
+        provider=loaded[0].source_record.provider,
+        dataset_key=loaded[0].source_record.dataset_key,
     )
 
     assert result.feature_count == 3
     assert len(result.feature_ids) == 1
-    assert set(result.feature_ids) <= {bundle.feature.feature_id for bundle in bundles}
+    assert set(result.feature_ids) <= {row.feature_id for row in loaded}
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
-            provider=bundles[0].source_record.provider,
-            dataset_key=bundles[0].source_record.dataset_key,
+            provider=loaded[0].source_record.provider,
+            dataset_key=loaded[0].source_record.dataset_key,
             feature_count=3,
             provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
@@ -319,7 +375,7 @@ async def test_count_center_radius_uses_limited_preview_and_full_counts(
 async def test_resolve_bbox_and_provider_dataset(
     migrated_session: AsyncSession,
 ) -> None:
-    bundle = await _load(migrated_session, "SCOPE-BBOX", sigungu_code="11560")
+    loaded = await _load(migrated_session, "SCOPE-BBOX", sigungu_code="11560")
 
     bbox = await scope_repo.resolve_bbox(
         migrated_session,
@@ -328,12 +384,12 @@ async def test_resolve_bbox_and_provider_dataset(
         max_lon=127.0,
         max_lat=37.7,
     )
-    assert bundle.feature.feature_id in bbox.feature_ids
+    assert loaded.feature_id in bbox.feature_ids
 
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
-        provider=bundle.source_record.provider,
-        dataset_key=bundle.source_record.dataset_key,
+        provider=loaded.source_record.provider,
+        dataset_key=loaded.source_record.dataset_key,
     )
     provider_scope = await scope_repo.resolve_provider_dataset(
         migrated_session,
@@ -341,11 +397,11 @@ async def test_resolve_bbox_and_provider_dataset(
         sync_scope=sync_scope,
         operation_key=operation_key,
     )
-    assert bundle.feature.feature_id in provider_scope.feature_ids
+    assert loaded.feature_id in provider_scope.feature_ids
     assert provider_scope.provider_datasets == (
         scope_repo.ProviderDatasetScope(
-            provider=bundle.source_record.provider,
-            dataset_key=bundle.source_record.dataset_key,
+            provider=loaded.source_record.provider,
+            dataset_key=loaded.source_record.dataset_key,
             feature_count=1,
             provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
@@ -357,7 +413,7 @@ async def test_resolve_bbox_and_provider_dataset(
 async def test_count_provider_dataset_uses_limited_preview_and_full_count(
     migrated_session: AsyncSession,
 ) -> None:
-    bundles = [
+    loaded = [
         await _load(
             migrated_session,
             f"SCOPE-PROVIDER-COUNT-{index}",
@@ -365,8 +421,8 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
         )
         for index in range(3)
     ]
-    provider = bundles[0].source_record.provider
-    dataset_key = bundles[0].source_record.dataset_key
+    provider = loaded[0].source_record.provider
+    dataset_key = loaded[0].source_record.dataset_key
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
         provider=provider,
@@ -386,7 +442,7 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
 
     assert result.feature_count == 3
     assert len(result.feature_ids) == 1
-    assert set(result.feature_ids) <= {bundle.feature.feature_id for bundle in bundles}
+    assert set(result.feature_ids) <= {row.feature_id for row in loaded}
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
             provider=provider,
@@ -486,18 +542,18 @@ async def test_resolve_sigungu_by_radius_uses_injected_kraddr_resolver(
     )
 
     assert seen == [{"lon": 126.978, "lat": 37.5665, "radius_km": 3.0}]
-    assert result.feature_ids == (included.feature.feature_id,)
+    assert result.feature_ids == (included.feature_id,)
     assert result.sigungu_codes == ("11140",)
 
 
 async def test_count_features_matching_scope_dispatches(
     migrated_session: AsyncSession,
 ) -> None:
-    bundle = await _load(migrated_session, "SCOPE-DISPATCH", sigungu_code="11560")
+    loaded = await _load(migrated_session, "SCOPE-DISPATCH", sigungu_code="11560")
 
     result = await scope_repo.count_features_matching_scope(
         migrated_session,
-        {"type": "feature_ids", "feature_ids": [bundle.feature.feature_id]},
+        {"type": "feature_ids", "feature_ids": [loaded.feature_id]},
     )
     assert result.feature_count == 1
 
@@ -564,7 +620,7 @@ async def test_resolve_cache_target_keys_uses_active_targets(
         target_keys=["poi-1", "missing", "poi-disabled"],
     )
 
-    assert result.feature_ids == (near.feature.feature_id,)
+    assert result.feature_ids == (near.feature_id,)
     assert result.cache_targets[0].target_id == target.target_id
     assert result.cache_target_matches[0].target_id == target.target_id
     assert result.cache_target_matches[0].relation == "within_radius"
@@ -625,12 +681,12 @@ async def test_matched_provider_datasets_exclude_deactivated_membership(
     네 갈래 projection SQL(feature_ids / center_radius / bbox / sigungu_codes)이
     같은 술어를 각자 들고 있어 한 갈래만 검증하면 나머지 셋이 무방비다.
     """
-    bundle = await _load(migrated_session, f"SCOPE-GUARD-{axis}", sigungu_code="11560")
-    feature_id = bundle.feature.feature_id
+    loaded = await _load(migrated_session, f"SCOPE-GUARD-{axis}", sigungu_code="11560")
+    feature_id = loaded.feature_id
     provider_dataset_id, _sync_scope, operation_key = await _refresh_membership(
         migrated_session,
-        provider=bundle.source_record.provider,
-        dataset_key=bundle.source_record.dataset_key,
+        provider=loaded.source_record.provider,
+        dataset_key=loaded.source_record.dataset_key,
     )
 
     before = await scope_repo.resolve_feature_ids(migrated_session, [feature_id])
@@ -690,13 +746,13 @@ async def test_provider_dataset_scope_rejects_deactivated_membership(
     axis: str,
 ) -> None:
     """direct scope는 비활성 membership을 조용히 빈 결과로 넘기지 않고 거부한다."""
-    bundle = await _load(
+    loaded = await _load(
         migrated_session, f"SCOPE-GUARD-DIRECT-{axis}", sigungu_code="11560"
     )
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
-        provider=bundle.source_record.provider,
-        dataset_key=bundle.source_record.dataset_key,
+        provider=loaded.source_record.provider,
+        dataset_key=loaded.source_record.dataset_key,
     )
     await _deactivate_membership(
         migrated_session,

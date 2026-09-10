@@ -40,18 +40,38 @@ pytestmark = [
 _PAIR_INDEX: Final = count(140)
 
 
+#: exact fallback이 해제된 claim을 걸러야 하는 세 생성 프로시저.
+#: `test_the_creation_procedures_filter_released_claims_in_their_fallback` 참조.
+_FALLBACK_PROCEDURES: Final = (
+    "approve_feature_request_with_initial_state",
+    "create_admin_manual_feature_with_initial_state",
+    "create_manual_curation_item_with_feature_command",
+)
+
+
 async def _seed_manual(engine: AsyncEngine) -> dict[str, object]:
     return await _seed_manual_provider_pair(engine, index=next(_PAIR_INDEX))
 
 
-async def _manual_uuid(engine: AsyncEngine, feature_id: str) -> str:
-    async with engine.connect() as connection:
-        return str(
-            await connection.scalar(
-                text("SELECT feature_uuid FROM feature.features WHERE feature_id = :fid"),
-                {"fid": feature_id},
-            )
-        )
+def _manual_uuid(pair: dict[str, object]) -> str:
+    """seed가 심은 manual Feature의 **정본 키**.
+
+    T-VN-39(309) 전에는 legacy `f_*`로 `feature.features`를 조회해 사본 컬럼
+    `feature_uuid`를 읽었다. 그 컬럼은 아홉 표에서 영구히 사라졌고 `feature_id` 자신이
+    uuid다(ADR-098) — 즉 legacy → 정본으로 가는 조회가 여기서는 애초에 할 일이 없다.
+    seed가 그 값을 이미 돌려주므로 그대로 꺼낸다.
+
+    `manual_feature_id`가 아니라 **이름이 축을 말하는 키**를 읽는 것이 요지다. 재키
+    뒤 두 키가 같은 값을 담게 되더라도 `manual_uuid`는 정본 키라는 뜻을 잃지 않는다.
+    """
+
+    return str(pair["manual_uuid"])
+
+
+def _provider_uuid(pair: dict[str, object]) -> str:
+    """seed가 심은 provider Feature의 정본 키 — `_manual_uuid`와 같은 이유다."""
+
+    return str(pair["provider_uuid"])
 
 
 async def _purge_command(engine: AsyncEngine, actor: str) -> int:
@@ -83,8 +103,11 @@ async def _record(engine: AsyncEngine, feature_uuid: str) -> dict[str, object]:
             (
                 await connection.execute(
                     text(
+                        # 309가 이 표의 두 열을 개명했다 — legacy 증거는
+                        # `legacy_feature_id`(text, nullable)로 남고 `feature_id`가
+                        # 정본 uuid를 받는다. 표 밖으로 나가는 이름은 그대로다.
                         "SELECT * FROM feature.manual_feature_purge_records"
-                        " WHERE feature_uuid = CAST(:uuid AS uuid)"
+                        " WHERE feature_id = CAST(:uuid AS uuid)"
                     ),
                     {"uuid": feature_uuid},
                 )
@@ -94,12 +117,15 @@ async def _record(engine: AsyncEngine, feature_uuid: str) -> dict[str, object]:
         )
 
 
-async def _feature_exists(engine: AsyncEngine, feature_id: str) -> bool:
+async def _feature_exists(engine: AsyncEngine, feature_uuid: str) -> bool:
     async with engine.connect() as connection:
         return bool(
             await connection.scalar(
-                text("SELECT count(*) FROM feature.features WHERE feature_id = :fid"),
-                {"fid": feature_id},
+                text(
+                    "SELECT count(*) FROM feature.features"
+                    " WHERE feature_id = CAST(:fid AS uuid)"
+                ),
+                {"fid": feature_uuid},
             )
         )
 
@@ -166,11 +192,14 @@ async def _purge_via_repo(
         )
 
 
-async def _direct_delete(engine: AsyncEngine, feature_id: str) -> None:
+async def _direct_delete(engine: AsyncEngine, feature_uuid: str) -> None:
     async with engine.begin() as connection:
         await connection.execute(
-            text("DELETE FROM feature.features WHERE feature_id = :fid"),
-            {"fid": feature_id},
+            text(
+                "DELETE FROM feature.features"
+                " WHERE feature_id = CAST(:fid AS uuid)"
+            ),
+            {"fid": feature_uuid},
         )
 
 
@@ -196,8 +225,7 @@ async def test_a_mistaken_creation_is_purged_and_its_rows_are_captured(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
-    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+    feature_uuid = _manual_uuid(pair)
     command_id = await _purge_command(migrated_engine, str(pair["actor"]))
 
     async with (
@@ -215,13 +243,15 @@ async def test_a_mistaken_creation_is_purged_and_its_rows_are_captured(
         )
 
     assert outcome.outcome == "purged"
-    assert not await _feature_exists(migrated_engine, feature_id)
+    assert not await _feature_exists(migrated_engine, feature_uuid)
 
     record = await _record(migrated_engine, feature_uuid)
     captured = record["captured_rows"]
     assert isinstance(captured, dict)
     assert "feature.features" in captured
-    assert captured["feature.features"][0]["feature_id"] == feature_id
+    # 담긴 core 행의 `feature_id`는 재키 뒤 정본 uuid다 — `to_jsonb`가 uuid를 canonical
+    # 소문자 표기로 적으므로 여기 비교가 그대로 성립한다.
+    assert captured["feature.features"][0]["feature_id"] == feature_uuid
     # subtype 행도 담겨야 한다 — core만 담으면 복구가 반쪽이다.
     assert "feature.feature_places" in captured, sorted(captured)
     assert record["captured_row_count"] == outcome.captured_row_count
@@ -240,7 +270,7 @@ async def test_purging_releases_the_identity_so_the_same_place_can_be_remade(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     before = await _claim(migrated_engine, feature_uuid)
     command_id = await _purge_command(migrated_engine, str(pair["actor"]))
 
@@ -278,7 +308,7 @@ async def test_keeping_the_identity_still_blocks_recreation(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     claim = await _claim(migrated_engine, feature_uuid)
     command_id = await _purge_command(migrated_engine, str(pair["actor"]))
 
@@ -320,15 +350,15 @@ async def test_a_feature_bound_by_immutable_evidence_is_refused_by_name(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
-    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+    feature_uuid = _manual_uuid(pair)
 
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
+        # 재키 뒤 이 프로시저의 두 파라미터는 uuid다 — 넘기는 것도 정본 키다.
         recorded = await _record_candidate(
             dagster,
-            manual_feature_id=feature_id,
-            provider_feature_id=str(pair["provider_feature_id"]),
+            manual_feature_id=feature_uuid,
+            provider_feature_id=_provider_uuid(pair),
         )
     finally:
         await dagster.dispose()
@@ -346,7 +376,7 @@ async def test_a_feature_bound_by_immutable_evidence_is_refused_by_name(
         )
     # 무엇이 막는지 말해야 한다 — "안 된다"만으로는 운영자가 다음 행동을 못 정한다.
     assert "manual_provider_dedup_cases" in str(blocked.value)
-    assert await _feature_exists(migrated_engine, feature_id)
+    assert await _feature_exists(migrated_engine, feature_uuid)
 
 
 async def test_deleting_without_an_authorised_purge_is_still_refused(
@@ -359,12 +389,12 @@ async def test_deleting_without_an_authorised_purge_is_still_refused(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
+    feature_uuid = _manual_uuid(pair)
 
     with pytest.raises(DBAPIError) as refused:
-        await _direct_delete(migrated_engine, feature_id)
+        await _direct_delete(migrated_engine, feature_uuid)
     assert getattr(refused.value.orig, "sqlstate", None) == "23514"
-    assert await _feature_exists(migrated_engine, feature_id)
+    assert await _feature_exists(migrated_engine, feature_uuid)
 
 
 async def test_the_claim_evidence_fields_stay_immutable(
@@ -376,7 +406,7 @@ async def test_the_claim_evidence_fields_stay_immutable(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
 
     with pytest.raises(DBAPIError) as mutated:
         await _direct_claim_update(
@@ -403,7 +433,7 @@ async def test_the_sanctioned_transition_cannot_smuggle_other_fields(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     command_id = await _purge_command(migrated_engine, str(pair["actor"]))
 
     with pytest.raises(DBAPIError) as smuggled:
@@ -423,7 +453,7 @@ async def test_purge_is_idempotent_for_the_same_feature(
     """두 번째 호출이 오류가 아니라 기존 영수증을 돌려준다."""
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
 
     async with (
         AsyncSession(migrated_engine, expire_on_commit=False) as session,
@@ -464,9 +494,7 @@ async def test_a_provider_feature_is_not_purgeable_by_this_command(
     """이 명령은 manual origin 전용이다 — provider Feature에 쓰면 안 된다."""
 
     pair = await _seed_manual(migrated_engine)
-    provider_uuid = await _manual_uuid(
-        migrated_engine, str(pair["provider_feature_id"])
-    )
+    provider_uuid = _provider_uuid(pair)
     command_id = await _purge_command(migrated_engine, str(pair["actor"]))
 
     with pytest.raises(ManualFeaturePurgeNotManual):
@@ -486,7 +514,7 @@ async def test_a_command_opened_for_another_operation_is_refused(
     """command가 이 명령의 것이 아니면 거부한다 — 감사 사슬이 끊기면 안 된다."""
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     wrong_command = await _open_command(
         migrated_engine,
         actor=str(pair["actor"]),
@@ -502,7 +530,7 @@ async def test_a_command_opened_for_another_operation_is_refused(
             actor=str(pair["actor"]),
             command_id=wrong_command,
         )
-    assert await _feature_exists(migrated_engine, str(pair["manual_feature_id"]))
+    assert await _feature_exists(migrated_engine, feature_uuid)
 
 
 async def test_an_unknown_reason_code_never_reaches_the_database(
@@ -540,8 +568,7 @@ async def test_a_request_approved_feature_is_refused_by_name_not_a_raw_fk_error(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
-    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+    feature_uuid = _manual_uuid(pair)
 
     async with migrated_engine.begin() as connection:
         command_id = await connection.scalar(
@@ -593,7 +620,7 @@ async def test_a_request_approved_feature_is_refused_by_name_not_a_raw_fk_error(
             command_id=purge_command,
         )
     assert "feature_requests" in str(blocked.value)
-    assert await _feature_exists(migrated_engine, feature_id)
+    assert await _feature_exists(migrated_engine, feature_uuid)
 
 
 async def test_set_null_referrers_are_captured_before_they_are_nulled(
@@ -606,18 +633,20 @@ async def test_set_null_referrers_are_captured_before_they_are_nulled(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
-    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+    feature_uuid = _manual_uuid(pair)
 
     async with migrated_engine.begin() as connection:
         await connection.execute(
             text(
+                # `ops.data_integrity_violations.feature_id`도 309에서 uuid가 됐다.
+                # PostgreSQL은 assignment 문맥에서 text → uuid를 암묵 변환하지 않으므로
+                # 캐스트가 여기 있어야 한다.
                 "INSERT INTO ops.data_integrity_violations ("
                 " feature_id, violation_type, severity, message"
-                ") VALUES (:feature_id, 'purge-capture-probe', 'warning',"
+                ") VALUES (CAST(:feature_id AS uuid), 'purge-capture-probe', 'warning',"
                 " 'purge capture probe')"
             ),
-            {"feature_id": feature_id},
+            {"feature_id": feature_uuid},
         )
 
     purge_command = await _purge_command(migrated_engine, str(pair["actor"]))
@@ -634,7 +663,7 @@ async def test_set_null_referrers_are_captured_before_they_are_nulled(
     captured = record["captured_rows"]
     assert isinstance(captured, dict)
     assert "ops.data_integrity_violations" in captured, sorted(captured)
-    assert captured["ops.data_integrity_violations"][0]["feature_id"] == feature_id
+    assert captured["ops.data_integrity_violations"][0]["feature_id"] == feature_uuid
 
 
 async def test_a_released_identity_is_not_returned_as_the_exact_duplicate(
@@ -652,7 +681,7 @@ async def test_a_released_identity_is_not_returned_as_the_exact_duplicate(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     claim = await _claim(migrated_engine, feature_uuid)
 
     purge_command = await _purge_command(migrated_engine, str(pair["actor"]))
@@ -688,7 +717,10 @@ async def test_a_released_identity_is_not_returned_as_the_exact_duplicate(
             )
         ).scalars().all()
     assert len(live) == 1, live
-    assert live[0] != feature_uuid
+    # `claim.feature_id`는 uuid 컬럼이라 driver가 `uuid.UUID`로 돌려준다. str과 그냥
+    # 비교하면 **항상** 다르므로 이 축이 공허해진다 — 살아남은 것이 지워진 Feature가
+    # 아니라는 것이 이 테스트의 요지이니 같은 표기로 맞춘 뒤 본다.
+    assert str(live[0]) != feature_uuid
 
     # 술어가 없으면 둘이라는 것까지 못 박는다 — 이 사실이 곧 결함의 이유다.
     async with migrated_engine.connect() as connection:
@@ -716,17 +748,31 @@ def test_the_creation_procedures_filter_released_claims_in_their_fallback() -> N
 
     위 테스트는 술어 자체를 재지만, 그 술어가 **프로시저 안에** 있는지는 재지 못한다.
     셋 중 하나만 빠져도 그 경로에서 결함이 그대로 남는다.
+
+    **읽는 파일을 306에 고정하지 않는다.** T-VN-39(309)가 세 프로시저를 전부 다시
+    썼다 — 306 사이드카를 계속 읽으면 이 게이트는 살아 있는 정의를 더 이상 보지 않고,
+    술어가 새 revision에서 빠져도 초록이 된다("게이트가 과거를 지킨다"). 그래서
+    프로시저마다 **가장 높은 revision의** 사이드카를 고른다. 다음에 누가 다시 쓰든
+    같은 이유로 여기가 저절로 따라간다.
     """
 
     import pathlib
 
     versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
-    sidecars = sorted(versions.glob("_306_*_upgraded.sql"))
-    assert len(sidecars) == 3, [p.name for p in sidecars]
-    for sidecar in sidecars:
-        body = sidecar.read_text(encoding="utf-8")
-        assert "INTO o_existing_feature_uuid" in body, sidecar.name
-        assert "AND NOT claim.identity_released" in body, sidecar.name
+    for procedure in _FALLBACK_PROCEDURES:
+        sidecars = [
+            path
+            for path in versions.glob(f"_[0-9][0-9][0-9]_{procedure}*.sql")
+            # `_original`은 downgrade가 되돌릴 **이전** 본문이다 — 살아 있는 정의가 아니다.
+            if not path.name.endswith("_original.sql")
+        ]
+        assert sidecars, procedure
+        latest = max(sidecars, key=lambda path: int(path.name.split("_")[1]))
+        body = latest.read_text(encoding="utf-8")
+        # 재키가 OUT 이름을 `o_existing_feature_uuid` → `o_existing_feature_id`로 옮겼다.
+        # 값의 출처가 아니라 이름 자체가 바뀐 자리이므로 여기 문자열도 함께 간다.
+        assert "INTO o_existing_feature_id" in body, latest.name
+        assert "AND NOT claim.identity_released" in body, latest.name
 
 
 async def test_the_capture_set_equals_what_the_catalog_says_not_a_fixed_list(
@@ -743,10 +789,12 @@ async def test_the_capture_set_equals_what_the_catalog_says_not_a_fixed_list(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_id = str(pair["manual_feature_id"])
-    feature_uuid = await _manual_uuid(migrated_engine, feature_id)
+    feature_uuid = _manual_uuid(pair)
 
     # 담길 것을 카탈로그로 **독립 계산**한다 — 프로시저와 같은 코드를 부르지 않는다.
+    # 안쪽 `format`이 짓는 술어는 `WHERE feature_id = %L`이다: 재키가 사본 컬럼
+    # `feature_uuid`를 없앴고, 프로시저가 짓는 술어와 같은 모양이어야 이 동등성 비교가
+    # 뜻을 갖는다. `%L`이 낳는 인용 리터럴은 uuid 컬럼과의 비교에서 그대로 uuid로 읽힌다.
     async with migrated_engine.connect() as connection:
         expected = set(
             (
@@ -762,7 +810,7 @@ async def test_the_capture_set_equals_what_the_catalog_says_not_a_fixed_list(
                                 format(
                                     'SELECT count(*) FROM %s AS c WHERE (%s) IN'
                                     ' (SELECT %s FROM feature.features'
-                                    '  WHERE feature_uuid = %L)',
+                                    '  WHERE feature_id = %L)',
                                     feature.qualified_relation_name(child.conrelid),
                                     (SELECT string_agg(format('c.%I', a.attname), ', '
                                                        ORDER BY o.ordinality)
@@ -819,7 +867,7 @@ async def test_a_purged_identity_can_still_be_released_later(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     claim = await _claim(migrated_engine, feature_uuid)
 
     await _purge_via_repo(
@@ -863,7 +911,7 @@ async def test_a_late_release_cannot_smuggle_a_rewritten_approval(
     """
 
     pair = await _seed_manual(migrated_engine)
-    feature_uuid = await _manual_uuid(migrated_engine, str(pair["manual_feature_id"]))
+    feature_uuid = _manual_uuid(pair)
     await _purge_via_repo(
         migrated_engine,
         feature_uuid=feature_uuid,
