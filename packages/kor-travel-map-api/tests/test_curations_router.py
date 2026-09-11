@@ -57,6 +57,16 @@ ITEM_ID = "22222222-2222-4222-8222-222222222222"
 CANDIDATE_ID = "33333333-3333-4333-8333-333333333333"
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _uuid(label: str) -> str:
     return str(uuid5(NAMESPACE_URL, label))
 
@@ -1398,7 +1408,10 @@ def test_admin_can_patch_and_archive_single_curation_item(
         {
             "collection_id": COLLECTION_ID,
             "curation_item_id": ITEM_ID,
-            "updates": {"feature_id": "feature:resolved", "address_hint": None},
+            "updates": {
+                "feature_id": _canonical("feature:resolved"),
+                "address_hint": None,
+            },
             "expected_revision": 1,
             "command_id": 1,
             "principal": "local-dev",

@@ -15,6 +15,16 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(
@@ -69,12 +79,12 @@ def test_price_card_response_maps_current_and_history(
     )
 
     async def _card(_s: Any, **kw: Any) -> PriceCard:
-        assert kw["feature_id"] == "f1"
+        assert kw["feature_id"] == _canonical("f1")
         assert kw["history_limit"] == 25
         return card
 
     async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
-        assert feature_id == "f1"
+        assert feature_id == _canonical("f1")
         return {"feature_id": "f1", "kind": "price", "status": "active"}
 
     monkeypatch.setattr(mod.price_repo, "build_price_card", _card)

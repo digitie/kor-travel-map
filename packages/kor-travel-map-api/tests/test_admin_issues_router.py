@@ -28,6 +28,16 @@ from kortravelmap.api.settings import ApiSettings
 _VIOLATION_KEY = "44444444-4444-4444-4444-444444444444"
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 class _Tx:
     async def __aenter__(self) -> None:
         return None
@@ -172,7 +182,7 @@ def test_list_issues_passes_filters_and_envelope(
         assert kwargs["violation_type"] == "address_mismatch"
         assert kwargs["provider_dataset_id"] == 42
         assert kwargs["severity"] == "error"
-        assert kwargs["feature_id"] == "feature-1"
+        assert kwargs["feature_id"] == _canonical("feature-1")
         assert kwargs["q"] == "종로"
         assert kwargs["bbox"] == (126.97, 37.57, 126.98, 37.58)
         assert kwargs["limit"] == 25

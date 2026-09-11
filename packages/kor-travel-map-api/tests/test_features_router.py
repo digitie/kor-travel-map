@@ -954,7 +954,7 @@ def test_get_area_contained_features_maps_rows(
         return area_row
 
     async def _contained(_session: Any, **kw: Any) -> list[dict[str, Any]]:
-        assert kw["feature_id"] == "area1"
+        assert kw["feature_id"] == _expected_uuid("area1")
         assert kw["limit"] == 51
         return contained_rows
 
@@ -1244,7 +1244,7 @@ def test_features_batch_bounds_known_revision_to_postgres_bigint(
     ) -> tuple[FeatureBatchItemRow, ...]:
         nonlocal called
         called = True
-        assert items == (("boundary", 9_223_372_036_854_775_807),)
+        assert items == ((_expected_uuid("boundary"), 9_223_372_036_854_775_807),)
         return (
             FeatureBatchItemRow(
                 feature_id="boundary",

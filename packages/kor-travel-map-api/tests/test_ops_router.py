@@ -33,6 +33,15 @@ _LIVE_SECRET = "ops-live-test-secret-at-least-32-bytes"
 _RAW_UVICORN_IO_TIMEOUT_SECONDS = 30.0
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
 def _live_subprotocol(
     *,
     now: datetime | None = None,
@@ -1797,7 +1806,8 @@ def test_consistency_and_issue_lists_pass_filters(
             "severity": "error",
             "violation_type": "missing_coordinate",
             "provider_dataset_id": 42,
-            "feature_id": "feature-1",
+            # 이 표면은 uuid 축이다 — 경계가 참조를 정본 키로 풀어 내려보낸다.
+            "feature_id": _canonical("feature-1"),
             "limit": 5,
             "cursor": None,
         }

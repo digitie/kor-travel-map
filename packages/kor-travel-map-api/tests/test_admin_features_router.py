@@ -488,7 +488,7 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
         return feature_id == "hidden-1"
 
     async def _weather(_session: Any, **kwargs: Any) -> WeatherCard:
-        assert kwargs["feature_id"] == "hidden-1"
+        assert kwargs["feature_id"] == _expected_uuid("hidden-1")
         return WeatherCard(
             feature_id="hidden-1",
             source_styles=[],
@@ -498,7 +498,7 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
         )
 
     async def _price(_session: Any, **kwargs: Any) -> PriceCard:
-        assert kwargs["feature_id"] == "hidden-1"
+        assert kwargs["feature_id"] == _expected_uuid("hidden-1")
         return PriceCard(
             feature_id="hidden-1",
             current=[],
@@ -782,7 +782,7 @@ def test_get_feature_revision_returns_stable_etag(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _revision(_session: Any, feature_id: str) -> int:
-        assert feature_id == "feature-1"
+        assert feature_id == _expected_uuid("feature-1")
         return 7
 
     monkeypatch.setattr(router_mod, "get_feature_row_revision", _revision)
@@ -1794,7 +1794,7 @@ def test_patch_feature_authors_typed_override_receipt(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _patch(_session: Any, **kwargs: Any) -> Any:
-        assert kwargs["feature_id"] == "feature-1"
+        assert kwargs["feature_id"] == _expected_uuid("feature-1")
         assert kwargs["payload"] == {"name": "수정된 장소"}
         assert kwargs["expected_row_revision"] == 4  # If-Match row_revision
         assert kwargs["reason_code"] == "사용자 수정"
@@ -1865,7 +1865,7 @@ def test_delete_feature_retires_with_typed_state_command(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _retire(_session: Any, feature_id: str, **kwargs: Any) -> Any:
-        assert feature_id == "feature-1"
+        assert feature_id == _expected_uuid("feature-1")
         assert kwargs["action"] == "retire"
         assert kwargs["expected_row_revision"] == 9
         assert kwargs["reason_code"] == "사용자 삭제 요청"
@@ -2009,7 +2009,7 @@ def test_feature_state_retire_is_atomic_and_returns_audited_etag(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _transition(_session: Any, feature_id: str, **kwargs: Any) -> Any:
-        assert feature_id == "feature-1"
+        assert feature_id == _expected_uuid("feature-1")
         assert kwargs == {
             "action": "retire",
             "publication_state": None,
@@ -2175,7 +2175,7 @@ def test_feature_state_reactivation_requires_current_source_evidence(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _reactivate(_session: Any, feature_id: str, **kwargs: Any) -> Any:
-        assert feature_id == "feature-1"
+        assert feature_id == _expected_uuid("feature-1")
         assert kwargs == {
             "expected_row_revision": 8,
             "reason_code": "source_revalidated",
@@ -2225,7 +2225,7 @@ def test_feature_field_override_author_uses_open_domain_command_and_etag(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _author(_session: Any, feature_id: str, **kwargs: Any) -> Any:
-        assert feature_id == "feature-1"
+        assert feature_id == _expected_uuid("feature-1")
         assert kwargs == {
             "expected_row_revision": 8,
             "reason_code": "correct_address",

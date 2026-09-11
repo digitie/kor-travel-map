@@ -30,6 +30,16 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 class _Tx:
     async def __aenter__(self) -> None:
         return None
@@ -386,7 +396,7 @@ def test_patch_merged_uses_advisory_lock(
 
     async def _merge(_session: Any, review_id: str, **kwargs: Any) -> MergeOutcome:
         assert review_id == "review-1"
-        assert kwargs["master_feature_id"] == "feature-a"
+        assert kwargs["master_feature_id"] == _canonical("feature-a")
         # T-VN-20: merged_by도 인증 principal에서만 파생한다 (body 무시).
         assert kwargs["merged_by"] == "local-dev"
         return MergeOutcome(

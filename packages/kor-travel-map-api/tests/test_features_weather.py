@@ -29,6 +29,16 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(ApiSettings()))
@@ -145,7 +155,7 @@ def test_weather_card_response_maps_metrics(
         return card
 
     async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
-        assert feature_id == "f1"
+        assert feature_id == _canonical("f1")
         return {"feature_id": "f1", "kind": "weather", "status": "active"}
 
     monkeypatch.setattr(mod.weather_repo, "build_weather_card", _current_card)
@@ -198,7 +208,7 @@ def test_weather_snapshot_requires_explicit_business_and_knowledge_time(
         )
 
     async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
-        assert feature_id == "f1"
+        assert feature_id == _canonical("f1")
         return {"feature_id": "f1", "kind": "weather", "status": "active"}
 
     monkeypatch.setattr(mod.weather_repo, "build_weather_snapshot", _snapshot_card)
@@ -233,7 +243,7 @@ def test_weather_card_404_when_feature_not_public(
     from kortravelmap.api.routers import features as mod
 
     async def _none(_s: Any, feature_id: str) -> None:
-        assert feature_id == "hidden-f"
+        assert feature_id == _canonical("hidden-f")
 
     monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _none)
     _fake_session(client)
@@ -388,11 +398,14 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
             "targets": (
                 WeatherBatchTarget(
                     target_at=earlier_at,
-                    feature_ids=("earlier-no-data",),
+                    feature_ids=(_canonical("earlier-no-data"),),
                 ),
                 WeatherBatchTarget(
                     target_at=target_at,
-                    feature_ids=("found", "found-peer", "no-data", "retired"),
+                    feature_ids=tuple(
+                        _canonical(ref)
+                        for ref in ("found", "found-peer", "no-data", "retired")
+                    ),
                 ),
             ),
             "known_at": known_at,
