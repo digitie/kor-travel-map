@@ -113,6 +113,48 @@ async def test_theme_catalog_procedure_stays_executable(
 
 
 @pytest.mark.integration
+async def test_provider_curation_seal_is_executable_by_the_loader_login(
+    migrated_session: AsyncSession,
+) -> None:
+    """적재 login이 seal 함수를 **실제로** 실행할 수 있어야 한다.
+
+    `capture_provider_curation_input`은 `client.load_feature_bundles`가
+    `curation_dataset`을 받을 때 불리고, `dagster/etl.py`는 snapshot이 아닌 **모든**
+    적재에 그것을 넘긴다. 그래서 이 EXECUTE가 없으면 그 부류 적재가 전부 선다 —
+    2026-09-11 prod에서 실제로 그렇게 멈췄다(`permission denied for function
+    current_provider_curation_input_set`).
+
+    대상 principal은 **로그인 role**이다. 그룹(`ktm_feature_runtime`)에만 물으면
+    멤버십·상속이 끊겨도 초록이라, 이 검사가 지키려는 바로 그 사실을 놓친다.
+    자매 함수(`resolve_provider_feature_id`)를 함께 재는 것은 둘이 한 쌍으로 쓰이기
+    때문이다 — claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
+    """
+    result = await migrated_session.execute(
+        text(
+            """
+            SELECT
+              has_function_privilege(
+                'ktm_feature_dagster_runtime',
+                'feature.current_provider_curation_input_set(bigint)',
+                'EXECUTE'
+              ) AS seal,
+              has_function_privilege(
+                'ktm_feature_dagster_runtime',
+                'feature.resolve_provider_feature_id(bigint,text,text)',
+                'EXECUTE'
+              ) AS claim
+            """
+        )
+    )
+    row = result.mappings().one()
+    assert row["claim"] is True, (
+        "claim 해석기가 적재 login에서 막혔다 — 이 검사의 전제가 깨졌다"
+    )
+    assert row["seal"] is True, (
+        "seal 함수가 적재 login에서 막혔다 — curation_dataset을 받는 모든 적재가 선다"
+    )
+
+
 def test_undeclared_relation_failure_names_the_sanctioned_escape() -> None:
     """fence가 배포를 막을 때 메시지가 **무엇을 하라**를 말해야 한다.
 

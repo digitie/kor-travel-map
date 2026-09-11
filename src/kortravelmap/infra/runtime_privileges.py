@@ -696,6 +696,31 @@ _SUBTYPE_READY_FUNCTION_ACL = (
 #:
 #: 첫 창의 evidence table은 schema owner 소유로 남고, manual SECURITY DEFINER owner는
 #: 좁게 부여된 INSERT 경로만 갖는다.
+#: provider 적재가 자기 transaction이 쓴 source head/link 집합의 causal seal을 읽는
+#: 통로. 함수는 `STABLE SECURITY DEFINER`이고 한 dataset의 집계 넷
+#: (entity 수·member 수·마지막 수정일·input set hash)만 돌려준다 — 행 내용은 나오지
+#: 않으며, 그 집계의 원천은 같은 transaction이 방금 쓴 데이터다.
+#:
+#: **이것은 권한 확대가 아니라 유실 복구다.** 은퇴한 `0209_tvn40_provider_curation_seal`
+#: 이 `TO ktm_feature_runtime, ktm_curation_command_owner`로 주었는데, 그 문장이
+#: baseline으로 접히면서 앞의 하나가 사라졌고 이 모델은 함수를 아예 몰랐다. 그래서
+#: 2026-09-11 prod 첫 provider 적재가 `permission denied for function
+#: current_provider_curation_input_set`로 멈췄다 — `curation_dataset`을 받는 모든
+#: 적재(= snapshot이 아닌 전부)가 이 경로를 지난다.
+#:
+#: 수여 대상은 새 role이 아니라 **같은 축의 자매 함수가 이미 갖는 그룹**이다.
+#: `resolve_provider_feature_id`(ADR-098 claim 해석기)가 `ktm_feature_runtime`에
+#: 부여돼 있고, 적재 login `ktm_feature_dagster_runtime`은 그 그룹의 멤버로
+#: (`inherit_option=true`, `set_option=false`) 그것을 실행한다. 둘은 한 쌍으로 쓰인다 —
+#: claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
+_PROVIDER_CURATION_SEAL_ACL = (
+    "REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(...) "
+    "FROM PUBLIC, ktm_feature_api_runtime",
+    "GRANT EXECUTE ON FUNCTION feature.current_provider_curation_input_set(...) "
+    "TO ktm_feature_runtime, ktm_curation_command_owner",
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -704,7 +729,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _MANUAL_FEATURE_TABLE_ACL
         + _FEATURE_REQUEST_TABLE_ACL
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
-        + _M05_SCHEMA_OWNER_DEPENDENCY_ACL,
+        + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
+        + _PROVIDER_CURATION_SEAL_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
