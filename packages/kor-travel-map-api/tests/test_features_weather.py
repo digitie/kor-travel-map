@@ -29,6 +29,16 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(ApiSettings()))
@@ -141,11 +151,11 @@ def test_weather_card_response_maps_metrics(
     )
 
     async def _current_card(_s: Any, **kw: Any) -> WeatherCard:
-        assert kw == {"feature_id": "f1"}
+        assert kw == {"feature_id": _canonical("f1")}
         return card
 
     async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
-        assert feature_id == "f1"
+        assert feature_id == _canonical("f1")
         return {"feature_id": "f1", "kind": "weather", "status": "active"}
 
     monkeypatch.setattr(mod.weather_repo, "build_weather_card", _current_card)
@@ -185,7 +195,7 @@ def test_weather_snapshot_requires_explicit_business_and_knowledge_time(
 
     async def _snapshot_card(_s: Any, **kw: Any) -> WeatherCard:
         assert kw == {
-            "feature_id": "f1",
+            "feature_id": _canonical("f1"),
             "target_at": target_at,
             "known_at": known_at,
         }
@@ -198,7 +208,7 @@ def test_weather_snapshot_requires_explicit_business_and_knowledge_time(
         )
 
     async def _public_row(_s: Any, feature_id: str) -> dict[str, Any]:
-        assert feature_id == "f1"
+        assert feature_id == _canonical("f1")
         return {"feature_id": "f1", "kind": "weather", "status": "active"}
 
     monkeypatch.setattr(mod.weather_repo, "build_weather_snapshot", _snapshot_card)
@@ -233,7 +243,7 @@ def test_weather_card_404_when_feature_not_public(
     from kortravelmap.api.routers import features as mod
 
     async def _none(_s: Any, feature_id: str) -> None:
-        assert feature_id == "hidden-f"
+        assert feature_id == _canonical("hidden-f")
 
     monkeypatch.setattr(mod.feature_repo, "get_public_feature_row", _none)
     _fake_session(client)
@@ -388,11 +398,14 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
             "targets": (
                 WeatherBatchTarget(
                     target_at=earlier_at,
-                    feature_ids=("earlier-no-data",),
+                    feature_ids=(_canonical("earlier-no-data"),),
                 ),
                 WeatherBatchTarget(
                     target_at=target_at,
-                    feature_ids=("found", "found-peer", "no-data", "retired"),
+                    feature_ids=tuple(
+                        _canonical(ref)
+                        for ref in ("found", "found-peer", "no-data", "retired")
+                    ),
                 ),
             ),
             "known_at": known_at,
@@ -402,7 +415,7 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                 target_at=earlier_at,
                 items=(
                     WeatherBatchItem(
-                        feature_id="earlier-no-data",
+                        feature_id=_canonical("earlier-no-data"),
                         state="no_data",
                         card_key=None,
                     ),
@@ -413,22 +426,22 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
                 target_at=target_at,
                 items=(
                     WeatherBatchItem(
-                        feature_id="found",
+                        feature_id=_canonical("found"),
                         state="found",
                         card_key="c2",
                     ),
                     WeatherBatchItem(
-                        feature_id="found-peer",
+                        feature_id=_canonical("found-peer"),
                         state="found",
                         card_key="c2",
                     ),
                     WeatherBatchItem(
-                        feature_id="no-data",
+                        feature_id=_canonical("no-data"),
                         state="no_data",
                         card_key=None,
                     ),
                     WeatherBatchItem(
-                        feature_id="retired",
+                        feature_id=_canonical("retired"),
                         state="retired",
                         card_key=None,
                     ),
@@ -457,15 +470,22 @@ def test_weather_batch_maps_found_no_data_retired_and_bitemporal_fields(
         "no-data": "00000000-0000-5000-8000-000000000004",
     }
 
+    # 조회도 반환도 정본 키 축이다 — 응답의 ``feature_id``만 요청 참조를
+    # 그대로 되울린다(``echo_feature_id``).
+    canonical_uuid_map = {_canonical(ref): value for ref, value in uuid_map.items()}
+
     async def _uuid_map(_session: Any, feature_ids: Any) -> dict[str, str]:
-        assert sorted(feature_ids) == [
-            "earlier-no-data",
-            "found",
-            "found-peer",
-            "no-data",
-            "retired",
-        ]
-        return uuid_map
+        assert sorted(feature_ids) == sorted(
+            _canonical(ref)
+            for ref in (
+                "earlier-no-data",
+                "found",
+                "found-peer",
+                "no-data",
+                "retired",
+            )
+        )
+        return canonical_uuid_map
 
     monkeypatch.setattr(mod.feature_identity, "get_feature_uuid_map", _uuid_map)
     _fake_session(client)

@@ -40,6 +40,16 @@ _SECURED_SETTINGS = ApiSettings(
 )
 
 
+def _canonical(feature_id: str) -> str:
+    """재키 뒤 정본 키 — 경계가 해석해 내려보내는 값이다.
+
+    결정적 mock 규약이지 저장 계약(0083 비파생 v7)이 아니다.
+    """
+    from kortravelmap.core.ids import feature_uuid_from_legacy
+
+    return str(feature_uuid_from_legacy(feature_id))
+
+
 def _client(settings: ApiSettings) -> TestClient:
     app = create_app(settings)
 
@@ -136,7 +146,7 @@ def test_feature_sources_returns_every_current_observation_for_operator(
 
     assert response.status_code == 200
     data = response.json()["data"]
-    assert data["feature_id"] == "feature:multi"
+    assert data["feature_id"] == _canonical("feature:multi")
     observations = data["observations"]
     assert {item["provider"] for item in observations} == {
         "python-mcst-api",
@@ -166,7 +176,7 @@ def test_observation_history_exposes_cursor_page_for_operator(
         return _feature_row()
 
     async def _history(_session: object, **kwargs: Any) -> ObservationHistoryPage:
-        assert kwargs["feature_id"] == "feature:multi"
+        assert kwargs["feature_id"] == _canonical("feature:multi")
         assert kwargs["source_entity_key"] == "se_mcst"
         assert kwargs["limit"] == 1
         return ObservationHistoryPage(items=(_observation(current=False),), next_cursor="next")

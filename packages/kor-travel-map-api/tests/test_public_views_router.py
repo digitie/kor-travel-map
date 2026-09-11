@@ -253,7 +253,7 @@ def test_get_public_festival_404(
     from kortravelmap.api.routers import public_views as public_views_mod
 
     async def _missing(_session: Any, *, feature_id: str) -> None:
-        assert feature_id == "missing"
+        assert feature_id == _expected_uuid("missing")
         return
 
     monkeypatch.setattr(public_views_mod.public_views_repo, "get_public_festival", _missing)
