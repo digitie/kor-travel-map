@@ -12,6 +12,20 @@
 
 ## 2026-09-11 — feature_id 재키가 착지했다
 
+- [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+  (**2026-09-11 완료**). autouse echo가 `feature_id=ref`로 재키 **이전** 세계를
+  모사해, "legacy 주소가 정본 uuid로 바뀌어 repo로 내려가는가"를 이 패키지에서
+  관측 불가로 만들고 있었다. `canonical_ref()`가 그 사상을 세우고, 함께 움직인
+  자리가 27곳이다 — fake의 kwargs, 존재 확인, 응답 본문, 그리고 weather batch가
+  snapshot을 되찾는 조회 키(단언이 아니라 fake의 **반환값**이라 안 고치면 라우터가
+  RuntimeError로 죽었다). n150 전량 **1223 passed / 0 failed**.
+
+  **조문 하나를 삭제했다.** "자체 resolver 설치가 제거된다"는 echo가 할 수 없는
+  일을 요구한다 — 전역 echo는 모든 참조를 해석 성공으로 만들어 "미해석 422" 축을
+  표현할 수 없고, 그 축을 재는 세 테스트가 재키 적대 리뷰 마지막 결함
+  (`22P02`→`DataError`→500)의 단위 커버리지다. 규약을 반대로 고정했다 — **echo는
+  해석의 값을, 각 테스트는 해석의 실패를 모사한다.**
+
 - [x] T-VN-39 — **KTM·PinVi write-fence cutover / legacy TEXT `feature_id` PK 제거**
   (**2026-09-11 완료**, #1197 `e8c66c47`). 본체는 재타입이 아니라 **멱등 앵커 교체**였다 —
   재키가 `ON CONFLICT (feature_id)`의 결정적 축을 없애므로 그 자리를

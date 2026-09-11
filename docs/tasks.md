@@ -60,38 +60,20 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 - [~] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
 
-  `T-VN-39`가 머지되어(#1197, `e8c66c47`) Map revision이 바뀌었다. prod 배포는
-  rotate → rebuild → 이미지 → repin → preflight → D1 → D2 전 사이클을 부른다.
-  **2026-09-11 — 배포는 끝났다**(prod `alembic_version=309`, `feature_id` uuid,
-  정본 generation ↔ live image 5종 불일치 0). 사이클도 D1까지 초록이고 D2만
+  배포는 2026-09-11에 끝났고 사이클도 D1까지 초록이다. D2만
   `T-VN-39-D2-FIXTURE`에 걸려 있다. 해제 조건은 acceptance §T-VN-39-DEPLOY.
 
 - [ ] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
 
-  D2 lane의 direct fixture seed가 `invalid UUID 'f_global_w_…'`로 죽는다. 하네스가
-  `make_feature_id`로 만든 **legacy 주소**를 `CAST(:feature_ids AS uuid[])` 자리에
-  그대로 넣는다 — 질의는 uuid 축으로 옮겼는데 **값의 출처는 안 옮겼다**(재키가
-  고치려던 바로 그 부류). 이 seed는 core 프로시저를 직접 부르므로 alias도 생기지
-  않아, 그 주소는 재키 뒤 DB 키가 아니다. 해제 조건은 acceptance
+  D2 direct seed가 `invalid UUID 'f_global_w_…'`로 죽는다. 질의는 uuid 축으로
+  옮겼는데 값의 출처는 `make_feature_id`에 남았다. 해제 조건은 acceptance
   §T-VN-39-D2-FIXTURE.
-
-- [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
-
-  autouse patch가 모든 feature 참조를 `feature_id=ref`로 "해석 성공" 처리해, uuid
-  해석·미해석 422 두 축을 이 패키지에서 관측 불가로 만든다. 참조 문자열을 그대로
-  기대하는 테스트가 함께 움직인다. **2026-09-11 닫힘** — n150 전량 1223 passed,
-  함께 옮긴 자리는 27곳. 조문 3(자체 resolver 제거)은 틀린 요구라 삭제했다:
-  전역 echo는 모든 참조를 해석 성공으로 만들어 "미해석 422" 축을 표현할 수
-  없다. 해제 조건은 acceptance §T-VN-39-ECHO.
 
 - [~] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
 
-  datagokr·krheritage의 `iter_pages`가 `total` 권위를 잃고 짧은 페이지 휴리스틱만
-  남겨, 행 하나가 걸러지면 목록이 조용히 절단됐다. **2026-09-11 두 리포에서 고쳤다** —
-  datagokr `0f1f236`(`fix/pagination-total-guard`), krheritage
-  `b86a094`(`fix/search-pagination-total-guard`). krheritage는 총계 가드가 아예 없어
-  행이 아니라 **페이지 수**로 세도록 했다(걸러진 행이 있어도 정확히 끝난다). 회귀
-  테스트 8건 + 기존 82건 통과. 남은 것은 두 리포의 머지와 Map 핀 상향(항목 4)이다.
+  두 리포의 `iter_pages`가 짧은 페이지 휴리스틱만 남겨 걸러진 행 하나가 목록을
+  조용히 끊었다. 2026-09-11 upstream에서 고쳤고, 남은 것은 Map 핀 상향이다.
+  해제 조건은 acceptance §T-VN-39-PROVIDER-PAGINATION.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 
