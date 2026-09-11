@@ -1819,6 +1819,18 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
    승인되지 않아 403(`SERVICE_KEY_IS_NOT_REGISTERED_ERROR`)이고, 신청을 기다리지 않는다.
    이 조문은 **다른 asset 하나**로 충족한다 — 같은 키로 관광지·박물관미술관·주차장·
    문화축제 넷이 이미 200을 받는다(2026-09-11 전수 실측).
+
+   **2026-09-11 — 네 겹을 지나 다섯째에서 멈췄다.** 성격이 전부 달랐다: 특화거리는
+   상류 미승인(위 판정), krex는 `KREX_GO_API_KEY` 미주입(주입 완료), 박물관은 seal
+   ACL 유실(`T-VN-CURATION-SEAL-ACL` — 수정·배포·실측 완료), 그다음은 내 호출 방식
+   (`asset materialize`는 operation key 태그를 싣지 않는다; 정식 경로는
+   `dagster job launch`이고 key는 job 이름이다). 정식 경로로 제출한 run은
+   `/opt/dagster/dagster_home/storage` 쓰기 불가로 실패했다 —
+   **`T-VN-DAGSTER-STORAGE`**가 그 축을 소유하며, 이 조문은 그것에 막혀 있다.
+
+   ACL 수정이 실물로 들었다는 것은 별도로 확인했다 — 배포 후 적재 login은 seal을
+   실행할 수 있고(`true`) API login은 못 한다(`false`). 자매 claim 해석기는 API도
+   `true`이므로 그 대비가 좁힌 grant가 경계를 지켰음을 보인다.
 5. 배포 뒤 정본 generation(`/var/lib/kor-travel-docker-manager-public/`
    `pinned-runtime-generation-v6.json`)의 `map_source_revision`과 네 image id가
    **실제로 돌고 있는 컨테이너와 같다.** 이 검사를 여기 두는 이유는 2026-09-11에
@@ -1836,6 +1848,52 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 
 **주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
 해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
+
+## T-VN-DAGSTER-STORAGE
+
+```markdown
+- [ ] T-VN-DAGSTER-STORAGE — **prod Dagster run이 compute-log storage에 쓸 수 없다**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. prod에서 provider asset job 하나가 `SUCCESS`로 끝난다 — run launcher에 제출한
+   run이 step 실패 없이 완주한다.
+2. 그 성질이 배포마다 유지된다. storage 부착이 pinned runtime generation의 함수라면,
+   generation이 바뀔 때 함께 따라오는 것이 증적으로 보인다.
+3. 이 축을 재는 검사가 있다 — 지금은 "컨테이너가 healthy"만 보고 "run이 완주한다"는
+   아무도 보지 않는다. healthy와 실행 가능은 다른 사실이다.
+
+**무엇이 관측됐나 — 2026-09-11.**
+
+`T-VN-39-DEPLOY` 조문 4(provider 적재 한 바퀴)를 닫으려 정식 경로
+(`dagster job launch` → run launcher 제출, operation key = job 이름)로 제출한 run이
+step 실패로 끝났다:
+
+    PermissionError: [Errno 13] Permission denied: '/opt/dagster/dagster_home/storage'
+    Exception initializing logger write stream: PermissionError ...
+
+실물:
+
+| | |
+|---|---|
+| 컨테이너 사용자 | `uid=999(appuser)` |
+| `/opt/dagster/dagster_home` | `dr-xr-xr-x root root` — appuser가 쓸 수 없다 |
+| `.../storage` | **없다** |
+| 마운트 | `dagster-storage-permit` (읽기 전용, generation `461cafcc…` 산출물) |
+
+prod Dagster storage는 별도 관리 컴포넌트다 — `/usr/local/bin/ktm-dagster-storage`가
+`verify-identity`와 sealed launch contract를 갖고, entrypoint가 `storage_input_preflight`
+로 argv를 대조한다. 즉 storage 부착은 pinned runtime이 통제하는 축이고, 현
+generation에서 그것이 붙지 않았다.
+
+**재키가 만든 것이 아니다.** 이 prod의 Dagster run 이력은 전부 실패다(조회 시점
+8건 중 7 FAILURE + 1 진행). `feature.features`가 0행이었던 것과 앞서 찾은 seal ACL
+유실이 같은 사실의 다른 면이다 — **이 prod에서 provider 적재가 한 번도 완주한 적이
+없다.** 그래서 이 조건도 그때부터 있었고 아무도 관측하지 않았다.
+
+**조문 3이 그 구멍을 겨냥한다.** 배포 사후점검은 컨테이너 healthy와 정본/실물 image
+일치를 보지만, "run이 완주한다"는 보지 않는다. 그 둘은 다른 사실이다.
 
 ## T-VN-D2-RESIDUE
 
