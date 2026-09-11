@@ -263,16 +263,23 @@ def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
     assert fixture_name == f"E2E TVN36 state fixture {run_id}"
     assert reason_prefix == f"tvn36-live-{run_id}"
 
-    # id는 서버가 발급하고 그 자연키는 **서버 발급 uuid**다. 그래서 helper는
-    # 재계산하지 않고 관측된 행의 uuid로 **재현**한다. 정본은
-    # `admin_feature_repo.create_admin_manual_feature_with_initial_state`이고,
-    # 아래 raw는 그 호출과 같은 성분으로 손으로 짠 것이다 — 규칙이 갈라지면 red다.
-    feature_uuid = "01a07367-27ce-71af-89e5-d28c5b537109"
-    feature_id = _FIXTURE_MODULE._admin_fixture_feature_id(  # noqa: SLF001
-        feature_uuid, "place"
+    # 309 뒤 서버는 manual Feature에 legacy id를 만들지 않는다 — 정본 키는 발급된
+    # UUIDv7 하나뿐이다. 그래서 대조의 대상이 "재현된 f_*"에서 "canonical UUIDv7"로
+    # 옮겨졌고, helper도 그렇게 바뀌어야 한다.
+    assert not hasattr(_FIXTURE_MODULE, "_admin_fixture_feature_id"), (
+        "legacy id를 재현하는 helper가 되살아났다 — 309 뒤 그 규칙은 없다"
     )
-    raw = f"global|place|manual_feature_v1|user_request|manual::{feature_uuid}|"
-    assert feature_id == f"f_global_p_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
+    assert (
+        _FIXTURE_MODULE._canonical_uuid7(  # noqa: SLF001
+            "01a07367-27ce-71af-89e5-d28c5b537109"
+        )
+        == "01a07367-27ce-71af-89e5-d28c5b537109"
+    )
+    # v7이 아니면 거부한다 — 서버 불변식과 같은 축이다.
+    assert _FIXTURE_MODULE._canonical_uuid7(  # noqa: SLF001
+        "0198d9f1-7a31-5e52-8ea8-cb2548d3a891"
+    ) is None
+    assert _FIXTURE_MODULE._canonical_uuid7("f_global_p_deadbeef") is None  # noqa: SLF001
     # 구 규칙(요청 category + name/좌표 자연키)은 다른 값을 낸다. M01 뒤로 그 대조는
     # 항상 실패했고, `api-audit`이 한 번도 실행되지 않아 아무도 몰랐다.
     stale = f"global|place|01070300|user_request|{fixture_name}:127.500000,36.500000|"

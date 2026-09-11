@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import uuid
 from collections import Counter
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -26,7 +27,6 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kortravelmap.core.ids import (
-    make_feature_id,
     make_payload_hash,
     make_source_record_key,
 )
@@ -37,6 +37,10 @@ from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
+from kortravelmap.infra.manual_feature_purge_repo import (
+    PURGE_OPERATION,
+    purge_manual_feature,
+)
 from kortravelmap.infra.provider_refresh_policy_repo import (
     get_provider_refresh_policy,
     upsert_provider_refresh_policy,
@@ -268,34 +272,29 @@ def _admin_reason_prefix(run_id: str) -> str:
     return f"tvn36-live-{run_id}"
 
 
-#: 서버가 manual Feature의 ``feature_id``를 만들 때 쓰는 category 리터럴.
-#: 요청 body의 category(``_ADMIN_FIXTURE_CATEGORY``)와 **다른 것**이다 — 전자는 id
-#: 유도의 성분이고 후자는 행의 업무 category다.
-_MANUAL_FEATURE_ID_CATEGORY: Final[str] = "manual_feature_v1"
+def _canonical_uuid7(value: object) -> str | None:
+    """서버가 발급한 정본 키인지 — canonical UUIDv7이면 정규 표기, 아니면 ``None``.
 
+    M01~309 사이에는 이 자리가 legacy ``f_*``의 **재현**이었다. 서버가
+    ``manual::{feature_uuid}``로 id를 유도했고, 그 규칙이 바뀌면 대조가 실패하는
+    것이 목적이었다.
 
-def _admin_fixture_feature_id(feature_uuid: str, kind: str) -> str:
-    """관측된 행의 ``feature_uuid``로 서버 규칙을 **재현**한다.
-
-    M01 이전에는 ``{name}:{lon:.6f},{lat:.6f}`` 자연키로 **재계산**했다. M01 뒤로
-    서버는 ``manual::{feature_uuid}``를 쓰고 그 uuid는 서버가 발급하는 랜덤
-    UUIDv7이라 run_id만으로는 원리적으로 재계산할 수 없다 — 그래서 그 대조는 항상
-    실패했고, `api-audit`/`purge` 경로가 한 번도 실행되지 않아 아무도 몰랐다
-    (2026-09-06 적대 리뷰).
-
-    재계산이 아니라 재현이므로 랜덤 uuid에도 성립하고, router 규칙이 바뀌면
-    여전히 실패한다 — 그것이 이 대조의 목적이다. 정본은
-    `admin_feature_repo.create_admin_manual_feature_with_initial_state`다.
+    309 뒤 그 규칙 자체가 없다.
+    ``admin_feature_repo.create_admin_manual_feature_with_initial_state``가 그렇게
+    적고 있다 — "legacy ``f_*``를 계산해도 실을 곳이 없다 … 정본 키는 UUIDv7
+    하나뿐이다". 그래서 대조의 **대상**을 옮긴다: 서버가 지켜야 할 규칙은 이제
+    "발급 키가 canonical UUIDv7이다"이고, 그것은 같은 repo의
+    ``_canonical_uuid7_or_invariant``가 강제하는 바로 그 불변식이다. 규칙이 바뀌면
+    여기서 여전히 실패한다.
     """
 
-    return make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category=_MANUAL_FEATURE_ID_CATEGORY,
-        source_type="user_request",
-        source_natural_key=f"manual::{feature_uuid}",
-        content_hash=None,
-    )
+    try:
+        parsed = uuid.UUID(str(value))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if parsed.version != 7:
+        return None
+    return str(parsed)
 
 
 async def _counts(
@@ -1115,7 +1114,10 @@ class _ApiOwnedInspection(NamedTuple):
 
 _API_OWNED_FEATURE_SQL: Final[str] = """
 SELECT
-  feature_id, CAST(feature_uuid AS text) AS feature_uuid,
+  -- 309가 shadow `feature_uuid` 컬럼을 지웠다. 바깥 이름(`AS feature_uuid`)은
+  -- 계약이라 그대로 두고 **값의 출처만** 정본 키로 옮긴다 — 재키 뒤 두 표기는
+  -- 같은 `features.feature_id`에서 나온다.
+  feature_id, CAST(feature_id AS text) AS feature_uuid,
   kind, name, category,
   lifecycle_state, publication_state, quality_state,
   marker_icon, marker_color, coord_precision_digits,
@@ -1131,7 +1133,10 @@ FOR UPDATE
 # Feature 행을 FOR UPDATE로 잡은 뒤 읽으면 같은 transaction 안에서 일관된다.
 _API_OWNED_TRANSITION_SQL: Final[str] = """
 SELECT
-  feature_id, CAST(feature_uuid AS text) AS feature_uuid,
+  -- 309가 shadow `feature_uuid` 컬럼을 지웠다. 바깥 이름(`AS feature_uuid`)은
+  -- 계약이라 그대로 두고 **값의 출처만** 정본 키로 옮긴다 — 재키 뒤 두 표기는
+  -- 같은 `features.feature_id`에서 나온다.
+  feature_id, CAST(feature_id AS text) AS feature_uuid,
   from_lifecycle_state, from_publication_state, from_quality_state,
   to_lifecycle_state, to_publication_state, to_quality_state,
   transition_kind, reason_code, principal, causation_ref,
@@ -1209,11 +1214,11 @@ async def _inspect_api_owned(
     for row in rows:
         feature_id = str(row["feature_id"])
         # id는 행 자신의 uuid로 재현한다 — 서버 발급 uuid는 밖에서 재계산할 수 없다.
-        expected_feature_id = _admin_fixture_feature_id(
-            str(row["feature_uuid"]), str(row["kind"])
-        )
+        canonical = _canonical_uuid7(feature_id)
         if (
-            feature_id != expected_feature_id
+            canonical is None
+            # 바깥 두 표기는 309 뒤 같은 값이다.
+            or canonical != str(row["feature_uuid"])
             or row["kind"] != _ADMIN_FIXTURE_KIND
             or row["category"] != _ADMIN_FIXTURE_CATEGORY
             or row["marker_icon"] != _ADMIN_FIXTURE_MARKER_ICON
@@ -1418,15 +1423,36 @@ async def _purge_api_owned(
     # ``ops.feature_overrides``/``feature.feature_aliases``/subtype은 모두
     # ON DELETE CASCADE라 Feature 삭제 한 번으로 사라진다. 0104 이전에 필요했던
     # change request 선삭제 단계는 그 표가 없어져 사라졌다.
-    await session.execute(
-        text(
-            """
-            DELETE FROM feature.features
-            WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
-            """
-        ),
-        {"feature_ids": list(inspection.feature_ids)},
+    #
+    # 다만 **삭제 자체를 직접 할 수는 없다.** 306이 raw DELETE를 봉인했고
+    # (``manual Feature delete needs an authorised purge command``), 유일한 경로는
+    # 감사되는 ``feature.purge_manual_feature``다. 그 규율은 옳다 — 되돌릴 수 없는
+    # 삭제에 actor와 command를 남긴다 — 그래서 우회하지 않고 그 경로를 쓴다.
+    command_id = int(
+        await session.scalar(
+            text(
+                """
+                INSERT INTO ops.domain_commands (
+                  actor, operation, idempotency_key, request_fingerprint
+                ) VALUES (
+                  :actor, :operation, x_extension.gen_random_uuid(), repeat('d', 64)
+                ) RETURNING command_id
+                """
+            ),
+            {"actor": _ADMIN_OPERATOR, "operation": PURGE_OPERATION},
+        )
     )
+    for feature_id in inspection.feature_ids:
+        # ``release_identity``에 기본값이 없다 — 이 lane은 같은 이름/좌표를 다음
+        # run이 다시 쓸 수 있어야 하므로 identity를 놓아 준다.
+        await purge_manual_feature(
+            session,
+            feature_uuid=feature_id,
+            reason_code="mistaken_creation",
+            release_identity=True,
+            actor=_ADMIN_OPERATOR,
+            command_id=command_id,
+        )
     remaining = (
         await session.execute(
             text(
