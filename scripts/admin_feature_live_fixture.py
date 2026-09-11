@@ -443,7 +443,7 @@ async def _assert_owned_or_absent(
 async def _assert_owned_source_links(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     present: set[str],
     *,
     lock: bool = False,
@@ -540,7 +540,7 @@ def _quote_identifier(value: str) -> str:
 
 async def _foreign_key_reference_counts(
     session: AsyncSession,
-    feature_ids: tuple[str, ...],
+    feature_ids: tuple[str | None, ...],
 ) -> dict[str, int]:
     constraints = (
         await session.execute(
@@ -619,7 +619,7 @@ async def _foreign_key_reference_counts(
 async def _assert_owned_values(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     present: set[str],
     *,
     lock: bool = False,
