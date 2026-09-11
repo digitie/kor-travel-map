@@ -1960,7 +1960,7 @@ fixture의 natural key는 `{run_id}:{kind}`이고 dataset은 `_ensure_dataset`�
 ## T-VN-39-PROVIDER-PAGINATION
 
 ```markdown
-- [ ] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
+- [x] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다** (2026-09-11 완료)
 ```
 
 **무엇이 참이면 닫히는가.**
@@ -1986,8 +1986,9 @@ Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출�
 엄밀히 낫다 — 행을 세면 걸러진 행 때문에 `seen`이 `total`에 영원히 못 미쳐 tail에서
 매번 여분 요청이 붙지만, 페이지를 세면 걸러져도 정확히 끝난다. datagokr은 이미
 `total_pages` 가드가 있어 그것을 살리고 짧은 페이지 규칙만 `total`로 조건화했다.
-회귀 테스트 8건(두 리포 4건씩) + 기존 82건 통과. **남은 것은 4뿐이다** — 두 PR 머지
-후 Map 핀 상향.
+회귀 테스트 8건(두 리포 4건씩) + 기존 82건 통과. **4도 닫혔다** — 두 PR이 머지됐고
+Map 핀 3자리를 올렸다(#1204 `7b2e9ecf`). 표면 manifest는 `pinned_sha` 둘만 바뀌어
+공개 멤버 집합이 불변임이 함께 증명된다.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
