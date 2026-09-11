@@ -128,6 +128,15 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     멤버십·상속이 끊겨도 초록이라, 이 검사가 지키려는 바로 그 사실을 놓친다.
     자매 함수(`resolve_provider_feature_id`)를 함께 재는 것은 둘이 한 쌍으로 쓰이기
     때문이다 — claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
+
+    **이 검사가 보지 못하는 축이 하나 있다.** 여기서는 migrator session이 카탈로그
+    술어를 묻는 것이므로, 적재 login이 **실제로 접속해** ADR-090 기동 preflight
+    (`assert_runtime_db_privilege_boundary`)를 통과하는지는 관측하지 않는다. 그 축은
+    `test_tvn34_runtime_privilege_preflight.py`의
+    `test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight`가
+    소유한다 — SECURITY DEFINER 함수에 EXECUTE를 주면 `infra/db.py`의 per-login
+    허용목록에도 등록해야 하고, 빠뜨리면 그 테스트가 빨개진다(그리고 배포하면 모든
+    Dagster 프로세스가 기동에서 죽는다).
     """
     result = await migrated_session.execute(
         text(
