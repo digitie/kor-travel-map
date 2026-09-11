@@ -1536,14 +1536,16 @@ class _FakeKhoaClient:
         self.calls: list[str] = []
         _FakeKhoaClient.instances.append(self)
 
-    def oceans_beach_info(
+    # khoa 6.x(provider PR#13)는 sync 진입점을 전부 없앴다. fake가 옛 표면을 들고
+    # 있으면 실제 파손을 못 잡는다 — 실제로 그랬다.
+    async def aoceans_beach_info(
         self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
     ) -> _FakeBeachPage:
         self.calls.append(sido_nm)
         # 단일 페이지(short)만 반환 → 페이지네이션 stop.
         return _FakeBeachPage(list(type(self).per_sido) if page_no == 1 else [])
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1559,15 +1561,15 @@ def _install_fake_khoa(
     return _FakeKhoaClient
 
 
-def test_khoa_beaches_raises_when_credential_missing() -> None:
+async def test_khoa_beaches_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_khoa_beaches(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_khoa_beaches_fetch_iterates_sido_and_closes(
+async def test_khoa_beaches_fetch_iterates_sido_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_khoa(
@@ -1575,7 +1577,7 @@ def test_khoa_beaches_fetch_iterates_sido_and_closes(
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_khoa_beaches(settings))
+    records = [record async for record in fetch_khoa_beaches(settings)]
 
     # 2 sido × 2 record = 4.
     assert len(records) == 4
@@ -1593,14 +1595,14 @@ class _FakeKhoaNetworkError(Exception):
 class _FlakyKhoaClient(_FakeKhoaClient):
     fail_first = True
 
-    def oceans_beach_info(
+    async def aoceans_beach_info(
         self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **kw: Any
     ) -> _FakeBeachPage:
         if type(self).fail_first:
             type(self).fail_first = False
             self.calls.append(sido_nm)
             raise _FakeKhoaNetworkError("transient")
-        return super().oceans_beach_info(
+        return await super().aoceans_beach_info(
             sido_nm,
             page_no=page_no,
             num_of_rows=num_of_rows,
@@ -1608,7 +1610,7 @@ class _FlakyKhoaClient(_FakeKhoaClient):
         )
 
 
-def test_khoa_beaches_retries_transient_page_without_record_loss(
+async def test_khoa_beaches_retries_transient_page_without_record_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeKhoaClient.instances = []
@@ -1619,10 +1621,20 @@ def test_khoa_beaches_retries_transient_page_without_record_loss(
     module.__dict__["OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES"] = ("부산광역시",)
     monkeypatch.setitem(sys.modules, "khoa", module)
     delays: list[float] = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+
+    async def _instant_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    # async 경계의 backoff는 `asyncio.sleep`으로 간다 — `time.sleep`을 막아도
+    # 아무 일도 일어나지 않는다. `test_kma_weather`가 쓰는 것과 같은 관용구다.
+    monkeypatch.setattr(
+        provider_fetchers.upstream_retry,
+        "asyncio",
+        SimpleNamespace(sleep=_instant_sleep),
+    )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
-    records = list(fetch_khoa_beaches(settings))
+    records = [record async for record in fetch_khoa_beaches(settings)]
 
     assert len(records) == 2
     client = _FakeKhoaClient.instances[0]

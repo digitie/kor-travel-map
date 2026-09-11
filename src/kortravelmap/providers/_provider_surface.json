@@ -678,10 +678,49 @@
     },
     "python-datagokr-api": {
       "classes": {
+        "datagokr.catalog.ApiCatalogEntry": {
+          "external_bases": [],
+          "members": [
+            "bound_args",
+            "data_source",
+            "default_num_of_rows",
+            "description_lines",
+            "endpoint",
+            "key",
+            "label",
+            "list_method",
+            "num_rows_kwarg",
+            "num_rows_wire_param",
+            "optional_params",
+            "page_no_wire_param",
+            "required_params",
+            "response_type_choices",
+            "response_type_param",
+            "service_attr",
+            "service_key_env_names",
+            "service_key_param",
+            "service_key_url",
+            "supports_response_type",
+            "title"
+          ]
+        },
+        "datagokr.catalog.ParamSpec": {
+          "external_bases": [],
+          "members": [
+            "choices",
+            "default",
+            "help",
+            "kind",
+            "label",
+            "name",
+            "required"
+          ]
+        },
         "datagokr.client.DataGoKrClient": {
           "external_bases": [],
           "members": [
             "close",
+            "debug_fetch",
             "save_to_local",
             "save_to_rustfs"
           ]
@@ -698,6 +737,20 @@
             "rustfs_region_name",
             "rustfs_secret_access_key",
             "timeout"
+          ]
+        },
+        "datagokr.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace"
           ]
         },
         "datagokr.exceptions.ApiErrorResponse": {
@@ -726,6 +779,20 @@
         "datagokr.exceptions.TransportError": {
           "external_bases": [
             "Exception"
+          ],
+          "members": []
+        },
+        "datagokr.exceptions.UnknownDatasetError": {
+          "external_bases": [
+            "Exception",
+            "KeyError"
+          ],
+          "members": []
+        },
+        "datagokr.exceptions.ValidationError": {
+          "external_bases": [
+            "Exception",
+            "ValueError"
           ],
           "members": []
         },
@@ -1024,13 +1091,27 @@
           "members": [
             "iter_all",
             "iter_pages",
-            "list"
+            "list",
+            "num_rows_param",
+            "page_no_param"
           ]
         },
         "datagokr.services.openapi.KwaterSluiceService": {
           "external_bases": [],
           "members": [
-            "hour_list"
+            "day_list",
+            "hour_list",
+            "ten_minute_list"
+          ]
+        },
+        "datagokr.services.pagination._PageLike": {
+          "external_bases": [
+            "Protocol"
+          ],
+          "members": [
+            "items",
+            "num_of_rows",
+            "total_pages"
           ]
         },
         "datagokr.services.standard.CulturalFestivalService": {
@@ -1111,7 +1192,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "48e458b1f06656a94474f9b08e87cefc3c9c9526"
+      "pinned_sha": "b8f1254871b28e9fbb10bfdd79a89580b8c0d76d"
     },
     "python-khoa-api": {
       "classes": {
@@ -1126,10 +1207,7 @@
           "members": [
             "aclose",
             "aget",
-            "aget_url",
-            "close",
-            "get",
-            "get_url"
+            "aget_url"
           ]
         },
         "khoa._http.ResponseLike": {
@@ -1204,27 +1282,9 @@
             "aseasickness_index",
             "askin_scuba_index",
             "asurfing_index",
-            "beach_index",
-            "beach_search",
-            "close",
-            "debug_fetch",
-            "fetch",
-            "first",
-            "fishing_index",
             "from_env",
-            "items",
-            "iter_oceans_beach_info_pages",
-            "iter_pages",
-            "mudflat_index",
-            "oceans_beach_info",
-            "roms",
-            "sea_split_index",
-            "sea_trip_index",
-            "seasickness_index",
             "service",
-            "services",
-            "skin_scuba_index",
-            "surfing_index"
+            "services"
           ]
         },
         "khoa.debug.DebugRun": {
@@ -1652,7 +1712,7 @@
         }
       },
       "package": "khoa",
-      "pinned_sha": "bc6fe221ceada92abf808c91dec6dafc90d5f225"
+      "pinned_sha": "3314f683121ee5b3caee83e361c7ad5a1d5d5cd4"
     },
     "python-kma-api": {
       "classes": {
@@ -2862,7 +2922,7 @@
         }
       },
       "package": "kma",
-      "pinned_sha": "a75d1e15ef1965f4d874f23b9e8f5610f6e0ad93"
+      "pinned_sha": "1f8d8df137db2c57e0fea99b730bf4976c8fbfe0"
     },
     "python-knps-api": {
       "classes": {
@@ -3095,7 +3155,8 @@
             "kind",
             "members",
             "model_config",
-            "size_bytes"
+            "size_bytes",
+            "truncated"
           ]
         },
         "knps.models.FileDataset": {
@@ -3157,7 +3218,8 @@
             "geometry_type",
             "member_name",
             "model_config",
-            "source_crs"
+            "source_crs",
+            "truncated"
           ]
         },
         "knps.models.Geometry": {
@@ -3223,7 +3285,7 @@
         }
       },
       "package": "knps",
-      "pinned_sha": "43f2917ee3727e8d615aa85ab6ae35dcf3e75fd3"
+      "pinned_sha": "afc8da5db7be33549b5daa7b0a96e5ad179063d7"
     },
     "python-krairport-api": {
       "classes": {
@@ -4605,6 +4667,18 @@
             "text"
           ]
         },
+        "krforest._mountain_stations.MountainStationRef": {
+          "external_bases": [
+            "NamedTuple"
+          ],
+          "members": [
+            "elevation",
+            "latitude",
+            "longitude",
+            "mountain_name",
+            "region_name"
+          ]
+        },
         "krforest._ratelimit.AsyncTokenBucket": {
           "external_bases": [],
           "members": [
@@ -4640,6 +4714,8 @@
         "krforest.client.SafetyNamespace": {
           "external_bases": [],
           "members": [
+            "dust_measurements",
+            "dust_stations",
             "erosion_control_dams",
             "landslide_forecast_issues",
             "landslide_predictions",
@@ -4665,6 +4741,7 @@
             "kid_forest_centers",
             "mountain_stories",
             "mountain_weather",
+            "mountain_weather_stations",
             "recreation_forest_arboretums",
             "recreation_forest_reservations",
             "recreation_forests",
@@ -4769,6 +4846,7 @@
             "required_params",
             "response_format",
             "response_type_param",
+            "response_type_value",
             "service",
             "service_key_param",
             "title",
@@ -4810,6 +4888,7 @@
             "required_params",
             "response_format",
             "response_type_param",
+            "response_type_value",
             "service",
             "service_key_account_url",
             "service_key_param",
@@ -4846,6 +4925,49 @@
             "provider",
             "source_path",
             "title"
+          ]
+        },
+        "krforest.models.ForestDustMeasurement": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "avoc_pm01",
+            "avoc_pm10",
+            "avoc_pm25",
+            "humidity",
+            "model_config",
+            "observed_at",
+            "pm01",
+            "pm10",
+            "pm25",
+            "raw",
+            "station_code",
+            "temperature",
+            "wind_direction",
+            "wind_speed"
+          ]
+        },
+        "krforest.models.ForestDustStation": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "address",
+            "description",
+            "elevation",
+            "equipment_maker",
+            "equipment_model",
+            "equipment_name",
+            "equipment_reference_number",
+            "installed_at",
+            "latitude",
+            "longitude",
+            "model_config",
+            "raw",
+            "station_code",
+            "station_group_code",
+            "station_name"
           ]
         },
         "krforest.models.ForestModel": {
@@ -4915,11 +5037,26 @@
             "status"
           ]
         },
+        "krforest.models.MountainStation": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "elevation",
+            "latitude",
+            "longitude",
+            "model_config",
+            "mountain_name",
+            "obs_id",
+            "region_name"
+          ]
+        },
         "krforest.models.MountainWeather": {
           "external_bases": [
             "BaseModel"
           ],
           "members": [
+            "elevation",
             "ground_temperature",
             "humidity_10m",
             "humidity_2m",
@@ -4934,6 +5071,7 @@
             "rainfall_tipping",
             "rainfall_weight",
             "raw",
+            "region_name",
             "temperature_10m",
             "temperature_2m",
             "wind_direction_10m",
@@ -5050,7 +5188,7 @@
         }
       },
       "package": "krforest",
-      "pinned_sha": "05676f35b0b79cce6ce0705d32d5146c6a7a0bbb"
+      "pinned_sha": "7a67f5f71abedc435c060a5c127387d65a54c130"
     },
     "python-krheritage-api": {
       "classes": {
@@ -5068,9 +5206,15 @@
             "label",
             "method",
             "model_hint",
+            "optional_params",
+            "param_enum",
+            "param_help",
             "path",
             "portal_url",
+            "required_params",
+            "requires_custom_path",
             "response_format",
+            "returns",
             "service_key_url"
           ]
         },
@@ -5084,7 +5228,8 @@
           "external_bases": [],
           "members": [
             "aio",
-            "close"
+            "close",
+            "debug_fetch"
           ]
         },
         "krheritage.codes._compat.StrEnum": {
@@ -5238,15 +5383,26 @@
             "max_rps"
           ]
         },
+        "krheritage.debug.DebugRun": {
+          "external_bases": [],
+          "members": [
+            "catalog",
+            "error",
+            "function",
+            "input",
+            "parsed",
+            "processed",
+            "request",
+            "response",
+            "trace",
+            "validation_errors"
+          ]
+        },
         "krheritage.exceptions.ApiErrorResponse": {
           "external_bases": [
             "Exception"
           ],
-          "members": [
-            "code",
-            "message",
-            "payload"
-          ]
+          "members": []
         },
         "krheritage.exceptions.ConfigError": {
           "external_bases": [
@@ -5256,6 +5412,12 @@
           "members": []
         },
         "krheritage.exceptions.KrHeritageError": {
+          "external_bases": [
+            "Exception"
+          ],
+          "members": []
+        },
+        "krheritage.exceptions.PayloadParseError": {
           "external_bases": [
             "Exception"
           ],
@@ -5368,7 +5530,6 @@
             "license",
             "location_text",
             "longitude",
-            "manager",
             "model_config",
             "name_en",
             "name_ko",
@@ -5620,6 +5781,14 @@
             "get"
           ]
         },
+        "krheritage.transport.ratelimit.SyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "krheritage.transport.ratelimit.TokenBucket": {
           "external_bases": [],
           "members": [
@@ -5630,7 +5799,7 @@
         }
       },
       "package": "krheritage",
-      "pinned_sha": "6076b523fac9226d365136518db4d219cb6339c6"
+      "pinned_sha": "8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c"
     },
     "python-mois-api": {
       "classes": {
@@ -7691,7 +7860,7 @@
         }
       },
       "package": "visitkorea",
-      "pinned_sha": "2406531315495e8b1158348ee3503e08a6717958"
+      "pinned_sha": "8aa96975a182fb1ec8810e6895ccde0472c60a3b"
     }
   },
   "providers_without_protocols": {

@@ -19,7 +19,7 @@ import logging
 import math
 import pathlib
 import time
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -36,7 +36,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
-from .provider_pagination import ProviderPage, iter_paginated_items
+from .provider_pagination import (
+    ProviderPage,
+    aiter_paginated_items,
+    iter_paginated_items,
+)
 from .upstream_retry import retry_upstream
 
 if TYPE_CHECKING:
@@ -176,6 +180,40 @@ async def fetch_kor_travel_concierge_youtube_features(
                 )
             cursor = next_cursor
 
+#: datagokr 표준데이터 요청 페이지 크기. provider의 ``DEFAULT_MAX_PAGE_SIZE``와 같다.
+_DATAGOKR_STANDARD_PAGE_SIZE: Final[int] = 1000
+
+
+def _iter_datagokr_standard(service: Any, *, label: str) -> Iterator[Any]:
+    """datagokr 표준데이터 service를 **Map의 페이지네이터로** 소진한다.
+
+    provider의 ``iter_all()``을 쓰지 않는다. 그 구현은 짧은 페이지를 무조건
+    마지막 페이지로 읽는데(`services/pagination.py`), 같은 릴리스에서 행 단위
+    ``except ValidationError: continue``가 들어와 **기형 행 하나가 페이지를 짧게
+    만든다.** 둘이 겹치면 18,000건짜리 데이터셋이 999건에서 조용히 끝난다 —
+    예외도 로그도 없이. 그리고 Map은 그 결과를
+    ``authoritative_snapshot_complete=True``로 봉인한다.
+
+    이 저장소는 같은 부류를 이미 한 번 겪었다. ``provider_pagination`` 모듈이
+    존재하는 이유가 ``python-krex-api``의 똑같은 변화이고, 그 규칙은
+    **``total_count``가 권위이고 짧은 페이지는 total을 모를 때만 쓰는 대체
+    휴리스틱**이다. datagokr도 그 규칙 아래로 옮긴다.
+    """
+
+    def _page(page_no: int) -> ProviderPage:
+        page = service.list(
+            page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE
+        )
+        return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+    return iter_paginated_items(
+        _page,
+        num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
+        label=label,
+        warn=_LOGGER.warning,
+    )
+
+
 
 def fetch_datagokr_cultural_festivals(
     settings: KorTravelMapSettings,
@@ -204,7 +242,9 @@ def fetch_datagokr_cultural_festivals(
 
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.festival.iter_all()
+        yield from _iter_datagokr_standard(
+            client.festival, label="datagokr festival.list"
+        )
     finally:
         client.close()
 
@@ -273,7 +313,7 @@ def fetch_krheritage_items(
     seen = 0
     try:
         for kind_code in kind_codes:
-            for record in client.search.iter_all_details(page_size=100, ccba_kdcd=kind_code):
+            for record in _iter_krheritage_details(client, kind_code=kind_code):
                 yield record
                 seen += 1
                 if seen >= max_items:
@@ -282,6 +322,55 @@ def fetch_krheritage_items(
         close = getattr(client, "close", None)
         if callable(close):
             close()
+
+#: 국가유산 목록 요청 페이지 크기. provider ``search.list``의 기본값과 같다.
+_KRHERITAGE_PAGE_SIZE: Final[int] = 100
+
+
+def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
+    """국가유산 종목코드 하나의 상세(detail) record를 전부 yield한다.
+
+    provider의 ``search.iter_all_details()``를 쓰지 않는다. 그 안의
+    ``iter_pages``는 ``if len(result.items) < page_size: return`` 하나로 끝내는데,
+    같은 provider가 **복합키 결측 row를 건너뛴다**(PR#6). 둘이 겹치면 만재 페이지
+    하나에서 row 하나만 빠져도 목록이 그 자리에서 조용히 끝난다.
+
+    이 위험은 이 저장소가 이미 알고 있었다 — ``pyproject.toml``의 krheritage 핀이
+    그 이유로 ``6076b523``에 묶여 있었고, 해제 조건은 "provider 측에서 total 기반
+    종료를 복구한 뒤"였다. upstream은 그것을 복구하지 않았다(``8cde3aff`` 확인).
+    그래서 **Map 쪽에서 권위를 되찾는다** — ``PaginatedResult.total``을 권위로 쓰는
+    :func:`iter_paginated_items` 아래로 옮기면 provider의 종료 조건에 기대지 않게
+    되고, 핀을 묶어 둘 이유도 함께 사라진다.
+
+    상세 조회 규율은 provider의 것을 그대로 따른다 — 복합키 3요소가 모두 있어야
+    ``details()``를 부를 수 있고, 결측 row는 조용히 버리지 않고 경고를 남긴다.
+    """
+
+    def _page(page_no: int) -> ProviderPage:
+        result = client.search.list(
+            page_size=_KRHERITAGE_PAGE_SIZE, page=page_no, ccba_kdcd=kind_code
+        )
+        return ProviderPage(items=list(result.items), total_count=result.total)
+
+    for summary in iter_paginated_items(
+        _page,
+        num_of_rows=_KRHERITAGE_PAGE_SIZE,
+        label=f"krheritage search.list kdcd={kind_code}",
+        warn=_LOGGER.warning,
+    ):
+        key = summary.key
+        if not (key.ccba_kdcd and key.ccba_asno and key.ccba_ctcd):
+            _LOGGER.warning(
+                "krheritage: 복합키가 불완전한 목록 row를 건너뛴다 "
+                "(kdcd=%r asno=%r ctcd=%r name=%r)",
+                key.ccba_kdcd,
+                key.ccba_asno,
+                key.ccba_ctcd,
+                summary.name_ko,
+            )
+            continue
+        yield client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
+
 
 
 def fetch_krex_rest_areas(
@@ -943,7 +1032,9 @@ def fetch_standard_museums(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.museum_art.iter_all()
+        yield from _iter_datagokr_standard(
+            client.museum_art, label="datagokr museum_art.list"
+        )
     finally:
         client.close()
 
@@ -970,7 +1061,9 @@ def fetch_standard_tourist_attractions(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.tourist_attraction.iter_all()
+        yield from _iter_datagokr_standard(
+            client.tourist_attraction, label="datagokr tourist_attraction.list"
+        )
     finally:
         client.close()
 
@@ -991,7 +1084,9 @@ def fetch_standard_special_streets(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.special_street.iter_all()
+        yield from _iter_datagokr_standard(
+            client.special_street, label="datagokr special_street.list"
+        )
     finally:
         client.close()
 
@@ -1186,15 +1281,25 @@ def _weather_warning_page(
     )
 
 
-def fetch_khoa_beaches(
+async def fetch_khoa_beaches(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """해양수산부 해수욕장정보 record를 khoa public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``KhoaClient(api_key=...)``를 열고
-    시도별(``OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES``) ``oceans_beach_info(sido,
+    시도별(``OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES``) ``aoceans_beach_info(sido,
     page_no=N)``을 페이지네이션하며 record(``OceanBeachInfo``, krtour
-    ``OceanBeachInfoItem`` Protocol 충족)를 yield한다. sync generator, finally close.
+    ``OceanBeachInfoItem`` Protocol 충족)를 yield한다.
+
+    **async generator다.** khoa 6.x(``3314f68``, provider PR#13)가 라이브러리를
+    asyncio 전용으로 바꾸면서 ``oceans_beach_info()``·``close()``를 포함한 sync
+    진입점을 전부 없앴다. 남은 ``KhoaClient.__getattr__``는 모르는 이름을
+    ``AttributeError``로 바꿔 던지므로 옛 호출은 **첫 페이지에서 즉사**한다.
+
+    부수 이득이 하나 있다. 핀 상태의 sync 진입점은 내부적으로 ``run_async()``를
+    거쳐 호출마다 ``ThreadPoolExecutor`` + 새 ``asyncio.run()``을 띄우면서도
+    rate limiter와 httpx 세션은 인스턴스 1회 생성분을 공유했다 — loop-bound 객체를
+    throwaway 루프들 사이에서 교차 사용하는 구조였다. async 전환이 그것을 없앤다.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1217,8 +1322,11 @@ def fetch_khoa_beaches(
     try:
         for sido in sido_names:
 
-            def _page(page_no: int, sido: str = sido) -> ProviderPage:
-                return retry_upstream(
+            def _page(page_no: int, sido: str = sido) -> Awaitable[ProviderPage]:
+                # `retry_upstream_awaitable`이 이 콜러블을 **await**한다. 동기
+                # 판(`retry_upstream_async`)에 넘기면 코루틴 객체가 그대로
+                # 반환돼 재시도가 예외를 한 번도 보지 못한다.
+                return upstream_retry.retry_upstream_awaitable(
                     partial(
                         _khoa_beach_page,
                         client,
@@ -1232,17 +1340,18 @@ def fetch_khoa_beaches(
                     on_retry=_LOGGER.warning,
                 )
 
-            yield from iter_paginated_items(
+            async for record in aiter_paginated_items(
                 _page,
                 num_of_rows=num_of_rows,
                 label=f"khoa oceans_beach_info {sido}",
                 warn=_LOGGER.warning,
-            )
+            ):
+                yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def _khoa_beach_page(
+async def _khoa_beach_page(
     client: Any,
     sido: str,
     *,
@@ -1259,7 +1368,7 @@ def _khoa_beach_page(
     휴리스틱보다도 나쁘다(적대 리뷰 실증). raw에 없으면 없는 것으로 둔다.
     """
 
-    page = client.oceans_beach_info(
+    page = await client.aoceans_beach_info(
         sido,
         page_no=page_no,
         num_of_rows=num_of_rows,
@@ -2101,7 +2210,9 @@ def fetch_standard_parking_lots(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.parking.iter_all()
+        yield from _iter_datagokr_standard(
+            client.parking, label="datagokr parking.list"
+        )
     finally:
         client.close()
 
