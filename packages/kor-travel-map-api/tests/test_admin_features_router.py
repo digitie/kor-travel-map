@@ -485,7 +485,8 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _exists(_session: Any, feature_id: str) -> bool:
-        return feature_id == "hidden-1"
+        # 경계가 해석한 정본 키로 존재 확인이 내려온다.
+        return feature_id == _expected_uuid("hidden-1")
 
     async def _weather(_session: Any, **kwargs: Any) -> WeatherCard:
         assert kwargs["feature_id"] == _expected_uuid("hidden-1")
@@ -791,7 +792,7 @@ def test_get_feature_revision_returns_stable_etag(
     assert response.status_code == 200
     assert response.headers["ETag"] == '"7"'
     assert response.json() == {
-        "data": {"feature_id": "feature-1", "row_revision": 7}
+        "data": {"feature_id": _expected_uuid("feature-1"), "row_revision": 7}
     }
 
 
