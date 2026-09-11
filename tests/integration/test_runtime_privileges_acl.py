@@ -142,7 +142,12 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
                 'ktm_feature_dagster_runtime',
                 'feature.resolve_provider_feature_id(bigint,text,text)',
                 'EXECUTE'
-              ) AS claim
+              ) AS claim,
+              has_function_privilege(
+                'ktm_feature_api_runtime',
+                'feature.current_provider_curation_input_set(bigint)',
+                'EXECUTE'
+              ) AS api_seal
             """
         )
     )
@@ -152,6 +157,14 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     )
     assert row["seal"] is True, (
         "seal 함수가 적재 login에서 막혔다 — curation_dataset을 받는 모든 적재가 선다"
+    )
+    # "적재는 할 수 있다"만 재면 "그리고 다른 모두도 할 수 있다"를 놓친다. API login은
+    # 넓은 `ktm_feature_runtime`의 멤버라(`inherit_option=true`) 그 그룹에 주면 함께
+    # 열리고, `REVOKE … FROM ktm_feature_api_runtime`은 멤버십 경유 권한을 걷지 못해
+    # 장식이 된다. 그래서 좁은 `ktm_curation_provider_executor`에 주고, 넓어졌는지를
+    # 여기서 반대편으로 잰다.
+    assert row["api_seal"] is False, (
+        "API login까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
     )
 
 

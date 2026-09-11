@@ -708,16 +708,25 @@ _SUBTYPE_READY_FUNCTION_ACL = (
 #: current_provider_curation_input_set`로 멈췄다 — `curation_dataset`을 받는 모든
 #: 적재(= snapshot이 아닌 전부)가 이 경로를 지난다.
 #:
-#: 수여 대상은 새 role이 아니라 **같은 축의 자매 함수가 이미 갖는 그룹**이다.
-#: `resolve_provider_feature_id`(ADR-098 claim 해석기)가 `ktm_feature_runtime`에
-#: 부여돼 있고, 적재 login `ktm_feature_dagster_runtime`은 그 그룹의 멤버로
-#: (`inherit_option=true`, `set_option=false`) 그것을 실행한다. 둘은 한 쌍으로 쓰인다 —
-#: claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
+#: **수여 대상은 `ktm_curation_provider_executor`다 — `ktm_feature_runtime`이 아니다.**
+#: 0209의 원문은 넓은 runtime 그룹에 주었지만 그 그룹에는 `ktm_feature_api_runtime`도
+#: 멤버로 들어 있다(`inherit_option=true`). 거기에 주면 API login까지 함께 열리고,
+#: `REVOKE … FROM ktm_feature_api_runtime`은 **멤버십 경유 권한을 걷지 못하므로**
+#: 장식이 된다. 실측으로 확인했다(2026-09-11).
+#:
+#: 좁은 그룹이 이미 정확히 존재한다. `ktm_curation_provider_executor`는 멤버가
+#: 적재 login 하나뿐이고, 무엇보다 이 함수가 돌려주는 **그 두 값**을 받는
+#: `feature.seal_provider_curation_snapshot_receipt(…, p_expected_input_member_count,
+#: p_expected_input_set_hash, …)`의 EXECUTE를 이미 갖는다. 값을 읽는 자리와 값을
+#: 봉인하는 자리가 같은 role인 것이 옳다.
+#:
+#: 넓은 두 role은 명시적으로 REVOKE해 둔다 — 지금은 no-op이지만, 넓은 grant가
+#: 되살아나려 할 때 이 문장이 그 자리에서 의도를 말한다.
 _PROVIDER_CURATION_SEAL_ACL = (
     "REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(...) "
-    "FROM PUBLIC, ktm_feature_api_runtime",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime",
     "GRANT EXECUTE ON FUNCTION feature.current_provider_curation_input_set(...) "
-    "TO ktm_feature_runtime, ktm_curation_command_owner",
+    "TO ktm_curation_provider_executor, ktm_curation_command_owner",
 )
 
 
