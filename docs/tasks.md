@@ -63,6 +63,12 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   배포는 2026-09-11에 끝났고 사이클도 D1까지 초록이다. D2만
   `T-VN-39-D2-FIXTURE`에 걸려 있다. 해제 조건은 acceptance §T-VN-39-DEPLOY.
 
+- [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
+
+  prod 적재가 `permission denied for function current_provider_curation_input_set`로
+  멈춘다. snapshot이 아닌 모든 provider 적재가 그 함수를 부른다. 해제 조건은
+  acceptance §T-VN-CURATION-SEAL-ACL.
+
 - [ ] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
 
   D2 direct seed가 `invalid UUID 'f_global_w_…'`로 죽는다. 질의는 uuid 축으로
