@@ -124,23 +124,52 @@ def _response_record(
     )
 
 
-def _feature_ids(run_id: str) -> tuple[str, str]:
-    """API resolver가 재해석할 수 있는 live weather/price legacy ID 두 건."""
+#: run이 소유한 Feature의 **정본 uuid**를 그 run의 provider dataset에서 되찾는다.
+#:
+#: 재키(309) 전에는 이 두 값을 ``make_feature_id``로 **재계산**했다. 그 축이
+#: 사라졌다 — ``feature_id``는 uuid이고, 이 seed는 core 프로시저를 직접 부르므로
+#: alias도 생기지 않는다(ADR-098 결정 6, 309가 ``trg_features_legacy_alias`` 제거).
+#: 그래서 legacy 주소는 더 이상 **어떤 열의 값도 아니다.**
+#:
+#: 후보 uuid는 비파생 랜덤 UUIDv7이라(0083) run_id에서 유도할 수도 없다. 그래서
+#: 재계산이 아니라 **재현**한다 — 이 파일이 API-owned 경로에서 이미 한 번 도달한
+#: 답이다. 여기서 run-owned 키는 run마다 따로 만드는 provider dataset
+#: (``_dataset_key``)이고, primary source link가 그 dataset의 entity에서 Feature로
+#: 이어진다. seed 전에는 행이 없으므로 ``None``이 돌아오고, 그것이 "아직 없다"를
+#: 그대로 표현한다(``= NULL``은 아무것도 맞히지 않는다).
+_OWNED_FEATURE_ID_SQL: Final[str] = """
+SELECT link.feature_id
+FROM provider_sync.source_links AS link
+JOIN provider_sync.source_entities AS entity
+  ON entity.source_entity_key = link.source_entity_key
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = entity.provider_dataset_id
+WHERE dataset.provider = :provider
+  AND dataset.dataset_key = :dataset_key
+  AND link.source_role = 'primary'
+"""
 
-    return (
-        _provider_fixture_feature_id(run_id, "weather"),
-        _provider_fixture_feature_id(run_id, "price"),
-    )
 
+async def _owned_feature_ids(
+    session: AsyncSession, run_id: str
+) -> tuple[str | None, str | None]:
+    """이 run이 소유한 (weather, price) Feature의 정본 uuid. 없으면 ``None``."""
 
-def _provider_fixture_feature_id(run_id: str, kind: str) -> str:
-    return make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category="00000000",
-        source_type=_E2E_PROVIDER,
-        source_natural_key=f"{run_id}:{kind}",
-    )
+    found: list[str | None] = []
+    for kind in ("weather", "price"):
+        rows = (
+            await session.execute(
+                text(_OWNED_FEATURE_ID_SQL),
+                {"provider": _E2E_PROVIDER, "dataset_key": _dataset_key(run_id, kind)},
+            )
+        ).scalars().all()
+        if len(rows) > 1:
+            # dataset 하나에 primary link가 둘이면 소유권이 모호하다 — 지우는
+            # 쪽으로 넘어가기 전에 멈춘다.
+            raise RuntimeError("run-owned provider dataset이 Feature 둘을 가리킵니다")
+        found.append(str(rows[0]) if rows else None)
+    weather_id, price_id = found
+    return weather_id, price_id
 
 
 # ── T-VN-36 API-owned fixture 계약 ───────────────────────────────────────────
@@ -269,7 +298,9 @@ def _admin_fixture_feature_id(feature_uuid: str, kind: str) -> str:
     )
 
 
-async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[str, int]:
+async def _counts(
+    session: AsyncSession, feature_ids: tuple[str | None, str | None]
+) -> dict[str, int]:
     weather_id, price_id = feature_ids
     row = (
         await session.execute(
@@ -335,7 +366,7 @@ async def _owned_summary_run_ids(
 async def _assert_owned_or_absent(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     *,
     lock: bool = False,
 ) -> set[str]:
@@ -412,7 +443,7 @@ async def _assert_owned_or_absent(
 async def _assert_owned_source_links(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     present: set[str],
     *,
     lock: bool = False,
@@ -509,7 +540,7 @@ def _quote_identifier(value: str) -> str:
 
 async def _foreign_key_reference_counts(
     session: AsyncSession,
-    feature_ids: tuple[str, ...],
+    feature_ids: tuple[str | None, ...],
 ) -> dict[str, int]:
     constraints = (
         await session.execute(
@@ -567,7 +598,9 @@ async def _foreign_key_reference_counts(
         if key in counts:
             raise RuntimeError("같은 feature FK column에 중복 constraint가 있습니다")
         cast_type = "uuid[]"
-        identities: list[str] = list(feature_ids)
+        # 아직 만들어지지 않은 소유 id는 셀 대상 자체가 없다 — 빼고 센다.
+        # 빈 배열에 대한 ``= ANY``는 그대로 0이다.
+        identities: list[str] = [value for value in feature_ids if value is not None]
         statement = text(
             "SELECT count(*) FROM "
             f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)} "
@@ -588,7 +621,7 @@ async def _foreign_key_reference_counts(
 async def _assert_owned_values(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     present: set[str],
     *,
     lock: bool = False,
@@ -672,7 +705,7 @@ async def _assert_owned_values(
 async def _assert_owned_state(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str, str],
+    feature_ids: tuple[str | None, str | None],
     *,
     lock: bool = False,
 ) -> tuple[dict[str, int], dict[str, int]]:
@@ -722,8 +755,7 @@ async def _seed(
     session: AsyncSession,
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int], tuple[int, int]]:
-    feature_ids = _feature_ids(run_id)
-    before = await _counts(session, feature_ids)
+    before = await _counts(session, await _owned_feature_ids(session, run_id))
     if before != {"features": 0, "weather_values": 0, "price_values": 0}:
         raise RuntimeError("owned fixture ID가 이미 존재합니다; recovery를 먼저 실행하세요")
 
@@ -743,7 +775,6 @@ async def _seed(
 
     async def create_provider_feature(
         *,
-        feature_id: str,
         kind: str,
         dataset_id: int,
         record: SourceRecord,
@@ -751,7 +782,11 @@ async def _seed(
         lon: float,
         marker_icon: str,
         marker_color: str,
-    ) -> None:
+    ) -> str:
+        # 정본 키는 서버가 받는다. 후보를 여기서 만들고, 프로시저가 돌려준
+        # ``o_feature_id``를 이 run의 소유 핸들로 쓴다 — run_id에서 유도할 수
+        # 있는 값이 아니므로 만들어 낸 쪽이 들고 있어야 한다.
+        feature_id = candidate_feature_uuid()
         # The API runtime is deliberately read-only after M01.  Register the
         # fixture's immutable source evidence first, then let the same provider
         # state procedure used by ingestion create the core Feature row.
@@ -788,8 +823,12 @@ async def _seed(
         if source_record_key != record.source_record_key:
             raise RuntimeError("fixture source head가 방금 등록한 record를 가리키지 않습니다")
         payload = {
+            # 309 뒤 두 슬롯은 같은 ``features.feature_id``에서 나온다 — 바깥
+            # 이름은 그대로 두고 값의 출처만 하나로 모은다. 종전에는 여기서
+            # 서로 다른 uuid를 실었고, 그 불일치는 legacy 축이 살아 있을 때만
+            # 뜻이 있었다.
             "feature_id": feature_id,
-            "feature_uuid": str(candidate_feature_uuid()),
+            "feature_uuid": feature_id,
             "kind": kind,
             "name": name,
             "category": "00000000",
@@ -867,10 +906,9 @@ async def _seed(
         )
         if not link_inserted:
             raise RuntimeError("provider fixture primary source link가 신규 행이 아닙니다")
+        return feature_id
 
-    weather_id, price_id = feature_ids
-    await create_provider_feature(
-        feature_id=weather_id,
+    weather_id = await create_provider_feature(
         kind="weather",
         dataset_id=weather_dataset_id,
         record=weather_record,
@@ -879,8 +917,7 @@ async def _seed(
         marker_icon="weather",
         marker_color="P-03",
     )
-    await create_provider_feature(
-        feature_id=price_id,
+    price_id = await create_provider_feature(
         kind="price",
         dataset_id=price_dataset_id,
         record=price_record,
@@ -931,6 +968,7 @@ async def _seed(
         provider_dataset_id=price_dataset_id,
         source_record=price_record,
     )
+    feature_ids = (weather_id, price_id)
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
         raise RuntimeError("owned weather/price fixture cardinality가 예상과 다릅니다")
@@ -941,7 +979,7 @@ async def _cleanup(
     session: AsyncSession,
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int]]:
-    feature_ids = _feature_ids(run_id)
+    feature_ids = await _owned_feature_ids(session, run_id)
     # Parent FOR UPDATE는 concurrent FK insert의 KEY SHARE와 충돌한다. 기존 child도
     # FOR UPDATE한 같은 transaction 안에서 fingerprint/FK audit/delete를 끝낸다.
     await _assert_owned_state(session, run_id, feature_ids, lock=True)
@@ -1726,7 +1764,7 @@ async def _run(
                     counts, foreign_keys = await _assert_owned_state(
                         session,
                         run_id,
-                        _feature_ids(run_id),
+                        await _owned_feature_ids(session, run_id),
                     )
     finally:
         await engine.dispose()

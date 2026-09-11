@@ -285,12 +285,22 @@ def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
     assert "owned_feature_ids_from_audit" in runner
     assert "e2e_live_acceptance::{run_id}::{role}" not in runner
 
-    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
-        run_id, "weather"
-    ).startswith("f_global_w_")
-    assert _FIXTURE_MODULE._provider_fixture_feature_id(  # noqa: SLF001
-        run_id, "price"
-    ).startswith("f_global_p_")
+    # provider fixture의 소유 핸들도 **재현**이다. 309 뒤 ``feature_id``는 uuid이고,
+    # 이 seed는 core 프로시저를 직접 부르므로 alias가 생기지 않는다(ADR-098 결정 6).
+    # 즉 legacy 주소는 어떤 열의 값도 아니므로 재계산 helper 자체가 없어야 한다 —
+    # 남아 있으면 "질의는 uuid 축, 값은 legacy 축"이 다시 자란다.
+    assert not hasattr(_FIXTURE_MODULE, "_provider_fixture_feature_id"), (
+        "legacy 주소를 재계산하는 helper가 되살아났다 — 소유 핸들은 재현한다"
+    )
+    fixture_source = _FIXTURE.read_text(encoding="utf-8")
+    assert "_owned_feature_ids" in fixture_source
+    # 재현의 축은 run마다 따로 만드는 provider dataset이고, primary link가 그
+    # dataset의 entity에서 Feature로 이어진다.
+    assert "_OWNED_FEATURE_ID_SQL" in fixture_source
+    assert "link.source_role = 'primary'" in fixture_source
+    assert "dataset.dataset_key = :dataset_key" in fixture_source
+    # 후보 uuid는 만들어 낸 쪽이 들고 있어야 한다(비파생 랜덤 v7).
+    assert "feature_id = candidate_feature_uuid()" in fixture_source
 
     # 완료 감사가 요구하는 전이 사슬은 spec이 실제로 실행하는 3단계다.
     assert _FIXTURE_MODULE._expected_transition_chain(run_id) == (  # noqa: SLF001
