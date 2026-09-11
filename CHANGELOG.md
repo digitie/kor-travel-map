@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+### provider 핀 8종 상향 — 그리고 두 곳의 조용한 절단을 막는다 (2026-09-11)
+
+- **CHANGED (provider 핀)**: datagokr · kma · khoa · visitkorea · knps · krforest ·
+  krheritage · mcst를 각 리포 기본 브랜치 tip으로 올렸다. 핀은 세 자리가 서로
+  대조한다 — `pyproject.toml` · `_provider_surface.json` · `provider-contract.md`
+  §12 표.
+- **BREAKING 대응 (khoa)**: provider PR#13이 라이브러리를 asyncio 전용으로 바꿔
+  `KhoaClient.oceans_beach_info()`·`close()`가 사라졌다. `fetch_khoa_beaches`를
+  async generator로 옮기고 `aoceans_beach_info`/`aclose`를 쓴다. 소비 측
+  (`_record_batches`)은 이미 `AsyncIterable`을 처리하므로 배선은 그대로다.
+- **ADDED (`aiter_paginated_items`)**: sync 판과 **종료 규칙을 공유하는** async
+  페이지네이터. 판정은 `_PageState` 하나가 소유한다 — 규칙을 두 벌로 적으면
+  한쪽만 고쳐지는 날이 오고, 그 부류가 이 모듈이 생긴 이유다.
+- **ADDED (`retry_upstream_awaitable`)**: 코루틴을 **await하며** 재시도하는 경계.
+  기존 `retry_upstream_async`는 호출을 동기 실행하므로(동기 client용), 코루틴을
+  넘기면 그 안의 예외를 재시도가 한 번도 보지 못한다 — 재시도가 조용히 사라진다.
+- **FIXED (조용한 절단 둘)**: datagokr `b8f1254`가 종료 조건에서
+  `reached_known_end` 가드를 떨어뜨리고 행 단위 `except ValidationError: continue`를
+  넣었다. 둘이 겹치면 기형 행 하나가 만재 페이지를 짧게 만들어 목록이 예외 없이
+  끊기고, Map은 그것을 `authoritative_snapshot_complete=True`로 봉인한다.
+  krheritage도 같은 모양이고 그 때문에 핀이 `6076b52`에 묶여 있었다.
+  두 경로를 Map의 `total` 권위 페이지네이터 아래로 옮겨 provider 종료 조건에 대한
+  **위임을 끊었다** — datagokr 표준데이터 5종은 `_iter_datagokr_standard`,
+  krheritage items는 `search.list` + `iter_paginated_items`.
+
 ### npm 보안 권고 셋을 닫는다 — maplibre-gl 6 · Next 16.3.4 · sharp 0.35.4 (2026-09-10)
 
 - **SECURITY (배포 의존성)**: `npm audit --audit-level=high --omit=dev`가 세 건을
