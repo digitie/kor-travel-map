@@ -18,8 +18,6 @@ _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _COMMIT_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^sha256:[0-9a-f]{64}$")
-#: `f_global_p_<16 hex>` — `make_feature_id`의 산출 형태
-_FEATURE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^f_global_[a-z]_[0-9a-f]{16}$")
 _UUID_RE: Final[re.Pattern[str]] = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -661,13 +659,15 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
         ):
             raise ValueError("direct evidence mismatch")
         ids = payload["feature_ids"]
-        # id는 서버가 uuid를 자연키로 발급하므로 밖에서 재계산할 수 없다. 형태와
-        # **uuid와 같은 개수**만 본다 — 값의 정합은 helper가 관측 시점에 재현해
-        # 대조했다(`_admin_fixture_feature_id`).
+        # 309 뒤 두 표기는 같은 `features.feature_id`에서 나온다 — 그래서 형태만
+        # 보는 것이 아니라 **서로 같은지**를 본다. 종전에는 legacy `f_global_*`
+        # 형태를 요구했는데 그 축은 재키가 없앴고, 그 검사는 helper가 먼저 죽는
+        # 바람에 한 번도 도달하지 않아 낡은 채로 남아 있었다.
         if (
             not isinstance(ids, list)
             or len(ids) != len(uuids)
-            or any(_FEATURE_ID_RE.fullmatch(value) is None for value in ids)
+            or any(_UUID_RE.fullmatch(value) is None for value in ids)
+            or ids != uuids
         ):
             raise ValueError("direct evidence mismatch")
     if action == "purge":
@@ -891,7 +891,11 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "field_overrides": 7,
             "state_transitions": 3,
         },
-        8,
+        # 7 = override 7. 종전의 8은 `trg_features_legacy_alias`가 만들던 alias
+        # 행 하나를 더 센 것이고, 309가 그 트리거를 영구 제거했다(ADR-098 결정 6 —
+        # admin 수동 생성 경로는 alias를 발급하지 않는다). helper 쪽은 이미
+        # override 하나만 기대하므로 8은 구조적으로 만족될 수 없었다.
+        7,
     )
     _validate_report(runtime / "playwright-recovery")
     phases: dict[str, set[str]] = {}
