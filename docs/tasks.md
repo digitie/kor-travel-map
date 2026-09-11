@@ -64,11 +64,14 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   rotate → rebuild → 이미지 → repin → preflight → D1 → D2 전 사이클을 부른다.
   해제 조건은 acceptance §T-VN-39-DEPLOY.
 
-- [ ] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+- [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
 
   autouse patch가 모든 feature 참조를 `feature_id=ref`로 "해석 성공" 처리해, uuid
   해석·미해석 422 두 축을 이 패키지에서 관측 불가로 만든다. 참조 문자열을 그대로
-  기대하는 테스트 47곳이 함께 움직인다. 해제 조건은 acceptance §T-VN-39-ECHO.
+  기대하는 테스트가 함께 움직인다. **2026-09-11 닫힘** — n150 전량 1223 passed,
+  함께 옮긴 자리는 27곳. 조문 3(자체 resolver 제거)은 틀린 요구라 삭제했다:
+  전역 echo는 모든 참조를 해석 성공으로 만들어 "미해석 422" 축을 표현할 수
+  없다. 해제 조건은 acceptance §T-VN-39-ECHO.
 
 - [~] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
 

@@ -2386,22 +2386,44 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 ## T-VN-39-ECHO
 
 ```markdown
-- [ ] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+- [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
 ```
 
 **무엇이 참이면 닫히는가.**
 
-1. `packages/kor-travel-map-api/tests/conftest.py`의 autouse resolver가 참조를
-   **정본 uuid**로 풀어 준다(`feature_id=ref`가 아니라).
-2. 그 위에서 이 패키지 테스트가 전부 초록이다 — 참조 문자열을 그대로 기대하는 47곳이
-   함께 움직인다.
-3. `test_curations_router._install_post_rekey_resolver` 같은 자체 resolver 설치가
-   불필요해지고 제거된다.
+1. [x] `packages/kor-travel-map-api/tests/conftest.py`의 autouse resolver가 참조를
+   **정본 uuid**로 풀어 준다(`feature_id=ref`가 아니라). — `canonical_ref()`가 그
+   사상을 세운다: legacy 주소는 결정적 파생 uuid로, 이미 uuid인 참조는 그대로.
+2. [x] 그 위에서 이 패키지 테스트가 전부 초록이다. — 2026-09-11 n150 전량
+   **1223 passed / 0 failed**. 함께 움직인 자리는 27곳이었다(47은 추정치였다).
+3. [ ] ~~`test_curations_router._install_post_rekey_resolver` 같은 자체 resolver
+   설치가 불필요해지고 제거된다.~~ **2026-09-11 — 이 조문이 틀렸다. 삭제한다.**
 
-**왜 지금 하지 않았나.** 재키 PR에 섞으면 그 47곳의 변경이 재키 diff와 구분되지
-않는다. 그리고 그 축의 실효 검증은 설계상 통합이 소유한다
-(`tests/integration/test_feature_identity_boundary.py`) — conftest가 스스로 그렇게
-적어 두었다.
+**왜 3이 틀렸나 — echo가 할 수 없는 일을 요구한다.**
+
+그 resolver를 쓰는 세 테스트는 필터 표면의 **3분기**를 잰다:
+
+| 입력 | 기대 |
+|---|---|
+| 해석되는 참조 | 200 + 정본 uuid |
+| 어떤 Feature도 가리키지 않는 참조 | **422**, repo는 호출조차 되지 않는다 |
+| 형식은 맞으나 없는 uuid | 200, 그대로 통과 |
+
+전역 echo는 **모든** 참조를 "해석 성공"으로 만든다. 그래서 2·3번 축은 echo 밑에서
+구조적으로 관측될 수 없고, echo를 "미해석은 None"으로 바꾸면 임의의 참조를 쓰는
+나머지 1200여 건이 전부 깨진다. 두 요구는 같은 fixture 안에서 양립하지 않는다.
+
+지우면 잃는 것이 정확히 무엇인지도 분명하다 — 재키 적대 리뷰가 마지막에 찾아낸
+결함(`22P02`가 `DataError`로 와서 `except ValueError`를 지나 500이 된다)의 **단위
+커버리지가 그 세 테스트다.** 검사기를 없애 조문을 만족시키는 것은 이 작업이 고치려던
+바로 그 함정이다.
+
+그래서 규약을 반대로 고정한다: **echo는 해석의 *값*을 모사하고, 해석의 *실패*는 각
+테스트가 자기 resolver로 모사한다.** conftest docstring이 그렇게 적고 있다.
+
+**왜 재키 PR과 나눴나.** 섞으면 그 27곳의 변경이 재키 diff와 구분되지 않는다. 그리고
+이 축의 실효 검증은 설계상 통합이 소유한다
+(`tests/integration/test_feature_identity_boundary.py`).
 
 ## T-VN-39-PROVIDER-PAGINATION
 
