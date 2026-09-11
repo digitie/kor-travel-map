@@ -1192,7 +1192,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "b8f1254871b28e9fbb10bfdd79a89580b8c0d76d"
+      "pinned_sha": "fd099b20887188cece480dd83a86ede075f88ad4"
     },
     "python-khoa-api": {
       "classes": {
@@ -5799,7 +5799,7 @@
         }
       },
       "package": "krheritage",
-      "pinned_sha": "8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c"
+      "pinned_sha": "545a01606184cbdb610ce9d654b7bece712b22ff"
     },
     "python-mois-api": {
       "classes": {
