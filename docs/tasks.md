@@ -58,11 +58,22 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [ ] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
+- [~] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
 
   `T-VN-39`가 머지되어(#1197, `e8c66c47`) Map revision이 바뀌었다. prod 배포는
   rotate → rebuild → 이미지 → repin → preflight → D1 → D2 전 사이클을 부른다.
-  해제 조건은 acceptance §T-VN-39-DEPLOY.
+  **2026-09-11 — 배포는 끝났다**(prod `alembic_version=309`, `feature_id` uuid,
+  정본 generation ↔ live image 5종 불일치 0). 사이클도 D1까지 초록이고 D2만
+  `T-VN-39-D2-FIXTURE`에 걸려 있다. 해제 조건은 acceptance §T-VN-39-DEPLOY.
+
+- [ ] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
+
+  D2 lane의 direct fixture seed가 `invalid UUID 'f_global_w_…'`로 죽는다. 하네스가
+  `make_feature_id`로 만든 **legacy 주소**를 `CAST(:feature_ids AS uuid[])` 자리에
+  그대로 넣는다 — 질의는 uuid 축으로 옮겼는데 **값의 출처는 안 옮겼다**(재키가
+  고치려던 바로 그 부류). 이 seed는 core 프로시저를 직접 부르므로 alias도 생기지
+  않아, 그 주소는 재키 뒤 DB 키가 아니다. 해제 조건은 acceptance
+  §T-VN-39-D2-FIXTURE.
 
 - [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
 
