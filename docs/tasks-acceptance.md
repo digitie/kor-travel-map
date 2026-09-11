@@ -1814,6 +1814,11 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
    `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`, 데이터셋 15017322), krex 휴게소는
    `KOR_TRAVEL_MAP_KREX_GO_API_KEY` 미주입(2026-09-11 채웠다 — 값은 이미 호스트에
    있던 data.go.kr 키와 같다).
+
+   **특화거리(data.go.kr 15017322)는 소유자 판정으로 제외한다(2026-09-11).** 활용신청이
+   승인되지 않아 403(`SERVICE_KEY_IS_NOT_REGISTERED_ERROR`)이고, 신청을 기다리지 않는다.
+   이 조문은 **다른 asset 하나**로 충족한다 — 같은 키로 관광지·박물관미술관·주차장·
+   문화축제 넷이 이미 200을 받는다(2026-09-11 전수 실측).
 5. 배포 뒤 정본 generation(`/var/lib/kor-travel-docker-manager-public/`
    `pinned-runtime-generation-v6.json`)의 `map_source_revision`과 네 image id가
    **실제로 돌고 있는 컨테이너와 같다.** 이 검사를 여기 두는 이유는 2026-09-11에
