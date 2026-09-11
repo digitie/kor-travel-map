@@ -87,15 +87,15 @@ providers = [
   # 48e458b: curated source 보강(T-223b) — fileData 4종 + 전국지역특화거리
   # 표준데이터 service/model 추가(provider PR#10).
   # b8f1254 상향(2026-09-11): 공용 pagination 헬퍼 추출 + 적대 리뷰 수정.
-  # **주의** — 같은 범위가 `services/pagination.py`의 종료 조건에서
-  # `reached_known_end`(= `total_count <= page_no * num_of_rows`) 가드를 떨어뜨려
-  # `if len(page.items) < page.num_of_rows: return`만 남겼고, 동시에
-  # `standard.py:list`에 행 단위 `except ValidationError: continue`가 들어왔다.
-  # 둘이 겹치면 기형 행 하나가 만재 페이지를 짧게 만들어 목록이 조용히 끊긴다
-  # (krex `ddd69cd2 → c6d8717e`와 정확히 같은 부류). Map은 표준데이터 5종을
-  # provider `iter_all()` 대신 dagster/provider_pagination으로 소진해 total 권위를
-  # 유지한다 — `_iter_datagokr_standard`.
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@b8f1254871b28e9fbb10bfdd79a89580b8c0d76d",
+  # `b8f1254`가 `services/pagination.py` 종료 조건에서 `reached_known_end` 가드를
+  # 떨어뜨려, 같은 범위가 넣은 행 단위 `except ValidationError: continue`와 겹치면
+  # 기형 행 하나가 만재 페이지를 짧게 만들어 목록이 조용히 끊겼다
+  # (krex `ddd69cd2 → c6d8717e`와 정확히 같은 부류).
+  # `fd099b2` **상향(2026-09-11, provider PR#16)**: 짧은 페이지 종료를 declared
+  # total로 조건화해 그 퇴화를 닫았다 — total이 없으면 멈추지 않고 빈 페이지를
+  # 기다린다. Map 쪽 `_iter_datagokr_standard` 우회는 **그대로 둔다**(방어는
+  # 중복이어도 좋다).
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@fd099b20887188cece480dd83a86ede075f88ad4",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `kortravelmap.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
@@ -143,13 +143,16 @@ providers = [
   # 8cde3af 상향(2026-09-11). 보류 사유였던 "provider iter_all이 total 권위를
   # 잃고 짧은 페이지 휴리스틱으로 바뀌었다"는 upstream에서 **여전히 그대로**다
   # (services/search.py:iter_pages는 `if len(result.items) < page_size: return`).
+  # `545a016` **상향(2026-09-11, provider PR#10)**: 그 종료 조건을 declared total로
+  # 바꿨고, **행이 아니라 페이지 수**로 센다(`page >= ceil(total/page_size)`) —
+  # 걸러진 행이 있어도 정확히 끝난다. 아래 우회는 그대로 둔다.
   # 그래서 upstream을 기다리는 대신 **Map이 권위를 되찾았다** —
   # `fetch_krheritage_items`가 provider의 `iter_all_details` 대신
   # `search.list`를 dagster/provider_pagination의 `iter_paginated_items`로
   # 소진한다(`PaginatedResult.total`이 권위). 위임을 끊었으므로 보류 조건 자체가
   # 사라졌다. 상세 조회 규율(복합키 3요소 필수·결측 row 경고)은 provider의 것을
   # 그대로 따른다.
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@8cde3affe2dfa43fd8219cd2b8fb14c0bf915d2c",
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@545a01606184cbdb610ce9d654b7bece712b22ff",
   "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@cbe4d1380dc0388c078e8ae4622d3e580717064b",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
