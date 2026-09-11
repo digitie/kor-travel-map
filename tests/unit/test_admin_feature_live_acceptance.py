@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import importlib.util
 import json
 import subprocess
@@ -280,10 +279,6 @@ def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
         "0198d9f1-7a31-5e52-8ea8-cb2548d3a891"
     ) is None
     assert _FIXTURE_MODULE._canonical_uuid7("f_global_p_deadbeef") is None  # noqa: SLF001
-    # 구 규칙(요청 category + name/좌표 자연키)은 다른 값을 낸다. M01 뒤로 그 대조는
-    # 항상 실패했고, `api-audit`이 한 번도 실행되지 않아 아무도 몰랐다.
-    stale = f"global|place|01070300|user_request|{fixture_name}:127.500000,36.500000|"
-    assert feature_id != f"f_global_p_{hashlib.sha1(stale.encode()).hexdigest()[:16]}"
     runner = _CLONE_RUNNER.read_text()
     # clone 러너는 더 이상 place id를 재계산하지 않는다 — 서버 발급 uuid를 밖에서
     # 만들 수 없으므로 api-audit 증거에서 읽는다(같은 파일의 `owned_feature_uuids_sql`이
@@ -933,7 +928,13 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert '"feature.feature_aliases.feature_id"' not in inspection
     assert "alias 발급을 provider 경로로 한정" in fixture
     assert cleanup.count("DELETE FROM feature.features") == 1
-    assert purge.count("DELETE FROM feature.features") == 1
+    # 306이 raw DELETE를 봉인했다(`manual Feature delete needs an authorised purge
+    # command`). purge는 감사되는 명령을 열고 그 경로로만 지운다 — raw DELETE가
+    # 되살아나면 lane이 마지막 걸음에서 다시 죽는다.
+    assert purge.count("DELETE FROM feature.features") == 0
+    assert "purge_manual_feature(" in purge
+    assert "PURGE_OPERATION" in purge
+    assert "INSERT INTO ops.domain_commands" in purge
     # 0104가 review/whole-row-freeze 모델을 지웠다. purge는 Feature 한 번 삭제로
     # CASCADE 자식(alias/subtype/field override)을 함께 지우고, append-only 전이
     # 감사는 남았음을 확인만 한다.
