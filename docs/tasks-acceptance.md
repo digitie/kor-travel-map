@@ -1912,9 +1912,17 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 (PR #181, merge `969eff18`)까지 완료했고 #177도 닫혔다. 그러나 이 task의
 운영 AC인 주기 실행·bounded retention·off-box 증거는 남아 있다.
 
-- [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
-  다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
-  수렴하는지는 운영 증거가 더 필요하다. application DB에 standalone cron을 중복 설치하지 않는다.
+- [x] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
+  `scheduled_backup`과 retention janitor가 최근 성공·bounded retention으로 수렴하는지가
+  남아 있었고, **2026-09-11 실측으로 닫혔다.** application DB에 standalone cron을
+  중복 설치하지 않는다.
+
+  `/home/digitie/kor-travel-geo/data/backups`에 **09-07·09-08·09-09·09-10 네 건이
+  연속으로** 있다(각 ~4.39 GB, `kor_travel_geo_backup_<ts>_zstd3.tar.zst`). 그리고
+  2026-09-08 시점에 남아 있던 08-24·08-25는 **지금 없다** — TTL 7일이 지난 뒤
+  `keep_min=3`을 새 성공들이 채우자 GC가 실제로 지웠다. "수렴"과 "bounded retention"이
+  둘 다 관측으로 성립하므로 이 조문을 닫는다. 남은 것은 off-box 사본뿐이고 그것은
+  `T-VN-H49-OFFBOX`가 소유한다.
 - [x] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
