@@ -22,6 +22,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
+from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -48,11 +49,17 @@ _PUBLIC_STATE = {
 # 작은 조회 bbox (경도 127.0~127.1, 위도 37.0~37.1).
 _BBOX = {"min_lon": 127.0, "min_lat": 37.0, "max_lon": 127.1, "max_lat": 37.1}
 
+# T-VN-39 재키(alembic 309): `feature.features.feature_id`가 uuid다. 이 파일의 seed는
+# core 표에 직접 넣는 **정본 축**이므로 `ib:*` 라벨은 키가 아니라 씨앗으로만 남는다 —
+# 같은 라벨은 언제나 같은 uuid라 seed·기대집합·단언이 한 값을 가리키고, 읽는 사람은
+# 이름을 그대로 본다. 이 파일은 membership(집합)만 재고 순서를 재지 않으므로 유도값의
+# 정렬이 라벨의 사전순과 달라도 잃는 것이 없다.
+
 
 async def _ins_point(
     session: AsyncSession,
     *,
-    feature_id: str,
+    label: str,
     lon: float,
     lat: float,
     sido_code: str | None = None,
@@ -68,7 +75,11 @@ async def _ins_point(
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
-                :fid, 'place', :fid, '06020000',
+                -- `name`은 varchar이고 `feature_id`는 uuid다. 재키 전에는 같은
+                -- `:fid` 하나로 두 자리를 채웠지만, asyncpg 방언이 같은 이름의
+                -- 바인드를 하나의 `$n`으로 접으므로 이제 42P08(두 타입 추론)이다.
+                -- 바인드를 나눠 축을 분리한다.
+                :fid, 'place', :label, '06020000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         CAST(:lon AS double precision), CAST(:lat AS double precision)
@@ -80,7 +91,8 @@ async def _ins_point(
             """
         ),
         {
-            "fid": feature_id,
+            "fid": feature_uuid(label),
+            "label": label,
             "lon": lon,
             "lat": lat,
             "ts": _NOW,
@@ -95,7 +107,7 @@ async def _ins_point(
 async def _ins_geom(
     session: AsyncSession,
     *,
-    feature_id: str,
+    label: str,
     kind: str,
     wkt: str,
     coord_lon: float | None = None,
@@ -119,7 +131,8 @@ async def _ins_geom(
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
-                :fid, :kind, :fid, '02000000',
+                -- `_ins_point`과 같은 이유로 uuid 자리와 varchar 자리를 나눈다.
+                :fid, :kind, :label, '02000000',
                 CASE
                   WHEN CAST(:coord_lon AS double precision) IS NULL THEN NULL
                   ELSE x_extension.ST_SetSRID(
@@ -136,7 +149,8 @@ async def _ins_geom(
             """
         ),
         {
-            "fid": feature_id,
+            "fid": feature_uuid(label),
+            "label": label,
             "kind": kind,
             "coord_lon": coord_lon,
             "coord_lat": coord_lat,
@@ -148,12 +162,12 @@ async def _ins_geom(
         },
     )
     await seed_feature_subtype(
-        session, feature_id=feature_id, kind=kind, geom_wkt=wkt
+        session, feature_id=feature_uuid(label), kind=kind, geom_wkt=wkt
     )
 
 
 async def _seed(session: AsyncSession) -> set[str]:
-    """7 feature를 넣고 bbox 안 기대 membership을 돌려준다."""
+    """7 feature를 넣고 bbox 안 기대 membership(정본 키 집합)을 돌려준다."""
     # 후보 (bbox 안):
     region = {
         "sido_code": "11",
@@ -161,12 +175,12 @@ async def _seed(session: AsyncSession) -> set[str]:
         "legal_dong_code": "1111010100",
     }
     await _ins_point(
-        session, feature_id="ib:place-in", lon=127.05, lat=37.05, **region
+        session, label="ib:place-in", lon=127.05, lat=37.05, **region
     )
     # bbox를 가로지르는 route (coord 없음, geom && + ST_Intersects 모두 참).
     await _ins_geom(
         session,
-        feature_id="ib:route-cross",
+        label="ib:route-cross",
         kind="route",
         wkt="LINESTRING(126.9 37.05, 127.2 37.05)",
         **region,
@@ -174,20 +188,20 @@ async def _seed(session: AsyncSession) -> set[str]:
     # bbox와 겹치는 area polygon (coord 없음).
     await _ins_geom(
         session,
-        feature_id="ib:area-in",
+        label="ib:area-in",
         kind="area",
         wkt="POLYGON((127.04 37.04, 127.06 37.04, 127.06 37.06, 127.04 37.06, 127.04 37.04))",
         **region,
     )
 
     # 비후보 (bbox 밖):
-    await _ins_point(session, feature_id="ib:place-out", lon=128.0, lat=38.0)
+    await _ins_point(session, label="ib:place-out", lon=128.0, lat=38.0)
     # MBR false positive: geom의 bounding box는 bbox와 겹치지만(&&=참) 실제 선분은
     # envelope 위쪽을 지나 교차하지 않는다(ST_Intersects=거짓). exact 술어가
     # 이 route를 두 변형 모두에서 제외해야 한다.
     await _ins_geom(
         session,
-        feature_id="ib:route-mbr-fp",
+        label="ib:route-mbr-fp",
         kind="route",
         wkt="LINESTRING(127.05 37.2, 127.2 37.05)",
         **region,
@@ -197,7 +211,7 @@ async def _seed(session: AsyncSession) -> set[str]:
     # 적대 fixture다.
     await _ins_geom(
         session,
-        feature_id="ib:area-centroid-fp",
+        label="ib:area-centroid-fp",
         kind="area",
         wkt=(
             "POLYGON((126.8 36.8,127.3 36.8,127.3 37.3,126.8 37.3,126.8 36.8),"
@@ -210,12 +224,16 @@ async def _seed(session: AsyncSession) -> set[str]:
     # 완전히 밖에 있는 route (대조군).
     await _ins_geom(
         session,
-        feature_id="ib:route-out",
+        label="ib:route-out",
         kind="route",
         wkt="LINESTRING(128.0 38.0, 128.2 38.0)",
     )
     await session.flush()
-    return {"ib:place-in", "ib:route-cross", "ib:area-in"}
+    return {
+        feature_uuid("ib:place-in"),
+        feature_uuid("ib:route-cross"),
+        feature_uuid("ib:area-in"),
+    }
 
 
 async def test_mbr_false_positive_is_excluded_by_exact_intersects(
@@ -231,14 +249,16 @@ async def test_mbr_false_positive_is_excluded_by_exact_intersects(
         migrated_session, **_BBOX, include_geometry=True, price_stale_hide_days=None
     )
 
-    light_ids = {r["feature_id"] for r in light}
-    geom_ids = {r["feature_id"] for r in geom}
+    # raw row의 `feature_id`는 uuid 컬럼에서 오므로 driver가 `uuid.UUID`를 준다 —
+    # 기대집합과 같은 축(text 표기)으로 낮춰 비교한다.
+    light_ids = {str(r["feature_id"]) for r in light}
+    geom_ids = {str(r["feature_id"]) for r in geom}
 
     # MBR false positive route는 어느 변형에도 없다.
-    assert "ib:route-mbr-fp" not in light_ids
-    assert "ib:route-mbr-fp" not in geom_ids
-    assert "ib:area-centroid-fp" not in light_ids
-    assert "ib:area-centroid-fp" not in geom_ids
+    assert feature_uuid("ib:route-mbr-fp") not in light_ids
+    assert feature_uuid("ib:route-mbr-fp") not in geom_ids
+    assert feature_uuid("ib:area-centroid-fp") not in light_ids
+    assert feature_uuid("ib:area-centroid-fp") not in geom_ids
     assert light_ids == expected
     assert geom_ids == expected
 
@@ -262,23 +282,24 @@ async def test_include_geometry_is_serialization_only(
     )
 
     # (1) membership 안정: 같은 feature_id 집합.
-    assert {r["feature_id"] for r in light} == {r["feature_id"] for r in geom}
+    assert {str(r["feature_id"]) for r in light} == {
+        str(r["feature_id"]) for r in geom
+    }
 
     # (2) payload만 차이: 경량 변형은 geometry 컬럼을 SELECT하지 않는다.
     assert all("geometry" not in r for r in light)
 
     # (3) geometry 변형은 route/area에 GeoJSON을 직렬화한다.
-    geom_by_id = {r["feature_id"]: r for r in geom}
-    assert geom_by_id["ib:route-cross"]["geometry"] is not None
+    geom_by_id = {str(r["feature_id"]): r for r in geom}
+    route_cross = geom_by_id[feature_uuid("ib:route-cross")]
+    assert route_cross["geometry"] is not None
     # T-VN-35: subtype 컬럼 타입이 MultiLineString이라 단일 선분도 Multi로 승격된다.
-    assert geom_by_id["ib:route-cross"]["geometry"]["type"] in {
-        "LineString",
-        "MultiLineString",
-    }
-    assert geom_by_id["ib:area-in"]["geometry"] is not None
-    assert geom_by_id["ib:area-in"]["geometry"]["type"] in {"Polygon", "MultiPolygon"}
+    assert route_cross["geometry"]["type"] in {"LineString", "MultiLineString"}
+    area_in = geom_by_id[feature_uuid("ib:area-in")]
+    assert area_in["geometry"] is not None
+    assert area_in["geometry"]["type"] in {"Polygon", "MultiPolygon"}
     # point feature는 geometry가 없다(coord만).
-    assert geom_by_id["ib:place-in"]["geometry"] is None
+    assert geom_by_id[feature_uuid("ib:place-in")]["geometry"] is None
 
 
 async def test_clusters_share_items_exact_spatial_universe(
@@ -294,7 +315,7 @@ async def test_clusters_share_items_exact_spatial_universe(
         migrated_session, **_BBOX, cluster_unit="sido"
     )
 
-    assert {row["feature_id"] for row in items} == expected
+    assert {str(row["feature_id"]) for row in items} == expected
     assert len(clusters) == 1
     assert clusters[0]["cluster_key"] == "11"
     assert clusters[0]["feature_count"] == len(expected)
@@ -315,7 +336,7 @@ async def test_cross_boundary_geometry_uses_stored_canonical_code_once(
     """
     await _ins_geom(
         migrated_session,
-        feature_id="ib:route-stored-seoul",
+        label="ib:route-stored-seoul",
         kind="route",
         wkt="LINESTRING(126.9 37.03, 127.2 37.03)",
         sido_code="11",
@@ -324,7 +345,7 @@ async def test_cross_boundary_geometry_uses_stored_canonical_code_once(
     )
     await _ins_geom(
         migrated_session,
-        feature_id="ib:area-stored-busan",
+        label="ib:area-stored-busan",
         kind="area",
         wkt=(
             "POLYGON((126.95 36.95,127.15 36.95,127.15 37.15,"
@@ -342,9 +363,9 @@ async def test_cross_boundary_geometry_uses_stored_canonical_code_once(
         include_geometry=False,
         price_stale_hide_days=None,
     )
-    assert {row["feature_id"] for row in items} == {
-        "ib:route-stored-seoul",
-        "ib:area-stored-busan",
+    assert {str(row["feature_id"]) for row in items} == {
+        feature_uuid("ib:route-stored-seoul"),
+        feature_uuid("ib:area-stored-busan"),
     }
 
     expected_by_unit = {

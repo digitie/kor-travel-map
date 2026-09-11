@@ -90,9 +90,11 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
             await connection.execute(text("CREATE SCHEMA feature"))
             await connection.execute(
                 text(
+                    # T-VN-39: 정본 표의 열 이름은 `feature_id`(uuid)다. 대역
+                    # 표가 옛 이름을 들면 repo의 SQL이 여기서만 42703으로 죽는다.
                     "CREATE TABLE feature.feature_aliases ("
                     "alias text PRIMARY KEY, "
-                    "feature_uuid uuid NOT NULL, "
+                    "feature_id uuid NOT NULL, "
                     "alias_kind text NOT NULL"
                     ")"
                 )
@@ -104,12 +106,12 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
                 await connection.execute(
                     text(
                         "INSERT INTO feature.feature_aliases "
-                        "(alias, feature_uuid, alias_kind) "
-                        "VALUES (:alias, :feature_uuid, 'legacy_feature_id')"
+                        "(alias, feature_id, alias_kind) "
+                        "VALUES (:alias, :feature_id, 'legacy_feature_id')"
                     ),
                     {
                         "alias": feature_id,
-                        "feature_uuid": str(uuid.uuid5(uuid.NAMESPACE_URL, feature_id)),
+                        "feature_id": str(uuid.uuid5(uuid.NAMESPACE_URL, feature_id)),
                     },
                 )
         yield engine
@@ -186,7 +188,8 @@ async def test_keyset_pages_and_checksum_follow_byte_order_on_glibc(
         stored = (
             await connection.execute(
                 text(
-                    "SELECT alias, alias_kind, CAST(feature_uuid AS text) AS feature_uuid "
+                    "SELECT alias, alias_kind, "
+                    "CAST(feature_id AS text) AS feature_uuid "
                     "FROM feature.feature_aliases"
                 )
             )

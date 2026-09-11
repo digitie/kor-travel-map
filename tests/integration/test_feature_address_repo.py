@@ -56,7 +56,7 @@ def _feature_row(feature_id: str) -> FeatureRow:
 
 
 async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> None:
-    fid = "f_addr_override"
+    fid = "00000000-0000-7000-8000-00000010a001"
     migrated_session.add(_feature_row(fid))
     await migrated_session.flush()
 
@@ -147,7 +147,7 @@ async def test_apply_override_missing_feature_returns_none(
 ) -> None:
     result = await apply_feature_address_override(
         migrated_session,
-        "f_does_not_exist",
+        "00000000-0000-7000-8000-00000010a0ff",
         legal_dong_code="1111010100",
     )
     assert result is None
@@ -156,7 +156,7 @@ async def test_apply_override_missing_feature_returns_none(
 async def test_apply_override_requires_a_field(
     migrated_session: AsyncSession,
 ) -> None:
-    fid = "f_addr_empty"
+    fid = "00000000-0000-7000-8000-00000010a002"
     migrated_session.add(_feature_row(fid))
     await migrated_session.flush()
     with pytest.raises(ValueError, match="최소 1개"):
@@ -184,7 +184,7 @@ async def test_address_override_is_lifecycle_reactivation_neutral(
     masking)가 지킨다.
     """
 
-    fid = "f_addr_lifecycle_neutral"
+    fid = "00000000-0000-7000-8000-00000010a003"
     migrated_session.add(_feature_row(fid))
     await migrated_session.flush()
     result = await apply_feature_address_override(

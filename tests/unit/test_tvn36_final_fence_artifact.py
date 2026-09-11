@@ -9,7 +9,12 @@ from typing import Final
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACT: Final = _ROOT / "contracts" / "vnext" / "tvn36-post-cutover-invariants-v1.sql"
-_EXPECTED_SHA256: Final = "0153a71af68eea65e9641b4c9d0634a69ea2d68b39c4b9ade1769cfb2fe01d37"
+#: T-VN-39 재키가 override 프로시저의 첫 인자를 uuid로 옮겼다. INV-36-04는 그
+#: 시그니처가 head에 **있어야 한다**고 선언하므로 계약이 따라와야 한다 —
+#: `to_regprocedure`는 IN 인자로 매칭하고, 옛 text 시그니처는 이제 NULL이다.
+#: 이 핀은 "계약이 조용히 바뀌지 않는다"를 지키는 것이지 특정 내용을
+#: 영구 고정하는 것이 아니다 — 내용이 바뀌면 여기도 같은 커밋에서 바뀐다.
+_EXPECTED_SHA256: Final = "19a450cc2363c7286acb45fe583f954430727e23e378d678d06e455458a727ec"
 _EXPECTED_ASSERTION_COUNT: Final = 6
 
 

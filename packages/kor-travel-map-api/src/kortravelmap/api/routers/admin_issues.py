@@ -396,15 +396,19 @@ async def list_admin_issues(
     started_at = perf_counter()
     try:
         bbox_tuple = _bbox_tuple(min_lon, min_lat, max_lon, max_lat)
-        # T-VN-32C PR-2 — UUID 표기 필터/검색어를 legacy 정본 키로 정규화
-        # (issue.feature_id 컬럼은 legacy 축, S5/S6).
+        # T-VN-32C PR-2 — 운영자가 응답에서 복사한 참조를 정본 키로 정규화.
+        # T-VN-39: 두 자리의 바인드 타입이 다르므로 표면도 다르다. `feature_id`는
+        # `CAST(:feature_id AS uuid)`로 들어가니 uuid 표기가 보장돼야 하고,
+        # `q`는 ILIKE 대상이라 자유 문자열이 그대로 가야 한다.
         page = await list_ops_integrity_issues(
             session,
             status=issue_status,
             severity=severity,
             violation_type=issue_type,
             provider_dataset_id=provider_dataset_id,
-            feature_id=await feature_identity.legacy_id_for_filter(session, feature_id),
+            feature_id=await feature_identity.canonical_feature_id_for_filter(
+                session, feature_id
+            ),
             q=await feature_identity.legacy_id_for_filter(session, q),
             bbox=bbox_tuple,
             limit=page_size,

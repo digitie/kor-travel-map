@@ -124,7 +124,15 @@ async def _engine_for_runtime(engine: AsyncEngine, *, login: str) -> AsyncEngine
 async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """두 runtime LOGIN은 session_user=current_user와 procedure-only 권한을 만족한다."""
+    """두 runtime LOGIN은 session_user=current_user와 procedure-only 권한을 만족한다.
+
+    T-VN-39(alembic 309) 뒤 feature 식별자를 받는 procedure의 첫 인자는 uuid다.
+    아래 ``::regprocedure`` 리터럴은 **존재하지 않는 시그니처면 NULL이 아니라
+    42883으로 선다** — 즉 이 목록은 ACL 단언이기 전에 "이 이름의 이 시그니처가
+    head에 있다"는 계약이다. 그래서 재키를 따라 첫 인자만 ``text`` → ``uuid``로
+    옮기고, 나머지 자리(text/bigint/jsonb/text[])는 그대로 둔다 — 시그니처를 느슨한
+    이름 조회로 바꾸면 그 계약이 사라진다.
+    """
 
     await _provision_runtime_logins(migrated_engine)
     engines: list[AsyncEngine] = []
@@ -177,7 +185,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.apply_provider_feature_field_patch("
-                            "text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
+                            "uuid,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -188,7 +196,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.author_feature_field_overrides("
-                            "text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
+                            "uuid,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -199,7 +207,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.revoke_feature_field_overrides("
-                            "text,bigint,text,text,bigint,text[])'::regprocedure, "
+                            "uuid,bigint,text,text,bigint,text[])'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -216,7 +224,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.transition_admin_feature_state("
-                            "text,text,text,text,bigint,text,text,text)'::regprocedure, "
+                            "uuid,text,text,text,bigint,text,text,text)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -227,7 +235,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.author_lifecycle_override("
-                            "text,text,text,boolean,text,text,bigint)'::regprocedure, "
+                            "uuid,text,text,boolean,text,text,bigint)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -238,7 +246,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.revoke_lifecycle_override("
-                            "text,text,bigint)'::regprocedure, "
+                            "uuid,text,bigint)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -249,7 +257,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.reactivate_admin_feature_state("
-                            "text,bigint,text,text,bigint,text,text)'::regprocedure, "
+                            "uuid,bigint,text,text,bigint,text,text)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -278,7 +286,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "SELECT has_function_privilege("
                             "session_user, "
                             "'feature.transition_feature_state("
-                            "text,text,text,text,bigint,jsonb)'::regprocedure, "
+                            "uuid,text,text,text,bigint,jsonb)'::regprocedure, "
                             "'EXECUTE')"
                         )
                     )
@@ -622,7 +630,7 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
                         """
                         CALL feature.create_feature_with_initial_state(
                             CAST(:payload AS jsonb), 'active', 'draft', 'valid',
-                            CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                            CAST(:context AS jsonb), NULL, NULL, NULL
                         )
                         """
                     ),

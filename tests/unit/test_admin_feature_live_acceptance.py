@@ -902,11 +902,15 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
     assert "owned weather value fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
-    assert '"feature.feature_aliases.feature_id"] = len(present)' in fixture
     assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
     assert '"feature.current_price_summary.feature_id"] = 1' in fixture
-    assert 'if rows:' in inspection
-    assert '"feature.feature_aliases.feature_id"] = len(rows)' in inspection
+    # T-VN-39/ADR-098 결정 6: alias 발급은 provider 경로 전용이다. seed는 core
+    # 프로시저를, api-audit lane은 admin 수동 생성을 감사하는데 **둘 다 alias를
+    # 만들지 않는다.** 종전의 두 핀은 `trg_features_legacy_alias`가 있던 시절의
+    # 기대였다. 기대를 지우고 끝내면 다시 들어와도 모르므로, 새 규칙을 결박한다.
+    assert '"feature.feature_aliases.feature_id"' not in fixture
+    assert '"feature.feature_aliases.feature_id"' not in inspection
+    assert "alias 발급을 provider 경로로 한정" in fixture
     assert cleanup.count("DELETE FROM feature.features") == 1
     assert purge.count("DELETE FROM feature.features") == 1
     # 0104가 review/whole-row-freeze 모델을 지웠다. purge는 Feature 한 번 삭제로

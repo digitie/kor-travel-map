@@ -84,27 +84,36 @@ async def _case_id_for(
 ) -> str | None:
     if not case_ids:
         return None
+    # T-VN-39 재키 뒤 `ops.manual_provider_dedup_cases.manual_feature_id`는 uuid다
+    # — **정본 축**이고 legacy `f_*`가 들어오는 자리가 아니다. 맨 바인드로 두면
+    # 드라이버의 타입 추론에 기대게 되므로 자리마다 명시 캐스트를 둔다(형제 파일
+    # `test_tvn_m05_detector_manual_listing.py`와 같은 형태).
     async with engine.connect() as connection:
         row = (
             await connection.execute(
                 text(
                     "SELECT case_id FROM ops.manual_provider_dedup_cases "
                     "WHERE case_id = ANY(CAST(:case_ids AS uuid[])) "
-                    "  AND manual_feature_id = :manual_feature_id"
+                    "  AND manual_feature_id = CAST(:manual_feature_id AS uuid)"
                 ),
                 {"case_ids": list(case_ids), "manual_feature_id": manual_feature_id},
             )
         ).first()
+    # `case_id`는 uuid 컬럼이라 드라이버가 `uuid.UUID`를 준다. 호출부가 이 값을
+    # `DetectionOutcome.suppressed_case_ids`(text 튜플)와 비교하므로 여기서 고정한다 —
+    # 섞이면 `case_id in again.suppressed_case_ids`가 **항상 거짓**이라 공허해진다.
     return None if row is None else str(row.case_id)
 
 
 async def _row_revision(engine: AsyncEngine, feature_id: str) -> int:
+    """`feature.features.feature_id`는 재키 뒤 uuid다 — 넘기는 것도 정본 키다."""
+
     async with engine.connect() as connection:
         return int(
             await connection.scalar(
                 text(
                     "SELECT row_revision FROM feature.features "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {"feature_id": feature_id},
             )
@@ -117,6 +126,9 @@ async def _seed_and_decide(
     """쌍 하나를 심고, 탐지해 나온 case를 admin 판정으로 닫는다."""
 
     pair = await _seed_manual_provider_pair(engine, index=index)
+    # 이 파일이 `manual_id`를 쓰는 자리는 전부 정본 축이다 — case 조회의 uuid 컬럼과
+    # `feature.features` 직접 UPDATE. 그래서 seed의 **정본 키**를 받는다. legacy `f_*`는
+    # alias map에만 남고(ADR-098) 여기 어디에도 들어가지 않는다.
     manual_id = str(pair["manual_feature_id"])
     first = await _detect_once(engine, run_id=f"fence-seed-{uuid4().hex[:8]}")
     case_id = await _case_id_for(engine, first.created_case_ids, manual_id)
@@ -152,7 +164,10 @@ async def test_a_decided_pair_returns_when_the_scoring_evidence_changes(
     async with migrated_engine.begin() as connection:
         await connection.execute(
             text(
-                "UPDATE feature.features SET name = :name WHERE feature_id = :feature_id"
+                # `name`은 varchar, `feature_id`는 uuid다 — 한 문장에서 두 축이 만난다.
+                # 바인드 이름을 나눠 두고 uuid 자리에만 캐스트를 붙인다.
+                "UPDATE feature.features SET name = :name "
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
             {"name": "M05 수동 후보 71 개명", "feature_id": manual_id},
         )
@@ -180,7 +195,7 @@ async def test_an_unrelated_field_patch_does_not_reraise_a_decided_pair(
             text(
                 "UPDATE feature.features "
                 "SET urls = CAST(:urls AS jsonb), row_revision = row_revision + 1 "
-                "WHERE feature_id = :feature_id"
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
             {"urls": _HOMEPAGE_PATCH, "feature_id": manual_id},
         )
@@ -267,7 +282,7 @@ async def test_a_new_provider_source_record_releases_the_fence(
                     "SELECT link.source_entity_key FROM provider_sync.source_links AS link "
                     "JOIN feature.features AS f ON f.feature_id = link.feature_id "
                     "WHERE link.source_role = 'primary' "
-                    "  AND f.feature_id <> :manual_feature_id "
+                    "  AND f.feature_id <> CAST(:manual_feature_id AS uuid) "
                     "  AND f.name LIKE 'M05 Provider 후보 74%'"
                 ),
                 {"manual_feature_id": manual_id},

@@ -68,16 +68,14 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
     create_domain_command_record,
     lock_domain_command,
 )
-from kortravelmap.infra.feature_identity import (
-    candidate_feature_uuid,
-    verify_feature_uuid,
-)
+from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
 from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
@@ -197,20 +195,26 @@ env ``KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`` (기본 4 = OpiNet 로테이션 1�
 # ─── SQL 상수 (EXPLAIN 검증 대상, test-strategy §4.2) ────────────────────────
 
 # T-VN-34: base INSERT와 세 상태축 쓰기는 procedure만 수행한다.
-_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
-CALL feature.create_feature_with_initial_state(
+#
+# T-VN-39/ADR-098: provider 경로는 core 프로시저를 **직접 부르지 않는다.** 재키가
+# `ON CONFLICT (feature_id)`의 결정적 축을 없애므로, wrapper가
+# `(provider_dataset_id, feature_kind, natural_key)`로 identity를 먼저 claim하고
+# 그 uuid로 core를 부른다. manual 세 경로가 이미 같은 삼단으로 산다.
+_CREATE_PROVIDER_FEATURE_SQL: Final[str] = """
+CALL feature.create_provider_feature_with_initial_state(
     CAST(:feature_payload AS jsonb),
+    CAST(:identity AS jsonb),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
     CAST(:state_context AS jsonb),
-    NULL, NULL, NULL, NULL
+    NULL, NULL, NULL
 )
 """
 
 _TRANSITION_FEATURE_STATE_SQL: Final[str] = """
 CALL feature.transition_feature_state(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:lifecycle_state AS text),
     CAST(:publication_state AS text),
     CAST(:quality_state AS text),
@@ -222,7 +226,7 @@ CALL feature.transition_feature_state(
 
 _APPLY_PROVIDER_FIELD_PATCH_SQL: Final[str] = """
 CALL feature.apply_provider_feature_field_patch(
-    CAST(:feature_id AS text),
+    CAST(:feature_id AS uuid),
     CAST(:provider_dataset_id AS bigint),
     CAST(:source_entity_key AS text),
     CAST(:source_record_key AS text),
@@ -326,12 +330,31 @@ SELECT EXISTS (SELECT 1 FROM upserted)
        ) AS became_current
 """
 
+#: 이 source entity의 primary Feature**들**을 묻는다 — 복수형이 요점이다.
+#:
+#: 2026-09-08에 `UNIQUE (source_entity_key) WHERE source_role='primary'`를 심었다가
+#: 통합 17건이 빨개져 되돌렸다. 그리고 2026-09-09 조사가 **축 자체가 틀렸다**는 것을
+#: 보였다: opinet은 `source_entity_id = f"{uni_id}:{prodcd}"`(제품별 N개)인데
+#: `source_natural_key = uni_id`(주유소별 1개)이고, 공개 함수 docstring이 "단일 제품
+#: 가격을 **같은 price anchor feature에 누적**"이라 명시한다. entity를 identity 축으로
+#: 삼으면 새 제품코드가 등장할 때마다 새 Feature가 주조된다 — 재키가 고치려던 중복을
+#: 재키가 만든다.
+#:
+#: 올바른 축은 `(provider_dataset_id, feature_kind, natural_key)`이고 그것은 T-VN-39가
+#: `provider_sync.provider_feature_identities`로 착지시킨다.
+_RESOLVE_PRIMARY_FEATURE_SQL: Final[str] = """
+SELECT feature_id
+FROM provider_sync.source_links
+WHERE source_entity_key = :source_entity_key
+  AND source_role = 'primary'
+"""
+
 _UPSERT_SOURCE_LINK_SQL: Final[str] = """
 INSERT INTO provider_sync.source_links (
     feature_id, source_entity_key, source_role,
     match_method, confidence, created_at
 ) VALUES (
-    :feature_id,
+    CAST(:feature_id AS uuid),
     (SELECT source_entity_key
      FROM provider_sync.source_records
     WHERE source_record_key = :source_record_key),
@@ -364,7 +387,7 @@ _PUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = """
 """
 
 _NONPUBLIC_FEATURE_ROW_COLUMNS_SQL: Final[str] = f"""
-    f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.feature_id, CAST(f.feature_id AS text) AS feature_uuid,
     f.kind, f.name, f.category,
     f.lifecycle_state, f.publication_state, f.quality_state,
     x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
@@ -394,7 +417,7 @@ _GET_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT {_NONPUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.features AS f
 {typed_feature_detail_joins_sql("f")}
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
 # 공개 단건/batch — ADR-067 단일 공개 projection(``feature.public_features``,
@@ -409,7 +432,7 @@ WHERE feature_id = :feature_id
 _GET_PUBLIC_FEATURES_BY_IDS_SQL: Final[str] = f"""
 SELECT {_PUBLIC_FEATURE_ROW_COLUMNS_SQL}
 FROM feature.public_features
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 """
 
 _FEATURE_LOAD_STATE_SQL: Final[str] = """
@@ -447,7 +470,7 @@ SELECT
         ORDER BY t.transition_id DESC
         LIMIT 1
     ) AS last_publication_from_state
-FROM (VALUES (CAST(:feature_id AS text))) AS wanted(feature_id)
+FROM (VALUES (CAST(:feature_id AS uuid))) AS wanted(feature_id)
 LEFT JOIN feature.features AS f
   ON f.feature_id = wanted.feature_id
 """
@@ -541,6 +564,14 @@ def _canonical_notice_feature_sql(
     source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
     ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
     없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
+
+    T-VN-39 재키 뒤 ``feature_id``는 uuid라 유도한 ``f_*``와 **직접 비교할 수 없다**
+    (`operator does not exist: uuid = text`). 그 값이 실제로 사는 곳은
+    ``feature.feature_aliases.alias``이므로 등치 대신 그 등록부를 조회한다 — 판정의
+    뜻은 그대로다("이 feature가 현재 계보의 정본 주소를 갖는가").
+
+    이 술어는 여덟 자리에 인라인된다(모든 공개 read 경로). 하나가 깨지면 공개 조회가
+    통째로 죽는다.
     """
     # 물화된 계보를 넘기면 그것을 쓴다. 안 넘기면 재계산인데, read 경로에서는
     # raw_data JSON 추출이 행마다 붙어 T-VN-37이 없앤 비용이 되살아난다.
@@ -560,19 +591,26 @@ def _canonical_notice_feature_sql(
          AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
          AND {entity_alias}.source_entity_type = 'weather_alert')
       )
-      THEN {feature_alias}.feature_id = (
-        'f_global_n_' || left(
-          encode(
-            x_extension.digest(
-              'global|notice|99000000|'
-              || {dataset_alias}.provider || ':' || {dataset_alias}.dataset_key || '|'
-              || {lineage_sql} || '|',
-              'sha1'
-            ),
-            'hex'
-          ),
-          16
-        )
+      THEN EXISTS (
+        SELECT 1
+        FROM feature.feature_aliases AS canonical_notice_alias
+        WHERE canonical_notice_alias.feature_id = {feature_alias}.feature_id
+          AND canonical_notice_alias.alias_kind = 'legacy_feature_id'
+          AND canonical_notice_alias.alias = (
+            'f_global_n_' || left(
+              encode(
+                x_extension.digest(
+                  'global|notice|99000000|'
+                  || {dataset_alias}.provider || ':'
+                  || {dataset_alias}.dataset_key || '|'
+                  || {lineage_sql} || '|',
+                  'sha1'
+                ),
+                'hex'
+              ),
+              16
+            )
+          )
       )
       ELSE false
     END
@@ -1024,13 +1062,13 @@ WITH requested AS (
         item.known_row_revision,
         item.ordinality
     FROM unnest(
-        CAST(:feature_ids AS text[]),
+        CAST(:feature_ids AS uuid[]),
         CAST(:known_row_revisions AS bigint[])
     ) WITH ORDINALITY AS item(feature_id, known_row_revision, ordinality)
 )
 SELECT
     requested.feature_id,
-    CAST(base.feature_uuid AS text) AS feature_uuid,
+    CAST(base.feature_id AS text) AS feature_uuid,
     CASE
       WHEN base.feature_id IS NULL THEN 'missing'
       WHEN base.lifecycle_state = 'retired' THEN 'retired'
@@ -1167,12 +1205,13 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
 """
 
 
-# notice lineage 가시성 read — T-VN-32B dual: feature 참조를 legacy id와 UUID
-# 정본 쌍으로 병행 반환한다(0080이 view에 feature_uuid를 노출).
+# notice lineage 가시성 read — 응답 계약인 ``feature_uuid`` 슬롯을 함께 반환한다.
+# T-VN-39 재키 뒤 ``feature_id``가 곧 uuid라 두 값은 같고, view는 그 슬롯을
+# ``CAST(feature_id AS text)``로 계속 노출한다(309 뷰 재생성).
 _PUBLIC_ACTIVE_NOTICE_IDENTITIES_SQL: Final[str] = f"""
 SELECT f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid
 FROM feature.public_features AS f
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND f.kind = 'notice'
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 """
@@ -1341,8 +1380,8 @@ WITH candidates AS MATERIALIZED (
     WHERE {_bbox_candidate_predicate_sql("f")}
     {_bbox_attribute_filter_sql("f")}
       AND (
-        CAST(:cursor_feature_id AS text) IS NULL
-        OR f.feature_id > CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS uuid)
       )
     {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
     ORDER BY f.feature_id ASC
@@ -1389,8 +1428,8 @@ WITH candidates AS MATERIALIZED (
     WHERE {_bbox_candidate_predicate_sql("f")}
     {_bbox_attribute_filter_sql("f")}
       AND (
-        CAST(:cursor_feature_id AS text) IS NULL
-        OR f.feature_id > CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid) IS NULL
+        OR f.feature_id > CAST(:cursor_feature_id AS uuid)
       )
     {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
     ORDER BY f.feature_id ASC
@@ -1628,7 +1667,7 @@ WHERE (
         -- feature_id tiebreak로 넘어가 커서 행 자신이 다음 페이지에 재등장(같은 feature_id
         -- 중복)하는 float8 정밀도 버그를 막는다.
         -CAST(:cursor_score AS real),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY score DESC, feature_id ASC
@@ -1642,8 +1681,8 @@ _FEATURE_SEARCH_BY_ID_SQL: Final[str] = (
 SELECT *
 FROM candidates
 WHERE (
-    CAST(:cursor_feature_id AS text) IS NULL
-    OR feature_id > CAST(:cursor_feature_id AS text)
+    CAST(:cursor_feature_id AS uuid) IS NULL
+    OR feature_id > CAST(:cursor_feature_id AS uuid)
 )
 ORDER BY feature_id ASC
 LIMIT :limit_plus_one
@@ -1733,7 +1772,7 @@ WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
     OR (distance_m, feature_id) > (
         CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY distance_m ASC, feature_id ASC
@@ -1750,7 +1789,7 @@ WHERE (
     CAST(:cursor_name AS text) IS NULL
     OR (name, feature_id) > (
         CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY name ASC, feature_id ASC
@@ -1767,7 +1806,7 @@ WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
     OR (last_updated_at, feature_id) < (
         CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY last_updated_at DESC, feature_id DESC
@@ -1850,7 +1889,7 @@ WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
     OR (distance_m, feature_id) > (
         CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY distance_m ASC, feature_id ASC
@@ -1867,7 +1906,7 @@ WHERE (
     CAST(:cursor_name AS text) IS NULL
     OR (name, feature_id) > (
         CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY name ASC, feature_id ASC
@@ -1884,7 +1923,7 @@ WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
     OR (last_updated_at, feature_id) < (
         CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS text)
+        CAST(:cursor_feature_id AS uuid)
     )
 )
 ORDER BY last_updated_at DESC, feature_id DESC
@@ -2195,10 +2234,11 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
     coord = feature.coord
     addr = feature.address
     return {
+        # T-VN-39/ADR-098: 이 값은 더 이상 identity가 아니라 **alias**다. wrapper가
+        # `(provider_dataset_id, kind, natural_key)`로 uuid를 claim하고, 이 문자열은
+        # 그 Feature의 legacy 주소로 `feature_aliases`에 append된다. 재분류로 값이
+        # 바뀌면 alias가 한 행 늘 뿐 Feature는 갈라지지 않는다.
         "feature_id": feature.feature_id,
-        # T-VN-32C 정본 generator — 비파생 UUIDv7 후보. ON CONFLICT 경로에서는
-        # 버려지고 기존 저장값이 정본(0083, feature_identity 모듈 docstring).
-        "feature_uuid": candidate_feature_uuid(),
         "kind": feature.kind.value,
         "name": feature.name,
         "category": feature.category,
@@ -2266,6 +2306,7 @@ def _provider_field_patch_payload(
     feature: Feature,
     *,
     feature_uuid: str,
+    parent_feature_id: str | None,
 ) -> tuple[str, str]:
     """Provider DTO를 registry의 고정 field path 입력으로 낮춘다.
 
@@ -2276,6 +2317,11 @@ def _provider_field_patch_payload(
     """
 
     params = _feature_params(feature)
+    # T-VN-39: registry의 `core.parent_feature_id`는 프로시저 안에서
+    # `NULLIF(p_values ->> 'core.parent_feature_id','')::uuid`로 착지한다
+    # (`alembic/head-schema.sql:916`). provider DTO가 든 것은 부모의 legacy
+    # **주소**이므로 호출부가 이미 푼 정본 키로 갈아 끼운다.
+    params["parent_feature_id"] = parent_feature_id
     values: dict[str, Any] = {
         f"core.{key}": (
             json.loads(value)
@@ -2315,7 +2361,6 @@ def _provider_field_patch_payload(
 
     subtype = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid=feature_uuid,
         kind=feature.kind.value,
         detail=feature.detail,
     )
@@ -2348,12 +2393,20 @@ async def _apply_provider_feature_field_patch(
 ) -> int:
     """Existing provider Feature를 field-level base/effective procedure로 갱신한다."""
 
+    parent_feature_id: str | None = feature.parent_feature_id
+    if parent_feature_id:
+        parents = await resolve_canonical_feature_ids(session, [parent_feature_id])
+        parent_feature_id = parents[parent_feature_id]
     values, geometry_wkt = _provider_field_patch_payload(
-        feature, feature_uuid=feature_uuid
+        feature, feature_uuid=feature_uuid, parent_feature_id=parent_feature_id
     )
     return await _apply_provider_field_values(
         session,
-        feature_id=feature.feature_id,
+        # T-VN-39: 프로시저는 `CAST(:feature_id AS uuid)`로 받는다. `feature.feature_id`는
+        # provider 라이브러리가 유도한 legacy `f_*`라 여기서 22P02다 — **정본 키는 이미
+        # 인자로 들어와 있다**(claim 축이 풀어 준 값). 기존 Feature 갱신 경로 전량이
+        # 이 한 줄에서 죽었고, SQL의 모양은 옳으므로 head 오라클이 볼 수 없었다.
+        feature_id=feature_uuid,
         provider_dataset_id=provider_dataset_id,
         source_membership=source_membership,
         expected_row_revision=expected_row_revision,
@@ -2463,9 +2516,11 @@ def _make_source_entity_key(
     return "se_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _source_link_params(link: SourceLink) -> dict[str, Any]:
+def _source_link_params(
+    link: SourceLink, *, feature_id: str | None = None
+) -> dict[str, Any]:
     return {
-        "feature_id": link.feature_id,
+        "feature_id": feature_id if feature_id is not None else link.feature_id,
         "source_record_key": link.source_record_key,
         "source_role": link.source_role.value,
         "match_method": link.match_method,
@@ -2483,14 +2538,21 @@ async def _upsert_feature_subtype(
 ) -> None:
     """kind별 typed subtype upsert (core upsert와 **같은 트랜잭션**).
 
-    ``feature_uuid``는 core upsert의 RETURNING 값을 그대로 쓴다. conflict-update
-    경로에서 정본은 이미 저장돼 있던 UUID이므로 후보를 재계산하면 identity 사본
-    FK(``fk_*_identity_pair``)가 깨진다 — 파생 계산 금지.
+    subtype 행이 참조하는 identity는 core의 ``feature_id``(uuid) 하나뿐이다 —
+    T-VN-39 재키(309)가 subtype의 identity 사본 컬럼과 ``fk_*_identity_pair`` FK를
+    함께 없앴으므로 재계산할 파생 identity 자체가 존재하지 않는다.
+
+    그 하나가 ``stored_feature_uuid``다. ``feature.feature_id``는 provider
+    라이브러리가 유도한 legacy **주소**이고 subtype 컬럼은 uuid이므로 그것을 넣으면
+    22P02다 — 신규 provider Feature 적재 **전량**이 여기서 죽었다. 형제 갈래
+    (`_apply_provider_feature_field_patch`, 기존 Feature 갱신)가 같은 실수를 갖고
+    있었고 둘 다 같은 커밋에서 고쳤다. 다른 호출부 셋
+    (`admin_feature_repo`·`curation_repo`·`feature_request_repo`)은 처음부터
+    정본 키를 넘긴다.
     """
     await write_subtype(
         session,
-        feature_id=feature.feature_id,
-        feature_uuid=stored_feature_uuid,
+        feature_id=stored_feature_uuid,
         kind=feature.kind.value,
         detail=feature.detail,
         geom_wkt=geom_wkt,
@@ -2508,16 +2570,15 @@ async def upsert_feature(
 
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
 
-    T-VN-32C(0083): ``feature_uuid``는 writer가 비파생 UUIDv7 후보를 명시
-    INSERT하고(fill 트리거는 raw SQL 경로 안전망), RETURNING 관측값을
-    fail-close 검증한다 — 신규 insert면 보낸 후보와 동일해야 하고(generator
-    이원화 차단), conflict-update면 기존 저장값이 정본이다
-    (``FeatureIdentityInvariantError``).
+    T-VN-39(309): identity 사본 컬럼 ``features.feature_uuid``와 그 fill 트리거는
+    재키가 없앴다. 정본 키는 wrapper가 ``(provider_dataset_id, feature_kind,
+    natural_key)``로 claim해 ``o_feature_id``로 돌려주는 ``feature_id``(uuid)
+    하나이고, claim과 core 결과의 일치는 DB 안에서 검증된다(ADR-098).
 
     T-VN-35(ADR-086): core는 kind 공통 축만 쓰고 kind별 상세·geometry는 subtype이
     정본이다. 두 write는 **한 트랜잭션**이며 순서가 강제된다 — subtype의
-    ``(feature_id, kind)``/``(feature_id, feature_uuid)`` FK가 core 행을 먼저
-    요구하기 때문이다(commit 경계는 종전처럼 호출자 책임).
+    ``(feature_id, kind)`` FK가 core 행을 먼저 요구하기 때문이다(commit 경계는
+    종전처럼 호출자 책임).
 
     base INSERT와 3축 initial state는 ``create_feature_with_initial_state``만
     수행한다. existing row의 provider 본문 갱신은 상태 축을 전혀 건드리지 않는
@@ -2534,12 +2595,38 @@ async def upsert_feature(
 
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
+    # T-VN-39: core 생성 프로시저는 payload의 `parent_feature_id`를
+    # `nullif(... , '')::uuid`로 받는다(`alembic/head-schema.sql:3757`). provider가
+    # 그 자리에 싣는 것은 **부모의 legacy 주소**다 — opinet 유가처럼 자식 Feature를
+    # 매다는 데이터셋 전량이 여기서 22P02였다. 부모는 같은 적재에서 먼저 들어와
+    # alias/claim이 이미 있으므로 정본 키로 풀어 넘긴다.
+    if params.get("parent_feature_id"):
+        parents = await resolve_canonical_feature_ids(
+            session, [str(params["parent_feature_id"])]
+        )
+        params["parent_feature_id"] = parents[str(params["parent_feature_id"])]
     initial_state = _provider_feature_state(feature)
+    if not feature.provider_natural_key:
+        # 이 값이 없으면 wrapper가 identity를 claim할 수 없다. 조용히 새 Feature를
+        # 만드는 대신 여기서 선다 — `tests/lint/test_provider_features_carry_their_natural_key.py`가
+        # provider 28곳을 결박하지만, 그 검사를 우회한 경로가 있으면 여기서 드러난다.
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {feature.feature_id!r}에 provider_natural_key가 없다 — "
+            "identity claim 축(ADR-098)의 세 번째 성분이 비어 있다."
+        )
     create_row = (
         await session.execute(
-            text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+            text(_CREATE_PROVIDER_FEATURE_SQL),
             {
                 "feature_payload": _provider_feature_payload(params),
+                "identity": json.dumps(
+                    {
+                        "provider_dataset_id": str(provider_dataset_id),
+                        "feature_kind": feature.kind.value,
+                        "natural_key": feature.provider_natural_key,
+                        "legacy_alias": feature.feature_id,
+                    }
+                ),
                 "lifecycle_state": initial_state.lifecycle_state,
                 "publication_state": initial_state.publication_state,
                 "quality_state": initial_state.quality_state,
@@ -2552,13 +2639,10 @@ async def upsert_feature(
         )
     ).mappings().one()
     inserted = bool(create_row["o_inserted"])
-    stored_feature_uuid = str(create_row["o_feature_uuid"])
-    verify_feature_uuid(
-        feature.feature_id,
-        stored_feature_uuid,
-        sent_feature_uuid=params["feature_uuid"],
-        inserted=inserted,
-    )
+    # T-VN-39: `o_feature_id`가 곧 uuid다. wrapper가 claim과 core 결과의 일치를
+    # 이미 DB 안에서 검증하므로(`ck_provider_feature_create_core_identity`), 여기서는
+    # 그 값을 받기만 한다 — 검증 지점이 둘이면 어느 쪽이 정본인지 흐려진다.
+    stored_feature_uuid = str(create_row["o_feature_id"])
     if inserted:
         await _upsert_feature_subtype(
             session,
@@ -2733,6 +2817,45 @@ class _FeatureLoadState:
     last_publication_from_state: str | None = None
 
 
+#: ADR-098: provider Feature의 identity는 `(provider_dataset_id, feature_kind,
+#: natural_key)` claim이다. DTO의 `feature_id`는 provider 라이브러리가 유도한 legacy
+#: `f_*` 문자열이라 재키 후 정본 키가 아니다 — 그것을 uuid로 캐스트하면 22P02다.
+#:
+#: claim 표를 여기서 **직접 읽지 않는다.** runtime 롤은 `provider_sync`의 어떤 표에도
+#: 직접 접근하지 않으므로(인벤토리가 그 스키마 전체를 runtime에서 회수한다) 직접
+#: SELECT는 마이그레이터 롤로 도는 통합 테스트에서만 통과하고 운영에서 permission
+#: denied가 난다. 해석은 SECURITY DEFINER 함수가 맡는다.
+_RESOLVE_PROVIDER_FEATURE_ID_SQL: Final[str] = """
+SELECT feature.resolve_provider_feature_id(
+    CAST(:provider_dataset_id AS bigint),
+    CAST(:feature_kind AS text),
+    CAST(:natural_key AS text)
+) AS feature_id
+"""
+
+
+async def _resolve_provider_feature_id(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    feature_kind: str,
+    natural_key: str,
+) -> str | None:
+    """claim 축으로 정본 키를 푼다. 첫 적재라 claim이 없으면 ``None``."""
+    row = (
+        await session.execute(
+            text(_RESOLVE_PROVIDER_FEATURE_ID_SQL),
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "feature_kind": feature_kind,
+                "natural_key": natural_key,
+            },
+        )
+    ).mappings().one()
+    resolved = row["feature_id"]
+    return None if resolved is None else str(resolved)
+
+
 async def _feature_load_state(
     session: AsyncSession, feature_id: str
 ) -> _FeatureLoadState:
@@ -2764,10 +2887,25 @@ async def _feature_load_state(
     )
 
 
-async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
-    """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``."""
+async def upsert_source_link(
+    session: AsyncSession, link: SourceLink, *, feature_id: str | None = None
+) -> bool:
+    """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``.
+
+    ``feature_id`` override는 **provider 적재 경로 전용**이다. T-VN-39 재키 뒤
+    ``provider_sync.source_links.feature_id``는 uuid이고, provider가 준
+    ``SourceLink.feature_id``는 provider 라이브러리가 유도한 legacy ``f_*``라
+    정본 키가 아니다(ADR-098). 그 경로는 claim 축
+    (:func:`_resolve_provider_feature_id`)이 푼 uuid를 여기로 넘긴다.
+
+    enrichment·리뷰 승인 경로는 이미 DB에서 읽은 정본 uuid를 DTO에 담아 오므로
+    override 없이 부른다 — 그래서 기본값이 DTO 값이다.
+    """
     await lock_feature_curation_write(session)
-    result = await session.execute(text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link))
+    result = await session.execute(
+        text(_UPSERT_SOURCE_LINK_SQL),
+        _source_link_params(link, feature_id=feature_id),
+    )
     return bool(result.scalar_one())
 
 
@@ -2982,6 +3120,36 @@ async def _retire_provider_candidates(
     return retired
 
 
+async def resolve_primary_features_for_entity(
+    session: AsyncSession, *, source_entity_key: str
+) -> tuple[str, ...]:
+    """이 source entity의 primary link가 가리키는 Feature들.
+
+    **재키(T-VN-39/ADR-098) 후에는 하나여야 한다.** identity가
+    ``(provider_dataset_id, feature_kind, natural_key)`` claim으로 옮겨가면서
+    ``feature_id``는 서버가 한 번 발급하는 UUIDv7이 됐고, 재분류는 새 Feature를
+    주조하는 대신 alias를 한 줄 늘린다.
+
+    재키 **전**에는 그렇지 않았다. Feature identity가 ``make_feature_id``의 ``f_*``
+    였고 그것이 ``bjd_code``·``category``를 해시 입력에 썼으므로, 재분류가 새 Feature를
+    주조해 같은 entity가 구·신 양쪽의 primary가 됐다. 이 함수가 **튜플을 돌려주는
+    것은 그 시절의 흔적**이다 — 시그니처를 좁히지 않고 남겨 둔 이유는, 둘 이상이
+    돌아오는 순간이 곧 앵커가 뚫렸다는 신호이기 때문이다. 하나로 좁히면 그 신호를
+    관측할 자리가 사라진다.
+
+    관측자는 ``tests/integration/test_feature_repo_load.py``의
+    ``test_the_same_provider_entity_never_yields_a_second_feature``다.
+    """
+
+    rows = (
+        await session.execute(
+            text(_RESOLVE_PRIMARY_FEATURE_SQL),
+            {"source_entity_key": source_entity_key},
+        )
+    ).scalars().all()
+    return tuple(str(row) for row in rows)
+
+
 async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
@@ -2999,14 +3167,39 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     record_inserted = record_state.inserted
     feature_inserted = False
     feature_updated = False
-    feature_state = await _feature_load_state(session, bundle.feature.feature_id)
+    if not bundle.feature.provider_natural_key:
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {bundle.feature.feature_id!r}에 provider_natural_key가 "
+            "없다 — identity claim 축(ADR-098)의 세 번째 성분이 비어 있다."
+        )
+    resolved_feature_id = await _resolve_provider_feature_id(
+        session,
+        provider_dataset_id=record_state.provider_dataset_id,
+        feature_kind=bundle.feature.kind.value,
+        natural_key=bundle.feature.provider_natural_key,
+    )
+    feature_state = (
+        _FeatureLoadState(
+            exists=False,
+            lifecycle_state=None,
+            publication_state=None,
+            quality_state=None,
+            row_revision=None,
+            has_provider_reactivation_override=False,
+        )
+        if resolved_feature_id is None
+        else await _feature_load_state(session, resolved_feature_id)
+    )
     feature_missing = not feature_state.exists
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
     # provider field-patch procedure. New Feature has no FK target until the
     # create procedure returns, so it creates this link immediately afterward.
     if not feature_missing:
-        link_inserted = await upsert_source_link(session, bundle.source_link)
+        assert resolved_feature_id is not None  # exists=True면 claim이 풀렸다.
+        link_inserted = await upsert_source_link(
+            session, bundle.source_link, feature_id=resolved_feature_id
+        )
     if record_state.became_current or feature_missing:
         feature_inserted = await upsert_feature(
             session,
@@ -3019,28 +3212,39 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         )
         feature_updated = not feature_inserted
     if feature_missing:
-        link_inserted = await upsert_source_link(session, bundle.source_link)
+        # create wrapper가 claim을 확정했으니 이제 claim 축이 정본 키를 돌려준다.
+        # link의 FK 대상은 그 uuid다 — DTO의 legacy ``f_*``를 그대로 넣으면 22P02다.
+        resolved_feature_id = await _resolve_provider_feature_id(
+            session,
+            provider_dataset_id=record_state.provider_dataset_id,
+            feature_kind=bundle.feature.kind.value,
+            natural_key=bundle.feature.provider_natural_key,
+        )
+        if resolved_feature_id is None:
+            raise FeatureIdentityAnchorError(
+                f"provider Feature {bundle.feature.feature_id!r} 생성 직후에도 "
+                "identity claim이 없다 — wrapper가 claim을 남기지 않았다."
+            )
+        link_inserted = await upsert_source_link(
+            session, bundle.source_link, feature_id=resolved_feature_id
+        )
     if feature_inserted:
         # Create procedure는 core identity/state를, subtype FK는 typed detail 행을
         # 먼저 만든다. 그 다음 같은 transaction에서 field patch를 실행해 신규
         # provider Feature도 base ledger와 effective materializer를 반드시 거치게
         # 한다. intermediate head는 배포하지 않는 single-release 규율이라 외부
         # reader가 direct-create 값을 볼 경계는 없다.
-        created = await _feature_load_state(session, bundle.feature.feature_id)
+        # 정본 키는 바로 위 `feature_missing` 분기가 claim 축에서 이미 풀었다 —
+        # `feature_inserted`는 `feature_missing`을 함의하므로 여기서 다시 묻지 않는다.
+        # `bundle.feature.feature_id`(legacy `f_*`)를 쓰면 uuid 캐스트에서 22P02다.
+        assert resolved_feature_id is not None
+        stored_feature_uuid = resolved_feature_id
+        created = await _feature_load_state(session, stored_feature_uuid)
         assert created.row_revision is not None
-        stored_feature_uuid = (
-            await session.execute(
-                text(
-                    "SELECT feature_uuid::text FROM feature.features "
-                    "WHERE feature_id = :feature_id"
-                ),
-                {"feature_id": bundle.feature.feature_id},
-            )
-        ).scalar_one()
         await _apply_provider_feature_field_patch(
             session,
             bundle.feature,
-            feature_uuid=str(stored_feature_uuid),
+            feature_uuid=stored_feature_uuid,
             provider_dataset_id=record_state.provider_dataset_id,
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
@@ -3048,9 +3252,20 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             ),
             expected_row_revision=created.row_revision,
         )
+    lifecycle_feature_id = resolved_feature_id or await _resolve_provider_feature_id(
+        session,
+        provider_dataset_id=record_state.provider_dataset_id,
+        feature_kind=bundle.feature.kind.value,
+        natural_key=bundle.feature.provider_natural_key,
+    )
+    if lifecycle_feature_id is None:
+        raise FeatureIdentityAnchorError(
+            f"provider Feature {bundle.feature.feature_id!r}에 identity claim이 없다 — "
+            "lifecycle 전이는 정본 키를 필요로 한다."
+        )
     state_updated = await _transition_provider_lifecycle_if_needed(
         session,
-        feature_id=bundle.feature.feature_id,
+        feature_id=lifecycle_feature_id,
         desired_state=_provider_feature_state(bundle.feature),
         provider_dataset_id=record_state.provider_dataset_id,
         source_membership=_ProviderSourceMembership(
@@ -3609,7 +3824,7 @@ def _supersede_stale_notice_sql(close_missing: bool) -> str:
     scope 자체의 winner는 ``ranked``에서 이미 계산하므로 cross-scope 보호 CTE에서
     다시 전수 비교하지 않는다.
 
-    ``close_missing=True``는 ``:hidden_before``(적재 이전에 안 보이던 feature_id
+    ``close_missing=True``는 ``hidden_before``(적재 이전에 안 보이던 feature_id
     배열)를 추가로 요구한다 — 같은 statement에서 읽는 상태는 이미 이번 적재가
     지나간 뒤라 "직전 가시성"을 스스로 관측할 수 없기 때문이다
     (``_hidden_notice_features``).
@@ -4020,9 +4235,9 @@ global_feature_wins AS MATERIALIZED (
             -- 열린다. 그러면 "직전에 안 보였다"가 관측 불가라 재등장 집계가
             -- 구조적으로 항상 0이 된다(실측: 적재 전 valid_end=03:20 → 적재 후
             -- NULL → reconcile 반환행 0건). 그래서 **적재 이전** 가시성은
-            -- 호출자가 재어 ``:hidden_before``로 넘긴다 — 적재가 없는 경로
+            -- 호출자가 재어 ``hidden_before``로 넘긴다 — 적재가 없는 경로
             -- (close/supersede)는 빈 배열이라 종전 판정 그대로다.
-            NOT (desired.feature_id = ANY(CAST(:hidden_before AS text[])))
+            NOT (desired.feature_id = ANY(CAST(:hidden_before AS uuid[])))
             AND desired.old_lifecycle_state = 'active'
             AND (
                 desired.old_valid_end_time IS NULL
@@ -4079,7 +4294,7 @@ global_feature_wins AS MATERIALIZED (
           -- 적재가 먼저 되살린 재등장은 여기 도달했을 때 core/subtype이 이미
           -- 최종 상태다(갱신할 컬럼이 없다). 그래도 RETURNING에 실어야 재등장
           -- 집계가 잡히므로 전이 자체를 갱신 조건에 포함한다. ``was_visible``이
-          -- ``:hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
+          -- ``hidden_before``로 고정되는 경로에서만 참이 되므로, 적재가 이미
           -- 손댄 행 외에는 추가 갱신이 생기지 않는다.
           OR (
               NOT target.was_visible
@@ -4131,7 +4346,7 @@ SELECT f.feature_id
 FROM feature.features AS f
 LEFT JOIN feature.feature_notices AS n
   ON n.feature_id = f.feature_id
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND NOT (
       f.lifecycle_state = 'active'
       AND (
@@ -4148,13 +4363,22 @@ async def _hidden_notice_features(
     feature_ids: Collection[str],
     evaluated_at: datetime,
 ) -> frozenset[str]:
-    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합."""
+    """``feature_ids`` 중 지금 시점에 **보이지 않는** feature 집합.
+
+    입력은 provider가 준 legacy 주소일 수 있다(적재 **전**에 재므로 정본 키를
+    아직 모르는 것이 정상이다). 아직 존재하지 않는 참조는 결과에서 빠지고, 그것이
+    "아직 없다"의 정확한 표현이다 — 그 Feature는 `old_lifecycle_state`가 NULL이라
+    하류의 `was_visible` 판정에서 이미 거짓이다.
+    """
     if not feature_ids:
+        return frozenset()
+    canonical = await resolve_canonical_feature_ids(session, feature_ids, strict=False)
+    if not canonical:
         return frozenset()
     rows = await session.execute(
         text(_HIDDEN_NOTICE_FEATURES_SQL),
         {
-            "feature_ids": sorted(set(feature_ids)),
+            "feature_ids": sorted(set(canonical.values())),
             "evaluated_at": evaluated_at,
         },
     )
@@ -4711,13 +4935,18 @@ async def get_public_feature_rows_by_ids(
 
 async def get_service_feature_batch_items(
     session: AsyncSession,
-    items: Sequence[tuple[str, int | None]],
+    items: Sequence[tuple[str | None, int | None]],
 ) -> tuple[FeatureBatchItemRow, ...]:
     """service batch 5-state item을 요청 순서대로 한 SQL snapshot에서 반환한다.
 
     base table은 존재/lifecycle 상태와 ``row_revision`` 판정에만 사용한다.
     ``trip_card``는 반드시 ``feature.public_features``에서만 만들며 retired,
     suppressed, missing item에는 비공개 payload를 싣지 않는다.
+
+    ``feature_id``가 ``None``인 item은 정본 키로 풀지 못한 참조다(T-VN-39 이후
+    라우터가 그것을 원문 문자열로 흘리지 않고 ``None``으로 바꾼다). ``unnest``가
+    NULL 원소도 한 행으로 만들고 LEFT JOIN이 무매칭이라 그 item만 ``missing``이
+    되며, 요청 순서 echo는 ``WITH ORDINALITY``가 지킨다.
     """
     if not items:
         return ()
@@ -4742,6 +4971,7 @@ async def get_service_feature_batch_items(
         trip_card = None
         if state == "found":
             trip_card = {
+                # ``state == "found"``면 매칭된 행이 있으므로 NULL이 아니다.
                 "feature_id": str(row["feature_id"]),
                 "kind": str(row["kind"]),
                 "name": str(row["name"]),
@@ -4753,9 +4983,13 @@ async def get_service_feature_batch_items(
                 "marker_color": row["marker_color"],
             }
         feature_uuid = row.get("feature_uuid")
+        # 미해석 참조(NULL)로 만들어진 missing 행은 정본 키가 없다. `str(None)`을
+        # 흘리면 응답에 리터럴 `'None'`이 실린다 — 요청 순서 echo는 라우터가
+        # 원문 ref로 맞추므로 여기서는 빈 값이 옳다.
+        row_feature_id = row["feature_id"]
         batch.append(
             FeatureBatchItemRow(
-                feature_id=str(row["feature_id"]),
+                feature_id="" if row_feature_id is None else str(row_feature_id),
                 state=cast(FeatureBatchItemState, state),
                 row_revision=revision,
                 trip_card=trip_card,
@@ -4771,8 +5005,9 @@ async def public_active_notice_feature_identities(
 ) -> dict[str, str]:
     """public에서 노출 가능한 active/latest notice의 ``{feature_id: feature_uuid}``.
 
-    notice lineage read의 T-VN-32B dual 표면 — 같은 감산 술어를 쓰되 feature
-    참조를 legacy id와 UUID 정본 쌍으로 병행 반환한다. 목록·검색·nearby와 같은
+    notice lineage read의 dual 표면 — 같은 감산 술어를 쓰되 응답 계약대로
+    ``feature_uuid`` 슬롯을 함께 반환한다. T-VN-39 재키 뒤 두 값은 같은 uuid이고
+    ``feature_uuid``는 그 text 표현이다. 목록·검색·nearby와 같은
     ``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``을 공유해 종료된 notice와 같은 계보의
     구버전 feature가 ID 직접 조회로 다시 노출되지 않게 한다. 일반
     ``get_feature_row(s)``는 admin/감사용 raw read 계약을 유지한다.
@@ -4877,7 +5112,11 @@ async def list_primary_place_locator(
 # ``feature_places`` 조인이 곧 ``kind = 'place'`` 필터이며, "번호 없음"은
 # jsonb 배열 길이가 아니라 배열 기수로 판정한다.
 _FIND_PLACE_NO_PHONE_SQL: Final[str] = """
-SELECT f.feature_id, f.name, f.address, se.source_entity_id
+-- T-VN-39: `PhoneEnrichmentCandidate.feature_id`는 text 계약이고, 이 함수의
+-- docstring이 그 값을 `apply_place_phone_enrichment`에 **그대로** 넘기라고
+-- 지시한다. 드라이버가 주는 `uuid.UUID`를 흘리면 그 다음 단계가 깨진다.
+SELECT CAST(f.feature_id AS text) AS feature_id, f.name, f.address,
+       se.source_entity_id
 FROM feature.features f
 JOIN feature.feature_places p
   ON p.feature_id = f.feature_id
@@ -4907,7 +5146,7 @@ FOR UPDATE
 
 _AUTHOR_PHONE_OVERRIDE_SQL: Final[str] = """
 CALL feature.author_feature_field_overrides(
-    CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
+    CAST(:feature_id AS uuid), CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text), 'phone_enrichment', CAST(:command_id AS bigint),
     CAST(:values AS jsonb), '{}'::jsonb, NULL, NULL, NULL, NULL
 )

@@ -40,8 +40,13 @@ input 구성 (``|`` 구분, 마지막 ``content_hash``는 ``None`` 시 빈 문�
   ``str``로 동작한다. 본 모듈은 dto를 import하지 않는다 (ADR-001 의존 방향
   유지 — core가 dto에 의존하지만 본 함수만큼은 dto 없이도 동작 가능하도록
   의도적으로 약결합).
-- ``bjd_code``가 변경되면 (행정구역 개편) ``feature_id``도 바뀐다 — 이는 의도된
-  동작. 옛 feature는 soft-delete + 새 feature 생성.
+- ``bjd_code``가 변경되면 (행정구역 개편) 이 함수의 산출도 바뀐다. **T-VN-39/ADR-098
+  이후 그것은 Feature가 갈라진다는 뜻이 아니다** — identity는
+  ``(provider_dataset_id, feature_kind, natural_key)`` claim이 쥐고 있고, 이 함수의
+  산출은 그 Feature의 **주소**(legacy alias)다. 주소가 하나 늘 뿐 Feature는 그대로다
+  (재분류 alias는 ``feature.feature_aliases``에 누적된다).
+  이 ADR 이전 서술은 "옛 feature는 soft-delete + 새 feature 생성"이었고, 그것은
+  ``feature_id``가 곧 identity이던 시절의 이야기다.
 - ``content_hash``가 다르면 다른 feature로 취급 (옵션 — 기본 ``None``).
 """
 

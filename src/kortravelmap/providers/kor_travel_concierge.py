@@ -308,6 +308,7 @@ async def _item_to_bundle(
     evidence = _mapping(item.get("evidence"))
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=source_entity_id,
         kind=FeatureKind.PLACE,
         name=name,
         coord=coord,

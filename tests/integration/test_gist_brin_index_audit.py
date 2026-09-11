@@ -82,6 +82,13 @@ async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
     # 전국(124.5~131.5 lon, 33.5~39.5 lat)에 고르게 뿌려 Seoul bbox/50km 반경이
     # 선택적(few match)이 되게 한다 → GiST bbox/KNN 스캔이 명확히 최적.
     #
+    # T-VN-39(alembic 309): ``features.feature_id``는 uuid다. 종전 seed는
+    # ``'gist:bbox:' || g``라는 **읽을 수 있는 라벨**을 정본 키에 넣고 그 접두사로
+    # 되세었다 — 재키 뒤 그 자리는 uuid여야 하므로 식별자는 ``md5(prefix||g)``로
+    # 결정적으로 유도하고(같은 prefix면 같은 5000개, 다른 prefix면 안 겹친다), 이
+    # seed 묶음을 되세는 표지는 ``name``으로 옮긴다. 되세기의 목적은 "방금 심은
+    # 행이 공개 표면에 전부 보이는가"이지 "키가 이 문자열로 시작하는가"가 아니다.
+    #
     # T-VN-34(0095~0097): 옛 seed의 ``status='active'``가 여기서 하던 일은 "이 행을
     # 공개 표면에 올려 partial GiST가 실제로 색인하게 만든다"였다. 0095 backfill이
     # 정한 대응이 정확히 ``status='active'`` → (lifecycle active, publication
@@ -97,7 +104,8 @@ async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
                 lifecycle_state, publication_state, quality_state, updated_at
             )
             SELECT
-                :prefix || g, 'place', 'p', '06020000',
+                CAST(md5(CAST(:prefix AS text) || CAST(g AS text)) AS uuid),
+                'place', CAST(:prefix AS text), '06020000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(
                         124.5 + (g % 700) * 0.01, 33.5 + ((g / 700) % 600) * 0.01
@@ -120,7 +128,7 @@ async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
     seeded = await session.execute(
         text(
             "SELECT count(*) FROM feature.public_features "
-            "WHERE feature_id LIKE :prefix || '%'"
+            "WHERE name = CAST(:prefix AS text)"
         ),
         {"prefix": prefix},
     )

@@ -1,0 +1,1338 @@
+{
+  "captured_at_revision": "308_t39_provider_identities",
+  "captured_from_commit": "25808bcf73125171c8fa80fc793faa5918531b79",
+  "constraints": {
+    "curated_source_rules_source_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curated_source_rules_theme_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_catalog_command_effects_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_collections_source_id_fkey": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_collections_theme_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_cutover_identity_mappings_collection_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_cutover_identity_mappings_curation_item_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_batches_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_collection_effects_collection_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_collection_effects_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_collection_touche_command_id_collection_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_claims_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_claims_import_plan_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_commits_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_commits_import_batch_id_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_commits_import_batch_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_commits_import_plan_id_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_commits_import_plan_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_revisions_import_plan_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plan_rows_import_plan_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_import_plans_preview_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_items_collection_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_items_feature_id_fkey": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_items_source_record_key_fkey": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_provider_root_receipts_root_job_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_provider_snapshot_receipts_provider_dataset_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_provider_snapshot_receipts_root_job_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_provider_snapshot_receipts_source_job_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_rule_reconcile_operations_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_rule_reconcile_operations_rule_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_rule_reconcile_scope_members_operation_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_source_observation_receipts_import_job_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "curation_source_observation_receipts_source_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "current_price_summary_feature_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "current_price_summary_provider_dataset_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "current_weather_summary_feature_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "current_weather_summary_provider_dataset_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_price_values_feature_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_price_values_provider_dataset_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_requests_resolution_command_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_requests_resolved_feature_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_requests_submission_command_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_weather_values_feature_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "feature_weather_values_provider_dataset_id_fkey": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_backup_command_executions_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_c6c_cancel_probe_fixtures_cancellation": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_c6c_cancel_probe_fixtures_job": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_claim_events_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_claim_events_event": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_claims_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_deliveries_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_deliveries_event": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_domain_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_head": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_job": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_reconciliation_request": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_refresh_request": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_source_event": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_outbox_target": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_reconciliation_requests_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_reconciliation_requests_snapshot": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_reconciliation_requests_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_refresh_members_head": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_refresh_members_request": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_refresh_members_target": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_restore_fences_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_restore_fences_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_restore_fences_superseded_reconciliation": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_snapshot_material_items_material": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_snapshot_materials_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_snapshots_material": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_snapshots_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_events_domain_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_events_head": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_events_job": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_events_refresh_request": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_events_target": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_heads_last_event": {
+      "ON DELETE": "RESTRICT DEFERRABLE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "YES"
+    },
+    "fk_cache_target_source_heads_stream": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_source_heads_target": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_streams_barrier_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_streams_blocked_event": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_writer_drain_instigations_lease": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_cache_target_writer_drain_runs_lease": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curated_source_rules_owner_provider_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curated_sources_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curated_themes_owner_provider_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_decision": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_plan_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_plan_row": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_manual_feature_children_receipt": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_rows_batch": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_import_rows_item": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_items_accepted_link_decision": {
+      "ON DELETE": "RESTRICT DEFERRABLE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "YES"
+    },
+    "fk_curation_items_current_import_row": {
+      "ON DELETE": "RESTRICT DEFERRABLE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "YES"
+    },
+    "fk_curation_link_decisions_import_row": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_link_decisions_item": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_curation_link_decisions_supersedes": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_current_price_summary_fact": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_current_price_summary_successful_run": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_current_weather_summary_fact": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_current_weather_summary_successful_run": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_data_integrity_violations_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_data_integrity_violations_feature_id_features": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_data_integrity_violations_source_record_key_source_records": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_dedup_review_queue_feature_id_a_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_dedup_review_queue_feature_id_b_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_domain_command_results_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_enrichment_review_queue_source_entity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_enrichment_review_queue_source_record": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_enrichment_review_queue_target_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_aliases_feature": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_aliases_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_areas_feature_kind": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_areas_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_base_field_values_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_base_field_values_entity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_base_field_values_feature_identity": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_base_field_values_field_path": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_base_field_values_record": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_creation_origins_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_creation_origins_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_events_feature_kind": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_events_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_merge_history_loser_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_merge_history_master_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_merge_history_review_key_dedup_review_queue": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_notices_feature_kind": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_notices_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_overrides_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_overrides_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_overrides_source_dataset": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_overrides_source_entity": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_overrides_source_record_key_source_records": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_places_feature_kind": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_places_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_acks_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_acks_event": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_acks_principal": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_case": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_old_identity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_replacement_identity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_resolution": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_events_transition": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_reference_reconciliation_leases_principal": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_routes_feature_kind": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_routes_identity_pair": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_update_request_datasets_exact_operation_scope": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_update_request_datasets_request": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_update_request_idempotency_request_id_featur_93ec": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_feature_update_requests_job_id_import_jobs": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_features_parent_feature_id_features": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_import_job_datasets_exact_operation_scope": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_import_job_datasets_job": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_import_job_events_job_member": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_import_jobs_cancellation": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_import_jobs_parent_job_id": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_integrity_finding_observations_run": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_integrity_observation_runs_scope": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_integrity_observation_scopes_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_managed_file_events_file_id_managed_files": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_managed_file_events_import_job_id_import_jobs": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_managed_files_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_managed_files_origin_import_job_id_import_jobs": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_feature_identity_claims_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_feature_identity_claims_purge_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_feature_purge_records_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_manual_claim": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_manual_identity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_manual_origin": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_provider_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_provider_identity": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_provider_link": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_cases_source_record": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_resolutions_case": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_resolutions_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_manual_provider_dedup_resolutions_superseded_case": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_notice_lifecycle_scopes_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_notice_lineage_states_scope": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_offline_upload_command_executions_command": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_offline_uploads_delete_command_id_domain_commands": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_offline_uploads_exact_operation_scope": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_offline_uploads_load_job_id_import_jobs": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_offline_uploads_validation_job_id_import_jobs": {
+      "ON DELETE": "SET NULL",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_pipeline_cancellation_members_attempt": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_pipeline_cancellation_members_job": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_pipeline_cancellation_members_run": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_pipeline_cancellation_runs_attempt": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_pipeline_cancellations_previous": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_poi_cache_target_feature_links_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_poi_cache_target_feature_links_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_poi_cache_target_feature_links_target_id_poi_cache_targets": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_price_value_source_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_price_value_source_lineage": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_provider_dataset_operation_scopes_operation": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_provider_dataset_operations_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_provider_refresh_policies_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_provider_sync_state_exact_operation_scope": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_entities_provider_dataset": {
+      "ON DELETE": "NO ACTION",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_entity_heads_entity": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_entity_heads_record": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_links_feature_id_features": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_links_source_entity_key_source_entities": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_source_records_source_entity_key_source_entities": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_theme_feature_candidates_source_record": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_weather_value_source_dataset": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "fk_weather_value_source_lineage": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "import_job_events_job_id_fkey": {
+      "ON DELETE": "CASCADE",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_candidate_generation_observations_generation_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_candidate_generations_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_candidate_generations_reconcile_operation_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_candidate_generations_rule_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_candidate_generations_source_job_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidate_transitions_command_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidate_transitions_generation_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidates_feature_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidates_merged_into_candidate_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidates_rule_id_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    },
+    "theme_feature_candidates_source_entity_key_fkey": {
+      "ON DELETE": "RESTRICT",
+      "ON UPDATE": "NO ACTION",
+      "MATCH": "SIMPLE",
+      "DEFERRABLE": "NO"
+    }
+  }
+}

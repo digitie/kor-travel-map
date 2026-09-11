@@ -211,7 +211,12 @@ async def test_tvn40_transition_audit_rejects_owner_update(
                   invoker_role, candidate_procedure_definer, audit_writer_definer
                 ) VALUES (
                       '00000000-0000-4000-8000-000000000040'::uuid,
-                      'feature:old', 'feature:new',
+                      -- T-VN-39(alembic 309): from/to_feature_id는 uuid다. 이 두
+                      -- 값은 append-only 증명의 채움값이라(FK도 없고 CHECK도 이
+                      -- transition_kind에서는 둘을 보지 않는다) 같은 파일의 다른
+                      -- 자리표시 uuid와 같은 형태로 맞춘다.
+                      '00000000-0000-4000-8000-00000000f01d'::uuid,
+                      '00000000-0000-4000-8000-00000000f0e0'::uuid,
                       '00000000-0000-4000-8000-000000000041'::uuid,
                       'entity:test', 'open', 'rejected',
                   true, true, 'active', 'active', 'admin_reject', 1, 1,

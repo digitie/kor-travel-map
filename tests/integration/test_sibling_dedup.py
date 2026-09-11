@@ -93,7 +93,11 @@ async def test_sibling_candidates_enqueued(migrated_session: AsyncSession) -> No
     rows = (
         await migrated_session.execute(
             text(
-                "SELECT feature_id, name, category, "
+                # T-VN-39 재키(alembic 309): `feature_id`는 uuid라 driver가
+                # `uuid.UUID` 객체를 준다. 아래 `_Feat.feature_id`는 `str` 계약이고
+                # 그대로 흘리면 그 계약이 조용히 깨지므로 읽는 자리에서 text로
+                # 고정한다 — 값의 축은 그대로 정본 키다.
+                "SELECT CAST(feature_id AS text) AS feature_id, name, category, "
                 "x_extension.ST_X(coord) lon, x_extension.ST_Y(coord) lat "
                 # 0097이 `deleted_at`을 물리 삭제했다 — lifecycle 축으로 읽는다.
                 "FROM feature.features WHERE lifecycle_state = 'active'"

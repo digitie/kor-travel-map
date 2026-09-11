@@ -29,6 +29,7 @@ from tests.integration.perf_gate import (
     explain_plan,
     query_result_columns,
     seed_hot_query_features,
+    seeded_feature_id,
 )
 
 if TYPE_CHECKING:
@@ -66,8 +67,11 @@ async def test_tier1_service_batch_query_count_is_constant(
     """service 5-state batch의 SQL 수가 item 수에 비례하지 않는다(N+1 가드)."""
 
     await seed_hot_query_features(migrated_session)
-    ids_50 = [f"perf:f:{i:06d}" for i in range(1, 51)]
-    ids_100 = [f"perf:f:{i:06d}" for i in range(1, 101)]
+    # T-VN-39 재키 뒤 seed의 정본 키는 uuid다 — 라벨은 대역으로만 남으므로
+    # 요청 id도 seed와 같은 generator에서 만든다(``seed_hot_query_features``의
+    # 기본 라벨 ``perf:f:``와 짝).
+    ids_50 = [seeded_feature_id("perf:f:", i) for i in range(1, 51)]
+    ids_100 = [seeded_feature_id("perf:f:", i) for i in range(1, 101)]
 
     with count_sql_statements(migrated_engine) as stmts_50:
         rows_50 = await feature_repo.get_service_feature_batch_items(

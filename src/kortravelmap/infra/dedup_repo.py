@@ -11,8 +11,13 @@
 - **commit은 호출자 책임** — transaction 경계는 오케스트레이션(client)이 잡는다.
 - **점수 0~100 변환** — core.scoring 점수는 0.0~1.0, 큐 컬럼은 ``NUMERIC(5,2)``
   0~100 (``ck_dedup_scores``). ``round(score * 100, 2)``로 변환.
-- **순서 독립 pair** — ``feature_id_a < feature_id_b``로 canonicalize해 ``(a,b)``와
-  ``(b,a)``가 같은 큐 행으로 수렴한다. self-pair는 큐에 넣지 않는다.
+- **정본 키로 고정** — 큐의 두 컬럼은 uuid다. 후보를 만든 ``core.dedup``은 provider
+  변환기가 준 legacy 주소만 알므로, 적재 직전에
+  ``resolve_canonical_feature_ids``로 legacy·uuid 둘 다 받아 정본 uuid로 푼다
+  (T-VN-39; weather/price 값 경로와 같은 규율).
+- **순서 독립 pair** — 해석된 정본 uuid를 ``feature_id_a < feature_id_b``로
+  canonicalize해 ``(a,b)``와 ``(b,a)``가 같은 큐 행으로 수렴한다. self-pair는 큐에
+  넣지 않는다 — 서로 다른 두 참조가 같은 Feature를 가리키는 경우도 포함이다.
 - **재스캔 안전 (검토 보존)** — canonical ``(feature_id_a, feature_id_b)`` 충돌 시
   ``status='pending'`` 행만 점수/제안 갱신. 운영자가 이미 accepted/rejected/
   merged/ignored한 행은 건드리지 않는다 (``DO UPDATE ... WHERE status='pending'``).
@@ -33,8 +38,10 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
+
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,7 +66,7 @@ INSERT INTO ops.dedup_review_queue (
     total_score, name_score, spatial_score, category_score,
     status, decision_reason
 ) VALUES (
-    :feature_id_a, :feature_id_b,
+    CAST(:feature_id_a AS uuid), CAST(:feature_id_b AS uuid),
     :total_score, :name_score, :spatial_score, :category_score,
     'pending', :decision_reason
 )
@@ -76,7 +83,12 @@ RETURNING (xmax = 0) AS inserted
 # pending 후보 조회 — idx_dedup_status_score (status, total_score DESC) 사용.
 _PENDING_DEDUP_SQL: Final[str] = """
 SELECT
-    review_id, feature_id_a, feature_id_b,
+    review_id,
+    -- T-VN-39: 두 컬럼은 uuid다. 이 함수는 dict를 그대로 돌려주고 상위가
+    -- JSON으로 직렬화하므로 경계에서 text로 고정한다 — 짝인
+    -- `pending_enrichment_reviews`가 이미 같은 처방을 쓴다.
+    CAST(feature_id_a AS text) AS feature_id_a,
+    CAST(feature_id_b AS text) AS feature_id_b,
     total_score, name_score, spatial_score, category_score,
     status, decision_reason, created_at
 FROM ops.dedup_review_queue
@@ -111,7 +123,14 @@ class DedupQueueResult:
 
 
 def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str] | None:
-    """검토 큐 저장용 feature pair를 순서 독립 key로 정규화한다."""
+    """검토 큐 저장용 feature pair를 순서 독립 key로 정규화한다.
+
+    **인자는 정본 uuid의 canonical 소문자 표기다.** 큐 컬럼이 uuid이고
+    ``ck_dedup_pair_order``가 ``feature_id_a < feature_id_b``를 uuid 순서로
+    검사하므로, 여기서 매기는 순서도 같아야 한다 — canonical 표기는 하이픈
+    위치가 고정이고 16진수는 ASCII 순서가 바이트 순서와 같아서 문자열 비교가
+    uuid 비교와 일치한다.
+    """
     if feature_id_a == feature_id_b:
         return None
     return (
@@ -121,13 +140,42 @@ def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str] | N
     )
 
 
-def _candidate_params(candidate: DedupCandidate) -> dict[str, Any] | None:
+async def _canonical_ids_for(
+    session: AsyncSession, candidates: Sequence[DedupCandidate]
+) -> Mapping[str, str]:
+    """후보들이 든 참조를 **한 번에** 정본 uuid로 푼다 (왕복 2회 고정).
+
+    T-VN-39 전 이 repo는 후보가 든 문자열을 그대로 uuid 컬럼에 넣었다. 그런데
+    후보를 만드는 ``core.dedup``은 provider 변환기가 준 legacy 주소밖에 알지
+    못하므로, 재키 뒤 운영 경로는 전부 22P02였다 — weather/price 값 경로와
+    **같은 부류이고 같은 처방**이다.
+
+    미해석 참조는 조용히 넘기지 않는다. 그대로 두면 FK 위반으로 죽는데 그 오류는
+    어느 참조가 문제인지 말하지 않고, 이 repo의 계약("features 적재 후 호출")이
+    깨졌다는 사실 자체가 호출자가 알아야 할 정보다.
+    """
+    refs = [
+        ref
+        for candidate in candidates
+        for ref in (candidate.feature_id_a, candidate.feature_id_b)
+    ]
+    return await resolve_canonical_feature_ids(session, refs)
+
+
+def _candidate_params(
+    candidate: DedupCandidate, canonical: Mapping[str, str]
+) -> dict[str, Any] | None:
     """``DedupCandidate`` → ``_UPSERT_DEDUP_SQL`` bind params.
 
     core.scoring 점수(0.0~1.0)를 큐 컬럼(0~100 NUMERIC)으로 ``×100`` 변환.
     ``decision_reason``에는 알고리즘 제안(auto_merge/manual_review)을 보관.
+
+    self-pair 판정은 **해석 후**에 한다 — 서로 다른 두 참조(legacy alias와 그
+    정본 uuid)가 같은 Feature를 가리킬 수 있고, 그것은 큐에 넣을 쌍이 아니다.
     """
-    pair = _canonical_pair(candidate.feature_id_a, candidate.feature_id_b)
+    pair = _canonical_pair(
+        canonical[candidate.feature_id_a], canonical[candidate.feature_id_b]
+    )
     if pair is None:
         return None
     feature_id_a, feature_id_b = pair
@@ -153,7 +201,15 @@ async def enqueue_dedup_candidate(
         ``"inserted"`` (신규) / ``"updated"`` (pending 행 점수 갱신) /
         ``"skipped"`` (이미 검토 완료된 행이라 보존).
     """
-    params = _candidate_params(candidate)
+    canonical = await _canonical_ids_for(session, [candidate])
+    return await _upsert_candidate(session, candidate, canonical)
+
+
+async def _upsert_candidate(
+    session: AsyncSession, candidate: DedupCandidate, canonical: Mapping[str, str]
+) -> str:
+    """이미 해석된 정본 키 표를 받아 한 후보를 upsert한다."""
+    params = _candidate_params(candidate, canonical)
     if params is None:
         return "skipped"
     result = await session.execute(text(_UPSERT_DEDUP_SQL), params)
@@ -171,10 +227,12 @@ async def enqueue_dedup_candidates(
     commit은 호출자 책임. FK상 두 feature(``feature_id_a/b``)가 먼저 적재돼
     있어야 한다 (오케스트레이션이 features 적재 후 호출).
     """
+    materialized = list(candidates)
+    canonical = await _canonical_ids_for(session, materialized)
     inserted = updated = skipped = total = 0
-    for candidate in candidates:
+    for candidate in materialized:
         total += 1
-        outcome = await enqueue_dedup_candidate(session, candidate)
+        outcome = await _upsert_candidate(session, candidate, canonical)
         if outcome == "inserted":
             inserted += 1
         elif outcome == "updated":

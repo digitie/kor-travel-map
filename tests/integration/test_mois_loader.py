@@ -168,11 +168,16 @@ async def test_loader_persists_promoted_and_skips_others(
     assert restaurant.category == "02010100"
     assert restaurant.marker_color == "P-01"
     # T-VN-35(ADR-086): place 값의 정본은 ``feature_places``다(core에 detail 없음).
+    # T-VN-39 재키(309) 뒤 ``feature_places.feature_id``는 uuid다 — 바인드를 맨몸으로
+    # 두면 PostgreSQL이 그 자리를 text로 유도해 ``uuid = text``(42883)로 죽는다.
+    # ORM(``UUID(as_uuid=False)``)이 주는 값은 그 uuid의 text 표현이므로 명시
+    # 캐스트로 uuid에 고정한다(이 저장소의 재키 후 관행 —
+    # ``test_perf_tier2_release_harness``/``test_tvn40_candidate_commands``와 같다).
     assert (
         await migrated_session.execute(
             text(
                 "SELECT place_kind FROM feature.feature_places "
-                "WHERE feature_id = :fid"
+                "WHERE feature_id = CAST(:fid AS uuid)"
             ),
             {"fid": restaurant.feature_id},
         )

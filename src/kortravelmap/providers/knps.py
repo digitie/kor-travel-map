@@ -295,6 +295,7 @@ async def _point_record_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=record.source_id,
         kind=FeatureKind.PLACE,
         name=normalized_name,
         coord=coord,
@@ -814,6 +815,7 @@ async def _geometry_record_to_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=record.source_id,
         kind=spec.feature_kind,
         name=normalized_name,
         coord=centroid,  # 선/면 대표 좌표 = centroid (ADR-012, 지도 마커용)

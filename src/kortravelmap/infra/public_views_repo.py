@@ -192,7 +192,7 @@ fp.place_kind = 'beach'
 _PUBLIC_BEACH_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -226,7 +226,7 @@ WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
       f.feature_id
     ) < (
       CAST(:cursor_updated_at AS timestamptz),
-      CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid)
     )
   )
 ORDER BY f.updated_at DESC, f.feature_id DESC
@@ -236,7 +236,7 @@ LIMIT :limit
 _PUBLIC_BEACH_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS display_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -256,13 +256,13 @@ FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
-  AND f.feature_id = CAST(:feature_id AS text)
+  AND f.feature_id = CAST(:feature_id AS uuid)
 """
 
 _PUBLIC_BEACH_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -316,7 +316,7 @@ _PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = f"""
 _PUBLIC_FESTIVAL_LIST_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -345,7 +345,7 @@ WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
     ) > (
       CAST(:cursor_start_date AS date),
       CAST(:cursor_updated_at AS timestamptz),
-      CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid)
     )
   )
 ORDER BY fe.starts_on ASC, f.updated_at ASC, f.feature_id ASC
@@ -355,7 +355,7 @@ LIMIT :limit
 _PUBLIC_FESTIVAL_DETAIL_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS festival_name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -375,13 +375,13 @@ FROM feature.public_features AS f
 {_SOURCE_PROVIDERS_LATERAL_SQL}
 {_PRIMARY_SOURCE_LATERAL_SQL}
 WHERE {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
-  AND f.feature_id = CAST(:feature_id AS text)
+  AND f.feature_id = CAST(:feature_id AS uuid)
 """
 
 _PUBLIC_FESTIVAL_MARKERS_SQL: Final[str] = f"""
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,

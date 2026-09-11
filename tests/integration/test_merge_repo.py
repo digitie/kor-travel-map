@@ -5,6 +5,12 @@
 ② loser curation item을 master로 재지정(+ 동일 item 충돌 drop)
 ③ loser feature soft-delete ④ ``feature_merge_history`` 기록
 ⑤ ``dedup_review_queue`` ``merged`` 전이 하는지 검증.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와 그것을 참조하는
+``source_links`` · ``curation_items`` · ``dedup_review_queue`` · ``feature_merge_history``
+· ``feature_overrides``가 전부 **uuid**다. 그래서 이 모듈의 두 Feature는 고정
+UUIDv7 상수로 심고, raw SQL은 그 값을 리터럴로 박지 않고 :data:`_FEATURE_IDS`를
+bind parameter로 받는다 — 값이 두 벌이 되면 한쪽만 고치는 드리프트가 생긴다.
 """
 
 from __future__ import annotations
@@ -66,6 +72,22 @@ async def apply_feature_merge(session: AsyncSession, *args: Any, **kwargs: Any) 
 
 _CAT = "01070100"
 _FETCHED = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
+
+#: 병합 쌍의 정본 키. ``ops.dedup_review_queue``의 canonical 제약이
+#: ``feature_id_a < feature_id_b``를 **uuid 비교**로 강제하므로 loser가 작아야
+#: 한다(종전 ``'f_loser' < 'f_master'``가 문자열로 성립했던 것과 같은 순서다).
+#: master 선정은 이 순서가 아니라 좌표 보유 여부가 정한다(ADR-016 1순위).
+_F_LOSER = "00000000-0000-7000-8000-0000000c0001"
+_F_MASTER = "00000000-0000-7000-8000-0000000c0002"
+_F_THEME_REUSE = "00000000-0000-7000-8000-0000000c0003"
+
+#: raw SQL이 위 세 값을 받는 bind parameter 묶음. ``text()``는 쓰지 않는 key를
+#: 무시하므로 문장마다 골라 담을 필요 없이 그대로 넘길 수 있다.
+_FEATURE_IDS = {
+    "master_id": _F_MASTER,
+    "loser_id": _F_LOSER,
+    "theme_reuse_id": _F_THEME_REUSE,
+}
 
 
 def _feature(feature_id: str, *, with_coord: bool) -> FeatureRow:
@@ -175,8 +197,8 @@ async def _seed_pair(engine: AsyncEngine) -> str:
     반환: 생성된 ``review_id``. SE1은 양쪽 모두 링크(충돌), SE2는 loser 전용.
     """
     async with AsyncSession(engine) as session, session.begin():
-        session.add(_feature("f_master", with_coord=True))
-        session.add(_feature("f_loser", with_coord=False))
+        session.add(_feature(_F_MASTER, with_coord=True))
+        session.add(_feature(_F_LOSER, with_coord=False))
         mois_dataset_id = await _seed_provider_dataset(
             session, provider="merge-test-mois", dataset_key="d"
         )
@@ -206,9 +228,9 @@ async def _seed_pair(engine: AsyncEngine) -> str:
             )
         )
         await session.flush()
-        session.add(_link("f_master", "SE1"))
-        session.add(_link("f_loser", "SE1", primary=False))  # 충돌 — master 보유
-        session.add(_link("f_loser", "SE2"))  # loser 전용 — 이동 대상
+        session.add(_link(_F_MASTER, "SE1"))
+        session.add(_link(_F_LOSER, "SE1", primary=False))  # 충돌 — master 보유
+        session.add(_link(_F_LOSER, "SE2"))  # loser 전용 — 이동 대상
         await session.execute(
             text(
                 """
@@ -230,25 +252,26 @@ async def _seed_pair(engine: AsyncEngine) -> str:
                     external_component_id, place_name, status
                 )
                 SELECT
-                    collection_id, 'f_master', 'shared', 'component-01',
+                    collection_id, CAST(:master_id AS uuid), 'shared', 'component-01',
                     '마스터 장소', 'included'
                 FROM collection
                 UNION ALL
                 SELECT
-                    collection_id, 'f_loser', 'shared', 'component-02',
+                    collection_id, CAST(:loser_id AS uuid), 'shared', 'component-02',
                     '병합 대상 장소', 'included'
                 FROM collection
                 UNION ALL
                 SELECT
-                    collection_id, 'f_loser', 'loser-only', 'primary',
+                    collection_id, CAST(:loser_id AS uuid), 'loser-only', 'primary',
                     '병합 대상 장소', 'included'
                 FROM collection
                 """
-            )
+            ),
+            _FEATURE_IDS,
         )
         row = DedupReviewQueueRow(
-            feature_id_a="f_loser",
-            feature_id_b="f_master",
+            feature_id_a=_F_LOSER,
+            feature_id_b=_F_MASTER,
             total_score=90,
             name_score=95,
             spatial_score=88,
@@ -465,11 +488,11 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
         )
         for statement in (
             "DELETE FROM ops.feature_merge_history "
-            "WHERE master_feature_id IN ('f_master', 'f_loser') "
-            "OR loser_feature_id IN ('f_master', 'f_loser')",
+            "WHERE master_feature_id IN (:master_id, :loser_id) "
+            "OR loser_feature_id IN (:master_id, :loser_id)",
             "DELETE FROM ops.dedup_review_queue "
-            "WHERE feature_id_a IN ('f_master', 'f_loser') "
-            "OR feature_id_b IN ('f_master', 'f_loser')",
+            "WHERE feature_id_a IN (:master_id, :loser_id) "
+            "OR feature_id_b IN (:master_id, :loser_id)",
             "DELETE FROM feature.curation_collections "
             "WHERE theme_id IN ("
             "SELECT theme_id FROM feature.curated_themes "
@@ -490,7 +513,7 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             "WHERE provider IN ('merge-test-mois', 'merge-test-visitkorea', "
             "'merge-test-provider'))",
             "DELETE FROM provider_sync.source_links "
-            "WHERE feature_id IN ('f_master', 'f_loser')",
+            "WHERE feature_id IN (:master_id, :loser_id)",
             "DELETE FROM provider_sync.source_entity_heads "
             "WHERE source_entity_key IN ('SE1', 'SE2')",
             "DELETE FROM provider_sync.source_records "
@@ -498,12 +521,12 @@ async def seeded(pg_container: object, migrated_engine: AsyncEngine) -> object:
             "DELETE FROM provider_sync.source_entities "
             "WHERE source_entity_key IN ('SE1', 'SE2')",
             "DELETE FROM feature.features "
-            "WHERE feature_id IN ('f_master', 'f_loser', 'f_theme_reuse')",
+            "WHERE feature_id IN (:master_id, :loser_id, :theme_reuse_id)",
             "DELETE FROM provider_sync.provider_datasets "
             "WHERE provider IN ('merge-test-mois', 'merge-test-visitkorea', "
             "'merge-test-provider')",
         ):
-            await session.execute(text(statement))
+            await session.execute(text(statement), _FEATURE_IDS)
 
 
 async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEngine) -> None:
@@ -512,22 +535,27 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         outcome = await merge_from_review(session, review_id, merged_by="op-1", reason="dup")
 
     # 좌표 보유 master 선정 (ADR-016 1순위).
-    assert outcome.master_feature_id == "f_master"
-    assert outcome.loser_feature_id == "f_loser"
+    # ``MergeOutcome``의 두 필드는 **바깥 계약이라 여전히 ``str``**이다 — 재키가 바꾼
+    # 것은 값의 출처(legacy ``f_*`` → canonical uuid)뿐이고 표기는 text로 남는다.
+    # ``merge_repo``가 그 계약을 SQL projection의 ``CAST(feature_id AS text)``로 지킨다.
+    # 여기서 ``str(...)``로 감싸면 드라이버가 준 ``uuid.UUID``가 새 들어와도 통과해
+    # 계약이 깨진 것을 못 본다 — 그래서 받은 값을 그대로 비교한다.
+    assert outcome.master_feature_id == _F_MASTER
+    assert outcome.loser_feature_id == _F_LOSER
     # SE2 이동(1), 충돌 SE1 drop(1).
     assert outcome.source_links_moved == 1
     assert outcome.source_links_dropped == 1
     assert outcome.queue_updated is True
 
     # master는 SE1+SE2 보유, loser는 링크 없음.
-    assert await _links_of(migrated_engine, "f_master") == {"SE1", "SE2"}
-    assert await _links_of(migrated_engine, "f_loser") == set()
+    assert await _links_of(migrated_engine, _F_MASTER) == {"SE1", "SE2"}
+    assert await _links_of(migrated_engine, _F_LOSER) == set()
     async with AsyncSession(migrated_engine) as session:
         items = (
             await session.execute(
                 text(
                     """
-                    SELECT feature_id, external_item_id
+                    SELECT feature_id::text, external_item_id
                     FROM feature.curation_items
                     WHERE collection_id = (
                         SELECT collection_id
@@ -541,14 +569,18 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
             )
         ).all()
     assert items == [
-        ("f_master", "loser-only"),
-        ("f_master", "shared"),
+        (_F_MASTER, "loser-only"),
+        (_F_MASTER, "shared"),
     ]
 
     async with AsyncSession(migrated_engine) as session:
         loser_memberships = (
             await session.execute(
-                text("SELECT count(*) FROM feature.curation_items WHERE feature_id = 'f_loser'")
+                text(
+                    "SELECT count(*) FROM feature.curation_items "
+                    "WHERE feature_id = :loser_id"
+                ),
+                _FEATURE_IDS,
             )
         ).scalar_one()
     assert loser_memberships == 0
@@ -559,36 +591,37 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
                 text(
                     """
                     SELECT lifecycle_state, publication_state, quality_state
-                    FROM feature.features WHERE feature_id = 'f_loser'
+                    FROM feature.features WHERE feature_id = :loser_id
                     """
-                )
+                ),
+                _FEATURE_IDS,
             )
         ).one()
     assert tuple(loser_axes) == ("retired", "suppressed", "valid")
     # master는 transition writer가 건드리지 않는다. legacy `status='active'`가
     # 뜻하던 상태는 3축에서 (active, published, valid)이고, 그 셋이 곧 공개 projection
     # 술어이므로 "축이 그대로다"와 "공개 표면에 그대로 있다"를 함께 못 박는다.
-    assert await _feature_axes(migrated_engine, "f_master") == (
+    assert await _feature_axes(migrated_engine, _F_MASTER) == (
         "active",
         "published",
         "valid",
     )
-    assert await _is_on_public_surface(migrated_engine, "f_master") is True
+    assert await _is_on_public_surface(migrated_engine, _F_MASTER) is True
     # loser는 반대로 공개 표면에서 사라져야 한다(legacy `deleted_at IS NOT NULL`).
-    assert await _is_on_public_surface(migrated_engine, "f_loser") is False
+    assert await _is_on_public_surface(migrated_engine, _F_LOSER) is False
 
     # feature_merge_history 1행 + 큐 merged.
     async with AsyncSession(migrated_engine) as session:
         hist = (
             await session.execute(
                 text(
-                    "SELECT master_feature_id, loser_feature_id, score, "
-                    "merged_by, review_id FROM ops.feature_merge_history"
+                    "SELECT master_feature_id::text, loser_feature_id::text, "
+                    "score, merged_by, review_id FROM ops.feature_merge_history"
                 )
             )
         ).one()
-        assert hist[0] == "f_master"
-        assert hist[1] == "f_loser"
+        assert hist[0] == _F_MASTER
+        assert hist[1] == _F_LOSER
         assert float(hist[2]) == 90.0
         assert hist[3] == "op-1"
         assert str(hist[4]) == review_id
@@ -606,11 +639,12 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
                     """
                     SELECT override_value, prevent_provider_reactivation, reason, created_by
                     FROM ops.feature_overrides
-                    WHERE feature_id = 'f_loser'
+                    WHERE feature_id = :loser_id
                       AND field_path = 'lifecycle_state'
                       AND status = 'active'
                     """
-                )
+                ),
+                _FEATURE_IDS,
             )
         ).one()
         assert override[0] == "retired"
@@ -632,10 +666,11 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                         collection_id::text,
                         curation_item_id::text
                     FROM feature.curation_items
-                    WHERE feature_id = 'f_loser'
+                    WHERE feature_id = :loser_id
                       AND external_item_id = 'loser-only'
                     """
-                )
+                ),
+                _FEATURE_IDS,
             )
         ).one()
         legacy_decision_id = str(
@@ -653,7 +688,7 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                             actor
                         ) VALUES (
                             CAST(:item_id AS uuid),
-                            'f_loser',
+                            :loser_id,
                             'accepted',
                             'legacy_unattributed',
                             'pre-0072-unknown',
@@ -663,7 +698,7 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                         RETURNING decision_id::text
                         """
                     ),
-                    {"item_id": state.curation_item_id},
+                    {"item_id": state.curation_item_id, **_FEATURE_IDS},
                 )
             ).scalar_one()
         )
@@ -695,7 +730,7 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                             status
                         ) VALUES (
                             CAST(:collection_id AS uuid),
-                            'f_loser',
+                            :loser_id,
                             'provenance-less',
                             'primary',
                             '근거 없는 병합 대상',
@@ -704,7 +739,7 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                         RETURNING curation_item_id::text
                         """
                     ),
-                    {"collection_id": state.collection_id},
+                    {"collection_id": state.collection_id, **_FEATURE_IDS},
                 )
             ).scalar_one()
         )
@@ -722,7 +757,7 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
                     """
                     SELECT
                         external_item_id,
-                        feature_id,
+                        feature_id::text,
                         accepted_link_decision_id::text
                     FROM feature.curation_items
                     WHERE curation_item_id IN (
@@ -789,8 +824,8 @@ async def test_merge_keeps_legacy_and_provenance_less_links_fail_closed(
             )
         ).all()
     assert moved == [
-        ("loser-only", "f_master", None),
-        ("provenance-less", "f_master", None),
+        ("loser-only", _F_MASTER, None),
+        ("provenance-less", _F_MASTER, None),
     ]
     assert public_gate_count == 0
     assert len(revocations) == 2
@@ -832,7 +867,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
         ResolvedCurationImportRow(
             row_number=2,
             source_component_key="component-01",
-            feature_id="f_master",
+            feature_id=_F_MASTER,
             place_name="이전 master source",
             metadata={"provider_revision": "master-old"},
             provenance={"fixture": "master-import"},
@@ -841,7 +876,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
         ResolvedCurationImportRow(
             row_number=3,
             source_component_key="component-02",
-            feature_id="f_loser",
+            feature_id=_F_LOSER,
             place_name="최신 loser source",
             metadata={"provider_revision": "loser-new"},
             provenance={"fixture": "loser-import"},
@@ -888,7 +923,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
                       CAST(:loser_item_id AS uuid)
                 """
             ),
-            {"loser_item_id": before["f_loser"]["curation_item_id"]},
+            {"loser_item_id": before[_F_LOSER]["curation_item_id"]},
         )
         await merge_from_review(
             session,
@@ -935,7 +970,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
                               CAST(:survivor_item_id AS uuid)
                         """
                     ),
-                    {"survivor_item_id": before["f_master"]["curation_item_id"]},
+                    {"survivor_item_id": before[_F_MASTER]["curation_item_id"]},
                 )
             )
             .mappings()
@@ -944,16 +979,16 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     assert survivor["place_name"] == "최신 loser source"
     assert survivor["metadata"] == {"provider_revision": "loser-new"}
     assert survivor["current_import_row_id"] not in {
-        before["f_master"]["current_import_row_id"],
-        before["f_loser"]["current_import_row_id"],
+        before[_F_MASTER]["current_import_row_id"],
+        before[_F_LOSER]["current_import_row_id"],
     }
-    assert survivor["row_owner"] == before["f_master"]["curation_item_id"]
+    assert survivor["row_owner"] == before[_F_MASTER]["curation_item_id"]
     assert survivor["row_place_name"] == survivor["place_name"]
     assert survivor["row_metadata"] == survivor["metadata"]
     assert survivor["row_provider"] == provider
     assert survivor["row_dataset_key"] == dataset_key
     assert survivor["provenance"]["provider_winner_import_row_id"] == (
-        before["f_loser"]["current_import_row_id"]
+        before[_F_LOSER]["current_import_row_id"]
     )
     assert survivor["batch_kind"] == "forward_recovery"
     assert survivor["row_count"] == 1
@@ -962,7 +997,7 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
     assert survivor["match_basis"] == "forward_recovery"
     assert survivor["resolver_version"] == "feature-merge-v2"
     assert survivor["supersedes_decision_id"] == (
-        before["f_master"]["accepted_link_decision_id"]
+        before[_F_MASTER]["accepted_link_decision_id"]
     )
 
 
@@ -1001,7 +1036,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
         ResolvedCurationImportRow(
             row_number=2,
             source_component_key="component-01",
-            feature_id="f_master",
+            feature_id=_F_MASTER,
             place_name="master current",
             metadata={"revision": "master-first"},
             provenance={"fixture": "master-first"},
@@ -1010,7 +1045,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
         ResolvedCurationImportRow(
             row_number=3,
             source_component_key="component-02",
-            feature_id="f_loser",
+            feature_id=_F_LOSER,
             place_name="loser historical",
             metadata={"revision": "loser-history"},
             provenance={"fixture": "loser-history"},
@@ -1021,7 +1056,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
         ResolvedCurationImportRow(
             row_number=2,
             source_component_key="component-01",
-            feature_id="f_master",
+            feature_id=_F_MASTER,
             place_name="master current",
             metadata={"revision": "master-second"},
             provenance={"fixture": "master-second"},
@@ -1030,7 +1065,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
         ResolvedCurationImportRow(
             row_number=3,
             source_component_key="component-03",
-            feature_id="f_loser",
+            feature_id=_F_LOSER,
             place_name="loser active winner",
             metadata={"revision": "loser-active"},
             provenance={"fixture": "loser-active"},
@@ -1059,11 +1094,12 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
                 UPDATE feature.curation_items
                 SET source_updated_at =
                     source_updated_at + interval '1 hour'
-                WHERE feature_id = 'f_loser'
+                WHERE feature_id = :loser_id
                   AND external_item_id = 'shared'
                   AND source_present
                 """
-            )
+            ),
+            _FEATURE_IDS,
         )
         before = {
             str(row["external_component_id"]): dict(row)
@@ -1104,7 +1140,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
                         """
                         SELECT
                             item.external_component_id,
-                            item.feature_id,
+                            item.feature_id::text,
                             item.source_present,
                             item.archived_at IS NOT NULL AS archived,
                             item.place_name,
@@ -1134,11 +1170,12 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
                     SELECT count(*)
                     FROM feature.curation_items
                     WHERE external_item_id = 'shared'
-                      AND feature_id = 'f_master'
+                      AND feature_id = :master_id
                       AND source_present
                       AND archived_at IS NULL
                     """
-                )
+                ),
+                _FEATURE_IDS,
             )
         ).scalar_one()
 
@@ -1150,7 +1187,7 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
     archived_current = by_component["component-03"]
 
     assert active_count == 1
-    assert all(row["feature_id"] == "f_master" for row in rows)
+    assert all(row["feature_id"] == _F_MASTER for row in rows)
     assert survivor["source_present"] is True
     assert survivor["archived"] is False
     assert survivor["place_name"] == "loser active winner"
@@ -1223,11 +1260,11 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     operator_updated_by = 'master-operator',
                     operator_updated_at = now() - interval '2 hours',
                     updated_at = now()
-                WHERE feature_id = 'f_master'
+                WHERE feature_id = :master_id
                   AND external_item_id = 'shared'
                 """
             ),
-            {"master_present": master_present},
+            {"master_present": master_present, **_FEATURE_IDS},
         )
         await session.execute(
             text(
@@ -1243,11 +1280,11 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                     operator_updated_by = 'latest-operator',
                     operator_updated_at = now() - interval '1 hour',
                     updated_at = now() - interval '3 hours'
-                WHERE feature_id = 'f_loser'
+                WHERE feature_id = :loser_id
                   AND external_item_id = 'shared'
                 """
             ),
-            {"loser_present": loser_present},
+            {"loser_present": loser_present, **_FEATURE_IDS},
         )
         await merge_from_review(session, seeded, merged_by="merge-operator")
 
@@ -1257,19 +1294,20 @@ async def test_merge_reconciles_source_presence_and_latest_operator_override(
                 text(
                     """
                     SELECT
-                        feature_id, source_present, place_name, status,
+                        feature_id::text, source_present, place_name, status,
                         curation_relation, reuse_policy, operator_updated_by
                     FROM feature.curation_items
-                    WHERE feature_id = 'f_master'
+                    WHERE feature_id = :master_id
                       AND external_item_id = 'shared'
                       AND source_present
                       AND archived_at IS NULL
                     """
-                )
+                ),
+                _FEATURE_IDS,
             )
         ).one()
     assert survivor == (
-        "f_master",
+        _F_MASTER,
         True,
         expected_place,
         "rejected",
@@ -1296,10 +1334,11 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
                     operator_updated_by = 'newer-visible-operator',
                     operator_updated_at = now() + interval '2 hours',
                     updated_at = now()
-                WHERE feature_id = 'f_master'
+                WHERE feature_id = :master_id
                   AND external_item_id = 'shared'
                 """
-            )
+            ),
+            _FEATURE_IDS,
         )
         await session.execute(
             text(
@@ -1313,10 +1352,11 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
                     operator_updated_by = 'archive-operator',
                     operator_updated_at = now(),
                     updated_at = now()
-                WHERE feature_id = 'f_loser'
+                WHERE feature_id = :loser_id
                   AND external_item_id = 'shared'
                 """
-            )
+            ),
+            _FEATURE_IDS,
         )
         await merge_from_review(session, seeded, merged_by="merge-operator")
 
@@ -1325,7 +1365,7 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
             await session.execute(
                 text(
                     """
-                    SELECT feature_id, status, archived_at IS NOT NULL,
+                    SELECT feature_id::text, status, archived_at IS NOT NULL,
                            curation_relation, reuse_policy,
                            operator_updated_by
                         FROM feature.curation_items
@@ -1337,7 +1377,7 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
         ).all()
     assert rows == [
         (
-            "f_master",
+            _F_MASTER,
             "archived",
             True,
             "primary_stop",
@@ -1345,7 +1385,7 @@ async def test_merge_tombstone_wins_over_visible_duplicate(
             "archive-operator",
         ),
         (
-            "f_master",
+            _F_MASTER,
             "archived",
             True,
             "primary_stop",
@@ -1425,7 +1465,7 @@ async def _seed_import_race_collection(
         source_name="merge/import race",
         source_url=None,
         source_item_key="loser-item",
-        feature_id="f_loser",
+        feature_id=_F_LOSER,
         place_name="병합 loser",
         address_hint=None,
         sort_order=1,
@@ -1472,10 +1512,11 @@ async def test_merge_first_serializes_import_against_feature_lifecycle(
                     "FROM feature.curation_collections AS collection "
                     "JOIN feature.curation_items AS item "
                     "ON item.collection_id = collection.collection_id "
-                    "WHERE item.feature_id = 'f_master' "
+                    "WHERE item.feature_id = :master_id "
                     "AND item.external_item_id = 'shared' "
                     "FOR UPDATE"
-                )
+                ),
+                _FEATURE_IDS,
             )
             merge_task = asyncio.create_task(run_merge())
             for _ in range(50):
@@ -1665,7 +1706,7 @@ async def test_import_first_merge_moves_newly_committed_membership(
                     text(
                             """
                             SELECT
-                                item.feature_id,
+                                item.feature_id::text,
                                 item.source_present,
                                 decision.match_basis,
                                 decision.resolver_version,
@@ -1688,17 +1729,18 @@ async def test_import_first_merge_moves_newly_committed_membership(
                 await session.execute(
                     text(
                         "SELECT count(*) FROM feature.curation_items "
-                        "WHERE feature_id = 'f_loser'"
-                    )
+                        "WHERE feature_id = :loser_id"
+                    ),
+                    _FEATURE_IDS,
                 )
             ).scalar_one()
         assert state == (
-            "f_master",
+            _F_MASTER,
             True,
             "forward_recovery",
             "feature-merge-v1",
             "merge-import-race",
-            "f_loser",
+            _F_LOSER,
         )
         assert loser_count == 0
     finally:
@@ -1814,7 +1856,7 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
                 await add_curation_item(
                     writer,
                     collection_id=collection_id,
-                    feature_id="f_loser",
+                    feature_id=_F_LOSER,
                     external_item_id=f"canonical-add-{suffix}",
                     actor="race-writer",
                 )
@@ -1824,7 +1866,7 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
                     writer,
                     collection_id=collection_id,
                     curation_item_id=unresolved_item_id,
-                    updates={"feature_id": "f_loser"},
+                    updates={"feature_id": _F_LOSER},
                     actor="race-writer",
                 )
             else:  # pragma: no cover — legacy_create는 parametrize에서 뺐다 (T-VN-40A)
@@ -1952,7 +1994,7 @@ async def test_membership_writer_first_is_seen_and_moved_by_merge(
         await add_curation_item(
             writer,
             collection_id=collection_id,
-            feature_id="f_loser",
+            feature_id=_F_LOSER,
             external_item_id=external_item_id,
             actor="writer-first",
         )
@@ -1968,14 +2010,14 @@ async def test_membership_writer_first_is_seen_and_moved_by_merge(
         state = (
             await session.execute(
                 text(
-                    "SELECT feature_id, source_present "
+                    "SELECT feature_id::text, source_present "
                     "FROM feature.curation_items "
                     "WHERE external_item_id = :external_item_id"
                 ),
                 {"external_item_id": external_item_id},
             )
         ).one()
-    assert state == ("f_master", True)
+    assert state == (_F_MASTER, True)
 
 
 
@@ -1993,8 +2035,8 @@ async def test_merge_locks_curation_collection_before_items(
             )
             await apply_feature_merge(
                 contender,
-                master_id="f_master",
-                loser_id="f_loser",
+                master_id=_F_MASTER,
+                loser_id=_F_LOSER,
                 review_id=seeded,
                 merged_by="lock-test",
             )
@@ -2006,9 +2048,10 @@ async def test_merge_locks_curation_collection_before_items(
                     text(
                         "SELECT collection_id::text "
                         "FROM feature.curation_items "
-                        "WHERE feature_id = 'f_master' "
+                        "WHERE feature_id = :master_id "
                         "AND external_item_id = 'shared'"
-                    )
+                    ),
+                    _FEATURE_IDS,
                 )
             ).scalar_one()
         )
@@ -2047,10 +2090,11 @@ async def test_merge_locks_curation_collection_before_items(
             text(
                 "SELECT curation_item_id "
                 "FROM feature.curation_items "
-                "WHERE feature_id = 'f_master' "
+                "WHERE feature_id = :master_id "
                 "AND external_item_id = 'shared' "
                 "FOR UPDATE NOWAIT"
-            )
+            ),
+            _FEATURE_IDS,
         )
 
     assert merge_task is not None
@@ -2100,7 +2144,7 @@ async def test_apply_feature_merge_distinct_guard(
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
         with pytest.raises(MergeConflictError, match="master와 loser가 같음"):
-            await apply_feature_merge(session, master_id="f_master", loser_id="f_master")
+            await apply_feature_merge(session, master_id=_F_MASTER, loser_id=_F_MASTER)
 
 
 async def test_merge_history_count_after_merge(seeded: str, migrated_engine: AsyncEngine) -> None:

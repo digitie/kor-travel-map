@@ -84,7 +84,7 @@ FOR UPDATE
 
 _AUTHOR_FEATURE_FIELD_OVERRIDES_SQL: Final[str] = """
 CALL feature.author_feature_field_overrides(
-    CAST(:feature_id AS text), CAST(:expected_row_revision AS bigint),
+    CAST(:feature_id AS uuid), CAST(:expected_row_revision AS bigint),
     CAST(:principal AS text), CAST(:reason_code AS text),
     CAST(:command_id AS bigint), CAST(:values AS jsonb),
     CAST(:geometry_wkt AS jsonb), NULL, NULL, NULL, NULL

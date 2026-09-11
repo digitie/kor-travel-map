@@ -1025,9 +1025,11 @@ async def list_features_in_bbox(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     page_rows = rows[:page_size]
-    # cursor는 치환 전 legacy feature_id 축 — keyset 술어와 같은 축이어야 한다.
+    # cursor는 keyset 술어와 **같은 축**이어야 한다. T-VN-39 재키 뒤 그 축은 uuid이고
+    # (`CAST(:cursor_feature_id AS uuid)`), 드라이버는 그 컬럼을 `uuid.UUID` 객체로
+    #준다 — 커서는 JSON이므로 경계에서 문자열로 고정한다.
     next_cursor = (
-        feature_repo.encode_bbox_cursor(page_rows[-1]["feature_id"])
+        feature_repo.encode_bbox_cursor(str(page_rows[-1]["feature_id"]))
         if len(rows) > page_size and page_rows
         else None
     )
@@ -1818,9 +1820,12 @@ def _weather_batch_item_out(
     *,
     echo_feature_id: str | None = None,
 ) -> WeatherBatchItemOut:
-    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 legacy 키).
+    # T-VN-32C — item feature_id는 요청 표기 echo (조회는 해석된 정본 키).
+    # 미해석 참조는 조회 키가 ``None``이라 uuid map에도 없다 — echo만 남는다.
     feature_id = echo_feature_id if echo_feature_id is not None else item.feature_id
-    feature_uuid = feature_uuid_map.get(item.feature_id)
+    feature_uuid = (
+        None if item.feature_id is None else feature_uuid_map.get(item.feature_id)
+    )
     if item.state == "found":
         if item.card_key is None:
             raise RuntimeError("found weather batch item has no card key")
@@ -1973,19 +1978,31 @@ async def get_feature_weather_batch(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WeatherBatchResponse:
     started_at = perf_counter()
-    # T-VN-32C PR-2 — target feature 참조를 경계 해석해 legacy 키로 조회하되
-    # (미해석 참조는 정당한 no_data/retired 계열), 응답 item feature_id는
-    # 요청 표기 echo를 유지한다. 같은 target 안에서 서로 다른 표기가 같은
-    # feature로 해석되면 조회는 1회, echo는 표기별로 낸다. 형식 위반 참조는
-    # per-item 격리 유지(해당 item만 no_data — 리뷰 M1).
+    # T-VN-32C PR-2 — target feature 참조를 경계 해석해 정본 키로 조회하고,
+    # 응답 item feature_id는 요청 표기 echo를 유지한다. 같은 target 안에서 서로
+    # 다른 표기가 같은 feature로 해석되면 조회는 1회, echo는 표기별로 낸다.
+    #
+    # T-VN-39 미결 — **uuid로 못 읽는 참조는 아직 per-item 격리가 아니다.** 재키 뒤
+    # ``_WEATHER_BATCH_SQL``의 ``CAST(:feature_ids AS uuid[])``가 원문 문자열을
+    # 받으면 22P02로 요청 전체가 503(WEATHER_BATCH_UNAVAILABLE)이 된다. ``/batch``
+    # 처럼 ``feature_identity.resolved_uuid_or_none``을 물려 ``None``을 내려보내는
+    # 것이 SQL 층에서는 옳지만(parents LEFT JOIN 무매칭 → 'retired' item),
+    # ``weather_repo``의 python 전제 두 곳이 먼저 깨진다 — 길이 가드
+    # ``len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH``의 TypeError와,
+    # 순서 대조 ``feature_by_ordinal[ordinal] != feature_id``(관측값이
+    # ``str(None)``)의 RuntimeError. 둘 다 500이라 지금의 503보다 나쁘고 수정
+    # 범위가 weather_repo(+ ``WeatherBatchTarget``/``WeatherBatchItem`` 타입)이므로
+    # 여기서 바꾸지 않는다. 형식 위반 참조는 해석에서 제외한다(리뷰 M1).
     all_refs = [ref for target in body.targets for ref in target.feature_ids]
     resolved_refs = await feature_identity.resolve_feature_identities_bulk(
         session, _wellformed_refs(all_refs)
     )
 
-    def _lookup_id(ref: str) -> str:
-        identity = resolved_refs.get(ref)
-        return identity.feature_id if identity is not None else ref
+    def _lookup_id(ref: str) -> str | None:
+        # service batch와 같은 규율 — 정본 키로 못 푼 참조는 원문을 흘리지 않고
+        # ``None``으로 보낸다. `weather_repo`가 NULL 원소를 그대로 한 행으로 만들어
+        # 그 item만 ``no_data``가 되고, echo는 ``echo_feature_id=ref``가 지킨다.
+        return feature_identity.resolved_uuid_or_none(ref, resolved_refs)
 
     try:
         snapshots = await weather_repo.get_weather_batch_snapshots(
@@ -2006,7 +2023,12 @@ async def get_feature_weather_batch(
     # T-VN-32B additive — weather batch 조회 SQL을 재작성하지 않고 item feature
     # 참조에 UUID 정본을 병행 노출한다(존재하지 않는 parent는 map에서 빠져 None).
     item_feature_ids = sorted(
-        {item.feature_id for snapshot in snapshots for item in snapshot.items}
+        {
+            item.feature_id
+            for snapshot in snapshots
+            for item in snapshot.items
+            if item.feature_id is not None
+        }
     )
     feature_uuid_map = await feature_identity.get_feature_uuid_map(
         session, item_feature_ids
@@ -2304,10 +2326,22 @@ async def get_features_batch(
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
     # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
-    # 해석으로 legacy 키 조회를 보장하되(미해석 참조는 정당한 missing),
-    # 응답 item feature_id는 요청 표기 echo를 유지한다. 형식 위반 참조는
-    # per-item 상태 기계 격리를 지키기 위해 해석에서 제외하고 원문 그대로
-    # 조회에 흘린다(종전과 동일하게 해당 item만 missing — 리뷰 M1).
+    # 해석으로 정본 키 조회를 보장하되, 응답 item feature_id는 요청 표기 echo를
+    # 유지한다.
+    #
+    # T-VN-39 (ADR-098 결정 6) — **uuid로 못 읽는 참조는 원문이 아니라 ``None``으로
+    # 내려보낸다.** 재키 뒤 조회 축은 uuid 하나뿐이라 원문 문자열은
+    # ``unnest(CAST(:feature_ids AS uuid[]), ...)``에서 22P02로 죽고, 그러면
+    # per-item 격리가 아니라 **요청 전체**가 503이 된다. alias 발급이
+    # provider/backfill 두 경로로 좁혀진 뒤로는 alias가 아예 없는
+    # manual·큐레이션 Feature를 가리키던 옛 f_* 참조가 실제로 여기 도달하므로,
+    # 위 주석이 약속하던 "미해석 참조 = 정당한 missing"을 지금 참으로 만든다:
+    # NULL 원소는 unnest가 그대로 한 행으로 만들고 ``feature.features`` LEFT
+    # JOIN이 무매칭이라 그 item만 ``missing``이 되며, ``WITH ORDINALITY``(SQL은
+    # ``ORDER BY requested.ordinality``) 덕에 요청 순서 zip echo 매핑은 바뀌지
+    # 않는다. 해석 miss라도 canonical uuid 표기는 헬퍼가 그대로 통과시켜 종전과
+    # 같은 missing이 되고, 형식 위반 참조는 해석에서 빠진 뒤 uuid로도 못 읽혀
+    # 같은 통로로 missing이 된다(리뷰 M1).
     refs = [item.feature_id for item in body.items]
     resolved = await feature_identity.resolve_feature_identities_bulk(
         session, _wellformed_refs(refs)
@@ -2317,9 +2351,7 @@ async def get_features_batch(
             session,
             tuple(
                 (
-                    resolved[item.feature_id].feature_id
-                    if item.feature_id in resolved
-                    else item.feature_id,
+                    feature_identity.resolved_uuid_or_none(item.feature_id, resolved),
                     item.known_row_revision,
                 )
                 for item in body.items

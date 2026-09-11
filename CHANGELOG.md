@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+### provider 핀 8종 상향 — 그리고 두 곳의 조용한 절단을 막는다 (2026-09-11)
+
+- **CHANGED (provider 핀)**: datagokr · kma · khoa · visitkorea · knps · krforest ·
+  krheritage · mcst를 각 리포 기본 브랜치 tip으로 올렸다. 핀은 세 자리가 서로
+  대조한다 — `pyproject.toml` · `_provider_surface.json` · `provider-contract.md`
+  §12 표.
+- **BREAKING 대응 (khoa)**: provider PR#13이 라이브러리를 asyncio 전용으로 바꿔
+  `KhoaClient.oceans_beach_info()`·`close()`가 사라졌다. `fetch_khoa_beaches`를
+  async generator로 옮기고 `aoceans_beach_info`/`aclose`를 쓴다. 소비 측
+  (`_record_batches`)은 이미 `AsyncIterable`을 처리하므로 배선은 그대로다.
+- **ADDED (`aiter_paginated_items`)**: sync 판과 **종료 규칙을 공유하는** async
+  페이지네이터. 판정은 `_PageState` 하나가 소유한다 — 규칙을 두 벌로 적으면
+  한쪽만 고쳐지는 날이 오고, 그 부류가 이 모듈이 생긴 이유다.
+- **ADDED (`retry_upstream_awaitable`)**: 코루틴을 **await하며** 재시도하는 경계.
+  기존 `retry_upstream_async`는 호출을 동기 실행하므로(동기 client용), 코루틴을
+  넘기면 그 안의 예외를 재시도가 한 번도 보지 못한다 — 재시도가 조용히 사라진다.
+- **FIXED (조용한 절단 둘)**: datagokr `b8f1254`가 종료 조건에서
+  `reached_known_end` 가드를 떨어뜨리고 행 단위 `except ValidationError: continue`를
+  넣었다. 둘이 겹치면 기형 행 하나가 만재 페이지를 짧게 만들어 목록이 예외 없이
+  끊기고, Map은 그것을 `authoritative_snapshot_complete=True`로 봉인한다.
+  krheritage도 같은 모양이고 그 때문에 핀이 `6076b52`에 묶여 있었다.
+  두 경로를 Map의 `total` 권위 페이지네이터 아래로 옮겨 provider 종료 조건에 대한
+  **위임을 끊었다** — datagokr 표준데이터 5종은 `_iter_datagokr_standard`,
+  krheritage items는 `search.list` + `iter_paginated_items`.
+
 ### npm 보안 권고 셋을 닫는다 — maplibre-gl 6 · Next 16.3.4 · sharp 0.35.4 (2026-09-10)
 
 - **SECURITY (배포 의존성)**: `npm audit --audit-level=high --omit=dev`가 세 건을
@@ -28,6 +53,30 @@
   lock이 그것과 같은가" 셋만 재고, 그 셋은 버전이 움직여도 그대로 성립한다.
   덤으로 lock의 workspace 키를 `as_posix()`로 읽어 Windows 체크아웃에서만 나던
   `KeyError`를 없앴다.
+
+### T-VN-39 — `feature_id`가 uuid가 된다 (2026-09-10)
+
+- **CHANGED (정본 키, alembic 309)**: `feature.features.feature_id`가 TEXT에서
+  **uuid**가 됐다. 그 값은 서버가 적재 시점에 발급하는 UUIDv7이고, 어떤 입력에서도
+  유도되지 않는다. 예전의 `f_<법정동>_<종류>_<해시>` 주소는 **주소 등록부**
+  (`feature.feature_aliases.alias`)로 옮겨 갔다 — 사라지지 않았고, 정본 키가
+  아니게 됐다(ADR-098).
+- **CHANGED (외부 표면의 값)**: 응답의 `feature_id`는 이제 uuid 표기다. **키 이름은
+  하나도 바뀌지 않았다** — jsonb 키, `RETURNS TABLE` 열 이름, DTO 필드, `feature_uuid`
+  별칭 전부 그대로다. 바뀐 것은 값의 출처뿐이다. `feature_id`를 불투명하게 다루는
+  소비자(T-VN-M02/M05 이후의 계약)는 손댈 것이 없다.
+- **ADDED (legacy 주소로도 찾을 수 있다)**: 조회·필터·상세 표면이 정본 uuid와 legacy
+  `f_*` 주소를 **둘 다** 받는다. `GET /v1/features/<f_*>`는 그 주소가 가리키는 Feature를
+  돌려주고, admin 목록의 feature 필터도 같은 규율을 쓴다
+  (`canonical_feature_id_for_filter`). 어떤 Feature도 가리키지 않는 값은 500이 아니라
+  422다.
+- **ADDED (provider identity 앵커)**: `provider_sync.provider_feature_identities`가
+  `(provider_dataset_id, feature_kind, natural_key) → feature_id` claim을 든다.
+  멱등 적재의 축이 문자열 유도에서 이 claim으로 옮겨 갔다(ADR-098).
+- **FIXED (값 경로)**: 날씨·유가 값 적재, 부모 Feature 연결, dedup 후보 큐가 변환기가
+  준 legacy 주소를 받아 정본 uuid로 푼다. 이 자리들은 재키 직후 전량 22P02였다.
+- **REMOVED (사본 열)**: 13개 `*_feature_uuid` shadow 열이 사라졌다. 두 표기를
+  나란히 들고 있을 이유가 없어졌다 — 정본이 곧 uuid다.
 
 ### backup artifact — manifest가 해시 대상에 들어가고 스키마 출처를 싣는다 (2026-09-08)
 

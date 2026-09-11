@@ -50,6 +50,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     resolve_pipeline_cancellation_scope,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -124,19 +125,26 @@ def test_scope_advisory_key_canonicalizes_filter_whitespace() -> None:
 
 
 def test_scope_advisory_key_canonicalizes_set_scope_order_and_rejects_duplicates() -> None:
+    # T-VN-39 재키 뒤 ``feature_ids`` scope의 항목은 정본 축(canonical uuid)이다 —
+    # ``canonicalize_feature_update_scope``가 uuid가 아닌 항목을 제출 시점에 거절한다.
+    # 여기서 재는 것은 값의 모양이 아니라 "집합 scope는 순서에 무관하고 중복은
+    # 거절한다"이므로, 라벨에서 유도한 uuid로 읽는 사람의 지도를 유지한다.
+    feature_a = feature_uuid("feature-a")
+    feature_b = feature_uuid("feature-b")
+
     assert feature_update_scope_advisory_key(
         scope_type="feature_ids",
-        scope={"type": "feature_ids", "feature_ids": ["feature-b", "feature-a"]},
+        scope={"type": "feature_ids", "feature_ids": [feature_b, feature_a]},
     dataset_memberships=[_LOCK_MEMBERSHIP],
     ) == feature_update_scope_advisory_key(
         scope_type="feature_ids",
-        scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-b"]},
+        scope={"type": "feature_ids", "feature_ids": [feature_a, feature_b]},
     dataset_memberships=[_LOCK_MEMBERSHIP],
     )
     with pytest.raises(ValueError, match="unique"):
         feature_update_scope_advisory_key(
             scope_type="feature_ids",
-            scope={"type": "feature_ids", "feature_ids": ["feature-a", "feature-a"]},
+            scope={"type": "feature_ids", "feature_ids": [feature_a, feature_a]},
         dataset_memberships=[_LOCK_MEMBERSHIP],
         )
     # 같은 membership을 두 번 주면 거절한다. scope도 triple을 직접 든다 —
@@ -475,7 +483,13 @@ async def test_enqueue_now_raises_when_scope_lock_is_held(
 ) -> None:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    scope = {"type": "feature_ids", "feature_ids": ["feature-1", "feature-2"]}
+    # scope에 실린 feature id도 정본 축이다 — 재키 뒤 resolver가
+    # ``unnest(CAST(:feature_ids AS uuid[]))``로 받으므로 uuid가 아니면 제출이 거절된다.
+    # 여기서는 "없는 id"라도 무방하다(경합은 lock key에서 판가름 난다).
+    scope = {
+        "type": "feature_ids",
+        "feature_ids": [feature_uuid("feature-1"), feature_uuid("feature-2")],
+    }
     # lock key는 scope + membership으로 만들어진다 (T-VN-33). 같은 key로 경합시키려면
     # holder와 enqueue가 **같은 membership**을 써야 한다 — 다른 것을 쓰면 애초에
     # 다른 lock이라 경합 자체가 일어나지 않는다.

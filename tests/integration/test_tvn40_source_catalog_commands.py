@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -53,7 +54,9 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
         seed = {
             "actor": actor,
             "dataset_id": dataset_id,
-            "feature_id": f"feature:tvn40-source-{suffix}",
+            # T-VN-39(alembic 309): 이 값은 ``feature.features``에 직접 심는
+            # 정본 키다 → uuid. 라벨은 :func:`feature_uuid`의 씨앗으로만 남는다.
+            "feature_id": feature_uuid(f"feature:tvn40-source-{suffix}"),
             "source_entity_key": f"entity:tvn40-source-{suffix}",
             "source_record_key": f"record:tvn40-source-{suffix}",
             "suffix": suffix,
@@ -100,10 +103,12 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             ) VALUES (:feature_id, :source_entity_key, 'primary', 'exact', 100)
             """,
             """
+            -- 309가 subtype 표의 사본 컬럼 ``feature_uuid``를 없앴다 —
+            -- 정본 키는 ``feature_id`` 하나다.
             INSERT INTO feature.feature_places (
-              feature_id, feature_uuid, kind, place_kind,
+              feature_id, kind, place_kind,
               facility_info, reviews_link, payload
-            ) SELECT feature_id, feature_uuid, kind, 'attraction',
+            ) SELECT feature_id, kind, 'attraction',
                      '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
               FROM feature.features WHERE feature_id = :feature_id
             """,

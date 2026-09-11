@@ -379,6 +379,7 @@ def _build_place_bundle(
     phones = [normalize_phone_number(phone)] if normalize_phone_number(phone) else []
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
         name=normalized_name,
         coord=coord,
@@ -533,6 +534,7 @@ async def _forest_route_to_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=source_id,
         kind=FeatureKind.ROUTE,
         name=name,
         coord=coord,

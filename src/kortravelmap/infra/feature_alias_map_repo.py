@@ -70,7 +70,7 @@ class FeatureAliasMapChecksum:
 # 오름차순)과 동일하다 (저장 alias는 NFC 검증을 통과해야 하므로 byte 순서가
 # 곧 canonical 순서다). 0081이 같은 collation의 keyset index를 만든다.
 _PAGE_SQL: Final[str] = """
-SELECT alias, CAST(feature_uuid AS text) AS feature_uuid, alias_kind
+SELECT alias, CAST(feature_id AS text) AS feature_uuid, alias_kind
 FROM feature.feature_aliases
 WHERE CAST(:after_alias AS text) IS NULL
    OR alias COLLATE "C" > CAST(:after_alias AS text) COLLATE "C"
@@ -79,11 +79,19 @@ LIMIT :limit
 """
 
 _ALL_ROWS_SQL: Final[str] = """
-SELECT alias, CAST(feature_uuid AS text) AS feature_uuid, alias_kind
+SELECT alias, CAST(feature_id AS text) AS feature_uuid, alias_kind
 FROM feature.feature_aliases
 """
 
 
+# 제약 이름의 `ck_feature_aliases_ck_feature_aliases_*` 중복은 오타가 아니라 실제 DB
+# 이름이다 — `conv()`가 접두를 이중으로 붙인 결과이고 `alembic/head-schema.sql`이
+# 정본이다. 새 제약 `ck_feature_aliases_legacy_alias_shape`(309 `_COLLATERAL_RECREATE`)
+# 하나만 단수 접두다.
+#
+# 옛 문구가 들던 "복합 FK 사본 일치"(`fk_feature_aliases_identity_pair`)는 309가
+# **영구 삭제**했다 — alias 쪽 uuid 사본 컬럼 자체가 없어 대조할 짝이 없다. 그 자리를
+# 받는 것이 형태 CHECK(`ck_feature_aliases_legacy_alias_shape`)다.
 def _canonical_row(alias: object, feature_uuid: object, alias_kind: object) -> FeatureAliasMapRowV1:
     try:
         row = FeatureAliasMapRowV1(
@@ -94,8 +102,12 @@ def _canonical_row(alias: object, feature_uuid: object, alias_kind: object) -> F
     except ValueError as exc:
         raise FeatureAliasMapIntegrityError(
             "alias-map 행이 canonical 계약을 위반했습니다 — DB 층 보장"
-            "(0080~0083: canonical CHECK·복합 FK 사본 일치)이 뚫린 상태이므로 "
-            f"이관을 중단합니다: {exc}"
+            "(ck_feature_aliases_ck_feature_aliases_alias_canonical · "
+            "ck_feature_aliases_ck_feature_aliases_kind_canonical · "
+            "ck_feature_aliases_ck_feature_aliases_alias_kind · "
+            "ck_feature_aliases_legacy_alias_shape · uuid 표기를 떠받치는 "
+            "feature_id 컬럼 타입)이 뚫린 상태이므로 이관을 중단합니다: "
+            f"{exc}"
         ) from exc
     return row
 

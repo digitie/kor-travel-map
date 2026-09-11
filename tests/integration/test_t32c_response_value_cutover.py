@@ -4,18 +4,25 @@
 값 전환의 계약을 고정한다:
 
 ① cursor 연속성 (R3 — 최중요) — bbox(``/features``)·search·nearby·public beach
-   목록 4계열 모두 2페이지 이상 걸치는 조건에서 누락·중복 0. cursor keyset은
-   치환 **전** legacy 축이고 응답 ``feature_id``는 UUID 정본이다 — repo 매퍼
-   단계에서 치환하면 keyset이 조용히 깨지는 회귀를 페이지 합집합으로 잡는다.
-② 응답 값 == 저장 uuid — 단건 상세·목록의 ``feature_id``가
-   ``feature.features.feature_uuid`` 저장값과 문자열로 일치하고 ``feature_uuid``
-   병행 필드와도 같다.
+   목록 4계열 모두 2페이지 이상 걸치는 조건에서 누락·중복 0. 재키 전에는 cursor
+   keyset이 치환 **전** legacy 축이고 응답 ``feature_id``만 UUID였다 — repo 매퍼
+   단계 치환이 keyset을 조용히 깨뜨릴 수 있는 자리였다. 309이 두 축을 하나의 uuid로
+   합친 뒤에도 이 축이 지키는 것은 같다: 전 페이지 합집합에 누락·중복이 0이고 모든
+   응답 값이 canonical UUID다.
+② 응답 값 == 저장 정본 키 — 단건 상세·목록의 ``feature_id``가
+   ``feature.features.feature_id`` 저장값과 문자열로 일치하고 ``feature_uuid``
+   병행 필드와도 같다. T-VN-39 재키(alembic 309) 전에는 그 저장값이 사본 컬럼
+   ``features.feature_uuid``에 있었고, 재키가 그 값을 ``feature_id``로 승계한 뒤
+   사본을 DROP했다 — 이 축이 지키는 것("응답 값 == DB의 정본 키")은 그대로이고
+   **읽는 자리만** 옮겼다. legacy ``f_*`` 문자열은 ``feature_aliases.alias``에
+   주소로 남아 요청 표기로만 쓰인다(ADR-098 결정 6).
 ③ batch echo 등식 (R2) — service feature batch·weather batch의 item
    ``feature_id``는 **요청 표기 그대로** 돌아온다(legacy in → legacy out,
    UUID in → UUID out). PinVi 클라이언트가 이 등식을 런타임 강제 중이다.
-④ write 해석 → legacy FK (R4) — M01 migration 전 admin create는 legacy UUID
-   해석·body validation·DB write보다 먼저 503으로 닫히고, update-request
-   scope.feature_ids는 UUID→legacy 해석과 미해석 422 fail-close를 유지한다.
+④ write 해석 → 정본 키 (R4) — M01 migration 전 admin create는 참조 해석·body
+   validation·DB write보다 먼저 503으로 닫히고, update-request의
+   scope.feature_ids는 **정본 uuid로** 해석되며 미해석 422 fail-close를
+   유지한다. T-VN-39 전에는 이 도착지가 legacy `f_*`였다.
 ⑤ admin 검색 UUID fast-path (R5) — ``list_admin_features(q=<uuid>)``가 해당
    feature 1건을 반환한다 (#639 풀스캔 회귀의 기능 축; EXPLAIN 등가는
    ``test_t212d_perf_explain``).
@@ -83,7 +90,25 @@ _BBOX = {
 }
 _NEARBY_CENTER = (124.6050, 33.1050)
 
-_MISSING_LEGACY_REF = "f_global_p_t32cmissing00001"
+# T-VN-39: 309 ``_COLLATERAL_RECREATE``가 ``ck_feature_aliases_legacy_alias_shape``
+# 를 새로 걸었다 — ``alias_kind='legacy_feature_id'`` 행은 ``make_feature_id``
+# 산출물 형태(``f_{bjd|global}_{kind 머리글자}_{16 hex}``)만 담을 수 있다. 재키 전
+# 이 파일이 쓰던 ``f_1100000000_p_t32cpage0001``류 읽기 좋은 라벨은 그 형태가
+# 아니라 이제 적재가 23514로 막힌다(alias는 provider 경로가 **쓴다**). 그래서
+# fixture 주소도 hex 형태로 맞추고, 읽히는 번호는 마지막 네 자리에 남긴다.
+_LEGACY_PAGE_GROUP = "00000032c010"
+_LEGACY_SCOPE_GROUP = "00000032c020"
+_LEGACY_FASTPATH_GROUP = "00000032c030"
+
+
+def _legacy_ref(group: str, index: int) -> str:
+    """provider 변환기 산출물과 **같은 형태**의 fixture legacy 주소."""
+    return f"f_1100000000_p_{group}{index:04d}"
+
+
+# 형태는 맞지만 어느 feature도 등록하지 않은 주소 — "해석 불가"가 형태 위반이 아니라
+# **부재** 때문이라야 이 파일의 fail-close 단언이 뜻을 갖는다.
+_MISSING_LEGACY_REF = "f_global_p_32c000000000dead"
 _MISSING_UUID_REF = "00000000-0000-7000-8000-00000000dead"
 
 _MANUAL_CREATE_WRITE_RELATIONS = (
@@ -118,9 +143,15 @@ _MANUAL_CREATE_WRITE_RELATIONS = (
 
 @dataclass(frozen=True)
 class _SeededIdentity:
-    """seed된 feature의 legacy 키·UUID 정본 쌍."""
+    """seed된 feature의 legacy 주소·정본 키 쌍.
 
-    feature_id: str
+    ``legacy_ref``는 provider 변환기가 만든 ``f_*``다 — 재키 뒤 그것은 키가 아니라
+    ``feature_aliases``에 등록된 주소이므로 이 파일에서는 "클라이언트가 아직 손에
+    들고 있을 수 있는 요청 표기"로만 쓴다. ``feature_uuid``가 서버 발급 정본 키이고
+    응답의 ``feature_id``·``feature_uuid`` 두 슬롯이 모두 그 값을 담는다.
+    """
+
+    legacy_ref: str
     feature_uuid: str
 
 
@@ -152,6 +183,14 @@ def _place_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        # T-VN-39/ADR-098: identity claim 축
+        # ``(provider_dataset_id, feature_kind, natural_key)``의 세 번째 성분.
+        # 정본 키는 서버가 발급하고 위 ``feature_id``는 alias(주소)로만 남으므로,
+        # claim 성분이 없으면 provider writer가 ``FeatureIdentityAnchorError``로
+        # fail-close한다. 이 fixture의 자연키는 legacy 주소 자신이다 —
+        # ``source_record``의 ``source_entity_id``·``raw_data['natural_key']``와
+        # 같은 값이라 seed 하나가 곧 계보 하나다.
+        provider_natural_key=feature_id,
         kind=FeatureKind.PLACE,
         name=name,
         address=Address(),
@@ -190,16 +229,27 @@ def _place_bundle(
     )
 
 
-async def _stored_feature_uuid(session: AsyncSession, feature_id: str) -> str:
-    """정본(features)에 저장된 ``feature_uuid`` — 모든 read 기대값의 기준."""
+async def _stored_canonical_key(session: AsyncSession, legacy_ref: str) -> str:
+    """legacy ``f_*``가 가리키는, ``features``에 저장된 정본 키 — 모든 read 기대값의 기준.
+
+    재키 전에는 같은 값을 ``features.feature_uuid``에서 바로 읽었다. 309
+    ``_SHADOW_DROP``이 그 사본 컬럼을 지웠고, legacy 문자열에서 정본 키로 가는
+    유일한 입구는 ``feature_aliases``다(ADR-098 결정 6). alias만 읽지 않고
+    ``features``와 조인하는 이유는 이 helper가 돌려주는 값이 **실제로 core에 있는
+    행의 키**여야 하기 때문이다 — 그것이 종전 질의가 features를 겨눴던 뜻이다.
+    """
     return str(
         (
             await session.execute(
                 text(
-                    "SELECT CAST(feature_uuid AS text) FROM feature.features "
-                    "WHERE feature_id = :fid"
+                    "SELECT CAST(f.feature_id AS text) "
+                    "FROM feature.features AS f "
+                    "JOIN feature.feature_aliases AS a "
+                    "  ON a.feature_id = f.feature_id "
+                    "WHERE a.alias = :legacy_ref "
+                    "  AND a.alias_kind = 'legacy_feature_id'"
                 ),
-                {"fid": feature_id},
+                {"legacy_ref": legacy_ref},
             )
         ).scalar_one()
     )
@@ -218,8 +268,8 @@ async def _seed_place(
     )
     await session.flush()
     return _SeededIdentity(
-        feature_id=feature_id,
-        feature_uuid=await _stored_feature_uuid(session, feature_id),
+        legacy_ref=feature_id,
+        feature_uuid=await _stored_canonical_key(session, feature_id),
     )
 
 
@@ -257,8 +307,8 @@ async def _seed_beaches(session: AsyncSession) -> tuple[_SeededIdentity, ...]:
         await session.flush()
         seeded.append(
             _SeededIdentity(
-                feature_id=bundle.feature.feature_id,
-                feature_uuid=await _stored_feature_uuid(
+                legacy_ref=bundle.feature.feature_id,
+                feature_uuid=await _stored_canonical_key(
                     session, bundle.feature.feature_id
                 ),
             )
@@ -293,7 +343,7 @@ async def cutover_env(migrated_engine: AsyncEngine) -> AsyncIterator[_CutoverEnv
                 [
                     await _seed_place(
                         setup,
-                        f"f_1100000000_p_t32cpage000{index}",
+                        _legacy_ref(_LEGACY_PAGE_GROUP, index),
                         name=f"T32C 페이지 표적 {index}",
                         lon=124.6020 + 0.0010 * index,
                         lat=33.1020 + 0.0010 * index,
@@ -425,9 +475,9 @@ async def test_public_beach_pages_are_gapless_and_uuid_valued(
 async def test_detail_and_list_feature_id_equal_stored_feature_uuid(
     cutover_env: _CutoverEnv,
 ) -> None:
-    """응답 feature_id == features.feature_uuid 저장값 == feature_uuid 필드."""
+    """응답 feature_id == features.feature_id 저장값 == feature_uuid 필드."""
     target = cutover_env.places[0]
-    by_legacy = await cutover_env.client.get(f"/v1/features/{target.feature_id}")
+    by_legacy = await cutover_env.client.get(f"/v1/features/{target.legacy_ref}")
     assert by_legacy.status_code == 200, by_legacy.text
     data = by_legacy.json()["data"]
     assert data["feature_id"] == target.feature_uuid
@@ -455,7 +505,7 @@ async def test_feature_batch_echoes_request_notation(
     """legacy·UUID 혼합 요청 — item feature_id는 요청 표기 그대로 (echo 계약)."""
     first, second = cutover_env.places[0], cutover_env.places[1]
     refs = [
-        first.feature_id,  # legacy 표기
+        first.legacy_ref,  # legacy 표기 — alias로 해석된다
         first.feature_uuid,  # 같은 feature의 UUID 표기 — 조회 1회, echo 별도
         second.feature_uuid,  # 다른 feature의 UUID 표기
         _MISSING_LEGACY_REF,
@@ -489,7 +539,7 @@ async def test_weather_batch_echoes_target_notation(
     cutover_env: _CutoverEnv,
 ) -> None:
     first, second = cutover_env.places[0], cutover_env.places[1]
-    refs = [first.feature_id, first.feature_uuid, second.feature_uuid]
+    refs = [first.legacy_ref, first.feature_uuid, second.feature_uuid]
     target_at = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
     response = await cutover_env.client.post(
         "/v1/features/weather/batch",
@@ -510,7 +560,7 @@ async def test_weather_batch_echoes_target_notation(
     assert items[2]["feature_uuid"] == second.feature_uuid
 
 
-# ── ④ write 해석 → legacy FK (R4) ──────────────────────────────────────────
+# ── ④ write 해석 → 정본 키 (R4) ────────────────────────────────────────────
 
 
 def _admin_create_body(**overrides: Any) -> dict[str, Any]:
@@ -604,20 +654,26 @@ async def test_admin_create_flag_closes_before_missing_parent_validation(
     )
 
 
-async def test_update_request_scope_resolves_uuid_refs_to_legacy(
+async def test_update_request_scope_resolves_refs_to_canonical_keys(
     migrated_session: AsyncSession,
 ) -> None:
-    """scope.feature_ids의 UUID 표기는 legacy 정본 집합으로 해석된다 (S1)."""
+    """scope.feature_ids의 두 표기가 하나의 정본 키 집합으로 해석된다 (S1).
+
+    재키 전 이 해석의 도착지는 legacy ``f_*``였다(그때는 그것이 FK 값이었다).
+    309이 정본 키를 uuid로 옮긴 뒤 도착지도 uuid다 — 이 테스트가 지키는 것은
+    도착지의 **표기**가 아니라 "서로 다른 표기가 조용히 빈 scope를 만들지 않는다"
+    이고, 그 축은 그대로다.
+    """
     first = await _seed_place(
         migrated_session,
-        "f_1100000000_p_t32cscope0001",
+        _legacy_ref(_LEGACY_SCOPE_GROUP, 1),
         name="T32C scope 표적 1",
         lon=124.6210,
         lat=33.1210,
     )
     second = await _seed_place(
         migrated_session,
-        "f_1100000000_p_t32cscope0002",
+        _legacy_ref(_LEGACY_SCOPE_GROUP, 2),
         name="T32C scope 표적 2",
         lon=124.6220,
         lat=33.1220,
@@ -625,27 +681,27 @@ async def test_update_request_scope_resolves_uuid_refs_to_legacy(
     body = FeatureUpdateRequestPreviewRequest(
         scope=FeatureIdsScope(
             type="feature_ids",
-            feature_ids=[first.feature_uuid, second.feature_id],
+            feature_ids=[first.feature_uuid, second.legacy_ref],
         )
     )
     resolved = await feature_update_service.resolve_feature_ids_scope_refs(
         body, migrated_session
     )
     assert isinstance(resolved.scope, FeatureIdsScope)
-    assert resolved.scope.feature_ids == [first.feature_id, second.feature_id]
+    assert resolved.scope.feature_ids == [first.feature_uuid, second.feature_uuid]
 
     # 같은 feature의 UUID·legacy 이중 표기는 canonical 1건으로 dedup된다.
     duplicated = FeatureUpdateRequestPreviewRequest(
         scope=FeatureIdsScope(
             type="feature_ids",
-            feature_ids=[first.feature_uuid, first.feature_id],
+            feature_ids=[first.feature_uuid, first.legacy_ref],
         )
     )
     deduplicated = await feature_update_service.resolve_feature_ids_scope_refs(
         duplicated, migrated_session
     )
     assert isinstance(deduplicated.scope, FeatureIdsScope)
-    assert deduplicated.scope.feature_ids == [first.feature_id]
+    assert deduplicated.scope.feature_ids == [first.feature_uuid]
 
 
 async def test_create_update_request_resolves_scope_inside_service_transaction(
@@ -656,14 +712,18 @@ async def test_create_update_request_resolves_scope_inside_service_transaction(
     라우터에서 scope를 먼저 해석하면 SELECT autobegin이 서비스의
     ``session.begin()``과 충돌해 feature_ids scope 요청이 전건 500이 된다.
     해석은 서비스 트랜잭션 안(idempotency lock 직후)에서 수행되고, 저장
-    레코드의 scope는 legacy 정본으로 canonical화된다.
+    레코드의 scope는 정본 키로 canonical화된다(재키 뒤 그 키는 uuid다).
     """
     first, second = cutover_env.places[0], cutover_env.places[1]
     body = FeatureUpdateRequestCreateRequest(
         scope=FeatureIdsScope(
             type="feature_ids",
             # UUID·legacy 혼합 + 같은 feature 이중 표기 → 해석·dedup 결과 고정.
-            feature_ids=[first.feature_uuid, first.feature_id, second.feature_id],
+            feature_ids=[
+                first.feature_uuid,
+                first.legacy_ref,
+                second.legacy_ref,
+            ],
         ),
         reason="T32C H1 회귀 검증",
     )
@@ -688,7 +748,7 @@ async def test_create_update_request_resolves_scope_inside_service_transaction(
         assert result.idempotent_replay is False
         scope = result.data.scope
         assert isinstance(scope, FeatureIdsScope)
-        assert scope.feature_ids == [first.feature_id, second.feature_id]
+        assert scope.feature_ids == [first.feature_uuid, second.feature_uuid]
 
         # 같은 key 재전송 — 해석 후 fingerprint가 동일하므로 terminal 재생.
         replay_session = AsyncSession(
@@ -741,7 +801,7 @@ async def test_admin_search_uuid_fast_path_returns_single_feature(
     """UUID 검색어가 해당 feature 1건으로 등가 해석된다 (#639 회귀의 기능 축)."""
     seeded = await _seed_place(
         migrated_session,
-        "f_1100000000_p_t32cfastpath1",
+        _legacy_ref(_LEGACY_FASTPATH_GROUP, 1),
         name="T32C fast-path 표적",
         lon=124.6310,
         lat=33.1310,
@@ -749,8 +809,14 @@ async def test_admin_search_uuid_fast_path_returns_single_feature(
     page = await admin_feature_repo.list_admin_features(
         migrated_session, q=seeded.feature_uuid
     )
-    assert [item.feature_id for item in page.items] == [seeded.feature_id]
+    # 재키 뒤 admin row의 ``feature_id``도 정본 키(uuid)다 — 두 슬롯은 같은 값의
+    # 두 표기이고, legacy ``f_*``는 alias 등록부에만 남는다.
+    assert [item.feature_id for item in page.items] == [seeded.feature_uuid]
     assert page.items[0].feature_uuid == seeded.feature_uuid
+    # 위 두 단언의 기대값은 이제 **질의 입력과 같은 문자열**이다 — 재키 전에는
+    # 두 축이 달라 그 자체로 "해석됐다"를 증명했지만 지금은 아니다. 그래서
+    # 질의와 독립인 속성으로 "seed한 그 행"을 한 번 더 못박는다.
+    assert page.items[0].name == "T32C fast-path 표적"
     assert page.next_cursor is None
 
     # 대문자 표기도 같은 fast-path에 태운다 — 경계 해석·batch echo와 표면 간
@@ -758,7 +824,7 @@ async def test_admin_search_uuid_fast_path_returns_single_feature(
     upper = await admin_feature_repo.list_admin_features(
         migrated_session, q=seeded.feature_uuid.upper()
     )
-    assert [item.feature_id for item in upper.items] == [seeded.feature_id]
+    assert [item.feature_id for item in upper.items] == [seeded.feature_uuid]
 
     # 존재하지 않는 UUID 검색어는 존재하지 않는 legacy id와 동일하게 빈 결과다.
     empty = await admin_feature_repo.list_admin_features(

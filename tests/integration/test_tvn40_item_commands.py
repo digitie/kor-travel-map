@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -55,7 +56,10 @@ async def test_item_commands_preserve_revision_link_audit_and_admin_boundary(
 ) -> None:
     suffix = uuid4().hex
     actor = f"admin:tvn40-item-{suffix}"
-    feature_id = f"feature-item-{suffix}"
+    # T-VN-39(alembic 309): ``feature.features``에 직접 심고 그 값을
+    # ``create/patch_curation_item_command``의 uuid 인자로 그대로 넘기므로
+    # 정본 축이다 — 라벨은 씨앗으로만 남긴다.
+    feature_id = feature_uuid(f"feature-item-{suffix}")
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:

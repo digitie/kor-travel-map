@@ -221,6 +221,7 @@ async def grid_to_weather_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.WEATHER,
         name=name,
         coord=coord,
@@ -1072,6 +1073,9 @@ def _alert_region_to_bundle(
 
     feature = Feature(
         feature_id=feature_id,
+        # `kma_alert_notice_feature_id`가 쓰는 것과 **같은 자연키**다(:931-939).
+        # 그 함수가 `make_feature_id`를 감싸므로 자동 주입에서 빠졌다.
+        provider_natural_key=natural_key,
         kind=FeatureKind.NOTICE,
         name=title_normalized,
         coord=None,  # 특보는 region 단위 — 점 좌표 X. 호출자가 후속 enrichment 가능.

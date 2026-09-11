@@ -1,9 +1,9 @@
 {
   "artifact": "target-schema-fingerprints-v1",
   "owner": "T-VN-31A",
-  "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다.",
+  "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다. 2026-09-10 T-VN-39 재키는 alias 발급 주체를 trigger에서 provider wrapper로 옮긴 사실을 **주석으로** 기록했다 — 카탈로그는 바뀌지 않으므로 7축 fingerprint는 그대로이고 source SHA만 따라간다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
-  "target_schema_sql_sha256": "c60bdddb411fc38087976df5398f968e9255074797d98d485c2341c30988dc8d",
+  "target_schema_sql_sha256": "9be2a024834eef475bec6a7521f7f24d390cf3bdf29ceee78db604941988269c",
   "tvn33_reference_ownership_sql_sha256": "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b",
   "fingerprints": {
     "columns": "552ba4b37b60a79aad50fad2b3fd124d079f31e28a56e3013db9f7e5e5f59082",

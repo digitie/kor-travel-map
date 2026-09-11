@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.ids import make_feature_uuid
 from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_operation_repo import (
@@ -72,8 +73,15 @@ async def _seed_candidate(
     place_kind: str = "attraction",
     place_payload: str = "{}",
 ) -> dict[str, object]:
-    suffix = uuid4().hex
-    feature_id = f"feature:tvn40-candidate-{suffix}"
+    # T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이
+    # seed는 provider 경로를 타지 않으므로 claim도 alias도 없고, 정본 키를 여기서
+    # 직접 발급한다 — ADR-098에서 그 값은 **서버가 발급하는 랜덤 UUIDv7**이고 값
+    # 자체가 뜻을 담지 않는다(종전 ``feature:tvn40-candidate-...`` 표찰은 uuid 열에
+    # 애초에 들어갈 수 없다). ``suffix``를 그 키의 hex로 두어 seed가 만드는 나머지
+    # text 키(entity/record/theme/run id)가 계속 한 벌로 묶이게 한다.
+    feature_uuid = make_feature_uuid()
+    suffix = feature_uuid.hex
+    feature_id = str(feature_uuid)
     source_entity_key = f"entity:tvn40-candidate-{suffix}"
     source_record_key = f"record:tvn40-candidate-{suffix}"
     actor = f"admin:tvn40-{suffix}"
@@ -153,7 +161,7 @@ async def _seed_candidate(
               feature_id, kind, name, category, coord, address,
               marker_icon, marker_color
             ) VALUES (
-              :feature_id, 'place', 'typed candidate', '01070100',
+              CAST(:feature_id AS uuid), 'place', 'typed candidate', '01070100',
               x_extension.ST_SetSRID(
                 x_extension.ST_MakePoint(126.9780, 37.5665), 4326
               ),
@@ -164,7 +172,7 @@ async def _seed_candidate(
             INSERT INTO provider_sync.source_links (
               feature_id, source_entity_key, source_role, match_method, confidence
             ) VALUES (
-              :feature_id, :source_entity_key, 'primary', 'exact', 100
+              CAST(:feature_id AS uuid), :source_entity_key, 'primary', 'exact', 100
             )
             """,
         ):
@@ -173,15 +181,15 @@ async def _seed_candidate(
             text(
                 """
                 INSERT INTO feature.feature_places (
-                  feature_id, feature_uuid, kind, place_kind,
+                  feature_id, kind, place_kind,
                   facility_info, reviews_link, payload
                 )
                 SELECT
-                  feature_id, feature_uuid, kind, :place_kind,
+                  feature_id, kind, :place_kind,
                   jsonb_build_object('wheelchair', true), '{}'::jsonb,
                   CAST(:place_payload AS jsonb)
                 FROM feature.features
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {**seed, "place_kind": place_kind},
@@ -275,7 +283,8 @@ async def _seed_candidate(
                       candidate_input_hash, review_state, eligibility_present,
                       disposition, rank_score, match_evidence
                     ) VALUES (
-                      CAST(:rule_id AS uuid), :source_entity_key, :feature_id,
+                      CAST(:rule_id AS uuid), :source_entity_key,
+                      CAST(:feature_id AS uuid),
                       :source_record_key, 1, repeat('b', 64), repeat('a', 64),
                       repeat('c', 64), 'open', true, 'active', 10,
                       jsonb_build_object('schema_version', 1)
@@ -301,7 +310,8 @@ async def _seed_candidate(
                     candidate_input_hash = snapshot.candidate_input_hash,
                     match_evidence = snapshot.match_evidence
                 FROM feature.current_theme_candidate_snapshot(
-                  CAST(:rule_id AS uuid), :source_entity_key, :feature_id
+                  CAST(:rule_id AS uuid), :source_entity_key,
+                  CAST(:feature_id AS uuid)
                 ) AS snapshot
                 WHERE candidate.candidate_id = CAST(:candidate_id AS uuid)
                     """
@@ -370,7 +380,8 @@ async def _seed_rule_reconcile_operation(
                     """
                     SELECT rule_input_hash, candidate_input_hash
                     FROM feature.current_theme_candidate_snapshot(
-                      CAST(:rule_id AS uuid), :source_entity_key, :feature_id
+                      CAST(:rule_id AS uuid), :source_entity_key,
+                      CAST(:feature_id AS uuid)
                     )
                     """
                 ),
@@ -536,9 +547,14 @@ async def test_candidate_command_acl_and_cas_fail_closed(
                         """
                     ),
                     {
+                        # T-VN-39: 앞 세 인자가 `uuid,text,text` → `uuid,uuid,uuid`다
+                        # (`p_candidate_id`·`p_from_feature_id`·`p_to_feature_id`).
+                        # 시그니처가 어긋나면 `to_regprocedure`가 NULL을 내고 이
+                        # 질의가 `NoResultFound`로 죽는다 — ACL을 못 지키는 것이
+                        # 아니라 **볼 대상을 잃는다**.
                         "audit_signature": (
                             "feature.append_theme_feature_candidate_transition("
-                            "uuid,text,text,uuid,text,text,text,boolean,boolean,text,text,"
+                            "uuid,uuid,uuid,uuid,text,text,text,boolean,boolean,text,text,"
                             "uuid,text,bigint,bigint,text,text,uuid,bigint,text,text,uuid,"
                             "uuid,bigint,text,text,jsonb)"
                         )
@@ -671,7 +687,8 @@ async def test_admin_runtime_promotion_is_one_trusted_membership_transaction(
                 await connection.execute(
                     text(
                         """
-                        SELECT item.feature_id, item.source_record_key, item.status,
+                        SELECT CAST(item.feature_id AS text), item.source_record_key,
+                               item.status,
                                item.row_revision, decision.decision_kind,
                                decision.match_basis, decision.resolver_version,
                                decision.actor, decision.evidence ->> 'candidate_id'
@@ -810,7 +827,7 @@ async def test_promotion_rejects_stale_typed_feature_detail(
                 """
                 UPDATE feature.feature_places
                 SET facility_info = jsonb_build_object('wheelchair', false)
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             seeded,
@@ -878,14 +895,15 @@ async def test_notice_candidate_detail_excludes_internal_validity_range(
     async with migrated_engine.begin() as connection:
         await connection.execute(
             text(
-                "DELETE FROM feature.feature_places WHERE feature_id = :feature_id"
+                "DELETE FROM feature.feature_places "
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
             seeded,
         )
         await connection.execute(
             text(
                 "UPDATE feature.features SET kind = 'notice' "
-                "WHERE feature_id = :feature_id"
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
             seeded,
         )
@@ -893,15 +911,15 @@ async def test_notice_candidate_detail_excludes_internal_validity_range(
             text(
                 """
                 INSERT INTO feature.feature_notices (
-                    feature_id, feature_uuid, kind, notice_type, severity,
+                    feature_id, kind, notice_type, severity,
                     valid_start_time, valid_end_time, source_agency, payload
                 )
-                SELECT feature_id, feature_uuid, kind, 'traffic', 2,
+                SELECT feature_id, kind, 'traffic', 2,
                        CAST(:valid_start AS timestamptz),
                        CAST(:valid_end AS timestamptz),
                        'test-agency', '{}'::jsonb
                 FROM feature.features
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {
@@ -1018,7 +1036,7 @@ async def test_rule_reconcile_generation_is_server_derived_and_replay_safe(
                          AND transition.generation_id = generation.generation_id
                         WHERE candidate.rule_id = CAST(:rule_id AS uuid)
                           AND candidate.source_entity_key = :source_entity_key
-                          AND candidate.feature_id = :feature_id
+                          AND candidate.feature_id = CAST(:feature_id AS uuid)
                         GROUP BY candidate.review_state,
                                  candidate.eligibility_present,
                                  candidate.disposition,
@@ -1427,7 +1445,7 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                         UPDATE provider_sync.source_links
                         SET confidence = 99
                         WHERE source_entity_key = :source_entity_key
-                          AND feature_id = :feature_id
+                          AND feature_id = CAST(:feature_id AS uuid)
                         """
                     ),
                     seeded,
@@ -1514,12 +1532,13 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
     [
         """
         UPDATE provider_sync.source_links SET match_method = 'manual', confidence = 55
-        WHERE source_entity_key = :source_entity_key AND feature_id = :feature_id
+        WHERE source_entity_key = :source_entity_key
+          AND feature_id = CAST(:feature_id AS uuid)
         """,
         """
         UPDATE feature.feature_places
         SET payload = jsonb_build_object('semantic-drift', true)
-        WHERE feature_id = :feature_id
+        WHERE feature_id = CAST(:feature_id AS uuid)
         """,
     ],
 )
@@ -2191,7 +2210,7 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                         UPDATE provider_sync.source_links
                         SET match_method = 'manual', confidence = 55
                         WHERE source_entity_key = :source_entity_key
-                          AND feature_id = :feature_id
+                          AND feature_id = CAST(:feature_id AS uuid)
                         """
                     ),
                     seeded,

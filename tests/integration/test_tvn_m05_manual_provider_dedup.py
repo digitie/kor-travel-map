@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = [
     pytest.mark.integration,
@@ -83,8 +84,14 @@ async def _seed_manual_provider_pair(
     manual_name = f"M05 수동 후보 {index}"
     manual_lon_e6 = 127111111 + int(round(lon_offset * 1_000_000))
     manual_lat_e6 = 37511111 + int(round(lat_offset * 1_000_000))
-    manual_feature_id = f"f_global_p_m05manual{suffix[:10]}"
-    provider_feature_id = f"f_global_p_m05provider{suffix[:10]}"
+    # T-VN-39(alembic 309): 이 fixture는 `feature.features`에 **직접** 심는다 →
+    # 정본 축이므로 두 식별자는 uuid다. 종전에는 legacy `f_*`를 넣으면 트리거
+    # `trg_features_legacy_alias`가 alias와 shadow uuid를 대신 만들어 줬는데, 309가
+    # 그 트리거와 사본 컬럼 `feature_uuid`를 함께 없앴다 — 이제 정본 키를 심는 쪽이
+    # 곧 이 값이고, 되읽을 shadow도 발급될 alias도 없다(ADR-098 결정 6: manual
+    # 계열은 주소를 발급하지 않는다). 라벨은 :func:`feature_uuid`의 씨앗으로만 남는다.
+    manual_feature_id = feature_uuid(f"m05-manual-{suffix}")
+    provider_feature_id = feature_uuid(f"m05-provider-{suffix}")
     source_entity_key = f"se_m05_{suffix[:12]}"
     source_record_key = f"sr_m05_{suffix[:12]}_a"
     actor = f"admin:tvn-m05-{suffix}"
@@ -120,35 +127,20 @@ async def _seed_manual_provider_pair(
                 text(
                     """
                     INSERT INTO feature.feature_places (
-                      feature_id, feature_uuid, kind, place_kind, facility_info,
+                      feature_id, kind, place_kind, facility_info,
                       reviews_link, payload
-                    ) SELECT feature_id, feature_uuid, kind, 'attraction',
+                    ) SELECT feature_id, kind, 'attraction',
                              '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
                       FROM feature.features WHERE feature_id = :feature_id
                     """
                 ),
                 {"feature_id": feature_id},
             )
-        manual_uuid = UUID(
-            str(
-                await connection.scalar(
-                    text(
-                        "SELECT feature_uuid FROM feature.features WHERE feature_id = :feature_id"
-                    ),
-                    {"feature_id": manual_feature_id},
-                )
-            )
-        )
-        provider_uuid = UUID(
-            str(
-                await connection.scalar(
-                    text(
-                        "SELECT feature_uuid FROM feature.features WHERE feature_id = :feature_id"
-                    ),
-                    {"feature_id": provider_feature_id},
-                )
-            )
-        )
+        # 정본 키가 하나뿐이므로 되읽을 shadow가 없다. `*_uuid`는 같은 값의
+        # `UUID` 표기다 — 드라이버가 uuid 컬럼을 읽어 돌려주는 형과 맞춰 둬야
+        # 아래 evidence 비교가 `str` 계약으로 새지 않는다.
+        manual_uuid = UUID(manual_feature_id)
+        provider_uuid = UUID(provider_feature_id)
         await connection.execute(
             text(
                 """
@@ -290,7 +282,7 @@ async def _record_candidate(
                     text(
                         """
                         CALL feature.record_manual_provider_dedup_candidate(
-                          CAST(:manual_feature_id AS text), CAST(:provider_feature_id AS text),
+                          CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid),
                           CAST(:scores AS jsonb), CAST(:causation AS jsonb),
                           NULL::uuid, NULL::text
                         )
@@ -476,9 +468,12 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
 ) -> None:
     """0234 preview DB의 v1 grant는 0235 repair 뒤에 남을 수 없다."""
 
+    # 309가 `p_survivor_feature_id`를 text → uuid로 옮겼다. `::regprocedure`는
+    # 없는 시그니처면 42883으로 서므로 이 문자열 자체가 "그 프로시저가 이 모양으로
+    # head에 있다"는 계약이다.
     v1 = (
         "feature.resolve_manual_provider_dedup_case("
-        "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+        "uuid,text,text,bigint,bigint,uuid,text,text,bigint)"
     )
     async with migrated_engine.begin() as connection:
         await connection.execute(
@@ -603,7 +598,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 await connection.execute(
                     text(
                         "CALL feature.record_manual_provider_dedup_candidate("
-                        "CAST(:manual_feature_id AS text), CAST(:provider_feature_id AS text), "
+                        "CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid), "
                         "CAST(:scores AS jsonb), CAST(:causation AS jsonb), "
                         "NULL::uuid, NULL::text)"
                     ),
@@ -634,7 +629,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                         "SELECT pg_get_userbyid(proowner) FROM pg_catalog.pg_proc "
                         "WHERE oid = "
                         "'feature.record_manual_provider_dedup_candidate("
-                        "text,text,jsonb,jsonb)'::regprocedure"
+                        "uuid,uuid,jsonb,jsonb)'::regprocedure"
                     )
                 )
                 == "ktm_manual_provider_dedup_procedure_owner"
@@ -745,9 +740,13 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                             CALL feature.resolve_manual_provider_dedup_case_v2(
                               CAST(:case_id AS uuid), 'merged', CAST(:fingerprint AS text),
                               CAST(:manual_revision AS bigint), CAST(:provider_revision AS bigint),
-                              CAST(:survivor_feature_id AS text), 'same location confirmed',
+                              CAST(:survivor_feature_id AS uuid), 'same location confirmed',
                               CAST(:actor AS text), CAST(:command_id AS bigint),
-                              NULL::text, NULL::uuid, NULL::uuid, NULL::text, NULL::bigint
+                              -- OUT 다섯: outcome text · resolution_id uuid ·
+                              -- event_id uuid · manual_feature_id **uuid**(309) ·
+                              -- manual_feature_row_revision bigint. 자리표시 타입이
+                              -- 하나라도 어긋나면 CALL이 어떤 프로시저와도 맞지 않는다.
+                              NULL::text, NULL::uuid, NULL::uuid, NULL::uuid, NULL::bigint
                             )
                             """
                         ),
@@ -766,7 +765,8 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 .one()
             )
         assert resolved["o_outcome"] == "merged"
-        assert resolved["o_manual_feature_id"] == pair["manual_feature_id"]
+        # 309 뒤 이 OUT은 uuid다 — 드라이버가 `UUID` 객체를 준다.
+        assert resolved["o_manual_feature_id"] == pair["manual_uuid"]
         assert resolved["o_manual_feature_row_revision"] == 2
         assert resolved["o_event_id"] is not None
 
@@ -778,8 +778,8 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                             """
                                SELECT resolution.decision, event.action, event.event_sequence,
                                    event.occurred_at,
-                               event.old_feature_uuid,
-                               event.replacement_feature_uuid, event.event_payload,
+                               event.old_feature_id,
+                               event.replacement_feature_id, event.event_payload,
                                event.event_sha256,
                                encode(x_extension.digest(
                                  convert_to(event.event_payload::text, 'UTF8'), 'sha256'
@@ -817,8 +817,10 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         assert evidence["event_payload"]["occurred_at"] == evidence[
             "occurred_at"
         ].isoformat(timespec="microseconds").replace("+00:00", "Z")
-        assert evidence["old_feature_uuid"] == pair["manual_uuid"]
-        assert evidence["replacement_feature_uuid"] == pair["provider_uuid"]
+        # 309가 사본 컬럼 `old_feature_uuid`/`replacement_feature_uuid`를 없앴다 —
+        # 두 참조 컬럼 자신이 uuid다.
+        assert evidence["old_feature_id"] == pair["manual_uuid"]
+        assert evidence["replacement_feature_id"] == pair["provider_uuid"]
         assert evidence["event_payload"]["action"] == "rebind"
         assert len(evidence["event_sha256"]) == 64
         assert evidence["event_sha256"] == evidence["recomputed_event_sha256"]

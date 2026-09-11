@@ -115,8 +115,11 @@ _JOB_SELECT_COLUMNS: Final[str] = ", ".join(
     f"job.{column}" for column in _RETURN_COLUMNS.split(", ")
 )
 
+#: T-VN-39: `feature_id`는 uuid 컬럼이지만 `ImportJobEvent.feature_id`는 text
+#: 계약이다(API 응답 필드). 나가는 이름은 그대로 두고 원천만 캐스트한다.
 _EVENT_RETURN_COLUMNS: Final[str] = (
-    "event_id, job_id, import_job_dataset_id, feature_id, stage, level, code, "
+    "event_id, job_id, import_job_dataset_id, "
+    "CAST(feature_id AS text) AS feature_id, stage, level, code, "
     "message, payload, occurred_at"
 )
 
@@ -406,7 +409,14 @@ INSERT INTO ops.import_job_events (
 SELECT
     job.job_id,
     CAST(:import_job_dataset_id AS uuid),
-    COALESCE(CAST(:feature_id AS text), job.payload ->> 'feature_id'),
+    -- T-VN-39: 두 갈래가 같은 타입이어야 한다. `->>`는 text를 내므로 캐스트가
+    -- 없으면 `COALESCE types uuid and text cannot be matched`로 INSERT 자체가
+    -- **파스 단계에서** 죽는다 — job 이벤트 기록이 통째로 멈춘다.
+    -- job payload의 `feature_id`는 재키 후 uuid 표기라 그대로 읽힌다.
+    COALESCE(
+        CAST(:feature_id AS uuid),
+        CAST(job.payload ->> 'feature_id' AS uuid)
+    ),
     COALESCE(CAST(:stage AS text), job.current_stage),
     :level,
     CAST(:code AS text),

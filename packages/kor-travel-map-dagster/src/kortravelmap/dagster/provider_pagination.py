@@ -52,7 +52,13 @@ krex는 resultCode ``03``/``NO_DATA``에 ``KrexNotFoundError``를, airkorea는
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterator,
+    Sequence,
+)
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -155,67 +161,130 @@ def iter_paginated_items(
     ProviderPaginationOverrun
         ``max_pages``를 넘겼을 때.
     """
-    seen = 0
-    declared: int | None = None
-    ceiling = max_pages
-
-    page_no = 0
+    state = _PageState(num_of_rows=num_of_rows, label=label, ceiling=max_pages)
     while True:
-        page_no += 1
-        if page_no > ceiling:
+        state.page_no += 1
+        state.guard_ceiling()
+        try:
+            page = fetch_page(state.page_no)
+        except end_of_pages:
+            # provider가 "더 없음"을 예외로 알렸다. 정상 종료다.
+            state.note_end_of_pages(warn)
+            return
+        yield from state.absorb(page, warn)
+        if state.finished:
+            return
+
+
+async def aiter_paginated_items(
+    fetch_page: Callable[[int], Awaitable[ProviderPage]],
+    *,
+    num_of_rows: int,
+    label: str,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    end_of_pages: tuple[type[BaseException], ...] = (),
+    warn: Callable[[str], None] | None = None,
+) -> AsyncIterator[Any]:
+    """:func:`iter_paginated_items`의 async 짝. **종료 규칙은 같은 한 벌이다.**
+
+    async 클라이언트를 쓰는 provider가 생기면서 필요해졌다(khoa가 6.x에서 sync
+    진입점을 전부 없앴다). 규칙을 두 벌로 복제하면 갈라진다 — 그래서 판정은
+    :func:`_terminate` 하나가 소유하고, 여기서는 await 경계만 다르다.
+
+    인자·예외·경고 계약은 sync 판과 동일하다. 그 문서는 위쪽을 보라.
+    """
+    state = _PageState(num_of_rows=num_of_rows, label=label, ceiling=max_pages)
+    while True:
+        state.page_no += 1
+        state.guard_ceiling()
+        try:
+            page = await fetch_page(state.page_no)
+        except end_of_pages:
+            state.note_end_of_pages(warn)
+            return
+        for item in state.absorb(page, warn):
+            yield item
+        if state.finished:
+            return
+
+
+@dataclass
+class _PageState:
+    """페이지네이션 종료 판정 상태 — sync/async 두 루프가 공유한다.
+
+    이 클래스가 생긴 이유는 코드 재사용이 아니라 **규칙이 하나여야 하기**
+    때문이다. 종료 조건(‘``total_count``가 권위, 짧은 페이지는 대체 휴리스틱’)을
+    두 자리에 적으면 한쪽만 고쳐지는 날이 온다. 이 파일의 존재 이유가 바로 그
+    부류의 사고다.
+    """
+
+    num_of_rows: int
+    label: str
+    ceiling: int
+    seen: int = 0
+    declared: int | None = None
+    page_no: int = 0
+    finished: bool = False
+
+    def guard_ceiling(self) -> None:
+        if self.page_no > self.ceiling:
             raise ProviderPaginationOverrun(
-                f"{label}: page 상한 {ceiling}를 넘겼다 (수신 {seen}건, 선언 {declared}). "
+                f"{self.label}: page 상한 {self.ceiling}를 넘겼다 "
+                f"(수신 {self.seen}건, 선언 {self.declared}). "
                 "upstream이 범위 밖 page에 빈 페이지를 주지 않거나 행을 과도하게 "
                 "걸러내는지 확인할 것."
             )
-        try:
-            page = fetch_page(page_no)
-        except end_of_pages:
-            # provider가 "더 없음"을 예외로 알렸다. 정상 종료다.
-            if declared is not None and seen < declared:
-                _emit(
-                    warn,
-                    f"{label}: upstream이 선언한 {declared}건 중 {seen}건에서 "
-                    f"페이지 종료를 알렸다 — provider 파싱 실패 행 가능성",
-                )
-            return
+
+    def note_end_of_pages(self, warn: Callable[[str], None] | None) -> None:
+        if self.declared is not None and self.seen < self.declared:
+            _emit(
+                warn,
+                f"{self.label}: upstream이 선언한 {self.declared}건 중 {self.seen}건에서 "
+                f"페이지 종료를 알렸다 — provider 파싱 실패 행 가능성",
+            )
+        self.finished = True
+
+    def absorb(
+        self, page: ProviderPage, warn: Callable[[str], None] | None
+    ) -> Sequence[Any]:
+        """한 페이지를 흡수하고 yield할 item을 돌려준다. 종료는 ``finished``로 알린다."""
         items = list(page.items)
         if page.declared_total is not None:
-            declared = page.declared_total
+            self.declared = page.declared_total
             # 선언 건수가 상한을 정한다. 전역 상한은 그보다 작을 때만 의미가 있다.
-            needed = -(-declared // num_of_rows) if num_of_rows > 0 else 1
-            ceiling = max(ceiling, needed * _DECLARED_PAGE_SLACK + 1)
+            needed = (
+                -(-self.declared // self.num_of_rows) if self.num_of_rows > 0 else 1
+            )
+            self.ceiling = max(self.ceiling, needed * _DECLARED_PAGE_SLACK + 1)
 
         if not items:
-            if declared is not None and seen < declared:
-                # upstream이 선언한 건수보다 적게 줬다. 절단 자체는 upstream/parse
-                # 쪽이지만 조용히 넘어가면 적재 누락이 보이지 않는다.
+            if self.declared is not None and self.seen < self.declared:
                 _emit(
                     warn,
-                    f"{label}: upstream이 선언한 {declared}건 중 {seen}건만 전달하고 "
-                    f"페이지가 비었다 — provider 파싱 실패 행 가능성",
+                    f"{self.label}: upstream이 선언한 {self.declared}건 중 "
+                    f"{self.seen}건만 전달하고 페이지가 비었다 — "
+                    "provider 파싱 실패 행 가능성",
                 )
-            return
+            self.finished = True
+            return ()
 
-        yield from items
-        seen += len(items)
-
-        if declared is not None:
-            if seen >= declared:
-                return
-            if len(items) < num_of_rows:
+        self.seen += len(items)
+        if self.declared is not None:
+            if self.seen >= self.declared:
+                self.finished = True
+            elif len(items) < self.num_of_rows:
                 # 이번 보정의 본체 — 짧은 페이지를 마지막 페이지로 읽지 않는다.
                 _emit(
                     warn,
-                    f"{label}: page {page_no}가 {len(items)}/{num_of_rows}행만 반환했으나 "
-                    f"선언 {declared}건 중 {seen}건만 받았다 — provider가 행을 걸렀을 수 "
-                    f"있어 계속 페이지네이션한다",
+                    f"{self.label}: page {self.page_no}가 "
+                    f"{len(items)}/{self.num_of_rows}행만 반환했으나 "
+                    f"선언 {self.declared}건 중 {self.seen}건만 받았다 — "
+                    "provider가 행을 걸렀을 수 있어 계속 페이지네이션한다",
                 )
-            continue
-
-        if len(items) < num_of_rows:
+        elif len(items) < self.num_of_rows:
             # total_count가 없으면 짧은 페이지 외에 판정 근거가 없다.
-            return
+            self.finished = True
+        return items
 
 
 def _emit(warn: Callable[[str], None] | None, message: str) -> None:

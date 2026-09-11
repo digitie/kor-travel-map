@@ -390,6 +390,10 @@ async def _bind_client_to_session(
         "AsyncEngine",
         _TransactionBoundEngineGuard(),
     )
+    # 결합 사실을 client가 **스스로 알게** 한다. 결합된 client에서 난 실패는 그
+    # rollback이 executor의 root transaction까지 되감으므로 회복 불가다 — 호출자가
+    # 완화 모드라도 삼키면 안 되고, 그 판단은 이 플래그를 보고 한다.
+    bound_client._transaction_bound = True  # noqa: SLF001
     return bound_client
 
 

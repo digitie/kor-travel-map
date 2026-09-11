@@ -1,4 +1,11 @@
-"""T-VN-34A 직교 Feature 상태 DB spine의 집중 PostgreSQL 계약."""
+"""T-VN-34A 직교 Feature 상태 DB spine의 집중 PostgreSQL 계약.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와
+``feature.feature_state_transitions.feature_id``가 uuid이고, 사본 컬럼
+``feature_uuid``는 두 표 모두에서 DROP됐다. 이 파일의 seed는 provider 적재
+경로를 타지 않고 state procedure를 직접 호출하므로 정본 키를 스스로 발급한다 —
+읽는 사람의 표찰은 ``name``에 남기고 조회 키는 uuid를 쓴다.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +19,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.integration._feature_ids import feature_uuid
+
 pytestmark = pytest.mark.integration
 
 _LEGAL_TUPLES: Sequence[tuple[str, str, str]] = (
@@ -24,6 +33,23 @@ _LEGAL_TUPLES: Sequence[tuple[str, str, str]] = (
     ("retired", "suppressed", "valid"),
     ("retired", "suppressed", "quarantined"),
 )
+
+#: 8 tuple seed의 정본 키. **순서가 뜻을 갖는다** — 아래 audit 단언이
+#: ``ORDER BY feature_id``의 첫 행을 index 1(유일한 provider_sync 근거 행)로 읽으므로,
+#: 라벨 사전순과 무관한 유도 uuid가 아니라 눈으로 순서를 확인할 수 있는 리터럴을
+#: 이 파일이 직접 든다 (``tests/integration/_feature_ids.py`` §"쓰면 안 되는 곳").
+_STATE_FEATURE_IDS: tuple[str, ...] = tuple(
+    f"00000000-0000-7000-8000-0000003400{index:02d}" for index in range(1, 9)
+)
+
+#: runtime 권한 fence probe가 쓰는 값. 형식이 맞는 uuid여야 한다 — 표찰 문자열은
+#: 권한 검사(42501)에 닿기 전 파스 단계 22P02로 죽어 관측 자체가 성립하지 않는다.
+_DIRECT_INSERT_FEATURE_ID = "00000000-0000-7000-8000-000000340091"
+_DIRECT_AUDIT_FEATURE_ID = "00000000-0000-7000-8000-000000340092"
+
+#: provider retire/reactivate fence fixture의 정본 키. 여기서는 순서가 뜻을 갖지
+#: 않으므로 표찰에서 유도한다 — 실패 메시지의 uuid를 표찰로 되짚을 수 있다.
+_REACTIVATION_FEATURE_ID = feature_uuid("tvn34-reactivation-feature")
 
 
 async def _require_tvn34_provenance_bridge(session: AsyncSession) -> None:
@@ -58,21 +84,28 @@ async def _call_create(
     session: AsyncSession,
     *,
     feature_id: str,
+    name: str,
     state: tuple[str, str, str],
     context: dict[str, Any],
 ) -> None:
+    """``feature_id``는 정본 키(uuid), ``name``은 읽는 사람의 표찰이다.
+
+    재키 뒤 create procedure가 payload의 ``feature_id``를 ``::uuid``로 읽으므로
+    (``ck_feature_create_payload``의 필수 core 필드 판정) 표찰을 그대로 키로 쓸 수
+    없다. 표찰은 ``name``으로 옮겨 실패 메시지에서 어느 fixture인지 계속 보이게 둔다.
+    """
     await session.execute(
         text(
             """
             CALL feature.create_feature_with_initial_state(
                 CAST(:payload AS jsonb), :lifecycle_state, :publication_state,
                 :quality_state, CAST(:context AS jsonb),
-                NULL, NULL, NULL, NULL
+                NULL, NULL, NULL
             )
             """
         ),
         {
-            "payload": _payload(feature_id, name=feature_id),
+            "payload": _payload(feature_id, name=name),
             "lifecycle_state": state[0],
             "publication_state": state[1],
             "quality_state": state[2],
@@ -93,7 +126,8 @@ async def _call_transition(
         text(
             """
             CALL feature.transition_feature_state(
-                :feature_id, :lifecycle_state, :publication_state, :quality_state,
+                CAST(:feature_id AS uuid),
+                :lifecycle_state, :publication_state, :quality_state,
                 :expected_revision, CAST(:context AS jsonb), NULL, NULL
             )
             """
@@ -270,7 +304,8 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                 }
             await _call_create(
                 migrated_session,
-                feature_id=f"tvn34-state-{index}",
+                feature_id=_STATE_FEATURE_IDS[index - 1],
+                name=f"tvn34-state-{index}",
                 state=state,
                 context=context,
             )
@@ -286,28 +321,33 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                     """
                     SELECT lifecycle_state, publication_state, quality_state
                     FROM feature.features
-                    WHERE feature_id LIKE 'tvn34-state-%'
+                    WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                     ORDER BY feature_id
                     """
-                )
+                ),
+                {"feature_ids": list(_STATE_FEATURE_IDS)},
             )
         ).all()
         assert set(states) == set(_LEGAL_TUPLES)
+        # ``feature_uuid`` 사본 컬럼은 309가 이 표에서 지웠다. 그 자리가 지키던 것
+        # ("audit 행이 어느 Feature의 것인지 정본 키로 남는다")은 사라지지 않았고,
+        # 이제 ``feature_id`` 자신이 그 값이다 — seed 순서와 1:1로 대조한다.
         audit_rows = (
             await migrated_session.execute(
                 text(
                     """
                     SELECT transition_kind, principal,
-                           feature_uuid,
+                           CAST(feature_id AS text) AS feature_id,
                            provider_dataset_id, source_entity_key, source_record_key,
                            provider_evidence,
                            from_lifecycle_state, from_publication_state, from_quality_state,
                            state_procedure_definer, audit_writer_definer
                     FROM feature.feature_state_transitions
-                    WHERE feature_id LIKE 'tvn34-state-%'
+                    WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                     ORDER BY feature_id
                     """
-                )
+                ),
+                {"feature_ids": list(_STATE_FEATURE_IDS)},
             )
         ).mappings().all()
         assert len(audit_rows) == len(_LEGAL_TUPLES)
@@ -317,7 +357,7 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         assert audit_rows[0]["source_entity_key"] == "tvn34-initial-entity"
         assert audit_rows[0]["source_record_key"] == "tvn34-initial-record"
         assert audit_rows[0]["provider_evidence"] == {"authoritative_receipt": "d340"}
-        assert all(row["feature_uuid"] is not None for row in audit_rows)
+        assert [row["feature_id"] for row in audit_rows] == list(_STATE_FEATURE_IDS)
         assert all(row["from_lifecycle_state"] is None for row in audit_rows)
         assert all(row["from_publication_state"] is None for row in audit_rows)
         assert all(row["from_quality_state"] is None for row in audit_rows)
@@ -330,7 +370,7 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
 
         await _call_transition(
             migrated_session,
-            feature_id="tvn34-state-1",
+            feature_id=_STATE_FEATURE_IDS[0],
             state=("active", "published", "valid"),
             expected_revision=1,
             context={
@@ -347,11 +387,12 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                            to_lifecycle_state, to_publication_state, to_quality_state,
                            row_revision
                     FROM feature.feature_state_transitions
-                    WHERE feature_id = 'tvn34-state-1'
+                    WHERE feature_id = CAST(:feature_id AS uuid)
                     ORDER BY transition_id DESC
                     LIMIT 1
                     """
-                )
+                ),
+                {"feature_id": _STATE_FEATURE_IDS[0]},
             )
         ).mappings().one()
         assert dict(transition) == {
@@ -372,10 +413,11 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                         INSERT INTO feature.features (
                             feature_id, kind, name, category, lifecycle_state,
                             publication_state, quality_state
-                        ) VALUES ('tvn34-direct-insert', 'place', 'direct', 'tvn34-state',
-                                  'active', 'draft', 'valid')
+                        ) VALUES (CAST(:feature_id AS uuid), 'place', 'direct',
+                                  'tvn34-state', 'active', 'draft', 'valid')
                         """
-                    )
+                    ),
+                    {"feature_id": _DIRECT_INSERT_FEATURE_ID},
                 )
         assert _sqlstate(direct_insert.value) == "42501"
 
@@ -386,9 +428,10 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                         """
                         UPDATE feature.features
                         SET publication_state = 'suppressed'
-                        WHERE feature_id = 'tvn34-state-1'
+                        WHERE feature_id = CAST(:feature_id AS uuid)
                         """
-                    )
+                    ),
+                    {"feature_id": _STATE_FEATURE_IDS[0]},
                 )
         assert _sqlstate(direct_axis_update.value) == "42501"
 
@@ -399,17 +442,16 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
                         """
                         INSERT INTO feature.feature_state_transitions (
                             feature_id, to_lifecycle_state, to_publication_state, to_quality_state,
-                            feature_uuid,
                             transition_kind, reason_code, principal, occurred_at, row_revision,
                             invoker_role, state_procedure_definer, audit_writer_definer
                         ) VALUES (
-                            'tvn34-direct-audit', 'active', 'draft', 'valid',
-                            '00000000-0000-0000-0000-000000000034', 'initial',
-                            'direct', 'runtime:forbidden', now(), 1,
+                            CAST(:feature_id AS uuid), 'active', 'draft', 'valid',
+                            'initial', 'direct', 'runtime:forbidden', now(), 1,
                             session_user::text, 'x', 'x'
                         )
                         """
-                    )
+                    ),
+                    {"feature_id": _DIRECT_AUDIT_FEATURE_ID},
                 )
         assert _sqlstate(direct_audit_insert.value) == "42501"
     finally:
@@ -419,19 +461,25 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
 
     # Feature hard purge가 audit evidence를 지우지 않는다 (no Feature FK/cascade).
     await migrated_session.execute(
-        text("DELETE FROM feature.features WHERE feature_id = 'tvn34-state-1'")
+        text(
+            "DELETE FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
+        {"feature_id": _STATE_FEATURE_IDS[0]},
     )
     audit_identity = (
         await migrated_session.execute(
             text(
-                "SELECT feature_id, feature_uuid, provider_dataset_id, source_entity_key, "
-                "source_record_key, provider_evidence FROM feature.feature_state_transitions "
-                "WHERE feature_id = 'tvn34-state-1' AND transition_kind = 'provider_sync'"
-            )
+                "SELECT CAST(feature_id AS text) AS feature_id, provider_dataset_id, "
+                "source_entity_key, source_record_key, provider_evidence "
+                "FROM feature.feature_state_transitions "
+                "WHERE feature_id = CAST(:feature_id AS uuid) "
+                "  AND transition_kind = 'provider_sync'"
+            ),
+            {"feature_id": _STATE_FEATURE_IDS[0]},
         )
     ).one()
-    assert audit_identity.feature_id == "tvn34-state-1"
-    assert audit_identity.feature_uuid is not None
+    # 지워진 Feature의 정본 키가 audit에 그대로 남아 있다는 것이 이 단언의 뜻이다.
+    assert audit_identity.feature_id == _STATE_FEATURE_IDS[0]
     assert audit_identity.provider_dataset_id == provider_dataset_id
     assert audit_identity.source_entity_key == "tvn34-initial-entity"
     assert audit_identity.source_record_key == "tvn34-initial-record"
@@ -493,7 +541,8 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
     try:
         await _call_create(
             migrated_session,
-            feature_id="tvn34-reactivation-feature",
+            feature_id=_REACTIVATION_FEATURE_ID,
+            name="tvn34-reactivation-feature",
             state=("retired", "suppressed", "valid"),
             context={
                 "transition_kind": "provider_sync",
@@ -512,7 +561,7 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             async with migrated_session.begin_nested():
                 await _call_transition(
                     migrated_session,
-                    feature_id="tvn34-reactivation-feature",
+                    feature_id=_REACTIVATION_FEATURE_ID,
                     state=("active", "suppressed", "valid"),
                     expected_revision=1,
                     context={
@@ -534,11 +583,12 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method, confidence
             ) VALUES (
-                'tvn34-reactivation-feature', 'tvn34-reactivation-entity',
+                CAST(:feature_id AS uuid), 'tvn34-reactivation-entity',
                 'primary', 'fixture', 100
             )
             """
-        )
+        ),
+        {"feature_id": _REACTIVATION_FEATURE_ID},
     )
     await migrated_session.execute(
         text(
@@ -573,7 +623,7 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             async with migrated_session.begin_nested():
                 await _call_transition(
                     migrated_session,
-                    feature_id="tvn34-reactivation-feature",
+                    feature_id=_REACTIVATION_FEATURE_ID,
                     state=("active", "suppressed", "valid"),
                     expected_revision=1,
                     context={
@@ -591,7 +641,7 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             async with migrated_session.begin_nested():
                 await _call_transition(
                     migrated_session,
-                    feature_id="tvn34-reactivation-feature",
+                    feature_id=_REACTIVATION_FEATURE_ID,
                     state=("active", "suppressed", "valid"),
                     expected_revision=1,
                     context={
@@ -614,11 +664,12 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
                     text(
                         """
                         CALL feature.author_lifecycle_override(
-                            'tvn34-reactivation-feature', 'active', 'retired', true,
+                            CAST(:feature_id AS uuid), 'active', 'retired', true,
                             'forged source history', 'admin:tvn34-test', 1, NULL
                         )
                         """
-                    )
+                    ),
+                    {"feature_id": _REACTIVATION_FEATURE_ID},
                 )
         assert _sqlstate(forged_override_source.value) == "23514"
         assert (
@@ -630,17 +681,18 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             text(
                 """
                 CALL feature.author_lifecycle_override(
-                    'tvn34-reactivation-feature', 'retired', 'retired', true,
+                    CAST(:feature_id AS uuid), 'retired', 'retired', true,
                     'fixture provider fence', 'admin:tvn34-test', 1, NULL
                 )
                 """
-            )
+            ),
+            {"feature_id": _REACTIVATION_FEATURE_ID},
         )
         with pytest.raises(DBAPIError) as fenced:
             async with migrated_session.begin_nested():
                     await _call_transition(
                         migrated_session,
-                        feature_id="tvn34-reactivation-feature",
+                        feature_id=_REACTIVATION_FEATURE_ID,
                         state=("active", "suppressed", "valid"),
                         expected_revision=1,
                     context={
@@ -657,14 +709,15 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             text(
                 """
                 CALL feature.revoke_lifecycle_override(
-                    'tvn34-reactivation-feature', 'admin:tvn34-test', 1, NULL
+                    CAST(:feature_id AS uuid), 'admin:tvn34-test', 1, NULL
                 )
                 """
-            )
+            ),
+            {"feature_id": _REACTIVATION_FEATURE_ID},
         )
         await _call_transition(
             migrated_session,
-            feature_id="tvn34-reactivation-feature",
+            feature_id=_REACTIVATION_FEATURE_ID,
             state=("active", "suppressed", "valid"),
             expected_revision=1,
             context={
@@ -674,7 +727,7 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
         )
         await _call_transition(
             migrated_session,
-            feature_id="tvn34-reactivation-feature",
+            feature_id=_REACTIVATION_FEATURE_ID,
             state=("retired", "suppressed", "valid"),
             expected_revision=2,
             context={
@@ -686,11 +739,12 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
             text(
                 """
                 CALL feature.author_lifecycle_override(
-                    'tvn34-reactivation-feature', 'active', 'retired', true,
+                    CAST(:feature_id AS uuid), 'active', 'retired', true,
                     'fixture provider fence restored', 'admin:tvn34-test', 3, NULL
                 )
                 """
-            )
+            ),
+            {"feature_id": _REACTIVATION_FEATURE_ID},
         )
     finally:
         with suppress(DBAPIError):
@@ -700,8 +754,9 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
         await migrated_session.scalar(
             text(
                 "SELECT count(*) FROM feature.feature_state_transitions "
-                "WHERE feature_id = 'tvn34-reactivation-feature'"
-            )
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
+            ),
+            {"feature_id": _REACTIVATION_FEATURE_ID},
         )
         == 3
     )
@@ -723,7 +778,11 @@ async def test_tvn34_provider_create_rejects_legacy_and_user_provenance_payload_
 ) -> None:
     """SECDEF create는 DB-owned provenance/timestamp를 절대 payload에서 받지 않는다."""
 
-    payload = json.loads(_payload(f"tvn34-forbidden-{forbidden_key}", name="forbidden"))
+    # 표찰이 아니라 정본 키를 싣는다 — payload의 ``feature_id``는 재키 뒤 uuid이고,
+    # 형식이 깨진 값이면 관측 대상(금지 키 거부)이 아니라 "필수 core 필드 없음"으로
+    # 같은 제약 이름을 우연히 통과하게 된다.
+    label = f"tvn34-forbidden-{forbidden_key}"
+    payload = json.loads(_payload(feature_uuid(label), name=label))
     payload[forbidden_key] = forbidden_value
 
     await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
@@ -735,7 +794,7 @@ async def test_tvn34_provider_create_rejects_legacy_and_user_provenance_payload_
                         """
                         CALL feature.create_feature_with_initial_state(
                             CAST(:payload AS jsonb), 'active', 'draft', 'valid',
-                            CAST(:context AS jsonb), NULL, NULL, NULL, NULL
+                            CAST(:context AS jsonb), NULL, NULL, NULL
                         )
                         """
                     ),
@@ -763,13 +822,15 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
     """runtime은 direct provenance UPDATE 없이 typed SECDEF routine만 호출한다."""
 
     await _require_tvn34_provenance_bridge(migrated_session)
-    feature_id = "tvn34-user-provenance"
+    label = "tvn34-user-provenance"
+    feature_id = feature_uuid(label)
     request_id = "00000000-0000-0000-0000-000000003496"
     await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
     try:
         await _call_create(
             migrated_session,
             feature_id=feature_id,
+            name=label,
             state=("active", "draft", "valid"),
             context={
                 "transition_kind": "initial",
@@ -788,7 +849,8 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 request_id, feature_id, action, state, review_mode,
                 base_row_revision, payload, reason, requested_by
             ) VALUES (
-                CAST(:request_id AS uuid), :feature_id, 'update', 'applied', 'immediate',
+                CAST(:request_id AS uuid), CAST(:feature_id AS uuid),
+                'update', 'applied', 'immediate',
                 1, '{}'::jsonb, 'typed provenance fixture', 'admin:tvn34-test'
             )
             """
@@ -802,8 +864,8 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
             async with migrated_session.begin_nested():
                 await migrated_session.execute(
                     text(
-                        "UPDATE feature.features "
-                        "SET data_origin = 'user_request' WHERE feature_id = :feature_id"
+                        "UPDATE feature.features SET data_origin = 'user_request' "
+                        "WHERE feature_id = CAST(:feature_id AS uuid)"
                     ),
                     {"feature_id": feature_id},
                 )
@@ -814,7 +876,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 text(
                     """
                     CALL feature.materialize_user_feature_change_provenance(
-                        :feature_id, 'update', CAST(:request_id AS uuid),
+                        CAST(:feature_id AS uuid), 'update', CAST(:request_id AS uuid),
                         'typed provenance fixture', 'admin:tvn34-test', 1, NULL, NULL
                     )
                     """
@@ -822,7 +884,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 {"feature_id": feature_id, "request_id": request_id},
             )
         ).one()
-        assert result.o_feature_id == feature_id
+        assert str(result.o_feature_id) == feature_id
         assert result.o_row_revision == 2
     finally:
         with suppress(DBAPIError):
@@ -833,7 +895,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
             text(
                 """
                 SELECT data_origin, data_version
-                FROM feature.features WHERE feature_id = :feature_id
+                FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -849,7 +911,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
                 SELECT version, origin, change_kind, request_id::text, created_by,
                        payload ->> 'data_origin' AS payload_data_origin
                 FROM feature.feature_versions
-                WHERE feature_id = :feature_id
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -871,13 +933,15 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
     """add/update/delete 모두 typed routine의 단일 provenance/version 경로를 쓴다."""
 
     await _require_tvn34_provenance_bridge(migrated_session)
-    add_feature_id = "tvn34-user-add-provenance"
+    add_label = "tvn34-user-add-provenance"
+    add_feature_id = feature_uuid(add_label)
     add_request_id = "00000000-0000-0000-0000-000000003497"
     await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
     try:
         await _call_create(
             migrated_session,
             feature_id=add_feature_id,
+            name=add_label,
             state=("active", "draft", "valid"),
             context={
                 "transition_kind": "initial",
@@ -894,9 +958,9 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
     await migrated_session.execute(
         text(
             """
-            INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
-            SELECT feature_id, feature_uuid, kind, 'tvn34-fixture'
-            FROM feature.features WHERE feature_id = :feature_id
+            INSERT INTO feature.feature_places (feature_id, kind, place_kind)
+            SELECT feature_id, kind, 'tvn34-fixture'
+            FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
         {"feature_id": add_feature_id},
@@ -922,7 +986,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
                 text(
                     """
                     CALL feature.materialize_user_feature_change_provenance(
-                        :feature_id, 'add', CAST(:request_id AS uuid),
+                        CAST(:feature_id AS uuid), 'add', CAST(:request_id AS uuid),
                         'typed add fixture', 'admin:tvn34-test', 1, NULL, NULL
                     )
                     """
@@ -941,7 +1005,8 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
                 """
                 SELECT version, change_kind, request_id::text,
                        payload #>> '{detail,place_kind}' AS place_kind
-                FROM feature.feature_versions WHERE feature_id = :feature_id
+                FROM feature.feature_versions
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": add_feature_id},
@@ -949,13 +1014,15 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
     ).one()
     assert tuple(add_snapshot) == (1, "add", add_request_id, "tvn34-fixture")
 
-    delete_feature_id = "tvn34-user-delete-provenance"
+    delete_label = "tvn34-user-delete-provenance"
+    delete_feature_id = feature_uuid(delete_label)
     delete_request_id = "00000000-0000-0000-0000-000000003498"
     await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
     try:
         await _call_create(
             migrated_session,
             feature_id=delete_feature_id,
+            name=delete_label,
             state=("active", "published", "valid"),
             context={
                 "transition_kind": "initial",
@@ -1004,7 +1071,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
                 text(
                     """
                     CALL feature.materialize_user_feature_change_provenance(
-                        :feature_id, 'delete', CAST(:request_id AS uuid),
+                        CAST(:feature_id AS uuid), 'delete', CAST(:request_id AS uuid),
                         'typed delete fixture', 'admin:tvn34-test', 2, NULL, NULL
                     )
                     """
@@ -1022,7 +1089,8 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
             text(
                 """
                 SELECT version, change_kind, request_id::text, created_by
-                FROM feature.feature_versions WHERE feature_id = :feature_id
+                FROM feature.feature_versions
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": delete_feature_id},
@@ -1034,7 +1102,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
             text(
                 """
                 SELECT lifecycle_state, publication_state, data_origin, data_version
-                FROM feature.features WHERE feature_id = :feature_id
+                FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": delete_feature_id},

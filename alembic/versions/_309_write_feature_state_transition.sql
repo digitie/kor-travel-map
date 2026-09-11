@@ -1,0 +1,124 @@
+-- 이 사이드카는 자기 역할 창을 스스로 연다.
+--
+-- 바깥에서 `SET ROLE`로 묶으면 순서에 결박된다 — 자기 창을 가진 사이드카가 끝에서
+-- 스키마 소유자로 되돌리는 순간, 뒤따르는 파일은 바깥 그룹이 지정한 롤이 아니라
+-- 스키마 소유자로 실행된다. 2026-09-09 n150 실행이 그것을 잡았다
+-- (`must be owner of function derive_subtype_public_ready`).
+--
+-- 롤은 NOINHERIT라 멤버십만으로는 소유자 검사를 통과하지 못한다. `feature` 스키마는
+-- 모든 소유자 롤이 `ALL`을 가지므로(alembic/head-schema.sql:24731-24737) 이 창 안에서
+-- DROP·CREATE·GRANT가 모두 성립한다.
+SET ROLE ktm_feature_audit_writer;
+
+CREATE OR REPLACE FUNCTION feature.write_feature_state_transition() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_context_text text;
+    v_context jsonb;
+    v_state_definer text;
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.lifecycle_state IS NOT DISTINCT FROM NEW.lifecycle_state
+       AND OLD.publication_state IS NOT DISTINCT FROM NEW.publication_state
+       AND OLD.quality_state IS NOT DISTINCT FROM NEW.quality_state THEN
+        RETURN NULL;
+    END IF;
+
+    v_context_text := current_setting('feature.state_transition_context', true);
+    v_state_definer := current_setting('feature.state_procedure_definer', true);
+    IF v_context_text IS NULL
+       OR v_state_definer <> 'ktm_feature_state_procedure_owner'
+       OR current_user <> 'ktm_feature_audit_writer' THEN
+        -- schema/migration owner는 runtime trust boundary 밖이다. existing DDL
+        -- migration과 fixture seeding은 이 privileged identity로만 direct write를
+        -- 수행할 수 있고, application runtime login은 아래 privilege fence에서
+        -- 이 분기에 도달하기 전에 거부된다.
+        IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_roles AS role_row
+            WHERE role_row.rolname = session_user
+              AND role_row.rolsuper
+        ) THEN
+            RETURN NULL;
+        END IF;
+        RAISE EXCEPTION 'feature state mutation requires the state procedure context'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_context := v_context_text::jsonb;
+    IF jsonb_typeof(v_context) IS DISTINCT FROM 'object'
+       OR (v_context ->> 'transition_kind') NOT IN (
+            'initial', 'legacy_backfill', 'provider_sync', 'admin', 'user_request',
+            'merge', 'quality_validation', 'system'
+       )
+       OR coalesce(btrim(v_context ->> 'reason_code'), '') = ''
+       OR coalesce(btrim(v_context ->> 'principal'), '') = '' THEN
+        RAISE EXCEPTION 'feature state mutation has malformed context'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+
+    IF TG_OP = 'INSERT' AND (v_context ->> 'transition_kind') NOT IN (
+        'initial', 'legacy_backfill', 'provider_sync'
+    ) THEN
+        RAISE EXCEPTION 'feature insert needs initial or provider-sync state transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+    IF TG_OP = 'UPDATE' AND (v_context ->> 'transition_kind') IN ('initial', 'legacy_backfill') THEN
+        RAISE EXCEPTION 'feature update cannot use initial state transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+
+    INSERT INTO feature.feature_state_transitions (
+        feature_id,
+        from_lifecycle_state, from_publication_state, from_quality_state,
+        to_lifecycle_state, to_publication_state, to_quality_state,
+        transition_kind, reason_code, principal, causation_ref,
+        provider_dataset_id, source_entity_key, source_record_key, provider_evidence,
+        occurred_at,
+        row_revision, invoker_role, state_procedure_definer, audit_writer_definer
+    ) VALUES (
+        NEW.feature_id,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.lifecycle_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.publication_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
+        NEW.lifecycle_state, NEW.publication_state, NEW.quality_state,
+        v_context ->> 'transition_kind', v_context ->> 'reason_code',
+        v_context ->> 'principal', v_context ->> 'causation_ref',
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN (v_context ->> 'provider_dataset_id')::bigint END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_entity_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_record_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context -> 'provider_evidence' END,
+        clock_timestamp(),
+        NEW.row_revision, session_user::text, v_state_definer, current_user::text
+    );
+    RETURN NULL;
+END;
+$$;
+
+
+DO $t39_owner$
+DECLARE
+    had_create boolean;
+BEGIN
+    -- 소유권 이전은 새 소유자가 담는 스키마의 CREATE 권한을 요구한다.
+    -- 302_m03_child_issuance.py:324-330이 `ops`에서 같은 함정을 만났다. 다만 그
+    -- 형태는 이미 CREATE를 가진 롤에서 권한을 빼앗으므로, 여기서는 **자기 상태를
+    -- 보고** 되돌린다. 2026-09-09 n150 첫 실행이 이것을 잡았다
+    -- (`permission denied for schema ops`).
+    had_create := has_schema_privilege('ktm_feature_audit_writer', 'feature', 'CREATE');
+    IF NOT had_create THEN
+        EXECUTE 'GRANT CREATE ON SCHEMA feature TO ktm_feature_audit_writer';
+    END IF;
+    EXECUTE 'ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer';
+    IF NOT had_create THEN
+        EXECUTE 'REVOKE CREATE ON SCHEMA feature FROM ktm_feature_audit_writer';
+    END IF;
+END
+$t39_owner$;
+
+SET ROLE ktm_feature_schema_owner;

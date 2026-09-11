@@ -193,7 +193,7 @@ class DetectionOutcome:
 _MANUAL_ORIGIN_SQL: Final[str] = """
 SELECT feature_id, name, category, lon, lat
 FROM feature.list_manual_provider_dedup_detector_manuals(
-    CAST(:after AS text), CAST(:limit AS integer)
+    CAST(:after AS uuid), CAST(:limit AS integer)
 )
 """
 
@@ -231,7 +231,7 @@ WHERE f.lifecycle_state = 'active'
   AND f.quality_state = 'valid'
   AND f.coord IS NOT NULL
   AND f.coord_5179 IS NOT NULL
-  AND f.feature_id <> :manual_feature_id
+  AND f.feature_id <> CAST(:manual_feature_id AS uuid)
   AND x_extension.ST_DWithin(
         f.coord_5179, i.pt, CAST(:radius_meters AS double precision)
       )
@@ -264,7 +264,10 @@ CALL feature.record_manual_provider_dedup_candidate(
 def _row_to_feature(row: Any) -> CandidateFeature:
     distance = getattr(row, "distance_meters", None)
     return CandidateFeature(
-        feature_id=row.feature_id,
+        # T-VN-39: 드라이버가 uuid 컬럼을 `uuid.UUID`로 준다. DTO 계약은 text이고
+        # `_scorer_input_sha256`이 이 값을 canonical JSON으로 직렬화하므로
+        # (`json.dumps`는 UUID를 모른다) 경계에서 문자열로 고정한다.
+        feature_id=str(row.feature_id),
         name=row.name,
         category=row.category,
         lon=float(row.lon),

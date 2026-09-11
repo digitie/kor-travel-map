@@ -60,22 +60,32 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
     """실제 runtime DB session이 ADR-090 권한 경계를 벗어났을 때의 기동 오류."""
 
 
+#: ADR-098 provider wrapper. EXECUTE는 `ktm_feature_create_provider_executor`에만
+#: 있고 그 롤은 `ktm_feature_dagster_runtime`에만 부여된다
+#: (`docker/postgres-role-bootstrap.sh:732`) — provider 적재 identity 하나다.
+_PROVIDER_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_provider_feature_with_initial_state(jsonb,jsonb,text,text,text,jsonb)"
+)
 _GENERIC_FEATURE_CREATE_PROCEDURE = (
     "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)"
 )
 
 _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     {
-        "feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)",
-        "feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)",
-        "feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)",
-        "feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)",
-        "feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])",
-        "feature.revoke_lifecycle_override(text,text,bigint)",
-        "feature.transition_admin_feature_state(text,text,text,text,bigint,text,text,text)",
-        "feature.transition_feature_state(text,text,text,text,bigint,jsonb)",
+        "feature.apply_provider_feature_field_patch(uuid,bigint,text,text,bigint,jsonb,jsonb)",
+        "feature.author_feature_field_overrides(uuid,bigint,text,text,bigint,jsonb,jsonb)",
+        "feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)",
+        "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
+        "feature.revoke_feature_field_overrides(uuid,bigint,text,text,bigint,text[])",
+        "feature.revoke_lifecycle_override(uuid,text,bigint)",
+        "feature.transition_admin_feature_state(uuid,text,text,text,bigint,text,text,text)",
+        "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
     }
 )
+
+# ruff: noqa: E501 — 이 모듈은 `::regprocedure` 시그니처를 SQL 문자열 안에
+# 담는다. 재키(T-VN-39)로 `text`가 `uuid`가 되면서 몇 줄이 100자를 넘는데,
+# SQL 리터럴이라 파이썬 문자열 연결로 나눌 수 없다(나누면 SQL이 깨진다).
 
 _MANUAL_FEATURE_CREATE_PROCEDURE = (
     "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
@@ -91,12 +101,19 @@ _FEATURE_REQUEST_APPROVE_PROCEDURE = (
 _FEATURE_REQUEST_REJECT_PROCEDURE = "feature.reject_feature_request(uuid,text,bigint)"
 _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
-_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
+_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(uuid,uuid,jsonb,jsonb)"
+#: 카탈로그가 돌려주는 표기에는 공백이 없다. 여기에만 공백을 두면 같은 프로시저가
+#: "빠졌다"와 "예상 밖이다" **양쪽**에 동시에 걸린다 — 2026-09-10 실측.
 _M05_DECISION_PROCEDURE = (
     "feature.resolve_manual_provider_dedup_case_v2("
-    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+    "uuid,text,text,bigint,bigint,uuid,text,text,bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
+#: T-VN-39/ADR-098 claim 축 해석기. 파이썬 repo가 직접 부르므로 EXECUTE가 공유 그룹
+#: `ktm_feature_runtime`에 있고, 따라서 두 런타임 로그인 모두 이것을 갖는다.
+_PROVIDER_FEATURE_ID_RESOLVER_FUNCTION = (
+    "feature.resolve_provider_feature_id(bigint,text,text)"
+)
 _M05_ACK_PROCEDURE = (
     "feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)"
 )
@@ -114,7 +131,7 @@ _M05_CASE_LIST_FUNCTION = (
 #: dagster 허용목록이 종전 **빈 집합**이었으므로, 이 등록이 없으면 함수가
 #: 배포되는 순간 모든 Dagster 프로세스가 기동 preflight에서 죽는다.
 _M05_DETECTOR_MANUAL_LIST_FUNCTION = (
-    "feature.list_manual_provider_dedup_detector_manuals(text,integer)"
+    "feature.list_manual_provider_dedup_detector_manuals(uuid,integer)"
 )
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
@@ -127,7 +144,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
             "uuid,integer,text,text,bigint,uuid,uuid,uuid,uuid)"
         ),
         # 0222 — canonical collections lock. admin executor만(dedup review 라우터·ktmctl).
-        "feature.merge_lock_curation_collections(text,text)",
+        "feature.merge_lock_curation_collections(uuid,uuid)",
         "feature.archive_curated_source_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_source_rule_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_theme_command(uuid,bigint,bigint,text,text)",
@@ -154,7 +171,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
         ),
         (
             "feature.create_curation_item_command("
-            "uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
+            "uuid,uuid,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
         ),
         ("feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)"),
         (
@@ -175,8 +192,8 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
         ),
         (
             "feature.patch_curation_item_command("
-            "uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,"
-            "jsonb,bigint,text)"
+            "uuid,uuid,bigint,uuid,text,text,text,text,text,text,integer,"
+            "text,text,text,text,jsonb,bigint,text)"
         ),
         (
             "feature.promote_theme_feature_candidate("
@@ -254,7 +271,13 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     ),
     "ktm_feature_dagster_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE, _M05_CANDIDATE_PROCEDURE})
+        | frozenset(
+            {
+                _GENERIC_FEATURE_CREATE_PROCEDURE,
+                _PROVIDER_FEATURE_CREATE_PROCEDURE,
+                _M05_CANDIDATE_PROCEDURE,
+            }
+        )
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
@@ -270,9 +293,12 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
             _M05_ACK_PREFLIGHT_FUNCTION,
             _M05_CASE_READ_FUNCTION,
             _M05_CASE_LIST_FUNCTION,
+            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
         }
     ),
-    "ktm_feature_dagster_runtime": frozenset({_M05_DETECTOR_MANUAL_LIST_FUNCTION}),
+    "ktm_feature_dagster_runtime": frozenset(
+        {_M05_DETECTOR_MANUAL_LIST_FUNCTION, _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION}
+    ),
 }
 
 
@@ -310,47 +336,43 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         ) AS can_execute_manual_create_procedure,
         has_function_privilege(
             session_user,
-            'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
+            'feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)'::regprocedure,
+        'feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_author_lifecycle_override_procedure,
         has_function_privilege(
             session_user,
-            'feature.revoke_lifecycle_override(text,text,bigint)'::regprocedure,
+            'feature.revoke_lifecycle_override(uuid,text,bigint)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_revoke_lifecycle_override_procedure,
         has_function_privilege(
             session_user,
             'feature.apply_provider_feature_field_patch('
-            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+            'uuid,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_provider_field_patch_procedure,
         has_function_privilege(
             session_user,
-            'feature.author_feature_field_overrides('
-            'text,bigint,text,text,bigint,jsonb,jsonb)'::regprocedure,
+            'feature.author_feature_field_overrides(uuid, bigint, text, text, bigint, jsonb, jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_author_procedure,
         has_function_privilege(
             session_user,
-            'feature.revoke_feature_field_overrides('
-            'text,bigint,text,text,bigint,text[])'::regprocedure,
+            'feature.revoke_feature_field_overrides(uuid, bigint, text, text, bigint, text[])'::regprocedure,
             'EXECUTE'
         ) AS can_execute_field_override_revoke_procedure,
         has_function_privilege(
             session_user,
-            'feature.transition_admin_feature_state('
-            'text,text,text,text,bigint,text,text,text)'::regprocedure,
+            'feature.transition_admin_feature_state(uuid, text, text, text, bigint, text, text, text)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_admin_transition_procedure,
         has_function_privilege(
             session_user,
-            'feature.reactivate_admin_feature_state('
-            'text,bigint,text,text,bigint,text,text)'::regprocedure,
+            'feature.reactivate_admin_feature_state(uuid, bigint, text, text, bigint, text, text)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_admin_reactivation_procedure,
         ARRAY(

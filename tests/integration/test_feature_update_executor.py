@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.cache_target_stream import make_active_cache_target_source
-from kortravelmap.infra import feature_repo
+from kortravelmap.infra import feature_identity, feature_repo
 from kortravelmap.infra import feature_update_executor as executor_mod
 from kortravelmap.infra.advisory_lock import advisory_lock_key, try_advisory_lock
 from kortravelmap.infra.cache_target_service_repo import (
@@ -307,6 +307,34 @@ async def _bundle(
     )[0]
 
 
+async def _stored_feature_id(session: AsyncSession, legacy_ref: str) -> str | None:
+    """provider 경로가 발급한 정본 키(uuid)를 legacy ``f_*``로 되찾는다.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다.
+    ``FeatureBundle``이 들고 오는 ``bundle.feature.feature_id``는 provider
+    라이브러리가 유도한 legacy ``f_*``이고 **정본 키가 아니므로**(ADR-098) DB
+    조회 키로 바로 쓸 수 없다. 바깥에서 정본 키를 되찾는 입구는
+    ``feature_aliases``를 보는
+    :func:`~kortravelmap.infra.feature_identity.resolve_feature_identity`
+    하나뿐이다(ADR-068 결정 3).
+
+    적재되지 않았거나 rollback돼 alias까지 사라졌으면 ``None``이다 — "적재됐다"와
+    "안 남았다"를 같은 입구로 물어야 두 검사가 서로 다른 축을 보지 않는다.
+    """
+    identity = await feature_identity.resolve_feature_identity(session, legacy_ref)
+    return None if identity is None else identity.feature_id
+
+
+async def _require_stored_feature_id(session: AsyncSession, legacy_ref: str) -> str:
+    """적재가 남아 있어야 하는 자리에서 정본 키를 얻는다."""
+    stored = await _stored_feature_id(session, legacy_ref)
+    assert stored is not None, (
+        f"legacy alias {legacy_ref!r}가 정본 키로 해석되지 않았다 — "
+        "provider 경로가 alias를 남기지 않았거나 Feature가 적재되지 않았다."
+    )
+    return stored
+
+
 async def _load_seed(session: AsyncSession, seed: str):
     bundle = await _bundle(seed)
     await feature_repo.load_bundle(session, bundle)
@@ -317,11 +345,13 @@ async def _load_seed(session: AsyncSession, seed: str):
             SET sigungu_code = :sigungu_code,
                 sido_code = :sido_code,
                 legal_dong_code = :bjd_code
-            WHERE feature_id = :feature_id
+            WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
         {
-            "feature_id": bundle.feature.feature_id,
+            "feature_id": await _require_stored_feature_id(
+                session, bundle.feature.feature_id
+            ),
             "sigungu_code": "11140",
             "sido_code": "11",
             "bjd_code": "1114010100",
@@ -486,7 +516,9 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
             operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
-            loaded_feature_ids=(loaded.feature.feature_id,),
+            loaded_feature_ids=(
+                await _require_stored_feature_id(session, loaded.feature.feature_id),
+            ),
             loaded_count=1,
             metadata={"runner": "integration"},
         )
@@ -530,10 +562,14 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     links = await list_poi_cache_target_feature_links(
         execution_session, target.target_id
     )
-    assert {
-        seed.feature.feature_id,
-        result.results[0].loaded_feature_ids[0],
-    } <= {link.feature_id for link in links}
+    # link 행이 드는 것은 정본 키(uuid)다 — seed 쪽도 legacy ``f_*``를 해석해
+    # 같은 축에서 비교한다.
+    seed_feature_id = await _require_stored_feature_id(
+        execution_session, seed.feature.feature_id
+    )
+    assert {seed_feature_id, result.results[0].loaded_feature_ids[0]} <= {
+        link.feature_id for link in links
+    }
 
 
 async def test_execute_next_fails_historic_service_owned_cache_target_request(
@@ -814,11 +850,14 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     assert refreshed_target is not None
     assert refreshed_target.last_requested_at is not None
     assert refreshed_target.last_refreshed_at is None
+    seed_feature_id = await _require_stored_feature_id(
+        execution_session, seed.feature.feature_id
+    )
     assert (
         await list_poi_cache_target_feature_links(
             execution_session, target.target_id
         )
-    )[0].feature_id == seed.feature.feature_id
+    )[0].feature_id == seed_feature_id
 
 
 async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
@@ -889,12 +928,15 @@ async def test_runner_level_skip_does_not_mark_cache_target_refreshed(
     assert refreshed_target is not None
     assert refreshed_target.last_requested_at is not None
     assert refreshed_target.last_refreshed_at is None
+    seed_feature_id = await _require_stored_feature_id(
+        execution_session, seed.feature.feature_id
+    )
     assert (
         await list_poi_cache_target_feature_links(
             execution_session,
             target.target_id,
         )
-    )[0].feature_id == seed.feature.feature_id
+    )[0].feature_id == seed_feature_id
 
 
 async def test_failed_runner_rolls_back_refresh_writes(
@@ -931,16 +973,16 @@ async def test_failed_runner_rolls_back_refresh_writes(
         },
     )
     assert isinstance(request, FeatureUpdateRequest)
-    loaded_feature_id: str | None = None
+    loaded_legacy_ref: str | None = None
 
     async def runner(
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
-        nonlocal loaded_feature_id
+        nonlocal loaded_legacy_ref
         assert scope.target_ids == (target.target_id,)
         loaded = await _bundle("EXEC-ROLLBACK-LOADED")
-        loaded_feature_id = loaded.feature.feature_id
+        loaded_legacy_ref = loaded.feature.feature_id
         await feature_repo.load_bundle(session, loaded)
         raise RuntimeError("provider refresh failed after partial write")
 
@@ -957,14 +999,9 @@ async def test_failed_runner_rolls_back_refresh_writes(
     assert result.results == ()
     assert result.error_message is not None
     assert "RuntimeError" in result.error_message
-    assert loaded_feature_id is not None
-    persisted = (
-        await execution_session.execute(
-            text("SELECT 1 FROM feature.features WHERE feature_id = :feature_id"),
-            {"feature_id": loaded_feature_id},
-        )
-    ).first()
-    assert persisted is None
+    assert loaded_legacy_ref is not None
+    # rollback이 core 행과 alias를 함께 되돌렸다 — 어느 축으로도 해석되지 않아야 한다.
+    assert await _stored_feature_id(execution_session, loaded_legacy_ref) is None
 
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
@@ -1083,13 +1120,12 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
     assert result.status == "failed"
     assert result.error_message == "RuntimeError: simulated provider checkpoint failure"
     assert checkpoint_writes == 2
-    persisted = (
-        await execution_session.execute(
-            text("SELECT 1 FROM feature.features WHERE feature_id = :feature_id"),
-            {"feature_id": expected_bundle.feature.feature_id},
+    assert (
+        await _stored_feature_id(
+            execution_session, expected_bundle.feature.feature_id
         )
-    ).first()
-    assert persisted is None
+        is None
+    )
     sync_state = (
         await execution_session.execute(
             text(
@@ -2440,7 +2476,7 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
     monkeypatch.setattr(executor_mod, "_guard_execution_phase", guarded_phase)
 
     runner_calls: list[str] = []
-    loaded_feature_id: str | None = None
+    loaded_legacy_ref: str | None = None
     cancellation_task: asyncio.Task[None] | None = None
     cancellation_detail: Any = None
 
@@ -2470,12 +2506,13 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
-        nonlocal cancellation_task, loaded_feature_id
+        nonlocal cancellation_task, loaded_legacy_ref
         runner_calls.append(scope.dataset_key)
         assert scope.dataset_key == "phase-a"
         loaded = await _bundle("EXEC-PHASE-COMMITTED")
-        loaded_feature_id = loaded.feature.feature_id
+        loaded_legacy_ref = loaded.feature.feature_id
         await feature_repo.load_bundle(session, loaded)
+        loaded_stored_id = await _require_stored_feature_id(session, loaded_legacy_ref)
         cancellation_task = asyncio.create_task(cancel_after_first_scope())
         await asyncio.sleep(0)
         return ProviderDatasetRefreshResult(
@@ -2484,7 +2521,7 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
             operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
-            loaded_feature_ids=(loaded.feature.feature_id,),
+            loaded_feature_ids=(loaded_stored_id,),
             loaded_count=1,
         )
 
@@ -2508,14 +2545,9 @@ async def test_cancellation_marker_preserves_committed_scope_and_skips_next_runn
     )
     assert [item.dataset_key for item in result.results] == ["phase-a"]
     assert runner_calls == ["phase-a"]
-    assert loaded_feature_id is not None
-    persisted = (
-        await execution_session.execute(
-            text("SELECT 1 FROM feature.features WHERE feature_id = :feature_id"),
-            {"feature_id": loaded_feature_id},
-        )
-    ).first()
-    assert persisted is not None
+    assert loaded_legacy_ref is not None
+    # 첫 scope의 적재는 checkpoint와 함께 commit됐다 — 취소가 들어와도 남아 있다.
+    assert await _stored_feature_id(execution_session, loaded_legacy_ref) is not None
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
     assert stored.status == "running"
@@ -2589,14 +2621,14 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
         )
 
     monkeypatch.setattr(executor_mod, "build_feature_update_execution_plan", fake_plan)
-    loaded_ids: dict[str, str] = {}
+    loaded_legacy_refs: dict[str, str] = {}
 
     async def runner(
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         loaded = await _bundle(f"EXEC-CHECKPOINT-{scope.dataset_key}")
-        loaded_ids[scope.dataset_key] = loaded.feature.feature_id
+        loaded_legacy_refs[scope.dataset_key] = loaded.feature.feature_id
         await feature_repo.load_bundle(session, loaded)
         if scope.dataset_key == "phase-b":
             raise RuntimeError("second scope failed")
@@ -2606,7 +2638,9 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
             operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
-            loaded_feature_ids=(loaded.feature.feature_id,),
+            loaded_feature_ids=(
+                await _require_stored_feature_id(session, loaded.feature.feature_id),
+            ),
             loaded_count=1,
         )
 
@@ -2621,21 +2655,14 @@ async def test_failure_preserves_prior_scope_checkpoint_and_data(
     assert result is not None
     assert result.status == "failed"
     assert [item.dataset_key for item in result.results] == ["phase-a"]
-    assert set(loaded_ids) == {"phase-a", "phase-b"}
+    assert set(loaded_legacy_refs) == {"phase-a", "phase-b"}
+    # 앞 scope의 적재만 checkpoint와 함께 commit됐고 실패한 scope의 것은 rollback됐다.
     persisted = {
-        str(value)
-        for value in await execution_session.scalars(
-            text(
-                "SELECT feature_id FROM feature.features "
-                "WHERE feature_id IN (:first_id, :second_id)"
-            ),
-            {
-                "first_id": loaded_ids["phase-a"],
-                "second_id": loaded_ids["phase-b"],
-            },
-        )
+        dataset_key
+        for dataset_key, legacy_ref in loaded_legacy_refs.items()
+        if await _stored_feature_id(execution_session, legacy_ref) is not None
     }
-    assert persisted == {loaded_ids["phase-a"]}
+    assert persisted == {"phase-a"}
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
     assert stored.status == "failed"
@@ -2756,16 +2783,17 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         wait_for_marker_before_finalize,
     )
     marker_task: asyncio.Task[None] | None = None
-    loaded_feature_id: str | None = None
+    loaded_legacy_ref: str | None = None
 
     async def runner(
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
-        nonlocal marker_task, loaded_feature_id
+        nonlocal marker_task, loaded_legacy_ref
         loaded = await _bundle("EXEC-MARKER-RACE")
-        loaded_feature_id = loaded.feature.feature_id
+        loaded_legacy_ref = loaded.feature.feature_id
         await feature_repo.load_bundle(session, loaded)
+        loaded_stored_id = await _require_stored_feature_id(session, loaded_legacy_ref)
         marker_task = asyncio.create_task(create_marker())
         await asyncio.wait_for(marker_waiting.wait(), timeout=5)
         await asyncio.sleep(0.05)
@@ -2776,7 +2804,7 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
             operation_key=scope.operation_key,
             provider=scope.provider,
             dataset_key=scope.dataset_key,
-            loaded_feature_ids=(loaded.feature.feature_id,),
+            loaded_feature_ids=(loaded_stored_id,),
             loaded_count=1,
         )
 
@@ -2802,13 +2830,8 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
             {"job_id": request.job_id},
         )
     ) == cancellation_detail.attempt.cancellation_id
-    assert loaded_feature_id is not None
-    assert (
-        await execution_session.execute(
-            text("SELECT 1 FROM feature.features WHERE feature_id = :feature_id"),
-            {"feature_id": loaded_feature_id},
-        )
-    ).first() is not None
+    assert loaded_legacy_ref is not None
+    assert await _stored_feature_id(execution_session, loaded_legacy_ref) is not None
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
     assert [

@@ -79,11 +79,12 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
         "categories": ["external-request"],
         "note": "integration",
     }
-    feature_uuid = "018f9f2b-7777-7def-8abc-1234567890ab"
-    feature_id = f"f_global_p_m04{suffix[:12]}"
+    # T-VN-39(alembic 309) + ADR-098 결정 6: 승인 writer의 payload identity는
+    # **정본 UUIDv7 하나**다(사이드카의 허용 키 목록에 ``feature_uuid``가 없어 넣으면
+    # 23514이고, 요청 승인 경로는 legacy 주소를 발급하지 않는다).
+    feature_id = "018f9f2b-7777-7def-8abc-1234567890ab"
     feature_payload = {
         "feature_id": feature_id,
-        "feature_uuid": feature_uuid,
         "kind": "place",
         "name": "M04 Feature 요청 장소",
         "category": "01070300",
@@ -149,7 +150,9 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
                         """
                         CALL feature.approve_feature_request_with_initial_state(
                           CAST(:request_id AS uuid), CAST(:feature_payload AS jsonb), :command_id,
-                          NULL::text, NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
+                          -- OUT 넷: outcome · feature_id(uuid) · row_revision
+                          -- · existing_feature_id(uuid). T-VN-39로 다섯에서 넷이 됐다.
+                          NULL::text, NULL::uuid, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
@@ -161,7 +164,7 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
                 )
             ).mappings().one()
         assert approved["o_outcome"] == "created"
-        assert str(approved["o_feature_uuid"]) == feature_uuid
+        assert str(approved["o_feature_id"]) == feature_id
 
         async with migrated_engine.connect() as connection:
             evidence = (
@@ -185,7 +188,7 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
             "status": "approved",
             "submission_command_id": service_command,
             "resolution_command_id": admin_command,
-            "resolved_feature_id": UUID(feature_uuid),
+            "resolved_feature_id": UUID(feature_id),
             "origin_kind": "manual_request",
             "creator_principal_id": "feature-request.approval.v1",
             "procedure_definer": "ktm_feature_request_procedure_owner",
@@ -421,8 +424,7 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
         operation="admin.feature-request.approve.v1",
     )
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    feature_uuid = "018f9f2b-8888-7def-8abc-1234567890ab"
-    feature_id = f"f_global_p_m04restore{suffix[:8]}"
+    feature_id = "018f9f2b-8888-7def-8abc-1234567890ab"
     request_payload = {
         "kind": "place",
         "name": "M04 restore writer",
@@ -432,7 +434,6 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
     }
     feature_payload = {
         "feature_id": feature_id,
-        "feature_uuid": feature_uuid,
         "kind": "place",
         "name": "M04 restore writer",
         "category": "01070300",
@@ -464,7 +465,8 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
                     text(
                         "CALL feature.approve_feature_request_with_initial_state("
                         "CAST(:request_id AS uuid), CAST(:payload AS jsonb), :command_id, "
-                        "NULL::text, NULL::text, NULL::uuid, NULL::bigint, NULL::uuid)"
+                        # OUT 넷 — T-VN-39로 다섯에서 넷이 됐다.
+                        "NULL::text, NULL::uuid, NULL::bigint, NULL::uuid)"
                     ),
                     {
                         "request_id": str(request_id),

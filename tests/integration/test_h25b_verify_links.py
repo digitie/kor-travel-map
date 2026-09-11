@@ -33,7 +33,15 @@ _SPEC.loader.exec_module(_MOD)
 
 
 async def _feature(session: AsyncSession, suffix: str) -> str:
-    feature_id = f"feature:h34-public:{suffix}:{uuid4().hex}"
+    """감사 대상 feature 1건을 심고 **정본 키**를 돌려준다.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이 seed는
+    core 표에 직접 넣는 정본 축이라 종전의 읽기 좋은 라벨을 그대로 쓸 수 없다 —
+    사람이 어느 feature인지 알아보는 축은 ``name``(``H34 {suffix}``)과 이 함수를
+    받는 지역 변수 이름이 이미 지고 있다. 이 모듈은 commit해 두고 뒤에서 TRUNCATE로
+    치우므로 값은 실행마다 새로워야 하고, 그래서 라벨 유도가 아니라 ``uuid4``다.
+    """
+    feature_id = str(uuid4())
     await session.execute(
         text(
             """

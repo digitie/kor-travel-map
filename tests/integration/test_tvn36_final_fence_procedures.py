@@ -17,6 +17,7 @@ from kortravelmap.infra.admin_feature_repo import (
     author_admin_feature_field_overrides,
     revoke_admin_feature_field_overrides,
 )
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -48,9 +49,16 @@ async def _open_command(session: AsyncSession, *, operation: str) -> int:
 
 
 async def _seed_notice(session: AsyncSession) -> tuple[str, int]:
-    """provider lineage가 붙은 notice feature 하나."""
+    """provider lineage가 붙은 notice feature 하나.
 
-    feature_id = "tvn36-fence-notice"
+    T-VN-39(alembic 309): 이 fixture는 ``feature.features``에 **직접** 심으므로
+    정본 축이다 — 종전의 읽을 수 있는 라벨 ``"tvn36-fence-notice"``는 그대로 두되
+    :func:`feature_uuid`로 uuid를 유도해 넣는다(라벨↔값이 1:1이라 파일 안의 참조가
+    그대로 성립한다). 사본 컬럼 ``feature_uuid``는 309가 아홉 표에서 영구히
+    없앴으므로 core·subtype INSERT 양쪽에서 뺀다 — 정본 키는 ``feature_id`` 하나다.
+    """
+
+    feature_id = feature_uuid("tvn36-fence-notice")
     dataset_id = int(
         (
             await session.execute(
@@ -85,16 +93,16 @@ async def _seed_notice(session: AsyncSession) -> tuple[str, int]:
         """,
         """
         INSERT INTO feature.features (
-            feature_id, feature_uuid, kind, name, category,
+            feature_id, kind, name, category,
             lifecycle_state, publication_state, quality_state
         ) VALUES (
-            :feature_id, x_extension.gen_random_uuid(), 'notice', 'fence notice',
+            :feature_id, 'notice', 'fence notice',
             '01010100', 'active', 'published', 'valid'
         )
         """,
         """
-        INSERT INTO feature.feature_notices (feature_id, feature_uuid, kind, notice_type)
-        SELECT feature_id, feature_uuid, kind, 'closure'
+        INSERT INTO feature.feature_notices (feature_id, kind, notice_type)
+        SELECT feature_id, kind, 'closure'
         FROM feature.features
         WHERE feature_id = :feature_id
         """,
@@ -129,7 +137,7 @@ async def _provider_patch(
         text(
             """
             CALL feature.apply_provider_feature_field_patch(
-                CAST(:feature_id AS text), CAST(:dataset_id AS bigint),
+                CAST(:feature_id AS uuid), CAST(:dataset_id AS bigint),
                 CAST(:entity_key AS text), CAST(:record_key AS text),
                 CAST(:expected_row_revision AS bigint), CAST(:values AS jsonb),
                 CAST(:geometry_wkt AS jsonb), NULL, NULL, NULL

@@ -19,7 +19,11 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.core.ids import (
+    make_feature_id,
+    make_payload_hash,
+    make_source_record_key,
+)
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._enums import FeatureKind, PriceDomain
 from kortravelmap.dto.price import PriceValue
@@ -38,6 +42,36 @@ _DATASET_KEYS = {
     "python-opinet-api": "opinet_gas_station_prices",
     "python-krex-api": "krex_rest_area_prices",
 }
+
+
+async def _canonical_feature_id(session: AsyncSession, legacy_feature_id: str) -> str:
+    """provider가 유도한 legacy ``f_*``가 가리키는 정본 키(uuid의 text 표기).
+
+    T-VN-39 재키(309) 뒤 ``feature.features.feature_id``와 그것을 참조하는
+    ``feature.feature_price_values.feature_id``는 uuid다. provider 라이브러리가
+    ``make_feature_id(...)``로 유도한 ``bundle.feature.feature_id``는 정본 키가
+    아니라 **주소**이고(ADR-098 결정 6), 그 주소에서 정본 키로 가는 유일한 입구가
+    ``feature_aliases``다. 이 파일은 bundle을 provider 적재 경로로 심으므로 그
+    주소가 발급돼 있다 — ``test_feature_identity_boundary``와 같은 규약이다.
+
+    **적재에는 이 값을 쓰지 않는다.** ``PriceValue.feature_id``에는 provider
+    변환기가 낸 legacy 주소를 그대로 실어 dagster ingest가 타는 바로 그
+    접합부를 태운다 — 적재기가 ``infra/canonical_feature_ids.py``로 해석한다.
+    여기서 푸는 정본 키는 **읽기·단언**에만 쓴다. 둘을 뒤섞으면 이 파일이
+    지키던 "provider가 준 주소로 적재된다"가 사라진다(2026-09-10 적대 리뷰).
+    """
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one()
+    )
 
 
 def _price_value(
@@ -140,7 +174,8 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
     now = datetime.now(tz=_KST)
     bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = bundles[0].feature.feature_id
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
 
     fresh_at = now - timedelta(hours=1)
     stale_at = now - timedelta(days=10)
@@ -148,7 +183,7 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
         migrated_session,
         [
             _price_value(
-                feature_id, product_key="gasoline", observed_at=fresh_at, price=1700
+                ingest_ref, product_key="gasoline", observed_at=fresh_at, price=1700
             )
         ],
     )
@@ -156,7 +191,7 @@ async def test_stale_price_hidden_from_current_but_kept_in_history(
         migrated_session,
         [
             _price_value(
-                feature_id, product_key="diesel", observed_at=stale_at, price=1500
+                ingest_ref, product_key="diesel", observed_at=stale_at, price=1500
             ),
         ],
     )
@@ -195,12 +230,13 @@ async def test_price_card_series_queries_use_identity_indexes(
     now = datetime.now(tz=_KST)
     bundles = await rest_areas_to_bundles([_RestArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = bundles[0].feature.feature_id
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                feature_id,
+                ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(minutes=minute),
                 price=1700 + minute,
@@ -260,12 +296,13 @@ async def test_stale_only_feature_is_stale_and_current_empty(
 
     bundles = await rest_areas_to_bundles([_StaleArea()], fetched_at=now)
     await feature_repo.load_bundles(migrated_session, bundles)
-    feature_id = bundles[0].feature.feature_id
+    ingest_ref = bundles[0].feature.feature_id
+    feature_id = await _canonical_feature_id(migrated_session, ingest_ref)
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                feature_id,
+                ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(days=10),
                 price=1650,
@@ -290,11 +327,27 @@ async def test_stale_price_excluded_from_bbox_price_summary(
     await feature_repo.load_bundles(migrated_session, bundles)
     feature = bundles[0].feature
     assert feature.coord is not None
+    # identity claim의 세 번째 성분 — 없으면 provider upsert 자체가 서지 않는다.
+    assert feature.provider_natural_key is not None
     # bbox price_summary는 kind='price' feature에만 붙는다 — place anchor를
     # 그대로 쓰지 않고 같은 좌표의 price-kind row를 직접 upsert한다.
+    #
+    # T-VN-39(309): provider 경로로 심으므로 DTO의 ``feature_id``는 legacy 주소이고,
+    # 309가 그 주소의 형태를 `^f_.+_[a-z]_[0-9a-f]{16}$`로 고정했다
+    # (`ck_feature_aliases_legacy_alias_shape`). 옛 픽스처의 `f"{...}_pz"`는 운영이
+    # 만들 수 없는 모양이라 alias 등록에서 23514다. 같은 자연키를 price kind로
+    # 유도해 실제 산출 형태를 쓴다 — identity claim 축이
+    # ``(provider_dataset_id, kind, natural_key)``라 kind만 달라도 place와 다른
+    # Feature이고, 주소도 그만큼 갈린다.
     price_feature = feature.model_copy(
         update={
-            "feature_id": f"{feature.feature_id}_pz",
+            "feature_id": make_feature_id(
+                bjd_code=None,
+                kind=FeatureKind.PRICE.value,
+                category=feature.category,
+                source_type="krex_rest_area_price_twin",
+                source_natural_key=feature.provider_natural_key,
+            ),
             "kind": FeatureKind.PRICE,
             "detail": None,  # price kind는 place detail을 갖지 않는다.
         }
@@ -317,18 +370,22 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             source_record_key=bundles[0].source_record.source_record_key,
         ),
     )
+    price_ingest_ref = price_feature.feature_id
+    price_feature_id = await _canonical_feature_id(
+        migrated_session, price_ingest_ref
+    )
 
     await _append_price_response(
         migrated_session,
         [
             _price_value(
-                price_feature.feature_id,
+                price_ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(hours=1),
                 price=1700,
             ),
             _price_value(
-                price_feature.feature_id,
+                price_ingest_ref,
                 product_key="diesel",
                 observed_at=now - timedelta(days=10),
                 price=1500,
@@ -339,7 +396,7 @@ async def test_stale_price_excluded_from_bbox_price_summary(
         migrated_session,
         [
             _price_value(
-                price_feature.feature_id,
+                price_ingest_ref,
                 product_key="gasoline",
                 observed_at=now - timedelta(minutes=30),
                 price=1710,
@@ -360,7 +417,7 @@ async def test_stale_price_excluded_from_bbox_price_summary(
     }
 
     card = await price_repo.build_price_card(
-        migrated_session, feature_id=price_feature.feature_id
+        migrated_session, feature_id=price_feature_id
     )
     expected_fresh_identities = {
         ("python-krex-api", "rest_area_fuel", "gasoline"),
@@ -378,7 +435,9 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             include_geometry=include_geometry,
             **bbox,
         )
-        hit = next(r for r in rows if r["feature_id"] == price_feature.feature_id)
+        # bbox row의 ``feature_id``는 uuid 컬럼이라 driver가 ``uuid.UUID``를 준다 —
+        # text 표기와 맞대려면 읽는 자리에서 한 번 고정한다(경계 이름은 불변).
+        hit = next(r for r in rows if str(r["feature_id"]) == price_feature_id)
         assert {
             (point["provider"], point["price_domain"], point["product_key"])
             for point in (hit["price_summary"] or [])
@@ -392,7 +451,7 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             **bbox,
         )
         hit_all = next(
-            r for r in rows_all if r["feature_id"] == price_feature.feature_id
+            r for r in rows_all if str(r["feature_id"]) == price_feature_id
         )
         assert {
             (point["provider"], point["price_domain"], point["product_key"])

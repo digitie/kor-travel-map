@@ -125,11 +125,42 @@ _LIGHTHOUSE_DATASET_PREFIX = "lighthouse-stamp-tour-season-"
 
 
 class _FakeResult:
-    def __init__(self, rows: tuple[_FakeCatalogRow, ...]) -> None:
+    def __init__(self, rows: tuple[Any, ...]) -> None:
         self._rows = rows
 
-    def __iter__(self) -> Iterator[_FakeCatalogRow]:
+    def __iter__(self) -> Iterator[Any]:
         return iter(self._rows)
+
+
+#: 아래 uuid 필터 테스트들이 아는 유일한 Feature.
+#:
+#: **이 패키지의 conftest는 `resolve_feature_identity`를 autouse로 echo-resolve로
+#: 덮는다** — 어떤 참조든 `FeatureIdentity(feature_id=ref, ...)`로 돌려준다. 재키
+#: 전에는 `feature_id`가 곧 legacy 문자열이라 옳았지만 지금은 그 등식이 거짓이고,
+#: 그 상태로는 "legacy 주소가 정본 uuid로 바뀌어 내려간다"도 "가리키는 Feature가
+#: 없으면 422다"도 관측할 수 없다. conftest가 스스로 허용한 대로
+#: (“각 테스트가 이 patch를 자기 resolver로 덮어쓴다”) 여기서는 재키 뒤 세계를
+#: 모사하는 resolver를 직접 설치한다.
+_KNOWN_FEATURE_UUID = "01a08b24-7ce2-7e3c-bd0b-c7382fe9db0f"
+_KNOWN_FEATURE_ALIAS = "f_1156010100_p_17064ab452996653"
+
+
+def _install_post_rekey_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    """재키 뒤 해석을 모사한다 — 아는 참조 하나만 정본 uuid로 풀리고 나머지는 miss."""
+    from kortravelmap.infra import feature_identity
+
+    async def _resolve(
+        _session: Any, ref: str
+    ) -> feature_identity.FeatureIdentity | None:
+        feature_identity.validate_feature_ref(ref)
+        if ref in {_KNOWN_FEATURE_ALIAS, _KNOWN_FEATURE_UUID}:
+            return feature_identity.FeatureIdentity(
+                feature_id=_KNOWN_FEATURE_UUID,
+                feature_uuid=_KNOWN_FEATURE_UUID,
+            )
+        return None
+
+    monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
 
 
 class _FakeSession:
@@ -2337,6 +2368,7 @@ def test_admin_theme_candidate_list_uses_and_filters_and_decimal_revisions(
         "list_theme_candidates",
         listing,
     )
+    _install_post_rekey_resolver(monkeypatch)
 
     response = client.get(
         "/v1/admin/theme-feature-candidates",
@@ -2346,7 +2378,12 @@ def test_admin_theme_candidate_list_uses_and_filters_and_decimal_revisions(
             "source_id": _uuid("source"),
             "review_state": "open",
             "eligibility_present": "true",
-            "feature_id": "feature:one",
+            # T-VN-39: 이 값은 `CAST(:feature_id AS uuid)`로 들어간다. 그래서
+            # 라우터가 정본 키로 고정해서 넘겨야 하고, 이 자리에는 **해석되는**
+            # 참조를 준다. 옛 판은 `"feature:one"`을 주고 200을 단언했는데,
+            # repo가 mock이라 uuid 바인드가 아예 일어나지 않아 그 초록이 아무것도
+            # 말해 주지 않았다(적대 리뷰).
+            "feature_id": _KNOWN_FEATURE_ALIAS,
             "page_size": 25,
         },
     )
@@ -2364,10 +2401,76 @@ def test_admin_theme_candidate_list_uses_and_filters_and_decimal_revisions(
         "source_id": _uuid("source"),
         "review_state": "open",
         "eligibility_present": True,
-        "feature_id": "feature:one",
+        # legacy 주소로 들어와도 repo가 받는 것은 **정본 uuid**다.
+        "feature_id": _KNOWN_FEATURE_UUID,
         "limit": 25,
         "cursor": None,
     }
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_list_rejects_a_feature_ref_that_names_nothing(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """어떤 Feature도 가리키지 않는 필터 값은 422다 — 500도, 전체 목록도 아니다.
+
+    이 자리는 `curation_candidate_repo._LIST_SQL`의 `CAST(:feature_id AS uuid)`로
+    들어간다. 원문을 그대로 넘기면 22P02가 나는데 그 오류는
+    `sqlalchemy.exc.DataError`라 라우터의 `except ValueError`를 통과해 **500**이
+    된다. 형제 필터(`rule_id`·`theme_id`·`source_id`)는 `UUID` 타입이라 FastAPI가
+    막아 주지만 이 자리만 자유 문자열이라 표면이 직접 막아야 한다.
+
+    조용히 `None`으로 낮추는 길도 틀렸다 — 그러면 "필터 없음"이 되어 **전체 목록**이
+    나간다. 그래서 세 갈래 중 이 갈래만 오류다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(
+        return_value=ThemeCandidatePage((_theme_candidate(),), None)
+    )
+    monkeypatch.setattr(
+        module.curation_candidate_repo, "list_theme_candidates", listing
+    )
+    _install_post_rekey_resolver(monkeypatch)
+
+    response = client.get(
+        "/v1/admin/theme-feature-candidates",
+        params={"feature_id": "f_1156010100_p_0000000000000000"},
+    )
+
+    assert response.status_code == 422
+    assert listing.await_count == 0, (
+        "해석 실패는 **질의 전에** 멈춰야 한다 — repo까지 가면 uuid 바인드에서 "
+        "22P02가 나고 그것은 422가 아니라 500이다."
+    )
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_list_passes_an_unknown_uuid_through_as_itself(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """canonical uuid인데 그런 Feature가 없으면 원문 그대로 내려간다 — 0행이 정답이다.
+
+    유효한 uuid이므로 바인드에 문제가 없고, "그런 Feature 없음"의 정확한 표현은
+    오류가 아니라 빈 목록이다. 이 갈래가 기존 계약을 그대로 보존하는 자리다.
+    """
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(return_value=ThemeCandidatePage((), None))
+    monkeypatch.setattr(
+        module.curation_candidate_repo, "list_theme_candidates", listing
+    )
+    _install_post_rekey_resolver(monkeypatch)
+    absent = "01a08b24-0000-7000-8000-000000000000"
+
+    response = client.get(
+        "/v1/admin/theme-feature-candidates", params={"feature_id": absent}
+    )
+
+    assert response.status_code == 200
+    assert listing.await_args.kwargs["feature_id"] == absent
 
 
 @pytest.mark.unit

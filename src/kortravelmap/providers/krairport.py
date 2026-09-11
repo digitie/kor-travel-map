@@ -161,6 +161,7 @@ async def _airport_to_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
         name=name,
         coord=coord,

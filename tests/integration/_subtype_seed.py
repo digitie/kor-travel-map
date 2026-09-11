@@ -43,12 +43,6 @@ _REQUIRED_DEFAULTS: dict[str, dict[str, Any]] = {
     "notice": {"notice_type": "safety"},
 }
 
-_STORED_UUID_SQL = """
-SELECT CAST(feature_uuid AS text)
-FROM feature.features
-WHERE feature_id = :feature_id
-"""
-
 
 async def seed_feature_subtype(
     session: AsyncSession,
@@ -60,9 +54,11 @@ async def seed_feature_subtype(
 ) -> None:
     """core 행이 이미 있는 feature에 kind별 subtype 행을 만든다(있으면 갱신).
 
-    ``feature_uuid``는 **core에 저장된 값을 읽어** 쓴다 — 파생 계산하면 identity
-    사본 FK(``fk_*_identity_pair``)가 깨진다. subtype이 없는 kind(price/weather)는
-    no-op이다.
+    ``feature_id``는 core에 저장된 정본 키(uuid)다. T-VN-39 재키(alembic 309)가
+    subtype 9표의 사본 컬럼 ``feature_uuid``와 그것을 참조하던 복합 FK
+    (``fk_*_identity_pair``)를 함께 없앴으므로, 종전에 core를 한 번 더 읽어
+    사본을 채우던 왕복도 사라졌다 — 심을 값은 호출자가 든 정본 키 하나뿐이다.
+    subtype이 없는 kind(price/weather)는 no-op이다.
     """
     sql = subtype_upsert_sql(kind)
     if sql is None:
@@ -71,11 +67,6 @@ async def seed_feature_subtype(
     payload.update(dict(detail or {}))
     params = subtype_params(
         feature_id=feature_id,
-        feature_uuid=str(
-            (
-                await session.execute(text(_STORED_UUID_SQL), {"feature_id": feature_id})
-            ).scalar_one()
-        ),
         kind=kind,
         detail=payload,
     )
@@ -87,23 +78,30 @@ async def seed_feature_subtype(
 
 
 _PREFIX_SUBTYPE_SQL = """
-INSERT INTO feature.{table} (feature_id, feature_uuid, kind, {required_column})
-SELECT f.feature_id, f.feature_uuid, f.kind, :required_value
+INSERT INTO feature.{table} (feature_id, kind, {required_column})
+SELECT f.feature_id, f.kind, :required_value
 FROM feature.features AS f
-WHERE f.feature_id LIKE :prefix || '%' AND f.kind = '{kind}'
+WHERE CAST(f.feature_id AS text) LIKE :uuid_prefix || '%' AND f.kind = '{kind}'
 ON CONFLICT (feature_id) DO NOTHING
 """
 
 
 async def seed_feature_subtypes_for_prefix(
     session: AsyncSession,
-    prefix: str,
+    uuid_prefix: str,
     *,
     place_kind: str = "attraction",
     event_kind: str = "festival",
     notice_type: str = "safety",
 ) -> None:
-    """``feature_id`` prefix로 심은 대량 seed에 place/event/notice subtype을 채운다.
+    """한 uuid 대역으로 심은 대량 seed에 place/event/notice subtype을 채운다.
+
+    T-VN-39 재키 뒤 ``feature_id``는 uuid라 종전의 ``'perf:f:'`` 같은 라벨
+    prefix가 값 안에 남지 않는다. 벌크 seed는 대신 라벨을 uuid **대역**으로 접고
+    순번을 하위 자리에 담으므로(``perf_gate.seed_uuid_namespace``), 여기서 받는
+    ``uuid_prefix``도 그 대역 문자열(예: ``'…-8xyz-'``)이다. 비교를 위해 uuid를
+    text로 낮추지만 이 함수는 seed 전용 벌크 경로라 인덱스 진입이 목적이 아니다 —
+    hot query가 아니다.
 
     generate_series 기반 벌크 seed용 — 행당 왕복을 만들지 않는다. geometry가
     필수인 route/area는 값이 kind별로 달라 여기서 다루지 않는다(호출자가
@@ -120,5 +118,5 @@ async def seed_feature_subtypes_for_prefix(
                     table=table, required_column=column, kind=kind
                 )
             ),
-            {"prefix": prefix, "required_value": value},
+            {"uuid_prefix": uuid_prefix, "required_value": value},
         )

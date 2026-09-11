@@ -63,7 +63,33 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-_FEATURE_ID = "feature:curation-multi-test"
+# T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 uuid이고, 이 파일이 다루는
+# ``feature.curation_items.feature_id`` · ``feature.curation_link_decisions.feature_id``도
+# 함께 옮겨졌다. 그래서 seed identity와 import row가 넘기는 ``feature_id``는 전부
+# uuid여야 한다 — 종전의 ``feature:*`` 문자열은 legacy ``f_*``조차 아닌 테스트 전용
+# 리터럴이었고, 재키 후에는 uuid 열에 text를 꽂는 자리가 된다.
+#
+# 값은 opaque다(ADR-068 결정 3) — 무엇을 가리키는지는 상수 **이름**이 지고 값의
+# 마지막 마디만 이 파일 안에서 유일하게 둔다. 이 fixture들은 provider 경로를 거치지
+# 않으므로 legacy alias를 갖지 않고, ADR-098 결정 6에 따르면 그것이 정상이다.
+_FEATURE_ID = "39040001-0000-4000-8000-000000000001"
+_FEATURE_IMPORT_A = "39040001-0000-4000-8000-000000000002"
+_FEATURE_IMPORT_B = "39040001-0000-4000-8000-000000000003"
+_FEATURE_PROVENANCE_A = "39040001-0000-4000-8000-000000000004"
+_FEATURE_PROVENANCE_B = "39040001-0000-4000-8000-000000000005"
+_FEATURE_PROVENANCE_C = "39040001-0000-4000-8000-000000000006"
+_FEATURE_PROVENANCE_UNSAFE = "39040001-0000-4000-8000-000000000007"
+_FEATURE_REIMPORT_A = "39040001-0000-4000-8000-000000000008"
+_FEATURE_SOURCE_ABSENT = "39040001-0000-4000-8000-000000000009"
+_FEATURE_COMPONENT_SECOND = "39040001-0000-4000-8000-000000000010"
+# 아래 둘은 ``ORDER BY f.feature_id``가 걸린 matcher 결과의 **순서**까지 재는 자리라
+# (split-address, wrong-field) 순서를 값으로 고정한다.
+_FEATURE_H31_SPLIT_ADDRESS = "39040001-0000-4000-8000-000000000011"
+_FEATURE_H31_WRONG_FIELD = "39040001-0000-4000-8000-000000000012"
+_FEATURE_H31_PREVIEW_ONLY = "39040001-0000-4000-8000-000000000013"
+# 성능 seed 500행은 ``lpad``로 만드는 별도 계열이다 — 위 상수와 겹치지 않도록 첫
+# 마디를 다르게 둔다.
+_FEATURE_PERF_UUID_PREFIX = "390400ff-0000-4000-8000-"
 
 
 async def _quarantine_command_id(session: AsyncSession, *, actor: str) -> int:
@@ -309,7 +335,7 @@ async def _seed_foundations(session: AsyncSession) -> tuple[str, str]:
                 feature_id, kind, name, category, coord, address,
                 marker_icon, marker_color
             ) VALUES (
-                :feature_id, 'place', '겹치는 관광지', '01070100',
+                CAST(:feature_id AS uuid), 'place', '겹치는 관광지', '01070100',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(126.9780, 37.5665), 4326
                 ),
@@ -482,7 +508,7 @@ async def test_same_feature_returns_every_edition_and_subcourse_membership(
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET publication_state = 'suppressed' "
-            "WHERE feature_id = :feature_id"
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
         ),
         {"feature_id": _FEATURE_ID},
     )
@@ -638,7 +664,7 @@ async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET publication_state = 'suppressed' "
-            "WHERE feature_id = :feature_id"
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
         ),
         {"feature_id": _FEATURE_ID},
     )
@@ -680,7 +706,7 @@ async def test_service_snapshot_cap_counts_only_exact_public_trusted_items(
             )
             SELECT
                 CAST(:collection_id AS uuid),
-                :feature_id,
+                CAST(:feature_id AS uuid),
                 'untrusted-' || value::text,
                 '미승인 ' || value::text,
                 'included'
@@ -715,7 +741,7 @@ async def test_service_snapshot_cap_counts_only_exact_public_trusted_items(
             )
             SELECT
                 CAST(:collection_id AS uuid),
-                :feature_id,
+                CAST(:feature_id AS uuid),
                 'trusted-' || value::text,
                 '승인 ' || value::text,
                 'included'
@@ -785,12 +811,13 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color
             ) VALUES
-                ('feature:import-a', 'place', 'CSV 장소 A', '01070100',
+                (CAST(:feature_a AS uuid), 'place', 'CSV 장소 A', '01070100',
                  'place', 'P-01'),
-                ('feature:import-b', 'place', 'CSV 장소 B', '01070100',
+                (CAST(:feature_b AS uuid), 'place', 'CSV 장소 B', '01070100',
                  'place', 'P-01')
             """
-        )
+        ),
+        {"feature_a": _FEATURE_IMPORT_A, "feature_b": _FEATURE_IMPORT_B},
     )
     common = {
         "collection_key": "csv-import:2026",
@@ -813,7 +840,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         ResolvedCurationImportRow(
             row_number=2,
             source_item_key="item-a",
-            feature_id="feature:import-a",
+            feature_id=_FEATURE_IMPORT_A,
             sort_order=1,
             metadata={"ordinal": 1},
             **common,
@@ -829,7 +856,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         ResolvedCurationImportRow(
             row_number=3,
             source_item_key="item-b",
-            feature_id="feature:import-b",
+            feature_id=_FEATURE_IMPORT_B,
             sort_order=2,
             metadata={"ordinal": 2},
             **common,
@@ -844,7 +871,7 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
         ResolvedCurationImportRow(
             row_number=2,
             source_item_key="item-a",
-            feature_id="feature:import-b",
+            feature_id=_FEATURE_IMPORT_B,
             sort_order=1,
             metadata={"ordinal": 1, "rematched": True},
             **common,
@@ -932,12 +959,15 @@ async def test_bulk_import_is_atomic_upsert_friendly_and_idempotent(
     rematched = (
         await migrated_session.execute(
             text(
-                "SELECT feature_id FROM feature.curation_items "
+                # 경계 규칙: 밖으로 나가는 값은 uuid의 **text 표기**다. 재키 뒤
+                # ``feature_id``를 그대로 읽으면 드라이버가 UUID 객체를 주므로
+                # 문자열 단언이 타입에서 어긋난다.
+                "SELECT CAST(feature_id AS text) FROM feature.curation_items "
                 "WHERE external_item_id = 'item-a' AND source_present"
             )
         )
     ).scalar_one()
-    assert rematched == "feature:import-b"
+    assert rematched == _FEATURE_IMPORT_B
 
 
 async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
@@ -950,16 +980,22 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color
             ) VALUES
-                ('feature:provenance-a', 'place', '근거 장소 A', '01070100',
+                (CAST(:feature_a AS uuid), 'place', '근거 장소 A', '01070100',
                  'place', 'P-01'),
-                ('feature:provenance-b', 'place', '근거 장소 B', '01070100',
+                (CAST(:feature_b AS uuid), 'place', '근거 장소 B', '01070100',
                  'place', 'P-01'),
-                ('feature:provenance-c', 'place', '복구 장소 C', '01070100',
+                (CAST(:feature_c AS uuid), 'place', '복구 장소 C', '01070100',
                  'place', 'P-01'),
-                ('feature:provenance-unsafe', 'place', '미승인 장소', '01070100',
+                (CAST(:feature_unsafe AS uuid), 'place', '미승인 장소', '01070100',
                  'place', 'P-01')
             """
-        )
+        ),
+        {
+            "feature_a": _FEATURE_PROVENANCE_A,
+            "feature_b": _FEATURE_PROVENANCE_B,
+            "feature_c": _FEATURE_PROVENANCE_C,
+            "feature_unsafe": _FEATURE_PROVENANCE_UNSAFE,
+        },
     )
     common = {
         "theme_slug": "provenance-test",
@@ -983,7 +1019,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         collection_key="provenance:a",
         title="근거 목록 A",
         source_item_key="item-a",
-        feature_id="feature:provenance-a",
+        feature_id=_FEATURE_PROVENANCE_A,
         place_name="근거 장소 A",
         provenance={
             "sidecar_schema": 1,
@@ -996,7 +1032,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         collection_key="provenance:b",
         title="근거 목록 B",
         source_item_key="item-b",
-        feature_id="feature:provenance-b",
+        feature_id=_FEATURE_PROVENANCE_B,
         place_name="근거 장소 B",
         provenance={"sidecar_schema": 1},
         **common,
@@ -1048,7 +1084,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
     assert first_state["item-a"]["resolver_version"] == "explicit-feature-id-v1"
     assert first_state["item-a"]["actor"] == "provenance-importer"
     assert first_state["item-a"]["evidence"]["requested_feature_id"] == (
-        "feature:provenance-a"
+        _FEATURE_PROVENANCE_A
     )
     assert first_state["item-a"]["provenance"]["address_fields"] == {
         "sido": "서울특별시",
@@ -1166,7 +1202,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         ) VALUES (
             CAST(:decision_id AS uuid),
             CAST(:curation_item_id AS uuid),
-            :feature_id,
+            CAST(:feature_id AS uuid),
             CAST(:import_row_id AS uuid),
             'accepted',
             'forward_recovery',
@@ -1183,7 +1219,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                 {
                     "decision_id": str(uuid4()),
                     "curation_item_id": first_state["item-a"]["curation_item_id"],
-                    "feature_id": "feature:provenance-a",
+                    "feature_id": _FEATURE_PROVENANCE_A,
                     "import_row_id": first_state["item-b"]["import_row_id"],
                     "supersedes_decision_id": None,
                 },
@@ -1195,7 +1231,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                 {
                     "decision_id": str(uuid4()),
                     "curation_item_id": first_state["item-a"]["curation_item_id"],
-                    "feature_id": "feature:provenance-a",
+                    "feature_id": _FEATURE_PROVENANCE_A,
                     "import_row_id": first_state["item-a"]["import_row_id"],
                     "supersedes_decision_id": first_state["item-b"]["decision_id"],
                 },
@@ -1208,7 +1244,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                 {
                     "decision_id": self_decision_id,
                     "curation_item_id": first_state["item-a"]["curation_item_id"],
-                    "feature_id": "feature:provenance-a",
+                    "feature_id": _FEATURE_PROVENANCE_A,
                     "import_row_id": first_state["item-a"]["import_row_id"],
                     "supersedes_decision_id": self_decision_id,
                 },
@@ -1216,7 +1252,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
 
     recovered_row_a = replace(
         row_a,
-        feature_id="feature:provenance-c",
+        feature_id=_FEATURE_PROVENANCE_C,
         provenance={"recovery_ticket": "#909"},
     )
     recovery = await import_curation_rows(
@@ -1233,7 +1269,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                 text(
                     """
                     SELECT
-                        item.feature_id,
+                        CAST(item.feature_id AS text) AS feature_id,
                         item.current_import_row_id::text AS import_row_id,
                         item.accepted_link_decision_id::text AS decision_id,
                         decision.match_basis,
@@ -1250,7 +1286,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         .mappings()
         .one()
     )
-    assert recovered_state["feature_id"] == "feature:provenance-c"
+    assert recovered_state["feature_id"] == _FEATURE_PROVENANCE_C
     assert recovered_state["match_basis"] == "forward_recovery"
     assert recovered_state["import_row_id"] != first_state["item-a"]["import_row_id"]
     assert recovered_state["decision_id"] != first_state["item-a"]["decision_id"]
@@ -1294,7 +1330,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                     place_name, status
                 ) VALUES (
                     CAST(:collection_id AS uuid),
-                    'feature:provenance-unsafe',
+                    CAST(:feature_id AS uuid),
                     'unsafe-item',
                     '미승인 장소',
                     'included'
@@ -1302,7 +1338,10 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
                 RETURNING curation_item_id::text
                 """
             ),
-            {"collection_id": collection_a_id},
+            {
+                "collection_id": collection_a_id,
+                "feature_id": _FEATURE_PROVENANCE_UNSAFE,
+            },
         )
     ).scalar_one()
     audits = await list_unattributed_curation_links(migrated_session)
@@ -1310,7 +1349,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
     assert (
         await get_feature_curation_group(
             migrated_session,
-            feature_id="feature:provenance-unsafe",
+            feature_id=_FEATURE_PROVENANCE_UNSAFE,
             public_only=True,
         )
         is None
@@ -1320,7 +1359,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
         migrated_session,
         collection_id=collection_a_id,
         curation_item_id=unsafe_item,
-        updates={"feature_id": "feature:provenance-unsafe"},
+        updates={"feature_id": _FEATURE_PROVENANCE_UNSAFE},
         actor="manual-reviewer",
     )
     assert approved is not None
@@ -1330,7 +1369,7 @@ async def test_link_provenance_is_append_only_fail_closed_and_recoverable(
     assert (
         await get_feature_curation_group(
             migrated_session,
-            feature_id="feature:provenance-unsafe",
+            feature_id=_FEATURE_PROVENANCE_UNSAFE,
             public_only=True,
         )
         is not None
@@ -1348,10 +1387,11 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color
             ) VALUES
-                ('feature:reimport-a', 'place', '재적재 장소 A', '01070100',
+                (CAST(:feature_id AS uuid), 'place', '재적재 장소 A', '01070100',
                  'place', 'P-01')
             """
-        )
+        ),
+        {"feature_id": _FEATURE_REIMPORT_A},
     )
     common = {
         "collection_key": "csv-reimport:2026",
@@ -1374,7 +1414,7 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
         ResolvedCurationImportRow(
             row_number=2,
             source_item_key="reimport-a",
-            feature_id="feature:reimport-a",
+            feature_id=_FEATURE_REIMPORT_A,
             sort_order=1,
             metadata={"ordinal": 1},
             **common,
@@ -1444,7 +1484,7 @@ async def test_authoritative_reimport_preserves_operator_curation_overrides(
         ResolvedCurationImportRow(
             row_number=2,
             source_item_key="reimport-a",
-            feature_id="feature:reimport-a",
+            feature_id=_FEATURE_REIMPORT_A,
             sort_order=1,
             metadata={"ordinal": 1},
             **{**common, "place_name": "갱신된 장소명"},
@@ -1598,11 +1638,12 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color
             ) VALUES (
-                'feature:source-absent', 'place', '원천 누락 장소',
+                CAST(:feature_id AS uuid), 'place', '원천 누락 장소',
                 '01070100', 'place', 'P-01'
             )
             """
-        )
+        ),
+        {"feature_id": _FEATURE_SOURCE_ABSENT},
     )
     common = {
         "collection_key": "source-absent:2026",
@@ -1623,7 +1664,7 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
     present_row = ResolvedCurationImportRow(
         row_number=2,
         source_item_key="source-absent-a",
-        feature_id="feature:source-absent",
+        feature_id=_FEATURE_SOURCE_ABSENT,
         sort_order=1,
         metadata={},
         place_name="원천 누락 장소",
@@ -1673,12 +1714,12 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
     assert public_collection[1] == ()
     assert await get_feature_curation_group(
         migrated_session,
-        feature_id="feature:source-absent",
+        feature_id=_FEATURE_SOURCE_ABSENT,
         public_only=True,
     ) is None
     assert await list_curation_items_by_feature_ids(
         migrated_session,
-        feature_ids=["feature:source-absent"],
+        feature_ids=[_FEATURE_SOURCE_ABSENT],
         public_only=True,
     ) == {}
     groups, cursor = await list_feature_curation_groups(
@@ -1686,7 +1727,7 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
         public_only=True,
         page_size=100,
     )
-    assert all(group.feature_id != "feature:source-absent" for group in groups)
+    assert all(group.feature_id != _FEATURE_SOURCE_ABSENT for group in groups)
     assert cursor is None
 
     archived = await archive_curation_item(
@@ -2151,7 +2192,9 @@ async def test_new_collection_create_add_does_not_deadlock_import(
     from sqlalchemy.ext.asyncio import AsyncSession
 
     suffix = uuid4().hex
-    feature_id = f"feature:collection-key-lock:{suffix}"
+    # 이 테스트는 실제로 commit하므로 seed identity가 실행마다 달라야 한다. 재키 뒤
+    # 정본 키는 uuid이므로 그 형태 그대로 뽑는다.
+    feature_id = str(uuid4())
     collection_key = f"collection-key-lock:{suffix}"
     theme_slug = f"collection-key-lock-{suffix}"
     provider = f"collection-key-lock-{suffix}"
@@ -2166,7 +2209,7 @@ async def test_new_collection_create_add_does_not_deadlock_import(
                 INSERT INTO feature.features (
                     feature_id, kind, name, category, marker_icon, marker_color
                 ) VALUES (
-                    :feature_id, 'place', 'collection key lock 장소',
+                    CAST(:feature_id AS uuid), 'place', 'collection key lock 장소',
                     '01070100', 'place', 'P-01'
                 )
                 """
@@ -2372,7 +2415,7 @@ async def test_admin_can_resolve_and_archive_unmatched_item_with_actor_audit(
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET publication_state = 'suppressed' "
-            "WHERE feature_id = :feature_id"
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
         ),
         {"feature_id": _FEATURE_ID},
     )
@@ -2535,14 +2578,14 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed_foundations(migrated_session)
-    second_feature_id = "feature:curation-component-second"
+    second_feature_id = _FEATURE_COMPONENT_SECOND
     await migrated_session.execute(
         text(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color
             ) VALUES (
-                :feature_id, 'place', '두 번째 구성 장소', '01070100',
+                CAST(:feature_id AS uuid), 'place', '두 번째 구성 장소', '01070100',
                 'place', 'P-01'
             )
             """
@@ -2603,7 +2646,7 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
             await migrated_session.execute(
                 text(
                     """
-                    SELECT feature_id, curation_item_id::text
+                    SELECT CAST(feature_id AS text), curation_item_id::text
                     FROM feature.curation_items
                     WHERE collection_id = CAST(:collection_id AS uuid)
                     ORDER BY feature_id
@@ -2633,7 +2676,7 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
             """
             UPDATE feature.curation_items
             SET external_component_id = 'legacy:' || curation_item_id::text,
-                source_present = feature_id <> :source_absent_feature_id
+                source_present = feature_id <> CAST(:source_absent_feature_id AS uuid)
             WHERE collection_id = CAST(:collection_id AS uuid)
             """
         ),
@@ -2672,7 +2715,7 @@ async def test_import_adopts_migrated_legacy_components_without_losing_state(
                 text(
                     """
                     SELECT
-                        feature_id,
+                        CAST(feature_id AS text) AS feature_id,
                         curation_item_id::text,
                         external_component_id,
                         source_present,
@@ -3042,12 +3085,13 @@ async def test_feature_curation_lookup_uses_membership_index(
                 feature_id, kind, name, category, marker_icon, marker_color
             )
             SELECT
-                'feature:curation-perf:' || g::text,
+                CAST(CAST(:uuid_prefix AS text) || lpad(g::text, 12, '0') AS uuid),
                 'place', '큐레이션 성능 장소 ' || g::text, '01070100',
                 'place', 'P-01'
             FROM generate_series(1, 500) AS g
             """
-        )
+        ),
+        {"uuid_prefix": _FEATURE_PERF_UUID_PREFIX},
     )
     await migrated_session.execute(
         text(
@@ -3058,14 +3102,17 @@ async def test_feature_curation_lookup_uses_membership_index(
             )
             SELECT
                 CAST(:collection_id AS uuid),
-                'feature:curation-perf:' || g::text,
+                CAST(CAST(:uuid_prefix AS text) || lpad(g::text, 12, '0') AS uuid),
                 'perf-item-' || g::text,
                 '큐레이션 성능 장소 ' || g::text,
                 'included', g
             FROM generate_series(1, 500) AS g
             """
         ),
-        {"collection_id": collection.collection_id},
+        {
+            "collection_id": collection.collection_id,
+            "uuid_prefix": _FEATURE_PERF_UUID_PREFIX,
+        },
     )
     await migrated_session.execute(text("ANALYZE feature.features"))
     await migrated_session.execute(text("ANALYZE feature.curation_items"))
@@ -3151,20 +3198,24 @@ async def test_address_hint_matches_split_jsonb_fields(
                 feature_id, kind, name, category, marker_icon, marker_color, address
             ) VALUES
                 (
-                    'feature:h31-split-address', 'place', '토큰분리 등대', '01050400',
+                    CAST(:feature_split AS uuid), 'place', '토큰분리 등대', '01050400',
                     'place', 'P-09',
                     '{"sido_name":"울산광역시","sigungu_name":"울주군",'
                     '"admin":"울산광역시 울주군 서생면"}'::jsonb
                 ),
                 (
-                    'feature:h31-wrong-field', 'place', '토큰분리 등대', '01050400',
+                    CAST(:feature_wrong AS uuid), 'place', '토큰분리 등대', '01050400',
                     'place', 'P-09',
                     '{"sido_name":"울산광역시","sigungu_name":"울주군",'
                     '"admin":"울산광역시 울주군 온산읍",'
                     '"road":"울산광역시 울주군 서생면로 1"}'::jsonb
                 )
             """
-        )
+        ),
+        {
+            "feature_split": _FEATURE_H31_SPLIT_ADDRESS,
+            "feature_wrong": _FEATURE_H31_WRONG_FIELD,
+        },
     )
 
     async def _match(hint: str | None) -> tuple[str, ...]:
@@ -3182,11 +3233,11 @@ async def test_address_hint_matches_split_jsonb_fields(
         return tuple(m.feature_id for m in matches[1])
 
     # hierarchy가 맞는 authoritative component만 남는다.
-    assert await _match("울산광역시 울주군 서생면") == ("feature:h31-split-address",)
+    assert await _match("울산광역시 울주군 서생면") == (_FEATURE_H31_SPLIT_ADDRESS,)
     # NFD 입력도 NFKC/NFC 주소와 같은 의미다.
     assert await _match(
         unicodedata.normalize("NFD", "울산광역시 울주군 서생면")
-    ) == ("feature:h31-split-address",)
+    ) == (_FEATURE_H31_SPLIT_ADDRESS,)
     # SQL LIKE wildcard는 주소 증거 없이 후보를 만들 수 없다.
     assert await _match("%") == ()
     assert await _match("_") == ()
@@ -3195,8 +3246,8 @@ async def test_address_hint_matches_split_jsonb_fields(
     assert await _match("부산광역시 울주군 서생면") == ()
     # 공백은 정규화하되 token boundary는 유지한다.
     assert await _match("울산광역시   울주군") == (
-        "feature:h31-split-address",
-        "feature:h31-wrong-field",
+        _FEATURE_H31_SPLIT_ADDRESS,
+        _FEATURE_H31_WRONG_FIELD,
     )
 
 
@@ -3210,13 +3261,14 @@ async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links
             INSERT INTO feature.features (
                 feature_id, kind, name, category, marker_icon, marker_color, address
             ) VALUES (
-                'feature:h31-preview-only', 'place', '미승인 등대', '01050400',
+                CAST(:feature_id AS uuid), 'place', '미승인 등대', '01050400',
                 'place', 'P-09',
                 '{"sido_name":"울산광역시","sigungu_name":"울주군",'
                 '"admin":"울산광역시 울주군 서생면 대송리"}'::jsonb
             )
             """
-        )
+        ),
+        {"feature_id": _FEATURE_H31_PREVIEW_ONLY},
     )
     matches = await resolve_feature_matches(
         migrated_session,
@@ -3229,7 +3281,7 @@ async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links
             ),
         ),
     )
-    assert [match.feature_id for match in matches[2]] == ["feature:h31-preview-only"]
+    assert [match.feature_id for match in matches[2]] == [_FEATURE_H31_PREVIEW_ONLY]
 
     row = ResolvedCurationImportRow(
         row_number=2,
@@ -3289,7 +3341,7 @@ async def test_address_candidate_reimport_is_idempotent_and_never_publicly_links
     assert (
         await get_feature_curation_group(
             migrated_session,
-            feature_id="feature:h31-preview-only",
+            feature_id=_FEATURE_H31_PREVIEW_ONLY,
             public_only=True,
         )
         is None

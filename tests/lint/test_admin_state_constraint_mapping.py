@@ -54,7 +54,7 @@ from kortravelmap.infra.admin_feature_repo import (
 )
 
 _SCHEMA: Final[pathlib.Path] = (
-    pathlib.Path(__file__).resolve().parents[2] / "alembic" / "baseline" / "schema.sql"
+    pathlib.Path(__file__).resolve().parents[2] / "alembic" / "head-schema.sql"
 )
 
 #: 라우터가 실제로 부르는 진입점. `admin_feature_repo.py`의 `CALL` 문과 같아야 한다.

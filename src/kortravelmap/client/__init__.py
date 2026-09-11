@@ -89,6 +89,7 @@ from kortravelmap.infra.cache_target_reconciliation_repo import (
 from kortravelmap.infra.cache_target_snapshot_gc_observation_repo import (
     record_cache_target_snapshot_gc_observation as repo_record_cache_target_snapshot_gc_observation,
 )
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
     DEDUP_SCORE_REGRESSION_WARN_POINTS,
@@ -552,6 +553,13 @@ class AsyncKorTravelMapClient:
         self._engine = engine
         self._session_factory = make_async_session_factory(engine)
         self._settings = settings
+        #: 이 client의 session이 **바깥 transaction에 결합돼 있는가.**
+        #:
+        #: dagster feature-update runner가 `_bind_client_to_session`으로 복제본을
+        #: 만들 때만 참이 된다. 결합된 client에서 난 실패는 그 rollback이 바깥
+        #: transaction까지 되감으므로 **회복 불가**다 — 호출자가 완화 모드라도
+        #: 삼키면 안 되고, 그 판단을 하려면 이 사실이 노출돼 있어야 한다.
+        self._transaction_bound = False
 
     async def __aenter__(self) -> AsyncKorTravelMapClient:
         return self
@@ -1876,9 +1884,15 @@ class AsyncKorTravelMapClient:
         """cross-provider 중복 후보 탐지 + ``ops.dedup_review_queue`` 적재.
 
         ``find_dedup_candidates``(순수, ADR-016)로 ``left × right``를 cross-score한
-        뒤 후보를 큐에 upsert한다. ``left``/``right``의 feature(``feature_id``)는
-        이미 ``feature.features``에 적재돼 있어야 한다 (큐 FK CASCADE). 후보가
+        뒤 후보를 큐에 upsert한다. ``left``/``right``의 feature는 이미
+        ``feature.features``에 적재돼 있어야 한다 (큐 FK CASCADE). 후보가
         없으면 빈 큐 결과.
+
+        ``feature_id``는 정본 uuid와 legacy ``f_*`` 주소를 **둘 다** 받는다 —
+        ``Feature`` DTO가 그대로 이 표면을 만족하고 그 DTO가 아는 것은 변환기가
+        만든 주소뿐이기 때문이다. 해석은 repo가 한다
+        (:func:`~kortravelmap.infra.canonical_feature_ids.resolve_canonical_feature_ids`).
+        가리키는 Feature가 없으면 쓰기 전에 멈춘다.
 
         Parameters
         ----------
@@ -1906,6 +1920,9 @@ class AsyncKorTravelMapClient:
         안의 self-sibling(예: MOIS 같은 사업장이 2슬러그로 중복 등록)을 탐지해 큐에
         upsert한다. ``features``의 feature는 이미 ``feature.features``에 적재돼 있어야
         한다 (큐 FK). 후보가 없으면 빈 큐 결과.
+
+        ``sync_dedup_candidates``와 같이 정본 uuid와 legacy ``f_*`` 주소를 둘 다
+        받는다.
 
         Parameters
         ----------
@@ -2724,6 +2741,23 @@ class AsyncKorTravelMapClient:
         rows = [deduped[key] for key in sorted(deduped)]
         try:
             async with self._session_factory() as session, session.begin():
+                # T-VN-39: `ops.data_integrity_violations.feature_id`는 uuid다.
+                # 여기 실려 온 값은 provider 변환기가 유도한 legacy **주소**이므로
+                # (`etl.py`의 `issue.feature_id`) 정본 키로 풀어야 한다 — 풀지 않으면
+                # 적재된 Feature에 주소/좌표 issue가 하나라도 붙는 순간 22P02다.
+                #
+                # 해석되지 않는 참조는 `linked=False`로 강등한다. 그 자리는 FK 없는
+                # 표현(payload)을 이미 갖고 있고, **source_record_key는 유지한다** —
+                # 그 둘은 다른 축이고 하나가 안 풀렸다고 다른 하나를 버릴 이유가 없다.
+                canonical = await resolve_canonical_feature_ids(
+                    session,
+                    (row["feature_id"] for row in rows if row["feature_id"]),
+                    strict=False,
+                )
+                for row in rows:
+                    reference = row["feature_id"]
+                    if reference:
+                        row["feature_id"] = canonical.get(reference)
                 provider_dataset_id = await resolve_active_provider_dataset_id(
                     session, provider=provider, dataset_key=dataset_key
                 )
@@ -2734,12 +2768,17 @@ class AsyncKorTravelMapClient:
                     external_run_id=run_id,
                 )
         except Exception as exc:  # noqa: BLE001
+            # 결합된 client에서는 위 `session.begin()`의 rollback이 **바깥
+            # transaction까지 되감았다**(`join_transaction_mode="rollback_only"`).
+            # 그 사실을 예외에 실어야 호출자가 "삼켜도 되는 실패"와 구분한다 —
+            # 구분하지 못하면 되감긴 적재 위로 sync cursor가 전진한다.
             raise IntegrityFindingPersistenceError(
                 provider=provider,
                 dataset_key=dataset_key,
                 observed_count=len(findings),
                 unique_count=len(rows),
                 error_type=type(exc).__name__,
+                transaction_destroyed=self._transaction_bound,
             ) from None
         return IntegrityFindingSyncResult(
             observed_count=len(findings),

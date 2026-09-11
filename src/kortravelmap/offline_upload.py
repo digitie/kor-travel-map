@@ -1245,6 +1245,7 @@ def _bundle_from_tabular_row(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=source_entity_id,
         kind=FeatureKind.PLACE,
         name=name,
         coord=coord,

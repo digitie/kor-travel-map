@@ -32,15 +32,25 @@ from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
     _FEATURES_IN_BBOX_SQL,
     _NEARBY_COORD_DISTANCE_SQL,
 )
+from tests.integration.perf_gate import seed_uuid_namespace
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
 
+# T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid이고, 값을
+# 채워 주던 ``trg_features_feature_uuid_fill``도 사라졌다 — seed가 정본 키를 직접
+# 넣는다. 라벨을 uuid 대역으로 접는 규칙은 tier-1 gate와 **같은 것 하나**를 쓴다
+# (``perf_gate.seed_uuid_namespace``): 두 파일이 같은 분포를 심는데 id 표기 규칙만
+# 갈라지면, 어느 쪽 plan이 운영과 같은 모양인지 판정할 근거가 둘로 쪼개진다.
+_PERF_FEATURE_LABEL = "perf:f:"
+_PERF_GEOM_LABEL = "perf:geom:"
+
 
 async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> None:
     """서울/부산/제주 주변의 provider-like feature/source/ops row를 대량 seed."""
+    namespace = seed_uuid_namespace(_PERF_FEATURE_LABEL)
     await session.execute(
         text(
             """
@@ -52,7 +62,9 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 created_at, updated_at
             )
             SELECT
-                'perf:f:' || lpad(g::text, 6, '0') AS feature_id,
+                CAST(
+                    :uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid
+                ) AS feature_id,
                 CASE
                   WHEN g % 19 = 0 THEN 'event'
                   WHEN g % 23 = 0 THEN 'weather'
@@ -120,25 +132,28 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             FROM generate_series(1, :n) AS g
             """
         ),
-        {"n": n},
+        {"n": n, "uuid_namespace": namespace},
     )
     # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다. 종전 seed가 core
     # ``detail``에 넣던 place_kind/business_hours가 typed 컬럼으로 간다 —
     # ``idx_feature_places_opening_hours``가 종전 ``idx_features_opening_hours_keyset``
     # 자리를 대신하므로 같은 17행 주기로 business_hours를 채운다.
+    # T-VN-39: subtype의 사본 컬럼 ``feature_uuid``는 309 ``_SHADOW_DROP``이
+    # 지웠다. 그리고 seed 순번은 더 이상 id 문자열에서 읽어낼 수 없으므로
+    # (``right(feature_id, 6)``의 자리) generate_series를 다시 붙여 같은 17행
+    # 주기를 만든다 — business_hours 분포가 이 파일의 index gate 근거다.
     await session.execute(
         text(
             """
             INSERT INTO feature.feature_places (
-                feature_id, feature_uuid, kind, place_kind, business_hours
+                feature_id, kind, place_kind, business_hours
             )
             SELECT
                 f.feature_id,
-                f.feature_uuid,
                 f.kind,
                 'attraction',
                 CASE
-                  WHEN right(f.feature_id, 6)::int % 17 = 0 THEN jsonb_build_object(
+                  WHEN g % 17 = 0 THEN jsonb_build_object(
                     'periods', jsonb_build_array(
                       jsonb_build_object(
                         'open', jsonb_build_object('day', '1', 'time', '0900'),
@@ -147,24 +162,31 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                     )
                   )
                 END
-            FROM feature.features AS f
-            WHERE f.feature_id LIKE 'perf:f:%' AND f.kind = 'place'
+            FROM generate_series(1, :n) AS g
+            JOIN feature.features AS f
+              ON f.feature_id = CAST(
+                  :uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid
+              )
+            WHERE f.kind = 'place'
             """
-        )
+        ),
+        {"n": n, "uuid_namespace": namespace},
     )
     await session.execute(
         text(
             """
             INSERT INTO feature.feature_events (
-                feature_id, feature_uuid, kind, event_kind, starts_on, ends_on
+                feature_id, kind, event_kind, starts_on, ends_on
             )
             SELECT
-                f.feature_id, f.feature_uuid, f.kind, 'festival',
+                f.feature_id, f.kind, 'festival',
                 CURRENT_DATE - 3, CURRENT_DATE + 3
             FROM feature.features AS f
-            WHERE f.feature_id LIKE 'perf:f:%' AND f.kind = 'event'
+            WHERE CAST(f.feature_id AS text) LIKE :uuid_namespace || '%'
+              AND f.kind = 'event'
             """
-        )
+        ),
+        {"uuid_namespace": namespace},
     )
     # T-VN-33: entity/record는 자연키 사본을 갖지 않는다 — dataset 소유는
     # ``provider_dataset_id`` 하나뿐이라 provider 분포는 catalog 행으로 만든다.
@@ -264,7 +286,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 match_method, confidence, created_at
             )
             SELECT
-                'perf:f:' || lpad(g::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
                 'perf:se:' || lpad(g::text, 6, '0'),
                 'primary',
                 'natural_key',
@@ -273,7 +295,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             FROM generate_series(1, :n) AS g
             """
         ),
-        {"n": n},
+        {"n": n, "uuid_namespace": namespace},
     )
     await session.execute(
         text(
@@ -331,7 +353,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 -- (``ck_data_integrity_violations_dataset_source_record``).
                 se.provider_dataset_id,
                 'perf:sr:' || lpad(g::text, 6, '0'),
-                'perf:f:' || lpad(g::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
                 CASE WHEN g % 3 = 0 THEN 'missing_address'
                      ELSE 'provider_address_mismatch' END,
                 CASE WHEN g % 3 = 0 THEN 'warning' ELSE 'error' END,
@@ -343,7 +365,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             JOIN provider_sync.source_entities AS se
               ON se.source_entity_key = 'perf:se:' || lpad(g::text, 6, '0')
             """
-        )
+        ),
+        {"uuid_namespace": namespace},
     )
     await session.execute(
         text(
@@ -354,8 +377,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 status, created_at
             )
             SELECT
-                'perf:f:' || lpad(g::text, 6, '0'),
-                'perf:f:' || lpad((g + 1600)::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
+                CAST(:uuid_namespace || lpad(to_hex(g + 1600), 12, '0') AS uuid),
                 70 + (g % 250)::numeric / 10,
                 80,
                 75,
@@ -364,7 +387,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, 500) AS g
             """
-        )
+        ),
+        {"uuid_namespace": namespace},
     )
     await session.execute(
         text(
@@ -374,7 +398,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 source_name, target_name, name_score, status, created_at
             )
             SELECT
-                'perf:f:' || lpad(g::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
                 'perf:se:' || lpad(g::text, 6, '0'),
                 'perf:sr:' || lpad(g::text, 6, '0'),
                 '축제 원천 ' || g::text,
@@ -384,7 +408,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 now() - (g::text || ' seconds')::interval
             FROM generate_series(1, 500) AS g
             """
-        )
+        ),
+        {"uuid_namespace": namespace},
     )
     await session.flush()
     await session.execute(text("ANALYZE"))
@@ -402,6 +427,7 @@ async def _seed_geom_only_perf_data(
     갖는다. 인덱스도 core 단일 partial GiST가 아니라 subtype별 GiST 2종이므로
     seed 구조를 그대로 옮기고, 통계는 세 relation 모두에 만든다.
     """
+    namespace = seed_uuid_namespace(_PERF_GEOM_LABEL)
     await session.execute(
         text(
             """
@@ -411,7 +437,7 @@ async def _seed_geom_only_perf_data(
                 sido_code, sigungu_code, legal_dong_code, created_at, updated_at
             )
             SELECT
-                'perf:geom:' || lpad(g::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
                 CASE WHEN g % 2 = 0 THEN 'route' ELSE 'area' END,
                 'geometry-only feature ' || g::text,
                 '02000000',
@@ -434,17 +460,16 @@ async def _seed_geom_only_perf_data(
             FROM generate_series(1, :n) AS g
             """
         ),
-        {"n": n},
+        {"n": n, "uuid_namespace": namespace},
     )
     await session.execute(
         text(
             """
             INSERT INTO feature.feature_routes (
-                feature_id, feature_uuid, kind, geom, route_type
+                feature_id, kind, geom, route_type
             )
             SELECT
                 f.feature_id,
-                f.feature_uuid,
                 f.kind,
                 x_extension.ST_Multi(
                     x_extension.ST_SetSRID(
@@ -462,21 +487,27 @@ async def _seed_geom_only_perf_data(
                     )
                 )::x_extension.geometry(MultiLineString, 4326),
                 'route'
-            FROM feature.features AS f
-            JOIN LATERAL (SELECT right(f.feature_id, 6)::int AS g) AS s ON TRUE
-            WHERE f.feature_id LIKE 'perf:geom:%' AND f.kind = 'route'
+            -- T-VN-39: 순번을 id 문자열에서 읽어낼 수 없다(정본 키가 uuid다).
+            -- geometry 좌표를 정하던 ``g``를 generate_series로 되돌린다 — 그
+            -- 좌표 분포가 곧 이 테스트가 겨누는 subtype GiST의 후보 분포다.
+            FROM generate_series(1, :n) AS g
+            JOIN feature.features AS f
+              ON f.feature_id = CAST(
+                  :uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid
+              )
+            WHERE f.kind = 'route'
             """
-        )
+        ),
+        {"n": n, "uuid_namespace": namespace},
     )
     await session.execute(
         text(
             """
             INSERT INTO feature.feature_areas (
-                feature_id, feature_uuid, kind, geom, area_kind
+                feature_id, kind, geom, area_kind
             )
             SELECT
                 f.feature_id,
-                f.feature_uuid,
                 f.kind,
                 x_extension.ST_Multi(
                     x_extension.ST_SetSRID(
@@ -490,11 +521,15 @@ async def _seed_geom_only_perf_data(
                     )
                 )::x_extension.geometry(MultiPolygon, 4326),
                 'area'
-            FROM feature.features AS f
-            JOIN LATERAL (SELECT right(f.feature_id, 6)::int AS g) AS s ON TRUE
-            WHERE f.feature_id LIKE 'perf:geom:%' AND f.kind = 'area'
+            FROM generate_series(1, :n) AS g
+            JOIN feature.features AS f
+              ON f.feature_id = CAST(
+                  :uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid
+              )
+            WHERE f.kind = 'area'
             """
-        )
+        ),
+        {"n": n, "uuid_namespace": namespace},
     )
     await session.flush()
     await session.execute(text("ANALYZE feature.features"))
@@ -563,21 +598,21 @@ _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
 
 # features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
 #
-# alembic 0083(T-VN-32C)이 복합 FK의 참조 대상으로
-# ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``를 만들면서 PK와
-# 선두 컬럼이 같은 btree가 하나 더 생겼고, ``feature_uuid``를 함께 투영하는
-# 질의에서는 planner가 이 covering index를 골라 index-only scan을 한다.
-# 선두 컬럼이 같아 selectivity·성능 축은 동일하므로 gate는 둘을 동치로 받는다
-# (``tests/integration/perf_gate._FEATURES_PK_ACCESS``와 같은 근거).
-# T-VN-35(alembic 0084): 배타 arc 참조 대상 ``uq_features_identity_kind
-# UNIQUE (feature_id, kind)``가 생기면서 PK와 선두 컬럼이 같은 btree가 하나 더
-# 늘었다. planner는 ``kind``까지 투영하는 hot query에서 이 covering index를 골라
-# index-only scan을 한다 — selectivity가 동일하므로 성능 축은 약화되지 않는다.
+# T-VN-35(alembic 0084): 배타 arc 참조 대상 ``UNIQUE (feature_id, kind)``는 PK와
+# 선두 컬럼이 같은 btree라, ``kind``까지 투영하는 hot query에서 planner가 이
+# covering index를 골라 index-only scan을 한다 — selectivity가 동일하므로 성능
+# 축은 약화되지 않는다. T-VN-39 재키가 그 제약을 ``uq_features_identity_kind``
+# → ``uq_features_id_kind``로 개명했다(309 ``_UNIQUE_RENAME``).
+#
+# 같은 성격이던 ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``는
+# 목록에서 **빠진다.** 309 ``_SHADOW_DROP``의 ``features DROP COLUMN feature_uuid``
+# 가 그 제약을 함께 지웠고 ``_COLLATERAL_RECREATE``도 되살리지 않는다 — 돌아올 수
+# 없는 이름을 기대 목록에 남기면 gate가 무엇을 보장하는지 흐려진다.
+# (``tests/integration/perf_gate._FEATURES_PK_ACCESS``와 같은 근거.)
 _FEATURES_PK_ACCESS = (
     "pk_features",
     "features_pkey",
-    "uq_features_identity_pair",
-    "uq_features_identity_kind",
+    "uq_features_id_kind",
 )
 
 # enrichment review 목록이 탈 수 있는 **동치** 접근 경로.
@@ -614,8 +649,7 @@ _DEDUP_REFRESH_ACCESS_BY_RELATION = {
         "idx_features_updated_keyset",
         "pk_features",
         "features_pkey",
-        "uq_features_identity_pair",
-        "uq_features_identity_kind",
+        "uq_features_id_kind",
     ),
     "source_links": (
         "idx_source_links_entity",
@@ -1153,9 +1187,14 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
     )
     _assert_uses_index(admin_features_by_id, *_FEATURES_PK_ACCESS)
 
-    # T-VN-32C (R5) — canonical UUID 검색어는 ``uq_features_feature_uuid`` 인덱스
-    # 등가 fast-path를 탄다. 값 전환 후 운영자가 응답 feature_id(UUID)를 그대로
-    # 검색하므로, 이 분기가 빠지면 #639가 고친 ILIKE 풀스캔(14~60s)이 회귀한다.
+    # T-VN-32C (R5) — canonical UUID 검색어는 PK 등가 fast-path를 탄다. 재키
+    # 전에는 그 자리가 사본 컬럼의 ``uq_features_feature_uuid``였는데, 309
+    # ``_SHADOW_DROP``이 ``features.feature_uuid``를 지우면서 그 unique 제약도
+    # 함께 사라졌다 — 이제 canonical UUID는 정본 키 그 자체이므로 진입점이
+    # ``pk_features``다(``_ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE``의
+    # ``f.feature_id = CAST(:q_exact_uuid AS uuid)``). 값 전환 후 운영자가 응답
+    # feature_id(UUID)를 그대로 검색하므로, 이 분기가 빠지면 #639가 고친 ILIKE
+    # 풀스캔(14~60s)이 회귀한다 — 그 축은 이름이 바뀌어도 그대로다.
     admin_features_by_uuid = await _explain_json(
         migrated_session,
         admin_feature_repo._admin_features_sql(
@@ -1184,7 +1223,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "limit_plus_one": 51,
         },
     )
-    _assert_uses_index(admin_features_by_uuid, "uq_features_feature_uuid")
+    _assert_uses_index(admin_features_by_uuid, *_FEATURES_PK_ACCESS)
 
     jobs = await _explain_json(
         migrated_session,
@@ -1499,7 +1538,11 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
             """
             CREATE TABLE feature.feature_files (
                 file_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
-                feature_id TEXT,
+                -- T-VN-39: F8 SQL은 이 컬럼을 ``feature.features.feature_id``에
+                -- LEFT JOIN한다. 재키 뒤 그쪽이 uuid라 text로 두면 ``uuid = text``
+                -- 로 파스 단계에서 죽는다(42883) — 실제 표가 생길 때도 uuid여야
+                -- 하는 자리다.
+                feature_id UUID,
                 storage_backend TEXT NOT NULL,
                 bucket TEXT NOT NULL,
                 object_key TEXT NOT NULL
@@ -1514,13 +1557,14 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
                 feature_id, storage_backend, bucket, object_key
             )
             SELECT
-                'perf:f:' || lpad(g::text, 6, '0'),
+                CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
                 'rustfs',
                 'kor-travel-map',
                 'provider/live-like/' || g::text || '.jpg'
             FROM generate_series(1, 200) AS g
             """
-        )
+        ),
+        {"uuid_namespace": seed_uuid_namespace(_PERF_FEATURE_LABEL)},
     )
     await migrated_session.flush()
     await migrated_session.execute(text("ANALYZE feature.feature_files"))

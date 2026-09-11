@@ -7,10 +7,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.admin_feature_repo import get_feature_row_revision
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = [pytest.mark.integration]
 
-_FID = "test-row-revision-1"
+#: T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이 파일은
+#: 그 표에 직접 행을 심으므로 정본 축이고, 라벨은 씨앗으로만 남는다 — 같은 라벨은
+#: 언제나 같은 uuid라 seed·조회·단언이 한 값을 가리킨다.
+_FID = feature_uuid("test-row-revision-1")
+
+#: 어떤 행도 갖지 않는 정본 키. 조회 SQL이 맨 바인딩을 uuid 컬럼에 대므로
+#: "없는 참조" probe도 라벨 문자열이 아니라 uuid여야 한다 — 문자열을 넣으면
+#: 관측(``None``)이 아니라 22P02가 된다.
+_MISSING_FID = feature_uuid("no-such-feature")
 
 
 async def _seed_one_feature(session: AsyncSession) -> None:
@@ -89,4 +98,4 @@ async def test_row_revision_is_server_owned_for_normal_and_axis_updates(
 async def test_get_feature_row_revision_missing_returns_none(
     migrated_session: AsyncSession,
 ) -> None:
-    assert await get_feature_row_revision(migrated_session, "no-such-feature") is None
+    assert await get_feature_row_revision(migrated_session, _MISSING_FID) is None

@@ -57,6 +57,7 @@ __all__ = [
     "default_upstream_retryable",
     "retry_upstream",
     "retry_upstream_async",
+    "retry_upstream_awaitable",
 ]
 
 T = TypeVar("T")
@@ -224,6 +225,52 @@ def retry_upstream(
             ):
                 raise
             do_sleep(
+                _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
+            )
+    raise AssertionError(f"unreachable: {label}")  # pragma: no cover
+
+
+async def retry_upstream_awaitable(
+    call: Callable[[], Awaitable[T]],
+    *,
+    label: str,
+    is_retryable: Callable[[BaseException], bool] = default_upstream_retryable,
+    attempts: int = DEFAULT_UPSTREAM_ATTEMPTS,
+    base_delay: float = DEFAULT_UPSTREAM_BASE_DELAY_SECONDS,
+    max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+    budget: RetryBudget | None = None,
+    on_retry: Callable[[str], None] | None = None,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
+) -> T:
+    """**async client 호출**을 재시도 경계 안에서 await한다.
+
+    :func:`retry_upstream_async`와 헷갈리기 쉬우므로 차이를 못 박는다 — 그쪽은
+    호출을 ``call()``로 **동기 실행**하고 backoff 대기만 event loop에 양보한다
+    (동기 client를 async asset 안에서 쓸 때). 코루틴을 돌려주는 호출을 거기 넘기면
+    ``call()``이 코루틴 **객체**를 만들어 그대로 반환하므로, 그 안에서 나는 예외를
+    재시도가 **한 번도 보지 못한다.** 재시도가 조용히 없어지는 셈이다.
+
+    async 전용 provider client(khoa 6.x 등)는 이 함수를 쓴다. 계약·backoff·예산은
+    동일하고 다른 것은 await 경계 하나다.
+    """
+    if attempts < 1:
+        raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
+    do_sleep = asyncio.sleep if sleep is None else sleep
+    for attempt in range(1, attempts + 1):
+        try:
+            return await call()
+        except Exception as exc:
+            if not _should_retry(
+                exc,
+                attempt=attempt,
+                attempts=attempts,
+                is_retryable=is_retryable,
+                budget=budget,
+                label=label,
+                on_retry=on_retry,
+            ):
+                raise
+            await do_sleep(
                 _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
             )
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover

@@ -31,6 +31,7 @@ from kortravelmap.infra.scope_repo import (
     FeatureScopeRow,
     ScopeResolution,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -65,6 +66,17 @@ async def _wait_for_lock(engine: AsyncEngine, backend_pid: int) -> None:
                 if row.wait_event_type == "Lock":
                     return
                 await asyncio.sleep(0.01)
+
+
+#: T-VN-39 재키 뒤 ``feature.features``의 ``feature_id``는 uuid고 ``name``은
+#: varchar다. 종전 이 파일의 seed는 ``:feature_id`` **한 바인드**를 두 자리에 함께
+#: 써서 asyncpg 방언이 그것을 하나의 ``$1``로 접었고, PostgreSQL이 자리마다 다른
+#: 타입을 유도해 ``AmbiguousParameterError``(42P18)로 parse 단계에서 죽었다.
+#: 바인드를 나눠 각자의 타입을 갖게 한다 — 사람이 읽는 라벨은 ``name``에 남는다.
+_SEED_FEATURE_SQL = (
+    "INSERT INTO feature.features (feature_id, kind, name, category) "
+    "VALUES (:feature_id, 'place', :feature_name, 'test')"
+)
 
 
 async def _create_target(
@@ -321,15 +333,13 @@ async def test_concurrent_put_reject_race_yields_single_winner_and_conflict(
     suffix = uuid4().hex
     external_system = f"put-race-{suffix}"
     target_key = f"target-{suffix}"
-    feature_id = f"feature:put-race:{suffix}"
+    feature_label = f"feature:put-race:{suffix}"
+    feature_id = feature_uuid(feature_label)
     try:
         async with AsyncSession(migrated_engine) as setup, setup.begin():
             await setup.execute(
-                text(
-                    "INSERT INTO feature.features (feature_id, kind, name, category) "
-                    "VALUES (:feature_id, 'place', :feature_id, 'test')"
-                ),
-                {"feature_id": feature_id},
+                text(_SEED_FEATURE_SQL),
+                {"feature_id": feature_id, "feature_name": feature_label},
             )
 
         async with (
@@ -417,15 +427,13 @@ async def test_executor_link_sync_wins_parent_lock_then_delete_leaves_no_active_
     suffix = uuid4().hex
     external_system = f"link-delete-{suffix}"
     target_key = f"target-{suffix}"
-    feature_id = f"feature:link-delete:{suffix}"
+    feature_label = f"feature:link-delete:{suffix}"
+    feature_id = feature_uuid(feature_label)
     try:
         async with AsyncSession(migrated_engine) as setup, setup.begin():
             await setup.execute(
-                text(
-                    "INSERT INTO feature.features (feature_id, kind, name, category) "
-                    "VALUES (:feature_id, 'place', :feature_id, 'test')"
-                ),
-                {"feature_id": feature_id},
+                text(_SEED_FEATURE_SQL),
+                {"feature_id": feature_id, "feature_name": feature_label},
             )
             target = await _create_target(
                 setup,
@@ -501,15 +509,13 @@ async def test_delete_wins_parent_lock_then_executor_sync_skips_inactive_parent(
     suffix = uuid4().hex
     external_system = f"delete-link-{suffix}"
     target_key = f"target-{suffix}"
-    feature_id = f"feature:delete-link:{suffix}"
+    feature_label = f"feature:delete-link:{suffix}"
+    feature_id = feature_uuid(feature_label)
     try:
         async with AsyncSession(migrated_engine) as setup, setup.begin():
             await setup.execute(
-                text(
-                    "INSERT INTO feature.features (feature_id, kind, name, category) "
-                    "VALUES (:feature_id, 'place', :feature_id, 'test')"
-                ),
-                {"feature_id": feature_id},
+                text(_SEED_FEATURE_SQL),
+                {"feature_id": feature_id, "feature_name": feature_label},
             )
             target = await _create_target(
                 setup,

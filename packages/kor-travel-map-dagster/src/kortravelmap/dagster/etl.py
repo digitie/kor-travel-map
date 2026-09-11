@@ -406,10 +406,22 @@ async def load_feature_bundles_for_dagster(
                 "address_validation_findings_unrecorded": exc.unique_count,
             }
         )
-        if mode == "strict":
+        # `transaction_destroyed`면 완화 모드라도 계속 갈 수 없다. 그 실패의
+        # rollback이 **적재까지 되감았고**, 여기서 삼키면 되감긴 적재 위로 sync
+        # cursor가 전진해 다음 run이 그 구간을 영구히 건너뛴다(조용한 데이터 손실).
+        # 완화 모드가 완화하는 것은 "finding을 못 남긴 것"이지 "적재가 사라진 것"이
+        # 아니다.
+        if mode == "strict" or exc.transaction_destroyed:
             _add_output_metadata(context, metadata)
             raise Failure(
-                description="Feature 주소/좌표 검증 finding durable 기록 실패",
+                description=(
+                    "Feature 주소/좌표 검증 finding durable 기록 실패"
+                    + (
+                        " — 이 실패가 적재 transaction까지 되감았다"
+                        if exc.transaction_destroyed
+                        else ""
+                    )
+                ),
                 metadata={
                     "address_validation_findings_observed": exc.observed_count,
                     "address_validation_findings_unique": exc.unique_count,

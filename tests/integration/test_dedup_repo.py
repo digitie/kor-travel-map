@@ -7,7 +7,14 @@
 - 재스캔 시 pending 행 점수 갱신(updated), 검토 완료(accepted) 행 보존(skipped).
 - reversed pair도 같은 canonical queue row로 수렴하며, self-pair는 skipped.
 - ``pending_dedup_reviews`` total_score 내림차순 + float 변환.
-- FK — 존재하지 않는 feature 참조 시 IntegrityError (CASCADE FK 강제).
+- 존재하지 않는 feature 참조는 **쓰기 전에** `UnresolvedFeatureRefError`로 멈춘다
+  (T-VN-39부터). FK(CASCADE)는 DB 층 보장으로 그대로 남아 repo를 우회한 직접
+  INSERT를 계속 막는다.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와 그것을 참조하는
+``ops.dedup_review_queue.feature_id_a/b``는 **uuid**다. 그래서 이 파일의 seed id는
+legacy ``f_*`` 문자열이 아니라 고정 UUIDv7이고, 무엇을 가리키는지는 값이 아니라
+상수 이름이 진다.
 """
 
 from __future__ import annotations
@@ -19,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.core.dedup import DedupCandidate
+from kortravelmap.infra.canonical_feature_ids import UnresolvedFeatureRefError
 from kortravelmap.infra.dedup_repo import (
     DedupQueueResult,
     enqueue_dedup_candidate,
@@ -33,6 +41,23 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _TEMPLE_CAT = "01070100"  # TOURISM_HERITAGE_TEMPLE
+
+# ``ops.dedup_review_queue``의 canonical 제약은 ``feature_id_a < feature_id_b``를
+# **uuid 비교**로 강제하고, ``infra/dedup_repo._canonical_pair``는 같은 판정을
+# 파이썬 문자열 비교로 한다. 아래 값은 소문자 canonical 표기라 두 순서가 일치하고,
+# 짝을 이루는 상수는 마지막 자리로 순서를 고정한다 — 이 순서가 곧 테스트 대상이다.
+_F_KNPS = "00000000-0000-7000-8000-0000000d0001"
+_F_KRH = "00000000-0000-7000-8000-0000000d0002"
+_F_PAIR_A = "00000000-0000-7000-8000-0000000d0011"
+_F_PAIR_B = "00000000-0000-7000-8000-0000000d0012"
+_F_SELF = "00000000-0000-7000-8000-0000000d0020"
+_F_SORT_A1 = "00000000-0000-7000-8000-0000000d0031"
+_F_SORT_B1 = "00000000-0000-7000-8000-0000000d0032"
+_F_SORT_A2 = "00000000-0000-7000-8000-0000000d0033"
+_F_SORT_B2 = "00000000-0000-7000-8000-0000000d0034"
+#: features에 적재하지 않는다 — "가리키는 Feature가 없다"를 관측하는 probe.
+_F_GHOST_A = "00000000-0000-7000-8000-0000000d00f1"
+_F_GHOST_B = "00000000-0000-7000-8000-0000000d00f2"
 
 
 def _temple(feature_id: str, name: str = "불국사") -> FeatureRow:
@@ -85,19 +110,19 @@ async def _score_row(session: AsyncSession, fa: str, fb: str) -> object:
 
 
 async def test_enqueue_inserts_and_persists(migrated_session: AsyncSession) -> None:
-    migrated_session.add(_temple("f_knps_1"))
-    migrated_session.add(_temple("f_krh_1"))
+    migrated_session.add(_temple(_F_KNPS))
+    migrated_session.add(_temple(_F_KRH))
     await migrated_session.flush()
 
     result = await enqueue_dedup_candidates(
         migrated_session,
-        [_candidate("f_knps_1", "f_krh_1")],
+        [_candidate(_F_KNPS, _F_KRH)],
     )
     assert result == DedupQueueResult(
         candidates_total=1, inserted=1, updated=0, skipped=0
     )
 
-    row = await _score_row(migrated_session, "f_knps_1", "f_krh_1")
+    row = await _score_row(migrated_session, _F_KNPS, _F_KRH)
     # 0.0~1.0 점수 → 0~100 NUMERIC(5,2) 변환 확인.
     assert float(row.total_score) == 74.0
     assert float(row.name_score) == 90.0
@@ -110,21 +135,21 @@ async def test_enqueue_inserts_and_persists(migrated_session: AsyncSession) -> N
 async def test_reenqueue_updates_pending_scores(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_temple("f_knps_1"))
-    migrated_session.add(_temple("f_krh_1"))
+    migrated_session.add(_temple(_F_KNPS))
+    migrated_session.add(_temple(_F_KRH))
     await migrated_session.flush()
 
-    await enqueue_dedup_candidate(migrated_session, _candidate("f_knps_1", "f_krh_1"))
+    await enqueue_dedup_candidate(migrated_session, _candidate(_F_KNPS, _F_KRH))
     # 재스캔 — 점수가 달라진 같은 쌍.
     result = await enqueue_dedup_candidates(
         migrated_session,
-        [_candidate("f_knps_1", "f_krh_1", score=0.80, name_score=0.95)],
+        [_candidate(_F_KNPS, _F_KRH, score=0.80, name_score=0.95)],
     )
     assert result.updated == 1
     assert result.inserted == 0
     assert result.skipped == 0
 
-    row = await _score_row(migrated_session, "f_knps_1", "f_krh_1")
+    row = await _score_row(migrated_session, _F_KNPS, _F_KRH)
     assert float(row.total_score) == 80.0  # 갱신됨
     assert float(row.name_score) == 95.0
 
@@ -132,28 +157,29 @@ async def test_reenqueue_updates_pending_scores(
 async def test_reversed_pair_reuses_canonical_queue_row(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_temple("f_a"))
-    migrated_session.add(_temple("f_b"))
+    migrated_session.add(_temple(_F_PAIR_A))
+    migrated_session.add(_temple(_F_PAIR_B))
     await migrated_session.flush()
 
-    first = await enqueue_dedup_candidate(migrated_session, _candidate("f_b", "f_a"))
+    first = await enqueue_dedup_candidate(migrated_session, _candidate(_F_PAIR_B, _F_PAIR_A))
     second = await enqueue_dedup_candidate(
         migrated_session,
-        _candidate("f_a", "f_b", score=0.83, name_score=0.97),
+        _candidate(_F_PAIR_A, _F_PAIR_B, score=0.83, name_score=0.97),
     )
 
     assert first == "inserted"
     assert second == "updated"
-    row = await _score_row(migrated_session, "f_a", "f_b")
+    row = await _score_row(migrated_session, _F_PAIR_A, _F_PAIR_B)
     assert float(row.total_score) == 83.0
     assert float(row.name_score) == 97.0
     count = (
         await migrated_session.execute(
             text(
                 "SELECT count(*) FROM ops.dedup_review_queue "
-                "WHERE feature_id_a IN ('f_a','f_b') "
-                "AND feature_id_b IN ('f_a','f_b')"
-            )
+                "WHERE feature_id_a IN (:a, :b) "
+                "AND feature_id_b IN (:a, :b)"
+            ),
+            {"a": _F_PAIR_A, "b": _F_PAIR_B},
         )
     ).scalar_one()
     assert count == 1
@@ -162,12 +188,12 @@ async def test_reversed_pair_reuses_canonical_queue_row(
 async def test_self_pair_is_skipped(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_temple("f_same"))
+    migrated_session.add(_temple(_F_SELF))
     await migrated_session.flush()
 
     result = await enqueue_dedup_candidate(
         migrated_session,
-        _candidate("f_same", "f_same"),
+        _candidate(_F_SELF, _F_SELF),
     )
 
     assert result == "skipped"
@@ -182,8 +208,8 @@ async def test_self_pair_is_skipped(
 async def test_db_rejects_non_canonical_pair_insert(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_temple("f_a"))
-    migrated_session.add(_temple("f_b"))
+    migrated_session.add(_temple(_F_PAIR_A))
+    migrated_session.add(_temple(_F_PAIR_B))
     await migrated_session.flush()
 
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
@@ -193,37 +219,40 @@ async def test_db_rejects_non_canonical_pair_insert(
                     "INSERT INTO ops.dedup_review_queue "
                     "(feature_id_a, feature_id_b, total_score, name_score, "
                     "spatial_score, category_score, status) "
-                    "VALUES ('f_b', 'f_a', 70, 90, 60, 100, 'pending')"
-                )
+                    # 큰 uuid를 a 자리에 — canonical 제약이 거부해야 한다.
+                    "VALUES (:b, :a, 70, 90, 60, 100, 'pending')"
+                ),
+                {"a": _F_PAIR_A, "b": _F_PAIR_B},
             )
 
 
 async def test_reviewed_row_preserved_on_reenqueue(
     migrated_session: AsyncSession,
 ) -> None:
-    migrated_session.add(_temple("f_knps_1"))
-    migrated_session.add(_temple("f_krh_1"))
+    migrated_session.add(_temple(_F_KNPS))
+    migrated_session.add(_temple(_F_KRH))
     await migrated_session.flush()
 
-    await enqueue_dedup_candidate(migrated_session, _candidate("f_knps_1", "f_krh_1"))
+    await enqueue_dedup_candidate(migrated_session, _candidate(_F_KNPS, _F_KRH))
     # 운영자가 검토 완료 (accepted).
     await migrated_session.execute(
         text(
             "UPDATE ops.dedup_review_queue SET status = 'accepted' "
-            "WHERE feature_id_a = 'f_knps_1' AND feature_id_b = 'f_krh_1'"
-        )
+            "WHERE feature_id_a = :a AND feature_id_b = :b"
+        ),
+        {"a": _F_KNPS, "b": _F_KRH},
     )
 
     # 재스캔 — 더 높은 점수로 들어와도 검토 완료 행은 보존.
     result = await enqueue_dedup_candidates(
         migrated_session,
-        [_candidate("f_knps_1", "f_krh_1", score=0.95, decision="auto_merge")],
+        [_candidate(_F_KNPS, _F_KRH, score=0.95, decision="auto_merge")],
     )
     assert result.skipped == 1
     assert result.updated == 0
     assert result.inserted == 0
 
-    row = await _score_row(migrated_session, "f_knps_1", "f_krh_1")
+    row = await _score_row(migrated_session, _F_KNPS, _F_KRH)
     assert row.status == "accepted"  # 보존
     assert float(row.total_score) == 74.0  # 점수 갱신 안 됨
     assert row.decision_reason == "manual_review"  # 갱신 안 됨
@@ -232,15 +261,15 @@ async def test_reviewed_row_preserved_on_reenqueue(
 async def test_pending_dedup_reviews_sorted_desc(
     migrated_session: AsyncSession,
 ) -> None:
-    for fid in ("a1", "b1", "a2", "b2"):
+    for fid in (_F_SORT_A1, _F_SORT_B1, _F_SORT_A2, _F_SORT_B2):
         migrated_session.add(_temple(fid))
     await migrated_session.flush()
 
     await enqueue_dedup_candidates(
         migrated_session,
         [
-            _candidate("a1", "b1", score=0.70),
-            _candidate("a2", "b2", score=0.82),
+            _candidate(_F_SORT_A1, _F_SORT_B1, score=0.70),
+            _candidate(_F_SORT_A2, _F_SORT_B2, score=0.82),
         ],
     )
     rows = await pending_dedup_reviews(migrated_session, limit=10)
@@ -253,11 +282,44 @@ async def test_pending_dedup_reviews_sorted_desc(
     assert rows[0]["status"] == "pending"
 
 
-async def test_fk_requires_existing_features(
+async def test_unknown_features_fail_before_any_write(
     migrated_session: AsyncSession,
 ) -> None:
-    # 두 feature 모두 미적재 → FK(CASCADE) 위반.
-    cand = _candidate("ghost-a", "ghost-b")
+    """미적재 feature를 가리키는 후보는 **쓰기 전에** 멈춘다.
+
+    T-VN-39 전에는 FK 위반(IntegrityError)이 이것을 잡았다. 그 판정은 옳았지만
+    두 가지가 아쉬웠다 — 오류가 **어느 참조가 문제인지 말하지 않고**, FK 위반은
+    트랜잭션을 통째로 중단시켜 같은 배치의 앞선 적재까지 잃는다.
+
+    이제 repo가 후보의 참조를 정본 uuid로 풀면서 그 자리에서 멈춘다. FK는
+    사라지지 않았고 DB 층 보장으로 그대로 남는다 — 다만 정상 경로에서 그것이
+    울릴 일이 없어졌다.
+    """
+    cand = _candidate(_F_GHOST_A, _F_GHOST_B)
+    with pytest.raises(UnresolvedFeatureRefError) as caught:
+        await enqueue_dedup_candidate(migrated_session, cand)
+    assert _F_GHOST_A in str(caught.value)
+    count = (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.dedup_review_queue")
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_db_still_rejects_a_queue_row_without_its_features(
+    migrated_session: AsyncSession,
+) -> None:
+    """repo를 우회해 직접 넣으면 FK가 여전히 잡는다 — DB 층 보장은 그대로다."""
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
         async with migrated_session.begin_nested():
-            await enqueue_dedup_candidate(migrated_session, cand)
+            await migrated_session.execute(
+                text(
+                    "INSERT INTO ops.dedup_review_queue "
+                    "(feature_id_a, feature_id_b, total_score, name_score, "
+                    " spatial_score, category_score, status, decision_reason) "
+                    "VALUES (CAST(:a AS uuid), CAST(:b AS uuid), "
+                    "        50, 50, 50, 50, 'pending', 'manual_review')"
+                ),
+                {"a": _F_GHOST_A, "b": _F_GHOST_B},
+            )

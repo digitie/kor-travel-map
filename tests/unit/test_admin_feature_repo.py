@@ -211,19 +211,19 @@ def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> No
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("kind", "expected_feature_id"),
-    [
-        ("place", "f_global_p_9f9480adb6abef69"),
-        ("event", "f_global_e_a221cb848390f739"),
-    ],
-)
-async def test_create_initial_payload_uses_manual_wrapper_and_uuid_bridge(
+@pytest.mark.parametrize("kind", ["place", "event"])
+async def test_create_initial_payload_sends_the_canonical_key_to_the_wrapper(
     monkeypatch: pytest.MonkeyPatch,
     kind: str,
-    expected_feature_id: str,
 ) -> None:
-    """UUIDv7만으로 current opaque legacy bridge를 만들고 wrapper에 보낸다."""
+    """payload의 ``feature_id``는 서버가 발급한 UUIDv7 그 자체다.
+
+    T-VN-39/ADR-098 결정 6 이전에는 ``make_feature_id``로 legacy ``f_*``를 유도해
+    ``feature_id``에 싣고 uuid를 ``feature_uuid`` 키로 함께 보냈다. 재키 후 wrapper의
+    allow-list에는 ``feature_uuid``가 없고 ``feature_id``는 UUIDv7이어야 하므로 그
+    브리지는 성립하지 않는다. kind가 달라도 서버 발급 uuid 하나뿐이라 kind별로 다른
+    id를 기대하던 파라미터도 의미를 잃었다 — kind는 subtype 분기만 태운다.
+    """
 
     async def _write_subtype(_session: object, **_: Any) -> None:
         return None
@@ -250,10 +250,9 @@ async def test_create_initial_payload_uses_manual_wrapper_and_uuid_bridge(
                 [
                     {
                         "o_outcome": "created",
-                        "o_feature_id": expected_feature_id,
-                        "o_feature_uuid": candidate_uuid,
+                        "o_feature_id": candidate_uuid,
                         "o_row_revision": 1,
-                        "o_existing_feature_uuid": None,
+                        "o_existing_feature_id": None,
                     }
                 ]
             )
@@ -278,13 +277,14 @@ async def test_create_initial_payload_uses_manual_wrapper_and_uuid_bridge(
     initial_payload = json.loads(session.calls[0]["params"]["feature_payload"])
     assert isinstance(result, repo.AdminManualFeatureCreated)
     assert result.feature_uuid == candidate_uuid
-    assert result.feature_id == expected_feature_id
+    assert result.feature_id == candidate_uuid
     assert session.calls[0]["params"]["domain_command_id"] == 71
     assert "create_admin_manual_feature_with_initial_state" in session.calls[0][
         "statement"
     ]
-    assert initial_payload["feature_id"] == expected_feature_id
-    assert initial_payload["feature_uuid"] == candidate_uuid
+    assert initial_payload["feature_id"] == candidate_uuid
+    # allow-list에 없는 키다 — 남기면 `ck_feature_create_payload`(23514).
+    assert "feature_uuid" not in initial_payload
     assert initial_payload["lon"] == 127.5
     assert initial_payload["lat"] == 36.5
     assert initial_payload["coord_precision_digits"] == 6
@@ -312,9 +312,8 @@ async def test_create_exact_duplicate_returns_winner_before_subtype(
                     {
                         "o_outcome": "exact_conflict",
                         "o_feature_id": None,
-                        "o_feature_uuid": None,
                         "o_row_revision": None,
-                        "o_existing_feature_uuid": winner_uuid,
+                        "o_existing_feature_id": winner_uuid,
                     }
                 ]
             )
@@ -369,7 +368,9 @@ def test_manual_create_db_error_mapper_is_allow_listed_and_does_not_leak_driver_
     monkeypatch.setattr(
         repo,
         "_driver_constraint_identity",
-        lambda _error: ("23505", "uq_features_feature_uuid"),
+        # T-VN-39: `uq_features_feature_uuid`는 shadow 컬럼과 함께 사라졌다.
+        # identity 충돌의 현행 얼굴은 정본 키의 PK다.
+        lambda _error: ("23505", "pk_features"),
     )
     with pytest.raises(repo.AdminManualFeatureIdentityConflict) as identity:
         repo._raise_admin_manual_feature_create_procedure_error(
@@ -490,47 +491,50 @@ async def test_manual_feature_provenance_reader_rejects_partial_evidence() -> No
 @pytest.mark.parametrize(
     "wrapper_row",
     [
+        # T-VN-39/ADR-098 결정 6 — wrapper OUT은 넷이다: o_outcome · o_feature_id(uuid)
+        # · o_row_revision · o_existing_feature_id(uuid). legacy 문자열 축과
+        # `o_feature_uuid`는 사라졌다. 각 행이 무엇을 어기는지는 그대로 보존한다.
         {
+            # exact_conflict인데 success OUT이 함께 왔다.
             "o_outcome": "exact_conflict",
-            "o_feature_id": "must-be-null",
-            "o_feature_uuid": None,
+            "o_feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
             "o_row_revision": None,
-            "o_existing_feature_uuid": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
+            "o_existing_feature_id": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
         },
         {
+            # exact_conflict인데 승자가 없다.
             "o_outcome": "exact_conflict",
             "o_feature_id": None,
-            "o_feature_uuid": None,
             "o_row_revision": None,
-            "o_existing_feature_uuid": None,
+            "o_existing_feature_id": None,
         },
         {
+            # created인데 exact-conflict 승자가 함께 왔다.
             "o_outcome": "created",
-            "o_feature_id": "f_global_p_9f9480adb6abef69",
-            "o_feature_uuid": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            "o_feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
             "o_row_revision": 1,
-            "o_existing_feature_uuid": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
+            "o_existing_feature_id": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
         },
         {
+            # 정본 키가 UUIDv7이 아니다(v4).
             "o_outcome": "created",
-            "o_feature_id": "f_global_p_9f9480adb6abef69",
-            "o_feature_uuid": "00000000-0000-4000-8000-000000000001",
+            "o_feature_id": "00000000-0000-4000-8000-000000000001",
             "o_row_revision": 1,
-            "o_existing_feature_uuid": None,
+            "o_existing_feature_id": None,
         },
         {
+            # 최초 row revision이 1 미만이다.
             "o_outcome": "created",
-            "o_feature_id": "f_global_p_9f9480adb6abef69",
-            "o_feature_uuid": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            "o_feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
             "o_row_revision": 0,
-            "o_existing_feature_uuid": None,
+            "o_existing_feature_id": None,
         },
         {
+            # 알 수 없는 outcome.
             "o_outcome": "unexpected",
             "o_feature_id": None,
-            "o_feature_uuid": None,
             "o_row_revision": None,
-            "o_existing_feature_uuid": None,
+            "o_existing_feature_id": None,
         },
     ],
 )
@@ -644,7 +648,7 @@ async def test_manual_create_rejects_mismatched_override_receipt(
     expected_message: str,
 ) -> None:
     candidate_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
-    feature_id = "f_global_p_9f9480adb6abef69"
+    feature_id = candidate_uuid
     monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
 
     async def _write_subtype(_session: object, **_: Any) -> None:
@@ -669,9 +673,8 @@ async def test_manual_create_rejects_mismatched_override_receipt(
                     {
                         "o_outcome": "created",
                         "o_feature_id": feature_id,
-                        "o_feature_uuid": candidate_uuid,
                         "o_row_revision": 1,
-                        "o_existing_feature_uuid": None,
+                        "o_existing_feature_id": None,
                     }
                 ]
             )
@@ -751,12 +754,16 @@ async def test_list_admin_features_full_id_uses_pk_fast_path() -> None:
     )
 
     call = session.calls[0]
-    # PK 등가 파라미터만 바인딩, ILIKE substring은 비활성.
+    # 등가 파라미터만 바인딩, ILIKE substring은 비활성.
     assert call["params"]["q_exact"] == feature_id
     assert call["params"]["q_like"] is None
-    # SQL은 PK 등가절만 쓰고, q-필터 상관 서브쿼리(source_records AS qsr)·:q_like는 타지 않는다.
+    # T-VN-39: `f.feature_id = :q_exact`는 이제 `uuid = text`라 42883이다. legacy 문자열은
+    # 그것이 실제로 사는 곳(`feature_aliases.alias`)에서 uuid로 풀어 넘기고, 바깥은
+    # 그대로 `pk_features` 등가로 남는다.
+    assert "FROM feature.feature_aliases AS qa" in call["statement"]
+    assert "WHERE qa.alias = CAST(:q_exact AS text)" in call["statement"]
+    # q-필터 상관 서브쿼리(source_records AS qsr)·:q_like는 타지 않는다.
     # (기본 소스 조회용 source_records AS sr projection은 두 경로 모두 남아 있으므로 qsr로 구분.)
-    assert "f.feature_id = CAST(:q_exact AS text)" in call["statement"]
     assert "AS qsr" not in call["statement"]
     assert ":q_like" not in call["statement"]
 

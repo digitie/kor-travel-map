@@ -58,7 +58,13 @@ class PriceValue(BaseModel):
 
     feature_id: str = Field(
         min_length=1,
-        description="`make_feature_id(...)` 결과. price kind anchor feature를 참조.",
+        description=(
+            "price kind anchor feature 참조. provider 변환기는 "
+            "`make_feature_id(...)`가 유도한 legacy `f_*`를 싣고, 이미 정본 키를 "
+            "아는 호출자는 canonical uuid를 싣는다 — 적재기"
+            "(`infra/canonical_feature_ids.py`)가 둘 다 받아 컬럼에 들어갈 값만 정본 "
+            "uuid로 고정한다(T-VN-39/ADR-098)."
+        ),
     )
     provider: str = Field(
         min_length=1,

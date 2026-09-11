@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Final, NamedTuple
 
+from kortravelmap.api.domain_command_registry import command_policy
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -33,7 +34,6 @@ from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.api.domain_command_registry import command_policy
 from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
@@ -277,7 +277,7 @@ async def _counts(session: AsyncSession, feature_ids: tuple[str, str]) -> dict[s
                 """
                 SELECT
                   (SELECT count(*) FROM feature.features
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[]))) AS features,
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))) AS features,
                   (SELECT count(*) FROM feature.feature_weather_values
                    WHERE feature_id = :weather_id) AS weather_values,
                   (SELECT count(*) FROM feature.feature_price_values
@@ -351,7 +351,7 @@ async def _assert_owned_or_absent(
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
                 FROM feature.features
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY feature_id
                 """
                 + lock_clause
@@ -466,7 +466,7 @@ async def _assert_owned_source_links(
                   ON dataset.provider_dataset_id = entity.provider_dataset_id
                 JOIN provider_sync.source_entity_heads AS head
                   ON head.source_entity_key = entity.source_entity_key
-                WHERE link.feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE link.feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY link.feature_id
                 """
                 + lock_clause
@@ -547,19 +547,18 @@ async def _foreign_key_reference_counts(
         )
     ).mappings()
     counts: dict[str, int] = {}
-    # 소유 행의 uuid는 필요할 때 한 번만 푼다. `feature_uuid`를 가리키는 **단일 컬럼**
-    # FK가 실재하기 때문이다 — `ops.feature_requests.resolved_feature_id`(uuid)가
-    # T-VN-M04의 `0233`에서 그렇게 들어왔고 타입상 정당하다. 종전에는 이 함수가 그것을
-    # 계약 위반으로 보고 raise했다. 그 단언은 스키마에 결박돼 있지 않아 migration이
-    # 조용히 무효화했고, D2가 그 뒤로 돌지 않아 2026-09-05까지 아무도 몰랐다.
+    # T-VN-39 재키가 두 identity 축을 하나로 접었다. 종전에는 `feature_id`(text)와
+    # `feature_uuid`(uuid) 둘 다 FK 대상이었고 — `ops.feature_requests.resolved_feature_id`가
+    # `0233`에서 uuid 쪽으로 들어와 D2를 2026-09-05에 죽였다 — 이 함수가 대상 열에 따라
+    # 캐스트를 갈랐다. 재키 후 `feature_uuid` 컬럼이 사라지면서 그 FK도
+    # `feature.features(feature_id)`로 재타겟됐고, 남은 축은 하나다.
     #
-    # 건너뛰지 않고 **세는** 이유: 이 함수의 목적이 cleanup 뒤 남은 참조를 정확히
-    # 계수하는 것이라, uuid로 참조하는 표를 빼면 잔여물 탐지에 사각이 생긴다.
-    owned_uuids: list[str] | None = None
-
+    # 그래서 갈래를 없애되 **검사는 남긴다.** 세 번째 identity 열이 다시 들어오면
+    # 여기서 서고, 그 전에 `tests/lint/test_feature_fk_identity_targets_are_bound.py`가
+    # PR에서 잡는다 — 배포 스택 실행 도중이 아니라.
     for constraint in constraints:
         target_column_name = str(constraint["target_column_name"])
-        if target_column_name not in {"feature_id", "feature_uuid"}:
+        if target_column_name not in {"feature_id"}:
             raise RuntimeError("feature FK topology가 알려진 identity 계약과 다릅니다")
         schema_name = str(constraint["schema_name"])
         table_name = str(constraint["table_name"])
@@ -567,27 +566,8 @@ async def _foreign_key_reference_counts(
         key = f"{schema_name}.{table_name}.{column_name}"
         if key in counts:
             raise RuntimeError("같은 feature FK column에 중복 constraint가 있습니다")
-        if target_column_name == "feature_id":
-            cast_type = "text[]"
-            identities: list[str] = list(feature_ids)
-        else:
-            if owned_uuids is None:
-                owned_uuids = [
-                    str(value)
-                    for value in (
-                        await session.execute(
-                            text(
-                                "SELECT feature_uuid FROM feature.features "
-                                "WHERE feature_id = ANY(CAST(:feature_ids AS text[]))"
-                            ),
-                            {"feature_ids": list(feature_ids)},
-                        )
-                    )
-                    .scalars()
-                    .all()
-                ]
-            cast_type = "uuid[]"
-            identities = owned_uuids
+        cast_type = "uuid[]"
+        identities: list[str] = list(feature_ids)
         statement = text(
             "SELECT count(*) FROM "
             f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)} "
@@ -716,9 +696,12 @@ async def _assert_owned_state(
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
     if present:
-        # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
-        # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
-        expected_references["feature.feature_aliases.feature_id"] = len(present)
+        # alias는 **기대하지 않는다.** T-VN-39/ADR-098 결정 6은
+        # alias 발급을 provider 경로로 한정했고,
+        # 309가 `trg_features_legacy_alias`를 영구 제거했다. 이 seed는
+        # core 프로시저를 직접 부르므로 alias가 생기지 않으며 그것이 정상이다 —
+        # 종전 주석의 "feature INSERT trigger가 canonical alias를 함께 만든다"는
+        # 그 트리거가 있던 시절의 이야기다.
         # provider procedure는 source evidence를 잠그지만 source link를 만들지
         # 않는다. fixture가 ingestion과 같은 primary lineage를 별도로 만들었는지
         # 확인하고, Feature CASCADE 뒤에는 이 reference도 0이어야 한다.
@@ -834,7 +817,9 @@ async def _seed(
                         CAST(:publication_state AS text),
                         CAST(:quality_state AS text),
                         CAST(:state_context AS jsonb),
-                        NULL, NULL, NULL, NULL
+                        -- OUT 셋: o_feature_id(uuid) · o_row_revision · o_inserted.
+                        -- T-VN-39가 legacy 문자열 축을 없애면서 넷에서 셋이 됐다.
+                        NULL, NULL, NULL
                     )
                     """
                 ),
@@ -1114,7 +1099,7 @@ SELECT
   transition_kind, reason_code, principal, causation_ref,
   provider_dataset_id, source_entity_key, source_record_key, provider_evidence
 FROM feature.feature_state_transitions
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 ORDER BY feature_id, occurred_at, transition_id
 """
 
@@ -1126,7 +1111,7 @@ SELECT
   source_record_key, source_provider_dataset_id, source_entity_key,
   source_raw_payload_hash
 FROM ops.feature_overrides
-WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
 ORDER BY feature_id, field_path
 FOR UPDATE
 """
@@ -1359,11 +1344,10 @@ async def _inspect_api_owned(
 
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
-    if rows:
-        # feature INSERT trigger가 canonical alias를 함께 만든다. subtype
-        # (`feature.feature_places`)은 composite FK라 이 단일 열 감사에 잡히지
-        # 않는다 — 그쪽은 Feature 삭제 시 같은 CASCADE로 사라진다.
-        expected_references["feature.feature_aliases.feature_id"] = len(rows)
+    # 이 lane은 admin 수동 생성 경로를 감사한다. 그 경로는 어떤 경우에도 alias를
+    # 만들지 않으므로(ADR-098 결정 6) 기대하지 않는다. subtype
+    # (`feature.feature_places`)은 composite FK라 이 단일 열 감사에 잡히지 않는다 —
+    # 그쪽은 Feature 삭제 시 같은 CASCADE로 사라진다.
     if override_rows:
         expected_references["ops.feature_overrides.feature_id"] = len(override_rows)
     observed_references = {key: value for key, value in foreign_keys.items() if value}
@@ -1400,7 +1384,7 @@ async def _purge_api_owned(
         text(
             """
             DELETE FROM feature.features
-            WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+            WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
             """
         ),
         {"feature_ids": list(inspection.feature_ids)},
@@ -1411,13 +1395,13 @@ async def _purge_api_owned(
                 """
                 SELECT
                   (SELECT count(*) FROM feature.features
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS features,
                   (SELECT count(*) FROM ops.feature_overrides
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS field_overrides,
                   (SELECT count(*) FROM feature.feature_state_transitions
-                   WHERE feature_id = ANY(CAST(:feature_ids AS text[])))
+                   WHERE feature_id = ANY(CAST(:feature_ids AS uuid[])))
                     AS state_transitions
                 """
             ),

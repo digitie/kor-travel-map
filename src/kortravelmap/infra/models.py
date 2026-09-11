@@ -381,25 +381,21 @@ class FeatureRow(Base):
                 "AND quality_state = 'valid'"
             ),
         ),
-        UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
-        # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
-        # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
-        UniqueConstraint("feature_id", "feature_uuid", name=conv("uq_features_identity_pair")),
         # T-VN-35A(0084) — typed subtype의 배타 arc 참조 대상. subtype 행이
         # (feature_id, kind) 복합 FK로 이 UNIQUE를 참조하고 각자 kind 상수
         # CHECK를 가지므로 ① 한 feature는 최대 한 subtype에만 존재하고
         # ② subtype 행이 있는 동안 core kind 변경이 FK 위반으로 막힌다
         # (혼합 kind row 거부 = 35B 요구의 선언적 구현).
-        UniqueConstraint("feature_id", "kind", name=conv("uq_features_identity_kind")),
+        UniqueConstraint("feature_id", "kind", name=conv("uq_features_id_kind")),
         {"schema": "feature"},
     )
 
-    feature_id: Mapped[str] = mapped_column(String, primary_key=True)
-    # ADR-068 UUID 정본 identity — 기존 행은 0080 backfill의 uuid5 파생값을
-    # 영구 보존하고, 신규 행은 0083부터 비파생 UUIDv7
-    # (app 정본 core/ids.make_feature_uuid, raw SQL 안전망은 fill 트리거의
-    # feature.uuid_generate_v7()). DB server default 없음.
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    # ADR-068 UUID 정본 identity. T-VN-39 재키(309)가 shadow ``feature_uuid``를
+    # 걷어내고 이 컬럼 자체를 uuid로 만들었다 — legacy ``f_*`` 문자열은
+    # ``feature_aliases.alias``(text)에만 남는다. 값은 비파생 UUIDv7
+    # (app 정본 core/ids.make_feature_uuid)이고 DB server default도 fill 트리거도
+    # 없다 — 309가 ``trg_features_feature_uuid_fill``을 영구 삭제했다.
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str] = mapped_column(String, nullable=False)
@@ -443,7 +439,7 @@ class FeatureRow(Base):
 
     # 관계.
     parent_feature_id: Mapped[str | None] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
     )
     sibling_group_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -495,9 +491,9 @@ class FeatureRow(Base):
 class FeatureStateTransitionRow(Base):
     """``feature.feature_state_transitions`` append-only full-tuple audit (ADR-090).
 
-    ``feature_id``(현행 text business key)와 ``feature_uuid``(T39 final identity)에
-    의도적으로 Feature FK가 없다. Feature hard purge 뒤에도 두 식별자와 state
-    evidence가 남아야 하므로 cascade를 금지한다.
+    ``feature_id``(T-VN-39 재키 이후 uuid 정본 identity)에 의도적으로 Feature FK가
+    없다. Feature hard purge 뒤에도 식별자와 state evidence가 남아야 하므로
+    cascade를 금지한다.
     """
 
     __tablename__ = "feature_state_transitions"
@@ -573,8 +569,7 @@ class FeatureStateTransitionRow(Base):
         Identity(always=True),
         primary_key=True,
     )
-    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     from_lifecycle_state: Mapped[str | None] = mapped_column(Text)
     from_publication_state: Mapped[str | None] = mapped_column(Text)
     from_quality_state: Mapped[str | None] = mapped_column(Text)
@@ -605,9 +600,9 @@ class FeatureStateTransitionRow(Base):
 class ManualFeatureIdentityClaimRow(Base):
     """수동 생성 exact identity 예약의 append-only snapshot.
 
-    ``feature_id``는 현행 ``features.feature_uuid``와 T-VN-39 이후
-    ``features.feature_id``가 공유하는 canonical UUID다. hard purge 뒤에도 예약을
-    보존해야 하므로 ``feature.features`` FK는 의도적으로 두지 않는다.
+    ``feature_id``는 ``features.feature_id``와 같은 canonical UUID다 — T-VN-39
+    재키(309) 이후 그 컬럼 자체가 uuid다. hard purge 뒤에도 예약을 보존해야
+    하므로 ``feature.features`` FK는 의도적으로 두지 않는다.
     """
 
     __tablename__ = "manual_feature_identity_claims"
@@ -739,7 +734,7 @@ class ManualFeaturePurgeRecordRow(Base):
             name=conv("ck_manual_feature_purge_records_counts"),
         ),
         UniqueConstraint(
-            "feature_uuid",
+            "feature_id",
             name=conv("uq_manual_feature_purge_records_feature"),
         ),
         UniqueConstraint(
@@ -760,8 +755,15 @@ class ManualFeaturePurgeRecordRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
-    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    #: 309 `_EVIDENCE_RENAME` — 옛 ``feature_uuid``가 이 이름을 물려받았다.
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    #: 옛 ``feature_id``. legacy 문자열을 **증거로** 남기는 자리라 uuid로 옮기지
+    #: 않고 이름만 정직하게 바꿨다(309 `_EVIDENCE_RENAME`).
+    #:
+    #: RENAME은 NOT NULL을 보존하지만 309 `_EVIDENCE_RENAME`이 곧바로
+    #: `DROP NOT NULL`을 낸다 — 재키 뒤 태어난 Feature는 legacy 주소를 애초에 갖지
+    #: 않으므로(ADR-098 결정 6) 여기의 NULL은 결손이 아니라 참이다.
+    legacy_feature_id: Mapped[str | None] = mapped_column(Text)
     reason_code: Mapped[str] = mapped_column(Text, nullable=False)
     identity_released: Mapped[bool] = mapped_column(Boolean, nullable=False)
     purged_by_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -927,7 +929,7 @@ class FeatureRequestRow(Base):
         ),
         ForeignKeyConstraint(
             ["resolved_feature_id"],
-            ["feature.features.feature_uuid"],
+            ["feature.features.feature_id"],
             name=conv("feature_requests_resolved_feature_id_fkey"),
         ),
         {"schema": "ops"},
@@ -998,19 +1000,19 @@ class ManualProviderDedupCaseRow(Base):
             name=conv("ck_manual_provider_dedup_cases_json"),
         ),
         ForeignKeyConstraint(
-            ["manual_feature_id", "manual_feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            ["manual_feature_id"],
+            ["feature.features.feature_id"],
             name=conv("fk_manual_provider_dedup_cases_manual_identity"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["provider_feature_id", "provider_feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            ["provider_feature_id"],
+            ["feature.features.feature_id"],
             name=conv("fk_manual_provider_dedup_cases_provider_identity"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["manual_feature_uuid", "manual_creation_command_id"],
+            ["manual_feature_id", "manual_creation_command_id"],
             [
                 "feature.feature_creation_origins.feature_id",
                 "feature.feature_creation_origins.creation_command_id",
@@ -1019,7 +1021,7 @@ class ManualProviderDedupCaseRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["manual_feature_uuid", "manual_creation_command_id"],
+            ["manual_feature_id", "manual_creation_command_id"],
             [
                 "feature.manual_feature_identity_claims.feature_id",
                 "feature.manual_feature_identity_claims.claimed_by_command_id",
@@ -1065,8 +1067,8 @@ class ManualProviderDedupCaseRow(Base):
         # 쌓일수록 후보 하나마다 전체 스캔이 된다.
         Index(
             "idx_manual_provider_dedup_cases_decision_fence",
-            "manual_feature_uuid",
-            "provider_feature_uuid",
+            "manual_feature_id",
+            "provider_feature_id",
             "decision_fingerprint",
         ),
         {"schema": "ops"},
@@ -1077,12 +1079,10 @@ class ManualProviderDedupCaseRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    manual_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
-    manual_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    manual_feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     manual_creation_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     manual_feature_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    provider_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
-    provider_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     provider_feature_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1195,10 +1195,8 @@ class FeatureReferenceReconciliationEventRow(Base):
         ),
         CheckConstraint(
             "(action = 'rebind' AND replacement_feature_id IS NOT NULL "
-            "AND replacement_feature_uuid IS NOT NULL "
             "AND replacement_feature_row_revision IS NOT NULL) "
             "OR (action = 'detach' AND replacement_feature_id IS NULL "
-            "AND replacement_feature_uuid IS NULL "
             "AND replacement_feature_row_revision IS NULL)",
             name=conv("ck_feature_reference_reconciliation_events_replacement"),
         ),
@@ -1235,14 +1233,14 @@ class FeatureReferenceReconciliationEventRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["old_feature_id", "old_feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            ["old_feature_id"],
+            ["feature.features.feature_id"],
             name=conv("fk_feature_reference_reconciliation_events_old_identity"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["replacement_feature_id", "replacement_feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            ["replacement_feature_id"],
+            ["feature.features.feature_id"],
             name=conv("fk_feature_reference_reconciliation_events_replacement_identity"),
             ondelete="RESTRICT",
         ),
@@ -1261,13 +1259,11 @@ class FeatureReferenceReconciliationEventRow(Base):
     case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     resolution_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
-    old_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
-    old_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    old_feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     old_feature_row_revision_before_transition: Mapped[int] = mapped_column(
         BigInteger, nullable=False
     )
-    replacement_feature_id: Mapped[str | None] = mapped_column(Text)
-    replacement_feature_uuid: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    replacement_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     replacement_feature_row_revision: Mapped[int | None] = mapped_column(BigInteger)
     manual_retire_transition_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     manual_retire_row_revision_after_transition: Mapped[int] = mapped_column(
@@ -1395,8 +1391,9 @@ class FeatureReferenceReconciliationLeaseRow(Base):
 # 배타 arc(표준 typed-subtype 패턴): 각 subtype은 kind 상수 CHECK를 갖고
 # ``(feature_id, kind)`` 복합 FK로 core를 참조한다 — 한 feature는 최대 한
 # subtype에만 존재하고(core kind는 단일 값), subtype 행이 있는 동안 core
-# kind 변경이 FK 위반으로 막힌다. ``(feature_id, feature_uuid)`` 복합 FK는
-# 0083 ``feature_aliases`` 선례와 같은 identity 사본 일치 계약이다.
+# kind 변경이 FK 위반으로 막힌다. identity 사본 일치 FK
+# ``fk_feature_*s_identity_pair``는 T-VN-39 재키(309)가 shadow 컬럼과 함께
+# 영구 삭제했다 — 재키 뒤에는 결합축이 uuid ``feature_id`` 하나다.
 #
 # T-VN-35(ADR-086 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
 # kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
@@ -1405,7 +1402,7 @@ class FeatureReferenceReconciliationLeaseRow(Base):
 
 
 def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
-    """subtype 공통 제약 — kind 상수 CHECK + 배타 arc FK + identity 사본 FK."""
+    """subtype 공통 제약 — kind 상수 CHECK + 배타 arc FK."""
     table = f"feature_{kind}s"
     return (
         CheckConstraint(f"kind = '{kind}'", name=conv(f"ck_{table}_kind")),
@@ -1413,12 +1410,6 @@ def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
             ["feature_id", "kind"],
             ["feature.features.feature_id", "feature.features.kind"],
             name=conv(f"fk_{table}_feature_kind"),
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["feature_id", "feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
-            name=conv(f"fk_{table}_identity_pair"),
             ondelete="CASCADE",
         ),
         *extra,
@@ -1431,8 +1422,7 @@ class _FeatureSubtypeBase(Base):
 
     __abstract__ = True
 
-    feature_id: Mapped[str] = mapped_column(String, primary_key=True)
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     kind: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -1632,9 +1622,10 @@ class FeatureAreaRow(_FeatureSubtypeBase):
 class FeatureAliasRow(Base):
     """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
 
-    shadow 단계 구조: 실질 결합축은 legacy ``feature_id``(text FK)이고,
-    ``feature_uuid``는 target 전환(T-VN-32C alias-map 이관) 때 재작성 없이
-    그대로 쓰는 파생 사본이다. 컬럼·제약 이름은 freeze
+    T-VN-39 재키(309) 이후 구조: 결합축은 ``feature_id``(uuid FK) 하나이고
+    legacy ``f_*`` 문자열은 ``alias``(text)에만 남는다 — shadow ``feature_uuid``
+    사본과 그것을 고정하던 identity 사본 일치 FK·CHECK는 영구 삭제됐다.
+    컬럼·제약 이름은 freeze
     ``contracts/vnext/target-schema-v1.sql`` §4의 대응물과 정합한다
     (``pk_feature_aliases`` / ``fk_feature_aliases_feature`` /
     ``ck_feature_aliases_alias_canonical`` / ``ck_feature_aliases_kind_canonical`` /
@@ -1646,8 +1637,28 @@ class FeatureAliasRow(Base):
     - FK ON DELETE — ``CASCADE`` (alias는 파생값·재계산 가능)
     - backfill generator — ``uuid5(FEATURE_UUID_NAMESPACE, feature_id)``
 
-    행 생성은 0079 AFTER INSERT 트리거(``trg_features_legacy_alias``)가 feature
-    INSERT와 같은 transaction에서 수행한다(원자 생성).
+    **alias는 "모든 Feature의 두 번째 이름"이 아니라 바깥에서 이 Feature를 가리킨
+    적이 있는 주소의 등록부다** (ADR-098 결정 6). 행 생성은 0079 AFTER INSERT
+    트리거(``trg_features_legacy_alias``)가 Feature 전수에 대해 맡았으나 309가 그
+    트리거를 영구 삭제했고, 재키 뒤 alias를 발급하는 주체는 둘뿐이다:
+
+    1. 이전 세대가 **실제로 발행했던** ``f_*``를 옮겨 싣는 backfill,
+    2. provider 생성 경로 ``feature.create_provider_feature_with_initial_state``
+       — Feature INSERT와 같은 transaction에서 명시적으로 넣는다
+       (``_309_create_provider_feature_with_initial_state.sql``; alias INSERT는
+       core CALL **뒤**에 있다 — 앞에 두면 FK가 즉시 검사되어 신규 provider
+       Feature마다 23503이 난다).
+
+    **admin 수동·요청 승인·큐레이션·core 경로가 만든 Feature는 alias를 갖지 않으며
+    그것이 정상 상태다** — 결손이 아니다. 근거는 정보량이다: provider ``f_*``는
+    ``sha1(bjd|kind|category|source_type|natural_key)``라 provider 레코드를 가진
+    제3자가 Map을 본 적 없어도 계산할 수 있는 주소이고, 재분류로 값이 바뀌어도 옛
+    주소가 alias로 남아 구 URL이 산다. 반면 manual ``f_*``는
+    ``sha1(…|manual::{서버가 방금 발급한 UUIDv7})``이라 **정본 키의 순수 함수**다 —
+    밖에서 계산할 수 없고, 계산할 수 있는 사람은 이미 정본 키를 쥐고 있으며, uuid는
+    드리프트하지 않으므로 "재분류마다 alias가 는다"는 이득이 원리적으로 없다.
+    ADR-068 결정 3 원문("**기존** ``f_*`` 값은 … 보존한다")은 **보존 규칙이지 발급
+    규칙이 아니다**.
     """
 
     __tablename__ = "feature_aliases"
@@ -1664,23 +1675,31 @@ class FeatureAliasRow(Base):
             "alias_kind IN ('legacy_feature_id')",
             name=conv("ck_feature_aliases_ck_feature_aliases_alias_kind"),
         ),
-        # T-VN-32C(0083) — 파생 CHECK 해제 후의 선언적 사본 일치: alias 행의
-        # (feature_id, feature_uuid)는 정본 행의 쌍과 정확히 같아야 한다.
-        ForeignKeyConstraint(
-            ["feature_id", "feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
-            name=conv("fk_feature_aliases_identity_pair"),
-            # CASCADE 필수 — 기존 CASCADE FK와 공존 시 RI 트리거 이름순서
-            # 의존을 제거한다(0083 docstring·적대 리뷰 1 H1 실측).
-            ondelete="CASCADE",
-        ),
-        # 닫힌 kind 기간의 실질 불변식 — legacy alias는 자기 자신 (H1).
+        # 309 `_COLLATERAL_RECREATE`. 삭제된 `ck_feature_aliases_legacy_identity`
+        # (`alias = feature_id`)의 자리를 값 관계가 아니라 **형태**로 받는다 —
+        # legacy alias는 `make_feature_id` 산출물
+        # (`f_{bjd|global}_{kind[0]}_{sha1[:16]}`)만 담고 uuid 표기는 이 형태에
+        # 걸리지 않으므로 "정본 키를 alias로 되풀이하지 않는다"가 DB 층에서
+        # 강제된다. bjd 자리가 `.+`인 것은 의도다 — `make_feature_id`는 `bjd_code`를
+        # 검증하지 않아 밑줄 섞인 값이 원리적으로 가능하고, `[^_]+`로 조이면 그런
+        # provider 하나가 전량 23514로 멎는다.
+        #
+        # `conv()`는 접두를 **붙이는** 것이 아니라 naming_convention 적용을 **막는**
+        # 마커다. 리터럴 이름을 주면 이 metadata의 `ck_%(table_name)s_%(constraint_name)s`가
+        # 덧붙어 `ck_feature_aliases_ck_feature_aliases_legacy_alias_shape`가 되고,
+        # 309 `_COLLATERAL_RECREATE`가 DB에 만드는 이름과 글자 단위로 어긋난다.
+        # 위 3건이 이중 접두인 것은 conv 때문이 아니라, 컨벤션에 이미 걸려 이중이 된
+        # DB 이름을 conv로 그대로 고정하고 있기 때문이다.
         CheckConstraint(
-            "alias_kind <> 'legacy_feature_id' OR alias = feature_id",
-            name=conv("ck_feature_aliases_legacy_identity"),
+            "alias_kind <> 'legacy_feature_id' "
+            "OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$'",
+            name=conv("ck_feature_aliases_legacy_alias_shape"),
         ),
+        # identity 사본 일치 FK(``fk_feature_aliases_identity_pair``)와
+        # ``ck_feature_aliases_legacy_identity``(``alias = feature_id``)는 309가
+        # 영구 삭제했다 — ``feature_id``가 uuid가 되어 text ``alias``와 비교할
+        # 연산자가 없고, legacy 키가 업무키가 아니라는 것이 재키의 요지다.
         Index("idx_feature_aliases_feature", "feature_id"),
-        Index("idx_feature_aliases_feature_uuid", "feature_uuid"),
         # T-VN-32C alias-map 이관 표면의 keyset scan index (alembic 0081).
         # 실제 DDL은 `(alias COLLATE "C")`지만 PG 반영(reflection)은 index
         # collation을 노출하지 않아 metadata에 COLLATE 식을 쓰면 alembic
@@ -1692,7 +1711,7 @@ class FeatureAliasRow(Base):
 
     alias: Mapped[str] = mapped_column(Text, primary_key=True)
     feature_id: Mapped[str] = mapped_column(
-        Text,
+        UUID(as_uuid=False),
         ForeignKey(
             "feature.features.feature_id",
             ondelete="CASCADE",
@@ -1700,7 +1719,6 @@ class FeatureAliasRow(Base):
         ),
         nullable=False,
     )
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     alias_kind: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -1712,6 +1730,72 @@ class FeatureAliasRow(Base):
 # =============================================================================
 # provider_sync.provider_datasets / source lineage  (ADR-087)
 # =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# provider_sync.provider_feature_identities  (T-VN-39, ADR-068 결정 2)
+# ---------------------------------------------------------------------------
+class ProviderFeatureIdentityRow(Base):
+    """provider 원천 → Feature identity 결박. **재키가 부순 멱등의 대체 앵커다.**
+
+    ``feature.features.feature_id``가 uuid가 되면
+    ``create_feature_with_initial_state``의 ``ON CONFLICT (feature_id)``가 결정성을
+    잃는다(writer가 매 호출 새 UUIDv7을 만들기 때문). 이 표의 PK가 그 자리를 받는다.
+
+    **축 선택의 근거**: ``make_feature_id``는
+    ``bjd_code|kind|category|source_type|source_natural_key``를 해시하는데, ADR-068
+    결정 2가 ``bjd_code``·``category``를 identity 입력에서 배제하라고 정했다. 남는
+    셋이 이 PK다.
+
+    ``source_entity_key``를 축으로 쓰면 **안 된다** — ``providers/opinet.py``는
+    주유소 하나(natural key 1개)가 제품코드마다 다른 source entity를 갖고 그 가격들이
+    같은 price anchor Feature에 누적된다. entity 축이면 제품코드가 늘 때마다 Feature가
+    갈라진다.
+
+    ``feature.features``로 가는 FK를 두지 **않는다** — claim이 Feature보다 먼저 서야
+    하기 때문이고, ``ManualFeatureIdentityClaimRow``가 같은 이유로 같은 모양이다.
+    """
+
+    __tablename__ = "provider_feature_identities"
+    __table_args__ = (
+        CheckConstraint(
+            "feature_kind IN ('place', 'event', 'notice', 'price', "
+            "'weather', 'route', 'area')",
+            name=conv("ck_provider_feature_identities_kind"),
+        ),
+        CheckConstraint(
+            "btrim(natural_key) = natural_key AND natural_key <> '' "
+            # SQL 표준 구문 `position(x in y)`는 PostgreSQL이 그 형태로 보존해
+            # deparse하므로 migration의 함수형과 갈린다 — `alembic check`가 CHECK
+            # expression drift로 잡았다(2026-09-09 실측). 양쪽을 `strpos`로 맞춘다.
+            "AND strpos(natural_key, '|') = 0",
+            name=conv("ck_provider_feature_identities_natural_key"),
+        ),
+        CheckConstraint(
+            "btrim(bound_by_operation) = bound_by_operation "
+            "AND bound_by_operation <> ''",
+            name=conv("ck_provider_feature_identities_operation"),
+        ),
+        Index("idx_provider_feature_identities_feature", "feature_id"),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id",
+            ondelete="RESTRICT",
+            name="fk_provider_feature_identities_dataset",
+        ),
+        primary_key=True,
+    )
+    feature_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    natural_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    bound_by_operation: Mapped[str] = mapped_column(Text, nullable=False)
+    bound_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("clock_timestamp()"), nullable=False
+    )
 
 
 class ProviderDatasetRow(Base):
@@ -2154,7 +2238,7 @@ class SourceLinkRow(Base):
     )
 
     feature_id: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -2666,7 +2750,7 @@ class CurationItemRow(Base):
         nullable=False,
     )
     feature_id: Mapped[str | None] = mapped_column(
-        Text,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
     )
     source_record_key: Mapped[str | None] = mapped_column(
@@ -2987,7 +3071,7 @@ class ThemeCandidateGenerationObservationRow(Base):
     )
     candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
-    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
     candidate_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(
@@ -3086,7 +3170,9 @@ class ThemeFeatureCandidateRow(Base):
         nullable=False,
     )
     feature_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("feature.features.feature_id", ondelete="RESTRICT"), nullable=False
+        UUID(as_uuid=False),
+        ForeignKey("feature.features.feature_id", ondelete="RESTRICT"),
+        nullable=False,
     )
     source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
     rule_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -3145,8 +3231,8 @@ class ThemeFeatureCandidateTransitionRow(Base):
 
     transition_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
-    from_feature_id: Mapped[str | None] = mapped_column(Text)
-    to_feature_id: Mapped[str | None] = mapped_column(Text)
+    from_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    to_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     rule_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
     from_review_state: Mapped[str | None] = mapped_column(Text)
@@ -3448,7 +3534,7 @@ class CurationLinkDecisionRow(Base):
         UUID(as_uuid=False),
         nullable=False,
     )
-    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     import_row_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     decision_kind: Mapped[str] = mapped_column(Text, nullable=False)
     match_basis: Mapped[str] = mapped_column(Text, nullable=False)
@@ -3625,12 +3711,12 @@ class DedupReviewQueueRow(Base):
         server_default=text("x_extension.gen_random_uuid()"),
     )
     feature_id_a: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
     feature_id_b: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -3727,7 +3813,7 @@ class EnrichmentReviewQueueRow(Base):
         server_default=text("x_extension.gen_random_uuid()"),
     )
     target_feature_id: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -3836,8 +3922,8 @@ class FeatureBaseFieldValueRow(Base):
             name=conv("ck_feature_base_field_values_source_hash"),
         ),
         ForeignKeyConstraint(
-            ["feature_id", "feature_uuid"],
-            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            ["feature_id"],
+            ["feature.features.feature_id"],
             name="fk_feature_base_field_values_feature_identity",
             ondelete="CASCADE",
         ),
@@ -3874,9 +3960,8 @@ class FeatureBaseFieldValueRow(Base):
         {"schema": "feature"},
     )
 
-    feature_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     field_path: Mapped[str] = mapped_column(Text, primary_key=True)
-    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
     source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -3938,7 +4023,7 @@ class FeatureOverrideRow(Base):
         server_default=text("x_extension.gen_random_uuid()"),
     )
     feature_id: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -4399,7 +4484,7 @@ class ImportJobEventRow(Base):
         nullable=False,
     )
     import_job_dataset_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-    feature_id: Mapped[str | None] = mapped_column(Text)
+    feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     stage: Mapped[str | None] = mapped_column(Text)
     level: Mapped[str] = mapped_column(Text, nullable=False)
     code: Mapped[str | None] = mapped_column(Text)
@@ -5746,7 +5831,7 @@ class DataIntegrityViolationRow(Base):
         ),
     )
     feature_id: Mapped[str | None] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="SET NULL"),
     )
     violation_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -5959,7 +6044,7 @@ class PoiCacheTargetFeatureLinkRow(Base):
         primary_key=True,
     )
     feature_id: Mapped[str] = mapped_column(
-        String,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         primary_key=True,
     )
@@ -7670,12 +7755,12 @@ class FeatureMergeHistoryRow(Base):
         server_default=text("x_extension.gen_random_uuid()"),
     )
     master_feature_id: Mapped[str] = mapped_column(
-        Text,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )
     loser_feature_id: Mapped[str] = mapped_column(
-        Text,
+        UUID(as_uuid=False),
         ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
         nullable=False,
     )

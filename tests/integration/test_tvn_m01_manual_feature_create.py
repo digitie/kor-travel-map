@@ -155,8 +155,10 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
                              WHERE feature_id = CAST(:feature_uuid AS uuid)),
                             (SELECT count(*) FROM feature.feature_creation_origins
                              WHERE feature_id = CAST(:feature_uuid AS uuid)),
+                            -- T-VN-39(309): features의 사본 컬럼 feature_uuid는
+                            -- 사라졌다 — 정본 키 feature_id가 곧 그 값이다.
                             (SELECT count(*) FROM feature.features
-                             WHERE feature_uuid = CAST(:feature_uuid AS uuid))
+                             WHERE feature_id = CAST(:feature_uuid AS uuid))
                         """
                     ),
                     {"feature_uuid": winner.feature_uuid},
@@ -191,7 +193,7 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
                 await connection.execute(
                     text(
                         "DELETE FROM feature.features "
-                        "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
+                        "WHERE feature_id = CAST(:feature_uuid AS uuid)"
                     ),
                     {"feature_uuid": winner.feature_uuid},
                 )

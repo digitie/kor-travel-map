@@ -36,14 +36,21 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-08 T-VN-39 — notice_states를 "채택되지 않음"으로 표시(소유자 승인).
-    "target-schema-v1.sql": ("c60bdddb411fc38087976df5398f968e9255074797d98d485c2341c30988dc8d"),
+    # 2026-09-09 T-VN-39/ADR-098 결정 6 — alias는 발행된 적 있는 외부 주소의 등록부다:
+    # INV-068-01을 "모든 feature가 alias를 갖는다"에서 "정본 키를 alias로 되풀이하지
+    # 않는다"로 교체하고, §4 GRANT 주석의 alias 발급 주체를 사라진 트리거에서 provider
+    # wrapper의 명시 INSERT로 고쳤다.
+    "target-schema-v1.sql": ("9be2a024834eef475bec6a7521f7f24d390cf3bdf29ceee78db604941988269c"),
     "target-invariants-v1.sql": (
-        "971f656169cb1d2f21f9286d22e732daf16a3a9d79456e0f221bae4c04b86e26"
+        "63c6e442f2b79a5a4e06aa0785fad271e076c86d00031cfb2adddabc67d9d484"
     ),
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
+    # 2026-09-10 T-VN-39 — 재키가 `target_schema_sql_sha256`을 바꿨다. 이 핀은
+    # 그때 함께 갱신됐어야 했고, 로컬(CRLF)에서만 재면 값이 또 갈린다 —
+    # `.gitattributes`가 `eol=lf`라 **정본은 LF 바이트**다.
     "target-schema-fingerprints-v1.json": (
-        "dd436d1024a77c892a987bf0bedaf12ca78425ffc917db31f5cc94f7bbeeddad"
+        "b08ed8a7684799614ad02fb957aff5945b7a69e34080903dcdee06cf9c5150da"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
@@ -59,8 +66,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
 # 2026-09-08 T-VN-39 — removal manifest에서 notice_states 대체 항목을 뺐다.
+    # 2026-09-09 T-VN-39/ADR-098 결정 6 — 32B 문안의 alias 원자 생성을 provider 경로로
+    # 한정했다(manual·요청승인·큐레이션·core는 legacy 주소를 갖지 않는다).
     "consumer-rollout-v1.json": (
-        "148d2f8e710c8d8c136eb5931829716ecf45bfbfdc58debcdd07b344d80ff442"
+        "ebdb1027506ab64ad166e02208dd6a4a378044fc0ca5f7d15b8aaad71c379bad"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

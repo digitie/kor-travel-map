@@ -13,6 +13,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     list_active_target_coords,
     upsert_poi_cache_target,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +77,11 @@ async def _insert_feature(
     ``('active', 'published', 'valid')``인 이유는 이 파일이 상태에 거는 요구가
     "``feature.public_features``에 뜨는가" 하나이고, 그 view의 술어가 정확히 이
     tuple이기 때문이다 — 옛 ``status='active'``와 같은 뜻이다.
+
+    T-VN-39 재키 뒤 ``feature_id``는 **정본 uuid**다(호출자가 :func:`feature_uuid`로
+    라벨에서 유도해 넘긴다). 사람이 읽는 이름은 ``name``이 계속 든다. 아래 provider
+    계보 문장들에서 같은 값이 ``source_entity_id``(text) 자리에도 가지만, 그것은
+    **다른 문장**이라 한 바인드가 두 타입으로 접히지 않는다.
     """
     source_record_key = f"src:{feature_id}"
     source_entity_key = f"entity:{feature_id}"
@@ -191,6 +197,9 @@ async def _insert_feature(
 async def test_features_nearby_target_filters_and_sorts_by_distance(
     migrated_session: AsyncSession,
 ) -> None:
+    near_id = feature_uuid("feature:nearby:in")
+    unpublished_id = feature_uuid("feature:nearby:unpublished")
+    far_id = feature_uuid("feature:nearby:far")
     target = await upsert_poi_cache_target(
         migrated_session,
         external_system="external-app",
@@ -201,7 +210,7 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:in",
+        feature_id=near_id,
         name="가까운 장소",
         lon=126.9782,
         lat=37.5667,
@@ -216,7 +225,7 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     # 두 번째 단언이 검증하려던 read 정합 자체가 없어진다.)
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:unpublished",
+        feature_id=unpublished_id,
         name="비공개 장소",
         lon=126.9783,
         lat=37.5666,
@@ -224,7 +233,7 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:far",
+        feature_id=far_id,
         name="먼 장소",
         lon=127.12,
         lat=37.66,
@@ -238,9 +247,9 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
             text("SELECT feature_id FROM feature.public_features")
         )
     }
-    assert "feature:nearby:in" in public_ids
-    assert "feature:nearby:far" in public_ids
-    assert "feature:nearby:unpublished" not in public_ids
+    assert near_id in public_ids
+    assert far_id in public_ids
+    assert unpublished_id not in public_ids
 
     page = await feature_repo.features_nearby_poi_cache_target(
         migrated_session,
@@ -250,7 +259,7 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
         limit=10,
     )
 
-    assert [item.feature_id for item in page.items] == ["feature:nearby:in"]
+    assert [item.feature_id for item in page.items] == [near_id]
     assert page.items[0].distance_m < 50
     assert page.items[0].primary_provider == "python-opinet-api"
     assert page.next_cursor is None
@@ -265,8 +274,8 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     # "공개되지 않아도 살아 있으면 날씨를 붙인다"는 D-12 read 정합이 그대로다.
     place_coords = await feature_repo.list_active_place_coords(migrated_session)
     by_id = {feature_id: (lon, lat) for feature_id, lon, lat in place_coords}
-    assert by_id["feature:nearby:in"] == (126.9782, 37.5667)
-    assert "feature:nearby:unpublished" in by_id
+    assert by_id[near_id] == (126.9782, 37.5667)
+    assert unpublished_id in by_id
     # 옛 soft delete(``deleted_at = now()``)의 현행 등가물은 lifecycle 'retired'다.
     # publication을 함께 내리는 것은 취향이 아니라 제약이다 — retired인데
     # publication이 suppressed가 아니면 ``ck_features_state_tuple``이 막는다.
@@ -274,16 +283,19 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
         text(
             "UPDATE feature.features "
             "SET lifecycle_state = 'retired', publication_state = 'suppressed' "
-            "WHERE feature_id = 'feature:nearby:far'"
-        )
+            "WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": far_id},
     )
     after = await feature_repo.list_active_place_coords(migrated_session)
-    assert all(feature_id != "feature:nearby:far" for feature_id, _, _ in after)
+    assert all(feature_id != far_id for feature_id, _, _ in after)
 
 
 async def test_features_nearby_target_cursor_pages_distance_order(
     migrated_session: AsyncSession,
 ) -> None:
+    first_id = feature_uuid("feature:nearby:first")
+    second_id = feature_uuid("feature:nearby:second")
     target = await upsert_poi_cache_target(
         migrated_session,
         external_system="external-app",
@@ -294,14 +306,14 @@ async def test_features_nearby_target_cursor_pages_distance_order(
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:first",
+        feature_id=first_id,
         name="첫 번째",
         lon=126.9781,
         lat=37.5666,
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:second",
+        feature_id=second_id,
         name="두 번째",
         lon=126.985,
         lat=37.568,
@@ -313,7 +325,7 @@ async def test_features_nearby_target_cursor_pages_distance_order(
         limit=1,
     )
     assert first_page.next_cursor is not None
-    assert [item.feature_id for item in first_page.items] == ["feature:nearby:first"]
+    assert [item.feature_id for item in first_page.items] == [first_id]
 
     second_page = await feature_repo.features_nearby_poi_cache_target(
         migrated_session,
@@ -321,15 +333,15 @@ async def test_features_nearby_target_cursor_pages_distance_order(
         limit=1,
         cursor=first_page.next_cursor,
     )
-    assert [item.feature_id for item in second_page.items] == [
-        "feature:nearby:second"
-    ]
+    assert [item.feature_id for item in second_page.items] == [second_id]
     assert second_page.next_cursor is None
 
 
 async def test_features_nearby_target_name_sort_and_invalid_cursor(
     migrated_session: AsyncSession,
 ) -> None:
+    name_a_id = feature_uuid("feature:nearby:name-a")
+    name_b_id = feature_uuid("feature:nearby:name-b")
     target = await upsert_poi_cache_target(
         migrated_session,
         external_system="external-app",
@@ -340,14 +352,14 @@ async def test_features_nearby_target_name_sort_and_invalid_cursor(
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:name-b",
+        feature_id=name_b_id,
         name="B second",
         lon=126.9781,
         lat=37.5666,
     )
     await _insert_feature(
         migrated_session,
-        feature_id="feature:nearby:name-a",
+        feature_id=name_a_id,
         name="A first",
         lon=126.9782,
         lat=37.5667,
@@ -359,10 +371,8 @@ async def test_features_nearby_target_name_sort_and_invalid_cursor(
         sort="name",
         limit=10,
     )
-    assert [item.feature_id for item in page.items] == [
-        "feature:nearby:name-a",
-        "feature:nearby:name-b",
-    ]
+    # 정렬 축은 ``name``이다(A first < B second) — feature_id 순서에 기대지 않는다.
+    assert [item.feature_id for item in page.items] == [name_a_id, name_b_id]
 
     with pytest.raises(ValueError, match="invalid nearby cursor"):
         await feature_repo.features_nearby_poi_cache_target(

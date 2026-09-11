@@ -40,6 +40,7 @@ from kortravelmap.providers.airkorea import (
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -137,6 +138,41 @@ def _stub(feature_id: str, name: str = "불국사") -> _Stub:
     )
 
 
+async def _canonical_uuid_for_alias(
+    engine: AsyncEngine, legacy_feature_id: str
+) -> str | None:
+    """provider 적재 경로가 legacy ``f_*``에 발급한 정본 키(uuid text). 없으면 ``None``.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 서버가 발급한
+    UUIDv7이고, provider 변환기가 유도한 ``bundle.feature.feature_id``는 정본 키가
+    **아니라** ``feature_aliases``에 등록된 주소다(ADR-098 결정 6). 이 client가
+    commit한 Feature를 다시 조회하려면 그 주소를 여기서 한 번 정본 키로 바꾼다.
+
+    ``None``은 "그 주소가 등록되지 않았다" — 즉 적재가 commit되지 않았다는 뜻이고,
+    rollback을 증명하는 쪽에서 그대로 쓴다.
+    """
+    async with AsyncSession(engine) as session:
+        bound = (
+            await session.execute(
+                text(
+                    "SELECT CAST(a.feature_id AS text) "
+                    "FROM feature.feature_aliases AS a "
+                    "WHERE a.alias = :alias AND a.alias_kind = 'legacy_feature_id'"
+                ),
+                {"alias": legacy_feature_id},
+            )
+        ).scalar_one_or_none()
+    return None if bound is None else str(bound)
+
+
+#: dedup 큐가 저장하는 쌍은 ``ck_dedup_pair_order``가 ``a < b``를 요구하고
+#: ``_canonical_pair``가 그 순서로 정규화한다. 아래 테스트는 **어느 쪽이 a인지**를
+#: 단언하므로 유도 uuid(라벨 사전순과 무관)를 쓸 수 없다 — 순서를 눈으로 확인할 수
+#: 있는 리터럴을 든다(선례: ``test_cli_dedup_merge._F_LOSER``/``_F_MASTER``).
+_F_DEDUP_KNPS = "00000000-0000-7000-8000-000000110001"
+_F_DEDUP_KRH = "00000000-0000-7000-8000-000000110002"
+
+
 @pytest.fixture
 async def map_client(
     migrated_engine: AsyncEngine,
@@ -214,7 +250,7 @@ async def _free_memberships(
 
 
 async def test_load_feature_bundles_commits_and_reads(
-    map_client: AsyncKorTravelMapClient,
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     bundles = await cultural_festivals_to_bundles(
         [_FEST],  # type: ignore[list-item]
@@ -226,7 +262,11 @@ async def test_load_feature_bundles_commits_and_reads(
     assert result.source_records_inserted == 1
     assert result.source_links_inserted == 1
 
-    fid = bundles[0].feature.feature_id
+    # 조회 키는 적재가 발급한 정본 키다 — DTO의 ``f_*``는 그 주소일 뿐이다.
+    fid = await _canonical_uuid_for_alias(
+        migrated_engine, bundles[0].feature.feature_id
+    )
+    assert fid is not None
     # 별도 세션 조회 → client가 commit했음을 확인.
     row = await map_client.get_feature(fid)
     assert row is not None
@@ -236,11 +276,12 @@ async def test_load_feature_bundles_commits_and_reads(
     feats = await map_client.features_in_bounds(
         min_lon=126.0, min_lat=37.0, max_lon=127.5, max_lat=38.0, kinds=["event"]
     )
-    assert any(f["feature_id"] == fid for f in feats)
+    # uuid 컬럼을 읽으면 driver가 ``uuid.UUID``를 준다 — 비교 전에 text로 낮춘다.
+    assert any(str(f["feature_id"]) == fid for f in feats)
 
 
 async def test_load_feature_bundle_batches_rolls_back_prior_batches(
-    map_client: AsyncKorTravelMapClient,
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     bundles = await cultural_festivals_to_bundles(
         [_FEST],  # type: ignore[list-item]
@@ -256,15 +297,26 @@ async def test_load_feature_bundle_batches_rolls_back_prior_batches(
             _failing_batches()
         )
 
-    assert await map_client.get_feature(bundles[0].feature.feature_id) is None
+    # 첫 batch가 rollback됐다는 증거를 "그 Feature가 없다"로 잡는다. 재키 뒤 정본
+    # 키는 적재가 발급하므로 미리 알 수 없고, legacy 주소가 등록부에 없다는 것이
+    # 곧 그 Feature가 commit되지 않았다는 뜻이다 — 생성 procedure가 core 행과
+    # alias를 같은 transaction에서 남기기 때문이다.
+    assert (
+        await _canonical_uuid_for_alias(
+            migrated_engine, bundles[0].feature.feature_id
+        )
+        is None
+    )
 
 
 async def test_sync_dedup_candidates_persists(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
-    await _seed_temples(migrated_engine, "cli-knps-1", "cli-krh-1")
+    await _seed_temples(migrated_engine, _F_DEDUP_KNPS, _F_DEDUP_KRH)
 
-    sync = await map_client.sync_dedup_candidates([_stub("cli-knps-1")], [_stub("cli-krh-1")])
+    sync = await map_client.sync_dedup_candidates(
+        [_stub(_F_DEDUP_KNPS)], [_stub(_F_DEDUP_KRH)]
+    )
     assert len(sync.candidates) == 1
     assert sync.candidates[0].decision == "auto_merge"  # 완전 동일 → auto_merge
     assert sync.queue.inserted == 1
@@ -272,8 +324,14 @@ async def test_sync_dedup_candidates_persists(
 
     reviews = await map_client.pending_dedup_reviews()
     assert len(reviews) == 1
-    assert reviews[0]["feature_id_a"] == "cli-knps-1"
-    assert reviews[0]["feature_id_b"] == "cli-krh-1"
+    # 큐 컬럼은 uuid지만 이 표면은 dict를 그대로 돌려주고 상위가 JSON으로
+    # 직렬화한다. 그래서 SQL이 경계에서 text로 편다 — 여기서 `str(...)`로 표기를
+    # 맞추면 그 계약이 깨져도 초록이 된다(적대 리뷰가 짝인 전화번호 테스트에서
+    # 집은 부류다). 표기를 맞추지 말고 **표기를 잰다.**
+    assert isinstance(reviews[0]["feature_id_a"], str)
+    assert isinstance(reviews[0]["feature_id_b"], str)
+    assert reviews[0]["feature_id_a"] == _F_DEDUP_KNPS
+    assert reviews[0]["feature_id_b"] == _F_DEDUP_KRH
     assert reviews[0]["total_score"] >= 85.0
     assert reviews[0]["decision_reason"] == "auto_merge"
 
@@ -281,11 +339,15 @@ async def test_sync_dedup_candidates_persists(
 async def test_sync_dedup_excludes_auto_merge_when_disabled(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
-    await _seed_temples(migrated_engine, "cli-a", "cli-b")
+    # 이 쌍은 큐에 들어가지 않으므로 저장 순서가 의미를 갖지 않는다 — 라벨에서
+    # 결정적으로 유도한 정본 uuid를 그대로 쓴다(``feature.features`` 직접 INSERT).
+    cli_a = feature_uuid("cli-a")
+    cli_b = feature_uuid("cli-b")
+    await _seed_temples(migrated_engine, cli_a, cli_b)
 
     # 완전 동일 쌍은 auto_merge — include_auto_merge=False면 후보 0 → DB 미적재.
     sync = await map_client.sync_dedup_candidates(
-        [_stub("cli-a")], [_stub("cli-b")], include_auto_merge=False
+        [_stub(cli_a)], [_stub(cli_b)], include_auto_merge=False
     )
     assert sync.candidates == []
     assert sync.queue.inserted == 0
@@ -543,6 +605,11 @@ async def test_load_air_quality_commits_station_and_values(
     fetched = datetime(2026, 6, 8, 9, 0, tzinfo=_KST)
     station = _AirStation(station_name="중구", addr="서울 중구", lat=37.5640, lon=126.9750)
     bundles = await air_quality_stations_to_bundles([station], fetched_at=fetched)
+    # ``load_air_quality``는 측정소 bundle과 측정값을 **한 transaction**에 넣는다.
+    # 그래서 호출자가 값에 붙일 수 있는 측정소 식별자는 적재 전에 손에 있는 것,
+    # 즉 provider 변환기가 유도한 legacy ``f_*``뿐이다 — dagster asset
+    # (``run_feature_weather_airkorea_air_quality``)도 정확히 이 매핑을 만든다.
+    # 이 호출 shape을 유지하는 것이 이 테스트가 지키는 계약이다.
     station_feature_ids = {b.source_record.source_entity_id: b.feature.feature_id for b in bundles}
     measurement = _AirMeasurement(
         station_name="중구",
@@ -598,18 +665,31 @@ async def test_load_air_quality_commits_station_and_values(
     assert result.weather_values == 2  # PM10 + PM2_5
 
     # 측정소는 weather feature로, 측정값은 feature_weather_values로 commit됐는지.
+    # 두 표의 ``feature_id``는 재키 뒤 uuid다 — 조회 키는 적재가 발급한 정본 키이고,
+    # 맨몸 바인드를 두면 PostgreSQL이 그 자리를 text로 유도하므로 명시 캐스트로
+    # uuid에 고정한다(재키 후 이 저장소의 관행).
+    station_uuid = await _canonical_uuid_for_alias(
+        migrated_engine, bundles[0].feature.feature_id
+    )
+    assert station_uuid is not None
     async with AsyncSession(migrated_engine) as session:
         kind = (
             await session.execute(
-                text("SELECT kind FROM feature.features WHERE feature_id = :f"),
-                {"f": bundles[0].feature.feature_id},
+                text(
+                    "SELECT kind FROM feature.features "
+                    "WHERE feature_id = CAST(:f AS uuid)"
+                ),
+                {"f": station_uuid},
             )
         ).scalar_one()
         assert kind == "weather"
         value_count = (
             await session.execute(
-                text("SELECT count(*) FROM feature.feature_weather_values WHERE feature_id = :f"),
-                {"f": bundles[0].feature.feature_id},
+                text(
+                    "SELECT count(*) FROM feature.feature_weather_values "
+                    "WHERE feature_id = CAST(:f AS uuid)"
+                ),
+                {"f": station_uuid},
             )
         ).scalar_one()
         assert value_count == 2

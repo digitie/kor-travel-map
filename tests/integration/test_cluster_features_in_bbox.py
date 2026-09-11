@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +22,7 @@ _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=timezone(timedelta(hours=9)))
 async def _ins(
     session: AsyncSession,
     *,
-    fid: str,
+    label: str,
     lon: float,
     lat: float,
     sido: str,
@@ -56,7 +57,7 @@ async def _ins(
             """
         ),
         {
-            "fid": fid, "lon": lon, "lat": lat, "ts": _FETCHED,
+            "fid": feature_uuid(label), "lon": lon, "lat": lat, "ts": _FETCHED,
             "sido": sido, "sigungu": sigungu, "bjd": bjd,
         },
     )
@@ -65,15 +66,15 @@ async def _ins(
 
 async def test_cluster_features_in_bbox_rollup(migrated_session: AsyncSession) -> None:
     await _ins(
-        migrated_session, fid="c1", lon=126.97, lat=37.56,
+        migrated_session, label="c1", lon=126.97, lat=37.56,
         sido="11", sigungu="11110", bjd="1111010100",
     )
     await _ins(
-        migrated_session, fid="c2", lon=126.99, lat=37.57,
+        migrated_session, label="c2", lon=126.99, lat=37.57,
         sido="11", sigungu="11110", bjd="1111010200",
     )
     await _ins(
-        migrated_session, fid="c3", lon=127.05, lat=37.50,
+        migrated_session, label="c3", lon=127.05, lat=37.50,
         sido="11", sigungu="11140", bjd="1114010100",
     )
 

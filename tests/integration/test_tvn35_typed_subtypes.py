@@ -6,8 +6,11 @@ route/area geometry, 공개 projection을 DB 수준에서 고정한다. 이전 m
 아니다. 여기서 검증하는 축은 다섯이다:
 
 1. **배타 arc** — subtype 행이 있는 동안 core ``kind``가 못 바뀌고, 한 feature는
-   최대 하나의 subtype에만 있으며, 고아 subtype과 identity 사본 불일치가
-   FK로 막힌다. 코드 규율이 아니라 DB 계약이라는 것이 요점이다.
+   최대 하나의 subtype에만 있으며, 고아 subtype이 FK로 막힌다. 코드 규율이 아니라
+   DB 계약이라는 것이 요점이다. (종전 넷째 축이던 "identity 사본 불일치"는
+   T-VN-39 재키(alembic 309)가 사본 컬럼 ``feature_uuid`` 아홉 개와 복합 FK
+   ``fk_*_identity_pair`` 여섯 개를 함께 없애면서 대상이 사라졌다 — 정본 키가
+   하나뿐이라 어긋날 짝이 없다.)
 2. **upsert 왕복** — writer가 subtype에만 쓰고, non-public repository reader가
    명시 LEFT JOIN으로 조립한 ``detail``이 DTO 왕복과 동등하다.
 3. **geometry 필수 kind** — geometry 없는 route/area는 write 시점에 거부되고
@@ -24,13 +27,16 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.core.ids import (
+    make_feature_id,
+    make_payload_hash,
+    make_source_record_key,
+)
 from kortravelmap.dto import (
     Address,
     AreaDetail,
@@ -46,13 +52,19 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra import admin_feature_repo, feature_repo, merge_repo
+from kortravelmap.infra import (
+    admin_feature_repo,
+    feature_identity,
+    feature_repo,
+    merge_repo,
+)
 from kortravelmap.infra.feature_subtype import (
     SUBTYPE_TABLES,
     subtype_params,
     subtype_upsert_sql,
 )
 from kortravelmap.infra.merge_repo import MergeConflictError
+from tests.integration._feature_ids import feature_uuid
 from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
@@ -67,6 +79,55 @@ _ROUTE_WKT = "MULTILINESTRING((127.0 37.5, 127.01 37.51, 127.02 37.52))"
 _AREA_WKT = (
     "MULTIPOLYGON(((127.0 37.5, 127.1 37.5, 127.1 37.6, 127.0 37.6, 127.0 37.5)))"
 )
+
+
+# ---------------------------------------------------------------------------
+# identity 헬퍼 — T-VN-39 재키(alembic 309) 뒤 두 축이 갈렸다.
+#
+# 정본 축: ``feature.features.feature_id``는 uuid이고 사본 컬럼 ``feature_uuid``는
+#   아홉 표 어디에도 없다. raw SQL seed는 그 키를 자기가 발급한다 — 표찰에서
+#   결정적으로 유도하는 :func:`tests.integration._feature_ids.feature_uuid`가
+#   그 발급기의 단일 정본이다(파일마다 유도 규칙을 따로 두지 않는다).
+# legacy 축: ``Feature`` DTO의 ``feature_id``는 provider 라이브러리가 유도한
+#   ``f_*``이고 정본 키가 **아니다**(ADR-098). 그 값은 ``feature_aliases.alias``에
+#   text로 남고, 거기서 정본 키로 가는 입구가 ``resolve_feature_identity`` 하나다.
+# ---------------------------------------------------------------------------
+
+
+def _legacy_feature_id(kind: str, label: str) -> str:
+    """provider 라이브러리가 유도하는 legacy ``f_*`` id (ADR-009).
+
+    재키 뒤 이 값은 정본 키가 아니라 **alias**로만 산다. 그래서 형태 계약이
+    붙었다 — 309 ``ck_feature_aliases_legacy_alias_shape``가 ``alias_kind``가
+    ``legacy_feature_id``인 행에 ``f_{bjd|global}_{kind[0]}_{sha1[:16]}``만
+    허용하므로, 종전 표찰(``tvn35:rt:place``)은 uuid 열은 물론 alias 열에도
+    들어갈 수 없다. 표찰은 claim 축(ADR-098)의 자연키로 옮기고, id는 프로덕션
+    생성기가 유도하게 둔다.
+    """
+    return make_feature_id(
+        bjd_code=None,
+        kind=kind,
+        category="TVN35_TYPED_SUBTYPE",
+        source_type="tvn35_typed_subtypes",
+        source_natural_key=label,
+    )
+
+
+async def _canonical_id(session: AsyncSession, *, kind: str, label: str) -> str:
+    """provider 경로가 발급한 정본 키(uuid)를 legacy alias로 되찾는다.
+
+    ADR-068 결정 3 · ADR-098: 바깥에서 정본 키로 가는 입구는 ``feature_aliases``를
+    보는 :func:`~kortravelmap.infra.feature_identity.resolve_feature_identity`
+    하나뿐이고, 이 파일의 DB 조회 키는 전부 그 해석 결과다.
+    """
+    identity = await feature_identity.resolve_feature_identity(
+        session, _legacy_feature_id(kind, label)
+    )
+    assert identity is not None, (
+        f"표찰 {label!r}({kind})의 legacy alias가 정본 키로 해석되지 않았다 — "
+        "provider 경로가 alias를 남기지 않았거나 Feature가 적재되지 않았다."
+    )
+    return identity.feature_id
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +149,11 @@ async def _insert_core(
     publication_state: str = "published",
     quality_state: str = "valid",
 ) -> str:
-    """core 행만 INSERT하고 저장된 ``feature_uuid``를 돌려준다."""
+    """core 행만 INSERT하고 저장된 정본 키(uuid)를 돌려준다.
+
+    재키(309) 뒤 ``feature.features.feature_id``가 uuid이고 사본 컬럼
+    ``feature_uuid``는 DROP됐다 — 돌려줄 값은 그 정본 키 하나다.
+    """
     stored_uuid = (
         await session.execute(
             text(
@@ -98,7 +163,7 @@ async def _insert_core(
                     lifecycle_state, publication_state, quality_state, updated_at
                 )
                 VALUES (
-                    :feature_id, :kind, :name, :category,
+                    CAST(:feature_id AS uuid), :kind, :name, :category,
                     CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
                          ELSE x_extension.ST_SetSRID(
                              x_extension.ST_MakePoint(
@@ -108,7 +173,7 @@ async def _insert_core(
                     :lifecycle_state, :publication_state, :quality_state,
                     CAST(:updated_at AS timestamptz)
                 )
-                RETURNING CAST(feature_uuid AS text)
+                RETURNING CAST(feature_id AS text)
                 """
             ),
             {
@@ -133,16 +198,19 @@ async def _insert_subtype(
     session: AsyncSession,
     *,
     feature_id: str,
-    feature_uuid: str,
     kind: str,
     detail: dict[str, Any],
     geom_wkt: str | None = None,
 ) -> None:
+    """``feature_id``는 core에 저장된 정본 키(uuid)다.
+
+    309가 subtype 5표의 사본 컬럼 ``feature_uuid``와 그것을 보던 복합 FK
+    (``fk_*_identity_pair``)를 함께 없앴으므로 심을 값은 정본 키 하나뿐이다.
+    """
     sql = subtype_upsert_sql(kind)
     assert sql is not None, f"kind {kind!r} has no subtype table"
     params = subtype_params(
         feature_id=feature_id,
-        feature_uuid=feature_uuid,
         kind=kind,
         detail=detail,
     )
@@ -156,15 +224,14 @@ async def _insert_subtype(
 async def _seed_place(
     session: AsyncSession, feature_id: str, *, place_kind: str = "cafe"
 ) -> str:
-    feature_uuid = await _insert_core(session, feature_id=feature_id, kind="place")
+    stored = await _insert_core(session, feature_id=feature_id, kind="place")
     await _insert_subtype(
         session,
-        feature_id=feature_id,
-        feature_uuid=feature_uuid,
+        feature_id=stored,
         kind="place",
         detail={"place_kind": place_kind},
     )
-    return feature_uuid
+    return stored
 
 
 def _bundle(
@@ -216,12 +283,28 @@ async def _detail_from_reader(session: AsyncSession, feature_id: str) -> dict[st
     return dict(row["detail"])
 
 
+def _expected_detail(detail: Any, feature_id: str) -> Any:
+    """DTO detail을 정본 키로 다시 묶어 조립 결과와 대조할 기대값을 만든다.
+
+    조립 SQL(``TYPED_FEATURE_DETAIL_COLUMNS_SQL``)은 detail의 ``feature_id``
+    슬롯을 core의 ``f.feature_id``로 채우고, 재키(309) 뒤 그 값은 정본 uuid다.
+    슬롯 이름도 응답 shape도 그대로이고 **값의 출처만** 바뀌었으므로(ADR-098:
+    DTO의 ``f_*``는 provider가 유도한 legacy 참조이지 정본 키가 아니다), 기대값의
+    그 슬롯 하나만 정본 키로 다시 묶고 나머지 필드는 전부 그대로 대조한다 —
+    "조립 detail이 DTO 왕복과 동등하다"는 축은 약해지지 않는다.
+    """
+    return detail.model_copy(update={"feature_id": feature_id})
+
+
 async def _subtype_row(
     session: AsyncSession, table: str, feature_id: str
 ) -> dict[str, Any] | None:
     row = (
         await session.execute(
-            text(f"SELECT * FROM feature.{table} WHERE feature_id = :feature_id"),
+            text(
+                f"SELECT * FROM feature.{table} "
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
+            ),
             {"feature_id": feature_id},
         )
     ).mappings().first()
@@ -229,7 +312,7 @@ async def _subtype_row(
 
 
 # ---------------------------------------------------------------------------
-# ① 배타 arc — kind 불변 / 단일 subtype / 고아 금지 / identity 사본 일치
+# ① 배타 arc — kind 불변 / 단일 subtype / 고아 금지
 # ---------------------------------------------------------------------------
 
 
@@ -242,27 +325,32 @@ async def test_core_kind_change_is_blocked_while_subtype_row_exists(
     조용히 교체할 수 있던 것)을 코드 규율이 아니라 DB 계약으로 닫은 것이 이
     단언의 대상이다. 참조 대상은 0084의 ``uq_features_identity_kind``.
     """
-    await _seed_place(migrated_session, "tvn35:arc:kind")
+    feature_id = feature_uuid("tvn35:arc:kind")
+    await _seed_place(migrated_session, feature_id)
 
     with pytest.raises(IntegrityError) as excinfo:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
                     "UPDATE feature.features SET kind = 'event' "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
-                {"feature_id": "tvn35:arc:kind"},
+                {"feature_id": feature_id},
             )
     assert "fk_feature_places_feature_kind" in str(excinfo.value)
 
     # subtype이 없는 kind(price)는 arc 밖이라 종전대로 자유롭다 — 배타 arc가
     # "subtype이 있는 동안"에만 kind를 묶는다는 것을 반대 방향으로 고정한다.
+    price_id = feature_uuid("tvn35:arc:price")
     await _insert_core(
-        migrated_session, feature_id="tvn35:arc:price", kind="price", category="06020000"
+        migrated_session, feature_id=price_id, kind="price", category="06020000"
     )
     await migrated_session.execute(
-        text("UPDATE feature.features SET kind = 'weather' WHERE feature_id = :feature_id"),
-        {"feature_id": "tvn35:arc:price"},
+        text(
+            "UPDATE feature.features SET kind = 'weather' "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
+        {"feature_id": price_id},
     )
     await migrated_session.flush()
 
@@ -275,14 +363,15 @@ async def test_second_subtype_insert_is_blocked_for_same_feature(
     core ``kind``가 단일 값이므로 다른 kind 상수를 요구하는 subtype의
     ``(feature_id, kind)`` 복합 FK가 구조적으로 실패한다.
     """
-    feature_uuid = await _seed_place(migrated_session, "tvn35:arc:double")
+    feature_id = await _seed_place(
+        migrated_session, feature_uuid("tvn35:arc:double")
+    )
 
     with pytest.raises(IntegrityError) as excinfo:
         async with migrated_session.begin_nested():
             await _insert_subtype(
                 migrated_session,
-                feature_id="tvn35:arc:double",
-                feature_uuid=feature_uuid,
+                feature_id=feature_id,
                 kind="event",
                 detail={"event_kind": "festival"},
             )
@@ -294,52 +383,50 @@ async def test_second_subtype_insert_is_blocked_for_same_feature(
             await migrated_session.execute(
                 text(
                     "INSERT INTO feature.feature_places "
-                    "(feature_id, feature_uuid, kind, place_kind) "
-                    "VALUES (:feature_id, CAST(:feature_uuid AS uuid), 'place', 'cafe')"
+                    "(feature_id, kind, place_kind) "
+                    "VALUES (CAST(:feature_id AS uuid), 'place', 'cafe')"
                 ),
-                {"feature_id": "tvn35:arc:double", "feature_uuid": feature_uuid},
+                {"feature_id": feature_id},
             )
     assert "pk_feature_places" in str(excinfo.value)
 
 
-async def test_orphan_subtype_and_identity_mismatch_are_blocked(
+async def test_orphan_subtype_is_blocked(
     migrated_session: AsyncSession,
 ) -> None:
-    """core 행 없는 subtype과 identity 사본 불일치가 각각 FK로 막힌다."""
+    """core 행 없는 subtype이 FK로 막힌다.
+
+    종전 이 테스트의 둘째 축은 "core는 있는데 ``feature_uuid`` 사본이 다르면
+    ``fk_feature_places_identity_pair``가 막는다"였다. T-VN-39 재키(309)가 subtype
+    5표의 사본 컬럼과 그 복합 FK를 **영구 삭제**했으므로(정본 키가 하나뿐이라
+    어긋날 짝이 없다) 그 축은 재현할 대상 자체가 사라졌다. 남은 축은 고아 금지
+    하나이고, 그것이 여전히 ``(feature_id, kind)`` 복합 FK로 강제된다.
+    """
     with pytest.raises(IntegrityError) as excinfo:
         async with migrated_session.begin_nested():
             await _insert_subtype(
                 migrated_session,
-                feature_id="tvn35:arc:ghost",
-                feature_uuid=str(uuid4()),
+                feature_id=feature_uuid("tvn35:arc:ghost"),
                 kind="place",
                 detail={"place_kind": "cafe"},
             )
     assert "fk_feature_places_feature_kind" in str(excinfo.value)
 
-    # core는 있지만 feature_uuid 사본이 다르면 identity 쌍 FK가 막는다(0083 선례).
-    await _insert_core(migrated_session, feature_id="tvn35:arc:identity", kind="place")
-    with pytest.raises(IntegrityError) as excinfo:
-        async with migrated_session.begin_nested():
-            await _insert_subtype(
-                migrated_session,
-                feature_id="tvn35:arc:identity",
-                feature_uuid=str(uuid4()),
-                kind="place",
-                detail={"place_kind": "cafe"},
-            )
-    assert "fk_feature_places_identity_pair" in str(excinfo.value)
-
 
 async def test_core_delete_cascades_to_subtype(migrated_session: AsyncSession) -> None:
     """core 행 삭제는 subtype을 CASCADE로 데려간다(0083 ``feature_aliases`` 규약)."""
-    await _seed_place(migrated_session, "tvn35:arc:cascade")
+    feature_id = await _seed_place(
+        migrated_session, feature_uuid("tvn35:arc:cascade")
+    )
     await migrated_session.execute(
-        text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
-        {"feature_id": "tvn35:arc:cascade"},
+        text(
+            "DELETE FROM feature.features "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
+        {"feature_id": feature_id},
     )
     await migrated_session.flush()
-    assert await _subtype_row(migrated_session, "feature_places", "tvn35:arc:cascade") is None
+    assert await _subtype_row(migrated_session, "feature_places", feature_id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -347,9 +434,19 @@ async def test_core_delete_cascades_to_subtype(migrated_session: AsyncSession) -
 # ---------------------------------------------------------------------------
 
 
-def _place_feature(feature_id: str, *, place_kind: str, phones: list[str]) -> Feature:
+def _place_feature(label: str, *, place_kind: str, phones: list[str]) -> Feature:
+    """표찰 하나로 provider Feature를 만든다.
+
+    ``feature_id``는 provider가 유도한 legacy ``f_*``이고 정본 키가 아니다.
+    ``provider_natural_key``가 ADR-098 identity claim 축
+    ``(provider_dataset_id, feature_kind, natural_key)``의 세 번째 성분이며, 이
+    값이 없으면 writer가 ``FeatureIdentityAnchorError``로 **선다**. 표찰을 그
+    자연키로 쓰므로 같은 표찰의 재적재는 같은 Feature로 접힌다.
+    """
+    feature_id = _legacy_feature_id("place", label)
     return Feature(
         feature_id=feature_id,
+        provider_natural_key=label,
         kind=FeatureKind.PLACE,
         name="왕복 검증 카페",
         category="01070100",
@@ -371,9 +468,11 @@ def _place_feature(feature_id: str, *, place_kind: str, phones: list[str]) -> Fe
     )
 
 
-def _event_feature(feature_id: str, *, ends_on: date) -> Feature:
+def _event_feature(label: str, *, ends_on: date) -> Feature:
+    feature_id = _legacy_feature_id("event", label)
     return Feature(
         feature_id=feature_id,
+        provider_natural_key=label,
         kind=FeatureKind.EVENT,
         name="왕복 검증 축제",
         category="01010100",
@@ -399,13 +498,15 @@ def _event_feature(feature_id: str, *, ends_on: date) -> Feature:
 
 
 def _notice_feature(
-    feature_id: str,
+    label: str,
     *,
     valid_end_time: datetime | None,
     valid_start_time: datetime | None = None,
 ) -> Feature:
+    feature_id = _legacy_feature_id("notice", label)
     return Feature(
         feature_id=feature_id,
+        provider_natural_key=label,
         kind=FeatureKind.NOTICE,
         name="왕복 검증 공지",
         category="99000000",
@@ -430,50 +531,59 @@ def _notice_feature(
 async def test_place_bundle_upsert_round_trips_through_subtype(
     migrated_session: AsyncSession,
 ) -> None:
-    """place bundle 적재 → subtype 행 생성 · identity 쌍 일치 · 뷰 detail 동등."""
-    feature = _place_feature(
-        "tvn35:rt:place", place_kind="cafe", phones=["02-1234-5678"]
-    )
+    """place bundle 적재 → subtype 행 생성 · core와 같은 정본 키 · 뷰 detail 동등."""
+    label = "tvn35:rt:place"
+    feature = _place_feature(label, place_kind="cafe", phones=["02-1234-5678"])
     await feature_repo.load_bundle(migrated_session, _bundle(feature, source_entity_id="P-1"))
     await migrated_session.flush()
 
-    row = await _subtype_row(migrated_session, "feature_places", "tvn35:rt:place")
+    feature_id = await _canonical_id(migrated_session, kind="place", label=label)
+    row = await _subtype_row(migrated_session, "feature_places", feature_id)
     assert row is not None
     assert row["kind"] == "place"
     assert row["place_kind"] == "cafe"
     assert row["phones"] == ["02-1234-5678"]
     assert row["license_date"] == date(2024, 3, 1)
-    core_uuid = (
+    # 종전 이 자리는 subtype의 사본 컬럼 ``feature_uuid``가 core 사본과 같은지 봤다.
+    # 309가 사본 컬럼과 복합 identity FK를 함께 없앴으므로 대조할 짝이 없고, 남은
+    # 축은 "legacy alias가 가리키는 **하나의** 정본 키 위에 core 행과 subtype 행이
+    # 함께 있는가"다 — 그것이 재키 뒤의 identity 일치다.
+    core_id = (
         await migrated_session.execute(
             text(
-                "SELECT CAST(feature_uuid AS text) FROM feature.features "
-                "WHERE feature_id = :feature_id"
+                "SELECT CAST(feature_id AS text) FROM feature.features "
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
-            {"feature_id": "tvn35:rt:place"},
+            {"feature_id": feature_id},
         )
     ).scalar_one()
-    assert str(row["feature_uuid"]) == str(core_uuid)
+    assert str(row["feature_id"]) == str(core_id) == feature_id
 
     # 뷰가 조립한 detail이 DTO 왕복과 동등하다(응답 shape 무변경).
-    assembled = await _detail_from_reader(migrated_session, "tvn35:rt:place")
-    assert PlaceDetail.model_validate(assembled) == feature.detail
-
-    # 재upsert가 subtype을 **갱신**한다(행 증식 없음).
-    updated = _place_feature(
-        "tvn35:rt:place", place_kind="restaurant", phones=["02-9999-0000"]
+    assembled = await _detail_from_reader(migrated_session, feature_id)
+    assert PlaceDetail.model_validate(assembled) == _expected_detail(
+        feature.detail, feature_id
     )
+
+    # 재upsert가 subtype을 **갱신**한다(행 증식 없음). 같은 표찰 = 같은 claim이라
+    # 정본 키도 그대로여야 한다.
+    updated = _place_feature(label, place_kind="restaurant", phones=["02-9999-0000"])
     await feature_repo.load_bundle(
         migrated_session, _bundle(updated, source_entity_id="P-1", raw_data={"v": 2})
     )
     await migrated_session.flush()
-    reread = await _subtype_row(migrated_session, "feature_places", "tvn35:rt:place")
+    assert await _canonical_id(migrated_session, kind="place", label=label) == feature_id
+    reread = await _subtype_row(migrated_session, "feature_places", feature_id)
     assert reread is not None
     assert reread["place_kind"] == "restaurant"
     assert reread["phones"] == ["02-9999-0000"]
     assert (
         await migrated_session.execute(
-            text("SELECT count(*) FROM feature.feature_places WHERE feature_id = :fid"),
-            {"fid": "tvn35:rt:place"},
+            text(
+                "SELECT count(*) FROM feature.feature_places "
+                "WHERE feature_id = CAST(:fid AS uuid)"
+            ),
+            {"fid": feature_id},
         )
     ).scalar_one() == 1
 
@@ -482,39 +592,46 @@ async def test_event_and_notice_bundles_round_trip_through_subtype(
     migrated_session: AsyncSession,
 ) -> None:
     """event/notice도 같은 계약 — typed date/timestamptz가 DTO 왕복과 동등하다."""
-    event = _event_feature("tvn35:rt:event", ends_on=date(2026, 8, 10))
-    notice = _notice_feature(
-        "tvn35:rt:notice", valid_end_time=_NOW + timedelta(days=3)
-    )
+    event_label = "tvn35:rt:event"
+    notice_label = "tvn35:rt:notice"
+    event = _event_feature(event_label, ends_on=date(2026, 8, 10))
+    notice = _notice_feature(notice_label, valid_end_time=_NOW + timedelta(days=3))
     await feature_repo.load_bundle(migrated_session, _bundle(event, source_entity_id="E-1"))
     await feature_repo.load_bundle(migrated_session, _bundle(notice, source_entity_id="N-1"))
     await migrated_session.flush()
 
-    event_row = await _subtype_row(migrated_session, "feature_events", "tvn35:rt:event")
+    event_id = await _canonical_id(migrated_session, kind="event", label=event_label)
+    notice_id = await _canonical_id(migrated_session, kind="notice", label=notice_label)
+
+    event_row = await _subtype_row(migrated_session, "feature_events", event_id)
     assert event_row is not None
     assert event_row["starts_on"] == date(2026, 8, 1)
     assert event_row["ends_on"] == date(2026, 8, 10)
     assert event_row["timezone"] == "Asia/Seoul"
 
-    notice_row = await _subtype_row(migrated_session, "feature_notices", "tvn35:rt:notice")
+    notice_row = await _subtype_row(migrated_session, "feature_notices", notice_id)
     assert notice_row is not None
     # 종전 ``detail->>`` 문자열이 아니라 typed timestamptz다.
     assert isinstance(notice_row["valid_end_time"], datetime)
     assert notice_row["valid_end_time"] == notice.detail.valid_end_time  # type: ignore[union-attr]
     assert notice_row["severity"] == 2
 
-    assembled_event = await _detail_from_reader(migrated_session, "tvn35:rt:event")
-    assert EventDetail.model_validate(assembled_event) == event.detail
-    assembled_notice = await _detail_from_reader(migrated_session, "tvn35:rt:notice")
-    assert NoticeDetail.model_validate(assembled_notice) == notice.detail
+    assembled_event = await _detail_from_reader(migrated_session, event_id)
+    assert EventDetail.model_validate(assembled_event) == _expected_detail(
+        event.detail, event_id
+    )
+    assembled_notice = await _detail_from_reader(migrated_session, notice_id)
+    assert NoticeDetail.model_validate(assembled_notice) == _expected_detail(
+        notice.detail, notice_id
+    )
 
     # 재upsert로 종료 시각이 typed 컬럼에서 갱신된다.
-    reopened = _notice_feature("tvn35:rt:notice", valid_end_time=None)
+    reopened = _notice_feature(notice_label, valid_end_time=None)
     await feature_repo.load_bundle(
         migrated_session, _bundle(reopened, source_entity_id="N-1", raw_data={"v": 2})
     )
     await migrated_session.flush()
-    reread = await _subtype_row(migrated_session, "feature_notices", "tvn35:rt:notice")
+    reread = await _subtype_row(migrated_session, "feature_notices", notice_id)
     assert reread is not None
     assert reread["valid_end_time"] is None
 
@@ -523,12 +640,14 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
     migrated_session: AsyncSession,
 ) -> None:
     """T-VN-37D의 파생 range가 empty를 보존하되 미래 공지는 계속 노출한다."""
-    withdrawn_id = "tvn37d:empty:notice"
-    future_id = "tvn37d:future:notice"
-    null_id = "tvn37d:null:notice"
-    start_only_id = "tvn37d:start-only:notice"
-    end_only_id = "tvn37d:end-only:notice"
-    equal_id = "tvn37d:equal:notice"
+    # 표찰은 claim 축(ADR-098)의 자연키이고, DB 조회 키가 되는 정본 uuid는 적재
+    # **뒤에** alias 해석으로 얻는다.
+    withdrawn_label = "tvn37d:empty:notice"
+    future_label = "tvn37d:future:notice"
+    null_label = "tvn37d:null:notice"
+    start_only_label = "tvn37d:start-only:notice"
+    end_only_label = "tvn37d:end-only:notice"
+    equal_label = "tvn37d:equal:notice"
     reference_now = datetime.now(_KST)
     withdrawn_start = reference_now + timedelta(days=30)
     withdrawn_end = reference_now - timedelta(days=1)
@@ -539,24 +658,24 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
     equal_bound = reference_now + timedelta(days=25)
 
     withdrawn = _notice_feature(
-        withdrawn_id,
+        withdrawn_label,
         valid_start_time=withdrawn_start,
         valid_end_time=withdrawn_end,
     )
     future = _notice_feature(
-        future_id,
+        future_label,
         valid_start_time=future_start,
         valid_end_time=future_end,
     )
-    null_notice = _notice_feature(null_id, valid_end_time=None)
+    null_notice = _notice_feature(null_label, valid_end_time=None)
     start_only_notice = _notice_feature(
-        start_only_id,
+        start_only_label,
         valid_start_time=start_only,
         valid_end_time=None,
     )
-    end_only_notice = _notice_feature(end_only_id, valid_end_time=end_only)
+    end_only_notice = _notice_feature(end_only_label, valid_end_time=end_only)
     equal_notice = _notice_feature(
-        equal_id,
+        equal_label,
         valid_start_time=equal_bound,
         valid_end_time=equal_bound,
     )
@@ -580,6 +699,25 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
         )
     await migrated_session.flush()
 
+    (
+        withdrawn_id,
+        future_id,
+        null_id,
+        start_only_id,
+        end_only_id,
+        equal_id,
+    ) = [
+        await _canonical_id(migrated_session, kind="notice", label=label)
+        for label in (
+            withdrawn_label,
+            future_label,
+            null_label,
+            start_only_label,
+            end_only_label,
+            equal_label,
+        )
+    ]
+
     # ``_notice_feature`` uses a historical start default for existing lifecycle
     # tests. Overwrite it here to exercise an explicit NULL lower bound and the
     # both-NULL representation.
@@ -587,14 +725,16 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
         text(
             "UPDATE feature.feature_notices "
             "SET valid_start_time = NULL "
-            "WHERE feature_id IN (:null_id, :end_only_id)"
+            "WHERE feature_id IN ("
+            "  CAST(:null_id AS uuid), CAST(:end_only_id AS uuid)"
+            ")"
         ),
         {"null_id": null_id, "end_only_id": end_only_id},
     )
     await migrated_session.execute(
         text(
             "UPDATE feature.feature_notices SET valid_end_time = NULL "
-            "WHERE feature_id = :null_id"
+            "WHERE feature_id = CAST(:null_id AS uuid)"
         ),
         {"null_id": null_id},
     )
@@ -610,7 +750,7 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
                        lower(valid_during) AS lower_bound,
                        upper(valid_during) AS upper_bound
                 FROM feature.feature_notices
-                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))
                 ORDER BY feature_id
                 """
             ),
@@ -708,15 +848,16 @@ async def test_assembled_notice_times_do_not_depend_on_session_timezone(
     덧붙여 마이크로초가 0이면 생략해 Python ``datetime.isoformat()``과 표기가
     같다 — 기존 prod ``valid_start_time`` 145행이 그대로 유지되는 근거다.
     """
-    feature_id = "tvn35:tz:notice"
+    label = "tvn35:tz:notice"
     # 마이크로초 0(생략 분기)과 non-zero(``.US`` 분기)를 함께 태운다.
     start = datetime(2026, 8, 5, 17, 35, 24, tzinfo=_KST)
     end = datetime(2026, 8, 6, 1, 2, 3, 823154, tzinfo=_KST)
-    notice = _notice_feature(feature_id, valid_start_time=start, valid_end_time=end)
+    notice = _notice_feature(label, valid_start_time=start, valid_end_time=end)
     await feature_repo.load_bundle(
         migrated_session, _bundle(notice, source_entity_id="N-TZ")
     )
     await migrated_session.flush()
+    feature_id = await _canonical_id(migrated_session, kind="notice", label=label)
 
     rendered: list[tuple[str, str]] = []
     observed_zones: list[str] = []
@@ -753,9 +894,11 @@ async def test_event_sigungu_code_survives_subtype_round_trip(
     migrated_session: AsyncSession,
 ) -> None:
     """``EventDetail.sigungu_code``도 다른 필드와 같이 왕복해야 한다."""
-    feature_id = "tvn35:rt:event-sigungu"
+    label = "tvn35:rt:event-sigungu"
+    feature_id = _legacy_feature_id("event", label)
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=label,
         kind=FeatureKind.EVENT,
         name="시군구 코드 축제",
         category="01010100",
@@ -779,8 +922,11 @@ async def test_event_sigungu_code_survives_subtype_round_trip(
     )
     await migrated_session.flush()
 
-    assembled = await _detail_from_reader(migrated_session, feature_id)
-    assert EventDetail.model_validate(assembled) == feature.detail
+    stored_id = await _canonical_id(migrated_session, kind="event", label=label)
+    assembled = await _detail_from_reader(migrated_session, stored_id)
+    assert EventDetail.model_validate(assembled) == _expected_detail(
+        feature.detail, stored_id
+    )
 
 
 async def test_public_projection_requires_the_final_visible_state_tuple(
@@ -792,18 +938,19 @@ async def test_public_projection_requires_the_final_visible_state_tuple(
     lifecycle, publication, quality의 어느 한 축에도 묻힌 legacy 상태값을 두지
     않도록 고정한다.
     """
-    feature_id = "tvn35:public:axes"
-    feature = _place_feature(feature_id, place_kind="cafe", phones=[])
+    label = "tvn35:public:axes"
+    feature = _place_feature(label, place_kind="cafe", phones=[])
     await feature_repo.load_bundle(
         migrated_session, _bundle(feature, source_entity_id="PUBLIC-AXES")
     )
     await migrated_session.flush()
+    feature_id = await _canonical_id(migrated_session, kind="place", label=label)
 
     assert await feature_repo.get_public_feature_row(migrated_session, feature_id)
     await migrated_session.execute(
         text(
             "UPDATE feature.features SET publication_state = 'suppressed' "
-            "WHERE feature_id = :feature_id"
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
         ),
         {"feature_id": feature_id},
     )
@@ -860,10 +1007,12 @@ async def test_geometryless_route_and_area_are_rejected_at_construction(
     geometry)도 같은 validator가 막는다: 담을 곳이 없으므로 조용히 버려지느니
     거부한다.
     """
-    feature_id = f"tvn35:geom:{kind.value}"
+    label = f"tvn35:geom:{kind.value}"
+    feature_id = _legacy_feature_id(kind.value, label)
     with pytest.raises(ValueError, match="geom이 필수"):
         Feature(
             feature_id=feature_id,
+            provider_natural_key=label,
             kind=kind,
             name="지오메트리 없는 경로/구역",
             category="03000000",
@@ -877,10 +1026,16 @@ async def test_geometryless_route_and_area_are_rejected_at_construction(
             updated_at=_NOW,
         )
 
+    # 구성이 섰으니 적재도 없었다. 재키 뒤 core 조회 키는 uuid라 legacy 표찰로는
+    # 셀 수 없고, "이 legacy id가 Feature를 얻었는가"를 보는 입구는 alias 하나다
+    # (ADR-098 결정 6) — ``feature_aliases.alias``는 여전히 text이므로 legacy 축
+    # 그대로 센다.
     assert (
         await migrated_session.execute(
-            text("SELECT count(*) FROM feature.features WHERE feature_id = :feature_id"),
-            {"feature_id": feature_id},
+            text(
+                "SELECT count(*) FROM feature.feature_aliases WHERE alias = :alias"
+            ),
+            {"alias": feature_id},
         )
     ).scalar_one() == 0
 
@@ -889,7 +1044,8 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
     """place/event에 geometry를 실으면 담을 곳이 없다 — 구성 시점에 거부한다."""
     with pytest.raises(ValueError, match="geom을 가질 수 없다"):
         Feature(
-            feature_id="tvn35:geom:place",
+            feature_id=_legacy_feature_id("place", "tvn35:geom:place"),
+            provider_natural_key="tvn35:geom:place",
             kind=FeatureKind.PLACE,
             name="선을 가진 장소",
             category="01070100",
@@ -898,7 +1054,10 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
             coord=Coordinate(lon=127.0, lat=37.5),
             address=Address(),
             geom=_ROUTE_WKT,
-            detail=PlaceDetail(feature_id="tvn35:geom:place", place_kind="cafe"),
+            detail=PlaceDetail(
+                feature_id=_legacy_feature_id("place", "tvn35:geom:place"),
+                place_kind="cafe",
+            ),
             created_at=_NOW,
             updated_at=_NOW,
         )
@@ -933,9 +1092,11 @@ async def test_route_and_area_with_geometry_land_in_subtype(
     detail_factory: Any,
 ) -> None:
     """geometry가 있으면 subtype에 Multi* 타입으로 승격 저장되고 뷰가 되돌려준다."""
-    feature_id = f"tvn35:geom-ok:{kind.value}"
+    label = f"tvn35:geom-ok:{kind.value}"
+    feature_id = _legacy_feature_id(kind.value, label)
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=label,
         kind=kind,
         name="지오메트리 있는 경로/구역",
         category="03000000",
@@ -952,26 +1113,29 @@ async def test_route_and_area_with_geometry_land_in_subtype(
         _bundle(feature, source_entity_id=f"GEOM-{kind.value}"),
     )
     await migrated_session.flush()
+    stored_id = await _canonical_id(migrated_session, kind=kind.value, label=label)
 
     geometry_type = (
         await migrated_session.execute(
             text(
                 f"SELECT x_extension.ST_GeometryType(geom) FROM feature.{table} "
-                "WHERE feature_id = :feature_id"
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
-            {"feature_id": feature_id},
+            {"feature_id": stored_id},
         )
     ).scalar_one()
     assert geometry_type == (
         "ST_MultiLineString" if kind is FeatureKind.ROUTE else "ST_MultiPolygon"
     )
 
-    assembled = await _detail_from_reader(migrated_session, feature_id)
+    assembled = await _detail_from_reader(migrated_session, stored_id)
     model = RouteDetail if kind is FeatureKind.ROUTE else AreaDetail
-    assert model.model_validate(assembled) == feature.detail
+    assert model.model_validate(assembled) == _expected_detail(
+        feature.detail, stored_id
+    )
 
     # core에는 geometry가 없다 — 직접 조립 reader가 subtype geometry를 제공한다.
-    assembled_row = await feature_repo.get_feature_row(migrated_session, feature_id)
+    assembled_row = await feature_repo.get_feature_row(migrated_session, stored_id)
     assert assembled_row is not None
     direct_geom = (
         await migrated_session.execute(
@@ -980,9 +1144,9 @@ async def test_route_and_area_with_geometry_land_in_subtype(
                 "FROM feature.features AS f "
                 "LEFT JOIN feature.feature_routes AS r ON r.feature_id = f.feature_id "
                 "LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id "
-                "WHERE f.feature_id = :feature_id"
+                "WHERE f.feature_id = CAST(:feature_id AS uuid)"
             ),
-            {"feature_id": feature_id},
+            {"feature_id": stored_id},
         )
     ).scalar_one()
     assert direct_geom == geometry_type
@@ -997,7 +1161,8 @@ async def test_supersede_writes_typed_valid_end_time_and_read_filter_hides_it(
     migrated_session: AsyncSession,
 ) -> None:
     """feed 소멸 supersede가 typed ``valid_end_time``을 쓰고 공개 read가 감산한다."""
-    feature = _notice_feature("tvn35:lifecycle:notice", valid_end_time=None)
+    label = "tvn35:lifecycle:notice"
+    feature = _notice_feature(label, valid_end_time=None)
     await feature_repo.load_bundle(
         migrated_session,
         _bundle(
@@ -1014,11 +1179,12 @@ async def test_supersede_writes_typed_valid_end_time_and_read_filter_hides_it(
         ),
     )
     await migrated_session.flush()
+    feature_id = await _canonical_id(migrated_session, kind="notice", label=label)
 
     visible = await feature_repo.public_active_notice_feature_identities(
-        migrated_session, ["tvn35:lifecycle:notice"]
+        migrated_session, [feature_id]
     )
-    assert set(visible) == {"tvn35:lifecycle:notice"}
+    assert set(visible) == {feature_id}
 
     # supersede 판정은 DB ``now()``와 비교되므로 실시계 기준 과거 시각을 쓴다.
     closed_at = datetime.now(_KST) - timedelta(hours=1)
@@ -1032,20 +1198,18 @@ async def test_supersede_writes_typed_valid_end_time_and_read_filter_hides_it(
     )
     await migrated_session.flush()
 
-    row = await _subtype_row(
-        migrated_session, "feature_notices", "tvn35:lifecycle:notice"
-    )
+    row = await _subtype_row(migrated_session, "feature_notices", feature_id)
     assert row is not None
     assert row["valid_end_time"] == closed_at
 
     # 조립 뷰의 detail도 같은 값을 돌려준다(조립 규칙이 한 곳이라 갈라지지 않는다).
-    assembled = await _detail_from_reader(migrated_session, "tvn35:lifecycle:notice")
+    assembled = await _detail_from_reader(migrated_session, feature_id)
     assert NoticeDetail.model_validate(assembled).valid_end_time == closed_at
 
     # typed 비교 read 필터가 종료된 notice를 감산한다.
     assert (
         await feature_repo.public_active_notice_feature_identities(
-            migrated_session, ["tvn35:lifecycle:notice"]
+            migrated_session, [feature_id]
         )
         == {}
     )
@@ -1055,26 +1219,31 @@ async def test_purge_expired_notices_reads_typed_columns(
     migrated_session: AsyncSession,
 ) -> None:
     """purge가 typed ``valid_end_time``/``valid_start_time``으로 보존 기간을 판정한다."""
-    expired_id = "tvn35:purge:expired"
-    fresh_id = "tvn35:purge:fresh"
-    start_only_id = "tvn35:purge:start-only"
+    expired_label = "tvn35:purge:expired"
+    fresh_label = "tvn35:purge:fresh"
+    start_only_label = "tvn35:purge:start-only"
 
-    for feature_id, end_time, start_time in (
-        (expired_id, _NOW - timedelta(days=800), _NOW - timedelta(days=810)),
-        (fresh_id, _NOW - timedelta(days=1), _NOW - timedelta(days=2)),
-        (start_only_id, None, _NOW - timedelta(days=800)),
+    for label, end_time, start_time in (
+        (expired_label, _NOW - timedelta(days=800), _NOW - timedelta(days=810)),
+        (fresh_label, _NOW - timedelta(days=1), _NOW - timedelta(days=2)),
+        (start_only_label, None, _NOW - timedelta(days=800)),
     ):
         await feature_repo.load_bundle(
             migrated_session,
             _bundle(
                 _notice_feature(
-                    feature_id,
+                    label,
                     valid_start_time=start_time,
                     valid_end_time=end_time,
                 ),
-                source_entity_id=feature_id,
+                source_entity_id=label,
             ),
         )
+
+    expired_id, fresh_id, start_only_id = [
+        await _canonical_id(migrated_session, kind="notice", label=label)
+        for label in (expired_label, fresh_label, start_only_label)
+    ]
 
     purged = await feature_repo.purge_expired_notices(migrated_session)
     await migrated_session.flush()
@@ -1084,8 +1253,9 @@ async def test_purge_expired_notices_reads_typed_columns(
         (
             await migrated_session.execute(
                 text(
-                    "SELECT feature_id, lifecycle_state FROM feature.features "
-                    "WHERE feature_id = ANY(CAST(:ids AS text[]))"
+                    "SELECT CAST(feature_id AS text), lifecycle_state "
+                    "FROM feature.features "
+                    "WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
                 ),
                 {"ids": [expired_id, fresh_id, start_only_id]},
             )
@@ -1107,14 +1277,18 @@ async def test_cross_kind_merge_is_rejected(migrated_session: AsyncSession) -> N
     kind가 어느 subtype에 값이 사는지를 결정하므로 이종 병합은 "provider 정체성만
     옮기고 typed 값은 남기는" 상태가 되어 무결성을 직접 깬다(ADR-086 결과절).
     """
-    await _seed_place(migrated_session, "tvn35:merge:place")
-    event_uuid = await _insert_core(
-        migrated_session, feature_id="tvn35:merge:event", kind="event", category="01010100"
+    place_id = await _seed_place(
+        migrated_session, feature_uuid("tvn35:merge:place")
+    )
+    event_id = await _insert_core(
+        migrated_session,
+        feature_id=feature_uuid("tvn35:merge:event"),
+        kind="event",
+        category="01010100",
     )
     await _insert_subtype(
         migrated_session,
-        feature_id="tvn35:merge:event",
-        feature_uuid=event_uuid,
+        feature_id=event_id,
         kind="event",
         detail={"event_kind": "festival"},
     )
@@ -1123,8 +1297,8 @@ async def test_cross_kind_merge_is_rejected(migrated_session: AsyncSession) -> N
         async with migrated_session.begin_nested(), as_api_runtime(migrated_session):
             await merge_repo.apply_feature_merge(
                 migrated_session,
-                master_id="tvn35:merge:place",
-                loser_id="tvn35:merge:event",
+                master_id=place_id,
+                loser_id=event_id,
                 merged_by="tvn35-test",
             )
 
@@ -1133,16 +1307,22 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
     migrated_session: AsyncSession,
 ) -> None:
     """같은 kind 병합은 정상 동작하고, loser subtype은 ADR-017대로 남는다."""
-    await _seed_place(migrated_session, "tvn35:merge:master", place_kind="cafe")
-    await _seed_place(migrated_session, "tvn35:merge:loser", place_kind="restaurant")
+    master_id = await _seed_place(
+        migrated_session, feature_uuid("tvn35:merge:master"), place_kind="cafe"
+    )
+    loser_id = await _seed_place(
+        migrated_session,
+        feature_uuid("tvn35:merge:loser"),
+        place_kind="restaurant",
+    )
 
     # merge는 실제 API runtime role로 — 0222 executor 게이트가 superuser를 거부하고, superuser는
     # ACL을 안 봐 회귀도 못 잡는다. savepoint 안이라 뒤따르는 superuser 검증 SQL은 그대로다.
     async with migrated_session.begin_nested(), as_api_runtime(migrated_session):
         await merge_repo.apply_feature_merge(
             migrated_session,
-            master_id="tvn35:merge:master",
-            loser_id="tvn35:merge:loser",
+            master_id=master_id,
+            loser_id=loser_id,
             merged_by="tvn35-test",
         )
     await migrated_session.flush()
@@ -1151,19 +1331,17 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
         await migrated_session.execute(
             text(
                 "SELECT lifecycle_state FROM feature.features "
-                "WHERE feature_id = :feature_id"
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
             ),
-            {"feature_id": "tvn35:merge:loser"},
+            {"feature_id": loser_id},
         )
     ).scalar_one()
     assert loser_lifecycle == "retired"
     # retirement은 core-only라 CASCADE가 발동하지 않는다 — typed 값이 보존된다.
     assert (
-        await _subtype_row(migrated_session, "feature_places", "tvn35:merge:loser")
+        await _subtype_row(migrated_session, "feature_places", loser_id)
     ) is not None
-    master_row = await _subtype_row(
-        migrated_session, "feature_places", "tvn35:merge:master"
-    )
+    master_row = await _subtype_row(migrated_session, "feature_places", master_id)
     assert master_row is not None
     assert master_row["place_kind"] == "cafe"
 

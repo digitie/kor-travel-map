@@ -19,6 +19,7 @@ from kortravelmap.infra.price_repo import (
     load_price_values,
     materialize_current_price_summary,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -29,6 +30,13 @@ pytestmark = pytest.mark.integration
 _BASE = datetime(2026, 8, 8, 3, 0, tzinfo=UTC)
 _PROVIDER = "tvn38-price-test"
 _DATASET = "retail_prices"
+
+# T-VN-39(309): 이 파일의 price anchor는 provider claim 경로가 아니라
+# ``INSERT INTO feature.features``로 직접 심는 **정본 축**이라 uuid다. 옛 라벨은
+# 씨앗으로 남겨 실패 메시지의 uuid를 이름으로 되짚을 수 있게 둔다 —
+# ``feature_price_values`` · ``current_price_summary``의 참조도 같은 값이다.
+_PRICE_FEATURE = feature_uuid("tvn38-price-feature")
+_INACTIVE_PRICE_FEATURE = feature_uuid("tvn38-price-inactive")
 
 
 async def _seed_response_record(
@@ -89,12 +97,13 @@ async def test_price_fact_is_immutable_and_current_rank_uses_known_at(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-price-feature', 'price', 'T-VN-38 가격', '00000000')
+            VALUES (:feature_id, 'price', 'T-VN-38 가격', '00000000')
             """
-        )
+        ),
+        {"feature_id": _PRICE_FEATURE},
     )
     value = PriceValue(
-        feature_id="tvn38-price-feature",
+        feature_id=_PRICE_FEATURE,
         provider=_PROVIDER,
         price_domain="opinet_gas_station",
         product_key="gasoline",
@@ -123,9 +132,10 @@ async def test_price_fact_is_immutable_and_current_rank_uses_known_at(
                 FROM feature.current_price_summary AS summary
                 JOIN feature.feature_price_values AS fact
                   ON fact.price_value_key = summary.price_value_key
-                WHERE summary.feature_id = 'tvn38-price-feature'
+                WHERE summary.feature_id = :feature_id
                 """
-            )
+            ),
+            {"feature_id": _PRICE_FEATURE},
         )
     ).mappings().one()
     assert winner["value_number"] == Decimal("1720")
@@ -139,9 +149,10 @@ async def test_price_fact_is_immutable_and_current_rank_uses_known_at(
                     """
                     UPDATE feature.feature_price_values
                     SET value_number = 99
-                    WHERE feature_id = 'tvn38-price-feature'
+                    WHERE feature_id = :feature_id
                     """
-                )
+                ),
+                {"feature_id": _PRICE_FEATURE},
             )
     with pytest.raises(DBAPIError, match="terminal current summary receipt is immutable"):
         async with migrated_session.begin_nested():
@@ -157,15 +168,17 @@ async def test_price_fact_is_immutable_and_current_rank_uses_known_at(
             )
 
     await migrated_session.execute(
-        text("DELETE FROM feature.features WHERE feature_id = 'tvn38-price-feature'")
+        text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+        {"feature_id": _PRICE_FEATURE},
     )
     assert await migrated_session.scalar(
         text(
             """
             SELECT count(*) FROM feature.current_price_summary
-            WHERE feature_id = 'tvn38-price-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _PRICE_FEATURE},
     ) == 0
 
 
@@ -181,15 +194,16 @@ async def test_price_current_reader_hides_inactive_dataset_before_reconcile(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-price-inactive', 'price', 'T-VN-38 inactive price', '00000000')
+            VALUES (:feature_id, 'price', 'T-VN-38 inactive price', '00000000')
             """
-        )
+        ),
+        {"feature_id": _INACTIVE_PRICE_FEATURE},
     )
     assert await load_price_values(
         migrated_session,
         [
             PriceValue(
-                feature_id="tvn38-price-inactive",
+                feature_id=_INACTIVE_PRICE_FEATURE,
                 provider=_PROVIDER,
                 price_domain="opinet_gas_station",
                 product_key="gasoline",
@@ -203,7 +217,7 @@ async def test_price_current_reader_hides_inactive_dataset_before_reconcile(
     ) == 1
     active = await build_price_card(
         migrated_session,
-        feature_id="tvn38-price-inactive",
+        feature_id=_INACTIVE_PRICE_FEATURE,
         stale_hide_days=None,
     )
     assert len(active.current) == 1
@@ -220,7 +234,7 @@ async def test_price_current_reader_hides_inactive_dataset_before_reconcile(
     )
     inactive = await build_price_card(
         migrated_session,
-        feature_id="tvn38-price-inactive",
+        feature_id=_INACTIVE_PRICE_FEATURE,
         stale_hide_days=None,
     )
     assert inactive.current == []

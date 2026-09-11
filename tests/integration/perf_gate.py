@@ -14,10 +14,11 @@ SQL 상수는 ``feature_repo``의 정본을 **읽기만** 하고 재구현하지
 
 from __future__ import annotations
 
+import uuid as uuid_module
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import event, text
 
@@ -47,11 +48,59 @@ __all__ = [
     "measure_index_write_cost",
     "query_result_columns",
     "seed_hot_query_features",
+    "seed_uuid_namespace",
+    "seeded_feature_id",
     "seq_scan_relations",
     "walk_plan",
 ]
 
-_SEED_FEATURE_ID = "perf:f:000100"
+
+# ---------------------------------------------------------------------------
+# seed 라벨 → 정본 키(uuid) 대역
+# ---------------------------------------------------------------------------
+
+# T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid이고, 값을
+# 채워 주던 ``trg_features_feature_uuid_fill``도 영구 제거됐다 — seed가 정본 키를
+# **직접** 넣어야 한다. 그런데 ``gen_random_uuid()``로 흩뿌리면 tier-1 hot query가
+# 겨누는 "그 50건"을 seed 밖에서 다시 알아낼 방법이 없다(EXPLAIN 파라미터는 seed
+# 이전에 정해진다).
+#
+# 그래서 종전의 라벨(``perf:f:``/``tier2:f:``)을 버리지 않고 uuid **대역**으로
+# 접는다: 라벨이 상위 20자리를, 순번이 하위 12자리를 정한다. 이 형태가 종전 문자열
+# id의 세 성질을 그대로 옮긴다.
+#
+# - **결정적**: 파이썬과 SQL이 seed 없이도 같은 값을 만든다.
+# - **라벨별 분리**: 라벨이 다르면 대역이 겹치지 않는다 — tier-2가 "고정 fixture
+#   id에 기대지 않는다"를 검사할 때 두 seed를 가르는 축이 남는다.
+# - **순번 정렬 = uuid 정렬**: uuid 비교는 16바이트 사전식이고 대역이 상수이므로,
+#   공개 batch selector의 ``ORDER BY feature_id``가 종전 문자열 정렬과 같은 순서를
+#   낸다.
+_SEED_UUID_LABEL_NAMESPACE: Final[uuid_module.UUID] = uuid_module.UUID(
+    "f39d0000-0000-7000-8000-000000000000"
+)
+
+
+def seed_uuid_namespace(feature_id_prefix: str) -> str:
+    """seed 라벨 → 그 라벨이 쓰는 ``feature_id`` uuid의 상위 20자리(순번 앞까지).
+
+    버전/변이 nibble을 7/8로 못 박아 canonical UUIDv7 표기를 유지한다 — 응답
+    경계가 돌려주는 값과 같은 모양이라야 fixture가 운영과 다른 형태를 planner에
+    보여주지 않는다.
+    """
+
+    label = uuid_module.uuid5(_SEED_UUID_LABEL_NAMESPACE, feature_id_prefix).hex
+    return f"{label[:8]}-{label[8:12]}-7{label[13:16]}-8{label[17:20]}-"
+
+
+def seeded_feature_id(feature_id_prefix: str, index: int) -> str:
+    """``feature_id_prefix`` 대역의 ``index``번째 seed feature 정본 키(uuid text)."""
+
+    return f"{seed_uuid_namespace(feature_id_prefix)}{index:012x}"
+
+
+#: tier-1 기본 seed 라벨. ``seed_hot_query_features``의 기본값과 같아야 한다.
+_SEED_FEATURE_ID_PREFIX: Final[str] = "perf:f:"
+_SEED_FEATURE_ID = seeded_feature_id(_SEED_FEATURE_ID_PREFIX, 100)
 
 
 # ---------------------------------------------------------------------------
@@ -135,26 +184,27 @@ _COORD_5179_SPATIAL = ("idx_features_coord_5179_gist", "idx_features_coord_5179"
 
 # features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
 #
-# alembic 0083(T-VN-32C)이 복합 FK ``fk_feature_aliases_identity_pair``의 참조
-# 대상으로 ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``를
-# 만들면서, PK와 선두 컬럼이 같은 btree가 하나 더 생겼다. planner는
-# ``feature_uuid``까지 투영하는 hot query(공개 detail — 0081 이후 응답에
-# ``feature_uuid``가 additive로 들어간다)에서 이 covering index를 골라
-# index-only scan을 한다.
+# T-VN-35(alembic 0084)의 배타 arc 참조 대상 ``UNIQUE (feature_id, kind)``는 PK와
+# 선두 컬럼이 같은 btree라, ``kind``까지 투영하는 hot query에서 planner가 이 covering
+# index를 골라 index-only scan을 한다. 309 재키가 그 제약을
+# ``uq_features_identity_kind`` → ``uq_features_id_kind``로 개명했다(``_UNIQUE_RENAME``)
+# — 이름이 "identity"를 자칭할 이유가 없어졌기 때문이다.
 #
-# T-VN-35(alembic 0084)이 배타 arc 참조 대상 ``uq_features_identity_kind
-# UNIQUE (feature_id, kind)``를 추가하며 같은 성격의 btree가 하나 더 늘었다 —
-# ``kind``까지 투영하는 hot query는 이쪽을 골라 index-only scan을 한다.
+# 같은 성격이던 ``uq_features_identity_pair UNIQUE (feature_id, feature_uuid)``는
+# **사라졌다.** 309 ``_SHADOW_DROP``의 ``features DROP COLUMN feature_uuid``가 그
+# 제약을 함께 지웠고 ``_COLLATERAL_RECREATE``도 되살리지 않는다 — 두 컬럼이 한
+# 값의 두 표기가 된 마당에 (feature_id, feature_uuid) 복합 unique는 PK의 사본이다.
+# 그래서 이 목록에서도 뺀다: 남겨 두면 "돌아올 수 없는 index"를 기대 이름으로
+# 계속 세어 gate가 무엇을 보장하는지 흐려진다.
 #
-# 성능 축은 **약화되지 않는다** — 선두 컬럼이 PK와 같아 selectivity가 동일하고,
-# heap 접근이 줄어드는 쪽이다. gate가 지키려는 것은 "Seq Scan 금지 + index
-# 접근"이므로 이 이름들을 동치로 받는다. (PK 자체가 사라지는 회귀는
+# 성능 축은 **약화되지 않는다** — 남은 이름들은 선두 컬럼이 PK와 같아 selectivity가
+# 동일하고, heap 접근이 줄어드는 쪽이다. gate가 지키려는 것은 "Seq Scan 금지 +
+# index 접근"이므로 이 이름들을 동치로 받는다. (PK 자체가 사라지는 회귀는
 # ``assert_no_seq_scan_on``이 계속 잡는다.)
 _FEATURES_PK_ACCESS = (
     "pk_features",
     "features_pkey",
-    "uq_features_identity_pair",
-    "uq_features_identity_kind",
+    "uq_features_id_kind",
 )
 
 HOT_QUERIES: tuple[HotQuery, ...] = (
@@ -167,14 +217,20 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
     HotQuery(
         "public batch (ANY ids)",
         _GET_PUBLIC_FEATURES_BY_IDS_SQL,
-        {"feature_ids": [f"perf:f:{i:06d}" for i in range(1, 51)]},
+        {
+            "feature_ids": [
+                seeded_feature_id(_SEED_FEATURE_ID_PREFIX, i) for i in range(1, 51)
+            ]
+        },
         expected_indexes=_FEATURES_PK_ACCESS,
     ),
     HotQuery(
         "service feature batch 5-state (200)",
         _SERVICE_FEATURE_BATCH_SQL,
         {
-            "feature_ids": [f"perf:f:{i:06d}" for i in range(1, 201)],
+            "feature_ids": [
+                seeded_feature_id(_SEED_FEATURE_ID_PREFIX, i) for i in range(1, 201)
+            ],
             "known_row_revisions": [None] * 200,
         },
         expected_indexes=_FEATURES_PK_ACCESS,
@@ -423,7 +479,9 @@ INSERT INTO feature.features (
     created_at, updated_at
 )
 SELECT
-    :feature_id_prefix || lpad(g::text, 6, '0') AS feature_id,
+    -- 재키 뒤 정본 키는 uuid다. 라벨 대역(상위 20자리) + 순번(하위 12자리) —
+    -- ``seed_uuid_namespace``/``seeded_feature_id``가 같은 값을 파이썬에서 만든다.
+    CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid) AS feature_id,
     CASE WHEN g % 19 = 0 THEN 'event' WHEN g % 23 = 0 THEN 'weather'
          ELSE 'place' END AS kind,
     CASE
@@ -463,21 +521,21 @@ FROM generate_series(1, :n) AS g
 #: place/event subtype seed — core seed와 같은 kind 분기를 따른다. weather는
 #: subtype이 없다(값 정본은 ``feature_weather_values``).
 _SEED_PLACE_SUBTYPE_SQL = """
-INSERT INTO feature.feature_places (feature_id, feature_uuid, kind, place_kind)
-SELECT f.feature_id, f.feature_uuid, f.kind, 'attraction'
+INSERT INTO feature.feature_places (feature_id, kind, place_kind)
+SELECT f.feature_id, f.kind, 'attraction'
 FROM feature.features AS f
-WHERE f.feature_id LIKE :feature_id_prefix || '%' AND f.kind = 'place'
+WHERE CAST(f.feature_id AS text) LIKE :uuid_namespace || '%' AND f.kind = 'place'
 """
 
 _SEED_EVENT_SUBTYPE_SQL = """
 INSERT INTO feature.feature_events (
-    feature_id, feature_uuid, kind, event_kind, starts_on, ends_on
+    feature_id, kind, event_kind, starts_on, ends_on
 )
 SELECT
-    f.feature_id, f.feature_uuid, f.kind, 'festival',
+    f.feature_id, f.kind, 'festival',
     CURRENT_DATE - 3, CURRENT_DATE + 3
 FROM feature.features AS f
-WHERE f.feature_id LIKE :feature_id_prefix || '%' AND f.kind = 'event'
+WHERE CAST(f.feature_id AS text) LIKE :uuid_namespace || '%' AND f.kind = 'event'
 """
 
 # source_entities/records/links — 공개 read가 공유하는 notice 감산
@@ -563,7 +621,7 @@ INSERT INTO provider_sync.source_links (
     match_method, confidence, created_at
 )
 SELECT
-    :feature_id_prefix || lpad(g::text, 6, '0'),
+    CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
     'perf:se:' || lpad(g::text, 6, '0'),
     'primary', 'natural_key', 100, now()
 FROM generate_series(1, :n) AS g
@@ -574,7 +632,7 @@ async def seed_hot_query_features(
     session: AsyncSession,
     *,
     n: int = 3200,
-    feature_id_prefix: str = "perf:f:",
+    feature_id_prefix: str = _SEED_FEATURE_ID_PREFIX,
 ) -> None:
     """서울/부산/제주 분포의 features + primary source lineage를 seed하고 ANALYZE한다.
 
@@ -584,23 +642,24 @@ async def seed_hot_query_features(
     상태면 planner가 features를 seq-scan한다). ops/review 계열은 public hot query에
     불필요해 생략한다. n은 selective 쿼리에서 planner가 index를 선호하기에 충분하다.
     ``feature_id_prefix``는 tier-2가 고정 fixture ID에 의존하지 않는 경로를 검증할 때만
-    바꾸며 tier-1 기본 계약은 ``perf:f:``를 유지한다.
+    바꾸며 tier-1 기본 계약은 ``perf:f:``를 유지한다. T-VN-39 재키 뒤 그 라벨은
+    ``feature_id`` 값에 문자열로 남지 않고 uuid **대역**으로 접힌다
+    (:func:`seed_uuid_namespace`) — 라벨별 분리와 순번 정렬은 그대로다.
     """
 
+    uuid_namespace = seed_uuid_namespace(feature_id_prefix)
     await session.execute(
         text(_SEED_FEATURES_SQL),
-        {"n": n, "feature_id_prefix": feature_id_prefix},
+        {"n": n, "uuid_namespace": uuid_namespace},
     )
     for subtype_sql in (_SEED_PLACE_SUBTYPE_SQL, _SEED_EVENT_SUBTYPE_SQL):
-        await session.execute(
-            text(subtype_sql), {"feature_id_prefix": feature_id_prefix}
-        )
+        await session.execute(text(subtype_sql), {"uuid_namespace": uuid_namespace})
     await session.execute(text(_SEED_PERF_PROVIDER_DATASETS_SQL))
     await session.execute(text(_SEED_SOURCE_ENTITIES_SQL), {"n": n})
     await session.execute(text(_SEED_SOURCE_RECORDS_SQL), {"n": n})
     await session.execute(text(_SEED_SOURCE_ENTITY_HEADS_SQL), {"n": n})
     await session.execute(
         text(_SEED_SOURCE_LINKS_SQL),
-        {"n": n, "feature_id_prefix": feature_id_prefix},
+        {"n": n, "uuid_namespace": uuid_namespace},
     )
     await session.execute(text("ANALYZE"))

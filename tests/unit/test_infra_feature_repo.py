@@ -67,6 +67,11 @@ _SEARCH_CURSOR_KEY = b"unit-test-feature-search-cursor-signing-key-0001"
 def _place(coord: Coordinate | None, detail: PlaceDetail | None) -> Feature:
     return Feature(
         feature_id="place:abc123",
+        # ADR-098: provider Feature의 identity 축은
+        # `(provider_dataset_id, feature_kind, natural_key)`다. 셋째 성분이 비면
+        # write 경로가 `FeatureIdentityAnchorError`로 막는다 — 그 fail-close가
+        # 이 픽스처에도 적용된다.
+        provider_natural_key="abc123",
         kind=FeatureKind.PLACE,
         name="홍대 카페",
         category="02020101",
@@ -216,10 +221,17 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
         async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
             sql = str(statement)
             self.calls.append((sql, params))
-            if "create_feature_with_initial_state" in sql:
+            if "create_provider_feature_with_initial_state" in sql:
                 payload = json.loads(params["feature_payload"])
                 assert "status" not in payload
                 assert "deleted_at" not in payload
+                # ADR-098: identity 축 세 성분 + legacy alias가 wrapper로 간다.
+                assert json.loads(params["identity"]) == {
+                    "provider_dataset_id": "17",
+                    "feature_kind": "place",
+                    "natural_key": "abc123",
+                    "legacy_alias": "place:abc123",
+                }
                 assert json.loads(params["state_context"]) == {
                     "transition_kind": "provider_sync",
                     "reason_code": "provider_initial",
@@ -227,10 +239,11 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
                     "source_entity_key": "entity:17",
                     "source_record_key": "record:17",
                 }
+                # wrapper가 claim한 uuid를 돌려준다 — 호출자가 후보를 보내지 않는다.
                 return _Result(
                     {
                         "o_inserted": True,
-                        "o_feature_uuid": payload["feature_uuid"],
+                        "o_feature_id": "00000000-0000-7000-8000-00000000c0de",
                     }
                 )
             return _Result()
@@ -249,8 +262,10 @@ async def test_provider_create_uses_procedure_and_omits_legacy_state(
     )
 
     assert inserted is True
+    # ADR-098 뒤로 provider 경로는 core를 직접 부르지 않는다 — wrapper가 identity를
+    # 먼저 claim하고 그 uuid로 core를 부른다.
     assert any(
-        "CALL feature.create_feature_with_initial_state" in sql
+        "CALL feature.create_provider_feature_with_initial_state" in sql
         for sql, _params in session.calls
     )
 
@@ -287,19 +302,29 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
         async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
             sql = str(statement)
             self.calls.append(sql)
-            if "create_feature_with_initial_state" in sql:
-                self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
+            if "create_provider_feature_with_initial_state" in sql:
+                # ADR-098 wrapper는 identity를 claim하고 그 uuid를 돌려준다.
+                # 호출자가 후보를 보내지 않으므로 여기서도 만들어 준다.
+                self.feature_uuid = "00000000-0000-7000-8000-00000000c0de"
                 return _Result(
                     {
                         "o_inserted": False,
-                        "o_feature_uuid": self.feature_uuid,
+                        "o_feature_id": self.feature_uuid,
                         "o_row_revision": 7,
                     }
                 )
             if "apply_provider_feature_field_patch" in sql:
+                # T-VN-39: 이 프로시저는 **정본 키**를 받고 되돌려준다. 대역이
+                # DTO의 legacy `f_*`를 돌려주면 호출자의 identity 대조가
+                # 통과하고(둘 다 legacy), 운영에서만 22P02가 나는 상태를
+                # 이 테스트가 초록으로 덮는다. 실제로 그렇게 덮여 있었다.
+                assert params["feature_id"] == self.feature_uuid, (
+                    "field patch는 정본 키를 받아야 한다 — DTO의 legacy 주소는 "
+                    "uuid 캐스트에서 22P02다"
+                )
                 return _Result(
                     {
-                        "o_feature_id": feature.feature_id,
+                        "o_feature_id": self.feature_uuid,
                         "o_row_revision": 8,
                         "o_applied_field_count": 25,
                     }
@@ -326,6 +351,75 @@ async def test_existing_provider_refresh_uses_typed_field_patch(
     assert any("apply_provider_feature_field_patch" in call for call in session.calls)
     assert not any("UPDATE feature.features AS f" in call for call in session.calls)
     assert not any("materialize_provider_feature_version" in call for call in session.calls)
+
+
+@pytest.mark.asyncio
+async def test_new_provider_feature_writes_subtype_with_the_canonical_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """신규 provider Feature의 subtype writer는 **정본 키**를 받는다.
+
+    subtype 컬럼은 T-VN-39 재키(309) 뒤 uuid다. ``Feature.feature_id``는 provider
+    라이브러리가 유도한 legacy 주소이므로 그것을 넘기면 22P02이고, 그러면 **신규
+    provider Feature 적재 전량**이 죽는다 — 2026-09-10 통합 런이 그 상태를 잡았다.
+
+    기존 Feature 갱신 갈래는 형제 테스트
+    (`test_existing_provider_refresh_uses_typed_field_patch`)가 본다. 두 갈래가
+    같은 실수를 동시에 갖고 있었으므로 두 자리 다 못박는다.
+    """
+
+    canonical = "00000000-0000-7000-8000-00000000face"
+
+    class _Mappings:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def one(self) -> dict[str, Any]:
+            assert self._row is not None
+            return self._row
+
+        def one_or_none(self) -> dict[str, Any] | None:
+            return self._row
+
+    class _Result:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def mappings(self) -> _Mappings:
+            return _Mappings(self._row)
+
+    class _Session:
+        async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
+            sql = str(statement)
+            if "create_provider_feature_with_initial_state" in sql:
+                return _Result(
+                    {
+                        "o_inserted": True,
+                        "o_feature_id": canonical,
+                        "o_row_revision": 1,
+                    }
+                )
+            if "feature-curation-write" in sql:
+                return _Result(None)
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    seen: dict[str, Any] = {}
+
+    async def _record_subtype(*_args: Any, **kwargs: Any) -> None:
+        seen.update(kwargs)
+
+    monkeypatch.setattr(feature_repo, "write_subtype", _record_subtype)
+
+    inserted = await feature_repo.upsert_feature(
+        _Session(),  # type: ignore[arg-type]
+        _place(None, None),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+    )
+
+    assert inserted is True
+    assert seen["feature_id"] == canonical
+    assert seen["kind"] == "place"
 
 
 @pytest.mark.asyncio
@@ -562,7 +656,6 @@ def test_feature_detail_maps_to_typed_subtype_params() -> None:
     )
     params = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid="00000000-0000-4000-8000-000000000001",
         kind=feature.kind.value,
         detail=feature.detail,
     )
@@ -584,7 +677,6 @@ def test_feature_params_without_coord_is_none() -> None:
     # detail 미지정이어도 subtype 파라미터는 kind DTO 기본값으로 채워진다.
     subtype = subtype_params(
         feature_id=feature.feature_id,
-        feature_uuid="00000000-0000-4000-8000-000000000001",
         kind=feature.kind.value,
         detail=feature.detail,
     )

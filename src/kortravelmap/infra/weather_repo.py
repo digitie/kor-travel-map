@@ -9,7 +9,7 @@ raw SQL은 본 모듈에 모음(ADR-004). commit은 호출자 책임.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -23,6 +23,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 
 if TYPE_CHECKING:
     from sqlalchemy import RowMapping
@@ -93,7 +94,7 @@ WEATHER_BATCH_MAX_FEATURE_IDS_PER_TARGET: Final[int] = 200
 """target group 하나의 Feature ID 상한."""
 
 WEATHER_BATCH_MAX_FEATURE_ID_LENGTH: Final[int] = 256
-"""request body와 PostgreSQL text[] 메모리를 제한하는 Feature ID 문자 상한."""
+"""request body와 PostgreSQL uuid[] 메모리를 제한하는 Feature ID 문자 상한."""
 
 WEATHER_BATCH_MAX_PAIRS: Final[int] = 2_000
 """한 요청에서 실제 조회하는 ``target_at × feature_id`` pair 상한."""
@@ -167,7 +168,7 @@ class WeatherBatchItem:
     있는 상태(found/no_data)에서 채워지고 retired면 ``None``.
     """
 
-    feature_id: str
+    feature_id: str | None
     state: WeatherBatchItemState
     card_key: str | None
     feature_uuid: str | None = None
@@ -190,7 +191,11 @@ class WeatherBatchTarget:
     """한 target 시각에 조회할 순서 보존 Feature ID 집합."""
 
     target_at: datetime
-    feature_ids: tuple[str, ...]
+    #: ``None`` 원소는 정본 키로 풀지 못한 참조다(T-VN-39). 라우터가 원문 문자열을
+    #: 흘리는 대신 그렇게 바꾼다 — `CAST(:feature_ids AS uuid[])`에 legacy `f_*`가
+    #: 닿으면 22P02로 batch **전체**가 죽기 때문이다. NULL 원소는 `unnest`가 한 행으로
+    #: 만들고 LEFT JOIN이 무매칭이라 그 item만 `no_data`가 된다.
+    feature_ids: tuple[str | None, ...]
 
 
 @dataclass(frozen=True)
@@ -336,7 +341,8 @@ INSERT INTO feature.feature_weather_values (
     observed_at, target_at, known_at, normalization_version, payload,
     source_entity_key, source_record_key
 ) VALUES (
-    :weather_value_key, :feature_id, :provider_dataset_id, :weather_domain, :forecast_style,
+    :weather_value_key, CAST(:feature_id AS uuid), :provider_dataset_id,
+    :weather_domain, :forecast_style,
     :timeline_bucket, :metric_key, :metric_name, :source_metric_key, :source_metric_name,
     :value_number, :value_text, :unit, :severity, :issued_at, :valid_at,
     CASE WHEN CAST(:valid_from AS timestamptz) IS NULL
@@ -515,7 +521,7 @@ _DELETE_SUPERSEDED_WEATHER_SUMMARIES_SQL: Final[str] = """
 WITH desired AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:identities AS jsonb)) AS row(
-        feature_id text,
+        feature_id uuid,
         provider_dataset_id bigint,
         weather_domain text,
         forecast_style text,
@@ -710,7 +716,7 @@ _WEATHER_BATCH_SQL: Final[str] = """
 WITH requested AS (
     SELECT item.feature_id, item.target_at, item.ordinality
     FROM unnest(
-        CAST(:feature_ids AS text[]),
+        CAST(:feature_ids AS uuid[]),
         CAST(:target_ats AS timestamptz[])
     ) WITH ORDINALITY AS item(feature_id, target_at, ordinality)
 ),
@@ -720,7 +726,6 @@ parents AS (
         requested.target_at,
         requested.ordinality,
         visible.feature_id AS visible_feature_id,
-        visible.feature_uuid,
         visible.coord_5179
     FROM requested
     LEFT JOIN feature.public_features AS visible
@@ -896,7 +901,7 @@ source_bundles AS (
         coalesce(
             array_agg(source.source_feature_id ORDER BY source.tier, source.source_feature_id)
                 FILTER (WHERE source.source_feature_id IS NOT NULL),
-            CAST(ARRAY[] AS text[])
+            CAST(ARRAY[] AS uuid[])
         ) AS source_feature_ids
     FROM parents AS parent
     LEFT JOIN sources AS source USING (ordinality, target_at)
@@ -1143,7 +1148,7 @@ weather_response_size AS (
             'value_number', value_number,
             'value_text', value_text
         ) AS text))), 0)
-        + (SELECT coalesce(sum(256 + octet_length(feature_id)), 0) FROM parents)
+        + (SELECT coalesce(sum(256 + octet_length(CAST(feature_id AS text))), 0) FROM parents)
         + (SELECT count(*) * 256 FROM cards)
     )::bigint AS value
     FROM weather_rows
@@ -1162,7 +1167,7 @@ batch_rows AS (
         'item'::text AS row_kind,
         parent.ordinality AS item_ordinality,
         parent.feature_id,
-        CAST(parent.feature_uuid AS text) AS feature_uuid,
+        CAST(parent.visible_feature_id AS text) AS feature_uuid,
         CASE WHEN parent.visible_feature_id IS NOT NULL AND state.has_weather
              THEN parent_card.card_ordinal END AS card_ordinal,
         CASE
@@ -1200,7 +1205,7 @@ batch_rows AS (
     SELECT
         'metric'::text,
         NULL::bigint,
-        NULL::text,
+        NULL::uuid,
         NULL::text,
         weather.card_ordinal,
         NULL::text,
@@ -1521,7 +1526,7 @@ WITH input AS (
 )
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1551,7 +1556,7 @@ WITH target AS (
 )
 SELECT
     f.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
@@ -1577,7 +1582,7 @@ WITH alert_records AS (
     SELECT
         sr.source_record_key,
         f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
+        CAST(f.feature_id AS text) AS feature_uuid,
         f.name AS feature_name,
         sr.raw_data,
         sr.raw_data->>'region_code' AS region_code,
@@ -1667,7 +1672,10 @@ def _weather_target_at(value: WeatherValue) -> datetime:
 
 
 def _weather_value_params(
-    value: WeatherValue, *, context: _WeatherValueWriteContext
+    value: WeatherValue,
+    *,
+    context: _WeatherValueWriteContext,
+    canonical_feature_ids: Mapping[str, str],
 ) -> dict[str, Any]:
     target_at = _weather_target_at(value)
     key = make_weather_value_key(
@@ -1681,7 +1689,10 @@ def _weather_value_params(
     )
     return {
         "weather_value_key": key,
-        "feature_id": value.feature_id,
+        # T-VN-39: 컬럼은 uuid다. 값 키(`key`)는 **위에서 provider가 준 참조로**
+        # 이미 만들어졌고 그것을 흔들면 기존 행 전체가 중복이 된다 — 바꾸는 것은
+        # 컬럼에 들어가는 값뿐이다(`infra/canonical_feature_ids.py`).
+        "feature_id": canonical_feature_ids[value.feature_id],
         "provider_dataset_id": context.provider_dataset_id,
         "weather_domain": _enum_value(value.weather_domain),
         "forecast_style": _enum_value(value.forecast_style),
@@ -1758,7 +1769,16 @@ async def load_weather_values(
         source_record_key=source_record.source_record_key,
         known_at=lineage["fetched_at"],
     )
-    params = [_weather_value_params(v, context=context) for v in values]
+    materialized = list(values)
+    canonical_feature_ids = await resolve_canonical_feature_ids(
+        session, (v.feature_id for v in materialized)
+    )
+    params = [
+        _weather_value_params(
+            v, context=context, canonical_feature_ids=canonical_feature_ids
+        )
+        for v in materialized
+    ]
     if not params:
         return 0
     await session.execute(text(_IMMUTABLE_INSERT_SQL), params)
@@ -2074,9 +2094,10 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 def _alert_history_row(row: RowMapping) -> WeatherAlertHistoryRow:
     feature_uuid = row.get("feature_uuid")
+    feature_id = row["feature_id"]
     return WeatherAlertHistoryRow(
         source_record_key=str(row["source_record_key"]),
-        feature_id=row["feature_id"],
+        feature_id=str(feature_id) if feature_id is not None else None,
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         feature_name=row["feature_name"],
         region_code=row["region_code"],
@@ -2202,7 +2223,7 @@ async def get_weather_batch_snapshots(
     if not 0 < query_timeout_seconds <= WEATHER_BATCH_QUERY_TIMEOUT_SECONDS:
         raise ValueError("weather batch query timeout is out of range")
 
-    feature_ids: list[str] = []
+    feature_ids: list[str | None] = []
     target_ats: list[datetime] = []
     previous_target_at: datetime | None = None
     for target in targets:
@@ -2216,7 +2237,8 @@ async def get_weather_batch_snapshots(
         if len(target.feature_ids) != len(set(target.feature_ids)):
             raise ValueError("weather batch target feature_ids must be unique")
         if any(
-            len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
+            feature_id is not None
+            and len(feature_id) > WEATHER_BATCH_MAX_FEATURE_ID_LENGTH
             for feature_id in target.feature_ids
         ):
             raise ValueError("weather batch feature_id length exceeds limit")
@@ -2293,7 +2315,7 @@ async def get_weather_batch_snapshots(
     timeline_by_card: dict[int, list[WeatherMetric]] = {}
     state_by_ordinal: dict[int, WeatherBatchItemState] = {}
     card_by_ordinal: dict[int, int | None] = {}
-    feature_by_ordinal: dict[int, str] = {}
+    feature_by_ordinal: dict[int, str | None] = {}
     feature_uuid_by_ordinal: dict[int, str | None] = {}
     valid_states: frozenset[str] = frozenset({"found", "no_data", "retired"})
     for row in rows:
@@ -2313,7 +2335,10 @@ async def get_weather_batch_snapshots(
                 raise RuntimeError("non-found weather batch item references a card")
             state_by_ordinal[ordinal] = cast(WeatherBatchItemState, raw_state)
             card_by_ordinal[ordinal] = card_ordinal
-            feature_by_ordinal[ordinal] = str(row["feature_id"])
+            observed_feature_id = row["feature_id"]
+            feature_by_ordinal[ordinal] = (
+                None if observed_feature_id is None else str(observed_feature_id)
+            )
             raw_feature_uuid = row.get("feature_uuid")
             feature_uuid_by_ordinal[ordinal] = (
                 str(raw_feature_uuid) if raw_feature_uuid is not None else None

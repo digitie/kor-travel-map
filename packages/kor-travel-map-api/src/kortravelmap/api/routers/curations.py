@@ -1919,9 +1919,27 @@ async def preview_admin_curation_import(
             ),
         )
     dry_run = True
-    # T-VN-32C PR-2 (W8) — CSV의 UUID 표기 feature 참조를 legacy 정본 키로
-    # 일괄 정규화해 매칭한다 (miss는 원문 유지 → 기존 unmatched 흐름,
-    # requested_feature_id echo는 CSV 원문 보존).
+    # T-VN-32C PR-2 (W8) — CSV의 feature 참조를 정본 키로 일괄 해석해 매칭한다
+    # (requested_feature_id echo는 CSV 원문 보존).
+    #
+    # T-VN-39 (ADR-098 결정 6) — 재키 뒤 matcher 요청 가상표의 ``feature_id``는
+    # uuid이므로 **미해석 참조를 원문 그대로 흘리면 22P02로 preview/commit 전체가
+    # 500이 된다**. alias 발급이 provider/backfill 두 경로로 좁혀진 뒤로는 alias가
+    # 아예 없는 manual·큐레이션 Feature를 가리키던 옛 f_* 참조가 실제로 여기
+    # 도달한다. ``resolved_uuid_or_none``이 그 자리를 대신한다 — 해석 miss라도
+    # **canonical uuid 표기는 그대로 통과**하므로(없는 정본 키 조회 = 빈 후보 =
+    # 종전 unmatched와 동일), ``None``이 되는 것은 uuid로 캐스팅조차 불가능한
+    # 참조뿐이다.
+    #
+    # 그 ``None``을 요청에 실으면 안 된다: 가상표의 NULL은 "ID를 안 적은 행"을
+    # 뜻해(``_RESOLVE_FEATURES_BATCH_SQL``의 두 번째 LATERAL arm이
+    # ``requested.feature_id IS NULL AND requested.place_name IS NOT NULL``)
+    # 이름 후보 매칭으로 넘어가고, 후보가 1건이면 ``_adopted_match``가 그것을
+    # **자동 채택**해 운영자가 적지 않은 Feature에 링크가 박힌다("CSV가 명시한
+    # exact Feature ID만 자동 채택한다"는 그 함수의 계약 위반 — plan에 굳어
+    # commit까지 간다). 그래서 **명시 참조가 None으로 떨어진 행은 matcher 요청에서
+    # 통째로 뺀다** — ``matches_by_row.get(..., ())``가 빈 후보를 돌려줘, 명시한
+    # uuid가 DB에 없을 때와 **같은** unmatched 흐름이 된다.
     csv_refs: list[str] = []
     for preview_row in preview.rows:
         if preview_row.status != "valid" or not preview_row.feature_id:
@@ -1936,10 +1954,18 @@ async def preview_admin_curation_import(
     )
 
     def _match_feature_id(raw: str | None) -> str | None:
+        """CSV 참조 → 정본 키(uuid). 미기재이거나 uuid로 못 읽으면 ``None``."""
         if not raw:
             return None
-        identity = resolved_csv_refs.get(raw)
-        return identity.feature_id if identity is not None else raw
+        return feature_identity.resolved_uuid_or_none(raw, resolved_csv_refs)
+
+    def _has_unresolved_feature_ref(raw: str | None) -> bool:
+        """CSV가 **명시**한 참조인데 uuid로 못 읽는가 (matcher 요청 제외 조건).
+
+        "명시했다"의 판정은 ``_adopted_match``와 같은 ``strip()`` 규칙이다 —
+        공백뿐인 값은 양쪽 모두 "ID 미기재"로 보고 이름 후보 흐름에 남긴다.
+        """
+        return bool((raw or "").strip()) and _match_feature_id(raw) is None
 
     matches_by_row = await curation_repo.resolve_feature_matches(
         session,
@@ -1951,7 +1977,7 @@ async def preview_admin_curation_import(
                 address_hint=row.address_hint or None,
             )
             for row in preview.rows
-            if row.status == "valid"
+            if row.status == "valid" and not _has_unresolved_feature_ref(row.feature_id)
         ),
     )
     item_views: list[CurationImportRowView] = []
@@ -2396,7 +2422,16 @@ async def list_admin_theme_candidates(
             source_id=str(source_id) if source_id else None,
             review_state=review_state,
             eligibility_present=eligibility_present,
-            feature_id=feature_id,
+            # T-VN-39: 이 값은 `CAST(:feature_id AS uuid)`로 들어간다
+            # (`curation_candidate_repo._LIST_SQL`). 형제 필터 셋은 `UUID` 타입이라
+            # FastAPI가 걸러 주지만 이 자리만 자유 문자열이다 — 원문을 그대로 넘기면
+            # legacy `f_*`도, 오타 섞인 uuid도 22P02(`sqlalchemy.exc.DataError`)가
+            # 되고 아래 `except ValueError`는 그것을 잡지 못해 **500**이 나간다.
+            # 자매 표면(`/admin/issues`·`/ops/consistency/issues`)과 같은 처방으로
+            # 맞춘다.
+            feature_id=await feature_identity.canonical_feature_id_for_filter(
+                session, feature_id
+            ),
             limit=page_size,
             cursor=cursor,
         )
@@ -3036,14 +3071,18 @@ async def add_admin_curation_item(
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
     payload = body.model_dump()
-    # T-VN-32C PR-2 (W6) — 값 전환 후 admin이 복사한 UUID 참조를 legacy 정본
-    # 키로 정규화한다 (miss는 원문 유지 — 기존 "active Feature 아님" 422 계약
-    # 이 판정).
-    if payload.get("feature_id") is not None:
-        payload["feature_id"] = await feature_identity.legacy_id_for_filter(
-            session, payload["feature_id"]
-        )
     try:
+        # T-VN-32C PR-2 (W6) — admin이 복사한 참조를 정본 키로 정규화한다.
+        # T-VN-39: curation item의 feature 참조는 uuid 컬럼으로 들어간다.
+        # canonical uuid인데 없는 경우는 그대로 넘겨 기존 "active Feature 아님"
+        # 422가 판정하고, 어떤 Feature도 가리키지 않는 문자열은 여기서
+        # ValueError가 되어 아래 handler가 같은 422로 옮긴다 — 전에는 22P02였다.
+        if payload.get("feature_id") is not None:
+            payload["feature_id"] = (
+                await feature_identity.canonical_feature_id_for_filter(
+                    session, payload["feature_id"]
+                )
+            )
         async with domain_command_transaction(session):
             command = domain_command_service.current_domain_command()
             item = await curation_repo.create_curation_item_command(
@@ -3093,12 +3132,14 @@ async def patch_admin_curation_item(
     expected_revision = parse_revision_header(request, "If-Match", required=True)
     assert expected_revision is not None
     updates = body.model_dump(exclude_unset=True)
-    # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
-    if updates.get("feature_id") is not None:
-        updates["feature_id"] = await feature_identity.legacy_id_for_filter(
-            session, updates["feature_id"]
-        )
     try:
+        # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
+        if updates.get("feature_id") is not None:
+            updates["feature_id"] = (
+                await feature_identity.canonical_feature_id_for_filter(
+                    session, updates["feature_id"]
+                )
+            )
         async with domain_command_transaction(session):
             command = domain_command_service.current_domain_command()
             item = await curation_repo.patch_curation_item_command(

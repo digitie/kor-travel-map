@@ -252,6 +252,7 @@ def _weather_anchor_bundle(
     )
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.WEATHER,
         name=name,
         coord=coord,
@@ -656,6 +657,7 @@ def landslide_forecast_issues_to_bundles(
         active = _landslide_is_active(item)
         feature = Feature(
             feature_id=feature_id,
+            provider_natural_key=natural_key,
             kind=FeatureKind.NOTICE,
             name=name,
             coord=None,

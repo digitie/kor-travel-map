@@ -945,8 +945,11 @@ CREATE TABLE feature.feature_aliases (
 -- lookup index (보고서 §3) — feature → alias 역방향.
 CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases (feature_id);
 
--- ``create_feature_with_initial_state``가 만든 core row의 alias trigger도 state
--- procedure owner로 실행된다. alias direct DML은 runtime에 grant하지 않는다.
+-- alias 행을 만드는 것은 trigger가 아니라 provider wrapper
+-- ``create_provider_feature_with_initial_state``의 명시 INSERT다 — core CALL **뒤에**
+-- 같은 트랜잭션에서 서므로 state procedure owner로 실행된다. manual·요청 승인·
+-- 큐레이션·core 경로가 만든 Feature는 legacy 주소를 발행한 적이 없어 alias를 갖지
+-- 않는다 (ADR-098 결정 6). alias direct DML은 runtime에 grant하지 않는다.
 GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner;
 
 -- =============================================================================

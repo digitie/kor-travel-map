@@ -375,6 +375,7 @@ async def _item_to_bundle(
         ends_on = None
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.EVENT,
         name=name,
         coord=coord,
@@ -636,6 +637,7 @@ async def _museum_to_bundle(
     phone = normalize_phone_number(item.oper_phone_number)
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
         name=normalize_korean_text(name) or name,
         coord=coord,
@@ -775,6 +777,7 @@ async def _standard_place_to_bundle(
     phone = normalize_phone_number(phone_raw)
     feature = Feature(
         feature_id=feature_id,
+        provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
         name=normalize_korean_text(name) or name,
         coord=coord,

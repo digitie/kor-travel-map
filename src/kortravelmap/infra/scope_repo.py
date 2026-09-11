@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import uuid
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol
@@ -109,6 +110,29 @@ def _canonical_scope_text(value: Any, *, field_name: str, max_length: int) -> st
     return canonical
 
 
+def _canonical_scope_feature_id(value: Any) -> str:
+    """scope의 feature id는 **canonical uuid**여야 한다.
+
+    T-VN-39 전에는 `f_*` 문자열이 정본 키였으므로 "공백 없는 1..256자"가 옳은
+    검증이었다. 재키 뒤 이 값을 받아 쓰는 SQL은 전부
+    `unnest(CAST(:feature_ids AS uuid[]))`이므로, 느슨한 검증을 통과한 값은
+    제출 시점이 아니라 **실행 시점**에 22P02로 죽는다 — 운영자에게는 400이어야 할
+    것이 500으로 보인다.
+
+    DB 쪽 `ops.is_valid_feature_update_scope`는 여전히 text/256으로 남겨 둔다.
+    바깥 울타리가 안쪽보다 느슨한 것은 결함이 아니고, CHECK 함수를 좁히면 이미
+    저장된 과거 scope 행이 소급 위반이 된다.
+    """
+    canonical = _canonical_scope_text(value, field_name="feature_ids item", max_length=256)
+    try:
+        parsed = uuid.UUID(canonical)
+    except ValueError as exc:
+        raise ValueError("feature_ids item must be a canonical uuid") from exc
+    if str(parsed) != canonical:
+        raise ValueError("feature_ids item must be a canonical uuid")
+    return canonical
+
+
 def _canonical_scope_number(
     value: Any,
     *,
@@ -178,10 +202,7 @@ def canonicalize_feature_update_scope(scope: Mapping[str, Any]) -> dict[str, Any
             raise ValueError(
                 f"feature_ids must be an array with at most {MAX_SCOPE_FEATURE_IDS} items"
             )
-        feature_ids = [
-            _canonical_scope_text(value, field_name="feature_ids item", max_length=256)
-            for value in raw_ids
-        ]
+        feature_ids = [_canonical_scope_feature_id(value) for value in raw_ids]
         if len(feature_ids) != len(set(feature_ids)):
             raise ValueError("feature_ids items must be unique")
         return {
@@ -399,7 +420,7 @@ class SigunguByRadiusResolver(Protocol):
 _RESOLVE_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id, ord
-    FROM unnest(CAST(:feature_ids AS text[])) WITH ORDINALITY AS r(feature_id, ord)
+    FROM unnest(CAST(:feature_ids AS uuid[])) WITH ORDINALITY AS r(feature_id, ord)
 )
 SELECT f.feature_id, f.sigungu_code
 FROM requested AS r
@@ -414,7 +435,7 @@ LIMIT CAST(:limit AS integer)
 _COUNT_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id
-    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+    FROM unnest(CAST(:feature_ids AS uuid[])) AS r(feature_id)
 )
 SELECT count(*)::int
 FROM requested AS r
@@ -427,7 +448,7 @@ WHERE f.lifecycle_state = 'active'
 _MATCHED_SIGUNGU_FEATURE_IDS_SQL: Final[str] = """
 WITH requested AS (
     SELECT feature_id
-    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+    FROM unnest(CAST(:feature_ids AS uuid[])) AS r(feature_id)
 )
 SELECT DISTINCT f.sigungu_code
 FROM requested AS r
@@ -843,7 +864,7 @@ JOIN provider_sync.provider_dataset_operations AS operation
  AND operation.operation_key = operation_scope.operation_key
  AND operation.operation_kind = operation_scope.operation_kind
 WHERE sl.source_role = 'primary'
-  AND sl.feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND sl.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND pd.is_active
   AND operation.is_enabled
 GROUP BY pd.provider_dataset_id, operation_scope.sync_scope, operation_scope.operation_key,

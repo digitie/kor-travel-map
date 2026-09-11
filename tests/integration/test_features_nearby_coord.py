@@ -19,6 +19,7 @@ from kortravelmap.infra import feature_repo
 from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상 raw SQL
     _NEARBY_COORD_DISTANCE_SQL,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +36,7 @@ _LAT = 37.5665
 async def _insert_feature(
     session: AsyncSession,
     *,
-    feature_id: str,
+    label: str,
     name: str,
     lon: float,
     lat: float,
@@ -49,6 +50,11 @@ async def _insert_feature(
     상태에 거는 요구는 "``feature.public_features``에 뜨는가" 하나뿐이고, 그 조건이
     곧 ``lifecycle='active' AND publication='published' AND quality='valid'``다 —
     옛 ``status='active'``와 같은 뜻이라 기본값을 그렇게 뒀다.
+
+    T-VN-39 재키(alembic 309) 뒤 ``feature_id``는 uuid이고 이 seed는 core 표에 직접
+    넣으므로 정본 축이다. ``label``은 키가 아니라 씨앗 — 같은 라벨은 언제나 같은
+    uuid라 seed와 단언이 한 값을 가리키고, 테스트를 읽는 사람은 이름을 그대로 본다.
+    이 파일의 정렬은 거리축(``distance``)이라 라벨의 사전순이 필요 없다.
     """
     await session.execute(
         text(
@@ -71,7 +77,7 @@ async def _insert_feature(
             """
         ),
         {
-            "feature_id": feature_id,
+            "feature_id": feature_uuid(label),
             "name": name,
             "lon": lon,
             "lat": lat,
@@ -85,7 +91,11 @@ async def _insert_feature(
 
 
 async def _public_ids(session: AsyncSession) -> set[str]:
-    """현재 공개 표면(``feature.public_features``)에 실재하는 feature_id 집합."""
+    """현재 공개 표면(``feature.public_features``)에 실재하는 feature_id 집합.
+
+    view의 ``feature_id``는 uuid이므로 driver가 ``uuid.UUID``를 준다 — 비교 축을
+    하나로 두려고 text 표기로 낮춘다(``feature_uuid`` 슬롯과 같은 표기다).
+    """
 
     rows = await session.execute(
         text("SELECT feature_id FROM feature.public_features")
@@ -97,7 +107,7 @@ async def test_features_nearby_filters_active_within_radius(
     migrated_session: AsyncSession,
 ) -> None:
     await _insert_feature(
-        migrated_session, feature_id="near:in", name="가까운 장소",
+        migrated_session, label="near:in", name="가까운 장소",
         lon=126.9782, lat=37.5667,
     )
     # 옛 ``status='inactive'``에 해당하는 자리. 0095 backfill이 그 세대의
@@ -105,28 +115,28 @@ async def test_features_nearby_filters_active_within_radius(
     # ``ck_features_state_tuple``이 retired면 publication을 ``suppressed``로
     # 강제하므로 "더는 공개되지 않는 feature"의 현행 표현은 이 tuple 하나다.
     await _insert_feature(
-        migrated_session, feature_id="near:retired", name="비활성",
+        migrated_session, label="near:retired", name="비활성",
         lon=126.9783, lat=37.5666,
         lifecycle_state="retired", publication_state="suppressed",
     )
     await _insert_feature(
-        migrated_session, feature_id="near:far", name="먼 장소",
+        migrated_session, label="near:far", name="먼 장소",
         lon=127.12, lat=37.66,
     )
 
     # 반경 밖 제외와 상태 제외를 구분해 둔다 — retired 건이 빠지는 이유가
     # 거리가 아니라 **공개 표면 부재**임을 먼저 못박는다.
     public_ids = await _public_ids(migrated_session)
-    assert "near:in" in public_ids
-    assert "near:far" in public_ids
-    assert "near:retired" not in public_ids
+    assert feature_uuid("near:in") in public_ids
+    assert feature_uuid("near:far") in public_ids
+    assert feature_uuid("near:retired") not in public_ids
 
     page = await feature_repo.features_nearby(
         migrated_session, lon=_LON, lat=_LAT, radius_m=300.0, limit=10
     )
 
     # 공개 표면 ∩ 반경 안만 (retired 제외, far 제외).
-    assert [item.feature_id for item in page.items] == ["near:in"]
+    assert [item.feature_id for item in page.items] == [feature_uuid("near:in")]
     assert page.items[0].distance_m < 50
     assert page.next_cursor is None
 
@@ -135,13 +145,13 @@ async def test_features_nearby_cursor_pages_distance_order(
     migrated_session: AsyncSession,
 ) -> None:
     await _insert_feature(
-        migrated_session, feature_id="p:1", name="A", lon=126.9781, lat=37.5666
+        migrated_session, label="p:1", name="A", lon=126.9781, lat=37.5666
     )
     await _insert_feature(
-        migrated_session, feature_id="p:2", name="B", lon=126.9790, lat=37.5670
+        migrated_session, label="p:2", name="B", lon=126.9790, lat=37.5670
     )
     await _insert_feature(
-        migrated_session, feature_id="p:3", name="C", lon=126.9800, lat=37.5680
+        migrated_session, label="p:3", name="C", lon=126.9800, lat=37.5680
     )
 
     seen: list[str] = []
@@ -156,8 +166,9 @@ async def test_features_nearby_cursor_pages_distance_order(
         if cursor is None:
             break
 
-    # 거리 오름차순으로 3건 모두 한 번씩.
-    assert seen == ["p:1", "p:2", "p:3"]
+    # 거리 오름차순으로 3건 모두 한 번씩. 정렬축은 거리라 uuid가 라벨의 사전순을
+    # 잃어도 기대 순서는 그대로다(동률 tiebreak인 feature_id에는 닿지 않는다).
+    assert seen == [feature_uuid("p:1"), feature_uuid("p:2"), feature_uuid("p:3")]
     assert cursor is None
 
 
@@ -189,7 +200,7 @@ async def test_features_nearby_predicate_uses_stored_coord_5179(
     대신 술어 대상 컬럼과 per-row transform 부재를 검증한다.
     """
     await _insert_feature(
-        migrated_session, feature_id="idx:1", name="X", lon=126.9782, lat=37.5667
+        migrated_session, label="idx:1", name="X", lon=126.9782, lat=37.5667
     )
     rows = (
         await migrated_session.execute(

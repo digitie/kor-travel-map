@@ -810,19 +810,23 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "playwright-main",
             "playwright-recovery",
         }
-        # seed가 남기는 FK reference는 **8**이다. helper의
+        # seed가 남기는 FK reference는 **6**이다. helper의
         # `_assert_owned_state`가 present 2건에 대해 그렇게 만든다:
-        #   feature_aliases 2 + source_links 2
+        #   source_links 2
         #   + weather_values 1 + current_weather_summary 1
         #   + price_values 1 + current_price_summary 1
-        # 종전 값 2는 alias·source_link·summary가 들어오기 전의 숫자였고,
-        # clone lane은 2026-08-08에 6으로 고쳤으나 이 lane은 갱신되지 않았다.
-        # D2가 통과한 적이 없어 드러나지 않았다(2026-09-06 실측: 8).
+        #
+        # 종전 값 8은 `feature_aliases` 2를 포함했다. T-VN-39/ADR-098 결정 6이 alias
+        # 발급을 provider 경로로 한정했고 309가 `trg_features_legacy_alias`를 영구
+        # 제거했다 — 이 seed는 core 프로시저를 직접 부르므로 alias가 생기지 않는다.
+        #
+        # 이 리터럴은 한 달간 낡아 있었다(2026-09-06 실측으로 2 → 8). D2가 통과한 적이
+        # 없어 드러나지 않았기 때문이다. 머지 전 live run 한 번으로 6을 실측해야 한다.
         _validate_direct(
             runtime / "direct-seed.json",
             "seed",
             {"features": 2, "price_values": 1, "weather_values": 1},
-            8,
+            6,
         )
         required_operations = {
             "executor-main",

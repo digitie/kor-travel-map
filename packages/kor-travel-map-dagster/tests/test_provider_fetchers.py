@@ -147,20 +147,41 @@ def _install_fake_kor_travel_concierge_httpx(
     return _FakeKrtourAiAgentAsyncClient
 
 
-class _FakeFestivalService:
+class _FakeStandardPage:
+    """datagokr ``StandardPage``의 종료 판정에 필요한 최소 표면."""
+
+    def __init__(self, items: list[object], total_count: int) -> None:
+        self.items = items
+        self.total_count = total_count
+
+
+class _FakeStandardService:
+    """datagokr 표준데이터 service — **``list`` 페이지 표면**을 흉내낸다.
+
+    Map은 provider의 ``iter_all()``을 더 이상 쓰지 않는다. 그 구현이 짧은 페이지를
+    무조건 마지막 페이지로 읽는데(`b8f1254`), 같은 릴리스의 행 단위
+    ``except ValidationError: continue``와 겹치면 기형 행 하나가 목록을 조용히
+    끊기 때문이다. Map은 ``total_count``가 권위인 자기 페이지네이터로 옮겼고,
+    fake도 그 표면을 들어야 그 변화를 잴 수 있다.
+    """
+
     def __init__(self, records: list[object]) -> None:
         self._records = records
+        self.pages: list[int] = []
 
-    def iter_all(self, **_filters: Any) -> Iterator[object]:
-        yield from self._records
+    def list(
+        self, *, page_no: int = 1, num_of_rows: int = 1000, **_filters: Any
+    ) -> _FakeStandardPage:
+        self.pages.append(page_no)
+        start = (page_no - 1) * num_of_rows
+        return _FakeStandardPage(
+            list(self._records[start : start + num_of_rows]), len(self._records)
+        )
 
 
-class _FakeMuseumArtService:
-    def __init__(self, records: list[object]) -> None:
-        self._records = records
-
-    def iter_all(self, **_filters: Any) -> Iterator[object]:
-        yield from self._records
+#: 이름은 유지한다 — 호출부(테스트)가 그대로 읽히게.
+_FakeFestivalService = _FakeStandardService
+_FakeMuseumArtService = _FakeStandardService
 
 
 class _FakeDataGoKrClient:
@@ -173,6 +194,7 @@ class _FakeDataGoKrClient:
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
         self.parking = _FakeMuseumArtService([object(), object(), object(), object()])
+        self.special_street = _FakeStandardService([object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     def close(self) -> None:
@@ -340,17 +362,57 @@ class _FakeEventService:
         yield from self._records
 
 
+class _FakeHeritageKey:
+    def __init__(self, kind_code: str, index: int) -> None:
+        self.ccba_kdcd = kind_code
+        self.ccba_asno = f"{index:04d}"
+        self.ccba_ctcd = "11"
+
+
+class _FakeHeritageSummary:
+    def __init__(self, kind_code: str, index: int) -> None:
+        self.key = _FakeHeritageKey(kind_code, index)
+        self.name_ko = f"{kind_code}-{index}"
+
+
+class _FakeHeritagePage:
+    def __init__(self, items: list[object], total: int) -> None:
+        self.items = items
+        self.total = total
+
+
 class _FakeHeritageSearchService:
+    """국가유산 검색 service — **``list`` + ``details``** 표면을 흉내낸다.
+
+    Map은 provider의 ``iter_all_details()``를 더 이상 쓰지 않는다. 그 안의
+    ``iter_pages``가 ``if len(result.items) < page_size: return`` 하나로 끝내는데,
+    같은 provider가 복합키 결측 row를 건너뛰므로 둘이 겹치면 목록이 조용히
+    끊긴다. Map은 ``PaginatedResult.total``이 권위인 자기 페이지네이터로 옮겼고,
+    fake도 그 표면을 들어야 그 변화를 잴 수 있다.
+    """
+
     def __init__(self, details_by_kind: dict[str, list[object]]) -> None:
         self._details_by_kind = details_by_kind
         self.calls: list[tuple[int, str]] = []
 
-    def iter_all_details(
-        self, *, page_size: int = 100, **filters: Any
-    ) -> Iterator[object]:
+    def list(
+        self, *, page_size: int = 100, page: int = 1, **filters: Any
+    ) -> _FakeHeritagePage:
         kind_code = str(filters.get("ccba_kdcd", ""))
-        self.calls.append((page_size, kind_code))
-        yield from self._details_by_kind.get(kind_code, [])
+        if page == 1:
+            self.calls.append((page_size, kind_code))
+        details = self._details_by_kind.get(kind_code, [])
+        start = (page - 1) * page_size
+        window = details[start : start + page_size]
+        summaries = [
+            _FakeHeritageSummary(kind_code, start + offset)
+            for offset in range(len(window))
+        ]
+        return _FakeHeritagePage(list(summaries), len(details))
+
+    def details(self, ccba_kdcd: str, ccba_asno: str, ccba_ctcd: str) -> object:
+        del ccba_ctcd
+        return self._details_by_kind[ccba_kdcd][int(ccba_asno)]
 
 
 class _FakeHeritageClient:
@@ -1536,14 +1598,16 @@ class _FakeKhoaClient:
         self.calls: list[str] = []
         _FakeKhoaClient.instances.append(self)
 
-    def oceans_beach_info(
+    # khoa 6.x(provider PR#13)는 sync 진입점을 전부 없앴다. fake가 옛 표면을 들고
+    # 있으면 실제 파손을 못 잡는다 — 실제로 그랬다.
+    async def aoceans_beach_info(
         self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
     ) -> _FakeBeachPage:
         self.calls.append(sido_nm)
         # 단일 페이지(short)만 반환 → 페이지네이션 stop.
         return _FakeBeachPage(list(type(self).per_sido) if page_no == 1 else [])
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1559,15 +1623,15 @@ def _install_fake_khoa(
     return _FakeKhoaClient
 
 
-def test_khoa_beaches_raises_when_credential_missing() -> None:
+async def test_khoa_beaches_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_khoa_beaches(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_khoa_beaches_fetch_iterates_sido_and_closes(
+async def test_khoa_beaches_fetch_iterates_sido_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_khoa(
@@ -1575,7 +1639,7 @@ def test_khoa_beaches_fetch_iterates_sido_and_closes(
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_khoa_beaches(settings))
+    records = [record async for record in fetch_khoa_beaches(settings)]
 
     # 2 sido × 2 record = 4.
     assert len(records) == 4
@@ -1593,14 +1657,14 @@ class _FakeKhoaNetworkError(Exception):
 class _FlakyKhoaClient(_FakeKhoaClient):
     fail_first = True
 
-    def oceans_beach_info(
+    async def aoceans_beach_info(
         self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **kw: Any
     ) -> _FakeBeachPage:
         if type(self).fail_first:
             type(self).fail_first = False
             self.calls.append(sido_nm)
             raise _FakeKhoaNetworkError("transient")
-        return super().oceans_beach_info(
+        return await super().aoceans_beach_info(
             sido_nm,
             page_no=page_no,
             num_of_rows=num_of_rows,
@@ -1608,7 +1672,7 @@ class _FlakyKhoaClient(_FakeKhoaClient):
         )
 
 
-def test_khoa_beaches_retries_transient_page_without_record_loss(
+async def test_khoa_beaches_retries_transient_page_without_record_loss(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeKhoaClient.instances = []
@@ -1619,10 +1683,20 @@ def test_khoa_beaches_retries_transient_page_without_record_loss(
     module.__dict__["OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES"] = ("부산광역시",)
     monkeypatch.setitem(sys.modules, "khoa", module)
     delays: list[float] = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+
+    async def _instant_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    # async 경계의 backoff는 `asyncio.sleep`으로 간다 — `time.sleep`을 막아도
+    # 아무 일도 일어나지 않는다. `test_kma_weather`가 쓰는 것과 같은 관용구다.
+    monkeypatch.setattr(
+        provider_fetchers.upstream_retry,
+        "asyncio",
+        SimpleNamespace(sleep=_instant_sleep),
+    )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
-    records = list(fetch_khoa_beaches(settings))
+    records = [record async for record in fetch_khoa_beaches(settings)]
 
     assert len(records) == 2
     client = _FakeKhoaClient.instances[0]
@@ -2933,7 +3007,7 @@ def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
     client = fake.instances[0]
     assert client.api_key is None
     assert client.closed is True
-    # 종목코드별 iter_all_details(page_size=100, ccba_kdcd=...) 1회씩.
+    # 종목코드별 search.list(page_size=100, page=1, ccba_kdcd=...) 1회씩.
     assert client.search.calls == [(100, "11"), (100, "13")]
 
 

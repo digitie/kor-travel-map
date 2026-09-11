@@ -1,14 +1,23 @@
-"""T-VN-34B 공개 projection cache·ACL·partial index PostgreSQL 계약."""
+"""T-VN-34B 공개 projection cache·ACL·partial index PostgreSQL 계약.
+
+T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``와 subtype 5표의
+``feature_id``가 uuid이고 사본 컬럼 ``feature_uuid``는 아홉 표에서 DROP됐다.
+이 파일의 seed는 provider 적재 경로를 타지 않는 raw SQL이므로 정본 키를 스스로
+발급한다 — 읽는 사람의 표찰은 ``name`` 열에 그대로 남기고, 그 표찰에서 유도한
+canonical uuid를 키로 쓴다(:func:`tests.integration._feature_ids.feature_uuid`).
+"""
 
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -17,16 +26,42 @@ _PUBLIC_PREDICATE = (
     "AND quality_state = 'valid'"
 )
 
+#: EXPLAIN 증명용 seed 규모. route/area는 그 뒤 두 자리를 이어 쓴다.
+_PERF_ROW_COUNT = 25000
+_PERF_ROUTE_ORDINAL = _PERF_ROW_COUNT + 1
+_PERF_AREA_ORDINAL = _PERF_ROW_COUNT + 2
+
+#: SQL이 같은 값을 만드는 식. Python과 두 벌이 되면 심은 행과 지우는 행이 갈라진다.
+_PERF_FEATURE_ID_SQL = "CAST(CAST(:run AS text) || lpad(to_hex(g), 16, '0') AS uuid)"
+
+
+def _perf_feature_id(run: str, ordinal: int) -> str:
+    """run 표지(16 hex) + 일련번호(16 hex) = canonical uuid.
+
+    재키(309) 뒤 ``feature_id``가 uuid라 ``LIKE 'prefix%'``로 seed를 쓸어 담을 수
+    없다. 대신 SQL(:data:`_PERF_FEATURE_ID_SQL`)과 이 함수가 **같은 규칙**으로
+    id를 유도해, 25 000행을 심을 때도 지울 때도 같은 집합을 가리키게 한다.
+    """
+    return str(UUID(f"{run}{ordinal:016x}"))
+
 
 async def _insert_feature(
     session: AsyncSession,
     *,
     feature_id: str,
+    name: str,
     kind: str,
     category: str,
     state: tuple[str, str, str] = ("active", "published", "valid"),
     coord: bool = False,
 ) -> None:
+    """core 행 하나 — ``feature_id``는 정본 키(uuid), ``name``은 표찰이다.
+
+    재키 전에는 두 슬롯이 **같은 바인드**였다(읽기 좋은 id를 이름으로도 썼다).
+    uuid 컬럼과 varchar 컬럼에 같은 이름의 바인드를 쓰면 asyncpg 방언이 둘을 한
+    ``$n``으로 접어 42P18(``uuid versus character varying``)로 선다 — 그래서
+    바인드를 나눈다.
+    """
     await session.execute(
         text(
             """
@@ -34,7 +69,7 @@ async def _insert_feature(
                 feature_id, kind, name, category, lifecycle_state,
                 publication_state, quality_state, coord
             ) VALUES (
-                :feature_id, :kind, :feature_id, :category, :lifecycle_state,
+                CAST(:feature_id AS uuid), :kind, :name, :category, :lifecycle_state,
                 :publication_state, :quality_state,
                 CASE WHEN :coord THEN x_extension.st_setsrid(
                     x_extension.st_makepoint(126.978, 37.5665), 4326
@@ -44,6 +79,7 @@ async def _insert_feature(
         ),
         {
             "feature_id": feature_id,
+            "name": name,
             "kind": kind,
             "category": category,
             "lifecycle_state": state[0],
@@ -57,20 +93,25 @@ async def _insert_feature(
 async def _insert_subtype(
     session: AsyncSession, *, table: str, feature_id: str
 ) -> None:
+    """subtype 행 하나. 정본 키는 core에서 그대로 가져온다.
+
+    309가 subtype 5표의 사본 컬럼 ``feature_uuid``와 그것을 보던 복합 FK를 함께
+    없앴으므로 심을 identity는 ``feature_id`` 하나다.
+    """
     if table == "feature_routes":
         await session.execute(
             text(
                 """
                 INSERT INTO feature.feature_routes (
-                    feature_id, feature_uuid, kind, geom, route_type, public_ready
+                    feature_id, kind, geom, route_type, public_ready
                 )
-                SELECT CAST(:feature_id AS varchar), feature_uuid, 'route',
+                SELECT feature_id, 'route',
                        x_extension.st_geomfromtext(
                            'MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326
                        ),
                        'trail', false
                 FROM feature.features
-                WHERE feature_id = CAST(:feature_id AS varchar)
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -81,16 +122,16 @@ async def _insert_subtype(
             text(
                 """
                 INSERT INTO feature.feature_areas (
-                    feature_id, feature_uuid, kind, geom, area_kind, public_ready
+                    feature_id, kind, geom, area_kind, public_ready
                 )
-                SELECT CAST(:feature_id AS varchar), feature_uuid, 'area',
+                SELECT feature_id, 'area',
                        x_extension.st_geomfromtext(
                            'MULTIPOLYGON(((126.97 37.56,126.98 37.56,126.98 37.57,126.97 37.56)))',
                            4326
                        ),
                        'boundary', false
                 FROM feature.features
-                WHERE feature_id = CAST(:feature_id AS varchar)
+                WHERE feature_id = CAST(:feature_id AS uuid)
                 """
             ),
             {"feature_id": feature_id},
@@ -110,14 +151,22 @@ async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
     category: str,
 ) -> None:
     """Caller-supplied flag은 덮어쓰고 core 3축 변경이 cache를 동기화한다."""
-    feature_id = f"tvn34b:{table}:{uuid4().hex}"
+    label = f"tvn34b:{table}:{uuid4().hex}"
+    feature_id = feature_uuid(label)
     await _insert_feature(
-        migrated_session, feature_id=feature_id, kind=kind, category=category
+        migrated_session,
+        feature_id=feature_id,
+        name=label,
+        kind=kind,
+        category=category,
     )
     await _insert_subtype(migrated_session, table=table, feature_id=feature_id)
 
     assert await migrated_session.scalar(
-        text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
+        text(
+            f"SELECT public_ready FROM feature.{table} "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
         {"feature_id": feature_id},
     ) is True
 
@@ -126,40 +175,53 @@ async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
             """
             UPDATE feature.features
             SET publication_state = 'suppressed'
-            WHERE feature_id = :feature_id
+            WHERE feature_id = CAST(:feature_id AS uuid)
             """
         ),
         {"feature_id": feature_id},
     )
     assert await migrated_session.scalar(
-        text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
+        text(
+            f"SELECT public_ready FROM feature.{table} "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
         {"feature_id": feature_id},
     ) is False
 
     # Even a privileged direct attempt cannot make the cache diverge: the
     # subtype BEFORE trigger recomputes it from the core state axes.
     await migrated_session.execute(
-        text(f"UPDATE feature.{table} SET public_ready = true WHERE feature_id = :feature_id"),
+        text(
+            f"UPDATE feature.{table} SET public_ready = true "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
         {"feature_id": feature_id},
     )
     assert await migrated_session.scalar(
-        text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
+        text(
+            f"SELECT public_ready FROM feature.{table} "
+            "WHERE feature_id = CAST(:feature_id AS uuid)"
+        ),
         {"feature_id": feature_id},
     ) is False
 
     # Subtype rows are 1:1 extensions of their core row, never attachments
     # that a generic UPDATE may retarget.  This is the lock-order boundary
     # that keeps ordinary subtype payload updates parent-lock-free.
+    # 재부착 대상도 정본 키여야 관측이 성립한다 — 형식이 깨진 값이면 BEFORE
+    # 트리거에 닿기 전 22P02로 죽어 "identity는 불변"이 아니라 "값이 uuid가
+    # 아니다"를 증명하게 된다.
     with pytest.raises(DBAPIError) as caught:
         async with migrated_session.begin_nested():
             await migrated_session.execute(
                 text(
-                    f"UPDATE feature.{table} SET feature_id = :replacement "
-                    "WHERE feature_id = :feature_id"
+                    f"UPDATE feature.{table} "
+                    "SET feature_id = CAST(:replacement AS uuid) "
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {
                     "feature_id": feature_id,
-                    "replacement": f"{feature_id}:reattached",
+                    "replacement": feature_uuid(f"{label}:reattached"),
                 },
             )
     assert getattr(caught.value.orig, "sqlstate", None) == "23514"
@@ -170,11 +232,13 @@ async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag
     migrated_engine: AsyncEngine,
 ) -> None:
     """state update × subtype insert은 parent lock 순서로 stale flag 없이 직렬화된다."""
-    feature_id = f"tvn34b:interleave:{uuid4().hex}"
+    label = f"tvn34b:interleave:{uuid4().hex}"
+    feature_id = feature_uuid(label)
     async with AsyncSession(migrated_engine, expire_on_commit=False) as seed, seed.begin():
         await _insert_feature(
             seed,
             feature_id=feature_id,
+            name=label,
             kind="route",
             category="06070000",
         )
@@ -189,7 +253,7 @@ async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag
             await state_session.execute(
                 text(
                     "SELECT feature_id FROM feature.features "
-                    "WHERE feature_id = :feature_id FOR UPDATE"
+                    "WHERE feature_id = CAST(:feature_id AS uuid) FOR UPDATE"
                 ),
                 {"feature_id": feature_id},
             )
@@ -203,7 +267,7 @@ async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag
             await state_session.execute(
                 text(
                     "UPDATE feature.features SET publication_state = 'suppressed' "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {"feature_id": feature_id},
             )
@@ -215,14 +279,17 @@ async def test_subtype_insert_waits_for_parent_state_lock_and_derives_fresh_flag
             assert await verify.scalar(
                 text(
                     "SELECT public_ready FROM feature.feature_routes "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {"feature_id": feature_id},
             ) is False
     finally:
         async with migrated_engine.begin() as connection:
             await connection.execute(
-                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+                text(
+                    "DELETE FROM feature.features "
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
+                ),
                 {"feature_id": feature_id},
             )
 
@@ -249,9 +316,12 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
     subtype UPDATE의 parent lock을 제거하고 identity reattachment를 금지한다.
     """
 
-    feature_id = f"tvn34b:deadlock:{table}:{uuid4().hex}"
+    label = f"tvn34b:deadlock:{table}:{uuid4().hex}"
+    feature_id = feature_uuid(label)
     async with AsyncSession(migrated_engine, expire_on_commit=False) as seed, seed.begin():
-        await _insert_feature(seed, feature_id=feature_id, kind=kind, category=category)
+        await _insert_feature(
+            seed, feature_id=feature_id, name=label, kind=kind, category=category
+        )
         await _insert_subtype(seed, table=table, feature_id=feature_id)
 
     try:
@@ -267,7 +337,7 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
                 await state_session.execute(
                     text(
                         "SELECT feature_id FROM feature.features "
-                        "WHERE feature_id = :feature_id FOR UPDATE"
+                        "WHERE feature_id = CAST(:feature_id AS uuid) FOR UPDATE"
                     ),
                     {"feature_id": feature_id},
                 )
@@ -277,7 +347,7 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
                         text(
                             f"UPDATE feature.{table} "
                             "SET payload = jsonb_build_object('tvn34b_deadlock_probe', true) "
-                            "WHERE feature_id = :feature_id"
+                            "WHERE feature_id = CAST(:feature_id AS uuid)"
                         ),
                         {"feature_id": feature_id},
                     )
@@ -289,7 +359,8 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
                         text(
                             """
                             CALL feature.transition_feature_state(
-                                :feature_id, 'active', 'suppressed', 'valid', 1,
+                                CAST(:feature_id AS uuid),
+                                'active', 'suppressed', 'valid', 1,
                                 jsonb_build_object(
                                     'transition_kind', 'admin',
                                     'reason_code', 'tvn34b_deadlock_regression',
@@ -319,19 +390,25 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
             state = await verify.execute(
                 text(
                     "SELECT publication_state FROM feature.features "
-                    "WHERE feature_id = :feature_id"
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
                 ),
                 {"feature_id": feature_id},
             )
             assert state.scalar_one() == "suppressed"
             assert await verify.scalar(
-                text(f"SELECT public_ready FROM feature.{table} WHERE feature_id = :feature_id"),
+                text(
+                    f"SELECT public_ready FROM feature.{table} "
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
+                ),
                 {"feature_id": feature_id},
             ) is False
     finally:
         async with migrated_engine.begin() as connection:
             await connection.execute(
-                text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+                text(
+                    "DELETE FROM feature.features "
+                    "WHERE feature_id = CAST(:feature_id AS uuid)"
+                ),
                 {"feature_id": feature_id},
             )
 
@@ -340,7 +417,14 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
 async def test_runtime_subtype_acl_excludes_public_ready(
     migrated_session: AsyncSession, table: str
 ) -> None:
-    """Runtime에는 table UPDATE/flag UPDATE가 없고 business column만 허용한다."""
+    """Runtime에는 table UPDATE/flag UPDATE가 없고 business column만 허용한다.
+
+    identity 축의 열거는 재키(309) 뒤 ``feature_id`` 하나다 — 사본 컬럼
+    ``feature_uuid``가 subtype 5표에서 DROP됐으므로 그 열의 권한을 묻는 것은
+    관측이 아니라 42703이다. 축이 줄어든 것이지 느슨해진 것이 아니다:
+    ``table_update = False``가 열 단위 예외를 제외한 **모든** 열의 UPDATE를 이미
+    막고, 남은 열 단위 단언은 그 예외 목록(geom만 허용)을 고정한다.
+    """
     privileges = (
         await migrated_session.execute(
             text(
@@ -358,9 +442,6 @@ async def test_runtime_subtype_acl_excludes_public_ready(
                         'ktm_feature_runtime', :relation, 'feature_id', 'UPDATE'
                     ) AS feature_id_update,
                     has_column_privilege(
-                        'ktm_feature_runtime', :relation, 'feature_uuid', 'UPDATE'
-                    ) AS feature_uuid_update,
-                    has_column_privilege(
                         'ktm_feature_runtime', :relation, 'kind', 'UPDATE'
                     ) AS kind_update
                 """
@@ -374,15 +455,30 @@ async def test_runtime_subtype_acl_excludes_public_ready(
         "flag_update": False,
         "geom_update": True,
         "feature_id_update": False,
-        "feature_uuid_update": False,
         "kind_update": False,
     }
+    # 사본 컬럼이 되살아나면 위 열거가 조용히 불완전해진다 — 그 자리를 이 단언이 지킨다.
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_schema = 'feature' AND table_name = :table_name "
+                "  AND column_name = 'feature_uuid'"
+            ),
+            {"table_name": table},
+        )
+    ) == 0
 
-    feature_id = f"tvn34b:acl:{table}:{uuid4().hex}"
+    label = f"tvn34b:acl:{table}:{uuid4().hex}"
+    feature_id = feature_uuid(label)
     kind = "route" if table == "feature_routes" else "area"
     category = "06070000" if kind == "route" else "06050000"
     await _insert_feature(
-        migrated_session, feature_id=feature_id, kind=kind, category=category
+        migrated_session,
+        feature_id=feature_id,
+        name=label,
+        kind=kind,
+        category=category,
     )
     await _insert_subtype(migrated_session, table=table, feature_id=feature_id)
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
@@ -392,7 +488,7 @@ async def test_runtime_subtype_acl_excludes_public_ready(
                 await migrated_session.execute(
                     text(
                         f"UPDATE feature.{table} SET public_ready = false "
-                        "WHERE feature_id = :feature_id"
+                        "WHERE feature_id = CAST(:feature_id AS uuid)"
                     ),
                     {"feature_id": feature_id},
                 )
@@ -447,17 +543,17 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
     for name in ("idx_feature_routes_geom_gist", "idx_feature_areas_geom_gist"):
         assert "WHERE public_ready" in definitions[name], definitions[name]
 
-    prefix = f"tvn34b:perf:{uuid4().hex}:"
+    run = uuid4().hex[:16]
     try:
         await migrated_session.execute(
             text(
-                """
+                f"""
                 INSERT INTO feature.features (
                     feature_id, kind, name, category, coord, lifecycle_state,
                     publication_state, quality_state, updated_at
                 )
                 SELECT
-                    :prefix || g::text, 'place',
+                    {_PERF_FEATURE_ID_SQL}, 'place',
                     CASE WHEN g = 17 THEN 'tvn34 needle place' ELSE 'unrelated station' END,
                     CASE WHEN g = 17 THEN '06020001' ELSE '06020000' END,
                     x_extension.st_setsrid(
@@ -465,18 +561,26 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                         4326
                     ),
                     'active', 'published', 'valid', now() - (g || ' seconds')::interval
-                FROM generate_series(1, 25000) AS g
+                FROM generate_series(1, CAST(:row_count AS integer)) AS g
                 """
             ),
-            {"prefix": prefix},
+            {"run": run, "row_count": _PERF_ROW_COUNT},
         )
-        route_id = f"{prefix}route"
-        area_id = f"{prefix}area"
+        route_id = _perf_feature_id(run, _PERF_ROUTE_ORDINAL)
+        area_id = _perf_feature_id(run, _PERF_AREA_ORDINAL)
         await _insert_feature(
-            migrated_session, feature_id=route_id, kind="route", category="06070000"
+            migrated_session,
+            feature_id=route_id,
+            name=f"tvn34b:perf:{run}:route",
+            kind="route",
+            category="06070000",
         )
         await _insert_feature(
-            migrated_session, feature_id=area_id, kind="area", category="06050000"
+            migrated_session,
+            feature_id=area_id,
+            name=f"tvn34b:perf:{run}:area",
+            kind="area",
+            category="06050000",
         )
         await _insert_subtype(migrated_session, table="feature_routes", feature_id=route_id)
         await _insert_subtype(migrated_session, table="feature_areas", feature_id=area_id)
@@ -592,7 +696,17 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
             )
             assert index_name in plan, (index_name, plan)
     finally:
+        # uuid에는 LIKE가 없다 — seed와 같은 유도 규칙으로 같은 집합을 되짚는다
+        # (route/area는 일련번호 뒤 두 자리라 이 한 문장이 셋을 다 데려간다).
         await migrated_session.execute(
-            text("DELETE FROM feature.features WHERE feature_id LIKE :prefix"),
-            {"prefix": f"{prefix}%"},
+            text(
+                f"""
+                DELETE FROM feature.features
+                WHERE feature_id IN (
+                    SELECT {_PERF_FEATURE_ID_SQL}
+                    FROM generate_series(1, CAST(:last_ordinal AS integer)) AS g
+                )
+                """
+            ),
+            {"run": run, "last_ordinal": _PERF_AREA_ORDINAL},
         )

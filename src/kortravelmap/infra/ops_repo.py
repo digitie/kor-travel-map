@@ -538,7 +538,10 @@ LIMIT 1
 _ISSUE_COLUMNS: Final[str] = (
     "issue.issue_id, issue.provider_dataset_id, provider_dataset.provider, "
     "provider_dataset.dataset_key, "
-    "issue.source_record_key, issue.feature_id, issue.violation_type, "
+    "issue.source_record_key, "
+    # DTO가 `feature_id: str | None`이다. 맨몸으로 뽑으면 asyncpg가 `uuid.UUID`를
+    # 주고 문자열 비교가 전부 어긋난다 — 출력 이름은 그대로 둔다.
+    "CAST(issue.feature_id AS text) AS feature_id, issue.violation_type, "
     "issue.severity, issue.message, issue.payload, issue.status, issue.detected_at, "
     "issue.last_seen_at, issue.resolved_at"
 )
@@ -558,11 +561,14 @@ WHERE (CAST(:status AS text) IS NULL OR issue.status = CAST(:status AS text))
     CAST(:provider_dataset_id AS bigint) IS NULL
     OR issue.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
   )
-  AND (CAST(:feature_id AS text) IS NULL OR issue.feature_id = CAST(:feature_id AS text))
+  AND (CAST(:feature_id AS uuid) IS NULL OR issue.feature_id = CAST(:feature_id AS uuid))
   AND (
     CAST(:q_like AS text) IS NULL
     OR issue.message ILIKE CAST(:q_like AS text)
-    OR issue.feature_id ILIKE CAST(:q_like AS text)
+    -- T-VN-39: `uuid ~~* text` 연산자는 없다. 운영자가 정본 키 조각으로 검색하는
+    -- 것을 계속 지원하려면 값을 text로 펴야 한다. 이 절은 파스 단계에서 해석되므로
+    -- 고치지 않으면 q를 넘기지 않는 호출까지 전부 42883으로 죽는다.
+    OR CAST(issue.feature_id AS text) ILIKE CAST(:q_like AS text)
     OR issue.source_record_key ILIKE CAST(:q_like AS text)
   )
   AND (

@@ -314,8 +314,10 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             feature = (
                 await connection.execute(
                     text(
+                        # T-VN-39(309): features의 사본 컬럼 feature_uuid는
+                        # 사라졌다 — 정본 키 feature_id가 곧 그 값이다.
                         "SELECT name, category FROM feature.features "
-                        "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
+                        "WHERE feature_id = CAST(:feature_uuid AS uuid)"
                     ),
                     {"feature_uuid": child.feature_uuid},
                 )
@@ -337,7 +339,9 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
                 await connection.execute(
                     text(
                         "SELECT plan_sha256, manual_payload_sha256, "
-                        "child_command_id, feature_uuid::text AS feature_uuid, "
+                        # 309는 이 표에서 feature_uuid를 **개명**했다(text 짝이
+                        # 없던 진짜 identity) — 바깥 이름은 계약이라 별칭으로 남긴다.
+                        "child_command_id, feature_id::text AS feature_uuid, "
                         "import_row_id::text AS import_row_id, "
                         "curation_item_id::text AS curation_item_id "
                         "FROM ops.curation_import_manual_feature_children "
@@ -359,7 +363,11 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             decision = (
                 await connection.execute(
                     text(
-                        "SELECT decision_kind, match_basis, feature_id "
+                        # uuid 컬럼을 그대로 읽으면 asyncpg가 UUID 객체를 준다.
+                        # 비교 상대(``child.feature_id``)는 str 계약이므로 projection에서
+                        # text로 고정한다.
+                        "SELECT decision_kind, match_basis, "
+                        "CAST(feature_id AS text) AS feature_id "
                         "FROM feature.curation_link_decisions "
                         "WHERE decision_id = CAST(:decision_id AS uuid)"
                     ),
@@ -374,7 +382,8 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
             item = (
                 await connection.execute(
                     text(
-                        "SELECT feature_id, source_present "
+                        "SELECT CAST(feature_id AS text) AS feature_id, "
+                        "source_present "
                         "FROM feature.curation_items "
                         "WHERE curation_item_id = CAST(:item_id AS uuid)"
                     ),

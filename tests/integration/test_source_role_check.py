@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.dto._enums import SourceRole
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,11 @@ _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)
 
 _PROVIDER = "test-provider-source-role"
 _DATASET = "source_role_check"
+
+#: FK 대상 feature 1건. T-VN-39 재키(alembic 309) 뒤 ``feature.features``와
+#: ``provider_sync.source_links``의 ``feature_id``가 모두 uuid이므로, 라벨을 SQL에
+#: 리터럴로 박던 세 자리를 결정적 uuid 하나의 bind로 모은다.
+_FEATURE_ID = feature_uuid("sr-check-f1")
 
 
 async def _dataset_id(session: AsyncSession) -> int:
@@ -62,8 +68,9 @@ async def test_all_source_role_values_pass_db_check(
         text(
             "INSERT INTO feature.features (feature_id, kind, name, category, "
             "marker_icon, marker_color) "
-            "VALUES ('sr-check-f1','place','장소','01010100','star','P-01')"
-        )
+            "VALUES (:feature_id,'place','장소','01010100','star','P-01')"
+        ),
+        {"feature_id": _FEATURE_ID},
     )
     await migrated_session.flush()
 
@@ -113,9 +120,9 @@ async def test_all_source_role_values_pass_db_check(
                 "INSERT INTO provider_sync.source_links "
                 "(feature_id, source_entity_key, source_role, match_method, "
                 " confidence) "
-                "VALUES ('sr-check-f1', :sek, :role, 'natural_key', 100)"
+                "VALUES (:feature_id, :sek, :role, 'natural_key', 100)"
             ),
-            {"sek": entity_key, "role": role.value},
+            {"feature_id": _FEATURE_ID, "sek": entity_key, "role": role.value},
         )
         await migrated_session.flush()
 
@@ -123,8 +130,9 @@ async def test_all_source_role_values_pass_db_check(
         await migrated_session.execute(
             text(
                 "SELECT count(*) FROM provider_sync.source_links "
-                "WHERE feature_id = 'sr-check-f1'"
-            )
+                "WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": _FEATURE_ID},
         )
     ).scalar_one()
     assert count == len(list(SourceRole))

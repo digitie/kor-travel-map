@@ -18,7 +18,6 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
-from kortravelmap.core import make_feature_id
 from kortravelmap.core.address import normalize_korean_text
 from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
@@ -743,7 +742,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     s.source_name,
     s.source_url,
     i.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
+    CAST(f.feature_id AS text) AS feature_uuid,
     f.name AS feature_name,
     f.kind AS feature_kind,
     f.category AS feature_category,
@@ -1249,7 +1248,7 @@ ORDER BY c.edition_key DESC, c.title, i.sort_order, i.curation_item_id
 _LIST_FEATURE_ITEMS_BATCH_SQL: Final[str] = (
     _ITEM_SELECT
     + f"""
-WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE i.feature_id = ANY(CAST(:feature_ids AS uuid[]))
   AND i.archived_at IS NULL
   AND i.source_present
   AND c.archived_at IS NULL
@@ -1334,8 +1333,8 @@ WHERE (
         )
   )
   AND (
-      CAST(:cursor_feature_id AS text) IS NULL
-      OR f.feature_id > CAST(:cursor_feature_id AS text)
+      CAST(:cursor_feature_id AS uuid) IS NULL
+      OR f.feature_id > CAST(:cursor_feature_id AS uuid)
   )
   {public_active_notice_filter_sql("f")}
 ORDER BY f.feature_id
@@ -1387,7 +1386,7 @@ SELECT
     core.quality_state
 FROM feature.public_features AS f
 {_PUBLIC_FEATURE_STATE_JOIN_SQL}
-WHERE f.feature_id = ANY(CAST(:feature_ids AS text[]))
+WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[]))
 {public_active_notice_filter_sql("f")}
 """
 
@@ -1492,7 +1491,7 @@ WITH incoming AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_id text,
-        feature_id text,
+        feature_id uuid,
         external_item_id text,
         external_component_id text
     )
@@ -1564,7 +1563,7 @@ WITH incoming AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_key text,
-        feature_id text,
+        feature_id uuid,
         external_item_id text,
         external_component_id text
     )
@@ -1624,7 +1623,7 @@ WITH incoming AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_id text,
-        feature_id text,
+        feature_id uuid,
         external_item_id text,
         external_component_id text,
         place_name text,
@@ -1720,7 +1719,7 @@ WITH incoming AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_id text,
-        feature_id text,
+        feature_id uuid,
         external_item_id text,
         external_component_id text,
         place_name text,
@@ -1885,7 +1884,7 @@ SELECT
 FROM jsonb_to_recordset(CAST(:decisions AS jsonb)) AS value(
     decision_id text,
     curation_item_id text,
-    feature_id text,
+    feature_id uuid,
     import_row_id text,
     decision_kind text,
     match_basis text,
@@ -2195,7 +2194,7 @@ WITH incoming AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS value(
         collection_key text,
-        feature_id text,
+        feature_id uuid,
         external_item_id text,
         external_component_id text,
         place_name text,
@@ -2302,49 +2301,75 @@ def _replace_once(sql: str, old: str, new: str) -> str:
     return sql.replace(old, new, 1)
 
 
+def _pre_uuid_feature_id_recordset(sql: str) -> str:
+    """``jsonb_to_recordset``의 ``feature_id`` 선언을 고정 세대의 text로 되돌린다.
+
+    T-VN-39/alembic 309는 **현행 세대만** 옮겼다. 0063~0079 고정 세대의
+    ``feature.curation_items.feature_id``는 아직 legacy ``f_*`` text이므로, 현행
+    표면의 uuid 선언을 그대로 물려받으면 ``operator does not exist: text = uuid``로
+    **파스 단계에서** 죽는다.
+
+    다만 이 되돌림만으로 고정 세대 import 경로 전체가 되살아나지는 않는다 — 아래
+    셋은 세대 분기가 없는 공용 표면이라 재키 뒤 그 세대에서 파스되지 않는다:
+    ``_LEGACY_IMPORT_ADOPTION_CONFLICTS_SQL``(``import_curation_rows``가 세대와
+    무관하게 실행), ``_INSERT_LINK_DECISIONS_SQL``(``_record_import_provenance``),
+    그리고 ``import_curation_rows``의 ``CAST(:feature_ids AS uuid[])`` 가드.
+    되살리려면 그 셋에도 세대 분기가 필요하고, 아니면 ``frozen_h35_schema``
+    자체를 은퇴시켜야 한다. 결정 전까지 파생은 각자의 세대에 정직하게 남긴다.
+    """
+
+    return _replace_once(sql, "        feature_id uuid,\n", "        feature_id text,\n")
+
+
 # h35 cutover CLI 전용 — 0063 고정(pre-0080, feature_uuid column 부재) 스키마
 # 세대에서 같은 import 경로를 돌린다 (역사 표면 보존, ADR-075).
-_MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _replace_once(
+_MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _pre_uuid_feature_id_recordset(
     _replace_once(
         _replace_once(
             _replace_once(
-                _MARK_IMPORT_REMOVALS_SQL,
-                "CAST(f.feature_uuid AS text) AS feature_uuid",
-                "NULL::text AS feature_uuid",
+                _replace_once(
+                    _MARK_IMPORT_REMOVALS_SQL,
+                    "CAST(f.feature_id AS text) AS feature_uuid",
+                    "NULL::text AS feature_uuid",
+                ),
+                # 0085가 신설한 ``feature.feature_notices``도 그 세대엔 없다 — 당시의
+                # detail 문자열 판정으로 되돌린다(T-VN-35).
+                #
+                # ``_PREVIEW_IMPORT_REMOVALS_SQL``에는 같은 변형을 두지 않는다. preview는
+                # h35 replay 경로(``run_csv5``)에서 호출되지 않고 현행 스키마에서만 도므로,
+                # 고정-세대 변형을 만들면 아무도 실행하지 않는 두 번째 SQL이 생긴다.
+                _ITEM_PUBLIC_NOTICE_FILTER_SQL,
+                public_active_notice_filter_sql("pf", frozen_h35_schema=True),
             ),
-            # 0085가 신설한 ``feature.feature_notices``도 그 세대엔 없다 — 당시의
-            # detail 문자열 판정으로 되돌린다(T-VN-35).
-            #
-            # ``_PREVIEW_IMPORT_REMOVALS_SQL``에는 같은 변형을 두지 않는다. preview는
-            # h35 replay 경로(``run_csv5``)에서 호출되지 않고 현행 스키마에서만 도므로,
-            # 고정-세대 변형을 만들면 아무도 실행하지 않는 두 번째 SQL이 생긴다.
-            _ITEM_PUBLIC_NOTICE_FILTER_SQL,
-            public_active_notice_filter_sql("pf", frozen_h35_schema=True),
+            # T-VN-33은 자연키를 ``provider_sync.provider_datasets`` projection으로
+            # 옮겼지만, 그 catalog를 만드는 것은 0089다. 고정 세대에서 자연키는
+            # ``feature.curated_sources``에 그대로 있고 surrogate는 존재하지 않는다.
+            "    s.provider_dataset_id,\n    pd.provider,\n    pd.dataset_key,",
+            "    NULL::bigint AS provider_dataset_id,\n    s.provider,\n    s.dataset_key,",
         ),
-        # T-VN-33은 자연키를 ``provider_sync.provider_datasets`` projection으로
-        # 옮겼지만, 그 catalog를 만드는 것은 0089다. 고정 세대에서 자연키는
-        # ``feature.curated_sources``에 그대로 있고 surrogate는 존재하지 않는다.
-        "    s.provider_dataset_id,\n    pd.provider,\n    pd.dataset_key,",
-        "    NULL::bigint AS provider_dataset_id,\n    s.provider,\n    s.dataset_key,",
-    ),
-    "LEFT JOIN provider_sync.provider_datasets AS pd\n"
-    "  ON pd.provider_dataset_id = s.provider_dataset_id\n",
-    "",
+        "LEFT JOIN provider_sync.provider_datasets AS pd\n"
+        "  ON pd.provider_dataset_id = s.provider_dataset_id\n",
+        "",
+    )
 )
 _MARK_IMPORT_REMOVALS_PRE_UUID_NO_REVISION_SQL: Final[str] = _replace_once(
     _MARK_IMPORT_REMOVALS_PRE_UUID_SQL,
     "        row_revision = existing.row_revision + 1,\n",
     "",
 )
-_ADOPT_LEGACY_IMPORT_IDENTITIES_PRE_REVISION_SQL: Final[str] = _replace_once(
-    _ADOPT_LEGACY_IMPORT_IDENTITIES_SQL,
-    "        row_revision = legacy.row_revision + 1,\n",
-    "",
+_ADOPT_LEGACY_IMPORT_IDENTITIES_PRE_REVISION_SQL: Final[str] = _pre_uuid_feature_id_recordset(
+    _replace_once(
+        _ADOPT_LEGACY_IMPORT_IDENTITIES_SQL,
+        "        row_revision = legacy.row_revision + 1,\n",
+        "",
+    )
 )
-_BULK_UPSERT_ITEMS_PRE_REVISION_SQL: Final[str] = _replace_once(
-    _BULK_UPSERT_ITEMS_SQL,
-    "        row_revision = feature.curation_items.row_revision + 1,\n",
-    "",
+_BULK_UPSERT_ITEMS_PRE_REVISION_SQL: Final[str] = _pre_uuid_feature_id_recordset(
+    _replace_once(
+        _BULK_UPSERT_ITEMS_SQL,
+        "        row_revision = feature.curation_items.row_revision + 1,\n",
+        "",
+    )
 )
 
 _PREVIEW_IMPORT_REMOVALS_SQL: Final[str] = (
@@ -2356,7 +2381,7 @@ WHERE i.archived_at IS NULL
       SELECT 1
       FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS incoming(
           collection_key text,
-          feature_id text,
+          feature_id uuid,
           external_item_id text,
           external_component_id text
       )
@@ -2366,7 +2391,7 @@ WHERE i.archived_at IS NULL
       SELECT 1
       FROM jsonb_to_recordset(CAST(:items AS jsonb)) AS incoming(
           collection_key text,
-          feature_id text,
+          feature_id uuid,
           external_item_id text,
           external_component_id text
       )
@@ -2564,7 +2589,7 @@ WITH requested AS (
     SELECT *
     FROM jsonb_to_recordset(CAST(:requests AS jsonb)) AS value(
         row_number integer,
-        feature_id text,
+        feature_id {requested_feature_id_type},
         place_name text,
         address_hint text
     )
@@ -2617,12 +2642,16 @@ ORDER BY requested.row_number, matched.feature_id
 """
 
 _RESOLVE_FEATURES_BATCH_SQL: Final[str] = _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(
-    feature_uuid_select="CAST(f.feature_uuid AS text)",
+    requested_feature_id_type="uuid",
+    feature_uuid_select="CAST(f.feature_id AS text)",
     active_feature_state=_active_feature_state_sql("f"),
 )
 
 # h35 CLI 전용 — feature_uuid column(0080)도 상태 3축 column(0095)도 없는 고정 세대.
+# 그 세대의 ``feature.features.feature_id``는 아직 legacy ``f_*`` text이므로 요청
+# 가상 표의 선언도 text로 남는다(T-VN-39/309는 현행 세대만 옮겼다).
 _RESOLVE_FEATURES_BATCH_PRE_UUID_SQL: Final[str] = _RESOLVE_FEATURES_BATCH_SQL_TEMPLATE.format(
+    requested_feature_id_type="text",
     feature_uuid_select="NULL::text",
     active_feature_state=_active_feature_state_sql("f", frozen_h35_schema=True),
 )
@@ -3866,11 +3895,17 @@ async def create_curation_item_command(
     return created
 
 
+# OUT 자리표시자 7개 — `o_outcome`, `o_feature_id`, `o_feature_row_revision`,
+# `o_curation_item_id`, `o_item_row_revision`, `o_collection_row_revision`,
+# `o_existing_feature_id`. T-VN-39/309가 `o_feature_id`를 text → uuid로 옮기면서
+# 짝이던 `o_feature_uuid`를 없앴고 `o_existing_feature_uuid`를
+# `o_existing_feature_id`로 접었다 — 자리표시자가 8개로 남아 있으면 procedure
+# 자체를 찾지 못한다(시그니처 불일치).
 _CREATE_MANUAL_CURATION_ITEM_WITH_FEATURE_SQL: Final[str] = """
 CALL feature.create_manual_curation_item_with_feature_command(
   CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-  CAST(:command_id AS bigint), NULL::text, NULL::text, NULL::uuid,
-  NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+  CAST(:command_id AS bigint), NULL::text, NULL::uuid, NULL::bigint,
+  NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
 )
 """
 
@@ -3896,9 +3931,10 @@ async def create_manual_curation_item_with_feature_command(
 ) -> CurationManualFeatureItem | CurationManualFeatureExactDuplicate:
     """M03 combined procedure로 explicit manual Feature와 item을 함께 만든다.
 
-    caller가 UUID, legacy ID, origin/claim/상태 tuple을 고를 수 없게 이 경계에서
-    새 UUIDv7과 opaque bridge를 한 번 발급한다. detail subtype은 같은 outer
-    SERIALIZABLE command transaction에서만 뒤이어 materialize된다.
+    caller가 UUID, origin/claim/상태 tuple을 고를 수 없게 이 경계에서 새 UUIDv7을
+    한 번 발급한다 — 그것이 이 경로의 유일한 식별자다(ADR-098 결정 6: 큐레이션
+    수동 생성은 alias를 만들지 않는다). detail subtype은 같은 outer SERIALIZABLE
+    command transaction에서만 뒤이어 materialize된다.
     """
 
     if command_id < 1 or not principal.strip():
@@ -3929,23 +3965,21 @@ async def create_manual_curation_item_with_feature_command(
     if lon is None or lat is None:
         raise ValueError("manual_feature.coord is required")
     feature_uuid = candidate_feature_uuid()
-    feature_id = make_feature_id(
-        bjd_code=None,
-        kind=kind,
-        category="manual_feature_v1",
-        source_type="user_request",
-        source_natural_key=f"manual::{feature_uuid}",
-        content_hash=None,
-    )
     feature_payload = {
         key: value
         for key, value in manual_feature.items()
         if key not in {"detail", "reason", "coord"}
     }
+    # T-VN-39: writer가 받는 ``feature_id``는 이제 정본 UUIDv7이다 — 309 뒤의
+    # `create_manual_curation_item_with_feature_command`는 payload 키 집합에서
+    # ``feature_uuid``를 아예 배제하고(`ck_manual_curation_create_payload`),
+    # ``feature_id``를 uuid로 파싱해 UUIDv7 여부까지 검사한다. legacy ``f_*``는
+    # 아예 만들지 않는다 — ADR-098 결정 6대로 이 경로는 alias를 발급하지 않으므로
+    # (발급자는 backfill과 `create_provider_feature_with_initial_state` 둘뿐)
+    # 계산해 봐야 실을 축이 없다.
     feature_payload.update(
         {
-            "feature_id": feature_id,
-            "feature_uuid": feature_uuid,
+            "feature_id": feature_uuid,
             "lon": lon,
             "lat": lat,
             "coord_precision_digits": manual_feature.get("coord_precision_digits", 6),
@@ -3982,28 +4016,31 @@ async def create_manual_curation_item_with_feature_command(
     ).mappings().one()
     outcome = result.get("o_outcome")
     if outcome == "exact_conflict":
-        winner = result.get("o_existing_feature_uuid")
+        winner = result.get("o_existing_feature_id")
         if not isinstance(winner, (str, UUID)):
             raise RuntimeError("manual curation exact conflict has no winner UUID")
         return CurationManualFeatureExactDuplicate(existing_feature_uuid=str(winner))
     if outcome != "created":
         raise RuntimeError("manual curation writer returned an unknown outcome")
+    # T-VN-39: `o_feature_id`가 곧 uuid다 — `o_feature_uuid`는 사라졌고, 두 축을
+    # 따로 검증하던 자리는 하나로 접힌다. 검증의 뜻은 그대로다("writer가 claim한
+    # identity와 프로시저가 돌려준 identity가 같은가").
     observed_feature_id = result.get("o_feature_id")
-    observed_feature_uuid = result.get("o_feature_uuid")
     item_id = result.get("o_curation_item_id")
     feature_revision = result.get("o_feature_row_revision")
     if (
-        observed_feature_id != feature_id
-        or str(observed_feature_uuid) != feature_uuid
+        str(observed_feature_id) != feature_uuid
         or not isinstance(item_id, (str, UUID))
         or type(feature_revision) is not int
         or feature_revision < 1
     ):
         raise RuntimeError("manual curation writer receipt does not match server identity")
+    # subtype 행이 참조하는 identity는 core의 ``feature_id``(uuid) 하나뿐이다 —
+    # 309가 subtype의 identity 컬럼을 uuid로 옮겼으므로 legacy ``f_*``를 넘기면
+    # `invalid input syntax for type uuid`로 죽는다.
     await write_subtype(
         session,
-        feature_id=feature_id,
-        feature_uuid=feature_uuid,
+        feature_id=feature_uuid,
         kind=kind,
         detail=manual_feature.get("detail"),
     )
@@ -4015,8 +4052,11 @@ async def create_manual_curation_item_with_feature_command(
     )
     if created is None:
         raise RuntimeError("manual curation item could not be read")
+    # DTO의 ``feature_id``는 재수렴 경로(``item.feature_id``, uuid)와 같은 축이어야
+    # 한다 — 여기만 legacy ``f_*``를 담으면 같은 필드가 경로마다 다른 축을 실어
+    # 소비자(child command response_body 등)가 둘을 구분할 수 없다.
     return CurationManualFeatureItem(
-        feature_id=feature_id,
+        feature_id=feature_uuid,
         feature_uuid=feature_uuid,
         feature_row_revision=feature_revision,
         item=created,
@@ -6201,8 +6241,8 @@ async def _issue_manual_feature_children(
             await session.execute(
                 text(
                     "SELECT item.curation_item_id, item.feature_id, "
-                    "feature_row.feature_uuid, linkage.child_command_id, "
-                    "linkage.manual_payload_sha256 "
+                    "CAST(feature_row.feature_id AS text) AS feature_uuid, "
+                    "linkage.child_command_id, linkage.manual_payload_sha256 "
                     "FROM feature.curation_items AS item "
                     "LEFT JOIN feature.features AS feature_row "
                     "  ON feature_row.feature_id = item.feature_id "
@@ -6542,12 +6582,16 @@ async def import_curation_rows(
             active_state_sql = _active_feature_state_sql(
                 "f", frozen_h35_schema=frozen_h35_schema
             )
-            active_feature_ids = set(
-                (
+            # 재키 뒤 이 컬럼은 uuid라 driver가 ``uuid.UUID``를 돌려준다. 아래
+            # 비교 상대는 str 집합이므로 여기서 문자열로 정규화하지 않으면 두
+            # 집합이 **항상** 달라 정상 import가 lifecycle 변경으로 오판된다.
+            active_feature_ids = {
+                str(value)
+                for value in (
                     await session.execute(
                         text(
                             "SELECT feature_id FROM feature.features AS f "
-                            "WHERE f.feature_id = ANY(CAST(:feature_ids AS text[])) "
+                            "WHERE f.feature_id = ANY(CAST(:feature_ids AS uuid[])) "
                             f"AND {active_state_sql} "
                             "ORDER BY f.feature_id FOR UPDATE"
                         ),
@@ -6556,7 +6600,7 @@ async def import_curation_rows(
                 )
                 .scalars()
                 .all()
-            )
+            }
             if active_feature_ids != set(feature_ids):
                 raise ValueError(
                     "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."

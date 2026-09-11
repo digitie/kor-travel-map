@@ -40,11 +40,39 @@ from kortravelmap.infra.models import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
 
 pytestmark = pytest.mark.integration
 
 _NOW = datetime(2026, 6, 3, 10, 0, tzinfo=UTC)
+
+#: dedup 후보 쌍의 정본 키. 이 자리만은 :func:`feature_uuid`로 유도할 수 없다 —
+#: ``ops.dedup_review_queue``의 ``ck_dedup_pair_order``가 ``feature_id_a <
+#: feature_id_b``를 **uuid 비교**로 강제하는데, 라벨에서 유도한 값의 순서는 라벨의
+#: 사전순과 무관하기 때문이다. 그래서 순서를 눈으로 확인할 수 있는 리터럴을 든다
+#: (선례: ``test_merge_repo`` ``_F_LOSER``/``_F_MASTER`` · ``test_cli_dedup_merge``).
+#: 마지막 마디의 오름차순이 곧 쌍 순서다.
+_F_DEDUP_A = "00000000-0000-7000-8000-0000000b0001"
+_F_DEDUP_B = "00000000-0000-7000-8000-0000000b0002"
+_F_LOCK_A = "00000000-0000-7000-8000-0000000b0011"
+_F_LOCK_B = "00000000-0000-7000-8000-0000000b0012"
+_F_PAGE_A = "00000000-0000-7000-8000-0000000b0021"
+_F_PAGE_B = "00000000-0000-7000-8000-0000000b0022"
+_F_PAGE_C = "00000000-0000-7000-8000-0000000b0023"
+_F_PAGE_D = "00000000-0000-7000-8000-0000000b0024"
+_F_PAGE_E = "00000000-0000-7000-8000-0000000b0025"
+_F_FP_A = "00000000-0000-7000-8000-0000000b0031"
+_F_FP_B = "00000000-0000-7000-8000-0000000b0032"
+_F_FP_C = "00000000-0000-7000-8000-0000000b0033"
+
+#: provider writer에 넣는 **legacy** 식별자. ADR-098에서 DTO ``Feature.feature_id``는
+#: provider 라이브러리가 ``make_feature_id(...)``로 유도한 ``f_*``이고 정본 키가
+#: 아니다 — 서버가 claim으로 uuid를 발급하고 이 값은 ``feature.feature_aliases``에
+#: 주소로 남는다. ``ck_feature_aliases_legacy_alias_shape``가 마지막 마디를 정확히
+#: 16자 hex로 못박으므로 읽기 좋은 이름은 hex 안에서 만든다
+#: (선례: ``test_feature_identity_boundary``의 ``f_1100000000_p_1db0000000000004``).
+_LEGACY_PROVIDER_ID = "f_1100000000_p_ad3100000000ac71"
 
 
 def _feature_row(
@@ -142,12 +170,22 @@ def _provider_source_membership(
 def _dto(
     feature_id: str,
     *,
+    legacy_feature_id: str = _LEGACY_PROVIDER_ID,
     lifecycle_state: str = "active",
     publication_state: str = "published",
     quality_state: str = "valid",
 ) -> Feature:
+    """provider writer(:func:`upsert_feature`)에 넣을 DTO.
+
+    T-VN-39/ADR-098 뒤 이 DTO의 ``feature_id``는 **legacy ``f_*``**다 — provider
+    경로의 identity는 ``(provider_dataset_id, feature_kind, natural_key)`` claim이
+    소유하고 정본 uuid는 서버가 발급한다. 그래서 정본 키(``feature_id`` 인자)는
+    ``provider_natural_key``로 실어 ``_seed_feature``가 심은 claim과 만나게 하고,
+    DTO 자신의 식별자 슬롯에는 legacy 주소를 둔다.
+    """
     return Feature(
-        feature_id=feature_id,
+        feature_id=legacy_feature_id,
+        provider_natural_key=feature_id,
         kind="place",
         name="광화문 재적재",
         category="01070300",
@@ -160,7 +198,7 @@ def _dto(
         ),
         marker_icon="marker",
         marker_color="P-01",
-        detail=PlaceDetail(feature_id=feature_id, place_kind="attraction"),
+        detail=PlaceDetail(feature_id=legacy_feature_id, place_kind="attraction"),
         lifecycle_state=lifecycle_state,
         publication_state=publication_state,
         quality_state=quality_state,
@@ -169,14 +207,45 @@ def _dto(
     )
 
 
+_PROVIDER_IDENTITY_CLAIM_SQL = """
+INSERT INTO provider_sync.provider_feature_identities (
+    provider_dataset_id, feature_kind, natural_key, feature_id, bound_by_operation
+) VALUES (
+    :provider_dataset_id, 'place', :natural_key, CAST(:feature_id AS uuid),
+    'provider_sync'
+)
+"""
+
+
 async def _seed_feature(
     session: AsyncSession,
-    feature_id: str = "feature-admin-1",
+    feature_id: str,
+    *,
+    natural_key: str | None = None,
 ) -> None:
+    """정본 키(uuid)로 심은 feature 1건 + 그 feature의 provider 계보.
+
+    T-VN-39/ADR-098: provider 경로의 identity는 ``(provider_dataset_id,
+    feature_kind, natural_key)`` claim이 소유한다. 재키 전에는 DTO의 ``f_*``가 곧
+    PK라 ``ON CONFLICT (feature_id)``가 재적재를 같은 행으로 되돌렸지만, 이제 그
+    자리를 claim이 대신한다. 그래서 직접 심은 core 행에도 claim을 함께 걸어야
+    provider writer가 **같은** Feature로 돌아온다 — claim이 없으면 writer는 새
+    uuid를 주조하고, "admin retirement를 우회하지 못한다"는 명제가 관측 불가능한
+    다른 Feature 위에서 참이 되어 버린다.
+    """
     session.add(_feature_row(feature_id, name="광화문"))
     await session.flush()
     await seed_feature_subtype(session, feature_id=feature_id, kind="place")
-    entity = _source_entity(f"sr-{feature_id}", await _provider_dataset_id(session))
+    provider_dataset_id = await _provider_dataset_id(session)
+    await session.execute(
+        text(_PROVIDER_IDENTITY_CLAIM_SQL),
+        {
+            "provider_dataset_id": provider_dataset_id,
+            "natural_key": natural_key or feature_id,
+            "feature_id": feature_id,
+        },
+    )
+    entity = _source_entity(f"sr-{feature_id}", provider_dataset_id)
     session.add(entity)
     await session.flush()
     session.add(_source_record(f"sr-{feature_id}"))
@@ -201,14 +270,14 @@ async def _merge_dedup_review_with_short_lock_timeout(
     await merge_dedup_review(
         session,
         review_id,
-        master_feature_id="feature-admin-lock-a",
+        master_feature_id=_F_LOCK_A,
     )
 
 
 async def test_admin_retire_reactivate_is_atomic_and_auditable(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "feature-admin-reactivation"
+    feature_id = feature_uuid("feature-admin-reactivation")
     await _seed_feature(migrated_session, feature_id)
     initial_revision = await get_feature_row_revision(migrated_session, feature_id)
     assert initial_revision is not None
@@ -274,7 +343,7 @@ async def test_admin_retire_reactivate_is_atomic_and_auditable(
 async def test_admin_state_transition_rejects_stale_revision(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "feature-admin-stale-revision"
+    feature_id = feature_uuid("feature-admin-stale-revision")
     await _seed_feature(migrated_session, feature_id)
     revision = await get_feature_row_revision(migrated_session, feature_id)
     assert revision is not None
@@ -303,7 +372,8 @@ async def test_admin_state_transition_rejects_stale_revision(
 async def test_list_admin_features_filters_issue_and_primary_source(
     migrated_session: AsyncSession,
 ) -> None:
-    await _seed_feature(migrated_session, "feature-admin-list")
+    feature_id = feature_uuid("feature-admin-list")
+    await _seed_feature(migrated_session, feature_id)
     provider_dataset_id = await _provider_dataset_id(migrated_session)
     await migrated_session.execute(
         text(
@@ -318,7 +388,7 @@ async def test_list_admin_features_filters_issue_and_primary_source(
             """
         ),
         {
-            "feature_id": "feature-admin-list",
+            "feature_id": feature_id,
             "provider_dataset_id": provider_dataset_id,
         },
     )
@@ -333,7 +403,7 @@ async def test_list_admin_features_filters_issue_and_primary_source(
 
     assert len(page.items) == 1
     item = page.items[0]
-    assert item.feature_id == "feature-admin-list"
+    assert item.feature_id == feature_id
     assert item.primary_provider == _PROVIDER
     assert item.primary_dataset_key == _DATASET_KEY
     assert item.issue_count == 1
@@ -344,12 +414,12 @@ async def test_dedup_review_decision_updates_pending_only(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
-    session.add(_feature_row("feature-admin-dedup-a", name="중복 A"))
-    session.add(_feature_row("feature-admin-dedup-b", name="중복 B"))
+    session.add(_feature_row(_F_DEDUP_A, name="중복 A"))
+    session.add(_feature_row(_F_DEDUP_B, name="중복 B"))
     await session.flush()
     review = DedupReviewQueueRow(
-        feature_id_a="feature-admin-dedup-a",
-        feature_id_b="feature-admin-dedup-b",
+        feature_id_a=_F_DEDUP_A,
+        feature_id_b=_F_DEDUP_B,
         total_score=90,
         name_score=95,
         spatial_score=80,
@@ -379,17 +449,17 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        session.add(_feature_row("feature-admin-lock-a", name="잠금 A"))
-        session.add(_feature_row("feature-admin-lock-b", name="잠금 B"))
+        session.add(_feature_row(_F_LOCK_A, name="잠금 A"))
+        session.add(_feature_row(_F_LOCK_B, name="잠금 B"))
         await session.flush()
         # 이 블록은 rollback이 아니라 **커밋**된다(세션 공유 DB). subtype 없는
         # core 행을 남기면 뒤따르는 테스트의 consistency 게이트(F2 — subtype 결측)가
         # 막힌다. 프로덕션 writer는 두 쓰기를 한 트랜잭션에서 하므로, 시드도 그렇게 한다.
-        for locked_id in ("feature-admin-lock-a", "feature-admin-lock-b"):
+        for locked_id in (_F_LOCK_A, _F_LOCK_B):
             await seed_feature_subtype(session, feature_id=locked_id, kind="place")
         review = DedupReviewQueueRow(
-            feature_id_a="feature-admin-lock-a",
-            feature_id_b="feature-admin-lock-b",
+            feature_id_a=_F_LOCK_A,
+            feature_id_b=_F_LOCK_B,
             total_score=90,
             name_score=95,
             spatial_score=80,
@@ -420,20 +490,20 @@ async def test_list_dedup_reviews_keyset_walk_stable_under_mutation(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
-    for feature_id in (
-        "feature-admin-page-a",
-        "feature-admin-page-b",
-        "feature-admin-page-c",
-        "feature-admin-page-d",
-        "feature-admin-page-e",
+    for feature_id, label in (
+        (_F_PAGE_A, "feature-admin-page-a"),
+        (_F_PAGE_B, "feature-admin-page-b"),
+        (_F_PAGE_C, "feature-admin-page-c"),
+        (_F_PAGE_D, "feature-admin-page-d"),
+        (_F_PAGE_E, "feature-admin-page-e"),
     ):
-        session.add(_feature_row(feature_id, name=feature_id))
+        session.add(_feature_row(feature_id, name=label))
     await session.flush()
     reviews = [
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000003",
-            feature_id_a="feature-admin-page-a",
-            feature_id_b="feature-admin-page-b",
+            feature_id_a=_F_PAGE_A,
+            feature_id_b=_F_PAGE_B,
             total_score=Decimal("90.01"),
             name_score=95,
             spatial_score=80,
@@ -441,8 +511,8 @@ async def test_list_dedup_reviews_keyset_walk_stable_under_mutation(
         ),
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000002",
-            feature_id_a="feature-admin-page-a",
-            feature_id_b="feature-admin-page-c",
+            feature_id_a=_F_PAGE_A,
+            feature_id_b=_F_PAGE_C,
             total_score=Decimal("90.01"),
             name_score=94,
             spatial_score=80,
@@ -450,8 +520,8 @@ async def test_list_dedup_reviews_keyset_walk_stable_under_mutation(
         ),
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000001",
-            feature_id_a="feature-admin-page-a",
-            feature_id_b="feature-admin-page-d",
+            feature_id_a=_F_PAGE_A,
+            feature_id_b=_F_PAGE_D,
             total_score=Decimal("90.01"),
             name_score=93,
             spatial_score=80,
@@ -488,8 +558,8 @@ async def test_list_dedup_reviews_keyset_walk_stable_under_mutation(
     session.add(
         DedupReviewQueueRow(
             review_id="00000000-0000-0000-0000-000000000009",
-            feature_id_a="feature-admin-page-a",
-            feature_id_b="feature-admin-page-e",
+            feature_id_a=_F_PAGE_A,
+            feature_id_b=_F_PAGE_E,
             total_score=Decimal("99.99"),  # page1 커서보다 상위 순위
             name_score=99,
             spatial_score=80,
@@ -520,15 +590,19 @@ async def test_list_dedup_reviews_cursor_rejects_filter_change(
     migrated_session: AsyncSession,
 ) -> None:
     session = migrated_session
-    for feature_id in ("feature-fp-a", "feature-fp-b", "feature-fp-c"):
-        session.add(_feature_row(feature_id, name=feature_id))
+    for feature_id, label in (
+        (_F_FP_A, "feature-fp-a"),
+        (_F_FP_B, "feature-fp-b"),
+        (_F_FP_C, "feature-fp-c"),
+    ):
+        session.add(_feature_row(feature_id, name=label))
     await session.flush()
     session.add_all(
         [
             DedupReviewQueueRow(
                 review_id="00000000-0000-0000-0000-0000000000a2",
-                feature_id_a="feature-fp-a",
-                feature_id_b="feature-fp-b",
+                feature_id_a=_F_FP_A,
+                feature_id_b=_F_FP_B,
                 total_score=Decimal("60.00"),
                 name_score=60,
                 spatial_score=60,
@@ -536,8 +610,8 @@ async def test_list_dedup_reviews_cursor_rejects_filter_change(
             ),
             DedupReviewQueueRow(
                 review_id="00000000-0000-0000-0000-0000000000a1",
-                feature_id_a="feature-fp-a",
-                feature_id_b="feature-fp-c",
+                feature_id_a=_F_FP_A,
+                feature_id_b=_F_FP_C,
                 total_score=Decimal("55.00"),
                 name_score=55,
                 spatial_score=55,
@@ -579,7 +653,7 @@ async def test_retired_feature_publication_patch_is_a_conflict_not_a_500(
     그 타입으로 409를 만들기 때문이다(타입이 맞으면 상태코드는 라우터 테스트가 고정한다).
     """
 
-    feature_id = "feature-retired-publication-patch"
+    feature_id = feature_uuid("feature-retired-publication-patch")
     await _seed_feature(migrated_session, feature_id)
     revision = await get_feature_row_revision(migrated_session, feature_id)
     assert revision is not None

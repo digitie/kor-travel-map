@@ -108,11 +108,15 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
     collection_id = await _collection(migrated_engine, actor=actor, suffix=suffix)
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
-    feature_uuid = "018f9f2b-1234-7def-8abc-1234567890ab"
-    feature_id = f"f_global_p_m03{suffix[:12]}"
+    # T-VN-39(alembic 309) + ADR-098 결정 6: manual curation writer가 받는 payload의
+    # ``feature_id``는 **호출자가 정하는 정본 UUIDv7 하나**다(사이드카가 15번째 글자로
+    # v7을 검사하고, core가 돌려준 키가 이 값과 다르면 23514로 선다). legacy ``f_*``
+    # 짝은 사라졌다 — 이 경로는 주소를 발급하지 않으므로 payload에 실을 것도 없고,
+    # 사이드카의 허용 키 목록에 ``feature_uuid``가 없어 넣으면 23514다.
+    feature_id = "018f9f2b-1234-7def-8abc-1234567890ab"
+    duplicate_feature_id = "018f9f2b-4321-7def-8abc-1234567890ab"
     feature_payload = {
         "feature_id": feature_id,
-        "feature_uuid": feature_uuid,
         "kind": "place",
         "name": "M03 원자 생성 장소",
         "category": "01070300",
@@ -147,8 +151,12 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
@@ -160,7 +168,7 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                 )
             ).mappings().one()
         assert created["o_outcome"] == "created"
-        assert str(created["o_feature_uuid"]) == feature_uuid
+        assert str(created["o_feature_id"]) == feature_id
         item_id = str(created["o_curation_item_id"])
 
         async with migrated_engine.connect() as connection:
@@ -170,15 +178,16 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         SELECT origin.origin_kind, origin.creation_command_id,
                                origin.creator_principal_id, origin.procedure_definer,
-                               item.feature_id, item.source_record_key,
+                               CAST(item.feature_id AS text) AS feature_id,
+                               item.source_record_key,
                                item.accepted_link_decision_id IS NOT NULL AS linked
                         FROM feature.feature_creation_origins AS origin
                         JOIN feature.curation_items AS item
                           ON item.curation_item_id = CAST(:item_id AS uuid)
-                        WHERE origin.feature_id = CAST(:feature_uuid AS uuid)
+                        WHERE origin.feature_id = CAST(:feature_id AS uuid)
                         """
                     ),
-                    {"feature_uuid": feature_uuid, "item_id": item_id},
+                    {"feature_id": feature_id, "item_id": item_id},
                 )
             ).mappings().one()
         assert evidence == {
@@ -201,26 +210,28 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),
                     {
                         "command_id": duplicate_command,
                         "feature_payload": json.dumps(
-                            feature_payload
-                            | {
-                                "feature_uuid": "018f9f2b-4321-7def-8abc-1234567890ab",
-                                "feature_id": f"f_global_p_m03d{suffix[:11]}",
-                            }
+                            # 같은 identity claim 축(kind·name·좌표)을 유지한 채
+                            # 정본 키만 다르게 준다 — 그래야 exact_conflict 분기다.
+                            feature_payload | {"feature_id": duplicate_feature_id}
                         ),
                         "item_payload": json.dumps(duplicate_item_payload),
                     },
                 )
             ).mappings().one()
         assert duplicate["o_outcome"] == "exact_conflict"
-        assert str(duplicate["o_existing_feature_uuid"]) == feature_uuid
+        assert str(duplicate["o_existing_feature_id"]) == feature_id
         async with migrated_engine.connect() as connection:
             item_count = await connection.scalar(
                 text(
@@ -240,8 +251,12 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
                         """
                         CALL feature.create_manual_curation_item_with_feature_command(
                           CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          :command_id, NULL::text, NULL::text, NULL::uuid,
-                          NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
+                          -- · curation_item_id · item_row_revision
+                          -- · collection_row_revision · existing_feature_id(uuid).
+                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
+                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
+                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
                         )
                         """
                     ),

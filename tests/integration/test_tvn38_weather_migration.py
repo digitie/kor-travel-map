@@ -22,6 +22,7 @@ from kortravelmap.infra.weather_repo import (
     load_weather_values,
     materialize_current_weather_summary,
 )
+from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -32,6 +33,16 @@ pytestmark = pytest.mark.integration
 _BASE = datetime(2026, 8, 8, 3, 0, tzinfo=UTC)
 _PROVIDER = "tvn38-weather-test"
 _DATASET = "forecast"
+
+# T-VN-39(309): 이 파일이 심는 weather anchor는 provider 적재 경로를 타지 않고
+# ``INSERT INTO feature.features``로 직접 들어간다 — 즉 **정본 축**이라
+# ``feature_id``는 uuid여야 한다. 옛 라벨을 그대로 씨앗으로 두면 실패 메시지의
+# uuid를 이름으로 되짚을 수 있고, 값 표(``feature_weather_values`` ·
+# ``current_weather_summary``)의 참조도 같은 uuid 하나로 맞는다.
+_FACT_FEATURE = feature_uuid("tvn38-weather-feature")
+_SUMMARY_FEATURE = feature_uuid("tvn38-summary-feature")
+_FUTURE_FEATURE = feature_uuid("tvn38-future-feature")
+_INACTIVE_FEATURE = feature_uuid("tvn38-inactive-feature")
 
 
 async def _seed_response_record(session: AsyncSession) -> tuple[int, SourceRecord]:
@@ -89,15 +100,16 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-weather-feature', 'weather', 'T-VN-38 날씨', '00000000')
+            VALUES (:feature_id, 'weather', 'T-VN-38 날씨', '00000000')
             """
-        )
+        ),
+        {"feature_id": _FACT_FEATURE},
     )
     assert await load_weather_values(
         migrated_session,
         [
             WeatherValue(
-                feature_id="tvn38-weather-feature",
+                feature_id=_FACT_FEATURE,
                 provider=_PROVIDER,
                 weather_domain="kma_short_forecast",
                 forecast_style="short",
@@ -115,9 +127,10 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
             """
             SELECT summary_run_id
             FROM feature.current_weather_summary
-            WHERE feature_id = 'tvn38-weather-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _FACT_FEATURE},
     )
     assert run_id is not None
 
@@ -128,9 +141,10 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
                     """
                     UPDATE feature.feature_weather_values
                     SET value_number = 99
-                    WHERE feature_id = 'tvn38-weather-feature'
+                    WHERE feature_id = :feature_id
                     """
-                )
+                ),
+                {"feature_id": _FACT_FEATURE},
             )
     with pytest.raises(DBAPIError, match="terminal current summary receipt is immutable"):
         async with migrated_session.begin_nested():
@@ -147,15 +161,17 @@ async def test_weather_fact_is_immutable_and_summary_requires_successful_receipt
 
     # parent cascade는 immutable fact/summary trigger에 막히지 않아야 한다.
     await migrated_session.execute(
-        text("DELETE FROM feature.features WHERE feature_id = 'tvn38-weather-feature'")
+        text("DELETE FROM feature.features WHERE feature_id = :feature_id"),
+        {"feature_id": _FACT_FEATURE},
     )
     assert await migrated_session.scalar(
         text(
             """
             SELECT count(*) FROM feature.current_weather_summary
-            WHERE feature_id = 'tvn38-weather-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _FACT_FEATURE},
     ) == 0
 
 
@@ -169,12 +185,13 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-summary-feature', 'weather', 'T-VN-38 summary', '00000000')
+            VALUES (:feature_id, 'weather', 'T-VN-38 summary', '00000000')
             """
-        )
+        ),
+        {"feature_id": _SUMMARY_FEATURE},
     )
     first_value = WeatherValue(
-        feature_id="tvn38-summary-feature",
+        feature_id=_SUMMARY_FEATURE,
         provider=_PROVIDER,
         weather_domain="kma_short_forecast",
         forecast_style="short",
@@ -226,31 +243,34 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
             FROM feature.current_weather_summary AS summary
             JOIN feature.feature_weather_values AS fact
               ON fact.weather_value_key = summary.weather_value_key
-            WHERE summary.feature_id = 'tvn38-summary-feature'
+            WHERE summary.feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _SUMMARY_FEATURE},
     ) == Decimal("21.0000")
     assert await migrated_session.scalar(
         text(
             """
             SELECT refresh_after
             FROM feature.current_weather_summary
-            WHERE feature_id = 'tvn38-summary-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _SUMMARY_FEATURE},
     ) == _BASE + timedelta(minutes=125)
     await migrated_session.execute(
         text(
             """
             UPDATE feature.current_weather_summary
             SET refresh_after = clock_timestamp() + interval '1 hour'
-            WHERE feature_id = 'tvn38-summary-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _SUMMARY_FEATURE},
     )
     card = await build_weather_card(
         migrated_session,
-        feature_id="tvn38-summary-feature",
+        feature_id=_SUMMARY_FEATURE,
     )
     assert card.metrics[0].value_number == Decimal("21.0000")
     assert card.metrics[0].provider_dataset_id == dataset_id
@@ -267,9 +287,10 @@ async def test_weather_summary_uses_business_time_and_expires_stale_rows(
             """
             SELECT count(*)
             FROM feature.current_weather_summary
-            WHERE feature_id = 'tvn38-summary-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _SUMMARY_FEATURE},
     ) == 0
 
 
@@ -283,12 +304,13 @@ async def test_weather_reconcile_advances_future_candidate_without_new_provider_
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-future-feature', 'weather', 'T-VN-38 future', '00000000')
+            VALUES (:feature_id, 'weather', 'T-VN-38 future', '00000000')
             """
-        )
+        ),
+        {"feature_id": _FUTURE_FEATURE},
     )
     current = WeatherValue(
-        feature_id="tvn38-future-feature",
+        feature_id=_FUTURE_FEATURE,
         provider=_PROVIDER,
         weather_domain="kma_short_forecast",
         forecast_style="short",
@@ -334,12 +356,13 @@ async def test_weather_reconcile_advances_future_candidate_without_new_provider_
             """
             UPDATE feature.current_weather_summary
             SET refresh_after = clock_timestamp() + interval '1 hour'
-            WHERE feature_id = 'tvn38-future-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _FUTURE_FEATURE},
     )
     before = await build_weather_card(
-        migrated_session, feature_id="tvn38-future-feature"
+        migrated_session, feature_id=_FUTURE_FEATURE
     )
     assert before.metrics[0].value_number == Decimal("20.0")
 
@@ -355,9 +378,10 @@ async def test_weather_reconcile_advances_future_candidate_without_new_provider_
             FROM feature.current_weather_summary AS summary
             JOIN feature.feature_weather_values AS fact
               ON fact.weather_value_key = summary.weather_value_key
-            WHERE summary.feature_id = 'tvn38-future-feature'
+            WHERE summary.feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _FUTURE_FEATURE},
     )
     assert selected == Decimal("22.0000")
 
@@ -372,15 +396,16 @@ async def test_weather_current_reader_hides_inactive_dataset_before_reconcile(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category)
-            VALUES ('tvn38-inactive-feature', 'weather', 'T-VN-38 inactive', '00000000')
+            VALUES (:feature_id, 'weather', 'T-VN-38 inactive', '00000000')
             """
-        )
+        ),
+        {"feature_id": _INACTIVE_FEATURE},
     )
     assert await load_weather_values(
         migrated_session,
         [
             WeatherValue(
-                feature_id="tvn38-inactive-feature",
+                feature_id=_INACTIVE_FEATURE,
                 provider=_PROVIDER,
                 weather_domain="kma_short_forecast",
                 forecast_style="short",
@@ -398,12 +423,13 @@ async def test_weather_current_reader_hides_inactive_dataset_before_reconcile(
             """
             UPDATE feature.current_weather_summary
             SET refresh_after = clock_timestamp() + interval '1 hour'
-            WHERE feature_id = 'tvn38-inactive-feature'
+            WHERE feature_id = :feature_id
             """
-        )
+        ),
+        {"feature_id": _INACTIVE_FEATURE},
     )
     assert (await build_weather_card(
-        migrated_session, feature_id="tvn38-inactive-feature"
+        migrated_session, feature_id=_INACTIVE_FEATURE
     )).metrics
 
     await migrated_session.execute(
@@ -417,7 +443,7 @@ async def test_weather_current_reader_hides_inactive_dataset_before_reconcile(
         {"provider_dataset_id": dataset_id},
     )
     inactive = await build_weather_card(
-        migrated_session, feature_id="tvn38-inactive-feature"
+        migrated_session, feature_id=_INACTIVE_FEATURE
     )
     assert inactive.metrics == []
 

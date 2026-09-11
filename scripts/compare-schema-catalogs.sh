@@ -552,7 +552,11 @@ if [ "$SELF_TEST" = "1" ]; then
     "UNLOGGED 전환|ALTER TABLE ops.system_log SET UNLOGGED"
     "replica identity FULL 전환|ALTER TABLE feature.features REPLICA IDENTITY FULL"
     "OWNED BY 링크 절단 (serial sequence를 고아로 만든다)|ALTER SEQUENCE ops.import_jobs_queue_sequence_seq OWNED BY NONE"
-    "replica identity USING INDEX|ALTER TABLE feature.features REPLICA IDENTITY USING INDEX uq_features_feature_uuid"
+    # T-VN-39: shadow 컬럼 `features.feature_uuid`와 함께 `uq_features_feature_uuid`도
+    # 사라졌다. 변조 SQL이 실패하면 이 스크립트는 SKIP만 찍고 놓침으로 세지 않으므로,
+    # 축(replica identity USING INDEX)을 살리려면 head에 실재하는 non-partial UNIQUE를
+    # 써야 한다 — `uq_features_id_kind`(feature_id, kind)는 둘 다 NOT NULL이다.
+    "replica identity USING INDEX|ALTER TABLE feature.features REPLICA IDENTITY USING INDEX uq_features_id_kind"
   )
   caught=0; missed=0
   for entry in "${MUTATIONS[@]}"; do

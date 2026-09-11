@@ -20,6 +20,10 @@ from kortravelmap.infra.scope_repo import (
 
 pytestmark = pytest.mark.unit
 
+#: scope 검증용 canonical uuid 두 개. T-VN-39 뒤 이 축은 uuid다.
+_SCOPE_ID_A = "00000000-0000-7000-8000-00000000d001"
+_SCOPE_ID_B = "00000000-0000-7000-8000-00000000d002"
+
 
 def _row(**values: object) -> dict[str, object]:
     return values
@@ -413,7 +417,7 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         return ("11110", "11110")
 
     scopes = [
-        {"type": "feature_ids", "feature_ids": ["one", "two"]},
+        {"type": "feature_ids", "feature_ids": [_SCOPE_ID_A, _SCOPE_ID_B]},
         {"type": "center_radius", "center": {"lon": 127.0, "lat": 37.0}, "radius_km": 3},
         {
             "type": "bbox",
@@ -451,7 +455,7 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
     assert "provider_datasets_for_ids" in call_names
     assert "execute_preview" in call_names
     feature_id_payload = next(payload for name, payload in calls if name == "feature_ids")
-    assert feature_id_payload["feature_ids"] == ("one", "two")
+    assert feature_id_payload["feature_ids"] == (_SCOPE_ID_A, _SCOPE_ID_B)
     assert feature_id_payload["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
     preview_calls = {
         name: payload
@@ -537,7 +541,11 @@ def test_canonicalize_feature_update_scope_materializes_defaults_and_strips_gene
     [
         {"type": "feature_ids", "feature_ids": [1]},
         {"type": "feature_ids", "feature_ids": ["\t"]},
-        {"type": "feature_ids", "feature_ids": ["a", "a"]},
+        {"type": "feature_ids", "feature_ids": [_SCOPE_ID_A, _SCOPE_ID_A]},
+        # T-VN-39: scope의 feature id는 canonical uuid여야 한다. 소비 SQL이 전부
+        # `CAST(:feature_ids AS uuid[])`라 느슨한 값은 실행 시점 22P02가 된다.
+        {"type": "feature_ids", "feature_ids": ["one"]},
+        {"type": "feature_ids", "feature_ids": ["00000000-0000-7000-8000-00000000D001"]},
         {
             "type": "center_radius",
             "center": {"lon": 181, "lat": 37},

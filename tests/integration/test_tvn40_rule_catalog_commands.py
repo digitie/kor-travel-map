@@ -10,6 +10,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
@@ -65,7 +66,9 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
 ) -> None:
     suffix = uuid4().hex
     actor = f"admin:tvn40-rule-{suffix}"
-    feature_id = f"tvn40:rule:{suffix}"
+    # T-VN-39(alembic 309): 아래 ``INSERT INTO feature.features``가 심는 값이므로
+    # 정본 축이다 — 라벨은 :func:`feature_uuid`의 씨앗으로만 남긴다.
+    feature_id = feature_uuid(f"tvn40:rule:{suffix}")
     source_entity_keys = [
         f"tvn40:rule:entity-a:{suffix}",
         f"tvn40:rule:entity-b:{suffix}",

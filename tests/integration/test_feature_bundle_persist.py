@@ -27,6 +27,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -35,6 +36,16 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
+
+#: 이 round-trip이 심는 행의 **정본 키**.
+#:
+#: T-VN-39 재키(alembic 309)와 ADR-098 뒤 두 값이 갈렸다: provider 라이브러리가
+#: ``make_feature_id``로 유도한 ``bundle.feature.feature_id``는 legacy ``f_*``
+#: 주소이고, ``feature.features.feature_id``는 서버가 발급하는 uuid다. 이 모듈은
+#: 일부러 적재 경로(``feature_repo.load_bundle``)를 태우지 않고 ORM으로 직접
+#: 심으므로 — 그것이 이 파일의 존재 이유다(DTO→DB 계약을 loader와 독립으로 잰다) —
+#: 주소를 발급해 줄 wrapper가 없다. 그래서 정본 키를 여기서 명시적으로 든다.
+_FEATURE_ID = feature_uuid("festival-bundle-roundtrip")
 
 _CATALOG_ID_SQL = """
 INSERT INTO provider_sync.provider_datasets (
@@ -126,6 +137,10 @@ async def test_feature_bundle_persists_and_roundtrips(
         bundle.source_link,
     )
     assert feature.coord is not None  # 좌표 있는 케이스
+    # DTO가 든 식별자는 legacy 축이다 — 정본 키가 아니라는 것 자체가 계약이므로
+    # 그 사실을 여기서 못박고, 아래 행은 전부 ``_FEATURE_ID``(정본 축)로 심는다.
+    assert feature.feature_id.startswith("f_")
+    assert source_link.feature_id == feature.feature_id
     source_entity_key = _make_source_entity_key(
         provider=source_record.provider,
         dataset_key=source_record.dataset_key,
@@ -134,7 +149,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     )
 
     feature_row = FeatureRow(
-        feature_id=feature.feature_id,
+        feature_id=_FEATURE_ID,
         kind=feature.kind.value,
         name=feature.name,
         category=feature.category,
@@ -170,7 +185,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다 — core에 detail 컬럼이 없다.
     await seed_feature_subtype(
         migrated_session,
-        feature_id=feature.feature_id,
+        feature_id=_FEATURE_ID,
         kind=feature.kind.value,
         detail=feature.detail.model_dump(mode="json") if feature.detail else None,
     )
@@ -187,7 +202,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     await migrated_session.flush()
 
     source_link_row = SourceLinkRow(
-        feature_id=source_link.feature_id,
+        feature_id=_FEATURE_ID,
         source_entity_key=source_entity_key,
         source_role=source_link.source_role.value,
         match_method=source_link.match_method,
@@ -199,7 +214,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     # ① feature 재조회 + JSONB round-trip
     got = (
         await migrated_session.execute(
-            select(FeatureRow).where(FeatureRow.feature_id == feature.feature_id)
+            select(FeatureRow).where(FeatureRow.feature_id == _FEATURE_ID)
         )
     ).scalar_one()
     assert got.kind == "event"
@@ -223,7 +238,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     assembled = (
         await migrated_session.execute(
             text("SELECT detail FROM feature.public_features WHERE feature_id = :fid"),
-            {"fid": feature.feature_id},
+            {"fid": _FEATURE_ID},
         )
     ).scalar_one()
     detail = json.loads(assembled) if isinstance(assembled, str) else dict(assembled)
@@ -235,7 +250,7 @@ async def test_feature_bundle_persists_and_roundtrips(
             "SELECT ST_SRID(coord_5179) AS srid, ST_X(coord) AS x, ST_Y(coord) AS y "
             "FROM feature.features WHERE feature_id = :fid"
         ),
-        {"fid": feature.feature_id},
+        {"fid": _FEATURE_ID},
     )
     srid5179, x, y = res.one()
     assert srid5179 == 5179
@@ -245,9 +260,7 @@ async def test_feature_bundle_persists_and_roundtrips(
     # ③ source_link FK 정합
     link = (
         await migrated_session.execute(
-            select(SourceLinkRow).where(
-                SourceLinkRow.feature_id == feature.feature_id
-            )
+            select(SourceLinkRow).where(SourceLinkRow.feature_id == _FEATURE_ID)
         )
     ).scalar_one()
     assert link.source_entity_key == source_entity_key

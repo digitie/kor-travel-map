@@ -34,7 +34,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
 ] = {
     ("feature", "feature_weather_values"): {
         ("weather_value_key", "text", True),
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("weather_domain", "text", True),
         ("forecast_style", "text", True),
@@ -61,7 +61,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
     },
     ("feature", "feature_price_values"): {
         ("price_value_key", "text", True),
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("price_domain", "text", True),
         ("product_key", "text", True),
@@ -93,7 +93,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("detail", "jsonb", True),
     },
     ("feature", "current_weather_summary"): {
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("weather_domain", "text", True),
         ("forecast_style", "text", True),
@@ -106,7 +106,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("receipt_status", "text", True),
     },
     ("feature", "current_price_summary"): {
-        ("feature_id", "text", True),
+        ("feature_id", "uuid", True),
         ("provider_dataset_id", "bigint", True),
         ("price_domain", "text", True),
         ("product_key", "text", True),
@@ -173,7 +173,7 @@ _UNMAPPED_TABLE_COLUMNS: dict[
     # 0103 legacy freeze replay의 fail-closed preflight 결과. 애플리케이션이 읽지
     # 않는 일회성 감사 기록이라 ORM에 매핑하지 않고, 구조는 여기서 고정한다.
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
-        ("feature_id", "text", True),
+        ("legacy_feature_id", "text", True),
         ("request_id", "uuid", False),
         ("violation_code", "text", True),
         ("detail", "text", True),
@@ -242,7 +242,9 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("plan_sha256", "text", True),
         ("manual_payload_sha256", "text", True),
         ("child_command_id", "bigint", True),
-        ("feature_uuid", "uuid", True),
+        # T-VN-39: 이 표에는 text 짝이 없었다 — shadow가 아니라 진짜 identity다.
+        # 309는 삭제가 아니라 `feature_uuid` → `feature_id` 개명으로 옮긴다.
+        ("feature_id", "uuid", True),
         ("import_row_id", "uuid", True),
         ("curation_item_id", "uuid", True),
         ("link_decision_id", "uuid", True),
@@ -979,7 +981,7 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
                     INSERT INTO feature.features (
                         feature_id, kind, name, category, coord
                     ) VALUES (
-                        'feature:precision-trigger',
+                        '00000000-0000-7000-8000-0000000f0001',
                         'place',
                         'precision trigger',
                         '01070100',
@@ -996,7 +998,7 @@ async def test_alembic_coord_precision_trigger_defaults_for_coord(
                     text(
                         "SELECT coord_precision_digits "
                         "FROM feature.features "
-                        "WHERE feature_id = 'feature:precision-trigger'"
+                        "WHERE feature_id = '00000000-0000-7000-8000-0000000f0001'"
                     )
                 )
             ).one()
@@ -1028,6 +1030,7 @@ async def test_alembic_creates_source_tables(
         "provider_dataset_operation_scopes",
         "provider_dataset_operations",
         "provider_datasets",
+        "provider_feature_identities",
         "provider_sync_state",
         "source_entities",
         "source_entity_heads",
