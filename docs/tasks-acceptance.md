@@ -2357,6 +2357,20 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 3. PinVi token pair 규약을 지킨 배포다(rebind 없이).
 4. 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
    재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다.
+5. 배포 뒤 정본 generation(`/var/lib/kor-travel-docker-manager-public/`
+   `pinned-runtime-generation-v6.json`)의 `map_source_revision`과 네 image id가
+   **실제로 돌고 있는 컨테이너와 같다.** 이 검사를 여기 두는 이유는 2026-09-11에
+   그 둘이 조용히 갈라진 적이 있기 때문이다 — 정본은 `2099b8a6`/`c10d6782`를
+   가리키는데 live는 rehearsal state가 얹은 `cf65e973`/`0169fe90`이었다.
+   레지스트리는 배포를 기록하지만 **실물을 강제하지는 않는다.**
+
+**회전 전제조건.** 회전은 `rotate-pinned-pair MAP PINVI`로만 들어간다. `PINVI`에는
+**핀된 revision**(`ktdctl pin show`의 `pinvi`)을 넘긴다 — PinVi `origin/main`은 아직
+pair 계약 v1이라 preflight가 `pair contract version is unsupported: 1`로 거부한다.
+v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI 표면
+(`openapi.json` · `openapi.service.json` · `openapi.user.json`)이 핀된 revision과
+**바이트 동일**하면 PinVi 재벤더링 없이 Map만 전진한다. 다르면 그때는 PinVi가 먼저
+재벤더링해야 하고, 그것이 T-VN-40이 기다리는 그 선행조건이다.
 
 **주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
 해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
