@@ -64,6 +64,12 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   바퀴이고 `T-VN-CURATION-SEAL-ACL`에 막혀 있다. 해제 조건은
   acceptance §T-VN-39-DEPLOY.
 
+- [ ] T-VN-DAGSTER-STORAGE — **prod Dagster run이 compute-log storage에 쓸 수 없다**
+
+  `/opt/dagster/dagster_home/storage`가 없고 상위가 root 소유 읽기 전용인데
+  컨테이너는 uid 999로 돈다. 이 prod에서 성공한 run이 하나도 없다. 해제 조건은
+  acceptance §T-VN-DAGSTER-STORAGE.
+
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
 
   D2는 소유 Feature를 은퇴까지만 끌고 가고 삭제는 `purge`가 하는데, 그 action이
