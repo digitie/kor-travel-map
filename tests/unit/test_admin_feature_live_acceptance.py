@@ -301,6 +301,10 @@ def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
     assert "dataset.dataset_key = :dataset_key" in fixture_source
     # 후보 uuid는 만들어 낸 쪽이 들고 있어야 한다(비파생 랜덤 v7).
     assert "feature_id = candidate_feature_uuid()" in fixture_source
+    # 309가 create payload에서 `feature_uuid` 슬롯을 지웠다. 정본 키가 하나이므로
+    # 두 번 실을 자리가 없고, 프로시저의 `ck_feature_create_payload`가 모르는 키를
+    # 거부한다 — 같은 값으로 맞추는 것으로도 통과하지 못한다(실측).
+    assert '"feature_uuid": ' not in fixture_source
 
     # 완료 감사가 요구하는 전이 사슬은 spec이 실제로 실행하는 3단계다.
     assert _FIXTURE_MODULE._expected_transition_chain(run_id) == (  # noqa: SLF001
