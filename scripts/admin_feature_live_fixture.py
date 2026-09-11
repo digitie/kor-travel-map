@@ -823,12 +823,12 @@ async def _seed(
         if source_record_key != record.source_record_key:
             raise RuntimeError("fixture source head가 방금 등록한 record를 가리키지 않습니다")
         payload = {
-            # 309 뒤 두 슬롯은 같은 ``features.feature_id``에서 나온다 — 바깥
-            # 이름은 그대로 두고 값의 출처만 하나로 모은다. 종전에는 여기서
-            # 서로 다른 uuid를 실었고, 그 불일치는 legacy 축이 살아 있을 때만
-            # 뜻이 있었다.
+            # 309가 payload 계약에서 ``feature_uuid`` 슬롯을 **지웠다** — 정본 키가
+            # ``feature_id`` 하나이므로 두 번 실을 자리가 없다. 프로시저의
+            # ``ck_feature_create_payload``가 모르는 키를 거부하므로, 같은 값으로
+            # 맞추는 것으로는 통과하지 못한다(실측: "feature create payload
+            # contains an unknown field").
             "feature_id": feature_id,
-            "feature_uuid": feature_id,
             "kind": kind,
             "name": name,
             "category": "00000000",
