@@ -61,18 +61,41 @@ from typing import Any
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _echo_feature_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+def canonical_ref(ref: str) -> str:
+    """이 패키지의 테스트가 쓰는 **재키 뒤** 참조 → 정본 uuid 규약.
+
+    309 뒤 ``features.feature_id``는 uuid다. 그래서 legacy ``f_*`` 주소를 경계에
+    넣으면 돌아오는 정본 키는 그 문자열이 **아니라** uuid이고, 이미 uuid인 참조는
+    그대로 정본 키다. DB 없는 이 패키지에서 그 사상을 결정적으로 세우는 것이
+    :func:`feature_uuid_from_legacy`다 — 저장 계약(0083 비파생 v7)이 아니라
+    테스트 편의 규약이며, 실효 검증은 통합이 소유한다
+    (``tests/integration/test_feature_identity_boundary.py``).
+
+    테스트가 응답의 feature 키를 단언할 때 원문 참조 대신 이 함수를 쓴다.
+    """
     from kortravelmap.core.ids import feature_uuid_from_legacy
     from kortravelmap.infra import feature_identity
 
+    if feature_identity.is_canonical_uuid_ref(ref):
+        return ref
+    return str(feature_uuid_from_legacy(ref))
+
+
+@pytest.fixture(autouse=True)
+def _echo_feature_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kortravelmap.infra import feature_identity
+
+    def _identity_of(ref: str) -> feature_identity.FeatureIdentity:
+        # 309 뒤 두 슬롯은 같은 ``features.feature_id``에서 나온다 — 같은 값이다.
+        canonical = canonical_ref(ref)
+        return feature_identity.FeatureIdentity(
+            feature_id=canonical,
+            feature_uuid=canonical,
+        )
+
     async def _resolve(_session: Any, ref: str) -> feature_identity.FeatureIdentity:
         feature_identity.validate_feature_ref(ref)
-        # 결정적 mock 값 — 저장 계약(0083 비파생 v7)이 아니라 테스트 편의 규약.
-        return feature_identity.FeatureIdentity(
-            feature_id=ref,
-            feature_uuid=str(feature_uuid_from_legacy(ref)),
-        )
+        return _identity_of(ref)
 
     async def _resolve_bulk(
         _session: Any, refs: Any
@@ -83,16 +106,13 @@ def _echo_feature_identity(monkeypatch: pytest.MonkeyPatch) -> None:
         resolved: dict[str, feature_identity.FeatureIdentity] = {}
         for ref in refs:
             feature_identity.validate_feature_ref(ref)
-            resolved[ref] = feature_identity.FeatureIdentity(
-                feature_id=ref,
-                feature_uuid=str(feature_uuid_from_legacy(ref)),
-            )
+            resolved[ref] = _identity_of(ref)
         return resolved
 
     async def _uuid_map(_session: Any, feature_ids: Any) -> dict[str, str]:
-        # additive 병행 노출(weather batch 등)용 legacy id → uuid map echo.
+        # 309 뒤 이 사상은 존재하는 정본 키에 대한 **항등**이다(정규화가 실질).
         return {
-            feature_id: str(feature_uuid_from_legacy(feature_id))
+            feature_id: canonical_ref(feature_id)
             for feature_id in feature_ids
             if feature_id
         }
