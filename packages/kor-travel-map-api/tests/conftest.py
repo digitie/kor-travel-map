@@ -3,10 +3,10 @@
 T-VN-32B 경계 alias 해석(`kortravelmap.api.feature_ref` →
 `kortravelmap.infra.feature_identity.resolve_feature_identity`)은 모든
 ``/{feature_id}`` 경로 handler의 첫 줄에서 실행된다. 본 패키지 테스트는 DB가
-없으므로(autouse) 해석을 **echo-resolve**로 대체한다 — 참조 문자열을 그대로
-legacy 정본 키로 보고 짝이 되는 uuid를 돌려주되, 형식 계약
+없으므로(autouse) 해석을 **echo-resolve**로 대체한다 — 참조를 :func:`canonical_ref`가
+정하는 정본 키(uuid)로 풀되, 형식 계약
 (``validate_feature_ref`` — 빈 문자열/공백 패딩/길이 초과 422)은 실제 검증을
-태운다. UUID 참조 해석·미해석 404 같은 특수 시나리오는 각 테스트가 이 patch를
+태운다. 미해석 404/422 같은 특수 시나리오는 각 테스트가 이 patch를
 자기 resolver로 덮어쓴다(테스트 내 ``monkeypatch.setattr``이 우선).
 
 ``feature_uuid_from_legacy``를 쓰는 이유는 **파생이 계약이라서가 아니라
@@ -21,20 +21,16 @@ legacy 정본 키로 보고 짝이 되는 uuid를 돌려주되, 형식 계약
 ``tests/integration/test_feature_identity_boundary.py``(실 PostGIS)가 소유한다.
 경로에 해석을 새로 붙일 때는 반드시 통합 쪽에도 회귀를 더해라.
 
-**T-VN-39 뒤 이 echo는 재키 이전 세계를 모사한다.** ``feature_id=ref``는 참조
-문자열이 곧 정본 키이던 시절의 등식이고, 지금 정본 키는 uuid다. 그래서 이 patch가
-깔린 채로는 다음 둘을 **관측할 수 없다**:
+**T-VN-39-ECHO 뒤 이 echo는 재키 뒤 세계를 모사한다.** 종전에는 ``feature_id=ref``,
+즉 참조 문자열이 곧 정본 키이던 시절의 등식이었고 그래서 "legacy 주소가 정본 uuid로
+바뀌어 repo로 내려가는가"를 **관측할 수 없었다**. 지금은 :func:`canonical_ref`가 그
+사상을 세운다 — legacy 주소는 결정적 파생 uuid로, 이미 uuid인 참조는 그대로.
 
-- legacy 주소가 정본 uuid로 바뀌어 repo로 내려가는가
-- 어떤 Feature도 가리키지 않는 참조가 422가 되는가
-  (:func:`~kortravelmap.infra.feature_identity.canonical_feature_id_for_filter`)
-
-echo는 모든 참조를 "해석 성공"으로 만들기 때문이다. 그 두 축을 재는 테스트는
-**자기 resolver를 설치해야 한다** — 위 규약대로 테스트 안 ``monkeypatch.setattr``이
-이 patch를 덮는다(예:
-``test_curations_router._install_post_rekey_resolver``). echo 자체를 재키 뒤 모양
-(``feature_id``가 uuid)으로 바꾸는 것은 이 패키지 테스트 47곳이 참조 문자열을 그대로
-기대하고 있어 별도 작업이다.
+남은 한계 하나는 그대로다: echo는 **모든** 참조를 "해석 성공"으로 만들기 때문에
+"어떤 Feature도 가리키지 않는 참조가 422가 되는가"
+(:func:`~kortravelmap.infra.feature_identity.canonical_feature_id_for_filter`)는
+여기서 관측되지 않는다. 그 축을 재는 테스트는 **자기 resolver를 설치해야 한다** —
+위 규약대로 테스트 안 ``monkeypatch.setattr``이 이 patch를 덮는다.
 """
 
 from __future__ import annotations
