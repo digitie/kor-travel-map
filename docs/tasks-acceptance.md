@@ -2426,6 +2426,15 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 `if len(result.items) < page_size: return` 하나뿐이고 결측 key row를 skip한다.
 Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출돼 있다.**
 
+**2026-09-11 진행.** 1·2·3은 닫혔다 — datagokr `0f1f236`(PR #16), krheritage
+`b86a094`(PR #10). krheritage는 `total` 가드가 아예 없었으므로 되돌릴 것이 없었고,
+대신 **행이 아니라 페이지 수**로 세게 했다(`page >= ceil(total/page_size)`). 이쪽이
+엄밀히 낫다 — 행을 세면 걸러진 행 때문에 `seen`이 `total`에 영원히 못 미쳐 tail에서
+매번 여분 요청이 붙지만, 페이지를 세면 걸러져도 정확히 끝난다. datagokr은 이미
+`total_pages` 가드가 있어 그것을 살리고 짧은 페이지 규칙만 `total`로 조건화했다.
+회귀 테스트 8건(두 리포 4건씩) + 기존 82건 통과. **남은 것은 4뿐이다** — 두 PR 머지
+후 Map 핀 상향.
+
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
 

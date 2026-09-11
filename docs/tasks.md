@@ -47,8 +47,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [ ] T-VN-H49 — **Geo application DB backup/retention 운영 증거 + hard purge 정책**
 
   `scheduled_backup`·retention janitor의 수렴을 보인다. 수납했던 manual Feature hard
-  purge 정책은 2026-09-08 소유자 판정으로 열려 migration 306이 구현했다. 남은 것은
-  off-box 사본 결선(`T-VN-H49-OFFBOX`)과 geo 예약 성공 누적이다.
+  purge 정책은 2026-09-08 소유자 판정으로 열려 migration 306이 구현했다. **geo 예약
+  성공 누적은 2026-09-11 실측으로 닫혔다**(09-07~09-10 연속 4건, 08-24·08-25는 GC가
+  실제로 지웠다). 남은 것은 off-box 사본 결선(`T-VN-H49-OFFBOX`)뿐이다.
 
 
 - [ ] T-VN-H49-OFFBOX — **off-box 복제 자동화 결선과 backup 문서 현행화**
@@ -69,11 +70,14 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   해석·미해석 422 두 축을 이 패키지에서 관측 불가로 만든다. 참조 문자열을 그대로
   기대하는 테스트 47곳이 함께 움직인다. 해제 조건은 acceptance §T-VN-39-ECHO.
 
-- [ ] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
+- [~] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
 
   datagokr·krheritage의 `iter_pages`가 `total` 권위를 잃고 짧은 페이지 휴리스틱만
-  남겨, 행 하나가 걸러지면 목록이 조용히 절단된다. Map은 위임을 끊어 스스로를
-  지켰지만 다른 소비자는 노출돼 있다. 해제 조건은 acceptance §T-VN-39-PROVIDER-PAGINATION.
+  남겨, 행 하나가 걸러지면 목록이 조용히 절단됐다. **2026-09-11 두 리포에서 고쳤다** —
+  datagokr `0f1f236`(`fix/pagination-total-guard`), krheritage
+  `b86a094`(`fix/search-pagination-total-guard`). krheritage는 총계 가드가 아예 없어
+  행이 아니라 **페이지 수**로 세도록 했다(걸러진 행이 있어도 정확히 끝난다). 회귀
+  테스트 8건 + 기존 82건 통과. 남은 것은 두 리포의 머지와 Map 핀 상향(항목 4)이다.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 
