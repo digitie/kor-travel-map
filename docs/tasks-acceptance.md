@@ -2225,7 +2225,20 @@ drift를 잡고, AC4의 manifest 결박은 HEAD에서 방금 재계산했다. �
 > production consumer enable·reconciliation 종결 AC를 소유한다.
 ```
 
-## T-VN-39
+## T-VN-39 — **완료(2026-09-11, #1197 `e8c66c47`)**
+
+> 이 절은 판정 근거로 남긴다. 착지 실측은 아래 "착지 확인"이고, 후속 셋은
+> `T-VN-39-DEPLOY` · `T-VN-39-ECHO` · `T-VN-39-PROVIDER-PAGINATION`이 소유한다.
+
+**착지 확인(head-schema 실측).** feature_id류 컬럼 52개가 uuid이고, text로 남은 셋은
+정당한 생존자다 — `manual_feature_purge_records.legacy_feature_id` ·
+`ops.tvn36_legacy_freeze_preflight_manifest.legacy_feature_id` · plpgsql 지역변수
+`v_legacy_feature_id`. shadow `feature_uuid` 컬럼 0개.
+`ck_feature_aliases_legacy_alias_shape`가 주소 등록부를 지킨다.
+게이트: GitHub CI 9종 전량 · n150(provider 실제 설치) dagster 575 · api 1,223 ·
+lint+unit 2,832 · 제품 SQL 786문 head Parse · live(DB→API→브라우저, 필터 3갈래
+200/200/422).
+
 
 ```markdown
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
@@ -2329,6 +2342,67 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 0행이라 데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다
 (2026-09-07 조문이 적은 "컬럼 40개"는 `pg_catalog`/`information_schema`를 뺀 실측에서
 37개다).
+
+## T-VN-39-DEPLOY
+
+```markdown
+- [ ] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. prod Map이 `e8c66c47` 이후 revision으로 돌고, `alembic_version`이 `309`다.
+2. D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
+   D1 → D2. 각 단계 증적이 남는다.
+3. PinVi token pair 규약을 지킨 배포다(rebind 없이).
+4. 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
+   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다.
+
+**주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
+해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
+
+## T-VN-39-ECHO
+
+```markdown
+- [ ] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. `packages/kor-travel-map-api/tests/conftest.py`의 autouse resolver가 참조를
+   **정본 uuid**로 풀어 준다(`feature_id=ref`가 아니라).
+2. 그 위에서 이 패키지 테스트가 전부 초록이다 — 참조 문자열을 그대로 기대하는 47곳이
+   함께 움직인다.
+3. `test_curations_router._install_post_rekey_resolver` 같은 자체 resolver 설치가
+   불필요해지고 제거된다.
+
+**왜 지금 하지 않았나.** 재키 PR에 섞으면 그 47곳의 변경이 재키 diff와 구분되지
+않는다. 그리고 그 축의 실효 검증은 설계상 통합이 소유한다
+(`tests/integration/test_feature_identity_boundary.py`) — conftest가 스스로 그렇게
+적어 두었다.
+
+## T-VN-39-PROVIDER-PAGINATION
+
+```markdown
+- [ ] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. `python-datagokr-api`의 `services/pagination.py:iter_pages`가 짧은 페이지 종료에
+   `total` 가드를 되돌린다(예: `len(items) < num_of_rows and seen >= total`).
+2. `python-krheritage-api`의 `services/search.py:iter_pages`도 같다.
+3. 두 리포에 그 성질을 고정하는 회귀 테스트가 있다 — "행 하나가 걸러진 만재 페이지"
+   에서 계속 페이지네이션하는 것을 본다.
+4. Map 핀을 그 커밋으로 올린다. Map 쪽 `_iter_datagokr_standard`/
+   `_iter_krheritage_details` 우회는 **그대로 둔다** — 방어는 중복이어도 좋다.
+
+**근거.** 2026-09-11 실측: datagokr `b8f1254`가 `reached_known_end`
+(= `total_count <= page_no * num_of_rows`) 가드를 떨어뜨렸고, 같은 범위가
+`standard.py:list`에 행 단위 `except ValidationError: continue`를 넣었다. 둘이
+겹치면 18,000건 데이터셋이 999건에서 예외 없이 끝난다. krheritage는
+`if len(result.items) < page_size: return` 하나뿐이고 결측 key row를 skip한다.
+Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출돼 있다.**
 
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
