@@ -133,6 +133,14 @@ _M05_CASE_LIST_FUNCTION = (
 _M05_DETECTOR_MANUAL_LIST_FUNCTION = (
     "feature.list_manual_provider_dedup_detector_manuals(uuid,integer)"
 )
+#: provider 적재가 자기 transaction의 causal seal을 읽는 통로(0209, T-VN-CURATION-SEAL-ACL).
+#: 적재는 `ktm_curation_provider_executor` 멤버십으로 이것을 받는다 — 그 executor에
+#: 걸린 다른 grant는 전부 PROCEDURE라서, 이것이 그 경로로 오는 **첫 SECURITY DEFINER
+#: 함수**다. 그래서 등록을 빠뜨리기 쉽고, 빠뜨리면 위 detector 함수와 똑같이
+#: 배포되는 순간 모든 Dagster 프로세스가 기동 preflight에서 죽는다.
+_PROVIDER_CURATION_SEAL_FUNCTION = (
+    "feature.current_provider_curation_input_set(bigint)"
+)
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -297,7 +305,11 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
         }
     ),
     "ktm_feature_dagster_runtime": frozenset(
-        {_M05_DETECTOR_MANUAL_LIST_FUNCTION, _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION}
+        {
+            _M05_DETECTOR_MANUAL_LIST_FUNCTION,
+            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
+            _PROVIDER_CURATION_SEAL_FUNCTION,
+        }
     ),
 }
 

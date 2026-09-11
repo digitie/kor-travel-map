@@ -113,6 +113,70 @@ async def test_theme_catalog_procedure_stays_executable(
 
 
 @pytest.mark.integration
+async def test_provider_curation_seal_is_executable_by_the_loader_login(
+    migrated_session: AsyncSession,
+) -> None:
+    """적재 login이 seal 함수를 **실제로** 실행할 수 있어야 한다.
+
+    `capture_provider_curation_input`은 `client.load_feature_bundles`가
+    `curation_dataset`을 받을 때 불리고, `dagster/etl.py`는 snapshot이 아닌 **모든**
+    적재에 그것을 넘긴다. 그래서 이 EXECUTE가 없으면 그 부류 적재가 전부 선다 —
+    2026-09-11 prod에서 실제로 그렇게 멈췄다(`permission denied for function
+    current_provider_curation_input_set`).
+
+    대상 principal은 **로그인 role**이다. 그룹(`ktm_feature_runtime`)에만 물으면
+    멤버십·상속이 끊겨도 초록이라, 이 검사가 지키려는 바로 그 사실을 놓친다.
+    자매 함수(`resolve_provider_feature_id`)를 함께 재는 것은 둘이 한 쌍으로 쓰이기
+    때문이다 — claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
+
+    **이 검사가 보지 못하는 축이 하나 있다.** 여기서는 migrator session이 카탈로그
+    술어를 묻는 것이므로, 적재 login이 **실제로 접속해** ADR-090 기동 preflight
+    (`assert_runtime_db_privilege_boundary`)를 통과하는지는 관측하지 않는다. 그 축은
+    `test_tvn34_runtime_privilege_preflight.py`의
+    `test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight`가
+    소유한다 — SECURITY DEFINER 함수에 EXECUTE를 주면 `infra/db.py`의 per-login
+    허용목록에도 등록해야 하고, 빠뜨리면 그 테스트가 빨개진다(그리고 배포하면 모든
+    Dagster 프로세스가 기동에서 죽는다).
+    """
+    result = await migrated_session.execute(
+        text(
+            """
+            SELECT
+              has_function_privilege(
+                'ktm_feature_dagster_runtime',
+                'feature.current_provider_curation_input_set(bigint)',
+                'EXECUTE'
+              ) AS seal,
+              has_function_privilege(
+                'ktm_feature_dagster_runtime',
+                'feature.resolve_provider_feature_id(bigint,text,text)',
+                'EXECUTE'
+              ) AS claim,
+              has_function_privilege(
+                'ktm_feature_api_runtime',
+                'feature.current_provider_curation_input_set(bigint)',
+                'EXECUTE'
+              ) AS api_seal
+            """
+        )
+    )
+    row = result.mappings().one()
+    assert row["claim"] is True, (
+        "claim 해석기가 적재 login에서 막혔다 — 이 검사의 전제가 깨졌다"
+    )
+    assert row["seal"] is True, (
+        "seal 함수가 적재 login에서 막혔다 — curation_dataset을 받는 모든 적재가 선다"
+    )
+    # "적재는 할 수 있다"만 재면 "그리고 다른 모두도 할 수 있다"를 놓친다. API login은
+    # 넓은 `ktm_feature_runtime`의 멤버라(`inherit_option=true`) 그 그룹에 주면 함께
+    # 열리고, `REVOKE … FROM ktm_feature_api_runtime`은 멤버십 경유 권한을 걷지 못해
+    # 장식이 된다. 그래서 좁은 `ktm_curation_provider_executor`에 주고, 넓어졌는지를
+    # 여기서 반대편으로 잰다.
+    assert row["api_seal"] is False, (
+        "API login까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
+    )
+
+
 def test_undeclared_relation_failure_names_the_sanctioned_escape() -> None:
     """fence가 배포를 막을 때 메시지가 **무엇을 하라**를 말해야 한다.
 

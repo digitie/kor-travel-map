@@ -696,6 +696,40 @@ _SUBTYPE_READY_FUNCTION_ACL = (
 #:
 #: 첫 창의 evidence table은 schema owner 소유로 남고, manual SECURITY DEFINER owner는
 #: 좁게 부여된 INSERT 경로만 갖는다.
+#: provider 적재가 자기 transaction이 쓴 source head/link 집합의 causal seal을 읽는
+#: 통로. 함수는 `STABLE SECURITY DEFINER`이고 한 dataset의 집계 넷
+#: (entity 수·member 수·마지막 수정일·input set hash)만 돌려준다 — 행 내용은 나오지
+#: 않으며, 그 집계의 원천은 같은 transaction이 방금 쓴 데이터다.
+#:
+#: **이것은 권한 확대가 아니라 유실 복구다.** 은퇴한 `0209_tvn40_provider_curation_seal`
+#: 이 `TO ktm_feature_runtime, ktm_curation_command_owner`로 주었는데, 그 문장이
+#: baseline으로 접히면서 앞의 하나가 사라졌고 이 모델은 함수를 아예 몰랐다. 그래서
+#: 2026-09-11 prod 첫 provider 적재가 `permission denied for function
+#: current_provider_curation_input_set`로 멈췄다 — `curation_dataset`을 받는 모든
+#: 적재(= snapshot이 아닌 전부)가 이 경로를 지난다.
+#:
+#: **수여 대상은 `ktm_curation_provider_executor`다 — `ktm_feature_runtime`이 아니다.**
+#: 0209의 원문은 넓은 runtime 그룹에 주었지만 그 그룹에는 `ktm_feature_api_runtime`도
+#: 멤버로 들어 있다(`inherit_option=true`). 거기에 주면 API login까지 함께 열리고,
+#: `REVOKE … FROM ktm_feature_api_runtime`은 **멤버십 경유 권한을 걷지 못하므로**
+#: 장식이 된다. 실측으로 확인했다(2026-09-11).
+#:
+#: 좁은 그룹이 이미 정확히 존재한다. `ktm_curation_provider_executor`는 멤버가
+#: 적재 login 하나뿐이고, 무엇보다 이 함수가 돌려주는 **그 두 값**을 받는
+#: `feature.seal_provider_curation_snapshot_receipt(…, p_expected_input_member_count,
+#: p_expected_input_set_hash, …)`의 EXECUTE를 이미 갖는다. 값을 읽는 자리와 값을
+#: 봉인하는 자리가 같은 role인 것이 옳다.
+#:
+#: 넓은 두 role은 명시적으로 REVOKE해 둔다 — 지금은 no-op이지만, 넓은 grant가
+#: 되살아나려 할 때 이 문장이 그 자리에서 의도를 말한다.
+_PROVIDER_CURATION_SEAL_ACL = (
+    "REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime",
+    "GRANT EXECUTE ON FUNCTION feature.current_provider_curation_input_set(...) "
+    "TO ktm_curation_provider_executor, ktm_curation_command_owner",
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -704,7 +738,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _MANUAL_FEATURE_TABLE_ACL
         + _FEATURE_REQUEST_TABLE_ACL
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
-        + _M05_SCHEMA_OWNER_DEPENDENCY_ACL,
+        + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
+        + _PROVIDER_CURATION_SEAL_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
