@@ -75,12 +75,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   옮겼는데 값의 출처는 `make_feature_id`에 남았다. 해제 조건은 acceptance
   §T-VN-39-D2-FIXTURE.
 
-- [~] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
-
-  두 리포의 `iter_pages`가 짧은 페이지 휴리스틱만 남겨 걸러진 행 하나가 목록을
-  조용히 끊었다. 2026-09-11 upstream에서 고쳤고, 남은 것은 Map 핀 상향이다.
-  해제 조건은 acceptance §T-VN-39-PROVIDER-PAGINATION.
-
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 
   하지 않는다. 재개하려면 목표 SLO 정의와, exact-viewport(ADR-073 accepted 계약)

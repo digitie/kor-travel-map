@@ -12,6 +12,22 @@
 
 ## 2026-09-11 — feature_id 재키가 착지했다
 
+- [x] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
+  (**2026-09-11 완료**, Map #1204 `7b2e9ecf`). 두 provider의 `iter_pages`가 `total`
+  권위를 잃고 짧은 페이지 휴리스틱만 남겨, **행 하나가 검증에서 걸러진 만재 페이지**를
+  스트림의 끝으로 읽었다. 절단이 예외를 내지 않으므로 소비자는 알 방법이 없고, Map은
+  그것을 `authoritative_snapshot_complete=True`로 봉인한다.
+
+  upstream에서 고쳤다(ADR-044 — 정합성 1차 책임은 provider) — datagokr `fd099b2`
+  (PR#16)는 짧은 페이지 종료를 declared total로 조건화했고, krheritage `545a016`
+  (PR#10)는 되돌릴 가드가 아예 없어 새로 세우되 **행이 아니라 페이지 수**로 센다
+  (`page >= ceil(total/page_size)`) — 걸러진 행이 있어도 정확히 끝나므로 행을 세는
+  것보다 엄밀히 낫다. 회귀 8건 + 기존 82건 통과, Map 핀 3자리 상향(표면 manifest는
+  `pinned_sha` 둘만 바뀌어 공개 표면 불변이 증거다).
+
+  Map 쪽 우회(`_iter_datagokr_standard`, `iter_paginated_items`)는 걷지 않았다 —
+  같은 성질을 두 층이 각각 보장하는 것은 중복이지 모순이 아니다.
+
 - [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
   (**2026-09-11 완료**). autouse echo가 `feature_id=ref`로 재키 **이전** 세계를
   모사해, "legacy 주소가 정본 uuid로 바뀌어 repo로 내려가는가"를 이 패키지에서
