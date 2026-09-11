@@ -1814,6 +1814,57 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 **주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
 해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
 
+## T-VN-CURATION-SEAL-ACL
+
+```markdown
+- [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. `ktm_feature_dagster_runtime`으로 접속한 적재가 curation seal을 통과한다 —
+   prod에서 provider asset 하나가 실제로 완주한다.
+2. 그 권한이 `infra/runtime_privileges.py`의 렌더링 모델에 들어간다. 마이그레이션에
+   직접 `GRANT`만 적고 모델이 모르는 상태로 두지 않는다 — 모르면 다음 재적용에서
+   조용히 사라진다(지금이 그 상태다).
+3. 이 축을 재는 회귀가 있다. **실 role로** 적재 경로를 태우는 것이어야 한다 —
+   migrator/superuser로 도는 통합은 ACL을 구조적으로 관측하지 못한다.
+
+**무엇이 깨졌나 — 2026-09-11 실측.**
+
+prod에서 `feature_place_standard_museums`를 적재하니 상류 조회를 지나 DB 쓰기에서
+멈췄다:
+
+    asyncpg.exceptions.InsufficientPrivilegeError:
+    permission denied for function current_provider_curation_input_set
+
+**실측 ACL** (prod, head 309):
+
+    owner = ktm_feature_schema_owner
+    acl   = ktm_feature_schema_owner=X, ktm_curation_command_owner=X
+
+적재 login role은 `ktm_feature_dagster_runtime`이고 그 목록에 없다. 그리고 runtime
+identity는 **설계상 `SET ROLE` 경로를 하나도 받지 않는다**
+(`runtime_privileges.py`: "runtime identity는 이 `SET ROLE` 경로를 하나도 받지
+않는다"). 즉 우회로가 없다.
+
+**재키 회귀가 아니다.** `alembic/baseline/schema.sql`과 `alembic/head-schema.sql`이
+**둘 다** `ktm_curation_command_owner` 하나에만 준다 — prod는 정본과 일치한다. 은퇴한
+`0209_tvn40_provider_curation_seal`이 `ktm_feature_runtime`에도 주었으나 그 문장은
+baseline으로 접히면서 사라졌고, `runtime_privileges.py`는 이 함수를 **아예 모른다.**
+
+**범위가 좁지 않다.** `capture_provider_curation_input`은 `client.load_feature_bundles`
+가 `curation_dataset`을 받을 때 불리고, `dagster/etl.py`는 **snapshot이 아닌 모든**
+적재에 그것을 넘긴다. 즉 그 부류 provider 적재가 prod에서 전부 막혀 있다.
+
+**왜 여태 안 보였나.** prod `feature.features`가 0행이었다 — 이 prod에서 provider
+적재가 한 번도 성공한 적이 없다. 그리고 통합 테스트는 ACL이 바인드되지 않는
+identity로 돈다. 조문 3이 그 구멍을 겨냥한다.
+
+**주의 — 권한 확대다.** runtime login에 함수 EXECUTE를 더하는 변경이므로, 무엇을
+열어 주는지(이 함수는 집계 읽기다)와 무엇을 열지 않는지를 먼저 적고 적대 리뷰를
+거친다.
+
 ## T-VN-39-D2-FIXTURE
 
 ```markdown
