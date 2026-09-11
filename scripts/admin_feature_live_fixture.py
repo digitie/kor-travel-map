@@ -598,7 +598,9 @@ async def _foreign_key_reference_counts(
         if key in counts:
             raise RuntimeError("같은 feature FK column에 중복 constraint가 있습니다")
         cast_type = "uuid[]"
-        identities: list[str] = list(feature_ids)
+        # 아직 만들어지지 않은 소유 id는 셀 대상 자체가 없다 — 빼고 센다.
+        # 빈 배열에 대한 ``= ANY``는 그대로 0이다.
+        identities: list[str] = [value for value in feature_ids if value is not None]
         statement = text(
             "SELECT count(*) FROM "
             f"{_quote_identifier(schema_name)}.{_quote_identifier(table_name)} "
