@@ -1786,16 +1786,34 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 **무엇이 참이면 닫히는가.**
 
 1. [x] prod Map이 `e8c66c47` 이후 revision으로 돌고, `alembic_version`이 `309`다.
-   — 2026-09-11 실측: live 컨테이너 revision `3b11c975`(= origin/main),
+   — 2026-09-11 실측: live 컨테이너 revision `3891f632`(= main),
    `head=309_t39_feature_id_rekey`, `feature.features.feature_id`가 `uuid`,
-   `/health` 200. pinned rebuild는 `success/committed`, pinset `26eb5967`.
-2. [~] D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
-   D1 → D2. 각 단계 증적이 남는다. — 2026-09-11: 회전·rebuild·executor 이미지
-   (라벨 `3b11c975` 일치)·repin·ACL preflight(55/55)·**D1 11 passed**까지 초록이다.
-   D2만 남았고 `T-VN-39-D2-FIXTURE`에 걸려 있다.
-3. PinVi token pair 규약을 지킨 배포다(rebind 없이).
-4. 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
-   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다.
+   `/health` 200. pinned rebuild는 `success/committed`, pinset `98ae83df`.
+2. [x] D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
+   D1 → D2. 각 단계 증적이 남는다. — **2026-09-11 완주.** 회전(pinset `98ae83df`)·
+   rebuild(`success/committed`, head `309`)·executor 이미지(라벨 `3891f632` 일치)·
+   repin·M01 ACL preflight(**55/55**)·D1(**11 passed**)·
+   **D2(`phase: passed`, `status: complete`, `recovery_attempt: 0`)**.
+   `validation.json`이 `evidence-validated`(mode normal, reports_passed 2,
+   FK 제약 23), `direct-api-audit.json`이
+   `feature_ids == feature_uuids == ["01a09088-…"]`(canonical UUIDv7) +
+   `foreign_key_references: 7`. 사후 prod 잔여물 0.
+
+   **다섯 겹이었다.** legacy 주소를 `uuid[]`에 바인드 → 309가 지운 create payload
+   슬롯 → 309가 지운 컬럼 투영 → 사라진 legacy 재현 규칙 → 306이 봉인한 raw DELETE.
+   앞의 셋은 사이클을 태워 가며 드러났고, 마지막 두 겹(증거 검사기 둘)은 **적대
+   리뷰가 사이클 전에** 잡았다 — 그 둘을 모르고 돌렸으면 70분을 더 태웠다.
+3. [x] PinVi token pair 규약을 지킨 배포다(rebind 없이). — 네 번의 회전 모두 PinVi
+   revision을 핀 원장에서 그대로 가져왔고(`f62e7ef1`), 세 OpenAPI 표면이 바이트
+   동일이라 재벤더링이 필요 없었다. `pinvi-pair deploy`/`rebind`를 부르지 않았다.
+4. [ ] 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
+   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다. — **막혀 있다.**
+   2026-09-11 첫 적재가 `permission denied for function
+   current_provider_curation_input_set`로 멈췄다(`T-VN-CURATION-SEAL-ACL`). 그 앞의
+   두 시도는 상류 문제였다 — 특화거리는 data.go.kr 활용신청 미승인(403,
+   `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`, 데이터셋 15017322), krex 휴게소는
+   `KOR_TRAVEL_MAP_KREX_GO_API_KEY` 미주입(2026-09-11 채웠다 — 값은 이미 호스트에
+   있던 data.go.kr 키와 같다).
 5. 배포 뒤 정본 generation(`/var/lib/kor-travel-docker-manager-public/`
    `pinned-runtime-generation-v6.json`)의 `map_source_revision`과 네 image id가
    **실제로 돌고 있는 컨테이너와 같다.** 이 검사를 여기 두는 이유는 2026-09-11에
@@ -1813,6 +1831,39 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 
 **주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
 해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
+
+## T-VN-D2-RESIDUE
+
+```markdown
+- [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. D2가 완주한 뒤 prod에 그 run이 만든 행이 **하나도 남지 않는다** — 또는 남기는
+   것이 의도라면 그 의도가 조문으로 적히고, 누적이 유계임을 보이는 정리 경로가 있다.
+2. 그 성질을 재는 검사가 있다. lane이 스스로 "통과"라고 적은 뒤의 상태를 보는
+   것이어야 한다 — 지금은 lane의 자기 검증이 통과해도 행이 남는다.
+
+**무엇이 관측됐나 — 2026-09-11.**
+
+D2가 `phase: passed`로 완주한 직후 prod에 `E2E TVN36 state fixture {run_id}` 한 행이
+`retired/suppressed`로 남아 있었다(`features_total=1`). lane의 자기 잔여물 검사는
+통과했다 — 그 검사가 세는 것은 provider fixture 쪽이고, API-owned 행의 삭제는
+`purge` action의 몫이기 때문이다.
+
+그런데 **D2는 `purge`를 부르지 않는다.** `admin_feature_live_supervisor.py`의
+`--helper-action` 선택지는 `seed`·`cleanup`·`audit`·`api-audit` 넷이고,
+`run-admin-feature-live-acceptance.sh`도 그 넷만 부른다. `purge`의 유일한 호출자는
+clone lane(`run-admin-feature-clone-live-acceptance.sh`)이며, 그 lane은
+`E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_*` 세 변수를 넘기지 않아 helper가 먼저 멈춘다.
+
+즉 **D2를 돌릴 때마다 prod가 은퇴 행 하나씩 늘어난다.** 2026-09-11에는 손으로
+306의 감사 경로(`feature.purge_manual_feature`)를 불러 정리했고 잔여물 0을 확인했다.
+그 손작업이 규약이 되어서는 안 된다.
+
+**적대 리뷰(2026-09-11)의 완결성 비평이 이것을 지목했다** — purge 경로를 고치는 데
+리뷰 한 축을 썼는데, 정작 그 경로는 D2에서 도달 불가였다는 것이 함께 드러났다.
 
 ## T-VN-CURATION-SEAL-ACL
 
@@ -1868,7 +1919,7 @@ identity로 돈다. 조문 3이 그 구멍을 겨냥한다.
 ## T-VN-39-D2-FIXTURE
 
 ```markdown
-- [ ] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
+- [x] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다** (2026-09-11 완료)
 ```
 
 **무엇이 참이면 닫히는가.**
@@ -1914,6 +1965,13 @@ fixture의 natural key는 `{run_id}:{kind}`이고 dataset은 `_ensure_dataset`�
 
 **주의 — prod에 쓴다.** 이 lane은 prod feature DB에 seed하고 지운다. 고친 뒤
 첫 실행은 잔여물 counter 넷을 전후로 재고 증거를 남긴다.
+
+**2026-09-11 — 자매 lane에도 같은 부류가 남아 있다(이 절의 것이 아니다).**
+적대 리뷰가 `scripts/admin_feature_clone_live_state.py`에서 둘을 더 짚었다:
+`_API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES = 8`(같은 alias 한 행을 더 센다)과,
+evidence 키 집합을 `feature_ids` 없이 **정확히** 요구하는 검사(그 키는 #1176부터
+나오고 있다). clone lane은 D2와 다른 소비자이므로 여기서 고치지 않는다 — 그 lane을
+다시 돌릴 때 함께 본다.
 
 ## T-VN-39-ECHO
 

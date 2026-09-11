@@ -12,6 +12,32 @@
 
 ## 2026-09-11 — feature_id 재키가 착지했다
 
+- [x] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
+  (**2026-09-11 완료**, #1207 `0ad47253` · #1210 `54136ac7` · #1211 `3891f632`).
+  D2 lane이 재키 뒤 세계에서 **다섯 겹**으로 막혀 있었다:
+
+  1. legacy `f_global_*` 주소를 `CAST(:feature_ids AS uuid[])`에 바인드 —
+     질의는 uuid 축으로 옮겼는데 값의 출처는 안 옮긴 자리. alias도 안 생기고
+     (ADR-098 결정 6) 후보 uuid는 비파생 랜덤 v7이라 재계산도 불가 → run별
+     provider dataset에서 primary link로 **재현**한다.
+  2. create payload의 `feature_uuid` 슬롯 — 309가 계약에서 지웠다. 같은 값으로
+     맞추는 것으로는 `ck_feature_create_payload`를 통과하지 못한다.
+  3. `CAST(feature_uuid AS text)` 투영 — 309가 지운 컬럼. 바깥 별칭은 두고 값의
+     출처만 정본 키로.
+  4. legacy id 재현과의 대조 — 서버가 그 규칙을 버렸다. 대상을 canonical UUIDv7
+     발급과 두 표기 일치로 옮긴다.
+  5. raw `DELETE FROM feature.features` — 306이 봉인했다. 감사되는
+     `feature.purge_manual_feature`로.
+
+  **마지막 두 겹은 적대 리뷰(36 에이전트)가 사이클 전에 잡았다.** 그 둘은 내가
+  고친 파일이 아니라 형제 검사기(`admin_feature_live_state.py`)에 있었고 —
+  legacy 정규식과 `foreign_key_references == 8`(309가 없앤 alias 행을 센다) —
+  재키 전에는 api-audit이 더 일찍 죽어 **도달조차 못 하던** 줄이었다. 내 수정이
+  처음 도달 가능하게 만들었으니 낡은 줄이어도 이 변경군의 회귀다.
+
+  실측: D2 `phase: passed`/`status: complete`, `validation.json`
+  `evidence-validated`, prod 잔여물 0.
+
 - [x] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
   (**2026-09-11 완료**, Map #1204 `7b2e9ecf`). 두 provider의 `iter_pages`가 `total`
   권위를 잃고 짧은 페이지 휴리스틱만 남겨, **행 하나가 검증에서 걸러진 만재 페이지**를
