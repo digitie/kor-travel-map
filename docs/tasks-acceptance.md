@@ -1912,9 +1912,17 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 (PR #181, merge `969eff18`)까지 완료했고 #177도 닫혔다. 그러나 이 task의
 운영 AC인 주기 실행·bounded retention·off-box 증거는 남아 있다.
 
-- [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
-  다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
-  수렴하는지는 운영 증거가 더 필요하다. application DB에 standalone cron을 중복 설치하지 않는다.
+- [x] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
+  `scheduled_backup`과 retention janitor가 최근 성공·bounded retention으로 수렴하는지가
+  남아 있었고, **2026-09-11 실측으로 닫혔다.** application DB에 standalone cron을
+  중복 설치하지 않는다.
+
+  `/home/digitie/kor-travel-geo/data/backups`에 **09-07·09-08·09-09·09-10 네 건이
+  연속으로** 있다(각 ~4.39 GB, `kor_travel_geo_backup_<ts>_zstd3.tar.zst`). 그리고
+  2026-09-08 시점에 남아 있던 08-24·08-25는 **지금 없다** — TTL 7일이 지난 뒤
+  `keep_min=3`을 새 성공들이 채우자 GC가 실제로 지웠다. "수렴"과 "bounded retention"이
+  둘 다 관측으로 성립하므로 이 조문을 닫는다. 남은 것은 off-box 사본뿐이고 그것은
+  `T-VN-H49-OFFBOX`가 소유한다.
 - [x] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
@@ -2351,9 +2359,14 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 
 **무엇이 참이면 닫히는가.**
 
-1. prod Map이 `e8c66c47` 이후 revision으로 돌고, `alembic_version`이 `309`다.
-2. D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
-   D1 → D2. 각 단계 증적이 남는다.
+1. [x] prod Map이 `e8c66c47` 이후 revision으로 돌고, `alembic_version`이 `309`다.
+   — 2026-09-11 실측: live 컨테이너 revision `3b11c975`(= origin/main),
+   `head=309_t39_feature_id_rekey`, `feature.features.feature_id`가 `uuid`,
+   `/health` 200. pinned rebuild는 `success/committed`, pinset `26eb5967`.
+2. [~] D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
+   D1 → D2. 각 단계 증적이 남는다. — 2026-09-11: 회전·rebuild·executor 이미지
+   (라벨 `3b11c975` 일치)·repin·ACL preflight(55/55)·**D1 11 passed**까지 초록이다.
+   D2만 남았고 `T-VN-39-D2-FIXTURE`에 걸려 있다.
 3. PinVi token pair 규약을 지킨 배포다(rebind 없이).
 4. 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
    재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다.
@@ -2375,25 +2388,97 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 **주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
 해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
 
-## T-VN-39-ECHO
+## T-VN-39-D2-FIXTURE
 
 ```markdown
-- [ ] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+- [ ] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
 ```
 
 **무엇이 참이면 닫히는가.**
 
-1. `packages/kor-travel-map-api/tests/conftest.py`의 autouse resolver가 참조를
-   **정본 uuid**로 풀어 준다(`feature_id=ref`가 아니라).
-2. 그 위에서 이 패키지 테스트가 전부 초록이다 — 참조 문자열을 그대로 기대하는 47곳이
-   함께 움직인다.
-3. `test_curations_router._install_post_rekey_resolver` 같은 자체 resolver 설치가
-   불필요해지고 제거된다.
+1. `scripts/admin_feature_live_fixture.py`의 provider fixture가 자기 Feature를
+   **정본 uuid**로 들고 다닌다 — `CAST(:feature_ids AS uuid[])` 바인드 10곳에
+   legacy 주소가 들어가지 않는다.
+2. D2 lane이 seed → 감사 → cleanup을 완주하고 `RESULT.json`이 남는다.
+3. 잔여물 0이 실측으로 확인된다(`/root/adjudicate.sh`의 네 counter).
 
-**왜 지금 하지 않았나.** 재키 PR에 섞으면 그 47곳의 변경이 재키 diff와 구분되지
-않는다. 그리고 그 축의 실효 검증은 설계상 통합이 소유한다
-(`tests/integration/test_feature_identity_boundary.py`) — conftest가 스스로 그렇게
-적어 두었다.
+**무엇이 깨졌나 — 2026-09-11 실측.**
+
+D2 direct seed가 이렇게 죽는다:
+
+    asyncpg.exceptions.DataError: invalid input for query argument $1:
+    ['f_global_w_47c05e70793daee8', ...] (invalid UUID: length must be
+    between 32..36 characters, got 27)
+
+    SELECT (SELECT count(*) FROM feature.features
+            WHERE feature_id = ANY(CAST($1 AS uuid[]))) AS features, ...
+
+**질의는 uuid 축으로 옮겼는데 값의 출처는 안 옮겼다.** 이것이 T-VN-39가 고치려던
+바로 그 부류이고, 하네스 자신이 그 부류로 남아 있었다.
+
+**왜 alias로 우회할 수 없나.** 이 seed는 core 프로시저를 직접 부른다. ADR-098 결정
+6과 309(`trg_features_legacy_alias` 영구 제거)에 따라 **alias가 생기지 않고 그것이
+정상이다** — 하네스 주석이 스스로 그렇게 적고 있다. 그래서
+`make_feature_id(...)`가 만든 `f_global_*` 주소는 재키 뒤 **DB 키가 전혀 아니다.**
+
+**왜 재계산도 안 되나.** `candidate_feature_uuid()`는 비파생 랜덤 UUIDv7이다
+(0083). run_id에서 유도할 수 없다. 이 파일은 같은 문제를 API-owned 경로에서 이미
+한 번 풀었고, 그 답이 "재계산이 아니라 **재현**"이었다 — 소유권 키로 **조회**한다.
+
+**그래서 해는 T-VN-39가 만든 앵커다.** provider 경로의 Feature identity는
+`provider_sync.provider_feature_identities`의
+`(provider_dataset_id, feature_kind, natural_key)` claim이 소유한다(ADR-098). 이
+fixture의 natural key는 `{run_id}:{kind}`이고 dataset은 `_ensure_dataset`가 run별로
+만든다. 즉 소유 uuid는 그 claim 한 번의 조회로 **재현**된다 — seed 전에는 행이
+없으므로 빈 집합이 되어 "이미 존재하는가" 사전 검사도 그대로 성립한다.
+
+**범위.** `_feature_ids(run_id)`의 소비자 전부(바인드 10곳)와 seed payload의
+`feature_id` 슬롯. payload는 admin 경로처럼 후보 uuid를 실어야 한다.
+
+**주의 — prod에 쓴다.** 이 lane은 prod feature DB에 seed하고 지운다. 고친 뒤
+첫 실행은 잔여물 counter 넷을 전후로 재고 증거를 남긴다.
+
+## T-VN-39-ECHO
+
+```markdown
+- [x] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+```
+
+**무엇이 참이면 닫히는가.**
+
+1. [x] `packages/kor-travel-map-api/tests/conftest.py`의 autouse resolver가 참조를
+   **정본 uuid**로 풀어 준다(`feature_id=ref`가 아니라). — `canonical_ref()`가 그
+   사상을 세운다: legacy 주소는 결정적 파생 uuid로, 이미 uuid인 참조는 그대로.
+2. [x] 그 위에서 이 패키지 테스트가 전부 초록이다. — 2026-09-11 n150 전량
+   **1223 passed / 0 failed**. 함께 움직인 자리는 27곳이었다(47은 추정치였다).
+3. [ ] ~~`test_curations_router._install_post_rekey_resolver` 같은 자체 resolver
+   설치가 불필요해지고 제거된다.~~ **2026-09-11 — 이 조문이 틀렸다. 삭제한다.**
+
+**왜 3이 틀렸나 — echo가 할 수 없는 일을 요구한다.**
+
+그 resolver를 쓰는 세 테스트는 필터 표면의 **3분기**를 잰다:
+
+| 입력 | 기대 |
+|---|---|
+| 해석되는 참조 | 200 + 정본 uuid |
+| 어떤 Feature도 가리키지 않는 참조 | **422**, repo는 호출조차 되지 않는다 |
+| 형식은 맞으나 없는 uuid | 200, 그대로 통과 |
+
+전역 echo는 **모든** 참조를 "해석 성공"으로 만든다. 그래서 2·3번 축은 echo 밑에서
+구조적으로 관측될 수 없고, echo를 "미해석은 None"으로 바꾸면 임의의 참조를 쓰는
+나머지 1200여 건이 전부 깨진다. 두 요구는 같은 fixture 안에서 양립하지 않는다.
+
+지우면 잃는 것이 정확히 무엇인지도 분명하다 — 재키 적대 리뷰가 마지막에 찾아낸
+결함(`22P02`가 `DataError`로 와서 `except ValueError`를 지나 500이 된다)의 **단위
+커버리지가 그 세 테스트다.** 검사기를 없애 조문을 만족시키는 것은 이 작업이 고치려던
+바로 그 함정이다.
+
+그래서 규약을 반대로 고정한다: **echo는 해석의 *값*을 모사하고, 해석의 *실패*는 각
+테스트가 자기 resolver로 모사한다.** conftest docstring이 그렇게 적고 있다.
+
+**왜 재키 PR과 나눴나.** 섞으면 그 27곳의 변경이 재키 diff와 구분되지 않는다. 그리고
+이 축의 실효 검증은 설계상 통합이 소유한다
+(`tests/integration/test_feature_identity_boundary.py`).
 
 ## T-VN-39-PROVIDER-PAGINATION
 
@@ -2417,6 +2502,15 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 겹치면 18,000건 데이터셋이 999건에서 예외 없이 끝난다. krheritage는
 `if len(result.items) < page_size: return` 하나뿐이고 결측 key row를 skip한다.
 Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출돼 있다.**
+
+**2026-09-11 진행.** 1·2·3은 닫혔다 — datagokr `0f1f236`(PR #16), krheritage
+`b86a094`(PR #10). krheritage는 `total` 가드가 아예 없었으므로 되돌릴 것이 없었고,
+대신 **행이 아니라 페이지 수**로 세게 했다(`page >= ceil(total/page_size)`). 이쪽이
+엄밀히 낫다 — 행을 세면 걸러진 행 때문에 `seen`이 `total`에 영원히 못 미쳐 tail에서
+매번 여분 요청이 붙지만, 페이지를 세면 걸러져도 정확히 끝난다. datagokr은 이미
+`total_pages` 가드가 있어 그것을 살리고 짧은 페이지 규칙만 `total`로 조건화했다.
+회귀 테스트 8건(두 리포 4건씩) + 기존 82건 통과. **남은 것은 4뿐이다** — 두 PR 머지
+후 Map 핀 상향.
 
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
