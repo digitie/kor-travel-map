@@ -1,101 +1,61 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-10 — T-VN-39 재키가 착지 직전이다
+## 2026-09-11 — T-VN-39 재키가 착지했다 (#1197, `e8c66c47`)
 
-`feat/t-vn-39-rekey`가 `feature_id`를 text → uuid로 옮겼다. **마이그레이션·계약
-오라클·lint·unit·제품 SQL Parse 오라클이 전부 초록**이고, 남은 것은 통합 스위트
-전량 재측정과 live e2e다.
+`feature.features.feature_id`가 uuid다. 서버가 적재 시점에 발급하는 UUIDv7이고 어떤
+입력에서도 유도되지 않는다. 예전의 `f_*` 주소는 `feature.feature_aliases.alias`의
+**주소 등록부**로 옮겨 갔고, 그 주소로 들어와도 같은 Feature가 나온다(ADR-098).
+**바깥 이름은 하나도 바뀌지 않았다** — 바뀐 것은 값의 출처뿐이다.
 
-| 게이트 | 상태 |
-|---|---|
-| `alembic upgrade head` + metadata 정합 10건 | **초록** |
-| lint 전량 · unit 2,826건 | **초록**(n150 node_modules 부재로 인한 frontend dotenv 13건 제외) |
-| `packages/*` 1,787건 | **초록** |
-| 제품 SQL **780문** head Parse | **초록** (적대 리뷰 뒤 587 → 780) |
-| 통합 스위트 | **CI 전량 런 초록** — 9묶음 초록 뒤 CI가 잡은 고아 claim 오염까지 닫음 |
-| live e2e (DB→API→브라우저) | **통과** — 격리 스택에서 실측, 보고서 §live e2e |
+같은 날 보안 PR #1198(maplibre-gl 6 · Next 16.3.4 · sharp 0.35.4)이 먼저 들어갔고,
+재키 PR이 그 위에 얹혔다.
 
-### 적대 리뷰 — blocker 2 · major 8, 전부 닫음
-
-머지 전에 6축 × 2명(opus5/xhigh)으로 적대 리뷰를 돌렸다. 세부는
-`docs/reports/t-vn-39-routine-open-defects.md` §적대 리뷰.
-
-- **blocker 2** (`cb35cbcf`) — uuid가 text 계약으로 새는 자리, 실행 트랜잭션이
-  조용히 끊긴 채 이어지는 자리. 뒤엣것이 남아 있던 통합 실패 1건의 원인이었다.
-- **major 축 부류 4** (`c1b4f3a3`) — 밖으로 uuid를 내보내던 SQL 둘, dedup 큐에
-  legacy 주소가 들어가던 자리, 표기가 달라 분기가 늘 실패하던 자리, 그리고
-  text 검색어와 uuid 필터를 겸하던 `legacy_id_for_filter`를 둘로 가른 것.
-- **major 탐지기 부류 4** (`03cafa2a`) — FK 액션 검사가 항진명제였고, Parse
-  오라클이 조립기 45개 중 6개만 불렀고, 축 검사의 사면이 `legacy_feature_id`를
-  삼켰고, 전화번호 테스트가 `str()`로 계약 위반을 덮었다. **넷 다 초록이면서
-  아무것도 못 보고 있었다.**
-
-### 머지 직전에 두 가지가 더 나왔다
-
-**하나 — 쪼갠 하네스가 세션 공유 상태를 가렸다.** 통합을 9묶음으로 나눠 돌린 것이
-전부 초록이었는데, PR을 열자 CI의 한 세션 전량 런이 곧바로 4건을 빨갛게 만들었다
-(`count_features_missing_identity == (0, 21, 0, 0)`). `provider_feature_identities`에
-`feature.features`로 가는 FK가 없어서 정리 도우미의 `TRUNCATE ... CASCADE`가 claim을
-데려가지 않고, commit하는 테스트가 지나간 자리마다 고아 claim이 쌓인 것이다. 도우미가
-호출부 TRUNCATE 뒤에 **부모 없는 claim만** 거두게 고쳤다. 저널 §묶음으로 쪼개 돌면.
-
-**둘 — npm 보안 권고 셋이 프론트 게이트를 막았다.** 이 PR과 무관한 새 권고이고 main도
-같은 얼굴이었다. 별도 PR(#1198)로 먼저 닫았다 — maplibre-gl 6.9.0 · Next 16.3.4 ·
-sharp 0.35.4. maplibre 메이저는 default export 제거 하나가 전부였고, 실브라우저
-e2e를 두 버전에 같은 조건으로 돌려 실패 집합이 **완전히 동일**함을 확인한 뒤 머지했다.
-저널 §보안 권고 셋이 머지를 막았고.
-
-### 델타 적대 리뷰 + provider 핀 8종 (2026-09-11)
-
-머지 직전에 두 라운드를 더 돌렸다.
-
-**델타 적대 리뷰** — 앞선 리뷰의 지적을 고친 **그 수정 자체**를 5축 × 2인으로 다시
-봤다(85 에이전트). 25건 중 11건 생존, blocker 0. 가장 값진 것은 마지막이었다:
-uuid 필터 표면 하나가 변환을 못 받아 500이었는데(`/admin/theme-feature-candidates`),
-**그것을 가린 자리가 따로 있었다** — API 패키지 conftest의 autouse echo-resolve가
-모든 참조를 "해석 성공"으로 만들어 그 축을 구조적으로 관측 불가로 만들고 있었다.
-새 lint는 호출 **개수**만 세다가 이제 **표면을 열거**한다.
-
-**provider 핀 8종** — 형제 리포를 확인해 뒤처진 8종을 올렸다. breaking은 khoa 하나
-(asyncio 전용 전환)였고, 그보다 중요한 것이 **조용한 절단 둘**이다. datagokr가
-종료 조건 가드를 잃으면서 행 단위 예외 삼킴이 들어와, 기형 행 하나가 18,000건을
-999건으로 만들고 Map이 그것을 완전 스냅샷으로 봉인할 수 있었다. krheritage도 같은
-모양이라 핀이 묶여 있었다. 두 경로를 Map의 `total` 권위 페이지네이터로 옮겨
-**provider 종료 조건에 대한 위임을 끊었다**.
-
-### 게이트 (2026-09-11)
+### 착지 시점 게이트
 
 | 층 | 결과 |
 |---|---|
-| GitHub CI 9종 | **전량 초록** (`0af5f36d`, CLEAN/MERGEABLE) |
-| n150 (provider **실제 설치**) | dagster 575 · api 1,223 · lint+unit 2,832 (환경 실패 14) |
-| live — 필터 표면 3갈래 | 200 / 200(빈) / **422** — 500이 사라진 것을 서비스가 말한다 |
-| live — 기동·bbox·상세 | 200 (핀 상향 뒤에도 그대로) |
+| GitHub CI 9종 | 전량 초록 |
+| n150 — provider **실제 설치** | dagster 575 · api 1,223 · lint+unit 2,832(환경 실패 14) |
+| 제품 SQL 786문 head Parse | 초록 (587 → 786) |
+| live — 필터 3갈래 | 200 / 200(빈 목록) / **422** |
+| live — DB→API→실제 브라우저 | 통과 |
 
-**CI는 provider extra를 설치하지 않는다.** khoa 같은 실제 파손은 CI가 구조적으로
-볼 수 없고, n150이 `[providers]`를 설치해 돌린 게이트가 잡았다. 그 빈자리를
-`_provider_surface.json`(핀된 SHA의 표면을 굳혀 대조)이 메운다.
+### 이 작업이 남긴 규칙 다섯
+
+1. **검사가 초록인 것과 결함이 없는 것은 다른 사실이다.** 가르는 방법은 검사에
+   결함을 일부러 넣어 보는 것뿐이다 — 그렇게 해서 FK 검사가 **항진명제**였음을
+   찾았다(정본을 마이그레이션과 함께 움직이는 덤프에서 읽고 있었다).
+2. **하한은 "판단 대상 수"가 아니라 "대상을 실제로 몇 개 보았는가"에 건다.**
+   앞의 것은 결함이 고쳐지는 순간 0이 되어 빨개진다.
+3. **개수 세기는 전칭 명제가 아니다.** 표면을 열거해야 "변환 안 된 자리"가 보인다 —
+   uuid 필터 하나가 그래서 500인 채로 남아 있었다.
+4. **쪼개서 빠르게 도는 하네스는 그 자체가 프록시다.** 통합을 9묶음으로 나눠 돌면
+   세션 공유 DB에 쌓이는 상태가 보이지 않는다. 머지 전에 한 번은 CI와 같은 방식으로.
+5. **결함을 만든 자리와 그것을 가린 자리는 따로 있을 수 있다.** API 패키지의
+   autouse echo-resolve가 uuid 해석 축을 구조적으로 관측 불가로 만들고 있었다.
+
+### 열린 후속 둘
+
+- **API 패키지 conftest의 echo-resolve가 재키 이전 세계를 모사한다**
+  (`feature_id=ref`). 그 patch가 깔린 채로는 "legacy 주소가 uuid로 바뀌는가"와
+  "없는 참조가 422인가"를 관측할 수 없다. 지금은 그 축을 재는 테스트가 자기
+  resolver를 설치해 우회한다. echo 자체를 재키 뒤 모양으로 바꾸는 것은 이 패키지
+  테스트 47곳이 참조 문자열을 그대로 기대해 별도 작업이다.
+- **datagokr/krheritage upstream의 페이지네이션 퇴화.** Map은 위임을 끊어 스스로를
+  지켰지만(`total` 권위 페이지네이터), 근본 수정은 provider 쪽이다. 다른 소비자는
+  여전히 노출돼 있다.
 
 ### 다음 한 작업
 
-1. draft 해제 → 머지.
-2. 머지 **뒤** prod Map 배포 — Map revision이 바뀌면 D2 재핀 사이클 전체가 따라오므로
-   별도 작업으로 분리한다.
+**prod Map 배포.** Map revision이 바뀌었으므로 D2 재핀 사이클 전체가 따라온다
+(rotate → rebuild → 이미지 → repin → preflight → D1 → D2). `docs/` 안의 prod 배포
+절차와 PinVi token pair 규약을 따른다.
 
-**T-VN-34C paired fresh-live 레인은 이 PR로 태울 수 없다.** 그 설치기는
-`consumer-rollout-v1.json`의 T-VN-40 paired consumer receipt가 `complete`일 것을
-요구하는데 지금 `pending`이고, 그 blocking_reason 자체가 "Map Admin provenance가
-opaque feature_id + required feature_uuid로 바뀌었으니 full-admin artifact를 다시
-vendoring하고 PinVi M05 attestation을 붙여 paired acceptance를 다시 돌려라"다 —
-별도 태스크다. 그래서 live e2e는 격리 스택으로 했다.
-
-### 열린 결정 하나
-
-**h35 고정 세대(`frozen_h35_schema`, ADR-075)를 되살릴지 은퇴시킬지.** 재키 뒤 그
-replay 경로는 세대 분기가 없는 공용 표면 셋 때문에 이미 반쪽이다. 목록은
-`curation_repo._pre_uuid_feature_id_recordset`의 docstring이 들고 있다. 되살리려면
-그 셋에도 세대 분기가 필요하고, 아니면 표면 자체를 은퇴시켜야 한다. 이 PR은 결정을
-내리지 않고 현행 세대만 정직하게 옮겼다 — head Parse 오라클도 그 세대를 제외한다.
+그 뒤 **T-VN-34C paired fresh-live 레인**은 여전히 별도다 —
+`consumer-rollout-v1.json`의 T-VN-40 paired consumer receipt가 `pending`이고, 그
+blocking_reason 자체가 "Map Admin provenance가 opaque feature_id + required
+feature_uuid로 바뀌었으니 full-admin artifact를 다시 vendoring하고 PinVi M05
+attestation을 붙여 paired acceptance를 다시 돌려라"다.
 
 ## 2026-09-08 (3) — 원장이 밀려 있던 둘을 정리하고 계약 하나를 개정했다
 
