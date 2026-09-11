@@ -57,11 +57,23 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
+- [ ] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
 
-  legacy TEXT `feature_id` PK 물리 제거가 본체이고 이 백로그에서 가장 큰 축이다.
-  본체는 재타입이 아니라 **멱등 앵커 교체**다 — 재키가 `ON CONFLICT (feature_id)`의
-  결정적 축을 없앤다. 규모·축 선택 근거는 acceptance가 소유한다.
+  `T-VN-39`가 머지되어(#1197, `e8c66c47`) Map revision이 바뀌었다. prod 배포는
+  rotate → rebuild → 이미지 → repin → preflight → D1 → D2 전 사이클을 부른다.
+  해제 조건은 acceptance §T-VN-39-DEPLOY.
+
+- [ ] T-VN-39-ECHO — **API 패키지 conftest의 echo-resolve를 재키 뒤 세계로**
+
+  autouse patch가 모든 feature 참조를 `feature_id=ref`로 "해석 성공" 처리해, uuid
+  해석·미해석 422 두 축을 이 패키지에서 관측 불가로 만든다. 참조 문자열을 그대로
+  기대하는 테스트 47곳이 함께 움직인다. 해제 조건은 acceptance §T-VN-39-ECHO.
+
+- [ ] T-VN-39-PROVIDER-PAGINATION — **provider 종료 조건 퇴화를 upstream에서 고친다**
+
+  datagokr·krheritage의 `iter_pages`가 `total` 권위를 잃고 짧은 페이지 휴리스틱만
+  남겨, 행 하나가 걸러지면 목록이 조용히 절단된다. Map은 위임을 끊어 스스로를
+  지켰지만 다른 소비자는 노출돼 있다. 해제 조건은 acceptance §T-VN-39-PROVIDER-PAGINATION.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 

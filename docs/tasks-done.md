@@ -10,6 +10,32 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-11 — feature_id 재키가 착지했다
+
+- [x] T-VN-39 — **KTM·PinVi write-fence cutover / legacy TEXT `feature_id` PK 제거**
+  (**2026-09-11 완료**, #1197 `e8c66c47`). 본체는 재타입이 아니라 **멱등 앵커 교체**였다 —
+  재키가 `ON CONFLICT (feature_id)`의 결정적 축을 없애므로 그 자리를
+  `provider_sync.provider_feature_identities` claim이 대신한다(ADR-098). legacy `f_*`는
+  사라지지 않고 `feature_aliases.alias`의 **주소 등록부**로 옮겼다. 착지 실측:
+  feature_id류 컬럼 52개가 uuid이고 text로 남은 셋은 정당한 생존자
+  (`legacy_feature_id` 2표 + plpgsql 변수), shadow `feature_uuid` 0개.
+  **바깥 이름은 하나도 바뀌지 않았다.**
+  근본원인은 "범위를 오라클이 아니라 프록시에서 유도했다"였고(다섯 번 유도·다섯 번
+  오답), 제품 SQL을 head에 직접 물리는 Parse 오라클이 첫 실행 33초에 여덟을 찾았다.
+  적대 리뷰 두 라운드(12 + 85 에이전트)의 최대 수확은 결함이 아니라 **결함을 가리는
+  구조**였다 — 항진명제 FK 검사, 개수만 세던 lint, 해석 축을 통째로 가리던 autouse
+  echo-resolve. 상세는 `docs/reports/t-vn-39-routine-open-defects.md`.
+  후속은 `T-VN-39-DEPLOY`·`T-VN-39-ECHO`·`T-VN-39-PROVIDER-PAGINATION`.
+- [x] T-VN-39-SECURITY — **배포 의존성 권고 셋**(#1198 `f8c11239`). maplibre-gl 6.9.0 ·
+  Next 16.3.4 · sharp 0.35.4. maplibre 메이저는 default export 제거 한 줄이 전부였고,
+  실브라우저 e2e를 두 버전에 같은 조건으로 돌려 실패 집합이 **완전히 동일**함을 확인한
+  뒤 머지했다. 같은 숫자를 네 자리가 들고 있던 과결박도 함께 걷어냈다.
+- [x] T-VN-39-PINS — **provider 핀 8종 상향**. breaking은 khoa 하나(asyncio 전용 전환)
+  였고, 무거운 것은 datagokr·krheritage의 **조용한 절단**이었다 — 기형 행 하나가
+  18,000건을 999건으로 만들고 Map이 그것을 완전 스냅샷으로 봉인할 수 있었다.
+  두 경로를 Map의 `total` 권위 페이지네이터로 옮겨 provider 종료 조건에 대한 위임을
+  끊었다. upstream 근본 수정은 `T-VN-39-PROVIDER-PAGINATION`이 소유한다.
+
 ## 2026-09-08 (2) — 승격 검증이 durable 기록을 남긴다
 
 - [x] T-VN-M05-VERIFY-RECEIPT — **승격 검증이 durable 기록을 남기게 한다**
