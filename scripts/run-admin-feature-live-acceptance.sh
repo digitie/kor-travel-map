@@ -257,6 +257,7 @@ readonly LANE_OPERATIONS=(
   helper-cleanup
   helper-audit
   helper-api-audit
+  helper-purge
   executor-main
   executor-recovery
 )
@@ -480,6 +481,16 @@ recover_run() {
     write_blocked recovery-failed
     die "recovery left owned residue"
   fi
+  # 복구 lane도 같은 은퇴 행을 남긴다 — 정상 lane만 지우면 실패한 run의 잔여물이
+  # 그대로 쌓인다. 위치는 정상 lane과 같은 이유로 **게이트 뒤**다: 감사가 red인
+  # 채로 그 감사 대상 행을 지우면 운영자가 무엇이 걸렸는지 DB에서 다시 볼 수 없다.
+  local purge_status=0
+  run_helper purge "$RUNTIME_DIR/direct-purge.json" || purge_status=$?
+  assert_container_residue_zero
+  if (( purge_status != 0 )); then
+    write_blocked recovery-failed
+    die "recovery owned feature purge failed"
+  fi
   validate_evidence recover
   write_result recovered
   # 외부 clear 명령 대기 중 signal trap이 다음 shell 명령 전에 실행되므로 guard를 먼저 닫는다.
@@ -536,6 +547,31 @@ PY
   if (( test_status != 0 )); then
     write_blocked test-failed-restored
     die "acceptance assertion failed; recovery acknowledgement required"
+  fi
+  # purge가 lane 안에 있는 이유: D2는 소유 Feature를 은퇴까지만 끌고 갔고 삭제는
+  # 아무도 하지 않았다. 그래서 run마다 prod에 은퇴 행이 하나씩 영구히 쌓였다
+  # (2026-09-11 실측). 306이 raw DELETE를 봉인했으므로 삭제는 감사되는
+  # `feature.purge_manual_feature`로만 간다 — helper가 그 경로를 쓴다.
+  #
+  # **위치는 모든 게이트 뒤다.** api-audit 뒤라는 원래 순서는 그대로지만(증거가
+  # 남은 다음에 지운다), 게이트 앞에 두면 두 가지가 깨진다:
+  #
+  #   - 감사가 red인 채로 그 감사 대상 행을 지운다. 운영자가 무엇이 걸렸는지
+  #     DB에서 다시 볼 수 없다.
+  #   - **실패한 run의 소유 Feature가 사라진다.** 복구 lane의 api-audit은 그 행
+  #     1건을 요구하므로(`_audit_complete_api_owned`), 먼저 지우면 `recover`가
+  #     구조적으로 통과 불가능해지고 BLOCKED가 영구화된다 — `run` 모드는
+  #     `prior BLOCKED state requires recover mode`로 막히므로 lane이 prod에서
+  #     영구 정지한다. 적대 리뷰가 두 렌즈에서 독립적으로 이것을 잡았다.
+  #
+  # 여기까지 왔으면 run 전체가 초록이다. 그때만 지운다. 실패한 run의 행은 남고,
+  # 그것을 지우는 것은 복구 lane의 몫이다.
+  local purge_status=0
+  run_helper purge "$RUNTIME_DIR/direct-purge.json" || purge_status=$?
+  assert_container_residue_zero
+  if (( purge_status != 0 )); then
+    write_blocked purge-failed
+    die "owned feature purge failed"
   fi
   validate_evidence normal
   write_result passed

@@ -556,7 +556,8 @@ def _parser() -> argparse.ArgumentParser:
     # 통째로 치르고서야 알았다. `tests/lint/test_supervisor_accepts_every_helper_action.py`가
     # 러너 호출부에서 유도해 대조한다.
     parser.add_argument(
-        "--helper-action", choices=("seed", "cleanup", "audit", "api-audit")
+        "--helper-action",
+        choices=("seed", "cleanup", "audit", "api-audit", "purge"),
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--artifact-dir", type=Path)

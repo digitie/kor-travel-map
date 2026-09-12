@@ -260,10 +260,15 @@ _ADMIN_EXPECTED_STATUS: Final[dict[str, int]] = {
 }
 
 
+#: run_id를 뺀 lane 소유 이름의 접두. `_admin_fixture_name`이 이것으로 만들어지고
+#: 누적 측정이 같은 값을 쓴다 — 두 곳이 따로 들고 있으면 어긋난다.
+_ADMIN_FIXTURE_NAME_PREFIX: Final = "E2E TVN36 state fixture "
+
+
 def _admin_fixture_name(run_id: str) -> str:
     """live spec의 ``FIXTURE_NAME``. API-owned row의 유일한 소유권 키다."""
 
-    return f"E2E TVN36 state fixture {run_id}"
+    return f"{_ADMIN_FIXTURE_NAME_PREFIX}{run_id}"
 
 
 def _admin_reason_prefix(run_id: str) -> str:
@@ -1418,7 +1423,7 @@ async def _inspect_api_owned(
 async def _purge_api_owned(
     session: AsyncSession,
     run_id: str,
-) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+) -> tuple[dict[str, int], dict[str, int], dict[str, int], int]:
     inspection = await _inspect_api_owned(session, run_id)
     # ``ops.feature_overrides``/``feature.feature_aliases``/subtype은 모두
     # ON DELETE CASCADE라 Feature 삭제 한 번으로 사라진다. 0104 이전에 필요했던
@@ -1485,6 +1490,27 @@ async def _purge_api_owned(
     )
     if any(remaining_foreign_keys.values()):
         raise RuntimeError("API-owned purge 뒤 FK reference가 남았습니다")
+    # 이 lane이 **여태까지** 남긴 것을 센다 — 이번 run이 아니라 이름 접두 전체다.
+    #
+    # 이 PR이 고친다고 말하는 것은 "run마다 은퇴 행이 하나씩 쌓인다"인데, 이번 run의
+    # 행이 사라졌다는 것만으로는 그 명제를 재지 못한다. 종전 run이 남긴 행은 그대로
+    # 있어도 초록이기 때문이다. 그래서 접두 전체를 센다.
+    #
+    # **지우지는 않는다.** purge는 되돌릴 수 없고, 다른 run의 행을 이 lane이 임의로
+    # 지울 권한은 없다. 세어서 보고하고, 0이 아니면 검증기가 빨갛게 만든다 —
+    # 무엇을 할지는 사람이 정한다.
+    lane_residue_total = int(
+        await session.scalar(
+            text(
+                """
+                SELECT count(*) FROM feature.features
+                WHERE name LIKE :prefix || '%'
+                """
+            ),
+            {"prefix": _ADMIN_FIXTURE_NAME_PREFIX},
+        )
+        or 0
+    )
     return (
         {"features": 0, "price_values": 0, "weather_values": 0},
         remaining_foreign_keys,
@@ -1492,6 +1518,7 @@ async def _purge_api_owned(
             "features": inspection.features,
             "field_overrides": inspection.field_overrides,
         },
+        lane_residue_total,
     )
 
 
@@ -1771,10 +1798,12 @@ async def _run(
                 elif action == "cleanup":
                     counts, foreign_keys = await _cleanup(session, run_id)
                 elif action == "purge":
-                    counts, foreign_keys, purged = await _purge_api_owned(
-                        session,
-                        run_id,
-                    )
+                    (
+                        counts,
+                        foreign_keys,
+                        purged,
+                        lane_residue_total,
+                    ) = await _purge_api_owned(session, run_id)
                 elif action == "api-audit":
                     (
                         counts,
@@ -1821,6 +1850,7 @@ async def _run(
         result["feature_ids"] = list(api_owned_feature_ids)
     if action == "purge":
         result["purged"] = purged
+        result["lane_residue_total"] = lane_residue_total
     return result
 
 
