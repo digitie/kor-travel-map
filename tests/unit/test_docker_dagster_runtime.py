@@ -51,6 +51,10 @@ def _compose() -> dict[str, Any]:
     return yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
 
 
+def _dagster_yaml() -> dict[str, Any]:
+    return yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+
+
 def _command_text(command: object) -> str:
     if isinstance(command, str):
         return command
@@ -84,6 +88,37 @@ def _assigned_env_keys(text: str, *, prefix: str) -> set[str]:
 
 
 @pytest.mark.unit
+def test_dagster_local_writes_land_in_the_appuser_owned_state_directory() -> None:
+    """로컬에 쓰는 두 축이 `DAGSTER_HOME`이 아니라 `/opt/dagster/state`를 가리켜야 한다.
+
+    `dagster.Dockerfile`은 `/opt/dagster`를 root 소유로 만든 뒤 `/opt/dagster/state`
+    **하나만** appuser에게 넘긴다. `DAGSTER_HOME`(설정)은 봉인이고 uid 999는 그 아래에
+    디렉터리를 만들 수 없다.
+
+    그런데 `local_artifact_storage`/`compute_logs`를 선언하지 않으면 Dagster는 기본값인
+    `$DAGSTER_HOME/storage`를 쓰려 하고, run이
+    `PermissionError: '/opt/dagster/dagster_home/storage'`로 죽는다. 2026-09-11 prod
+    실측에서 **성공한 run이 하나도 없었다** — 컨테이너는 계속 healthy였다.
+
+    그래서 이 검사가 있다. healthy와 "run이 완주한다"는 다른 사실이고, 전자만 보는
+    게이트는 후자를 영원히 놓친다.
+    """
+    config = _dagster_yaml()
+    state_root = "/opt/dagster/state/"
+
+    for key in ("local_artifact_storage", "compute_logs"):
+        assert key in config, (
+            f"{key}가 선언되지 않았다 — Dagster가 봉인된 DAGSTER_HOME에 쓰려 한다"
+        )
+        base_dir = config[key]["config"]["base_dir"]
+        assert base_dir.startswith(state_root), (
+            f"{key}.base_dir가 appuser 소유 state 밖을 가리킨다: {base_dir}"
+        )
+
+    # run/event/schedule은 postgres가 갖는다 — 로컬로 되돌아가면 같은 벽에 부딪힌다.
+    assert "postgres" in config["storage"]
+
+
 def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     services = _compose()["services"]
 

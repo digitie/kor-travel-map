@@ -8,6 +8,27 @@ python_logs:
     - kortravelmap.dagster.provider_fetchers
   python_log_level: WARNING
 
+# **로컬 쓰기는 전부 `/opt/dagster/state`로 간다.** `DAGSTER_HOME`은 설정 전용이고
+# root 소유 읽기 전용이다(`dagster.Dockerfile`: `chown -R root:root /opt/dagster` 뒤
+# `chown appuser:appuser /opt/dagster/state`). 그런데 이 둘을 선언하지 않으면 Dagster는
+# 기본값으로 `$DAGSTER_HOME/storage`를 쓰려 하고, uid 999는 그 자리를 만들 수 없다 —
+# run이 `PermissionError: '/opt/dagster/dagster_home/storage'`로 죽는다(2026-09-11 실측:
+# 이 prod에서 성공한 run이 하나도 없었다).
+#
+# run/event/schedule storage는 아래 postgres가 갖는다. 여기 두 항목은 그것이 덮지 않는
+# 나머지다 — compute log와 IO manager의 로컬 artifact다.
+local_artifact_storage:
+  module: dagster._core.storage.root
+  class: LocalArtifactStorage
+  config:
+    base_dir: /opt/dagster/state/artifacts
+
+compute_logs:
+  module: dagster._core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: /opt/dagster/state/compute_logs
+
 storage:
   postgres:
     postgres_url:
