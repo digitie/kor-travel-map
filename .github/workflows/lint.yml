@@ -84,7 +84,7 @@ jobs:
           mypy --strict \
             scripts/admin_feature_live_fixture.py \
             scripts/admin_feature_live_state.py \
-            scripts/admin_feature_live_supervisor.py
+            scripts/admin_feature_live_supervisor.py \
             scripts/dagster_run_completion_gate.py
 
       - name: mypy --strict (prod 이미지에 구워지는 스크립트)
