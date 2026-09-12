@@ -27,7 +27,6 @@ from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from kortravelmap.infra.application_schema_head import (
@@ -577,7 +576,7 @@ async def _read_operation_receipt(
 
 async def _find_operation_receipt(
     connection: AsyncConnection, operation_id: UUID
-) -> RowMapping | None:
+) -> Mapping[str, Any] | None:
     try:
         row = (
             await connection.execute(
@@ -594,10 +593,15 @@ async def _find_operation_receipt(
         ).mappings().one_or_none()
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
-    # 반환 타입은 `RowMapping`이다 — 이 SQLAlchemy 버전 스텁에서 그것은
-    # `Mapping[str, Any]`의 하위형이 아니다. 넓게 적으면 mypy가 거절하고 `ignore`로
-    # 덮으면 호출자가 무엇을 받는지 잃는다. 실제 타입을 적는다.
-    return row
+    # `.mappings()`는 `RowMapping`을 준다. 이 SQLAlchemy 버전 스텁에서 그것은
+    # `Mapping[str, Any]`의 하위형이 **아니다** — 그래서 세 선택지가 있었다:
+    # (a) 반환 타입을 `RowMapping`으로 올린다 → 호출자 계약까지 번진다,
+    # (b) `ignore`로 덮는다 → 무엇을 받는지 잃는다,
+    # (c) 경계에서 평범한 매핑으로 확정한다.
+    #
+    # (c)를 고른다. 영수증 한 행의 복사는 무의미한 비용이고, 그 대신 결과 집합에서
+    # **분리된** 값을 넘긴다 — 호출자가 connection 수명에 묶이지 않는다.
+    return None if row is None else dict(row)
 
 
 def _verify_fence_candidate(
