@@ -45,6 +45,47 @@ concurrency:
   pools:
     default_limit: 1
     granularity: run
+  # **동시 실행 상한을 암묵 기본값에 맡기지 않는다.**
+  #
+  # 이 값을 선언하지 않아도 Dagster는 `QueuedRunCoordinator`로 큐를 돌린다 —
+  # `InstanceRef.from_dir`의 기본값이다. 즉 큐는 이미 우리를 지배하고 있었고 그 상한만
+  # 우리가 모르고 있었다. 2026-09-12 prod 실측: `_max_concurrent_runs = 10`인데
+  # `_inst_data.config_yaml`이 `{}`다 — 값은 10인데 **아무도 그것을 고른 적이 없다.**
+  #
+  # 형제 저장소 `kor-travel-weather`가 이 정확한 자리에서 두 번 멈췄다. 프로세스가
+  # 사라진 run이 `STARTED`로 남아 슬롯을 영구 점유하고, 컨테이너 교체가 쌓이면 상한이
+  # "돌지 않는 run"으로 가득 차 daemon이 "10 runs are currently in progress. Maximum is
+  # 10, won't launch more"만 적는다. 두 번째에는 시간별 수집이 **18시간** 멈췄다.
+  #
+  # 그 정지의 치료는 `run_monitoring`이고 Map은 이미 갖고 있다(전역 6시간 상한 +
+  # schedule별 `dagster/max_runtime` tag). 여기서 더하는 것은 **상한 자체를 정본으로
+  # 만드는 것**이다 — 값은 바꾸지 않는다(실측 유효값과 같은 10). Dagster 업그레이드가
+  # 기본값을 움직여도 이 파일이 정본이고, 상한을 바꾸려면 이 주석을 읽게 된다.
+  #
+  # provider job은 rate-limited 공개 API에 대한 IO-bound 작업이고 n150은 단일 회전
+  # 디스크를 weather/concierge/geo/airport와 공유한다. 올려도 수집이 빨라지지 않는다.
+  #
+  # `run_coordinator`에 두면 안 된다 — `pools`가 선언된 상태에서 그 둘은 상호
+  # 배타이고 Dagster가 `DagsterInvalidConfigError`로 거부한다(1차 시안이 그랬다).
+  runs:
+    max_concurrent_runs: 10
+
+# **tick 이력에 상한을 준다.**
+#
+# 2026-09-12 실측에서 `job_ticks`가 이미 metadata DB의 **가장 큰 표**였다
+# (2,504 kB / 1,508행, 스택이 올라온 뒤 두 시간 만에). 분 단위 schedule이 하나
+# 돌고 있으므로 하루 ~1,440행씩 늘어난다. weather는 같은 host에서 디스크를 한 번
+# 소진한 뒤 이 설정을 넣었다.
+#
+# **이것이 덮지 않는 것**: `retention`은 schedule/sensor **tick**만 지운다. `runs`와
+# `event_logs`는 그대로 늘어난다. 지금 prod에서 그것이 터지지 않는 이유는 파괴적
+# rebuild가 배포마다 metadata DB를 비우기 때문이고, 그것은 보증이 아니다 — run 이력
+# 자체의 상한은 별도 과제다.
+retention:
+  schedule:
+    purge_after_days: 14
+  sensor:
+    purge_after_days: 14
 
 # 컨테이너 재시작으로 worker process만 사라지고 metadata가 STARTED/STARTING에
 # 남으면 queued-run 동시성 슬롯을 영구 점유한다. MOIS처럼 정상적으로 2시간을 넘는

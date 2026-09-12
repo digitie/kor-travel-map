@@ -144,6 +144,9 @@ def _validate_dagster_config(raw: bytes) -> None:
             # 소유 state 안에 있는지까지 본다.
             "local_artifact_storage",
             "compute_logs",
+            # tick 이력의 상한. 없으면 `job_ticks`가 무한히 늘어난다 — 2026-09-12
+            # 실측에서 그것이 이미 metadata DB의 가장 큰 표였다.
+            "retention",
         }:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         storage = config["storage"]
@@ -152,6 +155,8 @@ def _validate_dagster_config(raw: bytes) -> None:
             config["local_artifact_storage"]["config"]["base_dir"],
             config["compute_logs"]["config"]["base_dir"],
         )
+        run_limit = config["concurrency"]["runs"]["max_concurrent_runs"]
+        retention = config["retention"]
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
         raise DagsterStorageMigrationError("invalid_dagster_yaml") from exc
     if storage != {
@@ -176,6 +181,23 @@ def _validate_dagster_config(raw: bytes) -> None:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         resolved = posixpath.normpath(base_dir)
         if not resolved.startswith(f"{_LOCAL_STATE_ROOT}/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # key를 허용하는 것으로 끝내면 그 뜻이 구멍으로 빠져나간다 — 로컬 쓰기 두 축에
+    # 적용한 것과 같은 규율이다.
+    #
+    # 상한이 사라지면 큐는 Dagster 기본값으로 돌아간다. 그 값이 무엇인지는 버전이
+    # 정하고 우리는 모른다 — 형제 저장소 weather가 그 상태에서 두 번 멈췄다.
+    if type(run_limit) is not int or run_limit < 1:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # tick 이력의 상한. 둘 중 하나가 없으면 그 종류는 무한히 늘어난다.
+    if set(retention) != {"schedule", "sensor"}:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    for kind in ("schedule", "sensor"):
+        section = retention[kind]
+        if not isinstance(section, dict) or set(section) != {"purge_after_days"}:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        days = section["purge_after_days"]
+        if type(days) is not int or days < 1:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 

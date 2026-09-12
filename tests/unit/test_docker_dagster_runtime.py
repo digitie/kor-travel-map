@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -17,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 import yaml
+from dagster._core.instance.config import dagster_instance_config
+from dagster._core.instance.ref import InstanceRef
 
 ROOT = Path(__file__).resolve().parents[2]
 _CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
@@ -1099,8 +1102,124 @@ def test_dagster_image_config_serializes_provider_pools() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
 
     assert config["concurrency"] == {
-        "pools": {"default_limit": 1, "granularity": "run"}
+        "pools": {"default_limit": 1, "granularity": "run"},
+        "runs": {"max_concurrent_runs": 10},
     }
+
+
+@pytest.mark.unit
+def test_the_shipped_dagster_config_passes_dagsters_own_validator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """배에 실리는 `dagster.yaml`을 Dagster 자신에게 물어 본다.
+
+    손으로 쓴 key 검사는 **Dagster가 그 조합을 받아들이는지**를 말하지 않는다.
+    2026-09-12에 그 차이가 값을 치렀다. 동시 실행 상한을
+    `run_coordinator.config.max_concurrent_runs`에 두었더니 Dagster가 거부했다:
+
+        DagsterInvalidConfigError: Found config value for `['max_concurrent_runs']`
+        in `run_coordinator` which is incompatible with the `concurrency > runs` config
+
+    `concurrency`에 `pools`가 선언돼 있으면 그 둘은 상호 배타이고, 정본 자리는
+    `concurrency > runs`다(`validate_concurrency_config`). 그 사실을 이 저장소의
+    어느 검사도 알지 못했다 — prod 이미지 안에서 직접 파싱해 보고서야 나왔다.
+    배포 경로에서 이것이 터지면 파괴적 rebuild 한 번이 탄다(같은 날 실제로 그
+    종류의 실수 하나가 스택을 한 시간 넘게 내렸다).
+
+    그래서 CI가 같은 질문을 한다. 이 검사의 힘은 **우리가 무엇을 아는지에
+    의존하지 않는다는 것**이다 — Dagster의 스키마가 정본이고 버전과 함께 움직인다.
+    손으로 쓴 key 목록은 우리가 아는 것만 재고, 이것은 Dagster가 아는 것을 잰다.
+    """
+    # storage DSN은 StringSource라 스키마 검증에 값이 필요하지 않지만, 검증기가
+    # 뒤에서 해석하려 들어도 실패하지 않게 자리만 채운다. 실제 DSN이 아니다.
+    monkeypatch.setenv("KOR_TRAVEL_MAP_DAGSTER_PG_URL", "postgresql://validator.invalid/x")
+    home = tmp_path / "dagster_home"
+    home.mkdir()
+    shutil.copyfile(ROOT / "docker" / "dagster.yaml", home / "dagster.yaml")
+
+    # 파싱만이 아니라 **해석까지** 본다. `dagster_instance_config`는 상호 배타
+    # 검증을 돌고, `InstanceRef.from_dir`는 configurable class를 실제로 조립한다.
+    config, custom_instance_class = dagster_instance_config(str(home))
+    reference = InstanceRef.from_dir(str(home))
+
+    assert custom_instance_class is None, custom_instance_class
+    assert config["storage"]["postgres"]["postgres_url"] == {
+        "env": "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
+    }
+    # 세 storage가 전부 postgres로 해석되는 것까지 본다. 선언을 지우면 Dagster는
+    # `DAGSTER_HOME` 아래 SQLite로 조용히 떨어지고, SQLite는 동시 writer를 하나만
+    # 받는다 — 형제 저장소 weather에서 그것이 `database is locked`로 나타나
+    # 종결 이벤트를 잃은 run이 `STARTED`로 영구히 남았다.
+    assert reference.run_storage_data.class_name == "PostgresRunStorage"
+    assert reference.event_storage_data.class_name == "PostgresEventLogStorage"
+    assert reference.schedule_storage_data.class_name == "PostgresScheduleStorage"
+
+
+@pytest.mark.unit
+def test_the_run_queue_limit_is_declared_and_load_bearing() -> None:
+    """동시 실행 상한을 암묵 기본값에 맡기지 않는다.
+
+    이 값을 선언하지 않아도 Dagster는 `QueuedRunCoordinator`로 큐를 돌린다 —
+    `InstanceRef.from_dir`의 기본값이다. 즉 큐는 선언 여부와 무관하게 이미
+    우리를 지배하고 있었고, 그 상한만 우리가 모르고 있었다. 2026-09-12 prod
+    실측: `_max_concurrent_runs = 10`인데 `_inst_data.config_yaml`이 `{}`다.
+
+    형제 저장소 `kor-travel-weather`가 이 자리에서 두 번 멈췄다. 프로세스가 사라진
+    run이 `STARTED`로 남아 슬롯을 영구 점유하고, 컨테이너 교체가 쌓이면 상한이
+    "돌지 않는 run"으로 가득 차 daemon이 "Maximum is 10, won't launch more"만
+    적는다. 두 번째에는 시간별 수집이 18시간 멈췄다.
+
+    그리고 **선언이 실제로 지배하는지**를 본다. 값이 기본값과 같으면 선언의
+    존재만으로는 구분되지 않는다 — 다른 값으로 한 번 해석해 그것이 따라오는지
+    확인한다. 이것이 없으면 이 검사는 "우리가 10을 적었다"만 말하고, Dagster가
+    그것을 읽는지는 말하지 않는다.
+    """
+    raw = (ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8")
+    config = yaml.safe_load(raw)
+
+    limit = config["concurrency"]["runs"]["max_concurrent_runs"]
+    assert type(limit) is int and limit >= 1, limit
+    # `run_coordinator`에 두면 Dagster가 거부한다 — 상호 배타다.
+    assert "run_coordinator" not in config, config.get("run_coordinator")
+
+    def resolved(document: dict[str, object]) -> object:
+        settings = document.get("concurrency")
+        assert isinstance(settings, dict)
+        runs = settings.get("runs")
+        return runs.get("max_concurrent_runs") if isinstance(runs, dict) else None
+
+    probe = yaml.safe_load(raw)
+    probe["concurrency"]["runs"]["max_concurrent_runs"] = limit + 3
+    assert resolved(probe) == limit + 3
+    dropped = yaml.safe_load(raw)
+    del dropped["concurrency"]["runs"]
+    assert resolved(dropped) is None, (
+        "`concurrency > runs`를 지워도 상한이 남는다면 이 파일은 정본이 아니다"
+    )
+
+
+@pytest.mark.unit
+def test_tick_history_has_an_upper_bound() -> None:
+    """schedule/sensor tick 이력이 무한히 늘어나지 않는다.
+
+    2026-09-12 실측에서 `job_ticks`가 이미 Dagster metadata DB의 **가장 큰
+    표**였다 — 스택이 올라온 뒤 두 시간 만에 2,504 kB / 1,508행. 분 단위
+    schedule이 하나 돌고 있으므로 하루 ~1,440행씩 늘어난다. 형제 저장소
+    weather는 같은 host에서 디스크를 한 번 소진한 뒤 이 설정을 넣었다.
+
+    `retention`이 덮는 것은 **tick뿐**이다. `runs`와 `event_logs`는 그대로
+    늘어나고, 지금 그것이 터지지 않는 이유는 파괴적 rebuild가 배포마다 metadata
+    DB를 비우기 때문이다 — 그것은 보증이 아니다. 이 검사는 그 한계를 알고 있고,
+    run 이력 자체의 상한은 별도 과제다.
+    """
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+
+    retention = config["retention"]
+    assert set(retention) == {"schedule", "sensor"}, retention
+    for kind in ("schedule", "sensor"):
+        days = retention[kind]["purge_after_days"]
+        assert type(days) is int and days >= 1, (kind, days)
 
 
 @pytest.mark.unit
