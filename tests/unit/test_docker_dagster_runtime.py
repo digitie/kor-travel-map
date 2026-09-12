@@ -4302,6 +4302,97 @@ def test_dagster_storage_rejects_alternate_top_level_storage_keys(
     assert caught.value.code == "dagster_storage_target_not_sealed"
 
 
+def _local_write_base_dirs() -> dict[str, str]:
+    """`dagster.yaml`이 선언한 로컬 쓰기 경로. 리터럴을 다시 적지 않는다."""
+    config = _dagster_yaml()
+    return {
+        key: config[key]["config"]["base_dir"]
+        for key in ("local_artifact_storage", "compute_logs")
+    }
+
+
+def _final_owner_of(dockerfile: str, target: str) -> str | None:
+    """Dockerfile의 chown들을 순서대로 적용했을 때 `target`의 최종 소유자.
+
+    `chown -R owner dir`은 그 아래 전부를 가져가고, `chown owner dir`은 그 하나만
+    가져간다. 두 형태가 섞여 있고 **순서가 결과를 뒤집으므로** 텍스트 존재 여부로는
+    판정할 수 없다.
+    """
+    owner: str | None = None
+    for raw_line in dockerfile.splitlines():
+        line = raw_line.strip().removeprefix("&& ").removeprefix("RUN ").strip()
+        if not line.startswith("chown "):
+            continue
+        parts = line.removeprefix("chown ").rstrip("\\").split()
+        recursive = parts and parts[0] == "-R"
+        if recursive:
+            parts = parts[1:]
+        if len(parts) < 2:
+            continue
+        candidate, paths = parts[0], parts[1:]
+        for path in paths:
+            if path == target or (recursive and target.startswith(path.rstrip("/") + "/")):
+                owner = candidate
+    return owner
+
+
+@pytest.mark.unit
+def test_the_image_hands_the_declared_local_write_root_to_appuser() -> None:
+    """`dagster.yaml`이 가리키는 자리를 `dagster.Dockerfile`이 실제로 넘겨준다.
+
+    `/opt/dagster/state`는 Dockerfile·dagster.yaml·봉인 검사기·테스트 네 곳이
+    **각자** 들고 있는 리터럴이다. 봉인 검사기와 config는 이제 서로를 보지만
+    (`test_sealed_validator_accepts_the_config_this_repo_actually_ships`),
+    **그 값에 실제로 쓰기 권한을 주는 chown**은 아무도 보지 않았다.
+
+    그래서 `chown appuser:appuser /opt/dagster/state`를 지워도 전량이 초록이었다.
+    Dockerfile 안의 appuser 자가검사조차 `test ! -w`(설정이 **안** 써지는지)만 보고
+    state가 **써지는지는** 보지 않는다. 그러면 컨테이너는 healthy로 뜨고 모든 run이
+    `PermissionError`로 죽는다 — 2026-09-11과 같은 모양, 같은 가시성이다.
+
+    순서까지 본다. 뒤따르는 `chown -R root:root`가 그 자리를 되가져가면 앞의
+    chown은 없는 것과 같은데, 텍스트 존재 검사로는 그 차이가 보이지 않는다.
+    """
+    dockerfile = _dockerfile("dagster.Dockerfile")
+
+    for key, base_dir in _local_write_base_dirs().items():
+        parent = base_dir.rsplit("/", maxsplit=1)[0]
+        owner = _final_owner_of(dockerfile, parent)
+        assert owner == "appuser:appuser", (
+            f"{key}.base_dir({base_dir})의 상위 `{parent}`를 이미지가 appuser에게 "
+            f"넘기지 않는다(최종 소유자: {owner}). uid 999는 그 아래에 디렉터리를 "
+            "만들 수 없고, 모든 run이 PermissionError로 죽는다."
+        )
+
+
+@pytest.mark.unit
+def test_the_host_dev_stack_rebases_every_declared_local_write_path() -> None:
+    """`admin:stack`은 같은 `dagster.yaml`을 호스트에 설치한다 — 경로를 옮겨야 한다.
+
+    `scripts/run-admin-stack.sh`는 `docker/dagster.yaml`을 **바이트 그대로** 호스트
+    `DAGSTER_HOME`에 깔고 dagster-webserver/daemon을 호스트 프로세스로 띄운다.
+    그런데 그 안의 `base_dir`는 이미지가 만든 `/opt/dagster/state` 아래이고, 호스트의
+    비-root dev 사용자는 `/opt`에 디렉터리를 만들 수 없다. 두 key가 없던 시절에는
+    Dagster가 기본값 `$DAGSTER_HOME/storage`를 썼으므로 **동작이 바뀐 것**이다.
+
+    그래서 설치 뒤 두 경로를 호스트 자리로 옮긴다. 이 검사는 `dagster.yaml`이
+    선언한 key 집합에서 요구를 유도한다 — 나중에 세 번째 로컬 쓰기 축이 생기면
+    그것도 함께 빨개진다.
+    """
+    script = _script("scripts/run-admin-stack.sh")
+    install_at = script.find('install -m 0644 "$ROOT_DIR/docker/dagster.yaml"')
+    assert install_at >= 0, "admin:stack이 dagster.yaml을 설치하지 않는다 — 파서가 낡았다"
+
+    rebase = script[install_at:]
+    for key in _local_write_base_dirs():
+        assert f"'{key}'" in rebase or f'"{key}"' in rebase, (
+            f"admin:stack이 `{key}`를 호스트 자리로 옮기지 않는다. 컨테이너 전용 "
+            "절대경로가 호스트 Dagster에 그대로 먹여져 run 상세를 여는 것만으로 "
+            "PermissionError가 난다."
+        )
+    assert '"$DAGSTER_HOME_DIR"' in rebase
+
+
 @pytest.mark.unit
 def test_sealed_validator_accepts_the_config_this_repo_actually_ships() -> None:
     """`docker/dagster.yaml`은 `_validate_dagster_config`를 통과해야 한다.

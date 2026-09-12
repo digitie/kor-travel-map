@@ -750,6 +750,42 @@ DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
 mkdir -p "$DAGSTER_HOME_DIR"
 install -m 0644 "$ROOT_DIR/docker/dagster.yaml" "$DAGSTER_HOME_DIR/dagster.yaml"
 
+# 로컬 쓰기 두 축만 호스트 자리로 옮긴다. storage(postgres)는 그대로 공유한다.
+#
+# `docker/dagster.yaml`의 `local_artifact_storage`/`compute_logs`는 이미지가
+# appuser에게 넘긴 `/opt/dagster/state` 아래를 가리킨다(#1216). 그 디렉터리는
+# 이미지 안에만 있고 호스트의 비-root dev 사용자는 `/opt`에 만들 수 없다 —
+# 그대로 두면 webserver가 run 상세를 여는 것만으로 `ensure_dir`이
+# PermissionError를 낸다. 두 key가 없던 시절 호스트가 쓰던 기본값
+# (`$DAGSTER_HOME/storage`)과 같은 자리로 되돌리는 것이다.
+#
+# 컨테이너 쪽 봉인(`_validate_dagster_config`)은 그 절대경로를 계속 요구한다.
+# 그래서 여기서 바꾸기 **전에** 그 값이 맞는지 확인한다 — 봉인이 움직이면
+# 이 rebase도 함께 빨개져야 한다.
+"$PYTHON_BIN" - "$DAGSTER_HOME_DIR" <<'KTM_DAGSTER_REBASE'
+import pathlib
+import sys
+
+import yaml
+
+home = pathlib.Path(sys.argv[1]).resolve()
+path = home / 'dagster.yaml'
+config = yaml.safe_load(path.read_text(encoding='utf-8'))
+for key, leaf in (
+    ('local_artifact_storage', 'artifacts'),
+    ('compute_logs', 'compute_logs'),
+):
+    section = config[key]['config']
+    if not str(section['base_dir']).startswith('/opt/dagster/state/'):
+        raise SystemExit(f'{key}.base_dir is not the sealed container path')
+    section['base_dir'] = str(home / leaf)
+path.write_text(
+    yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+    encoding='utf-8',
+)
+print(f'dagster local writes rebased under {home}')
+KTM_DAGSTER_REBASE
+
 # dev 기본은 내부 주소(127.0.0.1) 바인드다. Windows Playwright e2e처럼 WSL 밖에서
 # 접근해야 하는 경우에만 KOR_TRAVEL_MAP_*_BIND_HOST=0.0.0.0으로 명시 opt-in한다
 # (docs/dev-environment.md §dev/prod 구분).
