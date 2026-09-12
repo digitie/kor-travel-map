@@ -1,5 +1,55 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-12 — 같은 집합을 각자 들고 있으면 언젠가 어긋난다
+
+`T-VN-DAGSTER-STORAGE`를 고친 #1216이 prod rebuild를 깼다. 고침이 결함이 된 경위를
+적는다 — 코드보다 **검사의 모양**에 관한 이야기다.
+
+### 두 파일이 같은 집합을 각자 들고 있었다
+
+`docker/dagster.yaml`의 최상위 key 집합과, `docker/dagster-storage-migrate.py`의
+`_validate_dagster_config`가 요구하는 key 집합. 이 둘은 같아야 하는데 서로를 본 적이
+없다. #1216이 한쪽에 `local_artifact_storage`/`compute_logs`를 더하자 다른 쪽이
+`dagster_storage_target_not_sealed`로 거절했고, 그 사실은 CI에서가 아니라 **prod
+rebuild가 스택을 내린 뒤**에 드러났다.
+
+### 검사는 있었다. 통과하는 쪽을 안 봤을 뿐이다
+
+`test_dagster_storage_rejects_alternate_top_level_storage_keys`는 실제
+`dagster.yaml`을 읽는다. 그런데 그것이 보는 것은 **거절되는 것**이다 — 임의의 key를
+더해 거절을 확인한다. 두 파일이 어긋나면 그 거절은 **이유만 바뀐 채 여전히
+일어난다.** 항진명제다.
+
+어긋남을 보려면 **통과하는 것**을 봐야 한다. 배에 실리는 config가 봉인 검사기를
+통과하는지 보는 검사 하나를 심었더니, 변이에서 정확히 그것 하나만 빨갛다:
+
+    ① 수정본 전체                    : 42 passed
+    ② 검사기만 5-key 봉인으로 되돌림 : 1 failed, 41 passed
+    ③ config에서 compute_logs 제거   : 4 failed, 38 passed
+
+②가 핵심이다. 같은 두 파일을 읽는 기존 41건이 어긋남에 눈이 멀어 있었다.
+
+### 진단이 두 번 틀렸다
+
+**한 번은 추론을 증거로 착각했다.** 실패 단계를 Manager 소스의 phase 목록에서
+읽고 "`map_dagster_storage_intent_durable`이 실패했다"고 적었다. 영수증에는 그런
+말이 없었다 — `{"status":"failed","classification":"unclassified"}` 한 줄과 0바이트
+stderr뿐이었다. 나중에 docker daemon 로그가 실제로 그 단계임을 확정해 주었지만,
+그때 내가 한 것은 확인이 아니라 짐작이었다.
+
+**한 번은 자기 자신에게 막혔다.** 삼켜진 원문을 회수하려고 `--json` 없이 CLI를
+돌렸는데, lock을 잡기만 하고 launcher처럼 FD를 넘기지 않았다. `c6c_deployment_lock`이
+새로 잡으려다 내 flock에 막혀 "another C6c compatible-pair operation is already
+active"를 냈다. 하마터면 그것을 원인으로 적을 뻔했다 — **내가 만든 사실을 세상의
+사실로 읽는 것**이 이 세션에서 두 번째다(어제는 pair contract v1 거절이 그랬다).
+
+### 원문을 삼키는 계약
+
+`--json` 경로는 봉인 밖 실패의 원문을 내지 않는다. 노출 계약으로서는 옳지만,
+launcher가 그 경로만 쓰므로 **운영자가 이유를 볼 방법이 없다.** 이번에는 같은 CLI를
+비-JSON으로 한 번 더 돌려 회수했다. 47초짜리 실행이면 값싸지만, 70분짜리였다면
+같은 값을 두 번 치렀을 것이다.
+
 ## 2026-09-11 — 결함을 만든 자리와 그것을 가린 자리는 따로 있었다
 
 T-VN-39가 착지했다(#1197). 마지막 두 라운드에서 배운 것을 적는다.

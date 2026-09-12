@@ -1890,6 +1890,18 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
    generation이 바뀔 때 함께 따라오는 것이 증적으로 보인다.
 3. 이 축을 재는 검사가 있다 — 지금은 "컨테이너가 healthy"만 보고 "run이 완주한다"는
    아무도 보지 않는다. healthy와 실행 가능은 다른 사실이다.
+4. 봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다 — 같은 key 집합을 각자
+   들고 있으면서 CI가 어긋남을 못 보는 상태가 아니어야 한다. 2026-09-12에 정확히
+   그 상태가 prod 스택을 내렸다.
+5. **UI에서 step의 stdout/stderr가 보인다.** 지금은 한 세대 안에서도 비어 있다 —
+   `dagster`(webserver)와 `dagster-daemon`이 각자 code location을 안고 도는 별개
+   컨테이너이고 `/opt/dagster/state`에 공유 volume이 없다. `DefaultRunLauncher`가
+   띄우는 run worker는 daemon 컨테이너의 자기 경로에 쓰고, webserver는 자기
+   컨테이너의 같은 경로를 읽는데 거기엔 아무것도 없다(없으면 `ensure_dir`이 빈
+   디렉터리를 만들어 그것을 watch한다). **"run이 왜 죽었나"를 UI로 확인하는 경로가
+   없다** — 이번 사고를 가린 것과 같은 종류의 맹점이다. 공유 named volume 하나로
+   조문 5와 아래 "알려진 한계"가 함께 닫히지만, compose는 pinned runtime 표면이라
+   prod가 복구된 뒤 별도 사이클에서 검사부터 붙여 넣는다.
 
 **무엇이 관측됐나 — 2026-09-11.**
 
@@ -1927,6 +1939,36 @@ generation에서 그것이 붙지 않았다.
 
 **조문 3이 그 구멍을 겨냥한다.** 배포 사후점검은 컨테이너 healthy와 정본/실물 image
 일치를 보지만, "run이 완주한다"는 보지 않는다. 그 둘은 다른 사실이다.
+
+**무엇이 관측됐나 — 2026-09-12. 고침이 결함이 됐다.**
+
+#1216(`dagster.yaml`에 `local_artifact_storage`/`compute_logs` 선언)이 머지된 뒤 첫
+회전 사이클이 prod 스택을 내린 상태에서 죽었다. `docker/dagster-storage-migrate.py`의
+`_validate_dagster_config`가 최상위 key 집합을 **정확히 5개로** 봉인하고 있었다.
+
+    06:34:05  …kor-travel-map-dagster-storage-migrate-run-dc953676ad41  기동
+    06:34:07  task-delete                                              (2초)
+    06:34:09  pinned runtime rebuild Compose run command failed (exit 1)
+
+#1219가 봉인을 그 둘만큼 넓히되, 두 `base_dir`가 이미지가 appuser에게 넘긴
+`/opt/dagster/state` 안인지까지 본다 — key를 허용하는 것으로 끝내면 "로컬로 새지
+않는다"는 봉인의 뜻이 그 구멍으로 빠져나간다.
+
+**조문 4 — 봉인 검사기와 배에 실리는 config가 서로를 본다.** 기존
+`test_dagster_storage_rejects_alternate_top_level_storage_keys`는 실제 `dagster.yaml`을
+읽으면서도 이 어긋남을 못 잡았다. **거절되는 것**만 보기 때문이다 — 두 파일이
+어긋나면 그 거절은 이유만 바뀐 채 여전히 일어난다. #1219가 **통과하는 것**을 보는
+검사를 심었고, 변이 ②(검사기만 되돌림)에서 그 하나만 빨갛다.
+
+**알려진 한계.** `/opt/dagster/state`에는 volume이 없다. artifact와 compute log는
+컨테이너 재생성마다 사라지고, 애초에 컨테이너 경계를 넘지도 못한다(조문 5).
+run/event/schedule storage는 postgres이므로 조문 1·2에는 영향이 없다.
+
+**호스트 dev 스택도 같은 파일을 읽는다.** `scripts/run-admin-stack.sh`가
+`docker/dagster.yaml`을 바이트 그대로 호스트 `DAGSTER_HOME`에 깐다. #1216의
+`base_dir`는 이미지 안에만 있는 경로라 그대로 두면 dev에서 같은 PermissionError가
+난다. #1219가 설치 뒤 두 경로만 `$DAGSTER_HOME` 아래로 옮기고, 그 요구를
+`dagster.yaml`이 선언한 key 집합에서 유도하는 검사를 붙였다.
 
 ## T-VN-D2-RESIDUE
 

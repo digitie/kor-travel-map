@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 import subprocess
@@ -41,6 +42,8 @@ _PERMIT_PAIRED_RECEIPT_ENV: Final = (
 _PERMIT_CONFIG_SHA256_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256"
 _DAGSTER_HOME: Final = Path("/opt/dagster/dagster_home")
 _DAGSTER_YAML: Final = _DAGSTER_HOME / "dagster.yaml"
+#: 이미지가 appuser에게 넘긴 유일한 쓰기 자리(`dagster.Dockerfile`).
+_LOCAL_STATE_ROOT: Final = "/opt/dagster/state"
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-dagster-storage-permit/permit.json")
 _PERMIT_SCHEMA: Final = "kor-travel-map.dagster-storage-database-permit.v2"
 _IDENTITY_SCHEMA: Final = "kor-travel-map.dagster-storage-database-identity.v1"
@@ -134,10 +137,21 @@ def _validate_dagster_config(raw: bytes) -> None:
             "storage",
             "concurrency",
             "run_monitoring",
+            # 로컬 쓰기 두 축. 선언하지 않으면 Dagster가 기본값인
+            # `$DAGSTER_HOME/storage`를 쓰려 하는데 그 트리는 root 소유 봉인이고
+            # 컨테이너는 uid 999다 — run이 PermissionError로 죽는다(2026-09-11 실측:
+            # 이 prod에서 성공한 run이 하나도 없었다). 아래에서 두 경로가 appuser
+            # 소유 state 안에 있는지까지 본다.
+            "local_artifact_storage",
+            "compute_logs",
         }:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         storage = config["storage"]
         postgres = storage["postgres"]
+        local_base_dirs = (
+            config["local_artifact_storage"]["config"]["base_dir"],
+            config["compute_logs"]["config"]["base_dir"],
+        )
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
         raise DagsterStorageMigrationError("invalid_dagster_yaml") from exc
     if storage != {
@@ -150,6 +164,19 @@ def _validate_dagster_config(raw: bytes) -> None:
         "should_autocreate_tables": False,
     }:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # 봉인의 뜻은 "로컬로 새지 않는다"이다. 키를 허용하는 것으로 끝내면 그 뜻이
+    # 빠져나가므로, 두 경로가 이미지가 appuser에게 넘긴 state 안에 있는지 본다.
+    #
+    # 접두 비교만으로는 부족하다 — `/opt/dagster/state/../dagster_home/storage`가
+    # 통과한다. 그 문자열이 권한을 주지는 않지만(config는 root 0444이고 sha256이
+    # 핀이다) 이 검사가 잡으려는 것은 공격이 아니라 **오설정**이고, 오설정은 정확히
+    # 그런 모양으로 온다. 그래서 사전적으로 정규화한 뒤 본다.
+    for base_dir in local_base_dirs:
+        if not isinstance(base_dir, str) or not base_dir.startswith("/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        resolved = posixpath.normpath(base_dir)
+        if not resolved.startswith(f"{_LOCAL_STATE_ROOT}/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 
 def _validate_root_owned_directory(metadata: os.stat_result) -> None:
