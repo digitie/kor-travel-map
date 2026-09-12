@@ -70,22 +70,59 @@ concurrency:
   runs:
     max_concurrent_runs: 10
 
-# **tick 이력에 상한을 준다.**
+# **상한이 없던 tick에만 상한을 준다.**
 #
-# 2026-09-12 실측에서 `job_ticks`가 이미 metadata DB의 **가장 큰 표**였다
-# (2,504 kB / 1,508행, 스택이 올라온 뒤 두 시간 만에). 분 단위 schedule이 하나
-# 돌고 있으므로 하루 ~1,440행씩 늘어난다. weather는 같은 host에서 디스크를 한 번
-# 소진한 뒤 이 설정을 넣었다.
+# 처음에는 양쪽에 `purge_after_days: 14`를 주었다. 그것이 **틀렸다.** Dagster의
+# 기본값이 두 축에서 반대 부호이기 때문이다(`get_default_tick_retention_settings`):
 #
-# **이것이 덮지 않는 것**: `retention`은 schedule/sensor **tick**만 지운다. `runs`와
-# `event_logs`는 그대로 늘어난다. 지금 prod에서 그것이 터지지 않는 이유는 파괴적
-# rebuild가 배포마다 metadata DB를 비우기 때문이고, 그것은 보증이 아니다 — run 이력
-# 자체의 상한은 별도 과제다.
+#   schedule : STARTED/SKIPPED/SUCCESS/FAILURE 전부 -1 (영구 보존)
+#   sensor   : SKIPPED 7일, 나머지 -1
+#
+# 그리고 bare int는 **네 status 전부**에 적용된다. 즉 sensor에 14를 주는 것은 이미
+# 7일로 지워지고 있던 것을 14일로 **늘리는** 일이다. 2026-09-12 prod 실측으로
+# 그것이 무엇을 뜻하는지가 분명해졌다:
+#
+#   SENSOR   / SKIPPED   18.40 행/분  ≈ 26,500/일   ← 전체 tick의 93%
+#   SCHEDULE / 전체       ~1.0 행/분  ≈  1,440/일
+#
+# sensor SKIPPED를 7 → 14로 올리면 정상상태가 ~185k → ~371k행이 된다. schedule 쪽에
+# 새로 생긴 상한이 그 +186k를 상쇄하려면 연속 가동 ~129일이 필요한데, 파괴적
+# rebuild 주기는 그보다 훨씬 짧다 — **모든 현실적 구간에서 표를 키운다.**
+#
+# 그래서 여기서 배운 것을 먼저 적는다. **`job_ticks`가 가장 큰 표인 것은 retention
+# 구멍이 아니었다.** 지배 성분에는 이미 상한이 있었고, 크기의 원인은 sensor 10개가
+# 15~30초마다 tick하며 대부분 skip하는 **비율**이다. 그 비율을 줄이는 것(sensor
+# 간격·개수)은 이 파일이 아니라 정의 쪽 문제이고 별도 과제다.
+#
+# 이 블록이 실제로 닫는 것은 **상한이 아예 없던 것들**이다 — schedule의 네 status
+# 전부와 sensor의 SKIPPED 아닌 세 status. sensor SKIPPED는 기본값 7을 **명시적으로
+# 그대로** 둔다: 값을 바꾸지 않지만, 다음 사람이 bare int로 덮어써 같은 실수를
+# 반복하지 않도록 자리를 차지해 둔다.
+#
+# **이것이 덮지 않는 것 둘.**
+#
+# 1. `runs`와 `event_logs`. `retention`은 tick만 지운다.
+# 2. **끈 schedule/sensor의 tick.** purge는 tick context가 닫힐 때 그 instigator의
+#    `selector_id`로 범위가 좁혀진 DELETE라, 더 이상 tick하지 않는 instigator의
+#    과거 행은 며칠이 지나도 지워지지 않는다. `schedules.py`의
+#    `DISABLED_FEATURE_LOAD_SCHEDULES`가 2026-09-09에 제거한 6개 schedule의 이력이
+#    그 상태다. 그 잔존분을 실제로 비우는 것은 (1)과 같은 자리의 별도 과제다.
 retention:
   schedule:
+    # 기본값 -1(영구) → 14. 여기가 실재하던 구멍이다.
     purge_after_days: 14
   sensor:
-    purge_after_days: 14
+    # status별로 내린다. bare int를 쓰면 SKIPPED까지 함께 움직여 지배 성분을
+    # 키운다 — 위 실측이 그것이다.
+    purge_after_days:
+      # 기본값 그대로. 바꾸지 않는다는 것을 명시하려고 적는다.
+      skipped: 7
+      # 아래 셋은 기본값이 -1(영구)이었다. 여기가 닫는 구멍이다.
+      success: 14
+      started: 14
+      # 실패는 더 오래 본다. 사후 판독의 유일한 근거이고 양이 적다
+      # (SENSOR/FAILURE 실측 34행 / 2h37m).
+      failure: 30
 
 # 컨테이너 재시작으로 worker process만 사라지고 metadata가 STARTED/STARTING에
 # 남으면 queued-run 동시성 슬롯을 영구 점유한다. MOIS처럼 정상적으로 2시간을 넘는

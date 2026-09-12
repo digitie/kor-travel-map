@@ -127,6 +127,25 @@ def _dagster_storage_head() -> str:
     return heads[0]
 
 
+def _bounded_tick_retention(value: object) -> bool:
+    """tick 보존 설정이 **모든 status에 유한 상한**을 주는지 본다.
+
+    Dagster는 두 모양을 받는다(`_tick_retention_config_schema`) — bare int는 네
+    status 전부에, dict는 적힌 status에만 적용된다. 그리고 적지 않은 status의
+    기본값은 `-1`(영구 보존)이라, dict를 쓰면서 status 하나를 빼먹으면 그 종류는
+    상한이 없는 채로 남는다. 그것이 조용히 통과하면 이 봉인의 뜻이 사라진다.
+
+    그래서 dict 형태는 **네 status가 모두 있어야** 통과한다.
+    """
+    if type(value) is int:
+        return value >= 1
+    if not isinstance(value, dict):
+        return False
+    if set(value) != {"skipped", "success", "started", "failure"}:
+        return False
+    return all(type(days) is int and days >= 1 for days in value.values())
+
+
 def _validate_dagster_config(raw: bytes) -> None:
     """Dagster storage target이 canonical DSN env 외에는 읽지 못하게 한다."""
     try:
@@ -196,15 +215,20 @@ def _validate_dagster_config(raw: bytes) -> None:
     run_limit = runs["max_concurrent_runs"]
     if type(run_limit) is not int or run_limit < 1:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
-    # tick 이력의 상한. 둘 중 하나가 없으면 그 종류는 무한히 늘어난다.
-    if set(retention) != {"schedule", "sensor"}:
+    # tick 이력의 상한.
+    #
+    # `concurrency`와 **같은 강도로** 가드한다. 종전에는 `isinstance` 없이
+    # `set(retention)`을 불러, `retention: null` 같은 흔한 오편집이
+    # `DagsterStorageMigrationError`가 아니라 맨 `TypeError`로 새어 나갔다 —
+    # `main()`이 잡지 않으므로 배포 래퍼가 읽는 JSON 오류 봉투를 잃는다.
+    # fail-close는 유지되지만 다음 사람은 "봉인 실패"가 아니라 "스크립트 버그"를 본다.
+    if not isinstance(retention, dict) or set(retention) != {"schedule", "sensor"}:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
     for kind in ("schedule", "sensor"):
         section = retention[kind]
         if not isinstance(section, dict) or set(section) != {"purge_after_days"}:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
-        days = section["purge_after_days"]
-        if type(days) is not int or days < 1:
+        if not _bounded_tick_retention(section["purge_after_days"]):
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 

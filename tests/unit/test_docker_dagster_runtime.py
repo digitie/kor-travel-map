@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import os
@@ -18,8 +19,15 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from dagster._core.instance.config import dagster_instance_config
+from dagster._core.definitions.run_request import InstigatorType
+from dagster._core.instance.config import (
+    ConcurrencyConfig,
+    dagster_instance_config,
+    get_default_tick_retention_settings,
+    get_tick_retention_settings,
+)
 from dagster._core.instance.ref import InstanceRef
+from dagster._core.run_coordinator.queued_run_coordinator import QueuedRunCoordinator
 
 ROOT = Path(__file__).resolve().parents[2]
 _CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
@@ -1138,8 +1146,6 @@ def test_the_shipped_dagster_config_passes_dagsters_own_validator(
     home.mkdir()
     shutil.copyfile(ROOT / "docker" / "dagster.yaml", home / "dagster.yaml")
 
-    # 파싱만이 아니라 **해석까지** 본다. `dagster_instance_config`는 상호 배타
-    # 검증을 돌고, `InstanceRef.from_dir`는 configurable class를 실제로 조립한다.
     config, custom_instance_class = dagster_instance_config(str(home))
     reference = InstanceRef.from_dir(str(home))
 
@@ -1151,14 +1157,28 @@ def test_the_shipped_dagster_config_passes_dagsters_own_validator(
     # `DAGSTER_HOME` 아래 SQLite로 조용히 떨어지고, SQLite는 동시 writer를 하나만
     # 받는다 — 형제 저장소 weather에서 그것이 `database is locked`로 나타나
     # 종결 이벤트를 잃은 run이 `STARTED`로 영구히 남았다.
-    assert reference.run_storage_data.class_name == "PostgresRunStorage"
-    assert reference.event_storage_data.class_name == "PostgresEventLogStorage"
-    assert reference.schedule_storage_data.class_name == "PostgresScheduleStorage"
+    #
+    # **그리고 이름이 실재하는 클래스인지까지 본다.** `InstanceRef.from_dir`는
+    # `ConfigurableClassData` — 모듈명과 클래스명 **문자열** — 만 만든다. import는
+    # `rehydrate()`에서만 일어나고 `from_dir`는 그것을 부르지 않는다. 그래서
+    # class_name 단언만으로는 `dagster_postgres`가 이미지 의존에서 빠져도, 모듈이
+    # 개명돼도 초록이다 — prod daemon은 rehydrate에서 죽는데 CI는 모른다.
+    # `rehydrate()` 자체는 engine을 만들고 접속하므로 CI에서 쓸 수 없다. 접속 없이
+    # **import와 속성 조회만** 태운다.
+    for data, expected in (
+        (reference.run_storage_data, "PostgresRunStorage"),
+        (reference.event_storage_data, "PostgresEventLogStorage"),
+        (reference.schedule_storage_data, "PostgresScheduleStorage"),
+    ):
+        assert data is not None
+        assert data.class_name == expected, (data.module_name, data.class_name)
+        module = importlib.import_module(data.module_name)
+        assert isinstance(getattr(module, data.class_name), type), data
 
 
 @pytest.mark.unit
-def test_the_run_queue_limit_is_declared_and_load_bearing() -> None:
-    """동시 실행 상한을 암묵 기본값에 맡기지 않는다.
+def test_the_run_queue_limit_is_declared_and_load_bearing(tmp_path: Path) -> None:
+    """동시 실행 상한을 암묵 기본값에 맡기지 않는다 — 그리고 그것이 실제로 지배한다.
 
     이 값을 선언하지 않아도 Dagster는 `QueuedRunCoordinator`로 큐를 돌린다 —
     `InstanceRef.from_dir`의 기본값이다. 즉 큐는 선언 여부와 무관하게 이미
@@ -1170,58 +1190,110 @@ def test_the_run_queue_limit_is_declared_and_load_bearing() -> None:
     "돌지 않는 run"으로 가득 차 daemon이 "Maximum is 10, won't launch more"만
     적는다. 두 번째에는 시간별 수집이 18시간 멈췄다.
 
-    그리고 **선언이 실제로 지배하는지**를 본다. 값이 기본값과 같으면 선언의
-    존재만으로는 구분되지 않는다 — 다른 값으로 한 번 해석해 그것이 따라오는지
-    확인한다. 이것이 없으면 이 검사는 "우리가 10을 적었다"만 말하고, Dagster가
-    그것을 읽는지는 말하지 않는다.
+    **이 검사의 첫 판은 항진명제였다.** yaml을 직접 조작하고 자기가 만든 헬퍼로
+    되읽어 "선언이 지배한다"고 적었는데, 그것은 "dict에 넣은 값을 dict에서 읽으면
+    같다"에 불과했다 — Dagster 코드가 한 줄도 돌지 않았다. 적대 리뷰가 네 렌즈에서
+    독립적으로 그것을 잡았다. 지금은 Dagster의 실제 resolver
+    (`ConcurrencyConfig.from_concurrency_settings`)를 태운다.
+
+    그때 박아 둔 불변식 하나도 틀렸다 — "`runs`를 지우면 `None`"이라고 적었지만
+    실제로는 `QueuedRunCoordinator`의 버전 기본값으로 **되돌아간다**(실측: 10).
+    그래서 지금은 기본값과도 배포값과도 다른 탐침값으로 그 차이를 본다.
+
+    coordinator class도 함께 박는다. 비-queued coordinator로 바뀌면
+    `ConcurrencyConfig`가 `run_queue_config = None`을 만들고 `concurrency > runs`는
+    **스키마상 유효한 죽은 설정**이 된다 — 그 상태로 조용히 되돌아가지 않게 한다.
     """
     raw = (ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8")
     config = yaml.safe_load(raw)
-
-    limit = config["concurrency"]["runs"]["max_concurrent_runs"]
-    assert type(limit) is int and limit >= 1, limit
-    # `run_coordinator`에 두면 Dagster가 거부한다 — 상호 배타다.
+    declared = config["concurrency"]["runs"]["max_concurrent_runs"]
+    assert type(declared) is int and declared >= 1, declared
+    # `run_coordinator`에 두면 Dagster가 거부한다 — `pools`와 상호 배타다.
     assert "run_coordinator" not in config, config.get("run_coordinator")
 
-    def resolved(document: dict[str, object]) -> object:
-        settings = document.get("concurrency")
-        assert isinstance(settings, dict)
-        runs = settings.get("runs")
-        return runs.get("max_concurrent_runs") if isinstance(runs, dict) else None
+    def resolve(concurrency: dict[str, Any]) -> int | None:
+        queue = ConcurrencyConfig.from_concurrency_settings(
+            concurrency, QueuedRunCoordinator().get_run_queue_config()
+        ).run_queue_config
+        return None if queue is None else queue.max_concurrent_runs
 
+    assert resolve(config["concurrency"]) == declared
+
+    # 선언한 값이 지배하는지 — 버전 기본값과도, 배포값과도 다른 탐침값으로 본다.
+    probe_value = declared + 3
     probe = yaml.safe_load(raw)
-    probe["concurrency"]["runs"]["max_concurrent_runs"] = limit + 3
-    assert resolved(probe) == limit + 3
+    probe["concurrency"]["runs"]["max_concurrent_runs"] = probe_value
+    assert resolve(probe["concurrency"]) == probe_value
+
+    # 지우면 파일이 정본이 아니게 된다 — 버전 기본값으로 되돌아간다.
     dropped = yaml.safe_load(raw)
     del dropped["concurrency"]["runs"]
-    assert resolved(dropped) is None, (
-        "`concurrency > runs`를 지워도 상한이 남는다면 이 파일은 정본이 아니다"
+    assert resolve(dropped["concurrency"]) != probe_value, (
+        "`concurrency > runs`를 지워도 탐침값이 남는다면 이 파일은 정본이 아니다"
+    )
+
+    # coordinator가 queued가 아니면 위 상한은 죽은 설정이 된다.
+    #
+    # `from_dir`은 저장소 디렉터리에 직접 걸지 않는다 — 그 함수가 앞으로 무엇을
+    # 만들지에 이 검사가 의존하게 되면 안 된다. 임시 `DAGSTER_HOME`에 복사해 읽는다.
+    home = tmp_path / "queue_home"
+    home.mkdir()
+    shutil.copyfile(ROOT / "docker" / "dagster.yaml", home / "dagster.yaml")
+    reference = InstanceRef.from_dir(str(home))
+    assert reference.run_coordinator_data is not None
+    assert reference.run_coordinator_data.class_name == "QueuedRunCoordinator", (
+        reference.run_coordinator_data
     )
 
 
 @pytest.mark.unit
 def test_tick_history_has_an_upper_bound() -> None:
-    """schedule/sensor tick 이력이 무한히 늘어나지 않는다.
+    """상한이 **없던** tick에 상한을 준다 — 있던 것을 늘리지 않는다.
 
-    2026-09-12 실측에서 `job_ticks`가 이미 Dagster metadata DB의 **가장 큰
-    표**였다 — 스택이 올라온 뒤 두 시간 만에 2,504 kB / 1,508행. 분 단위
-    schedule이 하나 돌고 있으므로 하루 ~1,440행씩 늘어난다. 형제 저장소
-    weather는 같은 host에서 디스크를 한 번 소진한 뒤 이 설정을 넣었다.
+    처음에는 양쪽에 `purge_after_days: 14`를 주었다. 그것이 틀렸다. Dagster의
+    기본값이 두 축에서 반대 부호이기 때문이다(`get_default_tick_retention_settings`,
+    실측):
 
-    `retention`이 덮는 것은 **tick뿐**이다. `runs`와 `event_logs`는 그대로
-    늘어나고, 지금 그것이 터지지 않는 이유는 파괴적 rebuild가 배포마다 metadata
-    DB를 비우기 때문이다 — 그것은 보증이 아니다. 이 검사는 그 한계를 알고 있고,
-    run 이력 자체의 상한은 별도 과제다.
+        schedule : 네 status 전부 -1 (영구 보존)
+        sensor   : SKIPPED 7일, 나머지 -1
+
+    그리고 bare int는 **네 status 전부**에 적용된다. 즉 sensor에 14를 주는 것은
+    이미 7일로 지워지고 있던 것을 14일로 **늘리는** 일이다. 2026-09-12 prod 실측:
+
+        SENSOR   / SKIPPED   18.40 행/분   ← 전체 tick의 93%
+        SCHEDULE / 전체       ~1.0 행/분
+
+    sensor SKIPPED를 7 → 14로 올리면 정상상태가 ~185k → ~371k행이 된다. schedule
+    쪽 새 상한이 그 +186k를 상쇄하려면 연속 가동 ~129일이 필요한데 파괴적 rebuild
+    주기는 훨씬 짧다 — **모든 현실적 구간에서 표를 키운다.** 적대 리뷰가 두 렌즈에서
+    독립적으로 이것을 잡았다.
+
+    그래서 이 검사는 리터럴이 아니라 **부호**를 본다: 모든 status에 유한 상한이
+    있고, 기본값이 이미 유한했던 곳은 그보다 느슨해지지 않는다. 그리고 판정을
+    Dagster의 해석 함수(`get_tick_retention_settings`)에 맡긴다 — bare int든
+    status별 dict든 같은 규칙으로 재게 된다.
     """
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
-
     retention = config["retention"]
     assert set(retention) == {"schedule", "sensor"}, retention
-    for kind in ("schedule", "sensor"):
-        days = retention[kind]["purge_after_days"]
-        assert type(days) is int and days >= 1, (kind, days)
 
-
+    for kind, instigator in (
+        ("schedule", InstigatorType.SCHEDULE),
+        ("sensor", InstigatorType.SENSOR),
+    ):
+        default = get_default_tick_retention_settings(instigator)
+        resolved = get_tick_retention_settings(retention[kind], default)
+        assert set(resolved) == set(default), (kind, sorted(s.value for s in resolved))
+        for status, days in resolved.items():
+            assert days >= 1, (kind, status.value, days)
+            previous = default[status]
+            # 기본값이 유한했던 status는 그보다 늘리지 않는다. `-1`(영구)이던
+            # status는 어떤 유한값이든 개선이다.
+            if previous >= 1:
+                assert days <= previous, (
+                    f"{kind}/{status.value}: 기본값 {previous}일이 이미 유한했는데 "
+                    f"{days}일로 늘렸다 — 상한을 주는 자리에서 늘리면 반대 방향이다"
+                )
 @pytest.mark.unit
 def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
     script = _script("scripts/run-admin-stack.sh")
@@ -4576,6 +4648,97 @@ def test_sealed_validator_rejects_paths_that_only_look_like_the_state_root(
     module = _load_dagster_storage_module()
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
     config[key]["config"]["base_dir"] = escape
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+def test_sealed_validator_rejects_dropping_the_run_queue_limit() -> None:
+    """`concurrency > runs`가 사라지면 상한이 버전 기본값으로 돌아간다.
+
+    그 값이 무엇인지는 Dagster 버전이 정하고 우리는 모른다 — 형제 저장소
+    weather가 정확히 그 상태에서 두 번 멈췄다. 봉인이 그 복귀를 거부한다.
+    """
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    del config["concurrency"]["runs"]
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "limit",
+    [0, -1, None, "10", True],
+)
+def test_sealed_validator_rejects_a_run_queue_limit_that_is_not_a_positive_int(
+    limit: object,
+) -> None:
+    """상한이 정수가 아니거나 1 미만이면 큐 계약이 성립하지 않는다.
+
+    `True`도 거부한다 — `bool`은 `int`의 하위형이지만 `max_concurrent_runs: true`는
+    yaml 오편집이고 1로 해석되면 전체 파이프라인이 직렬화된다.
+    """
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    config["concurrency"]["runs"]["max_concurrent_runs"] = limit
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda c: c.pop("retention"), id="retention-dropped"),
+        pytest.param(lambda c: c.update(retention=None), id="retention-null"),
+        pytest.param(lambda c: c.update(retention=14), id="retention-scalar"),
+        pytest.param(
+            lambda c: c.update(retention=["schedule", "sensor"]), id="retention-list"
+        ),
+        pytest.param(lambda c: c["retention"].pop("sensor"), id="sensor-dropped"),
+        pytest.param(lambda c: c["retention"].pop("schedule"), id="schedule-dropped"),
+        pytest.param(
+            lambda c: c["retention"]["sensor"].__setitem__("purge_after_days", 0),
+            id="zero-days",
+        ),
+        pytest.param(
+            lambda c: c["retention"]["sensor"]["purge_after_days"].pop("failure"),
+            id="status-missing",
+        ),
+        pytest.param(
+            lambda c: c["retention"]["schedule"].__setitem__("purge_after_days", -1),
+            id="keep-forever",
+        ),
+    ],
+)
+def test_sealed_validator_rejects_unbounded_tick_retention(
+    mutate: object,
+) -> None:
+    """tick 보존은 **모든 status에 유한 상한**이어야 한다.
+
+    두 모양이 다 유효하다 — bare int는 네 status 전부에, dict는 적힌 status에만
+    적용된다. 그리고 적지 않은 status의 기본값은 `-1`(영구 보존)이라, dict를
+    쓰면서 status 하나를 빼먹으면 그 종류는 상한 없이 남는다. `status-missing`
+    변이가 그것을 잰다.
+
+    `retention-null`/`retention-scalar`/`retention-list`는 오류 **코드**를 잰다.
+    종전에는 `isinstance` 가드가 없어 이 셋이 `DagsterStorageMigrationError`가
+    아니라 맨 `TypeError`로 새어 `main()`의 JSON 오류 봉투를 건너뛰었다 —
+    배포 래퍼가 분류 코드를 잃는다.
+    """
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    mutate(config)  # type: ignore[operator]
 
     with pytest.raises(module.DagsterStorageMigrationError) as caught:
         module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
