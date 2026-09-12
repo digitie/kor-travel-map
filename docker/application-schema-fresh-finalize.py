@@ -467,16 +467,16 @@ async def _assert_raw_300_and_receipts(
                 )
             ).all()
         )
-        catalog = await module.contract_sha256(  # type: ignore[attr-defined]
+        catalog = await module.contract_sha256(
             connection, "application-catalog.sql"
         )
-        seed = await module.contract_sha256(  # type: ignore[attr-defined]
+        seed = await module.contract_sha256(
             connection, "application-seed.sql"
         )
-        destination_alembic_version = await module.contract_sha256(  # type: ignore[attr-defined]
+        destination_alembic_version = await module.contract_sha256(
             connection, "application-destination-alembic-version.sql"
         )
-        await module.verify_runtime_projection_invariants(  # type: ignore[attr-defined]
+        await module.verify_runtime_projection_invariants(
             connection
         )
     except Exception as exc:
@@ -593,6 +593,9 @@ async def _find_operation_receipt(
         ).mappings().one_or_none()
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
+    # `RowMapping`은 이 SQLAlchemy 버전의 스텁에서 `Mapping[str, Any]`의 하위형이
+    # 아니다. 반환 타입을 넓히는 대신 실제 타입을 적는다 — 호출자가 무엇을 받는지
+    # 정확히 말하는 쪽이 계약으로서 낫다.
     return row
 
 

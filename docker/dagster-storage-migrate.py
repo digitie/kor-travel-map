@@ -1077,6 +1077,12 @@ def _dagster_metadata_contract() -> tuple[
             )
             table_indexes = {str(index.name) for index in table.indexes if index.name}
             for constraint in table.constraints:
+                # `.columns`는 `ColumnCollectionConstraint` 계열에만 있다. 좁히기
+                # **전에** 읽으면 base `Constraint`에 없는 속성을 만진다 — 지금은
+                # CHECK 제약이 없어 터지지 않을 뿐이고, 하나 추가되는 순간 런타임
+                # AttributeError다. 아래 두 분기가 실제로 쓰는 것만 좁혀서 읽는다.
+                if not isinstance(constraint, PrimaryKeyConstraint | UniqueConstraint):
+                    continue
                 constraint_columns = tuple(str(column.name) for column in constraint.columns)
                 if isinstance(constraint, PrimaryKeyConstraint) and constraint_columns:
                     table_indexes.add(
@@ -1263,7 +1269,9 @@ def _validate_intent(
 
 
 def _read_intent(connection: Any, operation_id: str) -> Mapping[str, Any] | None:
-    return connection.execute(
+    # `connection`이 `Any`라 결과도 `Any`다. 그대로 돌려주면 호출자에게 `Any`가
+    # 전파돼 이 함수의 반환 계약이 아무것도 말하지 않는다. 경계에서 한 번 선언한다.
+    row: Mapping[str, Any] | None = connection.execute(
         text(
             f"SELECT operation_id::text, permit_sha256, candidate_sha256, target_head, "
             "pre_state, pre_version_rows, database_name, database_oid, database_owner, "
@@ -1275,7 +1283,9 @@ def _read_intent(connection: Any, operation_id: str) -> Mapping[str, Any] | None
 
 
 def _read_receipt(connection: Any, operation_id: str) -> Mapping[str, Any] | None:
-    return connection.execute(
+    # `connection`이 `Any`라 결과도 `Any`다. 그대로 돌려주면 호출자에게 `Any`가
+    # 전파돼 이 함수의 반환 계약이 아무것도 말하지 않는다. 경계에서 한 번 선언한다.
+    row: Mapping[str, Any] | None = connection.execute(
         text(
             f"SELECT operation_id::text, result_schema, result_sha256, final_head, "
             f"result_payload FROM {_RECEIPT_TABLE} "

@@ -59,6 +59,9 @@ dev = [
   # geocoding.py는 httpx를 TYPE_CHECKING-only로 import (런타임 의존 아님,
   # 호출자 주입 — ADR-006/044). mypy --strict가 stub를 찾도록 dev에만 둔다.
   "httpx>=0.27",
+  # `docker/*.py`(prod 이미지에 구워지는 스크립트)가 yaml을 읽는다. mypy --strict가
+  # stub 없이는 그 파일 전체를 검사하지 못한다 — 런타임 의존이 아니라 검사 의존이다.
+  "types-PyYAML>=6",
 ]
 # REST API는 별도 패키지로 분리 (ADR-055):
 #   `packages/kor-travel-map-api/`. FastAPI/Uvicorn 의존성은 거기 있다.
