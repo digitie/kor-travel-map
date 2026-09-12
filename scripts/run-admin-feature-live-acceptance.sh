@@ -528,6 +528,14 @@ PY
   # 없는 식별자(서버 발급 uuid와 그 uuid로 만들어진 feature_id)를 증거로 남긴다.
   # clone 러너의 content digest가 그 증거를 읽는다.
   run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" || helper_cleanup_status=$?
+  # api-audit **뒤에** 지운다. 감사가 밖에서 재계산할 수 없는 식별자를 증거로 남기고
+  # 나서야 그 행을 없앨 수 있다 — 순서를 바꾸면 감사가 빈 집합을 보게 된다.
+  #
+  # purge가 lane 안에 있는 이유: D2는 소유 Feature를 은퇴까지만 끌고 갔고 삭제는
+  # 아무도 하지 않았다. 그래서 run마다 prod에 은퇴 행이 하나씩 영구히 쌓였다
+  # (2026-09-11 실측). 306이 raw DELETE를 봉인했으므로 삭제는 감사되는
+  # `feature.purge_manual_feature`로만 간다 — helper가 그 경로를 쓴다.
+  run_helper purge "$RUNTIME_DIR/direct-purge.json" || helper_cleanup_status=$?
   assert_container_residue_zero
   if (( browser_cleanup_status != 0 || helper_cleanup_status != 0 )); then
     write_blocked cleanup-failed
