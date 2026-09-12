@@ -210,7 +210,12 @@ def _under_state_root(value: object) -> bool:
 
 def _check_live_config(gate: Gate, config: dict[str, Any]) -> int:
     """A축 — 배포된 config가 로컬 쓰기 두 자리를 여전히 선언한다."""
-    for key in ("local_artifact_storage", "compute_logs"):
+    # 이름을 f-string으로 만들지 않는다. 리터럴이어야 로그에서 grep되고, 이 축이
+    # 조용히 사라지는 것을 정적 검사가 볼 수 있다.
+    for check_name, key in (
+        ("live-config/local_artifact_storage", "local_artifact_storage"),
+        ("live-config/compute_logs", "compute_logs"),
+    ):
         section = config.get(key)
         base_dir = (
             section.get("config", {}).get("base_dir")
@@ -218,7 +223,7 @@ def _check_live_config(gate: Gate, config: dict[str, Any]) -> int:
             else None
         )
         gate.require(
-            f"live-config/{key}",
+            check_name,
             "under-state-root" if _under_state_root(base_dir) else "elsewhere",
             "under-state-root",
             detail=base_dir,
@@ -285,12 +290,16 @@ def main() -> int:
 
     try:
         with engine.connect() as connection:
-            for table in ("runs", "event_logs", "daemon_heartbeats"):
+            for check_name, table in (
+                ("metadata-table/runs", "runs"),
+                ("metadata-table/event_logs", "event_logs"),
+                ("metadata-table/daemon_heartbeats", "daemon_heartbeats"),
+            ):
                 exists = connection.execute(
                     text("SELECT to_regclass(:name) IS NOT NULL"),
                     {"name": f"public.{table}"},
                 ).scalar()
-                gate.require(f"metadata-table/{table}", bool(exists), True)
+                gate.require(check_name, bool(exists), True)
             epoch = connection.execute(
                 text("SELECT (transaction_timestamp() AT TIME ZONE 'UTC')")
             ).scalar()
