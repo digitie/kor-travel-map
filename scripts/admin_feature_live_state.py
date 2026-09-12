@@ -651,6 +651,12 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
             or any(type(value) is not int or value <= 0 for value in run_ids)
         ):
             raise ValueError("direct evidence mismatch")
+    if action == "purge":
+        # `counts` 0은 '지운 뒤 남은 것이 없다'만 말한다. **무엇을 지웠는지**는
+        # `purged`가 들고 있고, 그 숫자가 api-audit이 감사한 것과 같아야
+        # 의미가 있다 — 0건을 지우고도 초록이 되는 통과를 막는다.
+        if payload["purged"] != {"features": 1, "field_overrides": 7}:
+            raise ValueError("direct evidence mismatch")
     if action == "api-audit":
         uuids = payload["feature_uuids"]
         if not isinstance(uuids, list) or any(
@@ -804,6 +810,8 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "direct-audit.json" + _HELPER_STDERR_SUFFIX,
             "direct-cleanup.json",
             "direct-cleanup.json" + _HELPER_STDERR_SUFFIX,
+            "direct-purge.json",
+            "direct-purge.json" + _HELPER_STDERR_SUFFIX,
             "direct-seed.json",
             "direct-seed.json" + _HELPER_STDERR_SUFFIX,
             "lifecycle",
@@ -834,6 +842,7 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "helper-api-audit",
             "helper-audit",
             "helper-cleanup",
+            "helper-purge",
             "helper-seed",
             "probe-cursor-missing",
         }
@@ -854,6 +863,8 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "direct-audit.json" + _HELPER_STDERR_SUFFIX,
             "direct-cleanup.json",
             "direct-cleanup.json" + _HELPER_STDERR_SUFFIX,
+            "direct-purge.json",
+            "direct-purge.json" + _HELPER_STDERR_SUFFIX,
             "lifecycle",
             "playwright-recovery",
         }
@@ -862,6 +873,7 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "helper-api-audit",
             "helper-audit",
             "helper-cleanup",
+            "helper-purge",
         }
         actor = "recovery"
     if {path.name for path in runtime.iterdir()} != expected_names:
@@ -896,6 +908,15 @@ def _validate_evidence(args: argparse.Namespace) -> None:
         # admin 수동 생성 경로는 alias를 발급하지 않는다). helper 쪽은 이미
         # override 하나만 기대하므로 8은 구조적으로 만족될 수 없었다.
         7,
+    )
+    # purge는 api-audit **뒤**에 돈다. 그래서 그 둘의 숫자는 같은 행 집합을
+    # 두 번 센 것이어야 한다 — `purged`가 api-audit의 counts와 어긋나면
+    # 지운 것이 감사한 것과 다르다는 뜻이다.
+    _validate_direct(
+        runtime / "direct-purge.json",
+        "purge",
+        {"features": 0, "price_values": 0, "weather_values": 0},
+        0,
     )
     _validate_report(runtime / "playwright-recovery")
     phases: dict[str, set[str]] = {}

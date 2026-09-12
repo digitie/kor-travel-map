@@ -257,6 +257,7 @@ readonly LANE_OPERATIONS=(
   helper-cleanup
   helper-audit
   helper-api-audit
+  helper-purge
   executor-main
   executor-recovery
 )
@@ -475,6 +476,9 @@ recover_run() {
   run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || helper_status=$?
   run_helper audit "$RUNTIME_DIR/direct-audit.json" || helper_status=$?
   run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" || helper_status=$?
+  # 복구 lane도 같은 은퇴 행을 남긴다 — 정상 lane만 지우면 실패한 run의
+  # 잔여물이 그대로 쌓인다. 순서도 같다: 감사가 증거를 남긴 **뒤**에 지운다.
+  run_helper purge "$RUNTIME_DIR/direct-purge.json" || helper_status=$?
   assert_container_residue_zero
   if (( browser_status != 0 || helper_status != 0 )); then
     write_blocked recovery-failed
