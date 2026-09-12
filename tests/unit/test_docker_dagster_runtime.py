@@ -1120,6 +1120,105 @@ def test_dagster_image_config_serializes_provider_pools() -> None:
 
 
 @pytest.mark.unit
+def test_whatever_hosts_the_recovery_daemons_is_health_checked() -> None:
+    """`run_monitoring`에 의존한다면 그것을 담은 프로세스가 감시받아야 한다.
+
+    `run_monitoring`(프로세스가 사라진 run을 회수)과 queued run dequeue는 전부
+    `dagster-daemon` 프로세스 안의 스레드다. 그런데 그 컨테이너에는 healthcheck가
+    없었다 — 바로 옆 webserver는 갖고 있다. 그리고 daemon은 스레드 하나가 죽으면
+    controller의 `check_daemon_threads`가 프로세스를 **스스로 끝내도록** 설계돼
+    있다.
+
+    그래서 두 실패가 조용했다.
+
+    1. 프로세스가 나가면 컨테이너가 Exited로 남고 회수 기제가 사라진다. `docker
+       compose ps`는 unhealthy를 말하지 않는다 — 애초에 health가 없으니까.
+    2. 스레드가 살아 있으면서 끼이면 heartbeat만 낡는다. 그것을 보는 것이 아무것도
+       없다.
+
+    형제 저장소 `kor-travel-weather`가 1번 계열로 18시간 정지했다. 이 PR의 다른
+    조치들(큐 상한, coalesce, run 상한)은 **모두 그 daemon이 살아 있다는 전제 위에
+    서 있다.** 전제를 재지 않으면 그 조치들이 언제 무력해졌는지 알 수 없다.
+
+    요구를 **유도**한다 — `docker/dagster.yaml`이 `run_monitoring.enabled: true`면
+    그 기제를 실행하는 서비스에 healthcheck가 있어야 한다. `run_monitoring`을 끄면
+    이 요구도 함께 사라지므로 리터럴 결박이 아니다.
+
+    판정은 dagster가 제공하는 정식 CLI(`dagster-daemon liveness-check`)를 쓰는지로
+    본다. 직접 만든 판정은 `all_daemons_live`가 보는 것(required daemon 전부의
+    heartbeat 신선도, `ignore_errors=True`)과 갈라질 수 있다.
+
+    그리고 **다시 올라오는지**까지 본다. healthcheck는 상태를 보이게 만들지만
+    아무것도 되돌리지 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다)
+    Exited 컨테이너를 되살리는 watchdog도 이 배포에 없다. 회수하는 것이 없어진 것을
+    회수해 줄 것이 없으면, 위 검사는 "누군가 볼 수 있다"까지다.
+
+    `always`는 거부한다. 명시적 stop도 되돌려 파괴적 rebuild와 Manager의 stop
+    버튼과 싸운다. `unless-stopped`는 명시적 stop을 존중하고 스스로 나간 경우만
+    잡는다.
+
+    **이 게이트가 지배하는 것.** prod의 daemon 서비스는 이 저장소의 compose가 아니라
+    `kor-travel-docker-manager/docker-compose.yml`이 정의한다 — 같은 계약을 그쪽
+    저장소에도 넣었다(`backend/tests/test_dagster_daemon_liveness_contract.py`).
+    이 게이트가 지배하는 것은 local dev(`scripts/docker-up.sh`)와 n150 격리 live
+    e2e 스택이다. 그 둘도 회수 기제 위에서 돌기 때문에 같은 요구를 받는다.
+    """
+    config = _dagster_yaml()
+    if not config.get("run_monitoring", {}).get("enabled"):
+        pytest.skip("run_monitoring이 꺼져 있으면 이 요구도 없다")
+
+    services = _compose()["services"]
+    hosts = {
+        name: service
+        for name, service in services.items()
+        if "dagster-daemon" in _command_text(service.get("command"))
+    }
+    assert hosts, (
+        "`dagster-daemon`을 실행하는 서비스를 찾지 못했다 — 이 게이트의 파서가 낡았다"
+    )
+
+    for name, service in hosts.items():
+        healthcheck = service.get("healthcheck")
+        assert healthcheck, (
+            f"`{name}`이 run_monitoring과 queue dequeue를 담고 있는데 healthcheck가 "
+            "없다. 그 프로세스가 나가거나 스레드가 끼이면 회수 기제가 조용히 사라지고, "
+            "이 저장소의 큐 상한·coalesce·run 상한이 전부 무력해진다."
+        )
+        probe = _command_text(healthcheck.get("test"))
+        assert "liveness-check" in probe, (
+            f"`{name}`의 healthcheck가 dagster의 정식 판정을 쓰지 않는다: {probe}. "
+            "직접 만든 판정은 `all_daemons_live`가 보는 것과 갈라진다."
+        )
+        # 기동 창이 없으면 첫 heartbeat 전에 unhealthy로 떨어진다.
+        assert healthcheck.get("start_period"), (name, healthcheck)
+        # 유예를 기본값(1800초)에 맡기면 끼인 스레드를 31분 뒤에 알게 된다.
+        # `interval`·`retries`를 줄여도 그 지연은 줄지 않는다 — 그 둘은 프로브를
+        # 얼마나 자주 부르는가이고 지연을 정하는 것은 tolerance다.
+        environment = service.get("environment") or {}
+        raw = environment.get("DAGSTER_DAEMON_HEARTBEAT_TOLERANCE")
+        assert raw is not None, (
+            f"`{name}`이 DAGSTER_DAEMON_HEARTBEAT_TOLERANCE를 선언하지 않는다 — "
+            "dagster 기본값 1800초가 이긴다."
+        )
+        text = str(raw)
+        default = text.split(":-", maxsplit=1)[1].rstrip("}") if ":-" in text else text
+        assert default.isdecimal(), (name, raw)
+        # 300은 dagster 자신이 같은 controller에서 "이만큼 낡으면 계속할 수 없다"로
+        # 쓰는 값(`DEFAULT_WORKSPACE_FRESHNESS_TOLERANCE`)이다. 임의값이 아니다.
+        assert 1 <= int(default) <= 300, (
+            f"`{name}`의 유예 기본값이 {default}초다 — 그 창 동안 회수 기제가 멈춘 채로 "
+            "healthy로 보고된다."
+        )
+        restart = service.get("restart")
+        assert restart == "unless-stopped", (
+            f"`{name}`의 restart 정책이 `unless-stopped`가 아니다: {restart!r}. "
+            "healthcheck는 상태를 보이게 하지만 되돌리지 않는다 — 이 서비스가 "
+            "스스로 나가면 회수 기제가 없어진 채로 남는다. `always`는 명시적 stop도 "
+            "되돌려 파괴적 rebuild와 싸우므로 쓰지 않는다."
+        )
+
+
+@pytest.mark.unit
 def test_the_shipped_dagster_config_passes_dagsters_own_validator(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

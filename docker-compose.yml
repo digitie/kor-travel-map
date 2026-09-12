@@ -664,6 +664,8 @@ services:
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      # 위 healthcheck의 감지 지연을 정하는 값. 기본값 1800초는 31분이다.
+      DAGSTER_DAEMON_HEARTBEAT_TOLERANCE: ${DAGSTER_DAEMON_HEARTBEAT_TOLERANCE:-300}
       KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
       KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID:-}
@@ -716,6 +718,62 @@ services:
       - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+    # **회수 기제가 살아 있는지 본다.**
+    #
+    # `run_monitoring`(프로세스가 사라진 run을 회수)과 queued run dequeue는 전부 이
+    # 프로세스 안의 스레드다. 그런데 이 컨테이너에는 healthcheck가 없었다 — 바로
+    # 위 webserver는 갖고 있다. 그리고 daemon은 스레드 하나가 죽으면 controller가
+    # `check_daemon_threads`에서 프로세스를 **스스로 끝내도록** 설계돼 있다.
+    #
+    # 그래서 두 실패가 조용했다. (a) 프로세스가 나가면 컨테이너가 Exited로 남고 회수
+    # 기제가 사라지는데 `docker compose ps`는 unhealthy를 말하지 않는다(애초에 health가
+    # 없으므로). (b) 스레드가 살아 있으면서 끼이면 heartbeat만 낡는데 그것을 보는
+    # 것이 아무것도 없다. 형제 저장소 weather가 (a) 계열로 18시간 정지했다.
+    #
+    # `dagster-daemon liveness-check`는 dagster가 제공하는 정식 판정이다 —
+    # `all_daemons_live`가 **required daemon 전부**의 heartbeat 신선도를 보고
+    # (`ignore_errors=True`, 즉 오류 유무가 아니라 살아 있는지만 본다) 하나라도
+    # 낡으면 exit 1이다. 2026-09-12 prod 실측: `Daemon live` / exit 0.
+    #
+    # **유예를 명시한다.** 판정식은 `now <= heartbeat + interval + tolerance`이고
+    # tolerance 기본값은 `DEFAULT_DAEMON_HEARTBEAT_TOLERANCE_SECONDS = 1800`이다.
+    # 그대로 두면 위 (b)를 **31분 뒤에** 알게 되는데, 아래 `interval`·`retries`를
+    # 어떻게 줄여도 그 지연은 줄지 않는다 — 그 둘은 프로브를 얼마나 자주 부르는가이고
+    # 지연을 정하는 것은 tolerance다. 그래서 위 environment에 값을 박았다. 300을 고른
+    # 근거는 임의값이 아니다: dagster 자신이 같은 controller에서
+    # `DEFAULT_WORKSPACE_FRESHNESS_TOLERANCE = 300`을 "이만큼 낡으면 계속할 수 없다"로
+    # 쓴다. daemon loop의 정상 heartbeat 간격은 15~30초이므로 10~20배 여유다.
+    #
+    # heartbeat는 metadata postgres에 있으므로 이 검사는 DB까지 왕복한다. 그래서
+    # interval을 webserver(10s)보다 길게 두고 start_period로 기동 창을 준다.
+    #
+    # **이 파일은 prod가 아니다.** prod의 이 서비스는
+    # `kor-travel-docker-manager/docker-compose.yml`이 정의한다 — Map 저장소는 그쪽에서
+    # build context와 스크립트 bind mount로만 참조되고 이 compose는 prod에서 읽히지
+    # 않는다. 같은 healthcheck를 Manager 쪽에도 넣었다. 이 파일이 지배하는 것은
+    # local dev(`scripts/docker-up.sh`)와 n150 격리 live e2e 스택이다.
+    #
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/dagster-daemon liveness-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # **그리고 다시 올린다.** healthcheck는 상태를 보이게 만들지만 아무것도 되돌리지
+    # 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다), Exited 컨테이너를
+    # 되살리는 watchdog도 이 배포에 없다.
+    #
+    # **prod 형상과 맞추는 것이다.** 처음에 이 자리에 "이 저장소의 어느 서비스에도
+    # `restart`가 없으니 배포 모델 변경이다"라고 적었는데 그것이 틀렸다 — prod의 이
+    # 서비스를 정의하는 Manager compose에는 `restart: unless-stopped`가 2026-06-13부터
+    # 이미 있고 그 스택의 장수 서비스 23개가 같은 값이다. 즉 없는 쪽이 특이했고, 이
+    # 변경은 dev/e2e 형상을 prod와 같게 만드는 것이다.
+    #
+    # `always`가 아니라 `unless-stopped`다. `always`는 명시적 stop도 되돌려 파괴적
+    # rebuild(`docker compose stop`)와 운영자의 stop 버튼(`container.stop()`)과
+    # 싸운다. `unless-stopped`는 그 둘을 존중하고 자기 스레드가 죽어 스스로 나간
+    # 경우(controller의 `check_daemon_threads`)만 잡는다.
+    restart: unless-stopped
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
   # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
