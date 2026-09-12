@@ -1893,6 +1893,15 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 4. 봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다 — 같은 key 집합을 각자
    들고 있으면서 CI가 어긋남을 못 보는 상태가 아니어야 한다. 2026-09-12에 정확히
    그 상태가 prod 스택을 내렸다.
+5. **UI에서 step의 stdout/stderr가 보인다.** 지금은 한 세대 안에서도 비어 있다 —
+   `dagster`(webserver)와 `dagster-daemon`이 각자 code location을 안고 도는 별개
+   컨테이너이고 `/opt/dagster/state`에 공유 volume이 없다. `DefaultRunLauncher`가
+   띄우는 run worker는 daemon 컨테이너의 자기 경로에 쓰고, webserver는 자기
+   컨테이너의 같은 경로를 읽는데 거기엔 아무것도 없다(없으면 `ensure_dir`이 빈
+   디렉터리를 만들어 그것을 watch한다). **"run이 왜 죽었나"를 UI로 확인하는 경로가
+   없다** — 이번 사고를 가린 것과 같은 종류의 맹점이다. 공유 named volume 하나로
+   조문 5와 아래 "알려진 한계"가 함께 닫히지만, compose는 pinned runtime 표면이라
+   prod가 복구된 뒤 별도 사이클에서 검사부터 붙여 넣는다.
 
 **무엇이 관측됐나 — 2026-09-11.**
 
@@ -1952,8 +1961,14 @@ generation에서 그것이 붙지 않았다.
 검사를 심었고, 변이 ②(검사기만 되돌림)에서 그 하나만 빨갛다.
 
 **알려진 한계.** `/opt/dagster/state`에는 volume이 없다. artifact와 compute log는
-컨테이너 재생성마다 사라진다. run/event/schedule storage는 postgres이므로 조문 1·2에는
-영향이 없지만, "지난 run의 로그를 본다"는 배포를 넘지 못한다.
+컨테이너 재생성마다 사라지고, 애초에 컨테이너 경계를 넘지도 못한다(조문 5).
+run/event/schedule storage는 postgres이므로 조문 1·2에는 영향이 없다.
+
+**호스트 dev 스택도 같은 파일을 읽는다.** `scripts/run-admin-stack.sh`가
+`docker/dagster.yaml`을 바이트 그대로 호스트 `DAGSTER_HOME`에 깐다. #1216의
+`base_dir`는 이미지 안에만 있는 경로라 그대로 두면 dev에서 같은 PermissionError가
+난다. #1219가 설치 뒤 두 경로만 `$DAGSTER_HOME` 아래로 옮기고, 그 요구를
+`dagster.yaml`이 선언한 key 집합에서 유도하는 검사를 붙였다.
 
 ## T-VN-D2-RESIDUE
 
