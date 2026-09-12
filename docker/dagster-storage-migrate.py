@@ -127,6 +127,25 @@ def _dagster_storage_head() -> str:
     return heads[0]
 
 
+def _bounded_tick_retention(value: object) -> bool:
+    """tick 보존 설정이 **모든 status에 유한 상한**을 주는지 본다.
+
+    Dagster는 두 모양을 받는다(`_tick_retention_config_schema`) — bare int는 네
+    status 전부에, dict는 적힌 status에만 적용된다. 그리고 적지 않은 status의
+    기본값은 `-1`(영구 보존)이라, dict를 쓰면서 status 하나를 빼먹으면 그 종류는
+    상한이 없는 채로 남는다. 그것이 조용히 통과하면 이 봉인의 뜻이 사라진다.
+
+    그래서 dict 형태는 **네 status가 모두 있어야** 통과한다.
+    """
+    if type(value) is int:
+        return value >= 1
+    if not isinstance(value, dict):
+        return False
+    if set(value) != {"skipped", "success", "started", "failure"}:
+        return False
+    return all(type(days) is int and days >= 1 for days in value.values())
+
+
 def _validate_dagster_config(raw: bytes) -> None:
     """Dagster storage target이 canonical DSN env 외에는 읽지 못하게 한다."""
     try:
@@ -144,6 +163,9 @@ def _validate_dagster_config(raw: bytes) -> None:
             # 소유 state 안에 있는지까지 본다.
             "local_artifact_storage",
             "compute_logs",
+            # tick 이력의 상한. 없으면 `job_ticks`가 무한히 늘어난다 — 2026-09-12
+            # 실측에서 그것이 이미 metadata DB의 가장 큰 표였다.
+            "retention",
         }:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         storage = config["storage"]
@@ -152,6 +174,11 @@ def _validate_dagster_config(raw: bytes) -> None:
             config["local_artifact_storage"]["config"]["base_dir"],
             config["compute_logs"]["config"]["base_dir"],
         )
+        # 최상위 key는 위에서 정확히 대조했으므로 여기서 KeyError는 나지 않는다.
+        # **그 아래를 try 안에서 뽑으면 안 된다** — 누락이 `invalid_dagster_yaml`로
+        # 접히고, 그러면 "봉인되지 않았다"와 "yaml이 깨졌다"가 구분되지 않는다.
+        concurrency = config["concurrency"]
+        retention = config["retention"]
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
         raise DagsterStorageMigrationError("invalid_dagster_yaml") from exc
     if storage != {
@@ -176,6 +203,48 @@ def _validate_dagster_config(raw: bytes) -> None:
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         resolved = posixpath.normpath(base_dir)
         if not resolved.startswith(f"{_LOCAL_STATE_ROOT}/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # key를 허용하는 것으로 끝내면 그 뜻이 구멍으로 빠져나간다 — 로컬 쓰기 두 축에
+    # 적용한 것과 같은 규율이다.
+    #
+    # 상한이 사라지면 큐는 Dagster 기본값으로 돌아간다. 그 값이 무엇인지는 버전이
+    # 정하고 우리는 모른다 — 형제 저장소 weather가 그 상태에서 두 번 멈췄다.
+    runs = concurrency.get("runs") if isinstance(concurrency, dict) else None
+    if not isinstance(runs, dict) or not set(runs) <= {
+        "max_concurrent_runs",
+        "tag_concurrency_limits",
+    }:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    run_limit = runs.get("max_concurrent_runs")
+    if type(run_limit) is not int or run_limit < 1:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # 한 job class가 큐 전량을 먹지 못하게 하는 상한. 허용만 하고 뜻을 보지 않으면
+    # `limit`이 전량과 같아져도(= 아무것도 막지 않아도) 통과한다.
+    #
+    # `value`를 금지한다. value 있는 항목은 그 key가 **그 값일 때만** 세므로,
+    # request id처럼 매번 다른 값에는 상한이 걸리지 않는다(`dagster/_utils/tags.py`).
+    for entry in runs.get("tag_concurrency_limits") or ():
+        if not isinstance(entry, dict) or set(entry) != {"key", "limit"}:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        if not isinstance(entry["key"], str) or not entry["key"]:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        tag_limit = entry["limit"]
+        if type(tag_limit) is not int or not 1 <= tag_limit < run_limit:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # tick 이력의 상한.
+    #
+    # `concurrency`와 **같은 강도로** 가드한다. 종전에는 `isinstance` 없이
+    # `set(retention)`을 불러, `retention: null` 같은 흔한 오편집이
+    # `DagsterStorageMigrationError`가 아니라 맨 `TypeError`로 새어 나갔다 —
+    # `main()`이 잡지 않으므로 배포 래퍼가 읽는 JSON 오류 봉투를 잃는다.
+    # fail-close는 유지되지만 다음 사람은 "봉인 실패"가 아니라 "스크립트 버그"를 본다.
+    if not isinstance(retention, dict) or set(retention) != {"schedule", "sensor"}:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    for kind in ("schedule", "sensor"):
+        section = retention[kind]
+        if not isinstance(section, dict) or set(section) != {"purge_after_days"}:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        if not _bounded_tick_retention(section["purge_after_days"]):
             raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 

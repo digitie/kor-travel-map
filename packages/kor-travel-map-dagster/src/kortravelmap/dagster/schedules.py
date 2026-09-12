@@ -299,6 +299,13 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_krex_rest_areas_hourly_schedule",
         cron_schedule="35 * * * *",
         description="고속도로 휴게소 관측 기상 weather Feature 매시 적재(기온→T1H, KMA 빈틈 보강).",
+        # 자기 회수 상한보다 짧은 주기인데 합치기도 회수도 없었다. upstream이
+        # trickle에 들어가면 매시 새 run이 뜨고 각 run이 전역 6시간을 쓰므로 같은
+        # job의 멈춘 run이 최대 6개 — 10 슬롯 중 6개를 한 job이 먹는다. 같은 EX
+        # 호스트를 쓰는 형제(`feature_notice_krex_traffic_notices_job`)는 이미 이
+        # 조합으로 in-flight 1개·2시간 회수다.
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krheritage_items,
