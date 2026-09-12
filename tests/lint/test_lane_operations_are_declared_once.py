@@ -470,3 +470,60 @@ def test_the_validator_operation_sets_match_each_lane() -> None:
         f"  검증기에만: {sorted(union - declared)}\n"
         "선언은 잔여물 확인의 범위이므로 두 lane이 만드는 것을 정확히 덮어야 한다."
     )
+
+
+def _entry_function_body(name: str) -> str:
+    """진입 함수 본문. 이 파일의 다른 게이트와 같은 파서를 쓴다."""
+    runner = _RUNNER.read_text(encoding="utf-8")
+    for match in _SHELL_FUNCTION.finditer(runner):
+        if match.group("name") == name:
+            return match.group("body")
+    raise AssertionError(f"러너에서 `{name}` 함수를 찾지 못했다")
+
+
+#: lane마다 "여기부터는 run 전체가 초록이다"를 선언하는 마지막 게이트.
+#: purge는 그 **뒤**여야 한다.
+_LAST_GATE = {
+    "run_new": "write_blocked test-failed-restored",
+    "recover_run": "write_blocked recovery-failed",
+}
+
+
+@pytest.mark.parametrize("entry", _ENTRY_FUNCTIONS)
+def test_purge_runs_only_after_every_gate_of_its_lane(entry: str) -> None:
+    """purge는 감사·테스트 게이트를 전부 지난 뒤에만 돈다.
+
+    purge를 게이트 **앞**에 두면 두 가지가 동시에 깨진다. 둘 다 적대 리뷰가
+    독립적인 두 렌즈에서 잡은 것이다.
+
+    1. 감사가 red인 채로 그 감사 대상 행을 지운다. 운영자가 무엇이 걸렸는지
+       DB에서 다시 볼 수 없다.
+    2. **실패한 run의 소유 Feature가 사라진다.** 복구 lane의 api-audit은
+       `_audit_complete_api_owned`에서 그 행 1건을 요구하므로, 먼저 지우면
+       `recover`가 구조적으로 통과 불가능해진다. BLOCKED는 `recover`로만 지워지고
+       `run` 모드는 `prior BLOCKED state requires recover mode`로 막히므로,
+       그 순간 D2 lane이 prod에서 **영구 정지**한다.
+
+    사람이 읽어서는 알 수 없는 순서다 — 두 줄의 상대 위치가 lane의 생사를
+    가르는데 둘 다 그냥 helper 호출로 보인다. 그래서 게이트로 못 박는다.
+    """
+    body = _entry_function_body(entry)
+    gate = _LAST_GATE[entry]
+
+    gate_at = body.find(gate)
+    purge_at = body.find('run_helper purge "$RUNTIME_DIR/')
+    evidence_at = body.find("validate_evidence ")
+
+    assert gate_at >= 0, f"`{entry}`에서 마지막 게이트 `{gate}`를 찾지 못했다"
+    assert purge_at >= 0, f"`{entry}`가 purge를 부르지 않는다"
+    assert evidence_at >= 0, f"`{entry}`가 증거 검증을 부르지 않는다"
+
+    assert gate_at < purge_at, (
+        f"`{entry}`가 게이트(`{gate}`)보다 **먼저** purge한다. 그러면 실패한 run의 "
+        "소유 Feature가 사라져 복구 lane의 api-audit이 구조적으로 통과할 수 없고, "
+        "BLOCKED가 영구화돼 lane이 prod에서 멈춘다."
+    )
+    assert purge_at < evidence_at, (
+        f"`{entry}`가 증거 검증 뒤에 purge한다 — 검증기가 `direct-purge.json`을 "
+        "요구하므로 파일이 아직 없다."
+    )
