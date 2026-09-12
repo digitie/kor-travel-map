@@ -85,6 +85,7 @@ jobs:
             scripts/admin_feature_live_fixture.py \
             scripts/admin_feature_live_state.py \
             scripts/admin_feature_live_supervisor.py
+            scripts/dagster_run_completion_gate.py
 
       - name: mypy --strict (prod 이미지에 구워지는 스크립트)
         # 이 일곱은 프로덕션 컨테이너 안에서 돌며 **모든 rebuild를 게이트한다** —
