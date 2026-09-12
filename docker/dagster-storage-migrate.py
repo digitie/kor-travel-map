@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 import subprocess
@@ -165,12 +166,17 @@ def _validate_dagster_config(raw: bytes) -> None:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
     # 봉인의 뜻은 "로컬로 새지 않는다"이다. 키를 허용하는 것으로 끝내면 그 뜻이
     # 빠져나가므로, 두 경로가 이미지가 appuser에게 넘긴 state 안에 있는지 본다.
-    if any(
-        not isinstance(base_dir, str)
-        or not base_dir.startswith(f"{_LOCAL_STATE_ROOT}/")
-        for base_dir in local_base_dirs
-    ):
-        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    #
+    # 접두 비교만으로는 부족하다 — `/opt/dagster/state/../dagster_home/storage`가
+    # 통과한다. 그 문자열이 권한을 주지는 않지만(config는 root 0444이고 sha256이
+    # 핀이다) 이 검사가 잡으려는 것은 공격이 아니라 **오설정**이고, 오설정은 정확히
+    # 그런 모양으로 온다. 그래서 사전적으로 정규화한 뒤 본다.
+    for base_dir in local_base_dirs:
+        if not isinstance(base_dir, str) or not base_dir.startswith("/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        resolved = posixpath.normpath(base_dir)
+        if not resolved.startswith(f"{_LOCAL_STATE_ROOT}/"):
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 
 def _validate_root_owned_directory(metadata: os.stat_result) -> None:

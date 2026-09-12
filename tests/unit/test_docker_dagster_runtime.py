@@ -4344,6 +4344,37 @@ def test_sealed_validator_rejects_local_writes_outside_the_appuser_state(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("key", ["local_artifact_storage", "compute_logs"])
+@pytest.mark.parametrize(
+    "escape",
+    [
+        "/opt/dagster/state/../dagster_home/storage",
+        "/opt/dagster/state/..",
+        "/opt/dagster/state",
+        "opt/dagster/state/artifacts",
+        "/opt/dagster/stateful/artifacts",
+    ],
+)
+def test_sealed_validator_rejects_paths_that_only_look_like_the_state_root(
+    key: str, escape: str
+) -> None:
+    """접두 비교만 하면 `state/../dagster_home`이 통과한다.
+
+    그 문자열이 권한을 주지는 않는다 — config는 root 0444이고 sha256이 핀이다.
+    이 검사가 잡으려는 것은 공격이 아니라 **오설정**이고, 오설정은 정확히 그런
+    모양으로 온다. `/opt/dagster/stateful`처럼 접두만 같은 이웃 경로도 마찬가지다.
+    """
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    config[key]["config"]["base_dir"] = escape
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["local_artifact_storage", "compute_logs"])
 def test_sealed_validator_rejects_dropping_a_local_write_declaration(
     key: str,
 ) -> None:
