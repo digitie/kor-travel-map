@@ -568,6 +568,12 @@ def test_every_schedule_firing_faster_than_its_own_recovery_bound_is_protected()
             )
             continue
         assert spec.max_runtime_seconds <= global_timeout, spec.job_name
+        # spec 필드는 **disabled schedule에도** 요구한다 — 다시 켜는 순간 보호가
+        # 없으면 그때 노출면이 생기고, 그 순간은 이 검사가 가장 조용할 때다.
+        # 다만 정의 자체는 workspace에 만들어지지 않으므로 resolve는 건너뛴다
+        # (`FEATURE_LOAD_SCHEDULES`가 `DISABLED_FEATURE_LOAD_SCHEDULES`를 제외한다).
+        if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES:
+            continue
         job = defs.resolve_job_def(spec.job_name)
         schedule = defs.resolve_schedule_def(spec.schedule_name)
         expected = str(spec.max_runtime_seconds)
