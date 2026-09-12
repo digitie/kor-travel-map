@@ -58,17 +58,11 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [~] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
+- [~] T-VN-DAGSTER-STORAGE — **prod Dagster run의 성공/실패 신호를 믿을 수 없다**
 
-  배포와 D2 재핀 사이클은 2026-09-11에 완주했다. 남은 조문은 provider 적재 한
-  바퀴이고 `T-VN-CURATION-SEAL-ACL`에 막혀 있다. 해제 조건은
-  acceptance §T-VN-39-DEPLOY.
-
-- [ ] T-VN-DAGSTER-STORAGE — **prod Dagster run이 compute-log storage에 쓸 수 없다**
-
-  `/opt/dagster/dagster_home/storage`가 없고 상위가 root 소유 읽기 전용인데
-  컨테이너는 uid 999로 돈다. 이 prod에서 성공한 run이 하나도 없다. 해제 조건은
-  acceptance §T-VN-DAGSTER-STORAGE.
+  로컬 쓰기가 봉인된 `DAGSTER_HOME`으로 가 run이 FAILURE로 표시되고 compute log가
+  남지 않는다. 적재 자체는 막지 않는다. 설정은 #1216이 고쳤고, 남은 것은 배포 뒤
+  run 하나가 SUCCESS로 끝나는 실측이다. 해제 조건은 acceptance §T-VN-DAGSTER-STORAGE.
 
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
 
