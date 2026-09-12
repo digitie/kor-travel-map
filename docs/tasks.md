@@ -58,11 +58,13 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [~] T-VN-DAGSTER-STORAGE — **prod Dagster run의 성공/실패 신호를 믿을 수 없다**
+- [~] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
 
-  로컬 쓰기가 봉인된 `DAGSTER_HOME`으로 가 run이 FAILURE로 표시되고 compute log가
-  남지 않는다. 적재 자체는 막지 않는다. 설정은 #1216이 고쳤고, 남은 것은 배포 뒤
-  run 하나가 SUCCESS로 끝나는 실측이다. 해제 조건은 acceptance §T-VN-DAGSTER-STORAGE.
+  로컬 쓰기 경로는 고쳐졌다(#1216 + #1219). 2026-09-12 prod 실측으로 조문 1이 닫혔다
+  — provider 적재 job이 `SUCCESS`로 끝났고 run 이력이 "전부 실패"에서
+  `SUCCESS 23 · FAILURE 1`로 뒤집혔다. 남은 것은 조문 3(배포 사후점검이 "run이
+  완주한다"를 보지 않는다)과 조문 5(webserver와 daemon이 별개 컨테이너라 UI에
+  stdout/stderr가 비어 있다). 해제 조건은 acceptance §T-VN-DAGSTER-STORAGE.
 
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
 

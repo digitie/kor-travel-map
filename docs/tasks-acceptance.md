@@ -1884,8 +1884,23 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 
 **무엇이 참이면 닫히는가.**
 
-1. prod에서 provider asset job 하나가 `SUCCESS`로 끝난다 — run launcher에 제출한
-   run이 step 실패 없이 완주한다.
+1. [x] prod에서 provider asset job 하나가 `SUCCESS`로 끝난다 — run launcher에 제출한
+   run이 step 실패 없이 완주한다. **2026-09-12 충족.**
+
+   `feature_place_standard_museums_job`이 정식 경로(`dagster job launch`)로 제출돼
+   `SUCCESS`로 끝났다. **이 prod에서 provider 적재 job이 SUCCESS로 끝난 첫 사례다.**
+
+   run 이력이 뒤집혔다 — 2026-09-11에는 조회 시점 8건이 **전부 실패**였는데,
+   수정 배포 뒤에는 `SUCCESS 23 · FAILURE 1`이다. 그 FAILURE 1건은 08:09의
+   `current_weather_summary_refresh`로, rebuild가 스택을 내리던 순간에 걸린 run이다.
+   스택이 올라온 08:22 이후의 run은 전부 성공했다.
+
+   로컬 쓰기 자리도 실물로 확인했다 — 컨테이너 안에서 `uid=999(appuser)`가
+   `/opt/dagster/state/{artifacts,compute_logs}`를 소유하고, compute log가 실제로
+   쌓이고 있다. 종전에는 그 자리가 봉인된 `DAGSTER_HOME` 아래라 만들 수조차 없었다.
+
+   적재 축도 다시 맞물린다: `claims 1047 · aliases 1047 · links 1047`
+   (`features 1048`은 D2가 남긴 은퇴 행 1개를 포함한다 — §T-VN-D2-RESIDUE).
 2. 그 성질이 배포마다 유지된다. storage 부착이 pinned runtime generation의 함수라면,
    generation이 바뀔 때 함께 따라오는 것이 증적으로 보인다.
 3. 이 축을 재는 검사가 있다 — 지금은 "컨테이너가 healthy"만 보고 "run이 완주한다"는
