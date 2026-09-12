@@ -1156,6 +1156,12 @@ def test_whatever_hosts_the_recovery_daemons_is_health_checked() -> None:
     `always`는 거부한다. 명시적 stop도 되돌려 파괴적 rebuild와 Manager의 stop
     버튼과 싸운다. `unless-stopped`는 명시적 stop을 존중하고 스스로 나간 경우만
     잡는다.
+
+    **이 게이트가 지배하는 것.** prod의 daemon 서비스는 이 저장소의 compose가 아니라
+    `kor-travel-docker-manager/docker-compose.yml`이 정의한다 — 같은 계약을 그쪽
+    저장소에도 넣었다(`backend/tests/test_dagster_daemon_liveness_contract.py`).
+    이 게이트가 지배하는 것은 local dev(`scripts/docker-up.sh`)와 n150 격리 live
+    e2e 스택이다. 그 둘도 회수 기제 위에서 돌기 때문에 같은 요구를 받는다.
     """
     config = _dagster_yaml()
     if not config.get("run_monitoring", {}).get("enabled"):
@@ -1185,6 +1191,24 @@ def test_whatever_hosts_the_recovery_daemons_is_health_checked() -> None:
         )
         # 기동 창이 없으면 첫 heartbeat 전에 unhealthy로 떨어진다.
         assert healthcheck.get("start_period"), (name, healthcheck)
+        # 유예를 기본값(1800초)에 맡기면 끼인 스레드를 31분 뒤에 알게 된다.
+        # `interval`·`retries`를 줄여도 그 지연은 줄지 않는다 — 그 둘은 프로브를
+        # 얼마나 자주 부르는가이고 지연을 정하는 것은 tolerance다.
+        environment = service.get("environment") or {}
+        raw = environment.get("DAGSTER_DAEMON_HEARTBEAT_TOLERANCE")
+        assert raw is not None, (
+            f"`{name}`이 DAGSTER_DAEMON_HEARTBEAT_TOLERANCE를 선언하지 않는다 — "
+            "dagster 기본값 1800초가 이긴다."
+        )
+        text = str(raw)
+        default = text.split(":-", maxsplit=1)[1].rstrip("}") if ":-" in text else text
+        assert default.isdecimal(), (name, raw)
+        # 300은 dagster 자신이 같은 controller에서 "이만큼 낡으면 계속할 수 없다"로
+        # 쓰는 값(`DEFAULT_WORKSPACE_FRESHNESS_TOLERANCE`)이다. 임의값이 아니다.
+        assert 1 <= int(default) <= 300, (
+            f"`{name}`의 유예 기본값이 {default}초다 — 그 창 동안 회수 기제가 멈춘 채로 "
+            "healthy로 보고된다."
+        )
         restart = service.get("restart")
         assert restart == "unless-stopped", (
             f"`{name}`의 restart 정책이 `unless-stopped`가 아니다: {restart!r}. "
