@@ -30,6 +30,17 @@ retries=3 → 4 HTTP 시도). 본 모듈은 그 위의 **두 번째** 레이어�
 - 우변: KMA job이 받는 상한은 6h가 아니라 job tag ``dagster/max_runtime`` = 7200초다.
   그리고 격자 기본값은 187이 아니라 ``kma_weather_max_grids_per_run`` = 300(최대 500)이다.
 
+**그리고 요청당 시간은 상수가 아니다.** 형제 저장소가 2026-09-12에 그것을 값을
+치르고 측정했다 — 무료 티어 쿼터를 초과해 throttle되자 요청이 ~0.3초에서 12~17초로
+**40~50배** 늘어났고, 그래서 *성공한* 순회도 4~13시간이 걸렸다. 매시 도착하는 일이
+여섯 시간 걸리면 큐는 반드시 찬다. 그쪽 결론이 이것이다 — "**It was arithmetic, not
+a hang.**" ``run_monitoring``은 프로세스가 죽은 run을 실패시키는데 throttle된 run은
+살아서 일하고 있다.
+
+즉 어떤 벽시계 추정도 **어느 구간을 가정했는지** 함께 적어야 한다. 쿼터 안에서 도는
+것과 초과해 throttle된 것은 같은 코드의 두 다른 세계다. 그리고 그 세계를 바꾸는 것은
+timeout이 아니라 **덜 걷거나 덜 자주 걷는 것**뿐이다.
+
 **실제로 강제되는 시간 상한은 run 층뿐이다** — job의 ``dagster/max_runtime`` tag,
 없으면 ``docker/dagster.yaml``의 ``run_monitoring.max_runtime_seconds``. 그 회수는
 프로세스 생존과 무관하다: ``check_run_timeout``이 ``terminate`` 성공 여부를 보지 않고
