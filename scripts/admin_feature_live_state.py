@@ -617,7 +617,7 @@ def _validate_c7_module(args: argparse.Namespace) -> None:
 _DIRECT_EXTRA_KEYS: Final[dict[str, frozenset[str]]] = {
     "seed": frozenset({"summary_run_ids"}),
     "api-audit": frozenset({"feature_ids", "feature_uuids"}),
-    "purge": frozenset({"purged"}),
+    "purge": frozenset({"lane_residue_total", "purged"}),
 }
 
 
@@ -656,6 +656,11 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
         # `purged`가 들고 있고, 그 숫자가 api-audit이 감사한 것과 같아야
         # 의미가 있다 — 0건을 지우고도 초록이 되는 통과를 막는다.
         if payload["purged"] != {"features": 1, "field_overrides": 7}:
+            raise ValueError("direct evidence mismatch")
+        # 그리고 이 lane이 **여태까지** 남긴 것을 본다. 이번 run만 세면 이 task가
+        # 고친다고 말하는 명제("run마다 하나씩 쌓인다")를 재지 못한다 — 종전 run의
+        # 행이 그대로 있어도 초록이기 때문이다.
+        if payload["lane_residue_total"] != 0:
             raise ValueError("direct evidence mismatch")
     if action == "api-audit":
         uuids = payload["feature_uuids"]
