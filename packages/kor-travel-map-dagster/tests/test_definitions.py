@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
 import pytest
+import yaml
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
     DagsterInstance,
@@ -15,6 +20,7 @@ from dagster._core.remote_origin import (
     RemoteJobOrigin,
     RemoteRepositoryOrigin,
 )
+from dagster._utils.schedules import cron_string_iterator
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.settings import KorTravelMapSettings
@@ -494,25 +500,86 @@ def test_knps_schedule_specs_use_the_settings_dataset_key() -> None:
     assert geometry.execution_scopes == _KNPS_GEOMETRY_SCHEDULE.execution_scopes
 
 
-def test_freshness_sensitive_jobs_have_two_hour_runtime_tag() -> None:
-    assert MAX_RUNTIME_SECONDS_TAG == "dagster/max_runtime"
+def _global_run_timeout_seconds() -> int:
+    """배에 실리는 `docker/dagster.yaml`의 run 전체 상한.
 
-    expected = {
-        "feature_place_opinet_stations_job": (
-            "feature_place_opinet_stations_monthly_schedule"
-        ),
-        "feature_price_opinet_stations_job": (
-            "feature_price_opinet_stations_daily_schedule"
-        ),
-        "feature_notice_krex_traffic_notices_job": (
-            "feature_notice_krex_traffic_notices_ten_minute_schedule"
-        ),
-    }
-    for job_name, schedule_name in expected.items():
-        job = defs.resolve_job_def(job_name)
-        schedule = defs.resolve_schedule_def(schedule_name)
-        assert job.tags[MAX_RUNTIME_SECONDS_TAG] == "7200"
-        assert schedule.tags[MAX_RUNTIME_SECONDS_TAG] == "7200"
+    리터럴로 적지 않는다 — 이 검사의 요구가 그 값에서 **유도**되어야, 전역 상한을
+    내리면 그때 규칙에 새로 걸리는 job도 함께 드러난다.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    config = yaml.safe_load(
+        (repo_root / "docker" / "dagster.yaml").read_text(encoding="utf-8")
+    )
+    timeout = config["run_monitoring"]["max_runtime_seconds"]
+    assert type(timeout) is int and timeout >= 1, timeout
+    return timeout
+
+
+def _minimum_firing_interval_seconds(cron_schedule: str) -> float:
+    """이 cron이 두 발화 사이에 두는 **최소** 간격.
+
+    `0 1,5,9 * * *`처럼 불균등한 cron이 있으므로 평균이나 첫 간격이 아니라 최소를
+    본다. 계산은 Dagster 자신의 cron 엔진으로 한다 — scheduler가 실제로 쓰는 것과
+    갈라질 수 없다.
+    """
+    start = datetime(2026, 1, 1, tzinfo=ZoneInfo(KST_TIMEZONE))
+    iterator = cron_string_iterator(start.timestamp(), cron_schedule, KST_TIMEZONE)
+    fires = [next(iterator) for _ in range(9)]
+    return min(
+        (later - earlier).total_seconds()
+        for earlier, later in zip(fires, fires[1:], strict=True)
+    )
+
+
+def test_every_schedule_firing_faster_than_its_own_recovery_bound_is_protected() -> None:
+    """자기 회수 상한보다 빨리 발화하는 schedule은 합치기와 자체 상한을 갖는다.
+
+    이 검사는 리터럴 목록이었다 — job 이름 세 개를 손으로 적고 그 tag가 "7200"인지
+    확인했다. 그것은 **적어 둔 셋만** 재고, 같은 조건의 네 번째 job은 보지 않는다.
+    2026-09-12 감사가 정확히 그 네 번째를 찾았다:
+    `feature_weather_krex_rest_areas_job`은 매시(3,600초)인데 전역 회수 상한은
+    21,600초라, upstream이 trickle에 들어가면 같은 job의 멈춘 run이 최대 6개까지
+    동시에 살아 10 슬롯 중 6개를 한 job이 먹는다. 리터럴 검사는 그때도 초록이었다.
+
+    그래서 요구를 **유도**한다: 발화 간격이 전역 회수 상한보다 짧으면
+    (= 다음 run이 뜰 때 이전 run이 아직 회수되지 않을 수 있으면)
+
+      - `coalesce_active_runs` — 미종료 run이 있으면 tick을 생략한다
+      - `max_runtime_seconds` — 전역보다 이른 자체 상한
+
+    둘을 모두 요구한다. 세 출처(cron 문자열 · 전역 상한 · spec의 두 필드)를 엮으므로
+    어느 쪽이 움직여도 빨개진다. 시간별 schedule을 새로 추가하고 보호를 잊으면
+    추가되는 순간 빨갛다.
+    """
+    assert MAX_RUNTIME_SECONDS_TAG == "dagster/max_runtime"
+    global_timeout = _global_run_timeout_seconds()
+
+    unprotected: list[str] = []
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS:
+        interval = _minimum_firing_interval_seconds(spec.cron_schedule)
+        if interval >= global_timeout:
+            # 다음 발화 전에 전역 상한이 이미 run을 회수한다.
+            continue
+        if not spec.coalesce_active_runs or spec.max_runtime_seconds is None:
+            unprotected.append(
+                f"{spec.job_name}(간격 {interval:.0f}s < 전역 {global_timeout}s, "
+                f"coalesce={spec.coalesce_active_runs}, "
+                f"max_runtime={spec.max_runtime_seconds})"
+            )
+            continue
+        assert spec.max_runtime_seconds <= global_timeout, spec.job_name
+        job = defs.resolve_job_def(spec.job_name)
+        schedule = defs.resolve_schedule_def(spec.schedule_name)
+        expected = str(spec.max_runtime_seconds)
+        assert job.tags[MAX_RUNTIME_SECONDS_TAG] == expected, spec.job_name
+        assert schedule.tags[MAX_RUNTIME_SECONDS_TAG] == expected, spec.schedule_name
+
+    assert not unprotected, (
+        "자기 회수 상한보다 빨리 발화하는데 합치기·자체 상한이 없는 schedule: "
+        + " · ".join(unprotected)
+        + ". 멈춘 run이 회수되기 전에 다음 run이 떠서 같은 job이 큐 슬롯을 여러 개 "
+        "먹는다."
+    )
 
 
 def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:

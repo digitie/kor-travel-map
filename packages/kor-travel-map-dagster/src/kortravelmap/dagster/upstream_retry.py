@@ -13,8 +13,30 @@ retries=3 → 4 HTTP 시도). 본 모듈은 그 위의 **두 번째** 레이어�
 
 - 기본 attempts는 **2**(추가 1회) — 호출 지점은 client에 ``retries=1``을 함께
   주입해 총 HTTP 시도 상한을 경계당 2×2=4로 유지한다(레이어 도입 전 lib 단독
-  4와 동일). timeout 20s 기준 경계당 최악 wall ≈ 2×(2×20+jitter)+backoff
-  ≈ 84s, 187격자 병적 상한 ≈ 4.4h < dagster run 한도 6h.
+  4와 동일).
+
+**attempts는 시도 횟수의 상한이지 시간의 상한이 아니다.** 종전 이 자리에 "timeout
+20s 기준 경계당 최악 wall ≈ 84s, 187격자 병적 상한 ≈ 4.4h < dagster run 한도 6h"를
+적어 두었는데 그 부등식은 **양변이 틀렸다**(2026-09-12 정정).
+
+- 좌변: 호출측이 넘기는 timeout은 httpx 스칼라이고, httpx는 그것을
+  connect/read/write/pool **각각에** 복사한다. 그중 read timeout은 소켓 read마다
+  **재무장되는 간격 상한**이다(``httpcore``의 ``while True: read(..., timeout=...)``) —
+  호출 전체의 deadline이 아니다. 19초마다 1바이트를 흘리는 연결은 어떤 시도도
+  끝내지 못하므로 재시도 예산이 소진되지 않는다. 이 모듈에는 코루틴 수준 상한
+  (``asyncio.timeout``/``wait_for``)이 없다. 형제 저장소 ``kor-travel-weather``가
+  같은 것을 값을 치르고 배웠다 — "``client_timeout``은 HTTP 클라이언트 설정이고
+  이 코루틴에 대한 deadline이 아니다".
+- 우변: KMA job이 받는 상한은 6h가 아니라 job tag ``dagster/max_runtime`` = 7200초다.
+  그리고 격자 기본값은 187이 아니라 ``kma_weather_max_grids_per_run`` = 300(최대 500)이다.
+
+**실제로 강제되는 시간 상한은 run 층뿐이다** — job의 ``dagster/max_runtime`` tag,
+없으면 ``docker/dagster.yaml``의 ``run_monitoring.max_runtime_seconds``. 그 회수는
+프로세스 생존과 무관하다: ``check_run_timeout``이 ``terminate`` 성공 여부를 보지 않고
+try 밖에서 ``_force_mark_as_failed``를 호출하므로, 소켓에 붙어 있는 run도 FAILURE가
+되고 큐 슬롯이 풀린다. 그래서 여기서 여유를 계산하지 않는다 — 여유가 있다고 믿고
+격자 수나 backoff를 올리면 7200초 tag에 먼저 걸리고, 그때 cursor는 전진하지 않아
+같은 작업을 매 주기 반복한다.
 - **쿼터/레이트리밋은 재시도하지 않는다**: 일일 쿼터 소진(kma resultCode 22 —
   ``failure_kind="quota"``/``"rate_limit"``)은 transient가 아니고, 재시도는
   쿼터 구멍만 키운다(``kma_weather_max_grids_per_run``의 일일 한도 보호 취지).

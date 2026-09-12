@@ -69,6 +69,34 @@ concurrency:
   # 배타이고 Dagster가 `DagsterInvalidConfigError`로 거부한다(1차 시안이 그랬다).
   runs:
     max_concurrent_runs: 10
+    # **한 job class가 큐를 전부 먹지 못하게 한다.**
+    #
+    # `feature_update_request_queue_sensor`는 15초마다 tick하고 tick당 RunRequest를
+    # 최대 10개 낸다 — 그 수가 위 상한과 **같다**. request마다 run_key가 다르므로
+    # 10개가 전부 별개 run으로 뜬다. 그리고 `feature_update_request_worker` job에는
+    # `dagster/max_runtime` tag가 없어 각 run이 전역 6시간을 쓸 수 있다.
+    #
+    # 그 run이 붙잡는 것은 슬롯만이 아니다. 멈춘 upstream 호출은
+    # `async with session.begin():` 안에 있어 request/scope advisory lock 2개와 열린
+    # 트랜잭션·전용 connection이 run 수명 내내 유지된다. 그동안 같은 scope를 노리는
+    # 다른 request는 `FeatureUpdateLockBusy`로 requeue되는데 generation이 +1돼
+    # run_key가 바뀌므로 sensor가 15초마다 **새 run을 또 만든다.**
+    #
+    # 슬롯이 만석이면 daemon은 priority sort **이전에** `return []`한다
+    # (`queued_run_coordinator_daemon.py`). 즉 만석 구간에서 우선순위는 아무것도
+    # 바꾸지 않는다 — 배분은 여기서 강제해야 한다.
+    #
+    # `value`를 주지 않는다. value 없는 항목은 그 key를 가진 in-progress run
+    # **전체**를 센다(`dagster/_utils/tags.py`) — request id는 매번 다르므로
+    # key만으로 묶어야 worker class 전체가 4로 묶인다.
+    #
+    # 4는 "과반을 남긴다"에서 왔다. 10 중 4를 worker에 주면 정기 적재 provider
+    # job에 6이 남는다. 교환은 명시적이다 — 요청 5건 이상이 동시에 들어오면 4건만
+    # 실행되고 나머지는 QUEUED로 남는다(버려지지 않는다). 장기 정지의 비용이
+    # "최신성 job 굶주림"에서 "관리자 요청 대기열"로 옮겨가는 것이 의도다.
+    tag_concurrency_limits:
+      - key: "kor_travel_map.feature_update_request_id"
+        limit: 4
 
 # **상한이 없던 tick에만 상한을 준다.**
 #

@@ -1177,6 +1177,48 @@ def test_the_shipped_dagster_config_passes_dagsters_own_validator(
 
 
 @pytest.mark.unit
+def test_one_job_class_cannot_take_the_whole_queue() -> None:
+    """worker run이 큐 전량을 먹지 못하게 묶여 있다.
+
+    `feature_update_request_queue_sensor`는 15초마다 tick하고 tick당 RunRequest를
+    최대 10개 낸다 — 그 수가 `max_concurrent_runs`와 **같다**. request마다 run_key가
+    다르므로 10개가 전부 별개 run으로 뜨고, `feature_update_request_worker` job에는
+    `dagster/max_runtime` tag가 없어 각 run이 전역 6시간을 쓸 수 있다. 그 run은
+    슬롯만 잡는 것이 아니다 — 멈춘 upstream 호출이 `async with session.begin():`
+    안에 있어 advisory lock 2개와 전용 connection이 run 수명 내내 유지된다.
+
+    슬롯이 만석이면 daemon은 priority sort **이전에** `return []`한다. 즉 만석
+    구간에서 우선순위는 아무것도 바꾸지 않고, 배분은 큐 설정에서 강제해야 한다.
+
+    `key`는 sensor가 실제로 찍는 상수에서 **import**해 대조한다 — 리터럴을 다시
+    적으면 두 곳이 따로 낡는다. `value`가 없어야 한다: value 없는 항목은 그 key를
+    가진 in-progress run **전체**를 세므로, request id가 매번 달라도 worker class
+    전체가 묶인다. value를 주면 같은 id를 가진 run만 세어 상한이 무의미해진다.
+    """
+    from kortravelmap.dagster.sensors import FEATURE_UPDATE_REQUEST_ID_TAG
+
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+    runs = config["concurrency"]["runs"]
+    limits = runs["tag_concurrency_limits"]
+    assert isinstance(limits, list) and limits, limits
+
+    matched = [entry for entry in limits if entry.get("key") == FEATURE_UPDATE_REQUEST_ID_TAG]
+    assert len(matched) == 1, (FEATURE_UPDATE_REQUEST_ID_TAG, limits)
+    entry = matched[0]
+    assert set(entry) == {"key", "limit"}, entry
+    assert "value" not in entry, (
+        "value를 주면 같은 id를 가진 run만 센다 — request id는 매번 다르므로 "
+        "상한이 아무것도 막지 않는다"
+    )
+    limit = entry["limit"]
+    assert type(limit) is int and limit >= 1, limit
+    assert limit < runs["max_concurrent_runs"], (
+        f"worker 상한 {limit}이 큐 전량 {runs['max_concurrent_runs']}과 같거나 크면 "
+        "한 job class가 큐를 전부 먹을 수 있다"
+    )
+
+
+@pytest.mark.unit
 def test_the_run_queue_limit_is_declared_and_load_bearing(tmp_path: Path) -> None:
     """동시 실행 상한을 암묵 기본값에 맡기지 않는다 — 그리고 그것이 실제로 지배한다.
 
