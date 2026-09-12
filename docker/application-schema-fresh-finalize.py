@@ -467,16 +467,16 @@ async def _assert_raw_300_and_receipts(
                 )
             ).all()
         )
-        catalog = await module.contract_sha256(  # type: ignore[attr-defined]
+        catalog = await module.contract_sha256(
             connection, "application-catalog.sql"
         )
-        seed = await module.contract_sha256(  # type: ignore[attr-defined]
+        seed = await module.contract_sha256(
             connection, "application-seed.sql"
         )
-        destination_alembic_version = await module.contract_sha256(  # type: ignore[attr-defined]
+        destination_alembic_version = await module.contract_sha256(
             connection, "application-destination-alembic-version.sql"
         )
-        await module.verify_runtime_projection_invariants(  # type: ignore[attr-defined]
+        await module.verify_runtime_projection_invariants(
             connection
         )
     except Exception as exc:
@@ -593,7 +593,15 @@ async def _find_operation_receipt(
         ).mappings().one_or_none()
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
-    return row
+    # `.mappings()`는 `RowMapping`을 준다. 이 SQLAlchemy 버전 스텁에서 그것은
+    # `Mapping[str, Any]`의 하위형이 **아니다** — 그래서 세 선택지가 있었다:
+    # (a) 반환 타입을 `RowMapping`으로 올린다 → 호출자 계약까지 번진다,
+    # (b) `ignore`로 덮는다 → 무엇을 받는지 잃는다,
+    # (c) 경계에서 평범한 매핑으로 확정한다.
+    #
+    # (c)를 고른다. 영수증 한 행의 복사는 무의미한 비용이고, 그 대신 결과 집합에서
+    # **분리된** 값을 넘긴다 — 호출자가 connection 수명에 묶이지 않는다.
+    return None if row is None else dict(row)
 
 
 def _verify_fence_candidate(

@@ -86,6 +86,26 @@ jobs:
             scripts/admin_feature_live_state.py \
             scripts/admin_feature_live_supervisor.py
 
+      - name: mypy --strict (prod 이미지에 구워지는 스크립트)
+        # 이 일곱은 프로덕션 컨테이너 안에서 돌며 **모든 rebuild를 게이트한다** —
+        # schema head 계약, 최종 permit, fresh bootstrap, Dagster storage migration.
+        # 그런데 2026-09-13까지 타입 검사 밖에 있었다. 같은 날 그중 하나
+        # (`dagster-storage-migrate.py`)가 prod 스택을 두 번 내렸다. 두 번 다 타입이
+        # 아니라 계약 문제였지만, 그 파일이 얼마나 결정적인지가 그 사건의 내용이다.
+        # 실측: 일곱 중 다섯은 이미 깨끗했고 나머지도 8건뿐이었다 — 경계를 미룰 이유가
+        # 없었다.
+        # 목록은 `tests/lint/test_image_scripts_are_type_checked.py`가 Dockerfile의
+        # COPY에서 유도해 대조한다.
+        run: |
+          mypy --strict \
+            docker/application-schema-contract.py \
+            docker/application-schema-db-contract.py \
+            docker/application-schema-final-permit.py \
+            docker/application-schema-fresh-300.py \
+            docker/application-schema-fresh-finalize.py \
+            docker/application-schema-head.py \
+            docker/dagster-storage-migrate.py
+
       - name: import-linter (의존 계층 + forbidden contracts)
         # ADR-002 layered + ADR-020 fastapi/uvicorn 금지 + ADR-030 cache 금지 +
         # ADR-103 kafka 금지. 위반 시 exit 1.
