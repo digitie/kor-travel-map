@@ -716,6 +716,36 @@ services:
       - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+    # **회수 기제가 살아 있는지 본다.**
+    #
+    # `run_monitoring`(프로세스가 사라진 run을 회수)과 queued run dequeue는 전부 이
+    # 프로세스 안의 스레드다. 그런데 이 컨테이너에는 healthcheck가 없었다 — 바로
+    # 위 webserver는 갖고 있다. 그리고 daemon은 스레드 하나가 죽으면 controller가
+    # `check_daemon_threads`에서 프로세스를 **스스로 끝내도록** 설계돼 있다.
+    #
+    # 그래서 두 실패가 조용했다. (a) 프로세스가 나가면 컨테이너가 Exited로 남고 회수
+    # 기제가 사라지는데 `docker compose ps`는 unhealthy를 말하지 않는다(애초에 health가
+    # 없으므로). (b) 스레드가 살아 있으면서 끼이면 heartbeat만 낡는데 그것을 보는
+    # 것이 아무것도 없다. 형제 저장소 weather가 (a) 계열로 18시간 정지했다.
+    #
+    # `dagster-daemon liveness-check`는 dagster가 제공하는 정식 판정이다 —
+    # `all_daemons_live`가 **required daemon 전부**의 heartbeat 신선도를 보고
+    # (`ignore_errors=True`, 즉 오류 유무가 아니라 살아 있는지만 본다) 하나라도
+    # 낡으면 exit 1이다. 2026-09-12 prod 실측: `Daemon live` / exit 0.
+    #
+    # heartbeat는 metadata postgres에 있으므로 이 검사는 DB까지 왕복한다. 그래서
+    # interval을 webserver(10s)보다 길게 두고 start_period로 기동 창을 준다.
+    #
+    # **restart 정책은 여기서 정하지 않는다.** 이 저장소의 어느 서비스에도 `restart`가
+    # 없고 lifecycle의 소유자는 Docker Manager다. 한 서비스에만 정책을 넣는 것은 배포
+    # 모델 변경이므로 소유자 결정으로 둔다 — 이 healthcheck는 그 결정을 하든 안 하든
+    # 필요한, 상태를 관측 가능하게 만드는 최소한이다.
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/dagster-daemon liveness-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
   # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
