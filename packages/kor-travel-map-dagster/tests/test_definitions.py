@@ -511,7 +511,8 @@ def _global_run_timeout_seconds() -> int:
         (repo_root / "docker" / "dagster.yaml").read_text(encoding="utf-8")
     )
     timeout = config["run_monitoring"]["max_runtime_seconds"]
-    assert type(timeout) is int and timeout >= 1, timeout
+    assert type(timeout) is int, timeout
+    assert timeout >= 1, timeout
     return timeout
 
 

@@ -1204,7 +1204,8 @@ def test_one_job_class_cannot_take_the_whole_queue() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
     runs = config["concurrency"]["runs"]
     limits = runs["tag_concurrency_limits"]
-    assert isinstance(limits, list) and limits, limits
+    assert isinstance(limits, list), limits
+    assert limits, limits
 
     matched = [entry for entry in limits if entry.get("key") == FEATURE_UPDATE_REQUEST_ID_TAG]
     assert len(matched) == 1, (FEATURE_UPDATE_REQUEST_ID_TAG, limits)
@@ -1215,7 +1216,8 @@ def test_one_job_class_cannot_take_the_whole_queue() -> None:
         "상한이 아무것도 막지 않는다"
     )
     limit = entry["limit"]
-    assert type(limit) is int and limit >= 1, limit
+    assert type(limit) is int, limit
+    assert limit >= 1, limit
     assert limit < runs["max_concurrent_runs"], (
         f"worker 상한 {limit}이 큐 전량 {runs['max_concurrent_runs']}과 같거나 크면 "
         "한 job class가 큐를 전부 먹을 수 있다"
@@ -1253,7 +1255,8 @@ def test_the_run_queue_limit_is_declared_and_load_bearing(tmp_path: Path) -> Non
     raw = (ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8")
     config = yaml.safe_load(raw)
     declared = config["concurrency"]["runs"]["max_concurrent_runs"]
-    assert type(declared) is int and declared >= 1, declared
+    assert type(declared) is int, declared
+    assert declared >= 1, declared
     # `run_coordinator`에 두면 Dagster가 거부한다 — `pools`와 상호 배타다.
     assert "run_coordinator" not in config, config.get("run_coordinator")
 
