@@ -1780,7 +1780,7 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 ## T-VN-39-DEPLOY
 
 ```markdown
-- [ ] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
+- [x] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀** (2026-09-12 완료)
 ```
 
 **무엇이 참이면 닫히는가.**
@@ -1806,8 +1806,34 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 3. [x] PinVi token pair 규약을 지킨 배포다(rebind 없이). — 네 번의 회전 모두 PinVi
    revision을 핀 원장에서 그대로 가져왔고(`f62e7ef1`), 세 OpenAPI 표면이 바이트
    동일이라 재벤더링이 필요 없었다. `pinvi-pair deploy`/`rebind`를 부르지 않았다.
-4. [ ] 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
-   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다. — **막혀 있다.**
+4. [x] 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
+   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다. — **2026-09-12 충족.**
+
+   `feature_place_standard_museums_job`이 prod에서 적재를 끝냈다. 여섯 축이 정확히
+   맞물린다 — `entities=1047 · heads=1047 · links=1047 · features=1047 ·
+   claims=1047 · aliases=1047`(`records=1072`는 entity당 버전이 쌓인 것이고, head가
+   가리키는 record는 결측 0). 고아·불일치 여섯 검사 **전부 0**이다:
+   feature 없는 link·claim·alias, link 없는 feature, **claim 없는 feature**, 없는
+   record를 가리키는 head.
+
+   그리고 그 값들이 재키가 설계한 축 그대로다:
+
+   - **claim** = `(provider_dataset_id, feature_kind, natural_key) → feature_id`
+     (예: `dataset=2 kind=place natural_key=대전대학교박물관::… → 01a092b5…`).
+     `ON CONFLICT (feature_id)`의 결정적 축이 사라진 자리를 이것이 대신한다(ADR-098).
+   - **legacy `f_*`는 주소로 생존** —
+     `f_1111010600_p_98434503e9869507 → 01a092b7…`.
+
+   **2026-09-12 정정.** 이 조문을 한 번 "막혀 있다"로 적었다. run 상태가 FAILURE였고
+   compute-log 쓰기 실패가 로그에 있었기 때문인데, **데이터를 보지 않고 run 상태만
+   보고 판정했다.** 적재 트랜잭션은 온전히 커밋돼 있었다. `T-VN-DAGSTER-STORAGE`는
+   실재하는 결함이지만(run이 FAILURE로 표시되고 compute log가 남지 않는다) 적재를
+   막고 있던 것은 아니다.
+
+   지나온 겹은 넷이었다: 특화거리 상류 미승인(소유자 제외), `KREX_GO_API_KEY`
+   미주입(주입), seal ACL 유실(`T-VN-CURATION-SEAL-ACL` 수정·배포), 그리고 내 호출
+   방식(`asset materialize`는 operation key 태그를 싣지 않는다 — 정식 경로는
+   `dagster job launch`이고 key는 job 이름이다).
    2026-09-11 첫 적재가 `permission denied for function
    current_provider_curation_input_set`로 멈췄다(`T-VN-CURATION-SEAL-ACL`). 그 앞의
    두 시도는 상류 문제였다 — 특화거리는 data.go.kr 활용신청 미승인(403,
@@ -1837,6 +1863,7 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
    그 둘이 조용히 갈라진 적이 있기 때문이다 — 정본은 `2099b8a6`/`c10d6782`를
    가리키는데 live는 rehearsal state가 얹은 `cf65e973`/`0169fe90`이었다.
    레지스트리는 배포를 기록하지만 **실물을 강제하지는 않는다.**
+   — 2026-09-12 최종 실측: live revision `488a29e1`(= main), image 5종 **불일치 0**.
 
 **회전 전제조건.** 회전은 `rotate-pinned-pair MAP PINVI`로만 들어간다. `PINVI`에는
 **핀된 revision**(`ktdctl pin show`의 `pinvi`)을 넘긴다 — PinVi `origin/main`은 아직
@@ -1866,9 +1893,15 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 
 **무엇이 관측됐나 — 2026-09-11.**
 
-`T-VN-39-DEPLOY` 조문 4(provider 적재 한 바퀴)를 닫으려 정식 경로
-(`dagster job launch` → run launcher 제출, operation key = job 이름)로 제출한 run이
-step 실패로 끝났다:
+**범위 정정(2026-09-12).** 이 결함은 run을 FAILURE로 **표시**하고 compute log를
+남기지 못하게 한다. 그러나 **적재 자체를 막지는 않는다** — 같은 run이 남긴 데이터가
+정합성 검사 여섯 축을 0건으로 통과했다(§T-VN-39-DEPLOY 조문 4). 그래서 이 task는
+"적재가 안 된다"가 아니라 **"run의 성공/실패 신호와 compute log를 믿을 수 없다"**를
+소유한다. 신호를 믿을 수 없다는 것은 그 자체로 운영 결함이다 — 2026-09-12에 나는
+정확히 그 신호를 믿고 조문 4를 "막혀 있다"로 잘못 적었다.
+
+정식 경로(`dagster job launch` → run launcher 제출, operation key = job 이름)로 제출한
+run이 step 실패로 끝났다:
 
     PermissionError: [Errno 13] Permission denied: '/opt/dagster/dagster_home/storage'
     Exception initializing logger write stream: PermissionError ...

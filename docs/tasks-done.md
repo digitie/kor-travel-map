@@ -12,6 +12,24 @@
 
 ## 2026-09-11 — feature_id 재키가 착지했다
 
+- [x] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**
+  (**2026-09-12 완료**). 다섯 조문이 전부 실측으로 성립한다 — prod head
+  `309_t39_feature_id_rekey`에 `feature_id`가 uuid, D2 `phase: passed`,
+  PinVi rebind 없음, provider 적재 1047건, 정본↔실물 image 불일치 0.
+
+  **재키의 핵심 축이 운영 데이터에서 성립한다.** `entities/heads/links/features/
+  claims/aliases`가 전부 1047로 맞물리고 고아·불일치 여섯 검사가 0이다. claim은
+  `(provider_dataset_id, feature_kind, natural_key) → feature_id`로 발급되고
+  (`ON CONFLICT (feature_id)`를 대신하는 ADR-098 앵커), legacy `f_*`는
+  `f_1111010600_p_98434503e9869507 → 01a092b7…`처럼 **주소로 생존**한다.
+
+  **배포가 드러낸 결함이 넷이었고 전부 재키와 무관한 선재 결함이었다** —
+  정본/실물 드리프트, seal 함수 ACL 유실(`T-VN-CURATION-SEAL-ACL`), D2 fixture의
+  다섯 겹(`T-VN-39-D2-FIXTURE`), Dagster 로컬 쓰기 경로(`T-VN-DAGSTER-STORAGE`).
+  prod `features`가 0행이었다는 것이 그 넷을 한 문장으로 설명한다 — 이 prod에서
+  provider 적재가 한 번도 완주한 적이 없었고, 그래서 아무도 그 길을 걸어보지
+  않았다.
+
 - [x] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다**
   (**2026-09-11 완료**, #1207 `0ad47253` · #1210 `54136ac7` · #1211 `3891f632`).
   D2 lane이 재키 뒤 세계에서 **다섯 겹**으로 막혀 있었다:
