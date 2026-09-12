@@ -1109,10 +1109,14 @@ def test_dagster_image_config_recovers_orphaned_runs() -> None:
 def test_dagster_image_config_serializes_provider_pools() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
 
-    assert config["concurrency"] == {
-        "pools": {"default_limit": 1, "granularity": "run"},
-        "runs": {"max_concurrent_runs": 10},
-    }
+    # 이 검사의 주제는 **pool**이다. `concurrency` 전체를 정확 일치로 고정하면
+    # `runs` 쪽이 바뀔 때마다 여기가 낡는다 — 실제로 이 PR 안에서 두 번 낡았다.
+    # 그래서 주제만 정확 일치로 보고, 형제 key는 **집합으로만** 본다(새 key가
+    # 조용히 들어오는 것은 여전히 잡는다). `runs`의 뜻은
+    # `test_one_job_class_cannot_take_the_whole_queue`와
+    # `test_the_run_queue_limit_is_declared_and_load_bearing`이 소유한다.
+    assert set(config["concurrency"]) == {"pools", "runs"}, config["concurrency"]
+    assert config["concurrency"]["pools"] == {"default_limit": 1, "granularity": "run"}
 
 
 @pytest.mark.unit
