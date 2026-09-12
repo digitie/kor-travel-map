@@ -27,6 +27,7 @@ from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from kortravelmap.infra.application_schema_head import (
@@ -576,7 +577,7 @@ async def _read_operation_receipt(
 
 async def _find_operation_receipt(
     connection: AsyncConnection, operation_id: UUID
-) -> Mapping[str, Any] | None:
+) -> RowMapping | None:
     try:
         row = (
             await connection.execute(
@@ -593,9 +594,9 @@ async def _find_operation_receipt(
         ).mappings().one_or_none()
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
-    # `RowMapping`은 이 SQLAlchemy 버전의 스텁에서 `Mapping[str, Any]`의 하위형이
-    # 아니다. 반환 타입을 넓히는 대신 실제 타입을 적는다 — 호출자가 무엇을 받는지
-    # 정확히 말하는 쪽이 계약으로서 낫다.
+    # 반환 타입은 `RowMapping`이다 — 이 SQLAlchemy 버전 스텁에서 그것은
+    # `Mapping[str, Any]`의 하위형이 아니다. 넓게 적으면 mypy가 거절하고 `ignore`로
+    # 덮으면 호출자가 무엇을 받는지 잃는다. 실제 타입을 적는다.
     return row
 
 

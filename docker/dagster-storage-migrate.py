@@ -1280,6 +1280,7 @@ def _read_intent(connection: Any, operation_id: str) -> Mapping[str, Any] | None
         ),
         {"operation_id": operation_id},
     ).mappings().one_or_none()
+    return row
 
 
 def _read_receipt(connection: Any, operation_id: str) -> Mapping[str, Any] | None:
@@ -1293,6 +1294,7 @@ def _read_receipt(connection: Any, operation_id: str) -> Mapping[str, Any] | Non
         ),
         {"operation_id": operation_id},
     ).mappings().one_or_none()
+    return row
 
 
 def _migration_result(
