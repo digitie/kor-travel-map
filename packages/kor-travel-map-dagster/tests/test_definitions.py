@@ -527,7 +527,7 @@ def _minimum_firing_interval_seconds(cron_schedule: str) -> float:
     fires = [next(iterator) for _ in range(9)]
     return min(
         (later - earlier).total_seconds()
-        for earlier, later in zip(fires, fires[1:], strict=True)
+        for earlier, later in zip(fires[:-1], fires[1:], strict=True)
     )
 
 

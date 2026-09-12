@@ -210,11 +210,27 @@ def _validate_dagster_config(raw: bytes) -> None:
     # 상한이 사라지면 큐는 Dagster 기본값으로 돌아간다. 그 값이 무엇인지는 버전이
     # 정하고 우리는 모른다 — 형제 저장소 weather가 그 상태에서 두 번 멈췄다.
     runs = concurrency.get("runs") if isinstance(concurrency, dict) else None
-    if not isinstance(runs, dict) or set(runs) != {"max_concurrent_runs"}:
+    if not isinstance(runs, dict) or not set(runs) <= {
+        "max_concurrent_runs",
+        "tag_concurrency_limits",
+    }:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
-    run_limit = runs["max_concurrent_runs"]
+    run_limit = runs.get("max_concurrent_runs")
     if type(run_limit) is not int or run_limit < 1:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    # 한 job class가 큐 전량을 먹지 못하게 하는 상한. 허용만 하고 뜻을 보지 않으면
+    # `limit`이 전량과 같아져도(= 아무것도 막지 않아도) 통과한다.
+    #
+    # `value`를 금지한다. value 있는 항목은 그 key가 **그 값일 때만** 세므로,
+    # request id처럼 매번 다른 값에는 상한이 걸리지 않는다(`dagster/_utils/tags.py`).
+    for entry in runs.get("tag_concurrency_limits") or ():
+        if not isinstance(entry, dict) or set(entry) != {"key", "limit"}:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        if not isinstance(entry["key"], str) or not entry["key"]:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+        tag_limit = entry["limit"]
+        if type(tag_limit) is not int or not 1 <= tag_limit < run_limit:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
     # tick 이력의 상한.
     #
     # `concurrency`와 **같은 강도로** 가드한다. 종전에는 `isinstance` 없이
