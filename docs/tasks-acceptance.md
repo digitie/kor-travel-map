@@ -1985,6 +1985,85 @@ run/event/schedule storage는 postgres이므로 조문 1·2에는 영향이 없�
 난다. #1219가 설치 뒤 두 경로만 `$DAGSTER_HOME` 아래로 옮기고, 그 요구를
 `dagster.yaml`이 선언한 key 집합에서 유도하는 검사를 붙였다.
 
+## T-VN-QUOTA-ARITHMETIC
+
+```markdown
+- [ ] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
+```
+
+**왜 이 task가 있나.** 형제 저장소 `kor-travel-weather`가 2026-09-12에 정지 원인을
+확정했다(커밋 `a0c4dbb`) — 번역하지 않고 인용한다:
+
+> **It was arithmetic, not a hang.** Each external provider swept 1,428 locations with
+> one request each, hourly, against free tiers it exceeded by up to **43x**. Throttled,
+> a request took **12-17s instead of ~0.3s**, so a *successful* sweep ran **4-13
+> hours** — work arriving every hour that takes six to finish can only end one way.
+
+그 뒤 Map을 같은 기준으로 쟀다(3렌즈 감사: 요청량 · 쿼터 · 적합).
+
+**Map의 활성 schedule 산술은 성립한다 — 방어 장치가 아니라 순회 모양 때문이다.**
+
+weather는 **지점당 1요청**으로 훑었다. Map의 상시 고빈도 경로는 전부 집계/bulk
+endpoint다 — krex 교통공지 R=2~5, 휴게소 기상 R=1(전국 snapshot), 유가 R≈1,
+krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그것은 2026-09-09부터
+`DISABLED_FEATURE_LOAD_SCHEDULES`로 제거돼 있다. 나머지 27개는 월간이고, 요청당
+17초를 대입해도 최악 봉투가 전역 상한의 65%다.
+
+**weather와 구조적으로 다른 것 둘.**
+
+1. **실패 모양.** weather의 vendor는 throttle했다 — run이 *살아서 일하므로* 회수되지
+   않고 쌓였다. data.go.kr은 느려지지 않는다: resultCode 22를
+   `failure_kind="quota", retryable=False`로 즉시 올린다. Map의 쿼터 초과는 조용한
+   큐 포화가 아니라 **시끄러운 즉시 실패**다.
+2. **큐 포화가 구조적으로 막혀 있다.** 고빈도·disabled schedule 전부
+   `coalesce_active_runs=True`라 한 job이 슬롯 1개를 넘길 수 없다. weather의 "ten runs
+   sat STARTED"는 재현되지 않는다 — 재현 가능한 것은 그쪽의 *다른* 증상, **tick이
+   생략되고 데이터가 갱신되지 않는 것**뿐이다.
+
+**무엇이 참이면 닫히는가.**
+
+1. [ ] **분모가 기록돼 있다.** 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
+   상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
+   활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
+2. [ ] **분자가 있다.** 발신 provider 요청 수를 세는 코드가 있다. 지금은 0줄이다 —
+   그리고 `settings.log_api_calls`는 "provider client 호출 횟수를 `ops.api_call_log`에
+   기록"이라고 적혀 있지만 **프로덕션 reader가 0개**다(실제 writer는 API 패키지의
+   inbound 미들웨어이고 별개 설정이다). 카운터 이름에는 하한임을 박아야 한다 —
+   lib 내부 요청(krex lookback 루프, krheritage tenacity)은 이 층에서 보이지 않는다.
+3. [ ] **쿼터성 실패가 4배로 청구되지 않는다.** `FEATURE_LOAD_RETRY_POLICY`
+   (`max_retries=3`)가 35개 asset 전부에 붙어 있고, asset 경계가 `failure_kind`를
+   예외 **문자열에 녹여**(`f"KMA provider refresh failed: {exc}"`) step 층이 분류를
+   보지 못한다. code 22는 자정까지 같은 코드를 주므로 재시도의 성공 확률은 0인데,
+   쿼터 소진된 KMA run 하나가 **4 × 300 = 1,200요청**, krheritage run 하나가
+   **4 × ~3,950 = 15,800요청**을 쓴다.
+4. [ ] **선언 없는 증폭기가 없다.** 세 곳이 Map 코드에서 1줄로 보이는데 provider
+   안에서 팬아웃한다 — 휴게소 기상 `latest_weather()`가 최대 **49요청**
+   (`lookback_hours=48`), krforest 3종이 `max_pages` 미지정으로 lib 상한 **10,000
+   page**, OpiNet bbox/poi_cache_target 모드가 예산 미전달로 무제한.
+5. [ ] **UI가 근거 없는 보증을 하지 않는다.** admin의 schedule note가 두 갈래 모두
+   "rate limit의 약 90% 이하를 목표로 한"을 돌려주는데, 그 90%의 분모는 31개
+   schedule에 대해 존재하지 않는다. **그 화면이 운영자가 cron을 올리는 화면이다.**
+6. [ ] **KMA 격자 재활성화의 전제조건이 적혀 있다.** 켜면 한 활용신청에
+   24×300 + 24×300 + 8×300 = **16,800요청/일**이 들어간다. 비교할 수 있는 유일한
+   숫자는 근거 없는 어림 "보통 일 ~10,000"(`docs/etl/kma-weather-etl.md`) → 1.68배.
+   그리고 `settings`의 설명이 "초과분은 다음 run으로"라고 적지만 코드는 이월하지
+   않고 `KmaWeatherGridLimitExceeded`로 **전면 실패**한다.
+
+**바꾸기 전에 측정해야 하는 것.** 이 task의 절반은 코드가 아니라 숫자다.
+
+| 무엇 | 어떻게 |
+|---|---|
+| 각 활용신청의 일일 한도 | data.go.kr 마이페이지 → 활용신청 상세 (개발/운영 등급 포함) |
+| `VilageFcstInfoService_2.0`의 3 operation이 한 통을 공유하는가 | 같은 화면. 1.68배냐 0.56배냐가 여기서 갈린다 |
+| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe |
+| dataset별 선언 건수 | 각 endpoint에 `pageNo=1&numOfRows=1` 1요청 |
+| Map이 throttle 구간에 들어간 적이 있는가 | Dagster run 지속시간 분포 + asset metadata |
+
+**측정 전에 상한 숫자를 바꾸지 않는다.** 분모와 G를 모르는 상태에서 관측 범위를
+줄이면 그 대가를 계산할 수 없다. 대신 분모를 몰라도 정당한 것만 먼저 한다 — 정상
+관측값보다 크고 provider 기본값보다 작은 **폭주 상한**, 4배 배수 제거, 분자 만들기,
+그리고 다음 사람을 오도하는 문구 지우기.
+
 ## T-VN-D2-RESIDUE
 
 ```markdown
