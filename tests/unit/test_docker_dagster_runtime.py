@@ -1147,6 +1147,15 @@ def test_whatever_hosts_the_recovery_daemons_is_health_checked() -> None:
     판정은 dagster가 제공하는 정식 CLI(`dagster-daemon liveness-check`)를 쓰는지로
     본다. 직접 만든 판정은 `all_daemons_live`가 보는 것(required daemon 전부의
     heartbeat 신선도, `ignore_errors=True`)과 갈라질 수 있다.
+
+    그리고 **다시 올라오는지**까지 본다. healthcheck는 상태를 보이게 만들지만
+    아무것도 되돌리지 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다)
+    Exited 컨테이너를 되살리는 watchdog도 이 배포에 없다. 회수하는 것이 없어진 것을
+    회수해 줄 것이 없으면, 위 검사는 "누군가 볼 수 있다"까지다.
+
+    `always`는 거부한다. 명시적 stop도 되돌려 파괴적 rebuild와 Manager의 stop
+    버튼과 싸운다. `unless-stopped`는 명시적 stop을 존중하고 스스로 나간 경우만
+    잡는다.
     """
     config = _dagster_yaml()
     if not config.get("run_monitoring", {}).get("enabled"):
@@ -1176,6 +1185,13 @@ def test_whatever_hosts_the_recovery_daemons_is_health_checked() -> None:
         )
         # 기동 창이 없으면 첫 heartbeat 전에 unhealthy로 떨어진다.
         assert healthcheck.get("start_period"), (name, healthcheck)
+        restart = service.get("restart")
+        assert restart == "unless-stopped", (
+            f"`{name}`의 restart 정책이 `unless-stopped`가 아니다: {restart!r}. "
+            "healthcheck는 상태를 보이게 하지만 되돌리지 않는다 — 이 서비스가 "
+            "스스로 나가면 회수 기제가 없어진 채로 남는다. `always`는 명시적 stop도 "
+            "되돌려 파괴적 rebuild와 싸우므로 쓰지 않는다."
+        )
 
 
 @pytest.mark.unit

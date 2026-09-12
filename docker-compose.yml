@@ -736,16 +736,28 @@ services:
     # heartbeat는 metadata postgres에 있으므로 이 검사는 DB까지 왕복한다. 그래서
     # interval을 webserver(10s)보다 길게 두고 start_period로 기동 창을 준다.
     #
-    # **restart 정책은 여기서 정하지 않는다.** 이 저장소의 어느 서비스에도 `restart`가
-    # 없고 lifecycle의 소유자는 Docker Manager다. 한 서비스에만 정책을 넣는 것은 배포
-    # 모델 변경이므로 소유자 결정으로 둔다 — 이 healthcheck는 그 결정을 하든 안 하든
-    # 필요한, 상태를 관측 가능하게 만드는 최소한이다.
     healthcheck:
       test: ["CMD-SHELL", "/usr/local/bin/dagster-daemon liveness-check"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    # **그리고 다시 올린다.** healthcheck는 상태를 보이게 만들지만 아무것도 되돌리지
+    # 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다), Exited 컨테이너를
+    # 되살리는 watchdog도 이 배포에 없다. 즉 위 검사만으로는 "회수 기제가 없어진 것을
+    # 누군가 볼 수 있다"까지이고, 여전히 사람이 볼 때까지 없어진 채다.
+    #
+    # 이 저장소의 다른 어느 서비스에도 `restart`가 없다. 이 서비스에만 두는 근거는
+    # **없어진 것이 무엇인지**다. API나 UI가 죽으면 그 사실 자체가 증상이다. daemon이
+    # 죽으면 증상이 "몇 시간 뒤 데이터가 갱신되지 않았다"로 나타나고, 그 사이 이
+    # 저장소의 큐 상한·coalesce·run 회수가 **전부 무력한 상태로** 돌아간다. 회수하는
+    # 것이 없어진 것을 회수해 줄 것도 없다.
+    #
+    # `always`가 아니라 `unless-stopped`다. `always`는 명시적 stop도 되돌려 파괴적
+    # rebuild와 Manager의 stop 버튼과 싸운다. `unless-stopped`는 명시적 stop을
+    # 존중하고, 호스트 재부팅 전에 **돌고 있던** 것만 되살린다 — 즉 자기 스레드가
+    # 죽어 스스로 나간 경우(controller의 `check_daemon_threads`)만 잡는다.
+    restart: unless-stopped
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
   # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
