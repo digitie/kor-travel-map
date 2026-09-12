@@ -4303,6 +4303,62 @@ def test_dagster_storage_rejects_alternate_top_level_storage_keys(
 
 
 @pytest.mark.unit
+def test_sealed_validator_accepts_the_config_this_repo_actually_ships() -> None:
+    """`docker/dagster.yaml`은 `_validate_dagster_config`를 통과해야 한다.
+
+    이 검사가 없어서 2026-09-12에 회전 사이클 하나가 탔다. 두 파일이 같은
+    최상위 key 집합을 **각자** 들고 있는데 서로를 본 적이 없었다 — 한쪽에
+    `local_artifact_storage`/`compute_logs`를 더하자 다른 쪽이
+    `dagster_storage_target_not_sealed`로 거절했고, 그 사실은 prod rebuild가
+    죽고 나서야 드러났다.
+
+    이웃한 `test_dagster_storage_rejects_alternate_top_level_storage_keys`는 이걸
+    못 잡는다. 그건 **거절되는 것**을 보는데, 두 파일이 어긋나면 그 거절은
+    이유만 바뀐 채 여전히 일어나기 때문이다 — 항진명제다. 어긋남을 보려면
+    **통과하는 것**을 봐야 한다.
+    """
+    module = _load_dagster_storage_module()
+
+    module._validate_dagster_config((ROOT / "docker" / "dagster.yaml").read_bytes())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["local_artifact_storage", "compute_logs"])
+def test_sealed_validator_rejects_local_writes_outside_the_appuser_state(
+    key: str,
+) -> None:
+    """key를 허용한 것이 "아무 데나 써도 된다"가 되지 않아야 한다.
+
+    봉인의 뜻은 "로컬로 새지 않는다"이므로, 두 경로가 이미지가 appuser에게 넘긴
+    `/opt/dagster/state` 밖을 가리키면 여전히 거절이다.
+    """
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    config[key]["config"]["base_dir"] = "/opt/dagster/dagster_home/storage"
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("key", ["local_artifact_storage", "compute_logs"])
+def test_sealed_validator_rejects_dropping_a_local_write_declaration(
+    key: str,
+) -> None:
+    """선언을 지우면 Dagster가 기본값인 봉인된 `DAGSTER_HOME`으로 되돌아간다."""
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    del config[key]
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
 def test_dagster_storage_rejects_appuser_writable_config_parent() -> None:
     module = _load_dagster_storage_module()
     writable_parent = SimpleNamespace(st_mode=stat.S_IFDIR | 0o777, st_uid=0)
