@@ -1,5 +1,60 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-12 — 고침이 스택을 내렸고, 그 뒤에 진짜 고침이 있었다
+
+`T-VN-DAGSTER-STORAGE`가 닫히는 과정에서 prod가 한 시간 넘게 내려가 있었다. 그 한
+시간이 가르쳐 준 것을 적는다.
+
+### 파괴적 rebuild는 실패해도 파괴는 되돌리지 않는다
+
+rebuild는 스택을 먼저 내린다. 그 뒤 단계에서 죽으면 **내려간 채로 남는다.** 06:18에
+그렇게 됐고 나는 08:20이 되어서야 스택이 내려가 있다는 것을 알았다 — 원인을 좇느라
+`docker ps`를 한 번도 안 봤기 때문이다. 실패를 조사할 때 **무엇이 지금 죽어 있는가**를
+먼저 보는 것은 원인 규명보다 앞선다.
+
+### `--json`이 원문을 삼킨다
+
+launcher는 `ktdctl ... --json`으로 부르고, CLI는 봉인 밖 실패의 원문을 JSON에 넣지
+않는다. 남는 것은 `{"status":"failed","classification":"unclassified"}` 한 줄과
+0바이트 stderr다. 노출 계약으로는 옳지만 **운영자가 이유를 볼 방법이 없다.** 같은
+CLI를 `--json` 없이 한 번 더 돌려 회수했다. 47초짜리였으니 값쌌지만 70분짜리였다면
+같은 값을 두 번 치렀을 것이다.
+
+### 두 번 틀렸다
+
+**추론을 증거로 착각했다.** 실패 단계를 Manager 소스의 phase 목록에서 읽고 그것을
+관측처럼 적었다. 영수증에는 그런 말이 없었다. 나중에 docker daemon 로그가
+`…dagster-storage-migrate-run-dc953676ad41` 컨테이너가 2초 만에 죽은 것을 보여
+주면서 확정됐지만, 그때 내가 한 것은 확인이 아니라 짐작이었다.
+
+**내가 만든 사실을 세상의 사실로 읽었다.** 원문을 회수하려고 lock을 잡고 CLI를
+돌렸는데 launcher처럼 FD를 넘기지 않았다. `c6c_deployment_lock`이 새로 잡으려다 내
+flock에 막혀 "another C6c compatible-pair operation is already active"를 냈다.
+하마터면 그것을 원인으로 적을 뻔했다 — 어제 pair contract v1 거절에서 같은 실수를
+했으니 두 번째다.
+
+### 간헐 실패와 결함은 로그가 같다
+
+봉인을 고친 뒤 rebuild가 다시 죽었다. 이번엔 `pinvi-db-runtime-role` 단계였고 18분을
+돌았다. **같은 입력으로 재시도하니 9분 40초에 완주했다** — resume journal에서
+이어받았다. 코드를 의심하기 전에 한 번 더 돌리는 것이 이 계열에서는 옳다.
+
+### 그래서 무엇이 달라졌나
+
+수정 전 이 prod의 Dagster run은 **전부 실패**였다. 지금은 `SUCCESS 23 · FAILURE 1`
+이고, 그 하나는 rebuild가 스택을 내리던 순간에 걸린 run이다. provider 적재 job이
+이 prod에서 처음으로 `SUCCESS`로 끝났고 `claims 1047 · aliases 1047 · links 1047`이
+다시 맞물렸다.
+
+### 적대 리뷰가 막은 것
+
+같은 날 D2 lane 변경에서 blocker 2건이 나왔다. 두 렌즈가 **독립적으로 같은 결함**에
+도달했다 — purge를 게이트 앞에 두면 실패한 run의 소유 Feature가 사라지고, 복구
+lane의 api-audit이 그 행 1건을 요구하므로 `recover`가 구조적으로 통과 불가능해진다.
+BLOCKED는 `recover`로만 지워지고 `run`은 BLOCKED가 있으면 막히므로, 배포됐다면 D2가
+prod에서 **영구 정지**했을 것이다. 두 줄의 상대 위치가 그것을 갈랐고 둘 다 그냥
+helper 호출로 보였다.
+
 ## 2026-09-12 — 같은 집합을 각자 들고 있으면 언젠가 어긋난다
 
 `T-VN-DAGSTER-STORAGE`를 고친 #1216이 prod rebuild를 깼다. 고침이 결함이 된 경위를
