@@ -155,7 +155,10 @@ def _validate_dagster_config(raw: bytes) -> None:
             config["local_artifact_storage"]["config"]["base_dir"],
             config["compute_logs"]["config"]["base_dir"],
         )
-        run_limit = config["concurrency"]["runs"]["max_concurrent_runs"]
+        # 최상위 key는 위에서 정확히 대조했으므로 여기서 KeyError는 나지 않는다.
+        # **그 아래를 try 안에서 뽑으면 안 된다** — 누락이 `invalid_dagster_yaml`로
+        # 접히고, 그러면 "봉인되지 않았다"와 "yaml이 깨졌다"가 구분되지 않는다.
+        concurrency = config["concurrency"]
         retention = config["retention"]
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
         raise DagsterStorageMigrationError("invalid_dagster_yaml") from exc
@@ -187,6 +190,10 @@ def _validate_dagster_config(raw: bytes) -> None:
     #
     # 상한이 사라지면 큐는 Dagster 기본값으로 돌아간다. 그 값이 무엇인지는 버전이
     # 정하고 우리는 모른다 — 형제 저장소 weather가 그 상태에서 두 번 멈췄다.
+    runs = concurrency.get("runs") if isinstance(concurrency, dict) else None
+    if not isinstance(runs, dict) or set(runs) != {"max_concurrent_runs"}:
+        raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+    run_limit = runs["max_concurrent_runs"]
     if type(run_limit) is not int or run_limit < 1:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
     # tick 이력의 상한. 둘 중 하나가 없으면 그 종류는 무한히 늘어난다.
