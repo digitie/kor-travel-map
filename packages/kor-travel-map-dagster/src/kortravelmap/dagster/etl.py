@@ -18,6 +18,11 @@ from kortravelmap.dagster.validation import (
     validate_feature_bundles_address,
 )
 
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    observed_upstream_requests,
+)
+
 if TYPE_CHECKING:
     from collections.abc import (
         AsyncIterable,
@@ -760,8 +765,23 @@ def _merge_validation_summaries(
 def _add_output_metadata(
     context: AssetExecutionContext, metadata: Mapping[str, object]
 ) -> None:
+    """asset output metadata를 싣는다 — **분자를 여기서 합친다.**
+
+    이 함수가 이 패키지에서 metadata를 내보내는 유일한 자리다(19개 호출 지점).
+    그래서 "이 run이 upstream에 몇 번 요청했는가"를 여기서 한 번 합치면 asset
+    19곳을 각각 고치지 않아도 된다 — 그리고 실패 경로의 metadata에도 함께 실린다
+    (실패한 run이 쿼터를 얼마나 썼는지가 사후 판독의 값이다).
+
+    **호출자가 이미 그 key를 담았으면 덮지 않는다.** 자기 수를 아는 asset이
+    있다면 그쪽이 더 정확하다.
+    """
+
+    merged = dict(metadata)
+    observed = observed_upstream_requests()
+    if observed is not None and UPSTREAM_REQUESTS_METADATA_KEY not in merged:
+        merged[UPSTREAM_REQUESTS_METADATA_KEY] = observed
     try:
-        context.add_output_metadata(metadata)
+        context.add_output_metadata(merged)
     except Exception as exc:
         if exc.__class__.__name__ != "DagsterInvalidPropertyError":
             raise
