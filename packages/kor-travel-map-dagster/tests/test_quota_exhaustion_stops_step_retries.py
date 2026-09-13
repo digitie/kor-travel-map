@@ -534,6 +534,68 @@ def test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard() -> N
     assert openers, "계수기를 여는 함수를 하나도 찾지 못했다 — 결박이 사라졌다"
 
 
+def _enclosing_with_calls(module: ast.Module, target: ast.AST) -> set[str]:
+    """``target``을 감싸는 모든 ``with`` 문의 context manager 호출 이름."""
+
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(module):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    names: set[str] = set()
+    node: ast.AST | None = target
+    while node is not None:
+        if isinstance(node, ast.With | ast.AsyncWith):
+            for item in node.items:
+                expr = item.context_expr
+                if isinstance(expr, ast.Call):
+                    func = expr.func
+                    if isinstance(func, ast.Name):
+                        names.add(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        names.add(func.attr)
+        node = parents.get(node)
+    return names
+
+
+def test_the_queue_runner_opens_the_counter_around_the_raw_run_function() -> None:
+    """feature-update queue 경계도 계수기를 연다.
+
+    이 경로는 asset wrapper가 아니라 **원본 run 함수**를 직접 부른다. 그래서
+    wrapper가 여는 계수기가 여기엔 없다 — 열지 않으면 계측된 fetcher가 큐로 돌
+    때 모든 `note_upstream_request()`가 no-op이 되고, 값이 조용히 사라진다
+    (2026-09-13 2차 적대 리뷰 blocker).
+
+    종전 구조 검사는 "쿼터 판정을 거는 함수가 계수기를 여는가"만 물었는데, 그
+    두 집합이 정확히 같은 두 함수라 **동어반복**이었고 이 경계를 볼 수 없었다.
+    여기서는 호출 자리를 AST로 찾아 **그 자리가 계수 범위 안에 있는지**를 본다.
+    """
+
+    module = ast.parse((_PACKAGE / "feature_update_runner.py").read_text(encoding="utf-8"))
+    dispatches = [
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+        and isinstance(node.func.value, ast.Name)
+    ]
+    assert dispatches, (
+        "runner가 raw run 함수를 부르는 자리를 찾지 못했다 — 이 검사가 아무것도 "
+        "보지 않고 있다(유도가 낡았다)."
+    )
+    uncounted = [
+        node.lineno
+        for node in dispatches
+        if _COUNTER_SCOPE not in _enclosing_with_calls(module, node)
+    ]
+    assert uncounted == [], (
+        f"raw run 함수를 계수 범위 **밖**에서 부른다(line {uncounted}). 그 경로의 "
+        "`note_upstream_request()`는 전부 no-op이 되고, 계측된 fetcher가 큐로 돌면 "
+        "`upstream_requests_min` 없이 조용히 나간다."
+    )
+
+
 # `test_every_retrying_asset_counts_its_upstream_requests`는 여기 있었다(2026-09-13
 # 제거). 이름과 달리 **항진명제였다** — 계수기를 여는 wrapper를 모든 asset이 지나므로
 # `asset_name in openers or calls & openers`가 언제나 참이었고, 세지 않는 fetcher를
