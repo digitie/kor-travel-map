@@ -137,12 +137,12 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 
 **배선은 실행 문맥이 대신한다.** fetcher가 generator라 "세는 자리(페이지 루프)"와
 "내보내는 자리(asset output metadata)" 사이에 값을 흘릴 인자가 없었다. 그래서
-`kortravelmap.dagster.upstream_requests`가 `ContextVar`로 계수기를 들고, asset
-경계(`run_tracked_feature_asset`·`feature_place_mcst_culture`)가 그것을 연다 —
+`kortravelmap.dagster.upstream_requests`가 `ContextVar`로 계수기를 들고, **실행
+경계 셋**(asset wrapper `run_tracked_feature_asset`·`feature_place_mcst_culture`,
+그리고 feature-update queue의 `FeatureUpdateAssetRunner`)이 그것을 연다 —
 provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치는 자리는
-`etl._add_output_metadata` 하나뿐이라(이 패키지에서 metadata를 내보내는 유일한
-초크포인트) **실패 경로의 metadata에도 함께 실린다** — 실패한 run이 쿼터를 얼마나
-썼는지가 사후 판독의 값이다.
+`etl._add_output_metadata` 하나뿐이다(이 패키지에서 metadata를 내보내는 유일한
+초크포인트).
 
 **`_min`이 뜻하는 것.** 페이지 하나 = 요청 **적어도** 하나다. 콜백이 안에서
 재시도하면(외부 `upstream_retry` attempts, provider client 내부 retries) 그것은 이
