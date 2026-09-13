@@ -50,11 +50,18 @@ _REQUIRED_CHECKS = {
 
 
 def _judged_check_names() -> set[str]:
-    """``gate.require(...)``의 **첫 인자**로 쓰인 축 이름만 모은다.
+    """``gate.require(...)``의 **첫 인자 리터럴**만 모은다.
 
-    종전에는 모듈의 모든 문자열 리터럴을 모았다. 그러면 docstring도 세어서
-    "그 축을 잰다"가 아니라 "그 글자가 파일 어딘가에 있다"를 재게 된다 — 판정을
-    지우고 문서에 이름만 남겨도 초록이었다(적대 리뷰 지적). 판정의 자리를 본다.
+    두 번 좁혔다.
+
+    1차: 모듈의 모든 문자열 리터럴을 모으던 것 → docstring까지 세어서 판정을
+    지우고 문서에 이름만 남겨도 초록이었다.
+
+    2차: 그것을 고치며 "require를 부르는 함수 안의 모든 튜플/리스트"를 허용했는데
+    (축을 루프로 도는 자리가 있었다), 그 완화가 같은 구멍을 다시 열었다 — 루프
+    변수로 판정하는 축은 이름이 **튜플에만** 있으므로 `gate.require(...)`를
+    지워도 초록이었다(2026-09-13 2차 리뷰가 변이로 재현했다). 지금은 게이트
+    쪽에서 그 루프를 펴서 첫 인자를 리터럴로 만들었고, 여기서는 그 자리만 본다.
     """
 
     tree = ast.parse(_GATE.read_text(encoding="utf-8"))
@@ -70,15 +77,6 @@ def _judged_check_names() -> set[str]:
                 first = child.args[0]
                 if isinstance(first, ast.Constant) and isinstance(first.value, str):
                     names.add(first.value)
-            # (b) 같은 함수 안의 튜플/리스트 리터럴 — 축을 루프로 도는 자리가 있다
-            #     (`_check_live_config`의 두 축). docstring은 `Expr(Constant)`라
-            #     여기에 걸리지 않는다.
-            if isinstance(child, ast.Tuple | ast.List):
-                for element in ast.walk(child):
-                    if isinstance(element, ast.Constant) and isinstance(
-                        element.value, str
-                    ):
-                        names.add(element.value)
     return names
 
 

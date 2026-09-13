@@ -96,21 +96,52 @@ _REQUIRED_DAEMON_TYPES: tuple[str, ...] = (
 
 
 def _run_bound_seconds(tag_value: object, global_bound: float) -> float:
-    """이 run이 실제로 받는 회수 상한(초).
+    """이 run이 실제로 받는 runtime 회수 상한(초).
 
     job tag ``dagster/max_runtime``이 있으면 그것이고, 없으면
     ``run_monitoring.max_runtime_seconds``다. Dagster의 회수 판정이 그 순서다.
     tag가 숫자가 아니면 전역값으로 되돌린다 — 여기서 죽으면 게이트가 판정 대신
     파싱 오류로 끝난다.
+
+    **전역값이 0 이하면 상한이 없는 것으로 본다**(``inf``). config가 상한을
+    선언하지 않은 세계에서 "모든 진행 중 run이 stuck"이라고 말하면, 그 자리의
+    진짜 문제(``live-config/run-timeout-bounded``가 이미 red다)를 가린다.
     """
 
+    fallback = float(global_bound) if global_bound > 0 else float("inf")
     if tag_value is None:
-        return float(global_bound)
+        return fallback
     try:
         parsed = float(str(tag_value))
     except ValueError:
-        return float(global_bound)
-    return parsed if parsed > 0 else float(global_bound)
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _exceeds_reclaim_bound(row: Any, bounds: ReclaimBounds) -> bool:
+    """이 run이 **자기 상태의** 회수 기준을 넘겼는가.
+
+    row = ``(run_id, status, seconds_since_start, seconds_since_transition, tag)``.
+
+    - ``STARTING`` — 아직 안 돌고 있다. 기준은 ``start_timeout_seconds``이고,
+      경과는 마지막 상태 전이부터 잰다.
+    - ``CANCELING`` — 기준은 ``cancel_timeout_seconds``.
+    - ``STARTED`` — 기준은 job tag 또는 ``max_runtime_seconds``, 경과는
+      ``start_time``부터. ``create_timestamp``로 재면 큐에서 기다린 시간이 섞인다.
+    """
+
+    status = str(row[1])
+    since_start = float(row[2] or 0.0)
+    since_transition = float(row[3] or 0.0)
+    if status == "STARTING":
+        bound = float(bounds.start_timeout) if bounds.start_timeout > 0 else float("inf")
+        return since_transition > bound + _STUCK_GRACE_SECONDS
+    if status == "CANCELING":
+        bound = (
+            float(bounds.cancel_timeout) if bounds.cancel_timeout > 0 else float("inf")
+        )
+        return since_transition > bound + _STUCK_GRACE_SECONDS
+    return since_start > _run_bound_seconds(row[4], bounds.max_runtime) + _STUCK_GRACE_SECONDS
 
 
 class GateUnobservable(RuntimeError):
@@ -250,26 +281,53 @@ def _under_state_root(value: object) -> bool:
     return posixpath.normpath(value).startswith(f"{_LOCAL_STATE_ROOT}/")
 
 
-def _check_live_config(gate: Gate, config: dict[str, Any]) -> int:
+def _base_dir(config: dict[str, Any], key: str) -> Any:
+    """``<key>.config.base_dir``. 없으면 ``None``."""
+
+    section = config.get(key)
+    if not isinstance(section, dict):
+        return None
+    inner = section.get("config")
+    return inner.get("base_dir") if isinstance(inner, dict) else None
+
+
+@dataclass(frozen=True)
+class ReclaimBounds:
+    """Dagster가 상태별로 run을 회수하는 기준(초).
+
+    **한 값으로 재면 안 된다.** ``run_monitoring``은 상태마다 다른 knob을 쓴다 —
+    띄우지 못하는 run은 ``start_timeout_seconds``(기본 config 600초), 도는 run은
+    ``max_runtime_seconds``(21,600초), 취소 중인 run은 ``cancel_timeout_seconds``다.
+    셋을 모두 max_runtime으로 재면 **launcher가 죽어 STARTING에 갇힌 run이 6시간
+    넘게 초록**이다(2026-09-13 2차 리뷰 지적).
+    """
+
+    max_runtime: int
+    start_timeout: int
+    cancel_timeout: int
+
+
+def _check_live_config(gate: Gate, config: dict[str, Any]) -> ReclaimBounds:
     """A축 — 배포된 config가 로컬 쓰기 두 자리를 여전히 선언한다."""
-    # 이름을 f-string으로 만들지 않는다. 리터럴이어야 로그에서 grep되고, 이 축이
-    # 조용히 사라지는 것을 정적 검사가 볼 수 있다.
-    for check_name, key in (
-        ("live-config/local_artifact_storage", "local_artifact_storage"),
-        ("live-config/compute_logs", "compute_logs"),
-    ):
-        section = config.get(key)
-        base_dir = (
-            section.get("config", {}).get("base_dir")
-            if isinstance(section, dict)
-            else None
-        )
-        gate.require(
-            check_name,
-            "under-state-root" if _under_state_root(base_dir) else "elsewhere",
-            "under-state-root",
-            detail=base_dir,
-        )
+    # 이름을 f-string으로도, **루프 변수로도** 만들지 않는다. 판정 호출의 첫 인자가
+    # 리터럴이어야 정적 검사가 "이 축이 판정된다"를 볼 수 있다 — 루프로 돌리면
+    # 이름이 튜플에만 남아서, 판정을 지워도 검사가 초록이었다(2026-09-13 2차 리뷰).
+    gate.require(
+        "live-config/local_artifact_storage",
+        "under-state-root"
+        if _under_state_root(_base_dir(config, "local_artifact_storage"))
+        else "elsewhere",
+        "under-state-root",
+        detail=_base_dir(config, "local_artifact_storage"),
+    )
+    gate.require(
+        "live-config/compute_logs",
+        "under-state-root"
+        if _under_state_root(_base_dir(config, "compute_logs"))
+        else "elsewhere",
+        "under-state-root",
+        detail=_base_dir(config, "compute_logs"),
+    )
     storage = config.get("storage")
     postgres = storage.get("postgres") if isinstance(storage, dict) else None
     gate.require(
@@ -299,7 +357,17 @@ def _check_live_config(gate: Gate, config: dict[str, Any]) -> int:
         "declared",
         detail=queue_cap,
     )
-    return int(runtime_cap) if type(runtime_cap) is int else 0
+    return ReclaimBounds(
+        max_runtime=int(runtime_cap) if type(runtime_cap) is int else 0,
+        start_timeout=_positive_int(monitoring.get("start_timeout_seconds")),
+        cancel_timeout=_positive_int(monitoring.get("cancel_timeout_seconds")),
+    )
+
+
+def _positive_int(value: object) -> int:
+    """config의 양의 정수. 없거나 이상하면 0(= 상한 없음으로 본다)."""
+
+    return value if type(value) is int and value > 0 else 0
 
 
 def main() -> int:
@@ -320,13 +388,14 @@ def main() -> int:
         return 2
 
     gate = Gate()
-    run_timeout = _check_live_config(gate, config)
+    bounds = _check_live_config(gate, config)
     endpoint = f"http://127.0.0.1:{port}/graphql"
     engine = create_engine(dsn, pool_size=1, max_overflow=0)
     population: dict[str, Any] = {
         "kind": "dagster-run-completion",
         "probe_job": args.probe_job,
-        "run_timeout_seconds": run_timeout,
+        "run_timeout_seconds": bounds.max_runtime,
+        "start_timeout_seconds": bounds.start_timeout,
     }
     probe: dict[str, Any] = {}
 
@@ -398,14 +467,23 @@ def main() -> int:
                 detail=other_runs,
             )
 
-            # **run마다 자기 상한으로 잰다.** 전역 상한 하나로 재면 job tag
-            # ``dagster/max_runtime``(최신성 job 7,200초)을 세 배 넘긴 run이
-            # 네 시간 더 초록이다 — `docker/dagster.yaml`이 그 두 층을 명문화하는데
-            # 게이트는 위층만 보고 있었다(적대 리뷰 지적).
+            # **run마다 자기 상한으로, 그 상태의 기준 시각으로 잰다.**
+            #
+            # 전역 상한 하나로 재면 job tag ``dagster/max_runtime``(최신성 job
+            # 7,200초)을 세 배 넘긴 run이 네 시간 더 초록이다. 그리고 경과를
+            # ``create_timestamp``로 재면 **큐에서 기다린 시간**이 섞여 큐가 밀린
+            # 정상 상황에서 거짓 red가 난다 — Dagster가 max_runtime과 비교하는 것은
+            # ``start_time``이다. 마지막으로 STARTING은 max_runtime이 아니라
+            # ``start_timeout_seconds``로 회수된다. 셋 다 2026-09-13 2차 리뷰가
+            # 잡았다.
             in_progress = connection.execute(
                 text(
-                    "SELECT r.run_id, "
-                    "EXTRACT(EPOCH FROM (now() - r.create_timestamp)), "
+                    "SELECT r.run_id, r.status, "
+                    "EXTRACT(EPOCH FROM (now() - COALESCE("
+                    "  to_timestamp(r.start_time), r.update_timestamp,"
+                    "  r.create_timestamp))), "
+                    "EXTRACT(EPOCH FROM (now() - COALESCE("
+                    "  r.update_timestamp, r.create_timestamp))), "
                     "(SELECT t.value FROM run_tags t "
                     " WHERE t.run_id = r.run_id AND t.key = 'dagster/max_runtime') "
                     "FROM runs r "
@@ -413,10 +491,9 @@ def main() -> int:
                 )
             ).all()
             stuck_runs = [
-                str(row[0])
+                f"{row[0]}({row[1]})"
                 for row in in_progress
-                if float(row[1] or 0.0)
-                > _run_bound_seconds(row[2], run_timeout) + _STUCK_GRACE_SECONDS
+                if _exceeds_reclaim_bound(row, bounds)
             ]
             population["in_progress_runs"] = len(in_progress)
             gate.require(
@@ -447,11 +524,18 @@ def main() -> int:
                 "all-required-fresh",
                 detail=sorted(_REQUIRED_DAEMON_TYPES),
             )
+            # **필수 종류에 대해서만 판정한다.** 분모를 "관측된 전부"로 두면
+            # 한 번이라도 떴다가 꺼진 daemon의 heartbeat 행이 낡은 채로 영구
+            # 잔류해(`daemon_heartbeats.daemon_type`은 UNIQUE이고 wipe로만 지워진다)
+            # 이 축이 그때부터 절대 초록이 되지 않는다. Dagster 자신도 신선도를
+            # required 종류에 대해서만 판정한다(2026-09-13 2차 리뷰 지적).
+            required = set(_REQUIRED_DAEMON_TYPES)
+            fresh_required = sorted(required & fresh_types)
             gate.require(
                 "daemon/heartbeats-fresh",
-                f"{len(fresh_types)}/{len(observed_types)}",
-                f"{len(observed_types)}/{len(observed_types)}",
-                detail=sorted(observed_types - fresh_types),
+                f"{len(fresh_required)}/{len(required)}",
+                f"{len(required)}/{len(required)}",
+                detail=sorted(required - fresh_types),
             )
     except GateUnobservable as exc:
         print(f"!! 관측 불가: {exc}", file=sys.stderr)
