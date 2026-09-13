@@ -16,6 +16,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 import kortravelmap.dagster.provider_fetchers as provider_fetchers
+from kortravelmap.dagster.provider_pagination import ProviderPaginationOverrun
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
 )
@@ -1360,20 +1361,56 @@ def test_knps_point_records_fetch_closes_on_partial_consumption(
     assert fake.instances[0].closed is True
 
 
+class _FakeForestNoDataError(Exception):
+    """``krforest.ForestNoDataError``의 대역 — 실물은 "더 없음"을 예외로 알린다."""
+
+
 class _FakeForestPage:
-    def __init__(self, items: list[object]) -> None:
+    """실물 ``krforest.models.Page``의 필드 계약을 흉내낸다.
+
+    ``total_count``가 없으면 저장소 페이지네이션 헬퍼가 선언 건수로 상한을 유도하지
+    못한다. 종전 대역에는 그 필드가 없었고, 그래서 **페이지네이션이 한 번도
+    시험되지 않았다** — 라이브러리 ``iter_pages``의 10,000페이지 fallback이
+    아무에게도 보이지 않은 이유다.
+    """
+
+    def __init__(self, items: list[object], *, total_count: int | None = None) -> None:
         self.items = tuple(items)
+        self.total_count = len(items) if total_count is None else total_count
 
 
 class _FakeForestTravel:
-    def __init__(self, forests: list[object], arboretums: list[object]) -> None:
+    def __init__(
+        self,
+        forests: list[object],
+        arboretums: list[object],
+        *,
+        declared_total: int | None = None,
+        page_size_override: int | None = None,
+    ) -> None:
         self._forests = forests
         self._arboretums = arboretums
+        self._declared_total = declared_total
+        self._page_size_override = page_size_override
+        self.page_calls: list[int] = []
 
     async def standard_recreation_forests(
         self, *, page_no: int = 1, num_of_rows: int = 10, **_kwargs: Any
     ) -> _FakeForestPage:
-        return _FakeForestPage(self._forests)
+        self.page_calls.append(page_no)
+        size = self._page_size_override or num_of_rows
+        start = (page_no - 1) * size
+        window = self._forests[start : start + size]
+        if not window and self._declared_total is None:
+            raise _FakeForestNoDataError("no data")
+        return _FakeForestPage(
+            window,
+            total_count=(
+                len(self._forests)
+                if self._declared_total is None
+                else self._declared_total
+            ),
+        )
 
     async def recreation_forest_arboretums(
         self, *, name: str | None = None
@@ -1382,23 +1419,29 @@ class _FakeForestTravel:
 
 
 class _FakeForestClient:
+    """대역에 ``iter_pages``가 **없다**.
+
+    프로덕션 코드가 라이브러리 iterator로 되돌아가면 여기서 ``AttributeError``로
+    빨개진다. 그것이 의도다 — 라이브러리 iterator는 ``max_pages``를 주지 않으면
+    상한을 ``total_count``에서 유도하고, 그 유도가 실패하면 10,000페이지까지 간다.
+    """
+
     instances: list[_FakeForestClient] = []
     forests: list[object] = []
     arboretums: list[object] = []
+    declared_total: int | None = None
+    page_size_override: int | None = None
 
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
         self.travel = _FakeForestTravel(
-            list(type(self).forests), list(type(self).arboretums)
+            list(type(self).forests),
+            list(type(self).arboretums),
+            declared_total=type(self).declared_total,
+            page_size_override=type(self).page_size_override,
         )
         _FakeForestClient.instances.append(self)
-
-    async def iter_pages(
-        self, fetch_page: Any, *, page_no: int = 1, num_of_rows: int = 10, **kwargs: Any
-    ) -> AsyncIterator[_FakeForestPage]:
-        # 단일 페이지(테스트). 실제 has_next_page 페이지네이션은 provider 책임.
-        yield await fetch_page(page_no=page_no, num_of_rows=num_of_rows, **kwargs)
 
     async def aclose(self) -> None:
         self.closed = True
@@ -1409,12 +1452,17 @@ def _install_fake_krforest(
     *,
     forests: list[object],
     arboretums: list[object],
+    declared_total: int | None = None,
+    page_size_override: int | None = None,
 ) -> type[_FakeForestClient]:
     _FakeForestClient.instances = []
     _FakeForestClient.forests = forests
     _FakeForestClient.arboretums = arboretums
+    _FakeForestClient.declared_total = declared_total
+    _FakeForestClient.page_size_override = page_size_override
     module = ModuleType("krforest")
     module.__dict__["ForestClient"] = _FakeForestClient
+    module.__dict__["ForestNoDataError"] = _FakeForestNoDataError
     monkeypatch.setitem(sys.modules, "krforest", module)
     return _FakeForestClient
 
@@ -1441,6 +1489,56 @@ def test_krforest_recreation_forests_fetch_yields_and_closes(
     client = fake.instances[0]
     assert client.api_key == "forest-key"
     assert client.closed is True
+
+
+def test_krforest_recreation_forests_walks_every_page() -> None:
+    """선언 건수가 여러 페이지면 전부 걷는다 — 첫 페이지에서 멈추지 않는다."""
+
+    forests = [object() for _ in range(7)]
+
+    def _run(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+        fake = _install_fake_krforest(
+            monkeypatch, forests=forests, arboretums=[], page_size_override=3
+        )
+        settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+        records = asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
+        assert fake.instances[0].travel.page_calls == [1, 2, 3]
+        return records
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        records = _run(monkeypatch)
+    finally:
+        monkeypatch.undo()
+    assert len(records) == 7
+
+
+def test_krforest_recreation_forests_refuses_to_walk_past_the_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """상한을 넘기면 **조용히 자르지 않고** 실패한다.
+
+    이것이 쿼터 결함의 핵심이다. 종전에는 라이브러리 ``iter_pages``를 썼고, 그것은
+    ``max_pages``를 주지 않으면 ``total_count``에서 상한을 유도하되 유도가 실패하면
+    10,000페이지까지 간다 — 그리고 상한에 닿으면 **조용히 ``return``한다**.
+    산불위험예보의 실측 일일 한도는 오퍼레이션당 1,000이다.
+
+    여기서는 upstream이 선언 건수를 거짓으로 크게 말하는(= 유도가 쓸모없는) 상황을
+    만든다. 페이지는 계속 만재로 돌아오므로 짧은 페이지 휴리스틱도 멈추지 않는다.
+    """
+
+    forests = [object() for _ in range(1000)]
+    _install_fake_krforest(
+        monkeypatch,
+        forests=forests,
+        arboretums=[],
+        declared_total=10**9,
+        page_size_override=1,
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+
+    with pytest.raises(ProviderPaginationOverrun):
+        asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
 
 
 def test_krforest_arboretums_fetch_yields_and_closes(
@@ -1517,40 +1615,61 @@ def test_standard_museums_fetch_yields_and_closes(
 
 
 class _FakeFestivalPage:
-    def __init__(self, items: list[object]) -> None:
+    """실물 ``visitkorea.models.Page``의 필드 계약(``items`` + ``total_count``)."""
+
+    def __init__(self, items: list[object], *, total_count: int | None = None) -> None:
         self.items = tuple(items)
+        self.total_count = len(items) if total_count is None else total_count
 
 
 class _FakeVisitKoreaClient:
     instances: list[_FakeVisitKoreaClient] = []
     items: list[object] = []
+    declared_total: int | None = None
+    page_size_override: int | None = None
 
     def __init__(self, *, service_key: str | None = None, **_kwargs: Any) -> None:
         self.service_key = service_key
         self.closed = False
         self.search_calls: list[Any] = []
+        self.page_calls: list[int] = []
         _FakeVisitKoreaClient.instances.append(self)
 
     def search_festival(
         self, event_start_date: Any, *, page_no: int = 1, num_of_rows: int = 10, **_kw: Any
     ) -> _FakeFestivalPage:
         self.search_calls.append(event_start_date)
-        return _FakeFestivalPage(type(self).items)
+        self.page_calls.append(page_no)
+        size = type(self).page_size_override or num_of_rows
+        start = (page_no - 1) * size
+        items = type(self).items
+        return _FakeFestivalPage(
+            items[start : start + size],
+            total_count=(
+                len(items)
+                if type(self).declared_total is None
+                else type(self).declared_total
+            ),
+        )
 
-    def iter_pages(
-        self, fetch_page: Any, *args: Any, page_no: int = 1, num_of_rows: int = 10, **kw: Any
-    ) -> Iterator[_FakeFestivalPage]:
-        yield fetch_page(*args, page_no=page_no, num_of_rows=num_of_rows, **kw)
+    # ``iter_pages``는 일부러 두지 않는다 — 라이브러리 iterator는 ``max_pages``가
+    # 없으면 상한이 없다. 프로덕션이 그쪽으로 되돌아가면 AttributeError로 빨개진다.
 
     def close(self) -> None:
         self.closed = True
 
 
 def _install_fake_visitkorea(
-    monkeypatch: pytest.MonkeyPatch, *, items: list[object]
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    items: list[object],
+    declared_total: int | None = None,
+    page_size_override: int | None = None,
 ) -> type[_FakeVisitKoreaClient]:
     _FakeVisitKoreaClient.instances = []
     _FakeVisitKoreaClient.items = items
+    _FakeVisitKoreaClient.declared_total = declared_total
+    _FakeVisitKoreaClient.page_size_override = page_size_override
     module = ModuleType("visitkorea")
     module.__dict__["KrTourApiClient"] = _FakeVisitKoreaClient
     monkeypatch.setitem(sys.modules, "visitkorea", module)
@@ -1580,6 +1699,36 @@ def test_visitkorea_festival_events_fetch_yields_and_closes(
     # search_festival에 event_start_date(올해 1월 1일)를 넘긴다.
     assert client.search_calls
     assert client.search_calls[0].month == 1
+
+
+def test_visitkorea_festival_events_walks_every_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """축제는 한 페이지에 다 담기지 않는다 — 전부 걷는지 본다."""
+
+    items = [object() for _ in range(5)]
+    fake = _install_fake_visitkorea(monkeypatch, items=items, page_size_override=2)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_visitkorea_festival_events(settings))
+
+    assert len(records) == 5
+    assert fake.instances[0].page_calls == [1, 2, 3]
+
+
+def test_visitkorea_festival_events_refuses_to_walk_past_the_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """visitkorea ``iter_paginated_pages``는 ``max_pages``가 없으면 상한이 없다."""
+
+    items = [object() for _ in range(1000)]
+    _install_fake_visitkorea(
+        monkeypatch, items=items, declared_total=10**9, page_size_override=1
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(ProviderPaginationOverrun):
+        list(fetch_visitkorea_festival_events(settings))
 
 
 class _FakeBeachPage:
