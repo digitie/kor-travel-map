@@ -10,9 +10,11 @@ from __future__ import annotations
 import pytest
 
 from kortravelmap.dagster.provider_pagination import (
+    DEFAULT_ABSOLUTE_MAX_PAGES,
     DEFAULT_MAX_PAGES,
     ProviderPage,
     ProviderPaginationOverrun,
+    ProviderPaginationStalled,
     iter_paginated_items,
 )
 
@@ -210,3 +212,150 @@ def test_items_are_yielded_lazily() -> None:
     assert upstream.requested == [1]
     stream.close()
     assert upstream.requested == [1]
+
+
+def test_declared_total_raises_the_ceiling_but_not_past_the_absolute_one() -> None:
+    """**``max_pages``는 천장이 아니라 바닥이다.** 그 위에 천장이 있어야 한다.
+
+    ``absorb``가 선언 건수에 맞춰 ``ceiling``을 올리는 설계는 옳다 — 선언 건수가
+    상한을 정한다. 그러나 그 위에 아무것도 없으면 **upstream이 말한 숫자가 곧
+    우리의 요청 수**가 된다. ``total_count``를 잘못 파싱하거나 upstream이 거짓을
+    말하면 한 번의 sweep이 쿼터를 통째로 태운다.
+
+    2026-09-13에 이것을 값을 치르고 배웠다. krforest 호출 4곳에 ``max_pages=10``을
+    주고 "묶었다"고 적었는데, 선언 건수를 크게 둔 테스트가 상한을 무시하고 계속
+    걸었다.
+    """
+
+    calls: list[int] = []
+
+    def endless_with_huge_declared_total(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        return ProviderPage(items=[f"p{page_no}"], total_count=10**9)
+
+    with pytest.raises(ProviderPaginationOverrun) as caught:
+        list(
+            iter_paginated_items(
+                endless_with_huge_declared_total,
+                num_of_rows=1,
+                label="huge-declared",
+                max_pages=5,
+                absolute_max_pages=5,
+            )
+        )
+
+    assert len(calls) == 5, f"절대 상한을 넘겨 {len(calls)}페이지를 걸었다"
+    assert "절대 상한" in str(caught.value), (
+        "실패 문구가 어느 상한에 걸렸는지 말하지 않으면 운영자가 잘못된 값을 고친다"
+    )
+
+
+def test_max_pages_alone_does_not_bound_a_lying_upstream() -> None:
+    """회귀 표식 — 절대 상한을 빼면 ``max_pages``만으로는 묶이지 않는다.
+
+    이 테스트는 결함의 **모양**을 박아 둔다. ``absolute_max_pages``를 크게 두면
+    ``max_pages=5``는 upstream의 선언에 밀려 아무것도 막지 못한다.
+    """
+
+    calls: list[int] = []
+
+    def finite_but_long(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        if page_no > 40:
+            return ProviderPage(items=[], total_count=10**9)
+        return ProviderPage(items=[f"p{page_no}"], total_count=10**9)
+
+    list(
+        iter_paginated_items(
+            finite_but_long,
+            num_of_rows=1,
+            label="lying-upstream",
+            max_pages=5,
+            absolute_max_pages=DEFAULT_ABSOLUTE_MAX_PAGES,
+        )
+    )
+
+    assert len(calls) > 5, (
+        "`max_pages`가 천장처럼 동작했다 — 이 테스트가 박아 둔 사실이 바뀌었다면 "
+        "`absorb`의 상한 상향 규칙을 다시 읽어라."
+    )
+
+
+def test_a_stalled_upstream_is_caught_not_absorbed() -> None:
+    """``page_no``를 무시하는 upstream을 조용히 흡수하지 않는다.
+
+    같은 100건을 30번 받고 "3,000건 수집"으로 끝나는 모양이다 — 중복은 upsert가
+    흡수하므로 run은 초록이고 누락은 보이지 않는다. 이 검사는 원래 provider
+    라이브러리에 있었고(visitkorea `iter_paginated_pages`), 쿼터 상한을 얻으려
+    저장소 헬퍼로 옮기면서 잃었다가 적대 리뷰에 잡혀 되살렸다.
+    """
+
+    calls: list[int] = []
+
+    def never_advances(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        return ProviderPage(
+            items=["a", "b"], total_count=3000, fingerprint={"body": "same"}
+        )
+
+    with pytest.raises(ProviderPaginationStalled):
+        list(
+            iter_paginated_items(
+                never_advances, num_of_rows=2, label="stalled", max_pages=50
+            )
+        )
+    assert calls == [1, 2], f"두 번째 페이지에서 멈춰야 한다 — {len(calls)}번 걸었다"
+
+
+def test_a_fingerprint_that_actually_changes_is_not_flagged() -> None:
+    """항진명제 방지 — 전진하는 upstream은 통과해야 한다."""
+
+    def advances(page_no: int) -> ProviderPage:
+        return ProviderPage(
+            items=[f"p{page_no}"] if page_no <= 3 else [],
+            total_count=3,
+            fingerprint={"page": page_no},
+        )
+
+    assert list(iter_paginated_items(advances, num_of_rows=1, label="ok")) == [
+        "p1",
+        "p2",
+        "p3",
+    ]
+
+
+def test_a_synthesized_total_count_is_at_least_audible() -> None:
+    """provider가 ``totalCount``를 ``len(items)``로 채우면 조용히 잘린다 — 들리게 한다.
+
+    2026-09-13 실측: 2,500행 dataset에서 이 헬퍼도 1,000행만 받고 끝났다. 즉
+    라이브러리 iterator에서 저장소 헬퍼로 옮긴 것이 이 절단을 **고치지 않는다**.
+    종료 규칙 자체를 바꾸면 범위 밖 page에 예외를 던지는 provider에서 새 실패가
+    생기므로, 여기서는 경고만 낸다 — 적대 리뷰가 이 자리의 근거가 거꾸로였다고
+    지적한 뒤 실측으로 확인한 결과다.
+    """
+
+    warnings: list[str] = []
+    page_size = 1000
+    total = 2500
+
+    def synthesized(page_no: int) -> ProviderPage:
+        start = (page_no - 1) * page_size
+        items = list(range(start, min(start + page_size, total)))
+        # upstream이 totalCount를 안 주면 lib이 len(items)로 채운다.
+        return ProviderPage(items=items, total_count=len(items))
+
+    collected = list(
+        iter_paginated_items(
+            synthesized,
+            num_of_rows=page_size,
+            label="synthesized-total",
+            warn=warnings.append,
+        )
+    )
+
+    assert len(collected) == page_size, (
+        "종료 규칙이 바뀌었다 — 바꿨다면 범위 밖 page 예외를 던지는 provider를 "
+        "먼저 확인하고 이 테스트를 갱신해라."
+    )
+    assert warnings, "조용히 잘렸다 — 경고가 없으면 아무도 알아차리지 못한다"
+    assert "totalCount" in warnings[0]

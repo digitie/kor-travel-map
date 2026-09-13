@@ -58,12 +58,11 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [ ] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
+- [~] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
 
-  형제 저장소가 2026-09-12에 "It was arithmetic, not a hang"으로 정지 원인을 확정한
-  뒤 Map을 같은 기준으로 쟀다. 활성 schedule의 산술은 성립하지만(순회가 지점당
-  1요청이 아니라 집계 endpoint다) 쿼터를 **아는 코드가 없다** — 분모도 분자도.
-  해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
+  2026-09-13에 분모를 실측했고 그것이 전제 하나를 뒤집었다 — 일일 트래픽은 서비스가
+  아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 조문 1·3·4·5는
+  닫혔다. 해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
 
 - [~] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
 

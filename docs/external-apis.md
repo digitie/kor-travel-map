@@ -283,8 +283,12 @@ REST export는 ADR-053 예외로, kor-travel-map Dagster fetcher가 같은 timeo
   request_id}`.
 - 쿼터: provider별 token bucket 또는 leaky bucket.
 
-본 라이브러리는 provider client 호출 횟수만 `ops.api_call_log` 테이블에 기록
-(옵션, `log_api_calls=True`).
+`ops.api_call_log`는 **provider 호출이 아니라 Map API로 들어오는 요청**을 기록한다
+(`app.py`의 opt-in 미들웨어, 설정 `api_call_log_enabled`). 열은
+`method`/`path`/`status_code`/`duration_ms`/`request_id`다.
+
+**upstream 요청 수를 세는 자리는 아직 없다.** 분모는 실측했고
+(`docs/etl/upstream-quota.md`) 분자는 없다.
 
 ## 5. 호출 빈도 제어
 

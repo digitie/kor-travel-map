@@ -271,12 +271,28 @@ def _parse_ticks(raw_ticks: object) -> list[DagsterInstigationTick]:
 
 
 def _schedule_note(schedule_name: str, default_cron: str | None) -> str | None:
+    """운영자가 cron을 바꾸기 전에 읽는 한 줄.
+
+    2026-09-13까지 이 함수는 모든 schedule에 대해 "provider rate limit의 약 90%
+    이하를 목표로 한 기본값"이라고 답했다. **그 90%는 계산된 적이 없다.** 분모(각
+    오퍼레이션의 일일 트래픽)를 이 저장소가 갖고 있지 않았고, 분자(주기당 요청 수)도
+    지표로 나오지 않는다. 32개 schedule 중 31개가 같은 문자열을 받았다 — 즉 그것은
+    schedule에 대한 진술이 아니라 상수였다.
+
+    지금은 분모만 실측돼 있다(``docs/etl/upstream-quota.md``, 오퍼레이션당 500~10,000).
+    분자가 없으므로 **비율을 말할 수 없다.** 그래서 여기서는 아는 것만 말하고 —
+    이것이 저장소가 고른 기본값이라는 사실 — 나머지는 실측 표를 가리킨다.
+    """
+
     lowered = schedule_name.lower()
     if any(token in lowered for token in _FILE_DOWNLOAD_SCHEDULE_HINTS):
         return "파일 다운로드 계열 기본 주기는 월 1회입니다."
-    if default_cron and default_cron.endswith(" * * * *"):
-        return "provider rate limit의 약 90% 이하를 목표로 한 시간 단위 기본값입니다."
-    return "provider rate limit의 약 90% 이하를 목표로 한 기본값입니다."
+    cadence = "시간 단위 " if default_cron and default_cron.endswith(" * * * *") else ""
+    return (
+        f"이 저장소가 고른 {cadence}기본값입니다. "
+        "upstream 일일 한도 대비 소비량은 schedule마다 다릅니다 — "
+        "실측 한도는 docs/etl/upstream-quota.md에 있습니다."
+    )
 
 
 def default_cron_for_schedule(schedule_name: str, current_cron: str | None) -> str | None:

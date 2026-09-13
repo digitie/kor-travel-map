@@ -47,8 +47,6 @@ def test_settings_default_values() -> None:
     # 로깅
     assert settings.log_level == "INFO"
     assert settings.log_format == "json"
-    # 옵션
-    assert settings.log_api_calls is False
 
 
 @pytest.mark.unit
@@ -59,14 +57,12 @@ def test_settings_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET", "custom-bucket")
     monkeypatch.setenv("KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES", "2048")
-    monkeypatch.setenv("KOR_TRAVEL_MAP_LOG_API_CALLS", "true")
 
     settings = KorTravelMapSettings()
 
     assert settings.log_level == "DEBUG"
     assert settings.object_store_bucket == "custom-bucket"
     assert settings.offline_upload_max_bytes == 2048
-    assert settings.log_api_calls is True
 
 
 @pytest.mark.unit

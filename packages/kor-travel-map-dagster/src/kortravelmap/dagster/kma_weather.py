@@ -485,6 +485,15 @@ class KmaWeatherLoadResult:
             "grids_total": self.grids_total,
             "grids_fetched": self.grids_fetched,
             "grids_dropped": self.grids_dropped,
+            # **분자다.** 격자 하나 = upstream 요청 하나이므로 이 run이 쓴 오퍼레이션
+            # 쿼터가 곧 이 수다. `_min`인 이유는 실패한 격자가 재시도되면 요청이
+            # 늘어나기 때문이다(`upstream_retry`: 외부 attempts 2 x client 내부 1 =
+            # 경계당 최대 4 HTTP 시도). 즉 이것은 하한이지 실측이 아니다.
+            #
+            # 분모는 오퍼레이션당 10,000/일이다(docs/etl/upstream-quota.md).
+            # 이 값을 metadata로 내보내는 이유가 그것이다 — 분모는 실측했는데
+            # 분자를 Dagster UI에서 볼 수 없었다.
+            "upstream_requests_min": self.grids_fetched,
             "features_total": self.features_total,
             "values_loaded": self.values_loaded,
             "membership_fingerprint": self.membership_fingerprint,

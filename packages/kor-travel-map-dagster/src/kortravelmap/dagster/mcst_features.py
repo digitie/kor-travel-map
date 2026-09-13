@@ -40,6 +40,7 @@ from .feature_operation_tracking import (
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
 )
+from .quota_exhaustion import raise_terminal_if_quota_exhausted
 
 __all__ = [
     "MCST_FEATURE_ASSETS",
@@ -176,6 +177,9 @@ async def feature_place_mcst_culture(
         if guard is not None:
             for membership in memberships:
                 await append_failed_multi_member_attempt(context, guard, membership, exc)
+        # 이 asset만 multi-member라 `run_tracked_feature_asset`를 지나지 않는다.
+        # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`).
+        raise_terminal_if_quota_exhausted(exc)
         raise
     if guard is not None:
         assert guard.operation_key is not None

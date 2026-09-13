@@ -19,7 +19,7 @@ import logging
 import math
 import pathlib
 import time
-from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -51,6 +51,7 @@ _LOGGER = logging.getLogger(__name__)
 logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 
 __all__ = [
+    "KrexRestAreaWeatherUnavailable",
     "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
     "fetch_airkorea_air_quality",
@@ -90,6 +91,25 @@ __all__ = [
 
 class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
+
+
+class KrexRestAreaWeatherUnavailable(RuntimeError):
+    """EX 휴게소 기상이 lookback 창 안에서 한 시각도 관측을 주지 않았을 때.
+
+    **이것이 없으면 빈 Page가 성공이 된다.** ``krex``의 ``latest_weather()``는
+    lookback을 다 쓰고도 못 찾으면 예외가 아니라 **빈 Page를 정상 반환**한다
+    (``krex/client.py``). 그러면 이 저장소의 적재 경로 어디에도 빈 가드가 없어
+    0 bundle·0 value가 적재되고, asset이 ``_record_feature_sync_success``까지
+    실행해 cursor를 전진시키고 ``consecutive_failures``를 0으로 되돌린다 —
+    Dagster는 초록, freshness는 "방금 성공", 실제 값은 갱신 없음.
+
+    2026-09-13 적대 리뷰가 잡았다. 그 전에는 이 모듈이 lookback을 48 → 6으로
+    줄이면서 "못 찾으면 시끄럽게 실패한다"고 적었는데, 실패하는 장치가 없었다.
+
+    **쿼터성으로 분류하지 않는다.** upstream이 잠깐 멈춘 것일 수 있고 다음 시도가
+    성공할 수 있으므로 step 재시도를 남긴다. 값은 시간당 4벌 × 7요청 = 28요청이고,
+    EX OpenAPI 일일 한도는 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
+    """
 
 
 class KrexTrafficNoticeSnapshotUnstable(RuntimeError):
@@ -749,6 +769,26 @@ def fetch_krex_rest_area_fuel_prices(
         client.close()
 
 
+#: ``latest_weather``가 과거로 되짚는 시간 수. 호출 한 번의 **요청 수 상한**이
+#: ``lookback_hours + 1``이므로 이것이 곧 증폭 배수다(라이브러리 기본값 48 → 49 요청).
+#:
+#: 6으로 낮춘 이유는 비용이 아니라 **정확성**이다. 이 asset은 매시(`35 * * * *`)
+#: 돌고 upstream은 시간 단위로 발표한다. 6시간을 되짚어도 못 찾았다면 그것은
+#: "조금 늦은 데이터"가 아니라 upstream이 멈춘 것이고, 그때 48시간 전 관측을
+#: "최신 기상"으로 적재하는 것은 조용한 오염이다. 요청이 49 → 7로 주는 것은 그
+#: 판단의 부수 효과다.
+#:
+#: **그리고 못 찾았을 때 실제로 실패해야 한다.** 라이브러리는 lookback을 다 쓰면
+#: 예외가 아니라 빈 Page를 돌려주고, 이 저장소의 적재 경로에는 빈 가드가 없어
+#: 그것이 **성공 cursor 전진**으로 끝난다. 그래서 여기서
+#: :class:`KrexRestAreaWeatherUnavailable`을 던진다 — 그러지 않으면 lookback을
+#: 줄이는 것은 "낡은 데이터"를 "조용한 무데이터"로 바꾸는 일이고, 후자가 더 나쁘다.
+#:
+#: KREX(한국도로공사 EX OpenAPI)는 data.go.kr 활용신청이 아니라 일일 한도를
+#: 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
+_KREX_WEATHER_LOOKBACK_HOURS: Final = 6
+
+
 def fetch_krex_rest_area_weather(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -763,8 +803,13 @@ def fetch_krex_rest_area_weather(
 
     ``latest_weather``는 전국 휴게소 1시간 snapshot을 한 Page로 돌려준다(restWeatherList
     는 휴게소 필터 없음) — 가장 최근 데이터가 있는 시각을 lookback으로 찾는다.
-    페이지네이션 불필요. generator 소비 종료(또는 close)시 ``finally``에서
-    ``client.close()``.
+    페이지네이션은 없지만 **호출 한 번이 요청 한 번이 아니다**: 라이브러리는
+    ``range(lookback_hours + 1)``로 한 시각씩 과거로 내려가며 비어 있지 않은 첫
+    페이지를 찾는다(``krex/client.py``). 기본값 48이면 **최악 49 요청**이고, 그
+    사실이 이 저장소 어디에도 적혀 있지 않았다(T-VN-QUOTA-ARITHMETIC).
+
+    그래서 여기서 명시한다 — :data:`_KREX_WEATHER_LOOKBACK_HOURS`. generator 소비
+    종료(또는 close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -780,7 +825,16 @@ def fetch_krex_rest_area_weather(
 
     client = krex.KrexClient(ex_api_key=api_key)
     try:
-        page = client.restarea.latest_weather()
+        page = client.restarea.latest_weather(
+            lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
+        )
+        if not page.items:
+            raise KrexRestAreaWeatherUnavailable(
+                "EX 휴게소 기상이 lookback "
+                f"{_KREX_WEATHER_LOOKBACK_HOURS}시간 안에 관측을 주지 않았다. "
+                "빈 결과를 성공으로 적재하면 cursor가 전진하고 실패 카운터가 "
+                "0으로 돌아가 아무도 눈치채지 못한다."
+            )
         yield from page.items
     finally:
         client.close()
@@ -830,6 +884,62 @@ async def fetch_knps_geometry_records(
         await client.aclose()
 
 
+#: krforest 페이지네이션의 **절대** 상한. ``num_of_rows=1000``이므로 10장 = 10,000행이고,
+#: 이 네 dataset은 그 근처도 아니다(휴양림·산악기상·산불위험·산사태 모두 수천 행대).
+#: 선언 건수(``total_count``)를 알면 헬퍼가 그 아래에서 상한을 잡는다.
+#:
+#: **라이브러리 iterator를 버린 이유는 폭주가 아니라 조용한 절단이다.** 처음 이
+#: 자리에 "``max_pages``를 주지 않으면 10,000페이지까지 간다"고 적었는데 **거꾸로**였다
+#: (적대 리뷰 지적). ``krforest``의 ``iter_pages``는
+#: ``page_ceiling = min(max(ceil(total_count / num_of_rows), 1), 10_000)``이라
+#: 10,000은 **추정치의 천장**이지 fallback이 아니다. 그리고 응답에 ``totalCount``가
+#: 없으면 ``_http.py``가 ``total_count = len(items)``로 채우므로 추정치가 **1**이 되고,
+#: 라이브러리는 1페이지만 읽고 **조용히 ``return``한다**. 10,000에 닿으려면 upstream이
+#: 천만 건 이상을 선언해야 한다.
+#:
+#: 즉 실제 위험은 "쿼터 폭주"가 아니라 **행 누락이 성공으로 보이는 것**이다. 이
+#: 저장소의 헬퍼는 짧은 페이지를 마지막 페이지로 읽지 않고, 상한을 넘기면
+#: ``ProviderPaginationOverrun``으로 시끄럽게 실패한다.
+#:
+#: ``max_pages``가 아니라 ``absolute_max_pages``로 넘긴다. 전자는 천장이 아니라
+#: **바닥**이라 upstream이 선언한 건수가 그 위로 올려 버린다 — 처음에 그것을
+#: ``max_pages``로 줬다가, 선언 건수를 10억으로 둔 테스트가 1,000페이지를 전부 걷는
+#: 것을 보고 알았다.
+_KRFOREST_MAX_PAGES: Final = 10
+
+
+async def _iter_krforest_records(
+    endpoint: Callable[..., Awaitable[Any]],
+    *,
+    label: str,
+    num_of_rows: int = 1000,
+) -> AsyncIterator[Any]:
+    """krforest 페이지 API를 **상한이 있는** 저장소 공통 규칙으로 순회한다."""
+
+    krforest = cast(Any, importlib.import_module("krforest"))
+
+    async def _page(page_no: int) -> ProviderPage:
+        page = await endpoint(page_no=page_no, num_of_rows=num_of_rows)
+        return ProviderPage(items=page.items, total_count=page.total_count)
+
+    async for record in aiter_paginated_items(
+        _page,
+        num_of_rows=num_of_rows,
+        label=label,
+        absolute_max_pages=_KRFOREST_MAX_PAGES,
+        end_of_pages=(krforest.ForestNoDataError,),
+        # **첫 페이지 NODATA는 종료가 아니라 실패다.** 이 네 fetcher는 전부
+        # authoritative snapshot 적재로 흘러가고, 그중 산악기상·산불위험은
+        # `retire_absent_from_snapshot=True`로 적재된다 — 빈 snapshot 하나가 그
+        # source의 feature를 **전부 은퇴**시킨다. 종전 라이브러리 iterator는
+        # `ForestNoDataError`를 잡지 않아 asset이 시끄럽게 죽었고, 이 헬퍼로
+        # 옮기며 `end_of_pages`를 단 것이 그 신호를 삼켰다(2026-09-13 적대 리뷰).
+        first_page_end_of_pages_is_failure=True,
+        warn=_LOGGER.warning,
+    ):
+        yield record
+
+
 async def fetch_krforest_recreation_forests(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -853,11 +963,11 @@ async def fetch_krforest_recreation_forests(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=api_key)
     try:
-        async for page in client.iter_pages(
-            client.travel.standard_recreation_forests, num_of_rows=1000
+        async for record in _iter_krforest_records(
+            client.travel.standard_recreation_forests,
+            label="krforest travel.standard_recreation_forests",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -950,12 +1060,11 @@ async def fetch_krforest_mountain_weather(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.travel.mountain_weather,
-            num_of_rows=1000,
+            label="krforest travel.mountain_weather",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -975,12 +1084,11 @@ async def fetch_krforest_wildfire_risk_forecast(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.safety.wildfire_risk_forecast,
-            num_of_rows=1000,
+            label="krforest safety.wildfire_risk_forecast",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -1000,12 +1108,11 @@ async def fetch_krforest_landslide_forecast_issues(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.safety.landslide_forecast_issues,
-            num_of_rows=1000,
+            label="krforest safety.landslide_forecast_issues",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -2217,6 +2324,13 @@ def fetch_standard_parking_lots(
         client.close()
 
 
+#: visitkorea 축제 순회의 **절대** 페이지 상한. 100행 × 50 = 5,000건이면 국내 연간
+#: 축제 수를 크게 넘는다. 이 오퍼레이션의 실측 일일 한도는 1,000이다
+#: (docs/etl/upstream-quota.md). 넘으면 조용히 자르지 않고
+#: ``ProviderPaginationOverrun``으로 실패한다 — 그때 숫자를 의도적으로 올려라.
+_VISITKOREA_FESTIVAL_MAX_PAGES: Final = 50
+
+
 def fetch_visitkorea_festival_events(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -2241,8 +2355,39 @@ def fetch_visitkorea_festival_events(
     client = visitkorea.KrTourApiClient(service_key=api_key)
     kst = timezone(timedelta(hours=9))
     start = date(datetime.now(kst).year, 1, 1)
+    num_of_rows = 100
+
+    def _page(page_no: int) -> ProviderPage:
+        page = client.search_festival(start, page_no=page_no, num_of_rows=num_of_rows)
+        # `fingerprint`가 라이브러리에서 잃은 '전진하지 않는 페이지네이션' 검사를
+        # 되살린다(`ProviderPaginationStalled`).
+        return ProviderPage(
+            items=page.items,
+            total_count=page.total_count,
+            fingerprint=getattr(page, "raw", None),
+        )
+
     try:
-        for page in client.iter_pages(client.search_festival, start, num_of_rows=100):
-            yield from page.items
+        # visitkorea의 `iter_pages`는 `max_pages`를 주지 않으면 **상한이 없다**
+        # (`_pagination.iter_paginated_pages`: `total_count`가 말하는 만큼 전부 걷는다).
+        # 같은 페이지 반복은 잡지만 "너무 많은 페이지"는 잡지 않는다.
+        #
+        # `max_pages`가 아니라 `absolute_max_pages`를 쓴다 — 전자는 천장이 아니라
+        # 바닥이라 선언 건수가 그 위로 올린다(그것을 실측으로 확인했다).
+        #
+        # 라이브러리 iterator가 갖고 있던 "직전 페이지와 raw가 같으면 실패" 가드는
+        # 위 `_page`가 `fingerprint`로 넘겨 헬퍼 쪽에서 되살린다 — 처음 옮길 때
+        # 그것을 잃었고 적대 리뷰가 잡았다.
+        #
+        # **한계**: fingerprint가 응답 body 전체라, upstream이 매 페이지 달라지는
+        # 필드(요청 시각 등)를 실어 주면 같은 items를 받아도 가드가 발화하지
+        # 않는다. TourAPI 응답에는 그런 필드가 없지만 계약은 아니다.
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="visitkorea search_festival",
+            absolute_max_pages=_VISITKOREA_FESTIVAL_MAX_PAGES,
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()
