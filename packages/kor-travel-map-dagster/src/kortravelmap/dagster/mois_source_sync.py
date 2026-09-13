@@ -61,6 +61,12 @@ from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    counting_upstream_requests,
+    note_upstream_request,
+    observed_upstream_requests,
+)
 
 __all__ = [
     "MOIS_SOURCE_SYNC_JOBS",
@@ -203,6 +209,10 @@ def sync_mois_source_db(
         client = mois.LocalDataFileClient()
         try:
             for slug in slugs:
+                # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
+                # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
+                # 하한으로 1을 센다 - 이름이 `_min`인 이유.
+                note_upstream_request()
                 session = Session(engine)
                 try:
                     result = mois.sync_localdata_source_db(
@@ -483,13 +493,39 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
     if fd is None:
         raise RuntimeError("MOIS 소스 DB sync가 이미 진행 중입니다. 기존 run 완료 후 재시도하세요.")
     try:
-        summary = sync_mois_source_db(
-            settings,
-            service_slugs=service_slugs,
-            org_code=org_code,
-            batch_size=batch_size,
-            dagster_run_id=context.run_id,
-        )
+        # 이 op은 asset이 아니라 plain `@op`이라 asset wrapper의 계수기를 지나지
+        # 않는다. Phase A가 전국 LOCALDATA 파일을 slug마다 받으므로 여기서 직접
+        # 열지 않으면 `note_upstream_request()`가 전부 no-op이다(3차 적대 리뷰).
+        with counting_upstream_requests():
+            try:
+                summary = sync_mois_source_db(
+                    settings,
+                    service_slugs=service_slugs,
+                    org_code=org_code,
+                    batch_size=batch_size,
+                    dagster_run_id=context.run_id,
+                )
+            except Exception:
+                # 실패한 step은 output을 내지 않으므로 여기서 남기지 않으면
+                # 소비량이 사라진다.
+                #
+                # **쿼터 판정은 걸지 않는다.** 4차에서 `raise_terminal_if_quota_exhausted`
+                # 를 걸었는데 5차가 그것이 **발화할 수 없는 죽은 코드**임을 잡았다 -
+                # `mois` lib은 쿼터 전용 예외도 `failure_kind`도 `status_code`도
+                # 갖지 않는다(provider 소스 확인, `quota_exhaustion.QUOTA_EXCEPTION_TYPES`
+                # 주석이 같은 사실을 이미 적어 두었다). 걸어 두면 구조 검사가 이 op을
+                # "쿼터 판정을 거는 경계"로 세어 **막았다고 보증한다** - 3차가 없앤
+                # '이름으로 초록' 패턴의 재발이다. MOIS가 한도를 알려 주게 되기
+                # 전까지 이 경로는 `MAINTENANCE_RETRY_POLICY`대로 재시도한다.
+                observed = observed_upstream_requests()
+                if observed is not None:
+                    context.log.warning(
+                        "MOIS Phase A가 실패했지만 upstream 요청은 나갔다 (%s=%d)",
+                        UPSTREAM_REQUESTS_METADATA_KEY,
+                        observed,
+                    )
+                raise
+            observed_requests = observed_upstream_requests()
         full_coverage = (
             summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS)) and org_code is None
         )
@@ -509,6 +545,8 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
         {MOIS_SOURCE_SYNC_COVERAGE_TAG: coverage},
     )
     metadata["coverage"] = coverage
+    if observed_requests is not None:
+        metadata[UPSTREAM_REQUESTS_METADATA_KEY] = observed_requests
     context.add_output_metadata(metadata)
     return metadata
 

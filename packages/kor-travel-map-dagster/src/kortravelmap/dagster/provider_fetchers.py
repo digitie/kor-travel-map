@@ -41,6 +41,7 @@ from .provider_pagination import (
     aiter_paginated_items,
     iter_paginated_items,
 )
+from .upstream_requests import note_upstream_request
 from .upstream_retry import retry_upstream
 
 if TYPE_CHECKING:
@@ -173,6 +174,7 @@ async def fetch_kor_travel_concierge_youtube_features(
             }
             if cursor:
                 params["cursor"] = cursor
+            note_upstream_request()
             response = await client.get(path, params=params)
             response.raise_for_status()
             payload = response.json()
@@ -241,7 +243,7 @@ def fetch_datagokr_cultural_festivals(
     """전국문화축제표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
-    ``DataGoKrClient(api_key=...)``를 열고 ``client.festival.iter_all()``의
+    ``DataGoKrClient(api_key=...)``를 열고 ``client.festival``
     record(``PublicCulturalFestival``, ``CulturalFestivalItem`` Protocol 충족)를
     lazily yield한다. generator가 살아 있는 동안 client는 열려 있고,
     소비 종료(또는 close)시 ``finally``에서 ``client.close()``로 닫는다.
@@ -269,18 +271,43 @@ def fetch_datagokr_cultural_festivals(
         client.close()
 
 
+#: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
+#: **Map이 소유한다** — 요청 수를 셀 수 있어야 쿼터 비율을 말할 수 있다.
+_KRHERITAGE_EVENT_MONTHS_BACK: Final[int] = 1
+_KRHERITAGE_EVENT_MONTHS_AHEAD: Final[int] = 12
+
+
+def _krheritage_event_months(anchor: date) -> Iterator[tuple[int, int]]:
+    """``anchor`` 기준 rolling window의 ``(year, month)``를 순서대로 낸다.
+
+    지난달 1개 + 이번 달 + 다음 12개월 = 14개. 그 수가 곧 이 fetcher의 요청 수다.
+    """
+
+    start = (anchor.year * 12) + (anchor.month - 1) - _KRHERITAGE_EVENT_MONTHS_BACK
+    total = _KRHERITAGE_EVENT_MONTHS_BACK + _KRHERITAGE_EVENT_MONTHS_AHEAD + 1
+    for offset in range(total):
+        zero_based = start + offset
+        yield zero_based // 12, (zero_based % 12) + 1
+
+
 def fetch_krheritage_events(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
     """국가유산 행사(event) record를 krheritage public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
-    ``HeritageClient(api_key=...)``를 열고 ``client.event.iter_months()``의
-    record(``HeritageEvent``, ``KrHeritageEvent`` Protocol 충족)를 lazily yield
-    한다. ``iter_months``는 provider 내장 rolling window(기본 ``months_back=1,
-    months_ahead=12``)를 그대로 정책으로 쓴다 — custom 인자를 넘기지 않는다.
+    ``HeritageClient(api_key=...)``를 열고 rolling window의 달마다
+    ``client.event.by_month(...)``를 불러 record(``HeritageEvent``,
+    ``KrHeritageEvent`` Protocol 충족)를 lazily yield 한다.
     generator가 살아 있는 동안 client는 열려 있고, 소비 종료(또는 close)시
     ``finally``에서 ``client.close()``로 닫는다.
+
+    **``iter_months()`` 대신 Map이 직접 돈다.** 둘은 같은 창을 돌고 호출 수도
+    같지만(:data:`_KRHERITAGE_EVENT_MONTHS_BACK`/``_AHEAD``가 provider 기본값과
+    같다), ``iter_months``는 provider **안에서** 달을 돌기 때문에 이 층이 요청
+    수를 셀 수 없다. 비어 있는 달도 요청 1건을 쓰므로 record 수로는 역산되지
+    않는다 — "한도의 몇 %를 쓰는가"에 대답하려면 창을 Map이 소유해야 한다
+    (2026-09-13 적대 리뷰 2차: 종전 면제 사유 "알 수 없다"가 사실과 달랐다).
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -298,7 +325,10 @@ def fetch_krheritage_events(
 
     client = krheritage.HeritageClient(api_key=api_key)
     try:
-        yield from client.event.iter_months()
+        for year, month in _krheritage_event_months(date.today()):
+            # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인).
+            note_upstream_request()
+            yield from client.event.by_month(year=year, month=month)
     finally:
         client.close()
 
@@ -389,6 +419,11 @@ def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
                 summary.name_ko,
             )
             continue
+        # detail은 record당 정확히 1 HTTP다(이 파일 위쪽 docstring과
+        # `krheritage_max_items_per_run`이 같은 사실에 기대고 있다). 목록
+        # 페이지만 세면 실린 수가 실제의 ~1%가 된다 - run 하나가 목록 ~45건,
+        # detail ~4,000건이다.
+        note_upstream_request()
         yield client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
 
 
@@ -589,6 +624,9 @@ def _fetch_krex_traffic_notice_snapshot(
     page_no = 1
     expected_total: int | None = None
     while True:
+        # 우리가 소유한 페이지 루프. 안정성 비교로 이 snapshot을 **최소 2회**
+        # 완주하므로 실제 요청은 페이지 수의 배수다 — 그 배수는 호출자가 돈다.
+        note_upstream_request()
         page = client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
         items = list(page.items)
         total_count = _validate_krex_traffic_notice_page(
@@ -825,6 +863,9 @@ def fetch_krex_rest_area_weather(
 
     client = krex.KrexClient(ex_api_key=api_key)
     try:
+        # 이 호출 하나가 lib 안에서 최대 `lookback+1`건을 보낸다. 이 층은 그
+        # 안을 볼 수 없으므로 **1건으로 센다** — 그래서 이름이 `_min`이다.
+        note_upstream_request()
         page = client.restarea.latest_weather(
             lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
         )
@@ -856,6 +897,7 @@ async def fetch_knps_point_records(
     knps = cast(Any, importlib.import_module("knps"))
     client = knps.KnpsClient()
     try:
+        note_upstream_request()
         records = await client.files.read_place_records(dataset_key)
         for record in records:
             yield record
@@ -877,6 +919,7 @@ async def fetch_knps_geometry_records(
     knps = cast(Any, importlib.import_module("knps"))
     client = knps.KnpsClient()
     try:
+        note_upstream_request()
         records = await client.files.read_geo_records(dataset_key)
         for record in records:
             yield record
@@ -994,6 +1037,9 @@ async def fetch_krforest_arboretums(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=api_key)
     try:
+        # 호출 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을 받는다.
+        # 그 배수는 provider 내부라 여기서는 1로 센다 - 그래서 이름이 `_min`이다.
+        note_upstream_request()
         records = await client.travel.recreation_forest_arboretums()
         for record in records:
             yield record
@@ -1016,6 +1062,10 @@ async def fetch_krforest_mountain_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        # SHP 다운로드 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을
+        # 받는다. 그 배수는 provider 내부라 여기서는 1로 센다 - 이름이 `_min`인
+        # 이유이고, 위 arboretums와 같은 형태다.
+        note_upstream_request()
         records = await client.travel.forest_trail_file_features()
         for record in records:
             yield record
@@ -1038,6 +1088,10 @@ async def fetch_krforest_dulle_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        # SHP 다운로드 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을
+        # 받는다. 그 배수는 provider 내부라 여기서는 1로 센다 - 이름이 `_min`인
+        # 이유이고, 위 arboretums와 같은 형태다.
+        note_upstream_request()
         records = await client.travel.dulle_trail_features()
         for record in records:
             yield record
@@ -1123,7 +1177,7 @@ def fetch_standard_museums(
     """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
-    ``client.museum_art.iter_all()``의 record(``PublicMuseumArtGallery``, krtour
+    ``client.museum_art`` record(``PublicMuseumArtGallery``, krtour
     ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
     sync이므로 sync generator다. 소비 종료/close 시 ``finally``에서 ``close()``.
     """
@@ -1152,7 +1206,7 @@ def fetch_standard_tourist_attractions(
     """전국관광지표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
-    ``client.tourist_attraction.iter_all()``의 record(``PublicTouristAttraction``,
+    ``client.tourist_attraction`` record(``PublicTouristAttraction``,
     krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
     sync client → sync generator, ``finally``에서 ``close()``.
     """
@@ -1216,7 +1270,17 @@ def fetch_datagokr_file_data_records(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.file_data.iter_all(dataset_key)
+        # `iter_all`은 provider 안에서 페이지를 돌아 이 층이 셀 수 없다.
+        # `iter_pages`는 public이고 `iter_all`이 그것을 그대로 감싼 것뿐이라
+        # (provider 소스 확인) 바꿔도 같은 record를 같은 순서로 낸다 - 다만
+        # 페이지마다 요청 1건을 셀 수 있다.
+        #
+        # 여기만 요청 **뒤**에 센다(generator가 페이지를 받아 yield한 뒤 본문이
+        # 돈다). 마지막 페이지가 실패하면 그 1건이 빠지지만, 분자는 하한이므로
+        # 그 방향은 안전하다 - 반대로 앞에서 세면 나가지 않은 요청을 셀 수 있다.
+        for page in client.file_data.iter_pages(dataset_key):
+            note_upstream_request()
+            yield from page.items
     finally:
         client.close()
 
@@ -1275,6 +1339,9 @@ def fetch_mcst_culture_records(
     max_items = settings.mcst_max_items_per_dataset
     try:
         for slug in selected_slugs:
+            # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
+            # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
+            note_upstream_request()
             for seen, row in enumerate(client.iter_csv(slug), start=1):
                 yield (slug, row)
                 if seen >= max_items:
@@ -1730,6 +1797,18 @@ def _enumerate_opinet_stations(
     """여러 bbox를 ``iter_stations_in_bbox``로 enumerate하며 ``uni_id`` dedup.
 
     bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
+
+    **이 경로는 요청을 세지 못한다.** ``iter_stations_in_bbox``가 bbox를 격자로
+    덮으며 셀마다 ``aroundAll``을 부르는데, 그 셀 수 계산(``_bbox_grid_centers``)은
+    provider private이고 Map이 복제하면 drift가 난다 — 이 저장소가 이미 같은 이유로
+    복제를 거부했다. bbox 하나를 1로 세는 것은 1과 20,000을 같게 만들어 0만큼이나
+    오도한다.
+
+    그래서 **아무것도 세지 않는다**. 계수기 계약상 기록이 없으면
+    ``upstream_requests_min``이 metadata에 실리지 않으므로 "0번 요청했다"로 위장하지는
+    않는다. 같은 fetcher의 ``low_top_area`` 모드는 ``_OpinetCallBudget.spend()``로
+    정확히 센다 — 즉 **이 fetcher의 계측은 scope mode에 따라 다르다**(부분 계측).
+    총량을 실제로 묶는 것은 하루 한 번 coalescing이다(docs/etl/upstream-quota.md).
     """
     invalid_parameter = _opinet_invalid_parameter_error_type()
     seen: set[str] = set()
@@ -1978,12 +2057,24 @@ class _OpinetCallBudget:
         return not self._unbounded and self._remaining <= 0
 
     def spend(self) -> bool:
-        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``."""
+        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``.
+
+        **여기가 OpiNet의 분자다.** 이 메서드는 호출 **직전**에 정확히 1건씩
+        불린다 — 그래서 쿼터 계수기도 같은 자리에서 올린다. 2026-09-13 적대 리뷰
+        전까지 이 정확한 계수가 있는데도 metadata에는 0이 실렸다. 하필 OpiNet이
+        저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다
+        (`_OPINET_RUN_CALL_BUDGET` = 600 vs 무료키 1,500/일, #545). 예산을 짜 둔
+        자리의 분자가 0이었다.
+
+        예산이 소진돼 ``False``를 돌려줄 때는 호출이 일어나지 않으므로 세지 않는다.
+        """
         if self._unbounded:
+            note_upstream_request()
             return True
         if self._remaining <= 0:
             return False
         self._remaining -= 1
+        note_upstream_request()
         return True
 
 
@@ -2290,6 +2381,9 @@ def fetch_opinet_station_price_details(
         for station in _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         ):
+            # enumerate 자체는 세지 못하지만(`_enumerate_opinet_stations` 참고)
+            # 상세 조회는 uni_id마다 정확히 1건이다 - 셀 수 있는 쪽은 센다.
+            note_upstream_request()
             yield client.get_station_detail(station.uni_id)
     finally:
         close = getattr(client, "close", None)
@@ -2302,7 +2396,7 @@ def fetch_standard_parking_lots(
 ) -> Iterator[Any]:
     """전국주차장표준데이터 record를 datagokr public client로 stream한다.
 
-    ``client.parking.iter_all()``의 record(``PublicParkingLot``, krtour
+    ``client.parking`` record(``PublicParkingLot``, krtour
     ``PublicParkingLotItem`` Protocol 충족)를 yield. sync generator, finally close.
     """
     secret = settings.data_go_kr_service_key

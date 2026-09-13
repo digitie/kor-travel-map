@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-13 — 쿼터 분자가 붙었다 (`feat/upstream-request-numerator`)
+
+**다음 한 작업: 이 브랜치의 PR을 열고 CI green을 확인한 뒤 머지.**
+
+분모는 `0b60a8508`(#1227)로 들어갔고, 이 브랜치가 분자를 붙인다. upstream 진입점
+40개 중 35개가 요청을 전부 세고 그 수가 `upstream_requests_min`으로 asset output
+metadata에 실린다. 배선은 `ContextVar`다 — fetcher가 generator라 인자로는 흘릴 수
+없었고, 시그니처를 하나도 바꾸지 않는다.
+
+적대 리뷰 **다섯 판**이 각각 blocker를 냈다(상세는 `docs/journal.md` 2026-09-13
+"분자를 세기 시작했고…"). 요약하면 **배선보다 커버리지가 문제였고, 커버리지를
+지키려던 정적 검사가 두 번 다 항진명제였다.** 지금은 층이 나뉘어 있다 —
+정적 검사는 "빠진 진입점이 없는가", 런타임 테스트는 "N번 부르면 N을 세는가".
+
+남은 것:
+- 부분 계측 **셋**: OpiNet bbox enumerate 둘(provider가 격자 셀 수를 감춘다 —
+  총량을 묶는 것은 하루 한 번 coalescing이다)과 MOIS asset 경로(Dagster resource
+  init이 계수 범위보다 앞이다).
+- `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr 포털에 없어 **분모가 아직 없다** —
+  분자만 있는 provider라 분자의 정확성이 전부다.
+
 ## 2026-09-11 — T-VN-39 재키가 착지했다 (#1197, `e8c66c47`)
 
 `feature.features.feature_id`가 uuid다. 서버가 적재 시점에 발급하는 UUIDv7이고 어떤

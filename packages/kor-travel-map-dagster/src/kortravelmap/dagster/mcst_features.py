@@ -36,11 +36,13 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
+    _log_spend_on_failure,
     append_failed_multi_member_attempt,
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
 )
 from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .upstream_requests import counting_upstream_requests
 
 __all__ = [
     "MCST_FEATURE_ASSETS",
@@ -153,56 +155,61 @@ async def run_feature_place_mcst_culture(
 async def feature_place_mcst_culture(
     context: AssetExecutionContext,
 ) -> McstLoadResult:
-    guard = await ensure_tracked_multi_member_asset(context)
-    memberships = guard.memberships if guard is not None else ()
-    completed_memberships: tuple[ProviderDatasetOperationMembership, ...] = ()
+    """MCST multi-member asset — 쿼터 판정과 분자 계수기를 둘 다 연다."""
 
-    async def _on_memberships_completed(
-        received_memberships: tuple[ProviderDatasetOperationMembership, ...],
-    ) -> None:
-        nonlocal completed_memberships
-        if guard is not None and received_memberships != memberships:
-            raise RuntimeError("MCST completed membership snapshot이 guard와 다름")
-        completed_memberships = received_memberships
+    with counting_upstream_requests():
+        guard = await ensure_tracked_multi_member_asset(context)
+        memberships = guard.memberships if guard is not None else ()
+        completed_memberships: tuple[ProviderDatasetOperationMembership, ...] = ()
 
-    try:
-        result = await run_feature_place_mcst_culture(
-            context,
-            memberships=memberships,
-            on_memberships_completed=_on_memberships_completed if guard is not None else None,
-        )
-        if guard is not None and completed_memberships != memberships:
-            raise RuntimeError("MCST raw runner가 exact membership completion을 emit하지 않음")
-    except Exception as exc:
+        async def _on_memberships_completed(
+            received_memberships: tuple[ProviderDatasetOperationMembership, ...],
+        ) -> None:
+            nonlocal completed_memberships
+            if guard is not None and received_memberships != memberships:
+                raise RuntimeError("MCST completed membership snapshot이 guard와 다름")
+            completed_memberships = received_memberships
+
+        try:
+            result = await run_feature_place_mcst_culture(
+                context,
+                memberships=memberships,
+                on_memberships_completed=_on_memberships_completed if guard is not None else None,
+            )
+            if guard is not None and completed_memberships != memberships:
+                raise RuntimeError("MCST raw runner가 exact membership completion을 emit하지 않음")
+        except Exception as exc:
+            if guard is not None:
+                for membership in memberships:
+                    await append_failed_multi_member_attempt(context, guard, membership, exc)
+            # 이 asset만 multi-member라 `run_tracked_feature_asset`를 지나지 않는다.
+            # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`). 실패한 step은
+            # output을 내지 않으므로 소비량 로그도 같은 이유로 여기서 남긴다.
+            _log_spend_on_failure(context)
+            raise_terminal_if_quota_exhausted(exc)
+            raise
         if guard is not None:
-            for membership in memberships:
-                await append_failed_multi_member_attempt(context, guard, membership, exc)
-        # 이 asset만 multi-member라 `run_tracked_feature_asset`를 지나지 않는다.
-        # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`).
-        raise_terminal_if_quota_exhausted(exc)
-        raise
-    if guard is not None:
-        assert guard.operation_key is not None
-        if len(result.results) != len(completed_memberships):
-            raise RuntimeError("MCST authoritative member와 load seal 수가 다름")
-        for loaded in result.results:
-            membership = await guard.client.resolve_feature_operation_dataset_membership(
-                operation_key=guard.operation_key,
-                provider=MCST_PROVIDER_NAME,
-                dataset_key=loaded.dataset_key,
-            )
-            if membership not in completed_memberships:
-                raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
-            await finish_tracked_feature_membership(
-                guard,
-                membership,
-                authoritative_snapshot_complete=True,
-                curation_input_member_count=(
-                    loaded.load.curation_input_member_count
-                ),
-                curation_input_set_hash=loaded.load.curation_input_set_hash,
-            )
-    return result
+            assert guard.operation_key is not None
+            if len(result.results) != len(completed_memberships):
+                raise RuntimeError("MCST authoritative member와 load seal 수가 다름")
+            for loaded in result.results:
+                membership = await guard.client.resolve_feature_operation_dataset_membership(
+                    operation_key=guard.operation_key,
+                    provider=MCST_PROVIDER_NAME,
+                    dataset_key=loaded.dataset_key,
+                )
+                if membership not in completed_memberships:
+                    raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
+                await finish_tracked_feature_membership(
+                    guard,
+                    membership,
+                    authoritative_snapshot_complete=True,
+                    curation_input_member_count=(
+                        loaded.load.curation_input_member_count
+                    ),
+                    curation_input_set_hash=loaded.load.curation_input_set_hash,
+                )
+        return result
 
 
 MCST_FEATURE_ASSETS: Final = [

@@ -287,8 +287,12 @@ REST export는 ADR-053 예외로, kor-travel-map Dagster fetcher가 같은 timeo
 (`app.py`의 opt-in 미들웨어, 설정 `api_call_log_enabled`). 열은
 `method`/`path`/`status_code`/`duration_ms`/`request_id`다.
 
-**upstream 요청 수를 세는 자리는 아직 없다.** 분모는 실측했고
-(`docs/etl/upstream-quota.md`) 분자는 없다.
+**upstream 요청 수는 `upstream_requests_min`으로 asset/op output metadata에 실린다**
+(2026-09-13부터). 이름이 말하듯 **하한**이다 — provider lib 내부 재시도와 한 호출 안에서
+나가는 여러 요청은 이 층에서 보이지 않는다. 커버리지·면제·부분 계측의 정본은
+`docs/etl/upstream-quota.md` §4이고, 그 수는
+`tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 선언에 결박한다 —
+여기에 복제하지 않는다.
 
 ## 5. 호출 빈도 제어
 

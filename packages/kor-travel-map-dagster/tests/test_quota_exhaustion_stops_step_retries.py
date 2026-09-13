@@ -474,8 +474,15 @@ def test_the_guard_module_reuses_the_declared_nonretryable_set() -> None:
     )
 
 
-def test_the_kma_asset_publishes_the_quota_numerator() -> None:
-    """분자가 Dagster UI에 보여야 한다."""
+def test_the_kma_result_does_not_carry_a_second_numerator() -> None:
+    """분자의 정본은 하나여야 한다.
+
+    종전에는 `KmaWeatherLoadResult.as_metadata()`가 `grids_fetched`를
+    `upstream_requests_min`으로도 실었다. 그 둘은 **다른 수**다 — `grids_fetched`는
+    호출에 **성공한** 격자 수이고, 실패해 중단된 격자도 요청은 나갔다. 같은 이름을
+    두 곳이 들고 있으면 갈라지므로, 분자는 격자 루프가
+    `note_upstream_request`로 세고 `_add_output_metadata`가 싣는다.
+    """
 
     from kortravelmap.dagster.kma_weather import KmaWeatherLoadResult
 
@@ -491,6 +498,166 @@ def test_the_kma_asset_publishes_the_quota_numerator() -> None:
         values_loaded=600,
         membership_fingerprint="abc",
     )
-    assert result.as_metadata()["upstream_requests_min"] == 59, (
-        "분자가 격자 호출 수와 다르다 — 격자 하나 = 요청 하나가 이 job의 계약이다."
+    metadata = result.as_metadata()
+    assert metadata["grids_fetched"] == 59
+    assert "upstream_requests_min" not in metadata, (
+        "분자 정본이 둘이 됐다 — 격자 루프의 계수기가 정본이다."
     )
+
+
+# ---------------------------------------------------------------- 분자 배선
+
+
+_COUNTER_SCOPE = "counting_upstream_requests"
+
+
+def test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard() -> None:
+    """분자 계수기와 쿼터 판정은 **같은 두 경계**에서 열려야 한다.
+
+    계수기를 여는 자리를 놓치면 `test_upstream_request_numerator.py`는 전부
+    초록인 채로 prod에서 아무것도 세지 않는다 — 그 파일은 계수기가 열린 뒤를
+    재고, 여기서는 **그것이 열리는지**를 잰다.
+    """
+
+    openers = {
+        node.name
+        for _module, node in _functions()
+        if _COUNTER_SCOPE in _called_names(node)
+    }
+    guarded = _quota_guarded_functions()
+    missing = sorted(guarded - openers)
+    assert missing == [], (
+        f"쿼터 판정을 거는 경계가 분자 계수기를 열지 않는다: {missing}. "
+        "판정과 계수는 같은 실행 범위의 두 얼굴이다 — 한쪽만 걸면 그 asset의 "
+        "요청 수가 metadata에 실리지 않는다."
+    )
+    assert openers, "계수기를 여는 함수를 하나도 찾지 못했다 — 결박이 사라졌다"
+
+
+def _parent_map(module: ast.Module) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for node in ast.walk(module):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+    return parents
+
+
+def _enclosing_with_calls(
+    parents: dict[ast.AST, ast.AST], target: ast.AST
+) -> set[str]:
+    """``target``을 감싸는 ``with``의 context manager 이름 — **같은 함수 안에서만**.
+
+    함수 경계에서 멈추는 이유는, 멈추지 않으면 ``with`` 안에 ``def``만 두고 그
+    함수를 밖에서 불러도 초록이 되기 때문이다(3차 리뷰). 계수기는 **호출 시점**에
+    열려 있어야 하므로 정의를 감싼 ``with``는 아무 의미가 없다.
+    """
+
+    names: set[str] = set()
+    node: ast.AST | None = target
+    while node is not None:
+        if isinstance(node, ast.With | ast.AsyncWith):
+            for item in node.items:
+                expr = item.context_expr
+                if isinstance(expr, ast.Call):
+                    func = expr.func
+                    if isinstance(func, ast.Name):
+                        names.add(func.id)
+                    elif isinstance(func, ast.Attribute):
+                        names.add(func.attr)
+        parent = parents.get(node)
+        if isinstance(parent, ast.AsyncFunctionDef | ast.FunctionDef | ast.Lambda):
+            # 여기서 끊는다 — 그 위의 with는 정의를 감쌀 뿐 호출을 감싸지 않는다.
+            return names
+        node = parent
+    return names
+
+
+def test_the_queue_runner_opens_the_counter_around_the_raw_run_function() -> None:
+    """feature-update queue 경계도 계수기를 연다.
+
+    이 경로는 asset wrapper가 아니라 **원본 run 함수**를 직접 부른다. 그래서
+    wrapper가 여는 계수기가 여기엔 없다 — 열지 않으면 계측된 fetcher가 큐로 돌
+    때 모든 `note_upstream_request()`가 no-op이 되고, 값이 조용히 사라진다
+    (2026-09-13 2차 적대 리뷰 blocker).
+
+    종전 구조 검사는 "쿼터 판정을 거는 함수가 계수기를 여는가"만 물었는데, 그
+    두 집합이 정확히 같은 두 함수라 **동어반복**이었고 이 경계를 볼 수 없었다.
+    여기서는 호출 자리를 AST로 찾아 **그 자리가 계수 범위 안에 있는지**를 본다.
+    """
+
+    module = ast.parse((_PACKAGE / "feature_update_runner.py").read_text(encoding="utf-8"))
+    parents = _parent_map(module)
+    # `spec.run(...)`은 호출이지만 `spec.resources`는 `asyncio.to_thread`에
+    # **참조로** 넘어간다. 그래서 Call이 아니라 Attribute 노드를 찾는다 — 호출
+    # 형태에 의존하면 참조 전달 한 줄로 검사를 빠져나갈 수 있다.
+    dispatches = [
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"run", "resources"}
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "spec"
+    ]
+    found = sorted({node.attr for node in dispatches})
+    assert found == ["resources", "run"], (
+        f"runner가 raw run 함수와 resources 팩토리를 쓰는 자리를 찾지 못했다 — "
+        f"{found}만 보인다. 이 검사가 아무것도 보지 않고 있다."
+    )
+    uncounted = [
+        f"{node.attr}@{node.lineno}"
+        for node in dispatches
+        if _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
+    ]
+    assert uncounted == [], (
+        f"계수 범위 **밖**에서 부른다({uncounted}). 그 경로의 "
+        "`note_upstream_request()`는 전부 no-op이 되고, 계측된 진입점이 큐로 돌면 "
+        "`upstream_requests_min` 없이 조용히 나간다. **`spec.resources`도 같은 "
+        "범위여야 한다** — MOIS Phase A는 거기서 전국 파일을 받는다(3차 리뷰 blocker)."
+    )
+
+
+def test_the_asset_boundaries_open_the_counter_around_the_run_callable() -> None:
+    """asset 경계 둘도 **호출을 감싸는지** 본다 — 이름이 나오는지가 아니라.
+
+    종전 검사(`test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard`)는
+    "그 함수가 `counting_upstream_requests`를 부르는가"만 물었다. `with`를 실제
+    호출 **밖**으로 빼도 전부 초록이었다(3차 리뷰). 여기서는 호출 노드를 찾아
+    그것을 감싸는 `with`를 본다.
+    """
+
+    targets = [
+        ("feature_operation_tracking.py", "run"),
+        ("mcst_features.py", "run_feature_place_mcst_culture"),
+    ]
+    problems: list[str] = []
+    for filename, callee in targets:
+        module = ast.parse((_PACKAGE / filename).read_text(encoding="utf-8"))
+        parents = _parent_map(module)
+        calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == callee
+        ]
+        assert calls, f"{filename}에서 `{callee}(...)` 호출을 찾지 못했다 — 유도가 낡았다."
+        problems.extend(
+            f"{filename}:{node.lineno}"
+            for node in calls
+            if _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
+        )
+    assert problems == [], (
+        f"asset 경계가 run 호출을 계수 범위 밖에서 부른다: {problems}. "
+        "`with counting_upstream_requests():`가 그 호출을 감싸야 한다 — "
+        "이름이 같은 함수 안에 있기만 한 것으로는 부족하다."
+    )
+
+
+# `test_every_retrying_asset_counts_its_upstream_requests`는 여기 있었다(2026-09-13
+# 제거). 이름과 달리 **항진명제였다** — 계수기를 여는 wrapper를 모든 asset이 지나므로
+# `asset_name in openers or calls & openers`가 언제나 참이었고, 세지 않는 fetcher를
+# 절대 볼 수 없었다. 적대 리뷰가 그것을 잡았다.
+#
+# 요청을 보내는 것은 asset이 아니라 **fetcher**다. 그래서 커버리지 검사는
+# `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`로 옮겼다 — 거기서는
+# fetcher마다 계수 호출을 (전이 포함) 요구하고, 못 세는 것은 이유와 함께 선언한다.

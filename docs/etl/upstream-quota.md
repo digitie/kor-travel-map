@@ -1,10 +1,12 @@
-# upstream 일일 한도 — 실측 분모와 아직 없는 분자
+# upstream 일일 한도 — 실측 분모와 하한 분자
 
 > 이 문서는 "우리가 얼마나 부르는가"(분자)와 "얼마까지 부를 수 있는가"(분모)를
-> 한자리에 모은다. **분모는 2026-09-13에 실측했고, 분자는 대부분 아직 없다.**
-> 그 비대칭을 숨기지 않는 것이 이 문서의 요점이다 — 관리자 UI가 오래
-> "rate limit의 약 90% 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도
-> 갖고 있지 않았다.
+> 한자리에 모은다. **분모는 2026-09-13에 data.go.kr에서 실측했고, 분자는 같은 날
+> 진입점 40개 중 35개에서 하한으로 나가기 시작했다.** 남은 비대칭 둘을 숨기지
+> 않는 것이 이 문서의 요점이다 — data.go.kr 포털에 없는 provider 넷
+> (`krheritage`·`opinet`·`krex`·`mois`)은 **분모가 아직 없고**, 분자도 §4에
+> 열거한 자리에서는 부분값이거나 없다. 관리자 UI가 오래 "rate limit의 약 90%
+> 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도 갖고 있지 않았다.
 
 ## 1. 분모는 서비스가 아니라 **오퍼레이션**마다 걸린다
 
@@ -53,6 +55,17 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 `mois`/`localdata`(지방행정 인허가)는 **data.go.kr 활용신청이 아니다.** 각자
 포털에서 따로 봐야 하고, 아직 보지 않았다. 이 저장소가 krheritage에 대해 적어 둔
 "~3,950 요청/sweep"은 분자이고, 그 분모는 여전히 없다.
+
+| provider | 저장소가 들고 있는 수 | 출처 | 실측인가 |
+|---|---|---|---|
+| `opinet` | 무료키 **1,500/일** | #545 (`schedules.py:266`, `_OPINET_RUN_CALL_BUDGET` docstring) | **아니다** — 포털에서 확인하지 않았다 |
+| `krheritage` | 없음 | — | — |
+| `krex` | 없음 | — | — |
+| `mois`/`localdata` | 없음 | — | — |
+
+OpiNet의 1,500은 이 저장소가 **예산을 짜는 근거로 쓰고 있는** 수다
+(`_OPINET_RUN_CALL_BUDGET = 600`이 그 수의 40%). 확인되지 않은 수 위에 예산이
+서 있다는 사실 자체를 여기 남긴다 — 확인이 다음 단계다.
 
 ## 3. 바로 따라오는 산수 — KMA
 
@@ -127,15 +140,136 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 > **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
 
-## 4. 분자 — 하나는 생겼고 나머지는 아직 없다
+## 4. 분자 — 진입점 40개 중 35개가 전부 센다
 
-- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 2026-09-13부터 asset metadata로
-  `upstream_requests_min`을 내보낸다. `_min`인 이유는 실패한 격자의 재시도를 이
-  층에서 세지 못하기 때문이다(`upstream_retry`: 외부 attempts 2 × client 내부 1 =
-  경계당 최대 4 HTTP 시도).
-- **bulk/표준데이터·페이지네이션형**: sweep당 요청 수 = 페이지 수. 헬퍼가 세고
-  있지만(`_PageState.page_no`) asset metadata로 나가지 않는다. **여기가 남은
-  구멍이다** — fetcher가 generator라 asset 경계까지 값을 흘릴 배선이 없다.
+- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 격자 루프가 호출마다 계수한다.
+  `grids_fetched`(성공한 격자 수)와 **다른 수**임에 주의 — 실패해 중단된 격자도
+  요청은 나갔다. 처음에 그 둘을 같은 이름으로 실었다가 정본을 하나로 모았다.
+- **bulk/표준데이터·페이지네이션형**: sweep당 요청 수 = 페이지 수. 2026-09-13부터
+  같은 `upstream_requests_min`으로 나간다.
+
+**배선은 실행 문맥이 대신한다.** fetcher가 generator라 "세는 자리(페이지 루프)"와
+"내보내는 자리(asset output metadata)" 사이에 값을 흘릴 인자가 없었다. 그래서
+`kortravelmap.dagster.upstream_requests`가 `ContextVar`로 계수기를 들고, **실행
+경계 넷**이 그것을 연다 — asset wrapper 둘(`run_tracked_feature_asset`,
+`feature_place_mcst_culture`), feature-update queue의 `FeatureUpdateAssetRunner`,
+그리고 MOIS Phase A op(`mois_localdata_source_sync_op`). provider fetcher 32개의
+시그니처는 하나도 바꾸지 않는다.
+
+합치는 자리는 `etl._add_output_metadata`다 — **asset 경로의 주 초크포인트이고,
+유일한 자리는 아니다.** 이 패키지에는 `context.add_output_metadata`를 직접 부르는
+자리가 더 있다(op/sensor/maintenance 쪽). feature asset이 그 길로 새면 센 값이
+버려지므로, `tests/lint`가 feature asset 모듈에서 그것을 막는다.
+
+**`_min`이 뜻하는 것.** 페이지 하나 = 요청 **적어도** 하나다. 콜백이 안에서
+재시도하면(외부 `upstream_retry` attempts, provider client 내부 retries) 그것은 이
+층에서 보이지 않고, provider lib이 한 번의 호출 안에서 여러 요청을 보내는 자리도
+있다(krex `latest_weather`의 lookback 루프 — 그래서 그쪽은 상한을 따로 선언한다).
+즉 "적어도 이만큼은 썼다"이고, 한도와 비교할 때 그 방향으로만 안전하다.
+
+**"세지 않았다"는 값을 내지 않는다.** 계수기가 열려 있어도 **한 번도 기록되지
+않았으면** key 자체가 실리지 않는다.
+
+이 구분이 첫 판에는 없었고 적대 리뷰가 blocker로 잡았다 — 계수기는 asset 35개
+전부에서 열리는데 세는 자리는 셋뿐이라 **OpiNet이 수천 건을 쓰면서 0을 냈다.**
+하필 그것이 저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다(`_OPINET_RUN_CALL_BUDGET = 600`
+vs 무료키 1,500/일, #545). **예산을 짜 둔 자리의 분자가 0이었다** — 그리고 그
+예산기(`_OpinetCallBudget.spend()`)는 호출마다 정확히 1을 차감하고 있었다.
+한 줄이면 됐다.
+틀린 0은 읽는 사람을 멈추게 하지
+못하고, 없는 값은 멈추게 한다.
+
+### 커버리지 — 진입점 40개 중 35개가 전부 센다
+
+`tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 **명시 목록**
+(`_EXPECTED_FETCHERS`)의 진입점마다 **세거나, 왜 못 세는지 선언하거나**를 요구한다.
+목록에는 fetcher 32개 + MOIS Phase A(`sync_mois_source_db`) + KMA 격자/중기 진입점
+6개 + krex 스냅샷 헬퍼 1개가 들어 있다 — 접두사로 유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수
+있었고, MOIS의 slug별 LOCALDATA 다운로드와 KMA 격자 루프는 통째로 게이트 밖이었다.
+목록 크기 자체에도 래칫이 걸려 있어 **조용히 줄일 수 없다**.
+
+선언된 비계측은 **둘뿐**이고 둘 다 upstream 요청이 아예 없다:
+
+| 진입점 | 이유 |
+|---|---|
+| `fetch_krairport_airports` | 번들 정적 데이터 — upstream 요청이 없다 |
+| `fetch_mois_license_records` | 로컬 sqlite를 읽는다 |
+
+2차 적대 리뷰가 이 목록을 넷에서 둘로 줄였다. **나머지 둘의 사유가 provider 소스와
+어긋났다** — `file_data.iter_pages`는 public이고 `iter_all`이 그것을 감싼 것뿐이었고,
+행사 창은 14개월로 알 수 있었다(비어 있는 달도 요청 1건이라 record 수로는 역산되지
+않는다). 지금은 둘 다 Map이 루프를 소유하고 정확히 센다. 못 센다는 선언은 값싸고,
+값싼 선언은 계측을 대체하기 시작한다.
+
+종전 구조 검사는 "asset이 계수 범위 안에서 도는가"를 물었는데 wrapper가 항상 열어
+**항진명제였다.** 요청을 보내는 것은 asset이 아니라 fetcher다.
+
+#### 정적 검사가 볼 수 없는 것 — 그리고 그것을 덮는 층
+
+이 검사는 "계수 호출 자리가 있는가"만 본다. **도달 불가 분기·죽은 중첩 함수·루프
+밖 1회는 전부 초록이다.** 2차 리뷰가 바로 그 구멍으로 실제 blocker를 통과시켰다:
+`fetch_krheritage_items`가 목록 페이지만 세고 record당 1 HTTP인 detail을 세지 않았는데,
+목록 계수만으로 "센다"로 판정됐다 — 실린 수가 실제의 **약 1%**였다(목록 ~45 vs
+detail ~4,000).
+
+그래서 손으로 박은 자리마다 **가짜 client로 N번 부르게 하고 계수가 N인지 재는**
+런타임 테스트를 둔다(`packages/kor-travel-map-dagster/tests/test_upstream_request_numerator.py`).
+그쪽이 효과를 보는 층이고, 정적 검사는 "빠진 fetcher가 없는가"만 지킨다.
+
+#### "센다"가 "모든 모드에서 센다"는 아니다 — OpiNet 부분 계측
+
+유도는 *이 fetcher가 세는 함수를 부르는가*만 본다. 그래서 **실행 모드에 따라 계수
+경로를 타지 않는** fetcher도 초록으로 나온다. 실제로 둘이 그렇다:
+
+| 진입점 | 세는 부분 | 못 세는 부분 | 그래서 metadata는 |
+|---|---|---|---|
+| `fetch_opinet_stations` | `low_top_area` 모드(`_OpinetCallBudget.spend()`) | `bbox`/`poi_cache_target` 모드의 enumerate | bbox 모드에서는 **key가 없다** |
+| `fetch_opinet_station_price_details` | `low_top_area`는 예산기가 정확히 셈 / `bbox`·`poi_cache_target`은 `get_station_detail`(uni_id당 1건) | `bbox`·`poi_cache_target`의 enumerate | `low_top_area`는 정확, 나머지는 **key는 실리되 과소계수** |
+| `sync_mois_source_db` | 큐 runner 경로 · Phase A op | asset 경로(resource init이 계수 범위보다 앞) | asset 경로에서는 key가 없다 |
+
+`iter_stations_in_bbox`는 bbox를 격자로 덮으며 셀마다 `aroundAll`을 부르는데, 셀 수
+계산이 provider private이다. bbox 하나를 1로 세면 1과 20,000을 같게 만든다 — 그래서
+**세지 않는다.**
+
+**"기록이 없으면 key가 없다"는 보증이 세 행에 똑같이 적용되지는 않는다.**
+`fetch_opinet_stations`는 bbox 모드에서 아무것도 세지 않으므로 값이 안 나간다(정직한
+침묵). 그러나 `price_details`는 상세 조회를 세므로 **값이 나가되 실제보다 작다** —
+이 행만은 "없는 값"이 아니라 "작은 값"이다. 한도 대비 비율을 볼 때 그 방향을 기억해라.
+
+그 목록은 검사기의 `_PARTIALLY_COUNTED`에 이유와 함께 박혀 있고, `_UNCOUNTABLE`과
+겹치지 못하며, **계측된 쪽으로 세어 주지도 않는다** — 완전 계측을 부분 계측으로
+강등하는 것이 공짜면 그것이 값싼 도피로가 된다. 총량을 실제로 묶는 것은 §3의
+하루 한 번 coalescing이다.
+
+### 계수기는 어디서 열리나 — 경계가 넷이다
+
+`note_upstream_request()`는 계수기가 열려 있을 때만 기록한다. 여는 자리는 넷이다:
+
+| 경계 | 왜 따로 필요한가 |
+|---|---|
+| `run_tracked_feature_asset` | single-member asset wrapper |
+| `feature_place_mcst_culture` | 이 asset만 multi-member라 wrapper를 안 지난다 |
+| `FeatureUpdateAssetRunner` | 큐 경로는 wrapper가 아니라 **원본 run 함수**를 직접 부른다 |
+| `mois_localdata_source_sync_op` | Phase A는 asset이 아니라 plain `@op`이다 |
+
+뒤 둘을 빠뜨린 것이 2·3차 리뷰의 blocker였다. **계수기가 안 열리면
+`note_upstream_request()`는 조용한 no-op이고, 정적 검사는 그것을 보지 못한다** —
+호출 자리가 있기만 하면 초록이기 때문이다.
+
+큐 runner에서는 계수기를 `spec.resources()` **앞**에서 연다. resources 구성이
+I/O를 할 수 있기 때문이다 — MOIS Phase A가 거기서 전국 파일을 받는다.
+
+### 실패로 끝난 run은 어디에 남나
+
+**실패한 step은 output을 내지 않는다.** 그래서 `add_output_metadata`로 실은 분자는
+실패하면 사라진다. 남는 자리는 둘이다:
+
+| 실패 | 어디에 남나 |
+|---|---|
+| 일일 쿼터 소진 | `Failure` metadata의 `upstream_requests_min` (실패 이벤트에 붙는다) |
+| 그 밖의 실패 | 경고 로그 `실패로 끝났지만 upstream 요청은 나갔다 (...)` |
+
+세지 않은 경로는 둘 다 아무것도 남기지 않는다 — "0건 쓰고 죽었다"로 보이지 않게.
 
 ### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
@@ -175,7 +309,9 @@ coalescing이다. 셀 수 계산은 provider private이라 Map이 복제하면 d
 
 - data.go.kr에서 운영계정으로 승격하거나 활용신청을 추가/변경했을 때
 - 격자 상한(`kma_weather_max_grids_per_run`)이나 schedule cron을 바꿀 때
-- 분자 계측이 생겼을 때 — 그때 이 문서의 §4가 표로 바뀐다
+- 분자 계측의 커버리지나 면제 목록이 바뀔 때 — `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`의 상수(`_EXPECTED_FETCHERS`
+  ·`_EXPECTED_FULLY_COUNTED`·`_UNCOUNTABLE`·`_PARTIALLY_COUNTED`)와 §4를 **함께** 고친다.
+  그 상수가 결박이고 §4가 서술이다 — 한쪽만 고치면 게이트가 빨개진다
 
 분모는 마이페이지의 값이 정본이다. 여기 적힌 것은 **2026-09-13 시점의 사본**이고,
 사본은 늙는다.

@@ -81,6 +81,7 @@ from .feature_operation_tracking import (
     require_feature_operation_guard,
     run_tracked_feature_asset,
 )
+from .upstream_requests import note_upstream_request
 from .upstream_retry import (
     PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
     RetryBudget,
@@ -467,6 +468,11 @@ class KmaWeatherLoadResult:
 
     grids_total: int
     grids_fetched: int
+    """호출에 **성공한** 격자 수. 이것은 요청 수가 아니다 — 실패해 중단된 격자도
+    요청은 나갔다. 쿼터 분자(`upstream_requests_min`)는 격자 루프가
+    :func:`~.upstream_requests.note_upstream_request`로 따로 세고
+    ``_add_output_metadata``가 싣는다. 같은 수를 두 곳이 들고 있으면 갈라진다."""
+
     grids_dropped: int
     features_total: int
     values_loaded: int
@@ -485,15 +491,6 @@ class KmaWeatherLoadResult:
             "grids_total": self.grids_total,
             "grids_fetched": self.grids_fetched,
             "grids_dropped": self.grids_dropped,
-            # **분자다.** 격자 하나 = upstream 요청 하나이므로 이 run이 쓴 오퍼레이션
-            # 쿼터가 곧 이 수다. `_min`인 이유는 실패한 격자가 재시도되면 요청이
-            # 늘어나기 때문이다(`upstream_retry`: 외부 attempts 2 x client 내부 1 =
-            # 경계당 최대 4 HTTP 시도). 즉 이것은 하한이지 실측이 아니다.
-            #
-            # 분모는 오퍼레이션당 10,000/일이다(docs/etl/upstream-quota.md).
-            # 이 값을 metadata로 내보내는 이유가 그것이다 — 분모는 실측했는데
-            # 분자를 Dagster UI에서 볼 수 없었다.
-            "upstream_requests_min": self.grids_fetched,
             "features_total": self.features_total,
             "values_loaded": self.values_loaded,
             "membership_fingerprint": self.membership_fingerprint,
@@ -805,6 +802,9 @@ async def _run_kma_weather_asset(
             expected_calls=len(targets.grids),
         )
         for nx, ny in targets.grids:
+            # 격자 하나 = 오퍼레이션 호출 하나. 종전에는 이 수를 `grids_fetched`로만
+            # 내보내 쿼터와 연결되는 이름이 없었다.
+            note_upstream_request()
             # H45: 단건 격자 호출만 유한 재시도(retryable 분류 예외 한정 — kma
             # ``retryable`` 규약, quota/rate_limit 제외). N건 순차 호출에서 step
             # 전량 재시도의 시도당 전멸 확률(1-p^N)을 제거한다. attempts 소진
@@ -1238,6 +1238,14 @@ async def run_feature_weather_kma_mid_forecast(
             expected_calls=len(specs) * 2,
         )
         for spec in specs:
+            # region 하나당 오퍼레이션 호출 **둘**(육상 + 기온). 바로 위
+            # `expected_calls=len(specs) * 2`가 같은 산수를 재시도 예산에 쓰고
+            # 있었는데 쿼터 분자에는 연결돼 있지 않았다(2026-09-13 적대 리뷰).
+            #
+            # 둘을 한 번에 `note_upstream_request(2)`로 세지 않는다 - 육상이 종단
+            # 실패하면 기온 호출은 나가지 않는데 그러면 1건을 부풀린다. 분자는
+            # 하한이어야 하고, 부풀린 하한은 하한이 아니다.
+            note_upstream_request()
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
             land_rows: Sequence[Any] = mid_land_rows_from_items(
@@ -1252,6 +1260,7 @@ async def run_feature_weather_kma_mid_forecast(
                     on_retry=context.log.warning,
                 )
             )
+            note_upstream_request()
             temp_rows: Sequence[Any] = mid_temp_rows_from_items(
                 await retry_upstream_async(
                     partial(

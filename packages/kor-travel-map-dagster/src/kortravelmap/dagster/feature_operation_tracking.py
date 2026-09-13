@@ -36,6 +36,11 @@ from kortravelmap.core.feature_operation import (
 from dagster import InitResourceContext, resource
 
 from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    counting_upstream_requests,
+    observed_upstream_requests,
+)
 
 _T = TypeVar("_T")
 _MISSING = object()
@@ -517,6 +522,31 @@ async def _append_failed_attempt(
     )
 
 
+def _log_spend_on_failure(context: Any) -> None:
+    """실패로 죽기 전에 이번 run이 쓴 upstream 요청 수를 로그에 남긴다.
+
+    실패한 step은 output을 내지 않으므로 ``add_output_metadata``로 실은 분자가
+    사라진다. 쿼터 소진은 Failure metadata가 받지만(:mod:`~.quota_exhaustion`),
+    그 밖의 실패는 이 로그가 유일한 기록이다 — 한도의 몇 %를 쓰고 죽었는지는
+    다음 schedule을 앞당길지 판단하는 근거다.
+
+    한 번도 세지 않았으면 아무것도 남기지 않는다. "세지 않았다"를 "0번 썼다"로
+    보이게 하는 것이 이 저장소가 이미 한 번 낸 사고다.
+    """
+
+    observed = observed_upstream_requests()
+    if observed is None:
+        return
+    log = getattr(context, "log", None)
+    warning = getattr(log, "warning", None)
+    if callable(warning):
+        warning(
+            "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
+            UPSTREAM_REQUESTS_METADATA_KEY,
+            observed,
+        )
+
+
 async def run_tracked_feature_asset(
     context: Any,
     run: Callable[[Any], Awaitable[_T]],
@@ -527,44 +557,58 @@ async def run_tracked_feature_asset(
     쿼터 소진 판정도 두 갈래 모두에 건다 — 한쪽만 걸면 그쪽 run(run tag에
     operation_key가 없는 UI 수동 실행·태그 없는 backfill)이 조용히 재시도를 산다
     (:mod:`~.quota_exhaustion`).
+
+    **분자 계수기도 여기서 연다**(:mod:`~.upstream_requests`). fetcher는 generator라
+    요청을 세는 자리와 그 수를 내보내는 자리 사이에 배선이 없다 — 실행 문맥이 그
+    배선을 대신한다.
+
+    **실패한 step은 output을 내지 않는다.** 그래서 ``add_output_metadata``로 실은
+    분자는 실패하면 사라진다 — 2026-09-13 적대 리뷰 2차가 "실패 경로에도 실린다"는
+    종전 주장을 거짓으로 판정했다. 지금 실패한 run의 소비량이 남는 자리는 둘이다:
+    쿼터 소진이면 :func:`~.quota_exhaustion.raise_terminal_if_quota_exhausted`가
+    **Failure metadata**에 싣고(output이 아니라 실패 이벤트에 붙으므로 남는다),
+    그 밖의 실패는 아래 :func:`_log_spend_on_failure`가 경고 로그로 남긴다.
     """
-    guard = await ensure_authoritative_feature_operation_guard(
-        context,
-        boundary="public_wrapper",
-    )
-    if guard.operation_key is None:
+    with counting_upstream_requests():
+        guard = await ensure_authoritative_feature_operation_guard(
+            context,
+            boundary="public_wrapper",
+        )
+        if guard.operation_key is None:
+            try:
+                return await run(context)
+            except Exception as exc:
+                _log_spend_on_failure(context)
+                raise_terminal_if_quota_exhausted(exc)
+                raise
+        membership = _single_membership_for_asset(guard)
         try:
-            return await run(context)
+            result = await run(context)
         except Exception as exc:
+            # 실패 기록이 먼저다 — 원 예외를 그대로 봐야 분류가 보존된다.
+            await _append_failed_attempt(context, guard, membership, exc)
+            _log_spend_on_failure(context)
             raise_terminal_if_quota_exhausted(exc)
             raise
-    membership = _single_membership_for_asset(guard)
-    try:
-        result = await run(context)
-    except Exception as exc:
-        # 실패 기록이 먼저다 — 원 예외를 그대로 봐야 분류가 보존된다.
-        await _append_failed_attempt(context, guard, membership, exc)
-        raise_terminal_if_quota_exhausted(exc)
-        raise
-    mutation = await guard.client.finish_dagster_feature_membership(
-        dagster_run_id=guard.dagster_run_id,
-        membership=membership,
-        authoritative_snapshot_complete=bool(
-            getattr(
-                getattr(result, "observation_receipt", None),
-                "authoritative_snapshot_complete",
-                False,
-            )
-        ),
-        curation_input_member_count=getattr(
-            getattr(result, "load", None), "curation_input_member_count", None
-        ),
-        curation_input_set_hash=getattr(
-            getattr(result, "load", None), "curation_input_set_hash", None
-        ),
-    )
-    _raise_if_blocked(guard.dagster_run_id, mutation)
-    return result
+        mutation = await guard.client.finish_dagster_feature_membership(
+            dagster_run_id=guard.dagster_run_id,
+            membership=membership,
+            authoritative_snapshot_complete=bool(
+                getattr(
+                    getattr(result, "observation_receipt", None),
+                    "authoritative_snapshot_complete",
+                    False,
+                )
+            ),
+            curation_input_member_count=getattr(
+                getattr(result, "load", None), "curation_input_member_count", None
+            ),
+            curation_input_set_hash=getattr(
+                getattr(result, "load", None), "curation_input_set_hash", None
+            ),
+        )
+        _raise_if_blocked(guard.dagster_run_id, mutation)
+        return result
 
 
 async def ensure_tracked_multi_member_asset(

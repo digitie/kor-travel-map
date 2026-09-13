@@ -62,6 +62,8 @@ from collections.abc import (
 from dataclasses import dataclass
 from typing import Any, Final
 
+from .upstream_requests import note_upstream_request
+
 DEFAULT_MAX_PAGES: Final = 200
 """``total_count``를 모를 때의 페이지 상한.
 
@@ -240,6 +242,9 @@ def iter_paginated_items(
     while True:
         state.page_no += 1
         state.guard_ceiling()
+        # 페이지 하나 = upstream 요청 **적어도** 하나. 콜백이 안에서 재시도하면
+        # 그것은 이 층에서 보이지 않는다 — 그래서 이름이 `_min`이다.
+        note_upstream_request()
         try:
             page = fetch_page(state.page_no)
         except end_of_pages:
@@ -281,6 +286,7 @@ async def aiter_paginated_items(
     while True:
         state.page_no += 1
         state.guard_ceiling()
+        note_upstream_request()
         try:
             page = await fetch_page(state.page_no)
         except end_of_pages:

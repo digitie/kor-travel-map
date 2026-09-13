@@ -247,6 +247,13 @@ def test_op_runs_sync_and_emits_metadata(tmp_path: Any, monkeypatch: pytest.Monk
     assert metadata["service_slug_count"] == len(PROMOTED_SERVICE_SLUGS)
     assert metadata["db_path"] == str(db_file)
     assert metadata["coverage"] == MOIS_SOURCE_SYNC_FULL_COVERAGE
+    # Phase A는 slug마다 LOCALDATA 파일을 받는다. 이 op은 asset wrapper를 지나지
+    # 않으므로 계수기를 스스로 열어야 하는데, 열지 않아도 정적 검사는 초록이다
+    # (호출 자리만 본다). **이 단언이 그 경계를 효과로 결박하는 유일한 층이다.**
+    assert metadata["upstream_requests_min"] == len(PROMOTED_SERVICE_SLUGS), (
+        "Phase A가 slug마다 센 수가 op output metadata에 실리지 않았다 — "
+        "계수기를 열지 않으면 `note_upstream_request()`가 조용한 no-op이다"
+    )
     assert run_tags == [
         (
             context.run_id,

@@ -61,9 +61,15 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [~] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
 
   2026-09-13에 분모를 실측했고 그것이 전제 하나를 뒤집었다 — 일일 트래픽은 서비스가
-  아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 조문 1·3·4·5는
-  닫혔고 prod 배포(t41a)도 전 사이클 GREEN이다. 남은 것은 bulk fetcher의 분자다.
+  아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 다섯 조문이 닫혔고
+  prod 배포(t41a)도 전 사이클 GREEN이다. 남은 것은 조문 6(KMA 격자 재활성화 전제).
   해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
+
+- [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
+
+  221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을
+  삭제로 판정했고(37건), 헤딩으로 자르면 코드 펜스가 섹션 경계를 넘나들어 체크박스가
+  펜스 안으로 들어갔다. 되돌렸다. 해제 조건은 acceptance §T-VN-LEDGER-ARCHIVE.
 
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
 

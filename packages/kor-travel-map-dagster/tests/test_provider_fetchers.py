@@ -360,11 +360,26 @@ async def test_kor_travel_concierge_youtube_fetch_raises_on_missing_next_cursor(
 
 
 class _FakeEventService:
+    """``by_month`` 표면을 흉내낸다.
+
+    Map은 provider의 ``iter_months()``를 더 이상 쓰지 않는다. 그 안에서 달을 돌면
+    이 층이 요청 수를 셀 수 없는데, 비어 있는 달도 요청 1건을 쓰므로 record 수로는
+    역산되지 않는다. Map이 창을 소유하고 달마다 부르므로, fake도 그 표면을 들어야
+    "달마다 한 번 세는가"를 잴 수 있다.
+
+    이 fake는 첫 달에 record를 전부 주고 나머지 달은 비운다 — 요청 수와 record
+    수가 다르다는 사실 자체가 이 변경의 이유이기 때문이다.
+    """
+
     def __init__(self, records: list[object]) -> None:
         self._records = records
+        self.calls: list[tuple[int, int]] = []
 
-    def iter_months(self, **_filters: Any) -> Iterator[object]:
-        yield from self._records
+    def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
+        self.calls.append((year, month))
+        if len(self.calls) == 1:
+            return tuple(self._records)
+        return ()
 
 
 class _FakeHeritageKey:
@@ -3180,6 +3195,11 @@ def test_krheritage_fetch_yields_records_and_closes_client(
     client = fake.instances[0]
     assert client.api_key == "service-key"
     assert client.closed is True
+    # 창은 Map이 소유한다 — 지난달 1개 + 이번 달 + 다음 12개월.
+    assert len(client.event.calls) == 14, (
+        "rolling window가 14개월이 아니다 — 이 수가 곧 이 fetcher의 요청 수다"
+    )
+    assert len(set(client.event.calls)) == 14, "같은 달을 두 번 불렀다"
 
 
 def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(

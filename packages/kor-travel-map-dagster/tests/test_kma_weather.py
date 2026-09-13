@@ -50,6 +50,10 @@ from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_kma_weather_alerts,
 )
+from kortravelmap.dagster.upstream_requests import (
+    counting_upstream_requests,
+    observed_upstream_requests,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -1992,4 +1996,137 @@ def test_kma_refresh_failure_identity_must_match_the_resolved_membership() -> No
             message="boom",
         ),
         membership,
+    )
+
+
+async def test_grid_loop_counts_one_upstream_request_per_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """격자 하나 = 요청 하나. **효과로** 결박한다.
+
+    이 판이 `KmaWeatherLoadResult.as_metadata()`에서 `upstream_requests_min`을
+    뺐다(정본을 하나로 하려고). 그래서 격자 루프의 `note_upstream_request()`를
+    지워도 빨개지는 테스트가 하나도 없게 됐다 — 2026-09-13 3차 적대 리뷰가 그것을
+    잡았다. KMA는 분모를 실측한 provider 중 가장 큰 소비자다.
+    """
+
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665), (129.07, 35.17), (128.6, 35.87)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    with counting_upstream_requests():
+        result = await run_feature_weather_kma_ultra_short_nowcast(
+            _context(kor_travel_map_client, forecast)
+        )
+        observed = observed_upstream_requests()
+
+    assert result.grids_total >= 2, "격자가 하나뿐이면 '루프마다'를 잴 수 없다"
+    assert len(forecast.calls) == result.grids_total
+    assert observed == result.grids_total, (
+        f"격자 {result.grids_total}개인데 {observed}건을 셌다 — "
+        "격자 하나가 오퍼레이션 호출 하나다"
+    )
+
+
+async def test_a_failed_grid_is_still_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패한 격자도 요청은 나갔다 — `grids_fetched`와 분자가 다른 수인 이유다."""
+
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665), (129.07, 35.17)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+
+    class _FatalError(Exception):
+        retryable = False
+
+    class _FatalForecast(_FakeForecastService):
+        def now(self, *, nx: int, ny: int) -> Any:
+            self.calls.append(("now-fatal", nx, ny))
+            raise _FatalError("bad key")
+
+    forecast = _FatalForecast(snapshot=_NOWCAST_SNAPSHOT)
+
+    with counting_upstream_requests():
+        with pytest.raises(ProviderDatasetRefreshFailure):
+            await run_feature_weather_kma_ultra_short_nowcast(
+                _context(kor_travel_map_client, forecast)
+            )
+        observed = observed_upstream_requests()
+
+    assert observed == 1, (
+        f"첫 격자에서 죽었는데 {observed}건을 셌다 — 나간 요청은 정확히 1건이다"
+    )
+
+
+_MID_TWO_REGION_JSON = (
+    '[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101", "feature_ids": ["f1"]},'
+    ' {"land_reg_id": "11H20000", "ta_reg_id": "11H20201", "feature_ids": ["f2"]}]'
+)
+
+
+async def test_mid_forecast_counts_two_requests_per_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """region 하나 = 오퍼레이션 호출 **둘**(육상 + 기온). 효과로 결박한다.
+
+    `_proportional_retry_budget(expected_calls=len(specs) * 2)`가 같은 산수를 재시도
+    예산에 쓰고 있었는데 분자에는 연결돼 있지 않았다. 지금은 연결됐지만, 2026-09-13
+    4차 적대 리뷰가 **그 연결을 재는 테스트가 없다**는 것을 잡았다 — 두 계수를 다시
+    `note_upstream_request(2)` 하나로 합쳐도 아무것도 빨개지지 않았다.
+    """
+
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    kor_travel_map_client = _FakeKrtourClient()
+    datagokr = _FakeDataGoKrClient(land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM])
+
+    with counting_upstream_requests():
+        result = await run_feature_weather_kma_mid_forecast(
+            _mid_context(kor_travel_map_client, datagokr, region_json=_MID_TWO_REGION_JSON)
+        )
+        observed = observed_upstream_requests()
+
+    assert result.regions_total == 2
+    assert len(datagokr.calls) == 4
+    assert observed == 4, f"region 2개 × 호출 2 = 4건인데 {observed}건을 셌다"
+
+
+async def test_mid_forecast_does_not_count_the_call_that_never_went_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """육상이 종단 실패하면 기온 호출은 나가지 않는다 — 그 1건을 세면 안 된다.
+
+    종전에는 region마다 `note_upstream_request(2)`를 **호출 전에 한 번** 불렀다.
+    그러면 첫 region의 육상에서 죽어도 2건을 센다 — 부풀린 하한은 하한이 아니다.
+    """
+
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+
+    class _FatalError(Exception):
+        retryable = False
+
+    class _FatalLandClient(_FakeDataGoKrClient):
+        def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
+            self.calls.append(("land-fatal", reg_id))
+            raise _FatalError("bad key")
+
+    kor_travel_map_client = _FakeKrtourClient()
+    datagokr = _FatalLandClient(land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM])
+
+    with counting_upstream_requests():
+        with pytest.raises(Exception):  # noqa: B017, PT011 - provider 예외 그대로 전파
+            await run_feature_weather_kma_mid_forecast(
+                _mid_context(kor_travel_map_client, datagokr, region_json=_MID_TWO_REGION_JSON)
+            )
+        observed = observed_upstream_requests()
+
+    assert len(datagokr.calls) == 1
+    assert observed == 1, (
+        f"육상 1건만 나갔는데 {observed}건을 셌다 — 나가지 않은 기온 호출을 세면 "
+        "분자가 하한이 아니게 된다"
     )
