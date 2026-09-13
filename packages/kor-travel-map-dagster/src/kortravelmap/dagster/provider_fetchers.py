@@ -51,6 +51,7 @@ _LOGGER = logging.getLogger(__name__)
 logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 
 __all__ = [
+    "KrexRestAreaWeatherUnavailable",
     "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
     "fetch_airkorea_air_quality",
@@ -90,6 +91,21 @@ __all__ = [
 
 class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
+
+
+class KrexRestAreaWeatherUnavailable(RuntimeError):
+    """EX 휴게소 기상이 lookback 창 안에서 한 시각도 관측을 주지 않았을 때.
+
+    **이것이 없으면 빈 Page가 성공이 된다.** ``krex``의 ``latest_weather()``는
+    lookback을 다 쓰고도 못 찾으면 예외가 아니라 **빈 Page를 정상 반환**한다
+    (``krex/client.py``). 그러면 이 저장소의 적재 경로 어디에도 빈 가드가 없어
+    0 bundle·0 value가 적재되고, asset이 ``_record_feature_sync_success``까지
+    실행해 cursor를 전진시키고 ``consecutive_failures``를 0으로 되돌린다 —
+    Dagster는 초록, freshness는 "방금 성공", 실제 값은 갱신 없음.
+
+    2026-09-13 적대 리뷰가 잡았다. 그 전에는 이 모듈이 lookback을 48 → 6으로
+    줄이면서 "못 찾으면 시끄럽게 실패한다"고 적었는데, 실패하는 장치가 없었다.
+    """
 
 
 class KrexTrafficNoticeSnapshotUnstable(RuntimeError):
@@ -755,8 +771,14 @@ def fetch_krex_rest_area_fuel_prices(
 #: 6으로 낮춘 이유는 비용이 아니라 **정확성**이다. 이 asset은 매시(`35 * * * *`)
 #: 돌고 upstream은 시간 단위로 발표한다. 6시간을 되짚어도 못 찾았다면 그것은
 #: "조금 늦은 데이터"가 아니라 upstream이 멈춘 것이고, 그때 48시간 전 관측을
-#: "최신 기상"으로 적재하는 것은 조용한 오염이다 — 빈 Page로 돌아와 시끄럽게
-#: 실패하는 편이 낫다. 요청이 49 → 7로 주는 것은 그 판단의 부수 효과다.
+#: "최신 기상"으로 적재하는 것은 조용한 오염이다. 요청이 49 → 7로 주는 것은 그
+#: 판단의 부수 효과다.
+#:
+#: **그리고 못 찾았을 때 실제로 실패해야 한다.** 라이브러리는 lookback을 다 쓰면
+#: 예외가 아니라 빈 Page를 돌려주고, 이 저장소의 적재 경로에는 빈 가드가 없어
+#: 그것이 **성공 cursor 전진**으로 끝난다. 그래서 여기서
+#: :class:`KrexRestAreaWeatherUnavailable`을 던진다 — 그러지 않으면 lookback을
+#: 줄이는 것은 "낡은 데이터"를 "조용한 무데이터"로 바꾸는 일이고, 후자가 더 나쁘다.
 #:
 #: KREX(한국도로공사 EX OpenAPI)는 data.go.kr 활용신청이 아니라 일일 한도를
 #: 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
@@ -802,6 +824,13 @@ def fetch_krex_rest_area_weather(
         page = client.restarea.latest_weather(
             lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
         )
+        if not page.items:
+            raise KrexRestAreaWeatherUnavailable(
+                "EX 휴게소 기상이 lookback "
+                f"{_KREX_WEATHER_LOOKBACK_HOURS}시간 안에 관측을 주지 않았다. "
+                "빈 결과를 성공으로 적재하면 cursor가 전진하고 실패 카운터가 "
+                "0으로 돌아가 아무도 눈치채지 못한다."
+            )
         yield from page.items
     finally:
         client.close()

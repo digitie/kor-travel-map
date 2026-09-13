@@ -314,8 +314,10 @@ class KorTravelMapSettings(BaseSettings):
             "한도 보호. **대상 격자가 이 값을 넘으면 run이 실패한다** "
             "(``KmaWeatherGridLimitExceeded``: partial execution is forbidden). "
             "초과분은 다음 run으로 넘어가지 않는다 — 상한을 올리거나 대상을 줄여야 "
-            "한다. 기본값 300 × 매시 = 7,200 요청/일이고 오퍼레이션당 실측 한도는 "
-            "10,000/일이다(docs/etl/upstream-quota.md). "
+            "한다. 이 값은 **호출 경계 수의 상한**이지 요청 수도 실제 격자 수도 "
+            "아니다 — 경계당 최대 4 HTTP 시도이고(upstream_retry: 안쪽 2 x 바깥 2) "
+            "2026-09-13 prod 실측 격자 수는 59다. 오퍼레이션당 실측 한도 10,000/일과의 "
+            "관계는 docs/etl/upstream-quota.md. "
             "env ``KMA_WEATHER_MAX_GRIDS_PER_RUN``."
         ),
     )

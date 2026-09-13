@@ -31,6 +31,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
     fetch_krex_rest_area_fuel_prices,
+    fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
@@ -462,9 +463,21 @@ class _FakePage:
 
 
 class _FakeRestareaService:
-    def __init__(self, total: int) -> None:
+    def __init__(self, total: int, weather: tuple[object, ...] = ()) -> None:
         self.total = total
         self.calls: list[tuple[int, int]] = []
+        self.weather = weather
+        self.lookback_calls: list[int] = []
+
+    def latest_weather(self, *, lookback_hours: int = 48, **_kwargs: Any) -> _FakePage:
+        """실물 계약: lookback을 다 써도 못 찾으면 **예외가 아니라 빈 Page**다.
+
+        `krex/client.py`의 `latest_weather`가 `KrexNotFoundError`를 continue로
+        삼키고 끝에서 `Page(items=(), raw=last_raw)`를 정상 반환한다. 대역이 그
+        성질을 흉내내지 않으면 "빈 결과가 성공이 된다"는 결함이 보이지 않는다.
+        """
+        self.lookback_calls.append(lookback_hours)
+        return _FakePage(items=tuple(self.weather), total_count=len(self.weather))
 
     def list_all(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
@@ -484,11 +497,19 @@ class _FakeRestareaService:
 class _FakeKrexClient:
     instances: list[_FakeKrexClient] = []
     total: int = 0
+    weather: tuple[object, ...] = ()
 
-    def __init__(self, *, go_api_key: str | None = None, **_kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        go_api_key: str | None = None,
+        ex_api_key: str | None = None,
+        **_kwargs: Any,
+    ) -> None:
         self.go_api_key = go_api_key
+        self.ex_api_key = ex_api_key
         self.closed = False
-        self.restarea = _FakeRestareaService(type(self).total)
+        self.restarea = _FakeRestareaService(type(self).total, type(self).weather)
         _FakeKrexClient.instances.append(self)
 
     def close(self) -> None:
@@ -496,10 +517,14 @@ class _FakeKrexClient:
 
 
 def _install_fake_krex(
-    monkeypatch: pytest.MonkeyPatch, *, total: int
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    total: int = 0,
+    weather: tuple[object, ...] | list[object] = (),
 ) -> type[_FakeKrexClient]:
     _FakeKrexClient.instances = []
     _FakeKrexClient.total = total
+    _FakeKrexClient.weather = tuple(weather)
     module = ModuleType("krex")
     module.__dict__["KrexClient"] = _FakeKrexClient
     monkeypatch.setitem(sys.modules, "krex", module)
@@ -3249,3 +3274,37 @@ def test_datagokr_resource_definition_is_live_not_guard() -> None:
     # krheritage_items도 live로 wiring 완료 (#380) — guard 아님.
     heritage_items = PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_items"]
     assert "live fetcher" in (heritage_items.description or "")
+
+
+def test_krex_rest_area_weather_refuses_to_succeed_with_no_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """빈 Page를 성공으로 적재하지 않는다.
+
+    `krex`의 `latest_weather()`는 lookback을 다 써도 못 찾으면 예외가 아니라
+    **빈 Page를 정상 반환**한다. 적재 경로에 빈 가드가 없어 그것이 `sync success`
+    cursor 전진과 `consecutive_failures = 0`으로 끝난다 — Dagster는 초록인데
+    weather value는 갱신되지 않는다. 2026-09-13 적대 리뷰가 잡은 구멍이다.
+    """
+
+    fake = _install_fake_krex(monkeypatch, weather=[])
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    with pytest.raises(provider_fetchers.KrexRestAreaWeatherUnavailable):
+        list(fetch_krex_rest_area_weather(settings))
+    assert fake.instances[0].closed is True
+
+
+def test_krex_rest_area_weather_declares_its_lookback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """호출 한 번이 요청 한 번이 아니다 — lookback이 곧 증폭 배수다."""
+
+    fake = _install_fake_krex(monkeypatch, weather=[object()])
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    list(fetch_krex_rest_area_weather(settings))
+
+    assert fake.instances[0].restarea.lookback_calls == [
+        provider_fetchers._KREX_WEATHER_LOOKBACK_HOURS
+    ], "lookback을 명시하지 않으면 라이브러리 기본값 48(=49 요청)로 돌아간다"
