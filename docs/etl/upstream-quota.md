@@ -127,7 +127,7 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 > **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
 
-## 4. 분자 — 이제 모든 asset이 센다
+## 4. 분자 — fetcher 32개 중 28개가 센다
 
 - **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 격자 루프가 호출마다 계수한다.
   `grids_fetched`(성공한 격자 수)와 **다른 수**임에 주의 — 실패해 중단된 격자도
@@ -150,8 +150,30 @@ provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치�
 있다(krex `latest_weather`의 lookback 루프 — 그래서 그쪽은 상한을 따로 선언한다).
 즉 "적어도 이만큼은 썼다"이고, 한도와 비교할 때 그 방향으로만 안전하다.
 
-**세지 않은 것과 0번 요청한 것을 섞지 않는다.** 계수기 밖에서는 key 자체가 metadata에
-실리지 않는다 — 캐시/skip으로 끝난 run의 `0`과 구분된다.
+**"세지 않았다"는 값을 내지 않는다.** 계수기가 열려 있어도 **한 번도 기록되지
+않았으면** key 자체가 실리지 않는다.
+
+이 구분이 첫 판에는 없었고 적대 리뷰가 blocker로 잡았다 — 계수기는 asset 35개
+전부에서 열리는데 세는 자리는 셋뿐이라 **OpiNet이 수천 건을 쓰면서 0을 냈다.**
+하필 그것이 분모를 실측한 유일한 provider다. 틀린 0은 읽는 사람을 멈추게 하지
+못하고, 없는 값은 멈추게 한다.
+
+### 커버리지 — fetcher 32개 중 28개가 센다
+
+`tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 fetcher를 소스에서
+유도해 **세거나, 왜 못 세는지 선언하거나**를 요구한다. 선언된 넷:
+
+| fetcher | 이유 |
+|---|---|
+| `fetch_krairport_airports` | 번들 정적 데이터 — upstream 요청이 없다 |
+| `fetch_mois_license_records` | 로컬 sqlite를 읽는다 |
+| `fetch_datagokr_file_data_records` | `file_data.iter_all()`이 provider 안에서 페이지네이션한다 |
+| `fetch_krheritage_events` | `event.iter_months()`가 provider 안에서 월별 순회한다 |
+
+뒤 둘을 **1로 세지 않는다** — 1은 0만큼이나 오도한다. 그 asset은 key 없이 나간다.
+
+종전 구조 검사는 "asset이 계수 범위 안에서 도는가"를 물었는데 wrapper가 항상 열어
+**항진명제였다.** 요청을 보내는 것은 asset이 아니라 fetcher다.
 
 ### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
