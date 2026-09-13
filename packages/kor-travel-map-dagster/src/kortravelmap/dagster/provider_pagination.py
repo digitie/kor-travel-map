@@ -295,18 +295,23 @@ class _PageState:
     page_no: int = 0
     finished: bool = False
     previous_fingerprint: Any = None
+    declared_raised_ceiling: bool = False
 
     def guard_ceiling(self) -> None:
         effective = min(self.ceiling, self.absolute_ceiling)
         if self.page_no > effective:
-            hit_absolute = effective == self.absolute_ceiling < self.ceiling
+            # 선언 건수가 **실제로** 상한을 올렸을 때만 그렇게 말한다. `max_pages`
+            # 기본값이 절대 상한보다 큰 것은 선언과 무관하다(적대 리뷰 지적).
+            blocked_by_absolute = (
+                self.declared_raised_ceiling and self.absolute_ceiling < self.ceiling
+            )
             raise ProviderPaginationOverrun(
                 f"{self.label}: page 상한 {effective}를 넘겼다 "
                 f"(수신 {self.seen}건, 선언 {self.declared}"
                 + (
-                    f", 선언이 요구한 상한 {self.ceiling}는 절대 상한 "
+                    f", 선언 건수가 요구한 상한 {self.ceiling}는 절대 상한 "
                     f"{self.absolute_ceiling}에 막혔다"
-                    if hit_absolute
+                    if blocked_by_absolute
                     else ""
                 )
                 + "). "
@@ -345,7 +350,10 @@ class _PageState:
             needed = (
                 -(-self.declared // self.num_of_rows) if self.num_of_rows > 0 else 1
             )
-            self.ceiling = max(self.ceiling, needed * _DECLARED_PAGE_SLACK + 1)
+            raised = needed * _DECLARED_PAGE_SLACK + 1
+            if raised > self.ceiling:
+                self.ceiling = raised
+                self.declared_raised_ceiling = True
 
         if not items:
             if self.declared is not None and self.seen < self.declared:
