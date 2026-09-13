@@ -117,6 +117,7 @@ from .provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
+from .schedules import DISABLED_FEATURE_LOAD_OPERATION_KEYS
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -220,6 +221,40 @@ class FeatureUpdateAssetRunner:
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
         failure_sync_scope = scope.sync_scope
+        if scope.operation_key in DISABLED_FEATURE_LOAD_OPERATION_KEYS:
+            # 자동 적재를 끈 provider다(`DISABLED_FEATURE_LOAD_SCHEDULES`).
+            # 그 목록은 schedule만 막았고 **이 경로는 막지 않았다** - prod가 cron이
+            # 아니라 큐로 돌기 때문에, 사용자가 끈 provider가 살아 있는 경로로
+            # 그대로 나가고 있었다(2026-09-14 발견). 끄는 결정을 기록만 하지 않고
+            # 실행 경계에 결박한다.
+            #
+            # job은 그대로 둔다 - 사람이 Dagster UI에서 직접 돌리는 백필은 이
+            # runner를 지나지 않는다. 여기서 막는 것은 **자동으로 도는 것**이다.
+            log_info = getattr(self._log, "info", None)
+            if callable(log_info):
+                log_info(
+                    "%s 자동 적재가 꺼져 있어 큐 요청을 건너뛴다 "
+                    "(DISABLED_FEATURE_LOAD_SCHEDULES).",
+                    scope.operation_key,
+                )
+            return ProviderDatasetRefreshResult(
+                provider_dataset_id=scope.provider_dataset_id,
+                sync_scope=scope.sync_scope,
+                operation_key=scope.operation_key,
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                status="skipped",
+                metadata={
+                    "provider_dataset_id": scope.provider_dataset_id,
+                    "sync_scope": scope.sync_scope,
+                    "operation_key": scope.operation_key,
+                    "provider": scope.provider,
+                    "dataset_key": scope.dataset_key,
+                    "skipped": True,
+                    "skip_reason": "provider_auto_load_disabled",
+                    "scope_type": scope.scope_type,
+                },
+            )
         if (
             scope.operation_key
             in {
