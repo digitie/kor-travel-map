@@ -587,24 +587,26 @@ def test_the_queue_runner_opens_the_counter_around_the_raw_run_function() -> Non
 
     module = ast.parse((_PACKAGE / "feature_update_runner.py").read_text(encoding="utf-8"))
     parents = _parent_map(module)
+    # `spec.run(...)`은 호출이지만 `spec.resources`는 `asyncio.to_thread`에
+    # **참조로** 넘어간다. 그래서 Call이 아니라 Attribute 노드를 찾는다 — 호출
+    # 형태에 의존하면 참조 전달 한 줄로 검사를 빠져나갈 수 있다.
     dispatches = [
         node
         for node in ast.walk(module)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"run", "resources"}
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "spec"
+        if isinstance(node, ast.Attribute)
+        and node.attr in {"run", "resources"}
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "spec"
     ]
-    assert len(dispatches) >= 2, (
-        "runner가 raw run 함수와 resources 팩토리를 부르는 자리를 찾지 못했다 — "
-        f"{len(dispatches)}개만 보인다. 이 검사가 아무것도 보지 않고 있다."
+    found = sorted({node.attr for node in dispatches})
+    assert found == ["resources", "run"], (
+        f"runner가 raw run 함수와 resources 팩토리를 쓰는 자리를 찾지 못했다 — "
+        f"{found}만 보인다. 이 검사가 아무것도 보지 않고 있다."
     )
     uncounted = [
-        f"{node.func.attr}@{node.lineno}"
+        f"{node.attr}@{node.lineno}"
         for node in dispatches
-        if isinstance(node.func, ast.Attribute)
-        and _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
+        if _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
     ]
     assert uncounted == [], (
         f"계수 범위 **밖**에서 부른다({uncounted}). 그 경로의 "
