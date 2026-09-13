@@ -2324,6 +2324,13 @@ def fetch_visitkorea_festival_events(
         #
         # `max_pages`가 아니라 `absolute_max_pages`를 쓴다 — 전자는 천장이 아니라
         # 바닥이라 선언 건수가 그 위로 올린다(그것을 실측으로 확인했다).
+        #
+        # **잃는 것 하나를 적어 둔다.** 라이브러리 iterator에는 "직전 페이지와 raw가
+        # 같으면 `TourApiParseError`"라는 가드가 있고 여기에는 없다. upstream이
+        # 커서를 전진시키지 않으면 그쪽은 2요청에서 멈추고 이쪽은 상한(50)까지 간다.
+        # 그 대가를 받는 이유는 반대편이 더 크기 때문이다 — 그쪽에는 상한이 아예
+        # 없어서 upstream이 `total_count`를 크게 말하는 쪽이 훨씬 비싸다. 50요청은
+        # 이 오퍼레이션 일일 한도(1,000)의 5%다.
         yield from iter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
