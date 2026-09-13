@@ -1238,6 +1238,10 @@ async def run_feature_weather_kma_mid_forecast(
             expected_calls=len(specs) * 2,
         )
         for spec in specs:
+            # region 하나당 오퍼레이션 호출 **둘**(육상 + 기온). 바로 위
+            # `expected_calls=len(specs) * 2`가 같은 산수를 재시도 예산에 쓰고
+            # 있었는데 쿼터 분자에는 연결돼 있지 않았다(2026-09-13 적대 리뷰).
+            note_upstream_request(2)
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
             land_rows: Sequence[Any] = mid_land_rows_from_items(

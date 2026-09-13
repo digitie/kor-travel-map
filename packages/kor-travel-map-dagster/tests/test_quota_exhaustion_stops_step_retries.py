@@ -534,25 +534,11 @@ def test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard() -> N
     assert openers, "계수기를 여는 함수를 하나도 찾지 못했다 — 결박이 사라졌다"
 
 
-@pytest.mark.parametrize(
-    ("module", "asset_name", "calls"),
-    [
-        (module, node.name, _called_names(node))
-        for module, node in _feature_load_assets()
-    ],
-    ids=[f"{module}:{node.name}" for module, node in _feature_load_assets()],
-)
-def test_every_retrying_asset_counts_its_upstream_requests(
-    module: str, asset_name: str, calls: set[str]
-) -> None:
-    """분자를 세는 범위 안에서 도는 asset이어야 한다."""
-
-    openers = {
-        node.name
-        for _m, node in _functions()
-        if _COUNTER_SCOPE in _called_names(node)
-    }
-    assert asset_name in openers or calls & openers, (
-        f"{module}의 `{asset_name}`이 분자 계수 범위 밖에서 돈다 — "
-        "그 asset의 upstream 요청 수는 Dagster UI에 실리지 않는다."
-    )
+# `test_every_retrying_asset_counts_its_upstream_requests`는 여기 있었다(2026-09-13
+# 제거). 이름과 달리 **항진명제였다** — 계수기를 여는 wrapper를 모든 asset이 지나므로
+# `asset_name in openers or calls & openers`가 언제나 참이었고, 세지 않는 fetcher를
+# 절대 볼 수 없었다. 적대 리뷰가 그것을 잡았다.
+#
+# 요청을 보내는 것은 asset이 아니라 **fetcher**다. 그래서 커버리지 검사는
+# `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`로 옮겼다 — 거기서는
+# fetcher마다 계수 호출을 (전이 포함) 요구하고, 못 세는 것은 이유와 함께 선언한다.

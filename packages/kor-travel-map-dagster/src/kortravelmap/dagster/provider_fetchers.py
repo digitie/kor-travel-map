@@ -173,6 +173,7 @@ async def fetch_kor_travel_concierge_youtube_features(
             }
             if cursor:
                 params["cursor"] = cursor
+            note_upstream_request()
             response = await client.get(path, params=params)
             response.raise_for_status()
             payload = response.json()
@@ -589,6 +590,9 @@ def _fetch_krex_traffic_notice_snapshot(
     page_no = 1
     expected_total: int | None = None
     while True:
+        # 우리가 소유한 페이지 루프. 안정성 비교로 이 snapshot을 **최소 2회**
+        # 완주하므로 실제 요청은 페이지 수의 배수다 — 그 배수는 호출자가 돈다.
+        note_upstream_request()
         page = client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
         items = list(page.items)
         total_count = _validate_krex_traffic_notice_page(
@@ -825,6 +829,9 @@ def fetch_krex_rest_area_weather(
 
     client = krex.KrexClient(ex_api_key=api_key)
     try:
+        # 이 호출 하나가 lib 안에서 최대 `lookback+1`건을 보낸다. 이 층은 그
+        # 안을 볼 수 없으므로 **1건으로 센다** — 그래서 이름이 `_min`이다.
+        note_upstream_request()
         page = client.restarea.latest_weather(
             lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
         )
@@ -856,6 +863,7 @@ async def fetch_knps_point_records(
     knps = cast(Any, importlib.import_module("knps"))
     client = knps.KnpsClient()
     try:
+        note_upstream_request()
         records = await client.files.read_place_records(dataset_key)
         for record in records:
             yield record
@@ -877,6 +885,7 @@ async def fetch_knps_geometry_records(
     knps = cast(Any, importlib.import_module("knps"))
     client = knps.KnpsClient()
     try:
+        note_upstream_request()
         records = await client.files.read_geo_records(dataset_key)
         for record in records:
             yield record
@@ -994,6 +1003,7 @@ async def fetch_krforest_arboretums(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=api_key)
     try:
+        note_upstream_request()
         records = await client.travel.recreation_forest_arboretums()
         for record in records:
             yield record
@@ -1016,6 +1026,7 @@ async def fetch_krforest_mountain_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        note_upstream_request()
         records = await client.travel.forest_trail_file_features()
         for record in records:
             yield record
@@ -1038,6 +1049,7 @@ async def fetch_krforest_dulle_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        note_upstream_request()
         records = await client.travel.dulle_trail_features()
         for record in records:
             yield record
@@ -1275,6 +1287,9 @@ def fetch_mcst_culture_records(
     max_items = settings.mcst_max_items_per_dataset
     try:
         for slug in selected_slugs:
+            # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
+            # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
+            note_upstream_request()
             for seen, row in enumerate(client.iter_csv(slug), start=1):
                 yield (slug, row)
                 if seen >= max_items:
@@ -1978,12 +1993,22 @@ class _OpinetCallBudget:
         return not self._unbounded and self._remaining <= 0
 
     def spend(self) -> bool:
-        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``."""
+        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``.
+
+        **여기가 OpiNet의 분자다.** 이 메서드는 호출 **직전**에 정확히 1건씩
+        불린다 — 그래서 쿼터 계수기도 같은 자리에서 올린다. 2026-09-13 적대 리뷰
+        전까지 이 정확한 계수가 있는데도 metadata에는 0이 실렸다. 하필 OpiNet이
+        **분모를 실측한 유일한 provider**다(docs/etl/upstream-quota.md).
+
+        예산이 소진돼 ``False``를 돌려줄 때는 호출이 일어나지 않으므로 세지 않는다.
+        """
         if self._unbounded:
+            note_upstream_request()
             return True
         if self._remaining <= 0:
             return False
         self._remaining -= 1
+        note_upstream_request()
         return True
 
 

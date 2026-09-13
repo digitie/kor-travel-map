@@ -20,10 +20,18 @@ provider는 fetcher가 **generator**라서, 요청을 세는 자리(페이지 �
 
 즉 이 수는 **"적어도 이만큼은 썼다"**이고, 한도와 비교할 때 그 방향으로만 안전하다.
 
-**빈 문맥에서는 아무것도 하지 않는다.** 계수기를 열지 않은 경로(단위 테스트, 수동
-호출)에서 :func:`note_upstream_request`는 무해한 no-op이고
-:func:`observed_upstream_requests`는 ``None``을 돌려준다 — "0번 요청했다"와 "세지
-않았다"는 다른 사실이라 metadata에도 그 둘을 섞지 않는다.
+**"세지 않았다"는 값을 내지 않는다.** 계수기가 열려 있어도 **한 번도 기록되지
+않았으면** :func:`observed_upstream_requests`가 ``None``을 돌려준다 — 그때 metadata에는
+key 자체가 실리지 않는다.
+
+이 구분이 없으면 **계측되지 않은 fetcher가 "0번 요청했다"고 보고한다.** 2026-09-13
+적대 리뷰가 정확히 그것을 잡았다: 계수기는 asset 35개 전부에서 열리는데 세는 자리는
+셋뿐이었고, 그래서 OpiNet처럼 수천 건을 쓰는 경로가 0을 냈다 — 하필 분모를 실측한
+유일한 provider였다. 운영자가 그 0을 "캐시/skip으로 요청이 없었다"로 읽으면(문서가
+그렇게 읽으라고 적었다) 정반대 결론에 이른다.
+
+대가는 **진짜로 0번 요청한 run도 key가 없다는 것**이다. 그 편이 낫다 — 없는 값은
+읽는 사람을 멈추게 하고, 틀린 0은 멈추지 않는다.
 """
 
 from __future__ import annotations
@@ -44,9 +52,14 @@ __all__ = [
 #: 사라지는 것을 정적 검사가 볼 수 있다.
 UPSTREAM_REQUESTS_METADATA_KEY: Final[str] = "upstream_requests_min"
 
-#: 열려 있으면 ``[count]``, 아니면 ``None``. 가변 리스트를 담는 이유는 generator가
-#: 자기 문맥에서 값을 **올릴 수 있어야** 하기 때문이다 — 정수를 담으면 ``set``이
-#: 필요하고 그것은 호출자 문맥에 보이지 않는다.
+#: 열려 있으면 ``[요청 수, 기록 횟수]``, 아니면 ``None``.
+#:
+#: **가변 리스트**인 이유는 generator가 자기 문맥에서 값을 올릴 수 있어야 하기
+#: 때문이다 — 정수를 담으면 ``set``이 필요하고, 문맥이 복사되는 경계
+#: (``asyncio.to_thread``/``create_task``)에서 그 ``set``은 호출자에게 보이지 않는다.
+#: 리스트는 복사돼도 **같은 객체**라 안쪽 증가가 바깥에 보인다(실측).
+#:
+#: **두 번째 칸**이 "세지 않았다"와 "0번 요청했다"를 가른다.
 _COUNTER: Final[ContextVar[list[int] | None]] = ContextVar(
     "kortravelmap_upstream_requests", default=None
 )
@@ -60,7 +73,7 @@ def counting_upstream_requests() -> Iterator[list[int]]:
     안쪽 수가 바깥으로 합산되지는 않는다(그럴 일이 없고, 합산하면 이중 계수가 난다).
     """
 
-    counter = [0]
+    counter = [0, 0]
     token = _COUNTER.set(counter)
     try:
         yield counter
@@ -74,10 +87,17 @@ def note_upstream_request(count: int = 1) -> None:
     counter = _COUNTER.get()
     if counter is not None:
         counter[0] += count
+        counter[1] += 1
 
 
 def observed_upstream_requests() -> int | None:
-    """이 문맥에서 관측된 요청 수. 계수기가 열려 있지 않으면 ``None``."""
+    """이 문맥에서 관측된 요청 수.
+
+    계수기가 열려 있지 않거나 **한 번도 기록되지 않았으면** ``None``이다 —
+    계측되지 않은 fetcher가 "0번 요청했다"고 보고하지 않게 한다.
+    """
 
     counter = _COUNTER.get()
-    return None if counter is None else counter[0]
+    if counter is None or counter[1] == 0:
+        return None
+    return counter[0]
