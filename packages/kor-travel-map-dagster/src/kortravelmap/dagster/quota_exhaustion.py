@@ -27,6 +27,10 @@ Dagster가 60·120·240초 간격으로 **같은 순회를 세 번 더** 돌린�
 ``except DagsterError as de: raise de``가 먼저 잡지 않는다 — ``Failure``의 MRO는
 ``(Failure, Exception, BaseException, object)``라 ``DagsterError``가 아니다(실측).
 
+그 경계가 asset 본문을 실제로 감싼다: ``plan/compute.py``가 사용자 generator를
+``iterate_with_context(lambda: op_execution_error_boundary(...), user_event_generator)``
+로 돌린다. async asset은 ``gen_from_async_gen``을 한 겹 지나지만 같은 경계 안이다.
+
 따라서 **그냥 ``Failure``를 던지는 것으로는 부족하다.** ``allow_retries``의 기본값은
 ``True``이고(``events.py``: ``check.opt_bool_param(allow_retries, ..., True)``) 그때는
 정책이 그대로 세 번 더 돌린다. 이 모듈이 그 인자를 명시하는 이유다.
