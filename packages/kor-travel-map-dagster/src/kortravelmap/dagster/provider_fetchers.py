@@ -1062,6 +1062,9 @@ async def fetch_krforest_mountain_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        # SHP 다운로드 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을
+        # 받는다. 그 배수는 provider 내부라 여기서는 1로 센다 - 이름이 `_min`인
+        # 이유이고, 위 arboretums와 같은 형태다.
         note_upstream_request()
         records = await client.travel.forest_trail_file_features()
         for record in records:
@@ -1085,6 +1088,9 @@ async def fetch_krforest_dulle_trails(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
+        # SHP 다운로드 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을
+        # 받는다. 그 배수는 provider 내부라 여기서는 1로 센다 - 이름이 `_min`인
+        # 이유이고, 위 arboretums와 같은 형태다.
         note_upstream_request()
         records = await client.travel.dulle_trail_features()
         for record in records:

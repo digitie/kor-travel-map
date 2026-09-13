@@ -322,8 +322,9 @@ class FeatureUpdateAssetRunner:
                         # metadata를 싣지 못하므로 로그가 유일한 기록이다 -
                         # asset 경로의 `_log_spend_on_failure`와 같은 이유다.
                         observed = observed_upstream_requests()
-                        if observed is not None:
-                            self._log.warning(
+                        log_warning = getattr(self._log, "warning", None)
+                        if observed is not None and callable(log_warning):
+                            log_warning(
                                 "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
                                 UPSTREAM_REQUESTS_METADATA_KEY,
                                 observed,

@@ -18,6 +18,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+from dagster import Failure
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -31,6 +32,9 @@ from kortravelmap.dagster.provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
     iter_paginated_items,
+)
+from kortravelmap.dagster.quota_exhaustion import (
+    raise_terminal_if_quota_exhausted,
 )
 from kortravelmap.dagster.upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
@@ -124,8 +128,14 @@ def test_an_async_generator_chain_still_reaches_the_counter() -> None:
     assert counted == 2, f"async generator를 지나며 계수가 끊겼다({counted}건)"
 
 
-def test_a_failed_sweep_still_reports_what_it_spent() -> None:
-    """실패한 run이 쿼터를 얼마나 썼는지가 사후 판독의 값이다."""
+def test_a_failed_sweep_counts_the_request_that_failed() -> None:
+    """실패로 끝난 요청도 쿼터를 쓴다 — **계수기 안에서는** 세진다.
+
+    이 테스트가 재는 것은 계수기까지다. 그 수가 **읽을 수 있는 곳까지 가는지**는
+    별개이고, 2차 적대 리뷰가 그 구분을 짚었다 — 실패한 step은 output을 내지
+    않으므로 ``add_output_metadata``로 실은 값은 사라진다. 남는 경로는
+    :func:`test_quota_exhaustion_failure_carries_the_spend`가 잰다.
+    """
 
     def _page(page_no: int) -> ProviderPage:
         if page_no == 3:
@@ -136,6 +146,42 @@ def test_a_failed_sweep_still_reports_what_it_spent() -> None:
         list(iter_paginated_items(_page, num_of_rows=1, label="fails"))
 
     assert counter[0] == 3, "실패로 끝난 요청도 쿼터를 쓴다 — 세야 한다"
+
+
+def test_quota_exhaustion_failure_carries_the_spend() -> None:
+    """쿼터 소진으로 죽을 때 **얼마나 쓰고 죽었는지**가 실패 이벤트에 남는다.
+
+    하필 쿼터 소진이야말로 그 수가 필요한 실패다. output metadata는 실패하면
+    사라지지만 ``Failure`` metadata는 실패 이벤트에 붙으므로 남는다.
+    """
+
+    class _Exhausted(Exception):
+        failure_kind = "quota"
+
+    with counting_upstream_requests():
+        note_upstream_request(37)
+        with pytest.raises(Failure) as raised:
+            raise_terminal_if_quota_exhausted(_Exhausted("일일 한도 초과"))
+
+    metadata = {str(key): value for key, value in (raised.value.metadata or {}).items()}
+    assert UPSTREAM_REQUESTS_METADATA_KEY in metadata, (
+        "쿼터 소진 Failure가 소비량을 싣지 않았다 — 실패한 step은 output을 내지 "
+        "않으므로 이 자리가 아니면 그 수는 사라진다"
+    )
+    assert "37" in str(metadata[UPSTREAM_REQUESTS_METADATA_KEY])
+
+
+def test_quota_exhaustion_failure_omits_the_spend_when_nothing_was_counted() -> None:
+    """세지 않은 경로가 "0건 쓰고 죽었다"로 보이지 않게 한다."""
+
+    class _Exhausted(Exception):
+        failure_kind = "quota"
+
+    with counting_upstream_requests(), pytest.raises(Failure) as raised:
+        raise_terminal_if_quota_exhausted(_Exhausted("일일 한도 초과"))
+
+    metadata = {str(key): value for key, value in (raised.value.metadata or {}).items()}
+    assert UPSTREAM_REQUESTS_METADATA_KEY not in metadata
 
 
 # ------------------------------------------------------- metadata까지 닿는가

@@ -127,7 +127,7 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 > **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
 
-## 4. 분자 — fetcher 32개 중 28개가 센다
+## 4. 분자 — 진입점 33개 중 29개가 전부 센다
 
 - **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 격자 루프가 호출마다 계수한다.
   `grids_fetched`(성공한 격자 수)와 **다른 수**임에 주의 — 실패해 중단된 격자도
@@ -158,22 +158,41 @@ provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치�
 하필 그것이 분모를 실측한 유일한 provider다. 틀린 0은 읽는 사람을 멈추게 하지
 못하고, 없는 값은 멈추게 한다.
 
-### 커버리지 — fetcher 32개 중 28개가 센다
+### 커버리지 — 진입점 33개 중 29개가 전부 센다
 
-`tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 fetcher를 소스에서
-유도해 **세거나, 왜 못 세는지 선언하거나**를 요구한다. 선언된 넷:
+`tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 **명시 목록**
+(`_EXPECTED_FETCHERS`)의 진입점마다 **세거나, 왜 못 세는지 선언하거나**를 요구한다.
+목록에는 fetcher 32개 + MOIS Phase A(`sync_mois_source_db`)가 들어 있다 — 접두사로
+유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수 있었고, MOIS의 slug별 LOCALDATA
+다운로드는 통째로 게이트 밖이었다.
 
-| fetcher | 이유 |
+선언된 비계측은 **둘뿐**이고 둘 다 upstream 요청이 아예 없다:
+
+| 진입점 | 이유 |
 |---|---|
 | `fetch_krairport_airports` | 번들 정적 데이터 — upstream 요청이 없다 |
 | `fetch_mois_license_records` | 로컬 sqlite를 읽는다 |
-| `fetch_datagokr_file_data_records` | `file_data.iter_all()`이 provider 안에서 페이지네이션한다 |
-| `fetch_krheritage_events` | `event.iter_months()`가 provider 안에서 월별 순회한다 |
 
-뒤 둘을 **1로 세지 않는다** — 1은 0만큼이나 오도한다. 그 asset은 key 없이 나간다.
+2차 적대 리뷰가 이 목록을 넷에서 둘로 줄였다. **나머지 둘의 사유가 provider 소스와
+어긋났다** — `file_data.iter_pages`는 public이고 `iter_all`이 그것을 감싼 것뿐이었고,
+행사 창은 14개월로 알 수 있었다(비어 있는 달도 요청 1건이라 record 수로는 역산되지
+않는다). 지금은 둘 다 Map이 루프를 소유하고 정확히 센다. 못 센다는 선언은 값싸고,
+값싼 선언은 계측을 대체하기 시작한다.
 
 종전 구조 검사는 "asset이 계수 범위 안에서 도는가"를 물었는데 wrapper가 항상 열어
 **항진명제였다.** 요청을 보내는 것은 asset이 아니라 fetcher다.
+
+#### 정적 검사가 볼 수 없는 것 — 그리고 그것을 덮는 층
+
+이 검사는 "계수 호출 자리가 있는가"만 본다. **도달 불가 분기·죽은 중첩 함수·루프
+밖 1회는 전부 초록이다.** 2차 리뷰가 바로 그 구멍으로 실제 blocker를 통과시켰다:
+`fetch_krheritage_items`가 목록 페이지만 세고 record당 1 HTTP인 detail을 세지 않았는데,
+목록 계수만으로 "센다"로 판정됐다 — 실린 수가 실제의 **약 1%**였다(목록 ~45 vs
+detail ~4,000).
+
+그래서 손으로 박은 자리마다 **가짜 client로 N번 부르게 하고 계수가 N인지 재는**
+런타임 테스트를 둔다(`packages/kor-travel-map-dagster/tests/test_upstream_request_numerator.py`).
+그쪽이 효과를 보는 층이고, 정적 검사는 "빠진 fetcher가 없는가"만 지킨다.
 
 #### "센다"가 "모든 모드에서 센다"는 아니다 — OpiNet 부분 계측
 
@@ -190,7 +209,31 @@ provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치�
 **세지 않는다.** 계약상 기록이 없으면 key가 실리지 않으므로 0으로 위장하지는 않는다.
 
 그 목록은 검사기의 `_PARTIALLY_COUNTED`에 이유와 함께 박혀 있고, `_UNCOUNTABLE`과
-겹치지 못한다. 총량을 실제로 묶는 것은 §3의 하루 한 번 coalescing이다.
+겹치지 못하며, **계측된 쪽으로 세어 주지도 않는다** — 완전 계측을 부분 계측으로
+강등하는 것이 공짜면 그것이 값싼 도피로가 된다. 총량을 실제로 묶는 것은 §3의
+하루 한 번 coalescing이다.
+
+### 계수기는 어디서 열리나 — 경계가 둘이다
+
+`note_upstream_request()`는 계수기가 열려 있을 때만 기록한다. 여는 자리는 **asset
+경계**(`run_tracked_feature_asset`, `feature_place_mcst_culture`)와 **feature-update
+queue runner**(`FeatureUpdateAssetRunner`) 둘이다.
+
+runner를 빠뜨린 것이 2차 리뷰의 두 번째 blocker였다. 그 경로는 asset wrapper가 아니라
+**원본 run 함수**를 직접 부르므로, 계수기를 따로 열지 않으면 계측된 fetcher가 큐로
+돌 때 모든 계수가 no-op이 된다 — 조용히 값 없이 나간다.
+
+### 실패로 끝난 run은 어디에 남나
+
+**실패한 step은 output을 내지 않는다.** 그래서 `add_output_metadata`로 실은 분자는
+실패하면 사라진다. 남는 자리는 둘이다:
+
+| 실패 | 어디에 남나 |
+|---|---|
+| 일일 쿼터 소진 | `Failure` metadata의 `upstream_requests_min` (실패 이벤트에 붙는다) |
+| 그 밖의 실패 | 경고 로그 `실패로 끝났지만 upstream 요청은 나갔다 (...)` |
+
+세지 않은 경로는 둘 다 아무것도 남기지 않는다 — "0건 쓰고 죽었다"로 보이지 않게.
 
 ### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
