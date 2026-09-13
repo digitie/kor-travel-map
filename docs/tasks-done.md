@@ -10,6 +10,33 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-13 — 배포된 세대가 run을 완주시키는지 재게 됐다
+
+- [x] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
+  (**2026-09-13 완료**). 다섯 조문 전부 닫혔다(#1216 · #1219 · #1224 · #1225 · #1226).
+
+  **조문 3 — 재는 검사가 생겼다.** `scripts/dagster_run_completion_gate.py`가 다섯
+  축을 독립으로 판정한다: live config(컨테이너 안 `$DAGSTER_HOME/dagster.yaml`),
+  metadata 표 실재, daemon heartbeat 신선도, **능동 탐침 run 완주**, 멈춘 run 0건.
+  prod 실측으로 2026-09-11 사고 config를 되돌리면 red가 되는 것까지 확인했다
+  (config 변이 5종 + daemon tolerance 변이 전부 red, 대조군 0/15).
+
+  **조문 2 — 세대가 바뀌어도 유지된다.** t41a 배포에서 generation이
+  `b71cbefc` → `bae61363`으로 바뀐 뒤 같은 게이트가 15/15로 통과했다. 한 번의
+  관측이 아니라 두 세대의 비교다.
+
+  **조문 5 — 고치기 전에 재고, 재고 나서 고치지 않았다.** webserver와 daemon이
+  compute log를 공유하지 않는 것은 맞았지만, 그 자리에 있는 파일 286개가 **전부
+  0바이트**였다(1,047건을 적재한 provider job의 것 포함). 진단 내용은 event
+  log(postgres)에 있고 두 컨테이너가 같은 DB를 본다. 공유 volume은 빈 파일을
+  공유하면서 ~31 MB/일을 무한히 쌓는 교환이었다.
+
+  **이 task가 남긴 규칙.** 검사가 초록인 것과 결함이 없는 것은 다른 사실이다 —
+  이 게이트의 첫 판도 초록이었지만 네 자리에서 아무것도 재지 않았다
+  (`floor/runs-observed`가 탐침 때문에 항진명제, stuck이 큐 대기 시간을 섞어 잼,
+  daemon 하한이 상수 1, 신선도 분모가 꺼진 daemon 때문에 영구 red). 두 차례
+  적대 리뷰가 하나씩 잡았고 전부 prod에서 다시 쟀다.
+
 ## 2026-09-11 — feature_id 재키가 착지했다
 
 - [x] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀**

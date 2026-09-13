@@ -65,14 +65,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   닫혔고 prod 배포(t41a)도 전 사이클 GREEN이다. 남은 것은 bulk fetcher의 분자다.
   해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
 
-- [~] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
-
-  로컬 쓰기 경로는 고쳐졌다(#1216 + #1219). 2026-09-12 prod 실측으로 조문 1이 닫혔다
-  — provider 적재 job이 `SUCCESS`로 끝났고 run 이력이 "전부 실패"에서
-  `SUCCESS 23 · FAILURE 1`로 뒤집혔다. 남은 것은 조문 3(배포 사후점검이 "run이
-  완주한다"를 보지 않는다)과 조문 5(webserver와 daemon이 별개 컨테이너라 UI에
-  stdout/stderr가 비어 있다). 해제 조건은 acceptance §T-VN-DAGSTER-STORAGE.
-
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
 
   D2는 소유 Feature를 은퇴까지만 끌고 가고 삭제는 `purge`가 하는데, 그 action이
