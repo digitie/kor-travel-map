@@ -494,3 +494,56 @@ def test_the_kma_asset_publishes_the_quota_numerator() -> None:
     assert result.as_metadata()["upstream_requests_min"] == 59, (
         "분자가 격자 호출 수와 다르다 — 격자 하나 = 요청 하나가 이 job의 계약이다."
     )
+
+
+# ---------------------------------------------------------------- 분자 배선
+
+
+_COUNTER_SCOPE = "counting_upstream_requests"
+
+
+def test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard() -> None:
+    """분자 계수기와 쿼터 판정은 **같은 두 경계**에서 열려야 한다.
+
+    계수기를 여는 자리를 놓치면 `test_upstream_request_numerator.py`는 전부
+    초록인 채로 prod에서 아무것도 세지 않는다 — 그 파일은 계수기가 열린 뒤를
+    재고, 여기서는 **그것이 열리는지**를 잰다.
+    """
+
+    openers = {
+        node.name
+        for _module, node in _functions()
+        if _COUNTER_SCOPE in _called_names(node)
+    }
+    guarded = _quota_guarded_functions()
+    missing = sorted(guarded - openers)
+    assert missing == [], (
+        f"쿼터 판정을 거는 경계가 분자 계수기를 열지 않는다: {missing}. "
+        "판정과 계수는 같은 실행 범위의 두 얼굴이다 — 한쪽만 걸면 그 asset의 "
+        "요청 수가 metadata에 실리지 않는다."
+    )
+    assert openers, "계수기를 여는 함수를 하나도 찾지 못했다 — 결박이 사라졌다"
+
+
+@pytest.mark.parametrize(
+    ("module", "asset_name", "calls"),
+    [
+        (module, node.name, _called_names(node))
+        for module, node in _feature_load_assets()
+    ],
+    ids=[f"{module}:{node.name}" for module, node in _feature_load_assets()],
+)
+def test_every_retrying_asset_counts_its_upstream_requests(
+    module: str, asset_name: str, calls: set[str]
+) -> None:
+    """분자를 세는 범위 안에서 도는 asset이어야 한다."""
+
+    openers = {
+        node.name
+        for _m, node in _functions()
+        if _COUNTER_SCOPE in _called_names(node)
+    }
+    assert asset_name in openers or calls & openers, (
+        f"{module}의 `{asset_name}`이 분자 계수 범위 밖에서 돈다 — "
+        "그 asset의 upstream 요청 수는 Dagster UI에 실리지 않는다."
+    )
