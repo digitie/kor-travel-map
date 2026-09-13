@@ -86,14 +86,15 @@ def test_the_derivation_is_not_empty_and_matches_the_recorded_decision() -> None
 
 
 @pytest.mark.parametrize("operation_key", sorted(DISABLED_FEATURE_LOAD_OPERATION_KEYS))
-@pytest.mark.parametrize("scope_type", ["provider_dataset", "center_radius"])
-def test_the_queue_skips_a_provider_whose_auto_load_is_off(
-    operation_key: str, scope_type: str
+def test_the_queue_skips_a_targeted_request_for_a_disabled_provider(
+    operation_key: str,
 ) -> None:
-    """끈 provider의 큐 요청은 **어느 scope로 와도** upstream을 치지 않는다.
+    """끈 provider의 **targeted** 큐 요청은 upstream을 치지 않는다.
 
-    `spec.run`을 부르기 전에 돌려보내는지를 본다 — runner에 spec이 그대로 있으므로
-    "spec이 없어서 못 돈다"가 아니라 **의도해서 건너뛴다**는 것을 재야 한다.
+    targeted가 자동으로 도는 쪽이다 — PinVi cache target refresh가 반경 안 feature를
+    잡아 만드는 side effect. `spec.run`을 부르기 전에 돌려보내는지를 본다: runner에
+    spec이 그대로 있으므로 "spec이 없어서 못 돈다"가 아니라 **의도해서 건너뛴다**는
+    것을 재야 한다.
     """
 
     runner = FeatureUpdateAssetRunner(
@@ -102,12 +103,48 @@ def test_the_queue_skips_a_provider_whose_auto_load_is_off(
         settings_factory=lambda: pytest.fail("끈 provider인데 settings를 만들었다"),
     )
 
-    result = asyncio.run(runner(cast(Any, None), _scope(operation_key, scope_type=scope_type)))
+    result = asyncio.run(
+        runner(cast(Any, None), _scope(operation_key, scope_type="center_radius"))
+    )
 
     assert result.status == "skipped"
     assert result.metadata["skip_reason"] == "provider_auto_load_disabled", (
-        f"{operation_key}({scope_type})가 건너뛰어지지 않았다 — 사용자가 끈 provider가 "
-        "큐 경로로 나간다."
+        f"{operation_key}가 targeted 요청에서 건너뛰어지지 않았다 — 사용자가 끈 "
+        "provider가 자동 경로로 나간다."
+    )
+
+
+@pytest.mark.parametrize("operation_key", sorted(DISABLED_FEATURE_LOAD_OPERATION_KEYS))
+def test_a_dataset_wide_request_for_a_disabled_provider_still_runs(
+    operation_key: str,
+) -> None:
+    """`provider_dataset`은 **남긴다** — 기록된 의도가 그렇다.
+
+    "백필이나 일회성 재적재는 여전히 필요하고 그것은 **사람이 의도해서 한 번
+    돌리는 일**이다"(`schedules.py`). 같은 파일의 OpiNet skip도 같은 경계를 쓴다.
+
+    이 결박이 없으면 "자동만 막는다"가 "전부 막는다"로 조용히 넓어진다 — 그러면
+    백필이 불가능해지고, 그 사실은 백필이 필요한 날에야 드러난다.
+    """
+
+    reached: list[str] = []
+
+    def _settings() -> Any:
+        reached.append("yes")
+        raise RuntimeError("이 게이트는 통과한 것이다")
+
+    runner = FeatureUpdateAssetRunner(
+        common_resources={},
+        log=None,
+        settings_factory=_settings,
+    )
+    with pytest.raises(Exception):  # noqa: B017, PT011 - 게이트 통과 여부만 본다
+        asyncio.run(
+            runner(cast(Any, None), _scope(operation_key, scope_type="provider_dataset"))
+        )
+    assert reached == ["yes"], (
+        f"{operation_key}의 dataset 전체 갱신까지 막혔다 — 끄는 것은 시계이지 "
+        "능력이 아니다."
     )
 
 
