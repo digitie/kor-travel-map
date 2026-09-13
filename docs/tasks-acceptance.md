@@ -2072,16 +2072,18 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 1. [x] **분모가 기록돼 있다.** (2026-09-13) 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
    상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
    활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
-2. [x] **분자가 있다.** (2026-09-13) provider fetcher **32개 중 28개**가 upstream
-   요청을 세고, 그 수가 `upstream_requests_min`으로 asset output metadata에 실린다.
-   못 세는 넷은 이유와 함께 선언돼 있다(번들 정적 2, provider 내부 페이지네이션 2).
+2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 **33개 중 29개**가 요청을
+   전부 세고, 그 수가 `upstream_requests_min`으로 asset output metadata에 실린다.
+   못 세는 둘은 upstream 요청이 아예 없고(번들 정적·로컬 sqlite), 나머지 둘은
+   **부분 계측**으로 선언돼 있다(OpiNet bbox enumerate — provider가 격자 셀마다
+   부르는데 그 셀 수가 provider private).
 
    **배선이 없던 것이 이 조문이 오래 열려 있던 이유였다.** fetcher가 generator라
    "세는 자리"와 "내보내는 자리" 사이에 값을 흘릴 인자가 없었다.
    `kortravelmap.dagster.upstream_requests`가 `ContextVar`로 그것을 대신하고 asset
    경계가 계수기를 연다 — provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다.
-   합치는 자리는 `etl._add_output_metadata` 하나뿐이라(이 패키지의 유일한 metadata
-   초크포인트) **실패 경로에도 함께 실린다.**
+   합치는 자리는 `etl._add_output_metadata` 하나뿐이다(이 패키지의 유일한 metadata
+   초크포인트).
 
    **첫 판은 배선만 맞고 커버리지가 없었다(적대 리뷰 blocker).** 계수기는 asset
    35개 전부에서 열리는데 세는 자리는 셋뿐이라, OpiNet처럼 수천 건을 쓰는 경로가
@@ -2098,6 +2100,28 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
    결박은 세 겹이다. generator를 **두 겹 지나서도** 계수가 닿는지(배선을 끊으면
    3건 red), 문맥이 **복사되는 경계**(`to_thread`/`create_task`)에서도 보이는지,
    그리고 fetcher마다 계수 호출이 있는지.
+
+   **2차 적대 리뷰가 blocker 둘을 더 잡았고, 그것이 이 조문의 현재 형태를 만들었다.**
+
+   (a) **krheritage detail이 안 세졌다.** 목록 페이지는 세는데 record당 1 HTTP인
+   detail은 세지 않아, 실린 수가 실제의 **약 1%**였다(목록 ~45 vs detail ~4,000).
+   목록을 세는 덕에 key는 실려 나갔으므로 "0으로 위장하지 않는다"는 계약이 여기서는
+   작동하지 않았다 — 두 자릿수가 네 자릿수인 척했다.
+
+   (b) **feature-update queue 경로에서 계수기가 안 열렸다.** 그 runner는 asset
+   wrapper가 아니라 **원본 run 함수**를 직접 부른다. 계수기를 여는 자리가 wrapper
+   둘뿐이었으므로, 계측된 fetcher가 큐로 돌면 모든 계수가 no-op이 됐다. 이제
+   실행 경계가 계수기를 따로 연다 — **여는 자리는 둘**이다.
+
+   그리고 (c) **"실패 경로에도 실린다"는 주장이 거짓이었다.** 실패한 step은 output을
+   내지 않으므로 `add_output_metadata`로 실은 값은 사라진다. 지금 남는 자리는 쿼터
+   소진의 `Failure` metadata와 그 밖의 실패의 경고 로그다.
+
+   **정적 검사가 (a)를 통과시킨 것이 이 판의 교훈이다.** 그 검사는 "계수 호출 자리가
+   있는가"만 본다 — 루프 밖 1회도, 도달 불가 분기도 초록이다. 그래서 손으로 박은
+   자리마다 **가짜 client로 N번 부르게 하고 계수가 N인지 재는** 런타임 테스트를 뒀다.
+   정적 검사는 "빠진 진입점이 없는가"만 지키고, 하한·우주·면제는 전부 **선언에 정확히**
+   결박된다(여유 상수를 쓰지 않는다).
 
    `settings.log_api_calls`는 **지웠다** — 읽는 코드가 없었고, 그 표는 provider
    호출이 아니라 Map API로 들어오는 요청을 기록한다.
