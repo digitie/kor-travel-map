@@ -3,7 +3,9 @@
 ## 2026-09-14 — T-VN-QUOTA-ARITHMETIC 종결, 그리고 큐 경로가 남았다
 
 **다음 한 작업: `T-VN-QUEUE-QUOTA` — 큐 경로에 provider별 일일 예산을 만든다.**
-전제와 근거는 `docs/etl/upstream-quota.md` §5.
+전제와 근거는 `docs/etl/upstream-quota.md` §5. **KMA·에어코리아는 평가 대상에서
+제외**(2026-09-14 지시) — 대상은 끄지 않은 provider다. 그중 일일 가드가 있는 것은
+OpiNet 하나뿐이고, `krheritage`는 sweep당 ~3,950요청인데 분모조차 없다.
 
 `T-VN-QUOTA-ARITHMETIC`은 여섯 조문 전부 `[x]`로 닫혔다. 분모 실측(오퍼레이션마다
 따로 걸린다) · 분자(`upstream_requests_min`, #1229) · 쿼터성 실패의 재시도 차단

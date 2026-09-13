@@ -43,10 +43,16 @@ job을 직접 돌리는 백필은 이 runner를 지나지 않는다.
 
 ### 남은 것은 끄지 않은 provider의 총량이다
 
-큐에는 일일 예산이 없다. 상한은 센서 tick당 10 run(15초 간격)뿐이고, 사실상의 가드는
-KMA의 같은-base cursor skip과 OpiNet의 `already_succeeded_today_kst` 둘뿐이다.
-`krheritage`는 sweep당 ~3,950요청인데 분모조차 없다. `T-VN-QUEUE-QUOTA`로 남겼다
-(`docs/etl/upstream-quota.md` §5).
+큐에는 일일 예산이 없다. 상한은 센서 tick당 10 run(15초 간격)뿐이다.
+
+그리고 같은 날 **KMA·에어코리아가 쿼터 평가 대상에서 빠졌다**(사용자 지시). 둘 다
+꺼져 있고 이제 큐 경계가 그 결정을 강제하므로, 평가는 **끄지 않은 provider**만
+본다. 그러자 그림이 더 나빠졌다 — 남는 provider 중 일일 가드가 있는 것은
+**OpiNet 하나뿐**이다(KMA의 cursor skip이 빠지니 그렇다). `krheritage`는 sweep당
+~3,950요청인데 분모조차 없고, 나머지 다수는 1,000/op/일이다.
+
+빼고 나서 남은 것이 더 좁아지는 것 — 그것이 이 지시가 실제로 드러낸 것이다.
+`T-VN-QUEUE-QUOTA`로 남겼다(`docs/etl/upstream-quota.md` §5).
 
 ## 2026-09-14 — 분자를 prod에 올렸고, 거기서는 아직 볼 수 없다는 것을 알았다
 

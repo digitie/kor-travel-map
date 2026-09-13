@@ -62,8 +62,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
   쿼터 산수는 cron 기준인데 prod는 cron이 아니라 feature update queue로 돈다
   (schedule 전부 STOPPED, 큐 센서만 RUNNING). 큐에는 일일 예산이 없고, 정책의
-  rate limit 필드는 기록만 되고 강제되지 않는다. 해제 조건은 acceptance
-  §T-VN-QUEUE-QUOTA.
+  rate limit 필드는 기록만 되고 강제되지 않는다. **KMA·에어코리아는 평가 대상에서
+  제외**(2026-09-14 지시). 해제 조건은 acceptance §T-VN-QUEUE-QUOTA.
 
 - [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
 
