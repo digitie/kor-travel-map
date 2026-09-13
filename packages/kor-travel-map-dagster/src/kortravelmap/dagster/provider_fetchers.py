@@ -243,7 +243,7 @@ def fetch_datagokr_cultural_festivals(
     """전국문화축제표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
-    ``DataGoKrClient(api_key=...)``를 열고 ``client.festival.iter_all()``의
+    ``DataGoKrClient(api_key=...)``를 열고 ``client.festival``
     record(``PublicCulturalFestival``, ``CulturalFestivalItem`` Protocol 충족)를
     lazily yield한다. generator가 살아 있는 동안 client는 열려 있고,
     소비 종료(또는 close)시 ``finally``에서 ``client.close()``로 닫는다.
@@ -1177,7 +1177,7 @@ def fetch_standard_museums(
     """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
-    ``client.museum_art.iter_all()``의 record(``PublicMuseumArtGallery``, krtour
+    ``client.museum_art`` record(``PublicMuseumArtGallery``, krtour
     ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
     sync이므로 sync generator다. 소비 종료/close 시 ``finally``에서 ``close()``.
     """
@@ -1206,7 +1206,7 @@ def fetch_standard_tourist_attractions(
     """전국관광지표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
-    ``client.tourist_attraction.iter_all()``의 record(``PublicTouristAttraction``,
+    ``client.tourist_attraction`` record(``PublicTouristAttraction``,
     krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
     sync client → sync generator, ``finally``에서 ``close()``.
     """
@@ -2390,7 +2390,7 @@ def fetch_standard_parking_lots(
 ) -> Iterator[Any]:
     """전국주차장표준데이터 record를 datagokr public client로 stream한다.
 
-    ``client.parking.iter_all()``의 record(``PublicParkingLot``, krtour
+    ``client.parking`` record(``PublicParkingLot``, krtour
     ``PublicParkingLotItem`` Protocol 충족)를 yield. sync generator, finally close.
     """
     secret = settings.data_go_kr_service_key
