@@ -2087,7 +2087,8 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 
    **첫 판은 배선만 맞고 커버리지가 없었다(적대 리뷰 blocker).** 계수기는 asset
    35개 전부에서 열리는데 세는 자리는 셋뿐이라, OpiNet처럼 수천 건을 쓰는 경로가
-   `upstream_requests_min: 0`을 냈다 — 하필 **분모를 실측한 유일한 provider**다.
+   `upstream_requests_min: 0`을 냈다 — 하필 **호출량이 가장 크면서 일일 한도는
+   아직 실측하지 못한** provider다. 분자가 유일한 가시성인데 그것이 0이었다.
    그리고 그때의 구조 검사는 wrapper가 항상 열어 **항진명제**였다(같은 실패 형태를
    그날 네 번째로 반복했다).
 
@@ -2111,7 +2112,14 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
    (b) **feature-update queue 경로에서 계수기가 안 열렸다.** 그 runner는 asset
    wrapper가 아니라 **원본 run 함수**를 직접 부른다. 계수기를 여는 자리가 wrapper
    둘뿐이었으므로, 계측된 fetcher가 큐로 돌면 모든 계수가 no-op이 됐다. 이제
-   실행 경계가 계수기를 따로 연다 — **여는 자리는 둘**이다.
+   실행 경계가 계수기를 따로 연다 — **여는 자리는 넷**이다(wrapper 둘 + 큐 runner +
+   MOIS Phase A op).
+
+   **3차 리뷰가 같은 형태를 한 번 더 잡았다.** MOIS Phase A는 Dagster **resource
+   init 시점**에 도는데 계수기는 compute 안에서야 열렸다 — 2차 반영으로 게이트
+   안에 들어온 그 항목이 실제로는 세지 않으면서 게이트가 초록을 보증했다. 큐
+   runner는 계수기를 `spec.resources()` 앞으로 올려 덮었고, op은 자기 계수기를
+   열며, asset 경로(resource init)는 **부분 계측으로 선언**했다.
 
    그리고 (c) **"실패 경로에도 실린다"는 주장이 거짓이었다.** 실패한 step은 output을
    내지 않으므로 `add_output_metadata`로 실은 값은 사라진다. 지금 남는 자리는 쿼터

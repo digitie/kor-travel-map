@@ -1785,7 +1785,9 @@ async def run_feature_place_kor_travel_concierge_youtube(
         )
     if quarantined:
         # silent cap 금지 — 격리한 건수와 사유를 metadata로 드러낸다.
-        context.add_output_metadata(
+        # 초크포인트를 지나야 분자도 함께 실린다(concierge cursor 루프가 센다).
+        _add_output_metadata(
+            context,
             {
                 "concierge_quarantined_count": len(quarantined),
                 "concierge_quarantined_item_keys": [
@@ -1795,7 +1797,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
                     f"{entry.reason_code}: {entry.message}"[:300]
                     for entry in quarantined[:20]
                 ],
-            }
+            },
         )
     retired_entity_ids = kor_travel_concierge_inactive_entity_ids(records)
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))

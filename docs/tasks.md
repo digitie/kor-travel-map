@@ -61,8 +61,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 - [~] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
 
   2026-09-13에 분모를 실측했고 그것이 전제 하나를 뒤집었다 — 일일 트래픽은 서비스가
-  아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 여섯 조문 전부
-  닫혔고 prod 배포(t41a)도 전 사이클 GREEN이다.
+  아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 다섯 조문이 닫혔고
+  prod 배포(t41a)도 전 사이클 GREEN이다. 남은 것은 조문 6(KMA 격자 재활성화 전제).
   해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
 
 - [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**

@@ -767,9 +767,14 @@ def _add_output_metadata(
 ) -> None:
     """asset output metadata를 싣는다 — **분자를 여기서 합친다.**
 
-    이 함수가 이 패키지에서 metadata를 내보내는 유일한 자리다(19개 호출 지점).
-    그래서 "이 run이 upstream에 몇 번 요청했는가"를 여기서 한 번 합치면 asset
-    19곳을 각각 고치지 않아도 된다.
+    이 함수가 **feature asset 경로의 초크포인트**다. 그래서 "이 run이 upstream에
+    몇 번 요청했는가"를 여기서 한 번 합치면 asset을 하나씩 고치지 않아도 된다.
+
+    **이 패키지에서 metadata를 내보내는 유일한 자리는 아니다.** op/sensor/maintenance
+    쪽은 ``context.add_output_metadata``를 직접 부른다(그쪽은 분자를 스스로 싣는다).
+    feature asset이 그 길로 새면 센 값이 버려지므로 - 실제로 visitkorea enrichment
+    asset이 그랬다(2026-09-13 3차 적대 리뷰) - ``tests/lint``가 feature asset
+    모듈에서 직접 호출을 막는다.
 
     **이 자리는 성공한 run만 덮는다.** 실패한 step은 output을 내지 않으므로 여기서
     실은 값은 사라진다 — 2026-09-13 2차 적대 리뷰가 종전 문장("실패 경로에도 함께

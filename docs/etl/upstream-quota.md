@@ -1,10 +1,12 @@
-# upstream 일일 한도 — 실측 분모와 아직 없는 분자
+# upstream 일일 한도 — 실측 분모와 하한 분자
 
 > 이 문서는 "우리가 얼마나 부르는가"(분자)와 "얼마까지 부를 수 있는가"(분모)를
-> 한자리에 모은다. **분모는 2026-09-13에 실측했고, 분자는 대부분 아직 없다.**
-> 그 비대칭을 숨기지 않는 것이 이 문서의 요점이다 — 관리자 UI가 오래
-> "rate limit의 약 90% 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도
-> 갖고 있지 않았다.
+> 한자리에 모은다. **분모는 2026-09-13에 data.go.kr에서 실측했고, 분자는 같은 날
+> 진입점 39개 중 34개에서 하한으로 나가기 시작했다.** 남은 비대칭 둘을 숨기지
+> 않는 것이 이 문서의 요점이다 — data.go.kr 포털에 없는 provider 넷
+> (`krheritage`·`opinet`·`krex`·`mois`)은 **분모가 아직 없고**, 분자도 §4에
+> 열거한 자리에서는 부분값이거나 없다. 관리자 UI가 오래 "rate limit의 약 90%
+> 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도 갖고 있지 않았다.
 
 ## 1. 분모는 서비스가 아니라 **오퍼레이션**마다 걸린다
 
@@ -138,11 +140,15 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 **배선은 실행 문맥이 대신한다.** fetcher가 generator라 "세는 자리(페이지 루프)"와
 "내보내는 자리(asset output metadata)" 사이에 값을 흘릴 인자가 없었다. 그래서
 `kortravelmap.dagster.upstream_requests`가 `ContextVar`로 계수기를 들고, **실행
-경계 셋**(asset wrapper `run_tracked_feature_asset`·`feature_place_mcst_culture`,
-그리고 feature-update queue의 `FeatureUpdateAssetRunner`)이 그것을 연다 —
-provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치는 자리는
-`etl._add_output_metadata` 하나뿐이다(이 패키지에서 metadata를 내보내는 유일한
-초크포인트).
+경계 넷**이 그것을 연다 — asset wrapper 둘(`run_tracked_feature_asset`,
+`feature_place_mcst_culture`), feature-update queue의 `FeatureUpdateAssetRunner`,
+그리고 MOIS Phase A op(`mois_localdata_source_sync_op`). provider fetcher 32개의
+시그니처는 하나도 바꾸지 않는다.
+
+합치는 자리는 `etl._add_output_metadata`다 — **asset 경로의 주 초크포인트이고,
+유일한 자리는 아니다.** 이 패키지에는 `context.add_output_metadata`를 직접 부르는
+자리가 더 있다(op/sensor/maintenance 쪽). feature asset이 그 길로 새면 센 값이
+버려지므로, `tests/lint`가 feature asset 모듈에서 그것을 막는다.
 
 **`_min`이 뜻하는 것.** 페이지 하나 = 요청 **적어도** 하나다. 콜백이 안에서
 재시도하면(외부 `upstream_retry` attempts, provider client 내부 retries) 그것은 이
@@ -155,7 +161,9 @@ provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치�
 
 이 구분이 첫 판에는 없었고 적대 리뷰가 blocker로 잡았다 — 계수기는 asset 35개
 전부에서 열리는데 세는 자리는 셋뿐이라 **OpiNet이 수천 건을 쓰면서 0을 냈다.**
-하필 그것이 분모를 실측한 유일한 provider다. 틀린 0은 읽는 사람을 멈추게 하지
+하필 그것이 **호출량이 가장 크면서 일일 한도는 아직 실측하지 못한** provider다
+(§5 참고 — data.go.kr 포털에 없다). 분자가 유일한 가시성인데 그것이 0이었다.
+틀린 0은 읽는 사람을 멈추게 하지
 못하고, 없는 값은 멈추게 한다.
 
 ### 커버리지 — 진입점 33개 중 29개가 전부 센다
@@ -199,29 +207,43 @@ detail ~4,000).
 유도는 *이 fetcher가 세는 함수를 부르는가*만 본다. 그래서 **실행 모드에 따라 계수
 경로를 타지 않는** fetcher도 초록으로 나온다. 실제로 둘이 그렇다:
 
-| fetcher | 세는 모드 | 못 세는 모드 |
-|---|---|---|
-| `fetch_opinet_stations` | `low_top_area` (`_OpinetCallBudget.spend()`) | `bbox` / `poi_cache_target` |
-| `fetch_opinet_station_price_details` | 〃 | 〃 |
+| 진입점 | 세는 부분 | 못 세는 부분 | 그래서 metadata는 |
+|---|---|---|---|
+| `fetch_opinet_stations` | `low_top_area` 모드(`_OpinetCallBudget.spend()`) | `bbox`/`poi_cache_target` 모드의 enumerate | bbox 모드에서는 **key가 없다** |
+| `fetch_opinet_station_price_details` | `get_station_detail`(uni_id당 1건, **모든 모드**) | 같은 enumerate | **key는 실리되 과소계수**다 |
+| `sync_mois_source_db` | 큐 runner 경로 · Phase A op | asset 경로(resource init이 계수 범위보다 앞) | asset 경로에서는 key가 없다 |
 
 `iter_stations_in_bbox`는 bbox를 격자로 덮으며 셀마다 `aroundAll`을 부르는데, 셀 수
 계산이 provider private이다. bbox 하나를 1로 세면 1과 20,000을 같게 만든다 — 그래서
-**세지 않는다.** 계약상 기록이 없으면 key가 실리지 않으므로 0으로 위장하지는 않는다.
+**세지 않는다.**
+
+**"기록이 없으면 key가 없다"는 보증이 세 행에 똑같이 적용되지는 않는다.**
+`fetch_opinet_stations`는 bbox 모드에서 아무것도 세지 않으므로 값이 안 나간다(정직한
+침묵). 그러나 `price_details`는 상세 조회를 세므로 **값이 나가되 실제보다 작다** —
+이 행만은 "없는 값"이 아니라 "작은 값"이다. 한도 대비 비율을 볼 때 그 방향을 기억해라.
 
 그 목록은 검사기의 `_PARTIALLY_COUNTED`에 이유와 함께 박혀 있고, `_UNCOUNTABLE`과
 겹치지 못하며, **계측된 쪽으로 세어 주지도 않는다** — 완전 계측을 부분 계측으로
 강등하는 것이 공짜면 그것이 값싼 도피로가 된다. 총량을 실제로 묶는 것은 §3의
 하루 한 번 coalescing이다.
 
-### 계수기는 어디서 열리나 — 경계가 둘이다
+### 계수기는 어디서 열리나 — 경계가 넷이다
 
-`note_upstream_request()`는 계수기가 열려 있을 때만 기록한다. 여는 자리는 **asset
-경계**(`run_tracked_feature_asset`, `feature_place_mcst_culture`)와 **feature-update
-queue runner**(`FeatureUpdateAssetRunner`) 둘이다.
+`note_upstream_request()`는 계수기가 열려 있을 때만 기록한다. 여는 자리는 넷이다:
 
-runner를 빠뜨린 것이 2차 리뷰의 두 번째 blocker였다. 그 경로는 asset wrapper가 아니라
-**원본 run 함수**를 직접 부르므로, 계수기를 따로 열지 않으면 계측된 fetcher가 큐로
-돌 때 모든 계수가 no-op이 된다 — 조용히 값 없이 나간다.
+| 경계 | 왜 따로 필요한가 |
+|---|---|
+| `run_tracked_feature_asset` | single-member asset wrapper |
+| `feature_place_mcst_culture` | 이 asset만 multi-member라 wrapper를 안 지난다 |
+| `FeatureUpdateAssetRunner` | 큐 경로는 wrapper가 아니라 **원본 run 함수**를 직접 부른다 |
+| `mois_localdata_source_sync_op` | Phase A는 asset이 아니라 plain `@op`이다 |
+
+뒤 둘을 빠뜨린 것이 2·3차 리뷰의 blocker였다. **계수기가 안 열리면
+`note_upstream_request()`는 조용한 no-op이고, 정적 검사는 그것을 보지 못한다** —
+호출 자리가 있기만 하면 초록이기 때문이다.
+
+큐 runner에서는 계수기를 `spec.resources()` **앞**에서 연다. resources 구성이
+I/O를 할 수 있기 때문이다 — MOIS Phase A가 거기서 전국 파일을 받는다.
 
 ### 실패로 끝난 run은 어디에 남나
 

@@ -3,7 +3,8 @@
 2026-09-13 적대 리뷰가 blocker를 잡았다. 분자 배선(:mod:`~.upstream_requests`)은
 멀쩡했는데 **커버리지가 없었다** — 계수기는 asset 35개 전부에서 열리는데 세는 자리는
 셋뿐이었다. 그래서 OpiNet처럼 수천 건을 쓰는 경로가 ``upstream_requests_min: 0``을
-냈고, 하필 그것이 **분모를 실측한 유일한 provider**였다.
+냈고, 하필 그것이 **호출량이 가장 크면서 일일 한도는 아직 모르는** provider였다 —
+분자가 유일한 가시성인데 그것이 0이었다.
 
 그때 이 저장소가 갖고 있던 구조 검사는 초록이었다. 그 검사는
 ``asset이 계수 범위 안에서 도는가``를 물었는데, wrapper가 **항상** 열므로
@@ -381,6 +382,40 @@ def test_every_fetcher_counts_its_upstream_requests(fetcher: str) -> None:
         "**한도의 몇 %를 쓰는지 대답할 수 없다**. "
         f"`{_NOTE}()`를 호출 자리에 넣거나, 이 층에서 셀 수 없다면 "
         "`_UNCOUNTABLE`에 이유와 함께 적어라."
+    )
+
+
+#: feature asset이 사는 모듈 — 여기서는 metadata 초크포인트를 지나야 한다.
+_FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "kma_weather.py", "mcst_features.py")
+
+
+def test_feature_assets_do_not_bypass_the_metadata_choke_point() -> None:
+    """센 값을 들고 초크포인트를 지나지 않는 feature asset이 없어야 한다.
+
+    분자는 ``etl._add_output_metadata``에서 합쳐진다. feature asset이
+    ``context.add_output_metadata``를 직접 부르면 그 자리에서는 분자가 실리지
+    않는다 — 실제로 visitkorea enrichment asset이 센 값을 그렇게 버리고 있었다
+    (2026-09-13 3차 적대 리뷰).
+
+    직접 호출 자체를 금지하지는 않는다. 같은 함수가 초크포인트도 지나면
+    (추가 metadata를 덧붙이는 자리) 분자는 그쪽으로 실린다 — 여기서는 **둘 중
+    하나도 안 지나는 함수**만 잡는다.
+    """
+
+    offenders: list[str] = []
+    for module, tree in _module_trees().items():
+        if module not in _FEATURE_ASSET_MODULES:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+                continue
+            calls = _called_names(node)
+            if "add_output_metadata" in calls and "_add_output_metadata" not in calls:
+                offenders.append(f"{module}::{node.name}")
+    assert offenders == [], (
+        f"feature asset이 초크포인트를 지나지 않고 metadata를 싣는다: {offenders}. "
+        "`_add_output_metadata(context, ...)`를 써라 — 그러지 않으면 그 asset이 "
+        "센 upstream 요청 수가 버려진다."
     )
 
 

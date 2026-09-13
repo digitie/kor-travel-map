@@ -56,7 +56,8 @@ def test_an_uninstrumented_path_reports_nothing_not_zero() -> None:
 
     이것이 2026-09-13 적대 리뷰가 잡은 blocker의 핵심이다. 계수기는 asset 35개
     전부에서 열리는데 세는 자리는 셋뿐이었고, 그래서 계측되지 않은 fetcher가
-    "0번 요청했다"고 보고했다 — 하필 분모를 실측한 유일한 provider(OpiNet)가
+    "0번 요청했다"고 보고했다 — 하필 호출량이 가장 크고 일일 한도조차 아직 모르는
+    provider(OpiNet)가
     수천 건을 쓰면서 0을 냈다. 운영자가 그 0을 "요청이 없었다"로 읽으면 정반대
     결론에 이른다.
     """
@@ -246,9 +247,10 @@ def test_the_counter_survives_thread_and_task_boundaries() -> None:
     `counter[0] += 1`이 바깥에 보인다. 계수기에 정수를 담았다면 안쪽에서
     `set`이 필요하고 그것은 바깥에 보이지 않아 **조용히 0이 됐을** 자리다.
 
-    이 저장소가 실제로 그 경계를 쓴다(`feature_update_runner`의
-    `asyncio.to_thread(spec.resources, ...)`). 지금은 그쪽이 계수기를 열지 않지만,
-    asset 경로가 thread로 옮겨가는 날 이 성질이 조용히 깨지면 안 된다.
+    이 저장소가 실제로 그 경계를 쓰고, **그 안에서 실제로 센다** —
+    `FeatureUpdateAssetRunner`는 계수기를 `asyncio.to_thread(spec.resources, ...)`
+    **앞**에서 열고, MOIS Phase A가 바로 그 thread 안에서 전국 파일을 받는다.
+    이 성질이 깨지면 그 요청이 통째로 사라진다(2026-09-13 3차 적대 리뷰 blocker).
     """
 
     def _work() -> None:

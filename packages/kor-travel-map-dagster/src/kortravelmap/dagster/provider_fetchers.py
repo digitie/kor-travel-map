@@ -1274,6 +1274,10 @@ def fetch_datagokr_file_data_records(
         # `iter_pages`는 public이고 `iter_all`이 그것을 그대로 감싼 것뿐이라
         # (provider 소스 확인) 바꿔도 같은 record를 같은 순서로 낸다 - 다만
         # 페이지마다 요청 1건을 셀 수 있다.
+        #
+        # 여기만 요청 **뒤**에 센다(generator가 페이지를 받아 yield한 뒤 본문이
+        # 돈다). 마지막 페이지가 실패하면 그 1건이 빠지지만, 분자는 하한이므로
+        # 그 방향은 안전하다 - 반대로 앞에서 세면 나가지 않은 요청을 셀 수 있다.
         for page in client.file_data.iter_pages(dataset_key):
             note_upstream_request()
             yield from page.items
@@ -2058,7 +2062,8 @@ class _OpinetCallBudget:
         **여기가 OpiNet의 분자다.** 이 메서드는 호출 **직전**에 정확히 1건씩
         불린다 — 그래서 쿼터 계수기도 같은 자리에서 올린다. 2026-09-13 적대 리뷰
         전까지 이 정확한 계수가 있는데도 metadata에는 0이 실렸다. 하필 OpiNet이
-        **분모를 실측한 유일한 provider**다(docs/etl/upstream-quota.md).
+        **호출량이 가장 크면서 일일 한도는 아직 실측하지 못한** provider다
+        (docs/etl/upstream-quota.md) - 분자가 유일한 가시성이다.
 
         예산이 소진돼 ``False``를 돌려줄 때는 호출이 일어나지 않으므로 세지 않는다.
         """
