@@ -46,8 +46,11 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 | 인천국제공항공사 주차 정보 / 주차장별 요금 | 각 1 | 1,000 |
 | 한국천문연구원 출몰 / 음양력 / 특일 | 2 / 4 / 5 | 10,000 |
 
-가장 좁은 자리는 **500**(에어코리아, 인천공항 운항)이고, 그다음이
-**1,000**(전국표준데이터 전부, visitkorea 전부, 산불위험).
+**기상청·에어코리아 행은 평가 대상이 아니다**(2026-09-14 지시). 둘 다 2026-09-09에
+자동 적재가 꺼졌고 계속 꺼져 있다 — 표에는 실측 기록으로 남기되, 아래 어느 산수에도
+넣지 않는다. 그래서 지금 **살아 있는 provider 중 가장 좁은 자리는 1,000**이다
+(전국표준데이터 전부, visitkorea 전부, 산불위험, 인천공항 주차). 인천공항 운항의
+500은 Map이 부르지 않는다.
 
 ### 이 표에 없는 provider
 
@@ -67,7 +70,14 @@ OpiNet의 1,500은 이 저장소가 **예산을 짜는 근거로 쓰고 있는**
 (`_OPINET_RUN_CALL_BUDGET = 600`이 그 수의 40%). 확인되지 않은 수 위에 예산이
 서 있다는 사실 자체를 여기 남긴다 — 확인이 다음 단계다.
 
-## 3. 바로 따라오는 산수 — KMA
+## 3. 산수 — KMA (기록, 평가 대상 아님)
+
+> **2026-09-14 지시로 KMA·에어코리아는 쿼터 평가 대상에서 빠졌다.** 둘 다
+> 2026-09-09부터 자동 적재가 꺼져 있고(`DISABLED_FEATURE_LOAD_SCHEDULES`),
+> 큐 경계가 그 결정을 강제한다. 이 절은 **분모를 어떻게 얻었는지의 기록**으로
+> 남긴다 — 여기 숫자로 운영 판단을 하지 않는다. 재활성화는 그 지시를 되돌리는
+> 일이고 이 문서의 일이 아니다.
+
 
 격자 순회 job 하나는 오퍼레이션 **하나**를 격자 수 G만큼 부른다. 세 격자
 dataset(초단기실황·초단기예보·단기예보)은 **서로 다른 오퍼레이션**을 쓰므로 각자
@@ -137,8 +147,17 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 `python-kma-api`가 `resultCode 22`를 `failure_kind="quota"`로 분류하며 적어 둔
 그대로 — 한도는 자정에 리셋되므로 같은 날 재시도는 성공할 수 없다.
 
-> **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
+> **주의**: KMA·AirKorea 자동 적재는 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
+>
+> 2026-09-14까지 그 목록은 **시계만** 껐다. 이 저장소의 prod는 cron이 아니라
+> **feature update queue**로 돈다 — schedule은 전부 `default_status=STOPPED`이고
+> 켜진 적이 없는 반면 `feature_update_request_queue_sensor`는 기본 RUNNING이다.
+> 그 큐 runner에 꺼진 operation의 spec이 그대로 있었고 정책 게이트는 row가 없으면
+> fail-open이라, **사용자가 끈 provider가 살아 있는 경로로 나가고 있었다.**
+> 지금은 `DISABLED_FEATURE_LOAD_OPERATION_KEYS`를 큐 경계가 읽어 typed skip
+> (`provider_auto_load_disabled`)을 낸다. 사람이 Dagster UI에서 job을 직접 돌리는
+> 백필은 그대로다 — 끄는 것은 시계이지 능력이 아니다.
 
 ## 4. 분자 — 진입점 40개 중 35개가 전부 센다
 
@@ -183,10 +202,14 @@ vs 무료키 1,500/일, #545). **예산을 짜 둔 자리의 분자가 0이었�
 
 `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 **명시 목록**
 (`_EXPECTED_FETCHERS`)의 진입점마다 **세거나, 왜 못 세는지 선언하거나**를 요구한다.
-목록에는 fetcher 32개 + MOIS Phase A(`sync_mois_source_db`) + KMA 격자/중기 진입점
-6개 + krex 스냅샷 헬퍼 1개가 들어 있다 — 접두사로 유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수
-있었고, MOIS의 slug별 LOCALDATA 다운로드와 KMA 격자 루프는 통째로 게이트 밖이었다.
-목록 크기 자체에도 래칫이 걸려 있어 **조용히 줄일 수 없다**.
+목록에는 fetcher 30개 + MOIS Phase A(`sync_mois_source_db`) + krex 스냅샷 헬퍼 1개가
+들어 있다 — 접두사로 유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수 있었고,
+MOIS의 slug별 LOCALDATA 다운로드는 통째로 게이트 밖이었다. 목록 크기 자체에도
+래칫이 걸려 있어 **조용히 줄일 수 없다**.
+
+**KMA·에어코리아는 목록에 없다**(2026-09-14 지시) — 게이트의
+`_EXCLUDED_FROM_EVALUATION`에 이유와 함께 적혀 있다. 계수 호출은 코드에 그대로
+있으므로 그 asset이 돌면 값은 나온다. 빠진 것은 **평가**이지 계측이 아니다.
 
 선언된 비계측은 **둘뿐**이고 둘 다 upstream 요청이 아예 없다:
 
@@ -305,7 +328,47 @@ coalescing이다. 셀 수 계산은 provider private이라 Map이 복제하면 d
 요청과 무관하다. 오래 있던 `settings.log_api_calls`는 "provider 호출 횟수를 기록"
 한다고 적었지만 **읽는 코드가 없었고**, 2026-09-13에 지웠다.
 
-## 5. 이 문서를 고쳐야 하는 때
+## 5. 큐 경로에는 아직 예산이 없다 (T-VN-QUEUE-QUOTA)
+
+§3의 산수는 **cron 기준**이다. 그런데 이 저장소의 prod는 cron이 아니라 **feature
+update queue**로 돈다 — feature schedule은 전부 `default_status=STOPPED`이고 켜진 적이
+없는 반면 `feature_update_request_queue_sensor`는 기본 RUNNING이다(2026-09-14 prod
+실측: instigator state 11개가 전부 센서 + 분당 job 하나, feature asset
+materialization 0건).
+
+**그 경로에 일일 예산이 없다.** 상한은 센서 tick당 10 run(15초 간격)뿐이고 하루
+총량은 어디에도 없다. 사실상의 가드는 둘뿐이다:
+
+**KMA·에어코리아는 여기서도 평가 대상이 아니다** — 꺼져 있고, 큐 경계가 그것을
+강제한다. 남는 provider 중 일일 가드가 있는 것은 **하나뿐**이다:
+
+| provider | 가드 | 효과 |
+|---|---|---|
+| OpiNet | `already_succeeded_today_kst` | 하루 한 번 성공하면 그날 skip |
+
+나머지 — `krheritage`(sweep당 ~3,950요청, **분모 미측정**) · `krex` · 전국표준데이터 ·
+`krforest` · `knps` · `mcst` · `visitkorea` · `khoa` · concierge — 에는 **아무것도
+없다.** 큐 요청이 반복되면 그만큼 나간다. 그리고 그중 다수가 **1,000/op/일**이다.
+
+**정책의 rate limit은 기록만 된다.** `provider_refresh_policies`의 rate limit 필드는
+metadata payload로 실릴 뿐 한 번도 강제되지 않는다 — §4 조문 5가 admin UI에서 지운
+"근거 없는 보증"과 같은 종류다.
+
+**targeted refresh가 필요 없는 scope까지 깨운다.** 반경/bbox membership SQL이 요청과
+`operation_scope.sync_scope`를 대조하지 않아, 한 dataset의 **선언된 모든** sync_scope가
+함께 잡힌다. 평가 대상 provider에서는 전량 순회 scope가 targeted 요청에 딸려 오는
+형태로 나타난다.
+
+**이미 고친 것 하나.** `DISABLED_FEATURE_LOAD_SCHEDULES`는 시계만 껐고 큐는 꺼진
+provider를 그대로 불렀다(정책 게이트는 row가 없으면 fail-open이고 baseline seed에
+row가 0건이다). 2026-09-14부터 `DISABLED_FEATURE_LOAD_OPERATION_KEYS`를 큐 경계가
+읽어 `provider_auto_load_disabled`로 건너뛴다. 이 절의 나머지는 **끄지 않은
+provider의 총량** 문제다.
+
+**분자는 어디서 읽나.** asset 경로는 output metadata의 `upstream_requests_min`이고,
+큐 경로는 `ProviderDatasetRefreshResult.metadata`의 같은 key다.
+
+## 6. 이 문서를 고쳐야 하는 때
 
 - data.go.kr에서 운영계정으로 승격하거나 활용신청을 추가/변경했을 때
 - 격자 상한(`kma_weather_max_grids_per_run`)이나 schedule cron을 바꿀 때

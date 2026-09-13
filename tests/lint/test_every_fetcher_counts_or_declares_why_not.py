@@ -15,6 +15,11 @@ fetcher이고, 그것이 계수 호출을 (직접이든 헬퍼를 통해서든) 
 유도할 수 있다. 못 세는 것은 :data:`_UNCOUNTABLE`에 **이유와 함께** 적어야 한다 —
 목록에 이름을 올리는 일 자체가 결정의 기록이다.
 
+**KMA(기상청)·에어코리아는 이 게이트의 대상이 아니다**(2026-09-14 지시).
+:data:`_EXCLUDED_FROM_EVALUATION`에 이유와 함께 적혀 있다 — 둘 다 자동 적재가 꺼져
+있고 큐 경계가 그 결정을 강제하며, **날씨 관련 로직 자체를 걷어낼 예정**이다.
+계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
+
 **이 검사가 볼 수 없는 것**(2차 적대 리뷰가 실측으로 열거했다. 적어 두는 이유는
 다음 사람이 초록을 과신하지 않게 하려는 것이다):
 
@@ -100,12 +105,9 @@ _PARTIALLY_COUNTED: dict[str, str] = {
 #: 전부 이 파일의 편집으로 나타나 리뷰에 보인다.
 _EXPECTED_FETCHERS: frozenset[str] = frozenset(
     {
-        "fetch_airkorea_air_quality",
-        "fetch_airkorea_stations",
         "fetch_datagokr_cultural_festivals",
         "fetch_datagokr_file_data_records",
         "fetch_khoa_beaches",
-        "fetch_kma_weather_alerts",
         "fetch_knps_geometry_records",
         "fetch_knps_point_records",
         "fetch_kor_travel_concierge_youtube_features",
@@ -133,39 +135,39 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_tourist_attractions",
         "fetch_visitkorea_festival_events",
         # fetcher 이름은 아니지만 **같은 종류의 upstream 다운로드**라 게이트 안에
-        # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받고, KMA 격자 job은
-        # 격자마다 부른다 — 접두사로 유도하면 이것들이 통째로 게이트 밖이었다
-        # (2·3차 리뷰).
+        # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받는다 — 접두사로 유도하면
+        # 이것이 통째로 게이트 밖이었다(2·3차 리뷰).
         "sync_mois_source_db",
-        "_run_kma_weather_asset",
-        "_run_kma_grid_weather",
-        "run_feature_weather_kma_mid_forecast",
-        "run_feature_weather_kma_short_forecast",
-        "run_feature_weather_kma_ultra_short_forecast",
-        "run_feature_weather_kma_ultra_short_nowcast",
         # 이름에 밑줄이 앞서지만 upstream을 직접 부르는 자리다.
         "_fetch_krex_traffic_notice_snapshot",
     }
 )
+
+#: **쿼터 평가 대상이 아닌** 진입점과 그 이유.
+#:
+#: 2026-09-14 지시로 KMA(기상청)·에어코리아가 빠졌다. 둘 다 2026-09-09부터 자동
+#: 적재가 꺼져 있고(`DISABLED_FEATURE_LOAD_SCHEDULES`), 큐 경계가 그 결정을 강제한다
+#: (`DISABLED_FEATURE_LOAD_OPERATION_KEYS`). 그리고 **날씨 관련 로직 자체를 걷어낼
+#: 예정**이라, 그때까지 이 게이트가 그 코드를 붙들고 있을 이유가 없다.
+#:
+#: 이름을 조용히 지우지 않고 목록으로 남기는 이유는 다른 목록과 같다 — **이름을
+#: 올리는 일 자체가 결정의 기록**이고, 지우면 "왜 빠졌는지"가 diff 밖으로 사라진다.
+#: 계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
+_EXCLUDED_FROM_EVALUATION: dict[str, str] = {
+    "fetch_kma_weather_alerts": "기상청 — 2026-09-14 지시로 쿼터 평가 대상에서 제외.",
+    "fetch_airkorea_air_quality": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
+    "fetch_airkorea_stations": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
+    "_fetch_nowcast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
+    "_fetch_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
+    "_fetch_ultra_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
+}
 
 #: 접두사에는 걸리지만 **진입점이 아닌** 이름과 그 이유.
 #:
 #: 우주 유도를 접두사로 넓히면(`_fetch_` 등) 콜백·헬퍼까지 딸려 온다. 그것들을
 #: 계측하라고 요구하면 **이중 계수**가 난다 — 부르는 쪽이 이미 세고 있기 때문이다.
 #: 그래서 빼되, 빼는 이유를 적는다. 목록에 이름을 올리는 일 자체가 결정의 기록이다.
-_NOT_AN_ENTRYPOINT: dict[str, str] = {
-    "_fetch_nowcast_rows": (
-        "격자 루프가 넘기는 **콜백**이다. 격자 루프를 소유한 "
-        "`_run_kma_weather_asset`이 격자마다 세므로 여기서 또 세면 이중 계수다 "
-        "(`_run_kma_grid_weather`는 dataset_key 디스패처일 뿐이다)."
-    ),
-    "_fetch_short_forecast_rows": (
-        "같은 콜백이다 — 격자 루프를 소유한 `_run_kma_weather_asset`이 격자마다 센다."
-    ),
-    "_fetch_ultra_short_forecast_rows": (
-        "같은 콜백이다 — 격자 루프를 소유한 `_run_kma_weather_asset`이 격자마다 센다."
-    ),
-}
+_NOT_AN_ENTRYPOINT: dict[str, str] = {}
 
 #: 진입점 후보를 훑을 때 쓰는 이름 접두사.
 #:
@@ -176,8 +178,6 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
     "_fetch_",
     "sync_",
     "download_",
-    "_run_kma_",
-    "run_feature_weather_kma_",
 )
 
 #: **완전 계측 수를 직접 박는다.**
@@ -186,7 +186,7 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 그것은 래칫이 아니라 **항등식**이다 — 면제를 하나 늘리면 좌변과 우변이 함께
 #: 줄어 아무것도 빨개지지 않는다(3차 리뷰). 수를 따로 박으면 면제를 늘리는 편집이
 #: 반드시 이 숫자를 낮추는 편집을 동반하고, 그 한 줄이 리뷰에 보인다.
-_EXPECTED_FULLY_COUNTED: int = 35
+_EXPECTED_FULLY_COUNTED: int = 26
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -307,6 +307,7 @@ def test_the_declared_universe_matches_the_source() -> None:
         if leaf.startswith(_ENTRYPOINT_PREFIXES)
         and leaf not in _EXPECTED_FETCHERS
         and leaf not in _NOT_AN_ENTRYPOINT
+        and leaf not in _EXCLUDED_FROM_EVALUATION
     )
     assert extra == [], (
         f"목록에 없는 새 진입점이 있다: {extra}. `_EXPECTED_FETCHERS`에 올리고, "
@@ -323,28 +324,36 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     반드시 이 줄을 고치게 된다.
     """
 
-    assert len(_EXPECTED_FETCHERS) >= 40, (
+    assert len(_EXPECTED_FETCHERS) >= 31, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
 
 
-def test_the_not_an_entrypoint_list_is_real_and_states_reasons() -> None:
-    """제외 목록이 낡거나 이름만 올라가는 것을 막는다."""
+def test_the_exclusion_lists_are_real_and_state_reasons() -> None:
+    """제외 목록이 낡거나 이름만 올라가는 것을 막는다.
+
+    제외는 값싸다 — 값싼 제외는 계측을 대체하기 시작한다. 그래서 이름이 실재하는지,
+    이유가 적혀 있는지, 그리고 진입점 목록과 겹치지 않는지를 따로 결박한다.
+    """
 
     leaves = {_leaf(qualname) for _, qualname in _definitions()}
-    stale = sorted(set(_NOT_AN_ENTRYPOINT) - leaves)
-    assert stale == [], f"제외 목록에 없는 이름이 적혀 있다: {stale}"
-    thin = sorted(name for name, why in _NOT_AN_ENTRYPOINT.items() if len(why) < 25)
-    assert thin == [], f"이유가 너무 짧다: {thin}"
-    overlap = sorted(set(_NOT_AN_ENTRYPOINT) & set(_EXPECTED_FETCHERS))
-    assert overlap == [], f"진입점이면서 진입점이 아니라고 적혀 있다: {overlap}"
+    for label, table in (
+        ("_NOT_AN_ENTRYPOINT", _NOT_AN_ENTRYPOINT),
+        ("_EXCLUDED_FROM_EVALUATION", _EXCLUDED_FROM_EVALUATION),
+    ):
+        stale = sorted(set(table) - leaves)
+        assert stale == [], f"{label}에 없는 이름이 적혀 있다: {stale}"
+        thin = sorted(name for name, why in table.items() if len(why) < 25)
+        assert thin == [], f"{label}의 이유가 너무 짧다: {thin}"
+        overlap = sorted(set(table) & set(_EXPECTED_FETCHERS))
+        assert overlap == [], f"{label}이 진입점 목록과 겹친다: {overlap}"
 
 
 def test_the_derivation_actually_found_the_counting_sites() -> None:
     """항진명제 방지 — 유도가 비면 아래 파라미터가 0개가 된다."""
 
-    assert len(_fetchers()) >= 40, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
+    assert len(_fetchers()) >= 31, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
     assert _counting_definitions(), (
         f"`{_NOTE}`를 부르는 정의를 하나도 찾지 못했다 — 계측이 사라졌다."
     )

@@ -117,6 +117,7 @@ from .provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
+from .schedules import DISABLED_FEATURE_LOAD_OPERATION_KEYS
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -220,6 +221,50 @@ class FeatureUpdateAssetRunner:
     ) -> ProviderDatasetRefreshResult:
         spec = self._spec_for_scope(scope)
         failure_sync_scope = scope.sync_scope
+        if (
+            scope.operation_key in DISABLED_FEATURE_LOAD_OPERATION_KEYS
+            and scope.scope_type != "provider_dataset"
+        ):
+            # 자동 적재를 끈 provider다(`DISABLED_FEATURE_LOAD_SCHEDULES`).
+            # 그 목록은 schedule만 막았고 **이 경로는 막지 않았다** - prod가 cron이
+            # 아니라 큐로 돌기 때문에, 사용자가 끈 provider가 살아 있는 경로로
+            # 그대로 나가고 있었다(2026-09-14 발견). 끄는 결정을 기록만 하지 않고
+            # 실행 경계에 결박한다.
+            #
+            # **targeted scope만 막는다.** 기록된 의도가 "백필이나 일회성 재적재는
+            # 여전히 필요하고 그것은 **사람이 의도해서 한 번 돌리는 일**이다"이기
+            # 때문이다. 자동으로 도는 것은 targeted 쪽 - PinVi cache target refresh가
+            # 반경 안 feature를 잡아 만드는 side effect다. `provider_dataset`은
+            # "이 dataset을 지금 갱신하라"는 의도된 한 번이므로 남긴다(같은 파일의
+            # OpiNet skip이 쓰는 경계와 같다).
+            #
+            # 남는 노출: 자동 호출자가 `provider_dataset` scope로 넣으면 여전히
+            # 돈다. provider별 일일 예산이 그것을 닫는다 - `T-VN-QUEUE-QUOTA`.
+            log_info = getattr(self._log, "info", None)
+            if callable(log_info):
+                log_info(
+                    "%s 자동 적재가 꺼져 있어 큐 요청을 건너뛴다 "
+                    "(DISABLED_FEATURE_LOAD_SCHEDULES).",
+                    scope.operation_key,
+                )
+            return ProviderDatasetRefreshResult(
+                provider_dataset_id=scope.provider_dataset_id,
+                sync_scope=scope.sync_scope,
+                operation_key=scope.operation_key,
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                status="skipped",
+                metadata={
+                    "provider_dataset_id": scope.provider_dataset_id,
+                    "sync_scope": scope.sync_scope,
+                    "operation_key": scope.operation_key,
+                    "provider": scope.provider,
+                    "dataset_key": scope.dataset_key,
+                    "skipped": True,
+                    "skip_reason": "provider_auto_load_disabled",
+                    "scope_type": scope.scope_type,
+                },
+            )
         if (
             scope.operation_key
             in {

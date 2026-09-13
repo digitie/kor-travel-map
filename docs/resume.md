@@ -1,34 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-14 — 쿼터 분자가 prod에 있다 (#1229, `2db70b478`)
+## 2026-09-14 — T-VN-QUOTA-ARITHMETIC 종결, 그리고 큐 경로가 남았다
 
-**다음 한 작업: `T-VN-QUOTA-ARITHMETIC` 조문 6 — KMA 격자 재활성화 판단.**
-분모·분자·증폭기 선언이 모두 끝났고 G=59도 실측됐다. 켜는 데 필요한 숫자는 다 있다.
+**다음 한 작업: `T-VN-QUEUE-QUOTA` — 남은 provider 넷의 분모부터 포털에서 본다.** `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr이 아니라 각자 포털에 있고
+아직 보지 않았다. OpiNet의 1,500/일은 실측이 아닌데 예산 600이 그 위에 서 있다.
+**조회이지 엔지니어링이 아니다.**
 
-t42a 재핀 사이클 전 사이클 GREEN(회전 #50 · rebuild committed · repin VERIFIER PASS ·
-M01 ACL 55/55 · D1 live Playwright 11 passed · D2 phase=passed).
+**급하지 않다.** 2026-09-14 prod 실측 feature asset materialization **0건**이고
+feature cron schedule은 전부 꺼져 있다 — 쿼터가 압박받는 상황이 아니다. 큐 예산
+장치는 분모를 보고 나서 필요한지 판단한다("측정 전에 상한 숫자를 바꾸지 않는다").
+KMA·에어코리아는 평가 대상에서 제외(2026-09-14 지시).
 
-**주의: prod feature load schedule은 전부 `default_status=STOPPED`다.** 그래서 배포
-뒤 feature asset materialization이 0건이고 `upstream_requests_min`이 실린 자리가
-아직 없다. 분자가 0이 아닌 값을 내려면 누군가 스케줄을 켜야 한다 — 그것이 조문 6의
-판단과 같은 자리다.
+`T-VN-QUOTA-ARITHMETIC`은 여섯 조문 전부 `[x]`로 닫혔다. 분모 실측(오퍼레이션마다
+따로 걸린다) · 분자(`upstream_requests_min`, #1229) · 쿼터성 실패의 재시도 차단
+(#1227) · 증폭기 선언 · UI 보증 제거 · KMA 재활성화 전제. prod 배포 t41a·t42a 두
+사이클 GREEN.
 
-분모는 `0b60a8508`(#1227)로 들어갔고, 이 브랜치가 분자를 붙인다. upstream 진입점
-40개 중 35개가 요청을 전부 세고 그 수가 `upstream_requests_min`으로 asset output
-metadata에 실린다. 배선은 `ContextVar`다 — fetcher가 generator라 인자로는 흘릴 수
-없었고, 시그니처를 하나도 바꾸지 않는다.
+**조사 중에 blocker 하나를 찾아 고쳤다.** `DISABLED_FEATURE_LOAD_SCHEDULES`
+(2026-09-09 사용자 지시로 KMA·AirKorea 자동 적재 중지)는 **시계만** 껐다. prod는
+cron이 아니라 feature update queue로 도는데(schedule 전부 STOPPED, 큐 센서만
+RUNNING) 큐 runner에 꺼진 operation의 spec이 그대로 있었고 정책 게이트는 row가
+없으면 fail-open이다 — 즉 **사용자가 끈 provider가 살아 있는 경로로 나가고 있었다.**
+지금은 큐 경계가 `DISABLED_FEATURE_LOAD_OPERATION_KEYS`를 읽어 건너뛴다.
 
-적대 리뷰 **다섯 판**이 각각 blocker를 냈다(상세는 `docs/journal.md` 2026-09-13
-"분자를 세기 시작했고…"). 요약하면 **배선보다 커버리지가 문제였고, 커버리지를
-지키려던 정적 검사가 두 번 다 항진명제였다.** 지금은 층이 나뉘어 있다 —
-정적 검사는 "빠진 진입점이 없는가", 런타임 테스트는 "N번 부르면 N을 세는가".
-
-남은 것:
-- 부분 계측 **셋**: OpiNet bbox enumerate 둘(provider가 격자 셀 수를 감춘다 —
-  총량을 묶는 것은 하루 한 번 coalescing이다)과 MOIS asset 경로(Dagster resource
-  init이 계수 범위보다 앞이다).
-- `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr 포털에 없어 **분모가 아직 없다** —
-  분자만 있는 provider라 분자의 정확성이 전부다.
 
 ## 2026-09-11 — T-VN-39 재키가 착지했다 (#1197, `e8c66c47`)
 

@@ -646,6 +646,30 @@ DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
     }
 )
 
+DISABLED_FEATURE_LOAD_OPERATION_KEYS: Final[frozenset[str]] = frozenset(
+    spec.job_name
+    for spec in FEATURE_LOAD_SCHEDULE_SPECS
+    if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES
+)
+"""자동 적재를 끈 provider의 **operation key**.
+
+``DISABLED_FEATURE_LOAD_SCHEDULES``는 이름이 말하듯 **시계만** 끈다. 그런데 이
+저장소의 prod는 cron이 아니라 **feature update queue**로 돈다 — schedule은 전부
+``default_status=STOPPED``이고 켜진 적이 없는 반면
+``feature_update_request_queue_sensor``는 기본 RUNNING이다. 그 큐 runner
+(:class:`~.feature_update_runner.FeatureUpdateAssetRunner`)에는 여기 있는
+operation의 spec이 그대로 있고, 실행 전 정책 게이트는 ``provider_refresh_policies``
+row가 없으면 ``allow_targeted``로 **fail-open**한다(baseline seed에 row가 0건이다).
+
+즉 "2026-09-09 KMA·AirKorea 자동 적재 중지(사용자 지시)"가 **살아 있는 경로에서는
+지켜지지 않고 있었다**(2026-09-14 발견). PinVi cache target refresh 하나가 반경 안
+KMA weather feature를 잡으면 격자 순회가 그대로 나갔다.
+
+**끄는 것은 시계이지 능력이 아니다** — 그 원칙은 유지한다. 사람이 Dagster UI에서
+job을 직접 돌리는 백필은 여전히 된다(그 경로는 이 runner를 지나지 않는다). 여기서
+막는 것은 **자동으로 도는 것**뿐이고, 큐는 자동이다.
+"""
+
 FEATURE_LOAD_SCHEDULES: Final = [
     ScheduleDefinition(
         name=spec.schedule_name,
