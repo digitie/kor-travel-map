@@ -116,6 +116,21 @@ class ProviderPaginationOverrun(RuntimeError):
     """페이지 상한을 넘겼다 — 조용히 자르지 않고 실패시킨다."""
 
 
+class ProviderPaginationStalled(RuntimeError):
+    """``page_no``를 올렸는데 upstream이 **같은 페이지**를 다시 줬다.
+
+    ``pageNo``를 무시하는 upstream이 있다. 그때 선언 건수만 믿고 걷으면 같은 100건을
+    30번 받고도 "3,000건 수집"으로 끝난다 — 중복은 upsert가 흡수하므로 run은 초록이고
+    누락은 보이지 않는다.
+
+    이 검사는 원래 provider 라이브러리 쪽에 있었다(``visitkorea``의
+    ``iter_paginated_pages``가 직전 ``page.raw``와 비교해 ``TourApiParseError``를
+    던진다). 2026-09-13에 쿼터 상한을 얻으려 저장소 헬퍼로 옮기면서 그 능력을 잃었고,
+    적대 리뷰가 그것을 잡았다. 여기서 되살리되 provider에 매이지 않는 형태로 둔다 —
+    호출자가 :attr:`ProviderPage.fingerprint`를 주면 켜진다.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderPage:
     """provider 1페이지의 종료 판정에 필요한 최소 정보.
@@ -126,6 +141,12 @@ class ProviderPage:
 
     items: Sequence[Any]
     total_count: int | None = None
+    fingerprint: Any = None
+    """이 페이지를 식별하는 값(보통 provider raw body). 주면 전진 검사가 켜진다.
+
+    ``None``이면 검사하지 않는다 — 모든 provider가 비교 가능한 raw를 주지는 않기
+    때문이다. 값이 있으면 직전 페이지와 ``==``로 비교한다.
+    """
 
     @property
     def declared_total(self) -> int | None:
@@ -194,6 +215,8 @@ def iter_paginated_items(
     ------
     ProviderPaginationOverrun
         ``max_pages``를 넘겼을 때.
+    ProviderPaginationStalled
+        ``fingerprint``를 주는 호출자에서 upstream이 같은 페이지를 반복할 때.
     """
     state = _PageState(
         num_of_rows=num_of_rows,
@@ -271,6 +294,7 @@ class _PageState:
     declared: int | None = None
     page_no: int = 0
     finished: bool = False
+    previous_fingerprint: Any = None
 
     def guard_ceiling(self) -> None:
         effective = min(self.ceiling, self.absolute_ceiling)
@@ -304,6 +328,17 @@ class _PageState:
     ) -> Sequence[Any]:
         """한 페이지를 흡수하고 yield할 item을 돌려준다. 종료는 ``finished``로 알린다."""
         items = list(page.items)
+        if page.fingerprint is not None:
+            if (
+                self.previous_fingerprint is not None
+                and page.fingerprint == self.previous_fingerprint
+            ):
+                raise ProviderPaginationStalled(
+                    f"{self.label}: page {self.page_no}가 직전 페이지와 같은 내용을 "
+                    f"돌려줬다 — upstream이 page_no를 전진시키지 않는다 "
+                    f"(수신 {self.seen}건, 선언 {self.declared})."
+                )
+            self.previous_fingerprint = page.fingerprint
         if page.declared_total is not None:
             self.declared = page.declared_total
             # 선언 건수가 상한을 정한다. 전역 상한은 그보다 작을 때만 의미가 있다.

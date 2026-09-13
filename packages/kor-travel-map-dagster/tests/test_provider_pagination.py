@@ -14,6 +14,7 @@ from kortravelmap.dagster.provider_pagination import (
     DEFAULT_MAX_PAGES,
     ProviderPage,
     ProviderPaginationOverrun,
+    ProviderPaginationStalled,
     iter_paginated_items,
 )
 
@@ -278,3 +279,46 @@ def test_max_pages_alone_does_not_bound_a_lying_upstream() -> None:
         "`max_pages`가 천장처럼 동작했다 — 이 테스트가 박아 둔 사실이 바뀌었다면 "
         "`absorb`의 상한 상향 규칙을 다시 읽어라."
     )
+
+
+def test_a_stalled_upstream_is_caught_not_absorbed() -> None:
+    """``page_no``를 무시하는 upstream을 조용히 흡수하지 않는다.
+
+    같은 100건을 30번 받고 "3,000건 수집"으로 끝나는 모양이다 — 중복은 upsert가
+    흡수하므로 run은 초록이고 누락은 보이지 않는다. 이 검사는 원래 provider
+    라이브러리에 있었고(visitkorea `iter_paginated_pages`), 쿼터 상한을 얻으려
+    저장소 헬퍼로 옮기면서 잃었다가 적대 리뷰에 잡혀 되살렸다.
+    """
+
+    calls: list[int] = []
+
+    def never_advances(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        return ProviderPage(
+            items=["a", "b"], total_count=3000, fingerprint={"body": "same"}
+        )
+
+    with pytest.raises(ProviderPaginationStalled):
+        list(
+            iter_paginated_items(
+                never_advances, num_of_rows=2, label="stalled", max_pages=50
+            )
+        )
+    assert calls == [1, 2], f"두 번째 페이지에서 멈춰야 한다 — {len(calls)}번 걸었다"
+
+
+def test_a_fingerprint_that_actually_changes_is_not_flagged() -> None:
+    """항진명제 방지 — 전진하는 upstream은 통과해야 한다."""
+
+    def advances(page_no: int) -> ProviderPage:
+        return ProviderPage(
+            items=[f"p{page_no}"] if page_no <= 3 else [],
+            total_count=3,
+            fingerprint={"page": page_no},
+        )
+
+    assert list(iter_paginated_items(advances, num_of_rows=1, label="ok")) == [
+        "p1",
+        "p2",
+        "p3",
+    ]
