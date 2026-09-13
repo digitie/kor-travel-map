@@ -145,7 +145,7 @@
   요구하는 값은 전부 이미 지역변수로 살아 있다가 print 문자열에만 들어가고 버려지고
   있었다. 가장 날카로운 지점은 신뢰 경계 거부 경로였다 — 한 문장만 인쇄하고 축을 하나도
   남기지 않아, receipt를 붙였어도 내용이 비었을 것이다.
-  상세는 `docs/tasks-acceptance.md` §T-VN-M05-VERIFY-RECEIPT(→ `archive/tasks-acceptance-2026-09a.md`).
+  상세는 `docs/tasks-acceptance.md` §T-VN-M05-VERIFY-RECEIPT.
 
 ## 2026-09-08 — purge 개방·TRUNCATE fence·소비 기록
 
@@ -179,7 +179,7 @@
   판정을 좌우하는 것만 넣은 `decision_fingerprint`로 차단하고, R5로 일간 스케줄
   (04:20 KST, 기본 `STOPPED`)을 붙였다. **변이 검증이 설계를 고쳤다** — 처음 넣었던
   `source_record_key`는 같은 내용의 재fetch로도 바뀌어 churn 원인이었다.
-  상세는 `docs/tasks-acceptance.md` §T-VN-M05-RELITIGATION(→ `archive/tasks-acceptance-2026-09a.md`).
+  상세는 `docs/tasks-acceptance.md` §T-VN-M05-RELITIGATION.
 
 
 ## 2026-09-08 — M05 활성화 승격
@@ -239,7 +239,7 @@ root chown` 인계를 넣어 셋 다 처음으로 통과했다. 기록 위치는
   자격증명")은 **소유자 판정으로 `T-VN-41F1D-D1` 실측이 갚는다.**
   **잔여 위험(감추지 않는다)**: AC3·AC5의 receipt는 현 HEAD보다 frontend/src 커밋 5개
   뒤 체크아웃 것이고 mocked checkpoint는 CI job이 아니라 수동 게이트다. CI `type-check`가
-  mock↔생성 타입 drift는 매 PR 잡는다. 상세는 `docs/tasks-acceptance.md` §T-FE-MOCK-FLAKE(→ `archive/tasks-acceptance-2026-09a.md`).
+  mock↔생성 타입 drift는 매 PR 잡는다. 상세는 `docs/tasks-acceptance.md` §T-FE-MOCK-FLAKE.
 - [x] T-VN-H34 — 공식 curation 미연결 membership (**2026-09-07 완료, 범위: 저장소 CSV**).
   소유자 판정으로 범위를 저장소 CSV까지로 한정했다 — prod 데이터를 전제하던 조건들은
   **pinned rebuild가 매번 DB를 새로 만들어** 구조적으로 닫히지 않는다. CSV 범위 4개 조건
@@ -262,7 +262,7 @@ root chown` 인계를 넣어 셋 다 처음으로 통과했다. 기록 위치는
   `status: passed`. 회전 preflight가 Map 5커밋 전진을 **PinVi 커밋 없이** 수용.
   **적대 리뷰 2라운드**가 P0 2건을 잡았고(v2로 receipt 생성 불가 / service revision
   생산자 오지목 → 71분 뒤 기동 실패) 픽스처가 둘 다 가리고 있었다. 변이 검증 PinVi
-  9건 · Manager 12건 전부 red. 상세는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2(→ `archive/tasks-acceptance-2026-09a.md`).
+  9건 · Manager 12건 전부 red. 상세는 `docs/tasks-acceptance.md` §T-VN-PAIR-V2.
   PR: PinVi #538 #539, Manager #321 #322 #323, Map #1181 #1182.
 
 ## T-VN-D2-API-AUDIT — helper의 api-audit 경로 활성화 (2026-09-06 완료)
