@@ -1901,6 +1901,11 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 
    적재 축도 다시 맞물린다: `claims 1047 · aliases 1047 · links 1047`
    (`features 1048`은 D2가 남긴 은퇴 행 1개를 포함한다 — §T-VN-D2-RESIDUE).
+
+   **2026-09-13 새 세대(pinset `b71cbefc`, map `2b65e5b3`)에서 재확인.** 같은 job이
+   다시 `SUCCESS`로 끝났고 이번에는 `features 1047`이다 — D2가 자기 행을 스스로
+   지웠으므로 은퇴 행이 없다(§T-VN-D2-RESIDUE 실측 `lane_residue_total=0`). 네 축이
+   정확히 같다: `features 1047 · claims 1047 · aliases 1047 · links 1047`.
 2. 그 성질이 배포마다 유지된다. storage 부착이 pinned runtime generation의 함수라면,
    generation이 바뀔 때 함께 따라오는 것이 증적으로 보인다.
 3. 이 축을 재는 검사가 있다 — 지금은 "컨테이너가 healthy"만 보고 "run이 완주한다"는
@@ -1908,15 +1913,40 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
 4. 봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다 — 같은 key 집합을 각자
    들고 있으면서 CI가 어긋남을 못 보는 상태가 아니어야 한다. 2026-09-12에 정확히
    그 상태가 prod 스택을 내렸다.
-5. **UI에서 step의 stdout/stderr가 보인다.** 지금은 한 세대 안에서도 비어 있다 —
-   `dagster`(webserver)와 `dagster-daemon`이 각자 code location을 안고 도는 별개
-   컨테이너이고 `/opt/dagster/state`에 공유 volume이 없다. `DefaultRunLauncher`가
-   띄우는 run worker는 daemon 컨테이너의 자기 경로에 쓰고, webserver는 자기
-   컨테이너의 같은 경로를 읽는데 거기엔 아무것도 없다(없으면 `ensure_dir`이 빈
-   디렉터리를 만들어 그것을 watch한다). **"run이 왜 죽었나"를 UI로 확인하는 경로가
-   없다** — 이번 사고를 가린 것과 같은 종류의 맹점이다. 공유 named volume 하나로
-   조문 5와 아래 "알려진 한계"가 함께 닫히지만, compose는 pinned runtime 표면이라
-   prod가 복구된 뒤 별도 사이클에서 검사부터 붙여 넣는다.
+5. [x] **"run이 왜 죽었나"를 UI로 확인할 수 있다. — 2026-09-13 실측으로 정정.**
+
+   처음에 이 조문을 "UI에서 step의 stdout/stderr가 보인다"로 적었다. 근거는
+   `dagster`(webserver)와 `dagster-daemon`이 별개 컨테이너이고 `/opt/dagster/state`에
+   공유 volume이 없다는 것이었다 — 그 사실 자체는 맞다(실측: webserver 0 디렉터리,
+   daemon 42 디렉터리). 그래서 공유 named volume을 넣으려 했다.
+
+   **고치기 전에 재 봤더니 그 자리가 정보를 담지 않는다.**
+
+   ```
+   compute_logs : 42 run · 286 파일 · 전부 0바이트 · 352K
+   artifacts    : 528K
+   ```
+
+   286개가 **전부 0바이트**이고, 여기에는 방금 1,047건을 수 분간 적재한
+   `feature_place_standard_museums_job`의 것도 포함된다. 이 배포의 step은 stdout으로
+   인쇄하지 않는다 — 모든 로깅이 Dagster 로거를 지나 **event log(postgres)**로 간다.
+   그 표는 40 run에 699행이고(ENGINE_EVENT · STEP_START · RESOURCE_INIT ·
+   STEP_OUTPUT · HANDLED_OUTPUT · LOGS_CAPTURED …) 두 컨테이너가 같은 DB를 보므로
+   **이미 공유되고 UI에 보인다.** 실패는 `STEP_FAILURE` 이벤트가 오류 본문을 담아
+   같은 경로로 표시된다.
+
+   그러므로 공유 volume은 **빈 파일을 공유하는 일**이다. 그리고 공짜가 아니다 —
+   파괴적 rebuild는 volume이 아니라 데이터베이스 수준에서 비우므로(`postgres`
+   컨테이너가 rebuild를 여러 번 겪고도 `Up 7 days`였다) 공유 volume은 배포를 넘어
+   살아남고, `retention`은 compute log를 덮지 않는다. 측정된 증가율 ~31 MB/일
+   (분 단위 schedule 기준)이 상한 없이 쌓인다. **정보 이득 0에 무한 증가를 더하는
+   교환이다** — 같은 날 `retention`에서 저지른 실수와 같은 모양이다.
+
+   **남는 진짜 틈(좁다).** step이 stdout/stderr로 **직접** 쓰는 경우 — 라이브러리
+   인쇄, 또는 Dagster 핸들러 밖에서 나는 하드 크래시 traceback — 그것은 daemon
+   컨테이너에만 남고 UI가 보여 주지 못한다. 그때는 `docker logs
+   kor-travel-map-dagster-daemon-latest`가 정본이다. 그 경로를 아는 것이 이 조문의
+   실질이고, 그것을 위해 무한 증가를 사지 않는다.
 
 **무엇이 관측됐나 — 2026-09-11.**
 
@@ -1976,8 +2006,10 @@ generation에서 그것이 붙지 않았다.
 검사를 심었고, 변이 ②(검사기만 되돌림)에서 그 하나만 빨갛다.
 
 **알려진 한계.** `/opt/dagster/state`에는 volume이 없다. artifact와 compute log는
-컨테이너 재생성마다 사라지고, 애초에 컨테이너 경계를 넘지도 못한다(조문 5).
-run/event/schedule storage는 postgres이므로 조문 1·2에는 영향이 없다.
+컨테이너 재생성마다 사라지고 컨테이너 경계를 넘지도 못한다. **그것이 문제가 아닌
+이유는 조문 5에 적었다** — 그 파일들은 이 배포에서 전부 0바이트이고, 진단 내용은
+postgres의 event log에 있다. run/event/schedule storage가 postgres이므로 조문 1·2에도
+영향이 없다.
 
 **호스트 dev 스택도 같은 파일을 읽는다.** `scripts/run-admin-stack.sh`가
 `docker/dagster.yaml`을 바이트 그대로 호스트 `DAGSTER_HOME`에 깐다. #1216의
