@@ -319,21 +319,7 @@ class FeatureUpdateAssetRunner:
                     # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
                     # 아니다. 계수기는 이 메서드 맨 위에서 열린다(resources 구성의
                     # I/O까지 덮기 위해서다).
-                    try:
-                        result = await spec.run(context)
-                    except Exception:
-                        # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은
-                        # metadata를 싣지 못하므로 로그가 유일한 기록이다 -
-                        # asset 경로의 `_log_spend_on_failure`와 같은 이유다.
-                        observed = observed_upstream_requests()
-                        log_warning = getattr(self._log, "warning", None)
-                        if observed is not None and callable(log_warning):
-                            log_warning(
-                                "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
-                                UPSTREAM_REQUESTS_METADATA_KEY,
-                                observed,
-                            )
-                        raise
+                    result = await spec.run(context)
                     return _as_refresh_result(
                         result,
                         scope=scope,
@@ -351,6 +337,21 @@ class FeatureUpdateAssetRunner:
                     ) from exc
             except ProviderDatasetRefreshFailure as exc:
                 refresh_failure = exc
+                # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은 metadata를
+                # 싣지 못하므로 로그가 유일한 기록이다 - asset 경로의
+                # `_log_spend_on_failure`와 같은 이유다. **`spec.run`뿐 아니라
+                # resource 구성·transaction 결박 실패도 여기로 온다** - MOIS
+                # Phase A는 그 resource 구성 안에서 전국 파일을 받으므로, 로깅을
+                # run 전용 except에 두면 계수기를 앞으로 옮긴 이유였던 그 요청이
+                # 그대로 사라진다(2026-09-13 4차 적대 리뷰).
+                observed = observed_upstream_requests()
+                log_warning = getattr(self._log, "warning", None)
+                if observed is not None and callable(log_warning):
+                    log_warning(
+                        "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
+                        UPSTREAM_REQUESTS_METADATA_KEY,
+                        observed,
+                    )
                 raise
             finally:
                 if extra is not None:

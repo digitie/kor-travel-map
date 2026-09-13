@@ -23,11 +23,11 @@
 > | 절 | 파일 | 크기 |
 > | --- | --- | --- |
 > | `T-VN-M05` · `T-VN-M05-ACTIVATION` (완료) | [archive/tasks-acceptance-m05.md](archive/tasks-acceptance-m05.md) | 약 47 KB |
-
-
-> **닫힌 task의 acceptance는 여기 없다.** 규약 §8대로
-> [`archive/tasks-acceptance-2026-09a.md`](archive/tasks-acceptance-2026-09a.md)로
-> 분리했다(31개 절). 이 파일은 **열린 task**만 갖는다 — 제목이 말하는 바다.
+> | 닫힌 절 31개 (~2026-09-13) | [archive/tasks-acceptance-2026-09a.md](archive/tasks-acceptance-2026-09a.md) | 약 130 KB |
+>
+> **닫힌 task의 acceptance는 여기 없다.** 이 파일은 **열린 task**만 갖는다 —
+> 제목이 말하는 바다. `docs/tasks-done.md`가 `acceptance §<ID>`로 가리키는 절이
+> 여기 없으면 위 아카이브에서 찾아라.
 
 ## T-VN-FINAL-REBUILD
 
@@ -444,7 +444,7 @@ live acceptance spec은 `origin/feat/m01-m02-live-acceptance`에만 있고 main�
 사라진다 — **회수가 가장 먼저다.** 병합만으로는 닫히지 않는다: spec은
 `E2E_MANUAL_CREATE_WRITE=1` opt-in 격리 스택 전용이라 기본 skip이다.
 
-이 절이 세는 것 중 **backup/restore 축은 이 항목의 것이 아니다** — §T-VN-M01이 그 축을
+이 절이 세는 것 중 **backup/restore 축은 이 항목의 것이 아니다** — §T-VN-M01(→ `archive/tasks-acceptance-2026-09a.md`)이 그 축을
 자기 전제에서 빼면서 `T-VN-H49` 계열로 넘겼다. 이 절만 계속 세고 있어 과대 계상이다.
 
 **소유자 판정** 둘: purge 정책(evidence cascade/orphan·권한·409 계약)과
@@ -452,7 +452,7 @@ backup/restore 소유권.
 
 **2026-09-07 소유자 판정 — 과대 계상분을 삭제한다.**
 
-이 절이 세던 **backup/restore 축은 이 항목의 것이 아니다.** §T-VN-M01이 그 축을 자기
+이 절이 세던 **backup/restore 축은 이 항목의 것이 아니다.** §T-VN-M01(→ `archive/tasks-acceptance-2026-09a.md`)이 그 축을 자기
 전제에서 빼면서 `T-VN-H49` 계열로 넘겼는데 이 절만 계속 세고 있었다. 소유자 판정으로
 이 절의 범위에서 삭제한다 — 소유는 `T-VN-H49`(+ 자식들)이다.
 
@@ -793,26 +793,30 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 
 **무엇이 참이면 닫히는가.**
 
-1. [x] **분모가 기록돼 있다.** (2026-09-13) 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
-   상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
-   활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
-2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 **39개 중 34개**가 요청을
+1. [x] **분모가 기록돼 있다.** (2026-09-13) data.go.kr 활용신청 **17개 서비스**의
+   오퍼레이션당 일일 트래픽이 `docs/etl/upstream-quota.md` §2 표에 나눗셈과 함께
+   적혀 있다. 표에 **없는** 넷(`krheritage`·`opinet`·`krex`·`mois`)은 data.go.kr
+   활용신청이 아니라 각자 포털에 있고, 아직 보지 않았다 — 그 넷은 분모가 없다.
+2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 **40개 중 35개**가 요청을
    전부 세고, 그 수가 `upstream_requests_min`으로 asset output metadata에 실린다.
-   못 세는 둘은 upstream 요청이 아예 없고(번들 정적·로컬 sqlite), 나머지 둘은
-   **부분 계측**으로 선언돼 있다(OpiNet bbox enumerate — provider가 격자 셀마다
-   부르는데 그 셀 수가 provider private).
+   나머지 다섯: 못 세는 **둘**은 upstream 요청이 아예 없고(번들 정적·로컬 sqlite),
+   **부분 계측 셋**은 OpiNet bbox enumerate 둘(provider가 격자 셀마다 부르는데 그
+   셀 수가 provider private)과 MOIS asset 경로(Dagster resource init이 계수 범위보다
+   앞)다. 2 + 3 = 5.
 
    **배선이 없던 것이 이 조문이 오래 열려 있던 이유였다.** fetcher가 generator라
    "세는 자리"와 "내보내는 자리" 사이에 값을 흘릴 인자가 없었다.
    `kortravelmap.dagster.upstream_requests`가 `ContextVar`로 그것을 대신하고 asset
    경계가 계수기를 연다 — provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다.
-   합치는 자리는 `etl._add_output_metadata` 하나뿐이다(이 패키지의 유일한 metadata
-   초크포인트).
+   합치는 자리는 `etl._add_output_metadata`다 — **feature asset 경로의 초크포인트이고,
+   이 패키지의 유일한 metadata 자리는 아니다**(op/sensor/maintenance는 직접 부른다).
+   feature asset이 그 길로 새면 센 값이 버려지므로 `tests/lint`가 그 모듈에서만 막는다.
 
    **첫 판은 배선만 맞고 커버리지가 없었다(적대 리뷰 blocker).** 계수기는 asset
    35개 전부에서 열리는데 세는 자리는 셋뿐이라, OpiNet처럼 수천 건을 쓰는 경로가
-   `upstream_requests_min: 0`을 냈다 — 하필 **호출량이 가장 크면서 일일 한도는
-   아직 실측하지 못한** provider다. 분자가 유일한 가시성인데 그것이 0이었다.
+   `upstream_requests_min: 0`을 냈다 — 하필 저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다
+   (`_OPINET_RUN_CALL_BUDGET = 600` vs 무료키 1,500/일, #545). 예산을 짜 둔 자리의
+   분자가 0이었다.
    그리고 그때의 구조 검사는 wrapper가 항상 열어 **항진명제**였다(같은 실패 형태를
    그날 네 번째로 반복했다).
 

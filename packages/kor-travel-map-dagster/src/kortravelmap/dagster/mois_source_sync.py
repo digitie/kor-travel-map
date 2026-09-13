@@ -59,6 +59,7 @@ from dagster import (
 from .file_registry_hooks import record_mois_source_download
 from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
+from .quota_exhaustion import raise_terminal_if_quota_exhausted
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .upstream_requests import (
@@ -497,13 +498,28 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
         # 않는다. Phase A가 전국 LOCALDATA 파일을 slug마다 받으므로 여기서 직접
         # 열지 않으면 `note_upstream_request()`가 전부 no-op이다(3차 적대 리뷰).
         with counting_upstream_requests():
-            summary = sync_mois_source_db(
-                settings,
-                service_slugs=service_slugs,
-                org_code=org_code,
-                batch_size=batch_size,
-                dagster_run_id=context.run_id,
-            )
+            try:
+                summary = sync_mois_source_db(
+                    settings,
+                    service_slugs=service_slugs,
+                    org_code=org_code,
+                    batch_size=batch_size,
+                    dagster_run_id=context.run_id,
+                )
+            except Exception as exc:
+                # 실패한 step은 output을 내지 않으므로 여기서 남기지 않으면
+                # 소비량이 사라진다. 그리고 이 op은 재시도 정책을 달고 있어
+                # 쿼터 소진이면 **같은 한도를 더 쓰며** 재시도한다 - 쿼터성
+                # 실패는 재시도 없는 terminal Failure로 바꾼다(4차 적대 리뷰).
+                observed = observed_upstream_requests()
+                if observed is not None:
+                    context.log.warning(
+                        "MOIS Phase A가 실패했지만 upstream 요청은 나갔다 (%s=%d)",
+                        UPSTREAM_REQUESTS_METADATA_KEY,
+                        observed,
+                    )
+                raise_terminal_if_quota_exhausted(exc)
+                raise
             observed_requests = observed_upstream_requests()
         full_coverage = (
             summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS)) and org_code is None

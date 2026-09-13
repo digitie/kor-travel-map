@@ -56,8 +56,8 @@ def test_an_uninstrumented_path_reports_nothing_not_zero() -> None:
 
     이것이 2026-09-13 적대 리뷰가 잡은 blocker의 핵심이다. 계수기는 asset 35개
     전부에서 열리는데 세는 자리는 셋뿐이었고, 그래서 계측되지 않은 fetcher가
-    "0번 요청했다"고 보고했다 — 하필 호출량이 가장 크고 일일 한도조차 아직 모르는
-    provider(OpiNet)가
+    "0번 요청했다"고 보고했다 — 하필 저장소가 유일하게 한도 대비 run 예산을 코드에
+    박아 둔 provider(OpiNet, `_OPINET_RUN_CALL_BUDGET` = 600 vs 무료키 1,500/일)가
     수천 건을 쓰면서 0을 냈다. 운영자가 그 0을 "요청이 없었다"로 읽으면 정반대
     결론에 이른다.
     """
@@ -199,7 +199,13 @@ class _Context:
 
 
 def test_the_choke_point_merges_the_numerator() -> None:
-    """``_add_output_metadata``가 유일한 초크포인트다 — 여기서 합쳐진다."""
+    """``_add_output_metadata``에서 분자가 합쳐진다.
+
+    **feature asset 경로의 초크포인트이고, 이 패키지의 유일한 metadata 자리는
+    아니다** — op/sensor/maintenance는 ``context.add_output_metadata``를 직접
+    부른다(그쪽은 분자를 스스로 싣는다). feature asset이 그 길로 새는 것은
+    ``tests/lint``가 막는다.
+    """
 
     from kortravelmap.dagster.etl import _add_output_metadata
 

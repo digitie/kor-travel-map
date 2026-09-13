@@ -40,6 +40,15 @@ from task_ledger_lint import (  # noqa: E402
 TASKS = "docs/tasks.md"
 DONE = "docs/tasks-done.md"
 ACCEPTANCE = "docs/tasks-acceptance.md"
+ARCHIVE = "docs/archive"
+"""읽기 전용 아카이브 — **여기로 옮기는 것은 삭제가 아니라 이관이다.**
+
+규약 §8(`docs/tasks-rule.md`)이 live 문서가 읽기 한도를 넘으면 분리를 요구한다.
+그때 acceptance 절이 통째로 `docs/archive/`로 이동하는데, 규칙 2가 감시 3파일만
+보면 그 이동 전부가 "근거 없는 삭제"로 판정된다 — 규약이 시키는 일을 게이트가
+막는 셈이다(2026-09-13 4차 적대 리뷰가 실측으로 37건을 냈다). 그래서 아카이브의
+추가 줄도 삭제 근거로 센다.
+"""
 
 
 def _git(*args: str) -> str:
@@ -68,6 +77,16 @@ def _added_diff_lines(base: str, path: str) -> list[str]:
         for line in lines
         if line.startswith("+") and not line.startswith("+++")
     ]
+
+
+def _added_archive_lines(base: str) -> list[str]:
+    """``docs/archive/`` 아래에서 이 변경이 **추가한** 줄 전부.
+
+    디렉터리 하나로 diff를 떠 새 아카이브 파일도 자동으로 포함된다 — 파일명을
+    박으면 다음 분리에서 같은 구멍이 다시 열린다.
+    """
+
+    return _added_diff_lines(base, ARCHIVE)
 
 
 def _added_done_entries(base: str) -> dict[str, str]:
@@ -155,6 +174,7 @@ def main() -> int:
             _added_diff_lines(base, ACCEPTANCE)
             + _added_diff_lines(base, TASKS)
             + _added_diff_lines(base, DONE)
+            + _added_archive_lines(base)
         )
         for item in base_acceptance:
             if item.any_id is None or item.any_id in head_ids:

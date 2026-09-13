@@ -3,8 +3,8 @@
 2026-09-13 적대 리뷰가 blocker를 잡았다. 분자 배선(:mod:`~.upstream_requests`)은
 멀쩡했는데 **커버리지가 없었다** — 계수기는 asset 35개 전부에서 열리는데 세는 자리는
 셋뿐이었다. 그래서 OpiNet처럼 수천 건을 쓰는 경로가 ``upstream_requests_min: 0``을
-냈고, 하필 그것이 **호출량이 가장 크면서 일일 한도는 아직 모르는** provider였다 —
-분자가 유일한 가시성인데 그것이 0이었다.
+냈고, 하필 그것이 저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔**
+provider였다(``_OPINET_RUN_CALL_BUDGET`` = 600 vs 무료키 1,500/일, #545).
 
 그때 이 저장소가 갖고 있던 구조 검사는 초록이었다. 그 검사는
 ``asset이 계수 범위 안에서 도는가``를 물었는데, wrapper가 **항상** 열므로
@@ -77,10 +77,10 @@ _PARTIALLY_COUNTED: dict[str, str] = {
         "이 층에서는 셀 수 없다."
     ),
     "fetch_opinet_station_price_details": (
-        "같은 enumerate 경로를 공유한다. 상세 조회(`get_station_detail`)는 uni_id마다 "
-        "1건이라 세지만(모든 모드), 그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 "
-        "이 값은 **key가 실리되 실제 사용량보다 작다.** `fetch_opinet_stations`처럼 "
-        "값을 안 내는 것이 아니다."
+        "`low_top_area` 모드는 예산기가 정확히 센다(완전). `bbox`/`poi_cache_target` "
+        "모드는 상세 조회(`get_station_detail`)가 uni_id마다 1건이라 그쪽은 세지만, "
+        "그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 **key가 실리되 실제 사용량보다 "
+        "작다.** 같은 모드의 `fetch_opinet_stations`가 값을 아예 안 내는 것과 다르다."
     ),
     "sync_mois_source_db": (
         "큐 runner 경로와 Phase A op 경로는 센다. **asset 경로는 못 센다** — "
@@ -143,8 +143,28 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "run_feature_weather_kma_short_forecast",
         "run_feature_weather_kma_ultra_short_forecast",
         "run_feature_weather_kma_ultra_short_nowcast",
+        # 이름에 밑줄이 앞서지만 upstream을 직접 부르는 자리다.
+        "_fetch_krex_traffic_notice_snapshot",
     }
 )
+
+#: 접두사에는 걸리지만 **진입점이 아닌** 이름과 그 이유.
+#:
+#: 우주 유도를 접두사로 넓히면(`_fetch_` 등) 콜백·헬퍼까지 딸려 온다. 그것들을
+#: 계측하라고 요구하면 **이중 계수**가 난다 — 부르는 쪽이 이미 세고 있기 때문이다.
+#: 그래서 빼되, 빼는 이유를 적는다. 목록에 이름을 올리는 일 자체가 결정의 기록이다.
+_NOT_AN_ENTRYPOINT: dict[str, str] = {
+    "_fetch_nowcast_rows": (
+        "격자 루프가 넘기는 **콜백**이다. 부르는 쪽(`_run_kma_grid_weather`)이 격자마다 "
+        "세므로 여기서 또 세면 이중 계수다."
+    ),
+    "_fetch_short_forecast_rows": (
+        "같은 격자 루프가 넘기는 콜백이다 — 부르는 쪽이 격자마다 센다."
+    ),
+    "_fetch_ultra_short_forecast_rows": (
+        "같은 격자 루프가 넘기는 콜백이다 — 부르는 쪽이 격자마다 센다."
+    ),
+}
 
 #: 진입점 후보를 훑을 때 쓰는 이름 접두사.
 #:
@@ -152,7 +172,9 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 #: job)이 새로 생겨도 아무도 보지 못한다. 3차 리뷰가 그 구멍을 짚었다.
 _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
     "fetch_",
+    "_fetch_",
     "sync_",
+    "download_",
     "_run_kma_",
     "run_feature_weather_kma_",
 )
@@ -163,7 +185,7 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 그것은 래칫이 아니라 **항등식**이다 — 면제를 하나 늘리면 좌변과 우변이 함께
 #: 줄어 아무것도 빨개지지 않는다(3차 리뷰). 수를 따로 박으면 면제를 늘리는 편집이
 #: 반드시 이 숫자를 낮추는 편집을 동반하고, 그 한 줄이 리뷰에 보인다.
-_EXPECTED_FULLY_COUNTED: int = 34
+_EXPECTED_FULLY_COUNTED: int = 35
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -281,7 +303,9 @@ def test_the_declared_universe_matches_the_source() -> None:
     extra = sorted(
         leaf
         for leaf in leaves
-        if leaf.startswith(_ENTRYPOINT_PREFIXES) and leaf not in _EXPECTED_FETCHERS
+        if leaf.startswith(_ENTRYPOINT_PREFIXES)
+        and leaf not in _EXPECTED_FETCHERS
+        and leaf not in _NOT_AN_ENTRYPOINT
     )
     assert extra == [], (
         f"목록에 없는 새 진입점이 있다: {extra}. `_EXPECTED_FETCHERS`에 올리고, "
@@ -298,16 +322,28 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     반드시 이 줄을 고치게 된다.
     """
 
-    assert len(_EXPECTED_FETCHERS) >= 39, (
+    assert len(_EXPECTED_FETCHERS) >= 40, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
 
 
+def test_the_not_an_entrypoint_list_is_real_and_states_reasons() -> None:
+    """제외 목록이 낡거나 이름만 올라가는 것을 막는다."""
+
+    leaves = {_leaf(qualname) for _, qualname in _definitions()}
+    stale = sorted(set(_NOT_AN_ENTRYPOINT) - leaves)
+    assert stale == [], f"제외 목록에 없는 이름이 적혀 있다: {stale}"
+    thin = sorted(name for name, why in _NOT_AN_ENTRYPOINT.items() if len(why) < 25)
+    assert thin == [], f"이유가 너무 짧다: {thin}"
+    overlap = sorted(set(_NOT_AN_ENTRYPOINT) & set(_EXPECTED_FETCHERS))
+    assert overlap == [], f"진입점이면서 진입점이 아니라고 적혀 있다: {overlap}"
+
+
 def test_the_derivation_actually_found_the_counting_sites() -> None:
     """항진명제 방지 — 유도가 비면 아래 파라미터가 0개가 된다."""
 
-    assert len(_fetchers()) >= 39, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
+    assert len(_fetchers()) >= 40, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
     assert _counting_definitions(), (
         f"`{_NOTE}`를 부르는 정의를 하나도 찾지 못했다 — 계측이 사라졌다."
     )
@@ -386,7 +422,38 @@ def test_every_fetcher_counts_its_upstream_requests(fetcher: str) -> None:
 
 
 #: feature asset이 사는 모듈 — 여기서는 metadata 초크포인트를 지나야 한다.
+#:
+#: 손으로 박은 목록이라 **조용히 줄일 수 있다.** 그래서 아래 두 검사가 이름의
+#: 실재와 유도 결과의 비어 있지 않음을 따로 결박한다(4차 적대 리뷰).
 _FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "kma_weather.py", "mcst_features.py")
+
+
+def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
+    """목록이 낡거나 조용히 줄어드는 것을 막는다.
+
+    아래 초크포인트 검사는 이 목록을 훑는다. 목록에서 모듈 하나를 빼면 그 모듈의
+    우회가 보이지 않게 되고, 목록을 비우면 검사가 **항진명제**가 된다.
+    """
+
+    modules = set(_module_trees())
+    missing = sorted(set(_FEATURE_ASSET_MODULES) - modules)
+    assert missing == [], f"선언된 feature asset 모듈이 없다: {missing}"
+    assert len(_FEATURE_ASSET_MODULES) >= 3, (
+        f"feature asset 모듈 목록이 {len(_FEATURE_ASSET_MODULES)}개로 줄었다 — "
+        "진짜로 사라졌으면 이 하한도 함께 낮춰라."
+    )
+    # 유도가 비면 초크포인트 검사가 아무 함수도 보지 않는다.
+    scanned = [
+        node.name
+        for module, tree in _module_trees().items()
+        if module in _FEATURE_ASSET_MODULES
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
+        and "_add_output_metadata" in _called_names(node)
+    ]
+    assert len(scanned) >= 10, (
+        f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
+    )
 
 
 def test_feature_assets_do_not_bypass_the_metadata_choke_point() -> None:
