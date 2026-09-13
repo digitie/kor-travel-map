@@ -105,6 +105,10 @@ class KrexRestAreaWeatherUnavailable(RuntimeError):
 
     2026-09-13 적대 리뷰가 잡았다. 그 전에는 이 모듈이 lookback을 48 → 6으로
     줄이면서 "못 찾으면 시끄럽게 실패한다"고 적었는데, 실패하는 장치가 없었다.
+
+    **쿼터성으로 분류하지 않는다.** upstream이 잠깐 멈춘 것일 수 있고 다음 시도가
+    성공할 수 있으므로 step 재시도를 남긴다. 값은 시간당 4벌 × 7요청 = 28요청이고,
+    EX OpenAPI 일일 한도는 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
     """
 
 
@@ -2374,6 +2378,10 @@ def fetch_visitkorea_festival_events(
         # 라이브러리 iterator가 갖고 있던 "직전 페이지와 raw가 같으면 실패" 가드는
         # 위 `_page`가 `fingerprint`로 넘겨 헬퍼 쪽에서 되살린다 — 처음 옮길 때
         # 그것을 잃었고 적대 리뷰가 잡았다.
+        #
+        # **한계**: fingerprint가 응답 body 전체라, upstream이 매 페이지 달라지는
+        # 필드(요청 시각 등)를 실어 주면 같은 items를 받아도 가드가 발화하지
+        # 않는다. TourAPI 응답에는 그런 필드가 없지만 계약은 아니다.
         yield from iter_paginated_items(
             _page,
             num_of_rows=num_of_rows,

@@ -29,8 +29,9 @@ asset은 **한 달** 갱신되지 않는다. provider lib들이 429와 resultCod
 문자열만으로는 둘을 가를 수 없고, 대신 예외가 들고 있는 HTTP 상태를 본다.
 
 **``failure_kind``가 없는 provider가 절반이다.** 그 속성을 예외에 붙이는 lib은
-kma·krforest·visitkorea·kasi·khoa·mcst·enckc·krbluelink뿐이고
-airkorea·datagokr·krairport·krex·opinet·krheritage·mois·knps는 붙이지 않는다.
+kma·krforest·visitkorea·kasi·khoa·mcst·enckc·krbluelink·knps이고
+airkorea·datagokr·krairport·krex·opinet·krheritage·mois·vworld는 붙이지 않는다
+(knps는 붙이지만 쿼터 분류는 쓰지 않는다 — network/auth 등만 단다).
 그래서 속성 하나에만 걸면 **가장 좁은 분모에서 한 번도 발화하지 않는다** —
 에어코리아가 오퍼레이션당 500/일이다(``docs/etl/upstream-quota.md``). 그 구멍을
 :data:`QUOTA_EXCEPTION_TYPES`가 메운다.

@@ -524,8 +524,9 @@ async def run_tracked_feature_asset(
     """single-member public wrapper의 attempt와 completion을 소유한다.
 
     실패 경로는 두 갈래인데(**guard 유무**) 둘 다 같은 asset의 step 경계다. 그래서
-    쿼터 소진 판정도 두 갈래 모두에 건다 — 한쪽만 걸면 guard 없는 run에서 조용히
-    네 배를 낸다(:mod:`~.quota_exhaustion`).
+    쿼터 소진 판정도 두 갈래 모두에 건다 — 한쪽만 걸면 그쪽 run(run tag에
+    operation_key가 없는 UI 수동 실행·태그 없는 backfill)이 조용히 재시도를 산다
+    (:mod:`~.quota_exhaustion`).
     """
     guard = await ensure_authoritative_feature_operation_guard(
         context,
