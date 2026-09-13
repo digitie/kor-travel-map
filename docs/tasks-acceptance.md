@@ -2072,11 +2072,24 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 1. [x] **분모가 기록돼 있다.** (2026-09-13) 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
    상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
    활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
-2. [~] **분자가 있다.** KMA 격자 job은 `upstream_requests_min`을 asset
-   metadata로 내보낸다(격자 하나 = 요청 하나, 재시도는 세지 못하므로 하한).
-   bulk/페이지네이션 fetcher는 아직 세지 않는다. `settings.log_api_calls`는
-   **지웠다** — 읽는 코드가 없었고, 그 표는 provider 호출이 아니라 Map API로
-   들어오는 요청을 기록한다.
+2. [x] **분자가 있다.** (2026-09-13) 모든 feature-load asset이
+   `upstream_requests_min`을 output metadata로 내보낸다 — 격자 순회형은 격자마다,
+   페이지네이션형은 페이지마다 센다.
+
+   **배선이 없던 것이 이 조문이 오래 열려 있던 이유였다.** fetcher가 generator라
+   "세는 자리"와 "내보내는 자리" 사이에 값을 흘릴 인자가 없었다.
+   `kortravelmap.dagster.upstream_requests`가 `ContextVar`로 그것을 대신하고 asset
+   경계가 계수기를 연다 — provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다.
+   합치는 자리는 `etl._add_output_metadata` 하나뿐이라(이 패키지의 유일한 metadata
+   초크포인트) **실패 경로에도 함께 실린다.**
+
+   결박은 두 겹이다. (1) generator를 **두 겹 지나서도** 계수가 닿는지를 재는
+   행동 테스트 — 배선을 끊으면 3건이 빨개지는 것을 확인했다. (2) 쿼터 판정을 거는
+   경계가 계수기도 여는지를 소스에서 유도하는 구조 검사 — 한쪽만 걸면 그 asset의
+   요청 수가 조용히 빠진다.
+
+   `settings.log_api_calls`는 **지웠다** — 읽는 코드가 없었고, 그 표는 provider
+   호출이 아니라 Map API로 들어오는 요청을 기록한다.
    (원래 조문) 발신 provider 요청 수를 세는 코드가 있다. 지금은 0줄이다 —
    그리고 `settings.log_api_calls`는 "provider client 호출 횟수를 `ops.api_call_log`에
    기록"이라고 적혀 있지만 **프로덕션 reader가 0개**다(실제 writer는 API 패키지의

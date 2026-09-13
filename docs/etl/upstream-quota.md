@@ -127,15 +127,31 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 > **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
 
-## 4. 분자 — 하나는 생겼고 나머지는 아직 없다
+## 4. 분자 — 이제 모든 asset이 센다
 
-- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 2026-09-13부터 asset metadata로
-  `upstream_requests_min`을 내보낸다. `_min`인 이유는 실패한 격자의 재시도를 이
-  층에서 세지 못하기 때문이다(`upstream_retry`: 외부 attempts 2 × client 내부 1 =
-  경계당 최대 4 HTTP 시도).
-- **bulk/표준데이터·페이지네이션형**: sweep당 요청 수 = 페이지 수. 헬퍼가 세고
-  있지만(`_PageState.page_no`) asset metadata로 나가지 않는다. **여기가 남은
-  구멍이다** — fetcher가 generator라 asset 경계까지 값을 흘릴 배선이 없다.
+- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 격자 루프가 호출마다 계수한다.
+  `grids_fetched`(성공한 격자 수)와 **다른 수**임에 주의 — 실패해 중단된 격자도
+  요청은 나갔다. 처음에 그 둘을 같은 이름으로 실었다가 정본을 하나로 모았다.
+- **bulk/표준데이터·페이지네이션형**: sweep당 요청 수 = 페이지 수. 2026-09-13부터
+  같은 `upstream_requests_min`으로 나간다.
+
+**배선은 실행 문맥이 대신한다.** fetcher가 generator라 "세는 자리(페이지 루프)"와
+"내보내는 자리(asset output metadata)" 사이에 값을 흘릴 인자가 없었다. 그래서
+`kortravelmap.dagster.upstream_requests`가 `ContextVar`로 계수기를 들고, asset
+경계(`run_tracked_feature_asset`·`feature_place_mcst_culture`)가 그것을 연다 —
+provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치는 자리는
+`etl._add_output_metadata` 하나뿐이라(이 패키지에서 metadata를 내보내는 유일한
+초크포인트) **실패 경로의 metadata에도 함께 실린다** — 실패한 run이 쿼터를 얼마나
+썼는지가 사후 판독의 값이다.
+
+**`_min`이 뜻하는 것.** 페이지 하나 = 요청 **적어도** 하나다. 콜백이 안에서
+재시도하면(외부 `upstream_retry` attempts, provider client 내부 retries) 그것은 이
+층에서 보이지 않고, provider lib이 한 번의 호출 안에서 여러 요청을 보내는 자리도
+있다(krex `latest_weather`의 lookback 루프 — 그래서 그쪽은 상한을 따로 선언한다).
+즉 "적어도 이만큼은 썼다"이고, 한도와 비교할 때 그 방향으로만 안전하다.
+
+**세지 않은 것과 0번 요청한 것을 섞지 않는다.** 계수기 밖에서는 key 자체가 metadata에
+실리지 않는다 — 캐시/skip으로 끝난 run의 `0`과 구분된다.
 
 ### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
