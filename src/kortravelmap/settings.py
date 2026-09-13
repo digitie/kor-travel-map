@@ -546,13 +546,18 @@ class KorTravelMapSettings(BaseSettings):
     )
 
     # ── 옵션 동작 ─────────────────────────────────────────────────────────
-    log_api_calls: bool = Field(
-        default=False,
-        description=(
-            "True 시 provider 호출 횟수를 ``ops.api_call_log`` 테이블에 "
-            "기록 (``docs/external-apis.md §4``)."
-        ),
-    )
+    #
+    # ``log_api_calls``가 여기 있었다(2026-09-13 제거). 설명은 "provider 호출 횟수를
+    # ``ops.api_call_log``에 기록"이라고 약속했는데 **두 군데가 틀렸다**.
+    #
+    # 1. 이 필드를 읽는 코드가 저장소 어디에도 없었다. 실제로 표를 채우는 것은
+    #    API 패키지의 별도 설정 ``api_call_log_enabled``다.
+    # 2. 그 표는 provider 호출이 아니라 **Map API로 들어오는 요청**을 기록한다
+    #    (``app.py``의 미들웨어가 ``request.method``/``request.url.path``/
+    #    ``response.status_code``를 넣는다). upstream 요청 수와 무관하다.
+    #
+    # 쿼터 산수의 분자를 찾다가 이 자리를 먼저 보게 되는데, 여기에는 분자가 없다.
+    # 그것을 아는 유일한 방법이 소스를 읽는 것이어서는 안 된다.
 
     # Sprint 2~5에서 추가될 필드 (현 시점 미정의):
     #   - settings for Record Linkage 임계값 override (ADR-016).

@@ -122,3 +122,29 @@ def test_the_grid_cap_description_matches_the_code_that_enforces_it() -> None:
         "말하지 않는다. 운영자는 '나눠서 처리된다'로 읽고 대상을 늘렸다가 "
         "수집 정지를 만난다."
     )
+
+
+def test_the_api_call_log_is_not_advertised_as_an_upstream_counter() -> None:
+    """`ops.api_call_log`는 upstream 요청 수를 세지 않는다 — 그렇게 적지 마라.
+
+    쿼터 산수의 분자를 찾는 사람이 이 이름을 보고 멈춘다. 실제로 그 표를 채우는
+    미들웨어는 **Map API로 들어오는 요청**의 method/path/status를 넣는다. 그리고
+    그것을 켜는 설정은 `api_call_log_enabled`이지, 오래 쓰여 있던 `log_api_calls`가
+    아니었다 — 후자는 읽는 코드가 **없었다**(2026-09-13 제거).
+    """
+
+    settings = _SETTINGS.read_text(encoding="utf-8")
+    assert "log_api_calls: bool" not in settings, (
+        "아무도 읽지 않는 `log_api_calls`가 돌아왔다. 되살리려면 실제로 읽는 코드와 "
+        "함께 되살려라."
+    )
+
+    external = (_ROOT / "docs" / "external-apis.md").read_text(encoding="utf-8")
+    offenders = [
+        line
+        for line in external.splitlines()
+        if "api_call_log" in line and "provider" in line and "아니라" not in line
+    ]
+    assert offenders == [], (
+        f"문서가 `ops.api_call_log`를 provider 호출 계수기로 소개한다: {offenders}"
+    )
