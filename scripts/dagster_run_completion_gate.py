@@ -60,15 +60,57 @@ from sqlalchemy import create_engine, text
 
 #: 이미지가 appuser에게 넘긴 유일한 쓰기 자리.
 _LOCAL_STATE_ROOT = "/opt/dagster/state"
-#: 부작용 없는 탐침. DB projection 전용이라 provider 호출도 write도 없다.
+#: 탐침. **upstream 호출이 없다** — DB projection만 갱신한다.
+#:
+#: "부작용이 없다"고 적었던 것은 틀렸다(적대 리뷰 지적). 이 job은 projection 표를
+#: 원자적으로 다시 쓰고, 분 단위 schedule의 tick 하나를 먹는다. 여기서 중요한 것은
+#: **upstream 쿼터를 쓰지 않는 것**이고, 그 성질을 정적 검사가 결박한다 — provider
+#: 적재 job으로 바꾸면 게이트를 돌릴 때마다 일일 한도를 깎는다.
 _DEFAULT_PROBE_JOB = "current_weather_summary_refresh"
 #: 이 게이트가 만든 run임을 표시한다. 잔여물 판독과 사후 구분에 쓴다.
 _GATE_TAG = "kor_travel_map.gate_kind"
 _GATE_TAG_VALUE = "dagster_run_completion"
 #: 멈춤 판정의 여유. 회수는 poll 간격만큼 늦게 일어난다.
 _STUCK_GRACE_SECONDS = 600
-#: 본 것의 하한. 빈 세계에서 초록이 되는 것을 막는다.
-_MIN_HEARTBEAT_TYPES = 1
+#: 살아 있어야 하는 daemon. **개수가 아니라 이름을 센다.**
+#:
+#: 종전에는 하한이 상수 1이었다 — daemon 하나만 살아 있어도 "non-empty"로 초록이고,
+#: 하필 죽은 것이 회수 daemon이면 이 게이트가 겨냥한 바로 그 정지가 보이지 않는다
+#: (적대 리뷰 지적). 그래서 종류를 지목한다.
+#:
+#: - ``MONITORING`` — ``run_monitoring``이 여기 산다. 프로세스가 사라진 run을
+#:   실패시켜 큐 슬롯을 푸는 기제 자체다.
+#: - ``QUEUED_RUN_COORDINATOR`` — 큐에서 run을 꺼내 띄운다. 형제 저장소가 18시간
+#:   멈췄을 때 "Maximum is 10, won't launch more"를 적던 그 daemon이다.
+#: - ``SCHEDULER`` / ``SENSOR`` — 이 둘이 없으면 일이 도착하지 않는다.
+#:
+#: prod 실측 daemon 종류는 7개다(ASSET·BACKFILL·FRESHNESS_DAEMON 포함). 나머지
+#: 셋을 필수로 두지 않는 이유는 그것이 없어도 정기 적재가 돌기 때문이다 — 신선도
+#: 판정은 **관측된 전부**에 대해 따로 한다.
+_REQUIRED_DAEMON_TYPES: tuple[str, ...] = (
+    "MONITORING",
+    "QUEUED_RUN_COORDINATOR",
+    "SCHEDULER",
+    "SENSOR",
+)
+
+
+def _run_bound_seconds(tag_value: object, global_bound: float) -> float:
+    """이 run이 실제로 받는 회수 상한(초).
+
+    job tag ``dagster/max_runtime``이 있으면 그것이고, 없으면
+    ``run_monitoring.max_runtime_seconds``다. Dagster의 회수 판정이 그 순서다.
+    tag가 숫자가 아니면 전역값으로 되돌린다 — 여기서 죽으면 게이트가 판정 대신
+    파싱 오류로 끝난다.
+    """
+
+    if tag_value is None:
+        return float(global_bound)
+    try:
+        parsed = float(str(tag_value))
+    except ValueError:
+        return float(global_bound)
+    return parsed if parsed > 0 else float(global_bound)
 
 
 class GateUnobservable(RuntimeError):
@@ -332,45 +374,74 @@ def main() -> int:
             )
             gate.require("probe/reaches-success", status, "SUCCESS")
 
-            total_runs = connection.execute(text("SELECT count(*) FROM runs")).scalar()
-            population["runs_observed"] = int(total_runs or 0)
+            # **탐침 run을 빼고 센다.** 빼지 않으면 이 하한은 항진명제다 —
+            # 게이트가 방금 만든 run이 항상 한 건 있기 때문이다(적대 리뷰 지적).
+            other_runs = connection.execute(
+                text("SELECT count(*) FROM runs WHERE run_id != :run_id"),
+                {"run_id": run_id},
+            ).scalar()
+            population["runs_observed_excluding_probe"] = int(other_runs or 0)
             gate.require(
                 "floor/runs-observed",
-                "non-empty" if int(total_runs or 0) >= 1 else "empty",
+                "non-empty" if int(other_runs or 0) >= 1 else "empty",
                 "non-empty",
-                detail=total_runs,
+                detail=other_runs,
             )
 
-            stuck = connection.execute(
+            # **run마다 자기 상한으로 잰다.** 전역 상한 하나로 재면 job tag
+            # ``dagster/max_runtime``(최신성 job 7,200초)을 세 배 넘긴 run이
+            # 네 시간 더 초록이다 — `docker/dagster.yaml`이 그 두 층을 명문화하는데
+            # 게이트는 위층만 보고 있었다(적대 리뷰 지적).
+            in_progress = connection.execute(
                 text(
-                    "SELECT count(*) FROM runs "
-                    "WHERE status IN ('STARTING', 'STARTED', 'CANCELING') "
-                    "AND create_timestamp < now() - make_interval(secs => :bound)"
-                ),
-                {"bound": run_timeout + _STUCK_GRACE_SECONDS},
-            ).scalar()
-            gate.require("stuck/in-progress-past-bound", int(stuck or 0), 0)
+                    "SELECT r.run_id, "
+                    "EXTRACT(EPOCH FROM (now() - r.create_timestamp)), "
+                    "(SELECT t.value FROM run_tags t "
+                    " WHERE t.run_id = r.run_id AND t.key = 'dagster/max_runtime') "
+                    "FROM runs r "
+                    "WHERE r.status IN ('STARTING', 'STARTED', 'CANCELING')"
+                )
+            ).all()
+            stuck_runs = [
+                str(row[0])
+                for row in in_progress
+                if float(row[1] or 0.0)
+                > _run_bound_seconds(row[2], run_timeout) + _STUCK_GRACE_SECONDS
+            ]
+            population["in_progress_runs"] = len(in_progress)
+            gate.require(
+                "stuck/in-progress-past-bound",
+                len(stuck_runs),
+                0,
+                detail=stuck_runs[:5],
+            )
 
             beats = connection.execute(
                 text(
-                    "SELECT count(*), "
-                    "count(*) FILTER (WHERE timestamp > now() - make_interval("
-                    "secs => :tolerance)) "
-                    "FROM daemon_heartbeats"
+                    "SELECT daemon_type, "
+                    "max(timestamp) > now() - make_interval(secs => :tolerance) "
+                    "FROM daemon_heartbeats GROUP BY daemon_type"
                 ),
                 {"tolerance": _stale_tolerance()},
-            ).one()
-            population["heartbeat_types"] = int(beats[0])
+            ).all()
+            fresh_types = {str(row[0]) for row in beats if bool(row[1])}
+            observed_types = {str(row[0]) for row in beats}
+            population["daemon_types_observed"] = sorted(observed_types)
+            population["daemon_types_stale"] = sorted(observed_types - fresh_types)
+
+            # **이름을 센다.** 개수 하한은 회수 daemon만 죽은 세계에서 초록이었다.
+            missing = sorted(set(_REQUIRED_DAEMON_TYPES) - fresh_types)
             gate.require(
                 "floor/heartbeat-types",
-                "non-empty" if int(beats[0]) >= _MIN_HEARTBEAT_TYPES else "empty",
-                "non-empty",
-                detail=beats[0],
+                "all-required-fresh" if not missing else f"missing:{','.join(missing)}",
+                "all-required-fresh",
+                detail=sorted(_REQUIRED_DAEMON_TYPES),
             )
             gate.require(
                 "daemon/heartbeats-fresh",
-                f"{int(beats[1])}/{int(beats[0])}",
-                f"{int(beats[0])}/{int(beats[0])}",
+                f"{len(fresh_types)}/{len(observed_types)}",
+                f"{len(observed_types)}/{len(observed_types)}",
+                detail=sorted(observed_types - fresh_types),
             )
     except GateUnobservable as exc:
         print(f"!! 관측 불가: {exc}", file=sys.stderr)

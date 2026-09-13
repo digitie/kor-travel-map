@@ -49,29 +49,69 @@ _REQUIRED_CHECKS = {
 }
 
 
-def _string_literals() -> set[str]:
+def _judged_check_names() -> set[str]:
+    """``gate.require(...)``의 **첫 인자**로 쓰인 축 이름만 모은다.
+
+    종전에는 모듈의 모든 문자열 리터럴을 모았다. 그러면 docstring도 세어서
+    "그 축을 잰다"가 아니라 "그 글자가 파일 어딘가에 있다"를 재게 된다 — 판정을
+    지우고 문서에 이름만 남겨도 초록이었다(적대 리뷰 지적). 판정의 자리를 본다.
+    """
+
     tree = ast.parse(_GATE.read_text(encoding="utf-8"))
-    return {
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
-    }
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+            continue
+        if not _calls_require(node):
+            continue
+        for child in ast.walk(node):
+            # (a) `require("이름", ...)`의 첫 인자
+            if isinstance(child, ast.Call) and _is_require(child) and child.args:
+                first = child.args[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    names.add(first.value)
+            # (b) 같은 함수 안의 튜플/리스트 리터럴 — 축을 루프로 도는 자리가 있다
+            #     (`_check_live_config`의 두 축). docstring은 `Expr(Constant)`라
+            #     여기에 걸리지 않는다.
+            if isinstance(child, ast.Tuple | ast.List):
+                for element in ast.walk(child):
+                    if isinstance(element, ast.Constant) and isinstance(
+                        element.value, str
+                    ):
+                        names.add(element.value)
+    return names
+
+
+def _is_require(call: ast.Call) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr == "require"
+    return isinstance(func, ast.Name) and func.id == "require"
+
+
+def _calls_require(node: ast.AST) -> bool:
+    return any(
+        isinstance(child, ast.Call) and _is_require(child) for child in ast.walk(node)
+    )
 
 
 def test_the_gate_source_parses() -> None:
     """유도의 전제. 파싱되지 않으면 아래 단언이 무엇도 재지 못한다."""
     assert _GATE.is_file(), f"{_GATE}가 없다"
-    literals = _string_literals()
-    assert literals, "게이트에서 문자열 리터럴을 하나도 찾지 못했다 — 파서가 낡았다"
+    judged = _judged_check_names()
+    assert len(judged) >= len(_REQUIRED_CHECKS), (
+        f"`require(...)` 호출을 {len(judged)}개만 찾았다 — 유도가 낡았다. 찾은 것="
+        f"{sorted(judged)}"
+    )
 
 
 @pytest.mark.parametrize("check_name", sorted(_REQUIRED_CHECKS))
 def test_the_gate_still_measures(check_name: str) -> None:
-    """각 축이 게이트에 남아 있다."""
-    assert check_name in _string_literals(), (
-        f"게이트가 `{check_name}`을 더 이상 재지 않는다. 이 축은 2026-09-11 사고나 "
-        "형제 저장소의 18시간 정지 중 한 겹이다 — 지우려면 그 겹이 왜 사라졌는지 "
-        "acceptance에 먼저 적어라."
+    """각 축이 **판정되고** 있다 — 이름이 어딘가 적혀 있는 것으로는 부족하다."""
+    assert check_name in _judged_check_names(), (
+        f"게이트가 `{check_name}`을 더 이상 **판정하지** 않는다(`require(...)`의 "
+        "첫 인자가 아니다). 이 축은 2026-09-11 사고나 형제 저장소의 18시간 정지 중 "
+        "한 겹이다 — 지우려면 그 겹이 왜 사라졌는지 acceptance에 먼저 적어라."
     )
 
 
@@ -91,11 +131,12 @@ def test_the_gate_reads_the_live_config_not_the_repo_copy() -> None:
     )
 
 
-def test_the_probe_job_has_no_upstream_side_effects() -> None:
-    """탐침은 부작용이 없어야 한다 — 게이트가 관측을 바꾸면 안 된다.
+def test_the_probe_job_spends_no_upstream_quota() -> None:
+    """탐침이 **upstream 쿼터를 쓰지 않아야** 한다.
 
-    기본 탐침은 DB projection 전용 job이다. provider 적재 job을 탐침으로 쓰면
-    게이트를 돌릴 때마다 upstream 쿼터를 쓰고 Feature를 만든다.
+    "부작용이 없다"가 아니다(적대 리뷰 정정) — 이 job은 projection 표를 다시
+    쓰고 분 단위 schedule의 tick 하나를 먹는다. 지켜야 하는 성질은 좁다:
+    provider 적재 job을 탐침으로 쓰면 게이트를 돌릴 때마다 일일 한도를 깎는다.
     """
     source = _GATE.read_text(encoding="utf-8")
     assert '_DEFAULT_PROBE_JOB = "current_weather_summary_refresh"' in source, (
