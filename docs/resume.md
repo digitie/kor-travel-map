@@ -1,8 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-13 — 쿼터 분자가 붙었다 (`feat/upstream-request-numerator`)
+## 2026-09-14 — 쿼터 분자가 prod에 있다 (#1229, `2db70b478`)
 
-**다음 한 작업: 이 브랜치의 PR을 열고 CI green을 확인한 뒤 머지.**
+**다음 한 작업: `T-VN-QUOTA-ARITHMETIC` 조문 6 — KMA 격자 재활성화 판단.**
+분모·분자·증폭기 선언이 모두 끝났고 G=59도 실측됐다. 켜는 데 필요한 숫자는 다 있다.
+
+t42a 재핀 사이클 전 사이클 GREEN(회전 #50 · rebuild committed · repin VERIFIER PASS ·
+M01 ACL 55/55 · D1 live Playwright 11 passed · D2 phase=passed).
+
+**주의: prod feature load schedule은 전부 `default_status=STOPPED`다.** 그래서 배포
+뒤 feature asset materialization이 0건이고 `upstream_requests_min`이 실린 자리가
+아직 없다. 분자가 0이 아닌 값을 내려면 누군가 스케줄을 켜야 한다 — 그것이 조문 6의
+판단과 같은 자리다.
 
 분모는 `0b60a8508`(#1227)로 들어갔고, 이 브랜치가 분자를 붙인다. upstream 진입점
 40개 중 35개가 요청을 전부 세고 그 수가 `upstream_requests_min`으로 asset output
