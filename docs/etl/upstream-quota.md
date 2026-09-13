@@ -175,6 +175,23 @@ provider fetcher 19곳의 시그니처를 하나도 바꾸지 않는다. 합치�
 종전 구조 검사는 "asset이 계수 범위 안에서 도는가"를 물었는데 wrapper가 항상 열어
 **항진명제였다.** 요청을 보내는 것은 asset이 아니라 fetcher다.
 
+#### "센다"가 "모든 모드에서 센다"는 아니다 — OpiNet 부분 계측
+
+유도는 *이 fetcher가 세는 함수를 부르는가*만 본다. 그래서 **실행 모드에 따라 계수
+경로를 타지 않는** fetcher도 초록으로 나온다. 실제로 둘이 그렇다:
+
+| fetcher | 세는 모드 | 못 세는 모드 |
+|---|---|---|
+| `fetch_opinet_stations` | `low_top_area` (`_OpinetCallBudget.spend()`) | `bbox` / `poi_cache_target` |
+| `fetch_opinet_station_price_details` | 〃 | 〃 |
+
+`iter_stations_in_bbox`는 bbox를 격자로 덮으며 셀마다 `aroundAll`을 부르는데, 셀 수
+계산이 provider private이다. bbox 하나를 1로 세면 1과 20,000을 같게 만든다 — 그래서
+**세지 않는다.** 계약상 기록이 없으면 key가 실리지 않으므로 0으로 위장하지는 않는다.
+
+그 목록은 검사기의 `_PARTIALLY_COUNTED`에 이유와 함께 박혀 있고, `_UNCOUNTABLE`과
+겹치지 못한다. 총량을 실제로 묶는 것은 §3의 하루 한 번 coalescing이다.
+
 ### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
 | 자리 | 선언 전 | 지금 |

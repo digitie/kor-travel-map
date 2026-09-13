@@ -36,12 +36,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
-from .upstream_requests import note_upstream_request
 from .provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
     iter_paginated_items,
 )
+from .upstream_requests import note_upstream_request
 from .upstream_retry import retry_upstream
 
 if TYPE_CHECKING:
@@ -1746,6 +1746,18 @@ def _enumerate_opinet_stations(
     """여러 bbox를 ``iter_stations_in_bbox``로 enumerate하며 ``uni_id`` dedup.
 
     bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
+
+    **이 경로는 요청을 세지 못한다.** ``iter_stations_in_bbox``가 bbox를 격자로
+    덮으며 셀마다 ``aroundAll``을 부르는데, 그 셀 수 계산(``_bbox_grid_centers``)은
+    provider private이고 Map이 복제하면 drift가 난다 — 이 저장소가 이미 같은 이유로
+    복제를 거부했다. bbox 하나를 1로 세는 것은 1과 20,000을 같게 만들어 0만큼이나
+    오도한다.
+
+    그래서 **아무것도 세지 않는다**. 계수기 계약상 기록이 없으면
+    ``upstream_requests_min``이 metadata에 실리지 않으므로 "0번 요청했다"로 위장하지는
+    않는다. 같은 fetcher의 ``low_top_area`` 모드는 ``_OpinetCallBudget.spend()``로
+    정확히 센다 — 즉 **이 fetcher의 계측은 scope mode에 따라 다르다**(부분 계측).
+    총량을 실제로 묶는 것은 하루 한 번 coalescing이다(docs/etl/upstream-quota.md).
     """
     invalid_parameter = _opinet_invalid_parameter_error_type()
     seen: set[str] = set()

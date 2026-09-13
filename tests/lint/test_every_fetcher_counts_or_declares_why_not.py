@@ -51,6 +51,28 @@ _UNCOUNTABLE: dict[str, str] = {
 }
 
 
+#: **부분 계측** — 어떤 실행 모드에서는 세고 어떤 모드에서는 못 세는 fetcher.
+#:
+#: 전이 폐쇄는 "이 fetcher가 세는 함수를 부르는가"만 본다. 그래서 모드에 따라
+#: 계수 경로를 타지 않는 fetcher도 "센다"로 판정된다 — 거짓 양성이다. 그 사실을
+#: 목록으로 남겨 다음 사람이 유도 결과를 과신하지 않게 한다.
+#:
+#: 여기 있는 fetcher는 계측된 모드에서는 값을 내고, 아닌 모드에서는 key 없이
+#: 나간다(계약상 0으로 위장하지 않는다).
+_PARTIALLY_COUNTED: dict[str, str] = {
+    "fetch_opinet_stations": (
+        "`low_top_area` 모드는 `_OpinetCallBudget.spend()`로 정확히 세지만, "
+        "`bbox`/`poi_cache_target` 모드의 `iter_stations_in_bbox`는 provider가 "
+        "bbox를 격자로 덮으며 셀마다 호출한다 — 셀 수 계산이 provider private이라 "
+        "이 층에서는 셀 수 없다."
+    ),
+    "fetch_opinet_station_price_details": (
+        "같은 enumerate 경로를 공유한다. 주유소 상세는 uni_id마다 1건이지만 "
+        "enumerate 자체가 세지 못한다."
+    ),
+}
+
+
 def _module_trees() -> dict[str, ast.Module]:
     return {
         path.name: ast.parse(path.read_text(encoding="utf-8"))
@@ -112,6 +134,22 @@ def test_the_derivation_actually_found_the_fetchers() -> None:
     assert _NOTE in str(_functions().values()) or _counting_functions(), (
         f"`{_NOTE}`를 부르는 함수를 하나도 찾지 못했다 — 계측이 사라졌다."
     )
+
+
+def test_the_partial_list_names_only_real_fetchers() -> None:
+    """부분 계측 목록도 낡지 않게 한다."""
+
+    stale = sorted(set(_PARTIALLY_COUNTED) - set(_fetchers()))
+    assert stale == [], f"부분 계측 목록에 없는 fetcher가 적혀 있다: {stale}"
+    thin = sorted(name for name, why in _PARTIALLY_COUNTED.items() if len(why) < 30)
+    assert thin == [], f"이유가 너무 짧다: {thin}"
+
+
+def test_partial_and_uncountable_do_not_overlap() -> None:
+    """한 fetcher가 '못 센다'와 '부분적으로 센다'를 동시에 주장할 수 없다."""
+
+    both = sorted(set(_PARTIALLY_COUNTED) & set(_UNCOUNTABLE))
+    assert both == [], f"두 목록에 함께 있다: {both}"
 
 
 def test_the_uncountable_list_names_only_real_fetchers() -> None:
