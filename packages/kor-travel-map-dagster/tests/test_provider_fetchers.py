@@ -477,7 +477,11 @@ class _FakeRestareaService:
         성질을 흉내내지 않으면 "빈 결과가 성공이 된다"는 결함이 보이지 않는다.
         """
         self.lookback_calls.append(lookback_hours)
-        return _FakePage(items=tuple(self.weather), total_count=len(self.weather))
+        return _FakePage(
+            items=tuple(self.weather),
+            total_count=len(self.weather),
+            page_no=1,
+        )
 
     def list_all(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
