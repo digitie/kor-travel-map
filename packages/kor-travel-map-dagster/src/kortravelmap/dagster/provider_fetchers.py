@@ -924,6 +924,13 @@ async def _iter_krforest_records(
         label=label,
         absolute_max_pages=_KRFOREST_MAX_PAGES,
         end_of_pages=(krforest.ForestNoDataError,),
+        # **첫 페이지 NODATA는 종료가 아니라 실패다.** 이 네 fetcher는 전부
+        # authoritative snapshot 적재로 흘러가고, 그중 산악기상·산불위험은
+        # `retire_absent_from_snapshot=True`로 적재된다 — 빈 snapshot 하나가 그
+        # source의 feature를 **전부 은퇴**시킨다. 종전 라이브러리 iterator는
+        # `ForestNoDataError`를 잡지 않아 asset이 시끄럽게 죽었고, 이 헬퍼로
+        # 옮기며 `end_of_pages`를 단 것이 그 신호를 삼켰다(2026-09-13 적대 리뷰).
+        first_page_end_of_pages_is_failure=True,
         warn=_LOGGER.warning,
     ):
         yield record

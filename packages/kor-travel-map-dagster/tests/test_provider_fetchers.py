@@ -3308,3 +3308,39 @@ def test_krex_rest_area_weather_declares_its_lookback(
     assert fake.instances[0].restarea.lookback_calls == [
         provider_fetchers._KREX_WEATHER_LOOKBACK_HOURS
     ], "lookback을 명시하지 않으면 라이브러리 기본값 48(=49 요청)로 돌아간다"
+
+
+def test_krforest_first_page_nodata_is_a_failure_not_an_empty_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """첫 페이지 NODATA를 **삼키지 않는다**.
+
+    이 네 fetcher는 authoritative snapshot 적재로 흘러가고, 산악기상·산불위험은
+    `retire_absent_from_snapshot=True`로 적재된다 — 빈 snapshot 하나가 그 source의
+    feature를 **전부 은퇴**시킨다. 종전 라이브러리 iterator는 `ForestNoDataError`를
+    잡지 않아 asset이 시끄럽게 죽었는데, 저장소 헬퍼로 옮기며 `end_of_pages`를 단
+    것이 그 신호를 조용한 0행 성공으로 바꿨다(2026-09-13 적대 리뷰가 잡았다).
+    """
+
+    fake = _install_fake_krforest(monkeypatch, forests=[], arboretums=[])
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+
+    with pytest.raises(_FakeForestNoDataError):
+        asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
+    assert fake.instances[0].closed is True
+
+
+def test_krforest_nodata_after_the_first_page_is_a_normal_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """과분류 방지 — 마지막 페이지 다음의 NODATA는 정상 종료다."""
+
+    forests = [object() for _ in range(3)]
+    _install_fake_krforest(
+        monkeypatch, forests=forests, arboretums=[], page_size_override=3
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+
+    records = asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
+
+    assert len(records) == 3

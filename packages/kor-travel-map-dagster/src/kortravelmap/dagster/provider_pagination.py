@@ -171,6 +171,7 @@ def iter_paginated_items(
     max_pages: int = DEFAULT_MAX_PAGES,
     absolute_max_pages: int = DEFAULT_ABSOLUTE_MAX_PAGES,
     end_of_pages: tuple[type[BaseException], ...] = (),
+    first_page_end_of_pages_is_failure: bool = False,
     warn: Callable[[str], None] | None = None,
 ) -> Iterator[Any]:
     """``fetch_page(page_no)``를 소진하며 item을 lazily yield한다.
@@ -195,6 +196,18 @@ def iter_paginated_items(
         크게 말하거나 provider가 그것을 잘못 파싱하면 위 규칙만으로는 요청 수가
         upstream의 숫자를 따라간다 — 쿼터가 좁은 경계에서는 그 한 번이 하루치를
         태운다. 기본값은 :data:`DEFAULT_ABSOLUTE_MAX_PAGES`.
+    first_page_end_of_pages_is_failure:
+        ``end_of_pages``가 **첫 페이지에서** 올라왔을 때 정상 종료로 삼키지 않고
+        다시 던진다. 기본값 ``False``는 "데이터가 하나도 없는 것이 정상 상태"인
+        경계용이다(예: 현재 진행 중인 교통 공지 0건).
+
+        **authoritative snapshot을 적재하는 경계는 반드시 ``True``로 준다.** 거기서
+        0행은 "없음"이 아니라 "못 받았음"일 수 있고, ``retire_absent_from_snapshot``이
+        켜진 적재는 빈 snapshot을 받으면 그 source의 feature를 **전부 은퇴**시킨다
+        (``feature_repo.retire_features_absent_from_snapshot``). 2026-09-13 적대
+        리뷰가 이 구멍을 잡았다 — krforest 4개 fetcher를 이 헬퍼로 옮기며
+        ``end_of_pages``를 달았는데, 그것이 종전의 시끄러운 실패를 조용한 0행
+        성공으로 바꿨다.
     end_of_pages:
         "더 이상 페이지가 없다"를 **예외로 알리는** provider의 예외형들. 빈 페이지
         대신 예외를 던지는 provider가 있다 — krex는 resultCode ``03``/``NO_DATA``에
@@ -230,6 +243,8 @@ def iter_paginated_items(
         try:
             page = fetch_page(state.page_no)
         except end_of_pages:
+            if first_page_end_of_pages_is_failure and state.page_no == 1:
+                raise
             # provider가 "더 없음"을 예외로 알렸다. 정상 종료다.
             state.note_end_of_pages(warn)
             return
@@ -246,6 +261,7 @@ async def aiter_paginated_items(
     max_pages: int = DEFAULT_MAX_PAGES,
     absolute_max_pages: int = DEFAULT_ABSOLUTE_MAX_PAGES,
     end_of_pages: tuple[type[BaseException], ...] = (),
+    first_page_end_of_pages_is_failure: bool = False,
     warn: Callable[[str], None] | None = None,
 ) -> AsyncIterator[Any]:
     """:func:`iter_paginated_items`의 async 짝. **종료 규칙은 같은 한 벌이다.**
@@ -268,6 +284,8 @@ async def aiter_paginated_items(
         try:
             page = await fetch_page(state.page_no)
         except end_of_pages:
+            if first_page_end_of_pages_is_failure and state.page_no == 1:
+                raise
             state.note_end_of_pages(warn)
             return
         for item in state.absorb(page, warn):
@@ -320,6 +338,16 @@ class _PageState:
             )
 
     def note_end_of_pages(self, warn: Callable[[str], None] | None) -> None:
+        if self.page_no == 1:
+            # 첫 페이지에서 "더 없음"이면 이 순회는 **한 행도 받지 못했다**.
+            # `declared`가 아직 None이라 아래 조건에 걸리지 않으므로 여기서 따로
+            # 말한다 — 조용한 0행이 성공으로 보이는 것이 이 파일의 주제다.
+            _emit(
+                warn,
+                f"{self.label}: 첫 페이지에서 end-of-pages — 한 행도 받지 못했다. "
+                "빈 결과가 정상인 경계인지 확인해라(authoritative snapshot이면 "
+                "`first_page_end_of_pages_is_failure=True`가 필요하다).",
+            )
         if self.declared is not None and self.seen < self.declared:
             _emit(
                 warn,
