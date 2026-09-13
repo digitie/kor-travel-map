@@ -61,6 +61,7 @@ from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
+from .upstream_requests import note_upstream_request
 
 __all__ = [
     "MOIS_SOURCE_SYNC_JOBS",
@@ -203,6 +204,10 @@ def sync_mois_source_db(
         client = mois.LocalDataFileClient()
         try:
             for slug in slugs:
+                # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
+                # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
+                # 하한으로 1을 센다 - 이름이 `_min`인 이유.
+                note_upstream_request()
                 session = Session(engine)
                 try:
                     result = mois.sync_localdata_source_db(

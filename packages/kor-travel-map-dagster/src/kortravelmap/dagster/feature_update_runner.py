@@ -12,7 +12,7 @@ import copy
 import importlib
 import inspect
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
@@ -116,6 +116,11 @@ from .provider_fetchers import (
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
+)
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    counting_upstream_requests,
+    observed_upstream_requests,
 )
 
 __all__ = [
@@ -303,12 +308,33 @@ class FeatureUpdateAssetRunner:
                     log=self._log,
                     asset_key=spec.asset_key,
                 )
-                result = await spec.run(context)
-                return _as_refresh_result(
-                    result,
-                    scope=scope,
-                    output_metadata=context.output_metadata,
-                )
+                # 이 경계가 asset wrapper를 **우회한다** - 여기서는 `spec.run`이
+                # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
+                # 아니다. 그래서 계수기도 여기서 따로 열어야 한다. 열지 않으면
+                # `note_upstream_request()`가 전부 no-op이 되어, 계측된 fetcher가
+                # 큐 경로에서만 조용히 `upstream_requests_min` 없이 나간다
+                # (2026-09-13 적대 리뷰 2차 blocker).
+                with counting_upstream_requests():
+                    try:
+                        result = await spec.run(context)
+                    except Exception:
+                        # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은
+                        # metadata를 싣지 못하므로 로그가 유일한 기록이다 -
+                        # asset 경로의 `_log_spend_on_failure`와 같은 이유다.
+                        observed = observed_upstream_requests()
+                        if observed is not None:
+                            self._log.warning(
+                                "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
+                                UPSTREAM_REQUESTS_METADATA_KEY,
+                                observed,
+                            )
+                        raise
+                    return _as_refresh_result(
+                        result,
+                        scope=scope,
+                        output_metadata=context.output_metadata,
+                        upstream_requests=observed_upstream_requests(),
+                    )
             except ProviderDatasetRefreshFailure:
                 raise
             except Exception as exc:
@@ -480,12 +506,21 @@ def _as_refresh_result(
     *,
     scope: ProviderDatasetRefreshScope,
     output_metadata: list[dict[str, object]] | None = None,
+    upstream_requests: int | None = None,
 ) -> ProviderDatasetRefreshResult:
     if isinstance(result, ProviderDatasetRefreshResult):
-        return result
+        if upstream_requests is None:
+            return result
+        merged = dict(result.metadata or {})
+        merged.setdefault(UPSTREAM_REQUESTS_METADATA_KEY, upstream_requests)
+        return replace(result, metadata=merged)
     metadata = _metadata_for_result(result)
     for item in output_metadata or ():
         metadata.update(item)
+    # asset 경로의 choke point(`etl._add_output_metadata`)가 이미 실었으면
+    # 그것이 정본이다. 싣지 않은 run 함수를 위해 여기서 한 번 더 받친다.
+    if upstream_requests is not None:
+        metadata.setdefault(UPSTREAM_REQUESTS_METADATA_KEY, upstream_requests)
     loaded_feature_ids = _loaded_feature_ids(result, metadata)
     return ProviderDatasetRefreshResult(
         provider_dataset_id=scope.provider_dataset_id,

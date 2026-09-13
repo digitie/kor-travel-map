@@ -271,18 +271,43 @@ def fetch_datagokr_cultural_festivals(
         client.close()
 
 
+#: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
+#: **Map이 소유한다** — 요청 수를 셀 수 있어야 쿼터 비율을 말할 수 있다.
+_KRHERITAGE_EVENT_MONTHS_BACK: Final[int] = 1
+_KRHERITAGE_EVENT_MONTHS_AHEAD: Final[int] = 12
+
+
+def _krheritage_event_months(anchor: date) -> Iterator[tuple[int, int]]:
+    """``anchor`` 기준 rolling window의 ``(year, month)``를 순서대로 낸다.
+
+    지난달 1개 + 이번 달 + 다음 12개월 = 14개. 그 수가 곧 이 fetcher의 요청 수다.
+    """
+
+    start = (anchor.year * 12) + (anchor.month - 1) - _KRHERITAGE_EVENT_MONTHS_BACK
+    total = _KRHERITAGE_EVENT_MONTHS_BACK + _KRHERITAGE_EVENT_MONTHS_AHEAD + 1
+    for offset in range(total):
+        zero_based = start + offset
+        yield zero_based // 12, (zero_based % 12) + 1
+
+
 def fetch_krheritage_events(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
     """국가유산 행사(event) record를 krheritage public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
-    ``HeritageClient(api_key=...)``를 열고 ``client.event.iter_months()``의
-    record(``HeritageEvent``, ``KrHeritageEvent`` Protocol 충족)를 lazily yield
-    한다. ``iter_months``는 provider 내장 rolling window(기본 ``months_back=1,
-    months_ahead=12``)를 그대로 정책으로 쓴다 — custom 인자를 넘기지 않는다.
+    ``HeritageClient(api_key=...)``를 열고 rolling window의 달마다
+    ``client.event.by_month(...)``를 불러 record(``HeritageEvent``,
+    ``KrHeritageEvent`` Protocol 충족)를 lazily yield 한다.
     generator가 살아 있는 동안 client는 열려 있고, 소비 종료(또는 close)시
     ``finally``에서 ``client.close()``로 닫는다.
+
+    **``iter_months()`` 대신 Map이 직접 돈다.** 둘은 같은 창을 돌고 호출 수도
+    같지만(:data:`_KRHERITAGE_EVENT_MONTHS_BACK`/``_AHEAD``가 provider 기본값과
+    같다), ``iter_months``는 provider **안에서** 달을 돌기 때문에 이 층이 요청
+    수를 셀 수 없다. 비어 있는 달도 요청 1건을 쓰므로 record 수로는 역산되지
+    않는다 — "한도의 몇 %를 쓰는가"에 대답하려면 창을 Map이 소유해야 한다
+    (2026-09-13 적대 리뷰 2차: 종전 면제 사유 "알 수 없다"가 사실과 달랐다).
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -300,7 +325,10 @@ def fetch_krheritage_events(
 
     client = krheritage.HeritageClient(api_key=api_key)
     try:
-        yield from client.event.iter_months()
+        for year, month in _krheritage_event_months(date.today()):
+            # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인).
+            note_upstream_request()
+            yield from client.event.by_month(year=year, month=month)
     finally:
         client.close()
 
@@ -391,6 +419,11 @@ def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
                 summary.name_ko,
             )
             continue
+        # detail은 record당 정확히 1 HTTP다(이 파일 위쪽 docstring과
+        # `krheritage_max_items_per_run`이 같은 사실에 기대고 있다). 목록
+        # 페이지만 세면 실린 수가 실제의 ~1%가 된다 - run 하나가 목록 ~45건,
+        # detail ~4,000건이다.
+        note_upstream_request()
         yield client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
 
 
@@ -1004,6 +1037,8 @@ async def fetch_krforest_arboretums(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=api_key)
     try:
+        # 호출 1회가 provider 안에서 popup 페이지 + 본문 파일 >=2건을 받는다.
+        # 그 배수는 provider 내부라 여기서는 1로 센다 - 그래서 이름이 `_min`이다.
         note_upstream_request()
         records = await client.travel.recreation_forest_arboretums()
         for record in records:
@@ -1229,7 +1264,13 @@ def fetch_datagokr_file_data_records(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from client.file_data.iter_all(dataset_key)
+        # `iter_all`은 provider 안에서 페이지를 돌아 이 층이 셀 수 없다.
+        # `iter_pages`는 public이고 `iter_all`이 그것을 그대로 감싼 것뿐이라
+        # (provider 소스 확인) 바꿔도 같은 record를 같은 순서로 낸다 - 다만
+        # 페이지마다 요청 1건을 셀 수 있다.
+        for page in client.file_data.iter_pages(dataset_key):
+            note_upstream_request()
+            yield from page.items
     finally:
         client.close()
 
@@ -2328,6 +2369,9 @@ def fetch_opinet_station_price_details(
         for station in _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         ):
+            # enumerate 자체는 세지 못하지만(`_enumerate_opinet_stations` 참고)
+            # 상세 조회는 uni_id마다 정확히 1건이다 - 셀 수 있는 쪽은 센다.
+            note_upstream_request()
             yield client.get_station_detail(station.uni_id)
     finally:
         close = getattr(client, "close", None)

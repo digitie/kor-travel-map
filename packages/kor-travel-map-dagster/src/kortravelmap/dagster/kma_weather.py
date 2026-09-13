@@ -1241,7 +1241,11 @@ async def run_feature_weather_kma_mid_forecast(
             # region 하나당 오퍼레이션 호출 **둘**(육상 + 기온). 바로 위
             # `expected_calls=len(specs) * 2`가 같은 산수를 재시도 예산에 쓰고
             # 있었는데 쿼터 분자에는 연결돼 있지 않았다(2026-09-13 적대 리뷰).
-            note_upstream_request(2)
+            #
+            # 둘을 한 번에 `note_upstream_request(2)`로 세지 않는다 - 육상이 종단
+            # 실패하면 기온 호출은 나가지 않는데 그러면 1건을 부풀린다. 분자는
+            # 하한이어야 하고, 부풀린 하한은 하한이 아니다.
+            note_upstream_request()
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
             land_rows: Sequence[Any] = mid_land_rows_from_items(
@@ -1256,6 +1260,7 @@ async def run_feature_weather_kma_mid_forecast(
                     on_retry=context.log.warning,
                 )
             )
+            note_upstream_request()
             temp_rows: Sequence[Any] = mid_temp_rows_from_items(
                 await retry_upstream_async(
                     partial(

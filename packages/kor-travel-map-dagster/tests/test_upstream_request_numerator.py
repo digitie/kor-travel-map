@@ -12,11 +12,21 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Iterator
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+from kortravelmap.settings import KorTravelMapSettings
+from pydantic import SecretStr
 
+from kortravelmap.dagster.provider_fetchers import (
+    _OpinetCallBudget,
+    fetch_datagokr_file_data_records,
+    fetch_krheritage_events,
+    fetch_krheritage_items,
+)
 from kortravelmap.dagster.provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
@@ -210,3 +220,176 @@ def test_the_counter_survives_thread_and_task_boundaries() -> None:
 
     assert asyncio.run(_through_thread()) == 5
     assert asyncio.run(_through_task()) == 5
+
+
+# --------------------------------------------------------------------------- #
+# 손으로 박은 계수 자리를 **효과로** 결박한다.
+#
+# `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`는 "자리가 있는가"만
+# 본다 — 루프 밖 1회든 도달 불가 분기든 초록이다. 실제로 2026-09-13 2차 적대 리뷰가
+# 그 구멍으로 실제 결함 하나를 통과시켰다: `fetch_krheritage_items`가 목록 페이지만
+# 세고 record당 1건인 detail을 세지 않았는데, 목록 계수만으로 fetcher가 "센다"로
+# 판정됐다. 실린 수는 실제의 약 1%였다.
+#
+# 그래서 여기서는 **가짜 client로 N번 부르게 하고 계수가 N인지** 잰다. 이것이
+# 그 구멍을 막는 유일한 층이다.
+# --------------------------------------------------------------------------- #
+
+
+def _install(monkeypatch: pytest.MonkeyPatch, name: str, **attrs: Any) -> None:
+    module = ModuleType(name)
+    module.__dict__.update(attrs)
+    monkeypatch.setitem(sys.modules, name, module)
+
+
+class _Key:
+    def __init__(self, index: int) -> None:
+        self.ccba_kdcd = "11"
+        self.ccba_asno = f"{index:04d}"
+        self.ccba_ctcd = "11"
+
+
+class _Summary:
+    def __init__(self, index: int) -> None:
+        self.key = _Key(index)
+        self.name_ko = f"item-{index}"
+
+
+class _Page:
+    def __init__(self, items: list[Any], total: int) -> None:
+        self.items = items
+        self.total = total
+
+
+def test_krheritage_items_counts_every_detail_call_not_just_the_list_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """detail은 record당 1 HTTP다 — 목록 페이지만 세면 실린 수가 실제의 1%다.
+
+    2차 적대 리뷰의 blocker를 그대로 재현한 회귀 테스트다. 정적 검사는 이 결함을
+    통과시켰다(목록 계수만으로 fetcher가 '센다'로 판정됐다).
+    """
+
+    total_items = 250  # 페이지 3장(100/100/50) + detail 250건
+
+    class _Search:
+        def list(self, *, page_size: int = 100, page: int = 1, **_f: Any) -> _Page:
+            start = (page - 1) * page_size
+            window = range(start, min(start + page_size, total_items))
+            return _Page([_Summary(i) for i in window], total_items)
+
+        def details(self, kdcd: str, asno: str, ctcd: str) -> object:
+            del kdcd, asno, ctcd
+            return object()
+
+    class _Client:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.search = _Search()
+
+        def close(self) -> None:
+            return None
+
+    _install(monkeypatch, "krheritage", HeritageClient=_Client)
+    settings = KorTravelMapSettings(
+        data_go_kr_service_key=SecretStr("k"), krheritage_kind_codes="11"
+    )
+
+    with counting_upstream_requests():
+        records = list(fetch_krheritage_items(settings))
+        observed = observed_upstream_requests()
+
+    assert len(records) == total_items
+    assert observed == 3 + total_items, (
+        f"목록 3페이지 + detail {total_items}건 = {3 + total_items}건인데 "
+        f"{observed}건을 셌다. 목록만 세면 3이 나온다 — 실제의 1%다."
+    )
+
+
+def test_datagokr_file_data_counts_one_request_per_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``iter_all``은 provider 안에서 페이지를 돌아 셀 수 없었다. ``iter_pages``는 센다."""
+
+    pages = [[object(), object()], [object(), object()], [object()]]
+
+    class _FileData:
+        def iter_pages(self, dataset: str, **_kwargs: Any) -> Iterator[Any]:
+            del dataset
+            for items in pages:
+                yield SimpleNamespace(items=list(items))
+
+    class _Client:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.file_data = _FileData()
+
+        def close(self) -> None:
+            return None
+
+    _install(monkeypatch, "datagokr", DataGoKrClient=_Client)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("k"))
+
+    with counting_upstream_requests():
+        records = list(fetch_datagokr_file_data_records(settings, dataset_key="ds"))
+        observed = observed_upstream_requests()
+
+    assert len(records) == 5
+    assert observed == len(pages), (
+        f"페이지 {len(pages)}장인데 {observed}건을 셌다 — 페이지마다 HTTP 1건이다"
+    )
+
+
+def test_krheritage_events_counts_every_month_including_the_empty_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """빈 달도 요청 1건을 쓴다 — record 수로는 역산되지 않는다."""
+
+    class _Event:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
+            self.calls.append((year, month))
+            return (object(),) if len(self.calls) == 1 else ()
+
+    class _Client:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.event = _Event()
+
+        def close(self) -> None:
+            return None
+
+    _install(monkeypatch, "krheritage", HeritageClient=_Client)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("k"))
+
+    with counting_upstream_requests():
+        records = list(fetch_krheritage_events(settings))
+        observed = observed_upstream_requests()
+
+    assert len(records) == 1
+    assert observed == 14, (
+        f"record는 1건이지만 요청은 14건(달마다 1건)이다 — {observed}건을 셌다"
+    )
+
+
+def test_the_opinet_budget_counts_exactly_the_calls_it_allows() -> None:
+    """OpiNet 예산기가 곧 분자다 — 예산이 끊은 호출은 나가지 않으므로 세지 않는다."""
+
+    with counting_upstream_requests():
+        budget = _OpinetCallBudget(3)
+        allowed = [budget.spend() for _ in range(5)]
+        observed = observed_upstream_requests()
+
+    assert allowed == [True, True, True, False, False]
+    assert observed == 3, f"허용된 3건만 세야 하는데 {observed}건을 셌다"
+
+
+def test_the_unbounded_opinet_budget_still_counts() -> None:
+    """예산이 없는 경로(`_unbounded`)도 요청은 나간다 — 세지 않으면 0으로 위장한다."""
+
+    with counting_upstream_requests():
+        budget = _OpinetCallBudget(None)
+        for _ in range(4):
+            assert budget.spend() is True
+        observed = observed_upstream_requests()
+
+    assert observed == 4

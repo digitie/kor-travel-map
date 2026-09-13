@@ -70,6 +70,10 @@ from typing import Final
 
 from dagster import Failure
 
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    observed_upstream_requests,
+)
 from .upstream_retry import NONRETRYABLE_FAILURE_KINDS
 
 __all__ = [
@@ -179,6 +183,13 @@ def raise_terminal_if_quota_exhausted(exc: BaseException) -> None:
     if cause is None:
         return
     failure_kind = str(getattr(cause, "failure_kind", "") or "unclassified")
+    # 실패한 step은 output을 내지 않으므로 `add_output_metadata`로 실은 분자가
+    # 사라진다. 하필 **쿼터 소진이야말로** "얼마나 쓰고 죽었나"를 알아야 하는
+    # 실패다. Failure metadata는 output이 아니라 실패 이벤트에 붙으므로 남는다.
+    observed = observed_upstream_requests()
+    spend: dict[str, str] = (
+        {} if observed is None else {UPSTREAM_REQUESTS_METADATA_KEY: str(observed)}
+    )
     raise Failure(
         description=(
             f"upstream 일일 쿼터 소진({failure_kind}) — step 재시도를 끈다. "
@@ -191,6 +202,7 @@ def raise_terminal_if_quota_exhausted(exc: BaseException) -> None:
             "provider_error": type(cause).__name__,
             "provider_module": type(cause).__module__.split(".", 1)[0],
             "step_retries_suppressed": "true",
+            **spend,
         },
         allow_retries=False,
     ) from exc
