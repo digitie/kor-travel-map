@@ -769,8 +769,13 @@ def _add_output_metadata(
 
     이 함수가 이 패키지에서 metadata를 내보내는 유일한 자리다(19개 호출 지점).
     그래서 "이 run이 upstream에 몇 번 요청했는가"를 여기서 한 번 합치면 asset
-    19곳을 각각 고치지 않아도 된다 — 그리고 실패 경로의 metadata에도 함께 실린다
-    (실패한 run이 쿼터를 얼마나 썼는지가 사후 판독의 값이다).
+    19곳을 각각 고치지 않아도 된다.
+
+    **이 자리는 성공한 run만 덮는다.** 실패한 step은 output을 내지 않으므로 여기서
+    실은 값은 사라진다 — 2026-09-13 2차 적대 리뷰가 종전 문장("실패 경로에도 함께
+    실린다")을 거짓으로 판정했다. 실패한 run의 소비량은 쿼터 소진이면
+    :mod:`~.quota_exhaustion`의 ``Failure`` metadata가, 그 밖이면
+    :func:`~.feature_operation_tracking._log_spend_on_failure`의 경고 로그가 받는다.
 
     **호출자가 이미 그 key를 담았으면 덮지 않는다.** 자기 수를 아는 asset이
     있다면 그쪽이 더 정확하다.
