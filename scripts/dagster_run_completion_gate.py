@@ -374,13 +374,23 @@ def main() -> int:
             )
             gate.require("probe/reaches-success", status, "SUCCESS")
 
-            # **탐침 run을 빼고 센다.** 빼지 않으면 이 하한은 항진명제다 —
-            # 게이트가 방금 만든 run이 항상 한 건 있기 때문이다(적대 리뷰 지적).
+            # **게이트가 만든 run을 전부 빼고 센다.** 빼지 않으면 이 하한은
+            # 항진명제다 — 방금 만든 run이 항상 한 건 있기 때문이다(적대 리뷰 지적).
+            #
+            # 이번 run만 빼는 것으로는 부족하다. 게이트를 연속으로 돌리면 직전
+            # 탐침들이 남아 같은 항진명제로 돌아간다. 그래서 `_GATE_TAG`로 계보
+            # 전체를 뺀다 — 그 tag를 다는 이유가 원래 "잔여물 판독과 사후 구분"이다.
             other_runs = connection.execute(
-                text("SELECT count(*) FROM runs WHERE run_id != :run_id"),
-                {"run_id": run_id},
+                text(
+                    "SELECT count(*) FROM runs r WHERE NOT EXISTS ("
+                    "  SELECT 1 FROM run_tags t"
+                    "  WHERE t.run_id = r.run_id AND t.key = :gate_key"
+                    "    AND t.value = :gate_value"
+                    ")"
+                ),
+                {"gate_key": _GATE_TAG, "gate_value": _GATE_TAG_VALUE},
             ).scalar()
-            population["runs_observed_excluding_probe"] = int(other_runs or 0)
+            population["runs_observed_excluding_gate"] = int(other_runs or 0)
             gate.require(
                 "floor/runs-observed",
                 "non-empty" if int(other_runs or 0) >= 1 else "empty",
