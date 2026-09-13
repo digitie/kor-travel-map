@@ -35,6 +35,8 @@ from kortravelmap.core.feature_operation import (
 
 from dagster import InitResourceContext, resource
 
+from .quota_exhaustion import raise_terminal_if_quota_exhausted
+
 _T = TypeVar("_T")
 _MISSING = object()
 _OPERATION_KEY_TAG = "kor_travel_map.operation_key"
@@ -519,18 +521,29 @@ async def run_tracked_feature_asset(
     context: Any,
     run: Callable[[Any], Awaitable[_T]],
 ) -> _T:
-    """single-member public wrapper의 attempt와 completion을 소유한다."""
+    """single-member public wrapper의 attempt와 completion을 소유한다.
+
+    실패 경로는 두 갈래인데(**guard 유무**) 둘 다 같은 asset의 step 경계다. 그래서
+    쿼터 소진 판정도 두 갈래 모두에 건다 — 한쪽만 걸면 guard 없는 run에서 조용히
+    네 배를 낸다(:mod:`~.quota_exhaustion`).
+    """
     guard = await ensure_authoritative_feature_operation_guard(
         context,
         boundary="public_wrapper",
     )
     if guard.operation_key is None:
-        return await run(context)
+        try:
+            return await run(context)
+        except Exception as exc:
+            raise_terminal_if_quota_exhausted(exc)
+            raise
     membership = _single_membership_for_asset(guard)
     try:
         result = await run(context)
     except Exception as exc:
+        # 실패 기록이 먼저다 — 원 예외를 그대로 봐야 분류가 보존된다.
         await _append_failed_attempt(context, guard, membership, exc)
+        raise_terminal_if_quota_exhausted(exc)
         raise
     mutation = await guard.client.finish_dagster_feature_membership(
         dagster_run_id=guard.dagster_run_id,
