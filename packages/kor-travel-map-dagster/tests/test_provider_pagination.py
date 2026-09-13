@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from kortravelmap.dagster.provider_pagination import (
+    DEFAULT_ABSOLUTE_MAX_PAGES,
     DEFAULT_MAX_PAGES,
     ProviderPage,
     ProviderPaginationOverrun,
@@ -210,3 +211,70 @@ def test_items_are_yielded_lazily() -> None:
     assert upstream.requested == [1]
     stream.close()
     assert upstream.requested == [1]
+
+
+def test_declared_total_raises_the_ceiling_but_not_past_the_absolute_one() -> None:
+    """**``max_pages``는 천장이 아니라 바닥이다.** 그 위에 천장이 있어야 한다.
+
+    ``absorb``가 선언 건수에 맞춰 ``ceiling``을 올리는 설계는 옳다 — 선언 건수가
+    상한을 정한다. 그러나 그 위에 아무것도 없으면 **upstream이 말한 숫자가 곧
+    우리의 요청 수**가 된다. ``total_count``를 잘못 파싱하거나 upstream이 거짓을
+    말하면 한 번의 sweep이 쿼터를 통째로 태운다.
+
+    2026-09-13에 이것을 값을 치르고 배웠다. krforest 호출 4곳에 ``max_pages=10``을
+    주고 "묶었다"고 적었는데, 선언 건수를 크게 둔 테스트가 상한을 무시하고 계속
+    걸었다.
+    """
+
+    calls: list[int] = []
+
+    def endless_with_huge_declared_total(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        return ProviderPage(items=[f"p{page_no}"], total_count=10**9)
+
+    with pytest.raises(ProviderPaginationOverrun) as caught:
+        list(
+            iter_paginated_items(
+                endless_with_huge_declared_total,
+                num_of_rows=1,
+                label="huge-declared",
+                max_pages=5,
+                absolute_max_pages=5,
+            )
+        )
+
+    assert len(calls) == 5, f"절대 상한을 넘겨 {len(calls)}페이지를 걸었다"
+    assert "절대 상한" in str(caught.value), (
+        "실패 문구가 어느 상한에 걸렸는지 말하지 않으면 운영자가 잘못된 값을 고친다"
+    )
+
+
+def test_max_pages_alone_does_not_bound_a_lying_upstream() -> None:
+    """회귀 표식 — 절대 상한을 빼면 ``max_pages``만으로는 묶이지 않는다.
+
+    이 테스트는 결함의 **모양**을 박아 둔다. ``absolute_max_pages``를 크게 두면
+    ``max_pages=5``는 upstream의 선언에 밀려 아무것도 막지 못한다.
+    """
+
+    calls: list[int] = []
+
+    def finite_but_long(page_no: int) -> ProviderPage:
+        calls.append(page_no)
+        if page_no > 40:
+            return ProviderPage(items=[], total_count=10**9)
+        return ProviderPage(items=[f"p{page_no}"], total_count=10**9)
+
+    list(
+        iter_paginated_items(
+            finite_but_long,
+            num_of_rows=1,
+            label="lying-upstream",
+            max_pages=5,
+            absolute_max_pages=DEFAULT_ABSOLUTE_MAX_PAGES,
+        )
+    )
+
+    assert len(calls) > 5, (
+        "`max_pages`가 천장처럼 동작했다 — 이 테스트가 박아 둔 사실이 바뀌었다면 "
+        "`absorb`의 상한 상향 규칙을 다시 읽어라."
+    )
