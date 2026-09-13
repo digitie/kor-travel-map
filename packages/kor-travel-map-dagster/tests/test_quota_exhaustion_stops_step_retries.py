@@ -23,7 +23,6 @@ from typing import Any
 
 import pytest
 from dagster import Failure
-
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
@@ -348,12 +347,11 @@ def _unguarded_handlers(node: ast.AST) -> list[int]:
     for child in ast.walk(node):
         if not isinstance(child, ast.ExceptHandler):
             continue
-        reraises = any(
-            isinstance(stmt, ast.Raise) for stmt in ast.walk(ast.Module(body=child.body, type_ignores=[]))
-        )
+        handler = ast.Module(body=child.body, type_ignores=[])
+        reraises = any(isinstance(stmt, ast.Raise) for stmt in ast.walk(handler))
         if not reraises:
             continue
-        if _GUARD_CALL not in _called_names(ast.Module(body=child.body, type_ignores=[])):
+        if _GUARD_CALL not in _called_names(handler):
             unguarded.append(child.lineno)
     return unguarded
 
