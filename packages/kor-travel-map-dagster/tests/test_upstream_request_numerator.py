@@ -37,16 +37,25 @@ def test_without_a_scope_counting_is_a_no_op() -> None:
     assert observed_upstream_requests() is None
 
 
-def test_not_counted_and_counted_zero_are_different_facts() -> None:
-    """``None``과 ``0``을 섞지 않는다.
+def test_an_uninstrumented_path_reports_nothing_not_zero() -> None:
+    """**계수기가 열려 있어도 한 번도 기록되지 않았으면 ``None``이다.**
 
-    "0번 요청했다"(캐시/skip으로 끝난 run)와 "세지 않았다"(계수기 밖)는 다른
-    사실이고, metadata에서 그 둘이 같아 보이면 분자를 잘못 읽는다.
+    이것이 2026-09-13 적대 리뷰가 잡은 blocker의 핵심이다. 계수기는 asset 35개
+    전부에서 열리는데 세는 자리는 셋뿐이었고, 그래서 계측되지 않은 fetcher가
+    "0번 요청했다"고 보고했다 — 하필 분모를 실측한 유일한 provider(OpiNet)가
+    수천 건을 쓰면서 0을 냈다. 운영자가 그 0을 "요청이 없었다"로 읽으면 정반대
+    결론에 이른다.
     """
 
     assert observed_upstream_requests() is None
     with counting_upstream_requests():
-        assert observed_upstream_requests() == 0
+        assert observed_upstream_requests() is None, (
+            "기록이 없는데 0을 냈다 — 계측되지 않은 fetcher가 0으로 위장한다"
+        )
+        note_upstream_request(0)
+        assert observed_upstream_requests() == 0, (
+            "명시적으로 0건을 기록한 것은 관측이다 — 그때는 0을 내야 한다"
+        )
 
 
 def test_the_scope_restores_the_outer_counter() -> None:

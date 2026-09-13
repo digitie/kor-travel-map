@@ -36,6 +36,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
+from .upstream_requests import note_upstream_request
 from .provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
