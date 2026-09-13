@@ -12,6 +12,17 @@
 
 ## 2026-09-13 — 배포된 세대가 run을 완주시키는지 재게 됐다
 
+- [x] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
+  (**2026-09-14 완료**). 분모를 data.go.kr에서 실측해 전제 하나를 뒤집었고(일일
+  트래픽은 서비스가 아니라 **오퍼레이션마다** 걸린다), 분자를 `upstream_requests_min`
+  으로 asset/op metadata까지 이었으며(#1229), 쿼터성 실패가 step 재시도를 사지 않게
+  하고(#1227), 선언 없는 증폭기를 없애고, UI의 근거 없는 보증을 지웠다. 여섯 조문
+  전부 `[x]`. prod 배포 t41a·t42a 두 사이클 모두 GREEN(D1 live Playwright 통과).
+  적대 리뷰 여섯 판이 이 task를 만들었고 3·4·5차 blocker는 전부 직전 판의 수정이
+  만든 것이었다 — 서사는 `docs/journal.md` 2026-09-13/14. 상세는
+  `docs/tasks-acceptance.md` §T-VN-QUOTA-ARITHMETIC, 정본 수치는
+  `docs/etl/upstream-quota.md`.
+
 - [x] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
   (**2026-09-13 완료**). 다섯 조문 전부 닫혔다(#1216 · #1219 · #1224 · #1225 · #1226).
 

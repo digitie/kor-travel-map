@@ -1,5 +1,53 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-14 — 사용자가 끈 provider가 살아 있는 경로로 나가고 있었다
+
+`T-VN-QUOTA-ARITHMETIC` 조문 6(마지막)을 닫으러 갔다가 조문보다 큰 것을 찾았다.
+
+### 조문 6은 이미 충족돼 있었다
+
+본문이 "**남은 것은 G(실제 격자 수) 실측**"이라고 적는데, **같은 절의 표가 같은 날
+G = 59로 답하고 있었다.** 헤드라인 비율 72%/72%/24%도 반증된 G=300 상한의 열이다.
+낡은 조문 하나로 task가 열려 있었던 것이다. 조문이 요구한 것 — 오퍼레이션별 분모,
+쿼터 비공유, G, 증폭기 선언, 조문 3, 켠 뒤 볼 분자 — 은 전부 들어와 있었다.
+
+### 그런데 prod는 cron으로 돌지 않는다
+
+instigator state가 11개뿐이고 전부 센서 + 분당 job 하나다. **feature load schedule은
+하나도 켜져 있지 않다**(전부 `default_status=STOPPED`, 켜진 적 없음). 살아 있는 것은
+`feature_update_request_queue_sensor`다. 즉 쿼터 산수 전체가 **cron 기준으로 쓰였는데
+prod의 실제 적재 경로는 큐**다.
+
+그래서 2차 적대 리뷰가 잡은 "큐 runner가 계수기를 열지 않는다"가 **운영상 가장 중요한
+blocker**였다. 그때는 그것을 몰랐다.
+
+### 그리고 "껐다"가 참이 아니었다
+
+`DISABLED_FEATURE_LOAD_SCHEDULES`는 2026-09-09 사용자 지시로 KMA·AirKorea 자동 적재를
+중지한 기록이다. 그런데 그 목록은 **`FEATURE_LOAD_SCHEDULES` 생성에서 이름을 빼는
+것이 전부**였다 — 전 저장소에서 그 상수를 읽는 자리가 그 한 줄뿐이다.
+
+큐 runner에는 꺼진 operation 6개의 spec이 그대로 있고, 실행 전 정책 게이트는
+`provider_refresh_policies` row가 없으면 `allow_targeted`로 **fail-open**한다.
+baseline seed에 그 row는 **0건**이다. PinVi cache target refresh 하나가 반경 안 KMA
+weather feature를 잡으면 격자 순회가 그대로 나간다.
+
+**사용자가 끈 것이 꺼져 있지 않았다.** 기록은 "껐다"고 말하는데 살아 있는 경로에서는
+지켜지지 않았다.
+
+이제 큐 경계가 `DISABLED_FEATURE_LOAD_OPERATION_KEYS`를 읽어
+`provider_auto_load_disabled`로 건너뛴다. 결박은 목록이 아니라 **효과**에 건다 —
+enforcement를 `if False:`로 바꾸면 12건이 빨개지고 대조군 2건은 초록으로 남는 것을
+확인했다. "끄는 것은 시계이지 능력이 아니다"는 원칙은 그대로다: 사람이 Dagster UI에서
+job을 직접 돌리는 백필은 이 runner를 지나지 않는다.
+
+### 남은 것은 끄지 않은 provider의 총량이다
+
+큐에는 일일 예산이 없다. 상한은 센서 tick당 10 run(15초 간격)뿐이고, 사실상의 가드는
+KMA의 같은-base cursor skip과 OpiNet의 `already_succeeded_today_kst` 둘뿐이다.
+`krheritage`는 sweep당 ~3,950요청인데 분모조차 없다. `T-VN-QUEUE-QUOTA`로 남겼다
+(`docs/etl/upstream-quota.md` §5).
+
 ## 2026-09-14 — 분자를 prod에 올렸고, 거기서는 아직 볼 수 없다는 것을 알았다
 
 `#1229`(`2db70b478`)가 머지됐고 t42a 재핀 사이클이 전 사이클 GREEN이다 — 회전 #50,
@@ -7,7 +55,7 @@ rebuild `phase=committed`, repin VERIFIER PASS, M01 ACL 55/55, **D1 live Playwri
 11 passed**, D2 `phase=passed`. 분자 모듈이 prod Dagster 이미지에 살아 있는 것도
 확인했다(`upstream_requests_min`).
 
-### 그런데 prod에서 분자를 관측할 수 없다
+### 그런데 prod의 asset 경로에서는 분자를 관측할 수 없다
 
 배포 뒤 돌아간 run이 `current_weather_summary_refresh`(분당) 하나뿐이다. feature
 asset materialization이 **0건**이라 `upstream_requests_min`이 실린 자리가 없다.
@@ -16,6 +64,12 @@ asset materialization이 **0건**이라 `upstream_requests_min`이 실린 자리
 (`schedules.py`), prod의 instigator state 11개에 feature 스케줄이 하나도 없다.
 **즉 오늘 prod는 feature upstream을 거의 부르지 않는다.** 분자를 붙였지만 그것이
 0이 아닌 값을 내려면 누군가 스케줄을 켜야 한다.
+
+**그리고 그것이 정확히 어디를 봐야 하는지를 바꾼다.** prod의 살아 있는 적재 경로는
+cron이 아니라 **feature update queue**다(`feature_update_request_queue_sensor`만
+RUNNING). 큐 경로의 분자는 asset output metadata가 아니라
+`ProviderDatasetRefreshResult.metadata`에 실린다 — 2차 적대 리뷰가 잡은 "큐 runner가
+계수기를 열지 않는다"가 운영상 가장 중요한 blocker였던 이유다.
 
 이것은 결함이 아니라 **이 task의 다음 단계가 무엇인지를 말해 준다.** 조문 6(KMA
 격자 재활성화)이 아직 `[~]`인 이유와 같은 자리다 — 분모·분자·증폭기 선언이 다
