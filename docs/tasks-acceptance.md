@@ -1906,13 +1906,28 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
    다시 `SUCCESS`로 끝났고 이번에는 `features 1047`이다 — D2가 자기 행을 스스로
    지웠으므로 은퇴 행이 없다(§T-VN-D2-RESIDUE 실측 `lane_residue_total=0`). 네 축이
    정확히 같다: `features 1047 · claims 1047 · aliases 1047 · links 1047`.
-2. 그 성질이 배포마다 유지된다. storage 부착이 pinned runtime generation의 함수라면,
-   generation이 바뀔 때 함께 따라오는 것이 증적으로 보인다.
-3. 이 축을 재는 검사가 있다 — 지금은 "컨테이너가 healthy"만 보고 "run이 완주한다"는
-   아무도 보지 않는다. healthy와 실행 가능은 다른 사실이다.
-4. 봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다 — 같은 key 집합을 각자
-   들고 있으면서 CI가 어긋남을 못 보는 상태가 아니어야 한다. 2026-09-12에 정확히
-   그 상태가 prod 스택을 내렸다.
+2. [x] **그 성질이 배포마다 유지된다.** (2026-09-13 t41a 배포로 확인) generation이
+   `b71cbefc` → `bae61363`으로 바뀐 뒤 **새 세대에서 run 완주 게이트가 15/15로
+   통과**했다 — 탐침 run이 실제로 `SUCCESS`로 완주하고, live config의 로컬 쓰기 두
+   축이 여전히 `/opt/dagster/state` 아래이며, 필수 daemon 4종이 전부 fresh였다.
+   즉 storage 부착이 세대 교체를 따라온다는 것이 **한 번의 관측이 아니라 두 세대의
+   비교**로 보인다.
+3. [x] **이 축을 재는 검사가 있다.** (2026-09-13, #1226) `scripts/dagster_run_completion_gate.py`가
+   다섯 축을 독립으로 판정한다 — live config(컨테이너 안 `$DAGSTER_HOME/dagster.yaml`),
+   metadata 표 실재, daemon heartbeat 신선도, **능동 탐침 run 완주**, 멈춘 run 0건.
+   prod 실측으로 2026-09-11 사고 config를 되돌리면 red가 되는 것까지 확인했다
+   (config 변이 5종 + daemon tolerance 변이 전부 red, 대조군 0/15).
+
+   첫 판은 **초록이었지만 네 자리에서 아무것도 재지 않았다** — `floor/runs-observed`는
+   게이트가 방금 만든 탐침 때문에 항진명제였고, stuck은 큐 대기 시간을 섞어 재면서
+   `STARTING`을 6시간 기준으로 봤고(띄우지 못하는 launcher가 안 보인다), daemon 하한은
+   상수 1이라 회수 daemon만 죽어도 초록이었으며, 신선도는 꺼진 daemon의 heartbeat 행이
+   영구 잔류하면 절대 초록이 될 수 없는 구조였다. 두 차례 적대 리뷰가 하나씩 잡았고
+   전부 prod에서 다시 쟀다.
+4. [x] **봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다.** (2026-09-12, #1219/#1224)
+   검사기가 8개 key 집합을 봉인하고, 이 저장소가 실제로 싣는 config를 그 검사기로
+   통과시키는 테스트가 CI에 있다(`test_sealed_validator_accepts_the_config_this_repo_actually_ships`).
+   그 테스트가 없던 동안 검사기가 자기 config를 거부해 prod 스택이 내려갔다.
 5. [x] **"run이 왜 죽었나"를 UI로 확인할 수 있다. — 2026-09-13 실측으로 정정.**
 
    처음에 이 조문을 "UI에서 step의 stdout/stderr가 보인다"로 적었다. 근거는
@@ -2196,8 +2211,43 @@ data.go.kr 활용신청이 **아니라서** 이 화면에 없다. 그쪽 분모�
 "krheritage run 하나가 15,800요청"의 분모도 그래서 아직 없다.
 
 **측정 전에 상한 숫자를 바꾸지 않는다**는 원칙은 유효했다. 분모를 몰라도 정당한
-것 — 폭주 상한, 4배 배수 제거, 분자 만들기, 오도하는 문구 지우기 — 만 먼저
+것 — 폭주 상한, 재시도 배수 제거, 분자 만들기, 오도하는 문구 지우기 — 만 먼저
 했고, 그 사이에 분모가 들어왔다.
+
+### 2026-09-13 prod 배포 (t41a) — 전 사이클 GREEN
+
+`chain17.sh`로 sanctioned 재핀 사이클을 돌렸다(`0b60a850` = #1227 머지 커밋).
+
+```
+A. 회전 preflight     OK (OpenAPI 표면 3종 digest 동일)
+B. 회전               49번째 · pinset bae61363a6fdd7ff
+C. rebuild            success · phase=committed
+                      heads 3종 불변 → 마이그레이션 없음이 실측으로 확인됨
+0. 핀 원장 대조        map=0b60a850 ✓ pinvi=f62e7ef1 ✓
+C. executor 이미지     success · 라벨=0b60a850…
+D. repin              repository_commit=0b60a850… · VERIFIER PASS
+                      attestation_sha256=10fd0f1f…
+E. M01 ACL preflight   failed 0 / total 55
+F. D1 (live Playwright) 11 passed (26.0s)
+G. lane 정리           BLOCKED 없음
+H. D2                 phase=passed · status=complete · recovery_attempt=0 · 잔여물 0
+```
+
+배포 뒤 **새 세대에서 run 완주 게이트(#1226)가 15/15 통과**했다 — 탐침 run이 실제로
+SUCCESS로 완주했고 필수 daemon 4종이 전부 fresh, 멈춘 run 0건이다.
+
+**UI에서 실제로 바뀐 것**: prod API 컨테이너가 돌려주는 schedule note가
+"provider rate limit의 약 90% 이하를 목표로 한 …"에서
+"이 저장소가 고른 …기본값입니다. upstream 일일 한도 대비 소비량은 schedule마다
+다릅니다 — 실측 한도는 docs/etl/upstream-quota.md에 있습니다."로 바뀌었다.
+32개 schedule에 똑같이 붙던 근거 없는 비율이 화면에서 사라졌다.
+
+**배포 경로에서 배운 것 둘.** (1) host-direct `docker compose build`는 이제 쓸 수
+없다 — 대상 서비스만 빌드해도 compose 파일 **전체**를 보간하는데 prod `.env`에
+다른 서비스(concierge)의 키가 없다. sanctioned 경로(`run-pinned-rebuild-once`)는
+Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기본 경로가 아니라
+`127.0.0.1:12700`이고 백업 대상은 `$POSTGRES_DB`(=postgres, 7MB)가 아니라
+애플리케이션 DB `kor_travel_map`(44MB)이다.
 
 ## T-VN-D2-RESIDUE
 
