@@ -46,7 +46,10 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
-from kortravelmap.dagster.provider_pagination import ProviderPaginationOverrun
+from kortravelmap.dagster.provider_pagination import (
+    ProviderPaginationOverrun,
+    ProviderPaginationStalled,
+)
 from kortravelmap.dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
     PROVIDER_RECORD_RESOURCE_SPECS,
@@ -1640,11 +1643,18 @@ def test_standard_museums_fetch_yields_and_closes(
 
 
 class _FakeFestivalPage:
-    """실물 ``visitkorea.models.Page``의 필드 계약(``items`` + ``total_count``)."""
+    """실물 ``visitkorea.models.Page``의 필드 계약(``items`` + ``total_count`` + ``raw``)."""
 
-    def __init__(self, items: list[object], *, total_count: int | None = None) -> None:
+    def __init__(
+        self,
+        items: list[object],
+        *,
+        total_count: int | None = None,
+        raw: dict[str, Any] | None = None,
+    ) -> None:
         self.items = tuple(items)
         self.total_count = len(items) if total_count is None else total_count
+        self.raw = raw
 
 
 class _FakeVisitKoreaClient:
@@ -1652,6 +1662,7 @@ class _FakeVisitKoreaClient:
     items: list[object] = []
     declared_total: int | None = None
     page_size_override: int | None = None
+    never_advances: bool = False
 
     def __init__(self, *, service_key: str | None = None, **_kwargs: Any) -> None:
         self.service_key = service_key
@@ -1666,7 +1677,8 @@ class _FakeVisitKoreaClient:
         self.search_calls.append(event_start_date)
         self.page_calls.append(page_no)
         size = type(self).page_size_override or num_of_rows
-        start = (page_no - 1) * size
+        effective_page = 1 if type(self).never_advances else page_no
+        start = (effective_page - 1) * size
         items = type(self).items
         return _FakeFestivalPage(
             items[start : start + size],
@@ -1675,6 +1687,10 @@ class _FakeVisitKoreaClient:
                 if type(self).declared_total is None
                 else type(self).declared_total
             ),
+            # 실물 `visitkorea.models.Page`는 파싱 전 body를 `raw`로 들고 있다.
+            # 대역이 그것을 흉내내지 않으면 `fingerprint`가 늘 None이 되어
+            # **전진 검사가 호출 지점에서 한 번도 돌지 않는다**(2차 리뷰 지적).
+            raw={"pageNo": effective_page, "items": [id(item) for item in items[start : start + size]]},
         )
 
     # ``iter_pages``는 일부러 두지 않는다 — 라이브러리 iterator는 ``max_pages``가
@@ -1690,11 +1706,13 @@ def _install_fake_visitkorea(
     items: list[object],
     declared_total: int | None = None,
     page_size_override: int | None = None,
+    never_advances: bool = False,
 ) -> type[_FakeVisitKoreaClient]:
     _FakeVisitKoreaClient.instances = []
     _FakeVisitKoreaClient.items = items
     _FakeVisitKoreaClient.declared_total = declared_total
     _FakeVisitKoreaClient.page_size_override = page_size_override
+    _FakeVisitKoreaClient.never_advances = never_advances
     module = ModuleType("visitkorea")
     module.__dict__["KrTourApiClient"] = _FakeVisitKoreaClient
     monkeypatch.setitem(sys.modules, "visitkorea", module)
@@ -3344,3 +3362,24 @@ def test_krforest_nodata_after_the_first_page_is_a_normal_end(
     records = asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
 
     assert len(records) == 3
+
+
+def test_visitkorea_stalled_pagination_is_caught_at_the_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """전진 검사가 **호출 지점에서** 실제로 도는지 본다.
+
+    헬퍼 쪽 테스트만 있으면 `_page`가 `fingerprint`를 안 넘겨도 초록이다 —
+    2차 적대 리뷰가 정확히 그 상태를 잡았다(대역에 `raw`가 없어 fingerprint가
+    늘 None이었다).
+    """
+
+    items = [object() for _ in range(10)]
+    _install_fake_visitkorea(
+        monkeypatch, items=items, declared_total=3000, page_size_override=2,
+        never_advances=True,
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(ProviderPaginationStalled):
+        list(fetch_visitkorea_festival_events(settings))
