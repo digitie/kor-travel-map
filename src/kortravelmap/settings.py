@@ -311,7 +311,11 @@ class KorTravelMapSettings(BaseSettings):
         le=500,
         description=(
             "KMA weather asset 1 run당 호출 격자 상한(T-219a) — data.go.kr 일일 "
-            "한도 보호. 초과분은 다음 run으로(정렬 안정). "
+            "한도 보호. **대상 격자가 이 값을 넘으면 run이 실패한다** "
+            "(``KmaWeatherGridLimitExceeded``: partial execution is forbidden). "
+            "초과분은 다음 run으로 넘어가지 않는다 — 상한을 올리거나 대상을 줄여야 "
+            "한다. 기본값 300 × 매시 = 7,200 요청/일이고 오퍼레이션당 실측 한도는 "
+            "10,000/일이다(docs/etl/upstream-quota.md). "
             "env ``KMA_WEATHER_MAX_GRIDS_PER_RUN``."
         ),
     )
