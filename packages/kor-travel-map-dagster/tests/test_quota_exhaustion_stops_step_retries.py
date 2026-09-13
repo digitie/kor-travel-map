@@ -474,8 +474,15 @@ def test_the_guard_module_reuses_the_declared_nonretryable_set() -> None:
     )
 
 
-def test_the_kma_asset_publishes_the_quota_numerator() -> None:
-    """분자가 Dagster UI에 보여야 한다."""
+def test_the_kma_result_does_not_carry_a_second_numerator() -> None:
+    """분자의 정본은 하나여야 한다.
+
+    종전에는 `KmaWeatherLoadResult.as_metadata()`가 `grids_fetched`를
+    `upstream_requests_min`으로도 실었다. 그 둘은 **다른 수**다 — `grids_fetched`는
+    호출에 **성공한** 격자 수이고, 실패해 중단된 격자도 요청은 나갔다. 같은 이름을
+    두 곳이 들고 있으면 갈라지므로, 분자는 격자 루프가
+    `note_upstream_request`로 세고 `_add_output_metadata`가 싣는다.
+    """
 
     from kortravelmap.dagster.kma_weather import KmaWeatherLoadResult
 
@@ -491,8 +498,10 @@ def test_the_kma_asset_publishes_the_quota_numerator() -> None:
         values_loaded=600,
         membership_fingerprint="abc",
     )
-    assert result.as_metadata()["upstream_requests_min"] == 59, (
-        "분자가 격자 호출 수와 다르다 — 격자 하나 = 요청 하나가 이 job의 계약이다."
+    metadata = result.as_metadata()
+    assert metadata["grids_fetched"] == 59
+    assert "upstream_requests_min" not in metadata, (
+        "분자 정본이 둘이 됐다 — 격자 루프의 계수기가 정본이다."
     )
 
 
