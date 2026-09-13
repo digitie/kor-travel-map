@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 from dagster import Failure
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
     run_tracked_feature_asset,
@@ -212,12 +213,16 @@ def test_quota_classification_survives_being_melted_into_a_message() -> None:
     """``ProviderDatasetRefreshFailure``가 문자열로 녹여도 ``__cause__``가 남는다."""
 
     cause = _QuotaExhausted("resultCode 22")
+    wrapped: _Wrapped | None = None
     try:
         raise _Wrapped(f"KMA provider refresh failed: {cause}") from cause
-    except _Wrapped as wrapped:
-        assert quota_exhaustion_cause(wrapped) is cause
-        with pytest.raises(Failure) as caught:
-            raise_terminal_if_quota_exhausted(wrapped)
+    except _Wrapped as caught_wrapped:
+        wrapped = caught_wrapped
+    assert wrapped is not None
+    assert quota_exhaustion_cause(wrapped) is cause
+
+    with pytest.raises(Failure) as caught:
+        raise_terminal_if_quota_exhausted(wrapped)
     assert caught.value.allow_retries is False
 
 
