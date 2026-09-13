@@ -171,3 +171,33 @@ def test_the_choke_point_adds_nothing_outside_a_scope() -> None:
     _add_output_metadata(context, {"provider": "x"})  # type: ignore[arg-type]
 
     assert UPSTREAM_REQUESTS_METADATA_KEY not in context.metadata
+
+
+def test_the_counter_survives_thread_and_task_boundaries() -> None:
+    """문맥이 **복사**되는 경계에서도 계수가 바깥에 보여야 한다.
+
+    `asyncio.to_thread`와 `create_task`는 `contextvars.copy_context()`로 문맥을
+    복사한다 — 복사된 것은 매핑이고 **값(리스트 객체)은 같다**. 그래서
+    `counter[0] += 1`이 바깥에 보인다. 계수기에 정수를 담았다면 안쪽에서
+    `set`이 필요하고 그것은 바깥에 보이지 않아 **조용히 0이 됐을** 자리다.
+
+    이 저장소가 실제로 그 경계를 쓴다(`feature_update_runner`의
+    `asyncio.to_thread(spec.resources, ...)`). 지금은 그쪽이 계수기를 열지 않지만,
+    asset 경로가 thread로 옮겨가는 날 이 성질이 조용히 깨지면 안 된다.
+    """
+
+    def _work() -> None:
+        note_upstream_request(5)
+
+    async def _through_thread() -> int:
+        with counting_upstream_requests() as counter:
+            await asyncio.to_thread(_work)
+            return counter[0]
+
+    async def _through_task() -> int:
+        with counting_upstream_requests() as counter:
+            await asyncio.create_task(asyncio.to_thread(_work))
+            return counter[0]
+
+    assert asyncio.run(_through_thread()) == 5
+    assert asyncio.run(_through_task()) == 5
