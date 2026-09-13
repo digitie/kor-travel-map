@@ -142,7 +142,7 @@ run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 �
 | 자리 | 선언 전 | 지금 |
 |---|---|---|
 | krex `latest_weather()` | `lookback_hours` 기본 48 → **최악 49 요청**. 저장소 문서는 "페이지네이션 불필요"라고만 적었다 | `_KREX_WEATHER_LOOKBACK_HOURS = 6` → 최악 7. 6시간을 못 찾으면 upstream이 멈춘 것이므로 48시간 전 관측을 "최신"으로 적재하지 않고 실패한다 |
-| krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `total_count` 유도 실패 시 **10,000 페이지**, 그리고 상한에서 **조용히 `return`** | 저장소 공통 `aiter_paginated_items`(`absolute_max_pages=10`) → 넘으면 `ProviderPaginationOverrun`으로 시끄럽게 실패 |
+| krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `totalCount`가 없으면 lib이 `total_count = len(items)`로 채워 상한이 **1페이지**가 되고 **조용히 `return`** — 행 누락이 성공으로 보인다 | 저장소 공통 `aiter_paginated_items`(`absolute_max_pages=10`) → 짧은 페이지를 마지막으로 읽지 않고, 넘으면 `ProviderPaginationOverrun` |
 | visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `absolute_max_pages=50`(100행 × 50 = 5,000건) |
 
 **`max_pages`가 아니라 `absolute_max_pages`인 이유.** 처음에는 `max_pages`로

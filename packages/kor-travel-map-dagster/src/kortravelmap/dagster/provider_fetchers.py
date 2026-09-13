@@ -880,18 +880,22 @@ async def fetch_knps_geometry_records(
         await client.aclose()
 
 
-#: krforest 페이지네이션의 미선언 상한. ``num_of_rows=1000``이므로 10장 = 10,000행이고,
+#: krforest 페이지네이션의 **절대** 상한. ``num_of_rows=1000``이므로 10장 = 10,000행이고,
 #: 이 네 dataset은 그 근처도 아니다(휴양림·산악기상·산불위험·산사태 모두 수천 행대).
-#: 선언 건수(``total_count``)를 알면 헬퍼가 그쪽으로 상한을 **올린다** — 이 값은
-#: "upstream이 건수를 말해 주지 않을 때"의 backstop이다.
+#: 선언 건수(``total_count``)를 알면 헬퍼가 그 아래에서 상한을 잡는다.
 #:
-#: 낮게 잡는 이유가 쿼터다. 종전에는 krforest 라이브러리의 ``iter_pages``를 그대로
-#: 썼는데, 그것은 ``max_pages``를 주지 않으면 ``total_count``에서 상한을 유도하고
-#: **실패하면 10,000페이지**까지 간다(``_ITER_PAGES_HARD_PAGE_CAP``). 산불위험예보의
-#: 실측 일일 한도는 오퍼레이션당 **1,000**이다(docs/etl/upstream-quota.md) — 한 번의
-#: 폭주가 그날 한도의 10배를 쓴다. 그리고 라이브러리는 상한에서 조용히 ``return``하므로
-#: 절단이 성공으로 보인다. 이 저장소의 헬퍼는 ``ProviderPaginationOverrun``으로
-#: 시끄럽게 실패한다.
+#: **라이브러리 iterator를 버린 이유는 폭주가 아니라 조용한 절단이다.** 처음 이
+#: 자리에 "``max_pages``를 주지 않으면 10,000페이지까지 간다"고 적었는데 **거꾸로**였다
+#: (적대 리뷰 지적). ``krforest``의 ``iter_pages``는
+#: ``page_ceiling = min(max(ceil(total_count / num_of_rows), 1), 10_000)``이라
+#: 10,000은 **추정치의 천장**이지 fallback이 아니다. 그리고 응답에 ``totalCount``가
+#: 없으면 ``_http.py``가 ``total_count = len(items)``로 채우므로 추정치가 **1**이 되고,
+#: 라이브러리는 1페이지만 읽고 **조용히 ``return``한다**. 10,000에 닿으려면 upstream이
+#: 천만 건 이상을 선언해야 한다.
+#:
+#: 즉 실제 위험은 "쿼터 폭주"가 아니라 **행 누락이 성공으로 보이는 것**이다. 이
+#: 저장소의 헬퍼는 짧은 페이지를 마지막 페이지로 읽지 않고, 상한을 넘기면
+#: ``ProviderPaginationOverrun``으로 시끄럽게 실패한다.
 #:
 #: ``max_pages``가 아니라 ``absolute_max_pages``로 넘긴다. 전자는 천장이 아니라
 #: **바닥**이라 upstream이 선언한 건수가 그 위로 올려 버린다 — 처음에 그것을

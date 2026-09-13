@@ -368,6 +368,26 @@ class _PageState:
 
         self.seen += len(items)
         if self.declared is not None:
+            if (
+                self.page_no == 1
+                and self.seen == self.declared
+                and len(items) == self.num_of_rows
+            ):
+                # **첫 페이지가 만재인데 선언 건수가 정확히 그만큼이다.**
+                # provider가 응답에서 ``totalCount``를 못 받아 ``len(items)``로
+                # 채운 모양일 수 있다(krforest ``_http.py``가 그렇게 한다). 그때
+                # 선언을 권위로 믿으면 여기서 멈추고 **행 누락이 성공으로 보인다** —
+                # 2026-09-13 실측: 2,500행 dataset에서 1,000행만 받고 끝났다.
+                #
+                # 종료 규칙은 바꾸지 않는다(바꾸면 범위 밖 page에 예외를 던지는
+                # provider에서 새 실패를 만든다). 대신 **들리게** 한다.
+                _emit(
+                    warn,
+                    f"{self.label}: 첫 페이지가 {len(items)}/{self.num_of_rows}행 "
+                    f"만재인데 선언 건수도 {self.declared}다 — provider가 "
+                    "totalCount를 len(items)로 채웠을 수 있다. 실제 행이 더 있으면 "
+                    "여기서 조용히 잘린다(확인 필요).",
+                )
             if self.seen >= self.declared:
                 self.finished = True
             elif len(items) < self.num_of_rows:

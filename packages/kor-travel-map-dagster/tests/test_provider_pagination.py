@@ -322,3 +322,40 @@ def test_a_fingerprint_that_actually_changes_is_not_flagged() -> None:
         "p2",
         "p3",
     ]
+
+
+def test_a_synthesized_total_count_is_at_least_audible() -> None:
+    """provider가 ``totalCount``를 ``len(items)``로 채우면 조용히 잘린다 — 들리게 한다.
+
+    2026-09-13 실측: 2,500행 dataset에서 이 헬퍼도 1,000행만 받고 끝났다. 즉
+    라이브러리 iterator에서 저장소 헬퍼로 옮긴 것이 이 절단을 **고치지 않는다**.
+    종료 규칙 자체를 바꾸면 범위 밖 page에 예외를 던지는 provider에서 새 실패가
+    생기므로, 여기서는 경고만 낸다 — 적대 리뷰가 이 자리의 근거가 거꾸로였다고
+    지적한 뒤 실측으로 확인한 결과다.
+    """
+
+    warnings: list[str] = []
+    page_size = 1000
+    total = 2500
+
+    def synthesized(page_no: int) -> ProviderPage:
+        start = (page_no - 1) * page_size
+        items = list(range(start, min(start + page_size, total)))
+        # upstream이 totalCount를 안 주면 lib이 len(items)로 채운다.
+        return ProviderPage(items=items, total_count=len(items))
+
+    collected = list(
+        iter_paginated_items(
+            synthesized,
+            num_of_rows=page_size,
+            label="synthesized-total",
+            warn=warnings.append,
+        )
+    )
+
+    assert len(collected) == page_size, (
+        "종료 규칙이 바뀌었다 — 바꿨다면 범위 밖 page 예외를 던지는 provider를 "
+        "먼저 확인하고 이 테스트를 갱신해라."
+    )
+    assert warnings, "조용히 잘렸다 — 경고가 없으면 아무도 알아차리지 못한다"
+    assert "totalCount" in warnings[0]
