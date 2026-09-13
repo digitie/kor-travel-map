@@ -26,8 +26,6 @@ from kortravelmap.dagster.quota_exhaustion import (
 
 from dagster import Failure
 
-pytestmark = pytest.mark.unit
-
 _PACKAGE = Path(__file__).resolve().parents[1] / "src" / "kortravelmap" / "dagster"
 
 #: 쿼터 판정을 실제로 부르는 함수 이름 — 이 심볼이 결박의 앵커다.
@@ -190,7 +188,9 @@ def test_every_retrying_asset_passes_through_the_quota_guard(
     """
 
     guarded = _quota_guarded_functions()
-    assert calls & guarded, (
+    # asset 자신이 판정을 직접 부르는 경우(multi-member)와 경계를 지나는 경우
+    # (single-member) 둘 다 받는다.
+    assert asset_name in guarded or calls & guarded, (
         f"{module}의 `{asset_name}`이 쿼터 판정을 지나지 않는다. "
         f"이 asset은 `FEATURE_LOAD_RETRY_POLICY`(max_retries=3)를 달고 있어 "
         "쿼터성 실패 하나가 upstream 요청을 네 배로 만든다. "
