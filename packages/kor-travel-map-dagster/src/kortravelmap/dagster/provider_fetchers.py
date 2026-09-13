@@ -19,7 +19,7 @@ import logging
 import math
 import pathlib
 import time
-from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -749,6 +749,20 @@ def fetch_krex_rest_area_fuel_prices(
         client.close()
 
 
+#: ``latest_weather``가 과거로 되짚는 시간 수. 호출 한 번의 **요청 수 상한**이
+#: ``lookback_hours + 1``이므로 이것이 곧 증폭 배수다(라이브러리 기본값 48 → 49 요청).
+#:
+#: 6으로 낮춘 이유는 비용이 아니라 **정확성**이다. 이 asset은 매시(`35 * * * *`)
+#: 돌고 upstream은 시간 단위로 발표한다. 6시간을 되짚어도 못 찾았다면 그것은
+#: "조금 늦은 데이터"가 아니라 upstream이 멈춘 것이고, 그때 48시간 전 관측을
+#: "최신 기상"으로 적재하는 것은 조용한 오염이다 — 빈 Page로 돌아와 시끄럽게
+#: 실패하는 편이 낫다. 요청이 49 → 7로 주는 것은 그 판단의 부수 효과다.
+#:
+#: KREX(한국도로공사 EX OpenAPI)는 data.go.kr 활용신청이 아니라 일일 한도를
+#: 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
+_KREX_WEATHER_LOOKBACK_HOURS: Final = 6
+
+
 def fetch_krex_rest_area_weather(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -763,8 +777,13 @@ def fetch_krex_rest_area_weather(
 
     ``latest_weather``는 전국 휴게소 1시간 snapshot을 한 Page로 돌려준다(restWeatherList
     는 휴게소 필터 없음) — 가장 최근 데이터가 있는 시각을 lookback으로 찾는다.
-    페이지네이션 불필요. generator 소비 종료(또는 close)시 ``finally``에서
-    ``client.close()``.
+    페이지네이션은 없지만 **호출 한 번이 요청 한 번이 아니다**: 라이브러리는
+    ``range(lookback_hours + 1)``로 한 시각씩 과거로 내려가며 비어 있지 않은 첫
+    페이지를 찾는다(``krex/client.py``). 기본값 48이면 **최악 49 요청**이고, 그
+    사실이 이 저장소 어디에도 적혀 있지 않았다(T-VN-QUOTA-ARITHMETIC).
+
+    그래서 여기서 명시한다 — :data:`_KREX_WEATHER_LOOKBACK_HOURS`. generator 소비
+    종료(또는 close)시 ``finally``에서 ``client.close()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -780,7 +799,9 @@ def fetch_krex_rest_area_weather(
 
     client = krex.KrexClient(ex_api_key=api_key)
     try:
-        page = client.restarea.latest_weather()
+        page = client.restarea.latest_weather(
+            lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
+        )
         yield from page.items
     finally:
         client.close()
@@ -830,6 +851,46 @@ async def fetch_knps_geometry_records(
         await client.aclose()
 
 
+#: krforest 페이지네이션의 미선언 상한. ``num_of_rows=1000``이므로 10장 = 10,000행이고,
+#: 이 네 dataset은 그 근처도 아니다(휴양림·산악기상·산불위험·산사태 모두 수천 행대).
+#: 선언 건수(``total_count``)를 알면 헬퍼가 그쪽으로 상한을 **올린다** — 이 값은
+#: "upstream이 건수를 말해 주지 않을 때"의 backstop이다.
+#:
+#: 낮게 잡는 이유가 쿼터다. 종전에는 krforest 라이브러리의 ``iter_pages``를 그대로
+#: 썼는데, 그것은 ``max_pages``를 주지 않으면 ``total_count``에서 상한을 유도하고
+#: **실패하면 10,000페이지**까지 간다(``_ITER_PAGES_HARD_PAGE_CAP``). 산불위험예보의
+#: 실측 일일 한도는 오퍼레이션당 **1,000**이다(docs/etl/upstream-quota.md) — 한 번의
+#: 폭주가 그날 한도의 10배를 쓴다. 그리고 라이브러리는 상한에서 조용히 ``return``하므로
+#: 절단이 성공으로 보인다. 이 저장소의 헬퍼는 ``ProviderPaginationOverrun``으로
+#: 시끄럽게 실패한다.
+_KRFOREST_MAX_PAGES: Final = 10
+
+
+async def _iter_krforest_records(
+    endpoint: Callable[..., Awaitable[Any]],
+    *,
+    label: str,
+    num_of_rows: int = 1000,
+) -> AsyncIterator[Any]:
+    """krforest 페이지 API를 **상한이 있는** 저장소 공통 규칙으로 순회한다."""
+
+    krforest = cast(Any, importlib.import_module("krforest"))
+
+    async def _page(page_no: int) -> ProviderPage:
+        page = await endpoint(page_no=page_no, num_of_rows=num_of_rows)
+        return ProviderPage(items=page.items, total_count=page.total_count)
+
+    async for record in aiter_paginated_items(
+        _page,
+        num_of_rows=num_of_rows,
+        label=label,
+        max_pages=_KRFOREST_MAX_PAGES,
+        end_of_pages=(krforest.ForestNoDataError,),
+        warn=_LOGGER.warning,
+    ):
+        yield record
+
+
 async def fetch_krforest_recreation_forests(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -853,11 +914,11 @@ async def fetch_krforest_recreation_forests(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=api_key)
     try:
-        async for page in client.iter_pages(
-            client.travel.standard_recreation_forests, num_of_rows=1000
+        async for record in _iter_krforest_records(
+            client.travel.standard_recreation_forests,
+            label="krforest travel.standard_recreation_forests",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -950,12 +1011,11 @@ async def fetch_krforest_mountain_weather(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.travel.mountain_weather,
-            num_of_rows=1000,
+            label="krforest travel.mountain_weather",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -975,12 +1035,11 @@ async def fetch_krforest_wildfire_risk_forecast(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.safety.wildfire_risk_forecast,
-            num_of_rows=1000,
+            label="krforest safety.wildfire_risk_forecast",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -1000,12 +1059,11 @@ async def fetch_krforest_landslide_forecast_issues(
     krforest = cast(Any, importlib.import_module("krforest"))
     client = krforest.ForestClient(api_key=secret.get_secret_value())
     try:
-        async for page in client.iter_pages(
+        async for record in _iter_krforest_records(
             client.safety.landslide_forecast_issues,
-            num_of_rows=1000,
+            label="krforest safety.landslide_forecast_issues",
         ):
-            for record in page.items:
-                yield record
+            yield record
     finally:
         await client.aclose()
 
@@ -2241,8 +2299,25 @@ def fetch_visitkorea_festival_events(
     client = visitkorea.KrTourApiClient(service_key=api_key)
     kst = timezone(timedelta(hours=9))
     start = date(datetime.now(kst).year, 1, 1)
+    num_of_rows = 100
+
+    def _page(page_no: int) -> ProviderPage:
+        page = client.search_festival(start, page_no=page_no, num_of_rows=num_of_rows)
+        return ProviderPage(items=page.items, total_count=page.total_count)
+
     try:
-        for page in client.iter_pages(client.search_festival, start, num_of_rows=100):
-            yield from page.items
+        # visitkorea의 `iter_pages`는 `max_pages`를 주지 않으면 **상한이 없다**
+        # (`_pagination.iter_paginated_pages`: `total_count`가 말하는 만큼 전부 걷는다).
+        # 같은 페이지 반복은 잡지만 "너무 많은 페이지"는 잡지 않는다. 이 오퍼레이션의
+        # 실측 일일 한도는 1,000이다(docs/etl/upstream-quota.md) — 100행 × 50페이지
+        # = 5,000건이면 국내 연간 축제 수를 크게 넘고, 요청은 50으로 묶인다.
+        # 선언 건수가 더 크면 헬퍼가 상한을 그쪽으로 올린다.
+        yield from iter_paginated_items(
+            _page,
+            num_of_rows=num_of_rows,
+            label="visitkorea search_festival",
+            max_pages=50,
+            warn=_LOGGER.warning,
+        )
     finally:
         client.close()

@@ -88,9 +88,23 @@ run 하나가 실패하면 같은 순회를 세 번 더 돈다:
 - **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 설정에서 유도된다.
 - **bulk/표준데이터**: sweep당 1~수 요청(페이지 수). 코드가 세고 있지만 **지표로
   내보내지 않는다**.
-- **per-record 확장형**(krex `latest_weather()`의 `lookback_hours=48` → 49 요청,
-  krforest `iter_pages`의 `max_pages` 미지정 → 라이브러리 상한 10,000 페이지,
-  OpiNet bbox 모드): 상한이 선언돼 있지 않다. 이것이 별도 과제다.
+**"호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다.**
+
+| 자리 | 선언 전 | 지금 |
+|---|---|---|
+| krex `latest_weather()` | `lookback_hours` 기본 48 → **최악 49 요청**. 저장소 문서는 "페이지네이션 불필요"라고만 적었다 | `_KREX_WEATHER_LOOKBACK_HOURS = 6` → 최악 7. 6시간을 못 찾으면 upstream이 멈춘 것이므로 48시간 전 관측을 "최신"으로 적재하지 않고 실패한다 |
+| krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `total_count` 유도 실패 시 **10,000 페이지**, 그리고 상한에서 **조용히 `return`** | 저장소 공통 `aiter_paginated_items`(`max_pages=10`) → 넘으면 `ProviderPaginationOverrun`으로 시끄럽게 실패 |
+| visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `max_pages=50`(100행 × 50 = 5,000건) |
+
+**OpiNet bbox 모드는 "무제한"이 아니었다.** 라이브러리가 격자 셀 수를 세어
+20,000을 넘으면 **호출 전에** `OpinetInvalidParameterError`를 던진다
+(`_MAX_BBOX_GRID_CELLS`). 다만 (1) 20,000은 bbox **하나당** 상한이고
+`_opinet_iter_stations`는 여러 bbox를 순회하므로 총량은 그 합이며, (2) Map 쪽에는
+자체 예산이 선언돼 있지 않다. 실제로 총량을 묶고 있는 것은 쿼터 설정이 아니라
+`_skip_opinet_if_already_succeeded_today` — **하루 한 번 성공하면 그날은 건너뛴다**는
+coalescing이다. 셀 수 계산은 provider private이라 Map이 복제하면 drift가 나므로
+(이 저장소가 이미 그 이유로 복제를 거부했다), 여기서는 숫자를 새로 짓지 않고
+사실만 적는다. OpiNet 일일 한도 실측이 그다음 단계다.
 
 `log_api_calls` 설정은 이름이 약속하는 것을 하지 않는다 — 프로덕션에서 그것을 읽는
 곳이 없다.
