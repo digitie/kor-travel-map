@@ -52,9 +52,9 @@ output을 내지 않으므로 `add_output_metadata`로 실은 값은 사라진�
 부르게 하고 계수가 N인지 재는 런타임 테스트**가 본다. 그쪽이 (a)를 실제로 잡는
 유일한 층이다.
 
-진입점 33개 중 29개가 전부 센다. 못 세는 둘은 upstream 요청이 아예 없고, 나머지
-둘은 OpiNet bbox enumerate — provider가 격자 셀마다 부르는데 그 셀 수가 provider
-private이라 **세지 않는다.** 1로 세면 1과 20,000이 같아진다.
+진입점 39개 중 34개가 전부 센다. 못 세는 둘은 upstream 요청이 아예 없고, 부분
+계측 셋은 OpiNet bbox enumerate 둘(provider가 격자 셀마다 부르는데 그 셀 수가
+provider private이다 — 1로 세면 1과 20,000이 같아진다)과 MOIS asset 경로다.
 
 ## 2026-09-13 — 분모를 얻었고, 적대 리뷰가 내 주장 셋을 뒤집었다
 

@@ -2072,7 +2072,7 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 1. [x] **분모가 기록돼 있다.** (2026-09-13) 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
    상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
    활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
-2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 **33개 중 29개**가 요청을
+2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 **39개 중 34개**가 요청을
    전부 세고, 그 수가 `upstream_requests_min`으로 asset output metadata에 실린다.
    못 세는 둘은 upstream 요청이 아예 없고(번들 정적·로컬 sqlite), 나머지 둘은
    **부분 계측**으로 선언돼 있다(OpiNet bbox enumerate — provider가 격자 셀마다

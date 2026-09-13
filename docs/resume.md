@@ -5,7 +5,7 @@
 **다음 한 작업: 이 브랜치의 PR을 열고 CI green을 확인한 뒤 머지.**
 
 분모는 `0b60a8508`(#1227)로 들어갔고, 이 브랜치가 분자를 붙인다. upstream 진입점
-33개 중 29개가 요청을 전부 세고 그 수가 `upstream_requests_min`으로 asset output
+39개 중 34개가 요청을 전부 세고 그 수가 `upstream_requests_min`으로 asset output
 metadata에 실린다. 배선은 `ContextVar`다 — fetcher가 generator라 인자로는 흘릴 수
 없었고, 시그니처를 하나도 바꾸지 않는다.
 
