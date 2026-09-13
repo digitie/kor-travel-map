@@ -50,6 +50,10 @@ from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_kma_weather_alerts,
 )
+from kortravelmap.dagster.upstream_requests import (
+    counting_upstream_requests,
+    observed_upstream_requests,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -1992,4 +1996,69 @@ def test_kma_refresh_failure_identity_must_match_the_resolved_membership() -> No
             message="boom",
         ),
         membership,
+    )
+
+
+async def test_grid_loop_counts_one_upstream_request_per_grid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """격자 하나 = 요청 하나. **효과로** 결박한다.
+
+    이 판이 `KmaWeatherLoadResult.as_metadata()`에서 `upstream_requests_min`을
+    뺐다(정본을 하나로 하려고). 그래서 격자 루프의 `note_upstream_request()`를
+    지워도 빨개지는 테스트가 하나도 없게 됐다 — 2026-09-13 3차 적대 리뷰가 그것을
+    잡았다. KMA는 분모를 실측한 provider 중 가장 큰 소비자다.
+    """
+
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665), (129.07, 35.17), (128.6, 35.87)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+    forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
+
+    with counting_upstream_requests():
+        result = await run_feature_weather_kma_ultra_short_nowcast(
+            _context(kor_travel_map_client, forecast)
+        )
+        observed = observed_upstream_requests()
+
+    assert result.grids_total >= 2, "격자가 하나뿐이면 '루프마다'를 잴 수 없다"
+    assert len(forecast.calls) == result.grids_total
+    assert observed == result.grids_total, (
+        f"격자 {result.grids_total}개인데 {observed}건을 셌다 — "
+        "격자 하나가 오퍼레이션 호출 하나다"
+    )
+
+
+async def test_a_failed_grid_is_still_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패한 격자도 요청은 나갔다 — `grids_fetched`와 분자가 다른 수인 이유다."""
+
+    _patch_grid_and_bases(monkeypatch)
+    kor_travel_map_client = _FakeKrtourClient(
+        target_coords=[(126.978, 37.5665), (129.07, 35.17)],
+        place_coords=[("f1", 126.978, 37.5665)],
+    )
+
+    class _FatalError(Exception):
+        retryable = False
+
+    class _FatalForecast(_FakeForecastService):
+        def now(self, *, nx: int, ny: int) -> Any:
+            self.calls.append(("now-fatal", nx, ny))
+            raise _FatalError("bad key")
+
+    forecast = _FatalForecast(snapshot=_NOWCAST_SNAPSHOT)
+
+    with counting_upstream_requests():
+        with pytest.raises(ProviderDatasetRefreshFailure):
+            await run_feature_weather_kma_ultra_short_nowcast(
+                _context(kor_travel_map_client, forecast)
+            )
+        observed = observed_upstream_requests()
+
+    assert observed == 1, (
+        f"첫 격자에서 죽었는데 {observed}건을 셌다 — 나간 요청은 정확히 1건이다"
     )

@@ -534,13 +534,23 @@ def test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard() -> N
     assert openers, "계수기를 여는 함수를 하나도 찾지 못했다 — 결박이 사라졌다"
 
 
-def _enclosing_with_calls(module: ast.Module, target: ast.AST) -> set[str]:
-    """``target``을 감싸는 모든 ``with`` 문의 context manager 호출 이름."""
-
+def _parent_map(module: ast.Module) -> dict[ast.AST, ast.AST]:
     parents: dict[ast.AST, ast.AST] = {}
     for node in ast.walk(module):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
+    return parents
+
+
+def _enclosing_with_calls(
+    parents: dict[ast.AST, ast.AST], target: ast.AST
+) -> set[str]:
+    """``target``을 감싸는 ``with``의 context manager 이름 — **같은 함수 안에서만**.
+
+    함수 경계에서 멈추는 이유는, 멈추지 않으면 ``with`` 안에 ``def``만 두고 그
+    함수를 밖에서 불러도 초록이 되기 때문이다(3차 리뷰). 계수기는 **호출 시점**에
+    열려 있어야 하므로 정의를 감싼 ``with``는 아무 의미가 없다.
+    """
 
     names: set[str] = set()
     node: ast.AST | None = target
@@ -554,7 +564,11 @@ def _enclosing_with_calls(module: ast.Module, target: ast.AST) -> set[str]:
                         names.add(func.id)
                     elif isinstance(func, ast.Attribute):
                         names.add(func.attr)
-        node = parents.get(node)
+        parent = parents.get(node)
+        if isinstance(parent, ast.AsyncFunctionDef | ast.FunctionDef | ast.Lambda):
+            # 여기서 끊는다 — 그 위의 with는 정의를 감쌀 뿐 호출을 감싸지 않는다.
+            return names
+        node = parent
     return names
 
 
@@ -572,27 +586,68 @@ def test_the_queue_runner_opens_the_counter_around_the_raw_run_function() -> Non
     """
 
     module = ast.parse((_PACKAGE / "feature_update_runner.py").read_text(encoding="utf-8"))
+    parents = _parent_map(module)
     dispatches = [
         node
         for node in ast.walk(module)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "run"
+        and node.func.attr in {"run", "resources"}
         and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "spec"
     ]
-    assert dispatches, (
-        "runner가 raw run 함수를 부르는 자리를 찾지 못했다 — 이 검사가 아무것도 "
-        "보지 않고 있다(유도가 낡았다)."
+    assert len(dispatches) >= 2, (
+        "runner가 raw run 함수와 resources 팩토리를 부르는 자리를 찾지 못했다 — "
+        f"{len(dispatches)}개만 보인다. 이 검사가 아무것도 보지 않고 있다."
     )
     uncounted = [
-        node.lineno
+        f"{node.func.attr}@{node.lineno}"
         for node in dispatches
-        if _COUNTER_SCOPE not in _enclosing_with_calls(module, node)
+        if isinstance(node.func, ast.Attribute)
+        and _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
     ]
     assert uncounted == [], (
-        f"raw run 함수를 계수 범위 **밖**에서 부른다(line {uncounted}). 그 경로의 "
-        "`note_upstream_request()`는 전부 no-op이 되고, 계측된 fetcher가 큐로 돌면 "
-        "`upstream_requests_min` 없이 조용히 나간다."
+        f"계수 범위 **밖**에서 부른다({uncounted}). 그 경로의 "
+        "`note_upstream_request()`는 전부 no-op이 되고, 계측된 진입점이 큐로 돌면 "
+        "`upstream_requests_min` 없이 조용히 나간다. **`spec.resources`도 같은 "
+        "범위여야 한다** — MOIS Phase A는 거기서 전국 파일을 받는다(3차 리뷰 blocker)."
+    )
+
+
+def test_the_asset_boundaries_open_the_counter_around_the_run_callable() -> None:
+    """asset 경계 둘도 **호출을 감싸는지** 본다 — 이름이 나오는지가 아니라.
+
+    종전 검사(`test_the_counting_scope_is_opened_at_the_same_boundaries_as_the_guard`)는
+    "그 함수가 `counting_upstream_requests`를 부르는가"만 물었다. `with`를 실제
+    호출 **밖**으로 빼도 전부 초록이었다(3차 리뷰). 여기서는 호출 노드를 찾아
+    그것을 감싸는 `with`를 본다.
+    """
+
+    targets = [
+        ("feature_operation_tracking.py", "run"),
+        ("mcst_features.py", "run_feature_place_mcst_culture"),
+    ]
+    problems: list[str] = []
+    for filename, callee in targets:
+        module = ast.parse((_PACKAGE / filename).read_text(encoding="utf-8"))
+        parents = _parent_map(module)
+        calls = [
+            node
+            for node in ast.walk(module)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == callee
+        ]
+        assert calls, f"{filename}에서 `{callee}(...)` 호출을 찾지 못했다 — 유도가 낡았다."
+        problems.extend(
+            f"{filename}:{node.lineno}"
+            for node in calls
+            if _COUNTER_SCOPE not in _enclosing_with_calls(parents, node)
+        )
+    assert problems == [], (
+        f"asset 경계가 run 호출을 계수 범위 밖에서 부른다: {problems}. "
+        "`with counting_upstream_requests():`가 그 호출을 감싸야 한다 — "
+        "이름이 같은 함수 안에 있기만 한 것으로는 부족하다."
     )
 
 

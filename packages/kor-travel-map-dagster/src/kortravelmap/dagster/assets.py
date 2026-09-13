@@ -1859,7 +1859,10 @@ async def run_feature_event_visitkorea_enrichment(
         records,
         fetched_at=fetched_at,
     )
-    context.add_output_metadata(result.as_metadata())
+    # 초크포인트를 지나야 분자가 함께 실린다. 이 asset은 visitkorea fetcher가
+    # 센 수를 들고 있으면서 종전에는 `context.add_output_metadata`를 직접 불러
+    # 그 값을 버렸다(2026-09-13 3차 적대 리뷰).
+    _add_output_metadata(context, result.as_metadata())
     await _record_feature_sync_success(
         context,
         client,

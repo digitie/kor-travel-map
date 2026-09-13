@@ -61,7 +61,12 @@ from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
-from .upstream_requests import note_upstream_request
+from .upstream_requests import (
+    UPSTREAM_REQUESTS_METADATA_KEY,
+    counting_upstream_requests,
+    note_upstream_request,
+    observed_upstream_requests,
+)
 
 __all__ = [
     "MOIS_SOURCE_SYNC_JOBS",
@@ -488,13 +493,18 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
     if fd is None:
         raise RuntimeError("MOIS 소스 DB sync가 이미 진행 중입니다. 기존 run 완료 후 재시도하세요.")
     try:
-        summary = sync_mois_source_db(
-            settings,
-            service_slugs=service_slugs,
-            org_code=org_code,
-            batch_size=batch_size,
-            dagster_run_id=context.run_id,
-        )
+        # 이 op은 asset이 아니라 plain `@op`이라 asset wrapper의 계수기를 지나지
+        # 않는다. Phase A가 전국 LOCALDATA 파일을 slug마다 받으므로 여기서 직접
+        # 열지 않으면 `note_upstream_request()`가 전부 no-op이다(3차 적대 리뷰).
+        with counting_upstream_requests():
+            summary = sync_mois_source_db(
+                settings,
+                service_slugs=service_slugs,
+                org_code=org_code,
+                batch_size=batch_size,
+                dagster_run_id=context.run_id,
+            )
+            observed_requests = observed_upstream_requests()
         full_coverage = (
             summary.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS)) and org_code is None
         )
@@ -514,6 +524,8 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
         {MOIS_SOURCE_SYNC_COVERAGE_TAG: coverage},
     )
     metadata["coverage"] = coverage
+    if observed_requests is not None:
+        metadata[UPSTREAM_REQUESTS_METADATA_KEY] = observed_requests
     context.add_output_metadata(metadata)
     return metadata
 

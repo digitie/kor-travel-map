@@ -260,39 +260,29 @@ class FeatureUpdateAssetRunner:
             )
         extra: RunnerResources | None = None
         refresh_failure: ProviderDatasetRefreshFailure | None = None
-        try:
+        # 계수기는 **resources 구성보다 앞에서** 연다. `spec.resources()`가 I/O를
+        # 할 수 있기 때문이다 - MOIS Phase A는 거기서 전국 LOCALDATA 파일을 받는다.
+        # `spec.run`만 감싸면 그 요청이 통째로 계수 범위 밖이 되어
+        # `note_upstream_request()`가 조용히 no-op이 된다(2026-09-13 3차 적대 리뷰
+        # blocker). `asyncio.to_thread`는 문맥을 복사하지만 계수기는 가변 리스트라
+        # 안쪽 증가가 바깥에 보인다(이 저장소가 실측해 둔 성질).
+        with counting_upstream_requests():
             try:
-                settings = self._settings_factory()
-                # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를
-                # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
-                # 보낸다(#617 리뷰).
-                extra = await asyncio.to_thread(spec.resources, settings, scope)
-                resources = {
-                    **self._common_resources,
-                    **dict(extra.values),
-                    "feature_update_membership": ProviderDatasetOperationMembership(
-                        provider_dataset_id=scope.provider_dataset_id,
-                        sync_scope=scope.sync_scope,
-                        operation_key=scope.operation_key,
-                    ),
-                }
-            except ProviderDatasetRefreshFailure:
-                raise
-            except Exception as exc:
-                raise ProviderDatasetRefreshFailure(
-                    provider_dataset_id=scope.provider_dataset_id,
-                    sync_scope=failure_sync_scope,
-                    operation_key=scope.operation_key,
-                    message="provider refresh resource initialization failed",
-                ) from exc
-            client = resources.get("kor_travel_map_client")
-            if isinstance(client, AsyncKorTravelMapClient):
                 try:
-                    resources["feature_update_evidence_client"] = client
-                    resources["kor_travel_map_client"] = await _bind_client_to_session(
-                        client,
-                        session,
-                    )
+                    settings = self._settings_factory()
+                    # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를
+                    # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
+                    # 보낸다(#617 리뷰).
+                    extra = await asyncio.to_thread(spec.resources, settings, scope)
+                    resources = {
+                        **self._common_resources,
+                        **dict(extra.values),
+                        "feature_update_membership": ProviderDatasetOperationMembership(
+                            provider_dataset_id=scope.provider_dataset_id,
+                            sync_scope=scope.sync_scope,
+                            operation_key=scope.operation_key,
+                        ),
+                    }
                 except ProviderDatasetRefreshFailure:
                     raise
                 except Exception as exc:
@@ -300,21 +290,35 @@ class FeatureUpdateAssetRunner:
                         provider_dataset_id=scope.provider_dataset_id,
                         sync_scope=failure_sync_scope,
                         operation_key=scope.operation_key,
-                        message="provider refresh transaction binding failed",
+                        message="provider refresh resource initialization failed",
                     ) from exc
-            try:
-                context = _DirectAssetContext(
-                    resources=resources,
-                    log=self._log,
-                    asset_key=spec.asset_key,
-                )
-                # 이 경계가 asset wrapper를 **우회한다** - 여기서는 `spec.run`이
-                # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
-                # 아니다. 그래서 계수기도 여기서 따로 열어야 한다. 열지 않으면
-                # `note_upstream_request()`가 전부 no-op이 되어, 계측된 fetcher가
-                # 큐 경로에서만 조용히 `upstream_requests_min` 없이 나간다
-                # (2026-09-13 적대 리뷰 2차 blocker).
-                with counting_upstream_requests():
+                client = resources.get("kor_travel_map_client")
+                if isinstance(client, AsyncKorTravelMapClient):
+                    try:
+                        resources["feature_update_evidence_client"] = client
+                        resources["kor_travel_map_client"] = await _bind_client_to_session(
+                            client,
+                            session,
+                        )
+                    except ProviderDatasetRefreshFailure:
+                        raise
+                    except Exception as exc:
+                        raise ProviderDatasetRefreshFailure(
+                            provider_dataset_id=scope.provider_dataset_id,
+                            sync_scope=failure_sync_scope,
+                            operation_key=scope.operation_key,
+                            message="provider refresh transaction binding failed",
+                        ) from exc
+                try:
+                    context = _DirectAssetContext(
+                        resources=resources,
+                        log=self._log,
+                        asset_key=spec.asset_key,
+                    )
+                    # 이 경계가 asset wrapper를 **우회한다** - 여기서는 `spec.run`이
+                    # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
+                    # 아니다. 계수기는 이 메서드 맨 위에서 열린다(resources 구성의
+                    # I/O까지 덮기 위해서다).
                     try:
                         result = await spec.run(context)
                     except Exception:
@@ -336,40 +340,40 @@ class FeatureUpdateAssetRunner:
                         output_metadata=context.output_metadata,
                         upstream_requests=observed_upstream_requests(),
                     )
-            except ProviderDatasetRefreshFailure:
-                raise
-            except Exception as exc:
-                raise ProviderDatasetRefreshFailure(
-                    provider_dataset_id=scope.provider_dataset_id,
-                    sync_scope=failure_sync_scope,
-                    operation_key=scope.operation_key,
-                    message="provider refresh asset execution failed",
-                ) from exc
-        except ProviderDatasetRefreshFailure as exc:
-            refresh_failure = exc
-            raise
-        finally:
-            if extra is not None:
-                try:
-                    await _close_teardowns(extra.teardowns)
+                except ProviderDatasetRefreshFailure:
+                    raise
                 except Exception as exc:
-                    if refresh_failure is None:
-                        raise ProviderDatasetRefreshFailure(
-                            provider_dataset_id=scope.provider_dataset_id,
-                            sync_scope=failure_sync_scope,
-                            operation_key=scope.operation_key,
-                            message=(
-                                "provider refresh resource teardown failed after the "
-                                "bound transaction"
-                            ),
-                        ) from exc
-                    log_error = getattr(self._log, "error", None)
-                    if callable(log_error):
-                        log_error(
-                            "provider refresh typed failure 뒤 resource teardown도 "
-                            "실패했지만 원래 failure identity를 보존한다.",
-                            exc_info=True,
-                        )
+                    raise ProviderDatasetRefreshFailure(
+                        provider_dataset_id=scope.provider_dataset_id,
+                        sync_scope=failure_sync_scope,
+                        operation_key=scope.operation_key,
+                        message="provider refresh asset execution failed",
+                    ) from exc
+            except ProviderDatasetRefreshFailure as exc:
+                refresh_failure = exc
+                raise
+            finally:
+                if extra is not None:
+                    try:
+                        await _close_teardowns(extra.teardowns)
+                    except Exception as exc:
+                        if refresh_failure is None:
+                            raise ProviderDatasetRefreshFailure(
+                                provider_dataset_id=scope.provider_dataset_id,
+                                sync_scope=failure_sync_scope,
+                                operation_key=scope.operation_key,
+                                message=(
+                                    "provider refresh resource teardown failed after the "
+                                    "bound transaction"
+                                ),
+                            ) from exc
+                        log_error = getattr(self._log, "error", None)
+                        if callable(log_error):
+                            log_error(
+                                "provider refresh typed failure 뒤 resource teardown도 "
+                                "실패했지만 원래 failure identity를 보존한다.",
+                                exc_info=True,
+                            )
 
     def _spec_for_scope(self, scope: ProviderDatasetRefreshScope) -> FeatureUpdateRunnerSpec:
         try:

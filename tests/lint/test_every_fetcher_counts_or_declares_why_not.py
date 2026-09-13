@@ -77,8 +77,17 @@ _PARTIALLY_COUNTED: dict[str, str] = {
     ),
     "fetch_opinet_station_price_details": (
         "같은 enumerate 경로를 공유한다. 상세 조회(`get_station_detail`)는 uni_id마다 "
-        "1건이라 세지만, 그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 이 값은 "
-        "실제 사용량보다 작다."
+        "1건이라 세지만(모든 모드), 그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 "
+        "이 값은 **key가 실리되 실제 사용량보다 작다.** `fetch_opinet_stations`처럼 "
+        "값을 안 내는 것이 아니다."
+    ),
+    "sync_mois_source_db": (
+        "큐 runner 경로와 Phase A op 경로는 센다. **asset 경로는 못 센다** — "
+        "`_sync_then_fetch_mois_license_records`가 Dagster resource init 시점에 "
+        "`ensure_mois_source_db_fresh`를 부르는데, resource init은 compute보다 "
+        "먼저 돌아 계수 범위 밖이다. generator로 미루면 범위 안으로 들어오지만 "
+        "동기 다운로드가 async compute의 이벤트 루프를 막는다(#617이 그래서 "
+        "`to_thread`로 보냈다)."
     ),
 }
 
@@ -123,11 +132,37 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_tourist_attractions",
         "fetch_visitkorea_festival_events",
         # fetcher 이름은 아니지만 **같은 종류의 upstream 다운로드**라 게이트 안에
-        # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받는다 — 접두사로 유도하면
-        # 이것이 통째로 게이트 밖이었다(2차 리뷰).
+        # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받고, KMA 격자 job은
+        # 격자마다 부른다 — 접두사로 유도하면 이것들이 통째로 게이트 밖이었다
+        # (2·3차 리뷰).
         "sync_mois_source_db",
+        "_run_kma_weather_asset",
+        "_run_kma_grid_weather",
+        "run_feature_weather_kma_mid_forecast",
+        "run_feature_weather_kma_short_forecast",
+        "run_feature_weather_kma_ultra_short_forecast",
+        "run_feature_weather_kma_ultra_short_nowcast",
     }
 )
+
+#: 진입점 후보를 훑을 때 쓰는 이름 접두사.
+#:
+#: ``fetch_`` 하나만 훑으면 **fetcher가 아닌 진입점**(MOIS Phase A sync, KMA 격자
+#: job)이 새로 생겨도 아무도 보지 못한다. 3차 리뷰가 그 구멍을 짚었다.
+_ENTRYPOINT_PREFIXES: tuple[str, ...] = (
+    "fetch_",
+    "sync_",
+    "_run_kma_",
+    "run_feature_weather_kma_",
+)
+
+#: **완전 계측 수를 직접 박는다.**
+#:
+#: 종전 하한은 ``len(fetchers) - len(_UNCOUNTABLE) - len(_PARTIALLY_COUNTED)``였다.
+#: 그것은 래칫이 아니라 **항등식**이다 — 면제를 하나 늘리면 좌변과 우변이 함께
+#: 줄어 아무것도 빨개지지 않는다(3차 리뷰). 수를 따로 박으면 면제를 늘리는 편집이
+#: 반드시 이 숫자를 낮추는 편집을 동반하고, 그 한 줄이 리뷰에 보인다.
+_EXPECTED_FULLY_COUNTED: int = 34
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -245,18 +280,33 @@ def test_the_declared_universe_matches_the_source() -> None:
     extra = sorted(
         leaf
         for leaf in leaves
-        if leaf.startswith("fetch_") and leaf not in _EXPECTED_FETCHERS
+        if leaf.startswith(_ENTRYPOINT_PREFIXES) and leaf not in _EXPECTED_FETCHERS
     )
     assert extra == [], (
-        f"목록에 없는 새 fetcher가 있다: {extra}. `_EXPECTED_FETCHERS`에 올리고, "
+        f"목록에 없는 새 진입점이 있다: {extra}. `_EXPECTED_FETCHERS`에 올리고, "
         "세거나 못 세는 이유를 선언해라."
+    )
+
+
+def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
+    """목록에서 **조용히 빠지는** 것을 막는 래칫.
+
+    ``extra`` 쪽 유도는 접두사에 걸려 있다. 그래서 접두사에 걸리지 않는 항목
+    (``sync_mois_source_db`` 같은 것)은 목록에서 지워도 아무것도 빨개지지
+    않았다 — 3차 리뷰가 잡은 구멍이다. 수 자체에 래칫을 걸면 줄이는 편집이
+    반드시 이 줄을 고치게 된다.
+    """
+
+    assert len(_EXPECTED_FETCHERS) >= 39, (
+        f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
+        "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
 
 
 def test_the_derivation_actually_found_the_counting_sites() -> None:
     """항진명제 방지 — 유도가 비면 아래 파라미터가 0개가 된다."""
 
-    assert len(_fetchers()) >= 30, "fetcher 유도가 낡았다 — 거의 아무것도 찾지 못했다."
+    assert len(_fetchers()) >= 39, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
     assert _counting_definitions(), (
         f"`{_NOTE}`를 부르는 정의를 하나도 찾지 못했다 — 계측이 사라졌다."
     )
@@ -354,10 +404,17 @@ def test_the_exemption_floor_is_bound_to_what_is_declared() -> None:
         and name not in _PARTIALLY_COUNTED
         and name not in _UNCOUNTABLE
     ]
-    expected = len(fetchers) - len(_UNCOUNTABLE) - len(_PARTIALLY_COUNTED)
-    assert len(fully) == expected, (
-        f"완전 계측이 {len(fully)}개인데 선언에서 기대되는 값은 {expected}개다"
-        f"(전체 {len(fetchers)}, 비계측 {len(_UNCOUNTABLE)}, "
-        f"부분 {len(_PARTIALLY_COUNTED)}). 계측을 빼거나 강등했다면 그 목록도 "
-        "함께 고쳐야 하고, 그 편집이 리뷰에 보여야 한다."
+    assert len(fully) == _EXPECTED_FULLY_COUNTED, (
+        f"완전 계측이 {len(fully)}개인데 이 파일이 박아 둔 수는 "
+        f"{_EXPECTED_FULLY_COUNTED}개다(전체 {len(fetchers)}, 비계측 "
+        f"{len(_UNCOUNTABLE)}, 부분 {len(_PARTIALLY_COUNTED)}). 계측을 빼거나 "
+        "강등했다면 `_EXPECTED_FULLY_COUNTED`도 함께 낮춰야 하고, 그 한 줄이 "
+        "리뷰에 보여야 한다. 늘렸다면 올려라."
+    )
+    # 선언 목록과 어긋나지 않는지도 함께 본다 — 둘 다 손으로 관리되므로 서로를
+    # 검산한다.
+    derived = len(fetchers) - len(_UNCOUNTABLE) - len(_PARTIALLY_COUNTED)
+    assert derived == _EXPECTED_FULLY_COUNTED, (
+        f"선언에서 유도한 수({derived})와 박아 둔 수({_EXPECTED_FULLY_COUNTED})가 "
+        "다르다 — 목록 하나를 고치고 다른 하나를 잊었다."
     )
