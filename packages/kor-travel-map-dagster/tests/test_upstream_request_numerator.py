@@ -113,9 +113,8 @@ def test_a_failed_sweep_still_reports_what_it_spent() -> None:
             raise RuntimeError("upstream 장애")
         return ProviderPage(items=[f"p{page_no}"], total_count=99)
 
-    with counting_upstream_requests() as counter:
-        with pytest.raises(RuntimeError):
-            list(iter_paginated_items(_page, num_of_rows=1, label="fails"))
+    with counting_upstream_requests() as counter, pytest.raises(RuntimeError):
+        list(iter_paginated_items(_page, num_of_rows=1, label="fails"))
 
     assert counter[0] == 3, "실패로 끝난 요청도 쿼터를 쓴다 — 세야 한다"
 
