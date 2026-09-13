@@ -2,8 +2,7 @@
 
 ## 2026-09-14 — T-VN-QUOTA-ARITHMETIC 종결, 그리고 큐 경로가 남았다
 
-**다음 한 작업: `T-VN-QUOTA-DENOMINATORS` — 남은 provider 넷의 분모를 포털에서
-본다.** `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr이 아니라 각자 포털에 있고
+**다음 한 작업: `T-VN-QUEUE-QUOTA` — 남은 provider 넷의 분모부터 포털에서 본다.** `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr이 아니라 각자 포털에 있고
 아직 보지 않았다. OpiNet의 1,500/일은 실측이 아닌데 예산 600이 그 위에 서 있다.
 **조회이지 엔지니어링이 아니다.**
 

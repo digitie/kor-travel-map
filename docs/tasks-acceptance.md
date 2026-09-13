@@ -2290,7 +2290,7 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 **왜 지금 닫지 않았나.** 2026-09-13 분자 PR이 (1)을 하려다 (2)·(3)을 만들었고, 그
 판의 주제가 아니어서 되돌렸다. 되돌린 상태가 종전과 같으므로 회귀는 없다.
 
-## T-VN-QUOTA-DENOMINATORS
+## T-VN-QUEUE-QUOTA
 
 **급하지 않다** — 2026-09-14 prod 실측 feature materialization 0건. 만들기 전에
 본다. 배경은 `docs/etl/upstream-quota.md` §2·§5.
