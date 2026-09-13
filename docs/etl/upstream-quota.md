@@ -202,10 +202,14 @@ vs 무료키 1,500/일, #545). **예산을 짜 둔 자리의 분자가 0이었�
 
 `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 **명시 목록**
 (`_EXPECTED_FETCHERS`)의 진입점마다 **세거나, 왜 못 세는지 선언하거나**를 요구한다.
-목록에는 fetcher 32개 + MOIS Phase A(`sync_mois_source_db`) + KMA 격자/중기 진입점
-6개 + krex 스냅샷 헬퍼 1개가 들어 있다 — 접두사로 유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수
-있었고, MOIS의 slug별 LOCALDATA 다운로드와 KMA 격자 루프는 통째로 게이트 밖이었다.
-목록 크기 자체에도 래칫이 걸려 있어 **조용히 줄일 수 없다**.
+목록에는 fetcher 30개 + MOIS Phase A(`sync_mois_source_db`) + krex 스냅샷 헬퍼 1개가
+들어 있다 — 접두사로 유도하던 종전 판은 개명 한 번으로 선언 없이 빠질 수 있었고,
+MOIS의 slug별 LOCALDATA 다운로드는 통째로 게이트 밖이었다. 목록 크기 자체에도
+래칫이 걸려 있어 **조용히 줄일 수 없다**.
+
+**KMA·에어코리아는 목록에 없다**(2026-09-14 지시) — 게이트의
+`_EXCLUDED_FROM_EVALUATION`에 이유와 함께 적혀 있다. 계수 호출은 코드에 그대로
+있으므로 그 asset이 돌면 값은 나온다. 빠진 것은 **평가**이지 계측이 아니다.
 
 선언된 비계측은 **둘뿐**이고 둘 다 upstream 요청이 아예 없다:
 
