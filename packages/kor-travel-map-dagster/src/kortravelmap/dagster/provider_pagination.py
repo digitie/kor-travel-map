@@ -82,6 +82,27 @@ throttle 구간에서도 성립한다. 다만 어느 구간을 가정했는지 �
 상한을 올릴 때 그 배수를 잊는다.
 """
 
+DEFAULT_ABSOLUTE_MAX_PAGES: Final = 10_000
+"""**선언 건수가 넘지 못하는** 절대 상한.
+
+``max_pages``는 상한이 아니라 **바닥**이다. ``absorb``가
+``ceiling = max(ceiling, needed * _DECLARED_PAGE_SLACK + 1)``로 선언 건수에 맞춰
+올리기 때문이다 — 그 설계는 옳다(선언 건수가 상한을 정한다). 그런데 그 위에
+아무것도 없으면 **upstream이 말한 숫자가 곧 우리의 요청 수**가 된다.
+``total_count``를 잘못 파싱하거나 upstream이 거짓을 말하면 그 한 번의 sweep이
+쿼터를 통째로 태운다.
+
+2026-09-13에 그것이 실측으로 드러났다. krforest 4곳을 이 헬퍼로 옮기며
+``max_pages=10``을 주고 "이제 묶였다"고 적었는데, 선언 건수를 10억으로 둔 테스트가
+1,000페이지를 전부 걸었다. **바닥을 낮춘 것이 천장을 낮춘 것이 아니었다.**
+
+기본값 10,000은 provider 라이브러리들이 스스로 두는 hard cap과 같은 크기다
+(``krforest._ITER_PAGES_HARD_PAGE_CAP``). 여기서 그것을 좁히지 않는 이유는 기존
+호출자(MOIS bulk 등)의 정상 동작을 바꾸지 않기 위해서다 — 이 기본값이 닫는 것은
+"무한"이지 "많음"이 아니다. 쿼터가 좁은 경계는 호출 지점에서
+``absolute_max_pages``를 명시해 따로 좁힌다.
+"""
+
 _DECLARED_PAGE_SLACK: Final = 2
 """``total_count``를 알 때 허용하는 여유 배수.
 
@@ -127,6 +148,7 @@ def iter_paginated_items(
     num_of_rows: int,
     label: str,
     max_pages: int = DEFAULT_MAX_PAGES,
+    absolute_max_pages: int = DEFAULT_ABSOLUTE_MAX_PAGES,
     end_of_pages: tuple[type[BaseException], ...] = (),
     warn: Callable[[str], None] | None = None,
 ) -> Iterator[Any]:
@@ -145,7 +167,13 @@ def iter_paginated_items(
         ``total_count``를 모를 때의 안전 상한. 넘기면
         :class:`ProviderPaginationOverrun`. 아는 경우에는
         ``ceil(total_count / num_of_rows) * _DECLARED_PAGE_SLACK + 1``과 이 값 중
-        **큰 쪽**을 쓴다 — 선언 건수가 상한을 정하게 한다.
+        **큰 쪽**을 쓴다 — 선언 건수가 상한을 정하게 한다. 즉 이것은 천장이 아니라
+        **바닥**이다.
+    absolute_max_pages:
+        선언 건수가 **넘지 못하는** 천장. upstream이 ``total_count``를 거짓으로
+        크게 말하거나 provider가 그것을 잘못 파싱하면 위 규칙만으로는 요청 수가
+        upstream의 숫자를 따라간다 — 쿼터가 좁은 경계에서는 그 한 번이 하루치를
+        태운다. 기본값은 :data:`DEFAULT_ABSOLUTE_MAX_PAGES`.
     end_of_pages:
         "더 이상 페이지가 없다"를 **예외로 알리는** provider의 예외형들. 빈 페이지
         대신 예외를 던지는 provider가 있다 — krex는 resultCode ``03``/``NO_DATA``에
@@ -167,7 +195,12 @@ def iter_paginated_items(
     ProviderPaginationOverrun
         ``max_pages``를 넘겼을 때.
     """
-    state = _PageState(num_of_rows=num_of_rows, label=label, ceiling=max_pages)
+    state = _PageState(
+        num_of_rows=num_of_rows,
+        label=label,
+        ceiling=max_pages,
+        absolute_ceiling=absolute_max_pages,
+    )
     while True:
         state.page_no += 1
         state.guard_ceiling()
@@ -188,6 +221,7 @@ async def aiter_paginated_items(
     num_of_rows: int,
     label: str,
     max_pages: int = DEFAULT_MAX_PAGES,
+    absolute_max_pages: int = DEFAULT_ABSOLUTE_MAX_PAGES,
     end_of_pages: tuple[type[BaseException], ...] = (),
     warn: Callable[[str], None] | None = None,
 ) -> AsyncIterator[Any]:
@@ -199,7 +233,12 @@ async def aiter_paginated_items(
 
     인자·예외·경고 계약은 sync 판과 동일하다. 그 문서는 위쪽을 보라.
     """
-    state = _PageState(num_of_rows=num_of_rows, label=label, ceiling=max_pages)
+    state = _PageState(
+        num_of_rows=num_of_rows,
+        label=label,
+        ceiling=max_pages,
+        absolute_ceiling=absolute_max_pages,
+    )
     while True:
         state.page_no += 1
         state.guard_ceiling()
@@ -227,16 +266,26 @@ class _PageState:
     num_of_rows: int
     label: str
     ceiling: int
+    absolute_ceiling: int = DEFAULT_ABSOLUTE_MAX_PAGES
     seen: int = 0
     declared: int | None = None
     page_no: int = 0
     finished: bool = False
 
     def guard_ceiling(self) -> None:
-        if self.page_no > self.ceiling:
+        effective = min(self.ceiling, self.absolute_ceiling)
+        if self.page_no > effective:
+            hit_absolute = effective == self.absolute_ceiling < self.ceiling
             raise ProviderPaginationOverrun(
-                f"{self.label}: page 상한 {self.ceiling}를 넘겼다 "
-                f"(수신 {self.seen}건, 선언 {self.declared}). "
+                f"{self.label}: page 상한 {effective}를 넘겼다 "
+                f"(수신 {self.seen}건, 선언 {self.declared}"
+                + (
+                    f", 선언이 요구한 상한 {self.ceiling}는 절대 상한 "
+                    f"{self.absolute_ceiling}에 막혔다"
+                    if hit_absolute
+                    else ""
+                )
+                + "). "
                 "upstream이 범위 밖 page에 빈 페이지를 주지 않거나 행을 과도하게 "
                 "걸러내는지 확인할 것."
             )

@@ -863,6 +863,11 @@ async def fetch_knps_geometry_records(
 #: 폭주가 그날 한도의 10배를 쓴다. 그리고 라이브러리는 상한에서 조용히 ``return``하므로
 #: 절단이 성공으로 보인다. 이 저장소의 헬퍼는 ``ProviderPaginationOverrun``으로
 #: 시끄럽게 실패한다.
+#:
+#: ``max_pages``가 아니라 ``absolute_max_pages``로 넘긴다. 전자는 천장이 아니라
+#: **바닥**이라 upstream이 선언한 건수가 그 위로 올려 버린다 — 처음에 그것을
+#: ``max_pages``로 줬다가, 선언 건수를 10억으로 둔 테스트가 1,000페이지를 전부 걷는
+#: 것을 보고 알았다.
 _KRFOREST_MAX_PAGES: Final = 10
 
 
@@ -884,7 +889,7 @@ async def _iter_krforest_records(
         _page,
         num_of_rows=num_of_rows,
         label=label,
-        max_pages=_KRFOREST_MAX_PAGES,
+        absolute_max_pages=_KRFOREST_MAX_PAGES,
         end_of_pages=(krforest.ForestNoDataError,),
         warn=_LOGGER.warning,
     ):
@@ -2275,6 +2280,13 @@ def fetch_standard_parking_lots(
         client.close()
 
 
+#: visitkorea 축제 순회의 **절대** 페이지 상한. 100행 × 50 = 5,000건이면 국내 연간
+#: 축제 수를 크게 넘는다. 이 오퍼레이션의 실측 일일 한도는 1,000이다
+#: (docs/etl/upstream-quota.md). 넘으면 조용히 자르지 않고
+#: ``ProviderPaginationOverrun``으로 실패한다 — 그때 숫자를 의도적으로 올려라.
+_VISITKOREA_FESTIVAL_MAX_PAGES: Final = 50
+
+
 def fetch_visitkorea_festival_events(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -2308,15 +2320,15 @@ def fetch_visitkorea_festival_events(
     try:
         # visitkorea의 `iter_pages`는 `max_pages`를 주지 않으면 **상한이 없다**
         # (`_pagination.iter_paginated_pages`: `total_count`가 말하는 만큼 전부 걷는다).
-        # 같은 페이지 반복은 잡지만 "너무 많은 페이지"는 잡지 않는다. 이 오퍼레이션의
-        # 실측 일일 한도는 1,000이다(docs/etl/upstream-quota.md) — 100행 × 50페이지
-        # = 5,000건이면 국내 연간 축제 수를 크게 넘고, 요청은 50으로 묶인다.
-        # 선언 건수가 더 크면 헬퍼가 상한을 그쪽으로 올린다.
+        # 같은 페이지 반복은 잡지만 "너무 많은 페이지"는 잡지 않는다.
+        #
+        # `max_pages`가 아니라 `absolute_max_pages`를 쓴다 — 전자는 천장이 아니라
+        # 바닥이라 선언 건수가 그 위로 올린다(그것을 실측으로 확인했다).
         yield from iter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="visitkorea search_festival",
-            max_pages=50,
+            absolute_max_pages=_VISITKOREA_FESTIVAL_MAX_PAGES,
             warn=_LOGGER.warning,
         )
     finally:
