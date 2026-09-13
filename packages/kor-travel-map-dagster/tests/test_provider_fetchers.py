@@ -16,7 +16,6 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 import kortravelmap.dagster.provider_fetchers as provider_fetchers
-from kortravelmap.dagster.provider_pagination import ProviderPaginationOverrun
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
 )
@@ -46,6 +45,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
+from kortravelmap.dagster.provider_pagination import ProviderPaginationOverrun
 from kortravelmap.dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
     PROVIDER_RECORD_RESOURCE_SPECS,
