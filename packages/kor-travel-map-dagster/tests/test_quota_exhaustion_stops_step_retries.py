@@ -267,3 +267,14 @@ def test_the_kma_asset_publishes_the_quota_numerator() -> None:
     assert metadata["upstream_requests_min"] == 287, (
         "분자가 격자 호출 수와 다르다 — 격자 하나 = 요청 하나가 이 job의 계약이다."
     )
+
+
+def test_a_plain_failure_would_still_be_retried() -> None:
+    """``Failure``만으로는 부족하다 — ``allow_retries``의 기본값은 ``True``다.
+
+    이 단언이 없으면 누군가 `allow_retries=False`를 지우고도 "Failure를 던지니까
+    재시도 안 된다"고 읽는다. Dagster는 그 인자를 보고 판단한다
+    (`_core/execution/plan/utils.py`의 `user_code_error_boundary`).
+    """
+
+    assert Failure(description="x").allow_retries is True

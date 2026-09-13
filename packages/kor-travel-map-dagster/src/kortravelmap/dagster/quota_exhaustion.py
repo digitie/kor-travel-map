@@ -14,6 +14,26 @@ Dagster가 60·120·240초 간격으로 **같은 순회를 세 번 더** 돌린�
 **step 재시도**다. 안쪽에서 "이건 재시도해도 소용없다"고 판정한 실패가 바깥에서
 세 번 더 순회를 사는 모순이 있었다.
 
+**이 기제가 실재한다는 근거.** Dagster 1.13.18
+``_core/execution/plan/utils.py``의 ``user_code_error_boundary``가 그 자리다::
+
+    if retry_policy:
+        # if Failure with allow_retries set to false, disregard retry policy and raise
+        if isinstance(e, Failure) and not e.allow_retries:
+            raise e
+        raise RetryRequestedFromPolicy(...)
+
+즉 ``allow_retries=False``가 ``RetryPolicy``를 **이긴다**. 그리고 그 위의
+``except DagsterError as de: raise de``가 먼저 잡지 않는다 — ``Failure``의 MRO는
+``(Failure, Exception, BaseException, object)``라 ``DagsterError``가 아니다(실측).
+
+따라서 **그냥 ``Failure``를 던지는 것으로는 부족하다.** ``allow_retries``의 기본값은
+``True``이고(``events.py``: ``check.opt_bool_param(allow_retries, ..., True)``) 그때는
+정책이 그대로 세 번 더 돌린다. 이 모듈이 그 인자를 명시하는 이유다.
+
+run 수준 재시도는 별개 축인데 이 배포에는 없다 — ``docker/dagster.yaml``에
+``run_retries`` 블록이 없고 ``run_monitoring.max_resume_run_attempts``는 0이다.
+
 **분류를 문자열에서 되찾지 않는다.** asset 경계는 provider 예외를
 ``ProviderDatasetRefreshFailure``로 감싸면서 ``failure_kind``를 메시지 문자열로
 녹인다(``message=f"KMA provider refresh failed: {exc}"``). 그러나 그 자리는
