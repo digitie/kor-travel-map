@@ -36,6 +36,7 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
+    _log_spend_on_failure,
     append_failed_multi_member_attempt,
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
@@ -182,7 +183,9 @@ async def feature_place_mcst_culture(
                 for membership in memberships:
                     await append_failed_multi_member_attempt(context, guard, membership, exc)
             # 이 asset만 multi-member라 `run_tracked_feature_asset`를 지나지 않는다.
-            # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`).
+            # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`). 실패한 step은
+            # output을 내지 않으므로 소비량 로그도 같은 이유로 여기서 남긴다.
+            _log_spend_on_failure(context)
             raise_terminal_if_quota_exhausted(exc)
             raise
         if guard is not None:
