@@ -2079,7 +2079,7 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 |---|---|---|
 | 각 활용신청의 일일 한도 | data.go.kr 마이페이지 → 활용신청 상세 | **2026-09-13 실측** |
 | `VilageFcstInfoService_2.0`의 3 operation이 한 통을 공유하는가 | 같은 화면 | **공유하지 않는다** |
-| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe | 미측정 |
+| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe | **G = 59** (2026-09-13 prod) |
 | dataset별 선언 건수 | 각 endpoint에 `pageNo=1&numOfRows=1` 1요청 | 미측정 |
 | Map이 throttle 구간에 들어간 적이 있는가 | Dagster run 지속시간 분포 + asset metadata | 미측정 |
 
@@ -2094,13 +2094,18 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 그래서 조문 6의 "한 활용신청에 16,800요청/일 → 1.68배"는 **분모를 잘못 잡은
 것**이었다. 오퍼레이션별로 다시 세면:
 
-| schedule | 오퍼레이션 | 요청/일 | 한도 | 비율 |
+| schedule | 오퍼레이션 | G=300(상한)일 때 | G=59(오늘 실측)일 때 | 한도 |
 |---|---|---:|---:|---:|
-| `..._ultra_short_nowcast_hourly` (`45 * * * *`) | `getUltraSrtNcst` | 24 × 300 = 7,200 | 10,000 | **72%** |
-| `..._ultra_short_forecast_hourly` (`50 * * * *`) | `getUltraSrtFcst` | 24 × 300 = 7,200 | 10,000 | **72%** |
-| `..._short_forecast_hourly` (`20 * * * *`, 3시간 발표라 cursor가 skip) | `getVilageFcst` | 8 × 300 = 2,400 | 10,000 | 24% |
+| `..._ultra_short_nowcast_hourly` (`45 * * * *`) | `getUltraSrtNcst` | 7,200 (72%) | **1,416 (14%)** | 10,000 |
+| `..._ultra_short_forecast_hourly` (`50 * * * *`) | `getUltraSrtFcst` | 7,200 (72%) | **1,416 (14%)** | 10,000 |
+| `..._short_forecast_hourly` (`20 * * * *`, cursor skip) | `getVilageFcst` | 2,400 (24%) | **472 (5%)** | 10,000 |
 
 **세 schedule은 서로의 쿼터를 먹지 않는다.** 합산해서 터지는 그림이 아니다.
+
+**그리고 300은 상한이지 대상 수가 아니었다.** prod 실측: `ops.poi_cache_targets`가
+**0행**이고(파괴적 rebuild 직후, PinVi 미등록) `KMA_WEATHER_EXTRA_POINTS`의 60점이
+DFS 격자로 dedupe되어 **G = 59**다. 오늘 KMA를 다시 켜는 것은 쿼터 관점에서
+넉넉하다 — 4배 배수를 전부 얹어도 57%다.
 
 **그런데 72%는 여유가 아니다.** 조문 3의 4배 배수가 여기에 곱해지면 한 번의
 재시도 순환이 그 run을 300 → 1,200으로 만들고, 하루 세 번이면 9,900으로 한도에

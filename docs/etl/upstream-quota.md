@@ -56,23 +56,43 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 
 ## 3. 바로 따라오는 산수 — KMA
 
-격자 순회 job 하나는 오퍼레이션 **하나**를 격자 수만큼 부른다.
-`kma_weather_max_grids_per_run` 기본값은 300이고 schedule은 매시다.
+격자 순회 job 하나는 오퍼레이션 **하나**를 격자 수 G만큼 부른다. 세 격자
+dataset(초단기실황·초단기예보·단기예보)은 **서로 다른 오퍼레이션**을 쓰므로 각자
+자기 10,000을 갖는다 — 합산으로 터지는 그림이 아니다.
+
+### G는 상한이 아니라 실측값이다 (2026-09-13 prod)
+
+`kma_weather_max_grids_per_run = 300`은 **상한**이지 대상 수가 아니다. 실제 G는
+활성 POI cache target + 설정 extra point를 DFS 격자로 dedupe한 수다. prod 실측:
 
 ```
-300 × 24 = 7,200 요청/일   vs   op당 10,000/일   →  72%
+ops.poi_cache_targets            0행 (표 자체가 비어 있다 — 파괴적 rebuild 직후)
+KMA_WEATHER_EXTRA_POINTS        60점
+DFS 격자로 dedupe               → G = 59   (한 쌍이 같은 격자로 겹친다)
 ```
 
-세 격자 dataset(초단기실황·초단기예보·단기예보)은 **서로 다른 오퍼레이션**을
-쓰므로 각자 자기 10,000을 갖는다. 즉 셋이 각각 72%다. 합산으로 터지지는 않는다.
+| schedule | 오퍼레이션 | 요청/일 | 한도 | 비율 |
+|---|---|---:|---:|---:|
+| 초단기실황 (`45 * * * *`) | `getUltraSrtNcst` | 24 × 59 = 1,416 | 10,000 | **14%** |
+| 초단기예보 (`50 * * * *`) | `getUltraSrtFcst` | 24 × 59 = 1,416 | 10,000 | **14%** |
+| 단기예보 (`20 * * * *`, 3시간 발표라 cursor가 skip) | `getVilageFcst` | 8 × 59 = 472 | 10,000 | 5% |
 
-**그런데 72%는 여유가 아니다.** `FEATURE_LOAD_RETRY_POLICY`가 `max_retries=3`이라
-run 하나가 실패하면 같은 순회를 세 번 더 돈다:
+**즉 오늘 KMA를 다시 켜는 것은 쿼터 관점에서 넉넉하다.** 4배 재시도 배수를 전부
+얹어도 5,664(57%)다.
+
+### 그러나 G는 자란다 — 그리고 상한에서 절벽이다
+
+`ops.poi_cache_targets`가 비어 있는 것은 PinVi가 아직 이 세대에 target을 등록하지
+않았기 때문이다. 등록이 늘면 G가 300을 향해 자라고, 그때 비율은 이렇게 된다.
 
 ```
-4 × 300 = 1,200 요청   →  그날 7,200 + 900 = 8,100 (81%)
-재시도가 하루 세 번이면 9,900 — 한도에 닿는다
+G = 300 → 24 × 300 = 7,200 요청/일 = 72%
+         재시도 한 번이면 8,100(81%), 하루 세 번이면 9,900 — 한도에 닿는다
 ```
+
+그리고 **G가 300을 넘는 순간 run이 통째로 실패한다** —
+`KmaWeatherGridLimitExceeded`("partial execution is forbidden"). 초과분이 다음
+run으로 이월되지 않는다. 상한을 넘긴 날 수집은 줄어드는 것이 아니라 **멈춘다**.
 
 그래서 쿼터성 실패는 step 재시도를 **끈다**(`kortravelmap.dagster.quota_exhaustion`).
 `python-kma-api`가 `resultCode 22`를 `failure_kind="quota"`로 분류하며 적어 둔
@@ -81,20 +101,32 @@ run 하나가 실패하면 같은 순회를 세 번 더 돈다:
 > **주의**: KMA·AirKorea schedule은 2026-09-09부터 꺼져 있다
 > (`DISABLED_FEATURE_LOAD_SCHEDULES`). 위 산수는 **다시 켰을 때**의 것이다.
 
-## 4. 분자는 아직 대부분 없다
+## 4. 분자 — 하나는 생겼고 나머지는 아직 없다
 
-지금 아는 것:
+- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 2026-09-13부터 asset metadata로
+  `upstream_requests_min`을 내보낸다. `_min`인 이유는 실패한 격자의 재시도를 이
+  층에서 세지 못하기 때문이다(`upstream_retry`: 외부 attempts 2 × client 내부 1 =
+  경계당 최대 4 HTTP 시도).
+- **bulk/표준데이터·페이지네이션형**: sweep당 요청 수 = 페이지 수. 헬퍼가 세고
+  있지만(`_PageState.page_no`) asset metadata로 나가지 않는다. **여기가 남은
+  구멍이다** — fetcher가 generator라 asset 경계까지 값을 흘릴 배선이 없다.
 
-- **격자 순회형**(KMA 3종): 요청 수 = 격자 수. 설정에서 유도된다.
-- **bulk/표준데이터**: sweep당 1~수 요청(페이지 수). 코드가 세고 있지만 **지표로
-  내보내지 않는다**.
-**"호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다.**
+### "호출 한 번"이 요청 한 번이 아닌 자리 — 2026-09-13에 셋을 선언했다
 
 | 자리 | 선언 전 | 지금 |
 |---|---|---|
 | krex `latest_weather()` | `lookback_hours` 기본 48 → **최악 49 요청**. 저장소 문서는 "페이지네이션 불필요"라고만 적었다 | `_KREX_WEATHER_LOOKBACK_HOURS = 6` → 최악 7. 6시간을 못 찾으면 upstream이 멈춘 것이므로 48시간 전 관측을 "최신"으로 적재하지 않고 실패한다 |
-| krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `total_count` 유도 실패 시 **10,000 페이지**, 그리고 상한에서 **조용히 `return`** | 저장소 공통 `aiter_paginated_items`(`max_pages=10`) → 넘으면 `ProviderPaginationOverrun`으로 시끄럽게 실패 |
-| visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `max_pages=50`(100행 × 50 = 5,000건) |
+| krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `total_count` 유도 실패 시 **10,000 페이지**, 그리고 상한에서 **조용히 `return`** | 저장소 공통 `aiter_paginated_items`(`absolute_max_pages=10`) → 넘으면 `ProviderPaginationOverrun`으로 시끄럽게 실패 |
+| visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `absolute_max_pages=50`(100행 × 50 = 5,000건) |
+
+**`max_pages`가 아니라 `absolute_max_pages`인 이유.** 처음에는 `max_pages`로
+줬다. 그것이 틀렸다 — 저장소 헬퍼에서 `max_pages`는 천장이 아니라 **바닥**이다.
+`_PageState.absorb`가 선언 건수에 맞춰 `ceiling = max(ceiling, ...)`으로 올리기
+때문이다. 그 설계 자체는 옳지만(선언 건수가 상한을 정한다) 그 위에 아무것도 없으면
+**upstream이 말한 숫자가 곧 우리의 요청 수**가 된다. 선언 건수를 10억으로 둔
+테스트가 `max_pages=10`을 무시하고 1,000페이지를 전부 걷는 것을 보고 알았고,
+`absolute_max_pages`를 더해 닫았다(기본값 10,000 — 닫는 것은 "무한"이지 "많음"이
+아니다).
 
 **OpiNet bbox 모드는 "무제한"이 아니었다.** 라이브러리가 격자 셀 수를 세어
 20,000을 넘으면 **호출 전에** `OpinetInvalidParameterError`를 던진다
@@ -106,8 +138,12 @@ coalescing이다. 셀 수 계산은 provider private이라 Map이 복제하면 d
 (이 저장소가 이미 그 이유로 복제를 거부했다), 여기서는 숫자를 새로 짓지 않고
 사실만 적는다. OpiNet 일일 한도 실측이 그다음 단계다.
 
-`log_api_calls` 설정은 이름이 약속하는 것을 하지 않는다 — 프로덕션에서 그것을 읽는
-곳이 없다.
+### `ops.api_call_log`는 여기가 아니다
+
+이름 때문에 분자를 찾는 사람이 멈추는 자리다. 그 표는 **Map API로 들어오는
+요청**을 기록한다(`app.py`의 opt-in 미들웨어, 설정 `api_call_log_enabled`). upstream
+요청과 무관하다. 오래 있던 `settings.log_api_calls`는 "provider 호출 횟수를 기록"
+한다고 적었지만 **읽는 코드가 없었고**, 2026-09-13에 지웠다.
 
 ## 5. 이 문서를 고쳐야 하는 때
 
