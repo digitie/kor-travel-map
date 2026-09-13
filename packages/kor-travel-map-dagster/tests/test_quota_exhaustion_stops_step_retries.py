@@ -18,13 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from dagster import Failure
 
 from kortravelmap.dagster.quota_exhaustion import (
     quota_exhaustion_cause,
     raise_terminal_if_quota_exhausted,
 )
-
-from dagster import Failure
 
 _PACKAGE = Path(__file__).resolve().parents[1] / "src" / "kortravelmap" / "dagster"
 
