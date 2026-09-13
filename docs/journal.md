@@ -1,5 +1,32 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-14 — 분자를 prod에 올렸고, 거기서는 아직 볼 수 없다는 것을 알았다
+
+`#1229`(`2db70b478`)가 머지됐고 t42a 재핀 사이클이 전 사이클 GREEN이다 — 회전 #50,
+rebuild `phase=committed`, repin VERIFIER PASS, M01 ACL 55/55, **D1 live Playwright
+11 passed**, D2 `phase=passed`. 분자 모듈이 prod Dagster 이미지에 살아 있는 것도
+확인했다(`upstream_requests_min`).
+
+### 그런데 prod에서 분자를 관측할 수 없다
+
+배포 뒤 돌아간 run이 `current_weather_summary_refresh`(분당) 하나뿐이다. feature
+asset materialization이 **0건**이라 `upstream_requests_min`이 실린 자리가 없다.
+
+이유는 설정이다 — feature load schedule은 전부 `default_status=STOPPED`이고
+(`schedules.py`), prod의 instigator state 11개에 feature 스케줄이 하나도 없다.
+**즉 오늘 prod는 feature upstream을 거의 부르지 않는다.** 분자를 붙였지만 그것이
+0이 아닌 값을 내려면 누군가 스케줄을 켜야 한다.
+
+이것은 결함이 아니라 **이 task의 다음 단계가 무엇인지를 말해 준다.** 조문 6(KMA
+격자 재활성화)이 아직 `[~]`인 이유와 같은 자리다 — 분모·분자·증폭기 선언이 다
+끝났으므로, 이제 켜는 판단에 필요한 것은 전부 있다. 켜는 순간 그 판단이 맞았는지를
+`upstream_requests_min`이 처음으로 말해 줄 것이다.
+
+**켜지 않고 분자를 검증하려면 쿼터를 쓴다.** 그래서 하지 않았다. 계측의 정확성은
+런타임 테스트가(가짜 client로 N번 → 계수 N) 결박하고, prod가 더해 주는 것은
+"실제 Dagster 문맥에서 배선이 살아남는가"뿐이다 — 그 축은 스케줄이 켜지는 날
+공짜로 확인된다.
+
 ## 2026-09-13 — 분자를 세기 시작했고, 적대 리뷰 다섯 판이 각각 blocker를 냈다
 
 분모를 얻은 다음 날의 절반은 분자였다. **"한도의 몇 %를 쓰는가"는 분자 없이는
