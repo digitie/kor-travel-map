@@ -59,7 +59,6 @@ from dagster import (
 from .file_registry_hooks import record_mois_source_download
 from .maintenance import MAINTENANCE_RETRY_POLICY
 from .provider_fetchers import ProviderCredentialMissing
-from .quota_exhaustion import raise_terminal_if_quota_exhausted
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .upstream_requests import (
@@ -506,11 +505,18 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
                     batch_size=batch_size,
                     dagster_run_id=context.run_id,
                 )
-            except Exception as exc:
+            except Exception:
                 # 실패한 step은 output을 내지 않으므로 여기서 남기지 않으면
-                # 소비량이 사라진다. 그리고 이 op은 재시도 정책을 달고 있어
-                # 쿼터 소진이면 **같은 한도를 더 쓰며** 재시도한다 - 쿼터성
-                # 실패는 재시도 없는 terminal Failure로 바꾼다(4차 적대 리뷰).
+                # 소비량이 사라진다.
+                #
+                # **쿼터 판정은 걸지 않는다.** 4차에서 `raise_terminal_if_quota_exhausted`
+                # 를 걸었는데 5차가 그것이 **발화할 수 없는 죽은 코드**임을 잡았다 -
+                # `mois` lib은 쿼터 전용 예외도 `failure_kind`도 `status_code`도
+                # 갖지 않는다(provider 소스 확인, `quota_exhaustion.QUOTA_EXCEPTION_TYPES`
+                # 주석이 같은 사실을 이미 적어 두었다). 걸어 두면 구조 검사가 이 op을
+                # "쿼터 판정을 거는 경계"로 세어 **막았다고 보증한다** - 3차가 없앤
+                # '이름으로 초록' 패턴의 재발이다. MOIS가 한도를 알려 주게 되기
+                # 전까지 이 경로는 `MAINTENANCE_RETRY_POLICY`대로 재시도한다.
                 observed = observed_upstream_requests()
                 if observed is not None:
                     context.log.warning(
@@ -518,7 +524,6 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
                         UPSTREAM_REQUESTS_METADATA_KEY,
                         observed,
                     )
-                raise_terminal_if_quota_exhausted(exc)
                 raise
             observed_requests = observed_upstream_requests()
         full_coverage = (

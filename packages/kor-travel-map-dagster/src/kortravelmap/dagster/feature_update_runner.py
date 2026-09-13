@@ -260,6 +260,8 @@ class FeatureUpdateAssetRunner:
             )
         extra: RunnerResources | None = None
         refresh_failure: ProviderDatasetRefreshFailure | None = None
+        #: 결과에 소비량을 실어 보냈는가 — `finally`의 경고 로그를 그때만 건너뛴다.
+        reported = False
         # 계수기는 **resources 구성보다 앞에서** 연다. `spec.resources()`가 I/O를
         # 할 수 있기 때문이다 - MOIS Phase A는 거기서 전국 LOCALDATA 파일을 받는다.
         # `spec.run`만 감싸면 그 요청이 통째로 계수 범위 밖이 되어
@@ -320,12 +322,14 @@ class FeatureUpdateAssetRunner:
                     # 아니다. 계수기는 이 메서드 맨 위에서 열린다(resources 구성의
                     # I/O까지 덮기 위해서다).
                     result = await spec.run(context)
-                    return _as_refresh_result(
+                    refresh_result = _as_refresh_result(
                         result,
                         scope=scope,
                         output_metadata=context.output_metadata,
                         upstream_requests=observed_upstream_requests(),
                     )
+                    reported = True
+                    return refresh_result
                 except ProviderDatasetRefreshFailure:
                     raise
                 except Exception as exc:
@@ -337,27 +341,38 @@ class FeatureUpdateAssetRunner:
                     ) from exc
             except ProviderDatasetRefreshFailure as exc:
                 refresh_failure = exc
-                # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은 metadata를
-                # 싣지 못하므로 로그가 유일한 기록이다 - asset 경로의
-                # `_log_spend_on_failure`와 같은 이유다. **`spec.run`뿐 아니라
-                # resource 구성·transaction 결박 실패도 여기로 온다** - MOIS
-                # Phase A는 그 resource 구성 안에서 전국 파일을 받으므로, 로깅을
-                # run 전용 except에 두면 계수기를 앞으로 옮긴 이유였던 그 요청이
-                # 그대로 사라진다(2026-09-13 4차 적대 리뷰).
-                observed = observed_upstream_requests()
-                log_warning = getattr(self._log, "warning", None)
-                if observed is not None and callable(log_warning):
-                    log_warning(
-                        "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
-                        UPSTREAM_REQUESTS_METADATA_KEY,
-                        observed,
-                    )
                 raise
             finally:
+                # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은 metadata를
+                # 싣지 못하므로 로그가 유일한 기록이다 - asset 경로의
+                # `_log_spend_on_failure`와 같은 이유다.
+                #
+                # `except`가 아니라 `finally`에 두는 이유: resource 구성 실패도
+                # (4차), teardown 실패와 취소(`BaseException`)도(5차) 같은 기록을
+                # 남겨야 한다. MOIS Phase A는 resource 구성 **안에서** 전국 파일을
+                # 받으므로 run 전용 except에 두면 계수기를 앞으로 옮긴 이유였던
+                # 그 요청이 그대로 사라진다. 성공해서 값을 실어 보낸 run은
+                # `reported` 플래그로 제외한다(이중 기록 방지).
+                def _log_spend() -> None:
+                    observed = observed_upstream_requests()
+                    log_warning = getattr(self._log, "warning", None)
+                    if observed is not None and callable(log_warning):
+                        log_warning(
+                            "끝까지 실어 보내지 못했지만 upstream 요청은 나갔다 (%s=%d)",
+                            UPSTREAM_REQUESTS_METADATA_KEY,
+                            observed,
+                        )
+
+                if not reported:
+                    _log_spend()
                 if extra is not None:
                     try:
                         await _close_teardowns(extra.teardowns)
                     except Exception as exc:
+                        if reported:
+                            # 결과를 만들어 두고도 teardown 실패로 그것을 잃는다 -
+                            # 실린 줄 알았던 소비량이 사라지는 유일한 경로다(5차).
+                            _log_spend()
                         if refresh_failure is None:
                             raise ProviderDatasetRefreshFailure(
                                 provider_dataset_id=scope.provider_dataset_id,

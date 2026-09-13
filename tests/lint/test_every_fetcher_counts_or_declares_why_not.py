@@ -155,14 +155,15 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 #: 그래서 빼되, 빼는 이유를 적는다. 목록에 이름을 올리는 일 자체가 결정의 기록이다.
 _NOT_AN_ENTRYPOINT: dict[str, str] = {
     "_fetch_nowcast_rows": (
-        "격자 루프가 넘기는 **콜백**이다. 부르는 쪽(`_run_kma_grid_weather`)이 격자마다 "
-        "세므로 여기서 또 세면 이중 계수다."
+        "격자 루프가 넘기는 **콜백**이다. 격자 루프를 소유한 "
+        "`_run_kma_weather_asset`이 격자마다 세므로 여기서 또 세면 이중 계수다 "
+        "(`_run_kma_grid_weather`는 dataset_key 디스패처일 뿐이다)."
     ),
     "_fetch_short_forecast_rows": (
-        "같은 격자 루프가 넘기는 콜백이다 — 부르는 쪽이 격자마다 센다."
+        "같은 콜백이다 — 격자 루프를 소유한 `_run_kma_weather_asset`이 격자마다 센다."
     ),
     "_fetch_ultra_short_forecast_rows": (
-        "같은 격자 루프가 넘기는 콜백이다 — 부르는 쪽이 격자마다 센다."
+        "같은 콜백이다 — 격자 루프를 소유한 `_run_kma_weather_asset`이 격자마다 센다."
     ),
 }
 

@@ -27,6 +27,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_datagokr_file_data_records,
     fetch_krheritage_events,
     fetch_krheritage_items,
+    fetch_opinet_station_price_details,
 )
 from kortravelmap.dagster.provider_pagination import (
     ProviderPage,
@@ -447,3 +448,47 @@ def test_the_unbounded_opinet_budget_still_counts() -> None:
         observed = observed_upstream_requests()
 
     assert observed == 4
+
+
+def test_opinet_price_details_counts_every_station_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """bbox 모드의 상세 조회는 uni_id마다 1건이다 — 규모가 큰 자리라 효과로 잰다.
+
+    enumerate(`iter_stations_in_bbox`)는 provider가 격자 셀마다 부르므로 이 층에서
+    셀 수 없다(`_PARTIALLY_COUNTED`). 셀 수 있는 절반은 정확한지 여기서 결박한다.
+    """
+
+    stations = [SimpleNamespace(uni_id=f"S{index:03d}") for index in range(7)]
+
+    class _Client:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.details: list[str] = []
+
+        def iter_stations_in_bbox(self, *_args: Any, **_kwargs: Any) -> Iterator[Any]:
+            yield from stations
+
+        def get_station_detail(self, uni_id: str) -> object:
+            self.details.append(uni_id)
+            return SimpleNamespace(uni_id=uni_id)
+
+        def close(self) -> None:
+            return None
+
+    client = _Client()
+    _install(monkeypatch, "opinet", OpinetClient=lambda **kwargs: client)
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("k"),
+        opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.9,37.5,127.0,37.6",
+    )
+
+    with counting_upstream_requests():
+        records = list(fetch_opinet_station_price_details(settings))
+        observed = observed_upstream_requests()
+
+    assert len(records) == len(stations)
+    assert observed == len(stations), (
+        f"uni_id {len(stations)}개의 상세를 부르고 {observed}건을 셌다 — "
+        "상세는 uni_id마다 정확히 1건이다"
+    )

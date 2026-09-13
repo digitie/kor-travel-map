@@ -224,7 +224,7 @@ detail ~4,000).
 | 진입점 | 세는 부분 | 못 세는 부분 | 그래서 metadata는 |
 |---|---|---|---|
 | `fetch_opinet_stations` | `low_top_area` 모드(`_OpinetCallBudget.spend()`) | `bbox`/`poi_cache_target` 모드의 enumerate | bbox 모드에서는 **key가 없다** |
-| `fetch_opinet_station_price_details` | `get_station_detail`(uni_id당 1건, **모든 모드**) | 같은 enumerate | **key는 실리되 과소계수**다 |
+| `fetch_opinet_station_price_details` | `low_top_area`는 예산기가 정확히 셈 / `bbox`·`poi_cache_target`은 `get_station_detail`(uni_id당 1건) | `bbox`·`poi_cache_target`의 enumerate | `low_top_area`는 정확, 나머지는 **key는 실리되 과소계수** |
 | `sync_mois_source_db` | 큐 runner 경로 · Phase A op | asset 경로(resource init이 계수 범위보다 앞) | asset 경로에서는 key가 없다 |
 
 `iter_stations_in_bbox`는 bbox를 격자로 덮으며 셀마다 `aroundAll`을 부르는데, 셀 수
@@ -309,7 +309,9 @@ coalescing이다. 셀 수 계산은 provider private이라 Map이 복제하면 d
 
 - data.go.kr에서 운영계정으로 승격하거나 활용신청을 추가/변경했을 때
 - 격자 상한(`kma_weather_max_grids_per_run`)이나 schedule cron을 바꿀 때
-- 분자 계측이 생겼을 때 — 그때 이 문서의 §4가 표로 바뀐다
+- 분자 계측의 커버리지나 면제 목록이 바뀔 때 — `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`의 상수(`_EXPECTED_FETCHERS`
+  ·`_EXPECTED_FULLY_COUNTED`·`_UNCOUNTABLE`·`_PARTIALLY_COUNTED`)와 §4를 **함께** 고친다.
+  그 상수가 결박이고 §4가 서술이다 — 한쪽만 고치면 게이트가 빨개진다
 
 분모는 마이페이지의 값이 정본이다. 여기 적힌 것은 **2026-09-13 시점의 사본**이고,
 사본은 늙는다.
