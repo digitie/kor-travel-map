@@ -78,3 +78,42 @@ def test_the_local_gate_script_mirrors_the_same_module_set() -> None:
         f"`{_GATES.relative_to(_ROOT).as_posix()}`의 mypy 게이트에 더해라 — "
         "CI와 갈라지면 로컬 green이 근거가 되지 못한다."
     )
+
+
+def _logical_commands(text: str) -> list[str]:
+    """줄 이음(`\\` + 개행)을 접어 **한 줄 = 한 명령**으로 만든다.
+
+    파일 이름이 워크플로에 *적혀 있다*는 것과 mypy가 그것을 *인자로 받는다*는 것은
+    다른 사실이다. 2026-09-13에 그 둘이 갈라졌다 — 앞줄의 줄 이음을 빠뜨려 파일
+    하나가 mypy 인자가 아니라 **별개의 명령**이 됐고, 셸이 그것을 실행하려다
+    `Permission denied`(exit 126)로 죽었다.
+
+    **그 사고 자체를 잡는 것은 이 파일이 아니다.** 떨어져 나간 파일은 D2 lane
+    모듈이 아니어서 `_lane_modules()` 유도에 들어오지 않는다 — 잡는 것은
+    `test_workflow_commands_have_no_dangling_arguments.py`이고 그쪽은 워크플로
+    전체의 `run:` 블록을 본다(적대 리뷰가 이 혼동을 지적했다). 여기서 지키는 것은
+    **lane 세 모듈**이 같은 방식으로 떨어져 나가지 않는 것뿐이다.
+    """
+
+    return re.sub(r"\\\n\s*", " ", text).splitlines()
+
+
+def test_every_lane_module_is_an_argument_of_the_mypy_command() -> None:
+    """이름이 적혀 있는 것으로 충분하지 않다 — mypy의 **인자**여야 한다."""
+
+    commands = [
+        line
+        for line in _logical_commands(_WORKFLOW.read_text(encoding="utf-8"))
+        if "mypy --strict" in line
+    ]
+    assert commands, "워크플로에서 `mypy --strict` 명령을 찾지 못했다 — 패턴을 의심하라"
+
+    orphans = [
+        module
+        for module in _lane_modules()
+        if not any(module in command for command in commands)
+    ]
+    assert orphans == [], (
+        f"D2 lane 모듈이 워크플로에 적혀 있지만 mypy 인자가 아니다: {orphans}. "
+        "앞줄의 줄 이음(\\)이 빠졌는지 보라 — 셸은 그것을 실행할 명령으로 읽는다."
+    )
