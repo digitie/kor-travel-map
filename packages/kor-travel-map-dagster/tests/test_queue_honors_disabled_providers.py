@@ -41,13 +41,32 @@ pytestmark = pytest.mark.filterwarnings(
 
 
 def _scope(operation_key: str, *, scope_type: str = "provider_dataset") -> Any:
+    request_scope: dict[str, object]
+    if scope_type == "provider_dataset":
+        request_scope = {
+            "type": "provider_dataset",
+            "provider_dataset_id": 1,
+            "sync_scope": "dataset_wide",
+        }
+    else:
+        request_scope = {
+            "type": "center_radius",
+            "center": {"lon": 127.0, "lat": 37.0},
+            "radius_km": 1.0,
+        }
     return ProviderDatasetRefreshScope(
-        provider_dataset_id=7,
+        request_id="11111111-1111-4111-8111-111111111111",
+        provider_dataset_id=1,
         sync_scope="dataset_wide",
         operation_key=operation_key,
         provider="python-kma-api",
         dataset_key="kma_ultra_short_nowcast",
         scope_type=scope_type,
+        request_scope=request_scope,
+        update_policy={"prevent_provider_reactivation": True},
+        feature_ids=("feature-1",),
+        feature_count=1,
+        prevent_provider_reactivation=True,
     )
 
 
@@ -67,7 +86,7 @@ def test_the_derivation_is_not_empty_and_matches_the_recorded_decision() -> None
 
 
 @pytest.mark.parametrize("operation_key", sorted(DISABLED_FEATURE_LOAD_OPERATION_KEYS))
-@pytest.mark.parametrize("scope_type", ["provider_dataset", "feature", "cache_target"])
+@pytest.mark.parametrize("scope_type", ["provider_dataset", "center_radius"])
 def test_the_queue_skips_a_provider_whose_auto_load_is_off(
     operation_key: str, scope_type: str
 ) -> None:
