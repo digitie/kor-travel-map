@@ -237,3 +237,33 @@ def test_the_terminal_failure_names_what_it_suppressed() -> None:
     metadata: dict[str, Any] = dict(caught.value.metadata)
     assert "failure_kind" in metadata
     assert "step_retries_suppressed" in metadata
+
+
+def test_the_kma_asset_publishes_the_quota_numerator() -> None:
+    """분자가 Dagster UI에 보여야 한다.
+
+    분모는 2026-09-13에 실측했다(오퍼레이션당 10,000/일). 분자 — 이 run이 쓴
+    upstream 요청 수 — 는 이미 코드가 세고 있었는데(`grids_fetched`) 쿼터와
+    연결되는 이름으로 나가지 않았다. 그래서 "우리가 한도의 몇 %를 쓰는가"를
+    아무도 대답할 수 없었고, 관리자 UI는 계산된 적 없는 90%를 말하고 있었다.
+    """
+
+    from kortravelmap.dagster.kma_weather import KmaWeatherLoadResult
+
+    result = KmaWeatherLoadResult(
+        provider="kma",
+        dataset_key="kma_short_forecast",
+        base_datetime="202609130200",
+        skipped=False,
+        grids_total=300,
+        grids_fetched=287,
+        grids_dropped=0,
+        features_total=287,
+        values_loaded=3000,
+        membership_fingerprint="abc",
+    )
+    metadata = result.as_metadata()
+
+    assert metadata["upstream_requests_min"] == 287, (
+        "분자가 격자 호출 수와 다르다 — 격자 하나 = 요청 하나가 이 job의 계약이다."
+    )
