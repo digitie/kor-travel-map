@@ -2022,47 +2022,101 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
 
 **무엇이 참이면 닫히는가.**
 
-1. [ ] **분모가 기록돼 있다.** 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
+1. [x] **분모가 기록돼 있다.** (2026-09-13) 각 data.go.kr 활용신청의 실제 일일 트래픽 한도가
    상한 옆에 **나눗셈과 함께** 적혀 있다. 지금 그렇게 된 상한은 OpiNet 하나뿐이고,
    활성 schedule 32개 중 31개에 대해 그 분모가 존재하지 않는다.
-2. [ ] **분자가 있다.** 발신 provider 요청 수를 세는 코드가 있다. 지금은 0줄이다 —
+2. [~] **분자가 있다.** KMA 격자 job은 `upstream_requests_min`을 asset
+   metadata로 내보낸다(격자 하나 = 요청 하나, 재시도는 세지 못하므로 하한).
+   bulk/페이지네이션 fetcher는 아직 세지 않는다. `settings.log_api_calls`는
+   **지웠다** — 읽는 코드가 없었고, 그 표는 provider 호출이 아니라 Map API로
+   들어오는 요청을 기록한다.
+   (원래 조문) 발신 provider 요청 수를 세는 코드가 있다. 지금은 0줄이다 —
    그리고 `settings.log_api_calls`는 "provider client 호출 횟수를 `ops.api_call_log`에
    기록"이라고 적혀 있지만 **프로덕션 reader가 0개**다(실제 writer는 API 패키지의
    inbound 미들웨어이고 별개 설정이다). 카운터 이름에는 하한임을 박아야 한다 —
    lib 내부 요청(krex lookback 루프, krheritage tenacity)은 이 층에서 보이지 않는다.
-3. [ ] **쿼터성 실패가 4배로 청구되지 않는다.** `FEATURE_LOAD_RETRY_POLICY`
+3. [x] **쿼터성 실패가 4배로 청구되지 않는다.** (2026-09-13 —
+   `kortravelmap.dagster.quota_exhaustion`이 예외 연쇄에서 `failure_kind`를 찾아
+   `Failure(allow_retries=False)`로 바꾼다. 문자열을 파싱하지 않는다. asset 35개 중
+   34개가 지나는 `run_tracked_feature_asset`와 multi-member인
+   `feature_place_mcst_culture` 둘에 결박하고, 유도 기반 탐지기가 36번째를 막는다.) `FEATURE_LOAD_RETRY_POLICY`
    (`max_retries=3`)가 35개 asset 전부에 붙어 있고, asset 경계가 `failure_kind`를
    예외 **문자열에 녹여**(`f"KMA provider refresh failed: {exc}"`) step 층이 분류를
    보지 못한다. code 22는 자정까지 같은 코드를 주므로 재시도의 성공 확률은 0인데,
    쿼터 소진된 KMA run 하나가 **4 × 300 = 1,200요청**, krheritage run 하나가
    **4 × ~3,950 = 15,800요청**을 쓴다.
-4. [ ] **선언 없는 증폭기가 없다.** 세 곳이 Map 코드에서 1줄로 보이는데 provider
+4. [x] **선언 없는 증폭기가 없다.** (2026-09-13 — krex `lookback_hours` 48 → 6,
+   krforest 4곳과 visitkorea를 저장소 공통 헬퍼로 옮기고 `absolute_max_pages`를
+   줬다. **OpiNet은 무제한이 아니었다** — 라이브러리가 격자 셀 20,000을 넘으면
+   호출 전에 거부하고, 총량을 실제로 묶는 것은 하루 한 번 coalescing이다.
+   그 사실을 `docs/etl/upstream-quota.md`에 적었다.
+
+   이 과정에서 **저장소 헬퍼 자체의 결함**이 드러났다: `max_pages`는 천장이 아니라
+   바닥이었다(`absorb`가 선언 건수에 맞춰 올린다). upstream이 `total_count`를
+   거짓으로 크게 말하면 요청 수가 그 숫자를 따라간다. `absolute_max_pages`를
+   더해 닫았다.) 세 곳이 Map 코드에서 1줄로 보이는데 provider
    안에서 팬아웃한다 — 휴게소 기상 `latest_weather()`가 최대 **49요청**
    (`lookback_hours=48`), krforest 3종이 `max_pages` 미지정으로 lib 상한 **10,000
    page**, OpiNet bbox/poi_cache_target 모드가 예산 미전달로 무제한.
-5. [ ] **UI가 근거 없는 보증을 하지 않는다.** admin의 schedule note가 두 갈래 모두
+5. [x] **UI가 근거 없는 보증을 하지 않는다.** (2026-09-13 — `_schedule_note`가
+   비율 대신 실측 표를 가리킨다. `tests/lint/test_quota_claims_have_a_denominator.py`가
+   비율 주장이 돌아오면 빨개진다.) admin의 schedule note가 두 갈래 모두
    "rate limit의 약 90% 이하를 목표로 한"을 돌려주는데, 그 90%의 분모는 31개
    schedule에 대해 존재하지 않는다. **그 화면이 운영자가 cron을 올리는 화면이다.**
-6. [ ] **KMA 격자 재활성화의 전제조건이 적혀 있다.** 켜면 한 활용신청에
+6. [~] **KMA 격자 재활성화의 전제조건이 적혀 있다.** 분모가 들어와 위 표로
+   다시 썼다(72% / 72% / 24%, 서로 다른 쿼터). `settings` 설명의 "초과분은 다음
+   run으로"도 고쳤다 — 코드는 `KmaWeatherGridLimitExceeded`로 전면 실패한다.
+   **남은 것은 G(실제 격자 수) 실측**이다. 300은 상한이고 실제 target 수가 아니다.
+   (원래 조문) 켜면 한 활용신청에
    24×300 + 24×300 + 8×300 = **16,800요청/일**이 들어간다. 비교할 수 있는 유일한
    숫자는 근거 없는 어림 "보통 일 ~10,000"(`docs/etl/kma-weather-etl.md`) → 1.68배.
    그리고 `settings`의 설명이 "초과분은 다음 run으로"라고 적지만 코드는 이월하지
    않고 `KmaWeatherGridLimitExceeded`로 **전면 실패**한다.
 
-**바꾸기 전에 측정해야 하는 것.** 이 task의 절반은 코드가 아니라 숫자다.
+**바꾸기 전에 측정해야 하는 것.** 이 task의 절반은 코드가 아니라 숫자였다.
 
-| 무엇 | 어떻게 |
-|---|---|
-| 각 활용신청의 일일 한도 | data.go.kr 마이페이지 → 활용신청 상세 (개발/운영 등급 포함) |
-| `VilageFcstInfoService_2.0`의 3 operation이 한 통을 공유하는가 | 같은 화면. 1.68배냐 0.56배냐가 여기서 갈린다 |
-| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe |
-| dataset별 선언 건수 | 각 endpoint에 `pageNo=1&numOfRows=1` 1요청 |
-| Map이 throttle 구간에 들어간 적이 있는가 | Dagster run 지속시간 분포 + asset metadata |
+| 무엇 | 어떻게 | 상태 |
+|---|---|---|
+| 각 활용신청의 일일 한도 | data.go.kr 마이페이지 → 활용신청 상세 | **2026-09-13 실측** |
+| `VilageFcstInfoService_2.0`의 3 operation이 한 통을 공유하는가 | 같은 화면 | **공유하지 않는다** |
+| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe | 미측정 |
+| dataset별 선언 건수 | 각 endpoint에 `pageNo=1&numOfRows=1` 1요청 | 미측정 |
+| Map이 throttle 구간에 들어간 적이 있는가 | Dagster run 지속시간 분포 + asset metadata | 미측정 |
 
-**측정 전에 상한 숫자를 바꾸지 않는다.** 분모와 G를 모르는 상태에서 관측 범위를
-줄이면 그 대가를 계산할 수 없다. 대신 분모를 몰라도 정당한 것만 먼저 한다 — 정상
-관측값보다 크고 provider 기본값보다 작은 **폭주 상한**, 4배 배수 제거, 분자 만들기,
-그리고 다음 사람을 오도하는 문구 지우기.
+### 2026-09-13 실측 — 분모를 얻었고, 그것이 조문 6의 전제를 뒤집었다
+
+**일일 트래픽은 서비스가 아니라 오퍼레이션마다 따로 걸린다.** 활용신청 상세의
+"상세기능" 표에 오퍼레이션마다 "일일 트래픽" 열이 있다. `기상청_단기예보
+조회서비스`는 `getUltraSrtNcst` / `getUltraSrtFcst` / `getVilageFcst` /
+`getFcstVersion` **넷이 각각 10,000/일**이다. 전체 표는
+`docs/etl/upstream-quota.md`.
+
+그래서 조문 6의 "한 활용신청에 16,800요청/일 → 1.68배"는 **분모를 잘못 잡은
+것**이었다. 오퍼레이션별로 다시 세면:
+
+| schedule | 오퍼레이션 | 요청/일 | 한도 | 비율 |
+|---|---|---:|---:|---:|
+| `..._ultra_short_nowcast_hourly` (`45 * * * *`) | `getUltraSrtNcst` | 24 × 300 = 7,200 | 10,000 | **72%** |
+| `..._ultra_short_forecast_hourly` (`50 * * * *`) | `getUltraSrtFcst` | 24 × 300 = 7,200 | 10,000 | **72%** |
+| `..._short_forecast_hourly` (`20 * * * *`, 3시간 발표라 cursor가 skip) | `getVilageFcst` | 8 × 300 = 2,400 | 10,000 | 24% |
+
+**세 schedule은 서로의 쿼터를 먹지 않는다.** 합산해서 터지는 그림이 아니다.
+
+**그런데 72%는 여유가 아니다.** 조문 3의 4배 배수가 여기에 곱해지면 한 번의
+재시도 순환이 그 run을 300 → 1,200으로 만들고, 하루 세 번이면 9,900으로 한도에
+닿는다. 즉 재시도는 쿼터 초과의 *결과*가 아니라 *원인*이 될 수 있는 구간에 이미
+들어와 있었다. **조문 3을 닫는 것이 조문 6의 전제조건이다.**
+
+가장 좁은 자리는 KMA가 아니다 — 에어코리아 **500/op/일**, 전국\*표준데이터와
+visitkorea 전부 **1,000/op/일**이다.
+
+`krheritage`(국가유산청) · `opinet` · `krex`(도로공사) · `mois`/`localdata`는
+data.go.kr 활용신청이 **아니라서** 이 화면에 없다. 그쪽 분모는 여전히 미측정이고,
+"krheritage run 하나가 15,800요청"의 분모도 그래서 아직 없다.
+
+**측정 전에 상한 숫자를 바꾸지 않는다**는 원칙은 유효했다. 분모를 몰라도 정당한
+것 — 폭주 상한, 4배 배수 제거, 분자 만들기, 오도하는 문구 지우기 — 만 먼저
+했고, 그 사이에 분모가 들어왔다.
 
 ## T-VN-D2-RESIDUE
 
