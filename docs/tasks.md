@@ -62,7 +62,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
   2026-09-13에 분모를 실측했고 그것이 전제 하나를 뒤집었다 — 일일 트래픽은 서비스가
   아니라 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quota.md`). 조문 1·3·4·5는
-  닫혔다. 해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
+  닫혔고 prod 배포(t41a)도 전 사이클 GREEN이다. 남은 것은 bulk fetcher의 분자다.
+  해제 조건은 acceptance §T-VN-QUOTA-ARITHMETIC.
 
 - [~] T-VN-DAGSTER-STORAGE — **run은 완주한다. 그 사실을 재는 검사와 UI 로그가 없다**
 

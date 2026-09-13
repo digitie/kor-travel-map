@@ -61,6 +61,27 @@ provider lib은 절반뿐이고, 하필 에어코리아·datagokr가 안 붙인�
    "rate limit의 90% 이하"를 돌려주고 있었다. 같은 답을 모두에게 주는 것은 그 대상에
    대한 진술이 아니다.
 
+### 배포 — 손으로 만든 경로가 막히고, sanctioned 경로가 왜 있는지 알았다
+
+prod에 올리려고 host-direct `docker compose build`를 썼다가 두 번 막혔다. 두 번째가
+결정적이다 — compose는 **대상 서비스만 빌드해도 파일 전체를 보간**하는데 prod
+`.env`에 내가 건드리지도 않는 서비스(concierge)의 키가 없었다. 계속하려면 비밀값을
+내가 넣거나 "파괴적"이라 표시된 경로를 쓰는 수밖에 없어 거기서 멈추고 `.env`를
+원복했다. sanctioned 경로(`run-pinned-rebuild-once`)는 Manager가 env를 통째로
+구성해 넘긴다 — 내가 흉내 낼 수 있는 것이 아니었다.
+
+그 다음 정찰이 더 중요한 것을 잡았다. 내가 배포하려던 `e037ab01`은
+`refs/pull/1227/head`이고 **#1226을 담고 있지 않았다** — 그것을 핀했다면 같은 날
+머지한 run 완주 게이트를 prod에서 되돌리는 것이었다. 핀 원장은 `repository_commit`을
+exact로 새기므로 미머지 head를 핀하는 것 자체가 오래 남는 오염이다. 머지 후 main
+커밋(`0b60a850`)으로 간 것이 옳았고, `chain17.sh`가 그것을 인자 하나로 받아
+회전→rebuild→executor→repin→ACL→D1→D2를 전부 GREEN으로 끌고 갔다.
+
+**리터럴을 들고 있지 않은 스크립트가 재사용된다.** `chain12`는 Manager revision을
+본문에 박아 두어 낡자마자 못 쓰게 됐고, `chain17`은 Map만 인자로 받고 PinVi는 핀
+원장, Manager는 설치 매니페스트에서 유도해 오늘 그대로 돌았다. 그 주석이 스스로
+그 이유를 적어 두었다.
+
 ## 2026-09-12 — 고침이 스택을 내렸고, 그 뒤에 진짜 고침이 있었다
 
 `T-VN-DAGSTER-STORAGE`가 닫히는 과정에서 prod가 한 시간 넘게 내려가 있었다. 그 한
