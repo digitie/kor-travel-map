@@ -1690,7 +1690,10 @@ class _FakeVisitKoreaClient:
             # 실물 `visitkorea.models.Page`는 파싱 전 body를 `raw`로 들고 있다.
             # 대역이 그것을 흉내내지 않으면 `fingerprint`가 늘 None이 되어
             # **전진 검사가 호출 지점에서 한 번도 돌지 않는다**(2차 리뷰 지적).
-            raw={"pageNo": effective_page, "items": [id(item) for item in items[start : start + size]]},
+            raw={
+                "pageNo": effective_page,
+                "items": [id(item) for item in items[start : start + size]],
+            },
         )
 
     # ``iter_pages``는 일부러 두지 않는다 — 라이브러리 iterator는 ``max_pages``가
