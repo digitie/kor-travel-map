@@ -2035,26 +2035,70 @@ krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그�
    기록"이라고 적혀 있지만 **프로덕션 reader가 0개**다(실제 writer는 API 패키지의
    inbound 미들웨어이고 별개 설정이다). 카운터 이름에는 하한임을 박아야 한다 —
    lib 내부 요청(krex lookback 루프, krheritage tenacity)은 이 층에서 보이지 않는다.
-3. [x] **쿼터성 실패가 4배로 청구되지 않는다.** (2026-09-13 —
-   `kortravelmap.dagster.quota_exhaustion`이 예외 연쇄에서 `failure_kind`를 찾아
+3. [x] **쿼터성 실패가 재시도를 사지 않는다.** (2026-09-13)
+
+   `kortravelmap.dagster.quota_exhaustion`이 예외 연쇄를 걸어
    `Failure(allow_retries=False)`로 바꾼다. 문자열을 파싱하지 않는다. asset 35개 중
    34개가 지나는 `run_tracked_feature_asset`와 multi-member인
-   `feature_place_mcst_culture` 둘에 결박하고, 유도 기반 탐지기가 36번째를 막는다.) `FEATURE_LOAD_RETRY_POLICY`
+   `feature_place_mcst_culture` 둘에 결박하고, 결박 단위는 함수 이름이 아니라
+   **`except` 핸들러**다 — 한 함수 안의 두 실패 분기 중 하나만 지워도 초록이던
+   첫 판을 적대 리뷰가 잡았다.
+
+   **"4배"는 틀렸다(적대 리뷰 정정).** 쿼터가 소진된 뒤의 재시도는 순회를 다시
+   도는 것이 아니라 **첫 격자에서 즉사한다** — 격자 루프는 항상 `grids[0]`부터
+   시작하고(성공 cursor는 완주 뒤에만 전진) 그 첫 호출이 곧바로 code 22를 받는다.
+   실제로 아끼는 것은 순회 3벌이 아니라 **요청 3건 + backoff 420초 + 큐 슬롯
+   점유 3회 + 실패 attempt 기록 3건**이다. 요청이 4배가 되는 것은 순회 *도중*
+   나는 **재시도 가능한** 실패(H45가 겨냥한 쪽)이고 이 변경은 그쪽을 건드리지
+   않는다.
+
+   **HTTP 429는 제외한다.** provider lib들이 429와 resultCode 22에 같은
+   `failure_kind="rate_limit"`를 붙이는데(visitkorea·mcst·krforest 실측) 이
+   저장소 schedule 다수가 월 1회라, 429 한 번에 재시도를 끄면 그 asset은 한 달
+   갱신되지 않는다. 예외가 든 HTTP 상태로 가른다.
+
+   **`failure_kind`를 붙이는 provider가 절반뿐이다.** airkorea·datagokr·krairport·
+   krex·opinet·krheritage·mois·knps는 붙이지 않는다. 속성 하나에만 걸면
+   **가장 좁은 분모에서 한 번도 발화하지 않는다** — 에어코리아가 오퍼레이션당
+   500/일이다. `QUOTA_EXCEPTION_TYPES`가 `(모듈, 클래스)` 선언으로 그 구멍을
+   메우고, contract 테스트가 그 이름이 실물 lib에 실재하는지 형제 소스로 확인한다.
+
+   **여전히 덮이지 않는 것**: `krheritage`는 쿼터 소진을 알려 주지 않는다
+   (`RateLimitError`가 클라이언트 측 limiter이고 lib 안에서 raise되지 않는다).
+   아래 "krheritage run 하나가 4 × ~3,950 = 15,800요청"은 이 기제로 닫히지 않는다.
+   `datagokr`(전국표준데이터, 1,000/일)도 쿼터 전용 예외가 없다. `FEATURE_LOAD_RETRY_POLICY`
    (`max_retries=3`)가 35개 asset 전부에 붙어 있고, asset 경계가 `failure_kind`를
    예외 **문자열에 녹여**(`f"KMA provider refresh failed: {exc}"`) step 층이 분류를
    보지 못한다. code 22는 자정까지 같은 코드를 주므로 재시도의 성공 확률은 0인데,
    쿼터 소진된 KMA run 하나가 **4 × 300 = 1,200요청**, krheritage run 하나가
    **4 × ~3,950 = 15,800요청**을 쓴다.
-4. [x] **선언 없는 증폭기가 없다.** (2026-09-13 — krex `lookback_hours` 48 → 6,
+4. [x] **선언 없는 증폭기가 없다.** (2026-09-13)
+
+   krex `lookback_hours` 48 → 6(호출 한 번의 요청 상한이 `lookback+1`이다),
    krforest 4곳과 visitkorea를 저장소 공통 헬퍼로 옮기고 `absolute_max_pages`를
    줬다. **OpiNet은 무제한이 아니었다** — 라이브러리가 격자 셀 20,000을 넘으면
    호출 전에 거부하고, 총량을 실제로 묶는 것은 하루 한 번 coalescing이다.
-   그 사실을 `docs/etl/upstream-quota.md`에 적었다.
 
    이 과정에서 **저장소 헬퍼 자체의 결함**이 드러났다: `max_pages`는 천장이 아니라
    바닥이었다(`absorb`가 선언 건수에 맞춰 올린다). upstream이 `total_count`를
    거짓으로 크게 말하면 요청 수가 그 숫자를 따라간다. `absolute_max_pages`를
-   더해 닫았다.) 세 곳이 Map 코드에서 1줄로 보이는데 provider
+   더해 닫았다.
+
+   **krforest 정당화가 거꾸로였다(적대 리뷰 정정).** 라이브러리는 유도가 실패할 때
+   10,000페이지로 폭주하는 것이 아니라 **1페이지로 조용히 잘린다** — 응답에
+   `totalCount`가 없으면 `_http.py`가 `total_count = len(items)`로 채워 추정치가
+   1이 된다. 그리고 **저장소 헬퍼로 옮겨도 그 절단은 그대로다**(2026-09-13 실측:
+   2,500행 dataset에서 1,000행에서 멈춘다). 종료 규칙을 바꾸면 범위 밖 page에
+   예외를 던지는 provider에서 새 실패가 생기므로 고치지 않고 **경고로 들리게** 했다.
+   실제 위험은 쿼터 폭주가 아니라 **행 누락이 성공으로 보이는 것**이다.
+
+   **krex의 "시끄럽게 실패"도 없었다(적대 리뷰).** 빈 Page는 예외가 아니라 정상
+   반환이고, 적재 경로에 빈 가드가 없어 0행이 `record_sync_success`까지 가서
+   `consecutive_failures`를 0으로 되돌렸다. `KrexRestAreaWeatherUnavailable`을
+   더했다 — 그 fetcher에는 테스트가 하나도 없었다.
+
+   **visitkorea 라이브러리에서 잃은 '전진하지 않는 페이지네이션' 가드**도
+   `ProviderPage.fingerprint` + `ProviderPaginationStalled`로 헬퍼에 복원했다. 세 곳이 Map 코드에서 1줄로 보이는데 provider
    안에서 팬아웃한다 — 휴게소 기상 `latest_weather()`가 최대 **49요청**
    (`lookback_hours=48`), krforest 3종이 `max_pages` 미지정으로 lib 상한 **10,000
    page**, OpiNet bbox/poi_cache_target 모드가 예산 미전달로 무제한.
