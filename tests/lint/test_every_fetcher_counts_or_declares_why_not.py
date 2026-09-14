@@ -4,7 +4,7 @@
 멀쩡했는데 **커버리지가 없었다** — 계수기는 asset 35개 전부에서 열리는데 세는 자리는
 셋뿐이었다. 그래서 OpiNet처럼 수천 건을 쓰는 경로가 ``upstream_requests_min: 0``을
 냈고, 하필 그것이 저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔**
-provider였다(``_OPINET_RUN_CALL_BUDGET`` = 600 vs 무료키 1,500/일, #545).
+provider였다(``_OPINET_RUN_CALL_BUDGET`` vs 무료키 300/일, #545).
 
 그때 이 저장소가 갖고 있던 구조 검사는 초록이었다. 그 검사는
 ``asset이 계수 범위 안에서 도는가``를 물었는데, wrapper가 **항상** 열므로
