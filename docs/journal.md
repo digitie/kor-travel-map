@@ -1,5 +1,24 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-14 — t43a 배포, 그리고 고친 것이 prod에서 살아 있는 것을 봤다
+
+`#1231`·`#1232`·`#1233`을 `e3fddce81`로 핀했다. 전 사이클 GREEN — 회전
+(pinset `6ff11b3b6520d05b`) · rebuild `phase=committed` · executor 이미지 ·
+repin **VERIFIER PASS** · M01 ACL **55/55** · **D1 live Playwright 11 passed** ·
+lane 정리 · D2 `phase=passed`.
+
+**배포로 끝내지 않고 고친 값을 prod에서 읽었다:**
+
+| 무엇 | 종전 | prod 실측 |
+|---|---:|---:|
+| `opinet_run_call_budget` | 600 | **140** |
+| `opinet_low_top_max_calls` | 180 | **90** |
+| 큐가 건너뛰는 operation | 0 | **6** |
+
+배포가 초록인 것과 **고친 것이 그 안에 있는 것**은 다른 사실이다. 이 판에서 그
+구분을 여러 번 배웠다 — 목록에 이름을 올린 것과 그 이름을 읽는 실행 경계가 있는
+것이 달랐고(#1231), 분자를 세는 것과 그 수가 실릴 자리가 있는 것이 달랐다(#1229).
+
 ## 2026-09-14 — "이관됐다"가 "옮겨야 한다"는 뜻은 아니었다 (MOIS)
 
 `mois`/localdata 분모를 보러 갔다가 네 번 생각을 바꿨다. 그 순서를 적는다 — 각
