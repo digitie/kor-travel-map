@@ -59,16 +59,43 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 포털에서 따로 봐야 하고, 아직 보지 않았다. 이 저장소가 krheritage에 대해 적어 둔
 "~3,950 요청/sweep"은 분자이고, 그 분모는 여전히 없다.
 
-| provider | 저장소가 들고 있는 수 | 출처 | 실측인가 |
+| provider | 일일 한도 | 출처 | 확인 |
 |---|---|---|---|
-| `opinet` | 무료키 **1,500/일** | #545 (`schedules.py:266`, `_OPINET_RUN_CALL_BUDGET` docstring) | **아니다** — 포털에서 확인하지 않았다 |
-| `krheritage` | 없음 | — | — |
-| `krex` | 없음 | — | — |
-| `mois`/`localdata` | 없음 | — | — |
+| `opinet` | 무료키 **300/일** | 오피넷 이용안내 > 유가정보 API — 일반 API 19종 `300call/일`(프리미엄 3종이 1,500) | **2026-09-14 확인** |
+| `krheritage` | **존재하지 않는다** — 인증키가 없다 | provider 소스: `serviceKey`는 `apis.data.go.kr` 호스트에만 주입되고 heritage는 `www.khs.go.kr/cha`다 | **2026-09-14 확인** |
+| `krex` | **미공개** | data.ex.co.kr OpenAPI 소개·인증키 발급 페이지에 수치가 없다(키는 즉시 발급) | **2026-09-14 확인(없음을 확인)** |
+| `mois`/`localdata` | 미확인 | `www.localdata.go.kr`가 응답하지 않았다(ECONNREFUSED / 브라우저 로드 실패) | **확인 실패** |
 
-OpiNet의 1,500은 이 저장소가 **예산을 짜는 근거로 쓰고 있는** 수다
-(`_OPINET_RUN_CALL_BUDGET = 600`이 그 수의 40%). 확인되지 않은 수 위에 예산이
-서 있다는 사실 자체를 여기 남긴다 — 확인이 다음 단계다.
+**"분모가 없다"가 셋 다 다른 뜻이다.**
+
+- `krheritage`는 **키가 없으므로 per-key 한도라는 개념이 없다.** 그래서 sweep당
+  ~3,950요청에 대해 "몇 %"를 물을 대상이 애초에 없다 — 위험은 쿼터 소진이 아니라
+  **과도 호출로 인한 차단**이고, 그것은 분모가 아니라 예의(간격·동시성)의 문제다.
+- `krex`는 키가 있는데 **한도를 공개하지 않는다.** 모르는 것이지 없는 것이 아니다.
+- `mois`/`localdata`는 **아직 못 봤다.** 사이트가 뜨지 않았다.
+
+### OpiNet — 저장소가 5배 잘못 알고 있었다 (2026-09-14)
+
+이 저장소는 무료키 한도를 **1,500**으로 알고 그 위에 예산 전체를 세웠다. 실제로는
+**300**이고, 1,500은 **유료 프리미엄 3종**의 값이다. Map이 부르는 네 오퍼레이션
+(`lowTop10` · 반경 내 주유소 검색 · 주유소 상세 · 지역코드)은 전부 일반 API 목록에
+있다.
+
+| 자리 | 종전 | 실제 300 대비 | 지금 |
+|---|---:|---|---:|
+| `opinet_run_call_budget` 기본 | 600 | **하루 한도의 2배** (place job과 겹치면 4배) | **140** |
+| 같은 필드 `le` 상한 | 700 | 설정 한 줄로 하루의 2.3배 | **300** |
+| `opinet_low_top_max_calls` 기본 | 180 | `get_area_codes`(~19)와 합쳐 하루의 66% | **90** |
+
+**켜져 있었다면 첫날에 막혔을 값이다.** prod는 `opinet_scope_mode=disabled`라 실제로
+쓰이지는 않았다 — 잠복 결함이었다. 그리고 이것을 찾은 것은 계측이 아니라 **공식
+자료를 한 번 본 것**이다.
+
+대가는 커버리지다. lowTop 상한이 180 → 90이면 시군 윈도가 60 → 30으로 줄어 전국
+1주기가 ≈4일 → ≈8일이 된다. run당 cap으로는 "하루 2 run"을 표현할 수 없기 때문에
+생기는 손해이고, **하루 예산**이 있으면 같은 안전성에서 더 쓸 수 있다
+(`T-VN-QUEUE-QUOTA`). `tests/lint/test_opinet_budget_fits_the_daily_limit.py`가
+이 산수를 결박한다.
 
 ## 3. 산수 — KMA (기록, 평가 대상 아님)
 
@@ -346,9 +373,21 @@ materialization 0건).
 |---|---|---|
 | OpiNet | `already_succeeded_today_kst` | 하루 한 번 성공하면 그날 skip |
 
-나머지 — `krheritage`(sweep당 ~3,950요청, **분모 미측정**) · `krex` · 전국표준데이터 ·
-`krforest` · `knps` · `mcst` · `visitkorea` · `khoa` · concierge — 에는 **아무것도
-없다.** 큐 요청이 반복되면 그만큼 나간다. 그리고 그중 다수가 **1,000/op/일**이다.
+나머지 — `krheritage` · `krex` · 전국표준데이터 · `krforest` · `knps` · `mcst` ·
+`visitkorea` · `khoa` · concierge — 에는 **아무것도 없다.** 큐 요청이 반복되면 그만큼
+나간다. 그리고 data.go.kr 쪽 다수가 **1,000/op/일**이다.
+
+**단, 필요한 조치가 provider마다 다르다**(2026-09-14 분모 조회 결과):
+
+| provider | 분모 | 필요한 것 |
+|---|---|---|
+| data.go.kr 계열(표준데이터·visitkorea·krforest·knps·khoa…) | 있다(§2) | **일일 예산** — 한도 대비 비율을 지킬 수 있다 |
+| `krheritage` | **없다 — 인증키가 없다** | **예산이 아니라 rate limit**(간격·동시성). sweep당 ~3,950요청에 "몇 %"를 물을 대상이 없고, 위험은 소진이 아니라 **차단**이다 |
+| `krex` | 미공개 | **문의** — 모르는 것이지 없는 것이 아니다 |
+| `mois`/localdata | 미확인 | **재시도** |
+
+즉 "큐 경로에 provider별 일일 예산을 만든다"는 처방은 **분모가 있는 쪽에만 맞는다.**
+krheritage에 예산을 짜는 것은 없는 분모를 지어내는 일이다.
 
 **정책의 rate limit은 기록만 된다.** `provider_refresh_policies`의 rate limit 필드는
 metadata payload로 실릴 뿐 한 번도 강제되지 않는다 — §4 조문 5가 admin UI에서 지운

@@ -273,26 +273,33 @@ class KorTravelMapSettings(BaseSettings):
         ),
     )
     opinet_low_top_max_calls: int = Field(
-        default=180,
+        default=90,
         ge=1,
         description=(
-            "``low_top_area`` 모드의 ``lowTop10`` area×product 호출 상한. 기본 180 = "
-            "제품 3종 기준 시군 60개 윈도/run. 시군 로테이션과 결합해 전국(~230 시군) "
-            "1주기 ≈ 4일. 상향 시 무료키 일일 한도(1,500회) 대비 여유를 계산할 것 — "
+            "``low_top_area`` 모드의 ``lowTop10`` area×product 호출 상한. 기본 90 = "
+            "제품 3종 기준 시군 30개 윈도/run. 시군 로테이션과 결합해 전국(~230 시군) "
+            "1주기 ≈ 8일. "
+            "**무료키 일일 한도는 300회다**(오피넷 이용안내의 일반 API 19종; "
+            "1,500은 유료 프리미엄 3종이다. 2026-09-14 확인). 종전 기본값 180은 "
+            "한도를 1,500으로 잘못 알고 잡은 값이라 `get_area_codes`(~19)와 합치면 "
+            "한 run이 하루의 66%를 썼다. 상향 시 **300 대비** 여유를 계산할 것 — "
             "매월 1일 place job이 같은 lowTop10 경로를 한 번 더 돈다. "
             "env ``OPINET_LOW_TOP_MAX_CALLS``."
         ),
     )
     opinet_run_call_budget: int = Field(
-        default=600,
+        default=140,
         ge=1,
-        le=700,
+        le=300,
         description=(
             "``low_top_area`` run당 OpiNet 총 호출 hard cap(#545 — get_area_codes + "
-            "lowTop10 + aroundAll 합산). 기본 600이면 월간 place job과 같은 날 "
-            "겹쳐도(2×600=1,200) 무료키 1,500회/일 아래. place/price KST 일일 "
-            "coalescing과 함께 쓰며, 두 dataset 합계와 운영 여유를 보장하도록 최대 700. "
-            "env ``OPINET_RUN_CALL_BUDGET``."
+            "lowTop10 + aroundAll 합산). "
+            "**무료키 일일 한도는 300회다**(2026-09-14 확인). 기본 140이면 월간 place "
+            "job과 같은 날 겹쳐도(2×140=280) 그 아래다 — 종전 기본값 600은 한도를 "
+            "1,500으로 잘못 알고 잡은 값이라 **한 run이 하루 한도의 2배**였다. "
+            "상한을 300으로 두는 이유는 그것이 하루 전체이기 때문이다: 한 run이 "
+            "하루보다 많이 쓰게 설정할 수 있으면 안 된다. place/price KST 일일 "
+            "coalescing과 함께 쓴다. env ``OPINET_RUN_CALL_BUDGET``."
         ),
     )
     kma_weather_extra_points: str | None = Field(

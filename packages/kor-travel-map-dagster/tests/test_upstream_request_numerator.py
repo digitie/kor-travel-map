@@ -58,7 +58,7 @@ def test_an_uninstrumented_path_reports_nothing_not_zero() -> None:
     이것이 2026-09-13 적대 리뷰가 잡은 blocker의 핵심이다. 계수기는 asset 35개
     전부에서 열리는데 세는 자리는 셋뿐이었고, 그래서 계측되지 않은 fetcher가
     "0번 요청했다"고 보고했다 — 하필 저장소가 유일하게 한도 대비 run 예산을 코드에
-    박아 둔 provider(OpiNet, `_OPINET_RUN_CALL_BUDGET` = 600 vs 무료키 1,500/일)가
+    박아 둔 provider(OpiNet, `_OPINET_RUN_CALL_BUDGET` vs 무료키 300/일)가
     수천 건을 쓰면서 0을 냈다. 운영자가 그 0을 "요청이 없었다"로 읽으면 정반대
     결론에 이른다.
     """

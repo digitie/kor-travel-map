@@ -1917,15 +1917,24 @@ _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS: Final[int] = 180
 ``settings.opinet_low_top_max_calls`` (env ``KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS``)로
 run별 override 가능 — 기본 180 = 제품 3종 기준 시군 60개 윈도/run."""
 
-_OPINET_RUN_CALL_BUDGET: Final[int] = 600
+_OPINET_RUN_CALL_BUDGET: Final[int] = 140
 """``low_top_area`` 한 run이 쓸 수 있는 OpiNet 호출 hard cap 기본값(#545).
 
 ``get_area_codes`` + ``lowTop10`` + ``aroundAll``(``search_stations_around``)을
-모두 합산해 이 값을 넘으면 enumeration을 즉시 중단한다. OpiNet 무료키 일일 한도는
-1,500회/일이고 가격 asset은 하루 1회 적재이므로 600/run이면 월간 place job과 같은
-경로가 같은 날 한 번 더 돌아도(=1,200) 한도 아래로 유지된다. ``lowTop10`` 상한
-(180) + ``get_area_codes``(~19)을 제외하면 grid fallback에 ~400회가 남아 빈 운영
-상태의 분포 보강도 가능하다. ``settings.opinet_run_call_budget``
+모두 합산해 이 값을 넘으면 enumeration을 즉시 중단한다.
+
+**무료키 일일 한도는 300회다**(오피넷 이용안내 — 일반 API 19종이 300call/일이고
+1,500call/일은 유료 프리미엄 3종이다. 2026-09-14 확인). 이 저장소는 그것을
+1,500으로 알고 있었고 그 위에 600/run을 세웠다 — **한 run이 하루 한도의 2배**였고,
+월간 place job과 겹치면 4배였다. 켜져 있었다면 첫날에 막혔을 값이다(prod는
+``opinet_scope_mode=disabled``라 실제로 쓰이지는 않았다).
+
+140/run이면 place job과 같은 날 겹쳐도 280으로 300 아래다. ``lowTop10`` 상한(90)
++ ``get_area_codes``(~19)를 빼면 grid fallback에 ~31회가 남는다 — 종전 ~400회에서
+줄어든 것이고, 그만큼 빈 운영 상태의 분포 보강이 느려진다. 더 쓰려면 run당 cap이
+아니라 **하루 예산**이 필요하다(`T-VN-QUEUE-QUOTA`).
+
+``settings.opinet_run_call_budget``
 (env ``KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET``)로 override 가능."""
 
 _OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
@@ -2063,7 +2072,7 @@ class _OpinetCallBudget:
         불린다 — 그래서 쿼터 계수기도 같은 자리에서 올린다. 2026-09-13 적대 리뷰
         전까지 이 정확한 계수가 있는데도 metadata에는 0이 실렸다. 하필 OpiNet이
         저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다
-        (`_OPINET_RUN_CALL_BUDGET` = 600 vs 무료키 1,500/일, #545). 예산을 짜 둔
+        (`_OPINET_RUN_CALL_BUDGET` vs 무료키 300/일, #545). 예산을 짜 둔
         자리의 분자가 0이었다.
 
         예산이 소진돼 ``False``를 돌려줄 때는 호출이 일어나지 않으므로 세지 않는다.
