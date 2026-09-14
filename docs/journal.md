@@ -29,14 +29,29 @@ acquire를 재시도 루프 밖으로 / client 미전달 / go 포털만 우회 /
 
 ruff clean · mypy strict clean · pytest **91 passed**(live 5 deselected).
 
-**Map 쪽 전제도 확인했다.** krex fetcher 넷은 각자 `KrexClient`를 **하나** 열고 그
-안에서 페이지네이션하고, prod는 cron 없이 큐 경로만 살아 있으며 큐 러너는 scope를
-**순차** 처리한다 — 한 번에 버킷 하나, 합계 5 TPS다. 이 전제가 깨지는 지점(krex
-fetcher 동시 실행 → 버킷 둘 → 10 TPS)과 그때의 조치(`max_rps`를 낮추는 게 아니라
-**클라이언트 공유**)를 `docs/etl/upstream-quota.md` §2에 적어 뒀다.
+**그리고 네 번째로 틀린 것은 Map 쪽 결론이었다.** "큐 러너가 scope를 순차 처리하므로
+합계 5 TPS"라고 적었는데, 전문 리뷰어 둘이 **독립적으로 같은 자리**를 짚었다. 그
+순차성은 run **하나 안에서**의 이야기다:
 
-**아직 Map에 들어오지 않았다** — krex 핀은 `ddd69cd2…` 그대로다. krex PR 머지 후
-repin이 따라온다.
+| 자리 | 값 |
+|---|---:|
+| 큐 센서 틱당 RunRequest | **10** (`RUNNING`, 15초 틱) |
+| `dagster.yaml` `max_concurrent_runs` | **10** |
+| `tag_concurrency_limits[…request_id]` | **4** |
+
+request마다 run_key가 다르니 worker run 넷이 동시에 뜨고, run마다 프로세스가 다르니
+`KrexClient`도 버킷도 넷이다 → **최대 20 TPS.** 직렬화하는 것이 아무것도 없다:
+실행 advisory lock은 request id와 scope key에 걸려 scope가 다르면 둘 다 진행하고,
+Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은 **asset**에 선언됐는데 큐 경로는 asset
+wrapper를 우회하며, `ops.provider_refresh_policies.max_concurrent`는 plan payload에
+**실리기만 하고 아무도 그 값을 보고 멈추지 않는다.**
+
+**닫혔다고 적은 구멍이 현재 설정으로 열려 있었다.** 배포가 초록인 것과 고친 것이 그
+안에 있는 것이 다르듯, **라이브러리가 막는 것과 시스템이 막는 것도 다르다.** 지금
+보증되는 것은 "프로세스당 5 TPS"다. 남은 작업은 `T-VN-KREX-TPS-FANOUT`.
+
+**아직 Map에 들어오지 않았다** — krex 핀은 `c6d8717e…` 그대로다(`ddd69cd2`는 그 전
+값이다 — 처음에 그것을 적었다). krex PR 머지 후 repin이 따라온다.
 
 ## 2026-09-14 — t43a 배포, 그리고 고친 것이 prod에서 살아 있는 것을 봤다
 

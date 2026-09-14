@@ -24,13 +24,22 @@
 잡는다. 마지막 것은 AST로 `session.get(...)` 자리가 하나임을 본다. **효과 검사는 지금
 있는 경로만 보므로 새 경로는 아무 테스트도 건드리지 않고 상한을 비켜 간다.**
 
-**Map 쪽 전제:** krex fetcher 넷이 각자 `KrexClient`를 하나 열고 그 안에서
-페이지네이션하며, prod는 cron 없이 큐 경로만 살아 있고 큐 러너는 scope를 순차
-처리한다 — 그래서 한 번에 버킷 하나, 합계 5 TPS다. **이 전제가 깨지는 지점(동시 실행)과
-그때의 조치(클라이언트 공유)는 `docs/etl/upstream-quota.md` §2에 적어 뒀다.**
+**그리고 Map 쪽에서 내가 틀렸다.** "큐 러너가 순차 처리하므로 합계 5 TPS"라고
+적었는데, 적대 리뷰 둘이 **독립적으로** 뒤집었다 — 그 순차성은 run **하나 안에서**의
+이야기다. 큐 센서는 틱당 RunRequest를 10개 내고(`RUNNING`, 15초 틱),
+`docker/dagster.yaml`이 `tag_concurrency_limits`로 **4를 동시에** 돌린다. run마다
+프로세스가 다르니 `KrexClient`도 버킷도 넷 → **최대 20 TPS.** krex를 직렬화하는 것은
+아무것도 없다(scope advisory lock은 키가 다르고, Dagster pool은 asset에만 있는데 큐
+경로가 asset을 우회하며, `provider_refresh_policies.max_concurrent`는 **읽히기만 하고
+집행되지 않는다**).
+
+**닫혔다고 적은 구멍이 현재 설정으로 열려 있었다.** 지금 보증되는 것은 "프로세스당
+5 TPS"이고 합계가 아니다. 남은 작업을 `T-VN-KREX-TPS-FANOUT`으로 뺐다 — 고칠 자리는
+`max_rps`가 아니라 **provider 단위 동시성 집행**이고, 스키마
+(`ops.provider_refresh_policies.max_concurrent`)는 이미 있다.
 
 **아직 Map에 반영되지 않았다** — `pyproject.toml`의 krex 핀이
-`ddd69cd29cb3b1ce811bfe5e8550399655bba06e`다. krex PR 머지 후 repin이 따라온다.
+`c6d8717ec2b712cc952bc566b351f07a7cd3824a`다. krex PR 머지 후 repin이 따라온다.
 
 t43a 배포 완료(`e3fddce81`, 전 사이클 GREEN — D1 live Playwright 11 passed,
 D2 phase=passed). prod 실측으로 OpiNet 예산 140/90과 큐 skip 6건이 살아 있는 것을

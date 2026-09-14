@@ -6,7 +6,8 @@
 > 않는 것이 이 문서의 요점이다 — data.go.kr 포털에 없는 provider 넷
 > (`krheritage`·`opinet`·`krex`·`mois`)은 **분모가 아직 없고**, 분자도 §4에
 > 열거한 자리에서는 부분값이거나 없다. **`krex`는 2026-09-14에 분모를 기다리는 대신
-> 축을 바꿨다 — 일일 한도가 아니라 TPS 5로 막는다(§2).** 관리자 UI가 오래 "rate limit의 약 90%
+> 축을 바꿨다 — 일일 한도가 아니라 TPS 5로 막는다(§2). 단 그 보증은 아직
+> **프로세스당**이고 합계가 아니다 — 큐가 run 넷을 동시에 띄운다(§2 "열려 있는 구멍").** 관리자 UI가 오래 "rate limit의 약 90%
 > 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도 갖고 있지 않았다.
 
 ## 1. 분모는 서비스가 아니라 **오퍼레이션**마다 걸린다
@@ -64,7 +65,7 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 |---|---|---|---|
 | `opinet` | 무료키 **300/일** | 오피넷 이용안내 > 유가정보 API — 일반 API 19종 `300call/일`(프리미엄 3종이 1,500) | **2026-09-14 확인** |
 | `krheritage` | **존재하지 않는다** — 인증키가 없다 | provider 소스: `serviceKey`는 `apis.data.go.kr` 호스트에만 주입되고 heritage는 `www.khs.go.kr/cha`다 | **2026-09-14 확인** |
-| `krex` | **일일 한도는 미공개 — 제약은 TPS다.** 라이브러리가 **5 TPS**로 막는다 | OpenAPI 소개·목록·인증키 발급·이용안내 **네 페이지 모두**에 일일 수치가 없다(키는 즉시 발급) | **2026-09-14 확인(없음을 확인) → TPS로 전환** |
+| `krex` | **일일 한도는 미공개 — 제약은 TPS다.** 라이브러리가 **프로세스당 5 TPS**로 막는다(합계는 아직 아니다 — 아래) | OpenAPI 소개·목록·인증키 발급·이용안내 **네 페이지 모두**에 일일 수치가 없다(키는 즉시 발급) | **2026-09-14 확인(없음을 확인) → TPS로 전환** |
 | `mois`/`localdata` | **존재하지 않는다** — 기관 자체 다운로드라 키·활용신청이 없다 | data.go.kr 파일데이터 `15045016`·`15044967`의 제공형태가 "기관자체에서 다운로드(제공데이터URL기재)"이고 그 URL이 `file.localdata.go.kr/file/<slug>/info`다 | **2026-09-14 확인** |
 
 **"분모가 없다"가 셋 다 다른 뜻이다.**
@@ -91,17 +92,45 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 | 범위 | **클라이언트당**(포털당 아님) | `data.ex.co.kr`·`data.go.kr` 호출이 같은 버킷을 지난다. 반대로 **클라이언트를 여러 개 만들면 버킷도 여러 개다** |
 | 동시성 | **스레드 안전** | 동기 API는 호출마다 새 이벤트 루프를 쓰고, 러닝 루프가 있으면 별도 스레드에서 돈다 — 락이 루프가 아니라 스레드를 막아야 한다 |
 
-**Map에서 이것이 유효한 이유는 호출 형태 때문이다.** `provider_fetchers`의 krex
-fetcher 넷(`fetch_krex_rest_areas`·`fetch_krex_traffic_notices`·
-`fetch_krex_rest_area_fuel_prices`·`fetch_krex_rest_area_weather`)은 각자
-`KrexClient`를 **하나** 열고 그 안에서 페이지네이션하므로 한 fetcher 실행 = 버킷
-하나다. 그리고 prod에는 cron schedule이 없고 큐 경로만 살아 있으며, 큐 러너는
-scope를 **순차** 처리한다 — 그래서 한 번에 버킷 하나, 합계 5 TPS다.
+#### Map 합계는 아직 5 TPS가 아니다 — 열려 있는 구멍 (2026-09-14)
 
-**이 전제가 깨지는 곳을 적어 둔다:** krex fetcher 둘이 동시에 돌게 되면(큐 러너
-병렬화, cron schedule 재활성화, 또는 한 op이 클라이언트를 둘 여는 것) 버킷이 둘이라
-합계가 10 TPS가 된다. 그때 필요한 것은 `max_rps`를 낮추는 것이 아니라 **클라이언트를
-공유**하는 것이다.
+> 이 문단은 한 번 **틀리게 적혔다가** 적대 리뷰에서 뒤집혔다. 원래 "큐 러너가 순차
+> 처리하므로 합계 5 TPS"라고 적었는데, 그 순차성은 **run 하나 안에서**의 이야기이고
+> run 자체는 동시에 여러 개가 뜬다. 닫혔다고 적은 구멍이 **현재 설정으로 열려 있다.**
+
+참인 부분:
+
+- krex fetcher 넷(`fetch_krex_rest_areas`·`fetch_krex_traffic_notices`·
+  `fetch_krex_rest_area_fuel_prices`·`fetch_krex_rest_area_weather`)은 각자
+  `KrexClient`를 **하나** 열고 그 안에서 페이지네이션한다 — 한 fetcher 실행 = 버킷 하나.
+- prod에 feature cron schedule은 전부 꺼져 있다(`default_status=STOPPED`).
+- `feature_update_executor`는 한 run 안에서 scope를 **순차** 처리한다.
+
+거짓인 부분 — **run은 동시에 뜬다:**
+
+| 자리 | 값 |
+|---|---:|
+| `FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS` (`sensors.py`) | 틱당 **10** RunRequest |
+| 큐 센서 `default_status` | **RUNNING** (15초 틱) |
+| `docker/dagster.yaml` `max_concurrent_runs` | **10** |
+| `tag_concurrency_limits[kor_travel_map.feature_update_request_id]` | **4** |
+
+request마다 run_key가 다르므로 **worker run 넷이 동시에** 실행될 수 있고, 각 run이
+자기 프로세스에서 자기 `KrexClient`를 연다 → **버킷 넷 → 최대 20 TPS.**
+
+krex를 직렬화하는 것은 아무것도 없다:
+
+- 실행 시점 advisory lock은 **request id**와 **scope key**에 걸린다. scope가 다르면
+  키가 달라 둘 다 진행한다.
+- Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은 **asset**에 선언돼 있는데, 큐 경로는
+  asset wrapper를 **우회한다**(`feature_update_runner.py`가 원본 run 함수를 부른다).
+- `ops.provider_refresh_policies.max_concurrent`는 읽혀서 plan payload에 실리기만
+  하고 **집행되지 않는다**(`feature_update_executor.py` `_rate_limit()`). 자리는 있는데
+  아무도 그 값을 보고 멈추지 않는다.
+
+**그래서 지금 보증되는 것은 "프로세스당 5 TPS"이고 "합계 5 TPS"가 아니다.** 남은
+작업은 `T-VN-KREX-TPS-FANOUT`으로 뺐다 — 고칠 자리는 `max_rps`가 아니라
+**provider 단위 동시성 집행**이다(스키마는 이미 있다).
 - `mois`/`localdata`도 **없는 것이 정상이다.** 키가 없기 때문이다 — 아래 참고.
 
 ### MOIS는 data.go.kr로 이관됐는데 **파일 경로는 그대로다** (2026-09-14)

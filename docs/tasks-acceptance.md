@@ -2290,6 +2290,42 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 **왜 지금 닫지 않았나.** 2026-09-13 분자 PR이 (1)을 하려다 (2)·(3)을 만들었고, 그
 판의 주제가 아니어서 되돌렸다. 되돌린 상태가 종전과 같으므로 회귀는 없다.
 
+## T-VN-KREX-TPS-FANOUT
+
+**무엇이 참이면 닫히는가.**
+
+1. [ ] krex로 나가는 요청이 **프로세스 수와 무관하게** 초당 5건을 넘지 않는다.
+   지금은 라이브러리가 프로세스당 5를 보장하고, 큐가 프로세스를 넷까지 띄운다.
+2. [ ] 그 성질을 재는 검사가 있다. **동시 run을 흉내 내는 검사여야 한다** — 한
+   프로세스 안에서만 재면 지금도 초록이다(그래서 이 구멍이 안 보였다).
+3. [ ] `ops.provider_refresh_policies.max_concurrent`가 **읽히기만 하는 상태를
+   벗어난다** — 그 값을 보고 실제로 멈추는 자리가 있거나, 집행하지 않는다는 것이
+   조문으로 적힌다. 지금은 plan payload에 실리기만 한다.
+
+**무엇이 관측됐나 — 2026-09-14.**
+
+`krex`에 5 TPS 상한을 넣고 "Map 합계도 5 TPS"라고 문서에 적었다. 전문 리뷰어 둘이
+**독립적으로 같은 자리**를 짚어 뒤집었다. 순차성은 run **하나 안에서**만 참이다:
+
+| 자리 | 값 |
+|---|---:|
+| `FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS` | 틱당 **10** RunRequest |
+| 큐 센서 `default_status` | **RUNNING**(15초 틱) |
+| `docker/dagster.yaml` `max_concurrent_runs` | **10** |
+| `tag_concurrency_limits[kor_travel_map.feature_update_request_id]` | **4** |
+
+request마다 run_key가 다르므로 worker run 넷이 동시에 실행되고, run마다 프로세스가
+달라 `KrexClient`도 버킷도 넷이다.
+
+직렬화하는 것이 아무것도 없다 — 실행 advisory lock은 **request id**와 **scope key**에
+걸려 scope가 다르면 둘 다 진행하고, Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은
+**asset**에 선언됐는데 큐 경로는 asset wrapper를 **우회하며**,
+`provider_refresh_policies.max_concurrent`는 `_rate_limit()`가 plan payload에 담기만
+한다.
+
+**고칠 자리는 `max_rps`가 아니다.** 프로세스당 상한을 낮춰도 프로세스 수만큼 곱해진다.
+필요한 것은 provider 단위 동시성(또는 공유 rate gate)이고, 스키마는 이미 있다.
+
 ## T-VN-QUEUE-QUOTA
 
 **급하지 않다** — 2026-09-14 prod 실측 feature materialization 0건. 배경과 근거는
