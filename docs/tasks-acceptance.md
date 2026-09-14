@@ -2297,11 +2297,16 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 
 1. [x] `krheritage` — 인증키가 없어 per-key 한도가 없다.
 2. [x] `opinet` — **300/일**. 1,500은 유료 프리미엄 값이었다.
-3. [x] `krex` **미공개**(포털 4개 면 확인, 남은 길은 문의). `mois` — 기관 자체
+3. [x] `krex` 일일 한도 **미공개**(포털 4개 면 확인). `mois` — 기관 자체
    다운로드라 **없는 것이 정상**.
 4. [x] 결과를 §2 표에 출처와 함께 적었다.
-5. [ ] **그다음에** 판단한다 — 분모가 있는 쪽은 일일 예산, `krheritage`는 예산이
-   아니라 rate limit이다.
+5. [x] `krex`는 **분모를 기다리지 않고 축을 바꿨다 — TPS 5**
+   (`python-krex-api` `feat/http-tps-limit`). 버스트 없음(capacity=1)·재시도도
+   요청으로 셈·클라이언트당 적용이고, 일곱 변이로 검사기를 확인했다. 근거와 전제가
+   깨지는 지점은 `docs/etl/upstream-quota.md` §2에 적었다.
+6. [ ] 남은 판단 — **분모가 있는 provider**에 일일 예산을 둘지. `krheritage`는
+   예산이 아니라 rate limit이고(키가 없어 분모라는 개념이 없다), `krex`가 그 형태의
+   첫 사례다.
 
 ## T-VN-D2-RESIDUE
 
