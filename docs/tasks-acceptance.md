@@ -2292,15 +2292,16 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 
 ## T-VN-QUEUE-QUOTA
 
-**급하지 않다** — 2026-09-14 prod 실측 feature materialization 0건. 만들기 전에
-본다. 배경은 `docs/etl/upstream-quota.md` §2·§5.
+**급하지 않다** — 2026-09-14 prod 실측 feature materialization 0건. 배경과 근거는
+`docs/etl/upstream-quota.md` §2·§5가 정본이다.
 
-1. [x] `krheritage` — **인증키가 없어 per-key 한도가 없다**(2026-09-14).
-2. [x] `opinet` — **300/일**(2026-09-14 확인). 1,500은 유료 프리미엄 값이었다.
-3. [~] `krex` 한도 **미공개**(확인함). `mois`/localdata는 사이트 무응답 — 재시도.
-4. [x] 결과를 §2 "이 표에 없는 provider" 표에 출처와 함께 적었다(2026-09-14).
-5. [ ] **그다음에** 판단한다 — 분모가 있는 쪽은 일일 예산, `krheritage`는
-   예산이 아니라 rate limit(간격·동시성)이다. §5 표 참고.
+1. [x] `krheritage` — 인증키가 없어 per-key 한도가 없다.
+2. [x] `opinet` — **300/일**. 1,500은 유료 프리미엄 값이었다.
+3. [x] `krex` **미공개**(포털 4개 면 확인, 남은 길은 문의). `mois` — 기관 자체
+   다운로드라 **없는 것이 정상**.
+4. [x] 결과를 §2 표에 출처와 함께 적었다.
+5. [ ] **그다음에** 판단한다 — 분모가 있는 쪽은 일일 예산, `krheritage`는 예산이
+   아니라 rate limit이다.
 
 ## T-VN-D2-RESIDUE
 
