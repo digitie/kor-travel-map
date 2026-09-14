@@ -373,9 +373,21 @@ materialization 0건).
 |---|---|---|
 | OpiNet | `already_succeeded_today_kst` | 하루 한 번 성공하면 그날 skip |
 
-나머지 — `krheritage`(sweep당 ~3,950요청, **분모 미측정**) · `krex` · 전국표준데이터 ·
-`krforest` · `knps` · `mcst` · `visitkorea` · `khoa` · concierge — 에는 **아무것도
-없다.** 큐 요청이 반복되면 그만큼 나간다. 그리고 그중 다수가 **1,000/op/일**이다.
+나머지 — `krheritage` · `krex` · 전국표준데이터 · `krforest` · `knps` · `mcst` ·
+`visitkorea` · `khoa` · concierge — 에는 **아무것도 없다.** 큐 요청이 반복되면 그만큼
+나간다. 그리고 data.go.kr 쪽 다수가 **1,000/op/일**이다.
+
+**단, 필요한 조치가 provider마다 다르다**(2026-09-14 분모 조회 결과):
+
+| provider | 분모 | 필요한 것 |
+|---|---|---|
+| data.go.kr 계열(표준데이터·visitkorea·krforest·knps·khoa…) | 있다(§2) | **일일 예산** — 한도 대비 비율을 지킬 수 있다 |
+| `krheritage` | **없다 — 인증키가 없다** | **예산이 아니라 rate limit**(간격·동시성). sweep당 ~3,950요청에 "몇 %"를 물을 대상이 없고, 위험은 소진이 아니라 **차단**이다 |
+| `krex` | 미공개 | **문의** — 모르는 것이지 없는 것이 아니다 |
+| `mois`/localdata | 미확인 | **재시도** |
+
+즉 "큐 경로에 provider별 일일 예산을 만든다"는 처방은 **분모가 있는 쪽에만 맞는다.**
+krheritage에 예산을 짜는 것은 없는 분모를 지어내는 일이다.
 
 **정책의 rate limit은 기록만 된다.** `provider_refresh_policies`의 rate limit 필드는
 metadata payload로 실릴 뿐 한 번도 강제되지 않는다 — §4 조문 5가 admin UI에서 지운

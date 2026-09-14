@@ -72,9 +72,17 @@ def test_geo_base_url_accepts_only_secret_free_origin(
 
 
 def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:
-    assert KorTravelMapSettings(opinet_run_call_budget=700).opinet_run_call_budget == 700
+    """run 예산 상한이 **하루 전체**를 넘지 못한다.
+
+    종전에는 700까지 허용했다 — 무료키 한도를 1,500으로 알고 있었기 때문이다.
+    실제 한도는 **300/일**이고(2026-09-14 포털 확인, 1,500은 유료 프리미엄 값)
+    한 run이 하루보다 많이 쓰게 설정할 수 있으면 안 된다. 산수 자체는
+    `tests/lint/test_opinet_budget_fits_the_daily_limit.py`가 결박한다.
+    """
+
+    assert KorTravelMapSettings(opinet_run_call_budget=300).opinet_run_call_budget == 300
     with pytest.raises(ValidationError):
-        KorTravelMapSettings(opinet_run_call_budget=701)
+        KorTravelMapSettings(opinet_run_call_budget=301)
 
 
 def test_provider_retry_budget_settings_are_bounded() -> None:
