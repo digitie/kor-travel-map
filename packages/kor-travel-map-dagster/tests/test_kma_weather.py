@@ -315,6 +315,13 @@ class _FakeKrtourClient:
 
 
 class _FakeForecastService:
+    """실물 ``ForecastService`` 대역 — 세 오퍼레이션이 전부 ``async def``다
+    (``kma/client.py:411`` now / ``:430`` short / ``:449`` vilage).
+
+    종전 대역은 셋 다 동기였다. 그래서 asset이 ``await`` 없이 불러 코루틴
+    객체를 변환 함수에 그대로 넘겨도 아무것도 빨개지지 않았다.
+    """
+
     def __init__(
         self,
         *,
@@ -327,17 +334,23 @@ class _FakeForecastService:
         self._vilage_items = vilage_items or []
         self.calls: list[tuple[str, int, int]] = []
 
-    def now(self, *, nx: int, ny: int) -> Any:
+    async def now(self, *, nx: int, ny: int) -> Any:
         self.calls.append(("now", nx, ny))
         return self._snapshot
 
-    def short(self, *, nx: int, ny: int) -> list[Any]:
+    async def short(self, *, nx: int, ny: int) -> list[Any]:
         self.calls.append(("short", nx, ny))
         return list(self._short_items)
 
-    def vilage(self, *, nx: int, ny: int) -> list[Any]:
+    async def vilage(self, *, nx: int, ny: int) -> list[Any]:
         self.calls.append(("vilage", nx, ny))
         return list(self._vilage_items)
+
+
+async def _noop_aclose() -> None:
+    """실물 ``KmaClient``의 정리 메서드 대역 — ``aclose`` 코루틴뿐이다
+    (``kma/client.py:93``. ``close``는 lib에 없다).
+    """
 
 
 _NOWCAST_SNAPSHOT = SimpleNamespace(
@@ -398,7 +411,7 @@ def _context(
         "kma_weather_client_factory": (
             client_factory
             if client_factory is not None
-            else lambda: SimpleNamespace(forecast=forecast)
+            else lambda: SimpleNamespace(forecast=forecast, aclose=_noop_aclose)
         ),
         "kma_weather_extra_points": extra_points,
         "kma_weather_max_grids_per_run": max_grids,
@@ -508,12 +521,12 @@ class _FlakyForecastService(_FakeForecastService):
         super().__init__(**kwargs)
         self.failures_left = 1
 
-    def now(self, *, nx: int, ny: int) -> Any:
+    async def now(self, *, nx: int, ny: int) -> Any:
         if self.failures_left > 0:
             self.failures_left -= 1
             self.calls.append(("now-fail", nx, ny))
             raise _RetryableKmaError("transient")
-        return super().now(nx=nx, ny=ny)
+        return await super().now(nx=nx, ny=ny)
 
 
 async def test_nowcast_asset_retries_transient_grid_failure(
@@ -563,7 +576,7 @@ async def test_nowcast_asset_nonretryable_grid_failure_fails_step(
         retryable = False
 
     class _FatalForecastService(_FakeForecastService):
-        def now(self, *, nx: int, ny: int) -> Any:
+        async def now(self, *, nx: int, ny: int) -> Any:
             self.calls.append(("now-fatal", nx, ny))
             raise _FatalError("bad key")
 
@@ -830,14 +843,15 @@ async def test_effective_grid_creates_and_closes_factory_owned_kma_client(
     kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5)])
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
     factory_calls: list[bool] = []
-    close_calls: list[bool] = []
+    aclose_calls: list[bool] = []
 
-    def _close() -> None:
-        close_calls.append(True)
+    async def _aclose() -> None:
+        aclose_calls.append(True)
 
     def _factory() -> object:
         factory_calls.append(True)
-        return SimpleNamespace(forecast=forecast, close=_close)
+        # 실물 정리 메서드는 ``aclose``뿐이다(``kma/client.py:93``).
+        return SimpleNamespace(forecast=forecast, aclose=_aclose)
 
     result = await run_feature_weather_kma_ultra_short_nowcast(
         _context(
@@ -850,7 +864,7 @@ async def test_effective_grid_creates_and_closes_factory_owned_kma_client(
 
     assert result.grids_fetched == 1
     assert factory_calls == [True]
-    assert close_calls == [True]
+    assert aclose_calls == [True]
     assert forecast.calls == [("now", 126, 37)]
 
 
@@ -864,10 +878,10 @@ async def test_cancellation_remains_primary_when_owned_client_close_fails(
         load_error=cancellation,
     )
     forecast = _FakeForecastService(snapshot=_NOWCAST_SNAPSHOT)
-    close_calls: list[bool] = []
+    aclose_calls: list[bool] = []
 
-    def _close() -> None:
-        close_calls.append(True)
+    async def _aclose() -> None:
+        aclose_calls.append(True)
         raise RuntimeError("secondary close failure")
 
     with pytest.raises(asyncio.CancelledError) as exc_info:
@@ -878,13 +892,13 @@ async def test_cancellation_remains_primary_when_owned_client_close_fails(
                 sync_scope="target_grids",
                 client_factory=lambda: SimpleNamespace(
                     forecast=forecast,
-                    close=_close,
+                    aclose=_aclose,
                 ),
             )
         )
 
     assert exc_info.value is cancellation
-    assert close_calls == [True]
+    assert aclose_calls == [True]
     assert kor_travel_map_client.failure_scope_calls == []
 
 
@@ -893,14 +907,14 @@ async def test_refresh_failure_remains_primary_when_owned_client_close_fails(
 ) -> None:
     _patch_grid_and_bases(monkeypatch)
     kor_travel_map_client = _FakeKrtourClient(target_coords=[(126.9, 37.5)])
-    close_calls: list[bool] = []
+    aclose_calls: list[bool] = []
 
     class _FailingForecast:
-        def now(self, *, nx: int, ny: int) -> object:
+        async def now(self, *, nx: int, ny: int) -> object:
             raise RuntimeError(f"primary provider failure: {nx},{ny}")
 
-    def _close() -> None:
-        close_calls.append(True)
+    async def _aclose() -> None:
+        aclose_calls.append(True)
         raise RuntimeError("secondary close failure")
 
     with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
@@ -911,14 +925,26 @@ async def test_refresh_failure_remains_primary_when_owned_client_close_fails(
                 sync_scope="target_grids",
                 client_factory=lambda: SimpleNamespace(
                     forecast=_FailingForecast(),
-                    close=_close,
+                    aclose=_aclose,
                 ),
             )
         )
 
     assert "primary provider failure" in str(exc_info.value.__cause__)
     assert "secondary close failure" not in str(exc_info.value)
-    assert close_calls == [True]
+    assert aclose_calls == [True]
+
+
+async def test_owned_client_cleanup_refuses_to_silently_skip_a_missing_aclose() -> None:
+    """정리 메서드 이름이 어긋나면 조용히 넘어가지 않는다.
+
+    종전 판은 ``getattr(client, "close", None)``이 None이면 그대로 return했다.
+    lib가 ``aclose``만 남긴 뒤(``kma/client.py:93``)에도 owned client는 한 번도
+    닫히지 않았고 **가드가 그 사실을 삼켰다** — 이 결함을 숨긴 장본인이 조용한
+    skip이라, 여기서는 시끄럽게 실패하는 쪽을 못 박는다.
+    """
+    with pytest.raises(AttributeError):
+        await kma_weather._close_owned_kma_weather_client(SimpleNamespace())
 
 
 async def test_target_grids_default_includes_global_extra_points(
@@ -1185,7 +1211,8 @@ class _FakeKmaClient:
         self.closed = False
         _FakeKmaClient.instances.append(self)
 
-    def close(self) -> None:
+    # 실물 ``KmaClient``의 정리 메서드는 ``aclose``뿐이다(``kma/client.py:93``).
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1442,6 +1469,10 @@ def test_mid_rows_from_items_map_camel_case_raw() -> None:
 
 
 class _FakeDataGoKrClient:
+    """실물 ``DataGoKrClient`` 중기 오퍼레이션 대역 — 둘 다 ``async def``다
+    (``kma/datagokr.py:536`` mid_land_forecast / ``:558`` mid_temperature_forecast).
+    """
+
     def __init__(
         self,
         *,
@@ -1452,11 +1483,11 @@ class _FakeDataGoKrClient:
         self._temp_items = temp_items or []
         self.calls: list[tuple[str, str]] = []
 
-    def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
+    async def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
         self.calls.append(("land", reg_id))
         return list(self._land_items)
 
-    def mid_temperature_forecast(self, *, reg_id: str) -> list[Any]:
+    async def mid_temperature_forecast(self, *, reg_id: str) -> list[Any]:
         self.calls.append(("ta", reg_id))
         return list(self._temp_items)
 
@@ -1515,6 +1546,62 @@ async def test_mid_forecast_asset_loads_values_per_region_feature(
             "cursor": {"base_datetime": "202606110600"},
         }
     ]
+
+
+class _FlakyMidDataGoKrClient(_FakeDataGoKrClient):
+    """첫 ``mid_land_forecast``만 retryable 오류 — 코루틴 **안**에서 난다."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.failures_left = 1
+
+    async def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
+        if self.failures_left > 0:
+            self.failures_left -= 1
+            self.calls.append(("land-fail", reg_id))
+            raise _RetryableKmaError("transient")
+        return await super().mid_land_forecast(reg_id=reg_id)
+
+
+async def test_mid_forecast_retries_a_transient_region_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """중기 호출도 **await 경계 안에서** 재시도돼야 한다.
+
+    동기 판 ``retry_upstream_async``에 코루틴 함수를 넘기면 ``call()``이 코루틴
+    **객체**만 돌려주고 예외는 재시도 밖에서 난다 — 재시도가 조용히 사라진다
+    (``upstream_retry.py:278-284``가 이 함정을 못 박아 둔 자리다). 격자 루프에는
+    이 회귀가 있었지만 중기 두 호출에는 없었다.
+    """
+
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    delays: list[float] = []
+
+    async def _instant_sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr(upstream_retry, "asyncio", SimpleNamespace(sleep=_instant_sleep))
+    kor_travel_map_client = _FakeKrtourClient()
+    datagokr = _FlakyMidDataGoKrClient(
+        land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM]
+    )
+
+    with counting_upstream_requests():
+        result = await run_feature_weather_kma_mid_forecast(
+            _mid_context(kor_travel_map_client, datagokr)
+        )
+        observed = observed_upstream_requests()
+
+    assert result.regions_fetched == 1
+    assert result.values_loaded == 6
+    assert datagokr.calls == [
+        ("land-fail", "11B00000"),
+        ("land", "11B00000"),
+        ("ta", "11B10101"),
+    ]
+    assert delays == [15.0]
+    # 재시도는 새 오퍼레이션 호출이 아니다 — 분자는 region당 2건 그대로다.
+    assert observed == 2
 
 
 async def test_mid_forecast_asset_skips_when_cursor_matches(
@@ -1768,13 +1855,34 @@ class _FakeWarningDataGoKrClient:
         self.calls: list[dict[str, Any]] = []
         _FakeWarningDataGoKrClient.instances.append(self)
 
-    def weather_warning_list(self, **kwargs: Any) -> list[Any]:
-        self.calls.append(kwargs)
+    # 실물: ``kma/datagokr.py:685``의 ``async def weather_warning_list``
+    # — 인자가 전부 keyword-only다. ``**kwargs``로 받으면 이름이 어긋나도
+    # 초록이라 실물 시그니처를 그대로 적는다.
+    async def weather_warning_list(
+        self,
+        *,
+        stn_id: str | int,
+        from_tm_fc: Any,
+        to_tm_fc: Any,
+        page_no: int = 1,
+        num_of_rows: int = 10,
+    ) -> list[Any]:
+        self.calls.append(
+            {
+                "stn_id": stn_id,
+                "from_tm_fc": from_tm_fc,
+                "to_tm_fc": to_tm_fc,
+                "page_no": page_no,
+                "num_of_rows": num_of_rows,
+            }
+        )
         index = len(self.calls) - 1
         pages = type(self).pages
         return pages[index] if index < len(pages) else []
 
-    def close(self) -> None:
+    # 실물 ``DataGoKrClient``의 정리 메서드는 ``aclose``뿐이다
+    # (``kma/datagokr.py:131``) — resource teardown도 이 이름을 부른다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1785,7 +1893,7 @@ def _install_fake_kma_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def test_fetch_kma_weather_alerts_paginates_and_closes(
+async def test_fetch_kma_weather_alerts_paginates_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeWarningDataGoKrClient.instances = []
@@ -1799,7 +1907,7 @@ def test_fetch_kma_weather_alerts_paginates_and_closes(
         kma_weather_alert_lookback_days=2,
     )
 
-    records = list(fetch_kma_weather_alerts(settings))
+    records = [record async for record in fetch_kma_weather_alerts(settings)]
 
     assert len(records) == 101
     [client] = _FakeWarningDataGoKrClient.instances
@@ -1814,11 +1922,12 @@ def test_fetch_kma_weather_alerts_paginates_and_closes(
     assert window.days == 1  # lookback 2일 = 오늘 포함 어제부터
 
 
-def test_fetch_kma_weather_alerts_requires_credential() -> None:
+async def test_fetch_kma_weather_alerts_requires_credential() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
+    generator = fetch_kma_weather_alerts(settings)
     with pytest.raises(ProviderCredentialMissing, match="DATA_GO_KR_SERVICE_KEY"):
-        next(iter(fetch_kma_weather_alerts(settings)))
+        await anext(generator)
 
 
 def test_kma_datagokr_client_resource_yields_client_and_closes(
@@ -2046,7 +2155,7 @@ async def test_a_failed_grid_is_still_counted(
         retryable = False
 
     class _FatalForecast(_FakeForecastService):
-        def now(self, *, nx: int, ny: int) -> Any:
+        async def now(self, *, nx: int, ny: int) -> Any:
             self.calls.append(("now-fatal", nx, ny))
             raise _FatalError("bad key")
 
@@ -2111,7 +2220,7 @@ async def test_mid_forecast_does_not_count_the_call_that_never_went_out(
         retryable = False
 
     class _FatalLandClient(_FakeDataGoKrClient):
-        def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
+        async def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
             self.calls.append(("land-fatal", reg_id))
             raise _FatalError("bad key")
 

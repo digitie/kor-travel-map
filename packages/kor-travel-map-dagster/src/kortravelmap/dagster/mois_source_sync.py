@@ -20,6 +20,7 @@ NOTE: 본 모듈은 ``from __future__ import annotations``를 쓰지 않는다 �
 (future import)은 ``DagsterInvalidDefinitionError``를 유발한다(``maintenance.py``와 동일).
 """
 
+import asyncio
 import contextlib
 import importlib
 import json
@@ -204,8 +205,21 @@ def sync_mois_source_db(
     sync_kind = "localdata_full"
     sync_kinds: set[str] = set()
     synced_slugs: list[str] = []
-    try:
-        mois.create_sqlite_schema(engine)
+    async def _sync_all_slugs() -> list[Any]:
+        """slug를 **한 client·한 루프**에서 순서대로 돌린다.
+
+        `mois`가 async-only가 되면서(2026-09-15 provider 일괄 개편) 이 경로가 코루틴을
+        부르게 됐다. 호출자(`ensure_mois_source_db_fresh` → Dagster op)는 동기이고
+        `asyncio.to_thread`가 돌리는 worker thread 위에 있으므로 `asyncio.run()`으로
+        브리지한다 — 이 저장소가 이미 여러 자리에서 쓰는 형태다.
+
+        **루프를 slug마다 새로 열지 않는다.** client의 token bucket은 한 이벤트 루프에
+        묶여 있어서(`AsyncTokenBucket`이 다른 루프에서 쓰이면 `RuntimeError`), slug마다
+        `asyncio.run`을 돌면 버킷이 매번 새 루프를 만나 터지거나 상한이 slug 수만큼
+        곱해진다. 하나의 `run()` 안에서 전부 돈다.
+        """
+
+        results: list[Any] = []
         client = mois.LocalDataFileClient()
         try:
             for slug in slugs:
@@ -215,29 +229,33 @@ def sync_mois_source_db(
                 note_upstream_request()
                 session = Session(engine)
                 try:
-                    result = mois.sync_localdata_source_db(
-                        session,
-                        client,
-                        service_slugs=(slug,),
-                        org_code=org_code,
-                        batch_size=batch_size,
-                        commit=True,
+                    results.append(
+                        await mois.sync_localdata_source_db(
+                            session,
+                            client,
+                            service_slugs=(slug,),
+                            org_code=org_code,
+                            batch_size=batch_size,
+                            commit=True,
+                        )
                     )
                 finally:
                     session.close()
                     _checkpoint_sqlite_wal(engine)
-
-                synced_slugs.extend(str(item) for item in result.service_slugs)
-                sync_kinds.add(str(result.sync_kind))
-                scanned_count += int(result.scanned_count)
-                upserted_count += int(result.upserted_count)
-                open_count += int(result.open_count)
-                closed_count += int(result.closed_count)
-                unknown_status_count += int(result.unknown_status_count)
         finally:
-            close = getattr(client, "close", None)
-            if callable(close):
-                close()
+            await client.aclose()
+        return results
+
+    try:
+        mois.create_sqlite_schema(engine)
+        for result in asyncio.run(_sync_all_slugs()):
+            synced_slugs.extend(str(item) for item in result.service_slugs)
+            sync_kinds.add(str(result.sync_kind))
+            scanned_count += int(result.scanned_count)
+            upserted_count += int(result.upserted_count)
+            open_count += int(result.open_count)
+            closed_count += int(result.closed_count)
+            unknown_status_count += int(result.unknown_status_count)
     finally:
         _checkpoint_sqlite_wal(engine)
         engine.dispose()

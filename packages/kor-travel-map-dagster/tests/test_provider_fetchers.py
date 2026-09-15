@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from datetime import date
 from types import ModuleType, SimpleNamespace
@@ -174,7 +173,7 @@ class _FakeStandardService:
         self._records = records
         self.pages: list[int] = []
 
-    def list(
+    async def list(
         self, *, page_no: int = 1, num_of_rows: int = 1000, **_filters: Any
     ) -> _FakeStandardPage:
         self.pages.append(page_no)
@@ -202,7 +201,7 @@ class _FakeDataGoKrClient:
         self.special_street = _FakeStandardService([object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -375,7 +374,8 @@ class _FakeEventService:
         self._records = records
         self.calls: list[tuple[int, int]] = []
 
-    def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
+    # 실물: ``krheritage/services/event.py:21``의 ``async def by_month``.
+    async def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
         self.calls.append((year, month))
         if len(self.calls) == 1:
             return tuple(self._records)
@@ -415,7 +415,9 @@ class _FakeHeritageSearchService:
         self._details_by_kind = details_by_kind
         self.calls: list[tuple[int, str]] = []
 
-    def list(
+    # 실물: ``krheritage/services/search.py:29``의 ``async def list``
+    # (keyword-only ``page_size``/``page``/``ccba_*``).
+    async def list(
         self, *, page_size: int = 100, page: int = 1, **filters: Any
     ) -> _FakeHeritagePage:
         kind_code = str(filters.get("ccba_kdcd", ""))
@@ -430,7 +432,9 @@ class _FakeHeritageSearchService:
         ]
         return _FakeHeritagePage(list(summaries), len(details))
 
-    def details(self, ccba_kdcd: str, ccba_asno: str, ccba_ctcd: str) -> object:
+    # 실물: ``krheritage/services/search.py:70``의 ``async def details``
+    # (``ccba_*`` 3개 위치인자).
+    async def details(self, ccba_kdcd: str, ccba_asno: str, ccba_ctcd: str) -> object:
         del ccba_ctcd
         return self._details_by_kind[ccba_kdcd][int(ccba_asno)]
 
@@ -446,7 +450,10 @@ class _FakeHeritageClient:
         self.search = _FakeHeritageSearchService(type(self).details_by_kind)
         _FakeHeritageClient.instances.append(self)
 
-    def close(self) -> None:
+    # 실물 ``HeritageClient``에 sync ``close``는 없다 — ``aclose``뿐이다
+    # (``krheritage/client.py:80``). fetcher의 ``finally``가 부르는 이름과
+    # 같아야 "닫혔다"는 단언이 뜻을 갖는다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -487,7 +494,9 @@ class _FakeRestareaService:
         self.weather = weather
         self.lookback_calls: list[int] = []
 
-    def latest_weather(self, *, lookback_hours: int = 48, **_kwargs: Any) -> _FakePage:
+    async def latest_weather(
+        self, *, lookback_hours: int = 48, **_kwargs: Any
+    ) -> _FakePage:
         """실물 계약: lookback을 다 써도 못 찾으면 **예외가 아니라 빈 Page**다.
 
         `krex/client.py`의 `latest_weather`가 `KrexNotFoundError`를 continue로
@@ -501,7 +510,7 @@ class _FakeRestareaService:
             page_no=1,
         )
 
-    def list_all(
+    async def list_all(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
     ) -> _FakePage:
         self.calls.append((num_of_rows, page_no))
@@ -510,10 +519,10 @@ class _FakeRestareaService:
         items = tuple(object() for _ in range(max(0, end - start)))
         return _FakePage(items=items, total_count=self.total, page_no=page_no)
 
-    def fuel_prices(
+    async def fuel_prices(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
     ) -> _FakePage:
-        return self.list_all(num_of_rows=num_of_rows, page_no=page_no)
+        return await self.list_all(num_of_rows=num_of_rows, page_no=page_no)
 
 
 class _FakeKrexClient:
@@ -534,7 +543,7 @@ class _FakeKrexClient:
         self.restarea = _FakeRestareaService(type(self).total, type(self).weather)
         _FakeKrexClient.instances.append(self)
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -553,22 +562,26 @@ def _install_fake_krex(
     return _FakeKrexClient
 
 
-def test_krex_rest_areas_fetch_raises_when_credential_missing() -> None:
+async def _krex_records(records: AsyncIterator[Any]) -> list[Any]:
+    return [record async for record in records]
+
+
+async def test_krex_rest_areas_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(krex_go_api_key=None)
 
     generator = fetch_krex_rest_areas(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_krex_rest_areas_fetch_paginates_yields_and_closes(
+async def test_krex_rest_areas_fetch_paginates_yields_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # total 1003 → page1=1000(full)·page2=3(short) → 2 pages, short-page stop.
     fake = _install_fake_krex(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_go_api_key=SecretStr("go-key"))
 
-    records = list(fetch_krex_rest_areas(settings))
+    records = await _krex_records(fetch_krex_rest_areas(settings))
 
     assert len(records) == 1003
     assert len(fake.instances) == 1
@@ -579,49 +592,49 @@ def test_krex_rest_areas_fetch_paginates_yields_and_closes(
     assert client.restarea.calls == [(1000, 1), (1000, 2)]
 
 
-def test_krex_rest_areas_fetch_stops_on_total_count(
+async def test_krex_rest_areas_fetch_stops_on_total_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # total 2000 = 정확히 2 페이지(각 1000) → total_count 도달로 stop(빈 페이지 X).
     fake = _install_fake_krex(monkeypatch, total=2000)
     settings = KorTravelMapSettings(krex_go_api_key=SecretStr("go-key"))
 
-    records = list(fetch_krex_rest_areas(settings))
+    records = await _krex_records(fetch_krex_rest_areas(settings))
 
     assert len(records) == 2000
     assert fake.instances[0].restarea.calls == [(1000, 1), (1000, 2)]
     assert fake.instances[0].closed is True
 
 
-def test_krex_rest_areas_fetch_closes_on_partial_consumption(
+async def test_krex_rest_areas_fetch_closes_on_partial_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krex(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_go_api_key=SecretStr("go-key"))
 
     generator = fetch_krex_rest_areas(settings)
-    first = next(generator)
+    first = await anext(generator)
     assert first is not None
-    generator.close()
+    await generator.aclose()
 
     assert fake.instances[0].closed is True
 
 
-def test_krex_rest_area_fuel_prices_missing_key_raises() -> None:
+async def test_krex_rest_area_fuel_prices_missing_key_raises() -> None:
     settings = KorTravelMapSettings(krex_ex_api_key=None)
 
     generator = fetch_krex_rest_area_fuel_prices(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_krex_rest_area_fuel_prices_fetch_paginates(
+async def test_krex_rest_area_fuel_prices_fetch_paginates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krex(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_rest_area_fuel_prices(settings))
+    records = await _krex_records(fetch_krex_rest_area_fuel_prices(settings))
 
     assert len(records) == 1003
     assert fake.instances[0].restarea.calls == [(1000, 1), (1000, 2)]
@@ -640,7 +653,7 @@ class _FakeIncidentService:
         self.empty_page_no = empty_page_no
         self.calls: list[tuple[int, int]] = []
 
-    def incident(
+    async def incident(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
     ) -> _FakePage:
         self.calls.append((num_of_rows, page_no))
@@ -696,7 +709,7 @@ class _FakeKrexTrafficClient:
         )
         _FakeKrexTrafficClient.instances.append(self)
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.close_calls += 1
         self.closed = True
 
@@ -718,15 +731,15 @@ def _install_fake_krex_traffic(
     return _FakeKrexTrafficClient
 
 
-def test_krex_traffic_notices_fetch_raises_when_credential_missing() -> None:
+async def test_krex_traffic_notices_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(krex_ex_api_key=None)
 
     generator = fetch_krex_traffic_notices(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_krex_traffic_notices_fetch_requires_two_stable_passes_before_yield(
+async def test_krex_traffic_notices_fetch_requires_two_stable_passes_before_yield(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # total 1003 → pass마다 page1=1000·page2=3. 동일 사건 집합을 2회
@@ -734,7 +747,7 @@ def test_krex_traffic_notices_fetch_requires_two_stable_passes_before_yield(
     fake = _install_fake_krex_traffic(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert len(records) == 1003
     assert len(fake.instances) == 1
@@ -745,21 +758,21 @@ def test_krex_traffic_notices_fetch_requires_two_stable_passes_before_yield(
     assert client.traffic.calls == [(1000, 1), (1000, 2)] * 2
 
 
-def test_krex_traffic_notices_fetch_stops_on_total_count(
+async def test_krex_traffic_notices_fetch_stops_on_total_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # total 2000 = 정확히 2 페이지(각 1000) → total_count 도달로 stop(빈 페이지 X).
     fake = _install_fake_krex_traffic(monkeypatch, total=2000)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert len(records) == 2000
     assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)] * 2
     assert fake.instances[0].closed is True
 
 
-def test_krex_traffic_notices_fetch_reaches_total_when_server_clamps_page_size(
+async def test_krex_traffic_notices_fetch_reaches_total_when_server_clamps_page_size(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # EX realTimeSms는 num_of_rows=1000 요청도 99건으로 clamp한다. 첫 99건을
@@ -771,27 +784,27 @@ def test_krex_traffic_notices_fetch_reaches_total_when_server_clamps_page_size(
     )
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert len(records) == 190
     assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)] * 2
     assert fake.instances[0].closed is True
 
 
-def test_krex_traffic_notices_fetch_accepts_explicit_empty_snapshot(
+async def test_krex_traffic_notices_fetch_accepts_explicit_empty_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krex_traffic(monkeypatch, total=0)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert records == []
     assert fake.instances[0].traffic.calls == [(1000, 1)] * 2
     assert fake.instances[0].closed is True
 
 
-def test_krex_traffic_notices_fetch_rejects_empty_page_before_total_count(
+async def test_krex_traffic_notices_fetch_rejects_empty_page_before_total_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krex_traffic(
@@ -803,7 +816,7 @@ def test_krex_traffic_notices_fetch_rejects_empty_page_before_total_count(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(RuntimeError, match=r"seen=99, total_count=190, page_no=2"):
-        list(fetch_krex_traffic_notices(settings))
+        await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)]
     assert fake.instances[0].closed is True
@@ -818,7 +831,7 @@ def test_krex_traffic_notices_fetch_rejects_empty_page_before_total_count(
         {"realTimeSMSList": []},
     ],
 )
-def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
+async def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
     monkeypatch: pytest.MonkeyPatch,
     raw: dict[str, Any],
 ) -> None:
@@ -826,7 +839,7 @@ def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
         def __init__(self) -> None:
             self.calls: list[tuple[int, int]] = []
 
-        def incident(
+        async def incident(
             self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
         ) -> _FakePage:
             self.calls.append((num_of_rows, page_no))
@@ -847,7 +860,7 @@ def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
             self.traffic = _MalformedIncidentService()
             _MalformedClient.instances.append(self)
 
-        def close(self) -> None:
+        async def aclose(self) -> None:
             self.closed = True
 
     module = ModuleType("krex")
@@ -856,20 +869,20 @@ def test_krex_traffic_notices_fetch_rejects_malformed_http_200_page(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(RuntimeError, match="KREX traffic_notices"):
-        list(fetch_krex_traffic_notices(settings))
+        await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert _MalformedClient.instances[0].traffic.calls == [(1000, 1)]
     assert _MalformedClient.instances[0].closed is True
 
 
-def test_krex_traffic_notices_fetch_rejects_count_change_between_pages(
+async def test_krex_traffic_notices_fetch_rejects_count_change_between_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _ChangingCountIncidentService:
         def __init__(self) -> None:
             self.calls: list[tuple[int, int]] = []
 
-        def incident(
+        async def incident(
             self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
         ) -> _FakePage:
             self.calls.append((num_of_rows, page_no))
@@ -896,7 +909,7 @@ def test_krex_traffic_notices_fetch_rejects_count_change_between_pages(
             self.traffic = _ChangingCountIncidentService()
             _ChangingCountClient.instances.append(self)
 
-        def close(self) -> None:
+        async def aclose(self) -> None:
             self.closed = True
 
     module = ModuleType("krex")
@@ -905,13 +918,13 @@ def test_krex_traffic_notices_fetch_rejects_count_change_between_pages(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(RuntimeError, match="페이지 사이 count"):
-        list(fetch_krex_traffic_notices(settings))
+        await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert _ChangingCountClient.instances[0].traffic.calls == [(1000, 1), (1000, 2)]
     assert _ChangingCountClient.instances[0].closed is True
 
 
-def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
+async def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """count 불변이어도 A,B / B,D면 B 중복+C 누락 snapshot이므로 거부한다."""
@@ -920,7 +933,7 @@ def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
         def __init__(self) -> None:
             self.calls: list[tuple[int, int]] = []
 
-        def incident(
+        async def incident(
             self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
         ) -> _FakePage:
             self.calls.append((num_of_rows, page_no))
@@ -948,7 +961,7 @@ def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
             self.traffic = _OverlappingIncidentService()
             _OverlappingClient.instances.append(self)
 
-        def close(self) -> None:
+        async def aclose(self) -> None:
             self.closed = True
 
     module = ModuleType("krex")
@@ -957,7 +970,7 @@ def test_krex_traffic_notices_fetch_rejects_page_boundary_overlap(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(RuntimeError, match="중복 사건 identity"):
-        list(fetch_krex_traffic_notices(settings))
+        await _krex_records(fetch_krex_traffic_notices(settings))
 
     [client] = _OverlappingClient.instances
     assert client.traffic.calls == [(1000, 1), (1000, 2)]
@@ -975,7 +988,7 @@ class _SequencedIncidentService:
         self._passes = pass_index_sets
         self.calls: list[tuple[int, int]] = []
 
-    def incident(
+    async def incident(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
     ) -> _FakePage:
         # pass=call 매핑은 각 pass가 1 page(total_count=index 수)임에 의존한다.
@@ -1010,7 +1023,7 @@ class _SequencedTrafficClient:
         self.traffic = _SequencedIncidentService(list(type(self).passes))
         _SequencedTrafficClient.instances.append(self)
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.close_calls += 1
         self.closed = True
 
@@ -1028,7 +1041,7 @@ def _install_sequenced_krex_traffic(
     return _SequencedTrafficClient
 
 
-def test_krex_traffic_notices_retries_transient_mismatch_until_stable(
+async def test_krex_traffic_notices_retries_transient_mismatch_until_stable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """휘발성 feed의 일시 불일치는 sliding bounded-retry로 self-heal한다(#700).
@@ -1039,7 +1052,7 @@ def test_krex_traffic_notices_retries_transient_mismatch_until_stable(
     _install_sequenced_krex_traffic(monkeypatch, passes=[(1, 2), (1, 3), (1, 3)])
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert sorted(record.series_no for record in records) == [1, 3]
     [client] = _SequencedTrafficClient.instances
@@ -1049,7 +1062,7 @@ def test_krex_traffic_notices_retries_transient_mismatch_until_stable(
     assert client.close_calls == 1
 
 
-def test_krex_traffic_notices_raises_typed_when_never_stable(
+async def test_krex_traffic_notices_raises_typed_when_never_stable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """상한 내 안정 pair를 못 잡으면 typed KrexTrafficNoticeSnapshotUnstable(#700).
@@ -1066,7 +1079,7 @@ def test_krex_traffic_notices_raises_typed_when_never_stable(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(KrexTrafficNoticeSnapshotUnstable, match="안정되지 않았다"):
-        list(fetch_krex_traffic_notices(settings))
+        await _krex_records(fetch_krex_traffic_notices(settings))
 
     [client] = _SequencedTrafficClient.instances
     assert (
@@ -1077,7 +1090,7 @@ def test_krex_traffic_notices_raises_typed_when_never_stable(
     assert client.close_calls == 1
 
 
-def test_krex_traffic_notices_stabilizes_on_last_permitted_retry(
+async def test_krex_traffic_notices_stabilizes_on_last_permitted_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """마지막 허용 재시도(상한 번째 snapshot)에서 안정되면 raise가 아니라 yield한다.
@@ -1091,7 +1104,7 @@ def test_krex_traffic_notices_stabilizes_on_last_permitted_retry(
     _install_sequenced_krex_traffic(monkeypatch, passes=passes)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    records = list(fetch_krex_traffic_notices(settings))
+    records = await _krex_records(fetch_krex_traffic_notices(settings))
 
     assert sorted(record.series_no for record in records) == [7, 8]
     [client] = _SequencedTrafficClient.instances
@@ -1196,16 +1209,16 @@ def test_krex_traffic_notices_page_accepts_single_object_item() -> None:
     )
 
 
-def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
+async def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krex_traffic(monkeypatch, total=1003)
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     generator = fetch_krex_traffic_notices(settings)
-    first = next(generator)
+    first = await anext(generator)
     assert first is not None
-    generator.close()
+    await generator.aclose()
 
     assert fake.instances[0].closed is True
     assert fake.instances[0].close_calls == 1
@@ -1601,9 +1614,9 @@ def test_krforest_arboretums_fetch_yields_and_closes(
 def test_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    generator = fetch_datagokr_cultural_festivals(settings)
+    agen = fetch_datagokr_cultural_festivals(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        asyncio.run(agen.__anext__())
 
 
 def test_fetch_yields_records_and_closes_client(
@@ -1612,7 +1625,7 @@ def test_fetch_yields_records_and_closes_client(
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_datagokr_cultural_festivals(settings))
+    records = asyncio.run(_acollect(fetch_datagokr_cultural_festivals(settings)))
 
     assert len(records) == 2
     assert len(fake.instances) == 1
@@ -1627,10 +1640,14 @@ def test_fetch_closes_client_on_partial_consumption(
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    generator = fetch_datagokr_cultural_festivals(settings)
-    first = next(generator)
-    assert first is not None
-    generator.close()
+    async def _take_one_then_close() -> None:
+        agen = fetch_datagokr_cultural_festivals(settings)
+        first = await agen.__anext__()
+        assert first is not None
+        # 조기 종료 시에도 finally의 ``aclose()``가 실행되어 client가 닫혀야 한다.
+        await agen.aclose()
+
+    asyncio.run(_take_one_then_close())
 
     assert fake.instances[0].closed is True
 
@@ -1638,9 +1655,9 @@ def test_fetch_closes_client_on_partial_consumption(
 def test_standard_museums_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    generator = fetch_standard_museums(settings)
+    agen = fetch_standard_museums(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        asyncio.run(agen.__anext__())
 
 
 def test_standard_museums_fetch_yields_and_closes(
@@ -1649,7 +1666,7 @@ def test_standard_museums_fetch_yields_and_closes(
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_standard_museums(settings))
+    records = asyncio.run(_acollect(fetch_standard_museums(settings)))
 
     assert len(records) == 3
     client = fake.instances[0]
@@ -1686,7 +1703,7 @@ class _FakeVisitKoreaClient:
         self.page_calls: list[int] = []
         _FakeVisitKoreaClient.instances.append(self)
 
-    def search_festival(
+    async def search_festival(
         self, event_start_date: Any, *, page_no: int = 1, num_of_rows: int = 10, **_kw: Any
     ) -> _FakeFestivalPage:
         self.search_calls.append(event_start_date)
@@ -1714,7 +1731,10 @@ class _FakeVisitKoreaClient:
     # ``iter_pages``는 일부러 두지 않는다 — 라이브러리 iterator는 ``max_pages``가
     # 없으면 상한이 없다. 프로덕션이 그쪽으로 되돌아가면 AttributeError로 빨개진다.
 
-    def close(self) -> None:
+    # 실물 ``visitkorea.KrTourApiClient``의 정리 메서드는 ``async def aclose``
+    # 하나다(``visitkorea/client.py:157``; 동기 ``close``는 없다). 대역에 동기
+    # ``close``를 남겨 두면 fetcher가 동기 정리로 되돌아가도 초록이 된다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1737,21 +1757,21 @@ def _install_fake_visitkorea(
     return _FakeVisitKoreaClient
 
 
-def test_visitkorea_festival_events_raises_when_credential_missing() -> None:
+async def test_visitkorea_festival_events_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_visitkorea_festival_events(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_visitkorea_festival_events_fetch_yields_and_closes(
+async def test_visitkorea_festival_events_fetch_yields_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_visitkorea(monkeypatch, items=[object(), object()])
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_visitkorea_festival_events(settings))
+    records = await _acollect(fetch_visitkorea_festival_events(settings))
 
     assert len(records) == 2
     client = fake.instances[0]
@@ -1762,7 +1782,7 @@ def test_visitkorea_festival_events_fetch_yields_and_closes(
     assert client.search_calls[0].month == 1
 
 
-def test_visitkorea_festival_events_walks_every_page(
+async def test_visitkorea_festival_events_walks_every_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """축제는 한 페이지에 다 담기지 않는다 — 전부 걷는지 본다."""
@@ -1771,13 +1791,13 @@ def test_visitkorea_festival_events_walks_every_page(
     fake = _install_fake_visitkorea(monkeypatch, items=items, page_size_override=2)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_visitkorea_festival_events(settings))
+    records = await _acollect(fetch_visitkorea_festival_events(settings))
 
     assert len(records) == 5
     assert fake.instances[0].page_calls == [1, 2, 3]
 
 
-def test_visitkorea_festival_events_refuses_to_walk_past_the_ceiling(
+async def test_visitkorea_festival_events_refuses_to_walk_past_the_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """visitkorea ``iter_paginated_pages``는 ``max_pages``가 없으면 상한이 없다."""
@@ -1789,7 +1809,7 @@ def test_visitkorea_festival_events_refuses_to_walk_past_the_ceiling(
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
     with pytest.raises(ProviderPaginationOverrun):
-        list(fetch_visitkorea_festival_events(settings))
+        await _acollect(fetch_visitkorea_festival_events(settings))
 
 
 class _FakeBeachPage:
@@ -1934,22 +1954,30 @@ class _FakeKrairportClient:
 
     def __init__(
         self,
-        *,
         kac_service_key: str | None = None,
         iiac_service_key: str | None = None,
         **_kwargs: Any,
     ) -> None:
+        # 실물 ctor(``krairport/client.py:44``)의 앞 둘은 positional-or-keyword다.
         self.kac_service_key = kac_service_key
         self.iiac_service_key = iiac_service_key
         self.closed = False
-        self.active_calls: list[bool] = []
+        self.active_calls: list[bool | None] = []
         _FakeKrairportClient.instances.append(self)
 
-    def airports(self, *, active: bool = True) -> list[object]:
+    # ``airports()``는 실물에서도 **동기**다 — 번들 정적 데이터를 거르기만
+    # 한다(``krairport/client.py:469`` → ``airports.py:280 list_airports``).
+    # async로 만들면 fetcher가 await하지 않는 것이 결함처럼 보인다.
+    def airports(
+        self, *, provider: object | None = None, active: bool | None = None
+    ) -> tuple[object, ...]:
+        del provider
         self.active_calls.append(active)
-        return list(type(self).airports_data)
+        return tuple(type(self).airports_data)
 
-    def close(self) -> None:
+    # 실물 ``KrairportClient``에 sync ``close``는 없다 — ``aclose``뿐이다
+    # (``krairport/client.py:112``).
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -1964,7 +1992,7 @@ def _install_fake_krairport(
     return _FakeKrairportClient
 
 
-def test_krairport_airports_fetch_yields_and_closes_keyless(
+async def test_krairport_airports_fetch_yields_and_closes_keyless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # keyless: credential 없이도 번들 정적 메타데이터를 yield 해야 한다.
@@ -1973,7 +2001,7 @@ def test_krairport_airports_fetch_yields_and_closes_keyless(
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    records = list(fetch_krairport_airports(settings))
+    records = [record async for record in fetch_krairport_airports(settings)]
 
     assert len(records) == 3
     assert len(fake.instances) == 1
@@ -1984,13 +2012,13 @@ def test_krairport_airports_fetch_yields_and_closes_keyless(
     assert client.closed is True
 
 
-def test_krairport_airports_fetch_passes_key_when_present(
+async def test_krairport_airports_fetch_passes_key_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krairport(monkeypatch, airports=[object()])
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("airport-key"))
 
-    records = list(fetch_krairport_airports(settings))
+    records = [record async for record in fetch_krairport_airports(settings)]
 
     assert len(records) == 1
     client = fake.instances[0]
@@ -1999,7 +2027,7 @@ def test_krairport_airports_fetch_passes_key_when_present(
     assert client.closed is True
 
 
-def test_krairport_airports_fetch_closes_on_partial_consumption(
+async def test_krairport_airports_fetch_closes_on_partial_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krairport(
@@ -2008,11 +2036,50 @@ def test_krairport_airports_fetch_closes_on_partial_consumption(
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_krairport_airports(settings)
-    first = next(generator)
+    first = await anext(generator)
     assert first is not None
-    generator.close()
+    await generator.aclose()
 
     assert fake.instances[0].closed is True
+
+
+async def test_krairport_airports_fetch_surfaces_a_client_without_aclose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """krairport도 같다 — ``aclose``가 없으면 조용히 넘어가지 않고 터진다.
+
+    실물 ``KrairportClient``에는 ``aclose``만 있고(``krairport/client.py:112``)
+    fetcher의 ``finally``도 그것만 부른다. ``getattr`` guard가 되살아나면 세션
+    누수가 소리 없이 지나간다.
+    """
+
+    class _NoAcloseKrairportClient:
+        instances: list[Any] = []
+
+        def __init__(self, **_kwargs: Any) -> None:
+            self.closed = False
+            _NoAcloseKrairportClient.instances.append(self)
+
+        def airports(self, *, active: bool | None = None) -> tuple[object, ...]:
+            del active
+            return (object(),)
+
+        def close(self) -> None:  # 구 계약 — 실물에는 없는 이름이다.
+            self.closed = True
+
+    _NoAcloseKrairportClient.instances = []
+    module = ModuleType("krairport")
+    module.__dict__["KrairportClient"] = _NoAcloseKrairportClient
+    monkeypatch.setitem(sys.modules, "krairport", module)
+    settings = KorTravelMapSettings(data_go_kr_service_key=None)
+
+    with pytest.raises(AttributeError, match="aclose"):
+        [record async for record in fetch_krairport_airports(settings)]
+
+    assert _NoAcloseKrairportClient.instances[0].closed is False, (
+        "sync ``close``로 대신 닫혔다 — fetcher가 다시 guard를 쓰고 있다"
+    )
+
 
 
 class _FakeAirKoreaClient:
@@ -2028,7 +2095,7 @@ class _FakeAirKoreaClient:
         self.sido_calls: list[str] = []
         _FakeAirKoreaClient.instances.append(self)
 
-    def stations(
+    async def stations(
         self, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
     ) -> list[object]:
         self.station_calls.append(page_no)
@@ -2036,14 +2103,14 @@ class _FakeAirKoreaClient:
         end = min(start + num_of_rows, type(self).stations_total)
         return [object() for _ in range(max(0, end - start))]
 
-    def sido_measurements(
+    async def sido_measurements(
         self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
     ) -> list[object]:
         self.sido_calls.append(sido_name)
         # 시도별 단일 페이지(short)만 반환 → 페이지네이션 stop.
         return list(type(self).per_sido) if page_no == 1 else []
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -2062,22 +2129,22 @@ def _install_fake_airkorea(
     return _FakeAirKoreaClient
 
 
-def test_airkorea_stations_raises_when_credential_missing() -> None:
+async def test_airkorea_stations_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_airkorea_stations(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_airkorea_stations_paginates_and_closes(
+async def test_airkorea_stations_paginates_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # total 103 → page1=100(full)·page2=3(short) → 2 pages, short-page stop.
     fake = _install_fake_airkorea(monkeypatch, stations_total=103)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
-    records = list(fetch_airkorea_stations(settings))
+    records = [record async for record in fetch_airkorea_stations(settings)]
 
     assert len(records) == 103
     client = fake.instances[0]
@@ -2086,15 +2153,15 @@ def test_airkorea_stations_paginates_and_closes(
     assert client.closed is True
 
 
-def test_airkorea_air_quality_raises_when_credential_missing() -> None:
+async def test_airkorea_air_quality_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_airkorea_air_quality(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_airkorea_air_quality_iterates_all_sido_and_closes(
+async def test_airkorea_air_quality_iterates_all_sido_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_airkorea(
@@ -2102,7 +2169,7 @@ def test_airkorea_air_quality_iterates_all_sido_and_closes(
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
-    records = list(fetch_airkorea_air_quality(settings))
+    records = [record async for record in fetch_airkorea_air_quality(settings)]
 
     # 17 시도 × 2 record = 34.
     assert len(records) == 34
@@ -2149,19 +2216,19 @@ class _FlakyAirKoreaClient(_FakeAirKoreaClient):
 
     fail_first: bool = True
 
-    def sido_measurements(
+    async def sido_measurements(
         self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
     ) -> list[object]:
         if type(self).fail_first:
             type(self).fail_first = False
             self.sido_calls.append(sido_name)
             raise _FakeAirKoreaNetworkError("transient")
-        return super().sido_measurements(
+        return await super().sido_measurements(
             sido_name, page_no=page_no, num_of_rows=num_of_rows, **_kw
         )
 
 
-def test_airkorea_air_quality_retries_transient_network_error(
+async def test_airkorea_air_quality_retries_transient_network_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """H45 — 시도×페이지 단건 호출의 retryable 예외는 backoff 후 재시도되고,
@@ -2178,10 +2245,20 @@ def test_airkorea_air_quality_retries_transient_network_error(
     module.__dict__["AirKoreaRateLimitError"] = type("R", (Exception,), {})
     monkeypatch.setitem(sys.modules, "airkorea", module)
     delays: list[float] = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+
+    async def _instant_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    # airkorea 경계가 async가 되면서 backoff는 `asyncio.sleep`으로 간다 —
+    # `time.sleep`을 막으면 아무것도 안 잡히고 **실제로 15초를 잔다**.
+    monkeypatch.setattr(
+        provider_fetchers.upstream_retry,
+        "asyncio",
+        SimpleNamespace(sleep=_instant_sleep),
+    )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
-    records = list(fetch_airkorea_air_quality(settings))
+    records = [record async for record in fetch_airkorea_air_quality(settings)]
 
     assert len(records) == 34  # 17 시도 × 2 — 실패분 손실 없음
     client = _FakeAirKoreaClient.instances[0]
@@ -2190,13 +2267,13 @@ def test_airkorea_air_quality_retries_transient_network_error(
     assert client.closed is True
 
 
-def test_airkorea_air_quality_nonretryable_propagates_immediately(
+async def test_airkorea_air_quality_nonretryable_propagates_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """auth 오류는 재시도 없이 즉시 전파 — fail-close 유지."""
 
     class _AuthFailClient(_FakeAirKoreaClient):
-        def sido_measurements(self, *_a: Any, **_kw: Any) -> list[object]:
+        async def sido_measurements(self, *_a: Any, **_kw: Any) -> list[object]:
             raise _FakeAirKoreaAuthError("bad key")
 
     _FakeAirKoreaClient.instances = []
@@ -2207,11 +2284,19 @@ def test_airkorea_air_quality_nonretryable_propagates_immediately(
     module.__dict__["AirKoreaRateLimitError"] = type("R2", (Exception,), {})
     monkeypatch.setitem(sys.modules, "airkorea", module)
     delays: list[float] = []
-    monkeypatch.setattr(time, "sleep", delays.append)
+
+    async def _instant_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(
+        provider_fetchers.upstream_retry,
+        "asyncio",
+        SimpleNamespace(sleep=_instant_sleep),
+    )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
 
     with pytest.raises(_FakeAirKoreaAuthError):
-        list(fetch_airkorea_air_quality(settings))
+        [record async for record in fetch_airkorea_air_quality(settings)]
 
     assert delays == []
 
@@ -2254,7 +2339,10 @@ class _FakeOpinetClient:
         self.around_calls: list[tuple[float, float, int, str]] = []
         _FakeOpinetClient.instances.append(self)
 
-    def iter_stations_in_bbox(
+    # 실물은 async generator **함수**다(``opinet/client.py:548`` ``async def
+    # iter_stations_in_bbox`` + 본문 ``yield station``) — 호출 자체는 await하지
+    # 않고 첫 ``__anext__``에서야 본문이 돈다. 대역도 그 지연을 그대로 흉내낸다.
+    async def iter_stations_in_bbox(
         self,
         *,
         min_lon: float,
@@ -2263,21 +2351,22 @@ class _FakeOpinetClient:
         max_lat: float,
         radius_m: int = 5000,
         **_kw: Any,
-    ) -> Iterator[object]:
+    ) -> AsyncIterator[object]:
         self.bbox_calls.append((min_lon, min_lat, max_lon, max_lat, radius_m))
-        yield from type(self).stations
+        for station in type(self).stations:
+            yield station
 
-    def get_station_detail(self, uni_id: str) -> object:
+    async def get_station_detail(self, uni_id: str) -> object:
         self.detail_calls.append(uni_id)
         return type(self).details.get(uni_id, object())
 
-    def get_area_codes(self, sido: str | None = None) -> list[_FakeOpinetArea]:
+    async def get_area_codes(self, sido: str | None = None) -> list[_FakeOpinetArea]:
         self.area_calls.append(sido)
         if sido is None:
             return list(type(self).root_areas)
         return list(type(self).child_areas.get(sido, []))
 
-    def get_lowest_price_top20(
+    async def get_lowest_price_top20(
         self, prodcd: str, cnt: int = 10, area: str | None = None
     ) -> list[object]:
         self.low_top_calls.append((prodcd, cnt, area))
@@ -2286,7 +2375,7 @@ class _FakeOpinetClient:
             raise value
         return list(value)
 
-    def search_stations_around(
+    async def search_stations_around(
         self,
         *,
         lon: float,
@@ -2301,7 +2390,10 @@ class _FakeOpinetClient:
             raise value
         return list(value)
 
-    def close(self) -> None:
+    # 실물 정리 메서드는 ``opinet/client.py:321`` ``async def aclose``뿐이다 —
+    # 동기 ``close``를 남겨 두면 fetcher의 ``finally``가 동기 정리로 되돌아가도
+    # 대역이 받아 줘 초록이 된다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -2342,7 +2434,7 @@ def test_opinet_sample_grid_centers_start_with_major_city_anchors() -> None:
     ]
 
 
-def test_opinet_sigungu_area_codes_interleaves_sidos(
+async def test_opinet_sigungu_area_codes_interleaves_sidos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2361,13 +2453,13 @@ def test_opinet_sigungu_area_codes_interleaves_sidos(
     )
     client = fake()
 
-    areas = provider_fetchers._opinet_sigungu_area_codes(client)
+    areas = await provider_fetchers._opinet_sigungu_area_codes(client)
 
     assert areas == ["0101", "0201", "0301", "0102", "0202", "0302"]
     assert client.area_calls == [None, "01", "02", "03"]
 
 
-def test_opinet_sigungu_area_codes_skips_invalid_root_sidos(
+async def test_opinet_sigungu_area_codes_skips_invalid_root_sidos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2386,27 +2478,29 @@ def test_opinet_sigungu_area_codes_skips_invalid_root_sidos(
     )
     client = fake()
 
-    areas = provider_fetchers._opinet_sigungu_area_codes(client)
+    areas = await provider_fetchers._opinet_sigungu_area_codes(client)
 
     assert areas == ["0101", "1401"]
     assert client.area_calls == [None, "01", "14"]
 
 
-def test_opinet_stations_disabled_raises() -> None:
+async def test_opinet_stations_disabled_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="disabled"
     )
+    generator = fetch_opinet_stations(settings)
     with pytest.raises(ProviderCredentialMissing, match="disabled"):
-        next(fetch_opinet_stations(settings))
+        await anext(generator)
 
 
-def test_opinet_stations_missing_key_raises() -> None:
+async def test_opinet_stations_missing_key_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=None, opinet_scope_mode="bbox",
         opinet_scope_bbox="126.0,37.0,127.0,38.0",
     )
+    generator = fetch_opinet_stations(settings)
     with pytest.raises(ProviderCredentialMissing, match="OPINET_API_KEY"):
-        next(fetch_opinet_stations(settings))
+        await anext(generator)
 
 
 def test_center_radius_to_bbox_math() -> None:
@@ -2420,7 +2514,7 @@ def test_center_radius_to_bbox_math() -> None:
     assert (max_lon - 127.0) > (max_lat - 37.5)  # 경도 폭 > 위도 폭
 
 
-def test_opinet_stations_poi_mode_enumerates_and_dedups(
+async def test_opinet_stations_poi_mode_enumerates_and_dedups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2438,7 +2532,7 @@ def test_opinet_stations_poi_mode_enumerates_and_dedups(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="poi_cache_target"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     # 2 target bbox 각각 동일 2 station 반환 → uni_id dedup → P1, P2.
     assert [r.uni_id for r in records] == ["P1", "P2"]
@@ -2447,7 +2541,7 @@ def test_opinet_stations_poi_mode_enumerates_and_dedups(
     assert client.closed is True
 
 
-def test_opinet_stations_poi_mode_empty_targets_raises(
+async def test_opinet_stations_poi_mode_empty_targets_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -2456,19 +2550,21 @@ def test_opinet_stations_poi_mode_empty_targets_raises(
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="poi_cache_target"
     )
+    generator = fetch_opinet_stations(settings)
     with pytest.raises(ProviderCredentialMissing, match="활성 target"):
-        next(fetch_opinet_stations(settings))
+        await anext(generator)
 
 
-def test_opinet_stations_bbox_missing_raises() -> None:
+async def test_opinet_stations_bbox_missing_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="bbox", opinet_scope_bbox=None
     )
+    generator = fetch_opinet_stations(settings)
     with pytest.raises(ProviderCredentialMissing, match="OPINET_SCOPE_BBOX"):
-        next(fetch_opinet_stations(settings))
+        await anext(generator)
 
 
-def test_opinet_stations_bbox_invalid_raises(
+async def test_opinet_stations_bbox_invalid_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_opinet(monkeypatch, stations=[])
@@ -2476,11 +2572,12 @@ def test_opinet_stations_bbox_invalid_raises(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="bbox",
         opinet_scope_bbox="126.0,37.0,127.0",  # 3개만
     )
+    generator = fetch_opinet_stations(settings)
     with pytest.raises(ProviderCredentialMissing, match="4개 값"):
-        next(fetch_opinet_stations(settings))
+        await anext(generator)
 
 
-def test_opinet_stations_bbox_enumerates_dedups_closes(
+async def test_opinet_stations_bbox_enumerates_dedups_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2492,7 +2589,7 @@ def test_opinet_stations_bbox_enumerates_dedups_closes(
         opinet_scope_bbox="126.0,37.0,127.0,38.0", opinet_scope_radius_m=3000,
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     # uni_id dedup → A1, A2.
     assert [r.uni_id for r in records] == ["A1", "A2"]
@@ -2502,7 +2599,7 @@ def test_opinet_stations_bbox_enumerates_dedups_closes(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_dedups_by_station(
+async def test_opinet_stations_low_top_area_dedups_by_station(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2520,7 +2617,7 @@ def test_opinet_stations_low_top_area_dedups_by_station(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2536,7 +2633,7 @@ def test_opinet_stations_low_top_area_dedups_by_station(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_falls_back_to_sample_grid(
+async def test_opinet_stations_low_top_area_falls_back_to_sample_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2558,7 +2655,7 @@ def test_opinet_stations_low_top_area_falls_back_to_sample_grid(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2575,7 +2672,7 @@ def test_opinet_stations_low_top_area_falls_back_to_sample_grid(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
+async def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2596,7 +2693,7 @@ def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2613,7 +2710,7 @@ def test_opinet_stations_low_top_area_partial_falls_back_to_sample_grid(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_ignores_no_data_errors(
+async def test_opinet_stations_low_top_area_ignores_no_data_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2631,7 +2728,7 @@ def test_opinet_stations_low_top_area_ignores_no_data_errors(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1"]
     client = fake.instances[0]
@@ -2643,7 +2740,7 @@ def test_opinet_stations_low_top_area_ignores_no_data_errors(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_call_budget_uses_fallback(
+async def test_opinet_stations_low_top_area_call_budget_uses_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2673,7 +2770,7 @@ def test_opinet_stations_low_top_area_call_budget_uses_fallback(
         opinet_low_top_max_calls=2,
     )
 
-    records = list(fetch_opinet_stations(settings, rotation_offset=0))
+    records = await _acollect(fetch_opinet_stations(settings, rotation_offset=0))
 
     assert [r.uni_id for r in records] == ["A1"]
     client = fake.instances[0]
@@ -2712,7 +2809,7 @@ def test_opinet_rotation_offset_advances_daily() -> None:
     assert len(covered) == areas_total
 
 
-def test_opinet_stations_low_top_area_rotates_window_by_offset(
+async def test_opinet_stations_low_top_area_rotates_window_by_offset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """offset이 윈도 크기만큼 다르면 다른 시군 윈도를 소비한다(로테이션 핵심)."""
@@ -2745,7 +2842,7 @@ def test_opinet_stations_low_top_area_rotates_window_by_offset(
             child_areas=child,
             low_top=dict(low_top),
         )
-        list(fetch_opinet_stations(settings, rotation_offset=offset))
+        await _acollect(fetch_opinet_stations(settings, rotation_offset=offset))
         client = fake.instances[0]
         areas_this_run = {call[2] for call in client.low_top_calls}
         assert len(areas_this_run) == 1
@@ -2756,7 +2853,7 @@ def test_opinet_stations_low_top_area_rotates_window_by_offset(
     assert hit_areas[3] == "0101"
 
 
-def test_opinet_stations_low_top_area_rotation_noop_when_window_covers_all(
+async def test_opinet_stations_low_top_area_rotation_noop_when_window_covers_all(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """시군 목록이 한 윈도에 다 들어가면 회전은 no-op — 기존 동작 보존."""
@@ -2775,7 +2872,7 @@ def test_opinet_stations_low_top_area_rotation_noop_when_window_covers_all(
     )
 
     # 기본 상한(180) 윈도(60) > 시군 2개 → 아무 offset이어도 순서 불변.
-    records = list(fetch_opinet_stations(settings, rotation_offset=987_654))
+    records = await _acollect(fetch_opinet_stations(settings, rotation_offset=987_654))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2784,7 +2881,7 @@ def test_opinet_stations_low_top_area_rotation_noop_when_window_covers_all(
     ]
 
 
-def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
+async def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """run hard budget(#545)는 area+lowTop10 호출을 합산해 초과 시 grid 진입 전에 중단."""
@@ -2816,7 +2913,7 @@ def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
         opinet_run_call_budget=4,
     )
 
-    records = list(fetch_opinet_stations(settings, rotation_offset=0))
+    records = await _acollect(fetch_opinet_stations(settings, rotation_offset=0))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2831,7 +2928,7 @@ def test_opinet_stations_low_top_area_run_budget_stops_enumeration(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_skips_grid_when_sufficient(
+async def test_opinet_stations_low_top_area_skips_grid_when_sufficient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """lowTop10이 임계치 이상이면 부분 성공이어도 grid fallback을 건너뛴다(#545)."""
@@ -2860,7 +2957,7 @@ def test_opinet_stations_low_top_area_skips_grid_when_sufficient(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2869,7 +2966,7 @@ def test_opinet_stations_low_top_area_skips_grid_when_sufficient(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
+async def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """임계치 미달 부분 성공 station도 yield되고, 그 뒤 grid로 보강한다(#545)."""
@@ -2892,7 +2989,7 @@ def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_stations(settings))
+    records = await _acollect(fetch_opinet_stations(settings))
 
     assert [r.uni_id for r in records] == ["A1", "A2"]
     client = fake.instances[0]
@@ -2909,7 +3006,7 @@ def test_opinet_stations_low_top_area_partial_below_threshold_still_yielded(
     assert client.closed is True
 
 
-def test_opinet_stations_low_top_area_rate_limit_fails_run(
+async def test_opinet_stations_low_top_area_rate_limit_fails_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """rate-limit 뒤 부분 성공을 RUN_SUCCESS로 오인하지 않고 예외를 전파한다."""
@@ -2938,7 +3035,7 @@ def test_opinet_stations_low_top_area_rate_limit_fails_run(
     )
 
     with pytest.raises(_FakeOpinetRateLimitError, match="daily limit"):
-        list(fetch_opinet_stations(settings))
+        await _acollect(fetch_opinet_stations(settings))
 
     client = fake.instances[0]
     assert client.low_top_calls == [
@@ -2950,7 +3047,7 @@ def test_opinet_stations_low_top_area_rate_limit_fails_run(
     assert client.closed is True
 
 
-def test_opinet_stations_grid_rate_limit_fails_run(
+async def test_opinet_stations_grid_rate_limit_fails_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -2969,24 +3066,25 @@ def test_opinet_stations_grid_rate_limit_fails_run(
     )
 
     with pytest.raises(_FakeOpinetRateLimitError, match="daily limit"):
-        list(fetch_opinet_stations(settings))
+        await _acollect(fetch_opinet_stations(settings))
 
     client = fake.instances[0]
     assert client.around_calls == [(127.0, 37.5, 5000, "B027")]
     assert client.closed is True
 
 
-def test_opinet_station_price_details_missing_key_raises() -> None:
+async def test_opinet_station_price_details_missing_key_raises() -> None:
     settings = KorTravelMapSettings(
         opinet_api_key=None,
         opinet_scope_mode="bbox",
         opinet_scope_bbox="126.0,37.0,127.0,38.0",
     )
+    generator = fetch_opinet_station_price_details(settings)
     with pytest.raises(ProviderCredentialMissing, match="OPINET_API_KEY"):
-        next(fetch_opinet_station_price_details(settings))
+        await anext(generator)
 
 
-def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
+async def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     d1 = object()
@@ -3003,7 +3101,7 @@ def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
         opinet_scope_radius_m=3000,
     )
 
-    records = list(fetch_opinet_station_price_details(settings))
+    records = await _acollect(fetch_opinet_station_price_details(settings))
 
     assert records == [d1, d2]
     client = fake.instances[0]
@@ -3011,7 +3109,7 @@ def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
     assert client.closed is True
 
 
-def test_opinet_station_price_details_low_top_area_dedups_by_station_product(
+async def test_opinet_station_price_details_low_top_area_dedups_by_station_product(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -3029,7 +3127,7 @@ def test_opinet_station_price_details_low_top_area_dedups_by_station_product(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_station_price_details(settings))
+    records = await _acollect(fetch_opinet_station_price_details(settings))
 
     assert [(r.uni_id, r.product_code) for r in records] == [
         ("A1", "B027"),
@@ -3046,7 +3144,7 @@ def test_opinet_station_price_details_low_top_area_dedups_by_station_product(
     assert client.closed is True
 
 
-def test_opinet_station_price_details_low_top_area_falls_back_to_sample_grid(
+async def test_opinet_station_price_details_low_top_area_falls_back_to_sample_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -3070,7 +3168,7 @@ def test_opinet_station_price_details_low_top_area_falls_back_to_sample_grid(
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_station_price_details(settings))
+    records = await _acollect(fetch_opinet_station_price_details(settings))
 
     assert [(r.uni_id, r.product_code) for r in records] == [
         ("A1", "B027"),
@@ -3092,7 +3190,7 @@ def test_opinet_station_price_details_low_top_area_falls_back_to_sample_grid(
     assert client.closed is True
 
 
-def test_opinet_station_price_details_low_top_area_partial_falls_back_to_sample_grid(
+async def test_opinet_station_price_details_low_top_area_partial_falls_back_to_sample_grid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_opinet(
@@ -3113,7 +3211,7 @@ def test_opinet_station_price_details_low_top_area_partial_falls_back_to_sample_
         opinet_api_key=SecretStr("certkey"), opinet_scope_mode="low_top_area"
     )
 
-    records = list(fetch_opinet_station_price_details(settings))
+    records = await _acollect(fetch_opinet_station_price_details(settings))
 
     assert [(r.uni_id, r.product_code) for r in records] == [
         ("A1", "B027"),
@@ -3137,9 +3235,9 @@ def test_opinet_station_price_details_low_top_area_partial_falls_back_to_sample_
 def test_standard_tourist_attractions_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    generator = fetch_standard_tourist_attractions(settings)
+    agen = fetch_standard_tourist_attractions(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        asyncio.run(agen.__anext__())
 
 
 def test_standard_tourist_attractions_fetch_yields_and_closes(
@@ -3148,7 +3246,7 @@ def test_standard_tourist_attractions_fetch_yields_and_closes(
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_standard_tourist_attractions(settings))
+    records = asyncio.run(_acollect(fetch_standard_tourist_attractions(settings)))
 
     assert len(records) == 2
     assert fake.instances[0].closed is True
@@ -3157,9 +3255,9 @@ def test_standard_tourist_attractions_fetch_yields_and_closes(
 def test_standard_parking_lots_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    generator = fetch_standard_parking_lots(settings)
+    agen = fetch_standard_parking_lots(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        asyncio.run(agen.__anext__())
 
 
 def test_standard_parking_lots_fetch_yields_and_closes(
@@ -3168,27 +3266,27 @@ def test_standard_parking_lots_fetch_yields_and_closes(
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_standard_parking_lots(settings))
+    records = asyncio.run(_acollect(fetch_standard_parking_lots(settings)))
 
     assert len(records) == 4
     assert fake.instances[0].closed is True
 
 
-def test_krheritage_fetch_raises_when_credential_missing() -> None:
+async def test_krheritage_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
     generator = fetch_krheritage_events(settings)
     with pytest.raises(ProviderCredentialMissing):
-        next(generator)
+        await anext(generator)
 
 
-def test_krheritage_fetch_yields_records_and_closes_client(
+async def test_krheritage_fetch_yields_records_and_closes_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krheritage(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = list(fetch_krheritage_events(settings))
+    records = [record async for record in fetch_krheritage_events(settings)]
 
     assert len(records) == 2
     assert len(fake.instances) == 1
@@ -3202,7 +3300,7 @@ def test_krheritage_fetch_yields_records_and_closes_client(
     assert len(set(client.event.calls)) == 14, "같은 달을 두 번 불렀다"
 
 
-def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
+async def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # khs.go.kr search/detail은 keyless (#380) — credential 없이도 fetch.
@@ -3215,7 +3313,7 @@ def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
         krheritage_kind_codes="11, 13",
     )
 
-    records = list(fetch_krheritage_items(settings))
+    records = [record async for record in fetch_krheritage_items(settings)]
 
     assert len(records) == 3
     assert len(fake.instances) == 1
@@ -3226,7 +3324,7 @@ def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
     assert client.search.calls == [(100, "11"), (100, "13")]
 
 
-def test_krheritage_items_fetch_stops_at_max_items_per_run(
+async def test_krheritage_items_fetch_stops_at_max_items_per_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_krheritage(
@@ -3241,13 +3339,51 @@ def test_krheritage_items_fetch_stops_at_max_items_per_run(
         krheritage_max_items_per_run=2,
     )
 
-    records = list(fetch_krheritage_items(settings))
+    records = [record async for record in fetch_krheritage_items(settings)]
 
     # detail 1콜/건 보호 — 상한 2에서 중단, 두 번째 종목코드(12)는 미호출.
     assert len(records) == 2
     client = fake.instances[0]
     assert client.closed is True
     assert client.search.calls == [(100, "11")]
+
+
+async def test_krheritage_items_fetch_surfaces_a_client_without_aclose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정리는 **무조건** 일어난다 — ``getattr`` guard로 건너뛰지 않는다.
+
+    fetcher는 종전 ``getattr(client, "close", None)`` guard를 버리고
+    ``await client.aclose()`` 하나만 남겼다. 실물에 sync ``close``가 없기
+    때문이다(``krheritage/client.py:80``에 ``aclose``만 있다). guard가
+    되살아나면 ``aclose``가 없는 client는 조용히 지나가고 세션이 샌다 —
+    그 조용함을 여기서 깬다.
+    """
+
+    class _NoAcloseHeritageClient:
+        instances: list[Any] = []
+
+        def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+            self.api_key = api_key
+            self.closed = False
+            self.search = _FakeHeritageSearchService({"11": [object()]})
+            _NoAcloseHeritageClient.instances.append(self)
+
+        def close(self) -> None:  # 구 계약 — 실물에는 없는 이름이다.
+            self.closed = True
+
+    _NoAcloseHeritageClient.instances = []
+    module = ModuleType("krheritage")
+    module.__dict__["HeritageClient"] = _NoAcloseHeritageClient
+    monkeypatch.setitem(sys.modules, "krheritage", module)
+    settings = KorTravelMapSettings(krheritage_kind_codes="11")
+
+    with pytest.raises(AttributeError, match="aclose"):
+        [record async for record in fetch_krheritage_items(settings)]
+
+    assert _NoAcloseHeritageClient.instances[0].closed is False, (
+        "sync ``close``로 대신 닫혔다 — fetcher가 다시 guard를 쓰고 있다"
+    )
 
 
 def test_live_resource_returns_iterable_when_credentials_present(
@@ -3317,7 +3453,7 @@ def test_datagokr_resource_definition_is_live_not_guard() -> None:
     assert "live fetcher" in (heritage_items.description or "")
 
 
-def test_krex_rest_area_weather_refuses_to_succeed_with_no_observation(
+async def test_krex_rest_area_weather_refuses_to_succeed_with_no_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """빈 Page를 성공으로 적재하지 않는다.
@@ -3332,11 +3468,11 @@ def test_krex_rest_area_weather_refuses_to_succeed_with_no_observation(
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
     with pytest.raises(provider_fetchers.KrexRestAreaWeatherUnavailable):
-        list(fetch_krex_rest_area_weather(settings))
+        await _krex_records(fetch_krex_rest_area_weather(settings))
     assert fake.instances[0].closed is True
 
 
-def test_krex_rest_area_weather_declares_its_lookback(
+async def test_krex_rest_area_weather_declares_its_lookback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """호출 한 번이 요청 한 번이 아니다 — lookback이 곧 증폭 배수다."""
@@ -3344,7 +3480,7 @@ def test_krex_rest_area_weather_declares_its_lookback(
     fake = _install_fake_krex(monkeypatch, weather=[object()])
     settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
 
-    list(fetch_krex_rest_area_weather(settings))
+    await _krex_records(fetch_krex_rest_area_weather(settings))
 
     assert fake.instances[0].restarea.lookback_calls == [
         provider_fetchers._KREX_WEATHER_LOOKBACK_HOURS
@@ -3387,7 +3523,7 @@ def test_krforest_nodata_after_the_first_page_is_a_normal_end(
     assert len(records) == 3
 
 
-def test_visitkorea_stalled_pagination_is_caught_at_the_call_site(
+async def test_visitkorea_stalled_pagination_is_caught_at_the_call_site(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """전진 검사가 **호출 지점에서** 실제로 도는지 본다.
@@ -3405,4 +3541,4 @@ def test_visitkorea_stalled_pagination_is_caught_at_the_call_site(
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
     with pytest.raises(ProviderPaginationStalled):
-        list(fetch_visitkorea_festival_events(settings))
+        await _acollect(fetch_visitkorea_festival_events(settings))

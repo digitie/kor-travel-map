@@ -780,11 +780,18 @@ def _kma_service_key(settings: KorTravelMapSettings, *, resource_key: str, datas
 
 
 def _close_method(value: object) -> Teardown:
+    """client 정리 teardown을 만든다 — 반환된 awaitable은 호출자가 await한다.
+
+    **이름을 `close`에서 `aclose`로 바꾼 것이 요점이 아니다.** 종전에는 메서드가
+    없으면 조용히 `None`을 돌려줬고, provider가 async-only가 되면서
+    (2026-09-15 일괄 개편) `close`가 사라지자 **그 침묵이 그대로 "닫지 않음"이
+    됐다** — 같은 client의 schedule 경로는 고쳐졌는데 이 direct/admin 경로만
+    남아 있었다. 그래서 가드를 없애고 없으면 터지게 둔다. 닫기 실패는
+    `_close_teardowns`가 부르는 자리에서 보이는 편이 낫다.
+    """
+
     def _teardown() -> object:
-        close = getattr(value, "close", None)
-        if callable(close):
-            return close()
-        return None
+        return cast("Any", value).aclose()
 
     return _teardown
 

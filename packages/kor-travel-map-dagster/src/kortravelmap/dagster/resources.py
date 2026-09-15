@@ -1217,7 +1217,10 @@ def kma_datagokr_client_resource(context: InitResourceContext) -> Iterator[Any]:
     try:
         yield client
     finally:
-        client.close()
+        # `kma`가 async-only가 되면서 `close()`가 `aclose()` 코루틴이 됐다
+        # (2026-09-15 provider 일괄 개편). Dagster sync generator resource의
+        # teardown이므로 이 저장소가 이미 쓰는 브리지를 그대로 쓴다.
+        _run_async_resource_teardown(client.aclose())
 
 
 @resource(description="admin offline upload 원본 파일을 읽는 RustFS/S3 store.")

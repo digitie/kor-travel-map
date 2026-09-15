@@ -98,7 +98,7 @@ providers = [
   # total로 조건화해 그 퇴화를 닫았다 — total이 없으면 멈추지 않고 빈 페이지를
   # 기다린다. Map 쪽 `_iter_datagokr_standard` 우회는 **그대로 둔다**(방어는
   # 중복이어도 좋다).
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@fd099b20887188cece480dd83a86ede075f88ad4",
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@99d8427510b027d7280fd8bc9532828c3c25f4f5",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `kortravelmap.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
@@ -109,27 +109,27 @@ providers = [
   # 않아 MidForecastItem.tm_fc가 항상 None → 해석된 요청 tmFc 폴백 주입
   # (provider #20/PR#21, T-212e mid forecast run f044b091 실측). 0868b76:
   # resultCode 22 비재시도 quota + strict XML 03 빈 결과(provider PR#24).
-  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@1f8d8df137db2c57e0fea99b730bf4976c8fbfe0",
-  "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@c4c8d122743522268df38f20128ec5d1a6e84455",
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@acd1cfa3fab7a7bc091b3ccede0cc905f0874a25",
+  "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@fc5c009defe5519a0b211017deb92de6a943b101",
   # khoa: snake_case live row 파싱(khoa#5/PR#6) + serviceKey 기본 URL HTTPS(PR#8).
   # 3314f68: **asyncio 전용 전환(provider PR#13)** — sync `oceans_beach_info()`·
   # `close()`가 사라졌다. Map의 `fetch_khoa_beaches`를 async generator로 옮기고
   # `aoceans_beach_info`/`aclose`를 쓴다. 부수 이득: 핀 상태의 sync 진입점이
   # 호출마다 만들던 throwaway 이벤트 루프(+ 공유 rate limiter 교차 사용)가 없어진다.
-  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@3314f683121ee5b3caee83e361c7ad5a1d5d5cd4",
+  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@38a2b74aabc1c077ebd2e1aa5ad3b2a70ffc8dd5",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
   #
   # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────
-  "python-opinet-api @ git+https://github.com/digitie/python-opinet-api.git@356cb0eaad46e4d1896092b164ff4ba08ede25c0",
+  "python-opinet-api @ git+https://github.com/digitie/python-opinet-api.git@dcfb41a1862bb9718a778fdc0fc2e3e807ed7d47",
   #
   # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
   # krex: incident → openapi/burstInfo/realTimeSms 재정렬 (krex PR#9, #378).
-  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@c6d8717ec2b712cc952bc566b351f07a7cd3824a",
+  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@d153f3cdd87c9cfacceeb94310bbe6067a1bbfa8",
   #
   # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
   # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/
   # contentId 매핑) 책임 — Sprint 2 끝물 PR.
-  "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@8aa96975a182fb1ec8810e6895ccde0472c60a3b",
+  "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@151ef90f07842863b986048a98a66a75d8e9d63d",
   #
   # ── Sprint 3 — knps / krforest_trails / krheritage / krairport ────────
   # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
@@ -139,8 +139,8 @@ providers = [
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
   # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
   # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
-  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@afc8da5db7be33549b5daa7b0a96e5ad179063d7",
-  "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@7a67f5f71abedc435c060a5c127387d65a54c130",
+  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@2676c745301ff4ce69ff9adc5e0fed7ef9db624d",
+  "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@270ef7a9884bef1f995e2f8fb43c5fb1e9da7905",
   # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
   # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
   # 8cde3af 상향(2026-09-11). 보류 사유였던 "provider iter_all이 total 권위를
@@ -155,11 +155,11 @@ providers = [
   # 소진한다(`PaginatedResult.total`이 권위). 위임을 끊었으므로 보류 조건 자체가
   # 사라졌다. 상세 조회 규율(복합키 3요소 필수·결측 row 경고)은 provider의 것을
   # 그대로 따른다.
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@545a01606184cbdb610ce9d654b7bece712b22ff",
-  "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@cbe4d1380dc0388c078e8ae4622d3e580717064b",
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@be3a1a28a9bc5214b9349dcdc7ff7e1ad9b970ba",
+  "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@fe2143b1b064abfc4a3d4070bcfc9dcca6595c21",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
-  "python-mois-api @ git+https://github.com/digitie/python-mois-api.git@f44c2d0985e89d7f59302dd80debc2211fda9d4f",
+  "python-mois-api @ git+https://github.com/digitie/python-mois-api.git@3cdee09eb753edbdaf91c28a955e2c6ddd72ec17",
   # "python-kasi-api     @ git+https://github.com/digitie/python-kasi-api.git@<sha>",
   #
   # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────
@@ -167,7 +167,7 @@ providers = [
   # #6/#7) — Dagster fetcher가 keyless FileDataClient를 lazy import.
   # 핀 c011f6e = 카탈로그 재편(#7) + 빈 params query 박탈 수정(#9) +
   # 중고서점 OpenAPI/CSV 보강(T-223b, provider PR#11) 포함.
-  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@99bcb26964c552c82e02f814b43f4f438eb05d2b",
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@f2b1e46c9e77e7c227c99039211d4414dea25166",
   # data.go.kr-standard 6종 + curated fileData 4종은 본 라이브러리 +
   # python-datagokr-api 경유 (ADR-042/T-223b).
 ]

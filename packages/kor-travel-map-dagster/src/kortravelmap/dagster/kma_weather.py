@@ -24,7 +24,6 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
 import hashlib
 import importlib
-import inspect
 import json
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
@@ -85,7 +84,7 @@ from .upstream_requests import note_upstream_request
 from .upstream_retry import (
     PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
     RetryBudget,
-    retry_upstream_async,
+    retry_upstream_awaitable,
 )
 
 if TYPE_CHECKING:
@@ -343,16 +342,22 @@ def _latest_short_forecast_base() -> tuple[str, str]:
     return (str(base_date), str(base_time))
 
 
-def _fetch_nowcast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaNowcastRow]:
-    return nowcast_rows_from_snapshot(kma_client.forecast.now(nx=nx, ny=ny))
+# 위 `kma.grid`/`kma.time_utils`는 계속 평범한 함수지만 `ForecastService`는
+# async-only다(`kma/client.py:411,430,449`). 같은 lib 안에서 둘이 갈리므로
+# "kma 헬퍼를 쓰니 동기"라는 추론이 여기서 깨진다 — await를 빠뜨리면 코루틴
+# 객체가 그대로 변환 함수로 들어간다.
+async def _fetch_nowcast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaNowcastRow]:
+    return nowcast_rows_from_snapshot(await kma_client.forecast.now(nx=nx, ny=ny))
 
 
-def _fetch_ultra_short_forecast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaForecastRow]:
-    return forecast_rows_from_items(kma_client.forecast.short(nx=nx, ny=ny))
+async def _fetch_ultra_short_forecast_rows(
+    kma_client: Any, nx: int, ny: int
+) -> list[KmaForecastRow]:
+    return forecast_rows_from_items(await kma_client.forecast.short(nx=nx, ny=ny))
 
 
-def _fetch_short_forecast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaForecastRow]:
-    return forecast_rows_from_items(kma_client.forecast.vilage(nx=nx, ny=ny))
+async def _fetch_short_forecast_rows(kma_client: Any, nx: int, ny: int) -> list[KmaForecastRow]:
+    return forecast_rows_from_items(await kma_client.forecast.vilage(nx=nx, ny=ny))
 
 
 # -- 대상 격자/feature 매핑 (옵션 B) --------------------------------------
@@ -615,12 +620,16 @@ async def _raise_kma_refresh_failure(
 
 
 async def _close_owned_kma_weather_client(client: object) -> None:
-    close = getattr(client, "close", None)
-    if not callable(close):
-        return
-    result = close()
-    if inspect.isawaitable(result):
-        await cast("Awaitable[object]", result)
+    """소유한 ``KmaClient``를 닫는다 — ``kma``는 async-only라 ``aclose()``뿐이다
+    (``kma/client.py:93``. ``close``는 lib에 더 이상 없다).
+
+    ``getattr`` 가드를 두지 않는다. 종전 코드는 사라진 ``close``를 찾아 없으면
+    조용히 return했고, 그래서 client가 **한 번도 닫히지 않는다**는 사실이
+    아무 데도 드러나지 않았다. 이름이 어긋나면 ``AttributeError``로 시끄럽게
+    실패하는 편이 낫다 — 이 호출은 primary error를 보존하는 ``finally`` 안이라
+    실패해도 원래 오류 identity를 덮지 않는다.
+    """
+    await cast(Any, client).aclose()
 
 
 async def _run_kma_weather_asset(
@@ -630,7 +639,7 @@ async def _run_kma_weather_asset(
     grid_dataset_key: str,
     grid_name_label: str,
     latest_base: Callable[[], tuple[str, str]],
-    fetch_rows: Callable[[Any, int, int], Sequence[Any]],
+    fetch_rows: Callable[[Any, int, int], Awaitable[Sequence[Any]]],
     to_values: Callable[[Sequence[Any], str], list[WeatherValue]],
 ) -> KmaWeatherLoadResult:
     """대상 격자 산출 → 격자별 KMA 호출 → ``WeatherValue`` 적재 공통 흐름.
@@ -809,7 +818,7 @@ async def _run_kma_weather_asset(
             # ``retryable`` 규약, quota/rate_limit 제외). N건 순차 호출에서 step
             # 전량 재시도의 시도당 전멸 확률(1-p^N)을 제거한다. attempts 소진
             # 시 원 예외 그대로 전파 — 부분 실행 금지·기존 실패 분류 경로 불변.
-            rows = await retry_upstream_async(
+            rows = await retry_upstream_awaitable(
                 partial(fetch_rows, kma_client, nx, ny),
                 label=f"{dataset_key} grid {nx},{ny}",
                 base_delay=PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
@@ -1248,8 +1257,11 @@ async def run_feature_weather_kma_mid_forecast(
             note_upstream_request()
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
+            # 중기 두 오퍼레이션은 ``async def``다(``kma/datagokr.py:536,558``).
+            # 동기 판 ``retry_upstream_async``에 넘기면 코루틴 **객체**가 그대로
+            # 돌아와 재시도가 예외를 한 번도 보지 못한다 — await하는 쪽을 쓴다.
             land_rows: Sequence[Any] = mid_land_rows_from_items(
-                await retry_upstream_async(
+                await retry_upstream_awaitable(
                     partial(
                         cast(Any, datagokr_client).mid_land_forecast,
                         reg_id=spec.land_reg_id,
@@ -1262,7 +1274,7 @@ async def run_feature_weather_kma_mid_forecast(
             )
             note_upstream_request()
             temp_rows: Sequence[Any] = mid_temp_rows_from_items(
-                await retry_upstream_async(
+                await retry_upstream_awaitable(
                     partial(
                         cast(Any, datagokr_client).mid_temperature_forecast,
                         reg_id=spec.ta_reg_id,
