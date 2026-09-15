@@ -71,6 +71,33 @@ def test_a_single_run_cannot_be_configured_above_a_whole_day() -> None:
     )
 
 
+def test_no_configuration_can_exceed_the_daily_limit() -> None:
+    """**설정 가능한 최대치**가 하루 한도 안에 들어간다 — 기본값이 아니라 상한을 본다.
+
+    종전 검사 둘은 각각 "기본값 × 2 ≤ 300"과 "`le` ≤ 300"만 봤다. 그 사이에 구멍이
+    있다 — `le=300`이면 예산을 300으로 **설정할 수 있고**, 월 1일에는 place job과
+    price job이 같은 날 돌아 2 run이 되므로 600회(한도의 200%)가 된다. 기본값이
+    맞아도 설정 한 줄로 넘길 수 있으면 한도를 지키는 것이 아니다(2026-09-16 적대
+    리뷰가 짚었다).
+
+    이 검사는 `le × 최악 run 수 ≤ 한도`를 요구한다. 올리려면 한도 쪽 근거를 먼저
+    적거나, 두 job이 같은 날 겹치지 않는다는 것을 스케줄에서 보여라.
+    """
+
+    field = KorTravelMapSettings.model_fields["opinet_run_call_budget"]
+    ceiling = next(
+        (getattr(meta, "le", None) for meta in field.metadata if getattr(meta, "le", None)),
+        None,
+    )
+    assert ceiling is not None, "run 예산에 상한(le)이 없다"
+    worst = ceiling * WORST_CASE_RUNS_PER_DAY
+    assert worst <= OPINET_FREE_DAILY_LIMIT, (
+        f"설정 상한 {ceiling} × {WORST_CASE_RUNS_PER_DAY} run = {worst}회로 무료키 "
+        f"일일 한도 {OPINET_FREE_DAILY_LIMIT}회를 넘는다. 기본값이 아니라 **설정할 수 "
+        "있는 최대치**가 한도 안에 들어가야 한다."
+    )
+
+
 def test_the_low_top_ceiling_fits_inside_the_run_budget() -> None:
     """`lowTop10` 상한이 run 예산 안에 들어간다.
 
