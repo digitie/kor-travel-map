@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-15 — t44a 배포 완료, async 이관이 prod에서 돈다
+
+**다음 한 작업: `T-VN-QUEUE-QUOTA` 조문 6 — 분모가 *있는* provider에 일일 예산을
+둘지 판단.** krex는 TPS로 닫혔고(`T-VN-KREX-TPS-FANOUT` 조문 1·2·4), 남은 것은
+분모가 있는 쪽이다.
+
+`#1235`(provider 13개 async-only) 머지 후 t44a 재핀 전 사이클 GREEN — D1 live
+Playwright 11 passed, D2 `phase=passed`. **prod에서 직접 읽어** 새 라이브러리(동기
+`close` 없음, 전부 coroutine)와 gate(`{'krex': 0.2}`, 4건 선언, 계수기보다 바깥)가
+살아 있는 것을 확인했다. **버전 문자열로는 판별되지 않아**(13개 전부 `0.1.0`) 코드의
+성질을 물었다.
+
+**열려 있는 것:** `T-VN-KREX-TPS-FANOUT` 조문 3(정책 테이블 `max_concurrent` 집행),
+`T-VN-QUEUE-QUOTA` 조문 6, `T-VN-LEDGER-ARCHIVE` 조문 2·3, `T-VN-M02`,
+`T-VN-H49`/`-OFFBOX`, `T-VN-D2-RESIDUE`, `T-VN-CURATION-SEAL-ACL`.
+
+
 ## 2026-09-15 — provider 13개 async-only 이관 (브랜치 `feat/provider-async-tps-migration`)
 
 **다음 한 작업: n150 4세션 게이트 결과 확인 → PR → 머지.** 그 뒤 prod 재핀

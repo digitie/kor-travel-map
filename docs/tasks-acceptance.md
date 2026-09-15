@@ -2151,7 +2151,11 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 3. [ ] `ops.provider_refresh_policies.max_concurrent`가 **읽히기만 하는 상태**를
    벗어난다 — gate가 그 값을 읽거나, 집행하지 않는다는 것이 조문으로 적힌다.
    지금 gate는 코드 상수(`PROVIDER_RATE_GATES`)를 쓴다.
-4. [ ] gate가 prod에서 실제로 걸리는 것을 본다(배포 후 실측). 지금은 검사만 초록이다.
+4. [x] gate가 prod 실행 경계에 있다 — t44a 배포(`e9b877b39`) 후 컨테이너에서 직접
+   읽었다: `PROVIDER_RATE_GATES = {'krex': 0.2}`, 선언 operation 4건,
+   `FeatureUpdateAssetRunner.__call__`이 gate를 지나며 **계수기보다 바깥**이다.
+   (아직 남은 것: krex run이 실제로 동시에 뜬 사례에서 합계를 관측한 것은 아니다 —
+   prod feature materialization이 0건이라 그 사례가 없다.)
 
 **무엇이 관측됐나 — 2026-09-14.** 근거·수치·표는 `docs/etl/upstream-quota.md` §2
 "열려 있는 구멍"이 정본이다. 요약: 큐 센서가 틱당 RunRequest를 10개 내고
