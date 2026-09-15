@@ -58,13 +58,17 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [ ] T-VN-QUEUE-QUOTA — **남은 provider 넷의 분모부터 포털에서 확인한다**
+- [ ] T-VN-KREX-TPS-FANOUT — **krex 5 TPS는 프로세스당이고 합계가 아니다**
 
-  `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr이 아니라 각자 포털에 있고 아직
-  보지 않았다. OpiNet의 1,500/일은 실측이 아닌데 예산(`_OPINET_RUN_CALL_BUDGET=600`)이
-  그 위에 서 있다. **조회이지 엔지니어링이 아니다.** 큐 예산 장치는 그다음이다.
-  급하지 않다(prod feature materialization 0건). 해제 조건은 acceptance
-  §T-VN-QUEUE-QUOTA.
+  큐가 worker run을 최대 4개 동시에 띄우고 run마다 `KrexClient`가 따로라 버킷도
+  넷이다 → 최대 **20 TPS**. `provider_refresh_policies.max_concurrent`는 자리만
+  있고 집행되지 않는다. 해제 조건은 acceptance §T-VN-KREX-TPS-FANOUT.
+
+- [ ] T-VN-QUEUE-QUOTA — **분모가 있는 provider에 일일 예산을 둘지 판단한다**
+
+  넷의 분모 조회는 끝났다(2026-09-14). `krex`는 일일 한도가 미공개라 분모를 기다리지
+  않고 **TPS 5**로 막았다. 남은 것은 분모가 **있는** 쪽의 판단이다. 급하지 않다
+  (prod feature materialization 0건). 해제 조건은 acceptance §T-VN-QUEUE-QUOTA.
 
 - [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
 

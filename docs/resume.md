@@ -1,9 +1,74 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-14 — T-VN-QUOTA-ARITHMETIC 종결, 그리고 큐 경로가 남았다
+## 2026-09-15 — provider 13개 async-only 이관 (브랜치 `feat/provider-async-tps-migration`)
 
-**다음 한 작업: `T-VN-QUEUE-QUOTA` 조문 5 — 분모가 있는 쪽에 일일 예산을 둘지
-판단.** `krex` 한도 문의(사람이 할 일)가 그 입력 하나로 남았다.
+**다음 한 작업: n150 4세션 게이트 결과 확인 → PR → 머지.** 그 뒤 prod 재핀
+(`/root/chain17.sh`)이 따라온다 — provider 핀이 13개 바뀌었으므로 이미지 재빌드가 필요하다.
+
+형제 `python-*-api` **13개 전부**가 native async only + 공유 TPS 제어로 재작성됐다
+(사용자 개편). Map을 그 표면에 맞췄다 — 핀 13개, fetcher 20개 async 전환, 경계 4곳,
+manifest 재생성, 계약표 13행.
+
+**어제의 krex TPS 브랜치(`python-krex-api` `feat/http-tps-limit`)는 흡수됐다.** 새
+라이브러리가 그 기본값과 검증을 그대로 갖고 있다(실측 확인). 머지하지 않고 접는다.
+**Map 쪽 `provider_rate_gate`는 살아남는다** — 새 `rate_limiter=` 주입은 한 이벤트
+루프 안에서만 성립하고 Map의 fan-out은 프로세스를 가로지른다.
+
+검증(기준선 비교):
+
+| | 브랜치 | HEAD 기준선 |
+|---|---:|---:|
+| dagster 세션 | 680 passed / **10 failed** | 675 passed / **같은 10 failed** |
+| 실패 집합 | — | **IDENTICAL(회귀 없음)** |
+
+남은 10건은 dagster 버전 환경 문제(`test_storage_migration_command` 9 +
+`test_definitions` 1). tests/lint 288 passed(conformance 38 포함), ruff 전 트리 clean.
+
+**열려 있는 것:** `T-VN-KREX-TPS-FANOUT` 조문 3·4(정책 테이블 집행 여부, prod 실측),
+`T-VN-QUEUE-QUOTA` 조문 6(분모가 있는 provider의 일일 예산),
+`T-VN-LEDGER-ARCHIVE` 조문 2·3.
+
+
+## 2026-09-14 — 분모가 없는 provider를 분모 없이 막았다 (krex TPS 5)
+
+**다음 한 작업: `T-VN-QUEUE-QUOTA` 조문 6 — 분모가 **있는** provider에 일일 예산을
+둘지 판단.** 조문 5(`krex`)는 닫혔다.
+
+**`krex`는 일일 한도를 기다리지 않고 축을 바꿨다.** 포털 네 면 어디에도 일일 수치가
+없고 남은 길은 문의뿐이었는데, **이 provider에서 실제로 조일 수 있는 것은 간격이다.**
+`python-krex-api` `feat/http-tps-limit`이 `KrexHttp`에 token bucket을 넣어 **초당
+5건**을 넘기지 않는다(`max_rps` 기본 `5.0`, `KrexClient`/`AsyncKrexClient`로 전달).
+
+세 가지를 일부러 다르게 했고 각각이 그냥 두면 틀렸을 자리다:
+
+- **버스트 없음(capacity=1)** — capacity가 `max_rps`면 가득 찬 버킷에서 5건이 즉시
+  나가고 그 초에 지속분이 더해져 **첫 1초에 10건**이다. 상한이지 평균이 아니다.
+- **재시도도 요청이다** — 버킷이 재시도 루프 **안**에 있다.
+- **락이 `threading.Lock`이다** — `_run_sync`가 호출마다 새 루프를 만들고 러닝 루프가
+  있으면 별도 스레드에서 돈다. `asyncio.Lock`은 스레드를 전혀 막지 못하면서 막는 것처럼
+  읽히고, 경합하면 처음 본 루프에 묶여 다음 루프에서 `RuntimeError`를 낸다(3.14 재현).
+
+검사기는 일곱 변이로 확인했다(상한 끄기 / capacity 되살리기 / 기본값 / acquire를 루프
+밖으로 / client 미전달 / go 포털만 우회 / 우회하는 새 전송 자리) — 각각 다른 테스트가
+잡는다. 마지막 것은 AST로 `session.get(...)` 자리가 하나임을 본다. **효과 검사는 지금
+있는 경로만 보므로 새 경로는 아무 테스트도 건드리지 않고 상한을 비켜 간다.**
+
+**그리고 Map 쪽에서 내가 틀렸다.** "큐 러너가 순차 처리하므로 합계 5 TPS"라고
+적었는데, 적대 리뷰 둘이 **독립적으로** 뒤집었다 — 그 순차성은 run **하나 안에서**의
+이야기다. 큐 센서는 틱당 RunRequest를 10개 내고(`RUNNING`, 15초 틱),
+`docker/dagster.yaml`이 `tag_concurrency_limits`로 **4를 동시에** 돌린다. run마다
+프로세스가 다르니 `KrexClient`도 버킷도 넷 → **최대 20 TPS.** krex를 직렬화하는 것은
+아무것도 없다(scope advisory lock은 키가 다르고, Dagster pool은 asset에만 있는데 큐
+경로가 asset을 우회하며, `provider_refresh_policies.max_concurrent`는 **읽히기만 하고
+집행되지 않는다**).
+
+**닫혔다고 적은 구멍이 현재 설정으로 열려 있었다.** 지금 보증되는 것은 "프로세스당
+5 TPS"이고 합계가 아니다. 남은 작업을 `T-VN-KREX-TPS-FANOUT`으로 뺐다 — 고칠 자리는
+`max_rps`가 아니라 **provider 단위 동시성 집행**이고, 스키마
+(`ops.provider_refresh_policies.max_concurrent`)는 이미 있다.
+
+**아직 Map에 반영되지 않았다** — `pyproject.toml`의 krex 핀이
+`c6d8717ec2b712cc952bc566b351f07a7cd3824a`다. krex PR 머지 후 repin이 따라온다.
 
 t43a 배포 완료(`e3fddce81`, 전 사이클 GREEN — D1 live Playwright 11 passed,
 D2 phase=passed). prod 실측으로 OpiNet 예산 140/90과 큐 skip 6건이 살아 있는 것을
@@ -15,10 +80,11 @@ D2 phase=passed). prod 실측으로 OpiNet 예산 140/90과 큐 skip 6건이 살
 가리킨다 — 이관됐지만 파일 경로는 그대로다), `krex`만 **미공개**라 문의가 남았다.
 2026-09-14에 넷을 다 봤고 결과가 갈렸다: **opinet 300/일**(저장소가 1,500으로 알고
 예산 600을 세웠다 — 켜면 첫날에 막혔을 값, 140/300/90으로 고침), **krheritage는
-인증키가 없어 한도 자체가 없다**(위험은 쿼터가 아니라 차단), **krex는 미공개**,
-**mois는 사이트 무응답으로 확인 실패**. `krheritage`·`opinet`·`krex`·`mois`는 data.go.kr이 아니라 각자 포털에 있고
-아직 보지 않았다. OpiNet의 1,500/일은 실측이 아닌데 예산 600이 그 위에 서 있다.
-**조회이지 엔지니어링이 아니다.**
+인증키가 없어 한도 자체가 없다**(위험은 쿼터가 아니라 차단), **mois도 키가 없다**
+(data.go.kr 파일데이터가 기관 자체 다운로드 URL을 가리킨다 — "사이트 무응답으로 확인
+실패"라고 적었던 것은 같은 날 뒤집혔다: 죽은 것은 사람용 포털이고 파일 호스트는
+살아 있었으며, 깨진 것은 Referer 없는 내 curl이었다), **krex는 일일 한도 미공개라
+TPS 5로 막았다**(위 참고).
 
 **급하지 않다.** 2026-09-14 prod 실측 feature asset materialization **0건**이고
 feature cron schedule은 전부 꺼져 있다 — 쿼터가 압박받는 상황이 아니다. 큐 예산

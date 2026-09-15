@@ -1,5 +1,115 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-15 — provider 13개가 async-only가 됐고, 낡은 대역이 세 번 계약 파손을 가렸다
+
+형제 `python-*-api` **13개 전부**가 native async only + 공유 TPS 제어로 재작성됐다.
+동기 HTTP bridge·`Async*` 별칭·`aio()`가 사라졌고 모든 네트워크 메서드가 코루틴,
+정리는 `aclose()`다. 핀을 올리고 Map을 맞췄다.
+
+**어제 만든 krex TPS 브랜치는 upstream에 흡수됐다.** 새 라이브러리가 그 기본값
+(`max_rps=5.0`, `capacity=1` — 버스트 없음)과 검증(`NaN`/`inf`/`bool` 거절)을 그대로
+갖고 있다. 실측 확인: 8건 동시 최소 간격 0.2004초, 최악 1초 창 5건. 루프 결박 문제는
+**async-only로 가면서 원인 자체가 사라졌다**(`_run_sync`가 없어졌다). 머지하지 않고
+접는다 — 남길 것은 코드가 아니라 그 판에서 배운 것이다.
+
+**반대로 Map 쪽 `provider_rate_gate`는 살아남는다.** 새 `rate_limiter=` 주입은 한
+이벤트 루프 안에서만 성립하고, Map의 fan-out은 프로세스를 가로지른다.
+
+### 내가 틀린 곳 하나
+
+`kma_weather.py`를 "로컬 헬퍼만 쓰니 무변경"이라고 단정했다 — **grep 결과 앞부분만
+보고** 그랬다. 실제로는 결함이 셋이었다:
+
+1. `forecast.now/short/vilage`를 `await` 없이 호출.
+2. 코루틴 함수를 `retry_upstream_async`에 넘김 — 그 함수는 `return call()`이라 코루틴
+   **객체**를 돌려주고 **그 안의 예외를 재시도가 한 번도 보지 못한다.** 재시도가 사라진
+   줄도 모르게 사라진다.
+3. 정리가 `close`를 찾는데 실물엔 `aclose`뿐 — 가드가 조용히 통과해 세션이 샜다.
+
+같은 3번 모양이 `feature_update_runner._close_method`에도 있었다. 같은 client의
+schedule 경로는 고쳐졌는데 direct/admin 경로만 남아 있었다.
+
+### 낡은 대역이 계약 파손을 가린 세 자리
+
+소스만 바꾸면 40곳이 `TypeError`로 죽는다. 그건 시끄러워서 낫다. **문제는 조용히
+통과하는 자리다.**
+
+| 자리 | 무엇이 가려졌나 |
+|---|---|
+| krheritage | `await`를 빼도 초록 — 250건이 코루틴 객체로 나가는데 단언이 **개수만** 봤다 |
+| opinet | fake의 `**_kwargs`가 kwarg 이름 변경을 삼켰다. 실물은 `TypeError` 뒤 조용히 기본 반경 5000m로 떨어질 자리 |
+| mcst | 상한이 1이라 row 수 == slug 수 — "slug당 1건"과 "row당 1건"이 같은 수였다 |
+
+**필수 인자만으로는 부족하다** — 기본값이 있는 인자일수록 구멍이 넓다. 셋 다 변이로
+빨강을 확인하고 닫았다.
+
+### drift 하나를 더 닫았다
+
+gate의 교대 간격(`1/5`초)과 라이브러리의 `DEFAULT_MAX_RPS`(5)가 서로를 모른 채 각자
+`5`를 들고 있었다. Map은 `max_rps`를 넘기지 않으므로 **라이브러리 기본값에 의존한다** —
+그쪽이 바뀌면 gate가 조용히 틀린 값이 된다. 형제 소스를 AST로 읽어 둘을 결박했고,
+**양쪽 변이**(gate만 바꾸기 / 라이브러리만 바꾸기)로 잡히는 것을 확인했다.
+
+### 판정은 격리가 아니라 기준선으로
+
+dagster 세션 **680 passed / 10 failed**. 같은 하네스로 HEAD를 돌리니 **675 passed /
+같은 10 failed** — 실패 집합이 바이트 단위로 동일하고 통과만 5건 늘었다. 남은 10건은
+dagster 버전 환경 문제다.
+
+
+## 2026-09-14 — 분모가 없는 provider를 분모 없이 막았다 (krex TPS 5)
+
+`krex`의 일일 한도는 포털 네 면 어디에도 없었고 남은 길은 문의였다. **기다리는 대신
+축을 바꿨다** — 이 provider에서 실제로 조일 수 있는 것은 하루 총량이 아니라 간격이다.
+`python-krex-api` `feat/http-tps-limit`이 `KrexHttp`에 token bucket을 넣어 **초당
+5건**을 넘기지 않는다(`max_rps` 기본 `5.0`).
+
+**세 번, 그냥 두면 틀렸을 자리가 있었다.**
+
+1. **처음 만든 것은 5 TPS가 아니라 10 TPS였다.** capacity를 `max_rps`로 두면 가득 찬
+   버킷에서 5건이 즉시 나가고 그 초에 지속분 5건이 더해진다. 테스트가 창의 **시작점**만
+   보고 있어서 초록이었다 — 어느 1초 창이든 보게 고치니 빨개졌다. capacity=1로 낮췄다.
+2. **락이 아무것도 막지 않고 있었다.** `asyncio.Lock`을 썼는데 `_run_sync`는 호출마다
+   새 이벤트 루프를 만들고 러닝 루프가 있으면 **별도 스레드**에서 돈다. asyncio 락은
+   스레드를 전혀 막지 못하면서 막는 것처럼 읽히고, 경합하면 처음 본 루프에 묶여 다음
+   루프에서 `RuntimeError`를 낸다(3.14에서 재현 확인). 임계구역 안에서 await하지
+   않으므로 `threading.Lock`으로 바꿨다. **동시 호출에서 상한이 지켜지던 것은 락 덕이
+   아니라 GIL 덕이었다** — 재는 것과 지켜지는 것이 달랐다.
+3. **`KrexClient`가 `max_rps`를 넘기지 않았다.** 버킷이 transport에만 있어서, client만
+   쓰는 호출자는 더 낮춰야 할 때 낮출 방법이 없었다. 두 facade 모두에 넣었다.
+
+검사기는 **일곱 변이**로 확인했다 — 상한 끄기 / capacity 되살리기 / 기본값 바꾸기 /
+acquire를 재시도 루프 밖으로 / client 미전달 / go 포털만 우회 / 우회하는 새 전송 자리
+추가. 각각 다른 테스트가 잡는다. 마지막 것만 AST다: `session.get(...)` 자리가 하나임을
+본다. **효과 검사는 지금 있는 경로만 본다 — 새 전송 경로는 아무 테스트도 건드리지 않고
+상한을 비켜 간다.** 이 저장소가 분자에서 이미 겪은 형태다(#1229 → #1231).
+
+ruff clean · mypy strict clean · pytest **91 passed**(live 5 deselected).
+
+**그리고 네 번째로 틀린 것은 Map 쪽 결론이었다.** "큐 러너가 scope를 순차 처리하므로
+합계 5 TPS"라고 적었는데, 전문 리뷰어 둘이 **독립적으로 같은 자리**를 짚었다. 그
+순차성은 run **하나 안에서**의 이야기다:
+
+| 자리 | 값 |
+|---|---:|
+| 큐 센서 틱당 RunRequest | **10** (`RUNNING`, 15초 틱) |
+| `dagster.yaml` `max_concurrent_runs` | **10** |
+| `tag_concurrency_limits[…request_id]` | **4** |
+
+request마다 run_key가 다르니 worker run 넷이 동시에 뜨고, run마다 프로세스가 다르니
+`KrexClient`도 버킷도 넷이다 → **최대 20 TPS.** 직렬화하는 것이 아무것도 없다:
+실행 advisory lock은 request id와 scope key에 걸려 scope가 다르면 둘 다 진행하고,
+Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은 **asset**에 선언됐는데 큐 경로는 asset
+wrapper를 우회하며, `ops.provider_refresh_policies.max_concurrent`는 plan payload에
+**실리기만 하고 아무도 그 값을 보고 멈추지 않는다.**
+
+**닫혔다고 적은 구멍이 현재 설정으로 열려 있었다.** 배포가 초록인 것과 고친 것이 그
+안에 있는 것이 다르듯, **라이브러리가 막는 것과 시스템이 막는 것도 다르다.** 지금
+보증되는 것은 "프로세스당 5 TPS"다. 남은 작업은 `T-VN-KREX-TPS-FANOUT`.
+
+**아직 Map에 들어오지 않았다** — krex 핀은 `c6d8717e…` 그대로다(`ddd69cd2`는 그 전
+값이다 — 처음에 그것을 적었다). krex PR 머지 후 repin이 따라온다.
+
 ## 2026-09-14 — t43a 배포, 그리고 고친 것이 prod에서 살아 있는 것을 봤다
 
 `#1231`·`#1232`·`#1233`을 `e3fddce81`로 핀했다. 전 사이클 GREEN — 회전

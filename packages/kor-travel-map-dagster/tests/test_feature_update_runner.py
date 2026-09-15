@@ -711,24 +711,35 @@ def test_kma_grid_resources_propagate_exact_persisted_scope(
     assert resources.values["kma_weather_max_grids_per_run"] == 17
 
 
-def test_kma_runner_clients_receive_timeout_and_inner_retries(
+async def test_kma_runner_clients_receive_timeout_and_inner_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """H45(재리뷰 N-4) — admin 재적재 runner 경로 2곳도 timeout·retries 정산값이
-    실제 client 생성자에 도달한다(스케줄 resource와 갈리면 진단이 흐려진다)."""
+    실제 client 생성자에 도달한다(스케줄 resource와 갈리면 진단이 흐려진다).
+
+    **정리도 함께 본다.** 종전에는 `teardown()`을 부르고 반환값을 버렸는데,
+    provider가 async-only가 되면서 그 반환값이 코루틴이 됐다 — 그대로 두면
+    client가 한 번도 닫히지 않는데 검사는 초록이다(2026-09-15 적대 리뷰가
+    이 자리를 실증했다). 그래서 `_close_teardowns`가 실제로 쓰는 경로로 돌린다.
+    """
 
     import sys
     from types import ModuleType
 
     created: list[tuple[str, dict[str, Any]]] = []
+    instances: list[Any] = []
 
     class _RecordingClient:
         def __init__(self, *, service_key: str, **kwargs: Any) -> None:
             created.append((type(self).__name__, dict(kwargs)))
             self.service_key = service_key
+            self.closed = False
+            instances.append(self)
 
-        def close(self) -> None:
-            pass
+        # 실물 `KmaClient`/`DataGoKrClient`의 정리 메서드는 `aclose`뿐이다
+        # (`python-kma-api/src/kma/client.py:93`, `datagokr.py:131`).
+        async def aclose(self) -> None:
+            self.closed = True
 
     fake = ModuleType("kma")
     fake.__dict__["KmaClient"] = type("KmaClient", (_RecordingClient,), {})
@@ -748,13 +759,22 @@ def test_kma_runner_clients_receive_timeout_and_inner_retries(
         settings,
         _scope(provider="python-kma-api", dataset_key="kma_mid_forecast"),
     )
-    for teardown in resources.teardowns:
-        teardown()
+    # 손으로 부르지 않고 **런너가 쓰는 자리**로 돌린다 — 그 자리가 awaitable을
+    # await하고, 손으로 부르면 코루틴이 버려져 "닫혔다"가 거짓이 된다.
+    assert resources.teardowns, "teardown이 하나도 등록되지 않았다"
+    await runner_mod._close_teardowns(resources.teardowns)  # noqa: SLF001 - 주입 경계 회귀
 
     assert created == [
         ("KmaClient", {"timeout": 20.0, "retries": 1}),
         ("DataGoKrClient", {"timeout": 20.0, "retries": 1}),
     ]
+    # client는 둘이다 — weather 쪽은 이 호출이 수명을 갖지 않으므로 여기서 닫히지
+    # 않는 것이 맞고(`_new_kma_weather_client`는 teardown을 돌려주지 않는다),
+    # teardown이 붙는 것은 mid 쪽뿐이다. 그 하나가 닫혔는지를 본다.
+    assert [client.closed for client in instances] == [False, True], (
+        f"정리 상태가 {[c.closed for c in instances]}다 — mid client가 닫혀야 하고 "
+        "teardown이 실물 정리 메서드(`aclose`)와 어긋나면 세션이 샌다"
+    )
 
 
 @pytest.mark.parametrize(

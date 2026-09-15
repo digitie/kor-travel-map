@@ -5,7 +5,9 @@
 > 진입점 40개 중 35개에서 하한으로 나가기 시작했다.** 남은 비대칭 둘을 숨기지
 > 않는 것이 이 문서의 요점이다 — data.go.kr 포털에 없는 provider 넷
 > (`krheritage`·`opinet`·`krex`·`mois`)은 **분모가 아직 없고**, 분자도 §4에
-> 열거한 자리에서는 부분값이거나 없다. 관리자 UI가 오래 "rate limit의 약 90%
+> 열거한 자리에서는 부분값이거나 없다. **`krex`는 2026-09-14에 분모를 기다리는 대신
+> 축을 바꿨다 — 일일 한도가 아니라 TPS 5로 막는다(§2). 프로세스당 보증은 라이브러리가,
+> 프로세스 사이는 `provider_rate_gate`가 맡는다.** 관리자 UI가 오래 "rate limit의 약 90%
 > 이하를 목표로" 한다고 말했는데, 그 90%의 분모를 아무도 갖고 있지 않았다.
 
 ## 1. 분모는 서비스가 아니라 **오퍼레이션**마다 걸린다
@@ -63,7 +65,7 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 |---|---|---|---|
 | `opinet` | 무료키 **300/일** | 오피넷 이용안내 > 유가정보 API — 일반 API 19종 `300call/일`(프리미엄 3종이 1,500) | **2026-09-14 확인** |
 | `krheritage` | **존재하지 않는다** — 인증키가 없다 | provider 소스: `serviceKey`는 `apis.data.go.kr` 호스트에만 주입되고 heritage는 `www.khs.go.kr/cha`다 | **2026-09-14 확인** |
-| `krex` | **미공개** | OpenAPI 소개·목록·인증키 발급·이용안내 **네 페이지 모두**에 수치가 없다(키는 즉시 발급). 포털에 문의 창구가 공개돼 있다 | **2026-09-14 확인(없음을 확인)** |
+| `krex` | **일일 한도는 미공개 — 제약은 TPS다.** 라이브러리가 프로세스당, `provider_rate_gate`가 프로세스 사이를 막아 **합계 5 TPS** | OpenAPI 소개·목록·인증키 발급·이용안내 **네 페이지 모두**에 일일 수치가 없다(키는 즉시 발급) | **2026-09-14 확인(없음을 확인) → TPS로 전환** |
 | `mois`/`localdata` | **존재하지 않는다** — 기관 자체 다운로드라 키·활용신청이 없다 | data.go.kr 파일데이터 `15045016`·`15044967`의 제공형태가 "기관자체에서 다운로드(제공데이터URL기재)"이고 그 URL이 `file.localdata.go.kr/file/<slug>/info`다 | **2026-09-14 확인** |
 
 **"분모가 없다"가 셋 다 다른 뜻이다.**
@@ -71,8 +73,86 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 - `krheritage`는 **키가 없으므로 per-key 한도라는 개념이 없다.** 그래서 sweep당
   ~3,950요청에 대해 "몇 %"를 물을 대상이 애초에 없다 — 위험은 쿼터 소진이 아니라
   **과도 호출로 인한 차단**이고, 그것은 분모가 아니라 예의(간격·동시성)의 문제다.
-- `krex`는 키가 있는데 **한도를 공개하지 않는다.** 모르는 것이지 없는 것이 아니다 —
-  포털 네 페이지를 다 봤고 어디에도 없다. 남은 길은 문의뿐이고, 그것은 사람이 할 일이다.
+- `krex`는 키가 있는데 **일일 한도를 공개하지 않는다.** 그래서 **분모를 기다리지 않고
+  다른 축으로 옮겼다 — 초당 건수다.** 없는 분모에 예산을 짜는 것은 없는 분모를 지어내는
+  일이고, 이 provider에서 실제로 조일 수 있는 것은 간격이다. 자세한 것은 아래.
+
+#### krex는 분모가 아니라 **TPS 5**로 막는다 (2026-09-14)
+
+`python-krex-api`의 `KrexHttp`가 token bucket으로 **초당 5건**을 넘기지 않는다
+(`max_rps`, 기본 `5.0`). 일일 한도를 알아내면 그때 예산을 더할 수 있지만, 그 전에도
+**지금 지켜지는 상한이 하나는 있다.**
+
+읽는 사람이 알아야 할 성질 넷:
+
+| 성질 | 값 | 왜 그렇게 했나 |
+|---|---|---|
+| 버스트 | **없음**(capacity=1) | capacity가 `max_rps`면 가득 찬 버킷에서 5건이 즉시 나가고 그 초에 지속분이 더해져 **첫 1초에 10건**이다. 요구사항은 평균이 아니라 상한이다 |
+| 재시도 | **요청으로 센다** | 버킷이 재시도 루프 **안**에 있다. 밖에 두면 시도 수만 세고 나가는 건수가 상한을 넘는다 |
+| 범위 | **클라이언트당**(포털당 아님) | `data.ex.co.kr`·`data.go.kr` 호출이 같은 버킷을 지난다. 반대로 **클라이언트를 여러 개 만들면 버킷도 여러 개다** |
+| 동시성 | **스레드 안전** | 동기 API는 호출마다 새 이벤트 루프를 쓰고, 러닝 루프가 있으면 별도 스레드에서 돈다 — 락이 루프가 아니라 스레드를 막아야 한다 |
+
+#### Map 합계는 아직 5 TPS가 아니다 — 열려 있는 구멍 (2026-09-14)
+
+> 이 문단은 한 번 **틀리게 적혔다가** 적대 리뷰에서 뒤집혔다. 원래 "큐 러너가 순차
+> 처리하므로 합계 5 TPS"라고 적었는데, 그 순차성은 **run 하나 안에서**의 이야기이고
+> run 자체는 동시에 여러 개가 뜬다. 닫혔다고 적은 구멍이 **현재 설정으로 열려 있다.**
+
+참인 부분:
+
+- krex fetcher 넷(`fetch_krex_rest_areas`·`fetch_krex_traffic_notices`·
+  `fetch_krex_rest_area_fuel_prices`·`fetch_krex_rest_area_weather`)은 각자
+  `KrexClient`를 **하나** 열고 그 안에서 페이지네이션한다 — 한 fetcher 실행 = 버킷 하나.
+- prod에 feature cron schedule은 전부 꺼져 있다(`default_status=STOPPED`).
+- `feature_update_executor`는 한 run 안에서 scope를 **순차** 처리한다.
+
+거짓인 부분 — **run은 동시에 뜬다:**
+
+| 자리 | 값 |
+|---|---:|
+| `FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS` (`sensors.py`) | 틱당 **10** RunRequest |
+| 큐 센서 `default_status` | **RUNNING** (15초 틱) |
+| `docker/dagster.yaml` `max_concurrent_runs` | **10** |
+| `tag_concurrency_limits[kor_travel_map.feature_update_request_id]` | **4** |
+
+request마다 run_key가 다르므로 **worker run 넷이 동시에** 실행될 수 있고, 각 run이
+자기 프로세스에서 자기 `KrexClient`를 연다 → **버킷 넷 → 최대 20 TPS.**
+
+krex를 직렬화하는 것은 아무것도 없다:
+
+- 실행 시점 advisory lock은 **request id**와 **scope key**에 걸린다. scope가 다르면
+  키가 달라 둘 다 진행한다.
+- Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은 **asset**에 선언돼 있는데, 큐 경로는
+  asset wrapper를 **우회한다**(`feature_update_runner.py`가 원본 run 함수를 부른다).
+- `ops.provider_refresh_policies.max_concurrent`는 읽혀서 plan payload에 실리기만
+  하고 **집행되지 않는다**(`feature_update_executor.py` `_rate_limit()`). 자리는 있는데
+  아무도 그 값을 보고 멈추지 않는다.
+
+**그래서 프로세스당 상한만으로는 부족하다.** `feature_update_runner`의
+`provider_rate_gate`(Postgres advisory lock + 교대 간격)가 그것을 닫는다 — 자세한
+것은 `T-VN-KREX-TPS-FANOUT`.
+
+#### 라이브러리가 async-only가 되면서 생긴 것 (2026-09-15)
+
+형제 `python-*-api` 13개가 **native async only + 공유 TPS 제어**로 재작성됐다. krex는
+기본값을 유지한다(`max_rps=5.0`, 버킷 `capacity=1` — 버스트 없음). 실측으로 확인했다:
+8건 동시 요청의 최소 간격 0.2004초, 최악 1초 창 5건, `NaN`/`inf`/0/음수/`bool` 거절.
+
+새로 생긴 것은 **`rate_limiter=` 주입**이다 — 여러 client가 버킷 하나를 공유해 예산을
+합산한다. 다만 그것은 **한 이벤트 루프 안에서**만 성립한다(`AsyncTokenBucket`은 다른
+루프에서 쓰이면 `RuntimeError`). 그래서:
+
+| 층 | 무엇을 막나 | 도구 |
+|---|---|---|
+| 한 client | 초당 5건 | 라이브러리 버킷(기본값) |
+| 한 프로세스의 여러 client | 합산 예산 | `rate_limiter=` 주입 *(Map은 아직 안 쓴다 — 한 run에서 krex fetcher가 동시에 돌지 않는다)* |
+| **프로세스 사이** | 합계 5 TPS | **`provider_rate_gate`** (advisory lock + 교대 간격) |
+
+**두 수가 같은 곳에서 나와야 한다.** gate의 교대 간격(`1/5`초)과 라이브러리의
+`DEFAULT_MAX_RPS`(5)는 서로를 모른 채 각자 `5`를 들고 있었다 — 라이브러리가 3이나
+10으로 바뀌면 gate가 조용히 틀린 값이 된다. `tests/lint/
+test_rate_gated_providers_declare_the_gate.py`가 형제 소스의 `DEFAULT_MAX_RPS`를
+AST로 읽어 그 둘을 결박한다(형제 체크아웃이 없으면 skip).
 - `mois`/`localdata`도 **없는 것이 정상이다.** 키가 없기 때문이다 — 아래 참고.
 
 ### MOIS는 data.go.kr로 이관됐는데 **파일 경로는 그대로다** (2026-09-14)

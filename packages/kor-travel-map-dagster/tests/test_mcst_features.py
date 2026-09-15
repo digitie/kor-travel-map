@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
@@ -26,6 +27,10 @@ from kortravelmap.dagster.mcst_features import (
     run_feature_place_mcst_culture,
 )
 from kortravelmap.dagster.provider_fetchers import fetch_mcst_culture_records
+from kortravelmap.dagster.upstream_requests import (
+    counting_upstream_requests,
+    observed_upstream_requests,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -456,12 +461,16 @@ class _FakeFileDataClient:
         self.calls: list[str] = []
         _FakeFileDataClient.instances.append(self)
 
-    def iter_csv(self, slug: str) -> Any:
+    # 실물: ``mcst/file_data.py:259``의 ``async def iter_csv``
+    # (``AsyncIterator[dict[str, str]]``, dataset은 위치인자).
+    async def iter_csv(self, slug: str) -> AsyncIterator[dict[str, str]]:
         self.calls.append(slug)
         for index in range(type(self).rows_per_dataset):
             yield {"TITLE": f"{slug}-{index}", "RNUM": str(index + 1)}
 
-    def close(self) -> None:
+    # 실물 ``FileDataClient``의 정리 메서드는 ``aclose``뿐이다
+    # (``mcst/file_data.py:107``) — sync ``close``는 없다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -472,7 +481,7 @@ def _install_fake_mcst(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "mcst", module)
 
 
-def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
+async def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_mcst(monkeypatch)
@@ -482,7 +491,7 @@ def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
         mcst_max_items_per_dataset=1,
     )
 
-    records = list(fetch_mcst_culture_records(settings))
+    records = [record async for record in fetch_mcst_culture_records(settings)]
 
     # 등록 slug × max_items=1.
     assert len(records) == len(MCST_FILE_DATASETS)
@@ -492,7 +501,7 @@ def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
     assert client.calls == list(MCST_FILE_DATASETS)
 
 
-def test_fetch_mcst_culture_records_caps_rows_per_dataset(
+async def test_fetch_mcst_culture_records_caps_rows_per_dataset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_mcst(monkeypatch)
@@ -500,7 +509,9 @@ def test_fetch_mcst_culture_records_caps_rows_per_dataset(
     try:
         settings = KorTravelMapSettings(mcst_max_items_per_dataset=3)
 
-        records = list(fetch_mcst_culture_records(settings))
+        records = [
+            record async for record in fetch_mcst_culture_records(settings)
+        ]
 
         per_slug: dict[str, int] = {}
         for slug, _row in records:
@@ -511,25 +522,26 @@ def test_fetch_mcst_culture_records_caps_rows_per_dataset(
         _FakeFileDataClient.rows_per_dataset = 2
 
 
-def test_fetch_mcst_culture_records_limits_worker_to_explicit_slug(
+async def test_fetch_mcst_culture_records_limits_worker_to_explicit_slug(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_mcst(monkeypatch)
     selected_slug = next(iter(MCST_FILE_DATASETS))
 
-    records = list(
-        fetch_mcst_culture_records(
+    records = [
+        record
+        async for record in fetch_mcst_culture_records(
             KorTravelMapSettings(mcst_max_items_per_dataset=1),
             slugs=(selected_slug,),
         )
-    )
+    ]
 
     assert [slug for slug, _row in records] == [selected_slug]
     [client] = _FakeFileDataClient.instances
     assert client.calls == [selected_slug]
 
 
-def test_fetch_mcst_culture_records_rejects_slug_absent_from_the_meta_table(
+async def test_fetch_mcst_culture_records_rejects_slug_absent_from_the_meta_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """메타표에 없는 slug는 **다운로드를 시작하기 전에** ``KeyError``로 끊는다.
@@ -552,25 +564,56 @@ def test_fetch_mcst_culture_records_rejects_slug_absent_from_the_meta_table(
     )
 
     with pytest.raises(KeyError, match="krtour-unregistered-slug"):
-        next(records)
+        await anext(records)
 
     assert _FakeFileDataClient.instances == []
 
 
-def test_fetch_mcst_culture_records_closes_on_partial_consumption(
+async def test_fetch_mcst_culture_records_closes_on_partial_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_mcst(monkeypatch)
     settings = KorTravelMapSettings()
 
     gen = fetch_mcst_culture_records(settings)
-    first = next(iter(gen))
+    first = await anext(gen)
     assert first is not None
-    # 조기 종료 시에도 finally의 ``close()``가 실행되어 client가 닫혀야 한다.
-    gen.close()
+    # 조기 종료 시에도 finally의 ``aclose()``가 실행되어 client가 닫혀야 한다.
+    await gen.aclose()
 
     [client] = _FakeFileDataClient.instances
     assert client.closed is True
+
+
+async def test_fetch_mcst_culture_records_counts_one_request_per_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드 — **1건(하한)**으로 센다.
+
+    lib 안에서 몇 번 나가는지 이 층은 볼 수 없어 분자는 하한이다. 그 하한이
+    사라지면(``note_upstream_request()`` 한 줄이 빠지면) 보고는 "0번 요청했다"가
+    아니라 침묵이 된다 — 계수되지 않은 경로는 ``None``이다. row 수로는 역산되지
+    않으므로(빈 dataset도 요청 1건을 쓴다) 이 수는 따로 결박해야 한다.
+    """
+    _install_fake_mcst(monkeypatch)
+    # **상한을 2로 둔다.** 1이면 row 수와 slug 수가 같아져 "slug당 1건"과 "row당
+    # 1건"이 같은 수가 되고, 계수기를 row 루프로 옮기는 변이가 초록으로 지나간다
+    # (적대 리뷰 실증 — 그 변이는 실제로는 보고 건수를 row 배수로 부풀린다).
+    settings = KorTravelMapSettings(mcst_max_items_per_dataset=2)
+
+    with counting_upstream_requests():
+        records = [record async for record in fetch_mcst_culture_records(settings)]
+        observed = observed_upstream_requests()
+
+    assert len(records) == 2 * len(MCST_FILE_DATASETS), (
+        "이 검사는 row 수와 slug 수가 **달라야** 의미가 있다 — 대역이 dataset마다 "
+        "2행을 내는지 먼저 확인한다"
+    )
+    assert observed == len(MCST_FILE_DATASETS), (
+        f"dataset {len(MCST_FILE_DATASETS)}개인데 {observed}건을 셌다 — "
+        "slug당 1건이 이 fetcher의 분자 하한이고, row 수(2배)가 아니다"
+    )
+
 
 
 # -- multi-member 완료 스냅샷 불변식 ---------------------------------------

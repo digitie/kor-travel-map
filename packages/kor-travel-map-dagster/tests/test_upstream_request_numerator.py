@@ -316,33 +316,71 @@ class _Page:
         self.total = total
 
 
-def test_krheritage_items_counts_every_detail_call_not_just_the_list_pages(
+async def test_krheritage_items_counts_every_detail_call_not_just_the_list_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """detail은 record당 1 HTTP다 — 목록 페이지만 세면 실린 수가 실제의 1%다.
 
     2차 적대 리뷰의 blocker를 그대로 재현한 회귀 테스트다. 정적 검사는 이 결함을
     통과시켰다(목록 계수만으로 fetcher가 '센다'로 판정됐다).
+
+    대역은 krheritage native async 표면을 그대로 흉내낸다 — ``search.list``
+    (``services/search.py:29``, keyword-only)·``search.details``
+    (``services/search.py:70``, ``ccba_*`` 3개 위치인자)·``aclose``
+    (``client.py:80``). 이름이나 await 경계가 실물과 어긋나면 계수가 맞아도
+    운영은 깨지므로 시그니처까지 결박한다.
     """
 
     total_items = 250  # 페이지 3장(100/100/50) + detail 250건
+    clients: list[_Client] = []
+
+    detail_calls: list[tuple[str, str, str]] = []
+
+    class _Detail:
+        """detail 응답 대역 — yield된 것이 이것인지 보기 위해 타입을 준다."""
+
+        def __init__(self, ccba_asno: str) -> None:
+            self.ccba_asno = ccba_asno
 
     class _Search:
-        def list(self, *, page_size: int = 100, page: int = 1, **_f: Any) -> _Page:
+        # **catch-all을 두지 않는다.** `**_f`로 받으면 fetcher가 인자 이름을 바꿔도
+        # 여기는 초록인데 실물(`krheritage/services/search.py:29`, 전부 keyword-only)은
+        # `TypeError`를 낸다. 기본값이 있는 인자일수록 그 구멍이 넓다 — 필수 인자만
+        # 우연히 걸린다. 실제 시그니처를 그대로 베낀다.
+        async def list(
+            self,
+            *,
+            page_size: int = 100,
+            page: int = 1,
+            ccba_kdcd: str | None = None,
+            ccba_ctcd: str | None = None,
+            ccba_asno: str | None = None,
+            st_ccba_asdt: str | int | None = None,
+            st_ccba_aedt: str | int | None = None,
+            ccba_cndt: str | int | None = None,
+            ccba_mnm1: str | None = None,
+        ) -> _Page:
+            del ccba_kdcd, ccba_ctcd, ccba_asno
+            del st_ccba_asdt, st_ccba_aedt, ccba_cndt, ccba_mnm1
             start = (page - 1) * page_size
             window = range(start, min(start + page_size, total_items))
             return _Page([_Summary(i) for i in window], total_items)
 
-        def details(self, kdcd: str, asno: str, ctcd: str) -> object:
-            del kdcd, asno, ctcd
-            return object()
+        async def details(self, ccba_kdcd: str, ccba_asno: str, ccba_ctcd: str) -> object:
+            # 호출 인자를 **기록한다.** 그러지 않으면 fetcher가 `await`를 잃어도
+            # 여기는 초록이다 — yield되는 것이 코루틴 객체로 바뀌는데 아래 단언이
+            # 개수만 보기 때문이다(적대 리뷰 실증: 250건이 코루틴이어도 통과).
+            detail_calls.append((ccba_kdcd, ccba_asno, ccba_ctcd))
+            return _Detail(ccba_asno)
 
     class _Client:
         def __init__(self, **_kwargs: Any) -> None:
             self.search = _Search()
+            self.closed = False
+            clients.append(self)
 
-        def close(self) -> None:
-            return None
+        async def aclose(self) -> None:
+            self.closed = True
 
     _install(monkeypatch, "krheritage", HeritageClient=_Client)
     settings = KorTravelMapSettings(
@@ -350,79 +388,132 @@ def test_krheritage_items_counts_every_detail_call_not_just_the_list_pages(
     )
 
     with counting_upstream_requests():
-        records = list(fetch_krheritage_items(settings))
+        records = [record async for record in fetch_krheritage_items(settings)]
         observed = observed_upstream_requests()
 
     assert len(records) == total_items
+    # **무엇이 yield됐는지**를 본다. 개수만 보면 `await`가 빠져 코루틴 객체가
+    # 흘러나가도 통과한다.
+    assert all(isinstance(record, _Detail) for record in records), (
+        "detail이 아닌 것이 yield됐다 — `await`가 빠지면 코루틴 객체가 그대로 나간다"
+    )
+    assert len(detail_calls) == total_items
+    assert detail_calls[0] == ("11", "0000", "11"), (
+        f"detail 인자 순서가 {detail_calls[0]}다 — 실물은 "
+        "`details(ccba_kdcd, ccba_asno, ccba_ctcd)` 위치 인자다"
+    )
     assert observed == 3 + total_items, (
         f"목록 3페이지 + detail {total_items}건 = {3 + total_items}건인데 "
         f"{observed}건을 셌다. 목록만 세면 3이 나온다 — 실제의 1%다."
     )
+    assert [client.closed for client in clients] == [True], (
+        "fetcher가 client를 닫지 않았다 — `finally`의 정리 메서드 이름이 실물"
+        "(`HeritageClient.aclose`)과 어긋나면 세션이 샌다"
+    )
 
 
-def test_datagokr_file_data_counts_one_request_per_page(
+async def test_datagokr_file_data_counts_one_request_per_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``iter_all``은 provider 안에서 페이지를 돌아 셀 수 없었다. ``iter_pages``는 센다."""
+    """``iter_all``은 provider 안에서 페이지를 돌아 셀 수 없었다. ``iter_pages``는 센다.
+
+    실물 ``file_data.iter_pages``는 dataset을 위치인자로 받는 async generator이고
+    (``datagokr/services/file_data.py:158``) 정리는 ``aclose``
+    (``datagokr/client.py:179``)다.
+    """
 
     pages = [[object(), object()], [object(), object()], [object()]]
+    clients: list[_Client] = []
 
     class _FileData:
-        def iter_pages(self, dataset: str, **_kwargs: Any) -> Iterator[Any]:
-            del dataset
+        def __init__(self) -> None:
+            self.datasets: list[str] = []
+
+        async def iter_pages(self, dataset: str, **_kwargs: Any) -> AsyncIterator[Any]:
+            self.datasets.append(dataset)
             for items in pages:
                 yield SimpleNamespace(items=list(items))
 
     class _Client:
         def __init__(self, **_kwargs: Any) -> None:
             self.file_data = _FileData()
+            self.closed = False
+            clients.append(self)
 
-        def close(self) -> None:
-            return None
+        async def aclose(self) -> None:
+            self.closed = True
 
     _install(monkeypatch, "datagokr", DataGoKrClient=_Client)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("k"))
 
     with counting_upstream_requests():
-        records = list(fetch_datagokr_file_data_records(settings, dataset_key="ds"))
+        records = [
+            record
+            async for record in fetch_datagokr_file_data_records(
+                settings, dataset_key="ds"
+            )
+        ]
         observed = observed_upstream_requests()
 
     assert len(records) == 5
     assert observed == len(pages), (
         f"페이지 {len(pages)}장인데 {observed}건을 셌다 — 페이지마다 HTTP 1건이다"
     )
+    assert len(clients) == 1
+    assert clients[0].file_data.datasets == ["ds"]
+    assert clients[0].closed is True, (
+        "fetcher가 client를 닫지 않았다 — 정리 메서드 이름이 실물"
+        "(`DataGoKrClient.aclose`)과 어긋났다"
+    )
 
 
-def test_krheritage_events_counts_every_month_including_the_empty_ones(
+async def test_krheritage_events_counts_every_month_including_the_empty_ones(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """빈 달도 요청 1건을 쓴다 — record 수로는 역산되지 않는다."""
+    """빈 달도 요청 1건을 쓴다 — record 수로는 역산되지 않는다.
+
+    ``event.by_month``는 실물에서 keyword-only async다
+    (``services/event.py:21``) — 대역도 같아야 계수가 아니라 **호출 모양**까지
+    결박된다.
+    """
+
+    clients: list[_Client] = []
 
     class _Event:
         def __init__(self) -> None:
             self.calls: list[tuple[int, int]] = []
 
-        def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
+        async def by_month(self, *, year: int, month: int) -> tuple[object, ...]:
             self.calls.append((year, month))
             return (object(),) if len(self.calls) == 1 else ()
 
     class _Client:
         def __init__(self, **_kwargs: Any) -> None:
             self.event = _Event()
+            self.closed = False
+            clients.append(self)
 
-        def close(self) -> None:
-            return None
+        async def aclose(self) -> None:
+            self.closed = True
 
     _install(monkeypatch, "krheritage", HeritageClient=_Client)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("k"))
 
     with counting_upstream_requests():
-        records = list(fetch_krheritage_events(settings))
+        records = [record async for record in fetch_krheritage_events(settings)]
         observed = observed_upstream_requests()
 
     assert len(records) == 1
     assert observed == 14, (
         f"record는 1건이지만 요청은 14건(달마다 1건)이다 — {observed}건을 셌다"
+    )
+    assert len(clients) == 1
+    assert len(clients[0].event.calls) == 14, (
+        "센 수와 실제로 부른 달 수가 갈라졌다 — 계수기가 호출과 무관해진 것이다"
+    )
+    assert clients[0].closed is True, (
+        "fetcher가 client를 닫지 않았다 — 정리 메서드 이름이 실물"
+        "(`HeritageClient.aclose`)과 어긋났다"
     )
 
 
@@ -450,13 +541,23 @@ def test_the_unbounded_opinet_budget_still_counts() -> None:
     assert observed == 4
 
 
-def test_opinet_price_details_counts_every_station_detail(
+async def test_opinet_price_details_counts_every_station_detail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """bbox 모드의 상세 조회는 uni_id마다 1건이다 — 규모가 큰 자리라 효과로 잰다.
 
     enumerate(`iter_stations_in_bbox`)는 provider가 격자 셀마다 부르므로 이 층에서
     셀 수 없다(`_PARTIALLY_COUNTED`). 셀 수 있는 절반은 정확한지 여기서 결박한다.
+
+    대역은 실물 표면을 **인자 이름까지** 흉내낸다 — ``iter_stations_in_bbox``는
+    keyword-only async generator 함수이고(``opinet/client.py:548``) 호출 자체는
+    await하지 않는다, ``get_station_detail``은 await 대상
+    (``opinet/client.py:513``), 정리는 ``aclose``(``opinet/client.py:321``)다.
+    ``**_kwargs``로 받아 버리면 fetcher가 인자 이름을 바꿔도 초록이라 그 구멍을
+    닫는다. **필수 인자만으로는 부족하다** — 기본값이 있는 인자(`radius_m`)를
+    `radius`로 바꾸는 변이가 catch-all 아래에서 초록이었고, 실물은 `TypeError`를
+    낸 뒤 조용히 기본 5000m로 떨어졌을 자리다(적대 리뷰 실증). 그래서 기록한
+    bbox 튜플을 값까지 단언한다.
     """
 
     stations = [SimpleNamespace(uni_id=f"S{index:03d}") for index in range(7)]
@@ -464,16 +565,31 @@ def test_opinet_price_details_counts_every_station_detail(
     class _Client:
         def __init__(self, **_kwargs: Any) -> None:
             self.details: list[str] = []
+            self.bboxes: list[tuple[float, float, float, float, int]] = []
+            self.closed = False
 
-        def iter_stations_in_bbox(self, *_args: Any, **_kwargs: Any) -> Iterator[Any]:
-            yield from stations
+        async def iter_stations_in_bbox(
+            self,
+            *,
+            min_lon: float,
+            min_lat: float,
+            max_lon: float,
+            max_lat: float,
+            radius_m: int = 5000,
+            prodcd: Any = None,
+            sort: Any = None,
+        ) -> AsyncIterator[Any]:
+            del prodcd, sort
+            self.bboxes.append((min_lon, min_lat, max_lon, max_lat, radius_m))
+            for station in stations:
+                yield station
 
-        def get_station_detail(self, uni_id: str) -> object:
+        async def get_station_detail(self, uni_id: str) -> object:
             self.details.append(uni_id)
             return SimpleNamespace(uni_id=uni_id)
 
-        def close(self) -> None:
-            return None
+        async def aclose(self) -> None:
+            self.closed = True
 
     client = _Client()
     _install(monkeypatch, "opinet", OpinetClient=lambda **kwargs: client)
@@ -484,11 +600,26 @@ def test_opinet_price_details_counts_every_station_detail(
     )
 
     with counting_upstream_requests():
-        records = list(fetch_opinet_station_price_details(settings))
+        records = [
+            record async for record in fetch_opinet_station_price_details(settings)
+        ]
         observed = observed_upstream_requests()
 
     assert len(records) == len(stations)
     assert observed == len(stations), (
         f"uni_id {len(stations)}개의 상세를 부르고 {observed}건을 셌다 — "
         "상세는 uni_id마다 정확히 1건이다"
+    )
+    assert client.details == [station.uni_id for station in stations], (
+        "센 수와 실제로 부른 uni_id가 갈라졌다 — 계수기가 호출과 무관해진 것이다"
+    )
+    # **값까지 본다.** 개수만 보면 `radius_m=`를 `radius=`로 바꾸는 변이가 통과하고
+    # (실물은 `TypeError`), settings의 bbox/반경이 실제로 도달하는지도 모른 채 지나간다.
+    assert client.bboxes == [(126.9, 37.5, 127.0, 37.6, settings.opinet_scope_radius_m)], (
+        f"enumerate에 도달한 인자가 {client.bboxes}다 — bbox 1개짜리 scope의 "
+        "좌표와 반경이 그대로 실려야 한다"
+    )
+    assert client.closed is True, (
+        "fetcher가 client를 닫지 않았다 — 정리 메서드 이름이 실물"
+        "(`OpinetClient.aclose`)과 어긋났다"
     )

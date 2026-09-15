@@ -1180,9 +1180,13 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
         def __init__(self) -> None:
             self.calls: list[tuple[int, int]] = []
 
-        def now(self, *, nx: int, ny: int) -> object:
+        # 실물 ``ForecastService.now``는 ``async def``다(``kma/client.py:411``).
+        async def now(self, *, nx: int, ny: int) -> object:
             self.calls.append((nx, ny))
             raise RuntimeError("bound KMA provider failure")
+
+    async def _aclose() -> None:
+        """실물 ``KmaClient``의 정리 메서드는 ``aclose``뿐이다(``kma/client.py:93``)."""
 
     forecast = _FailingForecast()
     monkeypatch.setattr(
@@ -1191,7 +1195,7 @@ async def test_bound_kma_failure_records_sync_failure_once_after_rollback(
         lambda _settings, _scope: RunnerResources(
             {
                 "kma_weather_client_factory": lambda: SimpleNamespace(
-                    forecast=forecast
+                    forecast=forecast, aclose=_aclose
                 )
             }
         ),

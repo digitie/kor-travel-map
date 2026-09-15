@@ -3,16 +3,6 @@
   "providers": {
     "python-airkorea-api": {
       "classes": {
-        "airkorea._http.AsyncHttpClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "clear_exchanges",
-            "exchanges",
-            "get_body",
-            "last_exchange"
-          ]
-        },
         "airkorea._http.AsyncSessionLike": {
           "external_bases": [
             "Protocol"
@@ -24,8 +14,9 @@
         "airkorea._http.HttpClient": {
           "external_bases": [],
           "members": [
+            "aclose",
+            "capture_exchanges",
             "clear_exchanges",
-            "close",
             "exchanges",
             "get_body",
             "last_exchange"
@@ -54,12 +45,12 @@
             "text"
           ]
         },
-        "airkorea._http.SessionLike": {
-          "external_bases": [
-            "Protocol"
-          ],
+        "airkorea._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
           "members": [
-            "get"
+            "acquire",
+            "capacity",
+            "max_rps"
           ]
         },
         "airkorea.catalog.ApiCatalogEntry": {
@@ -95,40 +86,6 @@
           ]
         },
         "airkorea.client.AirKoreaClient": {
-          "external_bases": [],
-          "members": [
-            "aio",
-            "aio_from_env",
-            "background_concentrations",
-            "cai_measurements",
-            "call",
-            "city_average_stats",
-            "close",
-            "dust_alarms",
-            "english_measurements",
-            "english_stations",
-            "forecast_notices",
-            "from_env",
-            "high_pm25_forecasts",
-            "iter_pages",
-            "latest_station_measurement",
-            "measurement_near",
-            "nearby_stations",
-            "ozone_advisories",
-            "sido_average_stats",
-            "sido_measurements",
-            "station_daily_stats",
-            "station_measurements",
-            "station_monthly_stats",
-            "stations",
-            "tm_coordinates",
-            "traffic_stats",
-            "unhealthy_stations",
-            "weekly_forecasts",
-            "yellow_dust_advisories"
-          ]
-        },
-        "airkorea.client.AsyncAirKoreaClient": {
           "external_bases": [],
           "members": [
             "aclose",
@@ -674,10 +631,18 @@
         }
       },
       "package": "airkorea",
-      "pinned_sha": "c4c8d122743522268df38f20128ec5d1a6e84455"
+      "pinned_sha": "fc5c009defe5519a0b211017deb92de6a943b101"
     },
     "python-datagokr-api": {
       "classes": {
+        "datagokr._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "datagokr.catalog.ApiCatalogEntry": {
           "external_bases": [],
           "members": [
@@ -719,7 +684,7 @@
         "datagokr.client.DataGoKrClient": {
           "external_bases": [],
           "members": [
-            "close",
+            "aclose",
             "debug_fetch",
             "save_to_local",
             "save_to_rustfs"
@@ -731,6 +696,7 @@
             "api_key",
             "base_url",
             "from_env",
+            "max_rps",
             "rustfs_access_key_id",
             "rustfs_bucket",
             "rustfs_endpoint_url",
@@ -1174,34 +1140,28 @@
             "list"
           ]
         },
-        "datagokr.transport.SyncHttpxTransport": {
+        "datagokr.transport.AsyncHttpxTransport": {
           "external_bases": [],
           "members": [
-            "close",
+            "aclose",
             "get"
           ]
         },
-        "datagokr.transport.SyncTransport": {
+        "datagokr.transport.AsyncTransport": {
           "external_bases": [
             "Protocol"
           ],
           "members": [
-            "close",
+            "aclose",
             "get"
           ]
         }
       },
       "package": "datagokr",
-      "pinned_sha": "fd099b20887188cece480dd83a86ede075f88ad4"
+      "pinned_sha": "99d8427510b027d7280fd8bc9532828c3c25f4f5"
     },
     "python-khoa-api": {
       "classes": {
-        "khoa._http.AsyncTokenBucket": {
-          "external_bases": [],
-          "members": [
-            "acquire"
-          ]
-        },
         "khoa._http.KhoaHttp": {
           "external_bases": [],
           "members": [
@@ -1226,6 +1186,14 @@
           ],
           "members": [
             "get"
+          ]
+        },
+        "khoa._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
           ]
         },
         "khoa.client.AsyncKhoaClient": {
@@ -1712,10 +1680,26 @@
         }
       },
       "package": "khoa",
-      "pinned_sha": "3314f683121ee5b3caee83e361c7ad5a1d5d5cd4"
+      "pinned_sha": "38a2b74aabc1c077ebd2e1aa5ad3b2a70ffc8dd5"
     },
     "python-kma-api": {
       "classes": {
+        "kma._http._KeyLogFilter": {
+          "external_bases": [
+            "Filter"
+          ],
+          "members": [
+            "filter"
+          ]
+        },
+        "kma._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "kma.apihub.ApiHubAttachment": {
           "external_bases": [],
           "members": [
@@ -1733,15 +1717,6 @@
           "external_bases": [],
           "members": [
             "aclose",
-            "adiscover_endpoints",
-            "adiscover_services",
-            "aio",
-            "aio_from_env",
-            "aiter_pages",
-            "aopen_api",
-            "arequest_path",
-            "arequest_query_parts",
-            "close",
             "debug_fetch_endpoint",
             "discover_endpoints",
             "discover_services",
@@ -1749,7 +1724,8 @@
             "iter_pages",
             "open_api",
             "request_path",
-            "request_query_parts"
+            "request_query_parts",
+            "session"
           ]
         },
         "kma.apihub.ApiHubEndpoint": {
@@ -1820,36 +1796,16 @@
             "rows"
           ]
         },
-        "kma.apihub.AsyncApiHubClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "discover_endpoints",
-            "discover_services",
-            "from_env",
-            "iter_pages",
-            "open_api",
-            "request_path",
-            "request_query_parts"
-          ]
-        },
         "kma.apihub_endpoints.ApiHubGeneratedClient": {
           "external_bases": [],
           "members": [
-            "acall_endpoint",
             "aclose",
-            "adiscover_endpoints",
-            "adiscover_services",
             "aftn_amm_service_get_metar",
             "aftn_amm_service_get_sigmet",
             "aftn_amm_service_get_taf",
-            "aimage_endpoint",
-            "aio",
-            "aio_from_env",
             "air_info_service_get_air_info",
             "air_metar_dec",
             "air_port_service_get_air_port",
-            "aiter_pages",
             "alw_aws_aws_obs_pnt",
             "alw_aws_aws_ww_pnt",
             "alw_sea_sea_obs_pnt",
@@ -1871,7 +1827,6 @@
             "amo_sigwx",
             "amo_wintem",
             "amos",
-            "aopen_api",
             "api_iwa_img_url_api_ret_back_map_url",
             "api_iwa_img_url_api_ret_back_map_url_2",
             "api_iwa_img_url_api_ret_composite1_img_url",
@@ -1886,9 +1841,6 @@
             "api_iwa_img_url_api_ret_obs_img_url",
             "api_iwa_img_url_api_ret_ocean_img_url",
             "api_iwa_img_url_api_ret_recreate_img_url",
-            "arequest_path",
-            "arequest_query_parts",
-            "atext_endpoint",
             "aws2_min",
             "aws2_min_ca2",
             "aws2_min_ca3",
@@ -1928,7 +1880,6 @@
             "call_endpoint",
             "ci_ela_data",
             "cld_ea_image",
-            "close",
             "cloud_satlit_info_service_get_gk2aapps_all",
             "cloud_satlit_info_service_get_gk2aapps_area",
             "cloud_satlit_info_service_get_gk2acla_all",
@@ -2186,6 +2137,7 @@
             "sea_mtly_info_service_get_wave_buoy_mm_sumry",
             "sea_mtly_info_service_get_wave_buoy_mm_sumry2",
             "sea_obs",
+            "session",
             "sfc_aws_day",
             "sfc_mtly_info_service_get_air_note",
             "sfc_mtly_info_service_get_daily_air_data",
@@ -2358,22 +2310,6 @@
             "service_key_url"
           ]
         },
-        "kma.client.AsyncForecastService": {
-          "external_bases": [],
-          "members": [
-            "now",
-            "short",
-            "version",
-            "vilage"
-          ]
-        },
-        "kma.client.AsyncKmaClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "from_env"
-          ]
-        },
         "kma.client.ForecastService": {
           "external_bases": [],
           "members": [
@@ -2387,13 +2323,6 @@
           "external_bases": [],
           "members": [
             "aclose",
-            "aforecast",
-            "aforecast_short",
-            "aio",
-            "aio_from_env",
-            "anow",
-            "aversion",
-            "close",
             "forecast_short",
             "from_env",
             "now",
@@ -2415,31 +2344,12 @@
             "metadata"
           ]
         },
-        "kma.datagokr.AsyncDataGoKrClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "dataset_items",
-            "from_env",
-            "items",
-            "iter_pages",
-            "request",
-            "request_with_metadata"
-          ]
-        },
         "kma.datagokr.DataGoKrClient": {
           "external_bases": [],
           "members": [
             "aclose",
-            "adataset_items",
-            "aio",
-            "aio_from_env",
             "air_diffusion_index",
-            "aitems",
-            "aiter_pages",
             "api_catalog",
-            "arequest",
-            "arequest_with_metadata",
             "asos_daily_weather",
             "asos_hourly_weather",
             "beach_forecast",
@@ -2449,7 +2359,6 @@
             "beach_water_temperature",
             "beach_wave_height",
             "city_tour_climate_index",
-            "close",
             "dataset",
             "dataset_items",
             "datasets",
@@ -2471,6 +2380,7 @@
             "request_with_metadata",
             "sea_forecast_message",
             "sensible_temperature_index",
+            "session",
             "tour_village_forecast",
             "tsunami_message",
             "tsunami_message_list",
@@ -2922,7 +2832,7 @@
         }
       },
       "package": "kma",
-      "pinned_sha": "1f8d8df137db2c57e0fea99b730bf4976c8fbfe0"
+      "pinned_sha": "acd1cfa3fab7a7bc091b3ccede0cc905f0874a25"
     },
     "python-knps-api": {
       "classes": {
@@ -2952,10 +2862,12 @@
             "text"
           ]
         },
-        "knps._ratelimit.AsyncRateLimiter": {
+        "knps._ratelimit.AsyncTokenBucket": {
           "external_bases": [],
           "members": [
-            "acquire"
+            "acquire",
+            "capacity",
+            "max_rps"
           ]
         },
         "knps.catalog.DatasetOperation": {
@@ -3285,30 +3197,14 @@
         }
       },
       "package": "knps",
-      "pinned_sha": "afc8da5db7be33549b5daa7b0a96e5ad179063d7"
+      "pinned_sha": "2676c745301ff4ce69ff9adc5e0fed7ef9db624d"
     },
     "python-krairport-api": {
       "classes": {
-        "krairport._http.AsyncHttpClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "get_json",
-            "get_xml"
-          ]
-        },
-        "krairport._http.AsyncSessionLike": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "get"
-          ]
-        },
         "krairport._http.HttpClient": {
           "external_bases": [],
           "members": [
-            "close",
+            "aclose",
             "get_json",
             "get_xml"
           ]
@@ -3331,6 +3227,14 @@
             "get"
           ]
         },
+        "krairport._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "krairport.catalog.ApiCatalogItem": {
           "external_bases": [],
           "members": [
@@ -3347,7 +3251,7 @@
             "to_dict"
           ]
         },
-        "krairport.client.AsyncKrairportClient": {
+        "krairport.client.KrairportClient": {
           "external_bases": [],
           "members": [
             "aclose",
@@ -3358,34 +3262,6 @@
             "arrival_congestion",
             "arrivals",
             "bus_routes",
-            "departures",
-            "flight_schedules",
-            "from_env",
-            "iiac_raw_items",
-            "iter_pages",
-            "kac_flight_status_detail_raw_items",
-            "kac_raw_items",
-            "nearest_airport",
-            "parking_fees",
-            "parking_status",
-            "passenger_forecast",
-            "service_destinations",
-            "taxi_status",
-            "world_weather"
-          ]
-        },
-        "krairport.client.KrairportClient": {
-          "external_bases": [],
-          "members": [
-            "aio",
-            "aircraft_assignments",
-            "airport_facilities",
-            "airport_metadata",
-            "airports",
-            "arrival_congestion",
-            "arrivals",
-            "bus_routes",
-            "close",
             "debug",
             "debug_aircraft_assignments",
             "debug_airport_facilities",
@@ -3896,31 +3772,13 @@
             "wind_speed"
           ]
         },
-        "krairport.providers.iiac.AsyncIiacClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "arrival_congestion",
-            "arrivals",
-            "bus_routes",
-            "departures",
-            "facilities",
-            "flight_schedules",
-            "parking_status",
-            "passenger_forecast",
-            "raw_items",
-            "service_destinations",
-            "taxi_status",
-            "world_weather"
-          ]
-        },
         "krairport.providers.iiac.IiacClient": {
           "external_bases": [],
           "members": [
+            "aclose",
             "arrival_congestion",
             "arrivals",
             "bus_routes",
-            "close",
             "departures",
             "facilities",
             "flight_schedules",
@@ -3930,33 +3788,16 @@
             "service_destinations",
             "taxi_status",
             "world_weather"
-          ]
-        },
-        "krairport.providers.kac.AsyncKacClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "aircraft_assignments",
-            "airport_buses",
-            "airport_facilities",
-            "arrivals",
-            "departures",
-            "flight_schedules",
-            "flight_status_detail_raw_items",
-            "jeju_taxi_wait",
-            "parking_fees",
-            "parking_status",
-            "raw_items"
           ]
         },
         "krairport.providers.kac.KacClient": {
           "external_bases": [],
           "members": [
+            "aclose",
             "aircraft_assignments",
             "airport_buses",
             "airport_facilities",
             "arrivals",
-            "close",
             "departures",
             "flight_schedules",
             "flight_status_detail_raw_items",
@@ -3968,7 +3809,7 @@
         }
       },
       "package": "krairport",
-      "pinned_sha": "cbe4d1380dc0388c078e8ae4622d3e580717064b"
+      "pinned_sha": "fe2143b1b064abfc4a3d4070bcfc9dcca6595c21"
     },
     "python-krex-api": {
       "classes": {
@@ -3976,9 +3817,7 @@
           "external_bases": [],
           "members": [
             "aclose",
-            "aget_ex",
-            "aget_go",
-            "close",
+            "capture_calls",
             "ex_api_key",
             "ex_base_url",
             "get_ex",
@@ -3987,6 +3826,9 @@
             "last_request",
             "last_response",
             "max_retries",
+            "max_rps",
+            "protect_error",
+            "rate_limiter",
             "retry_backoff",
             "session",
             "timeout"
@@ -4002,20 +3844,26 @@
             "total_count"
           ]
         },
+        "krex._http._KeyLogFilter": {
+          "external_bases": [
+            "Filter"
+          ],
+          "members": [
+            "filter"
+          ]
+        },
+        "krex._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "krex.client.AdminService": {
           "external_bases": [],
           "members": [
             "procurement_contracts"
-          ]
-        },
-        "krex.client.AsyncKrexClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "adebug_call",
-            "debug_call",
-            "ex_api_key",
-            "go_api_key"
           ]
         },
         "krex.client.FacilityService": {
@@ -4030,9 +3878,6 @@
           "external_bases": [],
           "members": [
             "aclose",
-            "adebug_call",
-            "aio",
-            "close",
             "debug_call",
             "from_env"
           ]
@@ -4079,10 +3924,6 @@
             "incident",
             "vds_raw"
           ]
-        },
-        "krex.client._AsyncServiceProxy": {
-          "external_bases": [],
-          "members": []
         },
         "krex.codes.CarType": {
           "external_bases": [
@@ -4622,7 +4463,7 @@
         }
       },
       "package": "krex",
-      "pinned_sha": "c6d8717ec2b712cc952bc566b351f07a7cd3824a"
+      "pinned_sha": "d153f3cdd87c9cfacceeb94310bbe6067a1bbfa8"
     },
     "python-krforest-api": {
       "classes": {
@@ -5188,10 +5029,18 @@
         }
       },
       "package": "krforest",
-      "pinned_sha": "7a67f5f71abedc435c060a5c127387d65a54c130"
+      "pinned_sha": "270ef7a9884bef1f995e2f8fb43c5fb1e9da7905"
     },
     "python-krheritage-api": {
       "classes": {
+        "krheritage._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
+          ]
+        },
         "krheritage.catalog.EndpointCatalogRow": {
           "external_bases": [],
           "members": [
@@ -5218,17 +5067,10 @@
             "service_key_url"
           ]
         },
-        "krheritage.client.AsyncHeritageClient": {
-          "external_bases": [],
-          "members": [
-            "aclose"
-          ]
-        },
         "krheritage.client.HeritageClient": {
           "external_bases": [],
           "members": [
-            "aio",
-            "close",
+            "aclose",
             "debug_fetch"
           ]
         },
@@ -5683,6 +5525,7 @@
         "krheritage.services.event.EventService": {
           "external_bases": [],
           "members": [
+            "api_key",
             "base_url",
             "by_month",
             "iter_months",
@@ -5697,6 +5540,7 @@
         "krheritage.services.gis.GisService": {
           "external_bases": [],
           "members": [
+            "api_key",
             "base_url",
             "spca",
             "transport"
@@ -5729,6 +5573,7 @@
         "krheritage.services.search.SearchService": {
           "external_bases": [],
           "members": [
+            "api_key",
             "base_url",
             "details",
             "iter_all_details",
@@ -5756,22 +5601,6 @@
             "get"
           ]
         },
-        "krheritage.transport.client.SyncHttpxTransport": {
-          "external_bases": [],
-          "members": [
-            "close",
-            "get"
-          ]
-        },
-        "krheritage.transport.client.SyncTransport": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "close",
-            "get"
-          ]
-        },
         "krheritage.transport.client.Transport": {
           "external_bases": [
             "Protocol"
@@ -5780,26 +5609,10 @@
             "aclose",
             "get"
           ]
-        },
-        "krheritage.transport.ratelimit.SyncTokenBucket": {
-          "external_bases": [],
-          "members": [
-            "acquire",
-            "capacity",
-            "max_rps"
-          ]
-        },
-        "krheritage.transport.ratelimit.TokenBucket": {
-          "external_bases": [],
-          "members": [
-            "acquire",
-            "capacity",
-            "max_rps"
-          ]
         }
       },
       "package": "krheritage",
-      "pinned_sha": "545a01606184cbdb610ce9d654b7bece712b22ff"
+      "pinned_sha": "be3a1a28a9bc5214b9349dcdc7ff7e1ad9b970ba"
     },
     "python-mois-api": {
       "classes": {
@@ -5808,14 +5621,6 @@
           "members": [
             "aclose",
             "get"
-          ]
-        },
-        "mois._http.AsyncTokenBucket": {
-          "external_bases": [],
-          "members": [
-            "acquire",
-            "capacity",
-            "max_rps"
           ]
         },
         "mois._http.AsyncTransport": {
@@ -5827,14 +5632,15 @@
             "get"
           ]
         },
-        "mois._http.SyncHttpxTransport": {
-          "external_bases": [],
+        "mois._http._KeyLogFilter": {
+          "external_bases": [
+            "Filter"
+          ],
           "members": [
-            "close",
-            "get"
+            "filter"
           ]
         },
-        "mois._http.SyncTokenBucket": {
+        "mois._ratelimit.AsyncTokenBucket": {
           "external_bases": [],
           "members": [
             "acquire",
@@ -5842,35 +5648,10 @@
             "max_rps"
           ]
         },
-        "mois._http.SyncTransport": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "close",
-            "get"
-          ]
-        },
-        "mois.client.AsyncMoisClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "debug_request",
-            "from_env",
-            "get",
-            "get_history_at",
-            "get_updated",
-            "iter_history_at",
-            "iter_records",
-            "iter_updated",
-            "request"
-          ]
-        },
         "mois.client.MoisClient": {
           "external_bases": [],
           "members": [
-            "aio",
-            "close",
+            "aclose",
             "debug_request",
             "from_env",
             "get",
@@ -6155,24 +5936,10 @@
           ],
           "members": []
         },
-        "mois.files.AsyncLocalDataFileClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "download",
-            "download_bytes",
-            "download_to_rustfs",
-            "iter",
-            "iter_file",
-            "load",
-            "load_file"
-          ]
-        },
         "mois.files.LocalDataFileClient": {
           "external_bases": [],
           "members": [
-            "aio",
-            "close",
+            "aclose",
             "download",
             "download_bytes",
             "download_to_rustfs",
@@ -6487,13 +6254,8 @@
         },
         "mois.rustfs.AsyncFileChunkIterator": {
           "external_bases": [],
-          "members": []
-        },
-        "mois.rustfs.AsyncRustfsClient": {
-          "external_bases": [],
           "members": [
-            "ensure_bucket",
-            "put_file"
+            "aclose"
           ]
         },
         "mois.rustfs.EffectiveRustfsConfig": {
@@ -6515,13 +6277,14 @@
         "mois.rustfs.RustfsClient": {
           "external_bases": [],
           "members": [
+            "aclose",
             "ensure_bucket",
             "put_file"
           ]
         }
       },
       "package": "mois",
-      "pinned_sha": "f44c2d0985e89d7f59302dd80debc2211fda9d4f"
+      "pinned_sha": "3cdee09eb753edbdaf91c28a955e2c6ddd72ec17"
     },
     "python-opinet-api": {
       "classes": {
@@ -6531,33 +6294,14 @@
             "BASE_URL",
             "aclose",
             "api_key",
+            "capture_calls",
             "get",
             "max_retries",
+            "max_rps",
+            "rate_limiter",
             "retry_backoff",
             "session",
             "timeout"
-          ]
-        },
-        "opinet._http.SyncHttpxTransport": {
-          "external_bases": [],
-          "members": [
-            "BASE_URL",
-            "api_key",
-            "close",
-            "get",
-            "max_retries",
-            "retry_backoff",
-            "session",
-            "timeout"
-          ]
-        },
-        "opinet._http.SyncTransport": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "close",
-            "get"
           ]
         },
         "opinet._http.Transport": {
@@ -6575,6 +6319,14 @@
           ],
           "members": [
             "filter"
+          ]
+        },
+        "opinet._ratelimit.AsyncTokenBucket": {
+          "external_bases": [],
+          "members": [
+            "acquire",
+            "capacity",
+            "max_rps"
           ]
         },
         "opinet.catalog.ApiCatalogItem": {
@@ -6607,25 +6359,10 @@
             "required"
           ]
         },
-        "opinet.client.AsyncOpinetClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "close",
-            "debug",
-            "get_area_codes",
-            "get_lowest_price_top20",
-            "get_national_average_price",
-            "get_station_detail",
-            "iter_stations_in_bbox",
-            "search_stations_around"
-          ]
-        },
         "opinet.client.OpinetClient": {
           "external_bases": [],
           "members": [
-            "aio",
-            "close",
+            "aclose",
             "debug",
             "debug_fetch",
             "get_area_codes",
@@ -6737,12 +6474,6 @@
             "get_national_average_price",
             "get_station_detail",
             "search_stations_around"
-          ]
-        },
-        "opinet.debug._RecordingTransport": {
-          "external_bases": [],
-          "members": [
-            "get"
           ]
         },
         "opinet.exceptions.OpinetAuthError": {
@@ -7049,7 +6780,7 @@
         }
       },
       "package": "opinet",
-      "pinned_sha": "356cb0eaad46e4d1896092b164ff4ba08ede25c0"
+      "pinned_sha": "dcfb41a1862bb9718a778fdc0fc2e3e807ed7d47"
     },
     "python-visitkorea-api": {
       "classes": {
@@ -7060,21 +6791,6 @@
             "env_names",
             "key",
             "label"
-          ]
-        },
-        "visitkorea._http.AsyncSessionLike": {
-          "external_bases": [
-            "Protocol"
-          ],
-          "members": [
-            "get"
-          ]
-        },
-        "visitkorea._http.AsyncTourApiHttp": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "get"
           ]
         },
         "visitkorea._http.ResponseLike": {
@@ -7098,30 +6814,25 @@
         "visitkorea._http.TourApiHttp": {
           "external_bases": [],
           "members": [
-            "close",
-            "get"
+            "aclose",
+            "get",
+            "session"
           ]
         },
-        "visitkorea._ratelimit.RateLimiter": {
+        "visitkorea._http._KeyLogFilter": {
           "external_bases": [
-            "Protocol"
+            "Filter"
           ],
           "members": [
-            "acquire"
+            "filter"
           ]
         },
-        "visitkorea._ratelimit.TokenBucketRateLimiter": {
+        "visitkorea._ratelimit.AsyncTokenBucket": {
           "external_bases": [],
           "members": [
-            "acquire"
-          ]
-        },
-        "visitkorea._service_views.AsyncTypedServiceView": {
-          "external_bases": [],
-          "members": [
-            "call",
-            "iter_pages",
-            "operations"
+            "acquire",
+            "capacity",
+            "max_rps"
           ]
         },
         "visitkorea._service_views.TypedServiceView": {
@@ -7132,7 +6843,7 @@
             "operations"
           ]
         },
-        "visitkorea.client.AsyncKrTourApiClient": {
+        "visitkorea.client.KrTourApiClient": {
           "external_bases": [],
           "members": [
             "aclose",
@@ -7141,31 +6852,6 @@
             "area_codes",
             "category_codes",
             "classification_system_codes",
-            "detail_common",
-            "detail_images",
-            "detail_info",
-            "detail_intro",
-            "detail_pet_tour",
-            "from_env",
-            "iter_pages",
-            "legal_dong_codes",
-            "location_based_list",
-            "raw_endpoint",
-            "search_festival",
-            "search_keyword",
-            "search_stay"
-          ]
-        },
-        "visitkorea.client.KrTourApiClient": {
-          "external_bases": [],
-          "members": [
-            "aio",
-            "area_based_list",
-            "area_based_sync_list",
-            "area_codes",
-            "category_codes",
-            "classification_system_codes",
-            "close",
             "detail_common",
             "detail_images",
             "detail_info",
@@ -7378,44 +7064,10 @@
             "metadata"
           ]
         },
-        "visitkorea.hub.AsyncRelatedTourServiceClient": {
-          "external_bases": [],
-          "members": [
-            "area_based_list",
-            "call",
-            "iter_area_based_list",
-            "iter_pages",
-            "iter_search_keyword",
-            "operations",
-            "search_keyword",
-            "typed"
-          ]
-        },
-        "visitkorea.hub.AsyncTourApiHubClient": {
-          "external_bases": [],
-          "members": [
-            "aclose",
-            "call",
-            "catalog",
-            "from_env",
-            "iter_pages",
-            "related_tour",
-            "service",
-            "services"
-          ]
-        },
-        "visitkorea.hub.AsyncTourApiServiceClient": {
-          "external_bases": [],
-          "members": [
-            "call",
-            "iter_pages",
-            "operations",
-            "typed"
-          ]
-        },
         "visitkorea.hub.RelatedTourServiceClient": {
           "external_bases": [],
           "members": [
+            "aclose",
             "area_based_list",
             "call",
             "iter_area_based_list",
@@ -7429,21 +7081,22 @@
         "visitkorea.hub.TourApiHubClient": {
           "external_bases": [],
           "members": [
-            "aio",
+            "aclose",
             "call",
             "catalog",
-            "close",
             "debug_fetch",
             "from_env",
             "iter_pages",
             "related_tour",
             "service",
-            "services"
+            "services",
+            "session"
           ]
         },
         "visitkorea.hub.TourApiServiceClient": {
           "external_bases": [],
           "members": [
+            "aclose",
             "call",
             "iter_pages",
             "operations",
@@ -7860,7 +7513,7 @@
         }
       },
       "package": "visitkorea",
-      "pinned_sha": "8aa96975a182fb1ec8810e6895ccde0472c60a3b"
+      "pinned_sha": "151ef90f07842863b986048a98a66a75d8e9d63d"
     }
   },
   "providers_without_protocols": {

@@ -14,11 +14,11 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import math
 import pathlib
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
@@ -39,10 +39,9 @@ from . import upstream_retry
 from .provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
-    iter_paginated_items,
 )
 from .upstream_requests import note_upstream_request
-from .upstream_retry import retry_upstream
+from .upstream_retry import retry_upstream_awaitable
 
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
@@ -206,7 +205,7 @@ async def fetch_kor_travel_concierge_youtube_features(
 _DATAGOKR_STANDARD_PAGE_SIZE: Final[int] = 1000
 
 
-def _iter_datagokr_standard(service: Any, *, label: str) -> Iterator[Any]:
+def _iter_datagokr_standard(service: Any, *, label: str) -> AsyncIterator[Any]:
     """datagokr 표준데이터 service를 **Map의 페이지네이터로** 소진한다.
 
     provider의 ``iter_all()``을 쓰지 않는다. 그 구현은 짧은 페이지를 무조건
@@ -222,13 +221,13 @@ def _iter_datagokr_standard(service: Any, *, label: str) -> Iterator[Any]:
     휴리스틱**이다. datagokr도 그 규칙 아래로 옮긴다.
     """
 
-    def _page(page_no: int) -> ProviderPage:
-        page = service.list(
+    async def _page(page_no: int) -> ProviderPage:
+        page = await service.list(
             page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE
         )
         return ProviderPage(items=list(page.items), total_count=page.total_count)
 
-    return iter_paginated_items(
+    return aiter_paginated_items(
         _page,
         num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
         label=label,
@@ -237,16 +236,16 @@ def _iter_datagokr_standard(service: Any, *, label: str) -> Iterator[Any]:
 
 
 
-def fetch_datagokr_cultural_festivals(
+async def fetch_datagokr_cultural_festivals(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """전국문화축제표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
     ``DataGoKrClient(api_key=...)``를 열고 ``client.festival``
     record(``PublicCulturalFestival``, ``CulturalFestivalItem`` Protocol 충족)를
     lazily yield한다. generator가 살아 있는 동안 client는 열려 있고,
-    소비 종료(또는 close)시 ``finally``에서 ``client.close()``로 닫는다.
+    소비 종료(또는 aclose)시 ``finally``에서 ``await client.aclose()``로 닫는다.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -264,11 +263,12 @@ def fetch_datagokr_cultural_festivals(
 
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from _iter_datagokr_standard(
+        async for record in _iter_datagokr_standard(
             client.festival, label="datagokr festival.list"
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
 #: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
@@ -290,17 +290,17 @@ def _krheritage_event_months(anchor: date) -> Iterator[tuple[int, int]]:
         yield zero_based // 12, (zero_based % 12) + 1
 
 
-def fetch_krheritage_events(
+async def fetch_krheritage_events(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """국가유산 행사(event) record를 krheritage public client로 stream한다.
 
     ``settings.data_go_kr_service_key``에서 service key를 읽어
     ``HeritageClient(api_key=...)``를 열고 rolling window의 달마다
     ``client.event.by_month(...)``를 불러 record(``HeritageEvent``,
     ``KrHeritageEvent`` Protocol 충족)를 lazily yield 한다.
-    generator가 살아 있는 동안 client는 열려 있고, 소비 종료(또는 close)시
-    ``finally``에서 ``client.close()``로 닫는다.
+    async generator가 살아 있는 동안 client는 열려 있고, 소비 종료(또는 aclose)시
+    ``finally``에서 ``await client.aclose()``로 닫는다.
 
     **``iter_months()`` 대신 Map이 직접 돈다.** 둘은 같은 창을 돌고 호출 수도
     같지만(:data:`_KRHERITAGE_EVENT_MONTHS_BACK`/``_AHEAD``가 provider 기본값과
@@ -328,14 +328,15 @@ def fetch_krheritage_events(
         for year, month in _krheritage_event_months(date.today()):
             # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인).
             note_upstream_request()
-            yield from client.event.by_month(year=year, month=month)
+            for record in await client.event.by_month(year=year, month=month):
+                yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def fetch_krheritage_items(
+async def fetch_krheritage_items(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """국가유산 본체(place/area) record를 krheritage public client로 stream한다 (#380).
 
     ``HeritageClient()``를 **keyless**로 열고 — 국가유산 search/detail은
@@ -348,7 +349,8 @@ def fetch_krheritage_items(
 
     detail이 **1건당 1 HTTP 콜**이므로 run당 상한
     ``krheritage_max_items_per_run``(기본 5000)에서 끊는다
-    (``mcst_max_items_per_dataset`` 가드 패턴). sync generator, finally close.
+    (``mcst_max_items_per_dataset`` 가드 패턴). async generator, ``finally``에서
+    ``await client.aclose()``.
     """
     # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
     # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
@@ -363,21 +365,19 @@ def fetch_krheritage_items(
     seen = 0
     try:
         for kind_code in kind_codes:
-            for record in _iter_krheritage_details(client, kind_code=kind_code):
+            async for record in _iter_krheritage_details(client, kind_code=kind_code):
                 yield record
                 seen += 1
                 if seen >= max_items:
                     return
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
+        await client.aclose()
 
 #: 국가유산 목록 요청 페이지 크기. provider ``search.list``의 기본값과 같다.
 _KRHERITAGE_PAGE_SIZE: Final[int] = 100
 
 
-def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
+async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncIterator[Any]:
     """국가유산 종목코드 하나의 상세(detail) record를 전부 yield한다.
 
     provider의 ``search.iter_all_details()``를 쓰지 않는다. 그 안의
@@ -396,13 +396,13 @@ def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
     ``details()``를 부를 수 있고, 결측 row는 조용히 버리지 않고 경고를 남긴다.
     """
 
-    def _page(page_no: int) -> ProviderPage:
-        result = client.search.list(
+    async def _page(page_no: int) -> ProviderPage:
+        result = await client.search.list(
             page_size=_KRHERITAGE_PAGE_SIZE, page=page_no, ccba_kdcd=kind_code
         )
         return ProviderPage(items=list(result.items), total_count=result.total)
 
-    for summary in iter_paginated_items(
+    async for summary in aiter_paginated_items(
         _page,
         num_of_rows=_KRHERITAGE_PAGE_SIZE,
         label=f"krheritage search.list kdcd={kind_code}",
@@ -424,28 +424,29 @@ def _iter_krheritage_details(client: Any, *, kind_code: str) -> Iterator[Any]:
         # 페이지만 세면 실린 수가 실제의 ~1%가 된다 - run 하나가 목록 ~45건,
         # detail ~4,000건이다.
         note_upstream_request()
-        yield client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
+        yield await client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
 
 
 
-def fetch_krex_rest_areas(
+async def fetch_krex_rest_areas(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """고속도로 휴게소(rest_area) record를 krex public client로 stream한다.
 
     ``settings.krex_go_api_key``(source ``KEX_GO_API_KEY``)에서 data.go.kr
     service key를 읽어 ``KrexClient(go_api_key=...)``를 열고
-    ``client.restarea.list_all(num_of_rows=1000, page_no=N)``을 페이지네이션하며
+    ``await client.restarea.list_all(num_of_rows=1000, page_no=N)``을 페이지네이션하며
     record(``krex.models.RestArea``, ``KrexRestAreaItem`` Protocol 충족)를 lazily
     yield한다. ``list_all``은 ``tn_pubr_public_rest_area_api`` (data.go.kr) 호출
     이므로 EX key가 아닌 **go key**를 쓴다.
 
     이 dataset에는 안정 식별자가 없어 krtour 변환부가 name+route_name+direction
     으로 자연키를 파생한다(ADR-044). 페이지네이션 종료 판정은
-    :func:`~kortravelmap.dagster.provider_pagination.iter_paginated_items`가
+    :func:`~kortravelmap.dagster.provider_pagination.aiter_paginated_items`가
     소유한다 — ``total_count``가 권위이고 짧은 페이지는 그것이 없을 때만 쓰는
     대체 휴리스틱이다(provider가 파싱 실패 행을 걸러도 조용히 절단되지 않게).
-    generator 소비 종료(또는 close)시 ``finally``에서 ``client.close()``.
+    krex client는 native async라 async generator다. 소비 종료(또는 aclose)시
+    ``finally``에서 ``await client.aclose()``.
     """
     secret = settings.krex_go_api_key
     if secret is None:
@@ -464,19 +465,20 @@ def fetch_krex_rest_areas(
     client = krex.KrexClient(go_api_key=api_key)
     num_of_rows = 1000
     try:
-        def _page(page_no: int) -> ProviderPage:
-            page = client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
+        async def _page(page_no: int) -> ProviderPage:
+            page = await client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
             return ProviderPage(items=list(page.items), total_count=page.total_count)
 
-        yield from iter_paginated_items(
+        async for record in aiter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="krex restarea.list_all",
             end_of_pages=_krex_end_of_pages_types(krex),
             warn=_LOGGER.warning,
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
 def fetch_mois_license_records(
@@ -531,13 +533,13 @@ def fetch_mois_license_records(
         engine.dispose()
 
 
-def fetch_krex_traffic_notices(
+async def fetch_krex_traffic_notices(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """고속도로 교통 공지(돌발 incident) record를 krex public client로 stream한다.
 
     ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
-    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``client.traffic.incident(
+    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``await client.traffic.incident(
     num_of_rows=1000, page_no=N)``을 페이지네이션한다. 완전 snapshot 검증 뒤
     record(``krex.models.Incident``, ``KrexTrafficNoticeItem`` Protocol 충족)를 yield한다.
     rest_areas와 달리 EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
@@ -554,8 +556,9 @@ def fetch_krex_traffic_notices(
     ``_KREX_NOTICE_STABILITY_RETRIES`` 상한 내에서 매 pass를 직전과 비교하는 sliding
     재시도로 확인하고, 안정된 최신 pass만 yield한다. 상한 내 안정 pair를 못 잡으면
     ``KrexTrafficNoticeSnapshotUnstable``(typed)로 실패한다(#700 — 일시 불일치가
-    run을 반복 중단시켜 notice 신선도를 정체시키던 문제). generator 소비 종료(또는
-    close)시 ``finally``에서 ``client.close()``.
+    run을 반복 중단시켜 notice 신선도를 정체시키던 문제). krex client는 native
+    async라 async generator다. 소비 종료(또는 aclose)시 ``finally``에서
+    ``await client.aclose()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -578,7 +581,7 @@ def fetch_krex_traffic_notices(
         # 재시도해 일시 불일치를 self-heal한다. 상한 내 안정 pair를 못 잡으면 typed 실패로
         # 명확히 신호한다(무한 재시도/불완전 snapshot yield 금지 — 완전 pagination 2회-일치
         # 안전성은 유지). 안정 pair 확정 전에는 한 건도 yield하지 않아 destructive reconcile과 격리.
-        previous_records, previous_identities = _fetch_krex_traffic_notice_snapshot(
+        previous_records, previous_identities = await _fetch_krex_traffic_notice_snapshot(
             client,
             num_of_rows=num_of_rows,
         )
@@ -587,8 +590,8 @@ def fetch_krex_traffic_notices(
             # 첫 재시도(attempt 0)는 initial snapshot과 full pagination 자연 지연으로
             # 이미 떨어져 있으므로 delay 없이 비교하고, 이후 재시도만 사건 정착 시간을 준다.
             if attempt > 0 and _KREX_NOTICE_RETRY_DELAY_SECONDS > 0:
-                time.sleep(_KREX_NOTICE_RETRY_DELAY_SECONDS)
-            current_records, current_identities = _fetch_krex_traffic_notice_snapshot(
+                await asyncio.sleep(_KREX_NOTICE_RETRY_DELAY_SECONDS)
+            current_records, current_identities = await _fetch_krex_traffic_notice_snapshot(
                 client,
                 num_of_rows=num_of_rows,
             )
@@ -608,12 +611,13 @@ def fetch_krex_traffic_notices(
                 f"{_KREX_NOTICE_STABILITY_RETRIES}회 재시도 내 안정되지 않았다: "
                 f"last_count={len(previous_records)}"
             )
-        yield from stable_records
+        for record in stable_records:
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def _fetch_krex_traffic_notice_snapshot(
+async def _fetch_krex_traffic_notice_snapshot(
     client: Any,
     *,
     num_of_rows: int,
@@ -627,7 +631,7 @@ def _fetch_krex_traffic_notice_snapshot(
         # 우리가 소유한 페이지 루프. 안정성 비교로 이 snapshot을 **최소 2회**
         # 완주하므로 실제 요청은 페이지 수의 배수다 — 그 배수는 호출자가 돈다.
         note_upstream_request()
-        page = client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
+        page = await client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
         items = list(page.items)
         total_count = _validate_krex_traffic_notice_page(
             page,
@@ -776,10 +780,14 @@ def _strict_non_negative_int(value: Any) -> int | None:
     return None
 
 
-def fetch_krex_rest_area_fuel_prices(
+async def fetch_krex_rest_area_fuel_prices(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
-    """고속도로 휴게소 유가(restarea.fuel_prices) record를 stream한다."""
+) -> AsyncIterator[Any]:
+    """고속도로 휴게소 유가(restarea.fuel_prices) record를 stream한다.
+
+    krex client는 native async라 async generator다. 소비 종료(또는 aclose)시
+    ``finally``에서 ``await client.aclose()``.
+    """
     secret = settings.krex_ex_api_key
     if secret is None:
         raise ProviderCredentialMissing(
@@ -792,19 +800,20 @@ def fetch_krex_rest_area_fuel_prices(
     client = krex.KrexClient(ex_api_key=api_key)
     num_of_rows = 1000
     try:
-        def _page(page_no: int) -> ProviderPage:
-            page = client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
+        async def _page(page_no: int) -> ProviderPage:
+            page = await client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
             return ProviderPage(items=list(page.items), total_count=page.total_count)
 
-        yield from iter_paginated_items(
+        async for record in aiter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="krex restarea.fuel_prices",
             end_of_pages=_krex_end_of_pages_types(krex),
             warn=_LOGGER.warning,
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
 #: ``latest_weather``가 과거로 되짚는 시간 수. 호출 한 번의 **요청 수 상한**이
@@ -827,13 +836,13 @@ def fetch_krex_rest_area_fuel_prices(
 _KREX_WEATHER_LOOKBACK_HOURS: Final = 6
 
 
-def fetch_krex_rest_area_weather(
+async def fetch_krex_rest_area_weather(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """고속도로 휴게소 관측 기상(rest_area_weather) record를 krex public client로 stream한다.
 
     ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
-    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``client.restarea.latest_weather()``
+    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``await client.restarea.latest_weather()``
     (``/openapi/restinfo/restWeatherList``, EX endpoint)의 record(``krex.models.
     RestAreaWeather``, ``KrexRestAreaWeatherRecord`` Protocol 충족 — unit_code +
     좌표 + 기온/습도/풍속/강수 wide row)를 lazily yield한다. traffic_notices와 동일
@@ -844,10 +853,12 @@ def fetch_krex_rest_area_weather(
     페이지네이션은 없지만 **호출 한 번이 요청 한 번이 아니다**: 라이브러리는
     ``range(lookback_hours + 1)``로 한 시각씩 과거로 내려가며 비어 있지 않은 첫
     페이지를 찾는다(``krex/client.py``). 기본값 48이면 **최악 49 요청**이고, 그
-    사실이 이 저장소 어디에도 적혀 있지 않았다(T-VN-QUOTA-ARITHMETIC).
+    사실이 이 저장소 어디에도 적혀 있지 않았다(T-VN-QUOTA-ARITHMETIC). native async로
+    바뀐 뒤에도 그 fan-out은 ``latest_weather`` 안의 순차 ``await``이라 요청 수는
+    그대로다(``krex/client.py``의 ``range(lookback_hours + 1)``).
 
     그래서 여기서 명시한다 — :data:`_KREX_WEATHER_LOOKBACK_HOURS`. generator 소비
-    종료(또는 close)시 ``finally``에서 ``client.close()``.
+    종료(또는 aclose)시 ``finally``에서 ``await client.aclose()``.
     """
     secret = settings.krex_ex_api_key
     if secret is None:
@@ -866,7 +877,7 @@ def fetch_krex_rest_area_weather(
         # 이 호출 하나가 lib 안에서 최대 `lookback+1`건을 보낸다. 이 층은 그
         # 안을 볼 수 없으므로 **1건으로 센다** — 그래서 이름이 `_min`이다.
         note_upstream_request()
-        page = client.restarea.latest_weather(
+        page = await client.restarea.latest_weather(
             lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
         )
         if not page.items:
@@ -876,9 +887,10 @@ def fetch_krex_rest_area_weather(
                 "빈 결과를 성공으로 적재하면 cursor가 전진하고 실패 카운터가 "
                 "0으로 돌아가 아무도 눈치채지 못한다."
             )
-        yield from page.items
+        for item in page.items:
+            yield item
     finally:
-        client.close()
+        await client.aclose()
 
 
 async def fetch_knps_point_records(
@@ -1171,15 +1183,15 @@ async def fetch_krforest_landslide_forecast_issues(
         await client.aclose()
 
 
-def fetch_standard_museums(
+async def fetch_standard_museums(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
     ``client.museum_art`` record(``PublicMuseumArtGallery``, krtour
     ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
-    sync이므로 sync generator다. 소비 종료/close 시 ``finally``에서 ``close()``.
+    async이므로 async generator다. 소비 종료/aclose 시 ``finally``에서 ``aclose()``.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1193,22 +1205,23 @@ def fetch_standard_museums(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from _iter_datagokr_standard(
+        async for record in _iter_datagokr_standard(
             client.museum_art, label="datagokr museum_art.list"
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def fetch_standard_tourist_attractions(
+async def fetch_standard_tourist_attractions(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """전국관광지표준데이터 record를 datagokr public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
     ``client.tourist_attraction`` record(``PublicTouristAttraction``,
     krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
-    sync client → sync generator, ``finally``에서 ``close()``.
+    async client → async generator, ``finally``에서 ``aclose()``.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1222,16 +1235,17 @@ def fetch_standard_tourist_attractions(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from _iter_datagokr_standard(
+        async for record in _iter_datagokr_standard(
             client.tourist_attraction, label="datagokr tourist_attraction.list"
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def fetch_standard_special_streets(
+async def fetch_standard_special_streets(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """전국지역특화거리표준데이터 record를 datagokr public client로 stream한다."""
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1245,18 +1259,19 @@ def fetch_standard_special_streets(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from _iter_datagokr_standard(
+        async for record in _iter_datagokr_standard(
             client.special_street, label="datagokr special_street.list"
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def fetch_datagokr_file_data_records(
+async def fetch_datagokr_file_data_records(
     settings: KorTravelMapSettings,
     *,
     dataset_key: str,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다."""
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1278,22 +1293,27 @@ def fetch_datagokr_file_data_records(
         # 여기만 요청 **뒤**에 센다(generator가 페이지를 받아 yield한 뒤 본문이
         # 돈다). 마지막 페이지가 실패하면 그 1건이 빠지지만, 분자는 하한이므로
         # 그 방향은 안전하다 - 반대로 앞에서 세면 나가지 않은 요청을 셀 수 있다.
-        for page in client.file_data.iter_pages(dataset_key):
+        async for page in client.file_data.iter_pages(dataset_key):
             note_upstream_request()
-            yield from page.items
+            for item in page.items:
+                yield item
     finally:
-        client.close()
+        await client.aclose()
 
 
-def fetch_krairport_airports(
+async def fetch_krairport_airports(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """공항 메타데이터 record를 krairport public client로 stream한다.
 
     ``client.airports(active=True)``는 **번들 정적 데이터**라 credential 없이도 동작
     한다(keyless). key가 있으면 network-backed 메서드용으로 주입하되, 본 fetcher는
     bundled metadata만 yield한다(``AirportMetadata``, krtour ``AirportMetadataItem``
-    Protocol 충족). sync generator, finally close.
+    Protocol 충족).
+
+    **async generator지만 ``airports()`` 자체는 여전히 동기 함수다** — krairport가
+    async 전용이 되며 바뀐 것은 세션 종료뿐이라(``close()`` 제거, ``aclose()``만
+    남음) await 경계는 ``finally`` 하나다.
     """
     krairport = cast(Any, importlib.import_module("krairport"))
     secret = settings.data_go_kr_service_key
@@ -1304,18 +1324,17 @@ def fetch_krairport_airports(
         kwargs["iiac_service_key"] = key
     client = krairport.KrairportClient(**kwargs)
     try:
-        yield from client.airports(active=True)
+        for airport in client.airports(active=True):
+            yield airport
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
+        await client.aclose()
 
 
-def fetch_mcst_culture_records(
+async def fetch_mcst_culture_records(
     settings: KorTravelMapSettings,
     *,
     slugs: Iterable[str] | None = None,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """MCST 파일데이터 등록 dataset CSV row를 mcst public client로 stream한다 (#395).
 
     파일 다운로드는 **keyless** — ``FileDataClient()``가 카탈로그의 다운로드
@@ -1324,8 +1343,8 @@ def fetch_mcst_culture_records(
     등록된 slug 또는 worker가 명시한 slug를 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
     ``(slug, row)`` 튜플로 lazily yield한다 — asset이 slug별로 분리
     ``_load``한다(dataset_key 단위 sync state 유지). dataset당
-    ``settings.mcst_max_items_per_dataset`` 상한(이상 응답 방어). sync
-    generator, finally close.
+    ``settings.mcst_max_items_per_dataset`` 상한(이상 응답 방어). async
+    generator, ``finally``에서 ``await client.aclose()``.
     """
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
     from kortravelmap.providers.mcst import MCST_FILE_DATASETS
@@ -1342,12 +1361,14 @@ def fetch_mcst_culture_records(
             # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
             # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
             note_upstream_request()
-            for seen, row in enumerate(client.iter_csv(slug), start=1):
+            seen = 0
+            async for row in client.iter_csv(slug):
+                seen += 1
                 yield (slug, row)
                 if seen >= max_items:
                     break
     finally:
-        client.close()
+        await client.aclose()
 
 
 KMA_WEATHER_ALERT_STN_ID: Final[str] = "108"
@@ -1368,9 +1389,9 @@ def _provider_retry_budget(
     )
 
 
-def fetch_kma_weather_alerts(
+async def fetch_kma_weather_alerts(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """KMA 기상특보 목록(getWthrWrnList) record를 kma public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``DataGoKrClient(service_key=...)``를
@@ -1380,7 +1401,7 @@ def fetch_kma_weather_alerts(
     (``kma.models.WeatherWarningItem`` — ``stn_id``/``tm_fc``/``seq``/``title``
     + ``raw``)를 lazily yield한다. 특보 종류/등급/구역의 구조화 파싱은
     ``kma_weather.weather_warning_rows``(asset 측 adapter)가 맡는다.
-    sync generator, finally close.
+    async generator, ``finally``에서 ``await client.aclose()``.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -1403,10 +1424,12 @@ def fetch_kma_weather_alerts(
     budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
     try:
-        def _page(page_no: int) -> ProviderPage:
+        async def _page(page_no: int) -> ProviderPage:
             # H45: 페이지 단건 호출만 유한 재시도 (kma ``retryable`` 규약 분류 —
-            # quota/rate_limit 제외는 default predicate 소관).
-            items = retry_upstream(
+            # quota/rate_limit 제외는 default predicate 소관). client가 코루틴을
+            # 돌려주므로 재시도는 **await하는 쪽**(`retry_upstream_awaitable`)이어야
+            # 한다 — 동기 판에 넘기면 코루틴 객체만 반환돼 예외를 못 본다.
+            items = await upstream_retry.retry_upstream_awaitable(
                 partial(
                     _weather_warning_page,
                     client,
@@ -1424,17 +1447,18 @@ def fetch_kma_weather_alerts(
             # 선언 건수를 알 수 없다 — 짧은 페이지 휴리스틱만 쓸 수 있다.
             return ProviderPage(items=items, total_count=None)
 
-        yield from iter_paginated_items(
+        async for record in aiter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="kma weather_warning_list",
             warn=_LOGGER.warning,
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
-def _weather_warning_page(
+async def _weather_warning_page(
     client: Any,
     *,
     from_tm_fc: date,
@@ -1445,7 +1469,7 @@ def _weather_warning_page(
     """특보 목록 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
 
     return list(
-        client.weather_warning_list(
+        await client.weather_warning_list(
             stn_id=KMA_WEATHER_ALERT_STN_ID,
             from_tm_fc=from_tm_fc,
             to_tm_fc=to_tm_fc,
@@ -1657,15 +1681,22 @@ def _airkorea_retryable_types() -> tuple[type[BaseException], ...]:
     return resolved
 
 
-def _airkorea_close(client: Any) -> None:
-    close = getattr(client, "close", None)
-    if callable(close):
-        close()
+async def _airkorea_close(client: Any) -> None:
+    """airkorea client를 닫는다 — `airkorea`가 async-only가 되어 `aclose()`다.
+
+    `getattr` 가드를 남긴다. 이 저장소가 `close`/`aclose` 어느 쪽도 없는 fake로
+    이 경계를 여러 번 테스트하고, 닫기 실패로 fetch 결과를 잃는 것은 이 자리에서
+    원하는 동작이 아니다.
+    """
+
+    aclose = getattr(client, "aclose", None)
+    if callable(aclose):
+        await aclose()
 
 
-def fetch_airkorea_stations(
+async def fetch_airkorea_stations(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """대기질 측정소 메타데이터를 airkorea public client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``AirKoreaClient(service_key=...)``를 열고
@@ -1679,10 +1710,10 @@ def fetch_airkorea_stations(
     num_of_rows = 100
     try:
 
-        def _page(page_no: int) -> ProviderPage:
+        async def _page(page_no: int) -> ProviderPage:
             # H45(리뷰 1 M-3): air_quality asset이 stations를 먼저 읽으므로 이
             # 경계도 동일 재시도 — 절반만 고치면 증상이 그대로 남는다.
-            items = retry_upstream(
+            items = await retry_upstream_awaitable(
                 partial(_airkorea_stations_page, client, page_no, num_of_rows),
                 label=f"airkorea stations p{page_no}",
                 base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
@@ -1697,26 +1728,27 @@ def fetch_airkorea_stations(
             # 페이지 휴리스틱과 아래 종료 예외만이 판정 근거다.
             return ProviderPage(items=items, total_count=None)
 
-        yield from iter_paginated_items(
+        async for item in aiter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="airkorea stations",
             end_of_pages=_airkorea_end_of_pages_types(),
             warn=_LOGGER.warning,
-        )
+        ):
+            yield item
     finally:
-        _airkorea_close(client)
+        await _airkorea_close(client)
 
 
-def _airkorea_stations_page(client: Any, page_no: int, num_of_rows: int) -> list[Any]:
+async def _airkorea_stations_page(client: Any, page_no: int, num_of_rows: int) -> list[Any]:
     """측정소 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
 
-    return list(client.stations(page_no=page_no, num_of_rows=num_of_rows))
+    return list(await client.stations(page_no=page_no, num_of_rows=num_of_rows))
 
 
-def fetch_airkorea_air_quality(
+async def fetch_airkorea_air_quality(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """대기질 실시간 측정값을 airkorea public client로 stream한다.
 
     시도별(``_AIRKOREA_SIDO_NAMES``) ``sido_measurements(sido, page_no=N)``을
@@ -1733,10 +1765,10 @@ def fetch_airkorea_air_quality(
     try:
         for sido in _AIRKOREA_SIDO_NAMES:
 
-            def _page(page_no: int, sido: str = sido) -> ProviderPage:
+            async def _page(page_no: int, sido: str = sido) -> ProviderPage:
                 # H45: 시도×페이지 단건 호출만 유한 재시도 — 17개 시도 순회가
                 # upstream 간헐 504(실측 SERVICETIMEOUT_ERROR)에 전멸하지 않게.
-                items = retry_upstream(
+                items = await retry_upstream_awaitable(
                     partial(
                         _airkorea_sido_page,
                         client,
@@ -1752,22 +1784,25 @@ def fetch_airkorea_air_quality(
                 )
                 return ProviderPage(items=items, total_count=None)
 
-            yield from iter_paginated_items(
+            async for item in aiter_paginated_items(
                 _page,
                 num_of_rows=num_of_rows,
                 label=f"airkorea sido_measurements {sido}",
                 end_of_pages=_airkorea_end_of_pages_types(),
                 warn=_LOGGER.warning,
-            )
+            ):
+                yield item
     finally:
-        _airkorea_close(client)
+        await _airkorea_close(client)
 
 
-def _airkorea_sido_page(client: Any, sido: str, *, page_no: int, num_of_rows: int) -> list[Any]:
+async def _airkorea_sido_page(
+    client: Any, sido: str, *, page_no: int, num_of_rows: int
+) -> list[Any]:
     """시도별 측정값 1페이지를 **재시도 경계 안에서** 소진한다 — lazy iterator를
     경계 밖으로 내보내면 소비 중 network 예외가 재시도를 우회한다(H45)."""
 
-    return list(client.sido_measurements(sido, page_no=page_no, num_of_rows=num_of_rows))
+    return list(await client.sido_measurements(sido, page_no=page_no, num_of_rows=num_of_rows))
 
 
 def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:
@@ -1788,12 +1823,12 @@ def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:
     return (min_lon, min_lat, max_lon, max_lat)
 
 
-def _enumerate_opinet_stations(
+async def _enumerate_opinet_stations(
     client: Any,
     bboxes: Iterable[tuple[float, float, float, float]],
     *,
     radius_m: int,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """여러 bbox를 ``iter_stations_in_bbox``로 enumerate하며 ``uni_id`` dedup.
 
     bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
@@ -1814,6 +1849,9 @@ def _enumerate_opinet_stations(
     seen: set[str] = set()
     for min_lon, min_lat, max_lon, max_lat in bboxes:
         try:
+            # ``iter_stations_in_bbox``는 async generator **함수**라 호출 자체는
+            # await하지 않는다 — 격자 계산도 파라미터 검증도 첫 ``__anext__``에서야
+            # 돈다. 아래 ``except``가 호출과 순회를 함께 감싸야 하는 이유다.
             stations = client.iter_stations_in_bbox(
                 min_lon=min_lon,
                 min_lat=min_lat,
@@ -1821,7 +1859,7 @@ def _enumerate_opinet_stations(
                 max_lat=max_lat,
                 radius_m=radius_m,
             )
-            for station in stations:
+            async for station in stations:
                 uni_id = getattr(station, "uni_id", None)
                 if isinstance(uni_id, str):
                     if uni_id in seen:
@@ -1997,8 +2035,12 @@ def _opinet_poi_target_bboxes(
 
     ``external_system``으로 필터하지 않는다(provider 아님). active target = deleted_at
     없음 + update_enabled + refresh_policy<>'disabled'(scope_repo와 동일), opinet을
-    targeted_policy='disabled'로 옵트아웃한 target 제외. fetcher는 sync라
-    ``settings.pg_dsn``(async driver)을 sync psycopg DSN으로 바꿔 짧게 조회한다.
+    targeted_policy='disabled'로 옵트아웃한 target 제외.
+
+    **이 조회만 sync로 남는다.** ``settings.pg_dsn``(async driver)을 sync psycopg
+    DSN으로 바꿔 쿼리 1회를 돌린다. 호출자(fetcher)가 async가 된 뒤로 이 한 번은
+    이벤트 루프를 막는다 — enumeration이 시작되기 전 1회뿐이라 그대로 두었다.
+    async engine으로 옮기면 fetcher 수명 내내 engine을 들고 있어야 한다.
     """
     dsn = require_pg_dsn(settings).get_secret_value().replace("+asyncpg", "+psycopg")
     engine = create_engine(dsn)
@@ -2087,7 +2129,7 @@ class _OpinetCallBudget:
         return True
 
 
-def _opinet_sigungu_area_codes(
+async def _opinet_sigungu_area_codes(
     client: Any, *, budget: _OpinetCallBudget | None = None
 ) -> list[str]:
     """OpiNet 시군구 area code 목록.
@@ -2101,7 +2143,7 @@ def _opinet_sigungu_area_codes(
     groups: list[list[str]] = []
     if budget is not None and not budget.spend():
         return []
-    for sido in client.get_area_codes():
+    for sido in await client.get_area_codes():
         sido_code = str(getattr(sido, "code", "")).strip()
         if not sido_code:
             continue
@@ -2111,7 +2153,7 @@ def _opinet_sigungu_area_codes(
             break
         sigungu_codes = [
             str(getattr(sigungu, "code", "")).strip()
-            for sigungu in client.get_area_codes(sido_code)
+            for sigungu in await client.get_area_codes(sido_code)
         ]
         sigungu_codes = [code for code in sigungu_codes if code]
         groups.append(sigungu_codes or [sido_code])
@@ -2189,14 +2231,14 @@ def _opinet_rotation_offset(*, window_areas: int, on_date: date | None = None) -
     return on_date.toordinal() * max(window_areas, 1)
 
 
-def _opinet_low_top_area_stations(
+async def _opinet_low_top_area_stations(
     client: Any,
     *,
     dedupe_by_product: bool,
     max_low_top_calls: int = _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS,
     run_call_budget: int = _OPINET_RUN_CALL_BUDGET,
     rotation_offset: int | None = None,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """시군구별 저가 주유소를 stream한다.
 
     전국 bbox exhaustive enumeration은 OpiNet 일일 한도를 초과하므로, 지도
@@ -2250,7 +2292,7 @@ def _opinet_low_top_area_stations(
             yielded += 1
             yield station
 
-    areas = _opinet_sigungu_area_codes(client, budget=budget)
+    areas = await _opinet_sigungu_area_codes(client, budget=budget)
     if len(areas) > window_areas:
         # 윈도보다 목록이 크면 run 날짜 기반 offset으로 회전 — 매일 윈도 크기만큼
         # 전진해 전국을 ≈ ceil(len/윈도)일에 1주기로 순회한다. round-robin 인접
@@ -2268,14 +2310,15 @@ def _opinet_low_top_area_stations(
                 break
             low_top_calls += 1
             try:
-                stations = client.get_lowest_price_top20(
+                stations = await client.get_lowest_price_top20(
                     product_code,
                     cnt=_OPINET_LOW_TOP_COUNT,
                     area=area,
                 )
             except no_data_error:
                 continue
-            yield from _emit(stations)
+            for station in _emit(stations):
+                yield station
         if budget.exhausted or low_top_calls >= max_low_top_calls:
             break
 
@@ -2291,7 +2334,7 @@ def _opinet_low_top_area_stations(
             if not budget.spend():
                 break
             try:
-                stations = client.search_stations_around(
+                stations = await client.search_stations_around(
                     lon=center_lon,
                     lat=center_lat,
                     radius_m=5000,
@@ -2299,14 +2342,15 @@ def _opinet_low_top_area_stations(
                 )
             except no_data_error:
                 continue
-            yield from _emit(stations)
+            for station in _emit(stations):
+                yield station
 
 
-def fetch_opinet_stations(
+async def fetch_opinet_stations(
     settings: KorTravelMapSettings,
     *,
     rotation_offset: int | None = None,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """OpiNet 주유소 record를 scope(bbox/POI-타깃)별로 stream한다(T-RV-04b).
 
     OpiNet은 전국 dump endpoint가 없어 ``iter_stations_in_bbox``(aroundAll 격자
@@ -2319,7 +2363,8 @@ def fetch_opinet_stations(
       bbox로 변환해 enumerate(여러 target 간 ``uni_id`` dedup).
     - ``low_top_area`` — 시군구별 저가 목록으로 전국 분포를 bounded 호출량으로 적재.
 
-    sync generator, finally close.
+    opinet client는 async라 async generator다. 소비 종료/조기 close 시
+    ``finally``에서 ``aclose()``.
     """
     secret = settings.opinet_api_key
     if secret is None:
@@ -2335,34 +2380,37 @@ def fetch_opinet_stations(
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         if settings.opinet_scope_mode == "low_top_area":
-            yield from _opinet_low_top_area_stations(
+            async for station in _opinet_low_top_area_stations(
                 client,
                 dedupe_by_product=False,
                 max_low_top_calls=settings.opinet_low_top_max_calls,
                 run_call_budget=settings.opinet_run_call_budget,
                 rotation_offset=rotation_offset,
-            )
+            ):
+                yield station
             return
         assert bboxes is not None
-        yield from _enumerate_opinet_stations(
+        async for station in _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
-        )
+        ):
+            yield station
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
+        await client.aclose()
 
 
-def fetch_opinet_station_price_details(
+async def fetch_opinet_station_price_details(
     settings: KorTravelMapSettings,
     *,
     rotation_offset: int | None = None,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """현재 OpiNet scope의 가격 record를 stream한다.
 
     ``bbox``/``poi_cache_target``은 기존처럼 ``detailById``를 반환하고,
     ``low_top_area``는 ``lowTop10`` Station row를 반환한다. asset 변환기가 row shape에
     따라 detail/단일 제품 가격 경로를 고른다.
+
+    opinet client는 async라 async generator다. 소비 종료/조기 close 시
+    ``finally``에서 ``aclose()``.
     """
     secret = settings.opinet_api_key
     if secret is None:
@@ -2378,35 +2426,34 @@ def fetch_opinet_station_price_details(
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         if settings.opinet_scope_mode == "low_top_area":
-            yield from _opinet_low_top_area_stations(
+            async for station in _opinet_low_top_area_stations(
                 client,
                 dedupe_by_product=True,
                 max_low_top_calls=settings.opinet_low_top_max_calls,
                 run_call_budget=settings.opinet_run_call_budget,
                 rotation_offset=rotation_offset,
-            )
+            ):
+                yield station
             return
         assert bboxes is not None
-        for station in _enumerate_opinet_stations(
+        async for station in _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         ):
             # enumerate 자체는 세지 못하지만(`_enumerate_opinet_stations` 참고)
             # 상세 조회는 uni_id마다 정확히 1건이다 - 셀 수 있는 쪽은 센다.
             note_upstream_request()
-            yield client.get_station_detail(station.uni_id)
+            yield await client.get_station_detail(station.uni_id)
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
+        await client.aclose()
 
 
-def fetch_standard_parking_lots(
+async def fetch_standard_parking_lots(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """전국주차장표준데이터 record를 datagokr public client로 stream한다.
 
     ``client.parking`` record(``PublicParkingLot``, krtour
-    ``PublicParkingLotItem`` Protocol 충족)를 yield. sync generator, finally close.
+    ``PublicParkingLotItem`` Protocol 충족)를 yield. async generator, finally aclose.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -2420,11 +2467,12 @@ def fetch_standard_parking_lots(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
-        yield from _iter_datagokr_standard(
+        async for record in _iter_datagokr_standard(
             client.parking, label="datagokr parking.list"
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()
 
 
 #: visitkorea 축제 순회의 **절대** 페이지 상한. 100행 × 50 = 5,000건이면 국내 연간
@@ -2434,16 +2482,17 @@ def fetch_standard_parking_lots(
 _VISITKOREA_FESTIVAL_MAX_PAGES: Final = 50
 
 
-def fetch_visitkorea_festival_events(
+async def fetch_visitkorea_festival_events(
     settings: KorTravelMapSettings,
-) -> Iterator[Any]:
+) -> AsyncIterator[Any]:
     """VisitKorea TourAPI 축제(searchFestival) record를 visitkorea client로 stream한다.
 
     ``settings.data_go_kr_service_key``로 ``KrTourApiClient(service_key=...)``를 열고
     ``search_festival(event_start_date=<올해 1월 1일 KST>)``을 ``iter_pages``로
     페이지네이션하며 ``TourItem``(krtour ``VisitKoreaFestivalItem`` Protocol 충족)을
     yield한다. enrichment 2차 source라 1차(datagokr) 적재 후 매칭에 쓰인다(ADR-042).
-    visitkorea client는 sync이므로 sync generator. 소비 종료/close 시 ``close()``.
+    visitkorea client는 async이므로 async generator. 소비 종료/조기 close 시
+    ``finally``에서 ``aclose()``.
     """
     secret = settings.data_go_kr_service_key
     if secret is None:
@@ -2460,8 +2509,8 @@ def fetch_visitkorea_festival_events(
     start = date(datetime.now(kst).year, 1, 1)
     num_of_rows = 100
 
-    def _page(page_no: int) -> ProviderPage:
-        page = client.search_festival(start, page_no=page_no, num_of_rows=num_of_rows)
+    async def _page(page_no: int) -> ProviderPage:
+        page = await client.search_festival(start, page_no=page_no, num_of_rows=num_of_rows)
         # `fingerprint`가 라이브러리에서 잃은 '전진하지 않는 페이지네이션' 검사를
         # 되살린다(`ProviderPaginationStalled`).
         return ProviderPage(
@@ -2485,12 +2534,13 @@ def fetch_visitkorea_festival_events(
         # **한계**: fingerprint가 응답 body 전체라, upstream이 매 페이지 달라지는
         # 필드(요청 시각 등)를 실어 주면 같은 items를 받아도 가드가 발화하지
         # 않는다. TourAPI 응답에는 그런 필드가 없지만 계약은 아니다.
-        yield from iter_paginated_items(
+        async for record in aiter_paginated_items(
             _page,
             num_of_rows=num_of_rows,
             label="visitkorea search_festival",
             absolute_max_pages=_VISITKOREA_FESTIVAL_MAX_PAGES,
             warn=_LOGGER.warning,
-        )
+        ):
+            yield record
     finally:
-        client.close()
+        await client.aclose()

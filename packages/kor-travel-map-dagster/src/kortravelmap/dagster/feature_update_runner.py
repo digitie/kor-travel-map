@@ -11,7 +11,8 @@ import asyncio
 import copy
 import importlib
 import inspect
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
@@ -19,6 +20,7 @@ from typing import Any, Final, cast
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
+from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
     ProviderDatasetRefreshResult,
@@ -154,6 +156,57 @@ class RunnerResources:
     teardowns: tuple[Teardown, ...] = ()
 
 
+KREX_RATE_GATE: Final[str] = "krex"
+"""krex rate gate 이름. :data:`PROVIDER_RATE_GATES`의 키다."""
+
+
+PROVIDER_RATE_GATES: Final[Mapping[str, float]] = MappingProxyType(
+    {
+        # krex는 **초당 5건**이 상한이다(일일 한도는 미공개 — `docs/etl/upstream-quota.md`
+        # §2). 라이브러리(`python-krex-api`)가 그것을 지키지만 그 보증은 **프로세스당**
+        # 이다. 큐 센서는 틱당 RunRequest를 10개 내고 `docker/dagster.yaml`이 4를 동시에
+        # 돌리므로, gate가 없으면 버킷이 넷 = **20 TPS**가 된다(2026-09-14 적대 리뷰).
+        #
+        # 값은 **교대 간격**(초)이다. 직렬화만으로는 부족하다 — A가 마지막 요청을
+        # 보내고 즉시 lock을 놓으면 B의 첫 요청이 그 뒤에 바로 붙어 1초 창에 6건이
+        # 된다. lock을 놓기 전에 이만큼 쉬면 **전 프로세스를 통틀어** 요청 간격이
+        # 1/5초 아래로 내려가지 않는다.
+        KREX_RATE_GATE: 1.0 / 5.0,
+    }
+)
+"""프로세스를 가로지르는 provider 단위 rate gate — 이름 → 교대 간격(초).
+
+**왜 advisory lock인가.** 같은 Postgres를 보는 모든 worker run이 이 키를 두고
+경합하므로, Dagster 설정이나 프로세스 수와 무관하게 성립한다.
+`ops.provider_refresh_policies.max_concurrent`에 자리가 있지만 그 값은 plan
+payload에 실리기만 하고 **집행되지 않는다**(`T-VN-KREX-TPS-FANOUT`).
+"""
+
+
+@asynccontextmanager
+async def provider_rate_gate(session: AsyncSession, gate: str | None) -> AsyncIterator[None]:
+    """``gate``가 선언된 operation을 **프로세스를 가로질러** 한 번에 하나만 통과시킨다.
+
+    lock을 놓기 **전에** 교대 간격만큼 쉰다 — 그러지 않으면 다음 프로세스의 첫
+    요청이 이전 프로세스의 마지막 요청 바로 뒤에 붙어 상한을 넘는다. 상한은
+    "평균"이 아니라 "어느 1초 창에서도"이므로 이음매도 창 안이다.
+
+    blocking lock을 쓴다. 건너뛰면 요청이 사라지거나 재큐잉 비용이 드는데, gate를
+    쓰는 fetcher는 수 초짜리라 기다리는 편이 싸다. run이 죽으면 session이 끊기고
+    session-level advisory lock은 Postgres가 자동으로 놓는다.
+    """
+
+    cooldown = PROVIDER_RATE_GATES.get(gate) if gate is not None else None
+    if cooldown is None:
+        yield
+        return
+    async with advisory_lock(session, f"provider-rate-gate:{gate}"):
+        try:
+            yield
+        finally:
+            await asyncio.sleep(cooldown)
+
+
 @dataclass(frozen=True, slots=True)
 class FeatureUpdateRunnerSpec:
     """DB operation key → 기존 Dagster asset runner 연결 사양.
@@ -167,6 +220,14 @@ class FeatureUpdateRunnerSpec:
     run: AssetRun
     resources: ResourceFactory
     asset_key: str
+    rate_gate: str | None = None
+    """이 operation이 지나야 하는 **프로세스 간** rate gate 이름(없으면 ``None``).
+
+    provider 라이브러리의 상한은 **프로세스당**이다. 큐는 worker run을 여러 개
+    동시에 띄우고 run마다 프로세스가 다르므로, 라이브러리 상한만으로는 합계가
+    프로세스 수만큼 곱해진다. 여기 이름을 적은 operation은
+    :data:`PROVIDER_RATE_GATES`의 advisory lock을 지나 **한 번에 하나만** 실행된다.
+    """
 
 
 class _DirectAssetContext:
@@ -313,40 +374,29 @@ class FeatureUpdateAssetRunner:
         # `note_upstream_request()`가 조용히 no-op이 된다(2026-09-13 3차 적대 리뷰
         # blocker). `asyncio.to_thread`는 문맥을 복사하지만 계수기는 가변 리스트라
         # 안쪽 증가가 바깥에 보인다(이 저장소가 실측해 둔 성질).
-        with counting_upstream_requests():
-            try:
+        # **상한은 프로세스당이다.** provider 라이브러리가 초당 건수를 지켜도, 큐가
+        # worker run을 동시에 띄우면 프로세스 수만큼 곱해진다(2026-09-14 적대 리뷰가
+        # 짚은 자리 — krex는 최대 4배였다). gate를 선언한 operation은 여기서
+        # **프로세스를 가로질러** 직렬화된다. 계수기보다 **바깥**이어야 한다 —
+        # 기다리는 동안은 요청을 보내지 않으므로 소비량에 섞이면 안 된다.
+        async with provider_rate_gate(session, spec.rate_gate):
+            with counting_upstream_requests():
                 try:
-                    settings = self._settings_factory()
-                    # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를
-                    # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
-                    # 보낸다(#617 리뷰).
-                    extra = await asyncio.to_thread(spec.resources, settings, scope)
-                    resources = {
-                        **self._common_resources,
-                        **dict(extra.values),
-                        "feature_update_membership": ProviderDatasetOperationMembership(
-                            provider_dataset_id=scope.provider_dataset_id,
-                            sync_scope=scope.sync_scope,
-                            operation_key=scope.operation_key,
-                        ),
-                    }
-                except ProviderDatasetRefreshFailure:
-                    raise
-                except Exception as exc:
-                    raise ProviderDatasetRefreshFailure(
-                        provider_dataset_id=scope.provider_dataset_id,
-                        sync_scope=failure_sync_scope,
-                        operation_key=scope.operation_key,
-                        message="provider refresh resource initialization failed",
-                    ) from exc
-                client = resources.get("kor_travel_map_client")
-                if isinstance(client, AsyncKorTravelMapClient):
                     try:
-                        resources["feature_update_evidence_client"] = client
-                        resources["kor_travel_map_client"] = await _bind_client_to_session(
-                            client,
-                            session,
-                        )
+                        settings = self._settings_factory()
+                        # spec.resources()는 MOIS의 경우 freshness-gated Phase A sync(I/O)를
+                        # 포함할 수 있으므로 이벤트 루프를 막지 않게 스레드로
+                        # 보낸다(#617 리뷰).
+                        extra = await asyncio.to_thread(spec.resources, settings, scope)
+                        resources = {
+                            **self._common_resources,
+                            **dict(extra.values),
+                            "feature_update_membership": ProviderDatasetOperationMembership(
+                                provider_dataset_id=scope.provider_dataset_id,
+                                sync_scope=scope.sync_scope,
+                                operation_key=scope.operation_key,
+                            ),
+                        }
                     except ProviderDatasetRefreshFailure:
                         raise
                     except Exception as exc:
@@ -354,87 +404,104 @@ class FeatureUpdateAssetRunner:
                             provider_dataset_id=scope.provider_dataset_id,
                             sync_scope=failure_sync_scope,
                             operation_key=scope.operation_key,
-                            message="provider refresh transaction binding failed",
+                            message="provider refresh resource initialization failed",
                         ) from exc
-                try:
-                    context = _DirectAssetContext(
-                        resources=resources,
-                        log=self._log,
-                        asset_key=spec.asset_key,
-                    )
-                    # 이 경계가 asset wrapper를 **우회한다** - 여기서는 `spec.run`이
-                    # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
-                    # 아니다. 계수기는 이 메서드 맨 위에서 열린다(resources 구성의
-                    # I/O까지 덮기 위해서다).
-                    result = await spec.run(context)
-                    refresh_result = _as_refresh_result(
-                        result,
-                        scope=scope,
-                        output_metadata=context.output_metadata,
-                        upstream_requests=observed_upstream_requests(),
-                    )
-                    reported = True
-                    return refresh_result
-                except ProviderDatasetRefreshFailure:
-                    raise
-                except Exception as exc:
-                    raise ProviderDatasetRefreshFailure(
-                        provider_dataset_id=scope.provider_dataset_id,
-                        sync_scope=failure_sync_scope,
-                        operation_key=scope.operation_key,
-                        message="provider refresh asset execution failed",
-                    ) from exc
-            except ProviderDatasetRefreshFailure as exc:
-                refresh_failure = exc
-                raise
-            finally:
-                # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은 metadata를
-                # 싣지 못하므로 로그가 유일한 기록이다 - asset 경로의
-                # `_log_spend_on_failure`와 같은 이유다.
-                #
-                # `except`가 아니라 `finally`에 두는 이유: resource 구성 실패도
-                # (4차), teardown 실패와 취소(`BaseException`)도(5차) 같은 기록을
-                # 남겨야 한다. MOIS Phase A는 resource 구성 **안에서** 전국 파일을
-                # 받으므로 run 전용 except에 두면 계수기를 앞으로 옮긴 이유였던
-                # 그 요청이 그대로 사라진다. 성공해서 값을 실어 보낸 run은
-                # `reported` 플래그로 제외한다(이중 기록 방지).
-                def _log_spend() -> None:
-                    observed = observed_upstream_requests()
-                    log_warning = getattr(self._log, "warning", None)
-                    if observed is not None and callable(log_warning):
-                        log_warning(
-                            "끝까지 실어 보내지 못했지만 upstream 요청은 나갔다 (%s=%d)",
-                            UPSTREAM_REQUESTS_METADATA_KEY,
-                            observed,
-                        )
-
-                if not reported:
-                    _log_spend()
-                if extra is not None:
-                    try:
-                        await _close_teardowns(extra.teardowns)
-                    except Exception as exc:
-                        if reported:
-                            # 결과를 만들어 두고도 teardown 실패로 그것을 잃는다 -
-                            # 실린 줄 알았던 소비량이 사라지는 유일한 경로다(5차).
-                            _log_spend()
-                        if refresh_failure is None:
+                    client = resources.get("kor_travel_map_client")
+                    if isinstance(client, AsyncKorTravelMapClient):
+                        try:
+                            resources["feature_update_evidence_client"] = client
+                            resources["kor_travel_map_client"] = await _bind_client_to_session(
+                                client,
+                                session,
+                            )
+                        except ProviderDatasetRefreshFailure:
+                            raise
+                        except Exception as exc:
                             raise ProviderDatasetRefreshFailure(
                                 provider_dataset_id=scope.provider_dataset_id,
                                 sync_scope=failure_sync_scope,
                                 operation_key=scope.operation_key,
-                                message=(
-                                    "provider refresh resource teardown failed after the "
-                                    "bound transaction"
-                                ),
+                                message="provider refresh transaction binding failed",
                             ) from exc
-                        log_error = getattr(self._log, "error", None)
-                        if callable(log_error):
-                            log_error(
-                                "provider refresh typed failure 뒤 resource teardown도 "
-                                "실패했지만 원래 failure identity를 보존한다.",
-                                exc_info=True,
+                    try:
+                        context = _DirectAssetContext(
+                            resources=resources,
+                            log=self._log,
+                            asset_key=spec.asset_key,
+                        )
+                        # 이 경계가 asset wrapper를 **우회한다** - 여기서는 `spec.run`이
+                        # 원본 run 함수이지 `run_tracked_feature_asset`으로 감싼 것이
+                        # 아니다. 계수기는 이 메서드 맨 위에서 열린다(resources 구성의
+                        # I/O까지 덮기 위해서다).
+                        result = await spec.run(context)
+                        refresh_result = _as_refresh_result(
+                            result,
+                            scope=scope,
+                            output_metadata=context.output_metadata,
+                            upstream_requests=observed_upstream_requests(),
+                        )
+                        reported = True
+                        return refresh_result
+                    except ProviderDatasetRefreshFailure:
+                        raise
+                    except Exception as exc:
+                        raise ProviderDatasetRefreshFailure(
+                            provider_dataset_id=scope.provider_dataset_id,
+                            sync_scope=failure_sync_scope,
+                            operation_key=scope.operation_key,
+                            message="provider refresh asset execution failed",
+                        ) from exc
+                except ProviderDatasetRefreshFailure as exc:
+                    refresh_failure = exc
+                    raise
+                finally:
+                    # 실패하면 결과 metadata가 없다. 이 경로의 실패 타입은 metadata를
+                    # 싣지 못하므로 로그가 유일한 기록이다 - asset 경로의
+                    # `_log_spend_on_failure`와 같은 이유다.
+                    #
+                    # `except`가 아니라 `finally`에 두는 이유: resource 구성 실패도
+                    # (4차), teardown 실패와 취소(`BaseException`)도(5차) 같은 기록을
+                    # 남겨야 한다. MOIS Phase A는 resource 구성 **안에서** 전국 파일을
+                    # 받으므로 run 전용 except에 두면 계수기를 앞으로 옮긴 이유였던
+                    # 그 요청이 그대로 사라진다. 성공해서 값을 실어 보낸 run은
+                    # `reported` 플래그로 제외한다(이중 기록 방지).
+                    def _log_spend() -> None:
+                        observed = observed_upstream_requests()
+                        log_warning = getattr(self._log, "warning", None)
+                        if observed is not None and callable(log_warning):
+                            log_warning(
+                                "끝까지 실어 보내지 못했지만 upstream 요청은 나갔다 (%s=%d)",
+                                UPSTREAM_REQUESTS_METADATA_KEY,
+                                observed,
                             )
+
+                    if not reported:
+                        _log_spend()
+                    if extra is not None:
+                        try:
+                            await _close_teardowns(extra.teardowns)
+                        except Exception as exc:
+                            if reported:
+                                # 결과를 만들어 두고도 teardown 실패로 그것을 잃는다 -
+                                # 실린 줄 알았던 소비량이 사라지는 유일한 경로다(5차).
+                                _log_spend()
+                            if refresh_failure is None:
+                                raise ProviderDatasetRefreshFailure(
+                                    provider_dataset_id=scope.provider_dataset_id,
+                                    sync_scope=failure_sync_scope,
+                                    operation_key=scope.operation_key,
+                                    message=(
+                                        "provider refresh resource teardown failed after the "
+                                        "bound transaction"
+                                    ),
+                                ) from exc
+                            log_error = getattr(self._log, "error", None)
+                            if callable(log_error):
+                                log_error(
+                                    "provider refresh typed failure 뒤 resource teardown도 "
+                                    "실패했지만 원래 failure identity를 보존한다.",
+                                    exc_info=True,
+                                )
 
     def _spec_for_scope(self, scope: ProviderDatasetRefreshScope) -> FeatureUpdateRunnerSpec:
         try:
@@ -713,11 +780,18 @@ def _kma_service_key(settings: KorTravelMapSettings, *, resource_key: str, datas
 
 
 def _close_method(value: object) -> Teardown:
+    """client 정리 teardown을 만든다 — 반환된 awaitable은 호출자가 await한다.
+
+    **이름을 `close`에서 `aclose`로 바꾼 것이 요점이 아니다.** 종전에는 메서드가
+    없으면 조용히 `None`을 돌려줬고, provider가 async-only가 되면서
+    (2026-09-15 일괄 개편) `close`가 사라지자 **그 침묵이 그대로 "닫지 않음"이
+    됐다** — 같은 client의 schedule 경로는 고쳐졌는데 이 direct/admin 경로만
+    남아 있었다. 그래서 가드를 없애고 없으면 터지게 둔다. 닫기 실패는
+    `_close_teardowns`가 부르는 자리에서 보이는 편이 낫다.
+    """
+
     def _teardown() -> object:
-        close = getattr(value, "close", None)
-        if callable(close):
-            return close()
-        return None
+        return cast("Any", value).aclose()
 
     return _teardown
 
@@ -864,6 +938,7 @@ def _operation_specs(
     run: AssetRun,
     resources: ResourceFactory,
     asset_key: str,
+    rate_gate: str | None = None,
 ) -> tuple[FeatureUpdateRunnerSpec, ...]:
     """같은 code handler를 공유하는 DB operation binding을 명시적으로 만든다."""
     return tuple(
@@ -872,6 +947,7 @@ def _operation_specs(
             run=run,
             resources=resources,
             asset_key=asset_key,
+            rate_gate=rate_gate,
         )
         for operation_key in operation_keys
     )
@@ -903,24 +979,28 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_place_krex_rest_areas,
         resources=_records("krex_rest_areas", fetch_krex_rest_areas),
         asset_key="feature_place_krex_rest_areas",
+        rate_gate=KREX_RATE_GATE,
     ),
     *_operation_specs(
         "feature_price_krex_rest_areas_job",
         run=run_feature_price_krex_rest_areas,
         resources=_records("krex_rest_area_fuel_prices", fetch_krex_rest_area_fuel_prices),
         asset_key="feature_price_krex_rest_areas",
+        rate_gate=KREX_RATE_GATE,
     ),
     *_operation_specs(
         "feature_weather_krex_rest_areas_job",
         run=run_feature_weather_krex_rest_areas,
         resources=_records("krex_rest_area_weather", fetch_krex_rest_area_weather),
         asset_key="feature_weather_krex_rest_areas",
+        rate_gate=KREX_RATE_GATE,
     ),
     *_operation_specs(
         "feature_notice_krex_traffic_notices_job",
         run=run_feature_notice_krex_traffic_notices,
         resources=_records("krex_traffic_notices", fetch_krex_traffic_notices),
         asset_key="feature_notice_krex_traffic_notices",
+        rate_gate=KREX_RATE_GATE,
     ),
     *_operation_specs(
         "feature_place_krheritage_items_job",

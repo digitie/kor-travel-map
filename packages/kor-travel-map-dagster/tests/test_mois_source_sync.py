@@ -50,7 +50,9 @@ class _FakeFileClient:
         self.closed = False
         _FakeFileClient.instances.append(self)
 
-    def close(self) -> None:
+    # 실물 `LocalDataFileClient`의 정리 메서드는 `aclose`뿐이다
+    # (`python-mois-api/src/mois/files.py:77`) — 동기 `close`는 없다.
+    async def aclose(self) -> None:
         self.closed = True
 
 
@@ -62,7 +64,9 @@ def _install_fake_mois(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         calls["schema_engine"] = engine
         return True
 
-    def _sync_localdata_source_db(
+    # 실물 `mois.sync_localdata_source_db`는 코루틴이다
+    # (`python-mois-api/src/mois/db.py:688 async def`).
+    async def _sync_localdata_source_db(
         session: Any,
         client: Any,
         *,
