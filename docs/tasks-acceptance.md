@@ -2148,9 +2148,18 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 2. [x] **동시 run을 흉내 내는** 검사가 있다. 한 프로세스 안에서만 재면 지금도
    초록이었다 — 그래서 이 구멍이 안 보였다.
    (`test_queue_serializes_rate_gated_providers.py` + 등록 완전성 lint)
-3. [ ] `ops.provider_refresh_policies.max_concurrent`가 **읽히기만 하는 상태**를
-   벗어난다 — gate가 그 값을 읽거나, 집행하지 않는다는 것이 조문으로 적힌다.
-   지금 gate는 코드 상수(`PROVIDER_RATE_GATES`)를 쓴다.
+3. [x] **집행하지 않는다 — 그리고 그것이 맞다.** 조문이 허용한 두 답 중 뒤쪽이다.
+
+   `ops.provider_refresh_policies`는 **prod에서 0행이다**(2026-09-16 실측, seed도 0).
+   그리고 행이 없을 때 `_skip_reason()`은 `"allow_targeted"`로 **fail-open**한다
+   (`feature_update_executor.py:386-388`). 그래서 gate가 그 테이블을 읽게 만들면
+   **읽을 값이 없어 통과**시키고, 지금처럼 언제나 적용되는 코드 상수보다 **나빠진다.**
+   상한을 DB로 옮기는 것은 그 테이블이 실제로 채워지고 fail-**close**가 된 뒤의 일이다.
+
+   같은 테이블의 `max_requests_per_day`·`min_interval_seconds`도 호출을 막지 않는다 —
+   전자는 upsert 시 간격 정합성 검증에만(`provider_refresh_schema.py:73-86`), 후자는
+   consistency 리포트의 SLA 판정에만 쓰인다. **세 필드 다 기록이지 집행이 아니다.**
+   그 사실을 `docs/etl/upstream-quota.md` §2에 적었다.
 4. [x] gate가 prod 실행 경계에 있다 — t44a 배포(`e9b877b39`) 후 컨테이너에서 직접
    읽었다: `PROVIDER_RATE_GATES = {'krex': 0.2}`, 선언 operation 4건,
    `FeatureUpdateAssetRunner.__call__`이 gate를 지나며 **계수기보다 바깥**이다.

@@ -58,12 +58,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
 
-- [ ] T-VN-KREX-TPS-FANOUT — **krex 5 TPS는 프로세스당이고 합계가 아니다**
-
-  큐가 worker run을 최대 4개 동시에 띄우고 run마다 `KrexClient`가 따로라 버킷도
-  넷이다 → 최대 **20 TPS**. `provider_refresh_policies.max_concurrent`는 자리만
-  있고 집행되지 않는다. 해제 조건은 acceptance §T-VN-KREX-TPS-FANOUT.
-
 - [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
 
   221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을
