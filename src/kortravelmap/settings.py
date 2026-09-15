@@ -290,16 +290,19 @@ class KorTravelMapSettings(BaseSettings):
     opinet_run_call_budget: int = Field(
         default=140,
         ge=1,
-        le=300,
+        le=150,
         description=(
             "``low_top_area`` run당 OpiNet 총 호출 hard cap(#545 — get_area_codes + "
             "lowTop10 + aroundAll 합산). "
             "**무료키 일일 한도는 300회다**(2026-09-14 확인). 기본 140이면 월간 place "
             "job과 같은 날 겹쳐도(2×140=280) 그 아래다 — 종전 기본값 600은 한도를 "
             "1,500으로 잘못 알고 잡은 값이라 **한 run이 하루 한도의 2배**였다. "
-            "상한을 300으로 두는 이유는 그것이 하루 전체이기 때문이다: 한 run이 "
-            "하루보다 많이 쓰게 설정할 수 있으면 안 된다. place/price KST 일일 "
-            "coalescing과 함께 쓴다. env ``OPINET_RUN_CALL_BUDGET``."
+            "상한은 **150**이다: 최악의 날은 2 run(월 1일에 price와 place가 겹친다)"
+            "이므로 설정할 수 있는 최대치도 2배 해서 한도 안에 들어가야 한다. "
+            "종전 상한 300은 그 곱을 빼먹어 **설정 한 줄로 600회(200%)**가 가능했다 "
+            "— 기본값이 맞아도 설정으로 넘길 수 있으면 한도를 지키는 것이 아니다 "
+            "(2026-09-16 적대 리뷰). place/price KST 일일 coalescing과 함께 쓴다. "
+            "env ``OPINET_RUN_CALL_BUDGET``."
         ),
     )
     kma_weather_extra_points: str | None = Field(

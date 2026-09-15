@@ -64,12 +64,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   넷이다 → 최대 **20 TPS**. `provider_refresh_policies.max_concurrent`는 자리만
   있고 집행되지 않는다. 해제 조건은 acceptance §T-VN-KREX-TPS-FANOUT.
 
-- [ ] T-VN-QUEUE-QUOTA — **분모가 있는 provider에 일일 예산을 둘지 판단한다**
-
-  넷의 분모 조회는 끝났다(2026-09-14). `krex`는 일일 한도가 미공개라 분모를 기다리지
-  않고 **TPS 5**로 막았다. 남은 것은 분모가 **있는** 쪽의 판단이다. 급하지 않다
-  (prod feature materialization 0건). 해제 조건은 acceptance §T-VN-QUEUE-QUOTA.
-
 - [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
 
   221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을

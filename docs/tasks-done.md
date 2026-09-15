@@ -10,6 +10,19 @@
 > | 2026-07-27 ~ 2026-07-31 | [archive/tasks-done-2026-07a.md](archive/tasks-done-2026-07a.md) |
 > | ~ 2026-07-26 (C7·Admin) | [archive/tasks-done-2026-07b.md](archive/tasks-done-2026-07b.md) |
 
+## 2026-09-16 — 분모를 재고, 그래서 짓지 않기로 했다
+
+- [x] T-VN-QUEUE-QUOTA — **큐 경로 upstream 쿼터: 분모·분자를 다 재고 여섯 조문을 닫았다. 일일 예산 장치는 만들지 않기로 결론.**
+  분모는 포털에서 확인했고(data.go.kr 한도는 **오퍼레이션당**이다 — `opinet`은
+  300/일로 저장소가 알던 1,500의 1/5였다), 분자는 코드에서 세고 전국표준데이터
+  총건수는 실제로 조회했다(최대 `parking` 18,883). **하루를 넘기려면 166,000이
+  필요해 한 자릿수 아래이므로 일일 예산 장치를 만들지 않기로 했다** — 가장 좁은
+  `opinet`은 이미 run당 예산이 있다. 대신 구멍 셋을 닫았다: khoa 페이지 절대 상한 +
+  stall 지문, `opinet_run_call_budget`의 `le` 300→150(설정 한 줄로 200%가 가능했다),
+  그리고 그 구멍을 보는 검사. `krex`는 분모가 미공개라 축을 바꿔 TPS 5로 막았고 그
+  후속은 `T-VN-KREX-TPS-FANOUT`이 갖는다. 근거는
+  `docs/etl/upstream-quota.md`, 조문은 `docs/tasks-acceptance.md` §T-VN-QUEUE-QUOTA.
+
 ## 2026-09-13 — 배포된 세대가 run을 완주시키는지 재게 됐다
 
 - [x] T-VN-QUOTA-DENOMINATORS — **회수(2026-09-14). 완료가 아니라 ID 합침이다.**

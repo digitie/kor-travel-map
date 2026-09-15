@@ -1542,6 +1542,7 @@ async def fetch_khoa_beaches(
                 _page,
                 num_of_rows=num_of_rows,
                 label=f"khoa oceans_beach_info {sido}",
+                absolute_max_pages=_KHOA_BEACH_MAX_PAGES,
                 warn=_LOGGER.warning,
             ):
                 yield record
@@ -1577,7 +1578,23 @@ async def _khoa_beach_page(
         total_count = int(declared) if declared is not None else None
     except (TypeError, ValueError):
         total_count = None
-    return ProviderPage(items=list(page.items), total_count=total_count)
+    return ProviderPage(
+        items=list(page.items),
+        total_count=total_count,
+        # **정지 조건을 하나 더 준다.** `pageNo`를 무시하는 upstream은 같은 페이지를
+        # 영원히 돌려주는데, `total_count`만 보는 순회는 `seen`이 늘어나므로 그것을
+        # 정상 진행으로 읽는다. raw 응답을 지문으로 주면 반복을 알아챈다
+        # (`provider_pagination` §stall). visitkorea가 쓰는 것과 같은 자리다.
+        fingerprint=raw if isinstance(raw, dict) else None,
+    )
+
+
+#: khoa 해수욕장 순회의 **절대** 페이지 상한. 100행 × 30 = 3,000건이고 전국 해수욕장은
+#: 수백 개 규모다(시도 하나에 3,000이면 크게 넘는다). 이 오퍼레이션의 실측 일일 한도는
+#: 10,000이고 시도 17개를 도므로, 상한이 없으면 선언 총건수 하나가 틀리는 것만으로
+#: 하루치를 넘길 수 있다. 넘으면 조용히 자르지 않고 ``ProviderPaginationOverrun``으로
+#: 실패한다 — 그때 숫자를 의도적으로 올려라.
+_KHOA_BEACH_MAX_PAGES: Final = 30
 
 
 _AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (

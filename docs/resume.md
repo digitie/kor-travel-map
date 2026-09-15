@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-16 — 일일 예산은 만들지 않는다 (분자를 재서 나온 결론)
+
+**다음 한 작업: `T-VN-KREX-TPS-FANOUT` 조문 3** — `provider_refresh_policies`의
+`max_concurrent`를 gate가 읽게 할지, 아니면 집행하지 않는다는 것을 조문으로 적을지.
+지금 그 테이블은 `max_requests_per_day`·`min_interval_seconds`·`max_concurrent`
+**셋 다 기록만 하고 호출을 막지 않는다**(2026-09-16 확인).
+
+`T-VN-QUEUE-QUOTA`는 **닫혔다**. 조문 6이 마지막이었다. **분모가 아니라 분자를 재서** 판단했다 —
+전국표준데이터는 하루를 넘기려면 총건수 166,000이 필요한데 실측 최대가 **18,883**
+(`parking`)이다. visitkorea 5%, 산림청 0.6~6%, `krairport` **0건**(번들 데이터).
+가장 좁은 `opinet`(300/일)은 이미 run당 예산이 있다. (`special_street`가 prod 키로
+403인 것은 관측했으나 **평가 대상에서 제외**한다 — 2026-09-16 지시.)
+
+**장치 대신 구멍 셋을 닫았다:** khoa 페이지 절대 상한 + stall 지문(선언 총건수 하나가
+틀리면 하루치를 넘길 수 있었다), `opinet_run_call_budget`의 `le` 300→150(2 run × 300
+= 600이 **설정 가능**했다).
+
+**열려 있는 것:** `T-VN-KREX-TPS-FANOUT` 조문 3, `T-VN-LEDGER-ARCHIVE` 조문 2·3,
+`T-VN-M02`, `T-VN-H49`/`-OFFBOX`, `T-VN-D2-RESIDUE`, `T-VN-CURATION-SEAL-ACL`.
+
+
 ## 2026-09-15 — t44a 배포 완료, async 이관이 prod에서 돈다
 
 **다음 한 작업: `T-VN-QUEUE-QUOTA` 조문 6 — 분모가 *있는* provider에 일일 예산을
