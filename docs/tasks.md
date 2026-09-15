@@ -64,13 +64,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   넷이다 → 최대 **20 TPS**. `provider_refresh_policies.max_concurrent`는 자리만
   있고 집행되지 않는다. 해제 조건은 acceptance §T-VN-KREX-TPS-FANOUT.
 
-- [ ] T-VN-QUEUE-QUOTA — **남은 것은 `special_street` 활용신청뿐이다**
-
-  분모·분자를 다 쟀고 **일일 예산 장치는 만들지 않기로** 했다(2026-09-16) — 실측
-  최대가 분모의 60%이고 가장 좁은 `opinet`은 이미 run당 예산이 있다. 대신 구멍 셋을
-  닫았다. 남은 것은 `special_street`가 prod 키로 403인 것(활용신청 필요).
-  해제 조건은 acceptance §T-VN-QUEUE-QUOTA.
-
 - [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
 
   221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을
