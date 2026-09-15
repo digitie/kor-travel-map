@@ -155,9 +155,17 @@ krex를 직렬화하는 것은 아무것도 없다:
   키가 달라 둘 다 진행한다.
 - Dagster pool `KREX_NOTICE_SNAPSHOT_POOL`은 **asset**에 선언돼 있는데, 큐 경로는
   asset wrapper를 **우회한다**(`feature_update_runner.py`가 원본 run 함수를 부른다).
-- `ops.provider_refresh_policies.max_concurrent`는 읽혀서 plan payload에 실리기만
-  하고 **집행되지 않는다**(`feature_update_executor.py` `_rate_limit()`). 자리는 있는데
-  아무도 그 값을 보고 멈추지 않는다.
+- `ops.provider_refresh_policies`는 **기록이지 집행이 아니다.** `max_concurrent`는
+  plan payload에 실리기만 하고(`feature_update_executor.py` `_rate_limit()`),
+  `max_requests_per_day`는 upsert 시 간격 정합성 검증에만
+  (`provider_refresh_schema.py`), `min_interval_seconds`는 consistency 리포트의 SLA
+  판정에만 쓰인다. **셋 다 아무도 그 값을 보고 멈추지 않는다.**
+
+  **그리고 그 테이블은 prod에서 0행이다**(2026-09-16 실측, seed도 0). 행이 없으면
+  `_skip_reason()`이 `"allow_targeted"`로 **fail-open**하므로, gate가 이 테이블을 읽게
+  만들면 읽을 값이 없어 통과시킨다 — 언제나 적용되는 코드 상수(`PROVIDER_RATE_GATES`)
+  보다 **나빠진다.** 상한을 DB로 옮기는 것은 그 테이블이 채워지고 fail-**close**가 된
+  뒤의 일이다.
 
 **그래서 프로세스당 상한만으로는 부족하다.** `feature_update_runner`의
 `provider_rate_gate`(Postgres advisory lock + 교대 간격)가 그것을 닫는다 — 자세한

@@ -2,12 +2,14 @@
 
 ## 2026-09-16 — 일일 예산은 만들지 않는다 (분자를 재서 나온 결론)
 
-**다음 한 작업: `T-VN-KREX-TPS-FANOUT` 조문 3** — `provider_refresh_policies`의
-`max_concurrent`를 gate가 읽게 할지, 아니면 집행하지 않는다는 것을 조문으로 적을지.
-지금 그 테이블은 `max_requests_per_day`·`min_interval_seconds`·`max_concurrent`
-**셋 다 기록만 하고 호출을 막지 않는다**(2026-09-16 확인).
+**다음 한 작업: `T-VN-LEDGER-ARCHIVE` 조문 2·3** — 원장 분리가 fence parity를
+검산하게 하고, 아카이브를 삭제 감시 대상에 넣는 일. 조문 1(220KB 아래)은 닫혔다.
 
-`T-VN-QUEUE-QUOTA`는 **닫혔다**. 조문 6이 마지막이었다. **분모가 아니라 분자를 재서** 판단했다 —
+**쿼터 축이 전부 닫혔다.** `T-VN-QUEUE-QUOTA`(6/6)와 `T-VN-KREX-TPS-FANOUT`(4/4)
+둘 다 완료로 이관했다. 조문 3의 답은 **"집행하지 않는다"**였다 —
+`ops.provider_refresh_policies`가 prod에서 **0행**이고(seed도 0) 행이 없으면
+`_skip_reason()`이 fail-**open**한다. gate가 그 테이블을 읽게 만들면 읽을 값이 없어
+통과시켜 **코드 상수보다 나빠진다.** **분모가 아니라 분자를 재서** 판단했다 —
 전국표준데이터는 하루를 넘기려면 총건수 166,000이 필요한데 실측 최대가 **18,883**
 (`parking`)이다. visitkorea 5%, 산림청 0.6~6%, `krairport` **0건**(번들 데이터).
 가장 좁은 `opinet`(300/일)은 이미 run당 예산이 있다. (`special_street`가 prod 키로
