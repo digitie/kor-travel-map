@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-15 — provider 13개 async-only 이관 (브랜치 `feat/provider-async-tps-migration`)
+
+**다음 한 작업: n150 4세션 게이트 결과 확인 → PR → 머지.** 그 뒤 prod 재핀
+(`/root/chain17.sh`)이 따라온다 — provider 핀이 13개 바뀌었으므로 이미지 재빌드가 필요하다.
+
+형제 `python-*-api` **13개 전부**가 native async only + 공유 TPS 제어로 재작성됐다
+(사용자 개편). Map을 그 표면에 맞췄다 — 핀 13개, fetcher 20개 async 전환, 경계 4곳,
+manifest 재생성, 계약표 13행.
+
+**어제의 krex TPS 브랜치(`python-krex-api` `feat/http-tps-limit`)는 흡수됐다.** 새
+라이브러리가 그 기본값과 검증을 그대로 갖고 있다(실측 확인). 머지하지 않고 접는다.
+**Map 쪽 `provider_rate_gate`는 살아남는다** — 새 `rate_limiter=` 주입은 한 이벤트
+루프 안에서만 성립하고 Map의 fan-out은 프로세스를 가로지른다.
+
+검증(기준선 비교):
+
+| | 브랜치 | HEAD 기준선 |
+|---|---:|---:|
+| dagster 세션 | 680 passed / **10 failed** | 675 passed / **같은 10 failed** |
+| 실패 집합 | — | **IDENTICAL(회귀 없음)** |
+
+남은 10건은 dagster 버전 환경 문제(`test_storage_migration_command` 9 +
+`test_definitions` 1). tests/lint 288 passed(conformance 38 포함), ruff 전 트리 clean.
+
+**열려 있는 것:** `T-VN-KREX-TPS-FANOUT` 조문 3·4(정책 테이블 집행 여부, prod 실측),
+`T-VN-QUEUE-QUOTA` 조문 6(분모가 있는 provider의 일일 예산),
+`T-VN-LEDGER-ARCHIVE` 조문 2·3.
+
+
 ## 2026-09-14 — 분모가 없는 provider를 분모 없이 막았다 (krex TPS 5)
 
 **다음 한 작업: `T-VN-QUEUE-QUOTA` 조문 6 — 분모가 **있는** provider에 일일 예산을
