@@ -1,5 +1,35 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-15 — t44a 배포: async 이관이 prod에서 도는 것을 읽었다
+
+`#1235`(provider 13개 async-only)를 `e9b877b39`로 핀했다. 전 사이클 GREEN — 회전
+(pinset `bbb330689e38`) · rebuild `phase=committed` · executor 이미지 · repin
+**VERIFIER PASS** · M01 ACL **55/55** · **D1 live Playwright 11 passed** · lane 정리 ·
+D2 `phase=passed`(`recovery_attempt=0`).
+
+D2의 `host_attestation_sha256`이 repin 단계의 값(`c564e786…`)과 **같다** — 검증된 그
+이미지가 그대로 돌았다는 뜻이다.
+
+**배포가 초록인 것과 고친 것이 그 안에 있는 것은 다른 사실이다.** 그래서 이번에도
+prod 컨테이너에서 직접 읽었다. **버전 문자열로는 판별되지 않았다** — provider 13개가
+전부 `0.1.0`이라 핀이 바뀌었는지 알 수 없다. 그래서 **코드의 성질**을 물었다:
+
+| 무엇 | prod 실측 |
+|---|---|
+| `krex.DEFAULT_MAX_RPS` / 버킷 capacity | **5.0 / 1.0**(버스트 없음) |
+| `KrexClient.close` 존재 | **False** — 동기 표면이 사라졌다 |
+| `restarea.list_all`·`aclose`·`mois.sync_localdata_source_db`·`kma forecast.now`·`airkorea.stations` | **전부 coroutine** |
+| fetcher 32개 | **async generator 31** + `fetch_mois_license_records` 1(로컬 SQLite라 동기가 맞다) |
+| `PROVIDER_RATE_GATES` | `{'krex': 0.2}` — 교대 간격 1/5초 |
+| gate 선언 operation | **4건**(krex place·price·weather·notice) |
+| gate가 `__call__`에 있나 / 계수기보다 바깥인가 | **True / True** |
+| 큐가 건너뛰는 operation | **6**(종전 값 유지) |
+| opinet 예산 | **140 / 90**(종전 값 유지) |
+
+`T-VN-KREX-TPS-FANOUT` 조문 4가 이것으로 닫힌다 — **gate가 prod 실행 경계에 실제로
+있다.** 조문 3(`provider_refresh_policies.max_concurrent` 집행)은 그대로 열려 있다.
+
+
 ## 2026-09-15 — provider 13개가 async-only가 됐고, 낡은 대역이 세 번 계약 파손을 가렸다
 
 형제 `python-*-api` **13개 전부**가 native async only + 공유 TPS 제어로 재작성됐다.
