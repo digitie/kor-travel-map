@@ -22,13 +22,18 @@ Sprint 1 (본 PR#17) — minimum settings만. Provider key 등은 후속 sprint�
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Final, Literal
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LogFormat = Literal["json", "console"]
+
+# ``backup_last_success_warn_hours``의 기본값 — 숫자의 정본은 여기 하나다.
+# ``infra.consistency``(F9)가 자기 kwarg 기본값으로 이 값을 초 환산해 읽는다. 코드
+# 기본값과 env 기본값을 각자 적으면 갈라지고, 갈라진 뒤에는 조용한 쪽이 이긴다.
+BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT: Final[int] = 48
 
 
 class KorTravelMapSettings(BaseSettings):
@@ -452,6 +457,25 @@ class KorTravelMapSettings(BaseSettings):
             "시간 내 sync됐으면 read 경로에서 전국 Phase A sync를 생략한다(#617 리뷰 — "
             "RUNNING 센서를 통한 무조건 전국 재sync 방지). env "
             "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
+        ),
+    )
+    backup_last_success_warn_hours: int = Field(
+        default=BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT,
+        ge=1,
+        description=(
+            "ADR-033 F9 — ``backup_root``의 **최신 성공** artifact가 이 시간보다 낡으면 "
+            "severity=WARN(observe-only, 적재 차단 없음). "
+            "기본 48h인 이유: 관측된 예약 주기는 24h이고 정상일 때도 다음 틱 직전의 최신 "
+            "artifact 나이는 24h + 실행시간까지 간다 — 24h로 "
+            "잡으면 아무 일 없는 날에도 매일 한 번 운다. 48h는 '예약 2회 연속 불발'이라 "
+            "노이즈가 아니고, 보존 TTL 7일보다 5일 이르므로 보유분이 TTL로 깎이기 전에 "
+            "울린다. 주기를 바꾸면 이 값도 그 2배로 맞춘다. "
+            "env ``KOR_TRAVEL_MAP_BACKUP_LAST_SUCCESS_WARN_HOURS``. "
+            "**두 수의 출처는 이 저장소가 아니다** — 2026-09-16에 n150 geo 컨테이너에서 "
+            "직접 읽은 값이다(`KTG_BACKUP_SCHEDULE_INTERVAL_HOURS=24`, 그리고 복구 직후 "
+            "백업이 00:30:30Z에 시작해 00:53:37Z에 `state=done`으로 끝난 23분). "
+            "여기서 확인할 수 없으므로 출처를 밝힌다 — geo 주기가 바뀌면 이 값도 "
+            "따라가야 하는데, 그 사실을 아는 검사는 없다."
         ),
     )
     file_registry_e2e_backup_ttl_days: int = Field(

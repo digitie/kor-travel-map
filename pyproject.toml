@@ -109,7 +109,7 @@ providers = [
   # 않아 MidForecastItem.tm_fc가 항상 None → 해석된 요청 tmFc 폴백 주입
   # (provider #20/PR#21, T-212e mid forecast run f044b091 실측). 0868b76:
   # resultCode 22 비재시도 quota + strict XML 03 빈 결과(provider PR#24).
-  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@acd1cfa3fab7a7bc091b3ccede0cc905f0874a25",
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@4ac9a32579e183734e2fa66f389c3cff054e8025",
   "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@fc5c009defe5519a0b211017deb92de6a943b101",
   # khoa: snake_case live row 파싱(khoa#5/PR#6) + serviceKey 기본 URL HTTPS(PR#8).
   # 3314f68: **asyncio 전용 전환(provider PR#13)** — sync `oceans_beach_info()`·

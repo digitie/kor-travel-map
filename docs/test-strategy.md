@@ -165,7 +165,7 @@ def test_korean_coord_validates_bounds(coord):
 
 ### 4.0 정합성 케이스 매트릭스 (ADR-033)
 
-`ops.feature_consistency_reports` F1~F8. Phase 1(F1~F3)은 통합
+`ops.feature_consistency_reports` F1~F9. Phase 1(F1~F3)은 통합
 `tests/integration/test_consistency_reports.py` + 집계 단위
 `tests/unit/test_infra_consistency.py`. Phase 2(F4~F8 + Dagster 게이트)는 Sprint 5.
 

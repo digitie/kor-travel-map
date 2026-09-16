@@ -106,6 +106,35 @@ def test_render_consistency_report_json() -> None:
     assert payload["report"]["summary"]["case_metadata"]["F4"]["threshold"] == 10
 
 
+def test_render_report_never_shows_an_unobserved_f9_as_normal() -> None:
+    """F9 미관측을 "이상 없음"으로 읽히게 두지 않는다 — 그 오독이 사고의 형태였다."""
+    markdown = render_consistency_report_markdown(_report(), options=_options())
+    payload = json.loads(render_consistency_report_json(_report(), options=_options()))
+
+    assert "- F9 backup root: `not provided` — **미관측**(정상 판정이 아니다)" in markdown
+    assert payload["backup_root"] == {"source": None, "observed": False}
+    assert payload["thresholds"]["backup_last_success_sla_seconds"] == 48 * 3600
+
+
+def test_render_report_shows_the_observed_f9_backup_root() -> None:
+    options = ConsistencyReportOptions(
+        generated_at=datetime(2026, 9, 16, 9, 0, tzinfo=KST),
+        persisted=False,
+        sample_limit=20,
+        dedup_pending_threshold=1000,
+        provider_last_success_sla_seconds=86400,
+        dedup_score_regression_warn_points=10.0,
+        backup_root_source="/srv/backups",
+        backup_last_success_sla_seconds=172800,
+    )
+
+    markdown = render_consistency_report_markdown(_report(), options=options)
+    payload = json.loads(render_consistency_report_json(_report(), options=options))
+
+    assert "- F9 backup root: `/srv/backups` (SLA 172800s)" in markdown
+    assert payload["backup_root"] == {"source": "/srv/backups", "observed": True}
+
+
 def test_load_file_object_refs_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "objects.jsonl"
     path.write_text(

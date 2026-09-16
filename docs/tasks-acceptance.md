@@ -798,14 +798,28 @@ acceptance 축만 남는다.**
 
 **그 하나가 막힌 이유는 셋이고, 그중 하나는 306이 절반 풀었다.**
 
-1. prod에서 돌리면 안 된다 — prod UI가 `admin`이라 spec의
-   `created_by_actor === "e2e-admin"`이 구조적으로 실패한다. 이 축은 그대로다.
-2. ~~cleanup이 없어 지워지지 않는 write가 남는다~~ — **306이 풀었다.** 그 되돌릴 수
-   없음은 hard-purge fence가 유일한 삭제 경로를 거부해서 생긴 것이었고, 이제 감사되는
-   `feature.purge_manual_feature`가 있다. 다만 1번 때문에 여전히 prod에서 돌리지 않는다.
+1. ~~prod UI가 `admin`이라 `created_by_actor === "e2e-admin"`이 구조적으로 실패한다~~
+   — **2026-09-16에 풀었다.** 그것은 계약이 아니라 **리터럴 한 줄**이었다. actor는
+   BFF의 `adminUsernameFromEnv()`(→ `ADMIN_USERNAME`, prod는 미설정이라 기본 `admin`)
+   에서 나와 `X-Kor-Travel-Map-Actor` → 도메인 커맨드 → `created_by_actor`로 간다
+   (체인 전 구간 실측). 저장소의 기존 관용구
+   (`ops-c7-read-auth.live.spec.ts`의 `process.env.E2E_ADMIN_USERNAME ?? "admin"`)와
+   같은 형태로 환경에서 유도하게 고쳤다 — 결박할 것은 "로그인한 주체가 provenance까지
+   실려 온다"이지 그 값이 아니다.
+2. **cleanup이 없다 — 이것이 지금 막는 축이다.** 종전에 "306이 풀었다"고 적었는데
+   **절반만 맞다**(2026-09-16 정정). #306이 만든 것은 `feature.purge_manual_feature`
+   **프로시저**이고, 그것은 **HTTP로 노출돼 있지 않다** — API 라우터에 없어
+   (`manual_feature_purge_repo.py`만 있다) spec이 부를 길이 없다. spec에 `purge` 호출은
+   **0건**이고 spec 주석 자체가 "생성물을 지우지 않는다"고 적고 있었다. prod에서 돌리면
+   지울 수 없는 행이 남는다 — 같은 형태가 `T-VN-D2-RESIDUE`로 이미 열려 있다.
 3. 격리 스택이 **사라졌다**(2026-09-08 실측). `~/ktm-live-301`은 정지가 아니라
    컨테이너도 볼륨도 없고, 체크아웃은 alembic head `302`(저장소는 `307`)이며 `e2e/live/`에
    그 spec 자체가 없다. **재기동이 아니라 재구축이 선행이다.**
+
+**그래서 남은 선택지는 둘이고 둘 다 소유자 판단이다.** (a) purge를 HTTP로 노출하고
+spec에 cleanup을 붙여 prod D1에 편입 — 되돌릴 수 없는 삭제 경로를 여는 일이고, 아래
+"왜 이관인가"가 그것을 restore proof(`T-VN-H49`)보다 먼저 하면 **순서 역전**이라고
+적는다. (b) 격리 스택 재구축 — 원장이 애초에 의도한 경로.
 
 그리고 spec은 `E2E_MANUAL_CREATE_WRITE=1` opt-in이라 병합만으로는 돌지 않는다.
 
@@ -1166,6 +1180,36 @@ lifecycle에서는 prod 데이터가 rebuild마다 사라진다). 다시 세울 
   수단은 갖춰졌다(`CURATION_CSV_OPTIONAL_HEADERS`, `ops.curation_import_manual_feature_children`,
   배포 API의 manual-feature create 활성). 실행이 prod 데이터에 걸린다.
 
+## T-VN-H49-BACKUP-STALENESS
+
+**무엇이 참이면 닫히는가.**
+
+1. [ ] 백업이 **멈추면 누군가 안다.** — **아직 아니다.** F9가 판정은 하지만 사람에게
+   닿는 경로가 없다. 둘이 막는다: (a) 자동으로 리포트를 쓰는 유일한 경로인 Dagster
+   배치는 `backup_root` 볼륨이 없다(api 컨테이너만 마운트한다) — 거기서 매 배치마다
+   WARN을 내면 일주일이면 무시되므로 일부러 `observed=false`로 둔다. (b)
+   `ops.feature_consistency_reports`를 **아무도 폴링하지 않는다.** 검사를 만드는 것과
+   알림이 닿는 것은 다른 일이고, 이 조문이 묻는 것은 뒤쪽이다.
+2. [x] 판정이 **"최근 성공이 있는가"**다 — F9(`consistency.py`). 근거를 DB job 행이
+   아니라 **디스크 artifact**에서 읽는다(이번 사고에서 "시작했다"는 행은 425번
+   적혔고 성공은 0건이었다). "성공 기록이 아예 없음"과 "마지막 성공이 너무 낡음"이
+   같은 WARN을 내고, 실패 건수는 판정에 들어가지 않는다.
+3. [x] GC와 백업을 **따로** 본다 — 판정 축은 `newest_success_age` **하나뿐**이고
+   `artifact_count`·`held_set_span_seconds`는 metadata로만 싣는다. 사고 fixture
+   (artifact 3건, 최신 5일 전)로 그 분리를 결박했다: 개수를 보는 검사였다면
+   "3건, 정상"이라고 답했을 것이고 그것이 5일간 조용했던 이유다.
+   **한 가지 한계**: 디렉터리 목록 하나로 GC가 살아 있음을 *증명*할 수는 없다.
+   F9는 백업 축에 경보하고 보존 축은 관측만 한다.
+
+**무엇이 관측됐나 — 2026-09-16.** 마지막 성공 백업 `2026-09-10 12:00Z`, 그 뒤
+**425건 연속 실패**(09-11 12:30Z부터, 15분 주기). 근본 원인은 geo Dagster의 code
+server가 gRPC UNAVAILABLE이 된 것이고 webserver 재기동으로 복구했다. 진단 체인은
+`T-VN-H49`의 2026-09-16 정정이 갖는다.
+
+**`T-VN-H49`와 다른 점.** 그쪽은 "백업이 수렴하는가"를 묻고 이쪽은 **"수렴하지 않게
+됐을 때 알 수 있는가"**를 묻는다. 앞의 것은 한 번 재면 닫히지만 뒤의 것은 그렇지
+않다 — 이번에 닫은 그 조문이 **닫힌 다음 날 깨졌다.**
+
 ## T-VN-H49
 
 ```markdown
@@ -1187,6 +1231,27 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
   `keep_min=3`을 새 성공들이 채우자 GC가 실제로 지웠다. "수렴"과 "bounded retention"이
   둘 다 관측으로 성립하므로 이 조문을 닫는다. 남은 것은 off-box 사본뿐이고 그것은
   `T-VN-H49-OFFBOX`가 소유한다.
+
+  **2026-09-16 정정 — 이 `[x]`는 닫힌 바로 그날 깨졌다.** `scheduled_backup`이
+  **2026-09-11 12:30Z부터 425건 연속 실패**했고(15분 주기) 마지막 성공 백업은
+  **09-10 12:00Z**였다. 즉 "수렴"이라고 적은 다음 날부터 5일간 발산이었다.
+  retention GC만 정상 동작해 09-07을 TTL로 지웠으므로 **보유분이 낡아가기만 했다.**
+
+  진단 체인: `run-due` → 502 → Dagster `launchRun` → 500 →
+  `DagsterUserCodeUnreachableError: gRPC UNAVAILABLE`. webserver가
+  `-m ...definitions`로 code server를 자기 안에 띄우는 구조라 **본체는 healthy인데
+  user code만 죽은** 상태였다 — 그래서 `{ __typename }` 같은 질의는 200이고 실행만
+  실패했다. 방아쇠는 metadata DB(:12500)의 `recovery mode`였고 그 DB는 지금 정상이다
+  (`pg_is_in_recovery=False`). webserver 재기동으로 복구했고, **끝까지 확인했다** —
+  재기동 직후 첫 틱(00:30:14Z)이 오류 없이 시작해 `state=done · progress=1.0`으로
+  00:53:37Z 완주했고, `.part`가 사라지며 정식 artifact
+  `kor_travel_geo_backup_20260916T003030Z_zstd3.tar.zst`(4.40 GB)가 됐다.
+  **5일 만의 첫 백업이다.**
+
+  **이 조문이 다시 닫히려면 "그때 수렴했다"가 아니라 "지금도 수렴한다"를 재는
+  것이 있어야 한다.** 425건이 조용히 실패하는 동안 아무 경보도 없었다 — 백업이
+  5일 멈춰도 아무도 모르는 상태였고, 그것이 이 건의 진짜 결함이다.
+  `T-VN-H49-BACKUP-STALENESS`로 뺐다.
 - [x] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
@@ -1520,6 +1585,7 @@ lint+unit 2,832 · 제품 SQL 786문 head Parse · live(DB→API→브라우저,
   migration에서 이미 물리 삭제한다.** 따라서 이 task는 T-VN-33 보존·rollback·removal을
   소유하지 않는다. 이후 task가 만든 held component만 그 task의 manifest와 함께 판단하며,
   intermediate data는 backup/restore가 아니라 최종 schema ETL로 재생성한다.
+```
 
 **2026-09-07 전수 조사 — 유일한 실질 blocker는 미구현 대체물이다.**
 
@@ -2214,10 +2280,32 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
 
 **무엇이 참이면 닫히는가.**
 
-1. D2가 완주한 뒤 prod에 그 run이 만든 행이 **하나도 남지 않는다** — 또는 남기는
-   것이 의도라면 그 의도가 조문으로 적히고, 누적이 유계임을 보이는 정리 경로가 있다.
-2. 그 성질을 재는 검사가 있다. lane이 스스로 "통과"라고 적은 뒤의 상태를 보는
-   것이어야 한다 — 지금은 lane의 자기 검증이 통과해도 행이 남는다.
+1. [x] D2가 완주한 뒤 prod에 그 run이 만든 행이 **하나도 남지 않는다** —
+   **#1218(`fc6e7efb`, 2026-09-12)이 이미 고쳤다.** `purge`를 러너 호출부와
+   supervisor 허용목록 양쪽에 들여 lane 안에서 돌게 했다.
+2. [x] 그 성질을 재는 검사가 있다 — `tests/lint/test_lane_operations_are_declared_once.py`
+   (같은 PR, 10 passed). lane operation 선언이 세 군데에서 갈라지지 않는 것을 본다.
+
+**2026-09-16 정정 — 이 조문은 닫힌 지 나흘 지나 있었다.** 고침(#1218)은
+2026-09-12에 들어왔는데 조문만 열린 채 남았다.
+
+**t44a 배포(2026-09-16)의 D2 산출물이 그것을 직접 증명한다** —
+`/var/lib/kor-travel-map/admin-feature-live-acceptance/run-6955e21e…/direct-purge.json`:
+
+```json
+{"action": "purge", "counts": {"features": 0, ...},
+ "purged": {"features": 1, "field_overrides": 7}, "lane_residue_total": 0}
+```
+
+lane이 만든 Feature 1건과 딸린 override 7건을 **실제로 지웠고** 잔여물 0이다.
+prod에서 따로 센 `feature.features` **0행**과 일치한다 — lane의 자기 신고와 DB 실측이
+같은 답을 낸다. 그리고 `run-admin-feature-live-acceptance.sh:488`이
+모든 게이트 뒤에서 `run_helper purge`를 부르고, `admin_feature_live_supervisor.py:560`의
+`choices`에 `purge`가 있다 — 이 절이 "넷뿐이다"라고 적은 목록은 낡았다.
+
+**남은 교훈은 원장 쪽이다.** 고쳐도 조문이 닫히지 않으면 열린 항목이 실제보다
+많아 보이고, 그 상태로 "다음 한 작업"을 고르면 이미 끝난 일을 다시 연다 —
+방금 그럴 뻔했다.
 
 **무엇이 관측됐나 — 2026-09-11.**
 
@@ -2422,6 +2510,7 @@ Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출�
 Map 핀 3자리를 올렸다(#1204 `7b2e9ecf`). 표면 manifest는 `pinned_sha` 둘만 바뀌어
 공개 멤버 집합이 불변임이 함께 증명된다.
 
+```markdown
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
 

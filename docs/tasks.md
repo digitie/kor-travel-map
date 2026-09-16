@@ -44,6 +44,12 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   수행하지 않는다(n150은 실 production이 아니며 손상 시 재적재가 정책).
   off-box 자동화의 현 소유자는 `T-VN-H49-OFFBOX`다.
 
+- [ ] T-VN-H49-BACKUP-STALENESS — **백업이 멈춰도 아무도 몰랐다**
+
+  `scheduled_backup`이 425건 연속 실패하는 동안 5일간 경보가 없었다(2026-09-16 발견,
+  webserver 재기동으로 복구). 진짜 결함은 멈춘 것이 아니라 **멈춘 줄 몰랐다**는
+  것이다. 해제 조건은 acceptance §T-VN-H49-BACKUP-STALENESS.
+
 - [ ] T-VN-H49 — **Geo application DB backup/retention 운영 증거 + hard purge 정책**
 
   `scheduled_backup`·retention janitor의 수렴을 보인다. 수납했던 manual Feature hard
@@ -63,11 +69,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을
   삭제로 판정했고(37건), 헤딩으로 자르면 코드 펜스가 섹션 경계를 넘나들어 체크박스가
   펜스 안으로 들어갔다. 되돌렸다. 해제 조건은 acceptance §T-VN-LEDGER-ARCHIVE.
-
-- [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
-
-  D2는 소유 Feature를 은퇴까지만 끌고 가고 삭제는 `purge`가 하는데, 그 action이
-  D2 lane의 `run_helper` 선택지에 없다. 해제 조건은 acceptance §T-VN-D2-RESIDUE.
 
 - [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
 

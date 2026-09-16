@@ -11,8 +11,16 @@ import { expect, test } from "@playwright/test";
  * 최상위에 함께 반환하고, immutable claim의 UUID가 최상위 `feature_uuid`와
  * 일치하며, origin이 단건 admin 경로의 principal/role 계약을 정확히 싣는다.
  *
- * 쓰기 스펙 opt-in: E2E_MANUAL_CREATE_WRITE=1 (격리 스택 전용 — 생성물을 지우지
- * 않는다).
+ * 쓰기 스펙 opt-in: E2E_MANUAL_CREATE_WRITE=1.
+ *
+ * **아직 격리 스택 전용이고, 이유는 cleanup이 없기 때문이다.** 이 spec은 Feature를
+ * 만들고 **지우지 않는다** — `feature.purge_manual_feature` 프로시저는 #306으로
+ * 생겼지만 **HTTP로 노출돼 있지 않아**(API 라우터에 없다) spec이 부를 길이 없다
+ * (2026-09-16 실측). 그래서 지금 prod에서 돌리면 지울 수 없는 행이 남는다 —
+ * 같은 형태가 `T-VN-D2-RESIDUE`로 이미 열려 있다.
+ *
+ * actor는 더 이상 막는 이유가 아니다: 종전에는 `"e2e-admin"` 리터럴 때문에 prod에서
+ * 구조적으로 실패했는데, 아래 단언을 환경에서 유도하도록 고쳤다.
  */
 
 type Envelope<T> = { data: T };
@@ -108,7 +116,16 @@ test.describe("M01/M02 admin 수동 Feature 생성 live acceptance", () => {
       "admin-ui-bff.manual-feature-create.v1",
     );
     expect(data.origin.invoker_role).toBe("ktm_feature_api_runtime");
-    expect(data.origin.created_by_actor).toBe("e2e-admin");
+    // **로그인한 주체가 provenance까지 실려 오는가** — 그 값이 무엇인지가 아니다.
+    // 종전에는 `"e2e-admin"`을 리터럴로 박아 두어 **환경이 바뀌면 부러졌다**: actor는
+    // BFF의 `adminUsernameFromEnv()`(→ `ADMIN_USERNAME`, 기본 `admin`)에서 나와
+    // `X-Kor-Travel-Map-Actor` 헤더 → 도메인 커맨드 → `created_by_actor`로 간다.
+    // prod는 그 값이 `admin`이라 이 단언 하나 때문에 구조적으로 실패했다(2026-09-16
+    // 실측). 저장소의 기존 관용구(`ops-c7-read-auth.live.spec.ts`)와 같은 형태로
+    // 환경에서 유도한다 — 계약을 결박하고 그때의 값은 결박하지 않는다.
+    expect(data.origin.created_by_actor).toBe(
+      process.env.E2E_ADMIN_USERNAME ?? "admin",
+    );
 
     // ── M01: 같은 identity 재제출은 exact-conflict fail-close ───────────
     await fill();

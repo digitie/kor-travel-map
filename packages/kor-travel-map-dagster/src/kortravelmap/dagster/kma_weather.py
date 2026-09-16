@@ -811,8 +811,20 @@ async def _run_kma_weather_asset(
             expected_calls=len(targets.grids),
         )
         for nx, ny in targets.grids:
-            # 격자 하나 = 오퍼레이션 호출 하나. 종전에는 이 수를 `grids_fetched`로만
-            # 내보내 쿼터와 연결되는 이름이 없었다.
+            # 격자 하나에 **적어도** 오퍼레이션 호출 하나. 종전에는 이 수를
+            # `grids_fetched`로만 내보내 쿼터와 연결되는 이름이 없었다.
+            #
+            # **"격자 하나 = 호출 하나"는 더 이상 참이 아니다.** `python-kma-api`
+            # `4ac9a325`(2026-09-16)가 `getVilageFcst`/`getUltraSrtFcst`/
+            # `getUltraSrtNcst`를 페이지네이션하도록 고쳤다 — 종전에는 두 번째
+            # 페이지가 오면 `KmaParseError`로 **실패**했고(하류 소비자가 저녁 KST
+            # 시간대에 연속 실패를 관측했다) 지금은 `has_next_page`가 끝날 때까지
+            # 돌며 상한이 `_MAX_FETCH_PAGES = 20`이다. 즉 격자 하나가 최대 20요청이
+            # 될 수 있고, 이 계수기는 그 안을 보지 못한다.
+            #
+            # 그래서 이 수는 여전히 **하한**이다(`upstream_requests_min`의 `_min`이
+            # 그 뜻이다). 실무에서는 한 페이지로 끝나는 것이 보통이라 하한이
+            # 대체로 참값이지만, 넘칠 때 얼마나 넘치는지는 이 층에서 안 보인다.
             note_upstream_request()
             # H45: 단건 격자 호출만 유한 재시도(retryable 분류 예외 한정 — kma
             # ``retryable`` 규약, quota/rate_limit 제외). N건 순차 호출에서 step
