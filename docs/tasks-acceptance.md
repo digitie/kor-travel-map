@@ -1184,6 +1184,21 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
   manifest 증거를 남긴다.
+
+  **2026-09-16 정정 — 이 `[x]`도 깨져 있었다. 위 geo 조문과 같은 날 같은 방식으로.**
+  세 role의 cron이 **2026-09-12부터 5일째** `Permission denied`로 실패했다(마지막 성공
+  09-11 03:15~03:55Z). 배포가 `kor-travel-docker-manager/scripts/*.sh`의 실행 비트를
+  벗겼는데(전부 `-rw-rw-r--`) crontab은 경로를 **직접 실행**한다:
+
+      [2026-09-11T03:15:05Z] [standalone-backup:geo_dagster] done
+      /bin/sh: 1: .../run-standalone-backup.sh: Permission denied
+
+  실행 비트를 복구하고 미등록 role 탐침(`EXIT=2` — 덤프도 GC도 일으키지 않는 경로)으로
+  실행 가능함을 확인했다. **조문이 요구한 "cron으로 돈다"는 지금 참이지만, 이 조문은
+  그것을 한 번 재서 닫았을 뿐이고 그 뒤 5일간 거짓이 되어도 아무도 몰랐다.**
+  이 절의 두 `[x]` 조문이 **둘 다** 같은 이유로 깨진 셈이라, 이 task의 진짜 미결은
+  "한 번 수렴했다"가 아니라 "계속 수렴하는지 아는가"다 —
+  `T-VN-H49-BACKUP-STALENESS` 조문 1이 그 축을 소유한다(현재 소유자 지시로 보류).
 - [ ] off-box 사본 자동화를 결선한다(`T-VN-H49-OFFBOX`). Map application/Dagster 주기화는
   #148의 재적재 정책 결정을 따르며 이 task가 임의로 활성화하지 않는다.
 - [ ] 위 운영 AC를 닫은 뒤 ~~`docs/backup-restore.md` §1의~~ 외부 instance 경고를
