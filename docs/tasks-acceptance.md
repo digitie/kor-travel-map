@@ -1180,6 +1180,27 @@ lifecycle에서는 prod 데이터가 rebuild마다 사라진다). 다시 세울 
   수단은 갖춰졌다(`CURATION_CSV_OPTIONAL_HEADERS`, `ops.curation_import_manual_feature_children`,
   배포 API의 manual-feature create 활성). 실행이 prod 데이터에 걸린다.
 
+## T-VN-H49-BACKUP-STALENESS
+
+**무엇이 참이면 닫히는가.**
+
+1. [ ] 백업이 **멈추면 누군가 안다.** 지금은 몰랐다 — `scheduled_backup`이 425건
+   연속 실패하는 동안 5일간 경보가 없었고, 발견은 다른 일로 디렉터리를 들여다본
+   우연이었다.
+2. [ ] 그 판정이 **"최근 성공이 있는가"**로 되어 있다. "실패가 있는가"로는 부족하다 —
+   실패 없이 **시도조차 멈추는** 형태가 따로 있고 결과는 같다(보유분이 낡는다).
+3. [ ] retention GC가 도는 것과 백업이 도는 것을 **따로** 본다. 이번에 GC만 정상
+   동작해 09-07을 지웠고 "뭔가 돌고 있다"는 인상이 남았다 — 실제로는 낡아가기만 했다.
+
+**무엇이 관측됐나 — 2026-09-16.** 마지막 성공 백업 `2026-09-10 12:00Z`, 그 뒤
+**425건 연속 실패**(09-11 12:30Z부터, 15분 주기). 근본 원인은 geo Dagster의 code
+server가 gRPC UNAVAILABLE이 된 것이고 webserver 재기동으로 복구했다. 진단 체인은
+`T-VN-H49`의 2026-09-16 정정이 갖는다.
+
+**`T-VN-H49`와 다른 점.** 그쪽은 "백업이 수렴하는가"를 묻고 이쪽은 **"수렴하지 않게
+됐을 때 알 수 있는가"**를 묻는다. 앞의 것은 한 번 재면 닫히지만 뒤의 것은 그렇지
+않다 — 이번에 닫은 그 조문이 **닫힌 다음 날 깨졌다.**
+
 ## T-VN-H49
 
 ```markdown
@@ -1201,6 +1222,27 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
   `keep_min=3`을 새 성공들이 채우자 GC가 실제로 지웠다. "수렴"과 "bounded retention"이
   둘 다 관측으로 성립하므로 이 조문을 닫는다. 남은 것은 off-box 사본뿐이고 그것은
   `T-VN-H49-OFFBOX`가 소유한다.
+
+  **2026-09-16 정정 — 이 `[x]`는 닫힌 바로 그날 깨졌다.** `scheduled_backup`이
+  **2026-09-11 12:30Z부터 425건 연속 실패**했고(15분 주기) 마지막 성공 백업은
+  **09-10 12:00Z**였다. 즉 "수렴"이라고 적은 다음 날부터 5일간 발산이었다.
+  retention GC만 정상 동작해 09-07을 TTL로 지웠으므로 **보유분이 낡아가기만 했다.**
+
+  진단 체인: `run-due` → 502 → Dagster `launchRun` → 500 →
+  `DagsterUserCodeUnreachableError: gRPC UNAVAILABLE`. webserver가
+  `-m ...definitions`로 code server를 자기 안에 띄우는 구조라 **본체는 healthy인데
+  user code만 죽은** 상태였다 — 그래서 `{ __typename }` 같은 질의는 200이고 실행만
+  실패했다. 방아쇠는 metadata DB(:12500)의 `recovery mode`였고 그 DB는 지금 정상이다
+  (`pg_is_in_recovery=False`). webserver 재기동으로 복구했고, **끝까지 확인했다** —
+  재기동 직후 첫 틱(00:30:14Z)이 오류 없이 시작해 `state=done · progress=1.0`으로
+  00:53:37Z 완주했고, `.part`가 사라지며 정식 artifact
+  `kor_travel_geo_backup_20260916T003030Z_zstd3.tar.zst`(4.40 GB)가 됐다.
+  **5일 만의 첫 백업이다.**
+
+  **이 조문이 다시 닫히려면 "그때 수렴했다"가 아니라 "지금도 수렴한다"를 재는
+  것이 있어야 한다.** 425건이 조용히 실패하는 동안 아무 경보도 없었다 — 백업이
+  5일 멈춰도 아무도 모르는 상태였고, 그것이 이 건의 진짜 결함이다.
+  `T-VN-H49-BACKUP-STALENESS`로 뺐다.
 - [x] 별도 `geo_dagster` metadata DB(`T-VN-H49-GEO-DAGSTER`)와
   concierge(`12600`, `T-VN-H49-CONCIERGE`)·pinvi(`12800`, `T-VN-H49-PINVI`)에 standalone
   create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
