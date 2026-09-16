@@ -194,17 +194,44 @@ def test_the_real_ledger_has_balanced_fences() -> None:
 def test_the_sections_that_were_invisible_are_now_parsed(task: str) -> None:
     """2026-09-16 이전에 fence 안에 갇혀 있던 절의 조문이 실제로 파싱된다.
 
-    세 이름을 박아 두는 이유: 이것들은 `tasks.md`에 **열려 있는** task이고, 그
-    해제 조건이 게이트에 보이지 않는 상태가 정확히 `6d671ef1`의 재발 조건이다.
+    세 이름을 박아 두는 이유: 이것들이 안 보이던 상태가 정확히 `6d671ef1`의 재발
+    조건이었다.
+
+    **원장만 보지 않고 감시 대상 전체를 본다.** 절이 닫히면 규약 §8대로
+    `docs/archive/tasks-acceptance-*.md`로 옮겨지는데, 그것은 **사라진 것이 아니라
+    옮겨진 것**이고 삭제 게이트는 아카이브도 감시 대상으로 읽는다
+    (`_archive_watch_paths`, `T-VN-LEDGER-ARCHIVE` 조문 3). 여기서 원장만 보면
+    닫아서 아카이브로 옮기는 정상 동작이 이 검사를 빨갛게 만든다 — 실제로
+    2026-09-16에 `T-VN-LEDGER-ARCHIVE`를 닫고 옮기자 그렇게 됐다.
+
+    즉 이 검사가 묻는 것은 "원장에 있는가"가 아니라 **"게이트에게 보이는가"**이고,
+    게이트가 보는 집합과 같은 집합을 봐야 그 물음이 성립한다.
     """
-    text = LEDGER.read_text(encoding="utf-8")
-    assert task in section_task_ids(text), f"`## {task}` 절이 파서에게 보이지 않는다"
-    clauses = [
-        item.clause_id
-        for item in parse_checkboxes(text, source=str(LEDGER))
-        if item.section_task_id == task and item.clause_id is not None
-    ]
-    assert clauses, f"{task}의 해제 조문이 하나도 파싱되지 않았다"
+    watched = [LEDGER, *sorted(LEDGER.parent.glob("archive/tasks-acceptance-*.md"))]
+    seen_section: list[str] = []
+    clauses: list[str] = []
+    for path in watched:
+        text = path.read_text(encoding="utf-8")
+        if task in section_task_ids(text):
+            seen_section.append(path.name)
+        # **첫 매치에서 멈추면 안 된다.** 절이 아카이브로 옮겨지면 live 원장에는
+        # 제목 + stub 한 줄만 남고 조문 본문은 아카이브에 있다(규약 §8). 원장에서
+        # 제목을 보고 거기서 끝내면 "제목은 있는데 조문이 0건"으로 빨개진다 —
+        # 정상 동작을 고장으로 읽는 것이다.
+        clauses.extend(
+            item.clause_id
+            for item in parse_checkboxes(text, source=str(path))
+            if item.section_task_id == task and item.clause_id is not None
+        )
+
+    assert seen_section, (
+        f"`## {task}` 절이 감시 대상 어디에서도 파서에게 보이지 않는다 "
+        f"(찾아본 곳 {len(watched)}개)"
+    )
+    assert clauses, (
+        f"{task}의 절은 {seen_section}에서 보이는데 해제 조문이 하나도 파싱되지 않았다 — "
+        "제목만 남고 조문이 어디에서도 안 보이면 게이트가 지킬 것이 없다"
+    )
 
 
 # ── 3층: 게이트가 실제로 빨개지는가 (임시 git 저장소) ──────────────────
