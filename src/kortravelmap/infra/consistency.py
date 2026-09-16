@@ -33,9 +33,22 @@ F1~F4 + Phase 2 케이스를 raw SQL(ADR-004)로 검사하고 결과를
   ``feature.feature_files`` 메타데이터가 서로 어긋나면 severity=**WARN**.
   ``feature_files`` 테이블이 아직 없거나 스냅샷이 제공되지 않은 방향은 검사하지
   않고 OK로 둔다.
+- **F9** backup last_success staleness — ``backup_root``에 있는 **완결된** backup
+  artifact 중 가장 새 것이 SLA(기본 ``backup_last_success_warn_hours``)보다 낡았거나
+  아예 하나도 없으면 severity=**WARN**(observe-only). F5와 같은 "최근 성공이
+  있는가" 축이고, 근거는 DB job 행이 아니라 **디스크의 산출물**이다.
 
-F1/F2/F3/F6은 ``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7/F8은
-``run_consistency_checks``의 임계/정책/재계산/객체 스냅샷 분기로 추가된다.
+  왜 그 축인가 — 2026-09-16에 geo 예약 백업이 **5일간 425회 연속 실패**하는 동안
+  아무것도 울리지 않았다. "실패가 있는가"로 묻는 검사는 *시도 자체가 멈춘* 경로를
+  영원히 놓치고(실패 행이 0건이다), 결과는 같다. 그리고 그때 retention GC는 정상
+  동작해 09-07 artifact를 TTL로 지웠다 — 즉 **보유 개수는 멀쩡했고 보유분만
+  낡아갔다.** 그래서 F9의 판정축은 최신 성공의 나이 하나뿐이고, GC가 만드는
+  모양(보유 개수·보유 시간 폭)은 ``metadata``에만 둔다. 개수를 판정에 넣었다면 그날
+  "artifact 3건, 정상"이라고 답했을 것이다.
+
+F1/F2/F3/F6은 ``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7/F8/F9는
+``run_consistency_checks``의 임계/정책/재계산/객체 스냅샷/백업 산출물 분기로
+추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -45,6 +58,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
@@ -53,15 +67,22 @@ from sqlalchemy import text
 
 from kortravelmap.core.scoring import score_pair
 from kortravelmap.dto import Coordinate
+from kortravelmap.infra.backup import BackupArtifactError, list_backup_artifacts
+from kortravelmap.settings import BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from kortravelmap.infra.backup import BackupArtifact
 
 __all__ = [
     "CaseSpec",
     "CaseResult",
     "ConsistencyReport",
     "FileObjectRef",
+    "BACKUP_LAST_SUCCESS_WARN_SECONDS",
     "CONSISTENCY_CASES",
     "DEDUP_PENDING_WARN_THRESHOLD",
     "DEDUP_SCORE_REGRESSION_WARN_POINTS",
@@ -90,6 +111,11 @@ PROVIDER_LAST_SUCCESS_WARN_SECONDS: Final[int] = 24 * 60 * 60
 # F7 기본 허용 회귀폭 — dedup_review_queue에 저장된 baseline total_score(0~100) 대비
 # 현재 core.scoring 재계산 점수가 이 점수 이상 낮아지면 WARN으로 본다.
 DEDUP_SCORE_REGRESSION_WARN_POINTS: Final[float] = 10.0
+
+# F9 기본 SLA — 숫자 자체는 ``settings.backup_last_success_warn_hours``가 갖는다(그
+# description이 "왜 48h인가"의 정본). 여기서 숫자를 다시 적지 않는 이유는 env 기본값과
+# 코드 기본값이 갈라질 수 있기 때문이다 — 갈라지면 더 느슨한 쪽이 조용히 이긴다.
+BACKUP_LAST_SUCCESS_WARN_SECONDS: Final[int] = BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT * 3600
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
@@ -674,6 +700,198 @@ async def _check_f8_file_object_orphans(
     )
 
 
+def _is_successful_backup_artifact(artifact: BackupArtifact) -> bool:
+    """artifact 하나가 **성공한 백업**으로 셀 자격이 있는가.
+
+    ``scripts/docker-backup.sh``는 디렉터리를 먼저 만들고 dump → ``meta/manifest.json``
+    → **마지막에** ``meta/SHA256SUMS``를 쓴다(그 스크립트가 직접 "``SHA256SUMS``가
+    유일한 신뢰 뿌리"라고 적어 둔 그 파일이다). 그러므로 checksum 0건은 "아직 쓰는
+    중이거나 도중에 죽었다"와 같은 말이다 — manifest까지만 쓰고 끊긴 디렉터리는
+    ``manifest_status == "ok"``라서, manifest만 보는 판정에는 **성공으로 통과한다.**
+    2026-09-16 사고에서 23분간 남아 있던 geo의 ``.part``가 디렉터리 모양으로
+    나타나면 정확히 이 상태다.
+
+    ``created_at_utc``가 ``None``인 경우(manifest 부재/파싱 실패/시각 필드 파싱 실패)는
+    따로 셀 것도 없다 — **언제 찍힌 것인지를 모르면** 최근성의 근거가 될 수 없다.
+
+    세 축 중 ``manifest_status``는 지금은 시각 축에 가려져 있다(manifest가 없거나 깨지면
+    ``infra.backup``이 ``created_at_utc``도 ``None``으로 준다). 그래도 남긴다 — 그 가림은
+    ``infra.backup``의 현재 구현에만 의존하고, 언젠가 디렉터리 mtime 등으로 시각을
+    보충하면 manifest 축이 유일한 방어가 된다.
+    """
+    return (
+        artifact.manifest_status == "ok"
+        and artifact.created_at_utc is not None
+        and artifact.checksum_count > 0
+    )
+
+
+def _build_f9_backup_staleness_result(
+    artifacts: Iterable[BackupArtifact],
+    *,
+    backup_root: Path | None,
+    sla_seconds: int,
+    now: datetime,
+    sample_limit: int,
+    scan_error: str | None = None,
+) -> CaseResult:
+    """F9 — backup artifact 목록에서 "최근 성공이 있는가"를 판정한다(순수 함수)."""
+    if scan_error is not None:
+        # 스캔이 실패하면 **최신 성공을 증명할 수 없다.** 증명 실패를 OK로 두면
+        # 읽기 권한 하나가 이 검사를 조용히 끄는 길이 된다.
+        return CaseResult(
+            code="F9",
+            severity="WARN",
+            count=1,
+            description=(
+                f"backup_root를 읽지 못해 최근 성공을 확인할 수 없다: {scan_error}"
+            ),
+            metadata={
+                "observed": False,
+                "scan_error": scan_error,
+                "backup_root": str(backup_root) if backup_root is not None else None,
+            },
+            sample_ids=(),
+        )
+    if backup_root is None:
+        # 미관측과 정상을 구분해서 적는다. Dagster 쪽 배치 경로는 ``backup_root``
+        # 볼륨이 아예 없고(api 컨테이너만 마운트한다), 거기서 WARN을 내면 매 배치마다
+        # 울려 곧 무시된다. 대신 ``observed=False``를 남겨 count 0이 "백업이 멀쩡하다"로
+        # 읽히지 않게 한다.
+        return CaseResult(
+            code="F9",
+            severity="WARN",
+            description=(
+                "backup artifact 최근 성공 SLA — **미관측**(backup_root 미제공, "
+                "ADR-033 F9). count 0은 정상이라는 뜻이 아니다."
+            ),
+            count=0,
+            sample_ids=[],
+            metadata={"observed": False, "reason": "backup_root_not_provided"},
+        )
+
+    materialized = list(artifacts)
+    # ``created_at_utc is not None``을 다시 적는 것은 mypy 때문이다 — 술어 함수 안의
+    # 검사는 호출부의 타입을 좁혀 주지 않는다.
+    dated: list[tuple[datetime, BackupArtifact]] = [
+        (artifact.created_at_utc, artifact)
+        for artifact in materialized
+        if _is_successful_backup_artifact(artifact) and artifact.created_at_utc is not None
+    ]
+    newest = max(dated, key=lambda item: item[0]) if dated else None
+    oldest = min(dated, key=lambda item: item[0]) if dated else None
+    newest_age = (now - newest[0]).total_seconds() if newest is not None else None
+    oldest_age = (now - oldest[0]).total_seconds() if oldest is not None else None
+
+    # 판정축은 **최신 성공의 나이** 하나다. 성공 기록이 하나도 없는 경우를 같은 결론에
+    # 넣는 것이 핵심이다(F5가 ``last_success_at IS NULL``을 stale에 넣는 것과 같은 모양)
+    # — 시도조차 멈춘 경로는 실패 행을 한 건도 만들지 않으므로, 빈 디렉터리를 조용히 OK로
+    # 두면 가장 나쁜 상태가 가장 조용해진다.
+    # **미래 날짜도 stale이다.** `newest_age > sla`만 보면 시계가 한 번 앞으로 튄
+    # 동안 만들어진 artifact가 **영원히 최신**이 되어 이 검사가 다시는 울리지 않는다
+    # (2026-09-16 적대 리뷰 실증: incident fixture + 2027년 artifact 하나 → age
+    # -2580h → 조용). 조용해지지 않는 것이 이 검사의 존재 이유이므로, 설명할 수 없는
+    # 시각은 안심이 아니라 경보다.
+    stale = newest_age is None or not (0.0 <= newest_age <= float(sla_seconds))
+
+    sample_ids: list[str] = []
+    if stale:
+        _append_limited_sample(
+            sample_ids,
+            (
+                f"no_successful_backup_artifact:{backup_root}"
+                if newest is None
+                else f"stale_newest_success:{newest[1].backup_id}:{newest[0].isoformat()}"
+            ),
+            sample_limit=sample_limit,
+        )
+    age_text = f"{newest_age / 3600:.1f}h" if newest_age is not None else "성공 기록 없음"
+    return CaseResult(
+        code="F9",
+        severity="WARN",
+        description=(
+            f"backup artifact 최근 성공 SLA 초과 (기준 {sla_seconds}s, 최신 성공 "
+            f"{age_text}, ADR-033 F9 — observe-only)"
+        ),
+        # F4와 같은 임계 초과 이벤트다 — root 하나에 백업 경로는 하나뿐이라 "몇 행이
+        # 위반인가"라는 물음 자체가 성립하지 않는다.
+        count=1 if stale else 0,
+        sample_ids=sample_ids,
+        metadata={
+            "observed": True,
+            "backup_root": str(backup_root),
+            "sla_seconds": sla_seconds,
+            "stale": stale,
+            "newest_success_backup_id": newest[1].backup_id if newest is not None else None,
+            "newest_success_at_utc": newest[0].isoformat() if newest is not None else None,
+            "newest_success_age_seconds": (
+                int(newest_age) if newest_age is not None else None
+            ),
+            # ── 아래 넷은 판정에 **쓰이지 않는다.** 이쪽은 retention GC가 만드는 모양
+            # (보유 개수와 그 보유분이 덮는 시간 폭)이고 백업이 도는지와는 다른 축이다.
+            # 2026-09-16이 정확히 그 분리였다: artifact 3건이 멀쩡히 있었고 GC는 09-07을
+            # TTL로 지우며 정상 동작 중이었는데 최신 성공은 5일 전이었다. 보유 폭이 TTL을
+            # 넘어 계속 자라면 그때는 반대로 GC 쪽이 멈춘 것이다 — 두 축을 한 숫자로
+            # 합치지 않았기 때문에 그 구분이 리포트에서 읽힌다.
+            "artifact_count": len(materialized),
+            "success_count": len(dated),
+            "incomplete_count": len(materialized) - len(dated),
+            "oldest_success_age_seconds": (
+                int(oldest_age) if oldest_age is not None else None
+            ),
+            "held_set_span_seconds": (
+                int(oldest_age - newest_age)
+                if oldest_age is not None and newest_age is not None
+                else None
+            ),
+        },
+    )
+
+
+def _check_f9_backup_staleness(
+    backup_root: Path | None,
+    *,
+    sla_seconds: int,
+    sample_limit: int,
+    now: datetime | None = None,
+) -> CaseResult:
+    """F9 — ``backup_root``를 훑어 최신 **성공** artifact의 나이를 잰다.
+
+    근거를 DB job 행이 아니라 디스크에서 읽는다. "시작했다"고 적힌 행은 이번 사고에서
+    425번 적혔고 그중 성공은 0건이었다 — 산출물만이 성공의 증거다. 파일시스템 I/O를
+    async 함수 안에서 동기로 도는 것은 ``infra.file_registry_scan.scan_backup_root``와
+    같은 선택이다(artifact 수십 개 규모).
+    """
+    artifacts: Iterable[BackupArtifact] = ()
+    scan_error: str | None = None
+    if backup_root is not None:
+        try:
+            artifacts = list_backup_artifacts(backup_root)
+        except (OSError, UnicodeDecodeError, BackupArtifactError) as exc:
+            # **artifact 하나가 리포트 전체를 죽이면 안 된다.** `list_backup_artifacts`는
+            # `BackupArtifactError`만 잡고 `OSError`·`UnicodeDecodeError`는 흘려보내는데,
+            # 이 호출부가 F1~F8과 같은 `cases` 목록에 들어 있어 **그 예외 하나가
+            # 일관성 리포트를 통째로 못 만들게 한다**(2026-09-16 적대 리뷰가
+            # `SHA256SUMS`에 비-UTF-8 바이트를 넣어 실증했다).
+            #
+            # 덧붙여 이 경로는 **본질적으로 경합한다** — retention GC가 스캔 중에
+            # artifact를 지우면 `FileNotFoundError`가 난다. 그것은 고장이 아니라 정상
+            # 동작이고, 그때 리포트 전체를 잃는 것이 훨씬 나쁘다.
+            #
+            # 읽지 못한 것을 **OK로 두지 않는다** — 읽을 수 없으면 최신 성공을 증명할
+            # 수 없고, 증명할 수 없는 것은 이 검사에서 경보다.
+            artifacts = ()
+            scan_error = f"{type(exc).__name__}: {exc}"
+    return _build_f9_backup_staleness_result(
+        artifacts,
+        scan_error=scan_error,
+        backup_root=backup_root,
+        sla_seconds=sla_seconds,
+        now=now if now is not None else datetime.now(UTC),
+        sample_limit=sample_limit,
+    )
+
+
 async def run_consistency_checks(
     session: AsyncSession,
     *,
@@ -684,8 +902,10 @@ async def run_consistency_checks(
     provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
     dedup_score_regression_warn_points: float = DEDUP_SCORE_REGRESSION_WARN_POINTS,
     known_file_objects: Iterable[FileObjectRef] | None = None,
+    backup_root: Path | None = None,
+    backup_last_success_sla_seconds: int = BACKUP_LAST_SUCCESS_WARN_SECONDS,
 ) -> ConsistencyReport:
-    """F1~F8 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F9 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -711,6 +931,13 @@ async def run_consistency_checks(
     known_file_objects:
         F8 객체 저장소 스냅샷. 제공되면 ``feature.feature_files`` metadata와 양방향
         비교한다. 미제공 시 DB metadata가 참조하는 feature 활성 여부만 검사한다.
+    backup_root:
+        F9 backup artifact 루트(``settings.backup_root``). 이 process가 그 볼륨을 보는
+        경우에만 호출자가 넘긴다 — 미제공이면 F9는 count 0 + ``metadata.observed=False``
+        (**정상이라는 뜻이 아니라 안 봤다는 뜻**)로 남는다.
+    backup_last_success_sla_seconds:
+        F9 SLA. 기본값은 ``settings.backup_last_success_warn_hours``(48h)를 초 환산한
+        것이고, env로 주기를 바꿨다면 호출자가 그 값을 넘긴다.
 
     Returns
     -------
@@ -750,7 +977,8 @@ async def run_consistency_checks(
             )
         )
 
-    # F4/F5/F7/F8 — 정적 SQL이 아닌 임계/정책/source join/object snapshot 케이스.
+    # F4/F5/F7/F8/F9 — 정적 SQL이 아닌 임계/정책/source join/object snapshot/
+    # 백업 산출물 케이스.
     cases.append(
         await _check_f4_dedup_backlog(
             session, threshold=dedup_pending_threshold, sample_limit=sample_limit
@@ -774,6 +1002,14 @@ async def run_consistency_checks(
         await _check_f8_file_object_orphans(
             session,
             known_file_objects=known_file_objects,
+            sample_limit=sample_limit,
+        )
+    )
+    # F9만 session을 쓰지 않는다 — 백업의 성공 여부는 DB가 아니라 디스크에 있다.
+    cases.append(
+        _check_f9_backup_staleness(
+            backup_root,
+            sla_seconds=backup_last_success_sla_seconds,
             sample_limit=sample_limit,
         )
     )

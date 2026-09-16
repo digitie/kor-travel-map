@@ -6,7 +6,7 @@ Sprint 4 §2.8 CLI. read-only ``status`` + mutate ``import``(MOIS Step A bulk �
 명령
 ----
 - ``ktmctl status`` — 운영 현황 카운트 출력 (read-only, mutex 없음).
-- ``ktmctl consistency-report`` — ADR-033 F1~F8 정합성 dry-run Markdown/JSON
+- ``ktmctl consistency-report`` — ADR-033 F1~F9 정합성 dry-run Markdown/JSON
   리포트 출력 (read-only 기본, mutex 없음).
 - ``ktmctl import mois <records-file>`` — provider가 export한 NDJSON snapshot을
   읽어 MOIS 인허가 feature를 적재한다 (Step A bulk). ``run_mois_license_bulk_job``이
@@ -54,6 +54,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core import DATASET_WIDE_SYNC_SCOPE, kst_now
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.infra.consistency import (
+    BACKUP_LAST_SUCCESS_WARN_SECONDS,
     DEDUP_PENDING_WARN_THRESHOLD,
     DEDUP_SCORE_REGRESSION_WARN_POINTS,
     PROVIDER_LAST_SUCCESS_WARN_SECONDS,
@@ -107,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     consistency_p = sub.add_parser(
         "consistency-report",
-        help="ADR-033 F1~F8 정합성 dry-run report 출력 (read-only 기본).",
+        help="ADR-033 F1~F9 정합성 dry-run report 출력 (read-only 기본).",
     )
     consistency_p.add_argument(
         "--batch-id",
@@ -163,6 +164,27 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "F8 객체 저장소 snapshot JSON/JSONL 경로. 각 항목은 storage_backend, bucket, "
             "object_key를 가진다."
+        ),
+    )
+    consistency_p.add_argument(
+        "--backup-root",
+        default=None,
+        help=(
+            "F9 backup artifact 루트 경로(api settings의 ``backup_root``). 미지정이면 "
+            "F9는 아무것도 재지 않고 observed=false로 남는다 — 정상 판정이 아니다."
+        ),
+    )
+    consistency_p.add_argument(
+        "--backup-last-success-sla-seconds",
+        type=int,
+        default=None,
+        help=(
+            "F9 backup 최신 성공 SLA seconds. 미지정이면 settings의 "
+            "``backup_last_success_warn_hours``(env "
+            "``KOR_TRAVEL_MAP_BACKUP_LAST_SUCCESS_WARN_HOURS``)를 쓰고, 그것도 없으면 "
+            f"{BACKUP_LAST_SUCCESS_WARN_SECONDS}(=48h, 예약 주기 24h의 2배)다. "
+            "**설정을 읽는 자리가 여기뿐이다** — 종전에는 이 기본값이 모듈 상수라 "
+            "env를 바꿔도 아무 일이 없었다(2026-09-16 적대 리뷰)."
         ),
     )
     consistency_p.add_argument(
@@ -346,6 +368,18 @@ async def _cmd_consistency_report(args: argparse.Namespace) -> int:
         known_source = str(path)
         known_count = len(known_file_objects)
 
+    backup_root = Path(args.backup_root) if args.backup_root is not None else None
+
+    # **설정을 실제로 읽는 자리.** 종전에는 이 인자의 기본값이 모듈 상수라
+    # `KOR_TRAVEL_MAP_BACKUP_LAST_SUCCESS_WARN_HOURS`를 바꿔도 아무 일이 없었다 —
+    # `.env.example`과 필드 설명이 그 env를 광고하는데 읽는 곳이 하나도 없었다
+    # (2026-09-16 적대 리뷰). 명시 인자 > 설정 > 모듈 기본값 순으로 떨어진다.
+    backup_sla_seconds = args.backup_last_success_sla_seconds
+    if backup_sla_seconds is None:
+        backup_sla_seconds = int(
+            KorTravelMapSettings().backup_last_success_warn_hours * 3600
+        )
+
     engine = make_async_engine(_resolve_dsn(args))
     try:
         async with AsyncKorTravelMapClient(engine) as client:
@@ -357,6 +391,8 @@ async def _cmd_consistency_report(args: argparse.Namespace) -> int:
                 provider_last_success_sla_seconds=args.provider_last_success_sla_seconds,
                 dedup_score_regression_warn_points=args.dedup_score_regression_warn_points,
                 known_file_objects=known_file_objects,
+                backup_root=backup_root,
+                backup_last_success_sla_seconds=backup_sla_seconds,
             )
     finally:
         await engine.dispose()
@@ -370,6 +406,8 @@ async def _cmd_consistency_report(args: argparse.Namespace) -> int:
         dedup_score_regression_warn_points=args.dedup_score_regression_warn_points,
         known_file_objects_source=known_source,
         known_file_objects_count=known_count,
+        backup_root_source=str(backup_root) if backup_root is not None else None,
+        backup_last_success_sla_seconds=backup_sla_seconds,
     )
     output = (
         render_consistency_report_json(report, options=options)

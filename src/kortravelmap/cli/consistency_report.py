@@ -8,7 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from kortravelmap.infra.consistency import ConsistencyReport, FileObjectRef
+from kortravelmap.infra.consistency import (
+    BACKUP_LAST_SUCCESS_WARN_SECONDS,
+    ConsistencyReport,
+    FileObjectRef,
+)
 
 __all__ = [
     "ConsistencyReportOptions",
@@ -30,6 +34,8 @@ class ConsistencyReportOptions:
     dedup_score_regression_warn_points: float
     known_file_objects_source: str | None = None
     known_file_objects_count: int | None = None
+    backup_root_source: str | None = None
+    backup_last_success_sla_seconds: int = BACKUP_LAST_SUCCESS_WARN_SECONDS
 
     @property
     def mode(self) -> str:
@@ -40,6 +46,7 @@ class ConsistencyReportOptions:
             "dedup_pending_threshold": self.dedup_pending_threshold,
             "provider_last_success_sla_seconds": self.provider_last_success_sla_seconds,
             "dedup_score_regression_warn_points": self.dedup_score_regression_warn_points,
+            "backup_last_success_sla_seconds": self.backup_last_success_sla_seconds,
             "sample_limit": self.sample_limit,
         }
 
@@ -125,6 +132,14 @@ def render_consistency_report_markdown(
             if options.known_file_objects_source is not None
             else "- F8 object snapshot: `not provided`"
         ),
+        (
+            f"- F9 backup root: `{options.backup_root_source}` "
+            f"(SLA {options.backup_last_success_sla_seconds}s)"
+            if options.backup_root_source is not None
+            # `not provided`를 "이상 없음"으로 읽지 않게 못박는다 — F9는 그 경우
+            # 아무것도 재지 않았고, 이번 사고가 바로 "아무도 안 보고 있었다"였다.
+            else "- F9 backup root: `not provided` — **미관측**(정상 판정이 아니다)"
+        ),
         "",
         "## 케이스 요약",
         "",
@@ -184,6 +199,10 @@ def render_consistency_report_json(
         "known_file_objects": {
             "source": options.known_file_objects_source,
             "count": options.known_file_objects_count,
+        },
+        "backup_root": {
+            "source": options.backup_root_source,
+            "observed": options.backup_root_source is not None,
         },
         "report": {
             "batch_id": report.batch_id,

@@ -91,6 +91,7 @@ from kortravelmap.infra.cache_target_snapshot_gc_observation_repo import (
 )
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.consistency import (
+    BACKUP_LAST_SUCCESS_WARN_SECONDS,
     DEDUP_PENDING_WARN_THRESHOLD,
     DEDUP_SCORE_REGRESSION_WARN_POINTS,
     PROVIDER_LAST_SUCCESS_WARN_SECONDS,
@@ -346,6 +347,7 @@ if TYPE_CHECKING:
         Sequence,
     )
     from datetime import datetime
+    from pathlib import Path
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -2000,8 +2002,15 @@ class AsyncKorTravelMapClient:
         provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
         dedup_score_regression_warn_points: float = DEDUP_SCORE_REGRESSION_WARN_POINTS,
         known_file_objects: Iterable[FileObjectRef] | None = None,
+        backup_root: Path | None = None,
+        backup_last_success_sla_seconds: int = BACKUP_LAST_SUCCESS_WARN_SECONDS,
     ) -> ConsistencyReport:
-        """F1~F8 consistency report를 실행하고 필요 시 DB에 저장한다."""
+        """F1~F9 consistency report를 실행하고 필요 시 DB에 저장한다.
+
+        ``backup_root``는 이 process가 그 볼륨을 실제로 보는 경우에만 넘긴다. 안 넘기면
+        F9는 count 0 + ``metadata.observed=False``로 남는다 — **백업이 정상이라는
+        뜻이 아니라 보지 않았다는 뜻**이다.
+        """
         async with self._session_factory() as session, session.begin():
             return await repo_run_consistency_checks(
                 session,
@@ -2012,6 +2021,8 @@ class AsyncKorTravelMapClient:
                 provider_last_success_sla_seconds=provider_last_success_sla_seconds,
                 dedup_score_regression_warn_points=dedup_score_regression_warn_points,
                 known_file_objects=known_file_objects,
+                backup_root=backup_root,
+                backup_last_success_sla_seconds=backup_last_success_sla_seconds,
             )
 
 

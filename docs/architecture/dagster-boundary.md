@@ -36,7 +36,7 @@
 | **sync state 갱신** | **본 라이브러리 (`infra/sync_repo.py`)** |
 | **import_jobs 큐 관리** | **본 라이브러리 (`infra/jobs_repo.py`)** |
 | Dedup scoring / Record Linkage | 본 라이브러리 (`core/scoring.py`) |
-| 정합성 검증 룰 (F1~F8) | 본 라이브러리 (`core/integrity.py`, T-201) |
+| 정합성 검증 룰 (F1~F9) | 본 라이브러리 (`core/integrity.py`, T-201) |
 | 외부 사용자/여행계획/POI 도메인 | 외부 서비스 |
 | 외부 서비스에서 feature update 요청 | kor-travel-map OpenAPI 호출 |
 
