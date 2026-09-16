@@ -1,5 +1,37 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-16 — seal ACL을 닫았고, prod가 배포마다 새로 태어난다는 것을 알았다
+
+`T-VN-CURATION-SEAL-ACL` 세 조문을 닫았다(#1239 머지 후 별도 PR). 조문 2는 코드를
+읽어 이미 들어가 있었고 조문 1은 2026-09-12 기록이 있었는데, **그 기록의 근거를 다시
+재려다 prod DB가 배포 때 새로 만들어진다는 것을 알았다** — `kor_travel_map` 생성
+시각이 t44a 배포 시각(2026-09-15 12:29:55Z)이고, 조회 시점 `feature.features` 0행 ·
+`source_entities` 0행 · seal 영수증 0건 · Dagster run 897건은 전부 분 단위 날씨
+스케줄(배포 후 15시간치)이었다. **`[x]`는 붙어 있는데 그것을 뒷받침하는 관측은 없는
+상태였다.**
+
+그래서 현 세대에 `feature_place_standard_museums_job`을 정식 경로로 다시 제출했다.
+run `0f70d0d5` `SUCCESS`, `features 1047 · source_entities 1047 · **seal 영수증 1건**`.
+영수증은 적재가 seal 함수에서 해시를 받아온 뒤에만 쓰이므로 — 그리고
+`finish_provider_feature_membership_command`가 영수증 유무와
+`authoritative_snapshot_complete`가 어긋나면 거절하므로 — "EXECUTE가 목록에 있다"가
+아니라 **"적재가 그 함수를 실제로 실행했다"**의 증거다. 같은 실행으로
+`T-VN-DAGSTER-STORAGE` 조문 1도 현 세대에서 다시 섰다.
+
+조문 3에는 **실 login으로 적재 경로를 태우는** 회귀를 추가했다. 있던 검사 둘 다 조문이
+거부하는 모양이었다 — 하나는 migrator가 카탈로그 술어를 묻고, 다른 하나는 실 login으로
+접속하지만 그 목록에 seal 함수가 없다. 변이로 차이를 보였다: EXECUTE는 두고 호출부가
+함께 거는 표 SELECT만 걷으면 **옛 검사는 초록이고 새 검사만 빨갛다.**
+
+배포가 DB를 새로 만든다는 사실은 특정 task가 아니라 **조문을 쓰는 방식**의 문제라
+`docs/tasks-rule.md` §6에 적었다. 전수 확인 결과 실제로 근거를 잃은 조문은
+`T-VN-DAGSTER-STORAGE` 조문 1 **하나**였다(prod 실측 근거 4건 중).
+
+그리고 **CI가 잡고 n150 네 세션 게이트가 못 잡은 것**이 하나 있었다 —
+`consistency.py`의 `sample_ids=()`(선언은 `list[str]`). 게이트는 전부 pytest이고
+mypy가 없다. dataclass는 런타임에 타입을 강제하지 않아 F9 검사 39건이 전부 초록인 채로
+통과했다.
+
 ## 2026-09-15 — t44a 배포: async 이관이 prod에서 도는 것을 읽었다
 
 `#1235`(provider 13개 async-only)를 `e9b877b39`로 핀했다. 전 사이클 GREEN — 회전

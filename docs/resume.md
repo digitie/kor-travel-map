@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-16 (2) — seal ACL 닫힘, 그리고 prod는 배포마다 새로 태어난다
+
+**다음 한 작업: `T-VN-M02`** — 소유자 판단이 먼저 필요하다. 격리 스택을 다시 세울
+것인지, purge를 HTTP로 노출할 것인지. 후자는 원장 기준 **순서 역전**이다(복원 증명은
+`T-VN-H49`가 소유한다).
+
+**`T-VN-CURATION-SEAL-ACL` 완료.** 세 조문 전부 실측으로 닫았다 — prod run `0f70d0d5`
+`SUCCESS`(`features 1047 · seal 영수증 1건`), 배포 재적용 뒤에도
+`dagster_seal=true / api_seal=false`, 실 login으로 적재 경로를 태우는 회귀 추가(변이
+빨강 확인). 같은 실행으로 `T-VN-DAGSTER-STORAGE` 조문 1도 현 세대에서 다시 섰다.
+
+**알아 둘 것 — prod DB는 배포가 새로 만든다.** `kor_travel_map` 생성 시각 =
+t44a 배포 시각. 그래서 "prod에서 …가 완주한다" 형태의 조문은 다음 배포에서 `[x]`만
+남고 근거가 사라진다. 규약은 `docs/tasks-rule.md` §6. 전수 확인상 실제로 그 자리였던
+것은 `T-VN-DAGSTER-STORAGE` 조문 1 하나다.
+
+**n150 네 세션 게이트에 mypy가 없다.** `sample_ids=()` 한 줄이 게이트 전부를 초록으로
+지나 CI lint에서만 빨개졌다. PR 전에 mypy 3종 + lint-imports를 따로 돌린다.
+
+**열려 있는 것:** `T-VN-KREX-TPS-FANOUT` 조문 3, `T-VN-LEDGER-ARCHIVE` 조문 2·3,
+`T-VN-M02`, `T-VN-H49`/`-OFFBOX`, `T-VN-H49-BACKUP-STALENESS` 조문 1.
+
+
 ## 2026-09-16 — 일일 예산은 만들지 않는다 (분자를 재서 나온 결론)
 
 **다음 한 작업: `T-VN-LEDGER-ARCHIVE` 조문 2·3** — 원장 분리가 fence parity를

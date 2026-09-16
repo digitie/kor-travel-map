@@ -1810,6 +1810,15 @@ v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI �
    다시 `SUCCESS`로 끝났고 이번에는 `features 1047`이다 — D2가 자기 행을 스스로
    지웠으므로 은퇴 행이 없다(§T-VN-D2-RESIDUE 실측 `lane_residue_total=0`). 네 축이
    정확히 같다: `features 1047 · claims 1047 · aliases 1047 · links 1047`.
+
+   **2026-09-16 — 이 조문의 증거가 한 번 사라졌다가 다시 섰다.** 배포는 prod DB를
+   **새로 만든다**(`kor_travel_map` 생성 2026-09-15 12:29:55Z = t44a 배포 시각).
+   그래서 위 두 실측이 담겨 있던 run 이력은 t44a 뒤에 존재하지 않았고, 조회 시점
+   run 897건은 전부 분 단위 `current_weather_summary_refresh`(배포 후 15시간치)였다.
+   **`[x]`는 붙어 있는데 그것을 뒷받침하는 관측은 없는 상태였다는 뜻이다.**
+   같은 job을 현 세대에 다시 제출해 run `0f70d0d5`가 `SUCCESS`로 끝나고
+   `features 1047`이 다시 섰다(§T-VN-CURATION-SEAL-ACL 조문 1과 같은 실행). 이
+   조문이 왜 이렇게 되는지는 `docs/tasks-rule.md` §6이 규약으로 적는다.
 2. [x] **그 성질이 배포마다 유지된다.** (2026-09-13 t41a 배포로 확인) generation이
    `b71cbefc` → `bae61363`으로 바뀐 뒤 **새 세대에서 run 완주 게이트가 15/15로
    통과**했다 — 탐침 run이 실제로 `SUCCESS`로 완주하고, live config의 로컬 쓰기 두
@@ -2330,18 +2339,18 @@ clone lane(`run-admin-feature-clone-live-acceptance.sh`)이며, 그 lane은
 ## T-VN-CURATION-SEAL-ACL
 
 ```markdown
-- [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
+- [x] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다** (2026-09-16 완료)
 ```
 
 **무엇이 참이면 닫히는가.**
 
-1. `ktm_feature_dagster_runtime`으로 접속한 적재가 curation seal을 통과한다 —
-   prod에서 provider asset 하나가 실제로 완주한다.
-2. 그 권한이 `infra/runtime_privileges.py`의 렌더링 모델에 들어간다. 마이그레이션에
+1. [x] `ktm_feature_dagster_runtime`으로 접속한 적재가 curation seal을 통과한다 —
+   prod에서 provider asset 하나가 실제로 완주한다. **2026-09-16 충족.**
+2. [x] 그 권한이 `infra/runtime_privileges.py`의 렌더링 모델에 들어간다. 마이그레이션에
    직접 `GRANT`만 적고 모델이 모르는 상태로 두지 않는다 — 모르면 다음 재적용에서
-   조용히 사라진다(지금이 그 상태다).
-3. 이 축을 재는 회귀가 있다. **실 role로** 적재 경로를 태우는 것이어야 한다 —
-   migrator/superuser로 도는 통합은 ACL을 구조적으로 관측하지 못한다.
+   조용히 사라진다(지금이 그 상태다). **2026-09-16 충족 — 재적용을 실제로 겪고 살아남았다.**
+3. [x] 이 축을 재는 회귀가 있다. **실 role로** 적재 경로를 태우는 것이어야 한다 —
+   migrator/superuser로 도는 통합은 ACL을 구조적으로 관측하지 못한다. **2026-09-16 충족.**
 
 **무엇이 깨졌나 — 2026-09-11 실측.**
 
@@ -2377,6 +2386,54 @@ identity로 돈다. 조문 3이 그 구멍을 겨냥한다.
 **주의 — 권한 확대다.** runtime login에 함수 EXECUTE를 더하는 변경이므로, 무엇을
 열어 주는지(이 함수는 집계 읽기다)와 무엇을 열지 않는지를 먼저 적고 적대 리뷰를
 거친다.
+
+**어떻게 닫혔나 — 2026-09-16 실측.**
+
+**조문 1.** 현 prod에 `feature_place_standard_museums_job`을 정식 경로
+(`dagster job launch`)로 제출해 run `0f70d0d5`가 `SUCCESS`로 끝났다. 그리고 **적재가
+남긴 것을 셌다**:
+
+| | 실행 전 | 실행 후 |
+|---|---|---|
+| `feature.features` | 0 | **1,047** |
+| `provider_sync.source_entities` | 0 | **1,047** |
+| `ops.curation_provider_snapshot_receipts` | 0 | **1** |
+
+세 번째 줄이 이 조문의 핵심이다. 영수증은 적재가 seal 함수에서 해시를 **받아온 뒤에만**
+쓰이고(`_seal_authoritative_curation_snapshot`), `finish_provider_feature_membership_command`
+가 `authoritative_snapshot_complete`와 영수증 유무가 어긋나면 거절한다. 즉 영수증 1건은
+"EXECUTE가 목록에 있다"가 아니라 **"적재가 그 함수를 실제로 실행해 결과를 봉인했다"**의
+증거다: `data.go.kr-standard/datagokr_museums`, `source_entity_count=1047`,
+`source_input_set_hash=7358285d…`.
+
+**조문 2.** 배포 재적용을 실제로 겪고 살아남았다. prod DB는 t44a 배포가 **새로 만든
+것**이다(`kor_travel_map` 생성 2026-09-15 12:29:55Z) — 즉 grant는 맨 DB에 렌더링 모델이
+다시 붙인 것이다. 오늘 실측:
+
+    dagster_seal = true      (적재 login은 실행할 수 있다)
+    dagster_claim = true     (자매 claim 해석기)
+    api_seal = false         (API login은 못 한다 — 좁힌 grant가 경계를 지킨다)
+
+조문 2가 겨냥한 위험이 "다음 재적용에서 조용히 사라진다"였고, **그 재적용이 실제로
+일어난 뒤에 쟀다.** 코드를 읽어 확인하는 것과는 다른 종류의 증거다.
+
+**조문 3.** `tests/integration/test_runtime_privileges_acl.py`의
+`test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins` —
+`dagster_runtime_engine`으로 **접속해서** raw SQL이 아니라 적재가 쓰는
+`capture_provider_curation_input`를 부른다. 반대편은 API login이 42501을 받는 것을 보되,
+**그 표를 읽을 수 있음을 먼저 확인한 뒤에** 본다(그 전제가 없으면 표 권한이 없어도 같은
+42501이라 경계가 풀려도 초록이다).
+
+**변이로 빨강을 확인했다 — 그리고 그 변이가 이 조문의 존재 이유를 보인다.** EXECUTE는
+그대로 두고 호출부가 함께 거는 `provider_sync.provider_datasets` SELECT만 걷었더니:
+
+| 검사 | 결과 |
+|---|---|
+| `test_provider_curation_seal_is_executable_by_the_loader_login` (migrator·카탈로그 술어) | **passed** |
+| `test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins` (실 login·적재 경로) | **failed** |
+
+조문 3이 "migrator/superuser로 도는 통합은 구조적으로 관측하지 못한다"고 적은 것이
+바로 이 차이다. 정상 상태에서는 이 파일 8건 전부 초록.
 
 ## T-VN-39-D2-FIXTURE
 

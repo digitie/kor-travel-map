@@ -70,12 +70,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   삭제로 판정했고(37건), 헤딩으로 자르면 코드 펜스가 섹션 경계를 넘나들어 체크박스가
   펜스 안으로 들어갔다. 되돌렸다. 해제 조건은 acceptance §T-VN-LEDGER-ARCHIVE.
 
-- [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
-
-  prod 적재가 `permission denied for function current_provider_curation_input_set`로
-  멈춘다. snapshot이 아닌 모든 provider 적재가 그 함수를 부른다. 해제 조건은
-  acceptance §T-VN-CURATION-SEAL-ACL.
-
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 
   하지 않는다. 재개하려면 목표 SLO 정의와, exact-viewport(ADR-073 accepted 계약)
