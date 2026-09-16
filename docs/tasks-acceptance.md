@@ -2287,8 +2287,19 @@ Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기
    (같은 PR, 10 passed). lane operation 선언이 세 군데에서 갈라지지 않는 것을 본다.
 
 **2026-09-16 정정 — 이 조문은 닫힌 지 나흘 지나 있었다.** 고침(#1218)은
-2026-09-12에 들어왔는데 조문만 열린 채 남았다. 오늘 prod에서 직접 셌다:
-`feature.features` **0행**. 그리고 `run-admin-feature-live-acceptance.sh:488`이
+2026-09-12에 들어왔는데 조문만 열린 채 남았다.
+
+**t44a 배포(2026-09-16)의 D2 산출물이 그것을 직접 증명한다** —
+`/var/lib/kor-travel-map/admin-feature-live-acceptance/run-6955e21e…/direct-purge.json`:
+
+```json
+{"action": "purge", "counts": {"features": 0, ...},
+ "purged": {"features": 1, "field_overrides": 7}, "lane_residue_total": 0}
+```
+
+lane이 만든 Feature 1건과 딸린 override 7건을 **실제로 지웠고** 잔여물 0이다.
+prod에서 따로 센 `feature.features` **0행**과 일치한다 — lane의 자기 신고와 DB 실측이
+같은 답을 낸다. 그리고 `run-admin-feature-live-acceptance.sh:488`이
 모든 게이트 뒤에서 `run_helper purge`를 부르고, `admin_feature_live_supervisor.py:560`의
 `choices`에 `purge`가 있다 — 이 절이 "넷뿐이다"라고 적은 목록은 낡았다.
 
