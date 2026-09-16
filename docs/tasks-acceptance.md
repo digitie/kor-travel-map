@@ -798,14 +798,28 @@ acceptance 축만 남는다.**
 
 **그 하나가 막힌 이유는 셋이고, 그중 하나는 306이 절반 풀었다.**
 
-1. prod에서 돌리면 안 된다 — prod UI가 `admin`이라 spec의
-   `created_by_actor === "e2e-admin"`이 구조적으로 실패한다. 이 축은 그대로다.
-2. ~~cleanup이 없어 지워지지 않는 write가 남는다~~ — **306이 풀었다.** 그 되돌릴 수
-   없음은 hard-purge fence가 유일한 삭제 경로를 거부해서 생긴 것이었고, 이제 감사되는
-   `feature.purge_manual_feature`가 있다. 다만 1번 때문에 여전히 prod에서 돌리지 않는다.
+1. ~~prod UI가 `admin`이라 `created_by_actor === "e2e-admin"`이 구조적으로 실패한다~~
+   — **2026-09-16에 풀었다.** 그것은 계약이 아니라 **리터럴 한 줄**이었다. actor는
+   BFF의 `adminUsernameFromEnv()`(→ `ADMIN_USERNAME`, prod는 미설정이라 기본 `admin`)
+   에서 나와 `X-Kor-Travel-Map-Actor` → 도메인 커맨드 → `created_by_actor`로 간다
+   (체인 전 구간 실측). 저장소의 기존 관용구
+   (`ops-c7-read-auth.live.spec.ts`의 `process.env.E2E_ADMIN_USERNAME ?? "admin"`)와
+   같은 형태로 환경에서 유도하게 고쳤다 — 결박할 것은 "로그인한 주체가 provenance까지
+   실려 온다"이지 그 값이 아니다.
+2. **cleanup이 없다 — 이것이 지금 막는 축이다.** 종전에 "306이 풀었다"고 적었는데
+   **절반만 맞다**(2026-09-16 정정). #306이 만든 것은 `feature.purge_manual_feature`
+   **프로시저**이고, 그것은 **HTTP로 노출돼 있지 않다** — API 라우터에 없어
+   (`manual_feature_purge_repo.py`만 있다) spec이 부를 길이 없다. spec에 `purge` 호출은
+   **0건**이고 spec 주석 자체가 "생성물을 지우지 않는다"고 적고 있었다. prod에서 돌리면
+   지울 수 없는 행이 남는다 — 같은 형태가 `T-VN-D2-RESIDUE`로 이미 열려 있다.
 3. 격리 스택이 **사라졌다**(2026-09-08 실측). `~/ktm-live-301`은 정지가 아니라
    컨테이너도 볼륨도 없고, 체크아웃은 alembic head `302`(저장소는 `307`)이며 `e2e/live/`에
    그 spec 자체가 없다. **재기동이 아니라 재구축이 선행이다.**
+
+**그래서 남은 선택지는 둘이고 둘 다 소유자 판단이다.** (a) purge를 HTTP로 노출하고
+spec에 cleanup을 붙여 prod D1에 편입 — 되돌릴 수 없는 삭제 경로를 여는 일이고, 아래
+"왜 이관인가"가 그것을 restore proof(`T-VN-H49`)보다 먼저 하면 **순서 역전**이라고
+적는다. (b) 격리 스택 재구축 — 원장이 애초에 의도한 경로.
 
 그리고 spec은 `E2E_MANUAL_CREATE_WRITE=1` opt-in이라 병합만으로는 돌지 않는다.
 
@@ -1520,6 +1534,7 @@ lint+unit 2,832 · 제품 SQL 786문 head Parse · live(DB→API→브라우저,
   migration에서 이미 물리 삭제한다.** 따라서 이 task는 T-VN-33 보존·rollback·removal을
   소유하지 않는다. 이후 task가 만든 held component만 그 task의 manifest와 함께 판단하며,
   intermediate data는 backup/restore가 아니라 최종 schema ETL로 재생성한다.
+```
 
 **2026-09-07 전수 조사 — 유일한 실질 blocker는 미구현 대체물이다.**
 
@@ -2422,6 +2437,7 @@ Map은 위임을 끊어 스스로를 지켰으나 **다른 소비자는 노출�
 Map 핀 3자리를 올렸다(#1204 `7b2e9ecf`). 표면 manifest는 `pinned_sha` 둘만 바뀌어
 공개 멤버 집합이 불변임이 함께 증명된다.
 
+```markdown
 ## T-101 — Materialized View 도입 검토 (보류)
 ```
 
