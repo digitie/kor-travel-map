@@ -748,11 +748,11 @@ rebuild 앞뒤로 각각 돌려 **두 번 다 55/55**였다. 즉 플래그 활�
 ## T-VN-M02
 
 ```markdown
-- [~] **T-VN-M02 — origin 보존과 불변** (결정 4, 구현 병합). #1029의 `0227` provenance reader,
+- [x] **T-VN-M02 — origin 보존과 불변** (결정 4, 구현 병합, 2026-09-16 완료). #1029의 `0227` provenance reader,
   immutable claim/origin ACL과 named hard-purge fence, unit/integration 회귀가 정본이다.
   ~~evidence를 남긴 상태에서의 purge 정책·backup/restore 실측 및 live acceptance가 남아
   있다.~~ **2026-09-08 정정 — 셋 중 둘은 이미 이 절의 것이 아니다**(아래 §잔여 참조).
-  남은 것은 live acceptance 하나다. PinVi M05 paired
+  ~~남은 것은 live acceptance 하나다.~~ **2026-09-16 — 그 하나도 격리 스택에서 완주했다.** PinVi M05 paired
   attestation이 소비하는 Admin provenance 최상위 identity는 opaque `feature_id`와 별도 `feature_uuid`를
   함께 반환해야 하며, UUID-only projection을 재사용하지 않는다. reader/immutable claim UUID는 모두
   최상위 `feature_uuid`와 같지 않으면 fail-close한다. PinVi consumer도 이 반환 UUID를 M05 case의
@@ -854,8 +854,41 @@ backup/restore가 갚히기 전에는 **원리적으로 판정할 수 없다.**
 
 **이 절에 남는 조건 — 하나.**
 
-- [ ] **live acceptance 실행** — `admin-manual-feature-create.live.spec.ts`가
-  `E2E_MANUAL_CREATE_WRITE=1`로 격리 스택에서 완주한다. **배포 prod에서 돌리지 않는다**
+- [x] **live acceptance 실행** — `admin-manual-feature-create.live.spec.ts`가
+  `E2E_MANUAL_CREATE_WRITE=1`로 격리 스택에서 완주한다. **2026-09-16 충족.**
+
+  live301(api `13711` · web `13712` · dagster `13714`)에서 **2 passed (47.9s)** —
+  `auth.setup` + 본 검사. 그리고 **검사가 초록인 것과 DB가 그렇게 된 것은 다른 사실이라**
+  따로 셌다: `feature.features` 1 → 2, 그리고 `feature.feature_creation_origins`에
+
+      origin_kind          manual_admin
+      created_by_actor     e2e-admin
+      invoker_role         ktm_feature_api_runtime
+      procedure_definer    ktm_manual_feature_procedure_owner
+      creator_principal_id admin-ui-bff.manual-feature-create.v1
+
+  이 절이 요구한 "origin이 단건 admin 경로의 principal/role 계약을 정확히 싣는다"가
+  이것이다 — 로그인한 주체가 BFF를 지나 SECURITY DEFINER 경계 너머 provenance까지
+  실려 왔다.
+
+  **이 spec은 한 번도 실행된 적이 없었다.** 2026-09-16에 actor 리터럴 결함을 찾은 것도
+  실행이 아니라 체인을 읽어서였다. 즉 통과한다는 것이 알려져 있지 않았고, 이번이 첫
+  실행이다. 첫 실행이 초록이라는 사실 자체가 이 조문의 값이다.
+
+  **예고한 대로 행이 하나 남았다**(1 → 2). cleanup이 없다는 아래 서술이 실측으로
+  확인됐다는 뜻이고, 격리 스택이라 차단 사유가 아닐 뿐 prod 불가 근거는 그대로다.
+
+  **스택을 세우며 막힌 것 둘(다음 사람을 위해).** (1) 체크아웃을 옮기면
+  `scripts/*.sh` 실행권한이 빠진다 — `preflight-ports.sh: Permission denied`.
+  (2) **Dagster 메타DB가 통째로 없었다** — `kor_travel_map_dagster` 롤도 DB도 없어
+  `password authentication failed`로 섰다. 앱 DB(`ktm_live_301`)는 멀쩡했고 head도
+  `309_t39_feature_id_rekey`로 저장소와 같았다. 롤·DB를 만들고
+  `DAGSTER_HOME=.dagster-migrate dagster instance migrate`(public 22 테이블)까지 해야
+  런처의 사전검증을 지난다. spec 자체는 Dagster를 쓰지 않지만 `run-admin-stack.sh`에
+  건너뛰기 경로가 없다.
+
+  **아래 서술은 2026-09-08 시점이라 이미 낡았다 — 대조용으로 남긴다.**
+  **배포 prod에서 돌리지 않는다**
   — prod UI는 `KOR_TRAVEL_MAP_UI_ADMIN_USERNAME=admin`이라 spec의
   `created_by_actor === "e2e-admin"` 단언이 구조적으로 실패하고, spec은 cleanup을 하지
   않아 지워지지 않는 write를 prod DB에 남긴다.
@@ -866,11 +899,17 @@ backup/restore가 갚히기 전에는 **원리적으로 판정할 수 없다.**
   두 항목을 따로 판정하면 안 된다.
 
   실행처는 n150 `~/ktm-live-301`이다. ~~그 스택은 이미 `e2e-admin`·create token·flag가
-  spec과 맞다(현재 정지 상태 — 재기동이 선행한다).~~ **2026-09-08 재실측 — 정지가 아니라
+  spec과 맞다(현재 정지 상태 — 재기동이 선행한다).~~ ~~**2026-09-08 재실측 — 정지가 아니라
   없다.** 컨테이너도 볼륨도 존재하지 않고(`ktm-live-301-pg` 부재, `ktm_live_301` 볼륨 부재),
   그 체크아웃은 alembic head **302**(저장소는 305)이며 `e2e/live/`에 해당 spec 자체가 없다.
   설정 산물(`~/.ktm-live-301-admin-pw`, `.env`, `live301-start.sh`)과 runner 이미지는
-  남아 있으므로 재구축은 가능하지만 **재기동이 아니라 재구축이 선행이다.**
+  남아 있으므로 재구축은 가능하지만 **재기동이 아니라 재구축이 선행이다.**~~
+
+  **2026-09-16 재실측 — 위 문단은 틀렸다.** `ktm-live-301-pg`는 떠 있었고(5일째),
+  체크아웃(`0af5f36d`, 2026-09-11)에 spec이 들어와 있었으며 앱 DB head는 `309`로
+  저장소와 같았다. **재구축이 아니라 체크아웃 전진 + api/ui 기동**이었다. 이 항목이
+  "막혀 있다"고 적힌 채 여덟 날 열려 있던 이유의 절반은 그 기록이 낡았기 때문이다 —
+  `T-VN-D2-RESIDUE`와 같은 모양이고, `docs/tasks-rule.md` §6이 그 형태를 다룬다.
 
 ## T-VN-M03
 

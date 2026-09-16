@@ -31,13 +31,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   시점까지 미룬다.
 
 
-- [ ] T-VN-M02 — **Feature origin/provenance live acceptance 실행**
-
-  구현 축은 전부 충족이고(2026-09-07 4축 실측) purge 정책은 소유자 판정으로
-  `T-VN-H49` 계열로 이관했다. 남은 것은 회수한 `admin-manual-feature-create.live.spec.ts`를
-  격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
-
-
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
 
   기준선 dump·sha256·rollback은 완료됐다. 남은 정기화·2차 외부 사본은 현 환경에서

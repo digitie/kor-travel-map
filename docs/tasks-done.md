@@ -12,6 +12,22 @@
 
 ## 2026-09-16 — 분모를 재고, 그래서 짓지 않기로 했다
 
+- [x] T-VN-M02 — **한 번도 실행된 적 없던 live acceptance spec을 격리 스택에서
+  완주시켰다 — 첫 실행이 초록이다.**
+  구현 축은 2026-09-07에 이미 전부 충족이었고 purge 정책·backup/restore는 `T-VN-H49`
+  계열로 이관돼, 남은 조문은 "spec이 격리 스택에서 완주한다" 하나였다. live301
+  (api `13711` · web `13712` · dagster `13714`)에서 `E2E_MANUAL_CREATE_WRITE=1`로
+  **2 passed (47.9s)**. 검사가 초록인 것과 DB가 그렇게 된 것은 다른 사실이라 따로 셌다 —
+  `feature.features` 1 → 2, `feature_creation_origins`에 `origin_kind=manual_admin` ·
+  `created_by_actor=e2e-admin` · `invoker_role=ktm_feature_api_runtime` ·
+  `procedure_definer=ktm_manual_feature_procedure_owner` ·
+  `creator_principal_id=admin-ui-bff.manual-feature-create.v1`. 이 절이 요구한
+  "origin이 단건 admin 경로의 principal/role 계약을 정확히 싣는다"가 그것이다.
+  **원장이 "스택이 없다"고 적은 것은 낡은 기록이었다**(2026-09-08자) — pg는 5일째 떠
+  있었고 앱 DB head도 저장소와 같았다. 실제로 막던 것은 Dagster 메타DB 부재와 체크아웃
+  이동 시 사라지는 `scripts/*.sh` 실행권한 둘이었고, 둘 다 해소했다. 해제 조건 전문은
+  acceptance §T-VN-M02.
+
 - [x] T-VN-CURATION-SEAL-ACL — **적재 login이 seal 함수를 실행하지 못해 snapshot이
   아닌 모든 provider 적재가 prod에서 멈춰 있던 것을 닫았다.**
   2026-09-11에 `permission denied for function current_provider_curation_input_set`로

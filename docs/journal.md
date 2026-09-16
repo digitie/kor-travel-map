@@ -1,5 +1,29 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-16 (2) — 한 번도 돌지 않았던 spec을 돌렸다
+
+`T-VN-M02`의 마지막 조문은 "live acceptance spec이 격리 스택에서 완주한다" 하나였다.
+live301(api `13711` · web `13712` · dagster `13714`)에서 `E2E_MANUAL_CREATE_WRITE=1`로
+**2 passed (47.9s)**. 그리고 검사가 초록인 것과 DB가 그렇게 된 것은 다른 사실이라 따로
+셌다 — `feature.features` 1 → 2, origin에 `manual_admin` · `e2e-admin` ·
+`ktm_feature_api_runtime` · `ktm_manual_feature_procedure_owner` ·
+`admin-ui-bff.manual-feature-create.v1`. 로그인한 주체가 BFF를 지나 SECURITY DEFINER
+경계 너머 provenance까지 실려 온다는 것이 이 절이 요구한 계약이다.
+
+**이 spec은 한 번도 실행된 적이 없었다.** 오늘 아침 actor 리터럴 결함을 찾은 것도
+실행이 아니라 체인을 읽어서였다 — 즉 통과한다는 것이 알려져 있지 않았다. 그래서 이
+조문의 값은 "M02를 닫았다"가 아니라 **"이제 그 spec이 실제 게이트가 됐다"**에 있다.
+
+**원장이 또 낡아 있었다.** 2026-09-08 기록은 "컨테이너도 볼륨도 없다, 재구축이
+선행이다"였는데 `ktm-live-301-pg`는 5일째 떠 있었고 체크아웃에 spec도 있었으며 앱 DB
+head는 `309`로 저장소와 같았다. 실제로 막던 것은 둘이다: 체크아웃을 옮기면 사라지는
+`scripts/*.sh` 실행권한, 그리고 **Dagster 메타DB 통째 부재**(`kor_travel_map_dagster`
+롤·DB를 만들고 `dagster instance migrate`까지 해야 런처 사전검증을 지난다 — spec은
+Dagster를 쓰지 않지만 `run-admin-stack.sh`에 건너뛰기 경로가 없다).
+
+`T-VN-D2-RESIDUE`·`T-VN-DAGSTER-STORAGE`에 이어 **세 번째**로 원장 기록이 낡아 일을
+막고 있던 사례다. 오늘 `docs/tasks-rule.md` §6에 넣은 규약이 겨냥하는 것이 이 형태다.
+
 ## 2026-09-16 — seal ACL을 닫았고, prod가 배포마다 새로 태어난다는 것을 알았다
 
 `T-VN-CURATION-SEAL-ACL` 세 조문을 닫았다(#1239 머지 후 별도 PR). 조문 2는 코드를
