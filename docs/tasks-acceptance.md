@@ -1251,6 +1251,53 @@ server가 gRPC UNAVAILABLE이 된 것이고 webserver 재기동으로 복구했�
 됐을 때 알 수 있는가"**를 묻는다. 앞의 것은 한 번 재면 닫히지만 뒤의 것은 그렇지
 않다 — 이번에 닫은 그 조문이 **닫힌 다음 날 깨졌다.**
 
+**2026-09-16 정정 — 조문 1의 (a)가 틀렸다.** "api 컨테이너만 마운트한다"고 적었는데
+실측하니 **api·dagster 둘 다** `backup_root`가 없다. 마운트도 env도 없다:
+
+| 무엇 | 실측 |
+|---|---|
+| `kor-travel-map-api-latest` 마운트 | `application-final-permit` 하나뿐 |
+| `kor-travel-map-dagster-latest` 마운트 | 위 + `dagster-storage-permit` |
+| 두 컨테이너의 `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | **미설정** |
+
+그래서 "api 컨테이너에서 F9를 돌리면 된다"는 길은 **지금 존재하지 않는다.** 더
+구조적인 것도 있다 — Dagster `run_consistency_check_op`의 config schema에
+`backup_root` **키 자체가 없고**(`maintenance.py`의 `_CONSISTENCY_CONFIG_SCHEMA`는
+persist/sample_limit/dedup_pending_threshold 셋뿐), `BatchDagRequest`에도 그 필드가
+없다. 즉 **자동으로 기록되는 F9 행은 예외 없이 `observed=false`**이고, 관측 가능한
+유일한 경로(`ktmctl consistency-report --backup-root`)는 `--persist`가 기본 off라
+행조차 남기지 않는다.
+
+그리고 `KorTravelMapSettings`에 `backup_root` 필드가 **없다** — SLA
+(`backup_last_success_warn_hours`)는 설정에서 읽는데 경로는 아니다. 비대칭이다.
+
+**따로 고쳐야 할 F9 결함 하나.** 없는 디렉터리는 예외가 아니라 빈 튜플이라
+(`infra/backup.py`의 `if not root_path.is_dir(): return ()`) `observed=true,
+stale=true`가 된다 — **경로 오타와 진짜 백업 중단이 같은 신호다.** 오늘 그 자리를
+설계하며 확인했고, 이 결함은 알림 경로와 독립이므로 이 조문이 열려 있는 것과 무관하게
+고칠 수 있다.
+
+**2026-09-16 — 같은 모양의 사고가 하나 더 있었고, 그건 고쳤다.** 위 geo 사고를
+조사하다 `geo_dagster`·`concierge`·`pinvi` standalone 백업이 **09-12부터 5일째**
+`Permission denied`로 실패 중인 것을 찾았다(마지막 성공 09-11 03:15~03:55Z). 배포가
+`kor-travel-docker-manager/scripts/*.sh`의 실행 비트를 벗겼는데 crontab은 경로를 직접
+실행한다. 실행 비트를 복구하고 미등록 role 탐침(`EXIT=2`, 덤프·GC 없음)으로 확인했다.
+**한 조문이 열려 있는 동안 같은 형태가 세 DB에서 조용히 재발했다는 것이 이 조문의
+값을 가장 잘 보여준다.**
+
+**근본 원인은 "경보가 없다"보다 앞에 있다.** Manager 저장소 어디에도 백업 주기를
+선언한 것이 없다 — 기대치가 오직 호스트 crontab에만 있고 저장소의 어떤 코드도
+crontab을 읽지 않는다. **선언되지 않은 것의 부재는 원리적으로 탐지할 수 없다.**
+그래서 이 조문을 닫을 때 첫 산출물은 알림 장치가 아니라 기대치 모델이어야 한다.
+
+**2026-09-16 — 알림 경로 작업은 소유자 지시로 보류한다.** 설계는 조사 4갈래 + 안 3개
++ 채점으로 확정했고(선택: 소유권을 `kor-travel-docker-manager`로 이관, 채널 ntfy),
+기대치 모델 초안이 그 저장소에 미커밋으로 있다(`config/backup-policy.yml`,
+`services/backup_policy.py`, `services/backup_watchdog.py` — 소비자가 없어 커밋하지
+않았다). 재개 시 **먼저 할 일은 채널 실배달 1건을 사람이 육안 확인하는 것**이다 —
+한 번도 배달해 보지 않은 채널은 없는 채널과 같고, 그 가정이 거짓이면 마지막 걸음의
+설계가 바뀐다.
+
 ## T-VN-H49
 
 ```markdown
