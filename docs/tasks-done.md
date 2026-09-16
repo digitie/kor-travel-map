@@ -12,6 +12,16 @@
 
 ## 2026-09-16 — 분모를 재고, 그래서 짓지 않기로 했다
 
+- [x] T-VN-D2-RESIDUE — **이미 고쳐져 있었다: #1218이 purge를 lane 안으로 들였고,
+  오늘 prod에서 `feature.features` 0행을 확인했다.**
+  D2가 소유 Feature를 은퇴까지만 끌고 가 run마다 prod에 은퇴 행이 하나씩 쌓이던
+  문제다. `fc6e7efb`(2026-09-12)가 `purge`를 러너 호출부와 supervisor 허용목록
+  양쪽에 들이고 모든 게이트 뒤에서 돌게 했으며, `test_lane_operations_are_declared_once`
+  (10 passed)가 선언이 세 군데에서 갈라지지 않는 것을 결박한다.
+  **조문은 그 뒤로 나흘간 열린 채 남아 있었다** — 고쳐도 원장이 닫히지 않으면 열린
+  항목이 실제보다 많아 보이고, 그 상태로 "다음 한 작업"을 고르면 끝난 일을 다시
+  연다. 오늘 그럴 뻔했고, 실측(prod 0행)으로 갈렸다.
+
 - [x] T-VN-KREX-TPS-FANOUT — **krex 상한을 프로세스 사이까지 넓혔다: advisory lock
   gate + 교대 간격, t44a로 배포하고 prod에서 읽어 확인했다.**
   라이브러리 상한(초당 5건)은 **프로세스당**인데 큐가 worker run을 4개까지 동시에

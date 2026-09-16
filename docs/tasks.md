@@ -70,11 +70,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   삭제로 판정했고(37건), 헤딩으로 자르면 코드 펜스가 섹션 경계를 넘나들어 체크박스가
   펜스 안으로 들어갔다. 되돌렸다. 해제 조건은 acceptance §T-VN-LEDGER-ARCHIVE.
 
-- [ ] T-VN-D2-RESIDUE — **D2가 run마다 은퇴 Feature 1행을 prod에 남긴다**
-
-  D2는 소유 Feature를 은퇴까지만 끌고 가고 삭제는 `purge`가 하는데, 그 action이
-  D2 lane의 `run_helper` 선택지에 없다. 해제 조건은 acceptance §T-VN-D2-RESIDUE.
-
 - [ ] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다**
 
   prod 적재가 `permission denied for function current_provider_curation_input_set`로
