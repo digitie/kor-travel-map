@@ -12,6 +12,22 @@
 
 ## 2026-09-16 — 분모를 재고, 그래서 짓지 않기로 했다
 
+- [x] T-VN-CURATION-SEAL-ACL — **적재 login이 seal 함수를 실행하지 못해 snapshot이
+  아닌 모든 provider 적재가 prod에서 멈춰 있던 것을 닫았다.**
+  2026-09-11에 `permission denied for function current_provider_curation_input_set`로
+  박물관 적재가 섰다. 좁은 `ktm_curation_provider_executor`에 EXECUTE를 주도록
+  `runtime_privileges.py` 렌더링 모델에 넣었고(넓은 `ktm_feature_runtime`에 주면 API
+  login까지 열린다 — 멤버십 경유 권한은 `REVOKE`로 걷히지 않는다), `infra/db.py`의
+  per-login 허용목록에도 등록했다(이 경로로 오는 첫 SECURITY DEFINER 함수라 빠뜨리면
+  모든 Dagster 프로세스가 기동 preflight에서 죽는다).
+  닫은 근거는 셋 다 **실측**이다: (1) 현 prod에서 `feature_place_standard_museums_job`
+  run `0f70d0d5`가 `SUCCESS`로 끝나고 `features 1047 · source_entities 1047 ·
+  seal 영수증 1건`(영수증은 seal이 실제로 실행돼 해시를 돌려준 뒤에만 쓰인다),
+  (2) 배포가 DB를 새로 만든 뒤에도 `dagster_seal=true / api_seal=false`,
+  (3) 실 login으로 적재 경로를 태우는 회귀를 추가하고 변이로 빨강을 확인했다 —
+  EXECUTE는 두고 표 SELECT만 걷으면 **옛 카탈로그 술어 검사는 초록이고 새 검사만
+  빨갛다**. 해제 조건 전문은 acceptance §T-VN-CURATION-SEAL-ACL.
+
 - [x] T-VN-D2-RESIDUE — **이미 고쳐져 있었다: #1218이 purge를 lane 안으로 들였고,
   오늘 prod에서 `feature.features` 0행을 확인했다.**
   D2가 소유 Feature를 은퇴까지만 끌고 가 run마다 prod에 은퇴 행이 하나씩 쌓이던

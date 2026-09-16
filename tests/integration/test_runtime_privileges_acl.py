@@ -8,11 +8,15 @@ T-VN-40C가 `tests/integration/test_tvn40a_legacy_write_fence_acl.py`를 legacy
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.infra import runtime_privileges
+from kortravelmap.infra.feature_repo import capture_provider_curation_input
 
 pytestmark = pytest.mark.integration
 
@@ -129,14 +133,20 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     자매 함수(`resolve_provider_feature_id`)를 함께 재는 것은 둘이 한 쌍으로 쓰이기
     때문이다 — claim으로 존재를 묻고, 적재 뒤 seal로 무엇을 썼는지 봉인한다.
 
-    **이 검사가 보지 못하는 축이 하나 있다.** 여기서는 migrator session이 카탈로그
-    술어를 묻는 것이므로, 적재 login이 **실제로 접속해** ADR-090 기동 preflight
-    (`assert_runtime_db_privilege_boundary`)를 통과하는지는 관측하지 않는다. 그 축은
-    `test_tvn34_runtime_privilege_preflight.py`의
-    `test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight`가
-    소유한다 — SECURITY DEFINER 함수에 EXECUTE를 주면 `infra/db.py`의 per-login
-    허용목록에도 등록해야 하고, 빠뜨리면 그 테스트가 빨개진다(그리고 배포하면 모든
-    Dagster 프로세스가 기동에서 죽는다).
+    **이 검사가 보지 못하는 축이 둘 있다.** 여기서는 migrator session이 카탈로그
+    술어를 묻는 것뿐이다.
+
+    1. 적재 login이 **실제로 접속해** ADR-090 기동 preflight
+       (`assert_runtime_db_privilege_boundary`)를 통과하는지. 그 축은
+       `test_tvn34_runtime_privilege_preflight.py`의
+       `test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight`가
+       소유한다 — SECURITY DEFINER 함수에 EXECUTE를 주면 `infra/db.py`의 per-login
+       허용목록에도 등록해야 하고, 빠뜨리면 그 테스트가 빨개진다(그리고 배포하면 모든
+       Dagster 프로세스가 기동에서 죽는다).
+    2. 그 권한으로 **실제 적재 경로를 태웠을 때** 함수가 도는지. 아래
+       `test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins`가
+       소유한다 — 카탈로그 술어는 EXECUTE만 보고, 함수가 읽는 표의 권한이나
+       호출부가 함께 거는 `provider_sync.provider_datasets` 조회는 보지 못한다.
     """
     result = await migrated_session.execute(
         text(
@@ -175,6 +185,108 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     assert row["api_seal"] is False, (
         "API login까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
     )
+
+
+@pytest.mark.integration
+async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins(
+    migrated_engine: AsyncEngine,
+    dagster_runtime_engine: AsyncEngine,
+    api_runtime_engine: AsyncEngine,
+) -> None:
+    """적재 login으로 **접속해서** 적재가 부르는 그 함수를 실제로 실행한다.
+
+    위 검사는 migrator가 `has_function_privilege`를 묻는다. 2026-09-11 prod 사고는
+    그 술어로도 잡혔겠지만, 술어가 초록인데 적재가 서는 형태가 따로 있다 — 술어는
+    EXECUTE **하나만** 본다. `capture_provider_curation_input`은 그 함수를
+    `provider_sync.provider_datasets` 조회와 **한 문장으로 묶어** 부르므로, 표
+    SELECT가 없으면 EXECUTE가 있어도 적재는 42501로 선다. 그 조합은 카탈로그
+    술어가 구조적으로 관측하지 못한다.
+
+    그래서 여기서는 raw SQL을 다시 쓰지 않고 **적재가 쓰는 바로 그 헬퍼**를 부른다.
+    호출 문장이 바뀌면(표가 하나 더 붙는다든지) 이 검사가 따라 움직이지만, SQL을
+    베껴 두면 사본만 초록인 채로 실물이 설 수 있다.
+
+    반대편도 함께 잰다. 다만 "API가 42501" 하나만 보면 **이유를 모른다** — API login이
+    `provider_datasets`를 아예 못 읽어도 같은 42501이고, 그러면 seal 경계가 풀려도
+    이 검사는 초록이다. 그래서 먼저 API login이 그 표를 읽을 수 있음을 확인하고,
+    그 다음에 함수 호출만 막히는 것을 본다.
+    """
+
+    provider = f"acl-seal-{uuid4().hex[:12]}"
+    dataset_key = "loader-path"
+
+    async with migrated_engine.begin() as seed:
+        await seed.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind,
+                    is_active, capabilities
+                )
+                VALUES (:provider, :dataset_key, :provider, 'system', true,
+                        jsonb_build_object('schema_version', 1,
+                                           'produces', '[]'::jsonb,
+                                           'extensions', '{}'::jsonb))
+                """
+            ),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+
+    try:
+        async with AsyncSession(dagster_runtime_engine) as loader:
+            assert (
+                await loader.scalar(text("SELECT session_user::text"))
+            ) == "ktm_feature_dagster_runtime", (
+                "적재 login으로 접속하지 못했다 — 이 검사의 전제가 깨졌다"
+            )
+            sealed = await capture_provider_curation_input(
+                loader, provider=provider, dataset_key=dataset_key
+            )
+            await loader.rollback()
+
+        # 빈 dataset이므로 member는 0이지만, seal은 **그 사실 자체를 해시로 봉인한다.**
+        # 값이 None이면 함수가 돌지 않은 것이고, 적재는 seal을 결과에 merge하므로
+        # 그 상태로는 적재가 성립하지 않는다.
+        assert sealed.curation_input_member_count == 0
+        assert sealed.curation_input_set_hash, "seal이 해시를 돌려주지 않았다"
+
+        async with AsyncSession(api_runtime_engine) as api:
+            assert (
+                await api.scalar(text("SELECT session_user::text"))
+            ) == "ktm_feature_api_runtime"
+            # 전제: 42501의 출처가 함수임을 보이려면 표는 읽을 수 있어야 한다.
+            assert (
+                await api.scalar(
+                    text(
+                        "SELECT count(*) FROM provider_sync.provider_datasets "
+                        "WHERE provider = :provider"
+                    ),
+                    {"provider": provider},
+                )
+            ) == 1, (
+                "API login이 provider_datasets를 못 읽는다 — 아래 42501이 seal 때문인지 "
+                "표 때문인지 구분할 수 없어 이 검사가 의미를 잃는다"
+            )
+
+            with pytest.raises(DBAPIError) as denied:
+                await capture_provider_curation_input(
+                    api, provider=provider, dataset_key=dataset_key
+                )
+            # abort된 transaction을 commit하려 들면 25P02가 원래 SQLSTATE를 덮는다.
+            await api.rollback()
+
+        assert getattr(denied.value.orig, "sqlstate", None) == "42501", repr(
+            denied.value.orig
+        )[:200]
+    finally:
+        async with migrated_engine.begin() as cleanup:
+            await cleanup.execute(
+                text(
+                    "DELETE FROM provider_sync.provider_datasets "
+                    "WHERE provider = :provider"
+                ),
+                {"provider": provider},
+            )
 
 
 def test_undeclared_relation_failure_names_the_sanctioned_escape() -> None:

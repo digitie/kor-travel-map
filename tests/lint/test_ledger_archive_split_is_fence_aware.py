@@ -162,6 +162,41 @@ def _plan(ledger: str, title: str, name: str) -> splitter.ArchivePlan:
     return splitter.build_plan(ledger, title, name, today="2026-09-16")
 
 
+def test_refusal_message_survives_items_without_an_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """거절은 **메시지**로 나와야 한다 — 거절을 만들다가 죽으면 도구가 고장난 것처럼 보인다.
+
+    지문 튜플에는 `task_id`·`criterion_id`가 `None`인 항목이 섞인다(절 제목이 ID를 갖고
+    조문에는 없는 모양이 그렇다). `sorted()`로 튜플을 직접 비교하면 그 자리에서 str과
+    None이 만나 `TypeError`가 난다 — 2026-09-16에 `T-FE-MOCK-FLAKE`를 시험하다 실제로
+    그렇게 죽었다.
+
+    **왜 이것이 조용한 사고인가.** 화면에 보이는 것이 "옮기면 안 된다"가 아니라 스택
+    트레이스면, 읽는 사람은 절이 위험하다고 읽지 않고 **도구가 망가졌다**고 읽는다.
+    그 다음 행동은 손으로 자르는 것이고, 그것이 2026-09-13에 삭제 게이트를 37번 빨갛게
+    만든 바로 그 경로다. 거절 경로는 그 자체가 안전 장치이므로 따로 결박한다.
+    """
+    plan = _plan(_LEDGER_CLEAN, "T-CLEAN-CLOSED", "tasks-acceptance-clean.md")
+
+    # 같은 (indent, state)에서 ID 있는 항목과 없는 항목이 섞이는 순간이 그 자리다.
+    lost: Counter[tuple[int, str, str | None, str | None, str]] = Counter(
+        {
+            (0, " ", "T-HAS-ID", None, "T-HAS-ID — ID가 있는 항목"): 1,
+            (0, " ", None, None, "ID가 없는 조문 항목"): 1,
+        }
+    )
+    monkeypatch.setattr(splitter, "parse_sum_delta", lambda _plan: (lost, Counter()))
+
+    failures = splitter.check_plan(plan)
+
+    assert failures, "항목이 사라지는데 거절하지 않았다"
+    joined = "\n".join(failures)
+    # 무엇이 사라지는지를 **이름으로** 말해야 한다 — 건수만으로는 손댈 자리를 모른다.
+    assert "T-HAS-ID" in joined, joined
+    assert "ID가 없는 조문 항목" in joined, joined
+
+
 def test_fence_crossing_section_is_refused() -> None:
     """fence가 경계를 넘는 절은 거절된다 — 2026-09-13의 모양 그대로."""
     plan = _plan(_LEDGER_FENCE_CROSSES, "T-CROSS-CLOSED", "tasks-acceptance-cross.md")
