@@ -734,6 +734,7 @@ def _build_f9_backup_staleness_result(
     now: datetime,
     sample_limit: int,
     scan_error: str | None = None,
+    root_missing: bool = False,
 ) -> CaseResult:
     """F9 — backup artifact 목록에서 "최근 성공이 있는가"를 판정한다(순수 함수)."""
     if scan_error is not None:
@@ -799,7 +800,14 @@ def _build_f9_backup_staleness_result(
         _append_limited_sample(
             sample_ids,
             (
-                f"no_successful_backup_artifact:{backup_root}"
+                # **같은 "성공 0건"이라도 두 모양을 구분한다.** 루트가 아예 없는 것과
+                # 루트는 있는데 성공 artifact가 없는 것은 조치가 다르다 — 앞은 경로·볼륨
+                # 설정이고 뒤는 백업 자체다. 종전에는 둘 다 같은 sample id라 리포트만
+                # 보고는 어느 쪽을 고쳐야 하는지 알 수 없었다(2026-09-16 규명).
+                # 판정(`stale`)과 심각도는 바꾸지 않는다 — 둘 다 여전히 경보다.
+                f"backup_root_missing:{backup_root}"
+                if root_missing
+                else f"no_successful_backup_artifact:{backup_root}"
                 if newest is None
                 else f"stale_newest_success:{newest[1].backup_id}:{newest[0].isoformat()}"
             ),
@@ -820,6 +828,12 @@ def _build_f9_backup_staleness_result(
         metadata={
             "observed": True,
             "backup_root": str(backup_root),
+            # 루트가 아예 없는 것은 "성공 0건"의 **한 가지 이유**이지 다른 판정이 아니다.
+            # `observed=True`를 유지하는 이유: 이 레이아웃에서 루트는 백업 프로세스가
+            # 만드는 자리라, 없다는 것은 실제로 "여기서 성공한 적이 없다"는 관측이다.
+            # 그래도 조치가 다르므로 이 축을 따로 싣는다 — 경로·볼륨을 고칠 것인지
+            # 백업을 고칠 것인지가 리포트에서 갈린다.
+            "root_missing": root_missing,
             "sla_seconds": sla_seconds,
             "stale": stale,
             "newest_success_backup_id": newest[1].backup_id if newest is not None else None,
@@ -864,7 +878,12 @@ def _check_f9_backup_staleness(
     """
     artifacts: Iterable[BackupArtifact] = ()
     scan_error: str | None = None
-    if backup_root is not None:
+    root_missing = False
+    if backup_root is not None and not backup_root.expanduser().is_dir():
+        # 스캔하기 전에 자리 자체가 있는지 먼저 본다. 없는 경로를 스캔하면 빈 튜플이
+        # 돌아와 "성공 기록이 하나도 없다"로 읽히는데, 그것은 관측이 아니라 오해다.
+        root_missing = True
+    elif backup_root is not None:
         try:
             artifacts = list_backup_artifacts(backup_root)
         except (OSError, UnicodeDecodeError, BackupArtifactError) as exc:
@@ -885,6 +904,7 @@ def _check_f9_backup_staleness(
     return _build_f9_backup_staleness_result(
         artifacts,
         scan_error=scan_error,
+        root_missing=root_missing,
         backup_root=backup_root,
         sla_seconds=sla_seconds,
         now=now if now is not None else datetime.now(UTC),
