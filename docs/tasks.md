@@ -31,13 +31,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   시점까지 미룬다.
 
 
-- [ ] T-VN-M02 — **Feature origin/provenance live acceptance 실행**
-
-  구현 축은 전부 충족이고(2026-09-07 4축 실측) purge 정책은 소유자 판정으로
-  `T-VN-H49` 계열로 이관했다. 남은 것은 회수한 `admin-manual-feature-create.live.spec.ts`를
-  격리 스택(n150 `~/ktm-live-301`)에서 완주시키는 것 하나다 — prod에서는 돌리지 않는다.
-
-
 - [ ] T-VN-H43 — **Map DB 백업 주기화·외부 사본** — **보류**(소유자 지시 2026-08-06)
 
   기준선 dump·sha256·rollback은 완료됐다. 남은 정기화·2차 외부 사본은 현 환경에서
@@ -63,12 +56,6 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   코드가 아니라 운영 결선이 남았다 — 목적지 호스트·계정·ssh 키가 소유자/운영자
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
-
-- [ ] T-VN-LEDGER-ARCHIVE — **acceptance 원장이 읽기 한도에 붙어 있는데 분리가 안전하지 않다**
-
-  221KB / 한도 220KB. 2026-09-13에 규약 §8대로 분리해 봤더니 삭제 게이트가 이관을
-  삭제로 판정했고(37건), 헤딩으로 자르면 코드 펜스가 섹션 경계를 넘나들어 체크박스가
-  펜스 안으로 들어갔다. 되돌렸다. 해제 조건은 acceptance §T-VN-LEDGER-ARCHIVE.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 

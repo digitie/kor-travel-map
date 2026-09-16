@@ -1,5 +1,38 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-16 (3) — M02·LEDGER-ARCHIVE 완주. 활성 항목이 H49 계열 셋만 남았다
+
+**다음 한 작업: `T-VN-H49-BACKUP-STALENESS` 조문 1** — F9는 판정하지만 **사람에게 닿는
+경로가 없다**. Dagster 배치에 `backup_root` 볼륨이 없고 `ops.feature_consistency_reports`를
+아무도 폴링하지 않는다. 425건이 조용히 실패한 이유가 검사 부재가 아니라 **보는 사람
+부재**였으므로, 검사를 더하는 것으로는 닫히지 않는다.
+
+**`T-VN-M02` 완료.** live301에서 `E2E_MANUAL_CREATE_WRITE=1`로 **2 passed (47.9s)**,
+DB 실측으로 `manual_admin` / `e2e-admin` / `ktm_feature_api_runtime` /
+`ktm_manual_feature_procedure_owner` / `admin-ui-bff.manual-feature-create.v1` 확인.
+**이 spec은 한 번도 실행된 적이 없었다** — 첫 실행이 초록이다.
+
+**원장 기록이 또 낡아 있었다.** "격리 스택이 없다"(2026-09-08)는 틀렸고 pg는 5일째 떠
+있었다. 실제로 막던 것은 (1) 체크아웃 이동 시 사라지는 `scripts/*.sh` 실행권한,
+(2) **Dagster 메타DB 통째 부재**(롤·DB 생성 + `dagster instance migrate` 필요)였다.
+spec 자체는 Dagster를 안 쓰지만 `run-admin-stack.sh`에 건너뛰기 경로가 없다.
+
+**`T-VN-LEDGER-ARCHIVE`도 함께 닫았다.** 조문 2·3은 #1239가 이미 넣은 것이었는데 표기만
+열려 있었다. 오늘 원장이 다시 220 KiB를 넘어 그 도구를 **실전에서 썼고**, 닫힌 절 둘을
+검산 통과 후 옮기고 넷을 이유와 함께 거절했으며, 삭제 게이트가 아카이브 미커밋 상태를
+잡아냈다 — 코드가 있다는 것보다 강한 근거다.
+
+**열린 항목(활성 셋, 전부 H49 계열):** `T-VN-H49-BACKUP-STALENESS` 조문 1 ·
+`T-VN-H49` · `T-VN-H49-OFFBOX`.
+**보류 셋**(잔여로 세지 않음): `T-VN-41C` · `T-VN-H43` · `T-101`.
+
+**오늘 네 번 낡은 기록에 막혔다** — `T-VN-D2-RESIDUE`(나흘), `T-VN-DAGSTER-STORAGE`
+조문 1(배포가 증거를 지움), `T-VN-M02`(여드레), `T-VN-LEDGER-ARCHIVE`(사흘). 넷 다
+**일이 남아서가 아니라 기록이 따라가지 않아서** 열려 있었다. `docs/tasks-rule.md` §6이
+이 형태를 다루지만 규약만으로는 부족하다 — 조문을 닫는 PR이 그 조문을 실제로 닫는지
+보는 장치가 없다.
+
+
 ## 2026-09-16 (2) — seal ACL 닫힘, 그리고 prod는 배포마다 새로 태어난다
 
 **다음 한 작업: `T-VN-M02`** — 소유자 판단이 먼저 필요하다. 격리 스택을 다시 세울
