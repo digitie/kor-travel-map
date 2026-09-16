@@ -1,5 +1,37 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-16 (3) — 조문이 열려 있는 동안 같은 사고가 세 DB에서 재발했다
+
+`T-VN-H49-BACKUP-STALENESS` 조문 1을 설계하려고 실측하다 **진행 중인 두 번째 사고**를
+찾았다. `geo_dagster`·`concierge`·`pinvi` standalone 백업이 **09-12부터 5일째**
+`Permission denied`로 실패 중이었다:
+
+```
+[2026-09-11T03:15:05Z] [standalone-backup:geo_dagster] done      ← 마지막 성공
+/bin/sh: 1: .../run-standalone-backup.sh: Permission denied      ← 이후 전부
+```
+
+배포가 `kor-travel-docker-manager/scripts/*.sh`의 실행 비트를 벗겼는데(전부
+`-rw-rw-r--`) crontab은 경로를 직접 실행한다. 실행 비트를 복구하고 미등록 role
+탐침으로 확인했다(`EXIT=2` — 덤프도 GC도 일으키지 않는 경로). 다음 cron부터 실제
+백업이 나온다.
+
+**조문 하나가 "아직 아니다"로 열려 있는 동안 같은 형태가 세 DB에서 조용히 재발했다.**
+이보다 그 조문의 값을 잘 보여주는 것은 없다.
+
+**근본 원인은 "경보가 없다"보다 앞이었다.** Manager 저장소 어디에도 백업 주기를
+선언한 것이 없다 — 기대치가 오직 crontab에만 있고 저장소의 어떤 코드도 crontab을 읽지
+않는다. 선언되지 않은 것의 부재는 원리적으로 탐지할 수 없다. 그래서 감시자보다
+기대치 모델이 먼저다.
+
+원장의 틀린 문장도 고쳤다: 조문 1의 "(a) api 컨테이너만 마운트한다"는 사실이 아니다 —
+**api·dagster 둘 다** `backup_root`가 마운트도 env도 없고, Dagster op의 config schema엔
+그 키 자체가 없다. 자동으로 기록되는 F9 행은 **예외 없이 `observed=false`**다.
+
+알림 경로 자체는 소유자 지시로 보류했다. 설계(조사 4 + 안 3 + 채점)는 소유권을
+Manager로 이관하고 채널은 ntfy로 확정했으며, 기대치 모델 초안이 그 저장소에 미커밋으로
+있다. 재개 시 첫 일은 **채널 실배달 1건의 육안 확인**이다.
+
 ## 2026-09-16 (2) — 한 번도 돌지 않았던 spec을 돌렸다
 
 `T-VN-M02`의 마지막 조문은 "live acceptance spec이 격리 스택에서 완주한다" 하나였다.

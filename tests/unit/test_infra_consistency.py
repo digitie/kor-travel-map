@@ -655,8 +655,9 @@ def test_f9_empty_backup_root_warns_instead_of_silently_passing(tmp_path: Path) 
 
 def test_f9_missing_backup_root_directory_warns(tmp_path: Path) -> None:
     # 루트 경로가 **설정됐는데 없는** 것은 "안 봤다"가 아니라 "성공이 하나도 없다"다.
+    missing = tmp_path / "gone"
     result = _check_f9_backup_staleness(
-        tmp_path / "gone",
+        missing,
         sla_seconds=_SLA_48H,
         sample_limit=5,
         now=datetime(2026, 9, 15, tzinfo=UTC),
@@ -665,6 +666,48 @@ def test_f9_missing_backup_root_directory_warns(tmp_path: Path) -> None:
     assert result.count == 1
     assert result.metadata["observed"] is True
     assert result.metadata["artifact_count"] == 0
+    # 판정은 위와 같되 **이유는 구분된다.**
+    assert result.metadata["root_missing"] is True
+    assert result.sample_ids == [f"backup_root_missing:{missing}"]
+
+
+def test_f9_missing_root_and_empty_root_are_the_same_verdict_but_different_reasons(
+    tmp_path: Path,
+) -> None:
+    """같은 "성공 0건"인데 조치가 다른 둘을 리포트에서 갈라 읽을 수 있어야 한다.
+
+    없는 루트는 경로·볼륨 설정 문제이고, 빈 루트는 백업 자체가 안 돈 것이다. 종전에는
+    둘 다 `no_successful_backup_artifact:<root>` 하나로 나와서 리포트만 보고는 어느
+    쪽을 고쳐야 하는지 알 수 없었다 — Map prod가 지금 정확히 그 상태다(api·dagster
+    어느 컨테이너에도 `backup_root`가 마운트돼 있지 않다, 2026-09-16 실측).
+
+    **판정을 바꾸는 검사가 아니다.** 둘 다 여전히 WARN이고 count 1이다. 바뀌는 것은
+    "왜"뿐이고, 그 "왜"가 없으면 고칠 수 없다.
+    """
+    missing = tmp_path / "gone"
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    at = datetime(2026, 9, 15, tzinfo=UTC)
+
+    missing_result = _check_f9_backup_staleness(
+        missing, sla_seconds=_SLA_48H, sample_limit=5, now=at
+    )
+    empty_result = _check_f9_backup_staleness(
+        empty, sla_seconds=_SLA_48H, sample_limit=5, now=at
+    )
+
+    # 판정은 같다 — 이것이 바뀌면 경보 하나를 잃은 것이다.
+    assert missing_result.severity == empty_result.severity == "WARN"
+    assert missing_result.count == empty_result.count == 1
+    assert missing_result.metadata["stale"] is True
+    assert empty_result.metadata["stale"] is True
+
+    # 이유는 다르다 — 이것이 같아지면 고칠 자리를 잃은 것이다.
+    assert missing_result.metadata["root_missing"] is True
+    assert empty_result.metadata["root_missing"] is False
+    assert missing_result.sample_ids != empty_result.sample_ids
+    assert missing_result.sample_ids == [f"backup_root_missing:{missing}"]
+    assert empty_result.sample_ids == [f"no_successful_backup_artifact:{empty}"]
 
 
 def test_f9_in_flight_artifact_without_checksums_is_not_a_success(tmp_path: Path) -> None:

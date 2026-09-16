@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-16 (4) — 백업 알림은 보류, 대신 진행 중이던 사고를 고쳤다
+
+**다음 한 작업: `T-VN-H49` 또는 `T-VN-H49-OFFBOX`** — `T-VN-H49-BACKUP-STALENESS`
+조문 1(알림 경로)은 **소유자 지시로 보류**한다.
+
+**보류 전에 얻은 것.** `geo_dagster`·`concierge`·`pinvi` 백업이 09-12부터 5일째
+`Permission denied`로 실패 중이던 것을 찾아 고쳤다(배포가 `scripts/*.sh` 실행 비트를
+벗겼고 crontab은 경로를 직접 실행한다). 조문이 열려 있는 동안 같은 형태가 세 DB에서
+재발한 것이다.
+
+**원장 정정.** 조문 1의 "(a) api 컨테이너만 마운트한다"는 틀렸다 — api·dagster 둘 다
+`backup_root`가 없고, Dagster op config schema엔 키 자체가 없으며, 자동 기록되는 F9
+행은 예외 없이 `observed=false`다. 그리고 **없는 디렉터리가 진짜 중단과 같은 신호**가
+되는 F9 결함은 알림과 독립이라 따로 고칠 수 있다.
+
+**재개할 때 첫 일은 채널 실배달 육안 확인이다.** 설계는 확정돼 있다(소유권 →
+`kor-travel-docker-manager`, 채널 → ntfy). 기대치 모델 초안이 그 저장소에 미커밋으로
+있다: `config/backup-policy.yml` · `services/backup_policy.py` ·
+`services/backup_watchdog.py`. 소비자가 없어 커밋하지 않았다.
+
+**열린 항목(활성 셋):** `T-VN-H49-BACKUP-STALENESS` 조문 1(**보류**) ·
+`T-VN-H49` · `T-VN-H49-OFFBOX`. 보류 셋: `T-VN-41C` · `T-VN-H43` · `T-101`.
+
+
 ## 2026-09-16 (3) — M02·LEDGER-ARCHIVE 완주. 활성 항목이 H49 계열 셋만 남았다
 
 **다음 한 작업: `T-VN-H49-BACKUP-STALENESS` 조문 1** — F9는 판정하지만 **사람에게 닿는
