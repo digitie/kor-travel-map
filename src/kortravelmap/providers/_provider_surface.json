@@ -2832,7 +2832,7 @@
         }
       },
       "package": "kma",
-      "pinned_sha": "acd1cfa3fab7a7bc091b3ccede0cc905f0874a25"
+      "pinned_sha": "4ac9a32579e183734e2fa66f389c3cff054e8025"
     },
     "python-knps-api": {
       "classes": {
