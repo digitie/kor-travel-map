@@ -24,6 +24,8 @@
 > | --- | --- | --- |
 > | `T-VN-M05` · `T-VN-M05-ACTIVATION` (완료) | [archive/tasks-acceptance-m05.md](archive/tasks-acceptance-m05.md) | 약 47 KB |
 > | `T-VN-PAIR-V2` (완료) | [archive/tasks-acceptance-pair-v2.md](archive/tasks-acceptance-pair-v2.md) | 약 12 KB |
+> | `T-VN-CURATION-SEAL-ACL` (완료) | [archive/tasks-acceptance-curation-seal-acl.md](archive/tasks-acceptance-curation-seal-acl.md) | 약 6 KB |
+> | `T-VN-39-DEPLOY` (완료) | [archive/tasks-acceptance-39-deploy.md](archive/tasks-acceptance-39-deploy.md) | 약 7 KB |
 
 ## 지금 무엇이 사실인가 — `T-VN-FINAL-REBUILD`
 
@@ -1683,102 +1685,7 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 
 ## T-VN-39-DEPLOY
 
-```markdown
-- [x] T-VN-39-DEPLOY — **재키 착지본 prod Map 배포와 D2 재핀** (2026-09-12 완료)
-```
-
-**무엇이 참이면 닫히는가.**
-
-1. [x] prod Map이 `e8c66c47` 이후 revision으로 돌고, `alembic_version`이 `309`다.
-   — 2026-09-11 실측: live 컨테이너 revision `3891f632`(= main),
-   `head=309_t39_feature_id_rekey`, `feature.features.feature_id`가 `uuid`,
-   `/health` 200. pinned rebuild는 `success/committed`, pinset `98ae83df`.
-2. [x] D2 재핀 사이클이 완주한다 — rotate → rebuild → 이미지 → repin → preflight →
-   D1 → D2. 각 단계 증적이 남는다. — **2026-09-11 완주.** 회전(pinset `98ae83df`)·
-   rebuild(`success/committed`, head `309`)·executor 이미지(라벨 `3891f632` 일치)·
-   repin·M01 ACL preflight(**55/55**)·D1(**11 passed**)·
-   **D2(`phase: passed`, `status: complete`, `recovery_attempt: 0`)**.
-   `validation.json`이 `evidence-validated`(mode normal, reports_passed 2,
-   FK 제약 23), `direct-api-audit.json`이
-   `feature_ids == feature_uuids == ["01a09088-…"]`(canonical UUIDv7) +
-   `foreign_key_references: 7`. 사후 prod 잔여물 0.
-
-   **다섯 겹이었다.** legacy 주소를 `uuid[]`에 바인드 → 309가 지운 create payload
-   슬롯 → 309가 지운 컬럼 투영 → 사라진 legacy 재현 규칙 → 306이 봉인한 raw DELETE.
-   앞의 셋은 사이클을 태워 가며 드러났고, 마지막 두 겹(증거 검사기 둘)은 **적대
-   리뷰가 사이클 전에** 잡았다 — 그 둘을 모르고 돌렸으면 70분을 더 태웠다.
-3. [x] PinVi token pair 규약을 지킨 배포다(rebind 없이). — 네 번의 회전 모두 PinVi
-   revision을 핀 원장에서 그대로 가져왔고(`f62e7ef1`), 세 OpenAPI 표면이 바이트
-   동일이라 재벤더링이 필요 없었다. `pinvi-pair deploy`/`rebind`를 부르지 않았다.
-4. [x] 배포 뒤 provider 적재 asset이 최소 한 바퀴 돌아 claim·alias가 실제로 발급된다 —
-   재키의 핵심 축이 운영 데이터에서 성립하는 것을 본다. — **2026-09-12 충족.**
-
-   `feature_place_standard_museums_job`이 prod에서 적재를 끝냈다. 여섯 축이 정확히
-   맞물린다 — `entities=1047 · heads=1047 · links=1047 · features=1047 ·
-   claims=1047 · aliases=1047`(`records=1072`는 entity당 버전이 쌓인 것이고, head가
-   가리키는 record는 결측 0). 고아·불일치 여섯 검사 **전부 0**이다:
-   feature 없는 link·claim·alias, link 없는 feature, **claim 없는 feature**, 없는
-   record를 가리키는 head.
-
-   그리고 그 값들이 재키가 설계한 축 그대로다:
-
-   - **claim** = `(provider_dataset_id, feature_kind, natural_key) → feature_id`
-     (예: `dataset=2 kind=place natural_key=대전대학교박물관::… → 01a092b5…`).
-     `ON CONFLICT (feature_id)`의 결정적 축이 사라진 자리를 이것이 대신한다(ADR-098).
-   - **legacy `f_*`는 주소로 생존** —
-     `f_1111010600_p_98434503e9869507 → 01a092b7…`.
-
-   **2026-09-12 정정.** 이 조문을 한 번 "막혀 있다"로 적었다. run 상태가 FAILURE였고
-   compute-log 쓰기 실패가 로그에 있었기 때문인데, **데이터를 보지 않고 run 상태만
-   보고 판정했다.** 적재 트랜잭션은 온전히 커밋돼 있었다. `T-VN-DAGSTER-STORAGE`는
-   실재하는 결함이지만(run이 FAILURE로 표시되고 compute log가 남지 않는다) 적재를
-   막고 있던 것은 아니다.
-
-   지나온 겹은 넷이었다: 특화거리 상류 미승인(소유자 제외), `KREX_GO_API_KEY`
-   미주입(주입), seal ACL 유실(`T-VN-CURATION-SEAL-ACL` 수정·배포), 그리고 내 호출
-   방식(`asset materialize`는 operation key 태그를 싣지 않는다 — 정식 경로는
-   `dagster job launch`이고 key는 job 이름이다).
-   2026-09-11 첫 적재가 `permission denied for function
-   current_provider_curation_input_set`로 멈췄다(`T-VN-CURATION-SEAL-ACL`). 그 앞의
-   두 시도는 상류 문제였다 — 특화거리는 data.go.kr 활용신청 미승인(403,
-   `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`, 데이터셋 15017322), krex 휴게소는
-   `KOR_TRAVEL_MAP_KREX_GO_API_KEY` 미주입(2026-09-11 채웠다 — 값은 이미 호스트에
-   있던 data.go.kr 키와 같다).
-
-   **특화거리(data.go.kr 15017322)는 소유자 판정으로 제외한다(2026-09-11).** 활용신청이
-   승인되지 않아 403(`SERVICE_KEY_IS_NOT_REGISTERED_ERROR`)이고, 신청을 기다리지 않는다.
-   이 조문은 **다른 asset 하나**로 충족한다 — 같은 키로 관광지·박물관미술관·주차장·
-   문화축제 넷이 이미 200을 받는다(2026-09-11 전수 실측).
-
-   **2026-09-11 — 네 겹을 지나 다섯째에서 멈췄다.** 성격이 전부 달랐다: 특화거리는
-   상류 미승인(위 판정), krex는 `KREX_GO_API_KEY` 미주입(주입 완료), 박물관은 seal
-   ACL 유실(`T-VN-CURATION-SEAL-ACL` — 수정·배포·실측 완료), 그다음은 내 호출 방식
-   (`asset materialize`는 operation key 태그를 싣지 않는다; 정식 경로는
-   `dagster job launch`이고 key는 job 이름이다). 정식 경로로 제출한 run은
-   `/opt/dagster/dagster_home/storage` 쓰기 불가로 실패했다 —
-   **`T-VN-DAGSTER-STORAGE`**가 그 축을 소유하며, 이 조문은 그것에 막혀 있다.
-
-   ACL 수정이 실물로 들었다는 것은 별도로 확인했다 — 배포 후 적재 login은 seal을
-   실행할 수 있고(`true`) API login은 못 한다(`false`). 자매 claim 해석기는 API도
-   `true`이므로 그 대비가 좁힌 grant가 경계를 지켰음을 보인다.
-5. 배포 뒤 정본 generation(`/var/lib/kor-travel-docker-manager-public/`
-   `pinned-runtime-generation-v6.json`)의 `map_source_revision`과 네 image id가
-   **실제로 돌고 있는 컨테이너와 같다.** 이 검사를 여기 두는 이유는 2026-09-11에
-   그 둘이 조용히 갈라진 적이 있기 때문이다 — 정본은 `2099b8a6`/`c10d6782`를
-   가리키는데 live는 rehearsal state가 얹은 `cf65e973`/`0169fe90`이었다.
-   레지스트리는 배포를 기록하지만 **실물을 강제하지는 않는다.**
-   — 2026-09-12 최종 실측: live revision `488a29e1`(= main), image 5종 **불일치 0**.
-
-**회전 전제조건.** 회전은 `rotate-pinned-pair MAP PINVI`로만 들어간다. `PINVI`에는
-**핀된 revision**(`ktdctl pin show`의 `pinvi`)을 넘긴다 — PinVi `origin/main`은 아직
-pair 계약 v1이라 preflight가 `pair contract version is unsupported: 1`로 거부한다.
-v2 계약은 revision이 아니라 digest만 담으므로, Map의 세 OpenAPI 표면
-(`openapi.json` · `openapi.service.json` · `openapi.user.json`)이 핀된 revision과
-**바이트 동일**하면 PinVi 재벤더링 없이 Map만 전진한다. 다르면 그때는 PinVi가 먼저
-재벤더링해야 하고, 그것이 T-VN-40이 기다리는 그 선행조건이다.
-
-**주의.** 이 배포는 provider 핀 8종 상향(khoa async 전환 포함)을 함께 싣는다.
-해수욕장 asset이 async generator로 바뀌었으므로 첫 실행 로그를 확인한다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-39-deploy.md](archive/tasks-acceptance-39-deploy.md)로 옮겼다(2026-09-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-DAGSTER-STORAGE
 
@@ -2338,102 +2245,7 @@ clone lane(`run-admin-feature-clone-live-acceptance.sh`)이며, 그 lane은
 
 ## T-VN-CURATION-SEAL-ACL
 
-```markdown
-- [x] T-VN-CURATION-SEAL-ACL — **적재 seal 함수를 적재 role이 실행할 수 없다** (2026-09-16 완료)
-```
-
-**무엇이 참이면 닫히는가.**
-
-1. [x] `ktm_feature_dagster_runtime`으로 접속한 적재가 curation seal을 통과한다 —
-   prod에서 provider asset 하나가 실제로 완주한다. **2026-09-16 충족.**
-2. [x] 그 권한이 `infra/runtime_privileges.py`의 렌더링 모델에 들어간다. 마이그레이션에
-   직접 `GRANT`만 적고 모델이 모르는 상태로 두지 않는다 — 모르면 다음 재적용에서
-   조용히 사라진다(지금이 그 상태다). **2026-09-16 충족 — 재적용을 실제로 겪고 살아남았다.**
-3. [x] 이 축을 재는 회귀가 있다. **실 role로** 적재 경로를 태우는 것이어야 한다 —
-   migrator/superuser로 도는 통합은 ACL을 구조적으로 관측하지 못한다. **2026-09-16 충족.**
-
-**무엇이 깨졌나 — 2026-09-11 실측.**
-
-prod에서 `feature_place_standard_museums`를 적재하니 상류 조회를 지나 DB 쓰기에서
-멈췄다:
-
-    asyncpg.exceptions.InsufficientPrivilegeError:
-    permission denied for function current_provider_curation_input_set
-
-**실측 ACL** (prod, head 309):
-
-    owner = ktm_feature_schema_owner
-    acl   = ktm_feature_schema_owner=X, ktm_curation_command_owner=X
-
-적재 login role은 `ktm_feature_dagster_runtime`이고 그 목록에 없다. 그리고 runtime
-identity는 **설계상 `SET ROLE` 경로를 하나도 받지 않는다**
-(`runtime_privileges.py`: "runtime identity는 이 `SET ROLE` 경로를 하나도 받지
-않는다"). 즉 우회로가 없다.
-
-**재키 회귀가 아니다.** `alembic/baseline/schema.sql`과 `alembic/head-schema.sql`이
-**둘 다** `ktm_curation_command_owner` 하나에만 준다 — prod는 정본과 일치한다. 은퇴한
-`0209_tvn40_provider_curation_seal`이 `ktm_feature_runtime`에도 주었으나 그 문장은
-baseline으로 접히면서 사라졌고, `runtime_privileges.py`는 이 함수를 **아예 모른다.**
-
-**범위가 좁지 않다.** `capture_provider_curation_input`은 `client.load_feature_bundles`
-가 `curation_dataset`을 받을 때 불리고, `dagster/etl.py`는 **snapshot이 아닌 모든**
-적재에 그것을 넘긴다. 즉 그 부류 provider 적재가 prod에서 전부 막혀 있다.
-
-**왜 여태 안 보였나.** prod `feature.features`가 0행이었다 — 이 prod에서 provider
-적재가 한 번도 성공한 적이 없다. 그리고 통합 테스트는 ACL이 바인드되지 않는
-identity로 돈다. 조문 3이 그 구멍을 겨냥한다.
-
-**주의 — 권한 확대다.** runtime login에 함수 EXECUTE를 더하는 변경이므로, 무엇을
-열어 주는지(이 함수는 집계 읽기다)와 무엇을 열지 않는지를 먼저 적고 적대 리뷰를
-거친다.
-
-**어떻게 닫혔나 — 2026-09-16 실측.**
-
-**조문 1.** 현 prod에 `feature_place_standard_museums_job`을 정식 경로
-(`dagster job launch`)로 제출해 run `0f70d0d5`가 `SUCCESS`로 끝났다. 그리고 **적재가
-남긴 것을 셌다**:
-
-| | 실행 전 | 실행 후 |
-|---|---|---|
-| `feature.features` | 0 | **1,047** |
-| `provider_sync.source_entities` | 0 | **1,047** |
-| `ops.curation_provider_snapshot_receipts` | 0 | **1** |
-
-세 번째 줄이 이 조문의 핵심이다. 영수증은 적재가 seal 함수에서 해시를 **받아온 뒤에만**
-쓰이고(`_seal_authoritative_curation_snapshot`), `finish_provider_feature_membership_command`
-가 `authoritative_snapshot_complete`와 영수증 유무가 어긋나면 거절한다. 즉 영수증 1건은
-"EXECUTE가 목록에 있다"가 아니라 **"적재가 그 함수를 실제로 실행해 결과를 봉인했다"**의
-증거다: `data.go.kr-standard/datagokr_museums`, `source_entity_count=1047`,
-`source_input_set_hash=7358285d…`.
-
-**조문 2.** 배포 재적용을 실제로 겪고 살아남았다. prod DB는 t44a 배포가 **새로 만든
-것**이다(`kor_travel_map` 생성 2026-09-15 12:29:55Z) — 즉 grant는 맨 DB에 렌더링 모델이
-다시 붙인 것이다. 오늘 실측:
-
-    dagster_seal = true      (적재 login은 실행할 수 있다)
-    dagster_claim = true     (자매 claim 해석기)
-    api_seal = false         (API login은 못 한다 — 좁힌 grant가 경계를 지킨다)
-
-조문 2가 겨냥한 위험이 "다음 재적용에서 조용히 사라진다"였고, **그 재적용이 실제로
-일어난 뒤에 쟀다.** 코드를 읽어 확인하는 것과는 다른 종류의 증거다.
-
-**조문 3.** `tests/integration/test_runtime_privileges_acl.py`의
-`test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins` —
-`dagster_runtime_engine`으로 **접속해서** raw SQL이 아니라 적재가 쓰는
-`capture_provider_curation_input`를 부른다. 반대편은 API login이 42501을 받는 것을 보되,
-**그 표를 읽을 수 있음을 먼저 확인한 뒤에** 본다(그 전제가 없으면 표 권한이 없어도 같은
-42501이라 경계가 풀려도 초록이다).
-
-**변이로 빨강을 확인했다 — 그리고 그 변이가 이 조문의 존재 이유를 보인다.** EXECUTE는
-그대로 두고 호출부가 함께 거는 `provider_sync.provider_datasets` SELECT만 걷었더니:
-
-| 검사 | 결과 |
-|---|---|
-| `test_provider_curation_seal_is_executable_by_the_loader_login` (migrator·카탈로그 술어) | **passed** |
-| `test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins` (실 login·적재 경로) | **failed** |
-
-조문 3이 "migrator/superuser로 도는 통합은 구조적으로 관측하지 못한다"고 적은 것이
-바로 이 차이다. 정상 상태에서는 이 파일 8건 전부 초록.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-curation-seal-acl.md](archive/tasks-acceptance-curation-seal-acl.md)로 옮겼다(2026-09-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-39-D2-FIXTURE
 

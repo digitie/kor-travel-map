@@ -399,8 +399,16 @@ def check_plan(plan: ArchivePlan) -> list[str]:
             f"{sum(gained.values())}건. **어느 쪽이든 삭제 게이트의 감시 집합이 소리 없이 "
             "바뀐다** — 사라진 항목은 그 뒤로 아무도 지켜보지 않고, 새로 생긴 항목은 "
             "기준이었던 적이 없는 줄이 기준 행세를 한다.\n"
-            + "".join(f"\n    사라짐: {_describe(item)}" for item in sorted(lost))
-            + "".join(f"\n    새로 생김: {_describe(item)}" for item in sorted(gained))
+            # `sorted(lost)`로 튜플을 직접 비교하면 안 된다 — `task_id`/`criterion_id`는
+            # `None`일 수 있고(절 제목이 ID를 갖는 조문 항목이 그렇다), str과 None을
+            # 비교하는 순간 TypeError로 **거절 메시지를 만들다가 죽는다**. 그러면 화면에
+            # 보이는 것은 "옮기면 안 된다"가 아니라 스택 트레이스이고, 읽는 사람은
+            # 도구가 고장났다고 판단해 손으로 자른다 — 이 도구가 막으려는 바로 그 경로다
+            # (2026-09-16 `T-FE-MOCK-FLAKE` 실측). 정렬 키는 출력 문자열로 고정한다.
+            + "".join(f"\n    사라짐: {_describe(item)}" for item in sorted(lost, key=_describe))
+            + "".join(
+                f"\n    새로 생김: {_describe(item)}" for item in sorted(gained, key=_describe)
+            )
         )
 
     if plan.section_text.rstrip("\n") not in plan.archive_after:
