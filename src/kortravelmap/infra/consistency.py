@@ -751,7 +751,7 @@ def _build_f9_backup_staleness_result(
                 "scan_error": scan_error,
                 "backup_root": str(backup_root) if backup_root is not None else None,
             },
-            sample_ids=(),
+            sample_ids=[],
         )
     if backup_root is None:
         # 미관측과 정상을 구분해서 적는다. Dagster 쪽 배치 경로는 ``backup_root``
