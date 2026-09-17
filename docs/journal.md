@@ -11,8 +11,8 @@
 /bin/sh: 1: .../run-standalone-backup.sh: Permission denied      ← 이후 전부
 ```
 
-배포가 `kor-travel-docker-manager/scripts/*.sh`의 실행 비트를 벗겼는데(전부
-`-rw-rw-r--`) crontab은 경로를 직접 실행한다. 실행 비트를 복구하고 미등록 role
+crontab은 경로를 직접 실행하는데 그 파일이 실행 불가였다(전부
+`-rw-rw-r--`). 실행 비트를 세우고 미등록 role
 탐침으로 확인했다(`EXIT=2` — 덤프도 GC도 일으키지 않는 경로). 다음 cron부터 실제
 백업이 나온다.
 
