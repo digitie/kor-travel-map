@@ -1119,9 +1119,9 @@ stale=true`가 된다 — **경로 오타와 진짜 백업 중단이 같은 신�
 
 **2026-09-16 — 같은 모양의 사고가 하나 더 있었고, 그건 고쳤다.** 위 geo 사고를
 조사하다 `geo_dagster`·`concierge`·`pinvi` standalone 백업이 **09-12부터 5일째**
-`Permission denied`로 실패 중인 것을 찾았다(마지막 성공 09-11 03:15~03:55Z). 배포가
-`kor-travel-docker-manager/scripts/*.sh`의 실행 비트를 벗겼는데 crontab은 경로를 직접
-실행한다. 실행 비트를 복구하고 미등록 role 탐침(`EXIT=2`, 덤프·GC 없음)으로 확인했다.
+`Permission denied`로 실패 중인 것을 찾았다(마지막 성공 09-11 03:15~03:55Z).
+crontab은 경로를 직접 실행하는데 그 파일이 실행 불가였다. 실행 비트를 세우고 미등록
+role 탐침(`EXIT=2`, 덤프·GC 없음)으로 확인했다. **2026-09-17 원인 정정 — 아래 참조.**
 **한 조문이 열려 있는 동안 같은 형태가 세 DB에서 조용히 재발했다는 것이 이 조문의
 값을 가장 잘 보여준다.**
 
@@ -1187,15 +1187,30 @@ Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
 
   **2026-09-16 정정 — 이 `[x]`도 깨져 있었다. 위 geo 조문과 같은 날 같은 방식으로.**
   세 role의 cron이 **2026-09-12부터 5일째** `Permission denied`로 실패했다(마지막 성공
-  09-11 03:15~03:55Z). 배포가 `kor-travel-docker-manager/scripts/*.sh`의 실행 비트를
-  벗겼는데(전부 `-rw-rw-r--`) crontab은 경로를 **직접 실행**한다:
+  09-11 03:15~03:55Z). crontab은 경로를 **직접 실행**하는데 그 파일이 실행 불가였다:
 
       [2026-09-11T03:15:05Z] [standalone-backup:geo_dagster] done
       /bin/sh: 1: .../run-standalone-backup.sh: Permission denied
 
-  실행 비트를 복구하고 미등록 role 탐침(`EXIT=2` — 덤프도 GC도 일으키지 않는 경로)으로
-  실행 가능함을 확인했다. **조문이 요구한 "cron으로 돈다"는 지금 참이지만, 이 조문은
-  그것을 한 번 재서 닫았을 뿐이고 그 뒤 5일간 거짓이 되어도 아무도 몰랐다.**
+  실행 비트를 세우고 미등록 role 탐침(`EXIT=2` — 덤프도 GC도 일으키지 않는 경로)으로
+  실행 가능함을 확인했다.
+
+  **2026-09-17 원인 정정 — "배포가 벗겼다"가 틀렸다. 처음부터 없었다.**
+  `git ls-files -s scripts/`가 `run-standalone-backup.sh`·`run-offbox-sync.sh`를
+  **`100644`**로 들고 있었다. 벗겨진 것이 아니라 **git이 그 비트를 가진 적이 없다** —
+  그래서 새 체크아웃마다 실행 불가 파일이 만들어진다. trusted installer가 `0755`로
+  세우는 스크립트는 넷(`install-ktdm-trusted-release`·`run-pinned-rebuild-once`·
+  `run-m05-isolated-e2e-once`·`rotate-pinned-pair`)뿐이고 백업 wrapper 둘은 그
+  목록에도 없다(`/opt`의 사본도 `-rw-r--r--`다).
+
+  **따라서 09-16의 `chmod +x`는 국소 수정이었고 다음 체크아웃이 되돌렸을 것이다 —
+  같은 사고가 같은 방식으로 재발할 예정이었다.** Manager 저장소에서 git 모드를
+  `100755`로 고치고, "헤더가 crontab 직접 실행을 적은 스크립트는 git 모드가 `100755`"를
+  강제하는 검사를 넣었다(탐지가 아니라 **예방**이다). 09-17 03:15/03:30 geo·concierge가
+  실제로 artifact를 냈다.
+
+  **조문이 요구한 "cron으로 돈다"는 지금 참이지만, 이 조문은 그것을 한 번 재서 닫았을
+  뿐이고 그 뒤 5일간 거짓이 되어도 아무도 몰랐다.**
   이 절의 두 `[x]` 조문이 **둘 다** 같은 이유로 깨진 셈이라, 이 task의 진짜 미결은
   "한 번 수렴했다"가 아니라 "계속 수렴하는지 아는가"다 —
   `T-VN-H49-BACKUP-STALENESS` 조문 1이 그 축을 소유한다(현재 소유자 지시로 보류).

@@ -6,7 +6,7 @@
 조문 1(알림 경로)은 **소유자 지시로 보류**한다.
 
 **보류 전에 얻은 것.** `geo_dagster`·`concierge`·`pinvi` 백업이 09-12부터 5일째
-`Permission denied`로 실패 중이던 것을 찾아 고쳤다(배포가 `scripts/*.sh` 실행 비트를
+`Permission denied`로 실패 중이던 것을 찾아 고쳤다(git이 `scripts/*.sh` 실행 비트를
 벗겼고 crontab은 경로를 직접 실행한다). 조문이 열려 있는 동안 같은 형태가 세 DB에서
 재발한 것이다.
 
