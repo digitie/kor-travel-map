@@ -361,6 +361,14 @@ async def test_cntc_resrce_bundle_maps_columns_and_plain_coordinates() -> None:
 
 
 async def test_split_coord_bundle_maps_fclty_columns() -> None:
+    """`FCLTY_*` 계열을 읽는 방언 자체를 센다.
+
+    예시 slug가 `children_bookstores_csv`였는데, 그 원천이 2026-08-15에
+    재등록되면서 컬럼이 전면 교체돼 `cntc_resrce` 방언으로 옮겼다. 이 검사가
+    보는 것은 slug가 아니라 **방언**이므로 남은 `split_coord` slug로 옮긴다 —
+    행 데이터는 그대로다(그 컬럼 모양이 곧 이 방언의 정의다).
+    """
+
     row = {
         "RNUM": "1",
         "ESNTL_ID": "KCCBSPO22N000000085",
@@ -372,11 +380,11 @@ async def test_split_coord_bundle_maps_fclty_columns() -> None:
         "FCLTY_LO": "126.9760656",
         "TEL_NO": "314225455",
     }
-    [bundle] = await file_rows_to_bundles([row], slug="children_bookstores_csv", fetched_at=_NOW)
+    [bundle] = await file_rows_to_bundles([row], slug="used_bookstores_csv", fetched_at=_NOW)
     feature = bundle.feature
     assert feature.name == "평촌어린이서점스펀지북"
     assert feature.coord == Coordinate(lon=Decimal("126.9760656"), lat=Decimal("37.39513617"))
-    assert feature.detail.place_kind == "children_bookstore"  # type: ignore[union-attr]
+    assert feature.detail.place_kind == "used_bookstore"  # type: ignore[union-attr]
     facility = feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["source_category"] == "아동서점 > 아동서적"
     assert (
@@ -415,7 +423,9 @@ async def test_split_coord_out_of_bbox_treated_as_missing() -> None:
         "FCLTY_LA": "0.4375",  # 실측에 시간분수형 오염값 존재 가능 — bbox 밖
         "FCLTY_LO": "0.75",
     }
-    [bundle] = await file_rows_to_bundles([row], slug="children_bookstores_csv", fetched_at=_NOW)
+    # 위와 같은 이유로 `used_bookstores_csv`를 쓴다 — 이 검사도 slug가 아니라
+    # bbox 밖 좌표를 버리는 **동작**을 센다.
+    [bundle] = await file_rows_to_bundles([row], slug="used_bookstores_csv", fetched_at=_NOW)
     assert bundle.feature.coord is None
 
 
