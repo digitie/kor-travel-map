@@ -402,7 +402,7 @@ def test_statements_without_a_routine_reference_pass_through_untouched() -> None
 #: admin 큐레이션 읽기 SQL이 참조하는 `feature.<표>`. 손으로 적지 않는다 — repo의
 #: SQL 문자열에서 뽑는다. 새 표를 join하면 이 집합이 저절로 넓어지고, 그것이 보호
 #: 목록에 있는데 grant가 없으면 아래 검사가 빨개진다.
-_FEATURE_RELATION = re.compile(r"feature\.([a-z_][a-z0-9_]*)")
+_FEATURE_RELATION = re.compile(r"(?<![A-Za-z0-9_])feature[.]([a-z_][a-z0-9_]*)")
 
 
 def _admin_curation_read_relations() -> frozenset[str]:
