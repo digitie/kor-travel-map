@@ -24,7 +24,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import Final, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -317,6 +317,10 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "manual_feature_purge_records",
         "theme_candidate_generation_observations",
         "theme_candidate_generations",
+        # 이 둘의 **읽기**는 아래 `_CURATION_CANDIDATE_READ_ACL`이 조건부로 연다.
+        # 일괄 grant 경로에는 그대로 두지 않는다 — 그 경로는 300에서도 돌고,
+        # 이 표들은 300 baseline에 이미 있어서 무조건 GRANT가 봉인된 catalog를
+        # 바꾼다.
         "theme_feature_candidate_transitions",
         "theme_feature_candidates",
     }
@@ -730,6 +734,56 @@ _PROVIDER_CURATION_SEAL_ACL = (
 )
 
 
+#: admin 큐레이션 **읽기** 경로 — `feature.theme_feature_candidates`와
+#: `..._transitions`의 SELECT만 연다.
+#:
+#: prod에서 `GET /v1/admin/theme-feature-candidates`가
+#: `permission denied for table theme_feature_candidates`로 **500**이었다
+#: (2026-09-18 n150 실측). admin 읽기 SQL이 그 둘을 join하는데
+#: (`curation_candidate_repo`의 `_CANDIDATE_FROM`·`_TRANSITIONS_SQL`) T-VN-40이
+#: 그것들을 보호 목록에 넣으면서 일괄 grant 경로가 건너뛰었고, 명시 grant는
+#: 주지 않았다.
+#:
+#: **왜 무조건 GRANT가 아닌가.** 이 조정기는 head에서만 돌지 않는다. `0236 → 300`
+#: handoff 실행자가 **revision 300에서** 이것을 돌리고 그 직후 catalog를 image에
+#: 봉인된 immutable reference와 sha256으로 대조한다. T-VN-40 표는 retired
+#: 마이그레이션(`0202_tvn40_curation_receipts`)이 300 baseline에 접어 넣어 **300에도
+#: 존재**하므로, 무조건 GRANT는 그 catalog를 바꾸고 handoff가
+#: "300 destination catalog or seed does not match the immutable reference"로 멎는다
+#: (CI PostGIS 실측). reference는 release 절차만 다시 만들 수 있으므로 맞춰야 하는
+#: 쪽은 이 조정기다.
+#:
+#: 그래서 `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 **반대 방향으로** 쓴다. shadow 컬럼
+#: `feature_uuid`는 300에 있고 309(`_SHADOW_DROP`)가 지운다 — **없을 때만**, 즉
+#: head에서만 GRANT한다. 300에서는 이 블록이 아무 것도 하지 않아 catalog가 그대로다.
+#:
+#: 쓰기는 열지 않는다 — 후보 행은 `ktm_curation_command_owner`가, transitions의
+#: append는 `ktm_curation_audit_writer`가 소유한다. 생성 축 둘
+#: (`theme_candidate_generations`, `..._observations`)은 admin 읽기 SQL이 참조하지
+#: 않으므로 열지 않는다.
+_CURATION_CANDIDATE_READ_RELATIONS: Final[tuple[str, ...]] = (
+    "theme_feature_candidates",
+    "theme_feature_candidate_transitions",
+)
+
+_CURATION_CANDIDATE_READ_ACL = tuple(
+    "DO $curation_read$ BEGIN"
+    " IF NOT EXISTS ("
+    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
+    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
+    "   JOIN pg_catalog.pg_namespace AS namespace"
+    "     ON namespace.oid = relation.relnamespace"
+    "   WHERE namespace.nspname = 'feature'"
+    "     AND relation.relname = 'feature_areas'"
+    "     AND attribute.attname = 'feature_uuid'"
+    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
+    " ) THEN"
+    f" EXECUTE 'GRANT SELECT ON feature.{relation} TO ktm_feature_runtime';"
+    " END IF; END $curation_read$"
+    for relation in _CURATION_CANDIDATE_READ_RELATIONS
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -739,7 +793,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _FEATURE_REQUEST_TABLE_ACL
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
-        + _PROVIDER_CURATION_SEAL_ACL,
+        + _PROVIDER_CURATION_SEAL_ACL
+        + _CURATION_CANDIDATE_READ_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",

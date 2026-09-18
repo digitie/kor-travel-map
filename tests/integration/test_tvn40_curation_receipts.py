@@ -9,6 +9,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
 
+#: 런타임 롤이 **읽을 수** 있어야 하는 relation.
+#:
+#: `ops.curation_cutover_identity_mappings`는 처음부터 열려 있었다. 후보 표 둘은
+#: 2026-09-18에 열었다 — admin 큐레이션 읽기 경로가 그 둘을 join하는데
+#: (`curation_candidate_repo`의 `_CANDIDATE_FROM`·`_TRANSITIONS_SQL`) 닫혀 있어서
+#: prod에서 `GET /v1/admin/theme-feature-candidates`가
+#: `permission denied for table theme_feature_candidates`로 **500**이었다.
+#:
+#: 이 검사의 요지는 바뀌지 않는다 — 막으려는 것은 **broad ops fallback**과
+#: **table-owner trigger bypass**이지 명시적·좁은 읽기가 아니다. 아래 INSERT
+#: 단언이 전 relation에 그대로 남아 쓰기는 여전히 전부 닫혀 있다.
+_RUNTIME_READABLE_RELATIONS = frozenset(
+    {
+        "ops.curation_cutover_identity_mappings",
+        "feature.theme_feature_candidates",
+        "feature.theme_feature_candidate_transitions",
+    }
+)
+
 _NEW_RELATIONS = (
     "ops.curation_cutover_identity_mappings",
     "ops.curation_rule_reconcile_operations",
@@ -139,7 +158,7 @@ async def test_tvn40_relations_are_closed_to_runtime_and_owned_by_schema_owner(
             text("SELECT has_table_privilege('ktm_feature_runtime', :relation, 'SELECT')"),
             {"relation": relation},
         )
-        assert has_runtime_select is (relation == "ops.curation_cutover_identity_mappings")
+        assert has_runtime_select is (relation in _RUNTIME_READABLE_RELATIONS), relation
         assert not await migrated_session.scalar(
             text("SELECT has_table_privilege('ktm_feature_runtime', :relation, 'INSERT')"),
             {"relation": relation},

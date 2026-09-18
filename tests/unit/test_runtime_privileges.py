@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.runtime_privileges import (
+    _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
+    _CURATION_CANDIDATE_READ_ACL,
+    _CURATION_CANDIDATE_READ_RELATIONS,
     _DECLARED_ROUTINES,
+    _FEATURE_TABLE_PRIVILEGES,
     _MANUAL_FEATURE_TABLE_ACL,
     _MANUAL_FEATURE_WRITER_ACL,
     _OPTIONAL_ROUTINES,
+    _PROTECTED_FEATURE_TABLES,
     _ROUTE_AREA_RUNTIME_GRANTS,
     RuntimePrivilegeReconciliationError,
     _render_acl_statement,
@@ -115,6 +123,11 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert "manual_feature_identity_claims" not in rendered
     assert "feature_creation_origins" not in rendered
     assert "feature_base_field_values" not in rendered
+    # 후보 축 둘은 **인벤토리 경로로는** 열지 않는다. 그 경로는 `0236 -> 300`
+    # handoff에서도 돌고, 이 표들은 300 baseline에 이미 있어서 거기서 GRANT가
+    # 나가면 봉인된 destination catalog가 어긋난다(CI PostGIS 실측).
+    # 읽기는 `_CURATION_CANDIDATE_READ_ACL`이 **head에서만** 조건부로 연다 —
+    # 아래 전용 검사가 그 조건까지 센다.
     assert "theme_feature_candidates" not in rendered
     assert "theme_feature_candidate_transitions" not in rendered
     assert "curation_rule_reconcile_operations" not in rendered
@@ -391,3 +404,115 @@ def test_statements_without_a_routine_reference_pass_through_untouched() -> None
 
     statement = 'GRANT SELECT ON TABLE "ops"."feature_overrides" TO ktm_feature_runtime'
     assert _render_acl_statement(statement, {}) == statement
+
+
+#: admin 큐레이션 읽기 SQL이 참조하는 `feature.<표>`. 손으로 적지 않는다 — repo의
+#: SQL 문자열에서 뽑는다. 새 표를 join하면 이 집합이 저절로 넓어지고, 그것이 보호
+#: 목록에 있는데 grant가 없으면 아래 검사가 빨개진다.
+_FEATURE_RELATION = re.compile(r"(?<![A-Za-z0-9_])feature[.]([a-z_][a-z0-9_]*)")
+
+
+def _admin_curation_read_relations() -> frozenset[str]:
+    sources = (
+        curation_candidate_repo._CANDIDATE_FROM,
+        curation_candidate_repo._LIST_SQL,
+        curation_candidate_repo._GET_SQL,
+        curation_candidate_repo._TRANSITIONS_SQL,
+    )
+    return frozenset(
+        name for sql in sources for name in _FEATURE_RELATION.findall(sql)
+    )
+
+
+def _relations_granted_select_to_runtime() -> frozenset[str]:
+    """런타임 롤이 SELECT를 갖게 되는 `feature` relation.
+
+    두 경로를 **모두** 본다 — 정적/조건부 ACL 창(`_ACL_ROLE_WINDOWS`)과 인벤토리
+    표(`_FEATURE_TABLE_PRIVILEGES`). 한쪽만 보면 다른 쪽으로 옮기는 변경이 조용히
+    통과한다(실제로 이 파일에서 두 번 옮겼다).
+
+    ACL 창의 문장은 `DO $$ ... EXECUTE 'GRANT ...' ... $$`로 감싸일 수 있으므로
+    문자열을 쪼개지 않고 패턴으로 찾는다.
+    """
+
+    granted: set[str] = set()
+    pattern = re.compile(
+        r"GRANT\s+SELECT[^']*?\s+ON\s+(?:TABLE\s+)?feature\.(\w+)\s+TO\s+ktm_feature_runtime"
+    )
+    for _role, statements in _ACL_ROLE_WINDOWS:
+        for statement in statements:
+            granted.update(pattern.findall(statement))
+    for relation, privileges in _FEATURE_TABLE_PRIVILEGES.items():
+        if "SELECT" in privileges and relation not in _PROTECTED_FEATURE_TABLES:
+            granted.add(relation)
+    return frozenset(granted)
+
+
+@pytest.mark.unit
+def test_every_protected_relation_the_admin_read_path_touches_is_granted() -> None:
+    """admin 큐레이션 읽기가 **읽을 수 없는** 표를 join하면 그 자리에서 빨개진다.
+
+    T-VN-40이 후보 표 넷을 보호 목록에 넣으면서 일괄 grant 경로를 끊었는데, admin
+    읽기 경로가 쓰는 둘에 명시 grant를 주지 않았다. prod에서
+    `GET /v1/admin/theme-feature-candidates`가
+    `permission denied for table theme_feature_candidates`로 **500**이었고
+    (2026-09-18 n150 실측), 저장소의 어떤 검사도 빨개지지 않았다 — 통합 테스트는
+    superuser로 돌기 때문이다.
+
+    그래서 이름을 적지 않고 **SQL에서 뽑는다.** 새 보호 표를 join하는 순간 이
+    검사가 그 이름을 들고 실패한다.
+    """
+
+    touched = _admin_curation_read_relations()
+    assert "theme_feature_candidates" in touched, touched
+
+    granted = _relations_granted_select_to_runtime()
+    blocked = sorted(
+        name
+        for name in touched
+        if name in _PROTECTED_FEATURE_TABLES and name not in granted
+    )
+    assert not blocked, (
+        "admin 읽기 경로가 런타임 롤에 보이지 않는 보호 표를 참조한다: "
+        + ", ".join(blocked)
+    )
+
+
+@pytest.mark.unit
+def test_the_candidate_read_grant_is_conditional_and_read_only() -> None:
+    """후보 축 읽기 grant는 **head에서만** 걸리고, 읽기만 연다.
+
+    조건이 없으면 `0236 -> 300` handoff가 멎는다 — 이 조정기는 revision 300에서도
+    돌고 그 직후 catalog가 image에 봉인된 immutable reference와 대조되는데,
+    T-VN-40 표는 retired 마이그레이션이 300 baseline에 접어 넣어 **300에도 있다.**
+    CI PostGIS가 이것을 두 번 잡았다.
+
+    `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 반대로 쓴다 — shadow 컬럼 `feature_uuid`는
+    300에 있고 309가 지운다. 그래서 `IF NOT EXISTS(... feature_uuid ...)`다.
+    """
+
+    assert _CURATION_CANDIDATE_READ_ACL
+    assert len(_CURATION_CANDIDATE_READ_ACL) == len(_CURATION_CANDIDATE_READ_RELATIONS)
+
+    for statement in _CURATION_CANDIDATE_READ_ACL:
+        # 조건부여야 한다 — 이 두 조각이 곧 300 안전성의 논증이다.
+        assert "IF NOT EXISTS" in statement, statement
+        assert "feature_uuid" in statement, statement
+        # 읽기만 연다.
+        assert "GRANT SELECT ON" in statement, statement
+        assert "INSERT" not in statement, statement
+        assert "UPDATE" not in statement, statement
+        assert "DELETE" not in statement, statement
+        assert "TO ktm_feature_runtime" in statement, statement
+
+    granted = _relations_granted_select_to_runtime()
+    for relation in _CURATION_CANDIDATE_READ_RELATIONS:
+        assert relation in granted, relation
+        # 일괄 grant 경로에는 남겨 두지 않는다(300에서 돌기 때문).
+        assert relation in _PROTECTED_FEATURE_TABLES, relation
+        assert relation not in _FEATURE_TABLE_PRIVILEGES, relation
+
+    #: 생성 축 둘은 열지 않는다 — admin 읽기 SQL이 참조하지 않는다.
+    for relation in ("theme_candidate_generations", "theme_candidate_generation_observations"):
+        assert relation in _PROTECTED_FEATURE_TABLES, relation
+        assert relation not in granted, relation
