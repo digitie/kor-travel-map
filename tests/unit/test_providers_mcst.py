@@ -125,24 +125,6 @@ def test_dataset_specs_use_existing_categories_and_key_convention() -> None:
         ("128.6083915, 35.86561079", (128.6083915, 35.86561079)),
     ],
 )
-def test_parse_kcisa_coordinates_accepts_korean_axis_labels() -> None:
-    """한글 축 라벨 형식 — 재등록된 아동서점 795행이 전부 이 형식이다(실측).
-
-    라벨을 벗겨 평문 경로로 흘리지 않는다. 라벨이 있는데 순서 추정에 맡기면
-    축 뒤집힘이 조용히 지나가므로, N/E로 정규화해 축 경로를 그대로 탄다.
-    """
-
-    assert parse_kcisa_coordinates("위도:37.39860599, 경도:126.6432039") == (
-        126.6432039,
-        37.39860599,
-    )
-    # 라벨과 값 사이 공백, 그리고 순서가 뒤집힌 경우도 축 라벨이 결정한다.
-    assert parse_kcisa_coordinates("경도: 126.6432039, 위도: 37.39860599") == (
-        126.6432039,
-        37.39860599,
-    )
-
-
 def test_parse_kcisa_coordinates_valid(text: str, expected: tuple[float, float]) -> None:
     assert parse_kcisa_coordinates(text) == expected
 
@@ -164,6 +146,25 @@ def test_parse_kcisa_coordinates_valid(text: str, expected: tuple[float, float])
 )
 def test_parse_kcisa_coordinates_invalid_returns_none(text: str | None) -> None:
     assert parse_kcisa_coordinates(text) is None
+
+
+@pytest.mark.unit
+def test_parse_kcisa_coordinates_accepts_korean_axis_labels() -> None:
+    """한글 축 라벨 형식 — 재등록된 아동서점 795행이 전부 이 형식이다(실측).
+
+    라벨을 벗겨 평문 경로로 흘리지 않는다. 라벨이 있는데 순서 추정에 맡기면
+    축 뒤집힘이 조용히 지나가므로, N/E로 정규화해 축 경로를 그대로 탄다.
+    """
+
+    assert parse_kcisa_coordinates("위도:37.39860599, 경도:126.6432039") == (
+        126.6432039,
+        37.39860599,
+    )
+    # 라벨과 값 사이 공백, 그리고 순서가 뒤집힌 경우도 축 라벨이 결정한다.
+    assert parse_kcisa_coordinates("경도: 126.6432039, 위도: 37.39860599") == (
+        126.6432039,
+        37.39860599,
+    )
 
 
 # -- 아동서점 재등록본(2026-08-15, fileDataNo 282 -> 484) ----------------------
