@@ -257,7 +257,9 @@ def test_split_slug_markers_keeps_rows_attempts_and_first_reason() -> None:
 
 async def test_culture_asset_rejects_unknown_slug() -> None:
     with pytest.raises(KeyError, match="nope"):
-        await run_feature_place_mcst_culture(_context([*_attempt_all(), ("nope", _common_row("어딘가"))]))
+        await run_feature_place_mcst_culture(
+            _context([*_attempt_all(), ("nope", _common_row("어딘가"))])
+        )
 
 
 async def test_culture_asset_rejects_excluded_slug() -> None:
