@@ -117,6 +117,9 @@ test-results/
 playwright-report/
 playwright/.cache/
 blob-report/
+
+# prebuild가 복사하는 maplibre worker(생성물)
+/public/maplibre/
 `;
 
 const [
