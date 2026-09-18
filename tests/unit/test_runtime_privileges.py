@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.runtime_privileges import (
+    _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
+    _CURATION_CANDIDATE_READ_ACL,
     _DECLARED_ROUTINES,
     _MANUAL_FEATURE_TABLE_ACL,
     _MANUAL_FEATURE_WRITER_ACL,
     _OPTIONAL_ROUTINES,
+    _PROTECTED_FEATURE_TABLES,
     _ROUTE_AREA_RUNTIME_GRANTS,
     RuntimePrivilegeReconciliationError,
     _render_acl_statement,
@@ -391,3 +397,82 @@ def test_statements_without_a_routine_reference_pass_through_untouched() -> None
 
     statement = 'GRANT SELECT ON TABLE "ops"."feature_overrides" TO ktm_feature_runtime'
     assert _render_acl_statement(statement, {}) == statement
+
+
+#: admin 큐레이션 읽기 SQL이 참조하는 `feature.<표>`. 손으로 적지 않는다 — repo의
+#: SQL 문자열에서 뽑는다. 새 표를 join하면 이 집합이 저절로 넓어지고, 그것이 보호
+#: 목록에 있는데 grant가 없으면 아래 검사가 빨개진다.
+_FEATURE_RELATION = re.compile(r"feature\.([a-z_][a-z0-9_]*)")
+
+
+def _admin_curation_read_relations() -> frozenset[str]:
+    sources = (
+        curation_candidate_repo._CANDIDATE_FROM,
+        curation_candidate_repo._LIST_SQL,
+        curation_candidate_repo._GET_SQL,
+        curation_candidate_repo._TRANSITIONS_SQL,
+    )
+    return frozenset(
+        name for sql in sources for name in _FEATURE_RELATION.findall(sql)
+    )
+
+
+def _relations_granted_select_to_runtime() -> frozenset[str]:
+    granted: set[str] = set()
+    for _role, statements in _ACL_ROLE_WINDOWS:
+        for statement in statements:
+            if not statement.startswith("GRANT "):
+                continue
+            if "ktm_feature_runtime" not in statement:
+                continue
+            if "SELECT" not in statement.split(" ON ")[0]:
+                continue
+            target = statement.split(" ON ", 1)[1].split(" TO ", 1)[0].strip()
+            if target.startswith("feature."):
+                granted.add(target.removeprefix("feature."))
+    return frozenset(granted)
+
+
+@pytest.mark.unit
+def test_every_protected_relation_the_admin_read_path_touches_is_granted() -> None:
+    """admin 큐레이션 읽기가 **읽을 수 없는** 표를 join하면 그 자리에서 빨개진다.
+
+    T-VN-40이 후보 표 넷을 보호 목록에 넣으면서 일괄 grant 경로를 끊었는데, admin
+    읽기 경로가 쓰는 둘에 명시 grant를 주지 않았다. prod에서
+    `GET /v1/admin/theme-feature-candidates`가
+    `permission denied for table theme_feature_candidates`로 **500**이었고
+    (2026-09-18 n150 실측), 저장소의 어떤 검사도 빨개지지 않았다 — 통합 테스트는
+    superuser로 돌기 때문이다.
+
+    그래서 이름을 적지 않고 **SQL에서 뽑는다.** 새 보호 표를 join하는 순간 이
+    검사가 그 이름을 들고 실패한다.
+    """
+
+    touched = _admin_curation_read_relations()
+    assert "theme_feature_candidates" in touched, touched
+
+    granted = _relations_granted_select_to_runtime()
+    blocked = sorted(
+        name
+        for name in touched
+        if name in _PROTECTED_FEATURE_TABLES and name not in granted
+    )
+    assert not blocked, (
+        "admin 읽기 경로가 런타임 롤에 보이지 않는 보호 표를 참조한다: "
+        + ", ".join(blocked)
+    )
+
+
+@pytest.mark.unit
+def test_the_candidate_read_grant_opens_reading_only() -> None:
+    """후보 표의 쓰기는 command 경로가 소유한다 — 읽기만 연다."""
+
+    assert _CURATION_CANDIDATE_READ_ACL
+    for statement in _CURATION_CANDIDATE_READ_ACL:
+        head = statement.split(" ON ", 1)[0]
+        assert head == "GRANT SELECT", statement
+        assert statement.endswith(" TO ktm_feature_runtime"), statement
+    #: 생성 축 둘은 열지 않는다.
+    joined = " ".join(_CURATION_CANDIDATE_READ_ACL)
+    assert "theme_candidate_generations" not in joined
+    assert "theme_candidate_generation_observations" not in joined

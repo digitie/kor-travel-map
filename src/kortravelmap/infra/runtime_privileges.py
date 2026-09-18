@@ -730,6 +730,27 @@ _PROVIDER_CURATION_SEAL_ACL = (
 )
 
 
+#: admin 큐레이션 **읽기** 경로. T-VN-40이 네 표를 `_PROTECTED_FEATURE_TABLES`에
+#: 넣으면서 일괄 grant 경로를 끊었는데(그게 맞다 — 선언 없이 권한이 생기는 길을
+#: 없앤 것이다), admin API가 읽는 **둘**에는 명시 grant를 주지 않았다. prod에서
+#: `GET /v1/admin/theme-feature-candidates`가 `InsufficientPrivilegeError:
+#: permission denied for table theme_feature_candidates`로 **500**이었다
+#: (2026-09-18 n150 실측).
+#:
+#: 자리는 `feature.features`·`feature.feature_state_transitions`와 같다 — 그 둘도
+#: 보호 목록에 있으면서 `_CORE_FEATURE_GRANTS`가 읽기만 따로 연다. 쓰기는 열지
+#: 않는다: 후보 행의 변경은 `ktm_curation_command_owner`의 command 경로가 소유하고,
+#: transitions는 `ktm_curation_audit_writer`만 append한다.
+#:
+#: 생성 축 둘(`theme_candidate_generations`,
+#: `theme_candidate_generation_observations`)은 **열지 않는다.** admin 읽기 SQL이
+#: 그 표를 참조하지 않는다 — 아래 검사가 그 사실을 SQL에서 직접 센다.
+_CURATION_CANDIDATE_READ_ACL = (
+    "GRANT SELECT ON feature.theme_feature_candidates TO ktm_feature_runtime",
+    "GRANT SELECT ON feature.theme_feature_candidate_transitions TO ktm_feature_runtime",
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -739,7 +760,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _FEATURE_REQUEST_TABLE_ACL
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
-        + _PROVIDER_CURATION_SEAL_ACL,
+        + _PROVIDER_CURATION_SEAL_ACL
+        + _CURATION_CANDIDATE_READ_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
