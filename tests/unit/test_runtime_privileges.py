@@ -10,8 +10,8 @@ from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.runtime_privileges import (
     _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
-    _FEATURE_TABLE_PRIVILEGES,
     _DECLARED_ROUTINES,
+    _FEATURE_TABLE_PRIVILEGES,
     _MANUAL_FEATURE_TABLE_ACL,
     _MANUAL_FEATURE_WRITER_ACL,
     _OPTIONAL_ROUTINES,
@@ -121,8 +121,25 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert "manual_feature_identity_claims" not in rendered
     assert "feature_creation_origins" not in rendered
     assert "feature_base_field_values" not in rendered
-    assert "theme_feature_candidates" not in rendered
-    assert "theme_feature_candidate_transitions" not in rendered
+    # 후보 축 둘은 **읽기만** 연다. 이 검사의 기준은 docstring이 적은
+    # "explicit runtime **DML** grant 후보가 될 수 없다"이고, 아래
+    # `ops.feature_overrides`도 같은 형태로 센다 — SELECT는 있고 DML은 없다.
+    #
+    # 닫아 두면 admin 큐레이션 읽기 경로가 이 둘을 join할 수 없다
+    # (`curation_candidate_repo`). 2026-09-18 prod에서
+    # `GET /v1/admin/theme-feature-candidates`가
+    # `permission denied for table theme_feature_candidates`로 500이었다.
+    for _candidate_relation in (
+        "theme_feature_candidates",
+        "theme_feature_candidate_transitions",
+    ):
+        assert (
+            f'GRANT SELECT ON TABLE "feature"."{_candidate_relation}"' in rendered
+        ), _candidate_relation
+        assert (
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
+            f'"feature"."{_candidate_relation}"' not in rendered
+        ), _candidate_relation
     assert "curation_rule_reconcile_operations" not in rendered
     assert "curation_rule_reconcile_scope_members" not in rendered
     assert (
