@@ -10,6 +10,8 @@ from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.runtime_privileges import (
     _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
+    _CURATION_CANDIDATE_READ_ACL,
+    _CURATION_CANDIDATE_READ_RELATIONS,
     _DECLARED_ROUTINES,
     _FEATURE_TABLE_PRIVILEGES,
     _MANUAL_FEATURE_TABLE_ACL,
@@ -121,25 +123,13 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert "manual_feature_identity_claims" not in rendered
     assert "feature_creation_origins" not in rendered
     assert "feature_base_field_values" not in rendered
-    # 후보 축 둘은 **읽기만** 연다. 이 검사의 기준은 docstring이 적은
-    # "explicit runtime **DML** grant 후보가 될 수 없다"이고, 아래
-    # `ops.feature_overrides`도 같은 형태로 센다 — SELECT는 있고 DML은 없다.
-    #
-    # 닫아 두면 admin 큐레이션 읽기 경로가 이 둘을 join할 수 없다
-    # (`curation_candidate_repo`). 2026-09-18 prod에서
-    # `GET /v1/admin/theme-feature-candidates`가
-    # `permission denied for table theme_feature_candidates`로 500이었다.
-    for _candidate_relation in (
-        "theme_feature_candidates",
-        "theme_feature_candidate_transitions",
-    ):
-        assert (
-            f'GRANT SELECT ON TABLE "feature"."{_candidate_relation}"' in rendered
-        ), _candidate_relation
-        assert (
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE '
-            f'"feature"."{_candidate_relation}"' not in rendered
-        ), _candidate_relation
+    # 후보 축 둘은 **인벤토리 경로로는** 열지 않는다. 그 경로는 `0236 -> 300`
+    # handoff에서도 돌고, 이 표들은 300 baseline에 이미 있어서 거기서 GRANT가
+    # 나가면 봉인된 destination catalog가 어긋난다(CI PostGIS 실측).
+    # 읽기는 `_CURATION_CANDIDATE_READ_ACL`이 **head에서만** 조건부로 연다 —
+    # 아래 전용 검사가 그 조건까지 센다.
+    assert "theme_feature_candidates" not in rendered
+    assert "theme_feature_candidate_transitions" not in rendered
     assert "curation_rule_reconcile_operations" not in rendered
     assert "curation_rule_reconcile_scope_members" not in rendered
     assert (
@@ -435,26 +425,23 @@ def _admin_curation_read_relations() -> frozenset[str]:
 
 
 def _relations_granted_select_to_runtime() -> frozenset[str]:
-    """런타임 롤이 SELECT를 갖는 `feature` relation.
+    """런타임 롤이 SELECT를 갖게 되는 `feature` relation.
 
-    두 경로를 **모두** 본다. 정적 ACL 창(`_ACL_ROLE_WINDOWS`)은 baseline에도 있는
-    표를 무조건 GRANT하고, 인벤토리 표(`_FEATURE_TABLE_PRIVILEGES`)는 DB에 실제로
-    있는 relation에만 GRANT한다. 한쪽만 보면 다른 쪽으로 옮기는 변경이 조용히
-    통과한다.
+    두 경로를 **모두** 본다 — 정적/조건부 ACL 창(`_ACL_ROLE_WINDOWS`)과 인벤토리
+    표(`_FEATURE_TABLE_PRIVILEGES`). 한쪽만 보면 다른 쪽으로 옮기는 변경이 조용히
+    통과한다(실제로 이 파일에서 두 번 옮겼다).
+
+    ACL 창의 문장은 `DO $$ ... EXECUTE 'GRANT ...' ... $$`로 감싸일 수 있으므로
+    문자열을 쪼개지 않고 패턴으로 찾는다.
     """
 
     granted: set[str] = set()
+    pattern = re.compile(
+        r"GRANT\s+SELECT[^']*?\s+ON\s+(?:TABLE\s+)?feature\.(\w+)\s+TO\s+ktm_feature_runtime"
+    )
     for _role, statements in _ACL_ROLE_WINDOWS:
         for statement in statements:
-            if not statement.startswith("GRANT "):
-                continue
-            if "ktm_feature_runtime" not in statement:
-                continue
-            if "SELECT" not in statement.split(" ON ")[0]:
-                continue
-            target = statement.split(" ON ", 1)[1].split(" TO ", 1)[0].strip()
-            if target.startswith("feature."):
-                granted.add(target.removeprefix("feature."))
+            granted.update(pattern.findall(statement))
     for relation, privileges in _FEATURE_TABLE_PRIVILEGES.items():
         if "SELECT" in privileges and relation not in _PROTECTED_FEATURE_TABLES:
             granted.add(relation)
@@ -492,25 +479,40 @@ def test_every_protected_relation_the_admin_read_path_touches_is_granted() -> No
 
 
 @pytest.mark.unit
-def test_the_candidate_read_declaration_opens_reading_only() -> None:
-    """후보 축의 쓰기는 command 경로가 소유한다 — 읽기만 연다.
+def test_the_candidate_read_grant_is_conditional_and_read_only() -> None:
+    """후보 축 읽기 grant는 **head에서만** 걸리고, 읽기만 연다.
 
-    그리고 **정적 ACL 창에 두지 않는다.** 인벤토리는 `0236 -> 300` handoff의
-    baseline과 head 두 상태에서 도는데 이 표들은 baseline에 없다 — 정적 `GRANT`는
-    그때 실패한다(CI `test_application_300_handoff_executable`가 실측으로 잡았다).
-    인벤토리 표는 DB에 없는 relation을 건너뛴다.
+    조건이 없으면 `0236 -> 300` handoff가 멎는다 — 이 조정기는 revision 300에서도
+    돌고 그 직후 catalog가 image에 봉인된 immutable reference와 대조되는데,
+    T-VN-40 표는 retired 마이그레이션이 300 baseline에 접어 넣어 **300에도 있다.**
+    CI PostGIS가 이것을 두 번 잡았다.
+
+    `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 반대로 쓴다 — shadow 컬럼 `feature_uuid`는
+    300에 있고 309가 지운다. 그래서 `IF NOT EXISTS(... feature_uuid ...)`다.
     """
 
-    for relation in ("theme_feature_candidates", "theme_feature_candidate_transitions"):
-        assert relation not in _PROTECTED_FEATURE_TABLES, relation
-        assert _FEATURE_TABLE_PRIVILEGES[relation] == ("SELECT",), relation
+    assert _CURATION_CANDIDATE_READ_ACL
+    assert len(_CURATION_CANDIDATE_READ_ACL) == len(_CURATION_CANDIDATE_READ_RELATIONS)
+
+    for statement in _CURATION_CANDIDATE_READ_ACL:
+        # 조건부여야 한다 — 이 두 조각이 곧 300 안전성의 논증이다.
+        assert "IF NOT EXISTS" in statement, statement
+        assert "feature_uuid" in statement, statement
+        # 읽기만 연다.
+        assert "GRANT SELECT ON" in statement, statement
+        assert "INSERT" not in statement, statement
+        assert "UPDATE" not in statement, statement
+        assert "DELETE" not in statement, statement
+        assert "TO ktm_feature_runtime" in statement, statement
+
+    granted = _relations_granted_select_to_runtime()
+    for relation in _CURATION_CANDIDATE_READ_RELATIONS:
+        assert relation in granted, relation
+        # 일괄 grant 경로에는 남겨 두지 않는다(300에서 돌기 때문).
+        assert relation in _PROTECTED_FEATURE_TABLES, relation
+        assert relation not in _FEATURE_TABLE_PRIVILEGES, relation
 
     #: 생성 축 둘은 열지 않는다 — admin 읽기 SQL이 참조하지 않는다.
     for relation in ("theme_candidate_generations", "theme_candidate_generation_observations"):
         assert relation in _PROTECTED_FEATURE_TABLES, relation
-        assert relation not in _FEATURE_TABLE_PRIVILEGES, relation
-
-    #: 정적 창에는 후보 표에 대한 문장이 없어야 한다.
-    for _role, statements in _ACL_ROLE_WINDOWS:
-        for statement in statements:
-            assert "theme_feature_candidates" not in statement, statement
+        assert relation not in granted, relation
