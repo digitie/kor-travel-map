@@ -106,6 +106,19 @@ def test_group_records_by_slug_preserves_order() -> None:
     assert grouped == {"a": [1, 3], "b": [2]}
 
 
+def _rows_only(records: list[Any]) -> list[Any]:
+    """stream에서 ``(slug, row)`` 튜플만 남긴다.
+
+    fetcher는 slug마다 :class:`McstSlugAttempt`를, 실패 시
+    :class:`McstSlugFailure`를 함께 흘린다. 이 검사들이 보는 것은 **행**이므로
+    asset과 같은 방법으로 가른 뒤 센다 — 위치나 개수로 가정하면 표식이 하나
+    늘어날 때마다 다시 깨진다.
+    """
+
+    rows, _attempted, _failures = split_slug_markers(records)
+    return rows
+
+
 def _attempt_all() -> list[Any]:
     """전량 경로 — fetcher가 13개 slug를 모두 시도했다고 알린다."""
 
@@ -244,14 +257,14 @@ def test_split_slug_markers_keeps_rows_attempts_and_first_reason() -> None:
 
 async def test_culture_asset_rejects_unknown_slug() -> None:
     with pytest.raises(KeyError, match="nope"):
-        await run_feature_place_mcst_culture(_context([("nope", _common_row("어딘가"))]))
+        await run_feature_place_mcst_culture(_context([*_attempt_all(), ("nope", _common_row("어딘가"))]))
 
 
 async def test_culture_asset_rejects_excluded_slug() -> None:
     """제외 dataset(예: public_libraries)은 메타표에 없어 적재 시도 시 실패."""
     with pytest.raises(KeyError, match="public_libraries"):
         await run_feature_place_mcst_culture(
-            _context([("public_libraries", {"도서관명": "더불어 숲"})])
+            _context([*_attempt_all(), ("public_libraries", {"도서관명": "더불어 숲"})])
         )
 
 
@@ -432,9 +445,7 @@ async def test_culture_public_wrapper_retries_canonical_members_stably(
         return object()
 
     monkeypatch.setattr(mcst_module, "_load", _load)
-    base = _context(
-        [
-            (first_slug, _common_row("첫 dataset")),
+    base = _context([*_attempt_all(), (first_slug, _common_row("첫 dataset")),
             (second_slug, _common_row("둘째 dataset")),
         ]
     )
@@ -612,11 +623,15 @@ async def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
         mcst_max_items_per_dataset=1,
     )
 
-    records = [record async for record in fetch_mcst_culture_records(settings)]
+    stream = [record async for record in fetch_mcst_culture_records(settings)]
+    records = _rows_only(stream)
 
     # 등록 slug × max_items=1.
     assert len(records) == len(MCST_FILE_DATASETS)
     assert {slug for slug, _row in records} == set(MCST_FILE_DATASETS)
+    # 표식도 slug마다 정확히 하나씩 나온다 — asset의 적재 범위가 여기서 온다.
+    _rows, attempted, _failures = split_slug_markers(stream)
+    assert attempted == set(MCST_FILE_DATASETS)
     [client] = _FakeFileDataClient.instances
     assert client.closed is True
     assert client.calls == list(MCST_FILE_DATASETS)
@@ -630,9 +645,9 @@ async def test_fetch_mcst_culture_records_caps_rows_per_dataset(
     try:
         settings = KorTravelMapSettings(mcst_max_items_per_dataset=3)
 
-        records = [
-            record async for record in fetch_mcst_culture_records(settings)
-        ]
+        records = _rows_only(
+            [record async for record in fetch_mcst_culture_records(settings)]
+        )
 
         per_slug: dict[str, int] = {}
         for slug, _row in records:
@@ -657,7 +672,11 @@ async def test_fetch_mcst_culture_records_limits_worker_to_explicit_slug(
         )
     ]
 
-    assert [slug for slug, _row in records] == [selected_slug]
+    assert [slug for slug, _row in _rows_only(records)] == [selected_slug]
+    # worker 경로는 slug 하나만 **시도한다** — asset이 그 하나만 적재하는
+    # 근거가 이 집합이다.
+    _rows, attempted, _failures = split_slug_markers(records)
+    assert attempted == {selected_slug}
     [client] = _FakeFileDataClient.instances
     assert client.calls == [selected_slug]
 
