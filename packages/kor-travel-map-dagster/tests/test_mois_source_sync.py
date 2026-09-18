@@ -76,6 +76,14 @@ def _install_fake_mois(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         sync_kind: str = "localdata_full",
         commit: bool = False,
     ) -> _FakeSyncResult:
+        # 실물은 이 session에 **`await session.run_sync(...)`를 부른다**
+        # (`python-mois-api/src/mois/db.py:732`). 대역이 session을 받기만 하고
+        # 쓰지 않으면 동기 `Session`이 넘어와도 이 스위트는 전부 초록이다 —
+        # 2026-09-18 prod에서 바로 그 형상이
+        # `AttributeError: 'Session' object has no attribute 'run_sync'`로
+        # 죽었는데 여기서는 아무것도 빨개지지 않았다. 대역은 실물이 session에
+        # 요구하는 것을 **그대로** 요구해야 한다.
+        await session.run_sync(lambda _sync_session: None)
         slugs = tuple(service_slugs)
         call = {
             "session": session,

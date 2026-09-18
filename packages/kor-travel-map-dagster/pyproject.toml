@@ -29,6 +29,11 @@ dependencies = [
   "boto3>=1.34,<2",
   "botocore>=1.34,<2",
   "httpx>=0.27,<1.0",
+  # mois source sync가 provider에 넘기는 session은 `AsyncSession`이어야 한다
+  # (provider가 `await session.run_sync(...)`를 부른다). 그 engine이
+  # `sqlite+aiosqlite`다. `mois` 자신도 선언하지만 이 경로를 여기서 만들므로
+  # 이 패키지도 직접 선언한다 — 대역으로 도는 테스트에는 `mois`가 없다.
+  "aiosqlite>=0.20",
 ]
 
 [project.optional-dependencies]
