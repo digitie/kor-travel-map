@@ -10,7 +10,7 @@ from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.runtime_privileges import (
     _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
-    _CURATION_CANDIDATE_READ_ACL,
+    _FEATURE_TABLE_PRIVILEGES,
     _DECLARED_ROUTINES,
     _MANUAL_FEATURE_TABLE_ACL,
     _MANUAL_FEATURE_WRITER_ACL,
@@ -418,6 +418,14 @@ def _admin_curation_read_relations() -> frozenset[str]:
 
 
 def _relations_granted_select_to_runtime() -> frozenset[str]:
+    """런타임 롤이 SELECT를 갖는 `feature` relation.
+
+    두 경로를 **모두** 본다. 정적 ACL 창(`_ACL_ROLE_WINDOWS`)은 baseline에도 있는
+    표를 무조건 GRANT하고, 인벤토리 표(`_FEATURE_TABLE_PRIVILEGES`)는 DB에 실제로
+    있는 relation에만 GRANT한다. 한쪽만 보면 다른 쪽으로 옮기는 변경이 조용히
+    통과한다.
+    """
+
     granted: set[str] = set()
     for _role, statements in _ACL_ROLE_WINDOWS:
         for statement in statements:
@@ -430,6 +438,9 @@ def _relations_granted_select_to_runtime() -> frozenset[str]:
             target = statement.split(" ON ", 1)[1].split(" TO ", 1)[0].strip()
             if target.startswith("feature."):
                 granted.add(target.removeprefix("feature."))
+    for relation, privileges in _FEATURE_TABLE_PRIVILEGES.items():
+        if "SELECT" in privileges and relation not in _PROTECTED_FEATURE_TABLES:
+            granted.add(relation)
     return frozenset(granted)
 
 
@@ -464,15 +475,25 @@ def test_every_protected_relation_the_admin_read_path_touches_is_granted() -> No
 
 
 @pytest.mark.unit
-def test_the_candidate_read_grant_opens_reading_only() -> None:
-    """후보 표의 쓰기는 command 경로가 소유한다 — 읽기만 연다."""
+def test_the_candidate_read_declaration_opens_reading_only() -> None:
+    """후보 축의 쓰기는 command 경로가 소유한다 — 읽기만 연다.
 
-    assert _CURATION_CANDIDATE_READ_ACL
-    for statement in _CURATION_CANDIDATE_READ_ACL:
-        head = statement.split(" ON ", 1)[0]
-        assert head == "GRANT SELECT", statement
-        assert statement.endswith(" TO ktm_feature_runtime"), statement
-    #: 생성 축 둘은 열지 않는다.
-    joined = " ".join(_CURATION_CANDIDATE_READ_ACL)
-    assert "theme_candidate_generations" not in joined
-    assert "theme_candidate_generation_observations" not in joined
+    그리고 **정적 ACL 창에 두지 않는다.** 인벤토리는 `0236 -> 300` handoff의
+    baseline과 head 두 상태에서 도는데 이 표들은 baseline에 없다 — 정적 `GRANT`는
+    그때 실패한다(CI `test_application_300_handoff_executable`가 실측으로 잡았다).
+    인벤토리 표는 DB에 없는 relation을 건너뛴다.
+    """
+
+    for relation in ("theme_feature_candidates", "theme_feature_candidate_transitions"):
+        assert relation not in _PROTECTED_FEATURE_TABLES, relation
+        assert _FEATURE_TABLE_PRIVILEGES[relation] == ("SELECT",), relation
+
+    #: 생성 축 둘은 열지 않는다 — admin 읽기 SQL이 참조하지 않는다.
+    for relation in ("theme_candidate_generations", "theme_candidate_generation_observations"):
+        assert relation in _PROTECTED_FEATURE_TABLES, relation
+        assert relation not in _FEATURE_TABLE_PRIVILEGES, relation
+
+    #: 정적 창에는 후보 표에 대한 문장이 없어야 한다.
+    for _role, statements in _ACL_ROLE_WINDOWS:
+        for statement in statements:
+            assert "theme_feature_candidates" not in statement, statement

@@ -61,6 +61,12 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "current_weather_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
+    # T-VN-40 후보 축의 **읽기 전용** 항목. 정적 ACL 창이 아니라 이 표에 두는
+    # 이유는 존재 조건 때문이다 — 인벤토리는 `0236 -> 300` handoff의 baseline과
+    # head 두 상태에서 돌고, 이 표들은 baseline에 없다. 정적 `GRANT`는 그때
+    # 실패하지만 이 경로는 DB에 없는 relation을 건너뛴다.
+    "theme_feature_candidate_transitions": ("SELECT",),
+    "theme_feature_candidates": ("SELECT",),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
@@ -317,8 +323,14 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "manual_feature_purge_records",
         "theme_candidate_generation_observations",
         "theme_candidate_generations",
-        "theme_feature_candidate_transitions",
-        "theme_feature_candidates",
+        # `theme_feature_candidates`와 `..._transitions`는 **여기 없다.**
+        # admin 큐레이션 읽기 경로가 그 둘을 join하는데(`curation_candidate_repo`),
+        # 보호 목록에 두면 일괄 grant 경로가 건너뛰어 런타임 롤에 권한이 전혀
+        # 생기지 않는다 — prod에서 `GET /v1/admin/theme-feature-candidates`가
+        # `permission denied for table theme_feature_candidates`로 500이었다
+        # (2026-09-18 n150 실측). 아래 `_FEATURE_TABLE_PRIVILEGES`에서 **읽기만**
+        # 연다 — 쓰기는 `ktm_curation_command_owner`(후보)와
+        # `ktm_curation_audit_writer`(transitions)가 그대로 소유한다.
     }
 )
 _PROTECTED_FEATURE_SEQUENCES = frozenset(
@@ -730,27 +742,6 @@ _PROVIDER_CURATION_SEAL_ACL = (
 )
 
 
-#: admin 큐레이션 **읽기** 경로. T-VN-40이 네 표를 `_PROTECTED_FEATURE_TABLES`에
-#: 넣으면서 일괄 grant 경로를 끊었는데(그게 맞다 — 선언 없이 권한이 생기는 길을
-#: 없앤 것이다), admin API가 읽는 **둘**에는 명시 grant를 주지 않았다. prod에서
-#: `GET /v1/admin/theme-feature-candidates`가 `InsufficientPrivilegeError:
-#: permission denied for table theme_feature_candidates`로 **500**이었다
-#: (2026-09-18 n150 실측).
-#:
-#: 자리는 `feature.features`·`feature.feature_state_transitions`와 같다 — 그 둘도
-#: 보호 목록에 있으면서 `_CORE_FEATURE_GRANTS`가 읽기만 따로 연다. 쓰기는 열지
-#: 않는다: 후보 행의 변경은 `ktm_curation_command_owner`의 command 경로가 소유하고,
-#: transitions는 `ktm_curation_audit_writer`만 append한다.
-#:
-#: 생성 축 둘(`theme_candidate_generations`,
-#: `theme_candidate_generation_observations`)은 **열지 않는다.** admin 읽기 SQL이
-#: 그 표를 참조하지 않는다 — 아래 검사가 그 사실을 SQL에서 직접 센다.
-_CURATION_CANDIDATE_READ_ACL = (
-    "GRANT SELECT ON feature.theme_feature_candidates TO ktm_feature_runtime",
-    "GRANT SELECT ON feature.theme_feature_candidate_transitions TO ktm_feature_runtime",
-)
-
-
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -760,8 +751,7 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _FEATURE_REQUEST_TABLE_ACL
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
-        + _PROVIDER_CURATION_SEAL_ACL
-        + _CURATION_CANDIDATE_READ_ACL,
+        + _PROVIDER_CURATION_SEAL_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
