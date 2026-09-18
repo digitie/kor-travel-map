@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from kortravelmap.dagster.provider_fetchers import (
     _KRFOREST_LARGEST_DECLARED_ROWS,
     _KRFOREST_MAX_PAGES,
@@ -31,10 +29,9 @@ _KRFOREST_NUM_OF_ROWS = 1000
 _REQUIRED_HEADROOM = 2
 
 
-@pytest.mark.unit
 def test_krforest_page_ceiling_has_headroom_over_the_largest_observed_dataset() -> None:
     needed_pages = math.ceil(_KRFOREST_LARGEST_DECLARED_ROWS / _KRFOREST_NUM_OF_ROWS)
-    assert _KRFOREST_MAX_PAGES >= needed_pages * _REQUIRED_HEADROOM, (
+    assert needed_pages * _REQUIRED_HEADROOM <= _KRFOREST_MAX_PAGES, (
         f"절대 상한 {_KRFOREST_MAX_PAGES}장이 실측 최대 "
         f"{_KRFOREST_LARGEST_DECLARED_ROWS:,}행({needed_pages}장)의 "
         f"{_REQUIRED_HEADROOM}배에 못 미친다. 상한을 올리거나, dataset이 그만큼 자랐다면 "
@@ -42,7 +39,6 @@ def test_krforest_page_ceiling_has_headroom_over_the_largest_observed_dataset() 
     )
 
 
-@pytest.mark.unit
 def test_the_observed_maximum_is_above_the_count_that_broke_prod() -> None:
     """실측 상수가 사고 당시 값 아래로 내려가지 않게 못박는다.
 
@@ -53,7 +49,6 @@ def test_the_observed_maximum_is_above_the_count_that_broke_prod() -> None:
     assert _KRFOREST_LARGEST_DECLARED_ROWS >= 10_562
 
 
-@pytest.mark.unit
 def test_the_ceiling_still_refuses_an_absurd_declaration() -> None:
     """상한은 여전히 **천장**이어야 한다 — 거짓 선언에 끌려가면 안 된다.
 
