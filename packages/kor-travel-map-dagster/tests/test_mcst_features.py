@@ -9,12 +9,12 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import AssetKey, build_asset_context
+from dagster import AssetKey, Failure, build_asset_context
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS
+from kortravelmap.providers.mcst import MCST_FILE_DATASETS, McstSlugFailure
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import mcst_features as mcst_module
@@ -25,6 +25,7 @@ from kortravelmap.dagster.mcst_features import (
     feature_place_mcst_culture,
     group_records_by_slug,
     run_feature_place_mcst_culture,
+    split_slug_failures,
 )
 from kortravelmap.dagster.provider_fetchers import fetch_mcst_culture_records
 from kortravelmap.dagster.upstream_requests import (
@@ -119,6 +120,84 @@ async def test_culture_asset_loads_per_slug_datasets() -> None:
     assert by_key["mcst_world_restaurants_csv"].load.bundles_total == 1
     assert result.bundles_total == 3
     assert result.as_metadata()["datasets_loaded"] == len(MCST_FILE_DATASETS)
+
+
+async def test_one_failing_slug_does_not_take_down_the_others() -> None:
+    """slug 하나의 수집 실패가 나머지를 죽이지 않는다.
+
+    2026-09-18 prod: 아동서점 원천이 이동해 그 slug의 수집이 실패했는데, stream을
+    리스트로 걷는 쪽이 예외를 그대로 통과시켜 **13개 dataset이 전부 0건**이 됐다.
+    앞서 수집해 둔 slug의 행까지 함께 버려졌다.
+
+    이 검사는 세 가지를 **동시에** 센다 — 셋 중 하나만 빠져도 사고가 다른 모양으로
+    돌아온다.
+    """
+
+    failed_slug = "children_bookstores_csv"
+    records = [
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
+        ("world_restaurants_csv", _common_row("식당 1")),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    # (1) run은 실패로 끝난다 — 일부가 죽었는데 초록이면 그것이 다음 사고다.
+    assert failed_slug in str(excinfo.value)
+    # (2) 재시도는 끈다 — 상류 이동은 같은 run 안에서 나아지지 않는다.
+    assert excinfo.value.allow_retries is False
+
+
+async def test_a_failed_slug_is_not_sealed_as_an_empty_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패한 slug는 **적재 자체를 건너뛴다**.
+
+    빈 목록으로 `_load`를 부르면 `authoritative_snapshot_complete=True`가 그것을
+    '전량'으로 선언해 그 dataset의 기존 feature가 **전부 은퇴**한다 — 수집이
+    실패했을 뿐인데 데이터를 지우는 셈이다. 그래서 건너뛴 것이 맞는지, 그리고
+    나머지는 그대로 적재됐는지를 `_load` 호출 자체로 센다.
+    """
+
+    loaded: list[str] = []
+    original = mcst_module._load
+
+    async def _spy(context: Any, **kwargs: Any) -> Any:
+        loaded.append(str(kwargs["dataset_key"]))
+        return await original(context, **kwargs)
+
+    monkeypatch.setattr(mcst_module, "_load", _spy)
+
+    failed_slug = "children_bookstores_csv"
+    records = [
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
+    ]
+
+    with pytest.raises(Failure):
+        await run_feature_place_mcst_culture(_context(records))
+
+    failed_key = MCST_FILE_DATASETS[failed_slug].dataset_key
+    assert failed_key not in loaded, loaded
+    # 나머지는 전부 적재됐다 — 전멸하지 않는다는 것이 이 수정의 요지다.
+    assert len(loaded) == len(MCST_FILE_DATASETS) - 1
+    assert "mcst_independent_bookstores_csv" in loaded
+
+
+def test_split_slug_failures_keeps_rows_and_first_reason() -> None:
+    rows, failures = split_slug_failures(
+        [
+            ("a", 1),
+            McstSlugFailure(slug="b", reason="첫 사유"),
+            ("a", 2),
+            McstSlugFailure(slug="b", reason="나중 사유"),
+        ]
+    )
+
+    assert rows == [("a", 1), ("a", 2)]
+    # 나중 것으로 덮으면 원인 추적이 한 단계 멀어진다.
+    assert failures == {"b": "첫 사유"}
 
 
 async def test_culture_asset_rejects_unknown_slug() -> None:

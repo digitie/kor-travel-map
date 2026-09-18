@@ -40,6 +40,7 @@ from .provider_pagination import (
     ProviderPage,
     aiter_paginated_items,
 )
+from .quota_exhaustion import quota_exhaustion_cause
 from .upstream_requests import note_upstream_request
 from .upstream_retry import retry_upstream_awaitable
 
@@ -1369,7 +1370,7 @@ async def fetch_mcst_culture_records(
     generator, ``finally``에서 ``await client.aclose()``.
     """
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
-    from kortravelmap.providers.mcst import MCST_FILE_DATASETS
+    from kortravelmap.providers.mcst import MCST_FILE_DATASETS, McstSlugFailure
 
     selected_slugs = tuple(MCST_FILE_DATASETS) if slugs is None else tuple(slugs)
     unknown = sorted(set(selected_slugs) - set(MCST_FILE_DATASETS))
@@ -1384,11 +1385,27 @@ async def fetch_mcst_culture_records(
             # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
             note_upstream_request()
             seen = 0
-            async for row in client.iter_csv(slug):
-                seen += 1
-                yield (slug, row)
-                if seen >= max_items:
-                    break
+            try:
+                async for row in client.iter_csv(slug):
+                    seen += 1
+                    yield (slug, row)
+                    if seen >= max_items:
+                        break
+            except Exception as exc:  # noqa: BLE001 — 아래에서 다시 가른다
+                # **한 slug의 상류 변화가 13개를 전멸시키지 않게 한다.**
+                # 이 stream을 리스트로 걷는 쪽(`_record_list`)은 예외를 그대로
+                # 통과시키므로, 여기서 raise하면 앞서 수집해 둔 slug의 행까지
+                # 함께 버려지고 뒤의 slug는 수집조차 되지 않는다(2026-09-18
+                # prod: 아동서점 원천 이동 하나로 13개 dataset 전멸).
+                #
+                # **쿼터 소진은 예외다.** 그것은 slug가 아니라 run 전체의
+                # 자원이 바닥난 것이라, 남은 slug를 계속 부르면 요청만 더 쓴다.
+                # 그대로 올려보내 terminal 처리 경로를 타게 한다.
+                if quota_exhaustion_cause(exc) is not None:
+                    raise
+                # 조용한 skip이 아니다 — asset이 이 표식을 보고 그 dataset의
+                # 적재를 건너뛴 뒤 run을 실패로 끝낸다.
+                yield McstSlugFailure(slug=slug, reason=f"{type(exc).__name__}: {exc}")
     finally:
         await client.aclose()
 

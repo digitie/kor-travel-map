@@ -84,6 +84,7 @@ __all__ = [
     "MCST_EXCLUDED_FILE_DATASETS",
     "McstDatasetSpec",
     "McstDialect",
+    "McstSlugFailure",
     "file_rows_to_bundles",
     "parse_kcisa_coordinates",
 ]
@@ -271,6 +272,28 @@ MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
     ),
 }
 """적재 제외 3 dataset과 사유 (#395 — 문서 `docs/etl/mcst-feature-etl.md` §3)."""
+
+
+# ── slug 수집 실패 표식 ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class McstSlugFailure:
+    """한 slug의 **수집**이 실패했다는 표식.
+
+    이 provider는 slug 13개를 한 stream으로 흘리고 asset이 slug별로 나눠
+    적재한다. 그런데 stream을 리스트로 걷는 쪽(`_record_list`)이 예외를 그대로
+    통과시키므로, **한 slug에서 예외가 나면 13개 전부가 0건이 된다** — 앞서
+    수집해 둔 slug의 행까지 함께 버려진다(2026-09-18 prod: 아동서점 원천 이동
+    하나로 13개 dataset 전멸).
+
+    그래서 수집 실패를 **예외 대신 이 값으로** 흘린다. 조용한 skip이 아니다 —
+    asset이 이 표식을 받은 slug는 적재를 **건너뛰고**(빈 스냅샷을 권위로 봉인하면
+    그 dataset의 기존 feature가 전부 은퇴한다) run 전체는 **실패로 끝낸다**.
+    """
+
+    slug: str
+    reason: str
 
 
 # ── COORDINATES 파서 ─────────────────────────────────────────────────────

@@ -21,10 +21,11 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationMembersh
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
     MCST_PROVIDER_NAME,
+    McstSlugFailure,
     file_rows_to_bundles,
 )
 
-from dagster import AssetExecutionContext, asset
+from dagster import AssetExecutionContext, Failure, asset
 
 from .assets import (
     _COMMON_RESOURCE_KEYS,
@@ -49,6 +50,7 @@ __all__ = [
     "McstLoadResult",
     "feature_place_mcst_culture",
     "group_records_by_slug",
+    "split_slug_failures",
     "run_feature_place_mcst_culture",
 ]
 
@@ -77,6 +79,30 @@ class McstLoadResult:
         }
 
 
+def split_slug_failures(
+    records: Sequence[Any],
+) -> tuple[list[Any], dict[str, str]]:
+    """스트림을 ``(정상 튜플, {실패 slug: 사유})``로 가른다.
+
+    fetcher가 slug 하나의 수집 실패를 예외 대신
+    :class:`~kortravelmap.providers.mcst.McstSlugFailure`로 흘린다 — 예외로
+    올리면 이 stream을 리스트로 걷는 쪽이 그대로 통과시켜 **13개 dataset이
+    전부 0건**이 되기 때문이다(2026-09-18 prod 실측).
+
+    같은 slug가 두 번 실패할 일은 없지만, 그렇더라도 **첫 사유를 남긴다** —
+    나중 것으로 덮으면 원인 추적이 한 단계 멀어진다.
+    """
+
+    rows: list[Any] = []
+    failures: dict[str, str] = {}
+    for entry in records:
+        if isinstance(entry, McstSlugFailure):
+            failures.setdefault(entry.slug, entry.reason)
+            continue
+        rows.append(entry)
+    return rows, failures
+
+
 def group_records_by_slug(
     records: Sequence[Any],
 ) -> dict[str, list[Any]]:
@@ -103,6 +129,7 @@ async def run_feature_place_mcst_culture(
     snapshot 전체를 한 번에 완료 처리한다.
     """
     records = await _record_list(context, "mcst_culture_records")
+    records, slug_failures = split_slug_failures(records)
     grouped = group_records_by_slug(records)
     unknown = sorted(set(grouped) - set(MCST_FILE_DATASETS))
     if unknown:
@@ -112,6 +139,18 @@ async def run_feature_place_mcst_culture(
     geocoder = _reverse_geocoder(context)
     results: list[DagsterFeatureLoadResult] = []
     for slug, spec in MCST_FILE_DATASETS.items():
+        if slug in slug_failures:
+            # **적재를 건너뛴다.** 빈 목록으로 `_load`를 부르면
+            # `authoritative_snapshot_complete=True`가 그것을 '전량'으로
+            # 선언해 이 dataset의 기존 feature가 **전부 은퇴**한다 — 수집이
+            # 실패했을 뿐인데 데이터를 지우는 셈이다.
+            context.log.error(
+                "MCST %s 수집 실패 — 이 dataset은 적재하지 않는다"
+                "(빈 스냅샷을 권위로 봉인하지 않는다): %s",
+                spec.dataset_key,
+                slug_failures[slug],
+            )
+            continue
         slug_rows = grouped.get(slug, [])
         if not slug_rows:
             context.log.info(
@@ -140,6 +179,29 @@ async def run_feature_place_mcst_culture(
             authoritative_snapshot_complete=True,
         )
         results.append(loaded)
+    if slug_failures:
+        # 성공한 dataset은 이미 적재됐다 — 그것이 이 변경의 요지다.
+        # 그래도 run은 **실패로 끝낸다**: 일부가 죽었는데 초록으로 보이면
+        # 그것이 다음 사고다.
+        #
+        # 재시도는 끈다. 여기 오는 실패는 상류 스키마·원천 이동처럼
+        # **같은 run 안에서 나아지지 않는** 종류다(쿼터 소진은 fetcher가
+        # 위로 올려 별도 경로를 탄다). 재시도하면 성공한 12개를 다시
+        # 적재하고 같은 자리에서 또 죽는다.
+        loaded_keys = [result.dataset_key for result in results]
+        raise Failure(
+            description=(
+                f"MCST slug {len(slug_failures)}건의 수집이 실패했다 — "
+                f"나머지 {len(loaded_keys)}건은 적재했다. "
+                f"실패: {slug_failures}"
+            ),
+            metadata={
+                "failed_slugs": ", ".join(sorted(slug_failures)),
+                "loaded_datasets": ", ".join(loaded_keys),
+                "step_retries_suppressed": "true",
+            },
+            allow_retries=False,
+        )
     result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
     if on_memberships_completed is not None and memberships:
         await on_memberships_completed(memberships)
