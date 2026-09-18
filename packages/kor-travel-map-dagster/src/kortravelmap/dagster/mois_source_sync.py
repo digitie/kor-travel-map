@@ -43,7 +43,6 @@ from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import Session
 
 from dagster import (
     Array,
