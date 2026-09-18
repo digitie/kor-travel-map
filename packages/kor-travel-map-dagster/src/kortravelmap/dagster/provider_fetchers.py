@@ -1427,7 +1427,7 @@ def _seoul_result_code(payload: Mapping[str, Any]) -> str:
 #: (`feature_place_datagokr_seoul_bookstores_job`), 봉인된 300 카탈로그가 전부 그
 #: 이름을 쥐고 있다. 바뀐 것은 원천뿐이고, 그 사실을 이 표가 한 줄로 말한다.
 _FILE_DATA_SOURCE_OVERRIDES: Final[
-    dict[str, Callable[["KorTravelMapSettings"], AsyncIterator[Any]]]
+    dict[str, Callable[[KorTravelMapSettings], AsyncIterator[Any]]]
 ] = {"datagokr_seoul_bookstores": fetch_seoul_open_data_bookstores}
 
 
