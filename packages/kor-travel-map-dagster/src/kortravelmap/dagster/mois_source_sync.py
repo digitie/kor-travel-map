@@ -42,7 +42,7 @@ from kortravelmap.providers.mois import (
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from dagster import (
     Array,
@@ -221,13 +221,29 @@ def sync_mois_source_db(
 
         results: list[Any] = []
         client = mois.LocalDataFileClient()
+        # **session도 async여야 한다.** provider가 async-only가 됐을 때 호출만
+        # `await`로 바꾸고 session은 동기 `Session`으로 남겨 뒀는데, provider는
+        # 그 session에 `await session.run_sync(...)`를 부른다(`mois/db.py:732`).
+        # 동기 `Session`에는 그 메서드가 없어서 prod에서 매번
+        # `AttributeError: 'Session' object has no attribute 'run_sync'`로
+        # 죽었다(2026-09-18 n150 실측, 재시도 3회 소진 후 job 실패).
+        #
+        # 위 동기 engine은 그대로 둔다 — `create_sqlite_schema`와 WAL checkpoint는
+        # 동기 `Engine`을 받는다. 같은 파일을 두 engine이 쓰지만 쓰기는 이 async
+        # session만 하고, checkpoint는 session을 닫은 뒤에 돈다.
+        # `aiosqlite`는 `mois`가 스스로 선언하는 의존이라(`aiosqlite>=0.20`)
+        # 이 경로가 도는 환경에는 반드시 있다 — 이 함수는 `mois` import에
+        # 성공한 뒤에만 불린다.
+        async_engine = create_async_engine(
+            f"sqlite+aiosqlite:///{db_path}", connect_args={"timeout": 30}
+        )
         try:
             for slug in slugs:
                 # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
                 # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
                 # 하한으로 1을 센다 - 이름이 `_min`인 이유.
                 note_upstream_request()
-                session = Session(engine)
+                session = AsyncSession(async_engine)
                 try:
                     results.append(
                         await mois.sync_localdata_source_db(
@@ -240,10 +256,11 @@ def sync_mois_source_db(
                         )
                     )
                 finally:
-                    session.close()
+                    await session.close()
                     _checkpoint_sqlite_wal(engine)
         finally:
             await client.aclose()
+            await async_engine.dispose()
         return results
 
     try:
