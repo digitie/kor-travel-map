@@ -636,8 +636,33 @@ def _coalescing_execution_fn(
 #: 의도해서 한 번 돌리는 일이다. 끄는 것은 시계이지 능력이 아니다.
 #:
 #: 2026-09-09 — KMA(기상청)·AirKorea 자동 적재 중지(사용자 지시).
+#:
+#: 2026-09-18 — data.go.kr 활용신청이 되지 않은 넷과, 오픈API가 아예 없는 하나를
+#: 중지(사용자 지시). prod에서 32개 provider job을 한 번에 돌려 실패 원인을
+#: 전수로 확정한 결과다.
+#:
+#: - 안산 세계맛집 · 경기 무슬림 친화 음식점 · 제주 향토음식점: odcloud **401**
+#:   `{"code":-4,"msg":"등록되지 않은 인증키 입니다."}`. 활용신청은 키가 아니라
+#:   **데이터셋 단위**라 그 셋만 미신청 상태다.
+#: - 지역특화거리 표준데이터: 표준 오픈API **403** `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`.
+#:   같은 원인(미신청)이 게이트웨이에 따라 401/403으로 다르게 나온다(무자격
+#:   프로브로 실측).
+#: - 서울 책방: odcloud **404** `{"code":-3,"msg":"등록되지 않은 서비스 입니다."}` —
+#:   날조한 데이터셋 번호와 **같은 응답**이고 swagger 네임스페이스도 404다.
+#:   포털에 오픈API 탭 자체가 없다. **활용신청으로 되살릴 수 없다.** baseline
+#:   seed가 이미 그 사실을 적어 뒀다 — `update_cycle='one_time'`,
+#:   `freshness_note='서울 열린데이터광장 원천 서비스 종료 안내 노출'`.
+#:
+#: 앞의 넷은 오너가 포털에서 활용신청을 마치면 이 목록에서 이름을 빼는 것으로
+#: 되살아난다. 서울 책방은 원천을 서울 열린데이터광장(OA-21062)으로 바꾸는
+#: 별건 작업이 필요하다.
 DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
     {
+        "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
+        "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
+        "feature_place_datagokr_seoul_bookstores_monthly_schedule",
+        "feature_place_standard_special_streets_monthly_schedule",
         "feature_weather_airkorea_air_quality_hourly_schedule",
         "feature_weather_kma_ultra_short_nowcast_hourly_schedule",
         "feature_weather_kma_ultra_short_forecast_hourly_schedule",
