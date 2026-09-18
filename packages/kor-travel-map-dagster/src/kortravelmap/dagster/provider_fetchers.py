@@ -19,7 +19,14 @@ import importlib
 import logging
 import math
 import pathlib
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+)
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -38,6 +45,7 @@ from sqlalchemy.orm import Session
 from . import upstream_retry
 from .provider_pagination import (
     ProviderPage,
+    ProviderPaginationOverrun,
     aiter_paginated_items,
 )
 from .quota_exhaustion import quota_exhaustion_cause
@@ -55,11 +63,13 @@ __all__ = [
     "KrexRestAreaWeatherUnavailable",
     "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
+    "SeoulOpenDataError",
     "fetch_airkorea_air_quality",
     "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
+    "fetch_seoul_open_data_bookstores",
     "fetch_kma_weather_alerts",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
@@ -1290,12 +1300,154 @@ async def fetch_standard_special_streets(
         await client.aclose()
 
 
+#: 서울 열린데이터광장 OpenAPI base. **https가 없다** — 8088 포트는 TLS를 받지
+#: 않는다(2026-09-19 실측: curl 35 SSL connect error). 인증키가 경로에 실려
+#: 평문으로 나간다는 뜻이고, 그래서 이 키는 **읽기 전용 공개데이터 전용**으로만
+#: 쓴다. data.go.kr 키를 여기 재사용하지 않는 이유이기도 하다.
+_SEOUL_OPEN_DATA_BASE_URL: Final = "http://openapi.seoul.go.kr:8088"
+
+#: 서울 책방(서점) 현황정보 OA-21062의 서비스명.
+_SEOUL_BOOKSTORE_SERVICE: Final = "TbSlibBookstoreInfo"
+
+#: 한 요청의 행 수. 포털이 1000을 넘기면 ``ERROR-336``으로 거절한다.
+_SEOUL_OPEN_DATA_PAGE_SIZE: Final = 1_000
+
+#: 2026-09-19 실측 총 행 수(`list_total_count`). 상한이 이 값보다 충분히 큰지
+#: 검사가 대조한다 — 상한을 실측에 붙여 두면 원천이 조금만 늘어도 잘린다.
+_SEOUL_BOOKSTORE_DECLARED_ROWS: Final = 606
+
+#: 페이지 상한. 1000행 x 20 = 20,000행으로 실측(606)의 30배가 넘는다.
+#: 상한은 무한 루프 차단용이지 수집량 조절 손잡이가 아니다.
+_SEOUL_OPEN_DATA_MAX_PAGES: Final = 20
+
+#: 정상 응답 코드와 "더 없음" 코드.
+_SEOUL_OK_CODE: Final = "INFO-000"
+_SEOUL_NO_DATA_CODE: Final = "INFO-200"
+
+
+class SeoulOpenDataError(RuntimeError):
+    """서울 열린데이터광장이 데이터 대신 오류를 돌려줬다.
+
+    이 포털은 **오류도 HTTP 200으로 준다.** 게다가 ``json``을 요청해도 인증 실패는
+    XML(``<RESULT><CODE>INFO-100</CODE>``)로 온다(2026-09-19 실측). 상태 코드나
+    파싱 성공으로 판정하면 조용히 0건이 되므로 본문의 ``RESULT.CODE``를 본다.
+    """
+
+
+async def fetch_seoul_open_data_bookstores(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """서울 책방(OA-21062) row를 서울 열린데이터광장에서 stream한다.
+
+    종전 원천인 data.go.kr odcloud 자동변환 API는 2026-09-18 기준
+    **404 ``등록되지 않은 서비스 입니다``**로 사라졌다(날조한 데이터셋 번호와 같은
+    응답이고 swagger 네임스페이스도 404다). 활용신청으로 되살릴 수 있는 종류가
+    아니라 원천 자체를 옮긴다.
+    """
+    secret = settings.seoul_open_data_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "서울 책방 live fetch에는 KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY "
+            "(source SEOUL_OPEN_DATA_API_KEY)가 필요하다. data.go.kr 키와 **다른 "
+            "포털의 키**라 DATA_GO_KR_SERVICE_KEY로는 호출되지 않는다."
+        )
+    api_key = secret.get_secret_value()
+
+    start = 1
+    pages = 0
+    async with httpx.AsyncClient(
+        base_url=_SEOUL_OPEN_DATA_BASE_URL, timeout=60.0
+    ) as client:
+        while True:
+            if pages >= _SEOUL_OPEN_DATA_MAX_PAGES:
+                raise ProviderPaginationOverrun(
+                    f"서울 책방 page 상한 {_SEOUL_OPEN_DATA_MAX_PAGES}를 넘겼다 "
+                    f"(수신 {start - 1}건, 선언 {_SEOUL_BOOKSTORE_DECLARED_ROWS})"
+                )
+            end = start + _SEOUL_OPEN_DATA_PAGE_SIZE - 1
+            note_upstream_request()
+            response = await client.get(
+                f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
+            )
+            response.raise_for_status()
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                # json을 요청했는데 XML이 왔다 = 인증 실패. 본문을 그대로 싣지
+                # 않는다 — 키가 경로에 있어 에코될 수 있다.
+                raise SeoulOpenDataError(
+                    "서울 열린데이터광장이 JSON이 아닌 응답을 줬다(인증 실패 시 "
+                    f"XML로 온다): {type(exc).__name__}"
+                ) from exc
+            if not isinstance(payload, dict):
+                raise SeoulOpenDataError("서울 열린데이터광장 응답이 JSON object가 아니다.")
+
+            envelope = payload.get(_SEOUL_BOOKSTORE_SERVICE)
+            if not isinstance(envelope, dict):
+                # 범위를 넘기면 서비스 봉투 없이 RESULT만 온다.
+                code = _seoul_result_code(payload)
+                if code == _SEOUL_NO_DATA_CODE:
+                    return
+                raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+
+            code = _seoul_result_code(envelope)
+            if code == _SEOUL_NO_DATA_CODE:
+                return
+            if code != _SEOUL_OK_CODE:
+                raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+
+            rows = envelope.get("row")
+            if not isinstance(rows, list) or not rows:
+                return
+            for row in rows:
+                yield row
+
+            pages += 1
+            start += len(rows)
+            total = envelope.get("list_total_count")
+            # 총계를 **신뢰하되 검증한다** — 총계가 없거나 이상하면 빈 페이지가
+            # 나올 때까지 돈다(상한이 그것을 막는다).
+            if isinstance(total, int) and start > total:
+                return
+
+
+def _seoul_result_code(payload: Mapping[str, Any]) -> str:
+    result = payload.get("RESULT")
+    if isinstance(result, Mapping):
+        code = result.get("CODE")
+        if isinstance(code, str):
+            return code
+    return "UNKNOWN"
+
+
+#: odcloud를 떠난 dataset → 대체 원천 fetcher.
+#:
+#: dataset_key와 provider 이름(`python-datagokr-api`)은 **레지스트리 신원**이라
+#: 바꾸지 않는다 — provider_dataset row, operation key
+#: (`feature_place_datagokr_seoul_bookstores_job`), 봉인된 300 카탈로그가 전부 그
+#: 이름을 쥐고 있다. 바뀐 것은 원천뿐이고, 그 사실을 이 표가 한 줄로 말한다.
+_FILE_DATA_SOURCE_OVERRIDES: Final[
+    dict[str, Callable[["KorTravelMapSettings"], AsyncIterator[Any]]]
+] = {"datagokr_seoul_bookstores": fetch_seoul_open_data_bookstores}
+
+
 async def fetch_datagokr_file_data_records(
     settings: KorTravelMapSettings,
     *,
     dataset_key: str,
 ) -> AsyncIterator[Any]:
-    """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다."""
+    """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다.
+
+    원천이 사라진 dataset은 ``_FILE_DATA_SOURCE_OVERRIDES``가 다른 fetcher로
+    보낸다. 분기를 여기 두는 이유는 호출자가 둘(Dagster resource와 feature-update
+    worker)이라 한쪽에만 넣으면 경로마다 원천이 달라지기 때문이다.
+    """
+    override = _FILE_DATA_SOURCE_OVERRIDES.get(dataset_key)
+    if override is not None:
+        async for row in override(settings):
+            yield row
+        return
+
     secret = settings.data_go_kr_service_key
     if secret is None:
         raise ProviderCredentialMissing(

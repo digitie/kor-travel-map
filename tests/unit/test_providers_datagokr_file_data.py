@@ -170,3 +170,90 @@ async def test_filedata_skips_unidentifiable_rows() -> None:
     )
     assert len(bundles) == 1
     assert bundles[0].feature.name == "정상가게"
+
+
+#: 2026-09-19 라이브 OA-21062 응답 1행(`TbSlibBookstoreInfo`)을 그대로 옮긴 것.
+#:
+#: 손으로 다듬지 않는다 — `STORE_TYPE_NAME`의 꼬리 공백까지 원천이 실제로 주는
+#: 모양이고, 그 모양이 변환을 지나는지가 여기서 세는 것이다.
+_SEOUL_OPEN_DATA_ROW = {
+    "STORE_SEQ_NO": 2283.0,
+    "STORE_NAME": "1984",
+    "GU_CODE": "313",
+    "CODE_VALUE": "마포구",
+    "ADRES": "마포구 동교로 194 혜원빌딩",
+    "TEL_NO": "02-325-1984",
+    "HMPG_URL": "",
+    "STORE_TYPE": "0002",
+    "STORE_TYPE_NAME": "새책방      ",
+    "XCNTS": "37.5573847248586",
+    "YDNTS": "126.922886096614",
+    "SNS": "https://www.instagram.com/1984store",
+}
+
+
+async def test_seoul_open_data_row_to_bundle() -> None:
+    """서울 열린데이터광장(OA-21062) row도 같은 dialect를 지나야 한다.
+
+    종전 원천인 data.go.kr odcloud는 2026-09-18 기준 404 `등록되지 않은 서비스
+    입니다`로 사라졌다. dataset_key와 provider 이름은 레지스트리 신원이라 그대로
+    두고 **원천만** 옮겼으므로, 같은 dataset이 두 벌의 열 이름을 받는다.
+    """
+
+    [bundle] = await file_data_rows_to_bundles(
+        [_Record(raw=dict(_SEOUL_OPEN_DATA_ROW))],
+        dataset_key="datagokr_seoul_bookstores",
+        fetched_at=_NOW,
+        reverse_geocoder=_fake_reverse,
+    )
+
+    feature = bundle.feature
+    assert feature.name == "1984"
+    assert feature.detail.place_kind == "seoul_bookstore"  # type: ignore[union-attr]
+    assert feature.detail.phones == ["02-325-1984"]  # type: ignore[union-attr]
+    facility = feature.detail.facility_info  # type: ignore[union-attr]
+    assert facility["source_category"] == "새책방"
+    assert facility["district"] == "마포구"
+    assert facility["sns_url"] == "https://www.instagram.com/1984store"
+    # 원천이 시(市)를 빼고 준다 — 주소는 주소대로 온전해야 한다.
+    assert feature.address.road == "서울특별시 마포구 동교로 194 혜원빌딩"
+    # 자연키는 표기가 아니라 값이다 — 원천이 2283.0을 "2283"으로 바꿔도 같아야 한다.
+    assert bundle.source_record.source_entity_id == "2283"
+
+
+async def test_the_seoul_open_data_axes_are_not_swapped() -> None:
+    """**`XCNTS`가 위도이고 `YDNTS`가 경도다.**
+
+    X를 경도로 읽는 통념대로 일반 키 목록에 넣으면 조용히 뒤집힌 좌표가 들어온다.
+    한국 bbox 검사(`_validated_lonlat`)가 그물이 되어 주지만 그것은 그물이지
+    근거가 아니다 — 축을 명시했다는 사실을 여기서 못박는다.
+    """
+
+    [bundle] = await file_data_rows_to_bundles(
+        [_Record(raw=dict(_SEOUL_OPEN_DATA_ROW))],
+        dataset_key="datagokr_seoul_bookstores",
+        fetched_at=_NOW,
+        reverse_geocoder=_fake_reverse,
+    )
+
+    coord = bundle.feature.coord
+    assert coord is not None
+    # 마포구 동교동 — 경도 126.92, 위도 37.55.
+    assert float(coord.lon) == pytest.approx(126.922886, abs=1e-5)
+    assert float(coord.lat) == pytest.approx(37.557384, abs=1e-5)
+
+
+async def test_the_seoul_address_prefix_is_not_doubled() -> None:
+    """원천이 언젠가 시 이름을 붙여 주기 시작해도 두 번 붙지 않는다."""
+
+    row = dict(_SEOUL_OPEN_DATA_ROW)
+    row["ADRES"] = "서울특별시 마포구 동교로 194"
+
+    [bundle] = await file_data_rows_to_bundles(
+        [_Record(raw=row)],
+        dataset_key="datagokr_seoul_bookstores",
+        fetched_at=_NOW,
+        reverse_geocoder=_fake_reverse,
+    )
+
+    assert bundle.feature.address.road == "서울특별시 마포구 동교로 194"

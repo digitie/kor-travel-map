@@ -649,19 +649,19 @@ def _coalescing_execution_fn(
 #:   프로브로 실측).
 #: - 서울 책방: odcloud **404** `{"code":-3,"msg":"등록되지 않은 서비스 입니다."}` —
 #:   날조한 데이터셋 번호와 **같은 응답**이고 swagger 네임스페이스도 404다.
-#:   포털에 오픈API 탭 자체가 없다. **활용신청으로 되살릴 수 없다.** baseline
-#:   seed가 이미 그 사실을 적어 뒀다 — `update_cycle='one_time'`,
-#:   `freshness_note='서울 열린데이터광장 원천 서비스 종료 안내 노출'`.
+#:   포털에 오픈API 탭 자체가 없다. **활용신청으로 되살릴 수 없다.**
 #:
-#: 앞의 넷은 오너가 포털에서 활용신청을 마치면 이 목록에서 이름을 빼는 것으로
-#: 되살아난다. 서울 책방은 원천을 서울 열린데이터광장(OA-21062)으로 바꾸는
-#: 별건 작업이 필요하다.
+#: 2026-09-19 — 서울 책방을 이 목록에서 **뺐다.** 원천을 서울 열린데이터광장
+#: OA-21062(`TbSlibBookstoreInfo`)로 옮기고 라이브로 606건을 확인했다. 되살린
+#: 것은 시계이고, 되살아난 근거는 원천 교체다 — 활용신청이 아니다.
+#:
+#: 남은 넷은 오너가 포털에서 활용신청을 마치면 이 목록에서 이름을 빼는 것으로
+#: 되살아난다.
 DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
     {
         "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
         "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
-        "feature_place_datagokr_seoul_bookstores_monthly_schedule",
         "feature_place_standard_special_streets_monthly_schedule",
         "feature_weather_airkorea_air_quality_hourly_schedule",
         "feature_weather_kma_ultra_short_nowcast_hourly_schedule",

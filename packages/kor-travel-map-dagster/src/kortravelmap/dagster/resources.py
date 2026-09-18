@@ -301,7 +301,11 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note=(
             "curated fileData 4종 공용 resource. Dagster asset은 "
-            "datagokr_file_data_dataset_key resource로 실제 dataset_key를 받는다."
+            "datagokr_file_data_dataset_key resource로 실제 dataset_key를 받는다. "
+            "서울 책방만 원천이 서울 열린데이터광장(OA-21062)으로 옮겨져 "
+            "SEOUL_OPEN_DATA_API_KEY를 쓴다 — 여기 setting_names에 넣지 않는 것은 "
+            "나머지 3종이 그 키 없이도 돌아야 하기 때문이고, 없을 때는 fetcher가 "
+            "ProviderCredentialMissing으로 정확히 말한다."
         ),
     ),
     ProviderRecordResourceSpec(

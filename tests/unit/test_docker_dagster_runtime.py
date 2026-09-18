@@ -465,6 +465,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     shared_provider_keys = {
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
         "KOR_TRAVEL_MAP_OPINET_API_KEY",
+        "KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
@@ -6207,3 +6208,62 @@ def test_the_opinet_call_budget_defaults_fit_the_free_key_day() -> None:
         assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
             f"{name}: 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
         )
+
+
+@pytest.mark.unit
+def test_the_env_example_opinet_knobs_fit_the_free_key_day_too() -> None:
+    """`.env.example`이 선언한 값도 같은 하루 한도를 지켜야 한다.
+
+    운영자는 이 파일을 복사해 `.env`를 만든다. 그러면 여기 적힌 값이 compose
+    기본값을 **덮는다** — 기본값만 고치고 이 파일을 두면 고친 적이 없는 것과 같다.
+    실제로 한도를 300으로 정정한 뒤에도 여기에는 1,500 시절의 180/600이 남아
+    있었다.
+    """
+
+    declared: dict[str, int] = {}
+    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _sep, value = stripped.partition("=")
+        if key.strip() in {
+            "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
+            "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        }:
+            declared[key.strip()] = int(value.strip())
+
+    budget = declared.get("KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET")
+    assert budget is not None, ".env.example에 OpiNet run 예산 선언이 사라졌다"
+    low_top = declared.get("KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS")
+    assert low_top is not None, ".env.example에 lowTop 상한 선언이 사라졌다"
+    assert low_top <= budget
+    worst = budget * _OPINET_WORST_DAY_RUNS
+    assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
+        f".env.example 기준 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
+    )
+
+
+@pytest.mark.unit
+def test_the_seoul_open_data_key_travels_with_the_datagokr_file_data_services() -> None:
+    """서울 책방의 새 원천 키가 fileData를 돌리는 서비스에 닿아야 한다.
+
+    서울 열린데이터광장은 data.go.kr과 **다른 포털이고 키도 다르다**. 키를 안
+    넘기면 fileData 4종 중 서울 책방만 `ProviderCredentialMissing`으로 죽는다 —
+    "키는 있는데 영원히 비활성"의 다른 모양이다.
+    """
+
+    services = _compose()["services"]
+    holders = {
+        name
+        for name, service in services.items()
+        if isinstance(service, dict)
+        and "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in (service.get("environment") or {})
+    }
+    assert holders, "data.go.kr 키를 받는 서비스가 하나도 없다 — 검사가 공허하다"
+    missing = sorted(
+        name
+        for name in holders
+        if "KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY"
+        not in services[name]["environment"]
+    )
+    assert not missing, f"서울 열린데이터광장 키를 못 받는 서비스: {missing}"

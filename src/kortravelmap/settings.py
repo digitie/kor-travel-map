@@ -246,6 +246,17 @@ class KorTravelMapSettings(BaseSettings):
             "resource가 참조한다."
         ),
     )
+    seoul_open_data_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "서울 열린데이터광장(``openapi.seoul.go.kr``) 인증키. data.go.kr과 "
+            "**다른 포털이고 키도 다르다** — 서울시 자체 발급이라 ``DATA_GO_KR_SERVICE_KEY``로는 "
+            "호출되지 않는다. 현재 이 키를 쓰는 곳은 서울 책방(OA-21062, "
+            "service ``TbSlibBookstoreInfo``) 하나다 — 종전 odcloud 원천이 404 "
+            "``등록되지 않은 서비스 입니다``로 사라졌다. "
+            "env ``SEOUL_OPEN_DATA_API_KEY``."
+        ),
+    )
     opinet_api_key: SecretStr | None = Field(
         default=None,
         description="OpiNet certkey. source env는 ``OPINET_API_KEY``.",
