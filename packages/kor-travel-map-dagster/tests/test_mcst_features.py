@@ -270,6 +270,7 @@ async def test_culture_asset_rejects_excluded_slug() -> None:
 
 async def test_culture_asset_skips_unidentifiable_rows_with_warning() -> None:
     records = [
+        *_attempt_all(),
         ("golf_courses_status", {"이름": "라데나골프클럽", "소재지": "춘천시 1"}),
         # 이름 없는 row — 변환에서 제외(경고 로그).
         ("golf_courses_status", {"소재지": "어딘가"}),
@@ -299,7 +300,7 @@ async def test_culture_raw_callback_completes_exact_membership_snapshot() -> Non
         completed.extend(completed_memberships)
 
     result = await run_feature_place_mcst_culture(
-        _context([]),
+        _context(_attempt_all()),
         memberships=memberships,
         on_memberships_completed=_done,
     )
@@ -339,6 +340,7 @@ async def test_culture_raw_callback_emits_no_membership_on_late_failure(
 
     monkeypatch.setattr(mcst_module, "_load", _load)
     records = [
+        *_attempt_all(),
         (first_slug, _common_row("첫 dataset")),
         (second_slug, _common_row("둘째 dataset")),
     ]
@@ -742,7 +744,9 @@ async def test_fetch_mcst_culture_records_counts_one_request_per_dataset(
     settings = KorTravelMapSettings(mcst_max_items_per_dataset=2)
 
     with counting_upstream_requests():
-        records = [record async for record in fetch_mcst_culture_records(settings)]
+        records = _rows_only(
+            [record async for record in fetch_mcst_culture_records(settings)]
+        )
         observed = observed_upstream_requests()
 
     assert len(records) == 2 * len(MCST_FILE_DATASETS), (
