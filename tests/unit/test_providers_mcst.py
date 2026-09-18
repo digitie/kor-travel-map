@@ -125,6 +125,24 @@ def test_dataset_specs_use_existing_categories_and_key_convention() -> None:
         ("128.6083915, 35.86561079", (128.6083915, 35.86561079)),
     ],
 )
+def test_parse_kcisa_coordinates_accepts_korean_axis_labels() -> None:
+    """한글 축 라벨 형식 — 재등록된 아동서점 795행이 전부 이 형식이다(실측).
+
+    라벨을 벗겨 평문 경로로 흘리지 않는다. 라벨이 있는데 순서 추정에 맡기면
+    축 뒤집힘이 조용히 지나가므로, N/E로 정규화해 축 경로를 그대로 탄다.
+    """
+
+    assert parse_kcisa_coordinates("위도:37.39860599, 경도:126.6432039") == (
+        126.6432039,
+        37.39860599,
+    )
+    # 라벨과 값 사이 공백, 그리고 순서가 뒤집힌 경우도 축 라벨이 결정한다.
+    assert parse_kcisa_coordinates("경도: 126.6432039, 위도: 37.39860599") == (
+        126.6432039,
+        37.39860599,
+    )
+
+
 def test_parse_kcisa_coordinates_valid(text: str, expected: tuple[float, float]) -> None:
     assert parse_kcisa_coordinates(text) == expected
 
@@ -146,6 +164,59 @@ def test_parse_kcisa_coordinates_valid(text: str, expected: tuple[float, float])
 )
 def test_parse_kcisa_coordinates_invalid_returns_none(text: str | None) -> None:
     assert parse_kcisa_coordinates(text) is None
+
+
+# -- 아동서점 재등록본(2026-08-15, fileDataNo 282 -> 484) ----------------------
+
+
+def _children_bookstore_row_484() -> dict[str, Any]:
+    """재등록본 CSV 1행 — 2026-09-19에 실제로 내려받아 그대로 옮긴 값.
+
+    구 스키마(`FCLTY_NM`/`FCLTY_LA`/`FCLTY_LO`/`FCLTY_ROAD_NM_ADDR`)는 이 파일에
+    **하나도 없다.** 그래서 `split_coord` 방언으로는 이름을 못 찾아 행이 통째로
+    건너뛰어지고, 좌표 파서도 한글 축 라벨을 몰라 `None`을 준다 — 두 겹으로
+    빨갛다. 옛 대역을 고쳐 쓰지 않고 새로 두는 이유다(계약이 바뀌었으므로 옛
+    대역을 흉내내는 fixture가 남으면 초록이 거짓이 된다).
+    """
+
+    return {
+        "TITLE": "송도어린이서점잭과콩나무",
+        "LOCAL_ID": "KCCBSPO22N000000644",
+        "STATE": "주차 가능, 화장실 남녀 구분",
+        "COORDINATES": "위도:37.39860599, 경도:126.6432039",
+        "TYPE": "아동서점-아동서적",
+        "CONTACT_POINT": "1032055042",
+        "ADDRESS": "22002-인천 연수구 아트센터대로97번길 56 송도더샵하버뷰2 상가동 2층 204호",
+    }
+
+
+async def test_children_bookstores_484_rows_become_bundles_with_coordinates() -> None:
+    """재등록본 행이 **좌표를 갖고** 번들이 된다.
+
+    2026-09-18 prod에서 이 slug 하나가 `McstParseError`로 죽으면서 13개 dataset이
+    전부 0건 적재됐다. 원천이 이동(282 -> 484)했고 컬럼·좌표 형식이 함께 바뀐
+    것이 원인이다. 이 검사는 이름이 아니라 **효과**에 결박한다 — 건수가 보존되고
+    좌표가 나오는가.
+    """
+
+    [bundle] = await file_rows_to_bundles(
+        [_children_bookstore_row_484()],
+        slug="children_bookstores_csv",
+        fetched_at=_NOW,
+        reverse_geocoder=_fake_reverse,
+    )
+
+    feature = bundle.feature
+    assert feature.kind == FeatureKind.PLACE
+    assert feature.name == "송도어린이서점잭과콩나무"
+    assert feature.coord == Coordinate(
+        lon=Decimal("126.6432039"), lat=Decimal("37.39860599")
+    )
+    assert feature.detail is not None
+    assert feature.detail.place_kind == "children_bookstore"  # type: ignore[union-attr]
+    facility = feature.detail.facility_info  # type: ignore[union-attr]
+    assert facility["source_category"] == "아동서점-아동서적"
+    assert facility["cntc_resrce_id"] == "KCCBSPO22N000000644"
 
 
 # -- 공통 방언 A --------------------------------------------------------------
