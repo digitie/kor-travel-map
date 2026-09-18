@@ -5029,7 +5029,7 @@
         }
       },
       "package": "krforest",
-      "pinned_sha": "270ef7a9884bef1f995e2f8fb43c5fb1e9da7905"
+      "pinned_sha": "70814c9f21532b931151a0a667cb94a2afa13dd8"
     },
     "python-krheritage-api": {
       "classes": {

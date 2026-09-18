@@ -468,6 +468,8 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
+        "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
         "KOR_TRAVEL_MAP_KREX_GO_API_KEY",
     }
@@ -6097,3 +6099,111 @@ def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> Non
 
     object_store = _script("docker-compose.external-object-store.yml")
     assert "db-role-bootstrap-300:" not in object_store
+
+
+#: OpiNet 무료키 일일 호출 한도. 오피넷 이용안내 > 유가정보 API의 **일반 API 19종**
+#: 기준이다(프리미엄 3종이 1,500). 2026-09-14 확인 — `docs/etl/upstream-quota.md` §opinet.
+_OPINET_FREE_KEY_DAILY_CALLS: Final = 300
+
+#: `low_top_area` 경로를 하루에 도는 job 수의 최악값. price job은 매일, place job은
+#: 매월 1일에 같은 경로를 한 번 더 돈다.
+_OPINET_WORST_DAY_RUNS: Final = 2
+
+
+def _compose_default(raw: str) -> str:
+    """``${A:-${B:-값}}`` 꼴 보간에서 **맨 안쪽 기본값**을 꺼낸다.
+
+    문자열 포함 검사로 때우면 `disabled`가 주석에 남아 있어도 통과한다. 여기서
+    보는 것은 "운영자가 `.env`에 아무것도 넣지 않았을 때 컨테이너가 실제로 받는
+    값"이다.
+    """
+
+    value = raw.strip()
+    while value.startswith("${") and value.endswith("}"):
+        inner = value[2:-1]
+        head, sep, tail = inner.partition(":-")
+        if not sep:
+            return ""
+        del head
+        value = tail.strip()
+    return value
+
+
+def _opinet_services() -> dict[str, dict[str, Any]]:
+    services = _compose()["services"]
+    holding_key = {
+        name: service
+        for name, service in services.items()
+        if isinstance(service, dict)
+        and "KOR_TRAVEL_MAP_OPINET_API_KEY" in (service.get("environment") or {})
+    }
+    assert holding_key, "OpiNet 키를 받는 서비스가 하나도 없다 — 검사가 공허하다"
+    return holding_key
+
+
+@pytest.mark.unit
+def test_the_opinet_scope_selector_travels_with_the_key() -> None:
+    """키를 받는 서비스는 scope 선택자와 호출량 노브도 함께 받아야 한다.
+
+    OpiNet에는 전국 목록(bulk) endpoint가 없어 **scope를 고르지 않으면 적재가
+    시작되지 않는다** — 키가 있어도 fetcher가 `ProviderCredentialMissing`으로 멈춘다.
+    2026-09-18 prod에서 place·price 두 job이 그 상태였고, 원인은 배포 문서가 키만
+    넘기고 선택자를 넘기지 않은 것이었다. 키 쪽을 기준으로 삼는 이유는 그쪽이
+    "이 서비스가 OpiNet을 쓴다"는 선언이기 때문이다.
+    """
+
+    required = {
+        "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
+        "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
+    }
+    missing = {
+        name: sorted(required - set(service["environment"]))
+        for name, service in _opinet_services().items()
+        if required - set(service["environment"])
+    }
+    assert not missing, f"OpiNet 키는 받는데 선택자/노브를 못 받는 서비스: {missing}"
+
+
+@pytest.mark.unit
+def test_the_opinet_default_mode_actually_starts_a_load() -> None:
+    """기본 모드는 `KorTravelMapSettings`가 받는 값이고, 적재를 **시작시키는** 값이어야 한다.
+
+    `disabled`가 기본이면 배포가 끝나도 적재가 켜지지 않아 호스트 `.env`를 손으로
+    고쳐야 한다 — 그 손 편집이 prod와 이 문서를 어긋나게 만든 자리다. 값 리터럴이
+    아니라 **효과**에 결박한다: fetcher가 `disabled`에서만 멈추므로, 그 외의 값이면서
+    `KorTravelMapSettings`의 Literal이 받는 값이어야 한다.
+    """
+
+    from kortravelmap.settings import KorTravelMapSettings
+
+    for name, service in _opinet_services().items():
+        mode = _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_SCOPE_MODE"])
+        assert mode != "disabled", f"{name}: 기본값이 `disabled`라 적재가 켜지지 않는다"
+        # Literal 목록을 여기 베끼지 않는다 — 베끼면 그 목록이 바뀔 때 조용히 낡는다.
+        assert (
+            KorTravelMapSettings(opinet_scope_mode=mode).opinet_scope_mode == mode
+        ), name
+
+
+@pytest.mark.unit
+def test_the_opinet_call_budget_defaults_fit_the_free_key_day() -> None:
+    """compose 기본 호출 상한이 무료키 하루를 넘지 않아야 한다.
+
+    노브를 올리는 것은 한 줄이지만 그 결과는 다음 날 전체 429다. 최악의 날은
+    매월 1일 — price job과 place job이 같은 `lowTop10` 경로를 하루에 두 번 돈다.
+    """
+
+    for name, service in _opinet_services().items():
+        budget = int(
+            _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET"])
+        )
+        low_top = int(
+            _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS"])
+        )
+        # run 예산은 lowTop10 호출 + `get_area_codes`까지 덮는 hard cap이다.
+        assert low_top <= budget, f"{name}: lowTop 상한이 run 예산보다 크다"
+        worst = budget * _OPINET_WORST_DAY_RUNS
+        assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
+            f"{name}: 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
+        )

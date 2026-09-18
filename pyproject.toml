@@ -140,7 +140,12 @@ providers = [
   # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
   # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
   "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@2676c745301ff4ce69ff9adc5e0fed7ef9db624d",
-  "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@270ef7a9884bef1f995e2f8fb43c5fb1e9da7905",
+  # 70814c9 상향(2026-09-19). 표준데이터 gateway가 어느 시점부터 response
+  # 래퍼(`{header, body}`)를 벗고 payload를 그대로 내려서, 산림 표준데이터
+  # 3종이 파싱 단계에서 전멸했다. 좁은 가지 하나로 두 모양을 다 받는다
+  # (provider PR#15). **이 핀을 올리지 않으면 라이브러리 수정이 적용되지
+  # 않는다** — 적재는 여전히 0건이다.
+  "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@70814c9f21532b931151a0a667cb94a2afa13dd8",
   # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
   # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
   # 8cde3af 상향(2026-09-11). 보류 사유였던 "provider iter_all이 total 권위를
@@ -167,7 +172,10 @@ providers = [
   # #6/#7) — Dagster fetcher가 keyless FileDataClient를 lazy import.
   # 핀 c011f6e = 카탈로그 재편(#7) + 빈 params query 박탈 수정(#9) +
   # 중고서점 OpenAPI/CSV 보강(T-223b, provider PR#11) 포함.
-  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@f2b1e46c9e77e7c227c99039211d4414dea25166",
+  # 0f5a8fe 상향(2026-09-19). 아동서점 CSV 원천이 fileDataNo 282에서 484로
+  # 옮겨가 카탈로그의 링크가 죽어 있었다(provider PR#19). 카탈로그가 틀리면
+  # 이 저장소의 변환 수정은 닿지도 못한다.
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@0f5a8fefc8118be5c7212ef66b1aca1a5138dd85",
   # data.go.kr-standard 6종 + curated fileData 4종은 본 라이브러리 +
   # python-datagokr-api 경유 (ADR-042/T-223b).
 ]
