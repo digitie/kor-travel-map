@@ -14,7 +14,11 @@ from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS, McstSlugFailure
+from kortravelmap.providers.mcst import (
+    MCST_FILE_DATASETS,
+    McstSlugAttempt,
+    McstSlugFailure,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import mcst_features as mcst_module
@@ -25,7 +29,7 @@ from kortravelmap.dagster.mcst_features import (
     feature_place_mcst_culture,
     group_records_by_slug,
     run_feature_place_mcst_culture,
-    split_slug_failures,
+    split_slug_markers,
 )
 from kortravelmap.dagster.provider_fetchers import fetch_mcst_culture_records
 from kortravelmap.dagster.upstream_requests import (
@@ -102,8 +106,17 @@ def test_group_records_by_slug_preserves_order() -> None:
     assert grouped == {"a": [1, 3], "b": [2]}
 
 
+def _attempt_all() -> list[Any]:
+    """전량 경로 — fetcher가 13개 slug를 모두 시도했다고 알린다."""
+
+    return [McstSlugAttempt(slug=slug) for slug in MCST_FILE_DATASETS]
+
+
 async def test_culture_asset_loads_per_slug_datasets() -> None:
+    """전량 경로에서는 시도한 13개를 모두 적재한다(상류가 0건인 것 포함)."""
+
     records = [
+        *_attempt_all(),
         ("independent_bookstores_csv", _common_row("서점 1")),
         ("world_restaurants_csv", _common_row("식당 1")),
         ("independent_bookstores_csv", _common_row("서점 2")),
@@ -122,6 +135,30 @@ async def test_culture_asset_loads_per_slug_datasets() -> None:
     assert result.as_metadata()["datasets_loaded"] == len(MCST_FILE_DATASETS)
 
 
+async def test_a_narrowed_run_only_loads_what_it_attempted() -> None:
+    """**시도하지 않은 dataset은 적재하지 않는다.**
+
+    feature-update worker는 fetcher를 slug 하나로 좁혀 부른다
+    (`_mcst_resources`가 `slugs=matched_slugs`로 정확히 1개를 넘긴다). 그런데
+    asset은 `MCST_FILE_DATASETS` **전체**를 돌며 빈 목록으로 적재했다 — 나머지
+    12개가 **시도한 적도 없이** authoritative 적재와 sync-success를 받아
+    수집하지 않은 dataset이 신선한 것으로 보였다.
+
+    종전 검사(`test_culture_asset_loads_per_slug_datasets`)는 slug 2개만 넣고도
+    `datasets_loaded == 13`을 단언해 **그 동작을 정본으로 못 박고 있었다.**
+    """
+
+    records = [
+        McstSlugAttempt(slug="world_restaurants_csv"),
+        ("world_restaurants_csv", _common_row("식당 1")),
+    ]
+
+    result = await run_feature_place_mcst_culture(_context(records))
+
+    assert [r.dataset_key for r in result.results] == ["mcst_world_restaurants_csv"]
+    assert result.as_metadata()["datasets_loaded"] == 1
+
+
 async def test_one_failing_slug_does_not_take_down_the_others() -> None:
     """slug 하나의 수집 실패가 나머지를 죽이지 않는다.
 
@@ -135,6 +172,7 @@ async def test_one_failing_slug_does_not_take_down_the_others() -> None:
 
     failed_slug = "children_bookstores_csv"
     records = [
+        *_attempt_all(),
         ("independent_bookstores_csv", _common_row("서점 1")),
         McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
         ("world_restaurants_csv", _common_row("식당 1")),
@@ -171,6 +209,7 @@ async def test_a_failed_slug_is_not_sealed_as_an_empty_snapshot(
 
     failed_slug = "children_bookstores_csv"
     records = [
+        *_attempt_all(),
         ("independent_bookstores_csv", _common_row("서점 1")),
         McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
     ]
@@ -185,9 +224,10 @@ async def test_a_failed_slug_is_not_sealed_as_an_empty_snapshot(
     assert "mcst_independent_bookstores_csv" in loaded
 
 
-def test_split_slug_failures_keeps_rows_and_first_reason() -> None:
-    rows, failures = split_slug_failures(
+def test_split_slug_markers_keeps_rows_attempts_and_first_reason() -> None:
+    rows, attempted, failures = split_slug_markers(
         [
+            McstSlugAttempt(slug="a"),
             ("a", 1),
             McstSlugFailure(slug="b", reason="첫 사유"),
             ("a", 2),
@@ -196,6 +236,8 @@ def test_split_slug_failures_keeps_rows_and_first_reason() -> None:
     )
 
     assert rows == [("a", 1), ("a", 2)]
+    # 실패한 slug도 **시도한** slug다 — 그래야 asset이 그것을 실패로 보고한다.
+    assert attempted == {"a", "b"}
     # 나중 것으로 덮으면 원인 추적이 한 단계 멀어진다.
     assert failures == {"b": "첫 사유"}
 

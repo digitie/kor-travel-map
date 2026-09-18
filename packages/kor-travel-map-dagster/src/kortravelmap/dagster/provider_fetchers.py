@@ -1370,7 +1370,11 @@ async def fetch_mcst_culture_records(
     generator, ``finally``에서 ``await client.aclose()``.
     """
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
-    from kortravelmap.providers.mcst import MCST_FILE_DATASETS, McstSlugFailure
+    from kortravelmap.providers.mcst import (
+        MCST_FILE_DATASETS,
+        McstSlugAttempt,
+        McstSlugFailure,
+    )
 
     selected_slugs = tuple(MCST_FILE_DATASETS) if slugs is None else tuple(slugs)
     unknown = sorted(set(selected_slugs) - set(MCST_FILE_DATASETS))
@@ -1383,6 +1387,10 @@ async def fetch_mcst_culture_records(
         for slug in selected_slugs:
             # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
             # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
+            # **시도했다**는 사실을 먼저 알린다 — asset이 이 집합만 적재한다.
+            # worker 경로는 slug 하나로 좁혀 부르므로, 이것이 없으면 나머지
+            # 12개가 시도한 적도 없이 빈 적재와 sync-success를 받는다.
+            yield McstSlugAttempt(slug=slug)
             note_upstream_request()
             seen = 0
             try:
