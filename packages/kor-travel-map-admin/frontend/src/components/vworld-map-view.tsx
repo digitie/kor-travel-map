@@ -41,6 +41,26 @@ import {
 
 const VWorldMapContext = createContext<MapLibreMap | null>(null);
 
+//: **worker를 정적 파일에서 띄운다.** Next 16 production 빌드는 Turbopack이고,
+//: Turbopack은 URL import를 해시된 단일 asset으로 내보내며 형제 파일을 함께
+//: 내보내지 않는다. maplibre 6의 worker(`maplibre-gl-worker.mjs`)는
+//: `maplibre-gl-shared.mjs`를 상대 경로로 import하는데, 기본 경로인 blob URL
+//: 에서는 그 import를 풀 수 없어 worker가 **조용히** 죽는다 — 생성자는
+//: 성공하고 에러도 나지 않으며 메시지만 영원히 돌아오지 않는다.
+//:
+//: prod 실측(2026-09-18 n150): 그 상태에서 GeoJSON source가 tile을 하나도
+//: 만들지 못해 `isSourceLoaded()`가 영원히 false이고, 그래서
+//: `isStyleLoaded()`도 false가 되어 아래 `updateMarkers`가 매번 조기 반환했다.
+//: **zoom 14 이상에서 마커가 한 개도 그려지지 않았다**(API는 정상적으로
+//: item을 돌려줬고 source `_data`에도 들어 있었다). raster는 worker를 쓰지
+//: 않아 멀쩡했기 때문에 '지도는 나오는데 feature만 사라진다'로 보였다.
+//:
+//: 파일은 `scripts/copy-maplibre-worker.mjs`가 `predev`/`prebuild`에서
+//: `public/maplibre/`로 복사한다(상류 문서의 Turbopack 절). 이 호출은 지도를
+//: 만들기 전에 한 번만 돌면 되므로 모듈 스코프에 둔다 — 이 파일이 저장소에서
+//: `new maplibregl.Map`을 부르는 **유일한** 자리다.
+maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+
 const CLUSTER_SOURCE_ID = "kor-feature-clusters";
 const GEOMETRY_SOURCE_ID = "kor-feature-geometries";
 const AREA_FILL_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-fill`;

@@ -4,7 +4,9 @@
   "description": "Debug UI frontend for kor-travel-map (Next.js + MapLibre GL + VWorld style builder).",
   "private": true,
   "scripts": {
+    "predev": "node ./scripts/copy-maplibre-worker.mjs",
     "dev": "next dev --port 12705 --hostname 127.0.0.1",
+    "prebuild": "node ./scripts/copy-maplibre-worker.mjs",
     "build": "next build",
     "start": "next start --port 12705 --hostname 127.0.0.1",
     "lint": "eslint . --max-warnings 0",
