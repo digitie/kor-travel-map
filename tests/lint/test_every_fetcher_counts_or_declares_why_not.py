@@ -187,7 +187,10 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 그것은 래칫이 아니라 **항등식**이다 — 면제를 하나 늘리면 좌변과 우변이 함께
 #: 줄어 아무것도 빨개지지 않는다(3차 리뷰). 수를 따로 박으면 면제를 늘리는 편집이
 #: 반드시 이 숫자를 낮추는 편집을 동반하고, 그 한 줄이 리뷰에 보인다.
-_EXPECTED_FULLY_COUNTED: int = 26
+#: 2026-09-19 26 → 27. 서울 열린데이터광장 fetcher가 들어왔고 **완전 계측**이다
+#: (페이지마다 `note_upstream_request()`). 월 1요청이라 쿼터상 무시할 수준이지만,
+#: 그것은 면제할 이유가 아니다 — 면제는 '적다'가 아니라 '셀 수 없다'일 때다.
+_EXPECTED_FULLY_COUNTED: int = 27
 
 
 def _module_trees() -> dict[str, ast.Module]:
