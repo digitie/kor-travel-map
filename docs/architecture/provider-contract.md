@@ -108,7 +108,7 @@ system
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
 | `mcst_<slug>` (13종) | python-mcst-api | 파일데이터 CSV 13종(`mcst_world_restaurants_csv`/`mcst_independent_bookstores_csv`/`mcst_children_bookstores_csv`/`mcst_used_bookstores_csv`/`mcst_golf_courses_status` 등, 컬럼 방언 4종). 메타표 `providers.mcst.MCST_FILE_DATASETS`. 제외 3종(`tourism_attractions_csv`/`recommended_travel_destinations_csv`/`public_libraries` — 기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS` + `docs/etl/mcst-feature-etl.md` §3 (#395 + T-223b) |
-| `datagokr_seoul_bookstores` | python-datagokr-api | 서울특별시 책방(서점) 현황정보 fileData |
+| `datagokr_seoul_bookstores` | python-datagokr-api(레지스트리 신원) / **원천은 서울 열린데이터광장** | 서울특별시 책방(서점) 현황정보. 2026-09-18 data.go.kr odcloud가 404 `등록되지 않은 서비스 입니다`로 사라져 **원천만** OA-21062(`TbSlibBookstoreInfo`)로 옮겼다(2026-09-19, 라이브 606건). dataset_key·provider 이름은 provider_dataset row·operation key·봉인된 300 카탈로그가 쥐고 있어 바꾸지 않는다. 키도 별개다 — `SEOUL_OPEN_DATA_API_KEY`. 분기는 `dagster.provider_fetchers._FILE_DATA_SOURCE_OVERRIDES` |
 | `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api | 경기도 무슬림 친화 음식점 fileData |
 | `datagokr_ansan_world_restaurants` | python-datagokr-api | 안산 세계맛집(다문화 세계음식점) fileData |
 | `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
@@ -163,7 +163,10 @@ fileData/특화거리 source는 `feature.curated_source_rules`의 기본 후보�
   provider PR#11). 독립서점·카페가 있는 서점·아동서점·세계음식점 계열과 같은
   문화정보원 source 성격이다.
 - `python-datagokr-api`: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
-  제주 향토음식점 fileData 4종을 구현했다(T-223b, provider PR#10).
+  제주 향토음식점 fileData 4종을 구현했다(T-223b, provider PR#10). 이 중 **서울
+  책방만 원천이 바뀌었다** — data.go.kr odcloud가 사라져 서울 열린데이터광장
+  OA-21062로 옮겼고, 변환 dialect는 한글 열과 영문 열을 **둘 다** 받는다(백필로
+  남은 odcloud CSV를 다시 통과시킬 수 있어야 한다).
 - `data.go.kr-standard`: 전국지역특화거리표준데이터를 구현했다(T-223b). 거리명·좌표·
   점포수·관리기관을 area/anchor metadata로 보존하고, 개별 점포 POI로 과해석하지 않는다.
 - 신규 source도 wrapper/facade 없이 provider public client/typed model을 먼저 정렬한 뒤,

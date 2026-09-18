@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-19 — 원천을 고쳤다. 다음은 재배포와 재실행이다
+
+**다음 한 작업: prod 재배포 후 실패했던 job 재실행.** prod 이미지는 아직 `e9b877b3`라
+이번 묶음(provider 핀 · OpiNet 기본 모드 · 서울 책방 원천)이 하나도 실려 있지 않다.
+**핀을 올리지 않으면 머지한 provider 수정이 적용되지 않는다** — 재배포 전까지 산림
+표준데이터 3종과 MCST 아동서점은 여전히 0건이다.
+
+**닫은 것.**
+- provider 핀 상향 — `python-krforest-api@70814c9`(표준데이터 gateway가 response
+  래퍼를 벗은 것), `python-mcst-api@0f5a8fe`(아동서점 fileDataNo 282→484).
+- OpiNet 기본 모드 `low_top_area`(운영 결정). compose가 안 넘기던 호출량 노브 둘도
+  배선. `.env.example`에 남아 있던 180/600(한도를 1,500으로 잘못 알던 시절 값)도
+  90/140으로 정정 — 그 파일이 compose 기본값을 덮는다.
+- 서울 책방 원천 → 서울 열린데이터광장 OA-21062(`TbSlibBookstoreInfo`), 라이브 606건.
+  schedule을 `DISABLED_FEATURE_LOAD_SCHEDULES`에서 뺐다.
+- MCST asset이 **시도하지 않은 dataset까지** 적재하던 것(worker 경로에서 12종이 빈
+  authoritative 적재 + sync-success를 받았다).
+- 페이지 상한 사전 경고 — 여유가 절반 아래로 내려오면 prod가 먼저 말한다.
+
+**오너 작업으로 남은 것(코드로 못 닫는다).** data.go.kr 활용신청 4건 — 안산
+세계맛집 · 경기 무슬림 친화 음식점 · 제주 향토음식점 · 지역특화거리 표준데이터.
+활용신청은 키가 아니라 **데이터셋 단위**다. 신청이 끝나면
+`DISABLED_FEATURE_LOAD_SCHEDULES`에서 그 이름을 빼는 것으로 되살아난다.
+
+**별건으로 남긴 것.** 산사태 예보발령 증분 수집. 이 asset은
+`load_authoritative_notice_snapshot`으로 `active_lineage_keys` 전체를 대조하므로,
+부분 수집으로 바꾸면 화해 계약부터 다시 설계해야 한다. 지금은 상한 40장(실측 10,562행
+대비 약 4배)과 사전 경고로 버틴다.
+
 ## 2026-09-16 (4) — 백업 알림은 보류, 대신 진행 중이던 사고를 고쳤다
 
 **다음 한 작업: `T-VN-H49` 또는 `T-VN-H49-OFFBOX`** — `T-VN-H49-BACKUP-STALENESS`

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+
 from kortravelmap.dagster import provider_fetchers
 from kortravelmap.dagster.provider_fetchers import (
     _SEOUL_BOOKSTORE_DECLARED_ROWS,

@@ -359,3 +359,68 @@ def test_a_synthesized_total_count_is_at_least_audible() -> None:
     )
     assert warnings, "조용히 잘렸다 — 경고가 없으면 아무도 알아차리지 못한다"
     assert "totalCount" in warnings[0]
+
+
+def test_it_warns_before_the_ceiling_is_actually_hit() -> None:
+    """상한에 **닿기 전에** 한 번 말한다.
+
+    2026-09-19 prod: 산사태 예보발령이 10,562건으로 자라 상한 10장(=10,000행)을
+    먹었다. 상한은 제 일을 했지만(조용한 절단 대신 시끄러운 실패), 그 신호는 이미
+    job이 죽은 뒤의 신호였다. 발령마다 행이 쌓이는 append-only 피드라 다음 dataset도
+    같은 길을 간다 — 그래서 여유가 절반 아래로 내려오는 순간 prod가 먼저 말한다.
+    """
+
+    warnings: list[str] = []
+    page_size = 10
+    total = 60  # 6장 필요 = 절대 상한 10장의 60% > 50%
+
+    def feed(page_no: int) -> ProviderPage:
+        start = (page_no - 1) * page_size
+        return ProviderPage(
+            items=list(range(start, min(start + page_size, total))),
+            total_count=total,
+        )
+
+    collected = list(
+        iter_paginated_items(
+            feed,
+            num_of_rows=page_size,
+            label="growing-feed",
+            absolute_max_pages=10,
+            warn=warnings.append,
+        )
+    )
+
+    assert len(collected) == total, "경고를 내느라 수집을 바꾸면 안 된다"
+    thin = [line for line in warnings if "절대 상한" in line]
+    assert thin, f"여유 경고가 없다: {warnings}"
+    # 한 run에서 한 번만 — 페이지마다 같은 말을 하면 아무도 안 읽는다.
+    assert len(thin) == 1
+    assert "증분 수집" in thin[0]
+
+
+def test_it_stays_quiet_while_there_is_room() -> None:
+    """여유가 충분하면 조용하다 — 상시 경고는 경고가 아니다."""
+
+    warnings: list[str] = []
+    page_size = 10
+    total = 20  # 2장 필요 = 절대 상한 10장의 20%
+
+    def feed(page_no: int) -> ProviderPage:
+        start = (page_no - 1) * page_size
+        return ProviderPage(
+            items=list(range(start, min(start + page_size, total))),
+            total_count=total,
+        )
+
+    list(
+        iter_paginated_items(
+            feed,
+            num_of_rows=page_size,
+            label="small-feed",
+            absolute_max_pages=10,
+            warn=warnings.append,
+        )
+    )
+
+    assert not [line for line in warnings if "절대 상한" in line], warnings

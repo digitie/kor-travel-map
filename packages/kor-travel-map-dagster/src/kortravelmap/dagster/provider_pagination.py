@@ -106,6 +106,22 @@ DEFAULT_ABSOLUTE_MAX_PAGES: Final = 10_000
 """
 
 _DECLARED_PAGE_SLACK: Final = 2
+
+_HEADROOM_WARN_FRACTION: Final = 0.5
+"""절대 상한의 이 비율을 넘게 요구하면 **미리** 말한다.
+
+2026-09-19 prod: 산사태 예보발령이 10,562건으로 자라 상한 10장(=10,000행)을
+먹었다. 상한은 제 일을 했다 — 조용히 자르지 않고 시끄럽게 실패했다. 다만
+그 신호가 **이미 늦은 신호**였다. 발령마다 행이 쌓이는 append-only 피드라
+다음 dataset도 같은 길을 간다.
+
+그래서 벽에 부딪히기 전에 한 번 더 말한다. 여기서 경고가 뜨면 상한을 올리는
+것이 아니라 **증분 수집으로 바꿀 때가 됐는지** 보라는 뜻이다 — 상한을 계속
+올리는 것은 같은 사고를 미루는 일이다.
+
+절반으로 잡는 이유: 검사(`test_provider_page_ceilings`)가 요구하는 여유가
+2배다. 즉 이 경고는 **CI가 빨개지는 지점과 같은 자리**에서 prod가 먼저
+말하게 한다."""
 """``total_count``를 알 때 허용하는 여유 배수.
 
 provider가 행을 걸러 낼 수 있으므로 ``ceil(declared / num_of_rows)``보다 많은 페이지가
@@ -320,6 +336,7 @@ class _PageState:
     finished: bool = False
     previous_fingerprint: Any = None
     declared_raised_ceiling: bool = False
+    _warned_thin_headroom: bool = False
 
     def guard_ceiling(self) -> None:
         effective = min(self.ceiling, self.absolute_ceiling)
@@ -362,6 +379,26 @@ class _PageState:
             )
         self.finished = True
 
+    def _warn_if_headroom_is_thin(
+        self, needed: int, warn: Callable[[str], None] | None
+    ) -> None:
+        """선언 건수가 절대 상한의 여유를 먹어 들어오면 미리 말한다."""
+
+        if self._warned_thin_headroom or self.page_no != 1:
+            # 한 run에서 한 번만 — 페이지마다 같은 말을 하면 아무도 안 읽는다.
+            return
+        if needed <= self.absolute_ceiling * _HEADROOM_WARN_FRACTION:
+            return
+        self._warned_thin_headroom = True
+        _emit(
+            warn,
+            f"{self.label}: upstream이 선언한 {self.declared}건은 "
+            f"{needed}장을 요구한다 — 절대 상한 {self.absolute_ceiling}장의 "
+            f"{_HEADROOM_WARN_FRACTION:.0%}를 넘었다. 상한을 올리기 전에 "
+            "증분 수집으로 바꿀 때인지 볼 것 — 계속 올리는 것은 같은 사고를 "
+            "미루는 일이다.",
+        )
+
     def absorb(
         self, page: ProviderPage, warn: Callable[[str], None] | None
     ) -> Sequence[Any]:
@@ -388,6 +425,7 @@ class _PageState:
             if raised > self.ceiling:
                 self.ceiling = raised
                 self.declared_raised_ceiling = True
+            self._warn_if_headroom_is_thin(needed, warn)
 
         if not items:
             if self.declared is not None and self.seen < self.declared:
