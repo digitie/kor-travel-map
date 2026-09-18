@@ -129,6 +129,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_mois_license_records",
         "fetch_opinet_station_price_details",
         "fetch_opinet_stations",
+        "fetch_seoul_open_data_bookstores",
         "fetch_standard_museums",
         "fetch_standard_parking_lots",
         "fetch_standard_special_streets",
