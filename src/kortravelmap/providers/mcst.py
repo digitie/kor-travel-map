@@ -223,14 +223,19 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "북카페",
             "cntc_resrce",
         ),
-        # ── 분리좌표 방언 (2종) — 서점류와 동일 계열 ──────────────────────
+        # 아동서점은 2026-08-15 재등록(fileDataNo 282 -> 484)에서 컬럼이 전면
+        # 교체됐다. 실측 795행: TITLE/LOCAL_ID/STATE/COORDINATES/TYPE/
+        # CONTACT_POINT/ADDRESS/... 로, `split_coord`가 찾던 FCLTY_* 계열이
+        # 하나도 없다. 그 컬럼들은 `cntc_resrce` 방언과 정확히 겹치므로 새
+        # 방언을 만들지 않고 그쪽으로 옮긴다.
         _spec(
             "children_bookstores_csv",
             PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
             "children_bookstore",
             "아동서점",
-            "split_coord",
+            "cntc_resrce",
         ),
+        # ── 분리좌표 방언 — 중고서점 ────────────────────────────────────
         _spec(
             "used_bookstores_csv",
             PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
@@ -270,8 +275,22 @@ MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
 
 # ── COORDINATES 파서 ─────────────────────────────────────────────────────
 
+#: 축 라벨이 한글인 형식(`위도:37.39, 경도:126.64`)도 받는다 — 2026-08-15
+#: 재등록된 아동서점 795행이 전부 이 형식이다(실측). 라벨을 그냥 벗겨
+#: 평문 경로로 흘리지 않는다 — 라벨이 있는데 순서 추정에 맡기면 결박이
+#: 약해지므로, N/E 축으로 정규화해 기존 축 경로를 그대로 타게 한다.
+_KOREAN_AXIS_LABELS: Final[dict[str, str]] = {"위도": "N", "경도": "E"}
+
 _COORD_TOKEN_RE: Final[re.Pattern[str]] = re.compile(
-    r"^([NSEW])?\s*([+-]?\d+(?:\.\d+)?)$", re.IGNORECASE
+    r"^(?:(?P<label>위도|경도)\s*[:：]\s*|(?P<axis>[NSEW])\s*)?"
+    r"(?P<value>[+-]?\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+
+#: 라벨과 값 사이 공백을 먼저 없앤다 — 토큰 분리가 공백 기준이라
+#: `위도: 37.39`가 토큰 네 개로 쪼개지는 것을 막는다.
+_KOREAN_AXIS_SPACING_RE: Final[re.Pattern[str]] = re.compile(
+    r"(위도|경도)\s*[:：]\s*"
 )
 _KOREA_LON_MIN: Final[float] = 124.0
 _KOREA_LON_MAX: Final[float] = 132.0
@@ -293,11 +312,13 @@ def _validated_lonlat(lon: float, lat: float) -> tuple[float, float] | None:
 
 
 def parse_kcisa_coordinates(text: str | None) -> tuple[float, float] | None:
-    """KCISA ``COORDINATES`` 텍스트 → ``(lon, lat)`` (실측 2형식 + 공백 변형).
+    """KCISA ``COORDINATES`` 텍스트 → ``(lon, lat)`` (실측 3형식 + 공백 변형).
 
     - ``"N37.545904, E126.92094"`` — N/E 접두, lat-lon 순.
     - ``"35.86561079 , 128.6083915"`` / ``"37.54497283 126.9676467"`` — 평문
       lat-lon 순 (구분자 콤마/공백 변형).
+    - ``"위도:37.39860599, 경도:126.6432039"`` — 한글 축 라벨. 2026-08-15
+      재등록된 아동서점 795행이 전부 이 형식이다(실측).
 
     결과는 한국 bbox(lon 124~132, lat 33~43)로 검증하고 평문 순서 뒤집힘은
     bbox로 감지해 교정한다. 파싱 실패/범위 밖이면 ``None``(좌표 없음 처리 —
@@ -305,7 +326,8 @@ def parse_kcisa_coordinates(text: str | None) -> tuple[float, float] | None:
     """
     if text is None:
         return None
-    tokens = [token for token in re.split(r"[,\s]+", text.strip()) if token]
+    normalized = _KOREAN_AXIS_SPACING_RE.sub(r"\1:", text.strip())
+    tokens = [token for token in re.split(r"[,\s]+", normalized) if token]
     if len(tokens) != 2:
         return None
     parsed: list[tuple[str | None, float]] = []
@@ -313,8 +335,13 @@ def parse_kcisa_coordinates(text: str | None) -> tuple[float, float] | None:
         match = _COORD_TOKEN_RE.match(token)
         if match is None:
             return None
-        axis = match.group(1).upper() if match.group(1) else None
-        value = float(match.group(2))
+        label = match.group("label")
+        raw_axis = match.group("axis")
+        if label is not None:
+            axis: str | None = _KOREAN_AXIS_LABELS[label]
+        else:
+            axis = raw_axis.upper() if raw_axis else None
+        value = float(match.group("value"))
         if axis == "S":
             axis, value = "N", -value
         elif axis == "W":
@@ -404,10 +431,12 @@ def _extract_cntc_resrce(row: Mapping[str, Any]) -> _ExtractedRow:
         raw_address=_row_text(row, ("ADDRESS",)),
         lonlat=parse_kcisa_coordinates(_row_text(row, ("COORDINATES",))),
         facility_info={
-            "source_category": _row_text(row, ("SUBJECT_KEYWORD",)),
+            # `TYPE`은 아동서점 재등록본(484)의 분류 컬럼이다(예: `아동서점-아동서적`).
+            # 기존 슬러그에는 `SUBJECT_KEYWORD`가 있으므로 동작이 바뀌지 않는다.
+            "source_category": _row_text(row, ("SUBJECT_KEYWORD", "TYPE")),
             "tel": _aux_text(row, ("CONTACT_POINT",)),
             # 안정 id처럼 보이나 명세 보증이 없어 자연키로는 쓰지 않고 보존만.
-            "cntc_resrce_id": _row_text(row, ("CNTC_RESRCE_ID",)),
+            "cntc_resrce_id": _row_text(row, ("CNTC_RESRCE_ID", "LOCAL_ID")),
         },
     )
 
