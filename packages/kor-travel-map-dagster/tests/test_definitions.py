@@ -607,6 +607,12 @@ def test_datagokr_file_data_schedules_cover_all_curated_datasets() -> None:
     assert set(specs) == set(DATAGOKR_FILEDATA_DATASETS)
 
     for dataset_key, spec in specs.items():
+        if spec.schedule_name in DISABLED_FEATURE_LOAD_SCHEDULES:
+            # 자동 적재를 끈 dataset은 schedule 객체가 만들어지지 않는다.
+            # 이 검사의 요지인 "모든 curated dataset이 spec을 갖는다"는 위
+            # `assert set(specs) == set(DATAGOKR_FILEDATA_DATASETS)`가 이미 센다 —
+            # 중지해도 dataset이 목록에서 사라지지 않는다는 것이 그 단언의 값이다.
+            continue
         schedule = defs.resolve_schedule_def(spec.schedule_name)
         assert schedule.tags["kor_travel_map.operation_key"] == spec.job_name
         tick = schedule.evaluate_tick(build_schedule_context())
