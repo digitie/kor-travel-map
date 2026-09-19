@@ -55,6 +55,19 @@ geometry가 `to_jsonb(route)`에서 빠지면 봉인이 geometry 변경을 더�
 봉인 함수는 그 컬럼을 LATERAL이 아니라 PK↔PK LEFT JOIN으로 읽어 route arm에
 `geom_digest` 한 항으로 넣는다(`_312_current_provider_curation_input_set.sql`).
 
+## 데이터를 이어 나르지 않는다
+
+소유자 결정(2026-09-19): *"마이그레이션 하지말고 db재설계후 다시데이터 로드해.
+지금데이터는 무의미함."*
+
+그래서 이 revision에는 backfill도 무손실 증명도 없다. 그 둘은 "옮긴 것이 같은가"를
+묻는 장치인데 여기서는 옮기지 않는다. 대신 `feature_routes`가 **비어 있기를
+요구**한다 — 지우는 것은 DB를 다시 세우는 절차의 일이고, 이 revision의 일은 그
+절차를 건너뛴 것을 알아차리는 것이다. 새 설치(300 → 312)는 0행이라 그대로 지나간다.
+
+`feature_routes`만 지우면 `feature.features`의 route 행이 subtype 없이 남아 **다른
+깨진 상태**가 되므로, 마이그레이션 안에서 지우지 않는다.
+
 ## area는 이번에 옮기지 않는다
 
 `feature_areas`는 구조가 route와 완전히 대칭이지만 **prod 행 수가 0**이다
@@ -142,45 +155,14 @@ _SEAL_FUNCTION: Final[tuple[str, ...]] = _sidecar(
 #: 이름·순서·타입이 그대로라 `CREATE OR REPLACE VIEW`가 성립한다.
 _PUBLIC_VIEW: Final[tuple[str, ...]] = _sidecar("_312_public_features.sql")
 
-#: `public_ready` 복제본을 유지하는 트리거 둘. 공개 bbox 후보 술어가
-#: `WHERE public_ready` partial GiST를 타는 것이 ADR-086 결정 5의 핵심 성질이라,
-#: 술어 컬럼이 geometry와 **같은 행**에 있어야 한다.
+#: `public_ready` 복제본을 유지하는 트리거.
 #:
-#: **쓰기 순서를 subtype → geometry로 고정한다.** 기존 `sync_subtype_public_ready`가
-#: `feature_routes`를 먼저 치므로 그 순서를 따른다. 재적재 경로도 같은 순서를 쓴다
-#: (`feature_subtype.subtype_upsert_statements`) — 두 경로의 순서가 반대면 40P01
-#: 교착 창이 열린다.
-_PUBLIC_READY_TRIGGERS: Final[tuple[str, ...]] = (
-    """
-CREATE OR REPLACE FUNCTION feature.sync_subtype_public_ready() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog'
-    AS $sync$
-DECLARE
-    v_public_ready boolean;
-BEGIN
-    -- The UPDATE which invoked this trigger already holds NEW's parent row
-    -- lock.  Keep it until the subtype cache rows have been refreshed.
-    v_public_ready := NEW.lifecycle_state = 'active'
-        AND NEW.publication_state = 'published'
-        AND NEW.quality_state = 'valid';
-
-    UPDATE feature.feature_routes
-       SET public_ready = v_public_ready
-     WHERE feature_id = NEW.feature_id
-       AND public_ready IS DISTINCT FROM v_public_ready;
-    UPDATE feature.feature_route_geometries
-       SET public_ready = v_public_ready
-     WHERE feature_id = NEW.feature_id
-       AND public_ready IS DISTINCT FROM v_public_ready;
-    UPDATE feature.feature_areas
-       SET public_ready = v_public_ready
-     WHERE feature_id = NEW.feature_id
-       AND public_ready IS DISTINCT FROM v_public_ready;
-    RETURN NULL;
-END;
-$sync$
-""",
+#: **자기 역할 창을 여는 사이드카다.** 이 함수의 소유자는
+#: `ktm_feature_state_procedure_owner`이고 롤이 NOINHERIT이라 스키마 소유자 창에서
+#: `CREATE OR REPLACE`하면 `must be owner of function`으로 죽는다(2026-09-19 n150
+#: 첫 실행이 잡았다). 파일이 자기 창을 열고 **닫는다**.
+_PUBLIC_READY_TRIGGERS: Final[tuple[str, ...]] = _sidecar(
+    "_312_sync_subtype_public_ready.sql"
 )
 
 #: 새 표가 자기 자리를 갖췄는지 스스로 증명한다.
@@ -269,11 +251,6 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "ALTER TABLE feature.feature_routes DROP COLUMN geom",
     *_PUBLIC_READY_TRIGGERS,
     _POSTCONDITION,
-    # 트리거 함수의 소유자는 state procedure owner다 — 사이드카가 schema owner
-    # 창에서 CREATE OR REPLACE 했으므로 되돌려 놓는다.
-    "ALTER FUNCTION feature.sync_subtype_public_ready()"
-    " OWNER TO ktm_feature_state_procedure_owner",
-    "SET ROLE ktm_feature_schema_owner",
 )
 
 
