@@ -98,6 +98,10 @@ def _head_owners() -> dict[str, str]:
 
 def _migration(revision_prefix: str) -> Any:
     path = next(_VERSIONS.glob(f"{revision_prefix}_*.py"))
+    return _load(path)
+
+
+def _load(path: pathlib.Path) -> Any:
     spec = importlib.util.spec_from_file_location(f"_lint_{path.stem}", path)
     assert spec is not None, path
     assert spec.loader is not None, path
@@ -106,31 +110,78 @@ def _migration(revision_prefix: str) -> Any:
     return module
 
 
+def _statement_groups(attribute: str) -> list[tuple[str, tuple[str, ...]]]:
+    """`attribute`를 가진 **모든** 마이그레이션의 (이름, 문장열).
+
+    **번호를 박지 않는다.** 2026-09-19까지 이 모듈의 세 검사는 전부
+    `_migration("309")`에 결박돼 있었고, 312가 새 역할 창 넷과 `CREATE OR REPLACE`
+    다섯을 더했는데 **한 문장도 보지 않았다**(2026-09-20 적대 리뷰). 검사가 대상을
+    이름으로 고르면, 새 대상이 생겨도 검사는 자라지 않는다.
+    """
+
+    groups: list[tuple[str, tuple[str, ...]]] = []
+    for path in sorted(_VERSIONS.glob("[0-9]*.py")):
+        module = _load(path)
+        statements = getattr(module, attribute, None)
+        if isinstance(statements, tuple | list) and all(
+            isinstance(statement, str) for statement in statements
+        ):
+            groups.append((path.name, tuple(statements)))
+    return groups
+
+
+def test_the_scan_sees_more_than_one_migration_and_many_statements() -> None:
+    """**하한을 '본 것'에 건다.** 대상이 줄면 위 검사들이 조용히 항진명제가 된다."""
+
+    groups = _statement_groups("_UPGRADE_STATEMENTS")
+    assert len(groups) >= 2, (
+        f"`_UPGRADE_STATEMENTS`를 가진 마이그레이션을 {len(groups)}개만 찾았다 — "
+        "상수 이름이 바뀌었거나 import가 깨졌다."
+    )
+    total = sum(len(statements) for _, statements in groups)
+    assert total >= 100, (
+        f"문장을 {total}개만 봤다 — 사이드카 해석이 깨지면 이 숫자가 먼저 무너진다."
+    )
+    windows = sum(
+        1
+        for _, statements in groups
+        for statement in statements
+        if _SET_ROLE.match(_sql_head(statement)) is not None
+    )
+    assert windows >= 10, (
+        f"`SET ROLE` 창을 {windows}개만 봤다 — 롤 창 검사가 볼 것이 거의 없다."
+    )
+
+
 def test_ownership_requiring_ddl_runs_under_the_owner_role() -> None:
     """`DROP`·`CREATE OR REPLACE`·`GRANT`/`REVOKE`는 소유자 롤 창 안에 있어야 한다."""
     owners = _head_owners()
     role = _SCHEMA_OWNER
     wrong: list[str] = []
 
-    for statement in _migration("309")._UPGRADE_STATEMENTS:
-        head = _sql_head(statement)
-        if (set_role := _SET_ROLE.match(head)) is not None:
-            role = set_role.group(1)
-            continue
-        for pattern, operation in (
-            (_DROP, "DROP"),
-            (_REPLACE, "CREATE OR REPLACE"),
-            (_PRIVILEGE, "GRANT/REVOKE"),
-        ):
-            match = pattern.match(head)
-            if match is None:
+    for name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
+        role = _SCHEMA_OWNER
+        for statement in statements:
+            head = _sql_head(statement)
+            if (set_role := _SET_ROLE.match(head)) is not None:
+                role = set_role.group(1)
                 continue
-            routine = match.group(1)
-            owner = owners.get(routine)
-            # head에 없으면 이 마이그레이션이 만든 루틴이다 — 만든 롤이 소유자이고,
-            # 그 일관성은 아래 `..._transfers_ownership...`가 따로 본다.
-            if owner is not None and role != owner:
-                wrong.append(f"{operation} {routine}: {role}로 도는데 소유자는 {owner}")
+            for pattern, operation in (
+                (_DROP, "DROP"),
+                (_REPLACE, "CREATE OR REPLACE"),
+                (_PRIVILEGE, "GRANT/REVOKE"),
+            ):
+                match = pattern.match(head)
+                if match is None:
+                    continue
+                routine = match.group(1)
+                owner = owners.get(routine)
+                # head에 없으면 이 마이그레이션이 만든 루틴이다 — 만든 롤이 소유자이고,
+                # 그 일관성은 아래 `..._transfers_ownership...`가 따로 본다.
+                if owner is not None and role != owner:
+                    wrong.append(
+                        f"{name}: {operation} {routine}: {role}로 도는데 소유자는 {owner}"
+                    )
 
     assert not wrong, (
         "소유권이 필요한 루틴 DDL이 소유자가 아닌 롤로 실행된다:\n  "
@@ -148,15 +199,17 @@ def test_routines_created_by_another_role_transfer_ownership_back() -> None:
     created_by: dict[str, str] = {}
     transferred: dict[str, str] = {}
 
-    for statement in _migration("309")._UPGRADE_STATEMENTS:
-        head = _sql_head(statement)
-        if (set_role := _SET_ROLE.match(head)) is not None:
-            role = set_role.group(1)
-            continue
-        if (created := _CREATE.match(head)) is not None:
-            created_by[created.group(1)] = role
-        for transfer in _TRANSFER.finditer(statement):
-            transferred[transfer.group(1)] = transfer.group(2)
+    for _name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
+        role = _SCHEMA_OWNER
+        for statement in statements:
+            head = _sql_head(statement)
+            if (set_role := _SET_ROLE.match(head)) is not None:
+                role = set_role.group(1)
+                continue
+            if (created := _CREATE.match(head)) is not None:
+                created_by[created.group(1)] = role
+            for transfer in _TRANSFER.finditer(statement):
+                transferred[transfer.group(1)] = transfer.group(2)
 
     stranded = [
         f"{routine}: {maker}가 만드는데 소유자는 {owners[routine]}, 이전 없음"
@@ -176,13 +229,23 @@ def test_routines_created_by_another_role_transfer_ownership_back() -> None:
 
 def test_the_routine_stage_ends_on_the_schema_owner() -> None:
     """루틴 단계가 롤을 흘리면 뒤의 트리거·뷰 재생성이 엉뚱한 롤로 돈다."""
-    role = _SCHEMA_OWNER
-    for statement in _migration("309")._ROUTINE_STATEMENTS:
-        if (set_role := _SET_ROLE.match(_sql_head(statement))) is not None:
-            role = set_role.group(1)
+    # `_ROUTINE_STATEMENTS`는 309에만 있는 이름이다. 이름이 아니라 **있는 것을**
+    # 전부 본다 — 다른 revision이 같은 단계를 두면 자동으로 따라온다.
+    groups = _statement_groups("_ROUTINE_STATEMENTS")
+    assert groups, "`_ROUTINE_STATEMENTS` 단계를 가진 마이그레이션이 없다."
 
-    assert role == _SCHEMA_OWNER, (
-        f"루틴 단계가 `{role}`로 끝난다. 뒤따르는 트리거 재생성·뷰 재생성이 그 롤로 "
-        f"돌게 되고, 그건 이 마이그레이션이 의도한 적 없는 소유권을 만든다. 마지막 "
-        f"사이드카가 `SET ROLE {_SCHEMA_OWNER}`로 창을 닫는지 보라."
+    leaking: list[str] = []
+    for name, statements in groups:
+        role = _SCHEMA_OWNER
+        for statement in statements:
+            if (set_role := _SET_ROLE.match(_sql_head(statement))) is not None:
+                role = set_role.group(1)
+        if role != _SCHEMA_OWNER:
+            leaking.append(f"{name}: {role}")
+
+    assert not leaking, (
+        f"루틴 단계가 스키마 소유자가 아닌 롤로 끝난다: {leaking}. 뒤따르는 트리거 "
+        "재생성·뷰 재생성이 그 롤로 돌게 되고, 그건 이 마이그레이션이 의도한 적 없는 "
+        f"소유권을 만든다. 마지막 사이드카가 `SET ROLE {_SCHEMA_OWNER}`로 창을 "
+        "닫는지 보라."
     )

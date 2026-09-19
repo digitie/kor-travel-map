@@ -107,9 +107,17 @@ geometry가 route payload의 **98.5%**인 것은 맞다. 그러나 place는 geom
 
 **근거는 크기 압박이 아니다.** 그것은 1단계가 이미 닫았다. route 1건의
 `to_jsonb(route)` 평균 43 kB 중 **98.5%가 geometry**이고, `to_jsonb(route)`를 읽는
-곳은 봉인 말고도 둘 더 있다 — 하나는 그 43 kB를
-`feature.theme_feature_candidates.match_evidence`에 **영구 저장**하고, 하나는 admin
-후보 목록 API 응답에 **페이지당 N×43 kB**로 내보낸다. 행을 좁히면 그 둘이 함께 줄어든다.
+곳은 봉인 말고도 둘 더 있다 — `feature.current_theme_candidate_snapshot`의
+`candidate_input_hash` 계산과, admin 후보 목록 API 응답(**페이지당 N×43 kB**).
+행을 좁히면 그 둘이 함께 줄어든다.
+
+> 2026-09-20 정정: 초안은 "그 43 kB가
+> `feature.theme_feature_candidates.match_evidence`에 **영구 저장**된다"고 적었다.
+> 틀렸다 — `match_evidence`는 `schema_version`/`feature_row_revision`/`feature_uuid`/
+> `source_role`/`match_method`/`confidence`/`rule_input`만 담고 detail은 담지 않는다.
+> 영구 저장 절감은 이 결정의 근거가 아니며, 남는 근거는 해시 계산 입력과 API
+> 응답 크기다. 적대 리뷰가 잡았고, 잘못된 수치로 선 결정은 다음 사람이 같은 논리를
+> area에 적용할 때 조용히 틀린다.
 
 **ADR-086의 불변식은 대체 fence로 보존한다.** `0087_route_area_subtypes`가 geometry를
 subtype으로 옮긴 이유는 성능이 아니라 "geometry가 필수인 kind와 없어야 하는 kind가
@@ -180,8 +188,13 @@ member 정의가 바뀌어 탐지 범위 변화를 함께 논증해야 하고, �
   대조군으로 함께 증명한다
   (`tests/integration/test_seal_fold_has_no_size_ceiling.py`).
 - 2단계 이후 `to_jsonb(route)`는 43 kB에서 약 633 B로 줄고, 그만큼
-  `theme_feature_candidates.match_evidence`의 영구 저장분과 admin 후보 목록 응답이
-  함께 줄어든다.
+  `candidate_input_hash` 계산 입력과 admin 후보 목록 응답이 함께 줄어든다.
+- **봉인 공식 세대(`input_set_formula`)는 2에 둔다.** 312가 route arm의 member
+  정의를 바꾸지만(geometry가 `to_jsonb(route)`에서 빠지고 `geom_digest`가 들어온다),
+  312는 `feature_routes`가 비어 있기를 **요구**하므로 세대 2로 발급된 구 route arm
+  receipt가 312 DB에 남을 수 없다. 즉 구별할 상대가 없는 라벨이 된다. 배포가 DB를
+  새로 만든다는 실측(`docs/tasks-rule.md`)도 같은 방향이다. 세대를 올리는 것은
+  **route 데이터를 보존한 채** member 정의를 바꾸는 다음 변경의 몫이다.
 - 2단계의 검사도 효과에 결박했다 — 카탈로그만 보지 않고 **행을 넣어**
   `public_ready`가 실제로 켜지는지, 공개 bbox 술어가 route를 실제로 돌려주는지,
   그 술어가 보조 relation의 partial GiST를 타는지를 본다

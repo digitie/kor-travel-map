@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from tests.integration._feature_ids import feature_uuid
 
+from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
+
 pytestmark = pytest.mark.integration
 
 _PUBLIC_PREDICATE = (
@@ -439,9 +441,18 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
             )
 
 
-@pytest.mark.parametrize("table", ["feature_routes", "feature_areas"])
+@pytest.mark.parametrize(
+    ("table", "kind"),
+    [
+        ("feature_routes", "route"),
+        # geometry를 실제로 담는 relation. runtime의 "geom만 예외" 계약이
+        # ADR-099 2단계 이후 **여기서** 서야 한다.
+        ("feature_route_geometries", "route"),
+        ("feature_areas", "area"),
+    ],
+)
 async def test_runtime_subtype_acl_excludes_public_ready(
-    migrated_session: AsyncSession, table: str
+    migrated_session: AsyncSession, table: str, kind: str
 ) -> None:
     """Runtime에는 table UPDATE/flag UPDATE가 없고 business column만 허용한다.
 
@@ -450,7 +461,13 @@ async def test_runtime_subtype_acl_excludes_public_ready(
     관측이 아니라 42703이다. 축이 줄어든 것이지 느슨해진 것이 아니다:
     ``table_update = False``가 열 단위 예외를 제외한 **모든** 열의 UPDATE를 이미
     막고, 남은 열 단위 단언은 그 예외 목록(geom만 허용)을 고정한다.
+
+    ``geom`` 질문은 **그 컬럼이 있는 relation에만** 던진다. ADR-099 2단계가
+    geometry를 옮긴 뒤에도 이 질문이 `feature_routes`에 남아 있어 42703으로
+    죽었다 — 관계 이름이 SQL 파라미터 뒤에 숨어 있어 이름 검색으로는 보이지
+    않던 자리다. 어느 relation이 geometry를 담는지는 적재 경로 모델에서 읽는다.
     """
+    holds_geometry = table in set(GEOMETRY_RELATIONS.values())
     privileges = (
         await migrated_session.execute(
             text(
@@ -461,9 +478,6 @@ async def test_runtime_subtype_acl_excludes_public_ready(
                     has_column_privilege(
                         'ktm_feature_runtime', :relation, 'public_ready', 'UPDATE'
                     ) AS flag_update,
-                    has_column_privilege(
-                        'ktm_feature_runtime', :relation, 'geom', 'UPDATE'
-                    ) AS geom_update,
                     has_column_privilege(
                         'ktm_feature_runtime', :relation, 'feature_id', 'UPDATE'
                     ) AS feature_id_update,
@@ -479,10 +493,37 @@ async def test_runtime_subtype_acl_excludes_public_ready(
         "table_update": False,
         "table_delete": False,
         "flag_update": False,
-        "geom_update": True,
         "feature_id_update": False,
         "kind_update": False,
     }
+
+    geom_column_exists = (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_schema = 'feature' AND table_name = :table_name "
+                "  AND column_name = 'geom'"
+            ),
+            {"table_name": table},
+        )
+    ) == 1
+    assert geom_column_exists is holds_geometry, (
+        f"{table}의 geom 컬럼 유무가 적재 경로 모델과 어긋난다 "
+        f"(모델: {holds_geometry}, 카탈로그: {geom_column_exists})."
+    )
+    if holds_geometry:
+        assert (
+            await migrated_session.scalar(
+                text(
+                    "SELECT has_column_privilege("
+                    "'ktm_feature_runtime', :relation, 'geom', 'UPDATE')"
+                ),
+                {"relation": f"feature.{table}"},
+            )
+        ) is True, (
+            f"runtime이 {table}.geom을 갱신하지 못한다 — geometry 정련은 정상적인 "
+            "subtype writer 작업이다."
+        )
     # 사본 컬럼이 되살아나면 위 열거가 조용히 불완전해진다 — 그 자리를 이 단언이 지킨다.
     assert (
         await migrated_session.scalar(
@@ -497,7 +538,6 @@ async def test_runtime_subtype_acl_excludes_public_ready(
 
     label = f"tvn34b:acl:{table}:{uuid4().hex}"
     feature_id = feature_uuid(label)
-    kind = "route" if table == "feature_routes" else "area"
     category = "06070000" if kind == "route" else "06050000"
     await _insert_feature(
         migrated_session,

@@ -18,6 +18,7 @@ deferred 제약은 문장 직후에 발화하지 않는다. `INSERT` 다음 줄�
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 
 import pytest
 from sqlalchemy import text
@@ -61,8 +62,50 @@ _INSERT_GEOMETRY = text(
 )
 
 
+#: 이 모듈이 만든 feature. 아래 autouse fixture가 검사마다 치운다.
+_CREATED_IDS: list[str] = []
+
+
 def _fresh_id() -> str:
-    return str(uuid.uuid4())
+    feature_id = str(uuid.uuid4())
+    _CREATED_IDS.append(feature_id)
+    return feature_id
+
+
+@pytest.fixture(autouse=True)
+async def _purge_features_this_module_committed(
+    migrated_engine: AsyncEngine,
+) -> AsyncIterator[None]:
+    """이 모듈은 **실제로 COMMIT한다** — 남긴 행은 남긴 쪽이 치운다.
+
+    DEFERRABLE INITIALLY DEFERRED 제약은 문장 직후에 발화하지 않는다. 그래서 이
+    파일의 검사들은 롤백되는 세션이 아니라 진짜 트랜잭션 경계를 넘어야 하고, 그
+    대가로 행이 공유 DB에 남는다.
+
+    2026-09-20 전체 통합 실행에서 route 6건이 남아 다른 모듈 셋을 무너뜨렸다 —
+    `test_status_repo`(`features_total == 0` 기대), `test_sibling_dedup`(`len(rows)
+    == 2` 기대). 그 검사들이 틀린 것이 아니라 **빈 기준선이라는 전제가 이 모듈
+    때문에 깨진 것**이다.
+
+    `feature.features` 하나만 지우면 된다 — subtype 행과 geometry 행은 둘 다
+    `ON DELETE CASCADE`로 따라간다.
+    """
+
+    _CREATED_IDS.clear()
+    try:
+        yield
+    finally:
+        leftovers = list(_CREATED_IDS)
+        _CREATED_IDS.clear()
+        if leftovers:
+            async with migrated_engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "DELETE FROM feature.features "
+                        "WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
+                    ),
+                    {"ids": leftovers},
+                )
 
 
 async def test_a_route_without_geometry_cannot_commit(

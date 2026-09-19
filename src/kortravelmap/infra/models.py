@@ -1554,8 +1554,9 @@ class FeatureRouteGeometryRow(Base):
 
     geometry가 route 행의 **98.5%**였다(43 kB 중 나머지가 633 B). 그리고
     `to_jsonb(route)`를 쓰는 곳이 셋이다 — causal seal, theme candidate의
-    `match_evidence`(후보 1건당 영구 저장), admin 후보 목록 API 응답(페이지당 N배).
-    행을 좁히면 그 셋이 함께 줄어든다.
+    `candidate_input_hash` 계산, admin 후보 목록 API 응답(페이지당 N배).
+    행을 좁히면 그 셋이 함께 줄어든다. (`match_evidence`는 detail을 담지 않는다 —
+    초안의 "영구 저장" 서술은 2026-09-20 적대 리뷰가 정정했다.)
 
     **FK는 `feature.features`를 직접 가리킨다.** purge 증거 포획이
     `confrelid='feature.features'` 한 단계만 훑으므로, `feature_routes`에 매달면

@@ -68,6 +68,10 @@ from sqlalchemy import text
 from kortravelmap.core.scoring import score_pair
 from kortravelmap.dto import Coordinate
 from kortravelmap.infra.backup import BackupArtifactError, list_backup_artifacts
+from kortravelmap.infra.feature_subtype import (
+    EXTERNAL_GEOMETRY_KINDS,
+    EXTERNAL_GEOMETRY_UNION_SQL,
+)
 from kortravelmap.settings import BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT
 
 if TYPE_CHECKING:
@@ -119,6 +123,14 @@ BACKUP_LAST_SUCCESS_WARN_SECONDS: Final[int] = BACKUP_LAST_SUCCESS_WARN_HOURS_DE
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
+
+# geometry가 subtype 행 **바깥**에 사는 kind. 목록을 여기 적지 않고 적재 경로의
+# 모델에서 가져온다 — ADR-099 2단계가 route를 옮겼고, 다음 이사도 그 dict 하나를
+# 바꾸는 일이어야 한다. 집합이 비면 `IN (NULL)`이 되어 F2G는 영원히 0건이다
+# (geometry가 전부 subtype 안으로 돌아온 세계에서 옳은 답이다).
+_EXTERNAL_GEOMETRY_KINDS_SQL: Final[str] = (
+    ", ".join(f"'{kind}'" for kind in sorted(EXTERNAL_GEOMETRY_KINDS)) or "NULL"
+)
 _FileObjectKey = tuple[str, str, str]
 
 
@@ -191,6 +203,32 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "WHERE f.lifecycle_state = 'active' "
             f"  AND f.kind IN ({_DETAIL_KINDS_SQL}) "
             "  AND s.feature_id IS NULL"
+        ),
+    ),
+    CaseSpec(
+        code="F2G",
+        severity="ERROR",
+        description=(
+            "geometry 행 결측 (subtype 행은 있는데 전용 geometry relation에 짝이 "
+            "없음, ADR-099 2단계)"
+        ),
+        # ADR-099 2단계가 route geometry를 subtype 행 **바깥**으로 옮기면서
+        # "geometry 없는 route"를 즉시 거절하던 `geom NOT NULL`이 COMMIT 시점
+        # DEFERRABLE FK로 바뀌었다. 즉시 검사가 아니므로 복구·복제 세션은 그 창을
+        # 지날 수 있고, 그때 남는 route는 오류 없이 공개 bbox에서 사라진다 —
+        # F2와 같은 성격의 보상 관측이다.
+        #
+        # 대상 relation은 적재 경로 모델에서 읽는다. geometry가 또 이사하거나
+        # area까지 따라 나오면 이 술어가 같이 움직인다.
+        sql=(
+            "SELECT f.feature_id AS id "
+            "FROM feature.features f "
+            "LEFT JOIN ("
+            f"  {EXTERNAL_GEOMETRY_UNION_SQL} "
+            ") AS g ON g.feature_id = f.feature_id "
+            "WHERE f.lifecycle_state = 'active' "
+            f"  AND f.kind IN ({_EXTERNAL_GEOMETRY_KINDS_SQL}) "
+            "  AND g.feature_id IS NULL"
         ),
     ),
     CaseSpec(

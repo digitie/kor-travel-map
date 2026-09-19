@@ -151,6 +151,16 @@ _SEAL_FUNCTION: Final[tuple[str, ...]] = _sidecar(
     "_312_current_provider_curation_input_set.sql"
 )
 
+#: 후보 스냅샷 함수 route arm에도 같은 지문을 되넣는다.
+#:
+#: `to_jsonb(route)`를 읽는 자리는 셋이고, 봉인만 메우면 나머지에서 geometry가
+#: **조용히** 빠진다 — `candidate_input_hash`가 geometry 변경을 더는 보지 않는다.
+#: 2026-09-20 적대 리뷰가 잡았다. 이 파일도 자기 역할 창을 연다(소유자가
+#: `ktm_curation_command_owner`다).
+_THEME_CANDIDATE_SNAPSHOT: Final[tuple[str, ...]] = _sidecar(
+    "_312_current_theme_candidate_snapshot.sql"
+)
+
 #: 공개 projection 뷰가 geometry를 보조 relation에서 읽게 한다. 출력 컬럼의
 #: 이름·순서·타입이 그대로라 `CREATE OR REPLACE VIEW`가 성립한다.
 _PUBLIC_VIEW: Final[tuple[str, ...]] = _sidecar("_312_public_features.sql")
@@ -168,6 +178,12 @@ _PUBLIC_READY_TRIGGERS: Final[tuple[str, ...]] = _sidecar(
 #: route geometry를 쓰는 프로시저 셋. plpgsql 본문은 `pg_depend`를 만들지 않아
 #: `DROP COLUMN`이 막히지 않는다 — 고치지 않으면 **첫 route 적재**가 42703으로
 #: 죽는다(2026-09-19 적대 리뷰가 blocker로 잡았다).
+#: override field-path 레지스트리를 새 자리로 옮긴다. `'route.geom'` 문자열은 외부
+#: 계약이라 그대로 두고, 그 값이 앉는 relation만 바꾼다.
+_OVERRIDE_FIELD_PATH_REGISTRY: Final[tuple[str, ...]] = _sidecar(
+    "_312_override_field_path_registry.sql"
+)
+
 _ROUTE_GEOMETRY_ROUTINES: Final[tuple[str, ...]] = (
     *_sidecar("_312_apply_provider_feature_field_patch.sql"),
     *_sidecar("_312_author_feature_field_overrides.sql"),
@@ -253,6 +269,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _receipt_head_check((*_RECEIPT_HEADS, revision)),
     *_SIDECAR_TABLE,
     *_SEAL_FUNCTION,
+    *_THEME_CANDIDATE_SNAPSHOT,
     *_PUBLIC_VIEW,
     # **뷰 교체 뒤에 드롭한다.** `feature.public_features`가 이 컬럼을 참조하므로
     # 순서를 어기면 `DependentObjectsStillExistError`로 멎는다. 무손실 증명은
@@ -260,6 +277,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "ALTER TABLE feature.feature_routes DROP COLUMN geom",
     *_PUBLIC_READY_TRIGGERS,
     *_ROUTE_GEOMETRY_ROUTINES,
+    *_OVERRIDE_FIELD_PATH_REGISTRY,
     _POSTCONDITION,
 )
 

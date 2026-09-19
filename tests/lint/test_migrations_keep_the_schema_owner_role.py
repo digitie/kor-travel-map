@@ -20,6 +20,7 @@ UPDATE 권한이 없고, 버전 기록은 마이그레이션 본문이 끝난 **
 from __future__ import annotations
 
 import ast
+import importlib.util
 import pathlib
 from typing import Final
 
@@ -39,11 +40,48 @@ _RESET_ROLE: Final = "reset role"
 _SET_ROLE: Final = "set role "
 
 
+def _migration_paths() -> list[pathlib.Path]:
+    return sorted(_VERSIONS.glob("[0-9]*.py"))
+
+
 def _migration_modules() -> list[tuple[str, ast.Module]]:
     modules: list[tuple[str, ast.Module]] = []
-    for path in sorted(_VERSIONS.glob("[0-9]*.py")):
+    for path in _migration_paths():
         modules.append((path.name, ast.parse(path.read_text(encoding="utf-8"))))
     return modules
+
+
+def _imported_statements(path: pathlib.Path, function_name: str) -> list[str] | None:
+    """마이그레이션을 **실제로 import해서** 그 문장 튜플을 그대로 읽는다.
+
+    AST만으로는 `*_sidecar("...sql")`처럼 **호출이 만드는** 문장을 볼 수 없다.
+    309부터 이 저장소의 마이그레이션은 본문을 별도 `.sql` 사이드카에 두고
+    파일별 달러 인용 인식 분할기로 잘라 넣는다 — 즉 AST가 보는 리터럴은
+    전체의 일부일 뿐이다.
+
+    312의 경우 AST는 세 문장만 보고 초록을 줬다(2026-09-20 적대 리뷰). 실제로는
+    42문장이고 그중 여덟이 `SET ROLE`이다. 검사가 보지 못한 자리에서 롤이
+    되돌아가면 이 검사는 아무 말도 하지 않는다.
+
+    import가 실패하면(alembic 컨텍스트가 필요한 드문 형태) ``None``을 돌려
+    호출자가 AST로 떨어지게 한다 — 검사를 잃는 대신 덜 보는 쪽이 낫다.
+    """
+
+    attribute = f"_{function_name.upper()}_STATEMENTS"
+    spec = importlib.util.spec_from_file_location(f"_migration_{path.stem}", path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:  # noqa: BLE001 - import 불가는 판정이 아니라 관측의 한계다
+        return None
+    statements = getattr(module, attribute, None)
+    if not isinstance(statements, tuple | list):
+        return None
+    if not all(isinstance(statement, str) for statement in statements):
+        return None
+    return list(statements)
 
 
 def _string_constants(module: ast.Module) -> dict[str, list[str]]:
@@ -119,6 +157,17 @@ def _executed_statements(module: ast.Module, function_name: str) -> list[str]:
     return statements
 
 
+def _statements_for(path: pathlib.Path, function_name: str) -> list[str]:
+    """import로 읽은 실제 문장열. 안 되면 AST 추출로 떨어진다."""
+
+    imported = _imported_statements(path, function_name)
+    if imported is not None:
+        return imported
+    return _executed_statements(
+        ast.parse(path.read_text(encoding="utf-8")), function_name
+    )
+
+
 def _trailing_role(statements: list[str]) -> str | None:
     """마지막에 남는 세션 롤. ``None``이면 로그인 롤로 되돌아간 것이다."""
 
@@ -137,13 +186,40 @@ def test_the_scan_actually_sees_role_switching_migrations() -> None:
     """항진명제 방지 — 롤을 바꾸는 마이그레이션을 실제로 찾아야 한다."""
 
     switching = [
-        name
-        for name, module in _migration_modules()
-        if _trailing_role(_executed_statements(module, "upgrade")) is not None
+        path.name
+        for path in _migration_paths()
+        if _trailing_role(_statements_for(path, "upgrade")) is not None
     ]
     assert len(switching) >= 5, (
         f"`SET ROLE`로 끝나는 마이그레이션을 {len(switching)}개만 찾았다 — "
-        "AST 추출이 낡았다(상수 형태가 바뀌었을 수 있다)."
+        "추출이 낡았다(상수 형태가 바뀌었을 수 있다)."
+    )
+
+
+@pytest.mark.unit
+def test_sidecar_migrations_are_not_read_through_the_ast_alone() -> None:
+    """**하한을 '본 것'에 건다.**
+
+    사이드카를 쓰는 마이그레이션에서 AST만으로 세면 문장 대부분이 빠진다. 그
+    상태로도 이 모듈의 단언은 조용히 통과하므로, "import 경로가 실제로 더 많이
+    본다"는 것을 여기서 명시적으로 센다. import 해석이 깨지면 이 검사가 먼저
+    빨갛게 된다 — 롤 검사가 조용히 항진명제가 되는 대신.
+    """
+
+    improved: list[str] = []
+    for path in _migration_paths():
+        if "_sidecar(" not in path.read_text(encoding="utf-8"):
+            continue
+        ast_only = _executed_statements(
+            ast.parse(path.read_text(encoding="utf-8")), "upgrade"
+        )
+        resolved = _statements_for(path, "upgrade")
+        if len(resolved) > len(ast_only):
+            improved.append(f"{path.name}: {len(ast_only)} -> {len(resolved)}")
+
+    assert improved, (
+        "사이드카를 쓰는 마이그레이션이 없거나, import 해석이 AST보다 더 보지 "
+        "못한다 — 이 모듈의 롤 검사가 사이드카 문장을 못 보고 있다는 뜻이다."
     )
 
 
@@ -157,9 +233,10 @@ def test_no_migration_hands_the_version_bump_back_to_the_login_role() -> None:
     """
 
     offenders: list[str] = []
-    for name, module in _migration_modules():
+    for path in _migration_paths():
+        name = path.name
         for function_name in ("upgrade", "downgrade"):
-            statements = _executed_statements(module, function_name)
+            statements = _statements_for(path, function_name)
             if not any(s.strip().lower().startswith(_SET_ROLE) for s in statements):
                 continue
             role = _trailing_role(statements)

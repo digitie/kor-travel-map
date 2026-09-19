@@ -11,10 +11,12 @@
 --   그중 geometry                        98.5%
 --   geom 제외                            633 B
 --
--- `to_jsonb(route)`는 봉인 말고도 두 곳이 더 쓴다. 하나는 그 43 kB를
--- `feature.theme_feature_candidates.match_evidence`에 **영구 저장**하고, 하나는
--- admin 후보 목록 API 응답에 **페이지당 N×43 kB**로 내보낸다. 행을 좁히면 그 둘이
--- 함께 줄어든다.
+-- `to_jsonb(route)`는 봉인 말고도 두 곳이 더 쓴다 —
+-- `feature.current_theme_candidate_snapshot`의 `candidate_input_hash` 계산과,
+-- admin 후보 목록 API 응답(**페이지당 N×43 kB**). 행을 좁히면 그 둘이 함께 줄어든다.
+--
+-- (2026-09-20 정정: 초안은 `match_evidence`가 그 43 kB를 영구 저장한다고 적었으나
+-- 그 컬럼에는 detail이 들어가지 않는다. 적대 리뷰가 잡았다.)
 --
 -- ## ADR-086이 세운 불변식을 어떻게 지키는가
 --
