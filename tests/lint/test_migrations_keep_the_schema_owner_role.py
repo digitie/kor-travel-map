@@ -168,16 +168,36 @@ def _statements_for(path: pathlib.Path, function_name: str) -> list[str]:
     )
 
 
+def _sql_head(statement: str) -> str:
+    """앞머리 주석과 빈 줄을 떼고 실제 SQL이 시작하는 자리부터 돌려준다.
+
+    문장 분할기는 `;`만 보고 자르므로 **주석이 문장 앞에 붙어 온다.** 사이드카의
+    여는 `SET ROLE`은 거의 언제나 설명 블록 뒤에 오므로, 주석을 떼지 않으면 이
+    검사가 창을 **여는** 쪽을 통째로 못 본다.
+
+    2026-09-20 돌연변이 실험이 그것을 드러냈다 — 마지막 사이드카의 닫는 문장을
+    지웠는데 검사가 초록이었다. 닫는 문장(주석 없음)만 보고 있었기 때문이다.
+    이웃 모듈(`test_routine_ddl_runs_under_its_owner_role`)은 같은 함정을 같은
+    이름의 함수로 이미 막고 있었다.
+    """
+
+    for index, line in enumerate(lines := statement.splitlines()):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("--"):
+            return "\n".join(lines[index:]).strip()
+    return ""
+
+
 def _trailing_role(statements: list[str]) -> str | None:
     """마지막에 남는 세션 롤. ``None``이면 로그인 롤로 되돌아간 것이다."""
 
     role: str | None = None
     for statement in statements:
-        lowered = statement.strip().lower()
+        lowered = _sql_head(statement).lower()
         if lowered.startswith(_RESET_ROLE):
             role = None
         elif lowered.startswith(_SET_ROLE):
-            role = statement.strip()[len(_SET_ROLE) :].strip().strip(";").strip()
+            role = _sql_head(statement)[len(_SET_ROLE) :].strip().strip(";").strip()
     return role
 
 
@@ -237,7 +257,9 @@ def test_no_migration_hands_the_version_bump_back_to_the_login_role() -> None:
         name = path.name
         for function_name in ("upgrade", "downgrade"):
             statements = _statements_for(path, function_name)
-            if not any(s.strip().lower().startswith(_SET_ROLE) for s in statements):
+            if not any(
+                _sql_head(s).lower().startswith(_SET_ROLE) for s in statements
+            ):
                 continue
             role = _trailing_role(statements)
             if role is None:
