@@ -661,7 +661,27 @@ def landslide_forecast_issues_to_bundles(
             kind=FeatureKind.NOTICE,
             name=name,
             coord=None,
-            address=Address(),
+            # **상류가 주는 단 하나의 위치 단서를 버리면 안 된다.**
+            #
+            # 이 dataset의 상류 row에는 필드가 일곱 개뿐이고 그중 위치를 말하는 것은
+            # `ocrnFrcstIssuInsttNm` 하나다. 2026-09-19에 10,562건을 전수로 재 보니
+            # 97%가 "충청남도 당진시"처럼 **시도+시군구**이고, 시도만 0.6%,
+            # 시도+연구소명("경기도 산림환경연구소")이 0.1%, 빈 값이 1.5%였다.
+            # 즉 98.5%가 행정구역을 말한다.
+            #
+            # 그런데 여기가 `Address()`를 넣는 바람에 `_provider_address`가 `None`이
+            # 되고, 적재기는 "좌표와 provider 주소가 모두 없음"으로 **전량을 버렸다**
+            # (prod 실측: 10,467건 전부 `missing_address`, notice feature 0건,
+            # 그런데 job은 SUCCESS). 좌표가 없는 row의 주소 단서를 `admin`에 남기는
+            # 것은 이 저장소의 기존 관례다 — `providers/mcst.py`의 `_resolve_address`가
+            # 같은 일을 하고, `dagster/validation.py`의 `_provider_address`는 그것을
+            # 읽으려고 `road`→`legal`→`admin` 순서를 본다.
+            #
+            # 값은 **손대지 않고 그대로** 넣는다. 0.1%의 "경기도 산림환경연구소"를
+            # 여기서 잘라 내면 provider가 말한 것과 다른 것을 저장하게 된다 —
+            # 행정구역과의 불일치는 `_provider_address_region_issues`가 warning으로
+            # 따로 센다. 빈 값 1.5%는 정말로 단서가 없으므로 계속 버려져야 한다.
+            address=Address(admin=_text(item.issuing_institution)),
             category=FOREST_SAFETY_CATEGORY,
             marker_icon=LANDSLIDE_FORECAST_MARKER_ICON,
             marker_color=LANDSLIDE_FORECAST_MARKER_COLOR,
