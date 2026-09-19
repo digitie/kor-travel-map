@@ -19,6 +19,7 @@ stream 경로), 이 저장소에서 반복된 사고가 "선언을 바꿨는데 
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
@@ -31,6 +32,7 @@ from kortravelmap.dto.source import SourceLink, SourceRecord, SourceRole
 
 pytestmark = pytest.mark.unit
 
+_FETCHED_AT = dt.datetime(2026, 9, 19, tzinfo=dt.UTC)
 _PROVIDER = "testprov"
 _DATASET = "testprov_things"
 
@@ -47,18 +49,21 @@ def _bundle(index: int, *, locatable: bool) -> FeatureBundle:
         name=f"이름 {index}",
         coord=None,
         address=Address(admin="서울특별시 종로구") if locatable else Address(),
-        category="test",
+        category="02020101",
+        marker_icon="restaurant",
+        marker_color="P-03",
     )
     return FeatureBundle(
         feature=feature,
         source_record=SourceRecord(
             source_record_key=source_record_key,
+            provider=_PROVIDER,
             dataset_key=_DATASET,
             source_entity_type="thing",
             source_entity_id=f"nk-{index}",
             raw_data={"i": index},
             raw_payload_hash=f"h{index}",
-            fetched_at=None,
+            fetched_at=_FETCHED_AT,
         ),
         source_link=SourceLink(
             feature_id=feature_id,
