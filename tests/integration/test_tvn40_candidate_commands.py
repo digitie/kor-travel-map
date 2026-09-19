@@ -72,7 +72,15 @@ async def _seed_candidate(
     dataset_key: str | None = None,
     place_kind: str = "attraction",
     place_payload: str = "{}",
+    kind: str = "place",
 ) -> dict[str, object]:
+    """후보 하나와 그 계보를 심는다.
+
+    ``kind``는 기본이 ``"place"``이고 그 경로는 종전과 **글자 그대로 같다**.
+    ``"route"``를 주면 route subtype 행과 ADR-099 2단계의 geometry 행을 함께
+    심는다 — `feature.current_theme_candidate_snapshot`이 route geometry를
+    실제로 보는지 재려면 route 후보가 필요하기 때문이다.
+    """
     # T-VN-39 재키(alembic 309) 뒤 ``feature.features.feature_id``는 uuid다. 이
     # seed는 provider 경로를 타지 않으므로 claim도 alias도 없고, 정본 키를 여기서
     # 직접 발급한다 — ADR-098에서 그 값은 **서버가 발급하는 랜덤 UUIDv7**이고 값
@@ -127,6 +135,7 @@ async def _seed_candidate(
             "source_record_key": source_record_key,
             "source_hash": "a" * 64,
             "place_payload": place_payload,
+            "kind": kind,
             "suffix": suffix,
         }
         for statement in (
@@ -161,7 +170,8 @@ async def _seed_candidate(
               feature_id, kind, name, category, coord, address,
               marker_icon, marker_color
             ) VALUES (
-              CAST(:feature_id AS uuid), 'place', 'typed candidate', '01070100',
+              CAST(:feature_id AS uuid), CAST(:kind AS text), 'typed candidate',
+              '01070100',
               x_extension.ST_SetSRID(
                 x_extension.ST_MakePoint(126.9780, 37.5665), 4326
               ),
@@ -177,23 +187,48 @@ async def _seed_candidate(
             """,
         ):
             await connection.execute(text(statement), seed)
-        await connection.execute(
-            text(
+        if kind == "place":
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO feature.feature_places (
+                      feature_id, kind, place_kind,
+                      facility_info, reviews_link, payload
+                    )
+                    SELECT
+                      feature_id, kind, :place_kind,
+                      jsonb_build_object('wheelchair', true), '{}'::jsonb,
+                      CAST(:place_payload AS jsonb)
+                    FROM feature.features
+                    WHERE feature_id = CAST(:feature_id AS uuid)
+                    """
+                ),
+                {**seed, "place_kind": place_kind},
+            )
+        elif kind == "route":
+            # ADR-099 2단계 이후 route는 **두 행**이다. 적재 경로
+            # (`feature_subtype.write_subtype`)와 같은 순서로 낸다.
+            for statement in (
                 """
-                INSERT INTO feature.feature_places (
-                  feature_id, kind, place_kind,
-                  facility_info, reviews_link, payload
+                INSERT INTO feature.feature_routes (feature_id, kind, route_type)
+                VALUES (CAST(:feature_id AS uuid), 'route', 'trail')
+                """,
+                """
+                INSERT INTO feature.feature_route_geometries (feature_id, kind, geom)
+                VALUES (
+                  CAST(:feature_id AS uuid), 'route',
+                  CAST(x_extension.ST_Multi(x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(CAST(:route_wkt AS text)), 4326))
+                  AS x_extension.geometry(MultiLineString, 4326))
                 )
-                SELECT
-                  feature_id, kind, :place_kind,
-                  jsonb_build_object('wheelchair', true), '{}'::jsonb,
-                  CAST(:place_payload AS jsonb)
-                FROM feature.features
-                WHERE feature_id = CAST(:feature_id AS uuid)
-                """
-            ),
-            {**seed, "place_kind": place_kind},
-        )
+                """,
+            ):
+                await connection.execute(
+                    text(statement),
+                    {**seed, "route_wkt": "MULTILINESTRING((126.97 37.56,126.98 37.57))"},
+                )
+        else:
+            raise AssertionError(f"unsupported seed kind: {kind}")
         theme_id = str(
             await connection.scalar(
                 text(
@@ -2302,3 +2337,66 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
     finally:
         await api.dispose()
         await dagster.dispose()
+
+
+async def test_route_geometry_change_moves_the_candidate_input_hash(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """`candidate_input_hash`가 route geometry 변경을 **실제로** 본다.
+
+    ADR-099 2단계가 geometry를 `to_jsonb(route)`에서 빼냈다. 그 자리를
+    `geom_digest`로 메우지 않으면 이 해시는 geometry가 바뀌어도 **그대로**이고,
+    후보가 재평가되지 않는다. 오류가 아니라 관측의 부재라 조용하다 —
+    2026-09-20 적대 리뷰가 잡은 자리다.
+
+    이름이 아니라 효과에 건다: 행을 심고, 해시를 재고, geometry만 바꾸고, 다시
+    잰다. 대조군으로 **아무것도 바꾸지 않은** 재측정이 같은 값인지도 함께 본다
+    (그래야 "매번 달라지는 해시"가 이 검사를 거짓 초록/거짓 빨강으로 만들지 않는다).
+    """
+
+    seeded = await _seed_candidate(migrated_engine, kind="route")
+    arguments = {
+        "rule_id": seeded["rule_id"],
+        "source_entity_key": seeded["source_entity_key"],
+        "feature_id": seeded["feature_id"],
+    }
+    snapshot_sql = text(
+        """
+        SELECT candidate_input_hash
+        FROM feature.current_theme_candidate_snapshot(
+          CAST(:rule_id AS uuid), :source_entity_key, CAST(:feature_id AS uuid)
+        )
+        """
+    )
+
+    async with migrated_engine.connect() as connection:
+        before = await connection.scalar(snapshot_sql, arguments)
+        stable = await connection.scalar(snapshot_sql, arguments)
+    assert before is not None, "route 후보의 스냅샷이 한 행도 나오지 않았다."
+    assert before == stable, (
+        "아무것도 바꾸지 않았는데 해시가 달라진다 — 이 검사의 전제가 무너진다."
+    )
+
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                UPDATE feature.feature_route_geometries
+                   SET geom = CAST(x_extension.ST_Multi(x_extension.ST_SetSRID(
+                         x_extension.ST_GeomFromText(
+                           'MULTILINESTRING((127.10 37.60,127.11 37.61))'), 4326))
+                       AS x_extension.geometry(MultiLineString, 4326))
+                 WHERE feature_id = CAST(:feature_id AS uuid)
+                """
+            ),
+            {"feature_id": seeded["feature_id"]},
+        )
+
+    async with migrated_engine.connect() as connection:
+        after = await connection.scalar(snapshot_sql, arguments)
+
+    assert after != before, (
+        "route geometry를 바꿨는데 candidate_input_hash가 그대로다 — 후보 해시가 "
+        "geometry를 더는 보지 않는다. `_312_current_theme_candidate_snapshot.sql`의 "
+        "`geom_digest` 항이 빠졌는지 볼 것."
+    )
