@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import logging
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass
@@ -16,7 +17,11 @@ from typing import Any, cast
 
 import httpx
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
+from kortravelmap.geocoding import (
+    GeoCallStats,
+    KorTravelGeoRestClient,
+    kor_travel_geo_reverse_geocoder,
+)
 from kortravelmap.infra.db import make_async_engine, require_pg_dsn
 from kortravelmap.infra.file_store import (
     S3ObjectStore,
@@ -89,6 +94,14 @@ __all__ = [
     "offline_upload_store_resource",
     "reverse_geocoder_resource",
 ]
+
+
+_LOGGER = logging.getLogger(__name__)
+"""geo 경계 계수를 Dagster event stream까지 나르는 표준 logger.
+
+`docker/dagster.yaml`의 `managed_python_loggers`에 이 모듈 이름이 있어야 실린다 —
+`provider_fetchers`가 같은 방식으로 H45 재시도 경고를 내보낸다.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1258,16 +1271,29 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         base_url=settings.kor_travel_geo_base_url.get_secret_value(),
         timeout=settings.kor_travel_geo_timeout_seconds,
     )
+    # **이 resource가 geo 경계 계수의 소유자다.** 아래 `region_fallback_radius_km`이
+    # 켜져 있어서 좌표 하나가 왕복 1회일 수도 2회일 수도 있는데, 그 비율이 오늘
+    # 어디에도 기록되지 않는다. 계수는 아무것도 바꾸지 않고 세기만 한다.
+    stats = GeoCallStats()
     try:
         client = KorTravelGeoRestClient(
             http,
             api_key=settings.kor_travel_geo_api_key,
+            stats=stats,
         )
         yield kor_travel_geo_reverse_geocoder(
             client,
             region_fallback_radius_km=0.1,
         )
     finally:
+        # **`add_output_metadata`가 아니라 로그로 낸다.** 실패한 step은 output을 내지
+        # 못하므로(`feature_operation_tracking._log_spend_on_failure`가 같은 이유를
+        # 적어 두었다), metadata로만 내면 **정확히 증거가 가장 필요한 run에서 수가
+        # 사라진다.** 2026-09-19의 증상이 "3시간 동안 이벤트 0건"이었다.
+        #
+        # WARNING인 이유는 `docker/dagster.yaml`의 `python_log_level: WARNING`이다 —
+        # INFO로 내면 Dagster event stream에 실리지 않아 조용해진다.
+        _LOGGER.warning("%s", stats.summary())
         _run_async_resource_teardown(http.aclose())
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from collections.abc import AsyncIterator, Callable, Iterator
 from io import BytesIO
@@ -12,6 +13,7 @@ from typing import Any, cast
 
 import pytest
 from dagster import build_init_resource_context
+from kortravelmap.geocoding import GeoCallStats
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -218,14 +220,20 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     )
     _FakeHttpClient.instances = []
     sentinel = object()
+    injected_stats: list[Any] = []
 
     def _fake_client(
         client: _FakeHttpClient,
         *,
         api_key: SecretStr | None = None,
+        stats: Any = None,
     ) -> tuple[str, _FakeHttpClient]:
         assert api_key is not None
         assert api_key.get_secret_value() == "geo-public-key"
+        # **대역이 계약을 따라와야 한다.** 이 인자를 받지 않으면 resource가 계수를
+        # 주입하도록 바뀐 것을 대역이 가려 버린다(TypeError로 드러나긴 하지만,
+        # 받기만 하고 세지 않으면 조용히 지나간다). 그래서 받은 것을 기록한다.
+        injected_stats.append(stats)
         return ("kraddr", client)
 
     def _fake_reverse(
@@ -249,6 +257,10 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     reverse_geocoder = next(resource_iter)
 
     assert reverse_geocoder is sentinel
+    # resource가 geo 경계 계수를 **실제로 주입한다.** 이것이 없으면 왕복 수가
+    # 아무 데도 기록되지 않고, 이후의 모든 상한이 분모 없이 정해진다.
+    assert injected_stats, "resource가 geo 계수를 주입하지 않았다."
+    assert isinstance(injected_stats[0], GeoCallStats)
     assert len(_FakeHttpClient.instances) == 1
     http = _FakeHttpClient.instances[0]
     assert http.base_url == "http://127.0.0.1:12501"
@@ -259,6 +271,63 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
         next(resource_iter)
 
     assert http.closed
+
+
+def test_reverse_geocoder_resource_reports_the_geo_call_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """teardown이 계수를 **로그로** 낸다 — 실패한 step은 output metadata를 못 낸다."""
+
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL", "http://127.0.0.1:12501"
+    )
+    monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY", "geo-public-key")
+    _FakeHttpClient.instances = []
+    seen: list[Any] = []
+
+    def _fake_client(
+        client: _FakeHttpClient,
+        *,
+        api_key: SecretStr | None = None,
+        stats: Any = None,
+    ) -> tuple[str, _FakeHttpClient]:
+        seen.append(stats)
+        return ("kraddr", client)
+
+    def _fake_reverse(
+        client: tuple[str, _FakeHttpClient],
+        *,
+        region_fallback_radius_km: float | None = None,
+    ) -> object:
+        return object()
+
+    monkeypatch.setattr(resources.httpx, "AsyncClient", _FakeHttpClient)
+    monkeypatch.setattr(resources, "KorTravelGeoRestClient", _fake_client)
+    monkeypatch.setattr(resources, "kor_travel_geo_reverse_geocoder", _fake_reverse)
+
+    resource_fn = cast(
+        "Callable[[object], Iterator[Any]]",
+        resources.reverse_geocoder_resource.resource_fn,
+    )
+    resource_iter = resource_fn(build_init_resource_context())
+    next(resource_iter)
+    stats = seen[0]
+    assert isinstance(stats, GeoCallStats)
+    # resource 수명 동안 쌓인 왕복이 teardown 로그에 그대로 나와야 한다.
+    stats.record("reverse", failed=False)
+    stats.record("regions_within_radius", failed=True)
+
+    with (
+        caplog.at_level(logging.WARNING, logger=resources._LOGGER.name),
+        pytest.raises(StopIteration),
+    ):
+        next(resource_iter)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("reverse=1" in message for message in messages), messages
+    assert any("regions_within_radius=1" in message for message in messages), messages
+    assert any("실패" in message for message in messages), messages
 
 
 def test_datagokr_file_data_dataset_key_resource_prefers_run_config() -> None:
