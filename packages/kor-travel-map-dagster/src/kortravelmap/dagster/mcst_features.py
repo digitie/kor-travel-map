@@ -31,6 +31,7 @@ from dagster import AssetExecutionContext, Failure, asset
 from .assets import (
     _COMMON_RESOURCE_KEYS,
     FEATURE_LOAD_RETRY_POLICY,
+    GEO_HEAVY_POOL,
     _fetched_at,
     _load,
     _record_list,
@@ -252,6 +253,7 @@ async def run_feature_place_mcst_culture(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"mcst_culture_records"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_mcst_culture(
     context: AssetExecutionContext,
