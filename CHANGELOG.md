@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### route geometry 분리 — ADR-099 2단계 (2026-09-20)
+
+- **CHANGED (스키마, rev 312)**: route geometry가 `feature.feature_routes.geom`을
+  떠나 전용 PostGIS relation `feature.feature_route_geometries`로 갔다. route
+  정체성은 `feature_routes`에 그대로 남고, "geometry 없는 route"는
+  `fk_feature_routes_geometry`(DEFERRABLE INITIALLY DEFERRED)가 COMMIT 시점에
+  막는다. 공개 bbox 술어가 **조인 없이** partial GiST를 타도록 `public_ready`를
+  그 행에 복제한다.
+- **CHANGED (봉인 입력)**: `to_jsonb(route)`에서 geometry가 빠진 자리를 생성 컬럼
+  `geom_digest`가 메운다. causal seal과 theme candidate 해시 **둘 다** 그 지문을
+  읽으므로 geometry 변경은 계속 관측된다.
+- **BREAKING (적재)**: 이 revision은 route를 이어 나르지 않고 `feature_routes`가
+  **비어 있기를 요구**한다. 소유자 결정(2026-09-19)에 따라 DB를 다시 세우고
+  provider에서 재적재한 뒤 올린다. forward-only — downgrade는 거부한다.
+- **FIXED (검사)**: geometry를 가리키던 검사·관측·권한 선언이 관계 이름 리터럴
+  대신 `GEOMETRY_RELATIONS`/`EXTERNAL_GEOMETRY_KINDS`에서 유도된다. 무결성 관측에
+  `missing_geometry` 축과 consistency `F2G`를 더했다 — `geom NOT NULL`이 COMMIT
+  시점 제약으로 약해진 자리를 메운다.
+
 ### 적대 리뷰 반영 — 키 유출·빈 문자열 가드·항진명제 검사 (2026-09-19)
 
 - **FIXED (인증키 유출)**: 서울 열린데이터광장은 인증키를 URL **경로**에 받는데
