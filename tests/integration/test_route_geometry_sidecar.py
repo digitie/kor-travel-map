@@ -365,3 +365,51 @@ async def test_feature_routes_no_longer_carries_geometry(
         ).scalars().all()
     assert "geom" not in rows, "feature_routes에 geom이 아직 있다 — 이전이 끝나지 않았다."
     assert "route_type" in rows, "비-공간 컬럼까지 사라졌다 — 이전 범위가 넘쳤다."
+
+
+async def test_the_state_procedure_owner_can_write_every_geometry(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """필드 패치 프로시저가 실행되는 롤이 geometry를 읽고 쓸 수 있는지 본다.
+
+    세 프로시저(`apply_provider_feature_field_patch`,
+    `author_feature_field_overrides`, `revoke_feature_field_overrides`)는
+    `ktm_feature_state_procedure_owner` 소유의 SECURITY DEFINER다. geometry가
+    `feature_routes`에서 보조 relation으로 옮겨갔을 때 이 롤의 권한은 **옛 자리에
+    얼어 있었고**, 2026-09-20 통합 실행이 `permission denied for table
+    feature_route_geometries`로 죽었다.
+
+    관계 이름을 여기 적지 않는다. geometry를 담는 relation 집합을 적재 경로가 쓰는
+    모델에서 그대로 가져온다 — geometry가 또 이사하면 이 검사도 따라 움직인다.
+    """
+
+    from kortravelmap.infra.runtime_privileges import _GEOMETRY_BEARING_RELATIONS
+
+    assert _GEOMETRY_BEARING_RELATIONS, (
+        "geometry를 담는 relation이 하나도 없다고 유도됐다 — 모델이 비었으면 "
+        "이 검사는 항진명제가 된다."
+    )
+
+    role = "ktm_feature_state_procedure_owner"
+    missing: list[str] = []
+    async with migrated_engine.connect() as conn:
+        for relation in sorted(_GEOMETRY_BEARING_RELATIONS):
+            qualified = f"feature.{relation}"
+            readable, writable = (
+                await conn.execute(
+                    text(
+                        "SELECT has_column_privilege(:role, :rel, 'geom', 'SELECT'),"
+                        "       has_column_privilege(:role, :rel, 'geom', 'UPDATE')"
+                    ),
+                    {"role": role, "rel": qualified},
+                )
+            ).one()
+            if not readable:
+                missing.append(f"{qualified}.geom SELECT")
+            if not writable:
+                missing.append(f"{qualified}.geom UPDATE")
+
+    assert not missing, (
+        f"{role}가 geometry를 다루지 못한다: {missing}. 필드 패치 프로시저가 그 롤로 "
+        "실행되므로 적재 첫 route에서 42501로 죽는다."
+    )

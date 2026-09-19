@@ -142,3 +142,16 @@ GRANT INSERT (feature_id, kind, geom)
 GRANT UPDATE (geom) ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
 GRANT SELECT (feature_id, public_ready), UPDATE (public_ready)
     ON TABLE feature.feature_route_geometries TO ktm_feature_state_procedure_owner;
+
+-- **필드 패치 프로시저 셋이 이 롤로 실행된다.** 셋 다
+-- `ktm_feature_state_procedure_owner` 소유의 SECURITY DEFINER이고, geometry 갱신을
+-- `SET geom = CASE ... ELSE route_geom.geom END`으로 낸다 — 쓰기만이 아니라 **읽기도**
+-- 필요하다. `feature_routes`·`feature_areas`는 테이블 레벨 SELECT로 그것을 갖고 있다.
+--
+-- 이 두 줄이 빠진 채 2026-09-20 통합 실행이 `permission denied for table
+-- feature_route_geometries`로 죽었다. geometry가 relation을 옮겼는데 그것을 가리키던
+-- 권한 선언이 옛 자리에 남아 있었다.
+GRANT SELECT ON TABLE feature.feature_route_geometries
+    TO ktm_feature_state_procedure_owner;
+GRANT UPDATE (geom) ON TABLE feature.feature_route_geometries
+    TO ktm_feature_state_procedure_owner;

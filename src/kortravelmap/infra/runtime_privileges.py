@@ -243,7 +243,48 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
         f"ON feature.{relation} "
         "TO ktm_feature_state_procedure_owner",
     )
-) + _SHADOW_COLUMN_GRANTS + _LEGACY_GEOM_GRANTS
+)
+
+#: geometry를 **직접 담는** relation. 목록을 손으로 적지 않고 위 모델에서 유도한다 —
+#: ADR-099 2단계가 route geometry를 옮겼을 때 이 집합이 따라 움직여야 하기 때문이다.
+_GEOMETRY_BEARING_RELATIONS: Final[frozenset[str]] = frozenset(
+    relation
+    for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
+    if "geom" in columns
+)
+
+#: 필드 패치 프로시저 셋(`apply_provider_feature_field_patch`,
+#: `author_feature_field_overrides`, `revoke_feature_field_overrides`)은
+#: `ktm_feature_state_procedure_owner` 소유의 SECURITY DEFINER다 — **그 롤로 실행되므로
+#: 그 롤이 geometry를 읽고 쓸 수 있어야 한다.**
+#:
+#: `SET geom = CASE ... ELSE <relation>.geom END`이라 UPDATE만으로는 모자라고 읽기도
+#: 필요하다. `feature_routes`·`feature_areas`는 테이블 레벨 SELECT로 그것을 갖고 있었다.
+#:
+#: 2026-09-20에 이 자리가 비어 통합 테스트가 `permission denied for table
+#: feature_route_geometries`로 죽었다. geometry는 relation을 옮겼는데 **그 relation을
+#: 가리키던 권한 선언은 옛 자리에 얼어 있었다.** 그래서 이 선언은 관계 이름이 아니라
+#: 위 `_GEOMETRY_BEARING_RELATIONS`에 결박한다.
+#:
+#: `feature_areas`에는 이미 같은 ACL이 있어 무연산이다 — revision 300 handoff가
+#: 대조하는 destination catalog는 그대로다. 새 relation만 `to_regclass` 판정을 거쳐
+#: 실제로 붙는다.
+_STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
+    _maybe_conditional(relation, statement)
+    for relation in sorted(_GEOMETRY_BEARING_RELATIONS)
+    for statement in (
+        f"GRANT SELECT ON feature.{relation} TO ktm_feature_state_procedure_owner",
+        f"GRANT UPDATE (geom) ON feature.{relation} "
+        "TO ktm_feature_state_procedure_owner",
+    )
+)
+
+_ROUTE_AREA_RUNTIME_GRANTS = (
+    _ROUTE_AREA_RUNTIME_GRANTS
+    + _STATE_PROCEDURE_GEOMETRY_GRANTS
+    + _SHADOW_COLUMN_GRANTS
+    + _LEGACY_GEOM_GRANTS
+)
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;
