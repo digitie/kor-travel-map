@@ -1140,9 +1140,14 @@ async def test_route_and_area_with_geometry_land_in_subtype(
     direct_geom = (
         await migrated_session.execute(
             text(
-                "SELECT x_extension.ST_GeometryType(COALESCE(r.geom, a.geom)) "
+                # ADR-099 2단계: route geometry는 전용 relation에 산다.
+                # 이 검사는 `load_bundle` 왕복이므로 프로시저 경로
+                # (`apply_provider_feature_field_patch`)도 함께 태운다 — 그 본문이
+                # 옛 컬럼을 치면 여기서 42703으로 죽는다.
+                "SELECT x_extension.ST_GeometryType(COALESCE(rg.geom, a.geom)) "
                 "FROM feature.features AS f "
-                "LEFT JOIN feature.feature_routes AS r ON r.feature_id = f.feature_id "
+                "LEFT JOIN feature.feature_route_geometries AS rg "
+                "  ON rg.feature_id = f.feature_id "
                 "LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id "
                 "WHERE f.feature_id = CAST(:feature_id AS uuid)"
             ),

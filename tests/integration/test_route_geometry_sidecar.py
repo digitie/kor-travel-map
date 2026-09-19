@@ -247,6 +247,76 @@ async def test_identical_geometry_reload_does_not_rewrite_the_row(
     )
 
 
+async def test_new_geometry_rows_become_public_ready(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """**핵심.** 새 geometry 행의 `public_ready`가 INSERT 시점에 채워진다.
+
+    2026-09-19 적대 리뷰가 잡은 blocker다. provider가 넣는 feature는 DTO 기본값이
+    active/published/valid라 **core 3축을 바꾸는 UPDATE가 일어나지 않고**, 그래서
+    AFTER UPDATE 트리거는 영원히 발화하지 않는다. 값을 채우는 것은 INSERT 시점의
+    BEFORE 트리거다. 그것이 없으면 `public_ready`가 false로 남고 공개 bbox가
+    route를 **한 건도** 못 고른다 — 오류 없이 결과만 0건이라 조용하다.
+    """
+
+    feature_id = _fresh_id()
+    async with migrated_engine.begin() as conn:
+        await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "ready"})
+        await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
+        await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
+
+    async with migrated_engine.connect() as conn:
+        ready = (
+            await conn.execute(
+                text(
+                    "SELECT public_ready FROM feature.feature_route_geometries"
+                    " WHERE feature_id = CAST(:feature_id AS uuid)"
+                ),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    assert ready is True, (
+        "published/active/valid feature의 geometry 행이 public_ready=false다 — "
+        "파생 트리거가 없어 공개 bbox에서 route가 영원히 0건이 된다."
+    )
+
+
+async def test_the_public_bbox_predicate_actually_returns_the_route(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """술어를 **행이 있는 상태로** 태운다.
+
+    EXPLAIN만 보는 검사는 빈 표에서도 초록이다 — 자기 대상을 한 번도 안 본다.
+    여기서는 실제로 bbox 안에 route를 넣고 그것이 후보로 **나오는지**를 센다.
+    """
+
+    feature_id = _fresh_id()
+    async with migrated_engine.begin() as conn:
+        await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "bbox"})
+        await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
+        await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
+
+    async with migrated_engine.connect() as conn:
+        hits = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM feature.feature_route_geometries AS hit"
+                    " WHERE hit.public_ready"
+                    "   AND hit.geom OPERATOR(x_extension.&&)"
+                    "       x_extension.ST_MakeEnvelope(126.9, 37.5, 127.0, 37.6, 4326)"
+                    "   AND x_extension.ST_Intersects(hit.geom,"
+                    "       x_extension.ST_MakeEnvelope(126.9, 37.5, 127.0, 37.6, 4326))"
+                    "   AND hit.feature_id = CAST(:feature_id AS uuid)"
+                ),
+                {"feature_id": feature_id},
+            )
+        ).scalar_one()
+    assert hits == 1, (
+        "bbox 안의 published route가 공개 후보 술어에 잡히지 않는다 — "
+        "공개 지도에서 route가 통째로 사라진다."
+    )
+
+
 async def test_the_public_bbox_predicate_still_uses_the_partial_gist(
     migrated_engine: AsyncEngine,
 ) -> None:

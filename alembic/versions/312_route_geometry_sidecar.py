@@ -165,6 +165,15 @@ _PUBLIC_READY_TRIGGERS: Final[tuple[str, ...]] = _sidecar(
     "_312_sync_subtype_public_ready.sql"
 )
 
+#: route geometry를 쓰는 프로시저 셋. plpgsql 본문은 `pg_depend`를 만들지 않아
+#: `DROP COLUMN`이 막히지 않는다 — 고치지 않으면 **첫 route 적재**가 42703으로
+#: 죽는다(2026-09-19 적대 리뷰가 blocker로 잡았다).
+_ROUTE_GEOMETRY_ROUTINES: Final[tuple[str, ...]] = (
+    *_sidecar("_312_apply_provider_feature_field_patch.sql"),
+    *_sidecar("_312_author_feature_field_overrides.sql"),
+    *_sidecar("_312_revoke_feature_field_overrides.sql"),
+)
+
 #: 새 표가 자기 자리를 갖췄는지 스스로 증명한다.
 _POSTCONDITION: Final[str] = """
 DO $post$
@@ -250,6 +259,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     # 표 사이드카 안에서 **드롭 전에** 이미 끝났다.
     "ALTER TABLE feature.feature_routes DROP COLUMN geom",
     *_PUBLIC_READY_TRIGGERS,
+    *_ROUTE_GEOMETRY_ROUTINES,
     _POSTCONDITION,
 )
 
