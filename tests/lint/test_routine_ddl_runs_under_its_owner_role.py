@@ -339,28 +339,41 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
 
     - 트리거를 만드는 롤이 그 함수의 **소유자**이거나,
     - 같은 마이그레이션이 그 앞에서 **그 롤에게 EXECUTE를 부여**했거나,
-    - 같은 마이그레이션이 그 함수를 **새로 만들었거나**(그 순간 ACL이 기본값이라
-      PUBLIC이 EXECUTE를 갖는다 — 301·306·307이 이 모양이고, 그래서 정당하다).
-      `CREATE OR REPLACE`는 여기 해당하지 않는다: 기존 ACL을 **보존**하므로 이미
-      좁혀진 함수는 좁혀진 채로 남는다.
+    - 그 마이그레이션이 체인에서 그 함수를 **처음 선언했거나**(그 순간 ACL이
+      기본값이라 PUBLIC이 EXECUTE를 갖고, 조정기는 아직 돌지 않았다 —
+      301·306·307이 이 모양이고 그래서 정당하다).
+
+    세 번째 조건을 "`CREATE OR REPLACE`가 아닌 `CREATE`"로 좁히면 안 된다. 301은
+    **없던 함수**를 `CREATE OR REPLACE`로 만든다 — 없던 것을 replace하면 보존할
+    ACL도 없으므로 그것도 기본값이다. 반대로 이미 있는 함수를 `CREATE OR REPLACE`
+    하면 ACL이 **보존**되므로 좁혀진 채로 남는다. 그 둘을 가르는 것은 문법이 아니라
+    **체인에서 처음인가**이고, 그래서 전 마이그레이션을 훑어 최초 선언자를 구한다.
     """
 
     owners = _head_owners()
+    groups = _statement_groups("_UPGRADE_STATEMENTS")
+
+    #: 루틴 → 체인에서 그것을 **처음 선언한** 마이그레이션. 거기서는 ACL이 기본값이다.
+    first_declarer: dict[str, str] = {}
+    for name, statements in groups:
+        for statement in statements:
+            head = _sql_head(statement)
+            for pattern in (_CREATE, _REPLACE):
+                if (declared := pattern.match(head)) is not None:
+                    first_declarer.setdefault(declared.group(1), name)
+
     wrong: list[str] = []
     seen = 0
 
-    for name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
+    for name, statements in groups:
         role: str | None = None
         granted: set[tuple[str, str]] = set()
-        freshly_created: set[str] = set()
         for statement in statements:
             expanded = _sql_text(statement)
             head = _sql_head(expanded)
             if (set_role := _SET_ROLE.match(head)) is not None:
                 role = set_role.group(1)
                 continue
-            if (created := _CREATE.match(head)) is not None:
-                freshly_created.add(created.group(1))
             for grant in _GRANT_EXECUTE.finditer(expanded):
                 granted.add((grant.group(1), grant.group(2)))
             trigger = _TRIGGER.match(head)
@@ -375,7 +388,7 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
             if (
                 effective == owner
                 or (routine, effective) in granted
-                or routine in freshly_created
+                or first_declarer.get(routine) == name
             ):
                 continue
             wrong.append(
