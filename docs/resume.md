@@ -1,5 +1,45 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-19 (2) — 재배포·재실행 완료. 그리고 상한 수정이 가린 것을 드러냈다
+
+**다음 한 작업: 산사태 notice의 위치 해석.** prod에 `feature.feature_notices`가
+**0행**이다 — 이 dataset은 한 번도 적재된 적이 없다.
+
+**왜 이제 보이는가.** 종전에는 `ProviderPaginationOverrun`으로 job이 수집 단계에서
+죽어 검증까지 가지 못했다. 상한을 40장으로 올리자 처음으로 전량이 도착했고, 그
+다음 단계가 **전량을 떨궜다.** 2026-09-19 04:09 실측 materialization:
+
+```
+upstream_requests_min              11      ← 상한 수정은 동작했다
+address_validation_total        10467
+address_validation_error_count  10467
+address_validation_dropped_count 10467     ← 받은 것 전부 탈락
+```
+
+**원인 가설(미확정).** 이 feed에는 좌표도 도로명주소도 없고 위치 단서가
+`ocrnFrcstIssuInsttNm`(예: `충청남도 당진시`) 하나다 — **주소가 아니라 기관명**이다.
+주소 파서는 그것을 주소로 읽지 못한다. 고치려면 기관명 → 시군구 코드 경로를
+따로 두어야 한다. **먼저 `address_validation_issues`의 실제 사유를 읽어 가설을
+확인할 것** — 위 숫자는 "전량 탈락"을 말할 뿐 이유를 말하지 않는다.
+
+**이것은 회귀가 아니다.** 상한 수정이 만든 것이 아니라, 상한 수정이 **처음으로
+그 지점까지 도달시켜서** 보이게 된 것이다.
+
+**재배포·재실행으로 확인된 것.** prod `697a1d87a`, migration head `310_seoul_source_move`.
+
+| dataset | 이전 | 지금 |
+|---|---:|---:|
+| `datagokr_seoul_bookstores` | 0 (odcloud 404) | **606** |
+| `krforest_arboretums` | 0 | **212** |
+| `krforest_recreation_forests` | 0 | **182** |
+| `krforest_dulle_trails` | — | **26** |
+| `krforest_landslide_forecast_issues` | job 실패 | 10,467 수신 / 0 적재 |
+
+**아직 열린 것.** MCST 문화·krforest 산악등산로 재실행 결과, OpiNet place/price
+재실행(하루 예산 280/300), 그리고 D2 lane BLOCKED
+(`admin feature live acceptance: direct fixture seed failed`) — prod 서비스가 아니라
+acceptance 하네스 쪽이고 별건이다.
+
 ## 2026-09-19 — 원천을 고쳤다. 다음은 재배포와 재실행이다
 
 **다음 한 작업: prod 재배포 후 실패했던 job 재실행.** prod 이미지는 아직 `e9b877b3`라
