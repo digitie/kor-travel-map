@@ -113,21 +113,11 @@ ALTER TABLE feature.feature_routes
     REFERENCES feature.feature_route_geometries(feature_id)
     DEFERRABLE INITIALLY DEFERRED;
 
--- **파생 트리거를 붙인다.** 이것이 없으면 `public_ready`가 영원히 false로 남고,
--- 공개 bbox 술어(`WHERE bbox_hit_route.public_ready`)가 route를 **한 건도** 못
--- 고른다. coord arm은 `kind NOT IN ('route','area')`로 route를 명시 배제하므로
--- 대체 경로도 없다 — 오류 없이 결과만 0건이라 조용하다.
---
--- 2026-09-19 적대 리뷰가 blocker로 잡았다. provider가 넣는 feature는 DTO 기본값이
--- active/published/valid라 **core 3축을 바꾸는 UPDATE가 일어나지 않고**, 그래서
--- AFTER UPDATE 트리거(`sync_subtype_public_ready`)는 영원히 발화하지 않는다.
--- 값을 채우는 것은 INSERT 시점의 이 BEFORE 트리거다.
---
--- `feature_routes`·`feature_areas`에 붙은 것과 **같은 함수**를 쓴다. 그 함수가
--- 보는 것은 `NEW.feature_id`/`NEW.kind`/`NEW.public_ready`뿐이고 셋 다 이 표에 있다.
-CREATE TRIGGER trg_feature_route_geometries_public_ready
-    BEFORE INSERT OR UPDATE ON feature.feature_route_geometries
-    FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+-- **파생 트리거는 여기서 붙이지 않는다.** `CREATE TRIGGER`가 트리거 함수의
+-- EXECUTE를 요구하는데 그 함수의 소유자는 다른 롤이고, 런타임 권한 조정기가
+-- PUBLIC의 EXECUTE를 걷어낸 DB에서는 이 창(스키마 소유자)으로 통과하지 못한다.
+-- 2026-09-20 격리 live 스택 실측 — 통합 게이트는 갓 만든 DB라 전부 초록이었다.
+-- 트리거는 `_312_route_geometry_public_ready_trigger.sql`이 자기 창에서 만든다.
 
 CREATE INDEX idx_feature_route_geometries_geom_gist
     ON feature.feature_route_geometries USING gist (geom) WHERE public_ready;

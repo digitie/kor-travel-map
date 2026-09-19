@@ -151,6 +151,14 @@ _SEAL_FUNCTION: Final[tuple[str, ...]] = _sidecar(
     "_312_current_provider_curation_input_set.sql"
 )
 
+#: 보조 relation의 `public_ready` 파생 트리거. **자기 역할 창을 연다** —
+#: `CREATE TRIGGER`는 트리거 함수의 EXECUTE를 요구하는데 그 함수 소유자는
+#: `ktm_feature_state_procedure_owner`이고, 조정기가 PUBLIC EXECUTE를 걷어낸 DB
+#: (운영·격리 live)에서는 스키마 소유자 창으로 통과하지 못한다.
+_ROUTE_GEOMETRY_READY_TRIGGER: Final[tuple[str, ...]] = _sidecar(
+    "_312_route_geometry_public_ready_trigger.sql"
+)
+
 #: 후보 스냅샷 함수 route arm에도 같은 지문을 되넣는다.
 #:
 #: `to_jsonb(route)`를 읽는 자리는 셋이고, 봉인만 메우면 나머지에서 geometry가
@@ -262,6 +270,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     _receipt_head_check((*_RECEIPT_HEADS, revision)),
     *_SIDECAR_TABLE,
+    *_ROUTE_GEOMETRY_READY_TRIGGER,
     *_SEAL_FUNCTION,
     *_THEME_CANDIDATE_SNAPSHOT,
     *_PUBLIC_VIEW,
