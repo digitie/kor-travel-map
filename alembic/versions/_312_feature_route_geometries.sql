@@ -69,38 +69,31 @@ CREATE TABLE feature.feature_route_geometries (
 
 ALTER TABLE feature.feature_route_geometries OWNER TO ktm_feature_schema_owner;
 
-INSERT INTO feature.feature_route_geometries
-    (feature_id, kind, geom, public_ready)
-SELECT feature_id, kind, geom, public_ready
-  FROM feature.feature_routes;
-
--- **무손실을 바이트로 증명한다.** 행 수 일치도 `ST_Equals`(위상 동등)도 증명이
--- 아니다 — 이 설계는 `geom_digest`를 통해 **바이트**에 걸려 있다. 구 컬럼을
--- 드롭하기 **전에** 증명해야 되돌릴 수 있다.
-DO $migrate$
+-- **이 revision은 route를 이어 나르지 않는다.** 대신 **비어 있기를 요구한다.**
+--
+-- 소유자 결정(2026-09-19): *"마이그레이션 하지말고 db재설계후 다시데이터 로드해.
+-- 지금데이터는 무의미함."* provider 적재분은 전부 재생성 가능하고, 등산로는 봉인
+-- 천장 때문에 **한 번도 성공한 적이 없어** 남길 것도 없다(둘레길 26건이 전부다).
+--
+-- 그러면 왜 여기서 지우지 않는가. 마이그레이션이 데이터를 조용히 지우는 것은
+-- 되돌릴 수 없고, `feature_routes`만 지우면 `feature.features`의 route 행이 subtype
+-- 없이 남아 **다른 깨진 상태**가 된다. 지우는 것은 DB를 다시 세우는 절차의 일이고,
+-- 이 revision의 일은 **그 절차를 건너뛴 것을 알아차리는 것**이다.
+--
+-- 새 설치(300 → 312)는 0행이라 그대로 지나간다.
+DO $require_empty$
 DECLARE
-    v_mismatched bigint;
-    v_orphaned bigint;
+    v_rows bigint;
 BEGIN
-    SELECT count(*) INTO v_mismatched
-      FROM feature.feature_routes AS r
-      JOIN feature.feature_route_geometries AS g ON g.feature_id = r.feature_id
-     WHERE NOT x_extension.ST_OrderingEquals(r.geom, g.geom);
-    IF v_mismatched > 0 THEN
+    SELECT count(*) INTO v_rows FROM feature.feature_routes;
+    IF v_rows > 0 THEN
         RAISE EXCEPTION
-            '312: geometry 이전이 무손실이 아니다 — %건이 바이트 단위로 다르다',
-            v_mismatched;
-    END IF;
-
-    SELECT count(*) INTO v_orphaned
-      FROM feature.feature_routes AS r
-      LEFT JOIN feature.feature_route_geometries AS g ON g.feature_id = r.feature_id
-     WHERE g.feature_id IS NULL;
-    IF v_orphaned > 0 THEN
-        RAISE EXCEPTION '312: geometry 행이 없는 route가 %건 남았다', v_orphaned;
+            '312: feature_routes에 %행이 남아 있다. 이 revision은 route geometry를 '
+            '이어 나르지 않는다 — DB를 다시 세우고 provider에서 재적재한 뒤 올릴 것.',
+            v_rows;
     END IF;
 END
-$migrate$;
+$require_empty$;
 
 ALTER TABLE feature.feature_route_geometries
     ADD CONSTRAINT pk_feature_route_geometries PRIMARY KEY (feature_id);
