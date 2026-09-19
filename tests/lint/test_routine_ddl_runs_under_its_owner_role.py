@@ -375,7 +375,14 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
                 role = set_role.group(1)
                 continue
             for grant in _GRANT_EXECUTE.finditer(expanded):
-                granted.add((grant.group(1), grant.group(2)))
+                # **그 부여가 가능한 부여여야 한다.** EXECUTE를 줄 수 있는 것은
+                # 함수의 소유자뿐이다. 이 조건이 없으면, 소유자가 아닌 창에서 낸
+                # (그래서 42501로 죽을) GRANT를 검사가 곧이곧대로 믿고 뒤따르는
+                # `CREATE TRIGGER`에 초록을 준다 — 2026-09-20 돌연변이 실험이 그
+                # 구멍을 드러냈다. `DO` 블록 안의 GRANT는 `_PRIVILEGE` 검사의 눈에
+                # 띄지 않으므로(문장이 `DO $...$`로 시작한다) 여기서 함께 본다.
+                if role is not None and role == owners.get(grant.group(1)):
+                    granted.add((grant.group(1), grant.group(2)))
             trigger = _TRIGGER.match(head)
             if trigger is None:
                 continue
