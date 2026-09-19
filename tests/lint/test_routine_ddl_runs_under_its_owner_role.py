@@ -83,6 +83,19 @@ _TRANSFER = re.compile(
     r"ALTER\s+(?:FUNCTION|PROCEDURE)\s+([a-z_]+\.[a-z_0-9]+)\s*\(.*?\)\s*OWNER TO ([a-z_]+)",
     re.IGNORECASE | re.DOTALL,
 )
+#: `CREATE TRIGGER ... EXECUTE FUNCTION f()` — 생성 시점에 `f`의 EXECUTE가 필요하다.
+_TRIGGER = re.compile(
+    r"^CREATE\s+(?:OR\s+REPLACE\s+)?(?:CONSTRAINT\s+)?TRIGGER\s+[a-z_0-9]+"
+    r".*?EXECUTE\s+(?:FUNCTION|PROCEDURE)\s+([a-z_]+\.[a-z_0-9]+)\s*\(",
+    re.IGNORECASE | re.DOTALL,
+)
+#: `GRANT EXECUTE ON FUNCTION f(...) TO role` — `DO` 블록 안의 문자열 이어붙이기도 본다.
+_GRANT_EXECUTE = re.compile(
+    r"GRANT\s+EXECUTE\s+ON\s+(?:FUNCTION|PROCEDURE)\s+([a-z_]+\.[a-z_0-9]+)"
+    r"\s*\([^)]*\)\s*TO\s+([a-z_]+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
 _HEAD_OWNER = re.compile(
     r"^ALTER (?:FUNCTION|PROCEDURE) ([a-z_]+\.[a-z_0-9]+)\(.*?\) OWNER TO ([a-z_]+);$",
     re.MULTILINE | re.DOTALL,
@@ -101,6 +114,17 @@ def _sql_head(statement: str) -> str:
         if stripped and not stripped.startswith("--"):
             return "\n".join(lines[index:]).strip()
     return ""
+
+
+def _sql_text(statement: str) -> str:
+    """plpgsql `EXECUTE '...' '...'`의 문자열 이어붙이기를 편다.
+
+    조건부 GRANT는 `DO` 블록 안에서 두 문자열로 쪼개져 오므로, 그대로는 하나의
+    `GRANT EXECUTE ... TO role`로 읽히지 않는다. 따옴표 사이의 공백·줄바꿈만
+    제거해 **한 문장으로 보이게** 만든다.
+    """
+
+    return re.sub(r"'\s*'", "", statement)
 
 
 def _head_owners() -> dict[str, str]:
@@ -294,4 +318,68 @@ def test_the_routine_stage_ends_on_the_schema_owner() -> None:
         "재생성·뷰 재생성이 그 롤로 돌게 되고, 그건 이 마이그레이션이 의도한 적 없는 "
         f"소유권을 만든다. 마지막 사이드카가 `SET ROLE {_SCHEMA_OWNER}`로 창을 "
         "닫는지 보라."
+    )
+
+
+def test_trigger_creation_can_execute_its_trigger_function() -> None:
+    """`CREATE TRIGGER`는 **생성 시점에** 트리거 함수의 EXECUTE를 요구한다.
+
+    갓 만든 DB에서는 이것이 보이지 않는다. 함수의 ACL이 기본값이라
+    (`pg_proc.proacl IS NULL`) PUBLIC이 EXECUTE를 갖고 아무 롤이나 통과하기
+    때문이다. 그래서 통합 스위트도 fresh 300 경로도 초록을 준다.
+
+    런타임 권한 조정기는 `REVOKE ALL ON FUNCTION ... FROM PUBLIC`을 낸다.
+    **조정기가 한 번이라도 돈 DB**(운영·격리 live)는 ACL이 명시 목록으로 굳어
+    PUBLIC 경로가 사라지고, 거기서는 같은 문장이 `42501`로 죽는다.
+
+    2026-09-20에 312가 그렇게 막혔다 — 통합 1,173건이 전부 초록인 채로. live
+    스택에 올려 보고서야 드러났다. 이 검사가 그 자리를 문장열에서 미리 본다.
+
+    통과 조건은 둘 중 하나다:
+
+    - 트리거를 만드는 롤이 그 함수의 **소유자**이거나,
+    - 같은 마이그레이션이 그 앞에서 **그 롤에게 EXECUTE를 부여**했거나.
+    """
+
+    owners = _head_owners()
+    wrong: list[str] = []
+    seen = 0
+
+    for name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
+        role: str | None = None
+        granted: set[tuple[str, str]] = set()
+        for statement in statements:
+            expanded = _sql_text(statement)
+            head = _sql_head(expanded)
+            if (set_role := _SET_ROLE.match(head)) is not None:
+                role = set_role.group(1)
+                continue
+            for grant in _GRANT_EXECUTE.finditer(expanded):
+                granted.add((grant.group(1), grant.group(2)))
+            trigger = _TRIGGER.match(head)
+            if trigger is None:
+                continue
+            seen += 1
+            routine = trigger.group(1)
+            owner = owners.get(routine)
+            if owner is None:
+                continue
+            effective = role if role is not None else _LOGIN_ROLE
+            if effective == owner or (routine, effective) in granted:
+                continue
+            wrong.append(
+                f"{name}: CREATE TRIGGER가 {routine}을 {effective}로 부는데 "
+                f"소유자는 {owner}이고 EXECUTE 부여도 없다"
+            )
+
+    assert seen >= 1, (
+        "`CREATE TRIGGER ... EXECUTE FUNCTION`을 한 건도 찾지 못했다 — "
+        "정규식이 낡았으면 이 검사는 항진명제가 된다."
+    )
+    assert not wrong, (
+        "트리거를 만드는 롤이 그 트리거 함수를 실행할 수 없다: "
+        + " / ".join(wrong)
+        + " — 갓 만든 DB는 함수 ACL이 기본값이라 통과하지만, 런타임 권한 조정기가 "
+        "PUBLIC의 EXECUTE를 걷어낸 DB(운영)에서는 `42501`로 죽는다. 함수 소유자 "
+        "창에서 만들거나, 그 창에서 EXECUTE를 빌리고 되돌려 놓을 것."
     )
