@@ -382,9 +382,18 @@ async def test_streaming_drop_metadata_keeps_total_beyond_id_sample(
     context = _Context(run_id="run-drop")
     client = _Client()
 
+    # **살아남는 row를 함께 넣는 이유.** 이 검사의 주제는 drop metadata의 계수와
+    # 표본이지 소실 판정이 아니다. 그런데 `_dataset_loss_drop_ratio` 하한이 생긴
+    # 뒤로는 '받은 것의 절반 넘게 버리는' 입력이 적재 전에 죽는다 — 원래 fixture는
+    # 전량 탈락이라 그 하한에 걸렸다. 버려지는 쪽은 그대로 두고 분모만 키운다.
+
     async def _batches() -> Any:
         for index in range(3):
-            yield [_bundle(f"feature-{index}")]
+            yield [
+                _bundle(f"feature-{index}"),
+                _bundle(f"kept-{index}-a"),
+                _bundle(f"kept-{index}-b"),
+            ]
 
     monkeypatch.setattr(
         "kortravelmap.dagster.etl.validate_feature_bundles_address",
@@ -425,9 +434,24 @@ async def test_streaming_drop_counts_rows_but_samples_unique_ids(
     context = _Context(run_id="run-drop-duplicates")
     client = _Client()
 
+    # **살아남는 row를 함께 넣는 이유.** 이 검사의 주제는 drop metadata의 계수와
+    # 표본이지 소실 판정이 아니다. 그런데 `_dataset_loss_drop_ratio` 하한이 생긴
+    # 뒤로는 '받은 것의 절반 넘게 버리는' 입력이 적재 전에 죽는다 — 원래 fixture는
+    # 전량 탈락이라 그 하한에 걸렸다. 버려지는 쪽은 그대로 두고 분모만 키운다.
+
     async def _batches() -> Any:
-        yield [_bundle("feature-dup"), _bundle("feature-dup")]
-        yield [_bundle("feature-dup"), _bundle("feature-other")]
+        yield [
+            _bundle("feature-dup"),
+            _bundle("feature-dup"),
+            _bundle("kept-a"),
+            _bundle("kept-b"),
+        ]
+        yield [
+            _bundle("feature-dup"),
+            _bundle("feature-other"),
+            _bundle("kept-c"),
+            _bundle("kept-d"),
+        ]
 
     monkeypatch.setattr(
         "kortravelmap.dagster.etl.validate_feature_bundles_address",
@@ -799,7 +823,17 @@ async def test_load_drop_mode_quarantines_error_rows(
 async def test_load_drop_mode_counts_rows_but_samples_unique_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    bundles = [_bundle("feature-dup"), _bundle("feature-dup")]
+    # **살아남는 row를 함께 넣는 이유.** 이 검사의 주제는 drop metadata의 계수와
+    # 표본이지 소실 판정이 아니다. 그런데 `_dataset_loss_drop_ratio` 하한이 생긴
+    # 뒤로는 '받은 것의 절반 넘게 버리는' 입력이 적재 전에 죽는다 — 원래 fixture는
+    # 전량 탈락이라 그 하한에 걸렸다. 버려지는 쪽은 그대로 두고 분모만 키운다.
+    bundles = [
+        _bundle("feature-dup"),
+        _bundle("feature-dup"),
+        _bundle("kept-a"),
+        _bundle("kept-b"),
+        _bundle("kept-c"),
+    ]
     context = _Context()
     client = _Client()
     monkeypatch.setattr(
