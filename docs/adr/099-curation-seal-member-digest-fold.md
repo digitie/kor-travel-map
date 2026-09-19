@@ -189,6 +189,16 @@ member 정의가 바뀌어 탐지 범위 변화를 함께 논증해야 하고, �
   (`tests/integration/test_seal_fold_has_no_size_ceiling.py`).
 - 2단계 이후 `to_jsonb(route)`는 43 kB에서 약 633 B로 줄고, 그만큼
   `candidate_input_hash` 계산 입력과 admin 후보 목록 응답이 함께 줄어든다.
+- **override field-path 레지스트리는 이번에 못 옮긴다.** `'route.geom'` 행은
+  `feature_routes.geom`을 계속 가리킨다 — `ops.feature_override_field_paths`의 전
+  행이 `alembic/baseline/application-seed.sql`로 **rev 300에 봉인**돼 있고 배포 허가
+  사슬 셋이 그 해시를 게이트로 쓰기 때문이다. 마이그레이션이 이 행을 고치면 fresh
+  300 배포가 `seed receipt does not match baseline`으로 멎는다(2026-09-20 실측).
+  봉인을 다시 뜨려면 살아 있는 0236 컨테이너가 필요한데 막혀 있다. catalog 쪽은
+  `_sealed_destination_catalog`가 "head 너머에서는 봉인값이 기대값이 아니다"로 이미
+  풀었고, seed 쪽에 같은 처리를 더하는 것은 `T-VN-SEED-RECEIPT-HEADAWARE`다.
+  그 간극은 `tests/integration/test_override_field_paths_point_at_real_columns.py`가
+  **예외가 아니라 단언으로** 못 박는다 — 봉인이 풀리면 그 검사가 먼저 빨개진다.
 - **봉인 공식 세대(`input_set_formula`)는 2에 둔다.** 312가 route arm의 member
   정의를 바꾸지만(geometry가 `to_jsonb(route)`에서 빠지고 `geom_digest`가 들어온다),
   312는 `feature_routes`가 비어 있기를 **요구**하므로 세대 2로 발급된 구 route arm

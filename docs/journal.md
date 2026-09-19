@@ -44,6 +44,23 @@
 `GEOMETRY_RELATIONS`/`EXTERNAL_GEOMETRY_KINDS`가 단일 정본이고, 검사·관측·권한·
 파라미터가 거기서 나온다. 다음 이사(area)는 dict 값 하나를 바꾸는 일이어야 한다.
 
+### 고치려다 배포 허가 사슬에 부딪힌 것 하나
+
+override field-path 레지스트리를 새 relation으로 옮겼더니 `application_300_fresh_*`
+두 건이 **결정적으로** 깨졌다 — `fresh finalize seed receipt does not match
+baseline`. `ops.feature_override_field_paths`의 전 행이 rev 300 seed 영수증으로
+봉인돼 있고 배포 허가 사슬 셋이 그 해시를 게이트로 쓴다. `target_relation`은 그
+해시에 들어가는 컬럼이다.
+
+catalog 쪽은 `_sealed_destination_catalog`가 같은 문제를 이미 겪고 "head 너머에서는
+봉인값이 기대값이 아니다"로 풀어 두었는데, seed 쪽에는 그 처리가 없다. 봉인을 다시
+뜨려면 살아 있는 0236 컨테이너가 필요하고 그건 막혀 있다.
+
+`minor` 발견 하나 때문에 배포 허가 사슬을 재설계하는 것은 맞바꿈이 나쁘다. 되돌리고
+`T-VN-SEED-RECEIPT-HEADAWARE`로 등록했다. 다만 간극을 **예외 목록이 아니라 단언으로**
+못 박았다 — 봉인이 풀려 레지스트리를 옮길 수 있게 되면 그 검사가 먼저 빨개진다.
+예외는 조용히 늘어나지만 단언은 조용히 늘어나지 않는다.
+
 ### 검사도 같은 병을 앓고 있었다
 
 역할 창 lint 셋이 전부 `_migration("309")`에 결박돼 312의 창 넷을 한 문장도 보지

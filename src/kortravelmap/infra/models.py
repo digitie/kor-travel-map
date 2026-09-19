@@ -3922,13 +3922,8 @@ class FeatureOverrideFieldPathRow(Base):
             name=conv("ck_feature_override_field_paths_kind"),
         ),
         CheckConstraint(
-            # ADR-099 2단계가 `feature_route_geometries`를 더했다 — `route.geom`이
-            # 앉는 자리가 그리로 옮겨갔기 때문이다. **순서는 DB가 렌더하는 순서와
-            # 같아야 한다**: `test_fresh_300_upgrade_is_metadata_clean`이 CHECK
-            # 표현식을 문자열로 대조하므로, 자리만 옳고 순서가 다르면 drift로 잡힌다.
             "target_relation IN ('features','feature_places','feature_events',"
-            "'feature_notices','feature_routes','feature_route_geometries',"
-            "'feature_areas')",
+            "'feature_notices','feature_routes','feature_areas')",
             name=conv("ck_feature_override_field_paths_relation"),
         ),
         CheckConstraint(
