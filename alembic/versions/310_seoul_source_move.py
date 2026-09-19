@@ -142,14 +142,17 @@ _RECEIPT_HEAD_WIDEN: Final[str] = (
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     _RECEIPT_HEAD_WIDEN,
-    "RESET ROLE",
 )
 
 
 def upgrade() -> None:
+    # `SET ROLE`을 먼저 열고 **UPDATE까지 그 안에서** 한다. `feature.curated_sources`의
+    # 소유자가 `ktm_feature_schema_owner`이고, migrator 롤에 그 표의 UPDATE 권한이
+    # 있다고 가정하지 않는다 — 이 저장소의 롤은 전부 `rolinherit=false`다.
     for statement in _UPGRADE_STATEMENTS:
         op.execute(statement)
     _apply(url=_NEW_URL, cycle="monthly", row_count=_NEW_ROW_COUNT, note=_NEW_NOTE)
+    op.execute("RESET ROLE")
 
 
 _RECEIPT_HEAD_NARROW: Final[str] = (
@@ -167,6 +170,7 @@ _RECEIPT_HEAD_NARROW: Final[str] = (
 def downgrade() -> None:
     # 되돌리면 **죽은 URL과 뒤집힌 문장이 돌아온다.** 그것이 맞다 — downgrade는
     # 이전 상태를 복원하는 것이지 더 나은 상태를 만드는 것이 아니다.
+    op.execute("SET ROLE ktm_feature_schema_owner")
+    op.execute(_RECEIPT_HEAD_NARROW)
     _apply(url=_OLD_URL, cycle="one_time", row_count=_OLD_ROW_COUNT, note=_OLD_NOTE)
-    for statement in ("SET ROLE ktm_feature_schema_owner", _RECEIPT_HEAD_NARROW, "RESET ROLE"):
-        op.execute(statement)
+    op.execute("RESET ROLE")
