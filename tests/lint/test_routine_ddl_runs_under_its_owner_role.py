@@ -37,6 +37,16 @@ PostgreSQL이 요구하는 것은 셋으로 갈린다:
 
 소유자는 `alembic/head-schema.sql`이 갖는다. 마이그레이션 자신이 적어 둔 `OWNER TO`를
 정본으로 삼으면 그 값이 틀렸을 때 검사도 같이 틀린다.
+
+다만 head 소유자는 **문장열이 끝난 뒤의** 상태다. 한 마이그레이션 안에서 루틴이
+만들어지고 소유자가 옮겨 가는 구간에서는 그 시점의 소유자를 따라가야 한다 —
+`CREATE`는 만든 롤을, `ALTER ... OWNER TO`는 지정한 롤을 소유자로 만든다.
+
+## 어떤 revision을 보는가
+
+`_UPGRADE_STATEMENTS`를 가진 **전부**다. 2026-09-19까지 세 검사가 모두
+`_migration("309")`에 결박돼 있었고, 312가 더한 역할 창 넷을 한 문장도 보지 않았다.
+검사가 대상을 번호로 고르면, 새 대상이 생겨도 검사는 자라지 않는다.
 """
 
 from __future__ import annotations
@@ -52,6 +62,10 @@ _HEAD_SCHEMA = _ROOT / "alembic" / "head-schema.sql"
 
 #: 마이그레이션이 문장열을 시작하는 롤. `_UPGRADE_STATEMENTS`의 첫 문장이다.
 _SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
+
+#: 아직 `SET ROLE`을 하지 않은 구간의 실행 주체. 실제 이름은 배포마다 다르고
+#: 관리 DSN의 로그인 롤이다 — 이름이 아니라 "어떤 소유자와도 같지 않다"가 요점이다.
+_LOGIN_ROLE: Final[str] = "(login role)"
 
 _SET_ROLE = re.compile(r"^SET\s+ROLE\s+([a-z_]+)\s*;?\s*$", re.IGNORECASE)
 _ROUTINE = r"([a-z_]+\.[a-z_0-9]+)\s*\("
@@ -154,17 +168,48 @@ def test_the_scan_sees_more_than_one_migration_and_many_statements() -> None:
 
 
 def test_ownership_requiring_ddl_runs_under_the_owner_role() -> None:
-    """`DROP`·`CREATE OR REPLACE`·`GRANT`/`REVOKE`는 소유자 롤 창 안에 있어야 한다."""
-    owners = _head_owners()
-    role = _SCHEMA_OWNER
+    """`DROP`·`CREATE OR REPLACE`·`GRANT`/`REVOKE`는 소유자 롤 창 안에 있어야 한다.
+
+    ## 소유자는 문장열 위에서 **움직인다**
+
+    head 소유자와 곧바로 대조하면 멀쩡한 마이그레이션을 빨갛게 만든다. 실제
+    PostgreSQL이 보는 것은 **그 문장 시점의** 소유자다:
+
+    - 새 `CREATE`는 **만든 롤을 소유자로 만든다.** 302가 `ops`에 프로시저를
+      스키마 소유자로 만들고 곧바로 `REVOKE`/`GRANT`를 내는 것은 정당하다 —
+      그 순간 소유자가 스키마 소유자이기 때문이다. head 소유자는 그 뒤의
+      `OWNER TO`가 만든 **나중 상태**다.
+    - `ALTER ... OWNER TO`는 그 자리에서 소유자를 옮긴다.
+
+    ## `SET ROLE` 이전은 판정하지 않는다
+
+    마이그레이션은 관리 DSN의 로그인 롤로 시작한다. 304처럼 `SET ROLE`을 한 번도
+    하지 않는 revision은 처음부터 끝까지 그 롤로 돌고, 그 롤은 소유자 검사를
+    지난다. 판정을 시작하는 시점은 마이그레이션이 **스스로 창을 좁힌** 첫
+    `SET ROLE`이다.
+
+    2026-09-20에 이 검사를 309 결박에서 전 revision으로 넓히면서 위 둘을 함께
+    옮겼다. 넓히기만 하고 모델을 그대로 두면 302·304가 거짓 양성으로 올라온다 —
+    그리고 거짓 양성은 다음 사람이 검사를 좁히게 만든다.
+    """
+
+    head_owners = _head_owners()
     wrong: list[str] = []
 
     for name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
-        role = _SCHEMA_OWNER
+        role: str | None = None
+        owner_now: dict[str, str] = {}
         for statement in statements:
             head = _sql_head(statement)
             if (set_role := _SET_ROLE.match(head)) is not None:
                 role = set_role.group(1)
+                continue
+            if (created := _CREATE.match(head)) is not None and role is not None:
+                owner_now[created.group(1)] = role
+            for transfer in _TRANSFER.finditer(statement):
+                owner_now[transfer.group(1)] = transfer.group(2)
+            if role is None:
+                # 아직 로그인(관리) 롤이다 — 소유자 검사를 지난다.
                 continue
             for pattern, operation in (
                 (_DROP, "DROP"),
@@ -175,9 +220,8 @@ def test_ownership_requiring_ddl_runs_under_the_owner_role() -> None:
                 if match is None:
                     continue
                 routine = match.group(1)
-                owner = owners.get(routine)
-                # head에 없으면 이 마이그레이션이 만든 루틴이다 — 만든 롤이 소유자이고,
-                # 그 일관성은 아래 `..._transfers_ownership...`가 따로 본다.
+                owner = owner_now.get(routine, head_owners.get(routine))
+                # 이 마이그레이션이 만들지도 않았고 head에도 없으면 관측 대상이 아니다.
                 if owner is not None and role != owner:
                     wrong.append(
                         f"{name}: {operation} {routine}: {role}로 도는데 소유자는 {owner}"
@@ -195,12 +239,14 @@ def test_ownership_requiring_ddl_runs_under_the_owner_role() -> None:
 def test_routines_created_by_another_role_transfer_ownership_back() -> None:
     """스키마 소유자로 만든 루틴은 반드시 head 소유자에게 넘겨야 한다."""
     owners = _head_owners()
-    role = _SCHEMA_OWNER
     created_by: dict[str, str] = {}
     transferred: dict[str, str] = {}
 
     for _name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
-        role = _SCHEMA_OWNER
+        # `SET ROLE` 이전은 관리 DSN의 로그인 롤이다. 그 롤이 만들면 소유자가
+        # 로그인 롤이 되므로 head 소유자와 **반드시** 다르고, 이전이 필수다 —
+        # 그래서 스키마 소유자로 가정하지 않고 구별되는 이름을 쓴다.
+        role = _LOGIN_ROLE
         for statement in statements:
             head = _sql_head(statement)
             if (set_role := _SET_ROLE.match(head)) is not None:
