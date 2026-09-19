@@ -6,7 +6,7 @@ import pickle
 from collections import Counter
 from dataclasses import dataclass, replace
 from tempfile import TemporaryFile
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final, NoReturn
 
 from kortravelmap.client import AddressValidationFinding
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
@@ -193,6 +193,117 @@ def _normalize_address_validation_mode(value: bool | str) -> str:
     return mode
 
 
+#: 이 비율을 넘게 버리면 **적재가 아니라 소실**로 본다.
+#:
+#: 왜 하한이 필요한가. drop 모드는 error가 난 row만 빼고 나머지를 적재한다. 그 설계는
+#: "대부분 멀쩡한데 몇 개가 나쁘다"를 전제로 하는데, 전제가 깨진 것을 **아무도 세지
+#: 않았다.** 2026-09-19 prod 실측: `krforest_landslide_forecast_issues`가 상류에서
+#: 10,467건을 받아 **10,467건 전부**를 `missing_address`로 버렸고, notice feature는
+#: 0건이 됐는데 job은 SUCCESS로 끝났다. error-severity 위반 10,467건이
+#: `ops.data_integrity_violations`에 `open`으로 쌓여 있었지만 아무도 읽지 않았다.
+#: 기록만으로는 부족하다 — 소실은 run을 **멈춰 세워야** 한다.
+#:
+#: **이 값은 측정값이 아니라 의미의 경계다.** 버린 것이 남긴 것보다 많으면 그 실행은
+#: 데이터셋을 적재한 것이 아니다. 다만 측정과 얼마나 떨어져 있는지는 적어 둔다 —
+#: 같은 날 실측에서 landslide를 뺀 모든 dataset의 error-severity 탈락률은 **0%**였고,
+#: landslide도 주소 단서를 살리면 1.5%(위치 단서가 정말 없는 156/10,562)다.
+#: 즉 이 하한은 정상값의 33배 위에 있다.
+_DATASET_LOSS_DROP_RATIO: Final[float] = 0.5
+
+
+async def _fail_before_load(
+    context: AssetExecutionContext,
+    client: AsyncKorTravelMapClient,
+    *,
+    validation: FeatureAddressValidationSummary,
+    provider: str,
+    dataset_key: str,
+    source_identities: Mapping[str, tuple[str, str]],
+    description: str,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> NoReturn:
+    """적재 **전에** 죽되, 죽기 전에 증거를 durable하게 남긴다.
+
+    T-VN-H30A: 여기서 죽는 run이 바로 증거가 가장 필요한 run이다. 적재가 없으므로
+    FK 대상도 없다 — 전부 unlinked로 남기고 id는 payload로만 나른다.
+
+    strict 모드와 적재율 하한이 **같은 경로**를 쓴다. 따로 두면 나중에 생긴 쪽이
+    기록을 빠뜨린 채 던지기 쉽고, 그 결과는 "왜 죽었는지 모르는 빨간 run"이다.
+    """
+
+    failed_findings = _address_validation_findings(
+        validation,
+        provider=provider,
+        dataset_key=dataset_key,
+        loaded_feature_ids=frozenset(),
+        dropped_feature_ids=frozenset(
+            issue.feature_id
+            for issue in validation.issues
+            if issue.severity == "error"
+        ),
+        source_identities=source_identities,
+    )
+    failure_metadata = dict(validation.as_metadata())
+    if extra_metadata:
+        failure_metadata.update(extra_metadata)
+    try:
+        sync = await _strict_failure_finding_client(
+            context, client
+        ).record_address_validation_findings(
+            failed_findings,
+            provider=provider,
+            dataset_key=dataset_key,
+            run_id=_dagster_run_id(context),
+        )
+    except IntegrityFindingPersistenceError as exc:
+        failure_metadata.update(
+            {
+                "address_validation_findings_observed": exc.observed_count,
+                "address_validation_findings_unique": exc.unique_count,
+                "address_validation_findings_upserted": 0,
+                "address_validation_findings_unrecorded": exc.unique_count,
+            }
+        )
+        _add_output_metadata(context, failure_metadata)
+        raise Failure(
+            description="Feature 주소/좌표 검증 finding durable 기록 실패",
+            metadata=failure_metadata,
+        ) from None
+    failure_metadata.update(
+        {
+            "address_validation_findings_observed": sync.observed_count,
+            "address_validation_findings_unique": sync.unique_count,
+            "address_validation_findings_upserted": sync.upserted_count,
+        }
+    )
+    if sync.unrecorded_count:
+        failure_metadata["address_validation_findings_unrecorded"] = (
+            sync.unrecorded_count
+        )
+        _add_output_metadata(context, failure_metadata)
+        raise Failure(
+            description="Feature 주소/좌표 검증 finding durable 기록 불완전",
+            metadata=failure_metadata,
+        )
+    _add_output_metadata(context, failure_metadata)
+    raise Failure(description=description, metadata=failure_metadata)
+
+
+def _dataset_loss_metadata(*, dropped: int, observed: int) -> dict[str, Any]:
+    return {
+        "dataset_loss_dropped": dropped,
+        "dataset_loss_observed": observed,
+        "dataset_loss_ratio": round(dropped / observed, 4) if observed else 0.0,
+        "dataset_loss_ratio_limit": _DATASET_LOSS_DROP_RATIO,
+    }
+
+
+def _dataset_was_lost(*, dropped: int, observed: int) -> bool:
+    """이 실행이 dataset을 적재한 것이 아니라 **잃은** 것인가."""
+
+    return observed > 0 and dropped / observed > _DATASET_LOSS_DROP_RATIO
+
+
 async def load_feature_bundles_for_dagster(
     *,
     context: AssetExecutionContext,
@@ -227,68 +338,17 @@ async def load_feature_bundles_for_dagster(
     # strict는 이름 그대로 모든 error에서 run을 중단한다. 영구 손실을 제한하는
     # DROPPABLE_ISSUE_CODES allowlist는 drop 모드에만 적용한다.
     if mode == "strict" and validation.has_errors:
-        # T-VN-H30A: **던지기 전에** 기록한다. strict는 배포 기본값이고, 여기서 죽는 run이
-        # 바로 증거가 가장 필요한 run이다. 적재가 없으므로 FK 대상도 없다 — 전부 unlinked로
-        # 남기고 id는 payload로만 나른다.
-        failed_findings = _address_validation_findings(
-            validation,
-            provider=provider,
-            dataset_key=dataset_key,
-            loaded_feature_ids=frozenset(),
-            dropped_feature_ids=frozenset(
-                issue.feature_id
-                for issue in validation.issues
-                if issue.severity == "error"
-            ),
-            source_identities=source_identities,
-        )
-        failure_metadata = dict(validation.as_metadata())
-        try:
-            sync = await _strict_failure_finding_client(
-                context, client
-            ).record_address_validation_findings(
-                failed_findings,
-                provider=provider,
-                dataset_key=dataset_key,
-                run_id=_dagster_run_id(context),
-            )
-        except IntegrityFindingPersistenceError as exc:
-            failure_metadata.update(
-                {
-                    "address_validation_findings_observed": exc.observed_count,
-                    "address_validation_findings_unique": exc.unique_count,
-                    "address_validation_findings_upserted": 0,
-                    "address_validation_findings_unrecorded": exc.unique_count,
-                }
-            )
-            _add_output_metadata(context, failure_metadata)
-            raise Failure(
-                description="Feature 주소/좌표 검증 finding durable 기록 실패",
-                metadata=failure_metadata,
-            ) from None
-        failure_metadata.update(
-            {
-                "address_validation_findings_observed": sync.observed_count,
-                "address_validation_findings_unique": sync.unique_count,
-                "address_validation_findings_upserted": sync.upserted_count,
-            }
-        )
-        if sync.unrecorded_count:
-            failure_metadata["address_validation_findings_unrecorded"] = (
-                sync.unrecorded_count
-            )
-            _add_output_metadata(context, failure_metadata)
-            raise Failure(
-                description="Feature 주소/좌표 검증 finding durable 기록 불완전",
-                metadata=failure_metadata,
-            )
-        _add_output_metadata(context, failure_metadata)
         codes = ", ".join(
             issue.code for issue in validation.issues if issue.severity == "error"
         )
-        raise Failure(
+        await _fail_before_load(
+            context,
+            client,
+            validation=validation,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_identities=source_identities,
             description=f"Feature 주소/좌표 검증 실패: {codes}",
-            metadata=failure_metadata,
         )
 
     dropped_feature_count = 0
@@ -320,6 +380,29 @@ async def load_feature_bundles_for_dagster(
         dropped_feature_ids_truncated = (
             len(sorted_dropped_feature_ids) > len(dropped_feature_ids)
         )
+        # 적재 **전에** 센다. 이 하한이 터지면 아무것도 적재하지 않는다 —
+        # dataset의 절반 넘게 버린 실행을 성공으로 남기면, 남은 조각이 그 dataset의
+        # 전부인 것처럼 보이고 그 상태가 다음 snapshot의 기준이 된다.
+        if _dataset_was_lost(
+            dropped=dropped_feature_count, observed=source_observations
+        ):
+            await _fail_before_load(
+                context,
+                client,
+                validation=validation,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_identities=source_identities,
+                description=(
+                    f"{dataset_key}: 상류 {source_observations}건 중 "
+                    f"{dropped_feature_count}건을 주소/좌표 검증에서 버렸다 — "
+                    "적재가 아니라 소실이다. provider payload가 바뀌었는지, "
+                    "변환이 위치 단서를 잃었는지 확인할 것."
+                ),
+                extra_metadata=_dataset_loss_metadata(
+                    dropped=dropped_feature_count, observed=source_observations
+                ),
+            )
 
     if load_all is not None:
         load = await load_all(bundles)
@@ -512,6 +595,7 @@ async def load_feature_bundle_batches_for_dagster(
     dropped_feature_count = 0
     dropped_feature_ids_truncated = False
     strict_failure = False
+    dataset_lost = False
     sync_observed = 0
     sync_unique = 0
     sync_upserted = 0
@@ -524,6 +608,7 @@ async def load_feature_bundle_batches_for_dagster(
         async def _validated_batches() -> AsyncIterator[Sequence[FeatureBundle]]:
             nonlocal dropped_feature_count, dropped_feature_ids_truncated
             nonlocal loaded_feature_count, strict_failure, validation
+            nonlocal dataset_lost
             async for raw_batch in batches:
                 batch = list(raw_batch)
                 batch_validation = validate_feature_bundles_address(batch)
@@ -593,11 +678,31 @@ async def load_feature_bundle_batches_for_dagster(
                 if findings:
                     pickle.dump(tuple(findings), finding_spool)
                 yield batch
+            # batch를 다 흘린 **뒤**, 그러나 loader가 commit하기 **전**이다. 여기서
+            # 던져야 transaction이 열린 채로 되감긴다 — `load_all`이 돌아온 뒤에
+            # 세면 이미 commit된 소실을 뒤늦게 신고하는 꼴이 된다.
+            if _dataset_was_lost(
+                dropped=dropped_feature_count, observed=validation.total
+            ):
+                dataset_lost = True
+                raise Failure(
+                    description=(
+                        f"{dataset_key}: 상류 {validation.total}건 중 "
+                        f"{dropped_feature_count}건을 주소/좌표 검증에서 버렸다 — "
+                        "적재가 아니라 소실이다."
+                    ),
+                    metadata={
+                        **validation.as_metadata(),
+                        **_dataset_loss_metadata(
+                            dropped=dropped_feature_count, observed=validation.total
+                        ),
+                    },
+                )
 
         try:
             load = await load_all(_validated_batches())
         except Failure:
-            if strict_failure:
+            if strict_failure or dataset_lost:
                 finding_spool.seek(0)
                 while findings := _load_finding_chunk(finding_spool):
                     await _strict_failure_finding_client(
