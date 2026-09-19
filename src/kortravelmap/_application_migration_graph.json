@@ -63,6 +63,12 @@
         "309_t39_feature_id_rekey"
       ],
       "revision": "310_seoul_source_move"
+    },
+    {
+      "down_revision": [
+        "310_seoul_source_move"
+      ],
+      "revision": "311_seal_member_digest"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -1,5 +1,71 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-19 (4) — 등산로가 한 번도 성공한 적 없는 이유를 찾았다. 봉인에 크기 천장이 있다
+
+**다음 한 작업: ADR-099 2단계 — route geometry를 PostGIS 보조 relation으로 분리.**
+1단계(`311_seal_member_digest`, fold를 행별 digest로)는 이 PR에서 닫았다.
+
+`feature_route_krforest_mountain_trails_job`이 **4시간18분** 지오코딩을 마치고
+적재/봉인에서 죽었다.
+
+```
+asyncpg.ProgramLimitExceededError:
+  total size of jsonb array elements exceeds the maximum of 268435455 bytes
+```
+
+`feature.current_provider_curation_input_set`이 causal seal을 만들 때 **데이터셋
+전 행의 feature detail을 하나의 `jsonb_agg` 배열로 모아** 그 text를 sha256한다.
+route는 `to_jsonb(route)`라서 geometry가 통째로 들어간다.
+
+**적재는 같은 트랜잭션 안에서 봉인보다 먼저** 일어난다. 그래서 57,060행을 넣고 →
+봉인에서 죽고 → **통째로 롤백**한다. `provider_sync.source_entities`의
+`mountain_trail_segment`가 0행인 이유가 이것이다 — 이 job은 **한 번도 성공한 적이
+없다.** 재시도는 같은 자리에서 죽으며 매번 4시간을 다시 쓴다. 2차 시도는 종료시켰다.
+
+**실측 — geometry가 payload의 98.5%다** (기존 둘레길 26행 기준).
+
+| | route당 | 57,060건 환산 |
+|---|---:|---:|
+| 현재(geom 포함) | 43 kB | **2.45 GB** ❌ |
+| geom 제외 | 633 B | 36 MB ✅ |
+
+현재 천장은 대략 **43 kB 기준 6,200 route**다. 둘레길 26건은 안전하다.
+
+**그런데 geometry만의 문제가 아니다.** `feature.feature_places`는 평균 **323 B**인데
+(prod 34,422행 실측) MOIS 980,970행이면 **302 MB**로 geometry 없이도 한계를 넘는다.
+즉 geometry를 어디로 옮기든 **fold 자체가 O(행수 × 행당 payload)인 것**이 근본이다.
+
+**소유자 지시**: *"등산로는 postgis 형태로 별도의 보조테이블에 저장"*,
+*"등산로와 같은 건 route 에 저장"*. 즉 route 정체성은 유지하고 geometry 저장소만
+분리한다. 설계는 ADR-099로 진행 중이다(다음 ADR 후보 번호 확인함).
+
+**설계에 확정된 제약(실측).**
+
+- 보조 테이블 PK는 `feature_id` **1:1**이다 — `forest_trails_to_bundles`가 item
+  하나당 bundle 하나를 만들어 57,060 세그먼트 = 57,060 route feature다. 1:N은
+  `ktm_feature_runtime`에 **의도적으로 없는** subtype DELETE 권한을 새로 요구한다.
+- **area도 같은 구조**다(`MULTIPOLYGON NOT NULL` + 동일한 부분 GiST). 지금 0행이고
+  생산자(KNPS 국립공원 경계)는 비활성 목록에도 없이 그냥 실행된 적이 없다 —
+  적재되는 순간 같은 사고가 난다.
+- 봉인은 기록이 아니라 **게이트**다. 불일치 시 child는 23514, root는 `stale_input`.
+  그리고 한 사이클에 **최소 세 번** 호출되며 그중 `finalize_provider_curation_root`는
+  **적재와 다른 트랜잭션**이다 — 적재 쪽만 고치면 finalize에서 같은 자리에서 죽는다.
+- ADR-086/`0087_route_area_subtypes`가 geometry를 subtype에 넣은 이유는 성능이 아니라
+  **불변식**이다: "geometry가 필수인 kind와 없어야 하는 kind가 술어가 아니라 테이블
+  구조로 갈린다". 보조 테이블은 그 불변식을 다시 연다 — 대체 fence가 설계의 중심이다.
+  (admin 주석의 "0086"은 ADR 번호이고 revision은 `0087`이다.)
+- 보조 테이블은 `feature_routes`가 아니라 **`feature.features`에 직접 FK**를 걸어야
+  한다. purge 증거 포획이 `confrelid='feature.features'` 한 단계만 훑으므로, 2단
+  CASCADE로 지워지면 복구점에 안 남는다.
+- provider 경로의 geometry 변경은 geometry를 빼도 계속 감지된다 —
+  `krforest.py`가 `geometry_wkt`를 `raw_payload_hash`에 넣고 그 해시가 봉인 배열에
+  이미 있다. 다만 **직접 `SET geom` 경로가 셋 실재**한다
+  (`_309_{apply_provider_feature_field_patch,author_feature_field_overrides,revoke_feature_field_overrides}.sql`).
+- API/OpenAPI는 걸리지 않는다 — route geometry는 GeoJSON(`include_geometry`)으로만
+  나가고 저장 표현은 노출되지 않는다.
+- **배포 창이 지금 깨끗하다**: snapshot receipt 5건, 진행 중 curation root **0건**.
+  봉인 해시 정의를 바꿔도 `stale_input`으로 빠질 in-flight root가 없다.
+
 ## 2026-09-19 (3) — 산사태 0행의 이유를 확정했다. 다음은 대량 역지오코딩이다
 
 **다음 한 작업: 대량 역지오코딩이 일시적 실패 한 번에 전체를 버리는 것을 고칠 것.**
