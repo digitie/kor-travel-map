@@ -6,6 +6,11 @@ telemetry:
 python_logs:
   managed_python_loggers:
     - kortravelmap.dagster.provider_fetchers
+    # geo 경계 계수(왕복 수 · endpoint별 실패)를 같은 통로로 내보낸다. 이것이
+    # 빠지면 계수는 컨테이너 stdout에만 남고 Dagster event stream에는 안 보인다 —
+    # 2026-09-19의 증상이 정확히 "이벤트 0건"이었으므로, 배선이 빠지면 계측 자체가
+    # 무효다. `tests/lint/test_geo_call_stats_reach_the_event_stream.py`가 결박한다.
+    - kortravelmap.dagster.resources
   python_log_level: WARNING
 
 # **로컬 쓰기는 전부 `/opt/dagster/state`로 간다.** `DAGSTER_HOME`은 설정 전용이고

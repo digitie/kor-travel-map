@@ -44,6 +44,7 @@ ADR 참조
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -171,6 +172,8 @@ __all__ = [
     "reverse_response_to_address",
     "geocode_response_to_address",
     "geocode_response_to_coordinate",
+    # 경계 계측
+    "GeoCallStats",
     # REST client + 콜러블 팩토리
     "KorTravelGeoRestClient",
     "kor_travel_geo_reverse_geocoder",
@@ -928,6 +931,70 @@ def _regions_within_radius_response_to_address(
 # -- kor-travel-geo REST 클라이언트 -----------------------------------------------
 
 
+@dataclass
+class GeoCallStats:
+    """geo 경계를 **몇 번 넘었는지**를 endpoint별로 센다.
+
+    **왜 endpoint별인가.** dagster의 reverse geocoder는
+    ``region_fallback_radius_km=0.1``로 결선돼 있어서, 첫 ``/v2/reverse``가 법정동코드를
+    못 채우면 같은 좌표로 ``/v2/regions/within-radius``를 **한 번 더** 친다
+    (:meth:`_KorTravelGeoObservedReverseGeocoder.observe`). 즉 행 하나가 왕복 1회일
+    수도 2회일 수도 있는데, **그 수가 오늘 어디에도 없다** — 이 저장소에도, geo
+    저장소의 벤치마크에도 없다. 합계만 세면 "느린 것이 reverse인가 fallback인가"를
+    영원히 못 가른다.
+
+    그 질문이 실무를 가른다. 2026-09-19에 산악 등산로 적재가 3시간 넘게 이벤트 없이
+    돌았는데, 산악 centroid는 도로명주소 후보가 없어 fallback이 거의 전량에 걸릴
+    것으로 **추정**될 뿐 측정된 적이 없다. 추정 위에 동시성이나 재시도 수치를 얹으면
+    분모가 틀린 채로 정확한 분자를 계산하게 된다.
+
+    **이 클래스는 아무것도 바꾸지 않는다.** 세기만 한다. 재시도도, 차단도, 지연도
+    없다 — 그 결정들의 분모를 먼저 만드는 것이 목적이다.
+
+    수명은 주입한 쪽이 갖는다(resource 하나 = 카운터 하나). 모듈 전역에 두지 않는
+    이유는 ADR-030(라이브러리 in-memory 캐시 금지)과 같은 것이다 — 프로세스 수명
+    상태를 라이브러리가 소유하면 누가 언제 리셋하는지가 사라진다.
+    """
+
+    calls: Counter[str] = field(default_factory=Counter)
+    """endpoint별 **시도** 수. 성공·실패를 모두 센다."""
+
+    failures: Counter[str] = field(default_factory=Counter)
+    """endpoint별 **전송 실패** 수(``calls``의 부분집합)."""
+
+    def record(self, endpoint: str, *, failed: bool) -> None:
+        self.calls[endpoint] += 1
+        if failed:
+            self.failures[endpoint] += 1
+
+    @property
+    def total_calls(self) -> int:
+        return sum(self.calls.values())
+
+    def as_metadata(self) -> dict[str, int]:
+        """Dagster metadata/로그에 실을 평평한 계수."""
+
+        metadata = {f"geo_calls_{name}": count for name, count in self.calls.items()}
+        metadata.update(
+            {f"geo_failures_{name}": count for name, count in self.failures.items()}
+        )
+        metadata["geo_calls_total"] = self.total_calls
+        metadata["geo_failures_total"] = sum(self.failures.values())
+        return metadata
+
+    def summary(self) -> str:
+        """한 줄 요약. **0건도 말한다** — 침묵과 0을 구별할 수 있어야 한다."""
+
+        if not self.calls:
+            return "geo 경계 호출 0건"
+        parts = [
+            f"{name}={self.calls[name]}"
+            + (f"(실패 {self.failures[name]})" if self.failures[name] else "")
+            for name in sorted(self.calls)
+        ]
+        return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts)
+
+
 class KorTravelGeoRestClient:
     """kor-travel-geo REST API v2 (``POST /v2/{reverse,geocode}``) 비동기 클라이언트.
 
@@ -945,6 +1012,7 @@ class KorTravelGeoRestClient:
         base_path: str = "/v2",
         api_key: SecretStr | None = None,
         require_auth: bool = True,
+        stats: GeoCallStats | None = None,
     ) -> None:
         """backend-to-backend public API key 인증을 생성 시점에 검증한다.
 
@@ -957,8 +1025,17 @@ class KorTravelGeoRestClient:
         self._http = http_client
         self._base = base_path.rstrip("/")
         self._api_key = api_key
+        # 기본값 None = **현행 동작과 같다.** 계측을 켜는 것은 주입한 쪽의 결정이고,
+        # 그래야 호출자 여덟 곳 중 어느 것도 우연히 달라지지 않는다.
+        self._stats = stats
         if require_auth:
             self.preflight()
+
+    def _endpoint(self, path: str) -> str:
+        """계수 키. ``/v2/regions/within-radius`` → ``regions_within_radius``."""
+
+        suffix = path[len(self._base) :] if path.startswith(self._base) else path
+        return suffix.strip("/").replace("/", "_").replace("-", "_") or "root"
 
     def preflight(self) -> None:
         """geo public API key **결선**을 확인한다 (형태만).
@@ -1050,6 +1127,11 @@ class KorTravelGeoRestClient:
             sanitized = GeoRequestError(
                 f"kor-travel-geo transport 실패: {type(exc).__name__}"
             )
+        # **던지기 전에 센다.** 실패한 왕복도 왕복이고, 실패한 run이야말로 그 수가
+        # 가장 필요한 run이다. except 블록 **밖**이므로 키가 든 원본 예외의
+        # ``__context__``가 생기지 않는다(위 주석의 계약을 그대로 지킨다).
+        if self._stats is not None:
+            self._stats.record(self._endpoint(path), failed=sanitized is not None)
         if sanitized is not None:
             raise sanitized
         assert response is not None
