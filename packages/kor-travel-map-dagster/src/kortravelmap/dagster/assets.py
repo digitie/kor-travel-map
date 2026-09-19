@@ -220,6 +220,43 @@ OPINET_PROVIDER_RUN_LOCK: Final[str] = "provider-run:python-opinet-api"
 KREX_NOTICE_SNAPSHOT_POOL: Final[str] = "krex_notice_snapshot"
 """KREX notice snapshot의 load/reconcile 순서를 직렬화하는 Dagster pool."""
 
+GEO_HEAVY_POOL: Final[str] = "kor_travel_geo"
+"""역지오코딩을 대량으로 하는 적재 asset을 인스턴스 전체에서 직렬화하는 pool.
+
+**왜 필요했나 — 원인을 두 번 쟀다.** 2026-09-19에
+`feature_place_mcst_culture_job`이 2시간54분·4회 시도 끝에
+`GeoRequestError: ReadTimeout`으로 죽었다. 처음에 나는 그것을 "geo가 느리다"로
+읽었는데 **틀렸다.** 같은 시각 geo reverse는 p50 86ms로 답했고 5시간 동안
+pool 포화 신호(503/E0500)를 한 건도 내지 않았다. 다시 잰 것은 호스트다.
+
+    /proc/pressure/io   full avg300 = 25.5%   ← 1/4 시간 동안 모든 태스크가 막힘
+    /proc/pressure/cpu  full avg300 =  0.0%   ← CPU는 병목이 아니다
+    04:05:00 최대 동시 run             8건
+
+n150은 4코어이고 단일 회전 디스크를 weather/concierge/geo/airport와 함께 쓴다 —
+이 파일이 아니라 `docker/dagster.yaml`이 그 사실을 이미 적어 두었다. 그런데
+geo를 대량으로 쓰는 asset 중 pool을 선언한 것은 **하나도 없었다.** cron은 월간
+job을 10분 간격으로 엇갈려 두었지만, 한 job이 3시간이면 그 엇갈림은 무의미하다.
+
+`docker/dagster.yaml`의 `concurrency.pools`가 `default_limit: 1`,
+`granularity: run`이므로 **이 이름을 선언하는 것만으로** 인스턴스 전역에서 한
+번에 하나만 돈다(`OPINET_API_POOL`과 같은 기제).
+
+**무엇이 여기 들어오고 무엇이 빠지는가는 유도한다.** 대상은
+`reverse_geocoder=`를 넘기는 asset 중 schedule spec에 `max_runtime_seconds`가
+**없는** 것이다 — 그 값이 있다는 것은 저장소가 그 job을 "지연되면 안 되는
+freshness 민감 job"으로 분류했다는 뜻이고, 그런 job을 몇 시간짜리 월간 적재
+뒤에 줄 세우면 시간별 수집이 그만큼 멈춘다. 그래서
+`feature_weather_airkorea_air_quality`와 `feature_weather_krex_rest_areas`는
+geo를 쓰면서도 여기 들어오지 않는다.
+`tests/lint/test_geo_heavy_assets_declare_the_pool.py`가 이 유도를 고정한다.
+
+**한계 — pool이 덮지 못하는 축.** 이것은 `@asset` 데코레이터에 걸린다. 큐 경로
+(`feature_update_runner`)는 asset wrapper를 **우회하고** 원본 run 함수를 직접
+부르므로 이 pool을 claim하지 않는다. 즉 예약·수동 실행만 묶인다. 큐 경로에는
+별도로 `provider_rate_gate`가 있다.
+"""
+
 KREX_NOTICE_PROVIDER_RUN_LOCK: Final[str] = "provider-run:python-krex-api:krex_traffic_notices"
 """KREX notice fetch→reconcile을 모든 실행 경로에서 직렬화하는 DB lock key."""
 
@@ -359,6 +396,7 @@ async def run_feature_event_datagokr_cultural_festivals(
     group_name="features_event",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"datagokr_cultural_festivals"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_event_datagokr_cultural_festivals(
     context: AssetExecutionContext,
@@ -679,6 +717,7 @@ async def run_feature_place_krex_rest_areas(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_areas"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_krex_rest_areas(
     context: AssetExecutionContext,
@@ -1015,6 +1054,7 @@ async def run_feature_place_krheritage_items(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krheritage_items"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_krheritage_items(
     context: AssetExecutionContext,
@@ -1046,6 +1086,7 @@ async def run_feature_event_krheritage_events(
     group_name="features_event",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krheritage_events"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_event_krheritage_events(
     context: AssetExecutionContext,
@@ -1110,6 +1151,7 @@ async def run_feature_place_mois_licenses(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"mois_license_records", "mois_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_mois_licenses(
     context: AssetExecutionContext,
@@ -1147,6 +1189,7 @@ async def run_feature_place_knps_points(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"knps_point_records", "knps_point_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_knps_points(
     context: AssetExecutionContext,
@@ -1185,6 +1228,7 @@ async def run_feature_geometry_knps_records(
     required_resource_keys=_COMMON_RESOURCE_KEYS
     | {"knps_geometry_records", "knps_geometry_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_geometry_knps_records(
     context: AssetExecutionContext,
@@ -1216,6 +1260,7 @@ async def run_feature_place_krforest_recreation_forests(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_recreation_forests"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_krforest_recreation_forests(
     context: AssetExecutionContext,
@@ -1249,6 +1294,7 @@ async def run_feature_place_krforest_arboretums(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_arboretums"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_krforest_arboretums(
     context: AssetExecutionContext,
@@ -1282,6 +1328,7 @@ async def run_feature_route_krforest_mountain_trails(
     group_name="features_route",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_mountain_trails"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_route_krforest_mountain_trails(
     context: AssetExecutionContext,
@@ -1315,6 +1362,7 @@ async def run_feature_route_krforest_dulle_trails(
     group_name="features_route",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_dulle_trails"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_route_krforest_dulle_trails(
     context: AssetExecutionContext,
@@ -1566,6 +1614,7 @@ async def run_feature_place_standard_museums(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_museums"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_standard_museums(
     context: AssetExecutionContext,
@@ -1597,6 +1646,7 @@ async def run_feature_place_standard_tourist_attractions(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_tourist_attractions"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_standard_tourist_attractions(
     context: AssetExecutionContext,
@@ -1630,6 +1680,7 @@ async def run_feature_place_standard_parking_lots(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_parking_lots"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_standard_parking_lots(
     context: AssetExecutionContext,
@@ -1663,6 +1714,7 @@ async def run_feature_place_standard_special_streets(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_special_streets"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_standard_special_streets(
     context: AssetExecutionContext,
@@ -1699,6 +1751,7 @@ async def run_feature_place_datagokr_file_data(
     required_resource_keys=_COMMON_RESOURCE_KEYS
     | {"datagokr_file_data_records", "datagokr_file_data_dataset_key"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_datagokr_file_data(
     context: AssetExecutionContext,
@@ -1730,6 +1783,7 @@ async def run_feature_place_khoa_beaches(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"khoa_beaches"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_khoa_beaches(
     context: AssetExecutionContext,
@@ -1761,6 +1815,7 @@ async def run_feature_place_krairport_airports(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krairport_airports"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_krairport_airports(
     context: AssetExecutionContext,
@@ -1854,6 +1909,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"kor_travel_concierge_youtube_features"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
 async def feature_place_kor_travel_concierge_youtube(
     context: AssetExecutionContext,
