@@ -34,12 +34,23 @@ _SERVICE = "TbSlibBookstoreInfo"
 
 
 class _FakeResponse:
-    def __init__(self, payload: Any, *, json_ok: bool = True) -> None:
+    """``httpx.Response`` 대역.
+
+    ``status_code``를 받는 이유는 **키 유출 경로를 실제로 지나가기 위해서다.**
+    종전 대역은 상태를 몰라 오류 응답을 흉내낼 수 없었고, 그래서 '키를 예외에
+    싣지 않는다'는 단언이 **유출될 수 없는 가지에만 걸려 있었다**(적대 리뷰 지적).
+    """
+
+    def __init__(
+        self, payload: Any, *, json_ok: bool = True, status_code: int = 200
+    ) -> None:
         self._payload = payload
         self._json_ok = json_ok
+        self.status_code = status_code
 
-    def raise_for_status(self) -> None:
-        return None
+    @property
+    def is_success(self) -> bool:
+        return 200 <= self.status_code < 300
 
     def json(self) -> Any:
         if not self._json_ok:
@@ -139,21 +150,93 @@ async def test_a_past_the_end_request_ends_the_stream_instead_of_raising() -> No
 
     실측: ``{"RESULT":{"CODE":"INFO-200","MESSAGE":"해당하는 데이터가 없습니다."}}``.
     이것을 오류로 읽으면 마지막 페이지가 딱 맞게 떨어질 때마다 run이 빨개진다.
+
+    **총계를 일부러 크게 준다.** 종전 검사는 첫 페이지에서 ``start > total``로
+    이미 끝나 두 번째 응답을 **소비하지 않았다** — 그 분기를 ``raise``로 바꿔도
+    초록이었다(적대 리뷰 지적). 요청이 실제로 두 번 나갔는지도 함께 센다.
     """
 
     with pytest.MonkeyPatch.context() as monkeypatch:
-        _install(
+        client = _install(
             monkeypatch,
             [
-                _ok(_rows(1, _SEOUL_OPEN_DATA_PAGE_SIZE), _SEOUL_OPEN_DATA_PAGE_SIZE),
+                _ok(_rows(1, _SEOUL_OPEN_DATA_PAGE_SIZE), 10**6),
                 _FakeResponse({"RESULT": {"CODE": "INFO-200"}}),
             ],
         )
         received = [row async for row in fetch_seoul_open_data_bookstores(_settings())]
 
-    # 총계와 받은 수가 같으므로 두 번째 요청 없이 끝나야 하지만, 총계를 못 믿는
-    # 날에도 INFO-200이 안전하게 멈춘다.
     assert len(received) == _SEOUL_OPEN_DATA_PAGE_SIZE
+    assert len(client.instances[0].paths) == 2
+
+
+async def test_a_first_page_with_no_rows_is_a_failure_not_an_empty_snapshot() -> None:
+    """**첫 페이지 0건은 종료가 아니라 실패다.**
+
+    이 fetcher가 흘리는 행은 ``authoritative_snapshot_complete=True``로 봉인된다.
+    조용한 0건은 그 dataset의 sync cursor를 전진시켜 **수집 실패를 신선한 성공으로
+    위장한다** — 이 PR이 MCST에서 막겠다고 한 바로 그 모양이다.
+    """
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _install(monkeypatch, [_ok([], 0)])
+        with pytest.raises(SeoulOpenDataError, match="첫 페이지가 0건"):
+            [row async for row in fetch_seoul_open_data_bookstores(_settings())]
+
+
+async def test_a_first_request_saying_no_data_is_also_a_failure() -> None:
+    """첫 요청이 ``INFO-200``이면 전량이 사라졌거나 서비스명이 바뀐 것이다."""
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _install(monkeypatch, [_FakeResponse({"RESULT": {"CODE": "INFO-200"}})])
+        with pytest.raises(SeoulOpenDataError, match="첫 요청이 INFO-200"):
+            [row async for row in fetch_seoul_open_data_bookstores(_settings())]
+
+
+async def test_a_single_row_object_is_not_read_as_zero_rows() -> None:
+    """행이 하나일 때 이 포털은 list가 아니라 object 하나를 준다.
+
+    list가 아니라고 버리면 **1건짜리 응답이 0건으로 보인다** — 위의 첫 페이지
+    가드와 합쳐지면 실패로 끝나므로 조용하지는 않지만, 애초에 틀린 판정이다.
+    """
+
+    single = _FakeResponse(
+        {
+            _SERVICE: {
+                "list_total_count": 1,
+                "RESULT": {"CODE": "INFO-000"},
+                "row": {"STORE_SEQ_NO": 7},
+            }
+        }
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _install(monkeypatch, [single])
+        received = [row async for row in fetch_seoul_open_data_bookstores(_settings())]
+
+    assert received == [{"STORE_SEQ_NO": 7}]
+
+
+async def test_an_http_error_never_carries_the_key_that_sits_in_the_path() -> None:
+    """HTTP 오류 메시지에 **인증키가 들어가면 안 된다.**
+
+    이 포털은 인증키를 경로에 받으므로 ``raise_for_status()``가 만드는
+    ``httpx.HTTPStatusError``는 키가 실린 URL 전체를 담는다. 그 메시지는 Dagster
+    step-failure 이벤트와 compute log에 영속 기록되고, 큐 경로는
+    ``raise ... from exc``로 체인까지 보존한다(적대 리뷰 지적). 형제 라이브러리
+    ``python-datagokr-api``가 같은 이유로 키를 지우고 체인을 끊는다.
+    """
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _install(monkeypatch, [_FakeResponse(None, status_code=502)])
+        with pytest.raises(SeoulOpenDataError) as excinfo:
+            [row async for row in fetch_seoul_open_data_bookstores(_settings())]
+
+    message = str(excinfo.value)
+    assert "502" in message
+    assert "seoul-key" not in message
+    assert "openapi.seoul.go.kr" not in message
+    # 체인도 끊는다 — `__cause__`에 원본 예외가 남으면 traceback으로 다시 샌다.
+    assert excinfo.value.__cause__ is None
 
 
 async def test_an_error_code_in_a_200_body_is_not_treated_as_empty() -> None:
@@ -182,6 +265,7 @@ async def test_an_xml_body_for_a_json_request_is_a_clear_failure() -> None:
             [row async for row in fetch_seoul_open_data_bookstores(_settings())]
 
     assert "seoul-key" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
 
 
 async def test_a_never_ending_feed_hits_the_page_ceiling_loudly() -> None:

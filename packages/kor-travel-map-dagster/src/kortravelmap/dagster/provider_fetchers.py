@@ -1334,6 +1334,22 @@ class SeoulOpenDataError(RuntimeError):
     """
 
 
+def _is_transient_upstream_error(exc: BaseException) -> bool:
+    """같은 run을 다시 돌리면 지나갈 수 있는 실패인가.
+
+    네트워크 계층(연결·타임아웃·읽기 오류)만 True다. HTTP 상태 오류는 제외한다 —
+    404/410처럼 원천이 사라진 응답이 그쪽으로 오고, 그것은 재시도로 나아지지
+    않는다. 5xx는 나아질 수 있지만 그 구분까지 넣으면 판정이 상류 운영 상태에
+    의존하게 되므로, **네트워크 계층만** 재시도 가능으로 본다.
+    """
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, TimeoutError | ConnectionError)
+
+
 async def fetch_seoul_open_data_bookstores(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -1369,7 +1385,7 @@ async def fetch_seoul_open_data_bookstores(
             response = await client.get(
                 f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
             )
-            response.raise_for_status()
+            _raise_seoul_status(response)
             try:
                 payload = response.json()
             except ValueError as exc:
@@ -1378,7 +1394,7 @@ async def fetch_seoul_open_data_bookstores(
                 raise SeoulOpenDataError(
                     "서울 열린데이터광장이 JSON이 아닌 응답을 줬다(인증 실패 시 "
                     f"XML로 온다): {type(exc).__name__}"
-                ) from exc
+                ) from None
             if not isinstance(payload, dict):
                 raise SeoulOpenDataError("서울 열린데이터광장 응답이 JSON object가 아니다.")
 
@@ -1386,18 +1402,27 @@ async def fetch_seoul_open_data_bookstores(
             if not isinstance(envelope, dict):
                 # 범위를 넘기면 서비스 봉투 없이 RESULT만 온다.
                 code = _seoul_result_code(payload)
-                if code == _SEOUL_NO_DATA_CODE:
-                    return
-                raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+                _stop_or_fail_seoul(code, first_page=pages == 0)
+                return
 
             code = _seoul_result_code(envelope)
-            if code == _SEOUL_NO_DATA_CODE:
-                return
             if code != _SEOUL_OK_CODE:
-                raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+                _stop_or_fail_seoul(code, first_page=pages == 0)
+                return
 
-            rows = envelope.get("row")
-            if not isinstance(rows, list) or not rows:
+            rows = _seoul_rows(envelope)
+            if not rows:
+                if pages == 0:
+                    # **첫 페이지 0건은 종료가 아니라 실패다.** 이 fetcher가 흘리는
+                    # 행은 `authoritative_snapshot_complete=True`로 봉인되므로,
+                    # 조용한 0건은 그 dataset의 sync cursor를 전진시켜 수집 실패를
+                    # 신선한 성공으로 위장한다. 저장소 공통 페이지네이터의
+                    # `first_page_end_of_pages_is_failure`와 같은 규칙이다.
+                    raise SeoulOpenDataError(
+                        "서울 책방 첫 페이지가 0건이다 — 정상 응답 코드라도 전량이 "
+                        "비었다면 수집 실패로 본다(빈 스냅샷을 권위로 봉인하면 "
+                        "수집 실패가 신선한 성공으로 보인다)."
+                    )
                 return
             for row in rows:
                 yield row
@@ -1409,6 +1434,56 @@ async def fetch_seoul_open_data_bookstores(
             # 나올 때까지 돈다(상한이 그것을 막는다).
             if isinstance(total, int) and start > total:
                 return
+
+
+def _raise_seoul_status(response: httpx.Response) -> None:
+    """HTTP 오류를 **키 없는** 예외로 바꾼다.
+
+    ``response.raise_for_status()``가 만드는 ``httpx.HTTPStatusError``의 메시지는
+    요청 URL 전체를 담는다. 이 포털은 인증키를 **경로**에 받으므로 그 메시지가
+    Dagster step-failure 이벤트와 compute log에 키를 평문으로 남긴다
+    (큐 경로는 ``raise ProviderDatasetRefreshFailure(...) from exc``로 체인까지
+    보존한다). 형제 라이브러리 ``python-datagokr-api``가 같은 이유로
+    ``copy_remove_param("serviceKey") + from None``을 쓴다 — 여기도 같은 규범을
+    따른다. 상태 코드만 싣고 체인을 끊는다.
+    """
+
+    if response.is_success:
+        return
+    raise SeoulOpenDataError(
+        f"서울 열린데이터광장이 HTTP {response.status_code}를 줬다 "
+        "(URL은 싣지 않는다 — 인증키가 경로에 있다)."
+    )
+
+
+def _stop_or_fail_seoul(code: str, *, first_page: bool) -> None:
+    """``INFO-200``은 종료, 나머지는 실패. 단 **첫 페이지 0건은 실패다.**"""
+
+    if code == _SEOUL_NO_DATA_CODE and not first_page:
+        return
+    if code == _SEOUL_NO_DATA_CODE:
+        raise SeoulOpenDataError(
+            "서울 책방 첫 요청이 INFO-200(데이터 없음)이다 — 전량이 사라졌거나 "
+            "서비스명이 바뀐 것이지 정상 종료가 아니다."
+        )
+    raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+
+
+def _seoul_rows(envelope: Mapping[str, Any]) -> list[Any]:
+    """``row``를 리스트로 정규화한다.
+
+    이 포털은 행이 하나일 때 list가 아니라 object 하나를 주는 서비스가 있다.
+    그 모양을 list가 아니라고 버리면 **1건짜리 응답이 0건으로 보인다** — 위의
+    첫 페이지 가드와 합쳐지면 실패로 끝나므로 조용하지는 않지만, 애초에 틀린
+    판정이다.
+    """
+
+    rows = envelope.get("row")
+    if isinstance(rows, Mapping):
+        return [rows]
+    if isinstance(rows, list):
+        return rows
+    return []
 
 
 def _seoul_result_code(payload: Mapping[str, Any]) -> str:
@@ -1565,7 +1640,17 @@ async def fetch_mcst_culture_records(
                     raise
                 # 조용한 skip이 아니다 — asset이 이 표식을 보고 그 dataset의
                 # 적재를 건너뛴 뒤 run을 실패로 끝낸다.
-                yield McstSlugFailure(slug=slug, reason=f"{type(exc).__name__}: {exc}")
+                #
+                # **재시도 가능 여부는 여기서 판정한다.** 예외 타입을 아는 자리가
+                # 여기뿐이다. 원천 이동·스키마 변경은 같은 run 안에서 나아지지
+                # 않지만 연결 끊김·타임아웃은 다음 시도에 지나갈 수 있다 — 이
+                # 구분이 없으면 asset이 전자의 이유로 붙인 `allow_retries=False`를
+                # 일시적 네트워크 실패에도 그대로 적용한다(적대 리뷰 지적).
+                yield McstSlugFailure(
+                    slug=slug,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    retryable=_is_transient_upstream_error(exc),
+                )
     finally:
         await client.aclose()
 

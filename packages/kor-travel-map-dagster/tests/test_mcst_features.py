@@ -252,7 +252,10 @@ def test_split_slug_markers_keeps_rows_attempts_and_first_reason() -> None:
     # 실패한 slug도 **시도한** slug다 — 그래야 asset이 그것을 실패로 보고한다.
     assert attempted == {"a", "b"}
     # 나중 것으로 덮으면 원인 추적이 한 단계 멀어진다.
-    assert failures == {"b": "첫 사유"}
+    assert set(failures) == {"b"}
+    assert failures["b"].reason == "첫 사유"
+    # 표식을 통째로 들고 있어야 asset이 재시도 가능 여부까지 볼 수 있다.
+    assert failures["b"].retryable is False
 
 
 async def test_culture_asset_rejects_unknown_slug() -> None:
@@ -887,3 +890,75 @@ async def test_culture_wrapper_rejects_a_runner_that_never_emits_completion(
 
     assert finished == []
     assert attempts == list(memberships)
+
+
+async def test_a_stream_with_no_attempt_markers_is_not_a_quiet_success() -> None:
+    """**시도 표식이 하나도 없으면 0건 적재로 초록이 된다** — 그것을 막는다.
+
+    asset은 시도하지 않은 slug를 전부 건너뛴다. 그러므로 표식이 없는 stream은
+    13개를 모두 건너뛰어 `results`도 `slug_failures`도 비고, 완료 콜백까지 불린
+    뒤 초록으로 끝난다 — 이 asset이 막으려던 "조용한 0건"의 새 입구다
+    (2026-09-19 적대 리뷰). fetcher는 slug마다 표식을 먼저 흘리므로, 표식이
+    없다는 것은 한 slug도 시작하지 못했다는 뜻이다.
+    """
+
+    completed: list[object] = []
+
+    async def _done(memberships: tuple[Any, ...]) -> None:
+        completed.extend(memberships)
+
+    with pytest.raises(Failure, match="시도 표식이 하나도 없다"):
+        await run_feature_place_mcst_culture(
+            _context([]),
+            memberships=(
+                ProviderDatasetOperationMembership(
+                    provider_dataset_id=1,
+                    sync_scope="dataset_wide",
+                    operation_key="feature_place_mcst_culture_job",
+                ),
+            ),
+            on_memberships_completed=_done,
+        )
+
+    assert completed == [], "실패했는데 완료 콜백이 불렸다"
+
+
+async def test_a_transient_failure_keeps_retries_open() -> None:
+    """일시적 네트워크 실패까지 재시도 불가로 만들지 않는다.
+
+    `allow_retries=False`의 근거는 "같은 run 안에서 나아지지 않는다"인데, 종전에는
+    **모든** 비-쿼터 예외를 같은 바구니에 넣었다. 연결 끊김 한 번이 그 달의 적재를
+    통째로 버리게 된다(2026-09-19 적대 리뷰).
+    """
+
+    records = [
+        *_attempt_all(),
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(
+            slug="children_bookstores_csv",
+            reason="ConnectError: connection reset",
+            retryable=True,
+        ),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    assert excinfo.value.allow_retries is True
+
+
+async def test_a_mixed_failure_set_closes_retries() -> None:
+    """하나라도 비재시도가 섞이면 닫는다 — 재시도해도 그 하나에서 또 죽는다."""
+
+    records = [
+        *_attempt_all(),
+        McstSlugFailure(slug="children_bookstores_csv", reason="McstParseError: 링크 없음"),
+        McstSlugFailure(
+            slug="used_bookstores_csv", reason="ReadTimeout: ", retryable=True
+        ),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    assert excinfo.value.allow_retries is False

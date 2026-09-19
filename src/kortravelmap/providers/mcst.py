@@ -316,10 +316,18 @@ class McstSlugFailure:
     **sync cursor가 전진해 수집 실패가 신선한 성공으로 보이고**, curation seal이
     관측한 적 없는 집합을 권위로 봉인한다. 실제 은퇴가 일어나는 자리는
     ``retire_absent_from_snapshot=True``인 krforest 쪽이다.
+
+    ``retryable``은 **같은 run 안에서 나아질 수 있는 종류인가**를 말한다. 원천
+    이동이나 스키마 변경은 재시도해도 같은 자리에서 또 죽지만, 연결 끊김·타임아웃은
+    다음 시도에서 지나갈 수 있다. 이 구분이 없으면 asset이 전자의 이유로 붙인
+    ``allow_retries=False``를 **일시적 네트워크 실패에도 그대로 적용한다**(적대 리뷰
+    지적). 판정은 fetcher가 예외를 보고 한다 — 표식을 만드는 자리가 유일하게
+    예외 타입을 아는 자리다.
     """
 
     slug: str
     reason: str
+    retryable: bool = False
 
 
 # ── COORDINATES 파서 ─────────────────────────────────────────────────────

@@ -136,6 +136,11 @@ export_first KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY \
   DATA_GO_KR_SERVICE_KEY DATAGOKR_API_KEY PUBLIC_DATA_SERVICE_KEY SERVICE_KEY
 export_first KOR_TRAVEL_MAP_OPINET_API_KEY \
   OPINET_API_KEY OPINET_SERVICE_KEY
+# 서울 열린데이터광장은 data.go.kr과 **다른 포털이고 키도 다르다**. 짧은 이름을
+# compose(`${...:-${SEOUL_OPEN_DATA_API_KEY:-}}`)와 문서가 정본으로 부르는데
+# 여기에 매핑이 없으면 `.env`에 짧은 이름만 둔 운영자에게는 값이 닿지 않는다.
+export_first KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY \
+  SEOUL_OPEN_DATA_API_KEY SEOUL_OPENAPI_KEY
 export_first KOR_TRAVEL_MAP_KREX_EX_API_KEY \
   KEX_GO_API_KEY KREX_API_KEY KREX_SERVICE_KEY
 export_first KOR_TRAVEL_MAP_KREX_GO_API_KEY \

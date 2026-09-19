@@ -223,24 +223,34 @@ def _seoul_full_address(raw: str | None) -> str | None:
 
 
 def _row_identifier(row: Mapping[str, Any], keys: tuple[str, ...]) -> str | None:
-    """식별자 열을 읽되 **숫자의 표기 차이를 지운다.**
+    """식별자 열을 읽되 **JSON number의 소수점 꼬리만** 지운다.
 
     서울 열린데이터광장은 ``STORE_SEQ_NO``를 JSON number로 준다 — ``2283.0``.
     그대로 문자열로 만들면 자연키가 ``"2283.0"``이 되고, 원천이 언젠가 문자열
-    ``"2283"``으로 바꾸는 순간 같은 책방이 **새 feature로 다시 생긴다.** 표기가
-    아니라 값에 결박한다.
+    ``"2283"``으로 바꾸는 순간 같은 책방이 **새 feature로 다시 생긴다.**
+
+    **문자열 값은 건드리지 않는다.** 처음에는 ``float(text)``로 판단했는데, 그러면
+    ``"0012"`` → ``"12"``, ``"2283e2"`` → ``"228300"``처럼 **다른 원천의 식별자까지
+    바꾼다**(적대 리뷰 지적). 이 헬퍼는 한글 열 ``관리번호``에도 함께 걸리므로,
+    표기 정규화가 아니라 **JSON 타입 차이만** 흡수하도록 좁힌다 — bool은 int의
+    하위형이라 먼저 걸러낸다.
     """
 
-    text = _row_text(row, keys)
-    if text is None:
-        return None
-    try:
-        number = float(text)
-    except ValueError:
-        return text
-    if number.is_integer():
-        return str(int(number))
-    return text
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            text = str(value).strip()
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))
+        elif isinstance(value, int):
+            text = str(value)
+        else:
+            text = str(value).strip()
+        if text:
+            return text
+    return None
 
 
 def _seoul_open_data_lonlat(row: Mapping[str, Any]) -> tuple[float, float] | None:

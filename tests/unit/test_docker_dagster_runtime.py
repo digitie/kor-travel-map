@@ -6106,9 +6106,50 @@ def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> Non
 #: 기준이다(프리미엄 3종이 1,500). 2026-09-14 확인 — `docs/etl/upstream-quota.md` §opinet.
 _OPINET_FREE_KEY_DAILY_CALLS: Final = 300
 
-#: `low_top_area` 경로를 하루에 도는 job 수의 최악값. price job은 매일, place job은
+#: `low_top_area` 경로를 하루에 **스케줄이** 도는 횟수. price job은 매일, place job은
 #: 매월 1일에 같은 경로를 한 번 더 돈다.
-_OPINET_WORST_DAY_RUNS: Final = 2
+_OPINET_SCHEDULED_RUNS_PER_DAY: Final = 2
+
+
+def _opinet_worst_day_runs() -> int:
+    """최악의 날 asset이 **실제로 실행되는** 횟수.
+
+    스케줄 수만 세면 안 된다 — Dagster의 step 재시도는 asset을 처음부터 다시
+    실행하고, 그 실행이 run 예산을 **전부 다시 쓴다**. 공통 정책
+    (`max_retries=3`)이면 한 job이 네 번 돌아 하루 560회가 되고, 그러면 그날의
+    나머지 job이 전부 429다(2026-09-19 적대 리뷰).
+
+    그래서 배수를 리터럴로 적지 않고 **실제 정책에서 유도한다.** 누군가 OpiNet
+    asset에 재시도를 되살리면 이 수가 함께 올라가 예산 검사가 빨개진다 — 리터럴
+    2를 따로 적어 두면 그 편집이 조용히 지나간다.
+    """
+
+    from kortravelmap.dagster.assets import (
+        OPINET_LOAD_RETRY_POLICY,
+        feature_place_opinet_stations,
+        feature_price_opinet_stations,
+    )
+
+    policies = [
+        asset_def.op.retry_policy
+        for asset_def in (feature_place_opinet_stations, feature_price_opinet_stations)
+    ]
+    # 자리(상수 선언)가 아니라 **효과**(asset에 붙은 정책)에 결박한다.
+    assert all(policy is not None for policy in policies), (
+        "OpiNet asset에서 retry policy가 사라졌다 — 그러면 Dagster 기본값이 적용돼 "
+        "이 계산이 근거를 잃는다"
+    )
+    attempts = [1 + (policy.max_retries or 0) for policy in policies if policy is not None]
+    assert len(attempts) == _OPINET_SCHEDULED_RUNS_PER_DAY, (
+        f"이 경로를 도는 asset이 {len(attempts)}개인데 하루 스케줄 수로는 "
+        f"{_OPINET_SCHEDULED_RUNS_PER_DAY}개를 세고 있다 — 둘이 어긋나면 계산이 "
+        "근거를 잃는다"
+    )
+    assert OPINET_LOAD_RETRY_POLICY.max_retries == 0, (
+        "OpiNet 전용 정책이 재시도를 허용한다 — 재시도 한 번이 run 예산을 통째로 "
+        "다시 쓴다"
+    )
+    return sum(attempts)
 
 
 def _compose_default(raw: str) -> str:
@@ -6204,7 +6245,7 @@ def test_the_opinet_call_budget_defaults_fit_the_free_key_day() -> None:
         )
         # run 예산은 lowTop10 호출 + `get_area_codes`까지 덮는 hard cap이다.
         assert low_top <= budget, f"{name}: lowTop 상한이 run 예산보다 크다"
-        worst = budget * _OPINET_WORST_DAY_RUNS
+        worst = budget * _opinet_worst_day_runs()
         assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
             f"{name}: 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
         )
@@ -6237,7 +6278,7 @@ def test_the_env_example_opinet_knobs_fit_the_free_key_day_too() -> None:
     low_top = declared.get("KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS")
     assert low_top is not None, ".env.example에 lowTop 상한 선언이 사라졌다"
     assert low_top <= budget
-    worst = budget * _OPINET_WORST_DAY_RUNS
+    worst = budget * _opinet_worst_day_runs()
     assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
         f".env.example 기준 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
     )

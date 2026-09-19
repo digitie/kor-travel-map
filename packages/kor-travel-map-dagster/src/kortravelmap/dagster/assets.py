@@ -194,6 +194,23 @@ FEATURE_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
 )
 """provider Feature load asset 공통 retry policy."""
 
+OPINET_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(max_retries=0)
+"""OpiNet asset **전용** — 재시도하지 않는다.
+
+Dagster의 step 재시도는 asset을 **처음부터 다시 실행한다.** 대부분의 provider에서는
+그것이 옳다(일시적 상류 장애를 흡수한다). 그런데 OpiNet은 run당 호출 예산
+(`opinet_run_call_budget`, 기본 140)을 **그 실행 동안 전부 다시 쓴다** — 무료키
+일일 한도가 300회인데 공통 정책(`max_retries=3`)이면 한 job이 최악의 경우 네 번
+실행되어 560회를 쓴다. 그러면 그날의 나머지 job이 전부 429다.
+
+2026-09-19 적대 리뷰가 지적한 자리다. 종전에는 prod가 `opinet_scope_mode=disabled`라
+잠복해 있었고, 이 변경이 기본 모드를 켜면서 실효가 된다.
+
+**재시도를 끄는 것이 수집을 포기하는 것은 아니다.** 이 모드는 시군 윈도를 날짜
+기준으로 회전시키므로, 실패한 run의 몫은 다음 날 run이 이어 받는다 — 즉 올바른
+재시도 주기는 60초가 아니라 **다음 스케줄**이다.
+"""
+
 OPINET_API_POOL: Final[str] = "opinet_api"
 """OpiNet 호출 asset을 인스턴스 전체에서 직렬화하는 Dagster pool."""
 
@@ -402,7 +419,7 @@ async def _run_feature_place_opinet_stations_locked(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_stations"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    retry_policy=OPINET_LOAD_RETRY_POLICY,
     pool=OPINET_API_POOL,
 )
 async def feature_place_opinet_stations(
@@ -629,7 +646,7 @@ def _aware_datetime_or_none(value: object) -> datetime | None:
     # 분리하고, 런타임 정합성은 price asset의 parent place co-load(#605)가 보장한다.
     deps=[feature_place_opinet_stations],
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_station_price_details"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    retry_policy=OPINET_LOAD_RETRY_POLICY,
     pool=OPINET_API_POOL,
 )
 async def feature_price_opinet_stations(

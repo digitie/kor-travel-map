@@ -134,14 +134,15 @@ OpiNet 공개 API에는 전국/지역 단위 전체 주유소 bulk endpoint가 �
 
 시군 윈도 로테이션 (staleness 근본 수정):
 
-- `lowTop10` 호출 상한(기본 180 = 시군 60개 윈도/run)이 전국 ~230 시군을 한 run에
+- `lowTop10` 호출 상한(기본 90 = 제품 3종 기준 시군 30개 윈도/run)이 전국 ~230 시군을 한 run에
   다 덮지 못하는데, 이전에는 시군 목록 앞쪽 윈도만 매일 소비해 **같은 ~60개 시군의
   top-20 저가 주유소만 갱신**됐다 — 한 번 dataset에 들어온 뒤 윈도/top-20 밖으로
   밀린 주유소는 영구 stale(prod 실측: price feature 37%가 3–7일 stale, 일간 동일
-  주유소 겹침 93%, 사용 호출 ~198/1,500).
+  주유소 겹침 93%, 당시 사용 호출 ~198). **그때의 분모 1,500은 틀렸다** — 무료키
+  일일 한도는 일반 API 19종 기준 **300회**다(2026-09-14 확인, `docs/etl/upstream-quota.md` §opinet).
 - 이제 run 날짜(KST) 기반 결정적 offset(`_opinet_rotation_offset`, `toordinal() ×
   윈도 크기`)으로 시군 목록을 회전시켜 매일 윈도 크기만큼 전진한다 → 전국 1주기
-  ≈ ceil(230/60) = **4일**, 호출량은 그대로(~198/run). round-robin 인접 시군은 서로
+  ≈ ceil(230/30) = **8일**, 호출량은 run 예산 140 안이다. round-robin 인접 시군은 서로
   다른 시도라 윈도 안 지리 분포 공정성도 유지된다.
 - 이 4일은 **시군 조회 윈도**의 1주기이지, 저장된 모든 주유소 가격의 갱신 보장이
   아니다. `lowTop10`의 유종별 top-20 밖으로 밀린 기존 주유소는 다시 응답될 때까지
@@ -181,8 +182,9 @@ OpiNet 쿼터 가드(#545):
   backoff일 뿐 요청 pacing이 아니다. 따라서 현재 보호선은 **동시 run 직렬화 + run당
   hard budget + 서버 `OpinetRateLimitError` 즉시 run 실패**다. provider에 실제 limiter가
   추가되기 전까지 token bucket이 있다고 가정하지 않는다.
-- 일일 1,500회 — `low_top_area` fetcher가 run당 hard call budget
-  (`KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`, 기본 600, 최대 700,
+- 일일 **300회**(무료키, 일반 API 19종 — 1,500은 유료 프리미엄 3종이다. 2026-09-14 확인) —
+  `low_top_area` fetcher가 run당 hard call budget
+  (`KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`, 기본 140, 최대 150,
   `get_area_codes`+`lowTop10`+
   `aroundAll` 합산)을 적용한다. 서버가 먼저 `OpinetRateLimitError`를 던지면 일부 record를
   이미 받았어도 run을 실패시켜 sync 성공으로 오인하지 않는다. 가격 적재는 일 1회로
@@ -195,11 +197,18 @@ OpiNet 쿼터 가드(#545):
   `latest_observed_at`, `today_values_count`를 기록한다. `today_values_count`는 asset의
   `fetched_at`과 각 `PriceValue.observed_at`을 모두 KST 날짜로 바꿔 계산하므로, run 성공과
   별개로 실제 당일 유가가 들어왔는지 운영에서 판별할 수 있다.
-- 운영 노브: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 180)는 반드시 run budget에서
+- 운영 노브: `KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS`(기본 90)는 반드시 run budget에서
   시도 코드 조회 호출량을 뺀 범위 안에서만 늘린다. 무료키 한도에 대한 안전 여유를 지키기
-  위해 `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`은 최대 700으로 검증하며, place/price가 같은
-  날 각각 한 번 실행돼도 합계 1,400회 이하가 된다. 기본값은 `max_calls=180`,
-  `run_call_budget=600`이다.
+  위해 `KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET`은 최대 150으로 검증하며, place/price가 같은
+  날(매월 1일) 각각 한 번 실행돼도 합계 **280회 ≤ 300회**가 된다. 기본값은
+  `max_calls=90`, `run_call_budget=140`이다.
+
+  이 숫자들은 세 자리에 함께 있다 — `KorTravelMapSettings` 기본값·`le`,
+  두 저장소의 compose 기본값, 그리고 `.env.example`. 어느 하나만 고치면 나머지가
+  그것을 덮는다(2026-09-19: 한도를 300으로 정정한 뒤에도 `.env.example`에 1,500
+  시절의 180/600이 남아 있었다). `tests/unit/test_docker_dagster_runtime.py`의
+  `test_the_opinet_call_budget_defaults_fit_the_free_key_day`가 compose와
+  `.env.example` 양쪽을 최악의 날 기준으로 센다.
 
 ### 8.3 가격 시계열만 갱신 (일 1회)
 
