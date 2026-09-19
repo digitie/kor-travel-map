@@ -216,12 +216,14 @@ async def run_feature_place_mcst_culture(
         # 위로 올려 별도 경로를 탄다). 재시도하면 성공한 12개를 다시
         # 적재하고 같은 자리에서 또 죽는다.
         loaded_keys = [result.dataset_key for result in results]
-        # **하나라도 재시도 가능하면 재시도를 열어 둔다.** 원천 이동·스키마 변경은
-        # 같은 run 안에서 나아지지 않지만, 연결 끊김·타임아웃은 지나갈 수 있다 —
-        # 모든 실패를 같은 바구니에 넣고 재시도를 끄면 일시적 장애 한 번이 그
-        # 달의 적재를 통째로 버린다(적대 리뷰 지적). 판정은 fetcher가 예외 타입을
-        # 보고 표식에 실어 둔다.
-        retryable = any(failure.retryable for failure in slug_failures.values())
+        # **전부 재시도 가능할 때만 재시도를 연다.** 연결 끊김·타임아웃은 다음
+        # 시도에 지나갈 수 있지만, 원천 이동·스키마 변경이 하나라도 섞여 있으면
+        # 재시도는 성공한 것들을 다시 적재한 뒤 같은 자리에서 또 죽는다.
+        #
+        # 종전에는 **모든** 비-쿼터 예외를 같은 바구니에 넣어 재시도를 껐다 —
+        # 일시적 장애 한 번이 그 달의 적재를 통째로 버렸다(적대 리뷰 지적).
+        # 판정은 fetcher가 예외 타입을 보고 표식에 실어 둔다.
+        retryable = all(failure.retryable for failure in slug_failures.values())
         reasons = {slug: failure.reason for slug, failure in slug_failures.items()}
         raise Failure(
             description=(

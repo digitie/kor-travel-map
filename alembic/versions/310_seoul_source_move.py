@@ -47,6 +47,7 @@ import logging
 from typing import Final
 
 import sqlalchemy as sa
+
 from alembic import op
 
 #: **32자 이하여야 한다** — `public.alembic_version.version_num`이 `varchar(32)`다.

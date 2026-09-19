@@ -5,6 +5,46 @@
 
 ## [Unreleased]
 
+### 적대 리뷰 반영 — 키 유출·빈 문자열 가드·항진명제 검사 (2026-09-19)
+
+- **FIXED (인증키 유출)**: 서울 열린데이터광장은 인증키를 URL **경로**에 받는데
+  `response.raise_for_status()`가 만드는 `httpx.HTTPStatusError` 메시지가 URL
+  전체를 담아 Dagster step-failure 이벤트·compute log에 평문으로 남았다. 상태
+  코드만 싣는 `SeoulOpenDataError`로 바꾸고 `from None`으로 체인을 끊는다
+  (형제 `python-datagokr-api`가 같은 이유로 쓰는 규범).
+- **FIXED (빈 문자열이 credential 가드를 무력화)**: compose가 자격증명을
+  `${X:-}`로 배선해 변수가 **항상 정의되고 값이 빈 문자열**이라, 모든 provider
+  fetcher의 `if secret is None` 가드가 배포 형상에서 한 번도 발화하지 않았다.
+  `SettingsConfigDict(env_ignore_empty=True)`.
+- **CHANGED (OpiNet 재시도)**: OpiNet asset 전용 `RetryPolicy(max_retries=0)`.
+  step 재시도는 asset을 처음부터 다시 실행하고 그 실행이 run 호출 예산을 **전부
+  다시 쓴다** — 공통 정책(`max_retries=3`)이면 하루 최악 560회로 무료키 300회를
+  넘는다. 이 모드는 시군 윈도를 날짜로 회전시키므로 올바른 재시도 주기는 60초가
+  아니라 다음 스케줄이다.
+- **FIXED (조용한 0건 둘)**: 서울 fetcher의 첫 페이지 0건·첫 요청 `INFO-200`이
+  정상 종료였다(authoritative 적재라 sync cursor가 전진해 수집 실패가 신선한
+  성공으로 보인다). MCST는 시도 표식이 하나도 없는 stream이 0건 적재로 초록이
+  됐다. 둘 다 실패다. 행이 하나일 때 `row`가 단일 object로 오는 모양도 정규화한다.
+- **FIXED (`allow_retries`)**: `McstSlugFailure.retryable`을 fetcher가 예외
+  타입으로 판정하고, 실패가 **전부 비재시도일 때만** 재시도를 닫는다. 종전에는
+  연결 끊김 한 번이 그 달의 적재를 통째로 버렸다.
+- **FIXED (`_row_identifier`)**: `float()` 정규화가 한글 열 `관리번호`에도 걸려
+  `"0012"` → `"12"`, `"2283e2"` → `"228300"`로 자연키를 바꿨다. JSON number
+  타입일 때만 소수점 꼬리를 지운다.
+- **FIXED (항진명제 검사 셋)**: 좌표 축 검사(`_validated_lonlat`의 bbox 자동
+  스왑이 되돌려 줬다) · INFO-200 종료 검사(두 번째 요청을 보내지 않았다) ·
+  키 유출 검사(테스트 대역의 `raise_for_status`가 무조건 `None`이었다).
+- **FIXED (페이지 사전 경고)**: `page_no != 1` 가드 때문에 총계를 두 번째
+  페이지에서 주는 provider에서는 영영 뜨지 않았다. `_DECLARED_PAGE_SLACK`의
+  docstring이 새 상수 삽입으로 고아가 된 것도 되돌린다.
+- **ADDED (alembic 310)**: `feature.curated_sources`의 서울 책방 행이 죽은
+  data.go.kr URL, `row_count=555`, 그리고 **뜻이 뒤집힌** freshness_note를 들고
+  있었다(옮겨 간 바로 그 포털을 "종료"라고 말한다). admin UI와 공개 curation
+  API가 읽는 값이다. seed는 봉인된 baseline이라 조정기 쪽을 고친다.
+- **ADDED (`scripts/load-env.sh`)**: 서울 키의 짧은 이름(`SEOUL_OPEN_DATA_API_KEY`)
+  매핑. compose와 문서가 그 이름을 정본으로 부르는데 아는 자리가 compose 보간
+  한 군데뿐이었다.
+
 ### 서울 책방 원천 이전 · provider 핀 상향 · OpiNet 적재 기본 ON (2026-09-19)
 
 - **CHANGED (provider 핀)**: `python-krforest-api@70814c9`(표준데이터 gateway가

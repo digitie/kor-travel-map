@@ -24,7 +24,16 @@
 활용신청은 키가 아니라 **데이터셋 단위**다. 신청이 끝나면
 `DISABLED_FEATURE_LOAD_SCHEDULES`에서 그 이름을 빼는 것으로 되살아난다.
 
-**별건으로 남긴 것.** 산사태 예보발령 증분 수집. 이 asset은
+**별건으로 남긴 것 (1).** MCST 부분 실패 run에서 **적재에 성공한 dataset의
+membership이 완료 처리되지 않는다.** `raise Failure`가 완료 콜백보다 앞에 있고,
+콜백 계약(`received_memberships != memberships` → RuntimeError)과 wrapper의
+`len(result.results) != len(completed_memberships)` 단언이 부분 완료를 거부한다.
+증거 원장과 DB 상태가 어긋나지만 (a) 큐 경로에는 도달하지 않고(scope당 slug 1개
+— multi-member run은 수동 launch나 schedule일 때만 생긴다), (b) 이번 변경의
+회귀가 아니다(종전에는 실패 하나가 13개를 전멸시켰다). 고치려면 두 결박을 함께
+풀어야 한다 — 2026-09-19 적대 리뷰가 확정했다.
+
+**별건으로 남긴 것 (2).** 산사태 예보발령 증분 수집. 이 asset은
 `load_authoritative_notice_snapshot`으로 `active_lineage_keys` 전체를 대조하므로,
 부분 수집으로 바꾸면 화해 계약부터 다시 설계해야 한다. 지금은 상한 40장(실측 10,562행
 대비 약 4배)과 사전 경고로 버틴다.
