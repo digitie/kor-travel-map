@@ -59,6 +59,7 @@ from kortravelmap.infra import (
     merge_repo,
 )
 from kortravelmap.infra.feature_subtype import (
+    GEOMETRY_RELATIONS,
     SUBTYPE_TABLES,
     subtype_params,
     subtype_upsert_sql,
@@ -69,8 +70,6 @@ from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
-
-from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
 
 pytestmark = pytest.mark.integration
 

@@ -17,9 +17,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from tests.integration._feature_ids import feature_uuid
-
 from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
+from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
