@@ -99,6 +99,62 @@ geometry가 route payload의 **98.5%**인 것은 맞다. 그러나 place는 geom
 되돌아간다. 되돌리기 비싼 절반을 뒤에 두는 것이 옳다. 그리고 1단계만으로
 등산로 적재가 풀리므로, 2단계는 크기 압박이 아니라 **자기 근거**로 판단할 수 있다.
 
+### 4. 2단계(rev 312): route geometry는 `feature.feature_route_geometries`로 간다
+
+`feature.feature_routes`에서 `geom`만 떼어 전용 relation에 둔다. route 정체성은
+`feature_routes`에 그대로 남는다 — 소유자 지시 *"등산로와 같은 건 route 에 저장"*이
+가리키는 것이 그것이다.
+
+**근거는 크기 압박이 아니다.** 그것은 1단계가 이미 닫았다. route 1건의
+`to_jsonb(route)` 평균 43 kB 중 **98.5%가 geometry**이고, `to_jsonb(route)`를 읽는
+곳은 봉인 말고도 둘 더 있다 — 하나는 그 43 kB를
+`feature.theme_feature_candidates.match_evidence`에 **영구 저장**하고, 하나는 admin
+후보 목록 API 응답에 **페이지당 N×43 kB**로 내보낸다. 행을 좁히면 그 둘이 함께 줄어든다.
+
+**ADR-086의 불변식은 대체 fence로 보존한다.** `0087_route_area_subtypes`가 geometry를
+subtype으로 옮긴 이유는 성능이 아니라 "geometry가 필수인 kind와 없어야 하는 kind가
+술어가 아니라 **테이블 구조로** 갈린다"였다. 보조 relation은 "geometry 없는 route"를
+다시 표현 가능하게 만들므로, `feature_routes.feature_id`에 보조 relation을 가리키는
+**DEFERRABLE INITIALLY DEFERRED** FK를 건다. 한 트랜잭션 안에서는 삽입 순서가 자유롭고
+COMMIT에서 `23503`으로 판정된다 — feature purge가 CASCADE로 두 표를 지울 때 중간
+상태가 잠시 위반이 되므로 즉시 검사는 쓸 수 없다.
+
+**FK는 `feature_routes`가 아니라 `feature.features`를 직접 가리킨다.** purge 증거
+포획(`_309_purge_manual_feature.sql`)이 `confrelid = 'feature.features'::regclass`
+**한 단계만** 훑기 때문이다. `feature_routes`에 매달면 2단 CASCADE로 지워지되
+`ops.manual_feature_purge_records.captured_rows`에 남지 않아 복구점이 조용히 불완전해진다.
+
+**봉인이 geometry 변경을 계속 보게 한다.** geometry가 `to_jsonb(route)`에서 빠지면
+봉인의 시야에서 사라지므로, 그 자리를 고정폭 지문 `geom_digest`로 메운다. 동기화할
+코드는 만들지 않는다 — `x_extension.digest`와 `x_extension.ST_AsEWKB`가 둘 다
+IMMUTABLE임을 `pg_proc.provolatile = 'i'`로 실측했으므로
+`GENERATED ALWAYS AS ... STORED`가 성립한다. DB가 유지하니 트리거도, 이중 해시 식도,
+직접 `UPDATE ... SET geom` 경로의 누락도 없다.
+
+**`public_ready`는 복제한다.** 공개 bbox 후보 술어가 `WHERE public_ready` partial
+GiST를 **조인 없이** 타는 것이 ADR-086 결정 5의 핵심 성질이다(뷰의 geom을 술어에
+쓰면 Hash Left Join 2단으로 퇴화함을 그 ADR이 EXPLAIN으로 실측했다). 그 성질을
+보존하려면 술어 컬럼이 geometry와 **같은 행**에 있어야 한다. 값은 기존 트리거 둘이
+그대로 채운다 — `derive_subtype_public_ready`(BEFORE INSERT OR UPDATE)와
+`sync_subtype_public_ready`(core 3축 변경 시). **BEFORE 트리거가 특히 중요하다.**
+provider가 넣는 feature는 DTO 기본값이 active/published/valid라 core 3축을 바꾸는
+UPDATE가 일어나지 않고, 그래서 AFTER UPDATE 트리거만으로는 `public_ready`가 영원히
+false로 남아 route가 **오류 없이** 공개 bbox에서 0건이 된다.
+
+### 5. 2단계는 데이터를 이어 나르지 않는다 — 비어 있기를 **요구**한다
+
+소유자 결정(2026-09-19): *"마이그레이션 하지말고 db재설계후 다시데이터 로드해.
+지금데이터는 무의미함."* provider 적재분은 전부 재생성 가능하고, 등산로는 1단계 이전의
+봉인 천장 때문에 **한 번도 성공한 적이 없어** 남길 것이 없다(둘레길 26건이 전부다).
+
+그러면 왜 revision이 직접 지우지 않는가. 마이그레이션이 데이터를 조용히 지우는 것은
+되돌릴 수 없고, `feature_routes`만 지우면 `feature.features`의 route 행이 subtype 없이
+남아 **다른 깨진 상태**가 된다. 지우는 것은 DB를 다시 세우는 절차의 일이고, 이
+revision의 일은 **그 절차를 건너뛴 것을 알아차리는 것**이다 — `feature_routes`에 행이
+남아 있으면 `RAISE EXCEPTION`으로 멎는다. 새 설치(300 → 312)는 0행이라 그대로 지나간다.
+
+이 revision은 forward-only다. downgrade는 `RuntimeError`를 던진다.
+
 ## 고려한 대안
 
 **geometry만 옮기고 fold는 두기.** 기각. route는 43 kB → 712 B로 줄지만 place가
@@ -123,3 +179,12 @@ member 정의가 바뀌어 탐지 범위 변화를 함께 논증해야 하고, �
   중간 집계 길이가 같은지를 재고(`행수 × 32 B` 고정), 옛 fold가 실제로 자라는 것을
   대조군으로 함께 증명한다
   (`tests/integration/test_seal_fold_has_no_size_ceiling.py`).
+- 2단계 이후 `to_jsonb(route)`는 43 kB에서 약 633 B로 줄고, 그만큼
+  `theme_feature_candidates.match_evidence`의 영구 저장분과 admin 후보 목록 응답이
+  함께 줄어든다.
+- 2단계의 검사도 효과에 결박했다 — 카탈로그만 보지 않고 **행을 넣어**
+  `public_ready`가 실제로 켜지는지, 공개 bbox 술어가 route를 실제로 돌려주는지,
+  그 술어가 보조 relation의 partial GiST를 타는지를 본다
+  (`tests/integration/test_route_geometry_sidecar.py`). geometry를 가리키는 검사들은
+  관계 이름 리터럴 대신 적재 경로의 `GEOMETRY_RELATIONS`에서 유도하므로 다음 이사를
+  따라간다.

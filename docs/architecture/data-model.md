@@ -1036,8 +1036,34 @@ CREATE TABLE feature.feature_routes (
   -- + 공통 복합 FK 2종 (§6 도입부)
 );
 
-CREATE INDEX idx_feature_routes_geom_gist
-  ON feature.feature_routes USING GIST (geom);
+-- ADR-099 2단계(rev 312): route geometry는 이 표를 떠나 전용 relation으로 갔다.
+-- route 정체성은 여기 그대로 남고, geometry 존재는 DEFERRABLE FK가 지킨다.
+CREATE TABLE feature.feature_route_geometries (
+  feature_id   UUID NOT NULL,
+  kind         VARCHAR NOT NULL,
+  geom         x_extension.geometry(MultiLineString, 4326) NOT NULL,
+  public_ready BOOLEAN NOT NULL DEFAULT false,
+  -- 봉인이 geometry 변경을 계속 보게 하는 고정폭 지문. DB가 유지한다.
+  geom_digest  TEXT GENERATED ALWAYS AS (
+                 encode(x_extension.digest(x_extension.ST_AsEWKB(geom), 'sha256'), 'hex')
+               ) STORED,
+  CONSTRAINT pk_feature_route_geometries PRIMARY KEY (feature_id),
+  CONSTRAINT ck_feature_route_geometries_kind CHECK (kind = 'route'),
+  CONSTRAINT fk_feature_route_geometries_feature_kind
+    FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind)
+    ON DELETE CASCADE
+);
+
+-- "geometry 없는 route"를 막는 대체 fence(ADR-086 불변식 보존). purge CASCADE의
+-- 중간 상태가 잠시 위반이 되므로 즉시 검사가 아니라 COMMIT 시점 판정이다.
+ALTER TABLE feature.feature_routes
+  ADD CONSTRAINT fk_feature_routes_geometry
+  FOREIGN KEY (feature_id)
+  REFERENCES feature.feature_route_geometries(feature_id)
+  DEFERRABLE INITIALLY DEFERRED;
+
+CREATE INDEX idx_feature_route_geometries_geom_gist
+  ON feature.feature_route_geometries USING GIST (geom) WHERE public_ready;
 ```
 
 ### 6.5 `feature.feature_areas`
