@@ -1086,12 +1086,26 @@ def test_dagster_image_config_points_storage_to_postgres() -> None:
 
 @pytest.mark.unit
 def test_dagster_image_config_captures_provider_retry_warnings() -> None:
-    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+    """이 검사의 주제는 **provider 재시도 경고가 event stream에 실리는가**다.
 
-    assert config["python_logs"] == {
-        "managed_python_loggers": ["kortravelmap.dagster.provider_fetchers"],
-        "python_log_level": "WARNING",
-    }
+    `python_logs` 전체를 정확 일치로 고정하면 다른 모듈의 logger가 목록에 더해질
+    때마다 여기가 낡는다 — 바로 아래 `..._serializes_provider_pools`가 같은 이유로
+    이미 한 번 고쳐졌다("`concurrency` 전체를 정확 일치로 고정하면 `runs` 쪽이
+    바뀔 때마다 여기가 낡는다 — 실제로 이 PR 안에서 두 번 낡았다").
+
+    그래서 **주제만** 정확히 본다: 이 logger가 목록에 있고 레벨이 WARNING인가.
+    목록에 새로 들어오는 다른 logger는 그것을 필요로 하는 쪽이 자기 검사로 결박한다
+    (`tests/lint/test_geo_call_stats_reach_the_event_stream.py`가 geo 경계 계수를
+    그렇게 결박한다). 다만 `python_logs`에 **모르는 key**가 조용히 들어오는 것은
+    여전히 잡는다.
+    """
+
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+    logs = config["python_logs"]
+
+    assert set(logs) == {"managed_python_loggers", "python_log_level"}
+    assert "kortravelmap.dagster.provider_fetchers" in logs["managed_python_loggers"]
+    assert logs["python_log_level"] == "WARNING"
 
 
 @pytest.mark.unit
