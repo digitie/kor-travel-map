@@ -17219,7 +17219,7 @@ CREATE TABLE ops.feature_override_field_paths (
     CONSTRAINT ck_feature_override_field_paths_geometry_kind CHECK ((((value_kind = 'geometry'::text) AND (geometry_type IS NOT NULL)) OR ((value_kind <> 'geometry'::text) AND (geometry_type IS NULL)))),
     CONSTRAINT ck_feature_override_field_paths_geometry_type CHECK (((geometry_type IS NULL) OR (geometry_type = ANY (ARRAY['POINT'::text, 'MULTILINESTRING'::text, 'MULTIPOLYGON'::text])))),
     CONSTRAINT ck_feature_override_field_paths_kind CHECK ((feature_kind = ANY (ARRAY['*'::text, 'place'::text, 'event'::text, 'notice'::text, 'route'::text, 'area'::text]))),
-    CONSTRAINT ck_feature_override_field_paths_relation CHECK ((target_relation = ANY (ARRAY['features'::text, 'feature_places'::text, 'feature_events'::text, 'feature_notices'::text, 'feature_routes'::text, 'feature_route_geometries'::text, 'feature_areas'::text]))),
+    CONSTRAINT ck_feature_override_field_paths_relation CHECK ((target_relation = ANY (ARRAY['features'::text, 'feature_places'::text, 'feature_events'::text, 'feature_notices'::text, 'feature_routes'::text, 'feature_areas'::text]))),
     CONSTRAINT ck_feature_override_field_paths_value_kind CHECK ((value_kind = ANY (ARRAY['text'::text, 'integer'::text, 'numeric'::text, 'boolean'::text, 'json_object'::text, 'json_array'::text, 'text_array'::text, 'date'::text, 'timestamptz'::text, 'uuid'::text, 'geometry'::text])))
 );
 
