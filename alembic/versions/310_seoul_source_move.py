@@ -33,6 +33,13 @@ Revises: 309_t39_feature_id_rekey
 SERIALIZABLE + 실행자 롤을 요구해 마이그레이션 경로에서 쓸 수 없기 때문이다 —
 그래서 그 프로시저가 하는 일(값 + 두 revision + `updated_at`)을 여기서 그대로 한다.
 
+## receipt head CHECK를 함께 넓힌다
+
+``ops.application_schema_operation_receipts``의 ``destination_head`` CHECK는 **graph의
+모든 revision**을 열거한다. 현재 head만 넣으면 중간 revision으로 설치된 DB에서
+``ADD CONSTRAINT`` 자체가 실패해 배포가 도중에 멈춘다 —
+``tests/lint/test_receipt_head_check_covers_the_graph_head.py``가 그것을 센다.
+
 ## 행이 없으면 조용히 지나간다
 
 `provider_dataset_id`로 찾는다. seed 이전 상태나 dataset을 지운 환경에서는 대상이
@@ -119,11 +126,47 @@ def _apply(*, url: str, cycle: str, row_count: int, note: str) -> None:
     )
 
 
+#: receipt head CHECK 갱신. **graph의 모든 revision을 열거한다.**
+_RECEIPT_HEAD_WIDEN: Final[str] = (
+    "ALTER TABLE ops.application_schema_operation_receipts"
+    " DROP CONSTRAINT ck_application_schema_operation_receipts_head,"
+    " ADD CONSTRAINT ck_application_schema_operation_receipts_head"
+    " CHECK (destination_head IN ('300', '301_m03_import_children',"
+    " '302_m03_child_issuance', '303_m05_payload_hash_domain',"
+    " '304_m05_detector_manuals', '305_m05_relitigation_fence',"
+    " '306_m02_manual_feature_purge', '307_m02_truncate_fence',"
+    " '308_t39_provider_identities', '309_t39_feature_id_rekey',"
+    " '310_seoul_source_move'))"
+)
+
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    "SET ROLE ktm_feature_schema_owner",
+    _RECEIPT_HEAD_WIDEN,
+    "RESET ROLE",
+)
+
+
 def upgrade() -> None:
+    for statement in _UPGRADE_STATEMENTS:
+        op.execute(statement)
     _apply(url=_NEW_URL, cycle="monthly", row_count=_NEW_ROW_COUNT, note=_NEW_NOTE)
+
+
+_RECEIPT_HEAD_NARROW: Final[str] = (
+    "ALTER TABLE ops.application_schema_operation_receipts"
+    " DROP CONSTRAINT ck_application_schema_operation_receipts_head,"
+    " ADD CONSTRAINT ck_application_schema_operation_receipts_head"
+    " CHECK (destination_head IN ('300', '301_m03_import_children',"
+    " '302_m03_child_issuance', '303_m05_payload_hash_domain',"
+    " '304_m05_detector_manuals', '305_m05_relitigation_fence',"
+    " '306_m02_manual_feature_purge', '307_m02_truncate_fence',"
+    " '308_t39_provider_identities', '309_t39_feature_id_rekey'))"
+)
 
 
 def downgrade() -> None:
     # 되돌리면 **죽은 URL과 뒤집힌 문장이 돌아온다.** 그것이 맞다 — downgrade는
     # 이전 상태를 복원하는 것이지 더 나은 상태를 만드는 것이 아니다.
     _apply(url=_OLD_URL, cycle="one_time", row_count=_OLD_ROW_COUNT, note=_OLD_NOTE)
+    for statement in ("SET ROLE ktm_feature_schema_owner", _RECEIPT_HEAD_NARROW, "RESET ROLE"):
+        op.execute(statement)
