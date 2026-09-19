@@ -422,7 +422,8 @@ async def _seed_geom_only_perf_data(
 ) -> None:
     """coord 없이 geometry만 가진 route/area의 대표 planner 분포를 만든다.
 
-    T-VN-35(ADR-086): geometry 정본이 ``feature_routes``/``feature_areas``로
+    T-VN-35(ADR-086) + ADR-099 2단계: geometry 정본이
+    ``feature_route_geometries``/``feature_areas``로
     옮겨졌고 두 subtype의 ``geom``은 NOT NULL이다 — core는 좌표 없는 껍데기만
     갖는다. 인덱스도 core 단일 partial GiST가 아니라 subtype별 GiST 2종이므로
     seed 구조를 그대로 옮기고, 통계는 세 relation 모두에 만든다.
@@ -447,7 +448,7 @@ async def _seed_geom_only_perf_data(
                 -- ``WHERE public_ready``인데 그 플래그를 채우는 trigger가 부모의
                 -- 3축을 그대로 읽는다. 세 축이 모두 공개값이라야 route/area 행이
                 -- public_ready=true로 들어가고 이 테스트가 겨누는
-                -- ``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``
+                -- ``idx_feature_route_geometries_geom_gist``/``idx_feature_areas_geom_gist``
                 -- 가 후보를 실제로 담는다.
                 'active',
                 'published',
@@ -465,8 +466,8 @@ async def _seed_geom_only_perf_data(
     await session.execute(
         text(
             """
-            INSERT INTO feature.feature_routes (
-                feature_id, kind, geom, route_type
+            INSERT INTO feature.feature_route_geometries (
+                feature_id, kind, geom
             )
             SELECT
                 f.feature_id,
@@ -485,11 +486,28 @@ async def _seed_geom_only_perf_data(
                         ),
                         4326
                     )
-                )::x_extension.geometry(MultiLineString, 4326),
-                'route'
+                )::x_extension.geometry(MultiLineString, 4326)
             -- T-VN-39: 순번을 id 문자열에서 읽어낼 수 없다(정본 키가 uuid다).
             -- geometry 좌표를 정하던 ``g``를 generate_series로 되돌린다 — 그
             -- 좌표 분포가 곧 이 테스트가 겨누는 subtype GiST의 후보 분포다.
+            FROM generate_series(1, :n) AS g
+            JOIN feature.features AS f
+              ON f.feature_id = CAST(
+                  :uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid
+              )
+            WHERE f.kind = 'route'
+            """
+        ),
+        {"n": n, "uuid_namespace": namespace},
+    )
+    # ADR-099 2단계 이후 route는 두 행이다. geometry 행은 위에서 심었고, 여기서
+    # subtype 행을 심는다 — `fk_feature_routes_geometry`는 DEFERRABLE이라 순서는
+    # 자유롭지만 **둘 다 있어야** COMMIT을 지난다.
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.feature_routes (feature_id, kind, route_type)
+            SELECT f.feature_id, f.kind, 'route'
             FROM generate_series(1, :n) AS g
             JOIN feature.features AS f
               ON f.feature_id = CAST(
@@ -534,6 +552,7 @@ async def _seed_geom_only_perf_data(
     await session.flush()
     await session.execute(text("ANALYZE feature.features"))
     await session.execute(text("ANALYZE feature.feature_routes"))
+    await session.execute(text("ANALYZE feature.feature_route_geometries"))
     await session.execute(text("ANALYZE feature.feature_areas"))
 
 
@@ -965,7 +984,7 @@ async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
     """coord 없는 route/area cluster가 실제 planner에서 **subtype** GiST를 쓴다.
 
     T-VN-35(ADR-086): geometry 정본이 subtype으로 옮겨지면서 core partial GiST
-    (``idx_features_geom_gist``)가 사라지고 ``idx_feature_routes_geom_gist`` /
+    (``idx_features_geom_gist``)가 사라지고 ``idx_feature_route_geometries_geom_gist`` /
     ``idx_feature_areas_geom_gist``가 그 자리를 대신한다. bbox 후보 술어가 조립
     뷰의 ``COALESCE(geom)``(인덱스 없음)로 퇴화하면 여기서 잡힌다 — 그때는
     subtype GiST가 plan에서 사라지고 features seq scan이 나타난다.
@@ -989,7 +1008,7 @@ async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
     )
 
     _assert_uses_index(
-        plan, "idx_feature_routes_geom_gist", "idx_feature_areas_geom_gist"
+        plan, "idx_feature_route_geometries_geom_gist", "idx_feature_areas_geom_gist"
     )
     _assert_no_seq_scan_on(plan, "features")
 

@@ -15,7 +15,7 @@ __all__ = ["TYPED_FEATURE_DETAIL_COLUMNS_SQL", "typed_feature_detail_joins_sql"]
 # ``f``는 callers가 core Feature relation에 붙이는 고정 alias다. typed subtype에
 # 없는 price/weather는 빈 detail, route/area는 각 subtype geometry를 반환한다.
 TYPED_FEATURE_DETAIL_COLUMNS_SQL: Final[str] = """
-    COALESCE(r.geom, a.geom) AS geom,
+    COALESCE(rg.geom, a.geom) AS geom,
     COALESCE(
         CASE f.kind
             WHEN 'place' THEN CASE WHEN p.feature_id IS NULL THEN NULL ELSE jsonb_build_object(
@@ -108,5 +108,6 @@ LEFT JOIN feature.feature_places AS p ON p.feature_id = {core_alias}.feature_id
 LEFT JOIN feature.feature_events AS e ON e.feature_id = {core_alias}.feature_id
 LEFT JOIN feature.feature_notices AS n ON n.feature_id = {core_alias}.feature_id
 LEFT JOIN feature.feature_routes AS r ON r.feature_id = {core_alias}.feature_id
+LEFT JOIN feature.feature_route_geometries AS rg ON rg.feature_id = {core_alias}.feature_id
 LEFT JOIN feature.feature_areas AS a ON a.feature_id = {core_alias}.feature_id
 """

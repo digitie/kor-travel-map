@@ -1122,7 +1122,8 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
       아래 exact geometry arm만 사용하며, geometry가 없는 legacy route/area만 coord로
       fallback한다.
     - **route/area geometry**: ``&&`` MBR prefilter만으로는 false positive가 실재하므로
-      (F-8) subtype GiST(``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``)를
+      (F-8) subtype GiST(``idx_feature_route_geometries_geom_gist`` /
+      ``idx_feature_areas_geom_gist``)를
       ``&&``로 구동한 뒤 exact ``ST_Intersects``를 덧대 실제 envelope 교차만 남긴다.
       ``ST_Transform``을 술어에 넣지 않는다(ADR-012).
 
@@ -1158,7 +1159,7 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     OR {feature_alias}.feature_id = ANY (
       ARRAY(
         SELECT bbox_hit_route.feature_id
-        FROM feature.feature_routes AS bbox_hit_route
+        FROM feature.feature_route_geometries AS bbox_hit_route
         WHERE bbox_hit_route.public_ready
           AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
           AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})

@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
 from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
@@ -98,18 +99,38 @@ async def _insert_subtype(
     309가 subtype 5표의 사본 컬럼 ``feature_uuid``와 그것을 보던 복합 FK를 함께
     없앴으므로 심을 identity는 ``feature_id`` 하나다.
     """
-    if table == "feature_routes":
+    if table in {"feature_routes", "feature_route_geometries"}:
+        # ADR-099 2단계가 route geometry를 `feature.feature_route_geometries`로
+        # 옮겼다. **route는 이제 두 행이다** — `write_subtype`이 내는 두 문장과 같은
+        # 순서(subtype → geometry)로 심는다. 두 경로의 잠금 순서가 어긋나면 40P01
+        # 교착 창이 열린다.
+        #
+        # `fk_feature_routes_geometry`는 DEFERRABLE INITIALLY DEFERRED라 이 두 문장
+        # 사이의 중간 상태는 위반이 아니고, COMMIT에서만 판정한다.
         await session.execute(
             text(
                 """
                 INSERT INTO feature.feature_routes (
-                    feature_id, kind, geom, route_type, public_ready
+                    feature_id, kind, route_type, public_ready
+                )
+                SELECT feature_id, 'route', 'trail', false
+                FROM feature.features
+                WHERE feature_id = CAST(:feature_id AS uuid)
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.feature_route_geometries (
+                    feature_id, kind, geom, public_ready
                 )
                 SELECT feature_id, 'route',
                        x_extension.st_geomfromtext(
                            'MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326
                        ),
-                       'trail', false
+                       false
                 FROM feature.features
                 WHERE feature_id = CAST(:feature_id AS uuid)
                 """
@@ -142,7 +163,13 @@ async def _insert_subtype(
 
 @pytest.mark.parametrize(
     ("table", "kind", "category"),
-    [("feature_routes", "route", "06070000"), ("feature_areas", "area", "06050000")],
+    [
+        ("feature_routes", "route", "06070000"),
+        # geometry를 실제로 담는 relation. 공개 bbox 술어가 타는 partial GiST가
+        # **이 행의** `public_ready`에 걸리므로, 트리거 계약이 여기서도 서야 한다.
+        ("feature_route_geometries", "route", "06070000"),
+        ("feature_areas", "area", "06050000"),
+    ],
 )
 async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
     migrated_session: AsyncSession,
@@ -413,9 +440,18 @@ async def test_subtype_update_and_state_transition_serialize_before_tuple_locks(
             )
 
 
-@pytest.mark.parametrize("table", ["feature_routes", "feature_areas"])
+@pytest.mark.parametrize(
+    ("table", "kind"),
+    [
+        ("feature_routes", "route"),
+        # geometry를 실제로 담는 relation. runtime의 "geom만 예외" 계약이
+        # ADR-099 2단계 이후 **여기서** 서야 한다.
+        ("feature_route_geometries", "route"),
+        ("feature_areas", "area"),
+    ],
+)
 async def test_runtime_subtype_acl_excludes_public_ready(
-    migrated_session: AsyncSession, table: str
+    migrated_session: AsyncSession, table: str, kind: str
 ) -> None:
     """Runtime에는 table UPDATE/flag UPDATE가 없고 business column만 허용한다.
 
@@ -424,7 +460,13 @@ async def test_runtime_subtype_acl_excludes_public_ready(
     관측이 아니라 42703이다. 축이 줄어든 것이지 느슨해진 것이 아니다:
     ``table_update = False``가 열 단위 예외를 제외한 **모든** 열의 UPDATE를 이미
     막고, 남은 열 단위 단언은 그 예외 목록(geom만 허용)을 고정한다.
+
+    ``geom`` 질문은 **그 컬럼이 있는 relation에만** 던진다. ADR-099 2단계가
+    geometry를 옮긴 뒤에도 이 질문이 `feature_routes`에 남아 있어 42703으로
+    죽었다 — 관계 이름이 SQL 파라미터 뒤에 숨어 있어 이름 검색으로는 보이지
+    않던 자리다. 어느 relation이 geometry를 담는지는 적재 경로 모델에서 읽는다.
     """
+    holds_geometry = table in set(GEOMETRY_RELATIONS.values())
     privileges = (
         await migrated_session.execute(
             text(
@@ -435,9 +477,6 @@ async def test_runtime_subtype_acl_excludes_public_ready(
                     has_column_privilege(
                         'ktm_feature_runtime', :relation, 'public_ready', 'UPDATE'
                     ) AS flag_update,
-                    has_column_privilege(
-                        'ktm_feature_runtime', :relation, 'geom', 'UPDATE'
-                    ) AS geom_update,
                     has_column_privilege(
                         'ktm_feature_runtime', :relation, 'feature_id', 'UPDATE'
                     ) AS feature_id_update,
@@ -453,10 +492,37 @@ async def test_runtime_subtype_acl_excludes_public_ready(
         "table_update": False,
         "table_delete": False,
         "flag_update": False,
-        "geom_update": True,
         "feature_id_update": False,
         "kind_update": False,
     }
+
+    geom_column_exists = (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.columns "
+                "WHERE table_schema = 'feature' AND table_name = :table_name "
+                "  AND column_name = 'geom'"
+            ),
+            {"table_name": table},
+        )
+    ) == 1
+    assert geom_column_exists is holds_geometry, (
+        f"{table}의 geom 컬럼 유무가 적재 경로 모델과 어긋난다 "
+        f"(모델: {holds_geometry}, 카탈로그: {geom_column_exists})."
+    )
+    if holds_geometry:
+        assert (
+            await migrated_session.scalar(
+                text(
+                    "SELECT has_column_privilege("
+                    "'ktm_feature_runtime', :relation, 'geom', 'UPDATE')"
+                ),
+                {"relation": f"feature.{table}"},
+            )
+        ) is True, (
+            f"runtime이 {table}.geom을 갱신하지 못한다 — geometry 정련은 정상적인 "
+            "subtype writer 작업이다."
+        )
     # 사본 컬럼이 되살아나면 위 열거가 조용히 불완전해진다 — 그 자리를 이 단언이 지킨다.
     assert (
         await migrated_session.scalar(
@@ -471,7 +537,6 @@ async def test_runtime_subtype_acl_excludes_public_ready(
 
     label = f"tvn34b:acl:{table}:{uuid4().hex}"
     feature_id = feature_uuid(label)
-    kind = "route" if table == "feature_routes" else "area"
     category = "06070000" if kind == "route" else "06050000"
     await _insert_feature(
         migrated_session,
@@ -520,7 +585,7 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                         "idx_features_updated_keyset",
                         "idx_features_lower_name_keyset",
                         "idx_features_name_trgm",
-                        "idx_feature_routes_geom_gist",
+                        "idx_feature_route_geometries_geom_gist",
                         "idx_feature_areas_geom_gist",
                     ]
                 },
@@ -540,7 +605,10 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
             assert fragment in definition, (name, definition)
         assert "deleted_at" not in definition, definition
         assert "status" not in definition, definition
-    for name in ("idx_feature_routes_geom_gist", "idx_feature_areas_geom_gist"):
+    for name in (
+        "idx_feature_route_geometries_geom_gist",
+        "idx_feature_areas_geom_gist",
+    ):
         assert "WHERE public_ready" in definitions[name], definitions[name]
 
     run = uuid4().hex[:16]
@@ -657,9 +725,9 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                 """,
             ),
             (
-                "idx_feature_routes_geom_gist",
+                "idx_feature_route_geometries_geom_gist",
                 """
-                SELECT feature_id FROM feature.feature_routes
+                SELECT feature_id FROM feature.feature_route_geometries
                 WHERE public_ready
                   AND geom OPERATOR(x_extension.&&) x_extension.st_makeenvelope(
                       126.96, 37.55, 126.99, 37.58, 4326

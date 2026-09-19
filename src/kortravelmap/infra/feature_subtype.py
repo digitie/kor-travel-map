@@ -45,10 +45,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DETAIL_MODEL_BY_KIND",
+    "GEOMETRY_RELATIONS",
     "GEOMETRY_SUBTYPE_KINDS",
     "SUBTYPE_TABLES",
     "SubtypeDetailError",
+    "EXTERNAL_GEOMETRY_KINDS",
+    "EXTERNAL_GEOMETRY_UNION_SQL",
     "count_subtype_drift",
+    "geometry_upsert_sql",
     "subtype_params",
     "subtype_table_for_kind",
     "write_subtype",
@@ -65,6 +69,29 @@ SUBTYPE_TABLES: Final[dict[str, str]] = {
     "route": "feature_routes",
     "area": "feature_areas",
 }
+
+#: kind → **geometry가 실제로 사는 relation**.
+#:
+#: ADR-099 2단계에서 route geometry가 `feature_routes`를 떠나 전용 PostGIS
+#: relation으로 갔다(행의 98.5%가 geometry였고, `to_jsonb(route)`를 쓰는 곳이
+#: 봉인 말고도 둘 더 있다 — theme candidate의 `candidate_input_hash`와 admin 후보
+#: 목록 API 응답). area는 prod 행 수가 0이라 이번에 옮기지 않았다.
+#:
+#: **비대칭을 `if kind == "route"` 분기가 아니라 이 dict의 값으로 둔다.** 나중에
+#: area를 옮기는 것이 값 하나를 바꾸는 일이 되고, 세 번째 kind가 생겨도 같은
+#: 자리만 본다. 이 모듈이 스스로를 subtype 매핑의 단일 정본으로 선언하므로
+#: 여기가 그 자리다.
+GEOMETRY_RELATIONS: Final[dict[str, str]] = {
+    "route": "feature_route_geometries",
+    "area": "feature_areas",
+}
+
+#: geometry가 subtype 행 **바깥**에 사는 kind. 이 kind의 upsert는 문장이 둘이다.
+EXTERNAL_GEOMETRY_KINDS: Final[frozenset[str]] = frozenset(
+    kind
+    for kind, relation in GEOMETRY_RELATIONS.items()
+    if relation != SUBTYPE_TABLES[kind]
+)
 
 
 def subtype_table_for_kind(kind: str) -> str | None:
@@ -236,17 +263,39 @@ def subtype_params(
 # subtype 사본 무결성 관측 — ``count_features_missing_identity``(0083 선례)와
 # 같은 성격이다. 0이 아니면 writer 이중 쓰기가 새고 있다는 뜻이므로 호출자는
 # fail-close 판정에 쓴다.
-_SUBTYPE_DRIFT_SQL: Final[str] = """
+#: subtype union을 **리터럴로 적지 않는다.** 표 목록이 바뀌면 이 관측도 따라와야
+#: 하는데, 손으로 적은 목록은 따라오지 않는다.
+_SUBTYPE_UNION_SQL: Final[str] = "\n    UNION ALL ".join(
+    f"SELECT feature_id, kind FROM feature.{table}"
+    for table in SUBTYPE_TABLES.values()
+)
+
+#: geometry가 subtype **바깥**에 사는 kind의 geometry relation union.
+#:
+#: 비어 있을 수 있다(geometry가 전부 subtype 안으로 돌아오는 경우). 그때도 SQL이
+#: 성립해야 하므로 빈 결과를 내는 형태로 떨어뜨린다 — 빈 문자열을 끼워 넣으면
+#: 문법 오류다.
+EXTERNAL_GEOMETRY_UNION_SQL: Final[str] = (
+    "\n    UNION ALL ".join(
+        f"SELECT feature_id FROM feature.{GEOMETRY_RELATIONS[kind]}"
+        for kind in sorted(EXTERNAL_GEOMETRY_KINDS)
+    )
+    or "SELECT NULL::uuid AS feature_id WHERE false"
+)
+
+_SUBTYPE_DRIFT_SQL: Final[str] = f"""
 WITH expected AS (
     SELECT f.feature_id, f.kind
     FROM feature.features AS f
     WHERE f.kind = ANY(CAST(:kinds AS text[]))
 ), actual AS (
-    SELECT feature_id, kind FROM feature.feature_places
-    UNION ALL SELECT feature_id, kind FROM feature.feature_events
-    UNION ALL SELECT feature_id, kind FROM feature.feature_notices
-    UNION ALL SELECT feature_id, kind FROM feature.feature_routes
-    UNION ALL SELECT feature_id, kind FROM feature.feature_areas
+    {_SUBTYPE_UNION_SQL}
+), geometry_expected AS (
+    SELECT feature_id
+    FROM feature.features
+    WHERE kind = ANY(CAST(:external_geometry_kinds AS text[]))
+), geometry_actual AS (
+    {EXTERNAL_GEOMETRY_UNION_SQL}
 )
 SELECT
     (
@@ -263,27 +312,47 @@ SELECT
         SELECT count(*) FROM actual a
         JOIN feature.features f ON f.feature_id = a.feature_id
         WHERE f.kind IS DISTINCT FROM a.kind
-    ) AS kind_mismatch
+    ) AS kind_mismatch,
+    -- geometry가 subtype 바깥에 사는 kind는 **행이 둘**이다. 그 둘째 행의 결측은
+    -- ADR-099 2단계 전까지 `geom NOT NULL`이 즉시 거절했지만, 이제는 DEFERRABLE
+    -- FK가 COMMIT에서만 본다 — replica-mode 복구 세션은 그 창을 지난다.
+    -- `missing_subtype`은 첫째 행만 보므로 이 축이 따로 필요하다.
+    (
+        SELECT count(*) FROM geometry_expected ge
+        LEFT JOIN geometry_actual ga ON ga.feature_id = ge.feature_id
+        WHERE ga.feature_id IS NULL
+    ) AS missing_geometry
 """
 
 
-async def count_subtype_drift(session: AsyncSession) -> tuple[int, int, int]:
-    """(subtype 결측, 고아 subtype, kind 불일치) — 정상은 ``(0, 0, 0)``.
+async def count_subtype_drift(session: AsyncSession) -> tuple[int, int, int, int]:
+    """(subtype 결측, 고아 subtype, kind 불일치, geometry 결측) — 정상은 전부 0.
 
     ``kind_mismatch``/``orphan_subtype``은 배타 arc FK가 이미 구조적으로
     막지만(replica-mode 우회 제외) 관측을 함께 둔다 — 0083 identity 4축과
     같은 규약이다. ``missing_subtype``만이 writer 이중 쓰기 누락을 직접
     드러내는 축이다.
+
+    ``missing_geometry``는 ADR-099 2단계가 더한 축이다. geometry가 subtype 행
+    바깥으로 나가면서 "geometry 없는 route"를 막던 ``geom NOT NULL``이 COMMIT
+    시점 DEFERRABLE FK로 바뀌었다 — 즉시 거절이 아니라 **트랜잭션 끝에서만**
+    본다. 복구·복제 세션이 그 창을 지나면 subtype 행은 있는데 geometry 행이 없는
+    route가 남고, 그 route는 오류 없이 공개 bbox에서 사라진다.
     """
     row = (
         await session.execute(
-            text(_SUBTYPE_DRIFT_SQL), {"kinds": list(SUBTYPE_TABLES)}
+            text(_SUBTYPE_DRIFT_SQL),
+            {
+                "kinds": list(SUBTYPE_TABLES),
+                "external_geometry_kinds": sorted(EXTERNAL_GEOMETRY_KINDS),
+            },
         )
     ).mappings().one()
     return (
         int(row["missing_subtype"]),
         int(row["orphan_subtype"]),
         int(row["kind_mismatch"]),
+        int(row["missing_geometry"]),
     )
 
 
@@ -323,7 +392,9 @@ def subtype_upsert_sql(kind: str) -> str | None:
     all_columns = ("feature_id", "kind", *columns)
     values = [f":{name}" for name in all_columns]
     update_columns = list(columns)
-    if geom_expr is not None:
+    # geometry가 subtype 행 **안**에 사는 kind만 여기서 함께 쓴다. route는
+    # ADR-099 2단계에서 밖으로 나갔으므로 `geometry_upsert_sql`이 따로 쓴다.
+    if geom_expr is not None and kind not in EXTERNAL_GEOMETRY_KINDS:
         all_columns = (*all_columns, "geom")
         values.append(geom_expr)
         update_columns.append("geom")
@@ -332,6 +403,31 @@ def subtype_upsert_sql(kind: str) -> str | None:
 INSERT INTO feature.{table} ({", ".join(all_columns)})
 VALUES ({", ".join(values)})
 ON CONFLICT (feature_id) DO UPDATE SET {updates}
+"""
+
+
+def geometry_upsert_sql(kind: str) -> str | None:
+    """geometry가 subtype 행 **바깥**에 사는 kind의 geometry UPSERT.
+
+    subtype upsert와 **같은 트랜잭션·같은 파라미터**(`:feature_id`/`:kind`/
+    `:geom_wkt`)를 쓴다. 존재 불변식 FK가 DEFERRABLE INITIALLY DEFERRED라 두 문장의
+    순서는 자유롭지만, **순서를 고정한다** — `sync_subtype_public_ready`가
+    `feature_routes`를 먼저 치므로 여기서도 subtype을 먼저 쓴다. 두 경로의 잠금
+    순서가 반대면 40P01 교착 창이 열린다.
+
+    **값이 같으면 쓰지 않는다.** geometry는 43 kB짜리 컬럼이고 GiST 인덱스가 달려
+    있다 — 동일 재적재가 57,060행을 다시 쓰면 인덱스가 그만큼 더럽혀진다.
+    """
+
+    relation = GEOMETRY_RELATIONS.get(kind)
+    if relation is None or kind not in EXTERNAL_GEOMETRY_KINDS:
+        return None
+    geom_expr = _GEOM_EXPR[kind]
+    return f"""
+INSERT INTO feature.{relation} (feature_id, kind, geom)
+VALUES (:feature_id, :kind, {geom_expr})
+ON CONFLICT (feature_id) DO UPDATE SET geom = EXCLUDED.geom
+WHERE feature.{relation}.geom IS DISTINCT FROM EXCLUDED.geom
 """
 
 
@@ -464,3 +560,8 @@ async def write_subtype(
             session, feature_id, params["valid_start_time"]
         )
     await session.execute(text(sql), params)
+    # geometry가 밖에 사는 kind는 여기서 **두 번째 문장**을 낸다. 순서는
+    # subtype → geometry로 고정한다(`geometry_upsert_sql` docstring).
+    geometry_sql = geometry_upsert_sql(kind)
+    if geometry_sql is not None:
+        await session.execute(text(geometry_sql), params)

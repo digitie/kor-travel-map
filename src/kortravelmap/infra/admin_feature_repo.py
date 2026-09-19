@@ -633,9 +633,10 @@ def _admin_bbox_envelope_sql() -> str:
 def _admin_geometry_hits_sql() -> str:
     """bbox와 실제로 교차한 route/area subtype geometry (T-VN-35, ADR-086).
 
-    geometry 정본이 ``feature_routes``/``feature_areas``로 옮겨졌으므로(0086)
+    geometry 정본이 ``feature_route_geometries``/``feature_areas``에 있으므로
+    (0086 + ADR-099 2단계)
     bbox 술어를 **subtype 쪽에서 먼저** 평가한다 — 각 subtype의 GiST 인덱스
-    (``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``)에
+    (``idx_feature_route_geometries_geom_gist``/``idx_feature_areas_geom_gist``)에
     ``&&``가 그대로 내려간다. core를 LEFT JOIN한 뒤 ``COALESCE(geom)``에
     술어를 걸면 인덱스를 못 쓰므로 이 형태가 정본이다.
 
@@ -647,7 +648,7 @@ def _admin_geometry_hits_sql() -> str:
     envelope = _admin_bbox_envelope_sql()
     return f"""
   SELECT feature_id, geom
-  FROM feature.feature_routes
+  FROM feature.feature_route_geometries
   WHERE geom OPERATOR(x_extension.&&) {envelope}
     AND x_extension.ST_Intersects(geom, {envelope})
   UNION ALL

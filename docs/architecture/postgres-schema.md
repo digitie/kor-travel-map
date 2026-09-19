@@ -274,7 +274,7 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 | `idx_feature_events_period` | (starts_on, ends_on) | 공개 festival 범위·keyset·정렬이 `starts_on` 선두를 요구 |
 | `idx_feature_events_opening_hours` | (feature_id) | partial `opening_hours IS NOT NULL` |
 | `idx_feature_notices_validity` | (valid_end_time, valid_start_time) | typed `timestamptz` 유효기간 필터 |
-| `idx_feature_routes_geom_gist` | GIST(geom) | route MULTILINESTRING 교차 |
+| `idx_feature_route_geometries_geom_gist` | GIST(geom) partial `WHERE public_ready` | route MULTILINESTRING 교차 (ADR-099 2단계로 `feature.feature_route_geometries`에 있다) |
 | `idx_feature_areas_geom_gist` | GIST(geom) | area MULTIPOLYGON 교차/포함 |
 
 subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건이 필요 없다. 공간 술어는

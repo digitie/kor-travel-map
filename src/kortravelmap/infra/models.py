@@ -1549,25 +1549,87 @@ class FeatureNoticeRow(_FeatureSubtypeBase):
     )
 
 
-class FeatureRouteRow(_FeatureSubtypeBase):
-    """``feature.feature_routes`` — route 전용 (geometry 정본이 여기로 이동)."""
+class FeatureRouteGeometryRow(Base):
+    """``feature.feature_route_geometries`` — route geometry 전용 relation (ADR-099 2단계).
 
-    __tablename__ = "feature_routes"
-    __table_args__ = _subtype_table_args(
-        "route",
+    geometry가 route 행의 **98.5%**였다(43 kB 중 나머지가 633 B). 그리고
+    `to_jsonb(route)`를 쓰는 곳이 셋이다 — causal seal, theme candidate의
+    `candidate_input_hash` 계산, admin 후보 목록 API 응답(페이지당 N배).
+    행을 좁히면 그 셋이 함께 줄어든다. (`match_evidence`는 detail을 담지 않는다 —
+    초안의 "영구 저장" 서술은 2026-09-20 적대 리뷰가 정정했다.)
+
+    **FK는 `feature.features`를 직접 가리킨다.** purge 증거 포획이
+    `confrelid='feature.features'` 한 단계만 훑으므로, `feature_routes`에 매달면
+    2단 CASCADE로 지워지되 복구점에 남지 않는다.
+    """
+
+    __tablename__ = "feature_route_geometries"
+    __table_args__ = (
+        CheckConstraint(
+            "kind = 'route'", name=conv("ck_feature_route_geometries_kind")
+        ),
+        ForeignKeyConstraint(
+            ["feature_id", "kind"],
+            ["feature.features.feature_id", "feature.features.kind"],
+            name=conv("fk_feature_route_geometries_feature_kind"),
+            ondelete="CASCADE",
+        ),
         Index(
-            "idx_feature_routes_geom_gist",
+            "idx_feature_route_geometries_geom_gist",
             "geom",
             postgresql_using="gist",
             postgresql_where=text("public_ready"),
         ),
+        {"schema": "feature"},
     )
 
-    # core에서 이동한 geometry — route는 LineString 계열만 허용한다
-    # (core의 GEOMETRY 느슨한 타입이 여기서 정확해진다).
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
     geom: Mapped[Any] = mapped_column(
         Geometry("MULTILINESTRING", srid=4326, spatial_index=False), nullable=False
     )
+    #: 공개 bbox 술어가 **조인 없이** partial GiST를 타려면 술어 컬럼이 geometry와
+    #: 같은 행에 있어야 한다(ADR-086 결정 5). `sync_subtype_public_ready`가 민다.
+    public_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    #: 봉인이 보는 geometry 지문. **생성 컬럼**이라 동기화할 코드가 없고,
+    #: 프로시저를 우회한 `UPDATE ... SET geom`까지 DB가 덮는다.
+    #: `x_extension.digest`/`ST_AsEWKB`가 IMMUTABLE임을 실측으로 확인했다.
+    geom_digest: Mapped[str | None] = mapped_column(
+        Text,
+        Computed(
+            "encode(x_extension.digest(x_extension.st_asewkb(geom), 'sha256'::text),"
+            " 'hex'::text)",
+            persisted=True,
+        ),
+    )
+
+
+class FeatureRouteRow(_FeatureSubtypeBase):
+    """``feature.feature_routes`` — route 전용 속성.
+
+    geometry는 ADR-099 2단계에서 :class:`FeatureRouteGeometryRow`로 갔다. 이 행에
+    남은 것은 비-공간 속성뿐이다.
+
+    **"route 행이 있으면 geometry가 있다"**는 ADR-086의 `geom NOT NULL`이 지키던
+    불변식이고, 이제 아래 DEFERRABLE FK가 그 자리를 대신한다. DEFERRABLE이어야
+    하는 이유는 둘이다 — 재적재가 한 트랜잭션에 두 문장을 내고, purge CASCADE가
+    중간 상태에서 잠시 위반이 된다.
+    """
+
+    __tablename__ = "feature_routes"
+    __table_args__ = _subtype_table_args(
+        "route",
+        ForeignKeyConstraint(
+            ["feature_id"],
+            ["feature.feature_route_geometries.feature_id"],
+            name="fk_feature_routes_geometry",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+
     # Core 3축의 DB-owned derived projection. Runtime은 이 열을 직접 쓸 수 없다.
     public_ready: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")

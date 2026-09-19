@@ -1,5 +1,45 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-20 — ADR-099 2단계: route geometry가 전용 PostGIS relation으로 갔다
+
+**다음 한 작업: 네 세션 게이트를 초록으로 만들고 머지 → 핀 회전 · DB 재구축 ·
+전 provider 재적재.** 소유자 지시: *"마이그레이션 하지말고 db재설계후 다시데이터
+로드해. 지금데이터는 무의미함."*
+
+`312_route_geometry_sidecar`가 `feature.feature_routes.geom`을
+`feature.feature_route_geometries`로 옮긴다. **데이터를 이어 나르지 않는다** —
+`feature_routes`가 비어 있기를 요구하고, 행이 남아 있으면 마이그레이션이 멎는다.
+설계 근거는 ADR-099 §4·§5.
+
+### 이 단계에서 반복해서 터진 결함은 하나의 모양이었다
+
+**"선언을 바꿨는데 그 선언을 얼려 둔 자리를 같이 못 봤다."** geometry 컬럼 하나가
+이사했을 뿐인데 그것을 가리키던 자리가 **열여섯 곳**에서 옛 자리에 남아 있었다:
+뷰 의존(DROP 실패), plpgsql 프로시저 셋(첫 적재에서 42703), `public_ready` 트리거
+누락(route가 오류 없이 공개 bbox에서 0건), NOINHERIT 소유자 검사, 권한 조정기의
+fail-close fence, ORM 메타데이터, GiST 인덱스 이름에 결박된 검사 여덟,
+`ktm_feature_state_procedure_owner`의 geometry 권한, `ktm_curation_command_owner`의
+SELECT, `current_theme_candidate_snapshot`의 `to_jsonb(route)`, override field-path
+레지스트리, 무결성 관측 두 축, 역할 창 lint의 309 결박, 롤 유지 lint의 AST 한계,
+그리고 head 오라클 자체.
+
+그래서 이 브랜치는 **이름을 옮기는 대신 모델에서 유도하게** 바꿨다 —
+`GEOMETRY_RELATIONS`/`EXTERNAL_GEOMETRY_KINDS`가 단일 정본이고, 검사·관측·권한이
+거기서 나온다. 다음 이사(area)는 dict 값 하나를 바꾸는 일이어야 한다.
+
+### 적대 리뷰 (opus5 · xhigh 2인 + 반증 패널)
+
+10건 중 8건 생존, 1건 반증, 1건은 API 오류로 미완. 생존분은 전부 닫았다.
+반증된 것은 "312가 봉인 member 정의를 바꾸는데 `input_set_formula` 세대를 안
+올렸다" — 312가 비어 있기를 **요구**하므로 세대 2로 발급된 구 route arm receipt가
+312 DB에 남을 수 없다. 판단 근거는 ADR-099 결과 절에 적었다.
+
+내 자신의 돌연변이 실험도 검사 결함 하나를 더 찾았다 — 롤 유지 lint가 **주석 붙은
+`SET ROLE`을 못 봤다**. 사이드카의 여는 창은 거의 언제나 설명 블록 뒤에 오므로,
+검사는 닫는 쪽만 보고 있었다.
+
+---
+
 ## 2026-09-19 (4) — 등산로가 한 번도 성공한 적 없는 이유를 찾았다. 봉인에 크기 천장이 있다
 
 **다음 한 작업: ADR-099 2단계 — route geometry를 PostGIS 보조 relation으로 분리.**

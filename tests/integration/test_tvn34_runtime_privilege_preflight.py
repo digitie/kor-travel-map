@@ -811,7 +811,10 @@ async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_wri
             # the identity and DB-owned cache columns above are not writable.
             async with runtime_engine.begin() as connection:
                 await connection.execute(
-                    text("UPDATE feature.feature_routes SET geom = geom WHERE FALSE")
+                    text(
+                        "UPDATE feature.feature_route_geometries "
+                        "SET geom = geom WHERE FALSE"
+                    )
                 )
     finally:
         for runtime_engine in runtime_engines:

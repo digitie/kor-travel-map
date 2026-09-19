@@ -208,17 +208,95 @@ def test_runtime_subtype_column_grants_name_the_target_relation() -> None:
     """column-list UPDATE는 대상 table을 명시해 fresh migration에서도 실행된다."""
 
     rendered = "\n".join(_ROUTE_AREA_RUNTIME_GRANTS)
+    # route는 ADR-099 2단계에서 `geom`이 보조 relation으로 갔다. 목록에서 빠졌지만
+    # ACL이 사라지면 안 된다 — revision 300에는 컬럼이 아직 있고 handoff가 그
+    # catalog를 immutable reference와 대조한다. 그래서 **컬럼이 있을 때만** 거는
+    # 조건부 블록으로 남는다.
     assert (
-        "GRANT UPDATE (geom, route_type, geometry_source, geometry_status, "
+        "GRANT UPDATE (route_type, geometry_source, geometry_status, "
         "total_distance_meters, expected_duration_minutes, difficulty, begin_name, "
         "begin_address, end_name, end_address, payload) ON feature.feature_routes "
         "TO ktm_feature_runtime"
+    ) in rendered
+    assert "attname = 'geom'" in rendered, (
+        "`feature_routes.geom` ACL이 조건부로도 남아 있지 않다 — revision 300 "
+        "handoff가 destination catalog 불일치로 멎는다(2026-09-10 `feature_uuid` 사고)."
+    )
+    assert (
+        "GRANT INSERT (geom), UPDATE (geom) ON feature.feature_routes"
+        " TO ktm_feature_runtime"
     ) in rendered
     assert (
         "GRANT UPDATE (geom, area_kind, boundary_source, area_square_meters, "
         "regulation_scope, administrative_office, description, payload) "
         "ON feature.feature_areas TO ktm_feature_runtime"
     ) in rendered
+
+
+@pytest.mark.unit
+def test_relations_added_after_300_grant_conditionally() -> None:
+    """**300에 없는 표의 GRANT는 조건부여야 한다.**
+
+    이 조정기는 head에서만 돌지 않는다 — `0236 → 300` handoff 실행자가 revision
+    300에서도 돌린다. 그 시점에 없는 표에 무조건 GRANT를 내면 배포가 그 자리에서
+    멎는다(2026-09-10에 `feature_uuid` 컬럼으로 같은 사고가 났고, 그 답이
+    `manual_feature_purge_records`의 `to_regclass` 판정이다).
+
+    판정은 이름 목록이 아니라 **렌더된 문장**에 건다 — 조건부로 감싸는 것을
+    잊으면 그 문장이 그대로 남으므로 여기서 잡힌다.
+    """
+
+    from kortravelmap.infra.runtime_privileges import _POST_300_GEOMETRY_RELATIONS
+
+    assert _POST_300_GEOMETRY_RELATIONS, (
+        "300 이후 relation 목록이 비었다 — 이 검사가 항진명제가 된다."
+    )
+    for relation in _POST_300_GEOMETRY_RELATIONS:
+        naked = [
+            statement
+            for statement in _ROUTE_AREA_RUNTIME_GRANTS
+            if f"feature.{relation}" in statement
+            and statement.lstrip().startswith("GRANT")
+        ]
+        assert not naked, (
+            f"`feature.{relation}`에 무조건 GRANT가 남아 있다 — revision 300에는 그 표가 "
+            f"없어 handoff가 멎는다: {naked}"
+        )
+        guarded = [
+            statement
+            for statement in _ROUTE_AREA_RUNTIME_GRANTS
+            if f"to_regclass('feature.{relation}')" in statement
+        ]
+        assert guarded, (
+            f"`feature.{relation}`의 조건부 GRANT가 하나도 없다 — 선언만 하고 권한을 "
+            "주지 않으면 런타임이 그 표를 못 읽는다."
+        )
+
+
+@pytest.mark.unit
+def test_every_geometry_relation_has_a_runtime_policy() -> None:
+    """geometry가 사는 relation은 전부 ACL 선언을 가져야 한다.
+
+    선언이 없으면 조정기가 `RuntimePrivilegeReconciliationError`로 배포를
+    fail-close한다 — 그 fence는 옳지만, 그것을 배포에서 처음 만나는 것은 비싸다.
+    분모를 `feature_subtype.GEOMETRY_RELATIONS`에서 유도해 새 kind가 생겨도
+    아무도 이 파일을 고치지 않아도 빨개진다.
+    """
+
+    from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
+    from kortravelmap.infra.runtime_privileges import (
+        _ROUTE_AREA_RUNTIME_INSERT_COLUMNS,
+    )
+
+    missing = sorted(
+        relation
+        for relation in GEOMETRY_RELATIONS.values()
+        if relation not in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS
+    )
+    assert not missing, (
+        "geometry가 사는 relation에 런타임 ACL 선언이 없다 — 배포가 "
+        f"`new relation has no deliberate runtime ACL policy`로 멎는다: {missing}"
+    )
 
 
 # ── routine 참조 해석 (T-VN-39 재키가 두 시점의 시그니처를 갈라놓은 뒤) ──────────

@@ -37,6 +37,13 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   수행하지 않는다(n150은 실 production이 아니며 손상 시 재적재가 정책).
   off-box 자동화의 현 소유자는 `T-VN-H49-OFFBOX`다.
 
+- [ ] T-VN-SEED-RECEIPT-HEADAWARE — **seed 영수증이 마이그레이션의 registry 정정을 막는다**
+
+  `ops.feature_override_field_paths`가 rev 300 seed 영수증으로 봉인돼 있어
+  312가 `route.geom`의 `target_relation`을 새 relation으로 못 옮긴다(옮기면 fresh
+  300 배포가 영수증 불일치로 멎는다). catalog 쪽은 `_sealed_destination_catalog`가
+  이미 head-aware로 풀었고 seed 쪽에는 그 처리가 없다.
+
 - [ ] T-VN-H49-BACKUP-STALENESS — **백업이 멈춰도 아무도 몰랐다**
 
   `scheduled_backup`이 425건 연속 실패하는 동안 5일간 경보가 없었다(2026-09-16 발견,

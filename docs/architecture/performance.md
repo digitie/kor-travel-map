@@ -144,7 +144,9 @@ WHERE ST_Intersects(r.geom, ST_GeomFromGeoJSON(:input_polygon_geojson))
 LIMIT :limit;
 ```
 
-`idx_feature_routes_geom_gist`가 잡힌다. area는 `feature.feature_areas`로 같은
+`idx_feature_route_geometries_geom_gist`가 잡힌다 — ADR-099 2단계(rev 312)가 route
+geometry를 `feature.feature_route_geometries`로 옮겼고, `public_ready`를 그 행에
+복제해 두어 partial GiST를 **조인 없이** 탄다. area는 `feature.feature_areas`로 같은
 모양이다. subtype 테이블 자체가 kind로 갈리므로 `kind='route'` 술어는 필요 없다.
 
 **공간 술어는 조립 뷰를 쓰지 않는다** (ADR-086). `feature.features_detailed`의

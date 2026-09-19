@@ -227,10 +227,21 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
         ),
         (
             "route",
-            "INSERT INTO feature.feature_routes (feature_id, kind, geom, route_type) "
-            "SELECT feature_id, kind, "
-            "x_extension.ST_GeomFromText('MULTILINESTRING((127 37,127.1 37.1))', 4326), "
-            "'walk' FROM feature.features "
+            # ADR-099 2단계 이후 route는 subtype 행 하나와 geometry 행 하나다.
+            # 이 자리는 문장을 **하나만** 받으므로 data-modifying CTE로 둘을 함께
+            # 낸다. `fk_feature_routes_geometry`는 DEFERRABLE이라 한 문장 안의
+            # 순서는 자유롭다.
+            "WITH geometry_row AS ("
+            "  INSERT INTO feature.feature_route_geometries (feature_id, kind, geom) "
+            "  SELECT feature_id, kind, "
+            "  x_extension.ST_GeomFromText("
+            "    'MULTILINESTRING((127 37,127.1 37.1))', 4326) "
+            "  FROM feature.features "
+            "  WHERE feature_id = CAST(:feature_id AS uuid) "
+            "  RETURNING feature_id"
+            ") "
+            "INSERT INTO feature.feature_routes (feature_id, kind, route_type) "
+            "SELECT feature_id, kind, 'walk' FROM feature.features "
             "WHERE feature_id = CAST(:feature_id AS uuid)",
             "route_type",
             "walk",

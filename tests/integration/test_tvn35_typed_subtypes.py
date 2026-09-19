@@ -59,6 +59,7 @@ from kortravelmap.infra import (
     merge_repo,
 )
 from kortravelmap.infra.feature_subtype import (
+    GEOMETRY_RELATIONS,
     SUBTYPE_TABLES,
     subtype_params,
     subtype_upsert_sql,
@@ -1069,7 +1070,10 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
         (
             FeatureKind.ROUTE,
             _ROUTE_WKT,
-            "feature_routes",
+            # 관계 이름을 **적지 않고 적재 경로의 모델에서 가져온다.** ADR-099 2단계가
+            # route geometry를 보조 relation으로 옮겼을 때 이 자리가 리터럴이라
+            # 검사가 옛 표를 계속 가리켰다. 다음에 또 옮겨도 여기는 따라 움직인다.
+            GEOMETRY_RELATIONS["route"],
             lambda fid: RouteDetail(
                 feature_id=fid, route_type="trail", geometry_source="knps"
             ),
@@ -1077,7 +1081,7 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
         (
             FeatureKind.AREA,
             _AREA_WKT,
-            "feature_areas",
+            GEOMETRY_RELATIONS["area"],
             lambda fid: AreaDetail(
                 feature_id=fid, area_kind="protected_area", boundary_source="gis_spca"
             ),
@@ -1140,9 +1144,14 @@ async def test_route_and_area_with_geometry_land_in_subtype(
     direct_geom = (
         await migrated_session.execute(
             text(
-                "SELECT x_extension.ST_GeometryType(COALESCE(r.geom, a.geom)) "
+                # ADR-099 2단계: route geometry는 전용 relation에 산다.
+                # 이 검사는 `load_bundle` 왕복이므로 프로시저 경로
+                # (`apply_provider_feature_field_patch`)도 함께 태운다 — 그 본문이
+                # 옛 컬럼을 치면 여기서 42703으로 죽는다.
+                "SELECT x_extension.ST_GeometryType(COALESCE(rg.geom, a.geom)) "
                 "FROM feature.features AS f "
-                "LEFT JOIN feature.feature_routes AS r ON r.feature_id = f.feature_id "
+                "LEFT JOIN feature.feature_route_geometries AS rg "
+                "  ON rg.feature_id = f.feature_id "
                 "LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id "
                 "WHERE f.feature_id = CAST(:feature_id AS uuid)"
             ),

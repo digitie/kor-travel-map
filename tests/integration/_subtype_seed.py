@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from kortravelmap.infra.feature_subtype import subtype_params, subtype_upsert_sql
+from kortravelmap.infra.feature_subtype import (
+    geometry_upsert_sql,
+    subtype_params,
+    subtype_upsert_sql,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -75,6 +79,17 @@ async def seed_feature_subtype(
     if geom_wkt is not None:
         params["geom_wkt"] = geom_wkt
     await session.execute(text(sql), params)
+    # **프로덕션 쓰기 경로(`feature_subtype.write_subtype`)를 미러한다.**
+    #
+    # ADR-099 2단계에서 route geometry가 전용 relation으로 갔고, 그 뒤로 route의
+    # upsert는 문장이 **둘**이다. 이 헬퍼는 `write_subtype`을 부르지 않고 같은
+    # 조립을 복제하므로, 두 번째 문장을 여기 미러하지 않으면 route 시드가
+    # `fk_feature_routes_geometry`(DEFERRABLE)를 COMMIT에서 위반한다.
+    #
+    # 순서도 프로덕션과 같다 — subtype 먼저, geometry 나중.
+    geometry_sql = geometry_upsert_sql(kind)
+    if geometry_sql is not None:
+        await session.execute(text(geometry_sql), params)
 
 
 _PREFIX_SUBTYPE_SQL = """

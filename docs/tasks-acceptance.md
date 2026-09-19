@@ -1061,6 +1061,31 @@ lifecycle에서는 prod 데이터가 rebuild마다 사라진다). 다시 세울 
   수단은 갖춰졌다(`CURATION_CSV_OPTIONAL_HEADERS`, `ops.curation_import_manual_feature_children`,
   배포 API의 manual-feature create 활성). 실행이 prod 데이터에 걸린다.
 
+## T-VN-SEED-RECEIPT-HEADAWARE
+
+**무엇이 참이면 닫히는가.**
+
+1. [ ] 마이그레이션이 `ops.feature_override_field_paths`의 행을 고쳐도 fresh 300
+   배포가 지나간다. 지금은 `alembic/baseline/application-seed.sql`이 그 표의 전 행을
+   rev 300 값으로 봉인하고 배포 허가 사슬 셋
+   (`application-schema-fresh-300.py`·`application-schema-fresh-finalize.py`·
+   `application-schema-final-permit.py`)이 그 해시를 게이트로 쓴다. 2026-09-20 실측:
+   312가 `route.geom`의 `target_relation`을 옮기자
+   `fresh finalize seed receipt does not match baseline`으로 멎었다.
+2. [ ] **게이트를 잃지 않는다.** seed 영수증의 목적은 "code-owned allow-list인
+   field-path registry가 조용히 바뀌지 않는다"이다(그 파일의 머리말이 정본).
+   head-aware로 바꾸면서 그 보장을 무엇이 대신하는지 명시하고, 그것을 일부러
+   빨갛게 만들어 보인다. catalog 쪽 선례는 `_sealed_destination_catalog`다 —
+   "head 너머에서는 봉인값이 기대값이 아니다"로 풀었다.
+3. [ ] `route.geom`의 `target_relation`이 `feature_route_geometries`를 가리킨다.
+   그 순간 `tests/integration/test_override_field_paths_point_at_real_columns.py`의
+   `test_the_known_route_geometry_gap_is_still_exactly_one_row`가 빨개진다 —
+   그 검사를 지우고 같은 파일 위 검사의 예외 집합을 비우는 것이 이 항목의 마지막 걸음이다.
+
+**막는 것.** 봉인값 재생성은 `build-baseline.sh`가 살아 있는 격리 0236 컨테이너를
+요구하는데 그것이 막혀 있다(2026-09-19 확인). 그래서 2번(head-aware 처리)이 실제
+경로이고, 1·3번은 그 결과다.
+
 ## T-VN-H49-BACKUP-STALENESS
 
 **무엇이 참이면 닫히는가.**

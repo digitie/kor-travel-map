@@ -69,6 +69,12 @@
         "310_seoul_source_move"
       ],
       "revision": "311_seal_member_digest"
+    },
+    {
+      "down_revision": [
+        "311_seal_member_digest"
+      ],
+      "revision": "312_route_geometry_sidecar"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
