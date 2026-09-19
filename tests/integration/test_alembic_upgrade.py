@@ -1072,12 +1072,17 @@ async def test_alembic_features_indexes_exist(
         ("features", "idx_features_coord_5179_gist"),
         ("features", "idx_features_kind_category"),
         ("features", "idx_features_name_trgm"),
-        ("feature_routes", "idx_feature_routes_geom_gist"),
+        # ADR-099 2단계: route geometry가 전용 relation으로 갔다. 공간 인덱스도
+        # 함께 옮겨졌고, **옮겨진 자리에 있어야** bbox 술어가 조인 없이 그것을 탄다.
+        ("feature_route_geometries", "idx_feature_route_geometries_geom_gist"),
         ("feature_areas", "idx_feature_areas_geom_gist"),
     }
     missing = required - idx
     assert not missing, f"missing indexes: {missing}"
     assert ("features", "idx_features_geom_gist") not in idx
+    # geometry를 옮겼으므로 옛 자리에 인덱스가 **남아 있으면 안 된다** — 남아
+    # 있다면 컬럼이 안 지워졌다는 뜻이고, 두 벌이 생긴다.
+    assert ("feature_routes", "idx_feature_routes_geom_gist") not in idx
 
 
 async def test_alembic_creates_feature_price_values_table(
