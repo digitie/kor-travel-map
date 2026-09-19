@@ -208,11 +208,23 @@ def test_runtime_subtype_column_grants_name_the_target_relation() -> None:
     """column-list UPDATE는 대상 table을 명시해 fresh migration에서도 실행된다."""
 
     rendered = "\n".join(_ROUTE_AREA_RUNTIME_GRANTS)
+    # route는 ADR-099 2단계에서 `geom`이 보조 relation으로 갔다. 목록에서 빠졌지만
+    # ACL이 사라지면 안 된다 — revision 300에는 컬럼이 아직 있고 handoff가 그
+    # catalog를 immutable reference와 대조한다. 그래서 **컬럼이 있을 때만** 거는
+    # 조건부 블록으로 남는다.
     assert (
-        "GRANT UPDATE (geom, route_type, geometry_source, geometry_status, "
+        "GRANT UPDATE (route_type, geometry_source, geometry_status, "
         "total_distance_meters, expected_duration_minutes, difficulty, begin_name, "
         "begin_address, end_name, end_address, payload) ON feature.feature_routes "
         "TO ktm_feature_runtime"
+    ) in rendered
+    assert "attname = 'geom'" in rendered, (
+        "`feature_routes.geom` ACL이 조건부로도 남아 있지 않다 — revision 300 "
+        "handoff가 destination catalog 불일치로 멎는다(2026-09-10 `feature_uuid` 사고)."
+    )
+    assert (
+        "GRANT INSERT (geom), UPDATE (geom) ON feature.feature_routes"
+        " TO ktm_feature_runtime"
     ) in rendered
     assert (
         "GRANT UPDATE (geom, area_kind, boundary_source, area_square_meters, "

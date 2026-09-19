@@ -32,6 +32,12 @@ _SEARCH_ROOTS = (VERSIONS,)
 # 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있기 때문이다.
 FORWARD_ONLY_REVISIONS = (
     "300_schema_baseline",
+    # ADR-099 2단계. geometry를 보조 relation으로 옮기고 `feature_routes.geom`을
+    # 지운다. 되돌리려면 역이전의 무손실을 다시 증명해야 하고, 이 저장소의 배포는
+    # **이미지 롤백 창을 갖지 않는다** — production entrypoint는 마이그레이션을
+    # 돌리지 않고 final permit이 head를 정확 일치로 본다. 그러므로 복원이 필요하면
+    # downgrade가 아니라 forward revision으로 한다.
+    "312_route_geometry_sidecar",
 )
 
 

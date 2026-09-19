@@ -45,10 +45,12 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DETAIL_MODEL_BY_KIND",
+    "GEOMETRY_RELATIONS",
     "GEOMETRY_SUBTYPE_KINDS",
     "SUBTYPE_TABLES",
     "SubtypeDetailError",
     "count_subtype_drift",
+    "geometry_upsert_sql",
     "subtype_params",
     "subtype_table_for_kind",
     "write_subtype",
@@ -65,6 +67,30 @@ SUBTYPE_TABLES: Final[dict[str, str]] = {
     "route": "feature_routes",
     "area": "feature_areas",
 }
+
+#: kind → **geometry가 실제로 사는 relation**.
+#:
+#: ADR-099 2단계에서 route geometry가 `feature_routes`를 떠나 전용 PostGIS
+#: relation으로 갔다(행의 98.5%가 geometry였고, `to_jsonb(route)`를 쓰는 곳이
+#: 봉인 말고도 둘 더 있다 — theme candidate의 `match_evidence` 영구 저장과 admin
+#: 후보 목록 API 응답). area는 prod 행 수가 0이라 이번에 옮기지 않았다.
+#:
+#: **비대칭을 `if kind == "route"` 분기가 아니라 이 dict의 값으로 둔다.** 나중에
+#: area를 옮기는 것이 값 하나를 바꾸는 일이 되고, 세 번째 kind가 생겨도 같은
+#: 자리만 본다. 이 모듈이 스스로를 subtype 매핑의 단일 정본으로 선언하므로
+#: 여기가 그 자리다.
+GEOMETRY_RELATIONS: Final[dict[str, str]] = {
+    "route": "feature_route_geometries",
+    "area": "feature_areas",
+}
+
+#: geometry가 subtype 행 **바깥**에 사는 kind. 이 kind의 upsert는 문장이 둘이다.
+_EXTERNAL_GEOMETRY_KINDS: Final[frozenset[str]] = frozenset(
+    kind
+    for kind, relation in GEOMETRY_RELATIONS.items()
+    if relation != SUBTYPE_TABLES[kind]
+)
+
 
 
 def subtype_table_for_kind(kind: str) -> str | None:
@@ -323,7 +349,9 @@ def subtype_upsert_sql(kind: str) -> str | None:
     all_columns = ("feature_id", "kind", *columns)
     values = [f":{name}" for name in all_columns]
     update_columns = list(columns)
-    if geom_expr is not None:
+    # geometry가 subtype 행 **안**에 사는 kind만 여기서 함께 쓴다. route는
+    # ADR-099 2단계에서 밖으로 나갔으므로 `geometry_upsert_sql`이 따로 쓴다.
+    if geom_expr is not None and kind not in _EXTERNAL_GEOMETRY_KINDS:
         all_columns = (*all_columns, "geom")
         values.append(geom_expr)
         update_columns.append("geom")
@@ -332,6 +360,31 @@ def subtype_upsert_sql(kind: str) -> str | None:
 INSERT INTO feature.{table} ({", ".join(all_columns)})
 VALUES ({", ".join(values)})
 ON CONFLICT (feature_id) DO UPDATE SET {updates}
+"""
+
+
+def geometry_upsert_sql(kind: str) -> str | None:
+    """geometry가 subtype 행 **바깥**에 사는 kind의 geometry UPSERT.
+
+    subtype upsert와 **같은 트랜잭션·같은 파라미터**(`:feature_id`/`:kind`/
+    `:geom_wkt`)를 쓴다. 존재 불변식 FK가 DEFERRABLE INITIALLY DEFERRED라 두 문장의
+    순서는 자유롭지만, **순서를 고정한다** — `sync_subtype_public_ready`가
+    `feature_routes`를 먼저 치므로 여기서도 subtype을 먼저 쓴다. 두 경로의 잠금
+    순서가 반대면 40P01 교착 창이 열린다.
+
+    **값이 같으면 쓰지 않는다.** geometry는 43 kB짜리 컬럼이고 GiST 인덱스가 달려
+    있다 — 동일 재적재가 57,060행을 다시 쓰면 인덱스가 그만큼 더럽혀진다.
+    """
+
+    relation = GEOMETRY_RELATIONS.get(kind)
+    if relation is None or kind not in _EXTERNAL_GEOMETRY_KINDS:
+        return None
+    geom_expr = _GEOM_EXPR[kind]
+    return f"""
+INSERT INTO feature.{relation} (feature_id, kind, geom)
+VALUES (:feature_id, :kind, {geom_expr})
+ON CONFLICT (feature_id) DO UPDATE SET geom = EXCLUDED.geom
+WHERE feature.{relation}.geom IS DISTINCT FROM EXCLUDED.geom
 """
 
 
@@ -464,3 +517,8 @@ async def write_subtype(
             session, feature_id, params["valid_start_time"]
         )
     await session.execute(text(sql), params)
+    # geometry가 밖에 사는 kind는 여기서 **두 번째 문장**을 낸다. 순서는
+    # subtype → geometry로 고정한다(`geometry_upsert_sql` docstring).
+    geometry_sql = geometry_upsert_sql(kind)
+    if geometry_sql is not None:
+        await session.execute(text(geometry_sql), params)

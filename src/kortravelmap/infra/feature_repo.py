@@ -1158,7 +1158,7 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
     OR {feature_alias}.feature_id = ANY (
       ARRAY(
         SELECT bbox_hit_route.feature_id
-        FROM feature.feature_routes AS bbox_hit_route
+        FROM feature.feature_route_geometries AS bbox_hit_route
         WHERE bbox_hit_route.public_ready
           AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
           AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})

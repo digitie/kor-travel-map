@@ -93,7 +93,15 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "feature_routes": (
         "feature_id",
         "kind",
-        "geom",
+        # ADR-099 2단계에서 `geom`이 `feature_route_geometries`로 갔다. 그런데
+        # 이 조정기는 head에서만 돌지 않는다 — `0236 → 300` handoff 실행자가
+        # **revision 300에서** 돌리고 그 직후 catalog를 immutable reference와
+        # sha256으로 대조한다. 그 catalog에 컬럼 단위 ACL이 들어 있으므로, 목록에서
+        # 그냥 빼면 컬럼이 아직 살아 있는 300에서 ACL 한 줄이 사라져 handoff가
+        # 멎는다(2026-09-10에 `feature_uuid`로 같은 사고가 났다).
+        #
+        # 그래서 목록에서 빼되 `_LEGACY_GEOM_GRANTS`가 **컬럼이 있을 때만** 같은
+        # ACL을 다시 건다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
         "route_type",
         "geometry_source",
         "geometry_status",
@@ -164,6 +172,30 @@ _SHADOW_COLUMN_GRANTS = tuple(
     for relation in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS
 )
 
+#: `feature_routes.geom`에 걸던 컬럼 ACL — **컬럼이 있을 때만** 건다.
+#:
+#: ADR-099 2단계가 head에서 그 컬럼을 지웠지만 revision 300에는 아직 있다. 같은
+#: 조정기가 두 지점에서 돌고 300 쪽은 immutable reference와 대조되므로, 판정을
+#: 카탈로그에 맡긴다(`_SHADOW_COLUMN_GRANTS`와 같은 형태).
+_LEGACY_GEOM_GRANTS = tuple(
+    "DO $legacy_geom$ BEGIN"
+    " IF EXISTS ("
+    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
+    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
+    "   JOIN pg_catalog.pg_namespace AS namespace"
+    "     ON namespace.oid = relation.relnamespace"
+    "   WHERE namespace.nspname = 'feature'"
+    f"     AND relation.relname = '{relation}'"
+    "     AND attribute.attname = 'geom'"
+    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
+    " ) THEN"
+    f" EXECUTE 'GRANT INSERT (geom), UPDATE (geom) ON feature.{relation}"
+    " TO ktm_feature_runtime';"
+    " END IF; END $legacy_geom$"
+    for relation in ("feature_routes",)
+)
+
+
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
     statement
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
@@ -176,7 +208,7 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
         f"ON feature.{relation} "
         "TO ktm_feature_state_procedure_owner",
     )
-) + _SHADOW_COLUMN_GRANTS
+) + _SHADOW_COLUMN_GRANTS + _LEGACY_GEOM_GRANTS
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;

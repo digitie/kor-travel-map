@@ -647,7 +647,7 @@ def _admin_geometry_hits_sql() -> str:
     envelope = _admin_bbox_envelope_sql()
     return f"""
   SELECT feature_id, geom
-  FROM feature.feature_routes
+  FROM feature.feature_route_geometries
   WHERE geom OPERATOR(x_extension.&&) {envelope}
     AND x_extension.ST_Intersects(geom, {envelope})
   UNION ALL
