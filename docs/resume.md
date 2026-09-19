@@ -30,6 +30,37 @@ feature_route_krforest_mountain_trails_job
 병목이다. 그리고 p95가 0.5초인데 timeout은 10초다. ReadTimeout은 20배 이상치이므로
 **timeout이 빡빡한 것이 아니라 이상치 한 번에 대한 내성이 0인 것**이 문제다.
 
+**그런데 범인은 geo가 아니었다 — 원인을 다시 쟀다.**
+
+처음에 나는 이 실패를 "geo가 느려서 timeout"으로 읽었다. 적대 리뷰가 그 전제를
+의심했고(4코어에 load 17인데 geo는 CPU 0.15%로 유휴), 읽기 전용으로 다시 재니
+전제가 틀렸다.
+
+```
+/proc/pressure/io   full avg300 = 25.5%   ← 전체 시간의 1/4 동안 모든 태스크가 디스크에 막힘
+/proc/pressure/cpu  full avg300 =  0.0%   ← CPU는 병목이 아니다
+geo 503 / E0500 (5시간)          0건      ← geo는 포화 신호를 낸 적이 없다
+D 상태 프로세스                  postgres
+04:05:00 최대 동시 run             8건
+```
+
+**04:03~04:05에 내가 feature job 7개를 동시에 띄웠고** weather 상시 run까지 8개가
+4코어·단일 회전 디스크에서 겹쳤다. `docker/dagster.yaml`의 주석이 이미 그 사실을
+적어 두었다 — *"provider job은 IO-bound이고 n150은 단일 회전 디스크를
+weather/concierge/geo/airport와 공유한다. 올려도 수집이 빨라지지 않는다."*
+그런데 geo를 대량 소비하는 asset에는 **pool이 붙어 있지 않다.** `concurrency.pools`
+(`default_limit: 1, granularity: run`)와 `OPINET_API_POOL`·`KREX_NOTICE_SNAPSHOT_POOL`
+이라는 선례가 이미 있는데 쓰이지 않았다.
+
+**그래서 순서가 바뀐다.** 동시성을 *올리는* 것(배치 지오코딩)은 이 호스트에서
+악화일 수 있다. 먼저 할 것은 ① geo 중량 asset에 pool을 붙여 **동시 실행을 묶고**,
+② reverse/region 왕복을 **따로 세는** 계측을 넣어(오늘 그 수가 이 저장소에도 geo
+저장소에도 없다) 분모를 만든 뒤, ③ 그 다음에 벽시계 deadline과 typed 분류를
+넣는 것이다. 재시도·동시성 수치는 ②의 실측 없이 고르면 안 된다.
+
+한계도 적어 둔다: pool은 `@asset` 데코레이터에 걸리는데 큐 경로는 그 래퍼를
+**우회한다**(`feature_update_runner.py:432-433`). 즉 pool은 예약 경로만 묶는다.
+
 **규모(조사로 정정됨).** MCST는 33,000이 아니라 13 slug 합계 **102,121행**이고,
 행 수 1위는 **MOIS 980,970행**인데 그쪽은 단일 트랜잭션이라 90만 번째 행의 timeout이
 앞서 적재한 전부를 rollback시킨다. dagster resource가 `region_fallback_radius_km=0.1`을
