@@ -4238,6 +4238,7 @@ CREATE FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_i
              WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
              WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
              WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
+               || jsonb_build_object('geom_digest', route_geom.geom_digest)
              WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
              ELSE '{}'::jsonb
            END AS feature_detail,
@@ -4255,6 +4256,8 @@ CREATE FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_i
     LEFT JOIN feature.feature_events AS event ON event.feature_id = core.feature_id
     LEFT JOIN feature.feature_notices AS notice ON notice.feature_id = core.feature_id
     LEFT JOIN feature.feature_routes AS route ON route.feature_id = core.feature_id
+    LEFT JOIN feature.feature_route_geometries AS route_geom
+      ON route_geom.feature_id = core.feature_id
     LEFT JOIN feature.feature_areas AS area_row ON area_row.feature_id = core.feature_id
     LEFT JOIN LATERAL (
       SELECT jsonb_agg(jsonb_build_array(
@@ -10808,12 +10811,16 @@ DECLARE
     v_public_ready boolean;
 BEGIN
     -- The UPDATE which invoked this trigger already holds NEW's parent row
-    -- lock.  Keep it until the two subtype cache rows have been refreshed.
+    -- lock.  Keep it until the subtype cache rows have been refreshed.
     v_public_ready := NEW.lifecycle_state = 'active'
         AND NEW.publication_state = 'published'
         AND NEW.quality_state = 'valid';
 
     UPDATE feature.feature_routes
+       SET public_ready = v_public_ready
+     WHERE feature_id = NEW.feature_id
+       AND public_ready IS DISTINCT FROM v_public_ready;
+    UPDATE feature.feature_route_geometries
        SET public_ready = v_public_ready
      WHERE feature_id = NEW.feature_id
        AND public_ready IS DISTINCT FROM v_public_ready;
@@ -15895,13 +15902,28 @@ CREATE TABLE feature.feature_price_values (
 ALTER TABLE feature.feature_price_values OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: feature_route_geometries; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.feature_route_geometries (
+    feature_id uuid NOT NULL,
+    kind character varying NOT NULL,
+    geom x_extension.geometry(MultiLineString,4326) NOT NULL,
+    public_ready boolean DEFAULT false NOT NULL,
+    geom_digest text GENERATED ALWAYS AS (encode(x_extension.digest(x_extension.st_asewkb(geom), 'sha256'::text), 'hex'::text)) STORED,
+    CONSTRAINT ck_feature_route_geometries_kind CHECK (((kind)::text = 'route'::text))
+);
+
+
+ALTER TABLE feature.feature_route_geometries OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_routes; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 CREATE TABLE feature.feature_routes (
     feature_id uuid NOT NULL,
     kind character varying NOT NULL,
-    geom x_extension.geometry(MultiLineString,4326) NOT NULL,
     route_type character varying NOT NULL,
     geometry_source character varying,
     geometry_status character varying,
@@ -16144,7 +16166,7 @@ CREATE VIEW feature.public_features AS
     core.created_at,
     core.updated_at,
     core.row_revision,
-    COALESCE(route.geom, area.geom) AS geom,
+    COALESCE(route_geom.geom, area.geom) AS geom,
     COALESCE(
         CASE core.kind
             WHEN 'place'::text THEN
@@ -16182,11 +16204,12 @@ CREATE VIEW feature.public_features AS
             END
             ELSE NULL::jsonb
         END, '{}'::jsonb) AS detail
-   FROM (((((feature.features core
+   FROM ((((((feature.features core
      LEFT JOIN feature.feature_places place ON ((place.feature_id = core.feature_id)))
      LEFT JOIN feature.feature_events event ON ((event.feature_id = core.feature_id)))
      LEFT JOIN feature.feature_notices notice ON ((notice.feature_id = core.feature_id)))
      LEFT JOIN feature.feature_routes route ON ((route.feature_id = core.feature_id)))
+     LEFT JOIN feature.feature_route_geometries route_geom ON ((route_geom.feature_id = core.feature_id)))
      LEFT JOIN feature.feature_areas area ON ((area.feature_id = core.feature_id)))
   WHERE ((core.lifecycle_state = 'active'::text) AND (core.publication_state = 'published'::text) AND (core.quality_state = 'valid'::text));
 
@@ -16429,7 +16452,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -18945,6 +18968,14 @@ ALTER TABLE ONLY feature.feature_places
 
 
 --
+-- Name: feature_route_geometries pk_feature_route_geometries; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_route_geometries
+    ADD CONSTRAINT pk_feature_route_geometries PRIMARY KEY (feature_id);
+
+
+--
 -- Name: feature_routes pk_feature_routes; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -20560,10 +20591,10 @@ CREATE INDEX idx_feature_places_opening_hours ON feature.feature_places USING bt
 
 
 --
--- Name: idx_feature_routes_geom_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: idx_feature_route_geometries_geom_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE INDEX idx_feature_routes_geom_gist ON feature.feature_routes USING gist (geom) WHERE public_ready;
+CREATE INDEX idx_feature_route_geometries_geom_gist ON feature.feature_route_geometries USING gist (geom) WHERE public_ready;
 
 
 --
@@ -23403,11 +23434,27 @@ ALTER TABLE ONLY feature.feature_places
 
 
 --
+-- Name: feature_route_geometries fk_feature_route_geometries_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_route_geometries
+    ADD CONSTRAINT fk_feature_route_geometries_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
+
+
+--
 -- Name: feature_routes fk_feature_routes_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.feature_routes
     ADD CONSTRAINT fk_feature_routes_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
+
+
+--
+-- Name: feature_routes fk_feature_routes_geometry; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_routes
+    ADD CONSTRAINT fk_feature_routes_geometry FOREIGN KEY (feature_id) REFERENCES feature.feature_route_geometries(feature_id) DEFERRABLE INITIALLY DEFERRED;
 
 
 --
@@ -26432,6 +26479,42 @@ GRANT UPDATE(payload) ON TABLE feature.feature_places TO ktm_feature_state_proce
 
 
 --
+-- Name: TABLE feature_route_geometries; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+
+
+--
+-- Name: COLUMN feature_route_geometries.feature_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(feature_id) ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+GRANT SELECT(feature_id) ON TABLE feature.feature_route_geometries TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_route_geometries.kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(kind) ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+
+
+--
+-- Name: COLUMN feature_route_geometries.geom; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(geom),UPDATE(geom) ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+
+
+--
+-- Name: COLUMN feature_route_geometries.public_ready; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(public_ready),UPDATE(public_ready) ON TABLE feature.feature_route_geometries TO ktm_feature_state_procedure_owner;
+
+
+--
 -- Name: TABLE feature_routes; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26453,14 +26536,6 @@ GRANT SELECT(feature_id),UPDATE(feature_id) ON TABLE feature.feature_routes TO k
 --
 
 GRANT INSERT(kind) ON TABLE feature.feature_routes TO ktm_feature_runtime;
-
-
---
--- Name: COLUMN feature_routes.geom; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-GRANT INSERT(geom),UPDATE(geom) ON TABLE feature.feature_routes TO ktm_feature_runtime;
-GRANT UPDATE(geom) ON TABLE feature.feature_routes TO ktm_feature_state_procedure_owner;
 
 
 --
