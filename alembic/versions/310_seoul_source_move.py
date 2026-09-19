@@ -33,6 +33,17 @@ Revises: 309_t39_feature_id_rekey
 SERIALIZABLE + 실행자 롤을 요구해 마이그레이션 경로에서 쓸 수 없기 때문이다 —
 그래서 그 프로시저가 하는 일(값 + 두 revision + `updated_at`)을 여기서 그대로 한다.
 
+## `RESET ROLE`을 하지 않는다
+
+이 저장소의 마이그레이션은 전부 `SET ROLE ktm_feature_schema_owner`를 **켠 채로
+끝난다.** 그 상태에서 alembic이 자기 `UPDATE alembic_version`을 내기 때문이다 —
+접속 로그인 롤에는 그 표의 UPDATE 권한이 없다. 롤을 되돌리면 본문이 다 성공한 뒤
+**버전 기록에서** `permission denied for table alembic_version`으로 죽는다.
+
+이 규약은 어디에도 적혀 있지 않았고, 2026-09-19에 이 마이그레이션이 그것을 깨서
+통합 검사 1,080건이 같은 원인으로 무너졌다. `tests/lint/test_migrations_keep_the_
+schema_owner_role.py`가 이제 그것을 센다.
+
 ## receipt head CHECK를 함께 넓힌다
 
 ``ops.application_schema_operation_receipts``의 ``destination_head`` CHECK는 **graph의
@@ -149,10 +160,16 @@ def upgrade() -> None:
     # `SET ROLE`을 먼저 열고 **UPDATE까지 그 안에서** 한다. `feature.curated_sources`의
     # 소유자가 `ktm_feature_schema_owner`이고, migrator 롤에 그 표의 UPDATE 권한이
     # 있다고 가정하지 않는다 — 이 저장소의 롤은 전부 `rolinherit=false`다.
+    #
+    # **`RESET ROLE`을 하지 않는다.** 이 저장소의 마이그레이션은 전부 `SET ROLE
+    # ktm_feature_schema_owner`를 켠 채로 끝나고, 그 상태에서 alembic이 자기
+    # `UPDATE alembic_version`을 낸다. 접속 로그인 롤에는 그 표의 UPDATE 권한이
+    # 없으므로, 롤을 되돌리면 마이그레이션 본문이 다 성공한 뒤 **버전 기록에서**
+    # `permission denied for table alembic_version`으로 죽는다(2026-09-19 CI 실측 —
+    # 통합 1,080건이 같은 원인으로 무너졌다).
     for statement in _UPGRADE_STATEMENTS:
         op.execute(statement)
     _apply(url=_NEW_URL, cycle="monthly", row_count=_NEW_ROW_COUNT, note=_NEW_NOTE)
-    op.execute("RESET ROLE")
 
 
 _RECEIPT_HEAD_NARROW: Final[str] = (
@@ -173,4 +190,4 @@ def downgrade() -> None:
     op.execute("SET ROLE ktm_feature_schema_owner")
     op.execute(_RECEIPT_HEAD_NARROW)
     _apply(url=_OLD_URL, cycle="one_time", row_count=_OLD_ROW_COUNT, note=_OLD_NOTE)
-    op.execute("RESET ROLE")
+    # upgrade와 같은 이유로 롤을 되돌리지 않는다.
