@@ -382,13 +382,19 @@ def _feature_load_assets() -> list[tuple[str, ast.AsyncFunctionDef | ast.Functio
     쿼터 결박 검사도 그 asset을 보지 못한다 — 하필 그런 asset이 쿼터가 가장 아픈
     자리다(2026-09-19: OpiNet이 run 예산 때문에 `max_retries=0`으로 갈렸다).
 
-    그래서 이름이 아니라 **`retry_policy`를 선언했다는 사실**로 고른다.
+    그래서 정책 **이름** 대신 두 구조를 본다 — ``@asset``이고 ``retry_policy``를
+    선언했다. ``@op``을 제외하는 이유는 이 파일이 다루는 것이 **상류를 부르는
+    provider 적재**이기 때문이다. `maintenance.py`의 정리 op들도 재시도하지만
+    그것들은 DB만 만지므로 쿼터 결박이 성립하지 않는다(정책 이름으로 고를 때는
+    그 구분이 우연히 맞아떨어졌다).
     """
 
     found: list[tuple[str, ast.AsyncFunctionDef | ast.FunctionDef]] = []
     for name, node in _functions():
         for decorator in node.decorator_list:
             if not isinstance(decorator, ast.Call):
+                continue
+            if ast.unparse(decorator.func).rsplit(".", 1)[-1] != "asset":
                 continue
             if any(keyword.arg == "retry_policy" for keyword in decorator.keywords):
                 found.append((name, node))
