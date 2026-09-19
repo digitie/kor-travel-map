@@ -1136,13 +1136,7 @@ BEGIN
         PERFORM 1 FROM feature.feature_routes WHERE feature_id = p_feature_id FOR UPDATE;
         IF NOT FOUND THEN RAISE EXCEPTION 'route subtype is missing' USING ERRCODE = '23514'; END IF;
         UPDATE feature.feature_routes AS route
-        SET geom = CASE
-            WHEN p_geometry_wkt ? 'route.geom'
-             AND NOT feature.has_active_feature_override(p_feature_id, 'route.geom')
-            THEN x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))
-            ELSE route.geom
-        END,
-            route_type = CASE
+        SET route_type = CASE
             WHEN p_values ? 'route.route_type'
              AND NOT feature.has_active_feature_override(p_feature_id, 'route.route_type')
             THEN p_values ->> 'route.route_type'
@@ -1209,6 +1203,14 @@ BEGIN
             ELSE route.payload
         END
       WHERE route.feature_id = p_feature_id;
+        UPDATE feature.feature_route_geometries AS route_geom
+        SET geom = CASE
+            WHEN p_geometry_wkt ? 'route.geom'
+             AND NOT feature.has_active_feature_override(p_feature_id, 'route.geom')
+            THEN x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))
+            ELSE route_geom.geom
+        END
+        WHERE route_geom.feature_id = p_feature_id;
     ELSIF v_feature.kind = 'area' AND (
         EXISTS (
             SELECT 1
@@ -2412,12 +2414,7 @@ BEGIN
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_override_subtype';
         END IF;
         UPDATE feature.feature_routes AS route
-        SET geom = CASE
-            WHEN p_geometry_wkt ? 'route.geom'
-            THEN x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))
-            ELSE route.geom
-        END,
-            route_type = CASE
+        SET route_type = CASE
             WHEN p_values ? 'route.route_type'
             THEN p_values ->> 'route.route_type'
             ELSE route.route_type
@@ -2473,6 +2470,13 @@ BEGIN
             ELSE route.payload
         END
       WHERE route.feature_id = p_feature_id;
+        UPDATE feature.feature_route_geometries AS route_geom
+        SET geom = CASE
+            WHEN p_geometry_wkt ? 'route.geom'
+            THEN x_extension.st_multi(x_extension.st_geomfromtext(p_geometry_wkt ->> 'route.geom', 4326))
+            ELSE route_geom.geom
+        END
+        WHERE route_geom.feature_id = p_feature_id;
     ELSIF v_feature.kind = 'area' AND (EXISTS (SELECT 1 FROM jsonb_object_keys(p_values) AS supplied_path(field_path) WHERE supplied_path.field_path LIKE 'area.%') OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_geometry_wkt) AS supplied_path(field_path) WHERE supplied_path.field_path LIKE 'area.%')) THEN
         PERFORM 1 FROM feature.feature_areas WHERE feature_id = p_feature_id FOR UPDATE;
         IF NOT FOUND THEN
@@ -4335,7 +4339,9 @@ effective_feature AS MATERIALIZED (
       WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
       WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
       WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
-      WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
+      WHEN 'route' THEN COALESCE(
+        to_jsonb(route) || jsonb_build_object('geom_digest', route_geom.geom_digest),
+        '{}'::jsonb)
       WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
       ELSE '{}'::jsonb
     END AS detail,
@@ -4362,6 +4368,8 @@ effective_feature AS MATERIALIZED (
   LEFT JOIN feature.feature_events AS event ON event.feature_id = core.feature_id
   LEFT JOIN feature.feature_notices AS notice ON notice.feature_id = core.feature_id
   LEFT JOIN feature.feature_routes AS route ON route.feature_id = core.feature_id
+  LEFT JOIN feature.feature_route_geometries AS route_geom
+    ON route_geom.feature_id = core.feature_id
   LEFT JOIN feature.feature_areas AS area_row ON area_row.feature_id = core.feature_id
   WHERE core.feature_id = p_feature_id
     AND core.lifecycle_state = 'active'
@@ -10103,12 +10111,7 @@ BEGIN
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_override_subtype';
         END IF;
         UPDATE feature.feature_routes AS route
-        SET geom = CASE
-            WHEN v_geometry_wkt ? 'route.geom'
-            THEN x_extension.st_multi(x_extension.st_geomfromtext(v_geometry_wkt ->> 'route.geom', 4326))
-            ELSE route.geom
-        END,
-            route_type = CASE
+        SET route_type = CASE
             WHEN v_values ? 'route.route_type'
             THEN v_values ->> 'route.route_type'
             ELSE route.route_type
@@ -10164,6 +10167,13 @@ BEGIN
             ELSE route.payload
         END
       WHERE route.feature_id = p_feature_id;
+        UPDATE feature.feature_route_geometries AS route_geom
+        SET geom = CASE
+            WHEN v_geometry_wkt ? 'route.geom'
+            THEN x_extension.st_multi(x_extension.st_geomfromtext(v_geometry_wkt ->> 'route.geom', 4326))
+            ELSE route_geom.geom
+        END
+        WHERE route_geom.feature_id = p_feature_id;
     ELSIF v_feature.kind = 'area' AND (EXISTS (SELECT 1 FROM jsonb_object_keys(v_values) AS supplied_path(field_path) WHERE supplied_path.field_path LIKE 'area.%') OR EXISTS (SELECT 1 FROM jsonb_object_keys(v_geometry_wkt) AS supplied_path(field_path) WHERE supplied_path.field_path LIKE 'area.%')) THEN
         PERFORM 1 FROM feature.feature_areas WHERE feature_id = p_feature_id FOR UPDATE;
         IF NOT FOUND THEN
@@ -17209,7 +17219,7 @@ CREATE TABLE ops.feature_override_field_paths (
     CONSTRAINT ck_feature_override_field_paths_geometry_kind CHECK ((((value_kind = 'geometry'::text) AND (geometry_type IS NOT NULL)) OR ((value_kind <> 'geometry'::text) AND (geometry_type IS NULL)))),
     CONSTRAINT ck_feature_override_field_paths_geometry_type CHECK (((geometry_type IS NULL) OR (geometry_type = ANY (ARRAY['POINT'::text, 'MULTILINESTRING'::text, 'MULTIPOLYGON'::text])))),
     CONSTRAINT ck_feature_override_field_paths_kind CHECK ((feature_kind = ANY (ARRAY['*'::text, 'place'::text, 'event'::text, 'notice'::text, 'route'::text, 'area'::text]))),
-    CONSTRAINT ck_feature_override_field_paths_relation CHECK ((target_relation = ANY (ARRAY['features'::text, 'feature_places'::text, 'feature_events'::text, 'feature_notices'::text, 'feature_routes'::text, 'feature_areas'::text]))),
+    CONSTRAINT ck_feature_override_field_paths_relation CHECK ((target_relation = ANY (ARRAY['features'::text, 'feature_places'::text, 'feature_events'::text, 'feature_notices'::text, 'feature_routes'::text, 'feature_route_geometries'::text, 'feature_areas'::text]))),
     CONSTRAINT ck_feature_override_field_paths_value_kind CHECK ((value_kind = ANY (ARRAY['text'::text, 'integer'::text, 'numeric'::text, 'boolean'::text, 'json_object'::text, 'json_array'::text, 'text_array'::text, 'date'::text, 'timestamptz'::text, 'uuid'::text, 'geometry'::text])))
 );
 
@@ -21879,6 +21889,13 @@ CREATE TRIGGER trg_feature_price_values_immutable BEFORE DELETE OR UPDATE ON fea
 
 
 --
+-- Name: feature_route_geometries trg_feature_route_geometries_public_ready; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_route_geometries_public_ready BEFORE INSERT OR UPDATE ON feature.feature_route_geometries FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+
+
+--
 -- Name: feature_routes trg_feature_routes_public_ready; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26483,6 +26500,8 @@ GRANT UPDATE(payload) ON TABLE feature.feature_places TO ktm_feature_state_proce
 --
 
 GRANT SELECT ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+GRANT SELECT ON TABLE feature.feature_route_geometries TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_route_geometries TO ktm_curation_command_owner;
 
 
 --
@@ -26505,6 +26524,7 @@ GRANT INSERT(kind) ON TABLE feature.feature_route_geometries TO ktm_feature_runt
 --
 
 GRANT INSERT(geom),UPDATE(geom) ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
+GRANT UPDATE(geom) ON TABLE feature.feature_route_geometries TO ktm_feature_state_procedure_owner;
 
 
 --
