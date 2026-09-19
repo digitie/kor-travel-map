@@ -66,7 +66,7 @@ def _fresh_id() -> str:
 
 
 async def test_a_route_without_geometry_cannot_commit(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """**핵심.** geometry 없는 route는 COMMIT에서 거절된다.
 
@@ -77,7 +77,7 @@ async def test_a_route_without_geometry_cannot_commit(
     feature_id = _fresh_id()
 
     async def _route_without_geometry() -> None:
-        async with pg_engine_with_migrations.begin() as conn:
+        async with migrated_engine.begin() as conn:
             await conn.execute(
                 _INSERT_FEATURE, {"feature_id": feature_id, "name": "no-geom"}
             )
@@ -93,18 +93,18 @@ async def test_a_route_without_geometry_cannot_commit(
 
 
 async def test_removing_the_geometry_cannot_commit(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """이미 있는 route의 geometry만 지우는 것도 막힌다."""
 
     feature_id = _fresh_id()
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "with-geom"})
         await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
         await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
 
     with pytest.raises(IntegrityError):
-        async with pg_engine_with_migrations.begin() as conn:
+        async with migrated_engine.begin() as conn:
             await conn.execute(
                 text(
                     "DELETE FROM feature.feature_route_geometries"
@@ -115,7 +115,7 @@ async def test_removing_the_geometry_cannot_commit(
 
 
 async def test_either_insertion_order_commits(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """**늘 거절하는 fence는 fence가 아니다.** geometry를 먼저 넣어도 통과한다.
 
@@ -124,12 +124,12 @@ async def test_either_insertion_order_commits(
     """
 
     feature_id = _fresh_id()
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "geom-first"})
         await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
         await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
 
-    async with pg_engine_with_migrations.connect() as conn:
+    async with migrated_engine.connect() as conn:
         found = (
             await conn.execute(
                 text(
@@ -143,7 +143,7 @@ async def test_either_insertion_order_commits(
 
 
 async def test_geom_digest_follows_the_geometry(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """생성 컬럼이므로 **어떤 쓰기 경로로 바꿔도** 지문이 따라간다.
 
@@ -152,13 +152,13 @@ async def test_geom_digest_follows_the_geometry(
     """
 
     feature_id = _fresh_id()
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "digest"})
         await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
         await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
 
     async def _digest() -> str:
-        async with pg_engine_with_migrations.connect() as conn:
+        async with migrated_engine.connect() as conn:
             return str(
                 (
                     await conn.execute(
@@ -176,7 +176,7 @@ async def test_geom_digest_follows_the_geometry(
 
     # **프로시저를 우회한 직접 UPDATE.** 이 경로가 덮이는 것이 생성 컬럼을 고른
     # 이유다 — 트리거였다면 `UPDATE OF geom_digest`가 발화하지 않는다.
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(
             text(
                 "UPDATE feature.feature_route_geometries"
@@ -195,7 +195,7 @@ async def test_geom_digest_follows_the_geometry(
 
 
 async def test_identical_geometry_reload_does_not_rewrite_the_row(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """같은 geometry를 다시 써도 행을 건드리지 않는다.
 
@@ -205,13 +205,13 @@ async def test_identical_geometry_reload_does_not_rewrite_the_row(
     """
 
     feature_id = _fresh_id()
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(_INSERT_FEATURE, {"feature_id": feature_id, "name": "quiet"})
         await conn.execute(_INSERT_GEOMETRY, {"feature_id": feature_id, "wkt": _ROUTE_WKT})
         await conn.execute(_INSERT_ROUTE, {"feature_id": feature_id})
 
     async def _xmin() -> str:
-        async with pg_engine_with_migrations.connect() as conn:
+        async with migrated_engine.connect() as conn:
             return str(
                 (
                     await conn.execute(
@@ -230,14 +230,14 @@ async def test_identical_geometry_reload_does_not_rewrite_the_row(
     assert statement is not None, "route geometry upsert 문장이 없다."
 
     before = await _xmin()
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(
             text(statement),
             {"feature_id": feature_id, "kind": "route", "geom_wkt": _ROUTE_WKT},
         )
     assert await _xmin() == before, "같은 geometry 재적재가 행을 다시 썼다."
 
-    async with pg_engine_with_migrations.begin() as conn:
+    async with migrated_engine.begin() as conn:
         await conn.execute(
             text(statement),
             {"feature_id": feature_id, "kind": "route", "geom_wkt": _OTHER_WKT},
@@ -248,7 +248,7 @@ async def test_identical_geometry_reload_does_not_rewrite_the_row(
 
 
 async def test_the_public_bbox_predicate_still_uses_the_partial_gist(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """공개 bbox가 **조인 없이** partial GiST를 그대로 탄다.
 
@@ -257,7 +257,7 @@ async def test_the_public_bbox_predicate_still_uses_the_partial_gist(
     "술어가 subtype GiST를 직접 탄다"는 성질을 잃는다.
     """
 
-    async with pg_engine_with_migrations.connect() as conn:
+    async with migrated_engine.connect() as conn:
         await conn.execute(text("SET enable_seqscan = off"))
         plan = "\n".join(
             str(row[0])
@@ -279,11 +279,11 @@ async def test_the_public_bbox_predicate_still_uses_the_partial_gist(
 
 
 async def test_feature_routes_no_longer_carries_geometry(
-    pg_engine_with_migrations: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
     """이전이 실제로 끝났는지 카탈로그로 본다 — 마이그레이션 파일이 아니라 DB를."""
 
-    async with pg_engine_with_migrations.connect() as conn:
+    async with migrated_engine.connect() as conn:
         rows = (
             await conn.execute(
                 text(

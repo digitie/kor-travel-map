@@ -121,8 +121,11 @@ ALTER TABLE feature.feature_routes
 CREATE INDEX idx_feature_route_geometries_geom_gist
     ON feature.feature_route_geometries USING gist (geom) WHERE public_ready;
 
--- 구 컬럼을 지운다. 컬럼에 달린 GiST 인덱스는 함께 사라진다.
-ALTER TABLE feature.feature_routes DROP COLUMN geom;
+-- **구 컬럼은 여기서 지우지 않는다.** `feature.public_features` 뷰가 그 컬럼을
+-- 참조하므로 먼저 뷰를 교체해야 한다 — 순서를 어기면
+-- `DependentObjectsStillExistError: cannot drop column geom ... other objects
+-- depend on it`이다(2026-09-19 n150 첫 실행이 이것을 잡았다). 드롭은
+-- `312_route_geometry_sidecar.py`가 뷰 교체 **뒤에** 낸다.
 
 GRANT SELECT ON TABLE feature.feature_route_geometries TO ktm_feature_runtime;
 GRANT INSERT (feature_id, kind, geom)

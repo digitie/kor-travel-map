@@ -263,6 +263,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     *_SIDECAR_TABLE,
     *_SEAL_FUNCTION,
     *_PUBLIC_VIEW,
+    # **뷰 교체 뒤에 드롭한다.** `feature.public_features`가 이 컬럼을 참조하므로
+    # 순서를 어기면 `DependentObjectsStillExistError`로 멎는다. 무손실 증명은
+    # 표 사이드카 안에서 **드롭 전에** 이미 끝났다.
+    "ALTER TABLE feature.feature_routes DROP COLUMN geom",
     *_PUBLIC_READY_TRIGGERS,
     _POSTCONDITION,
     # 트리거 함수의 소유자는 state procedure owner다 — 사이드카가 schema owner
