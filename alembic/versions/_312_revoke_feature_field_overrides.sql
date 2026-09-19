@@ -1,4 +1,4 @@
--- feature.revoke_feature_field_overrides — route geometry 쓰기를 보조 relation으로 옮긴다 (ADR-099 2단계).
+-- feature.apply_provider_feature_field_patch — route geometry 쓰기를 보조 relation으로 옮긴다 (ADR-099 2단계).
 --
 -- 판정: 교체(route geometry 쓰기 한정)
 --
@@ -487,21 +487,5 @@ BEGIN
     o_command_id := p_command_id;
 END;
 $$;
-
-
-DO $t39_owner$
-DECLARE
-    had_create boolean;
-BEGIN
-    -- 소유권 이전은 새 소유자가 담는 스키마의 CREATE 권한을 요구한다.
-    -- 302_m03_child_issuance.py:324-330이 `ops`에서 같은 함정을 만났다. 다만 그
-    -- 형태는 이미 CREATE를 가진 롤에서 권한을 빼앗으므로, 여기서는 **자기 상태를
-    -- 보고** 되돌린다. 2026-09-09 n150 첫 실행이 이것을 잡았다
-    -- (`permission denied for schema ops`).
-    had_create := has_schema_privilege('ktm_feature_state_procedure_owner', 'feature', 'CREATE');
-    IF NOT had_create THEN
-        EXECUTE 'GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner';
-    END IF;
-    EXECUTE '
 
 SET ROLE ktm_feature_schema_owner;
