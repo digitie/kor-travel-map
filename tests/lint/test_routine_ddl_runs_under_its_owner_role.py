@@ -338,7 +338,11 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
     통과 조건은 둘 중 하나다:
 
     - 트리거를 만드는 롤이 그 함수의 **소유자**이거나,
-    - 같은 마이그레이션이 그 앞에서 **그 롤에게 EXECUTE를 부여**했거나.
+    - 같은 마이그레이션이 그 앞에서 **그 롤에게 EXECUTE를 부여**했거나,
+    - 같은 마이그레이션이 그 함수를 **새로 만들었거나**(그 순간 ACL이 기본값이라
+      PUBLIC이 EXECUTE를 갖는다 — 301·306·307이 이 모양이고, 그래서 정당하다).
+      `CREATE OR REPLACE`는 여기 해당하지 않는다: 기존 ACL을 **보존**하므로 이미
+      좁혀진 함수는 좁혀진 채로 남는다.
     """
 
     owners = _head_owners()
@@ -348,12 +352,15 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
     for name, statements in _statement_groups("_UPGRADE_STATEMENTS"):
         role: str | None = None
         granted: set[tuple[str, str]] = set()
+        freshly_created: set[str] = set()
         for statement in statements:
             expanded = _sql_text(statement)
             head = _sql_head(expanded)
             if (set_role := _SET_ROLE.match(head)) is not None:
                 role = set_role.group(1)
                 continue
+            if (created := _CREATE.match(head)) is not None:
+                freshly_created.add(created.group(1))
             for grant in _GRANT_EXECUTE.finditer(expanded):
                 granted.add((grant.group(1), grant.group(2)))
             trigger = _TRIGGER.match(head)
@@ -365,7 +372,11 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
             if owner is None:
                 continue
             effective = role if role is not None else _LOGIN_ROLE
-            if effective == owner or (routine, effective) in granted:
+            if (
+                effective == owner
+                or (routine, effective) in granted
+                or routine in freshly_created
+            ):
                 continue
             wrong.append(
                 f"{name}: CREATE TRIGGER가 {routine}을 {effective}로 부는데 "
