@@ -375,18 +375,29 @@ def _quota_guarded_functions() -> set[str]:
 
 
 def _feature_load_assets() -> list[tuple[str, ast.AsyncFunctionDef | ast.FunctionDef]]:
-    """``FEATURE_LOAD_RETRY_POLICY``를 단 asset을 소스에서 유도한다."""
+    """**재시도 정책을 단** asset을 소스에서 유도한다.
+
+    종전에는 ``FEATURE_LOAD_RETRY_POLICY``라는 **이름**으로 골랐다. 그러면 정당한
+    이유로 다른 정책을 쓰는 asset이 생기는 순간 그것이 유도에서 빠지고, 이 파일의
+    쿼터 결박 검사도 그 asset을 보지 못한다 — 하필 그런 asset이 쿼터가 가장 아픈
+    자리다(2026-09-19: OpiNet이 run 예산 때문에 `max_retries=0`으로 갈렸다).
+
+    그래서 정책 **이름** 대신 두 구조를 본다 — ``@asset``이고 ``retry_policy``를
+    선언했다. ``@op``을 제외하는 이유는 이 파일이 다루는 것이 **상류를 부르는
+    provider 적재**이기 때문이다. `maintenance.py`의 정리 op들도 재시도하지만
+    그것들은 DB만 만지므로 쿼터 결박이 성립하지 않는다(정책 이름으로 고를 때는
+    그 구분이 우연히 맞아떨어졌다).
+    """
 
     found: list[tuple[str, ast.AsyncFunctionDef | ast.FunctionDef]] = []
     for name, node in _functions():
         for decorator in node.decorator_list:
             if not isinstance(decorator, ast.Call):
                 continue
-            for keyword in decorator.keywords:
-                if keyword.arg == "retry_policy" and ast.unparse(
-                    keyword.value
-                ).endswith("FEATURE_LOAD_RETRY_POLICY"):
-                    found.append((name, node))
+            if ast.unparse(decorator.func).rsplit(".", 1)[-1] != "asset":
+                continue
+            if any(keyword.arg == "retry_policy" for keyword in decorator.keywords):
+                found.append((name, node))
     return found
 
 

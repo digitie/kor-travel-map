@@ -204,27 +204,117 @@ def _lonlat_from_generic_keys(row: Mapping[str, Any]) -> tuple[float, float] | N
     return _validated_lonlat(lon, lat)
 
 
+#: 서울 열린데이터광장 주소 열은 시(市)를 빼고 온다 — "마포구 동교로 194".
+#:
+#: 이 원천은 서울시 데이터라 시 이름이 자명하다고 보고 생략한다. 그대로 두면
+#: 지오코딩이 같은 이름의 구를 가진 다른 시로 샐 수 있고, 무엇보다 사람이 보는
+#: 주소가 불완전하다. 좌표가 함께 오므로 적재 자체는 되지만, 주소는 주소대로
+#: 온전해야 한다.
+_SEOUL_ADDRESS_PREFIX: Final[str] = "서울특별시"
+
+
+def _seoul_full_address(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    # 이미 시 이름이 있으면 건드리지 않는다(원천이 형식을 바꿔도 두 번 붙지 않는다).
+    if raw.startswith("서울"):
+        return raw
+    return f"{_SEOUL_ADDRESS_PREFIX} {raw}"
+
+
+def _row_identifier(row: Mapping[str, Any], keys: tuple[str, ...]) -> str | None:
+    """식별자 열을 읽되 **JSON number의 소수점 꼬리만** 지운다.
+
+    서울 열린데이터광장은 ``STORE_SEQ_NO``를 JSON number로 준다 — ``2283.0``.
+    그대로 문자열로 만들면 자연키가 ``"2283.0"``이 되고, 원천이 언젠가 문자열
+    ``"2283"``으로 바꾸는 순간 같은 책방이 **새 feature로 다시 생긴다.**
+
+    **문자열 값은 건드리지 않는다.** 처음에는 ``float(text)``로 판단했는데, 그러면
+    ``"0012"`` → ``"12"``, ``"2283e2"`` → ``"228300"``처럼 **다른 원천의 식별자까지
+    바꾼다**(적대 리뷰 지적). 이 헬퍼는 한글 열 ``관리번호``에도 함께 걸리므로,
+    표기 정규화가 아니라 **JSON 타입 차이만** 흡수하도록 좁힌다 — bool은 int의
+    하위형이라 먼저 걸러낸다.
+    """
+
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            text = str(value).strip()
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))
+        elif isinstance(value, int):
+            text = str(value)
+        else:
+            text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _seoul_open_data_lonlat(row: Mapping[str, Any]) -> tuple[float, float] | None:
+    """``XCNTS``/``YDNTS``를 읽는다 — **이름이 뒤집혀 있다.**
+
+    서울 열린데이터광장 OA-21062의 출력 정의는 ``XCNTS``가 **위도**,
+    ``YDNTS``가 **경도**다(2026-09-19 라이브 확인: ``XCNTS=37.557…``,
+    ``YDNTS=126.922…``). X를 경도로 읽는 통념대로 일반 키 목록에 넣으면 조용히
+    뒤집힌 좌표가 들어온다 — 그래서 일반 경로를 쓰지 않고 여기서 **축을 명시**한다.
+
+    ``_validated_lonlat``이 한국 bbox로 한 번 더 걸러 주지만(경도 124~132와
+    위도 33~43은 겹치지 않는다) 그것은 그물이지 근거가 아니다.
+    """
+
+    lat = _row_float(row, ("XCNTS",))
+    lon = _row_float(row, ("YDNTS",))
+    if lon is None or lat is None:
+        return None
+    return _validated_lonlat(lon, lat)
+
+
 def _extract_seoul_bookstore(row: Mapping[str, Any]) -> _ExtractedRow:
+    """서울 책방 row → 공통 shape.
+
+    원천이 두 벌이다. 종전 data.go.kr odcloud 자동변환(한글 열 이름)은 2026-09-18
+    기준 **404 `등록되지 않은 서비스 입니다`**로 사라졌고, 대체 원천인 서울
+    열린데이터광장 OA-21062(`TbSlibBookstoreInfo`)는 영문 열 이름을 쓴다. 한글 열을
+    **지우지 않는다** — 백필로 남아 있는 odcloud CSV를 다시 통과시킬 수 있어야 한다.
+    """
+
+    seoul_open_data_lonlat = _seoul_open_data_lonlat(row)
     return _ExtractedRow(
-        name=_row_text(row, ("책방명", "서점명", "상호명", "상호", "명칭", "name")),
-        raw_address=_row_text(
-            row,
-            (
-                "주소",
-                "도로명주소",
-                "소재지도로명주소",
-                "소재지",
-                "상세주소",
-                "addr",
-            ),
+        name=_row_text(
+            row, ("책방명", "서점명", "상호명", "상호", "명칭", "STORE_NAME", "name")
         ),
-        lonlat=_lonlat_from_generic_keys(row),
-        phone=_row_text(row, ("전화번호", "연락처", "대표전화", "tel")),
-        natural_id=_row_text(row, ("관리번호", "책방ID", "서점ID", "id")),
+        raw_address=_seoul_full_address(
+            _row_text(
+                row,
+                (
+                    "주소",
+                    "도로명주소",
+                    "소재지도로명주소",
+                    "소재지",
+                    "상세주소",
+                    "ADRES",
+                    "addr",
+                ),
+            )
+        ),
+        lonlat=seoul_open_data_lonlat or _lonlat_from_generic_keys(row),
+        phone=_row_text(row, ("전화번호", "연락처", "대표전화", "TEL_NO", "tel")),
+        natural_id=_row_identifier(
+            row, ("관리번호", "책방ID", "서점ID", "STORE_SEQ_NO", "id")
+        ),
         facility_info={
-            "source_category": _joined(row, ("책방구분명", "운영형태", "종류", "구분")),
-            "homepage_url": _row_text(row, ("홈페이지", "홈페이지주소", "URL", "url")),
+            "source_category": _joined(
+                row, ("책방구분명", "운영형태", "종류", "구분", "STORE_TYPE_NAME")
+            ),
+            "homepage_url": _row_text(
+                row, ("홈페이지", "홈페이지주소", "URL", "HMPG_URL", "url")
+            ),
             "description": _row_text(row, ("책방소개", "공간소개", "소개", "설명")),
+            "district": _row_text(row, ("자치구", "구", "CODE_VALUE")),
+            "sns_url": _row_text(row, ("SNS", "sns")),
         },
     )
 

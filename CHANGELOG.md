@@ -5,6 +5,88 @@
 
 ## [Unreleased]
 
+### 적대 리뷰 반영 — 키 유출·빈 문자열 가드·항진명제 검사 (2026-09-19)
+
+- **FIXED (인증키 유출)**: 서울 열린데이터광장은 인증키를 URL **경로**에 받는데
+  `response.raise_for_status()`가 만드는 `httpx.HTTPStatusError` 메시지가 URL
+  전체를 담아 Dagster step-failure 이벤트·compute log에 평문으로 남았다. 상태
+  코드만 싣는 `SeoulOpenDataError`로 바꾸고 `from None`으로 체인을 끊는다
+  (형제 `python-datagokr-api`가 같은 이유로 쓰는 규범).
+- **FIXED (빈 문자열이 credential 가드를 무력화)**: compose가 자격증명을
+  `${X:-}`로 배선해 변수가 **항상 정의되고 값이 빈 문자열**이라, 모든 provider
+  fetcher의 `if secret is None` 가드가 배포 형상에서 한 번도 발화하지 않았다.
+  `SettingsConfigDict(env_ignore_empty=True)`.
+- **CHANGED (OpiNet 재시도)**: OpiNet asset 전용 `RetryPolicy(max_retries=0)`.
+  step 재시도는 asset을 처음부터 다시 실행하고 그 실행이 run 호출 예산을 **전부
+  다시 쓴다** — 공통 정책(`max_retries=3`)이면 하루 최악 560회로 무료키 300회를
+  넘는다. 이 모드는 시군 윈도를 날짜로 회전시키므로 올바른 재시도 주기는 60초가
+  아니라 다음 스케줄이다.
+- **FIXED (조용한 0건 둘)**: 서울 fetcher의 첫 페이지 0건·첫 요청 `INFO-200`이
+  정상 종료였다(authoritative 적재라 sync cursor가 전진해 수집 실패가 신선한
+  성공으로 보인다). MCST는 시도 표식이 하나도 없는 stream이 0건 적재로 초록이
+  됐다. 둘 다 실패다. 행이 하나일 때 `row`가 단일 object로 오는 모양도 정규화한다.
+- **FIXED (`allow_retries`)**: `McstSlugFailure.retryable`을 fetcher가 예외
+  타입으로 판정하고, 실패가 **전부 비재시도일 때만** 재시도를 닫는다. 종전에는
+  연결 끊김 한 번이 그 달의 적재를 통째로 버렸다.
+- **FIXED (`_row_identifier`)**: `float()` 정규화가 한글 열 `관리번호`에도 걸려
+  `"0012"` → `"12"`, `"2283e2"` → `"228300"`로 자연키를 바꿨다. JSON number
+  타입일 때만 소수점 꼬리를 지운다.
+- **FIXED (항진명제 검사 셋)**: 좌표 축 검사(`_validated_lonlat`의 bbox 자동
+  스왑이 되돌려 줬다) · INFO-200 종료 검사(두 번째 요청을 보내지 않았다) ·
+  키 유출 검사(테스트 대역의 `raise_for_status`가 무조건 `None`이었다).
+- **FIXED (페이지 사전 경고)**: `page_no != 1` 가드 때문에 총계를 두 번째
+  페이지에서 주는 provider에서는 영영 뜨지 않았다. `_DECLARED_PAGE_SLACK`의
+  docstring이 새 상수 삽입으로 고아가 된 것도 되돌린다.
+- **ADDED (alembic 310)**: `feature.curated_sources`의 서울 책방 행이 죽은
+  data.go.kr URL, `row_count=555`, 그리고 **뜻이 뒤집힌** freshness_note를 들고
+  있었다(옮겨 간 바로 그 포털을 "종료"라고 말한다). admin UI와 공개 curation
+  API가 읽는 값이다. seed는 봉인된 baseline이라 조정기 쪽을 고친다.
+- **ADDED (`scripts/load-env.sh`)**: 서울 키의 짧은 이름(`SEOUL_OPEN_DATA_API_KEY`)
+  매핑. compose와 문서가 그 이름을 정본으로 부르는데 아는 자리가 compose 보간
+  한 군데뿐이었다.
+
+### 서울 책방 원천 이전 · provider 핀 상향 · OpiNet 적재 기본 ON (2026-09-19)
+
+- **CHANGED (provider 핀)**: `python-krforest-api@70814c9`(표준데이터 gateway가
+  `{header, body}` 래퍼를 벗어 산림 표준데이터 3종이 파싱에서 전멸한 것을 수용),
+  `python-mcst-api@0f5a8fe`(아동서점 CSV 원천이 fileDataNo 282 → 484로 이동).
+  **핀을 올리지 않으면 머지한 provider 수정이 적용되지 않는다.**
+- **CHANGED (서울 책방 원천)**: data.go.kr odcloud 자동변환 API가 404
+  `등록되지 않은 서비스 입니다`로 사라져 **원천만** 서울 열린데이터광장
+  OA-21062(`TbSlibBookstoreInfo`)로 옮겼다. dataset_key
+  (`datagokr_seoul_bookstores`)와 provider 이름(`python-datagokr-api`)은
+  provider_dataset row · operation key · 봉인된 300 카탈로그가 쥐고 있는
+  **레지스트리 신원**이라 바꾸지 않는다. 분기는
+  `dagster.provider_fetchers._FILE_DATA_SOURCE_OVERRIDES` 한 줄이며, 호출자가
+  둘(Dagster resource + feature-update worker)이라 fetcher 안에 둔다.
+- **ADDED (`SEOUL_OPEN_DATA_API_KEY`)**: 서울시 자체 발급 인증키.
+  `DATA_GO_KR_SERVICE_KEY`로는 이 포털이 열리지 않는다. compose 두 서비스에
+  배선했고 같은 배선이 Manager에도 들어갔다(prod의 실효 compose는 그쪽이다).
+- **ADDED (`SeoulOpenDataError`)**: 이 포털은 **오류도 HTTP 200으로 준다.** json을
+  요청해도 인증 실패는 XML로 온다. 상태 코드나 파싱 성공으로 판정하면 조용한 0건이
+  되고, 이 asset은 authoritative 적재라 그 0건이 sync cursor를 전진시켜 수집 실패를
+  신선한 성공으로 위장한다.
+- **CHANGED (OpiNet)**: compose 기본 모드를 `disabled` → `low_top_area`. 선택자를
+  넘기는 것만으로는 부족했다 — 기본값이 `disabled`면 배포가 끝나도 적재가 켜지지
+  않아 호스트 `.env`를 손으로 고쳐야 하고, 그 손 편집이 prod와 문서를 어긋나게
+  만든다. compose가 아예 넘기지 않던 `OPINET_LOW_TOP_MAX_CALLS`/
+  `OPINET_RUN_CALL_BUDGET`도 함께 배선한다.
+- **FIXED (`.env.example` OpiNet 노브)**: 한도를 300회/일로 정정한 뒤에도 1,500 시절
+  값 180/600이 남아 있었다. 이 파일을 복사해 쓰면 compose 기본값(90/140)을 **덮어**
+  첫날에 한도를 넘긴다.
+- **FIXED (MCST asset 적재 범위)**: feature-update worker는 fetcher를 slug 하나로
+  좁혀 부르는데 asset은 `MCST_FILE_DATASETS` 전체를 돌았다 — 나머지 12종이 **시도한
+  적도 없이** 빈 authoritative 적재와 sync-success를 받았다. fetcher가 slug마다
+  `McstSlugAttempt`를 흘리고 asset은 그 집합만 돈다.
+- **ADDED (페이지 상한 사전 경고)**: 선언 건수가 절대 상한의 50%를 넘게 요구하면
+  `ProviderPaginationOverrun`에 닿기 **전에** 경고한다. 문구는 "상한을 올려라"가
+  아니라 "증분 수집으로 바꿀 때인지 보라"다 — 상한을 계속 올리는 것은 같은 사고를
+  미루는 일이다.
+- **CHANGED (schedule)**: 원천이 살아났으므로
+  `feature_place_datagokr_seoul_bookstores_monthly_schedule`을
+  `DISABLED_FEATURE_LOAD_SCHEDULES`에서 뺐다. 되살린 근거는 원천 교체이지
+  활용신청이 아니다.
+
 ### provider 핀 8종 상향 — 그리고 두 곳의 조용한 절단을 막는다 (2026-09-11)
 
 - **CHANGED (provider 핀)**: datagokr · kma · khoa · visitkorea · knps · krforest ·

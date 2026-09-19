@@ -57,6 +57,12 @@
         "308_t39_provider_identities"
       ],
       "revision": "309_t39_feature_id_rekey"
+    },
+    {
+      "down_revision": [
+        "309_t39_feature_id_rekey"
+      ],
+      "revision": "310_seoul_source_move"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

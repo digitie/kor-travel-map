@@ -84,6 +84,8 @@ __all__ = [
     "MCST_EXCLUDED_FILE_DATASETS",
     "McstDatasetSpec",
     "McstDialect",
+    "McstSlugAttempt",
+    "McstSlugFailure",
     "file_rows_to_bundles",
     "parse_kcisa_coordinates",
 ]
@@ -271,6 +273,61 @@ MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
     ),
 }
 """적재 제외 3 dataset과 사유 (#395 — 문서 `docs/etl/mcst-feature-etl.md` §3)."""
+
+
+# ── slug 수집 실패 표식 ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class McstSlugAttempt:
+    """이 run이 그 slug의 수집을 **시도했다**는 표식.
+
+    asset은 종전에 ``MCST_FILE_DATASETS`` **전체**를 돌며 적재했다. 그런데
+    feature-update worker 경로는 fetcher를 **slug 하나로 좁혀서**
+    호출한다(``_mcst_resources``). 그 상태로 13개를 다 돌면 나머지 12개가
+    **시도한 적도 없는데** 빈 authoritative 적재와 sync-success를 받는다 —
+    수집하지 않은 dataset이 신선한 것으로 보이게 된다.
+
+    그래서 fetcher가 slug마다 이 표식을 먼저 흘리고, asset은 **그 집합만**
+    돈다. 전량 경로에서는 13개가 모두 시도되므로 종전 동작 그대로이고,
+    상류가 정말 0건인 dataset은 여전히 빈 스냅샷으로 봉인된다 — 그 둘을
+    가르는 것이 이 표식의 전부다."""
+
+    slug: str
+
+
+@dataclass(frozen=True, slots=True)
+class McstSlugFailure:
+    """한 slug의 **수집**이 실패했다는 표식.
+
+    이 provider는 slug 13개를 한 stream으로 흘리고 asset이 slug별로 나눠
+    적재한다. 그런데 stream을 리스트로 걷는 쪽(`_record_list`)이 예외를 그대로
+    통과시키므로, **한 slug에서 예외가 나면 13개 전부가 0건이 된다** — 앞서
+    수집해 둔 slug의 행까지 함께 버려진다(2026-09-18 prod: 아동서점 원천 이동
+    하나로 13개 dataset 전멸).
+
+    그래서 수집 실패를 **예외 대신 이 값으로** 흘린다. 조용한 skip이 아니다 —
+    asset이 이 표식을 받은 slug는 적재를 **건너뛰고** run 전체는 **실패로
+    끝낸다**.
+
+    건너뛰는 이유는 **은퇴가 아니라 위장이다.** 이 provider의 적재는
+    ``retire_absent_from_snapshot``을 넘기지 않으므로 빈 목록이 기존 feature를
+    지우지는 않는다(코드로 확인함). 대신 빈 목록을 적재하면 그 dataset의
+    **sync cursor가 전진해 수집 실패가 신선한 성공으로 보이고**, curation seal이
+    관측한 적 없는 집합을 권위로 봉인한다. 실제 은퇴가 일어나는 자리는
+    ``retire_absent_from_snapshot=True``인 krforest 쪽이다.
+
+    ``retryable``은 **같은 run 안에서 나아질 수 있는 종류인가**를 말한다. 원천
+    이동이나 스키마 변경은 재시도해도 같은 자리에서 또 죽지만, 연결 끊김·타임아웃은
+    다음 시도에서 지나갈 수 있다. 이 구분이 없으면 asset이 전자의 이유로 붙인
+    ``allow_retries=False``를 **일시적 네트워크 실패에도 그대로 적용한다**(적대 리뷰
+    지적). 판정은 fetcher가 예외를 보고 한다 — 표식을 만드는 자리가 유일하게
+    예외 타입을 아는 자리다.
+    """
+
+    slug: str
+    reason: str
+    retryable: bool = False
 
 
 # ── COORDINATES 파서 ─────────────────────────────────────────────────────

@@ -19,7 +19,14 @@ import importlib
 import logging
 import math
 import pathlib
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Iterator,
+    Mapping,
+)
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
@@ -38,8 +45,10 @@ from sqlalchemy.orm import Session
 from . import upstream_retry
 from .provider_pagination import (
     ProviderPage,
+    ProviderPaginationOverrun,
     aiter_paginated_items,
 )
+from .quota_exhaustion import quota_exhaustion_cause
 from .upstream_requests import note_upstream_request
 from .upstream_retry import retry_upstream_awaitable
 
@@ -54,11 +63,13 @@ __all__ = [
     "KrexRestAreaWeatherUnavailable",
     "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
+    "SeoulOpenDataError",
     "fetch_airkorea_air_quality",
     "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
+    "fetch_seoul_open_data_bookstores",
     "fetch_kma_weather_alerts",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
@@ -1289,12 +1300,229 @@ async def fetch_standard_special_streets(
         await client.aclose()
 
 
+#: 서울 열린데이터광장 OpenAPI base. **https가 없다** — 8088 포트는 TLS를 받지
+#: 않는다(2026-09-19 실측: curl 35 SSL connect error). 인증키가 경로에 실려
+#: 평문으로 나간다는 뜻이고, 그래서 이 키는 **읽기 전용 공개데이터 전용**으로만
+#: 쓴다. data.go.kr 키를 여기 재사용하지 않는 이유이기도 하다.
+_SEOUL_OPEN_DATA_BASE_URL: Final = "http://openapi.seoul.go.kr:8088"
+
+#: 서울 책방(서점) 현황정보 OA-21062의 서비스명.
+_SEOUL_BOOKSTORE_SERVICE: Final = "TbSlibBookstoreInfo"
+
+#: 한 요청의 행 수. 포털이 1000을 넘기면 ``ERROR-336``으로 거절한다.
+_SEOUL_OPEN_DATA_PAGE_SIZE: Final = 1_000
+
+#: 2026-09-19 실측 총 행 수(`list_total_count`). 상한이 이 값보다 충분히 큰지
+#: 검사가 대조한다 — 상한을 실측에 붙여 두면 원천이 조금만 늘어도 잘린다.
+_SEOUL_BOOKSTORE_DECLARED_ROWS: Final = 606
+
+#: 페이지 상한. 1000행 x 20 = 20,000행으로 실측(606)의 30배가 넘는다.
+#: 상한은 무한 루프 차단용이지 수집량 조절 손잡이가 아니다.
+_SEOUL_OPEN_DATA_MAX_PAGES: Final = 20
+
+#: 정상 응답 코드와 "더 없음" 코드.
+_SEOUL_OK_CODE: Final = "INFO-000"
+_SEOUL_NO_DATA_CODE: Final = "INFO-200"
+
+
+class SeoulOpenDataError(RuntimeError):
+    """서울 열린데이터광장이 데이터 대신 오류를 돌려줬다.
+
+    이 포털은 **오류도 HTTP 200으로 준다.** 게다가 ``json``을 요청해도 인증 실패는
+    XML(``<RESULT><CODE>INFO-100</CODE>``)로 온다(2026-09-19 실측). 상태 코드나
+    파싱 성공으로 판정하면 조용히 0건이 되므로 본문의 ``RESULT.CODE``를 본다.
+    """
+
+
+def _is_transient_upstream_error(exc: BaseException) -> bool:
+    """같은 run을 다시 돌리면 지나갈 수 있는 실패인가.
+
+    네트워크 계층(연결·타임아웃·읽기 오류)만 True다. HTTP 상태 오류는 제외한다 —
+    404/410처럼 원천이 사라진 응답이 그쪽으로 오고, 그것은 재시도로 나아지지
+    않는다. 5xx는 나아질 수 있지만 그 구분까지 넣으면 판정이 상류 운영 상태에
+    의존하게 되므로, **네트워크 계층만** 재시도 가능으로 본다.
+    """
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if isinstance(exc, httpx.TransportError):
+        return True
+    return isinstance(exc, TimeoutError | ConnectionError)
+
+
+async def fetch_seoul_open_data_bookstores(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """서울 책방(OA-21062) row를 서울 열린데이터광장에서 stream한다.
+
+    종전 원천인 data.go.kr odcloud 자동변환 API는 2026-09-18 기준
+    **404 ``등록되지 않은 서비스 입니다``**로 사라졌다(날조한 데이터셋 번호와 같은
+    응답이고 swagger 네임스페이스도 404다). 활용신청으로 되살릴 수 있는 종류가
+    아니라 원천 자체를 옮긴다.
+    """
+    secret = settings.seoul_open_data_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "서울 책방 live fetch에는 KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY "
+            "(source SEOUL_OPEN_DATA_API_KEY)가 필요하다. data.go.kr 키와 **다른 "
+            "포털의 키**라 DATA_GO_KR_SERVICE_KEY로는 호출되지 않는다."
+        )
+    api_key = secret.get_secret_value()
+
+    start = 1
+    pages = 0
+    async with httpx.AsyncClient(
+        base_url=_SEOUL_OPEN_DATA_BASE_URL, timeout=60.0
+    ) as client:
+        while True:
+            if pages >= _SEOUL_OPEN_DATA_MAX_PAGES:
+                raise ProviderPaginationOverrun(
+                    f"서울 책방 page 상한 {_SEOUL_OPEN_DATA_MAX_PAGES}를 넘겼다 "
+                    f"(수신 {start - 1}건, 선언 {_SEOUL_BOOKSTORE_DECLARED_ROWS})"
+                )
+            end = start + _SEOUL_OPEN_DATA_PAGE_SIZE - 1
+            note_upstream_request()
+            response = await client.get(
+                f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
+            )
+            _raise_seoul_status(response)
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                # json을 요청했는데 XML이 왔다 = 인증 실패. 본문을 그대로 싣지
+                # 않는다 — 키가 경로에 있어 에코될 수 있다.
+                raise SeoulOpenDataError(
+                    "서울 열린데이터광장이 JSON이 아닌 응답을 줬다(인증 실패 시 "
+                    f"XML로 온다): {type(exc).__name__}"
+                ) from None
+            if not isinstance(payload, dict):
+                raise SeoulOpenDataError("서울 열린데이터광장 응답이 JSON object가 아니다.")
+
+            envelope = payload.get(_SEOUL_BOOKSTORE_SERVICE)
+            if not isinstance(envelope, dict):
+                # 범위를 넘기면 서비스 봉투 없이 RESULT만 온다.
+                code = _seoul_result_code(payload)
+                _stop_or_fail_seoul(code, first_page=pages == 0)
+                return
+
+            code = _seoul_result_code(envelope)
+            if code != _SEOUL_OK_CODE:
+                _stop_or_fail_seoul(code, first_page=pages == 0)
+                return
+
+            rows = _seoul_rows(envelope)
+            if not rows:
+                if pages == 0:
+                    # **첫 페이지 0건은 종료가 아니라 실패다.** 이 fetcher가 흘리는
+                    # 행은 `authoritative_snapshot_complete=True`로 봉인되므로,
+                    # 조용한 0건은 그 dataset의 sync cursor를 전진시켜 수집 실패를
+                    # 신선한 성공으로 위장한다. 저장소 공통 페이지네이터의
+                    # `first_page_end_of_pages_is_failure`와 같은 규칙이다.
+                    raise SeoulOpenDataError(
+                        "서울 책방 첫 페이지가 0건이다 — 정상 응답 코드라도 전량이 "
+                        "비었다면 수집 실패로 본다(빈 스냅샷을 권위로 봉인하면 "
+                        "수집 실패가 신선한 성공으로 보인다)."
+                    )
+                return
+            for row in rows:
+                yield row
+
+            pages += 1
+            start += len(rows)
+            total = envelope.get("list_total_count")
+            # 총계를 **신뢰하되 검증한다** — 총계가 없거나 이상하면 빈 페이지가
+            # 나올 때까지 돈다(상한이 그것을 막는다).
+            if isinstance(total, int) and start > total:
+                return
+
+
+def _raise_seoul_status(response: httpx.Response) -> None:
+    """HTTP 오류를 **키 없는** 예외로 바꾼다.
+
+    ``response.raise_for_status()``가 만드는 ``httpx.HTTPStatusError``의 메시지는
+    요청 URL 전체를 담는다. 이 포털은 인증키를 **경로**에 받으므로 그 메시지가
+    Dagster step-failure 이벤트와 compute log에 키를 평문으로 남긴다
+    (큐 경로는 ``raise ProviderDatasetRefreshFailure(...) from exc``로 체인까지
+    보존한다). 형제 라이브러리 ``python-datagokr-api``가 같은 이유로
+    ``copy_remove_param("serviceKey") + from None``을 쓴다 — 여기도 같은 규범을
+    따른다. 상태 코드만 싣고 체인을 끊는다.
+    """
+
+    if response.is_success:
+        return
+    raise SeoulOpenDataError(
+        f"서울 열린데이터광장이 HTTP {response.status_code}를 줬다 "
+        "(URL은 싣지 않는다 — 인증키가 경로에 있다)."
+    )
+
+
+def _stop_or_fail_seoul(code: str, *, first_page: bool) -> None:
+    """``INFO-200``은 종료, 나머지는 실패. 단 **첫 페이지 0건은 실패다.**"""
+
+    if code == _SEOUL_NO_DATA_CODE and not first_page:
+        return
+    if code == _SEOUL_NO_DATA_CODE:
+        raise SeoulOpenDataError(
+            "서울 책방 첫 요청이 INFO-200(데이터 없음)이다 — 전량이 사라졌거나 "
+            "서비스명이 바뀐 것이지 정상 종료가 아니다."
+        )
+    raise SeoulOpenDataError(f"서울 열린데이터광장 오류: {code}")
+
+
+def _seoul_rows(envelope: Mapping[str, Any]) -> list[Any]:
+    """``row``를 리스트로 정규화한다.
+
+    이 포털은 행이 하나일 때 list가 아니라 object 하나를 주는 서비스가 있다.
+    그 모양을 list가 아니라고 버리면 **1건짜리 응답이 0건으로 보인다** — 위의
+    첫 페이지 가드와 합쳐지면 실패로 끝나므로 조용하지는 않지만, 애초에 틀린
+    판정이다.
+    """
+
+    rows = envelope.get("row")
+    if isinstance(rows, Mapping):
+        return [rows]
+    if isinstance(rows, list):
+        return rows
+    return []
+
+
+def _seoul_result_code(payload: Mapping[str, Any]) -> str:
+    result = payload.get("RESULT")
+    if isinstance(result, Mapping):
+        code = result.get("CODE")
+        if isinstance(code, str):
+            return code
+    return "UNKNOWN"
+
+
+#: odcloud를 떠난 dataset → 대체 원천 fetcher.
+#:
+#: dataset_key와 provider 이름(`python-datagokr-api`)은 **레지스트리 신원**이라
+#: 바꾸지 않는다 — provider_dataset row, operation key
+#: (`feature_place_datagokr_seoul_bookstores_job`), 봉인된 300 카탈로그가 전부 그
+#: 이름을 쥐고 있다. 바뀐 것은 원천뿐이고, 그 사실을 이 표가 한 줄로 말한다.
+_FILE_DATA_SOURCE_OVERRIDES: Final[
+    dict[str, Callable[[KorTravelMapSettings], AsyncIterator[Any]]]
+] = {"datagokr_seoul_bookstores": fetch_seoul_open_data_bookstores}
+
+
 async def fetch_datagokr_file_data_records(
     settings: KorTravelMapSettings,
     *,
     dataset_key: str,
 ) -> AsyncIterator[Any]:
-    """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다."""
+    """data.go.kr fileData 자동변환 API raw row를 datagokr public client로 stream한다.
+
+    원천이 사라진 dataset은 ``_FILE_DATA_SOURCE_OVERRIDES``가 다른 fetcher로
+    보낸다. 분기를 여기 두는 이유는 호출자가 둘(Dagster resource와 feature-update
+    worker)이라 한쪽에만 넣으면 경로마다 원천이 달라지기 때문이다.
+    """
+    override = _FILE_DATA_SOURCE_OVERRIDES.get(dataset_key)
+    if override is not None:
+        async for row in override(settings):
+            yield row
+        return
+
     secret = settings.data_go_kr_service_key
     if secret is None:
         raise ProviderCredentialMissing(
@@ -1369,7 +1597,11 @@ async def fetch_mcst_culture_records(
     generator, ``finally``에서 ``await client.aclose()``.
     """
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
-    from kortravelmap.providers.mcst import MCST_FILE_DATASETS
+    from kortravelmap.providers.mcst import (
+        MCST_FILE_DATASETS,
+        McstSlugAttempt,
+        McstSlugFailure,
+    )
 
     selected_slugs = tuple(MCST_FILE_DATASETS) if slugs is None else tuple(slugs)
     unknown = sorted(set(selected_slugs) - set(MCST_FILE_DATASETS))
@@ -1382,13 +1614,43 @@ async def fetch_mcst_culture_records(
         for slug in selected_slugs:
             # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
             # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
+            # **시도했다**는 사실을 먼저 알린다 — asset이 이 집합만 적재한다.
+            # worker 경로는 slug 하나로 좁혀 부르므로, 이것이 없으면 나머지
+            # 12개가 시도한 적도 없이 빈 적재와 sync-success를 받는다.
+            yield McstSlugAttempt(slug=slug)
             note_upstream_request()
             seen = 0
-            async for row in client.iter_csv(slug):
-                seen += 1
-                yield (slug, row)
-                if seen >= max_items:
-                    break
+            try:
+                async for row in client.iter_csv(slug):
+                    seen += 1
+                    yield (slug, row)
+                    if seen >= max_items:
+                        break
+            except Exception as exc:  # noqa: BLE001 — 아래에서 다시 가른다
+                # **한 slug의 상류 변화가 13개를 전멸시키지 않게 한다.**
+                # 이 stream을 리스트로 걷는 쪽(`_record_list`)은 예외를 그대로
+                # 통과시키므로, 여기서 raise하면 앞서 수집해 둔 slug의 행까지
+                # 함께 버려지고 뒤의 slug는 수집조차 되지 않는다(2026-09-18
+                # prod: 아동서점 원천 이동 하나로 13개 dataset 전멸).
+                #
+                # **쿼터 소진은 예외다.** 그것은 slug가 아니라 run 전체의
+                # 자원이 바닥난 것이라, 남은 slug를 계속 부르면 요청만 더 쓴다.
+                # 그대로 올려보내 terminal 처리 경로를 타게 한다.
+                if quota_exhaustion_cause(exc) is not None:
+                    raise
+                # 조용한 skip이 아니다 — asset이 이 표식을 보고 그 dataset의
+                # 적재를 건너뛴 뒤 run을 실패로 끝낸다.
+                #
+                # **재시도 가능 여부는 여기서 판정한다.** 예외 타입을 아는 자리가
+                # 여기뿐이다. 원천 이동·스키마 변경은 같은 run 안에서 나아지지
+                # 않지만 연결 끊김·타임아웃은 다음 시도에 지나갈 수 있다 — 이
+                # 구분이 없으면 asset이 전자의 이유로 붙인 `allow_retries=False`를
+                # 일시적 네트워크 실패에도 그대로 적용한다(적대 리뷰 지적).
+                yield McstSlugFailure(
+                    slug=slug,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    retryable=_is_transient_upstream_error(exc),
+                )
     finally:
         await client.aclose()
 

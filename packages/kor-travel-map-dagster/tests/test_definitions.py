@@ -92,9 +92,49 @@ def test_feature_load_asset_keys_registered() -> None:
     } <= asset_keys
 
 
+#: 공통 재시도 정책을 **일부러** 쓰지 않는 asset과 그 사유.
+#:
+#: 빠뜨린 것과 면제한 것을 구분하기 위해 존재한다. 이 표가 없으면 누군가 asset
+#: 하나의 정책을 바꿔도 검사가 "그럴 수 있지"로 지나가거나, 반대로 정당한 예외
+#: 하나 때문에 검사를 통째로 느슨하게 만든다.
+_RETRY_POLICY_EXCEPTIONS: dict[str, str] = {
+    "feature_place_opinet_stations": (
+        "OpiNet은 run당 호출 예산(기본 140)을 쓰는데 step 재시도는 asset을 처음부터 "
+        "다시 실행해 그 예산을 전부 다시 쓴다. 무료키 일일 한도가 300회라 "
+        "max_retries=3이면 하루 최악 560회다. 이 모드는 시군 윈도를 날짜로 "
+        "회전시키므로 올바른 재시도 주기는 60초가 아니라 다음 스케줄이다."
+    ),
+    "feature_price_opinet_stations": (
+        "같은 이유 — 같은 상류, 같은 예산을 쓴다."
+    ),
+}
+
+
 def test_feature_load_assets_have_retry_policy() -> None:
+    """모든 feature load asset은 **재시도 정책을 갖는다.**
+
+    값이 공통 정책과 다른 것은 위 표에 사유와 함께 선언한 asset만 허용한다.
+    "정책이 있다"만 세면 누군가 `max_retries=0`으로 조용히 내려도 초록이고,
+    "값이 같다"만 세면 정당한 예외를 못 만든다.
+    """
+
+    unexpected: list[str] = []
     for asset_def in FEATURE_LOAD_ASSETS:
-        assert asset_def.op.retry_policy == FEATURE_LOAD_RETRY_POLICY
+        name = asset_def.op.name
+        policy = asset_def.op.retry_policy
+        assert policy is not None, f"{name}: 재시도 정책이 없다"
+        if name in _RETRY_POLICY_EXCEPTIONS:
+            continue
+        if policy != FEATURE_LOAD_RETRY_POLICY:
+            unexpected.append(name)
+    assert not unexpected, (
+        "공통 재시도 정책과 다른 asset이다 — 의도한 것이면 "
+        f"`_RETRY_POLICY_EXCEPTIONS`에 사유와 함께 올려라: {unexpected}"
+    )
+    # 면제 표가 낡지 않게 한다 — 사라진 이름이 남아 있으면 다음 예외가 그 뒤에 숨는다.
+    known = {asset_def.op.name for asset_def in FEATURE_LOAD_ASSETS}
+    stale = sorted(set(_RETRY_POLICY_EXCEPTIONS) - known)
+    assert not stale, f"면제 목록에 있으나 asset이 없다: {stale}"
 
 
 def test_feature_load_assets_have_provider_schedules() -> None:

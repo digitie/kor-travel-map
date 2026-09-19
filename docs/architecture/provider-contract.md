@@ -108,7 +108,7 @@ system
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
 | `mcst_<slug>` (13종) | python-mcst-api | 파일데이터 CSV 13종(`mcst_world_restaurants_csv`/`mcst_independent_bookstores_csv`/`mcst_children_bookstores_csv`/`mcst_used_bookstores_csv`/`mcst_golf_courses_status` 등, 컬럼 방언 4종). 메타표 `providers.mcst.MCST_FILE_DATASETS`. 제외 3종(`tourism_attractions_csv`/`recommended_travel_destinations_csv`/`public_libraries` — 기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS` + `docs/etl/mcst-feature-etl.md` §3 (#395 + T-223b) |
-| `datagokr_seoul_bookstores` | python-datagokr-api | 서울특별시 책방(서점) 현황정보 fileData |
+| `datagokr_seoul_bookstores` | python-datagokr-api(레지스트리 신원) / **원천은 서울 열린데이터광장** | 서울특별시 책방(서점) 현황정보. 2026-09-18 data.go.kr odcloud가 404 `등록되지 않은 서비스 입니다`로 사라져 **원천만** OA-21062(`TbSlibBookstoreInfo`)로 옮겼다(2026-09-19, 라이브 606건). dataset_key·provider 이름은 provider_dataset row·operation key·봉인된 300 카탈로그가 쥐고 있어 바꾸지 않는다. 키도 별개다 — `SEOUL_OPEN_DATA_API_KEY`. 분기는 `dagster.provider_fetchers._FILE_DATA_SOURCE_OVERRIDES` |
 | `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api | 경기도 무슬림 친화 음식점 fileData |
 | `datagokr_ansan_world_restaurants` | python-datagokr-api | 안산 세계맛집(다문화 세계음식점) fileData |
 | `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
@@ -163,7 +163,10 @@ fileData/특화거리 source는 `feature.curated_source_rules`의 기본 후보�
   provider PR#11). 독립서점·카페가 있는 서점·아동서점·세계음식점 계열과 같은
   문화정보원 source 성격이다.
 - `python-datagokr-api`: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
-  제주 향토음식점 fileData 4종을 구현했다(T-223b, provider PR#10).
+  제주 향토음식점 fileData 4종을 구현했다(T-223b, provider PR#10). 이 중 **서울
+  책방만 원천이 바뀌었다** — data.go.kr odcloud가 사라져 서울 열린데이터광장
+  OA-21062로 옮겼고, 변환 dialect는 한글 열과 영문 열을 **둘 다** 받는다(백필로
+  남은 odcloud CSV를 다시 통과시킬 수 있어야 한다).
 - `data.go.kr-standard`: 전국지역특화거리표준데이터를 구현했다(T-223b). 거리명·좌표·
   점포수·관리기관을 area/anchor metadata로 보존하고, 개별 점포 POI로 과해석하지 않는다.
 - 신규 source도 wrapper/facade 없이 provider public client/typed model을 먼저 정렬한 뒤,
@@ -451,7 +454,7 @@ def test_no_provider_wrapper_classes():
 | python-kma-api | `@4ac9a32` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#24, PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). `0868b76`: `resultCode=22`를 비재시도 quota로 분류하고 HTTP 200 XML `OpenAPI_ServiceResponse`의 `03`은 빈 결과, 임의 XML은 parse error로 fail-close(provider PR#24, T-VN-H45 후속). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@fc5c009` | `AirQualityStationItem`/`AirQualityMeasurementItem` | — | PM10/PM2.5/CAI. `c4c8d12`: base URL http→https, totalCount 결측+만재 페이지 `AirKoreaParseError` |
 | python-khoa-api | `@38a2b74` | (후속 PR) | PR#8 | 해수욕장·해양 지수. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump). `3314f68`: **asyncio 전용 전환(provider PR#13)** — sync `oceans_beach_info()`/`close()` 제거. Map `fetch_khoa_beaches`가 async generator로 이동하고 `aoceans_beach_info`/`aclose`를 쓴다. `20c7207`: `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환(provider PR#8, T-VN-H45 후속). C03에서 46개 ODMI catalog에 notice event/model이 없음을 확인해 coastal notice 계획 폐기 |
-| python-krforest-api | `@270ef7a` | `ForestSpatialFeature`, `MountainWeather`, `WildfireRiskForecast`, `LandslideForecastIssue` | PR#9 merge | C05A nested SHP route + C05B typed observed weather + C05C V2 fire index + C05D issue lifecycle. provider PR#9 merge SHA 고정 |
+| python-krforest-api | `@70814c9` | `ForestSpatialFeature`, `MountainWeather`, `WildfireRiskForecast`, `LandslideForecastIssue` | PR#9 merge | C05A nested SHP route + C05B typed observed weather + C05C V2 fire index + C05D issue lifecycle. provider PR#9 merge SHA 고정. `70814c9`(2026-09-19): 표준데이터 gateway가 `{header, body}` 래퍼를 벗어 산림 표준데이터 3종이 파싱에서 전멸한 것을 좁은 가지로 수용(provider PR#15) |
 | python-opinet-api | `@dcfb41a` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
 | python-krex-api | `@d153f3c` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱. `realTimeSMSList`와 0 이상 `count`가 없는 HTTP 200 본문은 authoritative empty가 아니라 `KrexParseError`(krex#11) |
 | python-visitkorea-api | `@151ef90` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
@@ -460,7 +463,7 @@ def test_no_provider_wrapper_classes():
 | python-krairport-api | `@fe2143b` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@3cdee09` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
-| python-mcst-api | `@f2b1e46` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/etl/mcst-feature-etl.md` §7) |
+| python-mcst-api | `@0f5a8fe` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). `0f5a8fe`(2026-09-19): 아동서점 CSV 원천이 fileDataNo 282→484로 이동(provider PR#19). dedup pair는 실데이터 확인 후 등록 검토(`docs/etl/mcst-feature-etl.md` §7) |
 
 **상향 보류였던 핀 — 2026-09-11 해소.** 아래 두 건은 provider HEAD가 Map에 회귀를
 일으켜 의도적으로 올리지 않던 것이고, `T-VN-39-PROVIDER-PAGINATION`이 **upstream에서**

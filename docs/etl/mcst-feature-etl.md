@@ -97,10 +97,27 @@ provider 재편으로 경로 자체가 소멸 — **도서관 디렉토리 재�
 
 ## 5. Dagster
 
-record resource 1개(`mcst_culture_records`)가 `(slug, row)` 튜플을 stream하고
-asset이 **slug별 분리 `_load`** — dataset_key 단위 import job/sync state 유지.
-fetcher는 keyless `FileDataClient`로 credential guard 없음(knps/krheritage
-items 패턴).
+record resource 1개(`mcst_culture_records`)가 stream하고 asset이 **slug별 분리
+`_load`** — dataset_key 단위 import job/sync state 유지. fetcher는 keyless
+`FileDataClient`로 credential guard 없음(knps/krheritage items 패턴).
+
+**stream에는 `(slug, row)` 외에 두 표식이 섞인다**(2026-09-19).
+
+- `McstSlugAttempt(slug)` — fetcher가 그 slug의 수집을 **시작했다**. asset은
+  **시도한 slug만** 돈다. feature-update worker는 fetcher를 slug 하나로 좁혀
+  부르므로(`_mcst_resources`), 이 표식이 없으면 나머지 12종이 시도한 적도 없이
+  빈 authoritative 적재와 sync-success를 받는다 — 수집하지 않은 dataset이 신선한
+  것으로 보인다. 표식이 **하나도 없는** stream은 무작업 성공이 되므로 `Failure`다.
+- `McstSlugFailure(slug, reason, retryable)` — 그 slug의 수집이 실패했다. asset은
+  그 dataset의 적재를 **건너뛰고**(빈 스냅샷을 권위로 봉인하면 sync cursor가
+  전진해 수집 실패가 신선한 성공으로 보인다) 성공분을 적재한 뒤 run을 `Failure`로
+  끝낸다. `allow_retries`는 **모든 실패가 재시도 가능할 때만** True다 — 연결
+  끊김·타임아웃은 다음 시도에 지나갈 수 있지만, 원천 이동·스키마 변경이 하나라도
+  섞여 있으면 재시도는 성공한 것들을 다시 적재한 뒤 같은 자리에서 또 죽는다.
+  쿼터 소진은 표식으로 접지 않고 그대로 올려 terminal 경로를 탄다.
+
+즉 **한 slug의 상류 변화가 13개를 전멸시키지 않는다**(2026-09-18 prod: 아동서점
+원천 이동 하나로 13개 dataset 전멸). 대신 run은 초록이 되지 않는다.
 
 | asset | resource | schedule |
 |---|---|---|

@@ -9,12 +9,16 @@ from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import AssetKey, build_asset_context
+from dagster import AssetKey, Failure, build_asset_context
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.mcst import MCST_FILE_DATASETS
+from kortravelmap.providers.mcst import (
+    MCST_FILE_DATASETS,
+    McstSlugAttempt,
+    McstSlugFailure,
+)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import mcst_features as mcst_module
@@ -25,6 +29,7 @@ from kortravelmap.dagster.mcst_features import (
     feature_place_mcst_culture,
     group_records_by_slug,
     run_feature_place_mcst_culture,
+    split_slug_markers,
 )
 from kortravelmap.dagster.provider_fetchers import fetch_mcst_culture_records
 from kortravelmap.dagster.upstream_requests import (
@@ -101,8 +106,30 @@ def test_group_records_by_slug_preserves_order() -> None:
     assert grouped == {"a": [1, 3], "b": [2]}
 
 
+def _rows_only(records: list[Any]) -> list[Any]:
+    """stream에서 ``(slug, row)`` 튜플만 남긴다.
+
+    fetcher는 slug마다 :class:`McstSlugAttempt`를, 실패 시
+    :class:`McstSlugFailure`를 함께 흘린다. 이 검사들이 보는 것은 **행**이므로
+    asset과 같은 방법으로 가른 뒤 센다 — 위치나 개수로 가정하면 표식이 하나
+    늘어날 때마다 다시 깨진다.
+    """
+
+    rows, _attempted, _failures = split_slug_markers(records)
+    return rows
+
+
+def _attempt_all() -> list[Any]:
+    """전량 경로 — fetcher가 13개 slug를 모두 시도했다고 알린다."""
+
+    return [McstSlugAttempt(slug=slug) for slug in MCST_FILE_DATASETS]
+
+
 async def test_culture_asset_loads_per_slug_datasets() -> None:
+    """전량 경로에서는 시도한 13개를 모두 적재한다(상류가 0건인 것 포함)."""
+
     records = [
+        *_attempt_all(),
         ("independent_bookstores_csv", _common_row("서점 1")),
         ("world_restaurants_csv", _common_row("식당 1")),
         ("independent_bookstores_csv", _common_row("서점 2")),
@@ -121,21 +148,134 @@ async def test_culture_asset_loads_per_slug_datasets() -> None:
     assert result.as_metadata()["datasets_loaded"] == len(MCST_FILE_DATASETS)
 
 
+async def test_a_narrowed_run_only_loads_what_it_attempted() -> None:
+    """**시도하지 않은 dataset은 적재하지 않는다.**
+
+    feature-update worker는 fetcher를 slug 하나로 좁혀 부른다
+    (`_mcst_resources`가 `slugs=matched_slugs`로 정확히 1개를 넘긴다). 그런데
+    asset은 `MCST_FILE_DATASETS` **전체**를 돌며 빈 목록으로 적재했다 — 나머지
+    12개가 **시도한 적도 없이** authoritative 적재와 sync-success를 받아
+    수집하지 않은 dataset이 신선한 것으로 보였다.
+
+    종전 검사(`test_culture_asset_loads_per_slug_datasets`)는 slug 2개만 넣고도
+    `datasets_loaded == 13`을 단언해 **그 동작을 정본으로 못 박고 있었다.**
+    """
+
+    records = [
+        McstSlugAttempt(slug="world_restaurants_csv"),
+        ("world_restaurants_csv", _common_row("식당 1")),
+    ]
+
+    result = await run_feature_place_mcst_culture(_context(records))
+
+    assert [r.dataset_key for r in result.results] == ["mcst_world_restaurants_csv"]
+    assert result.as_metadata()["datasets_loaded"] == 1
+
+
+async def test_one_failing_slug_does_not_take_down_the_others() -> None:
+    """slug 하나의 수집 실패가 나머지를 죽이지 않는다.
+
+    2026-09-18 prod: 아동서점 원천이 이동해 그 slug의 수집이 실패했는데, stream을
+    리스트로 걷는 쪽이 예외를 그대로 통과시켜 **13개 dataset이 전부 0건**이 됐다.
+    앞서 수집해 둔 slug의 행까지 함께 버려졌다.
+
+    이 검사는 세 가지를 **동시에** 센다 — 셋 중 하나만 빠져도 사고가 다른 모양으로
+    돌아온다.
+    """
+
+    failed_slug = "children_bookstores_csv"
+    records = [
+        *_attempt_all(),
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
+        ("world_restaurants_csv", _common_row("식당 1")),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    # (1) run은 실패로 끝난다 — 일부가 죽었는데 초록이면 그것이 다음 사고다.
+    assert failed_slug in str(excinfo.value)
+    # (2) 재시도는 끈다 — 상류 이동은 같은 run 안에서 나아지지 않는다.
+    assert excinfo.value.allow_retries is False
+
+
+async def test_a_failed_slug_is_not_sealed_as_an_empty_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """실패한 slug는 **적재 자체를 건너뛴다**.
+
+    빈 목록으로 `_load`를 부르면 `authoritative_snapshot_complete=True`가 그것을
+    '전량'으로 선언해 그 dataset의 기존 feature가 **전부 은퇴**한다 — 수집이
+    실패했을 뿐인데 데이터를 지우는 셈이다. 그래서 건너뛴 것이 맞는지, 그리고
+    나머지는 그대로 적재됐는지를 `_load` 호출 자체로 센다.
+    """
+
+    loaded: list[str] = []
+    original = mcst_module._load
+
+    async def _spy(context: Any, **kwargs: Any) -> Any:
+        loaded.append(str(kwargs["dataset_key"]))
+        return await original(context, **kwargs)
+
+    monkeypatch.setattr(mcst_module, "_load", _spy)
+
+    failed_slug = "children_bookstores_csv"
+    records = [
+        *_attempt_all(),
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(slug=failed_slug, reason="McstParseError: CSV 링크 없음"),
+    ]
+
+    with pytest.raises(Failure):
+        await run_feature_place_mcst_culture(_context(records))
+
+    failed_key = MCST_FILE_DATASETS[failed_slug].dataset_key
+    assert failed_key not in loaded, loaded
+    # 나머지는 전부 적재됐다 — 전멸하지 않는다는 것이 이 수정의 요지다.
+    assert len(loaded) == len(MCST_FILE_DATASETS) - 1
+    assert "mcst_independent_bookstores_csv" in loaded
+
+
+def test_split_slug_markers_keeps_rows_attempts_and_first_reason() -> None:
+    rows, attempted, failures = split_slug_markers(
+        [
+            McstSlugAttempt(slug="a"),
+            ("a", 1),
+            McstSlugFailure(slug="b", reason="첫 사유"),
+            ("a", 2),
+            McstSlugFailure(slug="b", reason="나중 사유"),
+        ]
+    )
+
+    assert rows == [("a", 1), ("a", 2)]
+    # 실패한 slug도 **시도한** slug다 — 그래야 asset이 그것을 실패로 보고한다.
+    assert attempted == {"a", "b"}
+    # 나중 것으로 덮으면 원인 추적이 한 단계 멀어진다.
+    assert set(failures) == {"b"}
+    assert failures["b"].reason == "첫 사유"
+    # 표식을 통째로 들고 있어야 asset이 재시도 가능 여부까지 볼 수 있다.
+    assert failures["b"].retryable is False
+
+
 async def test_culture_asset_rejects_unknown_slug() -> None:
     with pytest.raises(KeyError, match="nope"):
-        await run_feature_place_mcst_culture(_context([("nope", _common_row("어딘가"))]))
+        await run_feature_place_mcst_culture(
+            _context([*_attempt_all(), ("nope", _common_row("어딘가"))])
+        )
 
 
 async def test_culture_asset_rejects_excluded_slug() -> None:
     """제외 dataset(예: public_libraries)은 메타표에 없어 적재 시도 시 실패."""
     with pytest.raises(KeyError, match="public_libraries"):
         await run_feature_place_mcst_culture(
-            _context([("public_libraries", {"도서관명": "더불어 숲"})])
+            _context([*_attempt_all(), ("public_libraries", {"도서관명": "더불어 숲"})])
         )
 
 
 async def test_culture_asset_skips_unidentifiable_rows_with_warning() -> None:
     records = [
+        *_attempt_all(),
         ("golf_courses_status", {"이름": "라데나골프클럽", "소재지": "춘천시 1"}),
         # 이름 없는 row — 변환에서 제외(경고 로그).
         ("golf_courses_status", {"소재지": "어딘가"}),
@@ -165,7 +305,7 @@ async def test_culture_raw_callback_completes_exact_membership_snapshot() -> Non
         completed.extend(completed_memberships)
 
     result = await run_feature_place_mcst_culture(
-        _context([]),
+        _context(_attempt_all()),
         memberships=memberships,
         on_memberships_completed=_done,
     )
@@ -205,6 +345,7 @@ async def test_culture_raw_callback_emits_no_membership_on_late_failure(
 
     monkeypatch.setattr(mcst_module, "_load", _load)
     records = [
+        *_attempt_all(),
         (first_slug, _common_row("첫 dataset")),
         (second_slug, _common_row("둘째 dataset")),
     ]
@@ -311,9 +452,7 @@ async def test_culture_public_wrapper_retries_canonical_members_stably(
         return object()
 
     monkeypatch.setattr(mcst_module, "_load", _load)
-    base = _context(
-        [
-            (first_slug, _common_row("첫 dataset")),
+    base = _context([*_attempt_all(), (first_slug, _common_row("첫 dataset")),
             (second_slug, _common_row("둘째 dataset")),
         ]
     )
@@ -491,11 +630,15 @@ async def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
         mcst_max_items_per_dataset=1,
     )
 
-    records = [record async for record in fetch_mcst_culture_records(settings)]
+    stream = [record async for record in fetch_mcst_culture_records(settings)]
+    records = _rows_only(stream)
 
     # 등록 slug × max_items=1.
     assert len(records) == len(MCST_FILE_DATASETS)
     assert {slug for slug, _row in records} == set(MCST_FILE_DATASETS)
+    # 표식도 slug마다 정확히 하나씩 나온다 — asset의 적재 범위가 여기서 온다.
+    _rows, attempted, _failures = split_slug_markers(stream)
+    assert attempted == set(MCST_FILE_DATASETS)
     [client] = _FakeFileDataClient.instances
     assert client.closed is True
     assert client.calls == list(MCST_FILE_DATASETS)
@@ -509,9 +652,9 @@ async def test_fetch_mcst_culture_records_caps_rows_per_dataset(
     try:
         settings = KorTravelMapSettings(mcst_max_items_per_dataset=3)
 
-        records = [
-            record async for record in fetch_mcst_culture_records(settings)
-        ]
+        records = _rows_only(
+            [record async for record in fetch_mcst_culture_records(settings)]
+        )
 
         per_slug: dict[str, int] = {}
         for slug, _row in records:
@@ -536,7 +679,11 @@ async def test_fetch_mcst_culture_records_limits_worker_to_explicit_slug(
         )
     ]
 
-    assert [slug for slug, _row in records] == [selected_slug]
+    assert [slug for slug, _row in _rows_only(records)] == [selected_slug]
+    # worker 경로는 slug 하나만 **시도한다** — asset이 그 하나만 적재하는
+    # 근거가 이 집합이다.
+    _rows, attempted, _failures = split_slug_markers(records)
+    assert attempted == {selected_slug}
     [client] = _FakeFileDataClient.instances
     assert client.calls == [selected_slug]
 
@@ -602,7 +749,9 @@ async def test_fetch_mcst_culture_records_counts_one_request_per_dataset(
     settings = KorTravelMapSettings(mcst_max_items_per_dataset=2)
 
     with counting_upstream_requests():
-        records = [record async for record in fetch_mcst_culture_records(settings)]
+        records = _rows_only(
+            [record async for record in fetch_mcst_culture_records(settings)]
+        )
         observed = observed_upstream_requests()
 
     assert len(records) == 2 * len(MCST_FILE_DATASETS), (
@@ -741,3 +890,75 @@ async def test_culture_wrapper_rejects_a_runner_that_never_emits_completion(
 
     assert finished == []
     assert attempts == list(memberships)
+
+
+async def test_a_stream_with_no_attempt_markers_is_not_a_quiet_success() -> None:
+    """**시도 표식이 하나도 없으면 0건 적재로 초록이 된다** — 그것을 막는다.
+
+    asset은 시도하지 않은 slug를 전부 건너뛴다. 그러므로 표식이 없는 stream은
+    13개를 모두 건너뛰어 `results`도 `slug_failures`도 비고, 완료 콜백까지 불린
+    뒤 초록으로 끝난다 — 이 asset이 막으려던 "조용한 0건"의 새 입구다
+    (2026-09-19 적대 리뷰). fetcher는 slug마다 표식을 먼저 흘리므로, 표식이
+    없다는 것은 한 slug도 시작하지 못했다는 뜻이다.
+    """
+
+    completed: list[object] = []
+
+    async def _done(memberships: tuple[Any, ...]) -> None:
+        completed.extend(memberships)
+
+    with pytest.raises(Failure, match="시도 표식이 하나도 없다"):
+        await run_feature_place_mcst_culture(
+            _context([]),
+            memberships=(
+                ProviderDatasetOperationMembership(
+                    provider_dataset_id=1,
+                    sync_scope="dataset_wide",
+                    operation_key="feature_place_mcst_culture_job",
+                ),
+            ),
+            on_memberships_completed=_done,
+        )
+
+    assert completed == [], "실패했는데 완료 콜백이 불렸다"
+
+
+async def test_a_transient_failure_keeps_retries_open() -> None:
+    """일시적 네트워크 실패까지 재시도 불가로 만들지 않는다.
+
+    `allow_retries=False`의 근거는 "같은 run 안에서 나아지지 않는다"인데, 종전에는
+    **모든** 비-쿼터 예외를 같은 바구니에 넣었다. 연결 끊김 한 번이 그 달의 적재를
+    통째로 버리게 된다(2026-09-19 적대 리뷰).
+    """
+
+    records = [
+        *_attempt_all(),
+        ("independent_bookstores_csv", _common_row("서점 1")),
+        McstSlugFailure(
+            slug="children_bookstores_csv",
+            reason="ConnectError: connection reset",
+            retryable=True,
+        ),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    assert excinfo.value.allow_retries is True
+
+
+async def test_a_mixed_failure_set_closes_retries() -> None:
+    """하나라도 비재시도가 섞이면 닫는다 — 재시도해도 그 하나에서 또 죽는다."""
+
+    records = [
+        *_attempt_all(),
+        McstSlugFailure(slug="children_bookstores_csv", reason="McstParseError: 링크 없음"),
+        McstSlugFailure(
+            slug="used_bookstores_csv", reason="ReadTimeout: ", retryable=True
+        ),
+    ]
+
+    with pytest.raises(Failure) as excinfo:
+        await run_feature_place_mcst_culture(_context(records))
+
+    assert excinfo.value.allow_retries is False

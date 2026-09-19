@@ -53,6 +53,19 @@ class KorTravelMapSettings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",  # 다른 prefix env (예: TRIPMATE_*) 침범 차단
         hide_input_in_errors=True,
+        # **빈 env는 '값 없음'으로 읽는다.**
+        #
+        # compose는 자격증명을 `${X:-}`로 배선하므로 운영자가 `.env`를 채우지
+        # 않아도 변수는 **항상 정의되고 값이 빈 문자열**이다. 그러면 pydantic이
+        # `SecretStr("")`를 만들고, provider fetcher들이 공통으로 쓰는
+        # `if secret is None:` 가드가 **배포 형상에서는 한 번도 발화하지 않는다**
+        # (2026-09-19 적대 리뷰). 키 없는 스택이 빠른 실패 대신 무인증 상류
+        # 호출을 내고, OpiNet처럼 run당 호출 예산이 있는 provider에서는 그
+        # 예산만큼 헛돈다.
+        #
+        # 이 값은 **env에서 온 빈 문자열에만** 적용된다 — 코드가 명시적으로
+        # 넘긴 ""는 그대로다. 그래서 "비어 있음"의 의미가 자리마다 갈리지 않는다.
+        env_ignore_empty=True,
     )
 
     # ── PostgreSQL (ADR-007) ─────────────────────────────────────────────
@@ -244,6 +257,17 @@ class KorTravelMapSettings(BaseSettings):
             "data.go.kr gateway 공통 service key. source env는 "
             "``DATA_GO_KR_SERVICE_KEY``이며 datagokr/krheritage/MOIS 계열 provider "
             "resource가 참조한다."
+        ),
+    )
+    seoul_open_data_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "서울 열린데이터광장(``openapi.seoul.go.kr``) 인증키. data.go.kr과 "
+            "**다른 포털이고 키도 다르다** — 서울시 자체 발급이라 ``DATA_GO_KR_SERVICE_KEY``로는 "
+            "호출되지 않는다. 현재 이 키를 쓰는 곳은 서울 책방(OA-21062, "
+            "service ``TbSlibBookstoreInfo``) 하나다 — 종전 odcloud 원천이 404 "
+            "``등록되지 않은 서비스 입니다``로 사라졌다. "
+            "env ``SEOUL_OPEN_DATA_API_KEY``."
         ),
     )
     opinet_api_key: SecretStr | None = Field(

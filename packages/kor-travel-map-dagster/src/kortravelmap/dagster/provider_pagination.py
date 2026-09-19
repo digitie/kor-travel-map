@@ -113,6 +113,34 @@ provider가 행을 걸러 낼 수 있으므로 ``ceil(declared / num_of_rows)``�
 걸려 시끄럽게 실패하는 편이 낫다.
 """
 
+_HEADROOM_WARN_FRACTION: Final = 0.5
+"""실제 실패 지점의 이 비율을 넘게 요구하면 **미리** 말한다.
+
+2026-09-19 prod: 산사태 예보발령이 10,562건으로 자라 상한 10장(=10,000행)을
+먹었다. 상한은 제 일을 했다 — 조용히 자르지 않고 시끄럽게 실패했다. 다만
+그 신호가 **이미 늦은 신호**였다. 발령마다 행이 쌓이는 append-only 피드라
+다음 dataset도 같은 길을 간다.
+
+그래서 벽에 부딪히기 전에 한 번 더 말한다. 여기서 경고가 뜨면 상한을 올리는
+것이 아니라 **증분 수집으로 바꿀 때가 됐는지** 보라는 뜻이다 — 상한을 계속
+올리는 것은 같은 사고를 미루는 일이다.
+
+절반으로 잡는 이유: 검사(`test_provider_page_ceilings`)가 요구하는 여유가
+2배다. 즉 이 경고는 **CI가 빨개지는 지점과 같은 자리**에서 prod가 먼저
+말하게 한다.
+
+**기준은 ``absolute_ceiling``이다.** 적대 리뷰는 "``min(ceiling,
+absolute_ceiling)``이 실제 실패 지점"이라고 지적했는데, 그렇게 하면 항진명제가
+된다 — ``ceiling``은 바로 위에서 ``needed * _DECLARED_PAGE_SLACK + 1``로 **선언
+건수에서 유도해 올려 둔 값**이라 ``needed``가 그 절반을 넘을 수 없다. 순회를
+실제로 멈출 수 있는 것은 절대 상한 하나다.
+
+그래서 이 경고는 ``absolute_max_pages``를 **일부러 좁힌** 호출자에서만 뜬다.
+그것이 설계다 — 좁힌 자리가 곧 "쿼터가 아픈 자리"이고, 10,000장(=천만 행)을
+그대로 둔 호출자에게는 경고할 성장이 아직 없다. 좁히지 않은 경계를 이 경고로
+덮으려 하면 임의의 숫자를 하나 더 만들게 된다.
+"""
+
 
 class ProviderPaginationOverrun(RuntimeError):
     """페이지 상한을 넘겼다 — 조용히 자르지 않고 실패시킨다."""
@@ -320,6 +348,7 @@ class _PageState:
     finished: bool = False
     previous_fingerprint: Any = None
     declared_raised_ceiling: bool = False
+    _warned_thin_headroom: bool = False
 
     def guard_ceiling(self) -> None:
         effective = min(self.ceiling, self.absolute_ceiling)
@@ -362,6 +391,35 @@ class _PageState:
             )
         self.finished = True
 
+    def _warn_if_headroom_is_thin(
+        self, needed: int, warn: Callable[[str], None] | None
+    ) -> None:
+        """선언 건수가 절대 상한의 여유를 먹어 들어오면 미리 말한다."""
+
+        if self._warned_thin_headroom:
+            # 한 run에서 한 번만 — 페이지마다 같은 말을 하면 아무도 안 읽는다.
+            #
+            # 페이지 번호로 제한하지 않는다. 처음에는 `page_no != 1`도 함께 봤는데,
+            # 그러면 **총계를 두 번째 페이지에서 주는 provider에서는 영영 뜨지
+            # 않는다**(적대 리뷰 지적). 한 번만 말하면 되는 것이지 첫 페이지에서만
+            # 말해야 하는 것이 아니다.
+            return
+        # 기준은 `absolute_ceiling`이다. `self.ceiling`은 바로 위에서 선언 건수로
+        # 올려 둔 값(`needed * _DECLARED_PAGE_SLACK + 1`)이라, 그것과 `needed`를
+        # 비교하면 **항상 통과하는 항진명제**가 된다. 실제로 순회를 멈출 수 있는
+        # 것은 절대 상한 하나뿐이다(`guard_ceiling`의 `min(...)`에서 이기는 쪽).
+        if needed <= self.absolute_ceiling * _HEADROOM_WARN_FRACTION:
+            return
+        self._warned_thin_headroom = True
+        _emit(
+            warn,
+            f"{self.label}: upstream이 선언한 {self.declared}건은 "
+            f"{needed}장을 요구한다 — 절대 상한 {self.absolute_ceiling}장의 "
+            f"{_HEADROOM_WARN_FRACTION:.0%}를 넘었다. 상한을 올리기 전에 "
+            "증분 수집으로 바꿀 때인지 볼 것 — 계속 올리는 것은 같은 사고를 "
+            "미루는 일이다.",
+        )
+
     def absorb(
         self, page: ProviderPage, warn: Callable[[str], None] | None
     ) -> Sequence[Any]:
@@ -388,6 +446,7 @@ class _PageState:
             if raised > self.ceiling:
                 self.ceiling = raised
                 self.declared_raised_ceiling = True
+            self._warn_if_headroom_is_thin(needed, warn)
 
         if not items:
             if self.declared is not None and self.seen < self.declared:

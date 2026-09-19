@@ -465,9 +465,12 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     shared_provider_keys = {
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
         "KOR_TRAVEL_MAP_OPINET_API_KEY",
+        "KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
         "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
+        "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
         "KOR_TRAVEL_MAP_KREX_GO_API_KEY",
     }
@@ -6097,3 +6100,211 @@ def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> Non
 
     object_store = _script("docker-compose.external-object-store.yml")
     assert "db-role-bootstrap-300:" not in object_store
+
+
+#: OpiNet 무료키 일일 호출 한도. 오피넷 이용안내 > 유가정보 API의 **일반 API 19종**
+#: 기준이다(프리미엄 3종이 1,500). 2026-09-14 확인 — `docs/etl/upstream-quota.md` §opinet.
+_OPINET_FREE_KEY_DAILY_CALLS: Final = 300
+
+#: `low_top_area` 경로를 하루에 **스케줄이** 도는 횟수. price job은 매일, place job은
+#: 매월 1일에 같은 경로를 한 번 더 돈다.
+_OPINET_SCHEDULED_RUNS_PER_DAY: Final = 2
+
+
+def _opinet_worst_day_runs() -> int:
+    """최악의 날 asset이 **실제로 실행되는** 횟수.
+
+    스케줄 수만 세면 안 된다 — Dagster의 step 재시도는 asset을 처음부터 다시
+    실행하고, 그 실행이 run 예산을 **전부 다시 쓴다**. 공통 정책
+    (`max_retries=3`)이면 한 job이 네 번 돌아 하루 560회가 되고, 그러면 그날의
+    나머지 job이 전부 429다(2026-09-19 적대 리뷰).
+
+    그래서 배수를 리터럴로 적지 않고 **실제 정책에서 유도한다.** 누군가 OpiNet
+    asset에 재시도를 되살리면 이 수가 함께 올라가 예산 검사가 빨개진다 — 리터럴
+    2를 따로 적어 두면 그 편집이 조용히 지나간다.
+    """
+
+    from kortravelmap.dagster.assets import (
+        OPINET_LOAD_RETRY_POLICY,
+        feature_place_opinet_stations,
+        feature_price_opinet_stations,
+    )
+
+    policies = [
+        asset_def.op.retry_policy
+        for asset_def in (feature_place_opinet_stations, feature_price_opinet_stations)
+    ]
+    # 자리(상수 선언)가 아니라 **효과**(asset에 붙은 정책)에 결박한다.
+    assert all(policy is not None for policy in policies), (
+        "OpiNet asset에서 retry policy가 사라졌다 — 그러면 Dagster 기본값이 적용돼 "
+        "이 계산이 근거를 잃는다"
+    )
+    attempts = [1 + (policy.max_retries or 0) for policy in policies if policy is not None]
+    assert len(attempts) == _OPINET_SCHEDULED_RUNS_PER_DAY, (
+        f"이 경로를 도는 asset이 {len(attempts)}개인데 하루 스케줄 수로는 "
+        f"{_OPINET_SCHEDULED_RUNS_PER_DAY}개를 세고 있다 — 둘이 어긋나면 계산이 "
+        "근거를 잃는다"
+    )
+    assert OPINET_LOAD_RETRY_POLICY.max_retries == 0, (
+        "OpiNet 전용 정책이 재시도를 허용한다 — 재시도 한 번이 run 예산을 통째로 "
+        "다시 쓴다"
+    )
+    return sum(attempts)
+
+
+def _compose_default(raw: str) -> str:
+    """``${A:-${B:-값}}`` 꼴 보간에서 **맨 안쪽 기본값**을 꺼낸다.
+
+    문자열 포함 검사로 때우면 `disabled`가 주석에 남아 있어도 통과한다. 여기서
+    보는 것은 "운영자가 `.env`에 아무것도 넣지 않았을 때 컨테이너가 실제로 받는
+    값"이다.
+    """
+
+    value = raw.strip()
+    while value.startswith("${") and value.endswith("}"):
+        inner = value[2:-1]
+        head, sep, tail = inner.partition(":-")
+        if not sep:
+            return ""
+        del head
+        value = tail.strip()
+    return value
+
+
+def _opinet_services() -> dict[str, dict[str, Any]]:
+    services = _compose()["services"]
+    holding_key = {
+        name: service
+        for name, service in services.items()
+        if isinstance(service, dict)
+        and "KOR_TRAVEL_MAP_OPINET_API_KEY" in (service.get("environment") or {})
+    }
+    assert holding_key, "OpiNet 키를 받는 서비스가 하나도 없다 — 검사가 공허하다"
+    return holding_key
+
+
+@pytest.mark.unit
+def test_the_opinet_scope_selector_travels_with_the_key() -> None:
+    """키를 받는 서비스는 scope 선택자와 호출량 노브도 함께 받아야 한다.
+
+    OpiNet에는 전국 목록(bulk) endpoint가 없어 **scope를 고르지 않으면 적재가
+    시작되지 않는다** — 키가 있어도 fetcher가 `ProviderCredentialMissing`으로 멈춘다.
+    2026-09-18 prod에서 place·price 두 job이 그 상태였고, 원인은 배포 문서가 키만
+    넘기고 선택자를 넘기지 않은 것이었다. 키 쪽을 기준으로 삼는 이유는 그쪽이
+    "이 서비스가 OpiNet을 쓴다"는 선언이기 때문이다.
+    """
+
+    required = {
+        "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
+        "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
+    }
+    missing = {
+        name: sorted(required - set(service["environment"]))
+        for name, service in _opinet_services().items()
+        if required - set(service["environment"])
+    }
+    assert not missing, f"OpiNet 키는 받는데 선택자/노브를 못 받는 서비스: {missing}"
+
+
+@pytest.mark.unit
+def test_the_opinet_default_mode_actually_starts_a_load() -> None:
+    """기본 모드는 `KorTravelMapSettings`가 받는 값이고, 적재를 **시작시키는** 값이어야 한다.
+
+    `disabled`가 기본이면 배포가 끝나도 적재가 켜지지 않아 호스트 `.env`를 손으로
+    고쳐야 한다 — 그 손 편집이 prod와 이 문서를 어긋나게 만든 자리다. 값 리터럴이
+    아니라 **효과**에 결박한다: fetcher가 `disabled`에서만 멈추므로, 그 외의 값이면서
+    `KorTravelMapSettings`의 Literal이 받는 값이어야 한다.
+    """
+
+    from kortravelmap.settings import KorTravelMapSettings
+
+    for name, service in _opinet_services().items():
+        mode = _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_SCOPE_MODE"])
+        assert mode != "disabled", f"{name}: 기본값이 `disabled`라 적재가 켜지지 않는다"
+        # Literal 목록을 여기 베끼지 않는다 — 베끼면 그 목록이 바뀔 때 조용히 낡는다.
+        assert (
+            KorTravelMapSettings(opinet_scope_mode=mode).opinet_scope_mode == mode
+        ), name
+
+
+@pytest.mark.unit
+def test_the_opinet_call_budget_defaults_fit_the_free_key_day() -> None:
+    """compose 기본 호출 상한이 무료키 하루를 넘지 않아야 한다.
+
+    노브를 올리는 것은 한 줄이지만 그 결과는 다음 날 전체 429다. 최악의 날은
+    매월 1일 — price job과 place job이 같은 `lowTop10` 경로를 하루에 두 번 돈다.
+    """
+
+    for name, service in _opinet_services().items():
+        budget = int(
+            _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET"])
+        )
+        low_top = int(
+            _compose_default(service["environment"]["KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS"])
+        )
+        # run 예산은 lowTop10 호출 + `get_area_codes`까지 덮는 hard cap이다.
+        assert low_top <= budget, f"{name}: lowTop 상한이 run 예산보다 크다"
+        worst = budget * _opinet_worst_day_runs()
+        assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
+            f"{name}: 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
+        )
+
+
+@pytest.mark.unit
+def test_the_env_example_opinet_knobs_fit_the_free_key_day_too() -> None:
+    """`.env.example`이 선언한 값도 같은 하루 한도를 지켜야 한다.
+
+    운영자는 이 파일을 복사해 `.env`를 만든다. 그러면 여기 적힌 값이 compose
+    기본값을 **덮는다** — 기본값만 고치고 이 파일을 두면 고친 적이 없는 것과 같다.
+    실제로 한도를 300으로 정정한 뒤에도 여기에는 1,500 시절의 180/600이 남아
+    있었다.
+    """
+
+    declared: dict[str, int] = {}
+    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _sep, value = stripped.partition("=")
+        if key.strip() in {
+            "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
+            "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
+        }:
+            declared[key.strip()] = int(value.strip())
+
+    budget = declared.get("KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET")
+    assert budget is not None, ".env.example에 OpiNet run 예산 선언이 사라졌다"
+    low_top = declared.get("KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS")
+    assert low_top is not None, ".env.example에 lowTop 상한 선언이 사라졌다"
+    assert low_top <= budget
+    worst = budget * _opinet_worst_day_runs()
+    assert worst <= _OPINET_FREE_KEY_DAILY_CALLS, (
+        f".env.example 기준 최악의 날 {worst}회 > 무료키 {_OPINET_FREE_KEY_DAILY_CALLS}회"
+    )
+
+
+@pytest.mark.unit
+def test_the_seoul_open_data_key_travels_with_the_datagokr_file_data_services() -> None:
+    """서울 책방의 새 원천 키가 fileData를 돌리는 서비스에 닿아야 한다.
+
+    서울 열린데이터광장은 data.go.kr과 **다른 포털이고 키도 다르다**. 키를 안
+    넘기면 fileData 4종 중 서울 책방만 `ProviderCredentialMissing`으로 죽는다 —
+    "키는 있는데 영원히 비활성"의 다른 모양이다.
+    """
+
+    services = _compose()["services"]
+    holders = {
+        name
+        for name, service in services.items()
+        if isinstance(service, dict)
+        and "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY" in (service.get("environment") or {})
+    }
+    assert holders, "data.go.kr 키를 받는 서비스가 하나도 없다 — 검사가 공허하다"
+    missing = sorted(
+        name
+        for name in holders
+        if "KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY"
+        not in services[name]["environment"]
+    )
+    assert not missing, f"서울 열린데이터광장 키를 못 받는 서비스: {missing}"
