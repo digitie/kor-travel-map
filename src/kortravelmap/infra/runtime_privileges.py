@@ -114,6 +114,14 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
         "end_address",
         "payload",
     ),
+    # ADR-099 2단계가 만드는 route geometry 전용 relation. 여기 선언해야
+    # unknown-relation fence를 지나고(선언 없는 표는 fail-close다) 컬럼 GRANT가
+    # 손으로 적은 SQL이 아니라 이 모델에서 **유도**된다.
+    "feature_route_geometries": (
+        "feature_id",
+        "kind",
+        "geom",
+    ),
     "feature_areas": (
         "feature_id",
         "kind",
@@ -127,6 +135,14 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
         "payload",
     ),
 }
+
+#: **300에는 없고 312가 만드는 relation.** 이 조정기는 head에서만 돌지 않는다 —
+#: `0236 → 300` handoff 실행자가 revision 300에서도 돌린다. 그 시점에는 이 표가
+#: 없으므로 무조건 GRANT를 내면 배포가 그 자리에서 멎는다. 그래서 GRANT는
+#: `to_regclass` 판정으로 감싼다(`manual_feature_purge_records` 선례와 같은 형태).
+_POST_300_GEOMETRY_RELATIONS: Final[frozenset[str]] = frozenset(
+    {"feature_route_geometries"}
+)
 
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
@@ -196,8 +212,27 @@ _LEGACY_GEOM_GRANTS = tuple(
 )
 
 
+def _maybe_conditional(relation: str, statement: str) -> str:
+    """300에 없는 relation의 GRANT는 **표가 있을 때만** 실행한다.
+
+    handoff 실행자가 revision 300에서도 이 조정기를 돌린다. 그 시점에 없는 표에
+    무조건 GRANT를 내면 배포가 그 자리에서 멎는다 — `manual_feature_purge_records`가
+    같은 이유로 `to_regclass` 판정을 쓴다.
+    """
+
+    if relation not in _POST_300_GEOMETRY_RELATIONS:
+        return statement
+    escaped = statement.replace("'", "''")
+    return (
+        "DO $post300$ BEGIN"
+        f" IF to_regclass('feature.{relation}') IS NOT NULL THEN"
+        f" EXECUTE '{escaped}';"
+        " END IF; END $post300$"
+    )
+
+
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
-    statement
+    _maybe_conditional(relation, statement)
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
