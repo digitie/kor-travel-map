@@ -533,7 +533,8 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
     by_code = {case["code"]: case for case in report.cases_json()}
     assert by_code["F4"]["metadata"]["pending_count"] == 2
     assert by_code["F7"]["sample_ids"][0].startswith("rk-regressed:f7-a:f7-b:95.00->")
-    assert len(session.calls) == 12
+    # F2G가 count 한 번을 더 쓴다(0건이라 sample 조회는 없다).
+    assert len(session.calls) == 13
     assert session.calls[-1][1]["batch_id"] == "batch-unit"
     assert session.calls[-1][1]["severity_max"] == "ERROR"
 
