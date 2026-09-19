@@ -75,9 +75,18 @@ class _FakeSession:
         return self._results.pop(0)
 
 
-def test_static_cases_declares_f1_f2_f3_f6_all_error() -> None:
+def test_static_cases_declares_f1_f2_f2g_f3_f6_all_error() -> None:
+    """정적 케이스 목록과 순서를 못 박는다.
+
+    ADR-099 2단계가 `F2G`를 더했다 — geometry가 subtype 행 바깥으로 나가면서
+    "geometry 없는 route"를 즉시 거절하던 `geom NOT NULL`이 COMMIT 시점 DEFERRABLE
+    FK로 바뀌었고, 복구·복제 세션이 그 창을 지날 수 있기 때문이다(F2와 같은 성격의
+    보상 관측). 순서는 아래 `run_consistency_checks` 대역이 결과를 **순서대로**
+    돌려주므로 계약이다.
+    """
+
     codes = [c.code for c in CONSISTENCY_CASES]
-    assert codes == ["F1", "F2", "F3", "F6"]
+    assert codes == ["F1", "F2", "F2G", "F3", "F6"]
     assert all(c.severity == "ERROR" for c in CONSISTENCY_CASES)
 
 
@@ -452,6 +461,7 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
             _FakeResult(scalar=0),  # F1 count
             _FakeResult(scalar=1),  # F2 count
             _FakeResult(rows=["feature-missing-detail"]),  # F2 samples
+            _FakeResult(scalar=0),  # F2G count (route geometry 행 결측)
             _FakeResult(scalar=0),  # F3 count
             _FakeResult(scalar=0),  # F6 count
             _FakeResult(scalar=2),  # F4 pending count
