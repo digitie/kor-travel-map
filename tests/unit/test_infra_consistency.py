@@ -504,10 +504,12 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
     assert report.batch_id == "batch-unit"
     assert report.severity_max == "ERROR"
     assert report.summary["total_violations"] == 4
-    assert report.summary["cases_evaluated"] == 9
+    # ADR-099 2단계가 F2G를 더해 정적 케이스가 넷에서 다섯이 됐다.
+    assert report.summary["cases_evaluated"] == 10
     assert report.summary["by_code"] == {
         "F1": 0,
         "F2": 1,
+        "F2G": 0,
         "F3": 0,
         "F6": 0,
         "F4": 1,
