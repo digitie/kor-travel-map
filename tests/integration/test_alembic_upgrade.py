@@ -276,6 +276,9 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("input_member_count", "bigint", True),
         ("last_source_modified_at", "date", False),
         ("source_input_set_hash", "text", True),
+        # ADR-099 311: 이 해시를 만든 **공식 세대**. 세대가 없으면 "공식이 바뀌었다"와
+        # "값이 변조됐다"가 같은 관측으로 보인다.
+        ("input_set_formula", "smallint", True),
     },
     ("ops", "curation_source_observation_receipts"): {
         ("source_id", "uuid", True),
@@ -287,6 +290,8 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("last_source_modified_at", "date", False),
         ("source_input_set_hash", "text", True),
         ("created_at", "timestamp with time zone", True),
+        # ADR-099 311 — 위와 같은 이유.
+        ("input_set_formula", "smallint", True),
     },
     ("ops", "application_schema_operation_receipts"): {
         ("operation_id", "uuid", True),
@@ -493,6 +498,7 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("curation_provider_snapshot_receipts_source_entity_count_check", "c"),
         ("curation_provider_snapshot_receipts_input_member_count_check", "c"),
         ("curation_provider_snapshot_receipts_source_input_set_hash_check", "c"),
+        ("ck_curation_provider_snapshot_receipts_input_set_formula", "c"),
     },
     ("ops", "curation_source_observation_receipts"): {
         ("curation_source_observation_receipts_pkey", "p"),
@@ -502,6 +508,7 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("curation_source_observation_receipts_observation_revision_check", "c"),
         ("curation_source_observation_receipts_row_count_check", "c"),
         ("curation_source_observation_receipt_source_input_set_hash_check", "c"),
+        ("ck_curation_source_observation_receipts_input_set_formula", "c"),
     },
     ("ops", "application_schema_operation_receipts"): {
         ("pk_application_schema_operation_receipts", "p"),
@@ -685,10 +692,10 @@ _TVN40_RAW_SQL_CATALOG_SHA256: dict[tuple[str, str], str] = {
         "f3e030279289d8e865e32577a95e6cc795280a321395df6573d7d154db26dfc2"
     ),
     ("ops", "curation_provider_snapshot_receipts"): (
-        "c50c9f1e4bf814d61767930f90684f0e67326e58e0d577ba9ed32b8839c4dceb"
+        "4a7ed9db987d04c4f74dc92e48fdee834f71869f6b197ded97aa0303cc8305d5"
     ),
     ("ops", "curation_source_observation_receipts"): (
-        "be6d2e4da5248443e0a69ec8a3783c7ea9dd57016a47b579bdc32fe20a9cd0b3"
+        "1b021df0f075d991dae966a8cba4eda5ccd0144cdee956dc20ea98042b992ef5"
     ),
 }
 

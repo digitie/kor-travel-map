@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-099.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-100.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -112,6 +112,7 @@
 | ADR-096 | catalog identity는 자연키다 — migration은 Identity 대리키를 고정하지 않는다 | [096-catalog-identity-is-the-natural-key.md](096-catalog-identity-is-the-natural-key.md) |
 | ADR-097 | 수동/Provider 중복 판정과 소비자 참조 재결합을 append-only paired protocol로 둔다 | [097-manual-provider-dedup-paired-reconciliation.md](097-manual-provider-dedup-paired-reconciliation.md) |
 | ADR-098 | provider Feature identity는 `(dataset, kind, 자연키)`다 — source entity가 아니다 | [098-provider-feature-identity-axis.md](098-provider-feature-identity-axis.md) |
+| ADR-099 | causal seal은 행별 digest를 접는다 — 전 행 payload를 한 배열에 모으지 않는다 | [099-curation-seal-member-digest-fold.md](099-curation-seal-member-digest-fold.md) |
 
 ## 새 ADR 작성 규약
 

@@ -4271,16 +4271,18 @@ CREATE FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_i
   SELECT count(DISTINCT input.source_entity_key)::bigint,
          count(input.source_entity_key)::bigint,
          max(input.imported_at)::date,
-         encode(x_extension.digest(convert_to(
-           COALESCE(jsonb_agg(jsonb_build_array(
-             input.source_entity_key, input.current_source_record_key,
-             input.raw_payload_hash, input.feature_id, input.source_role,
-             input.match_method, input.confidence, input.feature_row_revision,
-             input.lifecycle_state, input.publication_state, input.quality_state,
-             input.feature_detail, input.override_lineage
-           ) ORDER BY input.source_entity_key, input.feature_id)
-           FILTER (WHERE input.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
-           'UTF8'), 'sha256'), 'hex')
+         encode(x_extension.digest(
+           COALESCE(string_agg(
+             x_extension.digest(convert_to(jsonb_build_array(
+               input.source_entity_key, input.current_source_record_key,
+               input.raw_payload_hash, input.feature_id, input.source_role,
+               input.match_method, input.confidence, input.feature_row_revision,
+               input.lifecycle_state, input.publication_state, input.quality_state,
+               input.feature_detail, input.override_lineage
+             )::text, 'UTF8'), 'sha256'),
+             ''::bytea ORDER BY input.source_entity_key, input.feature_id)
+           FILTER (WHERE input.source_entity_key IS NOT NULL), ''::bytea),
+           'sha256'), 'hex')
   FROM canonical_input AS input
 $$;
 
@@ -16427,7 +16429,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -16757,6 +16759,8 @@ CREATE TABLE ops.curation_provider_snapshot_receipts (
     input_member_count bigint NOT NULL,
     last_source_modified_at date,
     source_input_set_hash text NOT NULL,
+    input_set_formula smallint DEFAULT 2 NOT NULL,
+    CONSTRAINT ck_curation_provider_snapshot_receipts_input_set_formula CHECK ((input_set_formula = ANY (ARRAY[1, 2]))),
     CONSTRAINT curation_provider_snapshot_receipts_input_member_count_check CHECK ((input_member_count >= 0)),
     CONSTRAINT curation_provider_snapshot_receipts_source_entity_count_check CHECK ((source_entity_count >= 0)),
     CONSTRAINT curation_provider_snapshot_receipts_source_input_set_hash_check CHECK ((source_input_set_hash ~ '^[0-9a-f]{64}$'::text))
@@ -16832,6 +16836,8 @@ CREATE TABLE ops.curation_source_observation_receipts (
     last_source_modified_at date,
     source_input_set_hash text NOT NULL,
     created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    input_set_formula smallint DEFAULT 2 NOT NULL,
+    CONSTRAINT ck_curation_source_observation_receipts_input_set_formula CHECK ((input_set_formula = ANY (ARRAY[1, 2]))),
     CONSTRAINT curation_source_observation_receipt_source_input_set_hash_check CHECK ((source_input_set_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT curation_source_observation_receipts_observation_revision_check CHECK ((observation_revision > 0)),
     CONSTRAINT curation_source_observation_receipts_row_count_check CHECK ((row_count >= 0)),
