@@ -1,5 +1,65 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-20 — geometry 한 컬럼이 이사했는데, 그것을 가리키던 자리가 열여섯 곳 남아 있었다
+
+`312_route_geometry_sidecar`가 `feature.feature_routes.geom`을
+`feature.feature_route_geometries`로 옮겼다(ADR-099 2단계). 컬럼 하나를 옮기는
+변경인데, **그 컬럼을 가리키던 선언이 옛 자리에 얼어 있는 것**이 이 작업의 거의
+전부였다. 터진 순서대로:
+
+1. `public_features` 뷰가 컬럼을 참조해 `DROP COLUMN`이 막혔다 — 뷰 교체를 앞으로.
+2. `sync_subtype_public_ready`를 스키마 소유자 창에서 바꾸려다
+   `must be owner of function`. 롤이 NOINHERIT라 멤버십만으로는 안 된다.
+3. 권한 조정기의 fail-close fence — 선언 없는 relation은 거부한다. 300에서도 도는
+   조정기라 새 relation의 GRANT는 `to_regclass` 조건부여야 했다.
+4. ORM 메타데이터 drift — 표를 만들었으면 모델도 만들어야 한다.
+5. plpgsql 프로시저 **셋**이 여전히 `feature_routes.geom`에 쓴다. plpgsql 본문은
+   `pg_depend`를 만들지 않아 `DROP COLUMN`이 막지 않는다 — **첫 route 적재**에서
+   42703으로 죽는다(적대 리뷰가 blocker로 잡았다).
+6. 새 relation에 `derive_subtype_public_ready` 트리거가 없어 `public_ready`가
+   영원히 false. route가 **오류 없이** 공개 bbox에서 0건이 된다. provider 적재는
+   core 3축을 바꾸는 UPDATE를 내지 않으므로 AFTER 트리거만으로는 안 채워진다.
+7. 프로시저 사이드카를 `ALTER PROCEDURE`에서 잘랐는데 그 문자열이 `DO` 블록
+   **안에** 있어 달러 인용이 깨졌다 — 통합 **1,096건 오류**. 달러 인용 인식
+   분할기로 교체.
+8. 세 프로시저는 `ktm_feature_state_procedure_owner` 소유의 SECURITY DEFINER인데
+   그 롤의 geometry 권한이 옛 자리에 있었다 — `permission denied for table
+   feature_route_geometries`.
+9. GiST 인덱스 이름·적재 SQL·권한 단언에 결박된 검사 **여덟 자리**.
+10. `test_runtime_subtype_acl_excludes_public_ready`가 없는 컬럼의 권한을 물어
+    42703. 관계 이름이 SQL 파라미터 뒤에 숨어 있어 이름 검색으로는 안 보였다.
+11. 내 사이드카 테스트가 COMMIT한 행을 안 치워 다른 모듈 셋의 "빈 기준선" 전제를
+    깼다(`test_status_repo`, `test_sibling_dedup`).
+12. `current_theme_candidate_snapshot`도 `to_jsonb(route)`를 읽는다 — 봉인만
+    메우면 `candidate_input_hash`가 geometry 변경을 **조용히** 못 본다.
+13. 그 함수가 SECURITY DEFINER로 도는 `ktm_curation_command_owner`의 SELECT.
+14. override field-path 레지스트리가 없는 컬럼을 가리키고 CHECK가 새 relation을
+    금지. 같은 CHECK를 ORM도 선언하고 있어 한 쪽만 넓히니 카탈로그 대조가 잡았다.
+15. 무결성 관측 두 축이 새 relation을 안 셌다. `geom NOT NULL`이 COMMIT 시점
+    DEFERRABLE FK로 약해졌으므로 복구 세션이 그 창을 지난다.
+16. head 오라클이 낡아, 그것을 정본으로 읽는 lint **열한 개**가 "루틴이
+    `feature_routes.geom`을 쓴다"는 없는 세계를 보고 있었다.
+
+**그래서 이름을 옮기는 대신 모델에서 유도하게 바꿨다.**
+`GEOMETRY_RELATIONS`/`EXTERNAL_GEOMETRY_KINDS`가 단일 정본이고, 검사·관측·권한·
+파라미터가 거기서 나온다. 다음 이사(area)는 dict 값 하나를 바꾸는 일이어야 한다.
+
+### 검사도 같은 병을 앓고 있었다
+
+역할 창 lint 셋이 전부 `_migration("309")`에 결박돼 312의 창 넷을 한 문장도 보지
+않았고, 롤 유지 lint는 AST만 봐서 312를 **3문장**으로 읽었다(실제 42문장). 둘 다
+번호·형태 대신 "있는 것 전부"를 보게 넓혔다.
+
+넓히니 302·304가 거짓 양성으로 올라왔다 — **소유자는 문장열 위에서 움직인다.**
+새 `CREATE`는 만든 롤을 소유자로 만들고, `SET ROLE` 이전 구간은 관리 롤로 돈다.
+그 모델을 옮겨 적으니 예외 목록 없이 정확해졌다.
+
+그리고 돌연변이 실험이 하나를 더 찾았다 — 롤 유지 lint가 **주석 붙은 `SET ROLE`을
+못 봤다.** 문장 분할기는 `;`만 보고 자르므로 주석이 문장 앞에 붙어 오고, 사이드카의
+**여는** 창은 거의 언제나 설명 블록 뒤에 온다. 검사는 닫는 쪽만 보고 있었다.
+이웃 모듈은 같은 함정을 `_sql_head`로 이미 막고 있었는데, 그 교훈이 옆 파일로
+건너오지 않았다.
+
 ## 2026-09-19 (4) — 등산로가 한 번도 성공한 적 없는 이유는 봉인의 크기 천장이었다
 
 `feature_route_krforest_mountain_trails_job`이 **4시간18분** 지오코딩을 마치고
