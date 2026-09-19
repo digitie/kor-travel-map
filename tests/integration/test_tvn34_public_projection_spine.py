@@ -98,18 +98,38 @@ async def _insert_subtype(
     309가 subtype 5표의 사본 컬럼 ``feature_uuid``와 그것을 보던 복합 FK를 함께
     없앴으므로 심을 identity는 ``feature_id`` 하나다.
     """
-    if table == "feature_routes":
+    if table in {"feature_routes", "feature_route_geometries"}:
+        # ADR-099 2단계가 route geometry를 `feature.feature_route_geometries`로
+        # 옮겼다. **route는 이제 두 행이다** — `write_subtype`이 내는 두 문장과 같은
+        # 순서(subtype → geometry)로 심는다. 두 경로의 잠금 순서가 어긋나면 40P01
+        # 교착 창이 열린다.
+        #
+        # `fk_feature_routes_geometry`는 DEFERRABLE INITIALLY DEFERRED라 이 두 문장
+        # 사이의 중간 상태는 위반이 아니고, COMMIT에서만 판정한다.
         await session.execute(
             text(
                 """
                 INSERT INTO feature.feature_routes (
-                    feature_id, kind, geom, route_type, public_ready
+                    feature_id, kind, route_type, public_ready
+                )
+                SELECT feature_id, 'route', 'trail', false
+                FROM feature.features
+                WHERE feature_id = CAST(:feature_id AS uuid)
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.feature_route_geometries (
+                    feature_id, kind, geom, public_ready
                 )
                 SELECT feature_id, 'route',
                        x_extension.st_geomfromtext(
                            'MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326
                        ),
-                       'trail', false
+                       false
                 FROM feature.features
                 WHERE feature_id = CAST(:feature_id AS uuid)
                 """
@@ -142,7 +162,13 @@ async def _insert_subtype(
 
 @pytest.mark.parametrize(
     ("table", "kind", "category"),
-    [("feature_routes", "route", "06070000"), ("feature_areas", "area", "06050000")],
+    [
+        ("feature_routes", "route", "06070000"),
+        # geometry를 실제로 담는 relation. 공개 bbox 술어가 타는 partial GiST가
+        # **이 행의** `public_ready`에 걸리므로, 트리거 계약이 여기서도 서야 한다.
+        ("feature_route_geometries", "route", "06070000"),
+        ("feature_areas", "area", "06050000"),
+    ],
 )
 async def test_route_area_public_ready_is_trigger_owned_and_tracks_core_state(
     migrated_session: AsyncSession,
@@ -520,7 +546,7 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                         "idx_features_updated_keyset",
                         "idx_features_lower_name_keyset",
                         "idx_features_name_trgm",
-                        "idx_feature_routes_geom_gist",
+                        "idx_feature_route_geometries_geom_gist",
                         "idx_feature_areas_geom_gist",
                     ]
                 },
@@ -540,7 +566,10 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
             assert fragment in definition, (name, definition)
         assert "deleted_at" not in definition, definition
         assert "status" not in definition, definition
-    for name in ("idx_feature_routes_geom_gist", "idx_feature_areas_geom_gist"):
+    for name in (
+        "idx_feature_route_geometries_geom_gist",
+        "idx_feature_areas_geom_gist",
+    ):
         assert "WHERE public_ready" in definitions[name], definitions[name]
 
     run = uuid4().hex[:16]
@@ -657,9 +686,9 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                 """,
             ),
             (
-                "idx_feature_routes_geom_gist",
+                "idx_feature_route_geometries_geom_gist",
                 """
-                SELECT feature_id FROM feature.feature_routes
+                SELECT feature_id FROM feature.feature_route_geometries
                 WHERE public_ready
                   AND geom OPERATOR(x_extension.&&) x_extension.st_makeenvelope(
                       126.96, 37.55, 126.99, 37.58, 4326

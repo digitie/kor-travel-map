@@ -635,7 +635,7 @@ def _admin_geometry_hits_sql() -> str:
 
     geometry 정본이 ``feature_routes``/``feature_areas``로 옮겨졌으므로(0086)
     bbox 술어를 **subtype 쪽에서 먼저** 평가한다 — 각 subtype의 GiST 인덱스
-    (``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``)에
+    (``idx_feature_route_geometries_geom_gist``/``idx_feature_areas_geom_gist``)에
     ``&&``가 그대로 내려간다. core를 LEFT JOIN한 뒤 ``COALESCE(geom)``에
     술어를 걸면 인덱스를 못 쓰므로 이 형태가 정본이다.
 

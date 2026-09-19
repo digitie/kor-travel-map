@@ -22,13 +22,15 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
+
 pytestmark = pytest.mark.integration
 
 # 서울 근처 bbox — 공개 조회 EXPLAIN용.
 _BBOX = (126.9, 37.5, 127.1, 37.7)
 
 # T-VN-35(alembic 0086): geometry는 core 컬럼이 아니다 — geom GiST 축은
-# route/area subtype으로 이동했다(``idx_feature_routes_geom_gist`` /
+# route/area subtype으로 이동했다(``idx_feature_route_geometries_geom_gist`` /
 # ``idx_feature_areas_geom_gist``). 따라서 core의 full/partial GiST 감사 대상은
 # coord 2축만 남는다.
 _FULL_GIST = ("idx_features_coord", "idx_features_coord_5179")
@@ -36,10 +38,15 @@ _PARTIAL_GIST = (
     "idx_features_coord_gist",
     "idx_features_coord_5179_gist",
 )
-#: geometry GiST 정본 — subtype 테이블별 1개씩.
+#: geometry GiST 정본 — geometry를 **담는** relation마다 1개씩.
+#:
+#: 관계 이름을 적지 않는다. ADR-099 2단계가 route geometry를
+#: `feature.feature_route_geometries`로 옮겼을 때 이 자리가 리터럴이라 감사가 옛
+#: 표를 계속 가리켰다. 적재 경로가 쓰는 모델에서 그대로 가져오면 다음 이사도
+#: 따라온다 — 새 relation에 GiST를 안 만들면 여기서 빨갛게 된다.
 _SUBTYPE_GEOM_GIST = {
-    "feature_routes": "idx_feature_routes_geom_gist",
-    "feature_areas": "idx_feature_areas_geom_gist",
+    relation: f"idx_{relation}_geom_gist"
+    for relation in sorted(set(GEOMETRY_RELATIONS.values()))
 }
 
 

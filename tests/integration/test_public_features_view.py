@@ -546,7 +546,7 @@ async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
         planner_default=False,
     )
     assert {
-        "idx_feature_routes_geom_gist",
+        "idx_feature_route_geometries_geom_gist",
         "idx_feature_areas_geom_gist",
     } <= index_names(plan)
 

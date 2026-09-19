@@ -70,6 +70,8 @@ from tests.integration.conftest import as_api_runtime
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.infra.feature_subtype import GEOMETRY_RELATIONS
+
 pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
@@ -1069,7 +1071,10 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
         (
             FeatureKind.ROUTE,
             _ROUTE_WKT,
-            "feature_routes",
+            # 관계 이름을 **적지 않고 적재 경로의 모델에서 가져온다.** ADR-099 2단계가
+            # route geometry를 보조 relation으로 옮겼을 때 이 자리가 리터럴이라
+            # 검사가 옛 표를 계속 가리켰다. 다음에 또 옮겨도 여기는 따라 움직인다.
+            GEOMETRY_RELATIONS["route"],
             lambda fid: RouteDetail(
                 feature_id=fid, route_type="trail", geometry_source="knps"
             ),
@@ -1077,7 +1082,7 @@ async def test_geometry_on_non_route_area_kind_is_rejected() -> None:
         (
             FeatureKind.AREA,
             _AREA_WKT,
-            "feature_areas",
+            GEOMETRY_RELATIONS["area"],
             lambda fid: AreaDetail(
                 feature_id=fid, area_kind="protected_area", boundary_source="gis_spca"
             ),
