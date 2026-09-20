@@ -1,10 +1,44 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-20 (2) — PR #1257 머지 완료, prod 배포가 pinned-rebuild journal에 고착 (outage 진행 중)
+
+**다음 한 작업: PinVi에 실제 커밋 하나를 올려 새 pinset을 만들고 `chain17`을 다시
+돌린다.** PR #1257(ADR-099 2단계)은 머지됐고(`b3c217f0`), 회전 → rebuild까지는
+진행했으나 **prod의 Map/PinVi 앱 컨테이너가 전부 내려간 채로 멈춰 있다**
+(postgres 둘은 healthy, Map DB는 이미 `312_route_geometry_sidecar`로 정확히 재생성됨
+— 데이터 손실 없음, 순수 가용성 중단).
+
+**막힌 지점 (n150, Manager `d6c503a0` 기준 실측):**
+
+1. pinset `3705983b`(map `b3c217f0` + pinvi `ed5eb020`)의 rebuild가 compose-up
+   단계에서 반복 실패. 원인: **다른 세션이 geo 공용-postgres 온보딩 작업으로
+   `.env`에 `KOR_TRAVEL_GEO_SHARED_APP_PASSWORD`를 추가**해 파일 전체 해시가 바뀜
+   (`.env.bak-t308-20260920042101`로 확인, 완전히 무해한 동시 작업).
+2. 그런데 `_assert_pinvi_role_credential_rebind_admission`(Manager
+   `compose_service.py`)이 `journal.phase == "map_runtime_ready"`일 때만 재결박을
+   허용한다 — 이 journal은 이미 그보다 진행된 `cancel_probe_finalized`라 **원인이
+   무해해도 이 pinset은 설계상 영구 재개 불가**다(`rotate-pinned-pair`도 같은
+   map+pinvi 쌍이면 no-op을 거부해 새 pinset을 못 만든다).
+3. 알려진 v6 candidate 이미지로 직접 서비스만 복구를 시도했으나 두 관문에 추가로
+   걸렸다 — `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300`(수 주 전 값,
+   **고쳤다** → `312_route_geometry_sidecar`, `.env.bak-pre-migration-head-fix-*`)와
+   `application final permit`(`/run/kor-travel-map-application-final-permit/`,
+   호스트 마운트가 8월 25일자 무관한 rehearsal 트리를 가리키며 비어 있음 — 이건
+   **파이프라인이 끝까지 성공해야만 발급**되는 증빙이라 손으로 만들 수 없다).
+
+**해제 조건:** PinVi에 사소한 실제 커밋(예: 문서 동기화) → `rotate-pinned-pair`로
+진짜 새 pinset 생성(고착된 journal 우회) → `chain17.sh` 재실행 → compose up이
+끝까지 성공 → final permit 발급 → 서비스 기동 확인.
+
+소유자 결정(2026-09-20): 지금은 보류하고 weather → concierge → geo → pinvi → map
+순서의 Dagster 실행구조 개선·DB 인스턴스 통합을 먼저 진행한다. 이 outage 정리는
+그 작업과 별도로 재개한다.
+
 ## 2026-09-20 — ADR-099 2단계: route geometry가 전용 PostGIS relation으로 갔다
 
-**다음 한 작업: 네 세션 게이트를 초록으로 만들고 머지 → 핀 회전 · DB 재구축 ·
-전 provider 재적재.** 소유자 지시: *"마이그레이션 하지말고 db재설계후 다시데이터
-로드해. 지금데이터는 무의미함."*
+**다음 한 작업(완료, 위 항목 참조):** ~~네 세션 게이트를 초록으로 만들고 머지 →
+핀 회전 · DB 재구축 · 전 provider 재적재.~~ 소유자 지시: *"마이그레이션 하지말고
+db재설계후 다시데이터 로드해. 지금데이터는 무의미함."*
 
 `312_route_geometry_sidecar`가 `feature.feature_routes.geom`을
 `feature.feature_route_geometries`로 옮긴다. **데이터를 이어 나르지 않는다** —

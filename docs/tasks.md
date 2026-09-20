@@ -24,6 +24,13 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
 
+- [ ] **prod Map/PinVi outage — pinned-rebuild journal이 pinset `3705983b`에서 영구 고착** — **보류**(소유자 지시 2026-09-20, weather/concierge/geo/pinvi/map DB 통합을 먼저 진행)
+
+  회전·rebuild는 돌았으나 compose-up 단계 반복 실패로 prod의 map-api/ui/dagster·
+  pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
+  정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
+  요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
+
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 
   relay·reconciliation 구현은 끝나 있고 남은 것은 런타임 결선과 enable인데, 현
