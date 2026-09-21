@@ -680,11 +680,9 @@ BEGIN
 END
 $baseline_300_membership_precondition$;
 
-GRANT ktm_feature_schema_owner TO ktm_feature_migrator
+GRANT ktm_feature_schema_owner TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_feature_runtime TO ktm_feature_api_runtime
-    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime
+GRANT ktm_feature_runtime TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
@@ -694,29 +692,29 @@ GRANT ktm_curation_command_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_curation_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
+GRANT ktm_curation_provider_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_manual_feature_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+GRANT ktm_feature_create_provider_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_request_service_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_request_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime
+GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 
 CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner;
@@ -775,9 +773,7 @@ REVOKE ALL ON SCHEMA x_extension FROM
     ktm_curation_audit_writer,
     ktm_curation_admin_executor,
     ktm_curation_provider_executor,
-    ktm_feature_migrator,
-    ktm_feature_api_runtime,
-    ktm_feature_dagster_runtime,
+    ktm_feature_service,
     ktm_manual_feature_procedure_owner,
     ktm_manual_feature_admin_executor,
     ktm_feature_create_provider_executor,
@@ -792,8 +788,7 @@ GRANT USAGE ON SCHEMA x_extension TO
     ktm_feature_schema_owner,
     ktm_feature_state_procedure_owner,
     ktm_feature_runtime,
-    ktm_feature_api_runtime,
-    ktm_feature_dagster_runtime,
+    ktm_feature_service,
     ktm_curation_command_owner,
     ktm_manual_provider_dedup_procedure_owner;
 
