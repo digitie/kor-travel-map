@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) RETURNS TABLE(o_case_id uuid, o_status text, o_created_at timestamp with time zone, o_evidence_fingerprint text, o_manual_feature jsonb, o_provider_feature jsonb, o_scores jsonb)
+CREATE OR REPLACE FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) RETURNS TABLE(o_case_id uuid, o_status text, o_created_at timestamp with time zone, o_evidence_fingerprint text, o_manual_feature jsonb, o_provider_feature jsonb, o_scores jsonb)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$

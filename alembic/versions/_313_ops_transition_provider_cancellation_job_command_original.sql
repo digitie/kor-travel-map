@@ -1,4 +1,4 @@
-CREATE FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) RETURNS boolean
+CREATE OR REPLACE FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'ops'
     AS $$

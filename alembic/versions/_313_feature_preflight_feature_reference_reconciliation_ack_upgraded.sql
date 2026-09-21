@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) RETURNS TABLE(o_outcome text, o_acked_through_sequence bigint)
+CREATE OR REPLACE FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) RETURNS TABLE(o_outcome text, o_acked_through_sequence bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $_$

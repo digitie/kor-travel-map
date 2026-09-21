@@ -1,4 +1,4 @@
-CREATE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) RETURNS TABLE(o_data jsonb)
+CREATE OR REPLACE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) RETURNS TABLE(o_data jsonb)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$

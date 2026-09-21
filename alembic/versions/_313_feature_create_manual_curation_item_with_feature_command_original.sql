@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE OR REPLACE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$

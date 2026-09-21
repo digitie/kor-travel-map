@@ -1,4 +1,4 @@
-CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) RETURNS TABLE(expected_count bigint, owned_count bigint, updated_job_ids uuid[])
+CREATE OR REPLACE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) RETURNS TABLE(expected_count bigint, owned_count bigint, updated_job_ids uuid[])
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'ops'
     AS $$

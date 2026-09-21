@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE OR REPLACE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$

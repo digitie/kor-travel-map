@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean)
+CREATE OR REPLACE PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $$

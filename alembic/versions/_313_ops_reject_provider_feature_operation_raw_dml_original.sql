@@ -1,4 +1,4 @@
-CREATE FUNCTION ops.reject_provider_feature_operation_raw_dml() RETURNS trigger
+CREATE OR REPLACE FUNCTION ops.reject_provider_feature_operation_raw_dml() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'pg_catalog', 'ops'
     AS $$

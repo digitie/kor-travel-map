@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone)
+CREATE OR REPLACE PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $_$

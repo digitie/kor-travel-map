@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint)
+CREATE OR REPLACE PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $_$

@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer)
+CREATE OR REPLACE PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops'
     AS $$

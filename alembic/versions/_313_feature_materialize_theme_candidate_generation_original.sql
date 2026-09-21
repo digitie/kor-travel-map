@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean)
+CREATE OR REPLACE PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $$

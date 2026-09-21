@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone)
+CREATE OR REPLACE PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$

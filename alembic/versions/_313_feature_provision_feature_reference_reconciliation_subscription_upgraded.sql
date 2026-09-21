@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint)
+CREATE OR REPLACE PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$

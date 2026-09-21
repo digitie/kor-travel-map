@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text)
+CREATE OR REPLACE PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$

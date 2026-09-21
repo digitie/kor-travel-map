@@ -1,4 +1,4 @@
-CREATE PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+CREATE OR REPLACE PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
