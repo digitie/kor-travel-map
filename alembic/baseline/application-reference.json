@@ -9,7 +9,7 @@
     "postgis_extension_version": "3.5.6"
   },
   "artifacts": {
-    "schema_sql_sha256": "adc023d0df9c0c27719cfa5003a71cf6551ee6a697ee40921222f8efb29143a8",
+    "schema_sql_sha256": "87aca620bdae731cf5e56d4633f8fab8ca41216faa0331a0714a46580e3bff52",
     "seed_sql_sha256": "77173ed79a6451790b027be8d3a8010f9e42910004e8e2dacaaa6f0e8c165681",
     "catalog_contract_sql_sha256": "8e9429a6bc89205f8d92542ea6398cc8bde79c55f5fbbff1e0bfe7b49f977bce",
     "source_catalog_contract_sha256": "5d39c2b29c82740f7bc395f0e2aef63eb082d130a4e07e0088081e2997174162",

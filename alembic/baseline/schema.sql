@@ -24534,7 +24534,7 @@ GRANT ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagste
 --
 
 REVOKE ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) TO ktm_feature_api_runtime;
+GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) TO ktm_feature_service;
 
 
 --
@@ -24580,7 +24580,7 @@ REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
 SELECT set_config('role', 'ktm_curation_command_owner', true);
 
 REVOKE ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) TO ktm_feature_api_runtime;
+GRANT ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) TO ktm_feature_service;
 
 
 --
@@ -26435,7 +26435,7 @@ BEGIN
                              ('ktm_curation_audit_writer'),
                              ('ktm_curation_command_owner'),
                              ('ktm_curation_provider_executor'),
-                             ('ktm_feature_api_runtime'),
+                             ('ktm_feature_service'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
@@ -26476,7 +26476,7 @@ BEGIN
                              ('ktm_curation_audit_writer'),
                              ('ktm_curation_command_owner'),
                              ('ktm_curation_provider_executor'),
-                             ('ktm_feature_api_runtime'),
+                             ('ktm_feature_service'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
