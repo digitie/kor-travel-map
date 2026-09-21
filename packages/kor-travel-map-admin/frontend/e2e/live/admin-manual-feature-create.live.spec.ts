@@ -115,7 +115,7 @@ test.describe("M01/M02 admin 수동 Feature 생성 live acceptance", () => {
     expect(data.origin.creator_principal_id).toBe(
       "admin-ui-bff.manual-feature-create.v1",
     );
-    expect(data.origin.invoker_role).toBe("ktm_feature_api_runtime");
+    expect(data.origin.invoker_role).toBe("ktm_feature_service");
     // **로그인한 주체가 provenance까지 실려 오는가** — 그 값이 무엇인지가 아니다.
     // 종전에는 `"e2e-admin"`을 리터럴로 박아 두어 **환경이 바뀌면 부러졌다**: actor는
     // BFF의 `adminUsernameFromEnv()`(→ `ADMIN_USERNAME`, 기본 `admin`)에서 나와

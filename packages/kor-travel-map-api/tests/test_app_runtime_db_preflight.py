@@ -64,7 +64,7 @@ def test_lifespan_skips_preflight_when_not_required(
 
 
 @pytest.mark.unit
-def test_lifespan_runs_preflight_with_the_api_runtime_login(
+def test_lifespan_runs_preflight_with_the_service_login(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(_PREFLIGHT_ENV, "true")
@@ -75,7 +75,7 @@ def test_lifespan_runs_preflight_with_the_api_runtime_login(
         pass
 
     assert [call["expected_login"] for call in recorder.calls] == [
-        "ktm_feature_api_runtime"
+        "ktm_feature_service"
     ]
 
 

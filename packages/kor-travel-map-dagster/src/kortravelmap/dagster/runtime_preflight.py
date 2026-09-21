@@ -20,7 +20,7 @@ async def _preflight() -> None:
     try:
         await assert_runtime_db_privilege_boundary(
             engine,
-            expected_login="ktm_feature_dagster_runtime",
+            expected_login="ktm_feature_service",
         )
     finally:
         await engine.dispose()

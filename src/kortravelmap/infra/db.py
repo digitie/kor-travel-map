@@ -61,8 +61,11 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
 
 
 #: ADR-098 provider wrapper. EXECUTE는 `ktm_feature_create_provider_executor`에만
-#: 있고 그 롤은 `ktm_feature_dagster_runtime`에만 부여된다
-#: (`docker/postgres-role-bootstrap.sh:732`) — provider 적재 identity 하나다.
+#: 있다(`docker/postgres-role-bootstrap.sh`). ADR-100 이전에는 그 role이
+#: `ktm_feature_dagster_runtime`에만 부여돼 provider 적재 identity 하나였지만,
+#: LOGIN role 통합 이후 단일 `ktm_feature_service`가 이 procedure의 EXECUTE
+#: 권한을 갖는다 — 다만 실제로 이 procedure를 호출하는 애플리케이션 코드는
+#: 여전히 Dagster 경로뿐이다(ADR-100 §3, 호출 대상은 바뀌지 않음).
 _PROVIDER_FEATURE_CREATE_PROCEDURE = (
     "feature.create_provider_feature_with_initial_state(jsonb,jsonb,text,text,text,jsonb)"
 )
@@ -260,8 +263,15 @@ _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
     }
 )
 
+#: ADR-100: `ktm_feature_api_runtime`/`ktm_feature_dagster_runtime` LOGIN 두
+#: role이 `ktm_feature_service` 하나로 통합됐다. 이 role은 두 옛 role이 각각
+#: 갖던 procedure execute 권한의 **합집합**을 그대로 받는다(bootstrap 스크립트가
+#: 양쪽 executor role 멤버십을 모두 부여) — 호출하는 애플리케이션 코드 자체는
+#: 안 바뀌었으므로(API는 여전히 admin 계열만, Dagster는 여전히 provider 계열만
+#: 실제로 호출) 이 allowlist는 "이 login이 가질 수 있는 것"이지 "실제로 쓰는
+#: 것"이 아니다.
 _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
-    "ktm_feature_api_runtime": (
+    "ktm_feature_service": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
         | frozenset(
             {
@@ -273,43 +283,33 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
                 _M05_LEASE_PROCEDURE,
                 _M05_ACK_PROCEDURE,
                 _M05_SUBSCRIPTION_PROVISION_PROCEDURE,
-            }
-        )
-        | _ADMIN_CURATION_FEATURE_PROCEDURES
-    ),
-    "ktm_feature_dagster_runtime": (
-        _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset(
-            {
                 _GENERIC_FEATURE_CREATE_PROCEDURE,
                 _PROVIDER_FEATURE_CREATE_PROCEDURE,
                 _M05_CANDIDATE_PROCEDURE,
             }
         )
+        | _ADMIN_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
 }
 
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
-    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
-    | frozenset(
-        {
-            _MANUAL_FEATURE_PROVENANCE_FUNCTION,
-            _FEATURE_REQUEST_READ_FUNCTION,
-            _FEATURE_REQUEST_LIST_FUNCTION,
-            _M05_ACK_PREFLIGHT_FUNCTION,
-            _M05_CASE_READ_FUNCTION,
-            _M05_CASE_LIST_FUNCTION,
-            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
-        }
-    ),
-    "ktm_feature_dagster_runtime": frozenset(
-        {
-            _M05_DETECTOR_MANUAL_LIST_FUNCTION,
-            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
-            _PROVIDER_CURATION_SEAL_FUNCTION,
-        }
+    "ktm_feature_service": (
+        _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
+        | frozenset(
+            {
+                _MANUAL_FEATURE_PROVENANCE_FUNCTION,
+                _FEATURE_REQUEST_READ_FUNCTION,
+                _FEATURE_REQUEST_LIST_FUNCTION,
+                _M05_ACK_PREFLIGHT_FUNCTION,
+                _M05_CASE_READ_FUNCTION,
+                _M05_CASE_LIST_FUNCTION,
+                _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
+                _M05_DETECTOR_MANUAL_LIST_FUNCTION,
+                _PROVIDER_CURATION_SEAL_FUNCTION,
+            }
+        )
     ),
 }
 
@@ -613,20 +613,18 @@ def _runtime_db_privilege_problems(
         if row.get(field_name) is not True:
             problems.append(message)
 
-    if expected_login == "ktm_feature_api_runtime":
-        if row.get("can_execute_create_procedure") is not False:
-            problems.append(
-                "API runtime must not EXECUTE create_feature_with_initial_state directly"
-            )
-        if row.get("can_execute_manual_create_procedure") is not True:
-            problems.append(
-                "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
-            )
-    elif expected_login == "ktm_feature_dagster_runtime":
-        if row.get("can_execute_create_procedure") is not True:
-            problems.append("Dagster runtime must EXECUTE create_feature_with_initial_state")
-        if row.get("can_execute_manual_create_procedure") is not False:
-            problems.append("Dagster runtime must not EXECUTE the manual Feature writer")
+    # ADR-100: API/Dagster가 예전엔 서로 다른 LOGIN이라 이 둘은 상호 배타적으로
+    # 검증됐다(API는 manual만, Dagster는 generic/provider만). 지금은 단일
+    # `ktm_feature_service`가 두 procedure 모두에 대한 EXECUTE 권한을 갖는다 —
+    # 실제로 어느 코드 경로가 어느 procedure를 호출하는지는 이 preflight의
+    # 검증 범위 밖이다(DB 권한만 검증한다). 그래서 상호 배타 단언은 "둘 다
+    # 가진다" 단언으로 바뀐다.
+    if row.get("can_execute_create_procedure") is not True:
+        problems.append("runtime login must EXECUTE create_feature_with_initial_state")
+    if row.get("can_execute_manual_create_procedure") is not True:
+        problems.append(
+            "runtime login must EXECUTE create_admin_manual_feature_with_initial_state"
+        )
 
     expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:

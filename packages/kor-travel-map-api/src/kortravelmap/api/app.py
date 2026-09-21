@@ -794,7 +794,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
             await assert_runtime_db_privilege_boundary(
                 await get_engine(),
-                expected_login="ktm_feature_api_runtime",
+                expected_login="ktm_feature_service",
             )
         await _verify_kor_travel_geo_credentials(core_settings)
         try:

@@ -809,13 +809,13 @@ class FeatureCreationOriginRow(Base):
         ),
         CheckConstraint(
             "(origin_kind = 'manual_admin' "
-            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND invoker_role = 'ktm_feature_service' "
             "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
             "OR (origin_kind = 'manual_curation' "
-            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND invoker_role = 'ktm_feature_service' "
             "AND procedure_definer = 'ktm_curation_command_owner') "
             "OR (origin_kind = 'manual_request' "
-            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND invoker_role = 'ktm_feature_service' "
             "AND procedure_definer = 'ktm_feature_request_procedure_owner')",
             name=conv("ck_feature_creation_origins_roles"),
         ),

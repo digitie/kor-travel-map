@@ -17,11 +17,11 @@ from alembic.config import Config
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-# 기존 integration runtime fixture가 사용하는 test-only credential를 유지한다.
-# 값 자체는 testcontainer 내부에서만 쓰이며, `300` bootstrap으로 교체할 때 로그인
-# 경계를 바꾸지 않기 위해 이름이 아니라 역할별 credential 계약을 보존한다.
-_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
-_TEST_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+# ADR-100: migrator/api_runtime/dagster_runtime LOGIN 셋이 `ktm_feature_service`
+# 하나로 통합됐다. 옛 credential 상수 이름은 기존 fixture 참조를 최소로 흔들기
+# 위해 값만 하나로 합치고 이름은 유지한다.
+_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-service-password"
+_TEST_RUNTIME_PASSWORD = _TEST_MIGRATOR_PASSWORD
 
 _NOLOGIN_ROLES = (
     "ktm_feature_schema_owner",
@@ -45,11 +45,9 @@ _NOLOGIN_ROLES = (
 )
 
 _ROLE_GRANTS = (
-    "GRANT ktm_feature_schema_owner TO ktm_feature_migrator "
+    "GRANT ktm_feature_schema_owner TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-    "GRANT ktm_feature_runtime TO ktm_feature_api_runtime "
-    "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-    "GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime "
+    "GRANT ktm_feature_runtime TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
     "GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
@@ -59,30 +57,30 @@ _ROLE_GRANTS = (
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
     "GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-    "GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime "
+    "GRANT ktm_curation_admin_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-    "GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime "
+    "GRANT ktm_curation_provider_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
     "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-    "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime "
+    "GRANT ktm_manual_feature_admin_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-    "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime "
+    "GRANT ktm_feature_create_provider_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
     "GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-    "GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime "
+    "GRANT ktm_feature_request_service_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-    "GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime "
+    "GRANT ktm_feature_request_admin_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
     "GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner "
     "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-    "GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime "
+    "GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-    "GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime "
+    "GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_service "
     "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
     "GRANT ktm_feature_reference_reconciliation_service_executor "
-    "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+    "TO ktm_feature_service WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
 )
 
 
@@ -160,9 +158,7 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
                         );
                     END LOOP;
                     FOREACH role_name IN ARRAY ARRAY[
-                        'ktm_feature_migrator',
-                        'ktm_feature_api_runtime',
-                        'ktm_feature_dagster_runtime'
+                        'ktm_feature_service'
                     ] LOOP
                         IF to_regrole(role_name) IS NULL THEN
                             EXECUTE format(
@@ -178,9 +174,7 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
             )
         )
         for role, password in (
-            ("ktm_feature_migrator", _TEST_MIGRATOR_PASSWORD),
-            ("ktm_feature_api_runtime", _TEST_RUNTIME_PASSWORD),
-            ("ktm_feature_dagster_runtime", _TEST_RUNTIME_PASSWORD),
+            ("ktm_feature_service", _TEST_MIGRATOR_PASSWORD),
         ):
             quoted_password = await connection.scalar(
                 text("SELECT quote_literal(CAST(:password AS text))"),
@@ -278,16 +272,14 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
             text(
                 "REVOKE ALL ON SCHEMA x_extension FROM "
                 + ", ".join(_NOLOGIN_ROLES[1:])
-                + ", ktm_feature_migrator, ktm_feature_api_runtime, "
-                "ktm_feature_dagster_runtime"
+                + ", ktm_feature_service"
             )
         )
         await connection.execute(
             text(
                 "GRANT USAGE ON SCHEMA x_extension TO "
                 "ktm_feature_schema_owner, ktm_feature_state_procedure_owner, "
-                "ktm_feature_runtime, ktm_feature_api_runtime, "
-                "ktm_feature_dagster_runtime, ktm_curation_command_owner, "
+                "ktm_feature_runtime, ktm_feature_service, ktm_curation_command_owner, "
                 "ktm_manual_provider_dedup_procedure_owner"
             )
         )
@@ -321,7 +313,7 @@ async def bootstrapped_application_300_migrator_dsn(async_dsn: str) -> str:
         await engine.dispose()
     return (
         make_url(async_dsn)
-        .set(username="ktm_feature_migrator", password=password)
+        .set(username="ktm_feature_service", password=password)
         .render_as_string(hide_password=False)
     )
 
