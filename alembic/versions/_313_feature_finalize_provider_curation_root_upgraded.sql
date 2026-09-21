@@ -29,7 +29,6 @@ BEGIN
   END IF;
   IF (
        NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
      ) AND NOT (
        session_user = 'ktm_feature_service'
        AND current_setting('ktm.curation_cancellation_root', true)

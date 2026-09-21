@@ -10,8 +10,7 @@ BEGIN
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m03_child_linkage_isolation';
     END IF;
     IF session_user <> 'ktm_feature_service'
-       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
         RAISE EXCEPTION 'import child linkage requires the admin executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_m03_child_linkage_executor';
     END IF;

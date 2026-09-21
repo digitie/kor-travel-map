@@ -49,7 +49,6 @@ BEGIN
   IF (v_is_provider AND (
         (
           NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-          OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
         ) AND NOT (
           session_user = 'ktm_feature_service'
           AND EXISTS (
@@ -62,7 +61,6 @@ BEGIN
         )
       )) OR (NOT v_is_provider AND (
         NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-        OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
       )) THEN
     RAISE EXCEPTION 'generation receipt is not executable by this runtime principal'
       USING ERRCODE = '42501';

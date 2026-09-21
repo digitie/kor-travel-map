@@ -29,26 +29,58 @@ migration이 자기 것으로 만든 procedure 2개가 더 있다 —
 같은 blocking DDL만 직접 고쳤다(별도 커밋). procedure 본문의 role 검사는 여기,
 313에서 마저 CREATE OR REPLACE한다 — 그래야 302/304를 처음부터 다시 도는 fresh
 install과, 이미 302/304를 지나 313만 새로 받는 n150 같은 기존 환경이 같은 최종
-상태로 수렴한다. 총 21개 procedure/function.
+상태로 수렴한다. 여기까지 21개 procedure/function.
 
-**어느 procedure도 두 이름을 동시에 비교하지 않는다** — 각 procedure는 "이건 API
-전용" 또는 "이건 Dagster 전용" 둘 중 하나만 검사했다. 그래서 이건 분기 로직을
-합치는 판단이 필요한 작업이 아니라, 리터럴 문자열 치환이다(원본/치환본 대조는 이
-파일과 나란히 있는 `_313_*_original.sql` / `_313_*_upgraded.sql` 사이드카 diff로
-검증 가능 — 각 procedure당 role 이름 한 줄만 다르다).
+**두 번째, 별도 층 — `session_user` 리터럴이 아니라 executor NOLOGIN role
+membership으로 같은 상호 배타를 강제하는 procedure가 35개 더 있다**(n150
+testcontainers round-trip이 실제로 `ensure_provider_feature_operation_command`를
+호출하는 통합 테스트를 돌리기 전까지 안 보였다 — literal `session_user` 문자열
+검색으로는 못 잡는다). 패턴은:
+
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION ...
+
+즉 "admin executor 멤버이고, provider executor 멤버가 아니어야" 통과한다(역방향
+패턴도 있다). `ktm_curation_admin_executor`는 옛 api_runtime 전용, `ktm_curation_
+provider_executor`는 옛 dagster_runtime 전용 membership이었다 — `ktm_feature_service`는
+**두 role 모두**의 member이므로, 통합 이후 이 게이트는 호출자가 누구든 무조건
+거절한다(둘 다 만족 못 하는 게 아니라 "안 됨" 조건의 뒤쪽 절이 무조건 참이 됨).
+21개짜리 층과 달리 이건 "role 이름 문자열 치환"이 아니라 **상호 배타 자체가
+성립 불가능해진 것**이라 고정된 수정이 하나뿐이다 — `OR pg_has_role(<반대쪽>)`
+절을 통째로 드롭해 "그 executor의 member이기만 하면 통과"로 좁힌다(admin 대신
+provider를 쓰던 procedure는 반대로). 애플리케이션 코드가 실제로 어느 procedure를
+호출하는지는 안 바뀌므로 이 완화가 새로 여는 경로는 없다 — 다만 이 게이트가
+"당신은 그 반대가 아니어야 한다"까지 강제하던 것은 이제 못 한다(§3와 같은 종류의
+trade-off, 범위만 훨씬 넓다). 35개 중 4개(`create_manual_curation_item_with_
+initial_state`류의 4개와는 다른, `materialize_theme_candidate_generation` 등
+21개짜리 층과 이름이 겹치는 4개)는 이미 있던 sidecar에 이 수정을 추가로 얹었다
+(role 이름 치환 + 상호 배타 제거 둘 다). 총 56개 procedure/function
+(21 + 35, 단 4개는 양쪽 세트에 다 속해 있으므로 sidecar 파일 기준으로는 21 + 31
+= 52쌍).
+
+**리터럴 문자열 치환 층(첫 21개)은 어느 procedure도 두 이름을 동시에 비교하지
+않는다** — 각 procedure는 "이건 API 전용" 또는 "이건 Dagster 전용" 둘 중 하나만
+검사했다. 그래서 그 층은 분기 로직을 합치는 판단이 필요 없는 순수 치환이었다
+(원본/치환본 대조는 이 파일과 나란히 있는 `_313_*_original.sql` /
+`_313_*_upgraded.sql` 사이드카 diff로 검증 가능).
 
 `feature.feature_creation_origins`의 `ck_feature_creation_origins_roles` CHECK 제약도
 같은 이유로 `invoker_role = 'ktm_feature_api_runtime'`를 세 번 검사한다(dagster_runtime은
 애초에 여기 없었다 — manual 출처는 항상 API 경유였다). 이것도 단순 치환이다.
 
-## 명시적으로 버리는 것 (ADR-100 §3)
+## 명시적으로 버리는 것 (ADR-100 §3, 확장)
 
-통합 전에는 이 21개 procedure가 "호출자가 API 서버인지 Dagster인지"를 `session_user`로
-구분해 거절할 수 있었다. 통합 후에는 두 경로 모두 `ktm_feature_service`로 접속하므로 이
-구분은 사라진다 — 예를 들어 API 전용이던 procedure를 Dagster 경로 코드가 호출해도 더는
-`session_user` 비교로는 막히지 않는다. 애플리케이션 코드가 어느 procedure를 호출하는지는
-바뀌지 않으므로 기능 회귀는 없지만, DB가 강제하던 이 출처 분리는 더 이상 존재하지 않는다
-— ADR-100이 명시적으로 승인한 trade-off다.
+통합 전에는 이 procedure들이 "호출자가 API 서버인지 Dagster인지"를 `session_user`
+문자열 또는 admin/provider executor membership으로 구분해 거절할 수 있었다.
+통합 후에는 두 경로 모두 `ktm_feature_service`로 접속하고 두 executor role 모두의
+member이므로 이 구분은 사라진다 — API 전용이던 procedure를 Dagster 경로 코드가
+호출해도(또는 그 반대도) 더는 막히지 않는다. 애플리케이션 코드가 어느 procedure를
+호출하는지는 바뀌지 않으므로 **새로 열리는 호출 경로는 없다** — 다만 executor
+membership 층이 강제하던 "그 반대가 아니어야 한다"는 이제 DB가 대신 확인해 주지
+않는다. ADR-100이 명시적으로 승인한 trade-off이며, 범위는 최초 승인 시점(21개,
+session_user 문자열만) 확인 이후 실제 round-trip 테스트로 35개가 더 있다는 게
+드러나 확장됐다.
 
 ## owner 순서
 
@@ -113,9 +145,40 @@ _PROCEDURES_BY_OWNER: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "feature_finalize_provider_curation_root",
             "feature_materialize_theme_candidate_generation",
             "feature_refresh_curated_source_observation",
+            "feature_apply_curation_import_items_command",
+            "feature_archive_curated_source_command",
+            "feature_archive_curated_source_rule_command",
+            "feature_archive_curated_theme_command",
+            "feature_archive_curation_collection_command",
+            "feature_archive_curation_item_command",
+            "feature_claim_curation_import_plan_command",
+            "feature_create_curated_source_command",
+            "feature_create_curated_source_rule_command",
+            "feature_create_curated_theme_command",
+            "feature_create_curation_collection_command",
+            "feature_create_curation_import_plan_command",
+            "feature_create_curation_item_command",
+            "feature_finalize_provider_curation_receipts",
+            "feature_merge_lock_curation_collections",
+            "feature_patch_curated_source_command",
+            "feature_patch_curated_source_rule_command",
+            "feature_patch_curated_theme_command",
+            "feature_patch_curation_collection_command",
+            "feature_patch_curation_item_command",
+            "feature_promote_theme_feature_candidate",
+            "feature_reclassify_curation_quarantine_command",
+            "feature_reject_theme_feature_candidate",
+            "feature_resolve_curation_import_collection_command",
+            "feature_seal_provider_curation_snapshot_receipt",
+            "feature_sync_concierge_theme_catalog",
+            "feature_touch_curation_import_collection_command",
             "ops_fill_provider_cancellation_starts_command",
             "ops_transition_provider_cancellation_job_command",
             "ops_record_curation_import_manual_feature_child",
+            "ops_append_provider_feature_attempt_event_command",
+            "ops_ensure_provider_feature_operation_command",
+            "ops_finish_provider_feature_membership_command",
+            "ops_transition_provider_feature_operation_terminal_command",
         ),
     ),
     (
@@ -162,6 +225,10 @@ _CURATION_COMMAND_OWNER_OPS_NAMES: Final[frozenset[str]] = frozenset(
         "ops_fill_provider_cancellation_starts_command",
         "ops_transition_provider_cancellation_job_command",
         "ops_record_curation_import_manual_feature_child",
+        "ops_append_provider_feature_attempt_event_command",
+        "ops_ensure_provider_feature_operation_command",
+        "ops_finish_provider_feature_membership_command",
+        "ops_transition_provider_feature_operation_terminal_command",
     }
 )
 
