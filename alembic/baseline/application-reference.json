@@ -13,7 +13,7 @@
     "seed_sql_sha256": "77173ed79a6451790b027be8d3a8010f9e42910004e8e2dacaaa6f0e8c165681",
     "catalog_contract_sql_sha256": "11222539359d0e2f45962a93471131740005a850b9ef61f4b2d78f14dbeab146",
     "source_catalog_contract_sha256": "48a27bdba3bd8104d8252d9113ded402c247ca4e481119e3c115dde2ddeb3aa9",
-    "source_catalog_contract_receipt_sha256": "467f3e8cee5402ec47eb59a86b768352047c2731b381683bd8347dd7f92b60cf",
+    "source_catalog_contract_receipt_sha256": "e915a3d8e238a081f11f23ee88fdb2e2305fd61c5bd067bcd70b9b5d6ce708b5",
     "destination_catalog_contract_sha256": "deced8f5e2cd1b15801fdac6046a0ff2840026fe89d0c8fed6bd63451c82d9c4",
     "destination_catalog_contract_receipt_sha256": "ca5c1b1231063be39b00a79ed5feb65496d57d65c4644ab6697763ab8e4883f4",
     "seed_contract_sql_sha256": "f8e7bd767130af73aaf3dcea812e6c7af2896c9bf59878886a7aa6eca96cdb27",
