@@ -26460,7 +26460,7 @@ $ktm_acl_grantee$;
 DO $ktm_acl$
 DECLARE
     observed text;
-    expected text := 'bdf0aa14f6657627c9c9392c99cb56120d3ab53a2c074263f12cc94273929c90';
+    expected text := '5135042646be771da609aa3e486a6c08aac1cab6e7e4ed97f7938148c2ac55df';
 BEGIN
     observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
