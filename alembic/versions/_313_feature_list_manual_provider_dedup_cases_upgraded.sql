@@ -25,13 +25,13 @@ BEGIN
         candidate.evidence_fingerprint,
         jsonb_build_object(
             'feature_id', candidate.manual_feature_id,
-            'feature_uuid', candidate.manual_feature_uuid,
+            'feature_uuid', CAST(candidate.manual_feature_id AS text),
             'row_revision', candidate.manual_feature_row_revision,
             'snapshot', candidate.manual_feature_snapshot
         ),
         jsonb_build_object(
             'feature_id', candidate.provider_feature_id,
-            'feature_uuid', candidate.provider_feature_uuid,
+            'feature_uuid', CAST(candidate.provider_feature_id AS text),
             'row_revision', candidate.provider_feature_row_revision,
             'snapshot', candidate.provider_feature_snapshot
         ),

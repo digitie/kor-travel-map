@@ -1,17 +1,7 @@
-CREATE OR REPLACE PROCEDURE ops.record_curation_import_manual_feature_child(
-    IN p_import_plan_id uuid,
-    IN p_plan_row_number integer,
-    IN p_plan_sha256 text,
-    IN p_manual_payload_sha256 text,
-    IN p_child_command_id bigint,
-    IN p_feature_uuid uuid,
-    IN p_import_row_id uuid,
-    IN p_curation_item_id uuid,
-    IN p_link_decision_id uuid
-)
-LANGUAGE plpgsql SECURITY DEFINER
-SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
-AS $$
+CREATE OR REPLACE PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $_$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
 BEGIN
@@ -40,6 +30,9 @@ BEGIN
         RAISE EXCEPTION 'import child linkage digests are not canonical'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_digest';
     END IF;
+    -- 존재 결박(plan claim/plan row/claim causation/receipt/decision evidence)은
+    -- `301` FK가 강제한다. FK가 못 보는 **인자 사이 정합**은 여기서 fail-close한다
+    -- (적대 리뷰 H3 — 교차된 linkage가 FK 일곱을 전부 만족한 채 통과했다).
     IF NOT EXISTS (
         SELECT 1 FROM feature.curation_import_rows AS import_row
         WHERE import_row.import_row_id = p_import_row_id
@@ -70,9 +63,8 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1
         FROM feature.curation_items AS item
-        JOIN feature.features AS feature_row ON feature_row.feature_id = item.feature_id
         WHERE item.curation_item_id = p_curation_item_id
-          AND feature_row.feature_uuid = p_feature_uuid
+          AND item.feature_id = p_feature_id
     ) THEN
         RAISE EXCEPTION 'curation item is not bound to the linkage feature'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m03_child_linkage_feature';
@@ -89,12 +81,12 @@ BEGIN
     END IF;
     INSERT INTO ops.curation_import_manual_feature_children (
         import_plan_id, plan_row_number, plan_sha256, manual_payload_sha256,
-        child_command_id, feature_uuid, import_row_id, curation_item_id,
+        child_command_id, feature_id, import_row_id, curation_item_id,
         link_decision_id
     ) VALUES (
         p_import_plan_id, p_plan_row_number, p_plan_sha256, p_manual_payload_sha256,
-        p_child_command_id, p_feature_uuid, p_import_row_id, p_curation_item_id,
+        p_child_command_id, p_feature_id, p_import_row_id, p_curation_item_id,
         p_link_decision_id
     );
 END
-$$;
+$_$;

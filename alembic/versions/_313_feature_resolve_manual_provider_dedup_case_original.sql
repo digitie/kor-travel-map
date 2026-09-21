@@ -1,4 +1,4 @@
-CREATE OR REPLACE PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint)
+CREATE OR REPLACE PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id uuid, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id uuid, OUT o_manual_feature_row_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
     AS $_$
@@ -10,7 +10,7 @@ DECLARE
     v_source record;
     v_primary_source_count integer;
     v_command ops.domain_commands%ROWTYPE;
-    v_transition_feature_id text;
+    v_transition_feature_id uuid;
     v_transition_row_revision bigint;
     v_transition_id bigint;
     v_action text;
@@ -37,7 +37,7 @@ BEGIN
        OR nullif(btrim(p_reason), '') IS NULL
        OR nullif(btrim(p_actor), '') IS NULL
        OR p_domain_command_id IS NULL OR p_domain_command_id < 1
-       OR (p_decision = 'merged' AND nullif(btrim(p_survivor_feature_id), '') IS NULL)
+       OR (p_decision = 'merged' AND p_survivor_feature_id IS NULL)
        OR (p_decision <> 'merged' AND p_survivor_feature_id IS NOT NULL) THEN
         RAISE EXCEPTION 'manual/provider dedup decision input is not canonical'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_decision_input';
@@ -78,18 +78,16 @@ BEGIN
 
     PERFORM 1
     FROM feature.features AS locked
-    WHERE locked.feature_uuid IN (v_case.manual_feature_uuid, v_case.provider_feature_uuid)
-    ORDER BY locked.feature_uuid
+    WHERE locked.feature_id IN (v_case.manual_feature_id, v_case.provider_feature_id)
+    ORDER BY locked.feature_id
     FOR UPDATE;
     SELECT * INTO v_manual
     FROM feature.features
     WHERE feature_id = v_case.manual_feature_id
-      AND feature_uuid = v_case.manual_feature_uuid
     FOR UPDATE;
     SELECT * INTO v_provider
     FROM feature.features
     WHERE feature_id = v_case.provider_feature_id
-      AND feature_uuid = v_case.provider_feature_uuid
     FOR UPDATE;
     IF NOT FOUND
        OR v_manual.row_revision <> v_case.manual_feature_row_revision
@@ -103,12 +101,12 @@ BEGIN
     END IF;
     SELECT origin.* INTO v_origin
     FROM feature.feature_creation_origins AS origin
-    WHERE origin.feature_id = v_manual.feature_uuid
+    WHERE origin.feature_id = v_manual.feature_id
       AND origin.creation_command_id = v_case.manual_creation_command_id
       AND origin.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request');
     IF NOT FOUND OR NOT EXISTS (
         SELECT 1 FROM feature.manual_feature_identity_claims AS claim
-        WHERE claim.feature_id = v_manual.feature_uuid
+        WHERE claim.feature_id = v_manual.feature_id
           AND claim.claimed_by_command_id = v_origin.creation_command_id
     ) THEN
         o_outcome := 'stale';
@@ -199,12 +197,12 @@ BEGIN
         'action', v_action,
         'old_feature', jsonb_build_object(
             'feature_id', v_manual.feature_id,
-            'feature_uuid', v_manual.feature_uuid,
+            'feature_uuid', CAST(v_manual.feature_id AS text),
             'row_revision', v_manual.row_revision
         ),
         'replacement_feature', CASE WHEN v_action = 'rebind' THEN jsonb_build_object(
             'feature_id', v_provider.feature_id,
-            'feature_uuid', v_provider.feature_uuid,
+            'feature_uuid', CAST(v_provider.feature_id AS text),
             'row_revision', v_provider.row_revision
         ) ELSE NULL END,
         'manual_retire_transition_id', v_transition_id,
@@ -216,15 +214,14 @@ BEGIN
     );
     INSERT INTO ops.feature_reference_reconciliation_events (
         event_id, event_sequence, case_id, resolution_id, action,
-        old_feature_id, old_feature_uuid, old_feature_row_revision_before_transition,
-        replacement_feature_id, replacement_feature_uuid, replacement_feature_row_revision,
+        old_feature_id, old_feature_row_revision_before_transition,
+        replacement_feature_id, replacement_feature_row_revision,
         manual_retire_transition_id, manual_retire_row_revision_after_transition,
         command_id, payload_schema_version, event_payload, event_sha256, occurred_at
     ) OVERRIDING SYSTEM VALUE VALUES (
         o_event_id, v_event_sequence, v_case.case_id, o_resolution_id, v_action,
-        v_manual.feature_id, v_manual.feature_uuid, v_manual.row_revision,
+        v_manual.feature_id, v_manual.row_revision,
         CASE WHEN v_action = 'rebind' THEN v_provider.feature_id END,
-        CASE WHEN v_action = 'rebind' THEN v_provider.feature_uuid END,
         CASE WHEN v_action = 'rebind' THEN v_provider.row_revision END,
         v_transition_id, v_transition_row_revision, p_domain_command_id,
         1, v_payload, v_event_sha256, v_occurred_at

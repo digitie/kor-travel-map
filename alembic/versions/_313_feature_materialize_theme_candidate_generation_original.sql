@@ -11,7 +11,7 @@ DECLARE
   v_existing_generation feature.theme_candidate_generations%ROWTYPE;
   v_candidate feature.theme_feature_candidates%ROWTYPE;
   v_expected record;
-  v_feature_id text;
+  v_feature_id uuid;
   v_provider_dataset_id bigint;
   v_rule_input jsonb;
   v_rule_input_hash text;
@@ -210,7 +210,7 @@ BEGIN
     FROM provider_sync.source_entities AS entity
     WHERE entity.provider_dataset_id = v_provider_dataset_id
     UNION
-    SELECT 'feature'::text, link.feature_id
+    SELECT 'feature'::text, link.feature_id::text
     FROM provider_sync.source_entities AS entity
     JOIN provider_sync.source_links AS link
       ON link.source_entity_key = entity.source_entity_key
@@ -229,7 +229,7 @@ BEGIN
           FROM provider_sync.source_entities AS entity
           WHERE entity.provider_dataset_id = v_provider_dataset_id
           UNION
-          SELECT 'feature'::text, link.feature_id
+          SELECT 'feature'::text, link.feature_id::text
           FROM provider_sync.source_entities AS entity
           JOIN provider_sync.source_links AS link
             ON link.source_entity_key = entity.source_entity_key
@@ -243,7 +243,7 @@ BEGIN
           FROM provider_sync.source_entities AS entity
           WHERE entity.provider_dataset_id = v_provider_dataset_id
           UNION
-          SELECT 'feature'::text, link.feature_id
+          SELECT 'feature'::text, link.feature_id::text
           FROM provider_sync.source_entities AS entity
           JOIN provider_sync.source_links AS link
             ON link.source_entity_key = entity.source_entity_key

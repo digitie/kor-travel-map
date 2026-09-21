@@ -23,14 +23,14 @@ BEGIN
         'evidence_fingerprint', candidate.evidence_fingerprint,
         'manual_feature', jsonb_build_object(
             'feature_id', candidate.manual_feature_id,
-            'feature_uuid', candidate.manual_feature_uuid,
+            'feature_uuid', CAST(candidate.manual_feature_id AS text),
             'row_revision', candidate.manual_feature_row_revision,
             'creation_command_id', candidate.manual_creation_command_id,
             'snapshot', candidate.manual_feature_snapshot
         ),
         'provider_feature', jsonb_build_object(
             'feature_id', candidate.provider_feature_id,
-            'feature_uuid', candidate.provider_feature_uuid,
+            'feature_uuid', CAST(candidate.provider_feature_id AS text),
             'row_revision', candidate.provider_feature_row_revision,
             'dataset_id', candidate.provider_dataset_id,
             'source_entity_key', candidate.source_entity_key,
