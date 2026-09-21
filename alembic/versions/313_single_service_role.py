@@ -18,13 +18,24 @@ digest로 봉인한 **과거** 상태 snapshot이다("기준선은 새 migration
 
 ## 실제로 뭐가 바뀌는가
 
-`schema.sql` 전체에서 `session_user`를 `'ktm_feature_api_runtime'`/
+`schema.sql`(baseline `300`) 안에서 `session_user`를 `'ktm_feature_api_runtime'`/
 `'ktm_feature_dagster_runtime'` 리터럴과 비교하는 지점은 정확히 19개 procedure/function
-안에 있다(21회 api_runtime + 1회 dagster_runtime). **어느 procedure도 두 이름을 동시에
-비교하지 않는다** — 각 procedure는 "이건 API 전용" 또는 "이건 Dagster 전용" 둘 중 하나만
-검사했다. 그래서 이건 분기 로직을 합치는 판단이 필요한 작업이 아니라, 리터럴 문자열
-치환이다(원본/치환본 대조는 이 파일과 나란히 있는 `_313_*_original.sql` /
-`_313_*_upgraded.sql` 사이드카 diff로 검증 가능 — 각 procedure당 role 이름 한 줄만 다르다).
+안에 있다(21회 api_runtime + 1회 dagster_runtime). 여기에 300 이후 두 개의 forward
+migration이 자기 것으로 만든 procedure 2개가 더 있다 —
+`302_m03_import_child_issuance`의 `ops.record_curation_import_manual_feature_child`
+(api_runtime 1회)와 `304_m05_detector_manual_listing`의
+`feature.list_manual_provider_dedup_detector_manuals`(dagster_runtime 1회) — 그
+두 migration 자신은(302/304, 봉인 없음) 역사적 정의를 그대로 두고 REVOKE 대상
+같은 blocking DDL만 직접 고쳤다(별도 커밋). procedure 본문의 role 검사는 여기,
+313에서 마저 CREATE OR REPLACE한다 — 그래야 302/304를 처음부터 다시 도는 fresh
+install과, 이미 302/304를 지나 313만 새로 받는 n150 같은 기존 환경이 같은 최종
+상태로 수렴한다. 총 21개 procedure/function.
+
+**어느 procedure도 두 이름을 동시에 비교하지 않는다** — 각 procedure는 "이건 API
+전용" 또는 "이건 Dagster 전용" 둘 중 하나만 검사했다. 그래서 이건 분기 로직을
+합치는 판단이 필요한 작업이 아니라, 리터럴 문자열 치환이다(원본/치환본 대조는 이
+파일과 나란히 있는 `_313_*_original.sql` / `_313_*_upgraded.sql` 사이드카 diff로
+검증 가능 — 각 procedure당 role 이름 한 줄만 다르다).
 
 `feature.feature_creation_origins`의 `ck_feature_creation_origins_roles` CHECK 제약도
 같은 이유로 `invoker_role = 'ktm_feature_api_runtime'`를 세 번 검사한다(dagster_runtime은
@@ -32,7 +43,7 @@ digest로 봉인한 **과거** 상태 snapshot이다("기준선은 새 migration
 
 ## 명시적으로 버리는 것 (ADR-100 §3)
 
-통합 전에는 이 19개 procedure가 "호출자가 API 서버인지 Dagster인지"를 `session_user`로
+통합 전에는 이 21개 procedure가 "호출자가 API 서버인지 Dagster인지"를 `session_user`로
 구분해 거절할 수 있었다. 통합 후에는 두 경로 모두 `ktm_feature_service`로 접속하므로 이
 구분은 사라진다 — 예를 들어 API 전용이던 procedure를 Dagster 경로 코드가 호출해도 더는
 `session_user` 비교로는 막히지 않는다. 애플리케이션 코드가 어느 procedure를 호출하는지는
@@ -41,7 +52,7 @@ digest로 봉인한 **과거** 상태 snapshot이다("기준선은 새 migration
 
 ## owner 순서
 
-`CREATE OR REPLACE`는 소유자만 할 수 있다(302/305와 같은 규약). 19개 procedure는 5개
+`CREATE OR REPLACE`는 소유자만 할 수 있다(302/305와 같은 규약). 21개 procedure는 5개
 서로 다른 NOLOGIN owner에 흩어져 있어(schema_owner는 그대로 membership만 갖고, 실제
 owner는 각 도메인별 procedure_owner) `SET ROLE`을 owner별로 묶어 5번만 전환한다.
 """
@@ -80,6 +91,7 @@ _PROCEDURES_BY_OWNER: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "feature_read_manual_provider_dedup_case",
             "feature_record_manual_provider_dedup_candidate",
             "feature_resolve_manual_provider_dedup_case",
+            "feature_list_manual_provider_dedup_detector_manuals",
         ),
     ),
     (
@@ -103,6 +115,7 @@ _PROCEDURES_BY_OWNER: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "feature_refresh_curated_source_observation",
             "ops_fill_provider_cancellation_starts_command",
             "ops_transition_provider_cancellation_job_command",
+            "ops_record_curation_import_manual_feature_child",
         ),
     ),
     (

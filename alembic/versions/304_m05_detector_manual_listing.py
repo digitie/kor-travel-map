@@ -138,8 +138,8 @@ _LISTING_OWNER: Final[str] = (
 #: 하나가 지워졌을 때 다른 하나가 남는다.
 _LISTING_REVOKE: Final[str] = (
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(text, integer)"
-    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
-    " ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor,"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_service,"
+    " ktm_manual_provider_dedup_admin_executor,"
     " ktm_feature_reference_reconciliation_service_executor"
 )
 
