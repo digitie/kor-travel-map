@@ -140,9 +140,13 @@ def test_make_async_engine_passes_copied_server_settings(
 
 
 def _runtime_privilege_row(
-    login: str = "ktm_feature_api_runtime",
+    login: str = "ktm_feature_service",
 ) -> dict[str, object]:
-    """정상 runtime catalog receipt의 최소 모형."""
+    """정상 runtime catalog receipt의 최소 모형.
+
+    ADR-100 이후 login은 하나뿐이고, 그 하나가 두 procedure를 모두
+    EXECUTE한다(예전에는 api/dagster가 상호 배타적으로 나눠 가졌다).
+    """
 
     return {
         "session_user": login,
@@ -156,8 +160,8 @@ def _runtime_privilege_row(
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,
         "can_read_feature_override_field_paths": True,
-        "can_execute_create_procedure": login == "ktm_feature_dagster_runtime",
-        "can_execute_manual_create_procedure": login == "ktm_feature_api_runtime",
+        "can_execute_create_procedure": True,
+        "can_execute_manual_create_procedure": True,
         "can_execute_transition_procedure": True,
         "can_execute_author_lifecycle_override_procedure": True,
         "can_execute_revoke_lifecycle_override_procedure": True,
@@ -194,7 +198,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
 
     assert _runtime_db_privilege_problems(
         row,
-        expected_login="ktm_feature_api_runtime",
+        expected_login="ktm_feature_service",
     ) == []
 
     row["can_update_quality_directly"] = True
@@ -231,7 +235,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     ]
     problems = _runtime_db_privilege_problems(
         row,
-        expected_login="ktm_feature_api_runtime",
+        expected_login="ktm_feature_service",
     )
 
     assert "runtime login must not UPDATE feature.features.quality_state directly" in problems
@@ -258,7 +262,6 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must EXECUTE revoke_feature_field_overrides" in problems
     assert "runtime login must EXECUTE transition_admin_feature_state" in problems
     assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
-    assert "API runtime must EXECUTE create_admin_manual_feature_with_initial_state" not in problems
     assert any(
         problem.startswith(
             "runtime login must not EXECUTE unexpected application procedures: "
@@ -272,68 +275,71 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
 
 
 @pytest.mark.unit
-def test_runtime_privilege_preflight_uses_role_specific_exact_procedure_sets() -> None:
-    api_row = _runtime_privilege_row()
-    dagster_row = _runtime_privilege_row("ktm_feature_dagster_runtime")
+def test_runtime_privilege_preflight_uses_the_exact_service_procedure_set() -> None:
+    """ADR-100: 하나의 login이 두 procedure 모두를 가져야 한다(상호 배타 아님)."""
+
+    service_row = _runtime_privilege_row()
 
     assert _runtime_db_privilege_problems(
-        api_row,
-        expected_login="ktm_feature_api_runtime",
+        service_row,
+        expected_login="ktm_feature_service",
     ) == []
 
-    api_row["can_execute_create_procedure"] = True
-    api_row["can_execute_manual_create_procedure"] = False
-    api_boundary_problems = _runtime_db_privilege_problems(
-        api_row,
-        expected_login="ktm_feature_api_runtime",
-    )
-    assert (
-        "API runtime must not EXECUTE create_feature_with_initial_state directly"
-        in api_boundary_problems
-    )
-    assert (
-        "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
-        in api_boundary_problems
-    )
-    api_row = _runtime_privilege_row()
-    assert _runtime_db_privilege_problems(
-        dagster_row,
-        expected_login="ktm_feature_dagster_runtime",
-    ) == []
-
-    dagster_procedures = list(dagster_row["executable_application_procedures"])
-    dagster_procedures.append(
-        "feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)"
-    )
-    dagster_row["executable_application_procedures"] = dagster_procedures
+    missing_create_row = _runtime_privilege_row()
+    missing_create_row["can_execute_create_procedure"] = False
     problems = _runtime_db_privilege_problems(
-        dagster_row,
-        expected_login="ktm_feature_dagster_runtime",
+        missing_create_row,
+        expected_login="ktm_feature_service",
+    )
+    assert "runtime login must EXECUTE create_feature_with_initial_state" in problems
+
+    missing_manual_row = _runtime_privilege_row()
+    missing_manual_row["can_execute_manual_create_procedure"] = False
+    problems = _runtime_db_privilege_problems(
+        missing_manual_row,
+        expected_login="ktm_feature_service",
+    )
+    assert (
+        "runtime login must EXECUTE create_admin_manual_feature_with_initial_state"
+        in problems
+    )
+
+    extra_procedures_row = _runtime_privilege_row()
+    service_procedures = list(extra_procedures_row["executable_application_procedures"])
+    service_procedures.append("feature.unintended_runtime_procedure()")
+    extra_procedures_row["executable_application_procedures"] = service_procedures
+    problems = _runtime_db_privilege_problems(
+        extra_procedures_row,
+        expected_login="ktm_feature_service",
     )
     assert any("unexpected application procedures" in problem for problem in problems)
 
-    api_procedures = list(api_row["executable_application_procedures"])
-    api_procedures.remove(
+    missing_procedure_row = _runtime_privilege_row()
+    remaining_procedures = list(missing_procedure_row["executable_application_procedures"])
+    remaining_procedures.remove(
         "feature.archive_curation_collection_command(uuid,bigint,bigint,text)"
     )
-    api_row["executable_application_procedures"] = api_procedures
+    missing_procedure_row["executable_application_procedures"] = remaining_procedures
     problems = _runtime_db_privilege_problems(
-        api_row,
-        expected_login="ktm_feature_api_runtime",
+        missing_procedure_row,
+        expected_login="ktm_feature_service",
     )
     assert any("missing expected application procedures" in problem for problem in problems)
 
-    api_functions = list(
-        api_row["executable_application_security_definer_functions"]
+    missing_function_row = _runtime_privilege_row()
+    remaining_functions = list(
+        missing_function_row["executable_application_security_definer_functions"]
     )
-    api_functions.remove(
+    remaining_functions.remove(
         "ops.fill_provider_cancellation_starts_command("
         "uuid,text,timestamp with time zone)"
     )
-    api_row["executable_application_security_definer_functions"] = api_functions
+    missing_function_row["executable_application_security_definer_functions"] = (
+        remaining_functions
+    )
     problems = _runtime_db_privilege_problems(
-        api_row,
-        expected_login="ktm_feature_api_runtime",
+        missing_function_row,
+        expected_login="ktm_feature_service",
     )
     assert any(
         "missing expected application SECURITY DEFINER functions" in problem
