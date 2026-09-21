@@ -149,43 +149,38 @@ _NOLOGIN_ROLES: Final = (
     "ktm_manual_provider_dedup_admin_executor",
     "ktm_feature_reference_reconciliation_service_executor",
 )
-_LOGIN_ROLES: Final = (
-    "ktm_feature_migrator",
-    "ktm_feature_api_runtime",
-    "ktm_feature_dagster_runtime",
-)
+_LOGIN_ROLES: Final = ("ktm_feature_service",)
 _APPLICATION_ROLES: Final = _NOLOGIN_ROLES + _LOGIN_ROLES
 _EXPECTED_DATABASE_SEARCH_PATH: Final = ("search_path=public, x_extension",)
 _EXPECTED_ROLE_CONNECTION_LIMIT: Final = -1
 _EXPECTED_ROLE_VALID_UNTIL: Final = "infinity"
 _EXPECTED_MEMBERSHIPS: Final = frozenset(
     {
-        ("ktm_curation_admin_executor", "ktm_feature_api_runtime", False, True, False),
+        ("ktm_curation_admin_executor", "ktm_feature_service", False, True, False),
         ("ktm_curation_audit_writer", "ktm_feature_schema_owner", False, False, True),
         ("ktm_curation_command_owner", "ktm_feature_schema_owner", False, False, True),
-        ("ktm_curation_provider_executor", "ktm_feature_dagster_runtime", False, True, False),
+        ("ktm_curation_provider_executor", "ktm_feature_service", False, True, False),
         ("ktm_feature_audit_writer", "ktm_feature_schema_owner", False, False, True),
-        ("ktm_feature_create_provider_executor", "ktm_feature_dagster_runtime", False, True, False),
+        ("ktm_feature_create_provider_executor", "ktm_feature_service", False, True, False),
         (
             "ktm_feature_reference_reconciliation_service_executor",
-            "ktm_feature_api_runtime",
+            "ktm_feature_service",
             False,
             True,
             False,
         ),
-        ("ktm_feature_request_admin_executor", "ktm_feature_api_runtime", False, True, False),
+        ("ktm_feature_request_admin_executor", "ktm_feature_service", False, True, False),
         ("ktm_feature_request_procedure_owner", "ktm_feature_schema_owner", False, False, True),
-        ("ktm_feature_request_service_executor", "ktm_feature_api_runtime", False, True, False),
-        ("ktm_feature_runtime", "ktm_feature_api_runtime", False, True, False),
-        ("ktm_feature_runtime", "ktm_feature_dagster_runtime", False, True, False),
-        ("ktm_feature_schema_owner", "ktm_feature_migrator", False, False, True),
+        ("ktm_feature_request_service_executor", "ktm_feature_service", False, True, False),
+        ("ktm_feature_runtime", "ktm_feature_service", False, True, False),
+        ("ktm_feature_schema_owner", "ktm_feature_service", False, False, True),
         ("ktm_feature_state_procedure_owner", "ktm_feature_schema_owner", False, False, True),
-        ("ktm_manual_feature_admin_executor", "ktm_feature_api_runtime", False, True, False),
+        ("ktm_manual_feature_admin_executor", "ktm_feature_service", False, True, False),
         ("ktm_manual_feature_procedure_owner", "ktm_feature_schema_owner", False, False, True),
-        ("ktm_manual_provider_dedup_admin_executor", "ktm_feature_api_runtime", False, True, False),
+        ("ktm_manual_provider_dedup_admin_executor", "ktm_feature_service", False, True, False),
         (
             "ktm_manual_provider_dedup_detector_executor",
-            "ktm_feature_dagster_runtime",
+            "ktm_feature_service",
             False,
             True,
             False,
@@ -208,9 +203,7 @@ _X_EXTENSION_USAGE: Final = {
     "ktm_curation_audit_writer": False,
     "ktm_curation_admin_executor": False,
     "ktm_curation_provider_executor": False,
-    "ktm_feature_migrator": False,
-    "ktm_feature_api_runtime": True,
-    "ktm_feature_dagster_runtime": True,
+    "ktm_feature_service": True,
     "ktm_manual_feature_procedure_owner": False,
     "ktm_manual_feature_admin_executor": False,
     "ktm_feature_create_provider_executor": False,
@@ -688,13 +681,13 @@ async def _verify_migrator_session(connection: AsyncConnection) -> None:
         )
     ).one()
     if tuple(identity) != (
-        "ktm_feature_migrator",
-        "ktm_feature_migrator",
+        "ktm_feature_service",
+        "ktm_feature_service",
         False,
     ):
         raise HandoffError(
             "controlled handoff requires the exact non-superuser "
-            "ktm_feature_migrator session and effective role"
+            "ktm_feature_service session and effective role"
         )
 
 

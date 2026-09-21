@@ -70,7 +70,7 @@ BEGIN
         RAISE EXCEPTION 'feature reference reconciliation ack requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_ack_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
        ) THEN
@@ -270,8 +270,7 @@ BEGIN
     RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'curation import command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -1308,7 +1307,7 @@ BEGIN
         RAISE EXCEPTION 'Feature request approval writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_feature_request_admin_executor', 'member') THEN
         RAISE EXCEPTION 'Feature request approval writer requires admin executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
@@ -1435,8 +1434,7 @@ BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
   END IF;
   IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
@@ -1568,8 +1566,7 @@ BEGIN
     RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'rule command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -1707,8 +1704,7 @@ BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'theme command requires the admin executor' USING ERRCODE = '42501';
   END IF;
   IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
@@ -1866,8 +1862,7 @@ BEGIN
     RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'collection command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -1932,8 +1927,7 @@ BEGIN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'item command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -2662,8 +2656,7 @@ BEGIN
     RAISE EXCEPTION 'curation import commit requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'curation import commit requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -2878,7 +2871,7 @@ BEGIN
         RAISE EXCEPTION 'manual Feature writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_feature_create_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_manual_feature_admin_executor', 'member')
        OR pg_has_role(session_user, 'ktm_feature_create_provider_executor', 'member') THEN
         RAISE EXCEPTION 'manual Feature writer requires the API-only executor'
@@ -3027,8 +3020,7 @@ BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
   END IF;
   IF p_provider_dataset_id IS NULL OR p_provider_dataset_id <= 0
@@ -3094,8 +3086,7 @@ BEGIN
     RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'rule command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -3203,8 +3194,7 @@ BEGIN
     RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'theme command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -3258,8 +3248,7 @@ BEGIN
     RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'collection command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -3337,8 +3326,7 @@ BEGIN
     RAISE EXCEPTION 'curation import preview requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'curation import preview requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -3427,8 +3415,7 @@ BEGIN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'item command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -3823,9 +3810,8 @@ BEGIN
         RAISE EXCEPTION 'manual curation writer requires SERIALIZABLE'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_curation_create_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
-       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    IF session_user <> 'ktm_feature_service'
+       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
         RAISE EXCEPTION 'manual curation writer requires the admin executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_manual_curation_create_executor';
     END IF;
@@ -4665,8 +4651,7 @@ BEGIN
     RAISE EXCEPTION 'provider curation finalization requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider curation finalization requires the provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -4911,9 +4896,8 @@ BEGIN
   END IF;
   IF (
        NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
      ) AND NOT (
-       session_user = 'ktm_feature_api_runtime'
+       session_user = 'ktm_feature_service'
        AND current_setting('ktm.curation_cancellation_root', true)
          = p_root_job_id::text
      ) THEN
@@ -5196,7 +5180,7 @@ BEGIN
         RAISE EXCEPTION 'feature reference reconciliation lease requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_lease_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
        ) THEN
@@ -5335,7 +5319,7 @@ CREATE FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
 BEGIN
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
        ) THEN
@@ -5405,7 +5389,7 @@ CREATE FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
     AS $$
 BEGIN
-    IF session_user <> 'ktm_feature_dagster_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member')
        OR pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
        OR pg_has_role(session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member') THEN
@@ -5624,9 +5608,8 @@ BEGIN
   IF (v_is_provider AND (
         (
           NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-          OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
         ) AND NOT (
-          session_user = 'ktm_feature_api_runtime'
+          session_user = 'ktm_feature_service'
           AND EXISTS (
             SELECT 1 FROM ops.import_jobs AS source_job
             WHERE source_job.job_id = p_source_job_id
@@ -5637,7 +5620,6 @@ BEGIN
         )
       )) OR (NOT v_is_provider AND (
         NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-        OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
       )) THEN
     RAISE EXCEPTION 'generation receipt is not executable by this runtime principal'
       USING ERRCODE = '42501';
@@ -5843,7 +5825,7 @@ BEGIN
        OR (
          v_source_job.cancellation_id IS NOT NULL
          AND NOT (
-           session_user = 'ktm_feature_api_runtime'
+           session_user = 'ktm_feature_service'
            AND v_source_job.parent_job_id::text = current_setting(
              'ktm.curation_cancellation_root', true
            )
@@ -5879,7 +5861,7 @@ BEGIN
            AND (
              root.cancellation_id IS NULL
              OR (
-               session_user = 'ktm_feature_api_runtime'
+               session_user = 'ktm_feature_service'
                AND root.job_id::text = current_setting(
                  'ktm.curation_cancellation_root', true
                )
@@ -6315,8 +6297,7 @@ CREATE PROCEDURE feature.merge_lock_curation_collections(IN p_master uuid, IN p_
 BEGIN
     -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
     -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
-    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
         RAISE EXCEPTION 'merge command requires the admin executor'
             USING ERRCODE = '42501';
     END IF;
@@ -6351,8 +6332,7 @@ BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
   END IF;
   IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
@@ -6442,8 +6422,7 @@ BEGIN
     RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'rule command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -6621,8 +6600,7 @@ BEGIN
     RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'theme command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -6765,8 +6743,7 @@ BEGIN
     RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'collection command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -6865,8 +6842,7 @@ BEGIN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'item command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -7077,7 +7053,7 @@ BEGIN
         RAISE EXCEPTION 'feature reference reconciliation ack preflight requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_ack_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
        ) THEN
@@ -7312,8 +7288,7 @@ BEGIN
     RAISE EXCEPTION 'candidate command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'candidate promotion requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -7658,7 +7633,7 @@ BEGIN
         RAISE EXCEPTION 'feature reference reconciliation subscription provision requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_subscription_provision_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
        ) THEN
@@ -8163,7 +8138,7 @@ CREATE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) RETURNS 
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
 BEGIN
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(
            session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
        ) THEN
@@ -8279,8 +8254,7 @@ BEGIN
     RAISE EXCEPTION 'quarantine command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'quarantine command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -8508,7 +8482,7 @@ BEGIN
         RAISE EXCEPTION 'manual/provider dedup detector requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_detector_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_dagster_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member')
        OR pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
        OR pg_has_role(session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member') THEN
@@ -8782,9 +8756,8 @@ BEGIN
   END IF;
   IF (
        NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
      ) AND NOT (
-       session_user = 'ktm_feature_api_runtime'
+       session_user = 'ktm_feature_service'
        AND current_setting('ktm.curation_cancellation_root', true) IS NOT NULL
      ) THEN
     RAISE EXCEPTION 'source observation requires the provider executor' USING ERRCODE = '42501';
@@ -8803,7 +8776,7 @@ BEGIN
       AND (
         (child.cancellation_id IS NULL AND root.cancellation_id IS NULL)
         OR (
-          session_user = 'ktm_feature_api_runtime'
+          session_user = 'ktm_feature_service'
           AND root.job_id::text = current_setting(
             'ktm.curation_cancellation_root', true
           )
@@ -8958,7 +8931,7 @@ CREATE PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reaso
     AS $$
 DECLARE v_command ops.domain_commands%ROWTYPE;
 BEGIN
-    IF current_setting('transaction_isolation') <> 'read committed' OR session_user <> 'ktm_feature_api_runtime'
+    IF current_setting('transaction_isolation') <> 'read committed' OR session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_feature_request_admin_executor', 'member') THEN
         RAISE EXCEPTION 'Feature request rejection requires admin executor at READ COMMITTED' USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
     END IF;
@@ -9179,8 +9152,7 @@ BEGIN
     RAISE EXCEPTION 'candidate command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'candidate rejection requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -9386,8 +9358,7 @@ BEGIN
     RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'curation import command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -9497,7 +9468,7 @@ BEGIN
         RAISE EXCEPTION 'manual/provider dedup decision requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_decision_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
        OR pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member') THEN
         RAISE EXCEPTION 'manual/provider dedup decision requires the admin-only executor'
@@ -10293,8 +10264,7 @@ BEGIN
     RAISE EXCEPTION 'provider snapshot seal requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider snapshot seal requires the provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -10409,7 +10379,7 @@ BEGIN
         RAISE EXCEPTION 'Feature request submission requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
+    IF session_user <> 'ktm_feature_service'
        OR NOT pg_has_role(session_user, 'ktm_feature_request_service_executor', 'member') THEN
         RAISE EXCEPTION 'Feature request submission requires service executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
@@ -10533,8 +10503,7 @@ BEGIN
       USING ERRCODE = '25001';
   END IF;
   IF current_user <> 'ktm_curation_command_owner'
-     OR NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+     OR NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'concierge catalog sync is an internal provider command'
       USING ERRCODE = '42501';
   END IF;
@@ -10860,8 +10829,7 @@ BEGIN
     RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
     RAISE EXCEPTION 'curation import command requires the admin executor'
       USING ERRCODE = '42501';
   END IF;
@@ -11415,8 +11383,7 @@ CREATE PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider attempt event requires provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -11762,8 +11729,7 @@ DECLARE
   v_member_count bigint;
   v_distinct_member_count bigint;
 BEGIN
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider operation command requires provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -11931,7 +11897,7 @@ CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id 
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  IF session_user <> 'ktm_feature_api_runtime'
+  IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
        WHERE role.rolname = session_user AND role.rolsuper
@@ -11999,8 +11965,7 @@ DECLARE
   v_child_job_id uuid;
   v_has_receipt boolean;
 BEGIN
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider membership command requires provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -12631,9 +12596,8 @@ BEGIN
         RAISE EXCEPTION 'import child linkage requires SERIALIZABLE'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m03_child_linkage_isolation';
     END IF;
-    IF session_user <> 'ktm_feature_api_runtime'
-       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    IF session_user <> 'ktm_feature_service'
+       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
         RAISE EXCEPTION 'import child linkage requires the admin executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_m03_child_linkage_executor';
     END IF;
@@ -13131,7 +13095,7 @@ BEGIN
        'provider_feature_load_run', 'provider_feature_load'
      )) THEN
     IF TG_OP = 'UPDATE'
-       AND session_user = 'ktm_feature_api_runtime'
+       AND session_user = 'ktm_feature_service'
        AND NEW.cancellation_id IS NOT NULL
        AND EXISTS (
          SELECT 1
@@ -13511,7 +13475,7 @@ DECLARE
   v_replayed boolean;
   v_stale_input boolean;
 BEGIN
-  IF session_user <> 'ktm_feature_api_runtime'
+  IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
        WHERE role.rolname = session_user AND role.rolsuper
@@ -13666,8 +13630,7 @@ CREATE PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider terminal command requires provider executor'
       USING ERRCODE = '42501';
   END IF;
@@ -15802,7 +15765,7 @@ CREATE TABLE feature.feature_creation_origins (
     CONSTRAINT ck_feature_creation_origins_actor CHECK (((btrim(created_by_actor) <> ''::text) AND (char_length(created_by_actor) <= 200))),
     CONSTRAINT ck_feature_creation_origins_kind CHECK ((origin_kind = ANY (ARRAY['manual_admin'::text, 'manual_curation'::text, 'manual_request'::text]))),
     CONSTRAINT ck_feature_creation_origins_principal CHECK ((((origin_kind = 'manual_admin'::text) AND (creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'::text)) OR ((origin_kind = 'manual_curation'::text) AND (creator_principal_id = ANY (ARRAY['admin-ui-bff.manual-curation-feature-create.v1'::text, 'admin-ui-bff.curation-import.manual-feature-row.v1'::text]))) OR ((origin_kind = 'manual_request'::text) AND (creator_principal_id = 'feature-request.approval.v1'::text)))),
-    CONSTRAINT ck_feature_creation_origins_roles CHECK ((((origin_kind = 'manual_admin'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_manual_feature_procedure_owner'::text)) OR ((origin_kind = 'manual_curation'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_curation_command_owner'::text)) OR ((origin_kind = 'manual_request'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_feature_request_procedure_owner'::text))))
+    CONSTRAINT ck_feature_creation_origins_roles CHECK ((((origin_kind = 'manual_admin'::text) AND (invoker_role = 'ktm_feature_service'::text) AND (procedure_definer = 'ktm_manual_feature_procedure_owner'::text)) OR ((origin_kind = 'manual_curation'::text) AND (invoker_role = 'ktm_feature_service'::text) AND (procedure_definer = 'ktm_curation_command_owner'::text)) OR ((origin_kind = 'manual_request'::text) AND (invoker_role = 'ktm_feature_service'::text) AND (procedure_definer = 'ktm_feature_request_procedure_owner'::text))))
 );
 
 
@@ -16462,7 +16425,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -25565,7 +25528,7 @@ GRANT ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagste
 --
 
 REVOKE ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) TO ktm_feature_api_runtime;
+GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) TO ktm_feature_service;
 
 
 --
@@ -25617,7 +25580,7 @@ REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) FROM PUBLIC;
-GRANT ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) TO ktm_feature_api_runtime;
+GRANT ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) TO ktm_feature_service;
 
 
 --

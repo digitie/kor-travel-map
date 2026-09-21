@@ -577,11 +577,9 @@ def _runtime_dsn(consumer: str) -> str:
 
 async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None:
     dsn = _runtime_dsn(consumer)
-    expected_login = (
-        "ktm_feature_api_runtime"
-        if consumer == "api"
-        else "ktm_feature_dagster_runtime"
-    )
+    # ADR-100: api/dagster는 더 이상 서로 다른 LOGIN이 아니다 — 둘 다
+    # ktm_feature_service로 접속한다.
+    expected_login = "ktm_feature_service"
     engine = make_async_engine(dsn, pool_size=1)
     try:
         async with engine.connect() as connection:

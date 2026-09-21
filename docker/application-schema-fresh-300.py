@@ -47,7 +47,7 @@ _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
 _PROFILE_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
 _IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FRESH_MIGRATE_IMAGE_ID"
-_MIGRATOR_ROLE: Final = "ktm_feature_migrator"
+_MIGRATOR_ROLE: Final = "ktm_feature_service"
 _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
 _INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
@@ -137,18 +137,14 @@ _PRE_ROOT_NOLOGIN_ROLES: Final = (
     "ktm_manual_provider_dedup_detector_executor",
     "ktm_manual_provider_dedup_procedure_owner",
 )
-_PRE_ROOT_LOGIN_ROLES: Final = (
-    "ktm_feature_api_runtime",
-    "ktm_feature_dagster_runtime",
-    "ktm_feature_migrator",
-)
+_PRE_ROOT_LOGIN_ROLES: Final = ("ktm_feature_service",)
 _PRE_ROOT_MEMBERSHIPS: Final = (
-    ("ktm_curation_admin_executor", "ktm_feature_api_runtime", False, True, False),
+    ("ktm_curation_admin_executor", "ktm_feature_service", False, True, False),
     ("ktm_curation_audit_writer", _DATABASE_OWNER, False, False, True),
     ("ktm_curation_command_owner", _DATABASE_OWNER, False, False, True),
     (
         "ktm_curation_provider_executor",
-        "ktm_feature_dagster_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
@@ -156,21 +152,21 @@ _PRE_ROOT_MEMBERSHIPS: Final = (
     ("ktm_feature_audit_writer", _DATABASE_OWNER, False, False, True),
     (
         "ktm_feature_create_provider_executor",
-        "ktm_feature_dagster_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
     ),
     (
         "ktm_feature_reference_reconciliation_service_executor",
-        "ktm_feature_api_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
     ),
     (
         "ktm_feature_request_admin_executor",
-        "ktm_feature_api_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
@@ -178,18 +174,17 @@ _PRE_ROOT_MEMBERSHIPS: Final = (
     ("ktm_feature_request_procedure_owner", _DATABASE_OWNER, False, False, True),
     (
         "ktm_feature_request_service_executor",
-        "ktm_feature_api_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
     ),
-    ("ktm_feature_runtime", "ktm_feature_api_runtime", False, True, False),
-    ("ktm_feature_runtime", "ktm_feature_dagster_runtime", False, True, False),
+    ("ktm_feature_runtime", "ktm_feature_service", False, True, False),
     (_DATABASE_OWNER, _MIGRATOR_ROLE, False, False, True),
     ("ktm_feature_state_procedure_owner", _DATABASE_OWNER, False, False, True),
     (
         "ktm_manual_feature_admin_executor",
-        "ktm_feature_api_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
@@ -197,14 +192,14 @@ _PRE_ROOT_MEMBERSHIPS: Final = (
     ("ktm_manual_feature_procedure_owner", _DATABASE_OWNER, False, False, True),
     (
         "ktm_manual_provider_dedup_admin_executor",
-        "ktm_feature_api_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
     ),
     (
         "ktm_manual_provider_dedup_detector_executor",
-        "ktm_feature_dagster_runtime",
+        "ktm_feature_service",
         False,
         True,
         False,
@@ -228,8 +223,7 @@ _PRE_ROOT_SCHEMA_CREATORS: Final = (
 )
 _PRE_ROOT_EXTENSION_SCHEMA_USERS: Final = (
     "ktm_curation_command_owner",
-    "ktm_feature_api_runtime",
-    "ktm_feature_dagster_runtime",
+    "ktm_feature_service",
     "ktm_feature_runtime",
     "ktm_feature_state_procedure_owner",
     "ktm_manual_provider_dedup_procedure_owner",

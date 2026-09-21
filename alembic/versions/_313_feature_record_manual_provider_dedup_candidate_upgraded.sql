@@ -26,9 +26,7 @@ BEGIN
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_detector_isolation';
     END IF;
     IF session_user <> 'ktm_feature_service'
-       OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
-       OR pg_has_role(session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member') THEN
+       OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member') THEN
         RAISE EXCEPTION 'manual/provider dedup detector requires the Dagster-only executor'
             USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_detector_executor';
     END IF;
