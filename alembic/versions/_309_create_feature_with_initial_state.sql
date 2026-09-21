@@ -134,7 +134,7 @@ GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature js
 -- CREATE PROCEDURE는 PUBLIC에 EXECUTE를 기본 부여한다. src/kortravelmap/infra/db.py:585
 -- preflight("API runtime must not EXECUTE create_feature_with_initial_state directly")가
 -- 그 상태를 거부하므로 runtime_privileges.py:351-353·369-371과 같은 문장을 함께 되살린다.
-REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime;
+REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) FROM PUBLIC, ktm_feature_runtime, ktm_feature_service;
 GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) TO ktm_feature_create_provider_executor, ktm_manual_feature_procedure_owner;
 
 SET ROLE ktm_feature_schema_owner;

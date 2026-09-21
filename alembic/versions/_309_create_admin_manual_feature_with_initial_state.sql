@@ -179,7 +179,7 @@ $t39_owner$;
 -- PUBLIC EXECUTE라 pg_dump가 아무것도 내지 않았다). DROP PROCEDURE가 ACL을 버리고
 -- CREATE가 PUBLIC EXECUTE를 다시 심으므로, runtime_privileges.py:617-621의
 -- _MANUAL_FEATURE_WRITER_ACL과 같은 문장을 여기서 복원한다.
-REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, ktm_feature_create_provider_executor;
+REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_feature_create_provider_executor;
 GRANT EXECUTE ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(jsonb, bigint) TO ktm_manual_feature_admin_executor;
 
 SET ROLE ktm_feature_schema_owner;

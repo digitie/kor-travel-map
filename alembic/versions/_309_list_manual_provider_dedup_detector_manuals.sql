@@ -73,7 +73,7 @@ BEGIN
 END
 $t39_owner$;
 
-REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor, ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_manual_provider_dedup_admin_executor, ktm_feature_reference_reconciliation_service_executor;
 GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(p_after uuid, p_limit integer) TO ktm_manual_provider_dedup_detector_executor;
 
 SET ROLE ktm_feature_schema_owner;
