@@ -125,11 +125,66 @@ _PROCEDURES_BY_OWNER: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
 )
 
 
+#: `ktm_curation_command_owner`는 `feature`/`provider_sync`에는 CREATE가 있지만
+#: `ops`에는 USAGE만 있다(bootstrap 스크립트, `_309_record_curation_import_manual_
+#: feature_child.sql`의 같은 함정 주석 — "302_m03_child_issuance.py:324-330이
+#: 같은 함정을 만났다"). `CREATE OR REPLACE`는 이미 소유한 object를 바꿀 때도
+#: PostgreSQL이 **schema CREATE**를 별도로 요구한다(object ownership과 무관한
+#: 별개 권한 검사) — 그래서 이 owner가 `ops.*`를 CREATE OR REPLACE하려면 매번
+#: 이 grant가 필요하다. 이미 있었다면 건드리지 않고, 없었다면 준 뒤 되돌린다
+#: (멱등 — 이 migration을 두 번 돌려도 최종 권한 상태가 같다).
+_OPS_CREATE_GRANT_IF_NEEDED: Final[str] = """
+DO $ktm_313_ops_create_open$
+BEGIN
+    IF has_schema_privilege('ktm_curation_command_owner', 'ops', 'CREATE') THEN
+        PERFORM set_config('ktm.i313_ops_create_was_granted', 'false', false);
+    ELSE
+        EXECUTE 'GRANT CREATE ON SCHEMA ops TO ktm_curation_command_owner';
+        PERFORM set_config('ktm.i313_ops_create_was_granted', 'true', false);
+    END IF;
+END
+$ktm_313_ops_create_open$;
+"""
+
+_OPS_CREATE_REVOKE_IF_GRANTED: Final[str] = """
+DO $ktm_313_ops_create_close$
+BEGIN
+    IF current_setting('ktm.i313_ops_create_was_granted', true) = 'true' THEN
+        EXECUTE 'REVOKE CREATE ON SCHEMA ops FROM ktm_curation_command_owner';
+    END IF;
+END
+$ktm_313_ops_create_close$;
+"""
+
+#: 이 owner 그룹 안에서 실제로 `ops` 스키마 object인 sidecar 이름만 창을 두른다.
+_CURATION_COMMAND_OWNER_OPS_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "ops_fill_provider_cancellation_starts_command",
+        "ops_transition_provider_cancellation_job_command",
+        "ops_record_curation_import_manual_feature_child",
+    }
+)
+
+
 def _procedure_statements(suffix: str) -> tuple[str, ...]:
     statements: list[str] = []
     for owner, names in _PROCEDURES_BY_OWNER:
+        ops_names = [name for name in names if name in _CURATION_COMMAND_OWNER_OPS_NAMES]
+        other_names = [name for name in names if name not in _CURATION_COMMAND_OWNER_OPS_NAMES]
+
         statements.append(f"SET ROLE {owner}")
-        statements.extend(_sidecar(f"_313_{name}_{suffix}.sql") for name in names)
+        statements.extend(_sidecar(f"_313_{name}_{suffix}.sql") for name in other_names)
+
+        if ops_names:
+            # GRANT/REVOKE ON SCHEMA는 스키마 소유자만 할 수 있다 — owner 자신이
+            # 스스로에게 CREATE를 줄 수 없다. schema_owner로 열고/닫고, 그 사이
+            # 창에서만 실제 owner로 돌아와 CREATE OR REPLACE한다.
+            statements.append("SET ROLE ktm_feature_schema_owner")
+            statements.append(_OPS_CREATE_GRANT_IF_NEEDED)
+            statements.append(f"SET ROLE {owner}")
+            statements.extend(_sidecar(f"_313_{name}_{suffix}.sql") for name in ops_names)
+            statements.append("SET ROLE ktm_feature_schema_owner")
+            statements.append(_OPS_CREATE_REVOKE_IF_GRANTED)
     return tuple(statements)
 
 
