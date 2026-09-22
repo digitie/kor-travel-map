@@ -323,23 +323,32 @@ def _receipt_head_check(heads: tuple[str, ...]) -> str:
     )
 
 
+#: 마이그레이션은 SET ROLE을 켠 채로 끝나야 한다(RESET ROLE 금지) — alembic의 마지막
+#: `UPDATE alembic_version`이 그 role로 실행돼야 하고, `ktm_curation_command_owner`
+#: 같은 다른 owner로 끝나면 `permission denied for table alembic_version`으로 죽는다.
+#:
+#: 원래 이 파일은 "`_PROCEDURES_BY_OWNER`의 마지막 그룹이 schema owner다"에 기대고
+#: 있었다. 그건 **정렬 순서에 대한 의존**이라, 누가 가독성을 위해 그룹 순서를 바꾸면
+#: 조용히 깨진다. 게다가 두 role-window lint는 이 파일을 보지 못한다 —
+#: `_executed_statements`가 `ast.For`의 `iter`가 `ast.Name`일 때만 풀 수 있는데 여기는
+#: 함수 호출이다. 그래서 순서에 기대지 않고 **명시적으로** 되돌린다.
+_FINAL_ROLE: Final[str] = "SET ROLE ktm_feature_schema_owner"
+
+
 def upgrade() -> None:
-    # `_PROCEDURES_BY_OWNER`의 마지막 그룹은 `ktm_feature_schema_owner`다 — 이
-    # 루프가 끝난 뒤 role 전환 없이 CHECK/receipt-head 변경으로 바로 이어진다.
-    # 마이그레이션은 SET ROLE을 켠 채로 끝나야 한다(RESET ROLE 금지) — alembic의
-    # 마지막 `UPDATE alembic_version`이 이 role로 실행돼야 하기 때문이다.
     for statement in _procedure_statements("upgraded"):
         op.execute(statement)
+    op.execute(_FINAL_ROLE)
     op.execute(_ORIGIN_ROLES_CHECK_DROP)
     op.execute(_ORIGIN_ROLES_CHECK_ADD_UPGRADED)
     op.execute(_receipt_head_check((*_RECEIPT_HEADS, revision)))
 
 
 def downgrade() -> None:
-    op.execute("SET ROLE ktm_feature_schema_owner")
+    op.execute(_FINAL_ROLE)
     op.execute(_receipt_head_check(_RECEIPT_HEADS))
     op.execute(_ORIGIN_ROLES_CHECK_DROP)
     op.execute(_ORIGIN_ROLES_CHECK_ADD_ORIGINAL)
-    # 마지막 그룹이 다시 `ktm_feature_schema_owner`로 끝난다 — RESET ROLE 없이 종료.
     for statement in _procedure_statements("original"):
         op.execute(statement)
+    op.execute(_FINAL_ROLE)

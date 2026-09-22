@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.infra.merge_repo import apply_feature_merge
@@ -121,15 +122,24 @@ async def test_merge_procedures_stay_narrow_to_the_admin_executor(
     assert grantees["admin_side"] is True, grantees["acl"]
 
     # 그리고 본문 게이트가 살아 있는지 — grant만 재면 `session_user` 절을 지워도 초록이다.
+    #
+    # 이름이 소스에 보이는지로 재지 않는다. 그건 게이트를 뒤집거나(`IF NOT` → `IF`)
+    # 이름만 주석에 남겨도 통과한다 — 효과가 아니라 문자열을 재는 것이다. 통합 login은
+    # admin executor의 member라 그것으로는 거부를 만들 수 없지만, **admin executor가
+    # 아닌 principal**로 SESSION AUTHORIZATION을 바꾸면 실제 RAISE를 받을 수 있다.
+    # `ktm_curation_provider_executor`가 정확히 그 자리다: SECURITY DEFINER라 소유자
+    # 권한으로 실행되므로 본문까지 들어가고, `session_user`는 바뀐 쪽을 가리킨다.
     async with AsyncSession(migrated_engine) as session:
-        body = await session.scalar(
-            text(
-                "SELECT pg_get_functiondef(oid) FROM pg_catalog.pg_proc "
-                "WHERE pronamespace = CAST(:schema AS regnamespace) AND proname = :name"
-            ),
-            {"schema": schema, "name": name},
+        await session.begin()
+        await session.execute(
+            text("SET LOCAL SESSION AUTHORIZATION 'ktm_curation_provider_executor'")
         )
-    assert "ktm_curation_admin_executor" in body
+        with pytest.raises(DBAPIError) as denied:
+            await session.execute(text(call), _MERGE_IDS)
+        await session.rollback()
+    orig = denied.value.orig
+    assert getattr(orig, "sqlstate", None) == "42501", repr(orig)[:200]
+    assert "admin executor" in str(orig)
 
     # 통합 login이 실제로 이 CALL을 할 수 있어야 한다 — 위 두 단언이
     # "procedure가 아예 깨졌다"와 구분되게 하는 자리다.
