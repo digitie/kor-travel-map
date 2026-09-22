@@ -82,7 +82,7 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml \
 # Docker full stack은 local-dev profile만 사용한다. production은 Docker Manager가 소유한다.
 KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
   -f docker-compose.yml -f docker-compose.host.yml \
-  -f docker-compose.local-dev.yml up -d
+  up -d
 
 # 선택적 loopback venv smoke — 먼저 위 Docker fresh/normal 경로로 두 DB와
 # Dagster storage migration을 준비해야 하며 이 명령 자체는 DB를 만들거나 migrate하지 않는다.

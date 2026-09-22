@@ -91,12 +91,8 @@ validate_map_database_credentials() {
     KOR_TRAVEL_MAP_POSTGRES_USER \
     KOR_TRAVEL_MAP_POSTGRES_PASSWORD \
     KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN \
-    KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
-    KOR_TRAVEL_MAP_MIGRATOR_PG_DSN \
-    KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
-    KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN \
-    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD \
-    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN \
+    KOR_TRAVEL_MAP_SERVICE_PASSWORD \
+    KOR_TRAVEL_MAP_PG_DSN \
     KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB \
     KOR_TRAVEL_MAP_DAGSTER_METADATA_USER \
     KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD \
@@ -112,10 +108,13 @@ validate_map_database_credentials() {
     return 1
   fi
 
+  # ADR-100: 세 runtime 비밀번호가 KOR_TRAVEL_MAP_SERVICE_PASSWORD 하나로 합쳐졌다.
+  # 이 순회를 지우지는 않는다 — 이름 3개/쌍 3개로 줄어들 뿐이고, bootstrap 소유자와
+  # service login과 Dagster metadata login은 **여전히 서로 달라야** 한다.
+  # 반드시 한 번만 나열한다: 같은 이름을 두 번 넣으면 아래 `seen_right` 커서가
+  # 이름 일치로 전진하므로 변수가 자기 자신과 비교되어 항상 실패한다.
   credential_names='KOR_TRAVEL_MAP_POSTGRES_PASSWORD
-KOR_TRAVEL_MAP_MIGRATOR_PASSWORD
-KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD
-KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
+KOR_TRAVEL_MAP_SERVICE_PASSWORD
 KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD'
   for left_name in $credential_names; do
     require_map_database_credential "$left_name" || return 1
@@ -138,17 +137,13 @@ KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD'
     KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN postgresql:// \
     "$KOR_TRAVEL_MAP_POSTGRES_USER" KOR_TRAVEL_MAP_POSTGRES_PASSWORD \
     "$KOR_TRAVEL_MAP_POSTGRES_DB" || return 1
+  # ADR-100: 세 DSN이 하나가 됐다. 통합 전에는 이 세 호출이 "각 컨테이너는 자기
+  # identity의 DSN만 본다"를 지켰지만, 세 login이 한 role이 된 뒤에는 지킬 구분이
+  # 없다. 남는 검사는 그대로 유효하다 — 이 DSN의 login이 실제로
+  # `ktm_feature_service`이고 비밀번호가 SERVICE_PASSWORD와 일치하는지 본다.
   require_bound_map_postgres_dsn \
-    KOR_TRAVEL_MAP_MIGRATOR_PG_DSN postgresql+asyncpg:// \
-    ktm_feature_migrator KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
-    "$KOR_TRAVEL_MAP_POSTGRES_DB" || return 1
-  require_bound_map_postgres_dsn \
-    KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN postgresql+asyncpg:// \
-    ktm_feature_api_runtime KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
-    "$KOR_TRAVEL_MAP_POSTGRES_DB" || return 1
-  require_bound_map_postgres_dsn \
-    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN postgresql+asyncpg:// \
-    ktm_feature_dagster_runtime KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_PG_DSN postgresql+asyncpg:// \
+    ktm_feature_service KOR_TRAVEL_MAP_SERVICE_PASSWORD \
     "$KOR_TRAVEL_MAP_POSTGRES_DB" || return 1
   require_bound_map_postgres_dsn \
     "$metadata_dsn_name" postgresql:// \

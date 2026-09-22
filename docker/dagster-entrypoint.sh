@@ -44,14 +44,15 @@ application_privileged_name="$(
   /usr/local/bin/python -I -c '
 import os
 
+# ADR-100: 세 비밀번호 이름이 KOR_TRAVEL_MAP_SERVICE_PASSWORD 하나로 합쳐졌고,
+# 두 DSN 이름은 이 집합에서 **지웠다**. 이름만 바꾸면 KOR_TRAVEL_MAP_PG_DSN이 금지
+# 목록에 들어가는데 아래 production 분기가 그 이름을 요구하므로 Dagster가 매 기동마다
+# 죽는다. 애플리케이션 DSN을 이 one-shot에서 차단하는 일은 storage_input_preflight의
+# KOR_TRAVEL_MAP_PG_DSN 검사가 계속 맡는다.
 exact_names = {
     "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
-    "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-    "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
     "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
-    "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
-    "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
-    "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+    "KOR_TRAVEL_MAP_SERVICE_PASSWORD",
     "KOR_TRAVEL_MAP_POSTGRES_DB",
     "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
     "KOR_TRAVEL_MAP_POSTGRES_USER",
@@ -121,19 +122,14 @@ runtime_preflight() {
   fi
   if [ "$dagster_profile" = "production" ]; then
     # API permit만 확인하면 Dagster webserver/daemon이 같은 Map DB에 permit 없이
-    # 직접 연결할 수 있다. consumer-specific immutable Dagster image ID와 자기 runtime
-    # DSN의 DB identity/raw 300은 sealed verifier가 함께 검사한다.
-    # verifier가 확인하는 named DSN과 Dagster resource가 실제로 읽는
-    # KOR_TRAVEL_MAP_PG_DSN은 문자열까지 완전히 같은 한 연결이어야 한다.
-    # Compose의 같은 interpolation만으로는 직접 docker run/overlay에서의
-    # split-brain을 막지 못한다. 기존 PG_DSN이 다른 값이면 permit 실행 전
-    # 거부하고, 같거나 미설정이면 named runtime DSN으로 단일화한다.
-    dagster_runtime_dsn="${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required in production}"
-    if [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ] \
-      && [ "$KOR_TRAVEL_MAP_PG_DSN" != "$dagster_runtime_dsn" ]; then
-      echo "KOR_TRAVEL_MAP_PG_DSN must exactly equal KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN in production" >&2
-      exit 1
-    fi
+    # 직접 연결할 수 있다. consumer-specific immutable Dagster image ID와 runtime DSN의
+    # DB identity/raw 300은 sealed verifier가 함께 검사한다.
+    #
+    # ADR-100: 예전에는 verifier가 보는 named DSN(`..._DAGSTER_RUNTIME_PG_DSN`)과
+    # Dagster resource가 읽는 `KOR_TRAVEL_MAP_PG_DSN`이 **다른 두 이름**이었기 때문에
+    # 둘이 문자열까지 같은지 확인하는 split-brain 검사가 필요했다. 이름이 하나가 된
+    # 지금 그 검사는 변수를 자기 자신과 비교하는 항진명제라서 지웠다.
+    dagster_runtime_dsn="${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required in production}"
     export KOR_TRAVEL_MAP_PG_DSN="$dagster_runtime_dsn"
 
     if ! /usr/local/bin/python -I \
@@ -141,14 +137,17 @@ runtime_preflight() {
       echo "production Dagster requires a valid Docker Manager application final permit" >&2
       exit 1
     fi
-    unset KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN
+    # ADR-100: 걷어낼 두 번째 DSN 이름이 없다 — `KOR_TRAVEL_MAP_PG_DSN`은 Dagster
+    # resource가 읽어야 하므로 남는다.
   fi
   /usr/local/bin/python -I -m kortravelmap.dagster.runtime_preflight
 }
 
 storage_input_preflight() {
-  if [ "${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN+x}" = "x" ] \
-    || [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ] \
+  # ADR-100: 애플리케이션 DSN을 이 metadata one-shot에서 차단하는 일은 아래
+  # `KOR_TRAVEL_MAP_PG_DSN` 검사 하나로 충분하다 — 예전의 per-role 이름은 그 값의
+  # 두 번째 통로였고, 통로가 하나가 된 지금 이 검사가 여전히 그것을 잡는다.
+  if [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ] \
     || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID+x}" = "x" ] \
     || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID+x}" = "x" ]; then
     echo "Dagster metadata migration forbids application runtime/final-permit inputs" >&2

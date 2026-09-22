@@ -41,7 +41,8 @@ from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
 #: `command.upgrade(config, "head")`가 도달해야 하는 revision. graph에서 파생한다.
 _DESTINATION_HEAD: Final = application_schema_head()
-_MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
+# ADR-100: migrator LOGIN이 ktm_feature_service로 합쳐져 DSN env 이름이 하나다.
+_MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_PG_DSN"
 _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
 _PROFILE_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE"

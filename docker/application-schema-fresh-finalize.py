@@ -40,7 +40,8 @@ from kortravelmap.infra.runtime_privileges import (
 
 #: finalize가 DB `alembic_version`에서 기대하는 revision. graph에서 파생한다.
 _DESTINATION_HEAD: Final = application_schema_head()
-_MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
+# ADR-100: migrator LOGIN이 ktm_feature_service로 합쳐져 DSN env 이름이 하나다.
+_MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_PG_DSN"
 _BOOTSTRAP_DSN_ENV: Final = "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
 _IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID"

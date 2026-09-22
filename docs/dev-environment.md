@@ -243,7 +243,7 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml \
 # Docker Manager final permit transaction만 사용한다.
 KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
   -f docker-compose.yml -f docker-compose.host.yml \
-  -f docker-compose.local-dev.yml up -d
+  up -d
 
 # 단위 테스트 (DB 불필요)
 pytest tests/unit -q

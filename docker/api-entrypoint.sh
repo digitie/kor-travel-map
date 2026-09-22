@@ -337,21 +337,19 @@ if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
   exit 1
 fi
 
-runtime_dsn="${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}"
+# ADR-100: migrator와 runtime이 한 LOGIN(`ktm_feature_service`)이 됐다. 예전에는 이
+# 자리가 "어느 DSN을 KOR_TRAVEL_MAP_PG_DSN에 넣을지"를 profile로 골랐고, production은
+# migrator DSN이 env에 **있기만 해도** 거절했다. 고를 대상이 하나뿐인 지금 그 선택도
+# 그 거절도 지킬 구분이 없다 — 남는 차이는 alembic이 schema owner로 SET ROLE 하는지
+# 하나뿐이다.
+runtime_dsn="${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}"
+export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
 if [ "$api_profile" = "production" ]; then
-  # Production API는 migration을 소유하지 않는다. Manager one-shot만 migrator DSN을
-  # 받고, consumer container는 set-but-empty까지 fail-close한다.
-  if [ "${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN+x}" = "x" ]; then
-    echo "production API forbids KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" >&2
-    exit 1
-  fi
-  export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
+  # Production API는 migration을 소유하지 않는다 — Manager one-shot이 소유한다.
   unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
 else
   # local-dev의 명시적 developer launcher만 legacy convenience migration을 유지한다.
   # fresh production과 controlled handoff는 이 분기를 사용하지 않는다.
-  migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required in local-dev}"
-  export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
   export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
 fi
 
@@ -467,11 +465,12 @@ trap - EXIT
 /usr/local/bin/python -I -m kortravelmap.infra.runtime_privileges
 fi
 
-# Uvicorn과 그 자식에는 runtime credential만 남긴다. migration credential은
-# application code·request handler가 읽을 수 없게 exec 직전에 제거한다.
+# ADR-100: 여기서 걷어낼 별도 migration credential이 더는 없다 — DSN은 하나이고
+# uvicorn이 그것을 필요로 하므로 `KOR_TRAVEL_MAP_PG_DSN`은 남겨야 한다. 예전의 두
+# `unset`은 각 컨테이너가 자기 identity의 DSN만 보게 하던 장치였는데, 세 identity가
+# 한 role이 된 뒤에는 가릴 대상이 없다. schema-owner SET ROLE 플래그는 계속 걷는다 —
+# 그건 자격증명이 아니라 alembic 전용 스위치이고 request handler가 볼 이유가 없다.
 export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
-unset KOR_TRAVEL_MAP_MIGRATOR_PG_DSN
-unset KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN
 unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
 export KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="$manual_feature_create_digest"
 export KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED="$manual_feature_create_flag"

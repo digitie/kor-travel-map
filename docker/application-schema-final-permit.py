@@ -39,8 +39,9 @@ _PERMIT_TRANSITION: Final = "map-fresh-300-finalize"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
 _API_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID"
 _DAGSTER_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID"
-_API_RUNTIME_DSN_ENV: Final = "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN"
-_DAGSTER_RUNTIME_DSN_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN"
+# ADR-100: api와 dagster가 같은 LOGIN(`ktm_feature_service`)으로 접속하므로 소비자별
+# DSN env 이름이 하나로 합쳐졌다. consumer 구분은 image ID 쪽에만 남는다.
+_RUNTIME_DSN_ENV: Final = "KOR_TRAVEL_MAP_PG_DSN"
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_ID_PATTERN: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
@@ -563,15 +564,13 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
 
 
 def _runtime_dsn(consumer: str) -> str:
-    if consumer == "api":
-        environment_name = _API_RUNTIME_DSN_ENV
-    elif consumer == "dagster":
-        environment_name = _DAGSTER_RUNTIME_DSN_ENV
-    else:
+    # consumer는 여전히 검증한다 — DSN 이름은 하나지만 호출부가 허용된 두 소비자
+    # 중 하나임은 계속 확인해야 하고, image ID 축은 아직 소비자별로 갈린다.
+    if consumer not in ("api", "dagster"):
         raise FinalPermitError("final permit consumer is invalid")
-    dsn = os.environ.get(environment_name)
+    dsn = os.environ.get(_RUNTIME_DSN_ENV)
     if not dsn:
-        raise FinalPermitError(f"{environment_name} is required for final permit validation")
+        raise FinalPermitError(f"{_RUNTIME_DSN_ENV} is required for final permit validation")
     return dsn
 
 
