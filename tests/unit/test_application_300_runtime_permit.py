@@ -454,7 +454,7 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
             return None
 
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", "postgresql+asyncpg://unused")
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setattr(module, "_config", lambda _: object())
     monkeypatch.setattr(module.ScriptDirectory, "from_config", lambda _: _Script())
@@ -542,7 +542,7 @@ def test_fresh_root_missing_receipt_probe_returns_strict_candidate_bound_wire(
     async def _exact(_: object) -> str:
         return "kor-travel-map.application-fresh-300-pre-root.v1"
 
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", "postgresql+asyncpg://unused")
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setattr(module, "_require_fixed_fence", _fence)
     monkeypatch.setattr(module, "_static_contract", lambda: contract)
@@ -631,7 +631,7 @@ def test_fresh_root_missing_receipt_probe_fails_closed(
             raise module.FreshMigrationError("fresh 300 pre-root state is not exact")
         raise AssertionError("pre-root attestation must not run after an existing receipt")
 
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", "postgresql+asyncpg://unused")
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setattr(
         module,
@@ -807,7 +807,7 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         _unexpected_reconcile,
     )
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", "postgresql+asyncpg://unused")
     monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID", "sha256:" + "b" * 64)
 

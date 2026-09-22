@@ -26,7 +26,9 @@ def test_m02_migration_is_forward_only_and_closed_to_manual_admin_reader() -> No
     assert "SECURITY DEFINER" in source
     assert "feature.read_admin_manual_feature_provenance(uuid)" in source
     assert "TO ktm_manual_feature_admin_executor" in source
-    assert "ktm_feature_service" in source
+    # 이 파일은 **은퇴한 0227의 원문**을 고정하는 oracle이다 — 현행 role 이름으로
+    # 바꾸면 그 원문에 결코 없는 문자열을 찾게 된다. ADR-100 치환에서 제외한다.
+    assert "ktm_feature_dagster_runtime" in source
     assert "raise RuntimeError(\"0227_m02_feature_provenance is forward-only\")" in source
 
 

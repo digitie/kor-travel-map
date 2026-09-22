@@ -175,7 +175,7 @@ async def test_tvn34_service_runtime_login_passes_actual_catalog_preflight(
                         text(
                             "SELECT "
                             "has_function_privilege("
-                            "'ktm_curation_provider_executor', "
+                            "'ktm_feature_create_provider_executor', "
                             "'feature.create_feature_with_initial_state("
                             "jsonb,text,text,text,jsonb)'::regprocedure, "
                             "'EXECUTE') AS provider_side_of_provider_create, "
@@ -190,7 +190,7 @@ async def test_tvn34_service_runtime_login_passes_actual_catalog_preflight(
                             "jsonb,bigint)'::regprocedure, "
                             "'EXECUTE') AS admin_side_of_manual_create, "
                             "has_function_privilege("
-                            "'ktm_curation_provider_executor', "
+                            "'ktm_feature_create_provider_executor', "
                             "'feature.create_admin_manual_feature_with_initial_state("
                             "jsonb,bigint)'::regprocedure, "
                             "'EXECUTE') AS provider_side_of_manual_create"

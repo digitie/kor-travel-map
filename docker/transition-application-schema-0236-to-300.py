@@ -1477,9 +1477,9 @@ def _stamp_on_existing_connection(connection: Connection, config: Config) -> Non
 
 
 async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
-    dsn = os.environ.get("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN")
+    dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     if not dsn:
-        raise HandoffError("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required")
+        raise HandoffError("KOR_TRAVEL_MAP_PG_DSN is required")
     config = _config(dsn)
     # graph의 **head**가 아니라 stamp 목적지가 graph에 있는지를 본다. 이 handoff는
     # `300`으로 stamp하고, 그 뒤 child migration은 평범한 `alembic upgrade`가 올린다.

@@ -293,7 +293,7 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
     fence_payload = await _write_fence(module, admin_dsn, fence, monkeypatch)
     await _insert_prior_root_receipt(module, admin_dsn, fence_payload)
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
     assert await module.async_main(
         ["probe-missing", "--operation-id", str(fence_payload["operation_id"])]
     ) == 0

@@ -67,7 +67,7 @@ async def test_fresh_one_shot_rejects_superuser_dsn_before_version_table_mutatio
         module = _fresh_module()
         monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
         monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "local-dev")
-        monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", admin_dsn)
+        monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", admin_dsn)
 
         assert await module.async_main(["migrate"]) == 1
         assert "must connect as restricted migrator" in capsys.readouterr().err
@@ -158,7 +158,7 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
         monkeypatch.setattr(module, "_FENCE_PATH", fence)
         monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
         monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
-        monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+        monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
         monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
         monkeypatch.setenv(
             "KOR_TRAVEL_MAP_APPLICATION_FRESH_MIGRATE_IMAGE_ID",

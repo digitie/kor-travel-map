@@ -886,12 +886,12 @@ docker run --pull=never --rm --network "container:$CONTAINER" \
   -e KOR_TRAVEL_MAP_POSTGRES_DB="$DATABASE" \
   -e KOR_TRAVEL_MAP_POSTGRES_USER=postgres \
   -e KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE="$DATABASE" \
-  -e "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD=$oracle_password" \
-  -e "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD=$oracle_password" \
-  -e "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD=$oracle_password" \
+  -e "KOR_TRAVEL_MAP_SERVICE_PASSWORD=$oracle_password" \
+  -e "KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://ktm_feature_service:$oracle_password@127.0.0.1:5432/$DATABASE" \
   "$postgis_image_id" sh /bootstrap.sh
 
-migrator_dsn="postgresql+asyncpg://ktm_feature_migrator:$oracle_password@127.0.0.1:5432/$DATABASE"
+# ADR-100: 세 LOGIN이 ktm_feature_service 하나로 합쳐졌다.
+migrator_dsn="postgresql+asyncpg://ktm_feature_service:$oracle_password@127.0.0.1:5432/$DATABASE"
 database_oid="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
   -c 'SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()')"
 database_owner="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
@@ -989,7 +989,7 @@ fresh_migration_result_file="$(mktemp "${TMPDIR:-/tmp}/ktm300-fresh-migration-re
 docker run --pull=never --rm --network "container:$CONTAINER" \
   --mount "type=volume,source=$FRESH_MIGRATE_FENCE_VOLUME,target=/run/kor-travel-map-application-fresh-migrate,readonly" \
   -e KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE=production \
-  -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$migrator_dsn" \
+  -e "KOR_TRAVEL_MAP_PG_DSN=$migrator_dsn" \
   -e "KOR_TRAVEL_MAP_IMAGE_REVISION=$CANDIDATE_COMMIT" \
   -e "KOR_TRAVEL_MAP_APPLICATION_FRESH_MIGRATE_IMAGE_ID=$candidate_image_id" \
   --entrypoint /usr/local/bin/ktm-application-schema-fresh-300 "$candidate_image_id" \
@@ -1224,7 +1224,7 @@ PY
 fresh_finalize_result_file="$(mktemp "${TMPDIR:-/tmp}/ktm300-fresh-finalize-result.XXXXXX")"
 docker run --pull=never --rm --network "container:$CONTAINER" \
   --mount "type=volume,source=$FRESH_FINALIZE_FENCE_VOLUME,target=/run/kor-travel-map-application-fresh-finalize,readonly" \
-  -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$migrator_dsn" \
+  -e "KOR_TRAVEL_MAP_PG_DSN=$migrator_dsn" \
   -e "KOR_TRAVEL_MAP_IMAGE_REVISION=$CANDIDATE_COMMIT" \
   -e "KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID=$candidate_image_id" \
   --entrypoint /usr/local/bin/ktm-application-schema-fresh-finalize "$candidate_image_id" \
