@@ -20,7 +20,7 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 _SCORES = {
     "name_score": 0.95,
     "spatial_score": 0.97,
@@ -170,7 +170,7 @@ async def _seed_manual_provider_pair(
                 ) VALUES (
                   :feature_uuid, 'manual_admin', :command_id,
                   'admin-ui-bff.manual-feature-create.v1', :actor, clock_timestamp(),
-                  'ktm_feature_api_runtime', 'ktm_manual_feature_procedure_owner'
+                  'ktm_feature_service', 'ktm_manual_feature_procedure_owner'
                 )
                 """
             ),
@@ -414,7 +414,7 @@ async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
     구독을 먼저 만드는 순간 세 단언이 조용히 사라진다.
     """
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     principal_id = "service:feature-reference-reconciliation"
     try:
         # 구독 없이 판정하면 거부된다.
@@ -483,7 +483,7 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
             await connection.scalar(
                 text(
                     "SELECT has_function_privilege("
-                    "'ktm_feature_api_runtime', "
+                    "'ktm_feature_service', "
                     f"'{v1}'::regprocedure, 'EXECUTE')"
                 )
             )
@@ -492,8 +492,8 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
 
     previous_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrated_engine.url.set(
-        username="ktm_feature_migrator",
-        password="tvn34-test-only-migrator-password",
+        username="ktm_feature_service",
+        password="tvn34-test-only-service-password",
     ).render_as_string(hide_password=False)
     try:
         await reconcile_runtime_privileges()
@@ -508,7 +508,7 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
             await connection.scalar(
                 text(
                     "SELECT has_function_privilege("
-                    "'ktm_feature_api_runtime', "
+                    "'ktm_feature_service', "
                     f"'{v1}'::regprocedure, 'EXECUTE')"
                 )
             )
@@ -558,8 +558,8 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
     migrated_engine: AsyncEngine,
 ) -> None:
     pair = await _seed_manual_provider_pair(migrated_engine)
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         not_ready = await _lease_event(
             api,
@@ -573,7 +573,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 await connection.scalar(
                     text(
                         "SELECT has_function_privilege("
-                        "'ktm_feature_api_runtime', "
+                        "'ktm_feature_service', "
                         "'feature.lease_feature_reference_reconciliation_event("
                         "text,uuid)'::regprocedure, 'EXECUTE')"
                     )
@@ -584,7 +584,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 await connection.scalar(
                     text(
                         "SELECT has_function_privilege("
-                        "'ktm_feature_api_runtime', "
+                        "'ktm_feature_service', "
                         "'feature.lease_feature_reference_reconciliation_event_v2("
                         "text,uuid)'::regprocedure, 'EXECUTE')"
                     )

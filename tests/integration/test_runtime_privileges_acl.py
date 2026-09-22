@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.infra import runtime_privileges
@@ -153,20 +152,20 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
             """
             SELECT
               has_function_privilege(
-                'ktm_feature_dagster_runtime',
+                'ktm_feature_service',
                 'feature.current_provider_curation_input_set(bigint)',
                 'EXECUTE'
               ) AS seal,
               has_function_privilege(
-                'ktm_feature_dagster_runtime',
+                'ktm_feature_service',
                 'feature.resolve_provider_feature_id(bigint,text,text)',
                 'EXECUTE'
               ) AS claim,
               has_function_privilege(
-                'ktm_feature_api_runtime',
+                'ktm_curation_admin_executor',
                 'feature.current_provider_curation_input_set(bigint)',
                 'EXECUTE'
-              ) AS api_seal
+              ) AS admin_executor_seal
             """
         )
     )
@@ -177,21 +176,22 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     assert row["seal"] is True, (
         "seal 함수가 적재 login에서 막혔다 — curation_dataset을 받는 모든 적재가 선다"
     )
-    # "적재는 할 수 있다"만 재면 "그리고 다른 모두도 할 수 있다"를 놓친다. API login은
-    # 넓은 `ktm_feature_runtime`의 멤버라(`inherit_option=true`) 그 그룹에 주면 함께
-    # 열리고, `REVOKE … FROM ktm_feature_api_runtime`은 멤버십 경유 권한을 걷지 못해
-    # 장식이 된다. 그래서 좁은 `ktm_curation_provider_executor`에 주고, 넓어졌는지를
-    # 여기서 반대편으로 잰다.
-    assert row["api_seal"] is False, (
-        "API login까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
+    # "적재는 할 수 있다"만 재면 "그리고 다른 모두도 할 수 있다"를 놓친다. ADR-100
+    # 이후 LOGIN은 `ktm_feature_service` 하나뿐이고 그 하나가 9개 executor 전부의
+    # inheriting member다 — 그래서 "다른 login은 못 한다"는 더는 잴 수 없다. 좁히는
+    # 축은 이제 executor 층 하나이고 그 층은 ADR-100이 건드리지 않았다: 이 함수의
+    # grant는 `ktm_curation_provider_executor`에만 가야 하고, admin 쪽으로 새면 그것이
+    # 곧 넓어졌다는 뜻이다. executor role 사이에는 membership이 없으므로(bootstrap의
+    # role graph는 평평하다) 이 술어는 여전히 갈린다.
+    assert row["admin_executor_seal"] is False, (
+        "admin executor까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
     )
 
 
 @pytest.mark.integration
-async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins(
+async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_login(
     migrated_engine: AsyncEngine,
     dagster_runtime_engine: AsyncEngine,
-    api_runtime_engine: AsyncEngine,
 ) -> None:
     """적재 login으로 **접속해서** 적재가 부르는 그 함수를 실제로 실행한다.
 
@@ -206,10 +206,9 @@ async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins
     호출 문장이 바뀌면(표가 하나 더 붙는다든지) 이 검사가 따라 움직이지만, SQL을
     베껴 두면 사본만 초록인 채로 실물이 설 수 있다.
 
-    반대편도 함께 잰다. 다만 "API가 42501" 하나만 보면 **이유를 모른다** — API login이
-    `provider_datasets`를 아예 못 읽어도 같은 42501이고, 그러면 seal 경계가 풀려도
-    이 검사는 초록이다. 그래서 먼저 API login이 그 표를 읽을 수 있음을 확인하고,
-    그 다음에 함수 호출만 막히는 것을 본다.
+    ADR-100 이전에는 반대편(API login)도 여기서 함께 쟀다. LOGIN이 하나로 합쳐지면서
+    그 축이 사라졌으므로 이 검사는 적재 경로 하나만 본다 — 넓어짐을 재는 일은 위
+    카탈로그 검사의 executor 축이 맡는다.
     """
 
     provider = f"acl-seal-{uuid4().hex[:12]}"
@@ -236,7 +235,7 @@ async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins
         async with AsyncSession(dagster_runtime_engine) as loader:
             assert (
                 await loader.scalar(text("SELECT session_user::text"))
-            ) == "ktm_feature_dagster_runtime", (
+            ) == "ktm_feature_service", (
                 "적재 login으로 접속하지 못했다 — 이 검사의 전제가 깨졌다"
             )
             sealed = await capture_provider_curation_input(
@@ -250,34 +249,11 @@ async def test_provider_curation_seal_runs_on_the_loader_path_as_the_real_logins
         assert sealed.curation_input_member_count == 0
         assert sealed.curation_input_set_hash, "seal이 해시를 돌려주지 않았다"
 
-        async with AsyncSession(api_runtime_engine) as api:
-            assert (
-                await api.scalar(text("SELECT session_user::text"))
-            ) == "ktm_feature_api_runtime"
-            # 전제: 42501의 출처가 함수임을 보이려면 표는 읽을 수 있어야 한다.
-            assert (
-                await api.scalar(
-                    text(
-                        "SELECT count(*) FROM provider_sync.provider_datasets "
-                        "WHERE provider = :provider"
-                    ),
-                    {"provider": provider},
-                )
-            ) == 1, (
-                "API login이 provider_datasets를 못 읽는다 — 아래 42501이 seal 때문인지 "
-                "표 때문인지 구분할 수 없어 이 검사가 의미를 잃는다"
-            )
-
-            with pytest.raises(DBAPIError) as denied:
-                await capture_provider_curation_input(
-                    api, provider=provider, dataset_key=dataset_key
-                )
-            # abort된 transaction을 commit하려 들면 25P02가 원래 SQLSTATE를 덮는다.
-            await api.rollback()
-
-        assert getattr(denied.value.orig, "sqlstate", None) == "42501", repr(
-            denied.value.orig
-        )[:200]
+        # ADR-100 이전에는 여기서 API login으로 같은 헬퍼를 불러 42501을 봤다. LOGIN이
+        # 하나로 합쳐진 지금 그 반대편은 존재하지 않는다 — `api_runtime_engine`과
+        # `dagster_runtime_engine`이 같은 `ktm_feature_service`를 연다. 남은 경계는
+        # executor 층이고, 그것은 위 카탈로그 테스트가 잰다. 이 자리에 같은 login을
+        # 다시 열어 두면 "반대편도 잰다"는 인상만 남고 아무것도 지키지 않는다.
     finally:
         async with migrated_engine.begin() as cleanup:
             await cleanup.execute(

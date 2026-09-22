@@ -14,7 +14,7 @@ from kortravelmap.infra.db import make_async_engine
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 _OPERATION = "admin.curation-item.create.manual-feature-v1"
 
 
@@ -48,7 +48,7 @@ async def _command(engine: AsyncEngine, *, actor: str, operation: str) -> int:
 
 
 async def _collection(engine: AsyncEngine, *, actor: str, suffix: str) -> str:
-    api = _runtime_engine(engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(engine, login="ktm_feature_service")
     try:
         theme_command = await _command(
             engine, actor=actor, operation="admin.curated-theme.create"
@@ -106,8 +106,8 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
     suffix = uuid4().hex
     actor = f"admin:tvn-m03-{suffix}"
     collection_id = await _collection(migrated_engine, actor=actor, suffix=suffix)
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     # T-VN-39(alembic 309) + ADR-098 결정 6: manual curation writer가 받는 payload의
     # ``feature_id``는 **호출자가 정하는 정본 UUIDv7 하나**다(사이드카가 15번째 글자로
     # v7을 검사하고, core가 돌려준 키가 이 값과 다르면 23514로 선다). legacy ``f_*``

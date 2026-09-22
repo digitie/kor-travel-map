@@ -13,7 +13,7 @@ from kortravelmap.infra.db import make_async_engine
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -55,8 +55,8 @@ async def test_collection_commands_are_revisioned_idempotent_and_admin_only(
 ) -> None:
     suffix = uuid4().hex
     actor = f"admin:tvn40-collection-{suffix}"
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         theme_command = await _domain_command(
             migrated_engine, actor=actor, operation="admin.curated-theme.create"

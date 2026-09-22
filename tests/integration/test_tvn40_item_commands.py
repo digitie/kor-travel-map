@@ -14,7 +14,7 @@ from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -60,8 +60,8 @@ async def test_item_commands_preserve_revision_link_audit_and_admin_boundary(
     # ``create/patch_curation_item_command``의 uuid 인자로 그대로 넘기므로
     # 정본 축이다 — 라벨은 씨앗으로만 남긴다.
     feature_id = feature_uuid(f"feature-item-{suffix}")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             await connection.execute(

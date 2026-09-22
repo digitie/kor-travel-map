@@ -210,8 +210,8 @@ async def _deliver_one(
 async def delivery(migrated_engine: AsyncEngine) -> dict[str, object]:
     """event 둘, 그중 하나만 ack된 principal 하나. 살아 있는 holder를 남긴다."""
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         first = await _publish_event(
             migrated_engine, api, dagster, index=next(_PAIR_INDEX)
@@ -363,8 +363,8 @@ async def test_the_rebuild_stops_at_the_gap_not_at_the_maximum_ack(
     """
 
     principal_id = str(delivery["principal_id"])
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         third = await _publish_event(
             migrated_engine, api, dagster, index=next(_PAIR_INDEX)
@@ -415,7 +415,7 @@ async def test_invalidation_breaks_the_pre_restore_fencing_token(
     """
 
     principal_id = str(delivery["principal_id"])
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             invalidated = await invalidate_leases(connection, apply=True)
@@ -589,7 +589,7 @@ async def test_an_origin_without_its_identity_claim_is_caught(
                 " x_extension.gen_random_uuid(), 'manual_admin', :command_id,"
                 " 'admin-ui-bff.manual-feature-create.v1',"
                 " 'admin:m05-restore-orphan', clock_timestamp(),"
-                " 'ktm_feature_api_runtime', 'ktm_manual_feature_procedure_owner')"
+                " 'ktm_feature_service', 'ktm_manual_feature_procedure_owner')"
             ),
             {"command_id": orphan_command},
         )

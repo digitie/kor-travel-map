@@ -95,7 +95,7 @@ async def test_the_listing_and_the_procedure_agree_on_manual_origin(
     """
 
     pair = await _seed_manual_provider_pair(migrated_engine, index=10)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         listed = await _listing_rows(dagster)
         # `_listing_rows`가 uuid를 text 표현으로 돌려주므로 seed 쪽도 같은 표현으로
@@ -157,7 +157,7 @@ async def test_the_listing_body_guard_is_not_masked_by_the_acl(
     await _seed_manual_provider_pair(migrated_engine, index=11)
 
     # (a) EXECUTE 없음 — ACL이 막는다.
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         with pytest.raises(DBAPIError) as by_acl:
             await _listing_rows(api)
@@ -243,7 +243,7 @@ async def test_the_detector_login_still_cannot_read_the_origin_tables(
                 await connection.scalar(
                     text(
                         "SELECT has_table_privilege("
-                        "'ktm_feature_dagster_runtime', :relation, 'SELECT')"
+                        "'ktm_feature_service', :relation, 'SELECT')"
                     ),
                     {"relation": relation},
                 )
@@ -257,7 +257,7 @@ async def test_the_detector_records_a_candidate_and_reports_the_scope_it_scanned
     """탐지기가 후보를 남기고, 그 case가 **어떤 범위를 본 결과인지**를 싣는다."""
 
     pair = await _seed_manual_provider_pair(migrated_engine, index=12)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     run_id = f"itest-{uuid4().hex[:12]}"
     try:
         async with AsyncSession(dagster) as session:
@@ -314,7 +314,7 @@ async def test_the_detector_reports_its_scope_even_when_nothing_survives(
     """
 
     await _seed_manual_provider_pair(migrated_engine, index=13)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with AsyncSession(dagster) as session:
             # 반경을 1m로 좁히면 이웃이 사라진다 — 후보 0건, 그러나 manual은 훑었다.
@@ -350,7 +350,7 @@ async def test_the_manual_cursor_advances_past_a_page_with_no_neighbour(
         for i in range(3)
     ]
     wanted = {str(pair["manual_feature_id"]) for pair in pairs}
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         seen: list[str] = []
         after: str | None = None
@@ -388,7 +388,7 @@ async def test_the_detector_loop_reaches_every_manual_page(
         for i in range(3)
     ]
     wanted = {str(pair["manual_feature_id"]) for pair in pairs}
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with AsyncSession(dagster) as session:
             outcome = await detect_manual_provider_candidates(
@@ -424,7 +424,7 @@ async def test_the_detector_says_it_did_not_see_everything_when_it_was_capped(
 
     await _seed_manual_provider_pair(migrated_engine, index=40)
     await _seed_manual_provider_pair(migrated_engine, index=41)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with AsyncSession(dagster) as session:
             # 페이지 하나만 보고 멈춘다 — manual이 더 있는데 안 봤다.
@@ -454,7 +454,7 @@ async def test_the_listing_refuses_a_page_size_outside_its_range(
 ) -> None:
     """`p_limit` 가드도 결박한다 — 본문 가드를 통째로만 재면 이 절이 사라진다."""
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         for bad in (0, -1, 10001):
             with pytest.raises(DBAPIError) as refused:
@@ -481,7 +481,7 @@ async def test_the_listing_excludes_manual_features_the_detector_cannot_score(
 
     pair = await _seed_manual_provider_pair(migrated_engine, index=50)
     manual_id = str(pair["manual_feature_id"])
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         assert manual_id in await _listing_rows(dagster)
         # `ck_features_state_tuple`이 `lifecycle_state='active' OR
@@ -538,7 +538,7 @@ async def test_the_block_keeps_the_nearest_provider_when_it_is_capped(
 
     near = await _seed_manual_provider_pair(migrated_engine, index=60)
     far = await _seed_manual_provider_pair(migrated_engine, index=61)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with AsyncSession(dagster) as session:
             # 키를 uuid의 text 표현으로 고정한다. `CandidateFeature.feature_id`는

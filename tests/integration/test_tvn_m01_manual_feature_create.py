@@ -29,7 +29,7 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_API_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_API_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 _OPERATION = "admin.feature.create.manual-v1"
 
 

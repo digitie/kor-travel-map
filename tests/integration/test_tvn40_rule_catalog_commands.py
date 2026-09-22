@@ -14,7 +14,7 @@ from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -219,8 +219,8 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
     archive_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.archive"
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
@@ -417,20 +417,28 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
             ).one()
         assert row == (4, "ignore", False, True, 3, 3, 3, 3)
 
+        # ADR-100: LOGIN 축이 사라졌다 — 남은 축은 executor grant다(theme catalog 쪽과
+        # 같은 이유). admin executor 전용이어야 하고 적재 쪽으로 새면 안 된다.
         async with dagster.connect() as connection:
-            assert not bool(
-                await connection.scalar(
+            grantees = (
+                await connection.execute(
                     text(
                         """
-                        SELECT has_function_privilege(
-                          session_user,
-                          'feature.patch_curated_source_rule_command(uuid,bigint,text,text,jsonb,jsonb,text,integer,boolean,jsonb,bigint,text)'::regprocedure,
-                          'EXECUTE'
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'patch_curated_source_rule_command'
                         """
                     )
                 )
-            )
+            ).mappings().one()
+            assert grantees == {"provider_side": False, "admin_side": True}
     finally:
         await api.dispose()
         await dagster.dispose()

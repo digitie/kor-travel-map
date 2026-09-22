@@ -37,7 +37,7 @@ from kortravelmap.infra.db import make_async_engine
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:

@@ -31,7 +31,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -492,7 +492,7 @@ async def test_admin_runtime_reject_is_atomic_and_audited(
     migrated_engine: AsyncEngine,
 ) -> None:
     seeded = await _seed_candidate(migrated_engine)
-    runtime = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    runtime = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with runtime.begin() as connection:
             await connection.execute(
@@ -550,7 +550,7 @@ async def test_admin_runtime_reject_is_atomic_and_audited(
             seeded["command_id"],
             seeded["actor"],
             "not_relevant",
-            "ktm_feature_api_runtime",
+            "ktm_feature_service",
             "ktm_curation_command_owner",
             "ktm_curation_audit_writer",
         )
@@ -562,8 +562,8 @@ async def test_candidate_command_acl_and_cas_fail_closed(
     migrated_engine: AsyncEngine,
 ) -> None:
     seeded = await _seed_candidate(migrated_engine)
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             audit_acl = (
@@ -650,7 +650,7 @@ async def test_admin_runtime_promotion_is_one_trusted_membership_transaction(
         migrated_engine,
         operation="admin.theme-feature-candidate.promote",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             metadata_command_id = int(
@@ -783,7 +783,7 @@ async def test_promotion_stale_collection_rolls_back_every_surface(
         migrated_engine,
         operation="admin.theme-feature-candidate.promote",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -868,7 +868,7 @@ async def test_promotion_rejects_stale_typed_feature_detail(
             seeded,
         )
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -998,7 +998,7 @@ async def test_rule_reconcile_generation_is_server_derived_and_replay_safe(
     )
     operation_id = await _seed_rule_reconcile_operation(migrated_engine, seeded)
     params = {**seeded, "operation_id": operation_id}
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.begin() as connection:
             await connection.execute(
@@ -1111,8 +1111,8 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
         include_feature=False,
     )
     params = {**seeded, "operation_id": operation_id}
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -1197,7 +1197,7 @@ async def test_provider_generation_primitives_require_internal_finalizer(
         operation="admin.curation-rule.create",
         create_candidate=False,
     )
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             root_job_id = str(
@@ -1424,7 +1424,7 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
             seeded,
         )
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     source_job_id = ""
     try:
@@ -1630,7 +1630,7 @@ async def test_provider_child_rejects_post_load_semantic_commit(
             seeded,
         )
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         async with session_factory.begin() as session:
@@ -1708,7 +1708,7 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
 
     run_id = f"tvn40-concierge-{seeded['suffix']}"
     created_at = datetime(2026, 8, 13, 3, tzinfo=UTC)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         seal = await _current_provider_curation_input_set(
@@ -1832,7 +1832,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
 
     run_id = f"tvn40-provider-command-{seeded['suffix']}"
     created_at = datetime(2026, 8, 13, 4, tzinfo=UTC)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         async with session_factory.begin() as session:
@@ -1918,7 +1918,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         await dagster.dispose()
 
     # API runtime도 frozen cancellation receipt 없는 provider row를 raw 변경할 수 없다.
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         for statement in (
             """
@@ -1950,7 +1950,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         await api.dispose()
 
     terminal_dagster = _runtime_engine(
-        migrated_engine, login="ktm_feature_dagster_runtime"
+        migrated_engine, login="ktm_feature_service"
     )
     try:
         terminal_session_factory = async_sessionmaker(
@@ -2044,8 +2044,8 @@ async def test_provider_cancellation_lifecycle_requires_typed_api_command(
     run_id = f"tvn40-cancellation-{seeded['suffix']}"
     started_at = datetime(2026, 8, 13, 5, tzinfo=UTC)
     finished_at = started_at + timedelta(seconds=3)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
@@ -2194,8 +2194,8 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
     )
     started_at = datetime(2026, 8, 13, 6, tzinfo=UTC)
     finished_at = started_at + timedelta(seconds=3)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         seal = await _current_provider_curation_input_set(
             migrated_engine,
