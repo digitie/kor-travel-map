@@ -229,34 +229,33 @@ async def test_collection_commands_are_revisioned_idempotent_and_admin_only(
                 )
             ) == 4
 
-        denied_command = await _domain_command(
-            migrated_engine, actor=actor, operation="admin.curation-collection.create"
-        )
+        # ADR-100 이전에는 Dagster login으로 같은 CALL을 걸어 42501을 봤다. 313이 본문의
+        # `OR pg_has_role(provider_executor)` 절을 드롭했고 통합 login은 admin executor의
+        # member이므로 그 거부는 재현되지 않는다 — 그대로 두면 collection을 하나 더
+        # 만들고 끝난다. 남은 경계는 grant 층이다: admin executor 전용이어야 한다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            with pytest.raises(DBAPIError) as denied:
+            grantees = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.create_curation_collection_command(
-                          :collection_key, CAST(:theme_id AS uuid), NULL,
-                          'Denied', '', NULL, 'draft', 'admin_only', '{}'::jsonb,
-                          :command_id, :actor, NULL, NULL
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'create_curation_collection_command'
                         """
-                    ),
-                    {
-                        "actor": actor,
-                        "collection_key": f"denied-{suffix}",
-                        "command_id": denied_command,
-                        "theme_id": theme_id,
-                    },
+                    )
                 )
-            assert getattr(denied.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ).mappings().one()
+            assert grantees == {"provider_side": False, "admin_side": True}
 
-        for runtime in (api, dagster):
+        # LOGIN이 하나뿐이라 (api, dagster) 순회는 같은 login을 두 번 도는 것이다.
+        for runtime in (api,):
             for statement, params in (
                 (
                     """

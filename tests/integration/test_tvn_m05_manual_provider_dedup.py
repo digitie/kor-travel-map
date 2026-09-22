@@ -592,25 +592,29 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 is True
             )
 
-        async with api.connect() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            with pytest.raises(DBAPIError) as denied:
+        # ADR-100 이전에는 API login으로 detector procedure를 불러 42501을 봤다. 이제
+        # LOGIN이 하나이고 그 하나가 detector executor의 member다 — 남은 경계는
+        # executor 층이고, 이 procedure의 grant는 detector executor 하나뿐이다.
+        async with migrated_engine.connect() as connection:
+            candidate_acl = (
                 await connection.execute(
                     text(
-                        "CALL feature.record_manual_provider_dedup_candidate("
-                        "CAST(:manual_feature_id AS uuid), CAST(:provider_feature_id AS uuid), "
-                        "CAST(:scores AS jsonb), CAST(:causation AS jsonb), "
-                        "NULL::uuid, NULL::text)"
-                    ),
-                    {
-                        "manual_feature_id": pair["manual_feature_id"],
-                        "provider_feature_id": pair["provider_feature_id"],
-                        "scores": json.dumps(_SCORES),
-                        "causation": json.dumps(_CAUSATION),
-                    },
+                        """
+                        SELECT
+                          has_function_privilege(
+                            'ktm_manual_provider_dedup_detector_executor', oid, 'EXECUTE'
+                          ) AS detector,
+                          has_function_privilege(
+                            'ktm_manual_provider_dedup_admin_executor', oid, 'EXECUTE'
+                          ) AS admin
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'record_manual_provider_dedup_candidate'
+                        """
+                    )
                 )
-            await connection.rollback()
-        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+            ).mappings().one()
+            assert candidate_acl == {"detector": True, "admin": False}
 
         async with migrated_engine.connect() as connection:
             assert (
@@ -672,16 +676,28 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         assert detail["o_data"]["case_id"] == str(case_id)
         assert detail["o_data"]["status"] == "pending"
 
-        async with dagster.connect() as connection:
-            with pytest.raises(DBAPIError) as denied_case_read:
+        # detector executor는 case 목록을 읽지 못한다 — 그것이 "executor only"의
+        # 반대편이다. ADR-100이 login 축을 없앴으므로 executor 축으로 잰다.
+        async with migrated_engine.connect() as connection:
+            case_read_acl = (
                 await connection.execute(
                     text(
-                        "SELECT * FROM feature.list_manual_provider_dedup_cases("
-                        "'pending', NULL::timestamptz, NULL::uuid, 50)"
+                        """
+                        SELECT
+                          has_function_privilege(
+                            'ktm_manual_provider_dedup_detector_executor', oid, 'EXECUTE'
+                          ) AS detector,
+                          has_function_privilege(
+                            'ktm_manual_provider_dedup_admin_executor', oid, 'EXECUTE'
+                          ) AS admin
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'list_manual_provider_dedup_cases'
+                        """
                     )
                 )
-            await connection.rollback()
-        assert getattr(denied_case_read.value.orig, "sqlstate", None) == "42501"
+            ).mappings().one()
+            assert case_read_acl == {"detector": False, "admin": True}
 
         async with migrated_engine.begin() as connection:
             case = (

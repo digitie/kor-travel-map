@@ -242,31 +242,38 @@ async def test_manual_curation_writer_keeps_feature_claim_origin_and_item_atomic
             )
         assert item_count == 1
 
-        denied_command = await _command(migrated_engine, actor=actor, operation=_OPERATION)
-        async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            with pytest.raises(DBAPIError) as denied:
+        # ADR-100 이전에는 Dagster login으로 manual curation writer를 불러 42501을 봤다.
+        # 통합 login은 admin executor의 member이고 313이 `OR pg_has_role(provider)` 절을
+        # 드롭했으므로 그 거부는 사라졌다 — 그대로 두면 거부를 재는 대신 manual
+        # curation item을 하나 더 만들고 끝난다. `_MANUAL_CURATION_WRITER_ACL`이 명시적으로
+        # REVOKE하는 두 executor가 실제로 막혀 있는지를 대신 잰다.
+        async with migrated_engine.connect() as connection:
+            writer_acl = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.create_manual_curation_item_with_feature_command(
-                          CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
-                          -- OUT 일곱: outcome · feature_id(uuid) · feature_row_revision
-                          -- · curation_item_id · item_row_revision
-                          -- · collection_row_revision · existing_feature_id(uuid).
-                          -- T-VN-39가 legacy 문자열 축을 없애 여덟에서 일곱이 됐다.
-                          :command_id, NULL::text, NULL::uuid, NULL::bigint,
-                          NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_manual_feature_admin_executor', oid, 'EXECUTE'
+                          ) AS manual_admin_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'create_manual_curation_item_with_feature_command'
                         """
-                    ),
-                    {
-                        "command_id": denied_command,
-                        "feature_payload": json.dumps(feature_payload),
-                        "item_payload": json.dumps(item_payload),
-                    },
+                    )
                 )
-        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+            ).mappings().one()
+            assert writer_acl == {
+                "provider_side": False,
+                "manual_admin_side": False,
+                "admin_side": True,
+            }
     finally:
         await api.dispose()
         await dagster.dispose()

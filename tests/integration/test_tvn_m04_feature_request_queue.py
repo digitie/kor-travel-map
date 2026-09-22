@@ -118,27 +118,30 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
             ).mappings().one()
         assert submitted["o_status"] == "pending"
 
-        async with dagster.begin() as connection:
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-            )
-            with pytest.raises(DBAPIError) as denied:
+        # ADR-100 이전에는 Dagster login으로 같은 CALL을 걸어 42501을 봤다. 지금은
+        # LOGIN이 하나이고 그 하나가 request service executor의 member다 — 남은 경계는
+        # executor 층이다. submit은 service executor 전용이어야 하고 admin executor로
+        # 새면 안 된다(제출과 승인/거절은 서로 다른 principal이어야 한다).
+        async with migrated_engine.connect() as connection:
+            submit_acl = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.submit_feature_request(
-                          CAST(:request_id AS uuid), CAST(:payload AS jsonb), :command_id,
-                          NULL::text, NULL::timestamptz
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_feature_request_service_executor', oid, 'EXECUTE'
+                          ) AS service,
+                          has_function_privilege(
+                            'ktm_feature_request_admin_executor', oid, 'EXECUTE'
+                          ) AS admin
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'submit_feature_request'
                         """
-                    ),
-                    {
-                        "request_id": str(uuid4()),
-                        "payload": json.dumps(request_payload),
-                        "command_id": service_command,
-                    },
+                    )
                 )
-        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+            ).mappings().one()
+            assert submit_acl == {"service": True, "admin": False}
 
         async with api.begin() as connection:
             await connection.execute(

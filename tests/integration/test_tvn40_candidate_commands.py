@@ -617,6 +617,11 @@ async def test_candidate_command_acl_and_cas_fail_closed(
             assert getattr(stale.value.orig, "sqlstate", None) == "23514"
             await transaction.rollback()
 
+        # ADR-100: LOGIN이 하나뿐이고 그 하나가 admin/provider executor 둘 다의
+        # inheriting member다 — `session_user`로 재면 항진명제가 된다. 남은 경계는
+        # executor 층이고 ADR-100이 그 층은 건드리지 않았다: 이 둘의 grant는
+        # `ktm_curation_admin_executor` 하나뿐이어야 하며 적재 쪽으로 새면 안 된다.
+        # 세 번째 열은 양성 대조 — 없으면 grant가 통째로 사라진 경우도 초록이 된다.
         async with dagster.connect() as connection:
             privileges = (
                 await connection.execute(
@@ -624,20 +629,31 @@ async def test_candidate_command_acl_and_cas_fail_closed(
                         """
                         SELECT
                           has_function_privilege(
-                            session_user,
-                            'feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)'::regprocedure,
+                            'ktm_curation_provider_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'reject_theme_feature_candidate'),
                             'EXECUTE'
                           ),
                           has_function_privilege(
-                            session_user,
-                            'feature.promote_theme_feature_candidate(uuid,uuid,text,text,text,text,text,text,integer,text,text,text,bigint,bigint,bigint,bigint,text,text)'::regprocedure,
+                            'ktm_curation_provider_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'promote_theme_feature_candidate'),
+                            'EXECUTE'
+                          ),
+                          has_function_privilege(
+                            'ktm_curation_admin_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'reject_theme_feature_candidate'),
                             'EXECUTE'
                           )
                         """
                     )
                 )
             ).one()
-            assert privileges == (False, False)
+            assert privileges == (False, False, True)
     finally:
         await api.dispose()
         await dagster.dispose()
@@ -1136,26 +1152,31 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
             assert "DB-derived scope" in str(omitted.value.orig)
             await transaction.rollback()
 
+        # ADR-100 이전에는 Dagster login으로 같은 CALL을 걸어 42501을 봤다. 그 42501의
+        # 출처는 본문이 아니라 **카탈로그 EXECUTE 거부**였다 — 이 procedure의 grant는
+        # `ktm_curation_admin_executor` 하나뿐이고 적재 login은 그 멤버가 아니었다.
+        # LOGIN이 합쳐졌고 313이 본문의 `OR pg_has_role(반대쪽)` 절도 드롭했으므로
+        # 그 거부는 login으로 재현할 수 없다. 거부를 만들던 grant 경계를 직접 잰다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            with pytest.raises(DBAPIError) as crossed:
+            crossed = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
-                          CAST(:operation_id AS uuid), :command_id, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'materialize_theme_candidate_generation'
                         """
-                    ),
-                    params,
+                    )
                 )
-            assert getattr(crossed.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ).mappings().one()
+            assert crossed == {"provider_side": False, "admin_side": True}
 
         async with migrated_engine.connect() as connection:
             assert (
@@ -1323,26 +1344,26 @@ async def test_provider_generation_primitives_require_internal_finalizer(
                 ),
                 {**seeded, "source_job_id": invalid_source_job_id},
             )
+        # "내부 finalizer만 이 원시 procedure를 부를 수 있다"의 강제는 본문이 아니라
+        # grant다 — 적재 executor는 EXECUTE를 갖지 않고, 실제 호출은
+        # `feature.finalize_provider_curation_root`(SECURITY DEFINER,
+        # `ktm_curation_command_owner` 소유)가 대신 한다. ADR-100이 LOGIN을 합치면서
+        # 그 거부를 login으로 재현할 수 없게 됐으므로 grant 자체를 잰다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            with pytest.raises(DBAPIError) as invalid:
-                await connection.execute(
+            assert (
+                await connection.scalar(
                     text(
                         """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
-                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        SELECT has_function_privilege(
+                          'ktm_curation_provider_executor', oid, 'EXECUTE'
                         )
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'materialize_theme_candidate_generation'
                         """
-                    ),
-                    {**seeded, "source_job_id": invalid_source_job_id},
+                    )
                 )
-            assert getattr(invalid.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ) is False
 
         async with dagster.connect() as connection:
             transaction = await connection.begin()
