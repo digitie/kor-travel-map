@@ -93,15 +93,9 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "feature_routes": (
         "feature_id",
         "kind",
-        # ADR-099 2단계에서 `geom`이 `feature_route_geometries`로 갔다. 그런데
-        # 이 조정기는 head에서만 돌지 않는다 — `0236 → 300` handoff 실행자가
-        # **revision 300에서** 돌리고 그 직후 catalog를 immutable reference와
-        # sha256으로 대조한다. 그 catalog에 컬럼 단위 ACL이 들어 있으므로, 목록에서
-        # 그냥 빼면 컬럼이 아직 살아 있는 300에서 ACL 한 줄이 사라져 handoff가
-        # 멎는다(2026-09-10에 `feature_uuid`로 같은 사고가 났다).
-        #
-        # 그래서 목록에서 빼되 `_LEGACY_GEOM_GRANTS`가 **컬럼이 있을 때만** 같은
-        # ACL을 다시 건다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
+        # ADR-099 2단계가 `geom`을 `feature_route_geometries`로 옮겼으므로 여기
+        # 없다. 종전에는 `_LEGACY_GEOM_GRANTS`가 "컬럼이 있을 때만" 같은 ACL을 다시
+        # 걸었는데, 그것은 조정기가 revision 300에서도 돌던 시절의 보정이다(ADR-101).
         "route_type",
         "geometry_source",
         "geometry_status",
@@ -136,14 +130,6 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     ),
 }
 
-#: **300에는 없고 312가 만드는 relation.** 이 조정기는 head에서만 돌지 않는다 —
-#: `0236 → 300` handoff 실행자가 revision 300에서도 돌린다. 그 시점에는 이 표가
-#: 없으므로 무조건 GRANT를 내면 배포가 그 자리에서 멎는다. 그래서 GRANT는
-#: `to_regclass` 판정으로 감싼다(`manual_feature_purge_records` 선례와 같은 형태).
-_POST_300_GEOMETRY_RELATIONS: Final[frozenset[str]] = frozenset(
-    {"feature_route_geometries"}
-)
-
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
         column for column in columns if column not in {"feature_id", "kind"}
@@ -151,88 +137,8 @@ _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
 
-#: shadow 컬럼 ``feature_uuid``에 걸던 INSERT 권한 — **컬럼이 있을 때만** 건다.
-#:
-#: 이 조정기는 head에서만 도는 것이 아니다. `0236 → 300` handoff 실행자
-#: (`docker/transition-application-schema-0236-to-300.py`)가 **revision 300에서**
-#: 이것을 돌리고, 그 직후의 catalog를 image에 봉인된 immutable reference와
-#: sha256으로 대조한다. 그 catalog에는 **컬럼 단위 ACL이 들어 있다.**
-#:
-#: 309가 shadow 컬럼을 지우면서 이 자리의 `feature_uuid`를 목록에서 뺐더니,
-#: 컬럼이 아직 살아 있는 300에서 ACL 두 줄이 사라져 destination catalog가 어긋났다
-#: (2026-09-10 실측: `feature_areas`·`feature_routes`의
-#: `{ktm_feature_runtime=a/ktm_feature_schema_owner}` 두 행). handoff는
-#: "300 destination catalog or seed does not match the immutable reference"로 멎는다.
-#:
-#: reference는 release 절차(`scripts/build-baseline.sh`)만 다시 만들 수 있고 그것은
-#: 살아 있는 0236 컨테이너와 source certificate를 요구한다. 그러므로 **바꿀 수 없는
-#: 쪽은 reference이고, 맞춰야 하는 쪽은 조정기다.**
-#:
-#: 표 단위 선례(`manual_feature_purge_records`의 `to_regclass` 판정)와 같은 형태로
-#: 조건부로 만든다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
-_SHADOW_COLUMN_GRANTS = tuple(
-    "DO $shadow$ BEGIN"
-    " IF EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    f"     AND relation.relname = '{relation}'"
-    "     AND attribute.attname = 'feature_uuid'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT INSERT (feature_uuid) ON feature.{relation}"
-    " TO ktm_feature_runtime';"
-    " END IF; END $shadow$"
-    for relation in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS
-)
-
-#: `feature_routes.geom`에 걸던 컬럼 ACL — **컬럼이 있을 때만** 건다.
-#:
-#: ADR-099 2단계가 head에서 그 컬럼을 지웠지만 revision 300에는 아직 있다. 같은
-#: 조정기가 두 지점에서 돌고 300 쪽은 immutable reference와 대조되므로, 판정을
-#: 카탈로그에 맡긴다(`_SHADOW_COLUMN_GRANTS`와 같은 형태).
-_LEGACY_GEOM_GRANTS = tuple(
-    "DO $legacy_geom$ BEGIN"
-    " IF EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    f"     AND relation.relname = '{relation}'"
-    "     AND attribute.attname = 'geom'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT INSERT (geom), UPDATE (geom) ON feature.{relation}"
-    " TO ktm_feature_runtime';"
-    " END IF; END $legacy_geom$"
-    for relation in ("feature_routes",)
-)
-
-
-def _maybe_conditional(relation: str, statement: str) -> str:
-    """300에 없는 relation의 GRANT는 **표가 있을 때만** 실행한다.
-
-    handoff 실행자가 revision 300에서도 이 조정기를 돌린다. 그 시점에 없는 표에
-    무조건 GRANT를 내면 배포가 그 자리에서 멎는다 — `manual_feature_purge_records`가
-    같은 이유로 `to_regclass` 판정을 쓴다.
-    """
-
-    if relation not in _POST_300_GEOMETRY_RELATIONS:
-        return statement
-    escaped = statement.replace("'", "''")
-    return (
-        "DO $post300$ BEGIN"
-        f" IF to_regclass('feature.{relation}') IS NOT NULL THEN"
-        f" EXECUTE '{escaped}';"
-        " END IF; END $post300$"
-    )
-
-
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
-    _maybe_conditional(relation, statement)
+    statement
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
@@ -266,11 +172,10 @@ _GEOMETRY_BEARING_RELATIONS: Final[frozenset[str]] = frozenset(
 #: 가리키던 권한 선언은 옛 자리에 얼어 있었다.** 그래서 이 선언은 관계 이름이 아니라
 #: 위 `_GEOMETRY_BEARING_RELATIONS`에 결박한다.
 #:
-#: `feature_areas`에는 이미 같은 ACL이 있어 무연산이다 — revision 300 handoff가
-#: 대조하는 destination catalog는 그대로다. 새 relation만 `to_regclass` 판정을 거쳐
-#: 실제로 붙는다.
+#: `feature_areas`에는 이미 같은 ACL이 있어 무연산이고, 새 relation에만 실제로
+#: 붙는다.
 _STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
-    _maybe_conditional(relation, statement)
+    statement
     for relation in sorted(_GEOMETRY_BEARING_RELATIONS)
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_state_procedure_owner",
@@ -279,12 +184,7 @@ _STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
     )
 )
 
-_ROUTE_AREA_RUNTIME_GRANTS = (
-    _ROUTE_AREA_RUNTIME_GRANTS
-    + _STATE_PROCEDURE_GEOMETRY_GRANTS
-    + _SHADOW_COLUMN_GRANTS
-    + _LEGACY_GEOM_GRANTS
-)
+_ROUTE_AREA_RUNTIME_GRANTS = _ROUTE_AREA_RUNTIME_GRANTS + _STATE_PROCEDURE_GEOMETRY_GRANTS
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;
@@ -859,33 +759,18 @@ _PROVIDER_CURATION_SEAL_ACL = (
 #: (CI PostGIS 실측). reference는 release 절차만 다시 만들 수 있으므로 맞춰야 하는
 #: 쪽은 이 조정기다.
 #:
-#: 그래서 `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 **반대 방향으로** 쓴다. shadow 컬럼
-#: `feature_uuid`는 300에 있고 309(`_SHADOW_DROP`)가 지운다 — **없을 때만**, 즉
-#: head에서만 GRANT한다. 300에서는 이 블록이 아무 것도 하지 않아 catalog가 그대로다.
+#: 종전에는 이 GRANT가 `IF NOT EXISTS(... feature_uuid ...)` 조건 아래 있었다 —
+#: 조정기가 revision 300에서도 돌았고 그 시점 catalog가 봉인된 reference와
+#: 대조됐기 때문이다. 상태가 하나가 되어 그 조건은 항상 참이고, 조건을 남겨 두면
+#: 무엇을 막는지 아무도 모르는 우회로만 남는다(ADR-101).
 #:
-#: 쓰기는 열지 않는다 — 후보 행은 `ktm_curation_command_owner`가, transitions의
-#: append는 `ktm_curation_audit_writer`가 소유한다. 생성 축 둘
-#: (`theme_candidate_generations`, `..._observations`)은 admin 읽기 SQL이 참조하지
-#: 않으므로 열지 않는다.
 _CURATION_CANDIDATE_READ_RELATIONS: Final[tuple[str, ...]] = (
     "theme_feature_candidates",
     "theme_feature_candidate_transitions",
 )
 
 _CURATION_CANDIDATE_READ_ACL = tuple(
-    "DO $curation_read$ BEGIN"
-    " IF NOT EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    "     AND relation.relname = 'feature_areas'"
-    "     AND attribute.attname = 'feature_uuid'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT SELECT ON feature.{relation} TO ktm_feature_runtime';"
-    " END IF; END $curation_read$"
+    f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime"
     for relation in _CURATION_CANDIDATE_READ_RELATIONS
 )
 
