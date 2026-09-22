@@ -154,6 +154,12 @@ def _runtime_privilege_row(
         "is_superuser": False,
         "can_create_role": False,
         "bypasses_rls": False,
+        # ADR-100: 통합 LOGIN은 이 셋을 **수동적으로** 가져서는 안 된다. bootstrap이
+        # schema owner를 `INHERIT FALSE, SET TRUE`로 주므로 `USAGE`는 거짓이다 —
+        # 누가 `INHERIT TRUE`로 바꾸면 preflight가 거기서 막는다.
+        "inherits_schema_owner": False,
+        "inherits_audit_writer": False,
+        "inherits_state_procedure_owner": False,
         "can_set_runtime_group_role": False,
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,

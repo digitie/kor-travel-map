@@ -550,7 +550,7 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     # preflight에서 unexpected SECURITY DEFINER function으로 잡힌다.
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_evidence_mutation(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service, ktm_manual_feature_procedure_owner, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
     # 307의 TRUNCATE 가드 둘. trigger function은 발화 시 EXECUTE 권한을 보지 않으므로
     # 회수해도 fence는 그대로 돈다 — 회수하지 않으면 `db.py`의 startup preflight가
@@ -561,11 +561,11 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     # DO block은 head에서도 무조건 조용했고, 조용한 건너뜀에는 증인이 없다.
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_truncate(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service, ktm_manual_feature_procedure_owner, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
     "REVOKE ALL ON FUNCTION feature.reject_feature_request_evidence_mutation(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service, ktm_manual_feature_procedure_owner, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 
@@ -665,11 +665,9 @@ _M05_STATE_OWNER_DEPENDENCY_ACL = (
 
 _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_service, ktm_manual_provider_dedup_detector_executor, "
@@ -707,7 +705,7 @@ _M05_WRITER_ACL = (
     # 종전의 `to_regprocedure` DO block이 아니라 `_OPTIONAL_ROUTINES`가 한다.
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service, ktm_manual_provider_dedup_admin_executor, "
+    " ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(...) "
     "TO ktm_manual_provider_dedup_detector_executor",
@@ -756,7 +754,7 @@ _MANUAL_FEATURE_WRITER_ACL = (
     "ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_hard_purge(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
-    "ktm_feature_service, ktm_manual_feature_procedure_owner, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 

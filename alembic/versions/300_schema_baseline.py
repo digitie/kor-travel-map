@@ -235,7 +235,8 @@ DECLARE
     observed_extension_inventory text[];
 BEGIN
     -- known NOLOGIN/LOGIN checks below와 count를 결합해 reserved `ktm_*`
-    -- namespace 전체가 exact 21개임을 보장한다. 이 guard가 없으면 unseen prefix
+    -- namespace 전체가 exact 19개임을 보장한다(ADR-100: LOGIN 3 -> 1).
+    -- 이 guard가 없으면 unseen prefix
     -- principal이 ownership/ACL catalog boundary 밖에 남을 수 있다.
     IF (
         SELECT count(*)
