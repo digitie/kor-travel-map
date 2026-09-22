@@ -509,9 +509,7 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
-                ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
-                ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
+                ("KOR_TRAVEL_MAP_SERVICE_PASSWORD", "bootstrap-probe-service"),
                 ("KOR_TRAVEL_MAP_POSTGRES_DB", _DATABASE),
                 ("KOR_TRAVEL_MAP_POSTGRES_USER", bootstrap_user),
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE", _DATABASE),
@@ -586,9 +584,7 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
-                ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
-                ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
+                ("KOR_TRAVEL_MAP_SERVICE_PASSWORD", "bootstrap-probe-service"),
                 ("KOR_TRAVEL_MAP_POSTGRES_DB", _DATABASE),
                 ("KOR_TRAVEL_MAP_POSTGRES_USER", bootstrap_user),
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE", _DATABASE),
