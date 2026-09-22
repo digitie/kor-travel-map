@@ -255,6 +255,24 @@ def _procedure_statements(suffix: str) -> tuple[str, ...]:
     return tuple(statements)
 
 
+#: 두 목록을 **모듈 import 시점에** 만든다. 늦게 만들면 세 lint가 이 파일을 보지
+#: 못한다: `test_migration_sidecars_are_wired_into_their_migration`은
+#: `Path.read_text`를 계측한 채 모듈을 import해 "실제로 열린 사이드카"를 세고,
+#: 두 role-window lint는 module-level `_UPGRADE_STATEMENTS`/`_DOWNGRADE_STATEMENTS`를
+#: 읽는다. 함수 호출로 남겨 두면 세 검사 모두 조용히 이 파일을 건너뛴다 — 313은
+#: role을 여섯 번 바꾸는 유일한 마이그레이션이라 그 사각지대가 가장 비싼 자리다.
+#: 마이그레이션은 SET ROLE을 켠 채로 끝나야 한다(RESET ROLE 금지) — alembic의 마지막
+#: `UPDATE alembic_version`이 그 role로 실행돼야 하고, `ktm_curation_command_owner`
+#: 같은 다른 owner로 끝나면 `permission denied for table alembic_version`으로 죽는다.
+#:
+#: 원래 이 파일은 "`_PROCEDURES_BY_OWNER`의 마지막 그룹이 schema owner다"에 기대고
+#: 있었다. 그건 **정렬 순서에 대한 의존**이라, 누가 가독성을 위해 그룹 순서를 바꾸면
+#: 조용히 깨진다. 게다가 두 role-window lint는 이 파일을 보지 못한다 —
+#: `_executed_statements`가 `ast.For`의 `iter`가 `ast.Name`일 때만 풀 수 있는데 여기는
+#: 함수 호출이다. 그래서 순서에 기대지 않고 **명시적으로** 되돌린다.
+_FINAL_ROLE: Final[str] = "SET ROLE ktm_feature_schema_owner"
+
+
 #: `feature.feature_creation_origins`는 schema owner가 소유한다 — 마지막 owner 그룹과
 #: 같은 role이므로 role 전환 없이 이어서 실행한다.
 #:
@@ -323,32 +341,31 @@ def _receipt_head_check(heads: tuple[str, ...]) -> str:
     )
 
 
-#: 마이그레이션은 SET ROLE을 켠 채로 끝나야 한다(RESET ROLE 금지) — alembic의 마지막
-#: `UPDATE alembic_version`이 그 role로 실행돼야 하고, `ktm_curation_command_owner`
-#: 같은 다른 owner로 끝나면 `permission denied for table alembic_version`으로 죽는다.
-#:
-#: 원래 이 파일은 "`_PROCEDURES_BY_OWNER`의 마지막 그룹이 schema owner다"에 기대고
-#: 있었다. 그건 **정렬 순서에 대한 의존**이라, 누가 가독성을 위해 그룹 순서를 바꾸면
-#: 조용히 깨진다. 게다가 두 role-window lint는 이 파일을 보지 못한다 —
-#: `_executed_statements`가 `ast.For`의 `iter`가 `ast.Name`일 때만 풀 수 있는데 여기는
-#: 함수 호출이다. 그래서 순서에 기대지 않고 **명시적으로** 되돌린다.
-_FINAL_ROLE: Final[str] = "SET ROLE ktm_feature_schema_owner"
+#: 뒤따르는 CHECK/receipt-head 문장도 같은 튜플에 담는다. 밖에 두면
+#: `test_receipt_head_check_covers_the_graph_head`가 이 파일에서 receipt-head
+#: 문장을 찾지 못한다 — 그 검사는 `_UPGRADE_STATEMENTS`만 읽는다.
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    *_procedure_statements("upgraded"),
+    _FINAL_ROLE,
+    _ORIGIN_ROLES_CHECK_DROP,
+    _ORIGIN_ROLES_CHECK_ADD_UPGRADED,
+    _receipt_head_check((*_RECEIPT_HEADS, revision)),
+)
+_DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _FINAL_ROLE,
+    _receipt_head_check(_RECEIPT_HEADS),
+    _ORIGIN_ROLES_CHECK_DROP,
+    _ORIGIN_ROLES_CHECK_ADD_ORIGINAL,
+    *_procedure_statements("original"),
+    _FINAL_ROLE,
+)
 
 
 def upgrade() -> None:
-    for statement in _procedure_statements("upgraded"):
+    for statement in _UPGRADE_STATEMENTS:
         op.execute(statement)
-    op.execute(_FINAL_ROLE)
-    op.execute(_ORIGIN_ROLES_CHECK_DROP)
-    op.execute(_ORIGIN_ROLES_CHECK_ADD_UPGRADED)
-    op.execute(_receipt_head_check((*_RECEIPT_HEADS, revision)))
 
 
 def downgrade() -> None:
-    op.execute(_FINAL_ROLE)
-    op.execute(_receipt_head_check(_RECEIPT_HEADS))
-    op.execute(_ORIGIN_ROLES_CHECK_DROP)
-    op.execute(_ORIGIN_ROLES_CHECK_ADD_ORIGINAL)
-    for statement in _procedure_statements("original"):
+    for statement in _DOWNGRADE_STATEMENTS:
         op.execute(statement)
-    op.execute(_FINAL_ROLE)

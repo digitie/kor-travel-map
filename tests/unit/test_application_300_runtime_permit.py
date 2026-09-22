@@ -471,7 +471,11 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
         asyncio.run(module._migrate())
     assert calls == 2
     assert not upgraded
-    assert "KOR_TRAVEL_MAP_PG_DSN" not in os.environ
+    # ADR-100 이전에는 one-shot이 migrator DSN을 **다른 이름**인
+    # `KOR_TRAVEL_MAP_PG_DSN`에 임시로 넣었다가 지웠고, 그래서 "없음"이 맞았다. 두
+    # 이름이 하나가 된 지금 그 값은 이 테스트가 넣은 입력이므로 없을 수가 없다.
+    # 살아남는 성질은 더 강한 쪽이다: `finally`가 **정확히 이전 값으로 복원**한다.
+    assert os.environ["KOR_TRAVEL_MAP_PG_DSN"] == "postgresql+asyncpg://unused"
     assert "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE" not in os.environ
 
 
