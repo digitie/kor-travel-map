@@ -414,7 +414,7 @@ async def test_manual_feature_provenance_reader_maps_verified_snapshot() -> None
                         "creator_principal_id": "admin-ui-bff.manual-feature-create.v1",
                         "created_by_actor": "admin:m02",
                         "origin_created_at": _NOW,
-                        "invoker_role": "ktm_feature_api_runtime",
+                        "invoker_role": "ktm_feature_service",
                         "procedure_definer": "ktm_manual_feature_procedure_owner",
                     }
                 ]
@@ -445,7 +445,7 @@ async def test_manual_feature_provenance_reader_maps_verified_snapshot() -> None
             creator_principal_id="admin-ui-bff.manual-feature-create.v1",
             created_by_actor="admin:m02",
             created_at=_NOW,
-            invoker_role="ktm_feature_api_runtime",
+            invoker_role="ktm_feature_service",
             procedure_definer="ktm_manual_feature_procedure_owner",
         ),
     )

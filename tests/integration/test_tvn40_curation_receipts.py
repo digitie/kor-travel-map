@@ -241,7 +241,7 @@ async def test_tvn40_transition_audit_rejects_owner_update(
                   true, true, 'active', 'active', 'admin_reject', 1, 1,
                   repeat('a', 64), repeat('b', 64), 'admin:test', 'reviewed',
                   :command_id,
-                  'ktm_feature_api_runtime', 'ktm_curation_command_owner',
+                  'ktm_feature_service', 'ktm_curation_command_owner',
                   'ktm_curation_audit_writer'
                 )
                 RETURNING transition_id

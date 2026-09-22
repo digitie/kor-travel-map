@@ -151,7 +151,7 @@ async def container_dsn(
     superuser로 돌리면 ACL 회귀를 못 잡는다. 이름은 다른 테스트와의 호환을 위해 그대로 둔다.
     """
     dsn = migrated_engine.url.set(
-        username="ktm_feature_api_runtime",
+        username="ktm_feature_service",
         password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     yield dsn

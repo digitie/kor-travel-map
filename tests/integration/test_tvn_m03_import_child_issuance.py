@@ -195,7 +195,7 @@ async def test_manual_row_issues_child_and_binds_the_301_linkage(
     )
     rows = (plain, manual)
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(api, expire_on_commit=False)
     try:
         preview_command = await _domain_command(
@@ -509,7 +509,7 @@ async def test_reimporting_the_same_manual_row_reuses_the_child(
             "coord": {"lon": "127.10000", "lat": "37.40000"},
         },
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(api, expire_on_commit=False)
     try:
         first, _plan1, _sha1 = await _run_import(
@@ -564,7 +564,7 @@ async def test_manual_row_is_rejected_outside_the_command_path(
             "coord": {"lon": "127.0", "lat": "37.5"},
         },
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(api, expire_on_commit=False)
     try:
         async with session_factory() as session, session.begin():

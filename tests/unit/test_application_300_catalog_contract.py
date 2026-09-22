@@ -43,9 +43,9 @@ class _IdentityConnection:
 @pytest.mark.parametrize(
     "identity",
     [
-        ("other_login", "ktm_feature_migrator", False),
-        ("ktm_feature_migrator", "ktm_feature_schema_owner", False),
-        ("ktm_feature_migrator", "ktm_feature_migrator", True),
+        ("other_login", "ktm_feature_service", False),
+        ("ktm_feature_service", "ktm_feature_schema_owner", False),
+        ("ktm_feature_service", "ktm_feature_service", True),
     ],
 )
 def test_handoff_rejects_inexact_migrator_effective_identity(
@@ -65,7 +65,7 @@ def test_handoff_rejects_inexact_migrator_effective_identity(
 def test_handoff_accepts_exact_non_superuser_migrator_identity() -> None:
     module = _load_handoff()
     connection = _IdentityConnection(
-        ("ktm_feature_migrator", "ktm_feature_migrator", False)
+        ("ktm_feature_service", "ktm_feature_service", False)
     )
 
     asyncio.run(module._verify_migrator_session(connection))

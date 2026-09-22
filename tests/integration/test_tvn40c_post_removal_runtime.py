@@ -226,7 +226,7 @@ async def test_curation_command_procedures_keep_their_owner_and_fence(
                        pg_get_userbyid(p.proowner) AS owner,
                        p.prosecdef AS security_definer,
                        has_function_privilege(
-                         'ktm_feature_dagster_runtime', p.oid, 'EXECUTE'
+                         'ktm_feature_service', p.oid, 'EXECUTE'
                        ) AS dagster_execute
                 FROM pg_catalog.pg_proc AS p
                 JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace

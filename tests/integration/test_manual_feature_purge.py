@@ -352,7 +352,7 @@ async def test_a_feature_bound_by_immutable_evidence_is_refused_by_name(
     pair = await _seed_manual(migrated_engine)
     feature_uuid = _manual_uuid(pair)
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         # 재키 뒤 이 프로시저의 두 파라미터는 uuid다 — 넘기는 것도 정본 키다.
         recorded = await _record_candidate(

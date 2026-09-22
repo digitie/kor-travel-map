@@ -285,7 +285,7 @@ async def test_tvn34_all_legal_tuples_procedure_audit_and_runtime_fence(
         "procedure_owner": "ktm_feature_state_procedure_owner",
     }
 
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         for index, state in enumerate(_LEGAL_TUPLES, start=1):
             if index == 1:
@@ -537,7 +537,7 @@ async def test_tvn34_provider_reactivation_override_is_db_fenced(
         )
     )
 
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         await _call_create(
             migrated_session,
@@ -785,7 +785,7 @@ async def test_tvn34_provider_create_rejects_legacy_and_user_provenance_payload_
     payload = json.loads(_payload(feature_uuid(label), name=label))
     payload[forbidden_key] = forbidden_value
 
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         with pytest.raises(DBAPIError) as rejected:
             async with migrated_session.begin_nested():
@@ -825,7 +825,7 @@ async def test_tvn34_runtime_materializes_typed_user_change_provenance(
     label = "tvn34-user-provenance"
     feature_id = feature_uuid(label)
     request_id = "00000000-0000-0000-0000-000000003496"
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         await _call_create(
             migrated_session,
@@ -936,7 +936,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
     add_label = "tvn34-user-add-provenance"
     add_feature_id = feature_uuid(add_label)
     add_request_id = "00000000-0000-0000-0000-000000003497"
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         await _call_create(
             migrated_session,
@@ -1017,7 +1017,7 @@ async def test_tvn34_typed_provenance_snapshots_add_after_subtype_and_delete(
     delete_label = "tvn34-user-delete-provenance"
     delete_feature_id = feature_uuid(delete_label)
     delete_request_id = "00000000-0000-0000-0000-000000003498"
-    await migrated_session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await migrated_session.execute(text("SET ROLE ktm_feature_service"))
     try:
         await _call_create(
             migrated_session,
