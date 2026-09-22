@@ -165,7 +165,15 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
                 'ktm_curation_admin_executor',
                 'feature.current_provider_curation_input_set(bigint)',
                 'EXECUTE'
-              ) AS admin_executor_seal
+              ) AS admin_executor_seal,
+              -- 양성 대조를 통합 login에 걸면 안 된다: 그 하나가 아홉 executor 전부를
+              -- 상속하므로 grant가 **다른 executor로 옮겨가도** 참이다. 의도한
+              -- grantee를 이름으로 못박아야 이동을 잡는다.
+              has_function_privilege(
+                'ktm_curation_provider_executor',
+                'feature.current_provider_curation_input_set(bigint)',
+                'EXECUTE'
+              ) AS provider_executor_seal
             """
         )
     )
@@ -183,6 +191,10 @@ async def test_provider_curation_seal_is_executable_by_the_loader_login(
     # grant는 `ktm_curation_provider_executor`에만 가야 하고, admin 쪽으로 새면 그것이
     # 곧 넓어졌다는 뜻이다. executor role 사이에는 membership이 없으므로(bootstrap의
     # role graph는 평평하다) 이 술어는 여전히 갈린다.
+    assert row["provider_executor_seal"] is True, (
+        "seal의 grant가 `ktm_curation_provider_executor`에 없다 — 다른 executor로 "
+        "옮겨갔거나 사라졌다"
+    )
     assert row["admin_executor_seal"] is False, (
         "admin executor까지 seal을 실행할 수 있다 — grant가 의도보다 넓다"
     )

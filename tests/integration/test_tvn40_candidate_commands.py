@@ -1349,21 +1349,29 @@ async def test_provider_generation_primitives_require_internal_finalizer(
         # `feature.finalize_provider_curation_root`(SECURITY DEFINER,
         # `ktm_curation_command_owner` 소유)가 대신 한다. ADR-100이 LOGIN을 합치면서
         # 그 거부를 login으로 재현할 수 없게 됐으므로 grant 자체를 잰다.
+        # 음성만 재면 grant가 통째로 사라진 상태도 초록이다 — 그리고 이 술어는
+        # `test_rule_reconcile_scope_omission...`이 이미 재는 것과 같다. 양성 대조를
+        # 붙여야 "좁다"와 "없다"가 갈린다.
         async with dagster.connect() as connection:
-            assert (
-                await connection.scalar(
+            grantees = (
+                await connection.execute(
                     text(
                         """
-                        SELECT has_function_privilege(
-                          'ktm_curation_provider_executor', oid, 'EXECUTE'
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
                         FROM pg_catalog.pg_proc
                         WHERE pronamespace = 'feature'::regnamespace
                           AND proname = 'materialize_theme_candidate_generation'
                         """
                     )
                 )
-            ) is False
+            ).mappings().one()
+            assert grantees == {"provider_side": False, "admin_side": True}
 
         async with dagster.connect() as connection:
             transaction = await connection.begin()
