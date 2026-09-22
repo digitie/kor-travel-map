@@ -446,7 +446,7 @@ async def test_handoff_rejects_superuser_even_with_a_valid_manager_receipt(
         ]
     ) == 1
     assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-    assert "exact non-superuser ktm_feature_migrator session" in capsys.readouterr().err
+    assert "exact non-superuser ktm_feature_service session" in capsys.readouterr().err
 
 
 @pytest.mark.asyncio
@@ -667,18 +667,18 @@ async def test_catalog_receipt_handles_text_search_parser_template_and_mapping(
     ("mutation", "reset", "failure"),
     [
         (
-            "ALTER ROLE ktm_feature_api_runtime CONNECTION LIMIT 1",
-            "ALTER ROLE ktm_feature_api_runtime CONNECTION LIMIT -1",
+            "ALTER ROLE ktm_feature_service CONNECTION LIMIT 1",
+            "ALTER ROLE ktm_feature_service CONNECTION LIMIT -1",
             "role attributes",
         ),
         (
-            "ALTER ROLE ktm_feature_api_runtime VALID UNTIL '2030-01-01 00:00:00+00'",
-            "ALTER ROLE ktm_feature_api_runtime VALID UNTIL 'infinity'",
+            "ALTER ROLE ktm_feature_service VALID UNTIL '2030-01-01 00:00:00+00'",
+            "ALTER ROLE ktm_feature_service VALID UNTIL 'infinity'",
             "role attributes",
         ),
         (
-            "ALTER ROLE ktm_feature_api_runtime SET statement_timeout TO '1s'",
-            "ALTER ROLE ktm_feature_api_runtime RESET statement_timeout",
+            "ALTER ROLE ktm_feature_service SET statement_timeout TO '1s'",
+            "ALTER ROLE ktm_feature_service RESET statement_timeout",
             "role settings",
         ),
     ],
@@ -821,7 +821,7 @@ async def test_handoff_rejects_manager_observed_hidden_user_mapping_before_stamp
         admin_dsn,
         f"CREATE FOREIGN DATA WRAPPER {wrapper} NO HANDLER NO VALIDATOR; "
         f"CREATE SERVER {server} FOREIGN DATA WRAPPER {wrapper}; "
-        "CREATE USER MAPPING FOR ktm_feature_api_runtime "
+        "CREATE USER MAPPING FOR ktm_feature_service "
         f"SERVER {server} OPTIONS (user 'opaque');",
     )
     try:
@@ -844,6 +844,6 @@ async def test_handoff_rejects_manager_observed_hidden_user_mapping_before_stamp
     finally:
         await _admin_execute(
             admin_dsn,
-            f"DROP USER MAPPING FOR ktm_feature_api_runtime SERVER {server}; "
+            f"DROP USER MAPPING FOR ktm_feature_service SERVER {server}; "
             f"DROP SERVER {server}; DROP FOREIGN DATA WRAPPER {wrapper};",
         )
