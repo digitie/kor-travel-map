@@ -807,23 +807,6 @@ class FeatureCreationOriginRow(Base):
             "btrim(created_by_actor) <> '' AND char_length(created_by_actor) <= 200",
             name=conv("ck_feature_creation_origins_actor"),
         ),
-        # ADR-100: 통합된 이름과 통합 전 이름을 함께 받는다. 이 표는 append-only라
-        # 옛 행을 고쳐 쓸 수 없고, 그 행들은 그 시점에 실제로 존재하던 role을 기록한
-        # provenance다 — `ktm_feature_service`만 받는 형태로 걸면 이미 manual Feature를
-        # 만든 적 있는 DB에서 `alembic upgrade`가 23514로 통째 롤백된다.
-        # 근거 전문은 `alembic/versions/313_single_service_role.py`에 있다.
-        CheckConstraint(
-            "(origin_kind = 'manual_admin' "
-            "AND invoker_role = ANY (ARRAY['ktm_feature_service', 'ktm_feature_api_runtime']) "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
-            "OR (origin_kind = 'manual_curation' "
-            "AND invoker_role = ANY (ARRAY['ktm_feature_service', 'ktm_feature_api_runtime']) "
-            "AND procedure_definer = 'ktm_curation_command_owner') "
-            "OR (origin_kind = 'manual_request' "
-            "AND invoker_role = ANY (ARRAY['ktm_feature_service', 'ktm_feature_api_runtime']) "
-            "AND procedure_definer = 'ktm_feature_request_procedure_owner')",
-            name=conv("ck_feature_creation_origins_roles"),
-        ),
         UniqueConstraint(
             "creation_command_id",
             name=conv("uq_feature_creation_origins_command"),

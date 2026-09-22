@@ -324,7 +324,6 @@ KOR_TRAVEL_MAP_RUSTFS_API_PORT=$rustfs_port
 KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT=$((rustfs_port + 1))
 KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME=$MAP_PROJECT-mois
 KOR_TRAVEL_MAP_RUSTFS_VOLUME=$MAP_PROJECT-rustfs
-KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME=$MAP_PROJECT-application-final-permit
 KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME=$MAP_PROJECT-dagster-storage-permit
 KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=$admin_proxy_secret
 KOR_TRAVEL_MAP_API_SERVICE_TOKEN=$service_token
@@ -653,11 +652,7 @@ def environment(item):
     return dict(value.split("=", 1) for value in item["Config"]["Env"] if "=" in value)
 
 storage_env, web_env, daemon_env = map(environment, (storage, webserver, daemon))
-for forbidden in (
-    "KOR_TRAVEL_MAP_PG_DSN",
-    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
-    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
-):
+for forbidden in ("KOR_TRAVEL_MAP_PG_DSN",):
     if forbidden in storage_env:
         raise SystemExit("Dagster metadata migration received an application input")
 if len({item["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] for item in (storage_env, web_env, daemon_env)}) != 1:
@@ -798,7 +793,7 @@ run() {
   # recreate/up은 one-shot을 다시 실행하지 않으므로
   # persistent `300` DB restart가 fresh-only guard에 막히지 않는다.
   compose_map up --detach --wait postgres
-  compose_map --profile fresh-init run --rm db-application-schema-fresh-300
+  compose_map --profile fresh-init run --rm db-application-schema-fresh
   compose_map up --detach --build --wait \
     dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster \
     dagster-daemon

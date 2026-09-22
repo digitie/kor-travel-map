@@ -968,12 +968,18 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: head에는 반드시 있어야 한다는 것은 런타임의 추측이 아니라
 #: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 head 오라클에 대고
 #: 정적으로 고정한다 — 배포가 아니라 머지를 막는 쪽이 더 이르다.
-_OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "feature.list_manual_provider_dedup_detector_manuals": "304_m05_detector_manual_listing",
-    "feature.reject_feature_request_evidence_mutation": "307_m02_truncate_fence",
-    "feature.reject_manual_feature_truncate": "307_m02_truncate_fence",
-    "feature.resolve_provider_feature_id": "309_t39_feature_id_rekey",
-}
+#: 인벤토리가 지목하지만 **없어도 되는** 루틴과 그것을 만드는 revision.
+#:
+#: 지금은 비어 있다. 이 예외가 있던 이유는 조정기가 두 스키마 상태에서 돌았기
+#: 때문이다 — baseline root에서 한 번(0236 handoff 직후), head에서 한 번. 그
+#: 사이에 생긴 루틴은 앞 시점에 없었다. `400` 스쿼시로 그 두 시점이 하나가 됐고,
+#: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 실물로 확인한다 —
+#: baseline root에 없는 인벤토리 루틴은 0개다.
+#:
+#: 비워 두는 것이 중요하다. 이름이 남아 있으면 그 루틴이 **정말로** 사라진 날에도
+#: 조정기가 조용히 건너뛰고, 지켜야 할 ACL이 없어진 것을 아무도 모른다. 다음
+#: revision이 새 루틴을 만들고 그 사이 상태를 지나야 한다면 그때 다시 적는다.
+_OPTIONAL_ROUTINES: Mapping[str, str] = {}
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은
 #: **이 조정기가 ACL을 거는 대상**이고, lint가 두 오라클에 이름으로 묶는다.

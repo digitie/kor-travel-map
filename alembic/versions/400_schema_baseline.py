@@ -1,26 +1,37 @@
-"""`0236`의 final application schema를 재현하는 단일 root baseline.
+"""빈 DB를 head까지 올린 결과를 한 번에 적용하는 단일 root baseline.
 
-Revision ID: 300
-Revises: 없음 — active graph의 유일한 root
+Revision ID: 400
+Revises: 없음 — 활성 graph의 유일한 root
 
-`0200_schema_baseline`부터 `0236_tvn41s_compaction_drained`까지의 source는 실행
-graph가 아닌 retired archive로 보존한다. 새 DB는 final role bootstrap 뒤 이 migration
-하나만 적용한다. 기존 DB의 `0236 → 300` metadata handoff는 일반 upgrade/stamp가 아닌
-명시적인 one-shot protocol만 허용하며, 그 protocol의 guard는 ``alembic/env.py``가
-소유한다.
+`300`~`313` 열네 개를 하나로 접었다. 접을 수 있는 이유는 이 저장소가 **운영 중이
+아니고**, 따라서 올릴 기존 DB도 보존할 데이터도 없기 때문이다. 그 조건에서
+migration 체인은 "과거를 재생할 수 있다"는 성질에 값을 치를 이유가 없고, 체인이
+길어질수록 같은 사실(role graph·ACL·procedure 본문)이 여러 revision에 흩어져
+서로 어긋날 자리만 늘어난다.
 
-sidecar는 provider 적재·fixture·acceptance data가 없는 isolated fresh `0236` reference
-DB에서 ``scripts/build-baseline.sh``로 생성했다. 사람이 수정하는 파일이 아니며, 두
-sidecar hash와 final role/ACL bootstrap assertion이 함께 이 baseline의 정본이다.
+sidecar는 빈 DB를 `313`까지 올린 뒤 `pg_dump`로 뜬 것이다. 사람이 고치는 파일이
+아니다 — 고칠 일이 생기면 forward revision을 쌓고, 충분히 쌓이면 다시 접는다.
+
+`300`이 하던 것 중 **빠진 것**:
+
+- sidecar SHA-256 검증과 `application-reference.json` manifest. 0236에서 옮겨 온
+  스키마가 손대지 않은 원본인지 증명하기 위한 것이었고, 그 이관은 끝났다.
+- catalog/seed **receipt 대조**. 배포된 DB의 카탈로그를 정규화해 해시하고 빌드
+  시점 값과 맞추던 검사다. 같은 것을 CI의 ACL·procedure 테스트가 실제 효과로
+  재고, 여기서는 봉인된 기대값 파일만 늘렸다.
+- 그 receipt 계산 전용이던 canonical contract GUC 9개.
+
+**남은 것**은 전제 확인 둘뿐이고, 둘 다 "이 migration을 돌리면 안 되는 DB"를
+가려낸다: role bootstrap이 끝나지 않았거나(role assertion), `public`에 예상 밖의
+객체가 있는 경우(catalog assertion). 둘 다 없으면 첫 `ALTER SCHEMA ... OWNER TO`가
+읽기 어려운 오류로 터진다.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 from sqlalchemy.util.concurrency import await_only
 
@@ -28,158 +39,16 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "300"
+revision: str = "400"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
-_REFERENCE_MANIFEST: Final[str] = "application-reference.json"
-_REFERENCE_MANIFEST_SHA256: Final[str] = "application-reference.sha256"
-_REFERENCE_SCHEMA: Final[str] = "kor-travel-map.application-baseline-reference.v1"
-_REFERENCE_SOURCE: Final[dict[str, str]] = {
-    "git_commit": "01d65b2ad4ee265a3ef6b01448f6abf573a906a8",
-    "raw_alembic_revision": "0236_tvn41s_compaction_drained",
-    "container_image": "postgis/postgis:16-3.5-alpine",
-    "container_image_id": "sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c",
-    "postgres_server_version_num": "160014",
-    "postgis_extension_version": "3.5.6",
-}
-_REFERENCE_FRESH_SEED_RELATIONS: Final[tuple[str, ...]] = (
-    "feature.curated_source_rules",
-    "feature.curated_sources",
-    "feature.curated_themes",
-    "ops.feature_override_field_paths",
-    "provider_sync.provider_dataset_operation_scopes",
-    "provider_sync.provider_dataset_operations",
-    "provider_sync.provider_datasets",
-)
-_REFERENCE_STATIC_SEED_RELATIONS: Final[tuple[str, ...]] = (
-    "ops.feature_override_field_paths",
-)
-_CANONICAL_CONTRACT_GUC_STATEMENTS: Final[tuple[str, ...]] = (
-    "SET LOCAL quote_all_identifiers TO off",
-    "SET LOCAL DateStyle TO 'ISO, YMD'",
-    "SET LOCAL IntervalStyle TO 'postgres'",
-    "SET LOCAL TimeZone TO 'UTC'",
-    "SET LOCAL extra_float_digits TO 3",
-    "SET LOCAL lc_numeric TO 'C'",
-    "SET LOCAL bytea_output TO 'hex'",
-    "SET LOCAL standard_conforming_strings TO on",
-    "SET LOCAL xmlbinary TO 'base64'",
-)
-_REFERENCE_ARTIFACTS: Final[dict[str, str]] = {
-    "schema.sql": "schema_sql_sha256",
-    "seed.sql": "seed_sql_sha256",
-    "application-catalog.sql": "catalog_contract_sql_sha256",
-    "application-source-catalog.sha256": "source_catalog_contract_receipt_sha256",
-    "application-destination-catalog.sha256": (
-        "destination_catalog_contract_receipt_sha256"
-    ),
-    "application-seed.sql": "seed_contract_sql_sha256",
-    "application-seed.sha256": "seed_contract_receipt_sha256",
-    "application-privileged-residue.sql": "privileged_residue_contract_sql_sha256",
-    "application-privileged-residue.sha256": "privileged_residue_contract_receipt_sha256",
-    "application-source-alembic-version.sql": "source_alembic_version_contract_sql_sha256",
-    "application-source-alembic-version.sha256": "source_alembic_version_contract_receipt_sha256",
-    "application-destination-alembic-version.sql": "destination_alembic_version_contract_sql_sha256",
-    "application-destination-alembic-version.sha256": "destination_alembic_version_contract_receipt_sha256",
-    "application-runtime-invariants.sql": "runtime_invariants_sql_sha256",
-}
 
 
-def _read_sidecar(name: str, expected_sha256: str) -> str:
-    path = _BASELINE_DIR / name
-    raw = path.read_bytes()
-    observed = hashlib.sha256(raw).hexdigest()
-    if observed != expected_sha256:
-        raise RuntimeError(
-            f"alembic/baseline/{name} bytes drift — clean 0236 reference에서 다시 "
-            f"생성·catalog 동등성 증명 뒤 hash를 갱신하라 (observed {observed})"
-        )
-    return raw.decode("utf-8")
-
-
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
-def _reference_manifest_sha256() -> str:
-    """materialize 단계가 함께 낸 manifest digest sidecar를 엄격히 읽는다.
-
-    `300` artifact는 source-only materialize 단계에서 한 directory로 생성되고, 그
-    결과는 final candidate image와 fresh-oracle receipt가 image digest/commit과 함께
-    고정한다. Python literal을 따로 고쳐야만 새 artifact를 후보로 만들 수 있게 하면
-    그 자체가 생성 증적의 순환 의존성이 된다. digest sidecar는 manifest와 함께 기계
-    생성되며, 빈 값·공백·여러 줄을 허용하지 않는다.
-    """
-
-    path = _BASELINE_DIR / _REFERENCE_MANIFEST_SHA256
-    raw = path.read_bytes()
-    try:
-        value = raw.decode("ascii").strip()
-    except UnicodeDecodeError as exc:
-        raise RuntimeError("300 baseline reference manifest digest is malformed") from exc
-    if not _is_sha256(value) or raw != f"{value}\n".encode("ascii"):
-        raise RuntimeError("300 baseline reference manifest digest is malformed")
-    return value
-
-
-def _baseline_reference() -> dict[str, Any]:
-    """생성 artifact가 한 immutable receipt인지 fresh migration 전에 검증한다."""
-
-    manifest_path = _BASELINE_DIR / _REFERENCE_MANIFEST
-    raw = manifest_path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != _reference_manifest_sha256():
-        raise RuntimeError("300 baseline reference manifest bytes drifted")
-    try:
-        manifest = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError("300 baseline reference manifest is malformed") from exc
-    if not isinstance(manifest, dict) or manifest.get("schema") != _REFERENCE_SCHEMA:
-        raise RuntimeError("300 baseline reference manifest schema is invalid")
-    source = manifest.get("source")
-    artifacts = manifest.get("artifacts")
-    if (
-        not isinstance(source, dict)
-        or not isinstance(artifacts, dict)
-        or {key: source.get(key) for key in _REFERENCE_SOURCE} != _REFERENCE_SOURCE
-        or tuple(manifest.get("fresh_seed_relations") or ())
-        != _REFERENCE_FRESH_SEED_RELATIONS
-        or tuple(manifest.get("static_seed_relations") or ())
-        != _REFERENCE_STATIC_SEED_RELATIONS
-    ):
-        raise RuntimeError("300 baseline reference manifest contract is invalid")
-    for name, key in _REFERENCE_ARTIFACTS.items():
-        expected = artifacts.get(key)
-        if not _is_sha256(expected):
-            raise RuntimeError(f"300 baseline reference artifact digest is invalid: {key}")
-        _read_sidecar(name, expected)
-    for receipt_name, receipt_key in (
-        ("application-source-catalog.sha256", "source_catalog_contract_sha256"),
-        (
-            "application-destination-catalog.sha256",
-            "destination_catalog_contract_sha256",
-        ),
-        ("application-seed.sha256", "seed_contract_sha256"),
-        ("application-privileged-residue.sha256", "privileged_residue_contract_sha256"),
-        ("application-source-alembic-version.sha256", "source_alembic_version_contract_sha256"),
-        (
-            "application-destination-alembic-version.sha256",
-            "destination_alembic_version_contract_sha256",
-        ),
-    ):
-        receipt = _read_sidecar(
-            receipt_name, artifacts[_REFERENCE_ARTIFACTS[receipt_name]]
-        ).strip()
-        expected_receipt = artifacts.get(receipt_key)
-        if not _is_sha256(expected_receipt) or receipt != expected_receipt:
-            raise RuntimeError("300 baseline reference receipt/manifest drifted")
-    return manifest
+def _read_sidecar(name: str) -> str:
+    return (_BASELINE_DIR / name).read_text(encoding="utf-8")
 
 
 def _execute_sql_script(sql: str) -> None:
@@ -189,47 +58,9 @@ def _execute_sql_script(sql: str) -> None:
     await_only(raw_connection.execute(sql))
 
 
-def _set_canonical_contract_gucs() -> None:
-    """fresh migration의 catalog receipt도 handoff/source oracle과 같은 출력 규칙을 쓴다."""
-
-    raw_connection = op.get_bind().connection.driver_connection
-    for statement in _CANONICAL_CONTRACT_GUC_STATEMENTS:
-        await_only(raw_connection.execute(statement))
-
-
-def _verify_contract_receipt(
-    name: str,
-    expected_sha256: str,
-    expected_receipt_sha256: str,
-) -> None:
-    """fresh migration이 실제 DB의 immutable receipt까지 같은 transaction에서 닫는다.
-
-    sidecar byte hash만 확인하면 candidate build 때의 oracle은 통과해도, 다른 extension
-    inventory/ACL을 가진 fresh deployment가 raw `300`을 commit할 수 있다. canonical query의
-    ordered ``item`` stream을 handoff와 같은 UTF-8/LF SHA-256으로 다시 계산해, mismatch면
-    Alembic outer transaction 전체를 rollback한다.
-    """
-
-    sql = _read_sidecar(name, expected_sha256)
-    raw_connection = op.get_bind().connection.driver_connection
-    try:
-        rows = await_only(raw_connection.fetch(sql))
-    except Exception as exc:  # pragma: no cover - backend exception type is driver-owned
-        raise RuntimeError(f"300 baseline {name} receipt query failed") from exc
-    digest = hashlib.sha256()
-    for row in rows:
-        item = str(row["item"]).encode("utf-8")
-        digest.update(item)
-        digest.update(b"\n")
-    observed_receipt_sha256 = digest.hexdigest()
-    if observed_receipt_sha256 != expected_receipt_sha256:
-        raise RuntimeError(
-            f"300 baseline {name} receipt does not match immutable reference "
-            f"(expected={expected_receipt_sha256}, observed={observed_receipt_sha256})"
-        )
-
-
-_FINAL_APPLICATION_ROLE_ASSERTIONS_SQL: Final[str] = r"""
+#: bootstrap이 끝난 DB인지 확인한다. role graph의 정본은
+#: `docker/postgres-role-bootstrap.sh`이고 이 블록은 그것이 실제로 돌았는지를 잰다.
+_ROLE_ASSERTIONS_SQL: Final[str] = r"""
 DO $final_application_role_contract$
 DECLARE
     observed_extension_inventory text[];
@@ -243,7 +74,7 @@ BEGIN
         FROM pg_catalog.pg_roles
         WHERE rolname LIKE 'ktm\_%' ESCAPE '\'
     ) <> 19 THEN
-        RAISE EXCEPTION '300 baseline requires the exact reserved application role inventory'
+        RAISE EXCEPTION '400 baseline requires the exact reserved application role inventory'
             USING ERRCODE = '42501';
     END IF;
 
@@ -290,7 +121,7 @@ BEGIN
             'ktm_feature_reference_reconciliation_service_executor'
         )
     ) <> 18 THEN
-        RAISE EXCEPTION '300 baseline requires all final NOLOGIN application roles'
+        RAISE EXCEPTION '400 baseline requires all final NOLOGIN application roles'
             USING ERRCODE = '42501';
     END IF;
 
@@ -311,7 +142,7 @@ BEGIN
             'ktm_feature_service'
         )
     ) <> 1 THEN
-        RAISE EXCEPTION '300 baseline requires all final LOGIN application roles'
+        RAISE EXCEPTION '400 baseline requires all final LOGIN application roles'
             USING ERRCODE = '42501';
     END IF;
 
@@ -353,7 +184,7 @@ BEGIN
         UNION ALL
         (SELECT * FROM actual EXCEPT SELECT * FROM expected)
     ) THEN
-        RAISE EXCEPTION '300 baseline application role membership graph is not exact'
+        RAISE EXCEPTION '400 baseline application role membership graph is not exact'
             USING ERRCODE = '42501';
     END IF;
 
@@ -399,7 +230,7 @@ BEGIN
             )
         )
     ) THEN
-        RAISE EXCEPTION '300 baseline requires the final database owner/search_path/role-settings contract'
+        RAISE EXCEPTION '400 baseline requires the final database owner/search_path/role-settings contract'
             USING ERRCODE = '42501';
     END IF;
 
@@ -420,7 +251,7 @@ BEGIN
         'plpgsql@pg_catalog',
         'postgis@x_extension'
     ]::text[] THEN
-        RAISE EXCEPTION '300 baseline requires the exact extension inventory contract'
+        RAISE EXCEPTION '400 baseline requires the exact extension inventory contract'
             USING ERRCODE = '42P01',
                   DETAIL = array_to_string(observed_extension_inventory, ',');
     END IF;
@@ -441,7 +272,7 @@ BEGIN
         FROM pg_catalog.pg_namespace
         WHERE nspname IN ('topology', 'tiger')
     ) THEN
-        RAISE EXCEPTION '300 baseline extension bootstrap ownership/inventory contract is not exact'
+        RAISE EXCEPTION '400 baseline extension bootstrap ownership/inventory contract is not exact'
             USING ERRCODE = '42501';
     END IF;
 
@@ -505,7 +336,7 @@ BEGIN
         WHERE NOT owner.rolsuper
            OR owner.rolname LIKE 'ktm\_%' ESCAPE '\'
     ) THEN
-        RAISE EXCEPTION '300 baseline extension member ownership contract is not exact'
+        RAISE EXCEPTION '400 baseline extension member ownership contract is not exact'
             USING ERRCODE = '42501';
     END IF;
 
@@ -531,7 +362,7 @@ BEGIN
               'pg_catalog.pg_language'::regclass
           ])
     ) THEN
-        RAISE EXCEPTION '300 baseline does not accept unsupported extension member classes'
+        RAISE EXCEPTION '400 baseline does not accept unsupported extension member classes'
             USING ERRCODE = '42501';
     END IF;
 
@@ -563,7 +394,7 @@ BEGIN
         WHERE has_schema_privilege(role_name, 'x_extension', 'USAGE')
               IS DISTINCT FROM should_have_usage
     ) THEN
-        RAISE EXCEPTION '300 baseline x_extension USAGE contract is not exact'
+        RAISE EXCEPTION '400 baseline x_extension USAGE contract is not exact'
             USING ERRCODE = '42501';
     END IF;
 END
@@ -571,12 +402,9 @@ $final_application_role_contract$;
 """
 
 
-# baseline sidecar는 routine/table ACL을 해당 object owner role로 실행해야 한다. 일부
-# owner는 final state에서 CREATE를 갖지 않지만 object owner 변경 직전에는 PostgreSQL이
-# schema CREATE를 요구한다. fresh-300 bootstrap이 주는 그 좁은 임시 elevation은 sidecar
-# 뒤 이 block에서 정확한 final schema ACL로 소거한다. old staged bootstrap을 재실행하거나
-# migration 밖에서 broad CREATE를 남기는 경로는 허용하지 않는다.
-_FINAL_SCHEMA_PRIVILEGE_NORMALIZATION_SQL: Final[str] = r"""
+#: 덤프가 낸 ACL 위에 schema 수준 USAGE/CREATE를 다시 못박는다. pg_dump는 schema
+#: ACL을 내지만 PUBLIC REVOKE는 내지 않으므로 여기서 닫는다.
+_SCHEMA_PRIVILEGE_NORMALIZATION_SQL: Final[str] = r"""
 REVOKE ALL ON SCHEMA feature, provider_sync, ops FROM PUBLIC;
 REVOKE ALL ON SCHEMA feature, provider_sync, ops FROM
     ktm_feature_state_procedure_owner,
@@ -627,12 +455,11 @@ GRANT USAGE ON SCHEMA ops TO
 """
 
 
-# fresh bootstrap의 virgin input guard와 같은 catalog boundary를 migration transaction
-# 끝에서 다시 확인한다. bootstrap 뒤 public에는 exact fuzzystrmatch extension member와
-# Alembic 자신의 version table만 남을 수 있다. 이 assertion은 generic fresh
-# `upgrade head`가 source/handoff receipt와 다른 public ACL·extension/default-ACL 상태를
-# 승인하지 않게 한다.
-_FINAL_APPLICATION_CATALOG_ASSERTIONS_SQL: Final[str] = r"""
+#: bootstrap 뒤 `public`에는 fuzzystrmatch extension member와 Alembic version
+#: table만 남을 수 있다. 그 밖의 것이 있으면 이 migration이 승인하지 않는다 —
+#: 이름만 예외로 두면 extra index/column ACL/RLS/rule/trigger가 stamp의
+#: DELETE/INSERT에 개입할 수 있다.
+_CATALOG_ASSERTIONS_SQL: Final[str] = r"""
 DO $final_application_catalog_contract$
 BEGIN
     IF NOT EXISTS (
@@ -651,12 +478,12 @@ BEGIN
               'pg_database_owner=UC/pg_database_owner'
           ]::text[]
     ) THEN
-        RAISE EXCEPTION '300 baseline public schema ACL contract is not exact'
+        RAISE EXCEPTION '400 baseline public schema ACL contract is not exact'
             USING ERRCODE = '42501';
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl) THEN
-        RAISE EXCEPTION '300 baseline default privilege catalog must be empty'
+        RAISE EXCEPTION '400 baseline default privilege catalog must be empty'
             USING ERRCODE = '42501';
     END IF;
 
@@ -671,7 +498,7 @@ BEGIN
         )
         FROM pg_catalog.pg_language AS language
     ) IS DISTINCT FROM ARRAY['c', 'internal', 'plpgsql', 'sql']::text[] THEN
-        RAISE EXCEPTION '300 baseline procedural language inventory must be exact'
+        RAISE EXCEPTION '400 baseline procedural language inventory must be exact'
             USING ERRCODE = '42501';
     END IF;
 
@@ -887,7 +714,7 @@ BEGIN
               WHERE policy.polrelid = object.oid
           )
     ) THEN
-        RAISE EXCEPTION '300 baseline public.alembic_version contract is not exact'
+        RAISE EXCEPTION '400 baseline public.alembic_version contract is not exact'
             USING ERRCODE = '42501';
     END IF;
 
@@ -907,7 +734,7 @@ BEGIN
                WHERE datname = current_database()
            )
        ) THEN
-        RAISE EXCEPTION '300 baseline replication topology must be empty'
+        RAISE EXCEPTION '400 baseline replication topology must be empty'
             USING ERRCODE = '42501';
     END IF;
 
@@ -1136,7 +963,7 @@ BEGIN
                 AND member.objid = object.oid
           )
     ) THEN
-        RAISE EXCEPTION '300 baseline public residue catalog is not empty'
+        RAISE EXCEPTION '400 baseline public residue catalog is not empty'
             USING ERRCODE = '42501';
     END IF;
 END
@@ -1144,10 +971,8 @@ $final_application_catalog_contract$;
 """
 
 
-# live revision projection은 immutable seed가 아니다. 정상 운영 DML이 revision과
-# timestamp를 계속 바꾸므로 `0236 → 300` handoff에서 historical exact value를 강제하면
-# 정상 DB를 거절한다. fresh `300`만 최소 runtime row를 0에서 초기화하고, handoff는
-# `application-runtime-invariants.sql`로 존재·카디널리티·범위만 확인한다.
+#: seed가 아니라 런타임 투영의 초기값이다. 덤프에 담지 않는 이유는 이 두 표가
+#: 데이터가 아니라 카운터이기 때문이다 — ON CONFLICT DO NOTHING으로 멱등하다.
 _RUNTIME_PROJECTION_INITIALIZATION_SQL: Final[str] = r"""
 INSERT INTO ops.import_job_event_clock (clock_id, revision, updated_at)
 VALUES (true, 0, clock_timestamp())
@@ -1163,31 +988,23 @@ ON CONFLICT (topic) DO NOTHING;
 
 
 def upgrade() -> None:
-    """final bootstrap이 완성된 fresh DB에 immutable sidecar를 적용한다."""
+    """bootstrap이 끝난 fresh DB에 head 덤프를 적용한다."""
 
-    manifest = _baseline_reference()
-    artifacts = manifest["artifacts"]
-    op.execute(_FINAL_APPLICATION_ROLE_ASSERTIONS_SQL)
-    _execute_sql_script(_read_sidecar("schema.sql", artifacts["schema_sql_sha256"]))
-    _execute_sql_script(_FINAL_SCHEMA_PRIVILEGE_NORMALIZATION_SQL)
-    _execute_sql_script(_read_sidecar("seed.sql", artifacts["seed_sql_sha256"]))
+    op.execute(_ROLE_ASSERTIONS_SQL)
+    _execute_sql_script(_read_sidecar("schema.sql"))
+    _execute_sql_script(_SCHEMA_PRIVILEGE_NORMALIZATION_SQL)
+    _execute_sql_script(_read_sidecar("seed.sql"))
     _execute_sql_script(_RUNTIME_PROJECTION_INITIALIZATION_SQL)
     op.execute("GRANT SELECT ON TABLE public.alembic_version TO ktm_feature_runtime")
-    op.execute(_FINAL_APPLICATION_CATALOG_ASSERTIONS_SQL)
-    _set_canonical_contract_gucs()
-    _verify_contract_receipt(
-        "application-catalog.sql",
-        artifacts["catalog_contract_sql_sha256"],
-        artifacts["source_catalog_contract_sha256"],
-    )
-    _verify_contract_receipt(
-        "application-seed.sql",
-        artifacts["seed_contract_sql_sha256"],
-        artifacts["seed_contract_sha256"],
-    )
+    op.execute(_CATALOG_ASSERTIONS_SQL)
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "300_schema_baseline is forward-only — older Alembic lineages are unsupported"
-    )
+    """되돌리지 않는다.
+
+    이 저장소는 운영 중이 아니고 데이터 보존도 요구하지 않는다. 되돌릴 일이
+    생기면 downgrade가 아니라 forward revision으로 하거나 DB를 새로 만든다.
+    되돌릴 수 없는데 조용히 성공한 척하는 것이 가장 나쁘므로 거부한다.
+    """
+
+    raise RuntimeError("400_schema_baseline is forward-only")

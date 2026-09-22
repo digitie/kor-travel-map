@@ -109,7 +109,7 @@ one-shot을 한 번만 명시적으로 실행한다. 세 단계는 한 Compose e
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.host.yml \
-  --profile fresh-init run --rm db-application-schema-fresh-300
+  --profile fresh-init run --rm db-application-schema-fresh
 ```
 
 이는 기본 host topology 명령이다. bridge를 고르면
@@ -123,16 +123,16 @@ docker compose -f docker-compose.yml -f docker-compose.host.yml \
 `KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose -f docker-compose.yml -f
 docker-compose.host.yml up` 또는
 `scripts/docker-up.sh`를 쓴다.
-두 명령은 workstation local-dev 전용이다. production API는 Docker
-Manager final permit이 없으면 blank DB를 generic Alembic upgrade하지 않는다. 기존 `0236`
-DB를 이 명령으로 고치거나 ownership을 넘기는 것은 금지한다. production 전환은 Manager의
-승인된 fresh application `300` rebuild만 허용한다. 비밀번호는
+두 명령은 workstation local-dev 전용이다. production API는 blank DB를 스스로 Alembic
+upgrade하지 않는다 — 그건 `fresh-init` one-shot의 일이다. 퇴역 lineage를 가리키는 DB를
+이 명령으로 고치거나 ownership을 넘기는 것은 금지한다. production 전환은 Manager의
+승인된 fresh rebuild만 허용한다. 비밀번호는
 `KOR_TRAVEL_MAP_SERVICE_PASSWORD`로 ignored env에만 두며 Alembic revision에는 만들거나
 기록하지 않는다. ADR-100 이후 migration과 runtime이 같은 LOGIN(`ktm_feature_service`)이라
 받아둘 별도 migrator DSN이 없다 — `docker-compose.local-dev.yml` overlay와 Uvicorn exec
 직전의 DSN 제거는 그래서 사라졌다. local-dev API는 `KOR_TRAVEL_MAP_PG_DSN` 하나로 기동 전
-closed ACL inventory를 재조정하고, production API는 그 재조정을 하지 않는다 — 별도 Manager
-one-shot이 재조정과 final permit 발행을 끝낸다. 이 재조정은
+closed ACL inventory를 재조정하고, production API는 그 재조정을 하지 않는다 — 별도
+`fresh-init` one-shot이 그것을 끝낸다. 이 재조정은
 `ALTER DEFAULT PRIVILEGES`를 쓰지 않아 state/audit future table이 runtime DML을 자동 상속할
 수 없다.
 

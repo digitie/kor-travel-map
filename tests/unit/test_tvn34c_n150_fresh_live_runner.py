@@ -58,7 +58,7 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'local log="$evidence/playwright.log"' in runner
     assert '2>&1 | tee "$log"' in runner
     assert 'compose_map up --detach --wait postgres' in runner
-    assert 'compose_map --profile fresh-init run --rm db-application-schema-fresh-300' in runner
+    assert 'compose_map --profile fresh-init run --rm db-application-schema-fresh' in runner
     assert 'compose_map up --detach --force-recreate --wait api' in runner
     assert "- candidate-ui" in runner
     assert 'E2E_BASE_URL=http://localhost:12705' in runner

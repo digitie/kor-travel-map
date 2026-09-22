@@ -303,10 +303,13 @@ services:
       - ./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/database-credential-preflight.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
 
-  # `fresh-init`은 production API entrypoint의 generic upgrade 우회가 아니다.
-  # bootstrap-superuser와 분리된 candidate image one-shot이 exact root `300`과
-  # runtime ACL을 적용한 뒤 종료한다. normal runtime은 이 service에 의존하지 않는다.
-  db-application-schema-fresh-300:
+  # bootstrap-superuser와 분리된 candidate image one-shot이 baseline과 runtime ACL을
+  # 적용한 뒤 종료한다. normal runtime은 이 service에 의존하지 않는다.
+  #
+  # 예전에는 이 자리에 receipt를 대조하고 Manager fence를 두 번 확인하는 전용
+  # one-shot(1,422줄)이 있었다. 그 둘이 없어진 뒤 남는 일은 API entrypoint의
+  # local-dev 분기가 하는 것과 같아서 같은 두 명령으로 되돌렸다.
+  db-application-schema-fresh:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
@@ -321,11 +324,13 @@ services:
       # Docker Manager가 literal production profile + root-owned fixed fence를 만든다.
       KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE: local-dev
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}
-    entrypoint:
-      - /usr/local/bin/python
-      - -I
-      - /usr/local/bin/ktm-application-schema-fresh-300
-      - migrate
+      KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE: "true"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        /usr/local/bin/python -I -m alembic upgrade head
+        /usr/local/bin/python -I -m kortravelmap.infra.runtime_privileges
 
   rustfs-perms:
     image: alpine:3.20
@@ -442,7 +447,6 @@ services:
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}
       # production은 Manager가 immutable API image ID를 permit과 함께 주입한다.
       # local-dev에서는 verifier가 실행되지 않으므로 빈 값도 허용한다.
-      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -475,10 +479,6 @@ services:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
-    volumes:
-      # fixed read-only capability volume. 비어 있거나 stale한 permit은 production
-      # verifier가 candidate/DB binding에서 거부한다.
-      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12701}:${KOR_TRAVEL_MAP_API_PORT:-12701}"
     networks:
@@ -576,7 +576,6 @@ services:
       KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
       KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}
-      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -639,7 +638,6 @@ services:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
-      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     healthcheck:
       test:
@@ -674,7 +672,6 @@ services:
       KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
       KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}
-      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -733,7 +730,6 @@ services:
         condition: service_healthy
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
-      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
     # **회수 기제가 살아 있는지 본다.**
@@ -830,8 +826,6 @@ volumes:
     name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
     name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}
-  kor-travel-map-application-final-permit:
-    name: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME:-kor-travel-map-application-final-permit}
   kor-travel-map-dagster-storage-permit:
     name: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME:-kor-travel-map-dagster-storage-permit}
 

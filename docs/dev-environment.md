@@ -232,15 +232,15 @@ $EDITOR packages/kor-travel-map-api/.env
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data
 
-# virgin dedicated DB application role bootstrap→metadata DB/permit→restricted `300` root
-# migration 연속 one-shot — 한 번만 실행.
-# normal restart에는 실행하지 않고, production API는 Docker Manager final permit 없이는 blank
-# DB를 generic upgrade하지 않는다. legacy `0236` DB에는 Docker Manager handoff만 허용한다.
+# virgin dedicated DB application role bootstrap→metadata DB/permit→`alembic upgrade head`
+# 연속 one-shot — 한 번만 실행.
+# normal restart에는 실행하지 않고, production API는 blank DB를 스스로 upgrade하지 않는다.
+# 퇴역 lineage(`0200`~`0236`)를 가리키는 DB는 이 이미지가 해석하지 못한다 — 새로 만든다.
 docker compose -f docker-compose.yml -f docker-compose.host.yml \
-  --profile fresh-init run --rm db-application-schema-fresh-300
+  --profile fresh-init run --rm db-application-schema-fresh
 
 # Docker full stack은 workstation local-dev profile을 명시한다. production profile은
-# Docker Manager final permit transaction만 사용한다.
+# Docker Manager가 소유한다.
 KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
   -f docker-compose.yml -f docker-compose.host.yml \
   up -d

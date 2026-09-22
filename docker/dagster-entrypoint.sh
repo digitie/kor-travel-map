@@ -132,11 +132,6 @@ runtime_preflight() {
     dagster_runtime_dsn="${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required in production}"
     export KOR_TRAVEL_MAP_PG_DSN="$dagster_runtime_dsn"
 
-    if ! /usr/local/bin/python -I \
-      /usr/local/bin/ktm-application-schema-final-permit verify-dagster; then
-      echo "production Dagster requires a valid Docker Manager application final permit" >&2
-      exit 1
-    fi
     # ADR-100: 걷어낼 두 번째 DSN 이름이 없다 — `KOR_TRAVEL_MAP_PG_DSN`은 Dagster
     # resource가 읽어야 하므로 남는다.
   fi
@@ -147,14 +142,8 @@ storage_input_preflight() {
   # ADR-100: 애플리케이션 DSN을 이 metadata one-shot에서 차단하는 일은 아래
   # `KOR_TRAVEL_MAP_PG_DSN` 검사 하나로 충분하다 — 예전의 per-role 이름은 그 값의
   # 두 번째 통로였고, 통로가 하나가 된 지금 이 검사가 여전히 그것을 잡는다.
-  if [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ] \
-    || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID+x}" = "x" ] \
-    || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID+x}" = "x" ]; then
-    echo "Dagster metadata migration forbids application runtime/final-permit inputs" >&2
-    exit 1
-  fi
-  if [ -e /run/kor-travel-map-application-final-permit ]; then
-    echo "Dagster metadata migration forbids the application final-permit mount" >&2
+  if [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ]; then
+    echo "Dagster metadata migration forbids application runtime inputs" >&2
     exit 1
   fi
 }

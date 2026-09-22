@@ -1,5 +1,32 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-23 — revision `400` 단일 baseline (ADR-101), 배포 봉인 제거
+
+**다음 한 작업: 통합(PostGIS) 게이트를 돌려 `400`이 실제로 적용되는지 확인한다.**
+unit+lint는 n150에서 초록이다(2,973 passed / 15 skipped). 남은 위험은 migration이
+실제 DB에 적용되는 경로 하나다.
+
+**함께 따라오는 것 (아직 안 함):**
+
+1. **n150 `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`** — 지금
+   `312_route_geometry_sidecar`다. `400`으로 바꾸지 않으면 production API가
+   "the image alembic head does not match the expected head"로 기동을 거부한다.
+   운영 파일 수정이므로 별도 승인 후.
+2. **Manager 쪽 정리** — Map이 더는 읽지 않는 env 세 개
+   (`KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_{API,DAGSTER}_IMAGE_ID`,
+   `..._VOLUME`)와 permit 볼륨 마운트. Map은 안 읽으므로 그대로 둬도 무해하고,
+   Manager PR로 따로 지운다.
+3. **트리거 전수조사 결과 적용** — 187개 중 48개가 TRUNCATE 전용이고, 실측 결과
+   **소유자 아닌 grantee에게 부여된 TRUNCATE는 0건**이다(124개 표 전부). 즉 그
+   트리거들이 막는 동작을 할 수 있는 principal이 없다. `400`이 단일 root가 된
+   지금 트리거 삭제는 migration이 아니라 **덤프 전 DROP**이므로, 다시 떠서 접으면
+   된다. 별도 작업.
+4. **`runtime_privileges.py`의 죽은 조건부** — `_SHADOW_COLUMN_GRANTS`와
+   `_LEGACY_GEOM_GRANTS`가 겨누는 컬럼(`feature_areas.feature_uuid`,
+   `feature_routes.geom`)은 head에 없다(실측). `_CURATION_CANDIDATE_READ_ACL`과
+   `_maybe_conditional`의 조건은 반대로 항상 참이다. 넷 다 head에서 무연산이므로
+   지우는 것은 행동 변화가 없다. 별도 커밋.
+
 ## 2026-09-20 (2) — PR #1257 머지 완료, prod 배포가 pinned-rebuild journal에 고착 (outage 진행 중)
 
 **다음 한 작업: PinVi에 실제 커밋 하나를 올려 새 pinset을 만들고 `chain17`을 다시

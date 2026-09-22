@@ -9,30 +9,25 @@
 `('feature_routes', 'geom')`을 계속 가리킨다. 이 저장소의 어떤 검사도 그것을 보지
 않았고, 레지스트리에서 SQL을 유도하는 코드가 아직 없어 **조용했다**.
 
-## 왜 마이그레이션이 고치지 않는가
+## 왜 아직 고쳐지지 않았는가
 
-고칠 수 없기 때문이다. `alembic/baseline/application-seed.sql`이 이 표의 전 행을
-`to_jsonb(row) - ['created_at','updated_at']`로 해시해 **rev 300 시점 값으로
-봉인**하고, 배포 허가 사슬 세 곳이 그 값을 게이트로 쓴다
-(`docker/application-schema-fresh-300.py`,
-`docker/application-schema-fresh-finalize.py`,
-`docker/application-schema-final-permit.py`).
+**종전에는 고칠 수 없었다.** seed 영수증이 이 표의 전 행을
+`to_jsonb(row) - ['created_at','updated_at']`로 해시해 rev 300 시점 값으로 봉인했고,
+배포 허가 사슬 세 곳이 그 해시를 게이트로 썼다. `target_relation`이 그 해시에 들어가는
+컬럼이라, 행을 고치면 배포가 seed 영수증 불일치로 멎었다(2026-09-20 실측:
+`fresh finalize seed receipt does not match baseline`). 봉인값을 다시 뜨려면 살아 있는
+격리 0236 컨테이너가 필요했는데 그것이 막혀 있었다.
 
-`target_relation`은 그 해시에 들어가는 컬럼이다. 즉 마이그레이션이 이 행을 고치면
-**fresh 300 배포가 seed 영수증 불일치로 멎는다**(2026-09-20 실측:
-`fresh finalize seed receipt does not match baseline`). 봉인값을 다시 뜨려면
-`build-baseline.sh`가 살아 있는 격리 0236 컨테이너를 요구하는데 그것이 막혀 있다.
-
-`_sealed_destination_catalog`는 catalog 쪽에서 같은 문제를 이미 겪고
-"head 너머에서는 봉인값이 기대값이 아니다"로 풀었다. seed 쪽에는 그 처리가 없고,
-그것을 더하는 것은 배포 허가 사슬을 건드리는 별도 작업이다.
+**지금은 고칠 수 있다.** `400` 스쿼시가 그 영수증 사슬을 통째로 걷어냈고 seed는 평범한
+덤프가 됐다. 고치지 않고 두는 것은 그것이 seed **데이터** 결정이고 스쿼시의 범위가
+아니기 때문이다 — 행 하나를 지우는 일이지만 레지스트리 내용을 바꾸는 일이다.
 
 ## 그래서 이 검사는 **알려진 간극을 못 박는다**
 
 예외 목록을 두지 않는다. 예외는 조용히 늘어나고 검사를 갉아먹는다. 대신 이 간극을
-**단언**한다 — baseline을 다시 봉인해 레지스트리를 옮기는 순간 이 검사가 빨갛게
-되고, 그때 아래 `test_the_known_route_geometry_gap_is_still_exactly_one_row`를
-지우고 위 일반 검사에 `route.geom`을 되돌려 넣는다.
+**단언**한다 — 누가 그 행을 지우는 순간 이 검사가 빨갛게 되고, 그때 아래
+`test_the_known_route_geometry_gap_is_still_exactly_one_row`를 지우고 위 일반 검사에
+`route.geom`을 되돌려 넣는다.
 """
 
 from __future__ import annotations
@@ -43,8 +38,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
 
-#: baseline seed 영수증이 봉인돼 있어 312가 옮기지 못한 행. 이 집합이 커지면
-#: 그것은 새 간극이고, 아래 검사가 잡는다.
+#: 봉인 때문에 312가 옮기지 못했던 행. 봉인은 사라졌고 행은 남았다 — 이 집합이
+#: 커지면 그것은 새 간극이고, 아래 검사가 잡는다.
 _SEALED_STALE_FIELD_PATHS: frozenset[str] = frozenset({"route.geom"})
 
 

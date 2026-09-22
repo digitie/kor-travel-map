@@ -198,18 +198,12 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
         "ck_feature_creation_origins_actor": (
             "btrim(created_by_actor) <> '' AND char_length(created_by_actor) <= 200"
         ),
-        "ck_feature_creation_origins_roles": (
-            "(origin_kind = 'manual_admin' "
-            "AND invoker_role = 'ktm_feature_service' "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
-            "OR (origin_kind = 'manual_curation' "
-            "AND invoker_role = 'ktm_feature_service' "
-            "AND procedure_definer = 'ktm_curation_command_owner') "
-            "OR (origin_kind = 'manual_request' "
-            "AND invoker_role = 'ktm_feature_service' "
-            "AND procedure_definer = 'ktm_feature_request_procedure_owner')"
-        ),
     }
+    # `ck_feature_creation_origins_roles`는 없다. 그 CHECK는 `invoker_role`/
+    # `procedure_definer`가 어떤 role 이름인지를 검사했는데, 두 값은 SECURITY DEFINER
+    # procedure가 `session_user`/`current_user`에서 그대로 써넣는다 — DB가 쓴 값을 DB가
+    # 다시 확인하는 것이라 애플리케이션 실수를 잡지 못하고 role 이름이 바뀔 때만 터졌다.
+    # 열은 남는다: provenance 기록 자체는 쓸모가 있고, 검사만 없앴다.
 
     unique = _named_constraints(table, UniqueConstraint)
     assert {name: _column_names(constraint) for name, constraint in unique.items()} == {

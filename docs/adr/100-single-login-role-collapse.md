@@ -47,9 +47,11 @@ ADR-090은 Map의 DB LOGIN 경계를 세 축으로 나눴다: `ktm_feature_migra
    이후 이 둘은 항상 같은 `session_user`(`ktm_feature_service`)로 관측되므로, 이 구분은
    영구히 사라진다. 과거에 기록된 audit row의 구분은 보존되지만(그 시점엔 실제로 다른
    계정이었으므로), 통합 이후 신규 row는 이 축을 더 이상 제공하지 않는다.
-4. 변경은 `alembic/baseline/schema.sql`을 재생성하지 않고, 그 위에 얹는 새 migration
-   (`313_...`)의 `CREATE OR REPLACE FUNCTION`/`ALTER TABLE ... DROP/ADD CONSTRAINT`로
-   적용한다 — 300 이후 모든 migration(301~312)이 이미 쓰는 패턴과 동일하다. `schema.sql`은
+4. (ADR-101에서 superseded — `300`~`313`을 `400` 하나로 접으면서 `schema.sql`이
+   head 덤프로 다시 생성됐고 `build-baseline.sh`는 삭제됐다. 아래는 당시 결정의
+   기록이다.) 변경은 `alembic/baseline/schema.sql`을 재생성하지 않고, 그 위에 얹는
+   새 migration (`313_...`)의 `CREATE OR REPLACE FUNCTION`/`ALTER TABLE ... DROP/ADD
+   CONSTRAINT`로 적용한다 — 300 이후 모든 migration(301~312)이 이미 쓰는 패턴과 동일하다. `schema.sql`은
    `scripts/build-baseline.sh`가 격리된 0236 참조 DB에서 기계 생성하는 봉인 artifact이며,
    이번 변경은 그 artifact가 캡처한 **과거** 상태를 다시 만들 필요가 없는, 정상적인
    **전진(forward-only) 스키마 진화**다.

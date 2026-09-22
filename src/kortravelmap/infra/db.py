@@ -38,6 +38,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from kortravelmap.infra.application_schema_head import application_schema_head
+
 if TYPE_CHECKING:
     from pydantic import SecretStr
 
@@ -342,6 +344,26 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_read_public_features,
         has_table_privilege(session_user, 'ops.feature_override_field_paths', 'SELECT')
             AS can_read_feature_override_field_paths,
+        -- 이미지가 아는 head와 DB가 있는 head가 같은지 본다. 종전에는 Manager가
+        -- 서명한 final permit이 이 성질을 담당했고, 그것은 root 소유 mount와 봉인된
+        -- receipt 파일 다발을 요구했다. 성질 자체는 "runtime이 자기 이미지와 다른
+        -- 스키마의 DB에 붙지 않는다"이고, 그건 여기서 in-process로 잴 수 있다.
+        (
+            SELECT array_agg(applied.version_num::text ORDER BY applied.version_num)
+            FROM public.alembic_version AS applied
+        ) AS applied_alembic_heads,
+        -- runtime은 그 표를 **읽기만** 해야 한다. 쓰기까지 되면 스키마를 바꾸지 않고
+        -- head만 고쳐 위 검사를 통과시킬 수 있다. object 권한 검사는 inherited
+        -- 권한만 보므로(`INHERIT FALSE`인 schema owner 경유는 세지 않는다) 이 술어는
+        -- 통합 LOGIN에서도 여전히 갈린다.
+        has_table_privilege(session_user, 'public.alembic_version', 'SELECT')
+            AS can_read_alembic_version,
+        (
+            has_table_privilege(session_user, 'public.alembic_version', 'INSERT')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'UPDATE')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'DELETE')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'TRUNCATE')
+        ) AS can_write_alembic_version,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
         -- privilege inquiry is has_function_privilege even for a regprocedure.
         has_function_privilege(
@@ -536,6 +558,22 @@ def _runtime_db_privilege_problems(
         problems.append(f"session_user must be {expected_login!r}")
     if row.get("current_user") != row.get("session_user"):
         problems.append("session_user and current_user must be identical")
+
+    expected_heads = [application_schema_head()]
+    raw_heads = row.get("applied_alembic_heads")
+    # `array_agg`는 행이 없으면 NULL을 준다 — 그것과 빈 배열을 같게 다룬다. 카탈로그
+    # 행은 `Mapping[str, object]`로 들어오므로 형태를 여기서 좁힌다: 배열이 아닌 값이
+    # 오면 기대와 다르다는 것 자체가 문제다.
+    applied_heads = list(raw_heads) if isinstance(raw_heads, (list, tuple)) else []
+    if applied_heads != expected_heads:
+        problems.append(
+            f"applied Alembic head must be exactly {expected_heads!r} "
+            f"(observed {applied_heads!r})"
+        )
+    if not row.get("can_read_alembic_version"):
+        problems.append("runtime login must be able to read public.alembic_version")
+    if row.get("can_write_alembic_version"):
+        problems.append("runtime login must not be able to write public.alembic_version")
 
     # ADR-100: `has_schema_owner_membership`와 `can_set_schema_owner_role`은 이 집합에서
     # 빠졌다. 통합 전에는 migration만 `ktm_feature_migrator`로 돌았고 api/dagster LOGIN은

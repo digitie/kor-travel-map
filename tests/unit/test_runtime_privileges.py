@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from kortravelmap.infra import curation_candidate_repo
+from kortravelmap.infra import curation_candidate_repo, runtime_privileges
 from kortravelmap.infra.runtime_privileges import (
     _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
@@ -440,12 +440,25 @@ def test_an_absent_required_routine_fails_instead_of_being_skipped() -> None:
 
 
 @pytest.mark.unit
-def test_an_absent_optional_routine_skips_only_its_own_statement() -> None:
-    """`300` 시점에 없는 307/304 산물은 건너뛰되, 섞인 문장은 실패로 잡는다.
+def test_an_absent_optional_routine_skips_only_its_own_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """optional로 선언된 루틴은 자기 문장만 건너뛰고, 섞인 문장은 실패로 잡는다.
 
     문장 하나를 통째로 건너뛰면 같은 문장에 있던 present 루틴의 ACL이 **조용히**
     사라진다. 그것이 이 fence가 막는 형태다.
+
+    목록을 **주입한다.** `_OPTIONAL_ROUTINES`는 지금 비어 있다 — 조정기가 두 스키마
+    상태에서 돌던 시절의 산물이고 `400` 스쿼시가 그 시절을 끝냈다. 메커니즘은 남아
+    있으므로(다음 revision이 사이 상태를 만들면 다시 채워진다) 검사도 남기되, 목록의
+    **내용**에 기대지 않게 한다. 내용에 기대면 목록이 비는 날 이 검사가 함께 죽는다.
     """
+
+    monkeypatch.setattr(
+        runtime_privileges,
+        "_OPTIONAL_ROUTINES",
+        {"feature.reject_manual_feature_truncate": "future_revision"},
+    )
 
     assert (
         _render_acl_statement(

@@ -411,25 +411,15 @@ if [ "$api_profile" = "production" ]; then
     echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD" >&2
     exit 1
   fi
-  if ! /usr/local/bin/python -I \
-    /usr/local/bin/ktm-application-schema-final-permit verify-api; then
-    echo "production API requires a valid Docker Manager application final permit" >&2
-    exit 1
-  fi
 else
-# `300` image는 local-dev fresh DB 또는 raw `300`만 generic startup으로 처리한다. `0236`은
-# active graph 밖의 퇴역 revision이며 in-place stamp/upgrade를 지원하지 않는다.
+# 이 image는 빈 DB 또는 이 image가 아는 revision만 generic startup으로 처리한다.
+# 퇴역 lineage(`0200`~`0236`)는 archive이며 in-place stamp/upgrade를 지원하지 않는다.
 if ! current_raw="$(/usr/local/bin/python -I -m alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
-      if [ "$db_revision" = "0236_tvn41s_compaction_drained" ]; then
-        echo "the DB is at unsupported retired revision 0236; in-place transition is not available" >&2
-        echo "use only the approved destructive fresh rebuild path for application 300" >&2
-      else
-        echo "the DB Alembic revision is unsupported by the active 300-only image" >&2
-        echo "(raw revision: ${db_revision:-unknown}; no archive replay, downgrade, or manual version-table edit is supported)" >&2
-      fi
+      echo "the DB Alembic revision is unsupported by this image" >&2
+      echo "(raw revision: ${db_revision:-unknown}; no archive replay, downgrade, or manual version-table edit is supported)" >&2
       printf '%s\n' "$current_raw" >&2
       exit 1
       ;;

@@ -14,6 +14,7 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 import kortravelmap.infra.db as db_module
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import (
     _EXPECTED_RUNTIME_APPLICATION_PROCEDURES,
     _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS,
@@ -164,6 +165,11 @@ def _runtime_privilege_row(
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,
         "can_read_feature_override_field_paths": True,
+        # 이미지가 아는 head와 DB가 있는 head가 같아야 한다. Manager가 서명하던 final
+        # permit이 담당하던 성질이고, 지금은 이 preflight가 직접 잰다.
+        "applied_alembic_heads": [application_schema_head()],
+        "can_read_alembic_version": True,
+        "can_write_alembic_version": False,
         "can_execute_create_procedure": True,
         "can_execute_manual_create_procedure": True,
         "can_execute_transition_procedure": True,
@@ -194,6 +200,49 @@ def _runtime_privilege_row(
         "can_mutate_feature_override_registry_directly": False,
         "can_execute_audit_writer_directly": False,
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("applied_alembic_heads", [], "applied Alembic head must be exactly"),
+        ("applied_alembic_heads", ["399"], "applied Alembic head must be exactly"),
+        (
+            "applied_alembic_heads",
+            ["400", "401"],
+            "applied Alembic head must be exactly",
+        ),
+        (
+            "can_read_alembic_version",
+            False,
+            "must be able to read public.alembic_version",
+        ),
+        (
+            "can_write_alembic_version",
+            True,
+            "must not be able to write public.alembic_version",
+        ),
+    ],
+)
+def test_each_alembic_version_predicate_fails_on_its_own(
+    field: str, value: object, expected: str
+) -> None:
+    """이미지와 DB의 head가 어긋나면 런타임이 기동하지 않아야 한다.
+
+    종전에는 Manager가 서명한 final permit이 root 소유 mount와 봉인된 receipt
+    다발로 이 성질을 지켰다. 성질은 "runtime이 자기 이미지와 다른 스키마의 DB에
+    붙지 않는다" 하나이고, 그건 `public.alembic_version`을 직접 읽어 잴 수 있다.
+
+    세 술어를 **따로** 뒤집는다. 한꺼번에 뒤집으면 셋 중 하나만 살아 있어도 초록이다.
+    """
+
+    row = _runtime_privilege_row()
+    assert _runtime_db_privilege_problems(row, expected_login="ktm_feature_service") == []
+
+    row[field] = value
+    problems = _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
+    assert [problem for problem in problems if expected in problem], problems
 
 
 @pytest.mark.unit

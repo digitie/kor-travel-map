@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-101.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-102.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -114,6 +114,7 @@
 | ADR-098 | provider Feature identity는 `(dataset, kind, 자연키)`다 — source entity가 아니다 | [098-provider-feature-identity-axis.md](098-provider-feature-identity-axis.md) |
 | ADR-099 | causal seal은 행별 digest를 접는다 — 전 행 payload를 한 배열에 모으지 않는다 | [099-curation-seal-member-digest-fold.md](099-curation-seal-member-digest-fold.md) |
 | ADR-100 | DB LOGIN role를 3개(migrator/api_runtime/dagster_runtime)에서 1개(`ktm_feature_service`)로 통합한다 | [100-single-login-role-collapse.md](100-single-login-role-collapse.md) |
+| ADR-101 | `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다 | [101-single-baseline-revision-400.md](101-single-baseline-revision-400.md) |
 
 ## 새 ADR 작성 규약
 

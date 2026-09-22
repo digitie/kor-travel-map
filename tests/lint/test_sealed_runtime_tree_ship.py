@@ -2,12 +2,11 @@
 
 ## 왜 필요한가
 
-Manager pinned rebuild는 ``scripts/build-application-300-candidate.sh``로 candidate
-이미지를 봉인 검증한다. 그 게이트의 기대 manifest는 sealed Git archive의 runtime
-소스 트리(``src/kortravelmap``, ``packages/kor-travel-map-api/src/kortravelmap/api``)
-**전 파일**이고, 관측 manifest는 이미지 site-packages에서 ``.py``/``.json``/
-``py.typed``만 본다. 따라서 다음 두 클래스는 PR CI 전부 green인 채 **Manager
-rebuild 단계에서만** "installed runtime tree가 sealed Git archive와 다르다"로 터진다.
+wheel이 싣는 것과 runtime 트리에 있는 것이 갈리면, 그 차이는 PR CI 전부 green인 채
+**이미지를 만들 때만** 드러난다. 기대 대상은 runtime 소스 트리
+(``src/kortravelmap``, ``packages/kor-travel-map-api/src/kortravelmap/api``)의 전
+파일이고, 실제로 실리는 것은 package-data 선언이 정한다. 다음 두 클래스가 그렇게
+샌다.
 
 1. runtime 트리에 새 비-``.py`` 파일이 들어왔는데 package-data로 선언되지 않아
    wheel에 실리지 않는 경우.
@@ -55,11 +54,11 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # sealed 이미지 manifest가 관측하는 파일 집합 —
-# scripts/build-application-300-candidate.sh 의 image-side 필터와 동일해야 한다.
+# 이미지 site-packages에서 실제로 보이는 확장자와 동일해야 한다.
 _SEALED_MANIFEST_SUFFIXES = frozenset({".py", ".json"})
 
 # (pyproject.toml, runtime 트리 root, root 패키지 이름) —
-# scripts/build-application-300-candidate.sh 의 source-side 트리 목록과 동일해야 한다.
+# wheel이 실어야 하는 runtime 소스 트리 목록.
 _RUNTIME_TREES: tuple[tuple[Path, Path, str], ...] = (
     (
         PROJECT_ROOT / "pyproject.toml",
@@ -83,7 +82,7 @@ def _tracked_runtime_files(base: Path) -> list[Path]:
     """sealed Git archive가 보게 될 파일만 — 추적·비-symlink·실존."""
     moved_hint = (
         f"runtime 트리 root가 없거나 symlink다: {base} — 트리를 옮겼다면 "
-        "scripts/build-application-300-candidate.sh와 이 lint의 _RUNTIME_TREES를 "
+        "이 lint의 _RUNTIME_TREES와 package-data 선언을 "
         "함께 바꿔야 한다."
     )
     assert base.is_dir(), moved_hint
@@ -180,7 +179,7 @@ def test_runtime_tree_files_are_sealed_manifest_visible() -> None:
         "sealed 이미지 manifest는 .py/.json/py.typed만 관측한다. 다음 파일은 "
         "이미지 쪽에서 보이지 않아 pinned rebuild가 'installed runtime tree가 "
         "sealed Git archive와 다르다'로 실패한다 — runtime 트리 밖으로 옮기거나 "
-        "scripts/build-application-300-candidate.sh 필터와 함께 바꿔야 한다: "
+        "이미지 쪽 확장자 필터와 함께 바꿔야 한다: "
         f"{invisible}"
     )
 

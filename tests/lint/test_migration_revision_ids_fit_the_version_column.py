@@ -32,7 +32,6 @@ _VERSIONS = _ROOT / "alembic" / "versions"
 #: `alembic_version.version_num`의 폭을 선언하는 자리들. 하나라도 찾으면 그 값을 쓴다.
 _WIDTH_SOURCES = (
     _ROOT / "tests" / "integration" / "test_alembic_metadata_consistency.py",
-    _ROOT / "docker" / "transition-application-schema-0236-to-300.py",
 )
 
 _WIDTH_PATTERN = re.compile(r"version_num\s+varchar\((\d+)\)", re.IGNORECASE)

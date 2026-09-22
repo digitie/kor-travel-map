@@ -42,7 +42,7 @@ services:
       KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
 
-  db-application-schema-fresh-300:
+  db-application-schema-fresh:
     network_mode: host
 
   rustfs-perms:

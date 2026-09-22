@@ -73,37 +73,23 @@ RUN apt-get update \
     && chown appuser:appuser /opt/dagster/state
 
 COPY --from=builder /install /usr/local
-# Map application Alembic은 API image만 소유한다. Dagster metadata storage는 이
-# image에 설치된 Dagster package의 migration graph가 정본이며, one-shot command가
-# `dagster instance migrate` 뒤 strict version 검증을 수행한다.
-# Dagster는 Map application DB의 direct consumer다. API만 final permit을 확인하면
-# webserver/daemon이 permit 없는 DB에 직접 연결할 수 있으므로, immutable baseline receipt와
-# verifier를 same candidate image에 root-owned로 넣는다. Alembic graph 자체는 계속 API
-# image만 소유한다.
-COPY --chown=root:root alembic/baseline ./alembic/baseline
+# Map application Alembic graph와 baseline sidecar는 API image만 소유한다. Dagster
+# 런타임은 application 스키마를 만들지 않고, "이 DB가 application DB인가"는 설치된
+# package의 migration graph JSON에서 읽는다(`dagster-storage-migrate.py`).
+#
+# Dagster metadata storage는 이 image에 설치된 Dagster package의 migration graph가
+# 정본이며, one-shot command가 `dagster instance migrate` 뒤 strict version 검증을
+# 수행한다.
 COPY --chown=root:root docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
 COPY --chown=root:root docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
 COPY --chown=root:root docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
-COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
-COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
 RUN chown -R root:root /app /opt/dagster/dagster_home \
         /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
-        /usr/local/bin/ktm-application-schema-final-permit \
-        /usr/local/bin/ktm-application-schema-contract \
     && chmod 0555 /app /opt/dagster /opt/dagster/dagster_home \
     && chmod 0444 /opt/dagster/dagster_home/dagster.yaml \
-    && find /app/alembic -type d -exec chmod 0555 {} + \
-    && find /app/alembic -type f -exec chmod 0444 {} + \
-    && chmod 0555 /usr/local/bin/ktm-application-schema-final-permit \
-        /usr/local/bin/ktm-application-schema-contract \
     && chmod 0555 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
     && su -s /bin/sh -c 'test ! -w /app \
-        && test ! -w /app/alembic \
-        && test ! -w /app/alembic/baseline \
-        && ! mv /app/alembic/baseline /app/alembic/replaced 2>/dev/null \
         && test ! -w /usr/local/bin/dagster-entrypoint.sh \
-        && test ! -w /usr/local/bin/ktm-application-schema-final-permit \
-        && test ! -w /usr/local/bin/ktm-application-schema-contract \
         && test ! -w /opt/dagster/dagster_home/dagster.yaml' appuser
 
 USER appuser

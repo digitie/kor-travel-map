@@ -60,40 +60,24 @@ COPY --chown=root:root alembic/env.py alembic/script.py.mako ./alembic/
 COPY --chown=root:root alembic/baseline ./alembic/baseline
 COPY --chown=root:root alembic/versions ./alembic/versions
 COPY --chown=root:root docker/api-entrypoint.sh ./docker/api-entrypoint.sh
-COPY --chown=root:root docker/application-schema-db-contract.py ./docker/application-schema-db-contract.py
-COPY --chown=root:root docker/application-schema-fresh-300.py /usr/local/bin/ktm-application-schema-fresh-300
-COPY --chown=root:root docker/application-schema-fresh-finalize.py /usr/local/bin/ktm-application-schema-fresh-finalize
-COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
-COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
 COPY --chown=root:root docker/application-schema-head.py /usr/local/bin/ktm-application-schema
 COPY --chown=root:root resources/curations ./resources/curations
 
 RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.sh \
-    /app/docker/application-schema-db-contract.py \
     /app/resources/curations \
-    /usr/local/bin/ktm-application-schema-fresh-300 \
-    /usr/local/bin/ktm-application-schema-fresh-finalize \
-    /usr/local/bin/ktm-application-schema-final-permit \
-    /usr/local/bin/ktm-application-schema-contract \
     && find /app/alembic -type d -exec chmod 0555 {} + \
     && find /app/alembic -type f -exec chmod 0444 {} + \
     && find /app/resources/curations -type d -exec chmod 0555 {} + \
     && find /app/resources/curations -type f -exec chmod 0444 {} + \
     && chmod 0444 /app/alembic.ini \
-    && chmod 0444 /app/docker/application-schema-db-contract.py \
     && chmod 0555 /app /app/docker /usr/local/bin/ktm-application-schema \
-    && chmod 0555 /usr/local/bin/ktm-application-schema-fresh-300 \
-        /usr/local/bin/ktm-application-schema-fresh-finalize \
-        /usr/local/bin/ktm-application-schema-final-permit \
-        /usr/local/bin/ktm-application-schema-contract \
-        ./docker/api-entrypoint.sh \
+    && chmod 0555 ./docker/api-entrypoint.sh \
     && su -s /bin/sh -c 'test ! -w /app \
         && test ! -w /app/docker/api-entrypoint.sh \
         && test ! -w /app/alembic/baseline \
         && test ! -w /app/resources/curations \
         && ! mv /app/resources/curations/manifest.json /app/resources/curations/replaced.json \
-        && test ! -w /app/docker/application-schema-db-contract.py \
-        && test ! -w /usr/local/bin/ktm-application-schema-final-permit' appuser
+        && test ! -w /usr/local/bin/ktm-application-schema' appuser
 
 USER appuser
 

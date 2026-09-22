@@ -30,7 +30,7 @@ from dagster._core.storage.sql import ALEMBIC_SCRIPTS_LOCATION
 from sqlalchemy import create_engine, text
 
 #: application active graph의 유일한 root. head와 달리 움직이지 않는다.
-_BASELINE_ROOT_REVISION: Final = "300"
+_BASELINE_ROOT_REVISION: Final = "400"
 
 _DAGSTER_HOME_ENV: Final = "DAGSTER_HOME"
 _DAGSTER_PG_URL_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PG_URL"

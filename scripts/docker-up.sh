@@ -259,7 +259,7 @@ fi
 
 compose_files=(-f docker-compose.yml)
 # fresh baseline 준비는 normal launcher의 dependency가 아니다. 빈 dedicated DB는
-# 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh-300`으로
+# 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh`으로
 # application role bootstrap→metadata DB/permit→restricted root migration 연속 one-shot을
 # 끝내고, 이 launcher는 검증된 `300` DB의 restart만 수행한다.
 services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)

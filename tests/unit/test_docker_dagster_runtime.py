@@ -202,7 +202,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         "api",
         "dagster",
         "dagster-daemon",
-        "db-application-schema-fresh-300",
+        "db-application-schema-fresh",
     )
     bootstrap_dsn_services = (
         "dagster-db-init",
@@ -846,24 +846,25 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
         "service_completed_successfully"
     )
-    fresh_migration = services["db-application-schema-fresh-300"]
+    fresh_migration = services["db-application-schema-fresh"]
     assert fresh_migration["profiles"] == ["fresh-init"]
     assert "db-role-bootstrap-300" not in fresh_migration["depends_on"]
     assert fresh_migration["depends_on"]["dagster-db-init-fresh-300"][
         "condition"
     ] == "service_completed_successfully"
-    assert fresh_migration["entrypoint"] == [
-        "/usr/local/bin/python",
-        "-I",
-        "/usr/local/bin/ktm-application-schema-fresh-300",
-        "migrate",
-    ]
+    # 전용 one-shot(1,422줄)이 receipt를 대조하던 자리다. 봉인이 사라진 뒤 남는 일은
+    # API entrypoint의 local-dev 분기와 같아서 같은 두 명령으로 되돌렸다.
+    assert fresh_migration["entrypoint"] == ["/bin/sh", "-c"]
+    command = "\n".join(fresh_migration["command"])
+    assert "python -I -m alembic upgrade head" in command
+    assert "python -I -m kortravelmap.infra.runtime_privileges" in command
     # ADR-100: migration DSN과 runtime DSN이 한 이름이 됐으므로 이 one-shot이 받는
     # DB 입력은 정확히 하나다. 두 개로 되돌아오면(= 어느 쪽이든 per-role 이름이
     # 부활하면) 이 정확 일치가 깨진다.
     assert set(fresh_migration["environment"]) == {
         "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE",
         "KOR_TRAVEL_MAP_PG_DSN",
+        "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
     }
     assert fresh_migration["environment"][
         "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE"
@@ -887,7 +888,7 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     assert "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-baseline-300" in phase_script
 
     launcher = _script("scripts/docker-up.sh")
-    assert "--profile fresh-init run --rm db-application-schema-fresh-300" in launcher
+    assert "--profile fresh-init run --rm db-application-schema-fresh" in launcher
     assert "services=(postgres dagster-db-init db-role-bootstrap-300" not in launcher
     assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" in launcher
     assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in launcher
@@ -905,10 +906,6 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
         "postgresql://kor_travel_map:$postgres_password" not in fresh_acceptance
     )
     assert (
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME="
-        "$MAP_PROJECT-application-final-permit" in fresh_acceptance
-    )
-    assert (
         "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME="
         "$MAP_PROJECT-dagster-storage-permit" in fresh_acceptance
     )
@@ -921,13 +918,18 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     dockerfile = _script("docker/api.Dockerfile")
     assert "transition-application-schema-0236-to-300.py" not in dockerfile
     assert "ktm-application-schema-handoff" not in dockerfile
-    assert "application-schema-db-contract.py" in dockerfile
-    assert "application-schema-fresh-300.py" in dockerfile
-    assert "ktm-application-schema-fresh-300" in dockerfile
-    assert "application-schema-fresh-finalize.py" in dockerfile
-    assert "ktm-application-schema-fresh-finalize" in dockerfile
-    assert "application-schema-final-permit.py" in dockerfile
-    assert "ktm-application-schema-final-permit" in dockerfile
+    # 봉인된 배포 permit 다섯은 이미지에서 빠졌다. 그것들이 지키던 "런타임이 자기
+    # 이미지와 다른 스키마의 DB에 붙지 않는다"는 `db.py`의 런타임 preflight가 잰다.
+    for removed in (
+        "application-schema-db-contract.py",
+        "application-schema-fresh-300.py",
+        "application-schema-fresh-finalize.py",
+        "application-schema-final-permit.py",
+        "application-schema-contract.py",
+    ):
+        assert removed not in dockerfile
+    assert "application-schema-head.py" in dockerfile
+    assert "ktm-application-schema" in dockerfile
     for removed_image_path in (
         "migrate-to-m01-bootstrap-boundary.sh",
         "migrate-to-m05-bootstrap-boundary.sh",
@@ -3379,7 +3381,7 @@ def test_api_container_rejects_invalid_ops_principal_pair(
 def _entrypoint_stub_path(tmp_path: Path) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("alembic", "python", "ktm-application-schema-final-permit"):
+    for name in ("alembic", "python"):
         command = bin_dir / name
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
@@ -3407,7 +3409,6 @@ def _migration_stub_path(
     image_head: str,
     heads_script: str | None = None,
     current_script: str | None = None,
-    final_permit_script: str = "exit 0",
 ) -> tuple[str, Path]:
     """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
 
@@ -3435,11 +3436,6 @@ def _migration_stub_path(
     python = bin_dir / "python"
     python.write_text(
         "#!/bin/sh\n"
-        "if [ \"${1:-}\" = -I ] "
-        "&& [ \"${2##*/}\" = ktm-application-schema-final-permit ]; then\n"
-        "  shift 2\n"
-        "  exec \"$(dirname \"$0\")/ktm-application-schema-final-permit\" \"$@\"\n"
-        "fi\n"
         "if [ \"${1:-}\" = -I ] && [ \"${2:-}\" = -m ] "
         "&& [ \"${3:-}\" = alembic ]; then\n"
         "  shift 3\n"
@@ -3449,12 +3445,6 @@ def _migration_stub_path(
         encoding="utf-8",
     )
     python.chmod(0o755)
-    final_permit = bin_dir / "ktm-application-schema-final-permit"
-    final_permit.write_text(
-        f"#!/bin/sh\n{final_permit_script}\n",
-        encoding="utf-8",
-    )
-    final_permit.chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}", marker
 
 
@@ -3496,7 +3486,7 @@ def _image_layout_300_only(tmp_path: Path) -> Path:
     (image_root / "docker" / "api-entrypoint.sh").write_bytes(
         (ROOT / "docker" / "api-entrypoint.sh").read_bytes()
     )
-    (image_root / "alembic" / "versions" / "300_schema_baseline.py").touch()
+    (image_root / "alembic" / "versions" / "400_schema_baseline.py").touch()
     return image_root
 
 
@@ -3605,62 +3595,13 @@ def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
-def test_production_api_refuses_failed_final_permit_without_generic_upgrade(
-    tmp_path: Path,
-) -> None:
-    """production DB 상태 판정은 final permit에 맡기고 generic mutation은 하지 않는다."""
-
-    path, marker = _migration_stub_path(
-        tmp_path,
-        image_head="300",
-        current_script="true",
-        final_permit_script="exit 1",
-    )
-    result = _run_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_API_PROFILE": "production",
-            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
-            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
-        },
-    )
-
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "production blank DB에서 generic upgrade가 실행됐다."
-    assert "requires a valid Docker Manager application final permit" in result.stderr
-
-
-@pytest.mark.unit
-def test_production_api_with_final_permit_never_runs_generic_upgrade(tmp_path: Path) -> None:
-    """final permit + exact raw 300은 runtime start만 허용하고 upgrade는 하지 않는다."""
-
-    path, marker = _migration_stub_path(
-        tmp_path,
-        image_head="300",
-        current_script="echo '300 (head)'",
-    )
-    result = _run_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_API_PROFILE": "production",
-            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
-            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
-        },
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert not marker.exists(), "production final permit 경로에서 generic upgrade가 실행됐다."
-
-
-@pytest.mark.unit
 @pytest.mark.parametrize(
     ("api_profile", "migration_label", "expected_migration_role_state"),
     [
-        ("production", "final-permit", "unset"),
+        # production의 migration 단계 child는 이제 `alembic heads` 비교 하나다.
+        # 그 gate는 profile 분기의 `unset` **직후**에 돌므로, 이 검사가 재는 성질은
+        # 그대로다 — 스위치는 걷히고 DSN은 남는다.
+        ("production", "alembic-heads", "unset"),
         ("local-dev", "alembic-upgrade", "set"),
     ],
 )
@@ -3681,8 +3622,8 @@ def test_api_entrypoint_keeps_the_single_dsn_but_strips_the_schema_owner_switch(
     같은 자리에 살아 있는 구분은 두 가지다.
 
     1. `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE`은 profile로 갈린다. production은
-       migration을 소유하지 않으므로(Manager one-shot 소유) 그 스위치를 걷어내고,
-       local-dev convenience migration만 켠다. host env가 `true`를 주입해도
+       migration을 소유하지 않으므로(별도 fresh-init one-shot 소유) 그 스위치를
+       걷어내고, local-dev convenience migration만 켠다. host env가 `true`를 주입해도
        production migration 단계 child에는 전달되지 않아야 한다.
     2. 그 스위치는 exec 전에 **항상** 걷지만 DSN은 **남겨야 한다.** 종전 entrypoint는
        exec 전에 per-role DSN 두 개를 unset했다. 그 unset을 통합된 이름으로 그대로
@@ -3722,8 +3663,6 @@ def test_api_entrypoint_keeps_the_single_dsn_but_strips_the_schema_owner_switch(
         'if [ "${1:-}" = "-" ]; then\n'
         "  label=settings-preflight\n"
         "  cat >/dev/null\n"
-        'elif [ "${1##*/}" = "ktm-application-schema-final-permit" ]; then\n'
-        "  label=final-permit\n"
         'elif [ "${1:-}" = "-m" ] && [ "${2:-}" = "uvicorn" ]; then\n'
         "  label=uvicorn\n"
         'elif [ "${1:-}" = "-m" ]; then\n'
@@ -3817,7 +3756,7 @@ def test_api_container_fails_fast_for_unknown_active_graph_revision(tmp_path: Pa
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
-    assert "unsupported by the active 300-only image" in result.stderr
+    assert "unsupported by this image" in result.stderr
     assert "Can't locate revision" in result.stderr, (
         "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
     )
@@ -3841,8 +3780,11 @@ def test_api_container_rejects_retired_0236_and_requires_fresh_rebuild(
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "퇴역 revision인데 upgrade가 실행됐다."
-    assert "unsupported retired revision 0236" in result.stderr
-    assert "approved destructive fresh rebuild" in result.stderr
+    # `0236` 전용 안내는 없어졌다. 그 분기는 in-place 이관 경로가 있던 시절의 것이고,
+    # 지금은 알 수 없는 revision을 전부 한 가지로 거절한다 — alembic 원문을 그대로
+    # 실어 주므로 운영자는 어느 revision인지 여전히 본다.
+    assert "unsupported by this image" in result.stderr
+    assert "0236_tvn41s_compaction_drained" in result.stderr
     assert "ktm-application-schema-handoff" not in result.stderr
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
 
@@ -3866,7 +3808,7 @@ def test_api_image_with_only_300_root_rejects_archived_revision(
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
-    assert "unsupported by the active 300-only image" in result.stderr
+    assert "unsupported by this image" in result.stderr
     assert not (image_root / "alembic" / "retired_versions").exists()
 
 
@@ -4407,8 +4349,6 @@ def test_dagster_entrypoint_rejects_application_privileged_keys_even_when_empty(
         # application DSN이 이 one-shot에 들어오는 통로는 이제 하나뿐이고
         # 아래 row가 정확히 그것을 잰다.
         "KOR_TRAVEL_MAP_PG_DSN",
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
     ],
 )
 @pytest.mark.parametrize("profile", ["production", "local-dev"])
@@ -4431,7 +4371,7 @@ def test_dagster_storage_entrypoint_rejects_application_inputs_even_when_empty(
 
     assert result.returncode != 0
     assert (
-        "Dagster metadata migration forbids application runtime/final-permit inputs"
+        "Dagster metadata migration forbids application runtime inputs"
         in result.stderr
     )
 
@@ -4518,23 +4458,20 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
 
 def _dagster_production_runtime_stub_path(
     tmp_path: Path,
-) -> tuple[str, Path, Path, Path]:
-    """production permit argv와 실제 runtime DSN을 함께 기록하는 PATH다."""
+) -> tuple[str, Path, Path]:
+    """metadata identity permit argv와 실제 runtime DSN을 함께 기록하는 PATH다.
+
+    application final permit 축은 없어졌다(ADR-101). 남은 것은 Dagster **metadata**
+    identity permit이고, 그것은 이 변경과 무관하게 그대로다.
+    """
 
     bin_dir = tmp_path / "dagster-production-bin"
     bin_dir.mkdir()
-    permit_marker = tmp_path / "dagster-final-permit-argv"
     storage_permit_marker = tmp_path / "dagster-storage-permit-argv"
     runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
-    final_permit = bin_dir / "ktm-application-schema-final-permit"
     storage_permit = bin_dir / "ktm-dagster-storage"
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
-        f"if [ \"${{1:-}}\" = \"-I\" ] "
-        f"&& [ \"${{2:-}}\" = \"{final_permit}\" ]; then\n"
-        "  shift 2\n"
-        f"  exec '{final_permit}' \"$@\"\n"
-        "fi\n"
         "if [ \"${1:-}\" = \"-I\" ]; then\n"
         f"  case \"${{2:-}}\" in '{bin_dir}'/*) exec '{sys.executable}' \"$@\" ;; esac\n"
         "fi\n"
@@ -4555,16 +4492,6 @@ def _dagster_production_runtime_stub_path(
         "exit 70\n",
         encoding="utf-8",
     )
-    final_permit.write_text(
-        "#!/bin/sh\n"
-        "if [ \"$#\" -ne 1 ] || [ \"${1:-}\" != \"verify-dagster\" ]; then\n"
-        "  echo unexpected-final-permit-argv >&2\n"
-        "  exit 72\n"
-        "fi\n"
-        f"printf '%s\\n' \"$1\" > '{permit_marker}'\n"
-        "exit 0\n",
-        encoding="utf-8",
-    )
     storage_permit.write_text(
         f"#!{sys.executable}\n"
         "import pathlib\n"
@@ -4583,11 +4510,9 @@ def _dagster_production_runtime_stub_path(
         )
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
-    final_permit.chmod(0o755)
     storage_permit.chmod(0o755)
     return (
         f"{bin_dir}:{os.environ['PATH']}",
-        permit_marker,
         storage_permit_marker,
         runtime_dsn_marker,
     )
@@ -4668,11 +4593,15 @@ def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
 
     같은 자리에 남은 성질은 fail-closed 요구다 — production runtime은
     `${KOR_TRAVEL_MAP_PG_DSN:?...}`로 **미설정과 빈 값 둘 다** 거부하고, 그 거부는
-    application final permit 검증과 실제 Dagster 기동 **앞**에서 일어난다.
-    `:?`가 `:-`로 바뀌거나 사라지면 이 검사가 빨개진다.
+    실제 Dagster 기동 **앞**에서 일어난다. `:?`가 `:-`로 바뀌거나 사라지면 이 검사가
+    빨개진다.
+
+    증인은 "Dagster가 뜨지 않았다" 하나다. metadata identity permit은 증인이 될 수
+    없다 — 그것은 application DSN 검사보다 **먼저** 도는 것이 설계이므로, 그것이
+    돌았다는 사실은 이 검사에 대해 아무 말도 하지 않는다.
     """
 
-    path, permit_marker, _storage_permit_marker, _runtime_dsn_marker = (
+    path, _storage_permit_marker, _runtime_dsn_marker = (
         _dagster_production_runtime_stub_path(tmp_path)
     )
     environment = {
@@ -4685,10 +4614,9 @@ def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
 
     assert result.returncode != 0
     assert "KOR_TRAVEL_MAP_PG_DSN is required in production" in result.stderr
-    assert not permit_marker.exists(), (
-        "DSN 없이도 application final permit 검증이 실행됐다"
+    assert "-started" not in result.stdout, (
+        "DSN이 없는데 Dagster 프로세스가 떴다 — 거부가 기동보다 앞이 아니다"
     )
-    assert "-started" not in result.stdout
 
 
 @pytest.mark.unit
@@ -4718,7 +4646,7 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
 ) -> None:
     """같은 DSN으로 verifier와 Dagster runtime을 순서대로 결박한다."""
 
-    path, permit_marker, storage_permit_marker, runtime_dsn_marker = (
+    path, storage_permit_marker, runtime_dsn_marker = (
         _dagster_production_runtime_stub_path(tmp_path)
     )
     verified_dsn = "postgresql://dagster@example.invalid/verified"
@@ -4735,7 +4663,6 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
     )
 
     assert result.returncode == 0, result.stderr
-    assert permit_marker.read_text(encoding="utf-8") == "verify-dagster\n"
     assert storage_permit_marker.read_text(encoding="utf-8") == "verify-identity\n"
     assert runtime_dsn_marker.read_text(encoding="utf-8") == verified_dsn
 
@@ -5437,18 +5364,16 @@ def test_api_image_ships_static_application_schema_head_command() -> None:
         "docker/application-schema-head.py /usr/local/bin/ktm-application-schema" in api
     )
     assert "/usr/local/bin/ktm-application-schema" in api
-    assert (
-        "docker/application-schema-fresh-300.py "
-        "/usr/local/bin/ktm-application-schema-fresh-300" in api
-    )
-    assert (
-        "docker/application-schema-final-permit.py "
-        "/usr/local/bin/ktm-application-schema-final-permit" in api
-    )
-    assert (
-        "docker/application-schema-contract.py "
-        "/usr/local/bin/ktm-application-schema-contract" in api
-    )
+    # 봉인된 배포 one-shot 셋은 이미지에서 빠졌다. head attest command만 남는다 —
+    # 그것은 sidecar를 읽지 않고 설치된 graph JSON만 읽는다.
+    for removed in (
+        "application-schema-fresh-300.py",
+        "application-schema-fresh-finalize.py",
+        "application-schema-final-permit.py",
+        "application-schema-contract.py",
+        "application-schema-db-contract.py",
+    ):
+        assert removed not in api
     assert "_application_migration_graph.json" in pyproject["tool"]["setuptools"][
         "package-data"
     ]["kortravelmap"]
@@ -5548,7 +5473,7 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     assert fresh_metadata["environment"]["KOR_TRAVEL_MAP_DAGSTER_PROFILE"] == (
         "local-dev"
     )
-    fresh_application = services["db-application-schema-fresh-300"]
+    fresh_application = services["db-application-schema-fresh"]
     assert "db-role-bootstrap-300" not in fresh_application["depends_on"]
     assert fresh_application["depends_on"]["dagster-db-init-fresh-300"][
         "condition"
@@ -5641,7 +5566,7 @@ def test_fresh_profile_resolves_metadata_permit_before_application_schema(
     assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
         "service_completed_successfully"
     )
-    assert services["db-application-schema-fresh-300"]["depends_on"][
+    assert services["db-application-schema-fresh"]["depends_on"][
         "dagster-db-init-fresh-300"
     ]["condition"] == "service_completed_successfully"
 
@@ -6027,7 +5952,7 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         assert service["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] == (
             host_metadata_dsn
         )
-    assert services["db-application-schema-fresh-300"]["network_mode"] == "host"
+    assert services["db-application-schema-fresh"]["network_mode"] == "host"
 
 
 @pytest.mark.unit

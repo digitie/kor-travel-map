@@ -13,17 +13,10 @@ asyncpg driver로 정규화 후 `AsyncEngine`을 만들어 마이그레이션 �
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import os
-import re
-import stat
 from logging.config import fileConfig
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from alembic.runtime.migration import StampStep
-from alembic.script import ScriptDirectory
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -68,224 +61,26 @@ else:
 target_metadata = metadata
 
 _USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
-_BASELINE_300_REVISION = "300"
-_BASELINE_300_HANDOFF_SOURCE = "0236_tvn41s_compaction_drained"
-_BASELINE_300_HANDOFF_TAG = "application-schema-0236-to-300"
-_BASELINE_300_HANDOFF_CAPABILITY_ENV = (
-    "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_CAPABILITY_PATH"
-)
-_BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY = Path(
-    "/run/kor-travel-map-application-handoff"
-)
-_BASELINE_300_HANDOFF_CAPABILITY_FILE = (
-    _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY / "capability"
-)
-_BASELINE_300_DIR = Path(__file__).resolve().parent / "baseline"
+_BASELINE_REVISION = "400"
 
 
-def _verify_fresh_300_destination_facet(connection: Connection) -> None:
-    """Alembic version row 기록 뒤 outer transaction commit 전에 destination을 봉인한다."""
+def _refuse_downgrade() -> None:
+    """`alembic downgrade`를 해석 전에 거부한다.
 
-    reference_raw = (_BASELINE_300_DIR / "application-reference.json").read_bytes()
-    reference_digest_raw = (
-        _BASELINE_300_DIR / "application-reference.sha256"
-    ).read_bytes()
-    reference_digest = reference_digest_raw.decode("ascii").strip()
-    if (
-        reference_digest_raw != f"{reference_digest}\n".encode("ascii")
-        or hashlib.sha256(reference_raw).hexdigest() != reference_digest
-    ):
-        raise RuntimeError("fresh 300 destination reference manifest is invalid")
-    reference = json.loads(reference_raw)
-    artifacts = reference.get("artifacts")
-    if not isinstance(artifacts, dict):
-        raise RuntimeError("fresh 300 destination artifact map is invalid")
-    sql_raw = (
-        _BASELINE_300_DIR / "application-destination-alembic-version.sql"
-    ).read_bytes()
-    if hashlib.sha256(sql_raw).hexdigest() != artifacts.get(
-        "destination_alembic_version_contract_sql_sha256"
-    ):
-        raise RuntimeError("fresh 300 destination facet SQL is invalid")
-    rows = connection.execute(text(sql_raw.decode("utf-8")))
-    digest = hashlib.sha256()
-    for item in rows.scalars():
-        digest.update(str(item).encode("utf-8"))
-        digest.update(b"\n")
-    if digest.hexdigest() != artifacts.get(
-        "destination_alembic_version_contract_sha256"
-    ):
-        raise RuntimeError("fresh 300 destination facet does not match immutable reference")
-_BASELINE_300_HANDOFF_CAPABILITY_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+    revision 자신의 ``downgrade()``도 거부하지만, 그건 Alembic이 대상 revision을
+    해석한 **뒤**다. 여기서 먼저 서면 "무엇으로 내려갈지"를 따지기 전에 끝난다.
 
-
-def _require_application_handoff_capability() -> None:
-    """root helper가 만든 one-shot capability 없이는 metadata stamp를 금지한다.
-
-    ``Config.attributes``나 Alembic tag는 호출자가 자유롭게 만들 수 있으므로 권한
-    증명이 아니다. Docker Manager가 root user로 실행한 one-shot helper만 `/run`의
-    root-owned private directory에 capability를 만들고, helper가 끝나면 이를 제거한다.
-    API/Dagster의 non-root runtime과 generic Alembic 호출은 이 파일을 만들거나 읽을 수
-    없어야 한다.
+    예전에는 이 자리에 `0236 → 300` one-shot handoff(capability 파일·stamp
+    콜백·destination facet 봉인)가 함께 있었다. 그 이관은 끝났고 `0236` lineage는
+    retired archive이므로 다리를 놓을 출발점 자체가 없다.
     """
 
-    configured = os.environ.get(_BASELINE_300_HANDOFF_CAPABILITY_ENV)
-    if configured != str(_BASELINE_300_HANDOFF_CAPABILITY_FILE):
+    migration_fn = context.get_context().opts.get("fn")
+    if getattr(migration_fn, "__name__", None) == "downgrade":
         raise RuntimeError(
-            "0236-to-300 handoff requires the root-owned one-shot capability"
+            f"{_BASELINE_REVISION}_schema_baseline is forward-only; application "
+            "schema downgrade is unsupported"
         )
-    try:
-        parent = _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY.lstat()
-        if (
-            not stat.S_ISDIR(parent.st_mode)
-            or parent.st_uid != 0
-            or stat.S_IMODE(parent.st_mode) != 0o700
-            or parent.st_nlink != 2
-        ):
-            raise PermissionError("handoff capability directory is not trusted")
-        metadata = _BASELINE_300_HANDOFF_CAPABILITY_FILE.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != 0
-            or stat.S_IMODE(metadata.st_mode) != 0o400
-            or metadata.st_nlink != 1
-        ):
-            raise PermissionError("handoff capability is not trusted")
-        descriptor = os.open(
-            _BASELINE_300_HANDOFF_CAPABILITY_FILE,
-            os.O_RDONLY | os.O_NOFOLLOW,
-        )
-        try:
-            opened = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(opened.st_mode)
-                or opened.st_uid != 0
-                or stat.S_IMODE(opened.st_mode) != 0o400
-                or opened.st_nlink != 1
-            ):
-                raise PermissionError("opened handoff capability is not trusted")
-            token = os.read(descriptor, 65).decode("ascii")
-            if os.read(descriptor, 1) or not _BASELINE_300_HANDOFF_CAPABILITY_PATTERN.fullmatch(
-                token
-            ):
-                raise PermissionError("handoff capability token is invalid")
-        finally:
-            os.close(descriptor)
-    except (OSError, UnicodeDecodeError) as exc:
-        raise RuntimeError(
-            "0236-to-300 handoff requires the root-owned one-shot capability"
-        ) from exc
-
-
-def _raw_alembic_heads(connection: Connection) -> tuple[str, ...]:
-    """활성 script graph를 해석하지 않은 version table 원문을 읽는다."""
-
-    version_table = connection.scalar(
-        text("SELECT to_regclass('public.alembic_version')")
-    )
-    if version_table is None:
-        return ()
-    return tuple(
-        str(revision)
-        for revision in connection.execute(
-            text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
-        ).scalars()
-    )
-
-
-def _guard_application_schema_operation() -> bool:
-    """`300` active graph 밖 lineage의 일반 조작을 시작 전에 거부한다.
-
-    반환값이 ``True``이면 `0236 → 300` one-shot handoff만을 위한 stamp callback이
-    설치된 상태다. 이 경로는 `command.stamp(..., purge=True)`의 generic resolver가
-    retired `0236`을 해석하기 **전**에 빈 head set에서 `300`을 삽입하도록 교체한다.
-    """
-
-    migration_context = context.get_context()
-    migration_fn = migration_context.opts.get("fn")
-    operation = getattr(migration_fn, "__name__", None)
-    if operation == "downgrade":
-        raise RuntimeError(
-            "300_schema_baseline is forward-only; application schema downgrade is "
-            "unsupported"
-        )
-    if operation != "do_stamp":
-        # 일반 fresh upgrade는 허용하되 retired `0236`을 발견하면 Alembic의
-        # `Can't locate revision`보다 먼저 operator에게 정확한 protocol을 보인다.
-        if operation == "upgrade" and not migration_context.as_sql:
-            connection = migration_context.connection
-            if connection is not None and _BASELINE_300_HANDOFF_SOURCE in _raw_alembic_heads(
-                connection
-            ):
-                raise RuntimeError(
-                    "0236 application schema requires the controlled "
-                    "application-schema 0236-to-300 handoff; generic upgrade is "
-                    "unsupported"
-                )
-        return False
-
-    # `stamp`는 version metadata를 바꾸므로 generic invocation을 모두 막는다.
-    # 도착 revision, purge, tag, root-owned one-shot capability, online mode 및 raw
-    # source head가 함께 일치하는 one-shot handoff 하나만 예외다.
-    destination = tuple(
-        str(revision)
-        for revision in migration_context.opts.get("destination_rev") or ()
-    )
-    is_sanctioned = (
-        not migration_context.as_sql
-        and migration_context.opts.get("purge") is True
-        and destination == (_BASELINE_300_REVISION,)
-        and context.get_tag_argument() == _BASELINE_300_HANDOFF_TAG
-    )
-    if not is_sanctioned:
-        raise RuntimeError(
-            "generic Alembic stamp is unsupported; use the controlled "
-            "application-schema 0236-to-300 handoff"
-        )
-
-    connection = migration_context.connection
-    if connection is None:
-        raise RuntimeError("0236-to-300 handoff requires an online DB connection")
-    if _raw_alembic_heads(connection) != (_BASELINE_300_HANDOFF_SOURCE,):
-        raise RuntimeError(
-            "0236-to-300 handoff requires exactly one raw source head "
-            "0236_tvn41s_compaction_drained"
-        )
-
-    # handoff는 baseline root로 **stamp**한다. graph의 head가 아니라 그 목적지가
-    # graph에 있는지를 본다 — head로 결박하면 child migration을 하나 더하는 순간 이
-    # 다리가 막힌다. `docker/transition-application-schema-0236-to-300.py`도 같은
-    # 이유로 이미 고쳤는데 여기가 남아 있었다.
-    script = ScriptDirectory.from_config(config)
-    try:
-        script.get_revision(_BASELINE_300_REVISION)
-    except Exception as exc:
-        raise RuntimeError(
-            "0236-to-300 handoff requires the active graph to contain "
-            f"{_BASELINE_300_REVISION}"
-        ) from exc
-    _require_application_handoff_capability()
-
-    def stamp_baseline_300_after_purge(
-        current_heads: tuple[str, ...],
-        _migration_context: object,
-    ) -> tuple[StampStep, ...]:
-        # Alembic has already run `_ensure_version_table(purge=True)` here. Do
-        # not route the retired source revision through ScriptDirectory again.
-        if current_heads:
-            raise RuntimeError("0236-to-300 handoff expected purge to leave no heads")
-        return (
-            StampStep(
-                (),
-                _BASELINE_300_REVISION,
-                True,
-                True,
-                script.revision_map,
-            ),
-        )
-
-    migration_context._migrations_fn = stamp_baseline_300_after_purge  # noqa: SLF001
-    return True
 
 
 # ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
@@ -383,7 +178,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
     )
-    _guard_application_schema_operation()
+    _refuse_downgrade()
     with context.begin_transaction():
         context.run_migrations()
 
@@ -396,38 +191,6 @@ def do_run_migrations(connection: Connection) -> None:
     # L416-417). 즉 search_path SET 등 어떤 execute()도 configure() 이전에
     # 하면 SQLAlchemy 2.0 autobegin으로 트랜잭션이 열려 → migration이 적용은
     # 되지만 connection close 시 rollback → 빈 DB. (Alembic ≤1.17에선 무증상.)
-    # fresh 설치의 destination facet은 **`300` 도달 순간**에 봉인해야 한다.
-    # 계약 SQL(`application-destination-alembic-version.sql`)이 `alembic_version`
-    # 내용을 `ARRAY['300']`으로 못 박고 있고, 그 파일은 reference manifest digest로
-    # 봉인돼 있어 편집할 수 없다. child migration이 붙으면 `run_migrations()`가 끝난
-    # 시점의 version row는 head이므로 그때 검증하면 반드시 어긋난다.
-    #
-    # Alembic은 step마다 `head_maintainer.update_to_step()`을 **먼저** 하고
-    # `on_version_apply` 콜백을 부른다(`alembic/runtime/migration.py`). 따라서 이
-    # 콜백 안에서는 version row가 이미 `300`이고 다음 step은 아직 돌지 않았다 —
-    # 정확히 필요한 checkpoint다.
-    facet_verified: list[str] = []
-    fresh_install: list[bool] = []
-
-    def _seal_baseline_root_destination(**kwargs: object) -> None:
-        # **fresh 설치에서만** 봉인한다. 콜백은 `300`에 닿는 모든 step에서 불리는데,
-        # `0236 → 300` handoff도 그 중 하나다. handoff는 stamp 직후에 아직
-        # `ktm_feature_runtime` SELECT GRANT를 주지 않았고, 계약 SQL은
-        # `has_table_privilege('ktm_feature_runtime', …)`와 `8 = count(aclexplode(relacl))`를
-        # 요구하므로 그 시점엔 반드시 `mismatch`다. handoff는 GRANT 뒤에 **스스로**
-        # 같은 facet을 대조한다(`transition-...:1552`). 여기서 또 보면 다리가 막힌다.
-        #
-        # 종전 조건(`raw_heads_before == () and raw_heads_after == ("300",)`)도 fresh
-        # 설치만 봉인했다. 그 의미를 그대로 유지하되, 뒤 절이 head와 함께 움직이며
-        # 검증을 조용히 끄던 성질만 없앤다.
-        if not fresh_install:
-            return
-        heads = kwargs.get("heads")
-        if not isinstance(heads, set) or heads != {_BASELINE_300_REVISION}:
-            return
-        _verify_fresh_300_destination_facet(connection)
-        facet_verified.append(_BASELINE_300_REVISION)
-
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -437,7 +200,6 @@ def do_run_migrations(connection: Connection) -> None:
         compare_server_default=True,
         # 비-app·미모델 객체 제외 (ADR-075 D-12-2, T-VN-19 alembic check gate).
         include_object=_include_object,
-        on_version_apply=[_seal_baseline_root_destination],
     )
     with context.begin_transaction():
         use_schema_owner_role = os.environ.get(_USE_SCHEMA_OWNER_ROLE_ENV, "false")
@@ -446,41 +208,18 @@ def do_run_migrations(connection: Connection) -> None:
                 f"{_USE_SCHEMA_OWNER_ROLE_ENV} must be exactly true or false"
             )
         if use_schema_owner_role == "true":
-            # Bootstrap가 `ktm_feature_migrator`에게 이 NOLOGIN group으로의 SET
+            # Bootstrap가 `ktm_feature_service`에게 이 NOLOGIN group으로의 SET
             # 권한만 부여한다. Alembic의 concurrent-index autocommit block은
             # transaction-local role을 reset하므로 dedicated migration connection
             # 수명 동안의 session role을 쓴다. connection close 시 reset되며 runtime은
             # 이 group membership을 절대 얻지 않는다.
             connection.execute(text("SET ROLE ktm_feature_schema_owner"))
-        # version table purge 전 raw `0236`을 엄격히 검증하고, 일반
-        # stamp/downgrade를 차단한다. sanctioned handoff이면 이 call이 retire된
-        # revision을 ScriptDirectory에 다시 해석하지 않는 callback도 설치한다.
-        sanctioned_handoff = _guard_application_schema_operation()
+        _refuse_downgrade()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
         connection.execute(text("SET search_path = public, x_extension"))
-        raw_heads_before = _raw_alembic_heads(connection)
-        if raw_heads_before == ():
-            fresh_install.append(True)
         context.run_migrations()
-        raw_heads_after = _raw_alembic_heads(connection)
-        if raw_heads_before == () and not facet_verified:
-            # fresh 설치인데 `300` step을 지나지 않았다 = 봉인이 **일어나지 않았다.**
-            # 종전에는 이 자리에서 `raw_heads_after == ("300",)`을 조건으로 검증을
-            # 호출했는데, child migration이 생기면 그 조건이 영구히 False가 되어
-            # 검증이 **예외도 로그도 없이 사라졌다.** 이제는 검증을 step 콜백이
-            # 수행하고, 여기서는 "실제로 수행됐는가"만 확인한다 — 조용히 꺼질 자리를
-            # 없앤다.
-            raise RuntimeError(
-                "fresh install did not pass through the baseline root "
-                f"{_BASELINE_300_REVISION!r}; destination facet was never sealed "
-                f"(heads={raw_heads_after!r})"
-            )
-        if sanctioned_handoff and raw_heads_after != (_BASELINE_300_REVISION,):
-            raise RuntimeError(
-                "0236-to-300 handoff did not leave exactly one raw 300 head"
-            )
 
 
 async def run_async_migrations() -> None:
@@ -508,9 +247,9 @@ def run_migrations_online() -> None:
     if existing_connection is not None:
         if not isinstance(existing_connection, Connection):
             raise RuntimeError("Alembic external connection must be a SQLAlchemy Connection")
-        # controlled `0236 → 300` handoff는 caller가 연 outer transaction과 같은
-        # connection을 쓴다. 이를 새 AsyncEngine으로 바꾸면 pre/post catalog
-        # preflight와 stamp가 분리되어 postflight 실패 때 raw source row를 보존할 수 없다.
+        # 호출자가 연 outer transaction과 같은 connection을 쓴다. 새 AsyncEngine으로
+        # 바꾸면 migration이 호출자의 transaction 밖에서 commit되어, 호출자가 rollback해도
+        # 스키마가 남는다. 통합 fixture가 이 경로로 돈다.
         do_run_migrations(existing_connection)
         return
     asyncio.run(run_async_migrations())

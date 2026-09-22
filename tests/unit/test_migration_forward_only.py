@@ -7,7 +7,7 @@ revision은 되돌릴 수 있다 — 제약/함수 정의만 건드리기 때문
 것이 하필 같은 revision의 ``upgrade()``다. 저장소에는 downgrade 경로를 도는 테스트가
 한 건도 없어서 그 진술이 거짓이라는 사실이 적대 검증 전까지 드러나지 않았다.
 
-`300_schema_baseline`은 final schema를 새 DB에만 적재하는 single root다. 과거 active
+`400_schema_baseline`은 final schema를 새 DB에만 적재하는 single root다. 과거 active
 lineage는 retired archive이며, downgrade가 허용되면 실제 운영 DB가 더는 존재하지 않는
 revision을 가리킬 수 있다. 따라서 되돌릴 수 없다면 **되돌리려는 시도가 조용히 성공한
 척해서는 안 된다**.
@@ -28,17 +28,9 @@ _ALEMBIC = Path(__file__).resolve().parents[2] / "alembic"
 VERSIONS = _ALEMBIC / "versions"
 _SEARCH_ROOTS = (VERSIONS,)
 
-# 되돌릴 수 없다고 스스로 선언한 revision. 목록을 박아 두는 이유는, 선언 문자열만
-# 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있기 때문이다.
-FORWARD_ONLY_REVISIONS = (
-    "300_schema_baseline",
-    # ADR-099 2단계. geometry를 보조 relation으로 옮기고 `feature_routes.geom`을
-    # 지운다. 되돌리려면 역이전의 무손실을 다시 증명해야 하고, 이 저장소의 배포는
-    # **이미지 롤백 창을 갖지 않는다** — production entrypoint는 마이그레이션을
-    # 돌리지 않고 final permit이 head를 정확 일치로 본다. 그러므로 복원이 필요하면
-    # downgrade가 아니라 forward revision으로 한다.
-    "312_route_geometry_sidecar",
-)
+# 지금은 revision이 하나뿐이지만 목록을 박아 두는 이유는 그대로다 — 선언 문자열만
+# 보면 선언을 지워 게이트를 빠져나갈 수 있다.
+FORWARD_ONLY_REVISIONS = ("400_schema_baseline",)
 
 
 def _path_for(stem: str) -> Path:

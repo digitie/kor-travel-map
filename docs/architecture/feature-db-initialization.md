@@ -8,27 +8,25 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 
 ```
 1. PostgreSQL 16 + PostGIS 3.5와 dedicated DB (`kor_travel_map`)를 준비한다.
-2. ignored deployment env/vault에서 bootstrap, migrator, API runtime, Dagster runtime의
-   서로 다른 credential을 주입한다.
+2. ignored deployment env/vault에서 bootstrap superuser와 application service
+   (`ktm_feature_service`)의 서로 다른 credential을 주입한다. ADR-100 이후 application
+   LOGIN은 **하나**다 — migrator/API/Dagster 세 이름은 없다.
 3. virgin DB에만 `docker compose -f docker-compose.yml -f docker-compose.host.yml
-   --profile fresh-init run --rm db-application-schema-fresh-300`을 명시 confirmation과 함께
-   한 번 실행한다. 이 one-shot은
-   내부적으로 role/schema/extension bootstrap을 완료한 뒤 NOLOGIN `ktm_feature_schema_owner`와
-   runtime group의 final ownership을 설정하고, 다음 restricted root migration까지 실행한다.
-   기존 `0236` DB의 object/DB ownership transfer는 이 경로로 수행하지 않는다.
-4. candidate image의 고정 `ktm-application-schema-fresh-300 migrate`만 LOGIN
-   `ktm_feature_migrator` connection에서 `SET ROLE ktm_feature_schema_owner`로 실행한다. API
-   daemon entrypoint나 generic `alembic upgrade head`가 blank production DB를 처리하지 않는다.
-5. restricted root migration은 source catalog를 확인하고 raw `300` result까지만 남긴다.
-   Docker Manager는 그 result와 candidate/reference/DB identity를 외부 durable journal에 결박한
-   다음, 별도 fixed `fresh-300-finalize` one-shot에서 closed table ACL inventory 재조정과
-   destination catalog 확인을 **한 DB transaction**으로 완료한다. raw `300`과 source receipt만
-   남은 중간 상태에는 final permit을 발급하지 않으며 runtime도 기동하지 않는다. PostgreSQL
-   default privilege는 사용하지 않는다.
-6. API/Dagster는 각 LOGIN runtime DSN으로만 연결하고 실제 catalog preflight를 통과한다.
-   Dagster metadata DSN은 별도 root-owned identity permit의 system ID/name/OID/owner/login과
-   대조하며, application DB identity·raw `300`·application schema를 가리키면 migration이나
-   runtime 기동 전에 중단한다.
+   --profile fresh-init run --rm db-application-schema-fresh`을 명시 confirmation과 함께
+   한 번 실행한다. 이 one-shot은 role/schema/extension bootstrap이 끝난 DB에
+   `alembic upgrade head`와 런타임 권한 재조정을 차례로 돌린다.
+4. migration은 LOGIN `ktm_feature_service` connection에서
+   `SET ROLE ktm_feature_schema_owner`로 돈다
+   (`KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`).
+5. baseline revision `400`은 head 덤프를 통째로 적용한다. 전제(role bootstrap 완료,
+   `public`에 예상 밖의 객체 없음)를 확인하고, 스키마·seed·권한 정규화를 한
+   transaction에서 끝낸다. PostgreSQL default privilege는 사용하지 않는다.
+6. API/Dagster는 같은 runtime DSN으로 연결하고 실제 catalog preflight를 통과한다.
+   그 preflight가 `public.alembic_version`을 직접 읽어 **이미지가 아는 head와 DB의
+   head가 같은지** 확인한다 — 다르면 기동하지 않는다. Dagster metadata DSN은 별도
+   root-owned identity permit의 system ID/name/OID/owner/login과 대조하며,
+   application DB identity·application schema를 가리키면 migration이나 runtime 기동
+   전에 중단한다.
 7. (선택) 객체 저장소 client + provider client를 주입하고 `AsyncKorTravelMapClient`를 만든다.
 ```
 
@@ -46,9 +44,11 @@ PostgreSQL에 직접 연결하지 않는다 (ADR-045).
 
 role·ownership·membership 정본은 `docker/postgres-role-bootstrap.sh`다. 핵심은
 `ktm_feature_schema_owner`가 DB/application schema object를 소유하고,
-`ktm_feature_migrator`만 해당 NOLOGIN group으로 `SET ROLE`할 수 있다는 점이다.
-`ktm_feature_api_runtime`와 `ktm_feature_dagster_runtime`은 `ktm_feature_runtime`의
-권한만 inherit하며 `SET ROLE`하지 못한다. 0095 이후 runtime이 `EXECUTE`할 수 있는
+유일한 LOGIN인 `ktm_feature_service`만 해당 NOLOGIN group으로 `SET ROLE`할 수
+있다는 점이다(ADR-100). 그 membership은 `INHERIT FALSE, SET TRUE`이므로 평소에는
+schema owner 권한을 **수동적으로 갖지 않고**, migration 동안만 명시적으로 켠다.
+`ktm_feature_runtime` membership은 반대로 `INHERIT TRUE, SET FALSE`라 런타임 권한은
+그냥 상속된다. 런타임 preflight가 이 두 축을 각각 확인한다. 0095 이후 runtime이 `EXECUTE`할 수 있는
 feature procedure는 `create_feature_with_initial_state`, `transition_feature_state`,
 `materialize_user_feature_change_provenance`, `materialize_provider_feature_version`,
 `author_lifecycle_override`, `revoke_lifecycle_override` 여섯 개뿐이고, base Feature
@@ -67,36 +67,27 @@ procedure만 사용하며 runtime의 raw override `UPDATE`/`DELETE`는 허용하
 ## 4. Alembic 마이그레이션
 
 ```bash
-# fresh DB 1단계: candidate image의 fixed one-shot이 root migration과 source receipt만 만든다.
-ktm-application-schema-fresh-300 migrate
-
-# production 2단계: Manager fence 아래 ACL 재조정+destination receipt를 한 transaction으로 완료한다.
-ktm-application-schema-fresh-finalize finalize --writer-fence-receipt \
-  /run/kor-travel-map-application-fresh-finalize/fence.json
+# fresh DB: bootstrap이 끝난 뒤 한 번.
+alembic upgrade head
+python -m kortravelmap.infra.runtime_privileges
 
 # 현재 revision 확인
 alembic current
 
-# `300` 이후 downgrade/stamp-back/DB restore는 지원하지 않는다. 실패는 write fence 뒤
-# 새 forward-fix candidate의 controlled handoff로만 처리한다.
+# downgrade/stamp-back/DB restore는 지원하지 않는다. revision의 `downgrade()`는
+# 거부하고, `alembic/env.py`가 그보다 먼저 `alembic downgrade`를 거절한다. 실패는
+# 새 forward revision으로만 처리한다.
 ```
 
 `alembic/env.py`는 async DSN 정규화, migration connection 수명의
 `SET ROLE ktm_feature_schema_owner`(flag가 true일 때), 그리고
 `search_path = public, x_extension`를 강제한다. active `300` graph의 revision 정본은
 **정확히 하나의 `public.alembic_version`** 이며, `ops.alembic_version` 같은 별도
-version table은 생성하거나 수용하지 않는다. 이 physical contract는 baseline catalog
-receipt와 `300_schema_baseline.py`가 함께 검증한다.
+version table은 생성하거나 수용하지 않는다. `400_schema_baseline.py`의 catalog 전제
+검사가 그 physical contract를 확인한다.
 
-따라서 production에서는 일반 Alembic 명령을 운영 절차로 쓰지 않는다. virgin DB는
-`ktm-application-schema-fresh-300 migrate`만, exact `0236` DB의 전환은 Docker Manager가
-writer fence 아래 한 번만 실행하는 controlled handoff만 허용한다. 이 두 경우 외의
-`alembic stamp`, generic `upgrade`, version-table 수동 생성·수정은 `300` boundary를
-우회하므로 금지한다. fresh root 뒤 finalization의 ACL/destination 확인이 실패하면 raw
-`300`·candidate·reference·DB identity·source receipt를 Manager가 다시 exact 확인한 경우에만
-`ktm-application-schema-fresh-finalize finalize --writer-fence-receipt ...`가 허용된다.
-이 completion은 migration/restore/stamp가 아니며 성공 뒤에도 Manager의 privileged postflight와
-새 final permit 발급 전에는 runtime 기동 권한을 만들지 않는다.
+퇴역 lineage(`0200`~`0236`)는 읽기 전용 archive다. 그것을 가리키는 DB는 이 이미지가
+해석하지 못하며, in-place stamp/upgrade 경로도 없다 — 새로 만든다.
 
 ## 5. KorTravelMapSettings 로드
 
@@ -271,17 +262,17 @@ async def healthz(self) -> HealthCheck:
 - engine ping: `SELECT 1`
 - object store ping: bucket HEAD
 - schema 존재: `pg_namespace` 조회
-- Alembic receipt: **정확히 하나의** `public.alembic_version` row가 `300`이고, API
-  production entrypoint가 Docker Manager의 root-owned final permit을 검증
+- Alembic head: **정확히 하나의** `public.alembic_version` row가 이미지가 아는
+  head와 같고, 런타임 preflight가 그것을 직접 읽어 확인
 
 디버그 API `/health`가 이를 노출 (별도 패키지, ADR-020).
 
 ## 13. 통합 테스트 부트스트랩
 
-통합 테스트도 운영 계약과 같은 fresh-300 helper를 사용한다. testcontainers의 disposable
-DB에서 `tests/integration/_application_300_bootstrap.py`가 final role/extension inventory를
-준비하고 restricted migrator로 root `300`을 적용한다. 테스트 helper는 production operator
-interface가 아니며, 직접 schema 생성, 수동 version table, generic Alembic command를 새
+통합 테스트도 운영과 같은 경로를 쓴다. testcontainers의 disposable DB에서
+`tests/integration/_application_300_bootstrap.py`가 final role/extension inventory를
+준비하고, `ktm_feature_service`로 `alembic upgrade head`를 돌린다. 테스트 helper는
+production operator interface가 아니며, 직접 schema 생성이나 수동 version table을 새
 fixture 예제로 추가하지 않는다.
 
 ## 14. 멀티-DB / 멀티-환경
@@ -291,9 +282,10 @@ fixture 예제로 추가하지 않는다.
 - **운영**: kor-travel-map 독립 DB (`kor_travel_map`) + Dagster metadata DB
   (`kor_travel_map_dagster`)
 
-같은 라이브러리가 세 환경 모두 지원한다. 배포 service는 API/Dagster runtime DSN을
-각각 `KOR_TRAVEL_MAP_PG_DSN`으로 주입하지만, source env가 bootstrap owner로 이를 합성하지는 않는다.
-Alembic과 그 직후 ACL 재조정은 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`만 사용한다.
+같은 라이브러리가 세 환경 모두 지원한다. ADR-100 이후 DSN 이름은
+`KOR_TRAVEL_MAP_PG_DSN` 하나이고, Alembic과 그 직후 ACL 재조정도 같은 DSN을 쓴다 —
+다른 것은 그 세션이 `SET ROLE ktm_feature_schema_owner`를 켜는지 여부뿐이다.
+bootstrap owner credential은 별개이며 compose가 합성하지 않는다.
 
 ## 15. 초기화 실패 케이스
 
@@ -302,7 +294,7 @@ Alembic과 그 직후 ACL 재조정은 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`만 사�
 | runtime DSN 미설정 | Compose/API/Dagster startup | required interpolation 또는 privilege preflight가 기동 차단 |
 | DB 접근 거부 | `engine.connect()` | `OperationalError` → caller 처리 |
 | schema 부재 | `client.healthz()` | warning + 사용자에게 부트스트랩 안내 |
-| `300` receipt/final permit 불일치 | API production entrypoint | Map runtime을 기동하지 않고 writer fence 유지; Manager의 controlled fresh/handoff 또는 새 forward-fix candidate만 허용 |
+| DB head가 이미지 head와 다름 | 런타임 privilege preflight | Map runtime을 기동하지 않는다; 맞는 이미지로 바꾸거나 DB를 올린다 |
 | 확장 미설치 | 첫 SQL 실행 시 (`function st_makepoint does not exist`) | error |
 | object store 접근 실패 | `client.upload_feature_files()` | `FileStoreError` |
 
@@ -317,7 +309,7 @@ graceful degradation:
 - [ ] schema 4종 존재
 - [ ] 확장 4종 존재
 - [ ] `search_path` 올바름 (`SHOW search_path` → `public, x_extension`)
-- [ ] `public.alembic_version`이 raw `300` 하나이고 final permit의 DB/candidate/receipt와 일치
+- [ ] `public.alembic_version`이 한 행이고 그 값이 이미지의 alembic head와 일치
 - [ ] 객체 저장소 bucket healthy (RustFS healthcheck)
 - [ ] `KOR_TRAVEL_MAP_*` 환경변수 모두 설정
 - [ ] provider API 키 (kor-travel-map API/Dagster 환경)

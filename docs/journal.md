@@ -1,5 +1,57 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 — 열네 revision을 하나로 접고, 그 체인을 지키던 장치를 같이 걷어냈다
+
+활성 Alembic graph가 revision **하나**가 됐다. `400_schema_baseline.py`가 head
+`pg_dump`와 seed를 적용하고 `down_revision = None`이다. revision 14개와 사이드카
+111개가 사라졌고, 그 체인을 감시하던 장치가 함께 사라졌다 — 266개 파일,
+**-54,018 / +2,349**.
+
+**접을 수 있었던 이유.** 긴 migration 체인이 사는 값은 하나다 — 돌고 있는 DB를 그
+자리에서 앞으로 옮길 수 있다는 것. 이 저장소는 돌고 있지 않고 데이터 보존도 요구하지
+않으므로 그 값에 사는 사람이 없는데, 비용은 계속 쌓였다. 같은 사실(role graph·ACL·
+procedure 본문)이 열네 revision에 흩어져 어긋날 자리가 열네 군데였다.
+`runtime_privileges.py`의 조건부 ACL 세 덩어리는 전부 "이 조정기가 두 스키마 상태에서
+돈다"는 사정 하나에서 나왔다.
+
+**봉인.** receipt 사슬은 `0236 → 300` 이관이 원본을 건드리지 않았음을 증명하려고
+만들었다. 이관이 끝나 증명할 원본이 없고, 남은 것은 빌드 시점 해시와 배포 시점 해시가
+같은지 확인하는 파일 다발이었다. 그것이 막은 사고는 없다. 막은 것은 있다 — seed의
+`route.geom` 행이 312가 지운 컬럼을 가리키는데 봉인 때문에 **고칠 수 없었다.**
+
+**permit이 지키던 성질은 세 술어로 옮겼다.** `application-schema-final-permit.py`
+721줄, root 소유 mount, 서명 파일이 결국 지킨 것은 하나다 — 런타임이 자기 이미지와
+다른 스키마의 DB에 붙지 않는다. 런타임 privilege preflight가 이제 그것을 잰다:
+적용된 head가 이미지의 head와 같은가, `public.alembic_version`을 읽을 수 있는가,
+그리고 **쓸 수는 없는가**(셋째가 없으면 스키마 대신 head를 고쳐 첫째를 통과할 수
+있다). 셋을 따로따로 뒤집어 각각 빨개지는 것을 확인했다.
+
+**사이드카는 손으로 만들지 않았다.** 빈 DB를 `313`까지 올려 두 번 떠서 같은지 본
+다음 정규화했다. 정규화는 정확히 네 가지 — 매 덤프마다 바뀌는 토큰·버전 주석,
+`search_path` 고정(env.py가 트랜잭션 안에서 세운다), `CREATE SCHEMA IF NOT EXISTS`,
+그리고 **ACL 블록마다 소유자로 role 전환.** 마지막 것이 load-bearing이다: GRANT는
+소유자만 낼 수 있고 ADR-090 role은 NOINHERIT이며, 소유자 아닌 GRANT는 오류가 아니라
+경고 후 무시다 — exit 0이 적용의 증거가 되지 못한다.
+
+같은 런에서 head 오라클도 다시 떴는데 커밋돼 있던 파일과 **바이트 동일**했다. 덤프
+파이프라인이 기존 오라클을 재현한다는 확인이다.
+
+**대상이 빈 검사 다섯.** role을 바꿔 가며 DDL을 내는 migration을 감시하는 게이트들은
+덤프 하나를 적용하는 revision 앞에서 대상이 0이 된다. 하한을 낮추지 않고 — 그러면
+"본 것에 하한을 건다"가 무너진다 — 이유와 함께 skip하고 두 번째 revision이 붙는 순간
+다시 활성화되게 했다. `test_receipt_head_check_covers_the_graph_head.py`가 이미 쓰던
+형태다.
+
+유도형 검사 둘은 **더 나은 오라클로** 옮겼다. purge 제약 분류와 `match_basis` CHECK는
+이제 migration의 중간 문자열이 아니라 head 덤프를 읽는다 — DB가 실제로 들고 있는
+것에 한 칸 가깝다.
+
+`_OPTIONAL_ROUTINES`는 비웠다. `test_db_procedure_signatures_exist_in_head.py`가
+"baseline root에 없는 인벤토리 루틴: []"로 실측했기 때문이다. 이름을 남겨 두면 루틴이
+**정말로** 사라지는 날 조용히 건너뛴다.
+
+정본은 ADR-101.
+
 ## 2026-09-20 — geometry 한 컬럼이 이사했는데, 그것을 가리키던 자리가 열여섯 곳 남아 있었다
 
 `312_route_geometry_sidecar`가 `feature.feature_routes.geom`을

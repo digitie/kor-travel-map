@@ -23,9 +23,9 @@ static contract, fresh installer, finalize, final permit. 그 자체는 옳은 �
 
 - **guard의 엄격함**: "정확히 기대한 head"라는 성질은 그대로다. 기대값의 출처만
   리터럴에서 graph로 바뀐다.
-- **baseline root `300`**: `0236 → 300` handoff의 목적지와 sidecar가 재현하는 baseline은
-  영원히 `300`이다. 그것은 "현재 head"가 아니라 역사적 좌표이므로 여기서 다루지 않는다.
-  ``BASELINE_ROOT_REVISION``으로 이름을 따로 준다.
+- **baseline root**: sidecar가 재현하는 baseline root는 "현재 head"가 아니라
+  graph의 좌표다. ``BASELINE_ROOT_REVISION``으로 이름을 따로 준다 — 지금은 그 둘이
+  같은 값이지만(revision이 하나뿐이므로), 뜻이 다르므로 이름도 다르게 둔다.
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from typing import Final
 
 _GRAPH_PATH: Final = Path(__file__).resolve().parent.parent / "_application_migration_graph.json"
 
-BASELINE_ROOT_REVISION: Final = "300"
+BASELINE_ROOT_REVISION: Final = "400"
 """active graph의 유일한 root.
 
-`0200`~`0236`을 대체한 단일 baseline이며 `0236 → 300` handoff의 stamp 목적지다.
-migration이 더 쌓여도 이 값은 바뀌지 않는다 — root는 하나이고 그것이 `300`이다.
+`300`~`313` 열네 개를 접은 단일 baseline이다. migration이 더 쌓여도 이 값은 바뀌지
+않는다 — root는 하나이고 그것이 `400`이다.
 """
 
 
