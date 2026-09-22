@@ -754,7 +754,7 @@ run_handoff() {
   local dsn="postgresql+asyncpg://ktm_feature_migrator:${SOURCE_PASSWORD}@127.0.0.1:5432/${database}"
   docker run --pull=never --rm --user root --network "container:$SOURCE_CONTAINER" \
     --mount "type=volume,source=$FENCE_VOLUME,target=/handoff-fence,readonly" \
-    -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$dsn" \
+    -e "KOR_TRAVEL_MAP_PG_DSN=$dsn" \
     -e "KOR_TRAVEL_MAP_IMAGE_REVISION=$candidate_commit" \
     -e "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_IMAGE_ID=$candidate_image_id" \
     --entrypoint /usr/local/bin/ktm-application-schema-handoff "$candidate_image_id" \

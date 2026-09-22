@@ -805,7 +805,9 @@ PY
 # entrypoint가 migration 구간에서 쓰는 것과 같은 조합으로 조회한다: migrator LOGIN +
 # schema owner role 활성화. migrator LOGIN만으로는 부족하다 - `alembic_version`은 schema owner 소유다.
 # 두 값 모두 컨테이너 env 안에 이미 있으므로 secret이 host argv/로그로 새지 않는다.
-_ALEMBIC_INTROSPECTION_ENV='KOR_TRAVEL_MAP_PG_DSN="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?}" KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true'
+# ADR-100: migration DSN과 runtime DSN이 같은 이름이 됐다 — 재수출은 그대로 두어
+# 미설정 시 `:?`로 fail-close 하는 모양을 유지한다.
+_ALEMBIC_INTROSPECTION_ENV='KOR_TRAVEL_MAP_PG_DSN="${KOR_TRAVEL_MAP_PG_DSN:?}" KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true'
 
 alembic_in_container() {
   docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \

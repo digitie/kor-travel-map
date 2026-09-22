@@ -240,7 +240,7 @@ async def test_handoff_executable_accepts_exact_source_contract(
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
 
     module = _handoff_module()
     observed_catalog_sha256, observed_seed_sha256 = await _contract_receipts(
@@ -346,7 +346,7 @@ async def test_handoff_executable_rejects_source_contract_drift_without_stamping
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
 
     module = _handoff_module()
     before_catalog, before_seed = await _contract_receipts(module, migrator_dsn)
@@ -387,7 +387,7 @@ async def test_mutable_provider_catalog_data_does_not_change_handoff_contract(
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
     module = _handoff_module()
     before_catalog, before_seed = await _contract_receipts(module, migrator_dsn)
     await _admin_execute(
@@ -436,7 +436,7 @@ async def test_handoff_rejects_superuser_even_with_a_valid_manager_receipt(
     fence_receipt = await _writer_fence_receipt(
         module, admin_dsn, tmp_path, monkeypatch
     )
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", admin_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", admin_dsn)
 
     assert await module.async_main(
         [
@@ -470,7 +470,7 @@ async def test_handoff_rolls_back_real_post_stamp_failure_to_exact_0236_state(
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
     module = _handoff_module()
     fence_receipt = await _writer_fence_receipt(
         module, admin_dsn, tmp_path, monkeypatch
@@ -531,7 +531,7 @@ async def test_handoff_rejects_expired_or_wrong_database_manager_receipt(
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
     module = _handoff_module()
     fence_receipt = await _writer_fence_receipt(
         module, admin_dsn, tmp_path, monkeypatch
@@ -770,7 +770,7 @@ async def test_handoff_rejects_any_application_prefixed_role_before_stamp(
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
 
     module = _handoff_module()
     fence_receipt = await _writer_fence_receipt(
@@ -812,7 +812,7 @@ async def test_handoff_rejects_manager_observed_hidden_user_mapping_before_stamp
     )
     migrator_dsn = config.get_main_option("sqlalchemy.url")
     assert migrator_dsn is not None
-    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    monkeypatch.setenv("KOR_TRAVEL_MAP_PG_DSN", migrator_dsn)
 
     module = _handoff_module()
     wrapper = "handoff_privileged_residue_fdw"

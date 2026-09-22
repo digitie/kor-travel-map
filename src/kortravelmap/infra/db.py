@@ -322,10 +322,18 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         runtime_role.rolsuper AS is_superuser,
         runtime_role.rolcreaterole AS can_create_role,
         runtime_role.rolbypassrls AS bypasses_rls,
-        -- ADR-100: schema-owner membership과 그 SET 권한은 더 이상 묻지 않는다.
-        -- 통합된 LOGIN이 migration을 돌려야 하므로 둘 다 구조적으로 참이고, 묻기만
-        -- 하고 검사하지 않는 컬럼은 나중에 "검사되고 있다"로 잘못 읽힌다.
-        -- 무엇을 잃는지는 아래 `forbidden_true_fields` 옆에 적어뒀다.
+        -- ADR-100: "schema owner의 member인가"와 "SET ROLE 할 수 있는가"는 더 이상
+        -- 묻지 않는다 — 통합된 LOGIN이 migration을 돌려야 하므로 둘 다 구조적으로
+        -- 참이다. 대신 **수동적으로 갖는가**를 묻는다. `USAGE`는 `inherit_option`을
+        -- 따르므로, bootstrap이 `INHERIT FALSE`로 주는 한 이 셋은 거짓이어야 하고
+        -- 누가 `INHERIT TRUE`로 바꾸면 여기서 빨개진다. 아래 has_table_privilege
+        -- 계열은 전부 inherited 권한만 보므로 이 축을 스스로 관측하지 못한다.
+        pg_has_role(session_user, 'ktm_feature_schema_owner', 'USAGE')
+            AS inherits_schema_owner,
+        pg_has_role(session_user, 'ktm_feature_audit_writer', 'USAGE')
+            AS inherits_audit_writer,
+        pg_has_role(session_user, 'ktm_feature_state_procedure_owner', 'USAGE')
+            AS inherits_state_procedure_owner,
         pg_has_role(session_user, 'ktm_feature_runtime', 'SET')
             AS can_set_runtime_group_role,
         has_schema_privilege(session_user, 'feature', 'CREATE')
@@ -536,16 +544,34 @@ def _runtime_db_privilege_problems(
     # WITH INHERIT FALSE, SET TRUE`를 준다 — 두 술어는 구조적으로 참이 되어 남겨두면
     # 모든 런타임 preflight가 fail-close 한다.
     #
-    # **잃는 것을 명시한다**: 침해된 런타임이 `SET ROLE ktm_feature_schema_owner`로
-    # DDL에 닿을 수 있다. 통합 전에는 그 경로가 api/dagster login에 아예 없었다.
-    # 남은 것은 "자기 자신으로는 DDL할 수 없다"까지다 — `can_create_in_feature_schema`가
-    # 그것을 계속 잰다. 즉 DDL은 이제 **코드가 의도적으로 SET ROLE 해야** 닿는다.
+    # **잃는 것을 정확히 적는다**: 침해된 런타임이 `SET ROLE ktm_feature_schema_owner`를
+    # 거쳐 그 owner가 SET 할 수 있는 모든 것 — `ktm_feature_audit_writer`,
+    # `ktm_feature_state_procedure_owner` 등 — 에 닿을 수 있다. 즉 DDL만이 아니라
+    # audit 행 위조와 상태표 소유까지 열린다. 통합 전에는 그 경로가 api/dagster
+    # login에 아예 없었다. 이것은 "한 LOGIN이 migration도 돌린다"의 직접적 귀결이고
+    # 이 preflight가 되돌릴 수 있는 종류가 아니다.
+    #
+    # 되돌릴 수 없는 대신 **여전히 참인 축을 명시적으로 고정한다**: 그 권한을
+    # 수동적으로 갖지는 않는다. 아래 `inherits_*` 셋이 그것이고, 누가 bootstrap의
+    # 부여를 `INHERIT TRUE`로 바꾸면 거기서 빨개진다. 아래 has_table_privilege 계열은
+    # inherited 권한만 보므로 그 변화를 스스로 관측하지 못한다 — 그게 이 셋이
+    # 필요한 이유다. `can_create_in_feature_schema`는 CREATE 축만 덮는다.
+    #
     # `can_set_runtime_group_role`은 그대로 둔다: bootstrap이 `ktm_feature_runtime`은
     # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",
+        "inherits_schema_owner": (
+            "runtime login must not passively hold ktm_feature_schema_owner privileges"
+        ),
+        "inherits_audit_writer": (
+            "runtime login must not passively hold ktm_feature_audit_writer privileges"
+        ),
+        "inherits_state_procedure_owner": (
+            "runtime login must not passively hold ktm_feature_state_procedure_owner privileges"
+        ),
         "can_set_runtime_group_role": ("runtime login must not SET ROLE ktm_feature_runtime"),
         "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
         "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",

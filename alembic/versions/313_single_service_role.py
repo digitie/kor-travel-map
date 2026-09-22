@@ -257,6 +257,14 @@ def _procedure_statements(suffix: str) -> tuple[str, ...]:
 
 #: `feature.feature_creation_origins`는 schema owner가 소유한다 — 마지막 owner 그룹과
 #: 같은 role이므로 role 전환 없이 이어서 실행한다.
+#:
+#: 두 CHECK를 **`NOT VALID`로** 건다. 이 표는 append-only다 —
+#: `trg_feature_creation_origins_append_only`가 UPDATE/DELETE를 거절하므로 기존 행을
+#: 새 형태에 맞게 고쳐 쓸 방법이 없고, 고쳐 쓰는 것이 옳지도 않다: 그 행들은 그
+#: 시점에 실제로 존재하던 role 이름을 기록한 provenance다. 기본(VALIDATED) 형태로
+#: 걸면 PostgreSQL이 기존 행을 스캔해 23514로 거절하고, env.py가 전체 실행을 한
+#: 트랜잭션으로 감싸므로 **upgrade 전체가 롤백된다** — 이미 manual Feature를 만든
+#: 적이 있는 모든 DB에서. 새 행에 대한 강제는 `NOT VALID`로도 그대로 걸린다.
 _ORIGIN_ROLES_CHECK_DROP: Final[str] = (
     "ALTER TABLE feature.feature_creation_origins"
     " DROP CONSTRAINT ck_feature_creation_origins_roles"
@@ -271,6 +279,7 @@ _ORIGIN_ROLES_CHECK_ADD_ORIGINAL: Final[str] = (
     " AND (procedure_definer = 'ktm_curation_command_owner'::text))"
     " OR ((origin_kind = 'manual_request'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text)"
     " AND (procedure_definer = 'ktm_feature_request_procedure_owner'::text))))"
+    " NOT VALID"
 )
 
 _ORIGIN_ROLES_CHECK_ADD_UPGRADED: Final[str] = (
@@ -282,6 +291,7 @@ _ORIGIN_ROLES_CHECK_ADD_UPGRADED: Final[str] = (
     " AND (procedure_definer = 'ktm_curation_command_owner'::text))"
     " OR ((origin_kind = 'manual_request'::text) AND (invoker_role = 'ktm_feature_service'::text)"
     " AND (procedure_definer = 'ktm_feature_request_procedure_owner'::text))))"
+    " NOT VALID"
 )
 
 
