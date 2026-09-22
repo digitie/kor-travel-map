@@ -253,7 +253,13 @@ async def test_curation_command_procedures_keep_their_owner_and_fence(
     assert not reachable, f"적재 executor가 EXECUTE 가능한 command: {reachable}"
 
     # 양성 대조 — 없으면 grant가 통째로 사라진 상태도 위 단언을 통과한다.
-    unreachable_by_admin = [r["proname"] for r in rows if not r["admin_execute"]]
+    # `claim_*_effect`는 아래 SECDEF 검사와 같은 이유로 빠진다: command 본문이 부르는
+    # 내부 helper라 executor에게 EXECUTE가 없는 것이 정상이다.
+    unreachable_by_admin = [
+        r["proname"]
+        for r in rows
+        if not r["admin_execute"] and not r["proname"].startswith("claim_")
+    ]
     assert not unreachable_by_admin, (
         f"admin executor가 EXECUTE 못 하는 command: {unreachable_by_admin}"
     )
