@@ -749,30 +749,34 @@ def test_the_creation_procedures_filter_released_claims_in_their_fallback() -> N
     위 테스트는 술어 자체를 재지만, 그 술어가 **프로시저 안에** 있는지는 재지 못한다.
     셋 중 하나만 빠져도 그 경로에서 결함이 그대로 남는다.
 
-    **읽는 파일을 306에 고정하지 않는다.** T-VN-39(309)가 세 프로시저를 전부 다시
-    썼다 — 306 사이드카를 계속 읽으면 이 게이트는 살아 있는 정의를 더 이상 보지 않고,
-    술어가 새 revision에서 빠져도 초록이 된다("게이트가 과거를 지킨다"). 그래서
-    프로시저마다 **가장 높은 revision의** 사이드카를 고른다. 다음에 누가 다시 쓰든
-    같은 이유로 여기가 저절로 따라간다.
+    **유도원은 head 덤프다.** 종전에는 migration 사이드카 중 "가장 높은 revision"을
+    골랐다 — 게이트가 과거를 지키지 않게 하려는 장치였고, 여러 revision이 같은
+    프로시저를 다시 쓰기 때문에 필요했다. `400` 스쿼시가 그 상황을 끝냈다(ADR-101):
+    살아 있는 정의는 한 군데, `alembic/head-schema.sql`에만 있다. 고를 것이 없으니
+    잘못 고를 일도 없다.
     """
 
     import pathlib
+    import re
 
-    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    head_schema = (
+        pathlib.Path(__file__).resolve().parents[2] / "alembic" / "head-schema.sql"
+    ).read_text(encoding="utf-8")
+
     for procedure in _FALLBACK_PROCEDURES:
-        sidecars = [
-            path
-            for path in versions.glob(f"_[0-9][0-9][0-9]_{procedure}*.sql")
-            # `_original`은 downgrade가 되돌릴 **이전** 본문이다 — 살아 있는 정의가 아니다.
-            if not path.name.endswith("_original.sql")
-        ]
-        assert sidecars, procedure
-        latest = max(sidecars, key=lambda path: int(path.name.split("_")[1]))
-        body = latest.read_text(encoding="utf-8")
-        # 재키가 OUT 이름을 `o_existing_feature_uuid` → `o_existing_feature_id`로 옮겼다.
-        # 값의 출처가 아니라 이름 자체가 바뀐 자리이므로 여기 문자열도 함께 간다.
-        assert "INTO o_existing_feature_id" in body, latest.name
-        assert "AND NOT claim.identity_released" in body, latest.name
+        match = re.search(
+            rf"^CREATE (?:FUNCTION|PROCEDURE) feature\.{re.escape(procedure)}\(",
+            head_schema,
+            re.MULTILINE,
+        )
+        assert match is not None, (
+            f"head 덤프에서 `feature.{procedure}`를 찾지 못했다 — 이름이 바뀌었거나 "
+            "덤프가 낡았다. 유도가 비면 아래 단언이 통째로 공허해진다."
+        )
+        # pg_dump는 루틴마다 빈 줄 둘로 다음 객체와 나눈다.
+        body = head_schema[match.start() : head_schema.index("\n\n\n", match.start())]
+        assert "INTO o_existing_feature_id" in body, procedure
+        assert "AND NOT claim.identity_released" in body, procedure
 
 
 async def test_the_capture_set_equals_what_the_catalog_says_not_a_fixed_list(
