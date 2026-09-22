@@ -322,10 +322,10 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         runtime_role.rolsuper AS is_superuser,
         runtime_role.rolcreaterole AS can_create_role,
         runtime_role.rolbypassrls AS bypasses_rls,
-        pg_has_role(session_user, 'ktm_feature_schema_owner', 'member')
-            AS has_schema_owner_membership,
-        pg_has_role(session_user, 'ktm_feature_schema_owner', 'SET')
-            AS can_set_schema_owner_role,
+        -- ADR-100: schema-owner membership과 그 SET 권한은 더 이상 묻지 않는다.
+        -- 통합된 LOGIN이 migration을 돌려야 하므로 둘 다 구조적으로 참이고, 묻기만
+        -- 하고 검사하지 않는 컬럼은 나중에 "검사되고 있다"로 잘못 읽힌다.
+        -- 무엇을 잃는지는 아래 `forbidden_true_fields` 옆에 적어뒀다.
         pg_has_role(session_user, 'ktm_feature_runtime', 'SET')
             AS can_set_runtime_group_role,
         has_schema_privilege(session_user, 'feature', 'CREATE')
@@ -529,14 +529,23 @@ def _runtime_db_privilege_problems(
     if row.get("current_user") != row.get("session_user"):
         problems.append("session_user and current_user must be identical")
 
+    # ADR-100: `has_schema_owner_membership`와 `can_set_schema_owner_role`은 이 집합에서
+    # 빠졌다. 통합 전에는 migration만 `ktm_feature_migrator`로 돌았고 api/dagster LOGIN은
+    # schema owner가 될 수 없었다. 이제 LOGIN이 하나이고 그 하나가 migration도 돌려야
+    # 하므로 bootstrap이 `GRANT ktm_feature_schema_owner TO ktm_feature_service
+    # WITH INHERIT FALSE, SET TRUE`를 준다 — 두 술어는 구조적으로 참이 되어 남겨두면
+    # 모든 런타임 preflight가 fail-close 한다.
+    #
+    # **잃는 것을 명시한다**: 침해된 런타임이 `SET ROLE ktm_feature_schema_owner`로
+    # DDL에 닿을 수 있다. 통합 전에는 그 경로가 api/dagster login에 아예 없었다.
+    # 남은 것은 "자기 자신으로는 DDL할 수 없다"까지다 — `can_create_in_feature_schema`가
+    # 그것을 계속 잰다. 즉 DDL은 이제 **코드가 의도적으로 SET ROLE 해야** 닿는다.
+    # `can_set_runtime_group_role`은 그대로 둔다: bootstrap이 `ktm_feature_runtime`은
+    # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",
-        "has_schema_owner_membership": (
-            "runtime login must not be a ktm_feature_schema_owner member"
-        ),
-        "can_set_schema_owner_role": ("runtime login must not SET ROLE ktm_feature_schema_owner"),
         "can_set_runtime_group_role": ("runtime login must not SET ROLE ktm_feature_runtime"),
         "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
         "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",

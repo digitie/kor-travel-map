@@ -154,8 +154,6 @@ def _runtime_privilege_row(
         "is_superuser": False,
         "can_create_role": False,
         "bypasses_rls": False,
-        "has_schema_owner_membership": False,
-        "can_set_schema_owner_role": False,
         "can_set_runtime_group_role": False,
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,

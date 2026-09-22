@@ -588,8 +588,6 @@ async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None
                     text(
                         "SELECT session_user::text, current_user::text, "
                         "role.rolsuper, "
-                        "pg_catalog.pg_has_role(session_user, "
-                        "'ktm_feature_schema_owner', 'SET'), "
                         "database_row.datname, database_row.oid, "
                         "pg_catalog.pg_get_userbyid(database_row.datdba), "
                         "(SELECT system_identifier::text "
@@ -619,20 +617,26 @@ async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None
         await engine.dispose()
     database = payload["database"]
     observed_identity = _database_identity_sha256(
-        system_identifier=str(row[7]),
-        name=str(row[4]),
-        oid=int(row[5]),
-        owner=str(row[6]),
+        system_identifier=str(row[6]),
+        name=str(row[3]),
+        oid=int(row[4]),
+        owner=str(row[5]),
     )
+    # ADR-100: `pg_has_role(session_user,'ktm_feature_schema_owner','SET')`은 더 이상
+    # 거절 사유가 아니라서 SELECT에서도 빠졌다. 통합 전에는 api/dagster LOGIN이 schema
+    # owner가 될 수 없었지만, 이제 LOGIN 하나가 migration도 돌려야 하므로 bootstrap이
+    # 그 SET 권한을 준다(postgres-role-bootstrap.sh:683-684, `SET TRUE`). 그대로 두면
+    # verify-api와 verify-dagster가 매 컨테이너 기동마다 fail-close 한다 — 즉
+    # 프로덕션이 뜨지 않는다. 무엇을 잃는지는 src/kortravelmap/infra/db.py의 같은 결정
+    # 옆에 적어뒀다. `rolsuper`는 남는다: service login은 여전히 SUPERUSER여서는 안 된다.
     if (
         str(row[0]) != expected_login
         or str(row[1]) != expected_login
         or bool(row[2])
-        or bool(row[3])
-        or str(row[4]) != database["name"]
-        or int(row[5]) != database["oid"]
-        or str(row[6]) != database["owner"]
-        or str(row[7]) != database["system_identifier"]
+        or str(row[3]) != database["name"]
+        or int(row[4]) != database["oid"]
+        or str(row[5]) != database["owner"]
+        or str(row[6]) != database["system_identifier"]
         or observed_identity != database["identity_sha256"]
         or versions != (_HEAD,)
         or live_destination_facet
