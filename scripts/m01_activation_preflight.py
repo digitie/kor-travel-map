@@ -189,7 +189,11 @@ async def _routine_checks(connection: AsyncConnection) -> list[Check]:
             continue
         row = rows[0]
         checks.append(
-            Check(f"routine.{routine}.admin_executor_execute", str(row["admin_side"]), admin_execute)
+            Check(
+                f"routine.{routine}.admin_executor_execute",
+                str(row["admin_side"]),
+                admin_execute,
+            )
         )
         checks.append(
             Check(
