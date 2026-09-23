@@ -1,5 +1,43 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 (2) — 트리거 85개를 지우려다, 내 실측이 정반대로 읽힌 것을 알았다
+
+전수조사가 187개 트리거 중 85개를 "막는 동작을 할 수 있는 principal이 없다"며 삭제
+후보로 올렸다. 나는 그 근거를 카탈로그로 확인했다고 보고했다. **확인이 아니라 오독이었다.**
+적대 검증이 여섯 그룹을 전부 반박했다 — 삭제 가능한 트리거는 **0개**다.
+
+**무엇을 쟀는가.** `aclexplode`로 124개 표의 TRUNCATE grantee를 뽑았더니
+`ktm_feature_schema_owner` 하나였다. 그건 그 124개 표 **전부의 소유자**다. 나는 이것을
+"소유자 기본 항목이지 부여가 아니다 → 아무도 TRUNCATE를 못 한다"로 읽었다.
+
+**정반대다.** 소유자야말로 TRUNCATE를 할 수 있는 주체이고, **소유자에게선 REVOKE가
+불가능하다.** 그래서 REVOKE가 아니라 트리거를 쓴 것이다. 그리고 그 소유자는 닿을 수 있는
+자리에 있다 — `docker/postgres-role-bootstrap.sh:683`이 유일한 운영 LOGIN
+`ktm_feature_service`에게 `SET TRUE`를 주고, `alembic/env.py`는 **모든 마이그레이션에서**
+`SET ROLE ktm_feature_schema_owner`를 켠다. revision 400 자신이 그 세션 안에서 돈다.
+
+**증거는 CI에 이미 있었다.** `tests/integration/_db_cleanup.py`가 `_no_truncate` 트리거를
+**끄고 나서** TRUNCATE를 실행하고, 그게 **성공한다.** 권한이 없다면 트리거를 꺼도 똑같이
+`permission denied`로 죽어야 한다. 성공한다는 것이 곧 "principal이 TRUNCATE를 갖고 있고
+트리거가 유일한 방벽"이라는 실행 가능한 증명이다. 나는 그 파일을 blast-radius 목록으로만
+읽고, **그것이 답이라는 것**을 보지 못했다.
+
+**저장소가 이미 답해 뒀다.** `tests/integration/test_tvn41s_material_fences.py:147`:
+"UPDATE fence만 시험하면 나중에 TRUNCATE trigger 둘을 떨어뜨려도 `pytest -q`와
+`alembic check`가 모두 초록이다(적대 리뷰 지적)." 그 테스트는 정확히 이번 삭제를 잡으려고
+쓰였다. 그리고 `ENABLE ALWAYS` 다섯 줄은 `session_replication_role = replica` 한 줄로
+우회하는 행위자가 **있다**는 전제 위에서만 뜻이 있다 — 아무도 못 한다면 쓸 이유가 없는
+구문이다.
+
+**교훈은 이미 쓰여 있던 것이다** — 탐지기는 효과에, 그리고 맞는 층에 결박한다. 나는
+카탈로그 층(`aclexplode`)에 결박했고, 그 층은 소유자 암묵 권한도 `SET ROLE` 도달성도
+superuser 우회도 **구조적으로 보지 못한다.** 효과 층(트리거를 끄면 TRUNCATE가 되는가)에
+결박했다면 첫 질문에서 끝났다.
+
+지울 것이 없다는 것은 나쁜 소식이 아니다. 이 트리거들은 과잉 구현이 아니라 소유자를
+제약할 수 있는 **유일한** 수단이고, 지웠다면 `TRUNCATE feature.features CASCADE`가
+거부에서 전량 삭제로 **ACL 한 글자 안 바뀐 채** 조용히 바뀌었을 것이다.
+
 ## 2026-09-23 — 열네 revision을 하나로 접고, 그 체인을 지키던 장치를 같이 걷어냈다
 
 활성 Alembic graph가 revision **하나**가 됐다. `400_schema_baseline.py`가 head
