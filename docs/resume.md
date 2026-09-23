@@ -1,48 +1,73 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-23 — ADR-100 + ADR-101 머지됨, 남은 것은 prod 복구 사이클
+## 2026-09-23 — ADR-100/101 머지됨, prod는 Manager의 **남은 ADR-101 구간**에 막혀 있다
 
-**다음 한 작업: n150 prod 재구축.** 두 PR은 머지됐고, 코드 쪽에 남은 일은 없다.
+**다음 한 작업: Manager에서 paired candidate build receipt 장치를 걷어낸다.**
+그것 없이는 prod 재구축이 끝나지 않는다.
 
-| 저장소 | 머지 | 크기 |
-|---|---|---|
-| kor-travel-map | [#1259](https://github.com/digitie/kor-travel-map/pull/1259) → `eb4882aa4` | 218 files, +4,401 / −39,935 |
-| kor-travel-docker-manager | [#389](https://github.com/digitie/kor-travel-docker-manager/pull/389) → `e4d4fa5` | 15 files, +455 / −5,408 |
+### 무엇이 막혔나
 
-Manager를 먼저 머지했다 — `docker-compose.yml`이 Map 이미지에서 지워진 실행파일 둘을
-절대경로로 부르고 있었고, 그 자리가 fresh DB 복구 경로다.
+ADR-101은 Map에서 `scripts/build-application-300-{candidate,paired-candidate}.sh`와
+`build-baseline.sh`를 지웠다(ADR 문서 17행이 그 셋을 명시한다). 그런데 Manager의
+소비자는 그대로 남아 있다 — 앞선 ADR-101 Manager 작업(#389)이 영수증·fence·phase
+기계를 접었지만 **빌드 영수증 축은 범위 밖이었다.**
 
-### prod 현황 (2026-09-23 09:0x 실측, 읽기 전용)
+같은 뿌리에서 두 자리가 어긋나 있다:
 
-- `kor-travel-map-postgres`와 `pinvi-postgres`만 Up 2 weeks. **api·ui·dagster·
-  pinvi-api는 전부 내려가 있다** — `docs/journal.md`가 기록한 outage 그대로다.
-- `/opt/kor-travel-docker-manager/.env:162`
-  `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=312_route_geometry_sidecar` — **아직
-  바꾸지 않았다. 재구축 뒤에 바꾼다.**
-- 디스크 83% (369G/466G). 이전 통합 실패의 원인이던 91%에서 내려왔다.
+1. `compose_service.py:2830` `_run_map_application_300_paired_builder`가 지워진
+   `scripts/build-application-300-paired-candidate.sh`를 요구한다.
+   → 재구축이 `prejournal_failure` / stage `application_builder`로 죽는다 (실측).
+2. `compose_service.py:6098` `DagsterStorageCandidate`가 아직
+   `paired_candidate_build_receipt_sha256`을 싣는다. Map의
+   `docker/dagster-storage-migrate.py`는 이제 `_CANDIDATE_FIELDS =
+   {dagster_image_id, dagster_config_sha256}` **exact** 검사다.
+   → 1번을 고쳐도 Dagster storage 단계에서 `dagster_storage_permit_candidate_invalid`
+   로 막힌다(코드 대조로 확인, 아직 실측 전).
 
-### 남은 순서
+면적: `map_application_300_candidate.py` 773줄 + 호출부 + `Application300Contract` +
+테스트 참조 약 75건.
 
-1. **pinset 회전 + 재구축** — 직전 pinset `3705983b`는 journal이
-   `cancel_probe_finalized`에서 영구 고착이다(`.env` 해시가 무관한 이유로 바뀌었고,
-   재결박은 `map_runtime_ready`에서만 허용된다). 탈출구는 **새 커밋**이고, 위 두
-   머지가 그것을 만들었다. sanctioned 경로는 `/root/chain17.sh` 전 사이클이다 —
-   host-direct compose build는 다른 서비스 키 보간 때문에 막힌다.
-2. **그다음에** `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` → `400`.
-   먼저 바꾸면 production API가 "the image alembic head does not match the expected
-   head"로 기동을 거부한다.
-   (`/home/digitie/kor-travel-docker-manager/.env:117`은 낡은 개발 사본이다 — 건드릴
-   대상이 아니다.)
-3. 재구축이 끝나면 D1/D2 스펙 재실행.
+### prod 현재 상태 (2026-09-23 09:5x 실측)
 
-### 알아 둘 것
+**더 나빠지지 않았다.** 두 실패 모두 저널 **전**이라 후보가 해제됐고, 새 pinset에는
+journal이 없다 — 고착이 아니라 재시도 가능 상태다.
 
-- 재구축의 application 단계는 **DB를 새로 만든다**(`reset_databases_for_application_300`).
-  revision `400`은 중간 revision으로 올라온 DB를 해석하지 못하므로 이것이 설계된
-  경로다(ADR-101 §무엇을 잃는가).
-- `400` 위에 revision이 쌓이기 전까지
-  `tests/lint/test_baseline_schema_is_not_a_contract_oracle.py`의 등식 대조는 그대로
-  유지된다. 첫 `401`이 붙으면 스스로 비켜난다.
+| | |
+|---|---|
+| pinset | `e8441d96983d…` → map `f5703bc6…`, pinvi `351b4ace…` |
+| journal | 없음 (재시도 안전) |
+| 컨테이너 | `kor-travel-map-postgres`, `pinvi-postgres`만 Up. 나머지는 여전히 down |
+| rebuild t53a | `prejournal_failure` / `prebuild_snapshot` — `.env` 자격증명 부재 (**해결됨**) |
+| rebuild t53b | `prejournal_failure` / `application_builder` — 위 1번 (**미해결**) |
+
+### 이번 사이클에서 끝낸 것
+
+- **Manager 설치본을 `e4d4fa55`로 갱신했다** (사용자 1회 허가로 trusted installer 실행).
+  이전 설치본은 `2dc633dd`로 머지 여섯 개 뒤처져 있었다.
+- **`.env`에 ADR-100 단일 LOGIN 자격증명 쌍을 넣었다** —
+  `KOR_TRAVEL_MAP_SERVICE_PASSWORD`, `KOR_TRAVEL_MAP_PG_DSN`. Manager는 M05 폐기와
+  함께 이 값을 더는 쓰지 않으므로 운영자 책임이다. 선행 조건을 Manager
+  `docs/prod-deployment.md`에 적었다(kor-travel-docker-manager #390).
+  백업: `.env.bak-pre-adr100-service-credential-20260923T095230Z`.
+- **핀을 회전했다** — 직전 pinset의 journal 영구 고착 탈출구가 새 커밋이었고, 두
+  머지가 그것을 만들었다. 회전은 **다시 하면 안 된다**(`rotate-pinned-pair`가 같은
+  쌍에 대해 no-op을 거부한다). 재시도는 rebuild 단계부터다.
+
+### 재시도 방법 (Manager 고친 뒤)
+
+```bash
+# 회전은 이미 끝났다 — chain17을 통째로 다시 돌리면 B단계에서 죽는다.
+sudo systemd-run --no-block --unit=ktdm-rebuild-<새태그> --collect \
+  --property=Type=oneshot --property=TimeoutStartSec=7200 \
+  /opt/kor-travel-docker-manager/scripts/run-pinned-rebuild-once \
+  <설치된 Manager 40-hex> /root/rebuild-ktdm-rebuild-<새태그>
+# 성공하면 후반부
+sudo /root/chain16.sh <MAP 40-hex> <PINVI 40-hex> <execbuild unit> <d2 unit> <태그>
+```
+
+그다음에 `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `400`으로 바꾼다
+(지금 `312_route_geometry_sidecar`). **재구축 뒤에** 바꾼다 — 먼저 바꾸면 API가
+기동을 거부한다.
 
 ## 2026-09-20 (2) — PR #1257 머지 완료, prod 배포가 pinned-rebuild journal에 고착 (outage 진행 중)
 
