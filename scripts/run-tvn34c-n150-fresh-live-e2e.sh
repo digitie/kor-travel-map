@@ -677,13 +677,15 @@ def require_read_only_mount(item, destination):
 
 for item in (storage, webserver, daemon):
     require_read_only_mount(item, "/run/kor-travel-map-dagster-storage-permit")
-for item in (webserver, daemon):
-    require_read_only_mount(item, "/run/kor-travel-map-application-final-permit")
-if any(
-    mount["Destination"] == "/run/kor-travel-map-application-final-permit"
-    for mount in storage["Mounts"]
-):
-    raise SystemExit("Dagster metadata migration received the application permit mount")
+# ADR-101: application final permit 마운트는 사라졌다 — 그것을 읽던
+# `docker/application-schema-final-permit.py`가 rev 400 스쿼시에서 삭제됐고, Manager도
+# 마운트를 만들지 않는다. 남은 하나(storage permit)는 여전히 읽히는 계약이다.
+for item in (storage, webserver, daemon):
+    if any(
+        mount["Destination"] == "/run/kor-travel-map-application-final-permit"
+        for mount in item["Mounts"]
+    ):
+        raise SystemExit("retired application final permit mount is still present")
 PY
 }
 

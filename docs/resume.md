@@ -1,14 +1,12 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-09-23 — revision `400` 단일 baseline (ADR-101), 배포 봉인 제거
+## 2026-09-23 — revision `400` 단일 baseline (ADR-101), 양쪽 모두 완료
 
-**다음 한 작업: Manager 쪽 짝을 만든다 — Map 머지보다 먼저.** Manager의
-`docker-compose.yml`이 Map 이미지에서 지워진 실행파일 둘을 절대경로로 부른다
-(`ktm-application-schema-fresh-300`, `-fresh-finalize`). `bootstrap` profile 한정이라
-평상시 재핀 재구축은 지나가지 않지만, runbook이 가리키는 **fresh DB 복구 경로**가
-바로 그것이다 — 지금 outage의 복구 경로다.
+**다음 한 작업: 두 PR을 같은 사이클에 머지하고, 그다음에 n150 `.env`를 고친다.**
+순서가 계약이다 — 아래 §머지 순서를 볼 것.
 
-**Map 쪽은 끝났다.** 커밋 셋(`d1e553d87`, `4e6a84809`, `cfb7c2fb2`), PR #1259.
+**Map 쪽.** 커밋 셋(`d1e553d87`, `4e6a84809`, `cfb7c2fb2`) + C7 봉인 검증기 대응,
+PR #1259.
 
 | 게이트 | 결과 |
 |---|---|
@@ -16,44 +14,29 @@
 | `ruff check` (CI 범위) | clean |
 | `mypy --strict` ×4 | clean |
 | `lint-imports` | 4 kept / 0 broken |
-| `pytest tests/integration` | 1,133 passed / 20 failed |
+| `pytest tests/integration` | 1,133 passed / 20 failed (디스크 압박, 회귀 아님) |
 
-통합 20건은 원인이 하나다 — `the database system is not yet accepting connections /
-Consistent recovery state has not been yet reached`. 컨테이너가 기동을 마치기 전에
-테스트가 접속해 **단언에 도달조차 못 했다.** 회귀가 아니다. n150에서 Docker 빌드
-캐시 39GB를 회수해 디스크를 91% → 82%로 내리자 같은 모듈이 통과했다.
+**Manager 쪽.** `feat/adr-100-101-map-single-service`, 커밋 `0445c39`(ADR-100 마무리)
++ `78e118a`(ADR-101 봉인 제거). 13 files, −4,922줄. backend 1,947 passed,
+ruff 0.16.4 clean. 실패 둘은 무관하다(하나는 main에서도 빨감, 하나는 docker timeout).
 
-**함께 따라오는 것 (아직 안 함):**
+### 머지 순서
 
-1. **n150 `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`** — 지금
-   `312_route_geometry_sidecar`다. `400`으로 바꾸지 않으면 production API가
-   "the image alembic head does not match the expected head"로 기동을 거부한다.
-   운영 파일 수정이므로 별도 승인 후.
-2. **Manager 쪽 정리** — Map이 더는 읽지 않는 env 세 개
-   (`KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_{API,DAGSTER}_IMAGE_ID`,
-   `..._VOLUME`)와 permit 볼륨 마운트. Map은 안 읽으므로 그대로 둬도 무해하고,
-   Manager PR로 따로 지운다.
-3. **트리거 삭제는 취소했다 — 지울 것이 없다.** 전수조사가 187개 중 85개를 삭제
-   후보로 올렸고 나는 그 근거를 "실측으로 확인"했다고 적었다. **그 확인이 틀렸다.**
-   여섯 그룹 전부 적대 검증에서 반박됐다.
+1. **Manager 먼저.** Manager의 `docker-compose.yml`이 Map 이미지에서 지워진 실행파일
+   둘을 절대경로로 부르고 있었다. 그 상태로 Map만 머지하면 fresh DB 복구 경로가
+   깨진다(평상시 재핀 재구축은 `bootstrap` profile을 지나가지 않으므로 무사하다).
+2. **그다음 Map(#1259).**
+3. **마지막에 n150 `.env`.** `/opt/kor-travel-docker-manager/.env:162`의
+   `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`가 지금 `312_route_geometry_sidecar`다.
+   `400`으로 바꾼다 — **재구축 뒤에.** 먼저 바꾸면 production API가 "the image alembic
+   head does not match the expected head"로 기동을 거부한다.
+   (`/home/digitie/kor-travel-docker-manager/.env:117`은 낡은 개발 사본이다.)
 
-   무엇을 틀렸는가: `aclexplode`로 "TRUNCATE grantee는 `ktm_feature_schema_owner`
-   하나뿐이고 그건 124개 표 전부의 **소유자**니까 부여가 아니라 기본 항목이다 →
-   아무도 TRUNCATE를 못 한다"고 읽었다. 정반대다 — **소유자야말로 TRUNCATE를 할 수
-   있는 주체이고, 소유자에게선 REVOKE가 불가능하다. 그래서 REVOKE가 아니라 트리거를
-   쓴 것이다.** `docker/postgres-role-bootstrap.sh:683`이 유일한 운영 LOGIN
-   `ktm_feature_service`에게 그 소유자로의 `SET TRUE`를 주고, `alembic/env.py`는 모든
-   마이그레이션에서 실제로 `SET ROLE ktm_feature_schema_owner`를 켠다.
+### 아직 안 한 것
 
-   결정적 증거는 CI에 이미 있었다: `tests/integration/_db_cleanup.py`가 `_no_truncate`
-   트리거를 **끄고 나서** TRUNCATE를 실행하고 그게 **성공한다.** 권한이 없다면 트리거를
-   꺼도 똑같이 `permission denied`로 죽어야 한다. 즉 트리거가 유일한 방벽이다.
-
-   `aclexplode`는 소유자 암묵 권한도 `SET ROLE` 도달성도 superuser 우회도 보지 못한다.
-   카탈로그 층에 결박하고 효과 층에 결박하지 않은 것이 원인이다.
-   `tests/integration/test_tvn41s_material_fences.py:147`이 이 삭제를 정확히 예견해
-   적어 뒀다 — "TRUNCATE trigger 둘을 떨어뜨려도 `pytest -q`와 `alembic check`가 모두
-   초록이다(적대 리뷰 지적)".
+- prod 재구축 사이클(`/root/chain17.sh`)은 두 PR 머지 뒤에 돈다.
+- `400` 위에 revision이 쌓이기 전까지 `tests/lint/test_baseline_schema_is_not_a_contract_oracle.py`
+  의 등식 대조는 그대로 유지된다. 첫 `401`이 붙으면 스스로 비켜난다.
 
 ## 2026-09-20 (2) — PR #1257 머지 완료, prod 배포가 pinned-rebuild journal에 고착 (outage 진행 중)
 

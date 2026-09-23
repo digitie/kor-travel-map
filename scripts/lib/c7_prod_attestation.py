@@ -113,9 +113,7 @@ _MAP_APPLICATION_300_EXECUTION_EVIDENCE_KEYS = frozenset(
         "application_create_database_identity_sha256",
         "application_database_identity",
         "application_database_identity_sha256",
-        "fresh_root_operation_plan",
-        "fresh_finalize_operation_plan",
-        "app_final_permit_sha256",
+        "application_schema_head",
         "dagster_metadata_database_identity",
         "dagster_metadata_database_identity_sha256",
         "metadata_permit_sha256",
@@ -157,17 +155,6 @@ _DAGSTER_METADATA_ROLE_ATTRIBUTE_KEYS = frozenset(
         "database_role_setting_count",
         "granted_role_count",
         "member_role_count",
-    }
-)
-_APPLICATION_OPERATION_PLAN_KEYS = frozenset(
-    {
-        "transaction_id",
-        "operation_id",
-        "basis_journal_sha256",
-        "basis_journal_generation",
-        "writer_fence_expires_at",
-        "fence_sha256",
-        "result_sha256",
     }
 )
 # ktdm `PinnedRuntimeCancelProbeReceipt.to_payload()` / `PinnedRuntimeCancelProbeOutcome`의
@@ -615,34 +602,7 @@ def _validate_pinned_database_identity(value: object) -> None:
         raise AttestationError("journal PinVi database owner")
 
 
-def _validate_operation_plan(value: object, *, label: str) -> None:
-    if not _exact_dict(value, set(_APPLICATION_OPERATION_PLAN_KEYS)):
-        raise AttestationError(f"journal {label} operation plan shape")
-    assert isinstance(value, dict)
-    for field in ("transaction_id", "operation_id"):
-        identifier = value[field]
-        if not isinstance(identifier, str) or UUID_PATTERN.fullmatch(identifier) is None:
-            raise AttestationError(f"journal {label} operation identity")
-    for field in ("basis_journal_sha256", "fence_sha256", "result_sha256"):
-        digest = value[field]
-        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
-            raise AttestationError(f"journal {label} operation digest")
-    if (
-        type(value["basis_journal_generation"]) is not int
-        or value["basis_journal_generation"] < 0
-    ):
-        raise AttestationError(f"journal {label} operation generation")
-    _validate_utc_timestamp(
-        value["writer_fence_expires_at"],
-        f"journal {label} operation fence expiry",
-    )
-
-
-def _validate_application_execution_evidence(
-    value: object,
-    *,
-    journal_generation: int,
-) -> None:
+def _validate_application_execution_evidence(value: object) -> None:
     if not _exact_dict(value, set(_MAP_APPLICATION_300_EXECUTION_EVIDENCE_KEYS)):
         raise AttestationError("journal application execution evidence shape")
     assert isinstance(value, dict)
@@ -689,23 +649,17 @@ def _validate_application_execution_evidence(
             or digest != _canonical_document_sha256(value[identity_field])
         ):
             raise AttestationError(label)
-    for field in ("app_final_permit_sha256", "metadata_permit_sha256"):
-        digest = value[field]
-        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
-            raise AttestationError("journal application permit digest")
-    root_plan = value["fresh_root_operation_plan"]
-    finalize_plan = value["fresh_finalize_operation_plan"]
-    _validate_operation_plan(root_plan, label="root")
-    _validate_operation_plan(finalize_plan, label="finalize")
-    assert isinstance(root_plan, dict)
-    assert isinstance(finalize_plan, dict)
+    digest = value["metadata_permit_sha256"]
+    if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+        raise AttestationError("journal application permit digest")
+    # ADR-101: 봉인된 저널은 스키마가 **관측됐다**고 주장한다. 값 자체는 revision
+    # 문자열이고, 그것이 후보 head와 같은지는 저널의 candidate 블록이 따로 센다.
+    observed_head = value["application_schema_head"]
     if (
-        root_plan["operation_id"] == finalize_plan["operation_id"]
-        or root_plan["basis_journal_generation"] >= journal_generation
-        or finalize_plan["basis_journal_generation"] >= journal_generation
+        not isinstance(observed_head, str)
+        or SCHEMA_HEAD_PATTERN.fullmatch(observed_head) is None
     ):
-        raise AttestationError("journal application operation lineage")
-
+        raise AttestationError("journal application schema head")
 
 def _validate_utc_timestamp(value: object, label: str) -> None:
     """ktdm과 같은 강도로 **UTC**를 요구한다.
@@ -759,8 +713,7 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
     if candidate_evidence != generation["map_application_300_candidate_evidence"]:
         raise AttestationError("journal candidate evidence differs")
     _validate_application_execution_evidence(
-        value["map_application_300_execution_evidence"],
-        journal_generation=journal_generation,
+        value["map_application_300_execution_evidence"]
     )
     _validate_pinned_database_identity(value["pinvi_database_identity"])
     rebind = value["pinvi_role_credential_environment_rebind"]

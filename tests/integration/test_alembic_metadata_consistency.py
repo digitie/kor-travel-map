@@ -22,10 +22,7 @@ from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
 
 from alembic import command
-from kortravelmap.infra.application_schema_head import (
-    BASELINE_ROOT_REVISION,
-    application_schema_head,
-)
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration._application_300_bootstrap import (
     alembic_schema_owner_role,
     bootstrapped_application_300_migrator_dsn,

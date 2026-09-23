@@ -387,24 +387,6 @@ def _runtime_fixture() -> tuple[
             "member_role_count": 0,
         },
     }
-    root_plan = {
-        "transaction_id": "10000000-0000-0000-0000-000000000001",
-        "operation_id": "20000000-0000-0000-0000-000000000001",
-        "basis_journal_sha256": "8" * 64,
-        "basis_journal_generation": 7,
-        "writer_fence_expires_at": "2026-07-19T00:10:00+00:00",
-        "fence_sha256": "9" * 64,
-        "result_sha256": "a" * 64,
-    }
-    finalize_plan = {
-        "transaction_id": "10000000-0000-0000-0000-000000000002",
-        "operation_id": "20000000-0000-0000-0000-000000000002",
-        "basis_journal_sha256": "b" * 64,
-        "basis_journal_generation": 11,
-        "writer_fence_expires_at": "2026-07-19T00:20:00+00:00",
-        "fence_sha256": "c" * 64,
-        "result_sha256": "d" * 64,
-    }
     execution_evidence = {
         "application_create_database_identity": application_create_identity,
         "application_create_database_identity_sha256": (
@@ -414,9 +396,7 @@ def _runtime_fixture() -> tuple[
         "application_database_identity_sha256": (
             _canonical_document_sha256(application_identity)
         ),
-        "fresh_root_operation_plan": root_plan,
-        "fresh_finalize_operation_plan": finalize_plan,
-        "app_final_permit_sha256": "e" * 64,
+        "application_schema_head": "400",
         "dagster_metadata_database_identity": dagster_identity,
         "dagster_metadata_database_identity_sha256": (
             _canonical_document_sha256(dagster_identity)
@@ -753,10 +733,10 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
             "journal application identity digest",
         ),
         (
-            lambda value: value["map_application_300_execution_evidence"][
-                "fresh_finalize_operation_plan"
-            ].update({"result_sha256": None}),
-            "journal finalize operation digest",
+            lambda value: value["map_application_300_execution_evidence"].update(
+                {"application_schema_head": "NOT A HEAD"}
+            ),
+            "journal application schema head",
         ),
         (
             lambda value: value["map_application_300_execution_evidence"][

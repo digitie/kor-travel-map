@@ -1,5 +1,53 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 (3) — 봉인의 건너편을 접었다: 아홉 phase가 한 번의 관측으로
+
+ADR-101이 Map에서 지운 두 실행파일의 **소비자**는 Manager였다. 그 쪽에서 무엇이
+사라졌는지 세어 보니, Map에서 지운 것보다 컸다 — 13 files, −4,922줄.
+
+**무엇이 있었는가.** Manager는 삭제된 두 one-shot이 stdout으로 뱉는 JSON 영수증을
+파싱했고, 그들에게 root 소유 writer fence를 깔아 주었고, 그 과정을 아홉 개의 durable
+phase(`fresh_root_plan_ready` … `application_permit_ready`)로 쪼갰다. 각 phase는
+operation plan을 들고 있었고, 그 plan은 "어느 저널 세대에서 썼는가"를 sha256으로
+결박했다. 중간에 죽으면 `recover` / `probe-missing` 인자로 같은 실행파일을 다시 불러
+"영수증이 있는가 / 없는가"를 되물었다.
+
+**그 전부가 한 가지를 위한 것이었다** — 영수증 파일을 안전하게 재개하기. 파일이
+사라지면서 결박할 대상도 사라졌다.
+
+**대신 들어온 것.** one-shot이 끝나면 Manager가 **자기 admin 자격으로**
+`public.alembic_version`을 읽는다. 값이 후보 head와 다르면 거부하고, 같으면 저널에
+`application_schema_head`로 적는다. 옛 경로에서 "스키마가 올라갔다"의 근거는 결국
+"쉘 명령이 0으로 끝났다"였고, 영수증은 그 명령 자신이 쓴 것이라 독립 증거가 아니었다.
+
+**잃지 않은 것.** "이미 끝난 것을 다시 돌리지 않는다"는 여전히 계약이다. 다만 성질이
+바뀌었다 — 옛 계약은 "durable intent 이후 **절대** 재실행하지 않는다"였고, 그것은
+재실행이 **위험했기 때문에** 필요했다. `alembic upgrade head`는 이미 head면 무연산이고
+`runtime_privileges`는 재조정이므로 지금은 안전하다. 그래도 `application_schema_ready`
+에서 재개할 때 one-shot 명령이 호출 목록에 **없어야** 한다는 단언은 남겼다. 없으면
+phase 자체가 의미를 잃는다.
+
+**두 번 밟은 사고, 둘 다 조용한 종류.**
+
+1. `volumes:` 키만 지웠더니 그 아래 bind mount 세 줄이 앞 `command:` 목록에 흡수돼
+   **Prometheus CLI 플래그로 둔갑**했다. YAML은 유효하고 `safe_load`는 통과한다.
+   찾은 방법은 단언이 아니라 비교였다 — HEAD 문서와 지금 문서를 service×key로 대조해
+   "prometheus.volumes: 3 → None"을 뽑았다.
+2. 앵커 구간으로 헬퍼 12개를 지우며 같은 구간에 있던 `_discard_application_300_receipt`
+   (빌드 영수증 — 다른 축이다)를 함께 지웠다. 클래스 안에서 메서드 하나를 지우려고 끝
+   경계를 `\n\n\n`으로 잡았다가 뒤따르는 세 메서드를 함께 날린 것도 같은 형태다.
+   AST로 HEAD와 최상위 이름 집합을 대조하는 검사를 따로 돌려 잡았다.
+
+**이 저장소가 함께 바뀐 자리.** `scripts/lib/c7_prod_attestation.py`가 prod 저널을
+Manager와 같은 강도로 재검증하므로 증거 모양의 사본을 들고 있었다 — 새 모양으로 옮겼다.
+`scripts/run-tvn34c-n150-fresh-live-e2e.sh`는 final permit 마운트의 존재를 요구하다가
+이제 부재를 요구한다.
+
+**게이트.** Manager backend 1,947 passed (n150 CI-parity), ruff 0.16.4 clean. 남은
+둘은 이 변경과 무관하다 — `test_compose_ensure_build_command`는 손대지 않은 main에서도
+빨갛고, `test_canonical_compose_readiness_matches_real_runtime`은 30초 docker compose
+timeout이다(직전 회차에서 같은 코드로 통과).
+
 ## 2026-09-23 (2) — 트리거 85개를 지우려다, 내 실측이 정반대로 읽힌 것을 알았다
 
 전수조사가 187개 트리거 중 85개를 "막는 동작을 할 수 있는 principal이 없다"며 삭제

@@ -53,6 +53,43 @@ receipt 사슬은 `0236 → 300` 이관이 **원본을 손대지 않았음**을 
 
 세 술어는 각각 따로 빨개지는 것을 확인했다(`tests/unit/test_db.py`).
 
+## 건너편 — Manager는 무엇을 대신 보는가
+
+봉인의 소비자는 이 저장소가 아니라 `kor-travel-docker-manager`였다. 삭제된 두
+실행파일이 stdout으로 뱉던 JSON 영수증을 Manager가 파싱했고, 그들에게 writer fence를
+깔아 주었고, 그 과정을 **아홉 개의 durable phase**로 쪼개 재개 가능하게 만들었다.
+읽을 대상이 사라졌으므로 그 기계 전체가 결박할 것이 없다.
+
+Manager 쪽 대응(ADR-100/101 브랜치, 13 files, −4,922줄)은 이렇게 접혔다:
+
+- phase 아홉(`fresh_root_*` 넷, `fresh_finalize_*` 넷, `application_permit_ready`)이
+  `application_schema_ready` 하나가 됐다.
+- 증거 셋(operation plan 둘, final permit digest)이 `application_schema_head` 하나가
+  됐다. 이 값은 one-shot이 끝난 **뒤** Manager가 자기 admin 자격으로
+  `public.alembic_version`을 읽어 얻는다.
+- `MapApplication300OperationPlan`과 그 검증기, fence builder 둘, 영수증 parser 넷,
+  missing-receipt parser 둘, application final permit 빌더/검증기가 삭제됐다.
+- fixed mount 넷이 하나로 줄었다. 남은 것은 `dagster-storage-permit` — Map의
+  `docker/dagster-storage-migrate.py`가 실제로 읽는 살아 있는 계약이다.
+
+**왜 관측이 영수증보다 나은가.** 옛 경로에서 "스키마가 올라갔다"의 근거는 결국 "쉘
+명령이 0으로 끝났다"였다. 영수증은 그 명령 **자신이** 쓴 것이라 독립 증거가 아니다 —
+one-shot이 조용히 아무것도 안 하고 0으로 끝나면 영수증도 그렇게 적힌다. 지금은
+Manager가 데이터베이스를 직접 읽으므로 그 경우가 걸린다.
+
+**재개도 단순해졌다.** `alembic upgrade head`는 이미 head면 무연산이고
+`kortravelmap.infra.runtime_privileges`는 재조정이므로, 저널 기록 직전에 죽어도 다음
+회차가 그냥 다시 돌리면 된다. fence·operation plan·missing-receipt 프로브는 **그
+재실행이 위험했기 때문에** 있었다. "이미 끝난 것을 다시 돌리지 않는다"는 여전히
+계약이고, Manager의 `test_application_300_one_shots_never_reexecute_after_durable_intent`
+에 `application_schema_ready` 칸으로 남아 있다.
+
+**이 저장소가 함께 바뀐 자리.** `scripts/lib/c7_prod_attestation.py`가 prod 저널을
+Manager와 같은 강도로 다시 검증하므로 증거 모양의 사본을 들고 있었다. 그 사본도 새
+모양으로 옮겼다(operation plan 둘 → `application_schema_head` 하나).
+`scripts/run-tvn34c-n150-fresh-live-e2e.sh`는 final permit 마운트의 **존재**를
+요구하다가 이제 **부재**를 요구한다.
+
 ## 무엇을 잃는가
 
 - **중간 revision으로 올라오는 DB를 받지 못한다.** `0236`이든 `307`이든, 이 이미지는
