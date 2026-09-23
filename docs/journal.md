@@ -1,5 +1,38 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 (5) — prod 사이클을 돌렸고, 내 ADR-101 작업이 한 축을 빠뜨린 것을 알았다
+
+두 PR을 머지한 뒤 전 사이클을 기동했다. 세 가지를 배웠고, 셋째가 남은 일이다.
+
+**1. 설치본이 여섯 머지 뒤처져 있었다.** chain17은 Manager revision을 `/opt`의
+설치 매니페스트에서 읽는다. 거기 있던 것은 `2dc633dd`(#381 머지 시점)로 ADR-100도
+ADR-101도 없었다. 그대로 돌렸다면 옛 compose가 새 Map 이미지에서 삭제된 실행파일을
+불렀을 것이다. 사용자 1회 허가를 받아 trusted installer로 `e4d4fa55`를 설치했다.
+
+**2. `.env`에 ADR-100 자격증명 쌍이 없었다.** 재구축이 `prejournal_failure` /
+stage `prebuild_snapshot`으로 죽었고 그 한 단어가 남긴 전부였다. 원인은
+`KOR_TRAVEL_MAP_SERVICE_PASSWORD`와 `KOR_TRAVEL_MAP_PG_DSN` 부재 — 새 compose가
+`${X:?...}`로 요구하므로 해석 단계에서 막힌 것이다.
+
+왜 비어 있었나가 핵심이다. M05를 폐기하면서 **Manager가 `.env`에 role 자격증명을
+심던 경로가 사라졌다**(`compose_service.py`의 `prewrite_admission` 주석). 그 전까지는
+Manager가 넣었으므로 운영자가 신경 쓸 일이 아니었고, 사라진 뒤에도 runbook이 그
+책임을 이어받지 못했다. 이제 적었다(Manager #390).
+
+**3. 내 ADR-101 Manager 작업이 빌드 영수증 축을 빠뜨렸다.** 자격증명을 넣자
+재구축이 다음 단계인 `application_builder`에서 죽었다. ADR-101은 Map에서
+`scripts/build-application-300-paired-candidate.sh`를 지웠는데(ADR 문서가 명시한다)
+Manager의 소비자는 그대로다. 같은 뿌리에서 `DagsterStorageCandidate`도
+`paired_candidate_build_receipt_sha256`을 계속 싣는데 Map은 이제 그 필드를 받지
+않는다.
+
+내가 범위로 잡았던 (C)(D)(E)는 영수증·fence·phase 기계였고, **빌드 영수증은 다른
+축인데 같은 ADR이 지운 것**이었다. 지우는 쪽(Map)과 읽는 쪽(Manager)을 파일 단위로
+대조했어야 했다 — ADR 문서 17행이 지운 파일을 이미 열거하고 있었다.
+
+prod는 더 나빠지지 않았다: 두 실패 모두 저널 전이라 후보가 해제됐고 새 pinset에
+journal이 없다. 회전은 끝났으므로 재시도는 rebuild 단계부터다.
+
 ## 2026-09-23 (4) — 두 ADR을 한 사이클에 머지했다
 
 순서가 계약이었다: **Manager 먼저**(#389 → `e4d4fa5`), 그다음 Map(#1259 →
