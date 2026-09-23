@@ -63,31 +63,6 @@ _ENV_ASSIGNMENT = re.compile(
 )
 
 _EXEMPT: dict[str, str] = {
-    "build-baseline.sh": (
-        "baseline 제작기. 정의상 `300` baseline만 만든다 — 다른 head의 baseline은 "
-        "재squash라는 별도 결정이다."
-    ),
-    "create-application-300-fresh-oracle.sh": (
-        "`0236 → 300` baseline artifact 검증용 disposable oracle. 검증 대상이 baseline "
-        "그 자체이므로 목적지가 baseline root다."
-    ),
-    "rehearse-application-300-handoff.sh": (
-        "`0236 → 300` handoff 리허설. handoff의 목적지가 baseline root다."
-    ),
-    "build-application-300-paired-candidate.sh": (
-        "paired candidate receipt의 `forbidden_application_raw_revision`은 'Dagster "
-        "metadata DB는 application raw revision을 갖지 않는다'는 격리 선언이며 baseline "
-        "root를 가리킨다 — head가 아니다."
-    ),
-    "transition-application-schema-0236-to-300.py": (
-        "handoff executable. stamp 목적지가 baseline root이며 "
-        "`test_handoff_stamps_the_baseline_root_not_the_head`가 따로 고정한다."
-    ),
-    "application-schema-fresh-300.py": (
-        "baseline root 도달 여부로 분기한다. 리터럴이 아니라 "
-        "`BASELINE_ROOT_REVISION` 상수를 쓰지만, 봉인 실패 메시지에 `300`이 문자열로 "
-        "들어간다."
-    ),
     "dagster-storage-migrate.py": (
         "`_BASELINE_ROOT_REVISION` 선언 한 줄. Dagster metadata DB가 application raw "
         "revision을 갖지 않는다는 격리 판정에 쓰이며 head가 아니다."
@@ -197,16 +172,30 @@ def test_every_exemption_actually_needs_it() -> None:
     )
 
 
+#: 심는 표본은 **현행 root 값으로** 만든다. 리터럴을 박아 두면 root가 바뀌는 날
+#: 표본이 규칙과 어긋나 "뚫렸던 형태가 이제 걸린다"는 증명이 조용히 사라진다 —
+#: `300` -> `400` 스쿼시에서 일곱 건 전부 실제로 그렇게 됐다.
+_ROOT = BASELINE_ROOT_REVISION
+
+
 @pytest.mark.parametrize(
     ("shape", "line", "previous"),
     [
-        ("CLI 장옵션", '    --expected-head "300" \\', "    verify \\"),
-        ("변수 대입", 'EXPECTED_HEAD="300"', ""),
-        ("Dockerfile ENV", 'ENV KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD="300"', ""),
-        ("멤버십 튜플", '    "300",', "SUPPORTED_HEADS = ("),
-        ("SQL IN", "    CHECK (head IN ('300'))", ""),
-        ("compose env", "      KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD: 300", ""),
-        ("dotenv", "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300", ""),
+        ("CLI 장옵션", f'    --expected-head "{_ROOT}" \\', "    verify \\"),
+        ("변수 대입", f'EXPECTED_HEAD="{_ROOT}"', ""),
+        (
+            "Dockerfile ENV",
+            f'ENV KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD="{_ROOT}"',
+            "",
+        ),
+        ("멤버십 튜플", f'    "{_ROOT}",', "SUPPORTED_HEADS = ("),
+        ("SQL IN", f"    CHECK (head IN ('{_ROOT}'))", ""),
+        (
+            "compose env",
+            f"      KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD: {_ROOT}",
+            "",
+        ),
+        ("dotenv", f"KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD={_ROOT}", ""),
     ],
 )
 def test_the_rule_catches_every_shape_that_bypassed_the_old_one(

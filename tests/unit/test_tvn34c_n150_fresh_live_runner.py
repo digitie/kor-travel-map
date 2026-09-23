@@ -58,7 +58,7 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'local log="$evidence/playwright.log"' in runner
     assert '2>&1 | tee "$log"' in runner
     assert 'compose_map up --detach --wait postgres' in runner
-    assert 'compose_map --profile fresh-init run --rm db-application-schema-fresh-300' in runner
+    assert 'compose_map --profile fresh-init run --rm db-application-schema-fresh' in runner
     assert 'compose_map up --detach --force-recreate --wait api' in runner
     assert "- candidate-ui" in runner
     assert 'E2E_BASE_URL=http://localhost:12705' in runner
@@ -119,7 +119,7 @@ def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
 def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     seeder = _text(_SEEDER)
 
-    assert 'expected_login="ktm_feature_dagster_runtime"' in seeder
+    assert 'expected_login="ktm_feature_service"' in seeder
     assert "AsyncKorTravelMapClient" in seeder
     assert "FeatureKind.PLACE" in seeder
     assert "FeatureKind.WEATHER" in seeder

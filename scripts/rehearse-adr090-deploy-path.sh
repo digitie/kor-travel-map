@@ -37,6 +37,8 @@ require KTM_REHEARSAL_EXPECTED_HEAD
 
 IMAGE="$KTM_REHEARSAL_IMAGE"
 MIGRATOR_DSN="$KTM_REHEARSAL_MIGRATOR_DSN"
+# ADR-100: migration DSN과 runtime DSN이 한 이름이 됐다. 이 입력은 호출 계약을
+# 깨지 않으려고 계속 요구하지만, 아래 케이스는 단일 DSN 하나만 쓴다.
 RUNTIME_DSN="$KTM_REHEARSAL_RUNTIME_DSN"
 EXPECTED_HEAD="$KTM_REHEARSAL_EXPECTED_HEAD"
 
@@ -84,21 +86,24 @@ report() {
 printf '=== ADR-090 배포 경로 리허설 ===\n'
 printf 'image head 기대값: %s\n\n' "$EXPECTED_HEAD"
 
-# 1. split DSN 누락 — prod crash-loop의 정확한 재현. DB를 건드리기 전에 죽어야 한다.
-out="$(run_case -e "KOR_TRAVEL_MAP_PG_DSN=$MIGRATOR_DSN")" && code=0 || code=$?
-report "split DSN 누락은 기동을 거부한다" "$code" nonzero "$out"
-printf '%s\n' "$out" | grep -q 'KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required' ||
-  { printf 'FAIL  거부 사유가 MIGRATOR_PG_DSN 누락이 아니다\n'; failures=$((failures + 1)); }
+# ADR-100: 원래 1·2번은 "migrator DSN과 runtime DSN이 갈라져 있는데 한쪽이 없다"는
+# prod crash-loop을 재현했다. 두 DSN이 `KOR_TRAVEL_MAP_PG_DSN` 하나로 합쳐지면서 그
+# 주제 자체가 사라졌다 — 이름만 바꾸면 1번은 **이제 정상 production 형상**을 주고도
+# 다른 이유(EXPECTED_HEAD/final-permit)로 nonzero가 나므로 report가 PASS를 찍고 grep만
+# 따로 FAIL을 찍는다. 2번은 재현할 두 번째 DSN이 없다.
+#
+# 살아남은 등가물은 하나다: DSN이 아예 없으면 DB를 건드리기 전에 죽어야 한다.
 
-# 2. runtime DSN만 있고 migrator가 없는 경우도 같다.
-out="$(run_case -e "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=$RUNTIME_DSN")" && code=0 || code=$?
-report "runtime DSN 단독도 거부한다" "$code" nonzero "$out"
+# 1. DSN 누락 — DB를 건드리기 전에 죽어야 한다.
+out="$(run_case)" && code=0 || code=$?
+report "DSN 누락은 기동을 거부한다" "$code" nonzero "$out"
+printf '%s\n' "$out" | grep -q 'KOR_TRAVEL_MAP_PG_DSN is required' ||
+  { printf 'FAIL  거부 사유가 PG_DSN 누락이 아니다\n'; failures=$((failures + 1)); }
 
 # 3. EXPECTED_HEAD 불일치 — DB 접속 전에 거부해야 한다(`alembic heads`는 script
 #    디렉터리만 읽는다). 틀린 head를 박고 migration이 돌지 않는지 본다.
 out="$(run_case \
-  -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$MIGRATOR_DSN" \
-  -e "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=$RUNTIME_DSN" \
+  -e "KOR_TRAVEL_MAP_PG_DSN=$MIGRATOR_DSN" \
   -e "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=0000_head_that_does_not_exist")" && code=0 || code=$?
 report "EXPECTED_HEAD 불일치는 기동을 거부한다" "$code" nonzero "$out"
 printf '%s\n' "$out" | grep -q 'does not match the expected head' ||
@@ -106,8 +111,7 @@ printf '%s\n' "$out" | grep -q 'does not match the expected head' ||
 
 # 4. set-but-empty는 조용한 게이트 해제가 되면 안 된다.
 out="$(run_case \
-  -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$MIGRATOR_DSN" \
-  -e "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=$RUNTIME_DSN" \
+  -e "KOR_TRAVEL_MAP_PG_DSN=$MIGRATOR_DSN" \
   -e "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=")" && code=0 || code=$?
 report "EXPECTED_HEAD set-but-empty는 거부한다" "$code" nonzero "$out"
 

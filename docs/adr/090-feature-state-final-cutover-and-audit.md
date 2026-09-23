@@ -1,6 +1,9 @@
 # ADR-090: Feature 직교 상태의 final cutover와 DB 전이 감사
 
-- **상태**: accepted
+- **상태**: superseded by ADR-100 (LOGIN role 분리만 — `ktm_feature_migrator`/
+  `ktm_feature_api_runtime`/`ktm_feature_dagster_runtime` 세 LOGIN role을 `ktm_feature_service`
+  하나로 통합. §2의 procedure 기반 쓰기 강제, audit trigger, 18개 NOLOGIN role 계층은
+  그대로 유지 — 이 ADR이 규정한 1차 보안 경계는 건드리지 않는다.)
 - **날짜**: 2026-08-09
 - **결정자**: 사용자 + Codex
 - **관련**: ADR-067, ADR-074, ADR-075, T-VN-34

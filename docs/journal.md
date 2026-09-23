@@ -1,5 +1,143 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 (3) — 봉인의 건너편을 접었다: 아홉 phase가 한 번의 관측으로
+
+ADR-101이 Map에서 지운 두 실행파일의 **소비자**는 Manager였다. 그 쪽에서 무엇이
+사라졌는지 세어 보니, Map에서 지운 것보다 컸다 — 13 files, −4,922줄.
+
+**무엇이 있었는가.** Manager는 삭제된 두 one-shot이 stdout으로 뱉는 JSON 영수증을
+파싱했고, 그들에게 root 소유 writer fence를 깔아 주었고, 그 과정을 아홉 개의 durable
+phase(`fresh_root_plan_ready` … `application_permit_ready`)로 쪼갰다. 각 phase는
+operation plan을 들고 있었고, 그 plan은 "어느 저널 세대에서 썼는가"를 sha256으로
+결박했다. 중간에 죽으면 `recover` / `probe-missing` 인자로 같은 실행파일을 다시 불러
+"영수증이 있는가 / 없는가"를 되물었다.
+
+**그 전부가 한 가지를 위한 것이었다** — 영수증 파일을 안전하게 재개하기. 파일이
+사라지면서 결박할 대상도 사라졌다.
+
+**대신 들어온 것.** one-shot이 끝나면 Manager가 **자기 admin 자격으로**
+`public.alembic_version`을 읽는다. 값이 후보 head와 다르면 거부하고, 같으면 저널에
+`application_schema_head`로 적는다. 옛 경로에서 "스키마가 올라갔다"의 근거는 결국
+"쉘 명령이 0으로 끝났다"였고, 영수증은 그 명령 자신이 쓴 것이라 독립 증거가 아니었다.
+
+**잃지 않은 것.** "이미 끝난 것을 다시 돌리지 않는다"는 여전히 계약이다. 다만 성질이
+바뀌었다 — 옛 계약은 "durable intent 이후 **절대** 재실행하지 않는다"였고, 그것은
+재실행이 **위험했기 때문에** 필요했다. `alembic upgrade head`는 이미 head면 무연산이고
+`runtime_privileges`는 재조정이므로 지금은 안전하다. 그래도 `application_schema_ready`
+에서 재개할 때 one-shot 명령이 호출 목록에 **없어야** 한다는 단언은 남겼다. 없으면
+phase 자체가 의미를 잃는다.
+
+**두 번 밟은 사고, 둘 다 조용한 종류.**
+
+1. `volumes:` 키만 지웠더니 그 아래 bind mount 세 줄이 앞 `command:` 목록에 흡수돼
+   **Prometheus CLI 플래그로 둔갑**했다. YAML은 유효하고 `safe_load`는 통과한다.
+   찾은 방법은 단언이 아니라 비교였다 — HEAD 문서와 지금 문서를 service×key로 대조해
+   "prometheus.volumes: 3 → None"을 뽑았다.
+2. 앵커 구간으로 헬퍼 12개를 지우며 같은 구간에 있던 `_discard_application_300_receipt`
+   (빌드 영수증 — 다른 축이다)를 함께 지웠다. 클래스 안에서 메서드 하나를 지우려고 끝
+   경계를 `\n\n\n`으로 잡았다가 뒤따르는 세 메서드를 함께 날린 것도 같은 형태다.
+   AST로 HEAD와 최상위 이름 집합을 대조하는 검사를 따로 돌려 잡았다.
+
+**이 저장소가 함께 바뀐 자리.** `scripts/lib/c7_prod_attestation.py`가 prod 저널을
+Manager와 같은 강도로 재검증하므로 증거 모양의 사본을 들고 있었다 — 새 모양으로 옮겼다.
+`scripts/run-tvn34c-n150-fresh-live-e2e.sh`는 final permit 마운트의 존재를 요구하다가
+이제 부재를 요구한다.
+
+**게이트.** Manager backend 1,947 passed (n150 CI-parity), ruff 0.16.4 clean. 남은
+둘은 이 변경과 무관하다 — `test_compose_ensure_build_command`는 손대지 않은 main에서도
+빨갛고, `test_canonical_compose_readiness_matches_real_runtime`은 30초 docker compose
+timeout이다(직전 회차에서 같은 코드로 통과).
+
+## 2026-09-23 (2) — 트리거 85개를 지우려다, 내 실측이 정반대로 읽힌 것을 알았다
+
+전수조사가 187개 트리거 중 85개를 "막는 동작을 할 수 있는 principal이 없다"며 삭제
+후보로 올렸다. 나는 그 근거를 카탈로그로 확인했다고 보고했다. **확인이 아니라 오독이었다.**
+적대 검증이 여섯 그룹을 전부 반박했다 — 삭제 가능한 트리거는 **0개**다.
+
+**무엇을 쟀는가.** `aclexplode`로 124개 표의 TRUNCATE grantee를 뽑았더니
+`ktm_feature_schema_owner` 하나였다. 그건 그 124개 표 **전부의 소유자**다. 나는 이것을
+"소유자 기본 항목이지 부여가 아니다 → 아무도 TRUNCATE를 못 한다"로 읽었다.
+
+**정반대다.** 소유자야말로 TRUNCATE를 할 수 있는 주체이고, **소유자에게선 REVOKE가
+불가능하다.** 그래서 REVOKE가 아니라 트리거를 쓴 것이다. 그리고 그 소유자는 닿을 수 있는
+자리에 있다 — `docker/postgres-role-bootstrap.sh:683`이 유일한 운영 LOGIN
+`ktm_feature_service`에게 `SET TRUE`를 주고, `alembic/env.py`는 **모든 마이그레이션에서**
+`SET ROLE ktm_feature_schema_owner`를 켠다. revision 400 자신이 그 세션 안에서 돈다.
+
+**증거는 CI에 이미 있었다.** `tests/integration/_db_cleanup.py`가 `_no_truncate` 트리거를
+**끄고 나서** TRUNCATE를 실행하고, 그게 **성공한다.** 권한이 없다면 트리거를 꺼도 똑같이
+`permission denied`로 죽어야 한다. 성공한다는 것이 곧 "principal이 TRUNCATE를 갖고 있고
+트리거가 유일한 방벽"이라는 실행 가능한 증명이다. 나는 그 파일을 blast-radius 목록으로만
+읽고, **그것이 답이라는 것**을 보지 못했다.
+
+**저장소가 이미 답해 뒀다.** `tests/integration/test_tvn41s_material_fences.py:147`:
+"UPDATE fence만 시험하면 나중에 TRUNCATE trigger 둘을 떨어뜨려도 `pytest -q`와
+`alembic check`가 모두 초록이다(적대 리뷰 지적)." 그 테스트는 정확히 이번 삭제를 잡으려고
+쓰였다. 그리고 `ENABLE ALWAYS` 다섯 줄은 `session_replication_role = replica` 한 줄로
+우회하는 행위자가 **있다**는 전제 위에서만 뜻이 있다 — 아무도 못 한다면 쓸 이유가 없는
+구문이다.
+
+**교훈은 이미 쓰여 있던 것이다** — 탐지기는 효과에, 그리고 맞는 층에 결박한다. 나는
+카탈로그 층(`aclexplode`)에 결박했고, 그 층은 소유자 암묵 권한도 `SET ROLE` 도달성도
+superuser 우회도 **구조적으로 보지 못한다.** 효과 층(트리거를 끄면 TRUNCATE가 되는가)에
+결박했다면 첫 질문에서 끝났다.
+
+지울 것이 없다는 것은 나쁜 소식이 아니다. 이 트리거들은 과잉 구현이 아니라 소유자를
+제약할 수 있는 **유일한** 수단이고, 지웠다면 `TRUNCATE feature.features CASCADE`가
+거부에서 전량 삭제로 **ACL 한 글자 안 바뀐 채** 조용히 바뀌었을 것이다.
+
+## 2026-09-23 — 열네 revision을 하나로 접고, 그 체인을 지키던 장치를 같이 걷어냈다
+
+활성 Alembic graph가 revision **하나**가 됐다. `400_schema_baseline.py`가 head
+`pg_dump`와 seed를 적용하고 `down_revision = None`이다. revision 14개와 사이드카
+111개가 사라졌고, 그 체인을 감시하던 장치가 함께 사라졌다 — 266개 파일,
+**-54,018 / +2,349**.
+
+**접을 수 있었던 이유.** 긴 migration 체인이 사는 값은 하나다 — 돌고 있는 DB를 그
+자리에서 앞으로 옮길 수 있다는 것. 이 저장소는 돌고 있지 않고 데이터 보존도 요구하지
+않으므로 그 값에 사는 사람이 없는데, 비용은 계속 쌓였다. 같은 사실(role graph·ACL·
+procedure 본문)이 열네 revision에 흩어져 어긋날 자리가 열네 군데였다.
+`runtime_privileges.py`의 조건부 ACL 세 덩어리는 전부 "이 조정기가 두 스키마 상태에서
+돈다"는 사정 하나에서 나왔다.
+
+**봉인.** receipt 사슬은 `0236 → 300` 이관이 원본을 건드리지 않았음을 증명하려고
+만들었다. 이관이 끝나 증명할 원본이 없고, 남은 것은 빌드 시점 해시와 배포 시점 해시가
+같은지 확인하는 파일 다발이었다. 그것이 막은 사고는 없다. 막은 것은 있다 — seed의
+`route.geom` 행이 312가 지운 컬럼을 가리키는데 봉인 때문에 **고칠 수 없었다.**
+
+**permit이 지키던 성질은 세 술어로 옮겼다.** `application-schema-final-permit.py`
+721줄, root 소유 mount, 서명 파일이 결국 지킨 것은 하나다 — 런타임이 자기 이미지와
+다른 스키마의 DB에 붙지 않는다. 런타임 privilege preflight가 이제 그것을 잰다:
+적용된 head가 이미지의 head와 같은가, `public.alembic_version`을 읽을 수 있는가,
+그리고 **쓸 수는 없는가**(셋째가 없으면 스키마 대신 head를 고쳐 첫째를 통과할 수
+있다). 셋을 따로따로 뒤집어 각각 빨개지는 것을 확인했다.
+
+**사이드카는 손으로 만들지 않았다.** 빈 DB를 `313`까지 올려 두 번 떠서 같은지 본
+다음 정규화했다. 정규화는 정확히 네 가지 — 매 덤프마다 바뀌는 토큰·버전 주석,
+`search_path` 고정(env.py가 트랜잭션 안에서 세운다), `CREATE SCHEMA IF NOT EXISTS`,
+그리고 **ACL 블록마다 소유자로 role 전환.** 마지막 것이 load-bearing이다: GRANT는
+소유자만 낼 수 있고 ADR-090 role은 NOINHERIT이며, 소유자 아닌 GRANT는 오류가 아니라
+경고 후 무시다 — exit 0이 적용의 증거가 되지 못한다.
+
+같은 런에서 head 오라클도 다시 떴는데 커밋돼 있던 파일과 **바이트 동일**했다. 덤프
+파이프라인이 기존 오라클을 재현한다는 확인이다.
+
+**대상이 빈 검사 다섯.** role을 바꿔 가며 DDL을 내는 migration을 감시하는 게이트들은
+덤프 하나를 적용하는 revision 앞에서 대상이 0이 된다. 하한을 낮추지 않고 — 그러면
+"본 것에 하한을 건다"가 무너진다 — 이유와 함께 skip하고 두 번째 revision이 붙는 순간
+다시 활성화되게 했다. `test_receipt_head_check_covers_the_graph_head.py`가 이미 쓰던
+형태다.
+
+유도형 검사 둘은 **더 나은 오라클로** 옮겼다. purge 제약 분류와 `match_basis` CHECK는
+이제 migration의 중간 문자열이 아니라 head 덤프를 읽는다 — DB가 실제로 들고 있는
+것에 한 칸 가깝다.
+
+`_OPTIONAL_ROUTINES`는 비웠다. `test_db_procedure_signatures_exist_in_head.py`가
+"baseline root에 없는 인벤토리 루틴: []"로 실측했기 때문이다. 이름을 남겨 두면 루틴이
+**정말로** 사라지는 날 조용히 건너뛴다.
+
+정본은 ADR-101.
+
 ## 2026-09-20 — geometry 한 컬럼이 이사했는데, 그것을 가리키던 자리가 열여섯 곳 남아 있었다
 
 `312_route_geometry_sidecar`가 `feature.feature_routes.geom`을

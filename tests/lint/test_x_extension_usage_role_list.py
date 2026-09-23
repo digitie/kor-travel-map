@@ -4,7 +4,7 @@
 
 1. `docker/postgres-role-bootstrap.sh` — **정본.** 실제 배포가 GRANT를 거는 곳.
 2. `tests/integration/_application_300_bootstrap.py` — 통합 테스트용 거울.
-3. `alembic/versions/300_schema_baseline.py` — baseline이 "이 역할들이 USAGE를
+3. `alembic/versions/400_schema_baseline.py` — baseline이 "이 역할들이 USAGE를
    갖고 있는가"를 검사하는 전제 조건.
 
 (2)의 주석이 이미 위험을 적어 뒀다 — "정본은 bootstrap.sh이고 여기는 그 거울이다,
@@ -21,7 +21,7 @@
 **세 곳이 함께 틀리면 통과한다.** 여기서 보는 것은 일치이지 내용의 정당성이 아니다.
 이 테스트를 만들며 실제로 겪었다 — 변이 실험이 세 파일을 모두 바꿔 놓은 채 남았는데,
 셋이 서로 같으니 초록이었다. 그러니 "역할을 하나 빼도 된다"는 판단은 이 테스트가
-아니라 `300_schema_baseline`의 런타임 전제 검사와 실제 배포가 막는다.
+아니라 `400_schema_baseline`의 런타임 전제 검사와 실제 배포가 막는다.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 _BOOTSTRAP_SH = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _TEST_BOOTSTRAP = _ROOT / "tests" / "integration" / "_application_300_bootstrap.py"
-_BASELINE = _ROOT / "alembic" / "versions" / "300_schema_baseline.py"
+_BASELINE = _ROOT / "alembic" / "versions" / "400_schema_baseline.py"
 
 #: 역할 이름 하나. 목록 추출 결과를 이 모양으로만 받는다 — 정규식이 빗나가 엉뚱한
 #: 토큰을 주워도 여기서 걸린다.

@@ -28,14 +28,18 @@
 ----
 
 `feature.record_manual_provider_dedup_candidate`는 SECURITY DEFINER이고
-`session_user = 'ktm_feature_dagster_runtime'` + `ktm_manual_provider_dedup_detector_executor`
+`session_user = 'ktm_feature_service'` + `ktm_manual_provider_dedup_detector_executor`
 멤버십을 요구하며, admin executor·reconciliation service executor를 겸하면 거부한다.
-즉 이 경로는 **Dagster 런타임 전용**이다. detector relation에 대한 직접
-INSERT/UPDATE 권한은 어디에도 주지 않는다 — 프로시저만이 쓴다.
+이 코드는 여전히 **Dagster 경로에서만 실제로 호출한다** — 다만 ADR-100(LOGIN role
+통합) 이후 `session_user` 자체는 API 경로와 같은 `ktm_feature_service`이므로, 이
+procedure 게이트가 DB 층에서 "호출자가 API인지 Dagster인지"까지 구분하진 못한다
+(구분은 애플리케이션 코드가 이 함수를 실제로 어디서 부르느냐에만 있다). detector
+relation에 대한 직접 INSERT/UPDATE 권한은 어디에도 주지 않는다 — 프로시저만이
+쓴다.
 
 **manual 쪽은 표를 직접 읽을 수 없다.** `feature.feature_creation_origins`와
 `feature.manual_feature_identity_claims`는 `runtime_privileges.py`가
-`ktm_feature_dagster_runtime`을 **이름으로** REVOKE한다(`_MANUAL_FEATURE_TABLE_ACL`).
+`ktm_feature_service`를 **이름으로** REVOKE한다(`_MANUAL_FEATURE_TABLE_ACL`).
 그래서 manual 목록은 migration 304의 좁은 reader
 `feature.list_manual_provider_dedup_detector_manuals`로만 연다. provider 쪽 네 표와
 `feature.features`는 detector가 읽을 수 있으므로 그대로 SQL로 묻는다.

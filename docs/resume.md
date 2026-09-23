@@ -1,5 +1,43 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-23 — revision `400` 단일 baseline (ADR-101), 양쪽 모두 완료
+
+**다음 한 작업: 두 PR을 같은 사이클에 머지하고, 그다음에 n150 `.env`를 고친다.**
+순서가 계약이다 — 아래 §머지 순서를 볼 것.
+
+**Map 쪽.** 커밋 셋(`d1e553d87`, `4e6a84809`, `cfb7c2fb2`) + C7 봉인 검증기 대응,
+PR #1259.
+
+| 게이트 | 결과 |
+|---|---|
+| `pytest tests/unit tests/lint` | 2,973 passed / 15 skipped |
+| `ruff check` (CI 범위) | clean |
+| `mypy --strict` ×4 | clean |
+| `lint-imports` | 4 kept / 0 broken |
+| `pytest tests/integration` | 1,133 passed / 20 failed (디스크 압박, 회귀 아님) |
+
+**Manager 쪽.** `feat/adr-100-101-map-single-service`, 커밋 `0445c39`(ADR-100 마무리)
++ `78e118a`(ADR-101 봉인 제거). 13 files, −4,922줄. backend 1,947 passed,
+ruff 0.16.4 clean. 실패 둘은 무관하다(하나는 main에서도 빨감, 하나는 docker timeout).
+
+### 머지 순서
+
+1. **Manager 먼저.** Manager의 `docker-compose.yml`이 Map 이미지에서 지워진 실행파일
+   둘을 절대경로로 부르고 있었다. 그 상태로 Map만 머지하면 fresh DB 복구 경로가
+   깨진다(평상시 재핀 재구축은 `bootstrap` profile을 지나가지 않으므로 무사하다).
+2. **그다음 Map(#1259).**
+3. **마지막에 n150 `.env`.** `/opt/kor-travel-docker-manager/.env:162`의
+   `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`가 지금 `312_route_geometry_sidecar`다.
+   `400`으로 바꾼다 — **재구축 뒤에.** 먼저 바꾸면 production API가 "the image alembic
+   head does not match the expected head"로 기동을 거부한다.
+   (`/home/digitie/kor-travel-docker-manager/.env:117`은 낡은 개발 사본이다.)
+
+### 아직 안 한 것
+
+- prod 재구축 사이클(`/root/chain17.sh`)은 두 PR 머지 뒤에 돈다.
+- `400` 위에 revision이 쌓이기 전까지 `tests/lint/test_baseline_schema_is_not_a_contract_oracle.py`
+  의 등식 대조는 그대로 유지된다. 첫 `401`이 붙으면 스스로 비켜난다.
+
 ## 2026-09-20 (2) — PR #1257 머지 완료, prod 배포가 pinned-rebuild journal에 고착 (outage 진행 중)
 
 **다음 한 작업: PinVi에 실제 커밋 하나를 올려 새 pinset을 만들고 `chain17`을 다시

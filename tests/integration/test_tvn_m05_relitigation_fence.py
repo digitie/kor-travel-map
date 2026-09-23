@@ -71,7 +71,7 @@ async def _resolve_case(
 
 
 async def _detect_once(engine: AsyncEngine, *, run_id: str) -> DetectionOutcome:
-    dagster = _runtime_engine(engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(engine, login="ktm_feature_service")
     try:
         async with AsyncSession(dagster) as session:
             return await detect_manual_provider_candidates(session, run_id=run_id)
@@ -256,7 +256,7 @@ async def test_the_detector_login_still_cannot_read_the_case_table(
                 await connection.scalar(
                     text(
                         "SELECT has_table_privilege("
-                        "'ktm_feature_dagster_runtime', :relation, 'SELECT')"
+                        "'ktm_feature_service', :relation, 'SELECT')"
                     ),
                     {"relation": relation},
                 )

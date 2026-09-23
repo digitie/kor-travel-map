@@ -176,23 +176,55 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootstrap(
     tmp_path: Path,
 ) -> None:
-    """ADR-090 principal DSN은 ignored env 입력이며 bootstrap fallback이 아니다."""
+    """ADR-090/ADR-100 principal DSN은 ignored env 입력이며 bootstrap fallback이 아니다.
+
+    ADR-100이 세 principal DSN 이름을 `KOR_TRAVEL_MAP_PG_DSN` 하나로 합치면서 원래
+    문장("migrator DSN이 api service environment에 없다")은 **어디에도 존재하지 않는
+    이름**을 보는 항진명제가 됐다. 주제 자체는 살아 있다 — 소비자 종류에 따라 주입
+    형태가 달라야 한다.
+
+    * runtime consumer(api·dagster·daemon·candidate migration one-shot)는 `:?`로
+      **hard-require**한다. 여기에 `:-` 기본값이 생기면 host env 누락이 조용히 빈
+      DSN으로 기동을 허용한다.
+    * bootstrap one-shot(metadata init·fresh DB create·role bootstrap)은 의도적으로
+      `:-`로 pass-empty한다. `:?`를 쓰면 profile-disabled external overlay가 실행도
+      하기 전에 compose interpolation 단계에서 죽는다. 그 대신 shell preflight가
+      service 실행 시점에 fail-closed 한다.
+
+    그 갈림을 raw compose 값으로 재고, **두 집합이 DSN 소비자 전부**임도 함께 못박는다
+    (제3의 형태로 조용히 들어오는 새 소비자를 잡는다).
+    """
 
     compose = _compose()["services"]
-    assert "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" not in compose["api"]["environment"]
-    local_overlay = yaml.safe_load(
-        (ROOT / "docker-compose.local-dev.yml").read_text(encoding="utf-8")
+    required_dsn = "${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}"
+    pass_empty_dsn = "${KOR_TRAVEL_MAP_PG_DSN:-}"
+    runtime_dsn_services = (
+        "api",
+        "dagster",
+        "dagster-daemon",
+        "db-application-schema-fresh",
     )
-    assert local_overlay["services"]["api"]["environment"][
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
-    ].endswith("is required for local-dev}")
-    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN"].endswith(
-        "is required}"
+    bootstrap_dsn_services = (
+        "dagster-db-init",
+        "db-application-create-fresh-300",
+        "db-role-bootstrap-300",
     )
+    for service_name in runtime_dsn_services:
+        assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"] == (
+            required_dsn
+        ), service_name
+    for service_name in bootstrap_dsn_services:
+        environment = compose[service_name]["environment"]
+        assert environment["KOR_TRAVEL_MAP_PG_DSN"] == pass_empty_dsn, service_name
+        assert environment["KOR_TRAVEL_MAP_SERVICE_PASSWORD"] == (
+            "${KOR_TRAVEL_MAP_SERVICE_PASSWORD:-}"
+        ), service_name
+    assert {
+        service_name
+        for service_name, service in compose.items()
+        if "KOR_TRAVEL_MAP_PG_DSN" in (service.get("environment") or {})
+    } == set(runtime_dsn_services) | set(bootstrap_dsn_services)
     for service_name in ("dagster", "dagster-daemon"):
-        assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
-            "is required}"
-        )
         assert "db-role-bootstrap-300" not in compose[service_name]["depends_on"]
 
     load_env = _script("scripts/load-env.sh")
@@ -221,7 +253,8 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
 
     # T-102 pg_prewarm의 **유일한** 설치 지점이다. migration 0022는 "current_user가
     # superuser일 때만 만든다"로 짜였는데 ADR-090 이후 alembic은 NOSUPERUSER
-    # `ktm_feature_migrator`로만 돌아 그 분기가 영구 no-op이 됐다. pg_prewarm은
+    # LOGIN(ADR-100 통합 뒤로는 `ktm_feature_service`)으로만 돌아 그 분기가 영구
+    # no-op이 됐다. pg_prewarm은
     # trusted extension이 아니라 schema owner 권한으로도 만들 수 없으므로, 이 dedicated
     # superuser 연결에서 빠지면 확장이 **어디서도** 생기지 않고 prewarm이 조용히
     # no-op으로 남는다. 그 상태로도 게이트가 전부 green이었기 때문에 여기서 못박는다.
@@ -233,9 +266,11 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     role_service = compose["db-role-bootstrap-300"]
     for required_name in (
         "KOR_TRAVEL_MAP_POSTGRES_INIT_HOST",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+        # ADR-100: 세 per-role DSN 대신 하나의 service DSN + 하나의 service
+        # password가 온다. preflight가 이 둘을 `ktm_feature_service` login에
+        # 결박하므로 bootstrap one-shot은 여전히 둘을 모두 받아야 한다.
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD",
+        "KOR_TRAVEL_MAP_PG_DSN",
         "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB",
         "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER",
         "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD",
@@ -256,9 +291,9 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
             "PATH": os.environ["PATH"],
             "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED": "true",
             "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": "postgresql://unused.invalid/ktm",
-            "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": "test-only",
-            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": "test-only",
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": "test-only",
+            # `require_value`가 confirm-database 검사보다 앞서므로 비어 있으면 이
+            # 검사가 다른 문구로 죽는다.
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD": "test-only",
             "KOR_TRAVEL_MAP_POSTGRES_DB": "dedicated_map",
             "KOR_TRAVEL_MAP_POSTGRES_USER": "bootstrap",
             "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "other_database",
@@ -275,9 +310,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
 @pytest.mark.unit
 def test_fresh_role_bootstrap_rejects_dsn_credential_reuse_before_psql() -> None:
     bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
-    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
-    api_password = "api00000000000000000000000000000000000000000000000000000000000"
-    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    service_password = "service000000000000000000000000000000000000000000000000000000000"
     metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
     result = subprocess.run(
         ["sh", "docker/postgres-role-bootstrap.sh"],
@@ -294,20 +327,10 @@ def test_fresh_role_bootstrap_rejects_dsn_credential_reuse_before_psql() -> None
                 "postgresql://kor_travel_map:"
                 f"{bootstrap_password}@postgres:5432/kor_travel_map"
             ),
-            "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
-            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
-                "postgresql+asyncpg://ktm_feature_migrator:"
-                f"{migrator_password}@postgres:5432/kor_travel_map"
-            ),
-            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
-                "postgresql+asyncpg://ktm_feature_api_runtime:"
-                f"{api_password}@postgres:5432/kor_travel_map"
-            ),
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-                "postgresql+asyncpg://ktm_feature_dagster_runtime:"
-                f"{dagster_password}@postgres:5432/kor_travel_map"
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD": service_password,
+            "KOR_TRAVEL_MAP_PG_DSN": (
+                "postgresql+asyncpg://ktm_feature_service:"
+                f"{service_password}@postgres:5432/kor_travel_map"
             ),
             "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "kor_travel_map_dagster",
             "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "kor_travel_map_dagster",
@@ -332,7 +355,17 @@ def test_fresh_role_bootstrap_rejects_dsn_credential_reuse_before_psql() -> None
 def test_resolved_dagster_services_exclude_application_privileged_credentials(
     tmp_path: Path,
 ) -> None:
-    """root deployment env의 bootstrap/migrator 값은 Dagster에 전달되지 않는다."""
+    """root deployment env의 bootstrap/service 비밀은 Dagster에 전달되지 않는다.
+
+    ADR-100 이후 **DSN은 더 이상 이 검사의 주제가 아니다.** 통합 전에는 api DSN과
+    dagster DSN이 서로 다른 이름이어서 "api DSN이 dagster에 새지 않는다"를 물을 수
+    있었지만, 지금은 두 소비자가 같은 `KOR_TRAVEL_MAP_PG_DSN`을 **설계상 공유**한다.
+    그 이름을 아래 금지 집합에 넣으면 "production이 기동을 거부해야 한다"로 뒤집힌다.
+
+    살아 있는 주제: bootstrap superuser DSN·bootstrap/service **비밀번호**·bootstrap
+    DB 좌표는 Dagster process에 들어가지 않는다. 그 값들은 아래에서 poison으로
+    주입하고 resolved Dagster service 어디에도 나타나지 않음을 확인한다.
+    """
 
     reset_overlay = tmp_path / "reset-api-env-file.yml"
     reset_overlay.write_text(
@@ -353,16 +386,12 @@ def test_resolved_dagster_services_exclude_application_privileged_credentials(
         ),
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": poison,
         "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": poison,
-        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": poison,
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD": poison,
         "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": poison,
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
-            "postgresql://api@example.invalid/ktm"
-        ),
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            "postgresql://dagster@example.invalid/ktm"
-        ),
+        # 공유 runtime DSN은 Dagster가 **받아야** 하는 값이므로 poison이 아니다.
+        # 여기에 poison을 넣으면 아래 leak 검사가 정상 배선을 사고로 읽는다.
+        "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service@example.invalid/ktm",
         "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
             "postgresql://metadata@example.invalid/ktm_dagster"
         ),
@@ -390,12 +419,8 @@ def test_resolved_dagster_services_exclude_application_privileged_credentials(
     services = json.loads(result.stdout)["services"]
     privileged_names = {
         "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
         "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
-        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD",
         "KOR_TRAVEL_MAP_POSTGRES_DB",
         "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
         "KOR_TRAVEL_MAP_POSTGRES_USER",
@@ -404,6 +429,15 @@ def test_resolved_dagster_services_exclude_application_privileged_credentials(
         service = services[service_name]
         assert privileged_names.isdisjoint(service.get("environment", {})), service_name
         assert poison not in json.dumps(service, sort_keys=True), service_name
+    # dagster/daemon은 공유 DSN을 **받는다**. 위 금지 집합이 그것을 잡지 않는다는
+    # 사실이 우연이 아니라 계약임을 여기서 명시한다(집합에 넣으면 이 줄과 충돌한다).
+    for service_name in ("dagster", "dagster-daemon"):
+        assert services[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"] == (
+            environment["KOR_TRAVEL_MAP_PG_DSN"]
+        ), service_name
+    assert "KOR_TRAVEL_MAP_PG_DSN" not in (
+        services["dagster-storage-migrate"].get("environment") or {}
+    )
 
 
 @pytest.mark.unit
@@ -523,8 +557,13 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         # 원문 token은 어떤 Map runtime에도 전달하지 않는다.
         "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
         "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+        # ADR-100: DB DSN은 `KOR_TRAVEL_MAP_API_` 접두어를 잃고
+        # `KOR_TRAVEL_MAP_PG_DSN`이 됐으므로 이 접두어 집합에서 빠진다.
+        # `:?` hard-require 형상은
+        # test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootstrap이
+        # 소유한다.
     }
+    assert "KOR_TRAVEL_MAP_PG_DSN" in api["environment"]
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
     # admin secret과 같은 hard-require 패턴 — host env 누락 시 compose 평가 실패.
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN is required" in str(
@@ -807,22 +846,25 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
         "service_completed_successfully"
     )
-    fresh_migration = services["db-application-schema-fresh-300"]
+    fresh_migration = services["db-application-schema-fresh"]
     assert fresh_migration["profiles"] == ["fresh-init"]
     assert "db-role-bootstrap-300" not in fresh_migration["depends_on"]
     assert fresh_migration["depends_on"]["dagster-db-init-fresh-300"][
         "condition"
     ] == "service_completed_successfully"
-    assert fresh_migration["entrypoint"] == [
-        "/usr/local/bin/python",
-        "-I",
-        "/usr/local/bin/ktm-application-schema-fresh-300",
-        "migrate",
-    ]
+    # 전용 one-shot(1,422줄)이 receipt를 대조하던 자리다. 봉인이 사라진 뒤 남는 일은
+    # API entrypoint의 local-dev 분기와 같아서 같은 두 명령으로 되돌렸다.
+    assert fresh_migration["entrypoint"] == ["/bin/sh", "-c"]
+    command = "\n".join(fresh_migration["command"])
+    assert "python -I -m alembic upgrade head" in command
+    assert "python -I -m kortravelmap.infra.runtime_privileges" in command
+    # ADR-100: migration DSN과 runtime DSN이 한 이름이 됐으므로 이 one-shot이 받는
+    # DB 입력은 정확히 하나다. 두 개로 되돌아오면(= 어느 쪽이든 per-role 이름이
+    # 부활하면) 이 정확 일치가 깨진다.
     assert set(fresh_migration["environment"]) == {
         "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
         "KOR_TRAVEL_MAP_PG_DSN",
+        "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
     }
     assert fresh_migration["environment"][
         "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE"
@@ -846,7 +888,7 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     assert "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-baseline-300" in phase_script
 
     launcher = _script("scripts/docker-up.sh")
-    assert "--profile fresh-init run --rm db-application-schema-fresh-300" in launcher
+    assert "--profile fresh-init run --rm db-application-schema-fresh" in launcher
     assert "services=(postgres dagster-db-init db-role-bootstrap-300" not in launcher
     assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" in launcher
     assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in launcher
@@ -864,10 +906,6 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
         "postgresql://kor_travel_map:$postgres_password" not in fresh_acceptance
     )
     assert (
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME="
-        "$MAP_PROJECT-application-final-permit" in fresh_acceptance
-    )
-    assert (
         "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME="
         "$MAP_PROJECT-dagster-storage-permit" in fresh_acceptance
     )
@@ -880,13 +918,18 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     dockerfile = _script("docker/api.Dockerfile")
     assert "transition-application-schema-0236-to-300.py" not in dockerfile
     assert "ktm-application-schema-handoff" not in dockerfile
-    assert "application-schema-db-contract.py" in dockerfile
-    assert "application-schema-fresh-300.py" in dockerfile
-    assert "ktm-application-schema-fresh-300" in dockerfile
-    assert "application-schema-fresh-finalize.py" in dockerfile
-    assert "ktm-application-schema-fresh-finalize" in dockerfile
-    assert "application-schema-final-permit.py" in dockerfile
-    assert "ktm-application-schema-final-permit" in dockerfile
+    # 봉인된 배포 permit 다섯은 이미지에서 빠졌다. 그것들이 지키던 "런타임이 자기
+    # 이미지와 다른 스키마의 DB에 붙지 않는다"는 `db.py`의 런타임 preflight가 잰다.
+    for removed in (
+        "application-schema-db-contract.py",
+        "application-schema-fresh-300.py",
+        "application-schema-fresh-finalize.py",
+        "application-schema-final-permit.py",
+        "application-schema-contract.py",
+    ):
+        assert removed not in dockerfile
+    assert "application-schema-head.py" in dockerfile
+    assert "ktm-application-schema" in dockerfile
     for removed_image_path in (
         "migrate-to-m01-bootstrap-boundary.sh",
         "migrate-to-m05-bootstrap-boundary.sh",
@@ -2652,9 +2695,7 @@ def _run_docker_up_with_database_env(
         encoding="utf-8",
     )
     bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
-    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
-    api_password = "api00000000000000000000000000000000000000000000000000000000000"
-    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    service_password = "service000000000000000000000000000000000000000000000000000000000"
     metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
     environment = {
         "PATH": os.environ["PATH"],
@@ -2669,20 +2710,10 @@ def _run_docker_up_with_database_env(
             "postgresql://kor_travel_map:"
             f"{bootstrap_password}@postgres:5432/kor_travel_map"
         ),
-        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
-        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_migrator:"
-            f"{migrator_password}@postgres:5432/kor_travel_map"
-        ),
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_api_runtime:"
-            f"{api_password}@postgres:5432/kor_travel_map"
-        ),
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_dagster_runtime:"
-            f"{dagster_password}@postgres:5432/kor_travel_map"
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD": service_password,
+        "KOR_TRAVEL_MAP_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_service:"
+            f"{service_password}@postgres:5432/kor_travel_map"
         ),
         "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "kor_travel_map",
         "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "kor_travel_map_dagster",
@@ -2694,6 +2725,26 @@ def _run_docker_up_with_database_env(
             f"{metadata_password}@127.0.0.1:5432/kor_travel_map_dagster"
         ),
     }
+    # `scripts/docker-up.sh`에는 ADR-100 collapse가 아직 닿지 않았다 — 그 launcher는
+    # 아래 retired 이름들을 여전히 `require_env`로 요구하므로, 그것을 채워 주지
+    # 않으면 이 harness가 preflight 분기에 **도달하지 못하고** 다른 문구로 죽는다.
+    # 값은 읽히지 않는 placeholder다(preflight는 collapsed 이름만 본다). launcher가
+    # 정리되면 이 bridge는 스스로 빈 사전이 되고 harness는 collapsed 이름만 쓴다.
+    launcher_source = _script("scripts/docker-up.sh")
+    environment.update(
+        {
+            retired_name: "not-read-by-the-collapsed-preflight"
+            for retired_name in (
+                "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+                "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+                "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+                "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
+                "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
+                "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
+            )
+            if retired_name in launcher_source
+        }
+    )
     environment.update(overrides or {})
     return subprocess.run(
         ["bash", "scripts/docker-up.sh"],
@@ -2707,31 +2758,43 @@ def _run_docker_up_with_database_env(
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("dsn_name", "dsn"),
+    ("dsn_name", "dsn", "expected_error"),
     [
+        # ADR-100: 세 DSN이 하나가 됐어도 "이 DSN은 선언된 login/password/DB에
+        # 결박된다"는 세 갈래는 그대로 남는다 — 비밀번호가 다른 principal 것,
+        # login이 다른 role, DB가 다른 이름. 문구를 row별로 못박아 두면 어떤 row가
+        # 더 이른 검사에서 죽어 "엉뚱한 이유로 초록"이 되는 것을 잡는다.
         (
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-            "postgresql+asyncpg://ktm_feature_api_runtime:"
+            "KOR_TRAVEL_MAP_PG_DSN",
+            "postgresql+asyncpg://ktm_feature_service:"
             "metadata0000000000000000000000000000000000000000000000000000000@"
             "postgres:5432/kor_travel_map",
+            "KOR_TRAVEL_MAP_PG_DSN credential does not match "
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD and its dedicated login",
         ),
         (
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+            "KOR_TRAVEL_MAP_PG_DSN",
             "postgresql+asyncpg://wrong_login:"
-            "api00000000000000000000000000000000000000000000000000000000000@"
+            "service000000000000000000000000000000000000000000000000000000000@"
             "postgres:5432/kor_travel_map",
+            "KOR_TRAVEL_MAP_PG_DSN credential does not match "
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD and its dedicated login",
         ),
         (
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-            "postgresql+asyncpg://ktm_feature_api_runtime:"
-            "api00000000000000000000000000000000000000000000000000000000000@"
+            "KOR_TRAVEL_MAP_PG_DSN",
+            "postgresql+asyncpg://ktm_feature_service:"
+            "service000000000000000000000000000000000000000000000000000000000@"
             "postgres:5432/wrong_database",
+            "KOR_TRAVEL_MAP_PG_DSN database does not match "
+            "KOR_TRAVEL_MAP_POSTGRES_DB",
         ),
         (
             "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL",
             "postgresql://kor_travel_map_dagster:"
             "bootstrap0000000000000000000000000000000000000000000000000000000@"
             "127.0.0.1:5432/kor_travel_map_dagster",
+            "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL credential does not match "
+            "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD and its dedicated login",
         ),
     ],
 )
@@ -2739,6 +2802,7 @@ def test_docker_up_binds_each_database_dsn_to_declared_credential_before_launch(
     tmp_path: Path,
     dsn_name: str,
     dsn: str,
+    expected_error: str,
 ) -> None:
     result = _run_docker_up_with_database_env(
         tmp_path,
@@ -2746,10 +2810,7 @@ def test_docker_up_binds_each_database_dsn_to_declared_credential_before_launch(
     )
 
     assert result.returncode != 0
-    assert (
-        "credential does not match" in result.stderr
-        or "database does not match" in result.stderr
-    )
+    assert expected_error in result.stderr
     assert "preflight-ports" not in result.stdout + result.stderr
 
 
@@ -2757,11 +2818,14 @@ def test_docker_up_binds_each_database_dsn_to_declared_credential_before_launch(
 def test_docker_up_rejects_declared_database_credential_reuse_before_launch(
     tmp_path: Path,
 ) -> None:
+    # ADR-100: 쌍 목록이 5개 이름에서 3개로 줄었지만 service login과 Dagster
+    # metadata login은 **여전히 서로 다른 비밀번호여야** 한다. 이 쌍이 살아 있는
+    # 쌍이다(비교가 자기 자신이 되지 않는다).
     shared_password = "shared000000000000000000000000000000000000000000000000000000000"
     result = _run_docker_up_with_database_env(
         tmp_path,
         overrides={
-            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": shared_password,
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD": shared_password,
             "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": shared_password,
         },
     )
@@ -3060,8 +3124,7 @@ def test_api_entrypoint_exposes_manual_create_settings_only_to_app_runtime(
                 _MANUAL_FEATURE_CREATE_DIGEST
             ),
             "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED": "false",
-            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator/db",
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api/db",
+            "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service/db",
         },
     )
 
@@ -3318,7 +3381,7 @@ def test_api_container_rejects_invalid_ops_principal_pair(
 def _entrypoint_stub_path(tmp_path: Path) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("alembic", "python", "ktm-application-schema-final-permit"):
+    for name in ("alembic", "python"):
         command = bin_dir / name
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
@@ -3332,10 +3395,11 @@ _MIGRATION_BASE_ENV: Final = {
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
-    # Alembic와 API runtime은 같은 DB에도 서로 다른 LOGIN DSN을 반드시 쓴다.
-    # Entrypoint unit stub은 접속하지 않으므로 식별자만 있는 dummy를 준다.
-    "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
-    "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
+    # ADR-100: alembic과 API runtime은 한 LOGIN(`ktm_feature_service`)이므로 DSN도
+    # 하나다. entrypoint의 `${KOR_TRAVEL_MAP_PG_DSN:?...}`가 profile과 무관하게
+    # 이 값을 요구한다. Entrypoint unit stub은 접속하지 않으므로 식별자만 있는
+    # dummy를 준다.
+    "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service@example.invalid/ktm",
 }
 
 
@@ -3345,7 +3409,6 @@ def _migration_stub_path(
     image_head: str,
     heads_script: str | None = None,
     current_script: str | None = None,
-    final_permit_script: str = "exit 0",
 ) -> tuple[str, Path]:
     """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
 
@@ -3373,11 +3436,6 @@ def _migration_stub_path(
     python = bin_dir / "python"
     python.write_text(
         "#!/bin/sh\n"
-        "if [ \"${1:-}\" = -I ] "
-        "&& [ \"${2##*/}\" = ktm-application-schema-final-permit ]; then\n"
-        "  shift 2\n"
-        "  exec \"$(dirname \"$0\")/ktm-application-schema-final-permit\" \"$@\"\n"
-        "fi\n"
         "if [ \"${1:-}\" = -I ] && [ \"${2:-}\" = -m ] "
         "&& [ \"${3:-}\" = alembic ]; then\n"
         "  shift 3\n"
@@ -3387,12 +3445,6 @@ def _migration_stub_path(
         encoding="utf-8",
     )
     python.chmod(0o755)
-    final_permit = bin_dir / "ktm-application-schema-final-permit"
-    final_permit.write_text(
-        f"#!/bin/sh\n{final_permit_script}\n",
-        encoding="utf-8",
-    )
-    final_permit.chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}", marker
 
 
@@ -3405,9 +3457,12 @@ def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedPro
         path,
     )
     entrypoint.write_text(source, encoding="utf-8")
+    # ADR-100: production일 때 migration DSN을 빼던 분기는 삭제했다. 그 분기는
+    # "production API는 migrator DSN이 env에 있기만 해도 거부한다"를 통과시키기
+    # 위한 것이었고, 그 거절이 사라진 지금 남은 하나의 DSN을 production에서 빼면
+    # `${KOR_TRAVEL_MAP_PG_DSN:?...}`가 모든 production 검사를 같은 문구로
+    # 죽인다(= 아래 모든 production 검사가 주제와 무관하게 초록/빨강이 된다).
     base_env = dict(_MIGRATION_BASE_ENV)
-    if extra.get("KOR_TRAVEL_MAP_API_PROFILE") == "production":
-        base_env.pop("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", None)
     return subprocess.run(
         ["sh", str(entrypoint)],
         cwd=ROOT,
@@ -3431,7 +3486,7 @@ def _image_layout_300_only(tmp_path: Path) -> Path:
     (image_root / "docker" / "api-entrypoint.sh").write_bytes(
         (ROOT / "docker" / "api-entrypoint.sh").read_bytes()
     )
-    (image_root / "alembic" / "versions" / "300_schema_baseline.py").touch()
+    (image_root / "alembic" / "versions" / "400_schema_baseline.py").touch()
     return image_root
 
 
@@ -3540,79 +3595,112 @@ def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
-def test_production_api_refuses_failed_final_permit_without_generic_upgrade(
+@pytest.mark.parametrize(
+    ("api_profile", "migration_label", "expected_migration_role_state"),
+    [
+        # production의 migration 단계 child는 이제 `alembic heads` 비교 하나다.
+        # 그 gate는 profile 분기의 `unset` **직후**에 돌므로, 이 검사가 재는 성질은
+        # 그대로다 — 스위치는 걷히고 DSN은 남는다.
+        ("production", "alembic-heads", "unset"),
+        ("local-dev", "alembic-upgrade", "set"),
+    ],
+)
+def test_api_entrypoint_keeps_the_single_dsn_but_strips_the_schema_owner_switch(
     tmp_path: Path,
+    api_profile: str,
+    migration_label: str,
+    expected_migration_role_state: str,
 ) -> None:
-    """production DB 상태 판정은 final permit에 맡기고 generic mutation은 하지 않는다."""
+    """ADR-100 이후 이 자리에 남은 **유일한** 구분을 잰다.
 
-    path, marker = _migration_stub_path(
-        tmp_path,
-        image_head="300",
-        current_script="true",
-        final_permit_script="exit 1",
+    이 검사는 `test_production_api_rejects_migrator_credential_before_permit`을
+    대체한다. 그 검사의 주제 — "production API는 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`이
+    env에 있기만 해도 기동을 거부한다" — 는 세 DSN이 한 이름이 되면서 소멸했다.
+    금지할 두 번째 이름이 없고, 이름만 옮기면 "production은 자기가 요구하는 DSN을
+    받으면 기동을 거부해야 한다"로 **뒤집힌다**.
+
+    같은 자리에 살아 있는 구분은 두 가지다.
+
+    1. `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE`은 profile로 갈린다. production은
+       migration을 소유하지 않으므로(별도 fresh-init one-shot 소유) 그 스위치를
+       걷어내고, local-dev convenience migration만 켠다. host env가 `true`를 주입해도
+       production migration 단계 child에는 전달되지 않아야 한다.
+    2. 그 스위치는 exec 전에 **항상** 걷지만 DSN은 **남겨야 한다.** 종전 entrypoint는
+       exec 전에 per-role DSN 두 개를 unset했다. 그 unset을 통합된 이름으로 그대로
+       옮기면 uvicorn이 DB 자격 없이 뜨고, 이 검사가 그때 빨개진다.
+    """
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    evidence = tmp_path / "child-env.txt"
+    runtime_dsn = "postgresql+asyncpg://ktm_feature_service@example.invalid/ktm"
+    recorder = (
+        'role_state=unset\n'
+        'role_value=""\n'
+        'if [ "${KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE+x}" = x ]; then\n'
+        '  role_state=set\n'
+        '  role_value="$KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"\n'
+        'fi\n'
+        'dsn_state=unset\n'
+        'dsn_value=""\n'
+        'if [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = x ]; then\n'
+        '  dsn_state=set\n'
+        '  dsn_value="$KOR_TRAVEL_MAP_PG_DSN"\n'
+        'fi\n'
+        'printf "%s|%s|%s|%s|%s\\n" "$label" "$role_state" "$role_value" '
+        '"$dsn_state" "$dsn_value" >>"$EVIDENCE"\n'
     )
-    result = _run_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_API_PROFILE": "production",
-            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
-            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
-        },
+    python_stub = bin_dir / "python"
+    python_stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "${1:-}" = "-I" ]; then shift; fi\n'
+        'if [ "${1:-}" = "-m" ] && [ "${2:-}" = "alembic" ]; then\n'
+        '  label="alembic-${3:-unknown}"\n'
+        f"{recorder}"
+        '  if [ "${3:-}" = "heads" ]; then echo "300 (head)"; fi\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "${1:-}" = "-" ]; then\n'
+        "  label=settings-preflight\n"
+        "  cat >/dev/null\n"
+        'elif [ "${1:-}" = "-m" ] && [ "${2:-}" = "uvicorn" ]; then\n'
+        "  label=uvicorn\n"
+        'elif [ "${1:-}" = "-m" ]; then\n'
+        '  label="module-${2:-unknown}"\n'
+        "else\n"
+        "  label=python-other\n"
+        "fi\n"
+        f"{recorder}"
+        "exit 0\n",
+        encoding="utf-8",
     )
+    python_stub.chmod(0o755)
 
-    assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "production blank DB에서 generic upgrade가 실행됐다."
-    assert "requires a valid Docker Manager application final permit" in result.stderr
-
-
-@pytest.mark.unit
-def test_production_api_with_final_permit_never_runs_generic_upgrade(tmp_path: Path) -> None:
-    """final permit + exact raw 300은 runtime start만 허용하고 upgrade는 하지 않는다."""
-
-    path, marker = _migration_stub_path(
-        tmp_path,
-        image_head="300",
-        current_script="echo '300 (head)'",
-    )
-    result = _run_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_API_PROFILE": "production",
-            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
-            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
-        },
-    )
+    extra = {
+        "EVIDENCE": str(evidence),
+        "KOR_TRAVEL_MAP_API_PROFILE": api_profile,
+        "KOR_TRAVEL_MAP_PG_DSN": runtime_dsn,
+        # 배포 env가 schema-owner 스위치를 주입한 상황을 재현한다.
+        "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE": "true",
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
+    }
+    if api_profile == "production":
+        extra["KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"] = "300"
+    result = _run_entrypoint(f"{bin_dir}:{os.environ['PATH']}", extra)
 
     assert result.returncode == 0, result.stderr
-    assert not marker.exists(), "production final permit 경로에서 generic upgrade가 실행됐다."
+    rows = [line.split("|") for line in evidence.read_text(encoding="utf-8").splitlines()]
+    by_label = {row[0]: row[1:] for row in rows}
 
+    migration_child = by_label[migration_label]
+    assert migration_child[0] == expected_migration_role_state, by_label
+    # migration 단계도 DSN은 받는다 — 걷는 대상은 스위치뿐이다.
+    assert migration_child[2:] == ["set", runtime_dsn], by_label
 
-@pytest.mark.unit
-def test_production_api_rejects_migrator_credential_before_permit(
-    tmp_path: Path,
-) -> None:
-    path, marker = _migration_stub_path(tmp_path, image_head="300")
-    result = _run_entrypoint(
-        path,
-        {
-            "KOR_TRAVEL_MAP_API_PROFILE": "production",
-            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
-                "postgresql://migrator@example.invalid/forbidden"
-            ),
-            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
-            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
-            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
-        },
-    )
-
-    assert result.returncode != 0
-    assert "production API forbids KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" in result.stderr
-    assert not marker.exists()
+    # exec 대상(uvicorn)은 스위치를 절대 못 보고 DSN은 반드시 본다.
+    assert by_label["uvicorn"] == ["unset", "", "set", runtime_dsn], by_label
 
 
 @pytest.mark.unit
@@ -3668,7 +3756,7 @@ def test_api_container_fails_fast_for_unknown_active_graph_revision(tmp_path: Pa
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
-    assert "unsupported by the active 300-only image" in result.stderr
+    assert "unsupported by this image" in result.stderr
     assert "Can't locate revision" in result.stderr, (
         "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
     )
@@ -3692,8 +3780,11 @@ def test_api_container_rejects_retired_0236_and_requires_fresh_rebuild(
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "퇴역 revision인데 upgrade가 실행됐다."
-    assert "unsupported retired revision 0236" in result.stderr
-    assert "approved destructive fresh rebuild" in result.stderr
+    # `0236` 전용 안내는 없어졌다. 그 분기는 in-place 이관 경로가 있던 시절의 것이고,
+    # 지금은 알 수 없는 revision을 전부 한 가지로 거절한다 — alembic 원문을 그대로
+    # 실어 주므로 운영자는 어느 revision인지 여전히 본다.
+    assert "unsupported by this image" in result.stderr
+    assert "0236_tvn41s_compaction_drained" in result.stderr
     assert "ktm-application-schema-handoff" not in result.stderr
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
 
@@ -3717,7 +3808,7 @@ def test_api_image_with_only_300_root_rejects_archived_revision(
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
-    assert "unsupported by the active 300-only image" in result.stderr
+    assert "unsupported by this image" in result.stderr
     assert not (image_root / "alembic" / "retired_versions").exists()
 
 
@@ -4181,7 +4272,11 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
                 "-p",
                 "12702",
             ],
-            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+            # ADR-100: 두 per-role DSN 이름은 이 금지 집합에서 **빠졌다**(그 자리에
+            # KOR_TRAVEL_MAP_PG_DSN을 넣으면 production이 요구하는 이름을 금지하는
+            # 자기모순이 된다). 세 password 이름은 SERVICE_PASSWORD 하나로 합쳐졌고
+            # 그것은 Dagster가 절대 받을 이유가 없으므로 여기 남는다.
+            "KOR_TRAVEL_MAP_SERVICE_PASSWORD",
         ),
         (
             [
@@ -4190,7 +4285,7 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
                 "-m",
                 "kortravelmap.dagster.definitions",
             ],
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+            "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
         ),
         (
             ["/usr/local/bin/ktm-dagster-storage", "migrate"],
@@ -4222,31 +4317,38 @@ def test_dagster_entrypoint_rejects_application_privileged_keys_even_when_empty(
         f"Dagster process: {key}"
     ) in result.stderr
 
+    # 종전에는 열 개 이름이 "파일 안에 문자열로 존재하는가"만 봤다. 그 형태는
+    # 집합이 줄어들 때(= 금지가 약해질 때) 조용히 통과하고, 집합에 **요구되는**
+    # 이름이 들어와도 통과한다. 그래서 선언된 집합 자체를 뽑아 정확 일치로 본다.
     entrypoint = _script("docker/dagster-entrypoint.sh")
-    for forbidden_name in (
+    declared_block = entrypoint.split("exact_names = {", 1)[1].split("}", 1)[0]
+    declared_forbidden = set(
+        declared_block.replace('"', " ").replace(",", " ").split()
+    )
+    assert declared_forbidden == {
         "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
         "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
-        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD",
         "KOR_TRAVEL_MAP_POSTGRES_DB",
         "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
         "KOR_TRAVEL_MAP_POSTGRES_USER",
-        "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_",
-    ):
-        assert forbidden_name in entrypoint
+    }
+    # production runtime이 **요구하는** 이름을 금지 집합에 넣는 것은 자기모순이다.
+    # 위 정확 일치가 이미 막지만, 뒤집힘이 이 파일에서 재발한 적이 있어 명시한다.
+    assert "KOR_TRAVEL_MAP_PG_DSN" not in declared_forbidden
+    assert 'name.startswith("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_")' in entrypoint
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "key",
     [
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+        # ADR-100: `..._DAGSTER_RUNTIME_PG_DSN` row는 삭제했다. 그 이름은 더 이상
+        # 존재하지 않으므로 `storage_input_preflight`가 볼 대상이 아니며, row를
+        # 남기면 그 검사는 "아무 이름도 아닌 것"을 보는 항진명제가 된다.
+        # application DSN이 이 one-shot에 들어오는 통로는 이제 하나뿐이고
+        # 아래 row가 정확히 그것을 잰다.
         "KOR_TRAVEL_MAP_PG_DSN",
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
-        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
     ],
 )
 @pytest.mark.parametrize("profile", ["production", "local-dev"])
@@ -4269,7 +4371,7 @@ def test_dagster_storage_entrypoint_rejects_application_inputs_even_when_empty(
 
     assert result.returncode != 0
     assert (
-        "Dagster metadata migration forbids application runtime/final-permit inputs"
+        "Dagster metadata migration forbids application runtime inputs"
         in result.stderr
     )
 
@@ -4356,33 +4458,30 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
 
 def _dagster_production_runtime_stub_path(
     tmp_path: Path,
-) -> tuple[str, Path, Path, Path]:
-    """production permit argv와 실제 runtime DSN을 함께 기록하는 PATH다."""
+) -> tuple[str, Path, Path]:
+    """metadata identity permit argv와 실제 runtime DSN을 함께 기록하는 PATH다.
+
+    application final permit 축은 없어졌다(ADR-101). 남은 것은 Dagster **metadata**
+    identity permit이고, 그것은 이 변경과 무관하게 그대로다.
+    """
 
     bin_dir = tmp_path / "dagster-production-bin"
     bin_dir.mkdir()
-    permit_marker = tmp_path / "dagster-final-permit-argv"
     storage_permit_marker = tmp_path / "dagster-storage-permit-argv"
     runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
-    final_permit = bin_dir / "ktm-application-schema-final-permit"
     storage_permit = bin_dir / "ktm-dagster-storage"
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
-        f"if [ \"${{1:-}}\" = \"-I\" ] "
-        f"&& [ \"${{2:-}}\" = \"{final_permit}\" ]; then\n"
-        "  shift 2\n"
-        f"  exec '{final_permit}' \"$@\"\n"
-        "fi\n"
         "if [ \"${1:-}\" = \"-I\" ]; then\n"
         f"  case \"${{2:-}}\" in '{bin_dir}'/*) exec '{sys.executable}' \"$@\" ;; esac\n"
         "fi\n"
         "if [ \"${1:-}\" = \"-I\" ]; then shift; fi\n"
         "if [ \"${1:-}\" = \"-m\" ] "
         "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
-        "  if [ \"${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN+x}\" = \"x\" ]; then\n"
-        "    echo named-runtime-dsn-leaked >&2\n"
-        "    exit 71\n"
-        "  fi\n"
+        # ADR-100: 종전 stub은 `..._DAGSTER_RUNTIME_PG_DSN`이 남아 있으면 leak으로
+        # 판정했다. 그 이름이 사라지고 entrypoint의 unset도 삭제된 지금 그 판정은
+        # 어떤 배선에서도 참이 되지 않는 죽은 가드다. 남은 성질은 아래 marker가
+        # 잰다 — 통합된 DSN이 runtime preflight까지 **그대로 도달**한다.
         f"  printf '%s' \"$KOR_TRAVEL_MAP_PG_DSN\" > '{runtime_dsn_marker}'\n"
         "  echo runtime-preflight\n"
         "  exit 0\n"
@@ -4391,16 +4490,6 @@ def _dagster_production_runtime_stub_path(
         "  exit 0\n"
         "fi\n"
         "exit 70\n",
-        encoding="utf-8",
-    )
-    final_permit.write_text(
-        "#!/bin/sh\n"
-        "if [ \"$#\" -ne 1 ] || [ \"${1:-}\" != \"verify-dagster\" ]; then\n"
-        "  echo unexpected-final-permit-argv >&2\n"
-        "  exit 72\n"
-        "fi\n"
-        f"printf '%s\\n' \"$1\" > '{permit_marker}'\n"
-        "exit 0\n",
         encoding="utf-8",
     )
     storage_permit.write_text(
@@ -4421,11 +4510,9 @@ def _dagster_production_runtime_stub_path(
         )
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
-    final_permit.chmod(0o755)
     storage_permit.chmod(0o755)
     return (
         f"{bin_dir}:{os.environ['PATH']}",
-        permit_marker,
         storage_permit_marker,
         runtime_dsn_marker,
     )
@@ -4491,30 +4578,44 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
         ],
     ],
 )
-def test_dagster_production_rejects_runtime_dsn_split_brain(
+@pytest.mark.parametrize("runtime_dsn", [None, ""])
+def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
     tmp_path: Path,
     command: list[str],
+    runtime_dsn: str | None,
 ) -> None:
-    """permit가 본 DB와 Dagster가 쓰는 DB가 갈라지는 우회를 막는다."""
+    """`test_dagster_production_rejects_runtime_dsn_split_brain`을 대체한다.
 
-    verified_dsn = "postgresql://dagster@example.invalid/verified"
-    path = _dagster_runtime_command_stub_path(tmp_path)
-    result = _run_dagster_entrypoint(
-        tmp_path,
-        path,
-        command,
-        {
-            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
-            "DAGSTER_HOME": "/opt/dagster/dagster_home",
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
-            "KOR_TRAVEL_MAP_PG_DSN": "postgresql://dagster@example.invalid/different",
-        },
+    원래 주제는 "verifier가 본 named DSN과 Dagster resource가 읽는
+    `KOR_TRAVEL_MAP_PG_DSN`이 문자열까지 같다"였다. 두 이름이 한 이름이 된 뒤
+    그 비교는 변수를 자기 자신과 비교하는 항진명제이고, entrypoint에서도 삭제됐다.
+    이름만 옮기면 `X != X`를 요구하는 검사가 되어 절대 빨개지지 않는다.
+
+    같은 자리에 남은 성질은 fail-closed 요구다 — production runtime은
+    `${KOR_TRAVEL_MAP_PG_DSN:?...}`로 **미설정과 빈 값 둘 다** 거부하고, 그 거부는
+    실제 Dagster 기동 **앞**에서 일어난다. `:?`가 `:-`로 바뀌거나 사라지면 이 검사가
+    빨개진다.
+
+    증인은 "Dagster가 뜨지 않았다" 하나다. metadata identity permit은 증인이 될 수
+    없다 — 그것은 application DSN 검사보다 **먼저** 도는 것이 설계이므로, 그것이
+    돌았다는 사실은 이 검사에 대해 아무 말도 하지 않는다.
+    """
+
+    path, _storage_permit_marker, _runtime_dsn_marker = (
+        _dagster_production_runtime_stub_path(tmp_path)
     )
+    environment = {
+        "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+        "DAGSTER_HOME": "/opt/dagster/dagster_home",
+    }
+    if runtime_dsn is not None:
+        environment["KOR_TRAVEL_MAP_PG_DSN"] = runtime_dsn
+    result = _run_dagster_entrypoint(tmp_path, path, command, environment)
 
     assert result.returncode != 0
-    assert (
-        "KOR_TRAVEL_MAP_PG_DSN must exactly equal "
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN in production" in result.stderr
+    assert "KOR_TRAVEL_MAP_PG_DSN is required in production" in result.stderr
+    assert "-started" not in result.stdout, (
+        "DSN이 없는데 Dagster 프로세스가 떴다 — 거부가 기동보다 앞이 아니다"
     )
 
 
@@ -4545,7 +4646,7 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
 ) -> None:
     """같은 DSN으로 verifier와 Dagster runtime을 순서대로 결박한다."""
 
-    path, permit_marker, storage_permit_marker, runtime_dsn_marker = (
+    path, storage_permit_marker, runtime_dsn_marker = (
         _dagster_production_runtime_stub_path(tmp_path)
     )
     verified_dsn = "postgresql://dagster@example.invalid/verified"
@@ -4556,14 +4657,12 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
         {
             "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
             "DAGSTER_HOME": "/opt/dagster/dagster_home",
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
-            # 직접 실행/overlay도 compose와 똑같이 맞춘 경우에는 허용한다.
+            # ADR-100: verifier와 Dagster resource가 읽는 DSN 이름이 하나다.
             "KOR_TRAVEL_MAP_PG_DSN": verified_dsn,
         },
     )
 
     assert result.returncode == 0, result.stderr
-    assert permit_marker.read_text(encoding="utf-8") == "verify-dagster\n"
     assert storage_permit_marker.read_text(encoding="utf-8") == "verify-identity\n"
     assert runtime_dsn_marker.read_text(encoding="utf-8") == verified_dsn
 
@@ -5265,18 +5364,16 @@ def test_api_image_ships_static_application_schema_head_command() -> None:
         "docker/application-schema-head.py /usr/local/bin/ktm-application-schema" in api
     )
     assert "/usr/local/bin/ktm-application-schema" in api
-    assert (
-        "docker/application-schema-fresh-300.py "
-        "/usr/local/bin/ktm-application-schema-fresh-300" in api
-    )
-    assert (
-        "docker/application-schema-final-permit.py "
-        "/usr/local/bin/ktm-application-schema-final-permit" in api
-    )
-    assert (
-        "docker/application-schema-contract.py "
-        "/usr/local/bin/ktm-application-schema-contract" in api
-    )
+    # 봉인된 배포 one-shot 셋은 이미지에서 빠졌다. head attest command만 남는다 —
+    # 그것은 sidecar를 읽지 않고 설치된 graph JSON만 읽는다.
+    for removed in (
+        "application-schema-fresh-300.py",
+        "application-schema-fresh-finalize.py",
+        "application-schema-final-permit.py",
+        "application-schema-contract.py",
+        "application-schema-db-contract.py",
+    ):
+        assert removed not in api
     assert "_application_migration_graph.json" in pyproject["tool"]["setuptools"][
         "package-data"
     ]["kortravelmap"]
@@ -5376,7 +5473,7 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     assert fresh_metadata["environment"]["KOR_TRAVEL_MAP_DAGSTER_PROFILE"] == (
         "local-dev"
     )
-    fresh_application = services["db-application-schema-fresh-300"]
+    fresh_application = services["db-application-schema-fresh"]
     assert "db-role-bootstrap-300" not in fresh_application["depends_on"]
     assert fresh_application["depends_on"]["dagster-db-init-fresh-300"][
         "condition"
@@ -5440,9 +5537,7 @@ def test_fresh_profile_resolves_metadata_permit_before_application_schema(
             ),
             "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
             "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
-            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator.invalid/map",
-            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api.invalid/map",
-            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": "postgresql://dagster.invalid/map",
+            "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service.invalid/map",
         },
         check=False,
         capture_output=True,
@@ -5471,16 +5566,14 @@ def test_fresh_profile_resolves_metadata_permit_before_application_schema(
     assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
         "service_completed_successfully"
     )
-    assert services["db-application-schema-fresh-300"]["depends_on"][
+    assert services["db-application-schema-fresh"]["depends_on"][
         "dagster-db-init-fresh-300"
     ]["condition"] == "service_completed_successfully"
 
 
 def _local_database_environment(*, metadata_identity: str) -> dict[str, str]:
     bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
-    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
-    api_password = "api00000000000000000000000000000000000000000000000000000000000"
-    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    service_password = "service000000000000000000000000000000000000000000000000000000000"
     metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
     return {
         "KOR_TRAVEL_MAP_POSTGRES_INIT_HOST": "postgres",
@@ -5492,20 +5585,13 @@ def _local_database_environment(*, metadata_identity: str) -> dict[str, str]:
             "postgresql://bootstrap:"
             f"{bootstrap_password}@postgres:5432/kor_travel_map"
         ),
-        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_migrator:"
-            f"{migrator_password}@postgres:5432/kor_travel_map"
-        ),
-        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_api_runtime:"
-            f"{api_password}@postgres:5432/kor_travel_map"
-        ),
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            "postgresql+asyncpg://ktm_feature_dagster_runtime:"
-            f"{dagster_password}@postgres:5432/kor_travel_map"
+        # ADR-100: 세 principal password/DSN이 하나가 됐다. 남는 세 비밀번호
+        # (bootstrap owner · service login · Dagster metadata login)는 여전히
+        # 서로 달라야 하고 preflight의 pairwise 순회가 그것을 잰다.
+        "KOR_TRAVEL_MAP_SERVICE_PASSWORD": service_password,
+        "KOR_TRAVEL_MAP_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_service:"
+            f"{service_password}@postgres:5432/kor_travel_map"
         ),
         "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev",
         "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": metadata_identity,
@@ -5576,6 +5662,19 @@ def _run_fresh_database_creator(
             {
                 "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": (
                     "postgresql://bootstrap:wrong@postgres:5432/kor_travel_map"
+                )
+            },
+            "credential does not match",
+        ),
+        (
+            # ADR-100으로 새로 생긴 결박: 통합된 DSN도 특정 login
+            # (`ktm_feature_service`)에 묶여 있어야 한다. 퇴역한 migrator login을
+            # 같은 비밀번호로 끼워도 거부해야 한다.
+            {
+                "KOR_TRAVEL_MAP_PG_DSN": (
+                    "postgresql+asyncpg://ktm_feature_migrator:"
+                    "service000000000000000000000000000000000000000000000000000000000"
+                    "@postgres:5432/kor_travel_map"
                 )
             },
             "credential does not match",
@@ -5715,9 +5814,13 @@ def test_dagster_db_init_rejects_changed_metadata_credential_before_psql(
 def test_dagster_db_init_rejects_application_role_before_database_mutation(
     tmp_path: Path,
 ) -> None:
+    # ADR-100: `ktm_feature_dagster_runtime`은 더 이상 존재하지 않는 role이다.
+    # 살아 있는 application LOGIN(`ktm_feature_service`)로 바꿔 둔다 — `ktm_*`
+    # 예약 pattern을 재는 것은 같지만, 존재하지 않는 이름으로 재면 나중에 "이
+    # 검사가 실제 role을 막는다"로 잘못 읽힌다.
     result, psql_log, createdb_called = _run_dagster_db_init_command(
         tmp_path,
-        metadata_identity="ktm_feature_dagster_runtime",
+        metadata_identity="ktm_feature_service",
         role_count=0,
         database_count=0,
     )
@@ -5792,11 +5895,7 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         ),
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            "postgresql://dagster@example.invalid/ktm"
-        ),
+        "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service@example.invalid/ktm",
         "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
             "postgresql://metadata@example.invalid/ktm_dagster"
         ),
@@ -5853,7 +5952,7 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         assert service["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] == (
             host_metadata_dsn
         )
-    assert services["db-application-schema-fresh-300"]["network_mode"] == "host"
+    assert services["db-application-schema-fresh"]["network_mode"] == "host"
 
 
 @pytest.mark.unit
@@ -5963,9 +6062,7 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         ),
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": "postgresql://dagster@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service@example.invalid/ktm",
         "KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL": (
             "postgresql://metadata@example.invalid/ktm_dagster"
         ),
@@ -6051,11 +6148,7 @@ def test_host_external_overlays_use_only_the_final_host_metadata_dsn(
         ),
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            "postgresql://dagster@example.invalid/ktm"
-        ),
+        "KOR_TRAVEL_MAP_PG_DSN": "postgresql://service@example.invalid/ktm",
         "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
             "postgresql://unused@example.invalid/ktm_dagster"
         ),
@@ -6069,8 +6162,10 @@ def test_host_external_overlays_use_only_the_final_host_metadata_dsn(
             "/dev/null",
             "-f",
             str(ROOT / "docker-compose.yml"),
-            "-f",
-            str(ROOT / "docker-compose.local-dev.yml"),
+            # ADR-100: `docker-compose.local-dev.yml`은 삭제됐다. 그 overlay의 유일한
+            # 내용은 API의 별도 migration DSN이었고, DSN이 하나가 된 뒤 그 파일이
+            # 겹칠 것이 없다. `scripts/docker-up.sh`와 fresh-live e2e 런처도 이
+            # `-f`를 더 이상 전달하지 않는다.
             "-f",
             str(ROOT / overlay),
             "-f",

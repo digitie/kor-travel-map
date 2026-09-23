@@ -19,7 +19,7 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -69,8 +69,8 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
         actor=f"admin:tvn-m04-{suffix}",
         operation="admin.feature-request.approve.v1",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     request_payload = {
         "kind": "place",
         "name": "M04 Feature 요청 장소",
@@ -118,27 +118,30 @@ async def test_feature_request_submit_then_admin_approval_creates_only_manual_re
             ).mappings().one()
         assert submitted["o_status"] == "pending"
 
-        async with dagster.begin() as connection:
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
-            )
-            with pytest.raises(DBAPIError) as denied:
+        # ADR-100 이전에는 Dagster login으로 같은 CALL을 걸어 42501을 봤다. 지금은
+        # LOGIN이 하나이고 그 하나가 request service executor의 member다 — 남은 경계는
+        # executor 층이다. submit은 service executor 전용이어야 하고 admin executor로
+        # 새면 안 된다(제출과 승인/거절은 서로 다른 principal이어야 한다).
+        async with migrated_engine.connect() as connection:
+            submit_acl = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.submit_feature_request(
-                          CAST(:request_id AS uuid), CAST(:payload AS jsonb), :command_id,
-                          NULL::text, NULL::timestamptz
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_feature_request_service_executor', oid, 'EXECUTE'
+                          ) AS service,
+                          has_function_privilege(
+                            'ktm_feature_request_admin_executor', oid, 'EXECUTE'
+                          ) AS admin
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'submit_feature_request'
                         """
-                    ),
-                    {
-                        "request_id": str(uuid4()),
-                        "payload": json.dumps(request_payload),
-                        "command_id": service_command,
-                    },
+                    )
                 )
-        assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+            ).mappings().one()
+            assert submit_acl == {"service": True, "admin": False}
 
         async with api.begin() as connection:
             await connection.execute(
@@ -223,7 +226,7 @@ async def test_feature_request_admin_rejection_closes_the_request_without_a_feat
         actor=f"admin:tvn-m04-reject-{suffix}",
         operation="admin.feature-request.reject.v1",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     request_payload = {
         "kind": "place",
         "name": "M04 거절 대상 요청",
@@ -323,7 +326,7 @@ async def test_feature_request_direct_relation_access_and_invalid_payload_are_de
 ) -> None:
     """runtime은 queue relation을 읽지 못하고 direct CALL도 HTTP 입력 경계를 지킨다."""
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     request_id = uuid4()
     command_id = await _command(
         migrated_engine,
@@ -400,8 +403,8 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
 
     previous_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrated_engine.url.set(
-        username="ktm_feature_migrator",
-        password="tvn34-test-only-migrator-password",
+        username="ktm_feature_service",
+        password="tvn34-test-only-service-password",
     ).render_as_string(hide_password=False)
     try:
         await reconcile_runtime_privileges()
@@ -423,7 +426,7 @@ async def test_feature_request_reconciler_restores_cross_owner_dependencies(
         actor=f"admin:tvn-m04-restore-{suffix}",
         operation="admin.feature-request.approve.v1",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     feature_id = "018f9f2b-8888-7def-8abc-1234567890ab"
     request_payload = {
         "kind": "place",

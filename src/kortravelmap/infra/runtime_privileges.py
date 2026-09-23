@@ -43,7 +43,7 @@ class RuntimePrivilegeReconciliationError(RuntimeError):
 
 
 _RUNTIME_ROLE = "ktm_feature_runtime"
-_MIGRATOR_ROLE = "ktm_feature_migrator"
+_MIGRATOR_ROLE = "ktm_feature_service"
 _SCHEMA_OWNER_ROLE = "ktm_feature_schema_owner"
 
 # feature schema에는 procedure-only state/audit object가 섞여 있다. 이 map은
@@ -93,15 +93,9 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "feature_routes": (
         "feature_id",
         "kind",
-        # ADR-099 2단계에서 `geom`이 `feature_route_geometries`로 갔다. 그런데
-        # 이 조정기는 head에서만 돌지 않는다 — `0236 → 300` handoff 실행자가
-        # **revision 300에서** 돌리고 그 직후 catalog를 immutable reference와
-        # sha256으로 대조한다. 그 catalog에 컬럼 단위 ACL이 들어 있으므로, 목록에서
-        # 그냥 빼면 컬럼이 아직 살아 있는 300에서 ACL 한 줄이 사라져 handoff가
-        # 멎는다(2026-09-10에 `feature_uuid`로 같은 사고가 났다).
-        #
-        # 그래서 목록에서 빼되 `_LEGACY_GEOM_GRANTS`가 **컬럼이 있을 때만** 같은
-        # ACL을 다시 건다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
+        # ADR-099 2단계가 `geom`을 `feature_route_geometries`로 옮겼으므로 여기
+        # 없다. 종전에는 `_LEGACY_GEOM_GRANTS`가 "컬럼이 있을 때만" 같은 ACL을 다시
+        # 걸었는데, 그것은 조정기가 revision 300에서도 돌던 시절의 보정이다(ADR-101).
         "route_type",
         "geometry_source",
         "geometry_status",
@@ -136,14 +130,6 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
     ),
 }
 
-#: **300에는 없고 312가 만드는 relation.** 이 조정기는 head에서만 돌지 않는다 —
-#: `0236 → 300` handoff 실행자가 revision 300에서도 돌린다. 그 시점에는 이 표가
-#: 없으므로 무조건 GRANT를 내면 배포가 그 자리에서 멎는다. 그래서 GRANT는
-#: `to_regclass` 판정으로 감싼다(`manual_feature_purge_records` 선례와 같은 형태).
-_POST_300_GEOMETRY_RELATIONS: Final[frozenset[str]] = frozenset(
-    {"feature_route_geometries"}
-)
-
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
         column for column in columns if column not in {"feature_id", "kind"}
@@ -151,88 +137,8 @@ _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
 
-#: shadow 컬럼 ``feature_uuid``에 걸던 INSERT 권한 — **컬럼이 있을 때만** 건다.
-#:
-#: 이 조정기는 head에서만 도는 것이 아니다. `0236 → 300` handoff 실행자
-#: (`docker/transition-application-schema-0236-to-300.py`)가 **revision 300에서**
-#: 이것을 돌리고, 그 직후의 catalog를 image에 봉인된 immutable reference와
-#: sha256으로 대조한다. 그 catalog에는 **컬럼 단위 ACL이 들어 있다.**
-#:
-#: 309가 shadow 컬럼을 지우면서 이 자리의 `feature_uuid`를 목록에서 뺐더니,
-#: 컬럼이 아직 살아 있는 300에서 ACL 두 줄이 사라져 destination catalog가 어긋났다
-#: (2026-09-10 실측: `feature_areas`·`feature_routes`의
-#: `{ktm_feature_runtime=a/ktm_feature_schema_owner}` 두 행). handoff는
-#: "300 destination catalog or seed does not match the immutable reference"로 멎는다.
-#:
-#: reference는 release 절차(`scripts/build-baseline.sh`)만 다시 만들 수 있고 그것은
-#: 살아 있는 0236 컨테이너와 source certificate를 요구한다. 그러므로 **바꿀 수 없는
-#: 쪽은 reference이고, 맞춰야 하는 쪽은 조정기다.**
-#:
-#: 표 단위 선례(`manual_feature_purge_records`의 `to_regclass` 판정)와 같은 형태로
-#: 조건부로 만든다. 컬럼은 `to_regclass`로 물을 수 없어 `pg_attribute`를 본다.
-_SHADOW_COLUMN_GRANTS = tuple(
-    "DO $shadow$ BEGIN"
-    " IF EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    f"     AND relation.relname = '{relation}'"
-    "     AND attribute.attname = 'feature_uuid'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT INSERT (feature_uuid) ON feature.{relation}"
-    " TO ktm_feature_runtime';"
-    " END IF; END $shadow$"
-    for relation in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS
-)
-
-#: `feature_routes.geom`에 걸던 컬럼 ACL — **컬럼이 있을 때만** 건다.
-#:
-#: ADR-099 2단계가 head에서 그 컬럼을 지웠지만 revision 300에는 아직 있다. 같은
-#: 조정기가 두 지점에서 돌고 300 쪽은 immutable reference와 대조되므로, 판정을
-#: 카탈로그에 맡긴다(`_SHADOW_COLUMN_GRANTS`와 같은 형태).
-_LEGACY_GEOM_GRANTS = tuple(
-    "DO $legacy_geom$ BEGIN"
-    " IF EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    f"     AND relation.relname = '{relation}'"
-    "     AND attribute.attname = 'geom'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT INSERT (geom), UPDATE (geom) ON feature.{relation}"
-    " TO ktm_feature_runtime';"
-    " END IF; END $legacy_geom$"
-    for relation in ("feature_routes",)
-)
-
-
-def _maybe_conditional(relation: str, statement: str) -> str:
-    """300에 없는 relation의 GRANT는 **표가 있을 때만** 실행한다.
-
-    handoff 실행자가 revision 300에서도 이 조정기를 돌린다. 그 시점에 없는 표에
-    무조건 GRANT를 내면 배포가 그 자리에서 멎는다 — `manual_feature_purge_records`가
-    같은 이유로 `to_regclass` 판정을 쓴다.
-    """
-
-    if relation not in _POST_300_GEOMETRY_RELATIONS:
-        return statement
-    escaped = statement.replace("'", "''")
-    return (
-        "DO $post300$ BEGIN"
-        f" IF to_regclass('feature.{relation}') IS NOT NULL THEN"
-        f" EXECUTE '{escaped}';"
-        " END IF; END $post300$"
-    )
-
-
 _ROUTE_AREA_RUNTIME_GRANTS = tuple(
-    _maybe_conditional(relation, statement)
+    statement
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
@@ -266,11 +172,10 @@ _GEOMETRY_BEARING_RELATIONS: Final[frozenset[str]] = frozenset(
 #: 가리키던 권한 선언은 옛 자리에 얼어 있었다.** 그래서 이 선언은 관계 이름이 아니라
 #: 위 `_GEOMETRY_BEARING_RELATIONS`에 결박한다.
 #:
-#: `feature_areas`에는 이미 같은 ACL이 있어 무연산이다 — revision 300 handoff가
-#: 대조하는 destination catalog는 그대로다. 새 relation만 `to_regclass` 판정을 거쳐
-#: 실제로 붙는다.
+#: `feature_areas`에는 이미 같은 ACL이 있어 무연산이고, 새 relation에만 실제로
+#: 붙는다.
 _STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
-    _maybe_conditional(relation, statement)
+    statement
     for relation in sorted(_GEOMETRY_BEARING_RELATIONS)
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_state_procedure_owner",
@@ -279,12 +184,7 @@ _STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
     )
 )
 
-_ROUTE_AREA_RUNTIME_GRANTS = (
-    _ROUTE_AREA_RUNTIME_GRANTS
-    + _STATE_PROCEDURE_GEOMETRY_GRANTS
-    + _SHADOW_COLUMN_GRANTS
-    + _LEGACY_GEOM_GRANTS
-)
+_ROUTE_AREA_RUNTIME_GRANTS = _ROUTE_AREA_RUNTIME_GRANTS + _STATE_PROCEDURE_GEOMETRY_GRANTS
 
 # Provider/ops schemas contain ordinary application data, not state/audit
 # evidence.  Existing repositories use their complete current table surface;
@@ -504,7 +404,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     # 있나"를 묻는 유일한 통로다 — runtime은 `provider_sync`의 표를 직접 못 읽으므로
     # 이 SECURITY DEFINER 함수의 EXECUTE가 그 질문의 전부다.
     "REVOKE ALL ON FUNCTION feature.resolve_provider_feature_id(...) "
-    "FROM PUBLIC, ktm_feature_api_runtime, ktm_manual_feature_procedure_owner, "
+    "FROM PUBLIC, ktm_feature_service, ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor",
     # 생성 wrapper와 **같은 집합**에 준다. 둘은 한 쌍으로 쓰이므로 — claim을 풀어
     # 존재를 묻고, 없으면 wrapper로 만든다 — 한쪽만 부를 수 있는 롤이 있으면 적재가
@@ -514,7 +414,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(...) "
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "REVOKE ALL ON PROCEDURE feature.transition_feature_state(...) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override(...) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(...) FROM PUBLIC",
@@ -549,8 +449,8 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     # revoke하면 별도 grantor ACL은 지워도 owner/public ACL은 지우지 못해 API/Dagster
     # preflight에서 unexpected SECURITY DEFINER function으로 잡힌다.
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_evidence_mutation(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
     # 307의 TRUNCATE 가드 둘. trigger function은 발화 시 EXECUTE 권한을 보지 않으므로
     # 회수해도 fence는 그대로 돈다 — 회수하지 않으면 `db.py`의 startup preflight가
@@ -560,19 +460,19 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     # 그 판정은 종전의 `to_regprocedure` DO block이 아니라 `_OPTIONAL_ROUTINES`가 한다 —
     # DO block은 head에서도 무조건 조용했고, 조용한 건너뜀에는 증인이 없다.
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_truncate(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
     "REVOKE ALL ON FUNCTION feature.reject_feature_request_evidence_mutation(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 
 _MANUAL_FEATURE_TABLE_ACL = (
     "REVOKE ALL ON TABLE feature.manual_feature_identity_claims, "
     "feature.feature_creation_origins FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "ktm_feature_service",
     # `manual_feature_purge_records`는 306이 만든다. 이 조정기는 `300` head에서도
     # 도는데(0236 → 300 handoff 검증), 그 시점에는 표가 없어 이름을 그대로 쓰면
     # `UndefinedTable`로 죽는다 — 304의 함수 REVOKE가 pre-304 DB에서 42883으로 죽은
@@ -583,8 +483,8 @@ _MANUAL_FEATURE_TABLE_ACL = (
     "DO $$ BEGIN"
     " IF to_regclass('feature.manual_feature_purge_records') IS NOT NULL THEN"
     " EXECUTE 'REVOKE ALL ON TABLE feature.manual_feature_purge_records"
-    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,"
-    " ktm_feature_dagster_runtime';"
+    " FROM PUBLIC, ktm_feature_runtime, ktm_feature_service,"
+    " ktm_feature_service';"
     " EXECUTE 'GRANT SELECT, INSERT ON TABLE feature.manual_feature_purge_records"
     " TO ktm_manual_feature_procedure_owner';"
     " END IF; END $$",
@@ -598,7 +498,7 @@ _MANUAL_FEATURE_TABLE_ACL = (
 
 _FEATURE_REQUEST_TABLE_ACL = (
     "REVOKE ALL ON TABLE ops.feature_requests FROM PUBLIC, "
-    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "ktm_feature_runtime, ktm_feature_service",
     "GRANT SELECT, INSERT, UPDATE (status, resolved_at, resolved_by_actor, "
     "resolution_command_id, resolved_feature_id, rejection_reason) "
     "ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner",
@@ -665,24 +565,22 @@ _M05_STATE_OWNER_DEPENDENCY_ACL = (
 
 _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_service, ktm_manual_provider_dedup_detector_executor, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor",
     "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(...) "
     "TO ktm_feature_reference_reconciliation_service_executor",
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases(...), "
     "feature.read_manual_provider_dedup_case(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases(...), "
@@ -690,7 +588,7 @@ _M05_WRITER_ACL = (
     "TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_service, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate(...) "
@@ -706,14 +604,14 @@ _M05_WRITER_ACL = (
     # 전체가 무효화된다** — 이 두 문장과 무관한 grant까지 같이 날아간다. 그 판정은
     # 종전의 `to_regprocedure` DO block이 아니라 `_OPTIONAL_ROUTINES`가 한다.
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_admin_executor, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
+    " ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_detector_manuals(...) "
     "TO ktm_manual_provider_dedup_detector_executor",
     "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(...), "
     "feature.resolve_manual_provider_dedup_case_v2(...) FROM PUBLIC, "
-    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
@@ -722,7 +620,7 @@ _M05_WRITER_ACL = (
     "REVOKE ALL ON PROCEDURE "
     "feature.provision_feature_reference_reconciliation_subscription(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_service, ktm_manual_provider_dedup_detector_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE "
     "feature.provision_feature_reference_reconciliation_subscription(...) "
@@ -731,7 +629,7 @@ _M05_WRITER_ACL = (
     "feature.lease_feature_reference_reconciliation_event_v2(...), "
     "feature.ack_feature_reference_reconciliation_event(...), "
     "feature.ack_feature_reference_reconciliation_event_v2(...) FROM PUBLIC, "
-    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
@@ -742,21 +640,21 @@ _M05_WRITER_ACL = (
 
 _MANUAL_FEATURE_WRITER_ACL = (
     "REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_feature_create_provider_executor",
     "GRANT EXECUTE ON PROCEDURE feature.create_admin_manual_feature_with_initial_state(...) "
     "TO ktm_manual_feature_admin_executor",
     "REVOKE ALL ON FUNCTION feature.read_admin_manual_feature_provenance(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_feature_create_provider_executor",
     "GRANT EXECUTE ON FUNCTION feature.read_admin_manual_feature_provenance(...) "
     "TO ktm_manual_feature_admin_executor",
     "REVOKE ALL ON FUNCTION feature.manual_feature_identity_key(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "ktm_feature_service",
     "REVOKE ALL ON FUNCTION feature.reject_manual_feature_hard_purge(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
-    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
+    " ktm_manual_feature_procedure_owner, "
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 
@@ -764,7 +662,7 @@ _MANUAL_CURATION_WRITER_ACL = (
     "REVOKE ALL ON PROCEDURE "
     "feature.create_manual_curation_item_with_feature_command(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
-    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_service, "
     "ktm_curation_provider_executor, ktm_manual_feature_admin_executor",
     "GRANT EXECUTE ON PROCEDURE "
     "feature.create_manual_curation_item_with_feature_command(...) "
@@ -773,25 +671,25 @@ _MANUAL_CURATION_WRITER_ACL = (
 
 _FEATURE_REQUEST_WRITER_ACL = (
     "REVOKE ALL ON PROCEDURE feature.submit_feature_request(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_feature_admin_executor, ktm_curation_admin_executor, "
     "ktm_feature_request_admin_executor",
     "GRANT EXECUTE ON PROCEDURE feature.submit_feature_request(...) "
     "TO ktm_feature_request_service_executor",
     "REVOKE ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(...), "
     "feature.reject_feature_request(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_feature_admin_executor, ktm_curation_admin_executor, "
     "ktm_feature_request_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.approve_feature_request_with_initial_state(...), "
     "feature.reject_feature_request(...) "
     "TO ktm_feature_request_admin_executor",
     "REVOKE ALL ON FUNCTION feature.read_feature_request(...) FROM PUBLIC, "
-    "ktm_feature_runtime, ktm_feature_dagster_runtime",
+    "ktm_feature_runtime, ktm_feature_service",
     "GRANT EXECUTE ON FUNCTION feature.read_feature_request(...) "
     "TO ktm_feature_request_admin_executor",
     "REVOKE ALL ON FUNCTION feature.list_feature_requests(...) FROM PUBLIC, "
-    "ktm_feature_runtime, ktm_feature_dagster_runtime",
+    "ktm_feature_runtime, ktm_feature_service",
     "GRANT EXECUTE ON FUNCTION feature.list_feature_requests(...) "
     "TO ktm_feature_request_admin_executor",
 )
@@ -821,9 +719,9 @@ _SUBTYPE_READY_FUNCTION_ACL = (
 #: 적재(= snapshot이 아닌 전부)가 이 경로를 지난다.
 #:
 #: **수여 대상은 `ktm_curation_provider_executor`다 — `ktm_feature_runtime`이 아니다.**
-#: 0209의 원문은 넓은 runtime 그룹에 주었지만 그 그룹에는 `ktm_feature_api_runtime`도
+#: 0209의 원문은 넓은 runtime 그룹에 주었지만 그 그룹에는 `ktm_feature_service`도
 #: 멤버로 들어 있다(`inherit_option=true`). 거기에 주면 API login까지 함께 열리고,
-#: `REVOKE … FROM ktm_feature_api_runtime`은 **멤버십 경유 권한을 걷지 못하므로**
+#: `REVOKE … FROM ktm_feature_service`은 **멤버십 경유 권한을 걷지 못하므로**
 #: 장식이 된다. 실측으로 확인했다(2026-09-11).
 #:
 #: 좁은 그룹이 이미 정확히 존재한다. `ktm_curation_provider_executor`는 멤버가
@@ -836,7 +734,7 @@ _SUBTYPE_READY_FUNCTION_ACL = (
 #: 되살아나려 할 때 이 문장이 그 자리에서 의도를 말한다.
 _PROVIDER_CURATION_SEAL_ACL = (
     "REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime",
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
     "GRANT EXECUTE ON FUNCTION feature.current_provider_curation_input_set(...) "
     "TO ktm_curation_provider_executor, ktm_curation_command_owner",
 )
@@ -861,33 +759,18 @@ _PROVIDER_CURATION_SEAL_ACL = (
 #: (CI PostGIS 실측). reference는 release 절차만 다시 만들 수 있으므로 맞춰야 하는
 #: 쪽은 이 조정기다.
 #:
-#: 그래서 `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 **반대 방향으로** 쓴다. shadow 컬럼
-#: `feature_uuid`는 300에 있고 309(`_SHADOW_DROP`)가 지운다 — **없을 때만**, 즉
-#: head에서만 GRANT한다. 300에서는 이 블록이 아무 것도 하지 않아 catalog가 그대로다.
+#: 종전에는 이 GRANT가 `IF NOT EXISTS(... feature_uuid ...)` 조건 아래 있었다 —
+#: 조정기가 revision 300에서도 돌았고 그 시점 catalog가 봉인된 reference와
+#: 대조됐기 때문이다. 상태가 하나가 되어 그 조건은 항상 참이고, 조건을 남겨 두면
+#: 무엇을 막는지 아무도 모르는 우회로만 남는다(ADR-101).
 #:
-#: 쓰기는 열지 않는다 — 후보 행은 `ktm_curation_command_owner`가, transitions의
-#: append는 `ktm_curation_audit_writer`가 소유한다. 생성 축 둘
-#: (`theme_candidate_generations`, `..._observations`)은 admin 읽기 SQL이 참조하지
-#: 않으므로 열지 않는다.
 _CURATION_CANDIDATE_READ_RELATIONS: Final[tuple[str, ...]] = (
     "theme_feature_candidates",
     "theme_feature_candidate_transitions",
 )
 
 _CURATION_CANDIDATE_READ_ACL = tuple(
-    "DO $curation_read$ BEGIN"
-    " IF NOT EXISTS ("
-    "   SELECT 1 FROM pg_catalog.pg_attribute AS attribute"
-    "   JOIN pg_catalog.pg_class AS relation ON relation.oid = attribute.attrelid"
-    "   JOIN pg_catalog.pg_namespace AS namespace"
-    "     ON namespace.oid = relation.relnamespace"
-    "   WHERE namespace.nspname = 'feature'"
-    "     AND relation.relname = 'feature_areas'"
-    "     AND attribute.attname = 'feature_uuid'"
-    "     AND attribute.attnum > 0 AND NOT attribute.attisdropped"
-    " ) THEN"
-    f" EXECUTE 'GRANT SELECT ON feature.{relation} TO ktm_feature_runtime';"
-    " END IF; END $curation_read$"
+    f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime"
     for relation in _CURATION_CANDIDATE_READ_RELATIONS
 )
 
@@ -970,12 +853,18 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: head에는 반드시 있어야 한다는 것은 런타임의 추측이 아니라
 #: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 head 오라클에 대고
 #: 정적으로 고정한다 — 배포가 아니라 머지를 막는 쪽이 더 이르다.
-_OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "feature.list_manual_provider_dedup_detector_manuals": "304_m05_detector_manual_listing",
-    "feature.reject_feature_request_evidence_mutation": "307_m02_truncate_fence",
-    "feature.reject_manual_feature_truncate": "307_m02_truncate_fence",
-    "feature.resolve_provider_feature_id": "309_t39_feature_id_rekey",
-}
+#: 인벤토리가 지목하지만 **없어도 되는** 루틴과 그것을 만드는 revision.
+#:
+#: 지금은 비어 있다. 이 예외가 있던 이유는 조정기가 두 스키마 상태에서 돌았기
+#: 때문이다 — baseline root에서 한 번(0236 handoff 직후), head에서 한 번. 그
+#: 사이에 생긴 루틴은 앞 시점에 없었다. `400` 스쿼시로 그 두 시점이 하나가 됐고,
+#: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 실물로 확인한다 —
+#: baseline root에 없는 인벤토리 루틴은 0개다.
+#:
+#: 비워 두는 것이 중요하다. 이름이 남아 있으면 그 루틴이 **정말로** 사라진 날에도
+#: 조정기가 조용히 건너뛰고, 지켜야 할 ACL이 없어진 것을 아무도 모른다. 다음
+#: revision이 새 루틴을 만들고 그 사이 상태를 지나야 한다면 그때 다시 적는다.
+_OPTIONAL_ROUTINES: Mapping[str, str] = {}
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은
 #: **이 조정기가 ACL을 거는 대상**이고, lint가 두 오라클에 이름으로 묶는다.

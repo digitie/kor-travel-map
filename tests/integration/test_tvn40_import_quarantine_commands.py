@@ -28,7 +28,7 @@ from kortravelmap.infra.db import make_async_engine
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -70,7 +70,7 @@ async def test_import_and_quarantine_advance_collection_revision_once(
 ) -> None:
     suffix = uuid4().hex
     actor = f"admin:tvn40-import-{suffix}"
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(api, expire_on_commit=False)
     try:
         async with migrated_engine.begin() as connection:

@@ -25,11 +25,11 @@ pytestmark = pytest.mark.integration
 # Shared migrations recreate the disposable runtime LOGIN roles with this
 # T-VN-40 password.  Keep the preflight fixture aligned so a preceding
 # privilege test cannot invalidate later command-login connections.
-_PASSWORD = "tvn40-test-only-runtime-password"
-_RUNTIME_LOGINS = (
-    "ktm_feature_api_runtime",
-    "ktm_feature_dagster_runtime",
-)
+_PASSWORD = "tvn34-test-only-service-password"
+# ADR-100: bootstrap가 만드는 LOGIN은 하나다. 이 tuple을 유지하는 이유는 헬퍼와
+# 순회가 "bootstrap가 만드는 LOGIN 집합"을 뜻하기 때문이고, 그 집합이 다시 늘어나면
+# 여기부터 늘어나야 한다.
+_RUNTIME_LOGINS = ("ktm_feature_service",)
 
 
 async def _require_tvn34_provenance_bridge(engine: AsyncEngine) -> None:
@@ -121,10 +121,10 @@ async def _engine_for_runtime(engine: AsyncEngine, *, login: str) -> AsyncEngine
     return runtime_engine
 
 
-async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_preflight(
+async def test_tvn34_service_runtime_login_passes_actual_catalog_preflight(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """두 runtime LOGIN은 session_user=current_user와 procedure-only 권한을 만족한다.
+    """통합 runtime LOGIN은 session_user=current_user와 procedure-only 권한을 만족한다.
 
     T-VN-39(alembic 309) 뒤 feature 식별자를 받는 procedure의 첫 인자는 uuid다.
     아래 ``::regprocedure`` 리터럴은 **존재하지 않는 시그니처면 NULL이 아니라
@@ -156,7 +156,53 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "pg_has_role(session_user, 'ktm_feature_schema_owner', 'SET')"
                         )
                     )
-                ).one() == (False, False)
+                    # ADR-100: 통합된 LOGIN이 migration도 돌려야 하므로 bootstrap이
+                    # `ktm_feature_schema_owner`를 `SET TRUE`로 준다 — 두 번째는 이제
+                    # 참이어야 한다. 첫 번째는 `SET FALSE`라 여전히 거짓이고, 여전히
+                    # 갈린다(runtime group으로는 SET ROLE 할 수 없다).
+                ).one() == (False, True)
+                # ADR-100 이전에는 아래 두 EXECUTE가 login으로 갈렸다 — provider
+                # 생성은 Dagster login만, admin manual 생성은 API login만. LOGIN이
+                # 하나가 되면서 그 축이 사라졌고, 통합 login은 둘 다 갖는다.
+                #
+                # "둘 다 True"만 재면 grant가 넓어져도 초록이므로, 사라진 축 대신
+                # **executor 층**을 여기서 함께 잰다. ADR-100은 그 층을 건드리지
+                # 않았고 executor role끼리는 membership이 없어(bootstrap의 role
+                # graph는 평평하다) 여전히 갈린다: 각 procedure의 grant는 정확히 한
+                # executor에만 가야 한다.
+                narrow = (
+                    await connection.execute(
+                        text(
+                            "SELECT "
+                            "has_function_privilege("
+                            "'ktm_feature_create_provider_executor', "
+                            "'feature.create_feature_with_initial_state("
+                            "jsonb,text,text,text,jsonb)'::regprocedure, "
+                            "'EXECUTE') AS provider_side_of_provider_create, "
+                            "has_function_privilege("
+                            "'ktm_manual_feature_admin_executor', "
+                            "'feature.create_feature_with_initial_state("
+                            "jsonb,text,text,text,jsonb)'::regprocedure, "
+                            "'EXECUTE') AS admin_side_of_provider_create, "
+                            "has_function_privilege("
+                            "'ktm_manual_feature_admin_executor', "
+                            "'feature.create_admin_manual_feature_with_initial_state("
+                            "jsonb,bigint)'::regprocedure, "
+                            "'EXECUTE') AS admin_side_of_manual_create, "
+                            "has_function_privilege("
+                            "'ktm_feature_create_provider_executor', "
+                            "'feature.create_admin_manual_feature_with_initial_state("
+                            "jsonb,bigint)'::regprocedure, "
+                            "'EXECUTE') AS provider_side_of_manual_create"
+                        )
+                    )
+                ).mappings().one()
+                assert narrow == {
+                    "provider_side_of_provider_create": True,
+                    "admin_side_of_provider_create": False,
+                    "admin_side_of_manual_create": True,
+                    "provider_side_of_manual_create": False,
+                }
                 assert (
                     await connection.scalar(
                         text(
@@ -167,7 +213,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "'EXECUTE')"
                         )
                     )
-                ) is (login == "ktm_feature_dagster_runtime")
+                ) is True
                 assert (
                     await connection.scalar(
                         text(
@@ -178,7 +224,7 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "'EXECUTE')"
                         )
                     )
-                ) is (login == "ktm_feature_api_runtime")
+                ) is True
                 assert (
                     await connection.scalar(
                         text(
@@ -302,36 +348,33 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
     """audit·필수 read view ACL 하나라도 빠지면 fail-closed다."""
 
     await _provision_runtime_logins(migrated_engine)
-    api_engine = await _engine_for_runtime(
+    # ADR-100: API와 Dagster가 같은 LOGIN으로 접속하므로 engine 하나면 된다.
+    service_engine = await _engine_for_runtime(
         migrated_engine,
-        login="ktm_feature_api_runtime",
-    )
-    dagster_engine = await _engine_for_runtime(
-        migrated_engine,
-        login="ktm_feature_dagster_runtime",
+        login="ktm_feature_service",
     )
     try:
         async with migrated_engine.begin() as connection:
             await connection.execute(
-                text("GRANT INSERT ON feature.feature_state_transitions TO ktm_feature_api_runtime")
+                text("GRANT INSERT ON feature.feature_state_transitions TO ktm_feature_service")
             )
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="transition"):
             await assert_runtime_db_privilege_boundary(
-                api_engine,
-                expected_login="ktm_feature_api_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
 
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text(
                     "GRANT EXECUTE ON FUNCTION feature.write_feature_state_transition() "
-                    "TO ktm_feature_dagster_runtime"
+                    "TO ktm_feature_service"
                 )
             )
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="audit writer"):
             await assert_runtime_db_privilege_boundary(
-                dagster_engine,
-                expected_login="ktm_feature_dagster_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
 
         async with migrated_engine.begin() as connection:
@@ -340,28 +383,27 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
             )
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="public_features"):
             await assert_runtime_db_privilege_boundary(
-                api_engine,
-                expected_login="ktm_feature_api_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
     finally:
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text(
                     "REVOKE INSERT ON feature.feature_state_transitions "
-                    "FROM ktm_feature_api_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
                 text(
                     "REVOKE EXECUTE ON FUNCTION feature.write_feature_state_transition() "
-                    "FROM ktm_feature_dagster_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
                 text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
             )
-        await api_engine.dispose()
-        await dagster_engine.dispose()
+        await service_engine.dispose()
 
 
 async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants(
@@ -370,13 +412,10 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
     """T-VN-40 application routine 집합은 API/Dagster별 exact equality다."""
 
     await _provision_runtime_logins(migrated_engine)
-    api_engine = await _engine_for_runtime(
+    # ADR-100: API와 Dagster가 같은 LOGIN으로 접속하므로 engine 하나면 된다.
+    service_engine = await _engine_for_runtime(
         migrated_engine,
-        login="ktm_feature_api_runtime",
-    )
-    dagster_engine = await _engine_for_runtime(
-        migrated_engine,
-        login="ktm_feature_dagster_runtime",
+        login="ktm_feature_service",
     )
     try:
         async with migrated_engine.begin() as connection:
@@ -384,7 +423,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                 text(
                     "GRANT EXECUTE ON PROCEDURE "
                     "feature.finalize_provider_curation_root(uuid) "
-                    "TO ktm_feature_api_runtime"
+                    "TO ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -392,7 +431,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                     "GRANT EXECUTE ON PROCEDURE "
                     "feature.reject_theme_feature_candidate("
                     "uuid,bigint,bigint,text,text) "
-                    "TO ktm_feature_dagster_runtime"
+                    "TO ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -415,7 +454,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
             await connection.execute(
                 text(
                     "GRANT EXECUTE ON PROCEDURE ops.review_rogue_procedure() "
-                    "TO ktm_feature_dagster_runtime"
+                    "TO ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -426,19 +465,19 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
             await connection.execute(
                 text(
                     "GRANT EXECUTE ON FUNCTION ops.review_rogue_function() "
-                    "TO ktm_feature_api_runtime"
+                    "TO ktm_feature_service"
                 )
             )
 
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
             await assert_runtime_db_privilege_boundary(
-                api_engine,
-                expected_login="ktm_feature_api_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
             await assert_runtime_db_privilege_boundary(
-                dagster_engine,
-                expected_login="ktm_feature_dagster_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
 
         async with migrated_engine.begin() as connection:
@@ -446,7 +485,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                 text(
                     "REVOKE EXECUTE ON PROCEDURE "
                     "feature.finalize_provider_curation_root(uuid) "
-                    "FROM ktm_feature_api_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -454,7 +493,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                     "REVOKE EXECUTE ON PROCEDURE "
                     "feature.reject_theme_feature_candidate("
                     "uuid,bigint,bigint,text,text) "
-                    "FROM ktm_feature_dagster_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -475,19 +514,19 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                 text(
                     "REVOKE EXECUTE ON FUNCTION "
                     "ops.fill_provider_cancellation_starts_command("
-                    "uuid,text,timestamptz) FROM ktm_feature_api_runtime"
+                    "uuid,text,timestamptz) FROM ktm_feature_service"
                 )
             )
 
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="missing expected"):
             await assert_runtime_db_privilege_boundary(
-                api_engine,
-                expected_login="ktm_feature_api_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
         with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="missing expected"):
             await assert_runtime_db_privilege_boundary(
-                dagster_engine,
-                expected_login="ktm_feature_dagster_runtime",
+                service_engine,
+                expected_login="ktm_feature_service",
             )
     finally:
         async with migrated_engine.begin() as connection:
@@ -501,7 +540,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                 text(
                     "REVOKE EXECUTE ON PROCEDURE "
                     "feature.finalize_provider_curation_root(uuid) "
-                    "FROM ktm_feature_api_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -509,7 +548,7 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                     "REVOKE EXECUTE ON PROCEDURE "
                     "feature.reject_theme_feature_candidate("
                     "uuid,bigint,bigint,text,text) "
-                    "FROM ktm_feature_dagster_runtime"
+                    "FROM ktm_feature_service"
                 )
             )
             await connection.execute(
@@ -524,11 +563,10 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                 text(
                     "GRANT EXECUTE ON FUNCTION "
                     "ops.fill_provider_cancellation_starts_command("
-                    "uuid,text,timestamptz) TO ktm_feature_api_runtime"
+                    "uuid,text,timestamptz) TO ktm_feature_service"
                 )
             )
-        await api_engine.dispose()
-        await dagster_engine.dispose()
+        await service_engine.dispose()
 
 
 async def test_tvn34_runtime_logins_run_provider_and_admin_dml_but_raw_state_writes_fail(

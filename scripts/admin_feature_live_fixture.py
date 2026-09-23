@@ -1709,7 +1709,7 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
     # `rolinherit=false`라 자기 membership의 권한을 자동으로 갖지 않고,
     # `public.alembic_version`의 SELECT는 baseline이 소유자
     # `ktm_feature_schema_owner`와 `ktm_feature_runtime`에만 준다
-    # (`alembic/versions/300_schema_baseline.py`). 그래서 revision 확인은 아래
+    # (`alembic/versions/400_schema_baseline.py`). 그래서 revision 확인은 아래
     # `SET ROLE` 뒤로 간다 — 여전히 모든 mutation보다 앞이다.
     observed = (
         await connection.execute(

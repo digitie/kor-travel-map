@@ -240,16 +240,14 @@ random_secret() {
 }
 
 write_env_files() {
-  local postgres_password migrator_password api_password dagster_password metadata_password
+  local postgres_password service_password metadata_password
   local admin_proxy_secret service_token cursor_secret metrics_token
   local cache_target_command_token cache_target_consumer_token
   local curation_snapshot_token curation_cutover_mapping_token
   local curation_snapshot_digest curation_cutover_mapping_digest
   local ops_read ops_cancel ops_fixture ui_session ui_password_hash compose_ui_password_hash object_secret
   postgres_password="$(random_secret)"
-  migrator_password="$(random_secret)"
-  api_password="$(random_secret)"
-  dagster_password="$(random_secret)"
+  service_password="$(random_secret)"
   metadata_password="$(random_secret)"
   admin_proxy_secret="$(random_secret)"
   service_token="$(random_secret)"
@@ -308,15 +306,10 @@ KOR_TRAVEL_MAP_POSTGRES_USER=kor_travel_map
 KOR_TRAVEL_MAP_POSTGRES_PASSWORD=$postgres_password
 KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE=kor_travel_map
 KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN=postgresql://kor_travel_map:$postgres_password@postgres:5432/kor_travel_map
-KOR_TRAVEL_MAP_MIGRATOR_PASSWORD=$migrator_password
-KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD=$api_password
-KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD=$dagster_password
+KOR_TRAVEL_MAP_SERVICE_PASSWORD=$service_password
 KOR_TRAVEL_MAP_DAGSTER_METADATA_USER=kor_travel_map_dagster
 KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD=$metadata_password
-KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=postgresql+asyncpg://ktm_feature_migrator:$migrator_password@postgres:5432/kor_travel_map
-KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=postgresql+asyncpg://ktm_feature_api_runtime:$api_password@postgres:5432/kor_travel_map
-KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_runtime:$dagster_password@postgres:5432/kor_travel_map
-KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_runtime:$dagster_password@postgres:5432/kor_travel_map
+KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://ktm_feature_service:$service_password@postgres:5432/kor_travel_map
 KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map_dagster:$metadata_password@postgres:5432/kor_travel_map_dagster
 KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD
 # 이 isolated acceptance stack은 Manager production permit을 발행하지 않는다. production
@@ -331,7 +324,6 @@ KOR_TRAVEL_MAP_RUSTFS_API_PORT=$rustfs_port
 KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT=$((rustfs_port + 1))
 KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME=$MAP_PROJECT-mois
 KOR_TRAVEL_MAP_RUSTFS_VOLUME=$MAP_PROJECT-rustfs
-KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME=$MAP_PROJECT-application-final-permit
 KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME=$MAP_PROJECT-dagster-storage-permit
 KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=$admin_proxy_secret
 KOR_TRAVEL_MAP_API_SERVICE_TOKEN=$service_token
@@ -448,7 +440,6 @@ EOF
 compose_map() {
   docker compose --project-name "$MAP_PROJECT" --env-file "$MAP_ENV" \
     --file "$MAP_DIR/docker-compose.yml" \
-    --file "$MAP_DIR/docker-compose.local-dev.yml" \
     --file "$MAP_COMPOSE_OVERRIDE" "$@"
 }
 
@@ -661,26 +652,23 @@ def environment(item):
     return dict(value.split("=", 1) for value in item["Config"]["Env"] if "=" in value)
 
 storage_env, web_env, daemon_env = map(environment, (storage, webserver, daemon))
-for forbidden in (
-    "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
-    "KOR_TRAVEL_MAP_PG_DSN",
-    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
-    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
-):
+for forbidden in ("KOR_TRAVEL_MAP_PG_DSN",):
     if forbidden in storage_env:
         raise SystemExit("Dagster metadata migration received an application input")
 if len({item["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] for item in (storage_env, web_env, daemon_env)}) != 1:
     raise SystemExit("Dagster metadata DSN split-brain detected")
-if len({item["KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN"] for item in (web_env, daemon_env)}) != 1:
+if len({item["KOR_TRAVEL_MAP_PG_DSN"] for item in (web_env, daemon_env)}) != 1:
     raise SystemExit("Dagster application runtime DSN split-brain detected")
 for item in (storage_env, web_env, daemon_env):
     if item.get("DAGSTER_HOME") != "/opt/dagster/dagster_home":
         raise SystemExit("Dagster home is not canonical")
     if item.get("KOR_TRAVEL_MAP_DAGSTER_PROFILE") != "local-dev":
         raise SystemExit("fresh acceptance must use the explicit local-dev permit authority")
-for item in (web_env, daemon_env):
-    if item.get("KOR_TRAVEL_MAP_PG_DSN") != item.get("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN"):
-        raise SystemExit("Dagster runtime preflight DSN is not the runtime DSN")
+# ADR-100: 예전에는 Dagster resource가 읽는 `KOR_TRAVEL_MAP_PG_DSN`과 verifier가 보는
+# `..._DAGSTER_RUNTIME_PG_DSN`이 다른 두 이름이라 둘이 같은지 봐야 했다. 이름이 하나가
+# 된 지금 그 비교는 변수를 자기 자신과 재는 항진명제라서 지웠다 — 같은 항진명제를
+# `docker/dagster-entrypoint.sh`에서도 지웠으니 여기 남겨두면 옮겨온 셈이 된다.
+# web/daemon이 서로 같은 DSN을 받는지는 위 split-brain 검사가 계속 본다.
 
 def require_read_only_mount(item, destination):
     matches = [mount for mount in item["Mounts"] if mount["Destination"] == destination]
@@ -689,13 +677,15 @@ def require_read_only_mount(item, destination):
 
 for item in (storage, webserver, daemon):
     require_read_only_mount(item, "/run/kor-travel-map-dagster-storage-permit")
-for item in (webserver, daemon):
-    require_read_only_mount(item, "/run/kor-travel-map-application-final-permit")
-if any(
-    mount["Destination"] == "/run/kor-travel-map-application-final-permit"
-    for mount in storage["Mounts"]
-):
-    raise SystemExit("Dagster metadata migration received the application permit mount")
+# ADR-101: application final permit 마운트는 사라졌다 — 그것을 읽던
+# `docker/application-schema-final-permit.py`가 rev 400 스쿼시에서 삭제됐고, Manager도
+# 마운트를 만들지 않는다. 남은 하나(storage permit)는 여전히 읽히는 계약이다.
+for item in (storage, webserver, daemon):
+    if any(
+        mount["Destination"] == "/run/kor-travel-map-application-final-permit"
+        for mount in item["Mounts"]
+    ):
+        raise SystemExit("retired application final permit mount is still present")
 PY
 }
 
@@ -805,7 +795,7 @@ run() {
   # recreate/up은 one-shot을 다시 실행하지 않으므로
   # persistent `300` DB restart가 fresh-only guard에 막히지 않는다.
   compose_map up --detach --wait postgres
-  compose_map --profile fresh-init run --rm db-application-schema-fresh-300
+  compose_map --profile fresh-init run --rm db-application-schema-fresh
   compose_map up --detach --build --wait \
     dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster \
     dagster-daemon

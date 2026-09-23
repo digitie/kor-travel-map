@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
 
-from kortravelmap.infra import curation_candidate_repo
+from kortravelmap.infra import curation_candidate_repo, runtime_privileges
 from kortravelmap.infra.runtime_privileges import (
     _ACL_ROLE_WINDOWS,
     _CORE_FEATURE_GRANTS,
@@ -208,24 +209,26 @@ def test_runtime_subtype_column_grants_name_the_target_relation() -> None:
     """column-list UPDATE는 대상 table을 명시해 fresh migration에서도 실행된다."""
 
     rendered = "\n".join(_ROUTE_AREA_RUNTIME_GRANTS)
-    # route는 ADR-099 2단계에서 `geom`이 보조 relation으로 갔다. 목록에서 빠졌지만
-    # ACL이 사라지면 안 된다 — revision 300에는 컬럼이 아직 있고 handoff가 그
-    # catalog를 immutable reference와 대조한다. 그래서 **컬럼이 있을 때만** 거는
-    # 조건부 블록으로 남는다.
+    # route는 ADR-099 2단계에서 `geom`이 `feature_route_geometries`로 갔다. 목록에
+    # 없는 것이 맞다. 종전에는 "컬럼이 있을 때만" 거는 조건부 블록이 함께 있었는데,
+    # 그것은 이 조정기가 revision 300에서도 돌던 시절의 보정이고 ADR-101에서 걷었다 —
+    # head에 `feature_routes.geom`은 없으므로 그 블록은 항상 무연산이었다.
     assert (
         "GRANT UPDATE (route_type, geometry_source, geometry_status, "
         "total_distance_meters, expected_duration_minutes, difficulty, begin_name, "
         "begin_address, end_name, end_address, payload) ON feature.feature_routes "
         "TO ktm_feature_runtime"
     ) in rendered
-    assert "attname = 'geom'" in rendered, (
-        "`feature_routes.geom` ACL이 조건부로도 남아 있지 않다 — revision 300 "
-        "handoff가 destination catalog 불일치로 멎는다(2026-09-10 `feature_uuid` 사고)."
+    route_grants = [
+        statement
+        for statement in _ROUTE_AREA_RUNTIME_GRANTS
+        if "feature.feature_routes " in statement
+    ]
+    assert route_grants, "feature_routes GRANT를 하나도 찾지 못했다 — 추출이 낡았다."
+    assert not [statement for statement in route_grants if "(geom" in statement], (
+        "`feature_routes`에 geom 컬럼 ACL이 남아 있다 — 그 컬럼은 head에 없다: "
+        f"{[s for s in route_grants if '(geom' in s]}"
     )
-    assert (
-        "GRANT INSERT (geom), UPDATE (geom) ON feature.feature_routes"
-        " TO ktm_feature_runtime"
-    ) in rendered
     assert (
         "GRANT UPDATE (geom, area_kind, boundary_source, area_square_meters, "
         "regulation_scope, administrative_office, description, payload) "
@@ -234,44 +237,38 @@ def test_runtime_subtype_column_grants_name_the_target_relation() -> None:
 
 
 @pytest.mark.unit
-def test_relations_added_after_300_grant_conditionally() -> None:
-    """**300에 없는 표의 GRANT는 조건부여야 한다.**
+def test_route_area_grants_name_relations_that_exist_at_head() -> None:
+    """GRANT가 가리키는 relation이 head에 실재해야 한다.
 
-    이 조정기는 head에서만 돌지 않는다 — `0236 → 300` handoff 실행자가 revision
-    300에서도 돌린다. 그 시점에 없는 표에 무조건 GRANT를 내면 배포가 그 자리에서
-    멎는다(2026-09-10에 `feature_uuid` 컬럼으로 같은 사고가 났고, 그 답이
-    `manual_feature_purge_records`의 `to_regclass` 판정이다).
+    종전 주제는 "`300`에 없는 표의 GRANT는 조건부여야 한다"였다. 이 조정기가 두
+    스키마 상태에서 돌던 시절의 요구이고, `400` 스쿼시로 상태가 하나가 되면서
+    사라졌다(ADR-101).
 
-    판정은 이름 목록이 아니라 **렌더된 문장**에 건다 — 조건부로 감싸는 것을
-    잊으면 그 문장이 그대로 남으므로 여기서 잡힌다.
+    같은 자리에 **남는** 성질이 있다. 조건부가 사라졌다는 것은 이름이 틀렸을 때
+    런타임이 조용히 건너뛰지 않는다는 뜻이다 — 즉 오타 하나가 배포 시점에 터진다.
+    그러니 이름이 실재하는지를 여기서, 배포보다 먼저 본다.
+
+    유도원은 head 덤프다. 이름을 두 벌 적지 않는다.
     """
 
-    from kortravelmap.infra.runtime_privileges import _POST_300_GEOMETRY_RELATIONS
-
-    assert _POST_300_GEOMETRY_RELATIONS, (
-        "300 이후 relation 목록이 비었다 — 이 검사가 항진명제가 된다."
+    head_schema = (
+        pathlib.Path(__file__).resolve().parents[2] / "alembic" / "head-schema.sql"
+    ).read_text(encoding="utf-8")
+    declared = set(
+        re.findall(r"^CREATE TABLE feature\.([a-z0-9_]+) \(", head_schema, re.MULTILINE)
     )
-    for relation in _POST_300_GEOMETRY_RELATIONS:
-        naked = [
-            statement
-            for statement in _ROUTE_AREA_RUNTIME_GRANTS
-            if f"feature.{relation}" in statement
-            and statement.lstrip().startswith("GRANT")
-        ]
-        assert not naked, (
-            f"`feature.{relation}`에 무조건 GRANT가 남아 있다 — revision 300에는 그 표가 "
-            f"없어 handoff가 멎는다: {naked}"
-        )
-        guarded = [
-            statement
-            for statement in _ROUTE_AREA_RUNTIME_GRANTS
-            if f"to_regclass('feature.{relation}')" in statement
-        ]
-        assert guarded, (
-            f"`feature.{relation}`의 조건부 GRANT가 하나도 없다 — 선언만 하고 권한을 "
-            "주지 않으면 런타임이 그 표를 못 읽는다."
-        )
+    assert declared, "head 덤프에서 relation을 하나도 읽지 못했다 — 이 검사가 항진명제가 된다."
 
+    referenced = sorted(
+        set(re.findall(r"ON feature\.([a-z0-9_]+) TO ", "\n".join(_ROUTE_AREA_RUNTIME_GRANTS)))
+    )
+    assert referenced, "route/area GRANT를 하나도 찾지 못했다 — 추출이 낡았다."
+
+    missing = [relation for relation in referenced if relation not in declared]
+    assert not missing, (
+        f"GRANT가 head에 없는 relation을 가리킨다: {missing}. 조건부 래퍼가 없으므로 "
+        "이것은 배포 시점에 그대로 실패한다."
+    )
 
 @pytest.mark.unit
 def test_every_geometry_relation_has_a_runtime_policy() -> None:
@@ -440,12 +437,25 @@ def test_an_absent_required_routine_fails_instead_of_being_skipped() -> None:
 
 
 @pytest.mark.unit
-def test_an_absent_optional_routine_skips_only_its_own_statement() -> None:
-    """`300` 시점에 없는 307/304 산물은 건너뛰되, 섞인 문장은 실패로 잡는다.
+def test_an_absent_optional_routine_skips_only_its_own_statement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """optional로 선언된 루틴은 자기 문장만 건너뛰고, 섞인 문장은 실패로 잡는다.
 
     문장 하나를 통째로 건너뛰면 같은 문장에 있던 present 루틴의 ACL이 **조용히**
     사라진다. 그것이 이 fence가 막는 형태다.
+
+    목록을 **주입한다.** `_OPTIONAL_ROUTINES`는 지금 비어 있다 — 조정기가 두 스키마
+    상태에서 돌던 시절의 산물이고 `400` 스쿼시가 그 시절을 끝냈다. 메커니즘은 남아
+    있으므로(다음 revision이 사이 상태를 만들면 다시 채워진다) 검사도 남기되, 목록의
+    **내용**에 기대지 않게 한다. 내용에 기대면 목록이 비는 날 이 검사가 함께 죽는다.
     """
+
+    monkeypatch.setattr(
+        runtime_privileges,
+        "_OPTIONAL_ROUTINES",
+        {"feature.reject_manual_feature_truncate": "future_revision"},
+    )
 
     assert (
         _render_acl_statement(
@@ -558,24 +568,20 @@ def test_every_protected_relation_the_admin_read_path_touches_is_granted() -> No
 
 @pytest.mark.unit
 def test_the_candidate_read_grant_is_conditional_and_read_only() -> None:
-    """후보 축 읽기 grant는 **head에서만** 걸리고, 읽기만 연다.
+    """후보 축 읽기 grant는 읽기만 연다.
 
-    조건이 없으면 `0236 -> 300` handoff가 멎는다 — 이 조정기는 revision 300에서도
-    돌고 그 직후 catalog가 image에 봉인된 immutable reference와 대조되는데,
-    T-VN-40 표는 retired 마이그레이션이 300 baseline에 접어 넣어 **300에도 있다.**
-    CI PostGIS가 이것을 두 번 잡았다.
+    종전에는 이 grant가 조건부였다 — 조정기가 revision 300에서도 돌고 그 직후
+    catalog가 봉인된 reference와 대조됐기 때문이다. CI PostGIS가 그것을 두 번 잡았다.
 
-    `_SHADOW_COLUMN_GRANTS`가 쓰는 신호를 반대로 쓴다 — shadow 컬럼 `feature_uuid`는
-    300에 있고 309가 지운다. 그래서 `IF NOT EXISTS(... feature_uuid ...)`다.
+    ADR-101 이후 조건은 없다 — 조정기가 한 스키마 상태에서만 돌므로 그 `IF NOT
+    EXISTS(... feature_uuid ...)`는 항상 참이었다. 남는 성질은 "읽기만 연다"이고,
+    그것을 아래가 잰다.
     """
 
     assert _CURATION_CANDIDATE_READ_ACL
     assert len(_CURATION_CANDIDATE_READ_ACL) == len(_CURATION_CANDIDATE_READ_RELATIONS)
 
     for statement in _CURATION_CANDIDATE_READ_ACL:
-        # 조건부여야 한다 — 이 두 조각이 곧 300 안전성의 논증이다.
-        assert "IF NOT EXISTS" in statement, statement
-        assert "feature_uuid" in statement, statement
         # 읽기만 연다.
         assert "GRANT SELECT ON" in statement, statement
         assert "INSERT" not in statement, statement

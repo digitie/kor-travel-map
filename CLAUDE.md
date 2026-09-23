@@ -16,7 +16,7 @@ PostgreSQL + PostGIS에 저장·조회·병합하는 한국 여행 지도 데이
 Python core(`import kortravelmap as ktm`)는 정규화·적재 엔진이고, 외부 경계는
 OpenAPI다 — `api`/`dagster`가 이 core를 내부에서 import하고 PinVi는 HTTP로만 호출한다.
 
-vNext 재설계는 **정확성·보안 → 단일 정본/설계적 우월성 → 단순성 → 확장성 → 실측 성능 →
+vNext 재설계는 **정확성 → 단일 정본/설계적 우월성 → 단순성 → 보안 → 확장성 → 실측 성능 →
 호환성** 순이며, 기존 계약은 계획된 PinVi cutover 외에는 상위 원칙보다 우선하지 않는다
 (ADR-066~075).
 

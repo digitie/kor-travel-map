@@ -339,5 +339,5 @@ def test_the_alembic_read_that_broke_this_is_after_escalation() -> None:
     assert min(reads) > escalation, (
         f"`{_PRIVILEGED_READ}` 읽기가 role escalation보다 앞에 있다. "
         "baseline은 그 SELECT를 소유자와 `ktm_feature_runtime`에만 준다 "
-        "(alembic/versions/300_schema_baseline.py)."
+        "(alembic/versions/400_schema_baseline.py)."
     )

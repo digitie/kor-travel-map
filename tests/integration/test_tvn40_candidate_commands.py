@@ -31,7 +31,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -492,7 +492,7 @@ async def test_admin_runtime_reject_is_atomic_and_audited(
     migrated_engine: AsyncEngine,
 ) -> None:
     seeded = await _seed_candidate(migrated_engine)
-    runtime = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    runtime = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with runtime.begin() as connection:
             await connection.execute(
@@ -550,7 +550,7 @@ async def test_admin_runtime_reject_is_atomic_and_audited(
             seeded["command_id"],
             seeded["actor"],
             "not_relevant",
-            "ktm_feature_api_runtime",
+            "ktm_feature_service",
             "ktm_curation_command_owner",
             "ktm_curation_audit_writer",
         )
@@ -562,8 +562,8 @@ async def test_candidate_command_acl_and_cas_fail_closed(
     migrated_engine: AsyncEngine,
 ) -> None:
     seeded = await _seed_candidate(migrated_engine)
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             audit_acl = (
@@ -617,6 +617,11 @@ async def test_candidate_command_acl_and_cas_fail_closed(
             assert getattr(stale.value.orig, "sqlstate", None) == "23514"
             await transaction.rollback()
 
+        # ADR-100: LOGIN이 하나뿐이고 그 하나가 admin/provider executor 둘 다의
+        # inheriting member다 — `session_user`로 재면 항진명제가 된다. 남은 경계는
+        # executor 층이고 ADR-100이 그 층은 건드리지 않았다: 이 둘의 grant는
+        # `ktm_curation_admin_executor` 하나뿐이어야 하며 적재 쪽으로 새면 안 된다.
+        # 세 번째 열은 양성 대조 — 없으면 grant가 통째로 사라진 경우도 초록이 된다.
         async with dagster.connect() as connection:
             privileges = (
                 await connection.execute(
@@ -624,20 +629,31 @@ async def test_candidate_command_acl_and_cas_fail_closed(
                         """
                         SELECT
                           has_function_privilege(
-                            session_user,
-                            'feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)'::regprocedure,
+                            'ktm_curation_provider_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'reject_theme_feature_candidate'),
                             'EXECUTE'
                           ),
                           has_function_privilege(
-                            session_user,
-                            'feature.promote_theme_feature_candidate(uuid,uuid,text,text,text,text,text,text,integer,text,text,text,bigint,bigint,bigint,bigint,text,text)'::regprocedure,
+                            'ktm_curation_provider_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'promote_theme_feature_candidate'),
+                            'EXECUTE'
+                          ),
+                          has_function_privilege(
+                            'ktm_curation_admin_executor',
+                            (SELECT oid FROM pg_catalog.pg_proc
+                              WHERE pronamespace = 'feature'::regnamespace
+                                AND proname = 'reject_theme_feature_candidate'),
                             'EXECUTE'
                           )
                         """
                     )
                 )
             ).one()
-            assert privileges == (False, False)
+            assert privileges == (False, False, True)
     finally:
         await api.dispose()
         await dagster.dispose()
@@ -650,7 +666,7 @@ async def test_admin_runtime_promotion_is_one_trusted_membership_transaction(
         migrated_engine,
         operation="admin.theme-feature-candidate.promote",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             metadata_command_id = int(
@@ -783,7 +799,7 @@ async def test_promotion_stale_collection_rolls_back_every_surface(
         migrated_engine,
         operation="admin.theme-feature-candidate.promote",
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -868,7 +884,7 @@ async def test_promotion_rejects_stale_typed_feature_detail(
             seeded,
         )
 
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -998,7 +1014,7 @@ async def test_rule_reconcile_generation_is_server_derived_and_replay_safe(
     )
     operation_id = await _seed_rule_reconcile_operation(migrated_engine, seeded)
     params = {**seeded, "operation_id": operation_id}
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.begin() as connection:
             await connection.execute(
@@ -1111,8 +1127,8 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
         include_feature=False,
     )
     params = {**seeded, "operation_id": operation_id}
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.connect() as connection:
             transaction = await connection.begin()
@@ -1136,26 +1152,31 @@ async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
             assert "DB-derived scope" in str(omitted.value.orig)
             await transaction.rollback()
 
+        # ADR-100 이전에는 Dagster login으로 같은 CALL을 걸어 42501을 봤다. 그 42501의
+        # 출처는 본문이 아니라 **카탈로그 EXECUTE 거부**였다 — 이 procedure의 grant는
+        # `ktm_curation_admin_executor` 하나뿐이고 적재 login은 그 멤버가 아니었다.
+        # LOGIN이 합쳐졌고 313이 본문의 `OR pg_has_role(반대쪽)` 절도 드롭했으므로
+        # 그 거부는 login으로 재현할 수 없다. 거부를 만들던 grant 경계를 직접 잰다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            with pytest.raises(DBAPIError) as crossed:
+            crossed = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
-                          CAST(:operation_id AS uuid), :command_id, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'materialize_theme_candidate_generation'
                         """
-                    ),
-                    params,
+                    )
                 )
-            assert getattr(crossed.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ).mappings().one()
+            assert crossed == {"provider_side": False, "admin_side": True}
 
         async with migrated_engine.connect() as connection:
             assert (
@@ -1197,7 +1218,7 @@ async def test_provider_generation_primitives_require_internal_finalizer(
         operation="admin.curation-rule.create",
         create_candidate=False,
     )
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             root_job_id = str(
@@ -1323,26 +1344,34 @@ async def test_provider_generation_primitives_require_internal_finalizer(
                 ),
                 {**seeded, "source_job_id": invalid_source_job_id},
             )
+        # "내부 finalizer만 이 원시 procedure를 부를 수 있다"의 강제는 본문이 아니라
+        # grant다 — 적재 executor는 EXECUTE를 갖지 않고, 실제 호출은
+        # `feature.finalize_provider_curation_root`(SECURITY DEFINER,
+        # `ktm_curation_command_owner` 소유)가 대신 한다. ADR-100이 LOGIN을 합치면서
+        # 그 거부를 login으로 재현할 수 없게 됐으므로 grant 자체를 잰다.
+        # 음성만 재면 grant가 통째로 사라진 상태도 초록이다 — 그리고 이 술어는
+        # `test_rule_reconcile_scope_omission...`이 이미 재는 것과 같다. 양성 대조를
+        # 붙여야 "좁다"와 "없다"가 갈린다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(
-                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            )
-            with pytest.raises(DBAPIError) as invalid:
+            grantees = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.materialize_theme_candidate_generation(
-                          CAST(:rule_id AS uuid), 'provider_full_snapshot',
-                          CAST(:source_job_id AS uuid), NULL, NULL, NULL,
-                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'materialize_theme_candidate_generation'
                         """
-                    ),
-                    {**seeded, "source_job_id": invalid_source_job_id},
+                    )
                 )
-            assert getattr(invalid.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ).mappings().one()
+            assert grantees == {"provider_side": False, "admin_side": True}
 
         async with dagster.connect() as connection:
             transaction = await connection.begin()
@@ -1424,7 +1453,7 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
             seeded,
         )
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     source_job_id = ""
     try:
@@ -1630,7 +1659,7 @@ async def test_provider_child_rejects_post_load_semantic_commit(
             seeded,
         )
 
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         async with session_factory.begin() as session:
@@ -1708,7 +1737,7 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
 
     run_id = f"tvn40-concierge-{seeded['suffix']}"
     created_at = datetime(2026, 8, 13, 3, tzinfo=UTC)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         seal = await _current_provider_curation_input_set(
@@ -1832,7 +1861,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
 
     run_id = f"tvn40-provider-command-{seeded['suffix']}"
     created_at = datetime(2026, 8, 13, 4, tzinfo=UTC)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         async with session_factory.begin() as session:
@@ -1918,7 +1947,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         await dagster.dispose()
 
     # API runtime도 frozen cancellation receipt 없는 provider row를 raw 변경할 수 없다.
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         for statement in (
             """
@@ -1950,7 +1979,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         await api.dispose()
 
     terminal_dagster = _runtime_engine(
-        migrated_engine, login="ktm_feature_dagster_runtime"
+        migrated_engine, login="ktm_feature_service"
     )
     try:
         terminal_session_factory = async_sessionmaker(
@@ -2044,8 +2073,8 @@ async def test_provider_cancellation_lifecycle_requires_typed_api_command(
     run_id = f"tvn40-cancellation-{seeded['suffix']}"
     started_at = datetime(2026, 8, 13, 5, tzinfo=UTC)
     finished_at = started_at + timedelta(seconds=3)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
@@ -2194,8 +2223,8 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
     )
     started_at = datetime(2026, 8, 13, 6, tzinfo=UTC)
     finished_at = started_at + timedelta(seconds=3)
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         seal = await _current_provider_curation_input_set(
             migrated_engine,

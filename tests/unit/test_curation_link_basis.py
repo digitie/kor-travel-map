@@ -7,10 +7,8 @@ merge 재타게팅 whitelist. 값이 하나 늘 때 한 곳만 고치면 **아�
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
-from types import ModuleType
 
 from sqlalchemy import CheckConstraint
 
@@ -21,23 +19,25 @@ from kortravelmap.infra.curation_link_basis import (
     trusted_basis_sql,
 )
 
-#: DB CHECK의 현행 정본 — `302`가 `manual_feature_child`를 widen했다(T-VN-M03).
-#: 종전 정본이던 legacy `0073`은 아카이브 이력이다.
-_MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "alembic"
-    / "versions"
-    / "302_m03_import_child_issuance.py"
+#: DB CHECK의 현행 정본 — **배포되는 카탈로그 그 자체**다.
+#:
+#: 종전에는 이 값을 `302` migration의 모듈 상수에서 읽었다. 스쿼시로 그 파일이
+#: 사라졌지만, 애초에 그것은 CHECK가 되기 **전**의 문자열이었다. 덤프는 DB가
+#: 정규화해 돌려준 CHECK 본문이므로 한 칸 더 가깝다.
+_HEAD_SCHEMA = Path(__file__).resolve().parents[2] / "alembic" / "head-schema.sql"
+
+_MATCH_BASIS_CHECK = re.compile(
+    r"CONSTRAINT \S*curation_link_decisions\S*basis CHECK \(\(match_basis = ANY \(ARRAY\[([^]]+)\]"
 )
 
 
-def _load_migration() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("_h40_migration", _MIGRATION)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _head_check_values() -> set[str]:
+    found = _MATCH_BASIS_CHECK.search(_HEAD_SCHEMA.read_text(encoding="utf-8"))
+    assert found is not None, (
+        "head 덤프에서 `match_basis` CHECK를 찾지 못했다 — 제약 이름이나 덤프 형태가 "
+        "바뀌었다면 이 정규식을 갱신하라. 유도가 비면 아래 검사가 공허해진다."
+    )
+    return _check_values(found.group(1))
 
 
 def _check_values(clause: str) -> set[str]:
@@ -46,16 +46,7 @@ def _check_values(clause: str) -> set[str]:
 
 def test_db_check_and_python_definition_agree() -> None:
     """DB CHECK가 허용하는 값과 Python이 아는 값이 같아야 한다."""
-    migration = _load_migration()
-    assert _check_values(migration._MATCH_BASIS_ADD_NOT_VALID) == set(ALL_LINK_BASES)
-
-
-def test_downgrade_check_drops_exactly_the_new_basis() -> None:
-    """downgrade CHECK는 `manual_feature_child`만 빠진 집합이어야 한다."""
-    migration = _load_migration()
-    assert _check_values(migration._MATCH_BASIS_NARROW) == set(ALL_LINK_BASES) - {
-        "manual_feature_child"
-    }
+    assert _head_check_values() == set(ALL_LINK_BASES)
 
 
 def test_unattributed_basis_is_never_trusted() -> None:

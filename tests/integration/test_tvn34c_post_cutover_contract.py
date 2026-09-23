@@ -82,7 +82,7 @@ async def _create_as_provider_executor(
     # The executor is inherited by Dagster and deliberately cannot be SET
     # directly.  Exercise the deployable login boundary rather than bypassing
     # its schema privileges in this fixture.
-    await session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
+    await session.execute(text("SET ROLE ktm_feature_service"))
     try:
         await session.execute(
             text(

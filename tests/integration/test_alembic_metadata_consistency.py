@@ -1,7 +1,8 @@
 """300 root의 fresh upgrade와 retired lineage 거부 경계를 검증한다.
 
-과거 0200~0236 migration은 active integration에서 replay하지 않는다. handoff source는
-final 300 schema를 만든 뒤 test fixture가 raw version row만 0236으로 바꾼 상태다.
+과거 0200~0236 migration은 active integration에서 replay하지 않는다. 그 lineage로의
+다리(`0236 → 300` handoff)는 ADR-101에서 사라졌고, 이 모듈도 그것을 더는 흉내 내지
+않는다 — 지금 재는 것은 "빈 DB를 head까지 올린 결과"뿐이다.
 실제 historical source의 positive handoff는 root one-shot candidate 실행에서만 검증한다.
 """
 
@@ -21,10 +22,7 @@ from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
 
 from alembic import command
-from kortravelmap.infra.application_schema_head import (
-    BASELINE_ROOT_REVISION,
-    application_schema_head,
-)
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration._application_300_bootstrap import (
     alembic_schema_owner_role,
     bootstrapped_application_300_migrator_dsn,
@@ -43,8 +41,6 @@ pytestmark = pytest.mark.integration
 
 #: 배포가 파생하는 현재 application head. 리터럴 사본을 두지 않는다.
 _HEAD = application_schema_head()
-_HANDOFF_SOURCE = "0236_tvn41s_compaction_drained"
-_HANDOFF_TAG = "application-schema-0236-to-300"
 
 
 def _with_database(url: str, database: str) -> str:
@@ -229,31 +225,6 @@ async def application_300_config(
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
 
 
-async def _prepare_logical_0236(
-    config: Config, admin_dsn: str, *, expected_before: str = _HEAD
-) -> None:
-    """retired source를 실행하지 않고 exact source version facet을 fixture로 만든다.
-
-    ``expected_before``는 호출자가 **선언**한다. handoff fixture는 baseline root에서
-    멈추고 metadata fixture는 head까지 올리므로, 여기서 하나로 가정하면 둘 중 하나가
-    반드시 틀린다.
-    """
-    del config
-    assert await _raw_version(admin_dsn) == (expected_before,)
-    await _admin_execute(
-        admin_dsn,
-        "SET ROLE ktm_feature_schema_owner; "
-        "DROP TABLE public.alembic_version; "
-        "CREATE TABLE public.alembic_version ("
-        "version_num varchar(32) NOT NULL, "
-        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)"
-        "); "
-        f"INSERT INTO public.alembic_version VALUES ('{_HANDOFF_SOURCE}'); "
-        "RESET ROLE",
-    )
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-
-
 @pytest.mark.asyncio
 async def test_fresh_upgrade_rolls_back_when_public_text_search_residue_appears_after_bootstrap(
     pg_container: object,
@@ -310,27 +281,6 @@ async def test_fresh_upgrade_rolls_back_when_public_text_search_residue_appears_
         assert application_relation_count == 0
     finally:
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
-
-
-async def _stamp(
-    config: Config,
-    *,
-    # handoff의 목적지는 **baseline root**다. head가 아니다. 기본값을 `_HEAD`로 두면
-    # migration이 하나 붙는 순간 `is_sanctioned`가 거짓이 되어, 이 helper를 쓰는 음성
-    # 테스트들이 자기가 노리던 오류 대신 "generic Alembic stamp is unsupported"를 받는다.
-    revision: str = BASELINE_ROOT_REVISION,
-    purge: bool = True,
-    tag: str | None = _HANDOFF_TAG,
-) -> None:
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(
-            # intentional-squash-boundary-rejection: negative handoff gate inputs.
-            command.stamp,
-            config,
-            revision,
-            purge=purge,
-            tag=tag,
-        )
 
 
 @pytest.mark.filterwarnings("ignore:Cannot correctly sort tables:sqlalchemy.exc.SAWarning")
@@ -408,85 +358,6 @@ async def test_head_schema_artifact_matches_head(
 
 
 @pytest.mark.asyncio
-async def test_public_config_attribute_cannot_authorize_0236_to_300_stamp(
-    application_300_config: tuple[Config, str],
-) -> None:
-    config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
-    # 공격자가 arbitrary Config attribute를 넣어도 root-only capability를 만들 수는 없다.
-    config.attributes["application_schema_0236_to_300_handoff_authorized"] = True
-    try:
-        with pytest.raises(RuntimeError, match="root-owned one-shot capability"):
-            await _stamp(config)
-    finally:
-        config.attributes.pop("application_schema_0236_to_300_handoff_authorized", None)
-
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-
-
-@pytest.mark.asyncio
-async def test_generic_upgrade_from_0236_is_rejected_without_mutation(
-    application_300_config: tuple[Config, str],
-) -> None:
-    config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
-
-    with alembic_schema_owner_role(), pytest.raises(
-        RuntimeError,
-        match="controlled application-schema 0236-to-300 handoff",
-    ):
-        await asyncio.to_thread(command.upgrade, config, "head")
-
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("revision", "purge", "tag"),
-    [
-        (_HEAD, True, None),
-        (_HEAD, False, _HANDOFF_TAG),
-        ("head", True, _HANDOFF_TAG),
-        ("base", True, _HANDOFF_TAG),
-    ],
-)
-async def test_unsanctioned_stamp_keeps_0236_raw_version(
-    application_300_config: tuple[Config, str],
-    revision: str,
-    purge: bool,
-    tag: str | None,
-) -> None:
-    config, admin_dsn = application_300_config
-    await _prepare_logical_0236(config, admin_dsn)
-
-    with pytest.raises(RuntimeError, match="generic Alembic stamp is unsupported"):
-        await _stamp(
-            config,
-            revision=revision,
-            purge=purge,
-            tag=tag,
-        )
-
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-
-
-@pytest.mark.asyncio
-async def test_handoff_rejects_non_0236_raw_version_without_mutation(
-    application_300_config: tuple[Config, str],
-) -> None:
-    config, admin_dsn = application_300_config
-    await _admin_execute(
-        admin_dsn,
-        "UPDATE public.alembic_version SET version_num = '0235_m05_reconciliation_delivery'",
-    )
-
-    with pytest.raises(RuntimeError, match="requires exactly one raw source head"):
-        await _stamp(config)
-
-    assert await _raw_version(admin_dsn) == ("0235_m05_reconciliation_delivery",)
-
-
-@pytest.mark.asyncio
 async def test_downgrade_is_rejected_without_mutation(
     application_300_config: tuple[Config, str],
 ) -> None:
@@ -494,7 +365,7 @@ async def test_downgrade_is_rejected_without_mutation(
 
     with alembic_schema_owner_role(), pytest.raises(
         RuntimeError,
-        match="300_schema_baseline is forward-only",
+        match="400_schema_baseline is forward-only",
     ):
         await asyncio.to_thread(
             # intentional-squash-boundary-rejection: all downgrade targets are forbidden.

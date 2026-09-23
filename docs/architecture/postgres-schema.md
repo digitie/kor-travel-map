@@ -561,8 +561,10 @@ squash 이후 `versions/`의 모든 노드가 forward-only이고 `downgrade()`�
 지금 net 검증의 정본은 **빈 DB에서 head까지 올린 결과가 모델·계약과 일치하는가**다:
 
 - `tests/integration/test_alembic_metadata_consistency.py` — head 스키마 vs SQLAlchemy 모델
-- `scripts/compare-schema-catalogs.sh` — 두 DB의 카탈로그 행 단위 대조(변조 7종 자체검증)
-- `alembic/baseline/schema.sql` 끝의 routine ACL digest 자기검증
+- `tests/lint/test_baseline_schema_is_not_a_contract_oracle.py` — 실행되는 baseline과
+  읽히는 head 오라클이 같은 head를 서술하는지 대조(ADR-101)
+- ACL 경계는 통합 테스트가 **효과로** 잰다 — 종전의 덤프 내장 digest 자기검증은
+  기대값을 파일에 박아 두는 봉인이어서 ADR-101에서 걷어냈다
 
 (과거 예외 기록) 0044는 연결된 entity에 immutable record가 둘 이상이면, 0045는
 legacy에서 완전히 재구성할 수 없는 collection/item이나 감사값이 있으면 downgrade를
@@ -677,5 +679,5 @@ handoff로만 처리한다.
 - [ ] BRIN 인덱스 효율 측정 (1주 운영 후)
 - [ ] 인덱스 hit ratio 95%+ 확인
 - [ ] 부분 인덱스 vs 전체 인덱스 디스크 비교
-- [ ] isolated fresh-300 acceptance와 root/finalize receipt·final permit 검증 통과
+- [ ] fresh DB가 `alembic upgrade head` 한 번으로 올라오고 런타임 preflight가 head 일치를 확인
 - [ ] generic downgrade/stamp/restore 시도를 fail-closed로 거절하는 테스트 통과

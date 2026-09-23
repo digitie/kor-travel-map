@@ -14,7 +14,7 @@ from tests.integration._feature_ids import feature_uuid
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -60,8 +60,8 @@ async def test_item_commands_preserve_revision_link_audit_and_admin_boundary(
     # ``create/patch_curation_item_command``의 uuid 인자로 그대로 넘기므로
     # 정본 축이다 — 라벨은 씨앗으로만 남긴다.
     feature_id = feature_uuid(f"feature-item-{suffix}")
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
             await connection.execute(
@@ -316,32 +316,30 @@ async def test_item_commands_preserve_revision_link_audit_and_admin_boundary(
                 )
             ) == 4
 
-        denied_command = await _domain_command(
-            migrated_engine, actor=actor, operation="admin.curation-item.create"
-        )
+        # ADR-100 + 313: login 축도 본문의 상호 배타 절도 사라졌다 — grant 층만 남는다.
+        # `proacl`을 함께 읽어 실패했을 때 실제 grantee 목록이 메시지에 남게 한다.
         async with dagster.connect() as connection:
-            transaction = await connection.begin()
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-            with pytest.raises(DBAPIError) as denied:
+            grantees = (
                 await connection.execute(
                     text(
                         """
-                        CALL feature.create_curation_item_command(
-                          CAST(:collection_id AS uuid), NULL, NULL, 'denied',
-                          'primary', 'denied', NULL, 'included', 0, NULL, NULL,
-                          'nearby_option', 'manual_review', '{}'::jsonb,
-                          :command_id, :actor, NULL, NULL, NULL
-                        )
+                        SELECT
+                          proacl::text AS acl,
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'create_curation_item_command'
                         """
-                    ),
-                    {
-                        "actor": actor,
-                        "collection_id": collection_id,
-                        "command_id": denied_command,
-                    },
+                    )
                 )
-            assert getattr(denied.value.orig, "sqlstate", None) == "42501"
-            await transaction.rollback()
+            ).mappings().one()
+            assert grantees["provider_side"] is False, grantees["acl"]
+            assert grantees["admin_side"] is True, grantees["acl"]
     finally:
         await api.dispose()
         await dagster.dispose()

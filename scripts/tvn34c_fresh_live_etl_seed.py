@@ -2,7 +2,7 @@
 """T-VN-34C n150 fresh-live 전용 Dagster runtime 적재 fixture.
 
 외부 provider 자격증명이나 운영 row를 빌리지 않는다. 이 파일은 격리 compose의
-``ktm_feature_dagster_runtime`` 로그인으로만 실행되어, 실제 provider 적재 경로가
+``ktm_feature_service`` 로그인으로만 실행되어, 실제 provider 적재 경로가
 새 3축 state·subtype·source lineage를 통과하는지 확인한다.
 """
 
@@ -139,7 +139,7 @@ async def _run(run_id: str) -> dict[str, object]:
     try:
         await assert_runtime_db_privilege_boundary(
             engine,
-            expected_login="ktm_feature_dagster_runtime",
+            expected_login="ktm_feature_service",
         )
         fetched_at = datetime.now(UTC)
         feature_id = f"tvn34c::fresh-live::{run_id}::beach"

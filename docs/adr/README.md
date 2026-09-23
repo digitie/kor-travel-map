@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-100.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-102.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -103,7 +103,7 @@
 | ADR-087 | notice 계보 승자를 계보당 1회로 판정 | [087-notice-lineage-winner-once-per-lineage.md](087-notice-lineage-winner-once-per-lineage.md) |
 | ADR-088 | DB 소유 dataset operation과 immutable observation head | [088-provider-dataset-operation-and-observation-model.md](088-provider-dataset-operation-and-observation-model.md) |
 | ADR-089 | current summary는 불변 fact를 참조하고 rebuild receipt와 분리한다 | [089-current-summary-fact-reference-and-rebuild-receipt.md](089-current-summary-fact-reference-and-rebuild-receipt.md) |
-| ADR-090 | Feature 직교 상태의 final cutover와 DB 전이 감사 | [090-feature-state-final-cutover-and-audit.md](090-feature-state-final-cutover-and-audit.md) |
+| ADR-090 | Feature 직교 상태의 final cutover와 DB 전이 감사 (LOGIN role 분리는 ADR-100으로 superseded; procedure/audit 강제는 유지) | [090-feature-state-final-cutover-and-audit.md](090-feature-state-final-cutover-and-audit.md) |
 | ADR-091 | Field override의 base/effective lineage 완결 | [091-field-override-base-effective-lineage.md](091-field-override-base-effective-lineage.md) |
 | ADR-092 | 큐레이션 membership과 자동 후보를 분리해 단일 쓰기 정본으로 만든다 | [092-curation-canonical-membership-and-candidates.md](092-curation-canonical-membership-and-candidates.md) |
 | ADR-093 | 수동 Feature 생성 origin과 identity를 별도 정본으로 둔다 | [093-manual-feature-origin-and-identity.md](093-manual-feature-origin-and-identity.md) |
@@ -113,6 +113,8 @@
 | ADR-097 | 수동/Provider 중복 판정과 소비자 참조 재결합을 append-only paired protocol로 둔다 | [097-manual-provider-dedup-paired-reconciliation.md](097-manual-provider-dedup-paired-reconciliation.md) |
 | ADR-098 | provider Feature identity는 `(dataset, kind, 자연키)`다 — source entity가 아니다 | [098-provider-feature-identity-axis.md](098-provider-feature-identity-axis.md) |
 | ADR-099 | causal seal은 행별 digest를 접는다 — 전 행 payload를 한 배열에 모으지 않는다 | [099-curation-seal-member-digest-fold.md](099-curation-seal-member-digest-fold.md) |
+| ADR-100 | DB LOGIN role를 3개(migrator/api_runtime/dagster_runtime)에서 1개(`ktm_feature_service`)로 통합한다 | [100-single-login-role-collapse.md](100-single-login-role-collapse.md) |
+| ADR-101 | `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다 | [101-single-baseline-revision-400.md](101-single-baseline-revision-400.md) |
 
 ## 새 ADR 작성 규약
 

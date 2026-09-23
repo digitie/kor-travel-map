@@ -99,11 +99,6 @@ jobs:
         # COPY에서 유도해 대조한다.
         run: |
           mypy --strict \
-            docker/application-schema-contract.py \
-            docker/application-schema-db-contract.py \
-            docker/application-schema-final-permit.py \
-            docker/application-schema-fresh-300.py \
-            docker/application-schema-fresh-finalize.py \
             docker/application-schema-head.py \
             docker/dagster-storage-migrate.py
 

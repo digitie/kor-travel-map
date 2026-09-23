@@ -76,7 +76,7 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 _SERVICE_PRINCIPAL = "service:feature-reference-reconciliation"
 _SCORER_ID = "manual-provider-v1"
 _FETCHED_AT = datetime(2026, 9, 1, 3, 0, tzinfo=UTC)
@@ -488,8 +488,8 @@ async def test_default_payload_hash_provider_bundle_reaches_case_decision_and_fe
     """
 
     suffix = uuid4().hex
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         scenario = await _seed_scenario(migrated_engine, api, suffix=suffix)
 
@@ -752,8 +752,8 @@ async def test_dedup_candidate_identity_axis_is_the_canonical_uuid_only(
     """
 
     suffix = uuid4().hex
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         scenario = await _seed_scenario(migrated_engine, api, suffix=suffix)
 

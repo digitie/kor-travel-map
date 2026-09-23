@@ -29,7 +29,7 @@ pytestmark = [
     pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
 ]
 
-_API_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_API_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 _OPERATION = "admin.feature.create.manual-v1"
 
 
@@ -37,13 +37,13 @@ async def _api_runtime_engine(migrated_engine: AsyncEngine) -> AsyncEngine:
     """실 API LOGIN으로 wrapper를 호출한다; superuser shortcut은 허용하지 않는다."""
 
     dsn = migrated_engine.url.set(
-        username="ktm_feature_api_runtime",
+        username="ktm_feature_service",
         password=_API_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=1)
     await assert_runtime_db_privilege_boundary(
         engine,
-        expected_login="ktm_feature_api_runtime",
+        expected_login="ktm_feature_service",
     )
     return engine
 
@@ -177,7 +177,7 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
             command_id,
             "admin-ui-bff.manual-feature-create.v1",
             "admin:tvn-m01",
-            "ktm_feature_api_runtime",
+            "ktm_feature_service",
             "ktm_manual_feature_procedure_owner",
         )
         # **이 Feature의** 것만 센다. 전역 count로 재면 "한 번만 썼다"라는 뜻이 아니라

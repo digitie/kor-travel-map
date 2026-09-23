@@ -43,9 +43,7 @@ if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED:-false}" != "true" ]; then
   exit 1
 fi
 require_value KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN
-require_value KOR_TRAVEL_MAP_MIGRATOR_PASSWORD
-require_value KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD
-require_value KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
+require_value KOR_TRAVEL_MAP_SERVICE_PASSWORD
 require_identifier KOR_TRAVEL_MAP_POSTGRES_DB
 require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
 
@@ -109,9 +107,7 @@ run_baseline_300_phase() {
   /usr/local/bin/psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
     --single-transaction \
     -v ON_ERROR_STOP=1 \
-    -v migrator_password="$KOR_TRAVEL_MAP_MIGRATOR_PASSWORD" \
-    -v api_runtime_password="$KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD" \
-    -v dagster_runtime_password="$KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD" <<'SQL'
+    -v service_password="$KOR_TRAVEL_MAP_SERVICE_PASSWORD" <<'SQL'
 -- role·membership·database owner/search_path·schema·extension이 한 논리적 fresh
 -- bootstrap이다. late membership/extension guard가 실패할 때 앞선 role/password 또는
 -- DB setting이 남으면 다음 재시도가 다른 상태를 입력으로 받는다. psql의
@@ -273,7 +269,7 @@ BEGIN
             SELECT count(*)
             FROM pg_catalog.pg_roles AS role
             WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
-        ) <> 21
+        ) <> 19
         OR EXISTS (
             SELECT 1
             FROM pg_catalog.pg_roles AS role
@@ -297,9 +293,7 @@ BEGIN
                   'ktm_manual_provider_dedup_detector_executor',
                   'ktm_manual_provider_dedup_admin_executor',
                   'ktm_feature_reference_reconciliation_service_executor',
-                  'ktm_feature_migrator',
-                  'ktm_feature_api_runtime',
-                  'ktm_feature_dagster_runtime'
+                  'ktm_feature_service'
               )
         )
     ) THEN
@@ -540,9 +534,7 @@ BEGIN
     END LOOP;
 
     FOREACH role_name IN ARRAY ARRAY[
-        'ktm_feature_migrator',
-        'ktm_feature_api_runtime',
-        'ktm_feature_dagster_runtime'
+        'ktm_feature_service'
     ] LOOP
         IF to_regrole(role_name) IS NULL THEN
             EXECUTE format(
@@ -571,11 +563,9 @@ BEGIN
                 ('ktm_curation_audit_writer'),
                 ('ktm_curation_command_owner'),
                 ('ktm_curation_provider_executor'),
-                ('ktm_feature_api_runtime'),
                 ('ktm_feature_audit_writer'),
                 ('ktm_feature_create_provider_executor'),
-                ('ktm_feature_dagster_runtime'),
-                ('ktm_feature_migrator'),
+                ('ktm_feature_service'),
                 ('ktm_feature_reference_reconciliation_service_executor'),
                 ('ktm_feature_request_admin_executor'),
                 ('ktm_feature_request_procedure_owner'),
@@ -607,22 +597,8 @@ $baseline_300_role_inventory$;
 SELECT format(
     'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
     || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
-    'ktm_feature_migrator',
-    :'migrator_password'
-)
-\gexec
-SELECT format(
-    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
-    || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
-    'ktm_feature_api_runtime',
-    :'api_runtime_password'
-)
-\gexec
-SELECT format(
-    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
-    || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
-    'ktm_feature_dagster_runtime',
-    :'dagster_runtime_password'
+    'ktm_feature_service',
+    :'service_password'
 )
 \gexec
 
@@ -634,24 +610,23 @@ BEGIN
     IF EXISTS (
         WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
             VALUES
-                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_curation_admin_executor', 'ktm_feature_service', false, true, false),
                 ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
                 ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
-                ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_curation_provider_executor', 'ktm_feature_service', false, true, false),
                 ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
-                ('ktm_feature_create_provider_executor', 'ktm_feature_dagster_runtime', false, true, false),
-                ('ktm_feature_reference_reconciliation_service_executor', 'ktm_feature_api_runtime', false, true, false),
-                ('ktm_feature_request_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_create_provider_executor', 'ktm_feature_service', false, true, false),
+                ('ktm_feature_reference_reconciliation_service_executor', 'ktm_feature_service', false, true, false),
+                ('ktm_feature_request_admin_executor', 'ktm_feature_service', false, true, false),
                 ('ktm_feature_request_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
-                ('ktm_feature_request_service_executor', 'ktm_feature_api_runtime', false, true, false),
-                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
-                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
-                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_request_service_executor', 'ktm_feature_service', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_service', false, true, false),
+                ('ktm_feature_schema_owner', 'ktm_feature_service', false, false, true),
                 ('ktm_feature_state_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
-                ('ktm_manual_feature_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_manual_feature_admin_executor', 'ktm_feature_service', false, true, false),
                 ('ktm_manual_feature_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
-                ('ktm_manual_provider_dedup_admin_executor', 'ktm_feature_api_runtime', false, true, false),
-                ('ktm_manual_provider_dedup_detector_executor', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_manual_provider_dedup_admin_executor', 'ktm_feature_service', false, true, false),
+                ('ktm_manual_provider_dedup_detector_executor', 'ktm_feature_service', false, true, false),
                 ('ktm_manual_provider_dedup_procedure_owner', 'ktm_feature_schema_owner', false, false, true)
         ), actual AS (
             SELECT granted.rolname AS granted_role,
@@ -677,8 +652,7 @@ BEGIN
                 'ktm_manual_provider_dedup_detector_executor',
                 'ktm_manual_provider_dedup_admin_executor',
                 'ktm_feature_reference_reconciliation_service_executor',
-                'ktm_feature_migrator', 'ktm_feature_api_runtime',
-                'ktm_feature_dagster_runtime'
+                'ktm_feature_service'
             ) OR member.rolname IN (
                 'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
                 'ktm_feature_audit_writer', 'ktm_feature_runtime',
@@ -694,8 +668,7 @@ BEGIN
                 'ktm_manual_provider_dedup_detector_executor',
                 'ktm_manual_provider_dedup_admin_executor',
                 'ktm_feature_reference_reconciliation_service_executor',
-                'ktm_feature_migrator', 'ktm_feature_api_runtime',
-                'ktm_feature_dagster_runtime'
+                'ktm_feature_service'
             )
         )
         SELECT 1 FROM (SELECT * FROM actual EXCEPT SELECT * FROM expected) AS unexpected
@@ -707,11 +680,9 @@ BEGIN
 END
 $baseline_300_membership_precondition$;
 
-GRANT ktm_feature_schema_owner TO ktm_feature_migrator
+GRANT ktm_feature_schema_owner TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_feature_runtime TO ktm_feature_api_runtime
-    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime
+GRANT ktm_feature_runtime TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
@@ -721,29 +692,29 @@ GRANT ktm_curation_command_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_curation_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
+GRANT ktm_curation_provider_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_manual_feature_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+GRANT ktm_feature_create_provider_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_request_service_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_request_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
-GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime
+GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime
+GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
-GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_api_runtime
+GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_service
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 
 CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner;
@@ -802,9 +773,7 @@ REVOKE ALL ON SCHEMA x_extension FROM
     ktm_curation_audit_writer,
     ktm_curation_admin_executor,
     ktm_curation_provider_executor,
-    ktm_feature_migrator,
-    ktm_feature_api_runtime,
-    ktm_feature_dagster_runtime,
+    ktm_feature_service,
     ktm_manual_feature_procedure_owner,
     ktm_manual_feature_admin_executor,
     ktm_feature_create_provider_executor,
@@ -819,8 +788,7 @@ GRANT USAGE ON SCHEMA x_extension TO
     ktm_feature_schema_owner,
     ktm_feature_state_procedure_owner,
     ktm_feature_runtime,
-    ktm_feature_api_runtime,
-    ktm_feature_dagster_runtime,
+    ktm_feature_service,
     ktm_curation_command_owner,
     ktm_manual_provider_dedup_procedure_owner;
 

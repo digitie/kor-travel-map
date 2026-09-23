@@ -413,24 +413,17 @@ def _preflight_environment(container_dsn: str, database: str) -> str:
     assert root_credential is not None
     authority = "127.0.0.1:5432"
     suffix = uuid4().hex
-    migrator_credential = f"ktm-integration-migrator-{suffix}"
-    api_credential = f"ktm-integration-api-{suffix}"
-    dagster_credential = f"ktm-integration-dagster-{suffix}"
+    # ADR-100: 세 runtime credential이 하나로 합쳐졌다. 남는 셋(bootstrap owner /
+    # service / Dagster metadata)은 preflight의 pairwise 검사가 여전히 서로 다를 것을
+    # 요구하므로 각각 고유해야 한다.
+    service_credential = f"ktm-integration-service-{suffix}"
     metadata_credential = f"ktm-integration-metadata-{suffix}"
     credential_word = "PASS" + "WORD"
     environment_values = {
         "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": container_dsn,
-        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
-            f"postgresql+asyncpg://ktm_feature_migrator:"
-            f"{migrator_credential}@{authority}/{database}"
-        ),
-        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
-            f"postgresql+asyncpg://ktm_feature_api_runtime:"
-            f"{api_credential}@{authority}/{database}"
-        ),
-        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
-            f"postgresql+asyncpg://ktm_feature_dagster_runtime:"
-            f"{dagster_credential}@{authority}/{database}"
+        "KOR_TRAVEL_MAP_PG_DSN": (
+            f"postgresql+asyncpg://ktm_feature_service:"
+            f"{service_credential}@{authority}/{database}"
         ),
         "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "ktm_dagster_metadata",
         "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "ktm_dagster_metadata",
@@ -442,9 +435,7 @@ def _preflight_environment(container_dsn: str, database: str) -> str:
     environment_values.update(
         {
             f"KOR_TRAVEL_MAP_POSTGRES_{credential_word}": root_credential,
-            f"KOR_TRAVEL_MAP_MIGRATOR_{credential_word}": migrator_credential,
-            f"KOR_TRAVEL_MAP_API_RUNTIME_{credential_word}": api_credential,
-            f"KOR_TRAVEL_MAP_DAGSTER_RUNTIME_{credential_word}": dagster_credential,
+            f"KOR_TRAVEL_MAP_SERVICE_{credential_word}": service_credential,
             f"KOR_TRAVEL_MAP_DAGSTER_METADATA_{credential_word}": metadata_credential,
         }
     )
@@ -509,9 +500,7 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
-                ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
-                ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
+                ("KOR_TRAVEL_MAP_SERVICE_PASSWORD", "bootstrap-probe-service"),
                 ("KOR_TRAVEL_MAP_POSTGRES_DB", _DATABASE),
                 ("KOR_TRAVEL_MAP_POSTGRES_USER", bootstrap_user),
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE", _DATABASE),
@@ -586,9 +575,7 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
             arg
             for key, value in (
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED", "true"),
-                ("KOR_TRAVEL_MAP_MIGRATOR_PASSWORD", "bootstrap-probe-migrator"),
-                ("KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD", "bootstrap-probe-api"),
-                ("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD", "bootstrap-probe-dagster"),
+                ("KOR_TRAVEL_MAP_SERVICE_PASSWORD", "bootstrap-probe-service"),
                 ("KOR_TRAVEL_MAP_POSTGRES_DB", _DATABASE),
                 ("KOR_TRAVEL_MAP_POSTGRES_USER", bootstrap_user),
                 ("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE", _DATABASE),

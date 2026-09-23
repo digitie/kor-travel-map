@@ -13,7 +13,7 @@ from kortravelmap.infra.db import make_async_engine
 
 pytestmark = pytest.mark.integration
 
-_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
+_RUNTIME_PASSWORD = "tvn34-test-only-service-password"
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -75,9 +75,13 @@ async def _rule_hashes(engine: AsyncEngine, *, theme_id: str) -> list[str]:
 async def test_runtime_logins_cannot_bypass_retained_catalog_commands(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """API/Dagster LOGIN은 catalog read만 가능하고 raw writer는 모두 42501이다."""
+    """단일 service LOGIN은 catalog read만 가능하고 raw writer는 모두 42501이다.
 
-    for login in ("ktm_feature_api_runtime", "ktm_feature_dagster_runtime"):
+    ADR-100 이전에는 API/Dagster 두 login으로 각각 돌았다. 하나로 합쳐졌으므로 한 번만
+    돈다 — 같은 이름을 두 번 도는 것은 순회처럼 보이는 중복일 뿐이다.
+    """
+
+    for login in ("ktm_feature_service",):
         runtime = _runtime_engine(migrated_engine, login=login)
         try:
             async with runtime.connect() as connection:
@@ -123,8 +127,8 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
     provider_archive_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-theme.archive"
     )
-    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
-    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_service")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with api.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
@@ -390,20 +394,31 @@ async def test_theme_commands_separate_display_revision_from_rule_semantics(
                     {"theme_id": theme_id},
                 )
             ) == 4
+        # ADR-100: LOGIN이 하나뿐이라 `session_user`로는 "다른 쪽은 못 한다"를 못 잰다 —
+        # 통합 login은 admin/provider executor 양쪽의 inheriting member라 두 술어가 같은
+        # 값이 된다. executor 층은 ADR-100이 건드리지 않았으므로 그 층에서 잰다: 이
+        # procedure의 grant는 admin executor 하나뿐이어야 하고 적재 쪽으로 새면 안 된다.
+        # 양성 대조(admin_side)가 없으면 grant가 통째로 사라진 경우도 초록이 된다.
         async with dagster.connect() as connection:
-            assert not bool(
-                await connection.scalar(
+            grantees = (
+                await connection.execute(
                     text(
                         """
-                        SELECT has_function_privilege(
-                          session_user,
-                          'feature.patch_curated_theme_command(uuid,bigint,text,text,text,text,text,jsonb,bigint,text)'::regprocedure,
-                          'EXECUTE'
-                        )
+                        SELECT
+                          has_function_privilege(
+                            'ktm_curation_provider_executor', oid, 'EXECUTE'
+                          ) AS provider_side,
+                          has_function_privilege(
+                            'ktm_curation_admin_executor', oid, 'EXECUTE'
+                          ) AS admin_side
+                        FROM pg_catalog.pg_proc
+                        WHERE pronamespace = 'feature'::regnamespace
+                          AND proname = 'patch_curated_theme_command'
                         """
                     )
                 )
-            )
+            ).mappings().one()
+            assert grantees == {"provider_side": False, "admin_side": True}
     finally:
         await api.dispose()
         await dagster.dispose()

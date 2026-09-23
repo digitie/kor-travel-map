@@ -40,8 +40,8 @@ from kortravelmap.infra.db import make_async_engine
 from kortravelmap.settings import KorTravelMapSettings
 
 #: 닫힌 manifest의 role 이름. 설계 §8.1.
-API_LOGIN = "ktm_feature_api_runtime"
-DAGSTER_LOGIN = "ktm_feature_dagster_runtime"
+# ADR-100: 세 LOGIN이 하나로 합쳐졌다. 갈라지는 축은 이제 executor 층뿐이다.
+SERVICE_LOGIN = "ktm_feature_service"
 SCHEMA_OWNER = "ktm_feature_schema_owner"
 MANUAL_PROCEDURE_OWNER = "ktm_manual_feature_procedure_owner"
 ADMIN_EXECUTOR = "ktm_manual_feature_admin_executor"
@@ -85,8 +85,8 @@ async def _role_checks(connection: AsyncConnection) -> list[Check]:
     # membership의 exact option까지 본다 — 옵션이 다르면 우회 경로가 생긴다(§8.1).
     for group, member, admin, inherit, set_option in (
         (MANUAL_PROCEDURE_OWNER, SCHEMA_OWNER, False, False, True),
-        (ADMIN_EXECUTOR, API_LOGIN, False, True, False),
-        (PROVIDER_EXECUTOR, DAGSTER_LOGIN, False, True, False),
+        (ADMIN_EXECUTOR, SERVICE_LOGIN, False, True, False),
+        (PROVIDER_EXECUTOR, SERVICE_LOGIN, False, True, False),
     ):
         observed = await _scalar(
             connection,
@@ -102,19 +102,18 @@ async def _role_checks(connection: AsyncConnection) -> list[Check]:
             ),
         )
         checks.append(Check(f"member.{group}<-{member}.exact_options", observed, "true"))
-    # 교차 멤버십은 없어야 한다.
-    for login, group in ((API_LOGIN, PROVIDER_EXECUTOR), (DAGSTER_LOGIN, ADMIN_EXECUTOR)):
+    # ADR-100: 교차 멤버십 검사는 여기서 사라진다. 통합된 LOGIN은 두 executor 모두의
+    # member여야 하므로 "A는 B의 member가 아니다"가 구조적으로 성립할 수 없다. 두
+    # executor를 갈라 두는 일은 이제 **grant 층**이 하고, 아래 _routine_checks가 잰다.
+    #
+    # SET ROLE 검사도 schema owner 쪽 arm만 빠진다: 통합 LOGIN이 migration을 돌려야
+    # 하므로 bootstrap이 `ktm_feature_schema_owner`를 `SET TRUE`로 준다. procedure
+    # owner로는 여전히 SET ROLE 할 수 없어야 하고, 그 arm은 그대로 힘을 가진다(§8.3).
+    for owner in (MANUAL_PROCEDURE_OWNER,):
         observed = await _scalar(
-            connection, f"SELECT (NOT pg_has_role('{login}', '{group}', 'MEMBER'))::text"
+            connection, f"SELECT (NOT pg_has_role('{SERVICE_LOGIN}', '{owner}', 'USAGE'))::text"
         )
-        checks.append(Check(f"{login}.is_not_member_of.{group}", observed, "true"))
-    # runtime login은 어떤 owner로도 SET ROLE 할 수 없다(§8.3).
-    for login in (API_LOGIN, DAGSTER_LOGIN):
-        for owner in (SCHEMA_OWNER, MANUAL_PROCEDURE_OWNER):
-            observed = await _scalar(
-                connection, f"SELECT (NOT pg_has_role('{login}', '{owner}', 'USAGE'))::text"
-            )
-            checks.append(Check(f"{login}.cannot_set_role.{owner}", observed, "true"))
+        checks.append(Check(f"{SERVICE_LOGIN}.cannot_set_role.{owner}", observed, "true"))
     return checks
 
 
@@ -143,7 +142,7 @@ async def _relation_checks(connection: AsyncConnection) -> list[Check]:
             connection, f"SELECT relowner::regrole::text FROM pg_class WHERE oid = {oid}"
         )
         checks.append(Check(f"owner.{relation}", observed, SCHEMA_OWNER))
-        for grantee in (API_LOGIN, DAGSTER_LOGIN, "public"):
+        for grantee in (SERVICE_LOGIN, "public"):
             for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"):
                 observed = await _scalar(
                     connection,
@@ -157,10 +156,16 @@ async def _relation_checks(connection: AsyncConnection) -> list[Check]:
 
 
 async def _routine_checks(connection: AsyncConnection) -> list[Check]:
-    """wrapper는 API만, generic은 Dagster만 — PUBLIC은 둘 다 불가(§8.1)."""
+    """wrapper는 admin executor만, generic은 provider executor만 — PUBLIC은 둘 다 불가(§8.1).
+
+    ADR-100 이전에는 이 분리를 두 LOGIN으로 쟀다. LOGIN이 하나가 되면서 그 축이
+    사라졌고, 통합 LOGIN은 두 executor 모두의 member라 login으로는 갈리지 않는다.
+    executor 층은 ADR-100이 건드리지 않았고 executor role끼리는 membership이 없으므로
+    이 술어가 그 분리를 그대로 이어받는다.
+    """
 
     checks: list[Check] = []
-    for routine, api_execute, dagster_execute, owner in (
+    for routine, admin_execute, provider_execute, owner in (
         (WRAPPER_ROUTINE, "true", "false", MANUAL_PROCEDURE_OWNER),
         (GENERIC_ROUTINE, "false", "true", None),
     ):
@@ -168,9 +173,10 @@ async def _routine_checks(connection: AsyncConnection) -> list[Check]:
             await connection.execute(
                 text(
                     "SELECT p.oid::regprocedure::text AS signature, "
-                    f"has_function_privilege('{API_LOGIN}', p.oid, 'EXECUTE')::text AS api, "
-                    f"has_function_privilege('{DAGSTER_LOGIN}', p.oid, 'EXECUTE')::text "
-                    "AS dagster, "
+                    f"has_function_privilege('{ADMIN_EXECUTOR}', p.oid, 'EXECUTE')::text "
+                    "AS admin_side, "
+                    f"has_function_privilege('{PROVIDER_EXECUTOR}', p.oid, 'EXECUTE')::text "
+                    "AS provider_side, "
                     "has_function_privilege('public', p.oid, 'EXECUTE')::text AS anyone, "
                     "p.proowner::regrole::text AS owner "
                     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
@@ -182,9 +188,19 @@ async def _routine_checks(connection: AsyncConnection) -> list[Check]:
         if len(rows) != 1:
             continue
         row = rows[0]
-        checks.append(Check(f"routine.{routine}.api_execute", str(row["api"]), api_execute))
         checks.append(
-            Check(f"routine.{routine}.dagster_execute", str(row["dagster"]), dagster_execute)
+            Check(
+                f"routine.{routine}.admin_executor_execute",
+                str(row["admin_side"]),
+                admin_execute,
+            )
+        )
+        checks.append(
+            Check(
+                f"routine.{routine}.provider_executor_execute",
+                str(row["provider_side"]),
+                provider_execute,
+            )
         )
         checks.append(Check(f"routine.{routine}.public_execute", str(row["anyone"]), "false"))
         if owner is not None:

@@ -29,13 +29,23 @@ import re
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _VERSIONS = _ROOT / "alembic" / "versions"
 
-#: `alembic_version.version_num`의 폭을 선언하는 자리들. 하나라도 찾으면 그 값을 쓴다.
-_WIDTH_SOURCES = (
-    _ROOT / "tests" / "integration" / "test_alembic_metadata_consistency.py",
-    _ROOT / "docker" / "transition-application-schema-0236-to-300.py",
-)
+#: `alembic_version.version_num`의 폭을 선언하는 **정본**. alembic이 version table을
+#: 만드는 자리이고, 저장소의 어떤 파일도 그 사본일 뿐이다. 사본을 읽으면 사본이 낡는
+#: 날 이 검사가 조용히 낡은 폭을 지킨다.
+def _alembic_impl_source() -> pathlib.Path:
+    import alembic.ddl.impl
 
-_WIDTH_PATTERN = re.compile(r"version_num\s+varchar\((\d+)\)", re.IGNORECASE)
+    return pathlib.Path(alembic.ddl.impl.__file__)
+
+
+_WIDTH_SOURCES = (_alembic_impl_source(),)
+
+#: 두 형태를 모두 받는다 — alembic의 `Column("version_num", String(32), ...)`와
+#: 그것을 SQL로 적은 `version_num varchar(32)`.
+_WIDTH_PATTERN = re.compile(
+    r"""version_num["']?[\s,]+(?:String\(|varchar\()(\d+)\)""",
+    re.IGNORECASE,
+)
 #: 선언 형태가 두 가지다 — `revision: str = ...`(300~302)와
 #: `revision: Final[str] = ...`(303~). `Final[str]`만 보면 앞 셋을 놓치고, 그러면
 #: 이 검사는 **조용히 절반만** 본다(2026-09-09 첫 구현에서 실제로 그랬다).
@@ -76,8 +86,8 @@ def test_the_width_is_read_from_a_live_declaration() -> None:
     """폭을 상수로 박지 않는다 — 선언에서 읽는다."""
 
     assert _WIDTH is not None, (
-        "`version_num varchar(N)` 선언을 찾지 못했다 — 유도원이 옮겨졌다: "
-        f"{[str(s.relative_to(_ROOT)).replace(chr(92), '/') for s in _WIDTH_SOURCES]}"
+        "`version_num` 폭 선언을 찾지 못했다 — alembic이 version table을 만드는 "
+        f"자리가 옮겨졌거나 형태가 바뀌었다: {[str(source) for source in _WIDTH_SOURCES]}"
     )
     assert _WIDTH == 32, f"폭이 {_WIDTH}로 바뀌었다 — 이 검사의 전제를 갱신하라"
 

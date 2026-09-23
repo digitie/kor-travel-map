@@ -257,9 +257,9 @@ if [[ "$external_infra" == "true" || "$external_db" == "true" ]]; then
   exit 1
 fi
 
-compose_files=(-f docker-compose.yml -f docker-compose.local-dev.yml)
+compose_files=(-f docker-compose.yml)
 # fresh baseline 준비는 normal launcher의 dependency가 아니다. 빈 dedicated DB는
-# 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh-300`으로
+# 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh`으로
 # application role bootstrap→metadata DB/permit→restricted root migration 연속 one-shot을
 # 끝내고, 이 launcher는 검증된 `300` DB의 restart만 수행한다.
 services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)
@@ -298,20 +298,15 @@ require_env() {
 # T-VN-34A / ADR-090 — service principal DSN은 bootstrap owner에서 유도하지 않는다.
 # compose를 직접 실행하지 않고 공식 launcher를 쓸 때도 interpolation 전에 정확한
 # deployment secret 집합을 fail-closed 한다.
-for name in \
-  KOR_TRAVEL_MAP_MIGRATOR_PG_DSN \
-  KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN \
-  KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN; do
-  require_env "$name"
-done
+# ADR-100: 세 service principal DSN이 하나가 됐다. 이 loop는 external-db/external-infra
+# 분기에서도 도는 유일한 DSN fail-close라서 이름만 줄이고 자리는 유지한다.
+require_env KOR_TRAVEL_MAP_PG_DSN
 
 if [[ "$external_infra" != "true" && "$external_db" != "true" ]]; then
   for name in \
     KOR_TRAVEL_MAP_POSTGRES_PASSWORD \
     KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN \
-    KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
-    KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
-    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_SERVICE_PASSWORD \
     KOR_TRAVEL_MAP_DAGSTER_METADATA_USER \
     KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD \
     KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE; do

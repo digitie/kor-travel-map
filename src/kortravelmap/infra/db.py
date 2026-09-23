@@ -38,6 +38,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from kortravelmap.infra.application_schema_head import application_schema_head
+
 if TYPE_CHECKING:
     from pydantic import SecretStr
 
@@ -61,8 +63,11 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
 
 
 #: ADR-098 provider wrapper. EXECUTE는 `ktm_feature_create_provider_executor`에만
-#: 있고 그 롤은 `ktm_feature_dagster_runtime`에만 부여된다
-#: (`docker/postgres-role-bootstrap.sh:732`) — provider 적재 identity 하나다.
+#: 있다(`docker/postgres-role-bootstrap.sh`). ADR-100 이전에는 그 role이
+#: `ktm_feature_dagster_runtime`에만 부여돼 provider 적재 identity 하나였지만,
+#: LOGIN role 통합 이후 단일 `ktm_feature_service`가 이 procedure의 EXECUTE
+#: 권한을 갖는다 — 다만 실제로 이 procedure를 호출하는 애플리케이션 코드는
+#: 여전히 Dagster 경로뿐이다(ADR-100 §3, 호출 대상은 바뀌지 않음).
 _PROVIDER_FEATURE_CREATE_PROCEDURE = (
     "feature.create_provider_feature_with_initial_state(jsonb,jsonb,text,text,text,jsonb)"
 )
@@ -260,8 +265,15 @@ _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
     }
 )
 
+#: ADR-100: `ktm_feature_api_runtime`/`ktm_feature_dagster_runtime` LOGIN 두
+#: role이 `ktm_feature_service` 하나로 통합됐다. 이 role은 두 옛 role이 각각
+#: 갖던 procedure execute 권한의 **합집합**을 그대로 받는다(bootstrap 스크립트가
+#: 양쪽 executor role 멤버십을 모두 부여) — 호출하는 애플리케이션 코드 자체는
+#: 안 바뀌었으므로(API는 여전히 admin 계열만, Dagster는 여전히 provider 계열만
+#: 실제로 호출) 이 allowlist는 "이 login이 가질 수 있는 것"이지 "실제로 쓰는
+#: 것"이 아니다.
 _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
-    "ktm_feature_api_runtime": (
+    "ktm_feature_service": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
         | frozenset(
             {
@@ -273,43 +285,33 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
                 _M05_LEASE_PROCEDURE,
                 _M05_ACK_PROCEDURE,
                 _M05_SUBSCRIPTION_PROVISION_PROCEDURE,
-            }
-        )
-        | _ADMIN_CURATION_FEATURE_PROCEDURES
-    ),
-    "ktm_feature_dagster_runtime": (
-        _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset(
-            {
                 _GENERIC_FEATURE_CREATE_PROCEDURE,
                 _PROVIDER_FEATURE_CREATE_PROCEDURE,
                 _M05_CANDIDATE_PROCEDURE,
             }
         )
+        | _ADMIN_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
 }
 
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
-    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
-    | frozenset(
-        {
-            _MANUAL_FEATURE_PROVENANCE_FUNCTION,
-            _FEATURE_REQUEST_READ_FUNCTION,
-            _FEATURE_REQUEST_LIST_FUNCTION,
-            _M05_ACK_PREFLIGHT_FUNCTION,
-            _M05_CASE_READ_FUNCTION,
-            _M05_CASE_LIST_FUNCTION,
-            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
-        }
-    ),
-    "ktm_feature_dagster_runtime": frozenset(
-        {
-            _M05_DETECTOR_MANUAL_LIST_FUNCTION,
-            _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
-            _PROVIDER_CURATION_SEAL_FUNCTION,
-        }
+    "ktm_feature_service": (
+        _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
+        | frozenset(
+            {
+                _MANUAL_FEATURE_PROVENANCE_FUNCTION,
+                _FEATURE_REQUEST_READ_FUNCTION,
+                _FEATURE_REQUEST_LIST_FUNCTION,
+                _M05_ACK_PREFLIGHT_FUNCTION,
+                _M05_CASE_READ_FUNCTION,
+                _M05_CASE_LIST_FUNCTION,
+                _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
+                _M05_DETECTOR_MANUAL_LIST_FUNCTION,
+                _PROVIDER_CURATION_SEAL_FUNCTION,
+            }
+        )
     ),
 }
 
@@ -322,10 +324,18 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
         runtime_role.rolsuper AS is_superuser,
         runtime_role.rolcreaterole AS can_create_role,
         runtime_role.rolbypassrls AS bypasses_rls,
-        pg_has_role(session_user, 'ktm_feature_schema_owner', 'member')
-            AS has_schema_owner_membership,
-        pg_has_role(session_user, 'ktm_feature_schema_owner', 'SET')
-            AS can_set_schema_owner_role,
+        -- ADR-100: "schema owner의 member인가"와 "SET ROLE 할 수 있는가"는 더 이상
+        -- 묻지 않는다 — 통합된 LOGIN이 migration을 돌려야 하므로 둘 다 구조적으로
+        -- 참이다. 대신 **수동적으로 갖는가**를 묻는다. `USAGE`는 `inherit_option`을
+        -- 따르므로, bootstrap이 `INHERIT FALSE`로 주는 한 이 셋은 거짓이어야 하고
+        -- 누가 `INHERIT TRUE`로 바꾸면 여기서 빨개진다. 아래 has_table_privilege
+        -- 계열은 전부 inherited 권한만 보므로 이 축을 스스로 관측하지 못한다.
+        pg_has_role(session_user, 'ktm_feature_schema_owner', 'USAGE')
+            AS inherits_schema_owner,
+        pg_has_role(session_user, 'ktm_feature_audit_writer', 'USAGE')
+            AS inherits_audit_writer,
+        pg_has_role(session_user, 'ktm_feature_state_procedure_owner', 'USAGE')
+            AS inherits_state_procedure_owner,
         pg_has_role(session_user, 'ktm_feature_runtime', 'SET')
             AS can_set_runtime_group_role,
         has_schema_privilege(session_user, 'feature', 'CREATE')
@@ -334,6 +344,26 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             AS can_read_public_features,
         has_table_privilege(session_user, 'ops.feature_override_field_paths', 'SELECT')
             AS can_read_feature_override_field_paths,
+        -- 이미지가 아는 head와 DB가 있는 head가 같은지 본다. 종전에는 Manager가
+        -- 서명한 final permit이 이 성질을 담당했고, 그것은 root 소유 mount와 봉인된
+        -- receipt 파일 다발을 요구했다. 성질 자체는 "runtime이 자기 이미지와 다른
+        -- 스키마의 DB에 붙지 않는다"이고, 그건 여기서 in-process로 잴 수 있다.
+        (
+            SELECT array_agg(applied.version_num::text ORDER BY applied.version_num)
+            FROM public.alembic_version AS applied
+        ) AS applied_alembic_heads,
+        -- runtime은 그 표를 **읽기만** 해야 한다. 쓰기까지 되면 스키마를 바꾸지 않고
+        -- head만 고쳐 위 검사를 통과시킬 수 있다. object 권한 검사는 inherited
+        -- 권한만 보므로(`INHERIT FALSE`인 schema owner 경유는 세지 않는다) 이 술어는
+        -- 통합 LOGIN에서도 여전히 갈린다.
+        has_table_privilege(session_user, 'public.alembic_version', 'SELECT')
+            AS can_read_alembic_version,
+        (
+            has_table_privilege(session_user, 'public.alembic_version', 'INSERT')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'UPDATE')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'DELETE')
+            OR has_table_privilege(session_user, 'public.alembic_version', 'TRUNCATE')
+        ) AS can_write_alembic_version,
         -- PostgreSQL stores functions and procedures in pg_proc; the public
         -- privilege inquiry is has_function_privilege even for a regprocedure.
         has_function_privilege(
@@ -529,14 +559,57 @@ def _runtime_db_privilege_problems(
     if row.get("current_user") != row.get("session_user"):
         problems.append("session_user and current_user must be identical")
 
+    expected_heads = [application_schema_head()]
+    raw_heads = row.get("applied_alembic_heads")
+    # `array_agg`는 행이 없으면 NULL을 준다 — 그것과 빈 배열을 같게 다룬다. 카탈로그
+    # 행은 `Mapping[str, object]`로 들어오므로 형태를 여기서 좁힌다: 배열이 아닌 값이
+    # 오면 기대와 다르다는 것 자체가 문제다.
+    applied_heads = list(raw_heads) if isinstance(raw_heads, (list, tuple)) else []
+    if applied_heads != expected_heads:
+        problems.append(
+            f"applied Alembic head must be exactly {expected_heads!r} "
+            f"(observed {applied_heads!r})"
+        )
+    if not row.get("can_read_alembic_version"):
+        problems.append("runtime login must be able to read public.alembic_version")
+    if row.get("can_write_alembic_version"):
+        problems.append("runtime login must not be able to write public.alembic_version")
+
+    # ADR-100: `has_schema_owner_membership`와 `can_set_schema_owner_role`은 이 집합에서
+    # 빠졌다. 통합 전에는 migration만 `ktm_feature_migrator`로 돌았고 api/dagster LOGIN은
+    # schema owner가 될 수 없었다. 이제 LOGIN이 하나이고 그 하나가 migration도 돌려야
+    # 하므로 bootstrap이 `GRANT ktm_feature_schema_owner TO ktm_feature_service
+    # WITH INHERIT FALSE, SET TRUE`를 준다 — 두 술어는 구조적으로 참이 되어 남겨두면
+    # 모든 런타임 preflight가 fail-close 한다.
+    #
+    # **잃는 것을 정확히 적는다**: 침해된 런타임이 `SET ROLE ktm_feature_schema_owner`를
+    # 거쳐 그 owner가 SET 할 수 있는 모든 것 — `ktm_feature_audit_writer`,
+    # `ktm_feature_state_procedure_owner` 등 — 에 닿을 수 있다. 즉 DDL만이 아니라
+    # audit 행 위조와 상태표 소유까지 열린다. 통합 전에는 그 경로가 api/dagster
+    # login에 아예 없었다. 이것은 "한 LOGIN이 migration도 돌린다"의 직접적 귀결이고
+    # 이 preflight가 되돌릴 수 있는 종류가 아니다.
+    #
+    # 되돌릴 수 없는 대신 **여전히 참인 축을 명시적으로 고정한다**: 그 권한을
+    # 수동적으로 갖지는 않는다. 아래 `inherits_*` 셋이 그것이고, 누가 bootstrap의
+    # 부여를 `INHERIT TRUE`로 바꾸면 거기서 빨개진다. 아래 has_table_privilege 계열은
+    # inherited 권한만 보므로 그 변화를 스스로 관측하지 못한다 — 그게 이 셋이
+    # 필요한 이유다. `can_create_in_feature_schema`는 CREATE 축만 덮는다.
+    #
+    # `can_set_runtime_group_role`은 그대로 둔다: bootstrap이 `ktm_feature_runtime`은
+    # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",
-        "has_schema_owner_membership": (
-            "runtime login must not be a ktm_feature_schema_owner member"
+        "inherits_schema_owner": (
+            "runtime login must not passively hold ktm_feature_schema_owner privileges"
         ),
-        "can_set_schema_owner_role": ("runtime login must not SET ROLE ktm_feature_schema_owner"),
+        "inherits_audit_writer": (
+            "runtime login must not passively hold ktm_feature_audit_writer privileges"
+        ),
+        "inherits_state_procedure_owner": (
+            "runtime login must not passively hold ktm_feature_state_procedure_owner privileges"
+        ),
         "can_set_runtime_group_role": ("runtime login must not SET ROLE ktm_feature_runtime"),
         "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
         "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",
@@ -613,20 +686,18 @@ def _runtime_db_privilege_problems(
         if row.get(field_name) is not True:
             problems.append(message)
 
-    if expected_login == "ktm_feature_api_runtime":
-        if row.get("can_execute_create_procedure") is not False:
-            problems.append(
-                "API runtime must not EXECUTE create_feature_with_initial_state directly"
-            )
-        if row.get("can_execute_manual_create_procedure") is not True:
-            problems.append(
-                "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
-            )
-    elif expected_login == "ktm_feature_dagster_runtime":
-        if row.get("can_execute_create_procedure") is not True:
-            problems.append("Dagster runtime must EXECUTE create_feature_with_initial_state")
-        if row.get("can_execute_manual_create_procedure") is not False:
-            problems.append("Dagster runtime must not EXECUTE the manual Feature writer")
+    # ADR-100: API/Dagster가 예전엔 서로 다른 LOGIN이라 이 둘은 상호 배타적으로
+    # 검증됐다(API는 manual만, Dagster는 generic/provider만). 지금은 단일
+    # `ktm_feature_service`가 두 procedure 모두에 대한 EXECUTE 권한을 갖는다 —
+    # 실제로 어느 코드 경로가 어느 procedure를 호출하는지는 이 preflight의
+    # 검증 범위 밖이다(DB 권한만 검증한다). 그래서 상호 배타 단언은 "둘 다
+    # 가진다" 단언으로 바뀐다.
+    if row.get("can_execute_create_procedure") is not True:
+        problems.append("runtime login must EXECUTE create_feature_with_initial_state")
+    if row.get("can_execute_manual_create_procedure") is not True:
+        problems.append(
+            "runtime login must EXECUTE create_admin_manual_feature_with_initial_state"
+        )
 
     expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:

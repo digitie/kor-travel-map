@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.infra.merge_repo import apply_feature_merge
@@ -78,35 +79,73 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
         "CAST(:master AS uuid), CAST(:loser AS uuid))",
     ],
 )
-async def test_dagster_runtime_cannot_call_merge_procedures(
+async def test_merge_procedures_stay_narrow_to_the_admin_executor(
     migrated_engine: AsyncEngine, call: str
 ) -> None:
-    """provider ETL identity(dagster runtime)는 merge procedure를 부를 수 없다.
+    """merge procedure의 EXECUTE는 admin executor에만 가야 한다.
 
-    2차 적대 리뷰 P1: 처음엔 EXECUTE를 공유 그룹 `ktm_feature_runtime`에 줘서 dagster가
-    legacy row를 임의로 옮길 수 있었다. 0214 형태로 고쳤다 — EXECUTE는 admin executor에만,
-    본문에 `session_user` 게이트. 둘 중 하나만 남아도 여기서 42501이어야 한다.
+    2차 적대 리뷰 P1: 처음엔 EXECUTE를 공유 그룹 `ktm_feature_runtime`에 줘서 적재
+    identity가 legacy row를 임의로 옮길 수 있었다. 0214 형태로 고쳤다 — EXECUTE는 admin
+    executor에만, 본문에 `session_user` 게이트.
+
+    ADR-100 이전에는 그 두 층을 "Dagster login으로 부르면 42501"로 함께 쟀다. LOGIN이
+    `ktm_feature_service` 하나로 합쳐지면서 `as_dagster_runtime`과 `as_api_runtime`이
+    같은 role을 열게 됐고, 그 하나가 admin executor의 member라 42501은 더 나오지
+    않는다 — 그대로 두면 거부를 재는 대신 merge를 한 번 더 실행하고 끝난다.
+
+    남은 경계는 grant 층이고 ADR-100은 그것을 건드리지 않았다. executor role끼리는
+    membership이 없으므로(bootstrap의 role graph는 평평하다) 이 술어는 여전히 갈린다.
     """
-    from sqlalchemy.exc import DBAPIError
 
-    from tests.integration.conftest import as_dagster_runtime
+    procedure = call.split("CALL ", 1)[1].split("(", 1)[0]
+    schema, _, name = procedure.partition(".")
 
     async with AsyncSession(migrated_engine) as session:
-        await session.begin()
-        # pytest.raises가 CM 바깥이어야 한다 — 안쪽이면 실패한 CALL로 aborted된 트랜잭션에서
-        # CM 종료가 `SET LOCAL SESSION AUTHORIZATION DEFAULT`를 내려 InFailedSQLTransaction이다.
-        with pytest.raises(DBAPIError) as info:
-            async with as_dagster_runtime(session):
-                await session.execute(text(call), _MERGE_IDS)
-        orig = info.value.orig
-        # 어느 층이 거부했든 SQLSTATE는 42501이어야 한다. grant 층(EXECUTE가 admin executor에만)
-        # 이면 "permission denied for procedure", 게이트 층이면 "requires the admin executor".
-        # 둘 다 42501이라 한 층이 풀려도 여기서 red다.
-        assert getattr(orig, "sqlstate", None) == "42501", repr(orig)[:200]
-        await session.rollback()
+        grantees = (
+            await session.execute(
+                text(
+                    "SELECT "
+                    "has_function_privilege("
+                    "'ktm_curation_provider_executor', oid, 'EXECUTE') AS provider_side, "
+                    "has_function_privilege("
+                    "'ktm_curation_admin_executor', oid, 'EXECUTE') AS admin_side, "
+                    "proacl::text AS acl "
+                    "FROM pg_catalog.pg_proc "
+                    "WHERE pronamespace = CAST(:schema AS regnamespace) "
+                    "  AND proname = :name"
+                ),
+                {"schema": schema, "name": name},
+            )
+        ).mappings().one()
+    # 양성 대조가 없으면 "grant가 통째로 사라진" 상태도 초록이 된다.
+    assert grantees["provider_side"] is False, grantees["acl"]
+    assert grantees["admin_side"] is True, grantees["acl"]
 
-    # 양성 대조 — 같은 CALL을 API runtime(admin executor 상속)이 하면 통과한다. 이게 없으면
-    # "procedure가 아예 깨져서 모두 42501"인 상태와 구분이 안 된다.
+    # 그리고 본문 게이트가 살아 있는지 — grant만 재면 `session_user` 절을 지워도 초록이다.
+    #
+    # 이름이 소스에 보이는지로 재지 않는다. 그건 게이트를 뒤집거나(`IF NOT` → `IF`)
+    # 이름만 주석에 남겨도 통과한다 — 효과가 아니라 문자열을 재는 것이다.
+    #
+    # 본문에 **닿으면서** 게이트에 걸리는 principal은 세 조건을 모두 만족해야 한다:
+    # schema `feature`에 USAGE, 이 procedure에 EXECUTE, 그리고 admin executor의
+    # member가 아닐 것. 실측으로 후보 7개 중 하나만 그렇다 —
+    # `ktm_curation_command_owner`(이 procedure의 소유자). executor role들은 schema
+    # USAGE 자체가 없어 resolver에서 먼저 막히고, 다른 owner들은 EXECUTE가 없다.
+    # SECURITY DEFINER는 **닿은 뒤에** 적용되므로 USAGE가 없으면 본문을 못 본다.
+    async with AsyncSession(migrated_engine) as session:
+        await session.begin()
+        await session.execute(
+            text("SET LOCAL SESSION AUTHORIZATION 'ktm_curation_command_owner'")
+        )
+        with pytest.raises(DBAPIError) as denied:
+            await session.execute(text(call), _MERGE_IDS)
+        await session.rollback()
+    orig = denied.value.orig
+    assert getattr(orig, "sqlstate", None) == "42501", repr(orig)[:200]
+    assert "admin executor" in str(orig)
+
+    # 통합 login이 실제로 이 CALL을 할 수 있어야 한다 — 위 두 단언이
+    # "procedure가 아예 깨졌다"와 구분되게 하는 자리다.
     async with AsyncSession(migrated_engine) as session:
         await session.begin()
         async with as_api_runtime(session):

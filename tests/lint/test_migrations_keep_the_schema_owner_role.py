@@ -205,11 +205,18 @@ def _trailing_role(statements: list[str]) -> str | None:
 def test_the_scan_actually_sees_role_switching_migrations() -> None:
     """항진명제 방지 — 롤을 바꾸는 마이그레이션을 실제로 찾아야 한다."""
 
+    paths = _migration_paths()
     switching = [
         path.name
-        for path in _migration_paths()
+        for path in paths
         if _trailing_role(_statements_for(path, "upgrade")) is not None
     ]
+    if not switching and len(paths) <= 1:
+        pytest.skip(
+            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
+            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
+            "추가되면 이 검사는 자동으로 다시 활성화된다."
+        )
     assert len(switching) >= 5, (
         f"`SET ROLE`로 끝나는 마이그레이션을 {len(switching)}개만 찾았다 — "
         "추출이 낡았다(상수 형태가 바뀌었을 수 있다)."
@@ -226,8 +233,9 @@ def test_sidecar_migrations_are_not_read_through_the_ast_alone() -> None:
     빨갛게 된다 — 롤 검사가 조용히 항진명제가 되는 대신.
     """
 
+    paths = _migration_paths()
     improved: list[str] = []
-    for path in _migration_paths():
+    for path in paths:
         if "_sidecar(" not in path.read_text(encoding="utf-8"):
             continue
         ast_only = _executed_statements(
@@ -237,6 +245,12 @@ def test_sidecar_migrations_are_not_read_through_the_ast_alone() -> None:
         if len(resolved) > len(ast_only):
             improved.append(f"{path.name}: {len(ast_only)} -> {len(resolved)}")
 
+    if not improved and len(paths) <= 1:
+        pytest.skip(
+            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
+            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
+            "추가되면 이 검사는 자동으로 다시 활성화된다."
+        )
     assert improved, (
         "사이드카를 쓰는 마이그레이션이 없거나, import 해석이 AST보다 더 보지 "
         "못한다 — 이 모듈의 롤 검사가 사이드카 문장을 못 보고 있다는 뜻이다."

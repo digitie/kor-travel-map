@@ -258,7 +258,7 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # 같은 컨테이너 기본 DB를 `pg_engine`과 공유한다. 예전에는 그것이 순서 결합을
     # 만들었다 — `pg_engine`은 app schema를 컨테이너 superuser로
     # `CREATE SCHEMA IF NOT EXISTS`하고 이 fixture는 배포 경로
-    # (`ktm_feature_migrator` → SET ROLE `ktm_feature_schema_owner`)로 migration을
+    # (`ktm_feature_service` → SET ROLE `ktm_feature_schema_owner`)로 migration을
     # 도는데, `IF NOT EXISTS`는 이미 있는 schema에 AUTHORIZATION을 적용하지 않으므로
     # 먼저 선 쪽이 소유권을 확정했다. 그래서 "알파벳순 첫 파일이 migrated_engine을
     # 먼저 요구하게 한다"는 파일명 규약에 기대고 있었다.
@@ -268,7 +268,7 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # 테스트가 컨테이너 기본 DB를 직접 가리키기 때문이다 — 나누면 그쪽이 빈 DB를 본다.
     async_dsn = normalize_async_dsn(raw_dsn)
     migrator_dsn = make_url(async_dsn).set(
-        username="ktm_feature_migrator",
+        username="ktm_feature_service",
         password=_TEST_MIGRATOR_PASSWORD,
     )
 
@@ -374,7 +374,7 @@ async def m05_pristine_provisioning(migrated_engine: AsyncEngine) -> dict[str, o
     principal_id = "service:feature-reference-reconciliation"
     operation = "admin.feature-reference-reconciliation-subscription.provision.v1"
     dsn = migrated_engine.url.set(
-        username="ktm_feature_api_runtime",
+        username="ktm_feature_service",
         password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=2)
@@ -503,7 +503,7 @@ async def dagster_runtime_engine(
     from kortravelmap.infra.db import make_async_engine
 
     dsn = migrated_engine.url.set(
-        username="ktm_feature_dagster_runtime",
+        username="ktm_feature_service",
         password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=1)
@@ -526,7 +526,7 @@ async def api_runtime_engine(
     from kortravelmap.infra.db import make_async_engine
 
     dsn = migrated_engine.url.set(
-        username="ktm_feature_api_runtime",
+        username="ktm_feature_service",
         password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=1)
@@ -542,7 +542,7 @@ async def as_dagster_runtime(session: AsyncSession) -> AsyncIterator[AsyncSessio
     from sqlalchemy import text
 
     await session.execute(
-        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_dagster_runtime'")
+        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_service'")
     )
     try:
         yield session
@@ -561,7 +561,7 @@ async def as_api_runtime(session: AsyncSession) -> AsyncIterator[AsyncSession]:
     from sqlalchemy import text
 
     await session.execute(
-        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_api_runtime'")
+        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_service'")
     )
     try:
         yield session

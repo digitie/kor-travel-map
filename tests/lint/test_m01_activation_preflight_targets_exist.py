@@ -59,7 +59,8 @@ def test_the_gate_reads_the_real_constants() -> None:
 
     relations = _tuple_constant("PROTECTED_RELATIONS")
     assert len(relations) >= 2, f"보호 관계를 {len(relations)}개만 읽었다 — 파서를 의심하라"
-    for name in ("API_LOGIN", "DAGSTER_LOGIN", "SCHEMA_OWNER", "MANUAL_PROCEDURE_OWNER"):
+    # ADR-100: 세 LOGIN이 `SERVICE_LOGIN` 하나로 합쳐졌다.
+    for name in ("SERVICE_LOGIN", "SCHEMA_OWNER", "MANUAL_PROCEDURE_OWNER"):
         assert _constant(name).startswith("ktm_"), f"{name}이 role 이름 같지 않다"
 
 
@@ -98,8 +99,7 @@ def test_every_role_the_preflight_names_is_created_by_the_bootstrap() -> None:
     names = [
         _constant(name)
         for name in (
-            "API_LOGIN",
-            "DAGSTER_LOGIN",
+            "SERVICE_LOGIN",
             "SCHEMA_OWNER",
             "MANUAL_PROCEDURE_OWNER",
             "ADMIN_EXECUTOR",

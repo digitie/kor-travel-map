@@ -212,7 +212,7 @@ async def test_runtime_privileges_table_matches_the_database(
 async def test_curation_command_procedures_keep_their_owner_and_fence(
     migrated_session: AsyncSession,
 ) -> None:
-    """curation typed command가 40C 뒤에도 SECURITY DEFINER + dagster EXECUTE 금지인지.
+    """curation typed command가 40C 뒤에도 SECURITY DEFINER + 적재 executor 금지인지.
 
     40C는 legacy procedure를 지우면서 canonical command 정의도 재작성했다(D4).
     재작성이 `SECURITY DEFINER`나 소유자를 흘리면 권한 경계가 조용히 열린다 —
@@ -226,8 +226,11 @@ async def test_curation_command_procedures_keep_their_owner_and_fence(
                        pg_get_userbyid(p.proowner) AS owner,
                        p.prosecdef AS security_definer,
                        has_function_privilege(
-                         'ktm_feature_dagster_runtime', p.oid, 'EXECUTE'
-                       ) AS dagster_execute
+                         'ktm_curation_provider_executor', p.oid, 'EXECUTE'
+                       ) AS provider_execute,
+                       has_function_privilege(
+                         'ktm_curation_admin_executor', p.oid, 'EXECUTE'
+                       ) AS admin_execute
                 FROM pg_catalog.pg_proc AS p
                 JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
                 WHERE n.nspname = 'feature'
@@ -243,8 +246,23 @@ async def test_curation_command_procedures_keep_their_owner_and_fence(
     bad_owner = [r["proname"] for r in rows if r["owner"] != "ktm_curation_command_owner"]
     assert not bad_owner, f"소유자가 command owner가 아닌 procedure: {bad_owner}"
 
-    reachable = [r["proname"] for r in rows if r["dagster_execute"]]
-    assert not reachable, f"dagster runtime이 EXECUTE 가능한 command: {reachable}"
+    # ADR-100 이전에는 이 자리가 "적재 LOGIN이 EXECUTE 가능한가"였다. LOGIN이 하나로
+    # 합쳐지고 그 하나가 admin executor의 member가 되면서 그 술어는 항상 참이 됐다 —
+    # 남은 경계는 executor 층이고 ADR-100은 그것을 건드리지 않았다.
+    reachable = [r["proname"] for r in rows if r["provider_execute"]]
+    assert not reachable, f"적재 executor가 EXECUTE 가능한 command: {reachable}"
+
+    # 양성 대조 — 없으면 grant가 통째로 사라진 상태도 위 단언을 통과한다.
+    # `claim_*_effect`는 아래 SECDEF 검사와 같은 이유로 빠진다: command 본문이 부르는
+    # 내부 helper라 executor에게 EXECUTE가 없는 것이 정상이다.
+    unreachable_by_admin = [
+        r["proname"]
+        for r in rows
+        if not r["admin_execute"] and not r["proname"].startswith("claim_")
+    ]
+    assert not unreachable_by_admin, (
+        f"admin executor가 EXECUTE 못 하는 command: {unreachable_by_admin}"
+    )
 
     # `claim_*_effect`는 command 본문이 부르는 내부 helper라 SECDEF가 아니다.
     not_definer = sorted(

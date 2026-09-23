@@ -2,22 +2,20 @@
 
 ## 왜
 
-그 파일은 **rev 300 시점의 덤프**다. migration 입력이지 head의 사본이 아니다.
-그런데 2026-09-08(T-VN-39 착수)까지 유도형 검사기 다섯이 거기서 현행 계약을
-유도하고 있었고, 그 뒤처짐은 조용했다.
+그 파일은 **baseline root 시점의 덤프**이고 head의 사본이 아니다. 2026-09-08까지
+유도형 검사기 다섯이 거기서 현행 계약을 유도하고 있었고, 그 뒤처짐은 조용했다.
 
-실측 차이:
+당시 실측 차이(rev 300 baseline 대 head): `feature.purge_manual_feature`는 baseline
+0건 head 6건, `trg_features_manual_feature_truncate_fence`는 0건 대 3건, 루틴 본문은
+155개 대 163개였다. 그리고 `uq_manual_feature_identity_claims_exact`를 baseline은
+UNIQUE **제약**으로, head는 부분 유니크 **인덱스**로 봤다 — 낡음은 "덜 본다"에
+그치지 않고 **모양을 틀리게 본다.**
 
-- `feature.purge_manual_feature` — baseline 0건, head 6건 (306)
-- `trg_features_manual_feature_truncate_fence` — baseline 0건, head 3건 (307)
-- `feature.manual_feature_purge_records` — baseline 0건, head 29건 (306)
-- 루틴 본문 수 — baseline 155개, head 163개
-- `uq_manual_feature_identity_claims_exact` — baseline은 UNIQUE **제약**으로 보고
-  head는 부분 유니크 **인덱스**로 본다(306이 바꿨다). 즉 낡음은 "덜 본다"에
-  그치지 않고 **모양을 틀리게 본다.**
-
-`tests/lint/test_admin_state_constraint_mapping.py`의 docstring이 이 한계를 스스로
-적으면서 "지금은 그런 migration이 없다"고 했는데, T-VN-39가 정확히 그 migration이다.
+`300`~`313`을 `400` 하나로 접은 지금 두 파일은 같은 순간의 head를 서술한다. 그래서
+차이가 0이고, 그것이 이 규칙을 없앨 이유는 못 된다 — `401`이 붙는 순간 baseline은
+다시 뒤처지고 그 뒤처짐은 여전히 조용하기 때문이다. 아래
+`test_baseline_and_head_agree_while_the_root_is_the_head`가 지금의 0을 **확인**해서,
+둘 중 하나만 다시 뜨는 일을 잡는다.
 
 ## 무엇을 허용하나
 
@@ -42,7 +40,12 @@ baseline을 읽는 정당한 이유는 셋뿐이다 — 그것을 **실행하는
 from __future__ import annotations
 
 import ast
+import difflib
+import json
 import pathlib
+import re
+
+import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -50,12 +53,8 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: baseline으로 경로를 구성하면 그것은 오라클로 쓰는 것이고, head와 어긋난다.
 _ALLOWED = {
     # baseline을 실제로 적용하는 migration.
-    "alembic/versions/300_schema_baseline.py",
-    # 0236 → 300 handoff. baseline이 곧 그 handoff의 목적 상태다.
-    "docker/transition-application-schema-0236-to-300.py",
-    # baseline을 산출하는 빌더 자신.
-    "scripts/build-baseline.sh",
-    # head 오라클이 baseline보다 새롭다는 것을 **대조로 증명**하는 이 파일.
+    "alembic/versions/400_schema_baseline.py",
+    # baseline과 head 오라클을 **대조**하는 이 파일.
     "tests/lint/test_baseline_schema_is_not_a_contract_oracle.py",
     # `runtime_privileges.py`의 ACL 인벤토리는 head와 **rev 300 두 시점**에서 돈다
     # (0236 → 300 handoff가 stamp 직후 부른다). "이 루틴은 `300`에 아직 없어도 된다"는
@@ -189,38 +188,77 @@ def test_the_detector_sees_a_planted_path_construction() -> None:
     assert _python_offenders(planted) == [5, 6]
 
 
-def test_the_head_oracle_exists_and_is_newer_than_baseline() -> None:
-    """head 오라클이 실재하고 baseline보다 **더 많이** 담는지 확인한다.
+#: 실행 가능한 baseline이 오라클과 달라지는 **정확한 네 가지**. 둘 다 같은 덤프에서
+#: 나오고, baseline 쪽만 (a) 자기 설명 헤더가 없고 (b) schema 생성이 멱등하며
+#: (c) ACL 블록마다 소유자로 role을 바꾸는 줄이 끼워져 있고 (d) pg_dump의
+#: `search_path` 고정을 뺐다 — alembic/env.py가 트랜잭션 안에서 세운 것을 덮으면
+#: 안 되기 때문이다. 그 넷만 지우면 두 파일은 한 글자까지 같아야 한다.
+_ROLE_SWITCH = re.compile(
+    r"^(?:SELECT set_config\('(?:role|ktm\.baseline_prior_role)'.*|"
+    r"DO \$ktm_txn\$|BEGIN|END|\$ktm_txn\$;|"
+    r"\s+IF coalesce\(current_setting\('ktm\.baseline_prior_role'.*|"
+    r"\s+RAISE EXCEPTION|\s+'baseline은 하나의 트랜잭션.*|"
+    r"\s+USING ERRCODE = '25P01';|\s+END IF;|-- .*ACL 구간.*|"
+    r"-- GRANT/REVOKE는 소유자만.*|-- 아니라 경고 후 무시된다.*|"
+    r"-- 트랜잭션 밖에서 돌리면.*|-- 소유자 아닌 세션으로 나간다\..*|"
+    r"-- 문자열\*\*로 돌아오므로.*|"
+    r"SELECT pg_catalog\.set_config\('search_path'.*)$"
+)
 
-    오라클을 옮겨 놓고 그 파일이 실은 baseline의 사본이면 아무것도 고쳐지지 않는다.
-    301~ 이후 산물의 존재로 그 사실을 못 박는다.
+
+def _comparable(text: str) -> list[str]:
+    """두 덤프를 비교 가능한 형태로 만든다 — 지우는 것은 위 셋뿐이다."""
+
+    body = text.split("SET statement_timeout = 0;", 1)[-1]
+    kept: list[str] = []
+    for line in body.split("\n"):
+        if _ROLE_SWITCH.match(line):
+            continue
+        kept.append(line.replace("CREATE SCHEMA IF NOT EXISTS ", "CREATE SCHEMA "))
+    return [line for line in kept if line.strip()]
+
+
+def test_baseline_and_head_agree_while_the_root_is_the_head() -> None:
+    """graph에 revision이 하나뿐인 동안 두 덤프는 같은 카탈로그를 서술해야 한다.
+
+    스쿼시 직후에는 둘이 같은 순간의 head에서 나오므로 같다. 그 등식을 **확인해
+    두면** 한쪽만 다시 뜨는 사고가 여기서 잡힌다. `401`이 붙으면 head가 root보다
+    앞서므로 이 검사는 스스로 비켜난다 — 그때부터는 등식이 참이 아니고, 참이길
+    요구하면 revision을 더할 때마다 재스쿼시를 강요하게 된다.
     """
 
     head = _ROOT / "alembic" / "head-schema.sql"
     baseline = _ROOT / "alembic" / "baseline" / "schema.sql"
     assert head.is_file(), f"head 오라클이 없다: {head}"
-    head_text = head.read_text(encoding="utf-8")
-    baseline_text = baseline.read_text(encoding="utf-8")
 
-    for marker in (
-        "purge_manual_feature",
-        "manual_feature_purge_records",
-        "trg_features_manual_feature_truncate_fence",
-    ):
-        assert marker not in baseline_text, (
-            f"{marker!r}가 baseline에 있다 — baseline이 다시 덤프됐다면 이 검사의 "
-            "전제(baseline은 rev 300 시점)가 바뀐 것이므로 여기를 갱신하라."
+    graph = json.loads(
+        (_ROOT / "src" / "kortravelmap" / "_application_migration_graph.json").read_text(
+            encoding="utf-8"
         )
-        assert marker in head_text, (
-            f"{marker!r}가 head 오라클에 없다 — 오라클이 head가 아니거나 낡았다."
-        )
+    )
+    if len(graph["revisions"]) != 1:
+        pytest.skip("head가 baseline root보다 앞선다 — 두 덤프가 갈리는 것이 정상이다")
+
+    head_lines = _comparable(head.read_text(encoding="utf-8"))
+    baseline_lines = _comparable(baseline.read_text(encoding="utf-8"))
+    if head_lines == baseline_lines:
+        return
+
+    diff = list(
+        difflib.unified_diff(baseline_lines, head_lines, "baseline", "head", n=1, lineterm="")
+    )
+    raise AssertionError(
+        "baseline과 head 오라클이 같은 head를 서술하지 않는다 — 한쪽만 다시 뜬 것이다:\n"
+        + "\n".join(diff[:40])
+    )
 
 
 def test_no_module_derives_current_contract_from_the_baseline_dump() -> None:
     offenders = _offenders()
     assert offenders == {}, (
-        "이 파일들이 `alembic/baseline/schema.sql`로 경로를 구성한다. 그 파일은 rev 300 "
-        "시점 덤프라 301~ 이후를 담지 않는다 — 현행 계약의 유도원으로 쓰면 검사기가 "
-        "낡은 세계를 보고, 그 뒤처짐은 조용하다. `alembic/head-schema.sql`을 읽어라. "
+        "이 파일들이 `alembic/baseline/schema.sql`로 경로를 구성한다. 그 파일은 baseline "
+        "root 시점 덤프라 그 뒤 revision을 담지 않는다 — 현행 계약의 유도원으로 쓰면 "
+        "검사기가 낡은 세계를 보고, 그 뒤처짐은 조용하다. `alembic/head-schema.sql`을 "
+        "읽어라. "
         f"{offenders}"
     )

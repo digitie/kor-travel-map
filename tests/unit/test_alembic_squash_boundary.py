@@ -1,4 +1,4 @@
-"""`300` root와 retired Alembic cohort의 실행 경계를 고정한다."""
+"""`400` root와 retired Alembic cohort의 실행 경계를 고정한다."""
 
 from __future__ import annotations
 
@@ -17,13 +17,11 @@ _ACTIVE = _ROOT / "alembic" / "versions"
 _LEGACY = _ROOT / "alembic" / "legacy_versions"
 _RETIRED = _ROOT / "alembic" / "retired_versions" / "0200-0236"
 _ENV = _ROOT / "alembic" / "env.py"
-_BASELINE = _ACTIVE / "300_schema_baseline.py"
+_BASELINE = _ACTIVE / "400_schema_baseline.py"
 _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
-_SOURCE_ORACLE = _ROOT / "scripts" / "create-application-0236-source-oracle.sh"
-_SOURCE_ORACLE_ARCHIVE_MANIFEST = "alembic/retired_versions/0200-0236/manifest.sha256"
 #: active graph가 가져야 하는 유일한 root. child migration은 이 위에 붙는다.
-_EXPECTED_REVISIONS = ("300",)
+_EXPECTED_REVISIONS = ("400",)
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
 _LEGACY_ARCHIVE_SHA256 = (
@@ -235,17 +233,12 @@ def _shell_alembic_execution_violations(source: str, *, filename: str) -> list[s
         line = raw_line.split("#", maxsplit=1)[0]
         for match in pattern.finditer(line):
             target = match.group(1).strip("\"'")
-            if target not in {"head", "300"}:
+            if target not in {"head", "400"}:
                 violations.append(f"{filename}:{line_number}: {target}")
-        archive_manifest_read = (
-            filename == "scripts/create-application-0236-source-oracle.sh"
-            and _SOURCE_ORACLE_ARCHIVE_MANIFEST in line
-            and "manifest=" in line
-        )
-        if (
-            ("retired_versions" in line or "legacy_versions" in line)
-            and not archive_manifest_read
-        ):
+        # 종전에는 `create-application-0236-source-oracle.sh`가 archive manifest를
+        # **해시 비교 목적으로만** 읽는 예외가 있었다. 그 스크립트가 사라져 예외도
+        # 사라졌다 — 이제 실행 가능한 shell은 archive 경로를 아예 가리키지 않는다.
+        if "retired_versions" in line or "legacy_versions" in line:
             violations.append(f"{filename}:{line_number}: legacy archive path in runnable shell")
     return violations
 
@@ -298,7 +291,7 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_has_only_the_300_root() -> None:
+def test_active_graph_has_only_the_baseline_root() -> None:
     """active graph의 root는 ``300`` **하나**이고, head도 하나여야 한다.
 
     squash 직후에는 "revision이 300 하나뿐"과 "root가 300 하나뿐"이 같은 말이었다.
@@ -330,24 +323,8 @@ def test_active_graph_has_only_the_300_root() -> None:
     assert graph_roots == list(_EXPECTED_REVISIONS)
 
 
-def test_active_forward_only_boundary_allows_only_exact_handoff() -> None:
-    assert _literal(_ENV, "_BASELINE_300_REVISION") == "300"
-    assert (
-        _literal(_ENV, "_BASELINE_300_HANDOFF_SOURCE")
-        == "0236_tvn41s_compaction_drained"
-    )
-    source = _ENV.read_text(encoding="utf-8")
-    assert "generic Alembic stamp is unsupported" in source
-    assert "300_schema_baseline is forward-only" in source
-    assert "stamp_baseline_300_after_purge" in source
-    assert "script._stamp_revs" not in source
-
-    baseline_source = _BASELINE.read_text(encoding="utf-8")
-    assert "300_schema_baseline is forward-only" in baseline_source
-
-
 def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
-    baseline_contract = _literal(_BASELINE, "_FINAL_APPLICATION_ROLE_ASSERTIONS_SQL")
+    baseline_contract = _literal(_BASELINE, "_ROLE_ASSERTIONS_SQL")
     assert isinstance(baseline_contract, str)
 
     bootstrap = _ROLE_BOOTSTRAP.read_text(encoding="utf-8")
@@ -445,71 +422,6 @@ def test_active_runnable_paths_never_target_legacy_revision() -> None:
     assert violations == [], (
         "retired Alembic revision은 읽기 전용 archive다. active runnable path에서 실행하지 마라: "
         + ", ".join(violations)
-    )
-
-
-def test_source_oracle_may_only_read_the_retired_manifest_for_hash_comparison() -> None:
-    """historical source builder는 archive 실행이 아니라 exact bytes 대조만 허용한다."""
-
-    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
-    relative = _SOURCE_ORACLE.relative_to(_ROOT).as_posix()
-
-    assert source.count(_SOURCE_ORACLE_ARCHIVE_MANIFEST) == 1
-    assert f'manifest="$REPOSITORY_ROOT/{_SOURCE_ORACLE_ARCHIVE_MANIFEST}"' in source
-    assert "docker build --pull=false --no-cache" in source
-    assert "--entrypoint sh \"$source_image_id\"" in source
-    assert "alembic/retired_versions" not in (
-        _ROOT / "docker" / "api.Dockerfile"
-    ).read_text(encoding="utf-8")
-    assert _shell_alembic_execution_violations(source, filename=relative) == []
-
-    forbidden = source.replace(
-        _SOURCE_ORACLE_ARCHIVE_MANIFEST,
-        "alembic/retired_versions/0200-0236/0236_tvn41s_compaction_drained.py",
-    )
-    assert _shell_alembic_execution_violations(forbidden, filename=relative) == [
-        f"{relative}:153: legacy archive path in runnable shell"
-    ]
-
-
-def test_source_oracle_early_seal_cleanup_recovers_permissions_and_status() -> None:
-    """봉인 직후 실패해도 read-only archive를 지우고 원래 실패를 보존한다."""
-
-    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
-    remover = source.split("remove_source_seal() {", maxsplit=1)[1].split(
-        "cleanup_source_seal() {", maxsplit=1
-    )[0]
-    early_cleanup = source.split("cleanup_source_seal() {", maxsplit=1)[1].split(
-        'SOURCE_SEALED_PARENT="$(mktemp', maxsplit=1
-    )[0]
-
-    assert remover.index("chmod -R u+rwX") < remover.index("rm -rf")
-    assert '[ ! -e "$SOURCE_SEALED_PARENT" ]' in remover
-    assert "local status=$?" in early_cleanup
-    assert "remove_source_seal || cleanup_failed=1" in early_cleanup
-    assert 'if [ "$status" -ne 0 ]; then\n    exit "$status"' in early_cleanup
-    assert source.index("trap cleanup_source_seal EXIT") < source.index(
-        'git -C "$SOURCE_ROOT" archive'
-    )
-
-
-def test_source_oracle_full_cleanup_accumulates_failures() -> None:
-    """전체 cleanup은 성공을 거짓 보고하지 않고 기존 nonzero를 덮지 않는다."""
-
-    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
-    cleanup = source.split("\ncleanup() {", maxsplit=1)[1].split(
-        "\ntrap cleanup EXIT", maxsplit=1
-    )[0]
-
-    assert "local status=$?" in cleanup
-    assert "local cleanup_failed=0" in cleanup
-    assert "remove_source_seal || cleanup_failed=1" in cleanup
-    assert "docker container rm" in cleanup
-    assert "docker volume rm" in cleanup
-    assert cleanup.count("|| cleanup_failed=1") >= 9
-    assert 'if [ "$status" -ne 0 ]; then' in cleanup
-    assert cleanup.index('exit "$status"') < cleanup.index(
-        '[ "$cleanup_failed" -eq 0 ] || exit 1'
     )
 
 
@@ -689,7 +601,6 @@ def test_production_docker_build_context_never_copies_legacy_migrations() -> Non
     assert "COPY alembic/versions ./alembic/versions" in api
     assert "transition-application-schema-0236-to-300.py" not in api
     assert "ktm-application-schema-handoff" not in api
-    assert "application-schema-db-contract.py" in api
     for retired_runtime_helper in (
         "migrate-to-m01-bootstrap-boundary.sh",
         "migrate-to-m05-bootstrap-boundary.sh",

@@ -937,7 +937,7 @@ def test_feature_creation_provenance_returns_claim_and_origin(
                 creator_principal_id="admin-ui-bff.manual-feature-create.v1",
                 created_by_actor="admin:m02",
                 created_at=datetime(2026, 8, 20, tzinfo=UTC),
-                invoker_role="ktm_feature_api_runtime",
+                invoker_role="ktm_feature_service",
                 procedure_definer="ktm_manual_feature_procedure_owner",
             ),
         )
@@ -965,7 +965,7 @@ def test_feature_creation_provenance_returns_claim_and_origin(
         "creator_principal_id": "admin-ui-bff.manual-feature-create.v1",
         "created_by_actor": "admin:m02",
         "created_at": "2026-08-20T00:00:00Z",
-        "invoker_role": "ktm_feature_api_runtime",
+        "invoker_role": "ktm_feature_service",
         "procedure_definer": "ktm_manual_feature_procedure_owner",
     }
 

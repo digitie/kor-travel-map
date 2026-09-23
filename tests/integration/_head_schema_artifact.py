@@ -20,8 +20,8 @@ migration이다.
 ``baseline/schema.sql``과 무엇이 다른가
 --------------------------------------
 
-baseline은 **실행되는 migration 입력**이라 ``scripts/build-baseline.sh``가
-ACL 블록 재배치·``CREATE SCHEMA IF NOT EXISTS`` 치환 등 무거운 정규화를 한다.
+baseline은 **실행되는 migration 입력**이라 ACL 블록마다 소유자로 role을 바꾸고
+``CREATE SCHEMA IF NOT EXISTS``로 치환하는 정규화를 거친다.
 이 파일은 **읽히기만 하는 오라클**이므로 결정성만 확보하면 된다 — 매 덤프마다
 바뀌는 토큰과 버전 주석만 걷어낸다. 실행 가능하지 않고, 실행하려 해서도 안 된다.
 """
@@ -48,7 +48,7 @@ REGENERATE_ENV = "KTM_WRITE_HEAD_SCHEMA"
 _DUMP_SCHEMAS = ("feature", "provider_sync", "ops")
 
 #: PostgreSQL 16의 pg_dump가 내는 psql client-side fence. 토큰이 매번 달라
-#: 그대로 두면 결정론적 아티팩트가 되지 않는다. `build-baseline.sh`와 같은 판정이다.
+#: 그대로 두면 결정론적 아티팩트가 되지 않는다. baseline 덤프와 같은 판정이다.
 _PSQL_RESTRICT = re.compile(r"\\(?:un)?restrict [A-Za-z0-9]+")
 
 #: 판올림마다 바뀌는 두 줄.

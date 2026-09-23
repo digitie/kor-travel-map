@@ -2,18 +2,14 @@
 
 ## 왜 필요한가
 
-배포 계약은 "설치된 DB가 **정확히 기대한 revision**인가"를 여러 지점에서 확인한다 —
-static contract, fresh installer, finalize, final permit. 그 자체는 옳은 설계다.
-문제는 기대값이 **파일마다 하드코딩된 리터럴**이었다는 것이다.
-
-    docker/application-schema-contract.py       _HEAD = "300"
-    docker/application-schema-fresh-300.py      _DESTINATION_HEAD = "300"
-    docker/application-schema-fresh-finalize.py _DESTINATION_HEAD = "300"
-    docker/application-schema-final-permit.py   versions != ("300",)  등 3곳
-
-같은 값의 사본 여섯이 서로 일치한다는 것을 **아무것도 강제하지 않았고**, migration을
-하나 더하려면 여섯 곳을 한꺼번에 고쳐야 했다. 실제로 `301`을 얹자 fresh installer가
+배포 계약은 "설치된 DB가 **정확히 기대한 revision**인가"를 여러 지점에서 확인한다.
+그 자체는 옳은 설계다. 문제는 기대값이 **파일마다 하드코딩된 리터럴**이었다는 것이다 —
+한때 `300`이라는 같은 값의 사본이 여섯 벌 있었고, 서로 일치한다는 것을 **아무것도
+강제하지 않았다.** 실제로 `301`을 얹자 fresh installer가
 `installed active Alembic graph head is not exactly 300`으로 거절했다.
+
+(그 사본을 들고 있던 파일 대부분은 ADR-101에서 삭제됐다. 남은 소비자는 런타임 기동
+검사와 Manager의 배포 계약이고, 둘 다 아래의 파생값을 쓴다.)
 
 여기서 head를 **파생값**으로 만든다. 정본은 `_application_migration_graph.json`이고,
 그것은 `scripts/generate_application_migration_graph.py`가 `alembic/versions/`에서
@@ -23,9 +19,9 @@ static contract, fresh installer, finalize, final permit. 그 자체는 옳은 �
 
 - **guard의 엄격함**: "정확히 기대한 head"라는 성질은 그대로다. 기대값의 출처만
   리터럴에서 graph로 바뀐다.
-- **baseline root `300`**: `0236 → 300` handoff의 목적지와 sidecar가 재현하는 baseline은
-  영원히 `300`이다. 그것은 "현재 head"가 아니라 역사적 좌표이므로 여기서 다루지 않는다.
-  ``BASELINE_ROOT_REVISION``으로 이름을 따로 준다.
+- **baseline root**: sidecar가 재현하는 baseline root는 "현재 head"가 아니라
+  graph의 좌표다. ``BASELINE_ROOT_REVISION``으로 이름을 따로 준다 — 지금은 그 둘이
+  같은 값이지만(revision이 하나뿐이므로), 뜻이 다르므로 이름도 다르게 둔다.
 """
 
 from __future__ import annotations
@@ -37,11 +33,11 @@ from typing import Final
 
 _GRAPH_PATH: Final = Path(__file__).resolve().parent.parent / "_application_migration_graph.json"
 
-BASELINE_ROOT_REVISION: Final = "300"
+BASELINE_ROOT_REVISION: Final = "400"
 """active graph의 유일한 root.
 
-`0200`~`0236`을 대체한 단일 baseline이며 `0236 → 300` handoff의 stamp 목적지다.
-migration이 더 쌓여도 이 값은 바뀌지 않는다 — root는 하나이고 그것이 `300`이다.
+`300`~`313` 열네 개를 접은 단일 baseline이다. migration이 더 쌓여도 이 값은 바뀌지
+않는다 — root는 하나이고 그것이 `400`이다.
 """
 
 

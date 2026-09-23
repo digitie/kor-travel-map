@@ -22,7 +22,6 @@ Dockerfile을 쓰고 command만 다르므로, "Dockerfile 종류가 같다"로�
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -34,7 +33,6 @@ pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[2]
 _COMPOSE = _ROOT / "docker-compose.yml"
-_BASELINE_REFERENCE = _ROOT / "alembic" / "baseline" / "application-reference.json"
 _BUILD_SH = _ROOT / "scripts" / "docker-build.sh"
 _BUILDX_SH = _ROOT / "scripts" / "docker-buildx.sh"
 
@@ -107,17 +105,25 @@ def test_both_build_scripts_produce_the_same_image_set() -> None:
     )
 
 
-def test_postgres_image_binds_application_baseline_source_identity() -> None:
-    """fresh `300` receipt는 source baseline과 다른 mutable image에서 생성하지 않는다."""
+def test_postgres_image_is_digest_pinned() -> None:
+    """DB 이미지는 떠다니는 태그가 아니라 digest로 고정한다.
+
+    종전에는 이 기대값이 봉인된 baseline manifest의 `container_image_id`였다. 그
+    manifest는 0236 이관의 출처 증명이었고 이관이 끝나 사라졌다. 남는 성질은 하나다 —
+    `postgis/postgis:16-3.5` 같은 태그는 같은 이름으로 다른 바이트를 가리킬 수 있고,
+    그러면 확장 판올림이 배포에만 조용히 들어온다.
+    """
 
     document: Any = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
-    reference: Any = json.loads(_BASELINE_REFERENCE.read_text(encoding="utf-8"))
-    postgres = document["services"]["postgres"]
-    source = reference["source"]
-    repository, separator, _ = source["container_image"].partition(":")
+    image = str(document["services"]["postgres"]["image"])
 
-    assert separator, "baseline source image는 tag를 포함해야 한다"
-    assert postgres["image"] == f"{repository}@{source['container_image_id']}"
+    assert "@sha256:" in image, (
+        f"compose의 postgres 이미지가 digest로 고정돼 있지 않다: {image!r} — "
+        "태그는 같은 이름으로 다른 바이트를 가리킬 수 있다"
+    )
+    repository, _, digest = image.partition("@sha256:")
+    assert repository, f"digest 앞의 repository가 비어 있다: {image!r}"
+    assert re.fullmatch(r"[0-9a-f]{64}", digest), f"digest 형식이 아니다: {image!r}"
 
 
 def test_the_dagster_daemon_image_is_built() -> None:

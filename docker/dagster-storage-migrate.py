@@ -30,15 +30,12 @@ from dagster._core.storage.sql import ALEMBIC_SCRIPTS_LOCATION
 from sqlalchemy import create_engine, text
 
 #: application active graph의 유일한 root. head와 달리 움직이지 않는다.
-_BASELINE_ROOT_REVISION: Final = "300"
+_BASELINE_ROOT_REVISION: Final = "400"
 
 _DAGSTER_HOME_ENV: Final = "DAGSTER_HOME"
 _DAGSTER_PG_URL_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
 _DAGSTER_PROFILE_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PROFILE"
 _PERMIT_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID"
-_PERMIT_PAIRED_RECEIPT_ENV: Final = (
-    "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256"
-)
 _PERMIT_CONFIG_SHA256_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256"
 _DAGSTER_HOME: Final = Path("/opt/dagster/dagster_home")
 _DAGSTER_YAML: Final = _DAGSTER_HOME / "dagster.yaml"
@@ -83,9 +80,13 @@ _DAGSTER_DATABASE_FIELDS: Final = frozenset(
 _APPLICATION_DATABASE_FIELDS: Final = frozenset(
     {"system_identifier", "name", "oid", "owner"}
 )
-_CANDIDATE_FIELDS: Final = frozenset(
-    {"dagster_image_id", "paired_candidate_build_receipt_sha256", "dagster_config_sha256"}
-)
+#: permit의 candidate가 담는 것. `paired_candidate_build_receipt_sha256`은 ADR-101에서
+#: 빠졌다 — 그 값을 내던 `build-application-300-paired-candidate.sh`가 봉인 클러스터와
+#: 함께 삭제됐고, 생산자 없는 필드를 요구하면 metadata permit 단계가 **파괴적 DB
+#: 재생성 뒤에** 영영 막힌다. 남은 둘이 이미지와 그 이미지의 dagster.yaml을 못박고,
+#: "application DB가 아니라 metadata DB"라는 이 파일의 본래 격리는 두 database
+#: identity와 `_require_isolated_database_identities`가 따로 강제한다.
+_CANDIDATE_FIELDS: Final = frozenset({"dagster_image_id", "dagster_config_sha256"})
 _LOGIN_ROLE_ATTRIBUTE_FIELDS: Final = frozenset(
     {
         "superuser",
@@ -470,16 +471,13 @@ def _read_permit(
             permit["candidate"], _CANDIDATE_FIELDS, "dagster_storage_permit_candidate_invalid"
         )
         image_id = environment.get(_PERMIT_IMAGE_ID_ENV, "")
-        paired_receipt = environment.get(_PERMIT_PAIRED_RECEIPT_ENV, "")
         expected_config_sha256 = environment.get(_PERMIT_CONFIG_SHA256_ENV, "")
         if (
             not _IMAGE_ID_PATTERN.fullmatch(image_id)
-            or not _SHA256_PATTERN.fullmatch(paired_receipt)
             or not _SHA256_PATTERN.fullmatch(expected_config_sha256)
             or candidate
             != {
                 "dagster_image_id": image_id,
-                "paired_candidate_build_receipt_sha256": paired_receipt,
                 "dagster_config_sha256": expected_config_sha256,
             }
             or config_sha256 != expected_config_sha256
@@ -713,13 +711,7 @@ def _read_operation_binding(
     expected, _, binding = _read_permit(
         environment, profile=profile, config_sha256=config_sha256
     )
-    candidate = (
-        environment.get(_PERMIT_IMAGE_ID_ENV, "")
-        + ":"
-        + environment.get(_PERMIT_PAIRED_RECEIPT_ENV, "")
-        + ":"
-        + config_sha256
-    )
+    candidate = environment.get(_PERMIT_IMAGE_ID_ENV, "") + ":" + config_sha256
     return (
         dagster_pg_url,
         expected,
