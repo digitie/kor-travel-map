@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-23 (4) — 두 ADR을 한 사이클에 머지했다
+
+순서가 계약이었다: **Manager 먼저**(#389 → `e4d4fa5`), 그다음 Map(#1259 →
+`eb4882aa4`). Manager의 `docker-compose.yml`이 Map 이미지에서 지워진 실행파일 둘을
+절대경로로 부르고 있었고, 그 자리가 fresh DB 복구 경로다 — Map만 머지하면 지금
+outage의 복구 경로가 깨진 채로 남는다.
+
+Map PR은 최신 커밋 기준 9개 체크 전부 SUCCESS였다(PostGIS 통합 포함). Manager는 두
+체크 전부 SUCCESS.
+
+합계 **−45,343줄**(Map 218 files −39,935, Manager 15 files −5,408).
+
+**남은 것은 prod 복구 사이클 하나다.** 직전 pinset `3705983b`의 journal은
+`cancel_probe_finalized`에서 영구 고착이고 탈출구는 새 커밋인데, 이 두 머지가 바로
+그것이다.
+
 ## 2026-09-23 (3) — 봉인의 건너편을 접었다: 아홉 phase가 한 번의 관측으로
 
 ADR-101이 Map에서 지운 두 실행파일의 **소비자**는 Manager였다. 그 쪽에서 무엇이
