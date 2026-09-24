@@ -1,5 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-24 — prod 전 사이클 GREEN. ADR-100/101 + PinVi 단일 role, 실사용으로 처음 섰다
+
+**다음 한 작업: 소유자 판단 — D1/D2 spec 재검증을 지금 돌릴지, 아니면 여기서 접을지.**
+prod 자체는 안정 상태이므로 급하지 않다(아래 "끝난 상태" 참고). 돌린다면
+`docs/integration-map.md`의 D1(live Playwright)·D2(admin acceptance) 절차를
+그대로 따른다 — 지금 pinset(`fa6f624e5b06…`)이 첫 실사용 기준선이라 두 레인
+모두 **이 번호로는 한 번도 실행된 적이 없다.**
+
+### 끝난 것 — Manager+PinVi 연쇄 네 자리 (자세한 근거는 journal.md 2026-09-24)
+
+어제 남겼던 "빌드 영수증 축 빠짐"은 Manager PR #391/#392/#393으로 닫혔다. 그
+뒤 재구축이 Map을 다 통과하고 PinVi 쪽에서 네 번 더 막혔다 — pinvi DB owner
+drift(직접 SQL로 수정) · Map `ktm_*` role 19개 정본 이탈(직접 SQL로 수정) ·
+PinVi 0101이 요구하는 catalog-lock fence 함수 부재(Manager #394) · PinVi
+0101 자신이 자기 migrator 권한을 트랜잭션 안에서 거둬감(pinvi #564). 넷 다
+**ADR-46(PinVi M05 다중 role 폐기)이 인프라는 고쳤는데 그 인프라가 떠받치던
+자리 일부를 안 고친 것**이 근본이었다.
+
+### 끝난 상태 (2026-09-24 실측)
+
+| | |
+|---|---|
+| pinset | `fa6f624e5b068713546517d19660e60701913e483565ea21ee11ef73d19a00cc` |
+| map revision | `f5703bc676b175fb1b0f9ccbcdd202df02ad71d6` (schema head `400`) |
+| pinvi revision | `b60cc8cd601d6236655902337e150bfbd0829719` (schema head `20260917_0102`) |
+| Manager | `7fc1a8c94bea5eb5155246a71ddaa731d840a841`(#394), trusted install + execution rebind 완료 |
+| 런타임 | 7개 서비스(map-api/ui/dagster/dagster-daemon, pinvi-api/web/dagster) 전부 healthy |
+| `.env` | `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=400`(재구축 후 변경, 순서 지킴) |
+
 ## 2026-09-23 — ADR-100/101 머지됨, prod는 Manager의 **남은 ADR-101 구간**에 막혀 있다
 
 **다음 한 작업: Manager에서 paired candidate build receipt 장치를 걷어낸다.**
