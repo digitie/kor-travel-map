@@ -1,5 +1,72 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-24 — prod 전 사이클 GREEN. Map 400 + PinVi 단일 role 둘 다 실사용으로 처음 섰다
+
+어제 (5)에서 남긴 "빌드 영수증 축 빠짐"부터 시작해 Manager 쪽을 세 PR로 닫았다
+(#391 직접 buildx build, #392 postgres image id sha256 해석, #393 resume이
+재현 안 되는 buildx를 다시 빌드하지 않고 journal을 그대로 씀). 그런데 재구축이
+Map 쪽을 다 통과하고 나서 **PinVi 쪽에서 연쇄로 네 번 더 막혔다** — 전부 같은
+모양이다: **ADR-46(PinVi M05 다중 role 폐기 → geo와 같은 단일 scoped role)이
+인프라 쪽은 다 고쳤는데, 그 인프라가 떠받치던 자리 몇 개를 안 고쳤다.**
+
+**1. pinvi DB owner가 frozen contract와 달랐다.** 공용 control-plane
+instance(`kor-travel-shared-postgres`)의 `pinvi` DB가 `pinvi_application_runtime`이
+아니라 `shared_admin` 소유였다 — db-init 스크립트가 실제로는 이미 고쳐져 있었는데
+(role 먼저 만들고 `createdb -O`), **그 고쳐진 스크립트가 한 번도 다시 안
+돌아서** 고치기 전 실행의 산출물이 그대로 남아 있었다(initdb 인자처럼
+"생성 시점에만 적용"되는 부류의 함정). `ALTER DATABASE pinvi OWNER TO`로
+직접 고쳤다 — DB가 비어 있어(테이블 0개) 데이터 리스크는 없었다.
+
+**2. Map 쪽 `ktm_*` role 19개 정본과 실측이 어긋났다.** live에 21개가
+있었는데 그중 `ktm_feature_api_runtime`/`ktm_feature_dagster_runtime`/
+`ktm_feature_migrator` 셋은 rev 400 baseline 어디에도 없는 옛 역할 분리의
+잔재였고, `ktm_feature_service`(baseline이 요구하는 19번째)는 없었다.
+셋을 지우고(스크래치 DB 두 곳의 잔여 ACL만 `DROP OWNED BY`로 먼저 걷어냄)
+하나를 만들어 정본과 맞췄다.
+
+**3. PinVi 0101 migration의 fresh 경로가 요구하는 catalog-lock fence 함수가
+없었다.** `pinvi_internal.acquire_fresh_0101_database_fence()`는
+`pg_authid`/`pg_database`를 ACCESS EXCLUSIVE로 잠그는 SECURITY DEFINER
+함수다 — scoped app role은 자기 database를 소유해도 이 catalog 잠금 권한은
+가질 수 없다(catalog는 database 소유물이 아니라 cluster 전역이다). ADR-46이
+이 함수를 세우던 `bootstrap-pinvi-runtime-role.sh`를 통째로 버리면서 이 한
+함수도 같이 버렸는데, 나머지 아홉과 달리 이건 role 분리와 무관하게 fresh
+install마다 여전히 필요했다. Manager에 `_ensure_pinvi_fresh_migration_fence`를
+추가해 매 rebuild마다 다시 세운다(destructive reset이 매번
+`pinvi_internal` schema를 지운다) — kor-travel-docker-manager #394.
+
+**4. PinVi 0101 자신이 자기 migrator 권한을 스스로 거둬가고 있었다.**
+`_grant_fresh_runtime_app_privileges` 직후 `_revoke_runtime_alembic_version_privileges`를
+무조건 불렀는데, 단일 role 배포에서는 그 대상이 **지금 이 migration을 돌리는
+바로 그 connection**이다 — alembic이 트랜잭션 끝에 내부적으로 같은 role로
+`alembic_version`을 UPDATE해서 head를 기록하는데 그 직전에 자기 권한을
+잘라 "permission denied for table alembic_version"으로 0100+0101 전체가
+롤백됐다. legacy 다중 role 배포(managed-but-fresh, `migration_owner`/
+`migrator_login`이 설정된 경우)는 여전히 필요해서 — 완전히 지웠다가
+`test_0101_can_use_a_separate_nonruntime_migration_owner`가 깨져서 한 번
+더 좁혔다 — 두 role이 하나도 안 설정된 진짜 단일 role 경우에만 건너뛴다
+(PinVi #564).
+
+**소스 원장(P본)에는 이미 답이 있었다.** #564의 진짜 수정은 PinVi
+`origin/main`에 6주 전(8월 5일 pin 대비 9월 21일 merge)에 이미 올라 있었다
+— pin이 낡아서 못 쓰고 있었을 뿐이다. `_activate_m05_migration_owner`
+자체에 "ADR-46/070: 공용 control-plane은 M05 owner/migrator 분리를
+완전히 버린다"는 주석과 함께 단일 role 우회 경로가 이미 있었다. 매번 막힌
+자리를 직접 replay(`alembic upgrade head`를 sealed CLI 밖에서 직접
+호출)로 실측하지 않았다면 이 넷 중 어느 것도 진짜 원인에 닿지 못했을
+것이다 — CLI는 매번 `{"error_code":"...","phase":"..."}` 한 줄만 준다.
+
+**끝난 상태.** pinset `fa6f624e5b06…`(map `f5703bc6…` + pinvi `b60cc8cd…`),
+map schema head `400`, dagster head `29b539ebc72a`, pinvi head
+`20260917_0102`, 일곱 서비스(map-api/ui/dagster/dagster-daemon,
+pinvi-api/web/dagster) 전부 healthy. `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+`312_route_geometry_sidecar` → `400`으로 재구축 **후에** 바꿨다. Manager는
+`#394`까지 trusted install로 반영하고 `pin rebind-execution`으로
+provenance를 맞췄다.
+
+**PR 목록.** kor-travel-docker-manager #391/#392/#393/#394, pinvi #563(선행,
+과거 세션)/#564.
+
 ## 2026-09-23 (5) — prod 사이클을 돌렸고, 내 ADR-101 작업이 한 축을 빠뜨린 것을 알았다
 
 두 PR을 머지한 뒤 전 사이클을 기동했다. 세 가지를 배웠고, 셋째가 남은 일이다.
