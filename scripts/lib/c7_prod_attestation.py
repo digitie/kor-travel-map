@@ -92,7 +92,16 @@ _JOURNAL_KEYS = frozenset(
     }
 )
 _JOURNAL_COMMITTED_PHASE = "committed"
-_JOURNAL_COMMITTED_MIN_GENERATION = 27
+# 2026-08-25에 27로 박았을 때는 영수증 기반 파이프라인이었다 -- Manager의
+# `PinnedRuntimeRebuildJournal.journal_generation`은 phase 전환마다 1씩 늘고,
+# 그 파이프라인은 durable phase가 아홉 개 더 많았다(빌드 영수증 파싱·fence·
+# phase 기계, ADR-101이 전부 걷어냈다 -- kor-travel-docker-manager #391~394).
+# Manager 자신의 불변식은 `journal_generation >= REBUILD_PHASES.index(phase)`뿐이고
+# `committed`는 그 목록의 마지막(index 19)이다 -- 그게 진짜 하한이다. 27은 그
+# 위에 옛 파이프라인의 재시도 여유폭을 얹은 값이었을 뿐 이 목록 길이가 아니다.
+# 오늘 실제 성공한 committed journal(pinset fa6f624e...)의 값은 25였다 -- 새
+# 파이프라인에서는 정상이다. 재시도 여유폭은 남기되 phase 목록 길이에 맞춘다.
+_JOURNAL_COMMITTED_MIN_GENERATION = 19
 _PINVI_ROLE_CREDENTIAL_ENVIRONMENT_REBIND_KEYS = frozenset(
     {
         "previous_environment_sha256",

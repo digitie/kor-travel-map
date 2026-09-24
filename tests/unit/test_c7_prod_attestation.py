@@ -714,7 +714,7 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
         (lambda value: value.update({"phase": "manifest_committing"}), "journal is not committed"),
         (lambda value: value.update({"transaction_id": "not-a-uuid"}), "journal transaction"),
         (lambda value: value.update({"environment_sha256": "short"}), "journal input digest"),
-        (lambda value: value.update({"journal_generation": 26}), "journal generation"),
+        (lambda value: value.update({"journal_generation": 18}), "journal generation"),
         (
             lambda value: value["map_application_300_candidate_evidence"].update(
                 {"dagster_config_sha256": "0" * 64}
