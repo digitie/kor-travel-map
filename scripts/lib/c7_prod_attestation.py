@@ -65,14 +65,9 @@ _GENERATION_KEYS = frozenset(
 )
 _MAP_APPLICATION_300_CANDIDATE_EVIDENCE_KEYS = frozenset(
     {
-        "paired_receipt_sha256",
-        "api_receipt_sha256",
         "candidate_git_tree",
         "postgres_image_id",
         "dagster_config_sha256",
-        "dagster_yaml_sha256",
-        "application_contract_sha256",
-        "launch_contract_sha256",
     }
 )
 # ktdm `PinnedRuntimeRebuildJournal`의 exact key 집합과 최종 phase.

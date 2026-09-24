@@ -335,14 +335,9 @@ def _runtime_fixture() -> tuple[
         "pinvi_head": "20260804_0049",
     }
     candidate_evidence = {
-        "paired_receipt_sha256": "1" * 64,
-        "api_receipt_sha256": "2" * 64,
         "candidate_git_tree": "3" * 40,
         "postgres_image_id": "sha256:" + "9" * 64,
         "dagster_config_sha256": "4" * 64,
-        "dagster_yaml_sha256": "5" * 64,
-        "application_contract_sha256": "6" * 64,
-        "launch_contract_sha256": "7" * 64,
     }
     generation = {
         **{field: role_images[role] for role, field in ATTESTATION.GENERATION_RUNTIME_IMAGE_FIELDS},
@@ -722,7 +717,7 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
         (lambda value: value.update({"journal_generation": 26}), "journal generation"),
         (
             lambda value: value["map_application_300_candidate_evidence"].update(
-                {"api_receipt_sha256": "0" * 64}
+                {"dagster_config_sha256": "0" * 64}
             ),
             "journal candidate evidence differs",
         ),
