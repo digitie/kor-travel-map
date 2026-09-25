@@ -145,8 +145,8 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
     assert dagster["command"] == [
         "/usr/local/bin/dagster-webserver",
-        "-m",
-        "kortravelmap.dagster.definitions",
+        "-w",
+        "/opt/dagster/dagster_home/workspace.yaml",
         "-h",
         "0.0.0.0",
         "-p",
@@ -201,6 +201,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     runtime_dsn_services = (
         "api",
         "dagster",
+        "dagster-code-server",
         "dagster-daemon",
         "db-application-schema-fresh",
     )
@@ -425,13 +426,19 @@ def test_resolved_dagster_services_exclude_application_privileged_credentials(
         "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
         "KOR_TRAVEL_MAP_POSTGRES_USER",
     }
-    for service_name in ("dagster", "dagster-daemon", "dagster-storage-migrate"):
+    for service_name in (
+        "dagster",
+        "dagster-code-server",
+        "dagster-daemon",
+        "dagster-storage-migrate",
+    ):
         service = services[service_name]
         assert privileged_names.isdisjoint(service.get("environment", {})), service_name
         assert poison not in json.dumps(service, sort_keys=True), service_name
-    # dagster/daemon은 공유 DSN을 **받는다**. 위 금지 집합이 그것을 잡지 않는다는
-    # 사실이 우연이 아니라 계약임을 여기서 명시한다(집합에 넣으면 이 줄과 충돌한다).
-    for service_name in ("dagster", "dagster-daemon"):
+    # dagster/code-server/daemon은 공유 DSN을 **받는다**. 위 금지 집합이 그것을
+    # 잡지 않는다는 사실이 우연이 아니라 계약임을 여기서 명시한다(집합에 넣으면
+    # 이 줄과 충돌한다).
+    for service_name in ("dagster", "dagster-code-server", "dagster-daemon"):
         assert services[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"] == (
             environment["KOR_TRAVEL_MAP_PG_DSN"]
         ), service_name
