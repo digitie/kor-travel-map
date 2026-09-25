@@ -81,20 +81,22 @@ COPY --from=builder /install /usr/local
 # 정본이며, one-shot command가 `dagster instance migrate` 뒤 strict version 검증을
 # 수행한다.
 COPY --chown=root:root docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
+COPY --chown=root:root docker/workspace.yaml /opt/dagster/dagster_home/workspace.yaml
 COPY --chown=root:root docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
 COPY --chown=root:root docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
 RUN chown -R root:root /app /opt/dagster/dagster_home \
         /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
     && chmod 0555 /app /opt/dagster /opt/dagster/dagster_home \
-    && chmod 0444 /opt/dagster/dagster_home/dagster.yaml \
+    && chmod 0444 /opt/dagster/dagster_home/dagster.yaml /opt/dagster/dagster_home/workspace.yaml \
     && chmod 0555 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
     && su -s /bin/sh -c 'test ! -w /app \
         && test ! -w /usr/local/bin/dagster-entrypoint.sh \
-        && test ! -w /opt/dagster/dagster_home/dagster.yaml' appuser
+        && test ! -w /opt/dagster/dagster_home/dagster.yaml \
+        && test ! -w /opt/dagster/dagster_home/workspace.yaml' appuser
 
 USER appuser
 
-EXPOSE 12702
+EXPOSE 12702 12703
 
 ENTRYPOINT ["/usr/local/bin/dagster-entrypoint.sh"]
-CMD ["/usr/local/bin/dagster-webserver", "-m", "kortravelmap.dagster.definitions", "-h", "0.0.0.0", "-p", "12702"]
+CMD ["/usr/local/bin/dagster-webserver", "-w", "/opt/dagster/dagster_home/workspace.yaml", "-h", "0.0.0.0", "-p", "12702"]

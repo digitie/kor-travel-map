@@ -46,6 +46,16 @@ services:
     environment:
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
 
+  dagster-code-server:
+    depends_on: !override
+      dagster-storage-migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
+
   dagster:
     depends_on: !override
       dagster-storage-migrate:

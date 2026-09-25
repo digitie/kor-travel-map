@@ -154,9 +154,13 @@ if [ "$dagster_profile" = "production" ]; then
   # Manager launch attestation 이전에도 image 안에서 fail-close한다.
   case "${1:-}" in
     /usr/local/bin/dagster-webserver)
+      # ADR-069 짝: webserver는 code location을 더 이상 직접 import하지 않는다
+      # (`-m`) — `dagster-code-server`가 유일한 code location 로더가 되고,
+      # webserver는 workspace.yaml의 grpc_server로만 그것을 가리킨다(weather/geo/
+      # transport와 같은 형태). argv 개수는 그대로 7개다.
       if [ "$#" -ne 7 ] \
-        || [ "${2:-}" != "-m" ] \
-        || [ "${3:-}" != "kortravelmap.dagster.definitions" ] \
+        || [ "${2:-}" != "-w" ] \
+        || [ "${3:-}" != "/opt/dagster/dagster_home/workspace.yaml" ] \
         || [ "${4:-}" != "-h" ] \
         || [ "${5:-}" != "0.0.0.0" ] \
         || [ "${6:-}" != "-p" ]; then
@@ -176,11 +180,42 @@ if [ "$dagster_profile" = "production" ]; then
       runtime_preflight
       ;;
     /usr/local/bin/dagster-daemon)
+      # ADR-069 짝 — daemon도 더 이상 code location을 직접 import하지 않는다.
+      # code location이 로드 가능한지의 신호는 이제 daemon 자신이 아니라
+      # dagster-code-server 컨테이너다.
       if [ "$#" -ne 4 ] \
         || [ "${2:-}" != "run" ] \
-        || [ "${3:-}" != "-m" ] \
-        || [ "${4:-}" != "kortravelmap.dagster.definitions" ]; then
+        || [ "${3:-}" != "-w" ] \
+        || [ "${4:-}" != "/opt/dagster/dagster_home/workspace.yaml" ]; then
         echo "production Dagster daemon argv does not match the sealed launch contract" >&2
+        exit 1
+      fi
+      runtime_preflight
+      ;;
+    /usr/local/bin/dagster)
+      # ADR-069 짝 — 실제 code location이 도는 유일한 프로세스. `DefaultRunLauncher`의
+      # run worker는 이 프로세스의 자식으로 뜬다. gRPC에는 인증이 없으므로 `-h`는
+      # loopback으로 고정한다(weather와 같은 이유 — Manager launch attestation
+      # 이전에도 image 안에서 fail-close).
+      if [ "$#" -ne 9 ] \
+        || [ "${2:-}" != "api" ] \
+        || [ "${3:-}" != "grpc" ] \
+        || [ "${4:-}" != "-h" ] \
+        || [ "${5:-}" != "127.0.0.1" ] \
+        || [ "${6:-}" != "-p" ] \
+        || [ "${8:-}" != "-m" ] \
+        || [ "${9:-}" != "kortravelmap.dagster.definitions" ]; then
+        echo "production Dagster code server argv does not match the sealed launch contract" >&2
+        exit 1
+      fi
+      case "${7:-}" in
+        "" | *[!0-9]*)
+          echo "production Dagster code server port must be numeric" >&2
+          exit 1
+          ;;
+      esac
+      if [ "$7" -lt 1 ] || [ "$7" -gt 65535 ]; then
+        echo "production Dagster code server port is outside 1..65535" >&2
         exit 1
       fi
       runtime_preflight
@@ -209,6 +244,11 @@ else
       ;;
     dagster-daemon | /usr/local/bin/dagster-daemon)
       if [ "${2:-}" = "run" ]; then
+        runtime_preflight
+      fi
+      ;;
+    dagster | /usr/local/bin/dagster)
+      if [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; then
         runtime_preflight
       fi
       ;;

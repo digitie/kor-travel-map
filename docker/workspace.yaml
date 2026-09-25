@@ -1,0 +1,11 @@
+# ADR-069 짝(PinVi/weather/geo와 같은 code-server 분리 패턴) — webserver/daemon은
+# 더 이상 kortravelmap.dagster.definitions를 직접 import하지 않고, 이 파일의
+# grpc_server를 통해 dagster-code-server 컨테이너에 연결한다.
+#
+# host는 127.0.0.1로 고정한다 — 이 배포는 어디서나 network_mode: host이므로
+# bridge network 서비스명 DNS가 없다(weather가 겪은 것과 같은 이유).
+load_from:
+  - grpc_server:
+      host: 127.0.0.1
+      port: 12703
+      location_name: kortravelmap.dagster.definitions
