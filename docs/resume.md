@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 — ADR-069 재구축이 code-server를 한 번도 띄운 적이 없었다 → Manager 수정 후 재시도
+
+**다음 한 작업: Manager `fix/pinned-rebuild-generation-companions` 설치 → 이 커밋(새 pinset)으로
+chain17 → Map Dagster GraphQL로 code location 로드 확인 → D1/D2.** 그다음 봉인·신뢰 릴리스
+단순화(설계 완료, 잃는 보장 목록은 소유자 승인 대기).
+
+### 원인 (자세히는 journal.md 2026-09-26)
+
+- **t56g·t56h:** 비상 복구 때 `/opt` compose에 손으로 넣은 패치(webserver/daemon `-m`)를
+  되돌리지 않은 채 돌렸다. 새 이미지의 봉인 entrypoint가 `-m`을 거부해 compose up에서 죽었다.
+  신뢰 릴리스 사본으로 원복·diff 확인 완료. pinset `a7cc0414`는 journal이 패치본 compose sha를
+  동결해 재개 불가 — 버린다(이 커밋이 새 pinset이다).
+- **더 근본:** pinned rebuild가 `up --no-deps`에 고정 서비스 목록을 줬고, compose는 호출에 이름이
+  없는 서비스로의 `depends_on` 간선을 지운다. 그래서 Map code-server는 **어느 재구축에서도 기동된
+  적이 없고**, webserver healthcheck는 빈 `RepositoryConnection`도 통과시켜 `--wait`가 초록이었다.
+  D1도 code location을 보지 않는다 — 그대로 두면 저장소 0개인 Dagster가 GREEN으로 커밋될 뻔했다.
+  PinVi code-server·daemon도 관리 밖이라 DB 리셋을 건너 옛 이미지로 떠 있었다.
+- **PinVi:** SQLAlchemy 2.1.0이 bare `postgresql://`의 기본 driver를 psycopg(v3)로 바꿔
+  pinvi-dagster가 `ModuleNotFoundError: psycopg`로 죽었다 → pinvi#565(`<2.1`).
+
+### 끝난 것
+
+- Manager 수정(generation companion: resolved compose에서 slot 이미지를 공유하는 비-slot 서비스를
+  파생해 stop/up/readiness/image 대조에 태움, 영속 포맷 변경 없음) + 실패 원문을 `.env` 비밀을
+  가려 stderr로(봉인 단순화 1단계) + PinVi code-server `-h 127.0.0.1`(인증 없는 gRPC LAN 노출 제거).
+
 ## 2026-09-25 — ADR-069 code-server: PinVi 활성화 완료, Map은 merge+재설치 끝·재구축 진행 중
 
 **다음 한 작업: 이 커밋(새 pinset)으로 n150 chain17.sh 재시도, D1(live e2e UI)까지 확인.**
