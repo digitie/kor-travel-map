@@ -1,5 +1,46 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-25 — ADR-069 code-server 분리: PinVi 활성화 + Map 전환(#1264/#397), 재구축 두 자리 수리
+
+**PinVi.** dagster-code-server + webserver(`-w workspace.yaml`) + daemon을 n150에
+처음 기동했다. Manager의 compose 주석이 이미 원인을 적어 두고 있었다 — "이
+서비스가 없어서 PinVi Dagster는 한 번도 job을 실행한 적이 없다." 활성화
+직후 schedule/sensor 0개 자동 기동을 확인하고 안전하게 마쳤다.
+
+**Map.** 같은 패턴(weather/geo/transport/PinVi와 동일)으로 Map도 code-server를
+분리했다 — `dagster-code-server`가 유일한 `dagster api grpc` 프로세스이고
+webserver/daemon은 `workspace.yaml`로 grpc 접속만 한다. 저장소 두 곳에 걸친
+작업(Map #1264, Manager #397)이라 각자 "등록" 누락이 있었다:
+
+1. **SQLAlchemy 2.1.0이 그날 나왔다.** `sqlalchemy>=2.0` 무상한이 mypy
+   --strict를 15개 무관한 ORM 조회부 파일에서 26건 깨뜨렸다 — Map #1264와
+   무관한 base 자체의 환경 drift(어제 그린이던 커밋이 오늘 그대로 빨갛다).
+   `>=2.0,<2.1`로 고정(#1265)해서 닫았다.
+2. **C7 attestation 개수 하나.** `dagster-code-server`가 7번째 `build:`
+   서비스라 `KOR_TRAVEL_MAP_GIT_COMMIT` 카운트가 6→7로 바뀌어야 했다.
+3. **Manager `compose_service.py`의 별도 레지스트리.** `c6c_deployment.py`의
+   candidate-protected-value allowlist(#397에서 이미 갱신)와는 **다른**
+   자리 — `_validate_map_source_protected_scalar_tree`가 Map 자신의
+   compose에서 `KOR_TRAVEL_MAP_DAGSTER_PROFILE`이 나올 수 있는 정확한
+   `(service, env-var)` 경로를 고정 목록으로 들고 있다. `dagster-code-server`가
+   webserver의 env 블록을 통째로 복사해 이 변수도 들고 왔는데 목록엔 없었다
+   — 이 파일 자신의 테스트 주석이 그대로 인용하는 PinVi #356/#358과 같은
+   부류다. Manager #398로 등록(+ 해당 테스트 세 개도 함께)했다.
+
+**재구축이 두 번 막혔고, 봉인이 매번 한 단어였다.** launcher(`--json`)는
+`{"status":"failed","classification":"prejournal_failure","stage":"..."}` 한
+줄만 남긴다 — `/root/rebuild-diag.sh`(9월 12일 사고의 산물)를 그대로 복제해
+같은 lock FD를 넘기고 `--json` 없이 재현해서만 원문을 회수했다(첫 번째는
+`candidate_contract`/`ComposeCandidateContractError`, 두 번째는 `v6 execution
+lifecycle`이 이전 실패를 pinset 단위가 아니라 **(pinset, Manager revision)
+조합** 단위로 terminal 취급해 막은 것 — Manager를 고쳐도 같은 pinset을 다시
+쓰면 여전히 막힌다. 탈출구는 새 커밋(새 pinset)뿐이라 이 저널 커밋 자체가
+그 새 pinset이다.
+
+**끝난 상태 (진행 중).** Map #1264 + Manager #397/#398 전부 머지, n150
+Manager는 `6452a4c…`로 재설치·프론트엔드 재빌드까지 완료. 재구축은 이 커밋의
+새 pinset으로 재시도 예정 — 결과는 다음 저널/resume 항목.
+
 ## 2026-09-24 — prod 전 사이클 GREEN. Map 400 + PinVi 단일 role 둘 다 실사용으로 처음 섰다
 
 어제 (5)에서 남긴 "빌드 영수증 축 빠짐"부터 시작해 Manager 쪽을 세 PR로 닫았다

@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-25 — ADR-069 code-server: PinVi 활성화 완료, Map은 merge+재설치 끝·재구축 진행 중
+
+**다음 한 작업: 이 커밋(새 pinset)으로 n150 chain17.sh 재시도, D1(live e2e UI)까지 확인.**
+자세한 경위는 `journal.md` 2026-09-25. 요약: Map #1264 + Manager #397/#398(등록
+누락 두 건) 전부 머지·배포 끝, 재구축이 (pinset, Manager revision) 단위 v6
+execution terminal에 두 번 막혀 새 커밋으로 pinset을 갈아야만 재시도 가능했다.
+
+### 끝난 것
+
+- PinVi dagster-code-server + webserver(`-w`) + daemon 첫 기동, schedule/sensor
+  0개 자동 기동 확인.
+- Map도 같은 code-server 분리(Map #1264, Manager #397) — mypy 깨던 SQLAlchemy
+  2.1.0 무상한 고정(#1265), C7 attestation 카운트 6→7, Manager
+  `compose_service.py`의 별도 protected-scalar 레지스트리 등록 누락(#398).
+- n150 Manager `6452a4c…`로 재설치 + 프론트엔드 재빌드 완료.
+
+### 아직
+
+- 이 커밋의 새 pinset으로 chain17.sh(rotate→rebuild→executor image→repin→
+  ACL preflight→D1 live e2e→lane 정리→D2) 재시도.
+- D1(live Playwright, admin UI)로 code-server 토폴로지가 실제로 code
+  location을 서빙하는지, 기존 schedule/sensor/job이 그대로 보이는지 시각
+  확인.
+
 ## 2026-09-24 — prod 전 사이클 GREEN. ADR-100/101 + PinVi 단일 role, 실사용으로 처음 섰다
 
 **다음 한 작업: 소유자 판단 — D1/D2 spec 재검증을 지금 돌릴지, 아니면 여기서 접을지.**
