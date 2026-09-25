@@ -4265,8 +4265,8 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
         (
             [
                 "/usr/local/bin/dagster-webserver",
-                "-m",
-                "kortravelmap.dagster.definitions",
+                "-w",
+                "/opt/dagster/dagster_home/workspace.yaml",
                 "-h",
                 "0.0.0.0",
                 "-p",
@@ -4282,8 +4282,8 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
             [
                 "/usr/local/bin/dagster-daemon",
                 "run",
-                "-m",
-                "kortravelmap.dagster.definitions",
+                "-w",
+                "/opt/dagster/dagster_home/workspace.yaml",
             ],
             "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
         ),
@@ -4563,8 +4563,8 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
     [
         [
             "/usr/local/bin/dagster-webserver",
-            "-m",
-            "kortravelmap.dagster.definitions",
+            "-w",
+            "/opt/dagster/dagster_home/workspace.yaml",
             "-h",
             "0.0.0.0",
             "-p",
@@ -4573,8 +4573,8 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
         [
             "/usr/local/bin/dagster-daemon",
             "run",
-            "-m",
-            "kortravelmap.dagster.definitions",
+            "-w",
+            "/opt/dagster/dagster_home/workspace.yaml",
         ],
     ],
 )
@@ -4625,8 +4625,8 @@ def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
     [
         [
             "/usr/local/bin/dagster-webserver",
-            "-m",
-            "kortravelmap.dagster.definitions",
+            "-w",
+            "/opt/dagster/dagster_home/workspace.yaml",
             "-h",
             "0.0.0.0",
             "-p",
@@ -4635,8 +4635,8 @@ def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
         [
             "/usr/local/bin/dagster-daemon",
             "run",
-            "-m",
-            "kortravelmap.dagster.definitions",
+            "-w",
+            "/opt/dagster/dagster_home/workspace.yaml",
         ],
     ],
 )
@@ -4683,8 +4683,8 @@ def test_dagster_production_rejects_alternate_dagster_home(
         path,
         [
             "/usr/local/bin/dagster-webserver",
-            "-m",
-            "kortravelmap.dagster.definitions",
+            "-w",
+            "/opt/dagster/dagster_home/workspace.yaml",
             "-h",
             "0.0.0.0",
             "-p",

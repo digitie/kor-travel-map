@@ -547,6 +547,99 @@ services:
       retries: 20
       start_period: 30s
 
+  # ADR-069 짝 — 실제 code location이 도는 유일한 프로세스(weather/geo/transport/
+  # PinVi와 같은 패턴). gRPC에는 인증이 없으므로 host를 loopback으로 고정한다
+  # (dagster-entrypoint.sh의 production 봉인과 같은 이유).
+  dagster-code-server:
+    build:
+      context: .
+      dockerfile: docker/dagster.Dockerfile
+      args:
+        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
+      secrets:
+        - github_token
+    command:
+      - /usr/local/bin/dagster
+      - api
+      - grpc
+      - -h
+      - 127.0.0.1
+      - -p
+      - "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"
+      - -m
+      - kortravelmap.dagster.definitions
+    # code-server와 daemon 둘 다 이 netns를 공유한다 — bridge network에서는
+    # 컨테이너마다 자기 localhost가 따로 있으므로, loopback bind(위 -h 127.0.0.1)가
+    # 서로에게 보이려면 하나의 network namespace를 셋이 같이 써야 한다(prod의
+    # network_mode: host와 같은 위상을 local dev에서도 재현).
+    network_mode: service:dagster
+    environment:
+      TMPDIR: /tmp
+      TEMP: /tmp
+      TMP: /tmp
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
+      KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_PG_DSN:?KOR_TRAVEL_MAP_PG_DSN is required}
+      KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
+      KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
+      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
+      KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
+      KOR_TRAVEL_MAP_OBJECT_STORE_REGION: ${KOR_TRAVEL_MAP_OBJECT_STORE_REGION:-us-east-1}
+      KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
+      KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
+      KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX: ${KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX:-features}
+      KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
+      KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX:-offline-uploads}
+      KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
+      KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
+      KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY: ${KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY:-${SEOUL_OPEN_DATA_API_KEY:-}}
+      KOR_TRAVEL_MAP_OPINET_API_KEY: ${KOR_TRAVEL_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
+      KOR_TRAVEL_MAP_OPINET_SCOPE_MODE: ${KOR_TRAVEL_MAP_OPINET_SCOPE_MODE:-${OPINET_SCOPE_MODE:-low_top_area}}
+      KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX: ${KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX:-${OPINET_SCOPE_BBOX:-}}
+      KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M: ${KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M:-${OPINET_SCOPE_RADIUS_M:-5000}}
+      KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS: ${KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS:-${OPINET_LOW_TOP_MAX_CALLS:-90}}
+      KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET: ${KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET:-${OPINET_RUN_CALL_BUDGET:-140}}
+      KOR_TRAVEL_MAP_KREX_EX_API_KEY: ${KOR_TRAVEL_MAP_KREX_EX_API_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
+      KOR_TRAVEL_MAP_KREX_GO_API_KEY: ${KOR_TRAVEL_MAP_KREX_GO_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}}
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL:-http://host.docker.internal:12501}
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      # network_mode: service:dagster가 요구하는 순서 — 대상 컨테이너의 netns가
+      # 있어야 여기 붙는다. healthy까지 기다리지 않는다(순환 방지 — dagster
+      # webserver의 healthcheck 자체가 이 code-server가 실제로 응답하는지를
+      # GraphQL로 재확인하므로, 여기서 code-server를 dagster에 다시 의존시키면
+      # 서로가 서로를 기다리게 된다).
+      dagster:
+        condition: service_started
+      dagster-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+      dagster-storage-migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    volumes:
+      - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
+    healthcheck:
+      test: ["CMD", "dagster", "api", "grpc-health-check", "-h", "127.0.0.1", "-p", "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
   dagster:
     build:
       context: .
@@ -557,8 +650,8 @@ services:
         - github_token
     command:
       - /usr/local/bin/dagster-webserver
-      - -m
-      - kortravelmap.dagster.definitions
+      - -w
+      - /opt/dagster/dagster_home/workspace.yaml
       - -h
       - 0.0.0.0
       - -p
@@ -640,10 +733,13 @@ services:
       - kor-travel-map-mois-source:/app/data/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     healthcheck:
+      # ADR-069 짝 — 프로세스가 응답하는가가 아니라 code location이 실제로 code-server를
+      # 통해 로드됐는가를 본다(bare `/`는 code location이 죽었어도 200을 주므로
+      # healthy와 "job을 실행할 수 있다"가 갈릴 수 있다, weather/PinVi와 같은 이유).
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/' % os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12702'), timeout=2).read()\"",
+          "python -c \"import os, json, urllib.request as u; p = os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12702'); q = json.dumps({'query': '{repositoriesOrError{__typename}}'}).encode(); r = u.urlopen(u.Request('http://127.0.0.1:%s/graphql' % p, data=q, headers={'Content-Type': 'application/json'}), timeout=5); d = json.load(r); t = d.get('data', {}).get('repositoriesOrError', {}).get('__typename'); raise SystemExit(0 if t == 'RepositoryConnection' else 'code location not loaded: %s' % t)\"",
         ]
       interval: 10s
       timeout: 5s
@@ -658,6 +754,9 @@ services:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
       secrets:
         - github_token
+    # dagster/dagster-code-server와 같은 netns — daemon도 이제 code location을
+    # loopback gRPC로만 본다(위 dagster-code-server 주석 참고).
+    network_mode: service:dagster
     environment:
       TMPDIR: /tmp
       TEMP: /tmp
@@ -718,6 +817,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      # network_mode: service:dagster가 요구하는 순서(위 dagster-code-server와
+      # 같은 이유) — healthy까지는 기다리지 않는다, daemon 자신의
+      # liveness-check와 code-server의 healthcheck가 각자 fail-close한다.
+      dagster:
+        condition: service_started
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -731,7 +835,7 @@ services:
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
-    command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+    command: ["/usr/local/bin/dagster-daemon", "run", "-w", "/opt/dagster/dagster_home/workspace.yaml"]
     # **회수 기제가 살아 있는지 본다.**
     #
     # `run_monitoring`(프로세스가 사라진 run을 회수)과 queued run dequeue는 전부 이
