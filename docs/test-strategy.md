@@ -495,23 +495,21 @@ PATCH/DELETE request `If-Match`와 exact equality를 단정한다.
 
 ### 5.5 C7 prod 파괴적 live E2E의 복구·인과성 gate
 
-C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. host runner/helper/attestation 검증
-모듈/상태 감사기도
-`/usr/local/lib/kor-travel-map/c7-runner/<exact commit>`의 root-owned Git archive snapshot과
-attested file hash에서만 실행한다. root-owned 고정 attestation 파일의
-machine-id/hostname/origin hash뿐 아니라 clean Git commit, C6c compatible-pair manifest hash와
-generation, compose project, Map API/UI/Dagster web·daemon/PinVi API의 실제 image·command·정렬 env
-hash를 대조한다. Map API image의 Alembic `current == unique heads`와 `alembic check`, 로그인 POST
-`200 + Set-Cookie`도 선행 조건이다. 로그인은 session/auth audit를 만들 수 있는 domain-state 비파괴
-검증이며, 나머지는 read-only다. 이 preflight를 모두 통과하기 전에는 고정 state root의
-`BLOCKED.json`과 mutation journal을 만들지 않는다. 값은 로그·attachment에 출력하지 않는다.
-보안 코어는 import 가능한 Python 모듈로 두고 runner가 검증한 동일 module bytes를 직접 실행한다.
-unit gate는 runner/helper/module 각각의 hash 변조, file/ancestor owner·mode 위반, attestation exact
-shape 위반, compatible-pair·OCI image/service runtime metadata 불일치를 실제 예외 또는 non-zero로
-확인한다. runner 문자열만 검사하는 정적 fixture는 이 보안 gate를 대체하지 않는다.
+C7 prod runner는 실행자 입력만으로 prod를 주장하지 않는다. 러너는 핀된 SHA의 평범한 `git archive`
+체크아웃에서 돈다 — ADR-102 결정 6이 root 소유 snapshot, host attestation(machine-id/hostname,
+command·env hash), Manager의 pinned runtime manifest·rebuild journal 재파싱을 걷어냈다. 떠 있는
+image가 핀된 세대인지는 Manager가 대조한다. 러너의 runtime preflight(`scripts/lib/c7_prod_runtime.py`)는
+caller env와 `docker inspect`만으로 공개 origin 세 개의 canonical hash, compose service 일곱의
+running/healthy·단일 compose project·서로 다름, T-VN-15 cursor secret 위생, Map 네 image의 OCI
+revision == `E2E_C7_EXPECTED_GIT_COMMIT`, executor image ID·label을 대조한다. Map API image의 Alembic
+`current == unique heads`와 `alembic check`, 로그인 POST `200 + Set-Cookie`도 선행 조건이다. 로그인은
+session/auth audit를 만들 수 있는 domain-state 비파괴 검증이며, 나머지는 read-only다. 이 preflight를
+모두 통과하기 전에는 고정 state root의 `BLOCKED.json`과 mutation journal을 만들지 않는다. 값은
+로그·attachment에 출력하지 않는다. unit gate(`tests/unit/test_c7_prod_runtime.py`)는 각 조건의 위반을
+실제 예외로 확인한다. runner 문자열만 검사하는 정적 fixture는 이 gate를 대체하지 않는다.
 
 Playwright는 host npm/Chromium이 아니라 `docker/c7-playwright.Dockerfile`로 만든 immutable image ID에서
-worker 1·retry 0으로 실행한다. executor의 source commit/base digest label도 attestation과 같아야 한다.
+worker 1·retry 0으로 실행한다. executor의 source commit/base digest label도 runner env와 같아야 한다.
 container는 creator PID/PGID/session ID/start ticks와 outcome을 먼저 fsync한
 `docker create --pull=never`와 valid CID 검증 뒤
 `docker start --attach`를 분리해, SIGKILL create gap에서도 실행 중인 미추적 container를 만들지 않는다.

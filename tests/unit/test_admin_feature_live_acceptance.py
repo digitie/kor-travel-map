@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -18,7 +20,7 @@ _FIXTURE = _ROOT / "scripts" / "admin_feature_live_fixture.py"
 _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
 _CLONE_STATE = _ROOT / "scripts" / "admin_feature_clone_live_state.py"
 _SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
-_ATTESTATION = _ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
+_RUNTIME_PREFLIGHT = _ROOT / "scripts" / "lib" / "c7_prod_runtime.py"
 _LIVE_CONFIG = (
     _ROOT
     / "packages"
@@ -39,19 +41,20 @@ _C7_RUNNER = _ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 
 _ORIGIN_EXECUTION = {
     "api_image_id": "sha256:" + "1" * 64,
-    "pinned_runtime_manifest_sha256": "2" * 64,
-    "rebuild_journal_sha256": "b" * 64,
-    "host_attestation_sha256": "3" * 64,
     "playwright_image_id": "sha256:" + "4" * 64,
     "source_commit": "5" * 40,
 }
 _RECOVERY_EXECUTION = {
     "api_image_id": "sha256:" + "6" * 64,
-    "pinned_runtime_manifest_sha256": "7" * 64,
-    "rebuild_journal_sha256": "c" * 64,
-    "host_attestation_sha256": "8" * 64,
     "playwright_image_id": "sha256:" + "9" * 64,
     "source_commit": "a" * 40,
+}
+#: ADR-102 이전(v3) 실행 identity. attestation digest 셋을 실었다.
+_LEGACY_V3_EXECUTION = {
+    **_ORIGIN_EXECUTION,
+    "pinned_runtime_manifest_sha256": "2" * 64,
+    "rebuild_journal_sha256": "b" * 64,
+    "host_attestation_sha256": "3" * 64,
 }
 
 
@@ -348,16 +351,13 @@ def test_live_fixture_counts_only_direct_feature_id_references() -> None:
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         api_image_id=identity["api_image_id"],
-        pinned_runtime_manifest_sha256=identity["pinned_runtime_manifest_sha256"],
-        rebuild_journal_sha256=identity["rebuild_journal_sha256"],
-        host_attestation_sha256=identity["host_attestation_sha256"],
         path=path,
         playwright_image_id=identity["playwright_image_id"],
         source_commit=identity["source_commit"],
     )
 
 
-def test_blocked_v3_records_execution_identity() -> None:
+def test_blocked_v4_records_execution_identity() -> None:
     payload = _STATE_MODULE._blocked_payload(  # noqa: SLF001
         "live-20260726010101-abcdef123456",
         0,
@@ -376,8 +376,41 @@ def test_blocked_v3_records_execution_identity() -> None:
         "status",
         "version",
     }
-    assert payload["version"] == 3
+    assert payload["version"] == 4
     assert payload["execution"] == _ORIGIN_EXECUTION
+    # ADR-102 결정 6: attestation digest는 실행 identity에서 빠졌다.
+    assert set(payload["execution"]) == {"api_image_id", "playwright_image_id", "source_commit"}
+
+
+def test_legacy_blocked_v3_with_attestation_identity_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """ADR-102 이전 러너가 남긴 BLOCKED(v3, digest 셋 포함)는 새 계약으로 받지 않는다.
+
+    v3를 억지로 받아 주면 "그 run이 무엇을 근거로 돌았는가"가 두 계약에 걸쳐 섞인다.
+    어차피 복구는 같은 source commit에서만 되므로(`recovery execution identity changed`)
+    리비전을 넘는 BLOCKED는 운영자 판정의 몫이다.
+    """
+
+    payload = _STATE_MODULE._blocked_payload(  # noqa: SLF001
+        "live-20260726010101-abcdef123456",
+        0,
+        "browser-running",
+        "blocked",
+        _ORIGIN_EXECUTION,
+    )
+    payload["version"] = 3
+    payload["execution"] = dict(_LEGACY_V3_EXECUTION)
+    monkeypatch.setattr(_STATE_MODULE, "_read_root_json", lambda _path: payload)
+
+    with pytest.raises(ValueError, match="invalid BLOCKED state"):
+        _STATE_MODULE._validated_blocked(tmp_path / "BLOCKED.json")  # noqa: SLF001
+
+    # 같은 digest를 v4에 끼워 넣어도 exact 집합이 거부한다.
+    payload["version"] = 4
+    with pytest.raises(ValueError, match="invalid BLOCKED state"):
+        _STATE_MODULE._validated_blocked(tmp_path / "BLOCKED.json")  # noqa: SLF001
 
 
 @pytest.mark.parametrize(
@@ -388,7 +421,7 @@ def test_blocked_v3_records_execution_identity() -> None:
         ("status", "complete"),
     ],
 )
-def test_blocked_v3_rejects_malformed_control_fields(
+def test_blocked_v4_rejects_malformed_control_fields(
     field: str,
     value: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -519,7 +552,7 @@ def test_recovery_rejects_execution_identity_drift(
         )
 
 
-def test_result_v3_durably_preserves_execution_identity(
+def test_result_v4_durably_preserves_execution_identity(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -556,26 +589,22 @@ def test_result_v3_durably_preserves_execution_identity(
     assert written["path"] == tmp_path / "result.json"
     result = written["payload"]
     assert isinstance(result, dict)
+    # ADR-102 결정 6: `rebuild_journal_sha256`·`pinned_runtime_manifest_sha256`·
+    # `host_attestation_sha256`는 증거 계약에서 빠졌다. 실행 identity는 digest 하나로 남는다.
     assert set(result) == {
         "execution_identity_sha256",
-        "host_attestation_sha256",
         "owned_feature_id_sha256",
         "phase",
         "recorded_at",
         "recovery_attempt",
-        "pinned_runtime_manifest_sha256",
-        "rebuild_journal_sha256",
         "run_id_sha256",
         "status",
         "version",
     }
-    assert result["version"] == 3
+    assert result["version"] == 4
     assert result["execution_identity_sha256"] == (
         _STATE_MODULE._execution_identity_sha256(_ORIGIN_EXECUTION)  # noqa: SLF001
     )
-    assert result["pinned_runtime_manifest_sha256"] == "2" * 64
-    assert result["rebuild_journal_sha256"] == "b" * 64
-    assert result["host_attestation_sha256"] == "3" * 64
 
 
 def test_result_rejects_execution_identity_mismatch(
@@ -621,129 +650,187 @@ def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:
     assert "admin-feature-acceptance-write" not in _C7_RUNNER.read_text()
 
 
-_MODULE_DIGEST = "1" * 64
+def test_runner_runs_runtime_preflight_from_its_own_checkout_before_state() -> None:
+    """ADR-102 결정 6: preflight는 같은 체크아웃의 모듈이고 state를 만들기 전에 돈다."""
 
-
-def _bootstrap_args(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    payload: dict[str, object],
-) -> SimpleNamespace:
-    """`_validate_c7_module`의 version 분기까지 **실제로 도달하게** 만든다.
-
-    이 함수는 root 소유 절대경로 전제(경로 고정·ancestor 검사·0600 읽기) 뒤에야
-    version을 본다. 그 전제를 그대로 두면 테스트가 version 분기에 닿지 못하고
-    다른 이유로 raise되어, 무엇을 검사했는지 알 수 없는 통과가 된다.
-    """
-
-    commit = "5" * 40
-    monkeypatch.setattr(_STATE_MODULE, "_C7_BASE", tmp_path)
-    monkeypatch.setattr(_STATE_MODULE, "_safe_ancestors", lambda _path: None)
-    monkeypatch.setattr(
-        _STATE_MODULE,
-        "_read_regular",
-        lambda *_args, **_kwargs: json.dumps(payload).encode("utf-8"),
-    )
-    monkeypatch.setattr(_STATE_MODULE, "_file_sha256", lambda *_args, **_kwargs: _MODULE_DIGEST)
-    return SimpleNamespace(
-        expected_commit=commit,
-        module=tmp_path / commit / _STATE_MODULE._C7_MODULE_RELATIVE,  # noqa: SLF001
-        attestation=tmp_path / "attestation.json",
-    )
-
-
-def _bootstrap_payload(version: object) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "repository_commit": "5" * 40,
-        "orchestrator_files": {
-            "scripts/audit-c7-prod-live-state.py": "0" * 64,
-            "scripts/lib/c7-prod-runner-lifecycle.sh": "0" * 64,
-            "scripts/lib/c7_prod_attestation.py": _MODULE_DIGEST,
-            "scripts/run-c7-prod-live-e2e.sh": "0" * 64,
-        },
-    }
-    if version is not None:
-        payload["version"] = version
-    return payload
-
-
-def test_c7_module_bootstrap_accepts_v4_host_attestation(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """양성 경로가 없으면 아래 음성 테스트는 '항상 raise'와 구별되지 않는다."""
-
-    args = _bootstrap_args(monkeypatch, tmp_path, _bootstrap_payload(4))
-
-    _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
-
-
-@pytest.mark.parametrize("version", [3, 5, "4", None])
-def test_c7_module_bootstrap_rejects_non_v4_host_attestation(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    version: object,
-) -> None:
-    """bootstrap 검증이 host attestation version을 **실제로** 판정하는지 본다.
-
-    문자열 위치 단언만 있으면 상수가 어긋나도 통과한다. 실제로 이 브랜치에서
-    검증 모듈은 v4를 요구하는데 bootstrap은 v3를 요구해 admin lane이 통째로
-    fail-closed되는 상태가 CI green으로 남아 있었다(2026-08-20 적대 리뷰).
-    """
-
-    args = _bootstrap_args(monkeypatch, tmp_path, _bootstrap_payload(version))
-
-    with pytest.raises(ValueError, match="C7 module bootstrap mismatch"):
-        _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
-
-
-def test_runner_uses_trusted_c7_v4_v6_v8_runtime_attestation_before_state() -> None:
     runner = _RUNNER.read_text()
-    state = _STATE.read_text()
-    attestation = _ATTESTATION.read_text()
-    validate = runner.index("  state_helper validate-c7-module")
-    runtime = runner.index('    python3 -I -B "$c7_module" runtime')
+    preflight = runner.index('python3 -I -B "$RUNTIME_PREFLIGHT" runtime "$PWD"')
+    api_lookup = runner.index('API_IMAGE_ID="$(docker inspect')
     initialize = runner.rindex("\ninitialize_state\n")
-    assert validate < runtime < initialize
-    assert 'readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/' in runner
-    assert 'readonly C7_INSTALL_BASE="/usr/local/lib/kor-travel-map/c7-runner"' in runner
-    assert 'attestation.get("version") != 4' in state
-    assert 'manifest["version"] != 6' in attestation
-    assert 'value["version"] != 8' in attestation
-    assert 'value["phase"] != _JOURNAL_COMMITTED_PHASE' in attestation
-    assert 'value["candidate"] != generation' in attestation
-    assert (
-        'candidate_evidence != generation["map_application_300_candidate_evidence"]'
-        in attestation
+    assert preflight < api_lookup < initialize
+    assert 'readonly RUNTIME_PREFLIGHT="$SCRIPT_DIR/lib/c7_prod_runtime.py"' in runner
+    assert _RUNTIME_PREFLIGHT.is_file()
+    assert "E2E_C7_COMPATIBLE_PAIR_MANIFEST" not in runner
+    assert "E2E_C7_EXPECTED_GIT_COMMIT" in runner
+    # 진단 문구가 퇴역 포맷을 가리키면 실패한 사람이 없는 파일을 찾는다.
+    assert "v4/v5/v7" not in runner
+    assert "v6/v8" not in runner
+
+
+#: ADR-102 결정 6이 걷어낸 체인의 흔적. D2 lane이 이것을 다시 요구하면 Manager 내부
+#: 파일 모양이 바뀔 때마다 lane이 함께 깨지던 결합이 되살아난다.
+_RETIRED_CHAIN_MARKERS = (
+    "E2E_C7_PINNED_RUNTIME_MANIFEST",
+    "E2E_C7_REBUILD_JOURNAL",
+    "rebuild_journal_sha256",
+    "pinned_runtime_manifest_sha256",
+    "host_attestation_sha256",
+    "source-manifest.json",
+    "validate-source",
+    "validate-c7-module",
+    "c7_prod_attestation",
+    "safe_root_file",
+    "/etc/kor-travel-map",
+    "/usr/local/lib/kor-travel-map",
+)
+
+
+def test_d2_lane_no_longer_requires_the_retired_attestation_chain() -> None:
+    for path in (_RUNNER, _STATE, _SUPERVISOR, _FIXTURE):
+        source = path.read_text(encoding="utf-8")
+        for marker in _RETIRED_CHAIN_MARKERS:
+            assert marker not in source, f"{path.name}이 퇴역한 체인을 다시 요구한다: {marker}"
+    assert _STATE.read_text(encoding="utf-8").count("_add_execution_identity_arguments(") == 4
+
+
+def _bash_function(source: str, name: str) -> str:
+    """러너 소스에서 함수 정의 하나를 **그대로** 떼어 낸다(본문은 열 0의 `}`로 끝난다)."""
+
+    start = source.index(f"\n{name}() {{\n") + 1
+    return source[start : source.index("\n}\n", start) + 3]
+
+
+_D2_ENV = {
+    "E2E_BASE_URL": "https://map.example.test",
+    "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
+    "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
+    "E2E_ADMIN_PASSWORD": "redacted",
+    "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": "postgresql://fixture@127.0.0.1:12700/kor_travel_map",
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE": "kor_travel_map",
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE": "ktm_fixture_writer",
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION": "400",
+    "E2E_C7_EXPECTED_GIT_COMMIT": "5" * 40,
+    "E2E_C7_PLAYWRIGHT_IMAGE": "sha256:" + "4" * 64,
+    "E2E_C7_EXPECTED_UI_ORIGIN_SHA256": "1" * 64,
+    "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256": "2" * 64,
+    "E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256": "3" * 64,
+    "E2E_C7_DAGSTER_WEB_SERVICE": "map-web",
+    "E2E_C7_DAGSTER_DAEMON_SERVICE": "map-daemon",
+    "E2E_C7_UI_SERVICE": "map-ui",
+    "E2E_C7_MAP_API_SERVICE": "map-api",
+    "E2E_C7_PINVI_API_SERVICE": "pinvi-api",
+    "E2E_C7_PINVI_WEB_SERVICE": "pinvi-web",
+    "E2E_C7_PINVI_DAGSTER_SERVICE": "pinvi-dagster",
+    "E2E_LIVE_ALLOW_PROD": "1",
+    "E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE": "1",
+}
+
+
+def _run_d2_env_validation(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """러너의 env 계약 함수를 **소스 그대로** 떼어 실행한다(root·docker 없이)."""
+
+    runner = _RUNNER.read_text(encoding="utf-8")
+    functions = "".join(
+        _bash_function(runner, name)
+        for name in (
+            "die",
+            "require_env",
+            "validate_service_env",
+            "validate_sha256_env",
+            "validate_fixture_target_env",
+            "validate_env",
+        )
     )
-    assert '_validate_application_execution_evidence(' in attestation
-    assert 'active["map_source_revision"] != source_commits["map"]' in attestation
-    assert 'compose_project_hashes != {attestation["compose_project_sha256"]}' in attestation
-    assert 'environment_sha256 != expected["environment_sha256"]' in attestation
-    assert 'command_sha256 != expected["command_sha256"]' in attestation
-    assert 'observed_images[role] != active[field]' in attestation
-    assert '_public_origin(environ["E2E_BASE_URL"])' in attestation
-    assert 'E2E_C7_PINNED_RUNTIME_MANIFEST' in runner
-    assert 'E2E_C7_REBUILD_JOURNAL' in runner
-    assert 'E2E_C7_COMPATIBLE_PAIR_MANIFEST' not in runner
-    assert 'E2E_C7_EXPECTED_GIT_COMMIT' in runner
-    # 진단 문구가 퇴역 포맷을 가리키면 실패한 사람이 없는 파일을 찾는다. 2026-09-06까지
-    # attestation 실패 메시지가 `v4/v5/v7`이라고 적었는데 그 호출은 v6 manifest와 v8
-    # journal을 넘긴다 — v4/v5/v7은 `retired-<pinset>/`로 퇴역한 포맷이다.
-    assert 'v4/v5/v7' not in runner
+    return subprocess.run(
+        ["/bin/bash", "-c", f"set -euo pipefail\n{functions}validate_env\necho ENV_OK\n"],
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", **env},
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+def test_d2_env_contract_accepts_env_without_manifest_or_journal() -> None:
+    """`.d2-live.env`에서 두 키를 지워도 D2 러너가 env 단계에서 죽지 않는다."""
+
+    assert "E2E_C7_PINNED_RUNTIME_MANIFEST" not in _D2_ENV
+    assert "E2E_C7_REBUILD_JOURNAL" not in _D2_ENV
+    accepted = _run_d2_env_validation(_D2_ENV)
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout == "ENV_OK\n"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "E2E_C7_EXPECTED_GIT_COMMIT",
+        "E2E_C7_PLAYWRIGHT_IMAGE",
+        "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION",
+        "E2E_C7_PINVI_DAGSTER_SERVICE",
+    ],
+)
+def test_d2_env_contract_still_rejects_each_kept_requirement(name: str) -> None:
+    """위 양성 결과가 '무엇이든 통과'가 아님을 같은 하네스로 보인다."""
+
+    env = {key: value for key, value in _D2_ENV.items() if key != name}
+    rejected = _run_d2_env_validation(env)
+    assert rejected.returncode == 1
+    assert f"required env is missing: {name}" in rejected.stderr
+    assert "ENV_OK" not in rejected.stdout
+
+
+def test_d2_runner_starts_from_a_plain_checkout(tmp_path: Path) -> None:
+    """평범한 체크아웃(비-root 소유, 0644/0755)에서 시작해도 소스 검사로 죽지 않는다.
+
+    종전 러너는 첫 줄에서 자기 파일과 helper 셋·`source-manifest.json`이 root 소유
+    0555/0444인지 보고, 아니면 `root snapshot file metadata is unsafe`로 죽었다. 이제
+    그 검사는 없고, 비-root로 돌리면 다음 관문(root 실행 요구)까지 간다. docker는
+    `compose version`에만 답하는 대역이다 — 실제 Docker에는 닿지 않는다.
+    """
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text('#!/bin/sh\n[ "$1 $2" = "compose version" ] && exit 0\nexit 97\n')
+    docker.chmod(0o755)
+    for command in ("flock", "python3", "setsid", "dirname"):
+        resolved = shutil.which(command)
+        assert resolved is not None, command
+        (fake_bin / command).symlink_to(resolved)
+
+    result = subprocess.run(
+        ["/bin/bash", str(_RUNNER), "run"],
+        capture_output=True,
+        cwd=tmp_path,
+        env={"PATH": str(fake_bin)},
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    # 다음 관문은 실행 uid에 따라 다르다 — 전제를 환경의 우연에 맡기지 않는다.
+    next_gate = (
+        "required env is missing: E2E_BASE_URL"
+        if os.geteuid() == 0
+        else "fixed production state requires root execution"
+    )
+    assert result.returncode == 1
+    assert "root snapshot file metadata is unsafe" not in result.stderr
+    assert next_gate in result.stderr, result.stderr
 
 
 def test_cursor_secret_is_attested_and_fail_closed_on_exact_api_image() -> None:
     runner = _RUNNER.read_text()
     supervisor = _SUPERVISOR.read_text()
-    attestation = _ATTESTATION.read_text()
-    assert 'role != "map_api"' in attestation
-    assert 'cursor secret escaped API runtime' in attestation
-    assert 'environment.get("KOR_TRAVEL_MAP_API_PROFILE") != "production"' in attestation
-    assert 'environment.get("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED") != "true"' in attestation
-    assert "len(cursor) < 32" in attestation
-    assert "character.isspace()" in attestation
-    assert "cursor in protected" in attestation
+    runtime = _RUNTIME_PREFLIGHT.read_text()
+    assert 'role != "map_api"' in runtime
+    assert 'cursor secret escaped API runtime' in runtime
+    assert 'environment.get("KOR_TRAVEL_MAP_API_PROFILE") != "production"' in runtime
+    assert 'environment.get("KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED") != "true"' in runtime
+    assert "len(cursor) < 32" in runtime
+    assert "character.isspace()" in runtime
+    assert "cursor in protected" in runtime
     assert 'API_IMAGE_ID="$(docker inspect' in runner
     assert 'run_supervisor probe probe-cursor-missing' in runner
     assert '"--network",\n            "none"' in supervisor
@@ -865,22 +952,6 @@ def test_helper_environment_parser_preserves_values_without_disk_copy() -> None:
 def test_helper_environment_parser_rejects_ambiguous_shapes(items: object) -> None:
     with pytest.raises(RuntimeError, match="environment shape"):
         _SUPERVISOR_MODULE._unique_environment(items)  # noqa: SLF001
-
-
-def test_runner_requires_exact_root_source_snapshot() -> None:
-    runner = _RUNNER.read_text()
-    state = _STATE.read_text()
-    validate = runner.index("  state_helper validate-source")
-    initialize = runner.rindex("\ninitialize_state\n")
-    assert validate < initialize
-    assert "set(os.listdir(root)) != required | {args.manifest.name}" in state
-    assert "snapshot exact file set mismatch" in state
-    assert "snapshot file hash mismatch" in state
-    assert "stat.S_IMODE(observed.st_mode) & 0o022" in state
-    assert 'safe_root_file "$SOURCE_MANIFEST" 444' in runner
-    assert 'safe_root_file "$SUPERVISOR" 444' in runner
-    assert '--required-file "${SUPERVISOR##*/}"' in runner
-    assert 'name == "run-admin-feature-live-acceptance.sh"' in state
 
 
 def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None:

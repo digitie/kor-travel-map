@@ -374,7 +374,7 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
 
 n150 호스트의 브라우저 공유 라이브러리·host npm·host Chromium 설치 상태를 실행 계약으로
 사용하지 않는다. C7은 다음 공식 image digest를 base로 하는 저장소 전용 executor를 exact
-Git commit으로 build하고, tag가 아닌 최종 image ID를 attestation한다.
+Git commit으로 build하고, tag가 아닌 최종 image ID를 runner env로 넘긴다.
 
 ```bash
 git rev-parse HEAD
@@ -386,11 +386,12 @@ base는
 `mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
 로 고정한다. 최종 C7은 임의 `docker run`이나 host `npm` 명령으로 실행하지 않고
 build도 ignored/untracked file이 들어갈 수 없는 exact Git archive script로만 수행한다.
-runbook 절차로 설치한 `/usr/local/lib/kor-travel-map/c7-runner/<exact-commit>/scripts/`
-[`run-c7-prod-live-e2e.sh`](../scripts/run-c7-prod-live-e2e.sh)의 root-owned snapshot만 호출한다. runner는
-attested orchestrator file hash, compatible pair, 5개 service runtime hash, Alembic head/check와 UI login을
-read-only로 검증한 뒤에만 상태 journal과 파괴적 spec을 시작한다. 실제 env와 attestation 생성은
-gitignore된 local runbook에만 두며 셸이나 로그에 값을 출력하지 않는다.
+[`run-c7-prod-live-e2e.sh`](../scripts/run-c7-prod-live-e2e.sh)는 핀된 SHA의 평범한 `git archive`
+체크아웃에서 호출한다(ADR-102 결정 6 — root 소유 snapshot·host attestation·Manager manifest/journal은
+걷어냈다). runner는 origin·compose runtime 일곱·cursor secret 위생·Map image revision·executor
+image label(`scripts/lib/c7_prod_runtime.py`), Alembic head/check와 UI login을 read-only로 검증한
+뒤에만 상태 journal과 파괴적 spec을 시작한다. 실제 env는 gitignore된 local runbook에만 두며
+셸이나 로그에 값을 출력하지 않는다. n150 재핀 사이클 스크립트는 `scripts/n150/`이 정본이다.
 
 sudo 권한은 실행 직전 `sudo -n true`로 다시 확인한다. 접속 자체가 실패한 결과를 passwordless sudo
 부재로 해석하지 않는다. C7 실행·복구·evidence 절차는

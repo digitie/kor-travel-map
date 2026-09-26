@@ -111,6 +111,10 @@ generation `8eedf171…` 이후 최소 5개 pinset(`3d8d63e1`·`7035b0b1`·`8285
   runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
   만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).
 
+  > **ADR-102 결정 6 (2026-09-26) 이후 이 전제는 없다.** C7·D2 러너는 Manager의 manifest·journal을
+  > 읽지 않고, 두 env와 root 소유 사본·host attestation·러너 스냅샷을 요구하지 않는다. D1·D2는
+  > 핀된 SHA의 평범한 체크아웃에서 돈다(`scripts/n150/`).
+
 ### B4 판정 (2026-09-04) — **TRUE, 소유자 서명 완료**
 
 > 소유자가 2026-09-04에 서명했다. 아래가 그 근거이며, 마지막 문단의 해석 문제도 함께
@@ -193,6 +197,11 @@ B4 조문은 "Manager runner와 attestation/verifier contract가 달라지면 fa
 pinset과 execution identity가 그대로이기 때문이다.
 
 ### F1D-E blocker — host attestation v4 재발행 (2026-09-04 **완료, 검증기 PASS**)
+
+> **이력.** ADR-102 결정 6(2026-09-26)이 이 절의 체인 — host attestation v4, v6/v8 root 사본,
+> c7-runner·admin lane root 스냅샷, 검증기 `scripts/lib/c7_prod_attestation.py` — 을 걷어냈다.
+> 아래 "착수 전 소유자 판정" 1·3번(신뢰 경계를 C7 attestation에서 떼어낼지, attestation 발행을
+> 누가 소유할지)은 그 결정으로 닫혔다. 아래는 당시 기록이다.
 
 `docs/runbooks/admin-feature-live-acceptance.md` 서두는 "실행 전 신뢰 경계는 C7 host
 attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 재사용한다"고 적는다.
@@ -334,6 +343,7 @@ baseline에서는 돌 수 없다** — `docs/runbooks/c7-prod-live-e2e.md`가 �
 
 `/etc/kor-travel-map/`의 v6/v8 pinset 쌍 여섯은 같은 포맷의 이력이고 롤백 입력이라 퇴역
 대상이 아니다. 퇴역한 것은 **포맷**이다 — v4/v5/v7이 `retired-de5206dc/`에 있다.
+(ADR-102 결정 6 이후 러너는 v6/v8 사본을 읽지 않는다 — 위 사본은 운영자 정리 대상인 이력이다.)
 
 ```markdown
 - [x] **T-VN-41F1D-E — 구 generation 퇴역·v6/v8 attestation 전환** (2026-09-06 완료)

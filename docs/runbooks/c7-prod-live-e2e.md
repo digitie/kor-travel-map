@@ -5,6 +5,18 @@
 > 편집은 H46H handoff의 대안이 아니다. 현행 sequence는 `T-VN-H46H` 설계 문서와
 > `docs/backup-restore.md`를 따른다.
 
+> **ADR-102 결정 6 (2026-09-26) — attestation 체인 제거.** 아래 §1의 2번, §2.2의 root 소유
+> `c7-runner` snapshot 설치, §2.3의 host attestation과 v5/v6 manifest·v7/v8 journal 사본,
+> §3 5번의 attested document evidence 복제는 **더 이상 러너의 동작이 아니다.** 러너
+> (`scripts/run-c7-prod-live-e2e.sh`)는 핀된 SHA의 평범한 `git archive` 체크아웃에서 돌고,
+> `E2E_C7_PINNED_RUNTIME_MANIFEST`·`E2E_C7_REBUILD_JOURNAL`을 요구하지 않는다. 실행 전
+> runtime preflight는 `scripts/lib/c7_prod_runtime.py`가 caller env와 `docker inspect`만으로
+> 한다 — origin 세 개, compose service 일곱의 running/healthy·compose project·cursor secret
+> 위생, Map 네 image의 OCI revision == `E2E_C7_EXPECTED_GIT_COMMIT`, executor image label.
+> 떠 있는 image가 핀된 세대인지는 Manager가 대조한다. evidence manifest는 v3(attested digest
+> 없음)이고, 감사기는 v1·v2 archive를 legacy로 계속 인정한다. n150 호스트 스크립트는
+> `scripts/n150/`이 정본이다.
+
 이 문서는 `T-ADM-C7`의 n150 파괴적 live UI E2E를 실행하는 유일한 운영 순서를
 정의한다. 실제 host, URL, 계정, 비밀번호, token, hash는 gitignore된
 `docs/deploy-runbook.local.md`와 `docs/prod-access.local.md`에만 둔다.

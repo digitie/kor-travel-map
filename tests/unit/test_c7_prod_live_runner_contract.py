@@ -1,29 +1,42 @@
 """C7 prod live runner의 fail-closed 정적 계약 회귀 테스트."""
 
+import re
+import subprocess
 from pathlib import Path
 
-from scripts.lib import c7_prod_attestation as _ATTESTATION_MODULE
+import pytest
+
+from scripts.lib import c7_prod_runtime as _RUNTIME_MODULE
 
 # 기대 목록은 **테스트가** 적는다. 모듈 상수에서 파생시키면 "모듈이 스스로를 만족한다"는
 # 항등식이 되어 아무것도 보지 않는다(2026-08-20 적대 리뷰 지적).
-_EXPECTED_GENERATION_IMAGE_FIELDS = (
-    "map_api_image_id",
-    "map_ui_image_id",
-    "map_dagster_image_id",
-    "map_dagster_daemon_image_id",
-    "pinvi_api_image_id",
-    "pinvi_web_image_id",
-    "pinvi_dagster_image_id",
+_EXPECTED_ROLE_SERVICE_ENVS = (
+    ("map_api", "E2E_C7_MAP_API_SERVICE"),
+    ("map_ui", "E2E_C7_UI_SERVICE"),
+    ("map_dagster_web", "E2E_C7_DAGSTER_WEB_SERVICE"),
+    ("map_dagster_daemon", "E2E_C7_DAGSTER_DAEMON_SERVICE"),
+    ("pinvi_api", "E2E_C7_PINVI_API_SERVICE"),
+    ("pinvi_web", "E2E_C7_PINVI_WEB_SERVICE"),
+    ("pinvi_dagster", "E2E_C7_PINVI_DAGSTER_SERVICE"),
 )
-_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS = (
-    "map_application_head",
-    "map_dagster_head",
-    "pinvi_head",
+
+#: ADR-102 결정 6이 걷어낸 attestation 체인의 흔적. 러너가 이것들을 다시 요구하면
+#: Manager 내부 파일 모양이 바뀔 때마다 러너가 함께 깨지던 결합이 되살아난다.
+_RETIRED_CHAIN_MARKERS = (
+    "E2E_C7_PINNED_RUNTIME_MANIFEST",
+    "E2E_C7_REBUILD_JOURNAL",
+    "rebuild_journal_sha256",
+    "pinned_runtime_manifest_sha256",
+    "host_attestation_sha256",
+    "c7_prod_attestation",
+    "/etc/kor-travel-map",
+    "/usr/local/lib/kor-travel-map",
+    "orchestrator_files",
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
-ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
+RUNTIME = ROOT / "scripts" / "lib" / "c7_prod_runtime.py"
 LIVE_DIR = (
     ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
 )
@@ -31,6 +44,13 @@ LIVE_DIR = (
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _bash_function(source: str, name: str) -> str:
+    """러너 소스에서 함수 정의 하나를 **그대로** 떼어 낸다(본문은 열 0의 `}`로 끝난다)."""
+
+    start = source.index(f"\n{name}() {{\n") + 1
+    return source[start : source.index("\n}\n", start) + 3]
 
 
 def _section(source: str, start: str, end: str) -> str:
@@ -46,7 +66,6 @@ def _assert_in_order(source: str, *markers: str) -> None:
 
 def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     script = _read(RUNNER)
-    attestation = _read(ATTESTATION)
 
     assert "require_command node" not in script
     assert "require_command npm" not in script
@@ -57,8 +76,8 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     _assert_in_order(
         script,
         "require_command python3\n",
-        "verify_root_owned_orchestrator_snapshot ||",
-        "verify_trusted_runtime_attestation",
+        "\nvalidate_environment\n",
+        "verify_runtime_preflight 2>/dev/null ||",
         "verify_alembic_state",
         "verify_ui_auth_preflight ||",
         "initialize_state_paths\n",
@@ -71,19 +90,10 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
         "trap 'exit_for_signal 130' INT\n",
         "trap 'exit_for_signal 143' TERM",
     )
-    assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
-    assert 'machine_id_sha256' in attestation
-    assert 'hostname_sha256' in attestation
-    assert 'pinned_runtime_manifest_sha256' in attestation
-    assert 'rebuild_journal_sha256' in attestation
-    assert 'compose_project_sha256' in attestation
-    assert 'service_runtime' in attestation
-    assert '"orchestrator_files"' in script
-    assert 'attestation["version"] != 4' in attestation
-    assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
-    assert 'scripts/lib/c7_prod_attestation.py' in script
-    assert 'scripts/audit-c7-prod-live-state.py' in script
-    assert 'compile(module_bytes, str(module_path), "exec")' in script
+    # preflight 모듈은 러너와 **같은 체크아웃**에서 읽는다(고정 설치 경로가 아니다).
+    assert 'python3 -I -B "$SCRIPT_DIR/lib/c7_prod_runtime.py" runtime' in script
+    assert 'python3 "$SCRIPT_DIR/audit-c7-prod-live-state.py"' in script
+    assert 'REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"' in script
     assert "require_command git" not in script
     assert 'response.status != 200' in script
     assert 'response.headers.get("Set-Cookie")' in script
@@ -452,8 +462,7 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
     ]
     _assert_in_order(
         invocation,
-        "verify_root_owned_orchestrator_snapshot",
-        "verify_trusted_runtime_attestation",
+        "verify_runtime_preflight",
         "verify_alembic_state",
         "verify_ui_auth_preflight",
         "initialize_state_paths",
@@ -467,7 +476,7 @@ def test_runner_uses_fixed_root_owned_atomic_state() -> None:
 
 def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidence() -> None:
     script = _read(RUNNER)
-    attestation = _read(ATTESTATION)
+    runtime = _read(RUNTIME)
     build_script = _read(ROOT / "scripts" / "build-c7-playwright-image.sh")
     lifecycle = _read(ROOT / "scripts" / "lib" / "c7-prod-runner-lifecycle.sh")
     dockerfile = _read(ROOT / "docker" / "c7-playwright.Dockerfile")
@@ -515,31 +524,14 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert "        KOR_TRAVEL_MAP_GIT_COMMIT:" in frontend_build
     assert "        NEXT_PUBLIC_KOR_TRAVEL_MAP_API:" in frontend_build
     assert '[[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:' in script
-    assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
-    assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
-    assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 6' in attestation
-    assert 'value["version"] != 8' in attestation
-    assert '_validate_application_execution_evidence(' in attestation
+    assert 'executor.get("Id") != executor_image' in runtime
+    assert 'executor_labels.get("io.kortravelmap.c7.repository-commit") != commit' in runtime
+    assert 'image_labels.get("org.opencontainers.image.revision") != commit' in runtime
     # 모듈 상수가 기대 목록과 **정확히** 같아야 한다. 빠지면 그 runtime이 검사 밖에
     # 남고(그것이 v4의 결함이었다), 늘면 테스트가 모르는 runtime이 생긴 것이다.
-    assert (
-        tuple(field for _, field in _ATTESTATION_MODULE.GENERATION_RUNTIME_IMAGE_FIELDS)
-        == _EXPECTED_GENERATION_IMAGE_FIELDS
-    )
-    assert (
-        tuple(_ATTESTATION_MODULE.GENERATION_SCHEMA_HEAD_FIELDS)
-        == _EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS
-    )
-    for field in (
-        *_EXPECTED_GENERATION_IMAGE_FIELDS,
-        *_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS,
-    ):
-        assert field in attestation
-    assert 'active["map_source_revision"] != source_commits["map"]' in attestation
-    assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
-    assert "len(set(role_services.values())) != len(role_services)" in attestation
-    assert "len(observed_containers) != len(role_services)" in attestation
+    assert tuple(_RUNTIME_MODULE.ROLE_SERVICE_ENVS) == _EXPECTED_ROLE_SERVICE_ENVS
+    assert "len(set(role_services.values())) != len(role_services)" in runtime
+    assert "len(observed_containers) != len(role_services)" in runtime
     # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
     # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
     # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
@@ -598,8 +590,11 @@ def test_runner_preserves_recovery_state_on_failure_and_runs_full_audit() -> Non
         "verify_clean_state_audit\n",
         "start_orchestrator_lock_guard\n",
     )
+    # `container_clean/evidence_preserved` 조합의 세 번째는 attested input 사본 삭제를
+    # 지키던 블록이었다(ADR-102에서 사본과 함께 사라졌다). 남은 둘은 runtime 정리와 그
+    # 거절 분기다.
     assert finish.count("status == 0 && ORCHESTRATOR_VERIFIED == 1") >= 3
-    assert finish.count("container_clean == 1 && evidence_preserved == 1") >= 3
+    assert finish.count("container_clean == 1 && evidence_preserved == 1") >= 2
     assert finish.index('rm -f -- "$E2E_STORAGE_STATE"') < finish.index(
         'rm -rf -- "$RUNTIME_DIR"'
     )
@@ -677,3 +672,118 @@ def test_kma_cursor_requires_canonical_nonempty_base_datetime() -> None:
     assert 'expect(typeof baseDatetime).toBe("string")' in cursor
     assert "expect(isCanonicalKmaBaseDatetime(baseDatetime)).toBe(true)" in cursor
     assert "if (baseDatetime !== undefined)" not in cursor
+
+
+# -- ADR-102 결정 6: attestation 체인 제거 ------------------------------------
+
+
+def test_runner_no_longer_requires_the_retired_attestation_chain() -> None:
+    """러너와 preflight 모듈은 Manager manifest/journal·host attestation·root 스냅샷을 모른다."""
+
+    script = _read(RUNNER)
+    runtime = _read(RUNTIME)
+    runtime_code = runtime[runtime.index("from __future__") :]
+    for marker in _RETIRED_CHAIN_MARKERS:
+        assert marker not in script, f"C7 러너가 퇴역한 체인을 다시 요구한다: {marker}"
+        assert marker not in runtime_code, f"preflight 모듈이 퇴역한 체인을 읽는다: {marker}"
+    assert not (ROOT / "scripts" / "lib" / "c7_prod_attestation.py").exists()
+
+
+def test_evidence_manifest_v3_carries_no_attested_document_digest() -> None:
+    script = _read(RUNNER)
+    evidence = _section(script, "preserve_evidence() {", "\nfinish() {")
+    manifest = _section(evidence, "manifest = {", "}\n")
+
+    assert '"version": 3,' in manifest
+    assert set(re.findall(r'"([a-z_]+)":', manifest)) == {
+        "alembic_head",
+        "files",
+        "finished_at",
+        "orchestrator_verified",
+        "playwright_image_id",
+        "repository_commit",
+        "status",
+        "version",
+    }
+    # 사본을 archive에 넣던 경로도 함께 사라졌다.
+    assert "runtime-attestation.json" not in evidence
+    assert "pinned-runtime-rebuild.json" not in evidence
+
+
+_C7_ENV = {
+    "E2E_BASE_URL": "https://map.example.test",
+    "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
+    "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
+    "E2E_ADMIN_PASSWORD": "redacted",
+    "E2E_DAGSTER_JOB": "feature_update_request_worker",
+    "E2E_C7_SCHEDULE": "feature_weather_kma_short_forecast_hourly_schedule",
+    "E2E_C7_EXPECTED_GIT_COMMIT": "a" * 40,
+    "E2E_C7_PLAYWRIGHT_IMAGE": "sha256:" + "3" * 64,
+    "E2E_C7_EXPECTED_UI_ORIGIN_SHA256": "1" * 64,
+    "E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256": "2" * 64,
+    "E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256": "4" * 64,
+    "E2E_C7_DAGSTER_WEB_SERVICE": "map-web",
+    "E2E_C7_DAGSTER_DAEMON_SERVICE": "map-daemon",
+    "E2E_C7_UI_SERVICE": "map-ui",
+    "E2E_C7_MAP_API_SERVICE": "map-api",
+    "E2E_C7_PINVI_API_SERVICE": "pinvi-api",
+    "E2E_C7_PINVI_WEB_SERVICE": "pinvi-web",
+    "E2E_C7_PINVI_DAGSTER_SERVICE": "pinvi-dagster",
+    "E2E_LIVE_ALLOW_PROD": "1",
+    "E2E_ADMIN_WRITE": "1",
+    "E2E_C7_READ_AUTH_WRITE": "1",
+    "E2E_KMA_SCOPE_WRITE": "1",
+    "E2E_DAGSTER_WRITE": "1",
+    "E2E_DAGSTER_RUN": "1",
+    "E2E_QUEUE_SENSOR_BARRIER": "1",
+}
+
+
+def _run_c7_environment_validation(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """러너의 env 계약 함수를 **소스 그대로** 떼어 실행한다(root·docker 없이)."""
+
+    script = _read(RUNNER)
+    readonly = "\n".join(re.findall(r"^readonly SAFE_\w+=.*$", script, re.MULTILINE))
+    functions = "".join(
+        _bash_function(script, name)
+        for name in (
+            "die",
+            "require_env",
+            "require_enabled",
+            "validate_sha256_env",
+            "validate_service_env",
+            "validate_environment",
+        )
+    )
+    program = f"set -euo pipefail\n{readonly}\n{functions}validate_environment\necho ENV_OK\n"
+    return subprocess.run(
+        ["/bin/bash", "-c", program],
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", **env},
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+def test_runner_env_contract_accepts_env_without_manifest_or_journal() -> None:
+    """`.d2-live.env`에서 두 키를 지워도 러너가 env 단계에서 죽지 않는다."""
+
+    assert "E2E_C7_PINNED_RUNTIME_MANIFEST" not in _C7_ENV
+    assert "E2E_C7_REBUILD_JOURNAL" not in _C7_ENV
+    accepted = _run_c7_environment_validation(_C7_ENV)
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout == "ENV_OK\n"
+
+
+@pytest.mark.parametrize(
+    "name", ["E2E_C7_EXPECTED_GIT_COMMIT", "E2E_C7_PLAYWRIGHT_IMAGE", "E2E_C7_UI_SERVICE"]
+)
+def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None:
+    """위 양성 결과가 '무엇이든 통과'가 아님을 같은 하네스로 보인다."""
+
+    env = {key: value for key, value in _C7_ENV.items() if key != name}
+    rejected = _run_c7_environment_validation(env)
+    assert rejected.returncode == 1
+    assert f"required env is missing: {name}" in rejected.stderr
+    assert "ENV_OK" not in rejected.stdout
