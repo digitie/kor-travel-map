@@ -72,8 +72,9 @@ ktm-dagster-storage migrate
   `reindex`를 실행하고, 설치된 Dagster가 기대하는 table·column·valid index와 필수 data
   migration marker가 **모두 있는지**(여분은 허용하는 부분집합 검사), `alembic_version`이
   정확히 이미지 head 한 행인지 확인한다. 이미 head인 DB에서는 Dagster migrate/reindex 외에
-  바뀌는 것이 없다. permit은 읽지 않는다 — Manager가 전환기 동안 permit 디렉터리와
-  `..._STORAGE_PERMIT_IMAGE_ID`/`..._STORAGE_CONFIG_SHA256`을 넣어도 무시한다.
+  바뀌는 것이 없다. permit은 읽지 않는다 — Manager는 ADR-51 D-3(2026-09-27)부터 permit
+  디렉터리와 `..._STORAGE_PERMIT_IMAGE_ID`/`..._STORAGE_CONFIG_SHA256`을 더 넣지 않는다(그 전에도
+  넣으면 무시했다). Map 자신의 compose(M05·로컬)에 남은 permit volume은 후속 정리 대상이다.
 - 명령의 stdout은 로그용 결과 JSON(`kor-travel-map.dagster-storage-migration.v4`,
   `schema`/`status`/`head`) 한 줄만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
   진단 출력은 전달하지 않는다. 실패는 DSN·비밀번호·token을 반사하지 않는 유형화된
@@ -655,9 +656,9 @@ permit 입력을 거부한다. bootstrap/application login을 metadata DSN으로
 `DAGSTER_HOME`·수동 명령으로 production을 기동하지 않는다.
 
 production은 일반 `docker compose up` 또는 직접 `dagster-webserver` 실행이 아니다. Docker
-Manager가 실제 candidate container image ID, paired receipt와 application/metadata permit을
-검증·결선한 뒤 같은 immutable image의 fixed absolute argv로 storage migration,
-webserver, daemon을 순서대로 기동한다.
+Manager가 핀된 pair의 candidate image를 빌드·대조한 뒤(ADR-51: 마이그레이션 전진, receipt·permit
+없음) 같은 immutable image로 storage migration one-shot, code-server, webserver, daemon을
+기동한다.
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 kor-travel-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
