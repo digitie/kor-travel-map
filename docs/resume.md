@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 (저녁) — ADR-069 배포 완료(t57d): D1·D2 GREEN
+
+**다음 한 작업: ADR-102/Manager ADR-51 단계 PR을 이어 간다** — Manager B2(마이그레이션 전진 본체,
+브랜치 `feat/migrate-forward-b2`) 적대 리뷰 → PR·CI·머지·설치 → 같은 pair 수렴 1회 → Map M1(storage
+one-shot 멱등) → M2 + 호스트 스크립트(H1) → B3 …. 순서 근거는 아래 2026-09-26(오후) 항목과 ADR-102.
+
+- **배포:** pair Map `6511441f` / PinVi `b227e77b`(pinset `e4909e26`), Manager `e891ec7`(#401).
+  chain17 t57d: rebuild success → repin verifier PASS → M01 ACL 40/40 → D1 11 passed → D2 passed.
+- **ADR-069 확인:** Map·PinVi code-server/webserver/daemon healthy, companion = owner 이미지, code location
+  LOADED(Map 48 jobs / PinVi 9 jobs), gRPC 12703/12803 loopback 전용(`[::ffff:127.0.0.1]`, 비-loopback 29개 거부).
+- **t57b·t57c:** 호스트 포화(BuildKit session healthcheck 실패 / 내가 journal 전 중단). 데이터 변경 없음.
+- **n150 디스크:** 캐시·재생성 가능 항목만 정리해 42G → 84G(82%), IO `full` 50~60% → 약 3%.
+  **소유자 판단 대기:** 백업·덤프 약 31GB, 다른 세션 작업 디렉터리 약 18.5GB.
+- **열린 것:** geo code-server `-h 0.0.0.0`(아래 2026-09-26 항목) 그대로.
+
 ## 2026-09-26 (오후) — t57a는 디스크 포화에 걸렸다 → 타임아웃 수정 후 재시도, 배포 모델은 마이그레이션 전진으로
 
 **다음 한 작업: Manager #401 설치 → 이 커밋(새 pinset)으로 chain17 → code location 로드 확인 →
