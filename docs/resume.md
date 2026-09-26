@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 (자정 무렵) — Manager B3: v8 journal이 코드에서 사라졌다
+
+**다음 한 작업: Manager ADR-51 C(락 통합)** → D(permit mount 제거, v6 쓰기 중단·M05 driver를
+`deploy-status.json`으로). B3의 선택 PR-4(launcher claim 해제 정리·실패 분류 이름)는 C에 합쳐도 된다.
+
+- **B3 PR-1 #405** carry-over·죽은 증거 생산자 삭제(−2.3k줄), **PR-2 #406** v8 journal 모델 삭제·공개 세대
+  리더는 v6 manifest만(−4.3k줄, `drift` 없음), **PR-3 #407** journal 시절 관리자 비밀번호 guard·preflight
+  상태 퇴역(backend+frontend). 셋 다 적대 리뷰 반영, n150 전체 pytest 초록.
+- **n150 설치(`95a82c67`)** 뒤 확인: `pin verify` 0(binding match), 공개 세대 리더 `ok/match/committed`
+  (옛 공개 v8 사본은 안 읽음), M05 rotation preflight 통과, 사라진 route 404, 같은 pair `converged` 45초.
+- **알려진 후속(B3 밖):** preflight §1이 늘 `EXECUTION_VERIFICATION_REQUIRED`/`LEGACY_SOURCE_TERMINAL`을 더해
+  `ok`가 나오지 않는다(잃는 보장 B의 후속). `deployment_readiness`가 더는 주입되지 않는 PinVi
+  `PINVI_ROLE_CATALOG_RESET_*`를 요구해 거짓 blocker를 낼 수 있다.
+
 ## 2026-09-26 (늦은 밤) — 단순화된 체인으로 첫 새 pair가 D1·D2까지 섰다
 
 **다음 한 작업: Manager B3(v8 journal·phase·evidence 클래스와 journal 전용 코드 삭제, 남은 리더를
