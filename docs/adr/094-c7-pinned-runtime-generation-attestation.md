@@ -1,6 +1,6 @@
 # ADR-094: C7 신뢰 경계를 compatible-pair manifest v4에서 pinned runtime generation v5 + rebuild journal v7로 옮긴다
 
-- 상태: accepted
+- 상태: superseded by [ADR-102](102-migrate-forward-deploys-and-seal-removal.md) (2026-09-26)
 - 날짜: 2026-08-20
 - 결정자: human, AI agent
 - 관계: [ADR-076](076-c6c-manifest-v4-map-runtime-provenance.md)을 대체한다.

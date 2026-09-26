@@ -1,5 +1,26 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-26 (오후) — 디스크가 포화된 호스트의 60초, 그리고 배포는 데이터를 지우지 않기로
+
+**t57a.** #399를 설치하고 새 pinset `8451c8a3`으로 chain17을 돌렸다. 후보 빌드 49분 뒤, journal을
+쓰기도 전에 `application_candidate`에서 죽었다. 이번에는 봉인된 stage 한 단어가 아니라 #399가 남긴
+원인 원문(비밀 가림)이 stderr에 있었다 — `docker run --network none … ktm-application-schema head`가
+60초 타임아웃. 같은 명령을 손으로 돌리니 정상 출력(`head: 400`)에 74초, `docker run --rm /bin/true`
+하나에 112초였다. n150의 SATA SSD는 92% 차 있고 `/proc/pressure/io`의 `full`이 5분 평균 50%다.
+컨테이너 하나 띄우는 데 1~2분이 드는 호스트에서 60초 정적 검사는 멈춤 감지가 아니라 오탐기다.
+같은 이유로 ADR-069 뒤 직렬이 된 Map `up --wait`(code-server → webserver → daemon)도 300초로는
+위험하다. 둘 다 올렸다(600초, 900초). 디스크 포화 자체는 열린 문제로 남긴다.
+
+**배포 모델.** 봉인·신뢰 릴리스 단순화 설계를 소유자에게 올렸고 잃는 보장 목록 전체가 승인됐다.
+하나는 설계의 전제를 바꿨다 — **DB를 배포마다 지우지 않는다.** 설계는 "새 pinset = DB 리셋"을
+깔고 있었는데, 재조사해 보니 journal 상태기계의 대부분이 그 리셋 때문에 존재했다(리셋 도중 죽으면
+어디서 재개하나, 이 DB가 이번 회차에 만든 그 DB인가). 리셋을 명시적 `--restart`로만 두면 재개도
+receipt도 permit도 필요 없어지고, 전역 상태 파일 하나(absent/in_progress/committed)와 멱등
+one-shot만 남는다. Map 쪽 결정은 ADR-102로 남겼다: migration forward-only, stamp bridge 없는
+재스쿼시 금지, storage one-shot 멱등화, 런타임 `verify-identity`·argv 봉인 제거(loopback 가드만),
+C7 attestation 체인 제거(ADR-094 대체). 대가도 함께 적어 두었다 — 배포가 더는 빈 DB 경로를 증명하지 않고,
+손으로 만든 drift가 살아남고, 낮은 head로는 되돌릴 수 없다.
+
 ## 2026-09-26 — 재구축은 Map code-server를 한 번도 띄운 적이 없었다
 
 어제 항목의 "재시도 예정"은 네 번 더 실패했다(t56c~t56h). 원인은 셋이 겹쳐 있었고, 봉인된

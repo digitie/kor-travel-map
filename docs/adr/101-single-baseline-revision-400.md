@@ -1,6 +1,8 @@
 # ADR-101 — `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다
 
 - 상태: Accepted (2026-09-23)
+- 부분 대체: "운영 중 아님·데이터 보존 없음" 전제와 "다시 접을 때" 절차는
+  [ADR-102](102-migrate-forward-deploys-and-seal-removal.md)로 superseded (2026-09-26)
 - 관련: ADR-090(역할 분리), ADR-100(단일 LOGIN), ADR-099(curation seal)
 
 ## 결정

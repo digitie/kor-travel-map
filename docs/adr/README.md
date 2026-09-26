@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-102.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-103.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -107,14 +107,15 @@
 | ADR-091 | Field override의 base/effective lineage 완결 | [091-field-override-base-effective-lineage.md](091-field-override-base-effective-lineage.md) |
 | ADR-092 | 큐레이션 membership과 자동 후보를 분리해 단일 쓰기 정본으로 만든다 | [092-curation-canonical-membership-and-candidates.md](092-curation-canonical-membership-and-candidates.md) |
 | ADR-093 | 수동 Feature 생성 origin과 identity를 별도 정본으로 둔다 | [093-manual-feature-origin-and-identity.md](093-manual-feature-origin-and-identity.md) |
-| ADR-094 | C7 신뢰 경계를 pinned runtime generation v5 + rebuild journal v7로 옮긴다 | [094-c7-pinned-runtime-generation-attestation.md](094-c7-pinned-runtime-generation-attestation.md) |
+| ADR-094 | C7 신뢰 경계를 pinned runtime generation v5 + rebuild journal v7로 옮긴다 (ADR-102로 superseded) | [094-c7-pinned-runtime-generation-attestation.md](094-c7-pinned-runtime-generation-attestation.md) |
 | ADR-095 | notice 발효 전 철회를 empty 효력 범위로 표현한다 | [095-notice-empty-validity-range.md](095-notice-empty-validity-range.md) |
 | ADR-096 | catalog identity는 자연키다 — migration은 Identity 대리키를 고정하지 않는다 | [096-catalog-identity-is-the-natural-key.md](096-catalog-identity-is-the-natural-key.md) |
 | ADR-097 | 수동/Provider 중복 판정과 소비자 참조 재결합을 append-only paired protocol로 둔다 | [097-manual-provider-dedup-paired-reconciliation.md](097-manual-provider-dedup-paired-reconciliation.md) |
 | ADR-098 | provider Feature identity는 `(dataset, kind, 자연키)`다 — source entity가 아니다 | [098-provider-feature-identity-axis.md](098-provider-feature-identity-axis.md) |
 | ADR-099 | causal seal은 행별 digest를 접는다 — 전 행 payload를 한 배열에 모으지 않는다 | [099-curation-seal-member-digest-fold.md](099-curation-seal-member-digest-fold.md) |
 | ADR-100 | DB LOGIN role를 3개(migrator/api_runtime/dagster_runtime)에서 1개(`ktm_feature_service`)로 통합한다 | [100-single-login-role-collapse.md](100-single-login-role-collapse.md) |
-| ADR-101 | `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다 | [101-single-baseline-revision-400.md](101-single-baseline-revision-400.md) |
+| ADR-101 | `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다 (전제·재접기 절차는 ADR-102로 superseded) | [101-single-baseline-revision-400.md](101-single-baseline-revision-400.md) |
+| ADR-102 | 배포는 마이그레이션 전진이다: DB를 보존하고, 배포 봉인과 attestation 체인을 걷어낸다 | [102-migrate-forward-deploys-and-seal-removal.md](102-migrate-forward-deploys-and-seal-removal.md) |
 
 ## 새 ADR 작성 규약
 
