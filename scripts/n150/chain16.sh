@@ -129,7 +129,7 @@ else
   echo "  BLOCKED 없음"
 fi
 # 종결되지 않은 작업(ACTIVE)이 남았으면 D2 러너가 operator recovery를 요구하며 멈춘다.
-[ -e "$R/ACTIVE.json" ] && die "ACTIVE.json이 남았다 — runbook §5의 operator recovery가 먼저다"
+{ [ -e "$R/ACTIVE.json" ] || [ -L "$R/ACTIVE.json" ]; } && die "ACTIVE.json이 남았다 — runbook §5의 operator recovery가 먼저다"
 
 say "H. D2 ($D2U)"
 # D1과 같은 체크아웃($NEW)의 러너를 돌린다. 경로는 인자로 넘긴다 — 종전처럼

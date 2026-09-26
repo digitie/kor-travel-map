@@ -138,8 +138,11 @@ def test_adjudicate_only_clears_a_lane_that_is_really_stopped() -> None:
     positions = [source.index(marker) for marker in order]
     assert positions == sorted(positions), positions
     assert 'exec 9>"$R/orchestrator.lock"' in source
-    assert "if len(residue) != 4:" in source
-    assert "if any(residue.values()):" in source
+    # 가드는 지워질 뿐 아니라 약해질 수도 있다(`|| true`, `exit 0`, raise → print).
+    assert "|| true" not in source
+    assert "exit 0" not in source.split('[[ -e "$B" ]] ||', 1)[1].split("\n", 1)[1]
+    assert "if len(residue) != 4:\n    raise SystemExit(" in source
+    assert "if any(residue.values()):\n    raise SystemExit(" in source
 
 
 def test_chain16_stops_before_d2_when_the_lane_is_not_clean() -> None:
@@ -147,6 +150,6 @@ def test_chain16_stops_before_d2_when_the_lane_is_not_clean() -> None:
     step = source[source.index('say "G. lane 정리"') : source.index('say "H. D2')]
     adjudicate = step.index("/root/adjudicate.sh")
     survives = step.index('[ -e "$R/BLOCKED.json" ] && die')
-    active = step.index('[ -e "$R/ACTIVE.json" ] && die')
+    active = step.index('[ -L "$R/ACTIVE.json" ]; } && die')
     # 판정 **뒤에** 남은 BLOCKED를 본다(앞에 두면 BLOCKED가 있는 모든 사이클이 죽는다).
     assert adjudicate < survives < active

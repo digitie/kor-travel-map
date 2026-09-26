@@ -1,10 +1,11 @@
 #!/bin/bash
-# rebuild가 가로지른 BLOCKED lane을 판정으로 정리한다.
+# 멈춘 BLOCKED lane을 판정으로 정리한다.
 #
-# `begin-recovery`는 BLOCKED의 execution identity와 현재 identity의 일치를 요구하는데
-# rebuild가 API 이미지를 바꾼다 — 즉 lane recovery가 구조적으로 불가능하다. 이때의 정본
-# 경로는 **잔여물을 직접 측정해 0임을 확인한 뒤** `clear-blocked`로 정리하고 증거를 남기는
-# 것이다. 잔여물이 하나라도 있으면 여기서 멈춘다.
+# 흔한 경우는 rebuild가 BLOCKED을 가로지른 것이다 — `begin-recovery`는 BLOCKED의 execution
+# identity와 현재 identity의 일치를 요구하는데 rebuild가 API 이미지를 바꾸므로 lane recovery가
+# 구조적으로 불가능하다. 정본 경로는 lane이 정말 멈췄는지(lock·ACTIVE·run 컨테이너) 보고
+# **잔여물을 직접 측정해 0임을 확인한 뒤** `clear-blocked`로 정리하고 증거를 남기는 것이다.
+# 무엇 하나라도 걸리면 여기서 멈춘다. 판정 기록은 execution 일치 여부를 함께 남긴다.
 #
 # 정본은 저장소의 `scripts/n150/adjudicate.sh`다(ADR-102 결정 6). 상태 helper는 D1·D2와 같은
 # 핀된 SHA의 평범한 체크아웃(`/home/digitie/ktm-c7-$E2E_C7_EXPECTED_GIT_COMMIT`)에서 부른다.
