@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-27 — 소스 봉인을 걷어냈다: SHA가 곧 증명, 이름 붙은 디렉터리가 곧 캐시
+
+Manager ADR-51 잃는 보장 E를 세 PR로 끝냈다. 순서는 이번에도 "읽는 쪽 먼저"였다. E-1에서 재구축의 Map 계약
+reader를 git이 아니라 파일 읽기로 옮겨 두지 않았다면, E-3에서 source가 `.git` 없는 archive가 되는 순간 모든
+재구축이 `candidate_contract`에서 죽었을 것이다 — 그런데 그 reader를 부르는 유일한 테스트는 함수를 통째로
+대역으로 바꾸고 있어서 CI는 초록이었을 것이다([낡은 테스트 대역이 계약 파손을 가린다]).
+
+E-2에서 M05는 archive가 아니라 실행별 checkout을 쓴다. PinVi attestation이 진짜 clean checkout과 Map의 service
+릴리스 blob을 요구하기 때문이다. 적대 리뷰가 잡은 가장 중요한 것은 테스트의 맹점이었다 — full-path harness의
+checkout 대역이 preflight 트리를 그대로 복사해서, body가 Map compose나 `--map-source-root`를 옛 트리로 되돌려도
+모든 테스트가 통과했다. 이제 두 checkout이 생긴 뒤 preflight 트리를 치워 버린다(변이 3종이 red).
+
+E-3의 해석 하나: "실행마다 fetch"를 "없을 때만 fetch, 같은 revision은 재사용"으로 읽었다. 디렉터리 이름이 SHA이니
+재사용이 곧 증명이고, 같은 pair 수렴이 네트워크 없이 끝난다. 대신 재사용이 git 없이 이뤄지므로 두 가지를 더했다 —
+이름을 붙이기 전에 `os.sync()`, 기록이 손상되면 거부하지 않고 다시 만들기(거부하면 수동 삭제 전까지 모든 재구축이
+막힌다). 또 `tarfile`의 `data` 필터가 디렉터리 mode를 적용하지 않아 M05의 umask 077을 따르면 이미지 안에 0700
+디렉터리가 구워질 뻔했다 — 디렉터리를 0755로 고정하고 변이로 확인했다.
+
+E-2 검증 삼아 실제 M05를 한 번 돌렸는데 claim 전 단계에서 거부됐다. E-2 탓이 아니라 Map #1259가 지운
+`docker-compose.local-dev.yml`과 옛 role을 M05 driver가 아직 쓴다 — 9월 23일 이후 M05 전체 실행은 가능하지 않았다.
+정기 게이트가 preflight까지만 보기 때문에 아무도 몰랐다.
+
 ## 2026-09-27 — 설치기를 1,887줄에서 196줄로: 레이아웃을 먼저 옮기고 나서 설치기를 바꿨다
 
 Manager ADR-51의 잃는 보장 D(설치기)를 끝냈다. D-1/D-2와 같은 순서를 따랐다 — **설치 root가 symlink여도

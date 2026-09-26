@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — Manager ADR-51 잃는 보장 E(소스 봉인 제거) 완료
+
+**다음 한 작업: Manager ADR-51 잃는 보장 G(실패 출력 스크럽)** — 닫힌 어휘를 원문 스크럽으로(#399가 1단계).
+그 뒤 compose 파생 규칙(결정 5), 그리고 **M05 격리 하네스의 Map ADR-100/101 대응**(아래).
+
+- **Manager**: E-1 #416(`ab20659b`, Map 계약 reader가 git 대신 source 트리 파일을 읽는다) → E-2 #417(`4fd1581e`,
+  M05 본문이 실행별 checkout `runtime/{map-src,pinvi-src}`에서 돈다 — PinVi attestation 때문에 archive가 아니다)
+  → E-3 #418(`13173cd9`, 재구축 source = `<state_root>/pinned-runtime-sources/<role>-<revision>/{tree,source.json}`,
+  없을 때만 depth-1 fetch + `git archive`, 있으면 git 0회, 손상되면 다시 만든다). n150 설치.
+- **n150 인수**: 매 단계 `pin verify` 0·M05 preflight 0·같은 pair 수렴 `converged`·컨테이너 42개 재생성 0. E-3 첫 수렴에서
+  archive source 둘이 생겼고(tree id = 핀 commit, g/o 쓰기 0, 디렉터리 0755, `.git` 없음) build context 경로가 바뀌었는데도
+  재생성 0, 두 번째 수렴은 `source.json`을 건드리지 않았다(git 0회). 옛 `<state_root>/pinned-runtime-sources-v5/`(827M)는
+  되돌림 하한용으로 남겼다(삭제 선택, Manager `prod-deployment.md` §8.1).
+- **발견 — M05 전체 실행이 Map #1259 이후 불가능하다.** E-2 검증용 실제 M05(`/root/m05-once-e2run`)가
+  `runtime_loopback_publish_config_invalid`로 claim 전 거부됐다(`preflight_rejected`, 실행권 소비 없음). 원인은 E-2가 아니라
+  Map #1259(2026-09-23, ADR-100 단일 LOGIN role·ADR-101 baseline 400)가 `docker-compose.local-dev.yml`을 지웠는데 M05 driver가
+  아직 그 파일과 옛 role(`ktm_feature_migrator`·`ktm_feature_api_runtime`)을 쓰기 때문이다. E-2의 checkout 자체(GitHub depth-1
+  fetch)는 n150에서 동작했다. 대응은 별도 작업이다.
+
 ## 2026-09-27 — Manager ADR-51 잃는 보장 D(설치기 단순화) 완료
 
 **다음 한 작업: Manager ADR-51 잃는 보장 E(소스 봉인 제거).** pinned runtime 소스의 워크트리 불변화·
