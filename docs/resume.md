@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — Manager ADR-51 C(락 통합) 완료: 파일 락은 G 하나
+
+**다음 한 작업: Manager ADR-51 D**(permit mount 제거, v6 manifest 쓰기 중단, M05 driver·`pin verify`·공개 세대
+API를 `deploy-status.json`으로). 선택으로 B3 PR-4(launcher claim 해제·실패 분류 이름 정리).
+
+- **C-1 #408** 한 획득 경로(CLI pin 변이의 락 없는 두 갈래 삭제, 실제 자식 프로세스 경합 검사) →
+  **C-2 #409** rehearsal의 UI/API·compose·legacy retire·관리자 비밀번호 `.env` 쓰기가 G로(잡혀 있으면 즉시
+  409 `MANAGER_MUTATION_ACTIVE`) → **C-3 #410** pinned lease P·env 파생 락·override 삭제.
+- n150 설치(`4d324926`) 뒤: 같은 pair 수렴 재구축 중 `lslocks`에 **G 하나만**, G를 쥔 동안 rehearsal 경로 즉시 거절,
+  `pin verify` 0. 남은 P 파일은 보유자 없음을 확인하고 지웠다.
+- **대가(설계대로):** 재구축·M05·설치 동안 UI 조작과 관리자 비밀번호 변경은 409다. UI가 G를 몇 ms 쥔 순간에
+  chain17 launcher가 시작되면 빠르게 실패하므로 다시 돌린다. **G를 손으로 잡을 때는 `flock(1)` 금지**(없는 G를
+  0644로 만들어 모든 변경이 멈춘다) — `/opt` venv의 `manager_mutation_lock()`으로만.
+
 ## 2026-09-26 (자정 무렵) — Manager B3: v8 journal이 코드에서 사라졌다
 
 **다음 한 작업: Manager ADR-51 C(락 통합)** → D(permit mount 제거, v6 쓰기 중단·M05 driver를
