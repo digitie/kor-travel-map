@@ -1,5 +1,56 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-26 — 재구축은 Map code-server를 한 번도 띄운 적이 없었다
+
+어제 항목의 "재시도 예정"은 네 번 더 실패했다(t56c~t56h). 원인은 셋이 겹쳐 있었고, 봉인된
+실패 출력 때문에 하나씩 벗겨 내는 데 사이클마다 1~2시간이 들었다.
+
+**1. PinVi가 먼저 막았다 — SQLAlchemy 2.1.0.** 같은 날 나온 2.1.0이 bare `postgresql://`
+URL의 기본 driver를 psycopg2에서 psycopg(v3)로 바꿨다. PinVi etl 이미지에는 psycopg2만 있어
+dagster-postgres의 동기 엔진이 `ModuleNotFoundError: psycopg`로 죽었다(새로 빌드한 webserver만,
+옛 이미지의 code-server·daemon은 멀쩡). Map #1265와 같은 무상한 핀 문제 — pinvi#565로 `<2.1`.
+
+**2. 내 비상 패치가 두 사이클을 날렸다.** 서비스를 살리려고 `/opt` compose의 webserver/daemon
+명령을 `-m`으로 되돌린 패치를 두 번 넣었는데 두 번째는 되돌리지 않았다. 그 상태로 t56g·t56h가
+돌았고, 새 이미지의 봉인 entrypoint가 `-m` argv를 fail-close해 compose up에서 죽었다. 그 사이클의
+journal은 패치본 compose sha(`9296daab…`)를 동결해 pinset `a7cc0414`는 재개 불가다. 신뢰 릴리스
+사본(`8ac4ed17…`)으로 원복했고, 이 커밋이 새 pinset을 만든다.
+
+**3. 근본 — `up --no-deps`가 depends_on을 지운다.** Manager의 pinned rebuild는 Map을
+`up -d --no-deps --wait kor-travel-map-ui kor-travel-map-dagster kor-travel-map-dagster-daemon`로
+띄운다. compose-go는 `--no-deps`에서 호출에 이름이 없는 서비스로의 간선을 지우므로, webserver가
+code-server에 `service_healthy`로 의존해도 code-server는 **기동되지 않는다**(dockerd 로그상 어떤
+재구축도 띄운 적 없음). 게다가 webserver healthcheck는 빈 `RepositoryConnection`도 통과시켜
+`--wait`가 초록이었고, D1의 Dagster 단언은 instance storage의 run 개수뿐이라 code location을 안
+본다 — 신뢰 compose로 돈 사이클이 끝까지 갔다면 저장소 0개인 Dagster가 GREEN으로 커밋됐을 것이다.
+PinVi code-server·daemon도 같은 이유로 재구축이 정지·재생성한 적이 없어 DB 리셋을 건너 옛
+이미지로 옛 코드를 서빙하고 있었다(어제 내가 수동으로 띄운 것).
+
+**수정(Manager #399).** slot 이미지를 그대로 쓰는 비-slot
+장기 실행 서비스를 frozen resolved compose에서 파생해("generation companion") owner slot과 같은
+stop/up/readiness/image 대조/secret inspection에 태운다. 실제 `docker compose config`로 세 개
+(Map code-server, PinVi code-server·daemon)가 나오는 것을 확인했다. 영속 포맷(v6 manifest, v8
+journal, 7-slot)은 그대로다. 같은 PR에서 봉인 단순화의 첫 걸음으로 `rebuild-pinned` 실패 시
+예외 체인 전체를 `.env` 비밀과 URL userinfo를 가려 stderr에 남긴다(JSON·종료코드는 그대로) —
+이번에는 원문을 보려고 설치본 `cli.py`에 계측을 심고 파괴적 재구축을 다시 돌려야 했다. 그리고
+PinVi code-server가 host network에서 `-h 0.0.0.0`으로 인증 없는 gRPC를 LAN에 열고 있어
+`127.0.0.1`로 묶었다.
+
+첫 커밋의 테스트는 반쪽이었다. 적대 리뷰가 companion 호출처 10곳 중 8곳은 하나씩 지워도 아무
+테스트도 안 깨진다는 것을 확인했다 — 이번 결함(호출 하나에서 이름이 빠짐)이 그대로 재발할 수 있는
+자리다. `cancel_probe_finalized`에서 commit까지, 이어서 committed 재개까지 도는 테스트를 더하고
+n150에서 변이 검사로 10곳 + one-shot 제외 규칙 + 프로세스 환경 리댁션 12개가 각각 빨개지는 것을
+봤다. 같은 규칙을 명령으로 검출하다 보니 **geo code-server도 host network에서 `0.0.0.0`**이었다.
+geo 이미지의 workspace host를 확인하기 전에는 못 바꾸므로 알려진 예외로 등록하고, 해소되면 예외를
+지우라고 빨개지게 했다.
+
+**봉인·신뢰 릴리스 단순화(소유자 지시).** 네 덩어리(설치기 1,887줄, 재구축 실패 봉인, pinset·
+journal·실행 레지스트리 결박, Map storage permit/receipt/intent)를 조사해 설계를 만들었다. 적대
+리뷰가 짚은 쟁점: UI/API 사용자가 compose env를 직접 편집하므로 C6c 보호 참조 표는 파생 규칙으로
+대체해야지 지우면 안 된다, 호스트 스크립트(repin.sh/gen_attest.py)가 v6/v8 파일에 묶여 있다,
+committed never-reset 가드는 DB identity 없이는 안전하지 않다, 매 배포 DB 리셋(destructive-by-default)
+자체가 상태기계의 근원이다. 잃는 보장 목록을 ADR로 올려 승인받은 뒤 단계적으로 진행한다.
+
 ## 2026-09-25 — ADR-069 code-server 분리: PinVi 활성화 + Map 전환(#1264/#397), 재구축 두 자리 수리
 
 **PinVi.** dagster-code-server + webserver(`-w workspace.yaml`) + daemon을 n150에
