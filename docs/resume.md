@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — Manager ADR-51 잃는 보장 D(설치기 단순화) 완료
+
+**다음 한 작업: Manager ADR-51 잃는 보장 E(소스 봉인 제거).** pinned runtime 소스의 워크트리 불변화·
+symlink·submodule 금지·로컬 origin 확인을 실행마다 `fetch` + `git archive <sha>`로 바꾼다. 그 뒤 G(실패
+출력 스크럽 — #399가 1단계), compose 파생 규칙(결정 5) 순서.
+
+- **Manager**: I-1 #414(`f0149db2`, 설치 root symlink의 소비자 이전) → n150 레이아웃 1회 전환 →
+  I-2 #415(`58d25ab0`, 설치기 1,887줄 → 196줄) 머지·n150 설치.
+- **n150 설치 방식이 바뀌었다**: `/opt/kor-travel-docker-manager` → 상대 symlink `ktdm-release-<sha>`,
+  release는 `/opt/ktdm-release-<sha>/`(직전 하나 보존). 설치는 **root 소유 clone**
+  `/var/lib/kor-travel-docker-manager/src`에서 `bash ~/install-mgr.sh <sha>`(헬퍼가 clone·checkout·
+  installer 실행) → `ktdctl pin rebind-execution` → `pin verify` 0. 설치기가 항상 backend를 재기동한다.
+  롤백은 옛 sha 재설치(손으로 symlink 넘기기 금지). 옛 설치기는 symlink 레이아웃을 해 없이 거부한다.
+- **n150 인수**: 설치·같은 sha 재설치(5초, 빌드 없음)·I-1 롤백 왕복 모두 `pin verify` 0·M05 preflight 0,
+  같은 pair 수렴 `converged`에 Manager 관리 컨테이너 42개 재생성 0, bind에 release 경로 0. release 크기
+  83MB(옛 설치본은 헬퍼의 프론트 빌드로 882MB).
+- **n150 디스크**: Tier 3(다른 세션 작업 디렉터리) 정리로 여유 102G → 117G. 소유자 판단 대기 항목 해소.
+
 ## 2026-09-27 — 봉인·신뢰 릴리스 단순화(Manager ADR-51 / Map ADR-102) 완료
 
 **다음 한 작업: 없음(이 프로그램은 끝났다).** 남은 것은 ADR-51이 "그 뒤 각자"로 둔 별개 항목 —
