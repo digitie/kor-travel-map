@@ -117,17 +117,36 @@ def test_adjudicate_clears_with_the_helper_of_the_plain_checkout() -> None:
         'SRC="/home/digitie/ktm-c7-${E2E_C7_EXPECTED_GIT_COMMIT:?E2E_C7_EXPECTED_GIT_COMMIT}"'
     )
     assert checkout in source
-    assert 'python3 -I -B "$HELPER" clear-blocked --path "$B"' in source
-    # 잔여물 실측이 clear-blocked보다 먼저다.
-    assert source.index("clear-blocked 금지") < source.index('"$HELPER" clear-blocked')
     for retired in ("E2E_C7_PINNED_RUNTIME_MANIFEST", "E2E_C7_REBUILD_JOURNAL", "host_attestation"):
         assert retired not in source
 
 
-def test_chain16_stops_before_d2_when_blocked_survives_adjudication() -> None:
+def test_adjudicate_only_clears_a_lane_that_is_really_stopped() -> None:
+    """순서가 곧 안전이다: lock → ACTIVE 없음 → run 컨테이너 없음 → 잔여물 실측 → 증거 →
+    clear-blocked. 러너와 같은 lock을 잡지 않으면 도는 run의 BLOCKED를 지울 수 있고,
+    ACTIVE를 보지 않으면 종결되지 않은 작업의 앵커를 지운다."""
+
+    source = _read("adjudicate.sh")
+    order = [
+        'flock -n 9 ||',
+        'if [[ -e "$R/ACTIVE.json" || -L "$R/ACTIVE.json" ]]; then',
+        "docker ps -aq --filter label=io.kortravelmap.admin-feature-acceptance.run-key",
+        "python3 - \"$RECORD\"",
+        'install -d -o root -g root -m 0700 "$ARCH"',
+        'python3 -I -B "$HELPER" clear-blocked --path "$B"',
+    ]
+    positions = [source.index(marker) for marker in order]
+    assert positions == sorted(positions), positions
+    assert 'exec 9>"$R/orchestrator.lock"' in source
+    assert "if len(residue) != 4:" in source
+    assert "if any(residue.values()):" in source
+
+
+def test_chain16_stops_before_d2_when_the_lane_is_not_clean() -> None:
     source = _read("chain16.sh")
-    lane = source.index('say "G. lane 정리"')
-    d2 = source.index('say "H. D2')
-    step = source[lane:d2]
-    assert "/root/adjudicate.sh" in step
-    assert '[ -e "$R/BLOCKED.json" ] && die' in step
+    step = source[source.index('say "G. lane 정리"') : source.index('say "H. D2')]
+    adjudicate = step.index("/root/adjudicate.sh")
+    survives = step.index('[ -e "$R/BLOCKED.json" ] && die')
+    active = step.index('[ -e "$R/ACTIVE.json" ] && die')
+    # 판정 **뒤에** 남은 BLOCKED를 본다(앞에 두면 BLOCKED가 있는 모든 사이클이 죽는다).
+    assert adjudicate < survives < active
