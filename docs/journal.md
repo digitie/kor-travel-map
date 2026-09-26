@@ -26,7 +26,7 @@ code-server에 `service_healthy`로 의존해도 code-server는 **기동되지 �
 PinVi code-server·daemon도 같은 이유로 재구축이 정지·재생성한 적이 없어 DB 리셋을 건너 옛
 이미지로 옛 코드를 서빙하고 있었다(어제 내가 수동으로 띄운 것).
 
-**수정(Manager `fix/pinned-rebuild-generation-companions`).** slot 이미지를 그대로 쓰는 비-slot
+**수정(Manager #399).** slot 이미지를 그대로 쓰는 비-slot
 장기 실행 서비스를 frozen resolved compose에서 파생해("generation companion") owner slot과 같은
 stop/up/readiness/image 대조/secret inspection에 태운다. 실제 `docker compose config`로 세 개
 (Map code-server, PinVi code-server·daemon)가 나오는 것을 확인했다. 영속 포맷(v6 manifest, v8
@@ -35,6 +35,14 @@ journal, 7-slot)은 그대로다. 같은 PR에서 봉인 단순화의 첫 걸음
 이번에는 원문을 보려고 설치본 `cli.py`에 계측을 심고 파괴적 재구축을 다시 돌려야 했다. 그리고
 PinVi code-server가 host network에서 `-h 0.0.0.0`으로 인증 없는 gRPC를 LAN에 열고 있어
 `127.0.0.1`로 묶었다.
+
+첫 커밋의 테스트는 반쪽이었다. 적대 리뷰가 companion 호출처 10곳 중 8곳은 하나씩 지워도 아무
+테스트도 안 깨진다는 것을 확인했다 — 이번 결함(호출 하나에서 이름이 빠짐)이 그대로 재발할 수 있는
+자리다. `cancel_probe_finalized`에서 commit까지, 이어서 committed 재개까지 도는 테스트를 더하고
+n150에서 변이 검사로 10곳 + one-shot 제외 규칙 + 프로세스 환경 리댁션 12개가 각각 빨개지는 것을
+봤다. 같은 규칙을 명령으로 검출하다 보니 **geo code-server도 host network에서 `0.0.0.0`**이었다.
+geo 이미지의 workspace host를 확인하기 전에는 못 바꾸므로 알려진 예외로 등록하고, 해소되면 예외를
+지우라고 빨개지게 했다.
 
 **봉인·신뢰 릴리스 단순화(소유자 지시).** 네 덩어리(설치기 1,887줄, 재구축 실패 봉인, pinset·
 journal·실행 레지스트리 결박, Map storage permit/receipt/intent)를 조사해 설계를 만들었다. 적대

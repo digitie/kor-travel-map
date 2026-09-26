@@ -2,7 +2,7 @@
 
 ## 2026-09-26 — ADR-069 재구축이 code-server를 한 번도 띄운 적이 없었다 → Manager 수정 후 재시도
 
-**다음 한 작업: Manager `fix/pinned-rebuild-generation-companions` 설치 → 이 커밋(새 pinset)으로
+**다음 한 작업: Manager #399 설치 → 이 커밋(새 pinset)으로
 chain17 → Map Dagster GraphQL로 code location 로드 확인 → D1/D2.** 그다음 봉인·신뢰 릴리스
 단순화(설계 완료, 잃는 보장 목록은 소유자 승인 대기).
 
@@ -22,9 +22,18 @@ chain17 → Map Dagster GraphQL로 code location 로드 확인 → D1/D2.** 그�
 
 ### 끝난 것
 
-- Manager 수정(generation companion: resolved compose에서 slot 이미지를 공유하는 비-slot 서비스를
+- Manager #399(generation companion: resolved compose에서 slot 이미지를 공유하는 비-slot 서비스를
   파생해 stop/up/readiness/image 대조에 태움, 영속 포맷 변경 없음) + 실패 원문을 `.env` 비밀을
   가려 stderr로(봉인 단순화 1단계) + PinVi code-server `-h 127.0.0.1`(인증 없는 gRPC LAN 노출 제거).
+  적대 리뷰가 "companion 호출처 10곳 중 8곳은 지워도 테스트가 안 깨진다"를 검증해, commit·committed
+  재개까지 도는 테스트를 더했다 — 변이 검사로 10곳 + one-shot 제외 + 프로세스 환경 리댁션 12/12가
+  각각 빨개지는 것을 확인했다.
+
+### 열린 것
+
+- **geo code-server가 host network에서 `-h 0.0.0.0`**(인증 없는 gRPC가 LAN에 열림). geo 이미지의
+  workspace.yaml이 어느 host로 붙는지 확인한 뒤 닫는다. Manager 테스트에 알려진 예외로 등록해
+  두었고, 해소되면 그 예외부터 지우라고 빨개진다.
 
 ## 2026-09-25 — ADR-069 code-server: PinVi 활성화 완료, Map은 merge+재설치 끝·재구축 진행 중
 
