@@ -67,8 +67,11 @@ API=$(docker ps -q --filter "label=com.docker.compose.service=$E2E_C7_MAP_API_SE
 [ -n "$API" ] || die "Map API 컨테이너를 찾지 못했다"
 IMG=$(docker inspect "$API" --format '{{.Image}}')
 SCRIPT=/tmp/m01_pf_$TAG.py
-sudo -u digitie git -C /tmp/ktm-lint fetch -q origin main
-sudo -u digitie git -C /tmp/ktm-lint show origin/main:scripts/m01_activation_preflight.py > "$SCRIPT"
+# 배포한 그 SHA에서 꺼낸다(step C가 ktm-c7-src를 $MAP으로 옮겼다). 종전처럼 공유 lint
+# 체크아웃의 fetch에 기대면 fetch가 실패해도(2026-09-26 t59a, `unresolved deltas`)
+# 조용히 옛 origin/main 사본으로 돈다.
+sudo -u digitie git -C /home/digitie/ktm-c7-src show "$MAP:scripts/m01_activation_preflight.py" \
+  > "$SCRIPT" || die "M01 preflight 스크립트를 $MAP 에서 꺼내지 못했다"
 chmod 0444 "$SCRIPT"
 python3 - "$API" "$IMG" "$SCRIPT" <<'PY'
 import json, os, subprocess, sys

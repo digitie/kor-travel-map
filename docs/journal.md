@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-26 (늦은 밤) — 봉인 없이 한 바퀴: 첫 새 pair가 D2까지 섰다
+
+M1(#1270)과 M2(#1272)를 머지하고 `/root` 호스트 스크립트를 머지 커밋에서 설치한 뒤, 새 pair(Map
+`031205ff`)를 단순화된 체인으로 처음 돌렸다. 회전 전 pair 계약 preflight(유지한 hard gate) → 전진 배포
+`deployed` → repin(원장 대조와 이미지 라벨뿐) → ACL 40/40 → D1 11 → **D2 passed**. 전진 배포는 DB를 지우지
+않았고(oid 그대로), M1의 storage one-shot이 처음으로 **이미 head인 영속 metadata DB 위에서** 돌았다.
+D2는 root 소유 스냅샷이 아니라 D1과 같은 git archive 체크아웃에서 돌았고, BLOCKED/result는 v4였다.
+
+M2에 붙인 `adjudicate.sh`(rebuild가 가로지른 BLOCKED 정리)는 호스트 사본을 옮기다 결함 셋을 드러냈다.
+옛 사본은 M2 뒤 늘 실패했고(퇴역한 env 키와 스냅샷 경로), 옮긴 판에도 적대 리뷰가 major 하나를 잡았다 —
+러너의 lock을 잡지 않고 ACTIVE·run 컨테이너를 보지 않아, timeout으로 죽은 D2의 BLOCKED(recover의 유일한
+앵커)를 지울 수 있었다. 재검증은 lint가 가드 **삭제**만 잡고 `|| true` 같은 **약화**는 놓친다는 것을 보였다.
+
+t59a 로그에는 작은 것이 하나 더 있었다. chain16 step E가 공유 체크아웃 `/tmp/ktm-lint`에서 `fetch` 뒤
+M01 preflight를 꺼내는데 fetch 실패(`unresolved deltas`)를 보지 않아, 옛 origin/main 사본이 조용히 돌았다.
+배포한 SHA에서 꺼내고 실패하면 멈추게 고쳤다.
+
 ## 2026-09-26 (밤) — 배포는 이제 DB를 지우지 않는다: Manager B2 설치, 같은 pair가 45초에 수렴했다
 
 Manager ADR-51 B2(#404)를 머지·설치했다. 재구축 본체가 v8 journal 상태기계에서 **마이그레이션 전진**으로
