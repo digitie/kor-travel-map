@@ -5295,6 +5295,90 @@ def _with_legacy_outbox(database: _FakeMetadataDatabase) -> _FakeMetadataDatabas
     return database
 
 
+_IMAGE_DAGSTER_HOME: Final = Path("/opt/dagster/dagster_home")
+_FAKE_METADATA_DSN: Final = "postgresql://redacted/metadata"
+_PERMIT_INPUT_CASES: Final = pytest.mark.parametrize(
+    "permit_inputs",
+    [
+        {},
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "sha256:" + "0" * 64,
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "f" * 64,
+        },
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "",
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "not-a-digest",
+        },
+    ],
+    ids=["absent", "stale", "malformed"],
+)
+
+
+def _seal_shipped_dagster_config_into_image_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    yaml_uid: int = 0,
+) -> bytes:
+    """이미지의 root 소유 봉인을 테스트 호스트에 재현한다.
+
+    이미지에는 root 소유 `/opt`·`/opt/dagster`·`/opt/dagster/dagster_home`과 그 안의
+    uid 0 · `0444` · nlink 1 `dagster.yaml`이 있다. 테스트 호스트에는 그 경로도 root
+    소유 파일도 없으므로 **그 네 경로의 `lstat`과 yaml `open`만** 저장소가 싣는
+    `docker/dagster.yaml`의 tmp 사본으로 돌린다. 그 밖의 봉인 검사
+    (`_require_migration_environment` → `_safe_dagster_config` →
+    `_validate_dagster_config`)는 진짜 코드가 돈다 — env 검증을 통째로 대역으로 바꾸면
+    permit env 검사가 그 안에 되살아나도 아래 검사가 초록으로 남는다.
+    """
+
+    raw = (ROOT / "docker" / "dagster.yaml").read_bytes()
+    shipped = tmp_path / "shipped-dagster.yaml"
+    shipped.write_bytes(raw)
+    real = os.stat(shipped)
+    image_yaml = _IMAGE_DAGSTER_HOME / "dagster.yaml"
+    image_directories = {Path("/opt"), Path("/opt/dagster"), _IMAGE_DAGSTER_HOME}
+    original_lstat = Path.lstat
+    original_open = os.open
+
+    def lstat(self: Path) -> os.stat_result:
+        if self in image_directories:
+            return os.stat_result((stat.S_IFDIR | 0o755, 1, 1, 2, 0, 0, 4096, 0, 0, 0))
+        if self == image_yaml:
+            return os.stat_result(
+                (
+                    stat.S_IFREG | 0o444,
+                    real.st_ino,
+                    real.st_dev,
+                    1,
+                    yaml_uid,
+                    0,
+                    real.st_size,
+                    0,
+                    0,
+                    0,
+                )
+            )
+        return original_lstat(self)
+
+    def open_(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if Path(path) == image_yaml:
+            return original_open(shipped, flags, *args, **kwargs)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(os, "open", open_)
+    return raw
+
+
+def _storage_environment(**extra: str) -> dict[str, str]:
+    return {
+        "PATH": os.environ["PATH"],
+        "DAGSTER_HOME": str(_IMAGE_DAGSTER_HOME),
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL": _FAKE_METADATA_DSN,
+        **extra,
+    }
+
+
 def _wire_storage_boundaries(
     monkeypatch: pytest.MonkeyPatch,
     module: Any,
@@ -5302,18 +5386,14 @@ def _wire_storage_boundaries(
 ) -> dict[str, list[object]]:
     """one-shot의 **외부 경계**만 대역으로 바꾼다.
 
-    바꾸는 것: 설치된 Dagster head·catalog 계약, 이미지 안 `dagster.yaml` 봉인(이
-    테스트 호스트에는 `/opt/dagster`가 없다), DB 연결, Dagster CLI subprocess,
+    바꾸는 것: 설치된 Dagster head·catalog 계약, DB 연결, Dagster CLI subprocess,
     `create_all` + stamp. 그 사이의 순서·가드·outbox 제거·부분집합 검사는 진짜 코드다.
+    env·`dagster.yaml` 검증도 대역이 아니다 — `main()`을 부르는 검사는
+    `_seal_shipped_dagster_config_into_image_paths`로 이미지 경로만 재현한다.
     """
 
     calls: dict[str, list[object]] = {"bootstrap": [], "instance_migrate": []}
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: _FAKE_DAGSTER_HEAD)
-    monkeypatch.setattr(
-        module,
-        "_require_migration_environment",
-        lambda _environment: ("postgresql://redacted/metadata", "production", "a" * 64),
-    )
     monkeypatch.setattr(
         module,
         "_dagster_metadata_contract",
@@ -5375,23 +5455,50 @@ def test_the_fake_metadata_database_enforces_the_outbox_drop_dependencies() -> N
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "permit_inputs",
-    [
-        {},
-        {
-            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "sha256:" + "0" * 64,
-            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "f" * 64,
-        },
-        {
-            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "",
-            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "not-a-digest",
-        },
-    ],
-    ids=["absent", "stale", "malformed"],
-)
+def test_the_image_seal_stand_in_still_runs_the_real_config_checks(
+    tmp_path: Path,
+) -> None:
+    """아래 env 검사의 전제 — 이미지 경로 재현이 봉인 검사를 건너뛰지 않는다.
+
+    같은 사본이라도 소유자가 root가 아니면 진짜 `_safe_dagster_config`가 거부해야 한다.
+    재현이 검사 자체를 우회하면 "진짜 코드가 돈다"는 말이 거짓이 된다.
+    """
+
+    module = _load_dagster_storage_module()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path, yaml_uid=999)
+        with pytest.raises(module.DagsterStorageMigrationError) as caught:
+            module._require_migration_environment(_storage_environment())
+
+    assert caught.value.code == "invalid_dagster_yaml"
+
+
+@pytest.mark.unit
+@_PERMIT_INPUT_CASES
+def test_dagster_storage_environment_validation_ignores_permit_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    permit_inputs: dict[str, str],
+) -> None:
+    """ADR-102: env·`dagster.yaml` 봉인은 permit 입력을 보지 않는다.
+
+    진짜 `_require_migration_environment`를 직접 부른다. permit env 검사가 그 안이나
+    `_safe_dagster_config` 안에 되살아나면 `stale`/`malformed`가 빨개진다.
+    """
+
+    module = _load_dagster_storage_module()
+    raw = _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+
+    assert module._require_migration_environment(
+        _storage_environment(**permit_inputs)
+    ) == (_FAKE_METADATA_DSN, "production", hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.unit
+@_PERMIT_INPUT_CASES
 def test_dagster_storage_migrates_a_fresh_database_without_any_permit(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     permit_inputs: dict[str, str],
 ) -> None:
@@ -5399,6 +5506,7 @@ def test_dagster_storage_migrates_a_fresh_database_without_any_permit(
 
     Manager는 전환기 동안 permit 디렉터리를 마운트하고 두 env를 넣을 수 있다. one-shot은
     그것을 **읽지 않는다** — 파일이 없어도, env가 낡았거나 깨져 있어도 결과가 같다.
+    env·`dagster.yaml` 검증은 대역이 아니라 진짜 코드가 돈다.
     """
 
     # 전제: 이 호스트에 permit 파일이 없다. 있으면 "없이 돈다"를 재지 못하므로 조용히
@@ -5407,9 +5515,8 @@ def test_dagster_storage_migrates_a_fresh_database_without_any_permit(
     module = _load_dagster_storage_module()
     database = _FakeMetadataDatabase()
     calls = _wire_storage_boundaries(monkeypatch, module, database)
-    monkeypatch.setattr(
-        module.os, "environ", {"PATH": os.environ["PATH"], **permit_inputs}
-    )
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment(**permit_inputs))
 
     exit_code = module.main(["migrate"])
     captured = capsys.readouterr()
@@ -5425,6 +5532,7 @@ def test_dagster_storage_migrates_a_fresh_database_without_any_permit(
 @pytest.mark.unit
 def test_dagster_storage_migrate_is_idempotent_on_the_same_database(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """배포마다 도는 one-shot — 두 번째 실행은 첫 실행이 만든 head DB를 거부하지 않는다.
@@ -5435,7 +5543,8 @@ def test_dagster_storage_migrate_is_idempotent_on_the_same_database(
     module = _load_dagster_storage_module()
     database = _FakeMetadataDatabase()
     calls = _wire_storage_boundaries(monkeypatch, module, database)
-    monkeypatch.setattr(module.os, "environ", {"PATH": os.environ["PATH"]})
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
 
     first_exit = module.main(["migrate"])
     first = capsys.readouterr()
@@ -5460,6 +5569,7 @@ def test_dagster_storage_migrate_is_idempotent_on_the_same_database(
 @pytest.mark.unit
 def test_dagster_storage_drops_the_legacy_operation_outbox(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """ADR-102 이전 이미지가 만든 head DB — outbox·trigger 함수가 치워지고 성공한다."""
@@ -5467,7 +5577,8 @@ def test_dagster_storage_drops_the_legacy_operation_outbox(
     module = _load_dagster_storage_module()
     database = _with_legacy_outbox(_metadata_database_at_head())
     calls = _wire_storage_boundaries(monkeypatch, module, database)
-    monkeypatch.setattr(module.os, "environ", {"PATH": os.environ["PATH"]})
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
 
     exit_code = module.main(["migrate"])
     captured = capsys.readouterr()
@@ -5495,6 +5606,7 @@ def test_dagster_storage_drops_the_legacy_operation_outbox(
 )
 def test_dagster_storage_refuses_an_application_database_before_any_write(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     schemas: set[str],
     version_rows: tuple[str, ...] | None,
@@ -5510,7 +5622,8 @@ def test_dagster_storage_refuses_an_application_database_before_any_write(
         _FakeMetadataDatabase(schemas=schemas, version_rows=version_rows)
     )
     calls = _wire_storage_boundaries(monkeypatch, module, database)
-    monkeypatch.setattr(module.os, "environ", {"PATH": os.environ["PATH"]})
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
 
     exit_code = module.main(["migrate"])
     captured = capsys.readouterr()
