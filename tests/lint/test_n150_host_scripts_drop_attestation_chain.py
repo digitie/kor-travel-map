@@ -153,3 +153,14 @@ def test_chain16_stops_before_d2_when_the_lane_is_not_clean() -> None:
     active = step.index('[ -L "$R/ACTIVE.json" ]; } && die')
     # 판정 **뒤에** 남은 BLOCKED를 본다(앞에 두면 BLOCKED가 있는 모든 사이클이 죽는다).
     assert adjudicate < survives < active
+
+
+def test_chain16_takes_the_m01_preflight_from_the_deployed_sha() -> None:
+    """공유 체크아웃(/tmp/ktm-lint)의 fetch는 실패해도 조용했고, 그때 옛 origin/main 사본이
+    돌았다. 배포한 SHA에서 꺼내고, 꺼내지 못하면 멈춘다."""
+
+    source = _read("chain16.sh")
+    step = source[source.index('say "E. M01 ACL preflight"') : source.index('say "F. D1"')]
+    assert "/tmp/ktm-lint" not in step
+    assert '"$MAP:scripts/m01_activation_preflight.py"' in step
+    assert 'die "M01 preflight 스크립트를 $MAP 에서 꺼내지 못했다"' in step

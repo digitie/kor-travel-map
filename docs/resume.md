@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 (늦은 밤) — 단순화된 체인으로 첫 새 pair가 D1·D2까지 섰다
+
+**다음 한 작업: Manager B3(v8 journal·phase·evidence 클래스와 journal 전용 코드 삭제, 남은 리더를
+`deploy-status.json`으로)** → C(락 통합) → D(permit mount 제거, v6 쓰기 중단). 순서는 Manager ADR-51 §순서.
+
+- **M1 #1270**(storage one-shot 멱등) · **M2 #1272**(C7/D2 attestation 체인 제거 + `scripts/n150/`, `adjudicate.sh`
+  포함) 머지. `/root` 호스트 스크립트를 머지 커밋 `031205ff`에서 설치(옛 사본 `/root/host-scripts-pre-m2-*`).
+- **t59a(Map `031205ff`, pinset `be344a89`)**: pair 계약 preflight → 회전 → 전진 배포 `deployed`(DB oid 그대로,
+  경고 없음) → ADR-069 PASS → repin → ACL 40/40 → **D1 11 passed → D2 passed(v4)**, lane 깨끗.
+- **n150 디스크:** 백업·덤프 약 31GB도 정리(소유자 승인) → 여유 111G(76%). geo 백업은 geo janitor로.
+- **남은 판단:** 다른 세션 작업 디렉터리 약 18.5GB(지우지 않음).
+- **작은 결함 하나 고침(이 PR):** chain16 step E가 공유 체크아웃 `/tmp/ktm-lint`의 fetch 실패를 검사하지 않아
+  t59a에서 옛 origin/main 사본의 M01 preflight가 돌았다 → 배포한 SHA에서 꺼내고 실패하면 멈춘다.
+
 ## 2026-09-26 (밤) — Manager B2(마이그레이션 전진) 설치, 같은 pair 수렴 확인
 
 **다음 한 작업: Map M1(#1270, storage one-shot 멱등) CI → 머지, M2(C7/D2 attestation 체인 제거 +
