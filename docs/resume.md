@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 (밤) — Manager B2(마이그레이션 전진) 설치, 같은 pair 수렴 확인
+
+**다음 한 작업: Map M1(#1270, storage one-shot 멱등) CI → 머지, M2(C7/D2 attestation 체인 제거 +
+`scripts/n150/`) 적대 리뷰 반영 → PR → 머지 → 호스트 스크립트 설치(H1).** 그 뒤 첫 새 pair를 새 체인으로
+돌려 D1/D2를 확인한다. 그다음 Manager B3(v8·journal 클래스 삭제) → C → D.
+
+- **Manager B2 #404(`13e744b`)** 머지·n150 설치·`pin rebind-execution` 완료. 적대 리뷰 3회(1차 major 2 +
+  2차에서 1차 수정이 만든 major 2 + 3차 minor 2) 반영, 변이 18/18.
+- **첫 전진 배포(t58a):** carry-over 대신 기준선 없는 전체 경로(옛 계약 v8 journal 62개가 읽히지 않음) —
+  리셋 없음, DB oid 그대로, ADR-069 PASS, D1 11 passed. **t58b: `converged` 45초.**
+- **주의:** 새 pair는 아직 chain17로 돌리지 말 것 — B2가 v8 journal을 쓰지 않으므로 chain16의 repin
+  (gen_attest)이 실패한다. M2 + H1 뒤다. 같은 pair 재실행은 launcher(`run-pinned-rebuild-once`)로 수렴한다.
+- **소유자 판단 대기(유지):** n150 백업·덤프 약 31GB, 다른 세션 작업 디렉터리 약 18.5GB.
+
 ## 2026-09-26 (저녁) — ADR-069 배포 완료(t57d): D1·D2 GREEN
 
 **다음 한 작업: ADR-102/Manager ADR-51 단계 PR을 이어 간다** — Manager B2(마이그레이션 전진 본체,
