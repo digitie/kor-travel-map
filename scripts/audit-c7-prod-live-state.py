@@ -108,7 +108,9 @@ def _lock_is_active(lock_path: Path) -> bool:
 
 
 # evidence manifest는 attested document 구성이 바뀔 때 version을 올린다.
-# v1 = v4 compatible-pair 시절, v2 = v5 pinned generation + v7 rebuild journal.
+# v1 = v4 compatible-pair 시절, v2 = v5 pinned generation + v7 rebuild journal,
+# v3 = ADR-102 결정 6 이후 — attested document가 없다. v1·v2는 host에 남은 과거
+# archive를 위해 legacy로 인정하되 그 시절 계약으로 그대로 검사한다.
 _EVIDENCE_DIGEST_KEYS: Final[dict[int, tuple[str, ...]]] = {
     1: ("compatible_pair_manifest_sha256", "host_attestation_sha256"),
     2: (
@@ -116,6 +118,7 @@ _EVIDENCE_DIGEST_KEYS: Final[dict[int, tuple[str, ...]]] = {
         "rebuild_journal_sha256",
         "host_attestation_sha256",
     ),
+    3: (),
 }
 _EVIDENCE_ATTESTED_FILES: Final[dict[int, tuple[tuple[str, str], ...]]] = {
     1: (
@@ -127,6 +130,7 @@ _EVIDENCE_ATTESTED_FILES: Final[dict[int, tuple[tuple[str, str], ...]]] = {
         ("pinned-runtime-generation.json", "pinned_runtime_manifest_sha256"),
         ("pinned-runtime-rebuild.json", "rebuild_journal_sha256"),
     ),
+    3: (),
 }
 _EVIDENCE_COMMON_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -612,6 +616,8 @@ def audit_state_root(root: Path) -> AuditResult:
             (
                 ".state.",
                 "cap.",
+                # 아래 셋은 ADR-102 이전 러너가 만들던 attested input 사본이다. 새 러너는
+                # 만들지 않지만 옛 잔여물은 여전히 복구 대상으로 센다.
                 "attestation-",
                 "pinned-runtime-generation-",
                 "pinned-runtime-rebuild-",

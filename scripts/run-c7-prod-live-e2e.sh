@@ -2,16 +2,19 @@
 
 # 이 orchestrator는 n150의 docker compose project 디렉터리에서 실행한다. 실제
 # host, URL, secret, compose service 이름에는 기본값을 두지 않는다.
+#
+# 러너 자체는 핀된 SHA의 평범한 체크아웃(`git archive`)에서 돈다(ADR-102 결정 6).
+# root 소유 스냅샷·host attestation·Manager의 manifest/journal은 더 읽지 않는다 —
+# Manager가 이미 모든 컨테이너 image를 핀된 세대와 대조한다. 여기서는 caller env와
+# `docker inspect`로 잴 수 있는 기능 전제만 본다(`lib/c7_prod_runtime.py`).
 set +x
 set -euo pipefail
 umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 readonly COMPOSE_PROJECT_DIR="$PWD"
 readonly SAFE_DAGSTER_JOB="feature_update_request_worker"
 readonly SAFE_SCHEDULE="feature_weather_kma_short_forecast_hourly_schedule"
-readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/c7-prod-live-e2e-attestation.json"
 readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
 readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 STATE_ROOT=""
@@ -30,8 +33,6 @@ POI_STATE_FILE=""
 RUNTIME_DIR=""
 PLAYWRIGHT_IMAGE_ID=""
 REPOSITORY_COMMIT=""
-PINNED_RUNTIME_MANIFEST_SHA256=""
-REBUILD_JOURNAL_SHA256=""
 ALEMBIC_HEAD=""
 ACTIVE_COMMAND_PID=""
 ACTIVE_COMMAND_PGID=""
@@ -39,10 +40,6 @@ ACTIVE_CID_FILE=""
 ACTIVE_CONTAINER_REF_FILE=""
 ACTIVE_CREATE_OUTCOME_FILE=""
 ACTIVE_CONTAINER_NAME=""
-HOST_ATTESTATION_SHA256=""
-HOST_ATTESTATION_SNAPSHOT=""
-PINNED_RUNTIME_MANIFEST_SNAPSHOT=""
-REBUILD_JOURNAL_SNAPSHOT=""
 
 die() {
   printf 'C7 prod live E2E orchestrator failed: %s (values redacted)\n' "$1" >&2
@@ -233,83 +230,6 @@ validate_service_env() {
     die "invalid compose service env: $name"
 }
 
-snapshot_attested_inputs() {
-  HOST_ATTESTATION_SNAPSHOT="$STATE_ROOT/attestation-$$.json"
-  PINNED_RUNTIME_MANIFEST_SNAPSHOT="$STATE_ROOT/pinned-runtime-generation-$$.json"
-  REBUILD_JOURNAL_SNAPSHOT="$STATE_ROOT/pinned-runtime-rebuild-$$.json"
-  python3 - \
-    "$HOST_ATTESTATION_FILE" \
-    "$HOST_ATTESTATION_SNAPSHOT" \
-    "$HOST_ATTESTATION_SHA256" \
-    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
-    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
-    "$PINNED_RUNTIME_MANIFEST_SHA256" \
-    "$E2E_C7_REBUILD_JOURNAL" \
-    "$REBUILD_JOURNAL_SNAPSHOT" \
-    "$REBUILD_JOURNAL_SHA256" <<'PY'
-import hashlib
-import os
-import stat
-import sys
-from pathlib import Path
-
-pairs = zip(sys.argv[1::3], sys.argv[2::3], sys.argv[3::3], strict=True)
-created: list[Path] = []
-try:
-    for source_raw, destination_raw, expected_sha256 in pairs:
-        source = Path(source_raw)
-        destination = Path(destination_raw)
-        source_fd = os.open(source, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-        try:
-            observed = os.fstat(source_fd)
-            if (
-                not stat.S_ISREG(observed.st_mode)
-                or observed.st_uid != 0
-                or observed.st_gid != 0
-                or stat.S_IMODE(observed.st_mode) != 0o600
-            ):
-                raise RuntimeError("unsafe attested input")
-            chunks = []
-            while chunk := os.read(source_fd, 1024 * 1024):
-                chunks.append(chunk)
-            payload = b"".join(chunks)
-        finally:
-            os.close(source_fd)
-        if hashlib.sha256(payload).hexdigest() != expected_sha256:
-            raise RuntimeError("attested input changed after preflight")
-        destination_fd = os.open(
-            destination,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
-            0o600,
-        )
-        created.append(destination)
-        try:
-            os.fchown(destination_fd, 0, 0)
-            os.fchmod(destination_fd, 0o600)
-            offset = 0
-            while offset < len(payload):
-                offset += os.write(destination_fd, payload[offset:])
-            os.fsync(destination_fd)
-        finally:
-            os.close(destination_fd)
-    directory_fd = os.open(
-        Path(sys.argv[2]).parent,
-        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-    )
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
-except Exception:
-    for path in created:
-        try:
-            path.unlink()
-        except OSError:
-            pass
-    raise
-PY
-}
-
 preserve_evidence() {
   local status="$1"
   local temporary
@@ -330,13 +250,7 @@ preserve_evidence() {
     "$ORCHESTRATOR_VERIFIED" \
     "$REPOSITORY_COMMIT" \
     "$PLAYWRIGHT_IMAGE_ID" \
-    "$PINNED_RUNTIME_MANIFEST_SHA256" \
-    "$REBUILD_JOURNAL_SHA256" \
-    "$ALEMBIC_HEAD" \
-    "$HOST_ATTESTATION_SHA256" \
-    "$HOST_ATTESTATION_SNAPSHOT" \
-    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
-    "$REBUILD_JOURNAL_SNAPSHOT" <<'PY'
+    "$ALEMBIC_HEAD" <<'PY'
 import hashlib
 import json
 import os
@@ -357,13 +271,7 @@ from pathlib import Path
     verified_raw,
     repository_commit,
     playwright_image_id,
-    pinned_runtime_manifest_sha256,
-    rebuild_journal_sha256,
     alembic_head,
-    host_attestation_sha256,
-    host_attestation_raw,
-    pinned_runtime_manifest_raw,
-    rebuild_journal_raw,
 ) = sys.argv[1:]
 destination = Path(destination_raw)
 runtime = Path(runtime_raw) if runtime_raw else None
@@ -388,24 +296,6 @@ for name, raw in (
     source = Path(raw) if raw else None
     if source is not None and source.exists():
         copy_regular(source, destination / "journals" / name)
-
-attested_evidence = (
-    ("runtime-attestation.json", host_attestation_raw, host_attestation_sha256),
-    (
-        "pinned-runtime-generation.json",
-        pinned_runtime_manifest_raw,
-        pinned_runtime_manifest_sha256,
-    ),
-    ("pinned-runtime-rebuild.json", rebuild_journal_raw, rebuild_journal_sha256),
-)
-for name, raw, _expected in attested_evidence:
-    copy_regular(Path(raw), destination / name)
-
-if any(
-    hashlib.sha256((destination / name).read_bytes()).hexdigest() != expected
-    for name, _raw, expected in attested_evidence
-):
-    raise RuntimeError("attested evidence snapshot hash mismatch")
 
 if runtime is not None and runtime.exists():
     playwright = runtime / "playwright"
@@ -439,18 +329,17 @@ for path in sorted(destination.rglob("*")):
                 "size": path.stat().st_size,
             }
         )
+# v3 = ADR-102 결정 6 이후. attested document(host attestation·v6 manifest·v8
+# journal)가 사라졌으므로 그 digest와 사본도 싣지 않는다.
 manifest = {
     "alembic_head": alembic_head,
-    "pinned_runtime_manifest_sha256": pinned_runtime_manifest_sha256,
-    "rebuild_journal_sha256": rebuild_journal_sha256,
     "files": files,
     "finished_at": datetime.now(UTC).isoformat(),
     "orchestrator_verified": verified_raw == "1",
-    "host_attestation_sha256": host_attestation_sha256,
     "playwright_image_id": playwright_image_id,
     "repository_commit": repository_commit,
     "status": int(status_raw),
-    "version": 2,
+    "version": 3,
 }
 manifest_path = destination / "manifest.json"
 manifest_path.write_text(
@@ -514,13 +403,6 @@ finish() {
   if ((
     status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
       container_clean == 1 && evidence_preserved == 1
-  )); then
-    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
-      "$REBUILD_JOURNAL_SNAPSHOT" || status=1
-  fi
-  if ((
-    status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
-      container_clean == 1 && evidence_preserved == 1
   )) &&
     [[ -n "$RUNTIME_DIR" ]] && runtime_is_private_direct_child; then
     rm -rf -- "$RUNTIME_DIR" || status=1
@@ -564,6 +446,8 @@ create_blocked_sentinel() {
 }
 
 has_residual_state() {
+  # attestation-*/compatible-pair-*/pinned-runtime-* 사본은 ADR-102 이전 러너만 만든다.
+  # 이 러너는 더 만들지 않지만, 옛 러너가 남긴 잔여물은 여전히 복구 대상이다.
   compgen -G "$STATE_ROOT/run-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/schedule-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/kma-*.json" >/dev/null ||
@@ -599,157 +483,52 @@ require_command timeout
 docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable"
 (( EUID == 0 )) || die "production live runner requires root execution"
 
-require_env E2E_BASE_URL
-require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
-require_env E2E_DAGSTER_URL
-require_env E2E_ADMIN_PASSWORD
-require_env E2E_DAGSTER_JOB
-require_env E2E_C7_SCHEDULE
-require_env E2E_C7_EXPECTED_GIT_COMMIT
-require_env E2E_C7_PINNED_RUNTIME_MANIFEST
-require_env E2E_C7_REBUILD_JOURNAL
-require_env E2E_C7_PLAYWRIGHT_IMAGE
-validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
-validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
-validate_sha256_env E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
-validate_service_env E2E_C7_DAGSTER_WEB_SERVICE
-validate_service_env E2E_C7_DAGSTER_DAEMON_SERVICE
-validate_service_env E2E_C7_UI_SERVICE
-validate_service_env E2E_C7_MAP_API_SERVICE
-validate_service_env E2E_C7_PINVI_API_SERVICE
-validate_service_env E2E_C7_PINVI_WEB_SERVICE
-validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
+# env 계약은 이 함수 하나다. 단위 테스트가 이 정의를 그대로 떼어 실행한다.
+validate_environment() {
+  require_env E2E_BASE_URL
+  require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
+  require_env E2E_DAGSTER_URL
+  require_env E2E_ADMIN_PASSWORD
+  require_env E2E_DAGSTER_JOB
+  require_env E2E_C7_SCHEDULE
+  require_env E2E_C7_EXPECTED_GIT_COMMIT
+  require_env E2E_C7_PLAYWRIGHT_IMAGE
+  validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
+  validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
+  validate_sha256_env E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
+  validate_service_env E2E_C7_DAGSTER_WEB_SERVICE
+  validate_service_env E2E_C7_DAGSTER_DAEMON_SERVICE
+  validate_service_env E2E_C7_UI_SERVICE
+  validate_service_env E2E_C7_MAP_API_SERVICE
+  validate_service_env E2E_C7_PINVI_API_SERVICE
+  validate_service_env E2E_C7_PINVI_WEB_SERVICE
+  validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
 
-[[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
-  die "expected Git commit is invalid"
-[[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
-  die "Playwright executor must be an immutable image ID"
-[[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
-  die "pinned runtime manifest path must be absolute"
-[[ "$E2E_C7_REBUILD_JOURNAL" == /* ]] ||
-  die "pinned runtime rebuild journal path must be absolute"
+  [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+    die "expected Git commit is invalid"
+  [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    die "Playwright executor must be an immutable image ID"
 
-require_enabled E2E_LIVE_ALLOW_PROD
-require_enabled E2E_ADMIN_WRITE
-require_enabled E2E_C7_READ_AUTH_WRITE
-require_enabled E2E_KMA_SCOPE_WRITE
-require_enabled E2E_DAGSTER_WRITE
-require_enabled E2E_DAGSTER_RUN
-require_enabled E2E_QUEUE_SENSOR_BARRIER
+  require_enabled E2E_LIVE_ALLOW_PROD
+  require_enabled E2E_ADMIN_WRITE
+  require_enabled E2E_C7_READ_AUTH_WRITE
+  require_enabled E2E_KMA_SCOPE_WRITE
+  require_enabled E2E_DAGSTER_WRITE
+  require_enabled E2E_DAGSTER_RUN
+  require_enabled E2E_QUEUE_SENSOR_BARRIER
 
-[[ "$E2E_DAGSTER_JOB" == "$SAFE_DAGSTER_JOB" ]] ||
-  die "E2E_DAGSTER_JOB is not the allowlisted update-request worker"
-[[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
-  die "E2E_C7_SCHEDULE is not the allowlisted KMA schedule"
-
-run_verified_attestation_module() {
-  python3 -I -B - \
-    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
-    "$HOST_ATTESTATION_FILE" \
-    "$REPO_ROOT" \
-    "$E2E_C7_EXPECTED_GIT_COMMIT" \
-    "$@" <<'PY'
-import hashlib
-import json
-import os
-import stat
-import sys
-from pathlib import Path
-
-module_path = Path(sys.argv[1])
-attestation_path = Path(sys.argv[2])
-snapshot_root = Path(sys.argv[3])
-commit = sys.argv[4]
-module_arguments = sys.argv[5:]
-expected_root = Path("/usr/local/lib/kor-travel-map/c7-runner") / commit
-expected_module = expected_root / "scripts/lib/c7_prod_attestation.py"
-expected_paths = {
-    "scripts/audit-c7-prod-live-state.py",
-    "scripts/lib/c7-prod-runner-lifecycle.sh",
-    "scripts/lib/c7_prod_attestation.py",
-    "scripts/run-c7-prod-live-e2e.sh",
+  [[ "$E2E_DAGSTER_JOB" == "$SAFE_DAGSTER_JOB" ]] ||
+    die "E2E_DAGSTER_JOB is not the allowlisted update-request worker"
+  [[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
+    die "E2E_C7_SCHEDULE is not the allowlisted KMA schedule"
 }
 
+validate_environment
 
-def safe_file(path: Path, mode: int) -> bytes:
-    if not path.is_absolute():
-        raise RuntimeError("non-absolute bootstrap input")
-    for parent in path.parents:
-        observed_parent = parent.lstat()
-        if (
-            not stat.S_ISDIR(observed_parent.st_mode)
-            or parent.is_symlink()
-            or observed_parent.st_uid != 0
-            or observed_parent.st_gid != 0
-            or stat.S_IMODE(observed_parent.st_mode) & 0o022
-        ):
-            raise RuntimeError("unsafe bootstrap ancestor")
-    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    try:
-        observed = os.fstat(descriptor)
-        if (
-            not stat.S_ISREG(observed.st_mode)
-            or observed.st_uid != 0
-            or observed.st_gid != 0
-            or stat.S_IMODE(observed.st_mode) != mode
-        ):
-            raise RuntimeError("unsafe bootstrap file")
-        chunks = []
-        while chunk := os.read(descriptor, 1024 * 1024):
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
-        os.close(descriptor)
-
-
-if snapshot_root != expected_root or module_path != expected_module:
-    raise SystemExit(1)
-try:
-    module_bytes = safe_file(module_path, 0o555)
-    attestation = json.loads(safe_file(attestation_path, 0o600))
-    orchestrator_files = attestation.get("orchestrator_files")
-    if (
-        attestation.get("repository_commit") != commit
-        or not isinstance(orchestrator_files, dict)
-        or set(orchestrator_files) != expected_paths
-        or orchestrator_files["scripts/lib/c7_prod_attestation.py"]
-        != hashlib.sha256(module_bytes).hexdigest()
-    ):
-        raise RuntimeError("attestation bootstrap mismatch")
-    sys.argv = [str(module_path), *module_arguments]
-    exec(
-        compile(module_bytes, str(module_path), "exec"),
-        {
-            "__builtins__": __builtins__,
-            "__file__": str(module_path),
-            "__name__": "__main__",
-            "__package__": None,
-        },
-    )
-except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
-    raise SystemExit(1)
-PY
-}
-
-verify_root_owned_orchestrator_snapshot() {
-  run_verified_attestation_module \
-    snapshot \
-    "$REPO_ROOT" \
-    "${BASH_SOURCE[0]}" \
-    "$SCRIPT_DIR/audit-c7-prod-live-state.py" \
-    "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh" \
-    "$SCRIPT_DIR/lib/c7_prod_attestation.py" \
-    "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_EXPECTED_GIT_COMMIT" || return 1
-  REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"
-}
-
-verify_trusted_runtime_attestation() {
-  run_verified_attestation_module \
-    runtime \
-    "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
-    "$E2E_C7_REBUILD_JOURNAL" \
+# origin 세 개, compose service 일곱의 상태·cursor secret·Map image revision, executor
+# image label을 caller env와 `docker inspect`로 대조한다. Manager 파일은 읽지 않는다.
+verify_runtime_preflight() {
+  python3 -I -B "$SCRIPT_DIR/lib/c7_prod_runtime.py" runtime \
     "$COMPOSE_PROJECT_DIR" \
     "$PLAYWRIGHT_BASE_IMAGE"
 }
@@ -772,7 +551,7 @@ if (
 ):
     raise SystemExit(2)
 host = parsed.hostname.rstrip(".").lower()
-# c7_prod_attestation.py::_public_origin과 동일한 netloc 정규화를 미러링해(#805),
+# lib/c7_prod_runtime.py::_public_origin과 동일한 netloc 정규화를 미러링해(#805),
 # IPv6 Dagster URL에서 생성 해시와 verifier 해시가 divergence하지 않게 한다.
 if host == "localhost" or host.endswith(".localhost") or "%" in host:
     raise SystemExit(2)
@@ -1185,42 +964,18 @@ PY
 # 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다. UI login은
 # session/auth audit를 만들 수 있으나 provider/request/POI/schedule mutation은 하지 않는다.
 # 고정 C7 상태 root와 BLOCKED sentinel은 모든 실행 identity 검증 뒤에만 만든다.
-verify_root_owned_orchestrator_snapshot ||
-  die "runner is not the attested root-owned exact commit snapshot"
 source "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh"
-mapfile -t runtime_attestation_output < <(verify_trusted_runtime_attestation 2>/dev/null) ||
-  die "trusted host/runtime/pinned-generation attestation failed"
-(( ${#runtime_attestation_output[@]} == 3 )) ||
-  die "trusted runtime attestation output cardinality is invalid"
-PINNED_RUNTIME_MANIFEST_SHA256="${runtime_attestation_output[0]}"
-REBUILD_JOURNAL_SHA256="${runtime_attestation_output[1]}"
-HOST_ATTESTATION_SHA256="${runtime_attestation_output[2]}"
-[[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "pinned runtime manifest attestation output is invalid"
-[[ "$REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "pinned runtime rebuild journal attestation output is invalid"
-[[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "host runtime attestation output is invalid"
+verify_runtime_preflight 2>/dev/null ||
+  die "runtime origin/compose/executor preflight failed"
+REPOSITORY_COMMIT="$E2E_C7_EXPECTED_GIT_COMMIT"
 PLAYWRIGHT_IMAGE_ID="$E2E_C7_PLAYWRIGHT_IMAGE"
 actual_dagster_origin_sha256="$(canonical_dagster_graphql_sha256)" ||
   die "Dagster GraphQL HTTPS endpoint canonicalization failed"
 [[ "$actual_dagster_origin_sha256" == "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" ]] ||
   die "Dagster GraphQL endpoint origin attestation mismatch"
-ALEMBIC_HEAD="$(verify_alembic_state)"
+ALEMBIC_HEAD="$(verify_alembic_state)" ||
+  die "Map API Alembic current/head/check verification failed"
 [[ -n "$ALEMBIC_HEAD" ]] || die "Alembic head measurement is empty"
-attested_map_application_head="$(
-  python3 -I -B - "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(payload["active_generation"]["map_application_head"])
-PY
-)" || die "pinned generation schema head read failed"
-[[ "$ALEMBIC_HEAD" == "$attested_map_application_head" ]] ||
-  die "Map application schema head does not match the pinned generation" ||
-  die "Map API Alembic current/head/check attestation failed"
 [[ "$ALEMBIC_HEAD" =~ ^[0-9A-Za-z_]+$ ]] || die "Alembic head output is invalid"
 web_cap="$(read_cap "$E2E_C7_DAGSTER_WEB_SERVICE")" ||
   die "Dagster web cap attestation failed"
@@ -1253,7 +1008,6 @@ ACTIVE_CID_FILE="$STATE_ROOT/container-$$.cid"
 ACTIVE_CONTAINER_REF_FILE="$STATE_ROOT/container-$$.json"
 ACTIVE_CREATE_OUTCOME_FILE="$STATE_ROOT/container-$$.outcome.json"
 ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
-snapshot_attested_inputs || die "attested input immutable snapshot failed"
 
 RUN_STATE_FILE="$RUNTIME_DIR/journals/sensor.json"
 SCHEDULE_STATE_FILE="$RUNTIME_DIR/journals/schedule.json"

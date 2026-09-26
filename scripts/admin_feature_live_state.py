@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Targeted admin live lane의 root snapshot·durable state helper."""
+"""Targeted admin live lane의 durable state helper.
+
+ADR-102 결정 6 이후 lane은 핀된 SHA의 평범한 체크아웃에서 돈다. root 소유 스냅샷과
+host attestation을 검증하던 두 subcommand는 걷어냈고, 실행 identity도 source commit·
+API image·executor image 셋으로 줄었다(BLOCKED/result v4).
+"""
 
 from __future__ import annotations
 
@@ -23,8 +28,8 @@ _UUID_RE: Final[re.Pattern[str]] = re.compile(
 )
 _PHASE_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _TOKEN_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
-_C7_MODULE_RELATIVE: Final[str] = "scripts/lib/c7_prod_attestation.py"
-_C7_BASE: Final[Path] = Path("/usr/local/lib/kor-travel-map/c7-runner")
+#: BLOCKED.json·result.json 계약 version. v3는 attestation digest 셋을 실었다.
+_STATE_VERSION: Final[int] = 4
 #: executor artifact 디렉터리의 **정확한** 파일 집합.
 #:
 #: `executor.log`는 supervisor가 컨테이너 제거 **전에** 두 스트림을 옮겨 담는
@@ -156,20 +161,11 @@ def _validated_execution_identity(payload: Any) -> dict[str, str]:
         or set(payload)
         != {
             "api_image_id",
-            "pinned_runtime_manifest_sha256",
-            "rebuild_journal_sha256",
-            "host_attestation_sha256",
             "playwright_image_id",
             "source_commit",
         }
         or not isinstance(payload.get("api_image_id"), str)
         or _IMAGE_ID_RE.fullmatch(payload["api_image_id"]) is None
-        or not isinstance(payload.get("pinned_runtime_manifest_sha256"), str)
-        or _SHA256_RE.fullmatch(payload["pinned_runtime_manifest_sha256"]) is None
-        or not isinstance(payload.get("rebuild_journal_sha256"), str)
-        or _SHA256_RE.fullmatch(payload["rebuild_journal_sha256"]) is None
-        or not isinstance(payload.get("host_attestation_sha256"), str)
-        or _SHA256_RE.fullmatch(payload["host_attestation_sha256"]) is None
         or not isinstance(payload.get("playwright_image_id"), str)
         or _IMAGE_ID_RE.fullmatch(payload["playwright_image_id"]) is None
         or not isinstance(payload.get("source_commit"), str)
@@ -178,9 +174,6 @@ def _validated_execution_identity(payload: Any) -> dict[str, str]:
         raise ValueError("invalid execution identity")
     return {
         "api_image_id": payload["api_image_id"],
-        "pinned_runtime_manifest_sha256": payload["pinned_runtime_manifest_sha256"],
-        "rebuild_journal_sha256": payload["rebuild_journal_sha256"],
-        "host_attestation_sha256": payload["host_attestation_sha256"],
         "playwright_image_id": payload["playwright_image_id"],
         "source_commit": payload["source_commit"],
     }
@@ -190,9 +183,6 @@ def _execution_identity_from_args(args: argparse.Namespace) -> dict[str, str]:
     return _validated_execution_identity(
         {
             "api_image_id": args.api_image_id,
-            "pinned_runtime_manifest_sha256": args.pinned_runtime_manifest_sha256,
-            "rebuild_journal_sha256": args.rebuild_journal_sha256,
-            "host_attestation_sha256": args.host_attestation_sha256,
             "playwright_image_id": args.playwright_image_id,
             "source_commit": args.source_commit,
         }
@@ -228,7 +218,7 @@ def _blocked_payload(
         "recovery_attempt": attempt,
         "run_id": run_id,
         "status": status,
-        "version": 3,
+        "version": _STATE_VERSION,
     }
 
 
@@ -246,7 +236,7 @@ def _validated_blocked(path: Path) -> dict[str, Any]:
             "status",
             "version",
         }
-        or payload.get("version") != 3
+        or payload.get("version") != _STATE_VERSION
         or not isinstance(payload.get("run_id"), str)
         or _RUN_ID_RE.fullmatch(payload["run_id"]) is None
         or payload.get("owned_feature_ids") != _owned_ids(payload["run_id"])
@@ -335,17 +325,14 @@ def _write_result(args: argparse.Namespace) -> None:
     _atomic_write(
         args.path,
         {
-            "pinned_runtime_manifest_sha256": execution["pinned_runtime_manifest_sha256"],
-            "rebuild_journal_sha256": execution["rebuild_journal_sha256"],
             "execution_identity_sha256": _execution_identity_sha256(execution),
-            "host_attestation_sha256": execution["host_attestation_sha256"],
             "owned_feature_id_sha256": [_sha256(value) for value in _owned_ids(args.run_id)],
             "phase": args.phase,
             "recorded_at": _recorded_at(),
             "recovery_attempt": args.recovery_attempt,
             "run_id_sha256": _sha256(args.run_id),
             "status": args.status,
-            "version": 3,
+            "version": _STATE_VERSION,
         },
     )
 
@@ -531,79 +518,6 @@ def _run_key(args: argparse.Namespace) -> None:
     if _RUN_ID_RE.fullmatch(args.run_id) is None:
         raise ValueError("invalid run ID")
     print(_sha256(args.run_id))
-
-
-def _file_sha256(path: Path, mode: int = 0o555) -> str:
-    return hashlib.sha256(_read_regular(path, mode, 16 * 1024 * 1024)).hexdigest()
-
-
-def _safe_ancestors(path: Path) -> None:
-    for candidate in [path, *path.parents]:
-        observed = os.lstat(candidate)
-        if (
-            not stat.S_ISDIR(observed.st_mode)
-            or stat.S_ISLNK(observed.st_mode)
-            or observed.st_uid != 0
-            or observed.st_gid != 0
-            or stat.S_IMODE(observed.st_mode) & 0o022
-        ):
-            raise ValueError("unsafe root ancestor")
-
-
-def _validate_source(args: argparse.Namespace) -> None:
-    root = args.root.resolve(strict=True)
-    if root != args.root or root != Path(args.expected_root):
-        raise ValueError("snapshot root mismatch")
-    if args.manifest.parent.resolve(strict=True) != root:
-        raise ValueError("manifest parent mismatch")
-    _safe_ancestors(root)
-    if stat.S_IMODE(os.lstat(root).st_mode) != 0o555:
-        raise ValueError("snapshot root mode mismatch")
-    required = set(args.required_file)
-    if set(os.listdir(root)) != required | {args.manifest.name}:
-        raise ValueError("snapshot exact file set mismatch")
-    manifest = json.loads(_read_regular(args.manifest, 0o444))
-    if (
-        not isinstance(manifest, dict)
-        or set(manifest) != {"files", "repository_commit", "version"}
-        or manifest.get("version") != 1
-        or manifest.get("repository_commit") != args.expected_commit
-        or _COMMIT_RE.fullmatch(args.expected_commit) is None
-        or not isinstance(manifest.get("files"), dict)
-        or set(manifest["files"]) != required
-    ):
-        raise ValueError("manifest contract mismatch")
-    for name, expected_hash in manifest["files"].items():
-        if not isinstance(expected_hash, str) or _SHA256_RE.fullmatch(expected_hash) is None:
-            raise ValueError("manifest hash mismatch")
-        expected_mode = 0o555 if name == "run-admin-feature-live-acceptance.sh" else 0o444
-        if _file_sha256(root / name, expected_mode) != expected_hash:
-            raise ValueError("snapshot file hash mismatch")
-
-
-def _validate_c7_module(args: argparse.Namespace) -> None:
-    if _COMMIT_RE.fullmatch(args.expected_commit) is None:
-        raise ValueError("invalid expected commit")
-    expected = _C7_BASE / args.expected_commit / _C7_MODULE_RELATIVE
-    if args.module != expected:
-        raise ValueError("C7 module path mismatch")
-    _safe_ancestors(args.module.parent)
-    attestation = json.loads(_read_regular(args.attestation, 0o600))
-    orchestrator_files = attestation.get("orchestrator_files")
-    if (
-        attestation.get("version") != 4
-        or attestation.get("repository_commit") != args.expected_commit
-        or not isinstance(orchestrator_files, dict)
-        or set(orchestrator_files)
-        != {
-            "scripts/audit-c7-prod-live-state.py",
-            "scripts/lib/c7-prod-runner-lifecycle.sh",
-            _C7_MODULE_RELATIVE,
-            "scripts/run-c7-prod-live-e2e.sh",
-        }
-        or orchestrator_files.get(_C7_MODULE_RELATIVE) != _file_sha256(args.module)
-    ):
-        raise ValueError("C7 module bootstrap mismatch")
 
 
 #: helper가 action별로 **추가로** 내는 evidence 키.
@@ -1060,9 +974,6 @@ def _add_execution_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--api-image-id", required=True)
     parser.add_argument("--playwright-image-id", required=True)
-    parser.add_argument("--pinned-runtime-manifest-sha256", required=True)
-    parser.add_argument("--rebuild-journal-sha256", required=True)
-    parser.add_argument("--host-attestation-sha256", required=True)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1149,20 +1060,6 @@ def _parser() -> argparse.ArgumentParser:
     key = subparsers.add_parser("run-key")
     key.add_argument("--run-id", required=True)
     key.set_defaults(handler=_run_key)
-
-    source = subparsers.add_parser("validate-source")
-    source.add_argument("--root", type=_path, required=True)
-    source.add_argument("--expected-root", required=True)
-    source.add_argument("--manifest", type=_path, required=True)
-    source.add_argument("--expected-commit", required=True)
-    source.add_argument("--required-file", action="append", required=True)
-    source.set_defaults(handler=_validate_source)
-
-    c7 = subparsers.add_parser("validate-c7-module")
-    c7.add_argument("--module", type=_path, required=True)
-    c7.add_argument("--attestation", type=_path, required=True)
-    c7.add_argument("--expected-commit", required=True)
-    c7.set_defaults(handler=_validate_c7_module)
 
     evidence = subparsers.add_parser("validate-evidence")
     evidence.add_argument("--runtime", type=_path, required=True)

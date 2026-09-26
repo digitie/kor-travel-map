@@ -302,8 +302,9 @@ API·admin·Dagster 세 build를 실행하므로 ignored 파일이나 build 사�
 `KOR_TRAVEL_MAP_BUILDX_OCI_DIR` 아래 API·admin·Dagster별 archive를 생성해 앞선 출력을
 덮어쓰지 않는다. 제거된 단일 파일 변수 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH`가 남아 있으면 새
 디렉터리 변수로 바꾸라는 오류와 함께 중단한다. admin UI의 `/api/build-info`는 같은 빌드 SHA와
-실제 frontend build 입력의 결정적 SHA-256을 반환한다. 배포 뒤에는 기존 C6c/C7 attestation이 네 runtime
-container의 immutable image ID와 revision label을 같은 `map_source_revision`에 대조한다. 별도
+실제 frontend build 입력의 결정적 SHA-256을 반환한다. 배포 뒤에는 Manager가 runtime container의
+immutable image ID를 핀된 세대와 대조하고, C7·D2 러너의 runtime preflight가 네 Map runtime의
+revision label을 기대 commit과 대조한다(ADR-102 결정 6 — C7 attestation은 걷어냈다). 별도
 provenance 정본을 만들지 않는다. E2E runner는 clean
 worktree에서 digest를 독립 계산하므로 tag/SHA만 같고 실제 코드가 다른 이미지는 통과할 수 없다.
 mocked checkpoint runner는 외부 image/container를 입력받지 않는다. clean `HEAD`의

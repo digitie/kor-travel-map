@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### C7 attestation 체인 제거 — ADR-102 결정 6 (2026-09-26)
+
+- **REMOVED (운영 env)**: C7·D2 러너가 `E2E_C7_PINNED_RUNTIME_MANIFEST`·
+  `E2E_C7_REBUILD_JOURNAL`을 더 요구하지 않는다. Manager v6 manifest·v8 journal 재파싱,
+  host attestation(`/etc/kor-travel-map/...`), root 소유 러너 스냅샷·`source-manifest.json`
+  검증과 `scripts/lib/c7_prod_attestation.py`를 걷어냈다. 러너는 핀된 SHA의 평범한
+  `git archive` 체크아웃에서 돈다.
+- **CHANGED (runtime preflight)**: `scripts/lib/c7_prod_runtime.py`가 caller env와
+  `docker inspect`만으로 origin 세 개, compose service 일곱의 상태·compose project·cursor
+  secret 위생, Map image revision, executor image label을 대조한다. 기능 단언(Playwright
+  spec, fixture write/verify, lane/BLOCKED/RESULT)은 그대로다.
+- **BREAKING (증거 계약)**: D2 `BLOCKED.json`/`result.json` v3 → v4(실행 identity에서
+  attestation digest 셋 제거), C7 evidence manifest v2 → v3(attested document 없음). 감사기는
+  v1·v2 archive를 legacy로 계속 인정한다.
+- **ADDED**: n150 재핀 사이클 호스트 스크립트를 `scripts/n150/`에서 버전 관리한다
+  (`chain17.sh`·`chain16.sh`·`run-d2.sh`·축소된 `repin.sh`). `gen_attest.py`는 퇴역했다.
+
 ### route geometry 분리 — ADR-099 2단계 (2026-09-20)
 
 - **CHANGED (스키마, rev 312)**: route geometry가 `feature.feature_routes.geom`을

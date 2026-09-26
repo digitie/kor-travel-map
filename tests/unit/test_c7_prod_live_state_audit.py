@@ -320,6 +320,71 @@ def test_legacy_v1_evidence_manifest_stays_clean_but_is_still_checked(
     assert auditor._valid_evidence_manifest(run) is False
 
 
+def _v3_evidence_run(run: Path) -> dict[str, object]:
+    run.mkdir(mode=0o700)
+    result_file = run / "journals" / "sensor.json"
+    result_file.parent.mkdir(mode=0o700)
+    result_file.write_text("{}\n", encoding="utf-8")
+    result_file.chmod(0o600)
+    return {
+        "alembic_head": "400",
+        "files": [
+            {
+                "path": "journals/sensor.json",
+                "sha256": hashlib.sha256(result_file.read_bytes()).hexdigest(),
+                "size": result_file.stat().st_size,
+            }
+        ],
+        "finished_at": "2026-09-26T01:01:01+00:00",
+        "orchestrator_verified": True,
+        "playwright_image_id": f"sha256:{'c' * 64}",
+        "repository_commit": "d" * 40,
+        "status": 0,
+        "version": 3,
+    }
+
+
+def test_v3_evidence_manifest_needs_no_attested_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-102 결정 6 이후 러너가 쓰는 v3 archive는 attested 사본 없이도 clean이다.
+
+    attestation·manifest·journal 사본이 없다. 이것이 거절되면 새 러너의 첫 성공 run이
+    다음 run의 audit preflight를 막는다.
+    """
+
+    auditor = _load_auditor()
+    monkeypatch.setattr(auditor, "_safe_entry", _portable_safe_entry)
+    run = tmp_path / "run-20260926T010101Z-12"
+    manifest = _v3_evidence_run(run)
+    _write_json(run / "manifest.json", manifest)
+
+    assert auditor._valid_evidence_manifest(run) is True
+
+    # 파일 digest 재계산은 v3에서도 그대로다.
+    (run / "journals" / "sensor.json").write_text("tampered\n", encoding="utf-8")
+    assert auditor._valid_evidence_manifest(run) is False
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["rebuild_journal_sha256", "pinned_runtime_manifest_sha256", "host_attestation_sha256"],
+)
+def test_v3_evidence_manifest_rejects_attested_digest_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: str
+) -> None:
+    """v3는 exact key 집합이다 — 퇴역한 digest가 다시 실리면 계약 위반이다."""
+
+    auditor = _load_auditor()
+    monkeypatch.setattr(auditor, "_safe_entry", _portable_safe_entry)
+    run = tmp_path / "run-20260926T010101Z-13"
+    manifest = _v3_evidence_run(run)
+    manifest[extra] = "0" * 64
+    _write_json(run / "manifest.json", manifest)
+
+    assert auditor._valid_evidence_manifest(run) is False
+
+
 
 def test_active_lock_is_detected_across_process_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

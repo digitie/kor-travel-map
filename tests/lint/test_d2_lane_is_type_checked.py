@@ -28,8 +28,10 @@ _WORKFLOW = _ROOT / ".github" / "workflows" / "lint.yml"
 _GATES = _ROOT / "scripts" / "verify-all-gates.sh"
 
 #: `readonly SUPERVISOR="$SCRIPT_DIR/admin_feature_live_supervisor.py"`
+#: `readonly RUNTIME_PREFLIGHT="$SCRIPT_DIR/lib/c7_prod_runtime.py"` — ADR-102 결정 6 뒤
+#: lane은 체크아웃 전체에서 돌므로 하위 디렉터리 모듈도 같은 규칙으로 센다.
 _LOADED = re.compile(
-    r'^readonly\s+\w+="\$SCRIPT_DIR/(?P<name>[\w.-]+\.py)"', re.MULTILINE
+    r'^readonly\s+\w+="\$SCRIPT_DIR/(?P<name>[\w.-]+(?:/[\w.-]+)*\.py)"', re.MULTILINE
 )
 
 

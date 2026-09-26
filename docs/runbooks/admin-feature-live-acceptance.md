@@ -1,9 +1,15 @@
 # Admin Feature targeted production live 인수·복구
 
 이 runbook은 issue #741·#785와 `T-VN-15`의 남은 production 증거를 한 번의 owned
-Feature lane에서 검증한다. strict `T-ADM-C7`의 상태·증거에는 mutation을 섞지 않지만,
-실행 전 신뢰 경계는 C7 host attestation v4와 pinned runtime manifest v6 + rebuild
-journal v8을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
+Feature lane에서 검증한다. strict `T-ADM-C7`의 상태·증거에는 mutation을 섞지 않고, 실행 전
+runtime preflight는 C7 러너와 같은 모듈(`scripts/lib/c7_prod_runtime.py`)을 쓴다. C7 성공을
+대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
+
+> **ADR-102 결정 6 (2026-09-26).** root 소유 러너 스냅샷(`/usr/local/lib/...`,
+> `source-manifest.json`), host attestation(`/etc/kor-travel-map/...`), Manager의 v6
+> manifest·v8 journal 사본(`E2E_C7_PINNED_RUNTIME_MANIFEST`·`E2E_C7_REBUILD_JOURNAL`)은
+> 걷어냈다. 러너는 핀된 SHA의 평범한 `git archive` 체크아웃에서 돌고, 그 기능 단언이
+> 게이트다. n150에서는 `scripts/n150/chain16.sh`가 D1과 같은 체크아웃으로 D2를 돌린다.
 
 ## 1. 불변식
 
@@ -29,48 +35,20 @@ journal v8을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 �
   direct Feature/value 0/0/0, 모든 `feature.features(feature_id)` FK reference 0건,
   label/name 기반 Docker container 0건을 확인한다.
 
-## 2. 신뢰 snapshot 설치
+## 2. 체크아웃
 
-대상 commit을 먼저 확정한다. 다음 네 파일을 Git archive에서 추출해 commit별 immutable
-directory에 basename으로 설치한다.
+대상 commit을 먼저 확정하고, 그 commit의 `git archive`를 평범한 디렉터리에 푼다. 러너는
+같은 트리의 `scripts/admin_feature_live_{fixture,state,supervisor}.py`와
+`scripts/lib/c7_prod_runtime.py`를 쓴다. 설치 스냅샷·manifest·mode 검사는 없다.
 
-```text
-/usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/
-  admin_feature_live_fixture.py
-  admin_feature_live_state.py
-  admin_feature_live_supervisor.py
-  run-admin-feature-live-acceptance.sh
-  source-manifest.json
+```bash
+rm -rf /home/digitie/ktm-c7-<40-hex> && mkdir -p /home/digitie/ktm-c7-<40-hex>
+git -C <repo> archive --format=tar <40-hex> | tar -xf - -C /home/digitie/ktm-c7-<40-hex>
 ```
 
-- directory: `root:root 0555`
-- runner: `root:root 0555`
-- Python 세 파일과 manifest: `root:root 0444`
-- 기존 snapshot은 in-place 수정하지 않는다. 별도 임시 directory에서 파일·manifest·mode를
-  완성한 뒤 원자적으로 배치한다.
+n150에서는 `scripts/n150/chain16.sh`의 D1 단계가 이것을 하고, D2는 같은 트리를 쓴다.
 
-`source-manifest.json`은 다음 exact schema다. `files`는 네 source만 포함하며 manifest
-자신은 포함하지 않는다.
-
-```json
-{
-  "files": {
-    "admin_feature_live_fixture.py": "<sha256>",
-    "admin_feature_live_state.py": "<sha256>",
-    "admin_feature_live_supervisor.py": "<sha256>",
-    "run-admin-feature-live-acceptance.sh": "<sha256>"
-  },
-  "repository_commit": "<40-hex>",
-  "version": 1
-}
-```
-
-runner는 `/`부터 snapshot까지 root 소유·비쓰기 ancestor, exact directory 경로, exact 5-file
-set, mode, commit, SHA256을 state 생성 전에 검증한다. 같은 commit의 strict C7 snapshot에는
-`scripts/lib/c7_prod_attestation.py`가 root-owned 상태로 있어야 하며, host attestation
-`/etc/kor-travel-map/c7-prod-live-e2e-attestation.json`의 orchestrator hash와 일치해야 한다.
-
-## 3. 실행 환경과 attestation
+## 3. 실행 환경과 runtime preflight
 
 실제 값은 gitignore된 prod local runbook에서 읽고 shell environment로만 전달한다. URL,
 password, service 이름, image ID, host identity는 이 문서와 evidence에 복사하지 않는다.
@@ -87,8 +65,6 @@ export E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION='<deployed-alembic-rev
 export E2E_LIVE_ALLOW_PROD=1
 export E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1
 export E2E_C7_EXPECTED_GIT_COMMIT='<40-hex>'
-export E2E_C7_PINNED_RUNTIME_MANIFEST='<root-owned-pinned-runtime-generation-v6.json>'
-export E2E_C7_REBUILD_JOURNAL='<root-owned-pinned-runtime-rebuild-v8-<pinset>.json>'
 export E2E_C7_PLAYWRIGHT_IMAGE='sha256:<64-hex>'
 export E2E_C7_EXPECTED_UI_ORIGIN_SHA256='<64-hex>'
 export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256='<64-hex>'
@@ -102,38 +78,32 @@ export E2E_C7_PINVI_WEB_SERVICE='<compose-service>'
 export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 ```
 
-> 두 attested input은 ktdm이 rebuildable transaction에서 만든 v6/v8 문서의 **root 소유
-> 0600 사본**이어야 한다. ktdm의 state root는 Manager owner 소유 `0700`이라 그대로는
-> verifier의 root-owned 요구를 만족하지 않는다. 사본을 만들 때 내용은 바꾸지 않는다 —
-> verifier가 두 파일의 SHA256을 attestation과 대조하므로 한 바이트만 달라도 멈춘다.
+runtime preflight(`scripts/lib/c7_prod_runtime.py runtime`)는 mutation 전에 caller env와
+`docker inspect`만으로 다음을 본다. Manager 내부 파일은 읽지 않는다 — 떠 있는 image가 핀된
+세대인지는 Manager가 이미 대조한다(ADR-102).
 
-root snapshot의 C7 verifier는 mutation 전에 다음을 actual runtime과 exact 비교한다.
-
-- host machine ID·hostname, compose project, 공개 UI/API/Dagster origin
-- v6 active generation의 일곱 immutable image ID(Map API/UI/Dagster web/daemon,
-  PinVi API/web/dagster), 세 schema head(map application·map dagster·pinvi), pinset digest,
-  application `300` paired candidate evidence
-- v8 rebuild journal이 **이 세대를 commit했다는 것** — phase `committed`, candidate 전체
-  동등, candidate evidence 중복 결박, application/Dagster DB identity와 identity digest,
-  root/finalize result, application/metadata permit, cancel probe `finalized`
-- Map/PinVi source commit, OCI source revision, command hash, environment hash
-- Playwright executor image와 base image identity
+- 공개 UI/API websocket/Dagster GraphQL origin의 canonical SHA256이 세
+  `E2E_C7_EXPECTED_*_ORIGIN_SHA256`과 같고, 셋 다 loopback·link-local이 아닌 HTTPS
+- compose service 일곱(Map API/UI/Dagster web/daemon, PinVi API/web/dagster)이 각각 정확히
+  한 컨테이너로 running(healthcheck가 있으면 healthy)이고, 서로 다르며, 한 compose project 안
+- Map 네 runtime image의 OCI revision label이 `E2E_C7_EXPECTED_GIT_COMMIT`
+- Playwright executor image ID가 `E2E_C7_PLAYWRIGHT_IMAGE`이고 label의 commit·base가 일치
+- Map UI 런타임에 admin password hash가 있음
 - Map API의 `profile=production`, features route `true`, 중복 없는 cursor signing secret
   1개(32자 이상·공백 없음), admin/service/ops read/ops cancel/metrics/VWorld credential과의 분리
 - Map API 외 여섯 runtime(Map UI·Dagster web·Dagster daemon, PinVi API·web·dagster)에
   cursor signing secret이 없다는 음성 계약
 
-caller가 임의 OCI label이나 자체 생성 attestation으로 이 경계를 우회할 수 없다. 검증 성공
-출력은 pinned runtime manifest·rebuild journal·host attestation의 SHA256 세 개뿐이며
-result에 hash로만 남는다.
+PinVi image의 source revision은 Map env가 알 수 없으므로 Manager의 몫이다.
 
 ## 4. 실행 순서
 
-compose project directory에서 필요한 env를 보존해 commit별 runner를 실행한다.
+compose project directory에서 필요한 env를 보존해 체크아웃의 runner를 실행한다. n150에서는
+`scripts/n150/run-d2.sh <40-hex>`가 `/root/.d2-live.env`를 읽어 같은 일을 한다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
-  /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh run
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
+  bash /home/digitie/ktm-c7-<40-hex>/scripts/run-admin-feature-live-acceptance.sh run
 ```
 
 `/var/lib/kor-travel-map/admin-feature-live-acceptance`의 orchestrator lock과 Docker lifecycle
@@ -199,21 +169,21 @@ Docker daemon 상태를 조사한 뒤 daemon restart 또는 host reboot로 late 
 
 ## 6. recovery
 
-v3 snapshot 배치 전 고정 state root에 `BLOCKED.json`이 없는지 확인한다. v2 BLOCKED가 남아 있으면
-v3 helper로 변환하거나 삭제하지 않는다. v2에는 실행 identity가 없어 자동 호환성 판정이 불가능하므로,
-생성 당시 설치 snapshot과 배포 기록을 운영자가 확정해 그 snapshot의 recovery를 먼저 완료한다.
-생성 snapshot을 확정할 수 없으면 §5의 ACTIVE/container/DB 소유권을 수동 감사하고 fail-closed 상태를
-유지한다. BLOCKED가 완전히 종결된 뒤에만 v3 snapshot을 활성화한다.
+새 러너를 처음 쓰기 전에 고정 state root에 `BLOCKED.json`이 없는지 확인한다. BLOCKED v4는
+실행 identity가 source commit·API image·Playwright image 셋이다. ADR-102 이전 러너가 남긴
+v3(attestation digest 셋 포함)나 그보다 오래된 v2는 새 러너가 `BLOCKED state is invalid`로
+거절한다 — 변환하거나 삭제하지 않는다. 생성 당시 commit과 배포 기록을 운영자가 확정해 그
+commit의 러너로 recovery를 먼저 완료하고, 확정할 수 없으면 §5의 ACTIVE/container/DB 소유권을
+수동 감사하고 fail-closed 상태를 유지한다.
 
-같은 배포 env와 commit snapshot으로 실행한다. 최초 실행은 BLOCKED v3에 source commit,
-API·Playwright image ID, pinned runtime manifest·rebuild journal·host attestation hash의 exact execution
-identity를 기록한다. recovery는 현재 runtime attestation에서 다시 얻은 identity가 BLOCKED와
-완전히 같을 때만 attempt를 증가시키며, 하나라도 다르면 mutation 전에 fail-closed한다. 성공 result
-v3에는 exact identity의 canonical SHA256과 pair/attestation hash만 남기고 원문은 남기지 않는다.
+같은 배포 env와 같은 commit 체크아웃으로 실행한다. 최초 실행은 BLOCKED v4에 source commit,
+API·Playwright image ID의 exact execution identity를 기록한다. recovery는 현재 runtime에서 다시
+얻은 identity가 BLOCKED와 완전히 같을 때만 attempt를 증가시키며, 하나라도 다르면 mutation 전에
+fail-closed한다. 성공 result v4에는 exact identity의 canonical SHA256만 남기고 원문은 남기지 않는다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
-  /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh recover
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
+  bash /home/digitie/ktm-c7-<40-hex>/scripts/run-admin-feature-live-acceptance.sh recover
 ```
 
 recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 만들지 않고 다음만 한다.
@@ -235,8 +205,8 @@ fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭
 ## 7. 완료 판정
 
 - runner exit 0, `BLOCKED.json`·`ACTIVE.json` 없음
-- latest result가 `status=complete`, `phase=passed|recovered`, recovery attempt와 두 attestation
-  hash를 포함하고 원문 identity를 포함하지 않음
+- latest result(v4)가 `status=complete`, `phase=passed|recovered`, recovery attempt와 execution
+  identity SHA256을 포함하고 원문 identity를 포함하지 않음
 - normal은 probe/direct seed·cleanup·audit, main/recovery report, 6개 operation × 8개 exact
   lifecycle phase가 있음; recovery는 3개 operation × 8개 phase가 있음
 - 모든 evidence directory `root:root 0700`, file `root:root 0600`
@@ -247,6 +217,6 @@ fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭
 - 같은 exact tree의 PostgreSQL regression 증거에서 search `include_total=false` COUNT 0회,
   `include_total=true` COUNT 1회. production HTTP 결과만으로 SQL 실행 횟수를 추정하지 않음
 
-이슈에는 실행 시각, exact source commit, pinned generation/journal/attestation hash, passed/recovered,
+이슈에는 실행 시각, exact source commit, execution identity hash, passed/recovered,
 cleanup/audit/container 0 결과만 적는다. secret·origin·host·run ID·Feature ID·container ID·cursor
 원문은 적지 않는다.

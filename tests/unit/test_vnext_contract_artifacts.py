@@ -23,7 +23,6 @@ from typing import Any, Final
 import pytest
 
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
-from scripts.lib.c7_prod_attestation import GENERATION_RUNTIME_IMAGE_FIELDS
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
@@ -355,10 +354,8 @@ def _assert_promoted_paired_receipt(
         "pinvi_service_vendor_sha256",
         "verification",
     }
-    assert dict(GENERATION_RUNTIME_IMAGE_FIELDS) == {
-        role: generation_field
-        for role, (generation_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
-    }
+    # 종전에는 여기서 역할 목록을 C7 attestation 모듈의 generation 상수와 대조했다.
+    # ADR-102 결정 6이 그 모듈을 걷어냈으므로 receipt 계약은 자기 목록(일곱 역할)만 본다.
     if paired_receipt["state"] == "candidate_verified":
         prefix = "candidate_"
         state_keys = {
@@ -384,7 +381,7 @@ def _assert_promoted_paired_receipt(
     image_keys = {
         f"{prefix}{receipt_field}" for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
     }
-    assert len(image_keys) == len(GENERATION_RUNTIME_IMAGE_FIELDS)
+    assert len(image_keys) == len(_C7_ROLE_RECEIPT_FIELDS) == 7
     assert set(paired_receipt) == required_keys | state_keys | image_keys
     for key in (f"{prefix}map_commit", f"{prefix}pinvi_commit"):
         assert re.fullmatch(r"[0-9a-f]{40}", paired_receipt[key]), key

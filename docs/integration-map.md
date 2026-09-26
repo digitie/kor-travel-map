@@ -179,6 +179,15 @@ pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenA
 journal version 8이다.** v4 compatible-pair와 manifest v5/journal v7은 C7 신뢰 경계에서
 호환 변환 없이 퇴역했다.
 
+> **ADR-102 결정 6 (2026-09-26) — Map은 v6/v8을 더 읽지 않는다.** 아래 목록 중 "C7이 요구한다"는
+> 서술은 이력이다. C7·D2 러너(`scripts/run-c7-prod-live-e2e.sh`,
+> `scripts/run-admin-feature-live-acceptance.sh`)는 핀된 SHA의 평범한 체크아웃에서 돌고, Manager의
+> manifest·journal·host attestation을 재파싱하지 않는다(`scripts/lib/c7_prod_attestation.py` 삭제).
+> 떠 있는 image가 핀된 세대인지는 Manager가 대조하고, Map 러너는 caller env와 `docker inspect`로
+> origin·compose runtime·cursor secret 위생·Map image revision·executor label만 본다
+> (`scripts/lib/c7_prod_runtime.py`). 따라서 Manager 내부 파일의 모양 변경(ADR-51의
+> `deploy-status.json` 전환 포함)은 Map과의 paired PR을 요구하지 않는다.
+
 - v6 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
   image ID(Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster), Map/PinVi source
   revision, 세 schema head(`map_application_head`·`map_dagster_head`·`pinvi_head`),
@@ -221,9 +230,8 @@ revision과 pinset까지 exact로 일치시킨 unconditional terminal generation
 `pending_rebuild`만 허용할 수 있다. partial·malformed generation, phase-scoped block, `drift`,
 `unknown`은 gate를 열지 않는다. 새 launcher가
 완료된 뒤 C7 attestation·live acceptance로 나아가려면 반드시 `match`여야 한다. private
-manifest/journal과 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다. Map C7 attestation이
-소비하는 manifest v6/journal v8의 exact dict schema·키·version 변경은
-`scripts/lib/c7_prod_attestation.py`와 Docker Manager의 paired PR에서만 함께 변경한다.
+manifest/journal과 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다. (ADR-102 결정 6 이전에는
+Map C7 attestation이 manifest v6/journal v8을 소비해 paired PR이 필요했다 — 그 소비는 사라졌다.)
 
 따라서 새 M04/M05 n150 isolated E2E의 순서는 Manager release와 Map·PinVi source CI, exact-head
 전문 적대 리뷰 두 건, `rotate-pair`, registry와 완전한 public generation 확인, 새 root-owned leaf의

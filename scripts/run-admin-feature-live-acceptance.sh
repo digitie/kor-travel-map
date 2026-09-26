@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # #741/#785/T-VN-15 전용 production live lane. strict C7 state와 섞지 않는다.
+#
+# 핀된 SHA의 평범한 체크아웃(`git archive`, n150에서는 D1과 같은 디렉터리)에서 돈다
+# (ADR-102 결정 6). root 소유 스냅샷·source-manifest·host attestation·Manager의
+# manifest/journal은 더 요구하지 않는다. cwd는 compose project 디렉터리다.
 set +x
 set -euo pipefail
 umask 077
@@ -9,10 +13,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly FIXTURE_HELPER="$SCRIPT_DIR/admin_feature_live_fixture.py"
 readonly STATE_HELPER="$SCRIPT_DIR/admin_feature_live_state.py"
 readonly SUPERVISOR="$SCRIPT_DIR/admin_feature_live_supervisor.py"
-readonly SOURCE_MANIFEST="$SCRIPT_DIR/source-manifest.json"
-readonly INSTALL_BASE="/usr/local/lib/kor-travel-map/admin-feature-live-acceptance"
-readonly C7_INSTALL_BASE="/usr/local/lib/kor-travel-map/c7-runner"
-readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/c7-prod-live-e2e-attestation.json"
+readonly RUNTIME_PREFLIGHT="$SCRIPT_DIR/lib/c7_prod_runtime.py"
 readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 readonly STATE_ROOT="/var/lib/kor-travel-map/admin-feature-live-acceptance"
 readonly BLOCKED_FILE="$STATE_ROOT/BLOCKED.json"
@@ -29,9 +30,6 @@ RUNTIME_DIR=""
 LIFECYCLE_DIR=""
 API_CONTAINER_ID=""
 API_IMAGE_ID=""
-PINNED_RUNTIME_MANIFEST_SHA256=""
-REBUILD_JOURNAL_SHA256=""
-HOST_ATTESTATION_SHA256=""
 BARRIER_FD=""
 declare -a EXECUTION_IDENTITY_ARGS=()
 
@@ -47,16 +45,6 @@ require_command() {
 require_env() {
   local name="$1"
   [[ -n "${!name-}" ]] || die "required env is missing: $name"
-}
-
-safe_root_file() {
-  local path="$1"
-  local mode="$2"
-  [[
-    -f "$path" &&
-    ! -L "$path" &&
-    "$(stat -c '%u:%g:%a' -- "$path")" == "0:0:$mode"
-  ]] || die "root snapshot file metadata is unsafe"
 }
 
 state_helper() {
@@ -109,19 +97,13 @@ validate_fixture_target_env() {
     die "fixture target confirmation is invalid: $name"
 }
 
-validate_runtime() {
-  require_command docker
-  require_command flock
-  require_command python3
-  require_command setsid
-  docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable"
-  (( EUID == 0 )) || die "fixed production state requires root execution"
-
+# env 계약은 이 함수 하나다. 단위 테스트가 이 정의를 그대로 떼어 실행한다.
+validate_env() {
   require_env E2E_BASE_URL
   require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
   require_env E2E_DAGSTER_URL
   require_env E2E_ADMIN_PASSWORD
-  # API runtime credentials remain read-only. The standalone root-owned helper
+  # API runtime credentials remain read-only. The standalone helper container
   # receives this separate DSN only through the supervisor's process env and
   # confirms its target before assuming ktm_feature_schema_owner inside its
   # short-lived container.
@@ -135,8 +117,6 @@ validate_runtime() {
   validate_fixture_target_env E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE
   validate_fixture_target_env E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION
   require_env E2E_C7_EXPECTED_GIT_COMMIT
-  require_env E2E_C7_PINNED_RUNTIME_MANIFEST
-  require_env E2E_C7_REBUILD_JOURNAL
   require_env E2E_C7_PLAYWRIGHT_IMAGE
   validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
   validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
@@ -156,47 +136,22 @@ validate_runtime() {
     die "expected Git commit is invalid"
   [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
     die "Playwright executor must be an immutable image ID"
-  [[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
-    die "pinned runtime manifest path must be absolute"
-  [[ "$E2E_C7_REBUILD_JOURNAL" == /* ]] ||
-    die "pinned runtime rebuild journal path must be absolute"
+}
 
-  local expected_root c7_module
-  expected_root="$INSTALL_BASE/$E2E_C7_EXPECTED_GIT_COMMIT"
-  c7_module="$C7_INSTALL_BASE/$E2E_C7_EXPECTED_GIT_COMMIT/scripts/lib/c7_prod_attestation.py"
-  state_helper validate-source \
-    --root "$SCRIPT_DIR" \
-    --expected-root "$expected_root" \
-    --manifest "$SOURCE_MANIFEST" \
-    --expected-commit "$E2E_C7_EXPECTED_GIT_COMMIT" \
-    --required-file "${BASH_SOURCE[0]##*/}" \
-    --required-file "${FIXTURE_HELPER##*/}" \
-    --required-file "${STATE_HELPER##*/}" \
-    --required-file "${SUPERVISOR##*/}" || die "targeted source snapshot validation failed"
-  state_helper validate-c7-module \
-    --module "$c7_module" \
-    --attestation "$HOST_ATTESTATION_FILE" \
-    --expected-commit "$E2E_C7_EXPECTED_GIT_COMMIT" ||
-    die "strict C7 module bootstrap validation failed"
+validate_runtime() {
+  require_command docker
+  require_command flock
+  require_command python3
+  require_command setsid
+  docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is unavailable"
+  (( EUID == 0 )) || die "fixed production state requires root execution"
+  validate_env
 
-  local -a attestation_output=()
-  mapfile -t attestation_output < <(
-    python3 -I -B "$c7_module" runtime \
-      "$HOST_ATTESTATION_FILE" \
-      "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
-      "$E2E_C7_REBUILD_JOURNAL" \
-      "$PWD" \
-      "$PLAYWRIGHT_BASE_IMAGE" 2>/dev/null
-  ) || die "trusted C7 v6/v8 runtime attestation failed"
-  (( ${#attestation_output[@]} == 3 )) || die "runtime attestation output is invalid"
-  PINNED_RUNTIME_MANIFEST_SHA256="${attestation_output[0]}"
-  REBUILD_JOURNAL_SHA256="${attestation_output[1]}"
-  HOST_ATTESTATION_SHA256="${attestation_output[2]}"
-  [[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-    die "pinned runtime manifest hash is invalid"
-  [[ "$REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-    die "pinned runtime rebuild journal hash is invalid"
-  [[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "attestation hash is invalid"
+  # origin 세 개, compose service 일곱의 상태·cursor secret·Map image revision,
+  # executor image label을 caller env와 `docker inspect`로 대조한다. C7 러너와 같은
+  # 모듈이고, 같은 체크아웃에 있다. Manager 파일은 읽지 않는다.
+  python3 -I -B "$RUNTIME_PREFLIGHT" runtime "$PWD" "$PLAYWRIGHT_BASE_IMAGE" \
+    >/dev/null 2>&1 || die "runtime origin/compose/executor preflight failed"
 
   API_CONTAINER_ID="$(
     docker compose --project-directory "$PWD" ps --no-trunc -q \
@@ -211,9 +166,6 @@ validate_runtime() {
     --source-commit "$E2E_C7_EXPECTED_GIT_COMMIT"
     --api-image-id "$API_IMAGE_ID"
     --playwright-image-id "$E2E_C7_PLAYWRIGHT_IMAGE"
-    --pinned-runtime-manifest-sha256 "$PINNED_RUNTIME_MANIFEST_SHA256"
-    --rebuild-journal-sha256 "$REBUILD_JOURNAL_SHA256"
-    --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
   )
 }
 
@@ -581,11 +533,6 @@ PY
 }
 
 [[ "$MODE" == "run" || "$MODE" == "recover" ]] || die "usage: runner [run|recover]"
-safe_root_file "${BASH_SOURCE[0]}" 555
-safe_root_file "$FIXTURE_HELPER" 444
-safe_root_file "$STATE_HELPER" 444
-safe_root_file "$SUPERVISOR" 444
-safe_root_file "$SOURCE_MANIFEST" 444
 validate_runtime
 initialize_state
 trap 'finish_signal 130' INT
