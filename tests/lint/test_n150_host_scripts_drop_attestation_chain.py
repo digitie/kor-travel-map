@@ -46,7 +46,7 @@ def test_the_gate_sees_the_host_scripts() -> None:
     """유도가 실제로 파일을 찾았는지부터 본다 — 비면 아래 단언이 공허하다."""
 
     names = {path.name for path in _scripts()}
-    assert {"chain16.sh", "chain17.sh", "repin.sh", "run-d2.sh"} <= names, names
+    assert {"adjudicate.sh", "chain16.sh", "chain17.sh", "repin.sh", "run-d2.sh"} <= names, names
 
 
 @pytest.mark.parametrize("script", _scripts(), ids=lambda path: path.name)
@@ -106,3 +106,28 @@ def test_repin_updates_only_the_two_non_secret_env_keys() -> None:
     assert "'/^E2E_C7_(PINNED_RUNTIME_MANIFEST|REBUILD_JOURNAL)=/d'" in source
     assert "ktdctl" in source
     assert "pinned-runtime-generation" not in source
+
+
+def test_adjudicate_clears_with_the_helper_of_the_plain_checkout() -> None:
+    """BLOCKED 판정도 D1·D2와 같은 체크아웃의 helper를 쓴다 — 종전 호스트 사본은 root 소유
+    스냅샷 경로와 attestation·manifest·journal digest를 읽어 M2 뒤에는 늘 실패했다."""
+
+    source = _read("adjudicate.sh")
+    checkout = (
+        'SRC="/home/digitie/ktm-c7-${E2E_C7_EXPECTED_GIT_COMMIT:?E2E_C7_EXPECTED_GIT_COMMIT}"'
+    )
+    assert checkout in source
+    assert 'python3 -I -B "$HELPER" clear-blocked --path "$B"' in source
+    # 잔여물 실측이 clear-blocked보다 먼저다.
+    assert source.index("clear-blocked 금지") < source.index('"$HELPER" clear-blocked')
+    for retired in ("E2E_C7_PINNED_RUNTIME_MANIFEST", "E2E_C7_REBUILD_JOURNAL", "host_attestation"):
+        assert retired not in source
+
+
+def test_chain16_stops_before_d2_when_blocked_survives_adjudication() -> None:
+    source = _read("chain16.sh")
+    lane = source.index('say "G. lane 정리"')
+    d2 = source.index('say "H. D2')
+    step = source[lane:d2]
+    assert "/root/adjudicate.sh" in step
+    assert '[ -e "$R/BLOCKED.json" ] && die' in step

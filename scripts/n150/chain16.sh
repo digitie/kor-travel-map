@@ -120,7 +120,14 @@ echo "$D1OUT" | grep -qE '[0-9]+ passed' || die "D1 결과를 읽지 못했다"
 echo "$D1OUT" | grep -qE '[0-9]+ (failed|flaky)' && die "D1 실패"
 
 say "G. lane 정리"
-if [ -e "$R/BLOCKED.json" ]; then /root/adjudicate.sh 2>&1 | tail -3; else echo "  BLOCKED 없음"; fi
+if [ -e "$R/BLOCKED.json" ]; then
+  /root/adjudicate.sh 2>&1 | tail -3
+  # 판정이 실패해 BLOCKED가 남으면 D2 러너는 recover 모드를 요구하며 바로 멈춘다 —
+  # 여기서 먼저, 이유와 함께 멈춘다.
+  [ -e "$R/BLOCKED.json" ] && die "BLOCKED가 남았다 — adjudicate.sh 출력을 보라"
+else
+  echo "  BLOCKED 없음"
+fi
 
 say "H. D2 ($D2U)"
 # D1과 같은 체크아웃($NEW)의 러너를 돌린다. 경로는 인자로 넘긴다 — 종전처럼

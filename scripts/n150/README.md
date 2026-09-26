@@ -9,6 +9,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 | `chain16.sh` | 후반부: C7 executor 이미지 → `repin.sh` → M01 ACL preflight → D1 → lane 정리 → D2 |
 | `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
+| `adjudicate.sh` | rebuild가 가로지른 v4 BLOCKED lane을 잔여물 0 실측 뒤 `clear-blocked`로 정리 (chain16 lane 정리 단계) |
 
 ## 설치
 
@@ -17,7 +18,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 ```sh
 # 저장소 체크아웃에서 (예: /home/digitie/ktm-c7-src, 원하는 main 리비전)
 sudo install -o root -g root -m 0700 scripts/n150/chain17.sh scripts/n150/chain16.sh \
-  scripts/n150/repin.sh scripts/n150/run-d2.sh /root/
+  scripts/n150/repin.sh scripts/n150/run-d2.sh scripts/n150/adjudicate.sh /root/
 ```
 
 호스트 사본을 손으로 고치지 않는다. 고칠 것이 있으면 저장소에서 고치고 다시 복사한다.
@@ -45,7 +46,8 @@ D1·D2는 핀된 SHA의 평범한 `git archive` 체크아웃에서 돌고, 그 �
 
 호스트에 남은 위 파일은 운영자가 정리한다. 러너는 그것이 있든 없든 보지 않는다.
 
-## 아직 저장소 밖인 것
+## BLOCKED 정리
 
-`chain16.sh`의 lane 정리 단계는 `/root/adjudicate.sh`를 부른다. 이 스크립트는 아직
-버전 관리되지 않는다 — 옮길 때 root 소유 스냅샷 경로를 쓰지 않는지 함께 확인한다.
+`adjudicate.sh`는 D1·D2와 같은 체크아웃의 상태 helper로 **v4** BLOCKED만 정리한다. 옛 v3
+BLOCKED가 남아 있으면 이유와 함께 멈춘다 — runbook `admin-feature-live-acceptance.md` §6대로
+그것을 만든 커밋의 도구로 정리한다. chain16은 판정 뒤에도 BLOCKED가 남으면 D2 전에 멈춘다.
