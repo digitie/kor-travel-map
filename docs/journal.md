@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-26 (저녁) — 42GB를 비우니 배포가 한 번에 섰다
+
+#401을 설치하고 같은 pair(Map `6511441f` / PinVi `b227e77b`, pinset `e4909e26`)로 chain17을 두 번
+더 돌렸다. **t57b**는 pinvi-dagster 빌드 중 BuildKit session healthcheck 실패로 죽었고, **t57c**는
+journal 전에 내가 멈췄다 — 둘 다 코드가 아니라 호스트였다. SATA SSD가 91% 차 있었고 IO 압력 `full`이
+여전히 50~60%였다. 타임아웃을 늘리는 것은 증상 완화라, 이번에는 원인을 줄였다.
+
+디스크 조사는 후보마다 "지워도 되는가"를 따로 반박하게 했고, 결과를 세 층으로 나눴다. 캐시와 재생성
+가능한 것(옛 pinset·리허설 이미지, 고아 볼륨, Manager의 옛 pinset 소스 78개, npm/uv/pip 캐시,
+지난 e2e·C7·M05 스크래치)만 지웠다. 42G → 84G(91% → 82%), IO `full`은 약 3%로 떨어졌다. 백업·덤프
+(약 31GB)와 다른 세션의 작업 디렉터리(약 18.5GB)는 되돌릴 수 없어 소유자 판단으로 남겼다. 지우는
+명령도 추측이 아니라 명시 목록이었다 — `docker volume prune`은 현재 스택이 아닌 이름 붙은 볼륨까지
+삼키고, 옛 작업 디렉터리 하나는 다른 worktree들의 git 디렉터리였다.
+
+**t57d**는 같은 pair로 끝까지 섰다. rebuild success → executor 이미지 → repin(verifier PASS) → M01 ACL
+preflight 40/40 → **D1 11 passed** → **D2 `phase: passed`**(lane에 BLOCKED/RESULT/ACTIVE 없음).
+ADR-069 토폴로지도 확인했다: Map·PinVi 각각 code-server/webserver/daemon healthy, companion 이미지 =
+owner 이미지, code location LOADED(Map 48 jobs, PinVi 9 jobs). gRPC 12703/12803은 `ss`에
+`[::ffff:127.0.0.1]`로 보인다 — host network에서 dual-stack 소켓이 loopback에 묶인 모습이고, 호스트의
+비-loopback IPv4 29개에서 전부 거부되는 것을 직접 확인했다(내 검증 스크립트가 `127.0.0.1:` 표기만 받던 것을
+고쳤다).
+
 ## 2026-09-26 (오후) — 디스크가 포화된 호스트의 60초, 그리고 배포는 데이터를 지우지 않기로
 
 **t57a.** #399를 설치하고 새 pinset `8451c8a3`으로 chain17을 돌렸다. 후보 빌드 49분 뒤, journal을
