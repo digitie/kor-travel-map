@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-26 (오후) — t57a는 디스크 포화에 걸렸다 → 타임아웃 수정 후 재시도, 배포 모델은 마이그레이션 전진으로
+
+**다음 한 작업: Manager #401 설치 → 이 커밋(새 pinset)으로 chain17 → code location 로드 확인 →
+D1/D2.** 그다음 ADR-102/Manager ADR-51의 단계별 PR(A → M1 → M2+H1 → B1 → B2 …).
+
+- **t57a(#399 설치본):** 후보 static inspection `ktm-application-schema head`가 60초 타임아웃으로
+  죽었다(journal 전, claim 반환). 명령은 정상이다 — n150 SATA SSD가 92% 차 IO 압력 `full`이 상시
+  50~60%이고, `docker run --rm /bin/true` 하나가 112초, head가 74초 걸렸다. #399가 봉인된 stage 한
+  단어 대신 비밀을 가린 원인 원문을 stderr에 남겨서 재현 없이 바로 짚었다.
+- **수정(Manager #401):** static inspection 60→600초, compose `--wait-timeout` 300→900초(ADR-069 뒤 Map은
+  code-server → webserver → daemon 직렬 기동).
+- **배포 모델 결정(소유자):** 봉인·신뢰 릴리스 단순화의 잃는 보장 A~H 전부 승인, **DB는 배포를
+  넘어 보존(마이그레이션 전진)**, 리셋은 명시적 `--restart`만, 쌍 계약 preflight는 게이트 유지,
+  M05 유지, n150은 rebuildable 유지, `--restart` 전 백업 강제 안 함, 급하면 구 모델 리셋 1회 허용,
+  PinVi에도 forward-only ADR. → [ADR-102](adr/102-migrate-forward-deploys-and-seal-removal.md),
+  Manager ADR-51(#400), PinVi ADR-071(pinvi#566).
+- **열린 것:** n150 디스크 92%·IO 포화 자체. 타임아웃은 증상 완화다.
+
 ## 2026-09-26 — ADR-069 재구축이 code-server를 한 번도 띄운 적이 없었다 → Manager 수정 후 재시도
 
 **다음 한 작업: Manager #399 설치 → 이 커밋(새 pinset)으로
