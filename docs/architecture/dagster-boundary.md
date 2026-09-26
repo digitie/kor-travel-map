@@ -62,26 +62,31 @@ ktm-dagster-storage migrate
 - `migrate`는 `DAGSTER_HOME`과 그 아래 `dagster.yaml`,
   `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. production `DAGSTER_HOME`은
   root-owned `/opt/dagster/dagster_home` exact path만 허용하고, `dagster.yaml`은 mode `0444`
-  regular non-symlink이며 storage target이 해당 env 하나인지 확인한다. 별도 root-owned metadata
-  identity permit의 system ID/name/OID/owner/login과 같은 DSN 관측값을 대조하고 application DB
-  identity·raw `300`·application schema이면 **쓰기 전에** 중단한다. production permit은
-  Docker Manager authority, paired candidate receipt SHA-256, exact Dagster image ID와
-  `dagster.yaml` SHA-256을 함께 결박한다. 검증 뒤 이 입력 그대로
-  `dagster instance migrate`를 실행한 뒤, 같은 DSN으로
-  `public.alembic_version`을 직접 읽는다. 행은 정확히 하나여야 하고
-  `version_num`은 후보 이미지의 head와 같아야 성공한다.
-- 명령의 stdout은 성공 JSON만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
+  regular non-symlink이며 storage target이 해당 env 하나인지 확인한다.
+- `migrate`는 **멱등**이다(ADR-102). 배포는 metadata DB를 지우지 않으므로 이 one-shot은
+  매 배포 영속 DB 위에서 돈다. metadata DB 전용 session advisory lock 안에서
+  (1) DB가 application DB로 보이면(`feature`/`provider_sync`/`ops` schema 또는 설치된
+  application graph의 revision) **쓰기 전에** 중단하고, (2) ADR-102 이전 이미지가 남긴
+  intent/receipt outbox를 `DROP ... IF EXISTS`로 치우고, (3) `public.alembic_version`이
+  없을 때만 Dagster `create_all` + head stamp를 한다. 그 뒤 `dagster instance migrate` +
+  `reindex`를 실행하고, 설치된 Dagster가 기대하는 table·column·valid index와 필수 data
+  migration marker가 **모두 있는지**(여분은 허용하는 부분집합 검사), `alembic_version`이
+  정확히 이미지 head 한 행인지 확인한다. 이미 head인 DB에서는 Dagster migrate/reindex 외에
+  바뀌는 것이 없다. permit은 읽지 않는다 — Manager가 전환기 동안 permit 디렉터리와
+  `..._STORAGE_PERMIT_IMAGE_ID`/`..._STORAGE_CONFIG_SHA256`을 넣어도 무시한다.
+- 명령의 stdout은 로그용 결과 JSON(`kor-travel-map.dagster-storage-migration.v4`,
+  `schema`/`status`/`head`) 한 줄만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
   진단 출력은 전달하지 않는다. 실패는 DSN·비밀번호·token을 반사하지 않는 유형화된
-  오류로 종료한다.
-- Dagster webserver/daemon entrypoint는 migration을 실행하지 않는다. 다만 one-shot과 같은
-  canonical config/metadata identity permit verifier를 기동 전에 다시 실행하고, application
-  final permit도 별도로 확인한다. Compose의 `dagster-storage-migrate` one-shot service가
-  성공한 뒤에만 두 장기 실행 service를 시작한다.
+  오류로 종료한다. Manager는 stdout을 해석하지 않는다 — exit 0 뒤 metadata DB의
+  `public.alembic_version`을 직접 읽어 확인한다.
+- Dagster webserver/daemon/code-server entrypoint는 migration을 실행하지 않고, metadata DB
+  신원도 다시 증명하지 않는다(ADR-102). 기동 전에는 application head 확인
+  (`kortravelmap.dagster.runtime_preflight`)만 돈다. Compose의 `dagster-storage-migrate`
+  one-shot service가 성공한 뒤에만 장기 실행 service를 시작한다.
 
-이 경계는 v5 pinned runtime candidate를 attest할 때 Manager가 이미지 내부에서 head를
-읽고, reset 뒤 같은 후보 이미지로 정확한 Dagster storage migration을 수행하도록 만든다.
-따라서 stale storage schema의 web/daemon 자동 초기화·stamp를 정상 migration으로
-오인할 수 없다.
+이 경계는 Manager가 이미지 내부에서 head를 읽고, 같은 후보 이미지로 Dagster storage
+migration을 수행하도록 만든다. 따라서 stale storage schema의 web/daemon 자동
+초기화·stamp를 정상 migration으로 오인할 수 없다.
 
 요약:
 - **본 라이브러리**: 변환 + 저장 + 검증 (Dagster 없이도 호출 가능한 함수)

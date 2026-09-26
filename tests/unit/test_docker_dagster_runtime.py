@@ -41,23 +41,6 @@ _API_IMAGE_ENV: Final = {
     "PATH": _SEALED_RUNTIME_PATH,
     "PYTHONNOUSERSITE": "1",
 }
-_SAFE_DAGSTER_LOGIN_ATTRIBUTES: Final = {
-    "superuser": False,
-    "can_login": True,
-    "inherit": False,
-    "create_database": False,
-    "create_role": False,
-    "replication": False,
-    "bypass_rls": False,
-    "connection_limit": -1,
-    "valid_until_is_null": True,
-    "role_config_count": 0,
-    "database_role_setting_count": 0,
-    "granted_role_count": 0,
-    "member_role_count": 0,
-}
-
-
 def _compose() -> dict[str, Any]:
     return yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
 
@@ -4364,7 +4347,7 @@ def test_dagster_storage_entrypoint_rejects_application_inputs_even_when_empty(
     key: str,
     profile: str,
 ) -> None:
-    """metadata writer one-shot은 application runtime/permit 값을 받지 않는다."""
+    """metadata writer one-shot은 application runtime 값을 받지 않는다."""
 
     environment = {"KOR_TRAVEL_MAP_DAGSTER_PROFILE": profile, key: ""}
     if profile == "production":
@@ -4466,17 +4449,18 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
 def _dagster_production_runtime_stub_path(
     tmp_path: Path,
 ) -> tuple[str, Path, Path]:
-    """metadata identity permit argv와 실제 runtime DSN을 함께 기록하는 PATH다.
+    """storage 명령 호출 여부와 실제 runtime DSN을 함께 기록하는 PATH다.
 
-    application final permit 축은 없어졌다(ADR-101). 남은 것은 Dagster **metadata**
-    identity permit이고, 그것은 이 변경과 무관하게 그대로다.
+    ADR-102: 런타임 기동은 storage 명령(`ktm-dagster-storage`)을 부르지 않는다. 그래서
+    그 대역은 불리면 argv를 marker에 남기고 **실패한다** — 불리는 순간 기동이 막히고
+    marker가 증거로 남는다.
     """
 
     bin_dir = tmp_path / "dagster-production-bin"
     bin_dir.mkdir()
-    storage_permit_marker = tmp_path / "dagster-storage-permit-argv"
+    storage_command_marker = tmp_path / "dagster-storage-command-argv"
     runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
-    storage_permit = bin_dir / "ktm-dagster-storage"
+    storage_command = bin_dir / "ktm-dagster-storage"
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
         "if [ \"${1:-}\" = \"-I\" ]; then\n"
@@ -4499,17 +4483,16 @@ def _dagster_production_runtime_stub_path(
         "exit 70\n",
         encoding="utf-8",
     )
-    storage_permit.write_text(
+    storage_command.write_text(
         f"#!{sys.executable}\n"
         "import pathlib\n"
         "import sys\n"
-        "if sys.argv[1:] != ['verify-identity']:\n"
-        "    raise SystemExit(73)\n"
-        f"pathlib.Path({str(storage_permit_marker)!r}).write_text("
-        "'verify-identity\\n', encoding='utf-8')\n",
+        f"pathlib.Path({str(storage_command_marker)!r}).write_text("
+        "' '.join(sys.argv[1:]) + '\\n', encoding='utf-8')\n"
+        "raise SystemExit(73)\n",
         encoding="utf-8",
     )
-    for command in ("dagster-webserver", "dagster-daemon"):
+    for command in ("dagster-webserver", "dagster-daemon", "dagster"):
         target = bin_dir / command
         target.write_text(
             f"#!{sys.executable}\nprint('{command}-started')\n",
@@ -4517,10 +4500,10 @@ def _dagster_production_runtime_stub_path(
         )
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
-    storage_permit.chmod(0o755)
+    storage_command.chmod(0o755)
     return (
         f"{bin_dir}:{os.environ['PATH']}",
-        storage_permit_marker,
+        storage_command_marker,
         runtime_dsn_marker,
     )
 
@@ -4586,7 +4569,7 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
     ],
 )
 @pytest.mark.parametrize("runtime_dsn", [None, ""])
-def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
+def test_dagster_production_requires_the_single_runtime_dsn_before_start(
     tmp_path: Path,
     command: list[str],
     runtime_dsn: str | None,
@@ -4601,14 +4584,10 @@ def test_dagster_production_requires_the_single_runtime_dsn_before_the_permit(
     같은 자리에 남은 성질은 fail-closed 요구다 — production runtime은
     `${KOR_TRAVEL_MAP_PG_DSN:?...}`로 **미설정과 빈 값 둘 다** 거부하고, 그 거부는
     실제 Dagster 기동 **앞**에서 일어난다. `:?`가 `:-`로 바뀌거나 사라지면 이 검사가
-    빨개진다.
-
-    증인은 "Dagster가 뜨지 않았다" 하나다. metadata identity permit은 증인이 될 수
-    없다 — 그것은 application DSN 검사보다 **먼저** 도는 것이 설계이므로, 그것이
-    돌았다는 사실은 이 검사에 대해 아무 말도 하지 않는다.
+    빨개진다. 증인은 "Dagster가 뜨지 않았다" 하나다.
     """
 
-    path, _storage_permit_marker, _runtime_dsn_marker = (
+    path, _storage_command_marker, _runtime_dsn_marker = (
         _dagster_production_runtime_stub_path(tmp_path)
     )
     environment = {
@@ -4651,9 +4630,9 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
     tmp_path: Path,
     command: list[str],
 ) -> None:
-    """같은 DSN으로 verifier와 Dagster runtime을 순서대로 결박한다."""
+    """같은 DSN이 runtime preflight와 Dagster runtime에 그대로 도달한다."""
 
-    path, storage_permit_marker, runtime_dsn_marker = (
+    path, _storage_command_marker, runtime_dsn_marker = (
         _dagster_production_runtime_stub_path(tmp_path)
     )
     verified_dsn = "postgresql://dagster@example.invalid/verified"
@@ -4670,8 +4649,83 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
     )
 
     assert result.returncode == 0, result.stderr
-    assert storage_permit_marker.read_text(encoding="utf-8") == "verify-identity\n"
     assert runtime_dsn_marker.read_text(encoding="utf-8") == verified_dsn
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("profile", "command"),
+    [
+        (
+            "production",
+            [
+                "/usr/local/bin/dagster-webserver",
+                "-w",
+                "/opt/dagster/dagster_home/workspace.yaml",
+                "-h",
+                "0.0.0.0",
+                "-p",
+                "12702",
+            ],
+        ),
+        (
+            "production",
+            [
+                "/usr/local/bin/dagster-daemon",
+                "run",
+                "-w",
+                "/opt/dagster/dagster_home/workspace.yaml",
+            ],
+        ),
+        (
+            "production",
+            [
+                "/usr/local/bin/dagster",
+                "api",
+                "grpc",
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "4000",
+                "-m",
+                "kortravelmap.dagster.definitions",
+            ],
+        ),
+        ("local-dev", ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"]),
+        (
+            "local-dev",
+            ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+        ),
+    ],
+)
+def test_dagster_runtime_preflight_does_not_invoke_the_storage_command(
+    tmp_path: Path,
+    profile: str,
+    command: list[str],
+) -> None:
+    """ADR-102: 런타임은 metadata DB 신원을 다시 증명하지 않는다.
+
+    종전 `runtime_preflight`는 기동 전에 `ktm-dagster-storage verify-identity`로
+    permit과 DB를 대조했다. 그 호출이 사라져도 application head 확인
+    (`kortravelmap.dagster.runtime_preflight`)은 그대로 돈다 — 둘을 함께 잰다.
+    """
+
+    path, storage_command_marker, _runtime_dsn_marker = (
+        _dagster_production_runtime_stub_path(tmp_path)
+    )
+    environment = {"KOR_TRAVEL_MAP_DAGSTER_PROFILE": profile}
+    if profile == "production":
+        environment["DAGSTER_HOME"] = "/opt/dagster/dagster_home"
+        environment["KOR_TRAVEL_MAP_PG_DSN"] = "postgresql://dagster@example.invalid/x"
+    result = _run_dagster_entrypoint(tmp_path, path, command, environment)
+
+    assert not storage_command_marker.exists(), (
+        "runtime 기동이 storage 명령을 불렀다: "
+        + storage_command_marker.read_text(encoding="utf-8")
+    )
+    assert result.returncode == 0, result.stderr
+    assert "runtime-preflight" in result.stdout
+    assert "-started" in result.stdout
 
 
 @pytest.mark.unit
@@ -5044,301 +5098,600 @@ def test_dagster_storage_rejects_appuser_writable_config_parent() -> None:
     assert caught.value.code == "unsafe_dagster_home_parent"
 
 
+_FAKE_DAGSTER_HEAD: Final = "fake_dagster_head"
+_FAKE_CONTRACT_COLUMNS: Final = {
+    "runs": ("id", "run_id", "run_body"),
+    "secondary_indexes": ("id", "name", "migration_completed"),
+}
+_FAKE_CONTRACT_INDEXES: Final = {
+    "runs": ("idx_run_id", "runs_pkey"),
+    "secondary_indexes": ("secondary_indexes_pkey",),
+}
+_FAKE_REQUIRED_MIGRATIONS: Final = ("run_partitions", "run_repo_label_tags")
+#: ADR-102 이전 이미지가 metadata DB에 설치하던 outbox. 대역이 그 의존을 흉내 낸다.
+_LEGACY_OUTBOX_TABLES: Final = frozenset(
+    {
+        "ktm_dagster_storage_operation_intents",
+        "ktm_dagster_storage_operation_receipts",
+    }
+)
+_LEGACY_OUTBOX_FUNCTION: Final = "ktm_reject_dagster_storage_operation_mutation"
+_MIGRATION_ERROR_SCHEMA: Final = "kor-travel-map.dagster-storage-migration-error.v1"
+
+
+class _FakeResult:
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return list(self._rows)
+
+    def one(self) -> tuple[Any, ...]:
+        assert len(self._rows) == 1
+        return self._rows[0]
+
+    def scalar_one(self) -> Any:
+        return self.one()[0]
+
+
+class _FakeTransaction:
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _FakeMetadataDatabase:
+    """storage one-shot이 보내는 SQL만 해석하는 metadata DB 대역.
+
+    진짜 PostgreSQL이 아니다. 그러나 one-shot이 **무엇을 읽고 무엇을 바꾸는지**를
+    상태로 들고 있어서, 같은 대역에서 두 번 돌리면 두 번째 실행이 첫 실행이 남긴 상태를
+    본다. 옛 outbox의 두 의존(receipt→intent FK, 두 불변 trigger→함수)도 흉내 낸다 —
+    PostgreSQL처럼 의존하는 객체가 남은 채로 지우려 하면 실패한다
+    (`test_the_fake_metadata_database_enforces_the_outbox_drop_dependencies`).
+    """
+
+    def __init__(
+        self,
+        *,
+        schemas: set[str] | None = None,
+        tables: dict[str, set[str]] | None = None,
+        indexes: dict[str, set[str]] | None = None,
+        version_rows: tuple[str, ...] | None = None,
+        completed_markers: set[str] | None = None,
+        functions: set[str] | None = None,
+    ) -> None:
+        self.schemas = set(schemas or ())
+        self.tables = {name: set(columns) for name, columns in (tables or {}).items()}
+        self.indexes = {name: set(names) for name, names in (indexes or {}).items()}
+        #: ``None``이면 ``public.alembic_version`` 표 자체가 없다.
+        self.version_rows = version_rows
+        self.completed_markers = set(completed_markers or ())
+        self.functions = set(functions or ())
+        self.statements: list[str] = []
+        self.locked = False
+
+    def begin(self) -> _FakeTransaction:
+        return _FakeTransaction()
+
+    def commit(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    def writes(self) -> list[str]:
+        return [
+            statement
+            for statement in self.statements
+            if statement.split(" ", 1)[0]
+            in {"CREATE", "DROP", "ALTER", "INSERT", "UPDATE", "DELETE", "TRUNCATE"}
+        ]
+
+    def execute(
+        self, statement: object, parameters: dict[str, Any] | None = None
+    ) -> _FakeResult:
+        sql = " ".join(str(statement).split())
+        self.statements.append(sql)
+        params = parameters or {}
+        if "pg_advisory_lock(" in sql:
+            self.locked = True
+            return _FakeResult([(None,)])
+        if "pg_advisory_unlock(" in sql:
+            unlocked, self.locked = self.locked, False
+            return _FakeResult([(unlocked,)])
+        if "FROM pg_catalog.pg_namespace WHERE nspname" in sql:
+            return _FakeResult([(len(self.schemas & set(params["schemas"])),)])
+        if "to_regclass('public.alembic_version')" in sql:
+            return _FakeResult([(self.version_rows is not None,)])
+        if "SELECT 1 FROM public.alembic_version" in sql:
+            assert self.version_rows is not None
+            return _FakeResult(
+                [(bool(set(self.version_rows) & set(params["revisions"])),)]
+            )
+        if sql.startswith("DROP TABLE IF EXISTS "):
+            names = {
+                name.strip().removeprefix("public.")
+                for name in sql.removeprefix("DROP TABLE IF EXISTS ").split(",")
+            }
+            survivors = set(self.tables) - names
+            if (
+                "ktm_dagster_storage_operation_intents" in names
+                and "ktm_dagster_storage_operation_receipts" in survivors
+            ):
+                raise RuntimeError("receipt FK still depends on the intent table")
+            for name in names:
+                self.tables.pop(name, None)
+                self.indexes.pop(name, None)
+            return _FakeResult([])
+        if sql.startswith("DROP FUNCTION IF EXISTS "):
+            name = (
+                sql.removeprefix("DROP FUNCTION IF EXISTS ")
+                .removeprefix("public.")
+                .removesuffix("()")
+            )
+            if name == _LEGACY_OUTBOX_FUNCTION and _LEGACY_OUTBOX_TABLES & set(self.tables):
+                raise RuntimeError("immutable triggers still depend on the function")
+            self.functions.discard(name)
+            return _FakeResult([])
+        if "JOIN pg_catalog.pg_attribute" in sql:
+            rows = [
+                (table_name, column_name)
+                for table_name, columns in self.tables.items()
+                for column_name in sorted(columns)
+            ]
+            if self.version_rows is not None:
+                rows.append(("alembic_version", "version_num"))
+            return _FakeResult(rows)
+        if "FROM pg_catalog.pg_index" in sql:
+            return _FakeResult(
+                [
+                    (table_name, index_name)
+                    for table_name, names in self.indexes.items()
+                    for index_name in sorted(names)
+                ]
+            )
+        if "SELECT version_num FROM public.alembic_version" in sql:
+            assert self.version_rows is not None
+            return _FakeResult([(row,) for row in sorted(self.version_rows)])
+        if "FROM public.secondary_indexes" in sql:
+            assert "secondary_indexes" in self.tables
+            return _FakeResult([(name,) for name in sorted(self.completed_markers)])
+        raise AssertionError(f"대역이 모르는 SQL: {sql}")
+
+
+class _FakeMetadataEngine:
+    def __init__(self, database: _FakeMetadataDatabase) -> None:
+        self.database = database
+
+    def connect(self) -> _FakeMetadataDatabase:
+        return self.database
+
+    def dispose(self) -> None:
+        return None
+
+
+def _install_fake_contract(database: _FakeMetadataDatabase) -> None:
+    """Dagster `create_all` + stamp가 남기는 것을 대역에 심는다."""
+
+    for table_name, columns in _FAKE_CONTRACT_COLUMNS.items():
+        database.tables.setdefault(table_name, set()).update(columns)
+    for table_name, names in _FAKE_CONTRACT_INDEXES.items():
+        database.indexes.setdefault(table_name, set()).update(names)
+    database.version_rows = (_FAKE_DAGSTER_HEAD,)
+
+
+def _metadata_database_at_head() -> _FakeMetadataDatabase:
+    database = _FakeMetadataDatabase(completed_markers=set(_FAKE_REQUIRED_MIGRATIONS))
+    _install_fake_contract(database)
+    return database
+
+
+def _with_legacy_outbox(database: _FakeMetadataDatabase) -> _FakeMetadataDatabase:
+    database.tables["ktm_dagster_storage_operation_intents"] = {"operation_id"}
+    database.tables["ktm_dagster_storage_operation_receipts"] = {"operation_id"}
+    database.functions.add(_LEGACY_OUTBOX_FUNCTION)
+    return database
+
+
+_IMAGE_DAGSTER_HOME: Final = Path("/opt/dagster/dagster_home")
+_FAKE_METADATA_DSN: Final = "postgresql://redacted/metadata"
+_PERMIT_INPUT_CASES: Final = pytest.mark.parametrize(
+    "permit_inputs",
+    [
+        {},
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "sha256:" + "0" * 64,
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "f" * 64,
+        },
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID": "",
+            "KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256": "not-a-digest",
+        },
+    ],
+    ids=["absent", "stale", "malformed"],
+)
+
+
+def _seal_shipped_dagster_config_into_image_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    yaml_uid: int = 0,
+) -> bytes:
+    """이미지의 root 소유 봉인을 테스트 호스트에 재현한다.
+
+    이미지에는 root 소유 `/opt`·`/opt/dagster`·`/opt/dagster/dagster_home`과 그 안의
+    uid 0 · `0444` · nlink 1 `dagster.yaml`이 있다. 테스트 호스트에는 그 경로도 root
+    소유 파일도 없으므로 **그 네 경로의 `lstat`과 yaml `open`만** 저장소가 싣는
+    `docker/dagster.yaml`의 tmp 사본으로 돌린다. 그 밖의 봉인 검사
+    (`_require_migration_environment` → `_safe_dagster_config` →
+    `_validate_dagster_config`)는 진짜 코드가 돈다 — env 검증을 통째로 대역으로 바꾸면
+    permit env 검사가 그 안에 되살아나도 아래 검사가 초록으로 남는다.
+    """
+
+    raw = (ROOT / "docker" / "dagster.yaml").read_bytes()
+    shipped = tmp_path / "shipped-dagster.yaml"
+    shipped.write_bytes(raw)
+    real = os.stat(shipped)
+    image_yaml = _IMAGE_DAGSTER_HOME / "dagster.yaml"
+    image_directories = {Path("/opt"), Path("/opt/dagster"), _IMAGE_DAGSTER_HOME}
+    original_lstat = Path.lstat
+    original_open = os.open
+
+    def lstat(self: Path) -> os.stat_result:
+        if self in image_directories:
+            return os.stat_result((stat.S_IFDIR | 0o755, 1, 1, 2, 0, 0, 4096, 0, 0, 0))
+        if self == image_yaml:
+            return os.stat_result(
+                (
+                    stat.S_IFREG | 0o444,
+                    real.st_ino,
+                    real.st_dev,
+                    1,
+                    yaml_uid,
+                    0,
+                    real.st_size,
+                    0,
+                    0,
+                    0,
+                )
+            )
+        return original_lstat(self)
+
+    def open_(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if Path(path) == image_yaml:
+            return original_open(shipped, flags, *args, **kwargs)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(os, "open", open_)
+    return raw
+
+
+def _storage_environment(**extra: str) -> dict[str, str]:
+    return {
+        "PATH": os.environ["PATH"],
+        "DAGSTER_HOME": str(_IMAGE_DAGSTER_HOME),
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL": _FAKE_METADATA_DSN,
+        **extra,
+    }
+
+
+def _wire_storage_boundaries(
+    monkeypatch: pytest.MonkeyPatch,
+    module: Any,
+    database: _FakeMetadataDatabase,
+) -> dict[str, list[object]]:
+    """one-shot의 **외부 경계**만 대역으로 바꾼다.
+
+    바꾸는 것: 설치된 Dagster head·catalog 계약, DB 연결, Dagster CLI subprocess,
+    `create_all` + stamp. 그 사이의 순서·가드·outbox 제거·부분집합 검사는 진짜 코드다.
+    env·`dagster.yaml` 검증도 대역이 아니다 — `main()`을 부르는 검사는
+    `_seal_shipped_dagster_config_into_image_paths`로 이미지 경로만 재현한다.
+    """
+
+    calls: dict[str, list[object]] = {"bootstrap": [], "instance_migrate": []}
+    monkeypatch.setattr(module, "_dagster_storage_head", lambda: _FAKE_DAGSTER_HEAD)
+    monkeypatch.setattr(
+        module,
+        "_dagster_metadata_contract",
+        lambda: (
+            (),
+            dict(_FAKE_CONTRACT_COLUMNS),
+            dict(_FAKE_CONTRACT_INDEXES),
+            _FAKE_REQUIRED_MIGRATIONS,
+        ),
+    )
+    monkeypatch.setattr(module, "_installed_application_revisions", lambda: {"400", "401"})
+    monkeypatch.setattr(module, "create_engine", lambda _dsn: _FakeMetadataEngine(database))
+
+    def bootstrap(connection: object, *_args: object, **_kwargs: object) -> None:
+        assert connection is database
+        calls["bootstrap"].append(True)
+        _install_fake_contract(database)
+
+    def instance_migrate(environment: dict[str, str]) -> None:
+        # Dagster `instance migrate` + `reindex`: version을 head로 올리고 필수 data
+        # migration marker를 채운다. 이미 끝난 것은 다시 하지 않는다(그 자체가 멱등).
+        calls["instance_migrate"].append(dict(environment))
+        assert database.version_rows is not None
+        database.version_rows = (_FAKE_DAGSTER_HEAD,)
+        database.completed_markers |= set(_FAKE_REQUIRED_MIGRATIONS)
+
+    monkeypatch.setattr(module, "_bootstrap_fresh_dagster_catalog", bootstrap)
+    monkeypatch.setattr(module, "_run_dagster_instance_migrate", instance_migrate)
+    return calls
+
+
+_MIGRATED: Final = {
+    "schema": "kor-travel-map.dagster-storage-migration.v4",
+    "status": "migrated",
+    "head": _FAKE_DAGSTER_HEAD,
+}
+
+
+@pytest.mark.unit
+def test_the_fake_metadata_database_enforces_the_outbox_drop_dependencies() -> None:
+    """아래 outbox 제거 검사의 전제 — 대역이 PostgreSQL의 DROP 의존을 실제로 거부한다.
+
+    대역이 아무 순서나 받아 주면 "옛 outbox를 지웠다"는 검사는 순서가 틀려도 초록이다.
+    """
+
+    database = _with_legacy_outbox(_FakeMetadataDatabase())
+
+    with pytest.raises(RuntimeError, match="triggers"):
+        database.execute(
+            "DROP FUNCTION IF EXISTS "
+            "public.ktm_reject_dagster_storage_operation_mutation()"
+        )
+    with pytest.raises(RuntimeError, match="FK"):
+        database.execute(
+            "DROP TABLE IF EXISTS public.ktm_dagster_storage_operation_intents"
+        )
+    assert set(database.tables) >= _LEGACY_OUTBOX_TABLES
+    assert _LEGACY_OUTBOX_FUNCTION in database.functions
+
+
+@pytest.mark.unit
+def test_the_image_seal_stand_in_still_runs_the_real_config_checks(
+    tmp_path: Path,
+) -> None:
+    """아래 env 검사의 전제 — 이미지 경로 재현이 봉인 검사를 건너뛰지 않는다.
+
+    같은 사본이라도 소유자가 root가 아니면 진짜 `_safe_dagster_config`가 거부해야 한다.
+    재현이 검사 자체를 우회하면 "진짜 코드가 돈다"는 말이 거짓이 된다.
+    """
+
+    module = _load_dagster_storage_module()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path, yaml_uid=999)
+        with pytest.raises(module.DagsterStorageMigrationError) as caught:
+            module._require_migration_environment(_storage_environment())
+
+    assert caught.value.code == "invalid_dagster_yaml"
+
+
+@pytest.mark.unit
+@_PERMIT_INPUT_CASES
+def test_dagster_storage_environment_validation_ignores_permit_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    permit_inputs: dict[str, str],
+) -> None:
+    """ADR-102: env·`dagster.yaml` 봉인은 permit 입력을 보지 않는다.
+
+    진짜 `_require_migration_environment`를 직접 부른다. permit env 검사가 그 안이나
+    `_safe_dagster_config` 안에 되살아나면 `stale`/`malformed`가 빨개진다.
+    """
+
+    module = _load_dagster_storage_module()
+    raw = _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+
+    assert module._require_migration_environment(
+        _storage_environment(**permit_inputs)
+    ) == (_FAKE_METADATA_DSN, "production", hashlib.sha256(raw).hexdigest())
+
+
+@pytest.mark.unit
+@_PERMIT_INPUT_CASES
+def test_dagster_storage_migrates_a_fresh_database_without_any_permit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    permit_inputs: dict[str, str],
+) -> None:
+    """ADR-102: storage one-shot은 permit 없이 돈다.
+
+    Manager는 전환기 동안 permit 디렉터리를 마운트하고 두 env를 넣을 수 있다. one-shot은
+    그것을 **읽지 않는다** — 파일이 없어도, env가 낡았거나 깨져 있어도 결과가 같다.
+    env·`dagster.yaml` 검증은 대역이 아니라 진짜 코드가 돈다.
+    """
+
+    # 전제: 이 호스트에 permit 파일이 없다. 있으면 "없이 돈다"를 재지 못하므로 조용히
+    # 통과하지 않고 여기서 멈춘다.
+    assert not Path("/run/kor-travel-map-dagster-storage-permit/permit.json").exists()
+    module = _load_dagster_storage_module()
+    database = _FakeMetadataDatabase()
+    calls = _wire_storage_boundaries(monkeypatch, module, database)
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment(**permit_inputs))
+
+    exit_code = module.main(["migrate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0, captured.err
+    assert json.loads(captured.out) == _MIGRATED
+    assert len(calls["bootstrap"]) == 1
+    assert len(calls["instance_migrate"]) == 1
+    assert database.version_rows == (_FAKE_DAGSTER_HEAD,)
+    assert database.locked is False
+
+
+@pytest.mark.unit
+def test_dagster_storage_migrate_is_idempotent_on_the_same_database(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """배포마다 도는 one-shot — 두 번째 실행은 첫 실행이 만든 head DB를 거부하지 않는다.
+
+    종전에는 "final head인데 이번 operation의 intent가 없다"로 두 번째 배포를 막았다.
+    """
+
+    module = _load_dagster_storage_module()
+    database = _FakeMetadataDatabase()
+    calls = _wire_storage_boundaries(monkeypatch, module, database)
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
+
+    first_exit = module.main(["migrate"])
+    first = capsys.readouterr()
+    writes_after_first = len(database.writes())
+    second_exit = module.main(["migrate"])
+    second = capsys.readouterr()
+
+    assert (first_exit, second_exit) == (0, 0), (first.err, second.err)
+    assert json.loads(first.out) == json.loads(second.out) == _MIGRATED
+    # bootstrap은 version table이 없던 첫 실행에서만. Dagster migrate/reindex는 매번
+    # 돌지만 그 자체가 끝난 migration을 다시 하지 않는다.
+    assert len(calls["bootstrap"]) == 1
+    assert len(calls["instance_migrate"]) == 2
+    # 두 번째 실행의 쓰기는 옛 outbox의 `IF EXISTS` DROP뿐이다.
+    assert all(
+        statement.startswith("DROP ") and " IF EXISTS " in statement
+        for statement in database.writes()[writes_after_first:]
+    )
+    assert database.version_rows == (_FAKE_DAGSTER_HEAD,)
+
+
+@pytest.mark.unit
+def test_dagster_storage_drops_the_legacy_operation_outbox(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """ADR-102 이전 이미지가 만든 head DB — outbox·trigger 함수가 치워지고 성공한다."""
+
+    module = _load_dagster_storage_module()
+    database = _with_legacy_outbox(_metadata_database_at_head())
+    calls = _wire_storage_boundaries(monkeypatch, module, database)
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
+
+    exit_code = module.main(["migrate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0, captured.err
+    assert json.loads(captured.out) == _MIGRATED
+    assert not _LEGACY_OUTBOX_TABLES & set(database.tables)
+    assert _LEGACY_OUTBOX_FUNCTION not in database.functions
+    assert calls["bootstrap"] == []
+    assert len(calls["instance_migrate"]) == 1
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("attribute", "value"),
+    ("schemas", "version_rows"),
     [
-        ("superuser", True),
-        ("can_login", False),
-        ("inherit", True),
-        ("create_database", True),
-        ("create_role", True),
-        ("replication", True),
-        ("bypass_rls", True),
-        ("connection_limit", 0),
-        ("connection_limit", False),
-        ("valid_until_is_null", False),
-        ("role_config_count", 1),
-        ("role_config_count", False),
-        ("database_role_setting_count", 1),
-        ("database_role_setting_count", False),
-        ("granted_role_count", 1),
-        ("granted_role_count", False),
-        ("member_role_count", 1),
-        ("member_role_count", False),
+        ({"feature"}, None),
+        ({"provider_sync"}, None),
+        ({"ops"}, None),
+        (set(), ("401",)),
+        # `public.alembic_version`에 여러 행이 있어도 그중 하나가 application
+        # revision이면 application DB다.
+        (set(), ("other", "400")),
     ],
 )
-def test_dagster_storage_rejects_privileged_metadata_login(
-    attribute: str, value: object
+def test_dagster_storage_refuses_an_application_database_before_any_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    schemas: set[str],
+    version_rows: tuple[str, ...] | None,
 ) -> None:
+    """관측 가드는 남는다 — DB가 application DB로 보이면 무엇도 바꾸기 전에 멈춘다.
+
+    옛 outbox를 심어 두는 것은 "쓰기 전"을 재기 위해서다. 가드가 DROP보다 뒤에 서면
+    outbox가 사라진다.
+    """
+
     module = _load_dagster_storage_module()
-    attributes = {**_SAFE_DAGSTER_LOGIN_ATTRIBUTES, attribute: value}
-    identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map_dagster",
-        "oid": 200,
-        "owner": "dagster_metadata",
-        "login_role": "dagster_metadata",
-        "login_role_attributes": attributes,
+    database = _with_legacy_outbox(
+        _FakeMetadataDatabase(schemas=schemas, version_rows=version_rows)
+    )
+    calls = _wire_storage_boundaries(monkeypatch, module, database)
+    _seal_shipped_dagster_config_into_image_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(module.os, "environ", _storage_environment())
+
+    exit_code = module.main(["migrate"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert json.loads(captured.err) == {
+        "code": "dagster_storage_targets_application_schema",
+        "schema": _MIGRATION_ERROR_SCHEMA,
     }
-
-    with pytest.raises(module.DagsterStorageMigrationError) as caught:
-        module._require_database_identity(identity, dagster=True)
-
-    assert caught.value.code == "dagster_storage_login_role_unsafe"
+    assert database.writes() == []
+    assert set(database.tables) >= _LEGACY_OUTBOX_TABLES
+    assert calls == {"bootstrap": [], "instance_migrate": []}
+    assert database.locked is False
 
 
 @pytest.mark.unit
-def test_dagster_storage_rejects_metadata_owner_reused_by_application() -> None:
-    module = _load_dagster_storage_module()
-    shared_owner = "shared_database_owner"
-    dagster_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map_dagster",
-        "oid": 200,
-        "owner": shared_owner,
-        "login_role": shared_owner,
-        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
-    }
-    application_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map",
-        "oid": 100,
-        "owner": shared_owner,
-    }
-
-    with pytest.raises(module.DagsterStorageMigrationError) as caught:
-        module._require_isolated_database_identities(
-            dagster_identity,
-            application_identity,
-        )
-
-    assert caught.value.code == "dagster_storage_permit_identity_invalid"
-
-
-@pytest.mark.unit
-def test_dagster_storage_rejects_application_database_before_migration(
+def test_dagster_storage_postcondition_accepts_objects_beyond_the_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """metadata DSN이 application identity/raw 300이면 writer 호출 전에 중단한다."""
+    """DB가 배포를 넘어 살아남는다 — 여분의 표·column·index는 실패가 아니다(ADR-102)."""
 
     module = _load_dagster_storage_module()
-    dagster_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map_dagster",
-        "oid": 200,
-        "owner": "dagster_metadata",
-        "login_role": "dagster_metadata",
-        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
-    }
-    application_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map",
-        "oid": 100,
-        "owner": "ktm_feature_schema_owner",
-    }
-    observed_application = {
-        **application_identity,
-        "login_role": "dagster_metadata",
-        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
-    }
-    migrated = False
+    database = _metadata_database_at_head()
+    _wire_storage_boundaries(monkeypatch, module, database)
+    database.tables["ktm_hand_made_table"] = {"id"}
+    database.tables["runs"].add("column_left_by_an_older_dagster")
+    database.indexes["runs"].add("idx_left_by_an_older_dagster")
+    database.completed_markers.add("marker_from_an_older_dagster")
 
-    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
-    monkeypatch.setattr(
-        module,
-        "_require_migration_environment",
-        lambda environment: ("postgresql://redacted/application", "production", "a" * 64),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_permit",
-        lambda environment, **kwargs: (
-            dagster_identity,
-            application_identity,
-            {
-                "operation_id": "12345678-1234-5678-9234-567812345678",
-                "permit_sha256": "b" * 64,
-                "config_sha256": "a" * 64,
-            },
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_observed_identity",
-        lambda dsn: (observed_application, ("300",), (True, True, True), True),
-    )
-
-    def record_migration(environment: dict[str, str]) -> None:
-        nonlocal migrated
-        migrated = True
-
-    monkeypatch.setattr(module, "_run_dagster_instance_migrate", record_migration)
-
-    with pytest.raises(module.DagsterStorageMigrationError) as caught:
-        module._migrate({})
-
-    assert caught.value.code == "dagster_storage_targets_application_database"
-    assert migrated is False
+    module._verify_dagster_catalog(database, head=_FAKE_DAGSTER_HEAD)
 
 
 @pytest.mark.unit
-def test_dagster_storage_rejects_300_among_multiple_version_rows_before_migration(
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_column",
+        "missing_table",
+        "missing_index",
+        "missing_marker",
+        "old_version",
+        "extra_version_row",
+    ],
+)
+def test_dagster_storage_postcondition_rejects_anything_the_contract_expects_but_lacks(
     monkeypatch: pytest.MonkeyPatch,
+    damage: str,
 ) -> None:
     module = _load_dagster_storage_module()
-    dagster_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map_dagster",
-        "oid": 200,
-        "owner": "dagster_metadata",
-        "login_role": "dagster_metadata",
-        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
-    }
-    application_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map",
-        "oid": 100,
-        "owner": "ktm_feature_schema_owner",
-    }
-    migrated = False
-
-    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
-    monkeypatch.setattr(
-        module,
-        "_require_migration_environment",
-        lambda environment: ("postgresql://redacted/metadata", "production", "a" * 64),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_permit",
-        lambda environment, **kwargs: (
-            dagster_identity,
-            application_identity,
-            {
-                "operation_id": "12345678-1234-5678-9234-567812345678",
-                "permit_sha256": "b" * 64,
-                "config_sha256": "a" * 64,
-            },
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_observed_identity",
-        lambda dsn: (dagster_identity, ("other", "third"), (False, False, False), True),
-    )
-
-    def record_migration(environment: dict[str, str]) -> None:
-        nonlocal migrated
-        migrated = True
-
-    monkeypatch.setattr(module, "_run_dagster_instance_migrate", record_migration)
+    database = _metadata_database_at_head()
+    _wire_storage_boundaries(monkeypatch, module, database)
+    if damage == "missing_column":
+        database.tables["runs"].discard("run_body")
+    elif damage == "missing_table":
+        del database.tables["runs"]
+    elif damage == "missing_index":
+        database.indexes["runs"].discard("idx_run_id")
+    elif damage == "missing_marker":
+        database.completed_markers.discard("run_partitions")
+    elif damage == "old_version":
+        database.version_rows = ("older_dagster_head",)
+    else:
+        database.version_rows = (_FAKE_DAGSTER_HEAD, "another_head")
 
     with pytest.raises(module.DagsterStorageMigrationError) as caught:
-        module._migrate({})
+        module._verify_dagster_catalog(database, head=_FAKE_DAGSTER_HEAD)
 
-    assert caught.value.code == "dagster_storage_targets_application_schema"
-    assert migrated is False
-
-
-@pytest.mark.unit
-def test_dagster_storage_migrates_only_after_metadata_identity_match(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """정상 metadata identity는 검증 전후 같은 DSN/head일 때만 성공한다."""
-
-    module = _load_dagster_storage_module()
-    dagster_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map_dagster",
-        "oid": 200,
-        "owner": "dagster_metadata",
-        "login_role": "dagster_metadata",
-        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
-    }
-    operation_id = "12345678-1234-5678-9234-567812345678"
-    binding = {
-        "operation_id": operation_id,
-        "permit_sha256": "b" * 64,
-        "candidate_sha256": "c" * 64,
-    }
-    expected = {
-        "schema": "kor-travel-map.dagster-storage-migration.v3",
-        "status": "migrated",
-        "operation_id": operation_id,
-        "permit_sha256": "b" * 64,
-        "head": "dagster_head",
-        "version_num": "dagster_head",
-        "database_name": "kor_travel_map_dagster",
-        "database_oid": "200",
-    }
-    calls: list[str] = []
-
-    class FakeConnection:
-        def begin(self) -> FakeConnection:
-            return self
-
-        def __enter__(self) -> FakeConnection:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def close(self) -> None:
-            return None
-
-    class FakeEngine:
-        def __init__(self) -> None:
-            self.connection = FakeConnection()
-
-        def connect(self) -> FakeConnection:
-            return self.connection
-
-        def dispose(self) -> None:
-            return None
-
-    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
-    monkeypatch.setattr(module, "create_engine", lambda _dsn: FakeEngine())
-    monkeypatch.setattr(
-        module, "_acquire_session_operation_lock", lambda _connection: None
-    )
-    monkeypatch.setattr(
-        module, "_release_session_operation_lock", lambda _connection: None
-    )
-    monkeypatch.setattr(
-        module,
-        "_verify_database_identity",
-        lambda environment: ("postgresql://redacted/metadata", dagster_identity),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_operation_binding",
-        lambda environment: (
-            "postgresql://redacted/metadata",
-            dagster_identity,
-            binding,
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "_prepare_operation",
-        lambda *args, **kwargs: ("execute", None),
-    )
-    monkeypatch.setattr(
-        module,
-        "_run_dagster_instance_migrate",
-        lambda environment: calls.append("migrate"),
-    )
-    monkeypatch.setattr(
-        module,
-        "_complete_operation",
-        lambda *args, **kwargs: expected,
-    )
-
-    result = module._migrate({})
-
-    assert calls == ["migrate"]
-    assert result == expected
+    assert caught.value.code == "dagster_catalog_postcondition_mismatch"
 
 
 @pytest.mark.unit
