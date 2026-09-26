@@ -112,18 +112,13 @@ if [ "$dagster_profile" = "production" ] \
 fi
 
 runtime_preflight() {
-  # webserver와 daemon이 실제로 읽을 canonical dagster.yaml, metadata DSN과
-  # root-owned metadata DB identity permit을 migration one-shot과 같은 verifier로
-  # 먼저 결박한다. application final permit만으로 metadata target은 증명되지 않는다.
-  if ! /usr/local/bin/python -I \
-    /usr/local/bin/ktm-dagster-storage verify-identity >/dev/null; then
-    echo "Dagster runtime requires a valid metadata database identity permit" >&2
-    exit 1
-  fi
+  # ADR-102: 런타임은 metadata DB 신원을 다시 증명하지 않는다. storage one-shot
+  # (`ktm-dagster-storage migrate`)이 매 배포 멱등하게 head까지 올리고, 그 결과는
+  # Manager가 metadata DB를 직접 읽어 확인한다. Manager가 전환기 동안 마운트하는
+  # storage permit 디렉터리는 여기서도 one-shot에서도 읽지 않는다.
   if [ "$dagster_profile" = "production" ]; then
-    # API permit만 확인하면 Dagster webserver/daemon이 같은 Map DB에 permit 없이
-    # 직접 연결할 수 있다. consumer-specific immutable Dagster image ID와 runtime DSN의
-    # DB identity/raw 300은 sealed verifier가 함께 검사한다.
+    # production runtime은 application DSN 하나를 요구하고, 미설정·빈 값 모두 실제
+    # Dagster 기동 **앞**에서 거부한다.
     #
     # ADR-100: 예전에는 verifier가 보는 named DSN(`..._DAGSTER_RUNTIME_PG_DSN`)과
     # Dagster resource가 읽는 `KOR_TRAVEL_MAP_PG_DSN`이 **다른 두 이름**이었기 때문에
@@ -150,7 +145,7 @@ storage_input_preflight() {
 
 if [ "$dagster_profile" = "production" ]; then
   # production은 fixed image executable과 한 가지 argv 형상만 허용한다. bare PATH
-  # lookup과 shell command override는 permit 뒤 다른 executable을 실행할 수 있으므로
+  # lookup과 shell command override는 다른 executable을 실행할 수 있으므로
   # Manager launch attestation 이전에도 image 안에서 fail-close한다.
   case "${1:-}" in
     /usr/local/bin/dagster-webserver)

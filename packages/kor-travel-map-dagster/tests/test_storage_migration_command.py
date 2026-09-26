@@ -17,6 +17,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 _COMMAND_PATH = _REPOSITORY_ROOT / "docker" / "dagster-storage-migrate.py"
 _SENTINEL_DSN = "postgresql://user:do-not-reflect@storage.internal/dagster"
 _OPERATION_ID = "12345678-1234-5678-9234-567812345678"
+_ERROR_SCHEMA = "kor-travel-map.dagster-storage-migration-error.v1"
 
 
 class _FakeTransaction:
@@ -49,10 +50,20 @@ class _FakeEngine:
         return None
 
 
-def _mock_session_lock(monkeypatch: pytest.MonkeyPatch, module: ModuleType) -> None:
+def _mock_session_lock(
+    monkeypatch: pytest.MonkeyPatch, module: ModuleType, calls: list[str]
+) -> None:
     monkeypatch.setattr(module, "create_engine", lambda _dsn: _FakeEngine())
-    monkeypatch.setattr(module, "_acquire_session_operation_lock", lambda _connection: None)
-    monkeypatch.setattr(module, "_release_session_operation_lock", lambda _connection: None)
+    monkeypatch.setattr(
+        module,
+        "_acquire_session_operation_lock",
+        lambda _connection: calls.append("lock"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_release_session_operation_lock",
+        lambda _connection: calls.append("unlock"),
+    )
 
 
 def _command_module() -> ModuleType:
@@ -77,6 +88,20 @@ def _migration_environment(tmp_path: Path) -> dict[str, str]:
         "DAGSTER_HOME": str(dagster_home),
         "KOR_TRAVEL_MAP_DAGSTER_PG_URL": _SENTINEL_DSN,
     }
+
+
+def _accept_environment(monkeypatch: pytest.MonkeyPatch, module: ModuleType) -> None:
+    """이미지 안 `dagster.yaml` 봉인(`/opt/dagster`)은 이 호스트에 없다 — 그 경계만 넘긴다."""
+
+    monkeypatch.setattr(
+        module,
+        "_require_migration_environment",
+        lambda environment: (
+            environment["KOR_TRAVEL_MAP_DAGSTER_PG_URL"],
+            "production",
+            "a" * 64,
+        ),
+    )
 
 
 def test_head_attests_installed_dagster_package_graph_without_instance_config(
@@ -135,250 +160,77 @@ def test_storage_writer_runs_schema_migrate_then_required_reindex(
     ]
 
 
-def test_migrate_runs_dagster_cli_then_requires_exact_single_version_row(
+def test_migrate_prepares_then_runs_dagster_cli_then_checks_postcondition_under_lock(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = _command_module()
     environment = _migration_environment(tmp_path)
+    calls: list[str] = []
     invoked_with: list[Mapping[str, str]] = []
-    verified_with: list[Mapping[str, str]] = []
-    identity = {"name": "metadata", "oid": 42}
-    binding = {
-        "operation_id": _OPERATION_ID,
-        "permit_sha256": "a" * 64,
-        "config_sha256": "b" * 64,
-        "candidate_sha256": "c" * 64,
-    }
-    expected = {
-        "head": "candidate-head",
-        "schema": "kor-travel-map.dagster-storage-migration.v3",
-        "status": "migrated",
-        "operation_id": _OPERATION_ID,
-        "permit_sha256": "a" * 64,
-        "version_num": "candidate-head",
-        "database_name": "metadata",
-        "database_oid": "42",
-    }
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
-    _mock_session_lock(monkeypatch, module)
+    _accept_environment(monkeypatch, module)
+    _mock_session_lock(monkeypatch, module, calls)
+    monkeypatch.setattr(
+        module, "_prepare_storage", lambda _connection: calls.append("prepare")
+    )
 
-    def _verify_identity(
-        current_environment: Mapping[str, str],
-    ) -> tuple[str, dict[str, object]]:
-        verified_with.append(current_environment)
-        return _SENTINEL_DSN, identity
+    def _instance_migrate(current_environment: Mapping[str, str]) -> None:
+        calls.append("instance-migrate")
+        invoked_with.append(current_environment)
 
-    monkeypatch.setattr(module, "_verify_database_identity", _verify_identity)
+    monkeypatch.setattr(module, "_run_dagster_instance_migrate", _instance_migrate)
     monkeypatch.setattr(
         module,
-        "_read_operation_binding",
-        lambda _environment: (_SENTINEL_DSN, identity, binding),
-    )
-    monkeypatch.setattr(
-        module,
-        "_prepare_operation",
-        lambda *_args, **_kwargs: ("execute", None),
-    )
-    monkeypatch.setattr(
-        module,
-        "_run_dagster_instance_migrate",
-        lambda current_environment: invoked_with.append(current_environment),
-    )
-    monkeypatch.setattr(
-        module,
-        "_complete_operation",
-        lambda *_args, **_kwargs: expected,
+        "_verify_storage",
+        lambda _connection, *, head: calls.append(f"verify:{head}"),
     )
     monkeypatch.setattr(module.os, "environ", environment)
 
     assert module.main(["migrate"]) == 0
 
-    payload = json.loads(capsys.readouterr().out)
-    assert payload == expected
+    assert json.loads(capsys.readouterr().out) == {
+        "head": "candidate-head",
+        "schema": "kor-travel-map.dagster-storage-migration.v4",
+        "status": "migrated",
+    }
+    assert calls == [
+        "lock",
+        "prepare",
+        "instance-migrate",
+        "verify:candidate-head",
+        "unlock",
+    ]
     assert invoked_with == [environment]
-    assert verified_with == [environment, environment, environment]
 
 
-def test_migrate_reexecutes_when_receipt_is_missing(
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["verify-identity"],
+        ["recover", "--operation-id", _OPERATION_ID],
+        ["migrate", "--operation-id", _OPERATION_ID],
+        [],
+    ],
+)
+def test_removed_and_unknown_subcommands_are_invalid_arguments(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
 ) -> None:
+    """ADR-102: `verify-identity`·`recover`는 permit/outbox와 함께 사라졌다."""
+
     module = _command_module()
-    environment = _migration_environment(tmp_path)
-    identity = {"name": "metadata", "oid": 42}
-    binding = {
-        "operation_id": _OPERATION_ID,
-        "permit_sha256": "a" * 64,
-        "candidate_sha256": "b" * 64,
+    monkeypatch.setattr(module.os, "environ", _migration_environment(tmp_path))
+
+    assert module.main(arguments) == 1
+
+    assert json.loads(capsys.readouterr().err) == {
+        "code": "invalid_arguments",
+        "schema": _ERROR_SCHEMA,
     }
-    calls: list[str] = []
-    expected = {
-        "schema": "kor-travel-map.dagster-storage-migration.v3",
-        "status": "migrated",
-        "operation_id": _OPERATION_ID,
-        "head": "candidate-head",
-        "version_num": "candidate-head",
-    }
-    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
-    _mock_session_lock(monkeypatch, module)
-    monkeypatch.setattr(
-        module,
-        "_verify_database_identity",
-        lambda _environment: (_SENTINEL_DSN, identity),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_operation_binding",
-        lambda _environment: (_SENTINEL_DSN, identity, binding),
-    )
-    monkeypatch.setattr(
-        module,
-        "_prepare_operation",
-        lambda *_args, **_kwargs: ("execute", None),
-    )
-    monkeypatch.setattr(
-        module,
-        "_run_dagster_instance_migrate",
-        lambda _environment: calls.append("migrate"),
-    )
-    monkeypatch.setattr(
-        module,
-        "_complete_operation",
-        lambda *_args, **_kwargs: expected,
-    )
-    monkeypatch.setattr(module.os, "environ", environment)
-
-    assert module.main(["migrate"]) == 0
-
-    assert json.loads(capsys.readouterr().out) == expected
-    assert calls == ["migrate"]
-
-
-def test_prepare_final_head_without_receipt_reexecutes_same_intent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = _command_module()
-    connection = object()
-    identity = {
-        "name": "metadata",
-        "oid": 42,
-        "owner": "metadata_owner",
-        "system_identifier": "1234",
-    }
-    binding = {
-        "operation_id": _OPERATION_ID,
-        "permit_sha256": "a" * 64,
-        "candidate_sha256": "b" * 64,
-    }
-    intent = {
-        **binding,
-        "target_head": "candidate-head",
-        "pre_state": "missing",
-        "pre_version_rows": [],
-        "database_name": "metadata",
-        "database_oid": 42,
-        "database_owner": "metadata_owner",
-        "postgres_system_identifier": "1234",
-    }
-    bootstrapped: list[str] = []
-    monkeypatch.setattr(module, "_ensure_operation_outbox", lambda _connection: None)
-    monkeypatch.setattr(module, "_read_receipt", lambda *_args: None)
-    monkeypatch.setattr(
-        module,
-        "_read_version_state",
-        lambda *_args: ("final", ("candidate-head",)),
-    )
-    monkeypatch.setattr(module, "_read_intent", lambda *_args: intent)
-    monkeypatch.setattr(
-        module,
-        "_bootstrap_fresh_dagster_catalog",
-        lambda _connection, *, version_state: bootstrapped.append(version_state),
-    )
-
-    assert module._prepare_operation(
-        connection,
-        binding=binding,
-        identity=identity,
-        head="candidate-head",
-    ) == ("execute", None)
-    assert bootstrapped == ["final"]
-
-
-def test_migrate_recovers_committed_receipt_without_any_writer_call(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    module = _command_module()
-    environment = _migration_environment(tmp_path)
-    identity = {"name": "metadata", "oid": 42}
-    binding = {"operation_id": _OPERATION_ID}
-    recovered = {
-        "schema": "kor-travel-map.dagster-storage-migration.v3",
-        "operation_id": _OPERATION_ID,
-        "status": "migrated",
-        "head": "candidate-head",
-        "version_num": "candidate-head",
-    }
-    calls: list[str] = []
-    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
-    _mock_session_lock(monkeypatch, module)
-    monkeypatch.setattr(
-        module,
-        "_verify_database_identity",
-        lambda _environment: (_SENTINEL_DSN, identity),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_operation_binding",
-        lambda _environment: (_SENTINEL_DSN, identity, binding),
-    )
-    monkeypatch.setattr(
-        module,
-        "_prepare_operation",
-        lambda *_args, **_kwargs: ("done", recovered),
-    )
-    monkeypatch.setattr(
-        module,
-        "_run_dagster_instance_migrate",
-        lambda _environment: calls.append("migrate"),
-    )
-    monkeypatch.setattr(module.os, "environ", environment)
-
-    assert module.main(["migrate"]) == 0
-    assert json.loads(capsys.readouterr().out) == recovered
-    assert calls == []
-
-
-def test_explicit_recover_binds_operation_id_and_emits_canonical_receipt(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    module = _command_module()
-    environment = _migration_environment(tmp_path)
-    recovered = {
-        "schema": "kor-travel-map.dagster-storage-migration.v3",
-        "operation_id": _OPERATION_ID,
-        "status": "migrated",
-        "head": "candidate-head",
-        "version_num": "candidate-head",
-    }
-    observed: list[str] = []
-
-    def _recover(_environment: Mapping[str, str], operation_id: object) -> dict[str, str]:
-        observed.append(str(operation_id))
-        return recovered
-
-    monkeypatch.setattr(module, "_recover", _recover)
-    monkeypatch.setattr(module.os, "environ", environment)
-
-    assert module.main(["recover", "--operation-id", _OPERATION_ID]) == 0
-    assert json.loads(capsys.readouterr().out) == recovered
-    assert observed == [_OPERATION_ID]
 
 
 def test_migrate_failure_never_reflects_metadata_dsn(
@@ -388,28 +240,11 @@ def test_migrate_failure_never_reflects_metadata_dsn(
 ) -> None:
     module = _command_module()
     environment = _migration_environment(tmp_path)
-    identity = {"name": "metadata", "oid": 42}
+    calls: list[str] = []
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
-    _mock_session_lock(monkeypatch, module)
-    monkeypatch.setattr(
-        module,
-        "_verify_database_identity",
-        lambda _environment: (_SENTINEL_DSN, identity),
-    )
-    monkeypatch.setattr(
-        module,
-        "_read_operation_binding",
-        lambda _environment: (
-            _SENTINEL_DSN,
-            identity,
-            {"operation_id": _OPERATION_ID},
-        ),
-    )
-    monkeypatch.setattr(
-        module,
-        "_prepare_operation",
-        lambda *_args, **_kwargs: ("execute", None),
-    )
+    _accept_environment(monkeypatch, module)
+    _mock_session_lock(monkeypatch, module, calls)
+    monkeypatch.setattr(module, "_prepare_storage", lambda _connection: None)
 
     def _fail(_environment: Mapping[str, str]) -> None:
         raise module.DagsterStorageMigrationError("dagster_instance_migrate_failed")
@@ -422,7 +257,38 @@ def test_migrate_failure_never_reflects_metadata_dsn(
     captured = capsys.readouterr()
     assert json.loads(captured.err) == {
         "code": "dagster_instance_migrate_failed",
-        "schema": "kor-travel-map.dagster-storage-migration-error.v1",
+        "schema": _ERROR_SCHEMA,
+    }
+    assert _SENTINEL_DSN not in captured.out
+    assert _SENTINEL_DSN not in captured.err
+    # 실패해도 session lock은 풀린다.
+    assert calls == ["lock", "unlock"]
+
+
+def test_unreachable_metadata_database_never_reflects_metadata_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """연결 단계의 드라이버 예외는 DSN 원문을 담는다 — 코드로만 낸다."""
+
+    module = _command_module()
+    environment = _migration_environment(tmp_path)
+    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
+    _accept_environment(monkeypatch, module)
+
+    def _unreachable(dsn: str) -> object:
+        raise RuntimeError(f"could not connect to {dsn}")
+
+    monkeypatch.setattr(module, "create_engine", _unreachable)
+    monkeypatch.setattr(module.os, "environ", environment)
+
+    assert module.main(["migrate"]) == 1
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.err) == {
+        "code": "dagster_storage_database_unavailable",
+        "schema": _ERROR_SCHEMA,
     }
     assert _SENTINEL_DSN not in captured.out
     assert _SENTINEL_DSN not in captured.err
@@ -440,5 +306,5 @@ def test_migrate_requires_explicit_instance_home_and_metadata_dsn(
 
     assert json.loads(capsys.readouterr().err) == {
         "code": "missing_dagster_home",
-        "schema": "kor-travel-map.dagster-storage-migration-error.v1",
+        "schema": _ERROR_SCHEMA,
     }
