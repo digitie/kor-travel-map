@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — 봉인·신뢰 릴리스 단순화(Manager ADR-51 / Map ADR-102) 완료
+
+**다음 한 작업: 없음(이 프로그램은 끝났다).** 남은 것은 ADR-51이 "그 뒤 각자"로 둔 별개 항목 —
+설치기 단순화(잃는 보장 D), 소스 봉인(E), 실패 출력 스크럽(G), compose 파생 규칙 — 과 선택 정리
+(B3 PR-4 launcher claim 해제, D-4 안 읽히는 evidence, Map 자신의 compose에 남은 permit volume).
+
+- **Manager**: B2 #404 → B3 #405~#407 → C #408~#410 → **D #411~#413** 머지·n150 설치(`a3a695fa`).
+  D-1 M05·`pin verify`가 `deploy-status.json`을 본다(공개 세대 API 삭제), D-2 v6 쓰기 중단·코드 삭제,
+  D-3 Dagster storage permit mount 제거. 문서: PinVi #567, Map #1276.
+- **최종 인수(t61a, Map `b4fbde1e` / pinset `fc39eb5c`)**: 새 pair 전체 경로 배포 — 같은 DB(oid 그대로),
+  v6 파일 안 씀, permit 없음 → ACL 40/40 → **D1 11 passed → D2 passed(v4)**, lane 깨끗.
+- **기록된 손실**: 공개 세대 뷰, 실패한 배포 뒤 한 번 커밋될 때까지 M05 거부, pre-M1 Map pinset으로의
+  되돌림 불가(roll-forward), Manager 되돌림 하한 D-1.
+- **소유자 판단 대기(유지):** n150 다른 세션 작업 디렉터리 약 18.5GB.
+
 ## 2026-09-27 — Manager ADR-51 C(락 통합) 완료: 파일 락은 G 하나
 
 **다음 한 작업: Manager ADR-51 D**(permit mount 제거, v6 manifest 쓰기 중단, M05 driver·`pin verify`·공개 세대
