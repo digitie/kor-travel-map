@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-27 — 설치기를 1,887줄에서 196줄로: 레이아웃을 먼저 옮기고 나서 설치기를 바꿨다
+
+Manager ADR-51의 잃는 보장 D(설치기)를 끝냈다. D-1/D-2와 같은 순서를 따랐다 — **설치 root가 symlink여도
+모든 소비자가 도는 코드(I-1)를 옛 설치기로 먼저 깔고**, 손으로 한 번 레이아웃을 옮긴 뒤, 새 설치기(I-2)를
+그 위에 설치했다. 거꾸로 하면 새 설치기가 만든 symlink를 옛 코드(재구축 root·M05·rebind·관리자 비밀번호)가
+`lstat`으로 거부해 모든 mutation이 멈춘다.
+
+핵심 규칙은 하나였다: **compose 프로젝트 루트는 resolve하지 않는다.** 풀린 release 경로가
+`--project-directory`에 들어가면 상대 bind source가 `/opt/ktdm-release-<sha>`로 굳어 설치마다 컨테이너가
+재생성되고, 그 release가 GC되면 재시작에서 깨진다. n150에서 compose v5.2와 venv가 symlink 경로를
+그대로 쓰는지 먼저 봤고, 인수에서는 같은 pair 수렴 뒤 컨테이너 42개의 bind 문자열과 생성 시각이 그대로인지를
+봤다. 반대로 비교하는 쪽은 양쪽을 다 풀어야 했다 — operator bind의 backend 소스 가드는 한쪽만 풀고 있어서
+symlink root에서 조용히 통과하고 있었다(I-1에서 고침).
+
+적대 리뷰가 I-1에서 한 건(revision을 읽는 두 곳이 root 소유·쓰기 금지 검사까지 지웠다), I-2에서 일곱 건을
+확정했다. I-2의 가장 쓸모 있던 지적은 재기동 한도였다 — 깨진 release가 `StartLimitBurst`를 넘기면 그
+직후의 롤백 설치가 `systemctl start`에서 거절되어 backend가 내려간 채 남는다. `reset-failed`를 먼저 부른다.
+반박된 보안 지적 몇 개(운영자 소유 clone에서 root가 설치기를 실행한다, `python -m venv`가 cwd를 import한다)도
+한두 줄이라 받아들였다 — 이제 설치기는 root 소유 clone만 받고 git도 root로 돈다.
+
+부수 효과: 옛 헬퍼가 설치본 안에서 `npm ci && npm run build`를 돌려 release마다 790MB가 쌓였는데, 프론트
+유닛은 운영자 홈의 사본에서 돈다 — 아무도 쓰지 않는 빌드였다. 새 release는 83MB다.
+
 ## 2026-09-27 — 봉인을 걷어낸 체인으로 한 바퀴: D 완료와 최종 인수
 
 Manager ADR-51 D를 세 PR로 끝냈다. 순서가 핵심이었다 — **읽는 쪽을 먼저 옮기고(D-1), 그다음 쓰기를
