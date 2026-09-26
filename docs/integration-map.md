@@ -176,8 +176,10 @@ cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께
 pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
 **2026-08-25 이후 정본은 docker-manager의 pinned runtime manifest version 6과 rebuild
-journal version 8이다.** v4 compatible-pair와 manifest v5/journal v7은 C7 신뢰 경계에서
-호환 변환 없이 퇴역했다.
+journal version 8이었다.** v4 compatible-pair와 manifest v5/journal v7은 C7 신뢰 경계에서
+호환 변환 없이 퇴역했다. **2026-09-26~27 Manager ADR-51:** v8 journal은 B3에서 코드째 지워졌고,
+D-1부터 M05·`pin verify`는 `deploy-status.json`을 보며, v6 manifest 쓰기는 D-2에서 멈춘다 —
+아래 v6/v8 서술은 이력이다.
 
 > **ADR-102 결정 6 (2026-09-26) — Map은 v6/v8을 더 읽지 않는다.** 아래 목록 중 "C7이 요구한다"는
 > 서술은 이력이다. C7·D2 러너(`scripts/run-c7-prod-live-e2e.sh`,
@@ -223,19 +225,18 @@ receipt를 PinVi가 no-follow로 검증할 때만 실행을 허용한다. 호출
 이 receipt 생성·주입과 검증 계약의 정본 역시 Docker Manager `ktdctl` release와 PinVi paired
 PR이다.
 
-회전 뒤에는 인증된 Manager API `GET /api/v1/runtime-pins`와
-`GET /api/v1/pinned-runtime/generation`의 공개 사본을 확인한다. 후자의 `pinset_binding`은
-새 pair 회전 직후에는 직전의 완전한 committed generation 또는 Manager registry가 Map·PinVi
-revision과 pinset까지 exact로 일치시킨 unconditional terminal generation을 가리키는
-`pending_rebuild`만 허용할 수 있다. partial·malformed generation, phase-scoped block, `drift`,
-`unknown`은 gate를 열지 않는다. 새 launcher가
-완료된 뒤 C7 attestation·live acceptance로 나아가려면 반드시 `match`여야 한다. private
-manifest/journal과 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다. (ADR-102 결정 6 이전에는
-Map C7 attestation이 manifest v6/journal v8을 소비해 paired PR이 필요했다 — 그 소비는 사라졌다.)
+회전 뒤에는 인증된 Manager API `GET /api/v1/runtime-pins`로 pair를 확인하고, n150에서
+`sudo ktdctl pin verify`가 exit 0이며 M05 launcher의 source pair preflight가 통과해야 한다.
+Manager ADR-51 D-1(#411)부터 그 preflight는 커밋된 `deploy-status.json`(committed·현재 release
+pinset·Map application head)을 보고, `GET /api/v1/pinned-runtime/generation`과 `pinset_binding`
+(`pending_rebuild`/`match`)은 삭제됐다. 직전 배포가 실패해 `in_progress`로 남았으면 한 번 커밋될
+때까지 M05는 거부한다. private deploy-status와 raw launcher 출력은 Map·PinVi consumer가 읽지 않는다.
+(ADR-102 결정 6 이전에는 Map C7 attestation이 manifest v6/journal v8을 소비해 paired PR이
+필요했다 — 그 소비는 사라졌다.)
 
 따라서 새 M04/M05 n150 isolated E2E의 순서는 Manager release와 Map·PinVi source CI, exact-head
-전문 적대 리뷰 두 건, `rotate-pair`, registry와 완전한 public generation 확인, 새 root-owned leaf의
-정확히 한 번인 launcher, 이후 generation `match`다. terminal receipt가 나오면 그 exact pinset은 Manager registry에서
+전문 적대 리뷰 두 건, `rotate-pair`, 재구축 커밋, `pin verify` 0과 M05 preflight 통과, 새
+root-owned leaf의 정확히 한 번인 launcher다. terminal receipt가 나오면 그 exact pinset은 Manager registry에서
 즉시 block하고 어떤 consumer도 재실행하지 않는다.
 
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |
