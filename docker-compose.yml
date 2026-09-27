@@ -654,12 +654,25 @@ services:
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
+    # healthcheck·exec가 남긴 고아를 거둔다(PID 1인 dagster는 거두지 않는다 — 2026-09-27 n150
+    # Dagster 컨테이너들에 좀비 565개, Manager #426).
+    init: true
     healthcheck:
-      test: ["CMD", "dagster", "api", "grpc-health-check", "-h", "127.0.0.1", "-p", "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
+      # dagster의 gRPC health protocol(`DagsterApi` → SERVING)을 dagster를 import하지 않고 부른다 — CLI
+      # `dagster api grpc-health-check`는 매번 dagster import(유휴 2초)를 치르고 deadline이 없다
+      # (Manager #426과 같은 probe).
+      test:
+        - CMD
+        - python
+        - -I
+        - -c
+        - "import sys, grpc; from grpc_health.v1 import health_pb2 as h, health_pb2_grpc as g; r = g.HealthStub(grpc.insecure_channel('127.0.0.1:' + sys.argv[1])).Check(h.HealthCheckRequest(service='DagsterApi'), timeout=8); sys.exit(0 if r.status == h.HealthCheckResponse.SERVING else 1)"
+        - "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+      start_interval: 5s
 
   dagster:
     build:
@@ -753,15 +766,20 @@ services:
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
+    # healthcheck·exec가 남긴 고아를 거둔다(PID 1인 dagster는 거두지 않는다 — 2026-09-27 n150
+    # Dagster 컨테이너들에 좀비 565개, Manager #426).
+    init: true
     healthcheck:
       # ADR-069 짝 — 프로세스가 응답하는가가 아니라 code location이 실제로 code-server를
       # 통해 로드됐는가를 본다(bare `/`는 code location이 죽었어도 200을 주므로
       # healthy와 "job을 실행할 수 있다"가 갈릴 수 있다, weather/PinVi와 같은 이유).
+      # exec 형식 — timeout 때 셸 래퍼만 죽고 Python이 고아로 남지 않는다.
       test:
-        [
-          "CMD-SHELL",
-          "python -c \"import os, json, urllib.request as u; p = os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12702'); q = json.dumps({'query': '{repositoriesOrError{__typename}}'}).encode(); r = u.urlopen(u.Request('http://127.0.0.1:%s/graphql' % p, data=q, headers={'Content-Type': 'application/json'}), timeout=5); d = json.load(r); t = d.get('data', {}).get('repositoriesOrError', {}).get('__typename'); raise SystemExit(0 if t == 'RepositoryConnection' else 'code location not loaded: %s' % t)\"",
-        ]
+        - CMD
+        - python
+        - -I
+        - -c
+        - "import os, json, urllib.request as u; p = os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12702'); q = json.dumps({'query': '{repositoriesOrError{__typename}}'}).encode(); r = u.urlopen(u.Request('http://127.0.0.1:%s/graphql' % p, data=q, headers={'Content-Type': 'application/json'}), timeout=5); d = json.load(r); t = d.get('data', {}).get('repositoriesOrError', {}).get('__typename'); raise SystemExit(0 if t == 'RepositoryConnection' else 'code location not loaded: %s' % t)"
       interval: 10s
       timeout: 5s
       retries: 20
@@ -892,12 +910,18 @@ services:
     # 않는다. 같은 healthcheck를 Manager 쪽에도 넣었다. 이 파일이 지배하는 것은
     # local dev(`scripts/docker-up.sh`)와 n150 격리 live e2e 스택이다.
     #
+    # healthcheck·exec가 남긴 고아를 거둔다(PID 1인 dagster는 거두지 않는다 — 2026-09-27 n150
+    # Dagster 컨테이너들에 좀비 565개, Manager #426).
+    init: true
     healthcheck:
-      test: ["CMD-SHELL", "/usr/local/bin/dagster-daemon liveness-check"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      # dagster의 정식 판정. 매번 dagster를 import한다(유휴 2.3초, 부하 때 10초 초과). exec 형식이라 timeout
+      # 때 Python이 고아로 남지 않는다. 끼인 스레드는 tolerance + 주기 × retries(240초) 안에 보인다.
+      test: ["CMD", "/usr/local/bin/dagster-daemon", "liveness-check"]
+      interval: 120s
+      timeout: 60s
+      retries: 2
+      start_period: 90s
+      start_interval: 15s
     # **그리고 다시 올린다.** healthcheck는 상태를 보이게 만들지만 아무것도 되돌리지
     # 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다), Exited 컨테이너를
     # 되살리는 watchdog도 이 배포에 없다.
