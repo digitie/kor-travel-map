@@ -378,6 +378,7 @@ services:
         ensure_bucket() {
           tries=0
           while :; do
+            rm -f /tmp/rustfs-init.out
             code=$$(curl -sS -o /tmp/rustfs-init.out -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
               --user "$$KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:$$KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY" \
               -X PUT "$$KOR_TRAVEL_MAP_RUSTFS_INIT_ENDPOINT/$$1") || code=000
@@ -387,7 +388,7 @@ services:
               000|5??) tries=$$((tries + 1)); if [ "$$tries" -lt 60 ]; then sleep 2; continue; fi ;;
             esac
             echo "rustfs-init: bucket $$1: HTTP $$code" >&2
-            cat /tmp/rustfs-init.out >&2 || true
+            if [ -s /tmp/rustfs-init.out ]; then cat /tmp/rustfs-init.out >&2; fi
             return 1
           done
         }
