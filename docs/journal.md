@@ -1,5 +1,37 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-27 — minio/mc가 사라진 날: 세 저장소의 rustfs-init과 M05가 부딪힌 n150의 한계
+
+M05 port(Manager #424) 뒤 첫 실제 격리 실행 p1은 claim과 Map fresh-init 사슬까지 통과했다. 그다음
+`rustfs rustfs-init api frontend` 기동에서 `pull access denied for minio/mc`로 멈췄다. Docker Hub의 `minio/mc`와
+`minio/minio` 저장소가 통째로 사라진 것이다. Map·PinVi·Manager 세 compose가 모두 이 이미지로 버킷을 만들고 있었다.
+- PinVi는 digest로 핀했지만 저장소가 없으면 digest도 받을 수 없다.
+- Manager는 rustfs 재생성 뒤 `run --rm rustfs-init`을 돌리고, 실패하면 mutation을 롤백한다. 즉 rustfs 재생성 자체가 막혀 있었다.
+
+**고친 방법**: 새 클라이언트 이미지를 들이지 않았다. 각 저장소의 rustfs 서비스 이미지에 curl(8.19/8.21)이 이미 있어서,
+`curl --aws-sigv4 aws:amz:us-east-1:s3 -X PUT <ep>/<bucket>`으로 버킷을 만든다.
+- 이미 있는 버킷은 200(RustFS 실측) 또는 409 `BucketAlreadyOwnedByYou`로 성공이다. 4xx는 코드와 S3 본문을 남기고 즉시 실패한다.
+- 적대 리뷰가 하나를 더 잡았다. RustFS는 `/health/live`가 200이 된 뒤에도 약 1.7초 동안 PUT에 `503 waiting for storage_quorum`을 준다.
+  옛 mc는 minio-go가 이것을 안에서 재시도했다. 그래서 000·5xx 재시도와 요청 상한(connect 5s, max 30s)을 넣었다.
+- Map의 `docker-compose.host.yml`은 스크립트 사본 대신 endpoint env 한 줄만 바꾼다.
+
+**사이클**: 새 pair(Map `a18d9274` + PinVi `fd07903f`)로 회전해 chain17을 돌렸다. t62b는 rebuild `deployed`,
+ACL 40/40, D1 11, D2 passed로 초록이었다. t62a에서는 pinvi-web 빌드가 37분 동안 `Build Steps 0/0`, I/O 0으로 보여
+buildx bake를 끊었다. 나중에 docker.sock의 `/debug/pprof/goroutine?debug=2`로 보니, 같은 상태의 빌드는
+`exportLayers → computeBlobChain → overlay.WriteUpperdir → gzip`에 있었다. node_modules 레이어를 파일 단위로 압축하는 중이었다.
+**조용함은 정지의 증거가 아니었다.**
+
+**M05는 n150 한계에 부딪혔다.** p2~p4는 모두 본문 진입 전 인프라 phase에서 멈췄다(scoped 차단, 실행권 미소비).
+Map과 PinVi `rustfs-init`은 셋 다 `Exited (0)`이었다.
+- p2: PinVi web export 약 40분 → `commit failed: context deadline exceeded`.
+- p3·p4: PinVi `app-dagster`가 HEALTHCHECK 한도(약 150초)를 넘겨 unhealthy.
+
+원인을 좁히니 운영 Dagster 스택들의 healthcheck였다. `dagster-daemon liveness-check`와 `dagster api grpc-health-check`는
+주기마다 dagster를 import하는 Python을 띄운다(각 수 초, CPU 95%). 부하가 오르면 10초 타임아웃을 넘겨 다음 주기와 겹친다.
+p4 도중 이런 프로세스가 47개 동시에 돌았고 load는 137까지 갔다. PID 1이 자식을 거두지 않는 Dagster 컨테이너들에는 좀비가
+565개 쌓여 있었다. M05 빌드 부하가 이 되먹임에 불을 붙였다. 운영 서비스라 내리지 않았다. healthcheck 경량화와 `init: true`를
+소유자 결정으로 올린다.
+
 ## 2026-09-27 — C6c 보호 참조를 표에서 규칙으로: 운영 데이터로 미리 돌려 본 것이 배포를 살렸다
 
 Manager ADR-51 결정 5를 두 PR로 끝냈다. 대상은 UI·API 사용자가 compose env를 고칠 때 비밀이 엉뚱한 서비스로 새지
