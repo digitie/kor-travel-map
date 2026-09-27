@@ -46,19 +46,25 @@ echo "  manager =$MGR  (설치 매니페스트)"
 say "A. 회전 preflight"
 # driver는 거부 사유를 가린 한 줄로 stdout에 낸다(Manager ADR-51 잃는 보장 G-3). 버리지 않는다.
 if ! PREFLIGHT="$("$PYTHON" -I "$DRIVER" --rotation-preflight "$MAP" "$PINVI")"; then
-  die "rotation preflight 거부: ${PREFLIGHT:-(사유 없음)}"
+  die "rotation preflight 거부: ${PREFLIGHT:-(사유 줄 없음 — 위 stderr를 본다)}"
 fi
 echo "  OK"
 
 say "B. 회전"
-# 성공하면 history 두 줄만, 실패하면 출력 전체를 보인다 — 거르면 실패 사유가 사라진다.
-ROTATION="$(/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair "$MAP" "$PINVI" "$REASON" 2>&1)"
-ROTATION_STATUS=$?
-if [ "$ROTATION_STATUS" -ne 0 ]; then
-  printf '%s\n' "$ROTATION" >&2
-  die "회전 실패(exit $ROTATION_STATUS)"
+CURRENT_MAP="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="map"{print $2; exit}')"
+if [ "$CURRENT_MAP" = "$MAP" ]; then
+  # C에서 실패한 뒤 다시 돌리는 경우다. 같은 pair로의 회전은 registry가 거부한다(바뀌는 revision 없음).
+  echo "  이미 회전됨(원장 map=$MAP) — 건너뛴다"
+else
+  # 성공하면 history 두 줄만, 실패하면 출력 전체를 보인다 — 거르면 실패 사유가 사라진다.
+  ROTATION="$(/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair "$MAP" "$PINVI" "$REASON" 2>&1)"
+  ROTATION_STATUS=$?
+  if [ "$ROTATION_STATUS" -ne 0 ]; then
+    printf '%s\n' "$ROTATION" >&2
+    die "회전 실패(exit $ROTATION_STATUS)"
+  fi
+  printf '%s\n' "$ROTATION" | grep -A 1 'history ' | head -2
 fi
-printf '%s\n' "$ROTATION" | grep -A 1 'history ' | head -2
 NEWMAP="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="map"{print $2; exit}')"
 [ "$NEWMAP" = "$MAP" ] || die "회전 뒤에도 원장이 $MAP 을 가리키지 않는다"
 
@@ -71,6 +77,11 @@ systemd-run --no-block --unit="$RB" --collect --property=Type=oneshot \
   || die "rebuild 기동 실패"
 while [ "$(systemctl show "$RB" -p ActiveState --value)" = activating ]; do sleep 45; done
 echo "  Result=$(systemctl show "$RB" -p Result --value)"
+if [ ! -f "$OUT/result.json" ]; then
+  # launcher가 driver를 부르기 전에 멈췄다(revision 불일치·lock·claim). 원인은 unit 로그에 있다.
+  journalctl -u "$RB" -n 60 --no-pager >&2
+  die "rebuild가 result.json 없이 끝났다"
+fi
 if ! python3 -c "
 import json, sys
 d = json.load(open('$OUT/result.json'))
