@@ -358,22 +358,41 @@ services:
       - kor-travel-map-rustfs-data:/data
 
   rustfs-init:
-    image: minio/mc:latest
+    # MinIO가 Docker Hub에서 `minio/mc`를 내렸다(2026-09-27 n150 실측: 저장소 404, pull access denied).
+    # 버킷은 rustfs 이미지에 이미 든 curl의 SigV4로 만든다 — 이미지를 하나 더 끌어오지 않는다.
+    image: rustfs/rustfs:latest
     depends_on:
       - rustfs
     environment:
+      KOR_TRAVEL_MAP_RUSTFS_INIT_ENDPOINT: http://rustfs:9000
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
       KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
       KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
     entrypoint: ["/bin/sh", "-c"]
+    # 접속 실패·5xx만 재시도한다(rustfs 기동 대기). 인증·이름 같은 4xx는 바로 실패한다 —
+    # 이미 있는 버킷은 200(RustFS) 또는 409 BucketAlreadyOwnedByYou(S3)로 멱등이다.
     command:
       - |
-        until mc alias set rustfs http://rustfs:9000 "$$KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID" "$$KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY"; do
-          sleep 2
-        done
-        mc mb --ignore-existing "rustfs/$$KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET"
-        mc mb --ignore-existing "rustfs/$$KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET"
+        set -eu
+        ensure_bucket() {
+          tries=0
+          while :; do
+            code=$$(curl -sS -o /tmp/rustfs-init.out -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
+              --user "$$KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:$$KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY" \
+              -X PUT "$$KOR_TRAVEL_MAP_RUSTFS_INIT_ENDPOINT/$$1") || code=000
+            case "$$code" in
+              200) return 0 ;;
+              409) grep -q BucketAlreadyOwnedByYou /tmp/rustfs-init.out && return 0 ;;
+              000|5??) tries=$$((tries + 1)); if [ "$$tries" -lt 60 ]; then sleep 2; continue; fi ;;
+            esac
+            echo "rustfs-init: bucket $$1: HTTP $$code" >&2
+            cat /tmp/rustfs-init.out >&2 || true
+            return 1
+          done
+        }
+        ensure_bucket "$$KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET"
+        ensure_bucket "$$KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET"
 
   api:
     build:

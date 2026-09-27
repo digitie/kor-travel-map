@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### rustfs-init이 minio/mc 없이 버킷을 만든다 (2026-09-27)
+
+- **FIXED (compose)**: MinIO가 Docker Hub에서 `minio/mc`를 내려 `rustfs-init`이 pull 단계에서
+  죽었다(n150 M05 격리 실행 `map_application_start_failed`). `rustfs-init`은 이제 `rustfs` 서비스와
+  같은 `rustfs/rustfs` 이미지의 curl(`--aws-sigv4`)로 버킷을 만든다. 기동 대기(접속 실패·5xx)만
+  재시도하고 4xx는 바로 실패한다. `docker-compose.host.yml`은 스크립트 사본 대신 endpoint env
+  (`KOR_TRAVEL_MAP_RUSTFS_INIT_ENDPOINT`) 한 줄만 바꾼다.
+
 ### C7 attestation 체인 제거 — ADR-102 결정 6 (2026-09-26)
 
 - **REMOVED (운영 env)**: C7·D2 러너가 `E2E_C7_PINNED_RUNTIME_MANIFEST`·
