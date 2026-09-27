@@ -70,7 +70,7 @@ def test_host_script_is_valid_bash(script: Path) -> None:
 def test_chain17_keeps_pair_preflight_as_a_hard_gate_before_rotation() -> None:
     source = _read("chain17.sh")
     preflight = source.index('--rotation-preflight "$MAP" "$PINVI"')
-    refusal = source.index('|| die "rotation preflight 거부"', preflight)
+    refusal = source.index('die "rotation preflight 거부:', preflight)
     rotation = source.index("/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair")
     rebuild = source.index("/opt/kor-travel-docker-manager/scripts/run-pinned-rebuild-once")
     assert preflight < refusal < rotation < rebuild
