@@ -1,5 +1,26 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-27 — Dagster healthcheck 폭주: 셸 래퍼가 남긴 고아들
+
+M05가 n150 과부하로 연달아 멈춘 원인을 좁혀 보니, 운영 Dagster 스택 넷(Map·PinVi·geo·weather)의 healthcheck였다.
+- 적대 리뷰가 메커니즘을 바로잡았다. docker는 컨테이너마다 probe를 하나씩만 돌린다. 문제는 `CMD-SHELL`이다.
+  timeout 때 `sh`만 죽고, 그 아래 dagster-import Python은 고아로 계속 돈다. PID 1인 dagster는 고아를 거두지 않는다.
+  exec 형식 probe 컨테이너는 좀비가 0이었다.
+- CLI `dagster api grpc-health-check`는 deadline이 없다. weather code-server가 멈추자 probe가 끝없이 쌓였다.
+  weather 수집이 하루 반 동안 사실상 멈춰 있었다.
+
+Manager #426(`7bda04db`)의 내용:
+- 모든 Dagster probe를 exec 형식 `python -I`로 바꿨다.
+- code-server는 같은 gRPC health 호출을 `grpc_health`로 직접 한다(0.5초, deadline 8초).
+- daemon은 120초 주기에 timeout 60초, retries 2다.
+- 12개 서비스 모두 `init: true`다.
+
+반영: Map·PinVi는 같은 pair 수렴으로, geo·weather는 `-p`/`--project-directory`를 명시한 호스트 직접 재생성으로 했다.
+결과: 좀비 565 → 40, 동시 probe 47 → 1, weather code-server 복구.
+
+이 PR은 Map 자체 compose(local dev와 n150 격리 스택)에 같은 계약을 넣고, `test_docker_dagster_runtime.py`가 exec 형식과
+`init`을 command에서 유도한 서비스마다 요구한다.
+
 ## 2026-09-27 — minio/mc가 사라진 날: 세 저장소의 rustfs-init과 M05가 부딪힌 n150의 한계
 
 M05 port(Manager #424) 뒤 첫 실제 격리 실행 p1은 claim과 Map fresh-init 사슬까지 통과했다. 그다음

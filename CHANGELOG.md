@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Dagster healthcheck를 exec 형식으로 (2026-09-27)
+
+- **FIXED (compose)**: `dagster`·`dagster-code-server`·`dagster-daemon`의 healthcheck가 exec 형식(`python -I`,
+  `dagster-daemon liveness-check`)이 되고, 세 서비스 모두 `init: true`를 쓴다. code-server probe는 CLI
+  `dagster api grpc-health-check`(매번 dagster import, deadline 없음) 대신 같은 gRPC health 호출
+  (`DagsterApi` → SERVING)을 `grpc_health`로 직접 한다. n150 운영 스택(Manager #426)과 같은 계약이다 —
+  `CMD-SHELL` 래퍼가 timeout 때 Python을 고아로 남겨 좀비 565개·load 137을 만들었다.
+
 ### rustfs-init이 minio/mc 없이 버킷을 만든다 (2026-09-27)
 
 - **FIXED (compose)**: MinIO가 Docker Hub에서 `minio/mc`를 내려 `rustfs-init`이 pull 단계에서
