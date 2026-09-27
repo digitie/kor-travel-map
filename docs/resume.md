@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — Manager ADR-51 잃는 보장 G(실패 출력 스크럽) 완료
+
+**다음 한 작업: Manager ADR-51 compose 파생 규칙(결정 5).** 그 뒤 **M05 격리 하네스의 Map ADR-100/101 대응**. 포팅
+전까지 M05는 claim 전에 `runtime_setup_map_config`로 멈춘다. 핀된 Map의 fresh-init 서비스가 `db-application-schema-fresh`인데
+driver는 `-300`을 찾기 때문이다. 실행권은 쓰지 않는다.
+
+- **Manager**:
+  - G-1 #419(`95c79254`): 스크러버 하나를 CLI·API 출력 경계에 둔다.
+  - G-2 #420(`8ff53b59`): 재구축 봉인을 해체하고 명령 원문 tail을 싣는다. `--json`은 `{status, stage?}`이고, claim 해제
+    경로는 없앴다.
+  - G-3 #421(`03729712`): M05는 항상 캡처하고, 가린 `stderr.log` 한 채널로 낸다. 생성 비밀은 생성 시 등록하고, 닫힌
+    어휘는 삭제했다.
+  - n150 설치.
+- **n150 인수**:
+  - 매 단계 `pin verify` 0, M05 preflight 0, 같은 pair 수렴 `converged`, 컨테이너 42개 재생성 0이다.
+  - scrub probe 셋 모두 누출 0(비밀 71개 검사)이다.
+- **Map**: `scripts/n150/chain17.sh`가 회전 preflight 사유, 회전 실패 출력, 재구축 실패의 stage와 `stderr.log` 끝을 보인다.
+  운영자는 `/root/chain17.sh`로 다시 복사한다.
+
 ## 2026-09-27 — Manager ADR-51 잃는 보장 E(소스 봉인 제거) 완료
 
 **다음 한 작업: Manager ADR-51 잃는 보장 G(실패 출력 스크럽)** — 닫힌 어휘를 원문 스크럽으로(#399가 1단계).

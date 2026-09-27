@@ -44,13 +44,21 @@ echo "  pinvi   =$PINVI  (핀 원장)"
 echo "  manager =$MGR  (설치 매니페스트)"
 
 say "A. 회전 preflight"
-"$PYTHON" -I "$DRIVER" --rotation-preflight "$MAP" "$PINVI" >/dev/null 2>&1 \
-  || die "rotation preflight 거부"
+# driver는 거부 사유를 가린 한 줄로 stdout에 낸다(Manager ADR-51 잃는 보장 G-3). 버리지 않는다.
+if ! PREFLIGHT="$("$PYTHON" -I "$DRIVER" --rotation-preflight "$MAP" "$PINVI")"; then
+  die "rotation preflight 거부: ${PREFLIGHT:-(사유 없음)}"
+fi
 echo "  OK"
 
 say "B. 회전"
-/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair "$MAP" "$PINVI" "$REASON" 2>&1 \
-  | grep -A 1 'history ' | head -2
+# 성공하면 history 두 줄만, 실패하면 출력 전체를 보인다 — 거르면 실패 사유가 사라진다.
+ROTATION="$(/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair "$MAP" "$PINVI" "$REASON" 2>&1)"
+ROTATION_STATUS=$?
+if [ "$ROTATION_STATUS" -ne 0 ]; then
+  printf '%s\n' "$ROTATION" >&2
+  die "회전 실패(exit $ROTATION_STATUS)"
+fi
+printf '%s\n' "$ROTATION" | grep -A 1 'history ' | head -2
 NEWMAP="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="map"{print $2; exit}')"
 [ "$NEWMAP" = "$MAP" ] || die "회전 뒤에도 원장이 $MAP 을 가리키지 않는다"
 
@@ -63,14 +71,23 @@ systemd-run --no-block --unit="$RB" --collect --property=Type=oneshot \
   || die "rebuild 기동 실패"
 while [ "$(systemctl show "$RB" -p ActiveState --value)" = activating ]; do sleep 45; done
 echo "  Result=$(systemctl show "$RB" -p Result --value)"
-python3 -c "
+if ! python3 -c "
 import json, sys
 d = json.load(open('$OUT/result.json'))
-print('  success=', d.get('success'), 'phase=', d.get('phase'),
-      'pinset=', d.get('pinset_sha256','')[:16])
-print('  heads=', d.get('schema_heads'))
-sys.exit(0 if d.get('success') else 1)
-" || die "rebuild 실패"
+if d.get('success'):
+    print('  success=', d.get('success'), 'phase=', d.get('phase'),
+          'pinset=', d.get('pinset_sha256','')[:16])
+    print('  heads=', d.get('schema_heads'))
+    sys.exit(0)
+# 실패 판정은 {status, stage?}다(Manager ADR-51 G-2). stage가 없으면 단계 밖에서 멈췄다.
+print('  status=', d.get('status'), 'stage=', d.get('stage', '(단계 밖)'))
+sys.exit(1)
+"; then
+  # 원인은 root 0600 stderr.log에 가린 원문으로 있다. 끝부분을 보인다 — 대화·문서로 옮기지 않는다.
+  echo "  --- $OUT/stderr.log (끝 80줄) ---" >&2
+  tail -n 80 "$OUT/stderr.log" >&2
+  die "rebuild 실패"
+fi
 
 say "D. 나머지 사이클 (chain16)"
 /root/chain16.sh "$MAP" "$PINVI" "$EB" "$D2U" "$TAG"

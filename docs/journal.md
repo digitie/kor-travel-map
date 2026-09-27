@@ -1,5 +1,31 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-27 — 실패 출력을 봉인에서 원문으로: 스크러버 하나, 채널 하나
+
+Manager ADR-51 잃는 보장 G를 세 PR로 끝냈다. 순서는 "가리는 쪽 먼저"였다. G-1에서 스크러버 하나(`secret_scrub.py`)를
+CLI·API 출력 경계에 먼저 세웠다. 그다음 G-2가 재구축 경로의 봉인을 풀어 원문 tail을 싣고, G-3이 M05의 opt-in forensic
+증거 파일들을 "항상 캡처, 가린 `stderr.log` 하나"로 바꿨다. 순서를 거꾸로 하면 원문이 가림보다 먼저 나간다.
+
+리뷰가 잡은 것은 이번에도 "출력 자리"였다. G-2에서 `compose config`의 stderr tail이 `ComposeCandidateContractError`를
+타게 되자, 그것이 `ValueError`라서 `ktdctl action`·`ensure`의 `print(str(exc))`가 가리지 않은 채 냈다. 그래서 CLI의
+예외 출력 20곳을 helper 하나로 모았다. 테스트는 원문 출력 자리가 없다는 사실을 본다. 스크러버의 원천도 고쳤다.
+`.env`와 프로세스 환경을 합치면 한쪽 값이 사라진다 — compose는 프로세스 환경을, 스크러버는 `.env`를 앞세웠다.
+이제 합치지 않은 key·값 쌍을 모은다.
+
+G-3의 가장 값진 발견은 우연한 검사였다. M05의 fresh-init 진단 override는 서비스에 entrypoint만 얹었다. 서비스가
+없으면 compose가 그 override를 거부했고, 그것이 claim 전에 났다. override를 걷으면 이 검사도 조용히 사라지고,
+핀된 Map(서비스 이름이 `db-application-schema-fresh`로 바뀜)에서 M05가 실행권을 쓴 뒤에야 죽는다. 이제 claim 전에
+명시적으로 본다. 생성 비밀은 목록 대신 생성·기록 시점에 스스로 등록된다. 옛 목록은 열한 개를 놓쳤다. 새 테스트는
+driver가 **실제로 쓴** env 파일을 자식이 통째로 에코하게 하고, 민감 값이 하나도 새지 않는지 본다.
+
+n150 검증:
+- 재구축 probe(일부러 거부시킨 실행): JSON은 `{"status":"failed","stage":"environment_admission"}`이다. traceback
+  마지막 줄에 진짜 원인이 있고, 비밀 71개 중 누출은 0이다.
+- M05 negative probe 둘: 원인 문구가 나오고 누출은 0이다.
+- 같은 pair 수렴: 두 번 다 `converged`, 컨테이너 42개 재생성 0이다.
+- 맞춰서 `scripts/n150/chain17.sh`도 원인을 숨기지 않게 했다. 회전 preflight 사유와 회전 실패 출력 전체를 보이고,
+  재구축이 실패하면 stage와 `stderr.log` 끝 80줄을 보인다.
+
 ## 2026-09-27 — 소스 봉인을 걷어냈다: SHA가 곧 증명, 이름 붙은 디렉터리가 곧 캐시
 
 Manager ADR-51 잃는 보장 E를 세 PR로 끝냈다. 순서는 이번에도 "읽는 쪽 먼저"였다. E-1에서 재구축의 Map 계약
