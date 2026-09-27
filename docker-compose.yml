@@ -920,7 +920,7 @@ services:
       interval: 120s
       timeout: 60s
       retries: 2
-      start_period: 60s
+      start_period: 90s
       start_interval: 15s
     # **그리고 다시 올린다.** healthcheck는 상태를 보이게 만들지만 아무것도 되돌리지
     # 않는다 — docker는 unhealthy로 재시작하지 않고(그건 Swarm이다), Exited 컨테이너를

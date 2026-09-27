@@ -6787,15 +6787,20 @@ def _dagster_process_services() -> dict[str, dict[str, Any]]:
         name: service
         for name, service in services.items()
         if any(marker in _command_text(service.get("command")) for marker in markers)
-        and "liveness-check" not in _command_text(service.get("command"))
     }
 
 
+#: exec 형식으로 셸을 다시 부르면(`["CMD", "sh", "-c", ...]`) 같은 래퍼가 돌아온다.
+_SHELLS = frozenset({"sh", "/bin/sh", "bash", "/bin/bash"})
+
+
+@pytest.mark.unit
 def test_the_compose_declares_dagster_process_services() -> None:
     """유도의 전제 — 못 찾으면 아래 검사가 항진명제가 된다."""
     assert len(_dagster_process_services()) >= 3, sorted(_dagster_process_services())
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("service_name", sorted(_dagster_process_services()))
 def test_dagster_probes_run_without_a_shell_and_orphans_are_reaped(service_name: str) -> None:
     """Manager #426과 같은 계약(2026-09-27 n150 healthcheck 폭주).
@@ -6806,7 +6811,12 @@ def test_dagster_probes_run_without_a_shell_and_orphans_are_reaped(service_name:
     """
     service = _dagster_process_services()[service_name]
     test = (service.get("healthcheck") or {}).get("test")
-    assert isinstance(test, list) and test and test[0] == "CMD", (
+    assert isinstance(test, list), f"`{service_name}`의 healthcheck test가 목록이 아니다: {test!r}"
+    assert test[:1] == ["CMD"], (
         f"`{service_name}`의 healthcheck가 exec 형식(`CMD`)이 아니다: {str(test)[:80]}"
+    )
+    assert len(test) > 1, f"`{service_name}`의 healthcheck에 실행할 프로그램이 없다"
+    assert test[1] not in _SHELLS, (
+        f"`{service_name}`의 exec probe가 셸({test[1]})을 부른다 — CMD-SHELL과 같은 래퍼다."
     )
     assert service.get("init") is True, f"`{service_name}`에 `init: true`가 없다 — 좀비가 쌓인다."
