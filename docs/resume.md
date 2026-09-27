@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — Manager ADR-51 결정 5(C6c 보호 참조 파생 규칙) 완료
+
+**다음 한 작업: M05 격리 하네스의 Map ADR-100/101 대응.** 핀된 Map은 fresh-init 서비스를 `db-application-schema-fresh`로
+부르고, `docker-compose.local-dev.yml`을 지웠고, role을 단일 LOGIN(`ktm_feature_service`)으로 바꿨다. 포팅 전까지
+M05는 claim 전에 `runtime_setup_map_config`로 멈추며 실행권은 쓰지 않는다.
+
+- **Manager**:
+  - P-1 #422(`eb477467`): 설치기가 git에서 쓴 `.ktdm-release-compose.yml`을 원본으로, 자리별 보호 참조 부분집합 규칙을
+    세웠다. 옛 표 검사와 병행이다.
+  - P-2/P-3 #423(`784875e2`): 리터럴 표를 지웠다 — 이름 스캔, 허용 경로, sole-consumer, secret 이름 스캔, resolved의
+    `.env` 재대조가 사라졌다. 내용 스캔은 값만 본다. resolved 문서에는 값 백스톱을 둔다. 변수 이름은 compose처럼
+    ASCII로 읽는다.
+- **n150 인수**:
+  - 매 단계 `pin verify` 0, M05 preflight 0, 수렴 `converged`, 컨테이너 42개 재생성 0이다.
+  - 설치된 compose는 통과한다. 누출 후보 둘은 거부된다.
+  - 병합 전에 운영 데이터로 미리 돌려 보다가 bind 내용 스캔의 거짓 양성(배포 전체 차단)을 잡았다.
+
 ## 2026-09-27 — Manager ADR-51 잃는 보장 G(실패 출력 스크럽) 완료
 
 **다음 한 작업: Manager ADR-51 compose 파생 규칙(결정 5).** 그 뒤 **M05 격리 하네스의 Map ADR-100/101 대응**. 포팅
