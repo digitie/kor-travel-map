@@ -370,7 +370,8 @@ services:
       KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
       KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
     entrypoint: ["/bin/sh", "-c"]
-    # 접속 실패·5xx만 재시도한다(rustfs 기동 대기). 인증·이름 같은 4xx는 바로 실패한다 —
+    # 접속 실패·5xx만 재시도한다(rustfs 기동 대기 — RustFS는 health가 200이 된 뒤에도 잠시
+    # `503 waiting for storage_quorum`을 돌려준다). 인증·이름 같은 4xx는 바로 실패한다 —
     # 이미 있는 버킷은 200(RustFS) 또는 409 BucketAlreadyOwnedByYou(S3)로 멱등이다.
     command:
       - |
@@ -379,7 +380,7 @@ services:
           tries=0
           while :; do
             rm -f /tmp/rustfs-init.out
-            code=$$(curl -sS -o /tmp/rustfs-init.out -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
+            code=$$(curl -sS --connect-timeout 5 --max-time 30 -o /tmp/rustfs-init.out -w '%{http_code}' --aws-sigv4 aws:amz:us-east-1:s3 \
               --user "$$KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:$$KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY" \
               -X PUT "$$KOR_TRAVEL_MAP_RUSTFS_INIT_ENDPOINT/$$1") || code=000
             case "$$code" in
