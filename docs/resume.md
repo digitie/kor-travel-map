@@ -1,5 +1,41 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-27 — rustfs-init의 minio/mc 대체, 새 pair 사이클 t62b GREEN, M05는 n150 과부하로 BLOCKED
+
+**다음 한 작업: n150 Dagster healthcheck 폭주를 먼저 잡고 M05를 다시 돌린다(소유자 결정 필요).**
+M05 p2~p4는 본문 진입 전 인프라 phase에서 멈췄다(scoped 차단 — 실행권은 소비되지 않았고 같은 identity로 재실행된다).
+
+- **minio/mc 소멸**:
+  - Docker Hub의 `minio/mc`·`minio/minio` 저장소가 사라졌다(Hub API 404). digest 핀도 받을 수 없다.
+  - M05 port(#424) 뒤 첫 실제 실행 p1이 claim 뒤 Map `rustfs-init` pull 거부로 BLOCKED됐다.
+  - Map #1282(`a18d9274`), PinVi #568(`fd07903f`), Manager #425(`cc89ad9f`)로 세 저장소의 `rustfs-init`을 고쳤다.
+    - 자기 rustfs 서비스와 같은 이미지의 curl(`--aws-sigv4`)로 버킷을 만든다.
+    - 000과 5xx만 재시도한다. RustFS는 health 200 뒤에도 잠시 `503 storage_quorum`을 준다.
+    - 요청마다 connect 5초·전체 30초 상한을 둔다.
+  - 격리 실행 안에서 Map과 PinVi init 모두 `Exited (0)`을 확인했다. prod Manager `rustfs-init`도 6개 버킷 exit 0이었다.
+- **새 pair**: Map `a18d9274` + PinVi `fd07903f`, pinset `ce444e8e`.
+  - 회전 preflight OK.
+  - chain17 **t62b GREEN**: rebuild `deployed`(Map head 400, PinVi `20260917_0102`), ACL 40/40, D1 11 passed, D2 passed.
+  - t62a는 pinvi-web 빌드가 오래 조용하길래 buildx bake를 끊어 실패시켰다. 나중에 보니 레이어 export(gzip) 중이었을 가능성이 크다.
+- **M05 p2~p4 (BLOCKED, 모두 `runtime_command_failed`)**:
+  - p2: PinVi web 이미지 export가 약 40분 걸려 `commit failed: context deadline exceeded`.
+  - p3·p4: PinVi `app-dagster`가 이미지 HEALTHCHECK(시작 60s·10s×3)를 넘겨 unhealthy.
+  - 공통 원인은 n150 과부하다(load 최고 137). 운영 Dagster 스택들의 healthcheck(`dagster-daemon liveness-check`,
+    `dagster api grpc-health-check`)가 매번 dagster를 import하는 Python을 띄운다. 부하가 오르면 10초를 넘겨 겹치며
+    스스로 불어난다(동시 47개).
+  - 좀비는 565개였다. PID 1이 자식을 거두지 않는 Dagster 컨테이너들에 있다: geo code-server 261, geo daemon 85,
+    weather 78, PinVi 25, Map 20.
+- **소유자에게 물을 것**:
+  1. Dagster healthcheck를 가볍게 바꾸고(HTTP/grpc 대신 프로세스·포트 확인, 긴 timeout) `init: true`로 좀비를 거둔다.
+     운영 스택 전부(Map·PinVi·geo·weather·airport)가 대상이고, Manager compose 재설치와 rebuild가 따른다.
+  2. 또는 n150이 한가할 때 M05만 다시 돌린다(재발 가능성 높음).
+- **별건**:
+  - PinVi `deploy-node.sh`의 `fresh_stack_dependency_image_proof`가 main에서 이미 깨져 있다.
+    `api_image_provenance.py compose-image-reference`가 app-api/web/dagster만 받아 exit 2가 난다.
+  - prod `.env`의 관리 UI 비밀번호 해시 세 개가 따옴표 없이 `$`를 담고 있다. Manager 경로에서 컨테이너 값은 온전하다(해시 비교).
+    다만 호스트에서 `docker compose --env-file .env`를 직접 부르면 잘린다.
+  - Map·PinVi dagster-daemon이 healthcheck 타임아웃으로 `unhealthy` 표시다. 기능은 동작한다.
+
 ## 2026-09-27 — Manager ADR-51 결정 5(C6c 보호 참조 파생 규칙) 완료
 
 **다음 한 작업: M05 격리 하네스의 Map ADR-100/101 대응.** 핀된 Map은 fresh-init 서비스를 `db-application-schema-fresh`로
