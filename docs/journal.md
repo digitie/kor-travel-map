@@ -20,8 +20,20 @@ Manager ADR-52). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽
   alpine으로 떨어지지 않고 실패한다. main에 required check가 없으므로 두 leg 초록은 리뷰가 확인한다.
 - **n150 스크립트**: `adjudicate.sh`는 Map API 컨테이너 안에서 그 컨테이너의 DSN으로 읽기 전용으로 세고,
   `repin.sh` 3단계는 D2 fixture DSN을 그 DSN에서 유도한다. instance 이름·port·superuser 문자열은 없다.
-- n150 부하(load 16~17)에서 docker API가 60초를 넘겨 testcontainers가 `ReadTimeout`으로 죽는 일이 잦았다.
-  테스트 하네스에만 docker-py timeout을 늘리는 플러그인을 얹어 돌렸다(코드 변경 아님).
+- glibc lane을 n150에서 처음 전량으로 돌리자 두 가지가 나왔다(1139 passed / 20 failed).
+  - bootstrap-on-existing-db 19건이 `/usr/bin/sleep: not found`로 죽었다. 테스트가 스크립트를 **서버 컨테이너
+    안에서** 돌렸는데, Debian 기반 공용 이미지에는 `/usr/local/bin/psql`도 `/usr/bin/sleep`도 없다. 운영은
+    Manager one-shot(`postgres:16-alpine`)이 TCP로 붙으므로 문제는 테스트 모양이었다. 서버 network를 나눠 쓰는
+    alpine client 컨테이너에서 돌리게 바꿨다 — 두 lane 모두 19 passed.
+  - head 오라클(`alembic/head-schema.sql`)이 헤더 빈 줄 하나로 어긋났다. pg_dump 16.10+는 `\restrict` fence
+    뒤에 빈 줄을 하나 더 쓰고, 공용 instance의 16.9는 fence를 쓰지 않는다. 정규화가 fence 뒤 빈 줄도 걷게 했고,
+    alpine lane 재생성이 커밋본과 바이트까지 같다.
+- n150 부하(load 16~20)에서 docker API가 60초를 넘겨 testcontainers가 `ReadTimeout`으로 죽는 일이 잦았다.
+  테스트 하네스에만 docker-py timeout을 늘리는 플러그인을 얹어 돌렸다(코드 변경 아님). alpine lane 첫 전량에서는
+  bootstrap 모듈 19건이 알려진 부팅 경합(`not yet accepting connections`)으로 죽었고, 단독 실행은 19 passed다.
+- 두 수정 뒤 n150 전량(`0fd7de1c`): glibc **1161 passed / 12 skipped / 0 failed**, alpine 1154 passed / 18 skipped /
+  1 failed(`test_public_partial_indexes_have_exact_state_predicate_and_explain_proof` — 단독 재실행은 이 브랜치와
+  main 모두 passed). unit·lint 세션의 실패 16건은 main과 같은 집합이다(node_modules 없는 체크아웃·git 아닌 트리).
 
 ## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
 
