@@ -1,5 +1,32 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-28 — MP(Map DB 공용 이전의 Map 쪽 준비): 브랜치 `fix/shared-instance-readiness`
+
+**다음 한 작업: MP를 CI 두 leg(alpine·glibc) 초록 + 적대 리뷰로 머지 → n150 호스트 스크립트를 MP SHA에서
+0700 root로 재설치 → `/root/chain17.sh <MP_SHA> …`로 새 pair(MP + PinVi `c5be9eb4`)를 전용 12700 위에서
+회전·D1/D2 초록.** 그 뒤 Manager 창(MT·M2)에서 이동한다(ADR-103, Manager ADR-53).
+
+- `COLLATE "C"`: evidence export/backup twin, evidence restore, curation collection lock, cache target capture.
+  감사 뒤 그대로 둔 곳과 이유는 커밋 메시지(`fix: glibc-safe text orderings …`)에 있다.
+- CI `integration` 두 leg, 이미지 정본 `tests/integration/_postgis_image.py`.
+- `scripts/n150/adjudicate.sh`·`repin.sh`는 Map API 컨테이너에서 DB 접근을 유도한다. `/root` 사본은 MP 머지 뒤
+  재설치해야 한다(`scripts/n150/README.md` §설치, 0700 root, sha256 대조).
+- MP는 OpenAPI 스냅숏을 바꾸지 않는다 — PinVi pair 계약 preflight가 그대로 통과한다.
+- 적대 리뷰 반영(journal 참조): adjudicate 양성 대조, n150 스크립트의 API 컨테이너 조회를 D2 러너의 compose
+  project로, repin의 source 값 대조, 효과 기반 인스턴스 탐지기, 두 lane의 수동 workflow·로컬 게이트.
+  수동 `postgis-only.yml` 두 lane 초록(run 36421797357).
+  - PR을 열 때 본문에 CI `integration` 두 leg의 URL을 적는다(required check가 없다).
+  - 적대 리뷰 2차(09-29, journal 참조): n150 compose 조회의 stderr 차단(비밀 조각 누출), 탐지기 좁히기·유도
+    결박, 판정 도구 읽기 전용 검사, 다섯째 잔여물 줄(fixture dataset), D2 러너의 fixture 대상 대조.
+  - 남은 것(Map 밖, 소유자): `/opt/.env`의 `*_UI_ADMIN_PASSWORD_HASH` 넷을 작은따옴표로 감싸거나 `$$`로
+    바꾸고, Map UI 관리자 비밀번호를 교체한다(hash 조각이 리뷰 transcript에 찍혔다).
+  - 남은 것(Map 밖): 이동 창 사전 점검(스펙 §4.1 A0/A5)에 실행 중인 공용 컨테이너 `.Image`와
+    `tests/integration/_postgis_image.py`의 `SHARED_GLIBC_POSTGIS_IMAGE` 대조 한 줄. API 이미지의
+    `python -I -c 'import asyncpg'` smoke는 `docker-images.yml`이 OCI만 내보내 따로 load가 필요해 미뤘다.
+- Manager ADR 번호: 이 이동은 **ADR-53**이다. ADR-52는 #433(공용 instance의 `init`·exec probe `-t 3`/`timeout 10s`·
+  grace 300s·shm 512mb)이고 n150에 설치됐다(Manager `0fe0d97`, 공용 재생성 09-28 13:10:57Z). 아래 (저녁) 절의
+  `stop_grace 180s`·`pg_isready -t 2`는 그 전 계획값이다.
+
 ## 2026-09-28 (저녁) — transport 개명 완료, 공용 PG 재시작 원인, Map DB 공용 이전 착수
 
 **다음 한 작업: Map DB를 공용 PostgreSQL(11000)로 옮긴다(소유자 결정 C).** 명세·런북을 확정했고, 구현 1차

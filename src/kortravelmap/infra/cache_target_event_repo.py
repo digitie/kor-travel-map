@@ -124,6 +124,10 @@ class CacheTargetRefreshProtocolViolation(RuntimeError):
 _RELAY_OWNED_EXTERNAL_SYSTEM = "pinvi"
 
 
+# text 키(`external_system`·`target_key`)의 순서는 이 모듈 전체가 `COLLATE "C"`(byte
+# 순서)다. source head를 `FOR KEY SHARE`로 잡는 capture와 `FOR UPDATE`로 잡는 검증이
+# 서로 다른 collation을 따르면 두 문장의 잠금 순서가 갈려 교착이 생길 수 있고, DB
+# default collation은 glibc 공용 instance에서 byte 순서와 다르다(ADR-103).
 _CAPTURE_REFRESH_MEMBERS_SQL = """
 INSERT INTO ops.poi_cache_target_refresh_members (
     request_id, target_id, external_system, target_key,
@@ -138,7 +142,7 @@ WHERE head.state = 'active'
   AND head.target_id::text = ANY(CAST(:target_ids AS text[]))
   AND head.external_system = ANY(CAST(:external_systems AS text[]))
   AND target.deleted_at IS NULL
-ORDER BY head.external_system, head.target_key
+ORDER BY head.external_system COLLATE "C", head.target_key COLLATE "C"
 FOR KEY SHARE OF head
 ON CONFLICT (request_id, target_id) DO NOTHING
 """
@@ -159,7 +163,7 @@ WHERE head.external_system = :external_system
   AND target.deleted_at IS NULL
   AND target.update_enabled
   AND target.refresh_policy <> 'disabled'
-ORDER BY head.external_system, head.target_key
+ORDER BY head.external_system COLLATE "C", head.target_key COLLATE "C"
 FOR KEY SHARE OF head
 ON CONFLICT (request_id, target_id) DO NOTHING
 """
@@ -212,7 +216,8 @@ JOIN ops.poi_cache_target_source_events AS source
  AND source.restore_epoch = member.restore_epoch
  AND source.source_generation = member.source_generation
 WHERE member.request_id = CAST(:request_id AS uuid)
-ORDER BY member.external_system, member.target_key, member.target_id
+ORDER BY member.external_system COLLATE "C", member.target_key COLLATE "C",
+         member.target_id
 """
 
 _SELECT_REFRESH_PROTOCOL_SQL = """

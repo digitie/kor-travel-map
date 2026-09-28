@@ -13,6 +13,7 @@ B가 없으면 "만료된 것을 전부 지운다"는 잘못된 구현도 통과
 
 usage: tvn41c_gc_seed.py <dbname> <systems> <snapshots_per_system> <items_per_snapshot> [tag]
 연결 자격증명은 ``KTM_GC_VERIFY_PG_*`` 환경변수로 받는다(인자로 받으면 ps에 남는다).
+``KTM_GC_VERIFY_PG_PORT``와 ``KTM_GC_VERIFY_PG_PASSWORD``는 필수다(port 기본값 없음).
 """
 
 from __future__ import annotations
@@ -40,7 +41,12 @@ def _fingerprint(seed: str) -> str:
 
 def _dsn(dbname: str) -> str:
     host = os.environ.get("KTM_GC_VERIFY_PG_HOST", "127.0.0.1")
-    port = os.environ.get("KTM_GC_VERIFY_PG_PORT", "12700")
+    # port에는 기본값이 없다. 검증 DB가 어느 instance에 있는지는 운영자가 고른다 — 옛
+    # 전용 instance의 port를 기본값으로 두면 그 instance가 퇴역한 뒤(ADR-103) 다른
+    # 무엇이 그 port를 들을 때 그쪽에 쓴다.
+    port = os.environ["KTM_GC_VERIFY_PG_PORT"]
+    if not port.isdigit():
+        raise SystemExit("KTM_GC_VERIFY_PG_PORT는 숫자 port여야 한다")
     user = os.environ.get("KTM_GC_VERIFY_PG_USER", "kor_travel_map")
     password = os.environ["KTM_GC_VERIFY_PG_PASSWORD"]
     return f"host={host} port={port} user={user} password={password} dbname={dbname}"

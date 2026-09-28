@@ -26,6 +26,8 @@ FE=packages/kor-travel-map-admin/frontend
 NEW=/home/digitie/ktm-c7-$MAP
 R=/var/lib/kor-travel-map/admin-feature-live-acceptance
 D1ROOT=/home/digitie/d1-$TAG
+# D2 러너가 도는 compose project 디렉터리(`run-d2.sh`와 같은 곳).
+COMPOSE_DIR=/opt/kor-travel-docker-manager
 
 die() { echo "!! $1" >&2; exit 1; }
 say() { printf '\n===== %s =====\n' "$1"; }
@@ -63,8 +65,12 @@ say "D. repin (.d2-live.env)"
 
 say "E. M01 ACL preflight"
 set -a; . /root/.d2-live.env; set +a
-API=$(docker ps -q --filter "label=com.docker.compose.service=$E2E_C7_MAP_API_SERVICE" | head -1)
-[ -n "$API" ] || die "Map API 컨테이너를 찾지 못했다"
+# API 컨테이너는 D2 러너·repin과 같은 방법으로 찾는다 — compose project(`run-d2.sh`의 cwd)의
+# 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack은 보지 않는다. stderr는 버린다 —
+# compose가 project `.env`를 해석하며 찍는 경고에 비밀에서 나온 조각이 섞인다(repin 3단계 참조).
+# 실패는 아래 64-hex 검사가 잡는다.
+API=$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q "$E2E_C7_MAP_API_SERVICE" 2>/dev/null)
+[[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
 IMG=$(docker inspect "$API" --format '{{.Image}}')
 SCRIPT=/tmp/m01_pf_$TAG.py
 # 배포한 그 SHA에서 꺼낸다(step C가 ktm-c7-src를 $MAP으로 옮겼다). 종전처럼 공유 lint
@@ -80,6 +86,8 @@ record = json.loads(subprocess.run(["docker","inspect","--",api],check=True,
                                    capture_output=True,text=True).stdout)[0]
 runtime_env = dict(item.partition("=")[::2] for item in record["Config"]["Env"])
 proc_env = dict(os.environ); proc_env.update(runtime_env)
+# repin 3단계가 fixture DSN을 이 API의 DSN에서 유도하므로 지금은 같은 값이다. 대입은 남긴다 —
+# preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 코드로 말한다.
 proc_env["KOR_TRAVEL_MAP_PG_DSN"] = os.environ["E2E_ADMIN_FEATURE_FIXTURE_PG_DSN"]
 env_args = [v for n in sorted(runtime_env) for v in ("--env", n)]
 cmd = ["docker","create","--pull=never","--network","host","--read-only",

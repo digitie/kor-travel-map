@@ -33,14 +33,22 @@ _BACKUP_SCRIPT = (
 
 
 def _script_relations() -> list[tuple[str, str]]:
-    """`docker-backup.sh`의 `capture_evidence_jsonl` 호출을 파싱한다."""
+    """`docker-backup.sh`의 `capture_evidence_jsonl` 호출을 파싱한다.
+
+    SELECT는 bash 큰따옴표 문자열이다. `COLLATE \\"C\\"`처럼 escape된 따옴표를 문자열
+    끝으로 읽으면 SELECT가 거기서 잘려 두 구현이 다르다고 오판한다. 그래서 bash가
+    큰따옴표 안에서 푸는 escape(`\\$`·`` \\` ``·`\\"`·`\\\\`)를 그대로 풀어 대조한다.
+    """
 
     source = _BACKUP_SCRIPT.read_text(encoding="utf-8")
     pattern = re.compile(
-        r'capture_evidence_jsonl\s*\\\s*\n\s*(\w+)\s*\\\s*\n\s*"([^"]+)"',
+        r'capture_evidence_jsonl\s*\\\s*\n\s*(\w+)\s*\\\s*\n\s*"((?:[^"\\]|\\.)+)"',
         re.MULTILINE,
     )
-    return [(m.group(1), m.group(2)) for m in pattern.finditer(source)]
+    return [
+        (m.group(1), re.sub(r'\\([$`"\\])', r"\1", m.group(2)))
+        for m in pattern.finditer(source)
+    ]
 
 
 def test_evidence_export_matches_the_backup_script_contract() -> None:

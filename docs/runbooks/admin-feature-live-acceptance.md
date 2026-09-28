@@ -27,6 +27,11 @@ runtime preflight는 C7 러너와 같은 모듈(`scripts/lib/c7_prod_runtime.py`
   이 DSN은 browser executor나 API route에는 전달하지 않으며, fixture는 직접
   `feature.features`를 INSERT하지 않고 provider source evidence와
   `feature.create_feature_with_initial_state` procedure를 사용한다.
+- 러너는 lock·state를 만들기 전에(`validate_runtime`) fixture DSN이 찾은 Map API 컨테이너의
+  `KOR_TRAVEL_MAP_PG_DSN`과 **같은 DB**(사용자·비밀번호를 뺀 host·port·DB·query)를 가리키는지
+  대조하고, 다르면 멈춘다(ADR-103). 위 확인 키 셋은 DB 이름·login·head라서 다른 instance에 남은
+  같은 이름의 DB 사본에서도 맞는다 — 이동·롤백 직후 repin 없이 러너만 돌리면 API가 읽지 않는
+  사본을 고치게 된다. 값은 출력하지 않는다.
 - browser의 모든 API 호출은 same-origin `/api/proxy` BFF를 통한다. public API key를 URL이나
   browser state에 넣지 않는다.
 - `BLOCKED.json`과 `ACTIVE.json`은 고정 root state에만 원문 identity를 저장한다. 보존

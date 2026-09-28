@@ -257,6 +257,12 @@ setup_geo_live
 # skip되고 로그에는 "실제 실행"만 남는다. 그 조용한 skip을 exit 96으로 바꾼다.
 run_gate "pytest integration" py \
   'python scripts/geo_live_probe.py || exit 96; timeout 3000 python -m pytest tests/integration -q > /tmp/g4.log 2>&1; rc=$?; tail -25 /tmp/g4.log; python scripts/geo_live_probe.py --assert-ran /tmp/g4.log || exit 95; exit $rc'
+# CI `integration`의 두 번째 leg(ADR-103): n150 공용 instance의 glibc 이미지. 위 게이트는
+# alpine만 돈다 — 이것이 없으면 collation·head 오라클·bootstrap 결함이 로컬에서 초록이다.
+# digest는 손으로 적지 않고 정본(`_postgis_image.py`)에서 읽는다. 읽기에 실패하면 기본값
+# (alpine)으로 조용히 돌지 않도록 멈춘다.
+run_gate "pytest integration (glibc lane)" py \
+  'python scripts/geo_live_probe.py || exit 96; KTM_TEST_POSTGIS_IMAGE="$(python -c "from tests.integration._postgis_image import SHARED_GLIBC_POSTGIS_IMAGE as image; print(image)")" || exit 94; export KTM_TEST_POSTGIS_IMAGE; timeout 3000 python -m pytest tests/integration -q > /tmp/g5.log 2>&1; rc=$?; tail -25 /tmp/g5.log; python scripts/geo_live_probe.py --assert-ran /tmp/g5.log || exit 95; exit $rc'
 if [ -n "$GEO_TUNNEL_PID" ]; then
   kill "$GEO_TUNNEL_PID" 2>/dev/null
   MSYS_NO_PATHCONV=1 wsl -e bash -lc 'pkill -f "N -L 12599" >/dev/null 2>&1' >/dev/null 2>&1

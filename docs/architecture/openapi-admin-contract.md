@@ -53,7 +53,7 @@ provider별 refresh policy/rate limit 상세는
 | `kor-travel-map-frontend` | Next.js admin UI |
 | `kor-travel-map-dagster-webserver` | Dagster UI |
 | `kor-travel-map-dagster-daemon` | schedules/sensors/runs |
-| `kor-travel-map-postgres` | 독립 PostgreSQL 16 + PostGIS 3.5 |
+| `kor-travel-map-postgres` | 독립 PostgreSQL 16 + PostGIS 3.5 (standalone compose. n150 prod는 공용 instance 안의 전용 DATABASE — ADR-103) |
 | `kor-travel-map-rustfs` | 선택 객체 저장소. 로컬 표준 포트는 S3 API `12101`, console `12105` |
 
 PostgreSQL 기본 DB:

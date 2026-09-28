@@ -705,7 +705,7 @@ _D2_ENV = {
     "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
     "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
     "E2E_ADMIN_PASSWORD": "redacted",
-    "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": "postgresql://fixture@127.0.0.1:12700/kor_travel_map",
+    "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": "postgresql://fixture@127.0.0.1:55432/kor_travel_map",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE": "kor_travel_map",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE": "ktm_fixture_writer",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION": "400",
@@ -778,6 +778,111 @@ def test_d2_env_contract_still_rejects_each_kept_requirement(name: str) -> None:
     assert rejected.returncode == 1
     assert f"required env is missing: {name}" in rejected.stderr
     assert "ENV_OK" not in rejected.stdout
+
+
+_API_CONTAINER = "c" * 64
+_FIXTURE_SECRET = "fx-Secret.value"
+_API_SECRET = "api-Secret.value"
+_API_DSN = f"postgresql+asyncpg://ktm_feature_service:{_API_SECRET}@127.0.0.1:55432/kor_travel_map"
+
+
+def _run_fixture_target_check(
+    tmp_path: Path, fixture_dsn: str, api_env: list[str]
+) -> subprocess.CompletedProcess[str]:
+    """러너의 fixture 대상 확인을 **소스 그대로** 떼어 가짜 `docker inspect`로 실행한다."""
+
+    runner = _RUNNER.read_text(encoding="utf-8")
+    functions = "".join(
+        _bash_function(runner, name) for name in ("die", "validate_fixture_target")
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    inspect = tmp_path / "inspect.json"
+    inspect.write_text(json.dumps([{"Config": {"Env": api_env}}]), encoding="utf-8")
+    docker = fake_bin / "docker"
+    docker.write_text(
+        f'#!/bin/sh\n[ "$1 $2 $3" = "inspect -- {_API_CONTAINER}" ] || exit 97\n'
+        f'cat "{inspect}"\n'
+    )
+    docker.chmod(0o755)
+    python3 = shutil.which("python3")
+    assert python3 is not None
+    (fake_bin / "python3").symlink_to(python3)
+    return subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            f"set -euo pipefail\n{functions}validate_fixture_target\necho TARGET_OK\n",
+        ],
+        capture_output=True,
+        env={
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "API_CONTAINER_ID": _API_CONTAINER,
+            "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": fixture_dsn,
+        },
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_fixture_target_check_accepts_the_api_database_under_another_login(
+    tmp_path: Path,
+) -> None:
+    """사용자·비밀번호·scheme은 달라도 된다 — 같은 host·port·DB면 통과한다."""
+
+    accepted = _run_fixture_target_check(
+        tmp_path,
+        f"postgresql://ktm_fixture_writer:{_FIXTURE_SECRET}@127.0.0.1:55432/kor_travel_map",
+        ["PATH=/usr/bin", f"KOR_TRAVEL_MAP_PG_DSN={_API_DSN}"],
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout == "TARGET_OK\n"
+    assert accepted.stderr == ""
+
+
+_FIXTURE_AT = f"postgresql://ktm_feature_service:{_FIXTURE_SECRET}@"
+_API_ENV = [f"KOR_TRAVEL_MAP_PG_DSN={_API_DSN}"]
+
+
+@pytest.mark.parametrize(
+    ("fixture_dsn", "api_env"),
+    [
+        # DB를 옮기거나 되돌린 뒤 repin 없이 돈 러너: 같은 DB 이름, 다른 instance.
+        (_FIXTURE_AT + "127.0.0.1:55433/kor_travel_map", _API_ENV),
+        (_FIXTURE_AT + "127.0.0.2:55432/kor_travel_map", _API_ENV),
+        (_FIXTURE_AT + "127.0.0.1:55432/kor_travel_map_old", _API_ENV),
+        (_FIXTURE_AT + "127.0.0.1:55432/kor_travel_map?host=/run/other", _API_ENV),
+        # 판정할 수 없으면 거부한다.
+        (_FIXTURE_AT + "127.0.0.1:55432/kor_travel_map", ["PATH=/usr/bin"]),
+        (
+            _FIXTURE_AT + "127.0.0.1:55432/",
+            [f"KOR_TRAVEL_MAP_PG_DSN=postgresql://u:{_API_SECRET}@127.0.0.1:55432/"],
+        ),
+        (_FIXTURE_AT + "127.0.0.1:port/kor_travel_map", _API_ENV),
+    ],
+    ids=["port", "host", "database", "query-host", "api-dsn-missing", "no-database", "bad-port"],
+)
+def test_fixture_target_check_refuses_another_database_without_printing_secrets(
+    tmp_path: Path, fixture_dsn: str, api_env: list[str]
+) -> None:
+    refused = _run_fixture_target_check(tmp_path, fixture_dsn, api_env)
+    assert refused.returncode == 1
+    assert "fixture DSN does not target the Map API runtime database" in refused.stderr
+    assert "TARGET_OK" not in refused.stdout
+    for secret in (_FIXTURE_SECRET, _API_SECRET):
+        assert secret not in refused.stdout
+        assert secret not in refused.stderr
+
+
+def test_runtime_validation_checks_the_fixture_target_before_any_state() -> None:
+    """대상 확인은 API 컨테이너를 찾은 직후, lock·state를 만들기 전에 돈다."""
+
+    runner = _RUNNER.read_text(encoding="utf-8")
+    runtime = _bash_function(runner, "validate_runtime")
+    assert runtime.index('API_CONTAINER_ID="$(') < runtime.index("  validate_fixture_target\n")
+    main = runner[runner.index('[[ "$MODE" == "run" || "$MODE" == "recover" ]]') :]
+    assert main.index("validate_runtime\n") < main.index("initialize_state\n")
 
 
 def test_d2_runner_starts_from_a_plain_checkout(tmp_path: Path) -> None:

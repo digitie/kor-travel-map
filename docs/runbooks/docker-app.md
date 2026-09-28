@@ -2,9 +2,10 @@
 
 본 문서는 ADR-045/047/056 기준 kor-travel-map 독립 프로그램을 로컬에서 빌드·기동·스모크하는
 절차다. 고정 포트는 API `12701`, admin UI `12705`, Dagster `12702`이다.
-PC 개발 환경에서 `kor-travel-docker-manager`가 띄우는 map 전용 PostgreSQL은
-host **`12700`**이다(2026-08-17, docker-manager ADR-37 — 프로젝트마다 전용
-instance이고 포트는 대역의 `x00`이다). **`5432`를 듣는 것은 없다.** RustFS S3 API는
+`kor-travel-docker-manager`가 띄우는 PostgreSQL에서 map DB는 공용 instance
+`kor-travel-shared-postgres`(host **`11000`**) 안의 전용 DATABASE다(ADR-103, 2026-09-28 —
+Manager의 이전 창 전까지는 전용 instance `kor-travel-map-postgres`, host `12700`). 포트는
+Manager가 렌더한 DSN이 정본이다. **`5432`를 듣는 것은 없다.** RustFS S3 API는
 `12101`, console은 `12105`다. 공유 PostGIS/RustFS를 쓰는 external DB/infra 형상은
 standalone local launcher가 아니라 application/metadata permit을 발급하는 Docker Manager
 production flow만 사용한다.
@@ -161,7 +162,7 @@ ignored deployment env/vault에만 둔다. host network local-dev는 같은 값�
 external DB/infra overlay는 Manager-owned production composition의 내부 입력이다.
 `scripts/docker-up.sh`에 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 주면 permit producer가 없는 우회를 만들지 않고 즉시
-중단한다. 공유 `kor-travel-map-postgres:12700` 및 RustFS 형상은 Docker Manager가 dedicated
+중단한다. Manager가 띄우는 PostgreSQL(공용 instance, ADR-103) 및 RustFS 형상은 Docker Manager가 dedicated
 application role/DB와 `kor_travel_map_dagster` metadata role/DB를 확인하고, actual image ID와
 paired receipt를 결박한 두 root-owned permit을 원자적으로 publish한 뒤에만 기동한다.
 external overlay가 포트를 조합하지 않는다는 점은 유지되며 포트는 Manager가 검증한 완성 DSN
@@ -392,8 +393,8 @@ Map service는 fail-closed하며 writer fence를 유지한 새 forward-fix candi
 local-dev `dagster-db-init`는 `kor_travel_map_dagster` metadata DB 존재와 local identity permit만
 보장하며 production authority가 아니다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
-`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `12700` 공유 DB 형상은
-Docker Manager production flow만 기동하며 standalone local launcher에서는 거부한다.
+`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. Manager가 띄우는 공용 DB
+형상(ADR-103)은 Docker Manager production flow만 기동하며 standalone local launcher에서는 거부한다.
 
 Compose healthcheck 기준은 다음과 같다.
 

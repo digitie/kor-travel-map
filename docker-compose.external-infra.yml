@@ -1,7 +1,8 @@
 # 외부(공유) 인프라 모드 오버레이 (ADR-052 amendment).
 #
-# kor-travel-docker-manager가 소유한 map 전용 PostgreSQL(`kor-travel-map-postgres`,
-# **:12700** — `5432`가 아니다, docker-manager ADR-37)과 RustFS(S3 :12101)를 쓸 때
+# kor-travel-docker-manager가 소유한 PostgreSQL(n150 prod는 공용 instance
+# `kor-travel-shared-postgres` **:11000** 안의 map 전용 DATABASE, ADR-103 — `5432`가
+# 아니다)과 RustFS(S3 :12101)를 쓸 때
 # kor-travel-map compose의 local postgres/rustfs 계열을 시작하지 않는다. 이 overlay는
 # Manager-owned production composition의 내부 입력이다. standalone `scripts/docker-up.sh`는
 # permit producer가 없으므로 external DB/infra 모드를 명시적으로 거부한다.

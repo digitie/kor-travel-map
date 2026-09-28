@@ -77,7 +77,10 @@ class EvidenceRelation:
 
     name: str
     #: `to_jsonb(row)::text`를 PK 순서로 내는 SELECT. **정렬이 규약의 일부다** —
-    #: 순서가 다르면 같은 내용이 다른 SHA-256을 낸다.
+    #: 순서가 다르면 같은 내용이 다른 SHA-256을 낸다. text 키(`principal_id`)는
+    #: `COLLATE "C"`(byte 순서)로 고정한다 — DB default collation을 따르면 glibc
+    #: 공용 instance에서 하이픈 섞인 ID가 재정렬되고 libc 버전이 오르면 digest가
+    #: 바뀐다(ADR-103). uuid·정수 키는 collation과 무관하다.
     select_sql: str
 
 
@@ -128,13 +131,13 @@ EVIDENCE_RELATIONS: Final[tuple[EvidenceRelation, ...]] = (
     EvidenceRelation(
         "feature_reference_reconciliation_acks",
         "SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks"
-        " AS ack ORDER BY ack.event_id, ack.principal_id",
+        ' AS ack ORDER BY ack.event_id, ack.principal_id COLLATE "C"',
     ),
     EvidenceRelation(
         "feature_reference_reconciliation_subscriptions",
         "SELECT to_jsonb(subscription)::text FROM"
         " ops.feature_reference_reconciliation_subscriptions"
-        " AS subscription ORDER BY subscription.principal_id",
+        ' AS subscription ORDER BY subscription.principal_id COLLATE "C"',
     ),
 )
 

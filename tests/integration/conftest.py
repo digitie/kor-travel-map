@@ -3,7 +3,8 @@
 ``docs/test-strategy.md §4.1`` 명세 구현:
 
 - ``pg_container`` — session-scope source image digest가 고정된
-  ``postgis/postgis:16-3.5-alpine``.
+  ``postgis/postgis:16-3.5-alpine`` (기본 lane). ``KTM_TEST_POSTGIS_IMAGE``가
+  주어지면 그 digest(공용 instance의 glibc lane, ADR-103).
 - ``pg_engine`` — session-scope ``AsyncEngine`` + 4 schema + 3 extension 생성.
 - ``feature_schema`` — session-scope (현재는 placeholder, Sprint 2 실 DDL 박힘).
 - ``pg_session`` — per-test ``AsyncSession`` + 자동 rollback.
@@ -35,6 +36,7 @@ from tests.integration._application_300_bootstrap import (
     _TEST_RUNTIME_PASSWORD,
     upgrade_head_with_application_300_bootstrap,
 )
+from tests.integration._postgis_image import resolve_postgis_image
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -47,13 +49,22 @@ _SCHEMAS: tuple[str, ...] = ("feature", "provider_sync", "ops", "x_extension")
 _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
-# The immutable baseline receipt was materialized from this exact image.  A
+# The immutable baseline receipt was materialized from the alpine digest.  A
 # floating tag can move to a new PostGIS/PostgreSQL patch build with different
 # locale, role settings, or catalog definitions and make a fresh-300 test fail
-# before it reaches the application assertions.
-_POSTGIS_IMAGE: str = (
-    "postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c"
-)
+# before it reaches the application assertions.  CI also runs the whole suite on
+# the n150 shared instance's glibc digest (ADR-103); the lane picks it with
+# ``KTM_TEST_POSTGIS_IMAGE``, which must be a digest reference or the fixture
+# fails.  The single source of both digests is ``_postgis_image.py``.
+
+
+def postgis_image() -> str:
+    """이번 lane의 PostGIS 이미지. override가 모양이 틀리면 skip이 아니라 실패한다."""
+
+    try:
+        return resolve_postgis_image()
+    except ValueError as exc:
+        pytest.fail(str(exc), pytrace=False)
 
 
 def _import_testcontainers() -> Any | None:
@@ -75,6 +86,7 @@ def pg_container() -> Iterator[Any]:
 
     Docker / testcontainers 미설치 환경에서는 ``pytest.skip``.
     """
+    image = postgis_image()
     container_cls = _import_testcontainers()
     if container_cls is None:
         pytest.skip(
@@ -82,7 +94,7 @@ def pg_container() -> Iterator[Any]:
             "integration tests."
         )
     try:
-        container = container_cls(_POSTGIS_IMAGE)
+        container = container_cls(image)
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:

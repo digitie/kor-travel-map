@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-103.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-104.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -116,6 +116,7 @@
 | ADR-100 | DB LOGIN role를 3개(migrator/api_runtime/dagster_runtime)에서 1개(`ktm_feature_service`)로 통합한다 | [100-single-login-role-collapse.md](100-single-login-role-collapse.md) |
 | ADR-101 | `300`~`313`을 단일 baseline revision `400`으로 접고, 배포 봉인을 걷어낸다 (전제·재접기 절차는 ADR-102로 superseded) | [101-single-baseline-revision-400.md](101-single-baseline-revision-400.md) |
 | ADR-102 | 배포는 마이그레이션 전진이다: DB를 보존하고, 배포 봉인과 attestation 체인을 걷어낸다 | [102-migrate-forward-deploys-and-seal-removal.md](102-migrate-forward-deploys-and-seal-removal.md) |
+| ADR-103 | n150 prod에서 Map DB는 공용 PostgreSQL instance 안의 전용 DATABASE다 (ADR-045 개정) | [103-map-databases-on-the-shared-instance.md](103-map-databases-on-the-shared-instance.md) |
 
 ## 새 ADR 작성 규약
 
