@@ -77,6 +77,10 @@ api = apis[0]
 # 시작한다(`_admin_fixture_name` / `E2E suppressed {weather,price} {run_id}`). `feature_id`는
 # uuid라 run_id 문자열과 비교할 수 없다. alias·request 두 줄은 옛 주소 체계의 잔재까지
 # 넓게 센다(지금 스키마에서는 대개 0이다). run_id는 SQL 문자열이 아니라 bind parameter다.
+# fixture는 feature 밖에도 행을 남긴다 — `provider_sync.provider_datasets`(key
+# `admin-live-{run_id}-{kind}`, `_dataset_key`)와 그 아래 source 계보·refresh policy. 그 계보는
+# 모두 dataset에 매달리고 fixture cleanup도 dataset을 맨 마지막에 지우므로, dataset 한 줄을
+# 세면 dataset 쪽 잔여물이 드러난다. `starts_with`는 run_id의 `%`·`_`를 글자 그대로 본다.
 COUNT_PROGRAM = r'''
 import asyncio, json, os, sys
 
@@ -93,6 +97,8 @@ UNION ALL SELECT 'feature_requests', count(*) FROM ops.feature_requests
  WHERE resolved_feature_id IN (
    SELECT feature_id FROM feature.features
     WHERE name LIKE '%' || CAST($1 AS text) || '%')
+UNION ALL SELECT 'owned_datasets', count(*) FROM provider_sync.provider_datasets
+ WHERE starts_with(dataset_key, 'admin-live-' || CAST($1 AS text) || '-')
 """
 
 
@@ -125,8 +131,8 @@ if proc.returncode != 0:
         f"잔여물 측정 실패(API 컨테이너 exit {proc.returncode}): {proc.stderr.strip()[-400:]}"
     )
 residue = json.loads(proc.stdout)
-if len(residue) != 4:
-    raise SystemExit(f"잔여물 측정 결과가 네 줄이 아니다 — 판정 불가: {residue}")
+if len(residue) != 5:
+    raise SystemExit(f"잔여물 측정 결과가 다섯 줄이 아니다 — 판정 불가: {residue}")
 if any(residue.values()):
     raise SystemExit(f"잔여물이 있다 — clear-blocked 금지: {residue}")
 

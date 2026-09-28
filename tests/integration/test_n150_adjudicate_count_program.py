@@ -8,6 +8,9 @@ stdin으로 프로그램을, argv로 `run_id`를 준다. `+asyncpg` 제거, READ
 
 0은 이 판정에서 **위험한 방향**이다 — 늘 0을 내는 프로그램이면 `adjudicate.sh`가 잔여물이
 남은 lane을 `clear-blocked`로 지운다. 그래서 세어야 할 행을 실제로 심은 양성 대조가 있다.
+
+"아무것도 쓰지 못한다"도 주장이 아니라 검사다. 프로그램은 schema owner로 prod Map DB에 붙으므로,
+같은 transaction wrapper에 쓰기 SQL을 넣어 돌려 거부되고 아무것도 남지 않는지 본다.
 """
 
 from __future__ import annotations
@@ -46,7 +49,26 @@ _READ_COLUMNS: dict[str, tuple[str, ...]] = {
     "feature.features": ("feature_id", "name"),
     "feature.feature_aliases": ("alias",),
     "ops.feature_requests": ("resolved_feature_id",),
+    "provider_sync.provider_datasets": ("dataset_key",),
 }
+
+#: 프로그램이 내는 다섯 줄의 이름.
+_RESIDUE_KEYS = {
+    "owned_features",
+    "any_acceptance_prefix",
+    "acceptance_aliases",
+    "feature_requests",
+    "owned_datasets",
+}
+
+#: 쓰기 대조에서 프로그램의 `SQL`을 대신하는 문장 — 판정 프로그램이 세는 이름으로 한 행을 넣는다.
+_WRITE_SQL = (
+    'SQL = """\n'
+    "INSERT INTO feature.features (feature_id, name)\n"
+    "VALUES (gen_random_uuid(), 'E2E write probe ' || CAST($1 AS text))\n"
+    "RETURNING 'inserted', 1\n"
+    '"""\n'
+)
 
 
 def _count_program() -> str:
@@ -56,10 +78,12 @@ def _count_program() -> str:
     return match.group(1)
 
 
-def _run(dsn: str, run_id: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    dsn: str, run_id: str, program: str | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-I", "-B", "-", run_id],
-        input=_count_program(),
+        input=_count_program() if program is None else program,
         env={"PATH": os.environ.get("PATH", ""), "KOR_TRAVEL_MAP_PG_DSN": dsn},
         check=False,
         capture_output=True,
@@ -79,15 +103,25 @@ def service_dsn(pg_container: Any, migrated_engine: AsyncEngine) -> str:
     ).render_as_string(hide_password=False)
 
 
-def _fixture_name(run_id: str) -> str:
-    """D2 fixture가 API-owned row에 붙이는 이름. 잔여물 소유권 키의 정본이다."""
-
+def _fixture_module() -> Any:
     spec = importlib.util.spec_from_file_location("admin_feature_live_fixture", _FIXTURE_MODULE)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return str(module._admin_fixture_name(run_id))
+    return module
+
+
+def _fixture_name(run_id: str) -> str:
+    """D2 fixture가 API-owned row에 붙이는 이름. 잔여물 소유권 키의 정본이다."""
+
+    return str(_fixture_module()._admin_fixture_name(run_id))
+
+
+def _fixture_dataset_key(run_id: str, kind: str) -> str:
+    """D2 fixture가 만드는 provider dataset key(`_dataset_key`)의 정본."""
+
+    return str(_fixture_module()._dataset_key(run_id, kind))
 
 
 def _read_column_types(admin_dsn: str) -> dict[str, list[tuple[str, str]]]:
@@ -166,6 +200,16 @@ def residue_probe_dsn(pg_container: Any, service_dsn: str) -> Iterator[str]:
                 "VALUES (%s), (%s), (NULL)",
                 (owned, other),
             )
+            # 이웃은 다른 run의 fixture dataset과 운영 dataset 하나.
+            connection.execute(
+                "INSERT INTO provider_sync.provider_datasets (dataset_key) "
+                "VALUES (%s), (%s), (%s)",
+                (
+                    _fixture_dataset_key(_RUN_ID, "weather"),
+                    _fixture_dataset_key("e2e-run-third-probe", "price"),
+                    "kma-short-forecast",
+                ),
+            )
         yield make_url(service_dsn).set(database=probe_database).render_as_string(
             hide_password=False
         )
@@ -190,6 +234,7 @@ def test_count_program_counts_seeded_residue_for_its_run_id_only(
         "any_acceptance_prefix": 1,
         "acceptance_aliases": 1,
         "feature_requests": 1,
+        "owned_datasets": 1,
     }
     # 다른 run의 소유분은 0이다 — run_id와 무관하게 세는 프로그램도 빨갛다. 접두 두 줄은
     # run과 무관하게 넓게 센다.
@@ -200,24 +245,44 @@ def test_count_program_counts_seeded_residue_for_its_run_id_only(
         "any_acceptance_prefix": 1,
         "acceptance_aliases": 1,
         "feature_requests": 0,
+        "owned_datasets": 0,
     }
 
 
-def test_count_program_reads_four_residue_rows_as_the_service_login(service_dsn: str) -> None:
+def test_count_program_transaction_cannot_write(residue_probe_dsn: str) -> None:
+    """같은 wrapper(READ ONLY, `SET LOCAL ROLE` schema owner, ROLLBACK)에 쓰기를 넣으면 거부된다.
+
+    owner는 이 표에 INSERT 권한이 있다 — 막는 것은 transaction 모드뿐이다. `readonly=True`를
+    빼면 INSERT가 성공해 exit 0이고, ROLLBACK까지 COMMIT으로 바꾸면 행이 남는다. 둘 다 빨갛다.
+    """
+
+    program = re.sub(
+        r'^SQL = """\n.*?^"""\n', lambda _: _WRITE_SQL, _count_program(), flags=re.S | re.M
+    )
+    assert program != _count_program()
+    assert "INSERT INTO feature.features" in program
+    write_run = "e2e-run-write-probe"
+    proc = _run(residue_probe_dsn, write_run, program)
+    assert proc.returncode != 0, proc.stdout
+    assert "read-only transaction" in proc.stderr
+    assert proc.stdout == ""
+    # 거부된 쓰기는 아무것도 남기지 않는다(프로그램 자신으로 센다).
+    after = _run(residue_probe_dsn, write_run)
+    assert after.returncode == 0, after.stderr[-800:]
+    assert json.loads(after.stdout)["owned_features"] == 0
+
+
+def test_count_program_reads_five_residue_rows_as_the_service_login(service_dsn: str) -> None:
     assert service_dsn.startswith("postgresql+asyncpg://")
     # 실제 migrated 스키마에서 bind parameter 타입 추론과 권한 경로가 도는지 본다.
     proc = _run(service_dsn, _RUN_ID)
     assert proc.returncode == 0, proc.stderr[-800:]
     residue = json.loads(proc.stdout)
-    assert set(residue) == {
-        "owned_features",
-        "any_acceptance_prefix",
-        "acceptance_aliases",
-        "feature_requests",
-    }
+    assert set(residue) == _RESIDUE_KEYS
     assert all(isinstance(value, int) and value >= 0 for value in residue.values())
     assert residue["owned_features"] == 0
     assert residue["feature_requests"] == 0
+    assert residue["owned_datasets"] == 0
 
 
 def test_count_program_fails_loudly_without_the_dsn() -> None:
