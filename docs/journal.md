@@ -59,6 +59,12 @@ Manager ADR-53). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽
 - Manager ADR 번호 정정: #433이 ADR-52(공용 instance의 `init`·exec probe·grace)가 되어, 이 이동의 Manager ADR은
   **ADR-53**이다. ADR-103 `관련`, `CLAUDE.md`, `integration-map.md`, `deploy.md`, `rest-api.md`와 이 절·resume을
   고쳤다. main의 docs 커밋 #1286 위로 리베이스했다(journal·resume 충돌은 양쪽을 모두 남겼다).
+  - 리베이스 뒤(`8b0941a8`): GitHub `postgis-only.yml` dispatch(run 36450175854) glibc **1162 passed / 12 skipped**,
+    alpine **1156 passed / 18 skipped**. n150: ruff 초록, `mypy --strict` 일곱 대상 초록(공유 venv에 dev extra
+    `types-PyYAML`이 없어 scratch target으로 보탰다), lint-imports 4 kept. unit+lint 3044 passed / 15 skipped /
+    15 failed — 14건은 main(`90b1e5e0`)에서도 같은 node로 실패한다(node_modules 없는 체크아웃의 frontend 검증 13,
+    `test_lifecycle_preserves_signal_exit_status[INT-130]`), 1건(`test_orchestrator_guardian_lock_…`)은 단독
+    재실행에서 passed. gate mirror·mutation battery 17 passed.
 
 ## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
 
