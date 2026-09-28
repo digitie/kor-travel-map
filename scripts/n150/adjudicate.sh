@@ -52,35 +52,77 @@ import json, os, pathlib, subprocess, sys
 
 out, stamp, blocked_path = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
 blocked = json.loads(blocked_path.read_bytes())
+run_id = blocked["run_id"]
+
+# Map API 컨테이너는 execution identity와 잔여물 측정이 함께 쓴다. 정확히 하나여야 한다 —
+# 둘 이상이면 어느 쪽의 DB·image를 본 것인지 판정 기록이 말하지 못한다.
+apis = subprocess.run(
+    ["docker", "ps", "-q", "--filter",
+     f"label=com.docker.compose.service={os.environ['E2E_C7_MAP_API_SERVICE']}"],
+    check=True, capture_output=True, text=True, timeout=60,
+).stdout.split()
+if len(apis) != 1:
+    raise SystemExit(f"Map API 컨테이너가 정확히 하나가 아니다({len(apis)}개) — 판정 불가")
+api = apis[0]
+
+# 잔여물은 **API 컨테이너 안에서** 그 컨테이너 자신의 DSN으로 센다. Postgres instance의
+# 이름·port·superuser를 여기 적지 않는다 — DB가 어느 instance에 있든(ADR-103) API가
+# 붙는 곳이 곧 판정 대상이다. 비밀은 호스트 argv를 건너지 않고(컨테이너 env에서 읽는다),
+# READ ONLY transaction을 ROLLBACK으로 끝내므로 이 도구는 아무것도 쓰지 못한다.
+# `ktm_feature_service`는 schema owner를 SET TRUE로 받는다(Map bootstrap).
+#
 # 소유권 키는 **name**이다 — fixture가 만드는 모든 행 이름에 run_id가 들어가고 `E2E `로
 # 시작한다(`_admin_fixture_name` / `E2E suppressed {weather,price} {run_id}`). `feature_id`는
 # uuid라 run_id 문자열과 비교할 수 없다. alias·request 두 줄은 옛 주소 체계의 잔재까지
-# 넓게 센다(지금 스키마에서는 대개 0이다).
-run_id = blocked["run_id"]
-run_literal = "'" + run_id.replace("'", "''") + "'"
-owned_by_run = f"name LIKE '%' || {run_literal} || '%'"
-sql = (
-    "SELECT 'owned_features', count(*) FROM feature.features "
-    f"WHERE {owned_by_run} "
-    "UNION ALL SELECT 'any_acceptance_prefix', count(*) FROM feature.features "
-    "WHERE name LIKE 'E2E %' OR name LIKE 'e2e_live_acceptance::%' "
-    "UNION ALL SELECT 'acceptance_aliases', count(*) FROM feature.feature_aliases "
-    "WHERE alias LIKE 'e2e_live_acceptance::%' "
-    "UNION ALL SELECT 'feature_requests', count(*) FROM ops.feature_requests "
-    "WHERE resolved_feature_id IN (SELECT feature_id FROM feature.features "
-    f"WHERE {owned_by_run});"
-)
+# 넓게 센다(지금 스키마에서는 대개 0이다). run_id는 SQL 문자열이 아니라 bind parameter다.
+COUNT_PROGRAM = r'''
+import asyncio, json, os, sys
+
+import asyncpg
+
+SQL = """
+SELECT 'owned_features', count(*) FROM feature.features
+ WHERE name LIKE '%' || CAST($1 AS text) || '%'
+UNION ALL SELECT 'any_acceptance_prefix', count(*) FROM feature.features
+ WHERE name LIKE 'E2E %' OR name LIKE 'e2e_live_acceptance::%'
+UNION ALL SELECT 'acceptance_aliases', count(*) FROM feature.feature_aliases
+ WHERE alias LIKE 'e2e_live_acceptance::%'
+UNION ALL SELECT 'feature_requests', count(*) FROM ops.feature_requests
+ WHERE resolved_feature_id IN (
+   SELECT feature_id FROM feature.features
+    WHERE name LIKE '%' || CAST($1 AS text) || '%')
+"""
+
+
+async def main(run_id):
+    scheme, sep, rest = os.environ["KOR_TRAVEL_MAP_PG_DSN"].partition("://")
+    if scheme == "postgresql+asyncpg":
+        scheme = "postgresql"
+    connection = await asyncpg.connect(scheme + sep + rest)
+    try:
+        transaction = connection.transaction(readonly=True)
+        await transaction.start()
+        try:
+            await connection.execute("SET LOCAL ROLE ktm_feature_schema_owner")
+            rows = await connection.fetch(SQL, run_id)
+        finally:
+            await transaction.rollback()
+    finally:
+        await connection.close()
+    print(json.dumps({str(row[0]): int(row[1]) for row in rows}))
+
+
+asyncio.run(main(sys.argv[1]))
+'''
 proc = subprocess.run(
-    ["docker", "exec", "-i", "kor-travel-map-postgres", "psql", "-U", "kor_travel_map",
-     "-p", "12700", "-d", "kor_travel_map", "-t", "-A", "-F", " ", "-v", "ON_ERROR_STOP=1"],
-    input=sql, check=False, capture_output=True, text=True, timeout=120,
+    ["docker", "exec", "-i", api, "python", "-I", "-B", "-", run_id],
+    input=COUNT_PROGRAM, check=False, capture_output=True, text=True, timeout=120,
 )
 if proc.returncode != 0:
-    raise SystemExit(f"잔여물 측정 실패(psql exit {proc.returncode}): {proc.stderr.strip()[-400:]}")
-residue = {}
-for line in proc.stdout.strip().splitlines():
-    name, _, count = line.strip().partition(" ")
-    residue[name] = int(count)
+    raise SystemExit(
+        f"잔여물 측정 실패(API 컨테이너 exit {proc.returncode}): {proc.stderr.strip()[-400:]}"
+    )
+residue = json.loads(proc.stdout)
 if len(residue) != 4:
     raise SystemExit(f"잔여물 측정 결과가 네 줄이 아니다 — 판정 불가: {residue}")
 if any(residue.values()):
@@ -88,11 +130,6 @@ if any(residue.values()):
 
 # 현재 execution identity는 env와 실측 image에서 유도한다(손으로 적지 않는다). 필드는
 # BLOCKED v4의 세 필드와 같다.
-api = subprocess.run(
-    ["docker", "ps", "-q", "--filter",
-     f"label=com.docker.compose.service={os.environ['E2E_C7_MAP_API_SERVICE']}"],
-    check=True, capture_output=True, text=True, timeout=60,
-).stdout.split()[0]
 api_image = subprocess.run(
     ["docker", "inspect", api, "--format", "{{.Image}}"],
     check=True, capture_output=True, text=True, timeout=60,

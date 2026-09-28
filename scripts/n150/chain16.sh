@@ -80,6 +80,8 @@ record = json.loads(subprocess.run(["docker","inspect","--",api],check=True,
                                    capture_output=True,text=True).stdout)[0]
 runtime_env = dict(item.partition("=")[::2] for item in record["Config"]["Env"])
 proc_env = dict(os.environ); proc_env.update(runtime_env)
+# repin 3단계가 fixture DSN을 이 API의 DSN에서 유도하므로 지금은 같은 값이다. 대입은 남긴다 —
+# preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 코드로 말한다.
 proc_env["KOR_TRAVEL_MAP_PG_DSN"] = os.environ["E2E_ADMIN_FEATURE_FIXTURE_PG_DSN"]
 env_args = [v for n in sorted(runtime_env) for v in ("--env", n)]
 cmd = ["docker","create","--pull=never","--network","host","--read-only",

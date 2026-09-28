@@ -7,9 +7,31 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 | --- | --- |
 | `chain17.sh` | 전체 사이클: pair 계약 preflight → 회전 → Manager rebuild → `chain16.sh` |
 | `chain16.sh` | 후반부: C7 executor 이미지 → `repin.sh` → M01 ACL preflight → D1 → lane 정리 → D2 |
-| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신 |
+| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, D2 fixture DSN 유도 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
 | `adjudicate.sh` | rebuild가 가로지른 v4 BLOCKED lane을 잔여물 0 실측 뒤 `clear-blocked`로 정리 (chain16 lane 정리 단계) |
+
+## DB에 닿는 법 — instance를 적지 않는다
+
+스크립트에는 Map DB instance의 이름·port·superuser가 없다(ADR-103 — prod Map DB는 전용
+instance에서 공용 instance로 옮긴다). DB 접근은 **실행 중인 Map API 컨테이너**
+(`E2E_C7_MAP_API_SERVICE` 라벨로 찾는다, 정확히 하나)에서 유도한다.
+`tests/unit/test_n150_scripts_have_no_instance_literals.py`가 이것을 지킨다.
+
+- `adjudicate.sh`의 잔여물 네 줄은 그 컨테이너 **안에서** `docker exec -i <api> python -I -B -`로
+  센다. 프로그램은 컨테이너 자신의 `KOR_TRAVEL_MAP_PG_DSN`(`+asyncpg`를 떼고)으로 붙어
+  `READ ONLY` transaction에서 `SET LOCAL ROLE ktm_feature_schema_owner` 뒤 세고 `ROLLBACK`한다.
+  `run_id`는 bind parameter다. 비밀은 호스트 argv를 건너지 않고, 도구는 아무것도 쓰지 못한다.
+- `repin.sh` 3단계는 `/root/.d2-live.env`의 `E2E_ADMIN_FEATURE_FIXTURE_PG_DSN` 한 줄을 그
+  컨테이너의 `KOR_TRAVEL_MAP_PG_DSN`으로 바꾼다(2026-09-28 실측으로 두 값은 사용자·host:port·DB·
+  비밀번호가 같다). helper가 `docker inspect`를 직접 불러 값을 메모리에서만 다루고 출력하지 않는다.
+  쓰기 전에 사용자 = `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE`, 경로 =
+  `/$E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`, scheme ∈ {`postgresql`, `postgresql+asyncpg`}
+  (D2 러너 `validate_env`와 같다)이고 따옴표 없이 source할 수 있는 문자만 있는지 본다. 파일은 같은
+  디렉터리의 0600 임시 파일에 써서 rename하고, 그 키가 정확히 한 줄로 바뀌었는지 센다.
+  DB가 어느 instance로 옮겨 가든 다음 주기의 repin이 그 값을 따라간다.
+- `chain16.sh`의 M01 ACL preflight는 여전히 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮는다.
+  repin 뒤에는 같은 값이라 결과가 같다 — preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 남긴다.
 
 ## 설치
 
