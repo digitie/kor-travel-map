@@ -138,6 +138,43 @@ validate_env() {
     die "Playwright executor must be an immutable image ID"
 }
 
+# fixture DSN은 이 러너가 찾은 API 런타임이 붙은 **바로 그 DB**를 가리켜야 한다(ADR-103).
+# n150에서는 repin 3단계가 매 주기 API DSN에서 유도하지만 그것은 사이클의 관례일 뿐이다 —
+# DB를 옮기거나 되돌린 직후 repin 없이 러너만 돌리면 fixture는 API가 읽지 않는 DB 사본을
+# 심고 고치며, 그 잔여물은 판정(`adjudicate.sh`)이 세지 못한다. 확인 키 셋(DB 이름·login·
+# alembic revision)은 두 instance에서 똑같이 맞으므로 막지 못한다. 그래서 소비자인 여기서
+# 사용자·비밀번호를 뺀 나머지(host·port·DB·query)를 API 컨테이너의 `KOR_TRAVEL_MAP_PG_DSN`과
+# 대조한다. 값은 비밀이다: helper가 `docker inspect`를 직접 불러 메모리에서만 비교하고 아무것도
+# 출력하지 않는다.
+validate_fixture_target() {
+  python3 -I -B - "$API_CONTAINER_ID" >/dev/null 2>&1 <<'PY' ||
+import json
+import os
+import subprocess
+import sys
+from urllib.parse import urlsplit
+
+record = json.loads(
+    subprocess.run(
+        ["docker", "inspect", "--", sys.argv[1]],
+        check=True, capture_output=True, text=True, timeout=60,
+    ).stdout
+)[0]
+runtime = dict(item.partition("=")[::2] for item in record["Config"]["Env"])
+
+
+def target(dsn):
+    parts = urlsplit(dsn)
+    return parts.hostname, parts.port, parts.path, parts.query
+
+
+fixture = target(os.environ["E2E_ADMIN_FEATURE_FIXTURE_PG_DSN"])
+api = target(runtime["KOR_TRAVEL_MAP_PG_DSN"])
+sys.exit(0 if fixture[0] and fixture[2] not in ("", "/") and fixture == api else 1)
+PY
+    die "fixture DSN does not target the Map API runtime database"
+}
+
 validate_runtime() {
   require_command docker
   require_command flock
@@ -158,6 +195,7 @@ validate_runtime() {
       "$E2E_C7_MAP_API_SERVICE" 2>/dev/null
   )" || die "Map API compose lookup failed"
   [[ "$API_CONTAINER_ID" =~ ^[0-9a-f]{64}$ ]] || die "Map API container identity is invalid"
+  validate_fixture_target
   API_IMAGE_ID="$(docker inspect --format '{{.Image}}' "$API_CONTAINER_ID" 2>/dev/null)" ||
     die "Map API image lookup failed"
   [[ "$API_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || die "Map API image identity is invalid"

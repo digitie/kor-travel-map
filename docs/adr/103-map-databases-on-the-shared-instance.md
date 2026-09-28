@@ -26,3 +26,5 @@ loader가 다시 쓸 때까지 비어 있음. bootstrap 동안 instance admin �
 - `scripts/n150/adjudicate.sh`는 Map API 컨테이너 안에서 읽기 전용으로 세고,
   `scripts/n150/repin.sh`는 D2 fixture DSN을 그 컨테이너의 DSN에서 유도한다. 두 스크립트에는
   instance 이름·port·superuser가 없다(`tests/unit/test_n150_scripts_have_no_instance_literals.py`).
+- D2 러너는 lock을 잡기 전에 fixture DSN이 API 컨테이너의 DSN과 같은 DB(host·port·DB)를
+  가리키는지 대조한다 — 이동·롤백 직후 repin 없이 돈 러너가 버려진 사본을 고치지 않게 한다.
