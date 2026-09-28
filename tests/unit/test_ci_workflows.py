@@ -8,6 +8,12 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.integration._postgis_image import (
+    ALPINE_POSTGIS_IMAGE,
+    POSTGIS_IMAGE_ENV,
+    SHARED_GLIBC_POSTGIS_IMAGE,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -70,8 +76,18 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert upload["with"]["path"] == "coverage-unit"
 
     integration = jobs["integration"]
-    assert integration["name"] == "pytest integration (PostGIS)"
+    assert integration["name"] == "pytest integration (PostGIS, ${{ matrix.lane }})"
     assert integration["needs"] == "unit"
+    # 두 lane이 같은 suite를 돈다(ADR-103). digest의 정본은 `_postgis_image.py`다 —
+    # 워크플로가 그 값과 갈리면 glibc lane이 공용 instance가 아닌 이미지를 시험한다.
+    assert integration["strategy"]["fail-fast"] is False
+    assert integration["strategy"]["matrix"] == {
+        "include": [
+            {"lane": "alpine", "image": ALPINE_POSTGIS_IMAGE},
+            {"lane": "glibc", "image": SHARED_GLIBC_POSTGIS_IMAGE},
+        ]
+    }
+    assert integration["env"] == {POSTGIS_IMAGE_ENV: "${{ matrix.image }}"}
     integration_steps = _steps_by_name(integration)
     download = integration_steps["Download unit coverage data"]
     assert download["with"]["name"] == upload["with"]["name"]
@@ -88,7 +104,8 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert "--cov-fail-under=0" not in integration_test
     combined_upload = integration_steps["Upload combined coverage XML"]
     assert "!cancelled()" in combined_upload["if"]
-    assert combined_upload["with"]["name"] == "coverage-xml"
+    # upload-artifact@v4는 같은 이름의 두 번째 업로드를 거부한다 — leg마다 이름이 다르다.
+    assert combined_upload["with"]["name"] == "coverage-xml-${{ matrix.lane }}"
     assert combined_upload["with"]["path"] == "coverage.xml"
     assert combined_upload["with"]["if-no-files-found"] == "ignore"
 
@@ -119,7 +136,8 @@ def test_branch_protection_runbook_tracks_t203_required_checks() -> None:
         "pytest (Python 3.11)",
         "pytest (Python 3.12)",
         "pytest (Python 3.13)",
-        "pytest integration (PostGIS)",
+        "pytest integration (PostGIS, alpine)",
+        "pytest integration (PostGIS, glibc)",
         "pytest fixture replay",
         "openapi-drift",
         "type-check + next build (Node 20)",

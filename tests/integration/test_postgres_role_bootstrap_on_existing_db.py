@@ -22,7 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from tests.integration.conftest import _POSTGIS_IMAGE
+from tests.integration.conftest import postgis_image
 
 if TYPE_CHECKING:
     from typing import Any
@@ -42,14 +42,17 @@ def pg_container() -> Iterator[Any]:
     role/schema와 virgin bootstrap precondition이 서로 오염된다. 같은 immutable
     PostGIS image를 쓰되 별도 cluster에서만 fresh target을 만들어, 이 테스트의
     cluster-wide mutation과 cleanup이 다른 integration fixture에 닿지 않게 한다.
+    이미지는 lane의 것이다 — glibc lane에서는 공용 instance 이미지에서 bootstrap을
+    instance superuser로 돌린다(ADR-103, S1 리허설).
     """
 
+    image = postgis_image()
     try:
         from testcontainers.postgres import PostgresContainer
     except ImportError:
         pytest.skip("testcontainers not installed — integration tests are unavailable")
     try:
-        container = PostgresContainer(_POSTGIS_IMAGE)
+        container = PostgresContainer(image)
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
 

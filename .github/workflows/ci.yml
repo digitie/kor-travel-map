@@ -2,8 +2,9 @@ name: ci
 
 # pytest unit + integration + fixture replay + coverage.
 # - unit: Python 3.11/3.12/3.13 matrix. Docker 불필요.
-# - integration: Python 3.13 단일 job. testcontainers가 PostGIS 컨테이너 자동 부팅
-#   (`postgis/postgis:16-3.5-alpine`, ADR-007).
+# - integration: Python 3.13, lane 두 개(alpine·glibc). testcontainers가 PostGIS
+#   컨테이너 자동 부팅(`postgis/postgis:16-3.5-alpine` digest, ADR-007; glibc lane은
+#   n150 공용 instance digest, ADR-103).
 # - fixture replay: `tests/fixtures/`가 생기면 항상 별도 job에서 실행한다.
 # - coverage: ADR-032 단계적 상향 schedule, 현재 fail_under=80 (pyproject.toml).
 
@@ -109,9 +110,25 @@ jobs:
           retention-days: 7
 
   integration:
-    name: pytest integration (PostGIS)
+    # 두 lane이 같은 suite를 돈다(ADR-103). alpine은 immutable baseline을 만든
+    # musl 이미지, glibc는 n150 공용 instance(`kor-travel-shared-postgres`)가 실제로
+    # 도는 digest다 — prod collation(`en_US.utf8`)과 instance superuser bootstrap을
+    # CI가 미리 본다. 두 digest의 정본은 `tests/integration/_postgis_image.py`이고
+    # `tests/unit/test_ci_workflows.py`가 여기 값과 대조한다. main에 required check가
+    # 없으므로 두 leg가 모두 초록이어야 한다는 것은 PR 리뷰가 확인한다.
+    name: pytest integration (PostGIS, ${{ matrix.lane }})
     needs: unit
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: alpine
+            image: postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c
+          - lane: glibc
+            image: postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40
+    env:
+      KTM_TEST_POSTGIS_IMAGE: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,7 +182,9 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-xml
+          # leg마다 이름이 달라야 한다 — upload-artifact@v4는 같은 이름의 두 번째
+          # 업로드를 거부한다. 이 artifact를 받는 job은 없다.
+          name: coverage-xml-${{ matrix.lane }}
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 7

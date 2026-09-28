@@ -2,8 +2,9 @@
 
 기본 conftest PostGIS는 alpine(musl)이라 DB default collation이 byte order와
 사실상 같아, ``COLLATE "C"``를 제거하는 변이가 테스트를 전부 통과한 채
-생존한다(적대 리뷰 실측). 본 모듈은 **glibc 이미지**(``postgis/postgis:16-3.5``,
-default collation ``en_US.utf8``)를 별도로 띄워:
+생존한다(적대 리뷰 실측). 본 모듈은 **glibc 이미지**(n150 공용 instance와 같은
+digest — ``_postgis_image.SHARED_GLIBC_POSTGIS_IMAGE``, default collation
+``en_US.utf8``, ADR-103)를 별도로 띄워:
 
 ① keyset 페이지 순서 == checksum canonical 정렬 == UTF-8 byte 순서를 단언하고
    (COLLATE 제거 변이는 glibc에서 en_US 순서로 갈라져 여기서 죽는다),
@@ -30,6 +31,7 @@ from kortravelmap.infra.feature_alias_map_repo import (
     compute_feature_alias_map_checksum,
     fetch_feature_alias_map_page,
 )
+from tests.integration._postgis_image import SHARED_GLIBC_POSTGIS_IMAGE
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -38,7 +40,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-_GLIBC_POSTGIS_IMAGE: Final = "postgis/postgis:16-3.5"
+# floating tag가 아니라 공용 instance가 실제로 도는 digest다 — tag는 같은 이름으로
+# 다른 glibc·PostgreSQL 빌드를 가리킬 수 있다.
+_GLIBC_POSTGIS_IMAGE: Final = SHARED_GLIBC_POSTGIS_IMAGE
 
 # 리뷰 보고의 판별 세트 수준 — ASCII 대/소문자·기호·비-ASCII가 byte 순서와
 # en_US 순서에서 서로 다르게 갈라진다. 전부 NFC(비-ASCII는 escape로 고정).
