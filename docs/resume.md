@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-28 — MP(Map DB 공용 이전의 Map 쪽 준비): 브랜치 `fix/shared-instance-readiness`
+
+**다음 한 작업: MP를 CI 두 leg(alpine·glibc) 초록 + 적대 리뷰로 머지 → n150 호스트 스크립트를 MP SHA에서
+0700 root로 재설치 → `/root/chain17.sh <MP_SHA> …`로 새 pair(MP + PinVi `c5be9eb4`)를 전용 12700 위에서
+회전·D1/D2 초록.** 그 뒤 Manager 창(MT·M2)에서 이동한다(ADR-103, Manager ADR-52).
+
+- `COLLATE "C"`: evidence export/backup twin, evidence restore, curation collection lock, cache target capture.
+  감사 뒤 그대로 둔 곳과 이유는 커밋 메시지(`fix: glibc-safe text orderings …`)에 있다.
+- CI `integration` 두 leg, 이미지 정본 `tests/integration/_postgis_image.py`.
+- `scripts/n150/adjudicate.sh`·`repin.sh`는 Map API 컨테이너에서 DB 접근을 유도한다. `/root` 사본은 MP 머지 뒤
+  재설치해야 한다(`scripts/n150/README.md` §설치, 0700 root, sha256 대조).
+- MP는 OpenAPI 스냅숏을 바꾸지 않는다 — PinVi pair 계약 preflight가 그대로 통과한다.
+
 ## 2026-09-28 (저녁) — transport 개명 완료, 공용 PG 재시작 원인, Map DB 공용 이전 착수
 
 **다음 한 작업: Map DB를 공용 PostgreSQL(11000)로 옮긴다(소유자 결정 C).** 명세·런북을 확정했고, 구현 1차

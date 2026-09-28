@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-28 — Map DB를 공용 instance로 옮기기 전에 Map 쪽에서 할 일(MP): glibc 정렬, 두 번째 CI lane, 유도된 DB 접근
+
+소유자가 Map의 두 DB를 공용 instance `kor-travel-shared-postgres`로 옮기기로 결정했다(결정 C, ADR-103 ·
+Manager ADR-52). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽 준비다. 창 전에 새 pair로 핀해야 한다.
+
+- **collation**: 공용 instance는 glibc 이미지(PG 16.9·PostGIS 3.5.2, `en_US.utf8`)다. alpine(musl)에서는 default
+  collation이 byte 순서와 같아서 순서가 digest·잠금·Python `sorted()` 비교에 들어가는 text 키가 지금까지 무방비였다.
+  evidence export와 backup twin(`principal_id`), evidence restore(lease 재구축·`FOR UPDATE`), curation collection
+  advisory lock, cache target source head `FOR KEY SHARE` capture와 member 조회에 `COLLATE "C"`를 걸었다.
+  - feature update scope 잠금은 일부러 두었다. DB 함수 `lock_feature_update_request_member_scopes`가 같은 default
+    collation 순서로 잠그므로, 한쪽에만 `COLLATE "C"`를 걸면 오히려 잠금 순서가 갈린다.
+  - 탐지기 `test_collation_sensitive_orderings_glibc.py`는 lane 이미지 위 최소 표면에서 `'a-b'`·`'ab'`·`'B'`·`'a'`를
+    흘린다. advisory lock 순서는 `search_path` 앞 schema에 같은 이름의 함수를 두어 기록하고, row lock 순서는
+    `INSERT … SELECT … FOR KEY SHARE`의 삽입 순서로 잰다. alpine lane에서는 skip, 공용 glibc digest에서는 판별력이
+    없으면 실패한다.
+- **CI**: `integration` job을 `lane: alpine`·`lane: glibc` 두 leg으로 나눴다. 이미지 정본은
+  `tests/integration/_postgis_image.py`(`KTM_TEST_POSTGIS_IMAGE`)다. 값이 있는데 digest 모양이 아니면 조용히
+  alpine으로 떨어지지 않고 실패한다. main에 required check가 없으므로 두 leg 초록은 리뷰가 확인한다.
+- **n150 스크립트**: `adjudicate.sh`는 Map API 컨테이너 안에서 그 컨테이너의 DSN으로 읽기 전용으로 세고,
+  `repin.sh` 3단계는 D2 fixture DSN을 그 DSN에서 유도한다. instance 이름·port·superuser 문자열은 없다.
+- n150 부하(load 16~17)에서 docker API가 60초를 넘겨 testcontainers가 `ReadTimeout`으로 죽는 일이 잦았다.
+  테스트 하네스에만 docker-py timeout을 늘리는 플러그인을 얹어 돌렸다(코드 변경 아님).
+
 ## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
 
 Map DB를 공용 인스턴스로 옮기는 계획을 검토하다가, 공용 인스턴스가 오늘 새벽 한 번이 아니라 67시간 동안 다섯 번
