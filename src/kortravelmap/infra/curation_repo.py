@@ -3423,7 +3423,12 @@ async def _lock_collection_keys(
     session: AsyncSession,
     collection_keys: Sequence[str],
 ) -> None:
-    """아직 생성되지 않은 collection까지 stable key 순서로 직렬화한다."""
+    """아직 생성되지 않은 collection까지 stable key 순서로 직렬화한다.
+
+    잠금 순서는 Python `sorted()`(codepoint = UTF-8 byte 순서)와 **같아야** 한다.
+    SQL 쪽 `ORDER BY`가 DB default collation을 따르면 glibc 공용 instance에서 두
+    순서가 갈린다 — 그래서 `COLLATE "C"`로 고정한다(ADR-103).
+    """
 
     normalized_keys = sorted(set(collection_keys))
     if not normalized_keys:
@@ -3439,7 +3444,7 @@ async def _lock_collection_keys(
             )
             FROM unnest(CAST(:collection_keys AS text[]))
                 AS requested(collection_key)
-            ORDER BY collection_key
+            ORDER BY collection_key COLLATE "C"
             """
         ),
         {"collection_keys": normalized_keys},

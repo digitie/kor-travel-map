@@ -195,15 +195,17 @@ LEFT JOIN LATERAL (
             AND ack.principal_id = lease.principal_id
       )
 ) AS prefix ON TRUE
-ORDER BY lease.principal_id
+ORDER BY lease.principal_id COLLATE "C"
 """
 
 #: lease 행을 **읽고 잠근다.** 무효화는 읽은 값(이전 holder·epoch)을 receipt에 실어야
-#: 하는데 `UPDATE ... RETURNING`으로는 이전 값을 읽을 수 없다.
+#: 하는데 `UPDATE ... RETURNING`으로는 이전 값을 읽을 수 없다. `principal_id`는 text라
+#: `COLLATE "C"`(byte 순서)로 잠금·receipt 순서를 고정한다 — DB default collation을
+#: 따르면 glibc 공용 instance에서 순서가 libc에 매인다(ADR-103).
 _READ_LEASES_SQL: Final[str] = (
     "SELECT principal_id, worker_id, lease_epoch"
     " FROM ops.feature_reference_reconciliation_leases"
-    " ORDER BY principal_id"
+    ' ORDER BY principal_id COLLATE "C"'
 )
 _LOCK_LEASES_SQL: Final[str] = f"{_READ_LEASES_SQL} FOR UPDATE"
 

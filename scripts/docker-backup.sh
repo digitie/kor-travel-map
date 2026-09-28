@@ -267,11 +267,11 @@ capture_evidence_jsonl \
   "$app_snapshot_id"
 capture_evidence_jsonl \
   feature_reference_reconciliation_acks \
-  "SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks AS ack ORDER BY ack.event_id, ack.principal_id" \
+  "SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks AS ack ORDER BY ack.event_id, ack.principal_id COLLATE \"C\"" \
   "$app_snapshot_id"
 capture_evidence_jsonl \
   feature_reference_reconciliation_subscriptions \
-  "SELECT to_jsonb(subscription)::text FROM ops.feature_reference_reconciliation_subscriptions AS subscription ORDER BY subscription.principal_id" \
+  "SELECT to_jsonb(subscription)::text FROM ops.feature_reference_reconciliation_subscriptions AS subscription ORDER BY subscription.principal_id COLLATE \"C\"" \
   "$app_snapshot_id"
 release_app_snapshot
 
