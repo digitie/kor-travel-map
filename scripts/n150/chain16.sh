@@ -26,6 +26,8 @@ FE=packages/kor-travel-map-admin/frontend
 NEW=/home/digitie/ktm-c7-$MAP
 R=/var/lib/kor-travel-map/admin-feature-live-acceptance
 D1ROOT=/home/digitie/d1-$TAG
+# D2 러너가 도는 compose project 디렉터리(`run-d2.sh`와 같은 곳).
+COMPOSE_DIR=/opt/kor-travel-docker-manager
 
 die() { echo "!! $1" >&2; exit 1; }
 say() { printf '\n===== %s =====\n' "$1"; }
@@ -63,8 +65,10 @@ say "D. repin (.d2-live.env)"
 
 say "E. M01 ACL preflight"
 set -a; . /root/.d2-live.env; set +a
-API=$(docker ps -q --filter "label=com.docker.compose.service=$E2E_C7_MAP_API_SERVICE" | head -1)
-[ -n "$API" ] || die "Map API 컨테이너를 찾지 못했다"
+# API 컨테이너는 D2 러너·repin과 같은 방법으로 찾는다 — compose project(`run-d2.sh`의 cwd)의
+# 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack은 보지 않는다.
+API=$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q "$E2E_C7_MAP_API_SERVICE")
+[[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
 IMG=$(docker inspect "$API" --format '{{.Image}}')
 SCRIPT=/tmp/m01_pf_$TAG.py
 # 배포한 그 SHA에서 꺼낸다(step C가 ktm-c7-src를 $MAP으로 옮겼다). 종전처럼 공유 lint

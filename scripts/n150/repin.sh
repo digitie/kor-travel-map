@@ -27,6 +27,8 @@ PINVI="$2"
 [[ "$(id -u)" == "0" ]] || { echo "must run as root" >&2; exit 2; }
 
 KTDCTL=/opt/kor-travel-docker-manager/backend/.venv/bin/ktdctl
+# D2 러너가 도는 compose project 디렉터리(`run-d2.sh`와 같은 곳).
+COMPOSE_DIR=/opt/kor-travel-docker-manager
 ENV_FILE=/root/.d2-live.env
 IMAGE_TAG=kor-travel-map-c7-playwright:local
 
@@ -77,10 +79,12 @@ say "3. D2 fixture DSN (Map API 컨테이너에서 유도)"
 # argv에도 싣지 않는다(helper가 `docker inspect`를 직접 불러 메모리에서만 다룬다).
 # 대상 확인 두 키(`…CONFIRM_LOGIN_ROLE`·`…CONFIRM_DATABASE`)와 DSN이 맞아야만 쓴다.
 set -a; . "$ENV_FILE"; set +a
-mapfile -t APIS < <(docker ps -q \
-  --filter "label=com.docker.compose.service=${E2E_C7_MAP_API_SERVICE:?E2E_C7_MAP_API_SERVICE}")
-[[ "${#APIS[@]}" == 1 ]] || die "Map API 컨테이너가 정확히 하나가 아니다 (${#APIS[@]}개)"
-python3 -I - "$ENV_FILE" "${APIS[0]}" <<'PY' || die "fixture DSN을 유도하지 못했다"
+# API 컨테이너는 D2 러너와 같은 방법으로 찾는다 — 러너가 도는 compose project(`run-d2.sh`의
+# cwd)의 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack(격리 live 등)은 보지 않는다.
+API="$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q \
+  "${E2E_C7_MAP_API_SERVICE:?E2E_C7_MAP_API_SERVICE}")" || die "Map API compose 조회 실패"
+[[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
+python3 -I - "$ENV_FILE" "$API" <<'PY' || die "fixture DSN을 유도하지 못했다"
 import json, os, re, subprocess, sys, tempfile
 from urllib.parse import urlsplit
 
@@ -107,7 +111,9 @@ if parts.username != os.environ["E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE"]:
     refuse("API DSN의 사용자가 E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE와 다르다")
 if parts.path != "/" + os.environ["E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE"]:
     refuse("API DSN의 DB가 E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE와 다르다")
-# 이 파일은 bash가 `set -a; .`로 읽는다 — 따옴표 없이 source해도 한 단어로 남는 문자만 받는다.
+# 이 파일은 bash가 `set -a; .`로 읽는다 — 따옴표 없이 source해도 한 단어로 남고 명령을 돌리지
+# 않는 문자만 받는다. 이것만으로는 값이 보존되지 않는다: 대입의 `=` 뒤와 `:` 뒤의 `~`는
+# tilde 확장된다(`:~:pw@` → `:/root:pw@`). 그래서 아래에서 source한 값을 직접 대조한다.
 if not re.fullmatch(r"[A-Za-z0-9+:/@._~%-]+", dsn):
     refuse("API DSN에 따옴표 없이 source할 수 없는 문자가 있다")
 
@@ -124,6 +130,15 @@ try:
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.writelines(lines)
     os.chmod(tmp, 0o600)
+    # 소비자와 같은 방법으로 읽어 본다 — 바이트가 아니라 source한 **값**이 DSN이어야 한다.
+    # 위 문자 검사를 지나온 값만 source하므로 명령 치환은 없다. 값은 비교만 한다. 이 프로세스는
+    # 옛 값을 env로 물려받았으므로(위 셸의 `set -a`) 먼저 지운다.
+    sourced = subprocess.run(
+        ["bash", "-c", f'unset {KEY}; set -a; . "$1"; printf %s "${{{KEY}}}"', "_", tmp],
+        check=False, capture_output=True, text=True, timeout=60,
+    )
+    if sourced.returncode != 0 or sourced.stdout != dsn:
+        refuse(f"{KEY}를 source한 값이 API DSN과 다르다")
     os.replace(tmp, env_file)
 except BaseException:
     if os.path.exists(tmp):

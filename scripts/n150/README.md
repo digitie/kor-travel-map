@@ -14,9 +14,14 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 ## DB에 닿는 법 — instance를 적지 않는다
 
 스크립트에는 Map DB instance의 이름·port·superuser가 없다(ADR-103 — prod Map DB는 전용
-instance에서 공용 instance로 옮긴다). DB 접근은 **실행 중인 Map API 컨테이너**
-(`E2E_C7_MAP_API_SERVICE` 라벨로 찾는다, 정확히 하나)에서 유도한다.
-`tests/unit/test_n150_scripts_have_no_instance_literals.py`가 이것을 지킨다.
+instance에서 공용 instance로 옮긴다). DB 접근은 **실행 중인 Map API 컨테이너**에서 유도한다.
+그 컨테이너는 세 스크립트(`repin.sh`, `chain16.sh` M01 preflight, `adjudicate.sh`)가 D2 러너와
+같은 방법으로 찾는다: `docker compose --project-directory /opt/kor-travel-docker-manager ps
+--no-trunc -q "$E2E_C7_MAP_API_SERVICE"`, 정확히 하나. 러너가 도는 compose project(`run-d2.sh`의
+cwd)로 좁히므로 같은 service 라벨을 단 다른 stack(격리 live 등)의 컨테이너를 집지 않는다.
+`tests/unit/test_n150_scripts_have_no_instance_literals.py`가 이름이 아니라 효과를 지킨다 —
+PostgreSQL client 호출, DSN의 `host:port/`, port flag, 유도한 API 컨테이너가 아닌 곳으로의
+`docker exec`가 없다.
 
 - `adjudicate.sh`의 잔여물 네 줄은 그 컨테이너 **안에서** `docker exec -i <api> python -I -B -`로
   센다. 프로그램은 컨테이너 자신의 `KOR_TRAVEL_MAP_PG_DSN`(`+asyncpg`를 떼고)으로 붙어
@@ -28,7 +33,9 @@ instance에서 공용 instance로 옮긴다). DB 접근은 **실행 중인 Map A
   쓰기 전에 사용자 = `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE`, 경로 =
   `/$E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`, scheme ∈ {`postgresql`, `postgresql+asyncpg`}
   (D2 러너 `validate_env`와 같다)이고 따옴표 없이 source할 수 있는 문자만 있는지 본다. 파일은 같은
-  디렉터리의 0600 임시 파일에 써서 rename하고, 그 키가 정확히 한 줄로 바뀌었는지 센다.
+  디렉터리의 0600 임시 파일에 쓰고, 소비자와 같은 `set -a; .`로 그 임시 파일을 읽은 **값**이
+  API DSN과 같을 때만 rename한다(`:~`처럼 문자 검사는 지나도 tilde 확장으로 바뀌는 값을 막는다).
+  rename 뒤에는 그 키가 정확히 한 줄로 바뀌었는지 센다.
   DB가 어느 instance로 옮겨 가든 다음 주기의 repin이 그 값을 따라간다.
 - `chain16.sh`의 M01 ACL preflight는 여전히 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮는다.
   repin 뒤에는 같은 값이라 결과가 같다 — preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 남긴다.

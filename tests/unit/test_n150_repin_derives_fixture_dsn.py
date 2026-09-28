@@ -28,7 +28,7 @@ _OLD_LINE = f"{_KEY}=postgresql+asyncpg://ktm_feature_service:old@127.0.0.1:1270
 def _helper() -> str:
     source = _SCRIPT.read_text(encoding="utf-8")
     match = re.search(
-        r'^python3 -I - "\$ENV_FILE" "\$\{APIS\[0\]\}" <<\'PY\'.*?\n(.*?)^PY$',
+        r'^python3 -I - "\$ENV_FILE" "\$API" <<\'PY\'.*?\n(.*?)^PY$',
         source,
         re.DOTALL | re.MULTILINE,
     )
@@ -108,6 +108,9 @@ def test_plain_postgresql_scheme_is_accepted(tmp_path: Path) -> None:
         # 따옴표 없이 source할 수 없는 문자.
         (_OLD_LINE, _GOOD_DSN + "?sslmode=disable&x=1"),
         (_OLD_LINE, _GOOD_DSN.replace(_SECRET, _SECRET + "$HOME")),
+        # 문자 검사는 지나지만 source하면 tilde 확장으로 값이 바뀐다(`:~` → `:$HOME`).
+        (_OLD_LINE, _GOOD_DSN.replace(_SECRET, "~:" + _SECRET)),
+        (_OLD_LINE, _GOOD_DSN.replace(_SECRET, "~root:" + _SECRET)),
         # 바꿀 줄이 정확히 하나가 아니다.
         ("A=1\n", _GOOD_DSN),
         (_OLD_LINE + _OLD_LINE, _GOOD_DSN),
@@ -125,3 +128,9 @@ def test_refuses_and_leaves_the_file_untouched(
     assert proc.returncode != 0
     _no_secret(proc)
     assert env_file.read_text(encoding="utf-8") == env_text
+    # 거부가 임시 파일을 쓴 뒤였어도 남기지 않는다.
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        ".d2-live.env",
+        "bin",
+        "inspect.json",
+    ]

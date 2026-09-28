@@ -55,10 +55,12 @@ blocked = json.loads(blocked_path.read_bytes())
 run_id = blocked["run_id"]
 
 # Map API 컨테이너는 execution identity와 잔여물 측정이 함께 쓴다. 정확히 하나여야 한다 —
-# 둘 이상이면 어느 쪽의 DB·image를 본 것인지 판정 기록이 말하지 못한다.
+# 둘 이상이면 어느 쪽의 DB·image를 본 것인지 판정 기록이 말하지 못한다. D2 러너·repin과
+# 같은 방법으로 찾는다: 러너가 도는 compose project(`run-d2.sh`의 cwd)의 그 service다. 같은
+# service 라벨을 단 다른 stack(격리 live 등)은 보지 않는다.
 apis = subprocess.run(
-    ["docker", "ps", "-q", "--filter",
-     f"label=com.docker.compose.service={os.environ['E2E_C7_MAP_API_SERVICE']}"],
+    ["docker", "compose", "--project-directory", "/opt/kor-travel-docker-manager",
+     "ps", "--no-trunc", "-q", os.environ["E2E_C7_MAP_API_SERVICE"]],
     check=True, capture_output=True, text=True, timeout=60,
 ).stdout.split()
 if len(apis) != 1:
