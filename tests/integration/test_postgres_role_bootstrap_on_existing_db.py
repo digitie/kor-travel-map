@@ -59,10 +59,12 @@ def pg_container() -> Iterator[Any]:
 
     image = postgis_image()
     try:
-        from testcontainers.core.labels import create_labels
         from testcontainers.postgres import PostgresContainer
     except ImportError:
         pytest.skip("testcontainers not installed — integration tests are unavailable")
+    # testcontainers가 있는데 label helper가 없거나 옮겨졌으면 skip이 아니라 실패다 — 위 guard
+    # 안에 두면 이 모듈 19건(S1 리허설)이 두 lane 모두에서 조용히 skip으로 바뀐다.
+    from testcontainers.core.labels import create_labels
     try:
         container = PostgresContainer(image)
     except Exception as exc:  # pragma: no cover — Docker not available
