@@ -10,9 +10,22 @@ permissions:
 
 jobs:
   integration:
-    name: pytest integration (PostGIS-only)
+    # `ci.yml`의 `integration`과 같은 두 lane이다(ADR-103). 수동으로 다시 확인할 때 alpine만
+    # 돌면 glibc lane이 빨개도 초록으로 보인다. digest의 정본은
+    # `tests/integration/_postgis_image.py`이고 `tests/unit/test_ci_workflows.py`가 대조한다.
+    name: pytest integration (PostGIS-only, ${{ matrix.lane }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: alpine
+            image: postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c
+          - lane: glibc
+            image: postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40
+    env:
+      KTM_TEST_POSTGIS_IMAGE: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
 

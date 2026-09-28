@@ -27,9 +27,12 @@ ALPINE_POSTGIS_IMAGE: Final = (
 )
 
 #: n150 공용 instance(``kor-travel-shared-postgres``)가 실제로 도는 glibc 이미지.
-#: Manager가 이 digest를 고정한다(PG 16.9, PostGIS 3.5.2, ``en_US.utf8``). 공용
-#: instance의 digest가 바뀌면 여기와 ``ci.yml``의 ``lane: glibc``를 함께 바꾼다
-#: (``tests/unit/test_ci_workflows.py``가 두 값을 대조한다).
+#: 이 값은 **사본**이다. 정본은 Manager ``docker-compose.yml``의 공용 instance ``image:``
+#: digest 핀(Manager MT, D4)이고, 두 저장소 사이에는 drift 검출기가 없다. 이동 창의
+#: 사전 점검에서 실행 중인 공용 컨테이너의 ``.Image``와 이 값을 대조해야 한다. 공용 이미지를
+#: 올릴 때는 한 변경 묶음으로 Manager 핀과 이 값, ``ci.yml``·``postgis-only.yml``의
+#: ``lane: glibc``를 함께 바꾼다(``tests/unit/test_ci_workflows.py``가 workflow 쪽을 대조한다).
+#: 2026-09-28 기준 PG 16.9, PostGIS 3.5.2, ``en_US.utf8``.
 SHARED_GLIBC_POSTGIS_IMAGE: Final = (
     "postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40"
 )

@@ -708,6 +708,28 @@ def test_geo_live_mode_is_probed_before_and_after() -> None:
     )
 
 
+def test_integration_gates_cover_both_postgis_lanes() -> None:
+    """CI ``integration`` matrix의 두 lane(ADR-103)을 로컬도 **따로** 돈다.
+
+    조각 감사는 ``tests/integration`` 경로만 보므로 glibc 게이트를 지워도, 또는 그 게이트가
+    이미지를 넘기지 않아 alpine에서 돌아도 침묵한다.
+    """
+
+    integration = [
+        line for line in _run_gate_invocations() if "tests/integration" in line
+    ]
+    alpine = [line for line in integration if "KTM_TEST_POSTGIS_IMAGE" not in line]
+    glibc = [
+        line
+        for line in integration
+        if "import SHARED_GLIBC_POSTGIS_IMAGE" in line
+        and "export KTM_TEST_POSTGIS_IMAGE;" in line
+    ]
+    assert len(alpine) == 1, integration
+    assert len(glibc) == 1, integration
+    assert len(integration) == 2, integration
+
+
 def test_exempt_entries_state_a_reason() -> None:
     """면제에는 이유가 붙어야 한다 — 이유 없는 면제가 다음 사각이다."""
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +115,42 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     fixture_run = _steps_by_name(fixture)["Run fixture replay tests"]["run"]
     assert "[ -d tests/fixtures ]" in fixture_run
     assert "pytest tests/fixtures -q --no-cov" in fixture_run
+
+
+#: 통합 suite의 두 lane(ADR-103). 값의 정본은 `tests/integration/_postgis_image.py`다.
+_POSTGIS_LANES = [
+    {"lane": "alpine", "image": ALPINE_POSTGIS_IMAGE},
+    {"lane": "glibc", "image": SHARED_GLIBC_POSTGIS_IMAGE},
+]
+_INTEGRATION_PYTEST = re.compile(r"\bpytest\b[^\n]*\btests/integration\b")
+
+
+@pytest.mark.unit
+def test_every_workflow_that_runs_integration_covers_both_lanes() -> None:
+    """`pytest tests/integration`을 도는 **모든** workflow job이 두 lane을 돈다.
+
+    한 곳만 matrix를 가지면 다른 곳(수동 재확인 workflow 등)은 alpine에서만 돌며 초록이
+    된다 — glibc lane이 잡는 collation·head 오라클·bootstrap 결함을 보지 못한다.
+    """
+
+    seen: list[str] = []
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_id, job in workflow.get("jobs", {}).items():
+            runs = [
+                str(step.get("run", ""))
+                for step in job.get("steps", [])
+                if isinstance(step, dict)
+            ]
+            if not any(_INTEGRATION_PYTEST.search(run) for run in runs):
+                continue
+            where = f"{path.name}:{job_id}"
+            seen.append(where)
+            assert job.get("strategy", {}).get("matrix") == {"include": _POSTGIS_LANES}, where
+            assert job.get("strategy", {}).get("fail-fast") is False, where
+            assert job.get("env", {}).get(POSTGIS_IMAGE_ENV) == "${{ matrix.image }}", where
+    # 검사가 무엇을 봤는지의 하한 — 탐지가 비면 이 검사는 아무것도 증명하지 못한다.
+    assert set(seen) >= {"ci.yml:integration", "postgis-only.yml:integration"}
 
 
 @pytest.mark.unit
