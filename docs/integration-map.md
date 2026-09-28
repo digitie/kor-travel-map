@@ -24,29 +24,32 @@
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |
 |---|---|---|---|
 | **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12701** · admin UI 12705 · Dagster 12702 · rustfs 12101/12105 · postgres — **standalone 5432 / n150 prod 12700**(아래 ⚠️) | ADR-047 |
-| **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | n150: postgres **12800** · api **12801** · dagster 12802 · web 12805 (PinVi 저장소 자체 기본값은 api 9021 · web 9022) | PinVi README, ADR-047 |
+| **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | n150: postgres 공용 **11000**(DB `pinvi`) · api **12801** · dagster 12802 · web 12805 (PinVi 저장소 자체 기본값은 api 9021 · web 9022) | PinVi README, ADR-047 |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
-| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **프로젝트별 PostGIS 4개**·RustFS·관측 스택 소유 | PostGIS **12500·12600·12700·12800**(아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35 |
+| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **공용 PostGIS + map 전용 PostGIS**·RustFS·관측 스택 소유 | PostGIS 공용 **11000** · map **12700**(아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35 |
 | (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
 
-> ⚠️ **n150 prod의 PostgreSQL은 프로젝트마다 전용 인스턴스다 (2026-08-17~). 통합
-> 인스턴스는 없다.**
+> ⚠️ **n150 prod의 PostgreSQL은 두 인스턴스다 (2026-09-28 실측).**
 >
 > | 포트 | 컨테이너 | 담는 것 | listen |
 > |---|---|---|---|
-> | **12500** | `kor-travel-geo-postgres` | `kor_travel_geo`(33GB) · `_dagster` | `127.0.0.1` |
-> | **12600** | `kor-travel-concierge-postgres` | `kor_travel_concierge` | `127.0.0.1` |
-> | **12700** | `kor-travel-map-postgres` | `kor_travel_map` · `_dagster` | `127.0.0.1` |
-> | **12800** | `pinvi-postgres` | `pinvi` | `127.0.0.1` |
+> | **11000** | `kor-travel-shared-postgres` (`postgis/postgis:16-3.5`) | `kor_travel_geo`·`kor_travel_weather`·`kor_travel_transport`·`kor_travel_concierge`·`pinvi`와 각 `_dagster` | `127.0.0.1` |
+> | **12700** | `kor-travel-map-postgres` | `kor_travel_map` · `_dagster` (+ 검증 잔여 `ktm_40b`·`ktm_bootstrap`·`ktm_gcverify*`) | `127.0.0.1` |
 >
-> **`5432`를 듣는 것은 이제 없다.** 옛 문서를 보고 그리로 붙으면 연결 자체가
-> 실패한다. 각 프로젝트 대역의 `x00`이 그 프로젝트의 DB다(ADR-047 대역 규칙).
+> 2026-08-17부터 한동안은 프로젝트마다 전용 인스턴스(geo 12500 · concierge 12600 · map 12700 ·
+> pinvi 12800)였다. 그 뒤 map 외에는 공용 11000으로 옮겼고, 2026-09-28 Manager #429가 옛 전용
+> 인스턴스들을 목록에서 지우고 n150의 `pinvi-postgres`를 내렸다(데이터 디렉터리는 보존).
+> map도 11000으로 옮기는 계획이 소유자 지시로 진행 중이다 — 아래 "왜 DB만 나누는 것으로
+> 부족했나"의 cluster 전역 문제를 그 계획이 다시 따져야 한다.
+>
+> **`5432`를 듣는 것은 없다.** 옛 문서를 보고 그리로 붙으면 연결 자체가 실패한다.
 >
 > **왜 DB만 나누는 것으로 부족했나** — `role`·ACL·확장은 DB가 아니라 **cluster
 > 전역**이다. 2026-08-15에 map을 전용 인스턴스로 뺀 뒤에도 통합 인스턴스에 `ktm_`
 > 역할 7개가 남아 있었고, map migrator 자격증명으로 `kor_travel_geo`에 실제로
 > 접속됐다(`CONNECTED as ktm_feature_migrator`). 그것이 docker-manager ADR-35가 map을
-> 분리한 근거이고, 같은 근거가 concierge·pinvi에도 적용돼 2026-08-17에 넷으로 나눴다.
+> 분리한 근거이고, 같은 근거가 concierge·pinvi에도 적용돼 2026-08-17에 넷으로 나눴다
+> (그 뒤 map 외에는 다시 공용 11000으로 모였다 — 위 표).
 >
 > ⚠️ `docker exec <컨테이너> psql`에 **반드시 `-p`를 준다.** 전부
 > `network_mode: host`라 포트를 생략하면 컨테이너 기본값(5432)을 찾아 실패한다.
