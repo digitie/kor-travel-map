@@ -81,8 +81,11 @@ say "3. D2 fixture DSN (Map API 컨테이너에서 유도)"
 set -a; . "$ENV_FILE"; set +a
 # API 컨테이너는 D2 러너와 같은 방법으로 찾는다 — 러너가 도는 compose project(`run-d2.sh`의
 # cwd)의 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack(격리 live 등)은 보지 않는다.
+# stderr는 러너처럼 버린다: compose는 이 조회에서도 project의 `.env`를 해석하고, `$`가 든 값의
+# 꼬리를 변수 이름으로 읽어 "variable is not set" 경고로 찍는다 — 비밀에서 나온 조각이 운영
+# 로그(`chain16` D 단계의 `tail`)로 샌다(2026-09-29 n150 실측). 실패는 `|| die`와 64-hex 검사가 잡는다.
 API="$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q \
-  "${E2E_C7_MAP_API_SERVICE:?E2E_C7_MAP_API_SERVICE}")" || die "Map API compose 조회 실패"
+  "${E2E_C7_MAP_API_SERVICE:?E2E_C7_MAP_API_SERVICE}" 2>/dev/null)" || die "Map API compose 조회 실패"
 [[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
 python3 -I - "$ENV_FILE" "$API" <<'PY' || die "fixture DSN을 유도하지 못했다"
 import json, os, re, subprocess, sys, tempfile

@@ -66,8 +66,10 @@ say "D. repin (.d2-live.env)"
 say "E. M01 ACL preflight"
 set -a; . /root/.d2-live.env; set +a
 # API 컨테이너는 D2 러너·repin과 같은 방법으로 찾는다 — compose project(`run-d2.sh`의 cwd)의
-# 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack은 보지 않는다.
-API=$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q "$E2E_C7_MAP_API_SERVICE")
+# 그 service, 정확히 하나. 같은 service 라벨을 단 다른 stack은 보지 않는다. stderr는 버린다 —
+# compose가 project `.env`를 해석하며 찍는 경고에 비밀에서 나온 조각이 섞인다(repin 3단계 참조).
+# 실패는 아래 64-hex 검사가 잡는다.
+API=$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q "$E2E_C7_MAP_API_SERVICE" 2>/dev/null)
 [[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
 IMG=$(docker inspect "$API" --format '{{.Image}}')
 SCRIPT=/tmp/m01_pf_$TAG.py

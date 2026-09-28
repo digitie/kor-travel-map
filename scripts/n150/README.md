@@ -19,14 +19,22 @@ instance에서 공용 instance로 옮긴다). DB 접근은 **실행 중인 Map A
 같은 방법으로 찾는다: `docker compose --project-directory /opt/kor-travel-docker-manager ps
 --no-trunc -q "$E2E_C7_MAP_API_SERVICE"`, 정확히 하나. 러너가 도는 compose project(`run-d2.sh`의
 cwd)로 좁히므로 같은 service 라벨을 단 다른 stack(격리 live 등)의 컨테이너를 집지 않는다.
+조회의 stderr는 버린다(셸 `2>/dev/null`, python `capture_output=True`). compose는 `ps`에서도
+project `.env`를 해석하며 `$`가 든 값의 꼬리를 "variable is not set" 경고로 찍는데, n150에서는 그
+꼬리가 비밀의 조각이었다 — chain16이 repin 출력을 운영 로그로 옮긴다.
 `tests/unit/test_n150_scripts_have_no_instance_literals.py`가 이름이 아니라 효과를 지킨다 —
-PostgreSQL client 호출, DSN의 `host:port/`, port flag, 유도한 API 컨테이너가 아닌 곳으로의
-`docker exec`가 없다.
+PostgreSQL client 호출, PostgreSQL 서버 이미지, DSN 문자열, libpq 연결 키워드(`host=`·`port=`·
+`PGHOST`…)가 없고, `docker exec`(`docker container exec`·`docker compose … exec` 포함)는 같은
+스크립트가 API 조회 결과로만 대입한 변수에만 한다. compose 호출이 stderr를 흘리면 빨갛다.
 
-- `adjudicate.sh`의 잔여물 네 줄은 그 컨테이너 **안에서** `docker exec -i <api> python -I -B -`로
+- `adjudicate.sh`의 잔여물 다섯 줄은 그 컨테이너 **안에서** `docker exec -i <api> python -I -B -`로
   센다. 프로그램은 컨테이너 자신의 `KOR_TRAVEL_MAP_PG_DSN`(`+asyncpg`를 떼고)으로 붙어
   `READ ONLY` transaction에서 `SET LOCAL ROLE ktm_feature_schema_owner` 뒤 세고 `ROLLBACK`한다.
-  `run_id`는 bind parameter다. 비밀은 호스트 argv를 건너지 않고, 도구는 아무것도 쓰지 못한다.
+  `run_id`는 bind parameter다. 비밀은 호스트 argv를 건너지 않고, 도구는 아무것도 쓰지 못한다
+  (통합 테스트가 같은 wrapper에 INSERT를 넣어 거부되는지 본다). 다섯째 줄은 fixture의 provider
+  dataset(`admin-live-{run_id}-{kind}`)이다 — source 계보·refresh policy가 모두 그 아래에 달린다.
+- D2 러너는 lock을 잡기 전에 fixture DSN이 API 컨테이너의 DSN과 같은 DB(host·port·DB)를
+  가리키는지 대조한다. 아래 repin 유도는 매 주기의 관례이고, 이 대조가 그 불변식을 소비자에서 지킨다.
 - `repin.sh` 3단계는 `/root/.d2-live.env`의 `E2E_ADMIN_FEATURE_FIXTURE_PG_DSN` 한 줄을 그
   컨테이너의 `KOR_TRAVEL_MAP_PG_DSN`으로 바꾼다(2026-09-28 실측으로 두 값은 사용자·host:port·DB·
   비밀번호가 같다). helper가 `docker inspect`를 직접 불러 값을 메모리에서만 다루고 출력하지 않는다.
