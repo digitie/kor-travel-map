@@ -1,5 +1,39 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-28 — M05 격리 e2e 통과(p9), PinVi app-dagster 수정, 안 쓰는 전용 PostgreSQL 퇴역
+
+**다음 한 작업: transport 배포 식별자 개명 cutover(창 KST 21:30~23:00) → Manager transport 백업 역할 release →
+Manager 개명 release → Map DB를 공용 11000으로 이전(계획·적대 검토 중).** 모두 소유자 지시("남은 것 모두 완주")다.
+
+- **M05 p9 PASSED**: pinset `8c9f9ad1`(Map `a18d9274` + PinVi `c5be9eb4`), Manager `88599eb9`.
+  - 리허설 p9r `rehearsed` 뒤 실제 실행. `status: passed`, `phase: completed`, cleanup 실패 없음, `stderr.log` 0바이트.
+  - 약 11분(06:10Z 종료). 격리 컨테이너는 모두 정리됐다.
+- **막던 것과 고친 것**:
+  - PinVi #570(`c5be9eb4`): #558 뒤 PinVi app compose의 `app-dagster`에 `PINVI_DAGSTER_PG_URL`과
+    `pinvi_dagster` DB가 없어 항상 unhealthy였다. bootstrap 스크립트와 one-shot `app-dagster-db-init`을 넣었다.
+    p9에서 db-init exit 0, dagster는 약 1분 만에 healthy.
+  - PinVi #569(`5459b023`): `deploy-node.sh`의 fresh-stack 증명을 compose에서 유도한 서비스로 고쳤다.
+  - Manager #428(`e25f105a`): M05 포트를 고정 기준(`28629`)부터 찾아 두 실행이 같은 빌드 입력을 준다(캐시 적중).
+  - Dagster healthcheck 폭주: Manager #426 + Map #1284 뒤 운영 Dagster 컨테이너 전부가 exec 형식 probe와
+    `init`으로 healthy다. 좀비 565 → 16. transport 스택만 개명 cutover 때 함께 반영한다.
+- **chain17 t63b GREEN**(같은 pair): ACL 40/40, D1 11 passed, D2 passed.
+  - t63a는 D1 `admin-scenario-catalog.live.spec.ts:76`이 `GET /v1/ops/datasets`를 15초 안에 못 봐 실패했다.
+    같은 Map이 t62b·t63b에서 통과해 부하 flake로 본다.
+- **안 쓰는 전용 PostgreSQL 퇴역**: Manager #429(`88599eb9`)가 geo·concierge·pinvi 전용 인스턴스와 airport-db를
+  compose·target·백업 목록에서 지웠다. n150에서는 접속 0이던 `pinvi-postgres`(12800)만 내렸다(데이터 디렉터리 보존).
+  - 백업 gc는 다른 인스턴스의 dump를 지우지 않는다(`INSTANCE_MISMATCH`).
+  - n150 Manager 백업 cron(비-git 사본)이 2026-09-20 무렵부터 매일 실패하고 있었다(`compose_binds 절이 없다`).
+    cron 사본을 동기화하고 수동 실행으로 확인했다.
+  - `CLAUDE.md`·`docs/integration-map.md`의 DB 포트 설명을 실측(공용 11000 + map 12700)으로 고쳤다.
+- **공용 PostgreSQL 비정상 재시작(원인 미상)**: 2026-09-28 03:28:57Z에 `kor-travel-shared-postgres`의 백엔드 하나가
+  exit code 2로 끝나 postmaster가 전체를 재초기화했다. 복구에 약 2분 걸렸다(디스크 대기 속 pre-fsync 82초).
+  OOM은 아니다. transport `/health`가 그 사이 500이었다. Map을 공용으로 옮기면 이런 사건의 영향 범위에 Map도 든다.
+- **이어서**:
+  - transport: PR #44가 머지돼 개명 브랜치 `chore/rename-deploy-identity-transport`를 #46 위로 rebase했다
+    (`d2b7832`, 문서 밖 diff 동일). 창에서 transport 저장소 runbook "운영 식별자 개명 cutover"를 따른다.
+  - Manager `feat/transport-backup-roles`: 적대 검토 MED 1건(호스트 단계 순서)을 고치는 중이다.
+  - Map DB 이전: 읽기 전용 조사·계획·적대 검토 워크플로가 돌고 있다. 검증 잔여 DB 4개는 옮기지 않는다.
+
 ## 2026-09-27 — rustfs-init의 minio/mc 대체, 새 pair 사이클 t62b GREEN, M05는 n150 과부하로 BLOCKED
 
 **다음 한 작업: n150 Dagster healthcheck 폭주를 먼저 잡고 M05를 다시 돌린다(소유자 결정 필요).**

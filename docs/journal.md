@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-28 — M05가 끝까지 갔다: 마지막 벽은 부하가 아니라 PinVi의 빈 Dagster 저장소였다
+
+healthcheck 폭주를 잡은 뒤에도 M05의 PinVi `app-dagster`는 unhealthy였다. 부하 탓으로 보기 쉬웠지만 원인은
+PinVi #558의 회귀였다. app compose의 dagster가 `PINVI_DAGSTER_PG_URL`을 받지 못했고 `pinvi_dagster` DB도 없어서,
+한가한 호스트에서도 뜰 수 없었다. PinVi #570이 bootstrap 스크립트와 one-shot `app-dagster-db-init`을 넣었다.
+
+새 pair(Map `a18d9274` + PinVi `c5be9eb4`, pinset `8c9f9ad1`)로 회전해 chain17을 돌렸다. t63a는 D1 한 건이
+15초 poll에 걸렸고(같은 Map이 직전과 직후 사이클에서 통과), t63b는 ACL 40/40, D1 11, D2 passed였다.
+Manager `88599eb9` 설치 뒤 실행 identity가 바뀌었으므로 리허설(p9r `rehearsed`)부터 했다. 실제 실행 p9는
+약 11분 만에 `passed`/`completed`로 끝났다. Manager #428로 포트를 고정한 덕에 이미지 빌드가 캐시를 탔다.
+
+같은 날 정리한 것:
+- **안 쓰는 전용 PostgreSQL 퇴역**(Manager #429). 목록에서 지운 것은 geo·concierge·pinvi 전용 인스턴스와
+  airport-db다. n150에서 실제로 내린 것은 접속 0이던 `pinvi-postgres` 하나이고, 데이터 디렉터리는 남겼다.
+  그 과정에서 Manager 백업 cron이 9/20 무렵부터 매일 실패하고 있었음을 찾았다. cron은 git이 아닌 배포 사본을 돌리는데,
+  그 사본이 compose 모델보다 뒤처져 있었다.
+- **공용 PostgreSQL의 원인 미상 재시작**(03:28:57Z). 백엔드 하나가 exit code 2로 끝났다(보통 SIGQUIT 처리 경로다).
+  postmaster가 모든 연결을 끊고 재초기화했다. 디스크 대기 속에서 pre-fsync에 82초가 걸렸다. OOM 흔적은 없다.
+  그 시각 이 세션의 에이전트는 n150 임시 사본에서 가짜 대역 단위 테스트만 돌리고 있었다.
+  Map을 공용으로 옮기는 계획은 이 영향 범위를 따져야 한다.
+- `CLAUDE.md`와 `docs/integration-map.md`는 여전히 "프로젝트별 전용 인스턴스 넷"이라고 적고 있었다.
+  실측(공용 11000 + map 12700)으로 고쳤다.
+
 ## 2026-09-27 — Dagster healthcheck 폭주: 셸 래퍼가 남긴 고아들
 
 M05가 n150 과부하로 연달아 멈춘 원인을 좁혀 보니, 운영 Dagster 스택 넷(Map·PinVi·geo·weather)의 healthcheck였다.
