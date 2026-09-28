@@ -705,7 +705,7 @@ _D2_ENV = {
     "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
     "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
     "E2E_ADMIN_PASSWORD": "redacted",
-    "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": "postgresql://fixture@127.0.0.1:12700/kor_travel_map",
+    "E2E_ADMIN_FEATURE_FIXTURE_PG_DSN": "postgresql://fixture@127.0.0.1:55432/kor_travel_map",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE": "kor_travel_map",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE": "ktm_fixture_writer",
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION": "400",

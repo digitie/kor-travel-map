@@ -6262,7 +6262,7 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "metadata",
         "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": "resolver-dummy",
         "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL": (
-            "postgresql://metadata@127.0.0.1:12700/ktm_dagster"
+            "postgresql://metadata@127.0.0.1:55432/ktm_dagster"
         ),
     }
     resolved = subprocess.run(
@@ -6494,7 +6494,7 @@ def test_host_external_overlays_use_only_the_final_host_metadata_dsn(
         "services:\n  api:\n    env_file: !reset []\n",
         encoding="utf-8",
     )
-    host_dsn = "postgresql://metadata@127.0.0.1:12700/kor_travel_map_dagster"
+    host_dsn = "postgresql://metadata@127.0.0.1:55432/kor_travel_map_dagster"
     env = {
         "PATH": os.environ["PATH"],
         "COMPOSE_DISABLE_ENV_FILE": "1",
