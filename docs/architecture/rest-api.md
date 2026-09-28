@@ -106,7 +106,7 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
   전까지는 전용 instance `kor-travel-map-postgres`, host `12700`).
   ⚠️ 2026-08-17(docker-manager ADR-37)에 "공유 인스턴스 안의 독립 DATABASE" 구조를 한 번
   폐기했다 — role·ACL·확장이 database가 아니라 cluster 전역이라 database만 나누는 것으로는
-  principal이 격리되지 않기 때문이다. 2026-09-28 ADR-103(Manager ADR-52)이 그 결정을 map에
+  principal이 격리되지 않기 때문이다. 2026-09-28 ADR-103(Manager ADR-53)이 그 결정을 map에
   대해 다시 뒤집었다: 격리는 instance 대신 **DB ACL**로 한다(Manager가 Map DB의 PUBLIC
   CONNECT를 닫는다). **`5432`를 듣는 것은 없다**. consumer는 이 포트를 자기 설정에 박지 말고
   주입받은 DSN을 쓴다. `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함하고,

@@ -3,7 +3,7 @@
 ## 2026-09-28 — Map DB를 공용 instance로 옮기기 전에 Map 쪽에서 할 일(MP): glibc 정렬, 두 번째 CI lane, 유도된 DB 접근
 
 소유자가 Map의 두 DB를 공용 instance `kor-travel-shared-postgres`로 옮기기로 결정했다(결정 C, ADR-103 ·
-Manager ADR-52). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽 준비다. 창 전에 새 pair로 핀해야 한다.
+Manager ADR-53). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽 준비다. 창 전에 새 pair로 핀해야 한다.
 
 - **collation**: 공용 instance는 glibc 이미지(PG 16.9·PostGIS 3.5.2, `en_US.utf8`)다. alpine(musl)에서는 default
   collation이 byte 순서와 같아서 순서가 digest·잠금·Python `sorted()` 비교에 들어가는 text 키가 지금까지 무방비였다.
@@ -56,6 +56,9 @@ Manager ADR-52). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽
   - 결과: GitHub `postgis-only.yml` dispatch(`3234b3d1`, run 36421797357) glibc **1162 passed / 12 skipped**, alpine
     **1156 passed / 18 skipped**. `ci.yml`의 두 leg는 PR이 열려야 돈다. n150 대상 실행은 두 lane 모두 count 모듈
     3 passed, bootstrap 모듈 19 passed(client 잔여 0).
+- Manager ADR 번호 정정: #433이 ADR-52(공용 instance의 `init`·exec probe·grace)가 되어, 이 이동의 Manager ADR은
+  **ADR-53**이다. ADR-103 `관련`, `CLAUDE.md`, `integration-map.md`, `deploy.md`, `rest-api.md`와 이 절·resume을
+  고쳤다. main의 docs 커밋 #1286 위로 리베이스했다(journal·resume 충돌은 양쪽을 모두 남겼다).
 
 ## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
 

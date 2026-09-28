@@ -4,7 +4,7 @@
 
 **다음 한 작업: MP를 CI 두 leg(alpine·glibc) 초록 + 적대 리뷰로 머지 → n150 호스트 스크립트를 MP SHA에서
 0700 root로 재설치 → `/root/chain17.sh <MP_SHA> …`로 새 pair(MP + PinVi `c5be9eb4`)를 전용 12700 위에서
-회전·D1/D2 초록.** 그 뒤 Manager 창(MT·M2)에서 이동한다(ADR-103, Manager ADR-52).
+회전·D1/D2 초록.** 그 뒤 Manager 창(MT·M2)에서 이동한다(ADR-103, Manager ADR-53).
 
 - `COLLATE "C"`: evidence export/backup twin, evidence restore, curation collection lock, cache target capture.
   감사 뒤 그대로 둔 곳과 이유는 커밋 메시지(`fix: glibc-safe text orderings …`)에 있다.
@@ -19,6 +19,9 @@
   - 남은 것(Map 밖): 이동 창 사전 점검(스펙 §4.1 A0/A5)에 실행 중인 공용 컨테이너 `.Image`와
     `tests/integration/_postgis_image.py`의 `SHARED_GLIBC_POSTGIS_IMAGE` 대조 한 줄. API 이미지의
     `python -I -c 'import asyncpg'` smoke는 `docker-images.yml`이 OCI만 내보내 따로 load가 필요해 미뤘다.
+- Manager ADR 번호: 이 이동은 **ADR-53**이다. ADR-52는 #433(공용 instance의 `init`·exec probe `-t 3`/`timeout 10s`·
+  grace 300s·shm 512mb)이고 n150에 설치됐다(Manager `0fe0d97`, 공용 재생성 09-28 13:10:57Z). 아래 (저녁) 절의
+  `stop_grace 180s`·`pg_isready -t 2`는 그 전 계획값이다.
 
 ## 2026-09-28 (저녁) — transport 개명 완료, 공용 PG 재시작 원인, Map DB 공용 이전 착수
 

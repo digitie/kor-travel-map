@@ -28,7 +28,7 @@ M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 추가�
 > prod는 세 단계로 옮겼다. 2026-08-15 커토버(#46)가 kor-travel-geo와 공유하던
 > 인스턴스에서 map 전용 인스턴스(`12703`)로 뺐고, 2026-08-17에 **네 프로젝트를 각각
 > 전용 인스턴스로 나누면서** 포트를 대역 규칙에 맞춰 `12700`으로 옮겼다. 2026-09-28
-> 소유자가 map도 공용 instance로 옮기기로 결정했다(ADR-103, Manager ADR-52 — 이전은
+> 소유자가 map도 공용 instance로 옮기기로 결정했다(ADR-103, Manager ADR-53 — 이전은
 > Manager의 이전 창에서 한다).
 >
 > **왜 DB만 나누는 것으로 부족했나** — role·ACL·확장은 DB가 아니라 **cluster 전역**이라

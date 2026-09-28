@@ -1,7 +1,7 @@
 # ADR-103: n150 prod에서 Map DB는 공용 PostgreSQL instance 안의 전용 DATABASE다 (ADR-045 개정)
 
 - 상태: accepted (2026-09-28) · 개정 대상: ADR-045 결정 1의 "독립 PostGIS DB", AGENTS.md "공유 DB 아님"
-- 관련: Manager ADR-52
+- 관련: Manager ADR-53
 
 ### 결정
 - prod에서 `kor_travel_map`·`kor_travel_map_dagster`와 Map role 가족(`ktm_*` 19개, Dagster metadata login)은
