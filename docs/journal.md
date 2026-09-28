@@ -38,6 +38,14 @@
   제거 셋, adjudicate에 넣은 공용 instance 모양 여덟(compose exec 둘, container exec, 이름만 맞춘 `api=` 셸·
   python 재대입, 키워드 connect, `PGPORT`, `postgres:` 이미지), 러너 대조 무력화·호출 제거·사용자까지 비교,
   count의 readonly 제거·COMMIT·dataset 0·run 무시, labels import 이름 변경(19 errors, skip 아님).
+- 전량: lint 검사 하나(`test_adjudicate_only_clears_a_lane_that_is_really_stopped`)가 줄 수 확인을 `4`로 박아
+  빨개졌다. 리터럴 대신 COUNT_PROGRAM이 실제로 세는 줄 수와 확인이 같은지 보게 했다(확인을 4로 낮추거나 여섯째 줄을
+  더하면 빨갛다). n150 `b91a41a6`: ruff 초록, `mypy --strict` 일곱 대상 초록, lint-imports 4 kept, unit+lint
+  **3079 passed / 15 skipped / 14 failed** — 14건 모두 main(`90b1e5e0`)에서 같은 node로 실패한다(node_modules
+  없는 체크아웃의 frontend 검증 13, `test_lifecycle_preserves_signal_exit_status[INT-130]`). GitHub
+  `postgis-only.yml`(run 36456439859, `66a1cb3a`): glibc **1163 passed / 12 skipped**, alpine 첫 시도는
+  `test_public_partial_indexes_have_exact_state_predicate_and_explain_proof` 1건(planner 선택, 알려진 flake — n150
+  단독 3회씩 이 브랜치·main 모두 passed), 실패 job 재실행 **1157 passed / 18 skipped**.
 
 ## 2026-09-28 — Map DB를 공용 instance로 옮기기 전에 Map 쪽에서 할 일(MP): glibc 정렬, 두 번째 CI lane, 유도된 DB 접근
 
