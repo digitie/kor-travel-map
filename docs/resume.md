@@ -16,6 +16,10 @@
   project로, repin의 source 값 대조, 효과 기반 인스턴스 탐지기, 두 lane의 수동 workflow·로컬 게이트.
   수동 `postgis-only.yml` 두 lane 초록(run 36421797357).
   - PR을 열 때 본문에 CI `integration` 두 leg의 URL을 적는다(required check가 없다).
+  - 적대 리뷰 2차(09-29, journal 참조): n150 compose 조회의 stderr 차단(비밀 조각 누출), 탐지기 좁히기·유도
+    결박, 판정 도구 읽기 전용 검사, 다섯째 잔여물 줄(fixture dataset), D2 러너의 fixture 대상 대조.
+  - 남은 것(Map 밖, 소유자): `/opt/.env`의 `*_UI_ADMIN_PASSWORD_HASH` 넷을 작은따옴표로 감싸거나 `$$`로
+    바꾸고, Map UI 관리자 비밀번호를 교체한다(hash 조각이 리뷰 transcript에 찍혔다).
   - 남은 것(Map 밖): 이동 창 사전 점검(스펙 §4.1 A0/A5)에 실행 중인 공용 컨테이너 `.Image`와
     `tests/integration/_postgis_image.py`의 `SHARED_GLIBC_POSTGIS_IMAGE` 대조 한 줄. API 이미지의
     `python -I -c 'import asyncpg'` smoke는 `docker-images.yml`이 OCI만 내보내 따로 load가 필요해 미뤘다.

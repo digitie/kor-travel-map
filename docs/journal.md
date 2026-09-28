@@ -1,5 +1,44 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-29 — MP 적대 리뷰 2차: compose 경고로 새던 비밀 조각, 탐지기 다듬기, fixture 대상 대조
+
+- **MED(둘, 같은 결함)**: `repin.sh` 3단계와 `chain16.sh` E 단계가 Map API를 `docker compose … ps`로
+  찾으면서 stderr를 흘렸다. compose는 `ps`에서도 project `.env`를 해석한다. `/opt/.env`의 따옴표 없는 값에
+  든 `$`의 꼬리를 변수 이름으로 읽어 `The "<꼬리>" variable is not set` 경고를 찍는데, n150에서 그 꼬리는
+  UI 관리자 비밀번호 hash의 조각이었다. chain16은 repin 출력을 `2>&1 | tail -12`로 옮기므로 한 사이클에
+  여덟 줄이 운영 로그(`/root/chain17-<tag>.log`)에 남는다. 옛 `docker ps --filter label=…`은 compose를
+  읽지 않았으니 MP가 새로 연 경로다. 두 조회에 D2 러너와 같은 `2>/dev/null`을 붙였다(실패는 `|| die`·64-hex
+  검사가 잡는다). 새 검사 `test_compose_calls_keep_compose_warnings_out_of_the_output`은 `scripts/n150`의
+  모든 compose 호출이 stderr를 버리거나(`2>/dev/null`) 잡는지(`capture_output=True`) 본다 — 세 스크립트의
+  redirect·capture를 하나씩 지우면 각각 빨갛다.
+  - Map 밖(소유자 몫): `/opt/.env`의 `*_UI_ADMIN_PASSWORD_HASH` 넷을 작은따옴표로 감싸거나 `$$`로 바꾼다
+    (CLI compose 모델이 값을 망가뜨린다). 조각이 리뷰 transcript에 한 번 찍혔으므로 Map UI 관리자 비밀번호
+    교체도 권한다.
+- **탐지기(LOW 둘)**: 넓던 규칙 둘(`host:port/`, `-p`/`--port`)이 `curl …:12701/healthz`·`ssh -p 22`를
+  잡고, 공용 instance로 가는 모양 다섯(`docker compose … exec`, `docker container exec`, 키워드
+  `host=`/`port=`, `PGHOST`/`PGPORT`, `postgres:` 서버 이미지)은 놓쳤다. 규칙을 좁혀 바꿨다: DSN 문자열
+  (`postgres(ql)(+drv)://`), libpq 연결 키워드·env, PostgreSQL 서버 이미지. exec는 compose·container 형태도
+  보고, 값 있는 flag(`-e X=1`)를 target으로 읽지 않는다. exec 허용은 이름 목록이 아니라 **유도**다 — 같은
+  스크립트가 API 조회 결과로만 대입한 변수(`API="$(docker compose … ps …)"`, `api = apis[0]`)에만 허용하고,
+  다른 대입이 하나라도 있으면 빠진다. 리뷰가 실측한 모양을 두 자기 검사 목록에 넣었다.
+- **판정 도구 읽기 전용(LOW)**: `adjudicate.sh` COUNT_PROGRAM의 "아무것도 쓰지 못한다"를 검사로 바꿨다. 같은
+  wrapper에 INSERT를 넣어 돌리면 `read-only transaction`으로 거부되고 행이 남지 않는다. `readonly=True`를
+  빼거나 ROLLBACK까지 COMMIT으로 바꾸면 빨갛다.
+- **다섯째 잔여물 줄(LOW, 원래부터)**: fixture의 provider dataset(`admin-live-{run_id}-{kind}`)을 센다. source
+  계보와 refresh policy가 모두 그 아래 달리므로, dataset 쪽만 남은 BLOCKED lane이 네 줄 0으로 `clear-blocked`
+  되지 않는다. 양성 대조는 fixture의 `_dataset_key`로 심고 다른 run·운영 dataset을 이웃으로 둔다.
+- **fixture 대상 대조(LOW)**: D2 러너 `validate_runtime`이 lock·state 전에 fixture DSN의 host·port·DB·query를
+  API 컨테이너의 `KOR_TRAVEL_MAP_PG_DSN`과 대조한다(사용자·비밀번호는 다를 수 있다). 확인 키 셋(DB 이름·login·
+  head)은 다른 instance의 같은 이름 사본에서도 맞으므로, 이동·롤백 직후 repin 없이 러너만 돌 때 API가 읽지
+  않는 사본을 고치는 것을 막는다. 값은 출력하지 않는다.
+- 작은 것: bootstrap 모듈의 `create_labels` import를 skip guard 밖으로(없으면 19건이 조용히 skip이 아니라
+  실패), `_postgis_image.py` 주석은 MT 설치 전의 정본이 실행 중인 공용 컨테이너의 `.Image`임을 적었다.
+- n150 대상 실행(`cfb1eb45` + 이 변경): 대상 unit 141 passed, ruff 초록. count 모듈 alpine·glibc 각 **4 passed**,
+  bootstrap 모듈 alpine·glibc 각 **19 passed**(client 잔여 0). 변이는 모두 빨갛다 — compose redirect·capture
+  제거 셋, adjudicate에 넣은 공용 instance 모양 여덟(compose exec 둘, container exec, 이름만 맞춘 `api=` 셸·
+  python 재대입, 키워드 connect, `PGPORT`, `postgres:` 이미지), 러너 대조 무력화·호출 제거·사용자까지 비교,
+  count의 readonly 제거·COMMIT·dataset 0·run 무시, labels import 이름 변경(19 errors, skip 아님).
+
 ## 2026-09-28 — Map DB를 공용 instance로 옮기기 전에 Map 쪽에서 할 일(MP): glibc 정렬, 두 번째 CI lane, 유도된 DB 접근
 
 소유자가 Map의 두 DB를 공용 instance `kor-travel-shared-postgres`로 옮기기로 결정했다(결정 C, ADR-103 ·
