@@ -141,7 +141,11 @@ def test_adjudicate_only_clears_a_lane_that_is_really_stopped() -> None:
     # 가드는 지워질 뿐 아니라 약해질 수도 있다(`|| true`, `exit 0`, raise → print).
     assert "|| true" not in source
     assert "exit 0" not in source.split('[[ -e "$B" ]] ||', 1)[1].split("\n", 1)[1]
-    assert "if len(residue) != 4:\n    raise SystemExit(" in source
+    # 줄 수 확인은 COUNT_PROGRAM이 실제로 세는 줄의 수와 같아야 한다 — 줄을 더하고 확인을
+    # 그대로 두면 판정이 늘 거부되고, 확인을 낮추면 새 줄이 조용히 빠진다.
+    counted = re.findall(r"SELECT '(\w+)', count\(\*\) FROM", source)
+    assert len(counted) == len(set(counted)) >= 5, counted
+    assert f"if len(residue) != {len(counted)}:\n    raise SystemExit(" in source
     assert "if any(residue.values()):\n    raise SystemExit(" in source
 
 
