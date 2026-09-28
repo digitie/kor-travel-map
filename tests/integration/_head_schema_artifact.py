@@ -75,8 +75,17 @@ def normalize_dump(raw: str) -> str:
     """
 
     kept: list[str] = []
+    after_fence = False
     for line in raw.split("\n"):
+        if after_fence:
+            after_fence = False
+            if not line:
+                continue
         if _PSQL_RESTRICT.fullmatch(line):
+            # fence를 내는 pg_dump(16.10+)는 그 뒤에 빈 줄을 하나 더 쓴다. fence만 걷으면
+            # 그 빈 줄이 남아 fence를 내지 않는 판(공용 instance의 16.9, ADR-103)과 한 줄
+            # 어긋난다 — 같은 스키마가 판마다 다른 오라클이 된다.
+            after_fence = True
             continue
         if line.startswith(_VERSION_COMMENT):
             continue
