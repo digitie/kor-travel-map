@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from tests.integration._postgis_image import ALPINE_POSTGIS_IMAGE
 from tests.integration.conftest import postgis_image
 
 if TYPE_CHECKING:
@@ -44,6 +45,12 @@ def pg_container() -> Iterator[Any]:
     cluster-wide mutation과 cleanup이 다른 integration fixture에 닿지 않게 한다.
     이미지는 lane의 것이다 — glibc lane에서는 공용 instance 이미지에서 bootstrap을
     instance superuser로 돌린다(ADR-103, S1 리허설).
+
+    bootstrap 스크립트는 **서버 컨테이너 안이 아니라** 서버의 network namespace를 나눠
+    쓰는 별도 client 컨테이너(alpine)에서 돈다 — 운영도 Manager의 one-shot
+    (`postgres:16-alpine`)이 TCP로 붙는다. 스크립트의 절대 경로(`/usr/local/bin/psql`,
+    `/usr/bin/sleep`)는 alpine client 계약이다. glibc 서버 이미지 안에서 돌리면 그
+    경로가 없어 서버와 무관하게 죽는다(2026-09-28 glibc lane 실측).
     """
 
     image = postgis_image()
@@ -71,7 +78,43 @@ def pg_container() -> Iterator[Any]:
                 ),
             )
         setattr(container, "pass" + "word", root_credential)
-        yield container
+        server_id = container.get_wrapped_container().id
+        client_id = subprocess.run(  # noqa: S603 - 테스트 전용 client 컨테이너
+            [
+                "docker",
+                "run",
+                "-d",
+                "--network",
+                f"container:{server_id}",
+                "--entrypoint",
+                "tail",
+                ALPINE_POSTGIS_IMAGE,
+                "-f",
+                "/dev/null",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        setattr(container, _CLIENT_ATTRIBUTE, client_id)
+        try:
+            yield container
+        finally:
+            subprocess.run(  # noqa: S603 - 위에서 만든 client 컨테이너만 지운다
+                ["docker", "rm", "-f", client_id],
+                check=False,
+                capture_output=True,
+            )
+
+
+#: 서버 fixture에 붙여 두는 bootstrap client 컨테이너 id의 속성 이름.
+_CLIENT_ATTRIBUTE = "ktm_bootstrap_client_id"
+
+
+def _bootstrap_client(pg_container: Any) -> str:
+    """bootstrap 스크립트를 실행하는 alpine client 컨테이너(서버 network 공유)."""
+
+    return str(getattr(pg_container, _CLIENT_ATTRIBUTE))
 
 
 def _sync_dsn(raw_dsn: str, database: str) -> str:
@@ -489,7 +532,7 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
     bootstrap_user = make_url(raw_dsn).username
     assert bootstrap_user is not None
     target_dsn = _sync_dsn(raw_dsn, _DATABASE)
-    container_id = pg_container.get_wrapped_container().id
+    container_id = _bootstrap_client(pg_container)
     container_dsn = target_dsn.replace(
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
@@ -564,7 +607,7 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
 
     bootstrap_user = make_url(raw_dsn).username
     assert bootstrap_user is not None
-    container_id = pg_container.get_wrapped_container().id
+    container_id = _bootstrap_client(pg_container)
     container_dsn = _sync_dsn(raw_dsn, _DATABASE).replace(
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
