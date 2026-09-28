@@ -697,15 +697,22 @@ def test_geo_live_mode_is_probed_before_and_after() -> None:
         line for line in _run_gate_invocations() if "tests/integration" in line
     ]
     assert integration, "integration 게이트가 없다"
-    joined = "\n".join(integration)
-    # 사전/사후를 **따로** 요구한다. "geo_live_probe.py가 줄에 있는가"만 보면 한쪽만
-    # 지워도 통과한다 — 사후 단언이 남아 있어 문자열이 여전히 존재하기 때문이다.
-    assert "geo_live_probe.py || exit 96" in joined, (
-        "geo live 사전 probe가 없다 — live 모드 선언을 반증할 장치가 사라졌다"
-    )
-    assert "--assert-ran" in joined, (
-        "geo live 사후 단언이 없다 — 실행 도중 터널이 끊겨도 green이 된다"
-    )
+    # 게이트마다 따로 본다(lane이 둘이다, ADR-103). 모은 문자열에서 찾으면 한 lane의
+    # probe를 지워도 다른 lane의 것이 대신 만족시킨다(변이 R11·R11b가 실제로 살아남았다).
+    for line in integration:
+        # 사전/사후를 **따로** 요구한다. "geo_live_probe.py가 줄에 있는가"만 보면 한쪽만
+        # 지워도 통과한다 — 사후 단언이 남아 있어 문자열이 여전히 존재하기 때문이다.
+        assert "geo_live_probe.py || exit 96" in line, (
+            "geo live 사전 probe가 없다 — live 모드 선언을 반증할 장치가 사라졌다: "
+            + line.strip()[:80]
+        )
+        # 사후 단언은 **그 게이트가 쓴** 로그를 읽어야 한다.
+        log = re.search(r"> (/tmp/[\w.-]+\.log) 2>&1", line)
+        assert log is not None, line.strip()[:80]
+        assert f"--assert-ran {log.group(1)} " in line, (
+            "geo live 사후 단언이 없다 — 실행 도중 터널이 끊겨도 green이 된다: "
+            + line.strip()[:80]
+        )
 
 
 def test_integration_gates_cover_both_postgis_lanes() -> None:
