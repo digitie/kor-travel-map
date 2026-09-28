@@ -51,10 +51,15 @@ def pg_container() -> Iterator[Any]:
     (`postgres:16-alpine`)이 TCP로 붙는다. 스크립트의 절대 경로(`/usr/local/bin/psql`,
     `/usr/bin/sleep`)는 alpine client 계약이다. glibc 서버 이미지 안에서 돌리면 그
     경로가 없어 서버와 무관하게 죽는다(2026-09-28 glibc lane 실측).
+
+    client는 testcontainers가 띄우지 않으므로 회수를 셋에 건다: 이 fixture의
+    ``finally``, testcontainers가 자기 컨테이너에 붙이는 label(Ryuk가 session과 함께
+    거둔다), 그리고 ``--rm``과 끝나는 명령(Ryuk가 꺼진 채 프로세스가 죽어도 남지 않는다).
     """
 
     image = postgis_image()
     try:
+        from testcontainers.core.labels import create_labels
         from testcontainers.postgres import PostgresContainer
     except ImportError:
         pytest.skip("testcontainers not installed — integration tests are unavailable")
@@ -79,18 +84,27 @@ def pg_container() -> Iterator[Any]:
             )
         setattr(container, "pass" + "word", root_credential)
         server_id = container.get_wrapped_container().id
+        labels = [
+            argument
+            for key, value in create_labels(ALPINE_POSTGIS_IMAGE, None).items()
+            for argument in ("--label", f"{key}={value}")
+        ]
         client_id = subprocess.run(  # noqa: S603 - 테스트 전용 client 컨테이너
             [
                 "docker",
                 "run",
                 "-d",
+                "--rm",
+                "--name",
+                f"ktm-test-bootstrap-client-{uuid4().hex[:12]}",
+                *labels,
                 "--network",
                 f"container:{server_id}",
                 "--entrypoint",
-                "tail",
+                "sleep",
                 ALPINE_POSTGIS_IMAGE,
-                "-f",
-                "/dev/null",
+                # 이 모듈의 실행 시간보다 넉넉하되 끝이 있다.
+                "7200",
             ],
             check=True,
             capture_output=True,
