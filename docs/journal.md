@@ -1,5 +1,25 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
+
+Map DB를 공용 인스턴스로 옮기는 계획을 검토하다가, 공용 인스턴스가 오늘 새벽 한 번이 아니라 67시간 동안 다섯 번
+재시작했다는 것이 드러났다. 매번 로그는 "server process (PID N) exited with exit code 2"였고, 그 PID는 로그에 한
+줄도 남기지 않았다.
+
+원인을 네 갈래(PG 로그, 호스트·Docker 이벤트, 클라이언트, PG 16.9·moby 소스)로 조사하고 반박 검증을 붙였다. 결론은
+"백엔드가 죽은 것이 아니다"였다.
+- 컨테이너에 `init`이 없어 postmaster가 PID 1이다.
+- 헬스체크 `CMD-SHELL pg_isready`는 sh → Perl 래퍼 → 실제 pg_isready로 자식을 만든다.
+- 호스트가 멈칫하면(다섯 번 모두 Manager 재구축·chain17 중) 5초 timeout이 나고, Docker는 exec의 main PID인 `sh`만
+  죽인다. 남은 pg_isready는 postmaster에 입양되고, 서버가 응답하지 못하면 exit 2로 끝난다.
+- PG16 `CleanupBackend`는 BackendList를 찾기 전에 종료코드부터 보고 전체를 리셋한다.
+
+어제 Dagster에서 본 CMD-SHELL 고아와 같은 계열이다. Dagster에서는 좀비가 쌓였을 뿐인데, Postgres에서는 고아 하나가
+전 테넌트 재시작으로 증폭된다. `pg_postmaster_start_time()`은 크래시-재시작에서 바뀌지 않아 이 사건들을 가렸다.
+
+고침(`init: true`와 exec 형식 `pg_isready -t 2`)은 소유자가 지시한 공용 튜닝과 같은 재시작에 넣는다. Map을 옮기기 전에
+이것이 먼저 들어가야 Map이 이 위험을 물려받지 않는다.
+
 ## 2026-09-28 — M05가 끝까지 갔다: 마지막 벽은 부하가 아니라 PinVi의 빈 Dagster 저장소였다
 
 healthcheck 폭주를 잡은 뒤에도 M05의 PinVi `app-dagster`는 unhealthy였다. 부하 탓으로 보기 쉬웠지만 원인은

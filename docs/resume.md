@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-28 (저녁) — transport 개명 완료, 공용 PG 재시작 원인, Map DB 공용 이전 착수
+
+**다음 한 작업: Map DB를 공용 PostgreSQL(11000)로 옮긴다(소유자 결정 C).** 명세·런북을 확정했고, 구현 1차
+(Manager M1 펜스·MT 공용 튜닝, Map MP)가 돌고 있다. 그 뒤 M2(이전)와 이전 창이다.
+
+- **소유자 결정**:
+  - C: 위험을 받아들이고 옮긴다.
+  - superuser S1: 새 superuser 없이 기존 `shared_admin`을 Manager가 돌리는 Map 부트스트랩 one-shot에만 주입한다.
+    superuser가 필요한 것은 새 DB 부트스트랩 한 번뿐이다(bootstrap 게이트, untrusted 확장 postgis·pg_prewarm,
+    400의 확장 소유자 검사). 런타임은 비-superuser다.
+  - Map 정책대로 새로 재구축한다. 감사 dump와 옛 PGDATA는 보존하고, 검증 잔여 DB 4개는 옮기지 않는다.
+  - Map 전용 튜닝을 공용에도 적용한다(`shared_buffers` 1GB, work_mem 64MB, max_wal_size 2GB, pg_prewarm이 모든 DB,
+    shm 1gb, stop_grace 180s). 공용을 한 번 재시작해야 한다.
+  - `kor_travel_map` 연결 상한은 floor(0.4×사용 가능 슬롯) = 38이다.
+- **공용 PostgreSQL 반복 재시작 원인(유력, 적대 검증 유지)**:
+  - 09-25~28에 5번 "exit code 2" 뒤 전체 재시작이 있었다(각 1~7분).
+  - 실제 백엔드 크래시가 아니다. `init`이 없어 postmaster가 PID 1이다. 호스트 정체 때 `CMD-SHELL pg_isready`가
+    5초를 넘기면 Docker가 `sh`만 죽이고, 고아가 된 `pg_isready`(exit 2)를 postmaster가 입양한다. PG16은 모르는
+    자식의 비정상 종료도 크래시로 보고 클러스터를 리셋한다.
+  - 고침은 공용 서비스에 `init: true`와 exec 형식 `pg_isready -t 2`를 두는 것이다. 튜닝 재시작에 같이 넣는다.
+- **transport 배포 식별자 개명 cutover 완료**(12:24~12:33Z, transport #49 R=`b75fca1c`, 중단 약 1분).
+  - Manager #432(`e2d45d65`)로 target이 `transport`가 됐다.
+  - transport 백업은 Manager #430 role(16:50·17:15 UTC)로 옮겼다. 첫 dump 둘을 검증했다.
+  - 72시간 관찰 뒤 정리한다(그때까지 n150 prune 금지).
+- Manager #431: 백업 API 테스트의 `cancelled` flake를 고쳤다(TestClient가 요청마다 loop를 닫는 문제, 테스트만).
+
 ## 2026-09-28 — M05 격리 e2e 통과(p9), PinVi app-dagster 수정, 안 쓰는 전용 PostgreSQL 퇴역
 
 **다음 한 작업: transport 배포 식별자 개명 cutover(창 KST 21:30~23:00) → Manager transport 백업 역할 release →
