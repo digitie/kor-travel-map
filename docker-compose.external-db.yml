@@ -1,11 +1,11 @@
 # 외부(공유) DB 모드 오버레이.
 #
-# 붙을 대상은 `kor-travel-docker-manager`가 띄우는 **map 전용** PostgreSQL,
-# `kor-travel-map-postgres`(host **12700**, loopback 전용)다.
+# 붙을 대상은 `kor-travel-docker-manager`가 띄우는 PostgreSQL 안의 map 전용 DATABASE다 —
+# n150 prod는 공용 instance `kor-travel-shared-postgres`(host **11000**, loopback 전용,
+# ADR-103; Manager의 이전 창 전까지는 전용 `kor-travel-map-postgres` host 12700).
 #
-# ⚠️ `5432`도 `kor-travel-geo-postgres`도 아니다. 2026-08-17(docker-manager ADR-37)에
-#    PostgreSQL이 프로젝트별 전용 instance로 나뉘었다 — geo는 `12500`의 geo 전용이고
-#    `5432`를 듣는 것은 없다. 옛 문서를 보고 5432로 붙으면 연결 자체가 실패한다.
+# ⚠️ `5432`가 아니다. `5432`를 듣는 것은 없다 — 옛 문서를 보고 5432로 붙으면 연결 자체가
+#    실패한다.
 #
 # 포트를 정하는 별도 변수는 없다. 이 overlay는 포트를 조합하지 않고 아래
 # `..._PG_DSN`을 그대로 주입하므로 포트는 각 DSN 문자열 안에 있다.

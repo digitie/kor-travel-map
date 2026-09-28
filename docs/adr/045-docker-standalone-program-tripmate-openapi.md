@@ -6,6 +6,8 @@
 - **supersedes**: ADR-003의 함수 직접 호출 운영 모델, ADR-035의 "debug-ui"
   범위 표현 일부
 - **개정**: 2026-07-27 T-VN-43 — admin form dependency 계약을 실제 source 경계로 정렬
+- **개정**: 2026-09-28 [ADR-103](103-map-databases-on-the-shared-instance.md) — n150 prod에서
+  결정 1의 "독립 PostGIS DB"는 Manager 공용 instance 안의 전용 DATABASE다
 
 ### 컨텍스트
 

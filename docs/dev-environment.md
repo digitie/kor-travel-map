@@ -64,8 +64,10 @@ standalone `npm run docker:up` 경로가 아니라 Docker Manager의 production 
 **"runtime role의 write 권한이 0개"라는 틀린 결론**을 냈다(실제 94/84/82). 직접
 원인은 `127.0.0.1:5432`만 보고 어느 컨테이너가 그 포트를 갖는지 확인하지 않은 것이지만,
 **이름이 `ktm-`으로 시작하고 같은 이미지를 쓰는 컨테이너가 상시로 떠 있는 환경**이 그
-실수를 쉽게 만들었다. `docker ps` 목록에서 `kor-travel-map-postgres`(prod)와 나란히
-보이면 구별이 안 된다.
+실수를 쉽게 만들었다. `docker ps` 목록에서 `kor-travel-map-postgres`(당시 prod)와 나란히
+보이면 구별이 안 된다. ADR-103 이후 prod map DB는 공용 instance `kor-travel-shared-postgres`
+안에 있다 — 어느 instance가 정본인지는 컨테이너 이름이 아니라 실행 중인 Map API 컨테이너의
+DSN으로 확인한다.
 
 - 접두어는 **`tmp-`**를 쓴다. 목록에서 한눈에 갈린다.
 - **`--rm`을 기본으로** 띄운다. 종료와 함께 사라진다.

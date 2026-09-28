@@ -80,6 +80,9 @@ agent/skill 원문은 본 규칙의 예외다 — 원문 동기화 충실성을 
 ADR-045(2026-06-01) 이후 운영 모델은 **Docker 독립 프로그램 + 독립 DB/Dagster +
 OpenAPI 경계**다. 외부 소비자는 kor-travel-map DB에 직접 접근하거나 `kor-travel-map`을
 운영 코드에서 직접 import하지 않고, OpenAPI 기반 HTTP 계약으로만 호출한다.
+ADR-103(2026-09-28)부터 n150 prod의 "독립 DB"는 Manager 공용 PostgreSQL instance 안의
+**전용 DATABASE**다(전용 instance가 아니다). 경계는 그대로다 — 다른 프로젝트 role은 Map DB에
+CONNECT할 수 없고, 외부 소비자는 여전히 OpenAPI로만 닿는다.
 
 REST/OpenAPI backend는 별도 Python 패키지 `kor-travel-map-api`, admin UI는
 `kor-travel-map-admin`로 분리되어 있다(ADR-055). API/Dagster 내부에서는 메인
@@ -101,7 +104,7 @@ REST/OpenAPI backend는 별도 Python 패키지 `kor-travel-map-api`, admin UI�
 | Python import (REST API) | `from kortravelmap.api import ...` — 별도 dist kor-travel-map-api 내부에서만; 메인 라이브러리 `src/kortravelmap`에는 `.api` 하위 패키지 없음 (ADR-055) |
 | CLI 명령 | `ktmctl ...` |
 | 환경변수 prefix | `KOR_TRAVEL_MAP_*` (env는 underscore 표준 유지) |
-| PostgreSQL DB 이름 (개발/운영 기본) | `kor_travel_map` (ADR-045 — 공유 DB 아님) |
+| PostgreSQL DB 이름 (개발/운영 기본) | `kor_travel_map` (ADR-045 — 공유 DB 아님. n150 prod에서는 공용 instance 안의 전용 DATABASE, ADR-103) |
 | Dagster metadata DB 기본 | `kor_travel_map_dagster` |
 | Postgres schema | `feature`, `provider_sync`, `ops` (kor-travel-map 내부 schema 분리) |
 | PostGIS extension schema | `x_extension` (ADR-008) |
@@ -180,7 +183,9 @@ CLI `codegraph callers`/`impact`/`callees`. 신규 파일만 추가하고 기존
   `kor-travel-map`을 직접 import하지 않는다.
 - 외부 소비자는 kor-travel-map PostgreSQL/PostGIS DB에 직접 연결하지 않는다.
 - kor-travel-map은 Docker 독립 프로그램으로 실행되며 독립 DB(`kor_travel_map`)와 독립
-  Dagster metadata DB(`kor_travel_map_dagster`)를 가진다.
+  Dagster metadata DB(`kor_travel_map_dagster`)를 가진다. n150 prod에서 두 DB는 Manager
+  공용 instance 안의 전용 DATABASE다(ADR-103) — 순서가 digest·lock·Python 비교에 들어가는
+  text 키는 `COLLATE "C"`로 고정한다(prod collation은 glibc `en_US.utf8`).
 - OpenAPI는 우선 admin UI 기준으로 작성하고, 외부 연동 시 필요한 공개/사용자
   API를 보완·확장한다.
 - `AsyncKorTravelMapClient`는 kor-travel-map API/Dagster 내부 구현과 테스트용 Python API로
