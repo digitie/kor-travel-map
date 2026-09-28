@@ -12,6 +12,13 @@
 - `scripts/n150/adjudicate.sh`·`repin.sh`는 Map API 컨테이너에서 DB 접근을 유도한다. `/root` 사본은 MP 머지 뒤
   재설치해야 한다(`scripts/n150/README.md` §설치, 0700 root, sha256 대조).
 - MP는 OpenAPI 스냅숏을 바꾸지 않는다 — PinVi pair 계약 preflight가 그대로 통과한다.
+- 적대 리뷰 반영(journal 참조): adjudicate 양성 대조, n150 스크립트의 API 컨테이너 조회를 D2 러너의 compose
+  project로, repin의 source 값 대조, 효과 기반 인스턴스 탐지기, 두 lane의 수동 workflow·로컬 게이트.
+  수동 `postgis-only.yml` 두 lane 초록(run 36421797357).
+  - PR을 열 때 본문에 CI `integration` 두 leg의 URL을 적는다(required check가 없다).
+  - 남은 것(Map 밖): 이동 창 사전 점검(스펙 §4.1 A0/A5)에 실행 중인 공용 컨테이너 `.Image`와
+    `tests/integration/_postgis_image.py`의 `SHARED_GLIBC_POSTGIS_IMAGE` 대조 한 줄. API 이미지의
+    `python -I -c 'import asyncpg'` smoke는 `docker-images.yml`이 OCI만 내보내 따로 load가 필요해 미뤘다.
 
 ## 2026-09-28 (저녁) — transport 개명 완료, 공용 PG 재시작 원인, Map DB 공용 이전 착수
 

@@ -34,6 +34,28 @@ Manager ADR-52). 이동 자체는 Manager의 창에서 하고, 이 PR은 Map 쪽
 - 두 수정 뒤 n150 전량(`0fd7de1c`): glibc **1161 passed / 12 skipped / 0 failed**, alpine 1154 passed / 18 skipped /
   1 failed(`test_public_partial_indexes_have_exact_state_predicate_and_explain_proof` — 단독 재실행은 이 브랜치와
   main 모두 passed). unit·lint 세션의 실패 16건은 main과 같은 집합이다(node_modules 없는 체크아웃·git 아닌 트리).
+- 적대 리뷰 반영:
+  - **adjudicate 잔여물 측정의 양성 대조.** 종전 테스트는 빈 스키마에서 키 넷과 0만 봐서, 늘 0을 내는 프로그램도
+    초록이었다(n150 실측: 변이 `always_zero`·`no_wildcards`·`count_nothing`·`WHERE true` 넷이 살아남았다). 0은 이
+    판정에서 위험한 방향이다 — `clear-blocked`가 잔여물이 남은 lane을 지운다. 세어야 할 행은 migrated DB에 둘 수
+    없다: session이 나눠 쓰고, `ops.feature_requests`는 삭제가 막혔고, alias CHECK가 `e2e_live_acceptance::`를
+    거부한다. 그래서 같은 cluster에 버리는 DB를 만들고, 프로그램이 읽는 열만 실제 타입(catalog에서 읽는다)으로
+    만들어 `ktm_feature_schema_owner`로 커밋해 둔다. 소유 이름은 D2 fixture의 `_admin_fixture_name`에서 온다.
+    그 run_id의 네 줄이 모두 1, 다른 run_id는 소유분 0이다. 위 넷과 `SET LOCAL ROLE` 제거까지 다섯 변이가 모두 빨갛다.
+  - n150 스크립트 셋(`repin.sh`·`chain16.sh` M01·`adjudicate.sh`)이 Map API 컨테이너를 D2 러너와 같은 compose
+    project(`/opt/kor-travel-docker-manager`)에서 정확히 하나로 찾는다. service 라벨만으로는 같은 라벨을 단 다른
+    stack을 집고, chain16은 `head -1`이었다.
+  - `repin.sh` 3단계는 임시 파일을 소비자처럼 `set -a; .`로 읽은 값이 API DSN과 같을 때만 rename한다. 문자 검사는
+    `~`를 받는데 대입의 `:` 뒤 `~`는 tilde 확장된다(`:~:pw@` → `:/root:pw@`). 옛 read-back은 바이트를 비교해 통과했다.
+  - 인스턴스 탐지기를 이름에서 효과로 옮겼다: PostgreSQL client, DSN `host:port/`, port flag, 유도한 API가 아닌
+    곳으로의 `docker exec`. 공용 instance의 이름으로 적은 줄도 이제 빨갛다.
+  - 수동 `postgis-only.yml`과 로컬 `verify-all-gates.sh`도 glibc lane을 돈다. 게이트가 둘이 되자 geo live probe
+    검사가 두 줄을 합쳐 보던 탓에 변이 R11·R11b가 살아남았다(n150 전량에서 드러남). 이제 게이트마다, 그 게이트가
+    쓴 로그로 사후 단언을 요구한다. `test_ci_workflows`는 통합 suite를 도는 모든 workflow job에 두 lane이 있는지
+    본다. bootstrap client 컨테이너는 testcontainers label(Ryuk)·`--rm`·`sleep 7200`을 갖는다.
+  - 결과: GitHub `postgis-only.yml` dispatch(`3234b3d1`, run 36421797357) glibc **1162 passed / 12 skipped**, alpine
+    **1156 passed / 18 skipped**. `ci.yml`의 두 leg는 PR이 열려야 돈다. n150 대상 실행은 두 lane 모두 count 모듈
+    3 passed, bootstrap 모듈 19 passed(client 잔여 0).
 
 ## 2026-09-28 (저녁) — 공용 PostgreSQL은 크래시한 것이 아니라 고아를 입양했다
 
