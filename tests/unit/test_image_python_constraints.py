@@ -130,7 +130,14 @@ def test_every_pin_satisfies_the_declared_ranges() -> None:
 @pytest.mark.parametrize("relative", _DOCKERFILES)
 def test_dockerfile_project_installs_read_the_constraints(relative: str) -> None:
     text = (_ROOT / relative).read_text(encoding="utf-8")
-    builder = text.split("\nFROM ", 1)[0]
+    stages = re.split(r"^FROM\s", text, flags=re.MULTILINE)
+    builders = [
+        stage
+        for stage in stages
+        if re.match(r"\S+\s+AS\s+builder\s*$", stage.split("\n", 1)[0])
+    ]
+    assert len(builders) == 1, f"{relative}: builder stage를 하나로 찾지 못했다"
+    builder = builders[0]
     # continuation을 풀어 RUN 하나를 한 줄로 본다.
     joined = re.sub(r"\\\n\s*", " ", builder)
     installs = [
