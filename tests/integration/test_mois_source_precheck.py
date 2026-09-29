@@ -200,7 +200,15 @@ async def test_mois_membership_without_source_sync_is_rejected(
     assert excinfo.value.precheck.job_name == MOIS_SOURCE_SYNC_JOB_NAME
     assert len(probe.requests) == 1
     assert probe.requests[0]["variables"] == {
-        "filter": {"pipelineName": MOIS_SOURCE_SYNC_JOB_NAME}
+        "filter": {
+            "pipelineName": MOIS_SOURCE_SYNC_JOB_NAME,
+            "tags": [
+                {
+                    "key": ".dagster/repository",
+                    "value": "__repository__@kortravelmap.dagster.definitions",
+                }
+            ],
+        }
     }
 
 

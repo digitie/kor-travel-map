@@ -16,16 +16,24 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const QUIESCENCE_SAFETY_MARGIN_MS = 2_000;
 
+/**
+ * Map code location selector — `docker/workspace.yaml`의 `location_name`이 정본이다
+ * (`tests/unit/test_dagster_code_location_is_one_name.py`가 결박). 공유 Dagster
+ * webserver에서 다른 프로젝트의 repository를 읽지 않도록 조회를 이것으로 좁힌다.
+ */
+const MAP_DAGSTER_REPOSITORY_SELECTOR = {
+  repositoryName: "__repository__",
+  repositoryLocationName: "kortravelmap.dagster.definitions",
+} as const;
+
 const SENSOR_DISCOVERY_QUERY = `
-query C7QueueSensorDiscovery {
-  repositoriesOrError {
+query C7QueueSensorDiscovery($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
-        name
-        location { name }
-        sensors { name }
-      }
+    ... on Repository {
+      name
+      location { name }
+      sensors { name }
     }
   }
 }
@@ -427,20 +435,18 @@ export class QueueSensorController {
     const data = await this.#postGraphql(
       "discover_sensor",
       SENSOR_DISCOVERY_QUERY,
-      {},
+      { repositorySelector: MAP_DAGSTER_REPOSITORY_SELECTOR },
     );
-    const root = asRecord(data.repositoriesOrError);
-    if (root?.__typename !== "RepositoryConnection") {
+    const root = asRecord(data.repositoryOrError);
+    if (root?.__typename !== "Repository") {
       throw sensorError("DISCOVERY_RESULT_ERROR", "discover_sensor", root?.__typename);
     }
 
     const matches: QueueSensorSelector[] = [];
-    for (const nodeValue of asArray(root.nodes)) {
-      const node = asRecord(nodeValue);
-      const repositoryName = stringValue(node?.name);
-      const locationName = stringValue(asRecord(node?.location)?.name);
-      if (!repositoryName || !locationName) continue;
-      for (const sensorValue of asArray(node?.sensors)) {
+    const repositoryName = stringValue(root.name);
+    const locationName = stringValue(asRecord(root.location)?.name);
+    if (repositoryName && locationName) {
+      for (const sensorValue of asArray(root.sensors)) {
         const sensorName = stringValue(asRecord(sensorValue)?.name);
         if (sensorName === this.#sensorName) {
           matches.push({

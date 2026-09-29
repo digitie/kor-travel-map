@@ -13,7 +13,7 @@ import { type ReactNode, useMemo } from "react";
 import { useDedupReviews } from "@/api/dedup";
 import { useOpsMetrics } from "@/api/ops";
 import {
-  DAGSTER_UI_URL,
+  DAGSTER_UI_LOCATION_URL,
   usePipelineExecutions,
   usePipelineOverview,
 } from "@/api/pipeline";
@@ -290,7 +290,7 @@ function HomePageClientView({
           </Button>
           <a
             className={cn(buttonVariants({ variant: "outline" }))}
-            href={DAGSTER_UI_URL}
+            href={DAGSTER_UI_LOCATION_URL}
             rel="noreferrer"
             target="_blank"
           >

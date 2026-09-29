@@ -670,44 +670,50 @@ def _counts() -> PipelineStatusCounts:
     )
 
 
+# 공유 Dagster webserver에서도 Map code location만 읽는다 — 조회 variables의 기대값.
+_MAP_REPOSITORY_SELECTOR: dict[str, str] = {
+    "repositoryName": "__repository__",
+    "repositoryLocationName": "kortravelmap.dagster.definitions",
+}
+_MAP_REPOSITORY_RUN_TAG: dict[str, str] = {
+    "key": ".dagster/repository",
+    "value": "__repository__@kortravelmap.dagster.definitions",
+}
+
 _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
     "data": {
-        "repositoriesOrError": {
-            "__typename": "RepositoryConnection",
-            "nodes": [
+        "repositoryOrError": {
+            "__typename": "Repository",
+            "name": "__repository__",
+            "location": {"name": "kortravelmap.dagster.definitions"},
+            "schedules": [
                 {
-                    "name": "__repository__",
-                    "location": {"name": "kortravelmap.dagster.definitions"},
-                    "schedules": [
-                        {
-                            "name": ("feature_weather_kma_short_forecast_hourly_schedule"),
-                            "cronSchedule": "20 * * * *",
-                            "pipelineName": "feature_weather_kma_short_forecast_job",
-                            "mode": "default",
-                            "executionTimezone": "Asia/Seoul",
-                            "defaultStatus": "RUNNING",
-                            "canReset": True,
-                            "scheduleState": {
-                                "id": "state-1::selector",
-                                "selectorId": "sel-1",
-                                "status": "RUNNING",
-                                "repositoryName": "__repository__",
-                                "repositoryLocationName": ("kortravelmap.dagster.definitions"),
-                                "ticks": [],
-                            },
-                        }
-                    ],
-                    "sensors": [
-                        {
-                            "name": "feature_update_request_queue_sensor",
-                            "sensorState": {"status": "RUNNING", "ticks": []},
-                        },
-                        {
-                            "name": "feature_update_request_failure_sensor",
-                            "sensorState": {"status": "STOPPED", "ticks": []},
-                        },
-                    ],
+                    "name": ("feature_weather_kma_short_forecast_hourly_schedule"),
+                    "cronSchedule": "20 * * * *",
+                    "pipelineName": "feature_weather_kma_short_forecast_job",
+                    "mode": "default",
+                    "executionTimezone": "Asia/Seoul",
+                    "defaultStatus": "RUNNING",
+                    "canReset": True,
+                    "scheduleState": {
+                        "id": "state-1::selector",
+                        "selectorId": "sel-1",
+                        "status": "RUNNING",
+                        "repositoryName": "__repository__",
+                        "repositoryLocationName": ("kortravelmap.dagster.definitions"),
+                        "ticks": [],
+                    },
                 }
+            ],
+            "sensors": [
+                {
+                    "name": "feature_update_request_queue_sensor",
+                    "sensorState": {"status": "RUNNING", "ticks": []},
+                },
+                {
+                    "name": "feature_update_request_failure_sensor",
+                    "sensorState": {"status": "STOPPED", "ticks": []},
+                },
             ],
         }
     }
@@ -717,28 +723,24 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
 def _single_schedule_payload(schedule_name: str, job_name: str) -> dict[str, Any]:
     return {
         "data": {
-            "repositoriesOrError": {
-                "__typename": "RepositoryConnection",
-                "nodes": [
+            "repositoryOrError": {
+                "__typename": "Repository",
+                "name": "__repository__",
+                "location": {"name": "kortravelmap.dagster.definitions"},
+                "schedules": [
                     {
-                        "name": "__repository__",
-                        "location": {"name": "kortravelmap.dagster.definitions"},
-                        "schedules": [
-                            {
-                                "name": schedule_name,
-                                "cronSchedule": "0 0 * * *",
-                                "pipelineName": job_name,
-                                "mode": "default",
-                                "executionTimezone": "Asia/Seoul",
-                                "defaultStatus": "STOPPED",
-                                "canReset": True,
-                                "scheduleState": {
-                                    "status": "STOPPED",
-                                    "repositoryName": "__repository__",
-                                    "repositoryLocationName": ("kortravelmap.dagster.definitions"),
-                                },
-                            }
-                        ],
+                        "name": schedule_name,
+                        "cronSchedule": "0 0 * * *",
+                        "pipelineName": job_name,
+                        "mode": "default",
+                        "executionTimezone": "Asia/Seoul",
+                        "defaultStatus": "STOPPED",
+                        "canReset": True,
+                        "scheduleState": {
+                            "status": "STOPPED",
+                            "repositoryName": "__repository__",
+                            "repositoryLocationName": ("kortravelmap.dagster.definitions"),
+                        },
                     }
                 ],
             }
@@ -749,7 +751,7 @@ def _single_schedule_payload(schedule_name: str, job_name: str) -> dict[str, Any
 _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
     "data": {
         "version": "1.13.7",
-        "repositoriesOrError": _SCHEDULES_GRAPHQL_PAYLOAD["data"]["repositoriesOrError"],
+        "repositoryOrError": _SCHEDULES_GRAPHQL_PAYLOAD["data"]["repositoryOrError"],
         "runsOrError": {
             "__typename": "Runs",
             "results": [
@@ -1192,7 +1194,11 @@ def test_overview_combines_db_counts_and_dagster(
 
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == pipeline_mod._PIPELINE_OVERVIEW_QUERY
-        assert kwargs["variables"] == {"limit": 5}
+        assert kwargs["variables"] == {
+            "limit": 5,
+            "repositorySelector": _MAP_REPOSITORY_SELECTOR,
+            "runsFilter": {"tags": [_MAP_REPOSITORY_RUN_TAG]},
+        }
         return _RUNS_GRAPHQL_PAYLOAD
 
     monkeypatch.setattr(pipeline_mod, "get_pipeline_status_counts", _fake_counts)
@@ -2121,7 +2127,10 @@ def test_dagster_runs_panel_parses_runs(
 ) -> None:
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == pipeline_mod._PIPELINE_DAGSTER_RUNS_QUERY
-        assert kwargs["variables"] == {"limit": 5}
+        assert kwargs["variables"] == {
+            "limit": 5,
+            "runsFilter": {"tags": [_MAP_REPOSITORY_RUN_TAG]},
+        }
         return {"data": {"runsOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["runsOrError"]}}
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
@@ -2454,7 +2463,12 @@ def test_mois_source_sync_precheck_filters_exact_job_and_checks_fresh_success(
 ) -> None:
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == mois_source_precheck._QUERY
-        assert kwargs["variables"] == {"filter": {"pipelineName": "mois_localdata_source_sync"}}
+        assert kwargs["variables"] == {
+            "filter": {
+                "pipelineName": "mois_localdata_source_sync",
+                "tags": [_MAP_REPOSITORY_RUN_TAG],
+            }
+        }
         now = datetime.now(UTC).timestamp()
         return {
             "data": {

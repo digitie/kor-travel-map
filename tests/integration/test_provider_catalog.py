@@ -988,9 +988,9 @@ async def test_exact_set_gate_is_immune_to_operations_committed_by_other_tests(
 def _empty_schedule_payload() -> dict[str, object]:
     return {
         "data": {
-            "repositoriesOrError": {
-                "__typename": "RepositoryConnection",
-                "nodes": [{"schedules": []}],
+            "repositoryOrError": {
+                "__typename": "Repository",
+                "schedules": [],
             }
         }
     }

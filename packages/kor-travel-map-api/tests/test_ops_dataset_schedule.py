@@ -16,9 +16,9 @@ def _tags(operation_key: str) -> list[dict[str, str]]:
 def _payload(schedules: list[dict[str, object]]) -> dict[str, object]:
     return {
         "data": {
-            "repositoriesOrError": {
-                "__typename": "RepositoryConnection",
-                "nodes": [{"schedules": schedules}],
+            "repositoryOrError": {
+                "__typename": "Repository",
+                "schedules": schedules,
             }
         }
     }

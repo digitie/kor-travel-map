@@ -1163,12 +1163,20 @@ class ApiSettings(BaseSettings):
     dagster_repository_name: str = Field(
         default="__repository__",
         min_length=1,
-        description="Dagster GraphQL launch selector repositoryName.",
+        description=(
+            "Dagster GraphQL repositoryName. launch selector이자 조회 범위다 — "
+            "repository·schedule·run 조회를 전부 이 repository로 좁힌다."
+        ),
     )
     dagster_repository_location_name: str = Field(
         default="kortravelmap.dagster.definitions",
         min_length=1,
-        description="Dagster GraphQL launch selector repositoryLocationName.",
+        description=(
+            "Dagster GraphQL repositoryLocationName(``docker/workspace.yaml``의 "
+            "``location_name``이 정본). webserver 하나가 여러 프로젝트를 싣는 공유 "
+            "Dagster plane에서도 Map 것만 보도록 repository·schedule·run 조회를 전부 "
+            "이 code location으로 좁힌다."
+        ),
     )
     backup_root: Path = Field(
         default=Path("data/backups"),

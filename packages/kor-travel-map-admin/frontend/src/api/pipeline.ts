@@ -40,6 +40,19 @@ export const DAGSTER_UI_URL = publicUrlEnv(
   "http://127.0.0.1:12702",
 );
 
+/**
+ * Map의 Dagster code location 이름 — `docker/workspace.yaml`의 `location_name`이
+ * 정본이다(`tests/unit/test_dagster_code_location_is_one_name.py`가 결박).
+ */
+export const DAGSTER_CODE_LOCATION = "kortravelmap.dagster.definitions";
+
+/**
+ * Dagster UI의 이 code location 화면. webserver 하나가 여러 프로젝트를 싣는 공유
+ * plane에서도 Map 정의만 보이고, 프로젝트별 webserver에서도 같은 경로가 유효하다
+ * (`__repository__` repository는 경로에 location 이름만 쓴다).
+ */
+export const DAGSTER_UI_LOCATION_URL = `${DAGSTER_UI_URL.replace(/\/+$/, "")}/locations/${encodeURIComponent(DAGSTER_CODE_LOCATION)}`;
+
 type Schemas = components["schemas"];
 
 export type PipelineOverviewResponse = Schemas["PipelineOverviewResponse"];

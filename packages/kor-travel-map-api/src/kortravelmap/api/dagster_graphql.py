@@ -31,6 +31,7 @@ __all__ = [
     "DagsterUrlConfigurationError",
     "DagsterUrls",
     "JsonDict",
+    "REPOSITORY_RUN_TAG_KEY",
     "as_dict",
     "candidate_graphql_url",
     "dagster_urls",
@@ -41,6 +42,7 @@ __all__ = [
     "parse_run_detail",
     "parse_runs",
     "post_graphql",
+    "repository_connection",
 ]
 
 JsonDict = dict[str, Any]
@@ -100,10 +102,54 @@ _FILE_DOWNLOAD_SCHEDULE_HINTS = {
 }
 
 
+#: Dagster가 **모든** run에 생성 시점에 다는 tag(`dagster/_core/storage/dagster_run.py`).
+#: 값은 ``<repository>@<location>``이다. 공유 webserver에서 run 조회를 이 저장소의
+#: code location으로 좁히는 손잡이다.
+REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
+
+
 @dataclass(frozen=True)
 class DagsterUrls:
+    """Map API가 말을 거는 Dagster — endpoint와 그 안의 **Map code location**.
+
+    webserver 하나가 여러 프로젝트의 code location을 싣는 공유 plane에서는 URL만으로
+    대상이 정해지지 않는다. 그래서 조회는 전부 이 repository selector로 좁힌다
+    (``repositoryOrError`` · ``runsOrError(filter: {tags})``). 프로젝트별 webserver에서도
+    같은 selector가 유일한 repository를 가리키므로 오늘 배포와 호환된다.
+    """
+
     dagster_url: str
     graphql_url: str
+    repository_name: str
+    repository_location_name: str
+
+    def repository_selector(self) -> dict[str, str]:
+        """GraphQL ``RepositorySelector`` — ``repositoryOrError``와 launch selector의 공통 부분."""
+
+        return {
+            "repositoryName": self.repository_name,
+            "repositoryLocationName": self.repository_location_name,
+        }
+
+    def repository_run_tag(self) -> dict[str, str]:
+        """이 code location의 run만 고르는 ``ExecutionTag``."""
+
+        return {
+            "key": REPOSITORY_RUN_TAG_KEY,
+            "value": f"{self.repository_name}@{self.repository_location_name}",
+        }
+
+    def runs_filter(self, **fields: object) -> dict[str, object]:
+        """``RunsFilter``에 이 code location의 repository tag를 더한다.
+
+        호출자가 준 ``tags``가 있으면 뒤에 합친다 — Dagster는 tag 조건을 AND로 본다.
+        """
+
+        extra_tags = fields.pop("tags", None)
+        tags: list[object] = [self.repository_run_tag()]
+        if isinstance(extra_tags, list):
+            tags.extend(extra_tags)
+        return {**fields, "tags": tags}
 
 
 class DagsterUrlConfigurationError(ValueError):
@@ -165,7 +211,12 @@ def dagster_urls(settings: ApiSettings) -> DagsterUrls:
         allowed_hosts=allowed_hosts,
         require_graphql_path=True,
     )
-    return DagsterUrls(dagster_url=dagster_url.rstrip("/"), graphql_url=graphql_url)
+    return DagsterUrls(
+        dagster_url=dagster_url.rstrip("/"),
+        graphql_url=graphql_url,
+        repository_name=settings.dagster_repository_name,
+        repository_location_name=settings.dagster_repository_location_name,
+    )
 
 
 def as_dict(value: object) -> JsonDict:
@@ -386,6 +437,20 @@ def _parse_asset_groups(raw_assets: list[object]) -> list[DagsterAssetGroup]:
     ]
 
 
+def repository_connection(raw_repository: JsonDict) -> JsonDict:
+    """``repositoryOrError`` 결과를 ``parse_repositories``가 읽는 connection 모양으로 편다.
+
+    조회는 selector로 이 저장소의 repository **하나**만 받는다. 파서는 connection의
+    ``nodes``를 돌므로 ``Repository``는 원소 하나짜리 connection이 되고, 오류 타입
+    (``RepositoryNotFoundError``·``PythonError``)은 ``message``를 가진 채 그대로
+    지나가 파서의 오류 경로를 탄다.
+    """
+
+    if raw_repository.get("__typename") == "Repository":
+        return {"__typename": "RepositoryConnection", "nodes": [raw_repository]}
+    return raw_repository
+
+
 def parse_repositories(
     raw_connection: JsonDict,
     *,
@@ -537,6 +602,21 @@ def parse_run_detail(
                     "Dagster Run 응답의 runId가 요청과 일치하지 않습니다: "
                     f"{raw_run_id}"
                 ),
+            )
+        # run id는 instance 전역에서 유일하다. 공유 webserver에서는 다른 프로젝트의
+        # run도 id로 조회되므로, 이 code location의 run이 아니면 없는 것으로 답한다.
+        run_repository = _parse_run_summary(raw_run).tags.get(REPOSITORY_RUN_TAG_KEY)
+        expected_repository = dagster_urls.repository_run_tag()["value"]
+        if run_repository is not None and run_repository != expected_repository:
+            return DagsterRunDetailData(
+                status="not_found",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                errors=[
+                    "이 code location의 Dagster run이 아닙니다: "
+                    f"{raw_run_id} ({run_repository})"
+                ],
             )
 
         raw_event_connection = raw_run.get("eventConnection")

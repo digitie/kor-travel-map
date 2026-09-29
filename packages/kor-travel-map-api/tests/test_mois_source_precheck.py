@@ -81,7 +81,16 @@ async def test_fetch_precheck_uses_exact_job_and_accepts_fresh_full_coverage(
     async def _post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == mois_source_precheck._QUERY
         assert kwargs["variables"] == {
-            "filter": {"pipelineName": mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME}
+            "filter": {
+                "pipelineName": mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME,
+                # 공유 webserver에서 다른 프로젝트의 같은 이름 job을 고르지 않는다.
+                "tags": [
+                    {
+                        "key": ".dagster/repository",
+                        "value": "__repository__@kortravelmap.dagster.definitions",
+                    }
+                ],
+            }
         }
         return _payload()
 

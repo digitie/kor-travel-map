@@ -50,3 +50,24 @@ def test_opinet_assets_share_serial_api_pool() -> None:
 def test_krex_notice_asset_uses_serial_snapshot_pool() -> None:
     """10분 schedule run이 겹쳐도 snapshot load/reconcile 순서가 역전되지 않는다."""
     assert feature_notice_krex_traffic_notices.node_def.pool == KREX_NOTICE_SNAPSHOT_POOL
+
+
+def test_every_pool_in_the_code_location_is_tenant_prefixed() -> None:
+    """pool 이름공간은 instance 전역이다 — 공유 plane에서 다른 프로젝트와 슬롯을 나누지 않는다.
+
+    실제로 로드되는 정의(``defs``)의 모든 op/asset pool을 센다. 선언 자리를 소스에서
+    찾으면 새 모듈의 pool을 놓친다.
+    """
+
+    from kortravelmap.dagster.assets import MAP_POOL_PREFIX
+    from kortravelmap.dagster.definitions import defs
+
+    pools: set[str] = set()
+    for job in defs.resolve_all_job_defs():
+        for node in job.graph.iterate_op_defs():
+            if node.pool:
+                pools.add(node.pool)
+    # 하한: OpiNet·KREX notice·geo-heavy 세 pool을 실제로 봤다.
+    assert {OPINET_API_POOL, KREX_NOTICE_SNAPSHOT_POOL} <= pools, pools
+    assert len(pools) >= 3, pools
+    assert all(pool.startswith(MAP_POOL_PREFIX) for pool in pools), sorted(pools)

@@ -125,7 +125,9 @@ async def fetch_mois_source_sync_precheck(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"filter": {"pipelineName": MOIS_SOURCE_SYNC_JOB_NAME}},
+            variables={
+                "filter": dagster_urls.runs_filter(pipelineName=MOIS_SOURCE_SYNC_JOB_NAME)
+            },
             query=_QUERY,
         )
     except httpx.HTTPError as exc:

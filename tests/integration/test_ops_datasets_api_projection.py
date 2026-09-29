@@ -785,26 +785,22 @@ def _schedule_payload() -> dict[str, Any]:
     assert schedule_tags[ops_dataset_schedule.OPERATION_KEY_TAG] == _TARGET_OPERATION
     return {
         "data": {
-            "repositoriesOrError": {
-                "__typename": "RepositoryConnection",
-                "nodes": [
+            "repositoryOrError": {
+                "__typename": "Repository",
+                "schedules": [
                     {
-                        "schedules": [
-                            {
-                                "name": _SCHEDULE_NAME,
-                                "pipelineName": _TARGET_OPERATION,
-                                "tags": [
-                                    {"key": key, "value": value}
-                                    for key, value in sorted(schedule_tags.items())
-                                ],
-                                "scheduleState": {"status": "RUNNING"},
-                                "futureTicks": {
-                                    "results": [{"timestamp": _SCHEDULE_TICK}]
-                                },
-                            }
-                        ]
+                        "name": _SCHEDULE_NAME,
+                        "pipelineName": _TARGET_OPERATION,
+                        "tags": [
+                            {"key": key, "value": value}
+                            for key, value in sorted(schedule_tags.items())
+                        ],
+                        "scheduleState": {"status": "RUNNING"},
+                        "futureTicks": {
+                            "results": [{"timestamp": _SCHEDULE_TICK}]
+                        },
                     }
-                ],
+                ]
             }
         }
     }

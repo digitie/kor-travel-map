@@ -63,38 +63,34 @@ _NONTERMINAL_RUN_STATUSES: Final = (
 _TERMINAL_RUN_STATUSES: Final = frozenset({"SUCCESS", "FAILURE", "CANCELED"})
 
 _INSTIGATIONS_QUERY: Final = """
-query KorTravelMapWriterDrainInstigations {
-  repositoriesOrError {
+query KorTravelMapWriterDrainInstigations($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
+    ... on Repository {
+      name
+      location { name }
+      schedules {
         name
-        location { name }
-        schedules {
-          name
-          scheduleState {
-            id selectorId status repositoryName repositoryLocationName
-          }
+        scheduleState {
+          id selectorId status repositoryName repositoryLocationName
         }
-        sensors {
-          name
-          sensorState {
-            id selectorId status repositoryName repositoryLocationName
-          }
+      }
+      sensors {
+        name
+        sensorState {
+          id selectorId status repositoryName repositoryLocationName
         }
       }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError { message }
   }
 }
 """
 
 _NONTERMINAL_RUNS_QUERY: Final = """
-query KorTravelMapWriterDrainRuns($limit: Int!) {
-  runsOrError(
-    filter: {statuses: [QUEUED, NOT_STARTED, STARTED, MANAGED, CANCELING]},
-    limit: $limit
-  ) {
+query KorTravelMapWriterDrainRuns($limit: Int!, $runsFilter: RunsFilter!) {
+  runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs { results { runId status } }
     ... on PythonError { message }
@@ -306,14 +302,14 @@ def _snapshot_digest(
 async def _post(
     *,
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     query: str,
     variables: dict[str, object],
 ) -> dict[str, object]:
     try:
         payload = await dagster_graphql.post_graphql(
             client=http_client,
-            graphql_url=graphql_url,
+            graphql_url=dagster.graphql_url,
             query=query,
             variables=variables,
         )
@@ -328,16 +324,19 @@ async def _post(
 
 
 async def _list_instigations(
-    *, http_client: httpx.AsyncClient, graphql_url: str
+    *, http_client: httpx.AsyncClient, dagster: dagster_graphql.DagsterUrls
 ) -> tuple[WriterDrainInstigationSnapshot, ...]:
     data = await _post(
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         query=_INSTIGATIONS_QUERY,
-        variables={},
+        variables={"repositorySelector": dagster.repository_selector()},
     )
-    connection = data.get("repositoriesOrError")
-    if not isinstance(connection, dict) or connection.get("__typename") != "RepositoryConnection":
+    raw_repository = data.get("repositoryOrError")
+    connection = dagster_graphql.repository_connection(
+        raw_repository if isinstance(raw_repository, dict) else {}
+    )
+    if connection.get("__typename") != "RepositoryConnection":
         raise WriterDrainCommandError("DAGSTER_PROTOCOL")
     nodes = connection.get("nodes")
     if not isinstance(nodes, list):
@@ -409,13 +408,17 @@ async def _list_instigations(
 
 
 async def _list_nonterminal_runs(
-    *, http_client: httpx.AsyncClient, graphql_url: str
+    *, http_client: httpx.AsyncClient, dagster: dagster_graphql.DagsterUrls
 ) -> tuple[tuple[str, str], ...]:
     data = await _post(
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         query=_NONTERMINAL_RUNS_QUERY,
-        variables={"limit": _MAX_NONTERMINAL_RUNS},
+        variables={
+            "limit": _MAX_NONTERMINAL_RUNS,
+            # 공유 webserver에서 다른 프로젝트의 run을 끊지 않도록 이 code location으로 좁힌다.
+            "runsFilter": dagster.runs_filter(statuses=list(_NONTERMINAL_RUN_STATUSES)),
+        },
     )
     result = data.get("runsOrError")
     if not isinstance(result, dict) or result.get("__typename") != "Runs":
@@ -438,11 +441,11 @@ async def _list_nonterminal_runs(
 
 
 async def _query_run_status(
-    *, http_client: httpx.AsyncClient, graphql_url: str, run_id: str
+    *, http_client: httpx.AsyncClient, dagster: dagster_graphql.DagsterUrls, run_id: str
 ) -> str:
     data = await _post(
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         query=_RUN_STATUS_QUERY,
         variables={"runId": run_id},
     )
@@ -469,7 +472,7 @@ def _selector(instigation: WriterDrainInstigation) -> dict[str, str]:
 async def _mutate_instigation(
     *,
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     instigation: WriterDrainInstigation,
     start: bool,
 ) -> None:
@@ -503,7 +506,7 @@ async def _mutate_instigation(
         state_key = "sensorState"
     data = await _post(
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         query=query,
         variables=variables,
     )
@@ -518,11 +521,11 @@ async def _mutate_instigation(
 
 
 async def _terminate_run_once(
-    *, http_client: httpx.AsyncClient, graphql_url: str, run_id: str
+    *, http_client: httpx.AsyncClient, dagster: dagster_graphql.DagsterUrls, run_id: str
 ) -> str:
     data = await _post(
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         query=_TERMINATE_RUN_MUTATION,
         variables={"runId": run_id},
     )
@@ -606,13 +609,13 @@ async def _pause_instigations(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> None:
     instigations = await _verify_snapshot(session_factory=session_factory, lease=lease)
     observed = {
         (item.kind, item.selector_id): item
-        for item in await _list_instigations(http_client=http_client, graphql_url=graphql_url)
+        for item in await _list_instigations(http_client=http_client, dagster=dagster)
     }
     _require(
         set(observed) == {(item.kind, item.selector_id) for item in instigations},
@@ -635,7 +638,7 @@ async def _pause_instigations(
             continue
         await _mutate_instigation(
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             instigation=instigation,
             start=False,
         )
@@ -653,10 +656,10 @@ async def _observe_nonterminal_runs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> tuple[tuple[str, str], ...]:
-    runs = await _list_nonterminal_runs(http_client=http_client, graphql_url=graphql_url)
+    runs = await _list_nonterminal_runs(http_client=http_client, dagster=dagster)
     async with session_factory() as session, session.begin():
         for run_id, status in runs:
             await upsert_writer_drain_run(
@@ -672,7 +675,7 @@ async def _record_terminal_runs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> None:
     async with session_factory() as session:
@@ -682,7 +685,7 @@ async def _record_terminal_runs(
             continue
         status = await _query_run_status(
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             run_id=run.dagster_run_id,
         )
         _require(status in _TERMINAL_RUN_STATUSES, "RUN_DRAIN_NOT_TERMINAL")
@@ -699,13 +702,13 @@ async def _assert_drained(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> int:
     instigations = await _verify_snapshot(session_factory=session_factory, lease=lease)
     observed = {
         (item.kind, item.selector_id): item
-        for item in await _list_instigations(http_client=http_client, graphql_url=graphql_url)
+        for item in await _list_instigations(http_client=http_client, dagster=dagster)
     }
     _require(
         set(observed) == {(item.kind, item.selector_id) for item in instigations},
@@ -718,14 +721,14 @@ async def _assert_drained(
     runs = await _observe_nonterminal_runs(
         session_factory=session_factory,
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         lease=lease,
     )
     _require(not runs, "RUN_DRAIN_NOT_TERMINAL")
     await _record_terminal_runs(
         session_factory=session_factory,
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         lease=lease,
     )
     async with session_factory() as session:
@@ -741,7 +744,7 @@ async def _cancel_remaining_runs_once(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
     runs: tuple[tuple[str, str], ...],
 ) -> None:
@@ -757,7 +760,7 @@ async def _cancel_remaining_runs_once(
         try:
             status = await _terminate_run_once(
                 http_client=http_client,
-                graphql_url=graphql_url,
+                dagster=dagster,
                 run_id=run_id,
             )
         except WriterDrainCommandError as exc:
@@ -790,7 +793,7 @@ async def _drain_runs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     settings: ApiSettings,
     lease: WriterDrainLease,
 ) -> None:
@@ -799,7 +802,7 @@ async def _drain_runs(
         runs = await _observe_nonterminal_runs(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
         if not runs:
@@ -810,7 +813,7 @@ async def _drain_runs(
     await _cancel_remaining_runs_once(
         session_factory=session_factory,
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         lease=lease,
         runs=runs,
     )
@@ -819,7 +822,7 @@ async def _drain_runs(
         runs = await _observe_nonterminal_runs(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
         if not runs:
@@ -831,7 +834,7 @@ async def _drain_runs(
         await _cancel_remaining_runs_once(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
             runs=runs,
         )
@@ -889,13 +892,13 @@ async def _restore_instigations(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> None:
     instigations = await _verify_snapshot(session_factory=session_factory, lease=lease)
     observed = {
         (item.kind, item.selector_id): item
-        for item in await _list_instigations(http_client=http_client, graphql_url=graphql_url)
+        for item in await _list_instigations(http_client=http_client, dagster=dagster)
     }
     _require(
         set(observed) == {(item.kind, item.selector_id) for item in instigations},
@@ -918,7 +921,7 @@ async def _restore_instigations(
             continue
         await _mutate_instigation(
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             instigation=instigation,
             start=True,
         )
@@ -936,13 +939,13 @@ async def _assert_restored(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     lease: WriterDrainLease,
 ) -> int:
     instigations = await _verify_snapshot(session_factory=session_factory, lease=lease)
     observed = {
         (item.kind, item.selector_id): item
-        for item in await _list_instigations(http_client=http_client, graphql_url=graphql_url)
+        for item in await _list_instigations(http_client=http_client, dagster=dagster)
     }
     _require(
         set(observed) == {(item.kind, item.selector_id) for item in instigations},
@@ -964,11 +967,11 @@ async def _execute_begin(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     settings: ApiSettings,
     request: WriterDrainRequest,
 ) -> WriterDrainReceipt:
-    snapshot = await _list_instigations(http_client=http_client, graphql_url=graphql_url)
+    snapshot = await _list_instigations(http_client=http_client, dagster=dagster)
     lease = await _begin_lease(
         session_factory=session_factory,
         request=request,
@@ -1006,20 +1009,20 @@ async def _execute_begin(
         await _pause_instigations(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
         await _drain_runs(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             settings=settings,
             lease=lease,
         )
         terminal_cancel_count = await _assert_drained(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
     except WriterDrainCommandError as exc:
@@ -1042,7 +1045,7 @@ async def _execute_attest(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     request: WriterDrainRequest,
 ) -> WriterDrainReceipt:
     lease = await _load_lease_for_request(session_factory=session_factory, request=request)
@@ -1067,7 +1070,7 @@ async def _execute_attest(
     terminal_cancel_count = await _assert_drained(
         session_factory=session_factory,
         http_client=http_client,
-        graphql_url=graphql_url,
+        dagster=dagster,
         lease=lease,
     )
     return await _finalize_drained(
@@ -1083,7 +1086,7 @@ async def _execute_restore(
     *,
     session_factory: async_sessionmaker[AsyncSession],
     http_client: httpx.AsyncClient,
-    graphql_url: str,
+    dagster: dagster_graphql.DagsterUrls,
     request: WriterDrainRequest,
 ) -> WriterDrainReceipt:
     lease = await _load_lease_for_request(session_factory=session_factory, request=request)
@@ -1121,13 +1124,13 @@ async def _execute_restore(
         await _restore_instigations(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
         terminal_cancel_count = await _assert_restored(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=graphql_url,
+            dagster=dagster,
             lease=lease,
         )
     except WriterDrainCommandError as exc:
@@ -1174,7 +1177,7 @@ async def execute_writer_drain(
         return await _execute_begin(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=urls.graphql_url,
+            dagster=urls,
             settings=settings,
             request=request,
         )
@@ -1182,12 +1185,12 @@ async def execute_writer_drain(
         return await _execute_attest(
             session_factory=session_factory,
             http_client=http_client,
-            graphql_url=urls.graphql_url,
+            dagster=urls,
             request=request,
         )
     return await _execute_restore(
         session_factory=session_factory,
         http_client=http_client,
-        graphql_url=urls.graphql_url,
+        dagster=urls,
         request=request,
     )
