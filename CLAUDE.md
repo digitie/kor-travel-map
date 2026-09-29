@@ -38,8 +38,8 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
   ⚠️ **Postgres `5432`는 저장소 standalone 스택 기준이다.** n150 prod에서 geo·weather·
   concierge·pinvi·transport는 공용 `kor-travel-shared-postgres` **`11000`**에 있고(옛 전용
-  12500·12600·12800은 퇴역), **map도 그 공용 instance 안의 전용 DATABASE로 옮긴다
-  (ADR-103, 2026-09-28 결정)** — 이전 창(Manager ADR-53) 전까지는 전용 인스턴스 `12700`이다.
+  12500·12600·12800은 퇴역), **map도 2026-09-29 그 공용 instance 안의 전용 DATABASE로
+  옮겼다(ADR-103, Manager ADR-53)** — 옛 전용 인스턴스 `12700`은 멈춰 두었고(PGDATA 보존) 운영에서 쓰지 않는다.
   **prod에 `5432`를 듣는 것은 없다.** map DB의 port를 외워 쓰지 말고 Map API 컨테이너의
   DSN에서 유도한다(`scripts/n150/`가 그렇게 한다). 자세히는 `docs/integration-map.md`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

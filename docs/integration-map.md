@@ -29,13 +29,13 @@
 | **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **공용 PostGIS**(map 포함, ADR-103)·RustFS·관측 스택 소유 | PostGIS 공용 **11000**(map 전용 12700은 이전 창에서 퇴역, 아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35·ADR-53 |
 | (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
 
-> ⚠️ **n150 prod의 PostgreSQL은 공용 instance 하나로 모인다 (ADR-103, Manager ADR-53).**
-> 2026-09-28 결정 시점의 실측은 두 인스턴스였고, map의 이전은 Manager의 이전 창에서 한다.
+> ⚠️ **n150 prod의 PostgreSQL은 공용 instance 하나다 (ADR-103, Manager ADR-53).**
+> map은 2026-09-29 10:48~11:33Z 이전 창에서 옮겼다(Part A 공용 튜닝 재시작 → Part B 이전, V1~V9 통과).
 >
 > | 포트 | 컨테이너 | 담는 것 | listen |
 > |---|---|---|---|
-> | **11000** | `kor-travel-shared-postgres` (`postgis/postgis:16-3.5`, 실행 image `sha256:8b33190b…`) | `kor_travel_geo`·`kor_travel_weather`·`kor_travel_transport`·`kor_travel_concierge`·`pinvi`와 각 `_dagster`, **이전 뒤 `kor_travel_map`·`kor_travel_map_dagster`** | `127.0.0.1` |
-> | 12700 | `kor-travel-map-postgres` | **이전 창 전까지** `kor_travel_map` · `_dagster` (+ 검증 잔여 `ktm_40b`·`ktm_bootstrap`·`ktm_gcverify*`). 이전 뒤 퇴역, PGDATA는 롤백용으로 보존 | `127.0.0.1` |
+> | **11000** | `kor-travel-shared-postgres` (`postgis/postgis:16-3.5`, 실행 image `sha256:8b33190b…`) | `kor_travel_geo`·`kor_travel_weather`·`kor_travel_transport`·`kor_travel_concierge`·`pinvi`와 각 `_dagster`, **`kor_travel_map`·`kor_travel_map_dagster`(2026-09-29부터)** | `127.0.0.1` |
+> | ~~12700~~ | `kor-travel-map-postgres` | **2026-09-29 멈춤(exited, 컨테이너·PGDATA 보존)** — 이전 전 `kor_travel_map` · `_dagster`와 검증 잔여 `ktm_40b`·`ktm_bootstrap`·`ktm_gcverify*`. 72시간 관찰·소유자 수락 뒤 컨테이너만 제거(PGDATA는 롤백용으로 계속 보존) | — |
 >
 > 2026-08-17부터 한동안은 프로젝트마다 전용 인스턴스(geo 12500 · concierge 12600 · map 12700 ·
 > pinvi 12800)였다. 그 뒤 map 외에는 공용 11000으로 옮겼고, 2026-09-28 Manager #429가 옛 전용
