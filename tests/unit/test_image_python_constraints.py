@@ -67,6 +67,36 @@ _REQUIRED = _DAGSTER_FAMILY | {
     "psycopg2-binary",
     "asyncpg",
 }
+#: 한 줄 안의 셸 명령 경계. 줄바꿈은 ``splitlines``가 나눈다.
+_COMMAND_SEPARATOR = re.compile(r"&&|\|\||;")
+_CONSTRAINT_FLAGS = frozenset({"-c", "--constraint"})
+
+
+def _shell_commands(text: str) -> list[str]:
+    """continuation을 풀고 줄·``&&``·``||``·``;``로 나눈 셸 명령들."""
+
+    joined = re.sub(r"\\\n\s*", " ", text)
+    return [
+        command.strip()
+        for line in joined.splitlines()
+        for command in _COMMAND_SEPARATOR.split(line)
+        if command.strip()
+    ]
+
+
+def _command_tokens(command: str) -> list[str]:
+    """셸 토큰. ``#`` 뒤는 주석이라 버린다 — 주석 속 ``-c``는 설치를 묶지 않는다."""
+
+    return shlex.split(command, comments=True)
+
+
+def _reads_constraints(tokens: list[str]) -> bool:
+    pairs = zip(tokens, tokens[1:], strict=False)
+    return f"--constraint={_CONSTRAINTS_RELATIVE}" in tokens or any(
+        flag in _CONSTRAINT_FLAGS and value == _CONSTRAINTS_RELATIVE for flag, value in pairs
+    )
+
+
 _PIN_LINE = re.compile(r"^(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?P<version>[0-9][0-9A-Za-z.+-]*)$")
 
 
@@ -134,32 +164,79 @@ def test_every_pin_satisfies_the_declared_ranges() -> None:
     assert checked >= 8, checked
 
 
-@pytest.mark.parametrize("relative", _DOCKERFILES)
-def test_dockerfile_project_installs_read_the_constraints(relative: str) -> None:
-    text = (_ROOT / relative).read_text(encoding="utf-8")
-    stages = re.split(r"^FROM\s", text, flags=re.MULTILINE)
+def _builder_install_violations(text: str) -> list[str]:
+    """Dockerfile builder stage의 프로젝트 설치가 constraints를 읽는지 본다.
+
+    ``#`` 줄은 Dockerfile 주석이라 먼저 버린다 — 주석 속 ``COPY``·``-c``는 세지 않는다.
+    """
+
+    uncommented = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    stages = re.split(r"^FROM\s", uncommented, flags=re.MULTILINE)
     builders = [
         stage
         for stage in stages
         if re.match(r"\S+\s+AS\s+builder\s*$", stage.split("\n", 1)[0])
     ]
-    assert len(builders) == 1, f"{relative}: builder stage를 하나로 찾지 못했다"
+    if len(builders) != 1:
+        return ["builder stage를 하나로 찾지 못했다"]
     builder = builders[0]
-    # continuation을 풀어 RUN 하나를 한 줄로 본다.
-    joined = re.sub(r"\\\n\s*", " ", builder)
-    installs = [
-        line
-        for line in joined.splitlines()
-        if "pip install" in line and "--prefix=/install" in line
+    # continuation을 풀고 `&&`·`||`·`;`로 나눠 명령 하나씩 본다.
+    installs = [command for command in _shell_commands(builder) if "--prefix=/install" in command]
+    if not installs:
+        return ["프로젝트 설치를 찾지 못했다 — 게이트가 공허하다"]
+    violations = [
+        f"constraints를 읽지 않는다: {command}"
+        for command in installs
+        if not _reads_constraints(_command_tokens(command))
     ]
-    assert installs, f"{relative}: 프로젝트 설치를 찾지 못했다 — 게이트가 공허하다"
-    for line in installs:
-        for command in line.split("&&"):
-            if "--prefix=/install" in command:
-                assert f"-c {_CONSTRAINTS_RELATIVE}" in command, (relative, command)
     copy_line = f"COPY {_CONSTRAINTS_RELATIVE} ./{_CONSTRAINTS_RELATIVE}"
-    assert copy_line in builder, f"{relative}: builder가 constraints를 COPY하지 않는다"
-    assert builder.index(copy_line) < builder.index("--prefix=/install"), relative
+    if copy_line not in builder:
+        violations.append("builder가 constraints를 COPY하지 않는다")
+    elif builder.index(copy_line) > builder.index("--prefix=/install"):
+        violations.append("constraints COPY가 설치보다 뒤다")
+    return violations
+
+
+@pytest.mark.parametrize("relative", _DOCKERFILES)
+def test_dockerfile_project_installs_read_the_constraints(relative: str) -> None:
+    text = (_ROOT / relative).read_text(encoding="utf-8")
+    assert _builder_install_violations(text) == [], relative
+
+
+_BUILDER = """\
+FROM python AS builder
+COPY docker/constraints-dagster.txt ./docker/constraints-dagster.txt
+RUN python -m pip install --upgrade pip \\
+    && python -m pip install --prefix=/install \\
+        -c docker/constraints-dagster.txt .
+FROM python AS runtime
+"""
+_BUILDER_TAIL = "-c docker/constraints-dagster.txt .\n"
+
+
+@pytest.mark.parametrize(
+    ("dockerfile", "violations"),
+    [
+        (_BUILDER, 0),
+        # `;`로 이은 두 번째 설치는 constraints 없이 돈다.
+        (
+            _BUILDER.replace(
+                _BUILDER_TAIL, _BUILDER_TAIL[:-1] + " ; pip install --prefix=/install ./x\n"
+            ),
+            1,
+        ),
+        # 주석 속 `-c`는 설치를 묶지 않는다.
+        (_BUILDER.replace(_BUILDER_TAIL, ". # -c docker/constraints-dagster.txt\n"), 1),
+        # 주석 처리된 COPY는 COPY가 아니다.
+        (_BUILDER.replace("COPY docker/", "# COPY docker/"), 1),
+    ],
+)
+def test_builder_install_detector_rejects_unconstrained_installs(
+    dockerfile: str, violations: int
+) -> None:
+    assert len(_builder_install_violations(dockerfile)) == violations
 
 
 def _repository_installs(text: str) -> tuple[list[str], list[str]]:
@@ -170,27 +247,31 @@ def _repository_installs(text: str) -> tuple[list[str], list[str]]:
     돌려주는 것은 (저장소 설치 전부, 그중 constraints를 읽지 않는 것).
     """
 
-    joined = re.sub(r"\\\n\s*", " ", text)
     installs: list[str] = []
     unconstrained: list[str] = []
-    for line in joined.splitlines():
-        for raw_command in line.split("&&"):
-            command = raw_command.strip()
-            command = re.sub(r"^(?:-\s+)?(?:run:\s*)?", "", command)
-            if "pip install" not in command:
-                continue
-            arguments = shlex.split(command.split("pip install", 1)[1], comments=True)
-            targets = [
-                argument
-                for argument in arguments
-                if argument == "."
-                or argument.startswith((".[", "./", "packages/"))
-            ]
-            if not targets:
-                continue
-            installs.append(command)
-            if f"-c {_CONSTRAINTS_RELATIVE}" not in command:
-                unconstrained.append(command)
+    for raw_command in _shell_commands(text):
+        command = re.sub(r"^(?:-\s+)?(?:run:\s*)?", "", raw_command)
+        if "pip install" not in command:
+            continue
+        # 주석을 뺀 토큰에서 `pip install` 뒤의 인자를 본다.
+        tokens = _command_tokens(command)
+        starts = [
+            index + 2
+            for index in range(len(tokens) - 1)
+            if tokens[index] in {"pip", "pip3"} and tokens[index + 1] == "install"
+        ]
+        if not starts:
+            continue
+        targets = [
+            argument
+            for argument in tokens[starts[0] :]
+            if argument == "." or argument.startswith((".[", "./", "packages/"))
+        ]
+        if not targets:
+            continue
+        installs.append(command)
+        if not _reads_constraints(tokens):
+            unconstrained.append(command)
     return installs, unconstrained
 
 
@@ -217,6 +298,18 @@ def test_workflow_repository_installs_read_the_constraints() -> None:
         ("run: pip install . \\\n  ./packages/kor-travel-map-api\n", 1),
         ("run: python -m pip install --upgrade pip\n", 0),
         ('run: pip install -c docker/constraints-dagster.txt -e ".[dev]"\n', 0),
+        # 주석 속 `-c`는 설치를 묶지 않는다.
+        ('run: pip install -e ".[dev]"  # -c docker/constraints-dagster.txt\n', 1),
+        # `;`·`||`·줄바꿈으로 이은 두 번째 설치도 각자 본다.
+        (
+            "run: pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api;"
+            " pip install -e packages/kor-travel-map-dagster\n",
+            1,
+        ),
+        ("run: pip install ruff || pip install -e packages/kor-travel-map-api\n", 1),
+        ("run: |\n  pip install ruff\n  pip install -e .\n", 1),
+        # 주석 줄의 설치는 설치가 아니다.
+        ("run: |\n  # pip install -e .\n  pip install ruff\n", 0),
     ],
 )
 def test_workflow_install_detector_rejects_unconstrained_installs(
