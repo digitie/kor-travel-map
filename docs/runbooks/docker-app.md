@@ -215,11 +215,11 @@ job은 `dagster/max_runtime=7200` run tag로 2시간 상한을 적용한다. 이
 `docs/deploy-runbook.local.md`를 따른다.
 
 같은 설정의 `concurrency.pools`는 pool 기본 한도를 run 단위 1개로 둔다. 현재
-`feature_place_opinet_stations`와 `feature_price_opinet_stations`가 같은 `opinet_api`
+`feature_place_opinet_stations`와 `feature_price_opinet_stations`가 같은 `kor_travel_map.opinet_api`
 pool을 사용하므로 둘을 동시에 수동 실행해도 하나만 시작해야 한다. 배포 후 Dagster UI/API에서
 두 OpiNet run을 함께 제출해 둘 다 즉시 `STARTED`가 되면 이미지의
 `$DAGSTER_HOME/dagster.yaml` 반영 여부를 먼저 확인한다.
-KREX notice도 별도 `krex_notice_snapshot` pool을 사용해 snapshot reconcile을 직렬화한다.
+KREX notice도 별도 `kor_travel_map.krex_notice_snapshot` pool을 사용해 snapshot reconcile을 직렬화한다.
 여기에 KREX notice 10분 schedule은 같은 provider/dataset tag의 `QUEUED`/`STARTING`/
 `STARTED`/`CANCELING` run이 있으면 해당 tick을 skip해 새 backlog 생성을 예방한다. Dagster
 schedule tick 상세의 skip 사유에는 기존 run 상태와 id가 남는다. 이는 배포 전에 이미 쌓인

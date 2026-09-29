@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### 공유 Dagster plane 준비 — 정확한 이미지 버전과 code location 범위 조회 (2026-09-29)
+
+- **CHANGED (이미지)**: API·Dagster 이미지가 `docker/constraints-dagster.txt`(`pip install -c`)로 공유 plane의
+  정확한 버전 집합을 설치한다 — dagster family 1.13.24, dagster-postgres 0.29.24, grpcio 1.84.0, pydantic 2.13.5,
+  SQLAlchemy 2.0.54, psycopg 3.3.6, psycopg2-binary 2.9.13, asyncpg 0.31.0. 재빌드가 공유 host보다 높은
+  dagster를 끌어오지 못한다. pyproject의 범위 선언은 그대로다.
+- **CHANGED (API)**: Dagster GraphQL 조회가 전부 Map code location(`dagster_repository_name`/
+  `dagster_repository_location_name`)으로 좁혀진다 — `repositoryOrError(repositorySelector)`, `runsOrError`는
+  `.dagster/repository` tag filter. writer drain은 다른 프로젝트의 schedule/sensor를 멈추거나 run을 끊지 않고,
+  run 상세는 다른 code location의 run을 `not_found`로 답한다. 프로젝트별 webserver에서도 같은 결과다.
+- **CHANGED (admin UI)**: 운영 홈의 Dagster 링크가 `/locations/kortravelmap.dagster.definitions`로 간다.
+- **CHANGED (Dagster)**: Map pool 이름에 `kor_travel_map.` 접두사를 단다(`opinet_api` →
+  `kor_travel_map.opinet_api` 등). pool 이름공간이 instance 전역이기 때문이다. 배포 직후 옛 이름 슬롯을 잡고 있던
+  run과 새 이름의 run이 한 번 겹칠 수 있다.
+
 ### Dagster healthcheck를 exec 형식으로 (2026-09-27)
 
 - **FIXED (compose)**: `dagster`·`dagster-code-server`·`dagster-daemon`의 healthcheck가 exec 형식(`python -I`,

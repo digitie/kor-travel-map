@@ -272,7 +272,7 @@ scope/member 상태 동기화, 중복 정리, 종료·재개를 같은 DB transa
 envelope와 dependency pin을 정렬한 뒤에도 lifecycle의 destructive 종료 경계에서 독립 검증을
 유지한다. `realTimeSMSList`는 provider 계약대로 다건 list와 단건 object를 모두 허용한다.
 
-10분 schedule보다 한 run이 오래 걸릴 수 있으므로 asset은 `krex_notice_snapshot` Dagster
+10분 schedule보다 한 run이 오래 걸릴 수 있으므로 asset은 `kor_travel_map.krex_notice_snapshot` Dagster
 pool을 사용한다. `docker/dagster.yaml`의 run 단위 기본 한도 1이 snapshot fetch부터
 원자 apply까지 직렬화해, 늦게 끝난 이전 run이 새 snapshot 결과를 다시 덮는 순서 역전을
 막는다. load 전 preflight는 0046 scope의 `applied_at`과 sync cursor의

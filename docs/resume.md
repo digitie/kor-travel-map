@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-29 — 공유 Dagster plane Map 준비(stage 0 + 3.1): 브랜치 `feat/dagster-shared-stage0`
+
+**다음 한 작업: 브랜치를 CI 전량으로 확인하고 적대 리뷰 뒤 머지 → 다음 Map+PinVi pinned pair(chain17)로 배포.**
+배포 뒤 확인: 세 컨테이너의 `site-packages`가 constraints와 같은지, admin 운영 홈·pipeline 화면이 그대로인지.
+
+- 이미지: `docker/constraints-dagster.txt`(정확한 버전 집합)를 API·Dagster Dockerfile이 `-c`로 읽는다. 올릴 때는 공유
+  host 이미지 먼저, 이 파일 나중.
+- API/UI/C7/게이트의 Dagster 조회는 Map code location으로 좁혀졌다(journal 참조). pool은 `kor_travel_map.` 접두사.
+- D4: Map은 DB에만 켜진 instigator가 없다(읽기 전용 확인). 남은 판단: run-status sensor의 `monitor_all_code_locations`.
+
 ## 2026-09-29 — Map DB 공용 PostgreSQL 이전 완료
 
 **다음 한 작업: 72시간 관찰(~2026-10-02 11:30Z) 뒤 소유자 수락을 받아 12700 컨테이너 은퇴(§4.6, 수동, PGDATA 보존).**

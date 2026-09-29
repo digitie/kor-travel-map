@@ -26,7 +26,8 @@ def _workspace_location() -> str:
     entries = document["load_from"]
     assert len(entries) == 1, entries
     name = entries[0]["grpc_server"]["location_name"]
-    assert isinstance(name, str) and name
+    assert isinstance(name, str)
+    assert name
     return name
 
 
