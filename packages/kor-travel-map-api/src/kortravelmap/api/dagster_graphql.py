@@ -121,7 +121,7 @@ class DagsterUrls:
 
     webserver 하나가 여러 프로젝트의 code location을 싣는 공유 plane에서는 URL만으로
     대상이 정해지지 않는다. 그래서 조회는 전부 이 repository selector로 좁힌다
-    (``repositoryOrError`` · ``runsOrError(filter: {tags})``). 프로젝트별 webserver에서도
+    (``repositoryOrError``와 ``runsOrError``의 repository tag filter). 프로젝트별 webserver에서도
     같은 selector가 유일한 repository를 가리키므로 오늘 배포와 호환된다.
     """
 
