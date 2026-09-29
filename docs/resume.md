@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-09-29 — Map DB 공용 PostgreSQL 이전 완료
+
+**다음 한 작업: 72시간 관찰(~2026-10-02 11:30Z) 뒤 소유자 수락을 받아 12700 컨테이너 은퇴(§4.6, 수동, PGDATA 보존).**
+관찰은 n150 `sudo MOVE_DIR=/root/map-db-move-20260929 bash /root/map-db-move-20260929/bin/40-monitor.sh <SINCE>`
+(30분마다, ALARM은 기록용). 되돌리기는 같은 디렉터리의 `30-rollback.sh move`.
+
+- Map `kor_travel_map`·`kor_travel_map_dagster`가 이제 `kor-travel-shared-postgres`(11000) 안에 있다(ADR-103, Manager ADR-53).
+- Manager: #438 MT(공용 튜닝: shared_buffers 1GB·work_mem 64MB·max_wal_size 2GB·pg_prewarm 모든 DB·shm 1gb),
+  #439 M2(이전: S1 — 새 superuser 없이 `shared_admin`을 부트스트랩 one-shot에만 secret 파일로, 백업 role 공용으로, D10).
+  설치본 `3b282a7a`. 그 전 #434(stop grace·--no-deps), #435 M1(펜스·격리·연결 상한 38).
+- 창(2026-09-29, `F:\dev\handoff\window\` 스크립트): Part A 10:25Z 공용 재생성(A7 20분 게이트 통과, 크래시 0·DSM 0) →
+  Part B fence 10:55Z(감사 dump 12700에서) → M2 설치·env(DSN→11000) → rebuild(adopt, 3분, deployed) →
+  verify V1~V7 0 FAIL → chain16 V8(ACL 40/40, D1 11, D2 passed) → backup V9(공용에서 dump, sha256 OK). 11:33Z 완료.
+- 이전 직후 감시: 0 ALARM(연결 26/97, Map run 32 SUCCESS, prewarm leader 1, 백업 정상).
+- Map 데이터는 정책대로 새로 재구축했다(features 0행이었다). 옛 ops·Dagster 이력은 감사 dump와 보존된 12700 PGDATA에 있다.
+
 ## 2026-09-28 — MP(Map DB 공용 이전의 Map 쪽 준비): 브랜치 `fix/shared-instance-readiness`
 
 **다음 한 작업: MP를 CI 두 leg(alpine·glibc) 초록 + 적대 리뷰로 머지 → n150 호스트 스크립트를 MP SHA에서

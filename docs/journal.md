@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-29 — Map DB를 공용 PostgreSQL로 옮겼다
+
+소유자가 위험을 받아들이고(결정 C) Map 전용 인스턴스(12700)를 공용 인스턴스(11000)로 합치기로 했다. superuser는 새로
+만들지 않았다(S1): Map 부트스트랩이 superuser를 요구하는 것은 새 DB를 만들 때 한 번뿐이라, Manager가 그 one-shot에만
+공용 admin 자격증명을 secret 파일로 넣는다(n150 Compose v5.2.0에서 env·inspect·argv에 드러나지 않음을 먼저 실험으로 확인).
+Map 전용 튜닝(1GB 버퍼, 모든 DB prewarm 등)은 소유자 지시로 공용 인스턴스 전체에 적용했다.
+
+순서가 곧 안전장치였다. 먼저 Manager M1(펜스: 인스턴스 admin 소유 DB는 절대 drop하지 않는다, rebuild는 PostgreSQL 서비스를
+재생성하지 않는다, Map DB는 PUBLIC CONNECT를 닫고 연결 상한을 건다)을 넣고 12700에서 새 pair로 검증했다. 공용 튜닝(MT)과
+이전(M2)은 창 안에서만 머지·설치했다 — main에 미설치로 두면 누군가의 설치가 공용 재생성을 무장시키기 때문이다.
+
+창은 스크립트로 돌았다. 공용 재생성은 CHECKPOINT·`stop --time 300`·설정 read-back·20분 tenant 게이트로 감쌌고, 이전은
+writer fence → 12700에서 감사 dump → 12700 clean stop(보존) → M2 설치·`.env` 편집(G 잠금) → `--adopt-live-databases`
+rebuild → V1~V9로 갔다. 공용 인스턴스의 반복 재시작 원인(고아가 된 헬스체크 프로세스를 PID 1 postmaster가 입양)은
+전날 다른 세션의 Manager #433이 이미 막아 두었다.
+
 ## 2026-09-29 — MP 적대 리뷰 2차: compose 경고로 새던 비밀 조각, 탐지기 다듬기, fixture 대상 대조
 
 - **MED(둘, 같은 결함)**: `repin.sh` 3단계와 `chain16.sh` E 단계가 Map API를 `docker compose … ps`로
