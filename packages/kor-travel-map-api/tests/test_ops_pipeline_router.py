@@ -341,6 +341,14 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     )
 
 
+# Dagster GraphQL ``Run``의 실제 모양 — hidden ``.dagster/*`` tag는 ``tags``에 오지 않고,
+# 소속 code location은 ``repositoryOrigin``으로 온다(n150 1.13.24 실측).
+_MAP_RUN_ORIGIN: dict[str, str] = {
+    "repositoryName": "__repository__",
+    "repositoryLocationName": "kortravelmap.dagster.definitions",
+}
+
+
 def _malformed_run_detail_payload(case: str) -> dict[str, Any]:
     event_connection: object = {
         "cursor": None,
@@ -352,6 +360,7 @@ def _malformed_run_detail_payload(case: str) -> dict[str, Any]:
         "runId": "run-1",
         "status": "SUCCESS",
         "tags": [],
+        "repositoryOrigin": _MAP_RUN_ORIGIN,
         "eventConnection": event_connection,
     }
     if case == "missing_run_id":
@@ -2129,9 +2138,15 @@ def test_dagster_runs_panel_parses_runs(
         assert kwargs["query"] == pipeline_mod._PIPELINE_DAGSTER_RUNS_QUERY
         assert kwargs["variables"] == {
             "limit": 5,
+            "repositorySelector": _MAP_REPOSITORY_SELECTOR,
             "runsFilter": {"tags": [_MAP_REPOSITORY_RUN_TAG]},
         }
-        return {"data": {"runsOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["runsOrError"]}}
+        return {
+            "data": {
+                "repositoryOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["repositoryOrError"],
+                "runsOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["runsOrError"],
+            }
+        }
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
@@ -2142,6 +2157,34 @@ def test_dagster_runs_panel_parses_runs(
     assert data["status"] == "ok"
     assert data["run_counts"] == {"FAILURE": 1, "SUCCESS": 1}
     assert [run["run_id"] for run in data["runs"]] == ["run-1", "run-2"]
+
+
+@pytest.mark.unit
+def test_dagster_runs_panel_reports_a_missing_code_location(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """location 이름이 틀리면 tag filter는 0건이다 — 빈 목록 "ok"로 답하지 않는다."""
+
+    async def _fake_post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "data": {
+                "repositoryOrError": {
+                    "__typename": "RepositoryNotFoundError",
+                    "message": "Could not find Repository nope.__repository__",
+                },
+                "runsOrError": {"__typename": "Runs", "results": []},
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.get("/v1/ops/pipeline/dagster-runs?limit=5")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "error"
+    assert data["runs"] == []
+    assert data["errors"] == ["Could not find Repository nope.__repository__"]
 
 
 @pytest.mark.unit
@@ -2177,6 +2220,7 @@ def test_dagster_run_detail_returns_page_local_structured_failure(
                     "jobName": "provider_job",
                     "status": "FAILURE",
                     "tags": [],
+                    "repositoryOrigin": _MAP_RUN_ORIGIN,
                     "eventConnection": {
                         "cursor": "event-next",
                         "hasMore": True,
@@ -2272,6 +2316,7 @@ def test_dagster_run_detail_round_trips_encoded_opaque_path(
                     "jobName": "provider_job",
                     "status": "SUCCESS",
                     "tags": [],
+                    "repositoryOrigin": _MAP_RUN_ORIGIN,
                     "eventConnection": {
                         "cursor": None,
                         "hasMore": False,
@@ -2464,14 +2509,16 @@ def test_mois_source_sync_precheck_filters_exact_job_and_checks_fresh_success(
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == mois_source_precheck._QUERY
         assert kwargs["variables"] == {
-            "filter": {
+            "repositorySelector": _MAP_REPOSITORY_SELECTOR,
+            "runsFilter": {
                 "pipelineName": "mois_localdata_source_sync",
                 "tags": [_MAP_REPOSITORY_RUN_TAG],
-            }
+            },
         }
         now = datetime.now(UTC).timestamp()
         return {
             "data": {
+                "repositoryOrError": {"__typename": "Repository"},
                 "runsOrError": {
                     "__typename": "Runs",
                     "results": [

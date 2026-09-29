@@ -120,6 +120,7 @@ def _runs_payload(*, status: str, coverage: str | None) -> dict[str, Any]:
     )
     return {
         "data": {
+            "repositoryOrError": {"__typename": "Repository"},
             "runsOrError": {
                 "__typename": "Runs",
                 "results": [
@@ -141,6 +142,7 @@ def _runs_payload(*, status: str, coverage: str | None) -> dict[str, Any]:
 def _no_runs_payload() -> dict[str, Any]:
     return {
         "data": {
+            "repositoryOrError": {"__typename": "Repository"},
             "runsOrError": {"__typename": "Runs", "results": []},
         }
     }
@@ -149,6 +151,7 @@ def _no_runs_payload() -> dict[str, Any]:
 def _fresh_full_coverage_payload(*, now: float) -> dict[str, Any]:
     return {
         "data": {
+            "repositoryOrError": {"__typename": "Repository"},
             "runsOrError": {
                 "__typename": "Runs",
                 "results": [
@@ -200,7 +203,11 @@ async def test_mois_membership_without_source_sync_is_rejected(
     assert excinfo.value.precheck.job_name == MOIS_SOURCE_SYNC_JOB_NAME
     assert len(probe.requests) == 1
     assert probe.requests[0]["variables"] == {
-        "filter": {
+        "repositorySelector": {
+            "repositoryName": "__repository__",
+            "repositoryLocationName": "kortravelmap.dagster.definitions",
+        },
+        "runsFilter": {
             "pipelineName": MOIS_SOURCE_SYNC_JOB_NAME,
             "tags": [
                 {

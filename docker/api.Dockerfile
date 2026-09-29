@@ -18,8 +18,9 @@ COPY alembic/baseline ./alembic/baseline
 COPY alembic/versions ./alembic/versions
 COPY src ./src
 COPY packages/kor-travel-map-api ./packages/kor-travel-map-api
-# Dagster 이미지와 같은 설치 버전 정본(pydantic·SQLAlchemy·psycopg·asyncpg). API는
-# dagster를 설치하지 않지만 같은 파일을 읽어 두 이미지가 한 버전 집합을 공유한다.
+# Dagster 이미지와 같은 설치 버전 정본(나열한 pydantic·SQLAlchemy·psycopg·asyncpg 등만,
+# 전체 freeze는 아니다). API는 dagster를 설치하지 않지만 같은 파일을 읽어 두 이미지가
+# 한 버전 집합을 공유한다.
 COPY docker/constraints-dagster.txt ./docker/constraints-dagster.txt
 
 # T-VN-C01(2026-08-18): H35 helper가 저장소에서 사라져 `rm -f`가 필요 없어졌다.

@@ -15,11 +15,17 @@ host보다 높은 dagster로 올릴 수 있었다.
    실패로만 드러난다.
 4. API·Dagster 두 Dockerfile의 프로젝트 설치가 **전부** 그 파일을 `-c`로 읽고, 읽기
    전에 builder에 COPY한다.
+5. CI workflow가 저장소 패키지를 설치하는 `pip install`도 **전부** 같은 파일을 `-c`로
+   읽는다 — 테스트가 이미지와 다른 dagster·pydantic·SQLAlchemy로 초록이 되지 않게.
+
+이 파일은 **나열한 패키지만** 고정한다. 나머지 전이 의존성은 pyproject 범위 안에서 설치
+시점에 해소된다(전체 freeze를 고정하지 않는다).
 """
 
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 
@@ -34,6 +40,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 _CONSTRAINTS_RELATIVE = "docker/constraints-dagster.txt"
 _CONSTRAINTS = _ROOT / _CONSTRAINTS_RELATIVE
 _DOCKERFILES = ("docker/api.Dockerfile", "docker/dagster.Dockerfile")
+_WORKFLOWS = _ROOT / ".github" / "workflows"
 _PYPROJECTS = (
     "pyproject.toml",
     "packages/kor-travel-map-api/pyproject.toml",
@@ -153,3 +160,66 @@ def test_dockerfile_project_installs_read_the_constraints(relative: str) -> None
     copy_line = f"COPY {_CONSTRAINTS_RELATIVE} ./{_CONSTRAINTS_RELATIVE}"
     assert copy_line in builder, f"{relative}: builder가 constraints를 COPY하지 않는다"
     assert builder.index(copy_line) < builder.index("--prefix=/install"), relative
+
+
+def _repository_installs(text: str) -> tuple[list[str], list[str]]:
+    """workflow 본문에서 저장소 패키지를 까는 ``pip install`` 명령을 모두 찾는다.
+
+    ``pip install --upgrade pip``처럼 저장소 밖 도구만 까는 명령은 제외한다. 저장소
+    설치의 표지는 인자 ``.``·``.[extra]``·``./…``·``packages/…``다.
+    돌려주는 것은 (저장소 설치 전부, 그중 constraints를 읽지 않는 것).
+    """
+
+    joined = re.sub(r"\\\n\s*", " ", text)
+    installs: list[str] = []
+    unconstrained: list[str] = []
+    for line in joined.splitlines():
+        for raw_command in line.split("&&"):
+            command = raw_command.strip()
+            command = re.sub(r"^(?:-\s+)?(?:run:\s*)?", "", command)
+            if "pip install" not in command:
+                continue
+            arguments = shlex.split(command.split("pip install", 1)[1], comments=True)
+            targets = [
+                argument
+                for argument in arguments
+                if argument == "."
+                or argument.startswith((".[", "./", "packages/"))
+            ]
+            if not targets:
+                continue
+            installs.append(command)
+            if f"-c {_CONSTRAINTS_RELATIVE}" not in command:
+                unconstrained.append(command)
+    return installs, unconstrained
+
+
+def test_workflow_repository_installs_read_the_constraints() -> None:
+    per_workflow: dict[str, int] = {}
+    for path in sorted(_WORKFLOWS.glob("*.y*ml")):
+        installs, unconstrained = _repository_installs(path.read_text(encoding="utf-8"))
+        assert unconstrained == [], (path.name, unconstrained)
+        if installs:
+            per_workflow[path.name] = len(installs)
+    # 하한: 저장소를 까는 workflow를 **본** 것 — 넷 모두, 설치 명령 17개.
+    assert set(per_workflow) >= {"ci.yml", "lint.yml", "openapi.yml", "postgis-only.yml"}, (
+        per_workflow
+    )
+    assert sum(per_workflow.values()) >= 17, per_workflow
+
+
+@pytest.mark.parametrize(
+    ("workflow", "unconstrained"),
+    [
+        ('run: |\n  pip install -e ".[dev]"\n', 1),
+        ("run: python -m pip install -e packages/kor-travel-map-api\n", 1),
+        ("- run: pip install -e packages/kor-travel-map-dagster && pip install ruff\n", 1),
+        ("run: pip install . \\\n  ./packages/kor-travel-map-api\n", 1),
+        ("run: python -m pip install --upgrade pip\n", 0),
+        ('run: pip install -c docker/constraints-dagster.txt -e ".[dev]"\n', 0),
+    ],
+)
+def test_workflow_install_detector_rejects_unconstrained_installs(
+    workflow: str, unconstrained: int
+) -> None:
+    assert len(_repository_installs(workflow)[1]) == unconstrained

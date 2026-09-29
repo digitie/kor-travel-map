@@ -227,6 +227,77 @@ queue를 지우지는 않으므로 위 복구 절차는 여전히 필요하다. 
 제출처럼 조회 직후 생기는 경합은 pool이 Dagster 실행을 직렬화하고, pool 우회 경로까지 아래
 PostgreSQL advisory lock이 최종 방어한다.
 
+### pool 이름 변경 배포의 전제 (2026-09-29, `kor_travel_map.` 접두사)
+
+pool 이름이 `opinet_api`·`krex_notice_snapshot`·`kor_travel_geo`에서 `kor_travel_map.` 접두사
+이름으로 바뀐다. Dagster pool 슬롯은 **이름으로** 센다. 배포 순간 옛 이름으로 QUEUED·STARTING·
+STARTED인 run이 있으면, 새 이름의 run은 그 run을 보지 못하고 바로 시작한다. 그러면 pool이
+막으려던 겹침이 한 번 생긴다. OpiNet과 KREX notice는 아래 advisory lock이 fetch→load를 여전히
+직렬화한다. `kor_travel_geo` pool의 geo 대량 적재 job 23개에는 그런 lock이 없다. 그래서 겹치면
+두 적재가 동시에 돌고, 이것이 pool이 막으려던 디스크 대기 장애(assets.py `GEO_HEAVY_POOL`)다.
+
+**배포 전제 — 둘 중 하나.**
+
+1. pool을 쓰는 job의 run 중 끝나지 않은 것이 0건일 때 배포한다. 아래 읽기 전용 검사는 pool
+   job 목록을 live repository에서 유도한다(목록을 문서에 적지 않는다). exit 0이면 진행하고,
+   1이면 목록의 run이 끝나기를 기다린 뒤 다시 돌린다. 스크립트로 두지 않은 이유는 이 전제가
+   이번 이름 변경 한 번에만 필요하기 때문이다. `scripts/n150`에 Dagster GraphQL 의존을 새로
+   들이지 않는다.
+2. 또는 writer drain(`ktm-cache-target-writer-drain/v1`) 아래에서 배포한다. drain은 Map
+   schedule·sensor를 멈추고 QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING run이 모두
+   끝나기를 기다린다.
+
+```sh
+# n150, 배포 직전. 대상은 Map Dagster webserver(오늘은 127.0.0.1:12702).
+python3 - <<'PY'
+import json, urllib.request
+
+URL = "http://127.0.0.1:12702/graphql"
+REPOSITORY, LOCATION = "__repository__", "kortravelmap.dagster.definitions"
+
+
+def gql(query, variables):
+    request = urllib.request.Request(
+        URL,
+        json.dumps({"query": query, "variables": variables}).encode(),
+        {"content-type": "application/json"},
+    )
+    return json.load(urllib.request.urlopen(request, timeout=30))["data"]
+
+
+data = gql(
+    "query($s: RepositorySelector!, $f: RunsFilter!) {"
+    " repositoryOrError(repositorySelector: $s) { __typename"
+    "  ... on Repository { assetNodes { pools jobNames } } }"
+    " runsOrError(filter: $f, limit: 1000) { __typename"
+    "  ... on Runs { results { runId jobName status } } } }",
+    {
+        "s": {"repositoryName": REPOSITORY, "repositoryLocationName": LOCATION},
+        "f": {
+            "statuses": ["QUEUED", "NOT_STARTED", "STARTING", "STARTED", "MANAGED", "CANCELING"],
+            "tags": [{"key": ".dagster/repository", "value": f"{REPOSITORY}@{LOCATION}"}],
+        },
+    },
+)
+assert data["repositoryOrError"]["__typename"] == "Repository", data["repositoryOrError"]
+assert data["runsOrError"]["__typename"] == "Runs", data["runsOrError"]
+pool_jobs = {
+    job
+    for node in data["repositoryOrError"]["assetNodes"]
+    if node["pools"]
+    for job in node["jobNames"]  # 수동 materialize(`__ASSET_JOB`)도 센다
+}
+busy = [run for run in data["runsOrError"]["results"] if run["jobName"] in pool_jobs]
+print(f"pool jobs={len(pool_jobs)} nonterminal pool-job runs={len(busy)}")
+for run in busy:
+    print(run["status"], run["jobName"], run["runId"])
+raise SystemExit(1 if busy else 0)
+PY
+```
+
+2026-09-30 n150 실측 결과는 `pool jobs=27 nonterminal pool-job runs=0`이다(옛 이름 기준,
+`__ASSET_JOB` 포함).
+
 실제 최종 방어는 provider 실행 함수의 PostgreSQL advisory lock이다. targeted feature update
 worker는 asset pool을 거치지 않고 같은 함수를 직접 실행하므로, OpiNet place/price와 KREX
 notice는 fetch→load/reconcile→sync 성공 전체에서 각각 고정된 provider lock을 공유한다. pool과

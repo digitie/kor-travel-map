@@ -29,6 +29,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            docker/constraints-dagster.txt
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
@@ -49,9 +50,9 @@ jobs:
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install -e packages/kor-travel-map-api
-          pip install -e packages/kor-travel-map-dagster
+          pip install -c docker/constraints-dagster.txt -e ".[dev]"
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: ruff check (style + lint rules)
         # pyproject.toml [tool.ruff.lint] select rules.

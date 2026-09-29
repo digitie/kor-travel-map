@@ -125,6 +125,7 @@ query KorTravelMapDagsterRunDetail(
       endTime
       updateTime
       tags { key value }
+      repositoryOrigin { repositoryName repositoryLocationName }
       eventConnection(limit: $eventLimit, afterCursor: $afterCursor) {
         cursor
         hasMore

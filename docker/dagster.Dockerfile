@@ -15,7 +15,8 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY packages/kor-travel-map-dagster ./packages/kor-travel-map-dagster
-# 설치 버전의 정본. 공유 Dagster host보다 높은 dagster가 재빌드로 끼어들지 못하게
+# 나열한 패키지(dagster family·gRPC·pydantic·DB driver)의 설치 버전 정본 — 전체
+# freeze는 아니다. 공유 Dagster host보다 높은 dagster가 재빌드로 끼어들지 못하게
 # 프로젝트 설치는 전부 이 constraints를 읽는다(파일 머리 주석 참조).
 COPY docker/constraints-dagster.txt ./docker/constraints-dagster.txt
 

@@ -15,6 +15,14 @@ _SETTINGS = ApiSettings(
 )
 
 
+# Dagster GraphQL ``Run``의 실제 모양 — hidden ``.dagster/*`` tag는 ``tags``에 오지 않고,
+# 소속 code location은 ``repositoryOrigin``으로 온다(n150 1.13.24 실측).
+_MAP_RUN_ORIGIN: dict[str, str] = {
+    "repositoryName": "__repository__",
+    "repositoryLocationName": "kortravelmap.dagster.definitions",
+}
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_summary_service_parses_repository_and_run_payload(
@@ -105,6 +113,7 @@ async def test_run_detail_service_parses_event_page_and_forwards_cursor(
                     "jobName": "job",
                     "status": "FAILURE",
                     "tags": [],
+                    "repositoryOrigin": _MAP_RUN_ORIGIN,
                     "eventConnection": {
                         "cursor": "cursor-1",
                         "hasMore": True,
@@ -157,6 +166,7 @@ async def test_run_detail_service_fails_closed_on_malformed_pagination(
                     "runId": "run-1",
                     "status": "SUCCESS",
                     "tags": [],
+                    "repositoryOrigin": _MAP_RUN_ORIGIN,
                     "eventConnection": {
                         "cursor": None,
                         "hasMore": True,
@@ -225,22 +235,47 @@ async def test_summary_reports_a_missing_code_location_as_an_error(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin",
+    [
+        # 공유 webserver의 다른 프로젝트 run.
+        {
+            "repositoryName": "__repository__",
+            "repositoryLocationName": "kortravelweather_dagster.definitions",
+        },
+        # 같은 location 이름이라도 repository가 다르면 이 selector가 아니다.
+        {
+            "repositoryName": "other_repository",
+            "repositoryLocationName": "kortravelmap.dagster.definitions",
+        },
+        # 소속을 증명할 수 없는 run.
+        None,
+        {"repositoryName": "__repository__"},
+    ],
+)
 async def test_run_detail_hides_a_run_of_another_code_location(
     monkeypatch: pytest.MonkeyPatch,
+    origin: dict[str, str] | None,
 ) -> None:
-    async def _post(**_kwargs: object) -> dict[str, object]:
+    async def _post(**kwargs: object) -> dict[str, object]:
+        # 소속은 repositoryOrigin으로 묻는다 — Run.tags에는 hidden tag가 오지 않는다.
+        query = kwargs["query"]
+        assert isinstance(query, str)
+        assert "repositoryOrigin { repositoryName repositoryLocationName }" in query
         return {
             "data": {
                 "runOrError": {
                     "__typename": "Run",
                     "runId": "run-9",
                     "status": "SUCCESS",
+                    # 실제 응답 모양: .dagster/* 는 걸러지고 보이는 tag만 온다.
                     "tags": [
                         {
-                            "key": ".dagster/repository",
-                            "value": "__repository__@kortravelweather_dagster.definitions",
+                            "key": "dagster/code_location",
+                            "value": "kortravelweather_dagster.definitions",
                         }
                     ],
+                    "repositoryOrigin": origin,
                     "eventConnection": {"cursor": None, "hasMore": False, "events": []},
                 }
             }

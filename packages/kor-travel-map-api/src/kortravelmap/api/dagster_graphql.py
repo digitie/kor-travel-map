@@ -43,6 +43,8 @@ __all__ = [
     "parse_runs",
     "post_graphql",
     "repository_connection",
+    "repository_guard_error",
+    "run_repository_origin",
 ]
 
 JsonDict = dict[str, Any]
@@ -105,6 +107,11 @@ _FILE_DOWNLOAD_SCHEDULE_HINTS = {
 #: Dagster가 **모든** run에 생성 시점에 다는 tag(`dagster/_core/storage/dagster_run.py`).
 #: 값은 ``<repository>@<location>``이다. 공유 webserver에서 run 조회를 이 저장소의
 #: code location으로 좁히는 손잡이다.
+#:
+#: **filter 전용이다 — 응답에서 읽지 말 것.** ``RunsFilter.tags``는 storage의
+#: ``run_tags``를 보므로 이 hidden tag로 좁혀진다. 그러나 GraphQL ``Run.tags``는
+#: ``.dagster/*``(``TagType.HIDDEN``)를 걸러 내고 돌려준다(``GrapheneRun.resolve_tags``,
+#: n150 1.13.24 실측). run 하나의 소속은 ``Run.repositoryOrigin``으로 읽는다.
 REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
 
 
@@ -578,6 +585,38 @@ def _run_failures(events: list[DagsterRunEvent]) -> list[DagsterRunFailure]:
     ]
 
 
+def run_repository_origin(raw_run: JsonDict) -> dict[str, str] | None:
+    """``Run.repositoryOrigin``을 ``RepositorySelector`` 모양으로 읽는다.
+
+    두 이름 중 하나라도 문자열이 아니면 ``None`` — 소속을 모르는 run이다.
+    """
+
+    origin = as_dict(raw_run.get("repositoryOrigin"))
+    repository_name = optional_string(origin.get("repositoryName"))
+    location_name = optional_string(origin.get("repositoryLocationName"))
+    if not repository_name or not location_name:
+        return None
+    return {"repositoryName": repository_name, "repositoryLocationName": location_name}
+
+
+def repository_guard_error(data: JsonDict) -> str | None:
+    """같은 요청의 ``repositoryOrError``가 이 code location을 찾았는가.
+
+    run 조회는 ``.dagster/repository`` tag로 좁힌다. location 이름이 틀리면 그
+    filter는 **조용히 0건**을 돌려준다 — "run 없음"과 구분되지 않는다. 그래서 run
+    조회에는 같은 selector의 ``repositoryOrError``를 함께 싣고, ``Repository``가
+    아니면 그 메시지를 오류로 올린다.
+    """
+
+    repository = as_dict(data.get("repositoryOrError"))
+    if repository.get("__typename") == "Repository":
+        return None
+    return optional_string(repository.get("message")) or (
+        "Dagster code location을 찾을 수 없습니다: "
+        f"{_string(repository.get('__typename'), 'repositoryOrError 없음')}"
+    )
+
+
 def parse_run_detail(
     raw_run: JsonDict,
     *,
@@ -605,18 +644,22 @@ def parse_run_detail(
             )
         # run id는 instance 전역에서 유일하다. 공유 webserver에서는 다른 프로젝트의
         # run도 id로 조회되므로, 이 code location의 run이 아니면 없는 것으로 답한다.
-        run_repository = _parse_run_summary(raw_run).tags.get(REPOSITORY_RUN_TAG_KEY)
-        expected_repository = dagster_urls.repository_run_tag()["value"]
-        if run_repository is not None and run_repository != expected_repository:
+        # 소속은 ``repositoryOrigin``으로 읽는다 — ``Run.tags``에는 hidden
+        # ``.dagster/repository``가 오지 않는다(``REPOSITORY_RUN_TAG_KEY`` 참고).
+        # origin이 없으면 소속을 증명할 수 없으므로 역시 없는 것으로 답한다.
+        run_origin = run_repository_origin(raw_run)
+        if run_origin != dagster_urls.repository_selector():
+            observed = (
+                "origin 없음"
+                if run_origin is None
+                else f"{run_origin['repositoryName']}@{run_origin['repositoryLocationName']}"
+            )
             return DagsterRunDetailData(
                 status="not_found",
                 dagster_url=dagster_urls.dagster_url,
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
-                errors=[
-                    "이 code location의 Dagster run이 아닙니다: "
-                    f"{raw_run_id} ({run_repository})"
-                ],
+                errors=[f"이 code location의 Dagster run이 아닙니다: {raw_run_id} ({observed})"],
             )
 
         raw_event_connection = raw_run.get("eventConnection")

@@ -56,6 +56,7 @@ _MAX_NONTERMINAL_RUNS: Final = 1_000
 _NONTERMINAL_RUN_STATUSES: Final = (
     "QUEUED",
     "NOT_STARTED",
+    "STARTING",
     "STARTED",
     "MANAGED",
     "CANCELING",
@@ -89,7 +90,14 @@ query KorTravelMapWriterDrainInstigations($repositorySelector: RepositorySelecto
 """
 
 _NONTERMINAL_RUNS_QUERY: Final = """
-query KorTravelMapWriterDrainRuns($limit: Int!, $runsFilter: RunsFilter!) {
+query KorTravelMapWriterDrainRuns(
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
+    __typename
+    ... on RepositoryNotFoundError { message }
+    ... on PythonError { message }
+  }
   runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs { results { runId status } }
@@ -417,9 +425,14 @@ async def _list_nonterminal_runs(
         variables={
             "limit": _MAX_NONTERMINAL_RUNS,
             # 공유 webserver에서 다른 프로젝트의 run을 끊지 않도록 이 code location으로 좁힌다.
+            # 같은 selector의 repositoryOrError를 함께 물어, location 이름이 틀려 filter가
+            # 조용히 0건이 되는 경우(= drain이 아무것도 안 기다리고 통과)를 막는다.
+            "repositorySelector": dagster.repository_selector(),
             "runsFilter": dagster.runs_filter(statuses=list(_NONTERMINAL_RUN_STATUSES)),
         },
     )
+    if dagster_graphql.repository_guard_error(data) is not None:
+        raise WriterDrainCommandError("DAGSTER_PROTOCOL")
     result = data.get("runsOrError")
     if not isinstance(result, dict) or result.get("__typename") != "Runs":
         raise WriterDrainCommandError("DAGSTER_PROTOCOL")

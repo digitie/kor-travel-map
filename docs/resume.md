@@ -3,10 +3,17 @@
 ## 2026-09-29 — 공유 Dagster plane Map 준비(stage 0 + 3.1): 브랜치 `feat/dagster-shared-stage0`
 
 **다음 한 작업: 브랜치를 CI 전량으로 확인하고 적대 리뷰 뒤 머지 → 다음 Map+PinVi pinned pair(chain17)로 배포.**
-배포 뒤 확인: 세 컨테이너의 `site-packages`가 constraints와 같은지, admin 운영 홈·pipeline 화면이 그대로인지.
 
-- 이미지: `docker/constraints-dagster.txt`(정확한 버전 집합)를 API·Dagster Dockerfile이 `-c`로 읽는다. 올릴 때는 공유
-  host 이미지 먼저, 이 파일 나중.
+배포 체크리스트:
+
+- [ ] **배포 전제(pool 이름 변경)**: pool을 쓰는 job의 QUEUED·STARTING·STARTED run이 0건이다. 확인은
+  `docs/runbooks/docker-app.md` "pool 이름 변경 배포의 전제"의 읽기 전용 검사(exit 0)로 한다. 0건을 못 만들면 writer
+  drain 아래에서 배포한다.
+- [ ] 배포 뒤: 세 컨테이너의 `site-packages`에서 constraints에 나열한 패키지가 그 버전인지 본다(나열한 것만 고정).
+- [ ] 배포 뒤: admin 운영 홈·pipeline 화면(runs 패널·run 상세)이 그대로인지 본다.
+
+- 이미지·CI: `docker/constraints-dagster.txt`(나열한 패키지의 정확한 버전)를 API·Dagster Dockerfile과 CI 설치가
+  `-c`로 읽는다. 올릴 때는 공유 host 이미지 먼저, 이 파일 나중.
 - API/UI/C7/게이트의 Dagster 조회는 Map code location으로 좁혀졌다(journal 참조). pool은 `kor_travel_map.` 접두사.
 - D4: Map은 DB에만 켜진 instigator가 없다(읽기 전용 확인). 남은 판단: run-status sensor의 `monitor_all_code_locations`.
 

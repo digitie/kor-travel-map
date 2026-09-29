@@ -243,10 +243,14 @@ async def test_writer_drain_observes_only_this_code_location_runs(
         seen.append(kwargs["variables"])
         return {
             "data": {
+                "repositoryOrError": {"__typename": "Repository"},
                 "runsOrError": {
                     "__typename": "Runs",
-                    "results": [{"runId": "run-1", "status": "STARTED"}],
-                }
+                    "results": [
+                        {"runId": "run-1", "status": "STARTED"},
+                        {"runId": "run-2", "status": "STARTING"},
+                    ],
+                },
             }
         }
 
@@ -256,12 +260,24 @@ async def test_writer_drain_observes_only_this_code_location_runs(
         dagster=_DAGSTER,
     )
 
-    assert runs == (("run-1", "STARTED"),)
+    assert runs == (("run-1", "STARTED"), ("run-2", "STARTING"))
     assert seen == [
         {
             "limit": 1_000,
+            "repositorySelector": {
+                "repositoryName": "__repository__",
+                "repositoryLocationName": "kortravelmap.dagster.definitions",
+            },
             "runsFilter": {
-                "statuses": ["QUEUED", "NOT_STARTED", "STARTED", "MANAGED", "CANCELING"],
+                # STARTING은 launcher가 프로세스를 띄우는 중인 run이다 — 끝나지 않았다.
+                "statuses": [
+                    "QUEUED",
+                    "NOT_STARTED",
+                    "STARTING",
+                    "STARTED",
+                    "MANAGED",
+                    "CANCELING",
+                ],
                 "tags": [
                     {
                         "key": ".dagster/repository",
@@ -271,3 +287,29 @@ async def test_writer_drain_observes_only_this_code_location_runs(
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_writer_drain_fails_loudly_when_the_code_location_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """location 이름이 틀리면 tag filter는 0건이다 — 빈 drain으로 통과하지 않는다."""
+
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {
+            "data": {
+                "repositoryOrError": {
+                    "__typename": "RepositoryNotFoundError",
+                    "message": "Could not find Repository nope.__repository__",
+                },
+                "runsOrError": {"__typename": "Runs", "results": []},
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._list_nonterminal_runs(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+        )
+    assert str(excinfo.value) == "DAGSTER_PROTOCOL"

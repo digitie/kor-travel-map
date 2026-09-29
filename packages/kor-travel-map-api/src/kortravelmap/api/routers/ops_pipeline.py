@@ -645,7 +645,14 @@ query KorTravelMapPipelineOverview(
 """
 
 _PIPELINE_DAGSTER_RUNS_QUERY = """
-query KorTravelMapPipelineDagsterRuns($limit: Int!, $runsFilter: RunsFilter!) {
+query KorTravelMapPipelineDagsterRuns(
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
+    __typename
+    ... on RepositoryNotFoundError { message }
+    ... on PythonError { message }
+  }
   runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs {
@@ -1607,7 +1614,11 @@ async def list_dagster_runs(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"limit": limit, "runsFilter": dagster_urls.runs_filter()},
+            variables={
+                "limit": limit,
+                "repositorySelector": dagster_urls.repository_selector(),
+                "runsFilter": dagster_urls.runs_filter(),
+            },
             query=_PIPELINE_DAGSTER_RUNS_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -1634,6 +1645,19 @@ async def list_dagster_runs(
             meta=make_meta(started_at=started_at),
         )
     data = dagster_graphql.as_dict(payload.get("data"))
+    # location 이름이 틀리면 tag filter가 조용히 0건이다 — 빈 목록 대신 오류로 답한다.
+    repository_error = dagster_graphql.repository_guard_error(data)
+    if repository_error is not None:
+        return PipelineDagsterRunsResponse(
+            data=PipelineDagsterRunsData(
+                status="error",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                errors=[repository_error],
+            ),
+            meta=make_meta(started_at=started_at),
+        )
     runs, run_counts, run_errors = dagster_graphql.parse_runs(
         dagster_graphql.as_dict(data.get("runsOrError")),
     )

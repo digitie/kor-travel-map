@@ -36,19 +36,20 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            docker/constraints-dagster.txt
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install main package and development dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c docker/constraints-dagster.txt -e ".[dev]"
 
       - name: Install REST API package
-        run: python -m pip install -e packages/kor-travel-map-api
+        run: python -m pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api
 
       - name: Install Dagster package
-        run: python -m pip install -e packages/kor-travel-map-dagster
+        run: python -m pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: Run PostGIS integration tests
         run: pytest tests/integration -q --no-cov
