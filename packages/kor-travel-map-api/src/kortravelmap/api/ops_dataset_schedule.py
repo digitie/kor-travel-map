@@ -29,20 +29,19 @@ ScheduleSourceStatus = Literal["ok", "unavailable", "error"]
 OPERATION_KEY_TAG = "kor_travel_map.operation_key"
 
 _QUERY = """
-query KorTravelMapDatasetSchedules {
-  repositoriesOrError {
+query KorTravelMapDatasetSchedules($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
-        schedules {
-          name
-          pipelineName
-          tags { key value }
-          scheduleState { status }
-          futureTicks(limit: 1) { results { timestamp } }
-        }
+    ... on Repository {
+      schedules {
+        name
+        pipelineName
+        tags { key value }
+        scheduleState { status }
+        futureTicks(limit: 1) { results { timestamp } }
       }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError { message }
   }
 }
@@ -146,7 +145,9 @@ def _parse(payload: dict[str, Any]) -> DatasetScheduleIndex:
             ),
             by_operation_key={},
         )
-    connection = _dict(_dict(payload.get("data")).get("repositoriesOrError"))
+    connection = dagster_graphql.repository_connection(
+        _dict(_dict(payload.get("data")).get("repositoryOrError"))
+    )
     if connection.get("__typename") != "RepositoryConnection":
         message = _text(connection.get("message")) or "Dagster schedule 조회 실패"
         return DatasetScheduleIndex(
@@ -245,7 +246,7 @@ async def load_dataset_schedule_index(
     settings: ApiSettings,
     client: httpx.AsyncClient,
 ) -> DatasetScheduleIndex:
-    """Dagster 전체 schedule을 한 번 읽는다. 실패해도 DB grid는 degrade한다."""
+    """이 저장소 code location의 schedule을 한 번 읽는다. 실패해도 DB grid는 degrade한다."""
     try:
         urls = dagster_graphql.dagster_urls(settings)
     except dagster_graphql.DagsterUrlConfigurationError as exc:
@@ -256,7 +257,7 @@ async def load_dataset_schedule_index(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=urls.graphql_url,
-            variables={},
+            variables={"repositorySelector": urls.repository_selector()},
             query=_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:

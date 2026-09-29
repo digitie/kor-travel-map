@@ -116,32 +116,31 @@ class DagsterScheduleClaimResolutionConflict(RuntimeError):
 _LOG = logging.getLogger(__name__)
 
 _DAGSTER_SCHEDULES_QUERY = """
-query KorTravelMapDagsterSchedules {
-  repositoriesOrError {
+query KorTravelMapDagsterSchedules($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
+    ... on Repository {
+      name
+      location { name }
+      schedules {
         name
-        location { name }
-        schedules {
-          name
-          description
-          pipelineName
-          mode
-          cronSchedule
-          executionTimezone
-          defaultStatus
-          canReset
-          scheduleState {
-            id
-            selectorId
-            status
-            repositoryName
-            repositoryLocationName
-          }
+        description
+        pipelineName
+        mode
+        cronSchedule
+        executionTimezone
+        defaultStatus
+        canReset
+        scheduleState {
+          id
+          selectorId
+          status
+          repositoryName
+          repositoryLocationName
         }
       }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError {
       message
       stack
@@ -1236,11 +1235,11 @@ def _schedule_command_response(
     )
 
 
-def _schedule_selector(schedule: DagsterSchedule) -> dict[str, str]:
+def _schedule_selector(schedule: DagsterSchedule, dagster_urls: DagsterUrls) -> dict[str, str]:
     return {
-        "repositoryName": schedule.repository_name or "__repository__",
+        "repositoryName": schedule.repository_name or dagster_urls.repository_name,
         "repositoryLocationName": (
-            schedule.repository_location_name or "kortravelmap.dagster.definitions"
+            schedule.repository_location_name or dagster_urls.repository_location_name
         ),
         "scheduleName": schedule.name,
     }
@@ -1317,7 +1316,7 @@ async def _repository_schedules(
     payload = await dagster_graphql.post_graphql(
         client=client,
         graphql_url=dagster_urls.graphql_url,
-        variables={},
+        variables={"repositorySelector": dagster_urls.repository_selector()},
         query=_DAGSTER_SCHEDULES_QUERY,
     )
     graphql_errors = payload.get("errors")
@@ -1325,7 +1324,9 @@ async def _repository_schedules(
         return [], [dagster_graphql.graphql_error_message(error) for error in graphql_errors]
     data = dagster_graphql.as_dict(payload.get("data"))
     return dagster_graphql.parse_repositories(
-        dagster_graphql.as_dict(data.get("repositoriesOrError")),
+        dagster_graphql.repository_connection(
+            dagster_graphql.as_dict(data.get("repositoryOrError"))
+        ),
         overrides=overrides,
     )
 
@@ -1718,7 +1719,7 @@ async def mutate_schedule_state(
             ),
             started_at=started_at,
         )
-    selector = _schedule_selector(schedule)
+    selector = _schedule_selector(schedule, urls)
     variables: dict[str, object]
     if command == "start":
         query = _DAGSTER_START_SCHEDULE_MUTATION
@@ -1914,9 +1915,9 @@ async def run_schedule_now(
     execution_params = {
         "selector": {
             "jobName": schedule.pipeline_name,
-            "repositoryName": schedule.repository_name or "__repository__",
+            "repositoryName": schedule.repository_name or urls.repository_name,
             "repositoryLocationName": (
-                schedule.repository_location_name or "kortravelmap.dagster.definitions"
+                schedule.repository_location_name or urls.repository_location_name
             ),
         },
         "mode": schedule.mode or "default",

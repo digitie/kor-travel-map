@@ -43,9 +43,11 @@ storage:
     should_autocreate_tables: false
 
 # pool을 선언한 provider asset은 instance 전역에서 동시에 1개 run만 실행한다.
-# OpiNet place/price는 ``opinet_api``, KREX notice는 ``krex_notice_snapshot`` pool을
-# 사용한다. 전자는 key 동시 소비를, 후자는 10분 cron보다 오래 걸린 snapshot의
-# load/reconcile 순서 역전을 막는다.
+# OpiNet place/price는 ``kor_travel_map.opinet_api``, KREX notice는
+# ``kor_travel_map.krex_notice_snapshot`` pool을 사용한다. 전자는 key 동시 소비를,
+# 후자는 10분 cron보다 오래 걸린 snapshot의 load/reconcile 순서 역전을 막는다.
+# pool 이름공간은 instance 전역이라, 공유 plane에서 다른 프로젝트의 pool과 겹치지
+# 않도록 Map pool은 전부 ``kor_travel_map.`` 접두사를 단다(`assets.MAP_POOL_PREFIX`).
 concurrency:
   pools:
     default_limit: 1

@@ -44,6 +44,7 @@ def _payload(
     )
     return {
         "data": {
+            "repositoryOrError": {"__typename": "Repository"},
             "runsOrError": {
                 "__typename": "Runs",
                 "results": [
@@ -81,7 +82,20 @@ async def test_fetch_precheck_uses_exact_job_and_accepts_fresh_full_coverage(
     async def _post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == mois_source_precheck._QUERY
         assert kwargs["variables"] == {
-            "filter": {"pipelineName": mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME}
+            "repositorySelector": {
+                "repositoryName": "__repository__",
+                "repositoryLocationName": "kortravelmap.dagster.definitions",
+            },
+            "runsFilter": {
+                "pipelineName": mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME,
+                # 공유 webserver에서 다른 프로젝트의 같은 이름 job을 고르지 않는다.
+                "tags": [
+                    {
+                        "key": ".dagster/repository",
+                        "value": "__repository__@kortravelmap.dagster.definitions",
+                    }
+                ],
+            }
         }
         return _payload()
 
@@ -158,3 +172,34 @@ async def test_non_mois_plan_does_not_query_dagster(
             settings=_settings(),
             client=client,
         )
+
+
+@pytest.mark.asyncio
+async def test_fetch_precheck_fails_loudly_when_the_code_location_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """location 이름이 틀리면 tag filter는 0건이다 — "sync 필요"로 오판하지 않는다."""
+
+    async def _post_graphql(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "data": {
+                "repositoryOrError": {
+                    "__typename": "RepositoryNotFoundError",
+                    "message": "Could not find Repository nope.__repository__",
+                },
+                "runsOrError": {"__typename": "Runs", "results": []},
+            }
+        }
+
+    monkeypatch.setattr(dagster_graphql, "post_graphql", _post_graphql)
+
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(mois_source_precheck.MoisSourceSyncPrecheckError) as excinfo:
+            await mois_source_precheck.fetch_mois_source_sync_precheck(
+                settings=_settings(),
+                client=client,
+                checked_at=_CHECKED_AT,
+            )
+
+    assert excinfo.value.code == "DAGSTER_QUERY_FAILED"
+    assert "Could not find Repository" in str(excinfo.value)

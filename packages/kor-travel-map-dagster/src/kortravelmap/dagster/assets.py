@@ -211,16 +211,25 @@ Dagster의 step 재시도는 asset을 **처음부터 다시 실행한다.** 대�
 재시도 주기는 60초가 아니라 **다음 스케줄**이다.
 """
 
-OPINET_API_POOL: Final[str] = "opinet_api"
+MAP_POOL_PREFIX: Final[str] = "kor_travel_map."
+"""Map pool 이름의 접두사.
+
+pool 이름공간과 ``concurrency.pools.default_limit``은 Dagster **instance 전역**이다.
+여러 프로젝트가 한 instance를 쓰는 공유 plane에서 접두사 없는 이름(``opinet_api``,
+``kor_travel_geo``)은 다른 프로젝트의 같은 이름 pool과 슬롯을 나눠 서로를 막는다.
+그래서 Map pool은 전부 이 접두사로 시작한다(tag key ``kor_travel_map.*``와 같은 규칙).
+"""
+
+OPINET_API_POOL: Final[str] = f"{MAP_POOL_PREFIX}opinet_api"
 """OpiNet 호출 asset을 인스턴스 전체에서 직렬화하는 Dagster pool."""
 
 OPINET_PROVIDER_RUN_LOCK: Final[str] = "provider-run:python-opinet-api"
 """OpiNet fetch→load를 모든 실행 경로에서 직렬화하는 PostgreSQL lock key."""
 
-KREX_NOTICE_SNAPSHOT_POOL: Final[str] = "krex_notice_snapshot"
+KREX_NOTICE_SNAPSHOT_POOL: Final[str] = f"{MAP_POOL_PREFIX}krex_notice_snapshot"
 """KREX notice snapshot의 load/reconcile 순서를 직렬화하는 Dagster pool."""
 
-GEO_HEAVY_POOL: Final[str] = "kor_travel_geo"
+GEO_HEAVY_POOL: Final[str] = f"{MAP_POOL_PREFIX}kor_travel_geo"
 """역지오코딩을 대량으로 하는 적재 asset을 인스턴스 전체에서 직렬화하는 pool.
 
 **왜 필요했나 — 원인을 두 번 쟀다.** 2026-09-19에

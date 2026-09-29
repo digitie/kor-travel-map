@@ -13,6 +13,14 @@ from kortravelmap.infra.writer_drain_repo import WriterDrainLease
 
 from kortravelmap.api import writer_drain_command as command
 from kortravelmap.api import writer_drain_service as service
+from kortravelmap.api.dagster_graphql import DagsterUrls
+
+_DAGSTER = DagsterUrls(
+    dagster_url="http://dagster",
+    graphql_url="http://dagster/graphql",
+    repository_name="__repository__",
+    repository_location_name="kortravelmap.dagster.definitions",
+)
 
 
 def test_parse_request_requires_exact_private_schema() -> None:
@@ -157,7 +165,7 @@ async def test_drain_cancels_a_run_observed_after_grace_period(
     await service._drain_runs(  # noqa: SLF001 - command boundary state machine.
         session_factory=SimpleNamespace(),
         http_client=SimpleNamespace(),
-        graphql_url="http://dagster/graphql",
+        dagster=_DAGSTER,
         settings=SimpleNamespace(
             dagster_termination_timeout_seconds=30,
             dagster_termination_poll_interval_seconds=0.1,
@@ -175,35 +183,33 @@ async def test_drain_cancels_a_run_observed_after_grace_period(
 async def test_writer_drain_collects_schedule_and_sensor_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _graphql(**_kwargs: object) -> dict[str, object]:
+    async def _graphql(**kwargs: object) -> dict[str, object]:
+        # 공유 webserver에서 다른 프로젝트의 schedule/sensor를 멈추지 않는다.
+        assert kwargs["variables"] == {"repositorySelector": _DAGSTER.repository_selector()}
         return {
             "data": {
-                "repositoriesOrError": {
-                    "__typename": "RepositoryConnection",
-                    "nodes": [
+                "repositoryOrError": {
+                    "__typename": "Repository",
+                    "name": "repo",
+                    "location": {"name": "location"},
+                    "schedules": [
                         {
-                            "name": "repo",
-                            "location": {"name": "location"},
-                            "schedules": [
-                                {
-                                    "name": "schedule-internal-name",
-                                    "scheduleState": {
-                                        "id": "schedule-origin::state",
-                                        "selectorId": "schedule-selector",
-                                        "status": "RUNNING",
-                                    },
-                                }
-                            ],
-                            "sensors": [
-                                {
-                                    "name": "sensor-internal-name",
-                                    "sensorState": {
-                                        "id": "sensor-origin::state",
-                                        "selectorId": "sensor-selector",
-                                        "status": "STOPPED",
-                                    },
-                                }
-                            ],
+                            "name": "schedule-internal-name",
+                            "scheduleState": {
+                                "id": "schedule-origin::state",
+                                "selectorId": "schedule-selector",
+                                "status": "RUNNING",
+                            },
+                        }
+                    ],
+                    "sensors": [
+                        {
+                            "name": "sensor-internal-name",
+                            "sensorState": {
+                                "id": "sensor-origin::state",
+                                "selectorId": "sensor-selector",
+                                "status": "STOPPED",
+                            },
                         }
                     ],
                 }
@@ -213,7 +219,7 @@ async def test_writer_drain_collects_schedule_and_sensor_snapshot(
     monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
     snapshot = await service._list_instigations(  # noqa: SLF001 - private command unit.
         http_client=None,  # type: ignore[arg-type]
-        graphql_url="http://dagster/graphql",
+        dagster=_DAGSTER,
     )
 
     assert [(item.kind, item.was_running) for item in snapshot] == [
@@ -223,3 +229,87 @@ async def test_writer_drain_collects_schedule_and_sensor_snapshot(
     assert snapshot[0].origin_id == "schedule-origin"
     assert snapshot[0].pause_result == "pending"
     assert snapshot[1].pause_result == "not_required"
+
+
+@pytest.mark.asyncio
+async def test_writer_drain_observes_only_this_code_location_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """공유 webserver에서 다른 프로젝트의 진행 중 run을 끊지 않도록 run 조회를 좁힌다."""
+
+    seen: list[object] = []
+
+    async def _graphql(**kwargs: object) -> dict[str, object]:
+        seen.append(kwargs["variables"])
+        return {
+            "data": {
+                "repositoryOrError": {"__typename": "Repository"},
+                "runsOrError": {
+                    "__typename": "Runs",
+                    "results": [
+                        {"runId": "run-1", "status": "STARTED"},
+                        {"runId": "run-2", "status": "STARTING"},
+                    ],
+                },
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    runs = await service._list_nonterminal_runs(  # noqa: SLF001 - private command unit.
+        http_client=None,  # type: ignore[arg-type]
+        dagster=_DAGSTER,
+    )
+
+    assert runs == (("run-1", "STARTED"), ("run-2", "STARTING"))
+    assert seen == [
+        {
+            "limit": 1_000,
+            "repositorySelector": {
+                "repositoryName": "__repository__",
+                "repositoryLocationName": "kortravelmap.dagster.definitions",
+            },
+            "runsFilter": {
+                # STARTING은 launcher가 프로세스를 띄우는 중인 run이다 — 끝나지 않았다.
+                "statuses": [
+                    "QUEUED",
+                    "NOT_STARTED",
+                    "STARTING",
+                    "STARTED",
+                    "MANAGED",
+                    "CANCELING",
+                ],
+                "tags": [
+                    {
+                        "key": ".dagster/repository",
+                        "value": "__repository__@kortravelmap.dagster.definitions",
+                    }
+                ],
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_writer_drain_fails_loudly_when_the_code_location_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """location 이름이 틀리면 tag filter는 0건이다 — 빈 drain으로 통과하지 않는다."""
+
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {
+            "data": {
+                "repositoryOrError": {
+                    "__typename": "RepositoryNotFoundError",
+                    "message": "Could not find Repository nope.__repository__",
+                },
+                "runsOrError": {"__typename": "Runs", "results": []},
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._list_nonterminal_runs(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+        )
+    assert str(excinfo.value) == "DAGSTER_PROTOCOL"

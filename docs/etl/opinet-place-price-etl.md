@@ -27,7 +27,7 @@
 - `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
   `Feature(kind=price)` + `PriceValue`, DB 적재.
 - kor-travel-map Dagster: schedule, run당 호출 예산, OpiNet asset 직렬 실행
-  (`opinet_api` pool, instance 전역 `max_concurrent=1`).
+  (`kor_travel_map.opinet_api` pool, instance 전역 `max_concurrent=1`).
 
 ## 3. 변환 계약
 
@@ -156,7 +156,7 @@ OpiNet 공개 API에는 전국/지역 단위 전체 주유소 bulk endpoint가 �
 
 OpiNet 쿼터 가드(#545):
 
-- 동시 실행 1개 — place/price asset 모두 Dagster `opinet_api` pool을 선언하고,
+- 동시 실행 1개 — place/price asset 모두 Dagster `kor_travel_map.opinet_api` pool을 선언하고,
   `docker/dagster.yaml`의 `concurrency.pools.default_limit=1`, `granularity=run`이
   schedule·수동 materialize를 포함해 instance 전역에서 직렬화한다. 이전 문서의
   `ConcurrencyConfig` 표기는 실제 설정이 아니었다.
@@ -248,7 +248,7 @@ bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-0
 | cron (place) | `5 3 1 * *` (매월 1일 03:05 KST) |
 | cron (price) | `18 18 * * *` (매일 18:18 KST) |
 | group | `features_place` / `features_price` |
-| 실행 직렬화 | `opinet_api` Dagster pool + `provider-run:python-opinet-api` DB advisory lock |
+| 실행 직렬화 | `kor_travel_map.opinet_api` Dagster pool + `provider-run:python-opinet-api` DB advisory lock |
 
 ## 10. 검증
 

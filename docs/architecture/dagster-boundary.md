@@ -680,11 +680,11 @@ KREX notice와 OpiNet place/price job은 Dagster 1.13의 공개
 복구한다.
 
 provider 동시성도 같은 파일에서 실제로 강제한다. OpiNet place/price asset은 모두
-`opinet_api` pool을 선언하고, `concurrency.pools.default_limit: 1`과
+`kor_travel_map.opinet_api` pool을 선언하고, `concurrency.pools.default_limit: 1`과
 `granularity: run`이 schedule·수동 실행을 포함한 instance 전역 동시 실행을 1개로 제한한다.
 Dagster DB에 운영자가 별도 pool 값을 수동 입력해야만 성립하는 계약이 아니다. 현재 pool을
 선언한 asset은 OpiNet 2개와 KREX notice 1개다. KREX notice의
-`krex_notice_snapshot` pool은 10분 schedule보다 실행이 길 때 이전/newer snapshot의
+`kor_travel_map.krex_notice_snapshot` pool은 10분 schedule보다 실행이 길 때 이전/newer snapshot의
 load·reconcile 순서가 역전되는 것을 막는다. 다만 targeted feature update worker는 asset 함수를
 직접 호출하므로 pool만으로는 모든 실행 경로를 포괄하지 못한다. OpiNet place/price는 공통
 `provider-run:python-opinet-api`, KREX notice는 dataset 전용

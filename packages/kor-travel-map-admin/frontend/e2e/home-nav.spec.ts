@@ -662,6 +662,10 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     expect(["http:", "https:"]).toContain(
       new URL(dagsterHref as string).protocol,
     );
+    // 공유 webserver에서도 Map code location 화면으로 간다.
+    expect(new URL(dagsterHref as string).pathname).toMatch(
+      /\/locations\/kortravelmap\.dagster\.definitions$/,
+    );
 
     // ── Dedup pending 카드 ──
     const dedupPendingCard = cards.filter({

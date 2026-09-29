@@ -1,0 +1,47 @@
+# Map 이미지(API · Dagster code-server/webserver/daemon)와 CI가 설치하는, **아래에 나열한
+# 패키지의** 정확한 버전.
+#
+# 공유 Dagster plane(Manager `dagster-shared-plan` §3, stage 0)의 목표 버전 집합이다.
+# 이 파일은 **나열한 패키지만** 고정한다 — 전체 freeze가 아니다. 나열하지 않은 전이
+# 의존성은 pyproject 범위 안에서 설치 시점에 해소되므로 재빌드마다 움직일 수 있다.
+# `pyproject.toml`의 `>=1.9,<2` 같은 하한/상한은 라이브러리 소비자를 위한 범위로 그대로
+# 두고, 이미지 빌드와 CI 설치가 이 파일을 `pip install -c`로 읽는다. 그래야 재빌드가
+# 나열한 패키지를 PyPI의 그날 최신으로 조용히 끌어오지 못하고, CI가 이미지와 다른
+# 버전으로 초록이 되지 않는다.
+#
+# 왜 정확해야 하나: Dagster의 호환 정책은 "host(webserver/daemon) 버전 >= user code
+# (code-server) 버전"이다. 공유 host 뒤에서 code-server만 1.13.25로 재빌드되면 정책
+# 밖이다. 올릴 때는 **host 먼저, code-server 나중** — 이 파일은 Manager의 공유 host
+# 이미지가 먼저 올라간 뒤에만 바꾼다.
+#
+# `tests/unit/test_image_python_constraints.py`가 결박한다: 두 Dockerfile과 CI workflow의
+# 저장소 설치가 이 파일을 쓰는지, 여기 핀이 전부 `==`인지, 그리고 각 핀이 저장소 pyproject의
+# 선언 범위 안에 드는지(범위 밖 핀은 설치 시점에야 해소 실패로 드러난다).
+#
+# SQLAlchemy는 공유 plane에서 통일하지 않는다(code-server 안에만 머물고 gRPC 경계를
+# 넘지 않는다). Map은 `<2.1`(mypy --strict var-annotated 26건) 선언 그대로 2.0.x다.
+# alembic은 저장소 선언(`>=1.19.1,<1.20`)이 정본이라 여기 두지 않는다.
+
+# Dagster family — 공유 host와 같은 버전이어야 한다.
+dagster==1.13.24
+dagster-webserver==1.13.24
+dagster-graphql==1.13.24
+dagster-pipes==1.13.24
+dagster-shared==1.13.24
+dagster-postgres==0.29.24
+
+# gRPC — code-server ↔ host 경계.
+grpcio==1.84.0
+grpcio-health-checking==1.81.1
+protobuf==6.33.6
+
+# 주요 라이브러리.
+pydantic==2.13.5
+pydantic-core==2.46.5
+pydantic-settings==2.15.0
+sqlalchemy==2.0.54
+psycopg==3.3.6
+psycopg-binary==3.3.6
+psycopg-pool==3.3.3
+psycopg2-binary==2.9.13
+asyncpg==0.31.0

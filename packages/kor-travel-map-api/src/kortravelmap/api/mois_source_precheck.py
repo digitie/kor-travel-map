@@ -53,8 +53,15 @@ MOIS_SOURCE_PRECHECK_ERROR_RESPONSES: Final[dict[int | str, dict[str, object]]] 
 }
 
 _QUERY: Final = """
-query KorTravelMapMoisSourceSyncPrecheck($filter: RunsFilter!) {
-  runsOrError(filter: $filter, limit: 1) {
+query KorTravelMapMoisSourceSyncPrecheck(
+  $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
+    __typename
+    ... on RepositoryNotFoundError { message }
+    ... on PythonError { message }
+  }
+  runsOrError(filter: $runsFilter, limit: 1) {
     __typename
     ... on Runs {
       results {
@@ -125,7 +132,10 @@ async def fetch_mois_source_sync_precheck(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"filter": {"pipelineName": MOIS_SOURCE_SYNC_JOB_NAME}},
+            variables={
+                "repositorySelector": dagster_urls.repository_selector(),
+                "runsFilter": dagster_urls.runs_filter(pipelineName=MOIS_SOURCE_SYNC_JOB_NAME),
+            },
             query=_QUERY,
         )
     except httpx.HTTPError as exc:
@@ -152,6 +162,14 @@ async def fetch_mois_source_sync_precheck(
             status_code=502,
         )
     data = dagster_graphql.as_dict(payload.get("data"))
+    # location 이름이 틀리면 tag filter가 조용히 0건이다 — "sync 필요"로 오판하지 않는다.
+    repository_error = dagster_graphql.repository_guard_error(data)
+    if repository_error is not None:
+        raise MoisSourceSyncPrecheckError(
+            repository_error,
+            code="DAGSTER_QUERY_FAILED",
+            status_code=502,
+        )
     runs, _counts, run_errors = dagster_graphql.parse_runs(
         dagster_graphql.as_dict(data.get("runsOrError"))
     )

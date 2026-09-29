@@ -1,5 +1,70 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-09-30 — 공유 Dagster plane 준비의 적대 리뷰 반영: 브랜치 `feat/dagster-shared-stage0`
+
+- **run 상세 범위 판정이 한 번도 발화하지 않았다(HIGH).** 소속을 `Run.tags`의 `.dagster/repository`로 읽었는데,
+  GraphQL은 hidden `.dagster/*` tag를 걸러 낸다(`GrapheneRun.resolve_tags`의 `TagType.HIDDEN`). 그래서 "다른
+  location → not_found" 갈래는 죽은 코드였고, 테스트는 오지 않는 tag를 가짜로 넣어 초록이었다. n150 12702에서 run
+  하나를 조회해 보니 `tags`에 `.dagster/*`가 없었고, `repositoryOrigin`은 `__repository__` /
+  `kortravelmap.dagster.definitions`로 왔다. 이제 run 상세는 `repositoryOrigin`을 묻고 selector와 비교한다. origin이
+  없으면 not_found다. fixture도 실제 모양으로 고쳤다(hidden tag 없음, origin 있음). 응답 tag를 읽는 다른 자리도
+  감사했다. MOIS precheck(coverage tag), dataset schedule(operation key), C7 live helper(request tag)는 모두 보이는
+  tag만 읽는다. run 완주 게이트는 SQL `run_tags`를 직접 읽으므로 hidden tag가 있다. `RunsFilter.tags`도 storage를 보므로
+  tag filter 자체는 옳다(같은 실측에서 Map 값은 run을 돌려주고 틀린 값은 0건).
+- **CI가 constraints 없이 설치했다(MED).** 네 workflow의 저장소 설치 17곳이 모두 `-c docker/constraints-dagster.txt`를
+  읽는다. `test_image_python_constraints.py`가 workflow를 훑어 이를 결박한다. 헤더의 "정확한 버전"도 고쳤다. 이
+  파일은 나열한 패키지만 고정하고, 전체 freeze가 아니다.
+- **범위 검사가 옛 drain 쿼리를 통과시켰다(MED).** 종전 검사는 `filter:` 글자만 봤다. 그래서
+  `filter: {statuses: [...]}`처럼 repository tag 없는 리터럴 filter도 통과했다. 이제 `runsOrError` 선택은
+  `filter: $runsFilter`여야 하고, 같은 operation이 `$runsFilter: RunsFilter!`와 `repositoryOrError(repositorySelector:
+  $repositorySelector)`를 싣고 있어야 한다. bare `runsOrError {`도 잡는다. 훑는 범위를 API·Dagster·core·scripts
+  (`lib`·`n150`, `.sh`)·admin UI `.ts`로 넓혔다. 옛 모양 다섯 개가 각각 빨갛게 나오는지 detector 자체를 테스트한다.
+- **run 조회의 location 오타가 조용했다(LOW).** runs 패널, MOIS precheck, writer drain의 run 조회가 같은 요청에
+  `repositoryOrError`를 싣는다. `Repository`가 아니면 각각 오류 응답, `DAGSTER_QUERY_FAILED`,
+  `DAGSTER_PROTOCOL`로 멈춘다. 이전에는 빈 목록이 "run 없음"과 구분되지 않았다. drain이면 아무것도 기다리지 않고
+  통과할 수 있었다. drain의 끝나지 않은 상태 집합에는 `STARTING`을 더했다.
+- **pool 이름 변경 배포(MED).** 옛 이름으로 도는 run이 있으면 새 이름 run이 한 번 겹친다. OpiNet과 KREX notice에는
+  advisory lock이 있지만 `kor_travel_geo` pool의 23개 job에는 없다. 그래서 배포 전제를 두었다. pool job의
+  QUEUED·STARTING·STARTED run이 0건이거나, writer drain 아래에서 배포해야 한다. 이 전제를 runbook·CHANGELOG·resume
+  체크리스트에 적었다. 검사 명령은 pool job 목록을 live `assetNodes { pools jobNames }`에서 유도한다. n150 실측은
+  pool job 27개(`__ASSET_JOB` 포함), 끝나지 않은 run 0건이었다. 이번 한 번만 필요한 전제라 `scripts/n150`에 스크립트로
+  두지는 않았다.
+
+## 2026-09-29 — 공유 Dagster plane의 Map 쪽 준비(stage 0 + 3.1): 브랜치 `feat/dagster-shared-stage0`
+
+계획은 `F:\dev\handoff\dagster-shared-plan.md`(Manager 쪽 정본은 `docs/platform-topology.md` §7). 배포 변경은 없다 —
+Map은 나중에 Manager pinned pair와 chain17로 나간다.
+
+- **stage 0 — 이미지 버전 고정.** Map은 lockfile 없이 `pip install ".[providers]"`로 설치해 왔고, `dagster>=1.9,<2`는
+  하한일 뿐이라 실제 버전은 빌드한 날 PyPI가 준 것이었다. 공유 host(webserver/daemon)보다 높은 dagster가 code-server에
+  끼어드는 것은 Dagster 호환 정책 밖이다. `docker/constraints-dagster.txt`에 목표 집합을 `==`로 적고(dagster family
+  1.13.24, dagster-postgres 0.29.24, grpcio 1.84.0, grpcio-health-checking 1.81.1, protobuf 6.33.6, pydantic 2.13.5 /
+  core 2.46.5 / settings 2.15.0, SQLAlchemy 2.0.54, psycopg 3.3.6(+binary, pool 3.3.3), psycopg2-binary 2.9.13, asyncpg
+  0.31.0) API·Dagster Dockerfile이 둘 다 `-c`로 읽는다. 값은 n150 live 이미지(`3d0411dd`)와 같다. n150에서
+  `uv pip compile`(Python 3.12, 두 이미지의 설치 인자 그대로)로 해소 가능함을 확인했다. Python은 기존 digest 핀
+  3.12.13 그대로다(3.12.14로의 digest bump는 계획상 선택이라 하지 않았다). `test_image_python_constraints.py`가 핀
+  형식·누락·family 일치·pyproject 범위 포함·두 Dockerfile의 `-c`와 COPY 순서를 본다.
+- **3.1 — code location 범위 조회.** API의 Dagster GraphQL이 전부 `repositoriesOrError`(전 repository)와 filter 없는
+  `runsOrError`였다. 공유 webserver에서는 다른 프로젝트 것이 섞이고, **writer drain은 다른 프로젝트의 schedule/sensor를
+  멈추고 run을 끊는다.** 이제 `DagsterUrls`가 settings의 repository selector를 들고 다니고, 조회는
+  `repositoryOrError(repositorySelector)`와 `runsOrError(filter: {tags: [.dagster/repository=__repository__@<loc>]})`다
+  (요약·pipeline overview/runs/schedules·schedule 명령·dataset schedule index·MOIS precheck·writer drain). run 상세는
+  다른 code location의 run을 `not_found`로 답한다. 프로젝트별 webserver에서도 selector가 유일한 repository를 가리키므로
+  오늘 배포와 호환된다. admin UI 운영 홈의 Dagster 링크는 `/locations/kortravelmap.dagster.definitions`(Dagster UI는
+  `__repository__`면 경로에 location만 쓴다 — live 번들에서 확인), C7 live helper 둘과 run 완주 게이트도 같은 selector로
+  좁혔다. `test_dagster_code_location_is_one_name.py`가 이름을 쓰는 자리(settings 기본값·`.env.example`·UI 상수·C7
+  helper·게이트)를 `docker/workspace.yaml`과 대조하고, API src·scripts에 `repositoriesOrError`와 filter 없는
+  `runsOrError`가 돌아오지 못하게 한다.
+- **pool 접두사.** pool 이름공간과 `default_limit`은 instance 전역이다. `opinet_api`·`krex_notice_snapshot`·
+  `kor_travel_geo`(geo 프로젝트와 겹칠 이름)를 `kor_travel_map.` 접두사로 바꿨다. 배포 직후 옛 이름 슬롯을 잡은 run과 새
+  이름 run이 한 번 겹칠 수 있다.
+- **D4 확인(읽기 전용, n150 12:40Z 무렵).** live GraphQL의 schedule 34·sensor 10 전부 live 상태 = 코드 `default_status`,
+  metadata DB `jobs` 11행 전부 `DECLARED_IN_CODE`. DB에만 켜진 instigator가 없어 코드 변경은 없다.
+- 남긴 것: 7개 run-status sensor가 `monitor_all_code_locations=True`라 공유 daemon에서는 다른 프로젝트 run 이벤트도
+  평가한다. `kor_travel_map.operation_key` tag가 없으면 `panel_only`로 끝나 정확성 문제는 없고 비용만 든다 — 끌지는
+  C3e 설계 결정이라 별도로 판단한다. 공유 plane의 env 이름(`KOR_TRAVEL_DAGSTER_SHARED_PG_URL`)·URL 재지정은 cutover
+  때 Manager rendering 몫이다.
+
 ## 2026-09-29 — Map DB를 공용 PostgreSQL로 옮겼다
 
 소유자가 위험을 받아들이고(결정 C) Map 전용 인스턴스(12700)를 공용 인스턴스(11000)로 합치기로 했다. superuser는 새로

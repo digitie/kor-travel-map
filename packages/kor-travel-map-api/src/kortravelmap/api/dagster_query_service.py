@@ -25,72 +25,73 @@ __all__ = [
 ]
 
 _DAGSTER_SUMMARY_QUERY = """
-query KorTravelMapDagsterSummary($limit: Int!) {
+query KorTravelMapDagsterSummary(
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
   version
-  repositoriesOrError {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
+    ... on Repository {
+      name
+      location { name }
+      pipelines { name isJob }
+      schedules {
         name
-        location { name }
-        pipelines { name isJob }
-        schedules {
-          name
-          description
-          pipelineName
-          mode
-          cronSchedule
-          executionTimezone
-          defaultStatus
-          canReset
-          scheduleState {
-            id
-            selectorId
-            status
-            repositoryName
-            repositoryLocationName
-            ticks(limit: 3) {
-              tickId
-              status
-              timestamp
-              endTimestamp
-              runIds
-              runKeys
-              skipReason
-              cursor
-              error { message stack className }
-            }
-          }
-        }
-        sensors {
-          name
-          sensorState {
-            status
-            ticks(limit: 3) {
-              tickId
-              status
-              timestamp
-              endTimestamp
-              runIds
-              runKeys
-              skipReason
-              cursor
-              error { message stack className }
-            }
-          }
-        }
-        assetNodes {
+        description
+        pipelineName
+        mode
+        cronSchedule
+        executionTimezone
+        defaultStatus
+        canReset
+        scheduleState {
           id
-          groupName
-          assetKey { path }
+          selectorId
+          status
+          repositoryName
+          repositoryLocationName
+          ticks(limit: 3) {
+            tickId
+            status
+            timestamp
+            endTimestamp
+            runIds
+            runKeys
+            skipReason
+            cursor
+            error { message stack className }
+          }
         }
       }
+      sensors {
+        name
+        sensorState {
+          status
+          ticks(limit: 3) {
+            tickId
+            status
+            timestamp
+            endTimestamp
+            runIds
+            runKeys
+            skipReason
+            cursor
+            error { message stack className }
+          }
+        }
+      }
+      assetNodes {
+        id
+        groupName
+        assetKey { path }
+      }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError {
       message
     }
   }
-  runsOrError(limit: $limit) {
+  runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs {
       results {
@@ -124,6 +125,7 @@ query KorTravelMapDagsterRunDetail(
       endTime
       updateTime
       tags { key value }
+      repositoryOrigin { repositoryName repositoryLocationName }
       eventConnection(limit: $eventLimit, afterCursor: $afterCursor) {
         cursor
         hasMore
@@ -235,7 +237,11 @@ async def get_summary(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=urls.graphql_url,
-            variables={"limit": page_size},
+            variables={
+                "limit": page_size,
+                "repositorySelector": urls.repository_selector(),
+                "runsFilter": urls.runs_filter(),
+            },
             query=_DAGSTER_SUMMARY_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -279,7 +285,10 @@ async def get_summary(
         )
     data = dagster_graphql.as_dict(payload.get("data"))
     repositories, repository_errors = dagster_graphql.parse_repositories(
-        dagster_graphql.as_dict(data.get("repositoriesOrError")), overrides=overrides
+        dagster_graphql.repository_connection(
+            dagster_graphql.as_dict(data.get("repositoryOrError"))
+        ),
+        overrides=overrides,
     )
     recent_runs, run_counts, run_errors = dagster_graphql.parse_runs(
         dagster_graphql.as_dict(data.get("runsOrError"))

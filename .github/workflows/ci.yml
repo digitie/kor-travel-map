@@ -50,6 +50,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            docker/constraints-dagster.txt
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
@@ -57,20 +58,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # geo extra는 GDAL system dependency 필요 — Sprint 2부터 별도 GDAL setup job
-          pip install -e ".[dev]"
+          pip install -c docker/constraints-dagster.txt -e ".[dev]"
 
       - name: Install kor-travel-map-api (editable)
         # PR#35로 첫 FastAPI 라우터 머지 — 본 step에서 install + 후속 step에서
         # 패키지 tests 실행. 메인 라이브러리 coverage에는 포함되지 않는다 (별도
         # tests/ 트리, API package pyproject은 독립 dev deps).
         run: |
-          pip install -e packages/kor-travel-map-api
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api
 
       - name: Install kor-travel-map-dagster (editable)
         # ADR-045: Dagster code location은 kor-travel-map monorepo가 소유한다.
         # 메인 라이브러리는 Dagster를 import하지 않으므로 별도 패키지로 설치한다.
         run: |
-          pip install -e packages/kor-travel-map-dagster
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: Run unit + lint tests
         run: |
@@ -139,21 +140,22 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            docker/constraints-dagster.txt
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -c docker/constraints-dagster.txt -e ".[dev]"
 
       - name: Install kor-travel-map-api (editable)
         run: |
-          pip install -e packages/kor-travel-map-api
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api
 
       - name: Install kor-travel-map-dagster (editable)
         run: |
-          pip install -e packages/kor-travel-map-dagster
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: Download unit coverage data
         uses: actions/download-artifact@v4
@@ -202,15 +204,16 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+            docker/constraints-dagster.txt
             packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install -e packages/kor-travel-map-api
-          pip install -e packages/kor-travel-map-dagster
+          pip install -c docker/constraints-dagster.txt -e ".[dev]"
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-api
+          pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: Run fixture replay tests
         run: |

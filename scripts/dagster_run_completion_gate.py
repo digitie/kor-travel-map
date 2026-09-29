@@ -67,6 +67,17 @@ _LOCAL_STATE_ROOT = "/opt/dagster/state"
 #: **upstream 쿼터를 쓰지 않는 것**이고, 그 성질을 정적 검사가 결박한다 — provider
 #: 적재 job으로 바꾸면 게이트를 돌릴 때마다 일일 한도를 깎는다.
 _DEFAULT_PROBE_JOB = "current_weather_summary_refresh"
+#: Map의 code location. ``docker/workspace.yaml``의 ``location_name``이 정본이다
+#: (``tests/unit/test_dagster_code_location_is_one_name.py``가 결박).
+#:
+#: webserver 하나가 여러 프로젝트를 싣는 공유 plane에서는 탐침 job을 고르는 것도,
+#: run을 세는 것도 이 location으로 좁혀야 한다 — 다른 프로젝트의 run이 하한을 채우거나
+#: 멈춘 run으로 잡히면 판정이 Map에 대한 진술이 아니게 된다.
+_CODE_LOCATION = "kortravelmap.dagster.definitions"
+_REPOSITORY_NAME = "__repository__"
+#: Dagster가 모든 run에 생성 시점에 다는 repository tag와 그 값.
+_REPOSITORY_TAG = ".dagster/repository"
+_REPOSITORY_TAG_VALUE = f"{_REPOSITORY_NAME}@{_CODE_LOCATION}"
 #: 이 게이트가 만든 run임을 표시한다. 잔여물 판독과 사후 구분에 쓴다.
 _GATE_TAG = "kor_travel_map.gate_kind"
 _GATE_TAG_VALUE = "dagster_run_completion"
@@ -203,13 +214,12 @@ def _graphql(endpoint: str, query: str, variables: dict[str, Any] | None = None)
     return document["data"]
 
 
-_REPOSITORIES = """
-{
-  repositoriesOrError {
+_REPOSITORY = """
+query($selector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $selector) {
     __typename
-    ... on RepositoryConnection {
-      nodes { name location { name } pipelines { name } }
-    }
+    ... on Repository { name location { name } pipelines { name } }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError { message }
   }
 }
@@ -227,20 +237,19 @@ mutation($params: ExecutionParams!) {
 
 
 def _selector_for(endpoint: str, job_name: str) -> dict[str, str]:
-    data = _graphql(endpoint, _REPOSITORIES)["repositoriesOrError"]
-    if data.get("__typename") != "RepositoryConnection":
+    selector = {
+        "repositoryName": _REPOSITORY_NAME,
+        "repositoryLocationName": _CODE_LOCATION,
+    }
+    data = _graphql(endpoint, _REPOSITORY, {"selector": selector})["repositoryOrError"]
+    if data.get("__typename") != "Repository":
         raise GateUnobservable(
             f"code location을 읽지 못했습니다: {data.get('message', data)!s:.200}"
         )
-    for node in data["nodes"]:
-        names = {pipeline["name"] for pipeline in node["pipelines"]}
-        if job_name in names:
-            return {
-                "repositoryName": node["name"],
-                "repositoryLocationName": node["location"]["name"],
-                "jobName": job_name,
-            }
-    raise GateUnobservable(f"배포된 code location에 job이 없습니다: {job_name}")
+    names = {pipeline["name"] for pipeline in data["pipelines"]}
+    if job_name not in names:
+        raise GateUnobservable(f"배포된 code location에 job이 없습니다: {job_name}")
+    return {**selector, "jobName": job_name}
 
 
 def _launch_probe(endpoint: str, selector: dict[str, str]) -> str:
@@ -455,9 +464,18 @@ def main() -> int:
                     "  SELECT 1 FROM run_tags t"
                     "  WHERE t.run_id = r.run_id AND t.key = :gate_key"
                     "    AND t.value = :gate_value"
+                    ") AND EXISTS ("
+                    "  SELECT 1 FROM run_tags t"
+                    "  WHERE t.run_id = r.run_id AND t.key = :repository_key"
+                    "    AND t.value = :repository_value"
                     ")"
                 ),
-                {"gate_key": _GATE_TAG, "gate_value": _GATE_TAG_VALUE},
+                {
+                    "gate_key": _GATE_TAG,
+                    "gate_value": _GATE_TAG_VALUE,
+                    "repository_key": _REPOSITORY_TAG,
+                    "repository_value": _REPOSITORY_TAG_VALUE,
+                },
             ).scalar()
             population["runs_observed_excluding_gate"] = int(other_runs or 0)
             gate.require(
@@ -487,8 +505,15 @@ def main() -> int:
                     "(SELECT t.value FROM run_tags t "
                     " WHERE t.run_id = r.run_id AND t.key = 'dagster/max_runtime') "
                     "FROM runs r "
-                    "WHERE r.status IN ('STARTING', 'STARTED', 'CANCELING')"
-                )
+                    "WHERE r.status IN ('STARTING', 'STARTED', 'CANCELING') "
+                    "AND EXISTS (SELECT 1 FROM run_tags t "
+                    " WHERE t.run_id = r.run_id AND t.key = :repository_key"
+                    "   AND t.value = :repository_value)"
+                ),
+                {
+                    "repository_key": _REPOSITORY_TAG,
+                    "repository_value": _REPOSITORY_TAG_VALUE,
+                },
             ).all()
             stuck_runs = [
                 f"{row[0]}({row[1]})"

@@ -178,14 +178,22 @@ const OWNED_TARGET_PAGE_LIMIT = 2;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const bootstrappedPages = new WeakSet<Page>();
 
+/**
+ * Map code location selector — `docker/workspace.yaml`의 `location_name`이 정본이다
+ * (`tests/unit/test_dagster_code_location_is_one_name.py`가 결박). 공유 Dagster
+ * webserver에서 다른 프로젝트의 repository를 읽지 않도록 조회를 이것으로 좁힌다.
+ */
+const MAP_DAGSTER_REPOSITORY_SELECTOR = {
+  repositoryName: "__repository__",
+  repositoryLocationName: "kortravelmap.dagster.definitions",
+} as const;
+
 const KMA_DAGSTER_JOB_DISCOVERY_QUERY = `
-query C7KmaWorkerJobDiscovery {
-  repositoriesOrError {
+query C7KmaWorkerJobDiscovery($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
-        pipelines { name isJob }
-      }
+    ... on Repository {
+      pipelines { name isJob }
     }
   }
 }
@@ -1138,17 +1146,16 @@ async function postDagsterGraphql(
 
 /** KMA destructive mutation 전에 실제 queue worker job 정의를 단 하나로 결박한다. */
 export async function assertKmaDagsterWorkerJobDefinition(): Promise<void> {
-  const data = await postDagsterGraphql(KMA_DAGSTER_JOB_DISCOVERY_QUERY, {});
-  const root = asRecord(data.repositoriesOrError);
-  if (root?.__typename !== "RepositoryConnection") {
+  const data = await postDagsterGraphql(KMA_DAGSTER_JOB_DISCOVERY_QUERY, {
+    repositorySelector: MAP_DAGSTER_REPOSITORY_SELECTOR,
+  });
+  const root = asRecord(data.repositoryOrError);
+  if (root?.__typename !== "Repository") {
     throw new Error("C7 Dagster repository 조회 계약이 실패했습니다 (values redacted)");
   }
-  const matches = asArray(root.nodes).flatMap((nodeValue) => {
-    const node = asRecord(nodeValue);
-    return asArray(node?.pipelines)
-      .map(asRecord)
-      .filter((pipeline) => pipeline?.name === KMA_SAFE_DAGSTER_JOB);
-  });
+  const matches = asArray(root.pipelines)
+    .map(asRecord)
+    .filter((pipeline) => pipeline?.name === KMA_SAFE_DAGSTER_JOB);
   if (matches.length !== 1 || matches[0]?.isJob !== true) {
     throw new Error(
       "C7 Dagster queue worker job cardinality/isJob 계약이 실패했습니다 (values redacted)",

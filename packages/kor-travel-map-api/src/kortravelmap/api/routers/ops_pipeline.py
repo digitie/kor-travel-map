@@ -591,39 +591,40 @@ class PipelineScheduleClaimResolutionResponse(BaseModel):
 # =============================================================================
 
 _PIPELINE_OVERVIEW_QUERY = """
-query KorTravelMapPipelineOverview($limit: Int!) {
+query KorTravelMapPipelineOverview(
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
   version
-  repositoriesOrError {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
+    ... on Repository {
+      name
+      location { name }
+      schedules { name }
+      sensors {
         name
-        location { name }
-        schedules { name }
-        sensors {
-          name
-          sensorState {
+        sensorState {
+          status
+          ticks(limit: 3) {
+            tickId
             status
-            ticks(limit: 3) {
-              tickId
-              status
-              timestamp
-              endTimestamp
-              runIds
-              runKeys
-              skipReason
-              cursor
-              error { message stack className }
-            }
+            timestamp
+            endTimestamp
+            runIds
+            runKeys
+            skipReason
+            cursor
+            error { message stack className }
           }
         }
       }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError {
       message
     }
   }
-  runsOrError(limit: $limit) {
+  runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs {
       results {
@@ -644,8 +645,15 @@ query KorTravelMapPipelineOverview($limit: Int!) {
 """
 
 _PIPELINE_DAGSTER_RUNS_QUERY = """
-query KorTravelMapPipelineDagsterRuns($limit: Int!) {
-  runsOrError(limit: $limit) {
+query KorTravelMapPipelineDagsterRuns(
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
+    __typename
+    ... on RepositoryNotFoundError { message }
+    ... on PythonError { message }
+  }
+  runsOrError(filter: $runsFilter, limit: $limit) {
     __typename
     ... on Runs {
       results {
@@ -666,60 +674,59 @@ query KorTravelMapPipelineDagsterRuns($limit: Int!) {
 """
 
 _PIPELINE_SCHEDULES_QUERY = """
-query KorTravelMapPipelineSchedules {
-  repositoriesOrError {
+query KorTravelMapPipelineSchedules($repositorySelector: RepositorySelector!) {
+  repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
-    ... on RepositoryConnection {
-      nodes {
+    ... on Repository {
+      name
+      location { name }
+      schedules {
         name
-        location { name }
-        schedules {
-          name
-          description
-          pipelineName
-          mode
-          cronSchedule
-          executionTimezone
-          defaultStatus
-          canReset
-          scheduleState {
-            id
-            selectorId
+        description
+        pipelineName
+        mode
+        cronSchedule
+        executionTimezone
+        defaultStatus
+        canReset
+        scheduleState {
+          id
+          selectorId
+          status
+          repositoryName
+          repositoryLocationName
+          ticks(limit: 3) {
+            tickId
             status
-            repositoryName
-            repositoryLocationName
-            ticks(limit: 3) {
-              tickId
-              status
-              timestamp
-              endTimestamp
-              runIds
-              runKeys
-              skipReason
-              cursor
-              error { message stack className }
-            }
+            timestamp
+            endTimestamp
+            runIds
+            runKeys
+            skipReason
+            cursor
+            error { message stack className }
           }
         }
-        sensors {
-          name
-          sensorState {
+      }
+      sensors {
+        name
+        sensorState {
+          status
+          ticks(limit: 3) {
+            tickId
             status
-            ticks(limit: 3) {
-              tickId
-              status
-              timestamp
-              endTimestamp
-              runIds
-              runKeys
-              skipReason
-              cursor
-              error { message stack className }
-            }
+            timestamp
+            endTimestamp
+            runIds
+            runKeys
+            skipReason
+            cursor
+            error { message stack className }
           }
         }
       }
     }
+    ... on RepositoryNotFoundError { message }
     ... on PythonError {
       message
       stack
@@ -1129,7 +1136,11 @@ async def get_pipeline_overview(
             payload = await dagster_graphql.post_graphql(
                 client=client,
                 graphql_url=dagster_urls.graphql_url,
-                variables={"limit": run_limit},
+                variables={
+                    "limit": run_limit,
+                    "repositorySelector": dagster_urls.repository_selector(),
+                    "runsFilter": dagster_urls.runs_filter(),
+                },
                 query=_PIPELINE_OVERVIEW_QUERY,
             )
         except (httpx.HTTPError, ValueError) as exc:
@@ -1169,7 +1180,9 @@ def _parse_dagster_overview(
         )
     data = dagster_graphql.as_dict(payload.get("data"))
     repositories, repository_errors = dagster_graphql.parse_repositories(
-        dagster_graphql.as_dict(data.get("repositoriesOrError")),
+        dagster_graphql.repository_connection(
+            dagster_graphql.as_dict(data.get("repositoryOrError"))
+        ),
     )
     recent_runs, run_counts, run_errors = dagster_graphql.parse_runs(
         dagster_graphql.as_dict(data.get("runsOrError")),
@@ -1601,7 +1614,11 @@ async def list_dagster_runs(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"limit": limit},
+            variables={
+                "limit": limit,
+                "repositorySelector": dagster_urls.repository_selector(),
+                "runsFilter": dagster_urls.runs_filter(),
+            },
             query=_PIPELINE_DAGSTER_RUNS_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -1628,6 +1645,19 @@ async def list_dagster_runs(
             meta=make_meta(started_at=started_at),
         )
     data = dagster_graphql.as_dict(payload.get("data"))
+    # location 이름이 틀리면 tag filter가 조용히 0건이다 — 빈 목록 대신 오류로 답한다.
+    repository_error = dagster_graphql.repository_guard_error(data)
+    if repository_error is not None:
+        return PipelineDagsterRunsResponse(
+            data=PipelineDagsterRunsData(
+                status="error",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                errors=[repository_error],
+            ),
+            meta=make_meta(started_at=started_at),
+        )
     runs, run_counts, run_errors = dagster_graphql.parse_runs(
         dagster_graphql.as_dict(data.get("runsOrError")),
     )
@@ -1794,7 +1824,7 @@ async def list_pipeline_schedules(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={},
+            variables={"repositorySelector": dagster_urls.repository_selector()},
             query=_PIPELINE_SCHEDULES_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -1822,7 +1852,9 @@ async def list_pipeline_schedules(
         )
     data = dagster_graphql.as_dict(payload.get("data"))
     repositories, errors = dagster_graphql.parse_repositories(
-        dagster_graphql.as_dict(data.get("repositoriesOrError")),
+        dagster_graphql.repository_connection(
+            dagster_graphql.as_dict(data.get("repositoryOrError"))
+        ),
         overrides=overrides,
     )
     schedules = [schedule for repository in repositories for schedule in repository.schedules]
