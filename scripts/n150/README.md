@@ -7,7 +7,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 | --- | --- |
 | `chain17.sh` | 전체 사이클: pair 계약 preflight → 회전 → Manager rebuild → `chain16.sh` |
 | `chain16.sh` | 후반부: C7 executor 이미지 → `repin.sh` → M01 ACL preflight → D1 → lane 정리 → D2 |
-| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, D2 fixture DSN 유도 |
+| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, Dagster service 키를 Manager 토폴로지에서 유도, D2 fixture DSN 유도 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
 | `adjudicate.sh` | rebuild가 가로지른 v4 BLOCKED lane을 잔여물 0 실측 뒤 `clear-blocked`로 정리 (chain16 lane 정리 단계) |
 
@@ -47,6 +47,41 @@ PostgreSQL client 호출, PostgreSQL 서버 이미지, DSN 문자열, libpq 연�
   DB가 어느 instance로 옮겨 가든 다음 주기의 repin이 그 값을 따라간다.
 - `chain16.sh`의 M01 ACL preflight는 여전히 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮는다.
   repin 뒤에는 같은 값이라 결과가 같다 — preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 남긴다.
+
+## Dagster service 키 — Manager 토폴로지에서 유도한다
+
+`repin.sh` 3단계는 `E2E_C7_DAGSTER_WEB_SERVICE`·`E2E_C7_DAGSTER_DAEMON_SERVICE`(Map)와
+`E2E_C7_PINVI_DAGSTER_SERVICE`를 손으로 적은 값이 아니라 Manager가 설치한 모델
+(`ktdctl targets list --json`)에서 읽는다. 프로젝트 target은 이름이 아니라 그 API service를 자기
+`runtime_services`로 가진 target이고, 그 `dagster.control_plane`에 따라
+
+- `shared`(공유 Dagster plane, Manager ADR-54): 이름에 `dagster`가 든 runtime service가 정확히
+  하나(code-server)여야 하고, 그 값을 쓴다. Map은 web·daemon 두 키가 같은 code-server를 가리킨다 —
+  러너(`read_cap`)는 두 키로 Map 설정을 읽고, preflight(`c7_prod_runtime.SHAREABLE_ROLES`)는 이 두
+  role에만 service 공유를 허용한다.
+- `own`: 적힌 값이 그 target의 Dagster runtime service이고 서로 다른지 확인만 한다.
+
+PinVi가 공유 plane으로 옮기며 `pinvi-dagster`가 사라져(같은 image의 `pinvi-dagster-code-server`)
+preflight가 없는 service에서 멈춘 것이 계기다. Map flip 때도 Manager 모델이 바뀌면 다음 repin이
+따라간다 — 이 키를 손으로 고칠 일은 없다.
+
+### Map flip 때 손으로 바꿀 것 (공개 Dagster URL)
+
+공개 URL과 그 sha256은 caller가 **선언하는** attestation이라 유도하지 않는다. Map이 공유 plane으로
+옮기는 창에서 `/root/.d2-live.env`를 다음처럼 바꾼다(API의 공개 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL`
+과 같은 값이어야 C7의 대조가 맞는다).
+
+```
+E2E_DAGSTER_URL=https://dagster.digitie.mywire.org/graphql
+E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256=ac0c1ae66267459f12d740e06ca3aa3a1e964daf91fac3df01fb93b193ba6dfd
+E2E_DAGSTER_BASIC_AUTH_FILE=/root/.d2-dagster-basic-auth
+```
+
+`E2E_DAGSTER_BASIC_AUTH_FILE`은 gateway의 Basic Auth 자격증명 파일이다 — root 소유, `0600`(group·other
+권한 없음), symlink 아님, 내용은 `user:password` 한 줄. C7 러너는 이 파일을 executor에
+read-only bind(`/run/secrets/c7-dagster-basic-auth`)로만 건네고, C7 Dagster client는 그 파일이
+있을 때만 `Authorization: Basic`을 보낸다(Origin·Sec-Fetch-Site 없는 POST — gateway가 받는 모양).
+지금(Map 전용 공개 URL)은 인증이 없으므로 키를 두지 않는다.
 
 ## 설치
 

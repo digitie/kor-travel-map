@@ -530,8 +530,11 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     # 모듈 상수가 기대 목록과 **정확히** 같아야 한다. 빠지면 그 runtime이 검사 밖에
     # 남고(그것이 v4의 결함이었다), 늘면 테스트가 모르는 runtime이 생긴 것이다.
     assert tuple(_RUNTIME_MODULE.ROLE_SERVICE_ENVS) == _EXPECTED_ROLE_SERVICE_ENVS
-    assert "len(set(role_services.values())) != len(role_services)" in runtime
-    assert "len(observed_containers) != len(role_services)" in runtime
+    # service는 서로 달라야 한다 — 공유 Dagster plane에서 Map web·daemon 두 role만 Map
+    # code-server 하나를 함께 가리킬 수 있다(``SHAREABLE_ROLES``).
+    assert "len(roles) > 1 and not roles <= SHAREABLE_ROLES" in runtime
+    assert "len(observed_containers) != len(roles_by_service)" in runtime
+    assert _RUNTIME_MODULE.SHAREABLE_ROLES == {"map_dagster_web", "map_dagster_daemon"}
     # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
     # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
     # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
@@ -752,6 +755,7 @@ def _run_c7_environment_validation(env: dict[str, str]) -> subprocess.CompletedP
             "require_enabled",
             "validate_sha256_env",
             "validate_service_env",
+            "validate_dagster_basic_auth_file",
             "validate_environment",
         )
     )
@@ -787,3 +791,84 @@ def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None
     assert rejected.returncode == 1
     assert f"required env is missing: {name}" in rejected.stderr
     assert "ENV_OK" not in rejected.stdout
+
+
+def _credential_file(tmp_path: Path, content: bytes, mode: int = 0o600) -> Path:
+    path = tmp_path / "dagster-basic-auth"
+    path.write_bytes(content)
+    path.chmod(mode)
+    return path
+
+
+def test_runner_env_contract_accepts_a_private_basic_auth_file(tmp_path: Path) -> None:
+    path = _credential_file(tmp_path, b"c7-runner:s3cr3t:with-colon\n")
+    accepted = _run_c7_environment_validation(
+        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": str(path)}
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert "s3cr3t" not in accepted.stdout + accepted.stderr
+
+
+@pytest.mark.parametrize(
+    ("content", "mode", "link"),
+    [
+        (b"c7-runner:s3cr3t\n", 0o640, False),
+        (b"c7-runner:s3cr3t\n", 0o604, False),
+        (b"c7-runner:s3cr3t\n", 0o600, True),
+        (b"no-password-s3cr3t\n", 0o600, False),
+        (b"c7 runner:s3cr3t\n", 0o600, False),
+        (b"c7-runner:s3cr3t\nsecond:line\n", 0o600, False),
+    ],
+)
+def test_runner_env_contract_rejects_an_unsafe_basic_auth_file(
+    tmp_path: Path, content: bytes, mode: int, link: bool
+) -> None:
+    path = _credential_file(tmp_path, content, mode)
+    if link:
+        alias = tmp_path / "alias"
+        alias.symlink_to(path)
+        path = alias
+    rejected = _run_c7_environment_validation(
+        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": str(path)}
+    )
+    assert rejected.returncode == 1
+    assert "Dagster Basic Auth file is unsafe" in rejected.stderr
+    assert "s3cr3t" not in rejected.stdout + rejected.stderr
+    assert "ENV_OK" not in rejected.stdout
+
+
+def test_runner_env_contract_rejects_a_relative_basic_auth_path() -> None:
+    rejected = _run_c7_environment_validation(
+        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": "dagster-basic-auth"}
+    )
+    assert rejected.returncode == 1
+    assert "must be absolute" in rejected.stderr
+
+
+def test_basic_auth_reaches_every_direct_dagster_post_only_by_read_only_mount() -> None:
+    """C7이 Dagster에 직접 POST하는 세 자리가 모두 같은 header helper를 쓴다.
+
+    자격증명은 env가 아니라 read-only bind로만 executor에 들어간다 — `docker inspect`의
+    Env에는 컨테이너 안 경로만 있다.
+    """
+
+    script = _read(RUNNER)
+    live = ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
+    helper = _read(live / "_dagster-basic-auth.ts")
+    assert "readFileSync(path" in helper
+    assert "process.env.E2E_DAGSTER_BASIC_AUTH_FILE" in helper
+    post = re.compile(r"await fetch\((?:this\.#graphqlUrl|dagsterGraphqlEndpoint\(\))")
+    for name in ("_ops-c7-dagster-sensor.ts", "_ops-c7-admin-api.ts"):
+        source = _read(live / name)
+        assert len(post.findall(source)) == 1, name
+        assert source.count("...dagsterAuthorizationHeaders(),") == 1, name
+    # 러너 안의 최종 복원 검증(node inline)도 같다.
+    assert script.count("...dagsterAuthorizationHeaders(),") == 1
+    assert (
+        '--mount "type=bind,src=$E2E_DAGSTER_BASIC_AUTH_FILE,'
+        'dst=$DAGSTER_BASIC_AUTH_CONTAINER_PATH,readonly"' in script
+    )
+    assert '--env "E2E_DAGSTER_BASIC_AUTH_FILE=$DAGSTER_BASIC_AUTH_CONTAINER_PATH"' in script
+    # 이름만 준 `--env NAME`은 호스트 값(호스트 경로)을 그대로 복사한다 — 쓰지 않는다.
+    assert re.search(r"--env E2E_DAGSTER_BASIC_AUTH_FILE\s", script) is None
+    assert re.search(r"\bE2E_DAGSTER_BASIC_AUTH_FILE E2E", script) is None

@@ -25,7 +25,6 @@ from dagster import (
     Permissive,
     RetryPolicy,
     RunRequest,
-    RunsFilter,
     ScheduleDefinition,
     ScheduleEvaluationContext,
     SkipReason,
@@ -33,6 +32,7 @@ from dagster import (
     op,
 )
 
+from .run_scope import map_runs_filter
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
@@ -708,7 +708,7 @@ def _weather_summary_refresh_execution_fn(
 ) -> RunRequest | SkipReason:
     """실행 중인 global projection이 있으면 minute tick을 합친다."""
     active_runs = context.instance.get_runs(
-        filters=RunsFilter(
+        filters=map_runs_filter(
             job_name="current_weather_summary_refresh",
             statuses=_WEATHER_SUMMARY_ACTIVE_RUN_STATUSES,
         ),

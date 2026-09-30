@@ -10,6 +10,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import { dagsterAuthorizationHeaders } from "./_dagster-basic-auth";
+
 const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor";
 const DEFAULT_OPERATION_TIMEOUT_MS = 90_000;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
@@ -694,6 +696,7 @@ export class QueueSensorController {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
+          ...dagsterAuthorizationHeaders(),
         },
         method: "POST",
         redirect: "error",

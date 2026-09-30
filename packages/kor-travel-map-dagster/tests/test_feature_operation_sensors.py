@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from dagster import DagsterRunStatus, DefaultSensorStatus
+from dagster import DagsterInstance, DagsterRun, DagsterRunStatus, DefaultSensorStatus
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
@@ -27,12 +27,15 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
     _evaluate_status_event,
+    _latest_dagster_watermark,
     _reconcile_tick,
     feature_operation_reconciliation_sensor,
 )
+from kortravelmap.dagster.run_scope import CODE_LOCATION_RUN_TAG, MAP_CODE_LOCATION_NAME
 
 _NOW = datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
 _JOB_NAME = "feature_place_mois_licenses_job"
+_OTHER_LOCATION = "kor_travel_weather.definitions"
 
 
 @dataclass
@@ -169,6 +172,12 @@ class _Instance:
         if self.records_error is not None:
             raise self.records_error
         selected = list(self.records if self.scan_records is None else self.scan_records)
+        # 실제 run storage처럼 tag filter를 AND로 적용한다 — 무시하면 좁히지 않은 조회도
+        # 이 fake에서는 초록이 된다.
+        for key, value in (getattr(filters, "tags", None) or {}).items():
+            selected = [
+                record for record in selected if record.dagster_run.tags.get(key) == value
+            ]
         created_after = getattr(filters, "created_after", None)
         created_before = getattr(filters, "created_before", None)
         if created_after is not None:
@@ -212,6 +221,7 @@ class _Context:
     cursor: str | None = None
     log: _Log = field(default_factory=_Log)
     updated_cursors: list[str] = field(default_factory=list)
+    code_location_origin: Any = None
 
     def update_cursor(self, cursor: str) -> None:
         self.updated_cursors.append(cursor)
@@ -224,7 +234,9 @@ def _record(
     created_at: datetime = _NOW,
     registered: bool = True,
     storage_id: int = 2,
+    location: str = MAP_CODE_LOCATION_NAME,
 ) -> _Record:
+    location_tags = {CODE_LOCATION_RUN_TAG: location}
     if not registered:
         return _Record(
             storage_id=storage_id,
@@ -233,7 +245,7 @@ def _record(
                 job_name="arbitrary_user_code_job",
                 status=status,
                 run_config={},
-                tags={},
+                tags=dict(location_tags),
                 asset_selection=None,
             ),
             create_timestamp=created_at,
@@ -271,6 +283,7 @@ def _record(
             status=status,
             run_config={},
             tags={
+                **location_tags,
                 "kor_travel_map.operation_key": _JOB_NAME,
                 "kor_travel_map.trigger_kind": "schedule",
             },
@@ -282,7 +295,7 @@ def _record(
     )
 
 
-def test_tracking_sensors_are_running_and_event_sensors_monitor_all_locations() -> None:
+def test_tracking_sensors_are_running_and_event_sensors_monitor_only_map_location() -> None:
     assert len(FEATURE_OPERATION_TRACKING_SENSORS) == 8
     assert {sensor.name for sensor in FEATURE_OPERATION_TRACKING_SENSORS} == {
         "feature_operation_queued_sensor",
@@ -297,8 +310,11 @@ def test_tracking_sensors_are_running_and_event_sensors_monitor_all_locations() 
     for tracking_sensor in FEATURE_OPERATION_TRACKING_SENSORS:
         assert tracking_sensor.default_status == DefaultSensorStatus.RUNNING
         assert tracking_sensor.required_resource_keys == {"kor_travel_map_client"}
+    # 공유 daemon에서 다른 프로젝트의 run 이벤트를 평가하지 않는다 — Dagster가 run의
+    # remote origin을 sensor의 code location과 대조한다.
     for event_sensor in FEATURE_OPERATION_TRACKING_SENSORS[:-1]:
-        assert event_sensor._monitor_all_code_locations is True
+        assert event_sensor._monitor_all_code_locations is False
+        assert not event_sensor._monitored_jobs
     assert feature_operation_reconciliation_sensor.minimum_interval_seconds == 30
     assert FEATURE_OPERATION_SETTLE_LAG_SECONDS == 300
 
@@ -895,6 +911,110 @@ async def test_non_empty_storage_without_cursor_is_unready_and_does_not_cut_over
     assert client.ensure_calls == []
     assert client.reconcile_calls == []
     assert client.list_calls == []
+
+
+async def test_shared_storage_with_only_other_tenant_runs_seeds_null_cursor() -> None:
+    """공유 plane 첫 tick: 남의 run만 있으면 Map 범위는 비어 있다 — null cursor로 시작한다.
+
+    좁히지 않은 조회는 weather run을 보고 "non-empty storage" 오류로 영영 멈춘다.
+    """
+
+    instance = _Instance(
+        [
+            _record(
+                DagsterRunStatus.SUCCESS,
+                run_id="weather-run",
+                storage_id=5,
+                registered=False,
+                location=_OTHER_LOCATION,
+            )
+        ]
+    )
+    context = _Context(instance=instance)
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+
+    assert context.log.errors == []
+    assert [
+        FeatureOperationReconcileCursor.from_json(cursor) for cursor in context.updated_cursors
+    ] == [FeatureOperationReconcileCursor()]
+
+    # 다음 tick: 남의 run은 Dagster→DB 방향 page에 들어오지 않고, Map run만 반영된다.
+    instance.records.append(
+        _record(
+            DagsterRunStatus.STARTED,
+            run_id="map-run",
+            storage_id=6,
+            created_at=datetime.now(tz=UTC) - timedelta(hours=1),
+        )
+    )
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert [call["dagster_run_id"] for call in client.ensure_calls] == ["map-run"]
+    resumed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
+    assert resumed.dagster == DagsterRunWatermark(6, "map-run")
+
+
+async def test_reconcile_refuses_a_code_location_other_than_the_scoped_one() -> None:
+    """배포된 location 이름이 조회 범위와 다르면 조용히 0건을 보지 않고 크게 실패한다."""
+
+    context = _Context(
+        instance=_Instance([]),
+        code_location_origin=SimpleNamespace(location_name="renamed.location"),
+    )
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+
+    assert context.updated_cursors == []
+    assert len(context.log.errors) == 1
+    assert "renamed.location" in context.log.errors[0]
+    assert client.list_calls == []
+
+    context.code_location_origin = SimpleNamespace(location_name=MAP_CODE_LOCATION_NAME)
+    await _reconcile_tick(context, client)
+    assert len(context.updated_cursors) == 1
+
+
+def _add_run(instance: DagsterInstance, run_id: str, location: str) -> None:
+    instance.add_run(
+        DagsterRun(
+            job_name=_JOB_NAME,
+            run_id=run_id,
+            status=DagsterRunStatus.SUCCESS,
+            tags={CODE_LOCATION_RUN_TAG: location},
+        )
+    )
+
+
+def test_real_run_storage_scopes_watermark_and_page_to_map_location() -> None:
+    """실제 run storage의 tag join과 insertion cursor로 좁힘을 확인한다(fake가 아니라)."""
+
+    with DagsterInstance.ephemeral() as instance:
+        _add_run(instance, "weather-1", _OTHER_LOCATION)
+        assert _latest_dagster_watermark(instance) is None
+
+        _add_run(instance, "map-1", MAP_CODE_LOCATION_NAME)
+        _add_run(instance, "weather-2", _OTHER_LOCATION)
+        _add_run(instance, "map-2", MAP_CODE_LOCATION_NAME)
+        _add_run(instance, "weather-3", _OTHER_LOCATION)
+
+        latest = _latest_dagster_watermark(instance)
+        assert latest is not None
+        assert latest.run_id == "map-2"
+
+        settled_before = datetime.now(tz=UTC) + timedelta(hours=1)
+        first = _dagster_run_page(
+            instance, watermark=None, page_size=1, settled_before=settled_before
+        )
+        assert [record.dagster_run.run_id for record in first] == ["map-1"]
+        watermark = DagsterRunWatermark(first[0].storage_id, "map-1")
+        rest = _dagster_run_page(
+            instance, watermark=watermark, page_size=200, settled_before=settled_before
+        )
+        assert [record.dagster_run.run_id for record in rest] == ["map-2"]
 
 
 async def test_empty_storage_cutover_keeps_dagster_cursor_null() -> None:

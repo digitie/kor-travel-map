@@ -35,6 +35,7 @@ from .feature_operation_tracking import (
     declared_execution_scopes,
     resolve_run_execution_manifest,
 )
+from .run_scope import MAP_CODE_LOCATION_NAME, map_runs_filter
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -117,10 +118,17 @@ class _SensorLog(Protocol):
     def error(self, message: str, *args: object) -> None: ...
 
 
+class _CodeLocationOrigin(Protocol):
+    location_name: str
+
+
 class _ReconcileContext(Protocol):
     cursor: str | None
     instance: _DagsterInstance
     log: _SensorLog
+
+    @property
+    def code_location_origin(self) -> _CodeLocationOrigin | None: ...
 
     def update_cursor(self, cursor: str) -> None: ...
 
@@ -220,10 +228,14 @@ class FeatureOperationObservationError(RuntimeError):
 def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     sensor_name = f"feature_operation_{status.value.lower()}_sensor"
 
+    # 공유 daemon에서는 모든 프로젝트의 run 이벤트가 한 event log에 쌓인다. 기본값
+    # (``monitor_all_code_locations=False``, ``monitored_jobs`` 없음)이면 Dagster가 run의
+    # remote origin(location·repository)을 이 sensor의 것과 대조해 Map run에서만 평가한다.
+    # Map의 feature-load job은 전부 이 code location 하나에 있으므로 오늘 배포에서는
+    # 평가 대상이 바뀌지 않는다.
     @run_status_sensor(
         run_status=status,
         name=sensor_name,
-        monitor_all_code_locations=True,
         default_status=DefaultSensorStatus.RUNNING,
     )
     def _status_sensor(
@@ -326,7 +338,19 @@ async def _reconcile_tick(
     context: _ReconcileContext,
     client: AsyncKorTravelMapClient,
 ) -> SkipReason:
+    origin = context.code_location_origin
+    if origin is not None and origin.location_name != MAP_CODE_LOCATION_NAME:
+        # run 조회는 ``MAP_CODE_LOCATION_NAME``으로 좁힌다. 배포된 location 이름이 다르면
+        # 좁힌 조회가 조용히 0건을 돌려 reconcile이 아무것도 하지 않는다 — 크게 실패한다.
+        message = (
+            "reconcile sensor의 code location이 Map run 조회 범위와 다름: "
+            f"deployed={origin.location_name} expected={MAP_CODE_LOCATION_NAME}"
+        )
+        context.log.error(message)
+        return SkipReason(message)
     if context.cursor is None:
+        # 조회는 Map code location으로 좁혀져 있다. 공유 plane에 처음 올라온 Map은
+        # 다른 프로젝트 run이 있어도 자기 run이 0건이라 null cursor로 시작한다.
         latest = _latest_dagster_watermark(context.instance)
         if latest is not None:
             message = (
@@ -598,6 +622,7 @@ def _dagster_run_page(
     )
     insertion_page = tuple(
         instance.get_run_records(
+            filters=map_runs_filter(),
             limit=limit,
             ascending=True,
             cursor=watermark.run_id if watermark is not None else None,
@@ -626,6 +651,7 @@ def _latest_dagster_watermark(
 ) -> DagsterRunWatermark | None:
     latest = tuple(
         instance.get_run_records(
+            filters=map_runs_filter(),
             limit=1,
             ascending=False,
         )

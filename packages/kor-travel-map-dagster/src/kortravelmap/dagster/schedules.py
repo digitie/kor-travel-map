@@ -26,7 +26,6 @@ from dagster import (
     DagsterRunStatus,
     DefaultScheduleStatus,
     RunRequest,
-    RunsFilter,
     ScheduleDefinition,
     ScheduleEvaluationContext,
     SkipReason,
@@ -77,6 +76,7 @@ from .kma_weather import (
     feature_weather_kma_ultra_short_nowcast,
 )
 from .mcst_features import feature_place_mcst_culture
+from .run_scope import map_runs_filter
 from .schedule_overrides import cron_for_schedule
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
@@ -604,7 +604,7 @@ def _coalescing_execution_fn(
 
     def _evaluate(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
         active_runs = context.instance.get_runs(
-            filters=RunsFilter(
+            filters=map_runs_filter(
                 job_name=spec.job_name,
                 statuses=_COALESCING_RUN_STATUSES,
                 tags={"kor_travel_map.operation_key": spec.job_name},

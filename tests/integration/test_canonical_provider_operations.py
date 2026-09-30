@@ -534,6 +534,8 @@ class _PeriodicContext:
         self.cursor = FeatureOperationReconcileCursor().to_json()
         self.log = _PeriodicLog()
         self.updated_cursors: list[str] = []
+        # 실제 sensor context처럼 code location origin을 싣는다(테스트 harness는 None).
+        self.code_location_origin = None
 
     def update_cursor(self, cursor: str) -> None:
         self.updated_cursors.append(cursor)

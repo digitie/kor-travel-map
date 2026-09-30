@@ -16,6 +16,9 @@ readonly COMPOSE_PROJECT_DIR="$PWD"
 readonly SAFE_DAGSTER_JOB="feature_update_request_worker"
 readonly SAFE_SCHEDULE="feature_weather_kma_short_forecast_hourly_schedule"
 readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
+# 공유 Dagster plane의 공개 GraphQL gateway(Manager ADR-54 D2)는 Basic Auth를 요구한다.
+# 자격증명 파일은 executor 안의 이 경로에 read-only로만 보인다(env에는 경로만 싣는다).
+readonly DAGSTER_BASIC_AUTH_CONTAINER_PATH="/run/secrets/c7-dagster-basic-auth"
 readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 STATE_ROOT=""
 EVIDENCE_ROOT=""
@@ -228,6 +231,38 @@ validate_service_env() {
   require_env "$name"
   [[ "${!name}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
     die "invalid compose service env: $name"
+}
+
+# 선택: `E2E_DAGSTER_BASIC_AUTH_FILE`이 있으면 C7 Dagster client가 `Authorization: Basic`을
+# 보낸다. 파일은 러너 사용자(prod는 root) 소유, group·other 권한 없음, symlink 아님이고,
+# 내용은 `user:password` 한 줄(출력 가능한 ASCII, user에 `:` 없음)이다. 값은 출력하지 않는다.
+validate_dagster_basic_auth_file() {
+  local path="$E2E_DAGSTER_BASIC_AUTH_FILE"
+  [[ "$path" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
+    die "Dagster Basic Auth file path must be absolute and plain"
+  python3 -I - "$path" <<'PY' || die "Dagster Basic Auth file is unsafe (values redacted)"
+import os
+import re
+import stat
+import sys
+
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    payload = os.read(fd, 4097)
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != os.geteuid()
+    or stat.S_IMODE(observed.st_mode) & 0o077
+    or len(payload) > 4096
+):
+    raise SystemExit(1)
+credential = payload.removesuffix(b"\n")
+if re.fullmatch(rb"[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+", credential) is None:
+    raise SystemExit(1)
+PY
 }
 
 preserve_evidence() {
@@ -503,6 +538,7 @@ validate_environment() {
   validate_service_env E2E_C7_PINVI_API_SERVICE
   validate_service_env E2E_C7_PINVI_WEB_SERVICE
   validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
+  [[ -z "${E2E_DAGSTER_BASIC_AUTH_FILE-}" ]] || validate_dagster_basic_auth_file
 
   [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
     die "expected Git commit is invalid"
@@ -804,6 +840,13 @@ docker_run_playwright() {
     environment_args+=(--env "$name")
   done
   [[ -z "${E2E_ADMIN_USERNAME-}" ]] || environment_args+=(--env E2E_ADMIN_USERNAME)
+  # Basic Auth 자격증명은 env가 아니라 read-only bind로만 건넨다(`docker inspect`에 값이 없다).
+  if [[ -n "${E2E_DAGSTER_BASIC_AUTH_FILE-}" ]]; then
+    environment_args+=(
+      --mount "type=bind,src=$E2E_DAGSTER_BASIC_AUTH_FILE,dst=$DAGSTER_BASIC_AUTH_CONTAINER_PATH,readonly"
+      --env "E2E_DAGSTER_BASIC_AUTH_FILE=$DAGSTER_BASIC_AUTH_CONTAINER_PATH"
+    )
+  fi
   [[ -n "$LOCK_GUARD_PID" ]] && kill -0 "$LOCK_GUARD_PID" 2>/dev/null ||
     die "orchestrator lock guard is not alive"
   [[
@@ -1459,6 +1502,7 @@ remote_state_is_exact_restored() {
     "$E2E_STORAGE_STATE" <<'NODE'
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
+const { readFileSync } = require("node:fs");
 const { readFile } = require("node:fs/promises");
 const { chromium, devices } = require("@playwright/test");
 
@@ -1494,6 +1538,19 @@ function canonicalDagsterGraphql(raw) {
     ? pathname
     : `${pathname}/graphql`;
   return url;
+}
+
+// `_dagster-basic-auth.ts`와 같은 계약 — 파일이 없으면 header도 없다.
+function dagsterAuthorizationHeaders() {
+  const path = process.env.E2E_DAGSTER_BASIC_AUTH_FILE;
+  if (!path) return {};
+  const credential = readFileSync(path, "utf8").replace(/\n$/, "");
+  if (!/^[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+$/.test(credential)) {
+    throw new Error("unsafe Dagster Basic Auth file");
+  }
+  return {
+    Authorization: `Basic ${Buffer.from(credential, "utf8").toString("base64")}`,
+  };
 }
 
 function requiredString(value) {
@@ -1565,7 +1622,11 @@ query C7FinalQueueSensorStatus($selector: SensorSelector!) {
 }`;
   const response = await fetch(graphqlUrl, {
     body: JSON.stringify({ query, variables: { selector: initial.selector } }),
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...dagsterAuthorizationHeaders(),
+    },
     method: "POST",
     redirect: "error",
     signal: AbortSignal.timeout(15_000),

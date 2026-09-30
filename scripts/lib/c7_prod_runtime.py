@@ -13,7 +13,9 @@ runtime manifest·v8 rebuild journal)을 다시 파싱해 "지금 떠 있는 것
 - 공개 origin 세 개(UI·API websocket·Dagster GraphQL)가 caller가 선언한 sha256과 같고,
   셋 다 loopback·link-local이 아닌 HTTPS다.
 - compose service 일곱이 각각 정확히 한 컨테이너로 running(healthcheck가 있으면 healthy)
-  이고, 서로 다른 컨테이너이며, 한 compose project 안에 있다.
+  이고, 서로 다른 컨테이너이며, 한 compose project 안에 있다. 단 Map Dagster의 web·daemon
+  두 role은 같은 service를 가리킬 수 있다 — 공유 Dagster plane에서는 Map code를 싣는
+  컨테이너가 code-server 하나뿐이다.
 - T-VN-15 cursor secret은 Map API에만 있고 모양·전용성이 맞다.
 - Map UI 런타임에 admin password hash가 있다.
 - Map 네 runtime image의 OCI revision label이 `E2E_C7_EXPECTED_GIT_COMMIT`이다. PinVi
@@ -50,6 +52,11 @@ ROLE_SERVICE_ENVS: Final[tuple[tuple[str, str], ...]] = (
     ("pinvi_dagster", "E2E_C7_PINVI_DAGSTER_SERVICE"),
 )
 PINVI_ROLES: Final = frozenset({"pinvi_api", "pinvi_web", "pinvi_dagster"})
+#: 한 service를 함께 가리켜도 되는 role. 공유 Dagster plane(Manager ADR-54)에서는 Map의
+#: webserver·daemon이 공용이 되고, Map code(설정·run 실행)를 싣는 Map 컨테이너는
+#: code-server 하나만 남는다. 두 env가 그 service를 함께 가리킨다. 다른 role의 중복은
+#: 여전히 설정 실수다.
+SHAREABLE_ROLES: Final = frozenset({"map_dagster_web", "map_dagster_daemon"})
 
 _CURSOR_SECRET_ENV: Final = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
 _CURSOR_PROTECTED_ENVS: Final = frozenset(
@@ -248,7 +255,12 @@ def verify_runtime(
     verify_caller_origins(environ)
 
     role_services = {role: environ[env_name] for role, env_name in ROLE_SERVICE_ENVS}
-    if len(set(role_services.values())) != len(role_services):
+    roles_by_service: dict[str, set[str]] = {}
+    for role, service in role_services.items():
+        roles_by_service.setdefault(service, set()).add(role)
+    if any(
+        len(roles) > 1 and not roles <= SHAREABLE_ROLES for roles in roles_by_service.values()
+    ):
         raise RuntimePreflightError("compose services are not distinct")
     observed_containers: set[str] = set()
     compose_projects: set[str] = set()
@@ -305,7 +317,7 @@ def verify_runtime(
                 or image_labels.get("org.opencontainers.image.revision") != commit
             ):
                 raise RuntimePreflightError("runtime image source provenance")
-    if len(observed_containers) != len(role_services):
+    if len(observed_containers) != len(roles_by_service):
         raise RuntimePreflightError("runtime containers are not distinct")
     if len(compose_projects) != 1:
         raise RuntimePreflightError("wrong compose project")

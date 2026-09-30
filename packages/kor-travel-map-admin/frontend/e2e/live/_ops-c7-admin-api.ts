@@ -15,6 +15,8 @@ import type { Locator, Page, Response, Route, TestInfo } from "@playwright/test"
 
 import type { components } from "../../src/api/types";
 
+import { dagsterAuthorizationHeaders } from "./_dagster-basic-auth";
+
 export type BrowserFetchResult<T> = {
   body: T | null;
   entityTag: string | null;
@@ -1117,6 +1119,7 @@ async function postDagsterGraphql(
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        ...dagsterAuthorizationHeaders(),
       },
       method: "POST",
       redirect: "error",

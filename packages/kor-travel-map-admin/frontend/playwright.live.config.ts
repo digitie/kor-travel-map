@@ -269,6 +269,10 @@ const authRequestHeaders = isolatedAuthRequestHeaders();
  *     E2E_BASE_URL=https://map.<domain> E2E_DAGSTER_URL=https://map-dagster.<domain> \
  *     npm run e2e:live -- --retries=1
  *
+ * `E2E_DAGSTER_URL`이 공유 Dagster plane의 Basic Auth gateway(Manager ADR-54)면
+ * `E2E_DAGSTER_BASIC_AUTH_FILE`(`user:password` 한 줄, 소유자 전용 권한)을 준다 — C7 Dagster
+ * client(`e2e/live/_dagster-basic-auth.ts`)가 `Authorization: Basic`을 붙인다. 없으면 붙이지 않는다.
+ *
  * #520 인증 게이트: `E2E_ADMIN_PASSWORD`(+ 선택 `E2E_ADMIN_USERNAME`, 기본 admin)를 주면
  * auth.setup이 로그인 세션을 만들어 모든 spec이 인증 상태로 돈다(미설정 시 인증 미적용 대상으로 간주).
  *
