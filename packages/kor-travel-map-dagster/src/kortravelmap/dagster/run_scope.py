@@ -4,8 +4,8 @@
 run을 싣는다. ``instance.get_runs``·``get_run_records``·``get_run_ids``를 filter 없이
 부르면 weather·PinVi·geo의 run까지 읽는다 — reconcile sensor는 남의 run을 watermark로
 삼고, coalescing schedule은 남의 active run을 보고 tick을 생략한다. 그래서 인스턴스
-전역 run 조회는 전부 이 모듈의 filter를 거친다(``tests/unit/test_dagster_code_location_is_one_name.py``
-가 강제한다).
+전역 run 조회는 전부 이 모듈의 filter를 거친다
+(``tests/unit/test_dagster_code_location_is_one_name.py``가 강제한다).
 
 좁히는 손잡이는 ``dagster/code_location`` tag다. Dagster는 remote origin이 있는 run
 (daemon·sensor·schedule·GraphQL launch — Map prod run 전부)을 만들 때 이 tag에 code

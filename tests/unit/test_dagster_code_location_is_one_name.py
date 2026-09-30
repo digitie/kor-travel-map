@@ -496,7 +496,9 @@ def test_run_completion_gate_is_the_workspace_location() -> None:
 # 함께 있다.
 
 #: Python 조회가 살 수 있는 자리 — ``_QUERY_SOURCE_ROOTS``의 ``.py``.
-_INSTANCE_READ_ROOTS = tuple(relative for relative, suffixes in _QUERY_SOURCE_ROOTS if ".py" in suffixes)
+_INSTANCE_READ_ROOTS = tuple(
+    relative for relative, suffixes in _QUERY_SOURCE_ROOTS if ".py" in suffixes
+)
 
 #: filter로 좁힐 수 없는 인스턴스 전역 조회 중 filter 인자가 없는 것. Map은 쓰지 않는다 —
 #: 쓰게 되면 공유 plane에서의 범위 근거를 이 검사에 먼저 적는다.
@@ -544,8 +546,9 @@ def _is_map_runs_filter(node: ast.expr | None) -> bool:
     if not isinstance(node, ast.Call):
         return False
     func = node.func
-    name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else None
-    return name == "map_runs_filter"
+    if isinstance(func, ast.Name):
+        return func.id == "map_runs_filter"
+    return isinstance(func, ast.Attribute) and func.attr == "map_runs_filter"
 
 
 def unscoped_instance_reads(source: str) -> tuple[int, list[str]]:
@@ -571,7 +574,9 @@ def unscoped_instance_reads(source: str) -> tuple[int, list[str]]:
         keywords = {keyword.arg: keyword.value for keyword in node.keywords}
         value = keywords.get("filters", keywords.get("runs_filter"))
         if node.args or not _is_map_runs_filter(value):
-            violations.append(f"line {node.lineno}: {reader}가 map_runs_filter(…)로 좁혀지지 않는다")
+            violations.append(
+                f"line {node.lineno}: {reader}가 map_runs_filter(…)로 좁혀지지 않는다"
+            )
             continue
         scoped += 1
     return scoped, violations
@@ -655,8 +660,7 @@ def test_run_status_sensors_do_not_monitor_every_code_location() -> None:
 
 def test_dagster_run_scope_is_the_workspace_location() -> None:
     from dagster._core.storage.tags import CODE_LOCATION_TAG
-
     from kortravelmap.dagster.run_scope import CODE_LOCATION_RUN_TAG, MAP_CODE_LOCATION_NAME
 
-    assert MAP_CODE_LOCATION_NAME == _workspace_location()
+    assert _workspace_location() == MAP_CODE_LOCATION_NAME
     assert CODE_LOCATION_RUN_TAG == CODE_LOCATION_TAG

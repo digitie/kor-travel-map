@@ -534,7 +534,7 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     # code-server 하나를 함께 가리킬 수 있다(``SHAREABLE_ROLES``).
     assert "len(roles) > 1 and not roles <= SHAREABLE_ROLES" in runtime
     assert "len(observed_containers) != len(roles_by_service)" in runtime
-    assert _RUNTIME_MODULE.SHAREABLE_ROLES == {"map_dagster_web", "map_dagster_daemon"}
+    assert {"map_dagster_web", "map_dagster_daemon"} == _RUNTIME_MODULE.SHAREABLE_ROLES
     # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
     # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
     # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
