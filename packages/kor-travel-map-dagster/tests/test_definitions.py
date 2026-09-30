@@ -32,8 +32,8 @@ from kortravelmap.dagster.feature_operation_tracking import (
     DeclaredExecutionScope,
     declared_execution_scopes,
 )
-from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.maintenance import CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS
+from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.run_scope import MAP_CODE_LOCATION_NAME
 from kortravelmap.dagster.schedules import (
     _KNPS_GEOMETRY_SCHEDULE,
