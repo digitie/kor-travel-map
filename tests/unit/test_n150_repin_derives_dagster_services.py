@@ -210,7 +210,7 @@ def _without(target: dict[str, Any], service: str) -> dict[str, Any]:
             "compose service 이름이 아니다",
         ),
         (
-            [_MAP_OWN, {**_PINVI_SHARED, "runtime_services": ["pinvi-api", "Pinvi-Dagster"]}],
+            [_MAP_OWN, {**_PINVI_SHARED, "runtime_services": ["pinvi-api", "pinvi-dagster-Code"]}],
             _ENV,
             "compose service 이름이 아니다",
         ),
