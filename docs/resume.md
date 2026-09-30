@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-01 — Map shared-plane 차단 항목: 브랜치 `feat/dagster-shared-map-prep`
+
+**다음 한 작업: CI 전량 + 적대 리뷰 뒤 머지 → 다음 Map pinned pair로 배포(Map 전용 instance에서 동작 불변).**
+
+- run 조회(reconcile sensor, coalescing schedule 둘)는 `map_runs_filter()`로 Map code location만 읽는다. run-status
+  sensor는 자기 location만 본다.
+- API: `KOR_TRAVEL_MAP_API_DAGSTER_INTERNAL_GRAPHQL_URL`(호출) / `…_DAGSTER_GRAPHQL_URL`(보고·C7 hash). flip 때
+  Manager가 호출 URL을 `http://127.0.0.1:11002/graphql`, 공개 URL을 `https://dagster.digitie.mywire.org/graphql`로
+  렌더하고 allowlist에서 공개 host를 뺄 수 있다.
+- n150 `/root/.d2-live.env`: 지금은 새 `repin.sh`(호스트 사본 재설치 뒤)가 `E2E_C7_PINVI_DAGSTER_SERVICE`를
+  `pinvi-dagster-code-server`로 고친다. flip 값(URL·hash·Basic Auth 파일)은 `scripts/n150/README.md`.
+
 ## 2026-09-29 — 공유 Dagster plane Map 준비(stage 0 + 3.1): 브랜치 `feat/dagster-shared-stage0`
 
 **다음 한 작업: 브랜치를 CI 전량으로 확인하고 적대 리뷰 뒤 머지 → 다음 Map+PinVi pinned pair(chain17)로 배포.**

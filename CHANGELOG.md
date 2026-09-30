@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 공유 Dagster plane 합류 전 차단 항목 (2026-10-01)
+
+- **CHANGED (Dagster)**: reconcile sensor의 run 조회와 feature-load·weather summary schedule의 active run 조회가
+  Map code location(`dagster/code_location` tag)으로 좁혀진다. run-status sensor 일곱은 자기 code location의 run만
+  평가한다(`monitor_all_code_locations` 기본값). 배포된 location 이름이 조회 범위와 다르면 reconcile sensor가 오류로
+  멈춘다. Map 전용 instance에서는 결과가 같다.
+- **ADDED (API)**: `KOR_TRAVEL_MAP_API_DAGSTER_INTERNAL_GRAPHQL_URL` — backend가 호출하는 Dagster GraphQL URL.
+  없거나 비면 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL`을 호출한다(기존 동작). 주면 `…_DAGSTER_GRAPHQL_URL`은 응답의
+  `graphql_url`로 보고만 하고 `dagster_allowed_hosts`는 호출 URL에만 적용된다.
+- **CHANGED (C7/D2)**: `scripts/n150/repin.sh`가 Dagster service 키를 Manager 토폴로지(`ktdctl targets list --json`)
+  에서 유도한다. C7 preflight는 Map web·daemon 두 role이 한 service(공유 plane의 Map code-server)를 가리키는 것을
+  허용한다. 선택 `E2E_DAGSTER_BASIC_AUTH_FILE`이 있으면 C7 Dagster client가 `Authorization: Basic`을 보낸다.
+
 ### npm 보안 권고 — Next 16.3.8 (2026-10-01)
 
 - **SECURITY (frontend)**: `next` 16.3.4 → **16.3.8**(`@next/env`·`@next/eslint-plugin-next`·`@next/swc-*` 함께).
