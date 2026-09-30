@@ -72,11 +72,12 @@ preflight가 없는 service에서 멈춘 것이 계기다. Map flip 때도 Manag
 ### Map flip 때 손으로 바꿀 것 (공개 Dagster URL)
 
 공개 URL과 그 sha256은 caller가 **선언하는** attestation이라 유도하지 않는다. Map이 공유 plane으로
-옮기는 창에서 `/root/.d2-live.env`를 다음처럼 바꾼다(API의 공개 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL`
+옮기는 창에서 `/root/.d2-live.env`를 다음처럼 바꾼다(`<dagster-host>`는 공용 Dagster gateway의 공개 host.
+API의 공개 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL`
 과 같은 값이어야 C7의 대조가 맞는다).
 
 ```
-E2E_DAGSTER_URL=https://dagster.digitie.mywire.org/graphql
+E2E_DAGSTER_URL=https://<dagster-host>/graphql
 E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256=ac0c1ae66267459f12d740e06ca3aa3a1e964daf91fac3df01fb93b193ba6dfd
 E2E_DAGSTER_BASIC_AUTH_FILE=/root/.d2-dagster-basic-auth
 ```
