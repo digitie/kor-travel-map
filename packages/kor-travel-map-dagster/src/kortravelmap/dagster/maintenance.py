@@ -32,7 +32,7 @@ from dagster import (
     op,
 )
 
-from .run_scope import map_runs_filter
+from .run_scope import map_owned_runs_filter
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
@@ -707,10 +707,17 @@ def _weather_summary_refresh_execution_fn(
     context: ScheduleEvaluationContext,
 ) -> RunRequest | SkipReason:
     """실행 중인 global projection이 있으면 minute tick을 합친다."""
+    # schedule context에는 code location이 없다 — location 상수 대신 이 job이 스스로 다는
+    # ``kor_travel_map.job_kind`` tag로 좁힌다(공유 plane의 다른 프로젝트 run에는 없다).
     active_runs = context.instance.get_runs(
-        filters=map_runs_filter(
+        filters=map_owned_runs_filter(
             job_name="current_weather_summary_refresh",
             statuses=_WEATHER_SUMMARY_ACTIVE_RUN_STATUSES,
+            tags={
+                "kor_travel_map.job_kind": CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS[
+                    "kor_travel_map.job_kind"
+                ]
+            },
         ),
         limit=1,
     )

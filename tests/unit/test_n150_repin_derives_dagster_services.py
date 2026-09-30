@@ -71,11 +71,15 @@ _PLANE = {
 def _helper() -> str:
     source = _SCRIPT.read_text(encoding="utf-8")
     match = re.search(
-        r'^python3 -I - "\$ENV_FILE" "\$TOPOLOGY" <<\'PY\'.*?\n(.*?)^PY$',
+        r'^DAGSTER_KEYS_PROGRAM="\$\(cat <<\'PY\'\n(.*?)^PY\n\)"$',
         source,
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, "repin.sh에서 Dagster service helper를 찾지 못했다"
+    # 토폴로지는 argv가 아니라 stdin으로 간다.
+    assert (
+        'printf \'%s\' "$TOPOLOGY" | python3 -I -c "$DAGSTER_KEYS_PROGRAM" "$ENV_FILE"' in source
+    )
     return match.group(1)
 
 
@@ -91,8 +95,8 @@ def _run(
     env_file.write_text(env_text, encoding="utf-8")
     env_file.chmod(0o600)
     proc = subprocess.run(
-        [sys.executable, "-I", "-", str(env_file), json.dumps(topology)],
-        input=_helper(),
+        [sys.executable, "-I", "-c", _helper(), str(env_file)],
+        input=json.dumps(topology),
         env=_environ(env_text),
         check=False,
         capture_output=True,
@@ -115,13 +119,15 @@ def test_pinvi_on_the_shared_plane_rewrites_the_retired_service(tmp_path: Path) 
     assert proc.returncode == 0, proc.stderr
     keys = _keys(env_file)
     assert keys["E2E_C7_PINVI_DAGSTER_SERVICE"] == "pinvi-dagster-code-server"
+    # 새 plane 키는 없으면 덧붙인다 — preflight는 own이면 web ≠ daemon을 요구한다.
+    assert keys["E2E_C7_MAP_DAGSTER_CONTROL_PLANE"] == "own"
     # 전용 plane의 Map 키는 확인만 하고 그대로 둔다.
     assert keys["E2E_C7_DAGSTER_WEB_SERVICE"] == "kor-travel-map-dagster"
     assert keys["E2E_C7_DAGSTER_DAEMON_SERVICE"] == "kor-travel-map-dagster-daemon"
     # 다른 줄은 순서까지 그대로다.
     lines = env_file.read_text(encoding="utf-8").splitlines()
     assert lines[0] == "A=1"
-    assert lines[-1] == "Z=2"
+    assert lines[-2:] == ["Z=2", "E2E_C7_MAP_DAGSTER_CONTROL_PLANE=own"]
     assert oct(env_file.stat().st_mode & 0o777) == "0o600"
 
 
@@ -135,6 +141,16 @@ def test_map_flip_points_web_and_daemon_at_the_map_code_server(tmp_path: Path) -
     assert keys["E2E_C7_DAGSTER_WEB_SERVICE"] == "kor-travel-map-dagster-code-server"
     assert keys["E2E_C7_DAGSTER_DAEMON_SERVICE"] == "kor-travel-map-dagster-code-server"
     assert keys["E2E_C7_PINVI_DAGSTER_SERVICE"] == "pinvi-dagster-code-server"
+    assert keys["E2E_C7_MAP_DAGSTER_CONTROL_PLANE"] == "shared"
+
+
+def test_existing_plane_line_is_replaced_in_place(tmp_path: Path) -> None:
+    before = _ENV + "E2E_C7_MAP_DAGSTER_CONTROL_PLANE=own\nTAIL=1\n"
+    proc, env_file = _run(tmp_path, [_MAP_SHARED, _PINVI_SHARED], before)
+
+    assert proc.returncode == 0, proc.stderr
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    assert lines[-2:] == ["E2E_C7_MAP_DAGSTER_CONTROL_PLANE=shared", "TAIL=1"]
 
 
 def test_is_idempotent(tmp_path: Path) -> None:
@@ -184,6 +200,26 @@ def _without(target: dict[str, Any], service: str) -> dict[str, Any]:
         # control_plane을 모른다.
         ([_MAP_OWN, {**_PINVI_SHARED, "dagster": {"control_plane": "hybrid"}}], _ENV, "모른다"),
         ([_MAP_OWN, {**_PINVI_SHARED, "dagster": None}], _ENV, "모른다"),
+        # 유도 값이 compose service 이름 문법 밖이다(파일은 따옴표 없이 source된다).
+        (
+            [
+                _MAP_OWN,
+                {**_PINVI_SHARED, "runtime_services": ["pinvi-api", "pinvi-dagster;$(id)"]},
+            ],
+            _ENV,
+            "compose service 이름이 아니다",
+        ),
+        (
+            [_MAP_OWN, {**_PINVI_SHARED, "runtime_services": ["pinvi-api", "Pinvi-Dagster"]}],
+            _ENV,
+            "compose service 이름이 아니다",
+        ),
+        # plane 줄이 여러 개다.
+        (
+            [_MAP_OWN, _PINVI_SHARED],
+            _ENV + "E2E_C7_MAP_DAGSTER_CONTROL_PLANE=own\n" * 2,
+            "여러 개다",
+        ),
         # 쓸 키 줄이 없다.
         (
             [_MAP_OWN, _PINVI_SHARED],
@@ -201,6 +237,13 @@ def test_refuses_and_leaves_the_file_untouched(
     assert reason in proc.stderr, proc.stderr
     assert env_file.read_text(encoding="utf-8") == env_text
     assert sorted(path.name for path in tmp_path.iterdir()) == [".d2-live.env"]
+
+
+def test_verification_does_not_let_inherited_values_mask_the_file() -> None:
+    """source 대조 전에 물려받은 키를 지운다 — 파일이 키를 못 세워도 옛 값이 가리지 않는다."""
+
+    helper = _helper()
+    assert "unset {' '.join(derived)}; set -a;" in helper
 
 
 def test_repin_reads_the_installed_topology_not_a_literal() -> None:

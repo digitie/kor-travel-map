@@ -386,10 +386,30 @@ def test_rejects_services_that_are_not_distinct() -> None:
 )
 def test_map_dagster_roles_may_not_share_with_other_roles(first: str, second: str) -> None:
     docker = _Docker()
-    environ = docker.environ()
+    environ = {**docker.environ(), "E2E_C7_MAP_DAGSTER_CONTROL_PLANE": "shared"}
     environ[first] = environ[second]
 
     with pytest.raises(RUNTIME.RuntimePreflightError, match="compose services are not distinct"):
+        _verify(docker, environ)
+
+
+@pytest.mark.parametrize("plane", [None, "own"])
+def test_own_dagster_plane_still_requires_distinct_web_and_daemon(plane: str | None) -> None:
+    docker = _Docker()
+    environ = docker.environ()
+    environ["E2E_C7_DAGSTER_DAEMON_SERVICE"] = environ["E2E_C7_DAGSTER_WEB_SERVICE"]
+    if plane is not None:
+        environ["E2E_C7_MAP_DAGSTER_CONTROL_PLANE"] = plane
+
+    with pytest.raises(RUNTIME.RuntimePreflightError, match="compose services are not distinct"):
+        _verify(docker, environ)
+
+
+def test_rejects_unknown_map_control_plane() -> None:
+    docker = _Docker()
+    environ = {**docker.environ(), "E2E_C7_MAP_DAGSTER_CONTROL_PLANE": "hybrid"}
+
+    with pytest.raises(RUNTIME.RuntimePreflightError, match="control plane is unknown"):
         _verify(docker, environ)
 
 
@@ -399,6 +419,7 @@ def test_shared_dagster_plane_points_web_and_daemon_at_the_map_code_server() -> 
     docker = _Docker()
     environ = docker.environ()
     environ["E2E_C7_DAGSTER_DAEMON_SERVICE"] = environ["E2E_C7_DAGSTER_WEB_SERVICE"]
+    environ["E2E_C7_MAP_DAGSTER_CONTROL_PLANE"] = "shared"
     _verify(docker, environ)
 
     inspected = {

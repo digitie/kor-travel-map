@@ -57,13 +57,17 @@ PostgreSQL client 호출, PostgreSQL 서버 이미지, DSN 문자열, libpq 연�
 
 - `shared`(공유 Dagster plane, Manager ADR-54): 이름에 `dagster`가 든 runtime service가 정확히
   하나(code-server)여야 하고, 그 값을 쓴다. Map은 web·daemon 두 키가 같은 code-server를 가리킨다 —
-  러너(`read_cap`)는 두 키로 Map 설정을 읽고, preflight(`c7_prod_runtime.SHAREABLE_ROLES`)는 이 두
-  role에만 service 공유를 허용한다.
+  러너(`read_cap`)는 두 키로 Map 설정을 읽는다.
 - `own`: 적힌 값이 그 target의 Dagster runtime service이고 서로 다른지 확인만 한다.
+
+Map의 plane은 `E2E_C7_MAP_DAGSTER_CONTROL_PLANE`(`own`|`shared`, 없으면 덧붙인다)로도 적는다.
+preflight(`c7_prod_runtime`)는 이 값이 `shared`일 때만 web·daemon 두 role의 service 공유를 허용하고,
+없거나 `own`이면 서로 달라야 한다. 유도한 이름은 `^[a-z0-9][a-z0-9._-]*$`여야 쓰고(파일은 따옴표 없이
+source된다), 토폴로지 JSON은 stdin으로 받는다.
 
 PinVi가 공유 plane으로 옮기며 `pinvi-dagster`가 사라져(같은 image의 `pinvi-dagster-code-server`)
 preflight가 없는 service에서 멈춘 것이 계기다. Map flip 때도 Manager 모델이 바뀌면 다음 repin이
-따라간다 — 이 키를 손으로 고칠 일은 없다.
+따라간다. **이 키들을 손으로 고치는 것은 지원하지 않는다** — 매 repin이 다시 쓴다.
 
 ### Map flip 때 손으로 바꿀 것 (공개 Dagster URL)
 

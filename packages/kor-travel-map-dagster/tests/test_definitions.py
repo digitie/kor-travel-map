@@ -33,6 +33,7 @@ from kortravelmap.dagster.feature_operation_tracking import (
     declared_execution_scopes,
 )
 from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
+from kortravelmap.dagster.maintenance import CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS
 from kortravelmap.dagster.run_scope import MAP_CODE_LOCATION_NAME
 from kortravelmap.dagster.schedules import (
     _KNPS_GEOMETRY_SCHEDULE,
@@ -382,8 +383,12 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
             instance.delete_run(run.run_id)
 
 
-def test_krex_coalescing_ignores_other_code_location_run() -> None:
-    """공유 plane: 같은 job 이름·tag라도 다른 code location의 run은 tick을 막지 않는다."""
+def test_krex_coalescing_ignores_other_tenant_run() -> None:
+    """공유 plane: 다른 프로젝트의 같은 이름 job run은 Map tag가 없어 tick을 막지 않는다.
+
+    schedule context에는 code location이 없으므로 location 상수가 아니라 Map job이 스스로
+    다는 ``kor_travel_map.operation_key``로 좁힌다.
+    """
 
     schedule = defs.resolve_schedule_def(
         "feature_notice_krex_traffic_notices_ten_minute_schedule"
@@ -394,7 +399,7 @@ def test_krex_coalescing_ignores_other_code_location_run() -> None:
         instance.create_run_for_job(
             job,
             status=DagsterRunStatus.STARTED,
-            tags={"kor_travel_map.operation_key": job.name},
+            tags={"owner": "kor_travel_weather"},
             remote_job_origin=_remote_origin(job.name, "kor_travel_weather.definitions"),
         )
         with build_schedule_context(instance=instance) as context:
@@ -747,8 +752,12 @@ def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() 
     )
     job = defs.resolve_job_def("current_weather_summary_refresh")
     with DagsterInstance.local_temp() as instance:
+        # 실제 run은 schedule RunRequest·job 정의의 tag를 싣는다(n150 실측 1,000/1,000).
         instance.create_run_for_job(
-            job, status=DagsterRunStatus.STARTED, remote_job_origin=_remote_origin(job.name)
+            job,
+            status=DagsterRunStatus.STARTED,
+            tags=CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
+            remote_job_origin=_remote_origin(job.name),
         )
         with build_schedule_context(instance=instance) as context:
             tick = schedule.evaluate_tick(context)
@@ -758,8 +767,12 @@ def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() 
     assert "STARTED" in tick.skip_message
 
 
-def test_current_weather_summary_refresh_ignores_other_code_location_run() -> None:
-    """공유 plane: 같은 job 이름의 다른 프로젝트 active run은 minute tick을 막지 않는다."""
+def test_current_weather_summary_refresh_ignores_other_tenant_run() -> None:
+    """공유 plane: 같은 job 이름의 다른 프로젝트 active run은 minute tick을 막지 않는다.
+
+    다른 프로젝트 run에는 ``kor_travel_map.job_kind``가 없다(schedule context에는 location이
+    없어 location 상수 대신 이 tag로 좁힌다).
+    """
 
     schedule = defs.resolve_schedule_def(
         "current_weather_summary_refresh_minutely_schedule"

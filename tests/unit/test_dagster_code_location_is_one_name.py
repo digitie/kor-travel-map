@@ -542,13 +542,18 @@ def instance_run_readers() -> tuple[frozenset[str], frozenset[str]]:
     return frozenset(scoped), frozenset(forbidden)
 
 
+#: run 조회를 Map으로 좁히는 두 helper(``kortravelmap.dagster.run_scope``). location tag 또는
+#: Map job이 스스로 다는 ``kor_travel_map.*`` tag — 둘 다 다른 프로젝트 run을 고르지 않는다.
+_SCOPING_HELPERS = frozenset({"map_runs_filter", "map_owned_runs_filter"})
+
+
 def _is_map_runs_filter(node: ast.expr | None) -> bool:
     if not isinstance(node, ast.Call):
         return False
     func = node.func
     if isinstance(func, ast.Name):
-        return func.id == "map_runs_filter"
-    return isinstance(func, ast.Attribute) and func.attr == "map_runs_filter"
+        return func.id in _SCOPING_HELPERS
+    return isinstance(func, ast.Attribute) and func.attr in _SCOPING_HELPERS
 
 
 def unscoped_instance_reads(source: str) -> tuple[int, list[str]]:
@@ -600,7 +605,7 @@ def test_no_instance_run_read_escapes_the_map_code_location() -> None:
             count, violations = unscoped_instance_reads(path.read_text(encoding="utf-8"))
             assert violations == [], (path.relative_to(_ROOT).as_posix(), violations)
             seen += count
-    # 하한: 지금 있는 조회를 **본** 것 — reconcile sensor 둘(watermark·page), feature-load
+    # 하한: 지금 있는 조회를 **본** 것 — reconcile sensor 둘(run 수·page), feature-load
     # coalescing schedule, weather summary schedule. 새 조회가 늘면 올린다.
     assert seen >= 4, seen
 
@@ -632,9 +637,23 @@ def test_instance_read_detector_accepts_the_scoped_shape() -> None:
     source = (
         "context.instance.get_runs(filters=map_runs_filter(job_name='x'), limit=1)\n"
         "instance.get_run_records(filters=run_scope.map_runs_filter(), limit=1)\n"
+        "instance.get_runs_count(filters=map_owned_runs_filter(tags={'kor_travel_map.k': 'v'}))\n"
         "instance.get_run_record_by_id(run_id)\n"
     )
-    assert unscoped_instance_reads(source) == (2, [])
+    assert unscoped_instance_reads(source) == (3, [])
+
+
+def test_map_owned_runs_filter_refuses_tags_another_project_could_carry() -> None:
+    from kortravelmap.dagster.run_scope import map_owned_runs_filter, map_runs_filter
+
+    assert map_owned_runs_filter(tags={"kor_travel_map.job_kind": "x"}).tags == {
+        "kor_travel_map.job_kind": "x"
+    }
+    for tags in ({}, {"dagster/code_location": "x"}, {"kor_travel_map.k": "v", "owner": "x"}):
+        with pytest.raises(ValueError, match="kor_travel_map"):
+            map_owned_runs_filter(tags=tags)
+    with pytest.raises(ValueError, match="dagster/code_location"):
+        map_runs_filter(tags={"dagster/code_location": "other.location"})
 
 
 def _monitors_every_location(source: str) -> list[int]:

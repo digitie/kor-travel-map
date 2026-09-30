@@ -532,7 +532,8 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert tuple(_RUNTIME_MODULE.ROLE_SERVICE_ENVS) == _EXPECTED_ROLE_SERVICE_ENVS
     # service는 서로 달라야 한다 — 공유 Dagster plane에서 Map web·daemon 두 role만 Map
     # code-server 하나를 함께 가리킬 수 있다(``SHAREABLE_ROLES``).
-    assert "len(roles) > 1 and not roles <= SHAREABLE_ROLES" in runtime
+    assert "len(roles) > 1 and not roles <= shareable" in runtime
+    assert 'shareable = SHAREABLE_ROLES if map_plane == "shared" else frozenset()' in runtime
     assert "len(observed_containers) != len(roles_by_service)" in runtime
     assert {"map_dagster_web", "map_dagster_daemon"} == _RUNTIME_MODULE.SHAREABLE_ROLES
     # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable

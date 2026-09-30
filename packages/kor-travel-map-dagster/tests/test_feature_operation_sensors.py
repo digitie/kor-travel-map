@@ -18,6 +18,7 @@ from kortravelmap.core.feature_operation import (
 )
 
 from kortravelmap.dagster.feature_operation_sensors import (
+    FEATURE_OPERATION_RECONCILE_PAGE_SIZE,
     FEATURE_OPERATION_SETTLE_LAG_SECONDS,
     FEATURE_OPERATION_TRACKING_SENSORS,
     DagsterRunWatermark,
@@ -27,11 +28,15 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
     _evaluate_status_event,
-    _latest_dagster_watermark,
+    _map_run_count,
     _reconcile_tick,
     feature_operation_reconciliation_sensor,
 )
-from kortravelmap.dagster.run_scope import CODE_LOCATION_RUN_TAG, MAP_CODE_LOCATION_NAME
+from kortravelmap.dagster.run_scope import (
+    CODE_LOCATION_RUN_TAG,
+    MAP_CODE_LOCATION_NAME,
+    MapRunScopeMismatch,
+)
 
 _NOW = datetime(2026, 7, 1, 8, 0, tzinfo=UTC)
 _JOB_NAME = "feature_place_mois_licenses_job"
@@ -213,6 +218,9 @@ class _Instance:
         if limit is not None:
             selected = selected[:limit]
         return selected
+
+    def get_runs_count(self, filters: object | None = None) -> int:
+        return len(self.get_run_records(filters=filters))
 
 
 @dataclass
@@ -893,12 +901,17 @@ async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -
     assert "secret" not in context.log.errors[0]
 
 
-async def test_non_empty_storage_without_cursor_is_unready_and_does_not_cut_over() -> None:
-    record = _record(
-        DagsterRunStatus.SUCCESS,
-        run_id="historical-registered-run",
-    )
-    context = _Context(instance=_Instance([record]))
+def _map_runs(count: int) -> list[_Record]:
+    return [
+        _record(DagsterRunStatus.SUCCESS, run_id=f"map-run-{index}", storage_id=index + 1)
+        for index in range(count)
+    ]
+
+
+async def test_storage_above_one_page_without_cursor_is_unready_and_does_not_cut_over() -> None:
+    """오래 쓴 전용 instance(n150은 1,825건): 전량 재생 대신 명시 cursor를 요구한다."""
+
+    context = _Context(instance=_Instance(_map_runs(FEATURE_OPERATION_RECONCILE_PAGE_SIZE + 1)))
     client = _Client()
 
     await _reconcile_tick(context, client)
@@ -906,11 +919,45 @@ async def test_non_empty_storage_without_cursor_is_unready_and_does_not_cut_over
     assert context.updated_cursors == []
     assert context.log.errors == [
         "non-empty Dagster storage의 reconcile cursor가 준비되지 않음; "
-        "maintenance drain에서 명시 insertion cursor를 설정해야 함"
+        "maintenance drain에서 명시 insertion cursor를 설정해야 함 "
+        f"(map_runs={FEATURE_OPERATION_RECONCILE_PAGE_SIZE + 1} "
+        f"> page={FEATURE_OPERATION_RECONCILE_PAGE_SIZE})"
     ]
     assert client.ensure_calls == []
     assert client.reconcile_calls == []
     assert client.list_calls == []
+
+
+@pytest.mark.parametrize("count", [0, 1, 2, FEATURE_OPERATION_RECONCILE_PAGE_SIZE])
+async def test_at_most_one_page_without_cursor_seeds_null_and_replays_from_start(
+    count: int,
+) -> None:
+    """공유 plane 첫 부팅 경주: 매분 schedule·queue sensor가 reconcile 첫 tick보다 먼저 Map
+    run을 만들어도 영구히 멈추지 않는다. null cursor로 시작해 처음부터 훑는다(반영은 멱등)."""
+
+    runs = _map_runs(count)
+    for record in runs:
+        record.create_timestamp = datetime.now(tz=UTC) - timedelta(hours=1)
+    context = _Context(instance=_Instance(runs))
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+
+    assert context.log.errors == []
+    assert [
+        FeatureOperationReconcileCursor.from_json(cursor) for cursor in context.updated_cursors
+    ] == [FeatureOperationReconcileCursor()]
+    assert client.ensure_calls == []
+
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert context.log.errors == []
+    reconciled = [call["dagster_run_id"] for call in client.reconcile_calls]
+    assert reconciled == [record.dagster_run.run_id for record in runs]
+    resumed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
+    expected = DagsterRunWatermark(count, f"map-run-{count - 1}") if count else None
+    assert resumed.dagster == expected
 
 
 async def test_shared_storage_with_only_other_tenant_runs_seeds_null_cursor() -> None:
@@ -966,7 +1013,10 @@ async def test_reconcile_refuses_a_code_location_other_than_the_scoped_one() -> 
     )
     client = _Client()
 
-    await _reconcile_tick(context, client)
+    # SKIP으로 숨기지 않는다 — sensor 평가(다른 예외는 SkipReason으로 삼킨다)에서도 올라와
+    # tick이 FAILURE로 보인다.
+    with pytest.raises(MapRunScopeMismatch, match="renamed.location"):
+        await _evaluate_reconciliation_sensor(context, client)
 
     assert context.updated_cursors == []
     assert len(context.log.errors) == 1
@@ -994,16 +1044,14 @@ def test_real_run_storage_scopes_watermark_and_page_to_map_location() -> None:
 
     with DagsterInstance.ephemeral() as instance:
         _add_run(instance, "weather-1", _OTHER_LOCATION)
-        assert _latest_dagster_watermark(instance) is None
+        assert _map_run_count(instance) == 0
 
         _add_run(instance, "map-1", MAP_CODE_LOCATION_NAME)
         _add_run(instance, "weather-2", _OTHER_LOCATION)
         _add_run(instance, "map-2", MAP_CODE_LOCATION_NAME)
         _add_run(instance, "weather-3", _OTHER_LOCATION)
 
-        latest = _latest_dagster_watermark(instance)
-        assert latest is not None
-        assert latest.run_id == "map-2"
+        assert _map_run_count(instance) == 2
 
         settled_before = datetime.now(tz=UTC) + timedelta(hours=1)
         first = _dagster_run_page(

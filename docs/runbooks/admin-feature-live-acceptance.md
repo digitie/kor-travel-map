@@ -88,7 +88,8 @@ export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 Dagster service 키 셋은 n150에서 `scripts/n150/repin.sh`가 Manager 토폴로지(`ktdctl targets list
 --json`)에서 유도한다. 공유 Dagster plane으로 옮긴 프로젝트는 code-server 하나가 그 값이고, Map이
 공유 plane이면 `E2E_C7_DAGSTER_WEB_SERVICE`·`E2E_C7_DAGSTER_DAEMON_SERVICE`가 같은 Map code-server를
-가리킨다(preflight는 이 두 role에만 공유를 허용한다). 자세히는 `scripts/n150/README.md`.
+가리키고, repin이 `E2E_C7_MAP_DAGSTER_CONTROL_PLANE=shared`를 적는다. preflight는 이 값이 `shared`일
+때만 두 role의 공유를 허용한다(없거나 `own`이면 서로 달라야 한다). 자세히는 `scripts/n150/README.md`.
 
 runtime preflight(`scripts/lib/c7_prod_runtime.py runtime`)는 mutation 전에 caller env와
 `docker inspect`만으로 다음을 본다. Manager 내부 파일은 읽지 않는다 — 떠 있는 image가 핀된

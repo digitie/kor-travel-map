@@ -35,10 +35,21 @@
 - **C7 client의 Basic Auth.** 선택 키 `E2E_DAGSTER_BASIC_AUTH_FILE`(소유자 전용, `user:password` 한 줄)을 러너가
   검증하고 executor에 read-only bind로만 건넨다. Dagster에 직접 POST하는 세 자리(queue sensor controller, admin
   helper, 최종 복원 검증)가 그 파일이 있을 때만 `Authorization: Basic`을 붙인다.
-- 남긴 것: 공유 instance 첫 부팅에서 Map schedule(매분 weather summary 등)이 reconcile sensor 첫 tick보다 먼저 run을
-  만들면 기존 "non-empty storage" 규칙이 그대로 발화한다(이것은 어느 새 배포에서나 같다). flip 창에서 sensor cursor
-  초기화를 확인한다. 통합 테스트(`test_canonical_provider_operations`의 fake context 한 줄)는 n150에서 돌리지 않았다
-  (PostGIS 컨테이너를 prod host에 띄우지 않는다) — CI가 본다.
+- **적대 리뷰 후속(같은 브랜치).**
+  - MED-1 첫 부팅 경주: 공유 instance 첫 부팅에서 매분 weather summary schedule이나 queue sensor가 reconcile 첫
+    tick보다 먼저 Map run을 만들면 "non-empty storage" 규칙이 영구히 발화했다. 이제 cursor가 없고 Map run이
+    `FEATURE_OPERATION_RECONCILE_PAGE_SIZE`(200) 이하면 null cursor로 처음부터 훑는다(반영은 멱등). 그보다 많으면
+    (n150 전용 instance 1,825건) 여전히 명시 cursor를 요구한다. flip 전 drain 요구(옛 instance에만 run이 있는 active
+    operation을 먼저 끝낸다)는 `docs/runbooks/docker-app.md`에 적었다.
+  - L2: location 불일치는 `MapRunScopeMismatch`를 던져 tick이 FAILURE로 보인다(다른 예외처럼 SKIP으로 삼키지 않는다).
+  - L3: schedule context에는 code location이 없다. coalescing schedule 둘은 location 상수 대신 Map job이 스스로 다는
+    tag(`kor_travel_map.operation_key`·`kor_travel_map.job_kind`)로 좁힌다(`map_owned_runs_filter`, n150 weather
+    summary run 1,000/1,000이 tag를 단다). lint는 두 helper만 받는다.
+  - L4·L5·L7: `repin.sh`는 토폴로지를 stdin으로 받고, 유도한 service 이름을 `^[a-z0-9][a-z0-9._-]*$`로 확인하고,
+    source 대조 전에 물려받은 키를 지운다. Map plane을 `E2E_C7_MAP_DAGSTER_CONTROL_PLANE`(own|shared)로 적고,
+    preflight는 `shared`일 때만 web·daemon 공유를 허용한다(없으면 own — 엄격).
+- 통합 테스트(`test_canonical_provider_operations`의 fake context 한 줄)는 n150에서 돌리지 않았다(PostGIS 컨테이너를
+  prod host에 띄우지 않는다) — CI가 본다.
 
 ## 2026-09-30 — 공유 Dagster plane 준비의 적대 리뷰 반영: 브랜치 `feat/dagster-shared-stage0`
 
