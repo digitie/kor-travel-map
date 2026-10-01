@@ -35,8 +35,6 @@ export type FeaturesNearbyResponse = Schemas["FeaturesNearbyResponse"];
 export type FeaturesNearbyByTargetResponse =
   Schemas["FeaturesNearbyByTargetResponse"];
 export type NearbyFeatureSummary = Schemas["NearbyFeatureSummary"];
-export type FeatureWeatherResponse = Schemas["FeatureWeatherResponse"];
-export type WeatherMetric = Schemas["WeatherMetricOut"];
 export type CategoriesResponse = Schemas["CategoriesResponse"];
 export type CategorySummary = Schemas["CategorySummary"];
 export type ProviderLastSyncResponse = Schemas["ProviderLastSyncResponse"];
@@ -81,7 +79,6 @@ type _PathsStable = _Assert<
     | "/v1/features/nearby"
     | "/v1/features/{feature_id}"
     | "/v1/features/{feature_id}/contained-features"
-    | "/v1/features/{feature_id}/weather"
     | "/v1/public/beaches"
     | "/v1/public/beaches/map-markers"
     | "/v1/public/beaches/{feature_id}"
@@ -96,6 +93,14 @@ type _PathsStable = _Assert<
   >
 >;
 
+// weather 표면은 Map에서 제거됐다(owner 결정 2026-10-01) — `/weather` 경로가
+// 다시 생기면 컴파일 실패.
+type _NoWeatherPaths = _Assert<
+  [Extract<keyof paths, `${string}/weather${string}`>] extends [never]
+    ? true
+    : false
+>;
+
 // noUnusedLocals 회피용 도달 불가 참조 (타입 단언만 목적).
 export type _SurfaceAssertions = [
   _MetaHasPage,
@@ -104,4 +109,5 @@ export type _SurfaceAssertions = [
   _InBoundsPayload,
   _MetaHasCluster,
   _PathsStable,
+  _NoWeatherPaths,
 ];

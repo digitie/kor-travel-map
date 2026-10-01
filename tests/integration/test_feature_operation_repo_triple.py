@@ -1,9 +1,9 @@
 """``infra.feature_operation_repo``의 identity triple 축 회귀 (T-VN-33, ADR-088).
 
 이 파일이 고정하는 것은 **``operation_key`` 축**이다. 같은 SQL/함수의
-``sync_scope`` 축은 KMA 격자 dataset(한 operation이 ``dataset_wide``와
-``target_grids`` 두 member를 갖는다. 401 이후 disabled라 테스트가 transaction 안에서만
-다시 켠다)이 밟고 있지만, ``operation_key`` 축은
+``sync_scope`` 축은 한 operation이 ``dataset_wide``와 ``target_grids`` 두 member를
+갖는 probe dataset(옛 KMA 격자 dataset은 401·402(ADR-104/105)로 꺼져 테스트가
+transaction 안에 직접 심는다)이 밟고 있지만, ``operation_key`` 축은
 형제 operation을 실제로 seed하는 fixture가 저장소에 없어 무방비였다. 0091이 scope
 PK를 pair에서 triple로 올린 명시적 목적이 그 형제 등록을 허용하는 것이므로,
 여기서는 형제를 **직접 seed해** 축을 만든 뒤 검증한다.
@@ -66,9 +66,61 @@ async def finish_dagster_feature_membership(
 #: 둘인 조합 0건). 스키마는 허용하므로 테스트가 직접 만든다.
 _SIBLING_OPERATION_KEY = "feature_operation_sibling_probe_job"
 
-_KMA_PROVIDER = "python-kma-api"
-_KMA_DATASET = "kma_short_forecast"
-_KMA_OPERATION = "feature_weather_kma_short_forecast_job"
+#: scope가 둘인 refresh operation. 시드에서는 KMA 격자뿐이었고 401·402(ADR-104/105)가
+#: 꺼서 transaction 안에 probe로 심는다(``_seed_multi_scope_operation``).
+_MULTI_SCOPE_PROVIDER = "feature-operation-probe"
+_MULTI_SCOPE_DATASET = "multi_scope_refresh"
+_MULTI_SCOPE_OPERATION = "feature_operation_multi_scope_probe_job"
+
+
+async def _seed_multi_scope_operation(session: AsyncSession) -> None:
+    """``dataset_wide``·``target_grids`` 두 scope를 가진 refresh operation을 심는다."""
+    dataset_id = (
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind,
+                    is_active, capabilities
+                ) VALUES (
+                    :provider, :dataset_key, 'feature operation probe', 'system',
+                    true,
+                    jsonb_build_object('schema_version', 1,
+                                       'produces', '[]'::jsonb,
+                                       'extensions', '{}'::jsonb)
+                )
+                RETURNING provider_dataset_id
+                """
+            ),
+            {"provider": _MULTI_SCOPE_PROVIDER, "dataset_key": _MULTI_SCOPE_DATASET},
+        )
+    ).scalar_one()
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations
+                (provider_dataset_id, operation_key, operation_kind, is_enabled)
+            VALUES (:provider_dataset_id, :operation_key, 'refresh', true)
+            """
+        ),
+        {"provider_dataset_id": dataset_id, "operation_key": _MULTI_SCOPE_OPERATION},
+    )
+    for sync_scope in ("dataset_wide", "target_grids"):
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes
+                    (provider_dataset_id, sync_scope, operation_key, operation_kind)
+                VALUES (:provider_dataset_id, :sync_scope, :operation_key, 'refresh')
+                """
+            ),
+            {
+                "provider_dataset_id": dataset_id,
+                "sync_scope": sync_scope,
+                "operation_key": _MULTI_SCOPE_OPERATION,
+            },
+        )
+    await session.flush()
 
 
 async def _seed_sibling_operation(
@@ -324,54 +376,42 @@ async def test_membership_snapshot_drops_deactivated_catalog_rows(
 async def test_runtime_dataset_lookup_requires_exactly_one_membership(
     migrated_session: AsyncSession,
 ) -> None:
-    """``sync_scope``를 빼면 KMA 격자 dataset은 2건으로 갈려 exact lookup이 깨진다.
+    """``sync_scope``를 빼면 scope가 둘인 dataset은 2건으로 갈려 exact lookup이 깨진다.
 
     ``!= 1``을 ``< 1``로 되돌리면 2건 중 첫 행을 임의로 골라 조용히 진행한다 —
     provider callback이 어느 scope의 cursor를 미는지 알 수 없게 된다.
 
-    scope가 둘인 시드 operation은 KMA 격자뿐이고 401(ADR-104)이 그것을 껐다. 검증
-    대상은 KMA가 아니라 exact lookup이므로 이 transaction 안에서만 다시 켠다.
+    scope가 둘인 시드 operation은 KMA 격자뿐이었고 401·402(ADR-104/105)가 그것을 껐다.
+    검증 대상은 KMA가 아니라 exact lookup이므로 이 transaction 안에 probe를 심는다.
     """
-    enabled = await migrated_session.execute(
-        text(
-            """
-            UPDATE provider_sync.provider_dataset_operations
-            SET is_enabled = true
-            WHERE operation_key = :operation_key
-              AND operation_kind = 'refresh'
-            """
-        ),
-        {"operation_key": _KMA_OPERATION},
-    )
-    assert enabled.rowcount == 1
-    await migrated_session.flush()
+    await _seed_multi_scope_operation(migrated_session)
 
     with pytest.raises(FeatureOperationInvariantConflict) as ambiguous:
         await resolve_feature_operation_dataset_membership(
             migrated_session,
-            operation_key=_KMA_OPERATION,
-            provider=_KMA_PROVIDER,
-            dataset_key=_KMA_DATASET,
+            operation_key=_MULTI_SCOPE_OPERATION,
+            provider=_MULTI_SCOPE_PROVIDER,
+            dataset_key=_MULTI_SCOPE_DATASET,
         )
     assert ambiguous.value.details["match_count"] == 2
     assert ambiguous.value.details["sync_scope"] is None
 
     resolved = await resolve_feature_operation_dataset_membership(
         migrated_session,
-        operation_key=_KMA_OPERATION,
-        provider=_KMA_PROVIDER,
-        dataset_key=_KMA_DATASET,
+        operation_key=_MULTI_SCOPE_OPERATION,
+        provider=_MULTI_SCOPE_PROVIDER,
+        dataset_key=_MULTI_SCOPE_DATASET,
         sync_scope="target_grids",
     )
     assert resolved.sync_scope == "target_grids"
-    assert resolved.operation_key == _KMA_OPERATION
+    assert resolved.operation_key == _MULTI_SCOPE_OPERATION
 
     with pytest.raises(FeatureOperationInvariantConflict) as missing:
         await resolve_feature_operation_dataset_membership(
             migrated_session,
-            operation_key=_KMA_OPERATION,
-            provider=_KMA_PROVIDER,
-            dataset_key=_KMA_DATASET,
+            operation_key=_MULTI_SCOPE_OPERATION,
+            provider=_MULTI_SCOPE_PROVIDER,
+            dataset_key=_MULTI_SCOPE_DATASET,
             sync_scope="external_system:pinvi",
         )
     assert missing.value.details["match_count"] == 0

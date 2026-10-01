@@ -51,8 +51,9 @@ _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
 _MOIS_PROVIDER = "python-mois-api"
 _MOIS_DATASET = "mois_license_features_bulk"
-_KMA_PROVIDER = "python-kma-api"
-_KMA_DATASET = "kma_weather_alerts"
+#: 정책 대상 openapi notice dataset. 옛 KMA 특보(402/ADR-105로 비활성)를 대신한다.
+_NOTICE_PROVIDER = "python-krex-api"
+_NOTICE_DATASET = "krex_traffic_notices"
 
 # T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 uuid다 — 이 파일이 심는
 # seed identity도 그 형태여야 한다. 종전의 ``feature:poi:1`` 류 문자열은 legacy
@@ -170,7 +171,7 @@ async def test_provider_refresh_policy_upsert_get_list(
     migrated_session: AsyncSession,
 ) -> None:
     provider_dataset_id = await _dataset_id(
-        migrated_session, provider=_KMA_PROVIDER, dataset_key=_KMA_DATASET
+        migrated_session, provider=_NOTICE_PROVIDER, dataset_key=_NOTICE_DATASET
     )
     created = await upsert_provider_refresh_policy(
         migrated_session,
@@ -185,17 +186,17 @@ async def test_provider_refresh_policy_upsert_get_list(
         max_concurrent=2,
         stale_after_minutes=45,
         rate_limit_source={
-            "provider_repo": "F:/dev/python-kma-api",
+            "provider_repo": "F:/dev/python-krex-api",
             "docs": ["docs/rate-limit.md"],
             "checked_at": "2026-06-03T12:00:00+09:00",
         },
     )
 
-    assert created.provider == "python-kma-api"
+    assert created.provider == "python-krex-api"
     assert created.targeted_policy == "allow_targeted"
     assert created.max_concurrent == 2
     assert created.stale_after_minutes == 45
-    assert created.rate_limit_source["provider_repo"] == "F:/dev/python-kma-api"
+    assert created.rate_limit_source["provider_repo"] == "F:/dev/python-krex-api"
 
     updated = await upsert_provider_refresh_policy(
         migrated_session,
@@ -261,13 +262,13 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         lat=37.5665,
         radius_km=3.0,
         provider_overrides={
-            "python-kma-api:kma_weather_alerts": {"targeted_policy": "allow_targeted"}
+            "python-krex-api:krex_traffic_notices": {"targeted_policy": "allow_targeted"}
         },
         metadata={"external_poi_id": "poi-1"},
     )
     assert target.coord_key == "126.978000:37.566500:p6"
     assert (
-        target.provider_overrides["python-kma-api:kma_weather_alerts"]["targeted_policy"]
+        target.provider_overrides["python-krex-api:krex_traffic_notices"]["targeted_policy"]
         == "allow_targeted"
     )
 

@@ -138,7 +138,7 @@ Ops service principal의 감사 actor는 코드 상수 `service:pinvi`다. actor
   `/v1/admin/features/{id}/state/transitions`, `/v1/admin/features/change-requests`
 - `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
-- `/v1/features/{id}/weather`, `/v1/features/{id}/sources`, `/v1/features/{id}/files`
+- `/v1/features/{id}/sources`, `/v1/features/{id}/files` (weather 표면은 ADR-105로 제거)
 - `/v1/providers`, `/v1/providers/{provider}/last-sync` (공개 provider 신선도)
 - `/v1/ops/datasets`, `/v1/ops/datasets/detail?provider=...&dataset_key=...&sync_scope=...`
   (상태·정책·fixture preview)

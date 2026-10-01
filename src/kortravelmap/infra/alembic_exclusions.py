@@ -8,9 +8,9 @@ from __future__ import annotations
 
 UNMAPPED_APP_TABLES = frozenset(
     {
-        ("feature", "feature_weather_values"),
+        # weather 값 표(`feature_weather_values`·`current_weather_summary`)는
+        # migration 402가 지웠다(ADR-105).
         ("feature", "feature_price_values"),
-        ("feature", "current_weather_summary"),
         ("feature", "current_price_summary"),
         ("ops", "current_summary_runs"),
         ("ops", "system_log"),

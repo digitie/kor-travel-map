@@ -83,7 +83,13 @@ def test_partial_restore_is_reported_without_payload_values(
     encoded = json.dumps(auditor.asdict(result), sort_keys=True)
 
     assert result.blocked is True
-    assert result.journals == {"run": 1, "schedule": 0, "kma": 0, "poi": 0}
+    assert result.journals == {
+        "run": 1,
+        "schedule": 0,
+        "kma": 0,
+        "poi": 0,
+        "targets": 0,
+    }
     assert result.journal_phases["run"] == {"restore_failed": 1}
     assert result.runtime_directories == 1
     assert result.temporary_files == 1
@@ -143,8 +149,10 @@ def test_nested_runtime_journals_and_running_cid_are_reported(
     journals.mkdir(mode=0o700)
     playwright = runtime / "playwright"
     playwright.mkdir(mode=0o700)
+    # sensor.json은 퇴역한 journal이다 — 옛 러너의 잔여물로서 여전히 센다.
     _write_json(journals / "sensor.json", {"phase": "restoring"})
     _write_json(journals / "schedule.json", {"phase": "restored"})
+    _write_json(journals / "targets.json", {"phase": "orchestrator_pending"})
     cid = root / "container-10.cid"
     cid.write_text("a" * 64, encoding="ascii")
     cid.chmod(0o600)
@@ -153,9 +161,16 @@ def test_nested_runtime_journals_and_running_cid_are_reported(
     result = auditor.audit_state_root(root)
 
     assert result.runtime_directories == 1
-    assert result.journals == {"run": 1, "schedule": 1, "kma": 0, "poi": 0}
+    assert result.journals == {
+        "run": 1,
+        "schedule": 1,
+        "kma": 0,
+        "poi": 0,
+        "targets": 1,
+    }
     assert result.journal_phases["run"] == {"restoring": 1}
     assert result.journal_phases["schedule"] == {"restored": 1}
+    assert result.journal_phases["targets"] == {"orchestrator_pending": 1}
     assert result.container_reference_files == 2
     assert result.running_containers == 1
     assert result.requires_recovery is True

@@ -339,7 +339,7 @@ class KorTravelMapSettings(BaseSettings):
         gt=0.0,
         le=60.0,
         description=(
-            "KMA/DataGoKr/AirKorea/KHOA client 생성 시 주입하는 HTTP timeout seconds "
+            "DataGoKr/KHOA 등 provider client 생성 시 주입하는 HTTP timeout seconds "
             "(T-VN-H45). lib 기본 10s는 "
             "data.go.kr 지연 스파이크에서 대량 순차 호출 asset을 만성 실패시켰다. "
             "상한 60s: 경계당 최악 wall ≈ upstream_retry attempts 2 × (내부 "

@@ -261,11 +261,12 @@ def test_a_cyclic_cause_chain_terminates() -> None:
 def test_a_provider_without_failure_kind_is_caught_by_identity() -> None:
     """``failure_kind``를 붙이지 않는 lib이 절반이다 — 이름/모듈로 메운다.
 
-    에어코리아가 그 대표이고 **가장 좁은 분모**다(오퍼레이션당 500/일).
+    종전 대표는 에어코리아였다(2026-10-01 ADR-105로 Map에서 빠졌다). 같은 성질의
+    opinet으로 옮겨 잰다 — ``status_code``가 없는 쿼터 예외는 이름/모듈로만 잡힌다.
     """
 
     module, class_name = next(
-        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "airkorea"
+        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "opinet"
     )
     fake = type(class_name, (RuntimeError,), {"__module__": module})
     assert quota_exhaustion_cause(fake("daily limit exceeded")) is not None
@@ -285,7 +286,7 @@ def test_identity_match_is_module_qualified() -> None:
     """이름만 같은 남의 예외에 걸리면 안 된다."""
 
     impostor = type(
-        "AirKoreaRateLimitError", (RuntimeError,), {"__module__": "somewhere_else"}
+        "OpinetRateLimitError", (RuntimeError,), {"__module__": "somewhere_else"}
     )
     assert quota_exhaustion_cause(impostor("x")) is None
 
@@ -406,7 +407,8 @@ def test_the_derivation_actually_found_something() -> None:
 
     assets = _feature_load_assets()
     # 2026-10-01 35 → 30: KMA asset 다섯이 ADR-104로 사라졌다(실측 30).
-    assert len(assets) >= 30, (
+    # 2026-10-01 30 → 26: 남은 weather asset 넷이 ADR-105로 사라졌다(실측 26).
+    assert len(assets) >= 26, (
         f"재시도 정책을 단 asset을 {len(assets)}개만 찾았다 — 유도가 낡았다."
     )
     assert _quota_guarded_functions(), (

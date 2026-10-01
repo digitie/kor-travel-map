@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 
+import { DEFAULT_FEATURE_MAP_KINDS } from "../../src/state/map";
 import * as F from "./_fixtures";
 
 /**
@@ -18,8 +19,12 @@ import * as F from "./_fixtures";
 
 const ROUTE = "/features";
 const HEADING = "Feature 지도";
-const KINDS = F.KINDS.length > 0 ? F.KINDS : ["place"];
-const DEFAULT_KINDS = new Set(["weather", "notice"]);
+// 2026-10-01 ADR-105: Map은 weather 기능(적재·API·UI)을 전부 걷어냈다. `F.KINDS`는
+// kind **정의**라 weather를 남기지만, live 시나리오는 weather를 다루지 않는다.
+const WEATHERLESS_KINDS = F.KINDS.filter((kind) => kind !== "weather");
+const KINDS = WEATHERLESS_KINDS.length > 0 ? WEATHERLESS_KINDS : ["place"];
+// 기본 활성 kind의 정본은 UI store다(리터럴 사본은 기본값 변경 때 조용히 어긋난다).
+const DEFAULT_KINDS: ReadonlySet<string> = new Set(DEFAULT_FEATURE_MAP_KINDS);
 const NON_DEFAULT_KINDS = KINDS.filter((kind) => !DEFAULT_KINDS.has(kind));
 const MAP_VIEWS = F.MAP_VIEWS;
 const VIEWPORTS = [

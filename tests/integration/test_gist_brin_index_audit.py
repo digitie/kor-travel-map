@@ -1,8 +1,8 @@
 """T-VN-18 — 자동 full GiST 제거 + partial 유지 (F-8 / D-12-3).
 
 - head(0061)에서 자동 full GiST 3개는 사라지고 공개 술어 partial GiST 3개만 남는다.
-- 공개 bbox/nearest-weather 조회의 planner가 partial GiST를 선택한다(EXPLAIN 회귀).
-- weather source-record 지원 index(T-VN-17 이월)가 존재한다.
+- 공개 bbox/반경(coord_5179) 조회의 planner가 partial GiST를 선택한다(EXPLAIN 회귀).
+  (weather value index 검사는 ADR-105로 표와 함께 사라졌다.)
 
 **write-cost 실측(§8.3)은 이 파일에 없다.** `df9237a3`(T-VN-40, 0200 baseline 위로
 migration 재배치)이 그 측정을 지웠는데 이 docstring만 남아 "여기서 잰다"고 계속
@@ -74,15 +74,6 @@ async def test_head_keeps_partial_gist_and_drops_full_gist(
     assert "idx_features_geom_gist" not in names
     for table, index_name in _SUBTYPE_GEOM_GIST.items():
         assert index_name in await _index_names(migrated_session, table)
-
-
-async def test_weather_source_record_support_index_exists(
-    migrated_session: Any,
-) -> None:
-    """T-VN-38 fact/current lookup index가 immutable weather schema에 존재한다."""
-    names = await _index_names(migrated_session, "feature_weather_values")
-    assert "idx_weather_values_feature_target_known" in names
-    assert "idx_weather_values_source_record" not in names
 
 
 async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
@@ -175,10 +166,10 @@ async def test_public_bbox_query_plans_partial_coord_gist(
     assert "Seq Scan" not in plan, plan
 
 
-async def test_nearest_weather_query_plans_partial_coord_5179_gist(
+async def test_radius_query_plans_partial_coord_5179_gist(
     migrated_session: Any,
 ) -> None:
-    """nearest-weather(coord_5179 ST_DWithin)가 partial coord_5179 GiST를 사용한다."""
+    """반경 조회(coord_5179 ST_DWithin)가 partial coord_5179 GiST를 사용한다."""
     await _seed_public_points(migrated_session, 5000, "gist:knn:")
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
     plan_rows = await migrated_session.execute(

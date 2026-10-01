@@ -67,7 +67,6 @@ def _owned_ids(run_id: str) -> list[str]:
         f"{prefix}::marker::inactive",
         f"{prefix}::marker::hidden",
         f"{prefix}::correction",
-        f"{prefix}::weather",
         f"{prefix}::price",
         f"{prefix}::search::alpha",
         f"{prefix}::search::beta",
@@ -522,7 +521,8 @@ def _run_key(args: argparse.Namespace) -> None:
 
 #: helper가 action별로 **추가로** 내는 evidence 키.
 #:
-#: `seed`는 weather/price current-summary receipt의 run id 두 개를,
+#: `seed`는 price current-summary receipt의 run id 한 개를(weather fixture는
+#: ADR-105로 빠졌다),
 #: `api-audit`은 관측한 feature UUID 목록을 함께 낸다
 #: (`admin_feature_live_fixture.py`의 결과 조립부). exact 키 집합에 이것들이 없으면
 #: 성공한 seed evidence가 `direct evidence mismatch`로 거절된다 — 그리고 그 검증은
@@ -560,8 +560,7 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
         run_ids = payload["summary_run_ids"]
         if (
             not isinstance(run_ids, list)
-            or len(run_ids) != 2
-            or len(set(run_ids)) != 2
+            or len(run_ids) != 1
             or any(type(value) is not int or value <= 0 for value in run_ids)
         ):
             raise ValueError("direct evidence mismatch")
@@ -737,23 +736,26 @@ def _validate_evidence(args: argparse.Namespace) -> None:
             "playwright-main",
             "playwright-recovery",
         }
-        # seed가 남기는 FK reference는 **6**이다. helper의
-        # `_assert_owned_state`가 present 2건에 대해 그렇게 만든다:
-        #   source_links 2
-        #   + weather_values 1 + current_weather_summary 1
-        #   + price_values 1 + current_price_summary 1
+        # seed가 남기는 FK reference는 **3**이다. helper의
+        # `_assert_owned_state`가 present 1건(price)에 대해 그렇게 만든다:
+        #   source_links 1 + price_values 1 + current_price_summary 1
+        #
+        # 종전 값 6은 weather fixture(source_links 1 + weather_values 1 +
+        # current_weather_summary 1)를 포함했다. Map이 weather 기능을 전부 걷어내면서
+        # (ADR-105, migration 402) weather fixture가 빠졌다.
         #
         # 종전 값 8은 `feature_aliases` 2를 포함했다. T-VN-39/ADR-098 결정 6이 alias
         # 발급을 provider 경로로 한정했고 309가 `trg_features_legacy_alias`를 영구
         # 제거했다 — 이 seed는 core 프로시저를 직접 부르므로 alias가 생기지 않는다.
         #
         # 이 리터럴은 한 달간 낡아 있었다(2026-09-06 실측으로 2 → 8). D2가 통과한 적이
-        # 없어 드러나지 않았기 때문이다. 머지 전 live run 한 번으로 6을 실측해야 한다.
+        # 없어 드러나지 않았기 때문이다. 3은 종전 6에서 weather 몫 3을 뺀 계산값이고
+        # 아직 live run 실측이 아니다 — 머지 전 live run 한 번으로 3을 실측해야 한다.
         _validate_direct(
             runtime / "direct-seed.json",
             "seed",
-            {"features": 2, "price_values": 1, "weather_values": 1},
-            6,
+            {"features": 1, "price_values": 1},
+            3,
         )
         required_operations = {
             "executor-main",
@@ -800,13 +802,13 @@ def _validate_evidence(args: argparse.Namespace) -> None:
     _validate_direct(
         runtime / "direct-cleanup.json",
         "cleanup",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         0,
     )
     constraints = _validate_direct(
         runtime / "direct-audit.json",
         "audit",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         0,
     )
     # api-audit은 admin API가 만든 Feature의 **완료 상태**를 감사한다. fixture 감사와
@@ -834,7 +836,7 @@ def _validate_evidence(args: argparse.Namespace) -> None:
     _validate_direct(
         runtime / "direct-purge.json",
         "purge",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         0,
     )
     _validate_report(runtime / "playwright-recovery")

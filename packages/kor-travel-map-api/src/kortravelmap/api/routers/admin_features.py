@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.dto import EventDetail, PlaceDetail
-from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
+from kortravelmap.infra import curation_repo, feature_identity, price_repo
 from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureDetail,
     AdminFeatureDetailFeature,
@@ -89,12 +89,8 @@ from kortravelmap.api.routers.curations import (
 )
 from kortravelmap.api.routers.features import (
     FeaturePriceResponse,
-    FeatureWeatherResponse,
     PriceCardData,
     PricePointOut,
-    WeatherCardData,
-    WeatherMetricOut,
-    WeatherSummaryOut,
 )
 
 __all__ = [
@@ -232,7 +228,6 @@ class AdminFeatureMapItem(BaseModel):
     geometry: dict[str, Any] | None = None
     area_square_meters: float | None = None
     price_summary: list[PricePointOut] | None = None
-    weather_summary: WeatherSummaryOut | None = None
 
 
 class AdminFeatureCluster(BaseModel):
@@ -1452,44 +1447,6 @@ async def list_admin_features_in_bounds(
             clusters=[],
             truncated=truncated,
             coverage=AdminInBoundsCoverage(returned=len(items), limit=max_items),
-        ),
-        meta=make_meta(request, started_at=started_at),
-    )
-
-
-@router.get(
-    "/{feature_id}/weather",
-    response_model=FeatureWeatherResponse,
-    summary="Admin feature weather card",
-    responses={404: {"description": "feature 없음"}},
-)
-async def get_admin_feature_weather(
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    feature_id: str,
-) -> FeatureWeatherResponse:
-    started_at = perf_counter()
-    identity = await resolve_feature_ref_or_error(session, feature_id)
-    canonical_id = identity.feature_id
-    await _admin_feature_exists_or_404(session, canonical_id)
-    card = await weather_repo.build_admin_weather_card(
-        session,
-        feature_id=canonical_id,
-    )
-    return FeatureWeatherResponse(
-        data=WeatherCardData(
-            # T-VN-32C PR-2 — 단건 card 응답의 feature_id는 UUID 정본
-            # (features.py 단건 card와 동일 규약; repo 내부 조회는 legacy 축).
-            feature_id=identity.feature_uuid,
-            source_styles=card.source_styles,
-            metrics=[
-                WeatherMetricOut.model_validate(metric, from_attributes=True)
-                for metric in card.metrics
-            ],
-            latest_at=card.latest_at,
-            is_stale=card.is_stale,
-            selected_at=card.selected_at,
-            refresh_after=card.refresh_after,
         ),
         meta=make_meta(request, started_at=started_at),
     )

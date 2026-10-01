@@ -134,7 +134,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 
 KMA(기상청) asset·job·schedule은 2026-10-01 ADR-104로 제거됐다 — KMA는 kor-travel-weather가
 소유하고 Map은 KMA data.go.kr 오퍼레이션을 부르지 않는다. 재도입은
-`packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_kma.py`가 막는다.
+`packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_weather.py`가 막는다.
 
 T-VN-40부터 별도 curated overlay asset group은 제거됐다. provider full-snapshot의 authoritative
 terminal receipt가 source observation과 candidate generation을 같은 transaction에서 실행한다.

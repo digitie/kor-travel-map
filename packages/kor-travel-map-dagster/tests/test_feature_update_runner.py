@@ -605,11 +605,11 @@ def test_default_runner_uses_operation_key_not_catalog_labels() -> None:
         _scope(
             provider="arbitrary-catalog-label",
             dataset_key="arbitrary-display-key",
-            operation_key="feature_weather_airkorea_air_quality_job",
+            operation_key="feature_place_khoa_beaches_job",
         )
     )
 
-    assert spec.asset_key == "feature_weather_airkorea_air_quality"
+    assert spec.asset_key == "feature_place_khoa_beaches"
 
 
 def test_default_runner_uses_mois_operation_key_without_dataset_filtering() -> None:

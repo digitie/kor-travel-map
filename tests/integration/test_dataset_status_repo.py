@@ -147,9 +147,64 @@ async def test_count_open_issues_groups_by_dataset_and_severity(
     assert missing == ()
 
 
-_KMA_PROVIDER = "python-kma-api"
-_KMA_DATASET = "kma_ultra_short_nowcast"
-_KMA_OPERATION = "feature_weather_kma_ultra_short_nowcast_job"
+#: scope가 둘(``dataset_wide``·``target_grids``)인 refresh operation. 시드에서 그런
+#: operation은 KMA 격자뿐이었는데 401(ADR-104)이 끄고 402(ADR-105)가 dataset을 비활성으로
+#: 내렸다. 검증 대상은 KMA가 아니라 projection이므로 이 테스트의 transaction 안에 probe
+#: catalog를 심는다(rollback으로 사라진다).
+_PROBE_PROVIDER = "dataset-status-probe"
+_PROBE_DATASET = "multi_scope_refresh"
+_PROBE_OPERATION = "dataset_status_multi_scope_probe_job"
+
+
+async def _multi_scope_probe_dataset(session: AsyncSession) -> int:
+    dataset_id = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.provider_datasets (
+                        provider, dataset_key, display_name, source_kind,
+                        is_active, capabilities
+                    ) VALUES (
+                        :provider, :dataset_key, 'dataset status probe', 'system',
+                        true,
+                        jsonb_build_object('schema_version', 1,
+                                           'produces', '[]'::jsonb,
+                                           'extensions', '{}'::jsonb)
+                    )
+                    RETURNING provider_dataset_id
+                    """
+                ),
+                {"provider": _PROBE_PROVIDER, "dataset_key": _PROBE_DATASET},
+            )
+        ).scalar_one()
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (:dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
+            """
+        ),
+        {"dataset_id": dataset_id, "operation_key": _PROBE_OPERATION},
+    )
+    for sync_scope in ("dataset_wide", "target_grids"):
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                    provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, :sync_scope, :operation_key, 'refresh')
+                """
+            ),
+            {
+                "dataset_id": dataset_id,
+                "sync_scope": sync_scope,
+                "operation_key": _PROBE_OPERATION,
+            },
+        )
+    return dataset_id
 
 
 async def test_latest_dataset_execution_collapses_linked_request_job_root(
@@ -160,32 +215,20 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     scope 사본(job.sync_scope)이 사라졌으므로 두 root를 분리하려면 같은 dataset의
     **다른 catalog sync_scope**를 쓴다(unscoped ``None`` scope는 더 이상 없다).
     """
-    dataset_id = await _provider_dataset_id(
-        migrated_session, provider=_KMA_PROVIDER, dataset_key=_KMA_DATASET
-    )
-    # scope가 둘인 시드 dataset은 KMA 격자뿐이다. 401(ADR-104)이 KMA refresh를 껐으므로
-    # 이 테스트의 transaction 안에서만 다시 켠다 — 검증 대상은 KMA가 아니라 projection이다.
-    await migrated_session.execute(
-        text(
-            "UPDATE provider_sync.provider_dataset_operations SET is_enabled = true "
-            "WHERE provider_dataset_id = :dataset_id AND operation_key = :operation_key "
-            "AND operation_kind = 'refresh'"
-        ),
-        {"dataset_id": dataset_id, "operation_key": _KMA_OPERATION},
-    )
+    dataset_id = await _multi_scope_probe_dataset(migrated_session)
     request = await enqueue_feature_update_request(
         migrated_session,
         scope={
             "type": "provider_dataset",
             "provider_dataset_id": dataset_id,
             "sync_scope": "dataset_wide",
-            "operation_key": _KMA_OPERATION,
+            "operation_key": _PROBE_OPERATION,
         },
         dataset_memberships=[
             ImportJobDatasetTarget(
                 provider_dataset_id=dataset_id,
                 sync_scope="dataset_wide",
-                operation_key=_KMA_OPERATION,
+                operation_key=_PROBE_OPERATION,
             )
         ],
     )
@@ -218,7 +261,7 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
         dataset_membership=ImportJobDatasetTarget(
             provider_dataset_id=dataset_id,
             sync_scope="target_grids",
-            operation_key=_KMA_OPERATION,
+            operation_key=_PROBE_OPERATION,
         ),
         trigger_kind="manual",
     )
@@ -247,11 +290,11 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     }
     assert len(latest) == len(by_scope)
 
-    request_scope = by_scope[(_KMA_PROVIDER, _KMA_DATASET, "dataset_wide")]
+    request_scope = by_scope[(_PROBE_PROVIDER, _PROBE_DATASET, "dataset_wide")]
     assert request_scope.execution.kind == "update_request"
     assert request_scope.execution.id == request.request_id
 
-    job = by_scope[(_KMA_PROVIDER, _KMA_DATASET, "target_grids")]
+    job = by_scope[(_PROBE_PROVIDER, _PROBE_DATASET, "target_grids")]
     assert job.execution.kind == "import_job"
     assert job.execution.id == independent.job_id
     assert job.execution.trigger_kind == "manual"
@@ -278,11 +321,11 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     }
     assert len(tied) == len(tied_by_scope)
     assert (
-        tied_by_scope[(_KMA_PROVIDER, _KMA_DATASET, "dataset_wide")].execution.id
+        tied_by_scope[(_PROBE_PROVIDER, _PROBE_DATASET, "dataset_wide")].execution.id
         == request.request_id
     )
     assert (
-        tied_by_scope[(_KMA_PROVIDER, _KMA_DATASET, "target_grids")].execution.id
+        tied_by_scope[(_PROBE_PROVIDER, _PROBE_DATASET, "target_grids")].execution.id
         == independent.job_id
     )
 

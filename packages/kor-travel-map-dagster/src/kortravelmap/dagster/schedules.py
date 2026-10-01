@@ -49,10 +49,6 @@ from .assets import (
     feature_price_opinet_stations,
     feature_route_krforest_dulle_trails,
     feature_route_krforest_mountain_trails,
-    feature_weather_airkorea_air_quality,
-    feature_weather_krex_rest_areas,
-    feature_weather_krforest_mountain_weather,
-    feature_weather_krforest_wildfire_risk_forecast,
 )
 from .feature_operation_tracking import (
     EXECUTION_SCOPES_TAG,
@@ -261,20 +257,6 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
-        asset=feature_weather_krex_rest_areas,
-        job_name="feature_weather_krex_rest_areas_job",
-        schedule_name="feature_weather_krex_rest_areas_hourly_schedule",
-        cron_schedule="35 * * * *",
-        description="고속도로 휴게소 관측 기상 weather Feature 매시 적재(기온→T1H).",
-        # 자기 회수 상한보다 짧은 주기인데 합치기도 회수도 없었다. upstream이
-        # trickle에 들어가면 매시 새 run이 뜨고 각 run이 전역 6시간을 쓰므로 같은
-        # job의 멈춘 run이 최대 6개 — 10 슬롯 중 6개를 한 job이 먹는다. 같은 EX
-        # 호스트를 쓰는 형제(`feature_notice_krex_traffic_notices_job`)는 이미 이
-        # 조합으로 in-flight 1개·2시간 회수다.
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
-    FeatureLoadScheduleSpec(
         asset=feature_place_krheritage_items,
         job_name="feature_place_krheritage_items_job",
         schedule_name="feature_place_krheritage_items_monthly_schedule",
@@ -347,24 +329,6 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="산림청 둘레길 route Feature 월 1회 적재(C05A).",
     ),
     FeatureLoadScheduleSpec(
-        asset=feature_weather_krforest_mountain_weather,
-        job_name="feature_weather_krforest_mountain_weather_job",
-        schedule_name="feature_weather_krforest_mountain_weather_six_daily_schedule",
-        cron_schedule="0 1,5,9,13,17,21 * * *",
-        description="산림청 산악기상 station·WeatherValue 하루 6회 적재(C05B).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_krforest_wildfire_risk_forecast,
-        job_name="feature_weather_krforest_wildfire_risk_forecast_job",
-        schedule_name="feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule",
-        cron_schedule="10 1,5,9,13,17,21 * * *",
-        description="산림청 산불위험예보 WeatherValue 하루 6회 적재(C05C).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
-    FeatureLoadScheduleSpec(
         asset=feature_notice_krforest_landslide_forecast_issues,
         job_name="feature_notice_krforest_landslide_forecast_issues_job",
         schedule_name="feature_notice_krforest_landslide_forecast_issues_six_daily_schedule",
@@ -429,15 +393,6 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_event_visitkorea_enrichment_monthly_schedule",
         cron_schedule="50 4 1 * *",
         description="VisitKorea 축제 enrichment review 월 1회 적재.",
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_airkorea_air_quality,
-        job_name="feature_weather_airkorea_air_quality_job",
-        schedule_name="feature_weather_airkorea_air_quality_hourly_schedule",
-        cron_schedule="10 * * * *",
-        description="AirKorea 대기질 weather Feature + WeatherValue 매시 적재.",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     # MCST 파일데이터 (T-220 재배선, #395) — 저빈도 시설 데이터, 월 1회.
     FeatureLoadScheduleSpec(
@@ -558,6 +513,10 @@ def _coalescing_execution_fn(
 #: data.go.kr 오퍼레이션을 부르지 않는다. 이 목록은 "시계만 끈" provider의
 #: 기록이고 KMA는 시계도 능력도 없으므로 여기 남을 이름이 아니다.
 #:
+#: 2026-10-01 — AirKorea도 같은 이유로 **뺐다.** Map은 weather kind feature를 어떤
+#: 원천에서도 적재하지 않는다(ADR-105, 소유자 결정 — weather는 kor-travel-weather가
+#: 소유한다). AirKorea job·asset·schedule이 정의에서 사라졌으므로 끌 시계가 없다.
+#:
 #: 2026-09-18 — data.go.kr 활용신청이 되지 않은 넷과, 오픈API가 아예 없는 하나를
 #: 중지(사용자 지시). prod에서 32개 provider job을 한 번에 돌려 실패 원인을
 #: 전수로 확정한 결과다.
@@ -584,7 +543,6 @@ DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
         "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
         "feature_place_standard_special_streets_monthly_schedule",
-        "feature_weather_airkorea_air_quality_hourly_schedule",
     }
 )
 
@@ -605,7 +563,8 @@ row가 없으면 ``allow_targeted``로 **fail-open**한다(baseline seed에 row�
 
 즉 "2026-09-09 KMA·AirKorea 자동 적재 중지(사용자 지시)"가 **살아 있는 경로에서는
 지켜지지 않고 있었다**(2026-09-14 발견). PinVi cache target refresh 하나가 반경 안
-KMA weather feature를 잡으면 격자 순회가 그대로 나갔다.
+KMA weather feature를 잡으면 격자 순회가 그대로 나갔다. (KMA·AirKorea는 2026-10-01
+정의에서 걷어냈다 — ADR-104/105. 이 기제는 남은 data.go.kr 미신청 넷을 위해 유지한다.)
 
 **끄는 것은 시계이지 능력이 아니다** — 그 원칙은 유지한다. 사람이 Dagster UI에서
 job을 직접 돌리는 백필은 여전히 된다(그 경로는 이 runner를 지나지 않는다). 여기서

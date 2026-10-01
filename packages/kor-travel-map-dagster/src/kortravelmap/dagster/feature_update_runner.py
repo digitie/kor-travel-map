@@ -62,17 +62,11 @@ from .assets import (
     run_feature_price_opinet_stations,
     run_feature_route_krforest_dulle_trails,
     run_feature_route_krforest_mountain_trails,
-    run_feature_weather_airkorea_air_quality,
-    run_feature_weather_krex_rest_areas,
-    run_feature_weather_krforest_mountain_weather,
-    run_feature_weather_krforest_wildfire_risk_forecast,
 )
 from .mcst_features import run_feature_place_mcst_culture
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     ProviderCredentialMissing,
-    fetch_airkorea_air_quality,
-    fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
@@ -81,16 +75,13 @@ from .provider_fetchers import (
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
     fetch_krex_rest_area_fuel_prices,
-    fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
     fetch_krforest_landslide_forecast_issues,
     fetch_krforest_mountain_trails,
-    fetch_krforest_mountain_weather,
     fetch_krforest_recreation_forests,
-    fetch_krforest_wildfire_risk_forecast,
     fetch_krheritage_events,
     fetch_krheritage_items,
     fetch_mcst_culture_records,
@@ -590,7 +581,6 @@ def _loaded_count(
         return result.loaded_count
     for key in (
         "values_loaded",
-        "weather_values_loaded",
         "price_values_upserted",
         "features_total",
         "bundles_total",
@@ -721,18 +711,6 @@ def _knps_geometry_resources(
     )
 
 
-def _airkorea_resources(
-    settings: KorTravelMapSettings,
-    _scope: ProviderDatasetRefreshScope,
-) -> RunnerResources:
-    return RunnerResources(
-        {
-            "airkorea_stations": fetch_airkorea_stations(settings),
-            "airkorea_air_quality": fetch_airkorea_air_quality(settings),
-        }
-    )
-
-
 def _datagokr_file_data_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
@@ -822,13 +800,6 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         rate_gate=KREX_RATE_GATE,
     ),
     *_operation_specs(
-        "feature_weather_krex_rest_areas_job",
-        run=run_feature_weather_krex_rest_areas,
-        resources=_records("krex_rest_area_weather", fetch_krex_rest_area_weather),
-        asset_key="feature_weather_krex_rest_areas",
-        rate_gate=KREX_RATE_GATE,
-    ),
-    *_operation_specs(
         "feature_notice_krex_traffic_notices_job",
         run=run_feature_notice_krex_traffic_notices,
         resources=_records("krex_traffic_notices", fetch_krex_traffic_notices),
@@ -888,20 +859,6 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_route_krforest_dulle_trails,
         resources=_records("krforest_dulle_trails", fetch_krforest_dulle_trails),
         asset_key="feature_route_krforest_dulle_trails",
-    ),
-    *_operation_specs(
-        "feature_weather_krforest_mountain_weather_job",
-        run=run_feature_weather_krforest_mountain_weather,
-        resources=_records("krforest_mountain_weather", fetch_krforest_mountain_weather),
-        asset_key="feature_weather_krforest_mountain_weather",
-    ),
-    *_operation_specs(
-        "feature_weather_krforest_wildfire_risk_forecast_job",
-        run=run_feature_weather_krforest_wildfire_risk_forecast,
-        resources=_records(
-            "krforest_wildfire_risk_forecast", fetch_krforest_wildfire_risk_forecast
-        ),
-        asset_key="feature_weather_krforest_wildfire_risk_forecast",
     ),
     *_operation_specs(
         "feature_notice_krforest_landslide_forecast_issues_job",
@@ -970,12 +927,6 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_event_visitkorea_enrichment,
         resources=_records("visitkorea_festival_events", fetch_visitkorea_festival_events),
         asset_key="feature_event_visitkorea_enrichment",
-    ),
-    *_operation_specs(
-        "feature_weather_airkorea_air_quality_job",
-        run=run_feature_weather_airkorea_air_quality,
-        resources=_airkorea_resources,
-        asset_key="feature_weather_airkorea_air_quality",
     ),
     *_operation_specs(
         "feature_place_mcst_culture_job",

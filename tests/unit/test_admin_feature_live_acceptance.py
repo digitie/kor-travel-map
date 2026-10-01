@@ -1082,7 +1082,8 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
         )
     ]
     assert fixture.count('lock_clause = " FOR UPDATE" if lock else ""') == 2
-    assert owned_values.count("+ lock_clause") == 2
+    # value table은 price 하나다(weather 값 표는 ADR-105/402로 사라졌다).
+    assert owned_values.count("+ lock_clause") == 1
     assert "_assert_owned_values(session, run_id, feature_ids, present, lock=lock)" in fixture
     lock = cleanup.index("lock=True")
     foreign_key_audit = cleanup.index("DELETE FROM feature.features")
@@ -1092,10 +1093,14 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "foreign_key_constraints_checked" in fixture
     assert "foreign_key_references" in fixture
     assert "owned fixture ID의 소유권 fingerprint가 다릅니다" in fixture
-    assert "owned weather value fingerprint가 다릅니다" in fixture
     assert "owned price value fingerprint가 다릅니다" in fixture
-    assert '"feature.current_weather_summary.feature_id"] = 1' in fixture
     assert '"feature.current_price_summary.feature_id"] = 1' in fixture
+    # ADR-105: Map은 weather 기능을 전부 걷어냈다. fixture가 weather 값·summary
+    # 테이블(402가 지운다)을 다시 seed/감사하면 D2가 배포 스택에서 죽는다.
+    assert "feature_weather_values" not in fixture
+    assert "current_weather_summary" not in fixture
+    assert "weather_repo" not in fixture
+    assert '_FIXTURE_KINDS: Final[tuple[str]] = ("price",)' in fixture
     # T-VN-39/ADR-098 결정 6: alias 발급은 provider 경로 전용이다. seed는 core
     # 프로시저를, api-audit lane은 admin 수동 생성을 감사하는데 **둘 다 alias를
     # 만들지 않는다.** 종전의 두 핀은 `trg_features_legacy_alias`가 있던 시절의
@@ -1126,7 +1131,7 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "inspection.field_overrides" in purge
     assert 'result["feature_uuids"] = list(api_owned_feature_uuids)' in fixture
     assert "async def _owned_summary_run_ids(" in fixture
-    assert "owned weather/price current-summary receipt가 정확하지 않습니다" in fixture
+    assert "owned price current-summary receipt가 정확하지 않습니다" in fixture
     assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
 
 
@@ -1215,35 +1220,37 @@ def test_clone_content_digest_excludes_only_exact_run_bound_receipts() -> None:
     assert "legacy-v2 legacy-v1 legacy-v0" in runner
 
 
-def test_clone_seed_receipt_evidence_requires_two_distinct_positive_ids(
+def test_clone_seed_receipt_evidence_requires_exactly_one_positive_id(
     tmp_path: Path,
 ) -> None:
+    # seed는 price fixture 한 건이다(weather fixture는 ADR-105로 빠졌다) — receipt도 한 건.
     evidence_path = tmp_path / "direct-seed.json"
     payload = {
         "action": "seed",
-        "counts": {"features": 2, "price_values": 1, "weather_values": 1},
+        "counts": {"features": 1, "price_values": 1},
         "foreign_key_constraints_checked": 18,
-        "foreign_key_references": 6,
-        "summary_run_ids": [101, 102],
+        "foreign_key_references": 3,
+        "summary_run_ids": [101],
         "version": 1,
     }
     evidence_path.write_text(json.dumps(payload), encoding="utf-8")
     assert _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
         evidence_path,
         "seed",
-        {"features": 2, "price_values": 1, "weather_values": 1},
-        expected_foreign_key_references=6,
+        {"features": 1, "price_values": 1},
+        expected_foreign_key_references=3,
     ) == payload
 
-    payload["summary_run_ids"] = [101, 101]
-    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(RuntimeError, match="current-summary receipt"):
-        _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
-            evidence_path,
-            "seed",
-            {"features": 2, "price_values": 1, "weather_values": 1},
-            expected_foreign_key_references=6,
-        )
+    for invalid in ([101, 102], [0], []):
+        payload["summary_run_ids"] = invalid
+        evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="current-summary receipt"):
+            _CLONE_STATE_MODULE._fixture_counts(  # noqa: SLF001
+                evidence_path,
+                "seed",
+                {"features": 1, "price_values": 1},
+                expected_foreign_key_references=3,
+            )
 
 
 def test_evidence_validator_requires_exact_schema_phase_counts_and_fsync() -> None:

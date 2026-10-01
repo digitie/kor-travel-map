@@ -73,6 +73,8 @@ from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.dto import FeatureKind
 from kortravelmap.providers.feature_operation_registry import (
     feature_operation_handler_keys,
 )
@@ -771,8 +773,11 @@ _NON_DAGSTER_REFRESH_OPERATION_KEYS = frozenset(
 
 
 #: KMA의 provider 정체성. ADR-104 이후 Map은 이 provider의 적재 operation을 하나도
-#: 켜 두지 않는다(`401_retire_map_kma_refresh`).
-_KMA_PROVIDER = "python-kma-api"
+#: 켜 두지 않는다(`401_retire_map_kma_refresh`). KMA는 weather provider라 그 notice는
+#: 기상 원천 notice다(ADR-105).
+_KMA_PROVIDER = normalize_provider_name("kma")
+_WEATHER_KIND = FeatureKind.WEATHER.value
+_NOTICE_KIND = FeatureKind.NOTICE.value
 
 
 async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
@@ -790,46 +795,54 @@ async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
     assert verified >= _NON_DAGSTER_REFRESH_OPERATION_KEYS
 
 
-async def test_head_enables_no_kma_load_operation(
+async def test_head_serves_no_weather_dataset(
     seed_session: AsyncSession,
 ) -> None:
-    """head DB 카탈로그가 KMA를 실행 가능하다고 말하지 않는다(ADR-104).
+    """head DB 카탈로그가 weather·기상 원천 notice를 실행 가능하다고 말하지 않는다.
 
-    실행 가능 집합의 정본은 이 카탈로그다 — ``POST /ops/pipeline/requests``의
-    membership 검증(``infra/feature_update_repo._ACTIVE_DATASET_MEMBERSHIPS_SQL``),
-    ``/ops/datasets``의 갱신 capability, offline upload 후보가 모두
-    ``operation.is_enabled``로 join한다. 그래서 코드에서 handler를 지우는 것만으로는
-    부족하다: 행이 켜져 있으면 화면은 갱신 버튼을 내고 API는 요청을 큐에 넣는다.
+    ADR-104가 KMA 적재 operation을 껐고(401), ADR-105가 weather 기능 전체와 KMA notice를
+    내려놓으며 그 dataset을 비활성으로 내렸다(402). 실행 가능 집합의 정본은 이
+    카탈로그다 — ``POST /ops/pipeline/requests``의 membership 검증,
+    ``/ops/datasets``의 갱신 capability, offline upload 후보가 모두 ``is_active``와
+    ``operation.is_enabled``로 join한다. 코드에서 handler를 지우는 것만으로는 부족하다.
 
-    정체성은 operation key 이름이 아니라 dataset의 provider로 고른다. 하한은 본 것에
-    건다 — KMA dataset이 시드에 실제로 보여야 이 검사가 무언가를 잰다. 읽기 경로를
-    위해 dataset 자체는 활성으로 남고, fixture-only preview도 남는다.
+    정체성은 이름이 아니라 capability와 provider다: ``produces``에 weather가 있는
+    dataset, 그리고 KMA가 내는 notice dataset. 하한은 본 것에 건다 — 대상 dataset이
+    시드에 실제로 보여야 이 검사가 무언가를 잰다. 행은 지우지 않는다(이력 FK).
     """
 
     entries = [
         entry
         for entry in await list_provider_dataset_catalog(seed_session)
-        if entry.provider == _KMA_PROVIDER
+        if _WEATHER_KIND in entry.produces
+        or (entry.provider == _KMA_PROVIDER and _NOTICE_KIND in entry.produces)
     ]
-    assert entries, f"{_KMA_PROVIDER} dataset이 시드에 없다 — 이 검사가 아무것도 재지 않는다"
+    assert len(entries) >= 2, (
+        "weather/KMA notice dataset이 시드에 없다 — 이 검사가 아무것도 재지 않는다: "
+        f"{[(entry.provider, entry.dataset_key) for entry in entries]}"
+    )
+    assert any(entry.provider == _KMA_PROVIDER for entry in entries)
     assert any(
         operation.operation_kind == "refresh"
         for entry in entries
         for operation in entry.operations
-    ), "KMA refresh operation 행 자체가 사라졌다 — 이력 FK가 가리키는 행은 지우지 않는다"
+    ), "refresh operation 행 자체가 사라졌다 — 이력 FK가 가리키는 행은 지우지 않는다"
 
     enabled = sorted(
-        f"{entry.dataset_key}:{operation.operation_key}:{operation.operation_kind}"
+        f"{entry.provider}/{entry.dataset_key}:{operation.operation_key}:"
+        f"{operation.operation_kind}"
         for entry in entries
         for operation in entry.operations
-        if operation.is_enabled and operation.operation_kind in {"refresh", "feature_load"}
+        if operation.is_enabled
     )
-    assert enabled == [], f"KMA 적재 operation이 켜져 있다: {enabled}"
-    assert all(entry.is_active for entry in entries), "KMA dataset이 비활성화됐다 — 읽기가 끊긴다"
+    assert enabled == [], f"weather/KMA notice operation이 켜져 있다: {enabled}"
+    active = sorted(f"{e.provider}/{e.dataset_key}" for e in entries if e.is_active)
+    assert active == [], f"weather/KMA notice dataset이 활성이다: {active}"
     assert not any(entry.is_refreshable for entry in entries)
 
+    targets = {(entry.provider, entry.dataset_key) for entry in entries}
     bindings = await list_active_refresh_operation_bindings(seed_session)
-    assert not [b for b in bindings if b.provider == _KMA_PROVIDER]
+    assert not [b for b in bindings if (b.provider, b.dataset_key) in targets]
 
 
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(

@@ -421,14 +421,14 @@ async def test_dataset_events_filter_effective_scope_before_limit_and_cursor(
 
     membership_a = await _membership(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_short_forecast",
+        provider="scoped-provider",
+        dataset_key="scoped-dataset",
         sync_scope="target_grids",
     )
     membership_b = await _membership(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_short_forecast",
+        provider="scoped-provider",
+        dataset_key="scoped-dataset",
         sync_scope="external_system:other",
     )
     assert membership_a.provider_dataset_id == membership_b.provider_dataset_id

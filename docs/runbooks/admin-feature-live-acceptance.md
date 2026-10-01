@@ -81,9 +81,10 @@ export E2E_C7_DAGSTER_DAEMON_SERVICE='<compose-service>'
 export E2E_C7_PINVI_API_SERVICE='<compose-service>'
 export E2E_C7_PINVI_WEB_SERVICE='<compose-service>'
 export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
-# 선택(C7): 공유 Dagster plane의 Basic Auth gateway 자격증명 파일(root 0600, `user:password` 한 줄)
-# export E2E_DAGSTER_BASIC_AUTH_FILE='/root/.d2-dagster-basic-auth'
 ```
+
+`E2E_DAGSTER_BASIC_AUTH_FILE`은 더 받지 않는다 — 그것을 쓰던 C7 Dagster GraphQL client가
+2026-10-01 KMA C7 spec과 함께 지워졌다(ADR-104/105, `docs/runbooks/c7-prod-live-e2e.md` 머리말).
 
 Dagster service 키 셋은 n150에서 `scripts/n150/repin.sh`가 Manager 토폴로지(`ktdctl targets list
 --json`)에서 유도한다. 공유 Dagster plane으로 옮긴 프로젝트는 code-server 하나가 그 값이고, Map이

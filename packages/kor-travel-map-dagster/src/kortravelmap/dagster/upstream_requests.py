@@ -15,7 +15,8 @@ provider는 fetcher가 **generator**라서, 요청을 세는 자리(페이지 �
 - 페이지 하나를 가져오는 콜백이 **내부에서 재시도**하면 그 재시도는 보이지 않는다
   (``upstream_retry``의 외부 attempts, provider client의 내부 retries).
 - provider lib이 한 번의 호출 안에서 여러 요청을 보내는 자리가 있다
-  (krex ``latest_weather``의 lookback 루프 — 그래서 그쪽은 lookback 상한을 따로 선언한다).
+  (종전 예: krex ``latest_weather``의 lookback 루프 — 그 fetcher는 2026-10-01 ADR-105로
+  사라졌다. 같은 모양의 호출이 다시 생기면 상한을 따로 선언할 것).
 - 캐시/스킵으로 호출이 아예 없었던 구간은 0이다.
 
 즉 이 수는 **"적어도 이만큼은 썼다"**이고, 한도와 비교할 때 그 방향으로만 안전하다.

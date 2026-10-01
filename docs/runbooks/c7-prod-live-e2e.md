@@ -17,6 +17,21 @@
 > 없음)이고, 감사기는 v1·v2 archive를 legacy로 계속 인정한다. n150 호스트 스크립트는
 > `scripts/n150/`이 정본이다.
 
+> **2026-10-01 — KMA lane 퇴역(ADR-104/105).** Map은 weather를 더 적재하지 않고 KMA catalog
+> operation은 거절된다. 그래서 KMA exact-scope 3-spec(`ops-c7-kma-{active,cap,empty}-write`)과
+> contract preflight, queue sensor barrier(`sensor.json`), KMA journal(`kma.json`), grid cap
+> 대조(`kma_weather_max_grids_per_run`), C7 Dagster GraphQL client와 그 Basic Auth bind를
+> 지웠다. 옛 schedule allowlist(`feature_weather_kma_short_forecast_hourly_schedule`)는
+> 2026-09-09에 사라져 그날부터 러너가 돌 수 없었다. 현재 C7 blocking gate는
+> `ops-c7-read-auth` + `ops-c7-schedule-write` + `poi-cache-targets-write`의 `@c7-causal`
+> 한 건이다. schedule allowlist는 `feature_place_krairport_airports_monthly_schedule`
+> (공항 fetcher는 krairport 번들 정적 데이터만 읽어 tick이 나가도 upstream 호출이 0)이고,
+> 러너 env에서 `E2E_DAGSTER_JOB`·`E2E_DAGSTER_RUN`·`E2E_KMA_SCOPE_WRITE`·
+> `E2E_QUEUE_SENSOR_BARRIER`·`E2E_DAGSTER_BASIC_AUTH_FILE`이 빠졌다. runtime journal은
+> `{schedule,targets,poi}.json`이다 — `targets.json`은 read-auth의 dataset_projection
+> invalidation 시나리오가 만드는 POI target 하나의 소유·복원 journal이다. 아래 §1 5번,
+> §2.4, §4의 KMA·sensor 서술은 이 날짜 이전 기록이다.
+
 이 문서는 `T-ADM-C7`의 n150 파괴적 live UI E2E를 실행하는 유일한 운영 순서를
 정의한다. 실제 host, URL, 계정, 비밀번호, token, hash는 gitignore된
 `docs/deploy-runbook.local.md`와 `docs/prod-access.local.md`에만 둔다.
@@ -39,11 +54,11 @@ C7은 다음 조건을 모두 만족해야 완료다.
    `mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
    기반의 C7 executor image에서 실행한다. executor label의 Git commit도 실행 checkout과
    같아야 한다.
-5. 실제 Dagster repository에 `feature_update_request_worker` job이 정확히 하나 있고,
-   각 terminal request의 `runOrError.jobName`과 request/generation/scope/sensor tag가
-   해당 실행과 일치한다.
-6. sensor·schedule·KMA·POI 상태가 원래 값으로 정확히 복구되고, redacted 결과와 복구
-   증거가 root-owned evidence 디렉터리에 보존된다.
+5. (2026-10-01 퇴역) ~~실제 Dagster repository에 `feature_update_request_worker` job이 정확히
+   하나 있고, 각 terminal request의 `runOrError.jobName`과 request/generation/scope/sensor tag가
+   해당 실행과 일치한다.~~ — C7은 더 이상 feature update request를 만들지 않는다.
+6. schedule·C7 target(`targets.json`)·POI 상태가 원래 값으로 정확히 복구되고, redacted 결과와
+   복구 증거가 root-owned evidence 디렉터리에 보존된다.
 
 단순 HTTP 200, Playwright pass 수, container `running`만으로는 완료 처리하지 않는다.
 
@@ -175,7 +190,10 @@ manifest `active_generation`의 일곱 image ID와 각각 비교한다. Map 네 
 `active_generation.map_source_revision`, PinVi 세 image는 `pinvi_source_revision`이어야 한다.
 세 schema head와 `pinset_sha256`도 attestation과 generation이 exact 일치해야 한다.
 
-### 2.4 KMA 인수 scope (`external_system:c7-e2e`)
+### 2.4 KMA 인수 scope (`external_system:c7-e2e`) — 2026-10-01 퇴역
+
+> 아래는 퇴역한 KMA 3-spec의 기록이다. 남은 C7 spec은 `c7-e2e` scope로 갱신을 걸지 않는다.
+> 앞 run의 `c7-e2e` target이 남아 있으면 아래 회수 절차로 비우는 것만 여전히 유효하다.
 
 KMA live 3종(`ops-c7-kma-{active,cap,empty}-write`)은 **고정** external system
 `c7-e2e`에 cache target을 만들고 `external_system:c7-e2e` scope로 갱신을 건다. run마다
@@ -274,13 +292,16 @@ sudo python3 scripts/stop-c7-prod-live-container.py
 `runtime.*`·`.state.*`, evidence 존재 여부만 보고한다. 다음 순서로 수동 복구한다.
 
 1. mutation window를 다시 독점하고 API/Dagster writer를 fence한다.
-2. `runtime.*/journals/{sensor,schedule,kma,poi}.json`을 root만 읽을 수 있는 recovery
-   evidence로 복제하고 SHA-256을 기록한다. 이전 runner의 root 직하 journal도 있으면 함께 보존한다.
-3. sensor와 schedule은 journal의 최초 selector/state와 실제 Dagster GraphQL을 비교해
-   복구한다. 소유하지 않은 concurrent state면 덮어쓰지 않는다.
-4. KMA request·target과 POI target은 journal의 exact 자연키/UUID/ETag/body를 사용한다.
-   `412`, UUID drift, 응답 유실은 자동 삭제하지 않는다.
-5. 공개 UI session으로 schedule/KMA/POI의 최종 read-only equality와 owned scope 0건을
+2. `runtime.*/journals/{schedule,targets,poi}.json`을 root만 읽을 수 있는 recovery
+   evidence로 복제하고 SHA-256을 기록한다. 2026-10-01 이전 runner가 남긴
+   `{sensor,kma}.json`과 root 직하 journal도 있으면 함께 보존한다(감사기는 계속 센다).
+3. schedule은 journal의 최초 state와 admin schedule API를 비교해 복구한다. 옛 `sensor.json`이
+   남았으면 그 최초 selector/state와 실제 Dagster GraphQL을 비교한다. 소유하지 않은
+   concurrent state면 덮어쓰지 않는다.
+4. C7 target(`targets.json`)과 POI target은 journal의 exact 자연키/UUID/ETag/body를 사용한다.
+   옛 `kma.json`의 request는 KMA operation이 거절되므로 새로 실행될 수 없지만, 비terminal로
+   남았으면 admin 파이프라인 화면에서 취소한다. `412`, UUID drift, 응답 유실은 자동 삭제하지 않는다.
+5. 공개 UI session으로 schedule/target/POI의 최종 read-only equality와 owned scope 0건을
    다시 검증한다.
 6. 검증 결과를 evidence에 원자 기록하고 fsync한다. 그 뒤에만 operator가 journal과
    sentinel을 제거한다. 감사 도구는 의도적으로 자동 clear를 제공하지 않는다.

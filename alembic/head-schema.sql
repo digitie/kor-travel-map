@@ -9315,28 +9315,6 @@ $$;
 ALTER FUNCTION feature.reject_user_feature_version_mutation() OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: reject_weather_value_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE FUNCTION feature.reject_weather_value_mutation() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog'
-    AS $$
-        BEGIN
-            IF TG_OP = 'DELETE' AND NOT EXISTS (
-                SELECT 1 FROM feature.features AS f WHERE f.feature_id = OLD.feature_id
-            ) THEN
-                RETURN OLD;
-            END IF;
-            RAISE EXCEPTION 'feature_weather_values facts are immutable (ADR-089)'
-                USING ERRCODE = '23514', CONSTRAINT = 'ck_weather_values_immutable';
-        END;
-        $$;
-
-
-ALTER FUNCTION feature.reject_weather_value_mutation() OWNER TO ktm_feature_schema_owner;
-
---
 -- Name: resolve_curation_import_collection_command(text, uuid, uuid, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -15655,30 +15633,6 @@ CREATE TABLE feature.current_price_summary (
 ALTER TABLE feature.current_price_summary OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: current_weather_summary; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE feature.current_weather_summary (
-    feature_id uuid NOT NULL,
-    provider_dataset_id bigint NOT NULL,
-    weather_domain text NOT NULL,
-    forecast_style text NOT NULL,
-    metric_key text NOT NULL,
-    weather_value_key text NOT NULL,
-    summary_run_id bigint NOT NULL,
-    selected_at timestamp with time zone NOT NULL,
-    refresh_after timestamp with time zone NOT NULL,
-    projection_kind text DEFAULT 'weather'::text NOT NULL,
-    receipt_status text DEFAULT 'succeeded'::text NOT NULL,
-    CONSTRAINT ck_current_weather_summary_projection_kind CHECK ((projection_kind = 'weather'::text)),
-    CONSTRAINT ck_current_weather_summary_receipt_status CHECK ((receipt_status = 'succeeded'::text)),
-    CONSTRAINT ck_current_weather_summary_refresh_after CHECK ((refresh_after > selected_at))
-);
-
-
-ALTER TABLE feature.current_weather_summary OWNER TO ktm_feature_schema_owner;
-
---
 -- Name: feature_aliases; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -15959,45 +15913,6 @@ ALTER TABLE feature.feature_state_transitions ALTER COLUMN transition_id ADD GEN
     CACHE 1
 );
 
-
---
--- Name: feature_weather_values; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE feature.feature_weather_values (
-    weather_value_key text NOT NULL,
-    feature_id uuid NOT NULL,
-    provider_dataset_id bigint NOT NULL,
-    weather_domain text NOT NULL,
-    forecast_style text NOT NULL,
-    timeline_bucket text,
-    metric_key text NOT NULL,
-    metric_name text,
-    source_metric_key text,
-    source_metric_name text,
-    value_number numeric(14,4),
-    value_text text,
-    unit text,
-    severity text,
-    issued_at timestamp with time zone,
-    valid_at timestamp with time zone,
-    valid_during tstzrange,
-    observed_at timestamp with time zone,
-    target_at timestamp with time zone NOT NULL,
-    known_at timestamp with time zone NOT NULL,
-    normalization_version text,
-    payload jsonb DEFAULT '{}'::jsonb NOT NULL,
-    source_entity_key text NOT NULL,
-    source_record_key text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_weather_value_bitemporal_order CHECK (((issued_at IS NULL) OR (issued_at <= known_at))),
-    CONSTRAINT ck_weather_value_payload_object CHECK ((jsonb_typeof(payload) = 'object'::text)),
-    CONSTRAINT ck_weather_value_present CHECK (((value_number IS NOT NULL) OR (value_text IS NOT NULL))),
-    CONSTRAINT ck_weather_value_valid_during_not_empty CHECK (((valid_during IS NULL) OR (NOT isempty(valid_during))))
-);
-
-
-ALTER TABLE feature.feature_weather_values OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: features; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
@@ -16417,7 +16332,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -16855,7 +16770,7 @@ CREATE TABLE ops.current_summary_runs (
     CONSTRAINT ck_current_summary_runs_counts_nonnegative CHECK (((input_count >= 0) AND (inserted_count >= 0) AND (updated_count >= 0) AND (deleted_count >= 0))),
     CONSTRAINT ck_current_summary_runs_detail_object CHECK ((jsonb_typeof(detail) = 'object'::text)),
     CONSTRAINT ck_current_summary_runs_finished_at CHECK ((((status = 'running'::text) AND (finished_at IS NULL)) OR ((status = ANY (ARRAY['succeeded'::text, 'failed'::text])) AND (finished_at >= started_at)))),
-    CONSTRAINT ck_current_summary_runs_projection_kind CHECK ((projection_kind = ANY (ARRAY['weather'::text, 'price'::text]))),
+    CONSTRAINT ck_current_summary_runs_projection_kind CHECK ((projection_kind = 'price'::text)),
     CONSTRAINT ck_current_summary_runs_run_kind CHECK ((run_kind = ANY (ARRAY['ingest'::text, 'reconcile'::text, 'backfill'::text, 'restore'::text]))),
     CONSTRAINT ck_current_summary_runs_scope_object CHECK ((jsonb_typeof(scope) = 'object'::text)),
     CONSTRAINT ck_current_summary_runs_status CHECK ((status = ANY (ARRAY['running'::text, 'succeeded'::text, 'failed'::text])))
@@ -18821,14 +18736,6 @@ ALTER TABLE ONLY feature.feature_state_transitions
 
 
 --
--- Name: feature_weather_values feature_weather_values_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT feature_weather_values_pkey PRIMARY KEY (weather_value_key);
-
-
---
 -- Name: manual_feature_purge_records manual_feature_purge_records_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -18866,14 +18773,6 @@ ALTER TABLE ONLY feature.curation_link_decisions
 
 ALTER TABLE ONLY feature.current_price_summary
     ADD CONSTRAINT pk_current_price_summary PRIMARY KEY (feature_id, provider_dataset_id, price_domain, product_key);
-
-
---
--- Name: current_weather_summary pk_current_weather_summary; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.current_weather_summary
-    ADD CONSTRAINT pk_current_weather_summary PRIMARY KEY (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key);
 
 
 --
@@ -19170,14 +19069,6 @@ ALTER TABLE ONLY feature.theme_candidate_generation_observations
 
 ALTER TABLE ONLY feature.theme_feature_candidates
     ADD CONSTRAINT uq_theme_feature_candidates_rule_entity_feature UNIQUE (rule_id, source_entity_key, feature_id);
-
-
---
--- Name: feature_weather_values uq_weather_value_identity; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT uq_weather_value_identity UNIQUE (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key, target_at, source_record_key);
 
 
 --
@@ -20493,13 +20384,6 @@ CREATE INDEX idx_current_price_summary_fact ON feature.current_price_summary USI
 
 
 --
--- Name: idx_current_weather_summary_fact; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_current_weather_summary_fact ON feature.current_weather_summary USING btree (weather_value_key);
-
-
---
 -- Name: idx_feature_aliases_alias_c; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -20640,13 +20524,6 @@ CREATE INDEX idx_features_parent ON feature.features USING btree (parent_feature
 
 
 --
--- Name: idx_features_public_weather_coord_5179_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_features_public_weather_coord_5179_gist ON feature.features USING gist (coord_5179) WHERE ((lifecycle_state = 'active'::text) AND (publication_state = 'published'::text) AND (quality_state = 'valid'::text) AND ((kind)::text = 'weather'::text) AND (coord_5179 IS NOT NULL));
-
-
---
 -- Name: idx_features_sibling; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -20724,13 +20601,6 @@ CREATE INDEX idx_theme_feature_candidates_state_keyset ON feature.theme_feature_
 
 
 --
--- Name: idx_weather_values_feature_target_known; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_weather_values_feature_target_known ON feature.feature_weather_values USING btree (feature_id, target_at DESC, known_at DESC);
-
-
---
 -- Name: uq_curation_items_active_source_feature; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -20763,13 +20633,6 @@ CREATE UNIQUE INDEX uq_theme_candidate_generation_provider_job ON feature.theme_
 --
 
 CREATE UNIQUE INDEX uq_theme_candidate_generation_reconcile_operation ON feature.theme_candidate_generations USING btree (rule_id, reconcile_operation_id) WHERE (generation_kind = ANY (ARRAY['scoped_reconcile'::text, 'rule_reconcile'::text]));
-
-
---
--- Name: uq_weather_value_summary_reference; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE UNIQUE INDEX uq_weather_value_summary_reference ON feature.feature_weather_values USING btree (weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key);
 
 
 --
@@ -21774,13 +21637,6 @@ CREATE TRIGGER trg_current_price_summary_active_dataset_write BEFORE INSERT OR U
 
 
 --
--- Name: current_weather_summary trg_current_weather_summary_active_dataset_write; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_current_weather_summary_active_dataset_write BEFORE INSERT OR UPDATE ON feature.current_weather_summary FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
-
-
---
 -- Name: feature_aliases trg_feature_aliases_delete_fence; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -21869,20 +21725,6 @@ CREATE TRIGGER trg_feature_state_transitions_append_only_row BEFORE DELETE OR UP
 --
 
 CREATE TRIGGER trg_feature_state_transitions_append_only_truncate BEFORE TRUNCATE ON feature.feature_state_transitions FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_feature_state_transition_mutation();
-
-
---
--- Name: feature_weather_values trg_feature_weather_values_active_dataset_write; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_feature_weather_values_active_dataset_write BEFORE INSERT ON feature.feature_weather_values FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_provider_dataset();
-
-
---
--- Name: feature_weather_values trg_feature_weather_values_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_feature_weather_values_immutable BEFORE DELETE OR UPDATE ON feature.feature_weather_values FOR EACH ROW EXECUTE FUNCTION feature.reject_weather_value_mutation();
 
 
 --
@@ -23150,22 +22992,6 @@ ALTER TABLE ONLY feature.current_price_summary
 
 
 --
--- Name: current_weather_summary current_weather_summary_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.current_weather_summary
-    ADD CONSTRAINT current_weather_summary_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE;
-
-
---
--- Name: current_weather_summary current_weather_summary_provider_dataset_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.current_weather_summary
-    ADD CONSTRAINT current_weather_summary_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
-
-
---
 -- Name: feature_price_values feature_price_values_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -23179,22 +23005,6 @@ ALTER TABLE ONLY feature.feature_price_values
 
 ALTER TABLE ONLY feature.feature_price_values
     ADD CONSTRAINT feature_price_values_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
-
-
---
--- Name: feature_weather_values feature_weather_values_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT feature_weather_values_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE;
-
-
---
--- Name: feature_weather_values feature_weather_values_provider_dataset_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT feature_weather_values_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
 
 
 --
@@ -23291,22 +23101,6 @@ ALTER TABLE ONLY feature.current_price_summary
 
 ALTER TABLE ONLY feature.current_price_summary
     ADD CONSTRAINT fk_current_price_summary_successful_run FOREIGN KEY (summary_run_id, projection_kind, receipt_status) REFERENCES ops.current_summary_runs(summary_run_id, projection_kind, status);
-
-
---
--- Name: current_weather_summary fk_current_weather_summary_fact; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.current_weather_summary
-    ADD CONSTRAINT fk_current_weather_summary_fact FOREIGN KEY (weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key) REFERENCES feature.feature_weather_values(weather_value_key, feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key) ON DELETE CASCADE;
-
-
---
--- Name: current_weather_summary fk_current_weather_summary_successful_run; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.current_weather_summary
-    ADD CONSTRAINT fk_current_weather_summary_successful_run FOREIGN KEY (summary_run_id, projection_kind, receipt_status) REFERENCES ops.current_summary_runs(summary_run_id, projection_kind, status);
 
 
 --
@@ -23483,22 +23277,6 @@ ALTER TABLE ONLY feature.feature_price_values
 
 ALTER TABLE ONLY feature.theme_feature_candidates
     ADD CONSTRAINT fk_theme_feature_candidates_source_record FOREIGN KEY (source_entity_key, source_record_key) REFERENCES provider_sync.source_records(source_entity_key, source_record_key) ON DELETE RESTRICT;
-
-
---
--- Name: feature_weather_values fk_weather_value_source_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT fk_weather_value_source_dataset FOREIGN KEY (source_entity_key, provider_dataset_id) REFERENCES provider_sync.source_entities(source_entity_key, provider_dataset_id) ON DELETE RESTRICT;
-
-
---
--- Name: feature_weather_values fk_weather_value_source_lineage; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.feature_weather_values
-    ADD CONSTRAINT fk_weather_value_source_lineage FOREIGN KEY (source_record_key, source_entity_key, known_at) REFERENCES provider_sync.source_records(source_record_key, source_entity_key, fetched_at) ON DELETE RESTRICT;
 
 
 --

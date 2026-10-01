@@ -23,8 +23,9 @@
 ## vNext 단계적 전환 표면 (ADR-066·067·072~074, 부분 구현)
 
 기계 정본 OpenAPI는 **현재 구현 계약**이다. 공개 조회·검색, route policy 기반 security,
-raw lineage 분리와 principal actor, 5-state feature batch와 sparse weather batch는
-main에 반영됐다. 아래 표에는 현재 계약과 cache target·refresh 같은 후속 목표를 함께 표시한다.
+raw lineage 분리와 principal actor, 5-state feature batch는
+main에 반영됐다. weather 표면(batch·card·forecast·기상특보 이력)은 ADR-105로 제거했다 —
+날씨 정본은 kor-travel-weather다. 아래 표에는 현재 계약과 cache target·refresh 같은 후속 목표를 함께 표시한다.
 PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의 consumer-first 조건을
 통과한 compatible pair에서만 활성화한다. 호환 alias는 만들지 않는다.
 
@@ -35,7 +36,6 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | public-keyed | `GET /v1/categories` | catalog revision ETag |
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
 | service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
-| service | `POST /v1/features/weather/batch` | sparse `targets[]`/`known_at` 다중 시각 bitemporal query |
 | service | `POST /v1/service/feature-requests` | 범용 외부 Feature 요청의 immutable submit; service token + Idempotency-Key |
 | service | `PUT/GET/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 source generation, If-None-Match/ETag/If-Match, Idempotency-Key |
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
@@ -134,7 +134,7 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
   URL `key` query는 T-VN-H01에서 clean-cut으로 폐기했다. OpenAPI도 두 scheme을 OR
   대안으로 선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public
   consumer security에는 노출하지 않는다.
-- `POST /v1/features/batch`와 `POST /v1/features/weather/batch`는
+- `POST /v1/features/batch`는
   `RoutePolicy.SERVICE`이며 `ServiceToken`(`X-Kor-Travel-Map-Service-Token`) 전용이다.
   `/health`·`/version`·기계 판독 `/openapi.json`만 public-unauthenticated다.
 - `/v1/admin/*`는 trusted Admin BFF, `/v1/ops/*`는 경로·method별 Admin BFF 또는 제한된
@@ -326,9 +326,7 @@ GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
 GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
 GET  /v1/features/{feature_id}          # 단건 상세
 GET  /v1/features/{feature_id}/observations/{source_entity_key}/history
-GET  /v1/features/{feature_id}/weather  # 날씨 카드(metric + forecast_style)
 POST /v1/features/batch                 # trip_card 5-state batch, cap≤200 (ServiceToken)
-POST /v1/features/weather/batch         # sparse targets[]/known_at weather snapshots (ServiceToken)
 ```
 - 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
   `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
@@ -342,52 +340,12 @@ POST /v1/features/weather/batch         # sparse targets[]/known_at weather snap
   잘못되거나 다른 관측에 재사용한 cursor는 422, 첫 page에 해당 link가 없으면 404이며,
   마지막 cursor 다음은 200과 빈 `items`다.
 
-#### Weather batch 계약(T-VN-16A/C)
+#### Weather 표면 제거(ADR-105)
 
-- service-token 전용 `POST /v1/features/weather/batch`가 set-based 조회의 정본이다.
-- 요청은 `targets=[{target_at, feature_ids}]` sparse group과 timezone-aware
-  `known_at`을 받는다. target은 중복 없이 `target_at` 오름차순이며 최대 366개,
-  group별 Feature ID는 입력 순서를 보존하는 256자 이하 고유값 1~200개, 전체 실제
-  `target_at×feature_id` pair는 2,000개 이하다. DB 진입 전
-  `pair 수 + 5 × 전체 고유 Feature 수 <= 2,500`도 강제해 spatial 후보 계획 비용을
-  제한한다. 날짜별로 필요하지 않은 Feature를 Cartesian product로 조회하지 않는다.
-- `target_at`은 해당 group의 날씨가 설명하는 시각이고, 모든 group이 같은
-  `known_at` 지식 cutoff를 공유한다. current-row fact에서는 `collected_at`을
-  `known_at` 대리값으로 사용하며 forecast는 `issued_at <= known_at`도 강제한다.
-- 부모 공개 판정, nearest weather source tier, `current`, 각 `target_at` 뒤 24시간
-  `timeline`을 group 수와 무관하게 PostgreSQL statement 1회에서 읽는다. 고유
-  parent별 own/nearby spatial 후보 집합은 한 번만 계산하되, 최종 source의 series와
-  fact 적격성은 각 `target_at` 및 공통 `known_at` cutoff로 판정한다. 따라서 미래에
-  추가된 series가 과거 snapshot의 `found|no_data` 또는 source를 바꾸지 않으며,
-  가용한 weather가 달라지면 target마다 source가 달라질 수 있다.
-- 응답 `targets[]`와 각 `items[]`는 요청 순서를 그대로 보존하며 target마다
-  `timeline_until`을 명시한다. `found` item은 target-local `card_key`만 가지며 같은
-  target/source bundle의 metric은 `cards[]`에 한 번만 둔다. `no_data`와 `retired`는
-  card를 참조하지 않는다. `target_at + 24시간`을 표현할 수 없는 최댓값 부근 시각은
-  422로 거부한다.
-- fact projection 전에 공유 card×physical series 작업량 150,000을 제한한다.
-  정규화된 `cards[]`의 전체 current/timeline metric은 최대 20,000행이며 item/card/metric
-  구조를 포함한 보수적 전체 JSON 응답 추정치는 최대 8 MiB다. SQL이 이 예산을 같은
-  snapshot에서 계산하며 초과하면 부분 item을 반환하지 않고
-  `413 WEATHER_BATCH_RESULT_LIMIT_EXCEEDED`로 전량 거부한다. query는 transaction-local
-  PostgreSQL `statement_timeout` 20초를 적용하고 성공 시 이전 값을 복원한다. timeout은
-  DB의 statement 취소가 끝난 뒤 응답하며, DB/transport 실패와 함께 item 상태로
-  축약하지 않고 전체 `503 WEATHER_BATCH_UNAVAILABLE`다.
-- source 선택은 요청 Feature 자체의 weather를 먼저 쓰고, 없으면 공개·활성
-  `kind='weather'` anchor 후보만 거리순으로 사용한다. 후보는 series catalog로
-  좁히지만 실제 선택은 해당 target의 bitemporal fact 적격성까지 만족해야 한다.
-  `kind='place'` 등에 결합된 weather는 해당 Feature의 자체 값일 뿐 다른 Feature가
-  공유하는 anchor가 아니다.
-- physical series는
-  `(feature_id, provider, weather_domain, forecast_style, metric_key)`다. 응답 metric은
-  `provider`·`weather_domain`, 원래의 `valid_at`/`valid_from`/`valid_until`과 current
-  선택에 사용한 `effective_at`을 함께 반환한다. range 값은 `valid_from <= target_at <=
-  valid_until`일 때만 `current`이며, 미래 구간은 24시간 지평선의 `timeline`에 남는다.
-- item state는 `found|no_data|retired`다. `no_data`는 공개 parent는 있으나 cutoff에
-  맞는 날씨가 없음, `retired`는 현재 공개 projection에 parent가 없어 단건에서 404가
-  되는 상태다.
-- `GET /v1/features/{feature_id}/weather`도 같은 batch repository를 ID 1개로 호출한다.
-  따라서 parent 404와 빈 날씨 판정이 단건/batch에서 달라지지 않는다.
+- 옛 `POST /v1/features/weather/batch`(T-VN-16A/C), `GET /v1/features/{feature_id}/weather`,
+  `.../weather/snapshot`과 지도 목록의 `weather_summary` 필드는 ADR-105로 제거했다. Map은
+  weather kind를 적재하지 않으며, 날씨 소비자는 kor-travel-weather API를 쓴다. `kind='weather'`
+  정의(enum·CHECK 값)는 남으므로 일반 조회는 그런 행을 일반 Feature로 다룬다.
 - ⚠️ `/tripmate/*` namespace **제거**(kor-travel-map은 PinVi 전용이 아니다). batch는
   `POST /v1/features/batch`(service read, ServiceToken)로 일반화, `/tripmate/
   feature-update-requests*`는 #317로 `/v1/admin/*`에 이미 이전(중복 C2 해소).
@@ -426,38 +384,16 @@ GET /v1/public/festivals/{feature_id}
 - 해수욕장 판별은 category 단일값이 아니라 `detail.place_kind='beach'`를 1차로 쓴다.
   KHOA provider category는 DA-D-07로 `01050100`(`TOURISM_NATURE_BEACH`)로 정렬됐다
   (구 `01020300`은 오분류, 구 feature는 alembic 0027로 정리).
-- 수질/KHOA index/latest weather 필드는 schema에 nullable/빈 배열로 열어 두되,
-  값 projection은 후속 marine/weather 확정 후 채운다.
+- 수질/KHOA index 필드는 schema에 nullable/빈 배열로 열어 두되,
+  값 projection은 후속 marine 확정 후 채운다. 옛 `latest_weather` 필드는 값을 채운 적 없이
+  ADR-105로 제거했다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.
 
-### 2.4.2 `/v1/features/*/weather*` — 공개 weather forecast/history API (ADR-062)
+### 2.4.2 (제거) 공개 weather forecast/history API
 
-`/v1/features/{feature_id}/weather`는 feature 상세 카드용 최신 요약으로 유지한다.
-외부 시스템이 예보 timeline과 과거 발표 snapshot을 비교할 때도 별도 weather API가 아니라
-feature API의 weather subresource를 쓴다.
-
-```
-GET /v1/features/weather/forecast                # lon/lat 기준 nearest weather anchor forecast
-GET /v1/features/{feature_id}/weather/forecast   # feature 좌표 기준 nearest weather anchor forecast
-GET /v1/features/weather/alerts                  # KMA 기상특보 typed 공개 이력
-GET /v1/admin/features/weather/alerts            # 원문·lineage 포함 operator 이력
-```
-
-핵심 계약:
-
-- 기본 조회 보존 지평선은 3년(`history_days<=1095`)이다.
-- forecast 응답 row는 `issued_at`, `valid_at`, `valid_from`, `valid_until`,
-  `observed_at`을 함께 내려 3시간 전/1일 전 발표 예보와 현재 발표 예보를 같은
-  유효시각 기준으로 비교할 수 있게 한다.
-- 좌표 기반 forecast는 반경 내 가장 가까운 KMA 예보 anchor를 사용한다. anchor가 없으면
-  200 + 빈 `items`로 반환한다.
-- 중기예보는 `forecast_style=mid`, `weather_domain=kma_mid_forecast`로 포함한다.
-- 공개 forecast row는 원천 record identity를 반환하지 않는다. 공개 기상특보 이력은
-  `provider_sync.source_records`에서 도메인 필드와 발표·유효 시각만 typed projection하고,
-  원문 payload·source record identity·ingestion timestamp는 반환하지 않는다.
-- operator 기상특보 이력은 admin BFF 인증 아래 원문 payload와 lineage/ingestion timestamp를
-  보존한다. 별도 alert history table은 만들지 않는다. forecast의 상세 lineage는 기존
-  `/v1/features/{feature_id}/sources|observations` operator 표면에서 조회한다.
+ADR-062의 `/v1/features/weather/forecast`, `/v1/features/{feature_id}/weather/forecast`,
+`/v1/features/weather/alerts`, `/v1/admin/features/weather/alerts`는 ADR-105로 제거했다.
+기상 예보·특보는 kor-travel-weather가 소유한다.
 
 ### 2.4.3 `/v1/curations*` — 테마형 큐레이션 (collection/item)
 
@@ -551,7 +487,6 @@ GET    /v1/admin/features                              # 목록(page_size+cursor
 GET    /v1/admin/features/in-bounds                    # raw bbox items/cluster(3축 AND 반복 필터)
 GET    /v1/admin/features/{feature_id}                 # 상세
 GET    /v1/admin/features/{feature_id}/revision        # row_revision + raw strong ETag 편집 기준
-GET    /v1/admin/features/{feature_id}/weather         # 비공개 포함 admin weather card
 GET    /v1/admin/features/{feature_id}/price           # 비공개 포함 admin price card
 POST   /v1/admin/features                              # ✅#317 단건 생성(K-15)
 PATCH  /v1/admin/features/{feature_id}                 # ✅#317 수정
@@ -835,7 +770,7 @@ stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft�
   동일하게 적용한다. 응답의 `items`와 `clusters`는
   양 mode에서 모두 필수 배열이며 사용하지 않는 쪽을 `[]`로 반환한다. bbox 후보는 point의 `coord`와
   route/area의 exact geometry 교차를 함께 사용하고, cluster 귀속은 저장 canonical 행정코드로
-  feature당 한 번만 계산한다. `/weather`와 `/price` admin subresource도 public visibility와
+  feature당 한 번만 계산한다. `/price` admin subresource도 public visibility와
   무관한 admin-any 대상만 명시적으로 읽는다. legacy `status`/삭제 timestamp는 상태 판단에 쓰지
   않는다. public endpoint와
   `feature.public_features`의 공개 술어는 변경하지 않는다(T-VN-04A, #741).
@@ -978,22 +913,9 @@ PinVi는 기존 import-job cancel route로 한 번만 호출한다. Manager 성�
   provider/dataset/effective scope의 queued/running 요청은 계획이 완전히 같을 때만 `200`으로
   재사용하고 priority/operator/reason/policy 등이 다르면 기존 request 링크를 포함한 `409`다.
   `/v1/ops/datasets`의 `catalog.scope_refresh`가 selector/effect/default/allowed scopes/reason을
-  서버 정본으로 제공한다. KMA runner는 선택 scope의 active target만
-  조회하고 target/grid membership fingerprint와 base cursor가 둘 다 같을 때만
-  skip한다. `target_grids`와 `external_system:*` 모두 target 해석·격자 dedupe·상한 적용 뒤
-  유효 격자가 0개면 `KmaWeatherTargetScopeEmptyError`로 operation을 실패시킨다. 이
-  preflight 실패는 provider 호출·적재와 `provider_sync_state` 생성/수정 없이 canonical
-  operation의 terminal failure만 남긴다. credential 확인·provider module import·public client
-  생성은 target read → grid mapping/dedupe → cap → empty 판정 및 cursor skip 뒤에만 수행한다.
-  terminal 전이와 같은 transaction에 구조화 event code `kma.target_scope_empty`를 정확히 1건
-  기록하고, `/v1/ops/pipeline/executions/update_request/{request_id}`의 `events[].code`와
-  `/v1/ops/datasets/detail`의 `event_history.items[].code`에 그대로 노출한다. terminal 재실행은 기존
-  operation/event를 재사용한다. 격자 상한을 넘으면 provider I/O 전 전체 실패하여 partial cursor
-  전진을 금지하고, 실패 카운터는 provider transaction rollback 후 별도
-  transaction으로 영속한다. 일반 provider 실패는 성공 writer와 같은 `default` state
-  namespace에 기록하고, KMA grid 3종만 선택된 effective scope를 state namespace로 사용한다.
-  정규 schedule asset도 `kma_weather_client_factory`를 받아 target mapping/dedupe/cap/empty와
-  cursor skip 뒤에 동기 생성하며, close 실패가 기존 typed failure나 cancellation을 덮지 않는다.
+  서버 정본으로 제공한다. (옛 KMA grid runner — target 격자 해석·`KmaWeatherTargetScopeEmptyError`·
+  `kma.target_scope_empty` event — 는 ADR-104/105로 제거했다. `target_grids` scope 값과
+  일반 scope 처리는 catalog 정의로 남는다.)
 - **Dataset exact-scope event 이력(AUD-686/C7B-API)**:
   `/v1/ops/datasets/detail`의 `event_history`는
   `{items,next_cursor,canonical_url}`을 반환하고 각 item은 non-null `sync_scope`를 가진다.

@@ -32,8 +32,7 @@ from kortravelmap.dto import (
 )
 from kortravelmap.dto._enums import FeatureKind, SourceRole
 from kortravelmap.dto.price import PriceValue
-from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.infra import price_repo, weather_repo
+from kortravelmap.infra import price_repo
 from kortravelmap.infra.db import (
     assert_runtime_db_privilege_boundary,
     make_async_engine,
@@ -166,20 +165,8 @@ async def _run(run_id: str) -> dict[str, object]:
                 )
             }
         )
-        weather_feature_id = f"e2e_live_acceptance::{run_id}::weather"
+        # weather fixture는 ADR-105(Map이 날씨 기능을 내려놓음)로 빠졌다.
         price_feature_id = f"e2e_live_acceptance::{run_id}::price"
-        weather_bundle = _bundle(
-            run_id=run_id,
-            feature_id=weather_feature_id,
-            kind=FeatureKind.WEATHER,
-            name=f"E2E suppressed weather {run_id}",
-            lon=127.502,
-            marker_icon="weather",
-            marker_color="P-03",
-            fetched_at=fetched_at,
-            category=_FIXTURE_CATEGORY,
-            publication_state="suppressed",
-        )
         price_bundle = _bundle(
             run_id=run_id,
             feature_id=price_feature_id,
@@ -194,9 +181,9 @@ async def _run(run_id: str) -> dict[str, object]:
         )
         async with AsyncKorTravelMapClient(engine) as client:
             receipt = await client.load_feature_bundles(
-                [beach_bundle, weather_bundle, price_bundle]
+                [beach_bundle, price_bundle]
             )
-        if receipt.features_inserted != 3 or receipt.source_links_inserted != 3:
+        if receipt.features_inserted != 2 or receipt.source_links_inserted != 2:
             raise RuntimeError("fresh ETL fixture 적재 receipt가 예상과 다릅니다")
         async with AsyncSession(engine) as session, session.begin():
             dataset_id = await session.scalar(
@@ -213,12 +200,10 @@ async def _run(run_id: str) -> dict[str, object]:
             )
             if dataset_id is None:
                 raise RuntimeError("canonical fresh ETL dataset을 찾을 수 없습니다")
-            # Weather current-summary materialization is policy-driven.  The
-            # canonical KHOA dataset exists in a fresh database, but it does
-            # not own a refresh policy until an operator creates one.  Seed
-            # the explicit policy through the restricted Dagster runtime so
-            # the live card proves the real summary path rather than merely
-            # inserting a raw weather fact.
+            # The canonical KHOA dataset exists in a fresh database, but it
+            # does not own a refresh policy until an operator creates one.
+            # Seed the explicit policy through the restricted Dagster runtime
+            # so the run proves that login can write the policy path.
             policy = await get_provider_refresh_policy(
                 session,
                 provider_dataset_id=int(dataset_id),
@@ -229,29 +214,6 @@ async def _run(run_id: str) -> dict[str, object]:
                 source_kind="manual",
                 expected_revision=(policy.revision if policy is not None else None),
                 stale_after_minutes=24 * 60,
-            )
-            weather_values_inserted = await weather_repo.load_weather_values(
-                session,
-                [
-                    WeatherValue(
-                        feature_id=weather_feature_id,
-                        provider="e2e-live-acceptance",
-                        weather_domain="kma_short_forecast",
-                        forecast_style="short",
-                        timeline_bucket="short",
-                        metric_key="TMP",
-                        metric_name="인수 기온",
-                        value_number=Decimal("21.5"),
-                        unit="deg_c",
-                        issued_at=fetched_at,
-                        valid_at=fetched_at,
-                        normalization_version="tvn34c-fresh-live",
-                        payload={"fixture": "tvn34c-fresh-live"},
-                    )
-                ],
-                provider_dataset_id=int(dataset_id),
-                source_record=weather_bundle.source_record,
-                selected_at=fetched_at,
             )
             price_values_inserted = await price_repo.load_price_values(
                 session,
@@ -272,13 +234,12 @@ async def _run(run_id: str) -> dict[str, object]:
                 provider_dataset_id=int(dataset_id),
                 source_record=price_bundle.source_record,
             )
-        if weather_values_inserted != 1 or price_values_inserted != 1:
-            raise RuntimeError("fresh weather/price fixture 적재 receipt가 예상과 다릅니다")
+        if price_values_inserted != 1:
+            raise RuntimeError("fresh price fixture 적재 receipt가 예상과 다릅니다")
         return {
             "feature_id": feature_id,
             "features_inserted": receipt.features_inserted,
             "source_links_inserted": receipt.source_links_inserted,
-            "weather_values_inserted": weather_values_inserted,
             "price_values_inserted": price_values_inserted,
         }
     finally:

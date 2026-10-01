@@ -132,11 +132,12 @@ def test_the_gate_reads_the_live_config_not_the_repo_copy() -> None:
 def test_the_probe_job_spends_no_upstream_quota() -> None:
     """탐침이 **upstream 쿼터를 쓰지 않아야** 한다.
 
-    "부작용이 없다"가 아니다(적대 리뷰 정정) — 이 job은 projection 표를 다시
-    쓰고 분 단위 schedule의 tick 하나를 먹는다. 지켜야 하는 성질은 좁다:
-    provider 적재 job을 탐침으로 쓰면 게이트를 돌릴 때마다 일일 한도를 깎는다.
+    "부작용이 없다"가 아니다(적대 리뷰 정정) — 이 job은 만료·미참조 cache-target
+    snapshot을 지우고 관측 행을 남긴다(hourly schedule과 같은 일, 멱등). 지켜야 하는
+    성질은 좁다: provider 적재 job을 탐침으로 쓰면 게이트를 돌릴 때마다 일일 한도를
+    깎는다.
     """
     source = _GATE.read_text(encoding="utf-8")
-    assert '_DEFAULT_PROBE_JOB = "current_weather_summary_refresh"' in source, (
+    assert '_DEFAULT_PROBE_JOB = "cache_target_snapshot_gc"' in source, (
         "기본 탐침 job이 바뀌었다 — 부작용이 없는지 확인하고 이 검사를 갱신해라."
     )

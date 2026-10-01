@@ -32,33 +32,6 @@ _UNMAPPED_TABLE_COLUMNS: dict[
     tuple[str, str],
     set[tuple[str, str, bool]],
 ] = {
-    ("feature", "feature_weather_values"): {
-        ("weather_value_key", "text", True),
-        ("feature_id", "uuid", True),
-        ("provider_dataset_id", "bigint", True),
-        ("weather_domain", "text", True),
-        ("forecast_style", "text", True),
-        ("timeline_bucket", "text", False),
-        ("metric_key", "text", True),
-        ("metric_name", "text", False),
-        ("source_metric_key", "text", False),
-        ("source_metric_name", "text", False),
-        ("value_number", "numeric(14,4)", False),
-        ("value_text", "text", False),
-        ("unit", "text", False),
-        ("severity", "text", False),
-        ("issued_at", "timestamp with time zone", False),
-        ("valid_at", "timestamp with time zone", False),
-        ("valid_during", "tstzrange", False),
-        ("observed_at", "timestamp with time zone", False),
-        ("target_at", "timestamp with time zone", True),
-        ("known_at", "timestamp with time zone", True),
-        ("normalization_version", "text", False),
-        ("payload", "jsonb", True),
-        ("source_entity_key", "text", True),
-        ("source_record_key", "text", True),
-        ("created_at", "timestamp with time zone", True),
-    },
     ("feature", "feature_price_values"): {
         ("price_value_key", "text", True),
         ("feature_id", "uuid", True),
@@ -91,19 +64,6 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("deleted_count", "bigint", True),
         ("scope", "jsonb", True),
         ("detail", "jsonb", True),
-    },
-    ("feature", "current_weather_summary"): {
-        ("feature_id", "uuid", True),
-        ("provider_dataset_id", "bigint", True),
-        ("weather_domain", "text", True),
-        ("forecast_style", "text", True),
-        ("metric_key", "text", True),
-        ("weather_value_key", "text", True),
-        ("summary_run_id", "bigint", True),
-        ("selected_at", "timestamp with time zone", True),
-        ("refresh_after", "timestamp with time zone", True),
-        ("projection_kind", "text", True),
-        ("receipt_status", "text", True),
     },
     ("feature", "current_price_summary"): {
         ("feature_id", "uuid", True),
@@ -315,16 +275,6 @@ _UNMAPPED_TABLE_COLUMNS: dict[
 }
 
 _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
-    ("feature", "feature_weather_values"): {
-        ("feature_weather_values_pkey", "p"),
-        ("fk_weather_value_source_lineage", "f"),
-        ("fk_weather_value_source_dataset", "f"),
-        ("ck_weather_value_present", "c"),
-        ("ck_weather_value_valid_during_not_empty", "c"),
-        ("ck_weather_value_payload_object", "c"),
-        ("ck_weather_value_bitemporal_order", "c"),
-        ("uq_weather_value_identity", "u"),
-    },
     ("feature", "feature_price_values"): {
         ("feature_price_values_pkey", "p"),
         ("fk_price_value_source_lineage", "f"),
@@ -343,14 +293,6 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("ck_current_summary_runs_counts_nonnegative", "c"),
         ("ck_current_summary_runs_scope_object", "c"),
         ("ck_current_summary_runs_detail_object", "c"),
-    },
-    ("feature", "current_weather_summary"): {
-        ("pk_current_weather_summary", "p"),
-        ("fk_current_weather_summary_fact", "f"),
-        ("fk_current_weather_summary_successful_run", "f"),
-        ("ck_current_weather_summary_projection_kind", "c"),
-        ("ck_current_weather_summary_receipt_status", "c"),
-        ("ck_current_weather_summary_refresh_after", "c"),
     },
     ("feature", "current_price_summary"): {
         ("pk_current_price_summary", "p"),
@@ -531,12 +473,6 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
 }
 
 _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
-    ("feature", "feature_weather_values"): {
-        "feature_weather_values_pkey",
-        "uq_weather_value_identity",
-        "uq_weather_value_summary_reference",
-        "idx_weather_values_feature_target_known",
-    },
     ("feature", "feature_price_values"): {
         "feature_price_values_pkey",
         "uq_price_value_identity",
@@ -547,10 +483,6 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
         "current_summary_runs_pkey",
         "uq_current_summary_runs_receipt_state",
         "idx_current_summary_runs_projection_finished",
-    },
-    ("feature", "current_weather_summary"): {
-        "pk_current_weather_summary",
-        "idx_current_weather_summary_fact",
     },
     ("feature", "current_price_summary"): {
         "pk_current_price_summary",

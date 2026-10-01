@@ -78,7 +78,8 @@ def test_the_declaration_is_not_empty() -> None:
     """항진명제 방지 — 선언이 비면 아래 파라미터가 0개가 되어 아무것도 재지 않는다."""
 
     pairs = _declared_pairs()
-    assert len(pairs) >= 3, (
+    # 2026-10-01 3 → 2: 에어코리아 쿼터 예외를 ADR-105로 뺐다(Map은 에어코리아를 부르지 않는다).
+    assert len(pairs) >= 2, (
         f"선언된 쿼터 예외가 {len(pairs)}개뿐이다(유도 실패이거나 실제로 줄었다). "
         "줄이려면 왜 그 provider가 더 이상 쿼터를 알리지 않는지 먼저 적어라."
     )

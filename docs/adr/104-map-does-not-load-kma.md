@@ -43,7 +43,7 @@
    `kma_mid_region_features`·`kma_weather_alert_lookback_days`(설정은 `extra="ignore"`라 남은 env는
    무해하다), KMA 대상 좌표 조회(client `list_poi_cache_target_coords` 등 4개와 repo 함수),
    asset 한국어 라벨·API 기본 cron 표의 KMA 항목.
-5. **재도입 방지 검사** `packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_kma.py` —
+5. **재도입 방지 검사** `packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_weather.py` —
    이름이 아니라 정체성과 효과에 결박한다.
    - 정체성: 시드 카탈로그에서 `python-kma-api` 소유 operation key를 유도하고, Definitions의 job·
      schedule·sensor·asset, handler registry, 큐 runner(`provider_dataset` scope)가 그 key를

@@ -63,7 +63,9 @@ const VIEWPORTS = [
 // fixture array is unexpectedly large; minimum scenarios run even when empty).
 const SEARCH = F.SEARCH_TERMS.slice(0, 16);
 const CATEGORIES = F.CATEGORY_CODES.slice(0, 60);
-const KINDS = F.KINDS.slice(0, 7);
+// 2026-10-01 ADR-105: Map은 weather 기능(적재·API·UI)을 전부 걷어냈다. `F.KINDS`는
+// kind **정의**라 weather를 남기지만, live 시나리오는 weather를 다루지 않는다.
+const KINDS = F.KINDS.filter((kind) => kind !== "weather").slice(0, 7);
 const PAGE_SIZES = F.PAGE_SIZES.slice(0, 4);
 
 /** main heading + table container are the robust readiness landmarks. */

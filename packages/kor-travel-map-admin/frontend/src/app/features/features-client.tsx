@@ -561,7 +561,7 @@ function FeatureMapToolbar({
             })}
             <Button
               disabled={isDefaultKindFilter}
-              disabledReason="기본 종류(weather·notice)만 선택된 상태입니다"
+              disabledReason={`기본 종류(${DEFAULT_FEATURE_MAP_KINDS.join("·")})만 선택된 상태입니다`}
               size="sm"
               type="button"
               variant="ghost"

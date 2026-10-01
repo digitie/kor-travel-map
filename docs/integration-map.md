@@ -463,9 +463,11 @@ refresh operation이 `401_retire_map_kma_refresh`로 꺼져(ADR-104) exact join�
 조용히 0행을 넣고 통과하면 소비자가 `422`로 죽고 원인이 감춰진다.
 
 **동시 실행 제약.** 같은 이름을 쓰는 실행끼리는 `provider_sync_state` 한 행과
-`membership_fingerprint`를 공유한다. 따라서 그 scope를 쓰는 live 실행은 서로 직렬화해야 한다
-(`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL). 잠금 없이 병렬로 돌리면 실패가
-실제 회귀인지 경합인지 구분할 수 없다.
+`membership_fingerprint`를 공유한다. 따라서 그 scope를 쓰는 live 실행은 서로 직렬화해야 한다.
+잠금 없이 병렬로 돌리면 실패가 실제 회귀인지 경합인지 구분할 수 없다. 이 직렬화를 맡던 C7 잠금
+(`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL)은 2026-10-01 KMA C7 spec과 함께
+지워졌다(ADR-104/105) — 지금은 제출 가능한 `external_system:*` scope가 없어 잠글 대상도 없다. 새 이름을
+선언하면 그 live 실행의 직렬화를 함께 다시 세운다.
 
 ### 3.6 범용 Feature 요청 (T-VN-M04)
 

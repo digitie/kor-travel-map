@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""#741 production live 인수용 weather/price owned fixture 관리.
+"""#741 production live 인수용 price owned fixture 관리.
 
 이 helper는 exact API image의 standalone container에 read-only bind mount해 실행한다.
-운영 기존 row를 빌리지 않고 실행별 exact ID 두 건만 transaction으로
-seed/cleanup/audit한다. host runner가 mutation 전에 root-owned BLOCKED/journal을 기록하는
+운영 기존 row를 빌리지 않고 실행별 exact ID 한 건만 transaction으로
+seed/cleanup/audit한다. weather fixture는 Map이 weather 기능을 전부 걷어내면서
+(ADR-105, migration 402가 weather 값·summary 테이블을 지운다) 함께 빠졌다 —
+value table과 current-summary receipt를 함께 갖는 non-weather kind는 price뿐이다.
+host runner가 mutation 전에 root-owned BLOCKED/journal을 기록하는
 것이 선행조건이다.
 """
 
@@ -17,7 +20,7 @@ import os
 import re
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Final, NamedTuple
 
@@ -33,17 +36,12 @@ from kortravelmap.core.ids import (
 from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
-from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.infra import feature_repo, price_repo, weather_repo
+from kortravelmap.infra import feature_repo, price_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.manual_feature_purge_repo import (
     PURGE_OPERATION,
     purge_manual_feature,
-)
-from kortravelmap.infra.provider_refresh_policy_repo import (
-    get_provider_refresh_policy,
-    upsert_provider_refresh_policy,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -88,19 +86,7 @@ async def _ensure_dataset(session: AsyncSession, *, run_id: str, kind: str) -> i
         },
     )
     assert value is not None
-    dataset_id = int(value)
-    if kind == "weather":
-        policy = await get_provider_refresh_policy(
-            session, provider_dataset_id=dataset_id
-        )
-        await upsert_provider_refresh_policy(
-            session,
-            provider_dataset_id=dataset_id,
-            source_kind="manual",
-            expected_revision=(policy.revision if policy is not None else None),
-            stale_after_minutes=24 * 60,
-        )
-    return dataset_id
+    return int(value)
 
 
 def _response_record(
@@ -154,13 +140,18 @@ WHERE dataset.provider = :provider
 """
 
 
+#: run이 소유하는 fixture Feature kind. value table과 current-summary receipt를
+#: 함께 갖는 non-weather kind는 price뿐이다(weather는 ADR-105로 제거).
+_FIXTURE_KINDS: Final[tuple[str]] = ("price",)
+
+
 async def _owned_feature_ids(
     session: AsyncSession, run_id: str
-) -> tuple[str | None, str | None]:
-    """이 run이 소유한 (weather, price) Feature의 정본 uuid. 없으면 ``None``."""
+) -> tuple[str | None]:
+    """이 run이 소유한 (price,) Feature의 정본 uuid. 없으면 ``None``."""
 
     found: list[str | None] = []
-    for kind in ("weather", "price"):
+    for kind in _FIXTURE_KINDS:
         rows = (
             await session.execute(
                 text(_OWNED_FEATURE_ID_SQL),
@@ -172,8 +163,8 @@ async def _owned_feature_ids(
             # 쪽으로 넘어가기 전에 멈춘다.
             raise RuntimeError("run-owned provider dataset이 Feature 둘을 가리킵니다")
         found.append(str(rows[0]) if rows else None)
-    weather_id, price_id = found
-    return weather_id, price_id
+    (price_id,) = found
+    return (price_id,)
 
 
 # ── T-VN-36 API-owned fixture 계약 ───────────────────────────────────────────
@@ -303,9 +294,9 @@ def _canonical_uuid7(value: object) -> str | None:
 
 
 async def _counts(
-    session: AsyncSession, feature_ids: tuple[str | None, str | None]
+    session: AsyncSession, feature_ids: tuple[str | None]
 ) -> dict[str, int]:
-    weather_id, price_id = feature_ids
+    (price_id,) = feature_ids
     row = (
         await session.execute(
             text(
@@ -313,30 +304,27 @@ async def _counts(
                 SELECT
                   (SELECT count(*) FROM feature.features
                    WHERE feature_id = ANY(CAST(:feature_ids AS uuid[]))) AS features,
-                  (SELECT count(*) FROM feature.feature_weather_values
-                   WHERE feature_id = :weather_id) AS weather_values,
                   (SELECT count(*) FROM feature.feature_price_values
                    WHERE feature_id = :price_id) AS price_values
                 """
             ),
             {
                 "feature_ids": list(feature_ids),
-                "weather_id": weather_id,
                 "price_id": price_id,
             },
         )
     ).mappings().one()
-    return {key: int(row[key]) for key in ("features", "weather_values", "price_values")}
+    return {key: int(row[key]) for key in ("features", "price_values")}
 
 
 async def _owned_summary_run_ids(
     session: AsyncSession,
-    feature_ids: tuple[str, str],
-) -> tuple[int, int]:
-    """fixture weather/price current-summary receipt 두 건을 정확히 식별한다.
+    feature_ids: tuple[str],
+) -> tuple[int]:
+    """fixture price current-summary receipt 한 건을 정확히 식별한다.
 
     terminal receipt는 의도적으로 불변이라 Feature cascade 뒤에도 남는다. 따라서
-    clone digest는 이 exact two IDs만 run-owned 변화로 정규화해야 하며, broad
+    clone digest는 이 exact ID만 run-owned 변화로 정규화해야 하며, broad
     ``run_kind``/시간 범위 필터로 다른 receipt를 숨기면 안 된다.
     """
 
@@ -345,32 +333,24 @@ async def _owned_summary_run_ids(
             text(
                 """
                 SELECT summary_run_id
-                FROM feature.current_weather_summary
-                WHERE feature_id = :weather_id
-                UNION ALL
-                SELECT summary_run_id
                 FROM feature.current_price_summary
                 WHERE feature_id = :price_id
                 ORDER BY summary_run_id
                 """
             ),
-            {"weather_id": feature_ids[0], "price_id": feature_ids[1]},
+            {"price_id": feature_ids[0]},
         )
     ).scalars().all()
     summary_run_ids = tuple(int(value) for value in rows)
-    if (
-        len(summary_run_ids) != 2
-        or len(set(summary_run_ids)) != 2
-        or any(value <= 0 for value in summary_run_ids)
-    ):
-        raise RuntimeError("owned weather/price current-summary receipt가 정확하지 않습니다")
-    return summary_run_ids[0], summary_run_ids[1]
+    if len(summary_run_ids) != 1 or any(value <= 0 for value in summary_run_ids):
+        raise RuntimeError("owned price current-summary receipt가 정확하지 않습니다")
+    return (summary_run_ids[0],)
 
 
 async def _assert_owned_or_absent(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str | None, str | None],
+    feature_ids: tuple[str | None],
     *,
     lock: bool = False,
 ) -> set[str]:
@@ -396,19 +376,6 @@ async def _assert_owned_or_absent(
     ).mappings()
     expected = {
         feature_ids[0]: {
-            "category": "00000000",
-            "coord_precision_digits": 6,
-            "kind": "weather",
-            "lat": _LAT,
-            "lon": _LON + 0.002,
-            "marker_color": "P-03",
-            "marker_icon": "weather",
-            "name": f"E2E suppressed weather {run_id}",
-            "lifecycle_state": "active",
-            "publication_state": "suppressed",
-            "quality_state": "valid",
-        },
-        feature_ids[1]: {
             "category": "00000000",
             "coord_precision_digits": 6,
             "kind": "price",
@@ -447,7 +414,7 @@ async def _assert_owned_or_absent(
 async def _assert_owned_source_links(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str | None, str | None],
+    feature_ids: tuple[str | None],
     present: set[str],
     *,
     lock: bool = False,
@@ -462,7 +429,7 @@ async def _assert_owned_source_links(
     """
 
     expected: dict[str, dict[str, object]] = {}
-    for feature_id, kind in zip(feature_ids, ("weather", "price"), strict=True):
+    for feature_id, kind in zip(feature_ids, _FIXTURE_KINDS, strict=True):
         if feature_id not in present:
             continue
         expected[feature_id] = {
@@ -615,41 +582,22 @@ async def _foreign_key_reference_counts(
         )
     required = {
         "feature.feature_price_values.feature_id",
-        "feature.feature_weather_values.feature_id",
+        "feature.current_price_summary.feature_id",
     }
     if not required.issubset(counts):
-        raise RuntimeError("weather/price feature FK constraint가 누락되었습니다")
+        raise RuntimeError("price feature FK constraint가 누락되었습니다")
     return counts
 
 
 async def _assert_owned_values(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str | None, str | None],
+    feature_ids: tuple[str | None],
     present: set[str],
     *,
     lock: bool = False,
 ) -> None:
     lock_clause = " FOR UPDATE" if lock else ""
-    weather_rows = (
-        await session.execute(
-            text(
-                """
-                SELECT
-                  dataset.provider, dataset.dataset_key,
-                  weather_domain, forecast_style, timeline_bucket,
-                  metric_key, metric_name, value_number, unit,
-                  normalization_version, payload
-                FROM feature.feature_weather_values AS fact
-                JOIN provider_sync.provider_datasets AS dataset
-                  ON dataset.provider_dataset_id = fact.provider_dataset_id
-                WHERE feature_id = :feature_id
-                """
-                + lock_clause
-            ),
-            {"feature_id": feature_ids[0]},
-        )
-    ).mappings().all()
     price_rows = (
         await session.execute(
             text(
@@ -665,28 +613,11 @@ async def _assert_owned_values(
                 """
                 + lock_clause
             ),
-            {"feature_id": feature_ids[1]},
+            {"feature_id": feature_ids[0]},
         )
     ).mappings().all()
-    expected_weather = []
-    if feature_ids[0] in present:
-        expected_weather.append(
-            {
-                "forecast_style": "short",
-                "metric_key": "TMP",
-                "metric_name": "인수 기온",
-                "normalization_version": "e2e-v1",
-                "payload": {"fixture": "admin-feature-live-acceptance"},
-                "provider": _E2E_PROVIDER,
-                "dataset_key": _dataset_key(run_id, "weather"),
-                "timeline_bucket": "short",
-                "unit": "deg_c",
-                "value_number": Decimal("21.5"),
-                "weather_domain": "kma_short_forecast",
-            }
-        )
     expected_price = []
-    if feature_ids[1] in present:
+    if feature_ids[0] in present:
         expected_price.append(
             {
                 "normalization_version": "e2e-v1",
@@ -700,8 +631,6 @@ async def _assert_owned_values(
                 "value_number": Decimal("1711"),
             }
         )
-    if [dict(row) for row in weather_rows] != expected_weather:
-        raise RuntimeError("owned weather value fingerprint가 다릅니다")
     if [dict(row) for row in price_rows] != expected_price:
         raise RuntimeError("owned price value fingerprint가 다릅니다")
 
@@ -709,7 +638,7 @@ async def _assert_owned_values(
 async def _assert_owned_state(
     session: AsyncSession,
     run_id: str,
-    feature_ids: tuple[str | None, str | None],
+    feature_ids: tuple[str | None],
     *,
     lock: bool = False,
 ) -> tuple[dict[str, int], dict[str, int]]:
@@ -744,9 +673,6 @@ async def _assert_owned_state(
         # 확인하고, Feature CASCADE 뒤에는 이 reference도 0이어야 한다.
         expected_references["provider_sync.source_links.feature_id"] = len(present)
     if feature_ids[0] in present:
-        expected_references["feature.feature_weather_values.feature_id"] = 1
-        expected_references["feature.current_weather_summary.feature_id"] = 1
-    if feature_ids[1] in present:
         expected_references["feature.feature_price_values.feature_id"] = 1
         expected_references["feature.current_price_summary.feature_id"] = 1
     observed_references = {key: value for key, value in foreign_keys.items() if value}
@@ -758,19 +684,13 @@ async def _assert_owned_state(
 async def _seed(
     session: AsyncSession,
     run_id: str,
-) -> tuple[dict[str, int], dict[str, int], tuple[int, int]]:
+) -> tuple[dict[str, int], dict[str, int], tuple[int]]:
     before = await _counts(session, await _owned_feature_ids(session, run_id))
-    if before != {"features": 0, "weather_values": 0, "price_values": 0}:
+    if before != {"features": 0, "price_values": 0}:
         raise RuntimeError("owned fixture ID가 이미 존재합니다; recovery를 먼저 실행하세요")
 
     now = kst_now().replace(microsecond=0)
-    weather_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="weather")
     price_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="price")
-    weather_record = _response_record(
-        run_id=run_id,
-        kind="weather",
-        fetched_at=now,
-    )
     price_record = _response_record(
         run_id=run_id,
         kind="price",
@@ -912,15 +832,6 @@ async def _seed(
             raise RuntimeError("provider fixture primary source link가 신규 행이 아닙니다")
         return feature_id
 
-    weather_id = await create_provider_feature(
-        kind="weather",
-        dataset_id=weather_dataset_id,
-        record=weather_record,
-        name=f"E2E suppressed weather {run_id}",
-        lon=_LON + 0.002,
-        marker_icon="weather",
-        marker_color="P-03",
-    )
     price_id = await create_provider_feature(
         kind="price",
         dataset_id=price_dataset_id,
@@ -929,29 +840,6 @@ async def _seed(
         lon=_LON - 0.002,
         marker_icon="fuel",
         marker_color="P-04",
-    )
-    await weather_repo.load_weather_values(
-        session,
-        [
-            WeatherValue(
-                feature_id=weather_id,
-                provider="e2e-live-acceptance",
-                weather_domain="kma_short_forecast",
-                forecast_style="short",
-                timeline_bucket="short",
-                metric_key="TMP",
-                metric_name="인수 기온",
-                value_number=Decimal("21.5"),
-                unit="deg_c",
-                issued_at=now - timedelta(hours=1),
-                valid_at=now,
-                normalization_version="e2e-v1",
-                payload={"fixture": "admin-feature-live-acceptance"},
-            )
-        ],
-        provider_dataset_id=weather_dataset_id,
-        source_record=weather_record,
-        selected_at=now,
     )
     await price_repo.load_price_values(
         session,
@@ -972,10 +860,10 @@ async def _seed(
         provider_dataset_id=price_dataset_id,
         source_record=price_record,
     )
-    feature_ids = (weather_id, price_id)
+    feature_ids = (price_id,)
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
-    if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
-        raise RuntimeError("owned weather/price fixture cardinality가 예상과 다릅니다")
+    if observed != {"features": 1, "price_values": 1}:
+        raise RuntimeError("owned price fixture cardinality가 예상과 다릅니다")
     return observed, foreign_keys, await _owned_summary_run_ids(session, feature_ids)
 
 
@@ -991,15 +879,14 @@ async def _cleanup(
         text(
             """
             DELETE FROM feature.features
-            WHERE (feature_id = :weather_id AND kind = 'weather')
-               OR (feature_id = :price_id AND kind = 'price')
+            WHERE feature_id = :price_id AND kind = 'price'
             """
         ),
-        {"weather_id": feature_ids[0], "price_id": feature_ids[1]},
+        {"price_id": feature_ids[0]},
     )
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
-    if observed != {"features": 0, "weather_values": 0, "price_values": 0}:
-        raise RuntimeError("owned weather/price fixture cleanup이 완결되지 않았습니다")
+    if observed != {"features": 0, "price_values": 0}:
+        raise RuntimeError("owned price fixture cleanup이 완결되지 않았습니다")
     await _delete_owned_datasets(session, run_id)
     return observed, foreign_keys
 
@@ -1007,7 +894,7 @@ async def _cleanup(
 async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
     """fixture response lineage와 dataset/policy를 feature 삭제 뒤 완전히 지운다."""
 
-    dataset_keys = [_dataset_key(run_id, kind) for kind in ("weather", "price")]
+    dataset_keys = [_dataset_key(run_id, kind) for kind in _FIXTURE_KINDS]
     params = {"provider": _E2E_PROVIDER, "dataset_keys": dataset_keys}
     source_links_remaining = int(
         (
@@ -1512,7 +1399,7 @@ async def _purge_api_owned(
         or 0
     )
     return (
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         remaining_foreign_keys,
         {
             "features": inspection.features,
@@ -1790,7 +1677,7 @@ async def _run(
         async with engine.connect() as connection:
             await _prepare_fixture_connection(connection)
             async with AsyncSession(bind=connection) as session, session.begin():
-                summary_run_ids: tuple[int, int] | None = None
+                summary_run_ids: tuple[int] | None = None
                 api_owned_feature_uuids: tuple[str, ...] = ()
                 api_owned_feature_ids: tuple[str, ...] = ()
                 if action == "seed":

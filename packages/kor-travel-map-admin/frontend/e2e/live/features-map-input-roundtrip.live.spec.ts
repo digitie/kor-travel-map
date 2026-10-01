@@ -8,7 +8,16 @@ import {
 } from "@playwright/test";
 
 import type { components } from "../../src/api/types";
+import { DEFAULT_FEATURE_MAP_KINDS } from "../../src/state/map";
 import { MAP_VIEWS } from "./_fixtures";
+
+// 기본 kind 필터의 정본은 UI store(`src/state/map.ts`)다. spec이 리터럴을 따로 들고
+// 있으면 기본값이 바뀔 때(ADR-105가 weather를 걷어냈다) 조용히 어긋난다.
+const DEFAULT_KINDS: readonly string[] = DEFAULT_FEATURE_MAP_KINDS;
+const DEFAULT_KINDS_PARAM = DEFAULT_KINDS.join(",");
+// place 칩 토글이 "기본에 없는 kind를 더한다"는 전제 위에서만 아래 시나리오가 의미 있다.
+const COMBINED_KINDS: readonly string[] = [...DEFAULT_KINDS, "place"];
+const COMBINED_KINDS_PARAM = COMBINED_KINDS.join(",");
 
 /**
  * LIVE (non-mock) e2e for `/features` (Feature 지도) — *입력 라운드트립* 깊이.
@@ -189,7 +198,7 @@ function adminItemsContains(
   );
 }
 
-// 선택한 feature의 admin 단건 상세만 허용한다. weather/revision 등 하위 요청이나
+// 선택한 feature의 admin 단건 상세만 허용한다. revision 등 하위 요청이나
 // 다른 feature의 상세 응답이 먼저 와도 잘못 통과하지 않는다.
 function isAdminFeatureDetail(response: Response, featureId: string): boolean {
   return (
@@ -614,16 +623,19 @@ test.describe("/features live — map input round-trip (read-only)", () => {
   // 라이브 지도 + 타일 fetch는 타이밍 의존 → flaky 제한용 retries=1.
   test.describe.configure({ retries: 1 });
 
-  test("초기 저zoom 클러스터 요청은 기본 kind=weather,notice를 사용하고 토글 선택을 반영", async ({
+  test("초기 저zoom 클러스터 요청은 기본 kind(DEFAULT_FEATURE_MAP_KINDS)를 사용하고 토글 선택을 반영", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
+    expect(DEFAULT_KINDS.length).toBeGreaterThan(0);
+    expect(DEFAULT_KINDS).not.toContain("place");
+    expect(DEFAULT_KINDS).not.toContain("weather");
     const initialCluster = page.waitForResponse(
       (response) =>
         isAdminFeaturesInBounds(response) &&
         inBoundsBbox(response).zoom !== null &&
         (inBoundsBbox(response).zoom as number) <= 13 &&
-        inBoundsBbox(response).kinds.join(",") === "weather,notice",
+        inBoundsBbox(response).kinds.join(",") === DEFAULT_KINDS_PARAM,
       { timeout: FLOW_TIMEOUT },
     );
 
@@ -650,21 +662,17 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     await waitForExactServerClusters(page, initialBody.data.clusters);
 
     const filter = page.getByTestId("kind-filter");
-    const weatherChip = filter.getByRole("button", {
-      name: "weather",
-      exact: true,
-    });
-    const noticeChip = filter.getByRole("button", {
-      name: "notice",
-      exact: true,
-    });
+    const defaultChips = DEFAULT_KINDS.map((kind) =>
+      filter.getByRole("button", { name: kind, exact: true }),
+    );
     const placeChip = filter.getByRole("button", {
       name: "place",
       exact: true,
     });
     const reset = filter.getByRole("button", { name: "초기화" });
-    await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-    await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+    for (const chip of defaultChips) {
+      await expect(chip).toHaveAttribute("aria-pressed", "true", T);
+    }
     await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
     await expect(reset).toBeDisabled(T);
 
@@ -673,7 +681,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         isAdminFeaturesInBounds(response) &&
         inBoundsBbox(response).zoom !== null &&
         (inBoundsBbox(response).zoom as number) <= 13 &&
-        inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
+        inBoundsBbox(response).kinds.join(",") === COMBINED_KINDS_PARAM,
       { timeout: FLOW_TIMEOUT },
     );
     await placeChip.click();
@@ -695,8 +703,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       page,
       async () => {
         await reset.click();
-        await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-        await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+        for (const chip of defaultChips) {
+          await expect(chip).toHaveAttribute("aria-pressed", "true", T);
+        }
         await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
         await expect(reset).toBeDisabled(T);
         await waitForMapIdle(page);
@@ -707,7 +716,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       const bbox = inBoundsBboxFromUrl(request.url());
       expect(bbox.zoom).not.toBeNull();
       expect(bbox.zoom as number).toBeLessThanOrEqual(13);
-      expect(bbox.kinds.join(",")).toBe("weather,notice");
+      expect(bbox.kinds.join(",")).toBe(DEFAULT_KINDS_PARAM);
     }
     let resetBody = initialBody;
     for (const response of resetCapture.responses) {
@@ -772,7 +781,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       expectRequestBoundsToMatchMap(requested, bounds!);
       const direct = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, targetZoom, ["weather", "notice"]),
+        adminInBoundsPath(bounds!, targetZoom, [...DEFAULT_KINDS]),
       );
       expect(direct.status).toBe(200);
       expect(direct.body).not.toBeNull();
@@ -818,14 +827,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
     await gotoFeaturesReady(page);
     const filter = page.getByTestId("kind-filter");
-    const weatherChip = filter.getByRole("button", {
-      name: "weather",
-      exact: true,
-    });
-    const noticeChip = filter.getByRole("button", {
-      name: "notice",
-      exact: true,
-    });
+    const defaultChips = DEFAULT_KINDS.map((kind) =>
+      filter.getByRole("button", { name: kind, exact: true }),
+    );
     const placeChip = filter.getByRole("button", {
       name: "place",
       exact: true,
@@ -838,7 +842,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       const defaultResponsePromise = page.waitForResponse(
         (response) =>
           adminItemsContains(response, SEOUL.lon, SEOUL.lat) &&
-          inBoundsBbox(response).kinds.join(",") === "weather,notice",
+          inBoundsBbox(response).kinds.join(",") === DEFAULT_KINDS_PARAM,
         { timeout: FLOW_TIMEOUT },
       );
       await jumpMap(page, SEOUL.lon, SEOUL.lat, SEOUL.zoom);
@@ -851,8 +855,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await waitForExactPointMarkers(page, defaultBody.data.items);
 
       await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
-      await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-      await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+      for (const chip of defaultChips) {
+        await expect(chip).toHaveAttribute("aria-pressed", "true", T);
+      }
 
       // 새 kind 조합은 신규 query key이므로 exact admin response가 필수다.
       const combinedResponsePromise = page.waitForResponse(
@@ -860,7 +865,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           isAdminFeaturesInBounds(response) &&
           inBoundsBbox(response).zoom !== null &&
           (inBoundsBbox(response).zoom as number) > 13 &&
-          inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
+          inBoundsBbox(response).kinds.join(",") === COMBINED_KINDS_PARAM,
         { timeout: FLOW_TIMEOUT },
       );
       await placeChip.click();
@@ -871,7 +876,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         (await combinedResponse.json()) as AdminFeaturesInBoundsResponse;
       expect(combinedBody.data.mode).toBe("items");
       for (const item of combinedBody.data.items) {
-        expect(["weather", "notice", "place"]).toContain(item.kind);
+        expect(COMBINED_KINDS).toContain(item.kind);
       }
       await waitForMapIdle(page);
       await waitForExactPointMarkers(page, combinedBody.data.items);
@@ -892,8 +897,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         async () => {
           await filter.getByRole("button", { name: "초기화" }).click();
           await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
-          await expect(weatherChip).toHaveAttribute("aria-pressed", "true", T);
-          await expect(noticeChip).toHaveAttribute("aria-pressed", "true", T);
+          for (const chip of defaultChips) {
+            await expect(chip).toHaveAttribute("aria-pressed", "true", T);
+          }
           await expect(
             filter.getByRole("button", { name: "초기화" }),
           ).toBeDisabled(T);
@@ -907,7 +913,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         const bbox = inBoundsBboxFromUrl(request.url());
         expect(bbox.zoom).not.toBeNull();
         expect(bbox.zoom as number).toBeGreaterThan(13);
-        expect(bbox.kinds.join(",")).toBe("weather,notice");
+        expect(bbox.kinds.join(",")).toBe(DEFAULT_KINDS_PARAM);
       }
       let resetBody = defaultBody;
       for (const response of resetCapture.responses) {
@@ -944,7 +950,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       }
       const combined = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, SEOUL.zoom, ["weather", "notice", "place"]),
+        adminInBoundsPath(bounds!, SEOUL.zoom, [...COMBINED_KINDS]),
       );
       expect(combined.status).toBe(200);
       expect(combined.body).not.toBeNull();
@@ -980,10 +986,11 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     const panel = page.getByTestId("feature-detail-panel");
 
     try {
-      // 기본 필터(weather/notice)에 포함되는 feature를 직접 조회해 좌표 있는 실제 feature를 확인.
+      // 기본 필터(DEFAULT_FEATURE_MAP_KINDS)에 포함되는 feature를 직접 조회해 좌표 있는 실제 feature를 확인.
       const seed = await browserFetch<FeaturesInBboxResponse>(
         page,
-        "/v1/features?min_lon=126.96&min_lat=37.55&max_lon=127.02&max_lat=37.59&page_size=100&kind=weather&kind=notice",
+        "/v1/features?min_lon=126.96&min_lat=37.55&max_lon=127.02&max_lat=37.59&page_size=100" +
+          DEFAULT_KINDS.map((kind) => `&kind=${encodeURIComponent(kind)}`).join(""),
       );
       expect(seed.status).toBe(200);
       expect(seed.body).not.toBeNull();
@@ -1024,7 +1031,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       expectRequestBoundsToMatchMap(inBoundsBbox(mapResponse), bounds!);
       const direct = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, 16, ["weather", "notice"]),
+        adminInBoundsPath(bounds!, 16, [...DEFAULT_KINDS]),
       );
       expect(direct.status).toBe(200);
       expect(direct.body).not.toBeNull();

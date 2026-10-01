@@ -456,42 +456,77 @@ async def test_count_provider_dataset_uses_limited_preview_and_full_count(
     assert result.matched_scope()["feature_preview_truncated"] is True
 
 
+#: feature가 0건인 scope 둘(``dataset_wide``·``target_grids``)짜리 probe catalog.
+_ZERO_PROBE_PROVIDER = "scope-repo-probe"
+_ZERO_PROBE_DATASET = "zero_feature_multi_scope"
+_ZERO_PROBE_OPERATION = "scope_repo_zero_feature_probe_job"
+
+
 async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
     migrated_session: AsyncSession,
 ) -> None:
     """primary-source feature가 0건인 membership도 preview는 요청 triple을 노출한다.
 
-    executor와 동일한 WYSIWYG 계약 — 아직 feature가 적재되지 않은 dataset(예:
-    ``kma_ultra_short_nowcast``)을 대상으로 update request를 미리보기하면
-    ``matched_scope.provider_datasets``에 요청한 canonical membership
-    (``provider_dataset_id + sync_scope + operation_key``)이 ``feature_count=0``으로
-    포함되어야 한다(preview == execute; UI preview 결과가 execute 대상 membership을
+    executor와 동일한 WYSIWYG 계약 — 아직 feature가 적재되지 않은 dataset을 대상으로
+    update request를 미리보기하면 ``matched_scope.provider_datasets``에 요청한 canonical
+    membership(``provider_dataset_id + sync_scope + operation_key``)이 ``feature_count=0``
+    으로 포함되어야 한다(preview == execute; UI preview 결과가 execute 대상 membership을
     그대로 노출). ``dataset_wide``가 아닌 ``target_grids`` scope를 골라 요청한
     ``sync_scope``가 그대로 반향되는지도 함께 고정한다.
 
-    ``target_grids`` scope를 가진 시드 operation은 KMA 격자뿐이고 401(ADR-104)이
-    그것을 껐다. 검증 대상은 KMA가 아니라 preview 반향이므로 이 transaction 안에서만
-    다시 켠다.
+    ``target_grids`` scope를 가진 시드 operation은 KMA 격자뿐이었는데 401(ADR-104)이
+    그것을 끄고 402(ADR-105)가 그 dataset을 비활성으로 내렸다. 검증 대상은 KMA가 아니라
+    preview 반향이므로 이 transaction 안에 feature가 0건인 probe dataset을 심는다.
     """
-    enabled = await migrated_session.execute(
+    probe_dataset_id = (
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind,
+                    is_active, capabilities
+                ) VALUES (
+                    :provider, :dataset_key, 'scope repo probe', 'system', true,
+                    jsonb_build_object('schema_version', 1,
+                                       'produces', '[]'::jsonb,
+                                       'extensions', '{}'::jsonb)
+                )
+                RETURNING provider_dataset_id
+                """
+            ),
+            {"provider": _ZERO_PROBE_PROVIDER, "dataset_key": _ZERO_PROBE_DATASET},
+        )
+    ).scalar_one()
+    await migrated_session.execute(
         text(
             """
-            UPDATE provider_sync.provider_dataset_operations AS operation
-            SET is_enabled = true
-            FROM provider_sync.provider_datasets AS dataset
-            WHERE dataset.provider_dataset_id = operation.provider_dataset_id
-              AND dataset.provider = 'python-kma-api'
-              AND dataset.dataset_key = 'kma_ultra_short_nowcast'
-              AND operation.operation_kind = 'refresh'
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (:dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
             """
-        )
+        ),
+        {"dataset_id": probe_dataset_id, "operation_key": _ZERO_PROBE_OPERATION},
     )
-    assert enabled.rowcount == 1
+    for probe_scope in ("dataset_wide", "target_grids"):
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                    provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, :sync_scope, :operation_key, 'refresh')
+                """
+            ),
+            {
+                "dataset_id": probe_dataset_id,
+                "sync_scope": probe_scope,
+                "operation_key": _ZERO_PROBE_OPERATION,
+            },
+        )
     await migrated_session.flush()
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_ultra_short_nowcast",
+        provider=_ZERO_PROBE_PROVIDER,
+        dataset_key=_ZERO_PROBE_DATASET,
         sync_scope="target_grids",
     )
 
@@ -511,8 +546,8 @@ async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
     assert result.feature_ids == ()
     assert result.provider_datasets == (
         scope_repo.ProviderDatasetScope(
-            provider="python-kma-api",
-            dataset_key="kma_ultra_short_nowcast",
+            provider=_ZERO_PROBE_PROVIDER,
+            dataset_key=_ZERO_PROBE_DATASET,
             feature_count=0,
             provider_dataset_id=provider_dataset_id,
             sync_scope=sync_scope,
@@ -524,8 +559,8 @@ async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
             "provider_dataset_id": provider_dataset_id,
             "sync_scope": sync_scope,
             "operation_key": operation_key,
-            "provider": "python-kma-api",
-            "dataset_key": "kma_ultra_short_nowcast",
+            "provider": _ZERO_PROBE_PROVIDER,
+            "dataset_key": _ZERO_PROBE_DATASET,
             "feature_count": 0,
         }
     ]

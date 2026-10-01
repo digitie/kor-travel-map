@@ -21,8 +21,6 @@ from kortravelmap.dagster.feature_operation_tracking import (
 from kortravelmap.dagster.provider_fetchers import (
     KrexTrafficNoticeSnapshotUnstable,
     ProviderCredentialMissing,
-    fetch_airkorea_air_quality,
-    fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -30,7 +28,6 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
     fetch_krex_rest_area_fuel_prices,
-    fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
@@ -488,27 +485,9 @@ class _FakePage:
 
 
 class _FakeRestareaService:
-    def __init__(self, total: int, weather: tuple[object, ...] = ()) -> None:
+    def __init__(self, total: int) -> None:
         self.total = total
         self.calls: list[tuple[int, int]] = []
-        self.weather = weather
-        self.lookback_calls: list[int] = []
-
-    async def latest_weather(
-        self, *, lookback_hours: int = 48, **_kwargs: Any
-    ) -> _FakePage:
-        """실물 계약: lookback을 다 써도 못 찾으면 **예외가 아니라 빈 Page**다.
-
-        `krex/client.py`의 `latest_weather`가 `KrexNotFoundError`를 continue로
-        삼키고 끝에서 `Page(items=(), raw=last_raw)`를 정상 반환한다. 대역이 그
-        성질을 흉내내지 않으면 "빈 결과가 성공이 된다"는 결함이 보이지 않는다.
-        """
-        self.lookback_calls.append(lookback_hours)
-        return _FakePage(
-            items=tuple(self.weather),
-            total_count=len(self.weather),
-            page_no=1,
-        )
 
     async def list_all(
         self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
@@ -528,7 +507,6 @@ class _FakeRestareaService:
 class _FakeKrexClient:
     instances: list[_FakeKrexClient] = []
     total: int = 0
-    weather: tuple[object, ...] = ()
 
     def __init__(
         self,
@@ -540,7 +518,7 @@ class _FakeKrexClient:
         self.go_api_key = go_api_key
         self.ex_api_key = ex_api_key
         self.closed = False
-        self.restarea = _FakeRestareaService(type(self).total, type(self).weather)
+        self.restarea = _FakeRestareaService(type(self).total)
         _FakeKrexClient.instances.append(self)
 
     async def aclose(self) -> None:
@@ -551,11 +529,9 @@ def _install_fake_krex(
     monkeypatch: pytest.MonkeyPatch,
     *,
     total: int = 0,
-    weather: tuple[object, ...] | list[object] = (),
 ) -> type[_FakeKrexClient]:
     _FakeKrexClient.instances = []
     _FakeKrexClient.total = total
-    _FakeKrexClient.weather = tuple(weather)
     module = ModuleType("krex")
     module.__dict__["KrexClient"] = _FakeKrexClient
     monkeypatch.setitem(sys.modules, "krex", module)
@@ -2082,225 +2058,6 @@ async def test_krairport_airports_fetch_surfaces_a_client_without_aclose(
 
 
 
-class _FakeAirKoreaClient:
-    instances: list[_FakeAirKoreaClient] = []
-    stations_total: int = 0
-    per_sido: list[object] = []
-
-    def __init__(self, *, service_key: str | None = None, **kwargs: Any) -> None:
-        self.service_key = service_key
-        self.kwargs = dict(kwargs)  # H45: timeout/retries 도달 검증용(리뷰 2 M-5)
-        self.closed = False
-        self.station_calls: list[int] = []
-        self.sido_calls: list[str] = []
-        _FakeAirKoreaClient.instances.append(self)
-
-    async def stations(
-        self, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
-    ) -> list[object]:
-        self.station_calls.append(page_no)
-        start = (page_no - 1) * num_of_rows
-        end = min(start + num_of_rows, type(self).stations_total)
-        return [object() for _ in range(max(0, end - start))]
-
-    async def sido_measurements(
-        self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
-    ) -> list[object]:
-        self.sido_calls.append(sido_name)
-        # 시도별 단일 페이지(short)만 반환 → 페이지네이션 stop.
-        return list(type(self).per_sido) if page_no == 1 else []
-
-    async def aclose(self) -> None:
-        self.closed = True
-
-
-def _install_fake_airkorea(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    stations_total: int = 0,
-    per_sido: list[object] | None = None,
-) -> type[_FakeAirKoreaClient]:
-    _FakeAirKoreaClient.instances = []
-    _FakeAirKoreaClient.stations_total = stations_total
-    _FakeAirKoreaClient.per_sido = per_sido or []
-    module = ModuleType("airkorea")
-    module.__dict__["AirKoreaClient"] = _FakeAirKoreaClient
-    monkeypatch.setitem(sys.modules, "airkorea", module)
-    return _FakeAirKoreaClient
-
-
-async def test_airkorea_stations_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    generator = fetch_airkorea_stations(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        await anext(generator)
-
-
-async def test_airkorea_stations_paginates_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # total 103 → page1=100(full)·page2=3(short) → 2 pages, short-page stop.
-    fake = _install_fake_airkorea(monkeypatch, stations_total=103)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
-
-    records = [record async for record in fetch_airkorea_stations(settings)]
-
-    assert len(records) == 103
-    client = fake.instances[0]
-    assert client.service_key == "svc"
-    assert client.station_calls == [1, 2]
-    assert client.closed is True
-
-
-async def test_airkorea_air_quality_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    generator = fetch_airkorea_air_quality(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        await anext(generator)
-
-
-async def test_airkorea_air_quality_iterates_all_sido_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _install_fake_airkorea(
-        monkeypatch, per_sido=[object(), object()]
-    )
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
-
-    records = [record async for record in fetch_airkorea_air_quality(settings)]
-
-    # 17 시도 × 2 record = 34.
-    assert len(records) == 34
-    client = fake.instances[0]
-    assert len(client.sido_calls) == 17
-    assert client.sido_calls[0] == "서울"
-    # H45: settings 기본 timeout(20s)·내부 retries 정산값이 client에 도달.
-    assert client.kwargs == {"timeout": 20.0, "retries": 1}
-    assert client.closed is True
-
-
-def test_airkorea_retryable_names_exist_in_real_lib() -> None:
-    """H45(리뷰 M) — 분류가 이름 문자열 기반이라, 실 lib과의 계약을 여기서 고정.
-
-    upstream이 예외를 rename하면 재시도가 무음으로 꺼진다 — fake 기반 테스트는
-    그걸 못 잡으므로 실 lib 존재 시 이름·타입을 직접 단언한다.
-    """
-
-    airkorea = pytest.importorskip("airkorea")
-    for name in provider_fetchers.AIRKOREA_RETRYABLE_EXCEPTION_NAMES:
-        candidate = getattr(airkorea, name, None)
-        assert isinstance(candidate, type), (
-            f"airkorea.{name} 부재 — H45 재시도 분류가 무음 degrade된다"
-        )
-        assert issubclass(candidate, BaseException), f"airkorea.{name} 비예외 타입"
-
-
-def test_airkorea_rate_limit_is_deliberately_not_retryable() -> None:
-    """쿼터 소진(AirKoreaRateLimitError)은 재시도 목록에서 의도적 제외(리뷰 H)."""
-
-    assert "AirKoreaRateLimitError" not in provider_fetchers.AIRKOREA_RETRYABLE_EXCEPTION_NAMES
-
-
-class _FakeAirKoreaNetworkError(Exception):
-    """실 lib ``AirKoreaNetworkError`` 대역 — top-level re-export로 노출."""
-
-
-class _FakeAirKoreaAuthError(Exception):
-    """재시도 비대상 대역."""
-
-
-class _FlakyAirKoreaClient(_FakeAirKoreaClient):
-    """첫 sido 첫 호출만 network 오류를 던지고 이후 정상 — H45 재시도 회귀."""
-
-    fail_first: bool = True
-
-    async def sido_measurements(
-        self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
-    ) -> list[object]:
-        if type(self).fail_first:
-            type(self).fail_first = False
-            self.sido_calls.append(sido_name)
-            raise _FakeAirKoreaNetworkError("transient")
-        return await super().sido_measurements(
-            sido_name, page_no=page_no, num_of_rows=num_of_rows, **_kw
-        )
-
-
-async def test_airkorea_air_quality_retries_transient_network_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """H45 — 시도×페이지 단건 호출의 retryable 예외는 backoff 후 재시도되고,
-    전체 순회 결과는 무결이다."""
-
-    _FakeAirKoreaClient.instances = []
-    _FakeAirKoreaClient.stations_total = 0
-    _FakeAirKoreaClient.per_sido = [object(), object()]
-    _FlakyAirKoreaClient.fail_first = True
-    module = ModuleType("airkorea")
-    module.__dict__["AirKoreaClient"] = _FlakyAirKoreaClient
-    module.__dict__["AirKoreaNetworkError"] = _FakeAirKoreaNetworkError
-    module.__dict__["AirKoreaServerError"] = type("S", (Exception,), {})
-    module.__dict__["AirKoreaRateLimitError"] = type("R", (Exception,), {})
-    monkeypatch.setitem(sys.modules, "airkorea", module)
-    delays: list[float] = []
-
-    async def _instant_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    # airkorea 경계가 async가 되면서 backoff는 `asyncio.sleep`으로 간다 —
-    # `time.sleep`을 막으면 아무것도 안 잡히고 **실제로 15초를 잔다**.
-    monkeypatch.setattr(
-        provider_fetchers.upstream_retry,
-        "asyncio",
-        SimpleNamespace(sleep=_instant_sleep),
-    )
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
-
-    records = [record async for record in fetch_airkorea_air_quality(settings)]
-
-    assert len(records) == 34  # 17 시도 × 2 — 실패분 손실 없음
-    client = _FakeAirKoreaClient.instances[0]
-    assert client.sido_calls[:2] == ["서울", "서울"]  # 재시도 실측
-    assert delays == [15.0]  # provider 경계 backoff (재리뷰 2 N-2)
-    assert client.closed is True
-
-
-async def test_airkorea_air_quality_nonretryable_propagates_immediately(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """auth 오류는 재시도 없이 즉시 전파 — fail-close 유지."""
-
-    class _AuthFailClient(_FakeAirKoreaClient):
-        async def sido_measurements(self, *_a: Any, **_kw: Any) -> list[object]:
-            raise _FakeAirKoreaAuthError("bad key")
-
-    _FakeAirKoreaClient.instances = []
-    module = ModuleType("airkorea")
-    module.__dict__["AirKoreaClient"] = _AuthFailClient
-    module.__dict__["AirKoreaNetworkError"] = _FakeAirKoreaNetworkError
-    module.__dict__["AirKoreaServerError"] = type("S2", (Exception,), {})
-    module.__dict__["AirKoreaRateLimitError"] = type("R2", (Exception,), {})
-    monkeypatch.setitem(sys.modules, "airkorea", module)
-    delays: list[float] = []
-
-    async def _instant_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr(
-        provider_fetchers.upstream_retry,
-        "asyncio",
-        SimpleNamespace(sleep=_instant_sleep),
-    )
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
-
-    with pytest.raises(_FakeAirKoreaAuthError):
-        [record async for record in fetch_airkorea_air_quality(settings)]
-
-    assert delays == []
-
-
 class _FakeStation:
     def __init__(self, uni_id: str, product_code: str | None = None) -> None:
         self.uni_id = uni_id
@@ -3453,46 +3210,12 @@ def test_datagokr_resource_definition_is_live_not_guard() -> None:
     assert "live fetcher" in (heritage_items.description or "")
 
 
-async def test_krex_rest_area_weather_refuses_to_succeed_with_no_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """빈 Page를 성공으로 적재하지 않는다.
-
-    `krex`의 `latest_weather()`는 lookback을 다 써도 못 찾으면 예외가 아니라
-    **빈 Page를 정상 반환**한다. 적재 경로에 빈 가드가 없어 그것이 `sync success`
-    cursor 전진과 `consecutive_failures = 0`으로 끝난다 — Dagster는 초록인데
-    weather value는 갱신되지 않는다. 2026-09-13 적대 리뷰가 잡은 구멍이다.
-    """
-
-    fake = _install_fake_krex(monkeypatch, weather=[])
-    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
-
-    with pytest.raises(provider_fetchers.KrexRestAreaWeatherUnavailable):
-        await _krex_records(fetch_krex_rest_area_weather(settings))
-    assert fake.instances[0].closed is True
-
-
-async def test_krex_rest_area_weather_declares_its_lookback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """호출 한 번이 요청 한 번이 아니다 — lookback이 곧 증폭 배수다."""
-
-    fake = _install_fake_krex(monkeypatch, weather=[object()])
-    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
-
-    await _krex_records(fetch_krex_rest_area_weather(settings))
-
-    assert fake.instances[0].restarea.lookback_calls == [
-        provider_fetchers._KREX_WEATHER_LOOKBACK_HOURS
-    ], "lookback을 명시하지 않으면 라이브러리 기본값 48(=49 요청)로 돌아간다"
-
-
 def test_krforest_first_page_nodata_is_a_failure_not_an_empty_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """첫 페이지 NODATA를 **삼키지 않는다**.
 
-    이 네 fetcher는 authoritative snapshot 적재로 흘러가고, 산악기상·산불위험은
+    krforest fetcher는 authoritative snapshot 적재로 흘러가고, 등산로·둘레길은
     `retire_absent_from_snapshot=True`로 적재된다 — 빈 snapshot 하나가 그 source의
     feature를 **전부 은퇴**시킨다. 종전 라이브러리 iterator는 `ForestNoDataError`를
     잡지 않아 asset이 시끄럽게 죽었는데, 저장소 헬퍼로 옮기며 `end_of_pages`를 단

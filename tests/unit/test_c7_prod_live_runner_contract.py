@@ -40,6 +40,19 @@ RUNTIME = ROOT / "scripts" / "lib" / "c7_prod_runtime.py"
 LIVE_DIR = (
     ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
 )
+DAGSTER_SRC = (
+    ROOT / "packages" / "kor-travel-map-dagster" / "src" / "kortravelmap" / "dagster"
+)
+
+#: C7 blocking gate가 도는 spec 목록. **테스트가** 적는다(러너에서 파생하면 항등식이다).
+#: KMA exact-scope 3-spec(active/empty/cap)은 2026-10-01 퇴역했다(ADR-104/105).
+_EXPECTED_C7_SPECS = (
+    "e2e/live/ops-c7-read-auth.live.spec.ts",
+    "e2e/live/ops-c7-schedule-write.live.spec.ts",
+)
+#: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 upstream 호출이 0이어야
+#: 한다 — 공항 fetcher는 krairport 번들 정적 데이터만 읽는다.
+_EXPECTED_SAFE_SCHEDULE = "feature_place_krairport_airports_monthly_schedule"
 
 
 def _read(path: Path) -> str:
@@ -131,7 +144,7 @@ def test_poi_cleanup_is_journaled_and_conditional() -> None:
     assert 'sameSocketReceipts' in poi_spec
 
 
-def test_kma_target_recreation_and_response_loss_are_durable() -> None:
+def test_target_recreation_and_response_loss_are_durable() -> None:
     helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
 
     assert 'target_history: TargetJournalRef[]' in helper
@@ -142,7 +155,8 @@ def test_kma_target_recreation_and_response_loss_are_durable() -> None:
     assert '"target_put_replay_response_lost"' in helper
     assert 'recoverUnresolvedTargetIntents' in helper
     assert 'kind: "target_intent_recovery"' in helper
-    assert 'exactTargetDiscoveryComplete' in helper
+    # 응답 유실 intent 하나라도 정체를 증명하지 못하면 어떤 target도 지우지 않는다.
+    assert "const canDeleteTargets = targetRecovery.complete;" in helper
     assert 'preservedForManualCleanup' in helper
     assert "targetId === previousTarget.targetId" in helper
     assert "identity.entityTag === previousTarget.entityTag" in helper
@@ -158,198 +172,21 @@ def test_previous_journal_is_validated_before_non_overwriting_merge() -> None:
         "async function writeDurableJournal(",
     )
 
-    residue = merge.index("if (!isOrchestratorPlaceholder && !isCurrentScenario)")
+    placeholder = merge.index("if (isOrchestratorPlaceholder(raw)) return;")
+    residue = merge.index("if (!isCurrentScenario) {", placeholder)
     merge_comment = merge.index("previous payload 자체가 완전한 restored 상태", residue)
     target_merge = merge.index(
         "if (existing === undefined) state.allTargetRefs.set(key, item);",
         merge_comment,
     )
-    assert residue < merge_comment < target_merge
-    assert "state.idempotencyEntries.has(value.idempotency_key)" in merge
-    assert "state.requestTerminalStatuses.get(requestId)" in merge
+    assert placeholder < residue < merge_comment < target_merge
     assert "state.allTargetRefs.set(key, item);" not in merge[:target_merge]
-
-
-def test_every_kma_create_has_exact_server_target_preflight() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    create = _section(
-        helper,
-        "export async function createKmaRequest(",
-        "export type TrackedUiKmaCreateResult",
+    # placeholder는 러너가 깔아 두는 **정확한** 꼴만 받는다(exactJson).
+    assert (
+        'const ORCHESTRATOR_PLACEHOLDER = { phase: "orchestrator_pending", version: 1 };'
+        in helper
     )
-
-    _assert_in_order(
-        create,
-        "const expectedTargets = state.targets.filter(",
-        "await assertExactOwnedTargetsAtServer(",
-        "await journalPendingRequest(",
-        "await submit()",
-    )
-    assert "const OWNED_TARGET_PAGE_SIZE = 500" in helper
-    assert "const OWNED_TARGET_SET_LIMIT = 501" in helper
-    assert "const OWNED_TARGET_PAGE_LIMIT = 2" in helper
-    assert "page_size: String(OWNED_TARGET_PAGE_SIZE)" in helper
-    assert 'include_deleted: "false"' in helper
-    assert "const seenCursors = new Set<string>()" in helper
-    assert "seenCursors.has(nextCursor)" in helper
-    assert "target cursor page limit(2) 초과" in helper
-    assert 'if (!exactJson(observed, expected))' in helper
-
-
-def test_every_kma_run_now_has_exact_server_target_preflight() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    tracked = _section(
-        helper,
-        "export async function runTrackedRequestNowFromUi(",
-        "export async function runRequestNow(",
-    )
-    direct = _section(
-        helper,
-        "export async function runRequestNow(",
-        "export async function journalRunNowMutation(",
-    )
-
-    for source, journal_marker in (
-        (tracked, 'journalRunNowMutation(state, requestId, "pending")'),
-        (direct, 'writeDurableJournal(state, "run_now_pending")'),
-    ):
-        _assert_in_order(
-            source,
-            "const expectedTargets = state.targets.filter(",
-            "await assertExactOwnedTargetsAtServer(",
-            journal_marker,
-        )
-    _assert_in_order(
-        tracked,
-        "await assertExactOwnedTargetsAtServer(",
-        'journalRunNowMutation(state, requestId, "pending")',
-        "await route.continue()",
-    )
-
-
-def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
-    empty = _read(LIVE_DIR / "ops-c7-kma-empty-write.live.spec.ts")
-    cap = _read(LIVE_DIR / "ops-c7-kma-cap-write.live.spec.ts")
-
-    assert "assertExactKmaPreviewResponse" in helper
-    assert "assertKmaOnlyTerminalProviderScopes" in helper
-    assert '"eligible_provider_scopes"' in helper
-    assert '"skipped_provider_scopes"' in helper
-    assert '"executed_provider_scopes"' in helper
-    assert "assertOnlyKmaCanonicalIdentity(matched" in helper
-    assert "FORBIDDEN_PROVIDER_PATTERN" in helper
-    assert "providerDatasets.length !== 1" in helper
-    # identity는 triple이다(ADR-088). 자연키는 생산자가 strip하므로 여기서 단언하면
-    # 항상 실패한다 — 아래 test_live_helper_does_not_assert_stripped_identity_keys 참조.
-    assert "entry.provider_dataset_id !== identity.providerDatasetId" in helper
-    assert "entry.operation_key !== identity.operationKey" in helper
-    assert "entry.sync_scope !== expectedEffectiveSyncScope" in helper
-    assert "entry.feature_count < 0" in helper
-    for spec in (active, empty, cap):
-        assert "assertExactKmaPreviewResponse(" in spec
-        assert "assertKmaOnlyTerminalProviderScopes(" in spec
-    assert "const LOWERCASE_SHA256_PATTERN = /^[0-9a-f]{64}$/" in active
-    assert "isCanonicalKmaBaseDatetime" in active
-    assert "KMA_BASE_DATETIME_PATTERN" in active
-
-
-def test_live_helper_does_not_assert_stripped_identity_keys() -> None:
-    """matched_scope 단언이 생산자가 strip하는 자연키를 건드리지 않는다.
-
-    `api/feature_update_service._public_matched_scope`가
-    `_NATURAL_IDENTITY_RESPONSE_KEYS`를 응답에서 지운다("실행 진단에서 legacy natural
-    identity projection을 유출하지 않는다"). 그 자리에서 `provider`/`dataset_key`를
-    단언하면 **항상** 실패한다.
-
-    이 게이트가 필요한 이유는 앞 판이 정확히 반대로 했기 때문이다 — 소스 pin이
-    `pair.provider !== KMA_PROVIDER` 같은 **소비자 쪽 문자열을 고정**해서, 드리프트를
-    잡기는커녕 stale 단언을 얼려 두고 있었다. 그래서 계약이 바뀐 뒤에도 CI는 green이었고
-    prod C7 실행에서만 드러났다. 이번에는 축을 **생산자 상수에서 읽어** 대조한다.
-    """
-
-    from kortravelmap.api.feature_update_service import (
-        _NATURAL_IDENTITY_RESPONSE_KEYS,
-    )
-
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    preview = _section(
-        helper,
-        "function assertExactKmaPreviewBody(",
-        "export async function assertExactKmaPreviewResponse(",
-    )
-    terminal = _section(
-        helper,
-        "export function assertKmaOnlyTerminalProviderScopes(",
-        "export async function createKmaRequest(",
-    )
-    assert _NATURAL_IDENTITY_RESPONSE_KEYS, "생산자 상수가 비었다"
-    for section, label in ((preview, "preview"), (terminal, "terminal")):
-        for key in _NATURAL_IDENTITY_RESPONSE_KEYS:
-            reason = (
-                f"{label} 단언이 생산자가 strip하는 `{key}`를 본다 — "
-                "triple(provider_dataset_id/sync_scope/operation_key)로 단언하라"
-            )
-            # 속성 접근 두 모양(`x.key !==`, `x.key!==`)을 각각 본다.
-            assert f".{key} " not in section, reason
-            assert f".{key}!" not in section, reason
-
-
-def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    specs = [
-        _read(LIVE_DIR / name)
-        for name in (
-            "ops-c7-kma-active-write.live.spec.ts",
-            "ops-c7-kma-empty-write.live.spec.ts",
-            "ops-c7-kma-cap-write.live.spec.ts",
-        )
-    ]
-
-    assert '"feature_update_request_worker" as const' in helper
-    assert "pipelines { name isJob }" in helper
-    assert "matches.length !== 1 || matches[0]?.isJob !== true" in helper
-    terminal = _section(
-        helper,
-        "async function assertTerminalDagsterRunIdentity(",
-        "function parseStrongEntityTag(",
-    )
-    for marker in (
-        "run.runId !== runId",
-        "run.jobName !== KMA_SAFE_DAGSTER_JOB",
-        "FEATURE_UPDATE_REQUEST_ID_TAG",
-        "FEATURE_UPDATE_REQUEST_GENERATION_TAG",
-        'FEATURE_UPDATE_SCOPE_TYPE_TAG) !== "provider_dataset"',
-        "sensorName !== QUEUE_SENSOR_NAME",
-    ):
-        assert marker in terminal
-    wait = _section(
-        helper,
-        "export async function waitForTerminal(",
-        "export async function rediscoverExactActiveRequest(",
-    )
-    _assert_in_order(
-        wait,
-        'await writeDurableJournal(state, "request_terminal")',
-        "await assertTerminalDagsterRunIdentity(page, detail)",
-        "return detail",
-    )
-    for spec, mutation_marker in zip(
-        specs,
-        (
-            "await withC7Cleanup(",
-            "await previewEmptyRequestFromUi(",
-            "await withC7Cleanup(",
-        ),
-        strict=True,
-    ):
-        _assert_in_order(
-            spec,
-            'await bootstrapC7SameOriginPage(page, "/ops/pipeline")',
-            "await assertKmaDagsterWorkerJobDefinition()",
-            mutation_marker,
-        )
+    assert "exactJson(record, ORCHESTRATOR_PLACEHOLDER)" in helper
 
 
 def test_route_handlers_have_settlement_barriers() -> None:
@@ -393,7 +230,6 @@ def test_route_handlers_have_settlement_barriers() -> None:
 
 def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
     helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    sensor = _read(LIVE_DIR / "_ops-c7-dagster-sensor.ts")
     schedule = _read(LIVE_DIR / "ops-c7-schedule-write.live.spec.ts")
     poi = _read(LIVE_DIR / "poi-cache-targets-write.live.spec.ts")
 
@@ -401,11 +237,6 @@ def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
         helper,
         "async function writeDurableJournal(",
         "/**\n * 브라우저 인증 세션",
-    )
-    sensor_write = _section(
-        sensor,
-        "async #persist(",
-        "export async function createQueueSensorController(",
     )
     schedule_write = _section(
         schedule,
@@ -417,7 +248,7 @@ def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
         "async function writePoiJournal(",
         "function apiPath(",
     )
-    for source in (helper_write, sensor_write, schedule_write, poi_write):
+    for source in (helper_write, schedule_write, poi_write):
         _assert_in_order(
             source,
             "await writeFile(",
@@ -536,15 +367,14 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'shareable = SHAREABLE_ROLES if map_plane == "shared" else frozenset()' in runtime
     assert "len(observed_containers) != len(roles_by_service)" in runtime
     assert {"map_dagster_web", "map_dagster_daemon"} == _RUNTIME_MODULE.SHAREABLE_ROLES
-    # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
-    # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
-    # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
-    assert 'state.get("version") != 4' in script
-    assert 'state.get("request_ownership"), list' in script
-    assert (
-        '"run_id":"__orchestrator_pending__","target_history":[],'
-        '"target_refs":[],"version":3}' in script
-    )
+    # target journal 계약: 최종본은 helper의 v1(`version: 1` + exact key 집합)이고, 러너는
+    # 첫 durable write 전 helper가 받는 그 placeholder를 깐다. 한쪽만 바뀌면 browser lane과
+    # shell이 서로 다른 모양을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
+    assert "version: 1;" in admin_helper
+    assert 'state.get("version") != 1' in script
+    assert '"$TARGET_STATE_FILE" \\\n  \'{"phase":"orchestrator_pending","version":1}\'' in script
+    assert 'process.env.E2E_C7_TARGET_STATE_FILE' in admin_helper
+    assert 'export E2E_C7_TARGET_STATE_FILE="$TARGET_STATE_FILE"' in script
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
     assert "--network bridge --ipc private" in script
@@ -607,7 +437,10 @@ def test_runner_preserves_recovery_state_on_failure_and_runs_full_audit() -> Non
 def test_runner_requires_distinct_recreated_target_history() -> None:
     script = _read(RUNNER)
 
-    assert "if not isinstance(target_history, list) or not target_history" in script
+    # 남은 시나리오(invalidation)는 target을 재생성하지 않으므로 이력은 비어 있을 수 있다.
+    # 있으면 삭제가 증명돼야 하고 현재 identity와 겹치면 안 된다.
+    assert "if not isinstance(target_history, list):" in script
+    assert "if not all(deleted_target(item) for item in target_history):" in script
     assert "current_by_natural_key" in script
     assert 'item["targetId"] in current_target_ids' in script
     assert "raise SystemExit(36)" in script
@@ -665,19 +498,6 @@ def test_causal_poi_create_injects_committed_response_loss_once() -> None:
     assert "putWithCausalResponseRecovery(" not in create_step
 
 
-def test_kma_cursor_requires_canonical_nonempty_base_datetime() -> None:
-    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
-    cursor = _section(
-        active,
-        "function cursorMembershipFingerprint(",
-        'test.describe("C7 KMA active',
-    )
-
-    assert 'expect(typeof baseDatetime).toBe("string")' in cursor
-    assert "expect(isCanonicalKmaBaseDatetime(baseDatetime)).toBe(true)" in cursor
-    assert "if (baseDatetime !== undefined)" not in cursor
-
-
 # -- ADR-102 결정 6: attestation 체인 제거 ------------------------------------
 
 
@@ -719,8 +539,7 @@ _C7_ENV = {
     "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
     "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
     "E2E_ADMIN_PASSWORD": "redacted",
-    "E2E_DAGSTER_JOB": "feature_update_request_worker",
-    "E2E_C7_SCHEDULE": "feature_weather_kma_short_forecast_hourly_schedule",
+    "E2E_C7_SCHEDULE": _EXPECTED_SAFE_SCHEDULE,
     "E2E_C7_EXPECTED_GIT_COMMIT": "a" * 40,
     "E2E_C7_PLAYWRIGHT_IMAGE": "sha256:" + "3" * 64,
     "E2E_C7_EXPECTED_UI_ORIGIN_SHA256": "1" * 64,
@@ -736,10 +555,7 @@ _C7_ENV = {
     "E2E_LIVE_ALLOW_PROD": "1",
     "E2E_ADMIN_WRITE": "1",
     "E2E_C7_READ_AUTH_WRITE": "1",
-    "E2E_KMA_SCOPE_WRITE": "1",
     "E2E_DAGSTER_WRITE": "1",
-    "E2E_DAGSTER_RUN": "1",
-    "E2E_QUEUE_SENSOR_BARRIER": "1",
 }
 
 
@@ -756,7 +572,6 @@ def _run_c7_environment_validation(env: dict[str, str]) -> subprocess.CompletedP
             "require_enabled",
             "validate_sha256_env",
             "validate_service_env",
-            "validate_dagster_basic_auth_file",
             "validate_environment",
         )
     )
@@ -794,82 +609,81 @@ def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None
     assert "ENV_OK" not in rejected.stdout
 
 
-def _credential_file(tmp_path: Path, content: bytes, mode: int = 0o600) -> Path:
-    path = tmp_path / "dagster-basic-auth"
-    path.write_bytes(content)
-    path.chmod(mode)
-    return path
-
-
-def test_runner_env_contract_accepts_a_private_basic_auth_file(tmp_path: Path) -> None:
-    path = _credential_file(tmp_path, b"c7-runner:s3cr3t:with-colon\n")
-    accepted = _run_c7_environment_validation(
-        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": str(path)}
-    )
-    assert accepted.returncode == 0, accepted.stderr
-    assert "s3cr3t" not in accepted.stdout + accepted.stderr
-
-
 @pytest.mark.parametrize(
-    ("content", "mode", "link"),
+    "schedule",
     [
-        (b"c7-runner:s3cr3t\n", 0o640, False),
-        (b"c7-runner:s3cr3t\n", 0o604, False),
-        (b"c7-runner:s3cr3t\n", 0o600, True),
-        (b"no-password-s3cr3t\n", 0o600, False),
-        (b"c7 runner:s3cr3t\n", 0o600, False),
-        (b"c7-runner:s3cr3t\nsecond:line\n", 0o600, False),
+        # 2026-09-09에 사라진 옛 KMA schedule — 러너가 이것을 다시 받으면 안 된다.
+        "feature_weather_kma_short_forecast_hourly_schedule",
+        "feature_place_krairport_airports_monthly_schedule_typo",
     ],
 )
-def test_runner_env_contract_rejects_an_unsafe_basic_auth_file(
-    tmp_path: Path, content: bytes, mode: int, link: bool
-) -> None:
-    path = _credential_file(tmp_path, content, mode)
-    if link:
-        alias = tmp_path / "alias"
-        alias.symlink_to(path)
-        path = alias
-    rejected = _run_c7_environment_validation(
-        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": str(path)}
-    )
+def test_runner_env_contract_rejects_a_non_allowlisted_schedule(schedule: str) -> None:
+    rejected = _run_c7_environment_validation({**_C7_ENV, "E2E_C7_SCHEDULE": schedule})
     assert rejected.returncode == 1
-    assert "Dagster Basic Auth file is unsafe" in rejected.stderr
-    assert "s3cr3t" not in rejected.stdout + rejected.stderr
+    assert "not the allowlisted zero-upstream schedule" in rejected.stderr
     assert "ENV_OK" not in rejected.stdout
 
 
-def test_runner_env_contract_rejects_a_relative_basic_auth_path() -> None:
-    rejected = _run_c7_environment_validation(
-        {**_C7_ENV, "E2E_DAGSTER_BASIC_AUTH_FILE": "dagster-basic-auth"}
-    )
-    assert rejected.returncode == 1
-    assert "must be absolute" in rejected.stderr
+def test_runner_runs_exactly_the_expected_c7_specs() -> None:
+    script = _read(RUNNER)
+    block = _section(script, "readonly SPECS=(\n", "\n)\n")
+    specs = tuple(re.findall(r'^  "([^"]+)"$', block, re.MULTILINE))
+    assert specs == _EXPECTED_C7_SPECS
+    for spec in specs:
+        assert (ROOT / "packages" / "kor-travel-map-admin" / "frontend" / spec).is_file()
 
 
-def test_basic_auth_reaches_every_direct_dagster_post_only_by_read_only_mount() -> None:
-    """C7이 Dagster에 직접 POST하는 세 자리가 모두 같은 header helper를 쓴다.
+def test_safe_schedule_is_one_live_zero_upstream_schedule_everywhere() -> None:
+    """allowlist schedule이 실재하고 꺼져 있지 않으며, 세 사본이 같은 값이다.
 
-    자격증명은 env가 아니라 read-only bind로만 executor에 들어간다 — `docker inspect`의
-    Env에는 컨테이너 안 경로만 있다.
+    옛 KMA schedule은 2026-09-09에 사라졌는데 러너·spec은 그 이름을 계속 들고 있어서 C7이
+    그날부터 돌 수 없었다. 이름을 소스에서 읽어 정의 쪽(``schedules.py``)과 대조한다.
     """
 
     script = _read(RUNNER)
-    live = ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
-    helper = _read(live / "_dagster-basic-auth.ts")
-    assert "readFileSync(path" in helper
-    assert "process.env.E2E_DAGSTER_BASIC_AUTH_FILE" in helper
-    post = re.compile(r"await fetch\((?:this\.#graphqlUrl|dagsterGraphqlEndpoint\(\))")
-    for name in ("_ops-c7-dagster-sensor.ts", "_ops-c7-admin-api.ts"):
-        source = _read(live / name)
-        assert len(post.findall(source)) == 1, name
-        assert source.count("...dagsterAuthorizationHeaders(),") == 1, name
-    # 러너 안의 최종 복원 검증(node inline)도 같다.
-    assert script.count("...dagsterAuthorizationHeaders(),") == 1
-    assert (
-        '--mount "type=bind,src=$E2E_DAGSTER_BASIC_AUTH_FILE,'
-        'dst=$DAGSTER_BASIC_AUTH_CONTAINER_PATH,readonly"' in script
+    spec = _read(LIVE_DIR / "ops-c7-schedule-write.live.spec.ts")
+    schedules = _read(DAGSTER_SRC / "schedules.py")
+    fetchers = _read(DAGSTER_SRC / "provider_fetchers.py")
+
+    runner_value = re.search(r'^readonly SAFE_SCHEDULE="([^"]+)"$', script, re.MULTILINE)
+    remote_value = re.search(r'^const SAFE_SCHEDULE = "([^"]+)";$', script, re.MULTILINE)
+    spec_value = re.search(r'const SAFE_SCHEDULE =\s*"([^"]+)" as const;', spec)
+    assert runner_value is not None
+    assert remote_value is not None
+    assert spec_value is not None
+    values = {runner_value.group(1), remote_value.group(1), spec_value.group(1)}
+    assert values == {_EXPECTED_SAFE_SCHEDULE}
+
+    # 정의가 정확히 하나 있고, 자동 적재를 끈 목록에 없다.
+    assert schedules.count(f'schedule_name="{_EXPECTED_SAFE_SCHEDULE}"') == 1
+    disabled = _section(
+        schedules,
+        "DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(",
+        "\n)\n",
     )
-    assert '--env "E2E_DAGSTER_BASIC_AUTH_FILE=$DAGSTER_BASIC_AUTH_CONTAINER_PATH"' in script
-    # 이름만 준 `--env NAME`은 호스트 값(호스트 경로)을 그대로 복사한다 — 쓰지 않는다.
-    assert re.search(r"--env E2E_DAGSTER_BASIC_AUTH_FILE\s", script) is None
-    assert re.search(r"\bE2E_DAGSTER_BASIC_AUTH_FILE E2E", script) is None
+    assert _EXPECTED_SAFE_SCHEDULE not in disabled
+    # 그 schedule의 fetcher는 번들 정적 데이터만 yield한다(network 호출 없음).
+    fetcher = _section(
+        fetchers,
+        "async def fetch_krairport_airports(",
+        "\nasync def ",
+    )
+    assert "client.airports(active=True)" in fetcher
+    assert "httpx" not in fetcher
+
+
+def test_c7_lane_has_no_direct_dagster_client() -> None:
+    """남은 C7 spec은 Dagster GraphQL에 직접 POST하지 않는다 — 자격증명도 받지 않는다.
+
+    KMA queue sensor barrier와 run identity 대조가 퇴역하며 그 client(+ Basic Auth bind)는
+    죽은 배관이 됐다. 다시 들이면 러너 env·mount·검증을 함께 되살려야 한다.
+    """
+
+    script = _read(RUNNER)
+    for path in sorted(LIVE_DIR.glob("*.ts")):
+        source = _read(path)
+        assert "E2E_DAGSTER_BASIC_AUTH_FILE" not in source, path.name
+        assert "dagsterGraphqlEndpoint()" not in source, path.name
+    assert "E2E_DAGSTER_BASIC_AUTH_FILE" not in script
+    assert "sensorOrError" not in script
+    assert not (LIVE_DIR / "_dagster-basic-auth.ts").exists()

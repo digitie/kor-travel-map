@@ -868,11 +868,6 @@ test.describe("live/uploads-backups-poi kind deep-links (read-only)", () => {
     await expectHeading(page, "Offline uploads");
   });
 
-  test("uploads deep-link ?kind=weather loads heading", async ({ page }) => {
-    await page.goto(`/admin/offline-uploads?kind=${F.KINDS[4]}`);
-    await expectHeading(page, "Offline uploads");
-  });
-
   test("uploads deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[5]}`);
     await expectHeading(page, "Offline uploads");
@@ -903,11 +898,6 @@ test.describe("live/uploads-backups-poi kind deep-links (read-only)", () => {
     await expectHeading(page, "백업");
   });
 
-  test("backups deep-link ?kind=weather loads heading", async ({ page }) => {
-    await page.goto(`/admin/backups?kind=${F.KINDS[4]}`);
-    await expectHeading(page, "백업");
-  });
-
   test("backups deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[5]}`);
     await expectHeading(page, "백업");
@@ -935,11 +925,6 @@ test.describe("live/uploads-backups-poi kind deep-links (read-only)", () => {
 
   test("poi deep-link ?kind=price loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[3]}`);
-    await expectHeading(page, "POI cache targets");
-  });
-
-  test("poi deep-link ?kind=weather loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[4]}`);
     await expectHeading(page, "POI cache targets");
   });
 

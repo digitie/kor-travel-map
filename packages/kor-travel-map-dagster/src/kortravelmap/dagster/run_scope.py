@@ -15,8 +15,9 @@ run을 싣는다. ``instance.get_runs``·``get_run_records``·``get_run_ids``를
   sensor)은 평가 context의 ``code_location_origin``과 대조해 다르면 실패한다.
 - ``map_owned_runs_filter``: Map job이 스스로 다는 ``kor_travel_map.*`` tag로 좁힌다. location
   이름에 기대지 않는다. schedule 평가 context에는 code location이 없어 대조할 수 없으므로,
-  coalescing schedule은 이것을 쓴다(2026-10-01 n150 실측: weather summary run 1,000건 전부
-  ``kor_travel_map.job_kind``를 달고 있었다).
+  coalescing schedule은 이것을 쓴다(2026-10-01 n150 실측: 당시 weather summary run 1,000건 전부
+  ``kor_travel_map.job_kind``를 달고 있었다 — 그 schedule은 같은 날 weather 제거(ADR-105)로
+  사라졌고, 지금 쓰는 쪽은 ``schedules``의 coalescing feature-load schedule이다).
 """
 
 from __future__ import annotations

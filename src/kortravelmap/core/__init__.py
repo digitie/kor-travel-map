@@ -9,7 +9,7 @@
 ``ids.py`` ``make_feature_id`` (ADR-009 결정적 SHA1).
 **Sprint 1 PR#21+**: ``ids.py``의 나머지 helper (``make_source_record_key`` /
 ``make_payload_hash``), ``scoring`` (ADR-016 Coordinate 의존), ``protocols``,
-``providers`` (provider 이름 정규화), ``weather`` (build_weather_card),
+``providers`` (provider 이름 정규화). (``weather`` pure 헬퍼는 ADR-105로 제거),
 ``infra/crs.py`` (pyproj.Transformer ADR-030 narrow cache).
 **Sprint 3 PR (T-201a)**: ``integrity.py`` — F1~F3 (orphan source / detail
 누락 / CRS drift).
@@ -111,13 +111,6 @@ from kortravelmap.core.sync_scope import (
     parse_canonical_sync_scope,
 )
 from kortravelmap.core.types import KST, kst_now
-from kortravelmap.core.weather import (
-    filter_by_provider,
-    group_by_metric_key,
-    latest_by_metric_key,
-    pick_nowcast_value,
-    pick_timeline_slice,
-)
 
 __all__ = [
     # types (PR#19, ADR-019)
@@ -194,12 +187,6 @@ __all__ = [
     "extract_sido_code",
     "normalize_phone_number",
     "normalize_korean_text",
-    # weather pure helpers (PR#39, ADR-010)
-    "pick_nowcast_value",
-    "pick_timeline_slice",
-    "group_by_metric_key",
-    "filter_by_provider",
-    "latest_by_metric_key",
     # geometry (route/area WKT, ADR-012)
     "ROUTE_GEOMETRY_TYPES",
     "AREA_GEOMETRY_TYPES",

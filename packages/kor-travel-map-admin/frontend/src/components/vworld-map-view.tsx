@@ -532,28 +532,8 @@ export interface ClusterFeatureInput {
   geometry?: unknown;
   area_square_meters?: number | null;
   price_summary?: readonly ClusterPriceSummaryPoint[] | null;
-  weather_summary?: ClusterWeatherSummaryPoint | null;
 }
 
-
-interface ClusterWeatherSummaryPoint {
-  provider_dataset_id: number;
-  dataset_key: string;
-  dataset_display_name: string;
-  provider: string;
-  weather_domain?: string | null;
-  forecast_style?: string | null;
-  metric_key: string;
-  metric_name?: string | null;
-  value_number?: number | null;
-  value_text?: string | null;
-  unit?: string | null;
-  observed_at?: string | null;
-  valid_at?: string | null;
-  issued_at?: string | null;
-  known_at?: string | null;
-  refresh_after: string;
-}
 
 type GeometryFeatureKind = "route" | "area";
 type FeatureMapGeometry =
@@ -602,72 +582,6 @@ function hasRenderableGeometry(feature: ClusterFeatureInput): boolean {
 
 function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
   return feature.kind !== "route";
-}
-
-/**
- * weather marker 글리프의 판별 키. ADR-088 triple identity 이후 `WeatherSummaryOut`의 정본
- * 신원은 `dataset_key`(+`provider_dataset_id`)이고 `weather_domain`은 optional 잔존 필드다.
- * `weather_domain`만 보던 옛 코드는 dataset_key만 오는 응답에서 조용히 판별에 실패해
- * `marker_icon`("marker" → 📍)로 떨어졌다 — KMA/에어코리아 마커가 서로 구분되지 않던 원인.
- */
-function weatherDomainKey(
-  summary: ClusterWeatherSummaryPoint | null | undefined,
-): string | null {
-  return summary?.weather_domain ?? summary?.dataset_key ?? null;
-}
-
-function markerIconForFeature(feature: ClusterFeatureInput): string | null {
-  if (feature.kind === "weather") {
-    const domain = weatherDomainKey(feature.weather_summary);
-    if (domain?.startsWith("kma_")) {
-      return "weather";
-    }
-    if (domain?.startsWith("airkorea_")) {
-      return "air-quality";
-    }
-  }
-  return feature.marker_icon ?? null;
-}
-
-const temperatureFormatter = new Intl.NumberFormat("ko-KR", {
-  maximumFractionDigits: 1,
-});
-
-
-function weatherMarkerLabel(
-  summary: ClusterWeatherSummaryPoint | null | undefined,
-): string | null {
-  if (!summary) return null;
-  const metricLabel =
-    summary.metric_key === "TMN"
-      ? "최저 "
-      : summary.metric_key === "TMX"
-        ? "최고 "
-        : summary.metric_key === "POP"
-          ? "강수 "
-          : summary.metric_key === "REH"
-            ? "습도 "
-            : "";
-  if (typeof summary.value_number === "number") {
-    const unit = summary.unit ?? "";
-    const normalizedUnit = unit.toLowerCase();
-    if (
-      normalizedUnit === "deg_c" ||
-      normalizedUnit.includes("celsius") ||
-      unit.includes("C") ||
-      unit.includes("℃")
-    ) {
-      return `${metricLabel}${temperatureFormatter.format(summary.value_number)}℃`;
-    }
-    if (unit.length > 0) {
-      return `${metricLabel}${temperatureFormatter.format(summary.value_number)}${unit}`;
-    }
-    return `${metricLabel}${temperatureFormatter.format(summary.value_number)}°`;
-  }
-  if (summary.value_text) {
-    return summary.metric_key === "SKY" ? `예보 ${summary.value_text}` : summary.value_text;
-  }
-  return null;
 }
 
 type CoincidentEntry = {
@@ -767,7 +681,6 @@ function createFeatureMarkerElement({
   markerIcon,
   markerColor,
   priceLabel,
-  weatherLabel,
   title,
   badgeCount,
   onClick,
@@ -775,7 +688,6 @@ function createFeatureMarkerElement({
   markerIcon?: string | null;
   markerColor?: string | null;
   priceLabel?: string | null;
-  weatherLabel?: string | null;
   title: string;
   badgeCount?: number;
   onClick?: (event: MouseEvent) => void;
@@ -787,7 +699,7 @@ function createFeatureMarkerElement({
     title,
   });
   applyTokenMarkerColor(icon, markerColor);
-  const markerLabel = priceLabel ?? weatherLabel ?? null;
+  const markerLabel = priceLabel ?? null;
   if (!markerLabel) {
     if (onClick) {
       icon.style.cursor = "pointer";
@@ -805,9 +717,9 @@ function createFeatureMarkerElement({
 
   const color = markerColorValue(markerColor);
   // 아이콘(24px 원)이 좌표에 정확히 앵커링되도록 wrapper 박스를 아이콘 크기로 유지하고,
-  // 라벨(가격/날씨)은 absolute로 아이콘 오른쪽에 띄운다. flex로 [icon][label]을 나열하면
+  // 라벨(가격)은 absolute로 아이콘 오른쪽에 띄운다. flex로 [icon][label]을 나열하면
   // maplibre 기본 center 앵커가 wrapper 중앙(=아이콘과 라벨 사이)을 좌표에 놓아, 아이콘이
-  // 라벨 폭 절반만큼 왼쪽으로 어긋난다(weather/price 마커가 좌표에서 어긋나 보이던 원인).
+  // 라벨 폭 절반만큼 왼쪽으로 어긋난다(price 마커가 좌표에서 어긋나 보이던 원인).
   const wrapper = document.createElement("div");
   wrapper.title = `${title} ${markerLabel.replace(/\n/g, " ")}`;
   wrapper.style.position = "relative";
@@ -1215,15 +1127,12 @@ export function VWorldFeatureClusters({
   const priceSummariesRef = useRef(
     new Map<string, readonly ClusterPriceSummaryPoint[]>(),
   );
-  const weatherSummariesRef = useRef(
-    new Map<string, ClusterWeatherSummaryPoint>(),
-  );
   // 현재 화면에 떠 있는 point/label 마커 element를 feature_id로 추적해, selection 변경
   // 시 마커 풀을 건드리지 않고 outline만 토글한다(#500 (c)).
   const pointElementsRef = useRef(new Map<string, HTMLElement>());
   const labelElementsRef = useRef(new Map<string, HTMLElement>());
   // 겹친 마커 선택: 같은 화면 픽셀 셀에 묶인 point feature 그룹(feature_id → 그룹)과
-  // 현재 떠 있는 선택 팝업을 추적한다(동일 좌표 KMA 초단기/단기 등 겹침 분기).
+  // 현재 떠 있는 선택 팝업을 추적한다(동일 좌표 등 겹침 분기).
   const coincidentGroupsRef = useRef(new Map<string, CoincidentEntry[]>());
   const popupRef = useRef<MapLibrePopup | null>(null);
   const clusterMaxZoomRef = useRef(clusterMaxZoom);
@@ -1252,17 +1161,12 @@ export function VWorldFeatureClusters({
     selectedFeatureIdRef.current = selectedFeatureId;
     clusterMaxZoomRef.current = clusterMaxZoom;
     const summaries = new Map<string, readonly ClusterPriceSummaryPoint[]>();
-    const weatherSummaries = new Map<string, ClusterWeatherSummaryPoint>();
     for (const feature of dedupedFeatures) {
       if (feature.price_summary && feature.price_summary.length > 0) {
         summaries.set(feature.feature_id, feature.price_summary);
       }
-      if (feature.weather_summary) {
-        weatherSummaries.set(feature.feature_id, feature.weather_summary);
-      }
     }
     priceSummariesRef.current = summaries;
-    weatherSummariesRef.current = weatherSummaries;
   });
 
   // 페이지를 자정 너머 열어 둔 경우에도 price marker의 날짜 표기가 바뀌도록 KST
@@ -1292,7 +1196,7 @@ export function VWorldFeatureClusters({
                   feature_id: f.feature_id,
                   name: f.name,
                   kind: f.kind,
-                  marker_icon: markerIconForFeature(f),
+                  marker_icon: f.marker_icon ?? null,
                   marker_color: f.marker_color ?? null,
                 },
               },
@@ -1450,8 +1354,8 @@ export function VWorldFeatureClusters({
       });
     };
 
-    // 겹친 좌표의 feature들을 나열해 선택하게 하는 팝업. 동일 좌표(KMA 초단기/단기
-    // 격자처럼)나 근접해 마커가 겹치는 경우, 마커 클릭이 이 팝업으로 분기한다.
+    // 겹친 좌표의 feature들을 나열해 선택하게 하는 팝업. 동일 좌표(같은 지점의
+    // 여러 feature처럼)나 근접해 마커가 겹치는 경우, 마커 클릭이 이 팝업으로 분기한다.
     const showCoincidentPopup = (
       group: CoincidentEntry[],
       lngLat: [number, number] = [group[0].lon, group[0].lat],
@@ -1736,16 +1640,12 @@ export function VWorldFeatureClusters({
           const priceLabel = priceMarkerLabel(
             priceSummariesRef.current.get(featureId),
           );
-          const weatherLabel = weatherMarkerLabel(
-            weatherSummariesRef.current.get(featureId),
-          );
           const coincidentGroup = coincidentGroupsRef.current.get(featureId);
           const coincidentCount = coincidentGroup ? coincidentGroup.length : 1;
           const renderKey = JSON.stringify({
             markerIcon,
             markerColor,
             priceLabel,
-            weatherLabel,
             coincidentCount,
           });
           let marker = markers.get(id);
@@ -1759,7 +1659,6 @@ export function VWorldFeatureClusters({
               markerIcon,
               markerColor,
               priceLabel,
-              weatherLabel,
               title,
               badgeCount: coincidentCount,
               onClick: () => {
@@ -1773,8 +1672,8 @@ export function VWorldFeatureClusters({
             element.setAttribute("role", "button");
             element.setAttribute(
               "aria-label",
-              priceLabel || weatherLabel
-                ? `${title} ${(priceLabel ?? weatherLabel ?? "").replace(/\n/g, " ")}`
+              priceLabel
+                ? `${title} ${priceLabel.replace(/\n/g, " ")}`
                 : title,
             );
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
@@ -1786,8 +1685,6 @@ export function VWorldFeatureClusters({
             const element = marker.getElement();
             const ariaLabel = priceLabel
               ? `${title} ${priceLabel.replace(/\n/g, " ")}`
-              : weatherLabel
-                ? `${title} ${weatherLabel.replace(/\n/g, " ")}`
               : title;
             if (element.getAttribute("aria-label") !== ariaLabel) {
               element.title = ariaLabel;

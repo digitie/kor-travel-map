@@ -1,7 +1,9 @@
 """``kortravelmap.providers.krex`` — 휴게소 → multi-kind 변환 (Sprint 2 §2.4).
 
 본 모듈은 `python-krex-api` provider 라이브러리의 typed model을 4 kind으로
-정규화한다 — **multi-kind 통합 검증** (place + price + weather + notice).
+정규화한다 — **multi-kind 통합 검증** (place + price + notice). 휴게소 관측 기상
+(``krex_rest_area_weather`` → weather kind)은 ADR-105로 제거했다 — 날씨 정본은
+kor-travel-weather다.
 
 지원 dataset:
 
@@ -11,14 +13,12 @@
 | ``rest_area_prices_to_values`` | ``krex_rest_area_prices`` | (시계열) | PriceValue |
 | ``rest_area_fuel_price_records_to_features_and_values`` |
   ``krex_rest_area_prices`` | price | FeatureBundle + PriceValue |
-| ``rest_area_weather_to_values`` | ``krex_rest_area_weather`` | (시계열) | WeatherValue |
 | ``traffic_notices_to_bundles`` | ``krex_traffic_notices`` | notice | FeatureBundle |
 
 ADR 참조
 --------
 - ADR-006 — provider wrapper 금지 (Protocol input shape만)
 - ADR-009 — make_feature_id/source_record_key/payload_hash
-- ADR-010 — WeatherValue 두 축 (forecast_style=observed, timeline=ultra_short)
 - ADR-013/014 — bulk insert + BRIN
 - ADR-018 — Feature.detail은 PlaceDetail/NoticeDetail instance
 - ADR-024 — canonical provider name `python-krex-api`
@@ -31,8 +31,8 @@ ADR 참조
 - rest_area dataset(`tn_pubr_public_rest_area_api`)에는 안정 식별자가 없어
   (ADR-044 실측) 자연키를 krtour 측에서 `name`+`route_name`+`direction`으로
   파생한다(`_rest_area_natural_key`). 이 파생키 → `feature_id` 매핑은 본 함수가
-  결정. 호출자는 prices/weather 변환 시 동일 `feature_id`를 전달
-  (`KrexRestAreaCatalog` 같은 캐시 책임). prices/weather row의 `uni_id`는 별도
+  결정. 호출자는 prices 변환 시 동일 `feature_id`를 전달
+  (`KrexRestAreaCatalog` 같은 캐시 책임). prices row의 `uni_id`는 별도
   dataset의 자연키로 본 reconciliation 범위 밖이다.
 - 가격은 `REST_AREA_FOOD`(식음료) 또는 `REST_AREA_FUEL`(주유) — 입력 row의
   category 필드로 분기.
@@ -82,7 +82,6 @@ from kortravelmap.dto import (
     Feature,
     FeatureBundle,
     FeatureKind,
-    ForecastStyle,
     NoticeDetail,
     PlaceDetail,
     PriceDomain,
@@ -90,9 +89,6 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
     SourceRole,
-    TimelineBucket,
-    WeatherDomain,
-    WeatherValue,
     normalize_notice_type,
 )
 from kortravelmap.geocoding import (
@@ -106,8 +102,6 @@ __all__ = [
     "KrexRestAreaItem",
     "KrexRestAreaFuelPriceRecord",
     "KrexRestAreaPriceItem",
-    "KrexRestAreaWeatherItem",
-    "KrexRestAreaWeatherRecord",
     "KrexTrafficNoticeItem",
     # 변환 함수
     "rest_areas_to_bundles",
@@ -116,15 +110,11 @@ __all__ = [
     "build_rest_area_place_locator",
     "rest_area_place_locator_from_rows",
     "RestAreaPlaceLocator",
-    "rest_area_weather_to_values",
-    "rest_area_weather_records_to_bundles",
-    "rest_area_weather_records_to_values",
     "traffic_notices_to_bundles",
     # 메타
     "KREX_PROVIDER_NAME",
     "REST_AREA_DATASET_KEY",
     "REST_AREA_PRICES_DATASET_KEY",
-    "REST_AREA_WEATHER_DATASET_KEY",
     "TRAFFIC_NOTICES_DATASET_KEY",
     "REST_AREA_SOURCE_ENTITY_TYPE",
     "REST_AREA_CATEGORY",
@@ -145,7 +135,6 @@ KREX_PROVIDER_NAME: Final[str] = "python-krex-api"
 
 REST_AREA_DATASET_KEY: Final[str] = "krex_rest_areas"
 REST_AREA_PRICES_DATASET_KEY: Final[str] = "krex_rest_area_prices"
-REST_AREA_WEATHER_DATASET_KEY: Final[str] = "krex_rest_area_weather"
 TRAFFIC_NOTICES_DATASET_KEY: Final[str] = "krex_traffic_notices"
 
 _REST_AREA_ENTITY_TYPE: Final[str] = "rest_area"
@@ -264,75 +253,6 @@ class KrexRestAreaFuelPriceRecord(Protocol):
     diesel_price: int | Decimal | None
     lpg_price: int | Decimal | None
     raw: dict[str, Any]
-
-
-@runtime_checkable
-class KrexRestAreaWeatherItem(Protocol):
-    """krex 휴게소 관측 기상 row shape."""
-
-    uni_id: str
-    """휴게소 자연키."""
-
-    metric_key: str
-    """KMA 표준 호환 metric (T1H/REH/WSD/PTY 등)."""
-
-    value: str | Decimal | int | float
-    """관측값 (숫자 또는 코드 문자열)."""
-
-    observed_at: datetime
-    """관측 시각 (KST aware)."""
-
-    unit: str | None
-    """단위 override (없으면 metric_key로 KMA_METRIC_UNITS 참조)."""
-
-
-@runtime_checkable
-class KrexRestAreaWeatherRecord(Protocol):
-    """krex 휴게소 관측 기상 **wide row** shape (provider ``krex.models.RestAreaWeather`` 정합).
-
-    ``restWeatherList``(EX, ``KrexClient.restarea.weather``/``latest_weather``)는 휴게소별
-    1행에 기온/습도/풍속/강수 등 지표를 wide로 담는다. ``KrexRestAreaWeatherItem``
-    (이미 melt된 1 metric/1행, etl_live fixture용)과 달리, 이 Protocol은 변환부가
-    weather-kind Feature(`rest_area_weather_records_to_bundles`) + metric별
-    ``WeatherValue``(`rest_area_weather_records_to_values`)로 직접 melt하는 입력이다.
-
-    ``unit_code``가 안정 식별자라 weather-kind Feature 자연키로 쓴다(파생 불필요).
-    좌표(lat/lon)는 행에 포함 — place 휴게소와 fuzzy 매칭하지 않고 self-contained
-    weather feature를 만든다(airkorea 측정소 패턴, ADR-010 — 관측값은 place 아님).
-    """
-
-    unit_code: str
-    """휴게소 안정 식별자. weather Feature 자연키. (provider ``RestAreaWeather.unit_code``)"""
-
-    unit_name: str
-    """휴게소명. Feature.name. (provider ``RestAreaWeather.unit_name``)"""
-
-    route_name: str | None
-    """고속도로 노선명. (provider ``RestAreaWeather.route_name``)"""
-
-    direction_code: str | None
-    """방향 코드. (provider ``RestAreaWeather.direction_code``)"""
-
-    lat: float | Decimal | None
-    """위도 WGS84. (provider ``RestAreaWeather.lat``)"""
-
-    lon: float | Decimal | None
-    """경도 WGS84. (provider ``RestAreaWeather.lon``)"""
-
-    observed_at: datetime
-    """관측 시각 (KST aware). (provider ``RestAreaWeather.observed_at``)"""
-
-    temperature: float | Decimal | None
-    """기온(℃) → metric ``T1H``. (provider ``RestAreaWeather.temperature``)"""
-
-    humidity: float | Decimal | None
-    """습도(%) → metric ``REH``. (provider ``RestAreaWeather.humidity``)"""
-
-    wind_speed: float | Decimal | None
-    """풍속(m/s) → metric ``WSD``. (provider ``RestAreaWeather.wind_speed``)"""
-
-    rainfall: float | Decimal | None
-    """1시간 강수량(mm) → metric ``RN1``. (provider ``RestAreaWeather.rainfall``)"""
 
 
 @runtime_checkable
@@ -603,7 +523,7 @@ async def rest_areas_to_bundles(
     """krex 휴게소 items → ``list[FeatureBundle]`` (place kind, 1차 source).
 
     호출자는 결과 bundle의 `feature_id`를 캐시(파생 자연키 → feature_id)로 두고
-    `rest_area_prices_to_values`/`rest_area_weather_to_values` 호출 시 동일
+    `rest_area_prices_to_values` 호출 시 동일
     `feature_id`를 전달.
 
     `address_resolver`는 다른 provider와의 호출 시그니처 호환을 위해 받지만,
@@ -962,288 +882,6 @@ def rest_area_fuel_price_records_to_features_and_values(
         bundles.append(bundle)
         values.extend(item_values)
     return bundles, values
-
-
-# -- rest_area_weather → WeatherValue (observed) -----------------------
-
-
-def _rest_area_weather_item_to_value(
-    item: KrexRestAreaWeatherItem,
-    *,
-    feature_id: str,
-    source_record_key: str | None,
-) -> WeatherValue:
-    value_number = _parse_numeric(item.value)
-    value_text = (
-        None
-        if value_number is not None
-        else (str(item.value).strip() or None)
-    )
-
-    payload: dict[str, Any] = {
-        "uni_id": item.uni_id,
-        "metric_key": item.metric_key,
-        "value": str(item.value),
-        "observed_at": item.observed_at.isoformat(),
-        "unit": item.unit,
-    }
-
-    return WeatherValue(
-        feature_id=feature_id,
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        weather_domain=WeatherDomain.REST_AREA_WEATHER,
-        forecast_style=ForecastStyle.OBSERVED,
-        timeline_bucket=TimelineBucket.ULTRA_SHORT,
-        metric_key=item.metric_key,
-        source_metric_key=item.metric_key,
-        unit=item.unit,
-        observed_at=item.observed_at,
-        value_number=value_number,
-        value_text=value_text,
-        normalization_version="krex-v1.0",
-        payload=payload,
-        source_record_key=source_record_key,
-    )
-
-
-def rest_area_weather_to_values(
-    items: Iterable[KrexRestAreaWeatherItem],
-    *,
-    feature_id: str,
-    source_record_key: str | None = None,
-) -> list[WeatherValue]:
-    """krex 휴게소 관측 기상 → ``list[WeatherValue]`` (forecast_style=observed)."""
-    return [
-        _rest_area_weather_item_to_value(
-            item,
-            feature_id=feature_id,
-            source_record_key=source_record_key,
-        )
-        for item in items
-    ]
-
-
-# -- rest_area_weather records → weather Feature + WeatherValue ---------
-# 휴게소 관측 기상을 **자체 weather-kind Feature**로 적재한다(airkorea 측정소
-# 패턴 미러, ADR-010 — 관측값은 place가 아니라 weather feature). place 휴게소와
-# fuzzy 매칭하지 않고 ``unit_code``(안정키) + 행 내 좌표로 self-contained feature를
-# 만든다. de-rep(#496): 휴게소당 1 feature, 복제 없음 — KMA 기온 빈틈(고속도로
-# 농촌 구간)을 ``T1H``로 메운다(build_weather_card nearest-temp가 ``T1H/TMP`` 조회).
-
-_REST_AREA_WEATHER_ENTITY_TYPE: Final[str] = "rest_area_weather_station"
-
-_REST_AREA_WEATHER_SENTINEL: Final[Decimal] = Decimal("-99")
-"""EX 휴게소 날씨 결측 sentinel — 해당 metric drop(etl_live와 동일)."""
-
-# wide → long melt: (provider 모델 attr, KMA 호환 metric_key, metric_name, unit).
-# ``temperature → T1H``가 핵심 — build_weather_card의 nearest-temp가
-# ``metric_key IN ('T1H','TMP')``로 조회하므로 휴게소가 기온 anchor가 된다.
-_REST_AREA_WEATHER_METRICS: Final[tuple[tuple[str, str, str, str], ...]] = (
-    ("temperature", "T1H", "기온", "deg_c"),
-    ("humidity", "REH", "습도", "%"),
-    ("wind_speed", "WSD", "풍속", "m/s"),
-    ("rainfall", "RN1", "1시간 강수량", "mm"),
-)
-
-
-def _rest_area_weather_observed_at(value: datetime) -> datetime:
-    """관측 시각을 KST aware로 보정(ADR-019). naive면 KST 부여."""
-    if value.tzinfo is None:
-        return value.replace(tzinfo=_KST)
-    return value
-
-
-async def _rest_area_weather_record_to_bundle(
-    record: KrexRestAreaWeatherRecord,
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None,
-) -> FeatureBundle | None:
-    """휴게소 관측 기상 1행 → weather-kind ``FeatureBundle`` (좌표/unit_code 부재 시 None).
-
-    좌표가 없으면 공간 KNN(weather card nearest)에서 쓸모가 없으므로 skip한다.
-    """
-    natural_key = (record.unit_code or "").strip()
-    if not natural_key:
-        return None
-    lon = _to_decimal_or_none(record.lon)
-    lat = _to_decimal_or_none(record.lat)
-    coord = _coord_or_none(lat, lon)
-    if coord is None:
-        return None
-    bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
-    address = Address(
-        road=None,
-        admin=admin,
-        bjd_code=bjd_code,
-        sigungu_code=sigungu,
-        sido_code=sido,
-        road_name_code=None,
-    )
-    name = normalize_korean_text(record.unit_name) or record.unit_name or natural_key
-    raw_data: dict[str, Any] = {
-        "unit_code": natural_key,
-        "unit_name": record.unit_name,
-        "route_name": record.route_name,
-        "direction_code": record.direction_code,
-        "lon": str(lon) if lon is not None else None,
-        "lat": str(lat) if lat is not None else None,
-    }
-    payload_hash = make_payload_hash(raw_data)
-    source_record_key = make_source_record_key(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-        source_entity_type=_REST_AREA_WEATHER_ENTITY_TYPE,
-        source_entity_id=natural_key,
-        raw_payload_hash=payload_hash,
-    )
-    feature_id = make_feature_id(
-        bjd_code=bjd_code,
-        kind=FeatureKind.WEATHER.value,
-        category=REST_AREA_CATEGORY,
-        source_type=f"{KREX_PROVIDER_NAME}:{REST_AREA_WEATHER_DATASET_KEY}",
-        source_natural_key=natural_key,
-    )
-    feature = Feature(
-        feature_id=feature_id,
-        provider_natural_key=natural_key,
-        kind=FeatureKind.WEATHER,
-        name=name,
-        coord=coord,
-        address=address,
-        category=REST_AREA_CATEGORY,
-        marker_icon=REST_AREA_MARKER_ICON,
-        marker_color=REST_AREA_MARKER_COLOR,
-        detail=None,  # weather kind는 detail 불가(ADR-018) — 값은 WeatherValue.
-    )
-    source_record = SourceRecord(
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-        source_entity_type=_REST_AREA_WEATHER_ENTITY_TYPE,
-        source_entity_id=natural_key,
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=fetched_at,
-        source_record_key=source_record_key,
-    )
-    source_link = SourceLink(
-        feature_id=feature_id,
-        source_record_key=source_record_key,
-        source_role=SourceRole.PRIMARY,
-        match_method="natural_key",
-        confidence=100,
-    )
-    return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
-    )
-
-
-async def rest_area_weather_records_to_bundles(
-    records: Iterable[KrexRestAreaWeatherRecord],
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None = None,
-) -> list[FeatureBundle]:
-    """휴게소 관측 기상 records → ``list[FeatureBundle]`` (weather kind, unit_code dedup).
-
-    각 휴게소가 weather-kind Feature가 되고, 지표는 별도
-    ``rest_area_weather_records_to_values``로 melt한다. 안정키는 ``unit_code``.
-    좌표/unit_code 부재 행 및 같은 unit_code 중복 행은 제외한다.
-    """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    seen: set[str] = set()
-    bundles: list[FeatureBundle] = []
-    for record in records:
-        key = (record.unit_code or "").strip()
-        if not key or key in seen:
-            continue
-        bundle = await _rest_area_weather_record_to_bundle(
-            record, fetched_at=fetched_at, reverse_geocoder=geocoder
-        )
-        if bundle is None:
-            continue
-        seen.add(key)
-        bundles.append(bundle)
-    return bundles
-
-
-def _rest_area_weather_record_to_values(
-    record: KrexRestAreaWeatherRecord,
-    *,
-    feature_id: str,
-    source_record_key: str | None,
-) -> list[WeatherValue]:
-    observed_at = _rest_area_weather_observed_at(record.observed_at)
-    provider = normalize_provider_name(KREX_PROVIDER_NAME)
-    values: list[WeatherValue] = []
-    for attr, metric_key, metric_name, unit in _REST_AREA_WEATHER_METRICS:
-        value_number = _to_decimal_or_none(getattr(record, attr, None))
-        if value_number is None or value_number == _REST_AREA_WEATHER_SENTINEL:
-            continue  # 결측/sentinel metric은 행 생성 안 함.
-        values.append(
-            WeatherValue(
-                feature_id=feature_id,
-                provider=provider,
-                weather_domain=WeatherDomain.REST_AREA_WEATHER,
-                forecast_style=ForecastStyle.OBSERVED,
-                timeline_bucket=TimelineBucket.ULTRA_SHORT,
-                metric_key=metric_key,
-                source_metric_key=attr,
-                metric_name=metric_name,
-                unit=unit,
-                observed_at=observed_at,
-                value_number=value_number,
-                normalization_version="krex-v1.0",
-                payload={
-                    "unit_code": record.unit_code,
-                    "metric": metric_key,
-                },
-                source_record_key=source_record_key,
-            )
-        )
-    return values
-
-
-def rest_area_weather_records_to_values(
-    records: Iterable[KrexRestAreaWeatherRecord],
-    *,
-    station_feature_ids: Mapping[str, str],
-    source_record_key: str | None = None,
-) -> list[WeatherValue]:
-    """휴게소 관측 기상 records → ``list[WeatherValue]`` (지표별 1행, observed).
-
-    Parameters
-    ----------
-    records
-        ``KrexRestAreaWeatherRecord`` Protocol iterable(휴게소×시각별 wide 1행).
-    station_feature_ids
-        ``unit_code`` → weather feature_id 매핑(``rest_area_weather_records_to_bundles``
-        결과로 호출자가 구성). 매핑에 없는 unit_code 행은 건너뛴다.
-    source_record_key
-        provider raw 추적용(권장).
-
-    Returns
-    -------
-    list[WeatherValue]
-        ``weather_domain=rest_area_weather``, ``forecast_style=observed``,
-        ``timeline_bucket=ultra_short``. 결측/sentinel 지표 및 미매핑 휴게소는 제외.
-    """
-    out: list[WeatherValue] = []
-    for record in records:
-        key = (record.unit_code or "").strip()
-        feature_id = station_feature_ids.get(key)
-        if feature_id is None:
-            continue
-        out.extend(
-            _rest_area_weather_record_to_values(
-                record, feature_id=feature_id, source_record_key=source_record_key
-            )
-        )
-    return out
 
 
 # -- traffic_notices → notice FeatureBundle ----------------------------

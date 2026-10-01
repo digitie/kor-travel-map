@@ -6,7 +6,8 @@ publication=published, quality=valid의 교집합만 노출한다. retired lifec
 행도 같은 공개 경로 어디에서도 노출하지 않는다.
 
 상태별 fixture × 공개 read 경로(detail/batch/bbox/cluster/search/nearby/
-in-area/collection/curated/weather anchor/public views) 교차 검사.
+in-area/collection/curated/public views) 교차 검사. (weather anchor·기상특보 이력
+경로는 ADR-105로 제거했다.)
 공개 술어는 alembic 0096의 VIEW 한 곳에만 정의된다 — 본 테스트는 그 술어의
 소비자들이 전부 같은 판정을 내리는지 검증한다.
 """
@@ -15,23 +16,17 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, date, datetime, timedelta, timezone
-from decimal import Decimal
-from hashlib import md5
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from sqlalchemy import text
 
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
-from kortravelmap.dto import SourceRecord
-from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import (
     curation_repo,
     feature_repo,
     public_views_repo,
-    weather_repo,
 )
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from tests.integration._subtype_seed import seed_feature_subtype
@@ -615,119 +610,6 @@ async def test_public_festival_views_use_projection(migrated_session: AsyncSessi
         assert (row is not None) is public, f"festival detail mismatch for {suffix}"
 
 
-async def test_weather_anchor_skips_non_public_features(
-    migrated_session: AsyncSession,
-) -> None:
-    """nearest weather anchor가 비공개 feature를 건너뛴다 (공개 표면 feature_id 노출)."""
-    center_id = _fixture_feature_uuid("pfv:wx:center")
-    suppressed_near_id = _fixture_feature_uuid("pfv:wx:suppressed-near")
-    active_far_id = _fixture_feature_uuid("pfv:wx:active-far")
-    await _ins_feature(
-        migrated_session,
-        feature_id=center_id,
-        name="날씨 중심",
-        lon=126.978,
-        lat=37.5665,
-    )
-    # 더 가까운 suppressed anchor + 더 먼 public anchor — 전자가 이기면 leak.
-    await _ins_feature(
-        migrated_session,
-        feature_id=suppressed_near_id,
-        name="비공개 관측점",
-        publication_state="suppressed",
-        lon=126.9781,
-        lat=37.5666,
-    )
-    await _ins_feature(
-        migrated_session,
-        feature_id=active_far_id,
-        name="공개 관측점",
-        lon=126.99,
-        lat=37.57,
-    )
-    # T-VN-38 fact는 provider-dataset + immutable response lineage가 필수다.
-    # raw INSERT로 옛 provider 문자열 컬럼을 우회하지 않고 공개 anchor와 같은
-    # canonical ingestion 경로로 current summary까지 만든다.
-    selected_at = datetime.now(UTC)
-    provider = "python-kma-api"
-    dataset_key = "kma_ultra_short_forecast"
-    dataset_id = await _dataset_id(migrated_session, provider, dataset_key)
-    await migrated_session.execute(
-        text(
-            """
-            INSERT INTO ops.provider_refresh_policies (
-                provider_dataset_id, source_kind, stale_after_minutes
-            ) VALUES (:provider_dataset_id, 'system', 60)
-            ON CONFLICT (provider_dataset_id) DO UPDATE
-            SET enabled = true, stale_after_minutes = EXCLUDED.stale_after_minutes
-            """
-        ),
-        {"provider_dataset_id": dataset_id},
-    )
-    raw_data = {
-        "metric": "T1H",
-        "feature_ids": [suppressed_near_id, active_far_id],
-    }
-    payload_hash = make_payload_hash(raw_data)
-    source_entity_id = f"pfv-weather:{payload_hash[:20]}"
-    source_record = SourceRecord(
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type="weather_response",
-        source_entity_id=source_entity_id,
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=selected_at,
-        source_record_key=make_source_record_key(
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type="weather_response",
-            source_entity_id=source_entity_id,
-            raw_payload_hash=payload_hash,
-        ),
-    )
-    await weather_repo.load_weather_values(
-        migrated_session,
-        [
-            WeatherValue(
-                feature_id=feature_id,
-                provider=provider,
-                weather_domain=dataset_key,
-                forecast_style="ultra_short",
-                timeline_bucket="ultra_short",
-                metric_key="T1H",
-                value_number=Decimal("21.5"),
-                unit="deg_c",
-                issued_at=selected_at,
-                valid_at=selected_at,
-            )
-            for feature_id in (suppressed_near_id, active_far_id)
-        ],
-        provider_dataset_id=dataset_id,
-        source_record=source_record,
-        selected_at=selected_at,
-    )
-    await migrated_session.flush()
-
-    anchor = await weather_repo.nearest_weather_feature_for_coordinate(
-        migrated_session, lon=126.978, lat=37.5665, radius_m=50_000
-    )
-    assert anchor is not None
-    assert anchor.feature_id == active_far_id
-
-    by_feature = await weather_repo.nearest_weather_feature_for_feature(
-        migrated_session, feature_id=center_id, radius_m=50_000
-    )
-    assert by_feature is not None
-    assert by_feature.feature_id == active_far_id
-
-    # 비공개 feature를 target으로 한 anchor 탐색은 빈 결과(존재 은닉).
-    suppressed_target = await weather_repo.nearest_weather_feature_for_feature(
-        migrated_session, feature_id=suppressed_near_id, radius_m=50_000
-    )
-    assert suppressed_target is None
-
-
 async def _dataset_id(session: AsyncSession, provider: str, dataset_key: str) -> int:
     """fixture 전용 catalog 행을 만들고 canonical id를 돌려준다 (T-VN-33).
 
@@ -1041,118 +923,3 @@ async def test_collection_items_redact_non_public_linked_features(
     assert suppressed.place_name == "복제 장소명 suppressed"
     assert suppressed.address_hint == "복제 주소 suppressed"
     assert suppressed.metadata == {"copied_name": "아이템장소 suppressed"}
-
-
-async def test_weather_alert_history_hides_non_public_anchor(
-    migrated_session: AsyncSession,
-) -> None:
-    """특보 이력은 alert row를 보존하되 비공개 anchor의 feature 필드는 NULL이다 (리뷰 S2)."""
-    alert_active_id = _fixture_feature_uuid("pfv:alert:active")
-    alert_suppressed_id = _fixture_feature_uuid("pfv:alert:suppressed")
-    for fid, publication_state in (
-        (alert_active_id, "published"),
-        (alert_suppressed_id, "suppressed"),
-    ):
-        await _ins_feature(
-            migrated_session,
-            feature_id=fid,
-            name=f"특보 {publication_state}",
-            publication_state=publication_state,
-            kind="notice",
-        )
-    dataset_id = await _dataset_id(migrated_session, "python-kma-api", "kma_weather_alerts")
-    for i, fid in enumerate([alert_active_id, alert_suppressed_id]):
-        entity_key = f"se_pfv_alert_{i}"
-        raw_data = {
-            "alert_id": f"PFV-{i}",
-            "phenomenon": "호우",
-            "level": "주의보",
-            "title": "호우주의보",
-            "issued_at": _NOW.isoformat(),
-            "region_code": "99Z99999",
-            "region_name": "검증구역",
-        }
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO provider_sync.source_entities (
-                    source_entity_key, provider_dataset_id, source_entity_type,
-                    source_entity_id, first_seen_at, last_seen_at
-                )
-                VALUES (
-                    :entity_key, :dataset_id,
-                    'weather_alert', :entity_id, :ts, :ts
-                )
-                """
-            ),
-            {
-                "entity_key": entity_key,
-                "dataset_id": dataset_id,
-                "entity_id": f"99Z99999::호우::{i}",
-                "ts": _NOW,
-            },
-        )
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO provider_sync.source_records (
-                    source_record_key, source_entity_key, raw_data,
-                    raw_payload_hash, fetched_at
-                )
-                VALUES (
-                    :record_key, :entity_key,
-                    CAST(:raw_data AS jsonb), :payload_hash, :ts
-                )
-                """
-            ),
-            {
-                "record_key": f"sr_pfv_alert_{i}",
-                "entity_key": entity_key,
-                "raw_data": json.dumps(raw_data),
-                # ck_source_records_payload_hash_canonical = ^[0-9a-f]{1,64}$
-                "payload_hash": md5(f"pfv-alert-{i}".encode()).hexdigest(),
-                "ts": _NOW,
-            },
-        )
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO provider_sync.source_entity_heads (
-                    source_entity_key, current_source_record_key, observed_at
-                )
-                VALUES (:entity_key, :record_key, :ts)
-                """
-            ),
-            {
-                "entity_key": entity_key,
-                "record_key": f"sr_pfv_alert_{i}",
-                "ts": _NOW,
-            },
-        )
-        await migrated_session.execute(
-            text(
-                """
-                INSERT INTO provider_sync.source_links (
-                    feature_id, source_entity_key, source_role, match_method,
-                    confidence
-                )
-                VALUES (
-                    CAST(:fid AS uuid), :entity_key, 'primary', 'natural_key', 100
-                )
-                """
-            ),
-            {"fid": fid, "entity_key": entity_key},
-        )
-    await migrated_session.flush()
-
-    rows = await weather_repo.list_kma_weather_alert_history(
-        migrated_session, region_code="99Z99999"
-    )
-    by_key = {row.source_record_key: row for row in rows}
-    # alert row 2건 모두 생존 — 기상특보 자체는 anchor 공개 여부와 무관한 정보다.
-    assert set(by_key) == {"sr_pfv_alert_0", "sr_pfv_alert_1"}
-    assert by_key["sr_pfv_alert_0"].feature_id == alert_active_id
-    assert by_key["sr_pfv_alert_0"].feature_name == "특보 published"
-    # 비공개 anchor는 feature 필드가 NULL로 떨어진다 (이름/상태 leak 차단).
-    assert by_key["sr_pfv_alert_1"].feature_id is None
-    assert by_key["sr_pfv_alert_1"].feature_name is None

@@ -50,7 +50,6 @@ from .provider_pagination import (
 )
 from .quota_exhaustion import quota_exhaustion_cause
 from .upstream_requests import note_upstream_request
-from .upstream_retry import retry_upstream_awaitable
 
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
@@ -60,12 +59,9 @@ _LOGGER = logging.getLogger(__name__)
 logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 
 __all__ = [
-    "KrexRestAreaWeatherUnavailable",
     "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
     "SeoulOpenDataError",
-    "fetch_airkorea_air_quality",
-    "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
@@ -73,7 +69,6 @@ __all__ = [
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
     "fetch_krairport_airports",
-    "fetch_krex_rest_area_weather",
     "fetch_krex_rest_area_fuel_prices",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
@@ -81,9 +76,7 @@ __all__ = [
     "fetch_krforest_dulle_trails",
     "fetch_krforest_landslide_forecast_issues",
     "fetch_krforest_mountain_trails",
-    "fetch_krforest_mountain_weather",
     "fetch_krforest_recreation_forests",
-    "fetch_krforest_wildfire_risk_forecast",
     "fetch_krheritage_events",
     "fetch_krheritage_items",
     "fetch_mcst_culture_records",
@@ -101,25 +94,6 @@ __all__ = [
 
 class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
-
-
-class KrexRestAreaWeatherUnavailable(RuntimeError):
-    """EX 휴게소 기상이 lookback 창 안에서 한 시각도 관측을 주지 않았을 때.
-
-    **이것이 없으면 빈 Page가 성공이 된다.** ``krex``의 ``latest_weather()``는
-    lookback을 다 쓰고도 못 찾으면 예외가 아니라 **빈 Page를 정상 반환**한다
-    (``krex/client.py``). 그러면 이 저장소의 적재 경로 어디에도 빈 가드가 없어
-    0 bundle·0 value가 적재되고, asset이 ``_record_feature_sync_success``까지
-    실행해 cursor를 전진시키고 ``consecutive_failures``를 0으로 되돌린다 —
-    Dagster는 초록, freshness는 "방금 성공", 실제 값은 갱신 없음.
-
-    2026-09-13 적대 리뷰가 잡았다. 그 전에는 이 모듈이 lookback을 48 → 6으로
-    줄이면서 "못 찾으면 시끄럽게 실패한다"고 적었는데, 실패하는 장치가 없었다.
-
-    **쿼터성으로 분류하지 않는다.** upstream이 잠깐 멈춘 것일 수 있고 다음 시도가
-    성공할 수 있으므로 step 재시도를 남긴다. 값은 시간당 4벌 × 7요청 = 28요청이고,
-    EX OpenAPI 일일 한도는 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
-    """
 
 
 class KrexTrafficNoticeSnapshotUnstable(RuntimeError):
@@ -826,83 +800,6 @@ async def fetch_krex_rest_area_fuel_prices(
         await client.aclose()
 
 
-#: ``latest_weather``가 과거로 되짚는 시간 수. 호출 한 번의 **요청 수 상한**이
-#: ``lookback_hours + 1``이므로 이것이 곧 증폭 배수다(라이브러리 기본값 48 → 49 요청).
-#:
-#: 6으로 낮춘 이유는 비용이 아니라 **정확성**이다. 이 asset은 매시(`35 * * * *`)
-#: 돌고 upstream은 시간 단위로 발표한다. 6시간을 되짚어도 못 찾았다면 그것은
-#: "조금 늦은 데이터"가 아니라 upstream이 멈춘 것이고, 그때 48시간 전 관측을
-#: "최신 기상"으로 적재하는 것은 조용한 오염이다. 요청이 49 → 7로 주는 것은 그
-#: 판단의 부수 효과다.
-#:
-#: **그리고 못 찾았을 때 실제로 실패해야 한다.** 라이브러리는 lookback을 다 쓰면
-#: 예외가 아니라 빈 Page를 돌려주고, 이 저장소의 적재 경로에는 빈 가드가 없어
-#: 그것이 **성공 cursor 전진**으로 끝난다. 그래서 여기서
-#: :class:`KrexRestAreaWeatherUnavailable`을 던진다 — 그러지 않으면 lookback을
-#: 줄이는 것은 "낡은 데이터"를 "조용한 무데이터"로 바꾸는 일이고, 후자가 더 나쁘다.
-#:
-#: KREX(한국도로공사 EX OpenAPI)는 data.go.kr 활용신청이 아니라 일일 한도를
-#: 아직 실측하지 못했다(docs/etl/upstream-quota.md §2).
-_KREX_WEATHER_LOOKBACK_HOURS: Final = 6
-
-
-async def fetch_krex_rest_area_weather(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """고속도로 휴게소 관측 기상(rest_area_weather) record를 krex public client로 stream한다.
-
-    ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
-    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``await client.restarea.latest_weather()``
-    (``/openapi/restinfo/restWeatherList``, EX endpoint)의 record(``krex.models.
-    RestAreaWeather``, ``KrexRestAreaWeatherRecord`` Protocol 충족 — unit_code +
-    좌표 + 기온/습도/풍속/강수 wide row)를 lazily yield한다. traffic_notices와 동일
-    EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
-
-    ``latest_weather``는 전국 휴게소 1시간 snapshot을 한 Page로 돌려준다(restWeatherList
-    는 휴게소 필터 없음) — 가장 최근 데이터가 있는 시각을 lookback으로 찾는다.
-    페이지네이션은 없지만 **호출 한 번이 요청 한 번이 아니다**: 라이브러리는
-    ``range(lookback_hours + 1)``로 한 시각씩 과거로 내려가며 비어 있지 않은 첫
-    페이지를 찾는다(``krex/client.py``). 기본값 48이면 **최악 49 요청**이고, 그
-    사실이 이 저장소 어디에도 적혀 있지 않았다(T-VN-QUOTA-ARITHMETIC). native async로
-    바뀐 뒤에도 그 fan-out은 ``latest_weather`` 안의 순차 ``await``이라 요청 수는
-    그대로다(``krex/client.py``의 ``range(lookback_hours + 1)``).
-
-    그래서 여기서 명시한다 — :data:`_KREX_WEATHER_LOOKBACK_HOURS`. generator 소비
-    종료(또는 aclose)시 ``finally``에서 ``await client.aclose()``.
-    """
-    secret = settings.krex_ex_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krex rest_area_weather live fetch에는 "
-            "KOR_TRAVEL_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-    # 아니므로(부재 가능), 호출 시점에 ``importlib`` + ``cast(Any, ...)``로 resolve.
-    krex = cast(Any, importlib.import_module("krex"))
-
-    client = krex.KrexClient(ex_api_key=api_key)
-    try:
-        # 이 호출 하나가 lib 안에서 최대 `lookback+1`건을 보낸다. 이 층은 그
-        # 안을 볼 수 없으므로 **1건으로 센다** — 그래서 이름이 `_min`이다.
-        note_upstream_request()
-        page = await client.restarea.latest_weather(
-            lookback_hours=_KREX_WEATHER_LOOKBACK_HOURS,
-        )
-        if not page.items:
-            raise KrexRestAreaWeatherUnavailable(
-                "EX 휴게소 기상이 lookback "
-                f"{_KREX_WEATHER_LOOKBACK_HOURS}시간 안에 관측을 주지 않았다. "
-                "빈 결과를 성공으로 적재하면 cursor가 전진하고 실패 카운터가 "
-                "0으로 돌아가 아무도 눈치채지 못한다."
-            )
-        for item in page.items:
-            yield item
-    finally:
-        await client.aclose()
-
-
 async def fetch_knps_point_records(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -1138,54 +1035,6 @@ async def fetch_krforest_dulle_trails(
         note_upstream_request()
         records = await client.travel.dulle_trail_features()
         for record in records:
-            yield record
-    finally:
-        await client.aclose()
-
-
-async def fetch_krforest_mountain_weather(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """산악기상 관측 typed row를 페이지 단위로 stream한다(C05B)."""
-
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krforest mountain weather live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    krforest = cast(Any, importlib.import_module("krforest"))
-    client = krforest.ForestClient(api_key=secret.get_secret_value())
-    try:
-        async for record in _iter_krforest_records(
-            client.travel.mountain_weather,
-            label="krforest travel.mountain_weather",
-        ):
-            yield record
-    finally:
-        await client.aclose()
-
-
-async def fetch_krforest_wildfire_risk_forecast(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """전국 산불위험예보 V2 typed row를 stream한다(C05C)."""
-
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krforest wildfire risk live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    krforest = cast(Any, importlib.import_module("krforest"))
-    client = krforest.ForestClient(api_key=secret.get_secret_value())
-    try:
-        async for record in _iter_krforest_records(
-            client.safety.wildfire_risk_forecast,
-            label="krforest safety.wildfire_risk_forecast",
-        ):
             yield record
     finally:
         await client.aclose()
@@ -1786,44 +1635,6 @@ async def _khoa_beach_page(
 _KHOA_BEACH_MAX_PAGES: Final = 30
 
 
-_AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
-    "서울",
-    "부산",
-    "대구",
-    "인천",
-    "광주",
-    "대전",
-    "울산",
-    "경기",
-    "강원",
-    "충북",
-    "충남",
-    "전북",
-    "전남",
-    "경북",
-    "경남",
-    "제주",
-    "세종",
-)
-"""airkorea ``sido_measurements`` 전국 순회용 17개 시도명(``SidoName`` 값)."""
-
-
-def _airkorea_client(settings: KorTravelMapSettings, *, label: str) -> Any:
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            f"airkorea {label} live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    airkorea = cast(Any, importlib.import_module("airkorea"))
-    return airkorea.AirKoreaClient(
-        service_key=secret.get_secret_value(),
-        timeout=settings.provider_http_timeout_seconds,
-        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-    )
-
-
 def _krex_end_of_pages_types(krex: Any) -> tuple[type[BaseException], ...]:
     """krex가 "더 이상 페이지 없음"을 알리는 예외형 (ADR-006 — 직접 import 금지).
 
@@ -1836,179 +1647,6 @@ def _krex_end_of_pages_types(krex: Any) -> tuple[type[BaseException], ...]:
     if isinstance(resolved, type) and issubclass(resolved, BaseException):
         return (resolved,)
     return ()
-
-
-def _airkorea_end_of_pages_types() -> tuple[type[BaseException], ...]:
-    """airkorea가 "더 이상 데이터 없음"을 알리는 예외형.
-
-    ``_http.py``가 resultCode ``03``에 ``AirKoreaNoDataError``를 올리고, provider의
-    ``pagination.py``도 그것을 종료로 잡는다. 재시도 대상이 아니므로
-    ``AIRKOREA_RETRYABLE_EXCEPTION_NAMES``와는 별개다.
-    """
-    airkorea = cast(Any, importlib.import_module("airkorea"))
-    resolved = getattr(airkorea, "AirKoreaNoDataError", None)
-    if isinstance(resolved, type) and issubclass(resolved, BaseException):
-        return (resolved,)
-    return ()
-
-
-AIRKOREA_RETRYABLE_EXCEPTION_NAMES: Final[tuple[str, ...]] = (
-    "AirKoreaNetworkError",
-    "AirKoreaServerError",
-)
-"""airkorea 재시도 대상 예외 top-level 이름 — 실 lib과의 계약은 contract 테스트가
-고정한다. ``AirKoreaRateLimitError``(코드 22 — 일일 쿼터 소진)는 transient가
-아니므로 **의도적으로 제외**(리뷰 H — 쿼터 보호와 충돌)."""
-
-
-def _airkorea_retryable_types() -> tuple[type[BaseException], ...]:
-    """airkorea 예외 중 재시도 대상 — 네트워크/서버(H45).
-
-    인증·파싱·NO_DATA·쿼터는 재시도 무의미라 제외한다. airkorea lib은 kma의
-    ``retryable`` 속성 규약이 없어 타입으로 분류한다. 패키지 top-level
-    re-export에서 읽되, 부재 시(예: 테스트 fake 모듈) 빈 tuple로 degrade하고
-    경고를 남긴다 — 재시도 없이 종전 즉시-전파 동작(무음 금지, 리뷰 M).
-    """
-
-    airkorea = cast(Any, importlib.import_module("airkorea"))
-    resolved = tuple(
-        candidate
-        for name in AIRKOREA_RETRYABLE_EXCEPTION_NAMES
-        if isinstance(candidate := getattr(airkorea, name, None), type)
-        and issubclass(candidate, BaseException)
-    )
-    if len(resolved) != len(AIRKOREA_RETRYABLE_EXCEPTION_NAMES):
-        _LOGGER.warning(
-            "airkorea 재시도 예외 분류 불완전 — %d/%d 이름만 해석됨: 재시도가 "
-            "부분/전체 비활성 상태로 degrade한다 (H45)",
-            len(resolved),
-            len(AIRKOREA_RETRYABLE_EXCEPTION_NAMES),
-        )
-    return resolved
-
-
-async def _airkorea_close(client: Any) -> None:
-    """airkorea client를 닫는다 — `airkorea`가 async-only가 되어 `aclose()`다.
-
-    `getattr` 가드를 남긴다. 이 저장소가 `close`/`aclose` 어느 쪽도 없는 fake로
-    이 경계를 여러 번 테스트하고, 닫기 실패로 fetch 결과를 잃는 것은 이 자리에서
-    원하는 동작이 아니다.
-    """
-
-    aclose = getattr(client, "aclose", None)
-    if callable(aclose):
-        await aclose()
-
-
-async def fetch_airkorea_stations(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """대기질 측정소 메타데이터를 airkorea public client로 stream한다.
-
-    ``settings.data_go_kr_service_key``로 ``AirKoreaClient(service_key=...)``를 열고
-    ``stations(page_no=N)``을 페이지네이션하며 ``Station``(krtour
-    ``AirQualityStationItem`` Protocol 충족, station_name/addr/lat/lon)을 yield.
-    측정소는 weather-kind feature가 되고 측정값은 별도 fetcher가 가져온다.
-    """
-    client = _airkorea_client(settings, label="stations")
-    retryable_types = _airkorea_retryable_types()
-    budget = _provider_retry_budget(settings, expected_calls=1)
-    num_of_rows = 100
-    try:
-
-        async def _page(page_no: int) -> ProviderPage:
-            # H45(리뷰 1 M-3): air_quality asset이 stations를 먼저 읽으므로 이
-            # 경계도 동일 재시도 — 절반만 고치면 증상이 그대로 남는다.
-            items = await retry_upstream_awaitable(
-                partial(_airkorea_stations_page, client, page_no, num_of_rows),
-                label=f"airkorea stations p{page_no}",
-                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
-                is_retryable=lambda exc: isinstance(exc, retryable_types),
-                budget=budget,
-                on_retry=_LOGGER.warning,
-            )
-            # ``client.stations``는 Page가 아니라 iterable을 돌려주므로 선언 건수를
-            # 알 수 없다. provider의 totalCount fail-close(``_raw_page``)는 이 경로에
-            # **없다** — ``stations``/``sido_measurements``는 ``_items(body)``에서
-            # 바로 만들고 ``_raw_page``를 거치지 않는다(적대 리뷰 실증). 따라서 짧은
-            # 페이지 휴리스틱과 아래 종료 예외만이 판정 근거다.
-            return ProviderPage(items=items, total_count=None)
-
-        async for item in aiter_paginated_items(
-            _page,
-            num_of_rows=num_of_rows,
-            label="airkorea stations",
-            end_of_pages=_airkorea_end_of_pages_types(),
-            warn=_LOGGER.warning,
-        ):
-            yield item
-    finally:
-        await _airkorea_close(client)
-
-
-async def _airkorea_stations_page(client: Any, page_no: int, num_of_rows: int) -> list[Any]:
-    """측정소 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
-
-    return list(await client.stations(page_no=page_no, num_of_rows=num_of_rows))
-
-
-async def fetch_airkorea_air_quality(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """대기질 실시간 측정값을 airkorea public client로 stream한다.
-
-    시도별(``_AIRKOREA_SIDO_NAMES``) ``sido_measurements(sido, page_no=N)``을
-    페이지네이션하며 ``AirQualityMeasurement``(krtour ``AirQualityMeasurementItem``
-    Protocol 충족)를 yield한다. 측정소명으로 station feature에 조인된다.
-    """
-    client = _airkorea_client(settings, label="air_quality")
-    retryable_types = _airkorea_retryable_types()
-    budget = _provider_retry_budget(
-        settings,
-        expected_calls=len(_AIRKOREA_SIDO_NAMES),
-    )
-    num_of_rows = 100
-    try:
-        for sido in _AIRKOREA_SIDO_NAMES:
-
-            async def _page(page_no: int, sido: str = sido) -> ProviderPage:
-                # H45: 시도×페이지 단건 호출만 유한 재시도 — 17개 시도 순회가
-                # upstream 간헐 504(실측 SERVICETIMEOUT_ERROR)에 전멸하지 않게.
-                items = await retry_upstream_awaitable(
-                    partial(
-                        _airkorea_sido_page,
-                        client,
-                        sido,
-                        page_no=page_no,
-                        num_of_rows=num_of_rows,
-                    ),
-                    label=f"airkorea sido_measurements {sido} p{page_no}",
-                    base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
-                    is_retryable=lambda exc: isinstance(exc, retryable_types),
-                    budget=budget,
-                    on_retry=_LOGGER.warning,
-                )
-                return ProviderPage(items=items, total_count=None)
-
-            async for item in aiter_paginated_items(
-                _page,
-                num_of_rows=num_of_rows,
-                label=f"airkorea sido_measurements {sido}",
-                end_of_pages=_airkorea_end_of_pages_types(),
-                warn=_LOGGER.warning,
-            ):
-                yield item
-    finally:
-        await _airkorea_close(client)
-
-
-async def _airkorea_sido_page(
-    client: Any, sido: str, *, page_no: int, num_of_rows: int
-) -> list[Any]:
-    """시도별 측정값 1페이지를 **재시도 경계 안에서** 소진한다 — lazy iterator를
-    경계 밖으로 내보내면 소비 중 network 예외가 재시도를 우회한다(H45)."""
-
-    return list(await client.sido_measurements(sido, page_no=page_no, num_of_rows=num_of_rows))
 
 
 def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:

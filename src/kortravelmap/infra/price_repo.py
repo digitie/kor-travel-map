@@ -492,7 +492,7 @@ async def materialize_current_price_summary(
 
     # summary는 전역 projection이다. desired 집합을 계산한 오래된 transaction이
     # 더 새 writer의 series를 stale-delete 또는 pointer rollback하지 않도록
-    # weather projection과 같은 transaction advisory lock으로 직렬화한다.
+    # transaction advisory lock으로 직렬화한다.
     await session.execute(
         text(_ACQUIRE_PRICE_CURRENT_SUMMARY_LOCK_SQL),
         {"lock_id": _PRICE_CURRENT_SUMMARY_LOCK_ID},

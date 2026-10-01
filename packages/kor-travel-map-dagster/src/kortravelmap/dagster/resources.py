@@ -42,8 +42,6 @@ from .feature_operation_tracking import (
 )
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
-    fetch_airkorea_air_quality,
-    fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
@@ -52,16 +50,13 @@ from .provider_fetchers import (
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
     fetch_krex_rest_area_fuel_prices,
-    fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
     fetch_krforest_landslide_forecast_issues,
     fetch_krforest_mountain_trails,
-    fetch_krforest_mountain_weather,
     fetch_krforest_recreation_forests,
-    fetch_krforest_wildfire_risk_forecast,
     fetch_krheritage_events,
     fetch_krheritage_items,
     fetch_mcst_culture_records,
@@ -160,14 +155,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         source_env_names=("KEX_GO_API_KEY", "DATA_GO_KR_SERVICE_KEY"),
     ),
     ProviderRecordResourceSpec(
-        resource_key="krex_rest_area_weather",
-        provider_package="python-krex-api",
-        dataset_key="krex_rest_area_weather",
-        setting_names=("krex_ex_api_key",),
-        source_env_names=("KEX_GO_API_KEY",),
-        note="restWeatherList(EX)는 전국 휴게소 관측 기상을 1시간 snapshot으로 반환.",
-    ),
-    ProviderRecordResourceSpec(
         resource_key="krex_rest_area_fuel_prices",
         provider_package="python-krex-api",
         dataset_key="krex_rest_area_prices",
@@ -250,22 +237,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note="PBD0000031 SHP aggregate를 route geometry로 파싱한다.",
     ),
     ProviderRecordResourceSpec(
-        resource_key="krforest_mountain_weather",
-        provider_package="python-krforest-api",
-        dataset_key="krforest_mountain_weather",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="산악기상 관측 station과 WeatherValue를 6회/일 snapshot으로 적재한다.",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="krforest_wildfire_risk_forecast",
-        provider_package="python-krforest-api",
-        dataset_key="krforest_wildfire_risk_forecast",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="forestPointV2 전국 산불위험 예보를 6회/일 snapshot으로 적재한다.",
-    ),
-    ProviderRecordResourceSpec(
         resource_key="krforest_landslide_forecast_issues",
         provider_package="python-krforest-api",
         dataset_key="krforest_landslide_forecast_issues",
@@ -329,22 +300,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         provider_package="python-krairport-api",
         dataset_key="krairport_airports",
         note="공항 메타데이터는 번들 정적 데이터(keyless).",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="airkorea_stations",
-        provider_package="python-airkorea-api",
-        dataset_key="airkorea_stations",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="대기질 측정소(weather-kind feature) — 측정값과 station_name으로 조인.",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="airkorea_air_quality",
-        provider_package="python-airkorea-api",
-        dataset_key="airkorea_air_quality",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="대기질 실시간 측정값 → 오염물질별 WeatherValue(시도별 전국 순회).",
     ),
     ProviderRecordResourceSpec(
         resource_key="visitkorea_festival_events",
@@ -634,20 +589,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_areas"] = (
     )
 )
 
-_KREX_REST_AREA_WEATHER_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krex_rest_area_weather"
-)
-"""krex 휴게소 관측 기상 spec 참조 (live resource override용)."""
-
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_area_weather"] = (
-    build_provider_record_live_resource(
-        _KREX_REST_AREA_WEATHER_SPEC,
-        fetch_krex_rest_area_weather,
-    )
-)
-
 _KREX_REST_AREA_FUEL_PRICES_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -810,30 +751,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_dulle_trails"] = (
     )
 )
 
-_KRFOREST_MOUNTAIN_WEATHER_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krforest_mountain_weather"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_mountain_weather"] = (
-    build_provider_record_live_resource(
-        _KRFOREST_MOUNTAIN_WEATHER_SPEC,
-        fetch_krforest_mountain_weather,
-    )
-)
-
-_KRFOREST_WILDFIRE_RISK_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krforest_wildfire_risk_forecast"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_wildfire_risk_forecast"] = (
-    build_provider_record_live_resource(
-        _KRFOREST_WILDFIRE_RISK_SPEC,
-        fetch_krforest_wildfire_risk_forecast,
-    )
-)
-
 _KRFOREST_LANDSLIDE_FORECAST_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -962,30 +879,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krairport_airports"] = (
     build_provider_record_live_resource(
         _KRAIRPORT_AIRPORTS_SPEC,
         fetch_krairport_airports,
-    )
-)
-
-_AIRKOREA_STATIONS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "airkorea_stations"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["airkorea_stations"] = (
-    build_provider_record_live_resource(
-        _AIRKOREA_STATIONS_SPEC,
-        fetch_airkorea_stations,
-    )
-)
-
-_AIRKOREA_AIR_QUALITY_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "airkorea_air_quality"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["airkorea_air_quality"] = (
-    build_provider_record_live_resource(
-        _AIRKOREA_AIR_QUALITY_SPEC,
-        fetch_airkorea_air_quality,
     )
 )
 

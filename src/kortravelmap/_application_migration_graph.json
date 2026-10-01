@@ -9,6 +9,12 @@
         "400"
       ],
       "revision": "401_retire_map_kma_refresh"
+    },
+    {
+      "down_revision": [
+        "401_retire_map_kma_refresh"
+      ],
+      "revision": "402_remove_map_weather_data"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

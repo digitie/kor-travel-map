@@ -22,7 +22,7 @@
   `list_active_poi_cache_target_external_systems`·`has_active_poi_cache_targets_for_external_system`·
   `list_active_place_coords`와 대응 repo 함수, `providers.kma.parse_weather_extra_points`·
   `parse_mid_region_features`·`KmaMidRegionSpec`(KMA Dagster 전용이었다).
-- **ADDED (test)**: `test_map_dagster_has_no_kma.py` — 카탈로그 정체성(provider)과 효과(KMA client import·
+- **ADDED (test)**: `test_map_dagster_has_no_weather.py` — 카탈로그 정체성(provider)과 효과(KMA client import·
   KMA data.go.kr 경로)로 재도입을 막는다. `test_head_enables_no_kma_load_operation`이 DB 축을 본다.
 
 ### 공유 Dagster plane 합류 전 차단 항목 (2026-10-01)

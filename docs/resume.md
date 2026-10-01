@@ -5,7 +5,7 @@
 **다음 한 작업: CI 전량(통합 두 leg 포함) + 적대 리뷰 뒤 PR·머지 → 다음 Map pinned pair로 배포(migration 401 전진).**
 
 - KMA job·asset·schedule·resource·큐 runner spec·handler binding을 지웠고 `401_retire_map_kma_refresh`가 카탈로그의
-  KMA 적재 operation을 끈다. 재도입은 `test_map_dagster_has_no_kma.py`·`test_head_enables_no_kma_load_operation`이 막는다.
+  KMA 적재 operation을 끈다. 재도입은 `test_map_dagster_has_no_weather.py`·`test_head_enables_no_kma_load_operation`이 막는다.
 - 배포 영향(prod 읽기 전용 실측): Map KMA instigator·run 0(공유·옛 instance 모두), KMA 멤버십 import job·요청 0,
   KMA feature 0. 배포 뒤 Map location의 job 목록에서 KMA 5개가 사라지고 `/ops/datasets`의 KMA 갱신 capability가 없어진다.
 - 후속: C7 러너 가족 정리(KMA 기반, 이미 실행 불가), `python-kma-api` 핀 제거, Manager compose `KOR_TRAVEL_MAP_KMA_*` env 제거.

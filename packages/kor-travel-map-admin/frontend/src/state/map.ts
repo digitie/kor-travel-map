@@ -21,7 +21,7 @@ interface MapStoreState {
   viewport: MapViewport;
   featureViewMode: FeatureViewMode;
   selectedFeatureId: string | null;
-  /** 활성 feature kind. 빈 set이면 전체 표시, 기본값은 weather/notice. */
+  /** 활성 feature kind. 빈 set이면 전체 표시, 기본값은 notice. */
   activeFeatureKinds: ReadonlySet<string>;
   /** 활성 카테고리 8자리 코드 (PlaceCategoryCode). 빈 set이면 전체 표시. */
   activeCategoryCodes: ReadonlySet<string>;
@@ -47,7 +47,7 @@ const DEFAULT_VIEWPORT: MapViewport = {
   zoom: 6.5,
 };
 
-export const DEFAULT_FEATURE_MAP_KINDS = ["weather", "notice"] as const;
+export const DEFAULT_FEATURE_MAP_KINDS = ["notice"] as const;
 
 function defaultFeatureKinds(): Set<string> {
   return new Set<string>(DEFAULT_FEATURE_MAP_KINDS);

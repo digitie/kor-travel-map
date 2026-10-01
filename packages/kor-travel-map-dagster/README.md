@@ -81,16 +81,12 @@ provider record resource:
 - `krforest_arboretums`
 - `krforest_mountain_trails`
 - `krforest_dulle_trails`
-- `krforest_mountain_weather`
-- `krforest_wildfire_risk_forecast`
 - `krforest_landslide_forecast_issues`
 - `standard_museums`
 - `standard_tourist_attractions`
 - `standard_parking_lots`
 - `khoa_beaches`
 - `krairport_airports`
-- `airkorea_stations`
-- `airkorea_air_quality`
 - `visitkorea_festival_events`
 - `kor_travel_concierge_youtube_features`
 
@@ -119,16 +115,12 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `krforest_arboretums` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_mountain_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_dulle_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `krforest_mountain_weather` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `krforest_wildfire_risk_forecast` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_landslide_forecast_issues` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_museums` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_tourist_attractions` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_parking_lots` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `khoa_beaches` | `python-khoa-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krairport_airports` | `python-krairport-api` | 없음 | 없음 |
-| `airkorea_stations` | `python-airkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `airkorea_air_quality` | `python-airkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `visitkorea_festival_events` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `kor_travel_concierge_youtube_features` | `kor-travel-concierge` | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | 없음(DB `read` 키 발급) |
 
@@ -151,8 +143,6 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` |
 | `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `0 2 1 * *` |
 | `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `15 2 1 * *` |
-| `feature_weather_krforest_mountain_weather_six_daily_schedule` | `feature_weather_krforest_mountain_weather_job` | `0 1,5,9,13,17,21 * * *` |
-| `feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule` | `feature_weather_krforest_wildfire_risk_forecast_job` | `10 1,5,9,13,17,21 * * *` |
 | `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` |
 
 ## Curation candidate 갱신

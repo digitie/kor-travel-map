@@ -59,13 +59,13 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_items": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_link_decisions": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "current_weather_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_price_values": ("SELECT", "INSERT"),
-    "feature_weather_values": ("SELECT", "INSERT"),
+    # `feature_weather_values`·`current_weather_summary`는 migration 402가 지웠다(ADR-105).
+    # 표에서도 뺀다 — 남겨 두면 아래 phantom 검사가 잡는다.
     # `weather_metric_series`(legacy 0069)는 vNext baseline에 없다 — phantom 항목이라 지웠다.
     # 표에 있어도 DB에 없으면 reconcile이 건너뛰므로 아무 것도 지키지 않는다.
     # phantom은 `tests/integration/test_runtime_privileges_acl.py::

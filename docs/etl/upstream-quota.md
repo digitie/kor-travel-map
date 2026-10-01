@@ -3,7 +3,7 @@
 > **Map의 KMA(기상청) 호출은 0이다(2026-10-01, ADR-104).** KMA는 kor-travel-weather가
 > 소유한다. Map Dagster에는 KMA job·asset·schedule·sensor·runner spec이 없고, DB 카탈로그의
 > KMA 적재 operation은 `401_retire_map_kma_refresh`로 꺼져 있으며, Map 런타임 소스는 KMA
-> client 패키지를 import하지 않는다(`test_map_dagster_has_no_kma.py`). data.go.kr 키는
+> client 패키지를 import하지 않는다(`test_map_dagster_has_no_weather.py`). data.go.kr 키는
 > weather와 함께 쓰므로 아래 기상청 행의 오퍼레이션당 한도는 **weather가 전부 쓴다** —
 > Map 몫은 없다. 아래 기상청 행과 §3은 분모를 어떻게 얻었는지의 기록으로만 남긴다.
 

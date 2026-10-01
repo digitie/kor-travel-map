@@ -199,15 +199,6 @@ def _cluster_code_column_arguments(module: Any, builder: Any) -> list[dict[str, 
     return [{name: column} for column in sorted(set(columns.values()))]
 
 
-def _nearest_anchor_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
-    """anchor 술어는 호출부가 쓰는 세 가지 그대로다 — 빈 것과 두 술어."""
-    return [
-        {"exists_predicate": ""},
-        {"exists_predicate": f"AND {module._KMA_FORECAST_PREDICATE}"},
-        {"exists_predicate": f"AND {module._OBSERVED_TEMP_PREDICATE}"},
-    ]
-
-
 #: 켜짐/꺼짐으로 SQL 모양을 가르는 필터 인자의 "켜짐" 대역값. 값 자체는
 #: 모양에만 쓰이므로(`is not None` 분기) 진위가 아니라 **타입**만 맞으면 된다.
 _FILTER_STAND_INS: Final[dict[str, Any]] = {
@@ -279,18 +270,13 @@ _BUILDER_ARGUMENTS: Final[dict[str, Any]] = {
     "kortravelmap.infra.admin_feature_repo._admin_cluster_bbox_sql": (
         _cluster_code_column_arguments
     ),
-    "kortravelmap.infra.weather_repo._nearest_anchor_sql": _nearest_anchor_arguments,
-    "kortravelmap.infra.weather_repo._historical_nearest_anchor_sql": (
-        _nearest_anchor_arguments
-    ),
-    "kortravelmap.infra.weather_repo._admin_nearest_anchor_sql": (
-        _nearest_anchor_arguments
-    ),
 }
 
 #: 조립기 수집 하한. 숫자가 목적이 아니라 **수집이 살아 있음**이 목적이다.
-_MINIMUM_SQL_BUILDERS: Final[int] = 40
-_MINIMUM_CALLED_BUILDERS: Final[int] = 40
+#: 2026-10-01 ADR-105가 ``weather_repo``(이름으로 적어 둔 조립기 셋)를 걷어내며 40에서
+#: 내렸다 — 그날 ``src``의 모듈 최상단 ``*_sql`` 동기 함수는 39개였다.
+_MINIMUM_SQL_BUILDERS: Final[int] = 30
+_MINIMUM_CALLED_BUILDERS: Final[int] = 30
 
 #: 이름이 `_sql`로 끝나지만 조립기가 아닌 것. 이유를 적는다.
 _NOT_A_SQL_BUILDER: Final[dict[str, str]] = {

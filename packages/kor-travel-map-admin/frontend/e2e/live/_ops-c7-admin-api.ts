@@ -10,12 +10,17 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { expect } from "@playwright/test";
-import type { Locator, Page, Response, Route, TestInfo } from "@playwright/test";
+import type { Page, TestInfo } from "@playwright/test";
 
 import type { components } from "../../src/api/types";
 
-import { dagsterAuthorizationHeaders } from "./_dagster-basic-auth";
+// C7 live spec 공용 helper. same-origin BFF 호출과, C7 spec이 만드는 POI/cache target의
+// crash-safe 소유·복원 journal(`E2E_C7_TARGET_STATE_FILE`)을 맡는다.
+//
+// 2026-10-01: Map은 weather를 더 적재하지 않는다(ADR-104/105). 이 helper가 들고 있던
+// KMA exact-scope 갱신 요청(`external_system:c7-e2e` × `kma_ultra_short_nowcast`)의
+// 제출·소유·취소·Dagster run 결박은 그 spec 넷과 함께 지웠다. journal에 남은 것은
+// target 소유권뿐이다 — 이 helper로는 feature update request를 만들지 않는다.
 
 export type BrowserFetchResult<T> = {
   body: T | null;
@@ -29,28 +34,6 @@ export type PoiCacheTargetResponse =
   components["schemas"]["PoiCacheTargetResponse"];
 export type PoiCacheTargetListResponse =
   components["schemas"]["PoiCacheTargetListResponse"];
-export type FeatureUpdateRequestCreateRequest =
-  components["schemas"]["FeatureUpdateRequestCreateRequest"];
-export type FeatureUpdateRequestCreateResponse =
-  components["schemas"]["FeatureUpdateRequestCreateResponse"];
-export type FeatureUpdateRequestPreviewRequest =
-  components["schemas"]["FeatureUpdateRequestPreviewRequest"];
-export type FeatureUpdateRequestPreviewResponse =
-  components["schemas"]["FeatureUpdateRequestPreviewResponse"];
-export type FeatureUpdateRequestMutationResponse =
-  components["schemas"]["FeatureUpdateRequestMutationResponse"];
-export type PipelineExecutionDetailResponse =
-  components["schemas"]["PipelineExecutionDetailResponse"];
-export type PipelineOverviewResponse =
-  components["schemas"]["PipelineOverviewResponse"];
-export type PipelineExecutionsListResponse =
-  components["schemas"]["PipelineExecutionsListResponse"];
-export type OpsDatasetDetailResponse =
-  components["schemas"]["OpsDatasetDetailResponse"];
-export type OpsDatasetsGridResponse =
-  components["schemas"]["OpsDatasetsGridResponse"];
-export type PipelineCancellationResponse =
-  components["schemas"]["PipelineCancellationResponse"];
 
 export type TargetRef = { externalSystem: string; targetKey: string };
 type OwnedTarget = TargetRef & {
@@ -60,51 +43,25 @@ type OwnedTarget = TargetRef & {
   targetId: string;
 };
 export type CleanupResult = {
-  allRequestsTerminal: boolean;
   preservedForManualCleanup: boolean;
   restored: boolean;
 };
-export type CleanupScenario = "active" | "empty" | "cap" | "invalidation";
-/** 요청 하나를 이 시나리오 것이라고 말할 수 있게 하는 canonical triple. */
-export type KmaScopeExpectation = {
-  operationKey: string;
-  providerDatasetId: number;
-  syncScope: string;
-};
-/** triple에 durable idempotency key까지 묶어 request id와 1:1로 만든다. */
-export type KmaRequestOwnership = KmaScopeExpectation & {
-  idempotencyKey: string;
-};
-type TrackedIdempotencyEntries = Map<
-  string,
-  {
-    body: FeatureUpdateRequestCreateRequest;
-    requestId: string | null;
-    status: string;
-  }
->;
+/** journal을 쓰는 C7 시나리오. 러너는 최종 journal에서 이 집합 전부의 완료를 요구한다. */
+export type CleanupScenario = "invalidation";
+const CLEANUP_SCENARIOS: readonly CleanupScenario[] = ["invalidation"];
 export type CleanupState = {
-  allIdempotencyEntries: TrackedIdempotencyEntries;
-  allRequestIds: Set<string>;
-  allRequestOwnership: Map<string, KmaRequestOwnership>;
-  requestOwnership: Map<string, KmaRequestOwnership>;
-  allRequestTerminalStatuses: Map<string, string>;
+  allExternalSystems: Set<string>;
+  allTargetRefs: Map<string, TargetJournalRef>;
   cleanupResult: CleanupResult | null;
   completedScenarios: Set<CleanupScenario>;
   externalSystems: Set<string>;
-  allExternalSystems: Set<string>;
-  idempotencyEntries: TrackedIdempotencyEntries;
   journalWrite: Promise<void>;
-  requestIds: Set<string>;
-  requestTerminalStatuses: Map<string, string>;
   runId: string;
   scenario: CleanupScenario;
-  scopeStateCount: number;
   stateFile: string;
-  targetStatuses: Map<string, string>;
   targetHistory: TargetJournalRef[];
+  targetStatuses: Map<string, string>;
   targets: OwnedTarget[];
-  allTargetRefs: Map<string, TargetJournalRef>;
 };
 
 type TargetJournalRef = TargetRef & {
@@ -118,10 +75,6 @@ type TargetJournalRef = TargetRef & {
 type CleanupIssue = {
   http_status?: number;
   kind:
-    | "request_detail"
-    | "request_cancel"
-    | "request_ownership"
-    | "request_terminal_timeout"
     | "target_delete"
     | "target_intent_recovery"
     | "target_residue"
@@ -134,157 +87,32 @@ type CleanupExecution = {
   result: CleanupResult;
 };
 
-// src/kortravelmap/providers/kma.py와 schedules.py의 canonical identity.
-/** `kortravelmap.core.sync_scope.EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX`와 같은 값. */
-export const EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX = "external_system:" as const;
-/** C7 인수 harness가 쓰는 external system.
- *
- *  ADR-088 이후 제출 가능한 `sync_scope` 집합의 정본은 catalog 선언이다
- *  (`provider_dataset_operation_scopes`, API가 exact join으로 요구하고 exact FK 4종이
- *  구조로 강제한다). 그래서 run마다 이름을 새로 만들 수 없다 — 선언되지 않은 값은
- *  preview/create가 422다. 이름은 migration `0224_c7_external_system_scope`가
- *  선언한 값과 같아야 하고, run 격리는 `target_key`가 맡는다.
- *
- *  이 scope를 쓰는 이유(= `target_grids`를 쓰지 않는 이유): `target_grids`는 "모든 활성
- *  cache target + extra points"라 인수 실행이 운영 대상에 provider I/O를 내고
- *  `membership_fingerprint`가 비결정적이 되며, `provider_sync_state`의 정본 cursor 행을
- *  스케줄 job과 공유한다. */
-export const C7_EXTERNAL_SYSTEM = "c7-e2e" as const;
-export const C7_KMA_SYNC_SCOPE =
-  `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${C7_EXTERNAL_SYSTEM}` as const;
-
-export const KMA_PROVIDER = "python-kma-api" as const;
-export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
-export const KMA_NOWCAST_OPERATION_KEY =
-  "feature_weather_kma_ultra_short_nowcast_job" as const;
-export const KMA_SAFE_DAGSTER_JOB =
-  "feature_update_request_worker" as const;
-export const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;
-
-export const REQUEST_TERMINAL_TIMEOUT = 8 * 60 * 1000;
-export const CLEANUP_TERMINAL_TIMEOUT = 90 * 1000;
-export const TERMINAL_STATUSES = new Set(["done", "failed", "cancelled"]);
-
-const POI_TARGETS_PATH = "/v1/admin/poi-cache-targets";
-const PIPELINE_REQUESTS_PATH = "/v1/ops/pipeline/requests";
-const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
-const BROWSER_FETCH_TIMEOUT_MS = 30_000;
-// dataset detail은 per-scope 실행/이벤트 이력을 집계하므로 대량 이력 상황에서
-// 기본 timeout보다 여유가 필요하다(서버측 scoped 쿼리 최적화의 안전 마진).
-export const DATASET_DETAIL_FETCH_TIMEOUT_MS = 60_000;
-const DAGSTER_GRAPHQL_TIMEOUT_MS = 15_000;
-const DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS = 60_000;
-const OWNED_TARGET_PAGE_SIZE = 500;
-const OWNED_TARGET_SET_LIMIT = 501;
-const OWNED_TARGET_PAGE_LIMIT = 2;
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const bootstrappedPages = new WeakSet<Page>();
-
-/**
- * Map code location selector — `docker/workspace.yaml`의 `location_name`이 정본이다
- * (`tests/unit/test_dagster_code_location_is_one_name.py`가 결박). 공유 Dagster
- * webserver에서 다른 프로젝트의 repository를 읽지 않도록 조회를 이것으로 좁힌다.
- */
-const MAP_DAGSTER_REPOSITORY_SELECTOR = {
-  repositoryName: "__repository__",
-  repositoryLocationName: "kortravelmap.dagster.definitions",
-} as const;
-
-const KMA_DAGSTER_JOB_DISCOVERY_QUERY = `
-query C7KmaWorkerJobDiscovery($repositorySelector: RepositorySelector!) {
-  repositoryOrError(repositorySelector: $repositorySelector) {
-    __typename
-    ... on Repository {
-      pipelines { name isJob }
-    }
-  }
-}
-`;
-
-const KMA_DAGSTER_RUN_IDENTITY_QUERY = `
-query C7KmaWorkerRunIdentity($runId: ID!) {
-  runOrError(runId: $runId) {
-    __typename
-    ... on Run {
-      runId
-      jobName
-      status
-      tags { key value }
-    }
-  }
-}
-`;
-
-const FEATURE_UPDATE_REQUEST_ID_TAG =
-  "kor_travel_map.feature_update_request_id";
-const FEATURE_UPDATE_REQUEST_GENERATION_TAG =
-  "kor_travel_map.feature_update_request_generation";
-const FEATURE_UPDATE_SCOPE_TYPE_TAG =
-  "kor_travel_map.feature_update_scope_type";
-const DAGSTER_SENSOR_NAME_TAG = "dagster/sensor_name";
-const DAGSTER_TERMINAL_STATUSES = new Set([
-  "SUCCESS",
-  "FAILURE",
-  "CANCELED",
-]);
-
-type GraphqlEnvelope = {
-  data?: unknown;
-  errors?: unknown;
-};
+/** host orchestrator가 첫 durable write 전에 깔아 두는 placeholder(`poi.json`과 같은 꼴). */
+const ORCHESTRATOR_PLACEHOLDER = { phase: "orchestrator_pending", version: 1 };
 
 type DurableCleanupJournal = {
   cleanup_result: CleanupResult | null;
   completed_scenarios: CleanupScenario[];
   external_systems: string[];
-  idempotency_entries: Array<{
-    body: FeatureUpdateRequestCreateRequest;
-    idempotency_key: string;
-    request_id: string | null;
-    status: string;
-  }>;
   phase: string;
-  request_ids: string[];
-  request_ownership: Array<{
-    idempotency_key: string;
-    operation_key: string;
-    provider_dataset_id: number;
-    request_id: string;
-    sync_scope: string;
-  }>;
-  request_terminal_statuses: Record<string, string>;
   run_id: string;
   scenario: CleanupScenario;
-  scope_state_count: number;
   target_refs: TargetJournalRef[];
   target_history: TargetJournalRef[];
   updated_at: string;
-  version: 4;
+  version: 1;
 };
+
+const POI_TARGETS_PATH = "/v1/admin/poi-cache-targets";
+const FORBIDDEN_PROVIDER_PATTERN = /opinet/i;
+const BROWSER_FETCH_TIMEOUT_MS = 30_000;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const bootstrappedPages = new WeakSet<Page>();
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STRONG_ENTITY_TAG_PATTERN =
   /^"([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):([1-9][0-9]*)"$/;
-
-async function boundedWait<T>(
-  promise: Promise<T>,
-  operation: string,
-  timeoutMs = BROWSER_FETCH_TIMEOUT_MS,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      timeout = setTimeout(
-        () => reject(new Error(`${operation} 제한 시간 초과`)),
-        timeoutMs,
-      );
-      promise.then(resolve, reject);
-    });
-  } finally {
-    if (timeout !== null) clearTimeout(timeout);
-  }
-}
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -357,80 +185,13 @@ export async function bootstrapC7SameOriginPage(
     throw new Error("C7 same-origin/auth bootstrap guard 실패 (values redacted)");
   }
   bootstrappedPages.add(page);
-  // ADR-088 triple identity는 카탈로그가 발급하는 런타임 값이라 상수로 박을 수 없다.
-  // KMA mutation plan을 동기적으로 조립하는 헬퍼들이 쓸 수 있도록 bootstrap에서
-  // 미리 푼다. 여기서 실패해도 bootstrap 자체는 막지 않는다 — KMA identity를
-  // 실제로 요구하는 헬퍼가 requireKmaDatasetIdentity()로 명시적으로 실패한다
-  // (KMA를 쓰지 않는 C7 read/schedule spec 보호).
-  await resolveKmaDatasetIdentity(page).catch(() => undefined);
-}
-
-/** ADR-088 exact membership triple 중 dataset이 발급하는 두 값. */
-export type KmaDatasetIdentity = {
-  operationKey: string;
-  providerDatasetId: number;
-};
-
-let resolvedKmaDatasetIdentity: KmaDatasetIdentity | null = null;
-
-/**
- * `/v1/ops/datasets` 그리드에서 canonical KMA 행을 찾아 `provider_dataset_id`와
- * `operation_key`를 푼다.
- *
- * 그리드 1행의 identity는 `provider_dataset_id × sync_scope × operation_key`라
- * external_system scope마다 행이 늘어난다. dataset identity는
- * `(provider_dataset_id, operation_key)`로 접고, 형제 operation이 둘 이상이면
- * C7 mutation이 어느 operation을 실행하는지 단정할 수 없으므로 실패시킨다.
- */
-export async function resolveKmaDatasetIdentity(
-  page: Page,
-): Promise<KmaDatasetIdentity> {
-  if (resolvedKmaDatasetIdentity !== null) return resolvedKmaDatasetIdentity;
-  const grid = requireBody(
-    await browserFetch<OpsDatasetsGridResponse>(page, "/v1/ops/datasets", {
-      timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS,
-    }),
-    200,
-  );
-  const unique = new Map<string, KmaDatasetIdentity>();
-  for (const row of grid.data.items) {
-    if (
-      row.provider !== KMA_PROVIDER ||
-      row.dataset_key !== KMA_DATASET_KEY ||
-      row.operation_key === null
-    ) {
-      continue;
-    }
-    unique.set(`${row.provider_dataset_id}\u0000${row.operation_key}`, {
-      operationKey: row.operation_key,
-      providerDatasetId: row.provider_dataset_id,
-    });
-  }
-  const identities = [...unique.values()];
-  if (identities.length !== 1) {
-    throw new Error(
-      "C7 live E2E는 KMA dataset의 단일 canonical (provider_dataset_id, operation_key) identity를 요구합니다",
-    );
-  }
-  resolvedKmaDatasetIdentity = identities[0];
-  return identities[0];
-}
-
-/** 이미 해석된 KMA triple identity를 동기 plan 조립/가드에서 읽는다. */
-export function requireKmaDatasetIdentity(): KmaDatasetIdentity {
-  if (resolvedKmaDatasetIdentity === null) {
-    throw new Error(
-      "KMA provider_dataset_id/operation_key가 아직 해석되지 않았습니다 — bootstrapC7SameOriginPage 또는 resolveKmaDatasetIdentity를 먼저 호출하세요",
-    );
-  }
-  return resolvedKmaDatasetIdentity;
 }
 
 function cleanupStateFile(): string {
-  const value = process.env.E2E_C7_KMA_STATE_FILE;
+  const value = process.env.E2E_C7_TARGET_STATE_FILE;
   if (!value || !path.isAbsolute(value)) {
     throw new Error(
-      "E2E_C7_KMA_STATE_FILE은 host orchestrator가 지정한 절대 경로여야 합니다",
+      "E2E_C7_TARGET_STATE_FILE은 host orchestrator가 지정한 절대 경로여야 합니다",
     );
   }
   return value;
@@ -463,57 +224,14 @@ function durableJournal(
   if (phase === "restored" && state.cleanupResult?.restored === true) {
     completedScenarios.add(state.scenario);
   }
-  const allTargetRefs = new Map(state.allTargetRefs);
-  const allIdempotencyEntries = new Map(state.allIdempotencyEntries);
-  for (const [idempotencyKey, entry] of state.idempotencyEntries) {
-    allIdempotencyEntries.set(idempotencyKey, entry);
-  }
-  const allRequestIds = new Set([
-    ...state.allRequestIds,
-    ...state.requestIds,
-  ]);
-  const allRequestOwnership = new Map(state.allRequestOwnership);
-  for (const [requestId, ownership] of state.requestOwnership) {
-    allRequestOwnership.set(requestId, ownership);
-  }
-  const allRequestTerminalStatuses = new Map(
-    state.allRequestTerminalStatuses,
-  );
-  for (const [requestId, status] of state.requestTerminalStatuses) {
-    allRequestTerminalStatuses.set(requestId, status);
-  }
   return {
     cleanup_result: state.cleanupResult,
     completed_scenarios: [...completedScenarios].sort(),
     external_systems: [...state.allExternalSystems].sort(),
-    idempotency_entries: [...allIdempotencyEntries.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([idempotencyKey, entry]) => ({
-        body: entry.body,
-        idempotency_key: idempotencyKey,
-        request_id: entry.requestId,
-        status: entry.status,
-      })),
     phase,
-    request_ids: [...allRequestIds].sort(),
-    request_ownership: [...allRequestOwnership.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([requestId, ownership]) => ({
-        idempotency_key: ownership.idempotencyKey,
-        operation_key: ownership.operationKey,
-        provider_dataset_id: ownership.providerDatasetId,
-        request_id: requestId,
-        sync_scope: ownership.syncScope,
-      })),
-    request_terminal_statuses: Object.fromEntries(
-      [...allRequestTerminalStatuses.entries()].sort(
-        ([left], [right]) => left.localeCompare(right),
-      ),
-    ),
     run_id: state.runId,
     scenario: state.scenario,
-    scope_state_count: state.scopeStateCount,
-    target_refs: [...allTargetRefs.values()].sort((left, right) =>
+    target_refs: [...state.allTargetRefs.values()].sort((left, right) =>
       targetJournalKey(left).localeCompare(targetJournalKey(right)),
     ),
     target_history: [...state.targetHistory].sort((left, right) => {
@@ -524,155 +242,134 @@ function durableJournal(
       return (left.targetId ?? "").localeCompare(right.targetId ?? "");
     }),
     updated_at: new Date().toISOString(),
-    version: 4,
+    version: 1,
   };
 }
 
 function isCleanupScenario(value: unknown): value is CleanupScenario {
-  return ["active", "empty", "cap", "invalidation"].includes(String(value));
+  return (CLEANUP_SCENARIOS as readonly string[]).includes(String(value));
+}
+
+function isOrchestratorPlaceholder(value: unknown): boolean {
+  const record = asRecord(value);
+  return (
+    record !== null &&
+    exactJson(record, ORCHESTRATOR_PLACEHOLDER)
+  );
 }
 
 async function mergePreviousJournal(state: CleanupState): Promise<void> {
   try {
-    const previous = JSON.parse(await readFile(state.stateFile, "utf8")) as {
+    const raw = JSON.parse(await readFile(state.stateFile, "utf8")) as unknown;
+    if (isOrchestratorPlaceholder(raw)) return;
+    const previous = (asRecord(raw) ?? {}) as {
       cleanup_result?: unknown;
       completed_scenarios?: unknown;
       external_systems?: unknown;
-      idempotency_entries?: unknown;
       phase?: unknown;
-      request_ids?: unknown;
-      request_ownership?: unknown;
-      request_terminal_statuses?: unknown;
       run_id?: unknown;
       scenario?: unknown;
       target_refs?: unknown;
       target_history?: unknown;
       version?: unknown;
     };
-    const isOrchestratorPlaceholder =
-      previous.phase === "restored" &&
-      previous.run_id === "__orchestrator_pending__" &&
-      previous.version === 3;
     const isCurrentScenario =
       previous.run_id === state.runId && previous.scenario === state.scenario;
     if (
-      !isOrchestratorPlaceholder &&
-      (previous.version !== 4 ||
-        !Array.isArray(previous.request_ownership) ||
-        typeof previous.run_id !== "string" ||
-        previous.run_id.length === 0 ||
-        !isCleanupScenario(previous.scenario) ||
-        !Array.isArray(previous.completed_scenarios) ||
-        !Array.isArray(previous.external_systems) ||
-        !Array.isArray(previous.idempotency_entries) ||
-        !Array.isArray(previous.request_ids) ||
-        asRecord(previous.request_terminal_statuses) === null ||
-        !Array.isArray(previous.target_refs) ||
-        !Array.isArray(previous.target_history))
+      previous.version !== 1 ||
+      typeof previous.run_id !== "string" ||
+      previous.run_id.length === 0 ||
+      !isCleanupScenario(previous.scenario) ||
+      !Array.isArray(previous.completed_scenarios) ||
+      !Array.isArray(previous.external_systems) ||
+      !Array.isArray(previous.target_refs) ||
+      !Array.isArray(previous.target_history)
     ) {
       throw new Error("invalid target history");
     }
-    if (
-      !isOrchestratorPlaceholder &&
-      previous.phase !== "restored" &&
-      !isCurrentScenario
-    ) {
+    if (previous.phase !== "restored" && !isCurrentScenario) {
       throw new Error("unrestored residue");
     }
     const completedScenarios = previous.completed_scenarios;
-    if (
-      completedScenarios !== undefined &&
-      (!Array.isArray(completedScenarios) ||
-        !completedScenarios.every(isCleanupScenario))
-    ) {
+    if (!completedScenarios.every(isCleanupScenario)) {
       throw new Error("invalid completed scenarios");
     }
     const externalSystems = previous.external_systems;
     if (
-      externalSystems !== undefined &&
-      (!Array.isArray(externalSystems) ||
-        !externalSystems.every(
-          (value): value is string => typeof value === "string" && value.length > 0,
-        ))
+      !externalSystems.every(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      )
     ) {
       throw new Error("invalid target history");
     }
     const targetRefs = previous.target_refs;
     if (
-      targetRefs !== undefined &&
-      (!Array.isArray(targetRefs) ||
-        !targetRefs.every((value) => {
-          const item = asRecord(value);
-          const body = asRecord(item?.body);
-          const pendingIdentity =
-            item?.targetId === null &&
-            item?.entityTag === null &&
-            item?.lockVersion === null;
-          const durableIdentity =
-            typeof item?.targetId === "string" &&
-            UUID_PATTERN.test(item.targetId) &&
-            typeof item?.entityTag === "string" &&
-            typeof item?.lockVersion === "number" &&
-            Number.isSafeInteger(item.lockVersion) &&
-            item.lockVersion > 0 &&
-            parseStrongEntityTag(item.entityTag, item.targetId) ===
-              item.lockVersion;
-          return (
-            item !== null &&
-            body !== null &&
-            typeof item.externalSystem === "string" &&
-            item.externalSystem.length > 0 &&
-            typeof item.targetKey === "string" &&
-            item.targetKey.length > 0 &&
-            typeof item.status === "string" &&
-            item.status.length > 0 &&
-            (pendingIdentity || durableIdentity)
-          );
-        }))
+      !targetRefs.every((value) => {
+        const item = asRecord(value);
+        const body = asRecord(item?.body);
+        const pendingIdentity =
+          item?.targetId === null &&
+          item?.entityTag === null &&
+          item?.lockVersion === null;
+        const durableIdentity =
+          typeof item?.targetId === "string" &&
+          UUID_PATTERN.test(item.targetId) &&
+          typeof item?.entityTag === "string" &&
+          typeof item?.lockVersion === "number" &&
+          Number.isSafeInteger(item.lockVersion) &&
+          item.lockVersion > 0 &&
+          parseStrongEntityTag(item.entityTag, item.targetId) ===
+            item.lockVersion;
+        return (
+          item !== null &&
+          body !== null &&
+          typeof item.externalSystem === "string" &&
+          item.externalSystem.length > 0 &&
+          typeof item.targetKey === "string" &&
+          item.targetKey.length > 0 &&
+          typeof item.status === "string" &&
+          item.status.length > 0 &&
+          (pendingIdentity || durableIdentity)
+        );
+      })
     ) {
       throw new Error("invalid target history");
     }
-    if (Array.isArray(targetRefs)) {
-      const seenTargetKeys = new Set<string>();
-      for (const value of targetRefs) {
-        const item = value as TargetJournalRef;
-        const key = targetJournalKey(item);
-        if (seenTargetKeys.has(key)) {
-          throw new Error("invalid target history");
-        }
-        seenTargetKeys.add(key);
+    const seenTargetKeys = new Set<string>();
+    for (const value of targetRefs) {
+      const key = targetJournalKey(value as TargetJournalRef);
+      if (seenTargetKeys.has(key)) {
+        throw new Error("invalid target history");
       }
+      seenTargetKeys.add(key);
     }
     const targetHistory = previous.target_history;
     if (
-      targetHistory !== undefined &&
-      (!Array.isArray(targetHistory) ||
-        !targetHistory.every((value) => {
-          const item = asRecord(value);
-          return (
-            item !== null &&
-            asRecord(item.body) !== null &&
-            typeof item.externalSystem === "string" &&
-            item.externalSystem.length > 0 &&
-            typeof item.targetKey === "string" &&
-            item.targetKey.length > 0 &&
-            typeof item.targetId === "string" &&
-            UUID_PATTERN.test(item.targetId) &&
-            typeof item.entityTag === "string" &&
-            typeof item.lockVersion === "number" &&
-            Number.isSafeInteger(item.lockVersion) &&
-            item.lockVersion > 0 &&
-            parseStrongEntityTag(item.entityTag, item.targetId) ===
-              item.lockVersion &&
-            typeof item.status === "string" &&
-            item.status.length > 0
-          );
-        }))
+      !targetHistory.every((value) => {
+        const item = asRecord(value);
+        return (
+          item !== null &&
+          asRecord(item.body) !== null &&
+          typeof item.externalSystem === "string" &&
+          item.externalSystem.length > 0 &&
+          typeof item.targetKey === "string" &&
+          item.targetKey.length > 0 &&
+          typeof item.targetId === "string" &&
+          UUID_PATTERN.test(item.targetId) &&
+          typeof item.entityTag === "string" &&
+          typeof item.lockVersion === "number" &&
+          Number.isSafeInteger(item.lockVersion) &&
+          item.lockVersion > 0 &&
+          parseStrongEntityTag(item.entityTag, item.targetId) ===
+            item.lockVersion &&
+          typeof item.status === "string" &&
+          item.status.length > 0
+        );
+      })
     ) {
       throw new Error("invalid target history");
     }
     if (
-      Array.isArray(targetHistory) &&
       new Set(
         targetHistory.map((value) => {
           const item = value as TargetJournalRef;
@@ -683,153 +380,30 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       throw new Error("invalid target history");
     }
     const targetExternalSystems = new Set(
-      (targetRefs as TargetJournalRef[] | undefined)?.map(
-        (item) => item.externalSystem,
-      ) ?? [],
+      (targetRefs as TargetJournalRef[]).map((item) => item.externalSystem),
     );
     if (
-      Array.isArray(externalSystems) &&
-      (externalSystems.length !== targetExternalSystems.size ||
-        externalSystems.some(
-          (externalSystem) => !targetExternalSystems.has(externalSystem),
-        ))
+      externalSystems.length !== targetExternalSystems.size ||
+      externalSystems.some(
+        (externalSystem) => !targetExternalSystems.has(externalSystem),
+      )
     ) {
       throw new Error("invalid target history");
     }
 
-    const requestIds = previous.request_ids;
-    if (
-      requestIds !== undefined &&
-      (!Array.isArray(requestIds) ||
-        !requestIds.every(
-          (value): value is string =>
-            typeof value === "string" && UUID_PATTERN.test(value),
-        ) ||
-        new Set(requestIds).size !== requestIds.length)
-    ) {
-      throw new Error("invalid request history");
-    }
-    const terminalStatuses = asRecord(previous.request_terminal_statuses);
-    if (
-      previous.request_terminal_statuses !== undefined &&
-      (terminalStatuses === null ||
-        Object.entries(terminalStatuses).some(
-          ([requestId, status]) =>
-            !UUID_PATTERN.test(requestId) || typeof status !== "string",
-        ))
-    ) {
-      throw new Error("invalid request history");
-    }
-    if (terminalStatuses !== null) {
-      for (const requestId of Object.keys(terminalStatuses)) {
-        if (!(requestIds as string[] | undefined)?.includes(requestId)) {
-          throw new Error("invalid request history");
-        }
-      }
-    }
-
-    const idempotencyEntries = previous.idempotency_entries;
-    if (
-      idempotencyEntries !== undefined &&
-      (!Array.isArray(idempotencyEntries) ||
-        !idempotencyEntries.every((value) => {
-          const item = asRecord(value);
-          return (
-            item !== null &&
-            typeof item.idempotency_key === "string" &&
-            UUID_PATTERN.test(item.idempotency_key) &&
-            asRecord(item.body) !== null &&
-            (item.request_id === null ||
-              (typeof item.request_id === "string" &&
-                UUID_PATTERN.test(item.request_id))) &&
-            typeof item.status === "string" &&
-            item.status.length > 0
-          );
-        }))
-    ) {
-      throw new Error("invalid request history");
-    }
-    if (Array.isArray(idempotencyEntries)) {
-      const seenIdempotencyKeys = new Set<string>();
-      for (const value of idempotencyEntries) {
-        const item = value as DurableCleanupJournal["idempotency_entries"][number];
-        if (
-          seenIdempotencyKeys.has(item.idempotency_key) ||
-          (item.request_id !== null &&
-            !(requestIds as string[] | undefined)?.includes(item.request_id))
-        ) {
-          throw new Error("invalid request history");
-        }
-        seenIdempotencyKeys.add(item.idempotency_key);
-      }
-    }
-
-    const requestOwnership = previous.request_ownership;
-    if (
-      requestOwnership !== undefined &&
-      (!Array.isArray(requestOwnership) ||
-        !requestOwnership.every((value) => {
-          const item = asRecord(value);
-          return (
-            item !== null &&
-            typeof item.request_id === "string" &&
-            UUID_PATTERN.test(item.request_id) &&
-            typeof item.idempotency_key === "string" &&
-            UUID_PATTERN.test(item.idempotency_key) &&
-            typeof item.operation_key === "string" &&
-            item.operation_key.length > 0 &&
-            typeof item.provider_dataset_id === "number" &&
-            Number.isInteger(item.provider_dataset_id) &&
-            typeof item.sync_scope === "string" &&
-            item.sync_scope.length > 0
-          );
-        }))
-    ) {
-      throw new Error("invalid request history");
-    }
-    if (Array.isArray(requestOwnership)) {
-      // 소유권 행은 request id에 1:1이어야 한다. 중복이거나 request 이력에 없는
-      // id를 가리키면 그 journal로는 무엇이 우리 것인지 말할 수 없다.
-      const seenOwnedRequestIds = new Set<string>();
-      for (const value of requestOwnership) {
-        const item =
-          value as DurableCleanupJournal["request_ownership"][number];
-        if (
-          seenOwnedRequestIds.has(item.request_id) ||
-          !(requestIds as string[] | undefined)?.includes(item.request_id)
-        ) {
-          throw new Error("invalid request history");
-        }
-        seenOwnedRequestIds.add(item.request_id);
-      }
-    }
-
-    if (!isOrchestratorPlaceholder && !isCurrentScenario) {
+    if (!isCurrentScenario) {
       const cleanupResult = asRecord(previous.cleanup_result);
-      const scenario = previous.scenario as CleanupScenario;
-      const previousRequestIds = requestIds as string[];
-      const previousTerminalStatuses = terminalStatuses as Record<
-        string,
-        unknown
-      >;
       if (
         previous.phase !== "restored" ||
         cleanupResult === null ||
-        cleanupResult.allRequestsTerminal !== true ||
         cleanupResult.preservedForManualCleanup !== false ||
         cleanupResult.restored !== true ||
-        !(completedScenarios as CleanupScenario[]).includes(scenario) ||
+        !completedScenarios.includes(previous.scenario) ||
         (targetRefs as TargetJournalRef[]).some(
           (target) => target.status !== "deleted",
         ) ||
         (targetHistory as TargetJournalRef[]).some(
           (target) => target.status !== "deleted",
-        ) ||
-        previousRequestIds.some(
-          (requestId) =>
-            !TERMINAL_STATUSES.has(
-              String(previousTerminalStatuses[requestId] ?? ""),
-            ),
         )
       ) {
         throw new Error("unrestored residue");
@@ -838,27 +412,13 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
 
     // previous payload 자체가 완전한 restored 상태임을 먼저 판정한 뒤에만
     // 누적 이력을 합친다. 현재 scenario가 이미 보유한 key/status는 절대 되감지 않는다.
-    for (const scenario of
-      (completedScenarios as CleanupScenario[] | undefined) ?? []) {
+    for (const scenario of completedScenarios) {
       state.completedScenarios.add(scenario);
     }
-    for (const externalSystem of
-      (externalSystems as string[] | undefined) ?? []) {
+    for (const externalSystem of externalSystems) {
       state.allExternalSystems.add(externalSystem);
     }
-    for (const item of
-      (requestOwnership as
-        | DurableCleanupJournal["request_ownership"]
-        | undefined) ?? []) {
-      if (state.requestOwnership.has(item.request_id)) continue;
-      state.allRequestOwnership.set(item.request_id, {
-        idempotencyKey: item.idempotency_key,
-        operationKey: item.operation_key,
-        providerDatasetId: item.provider_dataset_id,
-        syncScope: item.sync_scope,
-      });
-    }
-    for (const item of (targetRefs as TargetJournalRef[] | undefined) ?? []) {
+    for (const item of targetRefs as TargetJournalRef[]) {
       const key = targetJournalKey(item);
       const existing = state.allTargetRefs.get(key);
       const currentReplacementIntent =
@@ -883,49 +443,11 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
         (item) => `${targetJournalKey(item)}\u0000${item.targetId}`,
       ),
     );
-    for (const item of (targetHistory as TargetJournalRef[] | undefined) ?? []) {
+    for (const item of targetHistory as TargetJournalRef[]) {
       const identity = `${targetJournalKey(item)}\u0000${item.targetId}`;
       if (!knownHistory.has(identity)) {
         knownHistory.add(identity);
         state.targetHistory.push(item);
-      }
-    }
-    for (const requestId of (requestIds as string[] | undefined) ?? []) {
-      state.allRequestIds.add(requestId);
-    }
-    for (const [requestId, status] of Object.entries(terminalStatuses ?? {})) {
-      const current = state.requestTerminalStatuses.get(requestId);
-      if (
-        current === undefined &&
-        !state.allRequestTerminalStatuses.has(requestId)
-      ) {
-        state.allRequestTerminalStatuses.set(requestId, String(status));
-      }
-    }
-    for (const value of (idempotencyEntries as
-      | DurableCleanupJournal["idempotency_entries"]
-      | undefined) ?? []) {
-      const existing =
-        state.idempotencyEntries.get(value.idempotency_key) ??
-        state.allIdempotencyEntries.get(value.idempotency_key);
-      if (
-        existing !== undefined &&
-        (!exactJson(existing.body, value.body) ||
-          (existing.requestId !== null &&
-            value.request_id !== null &&
-            existing.requestId !== value.request_id))
-      ) {
-        throw new Error("invalid request history");
-      }
-      if (
-        !state.idempotencyEntries.has(value.idempotency_key) &&
-        !state.allIdempotencyEntries.has(value.idempotency_key)
-      ) {
-        state.allIdempotencyEntries.set(value.idempotency_key, {
-          body: value.body,
-          requestId: value.request_id,
-          status: value.status,
-        });
       }
     }
   } catch (error) {
@@ -945,9 +467,6 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     }
     if (error instanceof Error && error.message === "invalid target history") {
       throw new Error("C7 durable cleanup journal의 target history가 손상되었습니다");
-    }
-    if (error instanceof Error && error.message === "invalid request history") {
-      throw new Error("C7 durable cleanup journal의 request history가 손상되었습니다");
     }
     throw error;
   }
@@ -1069,192 +588,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function dagsterGraphqlEndpoint(): URL {
-  const raw = process.env.E2E_DAGSTER_URL;
-  const expectedHash = process.env.E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256;
-  if (!raw || !expectedHash || !SHA256_PATTERN.test(expectedHash)) {
-    throw new Error(
-      "C7 Dagster GraphQL endpoint/hash attestation이 필요합니다 (values redacted)",
-    );
-  }
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("C7 Dagster GraphQL endpoint가 안전하지 않습니다");
-  }
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
-    throw new Error("C7 Dagster GraphQL endpoint가 안전하지 않습니다");
-  }
-  const pathname = url.pathname.replace(/\/+$/, "");
-  url.pathname = pathname.endsWith("/graphql")
-    ? pathname
-    : `${pathname}/graphql`;
-  if (sha256(url.href) !== expectedHash) {
-    throw new Error(
-      "C7 Dagster GraphQL endpoint attestation이 불일치합니다 (values redacted)",
-    );
-  }
-  return url;
-}
-
-async function postDagsterGraphql(
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  let response: globalThis.Response;
-  try {
-    response = await fetch(dagsterGraphqlEndpoint(), {
-      body: JSON.stringify({ query, variables }),
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...dagsterAuthorizationHeaders(),
-      },
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(DAGSTER_GRAPHQL_TIMEOUT_MS),
-    });
-  } catch {
-    throw new Error("C7 Dagster GraphQL transport가 실패했습니다 (values redacted)");
-  }
-  if (!response.ok) {
-    throw new Error("C7 Dagster GraphQL HTTP 계약이 실패했습니다 (values redacted)");
-  }
-  let envelope: GraphqlEnvelope;
-  try {
-    envelope = (await response.json()) as GraphqlEnvelope;
-  } catch {
-    throw new Error("C7 Dagster GraphQL JSON 계약이 실패했습니다 (values redacted)");
-  }
-  if (Array.isArray(envelope.errors) && envelope.errors.length > 0) {
-    throw new Error("C7 Dagster GraphQL 응답에 오류가 있습니다 (values redacted)");
-  }
-  const data = asRecord(envelope.data);
-  if (data === null) {
-    throw new Error("C7 Dagster GraphQL data 계약이 실패했습니다 (values redacted)");
-  }
-  return data;
-}
-
-/** KMA destructive mutation 전에 실제 queue worker job 정의를 단 하나로 결박한다. */
-export async function assertKmaDagsterWorkerJobDefinition(): Promise<void> {
-  const data = await postDagsterGraphql(KMA_DAGSTER_JOB_DISCOVERY_QUERY, {
-    repositorySelector: MAP_DAGSTER_REPOSITORY_SELECTOR,
-  });
-  const root = asRecord(data.repositoryOrError);
-  if (root?.__typename !== "Repository") {
-    throw new Error("C7 Dagster repository 조회 계약이 실패했습니다 (values redacted)");
-  }
-  const matches = asArray(root.pipelines)
-    .map(asRecord)
-    .filter((pipeline) => pipeline?.name === KMA_SAFE_DAGSTER_JOB);
-  if (matches.length !== 1 || matches[0]?.isJob !== true) {
-    throw new Error(
-      "C7 Dagster queue worker job cardinality/isJob 계약이 실패했습니다 (values redacted)",
-    );
-  }
-}
-
-function dagsterRunTags(value: unknown): Map<string, string> {
-  const tags = new Map<string, string>();
-  for (const rawTag of asArray(value)) {
-    const tag = asRecord(rawTag);
-    if (
-      typeof tag?.key !== "string" ||
-      !tag.key ||
-      typeof tag.value !== "string" ||
-      tags.has(tag.key)
-    ) {
-      throw new Error("C7 Dagster run tag 계약이 실패했습니다 (values redacted)");
-    }
-    tags.set(tag.key, tag.value);
-  }
-  return tags;
-}
-
-function expectedDagsterTerminalStatus(status: string): string {
-  if (status === "done") return "SUCCESS";
-  if (status === "failed") return "FAILURE";
-  if (status === "cancelled") return "CANCELED";
-  throw new Error("C7 request terminal status 계약이 실패했습니다");
-}
-
-async function assertTerminalDagsterRunIdentity(
-  page: Page,
-  detail: PipelineExecutionDetailResponse,
-): Promise<void> {
-  const identity = requireKmaDatasetIdentity();
-  const execution = detail.data.execution;
-  const updateRequest = detail.data.update_request;
-  const runId = execution.dagster_run_id;
-  if (
-    !runId ||
-    updateRequest === null ||
-    updateRequest.request_id !== execution.id ||
-    updateRequest.dagster_run_id !== runId ||
-    !Number.isSafeInteger(updateRequest.generation) ||
-    updateRequest.generation <= 0 ||
-    updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider_dataset_id !== identity.providerDatasetId ||
-    updateRequest.scope.operation_key !== identity.operationKey
-  ) {
-    throw new Error(
-      "C7 terminal request/Dagster owner identity 계약이 실패했습니다 (values redacted)",
-    );
-  }
-  const expectedStatus = expectedDagsterTerminalStatus(execution.status);
-  const deadline = Date.now() + DAGSTER_RUN_SETTLEMENT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const data = await postDagsterGraphql(KMA_DAGSTER_RUN_IDENTITY_QUERY, {
-      runId,
-    });
-    const run = asRecord(data.runOrError);
-    if (run?.__typename !== "Run") {
-      await page.waitForTimeout(1_000);
-      continue;
-    }
-    const tags = dagsterRunTags(run.tags);
-    const sensorName = tags.get(DAGSTER_SENSOR_NAME_TAG);
-    if (
-      run.runId !== runId ||
-      run.jobName !== KMA_SAFE_DAGSTER_JOB ||
-      tags.get(FEATURE_UPDATE_REQUEST_ID_TAG) !== updateRequest.request_id ||
-      tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG) !==
-        String(updateRequest.generation) ||
-      tags.get(FEATURE_UPDATE_SCOPE_TYPE_TAG) !== "provider_dataset" ||
-      sensorName !== QUEUE_SENSOR_NAME
-    ) {
-      throw new Error(
-        "C7 Dagster run job/tag identity 계약이 실패했습니다 (values redacted)",
-      );
-    }
-    if (run.status === expectedStatus) return;
-    if (
-      typeof run.status !== "string" ||
-      DAGSTER_TERMINAL_STATUSES.has(run.status)
-    ) {
-      throw new Error(
-        "C7 Dagster run terminal status 계약이 실패했습니다 (values redacted)",
-      );
-    }
-    await page.waitForTimeout(1_000);
-  }
-  throw new Error(
-    "C7 Dagster run terminal settlement 제한 시간을 초과했습니다 (values redacted)",
-  );
-}
-
 function parseStrongEntityTag(
   entityTag: string,
   expectedTargetId?: string,
@@ -1300,55 +633,6 @@ export function requireBody<T>(
   return result.body;
 }
 
-export function requireCreatedOrReplayedKmaRequest(
-  result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>,
-  options: { allowActiveReuse?: boolean } = {},
-): FeatureUpdateRequestCreateResponse {
-  if (![200, 201].includes(result.status) || result.body === null) {
-    throw new Error(
-      `KMA create/replay 응답 계약 불일치: ${safeHttpDiagnostic(result)}`,
-    );
-  }
-  if (
-    result.status === 200 &&
-    result.body.idempotent_replay !== true &&
-    options.allowActiveReuse !== true
-  ) {
-    throw new Error("KMA HTTP 200은 same-key idempotent replay여야 합니다");
-  }
-  return result.body;
-}
-
-export function destructiveGateBlocker(testInfo: TestInfo): string | null {
-  const required: Array<[string, string | undefined]> = [
-    ["E2E_LIVE_ALLOW_PROD", process.env.E2E_LIVE_ALLOW_PROD],
-    ["E2E_ADMIN_WRITE", process.env.E2E_ADMIN_WRITE],
-    ["E2E_KMA_SCOPE_WRITE", process.env.E2E_KMA_SCOPE_WRITE],
-    ["E2E_DAGSTER_WRITE", process.env.E2E_DAGSTER_WRITE],
-    ["E2E_DAGSTER_RUN", process.env.E2E_DAGSTER_RUN],
-  ];
-  const missing = required.filter(([, value]) => value !== "1").map(([name]) => name);
-  if (missing.length > 0) {
-    return `${missing.join(", ")}=1이 없어서 KMA destructive 시나리오 전체를 실행하지 않습니다.`;
-  }
-  if (process.env.E2E_DAGSTER_JOB !== KMA_SAFE_DAGSTER_JOB) {
-    return `E2E_DAGSTER_JOB은 정확히 ${KMA_SAFE_DAGSTER_JOB}이어야 합니다.`;
-  }
-  if (testInfo.config.workers !== 1) {
-    return "KMA destructive live E2E는 실제 workers=1에서만 실행합니다.";
-  }
-  if (testInfo.project.retries !== 0) {
-    return "KMA destructive live E2E는 실제 retries=0에서만 실행합니다.";
-  }
-  try {
-    cleanupStateFile();
-    expectedUiOrigin();
-  } catch {
-    return "KMA destructive live E2E durable state/UI origin attestation이 없습니다.";
-  }
-  return null;
-}
-
 function targetPath(externalSystem: string, targetKey: string): string {
   return `${POI_TARGETS_PATH}/${encodeURIComponent(
     externalSystem,
@@ -1369,7 +653,7 @@ export function buildPoiTargetBody(
     update_enabled: true,
     refresh_policy: "provider_default",
     provider_overrides: {},
-    metadata: { note: `C7 KMA live E2E ${options.runId}` },
+    metadata: { note: `C7 live E2E ${options.runId}` },
     on_conflict: "reject",
   };
 }
@@ -1416,22 +700,6 @@ export async function deletePoiTarget(
   );
 }
 
-export async function listActivePoiTargets(
-  page: Page,
-  externalSystem: string,
-): Promise<BrowserFetchResult<PoiCacheTargetListResponse>> {
-  const query = new URLSearchParams({
-    external_system: externalSystem,
-    include_deleted: "false",
-    page_size: "500",
-    update_enabled: "true",
-  });
-  return browserFetch<PoiCacheTargetListResponse>(
-    page,
-    `${POI_TARGETS_PATH}?${query.toString()}`,
-  );
-}
-
 async function listAllActivePoiTargets(
   page: Page,
   externalSystem: string,
@@ -1447,1283 +715,22 @@ async function listAllActivePoiTargets(
   );
 }
 
-/** 갱신 요청 dialog에 canonical KMA membership triple을 넣는다.
- *
- *  ADR-088 이후 이 dialog는 provider/dataset_key 자유입력이 아니라 catalog가 투영한
- *  membership을 고르는 화면이고, 제출 가능한 `sync_scope` 집합의 정본은
- *  `provider_dataset_operation_scopes`다(`ops_dataset_service.py::_scope_refresh_capability`).
- *  그래서 여기서 고르는 값은 **선언된 scope**여야 한다 — 선언되지 않은 값은
- *  `_ACTIVE_DATASET_MEMBERSHIPS_SQL`의 exact join에서 0행이 되어 preview/create가
- *  422로 죽고, `feature_update_request_datasets`의 exact FK도 그 행을 요구한다.
- *
- *  identity는 `resolveKmaDatasetIdentity`가 `/v1/ops/datasets`에서 푼 값이라
- *  화면과 API가 같은 triple을 보는지도 함께 확인된다.
- */
-export async function fillKmaRequestDialogScope(
-  dialog: Locator,
-  syncScope: string,
-): Promise<void> {
-  const identity = requireKmaDatasetIdentity();
-  await dialog.getByLabel("scope 유형").selectOption("provider_dataset");
-  await dialog
-    .getByLabel("대상 데이터셋")
-    .selectOption(String(identity.providerDatasetId));
-  await dialog.getByLabel("sync_scope").selectOption(syncScope);
-  // 아래 `toHaveCount(0)`이 **렌더 전이라 0**인 채로 공허하게 통과하지 않도록, 선택이
-  // 반영된 양성 신호를 먼저 기다린다. 신호는 **scope에 의존**해야 한다 —
-  // `canonical membership: <id>`는 dataset 선택에만 의존해서 이 줄 직전에 이미 참이다.
-  await expect(dialog.getByLabel("sync_scope")).toHaveValue(syncScope);
-  // 형제 operation이 갈리면 dialog가 operation_key select를 띄운다. C7은 단일
-  // canonical operation을 요구하므로(resolveKmaDatasetIdentity) 뜨면 안 된다 —
-  // 조용히 넘어가면 운영자가 고르지 않은 operation으로 write가 나간다.
-  await expect(dialog.getByLabel("operation_key")).toHaveCount(0);
-}
-
-/** 초단기실황에서 **지금 사용 가능한** canonical base(`YYYYMMDDHH00`, KST).
- *
- *  정본은 provider 라이브러리다 — `python-kma-api`의 `kma.time_utils`가
- *  `ULTRA_SRT_NCST_DELAY`(40분)를 뺀 뒤 정시로 절삭한다. "분 < 40이면 직전 시각"은 그것과
- *  동치이고, 출력 shape은 `dagster/kma_weather.py`의 `base_date + base_time`과 같다.
- *  두 규칙이 갈리면 이월 cursor 가드가 조용히 무력화되므로
- *  `tests/unit/test_c7_acceptance_scope_pin.py`가 지연 상수를 잠근다.
- */
-export function currentKmaNowcastBaseDatetime(now = Date.now()): string {
-  const kst = new Date(now + 9 * 60 * 60 * 1000);
-  if (kst.getUTCMinutes() < 40) {
-    kst.setUTCHours(kst.getUTCHours() - 1);
-  }
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  return (
-    `${kst.getUTCFullYear()}${pad(kst.getUTCMonth() + 1)}${pad(kst.getUTCDate())}` +
-    `${pad(kst.getUTCHours())}00`
-  );
-}
-
-/** 인수 scope가 깨끗함을 확인한다(fail-closed 사전조건).
- *
- *  external system 이름이 run마다 갈리지 않으므로 앞 run의 잔존물이 이 run에 그대로
- *  섞인다. 세 축을 본다.
- *
- *  1. **활성 target** — 남아 있으면 `membership_fingerprint`가 이 run의 것이 아니다.
- *     필터(`include_deleted=false` + `update_enabled=true`)는 실행 경로가 대상을 고르는
- *     조건(`infra/poi_cache_target_repo`의 `deleted_at IS NULL AND update_enabled`)과
- *     같아야 한다 — 넓으면 거짓 차단, 좁으면 오염을 통과시킨다.
- *  2. **비terminal 요청** — 같은 scope에 queued/running이 남아 있으면 이 run의 생성이
- *     409(active scope conflict)로 죽는다. reason에 RUN_ID가 들어가 plan이 달라 활성
- *     재사용도 되지 않는다.
- *
-
- *  이월된 sync-state cursor는 **여기서 보지 않는다**. 세 KMA spec이 같은 scope를
- *  공유하므로 runner 안에서 먼저 돈 spec이 남긴 cursor를 뒤 spec이 보게 되고, base
- *  동일성만으로 막으면 6-spec 게이트가 구조적으로 통과 불가능해진다. 실제로 문제가
- *  되는 것은 base와 **membership fingerprint가 함께** 같을 때뿐인데(각 spec의
- *  membership은 서로 다르다), 그 조건은 요청을 내 보기 전에는 알 수 없다. 그래서
- *  `skipped=true`를 만난 자리에서 사유를 밝히는 쪽으로 옮겼다
- *  (`assertNotSkippedByCarriedCursor`).
- *
- *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
- */
-export async function assertC7ScopeIsClean(page: Page): Promise<void> {
-  const listed = requireBody(
-    await listActivePoiTargets(page, C7_EXTERNAL_SYSTEM),
-    200,
-  );
-  expect(
-    listed.data.items,
-    `C7 인수 scope(${C7_EXTERNAL_SYSTEM})에 앞 run의 활성 target이 남아 있다 — ` +
-      "정리 후 다시 실행하라",
-  ).toHaveLength(0);
-  await assertExactNonTerminalFeatureUpdateRequests(
-    page,
-    [],
-    "C7 인수 사전조건",
-  );
-}
-
-/** 첫 요청이 `skipped`면 이월 cursor 때문임을 밝히고 멈춘다.
- *
- *  실행기는 `(base_datetime, membership_fingerprint)`가 저장된 cursor와 같으면
- *  provider I/O 없이 접는다(`dagster/kma_weather.py`). 고정 external system을 쓰게
- *  되면서 **같은 spec을 같은 KMA base 안에서 다시 돌리면** 그 조건이 성립한다 —
- *  실패 직후 재시도가 정확히 그 상황이다. cleanup은 target만 지우고 sync-state 행은
- *  남긴다.
- *
- *  bare `expect(skipped).toBe(false)`는 "false를 기대했는데 true"까지만 말해서, 원인이
- *  이 run 안에 없다는 사실이 드러나지 않는다. 무엇을 기다려야 하는지 여기서 말한다.
- */
-export function assertNotSkippedByCarriedCursor(
-  skipped: boolean,
-  label: string,
-): void {
-  if (!skipped) return;
-  throw new Error(
-    `${label}: provider I/O 없이 skipped로 접혔다 — 같은 KMA base` +
-      `(${currentKmaNowcastBaseDatetime()})에 같은 membership의 cursor가 이미 있다. ` +
-      "다음 base rollover(KST 매시 40분) 뒤에 다시 실행하라",
-  );
-}
-
-export function buildKmaRequest(
-  externalSystem: string,
-  reason: string,
-  runMode: "queued" | "now" = "queued",
-): FeatureUpdateRequestCreateRequest {
-  const identity = requireKmaDatasetIdentity();
-  const body: FeatureUpdateRequestCreateRequest = {
-    scope: {
-      type: "provider_dataset",
-      provider_dataset_id: identity.providerDatasetId,
-      operation_key: identity.operationKey,
-      sync_scope: `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}`,
-    },
-    run_mode: runMode,
-    priority: 50,
-    reason,
-  };
-  assertKmaOnlyPlan(body);
-  return body;
-}
-
-export function previewBody(
-  body: FeatureUpdateRequestCreateRequest,
-): FeatureUpdateRequestPreviewRequest {
-  const preview: FeatureUpdateRequestPreviewRequest = {
-    scope: body.scope,
-    update_policy: body.update_policy,
-    run_mode: body.run_mode,
-    priority: body.priority,
-  };
-  assertKmaOnlyPlan(preview);
-  return preview;
-}
-
-function assertKmaOnlyPlan(
-  body: FeatureUpdateRequestCreateRequest | FeatureUpdateRequestPreviewRequest,
-): void {
-  const serialized = JSON.stringify(body);
-  if (FORBIDDEN_PROVIDER_PATTERN.test(serialized)) {
-    throw new Error("C7 live E2E에서는 OpiNet provider를 호출할 수 없습니다.");
-  }
-  const identity = requireKmaDatasetIdentity();
-  const scope = body.scope;
-  if (
-    scope.type !== "provider_dataset" ||
-    scope.provider_dataset_id !== identity.providerDatasetId ||
-    scope.operation_key !== identity.operationKey ||
-    !scope.sync_scope.startsWith("external_system:")
-  ) {
-    throw new Error(
-      "C7 live E2E mutation은 canonical KMA external_system scope만 허용합니다.",
-    );
-  }
-}
-
-function kmaExternalSystem(
-  body: FeatureUpdateRequestCreateRequest | FeatureUpdateRequestPreviewRequest,
-): string {
-  assertKmaOnlyPlan(body);
-  const syncScope =
-    "sync_scope" in body.scope ? body.scope.sync_scope : undefined;
-  if (!syncScope?.startsWith("external_system:")) {
-    throw new Error("KMA request external_system scope가 없습니다");
-  }
-  const externalSystem = syncScope.slice("external_system:".length);
-  if (!externalSystem) {
-    throw new Error("KMA request external_system이 비어 있습니다");
-  }
-  return externalSystem;
-}
-
-export async function previewKmaRequest(
-  page: Page,
-  body: FeatureUpdateRequestPreviewRequest,
-): Promise<BrowserFetchResult<FeatureUpdateRequestPreviewResponse>> {
-  assertKmaOnlyPlan(body);
-  const result = await browserFetch<FeatureUpdateRequestPreviewResponse>(
-    page,
-    `${PIPELINE_REQUESTS_PATH}/preview`,
-    { method: "POST", body },
-  );
-  const response = requireBody(result, 200);
-  assertExactKmaPreviewBody(response, body);
-  return result;
-}
-
-/** 실행 진단 payload가 이 run의 canonical identity만 담았는지 재귀 확인한다.
- *
- *  ADR-088 이후 `matched_scope`는 자연키를 **싣지 않는다** —
- *  `api/feature_update_service._public_matched_scope`가
- *  `{provider, dataset_key, providers, dataset_keys}`를 의도적으로 strip한다("legacy
- *  natural identity projection을 유출하지 않는다"). 그래서 `"provider" in record`로
- *  가드하던 앞 판은 **완전히 공허**해졌다 — "KMA 외 provider가 섞이지 않는다"는 보장이
- *  조용히 사라져 있었다. 같은 보장을 정본 축(triple)으로 다시 세운다.
- */
-function assertOnlyKmaCanonicalIdentity(value: unknown, context: string): void {
-  const identity = requireKmaDatasetIdentity();
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const item of node) walk(item);
-      return;
-    }
-    const record = asRecord(node);
-    if (record === null) return;
-    if (
-      "provider_dataset_id" in record &&
-      record.provider_dataset_id !== identity.providerDatasetId
-    ) {
-      throw new Error(`${context}에 이 run 밖의 provider_dataset_id가 포함되었습니다`);
-    }
-    if (
-      "operation_key" in record &&
-      record.operation_key !== identity.operationKey
-    ) {
-      throw new Error(`${context}에 이 run 밖의 operation_key가 포함되었습니다`);
-    }
-    // 계약상 strip되지만, 되살아나면 그때도 KMA여야 한다.
-    if (
-      "provider" in record &&
-      (record.provider !== KMA_PROVIDER ||
-        ("dataset_key" in record && record.dataset_key !== KMA_DATASET_KEY))
-    ) {
-      throw new Error(`${context}에 KMA 외 provider/dataset이 포함되었습니다`);
-    }
-    for (const item of Object.values(record)) walk(item);
-  };
-  walk(value);
-}
-
-function assertExactKmaPreviewBody(
-  response: FeatureUpdateRequestPreviewResponse,
-  expected: FeatureUpdateRequestPreviewRequest,
-): void {
-  const data = response.data;
-  assertKmaOnlyPlan(expected);
-  const identity = requireKmaDatasetIdentity();
-  const expectedEffectiveSyncScope =
-    expected.scope.type === "provider_dataset"
-      ? expected.scope.sync_scope
-      : undefined;
-  const responseScope = data.scope;
-  const matchedScope = asRecord(data.matched_scope);
-  if (
-    data.result_kind !== "preview" ||
-    data.scope_type !== "provider_dataset" ||
-    !exactJson(data.scope, expected.scope) ||
-    responseScope.type !== "provider_dataset" ||
-    responseScope.provider_dataset_id !== identity.providerDatasetId ||
-    responseScope.operation_key !== identity.operationKey ||
-    responseScope.sync_scope !== expectedEffectiveSyncScope ||
-    !expectedEffectiveSyncScope?.startsWith("external_system:") ||
-    // providers[]/dataset_keys[] plan echo는 삭제됐다 — membership 정본은
-    // dataset_memberships[{provider_dataset_id, sync_scope, operation_key}]다.
-    !exactJson(data.dataset_memberships, [
-      {
-        operation_key: identity.operationKey,
-        provider_dataset_id: identity.providerDatasetId,
-        sync_scope: expectedEffectiveSyncScope,
-      },
-    ]) ||
-    data.run_mode !== expected.run_mode ||
-    data.priority !== expected.priority ||
-    !exactJson(data.update_policy, expected.update_policy ?? {}) ||
-    matchedScope === null
-  ) {
-    throw new Error("KMA preview response plan/resolved scope 계약 불일치");
-  }
-  const providerDatasets = matchedScope.provider_datasets;
-  if (
-    !Array.isArray(providerDatasets) ||
-    providerDatasets.length !== 1
-  ) {
-    throw new Error("KMA preview matched_scope exact provider pair가 없습니다");
-  }
-  const entry = asRecord(providerDatasets[0]);
-  // identity는 triple이다 — `provider`/`dataset_key`는 계약이 strip하므로 여기서
-  // 단언하면 항상 실패한다(그렇게 실패했다).
-  if (
-    entry === null ||
-    entry.provider_dataset_id !== identity.providerDatasetId ||
-    entry.operation_key !== identity.operationKey ||
-    entry.sync_scope !== expectedEffectiveSyncScope ||
-    typeof entry.feature_count !== "number" ||
-    !Number.isSafeInteger(entry.feature_count) ||
-    entry.feature_count < 0
-  ) {
-    throw new Error("KMA preview matched_scope canonical identity 불일치");
-  }
-  if (FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(data))) {
-    throw new Error("KMA preview response에 금지 provider가 포함되었습니다");
-  }
-  assertOnlyKmaCanonicalIdentity(data.matched_scope, "KMA preview matched_scope");
-}
-
-export async function assertExactKmaPreviewResponse(
-  response: Response,
-  expected: FeatureUpdateRequestPreviewRequest,
-): Promise<FeatureUpdateRequestPreviewResponse> {
-  const contentType = response.headers()["content-type"] ?? "";
-  if (response.status() !== 200 || !contentType.toLowerCase().includes("json")) {
-    throw new Error("KMA preview HTTP/content-type 계약 불일치");
-  }
-  let body: FeatureUpdateRequestPreviewResponse;
-  try {
-    body = (await response.json()) as FeatureUpdateRequestPreviewResponse;
-  } catch {
-    throw new Error("KMA preview JSON 응답 계약 불일치");
-  }
-  assertExactKmaPreviewBody(body, expected);
-  return body;
-}
-
-export function assertKmaOnlyTerminalProviderScopes(
-  detail: PipelineExecutionDetailResponse,
-  options: { executed: "empty" | "nonempty" },
-): void {
-  const identity = requireKmaDatasetIdentity();
-  const updateRequest = detail.data.update_request;
-  const membership = updateRequest?.dataset_memberships[0];
-  if (
-    updateRequest === null ||
-    updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider_dataset_id !== identity.providerDatasetId ||
-    updateRequest.scope.operation_key !== identity.operationKey ||
-    !updateRequest.scope.sync_scope.startsWith("external_system:") ||
-    // effective_sync_scope와 providers[]/dataset_keys[]는 삭제됐다. 실행 membership
-    // 정본은 dataset_memberships이며 scope와 정확히 같은 triple 하나여야 한다.
-    updateRequest.dataset_memberships.length !== 1 ||
-    membership?.provider_dataset_id !== identity.providerDatasetId ||
-    membership.operation_key !== identity.operationKey ||
-    membership.sync_scope !== updateRequest.scope.sync_scope
-  ) {
-    throw new Error("terminal update request KMA-only plan 계약 불일치");
-  }
-  const terminalIdentity = requireKmaDatasetIdentity();
-  const matched = asRecord(updateRequest.matched_scope);
-  if (matched === null) {
-    throw new Error("terminal matched_scope 계약 불일치");
-  }
-  const keys = [
-    "eligible_provider_scopes",
-    "skipped_provider_scopes",
-    "executed_provider_scopes",
-  ] as const;
-  if (
-    !Array.isArray(matched.eligible_provider_scopes) ||
-    !Array.isArray(matched.skipped_provider_scopes)
-  ) {
-    throw new Error("terminal provider scope 전체 집합 계약 불일치");
-  }
-  const providerIdentities = new Set<string>();
-  for (const key of keys) {
-    const raw = matched[key];
-    if (raw === undefined) continue;
-    if (!Array.isArray(raw)) {
-      throw new Error(`terminal ${key} 배열 계약 불일치`);
-    }
-    for (const value of raw) {
-      const item = asRecord(value);
-      // 자연키는 계약이 strip한다 — 정본 축(triple)으로 본다.
-      if (
-        item === null ||
-        item.provider_dataset_id !== terminalIdentity.providerDatasetId ||
-        item.operation_key !== terminalIdentity.operationKey ||
-        item.sync_scope !== updateRequest.scope.sync_scope
-      ) {
-        throw new Error(`terminal ${key} KMA-only 집합 불일치`);
-      }
-      providerIdentities.add(
-        `${String(item.provider_dataset_id)}\u0000${String(item.operation_key)}` +
-          `\u0000${String(item.sync_scope)}`,
-      );
-    }
-  }
-  const executed = matched.executed_provider_scopes;
-  if (
-    (options.executed === "empty" &&
-      executed !== undefined &&
-      (!Array.isArray(executed) || executed.length !== 0)) ||
-    (options.executed === "nonempty" &&
-      (!Array.isArray(executed) || executed.length !== 1)) ||
-    providerIdentities.size !== 1 ||
-    !providerIdentities.has(
-      `${String(terminalIdentity.providerDatasetId)}\u0000${terminalIdentity.operationKey}` +
-        `\u0000${updateRequest.scope.sync_scope}`,
-    ) ||
-    FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(matched))
-  ) {
-    throw new Error("terminal 전체 provider scope 집합이 exact KMA-only가 아닙니다");
-  }
-  assertOnlyKmaCanonicalIdentity(matched, "terminal matched_scope");
-}
-
-export async function createKmaRequest(
-  page: Page,
-  body: FeatureUpdateRequestCreateRequest,
-  idempotencyKey: string,
-  state: CleanupState,
-): Promise<BrowserFetchResult<FeatureUpdateRequestCreateResponse>> {
-  assertKmaOnlyPlan(body);
-  const externalSystem = kmaExternalSystem(body);
-  const expectedTargets = state.targets.filter(
-    (target) =>
-      target.externalSystem === externalSystem &&
-      state.targetStatuses.get(targetJournalKey(target)) === "active",
-  );
-  await assertExactOwnedTargetsAtServer(
-    page,
-    state,
-    expectedTargets,
-    externalSystem,
-  );
-  await journalPendingRequest(state, body, idempotencyKey);
-  const submit = () =>
-    browserFetch<FeatureUpdateRequestCreateResponse>(
-      page,
-      PIPELINE_REQUESTS_PATH,
-      {
-        method: "POST",
-        body,
-        headers: { "Idempotency-Key": idempotencyKey },
-      },
-    );
-  let result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>;
-  try {
-    result = await submit();
-  } catch {
-    const pending = state.idempotencyEntries.get(idempotencyKey);
-    if (pending) pending.status = "response_lost_replaying";
-    await writeDurableJournal(state, "request_response_lost");
-    result = await submit();
-  }
-  await trackRequestResult(state, result, idempotencyKey);
-  return result;
-}
-
-export type TrackedUiKmaCreateResult = {
-  created: FeatureUpdateRequestCreateResponse;
-  recovered: boolean;
-  result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>;
-};
-
-export async function resolveTrackedUiKmaCreateResponse(
-  page: Page,
-  state: CleanupState,
-  idempotencyKey: string,
-  body: FeatureUpdateRequestCreateRequest,
-  response: Response | null,
-  options: { allowActiveReuse?: boolean } = {},
-): Promise<TrackedUiKmaCreateResult> {
-  let parsed: FeatureUpdateRequestCreateResponse | null = null;
-  if (response !== null) {
-    try {
-      parsed = (await response.json()) as FeatureUpdateRequestCreateResponse;
-    } catch {
-      parsed = null;
-    }
-  }
-
-  const recovered = response === null || parsed === null;
-  let result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>;
-  if (recovered) {
-    const entry = state.idempotencyEntries.get(idempotencyKey);
-    if (!entry) {
-      throw new Error("UI KMA create recovery journal identity가 없습니다");
-    }
-    entry.status = "response_lost_replaying";
-    await writeDurableJournal(state, "request_response_lost");
-    result = await createKmaRequest(page, body, idempotencyKey, state);
-  } else {
-    if (response === null || parsed === null) {
-      throw new Error("UI KMA create response 분기 불변식이 깨졌습니다");
-    }
-    result = {
-      body: parsed,
-      entityTag: response.headers()["etag"] ?? null,
-      status: response.status(),
-    };
-    await trackRequestResult(state, result, idempotencyKey);
-  }
-
-  return {
-    created: requireCreatedOrReplayedKmaRequest(result, options),
-    recovered,
-    result,
-  };
-}
-
-export async function submitTrackedUiKmaCreate(
-  page: Page,
-  state: CleanupState,
-  expectedBody: FeatureUpdateRequestCreateRequest,
-  expectedTargets: readonly TargetRef[],
-  submit: () => Promise<void>,
-): Promise<TrackedUiKmaCreateResult> {
-  let idempotencyKey: string | null = null;
-  let journaledBody: FeatureUpdateRequestCreateRequest | null = null;
-  let routeSeen = false;
-  let resolveRouteHandled!: () => void;
-  let rejectRouteHandled!: (error: unknown) => void;
-  const routeHandled = new Promise<void>((resolve, reject) => {
-    resolveRouteHandled = resolve;
-    rejectRouteHandled = reject;
-  });
-  void routeHandled.catch(() => undefined);
-  let resolveHandlerSettled!: () => void;
-  const handlerSettled = new Promise<void>((resolve) => {
-    resolveHandlerSettled = resolve;
-  });
-  const exactUrl = new URL(
-    "/api/proxy/v1/ops/pipeline/requests",
-    expectedUiOrigin(),
-  ).href;
-  const routeHandler = async (route: Route): Promise<void> => {
-    routeSeen = true;
-    const request = route.request();
-    try {
-      if (request.method() !== "POST" || request.url() !== exactUrl) {
-        throw new Error("UI KMA create exact origin/path/method 불일치");
-      }
-      const candidateKey = request.headers()["idempotency-key"];
-      if (!candidateKey || !UUID_PATTERN.test(candidateKey)) {
-        throw new Error("UI KMA create Idempotency-Key 계약 불일치");
-      }
-      const body = request.postDataJSON() as FeatureUpdateRequestCreateRequest;
-      await assertExactOwnedTargetsAtServer(
-        page,
-        state,
-        expectedTargets,
-        kmaExternalSystem(expectedBody),
-      );
-      await journalExactUiKmaCreateRequest(
-        state,
-        body,
-        candidateKey,
-        expectedBody,
-        expectedTargets,
-      );
-      idempotencyKey = candidateKey;
-      journaledBody = body;
-      await route.continue();
-      resolveRouteHandled();
-    } catch (error) {
-      rejectRouteHandled(error);
-      await route.abort("failed").catch(() => undefined);
-    } finally {
-      resolveHandlerSettled();
-    }
-  };
-
-  await page.route(exactUrl, routeHandler);
-  const responsePromise = page.waitForResponse((candidate) => {
-    return (
-      candidate.request().method() === "POST" && candidate.url() === exactUrl
-    );
-  });
-  let response: Response | null = null;
-  let primaryError: unknown;
-  try {
-    await submit();
-    await boundedWait(routeHandled, "UI KMA create route barrier");
-    response = await boundedWait(
-      responsePromise,
-      "UI KMA create response",
-    ).catch(() => null);
-  } catch (error) {
-    primaryError = error;
-    throw error;
-  } finally {
-    void responsePromise.catch(() => undefined);
-    const teardownErrors: unknown[] = [];
-    if (routeSeen) {
-      await boundedWait(
-        handlerSettled,
-        "UI KMA create route handler settlement",
-      ).catch((error: unknown) => teardownErrors.push(error));
-    }
-    await page
-      .unroute(exactUrl, routeHandler)
-      .catch((error: unknown) => teardownErrors.push(error));
-    if (teardownErrors.length > 0) {
-      throw new AggregateError(
-        primaryError === undefined
-          ? teardownErrors
-          : [primaryError, ...teardownErrors],
-        "UI KMA create primary/route cleanup 실패",
-      );
-    }
-  }
-  if (!idempotencyKey || !journaledBody) {
-    throw new Error("UI KMA create durable journal identity가 없습니다");
-  }
-  return resolveTrackedUiKmaCreateResponse(
-    page,
-    state,
-    idempotencyKey,
-    journaledBody,
-    response,
-  );
-}
-
-export async function runTrackedRequestNowFromUi(
-  page: Page,
-  state: CleanupState,
-  requestId: string,
-  jobId: string,
-  syncScope: string,
-  submit: () => Promise<void>,
-): Promise<FeatureUpdateRequestMutationResponse> {
-  const runNowIdentity = requireKmaDatasetIdentity();
-  const exactPath = `/api/proxy/v1/ops/pipeline/requests/${encodeURIComponent(
-    requestId,
-  )}/run-now`;
-  const exactUrl = new URL(exactPath, expectedUiOrigin()).href;
-  let routeSeen = false;
-  let resolveBarrier!: () => void;
-  let rejectBarrier!: (error: unknown) => void;
-  const barrier = new Promise<void>((resolve, reject) => {
-    resolveBarrier = resolve;
-    rejectBarrier = reject;
-  });
-  void barrier.catch(() => undefined);
-  let resolveHandlerSettled!: () => void;
-  const handlerSettled = new Promise<void>((resolve) => {
-    resolveHandlerSettled = resolve;
-  });
-  const routeHandler = async (route: Route): Promise<void> => {
-    routeSeen = true;
-    const request = route.request();
-    try {
-      if (
-        request.method() !== "POST" ||
-        request.url() !== exactUrl ||
-        request.postData() !== null
-      ) {
-        throw new Error("run-now exact origin/path/method/body 계약 불일치");
-      }
-      const detailResponse = await page.request.get(
-        new URL(
-          `/api/proxy/v1/ops/pipeline/executions/update_request/${encodeURIComponent(
-            requestId,
-          )}`,
-          expectedUiOrigin(),
-        ).href,
-        { headers: { Accept: "application/json" }, timeout: BROWSER_FETCH_TIMEOUT_MS },
-      );
-      const detail = detailResponse.ok()
-        ? ((await detailResponse.json()) as PipelineExecutionDetailResponse)
-        : null;
-      const updateRequest = detail?.data.update_request;
-      const scope = updateRequest?.scope;
-      if (
-        detailResponse.status() !== 200 ||
-        detail === null ||
-        detail.data.execution.kind !== "update_request" ||
-        detail.data.execution.id !== requestId ||
-        detail.data.execution.status !== "running" ||
-        detail.data.execution.job_id !== jobId ||
-        updateRequest == null ||
-        updateRequest.request_id !== requestId ||
-        updateRequest.job_id !== jobId ||
-        updateRequest.status !== "running" ||
-        scope?.type !== "provider_dataset" ||
-        scope.provider_dataset_id !== runNowIdentity.providerDatasetId ||
-        scope.operation_key !== runNowIdentity.operationKey ||
-        scope.sync_scope !== syncScope ||
-        detail.data.cancellation !== null ||
-        detail.data.root.cancellation !== null
-      ) {
-        throw new Error(
-          "run-now mutation 직전 exact running KMA ownership barrier 실패",
-        );
-      }
-      const externalSystemPrefix = "external_system:";
-      const externalSystem = syncScope.startsWith(externalSystemPrefix)
-        ? syncScope.slice(externalSystemPrefix.length)
-        : "";
-      if (!externalSystem) {
-        throw new Error("run-now external_system scope identity가 없습니다");
-      }
-      const expectedTargets = state.targets.filter(
-        (target) =>
-          target.externalSystem === externalSystem &&
-          state.targetStatuses.get(targetJournalKey(target)) === "active",
-      );
-      await assertExactOwnedTargetsAtServer(
-        page,
-        state,
-        expectedTargets,
-        externalSystem,
-      );
-      await journalRunNowMutation(state, requestId, "pending");
-      await route.continue();
-      resolveBarrier();
-    } catch (error) {
-      rejectBarrier(error);
-      await route.abort("failed").catch(() => undefined);
-    } finally {
-      resolveHandlerSettled();
-    }
-  };
-  await page.route(exactUrl, routeHandler);
-  const responsePromise = page.waitForResponse((candidate) => {
-    return candidate.request().method() === "POST" && candidate.url() === exactUrl;
-  });
-  let response: Response;
-  let primaryError: unknown;
-  try {
-    await submit();
-    await boundedWait(barrier, "UI KMA run-now ownership barrier");
-    response = await boundedWait(responsePromise, "UI KMA run-now response");
-  } catch (error) {
-    primaryError = error;
-    throw error;
-  } finally {
-    void responsePromise.catch(() => undefined);
-    const teardownErrors: unknown[] = [];
-    if (routeSeen) {
-      await boundedWait(
-        handlerSettled,
-        "UI KMA run-now route handler settlement",
-      ).catch((error: unknown) => teardownErrors.push(error));
-    }
-    await page
-      .unroute(exactUrl, routeHandler)
-      .catch((error: unknown) => teardownErrors.push(error));
-    if (teardownErrors.length > 0) {
-      throw new AggregateError(
-        primaryError === undefined
-          ? teardownErrors
-          : [primaryError, ...teardownErrors],
-        "UI KMA run-now primary/route cleanup 실패",
-      );
-    }
-  }
-  let body: FeatureUpdateRequestMutationResponse | null = null;
-  if (response.status() === 200) {
-    try {
-      body = (await response.json()) as FeatureUpdateRequestMutationResponse;
-    } catch {
-      body = null;
-    }
-  }
-  if (
-    body === null ||
-    body.data.request_id !== requestId ||
-    body.data.job_id !== jobId
-  ) {
-    throw new Error("UI KMA run-now 응답 계약이 request/job identity와 다릅니다");
-  }
-  await journalRunNowMutation(state, requestId, "observed");
-  return body;
-}
-
-export async function runRequestNow(
-  page: Page,
-  requestId: string,
-  state?: CleanupState,
-): Promise<BrowserFetchResult<FeatureUpdateRequestMutationResponse>> {
-  if (!state) {
-    throw new Error("run-now direct dispatch에는 cleanup ownership state가 필요합니다");
-  }
-  const identity = requireKmaDatasetIdentity();
-  const detail = requireBody(await getRequestDetail(page, requestId), 200);
-  const updateRequest = detail.data.update_request;
-  const scope = updateRequest?.scope;
-  if (
-    detail.data.execution.id !== requestId ||
-    updateRequest === null ||
-    updateRequest.request_id !== requestId ||
-    scope?.type !== "provider_dataset" ||
-    scope.provider_dataset_id !== identity.providerDatasetId ||
-    scope.operation_key !== identity.operationKey ||
-    !scope.sync_scope.startsWith("external_system:")
-  ) {
-    throw new Error("run-now direct KMA request identity barrier 실패");
-  }
-  const externalSystem = scope.sync_scope.slice("external_system:".length);
-  const expectedTargets = state.targets.filter(
-    (target) =>
-      target.externalSystem === externalSystem &&
-      state.targetStatuses.get(targetJournalKey(target)) === "active",
-  );
-  await assertExactOwnedTargetsAtServer(
-    page,
-    state,
-    expectedTargets,
-    externalSystem,
-  );
-  await writeDurableJournal(state, "run_now_pending");
-  const result = await browserFetch<FeatureUpdateRequestMutationResponse>(
-    page,
-    `${PIPELINE_REQUESTS_PATH}/${encodeURIComponent(requestId)}/run-now`,
-    { method: "POST", body: {} },
-  );
-  await writeDurableJournal(state, "run_now_observed");
-  return result;
-}
-
-export async function journalRunNowMutation(
-  state: CleanupState,
-  requestId: string,
-  phase: "pending" | "observed",
-): Promise<void> {
-  if (!state.requestIds.has(requestId)) {
-    throw new Error("run-now journal request identity가 cleanup state에 없습니다");
-  }
-  await writeDurableJournal(state, `run_now_${phase}`);
-}
-
-export async function getRequestDetail(
-  page: Page,
-  requestId: string,
-): Promise<BrowserFetchResult<PipelineExecutionDetailResponse>> {
-  return browserFetch<PipelineExecutionDetailResponse>(
-    page,
-    `/v1/ops/pipeline/executions/update_request/${encodeURIComponent(requestId)}`,
-  );
-}
-
-function exactScopeQuery(syncScope: string): string {
-  const identity = requireKmaDatasetIdentity();
-  return new URLSearchParams({
-    sync_scope: syncScope,
-    operation_key: identity.operationKey,
-  }).toString();
-}
-
-export function exactDatasetUiPath(syncScope: string): string {
-  const identity = requireKmaDatasetIdentity();
-  const query = new URLSearchParams({
-    provider_dataset_id: String(identity.providerDatasetId),
-    sync_scope: syncScope,
-    operation_key: identity.operationKey,
-    panel: "history",
-  });
-  return `/ops/datasets?${query.toString()}`;
-}
-
-export async function getExactDatasetDetail(
-  page: Page,
-  syncScope: string,
-): Promise<BrowserFetchResult<OpsDatasetDetailResponse>> {
-  const identity = requireKmaDatasetIdentity();
-  return browserFetch<OpsDatasetDetailResponse>(
-    page,
-    `/v1/ops/datasets/${identity.providerDatasetId}?${exactScopeQuery(
-      syncScope,
-    )}`,
-    { timeoutMs: DATASET_DETAIL_FETCH_TIMEOUT_MS },
-  );
-}
-
-export async function getPipelineOverview(
-  page: Page,
-): Promise<BrowserFetchResult<PipelineOverviewResponse>> {
-  return browserFetch<PipelineOverviewResponse>(
-    page,
-    "/v1/ops/pipeline/overview?run_limit=1",
-  );
-}
-
-export type NonTerminalFeatureUpdateRequest = {
-  id: string;
-  status: "queued" | "running";
-};
-
-async function listExactFeatureUpdateRequestsByStatus(
-  page: Page,
-  status: NonTerminalFeatureUpdateRequest["status"],
-): Promise<NonTerminalFeatureUpdateRequest[]> {
-  const query = new URLSearchParams({
-    kind: "update_request",
-    page_size: "200",
-    status,
-  });
-  const response = requireBody(
-    await browserFetch<PipelineExecutionsListResponse>(
-      page,
-      `/v1/ops/pipeline/executions?${query.toString()}`,
-    ),
-    200,
-  );
-  if (response.meta.page?.next_cursor !== null) {
-    throw new Error(
-      `global ${status} feature update request 목록이 한 페이지를 초과해 안전 검증을 중단했습니다`,
-    );
-  }
-  if (
-    response.data.items.some(
-      (item) => item.kind !== "update_request" || item.status !== status,
-    )
-  ) {
-    throw new Error(`global ${status} feature update request 필터 계약이 깨졌습니다`);
-  }
-  return response.data.items.map((item) => ({ id: item.id, status }));
-}
-
-export async function assertExactNonTerminalFeatureUpdateRequests(
-  page: Page,
-  expected: readonly NonTerminalFeatureUpdateRequest[],
-  checkpoint: string,
-): Promise<void> {
-  // queued를 먼저 읽으면 RUNNING sensor 아래 상태 전이가 일어나도 두 조회 사이에서
-  // non-terminal request를 놓치지 않는다. sensor STOPPED 이후에는 queued가 고정된다.
-  const queued = await listExactFeatureUpdateRequestsByStatus(page, "queued");
-  const running = await listExactFeatureUpdateRequestsByStatus(page, "running");
-  const identity = (item: NonTerminalFeatureUpdateRequest): string =>
-    `${item.status}:${item.id}`;
-  const observedIdentities = [...queued, ...running].map(identity).sort();
-  const expectedIdentities = expected.map(identity).sort();
-  if (JSON.stringify(observedIdentities) !== JSON.stringify(expectedIdentities)) {
-    throw new Error(
-      `${checkpoint}: global non-terminal feature update request 집합 불일치(expected=${expectedIdentities.length}, observed=${observedIdentities.length})`,
-    );
-  }
-}
-
-export function queueSensorOperational(response: PipelineOverviewResponse): boolean {
-  if (response.data.dagster.status !== "ok") return false;
-  return (
-    response.data.dagster.sensors?.find((sensor) => sensor.name === QUEUE_SENSOR_NAME)
-      ?.status === "RUNNING"
-  );
-}
-
-function hasExactObjectKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-): boolean {
-  const actual = Object.keys(value).sort();
-  const sortedExpected = [...expected].sort();
-  return (
-    actual.length === sortedExpected.length &&
-    actual.every((key, index) => key === sortedExpected[index])
-  );
-}
-
-function equalStringSets(left: Set<string>, right: Set<string>): boolean {
-  return (
-    left.size === right.size && [...left].every((value) => right.has(value))
-  );
-}
-
-function journalBodyMatchesKmaScope(
-  body: unknown,
-  expected: KmaScopeExpectation,
-): boolean {
-  const scope = asRecord(asRecord(body)?.scope);
-  return (
-    scope !== null &&
-    scope.type === "provider_dataset" &&
-    expected.operationKey === KMA_NOWCAST_OPERATION_KEY &&
-    scope.provider_dataset_id === expected.providerDatasetId &&
-    scope.sync_scope === expected.syncScope &&
-    scope.operation_key === expected.operationKey
-  );
-}
-
-/**
- * durable journal 하나만 보고 "cleanup이 취소해도 되는 요청 집합"이 성립하는지 본다.
- *
- * request id ↔ idempotency entry ↔ provider dataset/sync scope/operation 삼중이
- * 빠짐없이 1:1이어야 한다. 하나라도 빠지거나 중복되면 그 journal로는 어느 요청이
- * 우리 것인지 말할 수 없고, 그때 cleanup은 취소를 포기해야 한다(fail-closed).
- */
-export function hasExactC7RequestOwnershipBinding(value: unknown): boolean {
-  const journal = asRecord(value);
-  if (
-    journal === null ||
-    journal.version !== 4 ||
-    !Array.isArray(journal.request_ids) ||
-    !Array.isArray(journal.idempotency_entries) ||
-    !Array.isArray(journal.request_ownership)
-  ) {
-    return false;
-  }
-
-  const requestIds = new Set<string>();
-  for (const requestId of journal.request_ids) {
-    if (typeof requestId !== "string" || !UUID_PATTERN.test(requestId)) {
-      return false;
-    }
-    if (requestIds.has(requestId)) return false;
-    requestIds.add(requestId);
-  }
-
-  const entriesByIdempotency = new Map<
-    string,
-    { body: unknown; requestId: string | null }
-  >();
-  const entryRequestIds = new Set<string>();
-  for (const entryValue of journal.idempotency_entries) {
-    const entry = asRecord(entryValue);
-    if (
-      entry === null ||
-      typeof entry.idempotency_key !== "string" ||
-      !UUID_PATTERN.test(entry.idempotency_key) ||
-      asRecord(entry.body) === null ||
-      (entry.request_id !== null &&
-        (typeof entry.request_id !== "string" ||
-          !UUID_PATTERN.test(entry.request_id))) ||
-      typeof entry.status !== "string" ||
-      entry.status.length === 0 ||
-      entriesByIdempotency.has(entry.idempotency_key)
-    ) {
-      return false;
-    }
-    const requestId = entry.request_id as string | null;
-    if (requestId !== null) {
-      if (entryRequestIds.has(requestId)) return false;
-      entryRequestIds.add(requestId);
-    }
-    entriesByIdempotency.set(entry.idempotency_key, {
-      body: entry.body,
-      requestId,
-    });
-  }
-
-  const ownershipRequestIds = new Set<string>();
-  const ownershipIdempotencyKeys = new Set<string>();
-  for (const ownershipValue of journal.request_ownership) {
-    const ownership = asRecord(ownershipValue);
-    if (
-      ownership === null ||
-      !hasExactObjectKeys(ownership, [
-        "idempotency_key",
-        "operation_key",
-        "provider_dataset_id",
-        "request_id",
-        "sync_scope",
-      ]) ||
-      typeof ownership.request_id !== "string" ||
-      !UUID_PATTERN.test(ownership.request_id) ||
-      typeof ownership.idempotency_key !== "string" ||
-      !UUID_PATTERN.test(ownership.idempotency_key) ||
-      ownership.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
-      typeof ownership.provider_dataset_id !== "number" ||
-      !Number.isSafeInteger(ownership.provider_dataset_id) ||
-      ownership.provider_dataset_id <= 0 ||
-      typeof ownership.sync_scope !== "string" ||
-      !ownership.sync_scope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX) ||
-      ownership.sync_scope === EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX ||
-      ownershipRequestIds.has(ownership.request_id) ||
-      ownershipIdempotencyKeys.has(ownership.idempotency_key)
-    ) {
-      return false;
-    }
-    const entry = entriesByIdempotency.get(ownership.idempotency_key);
-    if (
-      entry === undefined ||
-      entry.requestId !== ownership.request_id ||
-      !journalBodyMatchesKmaScope(entry.body, {
-        operationKey: ownership.operation_key,
-        providerDatasetId: ownership.provider_dataset_id,
-        syncScope: ownership.sync_scope,
-      })
-    ) {
-      return false;
-    }
-    ownershipRequestIds.add(ownership.request_id);
-    ownershipIdempotencyKeys.add(ownership.idempotency_key);
-  }
-
-  return (
-    equalStringSets(requestIds, entryRequestIds) &&
-    equalStringSets(requestIds, ownershipRequestIds) &&
-    equalStringSets(
-      ownershipIdempotencyKeys,
-      new Set(
-        [...entriesByIdempotency.entries()]
-          .filter(([, entry]) => entry.requestId !== null)
-          .map(([idempotencyKey]) => idempotencyKey),
-      ),
-    )
-  );
-}
-
-/** request body가 선언한 canonical triple을 뽑는다. 아니면 소유권 자체가 성립하지 않는다. */
-function kmaScopeExpectationFromRequestBody(
-  body: FeatureUpdateRequestCreateRequest,
-): KmaScopeExpectation {
-  const scope = body.scope;
-  if (
-    scope.type !== "provider_dataset" ||
-    scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
-    !scope.sync_scope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX)
-  ) {
-    throw new Error("KMA request scope canonical triple 계약 불일치");
-  }
-  return {
-    operationKey: scope.operation_key,
-    providerDatasetId: scope.provider_dataset_id,
-    syncScope: scope.sync_scope,
-  };
-}
-
-function sameKmaScope(
-  left: KmaScopeExpectation,
-  right: KmaScopeExpectation,
-): boolean {
-  return (
-    left.operationKey === right.operationKey &&
-    left.providerDatasetId === right.providerDatasetId &&
-    left.syncScope === right.syncScope
-  );
-}
-
-/**
- * Dataset-detail의 active 하나를 cleanup 대상으로 삼기 전에, 그것이 **이 시나리오가
- * durable하게 만든 그 요청**인지 본다. 축 하나라도 어긋나면 외부 요청일 수 있으므로
- * false다 — cleanup은 그때 fail-closed한다.
- *
- * main의 발견 루프는 dataset에 붙은 active를 무조건 채택했다. C7 dataset에 외부 운영
- * 요청이 활성이면 그것을 취소했다는 뜻이다.
- */
-export function isExactScenarioOwnedActiveRequest(
-  datasetDetail: OpsDatasetDetailResponse,
-  requestDetail: PipelineExecutionDetailResponse,
-  ownership: KmaRequestOwnership | undefined,
-  idempotencyEntry:
-    | { body: FeatureUpdateRequestCreateRequest; requestId: string | null }
-    | undefined,
-): boolean {
-  if (ownership === undefined || idempotencyEntry === undefined) return false;
-  let bodyScope: KmaScopeExpectation;
-  try {
-    bodyScope = kmaScopeExpectationFromRequestBody(idempotencyEntry.body);
-  } catch {
-    return false;
-  }
-  const active = datasetDetail.data.active_execution;
-  const updateRequest = requestDetail.data.update_request;
-  return !(
-    !sameKmaScope(ownership, bodyScope) ||
-    idempotencyEntry.requestId === null ||
-    active === null ||
-    active.kind !== "update_request" ||
-    active.id !== idempotencyEntry.requestId ||
-    active.sync_scope !== ownership.syncScope ||
-    active.operation_key !== ownership.operationKey ||
-    datasetDetail.data.provider !== KMA_PROVIDER ||
-    datasetDetail.data.dataset_key !== KMA_DATASET_KEY ||
-    datasetDetail.data.scopes.filter(
-      (scope) => scope.sync_scope === ownership.syncScope,
-    ).length !== 1 ||
-    active.provider_datasets.length !== 1 ||
-    active.provider_datasets[0]?.provider !== KMA_PROVIDER ||
-    active.provider_datasets[0]?.dataset_key !== KMA_DATASET_KEY ||
-    active.provider_datasets[0]?.provider_dataset_id !==
-      ownership.providerDatasetId ||
-    active.provider_datasets[0]?.sync_scope !== ownership.syncScope ||
-    requestDetail.data.execution.kind !== "update_request" ||
-    requestDetail.data.execution.id !== active.id ||
-    updateRequest === null ||
-    updateRequest.request_id !== active.id ||
-    updateRequest.scope.type !== "provider_dataset" ||
-    updateRequest.scope.provider_dataset_id !== ownership.providerDatasetId ||
-    updateRequest.scope.sync_scope !== ownership.syncScope ||
-    updateRequest.scope.operation_key !== ownership.operationKey ||
-    updateRequest.dataset_memberships.length !== 1 ||
-    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
-      ownership.providerDatasetId ||
-    updateRequest.dataset_memberships[0]?.sync_scope !== ownership.syncScope ||
-    updateRequest.dataset_memberships[0]?.operation_key !==
-      ownership.operationKey
-  );
-}
-
-/** cleanup이 cancel을 보낼 수 있는 소유 active 요청 id. 아니면 null이다. */
-export function cancellationCandidateForScenarioOwnedActiveRequest(
-  datasetDetail: OpsDatasetDetailResponse,
-  requestDetail: PipelineExecutionDetailResponse,
-  ownership: KmaRequestOwnership | undefined,
-  idempotencyEntry:
-    | { body: FeatureUpdateRequestCreateRequest; requestId: string | null }
-    | undefined,
-): string | null {
-  const active = datasetDetail.data.active_execution;
-  return active !== null &&
-    active.kind === "update_request" &&
-    isExactScenarioOwnedActiveRequest(
-      datasetDetail,
-      requestDetail,
-      ownership,
-      idempotencyEntry,
-    )
-    ? active.id
-    : null;
-}
-
-/**
- * C7 runner가 첫 durable write 전에 두는 v3 bootstrap marker인지 본다.
- *
- * 실제 mutation/cleanup journal을 v3로 해석하면 소유권 검사를 통째로 건너뛸 수 있다.
- * 그래서 v4 journal은 이 placeholder와 호환 변환하지 않는다 — placeholder는 shell이
- * 쓰는 별도 문서이고, 소유권을 말할 수 있는 것은 v4뿐이다.
- */
-export function isC7OrchestratorBootstrapPlaceholder(value: unknown): boolean {
-  return exactJson(value, {
-    cleanup_result: null,
-    completed_scenarios: [],
-    external_systems: [],
-    idempotency_entries: [],
-    phase: "restored",
-    request_ids: [],
-    request_terminal_statuses: {},
-    run_id: "__orchestrator_pending__",
-    target_history: [],
-    target_refs: [],
-    version: 3,
-  });
-}
-
-/**
- * Live E2E가 요청 대상 immutable dataset ID를 화면 projection에서 얻는다.
- * seed 순서나 DB sequence를 fixture 상수로 가정하지 않는다.
- */
-export async function resolveKmaProviderDatasetId(page: Page): Promise<number> {
-  return (await resolveKmaDatasetIdentity(page)).providerDatasetId;
-}
-
-export async function cancelRequest(
-  page: Page,
-  requestId: string,
-  reason: string,
-): Promise<BrowserFetchResult<PipelineCancellationResponse>> {
-  return browserFetch<PipelineCancellationResponse>(
-    page,
-    `/v1/ops/pipeline/executions/update_request/${encodeURIComponent(
-      requestId,
-    )}/cancel`,
-    { method: "POST", body: { reason } },
-  );
-}
-
 export function createCleanupState(
   scenario: CleanupScenario,
   runId: string,
 ): CleanupState {
   return {
     allExternalSystems: new Set(),
-    allIdempotencyEntries: new Map(),
-    allRequestIds: new Set(),
-    allRequestOwnership: new Map(),
-    requestOwnership: new Map(),
-    allRequestTerminalStatuses: new Map(),
     allTargetRefs: new Map(),
     cleanupResult: null,
     completedScenarios: new Set(),
     externalSystems: new Set(),
-    idempotencyEntries: new Map(),
     journalWrite: Promise.resolve(),
-    requestIds: new Set(),
-    requestTerminalStatuses: new Map(),
     runId,
     scenario,
-    scopeStateCount: 0,
     stateFile: cleanupStateFile(),
-    targetStatuses: new Map(),
     targetHistory: [],
+    targetStatuses: new Map(),
     targets: [],
   };
 }
@@ -2883,268 +890,6 @@ async function verifyOwnedTargetStillExact(
     );
   }
   return { status: "active", ...identity };
-}
-
-export async function assertExactOwnedTargetsAtServer(
-  page: Page,
-  state: CleanupState,
-  expectedTargets: readonly TargetRef[],
-  expectedExternalSystem?: string,
-): Promise<void> {
-  assertBootstrappedPage(page);
-  const ownedTargets = expectedTargets.map((target) => {
-    const owned = requireOwnedTarget(state, target);
-    if (state.targetStatuses.get(targetJournalKey(owned)) !== "active") {
-      throw new Error("UI KMA create expected target가 active owned 상태가 아닙니다");
-    }
-    return owned;
-  });
-  for (let offset = 0; offset < ownedTargets.length; offset += 25) {
-    const batch = ownedTargets.slice(offset, offset + 25);
-    await Promise.all(
-      batch.map(async (owned) => {
-        const response = await page.request.get(
-          new URL(
-            `/api/proxy${targetPath(owned.externalSystem, owned.targetKey)}`,
-            expectedUiOrigin(),
-          ).href,
-          {
-            headers: { Accept: "application/json" },
-            timeout: BROWSER_FETCH_TIMEOUT_MS,
-          },
-        );
-        if (response.status() !== 200) {
-          throw new Error(
-            `UI KMA create target server ownership barrier 실패(status=${response.status()})`,
-          );
-        }
-        const body = (await response.json()) as PoiCacheTargetResponse;
-        assertOwnedTargetRecord(body, owned, owned.body, owned.targetId);
-        const entityTag = response.headers()["etag"] ?? null;
-        if (
-          entityTag !== owned.entityTag ||
-          parseStrongEntityTag(entityTag ?? "", owned.targetId) !==
-            owned.lockVersion
-        ) {
-          throw new Error("UI KMA create target GET strong ETag 불일치");
-        }
-      }),
-    );
-  }
-  if (
-    expectedExternalSystem !== undefined &&
-    (expectedExternalSystem.length === 0 ||
-      ownedTargets.some(
-        (target) => target.externalSystem !== expectedExternalSystem,
-      ))
-  ) {
-    throw new Error("UI KMA create expected external_system 집합 불일치");
-  }
-  const externalSystems = [
-    ...new Set([
-      ...ownedTargets.map((target) => target.externalSystem),
-      ...(expectedExternalSystem === undefined
-        ? []
-        : [expectedExternalSystem]),
-    ]),
-  ].sort();
-  for (const externalSystem of externalSystems) {
-    const expected = ownedTargets
-      .filter((target) => target.externalSystem === externalSystem)
-      .map((target) => ({
-        entityTag: target.entityTag,
-        targetId: target.targetId,
-        targetKey: target.targetKey,
-      }))
-      .sort((left, right) => left.targetKey.localeCompare(right.targetKey));
-    if (expected.length > OWNED_TARGET_SET_LIMIT) {
-      throw new Error("UI KMA create owned target set limit(501)을 초과했습니다");
-    }
-    const observed: Array<{
-      entityTag: string;
-      targetId: string;
-      targetKey: string;
-    }> = [];
-    const seenCursors = new Set<string>();
-    let cursor: string | null = null;
-    let completed = false;
-    for (let pageIndex = 0; pageIndex < OWNED_TARGET_PAGE_LIMIT; pageIndex += 1) {
-      const query = new URLSearchParams({
-        external_system: externalSystem,
-        include_deleted: "false",
-        page_size: String(OWNED_TARGET_PAGE_SIZE),
-      });
-      if (cursor !== null) query.set("cursor", cursor);
-      const response = await page.request.get(
-        new URL(
-          `/api/proxy${POI_TARGETS_PATH}?${query.toString()}`,
-          expectedUiOrigin(),
-        ).href,
-        {
-          headers: { Accept: "application/json" },
-          timeout: BROWSER_FETCH_TIMEOUT_MS,
-        },
-      );
-      if (response.status() !== 200) {
-        throw new Error(
-          `UI KMA create external_system full-list barrier 실패(status=${response.status()})`,
-        );
-      }
-      const envelope = (await response.json()) as PoiCacheTargetListResponse;
-      const items = envelope.data.items;
-      if (
-        items.length > OWNED_TARGET_PAGE_SIZE ||
-        (cursor !== null && items.length === 0)
-      ) {
-        throw new Error("UI KMA create target cursor page 크기 계약 불일치");
-      }
-      for (const item of items) {
-        if (item.external_system !== externalSystem) {
-          throw new Error("UI KMA create target cursor page scope 누출");
-        }
-        observed.push({
-          entityTag: item.entity_tag,
-          targetId: item.target_id,
-          targetKey: item.target_key,
-        });
-      }
-      if (observed.length > OWNED_TARGET_SET_LIMIT) {
-        throw new Error("UI KMA create server active target set limit(501) 초과");
-      }
-      const nextCursor = envelope.meta.page?.next_cursor;
-      if (nextCursor === null) {
-        completed = true;
-        break;
-      }
-      if (
-        typeof nextCursor !== "string" ||
-        nextCursor.length === 0 ||
-        nextCursor === cursor ||
-        seenCursors.has(nextCursor)
-      ) {
-        throw new Error("UI KMA create target cursor 반복/형식 계약 불일치");
-      }
-      seenCursors.add(nextCursor);
-      cursor = nextCursor;
-    }
-    if (!completed) {
-      throw new Error("UI KMA create target cursor page limit(2) 초과");
-    }
-    observed.sort((left, right) => left.targetKey.localeCompare(right.targetKey));
-    if (!exactJson(observed, expected)) {
-      throw new Error(
-        "UI KMA create owned external_system key/UUID/entity_tag 전체 집합 불일치",
-      );
-    }
-  }
-}
-
-export async function journalPendingRequest(
-  state: CleanupState,
-  body: FeatureUpdateRequestCreateRequest,
-  idempotencyKey: string,
-): Promise<void> {
-  assertKmaOnlyPlan(body);
-  const existing = state.idempotencyEntries.get(idempotencyKey);
-  if (existing && !exactJson(existing.body, body)) {
-    throw new Error("동일 Idempotency-Key의 KMA request body가 변경되었습니다");
-  }
-  if (existing) {
-    existing.status = existing.requestId === null ? "pending" : "replay_pending";
-  } else {
-    state.idempotencyEntries.set(idempotencyKey, {
-      body,
-      requestId: null,
-      status: "pending",
-    });
-  }
-  await writeDurableJournal(state, "request_pending");
-}
-
-export async function journalExactUiKmaCreateRequest(
-  state: CleanupState,
-  actualBody: FeatureUpdateRequestCreateRequest,
-  idempotencyKey: string,
-  expectedBody: FeatureUpdateRequestCreateRequest,
-  expectedTargets: readonly TargetRef[],
-): Promise<void> {
-  if (!UUID_PATTERN.test(idempotencyKey)) {
-    throw new Error("UI KMA create Idempotency-Key UUID 계약 불일치");
-  }
-  assertKmaOnlyPlan(actualBody);
-  assertKmaOnlyPlan(expectedBody);
-  if (!exactJson(actualBody, expectedBody)) {
-    throw new Error("UI KMA create body가 exact expected body와 다릅니다");
-  }
-  const syncScope =
-    "sync_scope" in expectedBody.scope
-      ? expectedBody.scope.sync_scope
-      : null;
-  const expectedExternalSystem = syncScope?.startsWith("external_system:")
-    ? syncScope.slice("external_system:".length)
-    : "";
-  if (!expectedExternalSystem || expectedTargets.length === 0) {
-    throw new Error("UI KMA create expected target scope가 비어 있습니다");
-  }
-  const expectedKeys = expectedTargets
-    .map(targetJournalKey)
-    .sort();
-  if (new Set(expectedKeys).size !== expectedKeys.length) {
-    throw new Error("UI KMA create expected target identity가 중복되었습니다");
-  }
-  const activeOwned = state.targets.filter(
-    (target) => state.targetStatuses.get(targetJournalKey(target)) === "active",
-  );
-  const activeKeys = activeOwned.map(targetJournalKey).sort();
-  if (!exactJson(activeKeys, expectedKeys)) {
-    throw new Error("UI KMA create active owned target 집합이 exact scope와 다릅니다");
-  }
-  for (const target of activeOwned) {
-    if (
-      target.externalSystem !== expectedExternalSystem ||
-      !UUID_PATTERN.test(target.targetId) ||
-      !Number.isFinite(target.body.coord.lon) ||
-      !Number.isFinite(target.body.coord.lat) ||
-      !Number.isFinite(target.body.radius_km) ||
-      target.body.radius_km <= 0
-    ) {
-      throw new Error(
-        "UI KMA create target key/UUID/coord/radius/scope ownership 불일치",
-      );
-    }
-  }
-  await journalPendingRequest(state, actualBody, idempotencyKey);
-}
-
-export async function trackRequestResult(
-  state: CleanupState,
-  result: BrowserFetchResult<FeatureUpdateRequestCreateResponse>,
-  idempotencyKey?: string,
-): Promise<void> {
-  const data = asRecord(asRecord(result.body)?.data);
-  const requestId =
-    typeof data?.request_id === "string" ? data.request_id : undefined;
-  if (requestId) state.requestIds.add(requestId);
-  if (idempotencyKey) {
-    const entry = state.idempotencyEntries.get(idempotencyKey);
-    if (requestId !== undefined && entry !== undefined) {
-      // 소유권은 request id가 생기는 **그 순간** 기록해야 한다. 나중에 dataset detail을
-      // 보고 역추적하면 그때 붙어 있는 것이 우리 것인지 알 수 없다.
-      try {
-        state.requestOwnership.set(requestId, {
-          ...kmaScopeExpectationFromRequestBody(entry.body),
-          idempotencyKey,
-        });
-      } catch {
-        state.requestOwnership.delete(requestId);
-      }
-    }
-    if (entry) {
-      entry.requestId = requestId ?? null;
-      entry.status = requestId ? `response_${result.status}` : `http_${result.status}`;
-    }
-  }
-  await writeDurableJournal(state, "request_observed");
 }
 
 export async function putTrackedTarget(
@@ -3325,124 +1070,6 @@ export async function deleteTrackedTarget(
   return result;
 }
 
-export async function pollTerminal(
-  page: Page,
-  requestId: string,
-  timeout = REQUEST_TERMINAL_TIMEOUT,
-): Promise<string | null> {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const result = await getRequestDetail(page, requestId);
-    const status = result.body?.data.execution.status;
-    if (status && TERMINAL_STATUSES.has(status)) return status;
-    if (result.status === 404) return "not_found";
-    await page.waitForTimeout(1_000);
-  }
-  return null;
-}
-
-export async function waitForTerminal(
-  page: Page,
-  requestId: string,
-  timeout = REQUEST_TERMINAL_TIMEOUT,
-  state?: CleanupState,
-): Promise<PipelineExecutionDetailResponse> {
-  const terminal = await pollTerminal(page, requestId, timeout);
-  if (!terminal || !TERMINAL_STATUSES.has(terminal)) {
-    throw new Error(`request ${requestId} terminal 대기 실패: ${terminal ?? "timeout"}`);
-  }
-  const detail = requireBody(await getRequestDetail(page, requestId), 200);
-  if (state) {
-    state.requestTerminalStatuses.set(
-      requestId,
-      detail.data.execution.status,
-    );
-    for (const entry of state.idempotencyEntries.values()) {
-      if (entry.requestId === requestId) {
-        entry.status = `terminal_${detail.data.execution.status}`;
-      }
-    }
-    await writeDurableJournal(state, "request_terminal");
-  }
-  await assertTerminalDagsterRunIdentity(page, detail);
-  return detail;
-}
-
-export async function rediscoverExactActiveRequest(
-  page: Page,
-  syncScope: string,
-): Promise<NonNullable<OpsDatasetDetailResponse["data"]["active_execution"]>> {
-  const detail = requireBody(await getExactDatasetDetail(page, syncScope), 200);
-  const active = detail.data.active_execution;
-  if (
-    active === null ||
-    active.kind !== "update_request" ||
-    active.sync_scope !== syncScope
-  ) {
-    throw new Error(`exact scope active request 재탐색 실패: ${syncScope}`);
-  }
-  return active;
-}
-
-/**
- * fast-completion tolerant 재탐색. queued 요청이 sensor tick 전에 done까지 가면
- * active_execution이 null이 되어 rediscoverExactActiveRequest가 오탐(재탐색 실패)한다.
- * active면 active identity를, 아니면 latest_execution(=방금 종료된 우리 요청)을 검증한다.
- */
-export async function rediscoverExactActiveOrSettledRequest(
-  page: Page,
-  syncScope: string,
-  expectedRequestId: string,
-): Promise<void> {
-  const detail = requireBody(await getExactDatasetDetail(page, syncScope), 200);
-  const active = detail.data.active_execution;
-  if (active !== null) {
-    if (
-      active.kind !== "update_request" ||
-      active.sync_scope !== syncScope ||
-      active.id !== expectedRequestId
-    ) {
-      throw new Error(
-        `exact scope active request 재탐색 identity 불일치: ${syncScope}`,
-      );
-    }
-    return;
-  }
-  const latest = detail.data.latest_execution;
-  if (latest === null || latest.id !== expectedRequestId) {
-    throw new Error(
-      `exact scope active/settled request 재탐색 실패: ${syncScope}`,
-    );
-  }
-}
-
-export async function runCreateDeleteCanary(
-  page: Page,
-  state: CleanupState,
-  target: TargetRef,
-  body: PoiCacheTargetUpsertRequest,
-): Promise<void> {
-  const created = await putTrackedTarget(page, state, target, body);
-  const read = requireBody(
-    await getPoiTarget(page, target.externalSystem, target.targetKey),
-    200,
-  );
-  if (read.data.target_id !== created.data.target_id) {
-    throw new Error("POI target canary read identity 불일치");
-  }
-  requireBody(
-    await deleteTrackedTarget(page, state, target),
-    200,
-  );
-  const active = requireBody(
-    await listActivePoiTargets(page, target.externalSystem),
-    200,
-  );
-  if (active.data.items.length !== 0) {
-    throw new Error("POI target canary 삭제 뒤 active target이 남았습니다.");
-  }
-}
-
 async function targetCount(
   page: Page,
   externalSystem: string,
@@ -3514,198 +1141,13 @@ async function recoverUnresolvedTargetIntents(
 async function cleanupResources(
   page: Page,
   state: CleanupState,
-  terminalTimeout: number,
 ): Promise<CleanupExecution> {
   const issues: CleanupIssue[] = [];
-  let exactScopeDiscoveryComplete = true;
   const targetRecovery = await recoverUnresolvedTargetIntents(page, state);
   issues.push(...targetRecovery.issues);
-  const exactTargetDiscoveryComplete = targetRecovery.complete;
 
-  // 응답 유실 뒤 서버에는 request가 생긴 경우도 target보다 먼저 회수한다.
-  const activeDiscoveries = await Promise.allSettled(
-    [...state.externalSystems].sort().map(async (externalSystem) => ({
-      externalSystem,
-      result: await getExactDatasetDetail(
-        page,
-        `external_system:${externalSystem}`,
-      ),
-    })),
-  );
-  const scenarioOwnedActiveRequestIds = new Set<string>();
-  let cleanupOwnershipIntact = true;
-  for (const settled of activeDiscoveries) {
-    if (settled.status === "rejected") {
-      exactScopeDiscoveryComplete = false;
-      issues.push({
-        kind: "unexpected_exception",
-        resource: "exact_scope_active_discovery",
-      });
-      continue;
-    }
-    const { externalSystem, result } = settled.value;
-    if (result.status === 404) continue;
-    if (result.status !== 200 || result.body === null) {
-      exactScopeDiscoveryComplete = false;
-      issues.push({
-        http_status: result.status,
-        kind: "request_detail",
-        resource: `external_system:${externalSystem}`,
-      });
-      continue;
-    }
-    const active = result.body.data.active_execution;
-    if (active?.kind === "update_request") {
-      // 이 dataset에 붙은 active를 **무조건** 채택하면, 외부 운영 요청이 활성일 때
-      // 그것을 우리 것으로 오인해 아래에서 취소한다. 소유 삼중이 맞을 때만 채택한다.
-      const ownership = state.requestOwnership.get(active.id);
-      const idempotencyEntry =
-        ownership === undefined
-          ? undefined
-          : state.idempotencyEntries.get(ownership.idempotencyKey);
-      let owned = false;
-      try {
-        const requestDetailResult = await getRequestDetail(page, active.id);
-        owned =
-          requestDetailResult.status === 200 &&
-          requestDetailResult.body !== null &&
-          active.sync_scope ===
-            `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}` &&
-          cancellationCandidateForScenarioOwnedActiveRequest(
-            result.body,
-            requestDetailResult.body,
-            ownership,
-            idempotencyEntry,
-          ) === active.id;
-      } catch {
-        owned = false;
-      }
-      if (owned) {
-        state.requestIds.add(active.id);
-        scenarioOwnedActiveRequestIds.add(active.id);
-      } else {
-        cleanupOwnershipIntact = false;
-        exactScopeDiscoveryComplete = false;
-        issues.push({
-          kind: "request_ownership",
-          resource: `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}`,
-        });
-      }
-    } else if (active !== null) {
-      exactScopeDiscoveryComplete = false;
-      issues.push({
-        kind: "request_detail",
-        resource: `external_system:${externalSystem}`,
-      });
-    }
-  }
-  await writeDurableJournal(state, "cleanup_discovered");
-  const requestIds = [...state.requestIds].sort();
-
-  const initialDetails = await Promise.allSettled(
-    requestIds.map(async (requestId) => ({
-      requestId,
-      result: await getRequestDetail(page, requestId),
-    })),
-  );
-  const cancelIds: string[] = [];
-  for (const settled of initialDetails) {
-    if (settled.status === "rejected") {
-      issues.push({ kind: "unexpected_exception", resource: "request_detail" });
-      continue;
-    }
-    const { requestId, result } = settled.value;
-    if (result.status !== 200 || result.body === null) {
-      issues.push({
-        http_status: result.status,
-        kind: "request_detail",
-        resource: requestId,
-      });
-      continue;
-    }
-    const status = result.body.data.execution.status;
-    if (!TERMINAL_STATUSES.has(status)) {
-      const ownership = state.requestOwnership.get(requestId);
-      const idempotencyEntry =
-        ownership === undefined
-          ? undefined
-          : state.idempotencyEntries.get(ownership.idempotencyKey);
-      if (
-        !cleanupOwnershipIntact ||
-        ownership === undefined ||
-        idempotencyEntry === undefined ||
-        idempotencyEntry.requestId !== requestId ||
-        !scenarioOwnedActiveRequestIds.has(requestId)
-      ) {
-        // 하나라도 소유를 말할 수 없으면 이 run의 cancel 자체를 포기한다.
-        // 남은 것은 수동 정리로 넘긴다 — 남의 요청을 취소하는 것보다 낫다.
-        cleanupOwnershipIntact = false;
-        exactScopeDiscoveryComplete = false;
-        issues.push({ kind: "request_ownership", resource: requestId });
-        continue;
-      }
-      cancelIds.push(requestId);
-    }
-  }
-
-  if (!cleanupOwnershipIntact) cancelIds.length = 0;
-  if (cancelIds.length > 0) {
-    await writeDurableJournal(state, "cleanup_cancel_pending");
-  }
-  const cancellations = await Promise.allSettled(
-    cancelIds.map(async (requestId) => ({
-      requestId,
-      result: await cancelRequest(
-        page,
-        requestId,
-        `C7 ${state.scenario} ${state.runId} cleanup`,
-      ),
-    })),
-  );
-  for (const settled of cancellations) {
-    if (settled.status === "rejected") {
-      issues.push({ kind: "unexpected_exception", resource: "request_cancel" });
-      continue;
-    }
-    const { requestId, result } = settled.value;
-    if (![200, 404, 409].includes(result.status)) {
-      issues.push({
-        http_status: result.status,
-        kind: "request_cancel",
-        resource: requestId,
-      });
-    }
-  }
-  await writeDurableJournal(state, "cleanup_cancelled");
-
-  const terminalResults = await Promise.allSettled(
-    requestIds.map(async (requestId) => ({
-      requestId,
-      status: await pollTerminal(page, requestId, terminalTimeout),
-    })),
-  );
-  let everyRequestTerminal = true;
-  for (const settled of terminalResults) {
-    if (settled.status === "rejected") {
-      everyRequestTerminal = false;
-      issues.push({ kind: "unexpected_exception", resource: "request_terminal" });
-      continue;
-    }
-    const { requestId, status } = settled.value;
-    if (status && TERMINAL_STATUSES.has(status)) {
-      state.requestTerminalStatuses.set(requestId, status);
-    } else {
-      everyRequestTerminal = false;
-      issues.push({ kind: "request_terminal_timeout", resource: requestId });
-    }
-  }
-  await writeDurableJournal(state, "cleanup_terminal_checked");
-
-  // 하나라도 terminal을 증명하지 못하면 어떤 target도 삭제하지 않는다.
-  const canDeleteTargets =
-    everyRequestTerminal &&
-    exactScopeDiscoveryComplete &&
-    exactTargetDiscoveryComplete;
+  // 응답 유실 intent 중 하나라도 정체를 증명하지 못하면 어떤 target도 삭제하지 않는다.
+  const canDeleteTargets = targetRecovery.complete;
   if (canDeleteTargets) {
     const targets = [...state.targets].reverse();
     const batchSize = 3;
@@ -3813,7 +1255,6 @@ async function cleanupResources(
   const preservedForManualCleanup =
     !canDeleteTargets || hasTargetResidue || issues.length > 0;
   const result: CleanupResult = {
-    allRequestsTerminal: everyRequestTerminal && exactScopeDiscoveryComplete,
     preservedForManualCleanup,
     restored: !preservedForManualCleanup,
   };
@@ -3830,7 +1271,6 @@ export async function withC7Cleanup(
   testInfo: TestInfo,
   state: CleanupState,
   body: () => Promise<void>,
-  options: { terminalTimeout?: number } = {},
 ): Promise<CleanupResult> {
   let primaryError: unknown;
   let cleanup: CleanupExecution | null = null;
@@ -3841,17 +1281,12 @@ export async function withC7Cleanup(
     throw error;
   } finally {
     try {
-      cleanup = await cleanupResources(
-        page,
-        state,
-        options.terminalTimeout ?? CLEANUP_TERMINAL_TIMEOUT,
-      );
+      cleanup = await cleanupResources(page, state);
     } catch {
       const issues: CleanupIssue[] = [
         { kind: "unexpected_exception", resource: "cleanup_boundary" },
       ];
       state.cleanupResult = {
-        allRequestsTerminal: false,
         preservedForManualCleanup: true,
         restored: false,
       };
@@ -3879,7 +1314,6 @@ export async function withC7Cleanup(
     }
   }
   return cleanup?.result ?? {
-    allRequestsTerminal: false,
     preservedForManualCleanup: true,
     restored: false,
   };

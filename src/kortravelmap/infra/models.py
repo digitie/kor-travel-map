@@ -11,8 +11,10 @@ ORM 인스턴스 read mapping 용도로도 사용 가능.
   ``feature_notices`` / ``feature_routes`` / ``feature_areas``. core의
   ``UNIQUE (feature_id, kind)``를 kind 상수 CHECK + 복합 FK로 참조하는
   **배타 arc**다(한 feature는 최대 한 subtype, subtype이 있는 동안 kind 불변).
-- ``feature_weather_values`` / ``feature_price_values`` — weather/price는
-  subtype이 없고 값 정본이 이 둘이다.
+- ``feature_price_values`` — price는 subtype이 없고 값 정본이 이 표다(ORM 미매핑,
+  ``alembic_exclusions``). weather도 subtype이 없었지만 값 표
+  ``feature_weather_values``·``current_weather_summary``는 migration 402가 지웠다
+  (ADR-105 — Map은 weather 기능을 갖지 않는다). kind ``weather``는 정의로 남는다.
 - ``source_records`` / ``source_links`` / ``provider_sync_state`` —
   provider 적재 추적. ``feature_files``, ``ops.*``도 여기 매핑돼 있다.
 - 4 schemas (feature / provider_sync / ops / x_extension)
@@ -284,18 +286,6 @@ class FeatureRow(Base):
                 "lifecycle_state = 'active' "
                 "AND publication_state = 'published' "
                 "AND quality_state = 'valid'"
-            ),
-        ),
-        Index(
-            "idx_features_public_weather_coord_5179_gist",
-            "coord_5179",
-            postgresql_using="gist",
-            postgresql_where=text(
-                "lifecycle_state = 'active' "
-                "AND publication_state = 'published' "
-                "AND quality_state = 'valid' "
-                "AND kind = 'weather' "
-                "AND coord_5179 IS NOT NULL"
             ),
         ),
         Index(

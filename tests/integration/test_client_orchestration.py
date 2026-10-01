@@ -25,8 +25,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
-from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.coordinate import Coordinate
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
@@ -34,10 +32,6 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.models import FeatureRow
-from kortravelmap.providers.airkorea import (
-    air_quality_stations_to_bundles,
-    air_quality_to_weather_values,
-)
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration._feature_ids import feature_uuid
@@ -54,7 +48,7 @@ _TRUNCATE_SQL = (
     # ``source_entities``를 빼면 record만 지워지고 entity가 링크 없이 남아
     # 정합성 검사 F1(orphan source_entity)이 **다른 테스트에서** 켜진다.
     # T-VN-33이 head를 끼우면서 record CASCADE가 더 이상 entity를 지우지 않는다.
-    "TRUNCATE feature.features, feature.feature_weather_values, "
+    "TRUNCATE feature.features, "
     "provider_sync.source_entities, provider_sync.source_entity_heads, "
     "provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
@@ -561,135 +555,3 @@ async def test_resolve_enrichment_review_reject_keeps_no_link(
             )
         ).scalar_one()
     assert enrichment_links == 0
-
-
-# -- T-RV-55d: air quality (station weather feature + weather values) ----------
-
-
-@dataclass(frozen=True)
-class _AirStation:
-    """``AirQualityStationItem`` Protocol 만족."""
-
-    station_name: str
-    addr: str | None
-    lat: float | None
-    lon: float | None
-
-
-@dataclass(frozen=True)
-class _AirMeasurement:
-    """``AirQualityMeasurementItem`` Protocol 만족."""
-
-    station_name: str
-    data_time: datetime
-    sido_name: str | None = "서울"
-    khai_value: int | None = None
-    khai_grade: int | None = None
-    pm10_value: float | None = None
-    pm10_grade: int | None = None
-    pm25_value: float | None = None
-    pm25_grade: int | None = None
-    o3_value: float | None = None
-    o3_grade: int | None = None
-    no2_value: float | None = None
-    no2_grade: int | None = None
-    so2_value: float | None = None
-    so2_grade: int | None = None
-    co_value: float | None = None
-    co_grade: int | None = None
-
-
-async def test_load_air_quality_commits_station_and_values(
-    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
-) -> None:
-    fetched = datetime(2026, 6, 8, 9, 0, tzinfo=_KST)
-    station = _AirStation(station_name="중구", addr="서울 중구", lat=37.5640, lon=126.9750)
-    bundles = await air_quality_stations_to_bundles([station], fetched_at=fetched)
-    # ``load_air_quality``는 측정소 bundle과 측정값을 **한 transaction**에 넣는다.
-    # 그래서 호출자가 값에 붙일 수 있는 측정소 식별자는 적재 전에 손에 있는 것,
-    # 즉 provider 변환기가 유도한 legacy ``f_*``뿐이다 — dagster asset
-    # (``run_feature_weather_airkorea_air_quality``)도 정확히 이 매핑을 만든다.
-    # 이 호출 shape을 유지하는 것이 이 테스트가 지키는 계약이다.
-    station_feature_ids = {b.source_record.source_entity_id: b.feature.feature_id for b in bundles}
-    measurement = _AirMeasurement(
-        station_name="중구",
-        data_time=datetime(2026, 6, 8, 8, 0, tzinfo=_KST),
-        pm10_value=45.0,
-        pm10_grade=2,
-        pm25_value=18.0,
-        pm25_grade=1,
-    )
-    values = air_quality_to_weather_values([measurement], station_feature_ids=station_feature_ids)
-    raw_data = {
-        "records": [
-            {"station_name": measurement.station_name, "data_time": measurement.data_time}
-        ]
-    }
-    payload_hash = make_payload_hash(raw_data)
-    source_record = SourceRecord(
-        provider="python-airkorea-api",
-        dataset_key="airkorea_air_quality",
-        source_entity_type="weather_response",
-        source_entity_id="test-run:20260608T090000+0900",
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=fetched,
-        source_record_key=make_source_record_key(
-            provider="python-airkorea-api",
-            dataset_key="airkorea_air_quality",
-            source_entity_type="weather_response",
-            source_entity_id="test-run:20260608T090000+0900",
-            raw_payload_hash=payload_hash,
-        ),
-    )
-    async with AsyncSession(migrated_engine) as session:
-        provider_dataset_id = await session.scalar(
-            text(
-                """
-                SELECT provider_dataset_id
-                FROM provider_sync.provider_datasets
-                WHERE provider = 'python-airkorea-api'
-                  AND dataset_key = 'airkorea_air_quality'
-                """
-            )
-        )
-    assert provider_dataset_id is not None
-
-    result = await map_client.load_air_quality(
-        bundles,
-        values,
-        provider_dataset_id=int(provider_dataset_id),
-        source_record=source_record,
-    )
-    assert result.stations.features_inserted == 1
-    assert result.weather_values == 2  # PM10 + PM2_5
-
-    # 측정소는 weather feature로, 측정값은 feature_weather_values로 commit됐는지.
-    # 두 표의 ``feature_id``는 재키 뒤 uuid다 — 조회 키는 적재가 발급한 정본 키이고,
-    # 맨몸 바인드를 두면 PostgreSQL이 그 자리를 text로 유도하므로 명시 캐스트로
-    # uuid에 고정한다(재키 후 이 저장소의 관행).
-    station_uuid = await _canonical_uuid_for_alias(
-        migrated_engine, bundles[0].feature.feature_id
-    )
-    assert station_uuid is not None
-    async with AsyncSession(migrated_engine) as session:
-        kind = (
-            await session.execute(
-                text(
-                    "SELECT kind FROM feature.features "
-                    "WHERE feature_id = CAST(:f AS uuid)"
-                ),
-                {"f": station_uuid},
-            )
-        ).scalar_one()
-        assert kind == "weather"
-        value_count = (
-            await session.execute(
-                text(
-                    "SELECT count(*) FROM feature.feature_weather_values "
-                    "WHERE feature_id = CAST(:f AS uuid)"
-                ),
-                {"f": station_uuid},
-            )
-        ).scalar_one()
-        assert value_count == 2

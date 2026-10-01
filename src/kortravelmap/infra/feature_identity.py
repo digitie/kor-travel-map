@@ -95,8 +95,8 @@ __all__ = [
 MAX_FEATURE_REF_LENGTH: Final[int] = 256
 """경계가 수용하는 feature 참조 문자열 최대 길이.
 
-기존 경계 상한(``weather_repo.WEATHER_BATCH_MAX_FEATURE_ID_LENGTH`` = 256)과
-정합 — legacy id는 실측 최대 수십 자, canonical UUID는 36자다.
+옛 weather batch 경계 상한(256, ADR-105로 제거)에서 이어받은 값 — legacy id는
+실측 최대 수십 자, canonical UUID는 36자다.
 """
 
 _CANONICAL_UUID_LENGTH: Final[int] = 36
@@ -425,7 +425,7 @@ async def get_feature_uuid_map(
     거부한다(그 부류는 :func:`resolve_feature_identities_bulk`가 alias로 해석하는
     입력이다). 두 슬롯이 같은 ``features.feature_id``에서 나오므로 반환은 존재하는
     키에 대한 항등 사상이고, 실질 쓸모는 존재 확인과 canonical 소문자 정규화다.
-    복잡한 조회 SQL(예: weather batch)을 재작성하지 않고 응답의 ``feature_uuid``
+    복잡한 조회 SQL을 재작성하지 않고 응답의 ``feature_uuid``
     슬롯을 채울 때 그대로 쓴다. 존재하지 않는 키는 결과에서 빠진다.
     """
     normalized = [feature_id for feature_id in feature_ids if feature_id]

@@ -1,4 +1,4 @@
-"""#741 — admin 비공개 Feature 공간 조회와 weather anchor 회귀."""
+"""#741 — admin 비공개 Feature 공간 조회 회귀(weather anchor 검사는 ADR-105로 제거)."""
 
 from __future__ import annotations
 
@@ -13,12 +13,10 @@ from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._enums import PriceDomain
 from kortravelmap.dto.price import PriceValue
-from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import (
     admin_feature_repo,
     feature_repo,
     price_repo,
-    weather_repo,
 )
 from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
@@ -331,79 +329,6 @@ async def test_admin_bbox_geometry_membership_is_serialization_only(
     )
     assert len(clusters) == 1
     assert clusters[0]["feature_count"] == 1
-
-
-async def test_admin_weather_card_uses_nonpublic_target_and_anchor(
-    migrated_session: AsyncSession,
-) -> None:
-    current = datetime.now(UTC)
-    target_id = await _insert_feature(
-        migrated_session,
-        label="admin-hidden-target",
-        publication_state="suppressed",
-    )
-    anchor_id = await _insert_feature(
-        migrated_session,
-        label="admin-hidden-weather-anchor",
-        publication_state="suppressed",
-        kind="weather",
-        lon=_TEST_LON + 0.000001,
-        lat=_TEST_LAT + 0.000001,
-    )
-    await weather_repo.load_weather_values(
-        migrated_session,
-        [
-            WeatherValue(
-                feature_id=anchor_id,
-                provider="python-kma-api",
-                weather_domain="kma_short_forecast",
-                forecast_style="short",
-                timeline_bucket="short",
-                metric_key="TMP",
-                metric_name="기온",
-                value_number=Decimal("24.0"),
-                unit="deg_c",
-                issued_at=current,
-                valid_at=current,
-            )
-        ],
-        provider_dataset_id=await _current_dataset_id(
-            migrated_session,
-            provider="python-kma-api",
-            dataset_key="kma_short_forecast",
-        ),
-        source_record=_response_record(
-            provider="python-kma-api",
-            dataset_key="kma_short_forecast",
-            source_entity_type="weather_response",
-            raw_data={"metric": "TMP", "feature_id": anchor_id},
-            fetched_at=current,
-        ),
-        selected_at=current,
-    )
-    await migrated_session.flush()
-
-    public_card = await weather_repo.build_weather_card(
-        migrated_session,
-        feature_id=target_id,
-    )
-    admin_card = await weather_repo.build_admin_weather_card(
-        migrated_session,
-        feature_id=target_id,
-    )
-    map_rows = await admin_feature_repo.admin_features_in_bbox(
-        migrated_session,
-        **_BBOX,
-        lifecycle_states=["active"],
-        publication_states=["suppressed"],
-        kinds=["weather"],
-    )
-
-    assert public_card.metrics == []
-    assert [(metric.metric_key, metric.value_number) for metric in admin_card.metrics] == [
-        ("TMP", Decimal("24"))
-    ]
-    assert map_rows[0]["weather_summary"]["metric_key"] == "TMP"
 
 
 async def test_admin_price_card_and_map_summary_include_nonpublic_feature(

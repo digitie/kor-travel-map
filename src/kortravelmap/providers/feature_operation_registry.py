@@ -65,7 +65,6 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_notice_krex_traffic_notices_job",
         "feature_notice_krex_traffic_notices",
     ),
-    _handler("feature_weather_krex_rest_areas_job", "feature_weather_krex_rest_areas"),
     _handler("feature_place_krheritage_items_job", "feature_place_krheritage_items"),
     _handler("feature_event_krheritage_events_job", "feature_event_krheritage_events"),
     _handler("feature_place_mois_licenses_job", "feature_place_mois_licenses"),
@@ -84,14 +83,6 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
     _handler(
         "feature_route_krforest_dulle_trails_job",
         "feature_route_krforest_dulle_trails",
-    ),
-    _handler(
-        "feature_weather_krforest_mountain_weather_job",
-        "feature_weather_krforest_mountain_weather",
-    ),
-    _handler(
-        "feature_weather_krforest_wildfire_risk_forecast_job",
-        "feature_weather_krforest_wildfire_risk_forecast",
     ),
     _handler(
         "feature_notice_krforest_landslide_forecast_issues_job",
@@ -119,10 +110,6 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
     _handler(
         "feature_event_visitkorea_enrichment_job",
         "feature_event_visitkorea_enrichment",
-    ),
-    _handler(
-        "feature_weather_airkorea_air_quality_job",
-        "feature_weather_airkorea_air_quality",
     ),
     _handler(
         "feature_place_datagokr_seoul_bookstores_job",

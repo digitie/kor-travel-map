@@ -1261,8 +1261,6 @@ def test_openapi_declares_service_and_public_key_security_schemes() -> None:
     # service token 중 하나를 요구한다.
     tri = spec["paths"]["/v1/features/batch"]["post"]
     assert tri["security"] == [{"ServiceToken": []}]
-    weather_batch = spec["paths"]["/v1/features/weather/batch"]["post"]
-    assert weather_batch["security"] == [{"ServiceToken": []}]
     feat = spec["paths"]["/v1/features"]["get"]
     assert feat["security"] == [
         {"PublicApiKey": []},
@@ -1273,7 +1271,7 @@ def test_openapi_declares_service_and_public_key_security_schemes() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "path",
-    ["/v1/features/batch", "/v1/features/weather/batch"],
+    ["/v1/features/batch"],
 )
 def test_batch_requires_token_when_set(path: str) -> None:
     client = _client(_api_settings(service_token=SecretStr("tok")))
@@ -1292,7 +1290,7 @@ def test_batch_requires_token_when_set(path: str) -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "path",
-    ["/v1/features/batch", "/v1/features/weather/batch"],
+    ["/v1/features/batch"],
 )
 def test_batch_token_unset_not_blocked(path: str) -> None:
     client = _client(_api_settings(service_token=None))

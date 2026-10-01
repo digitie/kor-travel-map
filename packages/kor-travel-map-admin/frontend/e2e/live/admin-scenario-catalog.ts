@@ -150,7 +150,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readApis: [
       "/v1/admin/features/in-bounds",
       "/v1/admin/features/{feature_id}",
-      "/v1/admin/features/{feature_id}/weather",
       "/v1/admin/features/{feature_id}/price",
       "/v1/ops/datasets",
     ],
@@ -163,7 +162,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "Feature 상세",
     readApis: [
       "/v1/admin/features/{feature_id}",
-      "/v1/admin/features/{feature_id}/weather",
       "/v1/admin/features/{feature_id}/price",
       "/v1/features/nearby",
     ],
@@ -387,7 +385,9 @@ function addScenario(
 export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
   const scenarios: AdminLiveScenario[] = [];
   const searchTerms = F.SEARCH_TERMS.slice(0, 16);
-  const kinds = F.KINDS.slice(0, 7);
+  // 2026-10-01 ADR-105: Map은 weather 기능(적재·API·UI)을 전부 걷어냈다. `F.KINDS`는
+  // kind **정의**라 weather를 남기지만, live 시나리오는 weather를 다루지 않는다.
+  const kinds = F.KINDS.filter((kind) => kind !== "weather").slice(0, 7);
   const pageSizes = F.PAGE_SIZES.slice(0, 4);
   const categories = F.CATEGORY_CODES.slice(0, 40);
   const featureIds = F.FEATURE_IDS.slice(0, 120);
@@ -478,19 +478,15 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
   }
 
   for (const featureId of featureIds) {
-    for (const apiKind of ["admin", "weather", "price", "nearby"] as const) {
+    for (const apiKind of ["admin", "price", "nearby"] as const) {
       for (const viewport of VIEWPORTS) {
         addScenario(scenarios, {
           apiExpectation:
             apiKind === "admin"
               ? "/v1/admin/features/{feature_id}"
-              : apiKind === "weather"
-                ? "/v1/admin/features/{feature_id}/weather"
-                : apiKind === "price"
-                  ? "/v1/admin/features/{feature_id}/price"
-                : apiKind === "nearby"
-                  ? "/v1/features/nearby"
-                  : "/v1/admin/features/{feature_id}",
+              : apiKind === "price"
+                ? "/v1/admin/features/{feature_id}/price"
+                : "/v1/features/nearby",
           idParts: ["feature-detail", featureId, apiKind, viewport],
           mode: "catalog",
           reflectedSurface: "/admin/features",

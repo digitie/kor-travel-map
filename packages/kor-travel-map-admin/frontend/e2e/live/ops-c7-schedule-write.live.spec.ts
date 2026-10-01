@@ -83,8 +83,13 @@ type DagsterAttestation = {
   expected: string;
 };
 
+// 실수로 tick이 나가도 upstream 호출이 0인 schedule이어야 한다. 공항 fetcher
+// (`provider_fetchers.py::fetch_krairport_airports`)는 krairport의 번들 정적 데이터만
+// 읽는다(keyless, network 없음). 기본 STOPPED이고 `DISABLED_FEATURE_LOAD_SCHEDULES`에
+// 없다. 옛 KMA 시간 단위 schedule은 2026-09-09에 사라졌고 Map은 weather를 더 적재하지
+// 않는다(ADR-104/105).
 const SAFE_SCHEDULE =
-  "feature_weather_kma_short_forecast_hourly_schedule" as const;
+  "feature_place_krairport_airports_monthly_schedule" as const;
 const SCHEDULES_PATH = "/v1/ops/pipeline/schedules";
 const TEST_TIMEOUT = 12 * 60 * 1000;
 const STATE_WAIT_TIMEOUT = 2 * 60 * 1000;

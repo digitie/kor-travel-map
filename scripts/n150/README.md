@@ -79,14 +79,12 @@ API의 공개 `KOR_TRAVEL_MAP_API_DAGSTER_GRAPHQL_URL`
 ```
 E2E_DAGSTER_URL=https://<dagster-host>/graphql
 E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256=ac0c1ae66267459f12d740e06ca3aa3a1e964daf91fac3df01fb93b193ba6dfd
-E2E_DAGSTER_BASIC_AUTH_FILE=/root/.d2-dagster-basic-auth
 ```
 
-`E2E_DAGSTER_BASIC_AUTH_FILE`은 gateway의 Basic Auth 자격증명 파일이다 — root 소유, `0600`(group·other
-권한 없음), symlink 아님, 내용은 `user:password` 한 줄. C7 러너는 이 파일을 executor에
-read-only bind(`/run/secrets/c7-dagster-basic-auth`)로만 건네고, C7 Dagster client는 그 파일이
-있을 때만 `Authorization: Basic`을 보낸다(Origin·Sec-Fetch-Site 없는 POST — gateway가 받는 모양).
-지금(Map 전용 공개 URL)은 인증이 없으므로 키를 두지 않는다.
+C7은 2026-10-01부터 Dagster GraphQL에 직접 POST하지 않는다(KMA queue sensor barrier·run identity
+대조 퇴역, ADR-104/105) — `E2E_DAGSTER_URL`은 API가 돌려주는 `graphql_url`의 origin hash 대조에만
+쓴다. 그래서 `E2E_DAGSTER_BASIC_AUTH_FILE`(gateway Basic Auth 자격증명)은 더 받지 않는다. env에
+남아 있어도 러너는 읽지 않으니 지워도 된다.
 
 ## 설치
 

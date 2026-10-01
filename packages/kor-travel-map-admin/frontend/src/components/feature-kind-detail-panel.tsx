@@ -11,7 +11,6 @@ import {
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { FeaturePricePanel } from "@/components/feature-price-panel";
-import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
 import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -413,9 +412,6 @@ export function FeatureKindDetailPanel({
   if (!feature) return null;
   if (feature.kind === "price") {
     return <FeaturePricePanel compact={compact} featureId={featureId} />;
-  }
-  if (feature.kind === "weather") {
-    return <FeatureWeatherPanel compact={compact} featureId={featureId} />;
   }
   if (feature.kind === "event") {
     return <EventDetailPanel feature={feature} />;

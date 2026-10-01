@@ -54,11 +54,11 @@ function row(
   overrides: Partial<OpsDatasetGridRow> = {},
 ): CanonicalCatalogRow {
   return {
-    provider: "python-kma-api",
-    dataset_key: "kma_short_forecast",
+    provider: "python-opinet-api",
+    dataset_key: "opinet_stations",
     provider_dataset_id: providerDatasetId,
     sync_scope: syncScope,
-    operation_key: "feature_weather_kma_short_forecast_job",
+    operation_key: "feature_price_opinet_stations_job",
     catalog_state: "canonical",
     mutable: true,
     catalog: {
@@ -81,7 +81,7 @@ describe("validateCatalogSelection", () => {
           // 서버가 degrade해 내려준 바로 그 값이다. `effect`를 안 보면 아래
           // `default_sync_scope` 비교가 참이 되어 그대로 통과했다.
           sync_scope: "dataset_wide",
-          operation_key: "feature_weather_kma_short_forecast_job",
+          operation_key: "feature_price_opinet_stations_job",
         },
         rows,
       ),
@@ -97,7 +97,7 @@ describe("validateCatalogSelection", () => {
           type: "provider_dataset",
           provider_dataset_id: 6,
           sync_scope: "external_system:pinvi",
-          operation_key: "feature_weather_kma_short_forecast_job",
+          operation_key: "feature_price_opinet_stations_job",
         },
         rows,
       ),
@@ -138,7 +138,7 @@ describe("validateCatalogSelection", () => {
           type: "provider_dataset",
           provider_dataset_id: 8,
           sync_scope: syncScope,
-          operation_key: "feature_weather_kma_short_forecast_job",
+          operation_key: "feature_price_opinet_stations_job",
         },
         rows,
       );
@@ -169,7 +169,7 @@ describe("validateCatalogSelection", () => {
           type: "provider_dataset",
           provider_dataset_id: 9,
           sync_scope: "external_system:concierge",
-          operation_key: "feature_weather_kma_short_forecast_job",
+          operation_key: "feature_price_opinet_stations_job",
         },
         rows,
       ),

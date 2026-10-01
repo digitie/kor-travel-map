@@ -6,10 +6,10 @@ import type { components } from "../src/api/types";
  * `/features/[featureId]` 상세 — 섹션 깊이 spec (T-AUDIT-0616 추가분).
  *
  * 기존 `feature-detail.spec.ts`가 커버하는 항목(기본 헤더+섹션 타이틀, raw_refs 1개,
- * weather 패널 visible, nearby 1건, weather empty, 404 alert)은 **재계획하지 않고**,
+ * nearby 1건, 404 alert)은 **재계획하지 않고**,
  * 행/셀/컬럼헤더/토글/에러 격리/요청 카운터 같은 **깊이**만 추가한다.
  *
- * 본 페이지는 admin 상세/weather 라우트 + 공개 `GET /v1/features/nearby`를 쓴다.
+ * 본 페이지는 admin 상세 라우트 + 공개 `GET /v1/features/nearby`를 쓴다.
  * 모든 mock body는 생성된 OpenAPI 스키마(`components["schemas"][...]`)에 바인딩해
  * 백엔드 DTO 변경 시 컴파일이 깨지도록 한다(admin-ops.spec 패턴).
  *
@@ -32,9 +32,6 @@ type AdminFeatureDetailFileRecord =
 type CurationItemView = components["schemas"]["AdminCurationItemView"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
-type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
-type WeatherCardData = components["schemas"]["WeatherCardData"];
-type WeatherMetricOut = components["schemas"]["WeatherMetricOut"];
 
 const FEATURE_ID = "f_1156010100_p_sectiondepth00001";
 const DETAIL_PATH = `/v1/admin/features/${FEATURE_ID}`;
@@ -239,29 +236,6 @@ function makeNearby(
   };
 }
 
-function makeWeatherMetric(
-  overrides: Partial<WeatherMetricOut> = {},
-): WeatherMetricOut {
-  return {
-    forecast_style: "short_term",
-    dataset_display_name: "기상청 단기예보",
-    dataset_key: "kma_short_forecast",
-    issued_at: "2026-06-08T00:00:00.000Z",
-    known_at: "2026-06-08T08:00:00.000Z",
-    metric_key: "T1H",
-    metric_name: "기온",
-    observed_at: null,
-    provider_dataset_id: 101,
-    severity: "normal",
-    timeline_bucket: null,
-    unit: "°C",
-    valid_at: "2026-06-08T09:00:00.000Z",
-    value_number: 21.5,
-    value_text: null,
-    ...overrides,
-  };
-}
-
 function makeDetailData(
   partial: Partial<AdminFeatureDetailData> = {},
 ): AdminFeatureDetailData {
@@ -281,24 +255,6 @@ function makeDetailResponse(
   data: AdminFeatureDetailData,
 ): AdminFeatureDetailResponse {
   return { data, meta };
-}
-
-function makeWeatherResponse(
-  data: Partial<WeatherCardData> = {},
-): FeatureWeatherResponse {
-  return {
-    data: {
-      feature_id: FEATURE_ID,
-      is_stale: false,
-      latest_at: null,
-      metrics: [],
-      refresh_after: null,
-      selected_at: null,
-      source_styles: [],
-      ...data,
-    },
-    meta,
-  };
 }
 
 function makeNearbyResponse(
@@ -330,15 +286,12 @@ function apiPath(url: URL): string {
 interface MockOptions {
   data?: AdminFeatureDetailData;
   nearby?: NearbyFeatureSummary[];
-  weather?: Partial<WeatherCardData>;
-  weatherStatus?: number;
   nearbyStatus?: number;
 }
 
 interface MockCounters {
   detail: number;
   nearby: number;
-  weather: number;
   revision: number;
   /** admin 상세 라우트로 들어온 정확한 pathname 목록(deeplink 검증용). */
   detailPaths: string[];
@@ -353,7 +306,6 @@ async function mockFeatureDetail(
   const counters: MockCounters = {
     detail: 0,
     nearby: 0,
-    weather: 0,
     revision: 0,
     detailPaths: [],
   };
@@ -362,19 +314,6 @@ async function mockFeatureDetail(
     const request = route.request();
     const url = new URL(request.url());
     const pathname = apiPath(url);
-    if (request.method() === "GET" && pathname.endsWith("/weather")) {
-      counters.weather += 1;
-      if (options.weatherStatus && options.weatherStatus >= 400) {
-        await fulfillJson(
-          route,
-          { detail: "weather 조회 실패" },
-          options.weatherStatus,
-        );
-        return;
-      }
-      await fulfillJson(route, makeWeatherResponse(options.weather));
-      return;
-    }
     // `/revision` — FeatureStatePanel의 `useAdminFeatureCorrectionBasis`가 마운트와 함께
     // 부르는 write 선행조건(ETag + row_revision). mock이 이걸 비워 두면 요청이 route를
     // 빠져나가 BFF/실백엔드로 향하고(= mock suite의 hermetic 계약 위반), 실패 응답이
@@ -580,77 +519,6 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
         .getByText("Nearby", { exact: true })
         .locator("xpath=ancestor::section[1]")
         .getByText("2", { exact: true }),
-    ).toBeVisible();
-  });
-
-  test("Weather 패널 깊이 — metric 행 + current 상태 dl + stale 배지", async ({
-    page,
-  }) => {
-    await mockFeatureDetail(page, {
-      data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
-      weather: {
-        is_stale: true,
-        latest_at: "2026-06-08T08:00:00.000Z",
-        metrics: [makeWeatherMetric()],
-        refresh_after: "2026-06-08T10:00:00.000Z",
-        selected_at: "2026-06-08T09:00:00.000Z",
-        source_styles: ["short_term", "mid_term"],
-      },
-    });
-    await page.goto(`/features/${FEATURE_ID}`);
-
-    const panel = page.getByTestId("feature-weather-panel");
-    await expect(panel).toBeVisible();
-    await expect(panel.getByText("Weather")).toBeVisible();
-    await expect(
-      panel.getByText("날씨 정보와 최근 업데이트 시간"),
-    ).toBeVisible();
-
-    // is_stale=true → 배지 텍스트 "stale"(fresh 아님).
-    await expect(panel.getByText("stale")).toBeVisible();
-    await expect(panel.getByText("fresh")).toHaveCount(0);
-
-    // dl 라벨 + source_styles outline 배지(패널 scope에서 헤더 동명 라벨과 분리).
-    await expect(
-      panel.getByText("최근 업데이트", { exact: true }),
-    ).toBeVisible();
-    await expect(panel.getByText("선정 시각", { exact: true })).toBeVisible();
-    await expect(panel.getByText("다음 갱신", { exact: true })).toBeVisible();
-    await expect(panel.getByText("styles", { exact: true })).toBeVisible();
-    await expect(panel.getByText("short_term").first()).toBeVisible();
-    await expect(panel.getByText("mid_term")).toBeVisible();
-
-    // metric 테이블 헤더(non-compact 경로 — compact prop 미전달).
-    for (const column of ["metric", "value", "style", "severity", "valid"]) {
-      await expect(
-        panel.getByRole("columnheader", { name: column, exact: true }),
-      ).toBeVisible();
-    }
-
-    // metric 행: metric_name + value_number+unit 합성("21.5 °C").
-    await expect(panel.getByText("기온")).toBeVisible();
-    await expect(panel.getByText("21.5 °C")).toBeVisible();
-
-    // 비어있지 않으므로 weather empty 메시지 0건.
-    await expect(panel.getByText("weather metric이 없습니다.")).toHaveCount(0);
-  });
-
-  test("Weather 호출 실패 — 패널 내부 alert + 페이지 잔존", async ({
-    page,
-  }) => {
-    await mockFeatureDetail(page, {
-      data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
-      weatherStatus: 500,
-    });
-    await page.goto(`/features/${FEATURE_ID}`);
-
-    const panel = page.getByTestId("feature-weather-panel");
-    await expect(panel.getByText("weather 호출 실패")).toBeVisible();
-
-    // 상세 GET은 성공 → feature-detail-view 루트와 헤더 h2는 계속 보인다.
-    await expect(page.getByTestId("feature-detail-view")).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "여의도공원" }),
     ).toBeVisible();
   });
 
