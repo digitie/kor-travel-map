@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
+
+**다음 한 작업: CI 전량(통합 두 leg) + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(migration 401·402 전진, 되돌릴 수
+없음, 백업 면제) → n150 `.d2-live.env`의 `E2E_C7_SCHEDULE=feature_place_krairport_airports_monthly_schedule` → C7 재실행.**
+
+- weather kind 기능·KMA 특보 notice 기능을 Dagster·라이브러리·API·UI·DB에서 지웠다. 정의는 남는다. 산사태·교통 notice는 그대로.
+- 402는 weather 전용 표 둘·함수 하나·인덱스 하나를 DROP하고 weather/KMA 특보 dataset을 비활성화한다. prod에서 실제로 지워지는
+  행은 `ops.current_summary_runs` weather 2,875건뿐이다(feature 0행).
+- PinVi: 이미 kor-travel-weather를 쓴다. 다음 짝에서 Map OpenAPI vendor 스냅샷만 다시 뜬다(`latest_weather` 소멸).
+- 후속: `python-kma-api`·`python-airkorea-api` 핀, `.env.example` 키, Manager compose `KOR_TRAVEL_MAP_KMA_*`, KMA notice 분기.
+
 ## 2026-10-01 — Map Dagster의 KMA 적재 경로 제거(ADR-104): 브랜치 `feat/remove-map-kma-dagster`
 
 **다음 한 작업: CI 전량(통합 두 leg 포함) + 적대 리뷰 뒤 PR·머지 → 다음 Map pinned pair로 배포(migration 401 전진).**

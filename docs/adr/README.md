@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-105.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-106.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -118,6 +118,7 @@
 | ADR-102 | 배포는 마이그레이션 전진이다: DB를 보존하고, 배포 봉인과 attestation 체인을 걷어낸다 | [102-migrate-forward-deploys-and-seal-removal.md](102-migrate-forward-deploys-and-seal-removal.md) |
 | ADR-103 | n150 prod에서 Map DB는 공용 PostgreSQL instance 안의 전용 DATABASE다 (ADR-045 개정) | [103-map-databases-on-the-shared-instance.md](103-map-databases-on-the-shared-instance.md) |
 | ADR-104 | Map은 KMA(기상청)를 적재하지 않는다 — KMA는 kor-travel-weather가 소유한다 | [104-map-does-not-load-kma.md](104-map-does-not-load-kma.md) |
+| ADR-105 | Map에서 날씨 feature와 날씨 notice 기능을 지운다 — 정의는 남긴다 | [105-map-drops-weather-functionality.md](105-map-drops-weather-functionality.md) |
 
 ## 새 ADR 작성 규약
 
