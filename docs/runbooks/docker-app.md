@@ -313,6 +313,24 @@ metadata의 `today_values_count`가 `price_values_upserted`보다 작으면 당�
 `loaded_at`과 같은 KST 날짜가 아니면 재시도해야 한다. `already_succeeded_today_kst` skip은
 같은 KST 날짜에 적재값 전체가 당일 가격인 뒤에만 정상이다.
 
+### 공유 Dagster plane으로 옮기기 전의 drain (Map flip, Manager ADR-54)
+
+공유 plane의 run storage(`dagster_shared`)는 새로 시작한다(D1). Map DB의 active provider operation
+(`queued`·`running`)이 옛 Map 전용 instance에만 있는 Dagster run을 가리키면, 새 instance의 reconcile
+sensor는 그 run을 찾지 못해 영영 "Dagster run을 찾지 못함" 관측 오류로 남긴다 — 종결시킬 run이 없다.
+그래서 **flip 전에 active operation을 전부 끝낸다**:
+
+1. writer drain으로 새 run을 막고, 전용 instance의 Map run이 모두 terminal이 될 때까지 기다린다.
+2. 전용 instance의 reconcile sensor가 그 terminal 상태를 DB에 반영할 때까지 한 번 더 기다린다
+   (settle lag 300초 + 30초 주기). active operation 0건을 읽기 전용으로 확인한다.
+3. 그 뒤에 Manager가 Map을 공유 plane으로 옮긴다.
+
+flip 뒤 reconcile sensor는 cursor 없이 시작한다. 공유 instance의 Map run(`dagster/code_location`
+= Map location)이 한 page(`FEATURE_OPERATION_RECONCILE_PAGE_SIZE`, 200) 이하면 null cursor로 처음부터
+훑는다(반영은 멱등) — 첫 tick 전에 매분 weather summary schedule이나 queue sensor가 run을 만들어도
+멈추지 않는다. 한 page를 넘는 run이 cursor 없이 쌓인 instance(예: 오래 쓴 전용 instance)는 여전히
+"non-empty Dagster storage" 오류로 명시 cursor를 요구한다.
+
 ## 2. 포트 정리
 
 기동 전에 고정 포트를 점유한 프로세스를 종료한다.

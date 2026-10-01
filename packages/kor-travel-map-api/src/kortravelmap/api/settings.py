@@ -716,6 +716,15 @@ class ApiSettings(BaseSettings):
             )
         return value
 
+    @field_validator("dagster_internal_graphql_url", mode="before")
+    @classmethod
+    def _blank_internal_graphql_url_is_unset(cls, value: object) -> object:
+        """compose의 ``${X:-}``가 넣는 빈 값은 미설정이다 — 공개 URL을 그대로 호출한다."""
+
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("metrics_token", mode="before")
     @classmethod
     def _normalize_metrics_token(cls, value: object) -> object:
@@ -1080,16 +1089,31 @@ class ApiSettings(BaseSettings):
     dagster_graphql_url: str | None = Field(
         default=None,
         description=(
-            "Dagster GraphQL endpoint override. 미설정이면 ``{dagster_url}/graphql``로 계산한다."
+            "Dagster GraphQL의 **공개** endpoint — API 응답의 ``graphql_url``로 보고하고 "
+            "링크에 쓴다(C7이 이 값의 sha256을 대조한다). 미설정이면 "
+            "``{dagster_url}/graphql``로 계산한다. ``dagster_internal_graphql_url``이 "
+            "없으면 backend가 이 URL을 그대로 호출한다(단일 URL 배포와 호환)."
+        ),
+    )
+    dagster_internal_graphql_url: str | None = Field(
+        default=None,
+        description=(
+            "backend가 서버 쪽에서 **호출하는** Dagster GraphQL endpoint. 미설정(빈 값 포함)"
+            "이면 ``dagster_graphql_url``을 그대로 호출한다. 공유 Dagster plane(Manager "
+            "ADR-54)에서는 loopback webserver(``http://127.0.0.1:11002/graphql``)를 "
+            "가리키고, 공개 URL(Basic Auth gateway)은 보고에만 쓴다. 호출하는 이 URL만 "
+            "``dagster_allowed_hosts``를 통과해야 한다."
         ),
     )
     dagster_allowed_hosts: list[str] = Field(
         default=["127.0.0.1", "localhost", "::1", "dagster"],
         description=(
             "Backend가 Dagster GraphQL을 호출할 수 있는 host allowlist. "
-            "SSRF 방지를 위해 ``dagster_url``과 ``dagster_graphql_url``의 scheme은 "
-            "http/https, host는 이 목록 안의 값이어야 한다. Docker 기본 host는 "
-            "``dagster``이고 로컬 기본은 ``127.0.0.1``."
+            "SSRF 방지를 위해 ``dagster_url``과 **호출하는** GraphQL URL"
+            "(``dagster_internal_graphql_url``, 없으면 ``dagster_graphql_url``)의 scheme은 "
+            "http/https, host는 이 목록 안의 값이어야 한다. 보고만 하는 공개 URL은 호출하지 "
+            "않으므로 모양만 검사한다. Docker 기본 host는 ``dagster``이고 로컬 기본은 "
+            "``127.0.0.1``."
         ),
     )
     dagster_request_timeout_seconds: float = Field(

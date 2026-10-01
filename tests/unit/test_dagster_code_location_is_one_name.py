@@ -487,3 +487,199 @@ def test_run_completion_gate_is_the_workspace_location() -> None:
     relative = "scripts/dagster_run_completion_gate.py"
     assert _python_constant(relative, "_CODE_LOCATION") == _workspace_location()
     assert _python_constant(relative, "_REPOSITORY_NAME") == "__repository__"
+
+
+# -- DagsterInstance 직접 조회 (daemon 안의 sensor·schedule) --------------------------
+#
+# GraphQL 조회와 같은 이유로, code-server 안에서 ``context.instance``를 직접 읽는 run 조회도
+# Map code location으로 좁혀야 한다. 공유 plane의 run storage 하나에 weather·PinVi·geo run이
+# 함께 있다.
+
+#: Python 조회가 살 수 있는 자리 — ``_QUERY_SOURCE_ROOTS``의 ``.py``.
+_INSTANCE_READ_ROOTS = tuple(
+    relative for relative, suffixes in _QUERY_SOURCE_ROOTS if ".py" in suffixes
+)
+
+#: filter로 좁힐 수 없는 인스턴스 전역 조회 중 filter 인자가 없는 것. Map은 쓰지 않는다 —
+#: 쓰게 되면 공유 plane에서의 범위 근거를 이 검사에 먼저 적는다.
+_UNFILTERABLE_INSTANCE_READERS = frozenset(
+    {"get_run_tags", "get_run_tag_keys", "get_asset_keys", "get_asset_records"}
+)
+
+
+@functools.cache
+def instance_run_readers() -> tuple[frozenset[str], frozenset[str]]:
+    """설치된 ``DagsterInstance``에서 (``RunsFilter``로 좁힐 조회, 좁힐 수 없는 전역 조회).
+
+    ``RunsFilter``를 받는 인자(``filters``·``runs_filter``)가 있으면 좁힐 수 있는 run 조회다.
+    event·asset·backfill 조회(``records_filter``·``event_records_filter``·``BulkActionsFilter``)는
+    code location으로 좁혀지지 않으므로 금지 목록이다. Dagster가 조회를 더하면 저절로 넓어진다.
+    """
+
+    import inspect
+
+    from dagster import DagsterInstance
+
+    scoped: set[str] = set()
+    forbidden: set[str] = set(_UNFILTERABLE_INSTANCE_READERS)
+    for name, member in inspect.getmembers(DagsterInstance):
+        if name.startswith("_") or not callable(member):
+            continue
+        try:
+            parameters = inspect.signature(member).parameters
+        except (TypeError, ValueError):
+            continue
+        for parameter_name in ("filters", "runs_filter"):
+            parameter = parameters.get(parameter_name)
+            if parameter is None:
+                continue
+            if "RunsFilter" in str(parameter.annotation):
+                scoped.add(name)
+            else:
+                forbidden.add(name)
+        if {"records_filter", "event_records_filter"} & set(parameters):
+            forbidden.add(name)
+    return frozenset(scoped), frozenset(forbidden)
+
+
+#: run 조회를 Map으로 좁히는 두 helper(``kortravelmap.dagster.run_scope``). location tag 또는
+#: Map job이 스스로 다는 ``kor_travel_map.*`` tag — 둘 다 다른 프로젝트 run을 고르지 않는다.
+_SCOPING_HELPERS = frozenset({"map_runs_filter", "map_owned_runs_filter"})
+
+
+def _is_map_runs_filter(node: ast.expr | None) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in _SCOPING_HELPERS
+    return isinstance(func, ast.Attribute) and func.attr in _SCOPING_HELPERS
+
+
+def unscoped_instance_reads(source: str) -> tuple[int, list[str]]:
+    """``….get_runs(…)`` 등 인스턴스 전역 run 조회가 ``map_runs_filter(…)``로 좁혀지는지 본다.
+
+    돌려주는 것은 (좁혀진 호출 수, 위반). ``filters=RunsFilter(…)``처럼 filter가 있어도
+    location tag가 없으면 전 프로젝트의 run이다 — filter 값이 ``map_runs_filter(…)`` 호출
+    이어야 한다. 위치 인자로 넘긴 filter는 읽지 않고 위반으로 본다.
+    """
+
+    scoped_readers, forbidden_readers = instance_run_readers()
+    scoped = 0
+    violations: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        reader = node.func.attr
+        if reader in forbidden_readers:
+            violations.append(f"line {node.lineno}: 좁힐 수 없는 전역 조회 {reader}")
+            continue
+        if reader not in scoped_readers:
+            continue
+        keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+        value = keywords.get("filters", keywords.get("runs_filter"))
+        if node.args or not _is_map_runs_filter(value):
+            violations.append(
+                f"line {node.lineno}: {reader}가 map_runs_filter(…)로 좁혀지지 않는다"
+            )
+            continue
+        scoped += 1
+    return scoped, violations
+
+
+def test_instance_run_readers_come_from_installed_dagster() -> None:
+    scoped, forbidden = instance_run_readers()
+    # 하한: 공유 plane 리뷰가 이름 붙인 조회가 설치본에서 유도됐다(유도가 공허하지 않다).
+    assert {"get_runs", "get_run_records", "get_run_ids", "get_runs_count"} <= scoped
+    assert {"get_event_records", "fetch_materializations", "get_backfills"} <= forbidden
+    # id 조회는 전역 조회가 아니다 — run id는 좁힌 조회나 자기 launch에서만 나온다.
+    assert not {"get_run_by_id", "get_run_record_by_id"} & (scoped | forbidden)
+
+
+def test_no_instance_run_read_escapes_the_map_code_location() -> None:
+    seen = 0
+    for relative in _INSTANCE_READ_ROOTS:
+        for path in sorted((_ROOT / relative).rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            count, violations = unscoped_instance_reads(path.read_text(encoding="utf-8"))
+            assert violations == [], (path.relative_to(_ROOT).as_posix(), violations)
+            seen += count
+    # 하한: 지금 있는 조회를 **본** 것 — reconcile sensor 둘(run 수·page), feature-load
+    # coalescing schedule, weather summary schedule. 새 조회가 늘면 올린다.
+    assert seen >= 4, seen
+
+
+@pytest.mark.parametrize(
+    ("source", "reason"),
+    [
+        # 과거 reconcile sensor의 모양 — filter가 아예 없다.
+        ("instance.get_run_records(limit=1, ascending=False)", "map_runs_filter"),
+        # 과거 weather summary schedule의 모양 — filter가 있지만 location tag가 없다.
+        (
+            'context.instance.get_runs(filters=RunsFilter(job_name="x"), limit=1)',
+            "map_runs_filter",
+        ),
+        ("instance.get_run_ids(map_runs_filter())", "map_runs_filter"),
+        ("instance.get_run_partition_data(runs_filter=RunsFilter())", "map_runs_filter"),
+        ("instance.get_event_records(EventRecordsFilter(event_type=t))", "전역 조회"),
+        ("instance.get_run_tags(tag_keys=['k'])", "전역 조회"),
+    ],
+)
+def test_instance_read_detector_rejects_unscoped_shapes(source: str, reason: str) -> None:
+    count, violations = unscoped_instance_reads(source)
+    assert count == 0
+    assert len(violations) == 1, violations
+    assert reason in violations[0]
+
+
+def test_instance_read_detector_accepts_the_scoped_shape() -> None:
+    source = (
+        "context.instance.get_runs(filters=map_runs_filter(job_name='x'), limit=1)\n"
+        "instance.get_run_records(filters=run_scope.map_runs_filter(), limit=1)\n"
+        "instance.get_runs_count(filters=map_owned_runs_filter(tags={'kor_travel_map.k': 'v'}))\n"
+        "instance.get_run_record_by_id(run_id)\n"
+    )
+    assert unscoped_instance_reads(source) == (3, [])
+
+
+def test_map_owned_runs_filter_refuses_tags_another_project_could_carry() -> None:
+    from kortravelmap.dagster.run_scope import map_owned_runs_filter, map_runs_filter
+
+    assert map_owned_runs_filter(tags={"kor_travel_map.job_kind": "x"}).tags == {
+        "kor_travel_map.job_kind": "x"
+    }
+    for tags in ({}, {"dagster/code_location": "x"}, {"kor_travel_map.k": "v", "owner": "x"}):
+        with pytest.raises(ValueError, match="kor_travel_map"):
+            map_owned_runs_filter(tags=tags)
+    with pytest.raises(ValueError, match="dagster/code_location"):
+        map_runs_filter(tags={"dagster/code_location": "other.location"})
+
+
+def _monitors_every_location(source: str) -> list[int]:
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.keyword)
+        and node.arg in {"monitor_all_code_locations", "monitor_all_repositories"}
+        and not (isinstance(node.value, ast.Constant) and node.value.value is False)
+    ]
+
+
+def test_run_status_sensors_do_not_monitor_every_code_location() -> None:
+    """공유 daemon에서 ``monitor_all_code_locations=True``는 다른 프로젝트 run 이벤트를 평가한다."""
+
+    root = _ROOT / "packages" / "kor-travel-map-dagster" / "src"
+    for path in sorted(root.rglob("*.py")):
+        assert _monitors_every_location(path.read_text(encoding="utf-8")) == [], path.name
+    # 검사기 자체가 옛 모양을 잡는다.
+    assert _monitors_every_location("run_status_sensor(monitor_all_code_locations=True)") == [1]
+    assert _monitors_every_location("run_status_sensor(monitor_all_repositories=flag)") == [1]
+
+
+def test_dagster_run_scope_is_the_workspace_location() -> None:
+    from dagster._core.storage.tags import CODE_LOCATION_TAG
+    from kortravelmap.dagster.run_scope import CODE_LOCATION_RUN_TAG, MAP_CODE_LOCATION_NAME
+
+    assert _workspace_location() == MAP_CODE_LOCATION_NAME
+    assert CODE_LOCATION_RUN_TAG == CODE_LOCATION_TAG

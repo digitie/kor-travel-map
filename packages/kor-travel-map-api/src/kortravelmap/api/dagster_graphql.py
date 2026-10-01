@@ -34,6 +34,7 @@ __all__ = [
     "REPOSITORY_RUN_TAG_KEY",
     "as_dict",
     "candidate_graphql_url",
+    "candidate_internal_graphql_url",
     "dagster_urls",
     "default_cron_for_schedule",
     "graphql_error_message",
@@ -123,12 +124,23 @@ class DagsterUrls:
     대상이 정해지지 않는다. 그래서 조회는 전부 이 repository selector로 좁힌다
     (``repositoryOrError``와 ``runsOrError``의 repository tag filter). 프로젝트별 webserver에서도
     같은 selector가 유일한 repository를 가리키므로 오늘 배포와 호환된다.
+
+    GraphQL URL은 둘이다. ``graphql_url``은 backend가 **호출하는** endpoint(공유 plane에서는
+    loopback webserver)이고, ``public_graphql_url``은 응답으로 **보고**하고 링크에 쓰는
+    공개 endpoint다(C7이 이 값의 sha256을 대조한다). 응답 DTO에는 공개 URL만 싣는다 —
+    ``packages/kor-travel-map-api/tests/test_dagster_graphql_url_split.py``가
+    실제로 POST된 URL과 응답을 대조한다. 따로 주지 않으면 둘은 같다.
     """
 
     dagster_url: str
     graphql_url: str
     repository_name: str
     repository_location_name: str
+    public_graphql_url: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.public_graphql_url:
+            object.__setattr__(self, "public_graphql_url", self.graphql_url)
 
     def repository_selector(self) -> dict[str, str]:
         """GraphQL ``RepositorySelector`` — ``repositoryOrError``와 launch selector의 공통 부분."""
@@ -164,9 +176,17 @@ class DagsterUrlConfigurationError(ValueError):
 
 
 def candidate_graphql_url(settings: ApiSettings) -> str:
+    """보고·링크용 공개 GraphQL URL(검증 전)."""
+
     if settings.dagster_graphql_url:
         return settings.dagster_graphql_url
     return f"{settings.dagster_url.rstrip('/')}/graphql"
+
+
+def candidate_internal_graphql_url(settings: ApiSettings) -> str:
+    """backend가 호출하는 GraphQL URL(검증 전). 따로 없으면 공개 URL을 호출한다."""
+
+    return settings.dagster_internal_graphql_url or candidate_graphql_url(settings)
 
 
 def _normalised_allowed_hosts(settings: ApiSettings) -> set[str]:
@@ -179,9 +199,11 @@ def _validated_http_url(
     raw_url: str,
     *,
     setting_name: str,
-    allowed_hosts: set[str],
+    allowed_hosts: set[str] | None,
     require_graphql_path: bool = False,
 ) -> str:
+    """URL 모양을 검사하고 정규화한다. ``allowed_hosts``가 None이면 host를 대조하지 않는다 —
+    backend가 호출하지 않고 보고만 하는 URL이다(SSRF 경계 밖)."""
     value = raw_url.strip()
     try:
         parsed = urlsplit(value)
@@ -196,7 +218,7 @@ def _validated_http_url(
     hostname = parsed.hostname
     if hostname is None:
         raise DagsterUrlConfigurationError(f"{setting_name} host is required")
-    if hostname.lower().rstrip(".") not in allowed_hosts:
+    if allowed_hosts is not None and hostname.lower().rstrip(".") not in allowed_hosts:
         raise DagsterUrlConfigurationError(f"{setting_name} host is not in dagster_allowed_hosts")
     if parsed.query or parsed.fragment:
         raise DagsterUrlConfigurationError(f"{setting_name} must not include query or fragment")
@@ -212,15 +234,29 @@ def dagster_urls(settings: ApiSettings) -> DagsterUrls:
         setting_name="dagster_url",
         allowed_hosts=allowed_hosts,
     )
+    split = settings.dagster_internal_graphql_url is not None
+    # 호출하는 URL만 allowlist를 지난다(SSRF 경계). 따로 주지 않았으면 공개 URL이 곧
+    # 호출 URL이므로 오늘처럼 allowlist를 지나야 한다.
     graphql_url = _validated_http_url(
-        candidate_graphql_url(settings),
-        setting_name="dagster_graphql_url",
+        candidate_internal_graphql_url(settings),
+        setting_name="dagster_internal_graphql_url" if split else "dagster_graphql_url",
         allowed_hosts=allowed_hosts,
         require_graphql_path=True,
+    )
+    public_graphql_url = (
+        _validated_http_url(
+            candidate_graphql_url(settings),
+            setting_name="dagster_graphql_url",
+            allowed_hosts=None,
+            require_graphql_path=True,
+        )
+        if split
+        else graphql_url
     )
     return DagsterUrls(
         dagster_url=dagster_url.rstrip("/"),
         graphql_url=graphql_url,
+        public_graphql_url=public_graphql_url,
         repository_name=settings.dagster_repository_name,
         repository_location_name=settings.dagster_repository_location_name,
     )
@@ -657,7 +693,7 @@ def parse_run_detail(
             return DagsterRunDetailData(
                 status="not_found",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[f"이 code location의 Dagster run이 아닙니다: {raw_run_id} ({observed})"],
             )
@@ -719,7 +755,7 @@ def parse_run_detail(
         return DagsterRunDetailData(
             status="ok",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             checked_at=checked_at,
             run=_parse_run_summary(raw_run),
             events=events,
@@ -732,7 +768,7 @@ def parse_run_detail(
         return DagsterRunDetailData(
             status="not_found",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             checked_at=checked_at,
             errors=[_string(raw_run.get("message"), "Dagster run을 찾을 수 없습니다.")],
         )
@@ -741,14 +777,14 @@ def parse_run_detail(
         return DagsterRunDetailData(
             status="error",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             checked_at=checked_at,
             errors=[message],
         )
     return DagsterRunDetailData(
         status="error",
         dagster_url=dagster_urls.dagster_url,
-        graphql_url=dagster_urls.graphql_url,
+        graphql_url=dagster_urls.public_graphql_url,
         checked_at=checked_at,
         errors=[f"알 수 없는 Dagster run 응답 타입: {typename or 'unknown'}"],
     )
@@ -760,7 +796,7 @@ def _run_detail_error(
     return DagsterRunDetailData(
         status="error",
         dagster_url=dagster_urls.dagster_url,
-        graphql_url=dagster_urls.graphql_url,
+        graphql_url=dagster_urls.public_graphql_url,
         checked_at=checked_at,
         errors=[message],
     )

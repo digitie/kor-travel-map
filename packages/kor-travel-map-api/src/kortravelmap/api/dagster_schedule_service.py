@@ -1294,7 +1294,7 @@ def _command_error_data(
     return DagsterScheduleCommandData(
         status=status,
         dagster_url=dagster_urls.dagster_url,
-        graphql_url=dagster_urls.graphql_url,
+        graphql_url=dagster_urls.public_graphql_url,
         checked_at=checked_at,
         schedule_name=schedule_name,
         command=command,
@@ -1542,7 +1542,7 @@ async def update_schedule(
                 else "error"
             ),
             dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
+            graphql_url=urls.public_graphql_url,
             checked_at=checked_at,
             schedule_name=schedule_name,
             command="update",
@@ -1637,7 +1637,7 @@ async def reset_schedule_default(
                 else "error"
             ),
             dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
+            graphql_url=urls.public_graphql_url,
             checked_at=checked_at,
             schedule_name=schedule_name,
             command="default",
@@ -1829,7 +1829,7 @@ async def mutate_schedule_state(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
             dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
+            graphql_url=urls.public_graphql_url,
             checked_at=checked_at,
             schedule_name=schedule_name,
             command=command,
@@ -2002,7 +2002,7 @@ async def run_schedule_now(
         DagsterScheduleCommandData(
             status="ok" if result_error is None else "error",
             dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
+            graphql_url=urls.public_graphql_url,
             checked_at=checked_at,
             schedule_name=schedule_name,
             command="run",

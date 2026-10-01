@@ -1147,7 +1147,7 @@ async def get_pipeline_overview(
             dagster_part = PipelineDagsterOverview(
                 status="unavailable",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 errors=[str(exc)],
             )
         else:
@@ -1175,7 +1175,7 @@ def _parse_dagster_overview(
         return PipelineDagsterOverview(
             status="error",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
         )
     data = dagster_graphql.as_dict(payload.get("data"))
@@ -1192,7 +1192,7 @@ def _parse_dagster_overview(
     return PipelineDagsterOverview(
         status="error" if errors else "ok",
         dagster_url=dagster_urls.dagster_url,
-        graphql_url=dagster_urls.graphql_url,
+        graphql_url=dagster_urls.public_graphql_url,
         version=dagster_graphql.optional_string(data.get("version")),
         run_counts=run_counts,
         recent_runs=recent_runs,
@@ -1626,7 +1626,7 @@ async def list_dagster_runs(
             data=PipelineDagsterRunsData(
                 status="unavailable",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),
@@ -1638,7 +1638,7 @@ async def list_dagster_runs(
             data=PipelineDagsterRunsData(
                 status="error",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
             ),
@@ -1652,7 +1652,7 @@ async def list_dagster_runs(
             data=PipelineDagsterRunsData(
                 status="error",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[repository_error],
             ),
@@ -1665,7 +1665,7 @@ async def list_dagster_runs(
         data=PipelineDagsterRunsData(
             status="error" if run_errors else "ok",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             checked_at=checked_at,
             run_counts=run_counts,
             runs=runs,
@@ -1832,7 +1832,7 @@ async def list_pipeline_schedules(
             data=PipelineSchedulesData(
                 status="unavailable",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),
@@ -1844,7 +1844,7 @@ async def list_pipeline_schedules(
             data=PipelineSchedulesData(
                 status="error",
                 dagster_url=dagster_urls.dagster_url,
-                graphql_url=dagster_urls.graphql_url,
+                graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
             ),
@@ -1863,7 +1863,7 @@ async def list_pipeline_schedules(
         data=PipelineSchedulesData(
             status="error" if errors else "ok",
             dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
+            graphql_url=dagster_urls.public_graphql_url,
             checked_at=checked_at,
             schedules=schedules,
             sensors=sensors,

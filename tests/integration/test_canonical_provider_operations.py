@@ -534,6 +534,10 @@ class _PeriodicContext:
         self.cursor = FeatureOperationReconcileCursor().to_json()
         self.log = _PeriodicLog()
         self.updated_cursors: list[str] = []
+        # reconcile의 location guard는 origin이 있을 때만 대조한다. 이 harness는 gRPC 밖의
+        # `build_sensor_context`처럼 origin이 없으므로(None) guard를 건너뛴다 — guard 자체는
+        # dagster 패키지의 sensor 테스트가 본다.
+        self.code_location_origin = None
 
     def update_cursor(self, cursor: str) -> None:
         self.updated_cursors.append(cursor)

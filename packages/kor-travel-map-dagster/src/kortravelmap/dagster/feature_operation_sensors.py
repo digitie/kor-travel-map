@@ -35,6 +35,7 @@ from .feature_operation_tracking import (
     declared_execution_scopes,
     resolve_run_execution_manifest,
 )
+from .run_scope import MapRunScopeMismatch, map_runs_filter, require_map_code_location
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -112,15 +113,24 @@ class _DagsterInstance(Protocol):
         cursor: str | None = None,
     ) -> Sequence[_RunRecord]: ...
 
+    def get_runs_count(self, filters: Any = None) -> int: ...
+
 
 class _SensorLog(Protocol):
     def error(self, message: str, *args: object) -> None: ...
+
+
+class _CodeLocationOrigin(Protocol):
+    location_name: str
 
 
 class _ReconcileContext(Protocol):
     cursor: str | None
     instance: _DagsterInstance
     log: _SensorLog
+
+    @property
+    def code_location_origin(self) -> _CodeLocationOrigin | None: ...
 
     def update_cursor(self, cursor: str) -> None: ...
 
@@ -220,10 +230,14 @@ class FeatureOperationObservationError(RuntimeError):
 def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     sensor_name = f"feature_operation_{status.value.lower()}_sensor"
 
+    # 공유 daemon에서는 모든 프로젝트의 run 이벤트가 한 event log에 쌓인다. 기본값
+    # (``monitor_all_code_locations=False``, ``monitored_jobs`` 없음)이면 Dagster가 run의
+    # remote origin(location·repository)을 이 sensor의 것과 대조해 Map run에서만 평가한다.
+    # Map의 feature-load job은 전부 이 code location 하나에 있으므로 오늘 배포에서는
+    # 평가 대상이 바뀌지 않는다.
     @run_status_sensor(
         run_status=status,
         name=sensor_name,
-        monitor_all_code_locations=True,
         default_status=DefaultSensorStatus.RUNNING,
     )
     def _status_sensor(
@@ -326,19 +340,29 @@ async def _reconcile_tick(
     context: _ReconcileContext,
     client: AsyncKorTravelMapClient,
 ) -> SkipReason:
+    # run 조회는 ``MAP_CODE_LOCATION_NAME``으로 좁힌다. 배포된 location 이름이 다르면 좁힌
+    # 조회가 조용히 0건을 돌려 reconcile이 아무것도 하지 않는다 — tick을 실패로 올린다
+    # (``_evaluate_reconciliation_sensor``가 이 예외만은 삼키지 않는다).
+    origin = context.code_location_origin
+    require_map_code_location(origin.location_name if origin is not None else None)
     if context.cursor is None:
-        latest = _latest_dagster_watermark(context.instance)
-        if latest is not None:
+        # 조회는 Map code location으로 좁혀져 있다. cursor가 없을 때 Map run이 한 page 이하면
+        # null cursor로 시작해 처음부터 다시 훑는다 — 반영은 멱등이다. 공유 plane 첫 부팅에서
+        # 매분 schedule이나 queue sensor가 reconcile 첫 tick보다 먼저 run을 만들어도 영구히
+        # 멈추지 않는다. 그보다 많으면(오래 쓴 전용 instance) 전량 재생 대신 명시 cursor를 요구한다.
+        existing = _map_run_count(context.instance)
+        if existing > FEATURE_OPERATION_RECONCILE_PAGE_SIZE:
             message = (
                 "non-empty Dagster storage의 reconcile cursor가 준비되지 않음; "
-                "maintenance drain에서 명시 insertion cursor를 설정해야 함"
+                "maintenance drain에서 명시 insertion cursor를 설정해야 함 "
+                f"(map_runs={existing} > page={FEATURE_OPERATION_RECONCILE_PAGE_SIZE})"
             )
             context.log.error(message)
             return SkipReason(message)
         context.update_cursor(FeatureOperationReconcileCursor().to_json())
         return SkipReason(
-            "empty Dagster storage의 null insertion cursor 초기화 완료; "
-            "cursor readback 뒤 다음 tick부터 양방향 reconcile 수행"
+            f"Map run {existing}건(page 이하)의 null insertion cursor 초기화 완료; "
+            "cursor readback 뒤 다음 tick부터 처음부터 양방향 reconcile 수행"
         )
     cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
     dagster_records = _dagster_run_page(
@@ -396,6 +420,10 @@ async def _evaluate_reconciliation_sensor(
 ) -> SkipReason:
     try:
         return await _reconcile_tick(context, client)
+    except MapRunScopeMismatch as exc:
+        # 설정 오류는 SKIP으로 숨기지 않는다 — tick이 FAILURE로 보여야 한다.
+        context.log.error(str(exc))
+        raise
     except Exception as exc:
         message = f"provider feature operation reconcile 실패: error_type={type(exc).__name__}"
         context.log.error(message)
@@ -598,6 +626,7 @@ def _dagster_run_page(
     )
     insertion_page = tuple(
         instance.get_run_records(
+            filters=map_runs_filter(),
             limit=limit,
             ascending=True,
             cursor=watermark.run_id if watermark is not None else None,
@@ -621,21 +650,8 @@ def _dagster_run_page(
     return tuple(records)
 
 
-def _latest_dagster_watermark(
-    instance: _DagsterInstance,
-) -> DagsterRunWatermark | None:
-    latest = tuple(
-        instance.get_run_records(
-            limit=1,
-            ascending=False,
-        )
-    )
-    if not latest:
-        return None
-    return DagsterRunWatermark(
-        storage_id=latest[0].storage_id,
-        run_id=latest[0].dagster_run.run_id,
-    )
+def _map_run_count(instance: _DagsterInstance) -> int:
+    return int(instance.get_runs_count(filters=map_runs_filter()))
 
 
 def _terminal_error(run: _DagsterRun) -> dict[str, str] | None:

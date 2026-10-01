@@ -249,7 +249,7 @@ async def get_summary(
             DagsterSummaryData(
                 status="unavailable",
                 dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
+                graphql_url=urls.public_graphql_url,
                 checked_at=checked_at,
                 repository_count=0,
                 job_count=0,
@@ -269,7 +269,7 @@ async def get_summary(
             DagsterSummaryData(
                 status="error",
                 dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
+                graphql_url=urls.public_graphql_url,
                 checked_at=checked_at,
                 repository_count=0,
                 job_count=0,
@@ -298,7 +298,7 @@ async def get_summary(
         DagsterSummaryData(
             status="error" if errors else "ok",
             dagster_url=urls.dagster_url,
-            graphql_url=urls.graphql_url,
+            graphql_url=urls.public_graphql_url,
             version=dagster_graphql.optional_string(data.get("version")),
             checked_at=checked_at,
             repository_count=len(repositories),
@@ -348,7 +348,7 @@ async def get_run_detail(
             DagsterRunDetailData(
                 status="error",
                 dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
+                graphql_url=urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),
@@ -359,7 +359,7 @@ async def get_run_detail(
             DagsterRunDetailData(
                 status="unavailable",
                 dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
+                graphql_url=urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[str(exc)],
             ),
@@ -371,7 +371,7 @@ async def get_run_detail(
             DagsterRunDetailData(
                 status="error",
                 dagster_url=urls.dagster_url,
-                graphql_url=urls.graphql_url,
+                graphql_url=urls.public_graphql_url,
                 checked_at=checked_at,
                 errors=[dagster_graphql.graphql_error_message(error) for error in graphql_errors],
             ),

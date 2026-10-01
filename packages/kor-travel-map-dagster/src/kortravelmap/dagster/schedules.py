@@ -26,7 +26,6 @@ from dagster import (
     DagsterRunStatus,
     DefaultScheduleStatus,
     RunRequest,
-    RunsFilter,
     ScheduleDefinition,
     ScheduleEvaluationContext,
     SkipReason,
@@ -77,6 +76,7 @@ from .kma_weather import (
     feature_weather_kma_ultra_short_nowcast,
 )
 from .mcst_features import feature_place_mcst_culture
+from .run_scope import map_owned_runs_filter
 from .schedule_overrides import cron_for_schedule
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
@@ -603,8 +603,10 @@ def _coalescing_execution_fn(
     run_config = _resolved_run_config(spec)
 
     def _evaluate(context: ScheduleEvaluationContext) -> RunRequest | SkipReason:
+        # schedule context에는 code location이 없다 — location 상수 대신 Map job이 스스로 다는
+        # operation key tag로 좁힌다(공유 plane의 다른 프로젝트 run에는 없다).
         active_runs = context.instance.get_runs(
-            filters=RunsFilter(
+            filters=map_owned_runs_filter(
                 job_name=spec.job_name,
                 statuses=_COALESCING_RUN_STATUSES,
                 tags={"kor_travel_map.operation_key": spec.job_name},

@@ -32,7 +32,9 @@ from kortravelmap.dagster.feature_operation_tracking import (
     DeclaredExecutionScope,
     declared_execution_scopes,
 )
+from kortravelmap.dagster.maintenance import CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS
 from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
+from kortravelmap.dagster.run_scope import MAP_CODE_LOCATION_NAME
 from kortravelmap.dagster.schedules import (
     _KNPS_GEOMETRY_SCHEDULE,
     _KNPS_POINT_SCHEDULE,
@@ -338,18 +340,23 @@ def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
     assert schedule.tags["kor_travel_map.trigger_kind"] == "schedule"
 
 
+def _remote_origin(job_name: str, location_name: str = MAP_CODE_LOCATION_NAME) -> RemoteJobOrigin:
+    """daemon·GraphQL launch처럼 remote origin을 단 run — Dagster가 location tag를 단다."""
+
+    return RemoteJobOrigin(
+        RemoteRepositoryOrigin(
+            RegisteredCodeLocationOrigin(location_name),
+            "__repository__",
+        ),
+        job_name,
+    )
+
+
 def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
     schedule = defs.resolve_schedule_def(
         "feature_notice_krex_traffic_notices_ten_minute_schedule"
     )
     job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
-    remote_origin = RemoteJobOrigin(
-        RemoteRepositoryOrigin(
-            RegisteredCodeLocationOrigin("test"),
-            "__repository__",
-        ),
-        job.name,
-    )
 
     with DagsterInstance.local_temp() as instance:
         for run_status in (
@@ -364,9 +371,7 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
                 job,
                 status=run_status,
                 tags={"kor_travel_map.operation_key": job.name},
-                remote_job_origin=(
-                    remote_origin if run_status == DagsterRunStatus.QUEUED else None
-                ),
+                remote_job_origin=_remote_origin(job.name),
             )
 
             with build_schedule_context(instance=instance) as context:
@@ -376,6 +381,32 @@ def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
             assert tick.skip_message is not None
             assert run_status.value in tick.skip_message
             instance.delete_run(run.run_id)
+
+
+def test_krex_coalescing_ignores_other_tenant_run() -> None:
+    """공유 plane: 다른 프로젝트의 같은 이름 job run은 Map tag가 없어 tick을 막지 않는다.
+
+    schedule context에는 code location이 없으므로 location 상수가 아니라 Map job이 스스로
+    다는 ``kor_travel_map.operation_key``로 좁힌다.
+    """
+
+    schedule = defs.resolve_schedule_def(
+        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+    )
+    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+
+    with DagsterInstance.local_temp() as instance:
+        instance.create_run_for_job(
+            job,
+            status=DagsterRunStatus.STARTED,
+            tags={"owner": "kor_travel_weather"},
+            remote_job_origin=_remote_origin(job.name, "kor_travel_weather.definitions"),
+        )
+        with build_schedule_context(instance=instance) as context:
+            tick = schedule.evaluate_tick(context)
+
+    assert tick.skip_message is None
+    assert len(tick.run_requests) == 1
 
 
 def test_krex_coalescing_ignores_untagged_run() -> None:
@@ -721,10 +752,40 @@ def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() 
     )
     job = defs.resolve_job_def("current_weather_summary_refresh")
     with DagsterInstance.local_temp() as instance:
-        instance.create_run_for_job(job, status=DagsterRunStatus.STARTED)
+        # 실제 run은 schedule RunRequest·job 정의의 tag를 싣는다(n150 실측 1,000/1,000).
+        instance.create_run_for_job(
+            job,
+            status=DagsterRunStatus.STARTED,
+            tags=CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
+            remote_job_origin=_remote_origin(job.name),
+        )
         with build_schedule_context(instance=instance) as context:
             tick = schedule.evaluate_tick(context)
 
     assert tick.run_requests == []
     assert tick.skip_message is not None
     assert "STARTED" in tick.skip_message
+
+
+def test_current_weather_summary_refresh_ignores_other_tenant_run() -> None:
+    """공유 plane: 같은 job 이름의 다른 프로젝트 active run은 minute tick을 막지 않는다.
+
+    다른 프로젝트 run에는 ``kor_travel_map.job_kind``가 없다(schedule context에는 location이
+    없어 location 상수 대신 이 tag로 좁힌다).
+    """
+
+    schedule = defs.resolve_schedule_def(
+        "current_weather_summary_refresh_minutely_schedule"
+    )
+    job = defs.resolve_job_def("current_weather_summary_refresh")
+    with DagsterInstance.local_temp() as instance:
+        instance.create_run_for_job(
+            job,
+            status=DagsterRunStatus.STARTED,
+            remote_job_origin=_remote_origin(job.name, "kor_travel_weather.definitions"),
+        )
+        with build_schedule_context(instance=instance) as context:
+            tick = schedule.evaluate_tick(context)
+
+    assert tick.skip_message is None
+    assert len(tick.run_requests) == 1
