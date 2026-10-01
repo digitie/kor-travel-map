@@ -243,9 +243,10 @@ STARTED인 run이 있으면, 새 이름의 run은 그 run을 보지 못하고 �
    1이면 목록의 run이 끝나기를 기다린 뒤 다시 돌린다. 스크립트로 두지 않은 이유는 이 전제가
    이번 이름 변경 한 번에만 필요하기 때문이다. `scripts/n150`에 Dagster GraphQL 의존을 새로
    들이지 않는다.
-2. 또는 writer drain(`ktm-cache-target-writer-drain/v1`) 아래에서 배포한다. drain은 Map
-   schedule·sensor를 멈추고 QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING run이 모두
-   끝나기를 기다린다.
+2. 또는 writer drain(`ktm-cache-target-writer-drain/v1`) 아래에서 배포한다. drain은 Map의
+   RUNNING schedule·sensor를 전부 멈추고, 짧은 grace(`min(15초, dagster_termination_timeout_seconds/2)`)
+   뒤 남은 QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING run을 `SAFE_TERMINATE`로 **끊어**
+   terminal로 만든다. run이 끝나기를 기다려 주지 않으므로, 끊겨도 되는 run만 있을 때 쓴다.
 
 ```sh
 # n150, 배포 직전. 대상은 Map Dagster webserver(오늘은 127.0.0.1:12702).
@@ -315,15 +316,48 @@ metadata의 `today_values_count`가 `price_values_upserted`보다 작으면 당�
 
 ### 공유 Dagster plane으로 옮기기 전의 drain (Map flip, Manager ADR-54)
 
+> **완료.** Map은 2026-10-01 05:54Z cutover로 **05:58Z부터 공유 plane에서 돈다**. C7은 06:02Z GREEN이었다.
+> 아래는 그때 실제로 쓴 절차의 기록이다. 정본은 Manager runbook(`docs/platform-topology.md` §7)과 그것을
+> 강제하는 Manager `scripts/dagster-shared-cutover.sh`다.
+
 공유 plane의 run storage(`dagster_shared`)는 새로 시작한다(D1). Map DB의 active provider operation
 (`queued`·`running`)이 옛 Map 전용 instance에만 있는 Dagster run을 가리키면, 새 instance의 reconcile
 sensor는 그 run을 찾지 못해 영영 "Dagster run을 찾지 못함" 관측 오류로 남긴다 — 종결시킬 run이 없다.
-그래서 **flip 전에 active operation을 전부 끝낸다**:
+그래서 **flip 전에 Dagster run을 가리키는 active operation을 0건으로 만든다.**
 
-1. writer drain으로 새 run을 막고, 전용 instance의 Map run이 모두 terminal이 될 때까지 기다린다.
-2. 전용 instance의 reconcile sensor가 그 terminal 상태를 DB에 반영할 때까지 한 번 더 기다린다
-   (settle lag 300초 + 30초 주기). active operation 0건을 읽기 전용으로 확인한다.
-3. 그 뒤에 Manager가 Map을 공유 plane으로 옮긴다.
+**writer drain(`ktm-cache-target-writer-drain/v1`)은 이 목적에 쓰지 않는다.** 두 가지 이유로 "active
+operation 0건"을 만들 수 없다.
+
+- drain은 Map의 RUNNING schedule·sensor를 **전부** 멈춘다. 여기에는 operation을 종결 상태로 반영해야 할
+  reconcile sensor와 run-status sensor도 들어간다. 그러면 run이 끝나도 DB의 operation은 그대로 남는다.
+- drain은 run을 기다리지 않는다. 약 15초 grace(`min(15초, dagster_termination_timeout_seconds/2)`) 뒤
+  남은 run을 `SAFE_TERMINATE`로 끊는다.
+
+writer drain의 원래 용도는 Docker Manager의 cache-target diagnostic/cutover(`owner_kind`
+`diagnostic|cutover`)에서 writer fence(Map writer stop) 직전에 Map Dagster producer를 비우는 것이다 —
+instigator 원래 상태를 durable하게 기록하고 pause → grace → terminal-cancel → 0건 attest, 끝나면 기록한
+상태 그대로 restore한다. 그 용도로는 여전히 유효하다(`docs/architecture/cache-target-writer-drain.md`,
+ADR-082).
+
+**실제 절차 (2026-10-01 cutover):**
+
+1. 창 전에 진행 중인 feature load가 스스로 끝나게 둔다. 끝난 뒤 옛 reconcile sensor가 terminal 상태를
+   DB에 기록할 때까지 **최소 330초**(reconcile lag 300초 + sensor 주기 30초) 기다린다. 그동안 새 load나
+   요청을 시작하지 않는다.
+2. Map app DB(DSN은 Map API 컨테이너에서 유도한다)에서 읽기 전용으로 게이트를 본다. **0이어야 한다.**
+
+   ```sql
+   SELECT count(*) FROM ops.import_jobs
+   WHERE status IN ('queued','running') AND dagster_run_id IS NOT NULL
+     AND quarantined_at IS NULL
+     AND kind IN ('provider_feature_load_run','feature_update_request');
+   ```
+
+3. queue는 닫지 않는다. `DISABLED_FEATURE_LOAD_SCHEDULES`도 필요 없다. 아직 run이 없는 요청
+   (`dagster_run_id IS NULL`)은 게이트 대상이 아니고, flip 뒤 새 queue sensor가 DB에서 집어 간다.
+4. cutover script는 게이트를 두 번 본다 — precheck에서 한 번, fence와 run-cancel 뒤·switch 전에 한 번.
+   두 번째는 그 순간의 snapshot일 뿐이다. 이때 cancel된 `feature_update_request` run은 어느 sensor도
+   종결시키지 않는다. 그런 행이 보이면 손으로 정리한다.
 
 flip 뒤 reconcile sensor는 cursor 없이 시작한다. 공유 instance의 Map run(`dagster/code_location`
 = Map location)이 한 page(`FEATURE_OPERATION_RECONCILE_PAGE_SIZE`, 200) 이하면 null cursor로 처음부터

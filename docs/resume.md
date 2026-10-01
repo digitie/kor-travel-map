@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-01 — Map 공유 Dagster plane cutover 완료, flip 전 drain 문서 정정: 브랜치 `docs/shared-plane-drain`
+
+**다음 한 작업: 문서 PR 머지(소유자). 그 뒤 공유 plane soak 관찰(D6) — 옛 Map 전용 Dagster metadata DB는 보존(D1).**
+
+- Map은 2026-10-01 05:54Z cutover로 05:58Z부터 공유 plane에서 돈다. C7 06:02Z GREEN.
+- `docs/runbooks/docker-app.md` "공유 Dagster plane으로 옮기기 전의 drain"을 실제 절차로 고쳤다. writer drain은
+  reconcile·run-status sensor까지 멈추고 run을 약 15초 뒤 끊으므로 flip 전 drain이 아니다. 절차는 자연 종료 →
+  330초 대기 → `ops.import_jobs` 게이트 0 → queue는 열어 둔다(정본은 Manager topology §7·`dagster-shared-cutover.sh`).
+
 ## 2026-10-01 — Map shared-plane 차단 항목: 브랜치 `feat/dagster-shared-map-prep`
 
 **다음 한 작업: CI 전량 + 적대 리뷰 뒤 머지 → 다음 Map pinned pair로 배포(Map 전용 instance에서 동작 불변).**
