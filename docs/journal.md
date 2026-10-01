@@ -16,6 +16,12 @@
   `.env.example` 키·stale docstring·삭제된 schedule mock 정리. frozen H35 replay의 KMA 텍스트는 해시 고정이라 남겼다.
   매분 schedule의 RUNNING 상태 행은 회전 전 stop(runbook)으로 처리한다 — Map에 RUNNING schedule이 0이어도 gate는
   SCHEDULER daemon heartbeat만 보므로 바닥이 빨갛게 고정되지 않는다.
+- **n150 게이트(`9de7630`).** unit+lint 3,047 passed / 14 failed(main도 같은 환경 실패 15건 이하), API 1,217, Dagster 624,
+  ruff·mypy 3패키지·lint-imports·graph check 통과. 통합 전량 1,106 passed / 2 failed(main에서도 실패하는 docker effect) /
+  25 errors(bootstrap 19 환경, glibc collation 6은 단독 재실행 6/6 통과). `test_weather_removal_migration` 3/3(신규 400→402
+  in-flight 중단 포함), `test_notice_lineage_key` 전부 통과, `head-schema.sql`은 재생성과 동일. probe lint는 기본값을
+  `cache_target_snapshot_gc`로 되돌리면 4/20 빨강. 첫 실행에서 루트 설정의 경고→오류 때문에 setup ERROR 6건이 났다 —
+  ERROR는 빨강이 아니므로 필터를 달고 다시 쟀다.
 
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 같은 브랜치 `feat/remove-map-kma-dagster`
 
