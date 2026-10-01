@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### npm 보안 권고 — Next 16.3.8 (2026-10-01)
+
+- **SECURITY (frontend)**: `next` 16.3.4 → **16.3.8**(`@next/env`·`@next/eslint-plugin-next`·`@next/swc-*` 함께).
+  GHSA-vcvr-r3jv-pc5j(critical, `next/og` `ImageResponse` RCE, 16.2.0–16.3.5)가 `npm run audit:high`를 막았다.
+  lockfile은 npm 12.0.1로 다시 만들었고 Next family 밖의 해소는 바뀌지 않았다.
+
 ### 공유 Dagster plane 준비 — 정확한 이미지 버전과 code location 범위 조회 (2026-09-29)
 
 - **CHANGED (이미지·CI)**: API·Dagster 이미지와 CI(`ci.yml`·`lint.yml`·`openapi.yml`·`postgis-only.yml`)의
