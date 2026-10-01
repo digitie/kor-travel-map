@@ -45,8 +45,35 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 
-_PROVIDER = "python-kma-api"
-_DATASET = "kma_short_forecast"
+#: scope가 둘(``dataset_wide``·``target_grids``)인 refresh operation을 가진 probe dataset.
+#: 시드에서 그런 dataset은 KMA 격자뿐이었는데 401(ADR-104)이 refresh operation을 끄고
+#: 402(ADR-105)가 dataset을 비활성으로 내렸다. 검증 대상은 KMA 적재가 아니라 active
+#: scope·idempotency 기제이므로 이 파일은 자기 transaction(또는 격리 DB) 안에 probe
+#: catalog를 심는다.
+_PROVIDER = "feature-update-active-probe"
+_DATASET = "multi_scope_refresh"
+_GRID_OPERATION = "feature_update_active_multi_scope_probe_job"
+_SEED_GRID_DATASET_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+) VALUES (
+    :provider, :dataset_key, 'feature update active probe', 'system', true,
+    jsonb_build_object('schema_version', 1,
+                       'produces', '[]'::jsonb,
+                       'extensions', '{}'::jsonb)
+)
+RETURNING provider_dataset_id
+"""
+_SEED_GRID_OPERATION_SQL = """
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind, is_enabled, config
+) VALUES (:provider_dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
+"""
+_SEED_GRID_SCOPE_SQL = """
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key, operation_kind
+) VALUES (:provider_dataset_id, :sync_scope, :operation_key, 'refresh')
+"""
 
 #: catalog에서 (dataset, sync_scope, operation) triple 하나를 고르는 SQL.
 #:
@@ -122,6 +149,30 @@ async def _operation_scope(
     )
 
 
+async def _seed_grid_probe(session: AsyncSession) -> None:
+    """scope가 둘인 probe dataset·refresh operation을 이 transaction 안에 심는다."""
+    dataset_id = (
+        await session.execute(
+            text(_SEED_GRID_DATASET_SQL),
+            {"provider": _PROVIDER, "dataset_key": _DATASET},
+        )
+    ).scalar_one()
+    await session.execute(
+        text(_SEED_GRID_OPERATION_SQL),
+        {"provider_dataset_id": dataset_id, "operation_key": _GRID_OPERATION},
+    )
+    for sync_scope in ("dataset_wide", "target_grids"):
+        await session.execute(
+            text(_SEED_GRID_SCOPE_SQL),
+            {
+                "provider_dataset_id": dataset_id,
+                "sync_scope": sync_scope,
+                "operation_key": _GRID_OPERATION,
+            },
+        )
+    await session.flush()
+
+
 async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
     """활성 request가 점유하지 않은 triple을 골라 membership으로 만든다."""
     row = (await session.execute(text(_FREE_MEMBERSHIP_SQL))).one()
@@ -179,6 +230,9 @@ async def _isolated_membership(dsn: str, *, sync_scope: str) -> ImportJobDataset
     engine = make_async_engine(dsn)
     try:
         async with AsyncSession(engine) as session:
+            # 격리 DB는 테스트 끝에 통째로 drop되므로 여기서 심은 probe를 commit한다.
+            await _seed_grid_probe(session)
+            await session.commit()
             return await _operation_scope(session, sync_scope=sync_scope)
     finally:
         await engine.dispose()
@@ -199,6 +253,7 @@ async def _drop_isolated_database(pg_container: Any, dsn: str) -> None:
 async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
     migrated_session: AsyncSession,
 ) -> None:
+    await _seed_grid_probe(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     first = await enqueue_feature_update_request(
         migrated_session,
@@ -755,6 +810,7 @@ async def test_direct_writer_requires_canonical_effective_scope(
     operation_key``)이 든다. 종전 인자가 지키던 계약(정규 scope만 · 요청 scope와
     실행 scope 불일치 금지 · 자유 alias 금지)은 그대로 membership 축에서 검증한다.
     """
+    await _seed_grid_probe(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     dataset_wide = await _operation_scope(migrated_session, sync_scope="dataset_wide")
 
@@ -906,6 +962,7 @@ async def test_active_lookup_does_not_match_sibling_operation_on_same_scope(
     비교가 불일치를 내며 **정당한 요청에 409**를 준다 — Python 가드가 자기가 흉내
     내는 DB 가드보다 엄격해지는 상태다.
     """
+    await _seed_grid_probe(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     sibling_operation_key = f"{targeted.operation_key}.sibling"
     await migrated_session.execute(

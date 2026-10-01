@@ -90,7 +90,7 @@ function makeAdminFeature(
     lon: 126.978,
     name: "Mock active feature",
     primary_dataset_key: "mock_dataset",
-    primary_provider: "python-kma-api",
+    primary_provider: "python-knps-api",
     lifecycle_state: "active",
     publication_state: "published",
     quality_state: "valid",

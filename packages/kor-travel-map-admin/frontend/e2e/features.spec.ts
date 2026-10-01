@@ -148,7 +148,7 @@ test.describe("/features", () => {
     ).toBeVisible();
   });
 
-  test("kind 필터 — 칩 7종 + 토글 + 초기화", async ({ page }) => {
+  test("kind 필터 — 칩 6종(weather 없음) + 토글 + 초기화", async ({ page }) => {
     await page.goto("/features");
     const filter = page.getByTestId("kind-filter");
     await expect(filter).toBeVisible();
@@ -163,7 +163,6 @@ test.describe("/features", () => {
       "event",
       "notice",
       "price",
-      "weather",
       "route",
       "area",
     ]) {
@@ -171,17 +170,16 @@ test.describe("/features", () => {
         filter.getByRole("button", { name: k, exact: true }),
       ).toBeVisible();
     }
-    const weatherBtn = filter.getByRole("button", {
-      name: "weather",
-      exact: true,
-    });
+    // Map은 weather 레이어를 제공하지 않는다(owner 결정 2026-10-01).
+    await expect(
+      filter.getByRole("button", { name: "weather", exact: true }),
+    ).toHaveCount(0);
     const noticeBtn = filter.getByRole("button", {
       name: "notice",
       exact: true,
     });
     const placeBtn = filter.getByRole("button", { name: "place", exact: true });
     const reset = filter.getByRole("button", { name: "초기화" });
-    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
     await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
     await expect(reset).toBeVisible();
@@ -191,7 +189,6 @@ test.describe("/features", () => {
     await expect(reset).toBeEnabled();
     await reset.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
     await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(reset).toBeDisabled();
   });

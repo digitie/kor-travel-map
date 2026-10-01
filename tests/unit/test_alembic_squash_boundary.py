@@ -72,6 +72,12 @@ def _runnable_shell_paths() -> list[Path]:
     )
 
 
+def _active_graph_revisions() -> frozenset[str]:
+    """active migration graph(`_application_migration_graph.json`)의 revision 전부."""
+    payload = json.loads(_GRAPH.read_text(encoding="utf-8"))
+    return frozenset(str(entry["revision"]) for entry in payload["revisions"])
+
+
 def _string_constants(tree: ast.Module) -> dict[str, str]:
     candidates: dict[str, set[str]] = {}
     invalid: set[str] = set()
@@ -191,7 +197,9 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
             violations.append(f"{filename}:{node.lineno}: revision 인자 없음")
             continue
         revision = _resolved_string(revision_node, constants)
-        if revision == "head" or revision in _EXPECTED_REVISIONS:
+        # active graph의 revision(400 root와 그 child)은 retired가 아니다 — 2026-10-01 401·402가
+        # 첫 child로 들어오며 root만 허용하던 판이 child를 겨누는 통합 테스트를 막았다.
+        if revision == "head" or revision in _active_graph_revisions():
             continue
         call_source = "\n".join(
             source.splitlines()[node.lineno - 1 : node.end_lineno]

@@ -62,7 +62,6 @@ class BeachPublicView(BaseModel):
     image_url: str | None = None
     latest_water_quality: dict[str, Any] | None = None
     upcoming_index_forecasts: list[dict[str, Any]] = Field(default_factory=list)
-    latest_weather: dict[str, Any] | None = None
     source_providers: list[str]
     updated_at: datetime
 

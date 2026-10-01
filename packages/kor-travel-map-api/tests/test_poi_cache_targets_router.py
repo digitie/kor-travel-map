@@ -267,7 +267,7 @@ def test_put_poi_cache_target_uses_transaction(
         assert kwargs["lon"] == 126.978
         assert kwargs["on_conflict"] == "reject"
         assert kwargs["provider_overrides"] == {
-            "python-kma-api:kma_weather_alerts": {
+            "python-krex-api:krex_traffic_notices": {
                 "targeted_policy": "allow_targeted",
                 "min_interval_seconds": 300,
             }
@@ -290,7 +290,7 @@ def test_put_poi_cache_target_uses_transaction(
             "coord": {"lon": 126.978, "lat": 37.5665},
             "radius_km": 5.0,
             "provider_overrides": {
-                "python-kma-api:kma_weather_alerts": {
+                "python-krex-api:krex_traffic_notices": {
                     "targeted_policy": "allow_targeted",
                     "min_interval_seconds": 300,
                 }

@@ -261,11 +261,12 @@ def test_a_cyclic_cause_chain_terminates() -> None:
 def test_a_provider_without_failure_kind_is_caught_by_identity() -> None:
     """``failure_kind``를 붙이지 않는 lib이 절반이다 — 이름/모듈로 메운다.
 
-    에어코리아가 그 대표이고 **가장 좁은 분모**다(오퍼레이션당 500/일).
+    종전 대표는 에어코리아였다(2026-10-01 ADR-105로 Map에서 빠졌다). 같은 성질의
+    opinet으로 옮겨 잰다 — ``status_code``가 없는 쿼터 예외는 이름/모듈로만 잡힌다.
     """
 
     module, class_name = next(
-        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "airkorea"
+        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "opinet"
     )
     fake = type(class_name, (RuntimeError,), {"__module__": module})
     assert quota_exhaustion_cause(fake("daily limit exceeded")) is not None
@@ -285,7 +286,7 @@ def test_identity_match_is_module_qualified() -> None:
     """이름만 같은 남의 예외에 걸리면 안 된다."""
 
     impostor = type(
-        "AirKoreaRateLimitError", (RuntimeError,), {"__module__": "somewhere_else"}
+        "OpinetRateLimitError", (RuntimeError,), {"__module__": "somewhere_else"}
     )
     assert quota_exhaustion_cause(impostor("x")) is None
 
@@ -405,7 +406,9 @@ def test_the_derivation_actually_found_something() -> None:
     """항진명제 방지 — 유도가 비면 아래 단언이 무엇도 재지 못한다."""
 
     assets = _feature_load_assets()
-    assert len(assets) >= 35, (
+    # 2026-10-01 35 → 30: KMA asset 다섯이 ADR-104로 사라졌다(실측 30).
+    # 2026-10-01 30 → 26: 남은 weather asset 넷이 ADR-105로 사라졌다(실측 26).
+    assert len(assets) >= 26, (
         f"재시도 정책을 단 asset을 {len(assets)}개만 찾았다 — 유도가 낡았다."
     )
     assert _quota_guarded_functions(), (
@@ -482,37 +485,6 @@ def test_the_guard_module_reuses_the_declared_nonretryable_set() -> None:
     source = (_PACKAGE / "quota_exhaustion.py").read_text(encoding="utf-8")
     assert "from .upstream_retry import NONRETRYABLE_FAILURE_KINDS" in source, (
         "쿼터 분류 집합을 이 모듈이 따로 정의하면 `upstream_retry`와 갈라진다."
-    )
-
-
-def test_the_kma_result_does_not_carry_a_second_numerator() -> None:
-    """분자의 정본은 하나여야 한다.
-
-    종전에는 `KmaWeatherLoadResult.as_metadata()`가 `grids_fetched`를
-    `upstream_requests_min`으로도 실었다. 그 둘은 **다른 수**다 — `grids_fetched`는
-    호출에 **성공한** 격자 수이고, 실패해 중단된 격자도 요청은 나갔다. 같은 이름을
-    두 곳이 들고 있으면 갈라지므로, 분자는 격자 루프가
-    `note_upstream_request`로 세고 `_add_output_metadata`가 싣는다.
-    """
-
-    from kortravelmap.dagster.kma_weather import KmaWeatherLoadResult
-
-    result = KmaWeatherLoadResult(
-        provider="kma",
-        dataset_key="kma_short_forecast",
-        base_datetime="202609130200",
-        skipped=False,
-        grids_total=59,
-        grids_fetched=59,
-        grids_dropped=0,
-        features_total=59,
-        values_loaded=600,
-        membership_fingerprint="abc",
-    )
-    metadata = result.as_metadata()
-    assert metadata["grids_fetched"] == 59
-    assert "upstream_requests_min" not in metadata, (
-        "분자 정본이 둘이 됐다 — 격자 루프의 계수기가 정본이다."
     )
 
 

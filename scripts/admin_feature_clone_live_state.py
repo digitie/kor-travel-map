@@ -1160,8 +1160,7 @@ def _fixture_counts(
         summary_run_ids = evidence.get("summary_run_ids")
         if (
             not isinstance(summary_run_ids, list)
-            or len(summary_run_ids) != 2
-            or len(set(summary_run_ids)) != 2
+            or len(summary_run_ids) != 1
             or not all(
                 isinstance(value, int) and not isinstance(value, bool) and value > 0
                 for value in summary_run_ids
@@ -1192,7 +1191,7 @@ def _purge_counts(path: Path) -> dict[str, int]:
         or evidence.get("version") != 1
         or evidence.get("action") != "purge"
         or evidence.get("counts")
-        != {"features": 0, "price_values": 0, "weather_values": 0}
+        != {"features": 0, "price_values": 0}
         or evidence.get("foreign_key_references") != 0
         or not isinstance(evidence.get("foreign_key_constraints_checked"), int)
         or evidence["foreign_key_constraints_checked"] < 1
@@ -1684,8 +1683,9 @@ def _build_result(
     if effective_final["feature_non_deleted"] != startup_before["feature_non_deleted"]:
         raise RuntimeError("최종 non-deleted Feature 수가 시작 기준과 다릅니다")
     # T-VN-36 live spec은 Feature를 **한 건** 만들고 retire까지만 간다(hard delete
-    # 없음). provider fixture 두 건은 같은 run 안에서 cleanup이 물리 삭제하므로
-    # 총계에 남지 않는다. 그래서 최종 총계는 시작 기준 + 1이다.
+    # 없음). provider fixture(price 한 건 — weather는 ADR-105로 빠졌다)는 같은 run
+    # 안에서 cleanup이 물리 삭제하므로 총계에 남지 않는다. 그래서 최종 총계는 시작
+    # 기준 + 1이다.
     if effective_final["feature_total"] != startup_before["feature_total"] + 1:
         raise RuntimeError("최종 retire 감사 Feature 1건이 예상과 다릅니다")
     if effective_final["active_owned_features"] != 0:
@@ -1694,19 +1694,19 @@ def _build_result(
     _fixture_counts(
         runtime / "direct-seed.json",
         "seed",
-        {"features": 2, "price_values": 1, "weather_values": 1},
-        expected_foreign_key_references=6,
+        {"features": 1, "price_values": 1},
+        expected_foreign_key_references=3,
     )
     cleanup = _fixture_counts(
         runtime / "direct-cleanup.json",
         "cleanup",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         expected_foreign_key_references=0,
     )
     audit = _fixture_counts(
         runtime / "direct-audit.json",
         "audit",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         expected_foreign_key_references=0,
     )
     api_owned_audit = _api_owned_audit_counts(runtime / "api-owned-audit.json")
@@ -1922,19 +1922,19 @@ def abandon_failed_run(args: argparse.Namespace) -> None:
     _fixture_counts(
         runtime / "direct-seed.json",
         "seed",
-        {"features": 2, "price_values": 1, "weather_values": 1},
-        expected_foreign_key_references=6,
+        {"features": 1, "price_values": 1},
+        expected_foreign_key_references=3,
     )
     _fixture_counts(
         runtime / "direct-cleanup.json",
         "cleanup",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         expected_foreign_key_references=0,
     )
     _fixture_counts(
         runtime / "direct-audit.json",
         "audit",
-        {"features": 0, "price_values": 0, "weather_values": 0},
+        {"features": 0, "price_values": 0},
         expected_foreign_key_references=0,
     )
     api_audit_path = runtime / "api-owned-audit.json"

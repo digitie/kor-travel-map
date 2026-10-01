@@ -1,5 +1,107 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
+
+- **MED-1 PinVi가 다음 짝을 막는다.** Manager M05 harness가 OpenAPI hash 불일치를 거부하고 PinVi 계약 테스트가
+  `BeachPublicView.latest_weather`를 단언한다. PinVi 브랜치 `chore/map-drop-weather`에서 재vendor한다. 순서: PinVi PR →
+  Map PR → pair 회전.
+- **MED-2 probe.** `cache_target_snapshot_gc`는 prod에서 돈 적이 없어(schedule STOPPED) 첫 gate가 GC 적체(최대 2,000
+  batch)를 health check 안에서 지울 수 있었다. 전용 no-op job `map_run_heartbeat`를 두고 lint를 성질(resource ⊆
+  {io_manager}, kortravelmap import 없음, run config 불필요, operation key 없음, in-process 성공)에 결박했다. 옛 기본값으로
+  되돌리면 4개가 빨갛다.
+- **MED-3 C7 왕복 복원.** KMA write spec이 덮던 "요청 → queue sensor → worker → 종결"을 krairport(번들 정적 데이터,
+  upstream 0)로 되살렸다. 실제 prod write(공항 place 15건 멱등)다. 공유 plane Basic Auth 파일을 다시 읽는다.
+- **LOW.** 401에 in-flight preflight(같은 upgrade에서 402의 `is_enabled` 필터를 빠져나가던 구멍; 막지 않으면 통과하는
+  통합 케이스 추가), 403으로 lineage 함수의 KMA 분기 제거(앱 식과 DB 함수의 분기 집합 일치 unit 테스트 추가), 핀 제거,
+  `.env.example` 키·stale docstring·삭제된 schedule mock 정리. frozen H35 replay의 KMA 텍스트는 해시 고정이라 남겼다.
+  매분 schedule의 RUNNING 상태 행은 회전 전 stop(runbook)으로 처리한다 — Map에 RUNNING schedule이 0이어도 gate는
+  SCHEDULER daemon heartbeat만 보므로 바닥이 빨갛게 고정되지 않는다.
+- **n150 게이트(`9de7630`).** unit+lint 3,047 passed / 14 failed(main도 같은 환경 실패 15건 이하), API 1,217, Dagster 624,
+  ruff·mypy 3패키지·lint-imports·graph check 통과. 통합 전량 1,106 passed / 2 failed(main에서도 실패하는 docker effect) /
+  25 errors(bootstrap 19 환경, glibc collation 6은 단독 재실행 6/6 통과). `test_weather_removal_migration` 3/3(신규 400→402
+  in-flight 중단 포함), `test_notice_lineage_key` 전부 통과, `head-schema.sql`은 재생성과 동일. probe lint는 기본값을
+  `cache_target_snapshot_gc`로 되돌리면 4/20 빨강. 첫 실행에서 루트 설정의 경고→오류 때문에 setup ERROR 6건이 났다 —
+  ERROR는 빨강이 아니므로 필터를 달고 다시 쟀다.
+
+## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 같은 브랜치 `feat/remove-map-kma-dagster`
+
+ADR-104(KMA Dagster 경로 제거) 작업 중 소유자 결정이 넓어졌다: weather kind 기능 전부와 날씨 출처 notice(KMA 특보)만
+지우고, UI에서도 지우고, 데이터와 관련 스키마도 지운다. 정의(kind·DTO·enum·`make_feature_id`·DB kind 값)는 남긴다.
+산림청 산사태 예보와 KREX 교통공지는 날씨 출처가 아니라 남긴다. **배포 전 백업은 소유자가 명시적으로 면제했고, 삭제는
+되돌릴 수 없다.** 정기 백업은 이 결정과 무관하다.
+
+- **prod 읽기 전용 실측(12:00Z 전후).** `feature.features` 0행(모든 kind), weather fact·summary·notice 0,
+  `source_entities`·`source_records` 0, `ops.current_summary_runs` weather 2,875(매분 schedule의 receipt)·price 5,
+  weather·KMA 카탈로그 dataset 12·operation 18·scope 13. notice provider별 행도 0이라 지워지는 notice도 남는 notice도
+  현재는 행이 없다. 그래서 402가 prod에서 실제로 지우는 것은 summary run 2,875행과 카탈로그 상태뿐이다.
+- **나눈 작업.** Dagster(W1), 라이브러리·API·OpenAPI(W2), migration 402·스키마 산출물(W4), C7/D1/D2(W5), UI(W3), 교차
+  정리(W6)를 파일 소유를 갈라 병렬로 했다. 정본 결정은 `WEATHER-REMOVAL-SPEC`(작업 메모)에 두고 모두 같은 정체성 규칙을
+  썼다: weather = 카탈로그 `capabilities.produces ∋ "weather"`, 날씨 notice = notice이면서 provider `python-kma-api`.
+- **402가 하는 일과 근거**는 migration docstring과 ADR-105에 있다. 지운 스키마 넷은 `head-schema.sql` 전수 검색으로
+  weather 전용임을 확인했다. 공유 표 `ops.current_summary_runs`는 남기고 CHECK만 `price`로 좁혔다.
+- **게이트에서 잡은 것.** (1) API guard가 `app.routes`로 경로를 셌는데 n150에서는 sub-app mount 때문에 `/metrics`
+  하나만 보여 **빈 집합에서 빨갰다** — main에서의 빨강도 그 이유였을 수 있어, OpenAPI `paths`로 바꾸고 main에서 다시
+  잰다. (2) squash 경계 검사가 root(`400`)만 허용해 401·402를 겨누는 통합 테스트를 retired 대상으로 봤다 — active
+  graph의 revision을 허용하게 고쳤다. (3) PinVi rollout pending receipt의 OpenAPI sha를 재핀했다(`latest_weather` 소멸 —
+  PinVi vendor는 다음 짝에서).
+- **C7.** KMA 위에 서 있던 러너를 KMA 없이 돌게 했다: read-auth, schedule-write(allowlist
+  `feature_place_krairport_airports_monthly_schedule` — fetcher가 번들 정적 데이터만 읽어 upstream 호출 0), POI
+  `@c7-causal`. n150 `.d2-live.env`의 `E2E_C7_SCHEDULE`을 그 값으로 바꿔야 러너가 시작한다. D2는 price feature 하나만
+  심는다. 둘 다 prod에서만 돌 수 있어 이번에 실행하지 못했다.
+- **n150 게이트(브랜치 소스를 PYTHONPATH로, main과 대조).** unit+lint 3,026 passed / 14 failed — 14건은 main에서도
+  같은 환경 실패(`test_docker_dagster_runtime` 13: node 의존, `test_c7_prod_live_runner_process` INT-130 1). API 1,217
+  passed, Dagster 624 passed, ruff·mypy --strict 3패키지·lint-imports·migration graph `--check` 통과. frontend
+  type-check 통과, vitest 380/381(실패 1은 main과 같은 maplibre worker 파일 부재), lint·build는 n150 node_modules가
+  main에서도 깨져 판정 불가(W3가 로컬 eslint 통과를 확인). 통합 테스트는 n150 디스크 대기로 testcontainers PostGIS가
+  `pg_ctl` shutdown checkpoint에서 죽어(교체된 이유) 하네스에서만 PGDATA를 tmpfs로 두고 돌렸다: 영향 파일 30개
+  307 passed, `head-schema.sql`은 `KTM_WRITE_HEAD_SCHEMA=1` 재생성 결과와 바이트 동일. 통합 전량(glibc 이미지)은
+  1,110 passed / 3 failed / 19 errors — 19 errors는 bootstrap 묶음의 알려진 n150 환경 실패, docker effect 2건은 main에서도
+  같이 실패, `test_tvn34_public_projection_spine`의 EXPLAIN 1건은 단독 재실행에서 통과(공유 DB 통계 순서 의존).
+- **빨강 실측.** 브랜치의 guard를 main 소스에 대고 돌렸다: Dagster 5/7 빨강(나머지 둘은 카탈로그 하한·남는 notice
+  양성 검사), API 3/5 빨강(나머지 둘은 축 유도 하한·남는 notice preview 양성 검사), UI 4/6 빨강(W3, HEAD 파일 복원),
+  DB는 `test_weather_removal_migration.py`가 401에서 19개 제거 검사가 0이 아님을 먼저 단언한다.
+- **배포 영향.** 공유 plane Map location의 instigator 11개 중 `current_weather_summary_refresh_minutely_schedule`
+  (RUNNING) 하나가 사라지고 sensor 10은 남는다. 옛 Map 전용 instance(`kor_travel_map_dagster`)의 같은 schedule 상태 행도
+  쓰이지 않게 된다. 402의 `DROP INDEX`가 `feature.features`에 ACCESS EXCLUSIVE를 잡으므로 매분 schedule과 겹치지 않게
+  배포한다(새 코드에는 그 schedule이 없으니 code server 교체 뒤 migration이면 겹칠 일이 없다).
+
+## 2026-10-01 — Map Dagster의 KMA 적재 경로 제거(ADR-104): 브랜치 `feat/remove-map-kma-dagster`
+
+소유자 결정: KMA는 kor-travel-weather가 소유하고, Map은 KMA data.go.kr 오퍼레이션을 다시는 부르지 않는다
+(data.go.kr 키를 weather와 함께 쓰고 오퍼레이션당 일일 한도가 빠듯하다).
+
+- **끄던 것이 능력을 남기고 있었다.** `DISABLED_FEATURE_LOAD_SCHEDULES`는 schedule을 만들지 않고 큐의 targeted
+  요청만 건너뛰었다. Dagster UI launch·백필, `provider_dataset` 큐 요청, C7의 `external_system:c7-e2e` 요청은
+  그대로 KMA를 불렀고, 카탈로그는 KMA refresh operation 5개를 enabled로 들고 있었다.
+- **지운 것.** `dagster/kma_weather.py`(asset 5), KMA job·schedule, resource 셋, `fetch_kma_weather_alerts`, 큐
+  runner spec·handler binding 5, KMA settings 넷, KMA 대상 좌표 조회(client 4·repo 4), asset 라벨·API cron 힌트,
+  `providers.kma`의 Dagster 설정 파서 둘. `DISABLED_FEATURE_LOAD_SCHEDULES`에서 KMA 이름이 빠졌다(AirKorea 등 때문에
+  목록은 남는다).
+- **남긴 것.** `providers.kma` 변환·정체성 계약(이미 적재된 KMA feature 읽기, `/ops/datasets` fixture preview),
+  카탈로그 행·scope·dataset(`is_active`), preview operation, 공개/운영 KMA 특보 이력 API.
+- **DB.** `401_retire_map_kma_refresh` — provider `python-kma-api`의 `refresh`·`feature_load`를 `is_enabled=false`.
+  이 저장소 관례(`_UPGRADE_STATEMENTS`)를 따르고 receipt head CHECK에 `400`·`401`을 더했다(graph 전체를 받아야 한다는
+  lint 계약; `head-schema.sql` 동기화). 400 스쿼시 뒤 첫 child migration이라, 300~313 체인에 맞춰 박힌 migration lint
+  하한 다섯(롤 전환 ≥5, 문장 ≥100 등)이 대상이 없는데 빨갰다 — 하한을 "소스 텍스트에 보이는 것을 추출도 전부 본다"로
+  옮겼다.
+- **재도입 방지.** `test_map_dagster_has_no_weather.py`가 시드 카탈로그에서 KMA operation key를 provider로 유도해
+  Definitions(job·schedule·sensor·asset)·handler registry·큐 runner를 보고, 효과 축으로 Map 런타임 소스의 KMA client
+  import와 KMA data.go.kr 경로(`1360000`)를 본다. DB 축은 `test_head_enables_no_kma_load_operation`.
+  **각 검사를 한 번씩 빨갛게 만들었다**: main 소스에 대고 돌리면 job·asset·launch·소스 넷이 각각 KMA job 5개 /
+  `kma_weather_alert_records` / registry의 KMA key 5개 / `import kma` 위치로 빨갛다. 하한 검사는 KMA 행을 뺀 시드로
+  빨갛다. 처음 판의 sensor 축은 `RunStatusSensorDefinition`에 `job_names`가 없어 **효과가 아니라 AttributeError로**
+  빨갰다 — 그 빨강은 아무것도 증명하지 않으므로 target의 `job_name`을 읽게 고치고 main에서 다시 KMA job 이름으로
+  빨개지는 것을 확인했다.
+- **prod 읽기 전용 실측(09:00Z 전후).** 공유 plane `dagster_shared`의 Map instigator는 sensor 10 + schedule 1
+  (`current_weather_summary_refresh_minutely_schedule`), 옛 `kor_travel_map_dagster`도 같은 11개 — KMA instigator·
+  KMA run 0. `dagster_shared`의 KMA schedule 5·run 63(전부 FAILURE)은 weather location 것이다. Map DB(rev `400`)는 KMA
+  refresh 5·preview 4가 enabled, KMA feature·sync state·멤버십 가진 import job·요청 0. 그래서 배포가 바꾸는 것은
+  Dagster 정의 목록(KMA job 5 소멸, instigator 변화 없음)과 카탈로그의 enabled 5행뿐이다.
+- **남긴 일.** C7 러너 가족(`run-c7-prod-live-e2e.sh`, `ops-c7-*` spec)은 KMA 위에 서 있다 — KMA write spec은 이제
+  요청 단계에서 거부되고, 러너는 schedule allowlist의 KMA schedule이 2026-09-09부터 없어 이미 돌 수 없었다. 배포 게이트
+  (chain16 D1·D2)는 이 러너를 쓰지 않는다. `python-kma-api` 의존 핀, Manager compose의 `KOR_TRAVEL_MAP_KMA_WEATHER_*`
+  env도 후속.
+
 ## 2026-10-01 — flip 전 drain 절차 정정(공유 Dagster plane cutover 완료): 브랜치 `docs/shared-plane-drain`
 
 Map은 2026-10-01 05:54Z cutover로 05:58Z부터 공유 plane에서 돈다. C7은 06:02Z GREEN이었다.

@@ -193,7 +193,7 @@ def residue_probe_dsn(pg_container: Any, service_dsn: str) -> Iterator[str]:
             )
             connection.execute(
                 "INSERT INTO feature.feature_aliases (alias) VALUES (%s), (%s)",
-                (f"e2e_live_acceptance::{_RUN_ID}::weather", "f_place_seoul_a_0123456789abcdef"),
+                (f"e2e_live_acceptance::{_RUN_ID}::price", "f_place_seoul_a_0123456789abcdef"),
             )
             connection.execute(
                 "INSERT INTO ops.feature_requests (resolved_feature_id) "
@@ -205,9 +205,9 @@ def residue_probe_dsn(pg_container: Any, service_dsn: str) -> Iterator[str]:
                 "INSERT INTO provider_sync.provider_datasets (dataset_key) "
                 "VALUES (%s), (%s), (%s)",
                 (
-                    _fixture_dataset_key(_RUN_ID, "weather"),
+                    _fixture_dataset_key(_RUN_ID, "price"),
                     _fixture_dataset_key("e2e-run-third-probe", "price"),
-                    "kma-short-forecast",
+                    "opinet-stations",
                 ),
             )
         yield make_url(service_dsn).set(database=probe_database).render_as_string(

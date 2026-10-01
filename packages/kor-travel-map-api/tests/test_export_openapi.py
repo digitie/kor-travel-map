@@ -79,11 +79,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/features/{feature_id}/contained-features",
         "/v1/features/{feature_id}/price",
         "/v1/features/{feature_id}/price/snapshot",
-        "/v1/features/{feature_id}/weather",
-        "/v1/features/{feature_id}/weather/snapshot",
-        "/v1/features/{feature_id}/weather/forecast",
-        "/v1/features/weather/forecast",
-        "/v1/features/weather/alerts",
         "/v1/public/beaches",
         "/v1/public/beaches/map-markers",
         "/v1/public/beaches/{feature_id}",
@@ -113,7 +108,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" not in schemas
-    assert "WeatherBatchResponse" not in schemas
     assert "CacheTargetClaimResponse" not in schemas
     assert "CacheTargetEventRecord" not in schemas
     assert "BeachPublicView" in schemas
@@ -125,7 +119,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "PublicCurationItemView" in schemas
     assert "PublicCurationCollectionView" in schemas
     assert "AdminCurationItemView" not in schemas
-    assert "AdminWeatherAlertHistoryItem" not in schemas
     assert "CuratedFeatureDetailSnapshotView" not in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
@@ -171,14 +164,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "metadata",
     }.isdisjoint(_schema_properties(user, "PublicCurationItemView"))
     assert "metadata" not in _schema_properties(user, "PublicCurationCollectionView")
-    assert "source_record_key" not in _schema_properties(user, "PublicWeatherValueItem")
-    assert {
-        "source_record_key",
-        "payload",
-        "fetched_at",
-        "imported_at",
-        "last_seen_at",
-    }.isdisjoint(_schema_properties(user, "PublicWeatherAlertHistoryItem"))
 
 
 @pytest.mark.unit
@@ -186,7 +171,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     ("path", "schemas", "expected"),
     [
         (
-            "/v1/features/weather/alerts",
+            "/v1/features/{feature_id}",
             {
                 "Root": {
                     "type": "object",
@@ -196,7 +181,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
             "source_record_key",
         ),
         (
-            "/v1/features/weather/forecast",
+            "/v1/features/search",
             {
                 "Root": {
                     "type": "array",
@@ -328,7 +313,6 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert service["info"]["title"] == "kor-travel-map-service"
     assert set(service["paths"]) == {
         "/v1/features/batch",
-        "/v1/features/weather/batch",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
         "/v1/service/cache-target-event-acks",
@@ -381,7 +365,6 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
 
     schemas = service["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
-    assert "WeatherBatchResponse" in schemas
     assert "CacheTargetClaimResponse" in schemas
     snapshot_data = schemas["CacheTargetSnapshotData"]
     assert {"created_at", "expires_at"} <= set(snapshot_data["required"])

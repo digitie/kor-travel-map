@@ -82,11 +82,24 @@ E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256=ac0c1ae66267459f12d740e06ca3aa3a1e964daf91
 E2E_DAGSTER_BASIC_AUTH_FILE=/root/.d2-dagster-basic-auth
 ```
 
-`E2E_DAGSTER_BASIC_AUTH_FILE`은 gateway의 Basic Auth 자격증명 파일이다 — root 소유, `0600`(group·other
-권한 없음), symlink 아님, 내용은 `user:password` 한 줄. C7 러너는 이 파일을 executor에
-read-only bind(`/run/secrets/c7-dagster-basic-auth`)로만 건네고, C7 Dagster client는 그 파일이
-있을 때만 `Authorization: Basic`을 보낸다(Origin·Sec-Fetch-Site 없는 POST — gateway가 받는 모양).
-지금(Map 전용 공개 URL)은 인증이 없으므로 키를 두지 않는다.
+C7 기준 5(`ops-c7-update-request-write`, 2026-10-02 복원)는 Dagster GraphQL에 **읽기 전용**
+POST를 보낸다 — queue worker job 정의와 queue sensor 상태, request 하나가 낳은 worker run의
+identity·terminal status만 읽고 mutation은 없다. 공유 plane의 공개 gateway는 Basic Auth 뒤이므로
+`E2E_DAGSTER_BASIC_AUTH_FILE`이 다시 필요하다. 파일은 root 소유, `0600`(group·other 권한 없음),
+symlink 아님, 내용은 `user:password` 한 줄이다. 러너는 env 단계에서 모양을 검사하고, executor에는
+read-only bind(`/run/secrets/c7-dagster-basic-auth`)로만 건넨다 — env·로그·evidence에 값이 없다.
+C7 Dagster client는 그 파일이 있을 때만 `Authorization: Basic`을 보낸다(Origin·Sec-Fetch-Site 없는
+POST — gateway가 받는 모양). 인증 없는 Map 전용 공개 URL이면 키를 두지 않는다.
+
+같은 spec이 요구하는 키 둘도 `/root/.d2-live.env`에 손으로 둔다(repin은 쓰지 않는다):
+
+```
+E2E_C7_UPDATE_REQUEST_WRITE=1
+E2E_C7_UPDATE_REQUEST_OPERATION=feature_place_krairport_airports_job
+```
+
+첫째는 실제 prod 쓰기에 대한 명시 opt-in이고(번들 공항 place feature의 idempotent upsert,
+upstream 호출 0), 둘째는 러너의 allowlist와 정확히 같아야 한다.
 
 ## 설치
 

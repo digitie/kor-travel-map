@@ -118,29 +118,27 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_krforest_arboretums` | `krforest_arboretums` | `krforest_arboretums` | `features_place` |
 | `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `krforest_mountain_trails` | `features_route` |
 | `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
-| `feature_weather_krforest_mountain_weather` | `krforest_mountain_weather` | `krforest_mountain_weather` | `features_weather` |
-| `feature_weather_krforest_wildfire_risk_forecast` | `krforest_wildfire_risk_forecast` | `krforest_wildfire_risk_forecast` | `features_weather` |
 | `feature_notice_krforest_landslide_forecast_issues` | `krforest_landslide_forecast_issues` | `krforest_landslide_forecast_issues` | `features_notice` |
 | `feature_place_standard_museums` | `standard_museums` | `datagokr_museums` | `features_place` |
 | `feature_place_standard_tourist_attractions` | `standard_tourist_attractions` | `datagokr_tourist_attractions` | `features_place` |
 | `feature_place_standard_parking_lots` | `standard_parking_lots` | `datagokr_parking_lots` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `khoa_beaches` | `features_place` |
 | `feature_place_krairport_airports` | `krairport_airports` | `krairport_airports` | `features_place` |
-| `feature_weather_airkorea_air_quality` | `airkorea_stations`, `airkorea_air_quality` | `airkorea_air_quality` | `features_weather` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
 | `feature_place_kor_travel_concierge_youtube` | `kor_travel_concierge_youtube_features` | `youtube_place_candidates` | `features_place` |
-| `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
-| `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `features_weather` |
-| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `kma_short_forecast` | `features_weather` |
-| `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `kma_mid_forecast` | `features_weather` |
-| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
 | `feature_place_datagokr_file_data` | `datagokr_file_data_records` + `datagokr_file_data_dataset_key` | `datagokr_*` fileData 4종 (`DATAGOKR_FILEDATA_DATASETS`) | `features_place` |
 | `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
+
+weather kind asset 전부(KMA·AirKorea·KREX 휴게소 기상·산림청 산악기상·산불위험예보)와 KMA 기상특보
+notice asset, 매분 weather current summary schedule은 2026-10-01 ADR-104·ADR-105로 제거됐다. 이 아래
+과거 기록 중 weather를 말하는 단락은 기록이다. KMA(기상청) asset·job·schedule은 2026-10-01 ADR-104로 제거됐다 — KMA는 kor-travel-weather가
+소유하고 Map은 KMA data.go.kr 오퍼레이션을 부르지 않는다. 재도입은
+`packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_weather.py`가 막는다.
 
 T-VN-40부터 별도 curated overlay asset group은 제거됐다. provider full-snapshot의 authoritative
 terminal receipt가 source observation과 candidate generation을 같은 transaction에서 실행한다.
 
-`feature_place_krairport_airports`와 `feature_weather_airkorea_air_quality` asset은
+`feature_place_krairport_airports` asset은
 현재 §10 정기 schedule이 없다(on-demand 전용 — Dagster UI/API 수동 실행 또는 feature
 update request로만 적재).
 
@@ -158,14 +156,10 @@ update request로만 적재).
     `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 미설정 시 `RuntimeError`를 낸다(조용히
     None을 주지 않는다 — feature_id 결정성 보장).
   - blast radius = `_COMMON_RESOURCE_KEYS`를 `required_resource_keys`로 갖는 모든
-    feature-load asset(위 §1.1 provider asset들 + `feature_notice_kma_weather_alerts`
-    + `feature_place_mcst_culture`)이 base URL 미설정 시 resource init에서 함께
-    실패한다(asset 본문 진입 전 차단).
-  - 예외(영향 없음) = 4개 KMA 예보 asset(`feature_weather_kma_ultra_short_nowcast`
-    / `feature_weather_kma_ultra_short_forecast` / `feature_weather_kma_short_forecast`
-    / `feature_weather_kma_mid_forecast`)은 `_KMA_WEATHER_RESOURCE_KEYS`/
-    `_KMA_MID_RESOURCE_KEYS`를 쓰며 `reverse_geocoder`를 포함하지 않는다. curated_*
-    / maintenance / offline_upload / sensors / batch_dag도 이 key를 쓰지 않는다.
+    feature-load asset(위 §1.1 provider asset들 + `feature_place_mcst_culture`)이 base URL
+    미설정 시 resource init에서 함께 실패한다(asset 본문 진입 전 차단).
+  - curated_* / maintenance / offline_upload / sensors / batch_dag는 이 key를 쓰지 않는다.
+    (종전의 예외였던 KMA 예보 asset은 ADR-104로 제거됐다.)
 - `fetched_at`: batch 기준 aware `datetime`(없으면 KST 현재 시각).
 - 주소 검증 모드: `strict`|`drop`|`off` 문자열, 기본 `strict`
   (`KorTravelMapSettings.dagster_address_validation`, #376). `strict`는 주소/좌표
@@ -282,12 +276,7 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 | `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
 | `feature_place_krex_rest_areas` | `krex_rest_areas` | `features_place` |
 | `price_krex_rest_area_fuel` (forward-looking) | `krex_rest_area_prices` | `features_price` |
-| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `features_weather` |
-| `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
 | `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
-| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
-| `feature_weather_krforest_mountain_weather` (C05B) | `krforest_mountain_weather` | `features_weather` |
-| `feature_weather_krforest_wildfire_risk_forecast` (C05C) | `krforest_wildfire_risk_forecast` | `features_weather` |
 | `feature_notice_krforest_landslide_forecast_issues` (C05D) | `krforest_landslide_forecast_issues` | `features_notice` |
 | `feature_dedup_review` | (운영) | `features_quality` |
 | `feature_consistency_reports` | (운영, T-201) | `features_quality` |
@@ -513,22 +502,14 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_price_krex_rest_areas_twice_daily_schedule` | `feature_price_krex_rest_areas_job` | `28 6,18 * * *` | KREX 휴게소 유가 일 2회 |
 | `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `25 4 4 * *` | 산림청 등산로 월 1회(C05A) |
 | `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `35 4 4 * *` | 산림청 둘레길 월 1회(C05A) |
-| `feature_weather_krforest_mountain_weather_six_daily_schedule` | `feature_weather_krforest_mountain_weather_job` | `0 1,5,9,13,17,21 * * *` | 산림청 산악기상 하루 6회(C05B) |
-| `feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule` | `feature_weather_krforest_wildfire_risk_forecast_job` | `10 1,5,9,13,17,21 * * *` | 산림청 산불위험예보 하루 6회(C05C) |
 | `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` | 산림청 산사태 예보발령·해제 하루 6회(C05D) |
 | `feature_notice_krex_traffic_notices_ten_minute_schedule` | `feature_notice_krex_traffic_notices_job` | `*/10 * * * *` | KREX 교통공지 10분마다 |
-| `feature_weather_krex_rest_areas_hourly_schedule` | `feature_weather_krex_rest_areas_job` | `35 * * * *` | KREX 휴게소 관측 기상 시간당 |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` | 국가유산 item 월 1회 |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` | 국가유산 행사 월 1회 |
 | `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` | MOIS bulk 월 1회 |
 | `feature_place_knps_points_monthly_schedule` | `feature_place_knps_points_job` | `45 3 3 * *` | KNPS point 월 1회 |
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` | KNPS geometry 월 1회 |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` | kor-travel-concierge YouTube 후보 월 1회 |
-| `feature_weather_kma_ultra_short_nowcast_hourly_schedule` | `feature_weather_kma_ultra_short_nowcast_job` | `45 * * * *` | KMA 초단기실황 시간당 |
-| `feature_weather_kma_ultra_short_forecast_hourly_schedule` | `feature_weather_kma_ultra_short_forecast_job` | `50 * * * *` | KMA 초단기예보 시간당 |
-| `feature_weather_kma_short_forecast_hourly_schedule` | `feature_weather_kma_short_forecast_job` | `20 * * * *` | KMA 단기예보 시간당 |
-| `feature_weather_kma_mid_forecast_hourly_schedule` | `feature_weather_kma_mid_forecast_job` | `25 * * * *` | KMA 중기예보 시간당 |
-| `feature_notice_kma_weather_alerts_hourly_schedule` | `feature_notice_kma_weather_alerts_job` | `15 * * * *` | KMA 기상특보 시간당 |
 | `feature_place_mcst_culture_monthly_schedule` | `feature_place_mcst_culture_job` | `30 4 3 * *` | MCST 문화 파일데이터 13종 월 1회 |
 | `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |

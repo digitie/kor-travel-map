@@ -17,7 +17,6 @@ type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
 type AdminFeaturesInBoundsResponse =
   components["schemas"]["AdminFeaturesInBoundsResponse"];
 type Meta = components["schemas"]["Meta"];
-type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 type FeaturePriceResponse = components["schemas"]["FeaturePriceResponse"];
 type AdminFeatureDetailFeatureRecord =
   components["schemas"]["AdminFeatureDetailFeatureRecord"];
@@ -234,21 +233,6 @@ function makeAdminFeatureDetailResponse(
   };
 }
 
-function makeFeatureWeatherResponse(): FeatureWeatherResponse {
-  return {
-    data: {
-      feature_id: FEATURE_ID,
-      is_stale: false,
-      latest_at: null,
-      metrics: [],
-      refresh_after: null,
-      selected_at: null,
-      source_styles: [],
-    },
-    meta: makeMeta({ request_id: "e2e-feature-weather" }),
-  };
-}
-
 function makeFeaturePriceResponse(): FeaturePriceResponse {
   const point = {
     dataset_display_name: "OpiNet 유가",
@@ -301,7 +285,7 @@ interface FeaturesRouteOptions {
 }
 
 /**
- * Admin 지도·상세·weather·price가 쓰는 `**​/v1/admin/features/**` 요청을 단일
+ * Admin 지도·상세·price가 쓰는 `**​/v1/admin/features/**` 요청을 단일
  * 핸들러에서 pathname으로 분기한다. RSC/document 요청은 route.continue()
  * (admin-ops idiom).
  * 반환된 카운터로 요청 shape를 expect.poll 단언한다.
@@ -317,7 +301,6 @@ async function mockFeatureRoutes(
     cluster: 0,
     adminDetail: 0,
     price: 0,
-    weather: 0,
     /** list 쿼리마다 url.searchParams.getAll("kind") 기록 — 마지막 요청 shape 검증용. */
     listKinds: [] as string[][],
     /** cluster 쿼리마다 url.searchParams.getAll("kind") 기록 — 저zoom shape 검증용. */
@@ -349,13 +332,6 @@ async function mockFeatureRoutes(
     if (url.pathname.endsWith("/price")) {
       requests.price += 1;
       await fulfillJson(route, options.price ?? makeFeaturePriceResponse());
-      return;
-    }
-
-    // weather: `/v1/admin/features/{id}/weather`
-    if (url.pathname.endsWith("/weather")) {
-      requests.weather += 1;
-      await fulfillJson(route, makeFeatureWeatherResponse());
       return;
     }
 
@@ -489,7 +465,7 @@ test.describe("/features map interactions", () => {
     await expect(page.getByTestId("map-canvas-container")).toBeAttached();
   });
 
-  test("고zoom 기본 weather/notice 조회는 geometry SQL을 요청하지 않는다", async ({
+  test("고zoom 기본 notice 조회는 geometry SQL을 요청하지 않는다", async ({
     page,
   }) => {
     const requests = await mockFeatureRoutes(page);
@@ -501,9 +477,6 @@ test.describe("/features map interactions", () => {
 
     // 빈 kind set은 API에서 "전체 kind"이므로 route/area geometry도 다시 포함한다.
     const kindFilter = page.getByTestId("kind-filter");
-    await kindFilter
-      .getByRole("button", { name: "weather", exact: true })
-      .click();
     await kindFilter
       .getByRole("button", { name: "notice", exact: true })
       .click();
@@ -1129,21 +1102,19 @@ test.describe("/features map interactions", () => {
 
     // 기본 zoom 6.5는 clusterMode → admin in-bounds 요청이 최소 1회 발생.
     await expect.poll(() => requests.cluster).toBeGreaterThanOrEqual(1);
-    // 기본 kind 필터는 weather + notice.
-    expect(requests.clusterKinds[0]).toEqual(["weather", "notice"]);
+    // 기본 kind 필터는 notice(weather는 Map이 제공하지 않는다 — owner 결정 2026-10-01).
+    expect(requests.clusterKinds[0]).toEqual(["notice"]);
 
     const filter = page.getByTestId("kind-filter");
-    const weatherBtn = filter.getByRole("button", {
-      name: "weather",
-      exact: true,
-    });
+    await expect(
+      filter.getByRole("button", { name: "weather", exact: true }),
+    ).toHaveCount(0);
     const noticeBtn = filter.getByRole("button", {
       name: "notice",
       exact: true,
     });
     const placeBtn = filter.getByRole("button", { name: "place", exact: true });
     const reset = filter.getByRole("button", { name: "초기화" });
-    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
     await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
     await expect(reset).toBeDisabled();
@@ -1153,14 +1124,13 @@ test.describe("/features map interactions", () => {
     await expect(placeBtn).toHaveAttribute("aria-pressed", "true");
     await expect
       .poll(() => requests.clusterKinds.at(-1))
-      .toEqual(["weather", "notice", "place"]);
+      .toEqual(["notice", "place"]);
     await expect(reset).toBeEnabled();
 
-    // '초기화' → 기본 kind(weather/notice) 복원. 동일 byte 쿼리는 react-query 캐시로
+    // '초기화' → 기본 kind(notice) 복원. 동일 byte 쿼리는 react-query 캐시로
     // 새 네트워크 호출이 없을 수 있으므로 UI 상태로 단언한다.
     await reset.click();
     await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
-    await expect(weatherBtn).toHaveAttribute("aria-pressed", "true");
     await expect(noticeBtn).toHaveAttribute("aria-pressed", "true");
     await expect(reset).toBeDisabled();
   });

@@ -21,7 +21,6 @@ from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
 from kortravelmap.geocoding import ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
-    AirQualityLoadResult,
     FeatureLoadResult,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
@@ -30,12 +29,6 @@ from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
 )
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
-from kortravelmap.providers.airkorea import (
-    AIRKOREA_PROVIDER_NAME,
-    DATASET_KEY_AIR_QUALITY,
-    air_quality_stations_to_bundles,
-    air_quality_to_weather_values,
-)
 from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_PROVIDER_NAME,
     file_data_rows_to_bundles,
@@ -74,12 +67,9 @@ from kortravelmap.providers.krex import (
     REST_AREA_DATASET_KEY,
     REST_AREA_PRICES_DATASET_KEY,
     REST_AREA_SOURCE_ENTITY_TYPE,
-    REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICES_DATASET_KEY,
     rest_area_fuel_price_records_to_features_and_values,
     rest_area_place_locator_from_rows,
-    rest_area_weather_records_to_bundles,
-    rest_area_weather_records_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -107,19 +97,7 @@ from kortravelmap.providers.krforest_safety import (
 )
 from kortravelmap.providers.krforest_safety import (
     LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE,
-    MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
-    WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
     landslide_forecast_issues_to_bundles,
-    mountain_weather_stations_to_bundles,
-    mountain_weather_to_values,
-    wildfire_risk_forecasts_to_bundles,
-    wildfire_risk_to_values,
-)
-from kortravelmap.providers.krforest_safety import (
-    MOUNTAIN_WEATHER_DATASET_KEY as KRFOREST_MOUNTAIN_WEATHER_DATASET_KEY,
-)
-from kortravelmap.providers.krforest_safety import (
-    WILDFIRE_RISK_DATASET_KEY as KRFOREST_WILDFIRE_RISK_DATASET_KEY,
 )
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_EVENT_DATASET_KEY,
@@ -255,9 +233,9 @@ job을 10분 간격으로 엇갈려 두었지만, 한 job이 3시간이면 그 �
 `reverse_geocoder=`를 넘기는 asset 중 schedule spec에 `max_runtime_seconds`가
 **없는** 것이다 — 그 값이 있다는 것은 저장소가 그 job을 "지연되면 안 되는
 freshness 민감 job"으로 분류했다는 뜻이고, 그런 job을 몇 시간짜리 월간 적재
-뒤에 줄 세우면 시간별 수집이 그만큼 멈춘다. 그래서
-`feature_weather_airkorea_air_quality`와 `feature_weather_krex_rest_areas`는
-geo를 쓰면서도 여기 들어오지 않는다.
+뒤에 줄 세우면 시간별 수집이 그만큼 멈춘다. (종전에는 매시 수집하던 날씨 asset 둘이
+geo를 쓰면서도 이 이유로 빠져 있었다 — 2026-10-01 ADR-105로 asset째 사라져 지금은
+해당하는 asset이 없다.)
 `tests/lint/test_geo_heavy_assets_declare_the_pool.py`가 이 유도를 고정한다.
 
 **한계 — pool이 덮지 못하는 축.** 이것은 `@asset` 데코레이터에 걸린다. 큐 경로
@@ -1379,158 +1357,6 @@ async def feature_route_krforest_dulle_trails(
     return await run_tracked_feature_asset(context, run_feature_route_krforest_dulle_trails)
 
 
-async def _run_krforest_weather_values_asset(
-    context: AssetExecutionContext,
-    *,
-    resource_key: str,
-    dataset_key: str,
-    make_bundles: Callable[..., list[Any]],
-    make_values: Callable[..., list[Any]],
-    feature_id_mapping: Callable[[list[Any]], Mapping[str, str]],
-    source_entity_type: str,
-) -> DagsterFeatureLoadResult:
-    """산림청 weather anchor와 값 fact를 한 provider run에서 적재한다."""
-
-    records = await _record_list(context, resource_key)
-    fetched_at = await _fetched_at(context)
-    bundles = make_bundles(records, fetched_at=fetched_at)
-    result = await _load(
-        context,
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=dataset_key,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
-        source_entity_type=source_entity_type,
-        retire_absent_from_snapshot=True,
-        record_sync_state=False,
-    )
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="feature_weather_values",
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=dataset_key,
-    )
-    response_record = _value_response_source_record(
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=dataset_key,
-        source_entity_type="weather_response",
-        source_entity_id=f"snapshot:{fetched_at.isoformat()}",
-        records=records,
-        fetched_at=fetched_at,
-    )
-    values = make_values(
-        records,
-        feature_id_mapping(bundles),
-        source_record_key=response_record.source_record_key,
-    )
-    values_loaded = await client.load_weather_values(
-        values,
-        provider_dataset_id=membership.provider_dataset_id,
-        source_record=response_record,
-    )
-    context.log.info(
-        "산림청 %s weather anchor %d건, WeatherValue %d건 적재.",
-        dataset_key,
-        len(bundles),
-        values_loaded,
-    )
-    _add_output_metadata(
-        context,
-        {
-            "provider": KRFOREST_PROVIDER_NAME,
-            "dataset_key": dataset_key,
-            "features_total": len(bundles),
-            "weather_values_loaded": values_loaded,
-        },
-    )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=KRFOREST_PROVIDER_NAME,
-        dataset_key=dataset_key,
-        cursor_extra={
-            "features_total": len(bundles),
-            "weather_values_loaded": values_loaded,
-        },
-        observation_receipt=result.observation_receipt,
-    )
-    return result
-
-
-async def run_feature_weather_krforest_mountain_weather(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    """산악기상 station과 관측 WeatherValue를 적재한다(C05B)."""
-
-    return await _run_krforest_weather_values_asset(
-        context,
-        resource_key="krforest_mountain_weather",
-        dataset_key=KRFOREST_MOUNTAIN_WEATHER_DATASET_KEY,
-        make_bundles=mountain_weather_stations_to_bundles,
-        make_values=lambda records, mapping, source_record_key: mountain_weather_to_values(
-            records,
-            feature_id_by_obs_id=mapping,
-            source_record_key=source_record_key,
-        ),
-        feature_id_mapping=lambda bundles: {
-            bundle.source_record.source_entity_id: bundle.feature.feature_id
-            for bundle in bundles
-        },
-        source_entity_type=MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
-    )
-
-
-@asset(
-    group_name="features_weather",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_mountain_weather"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_weather_krforest_mountain_weather(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_weather_krforest_mountain_weather
-    )
-
-
-async def run_feature_weather_krforest_wildfire_risk_forecast(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    """전국 산불위험예보 anchor와 지수 WeatherValue를 적재한다(C05C)."""
-
-    return await _run_krforest_weather_values_asset(
-        context,
-        resource_key="krforest_wildfire_risk_forecast",
-        dataset_key=KRFOREST_WILDFIRE_RISK_DATASET_KEY,
-        make_bundles=wildfire_risk_forecasts_to_bundles,
-        make_values=lambda records, mapping, source_record_key: wildfire_risk_to_values(
-            records,
-            feature_id_by_region_key=mapping,
-            source_record_key=source_record_key,
-        ),
-        feature_id_mapping=lambda bundles: {
-            bundle.source_record.source_entity_id: bundle.feature.feature_id
-            for bundle in bundles
-        },
-        source_entity_type=WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
-    )
-
-
-@asset(
-    group_name="features_weather",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_wildfire_risk_forecast"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_weather_krforest_wildfire_risk_forecast(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_weather_krforest_wildfire_risk_forecast
-    )
-
-
 async def run_feature_notice_krforest_landslide_forecast_issues(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1970,154 +1796,6 @@ async def feature_event_visitkorea_enrichment(
     )
 
 
-async def run_feature_weather_airkorea_air_quality(
-    context: AssetExecutionContext,
-) -> AirQualityLoadResult:
-    """대기질 측정소를 weather feature로, 측정값을 air_quality WeatherValue로 적재한다.
-
-    측정소(``airkorea_stations``)와 측정값(``airkorea_air_quality``) 두 record stream을
-    읽어 (1) 측정소를 weather-kind ``FeatureBundle``로 변환·매핑(station_name→feature_id),
-    (2) 측정값을 오염물질별 ``WeatherValue``로 변환, (3) ``client.load_air_quality``로
-    한 transaction에 적재한다(ADR-010 — 대기질은 place가 아니라 측정값).
-    """
-    stations = await _record_list(context, "airkorea_stations")
-    measurements = await _record_list(context, "airkorea_air_quality")
-    fetched_at = await _fetched_at(context)
-    bundles = await air_quality_stations_to_bundles(
-        stations,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    station_feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id for bundle in bundles
-    }
-    values = air_quality_to_weather_values(measurements, station_feature_ids=station_feature_ids)
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="air_quality_weather_value_write",
-        provider=AIRKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_AIR_QUALITY,
-    )
-    result = await client.load_air_quality(
-        bundles,
-        values,
-        provider_dataset_id=membership.provider_dataset_id,
-        source_record=_value_response_source_record(
-            provider=AIRKOREA_PROVIDER_NAME,
-            dataset_key=DATASET_KEY_AIR_QUALITY,
-            source_entity_type="weather_response",
-            source_entity_id=f"run:{fetched_at.isoformat()}",
-            records=measurements,
-            fetched_at=fetched_at,
-        ),
-    )
-    _add_output_metadata(
-        context,
-        {
-            "provider": AIRKOREA_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_AIR_QUALITY,
-            **result.as_metadata(),
-        },
-    )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=AIRKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_AIR_QUALITY,
-        cursor_extra=result.as_metadata(),
-    )
-    return result
-
-
-@asset(
-    group_name="features_weather",
-    required_resource_keys=(_COMMON_RESOURCE_KEYS | {"airkorea_stations", "airkorea_air_quality"}),
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_weather_airkorea_air_quality(
-    context: AssetExecutionContext,
-) -> AirQualityLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_weather_airkorea_air_quality
-    )
-
-
-async def run_feature_weather_krex_rest_areas(
-    context: AssetExecutionContext,
-) -> AirQualityLoadResult:
-    """고속도로 휴게소 관측 기상을 weather feature로, 지표를 WeatherValue로 적재한다.
-
-    ``krex_rest_area_weather`` record stream(``RestAreaWeather`` wide row)을 읽어
-    (1) 휴게소를 weather-kind ``FeatureBundle``로 변환·매핑(unit_code→feature_id),
-    (2) 지표(기온/습도/풍속/강수)를 metric별 ``WeatherValue``로 melt, (3)
-    ``client.load_air_quality``(weather feature + value 한 transaction 적재 — 도메인
-    무관)로 적재한다. airkorea 대기질 패턴과 동일(ADR-010 — 관측값은 place 아님).
-    de-rep(#496): 휴게소당 1 feature, 복제 없음 — ``temperature→T1H``라 KMA 기온
-    빈틈(고속도로 농촌 구간)을 nearest-temp로 메운다.
-    """
-    records = await _record_list(context, "krex_rest_area_weather")
-    fetched_at = await _fetched_at(context)
-    bundles = await rest_area_weather_records_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    station_feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id for bundle in bundles
-    }
-    values = rest_area_weather_records_to_values(records, station_feature_ids=station_feature_ids)
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="krex_weather_value_write",
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-    )
-    result = await client.load_air_quality(
-        bundles,
-        values,
-        provider_dataset_id=membership.provider_dataset_id,
-        source_record=_value_response_source_record(
-            provider=KREX_PROVIDER_NAME,
-            dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-            source_entity_type="weather_response",
-            source_entity_id=f"run:{fetched_at.isoformat()}",
-            records=records,
-            fetched_at=fetched_at,
-        ),
-    )
-    _add_output_metadata(
-        context,
-        {
-            "provider": KREX_PROVIDER_NAME,
-            "dataset_key": REST_AREA_WEATHER_DATASET_KEY,
-            **result.as_metadata(),
-        },
-    )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_WEATHER_DATASET_KEY,
-        cursor_extra=result.as_metadata(),
-    )
-    return result
-
-
-@asset(
-    group_name="features_weather",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_area_weather"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_weather_krex_rest_areas(
-    context: AssetExecutionContext,
-) -> AirQualityLoadResult:
-    return await run_tracked_feature_asset(context, run_feature_weather_krex_rest_areas)
-
-
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -2134,8 +1812,6 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_krforest_arboretums,
     feature_route_krforest_mountain_trails,
     feature_route_krforest_dulle_trails,
-    feature_weather_krforest_mountain_weather,
-    feature_weather_krforest_wildfire_risk_forecast,
     feature_notice_krforest_landslide_forecast_issues,
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
@@ -2145,8 +1821,6 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_khoa_beaches,
     feature_place_krairport_airports,
     feature_place_kor_travel_concierge_youtube,
-    feature_weather_airkorea_air_quality,
-    feature_weather_krex_rest_areas,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
@@ -2220,7 +1894,6 @@ async def _exact_sync_membership(
     operation_key``다(ADR-088 §결정 2). provider/dataset label로는 어느 행을
     가리키는지 결정되지 않는다.
 
-    획득 경로는 ``kma_weather._exact_kma_sync_membership``과 같은 계약이다:
     queue worker가 request를 claim할 때 고정한 typed membership resource가 있으면
     그것을 쓰고, 없으면 guard가 고정한 **실행 manifest** 안에서 고른다.
     **provider나 dataset label에서 membership을 역산하는 fallback은 두지 않는다** —
@@ -2233,10 +1906,6 @@ async def _exact_sync_membership(
     ``0089_tvn33_expand_seed``는 ``feature_place_knps_points_job``과
     ``feature_geometry_knps_records_job``에 각각 dataset 5개를 결박하는데 asset은
     run 1회에 1개만 적재한다.
-
-    KMA 격자 dataset은 이 함수를 타지 않는다. 같은 계약의 게이트가
-    ``kma_weather._exact_kma_sync_membership``에 따로 있고, KMA weather asset은
-    그쪽만 호출한다.
     """
 
     resource_membership = await _resource_value(

@@ -560,9 +560,8 @@ feature_id = value.get("feature_id")
 if not isinstance(feature_id, str) or not re.fullmatch(r"tvn34c::fresh-live::[a-z0-9-]{15,79}::beach", feature_id):
     raise SystemExit(1)
 if (
-    value.get("features_inserted") != 3
-    or value.get("source_links_inserted") != 3
-    or value.get("weather_values_inserted") != 1
+    value.get("features_inserted") != 2
+    or value.get("source_links_inserted") != 2
     or value.get("price_values_inserted") != 1
 ):
     raise SystemExit(2)

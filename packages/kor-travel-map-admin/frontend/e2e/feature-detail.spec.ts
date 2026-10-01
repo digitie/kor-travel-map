@@ -7,9 +7,9 @@ import type { components } from "../src/api/types";
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.5).
  *
  * 본 페이지는 **admin 상세 라우트** `/v1/admin/features/{id}`를 쓴다(공개 라우트 아님).
- * 임의 featureId는 빈 DB에서 404이므로 admin 상세/weather + public nearby를 mock한다.
+ * 임의 featureId는 빈 DB에서 404이므로 admin 상세 + public nearby를 mock한다.
  * (감사 보고서의 "지도/AddressMatchReport/raw JSON 토글/재검증"은 실제 컴포넌트엔 없다 —
- * 실제 섹션은 Sources/Issues/Overrides/History/Files + Weather/Map/Nearby/Raw(<details>)다.)
+ * 실제 섹션은 Sources/Issues/Overrides/History/Files + Map/Nearby/Raw(<details>)다.)
  *
  * 라이브 실행 검증은 n150 Linux 환경에서 수행한다.
  */
@@ -20,7 +20,6 @@ type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
-type FeatureWeatherResponse = components["schemas"]["FeatureWeatherResponse"];
 
 const FEATURE_ID = "f_1156010100_p_e2eabc1234567890";
 const DETAIL_PATH = `/v1/admin/features/${FEATURE_ID}`;
@@ -93,19 +92,6 @@ async function mockFeatureDetail(
   await page.route("**/v1/admin/features/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "GET" && url.pathname.endsWith("/weather")) {
-      const body: FeatureWeatherResponse = {
-        data: {
-          feature_id: FEATURE_ID,
-          is_stale: false,
-          metrics: [],
-          source_styles: [],
-        },
-        meta,
-      };
-      await fulfillJson(route, body);
-      return;
-    }
     if (
       request.method() === "GET" &&
       (url.pathname === DETAIL_PATH ||
@@ -198,13 +184,28 @@ test.describe("/features/[featureId]", () => {
     await expect(page.getByRole("link", { name: /인근 카페/ })).toBeVisible();
   });
 
-  test("weather metric 없음 — empty state", async ({ page }) => {
+  test("weather kind feature — weather 패널·weather API 호출 없이 일반 패널", async ({
+    page,
+  }) => {
+    // Map은 weather 기능을 제공하지 않는다(owner 결정 2026-10-01). kind 정의는 남으므로
+    // 옛 weather feature가 열려도 전용 패널 없이 일반 패널로 떨어져야 하고 `/weather`를
+    // 부르지 않아야 한다.
+    const weatherRequests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.includes("/weather")) {
+        weatherRequests.push(request.url());
+      }
+    });
     await mockFeatureDetail(page, {
       feature: makeFeature({ kind: "weather" }),
     });
     await page.goto(`/features/${FEATURE_ID}`);
 
-    await expect(page.getByText("weather metric이 없습니다.")).toBeVisible();
+    await expect(
+      page.getByText("kind 전용 상세 화면이 아직 없는 feature"),
+    ).toBeVisible();
+    await expect(page.getByTestId("feature-weather-panel")).toHaveCount(0);
+    expect(weatherRequests).toEqual([]);
   });
 
   test("404 — feature 상세 조회 실패 alert", async ({ page }) => {

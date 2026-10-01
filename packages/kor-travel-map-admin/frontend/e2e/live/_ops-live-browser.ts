@@ -201,8 +201,8 @@ export function assertC7ReadAuthLiveEnvironment(actualWorkers: number): void {
   if (process.env.E2E_C7_READ_AUTH_WRITE !== "1") {
     missing.push("E2E_C7_READ_AUTH_WRITE=1");
   }
-  if (!process.env.E2E_C7_KMA_STATE_FILE) {
-    missing.push("E2E_C7_KMA_STATE_FILE");
+  if (!process.env.E2E_C7_TARGET_STATE_FILE) {
+    missing.push("E2E_C7_TARGET_STATE_FILE");
   }
   if (!process.env.E2E_C7_EXPECTED_UI_ORIGIN_SHA256) {
     missing.push("E2E_C7_EXPECTED_UI_ORIGIN_SHA256");

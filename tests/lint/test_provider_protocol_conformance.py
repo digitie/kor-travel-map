@@ -40,8 +40,8 @@ CI(``pip install -e ".[dev]"``)에 **설치조차 되지 않는다.**
 - **client 메서드·예외 이름**: ``restarea.list_all``/``oceans_beach_info``/
   ``stations``/``iter_stations_in_bbox``와 ``getattr``로 해석하는 예외 이름들
   (``_airkorea_retryable_types`` 등)은 결박 대상이 아니다.
-- **``raw`` dict 키**: kma 경로 전부가 여기 해당하며 ``PROTOCOLS_WITHOUT_PROVIDER_MODEL``
-  에 사유와 함께 면제돼 있다.
+- **``raw`` dict 키**: raw dict 기반 row를 받는 경로(옛 kma 경로가 그랬다 — ADR-105로
+  제거)는 ``PROTOCOLS_WITHOUT_PROVIDER_MODEL``에 사유와 함께 면제한다.
 - **provider 내부 동작**: 페이지네이션 종료 조건이나 파싱 관용도 변경(이번에
   datagokr·krheritage 핀을 보류하게 만든 것)은 표면이 아니라 로직이다.
 

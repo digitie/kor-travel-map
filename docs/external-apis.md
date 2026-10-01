@@ -119,6 +119,9 @@ root `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`이고, UI에는 server runtime
 
 ### 3.1 기상청 (KMA)
 
+> **2026-10-01부터 Map은 KMA를 부르지 않는다(ADR-104).** 아래는 기록이다. KMA는
+> kor-travel-weather가 소유하고 data.go.kr 키는 weather와 함께 쓴다.
+
 1. https://apihub.kma.go.kr 가입
 2. "마이페이지" → "API 키 발급" → 본 프로젝트용 키 생성
 3. `KMA_API_KEY` 환경변수에 저장

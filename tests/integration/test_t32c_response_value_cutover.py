@@ -16,7 +16,7 @@
    사본을 DROP했다 — 이 축이 지키는 것("응답 값 == DB의 정본 키")은 그대로이고
    **읽는 자리만** 옮겼다. legacy ``f_*`` 문자열은 ``feature_aliases.alias``에
    주소로 남아 요청 표기로만 쓰인다(ADR-098 결정 6).
-③ batch echo 등식 (R2) — service feature batch·weather batch의 item
+③ batch echo 등식 (R2) — service feature batch의 item
    ``feature_id``는 **요청 표기 그대로** 돌아온다(legacy in → legacy out,
    UUID in → UUID out). PinVi 클라이언트가 이 등식을 런타임 강제 중이다.
 ④ write 해석 → 정본 키 (R4) — M01 migration 전 admin create는 참조 해석·body
@@ -35,7 +35,7 @@ from __future__ import annotations
 import uuid as uuid_module
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -533,31 +533,6 @@ async def test_feature_batch_echoes_request_notation(
     # `trip_card.feature_id == item.feature_id` 등식을 런타임 강제한다(리뷰 F1).
     for item, ref in zip(items[:3], refs[:3], strict=False):
         assert item["trip_card"]["feature_id"] == ref
-
-
-async def test_weather_batch_echoes_target_notation(
-    cutover_env: _CutoverEnv,
-) -> None:
-    first, second = cutover_env.places[0], cutover_env.places[1]
-    refs = [first.legacy_ref, first.feature_uuid, second.feature_uuid]
-    target_at = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-    response = await cutover_env.client.post(
-        "/v1/features/weather/batch",
-        json={
-            "targets": [
-                {"target_at": target_at.isoformat(), "feature_ids": refs}
-            ],
-            "known_at": target_at.isoformat(),
-        },
-    )
-    assert response.status_code == 200, response.text
-    items = response.json()["data"]["targets"][0]["items"]
-    assert [item["feature_id"] for item in items] == refs
-    # weather 미적재 공개 parent — 상태는 no_data, echo·uuid 병행은 그대로.
-    assert {item["state"] for item in items} == {"no_data"}
-    assert items[0]["feature_uuid"] == first.feature_uuid
-    assert items[1]["feature_uuid"] == first.feature_uuid
-    assert items[2]["feature_uuid"] == second.feature_uuid
 
 
 # ── ④ write 해석 → 정본 키 (R4) ────────────────────────────────────────────

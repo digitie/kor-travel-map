@@ -9,9 +9,11 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
   `docs/architecture/rest-api.md`.
 - **npm 게시 안 함**(ADR-043 관행) — 산출물(`src/types.ts`)을 커밋하고 CI drift
   gate(`gen:types:check`)로 spec과 고정한다.
+- weather 경로·스키마는 Map에서 제거됐다(2026-10-01). 날씨는 kor-travel-weather가 정본이며
+  `_NoWeatherPaths` 단언이 `/weather` 경로의 재등장을 컴파일 단계에서 막는다.
 - T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·
   축제 view 경로를 named alias와 compile-time 경로 단언에 포함한다.
-- `RoutePolicy.SERVICE`인 feature/weather batch와 cache-target 표면은 이 사용자
+- `RoutePolicy.SERVICE`인 feature batch와 cache-target 표면은 이 사용자
   산출물에 포함하지 않는다. 서버 간 소비자는 `openapi.service.json`을 별도로 pin한다.
 
 ## 인증 계약

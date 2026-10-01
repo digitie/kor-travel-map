@@ -36,11 +36,6 @@ from kortravelmap.dto import (
 )
 from kortravelmap.infra import admin_feature_repo, feature_repo
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
-from kortravelmap.providers.kma import (
-    kma_alert_notice_feature_id,
-    weather_alert_lift_closures,
-    weather_alerts_to_notice_bundles,
-)
 from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
@@ -2192,99 +2187,6 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     assert lifecycle == "retired"
     assert lifecycle != "active"
     assert valid_end == expired_at
-
-
-async def test_close_notice_features_kma_lift_roundtrip(
-    migrated_session: AsyncSession,
-) -> None:
-    announced_at = datetime.now(_KST) - timedelta(hours=7)
-    scheduled_end = announced_at + timedelta(hours=12)
-
-    class _Region:
-        region_code = "stn:108"
-        region_name = "전국"
-
-    class _Alert:
-        alert_id = "108:202607030600:20"
-        alert_type = "폭염"  # 실제 경로처럼 현상 토큰(정규화 가능 값).
-        level = "주의보"
-        title = "폭염주의보 발표"
-        description = None
-        issued_at = announced_at
-        effective_from = None
-        effective_until = scheduled_end
-        source_agency = "기상청"
-        regions = [_Region()]
-
-    bundles = weather_alerts_to_notice_bundles(
-        [_Alert()], fetched_at=announced_at
-    )
-    assert len(bundles) == 1
-    lineage_key = bundles[0].source_record.source_entity_id
-    announced = await feature_repo.load_notice_event_bundles(
-        migrated_session,
-        bundles=bundles,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
-        source_entity_type="weather_alert",
-        lineage_events={
-            lineage_key: (True, announced_at, scheduled_end)
-        },
-        observed_at=announced_at,
-    )
-    assert announced.load.bundles_total == 1
-    assert announced.reconcile == feature_repo.NoticeReconcileResult()
-    legacy_ref = kma_alert_notice_feature_id("stn:108", "폭염")
-    assert bundles[0].feature.feature_id == legacy_ref
-    feature_id = await _key(migrated_session, legacy_ref)
-    assert (await _feature_state(migrated_session, feature_id))[2] == scheduled_end
-    assert await _snapshot_state(
-        migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
-        source_entity_type="weather_alert",
-        lineage_key=lineage_key,
-    ) == (True, announced_at, scheduled_end)
-
-    class _Lift(_Alert):
-        alert_id = "108:202607031800:25"
-        title = "폭염주의보 해제"
-        issued_at = announced_at + timedelta(hours=6)
-
-    closures = weather_alert_lift_closures([_Lift()])
-    closed = await feature_repo.close_notice_features(
-        migrated_session,
-        provider="python-kma-api",
-        dataset_key="kma_weather_alerts",
-        source_entity_type="weather_alert",
-        closures={c.natural_key: c.closed_at for c in closures},
-    )
-    assert closed == 1
-    lifecycle, _publication, valid_end = await _feature_state(
-        migrated_session, feature_id
-    )
-    assert lifecycle == "active"
-    assert valid_end is not None
-    # 미래 예정 종료보다 이른 explicit lift가 authoritative false 시각이다.
-    assert valid_end == announced_at + timedelta(hours=6)
-
-    # 같은 false 상태라도 더 최신 해제 event면 보존/purge 기준 종료 시각을 전진한다.
-    assert (
-        await feature_repo.close_notice_features(
-            migrated_session,
-            provider="python-kma-api",
-            dataset_key="kma_weather_alerts",
-            source_entity_type="weather_alert",
-            closures={
-                closures[0].natural_key: announced_at
-                + timedelta(hours=6, minutes=30)
-            },
-        )
-        == 0
-    )
-    assert (
-        await _feature_state(migrated_session, feature_id)
-    )[2] == announced_at + timedelta(hours=6, minutes=30)
 
 
 async def test_close_ignores_older_lift_after_reannouncement(

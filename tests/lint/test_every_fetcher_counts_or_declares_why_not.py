@@ -15,10 +15,10 @@ fetcher이고, 그것이 계수 호출을 (직접이든 헬퍼를 통해서든) 
 유도할 수 있다. 못 세는 것은 :data:`_UNCOUNTABLE`에 **이유와 함께** 적어야 한다 —
 목록에 이름을 올리는 일 자체가 결정의 기록이다.
 
-**KMA(기상청)·에어코리아는 이 게이트의 대상이 아니다**(2026-09-14 지시).
-:data:`_EXCLUDED_FROM_EVALUATION`에 이유와 함께 적혀 있다 — 둘 다 자동 적재가 꺼져
-있고 큐 경계가 그 결정을 강제하며, **날씨 관련 로직 자체를 걷어낼 예정**이다.
-계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
+**날씨 진입점은 이 게이트에 없다.** KMA(기상청) 진입점은 2026-10-01 ADR-104로,
+에어코리아·KREX 휴게소 기상·산림청 산악기상·산불위험예보 진입점은 같은 날 ADR-105로
+Map에서 코드째 사라졌다. :data:`_EXCLUDED_FROM_EVALUATION`은 그래서 비었다 — 기제는
+남긴다(다음에 평가에서 빼는 진입점이 생기면 이유와 함께 여기 적는다).
 
 **이 검사가 볼 수 없는 것**(2차 적대 리뷰가 실측으로 열거했다. 적어 두는 이유는
 다음 사람이 초록을 과신하지 않게 하려는 것이다):
@@ -113,16 +113,13 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_kor_travel_concierge_youtube_features",
         "fetch_krairport_airports",
         "fetch_krex_rest_area_fuel_prices",
-        "fetch_krex_rest_area_weather",
         "fetch_krex_rest_areas",
         "fetch_krex_traffic_notices",
         "fetch_krforest_arboretums",
         "fetch_krforest_dulle_trails",
         "fetch_krforest_landslide_forecast_issues",
         "fetch_krforest_mountain_trails",
-        "fetch_krforest_mountain_weather",
         "fetch_krforest_recreation_forests",
-        "fetch_krforest_wildfire_risk_forecast",
         "fetch_krheritage_events",
         "fetch_krheritage_items",
         "fetch_mcst_culture_records",
@@ -146,6 +143,13 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 
 #: **쿼터 평가 대상이 아닌** 진입점과 그 이유.
 #:
+#: 2026-10-01 — KMA(기상청) 진입점은 여기서 지웠다. 평가에서 뺀 것이 아니라 코드가
+#: 없어졌다(ADR-104: Map Dagster의 KMA 적재 경로 제거).
+#:
+#: 2026-10-01 — 에어코리아 진입점도 지웠다. 같은 이유로 코드가 없어졌다(ADR-105: Map은
+#: weather kind feature를 어떤 원천에서도 적재하지 않는다). 그래서 이 표는 비었다 —
+#: 아래 실재 검사가 사라진 이름을 남겨 두지 못하게 하므로 비우는 것이 맞다.
+#:
 #: 2026-09-14 지시로 KMA(기상청)·에어코리아가 빠졌다. 둘 다 2026-09-09부터 자동
 #: 적재가 꺼져 있고(`DISABLED_FEATURE_LOAD_SCHEDULES`), 큐 경계가 그 결정을 강제한다
 #: (`DISABLED_FEATURE_LOAD_OPERATION_KEYS`). 그리고 **날씨 관련 로직 자체를 걷어낼
@@ -154,14 +158,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 #: 이름을 조용히 지우지 않고 목록으로 남기는 이유는 다른 목록과 같다 — **이름을
 #: 올리는 일 자체가 결정의 기록**이고, 지우면 "왜 빠졌는지"가 diff 밖으로 사라진다.
 #: 계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
-_EXCLUDED_FROM_EVALUATION: dict[str, str] = {
-    "fetch_kma_weather_alerts": "기상청 — 2026-09-14 지시로 쿼터 평가 대상에서 제외.",
-    "fetch_airkorea_air_quality": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
-    "fetch_airkorea_stations": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
-    "_fetch_nowcast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
-    "_fetch_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
-    "_fetch_ultra_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
-}
+_EXCLUDED_FROM_EVALUATION: dict[str, str] = {}
 
 #: 접두사에는 걸리지만 **진입점이 아닌** 이름과 그 이유.
 #:
@@ -190,7 +187,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 2026-09-19 26 → 27. 서울 열린데이터광장 fetcher가 들어왔고 **완전 계측**이다
 #: (페이지마다 `note_upstream_request()`). 월 1요청이라 쿼터상 무시할 수준이지만,
 #: 그것은 면제할 이유가 아니다 — 면제는 '적다'가 아니라 '셀 수 없다'일 때다.
-_EXPECTED_FULLY_COUNTED: int = 27
+#: 2026-10-01 27 → 24. 날씨 진입점 셋(KREX 휴게소 기상·산림청 산악기상·산불위험예보)이
+#: ADR-105로 사라졌다 — 셋 다 완전 계측이었다.
+_EXPECTED_FULLY_COUNTED: int = 24
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -328,7 +327,8 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     반드시 이 줄을 고치게 된다.
     """
 
-    assert len(_EXPECTED_FETCHERS) >= 31, (
+    # 2026-10-01 31 → 29: 날씨 진입점 셋이 ADR-105로 사라졌다(32 → 29개).
+    assert len(_EXPECTED_FETCHERS) >= 29, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
@@ -357,7 +357,8 @@ def test_the_exclusion_lists_are_real_and_state_reasons() -> None:
 def test_the_derivation_actually_found_the_counting_sites() -> None:
     """항진명제 방지 — 유도가 비면 아래 파라미터가 0개가 된다."""
 
-    assert len(_fetchers()) >= 31, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
+    # 2026-10-01 31 → 29: 날씨 진입점 셋이 ADR-105로 사라졌다.
+    assert len(_fetchers()) >= 29, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
     assert _counting_definitions(), (
         f"`{_NOTE}`를 부르는 정의를 하나도 찾지 못했다 — 계측이 사라졌다."
     )
@@ -439,7 +440,8 @@ def test_every_fetcher_counts_its_upstream_requests(fetcher: str) -> None:
 #:
 #: 손으로 박은 목록이라 **조용히 줄일 수 있다.** 그래서 아래 두 검사가 이름의
 #: 실재와 유도 결과의 비어 있지 않음을 따로 결박한다(4차 적대 리뷰).
-_FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "kma_weather.py", "mcst_features.py")
+#: 2026-10-01 — ``kma_weather.py``가 ADR-104로 삭제돼 셋에서 둘로 줄었다.
+_FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "mcst_features.py")
 
 
 def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
@@ -452,7 +454,7 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
     modules = set(_module_trees())
     missing = sorted(set(_FEATURE_ASSET_MODULES) - modules)
     assert missing == [], f"선언된 feature asset 모듈이 없다: {missing}"
-    assert len(_FEATURE_ASSET_MODULES) >= 3, (
+    assert len(_FEATURE_ASSET_MODULES) >= 2, (
         f"feature asset 모듈 목록이 {len(_FEATURE_ASSET_MODULES)}개로 줄었다 — "
         "진짜로 사라졌으면 이 하한도 함께 낮춰라."
     )
@@ -465,7 +467,10 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
         if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
         and "_add_output_metadata" in _called_names(node)
     ]
-    assert len(scanned) >= 10, (
+    # 2026-10-01 10 → 9: ``kma_weather.py``의 초크포인트 함수가 ADR-104로 사라졌다.
+    # 2026-10-01 9 → 6: 에어코리아·KREX 휴게소 기상·산림청 weather 값 적재 함수가
+    # ADR-105로 사라졌다.
+    assert len(scanned) >= 6, (
         f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
     )
 

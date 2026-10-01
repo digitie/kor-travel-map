@@ -220,7 +220,7 @@ def test_operator_route_does_not_broadly_allow_arbitrary_origin(
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "path",
-    ["/v1/features/batch", "/v1/features/weather/batch"],
+    ["/v1/features/batch"],
 )
 def test_service_route_gets_no_cors(client: TestClient, path: str) -> None:
     # service surface(X-Kor-Travel-Map-Service-Token) —

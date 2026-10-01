@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -16,9 +15,6 @@ from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetPage,
     delete_poi_cache_target,
     get_dataset_projection_revision,
-    has_active_poi_cache_targets_for_external_system,
-    list_active_poi_cache_target_external_systems,
-    list_active_target_coords,
     list_poi_cache_targets,
     poi_cache_target_entity_tag,
     sync_poi_cache_target_feature_links,
@@ -184,78 +180,6 @@ async def test_list_poi_cache_targets_rejects_invalid_cursor(cursor: str) -> Non
 
 
 @pytest.mark.unit
-async def test_list_active_target_coords_applies_exact_external_system_filter() -> None:
-    session = _Session(
-        _Result(
-            [
-                SimpleNamespace(lon=126.9, lat=37.5),
-                SimpleNamespace(lon=129.1, lat=35.2),
-            ]
-        )
-    )
-
-    coords = await list_active_target_coords(
-        cast(Any, session),
-        external_system="tripmate",
-    )
-
-    assert coords == [(126.9, 37.5), (129.1, 35.2)]
-    assert session.params == [{"external_system": "tripmate"}]
-
-
-@pytest.mark.unit
-async def test_list_active_target_coords_without_filter_uses_all_active_targets() -> None:
-    session = _Session(_Result([SimpleNamespace(lon=126.9, lat=37.5)]))
-
-    coords = await list_active_target_coords(cast(Any, session))
-
-    assert coords == [(126.9, 37.5)]
-    assert session.params == [{}]
-
-
-@pytest.mark.unit
-async def test_active_external_system_reads_are_canonical_and_exact() -> None:
-    session = _Session(
-        _Result(
-            [
-                SimpleNamespace(external_system="concierge"),
-                SimpleNamespace(external_system="tripmate"),
-            ]
-        ),
-        _Result([], scalar=True),
-    )
-
-    systems = await list_active_poi_cache_target_external_systems(cast(Any, session))
-    exists = await has_active_poi_cache_targets_for_external_system(
-        cast(Any, session),
-        "tripmate",
-    )
-
-    assert systems == ["concierge", "tripmate"]
-    assert exists is True
-    assert session.params == [{}, {"external_system": "tripmate"}]
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    "external_system",
-    ["", " ", "tripmate ", "\ttripmate", "x" * 113],
-)
-async def test_active_external_system_reads_reject_non_exact_name(
-    external_system: str,
-) -> None:
-    session = _Session()
-
-    with pytest.raises(ValueError, match="external_system"):
-        await has_active_poi_cache_targets_for_external_system(
-            cast(Any, session),
-            external_system,
-        )
-
-    assert session.params == []
-
-
-@pytest.mark.unit
 @pytest.mark.parametrize(
     "external_system",
     ["", " pinvi", "pinvi ", "pinvi\t", "x" * 113],
@@ -342,20 +266,6 @@ async def test_upsert_create_race_bounded_retry_fails_closed_without_lock() -> N
     assert all("DO UPDATE" not in statement for statement in session.statements)
     assert sum("DO NOTHING" in statement for statement in session.statements) == 3
     assert sum("FOR UPDATE" in statement for statement in session.statements) == 4
-
-
-@pytest.mark.unit
-async def test_external_system_accepts_exact_112_character_limit() -> None:
-    external_system = "x" * 112
-    session = _Session(_Result([], scalar=False))
-
-    exists = await has_active_poi_cache_targets_for_external_system(
-        cast(Any, session),
-        external_system,
-    )
-
-    assert exists is False
-    assert session.params == [{"external_system": external_system}]
 
 
 @pytest.mark.unit

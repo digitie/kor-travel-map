@@ -5,6 +5,56 @@
 
 ## [Unreleased]
 
+### Map은 날씨 feature와 기상특보 notice 기능을 지운다 — ADR-105 (2026-10-01)
+
+- **CHANGED (적대 리뷰 반영, 2026-10-02)**: run-completion gate 기본 probe가 no-op job `map_run_heartbeat`다(DB·upstream
+  없음). C7에 `ops-c7-update-request-write` — krairport 정적 데이터 dataset의 exact `provider_dataset` 요청이 queue sensor →
+  `feature_update_request_worker` → `done`/`SUCCESS`까지 가는 왕복(upstream 0, 공항 place 15건 멱등 upsert). 401은 KMA 적재
+  operation에 queued/running job이 있으면 끄기 전에 중단한다. migration `403_drop_kma_notice_lineage`가
+  `provider_sync.notice_lineage_key`의 KMA 분기를 지운다. `python-kma-api`·`python-airkorea-api` 의존 핀 제거.
+- **REMOVED (Dagster)**: weather asset/job/schedule 넷(AirKorea 대기질, KREX 휴게소 기상, 산림청 산악기상,
+  산림청 산불위험예보)과 resource·fetcher·큐 runner spec·handler binding, 매분 `current_weather_summary_refresh`
+  job/schedule. run-completion gate의 기본 probe job은 `cache_target_snapshot_gc`다.
+- **REMOVED (API)**: `/v1/features/weather/{batch,forecast,alerts}`, `/v1/features/{feature_id}/weather`,
+  `…/weather/snapshot`, `…/weather/forecast`, `/v1/admin/features/weather/alerts`,
+  `/v1/admin/features/{feature_id}/weather`; 응답 필드 `FeatureSummary.weather_summary`,
+  `AdminFeatureMapItem.weather_summary`, `BeachPublicView.latest_weather`; weather·KMA 특보 preview fixture.
+- **REMOVED (library)**: `infra.weather_repo`, `core.weather`, `providers.kma`, `providers.airkorea`, `providers.krex`의
+  휴게소 기상 변환, `providers.krforest_safety`의 산악기상·산불위험 변환, client의 weather 적재·summary·카드 메서드.
+  정의(`dto.weather.WeatherValue`, `WeatherDomain` 등 enum, `make_weather_value_key`, kind 값)는 남는다.
+- **REMOVED (DB, 되돌릴 수 없음)**: migration `402_remove_map_weather_data` — weather·KMA 특보 dataset의 operation을 전부
+  끄고 dataset을 비활성화, weather feature와 KMA 특보 notice 및 의존 행 삭제, `feature.feature_weather_values`·
+  `feature.current_weather_summary`·`feature.reject_weather_value_mutation()`·`idx_features_public_weather_coord_5179_gist`
+  DROP, `ops.current_summary_runs`의 weather 행 삭제와 `projection_kind`를 `price`로 좁힘. 소유자가 배포 전 백업을
+  명시적으로 면제했다.
+- **REMOVED (UI)**: weather 패널, weather kind 토글(지도 기본 kind는 `notice`), KMA·AirKorea marker 분기, weather
+  fetcher. 산사태·교통 notice 표시는 그대로다.
+- **CHANGED (C7/D2)**: C7 러너는 KMA 없이 돈다 — `ops-c7-read-auth`, `ops-c7-schedule-write`(allowlist
+  `feature_place_krairport_airports_monthly_schedule`, upstream 호출 0), POI `@c7-causal`. n150 `.d2-live.env`의
+  `E2E_C7_SCHEDULE`을 그 값으로 바꿔야 한다. D2 fixture는 price feature 하나만 심는다.
+- **ADDED (test)**: `test_map_dagster_has_no_weather.py`·`test_api_serves_no_weather.py`·
+  `map-ui-has-no-weather.test.ts`·`test_weather_removal_migration.py` — kind·provider 정체성과 효과로 재도입을 막는다.
+
+### Map은 KMA를 적재하지 않는다 — ADR-104 (2026-10-01)
+
+- **REMOVED (Dagster)**: KMA(기상청) job·asset·schedule 다섯(`feature_weather_kma_{ultra_short_nowcast,
+  ultra_short_forecast,short_forecast,mid_forecast}`, `feature_notice_kma_weather_alerts`)과 그 resource
+  (`kma_weather_client_factory`·`kma_datagokr_client`·`kma_weather_alert_records`), 큐 runner spec·handler
+  binding. 수동 launch·백필·큐 요청 어느 경로로도 Map이 KMA를 부를 수 없다. `DISABLED_FEATURE_LOAD_SCHEDULES`
+  에서 KMA 이름이 빠졌다.
+- **CHANGED (DB)**: migration `401_retire_map_kma_refresh` — provider `python-kma-api`의 `refresh`·`feature_load`
+  operation을 `is_enabled = false`로 내린다. `/ops/datasets`는 KMA dataset에 갱신 capability를 내지 않고
+  `POST /ops/pipeline/requests`는 KMA membership을 받지 않는다. 행·dataset·preview는 남아 기존 KMA feature
+  읽기와 fixture preview는 그대로다. forward-only.
+- **REMOVED (settings)**: `kma_weather_extra_points`·`kma_weather_max_grids_per_run`·`kma_mid_region_features`·
+  `kma_weather_alert_lookback_days`. 남은 env(`KMA_WEATHER_*`, `KOR_TRAVEL_MAP_KMA_*`)는 무시된다.
+- **REMOVED (library)**: `AsyncKorTravelMapClient.list_poi_cache_target_coords`·
+  `list_active_poi_cache_target_external_systems`·`has_active_poi_cache_targets_for_external_system`·
+  `list_active_place_coords`와 대응 repo 함수, `providers.kma.parse_weather_extra_points`·
+  `parse_mid_region_features`·`KmaMidRegionSpec`(KMA Dagster 전용이었다).
+- **ADDED (test)**: `test_map_dagster_has_no_weather.py` — 카탈로그 정체성(provider)과 효과(KMA client import·
+  KMA data.go.kr 경로)로 재도입을 막는다. `test_head_enables_no_kma_load_operation`이 DB 축을 본다.
+
 ### 공유 Dagster plane 합류 전 차단 항목 (2026-10-01)
 
 - **CHANGED (Dagster)**: reconcile sensor의 run 조회가

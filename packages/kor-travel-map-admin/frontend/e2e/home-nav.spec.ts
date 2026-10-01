@@ -108,7 +108,7 @@ function makeMetrics(overrides: Partial<OpsMetricsData> = {}): OpsMetricsRespons
     features_total: 42,
     import_jobs_by_status: { queued: 1, running: 2 },
     latest_consistency_report: null,
-    source_records_by_provider: { "python-kma-api": 100 },
+    source_records_by_provider: { "python-knps-api": 100 },
     ...overrides,
   };
   return { data, meta: simpleMeta("e2e-home-metrics") };
@@ -231,7 +231,7 @@ function makeDedupFeature(
     lat: 37.5665,
     lon: 126.978,
     name: "Feature A",
-    provider: "python-kma-api",
+    provider: "python-knps-api",
     ...overrides,
   };
 }

@@ -122,9 +122,10 @@ def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     assert 'expected_login="ktm_feature_service"' in seeder
     assert "AsyncKorTravelMapClient" in seeder
     assert "FeatureKind.PLACE" in seeder
-    assert "FeatureKind.WEATHER" in seeder
     assert "FeatureKind.PRICE" in seeder
-    assert "weather_values_inserted" in seeder
+    # ADR-105: Map은 날씨를 적재하지 않는다 — seed도 weather fixture를 싣지 않는다.
+    assert "FeatureKind.WEATHER" not in seeder
+    assert "weather_values_inserted" not in seeder
     assert "price_values_inserted" in seeder
     assert "upsert_provider_refresh_policy" in seeder
     assert "stale_after_minutes=24 * 60" in seeder

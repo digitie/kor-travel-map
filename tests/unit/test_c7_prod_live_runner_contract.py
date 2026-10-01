@@ -1,5 +1,6 @@
 """C7 prod live runner의 fail-closed 정적 계약 회귀 테스트."""
 
+import ast
 import re
 import subprocess
 from pathlib import Path
@@ -40,6 +41,26 @@ RUNTIME = ROOT / "scripts" / "lib" / "c7_prod_runtime.py"
 LIVE_DIR = (
     ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
 )
+DAGSTER_SRC = (
+    ROOT / "packages" / "kor-travel-map-dagster" / "src" / "kortravelmap" / "dagster"
+)
+
+#: C7 blocking gate가 도는 spec 목록. **테스트가** 적는다(러너에서 파생하면 항등식이다).
+#: KMA exact-scope 3-spec(active/empty/cap)은 2026-10-01 퇴역했다(ADR-104/105).
+#: 기준 5(queue sensor → worker run)는 같은 날 upstream 0 dataset으로 되살렸다
+#: (`ops-c7-update-request-write`).
+_EXPECTED_C7_SPECS = (
+    "e2e/live/ops-c7-read-auth.live.spec.ts",
+    "e2e/live/ops-c7-schedule-write.live.spec.ts",
+    "e2e/live/ops-c7-update-request-write.live.spec.ts",
+)
+_UPDATE_REQUEST_SPEC = "ops-c7-update-request-write.live.spec.ts"
+#: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 upstream 호출이 0이어야
+#: 한다 — 공항 fetcher는 krairport 번들 정적 데이터만 읽는다.
+_EXPECTED_SAFE_SCHEDULE = "feature_place_krairport_airports_monthly_schedule"
+#: update-request spec이 실제로 request를 만드는 operation. 이것도 upstream 호출이 0이어야
+#: 한다 — 이름이 아니라 operation → fetcher 배선과 fetcher 본문의 효과로 본다.
+_EXPECTED_SAFE_UPDATE_OPERATION = "feature_place_krairport_airports_job"
 
 
 def _read(path: Path) -> str:
@@ -131,7 +152,7 @@ def test_poi_cleanup_is_journaled_and_conditional() -> None:
     assert 'sameSocketReceipts' in poi_spec
 
 
-def test_kma_target_recreation_and_response_loss_are_durable() -> None:
+def test_target_recreation_and_response_loss_are_durable() -> None:
     helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
 
     assert 'target_history: TargetJournalRef[]' in helper
@@ -142,7 +163,8 @@ def test_kma_target_recreation_and_response_loss_are_durable() -> None:
     assert '"target_put_replay_response_lost"' in helper
     assert 'recoverUnresolvedTargetIntents' in helper
     assert 'kind: "target_intent_recovery"' in helper
-    assert 'exactTargetDiscoveryComplete' in helper
+    # 응답 유실 intent 하나라도 정체를 증명하지 못하면 어떤 target도 지우지 않는다.
+    assert "const canDeleteTargets = targetRecovery.complete;" in helper
     assert 'preservedForManualCleanup' in helper
     assert "targetId === previousTarget.targetId" in helper
     assert "identity.entityTag === previousTarget.entityTag" in helper
@@ -158,198 +180,21 @@ def test_previous_journal_is_validated_before_non_overwriting_merge() -> None:
         "async function writeDurableJournal(",
     )
 
-    residue = merge.index("if (!isOrchestratorPlaceholder && !isCurrentScenario)")
+    placeholder = merge.index("if (isOrchestratorPlaceholder(raw)) return;")
+    residue = merge.index("if (!isCurrentScenario) {", placeholder)
     merge_comment = merge.index("previous payload 자체가 완전한 restored 상태", residue)
     target_merge = merge.index(
         "if (existing === undefined) state.allTargetRefs.set(key, item);",
         merge_comment,
     )
-    assert residue < merge_comment < target_merge
-    assert "state.idempotencyEntries.has(value.idempotency_key)" in merge
-    assert "state.requestTerminalStatuses.get(requestId)" in merge
+    assert placeholder < residue < merge_comment < target_merge
     assert "state.allTargetRefs.set(key, item);" not in merge[:target_merge]
-
-
-def test_every_kma_create_has_exact_server_target_preflight() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    create = _section(
-        helper,
-        "export async function createKmaRequest(",
-        "export type TrackedUiKmaCreateResult",
+    # placeholder는 러너가 깔아 두는 **정확한** 꼴만 받는다(exactJson).
+    assert (
+        'const ORCHESTRATOR_PLACEHOLDER = { phase: "orchestrator_pending", version: 1 };'
+        in helper
     )
-
-    _assert_in_order(
-        create,
-        "const expectedTargets = state.targets.filter(",
-        "await assertExactOwnedTargetsAtServer(",
-        "await journalPendingRequest(",
-        "await submit()",
-    )
-    assert "const OWNED_TARGET_PAGE_SIZE = 500" in helper
-    assert "const OWNED_TARGET_SET_LIMIT = 501" in helper
-    assert "const OWNED_TARGET_PAGE_LIMIT = 2" in helper
-    assert "page_size: String(OWNED_TARGET_PAGE_SIZE)" in helper
-    assert 'include_deleted: "false"' in helper
-    assert "const seenCursors = new Set<string>()" in helper
-    assert "seenCursors.has(nextCursor)" in helper
-    assert "target cursor page limit(2) 초과" in helper
-    assert 'if (!exactJson(observed, expected))' in helper
-
-
-def test_every_kma_run_now_has_exact_server_target_preflight() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    tracked = _section(
-        helper,
-        "export async function runTrackedRequestNowFromUi(",
-        "export async function runRequestNow(",
-    )
-    direct = _section(
-        helper,
-        "export async function runRequestNow(",
-        "export async function journalRunNowMutation(",
-    )
-
-    for source, journal_marker in (
-        (tracked, 'journalRunNowMutation(state, requestId, "pending")'),
-        (direct, 'writeDurableJournal(state, "run_now_pending")'),
-    ):
-        _assert_in_order(
-            source,
-            "const expectedTargets = state.targets.filter(",
-            "await assertExactOwnedTargetsAtServer(",
-            journal_marker,
-        )
-    _assert_in_order(
-        tracked,
-        "await assertExactOwnedTargetsAtServer(",
-        'journalRunNowMutation(state, requestId, "pending")',
-        "await route.continue()",
-    )
-
-
-def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
-    empty = _read(LIVE_DIR / "ops-c7-kma-empty-write.live.spec.ts")
-    cap = _read(LIVE_DIR / "ops-c7-kma-cap-write.live.spec.ts")
-
-    assert "assertExactKmaPreviewResponse" in helper
-    assert "assertKmaOnlyTerminalProviderScopes" in helper
-    assert '"eligible_provider_scopes"' in helper
-    assert '"skipped_provider_scopes"' in helper
-    assert '"executed_provider_scopes"' in helper
-    assert "assertOnlyKmaCanonicalIdentity(matched" in helper
-    assert "FORBIDDEN_PROVIDER_PATTERN" in helper
-    assert "providerDatasets.length !== 1" in helper
-    # identity는 triple이다(ADR-088). 자연키는 생산자가 strip하므로 여기서 단언하면
-    # 항상 실패한다 — 아래 test_live_helper_does_not_assert_stripped_identity_keys 참조.
-    assert "entry.provider_dataset_id !== identity.providerDatasetId" in helper
-    assert "entry.operation_key !== identity.operationKey" in helper
-    assert "entry.sync_scope !== expectedEffectiveSyncScope" in helper
-    assert "entry.feature_count < 0" in helper
-    for spec in (active, empty, cap):
-        assert "assertExactKmaPreviewResponse(" in spec
-        assert "assertKmaOnlyTerminalProviderScopes(" in spec
-    assert "const LOWERCASE_SHA256_PATTERN = /^[0-9a-f]{64}$/" in active
-    assert "isCanonicalKmaBaseDatetime" in active
-    assert "KMA_BASE_DATETIME_PATTERN" in active
-
-
-def test_live_helper_does_not_assert_stripped_identity_keys() -> None:
-    """matched_scope 단언이 생산자가 strip하는 자연키를 건드리지 않는다.
-
-    `api/feature_update_service._public_matched_scope`가
-    `_NATURAL_IDENTITY_RESPONSE_KEYS`를 응답에서 지운다("실행 진단에서 legacy natural
-    identity projection을 유출하지 않는다"). 그 자리에서 `provider`/`dataset_key`를
-    단언하면 **항상** 실패한다.
-
-    이 게이트가 필요한 이유는 앞 판이 정확히 반대로 했기 때문이다 — 소스 pin이
-    `pair.provider !== KMA_PROVIDER` 같은 **소비자 쪽 문자열을 고정**해서, 드리프트를
-    잡기는커녕 stale 단언을 얼려 두고 있었다. 그래서 계약이 바뀐 뒤에도 CI는 green이었고
-    prod C7 실행에서만 드러났다. 이번에는 축을 **생산자 상수에서 읽어** 대조한다.
-    """
-
-    from kortravelmap.api.feature_update_service import (
-        _NATURAL_IDENTITY_RESPONSE_KEYS,
-    )
-
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    preview = _section(
-        helper,
-        "function assertExactKmaPreviewBody(",
-        "export async function assertExactKmaPreviewResponse(",
-    )
-    terminal = _section(
-        helper,
-        "export function assertKmaOnlyTerminalProviderScopes(",
-        "export async function createKmaRequest(",
-    )
-    assert _NATURAL_IDENTITY_RESPONSE_KEYS, "생산자 상수가 비었다"
-    for section, label in ((preview, "preview"), (terminal, "terminal")):
-        for key in _NATURAL_IDENTITY_RESPONSE_KEYS:
-            reason = (
-                f"{label} 단언이 생산자가 strip하는 `{key}`를 본다 — "
-                "triple(provider_dataset_id/sync_scope/operation_key)로 단언하라"
-            )
-            # 속성 접근 두 모양(`x.key !==`, `x.key!==`)을 각각 본다.
-            assert f".{key} " not in section, reason
-            assert f".{key}!" not in section, reason
-
-
-def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
-    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    specs = [
-        _read(LIVE_DIR / name)
-        for name in (
-            "ops-c7-kma-active-write.live.spec.ts",
-            "ops-c7-kma-empty-write.live.spec.ts",
-            "ops-c7-kma-cap-write.live.spec.ts",
-        )
-    ]
-
-    assert '"feature_update_request_worker" as const' in helper
-    assert "pipelines { name isJob }" in helper
-    assert "matches.length !== 1 || matches[0]?.isJob !== true" in helper
-    terminal = _section(
-        helper,
-        "async function assertTerminalDagsterRunIdentity(",
-        "function parseStrongEntityTag(",
-    )
-    for marker in (
-        "run.runId !== runId",
-        "run.jobName !== KMA_SAFE_DAGSTER_JOB",
-        "FEATURE_UPDATE_REQUEST_ID_TAG",
-        "FEATURE_UPDATE_REQUEST_GENERATION_TAG",
-        'FEATURE_UPDATE_SCOPE_TYPE_TAG) !== "provider_dataset"',
-        "sensorName !== QUEUE_SENSOR_NAME",
-    ):
-        assert marker in terminal
-    wait = _section(
-        helper,
-        "export async function waitForTerminal(",
-        "export async function rediscoverExactActiveRequest(",
-    )
-    _assert_in_order(
-        wait,
-        'await writeDurableJournal(state, "request_terminal")',
-        "await assertTerminalDagsterRunIdentity(page, detail)",
-        "return detail",
-    )
-    for spec, mutation_marker in zip(
-        specs,
-        (
-            "await withC7Cleanup(",
-            "await previewEmptyRequestFromUi(",
-            "await withC7Cleanup(",
-        ),
-        strict=True,
-    ):
-        _assert_in_order(
-            spec,
-            'await bootstrapC7SameOriginPage(page, "/ops/pipeline")',
-            "await assertKmaDagsterWorkerJobDefinition()",
-            mutation_marker,
-        )
+    assert "exactJson(record, ORCHESTRATOR_PLACEHOLDER)" in helper
 
 
 def test_route_handlers_have_settlement_barriers() -> None:
@@ -393,7 +238,6 @@ def test_route_handlers_have_settlement_barriers() -> None:
 
 def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
     helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
-    sensor = _read(LIVE_DIR / "_ops-c7-dagster-sensor.ts")
     schedule = _read(LIVE_DIR / "ops-c7-schedule-write.live.spec.ts")
     poi = _read(LIVE_DIR / "poi-cache-targets-write.live.spec.ts")
 
@@ -401,11 +245,6 @@ def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
         helper,
         "async function writeDurableJournal(",
         "/**\n * 브라우저 인증 세션",
-    )
-    sensor_write = _section(
-        sensor,
-        "async #persist(",
-        "export async function createQueueSensorController(",
     )
     schedule_write = _section(
         schedule,
@@ -417,7 +256,7 @@ def test_all_c7_journals_fsync_before_and_after_atomic_rename() -> None:
         "async function writePoiJournal(",
         "function apiPath(",
     )
-    for source in (helper_write, sensor_write, schedule_write, poi_write):
+    for source in (helper_write, schedule_write, poi_write):
         _assert_in_order(
             source,
             "await writeFile(",
@@ -536,15 +375,14 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'shareable = SHAREABLE_ROLES if map_plane == "shared" else frozenset()' in runtime
     assert "len(observed_containers) != len(roles_by_service)" in runtime
     assert {"map_dagster_web", "map_dagster_daemon"} == _RUNTIME_MODULE.SHAREABLE_ROLES
-    # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
-    # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
-    # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
-    assert 'state.get("version") != 4' in script
-    assert 'state.get("request_ownership"), list' in script
-    assert (
-        '"run_id":"__orchestrator_pending__","target_history":[],'
-        '"target_refs":[],"version":3}' in script
-    )
+    # target journal 계약: 최종본은 helper의 v1(`version: 1` + exact key 집합)이고, 러너는
+    # 첫 durable write 전 helper가 받는 그 placeholder를 깐다. 한쪽만 바뀌면 browser lane과
+    # shell이 서로 다른 모양을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
+    assert "version: 1;" in admin_helper
+    assert 'state.get("version") != 1' in script
+    assert '"$TARGET_STATE_FILE" \\\n  \'{"phase":"orchestrator_pending","version":1}\'' in script
+    assert 'process.env.E2E_C7_TARGET_STATE_FILE' in admin_helper
+    assert 'export E2E_C7_TARGET_STATE_FILE="$TARGET_STATE_FILE"' in script
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
     assert "--network bridge --ipc private" in script
@@ -607,7 +445,10 @@ def test_runner_preserves_recovery_state_on_failure_and_runs_full_audit() -> Non
 def test_runner_requires_distinct_recreated_target_history() -> None:
     script = _read(RUNNER)
 
-    assert "if not isinstance(target_history, list) or not target_history" in script
+    # 남은 시나리오(invalidation)는 target을 재생성하지 않으므로 이력은 비어 있을 수 있다.
+    # 있으면 삭제가 증명돼야 하고 현재 identity와 겹치면 안 된다.
+    assert "if not isinstance(target_history, list):" in script
+    assert "if not all(deleted_target(item) for item in target_history):" in script
     assert "current_by_natural_key" in script
     assert 'item["targetId"] in current_target_ids' in script
     assert "raise SystemExit(36)" in script
@@ -665,19 +506,6 @@ def test_causal_poi_create_injects_committed_response_loss_once() -> None:
     assert "putWithCausalResponseRecovery(" not in create_step
 
 
-def test_kma_cursor_requires_canonical_nonempty_base_datetime() -> None:
-    active = _read(LIVE_DIR / "ops-c7-kma-active-write.live.spec.ts")
-    cursor = _section(
-        active,
-        "function cursorMembershipFingerprint(",
-        'test.describe("C7 KMA active',
-    )
-
-    assert 'expect(typeof baseDatetime).toBe("string")' in cursor
-    assert "expect(isCanonicalKmaBaseDatetime(baseDatetime)).toBe(true)" in cursor
-    assert "if (baseDatetime !== undefined)" not in cursor
-
-
 # -- ADR-102 결정 6: attestation 체인 제거 ------------------------------------
 
 
@@ -719,8 +547,7 @@ _C7_ENV = {
     "NEXT_PUBLIC_KOR_TRAVEL_MAP_API": "https://api.example.test",
     "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
     "E2E_ADMIN_PASSWORD": "redacted",
-    "E2E_DAGSTER_JOB": "feature_update_request_worker",
-    "E2E_C7_SCHEDULE": "feature_weather_kma_short_forecast_hourly_schedule",
+    "E2E_C7_SCHEDULE": _EXPECTED_SAFE_SCHEDULE,
     "E2E_C7_EXPECTED_GIT_COMMIT": "a" * 40,
     "E2E_C7_PLAYWRIGHT_IMAGE": "sha256:" + "3" * 64,
     "E2E_C7_EXPECTED_UI_ORIGIN_SHA256": "1" * 64,
@@ -736,10 +563,9 @@ _C7_ENV = {
     "E2E_LIVE_ALLOW_PROD": "1",
     "E2E_ADMIN_WRITE": "1",
     "E2E_C7_READ_AUTH_WRITE": "1",
-    "E2E_KMA_SCOPE_WRITE": "1",
     "E2E_DAGSTER_WRITE": "1",
-    "E2E_DAGSTER_RUN": "1",
-    "E2E_QUEUE_SENSOR_BARRIER": "1",
+    "E2E_C7_UPDATE_REQUEST_WRITE": "1",
+    "E2E_C7_UPDATE_REQUEST_OPERATION": _EXPECTED_SAFE_UPDATE_OPERATION,
 }
 
 
@@ -782,7 +608,13 @@ def test_runner_env_contract_accepts_env_without_manifest_or_journal() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["E2E_C7_EXPECTED_GIT_COMMIT", "E2E_C7_PLAYWRIGHT_IMAGE", "E2E_C7_UI_SERVICE"]
+    "name",
+    [
+        "E2E_C7_EXPECTED_GIT_COMMIT",
+        "E2E_C7_PLAYWRIGHT_IMAGE",
+        "E2E_C7_UI_SERVICE",
+        "E2E_C7_UPDATE_REQUEST_OPERATION",
+    ],
 )
 def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None:
     """위 양성 결과가 '무엇이든 통과'가 아님을 같은 하네스로 보인다."""
@@ -792,6 +624,398 @@ def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None
     assert rejected.returncode == 1
     assert f"required env is missing: {name}" in rejected.stderr
     assert "ENV_OK" not in rejected.stdout
+
+
+@pytest.mark.parametrize(
+    "schedule",
+    [
+        # 2026-09-09에 사라진 옛 KMA schedule — 러너가 이것을 다시 받으면 안 된다.
+        "feature_weather_kma_short_forecast_hourly_schedule",
+        "feature_place_krairport_airports_monthly_schedule_typo",
+    ],
+)
+def test_runner_env_contract_rejects_a_non_allowlisted_schedule(schedule: str) -> None:
+    rejected = _run_c7_environment_validation({**_C7_ENV, "E2E_C7_SCHEDULE": schedule})
+    assert rejected.returncode == 1
+    assert "not the allowlisted zero-upstream schedule" in rejected.stderr
+    assert "ENV_OK" not in rejected.stdout
+
+
+def test_runner_runs_exactly_the_expected_c7_specs() -> None:
+    script = _read(RUNNER)
+    block = _section(script, "readonly SPECS=(\n", "\n)\n")
+    specs = tuple(re.findall(r'^  "([^"]+)"$', block, re.MULTILINE))
+    assert specs == _EXPECTED_C7_SPECS
+    for spec in specs:
+        assert (ROOT / "packages" / "kor-travel-map-admin" / "frontend" / spec).is_file()
+
+
+def test_safe_schedule_is_one_live_zero_upstream_schedule_everywhere() -> None:
+    """allowlist schedule이 실재하고 꺼져 있지 않으며, 세 사본이 같은 값이다.
+
+    옛 KMA schedule은 2026-09-09에 사라졌는데 러너·spec은 그 이름을 계속 들고 있어서 C7이
+    그날부터 돌 수 없었다. 이름을 소스에서 읽어 정의 쪽(``schedules.py``)과 대조한다.
+    """
+
+    script = _read(RUNNER)
+    spec = _read(LIVE_DIR / "ops-c7-schedule-write.live.spec.ts")
+    schedules = _read(DAGSTER_SRC / "schedules.py")
+    fetchers = _read(DAGSTER_SRC / "provider_fetchers.py")
+
+    runner_value = re.search(r'^readonly SAFE_SCHEDULE="([^"]+)"$', script, re.MULTILINE)
+    remote_value = re.search(r'^const SAFE_SCHEDULE = "([^"]+)";$', script, re.MULTILINE)
+    spec_value = re.search(r'const SAFE_SCHEDULE =\s*"([^"]+)" as const;', spec)
+    assert runner_value is not None
+    assert remote_value is not None
+    assert spec_value is not None
+    values = {runner_value.group(1), remote_value.group(1), spec_value.group(1)}
+    assert values == {_EXPECTED_SAFE_SCHEDULE}
+
+    # 정의가 정확히 하나 있고, 자동 적재를 끈 목록에 없다.
+    assert schedules.count(f'schedule_name="{_EXPECTED_SAFE_SCHEDULE}"') == 1
+    disabled = _section(
+        schedules,
+        "DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(",
+        "\n)\n",
+    )
+    assert _EXPECTED_SAFE_SCHEDULE not in disabled
+    # 그 schedule이 돌리는 job의 fetcher는 upstream 호출이 0이다 — 이름이 아니라
+    # schedule → job → operation 배선을 따라가 fetcher 본문의 효과로 본다.
+    job_name = _schedule_job_name(schedules, _EXPECTED_SAFE_SCHEDULE)
+    fetcher_name = _operation_fetcher_name(
+        _read(DAGSTER_SRC / "feature_update_runner.py"), job_name
+    )
+    assert _zero_upstream_violations(fetchers, fetcher_name) == []
+
+
+# -- 기준 5: exact-scope request → queue sensor → worker run (upstream 0) -----------
+
+
+def _schedule_job_name(schedules_source: str, schedule_name: str) -> str:
+    """``schedules.py``에서 그 schedule이 돌리는 job 이름을 AST로 읽는다."""
+
+    found = []
+    for node in ast.walk(ast.parse(schedules_source)):
+        if not isinstance(node, ast.Call):
+            continue
+        keywords = {item.arg: item.value for item in node.keywords if item.arg}
+        name = keywords.get("schedule_name")
+        job = keywords.get("job_name")
+        if (
+            isinstance(name, ast.Constant)
+            and name.value == schedule_name
+            and isinstance(job, ast.Constant)
+            and isinstance(job.value, str)
+        ):
+            found.append(job.value)
+    assert len(found) == 1, f"schedule→job 배선이 정확히 하나가 아니다: {found}"
+    return found[0]
+
+
+def _operation_resource(runner_source: str, operation_key: str) -> tuple[str, str]:
+    """``feature_update_runner.py``의 operation 배선에서 (resource key, fetcher 이름)을 읽는다.
+
+    ``_operation_specs(<op>, ..., resources=_records("<key>", <fetcher>))`` 꼴만 받는다. 다른
+    resource factory(scope별 분기, budget 등)로 배선되면 fetcher 하나로 효과를 말할 수 없으니
+    실패한다(fail-closed).
+    """
+
+    found: list[tuple[str, str]] = []
+    for node in ast.walk(ast.parse(runner_source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_operation_specs"
+        ):
+            continue
+        keys = [arg.value for arg in node.args if isinstance(arg, ast.Constant)]
+        if operation_key not in keys:
+            continue
+        resources = next(
+            (item.value for item in node.keywords if item.arg == "resources"), None
+        )
+        if not (
+            isinstance(resources, ast.Call)
+            and isinstance(resources.func, ast.Name)
+            and resources.func.id == "_records"
+            and len(resources.args) == 2
+            and isinstance(resources.args[0], ast.Constant)
+            and isinstance(resources.args[0].value, str)
+            and isinstance(resources.args[1], ast.Name)
+        ):
+            raise AssertionError("operation이 단일 `_records(<key>, <fetcher>)`로 배선되지 않았다")
+        found.append((resources.args[0].value, resources.args[1].id))
+    assert len(found) == 1, f"operation 배선이 정확히 하나가 아니다: {found}"
+    return found[0]
+
+
+def _operation_fetcher_name(runner_source: str, operation_key: str) -> str:
+    return _operation_resource(runner_source, operation_key)[1]
+
+
+#: upstream에 닿지 않는 호출만. 여기 없는 호출은 위반이다(헬퍼를 거친 우회도 막는다).
+_ZERO_UPSTREAM_NAME_CALLS = frozenset({"cast", "dict"})
+_ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset(
+    {"import_module", "get_secret_value", "KrairportClient", "airports", "aclose"}
+)
+
+
+def _zero_upstream_violations(fetchers_source: str, fetcher_name: str) -> list[str]:
+    """fetcher 본문에서 upstream에 닿을 수 있는 자리를 모은다(빈 목록 = upstream 0).
+
+    이름이 아니라 효과에 건다.
+
+    - 요청을 세는 자리(``note_upstream_request``)가 있으면 요청이 있다는 뜻이다.
+    - krairport client는 async 전용이다 — network method는 전부 coroutine이라 ``await``
+      없이 upstream에 닿을 수 없다. 그래서 ``await``는 세션 정리(``aclose``)만 허용한다.
+    - ``async for``/``async with``(page iterator·session)는 없어야 한다.
+    - 호출은 위 허용 목록만 — 새 헬퍼를 거쳐 우회하면 여기서 빨개진다.
+    """
+
+    functions = [
+        node
+        for node in ast.walk(ast.parse(fetchers_source))
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == fetcher_name
+    ]
+    assert len(functions) == 1, f"fetcher 정의가 정확히 하나가 아니다: {fetcher_name}"
+    violations: list[str] = []
+    for node in ast.walk(functions[0]):
+        if isinstance(node, ast.AsyncFor | ast.AsyncWith):
+            violations.append(f"async iteration/context at line {node.lineno}")
+        elif isinstance(node, ast.Await):
+            awaited = node.value
+            if not (
+                isinstance(awaited, ast.Call)
+                and isinstance(awaited.func, ast.Attribute)
+                and awaited.func.attr == "aclose"
+            ):
+                violations.append(f"await other than aclose at line {node.lineno}")
+        elif isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                if func.id not in _ZERO_UPSTREAM_NAME_CALLS:
+                    violations.append(f"call {func.id} at line {node.lineno}")
+            elif isinstance(func, ast.Attribute):
+                if func.attr not in _ZERO_UPSTREAM_ATTRIBUTE_CALLS:
+                    violations.append(f"call .{func.attr} at line {node.lineno}")
+            else:
+                violations.append(f"dynamic call at line {node.lineno}")
+    return violations
+
+
+def _with_statement_appended(fetchers_source: str, fetcher_name: str, statement: str) -> str:
+    """실제 fetcher 본문 끝에 문장 하나를 덧붙인 소스(검사기를 빨갛게 만들어 보는 용도)."""
+
+    tree = ast.parse(fetchers_source)
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == fetcher_name
+    )
+    injected = ast.parse(f"async def _probe():\n    {statement}\n").body[0]
+    assert isinstance(injected, ast.AsyncFunctionDef)
+    function.body.extend(injected.body)
+    return ast.unparse(ast.fix_missing_locations(tree))
+
+
+def test_update_request_operation_is_one_zero_upstream_operation_everywhere() -> None:
+    """request를 만드는 operation이 러너·spec에서 같고, 그 fetcher는 upstream 호출이 0이다."""
+
+    script = _read(RUNNER)
+    spec = _read(LIVE_DIR / _UPDATE_REQUEST_SPEC)
+    runner_value = re.search(
+        r'^readonly SAFE_UPDATE_OPERATION="([^"]+)"$', script, re.MULTILINE
+    )
+    spec_value = re.search(r'const SAFE_UPDATE_OPERATION = "([^"]+)" as const;', spec)
+    assert runner_value is not None
+    assert spec_value is not None
+    assert {runner_value.group(1), spec_value.group(1)} == {
+        _EXPECTED_SAFE_UPDATE_OPERATION
+    }
+
+    resource_key, fetcher_name = _operation_resource(
+        _read(DAGSTER_SRC / "feature_update_runner.py"),
+        _EXPECTED_SAFE_UPDATE_OPERATION,
+    )
+    assert _zero_upstream_violations(
+        _read(DAGSTER_SRC / "provider_fetchers.py"), fetcher_name
+    ) == []
+
+    # spec이 grid에서 고르는 provider·dataset이 그 resource의 provider·dataset과 같다.
+    declared = []
+    for node in ast.walk(ast.parse(_read(DAGSTER_SRC / "resources.py"))):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "ProviderRecordResourceSpec"
+        ):
+            continue
+        keywords = {
+            item.arg: item.value.value
+            for item in node.keywords
+            if item.arg and isinstance(item.value, ast.Constant)
+        }
+        if keywords.get("resource_key") == resource_key:
+            declared.append((keywords.get("provider_package"), keywords.get("dataset_key")))
+    assert len(declared) == 1
+    provider, dataset_key = declared[0]
+    assert f'const SAFE_PROVIDER = "{provider}" as const;' in spec
+    assert f'const SAFE_DATASET_KEY = "{dataset_key}" as const;' in spec
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "await client.departures()",
+        "note_upstream_request()",
+        "async for page in client.iter_pages(client.departures):\n        pass",
+        "_fetch_more(client)",
+    ],
+)
+def test_zero_upstream_check_turns_red_on_an_upstream_call(statement: str) -> None:
+    """검사기가 항진명제가 아님을 실제 fetcher에 upstream 호출을 하나 심어 보인다."""
+
+    _, fetcher_name = _operation_resource(
+        _read(DAGSTER_SRC / "feature_update_runner.py"),
+        _EXPECTED_SAFE_UPDATE_OPERATION,
+    )
+    mutated = _with_statement_appended(
+        _read(DAGSTER_SRC / "provider_fetchers.py"), fetcher_name, statement
+    )
+    assert _zero_upstream_violations(mutated, fetcher_name) != []
+
+
+def test_operation_resolution_rejects_an_unwired_operation() -> None:
+    with pytest.raises(AssertionError):
+        _operation_resource(
+            _read(DAGSTER_SRC / "feature_update_runner.py"),
+            _EXPECTED_SAFE_UPDATE_OPERATION + "_typo",
+        )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        # upstream이 있는 operation — allowlist 밖이다.
+        "feature_place_khoa_beaches_job",
+        _EXPECTED_SAFE_UPDATE_OPERATION + "_typo",
+    ],
+)
+def test_runner_env_contract_rejects_a_non_allowlisted_update_operation(
+    operation: str,
+) -> None:
+    rejected = _run_c7_environment_validation(
+        {**_C7_ENV, "E2E_C7_UPDATE_REQUEST_OPERATION": operation}
+    )
+    assert rejected.returncode == 1
+    assert "not the allowlisted zero-upstream operation" in rejected.stderr
+    assert "ENV_OK" not in rejected.stdout
+
+
+def test_runner_env_contract_requires_the_update_request_write_opt_in() -> None:
+    env = {k: v for k, v in _C7_ENV.items() if k != "E2E_C7_UPDATE_REQUEST_WRITE"}
+    rejected = _run_c7_environment_validation(env)
+    assert rejected.returncode == 1
+    assert "explicit opt-in is required: E2E_C7_UPDATE_REQUEST_WRITE=1" in rejected.stderr
+
+
+def test_update_request_journal_is_shared_between_runner_and_spec() -> None:
+    """`requests.json`: 러너가 placeholder를 깔고, spec이 같은 키 집합으로 쓰고, 러너가 검증한다."""
+
+    script = _read(RUNNER)
+    spec = _read(LIVE_DIR / _UPDATE_REQUEST_SPEC)
+
+    assert 'REQUEST_STATE_FILE="$RUNTIME_DIR/journals/requests.json"' in script
+    assert (
+        '"$REQUEST_STATE_FILE" \\\n  \'{"phase":"orchestrator_pending","version":1}\''
+        in script
+    )
+    assert 'export E2E_C7_REQUEST_STATE_FILE="$REQUEST_STATE_FILE"' in script
+    assert 'state_is_exact_restored requests "$REQUEST_STATE_FILE"' in script
+    assert "process.env.E2E_C7_REQUEST_STATE_FILE" in spec
+    assert (
+        'const ORCHESTRATOR_PLACEHOLDER = { phase: "orchestrator_pending", version: 1 };'
+        in spec
+    )
+    # 키 집합: spec의 TS type과 러너의 exact_dict가 같아야 한다(한쪽만 바뀌면 빨갛다).
+    type_block = _section(spec, "type RequestJournal = {", "\n};")
+    spec_keys = set(re.findall(r"^  ([a-z_]+): ", type_block, re.MULTILINE))
+    requests_branch = _section(script, 'elif kind == "requests":', "\nelse:")
+    runner_keys = set(
+        re.findall(
+            r'^            "([a-z_]+)",$',
+            _section(requests_branch, "if not exact_dict(", "or state.get"),
+            re.MULTILINE,
+        )
+    )
+    assert spec_keys == runner_keys
+    assert len(spec_keys) == 14
+    assert 'state.get("terminal_status") == "done"' in requests_branch
+    assert 'state.get("dagster_run_status") == "SUCCESS"' in requests_branch
+    assert 'state.get("sensor_name") == "feature_update_request_queue_sensor"' in (
+        requests_branch
+    )
+    # journal은 다른 C7 journal과 같은 fsync·atomic rename 순서로 쓴다.
+    _assert_in_order(
+        _section(spec, "async function writeRequestJournal(", "\n}\n"),
+        "await writeFile(",
+        "await temporaryHandle.sync()",
+        "await rename(",
+        "await stateHandle.sync()",
+        "await directoryHandle.sync()",
+    )
+    # 성공 증명 전에는 `restored`를 쓰지 않는다 — 실패 정리는 `restore_failed`다.
+    _assert_in_order(
+        spec,
+        'expect(run.status).toBe("SUCCESS")',
+        "expect(after.active_execution).toBeNull()",
+        'journal.phase = "restored"',
+    )
+    settle = _section(spec, "async function settleOwnedRequestAfterFailure(", "\n}\n")
+    assert 'journal.phase = "restore_failed"' in settle
+    assert '"restored"' not in settle
+
+
+def test_update_request_spec_observes_the_queue_sensor_run_read_only() -> None:
+    """barrier는 run tag로 본다 — sensor·Map location·request·generation. Dagster는 읽기만 한다."""
+
+    dagster = _read(LIVE_DIR / "_ops-c7-dagster.ts")
+    spec = _read(LIVE_DIR / _UPDATE_REQUEST_SPEC)
+
+    for source in (dagster, spec):
+        assert re.search(r"\bmutation\s+\w+", source) is None
+    assert "if (/^\\s*mutation\\b/.test(query))" in dagster
+    for marker in (
+        "run.jobName !== QUEUE_WORKER_JOB",
+        "tags.get(DAGSTER_CODE_LOCATION_TAG) !== MAP_DAGSTER_LOCATION_NAME",
+        "tags.get(FEATURE_UPDATE_REQUEST_ID_TAG) !== identity.requestId",
+        "tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG) !== String(identity.generation)",
+        "sensorName !== QUEUE_SENSOR_NAME",
+    ):
+        assert marker in dagster
+    # 이름은 Dagster 정의와 같아야 한다.
+    sensors = _read(DAGSTER_SRC / "sensors.py")
+    assert '@job(name="feature_update_request_worker")' in sensors
+    assert 'name="feature_update_request_queue_sensor",' in sensors
+    assert 'QUEUE_WORKER_JOB = "feature_update_request_worker" as const;' in dagster
+    assert 'QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;' in dagster
+    location = re.search(r"location_name: (\S+)", _read(ROOT / "docker" / "workspace.yaml"))
+    assert location is not None
+    assert f'MAP_DAGSTER_LOCATION_NAME = "{location.group(1)}" as const;' in dagster
+    # 생성 → dispatch barrier → API terminal → Dagster terminal 순서.
+    _assert_in_order(
+        spec,
+        "await assertQueueWorkerOperational();",
+        "before.active_execution !== null",
+        "await createOwnedRequest(page, body, journal)",
+        "expect(record.dagster_run_id).toBeNull()",
+        "await waitForDispatch(page, record.request_id)",
+        "await waitForTerminal(page, record.request_id, TERMINAL_TIMEOUT_MS)",
+        "await waitForDagsterTerminal(page, identity)",
+    )
+    # 409(남의 활성 request)는 건드리지 않고 멈춘다.
+    assert "result.status === 409" in spec
+    assert '"create_rejected"' in spec
 
 
 def _credential_file(tmp_path: Path, content: bytes, mode: int = 0o600) -> Path:
@@ -846,25 +1070,22 @@ def test_runner_env_contract_rejects_a_relative_basic_auth_path() -> None:
     assert "must be absolute" in rejected.stderr
 
 
-def test_basic_auth_reaches_every_direct_dagster_post_only_by_read_only_mount() -> None:
-    """C7이 Dagster에 직접 POST하는 세 자리가 모두 같은 header helper를 쓴다.
+def test_basic_auth_reaches_the_dagster_post_only_by_read_only_mount() -> None:
+    """C7이 Dagster에 POST하는 자리는 하나이고, 자격증명은 read-only bind로만 들어간다.
 
-    자격증명은 env가 아니라 read-only bind로만 executor에 들어간다 — `docker inspect`의
-    Env에는 컨테이너 안 경로만 있다.
+    `docker inspect`의 Env에는 컨테이너 안 경로만 있다.
     """
 
     script = _read(RUNNER)
-    live = ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "e2e" / "live"
-    helper = _read(live / "_dagster-basic-auth.ts")
-    assert "readFileSync(path" in helper
-    assert "process.env.E2E_DAGSTER_BASIC_AUTH_FILE" in helper
-    post = re.compile(r"await fetch\((?:this\.#graphqlUrl|dagsterGraphqlEndpoint\(\))")
-    for name in ("_ops-c7-dagster-sensor.ts", "_ops-c7-admin-api.ts"):
-        source = _read(live / name)
-        assert len(post.findall(source)) == 1, name
-        assert source.count("...dagsterAuthorizationHeaders(),") == 1, name
-    # 러너 안의 최종 복원 검증(node inline)도 같다.
-    assert script.count("...dagsterAuthorizationHeaders(),") == 1
+    dagster = _read(LIVE_DIR / "_ops-c7-dagster.ts")
+    assert "readFileSync(credentialPath" in dagster
+    assert "process.env.E2E_DAGSTER_BASIC_AUTH_FILE" in dagster
+    posts = sum(
+        len(re.findall(r"await fetch\(dagsterGraphqlEndpoint\(\)", _read(path)))
+        for path in sorted(LIVE_DIR.glob("*.ts"))
+    )
+    assert posts == 1
+    assert dagster.count("...dagsterAuthorizationHeaders(),") == 1
     assert (
         '--mount "type=bind,src=$E2E_DAGSTER_BASIC_AUTH_FILE,'
         'dst=$DAGSTER_BASIC_AUTH_CONTAINER_PATH,readonly"' in script
@@ -873,3 +1094,5 @@ def test_basic_auth_reaches_every_direct_dagster_post_only_by_read_only_mount() 
     # 이름만 준 `--env NAME`은 호스트 값(호스트 경로)을 그대로 복사한다 — 쓰지 않는다.
     assert re.search(r"--env E2E_DAGSTER_BASIC_AUTH_FILE\s", script) is None
     assert re.search(r"\bE2E_DAGSTER_BASIC_AUTH_FILE E2E", script) is None
+
+

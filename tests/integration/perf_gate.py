@@ -519,7 +519,7 @@ FROM generate_series(1, :n) AS g
 """
 
 #: place/event subtype seed — core seed와 같은 kind 분기를 따른다. weather는
-#: subtype이 없다(값 정본은 ``feature_weather_values``).
+#: subtype이 없다(weather 값 표는 ADR-105로 사라졌다 — kind 정의만 남는다).
 _SEED_PLACE_SUBTYPE_SQL = """
 INSERT INTO feature.feature_places (feature_id, kind, place_kind)
 SELECT f.feature_id, f.kind, 'attraction'

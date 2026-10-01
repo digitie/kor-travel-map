@@ -1730,7 +1730,7 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
     test.setTimeout(FLOW_TIMEOUT);
 
     const { externalSystem, targetKey, name } = scenarioKeys("meta");
-    const OVERRIDE_KEY = "kma-mcst";
+    const OVERRIDE_KEY = "mcst-culture";
     const metadata: PoiCacheTargetUpsertRequest["metadata"] = {
       external_poi_id: `${RUN_ID}-poi`,
       external_ref: `${RUN_ID}-ref`,

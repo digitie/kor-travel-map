@@ -95,8 +95,9 @@ def test_every_rate_gated_fetcher_declares_its_gate() -> None:
         f"동시에 띄우면 상한이 프로세스 수만큼 곱해진다: {missing}"
     )
     assert not wrong, f"gate 이름이 다르다: {wrong}"
-    assert gated_seen >= 4, (
-        f"gate가 걸린 등록 자리를 {gated_seen}개만 봤다. krex operation은 넷이다 — "
+    # 2026-10-01 4 → 3: KREX 휴게소 기상 operation이 ADR-105로 사라졌다.
+    assert gated_seen >= 3, (
+        f"gate가 걸린 등록 자리를 {gated_seen}개만 봤다. krex operation은 셋이다 — "
         "이 검사가 등록 자리를 놓치고 있으면 항진명제가 된다."
     )
 

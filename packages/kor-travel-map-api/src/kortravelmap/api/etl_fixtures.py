@@ -11,6 +11,8 @@ fixture를 모은다. 실 provider client 없이 본 lib ``providers/*`` 변환 
 - registry는 `(provider, dataset_key)` 튜플 → `(variant, build_fixture,
   convert)` 매핑. 신규 변환 함수가 들어오면 본 registry에 1행 추가.
 - 제품 API의 preview는 fixture-only이며 외부 provider 호출 budget은 0이다.
+- weather kind dataset(KMA·AirKorea·휴게소 기상·산악기상·산불위험)과 KMA 특보 notice
+  fixture는 ADR-105로 제거했다. 산사태·교통 notice fixture는 남는다.
 
 ADR 참조
 --------
@@ -26,21 +28,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Final
 
-from kortravelmap.providers.airkorea import (
-    air_quality_stations_to_bundles,
-    air_quality_to_weather_values,
-)
 from kortravelmap.providers.khoa import beaches_to_bundles
-from kortravelmap.providers.kma import (
-    short_forecast_to_weather_values,
-    ultra_short_forecast_to_weather_values,
-    ultra_short_nowcast_to_weather_values,
-    weather_alerts_to_notice_bundles,
-)
 from kortravelmap.providers.krairport import airports_to_bundles
 from kortravelmap.providers.krex import (
     rest_area_prices_to_values,
-    rest_area_weather_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -52,10 +43,6 @@ from kortravelmap.providers.krforest import (
 )
 from kortravelmap.providers.krforest_safety import (
     landslide_forecast_issues_to_bundles,
-    mountain_weather_stations_to_bundles,
-    mountain_weather_to_values,
-    wildfire_risk_forecasts_to_bundles,
-    wildfire_risk_to_values,
 )
 from kortravelmap.providers.mcst import (
     file_rows_to_bundles,
@@ -167,147 +154,6 @@ async def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
-# ── KMA 단기예보 fixture ───────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _ShortFcst:
-    """`KmaShortForecastItem` Protocol 준수."""
-
-    base_date: str
-    base_time: str
-    fcst_date: str
-    fcst_time: str
-    nx: int
-    ny: int
-    category: str
-    fcst_value: str
-
-
-def _short(category: str, fcst_value: str) -> _ShortFcst:
-    return _ShortFcst(
-        base_date="20260527",
-        base_time="2300",
-        fcst_date="20260528",
-        fcst_time="0900",
-        nx=60,
-        ny=127,
-        category=category,
-        fcst_value=fcst_value,
-    )
-
-
-def _kma_short_forecast_fixture() -> Sequence[_ShortFcst]:
-    return [
-        _short("TMP", "23.5"),
-        _short("REH", "65"),
-        _short("WSD", "2.1"),
-        _short("POP", "20"),
-        _short("SKY", "3"),
-        _short("PTY", "0"),
-        _short("PCP", "강수없음"),
-    ]
-
-
-_FEATURE_ID_SEOUL_WEATHER = "f_global_w_seoul_demo"
-
-
-async def _convert_kma_short(items: Sequence[Any]) -> list[Any]:
-    values = short_forecast_to_weather_values(
-        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
-    )
-    return [v.model_dump(mode="json") for v in values]
-
-
-# ── KMA 초단기실황 fixture ─────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _Nowcast:
-    """`KmaUltraShortNowcastItem` Protocol 준수."""
-
-    base_date: str
-    base_time: str
-    nx: int
-    ny: int
-    category: str
-    obsr_value: str
-
-
-def _now_item(category: str, obsr_value: str) -> _Nowcast:
-    return _Nowcast(
-        base_date="20260528",
-        base_time="0400",
-        nx=60,
-        ny=127,
-        category=category,
-        obsr_value=obsr_value,
-    )
-
-
-def _kma_nowcast_fixture() -> Sequence[_Nowcast]:
-    return [
-        _now_item("T1H", "18.0"),
-        _now_item("REH", "68"),
-        _now_item("WSD", "1.8"),
-        _now_item("RN1", "강수없음"),
-        _now_item("PTY", "0"),
-    ]
-
-
-async def _convert_kma_nowcast(items: Sequence[Any]) -> list[Any]:
-    values = ultra_short_nowcast_to_weather_values(
-        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
-    )
-    return [v.model_dump(mode="json") for v in values]
-
-
-# ── KMA 초단기예보 fixture ─────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _UltraShortFcst:
-    """`KmaUltraShortForecastItem` Protocol 준수."""
-
-    base_date: str
-    base_time: str
-    fcst_date: str
-    fcst_time: str
-    nx: int
-    ny: int
-    category: str
-    fcst_value: str
-
-
-def _uf(category: str, fcst_value: str) -> _UltraShortFcst:
-    return _UltraShortFcst(
-        base_date="20260528",
-        base_time="0330",
-        fcst_date="20260528",
-        fcst_time="0400",
-        nx=60,
-        ny=127,
-        category=category,
-        fcst_value=fcst_value,
-    )
-
-
-def _kma_ultra_short_forecast_fixture() -> Sequence[_UltraShortFcst]:
-    return [
-        _uf("T1H", "18.5"),
-        _uf("RN1", "강수없음"),
-        _uf("LGT", "0"),
-        _uf("SKY", "1"),
-    ]
-
-
-async def _convert_kma_ultra_short_forecast(items: Sequence[Any]) -> list[Any]:
-    values = ultra_short_forecast_to_weather_values(
-        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
-    )
-    return [v.model_dump(mode="json") for v in values]
-
-
 # ── opinet 주유소 + 가격 fixture ───────────────────────────────────────
 
 
@@ -385,73 +231,6 @@ async def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
         items, feature_id=_FEATURE_ID_OPINET_STATION_DEMO
     )
     return [v.model_dump(mode="json") for v in values]
-
-
-# ── KMA weather_alerts fixture (PR#46) ─────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _AlertRegion:
-    """`KmaWeatherAlertRegion` Protocol 준수."""
-
-    region_code: str
-    region_name: str
-
-
-@dataclass(frozen=True)
-class _Alert:
-    """`KmaWeatherAlertItem` Protocol 준수."""
-
-    alert_id: str
-    alert_type: str
-    level: str | None
-    title: str
-    description: str | None
-    issued_at: datetime
-    effective_from: datetime | None
-    effective_until: datetime | None
-    source_agency: str | None
-    regions: list[_AlertRegion]
-
-
-def _kma_weather_alerts_fixture() -> Sequence[_Alert]:
-    issued = datetime(2026, 7, 15, 9, 0, tzinfo=KST)
-    return [
-        _Alert(
-            alert_id="DEMO-ALERT-001",
-            alert_type="호우주의보",  # alias → 'heavy_rain_warning'
-            level="주의보",
-            title="수도권 호우주의보",
-            description="2026-07-15 12:00부터 호우 예상.",
-            issued_at=issued,
-            effective_from=issued + timedelta(hours=3),
-            effective_until=issued + timedelta(hours=12),
-            source_agency="기상청",
-            regions=[
-                _AlertRegion(region_code="11B10101", region_name="서울특별시"),
-                _AlertRegion(region_code="11B20201", region_name="경기도"),
-            ],
-        ),
-        _Alert(
-            alert_id="DEMO-ALERT-002",
-            alert_type="폭염",
-            level="경보",
-            title="전국 폭염경보",
-            description=None,
-            issued_at=issued,
-            effective_from=None,
-            effective_until=None,
-            source_agency="기상청",
-            regions=[
-                _AlertRegion(region_code="11B10101", region_name="서울특별시"),
-            ],
-        ),
-    ]
-
-
-async def _convert_kma_weather_alerts(items: Sequence[Any]) -> list[Any]:
-    bundles = weather_alerts_to_notice_bundles(items, fetched_at=_now())
-    return [b.model_dump(mode="json") for b in bundles]
 
 
 # ── krex 4 dataset fixtures (PR#45) ─────────────────────────────────────
@@ -538,44 +317,6 @@ def _krex_prices_fixture() -> Sequence[_KrexPrice]:
 
 async def _convert_krex_prices(items: Sequence[Any]) -> list[Any]:
     values = rest_area_prices_to_values(
-        items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
-    )
-    return [v.model_dump(mode="json") for v in values]
-
-
-@dataclass(frozen=True)
-class _KrexWeather:
-    """`KrexRestAreaWeatherItem` Protocol 준수."""
-
-    uni_id: str
-    metric_key: str
-    value: str
-    observed_at: datetime
-    unit: str | None
-
-
-def _krex_weather_fixture() -> Sequence[_KrexWeather]:
-    obs = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
-    return [
-        _KrexWeather(
-            uni_id="RA-001",
-            metric_key="T1H",
-            value="22.5",
-            observed_at=obs,
-            unit="deg_c",
-        ),
-        _KrexWeather(
-            uni_id="RA-001",
-            metric_key="REH",
-            value="60",
-            observed_at=obs,
-            unit="%",
-        ),
-    ]
-
-
-async def _convert_krex_weather(items: Sequence[Any]) -> list[Any]:
-    values = rest_area_weather_to_values(
         items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
     )
     return [v.model_dump(mode="json") for v in values]
@@ -837,127 +578,6 @@ async def _convert_krforest_dulle_trails(items: Sequence[Any]) -> list[Any]:
 
 
 @dataclass(frozen=True)
-class _MountainWeather:
-    """`MountainWeatherItem` Protocol 준수 (C05B 관측 fixture)."""
-
-    obs_id: str | None
-    obs_name: str | None
-    local_area: str | None
-    observed_at: datetime | None
-    temperature_10m: float | None
-    temperature_2m: float | None
-    humidity_10m: float | None
-    humidity_2m: float | None
-    pressure: float | None
-    rainfall_tipping: float | None
-    rainfall_weight: float | None
-    ground_temperature: float | None
-    wind_direction_10m: float | None
-    wind_direction_10m_name: str | None
-    wind_direction_2m: float | None
-    wind_direction_2m_name: str | None
-    wind_speed_10m: float | None
-    wind_speed_2m: float | None
-    latitude: float | None
-    longitude: float | None
-    raw: Any = None
-
-
-def _krforest_mountain_weather_fixture() -> Sequence[_MountainWeather]:
-    return [
-        _MountainWeather(
-            obs_id="M-001",
-            obs_name="설악산 산악기상관측소",
-            local_area="강원특별자치도 속초시",
-            observed_at=_now(),
-            temperature_10m=19.4,
-            temperature_2m=18.8,
-            humidity_10m=72.0,
-            humidity_2m=76.0,
-            pressure=918.2,
-            rainfall_tipping=0.0,
-            rainfall_weight=0.0,
-            ground_temperature=17.1,
-            wind_direction_10m=225.0,
-            wind_direction_10m_name="남서",
-            wind_direction_2m=210.0,
-            wind_direction_2m_name="남남서",
-            wind_speed_10m=3.2,
-            wind_speed_2m=2.1,
-            latitude=38.1200,
-            longitude=128.4700,
-            raw={"obsid": "M-001", "tm2m": "18.8", "hm2m": "76"},
-        ),
-    ]
-
-
-async def _convert_krforest_mountain_weather(items: Sequence[Any]) -> list[Any]:
-    anchors = mountain_weather_stations_to_bundles(items, fetched_at=_now())
-    feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id
-        for bundle in anchors
-    }
-    values = mountain_weather_to_values(items, feature_id_by_obs_id=feature_ids)
-    return [value.model_dump(mode="json") for value in values]
-
-
-@dataclass(frozen=True)
-class _WildfireRisk:
-    """`WildfireRiskForecastItem` Protocol 준수 (C05C V2 fixture)."""
-
-    scope: str
-    analysis_at: datetime | None
-    area: str | None
-    region_code: str | None
-    region_name: str | None
-    upper_region_code: str | None
-    d1: float | None
-    d2: float | None
-    d3: float | None
-    d4: float | None
-    maximum: float | None
-    mean_average: float | None
-    minimum: float | None
-    standard_deviation: float | None
-    raw: Any = None
-
-
-def _krforest_wildfire_risk_fixture() -> Sequence[_WildfireRisk]:
-    return [
-        _WildfireRisk(
-            scope="sigungu",
-            analysis_at=_now(),
-            area="강원특별자치도",
-            region_code="51820",
-            region_name="속초시",
-            upper_region_code="51",
-            d1=2.0,
-            d2=3.0,
-            d3=3.0,
-            d4=4.0,
-            maximum=4.0,
-            mean_average=2.5,
-            minimum=1.0,
-            standard_deviation=0.8,
-            raw={"regioncode": "51820", "meanavg": "2.5", "d1": "2"},
-        ),
-    ]
-
-
-async def _convert_krforest_wildfire_risk(items: Sequence[Any]) -> list[Any]:
-    anchors = wildfire_risk_forecasts_to_bundles(items, fetched_at=_now())
-    feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id
-        for bundle in anchors
-    }
-    values = wildfire_risk_to_values(
-        items,
-        feature_id_by_region_key=feature_ids,
-    )
-    return [value.model_dump(mode="json") for value in values]
-
-
-@dataclass(frozen=True)
 class _LandslideIssue:
     """`LandslideForecastIssueItem` Protocol 준수 (C05D lifecycle fixture)."""
 
@@ -1191,88 +811,6 @@ async def _convert_airports(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
-@dataclass(frozen=True)
-class _AirStation:
-    """`AirQualityStationItem` Protocol 준수 (provider `Station`)."""
-
-    station_name: str
-    addr: str | None
-    lat: float | None
-    lon: float | None
-
-
-def _airkorea_station_fixture() -> Sequence[_AirStation]:
-    return [
-        _AirStation(
-            station_name="중구",
-            addr="서울 중구 덕수궁길 15",
-            lat=37.5640,
-            lon=126.9750,
-        ),
-    ]
-
-
-async def _convert_airkorea_stations(items: Sequence[Any]) -> list[Any]:
-    bundles = await air_quality_stations_to_bundles(items, fetched_at=_now())
-    return [b.model_dump(mode="json") for b in bundles]
-
-
-@dataclass(frozen=True)
-class _AirMeasurement:
-    """`AirQualityMeasurementItem` Protocol 준수 (provider `AirQualityMeasurement`)."""
-
-    station_name: str
-    data_time: datetime | None
-    sido_name: str | None = "서울"
-    khai_value: int | None = None
-    khai_grade: int | None = None
-    pm10_value: float | None = None
-    pm10_grade: int | None = None
-    pm25_value: float | None = None
-    pm25_grade: int | None = None
-    o3_value: float | None = None
-    o3_grade: int | None = None
-    no2_value: float | None = None
-    no2_grade: int | None = None
-    so2_value: float | None = None
-    so2_grade: int | None = None
-    co_value: float | None = None
-    co_grade: int | None = None
-
-
-def _airkorea_air_quality_fixture() -> Sequence[_AirMeasurement]:
-    return [
-        _AirMeasurement(
-            station_name="중구",
-            data_time=_now(),
-            khai_value=75,
-            khai_grade=2,
-            pm10_value=45.0,
-            pm10_grade=2,
-            pm25_value=18.0,
-            pm25_grade=1,
-            o3_value=0.035,
-            o3_grade=2,
-        ),
-    ]
-
-
-async def _convert_airkorea_air_quality(items: Sequence[Any]) -> list[Any]:
-    # 측정값 변환에는 측정소→feature_id 매핑이 필요 — 데모용 station fixture로 구성.
-    stations: Sequence[Any] = _airkorea_station_fixture()
-    station_bundles = await air_quality_stations_to_bundles(
-        stations, fetched_at=_now()
-    )
-    station_feature_ids = {
-        bundle.source_record.source_entity_id: bundle.feature.feature_id
-        for bundle in station_bundles
-    }
-    values = air_quality_to_weather_values(
-        items, station_feature_ids=station_feature_ids
-    )
-    return [v.model_dump(mode="json") for v in values]
-
-
 # MCST 파일데이터 CSV row fixture — 방언별 대표 1개씩 (T-220 재배선, #395).
 # 컬럼/값 모양은 2026-06-12 live CSV 실측 샘플 기반.
 
@@ -1364,7 +902,7 @@ class EtlFixtureEntry:
 
     provider: str
     dataset: str
-    variant: str  # "FeatureBundle" / "WeatherValue" / "PriceValue"
+    variant: str  # "FeatureBundle" / "PriceValue"
     description: str
     build_fixture: Callable[[], Sequence[Any]]
     convert: Callable[[Sequence[Any]], Awaitable[list[Any]]]
@@ -1383,30 +921,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_datagokr_festival,
     ),
     EtlFixtureEntry(
-        provider="python-kma-api",
-        dataset="kma_short_forecast",
-        variant="WeatherValue",
-        description="KMA 단기예보 (3시간 단위 5일). PR#38.",
-        build_fixture=_kma_short_forecast_fixture,
-        convert=_convert_kma_short,
-    ),
-    EtlFixtureEntry(
-        provider="python-kma-api",
-        dataset="kma_ultra_short_nowcast",
-        variant="WeatherValue",
-        description="KMA 초단기실황 (1시간 단위 관측). PR#39.",
-        build_fixture=_kma_nowcast_fixture,
-        convert=_convert_kma_nowcast,
-    ),
-    EtlFixtureEntry(
-        provider="python-kma-api",
-        dataset="kma_ultra_short_forecast",
-        variant="WeatherValue",
-        description="KMA 초단기예보 (30분 단위 6시간). PR#41.",
-        build_fixture=_kma_ultra_short_forecast_fixture,
-        convert=_convert_kma_ultra_short_forecast,
-    ),
-    EtlFixtureEntry(
         provider="python-opinet-api",
         dataset="opinet_fuel_station_details",
         variant="FeatureBundle",
@@ -1423,16 +937,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_opinet_prices,
     ),
     EtlFixtureEntry(
-        provider="python-kma-api",
-        dataset="kma_weather_alerts",
-        variant="FeatureBundle",
-        description=(
-            "KMA 특보 → notice FeatureBundle (region 단위 fan-out). PR#46."
-        ),
-        build_fixture=_kma_weather_alerts_fixture,
-        convert=_convert_kma_weather_alerts,
-    ),
-    EtlFixtureEntry(
         provider="python-krex-api",
         dataset="krex_rest_areas",
         variant="FeatureBundle",
@@ -1447,14 +951,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="krex 휴게소 food/fuel 가격 시계열. PR#45.",
         build_fixture=_krex_prices_fixture,
         convert=_convert_krex_prices,
-    ),
-    EtlFixtureEntry(
-        provider="python-krex-api",
-        dataset="krex_rest_area_weather",
-        variant="WeatherValue",
-        description="krex 휴게소 관측 기상 (observed). PR#45.",
-        build_fixture=_krex_weather_fixture,
-        convert=_convert_krex_weather,
     ),
     EtlFixtureEntry(
         provider="python-krex-api",
@@ -1495,22 +991,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="산림청 PBD0000031 둘레길 SHP → route Feature(C05A).",
         build_fixture=_krforest_dulle_trails_fixture,
         convert=_convert_krforest_dulle_trails,
-    ),
-    EtlFixtureEntry(
-        provider="python-krforest-api",
-        dataset="krforest_mountain_weather",
-        variant="WeatherValue",
-        description="산림청 15084696 산악기상 관측 → WeatherValue(C05B).",
-        build_fixture=_krforest_mountain_weather_fixture,
-        convert=_convert_krforest_mountain_weather,
-    ),
-    EtlFixtureEntry(
-        provider="python-krforest-api",
-        dataset="krforest_wildfire_risk_forecast",
-        variant="WeatherValue",
-        description="산림청 15084817 산불위험 V2 예보 → WeatherValue(C05C).",
-        build_fixture=_krforest_wildfire_risk_fixture,
-        convert=_convert_krforest_wildfire_risk,
     ),
     EtlFixtureEntry(
         provider="python-krforest-api",
@@ -1559,22 +1039,6 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="공항 메타데이터(번들 정적) → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_airport_fixture,
         convert=_convert_airports,
-    ),
-    EtlFixtureEntry(
-        provider="python-airkorea-api",
-        dataset="airkorea_stations",
-        variant="FeatureBundle",
-        description="대기질 측정소 → weather kind Feature (ADR-034 보조). T-RV-55d.",
-        build_fixture=_airkorea_station_fixture,
-        convert=_convert_airkorea_stations,
-    ),
-    EtlFixtureEntry(
-        provider="python-airkorea-api",
-        dataset="airkorea_air_quality",
-        variant="WeatherValue",
-        description="대기질 측정값 → 오염물질별 WeatherValue (observed). T-RV-55d.",
-        build_fixture=_airkorea_air_quality_fixture,
-        convert=_convert_airkorea_air_quality,
     ),
     EtlFixtureEntry(
         provider="python-mcst-api",

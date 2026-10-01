@@ -1179,8 +1179,8 @@ async def test_direct_scope_cannot_disagree_with_canonical_membership(
 async def test_latest_dataset_execution_keeps_direct_scopes_separate(
     migrated_session: AsyncSession,
 ) -> None:
-    provider = "python-kma-api"
-    dataset_key = "kma_short_forecast"
+    provider = "scoped-provider"
+    dataset_key = "scoped-dataset"
     requests = (
         (
             "a3333333-3333-4333-8333-333333333333",
@@ -1224,8 +1224,8 @@ async def test_latest_dataset_execution_keeps_direct_scopes_separate(
 async def test_dataset_execution_snapshot_keeps_terminal_and_active_independent(
     migrated_session: AsyncSession,
 ) -> None:
-    provider = "python-kma-api"
-    dataset_key = "kma_short_forecast"
+    provider = "scoped-provider"
+    dataset_key = "scoped-dataset"
     sync_scope = "target_grids"
     terminal_request_id = "a5555555-5555-4555-8555-555555555555"
     active_request_id = "a6666666-6666-4666-8666-666666666666"
@@ -1288,9 +1288,9 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
 ) -> None:
     """scoped snapshot 쿼리는 대상 canonical dataset에 대해 unscoped 결과를
     필터한 것과 동일해야 한다(다른 dataset의 root가 존재해도 제외한다)."""
-    provider = "python-kma-api"
-    dataset_key = "kma_short_forecast"
-    other_dataset_key = "kma_ultra_short_nowcast"
+    provider = "scoped-provider"
+    dataset_key = "scoped-dataset"
+    other_dataset_key = "scoped-dataset-other"
     sync_scope = "target_grids"
 
     target_terminal_id = str(uuid5(_REQUEST_JOB_NAMESPACE, "scoped-target-terminal"))
@@ -1387,8 +1387,8 @@ async def test_scoped_dataset_execution_snapshot_matches_unscoped_filtered(
 async def test_dataset_scope_filter_is_applied_before_page_limit(
     migrated_session: AsyncSession,
 ) -> None:
-    provider = "python-kma-api"
-    dataset_key = "kma_short_forecast"
+    provider = "scoped-provider"
+    dataset_key = "scoped-dataset"
     selected_scope = "external_system:retired"
     selected = await _member(
         migrated_session,
@@ -1966,14 +1966,14 @@ async def test_external_system_scope_run_history_cursor_pages_past_boundary(
 ) -> None:
     """C7 cursor-overflow(구 live 51-req 루프)의 실질 계약을 seed로 검증한다.
 
-    단일 KMA ``external_system`` scope에 page_size+1개 root를 넣으면 첫 페이지가
+    단일 ``external_system`` scope에 page_size+1개 root를 넣으면 첫 페이지가
     non-null ``next_cursor``를 내고 둘째 페이지가 disjoint·정렬 연속으로 이어진다.
     같은 dataset의 다른 scope를 interleave해 scope 필터가 page-limit **이전**에
     적용됨(crowding-out 방지, #832 §C)도 함께 확인한다. 51회 실 KMA refresh를
     prod-live에서 돌릴 필요가 없다 — 이 계약이 그 게이트가 실제로 지키던 것.
     """
-    provider = "python-kma-api"
-    dataset_key = "kma_ultra_short_nowcast"
+    provider = "scoped-provider"
+    dataset_key = "scoped-dataset-other"
     sync_scope = "external_system:c7-overflow-contract"
     page_size = 50
     total = page_size + 1

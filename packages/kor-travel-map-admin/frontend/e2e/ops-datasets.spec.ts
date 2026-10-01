@@ -36,18 +36,18 @@ type ProviderRefreshPolicyUpsertRequest =
   components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
 
 const MOCK_OLD = "2026-06-01T00:00:00.000Z";
-const KMA_PROVIDER = "python-kma-api";
-const KMA_DATASET = "kma_short_forecast";
-const KMA_PROVIDER_DATASET_ID = 101;
-const KMA_SCOPE = "target_grids";
-const KMA_OPERATION_KEY = "kma_refresh";
+const OPINET_PROVIDER = "python-opinet-api";
+const OPINET_DATASET = "opinet_gas_station_prices";
+const OPINET_PROVIDER_DATASET_ID = 101;
+const OPINET_SCOPE = "target_grids";
+const OPINET_OPERATION_KEY = "opinet_refresh";
 const ACTIVE_EXTERNAL_SCOPE = "external_system:concierge";
 const STALE_EXTERNAL_SCOPE = "external_system:retired";
 // URL query가 선택 정본이라(#684 C4R) drawer를 여는 테스트는 딥링크로 진입한다
 // (자동 row0 선택 fallback 제거 — 비선택 진입은 빈 상태).
-const KMA_DEEP_LINK =
-  `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
-  `&sync_scope=${KMA_SCOPE}`;
+const OPINET_DEEP_LINK =
+  `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
+  `&sync_scope=${OPINET_SCOPE}`;
 const MOIS_PROVIDER = "python-mois-api";
 const MOIS_DATASET = "mois_license_features_bulk";
 const MOIS_PROVIDER_DATASET_ID = 102;
@@ -65,8 +65,8 @@ const UUID_PATTERN =
 const FRESH_AT = new Date().toISOString();
 
 function providerDatasetId(provider: string, datasetKey: string): number {
-  if (provider === KMA_PROVIDER && datasetKey === KMA_DATASET) {
-    return KMA_PROVIDER_DATASET_ID;
+  if (provider === OPINET_PROVIDER && datasetKey === OPINET_DATASET) {
+    return OPINET_PROVIDER_DATASET_ID;
   }
   if (provider === MOIS_PROVIDER && datasetKey === MOIS_DATASET) {
     return MOIS_PROVIDER_DATASET_ID;
@@ -112,9 +112,9 @@ function makeScheduleSummary(
   return {
     source: "dagster_graphql",
     basis: "dagster_operation_key_tag",
-    schedule_names: ["feature_weather_kma_short_forecast_hourly_schedule"],
+    schedule_names: ["feature_price_opinet_gas_station_prices_hourly_schedule"],
     active_schedule_names: [
-      "feature_weather_kma_short_forecast_hourly_schedule",
+      "feature_price_opinet_gas_station_prices_hourly_schedule",
     ],
     next_scheduled_at: "2026-07-15T01:20:00.000Z",
     status: "RUNNING",
@@ -138,9 +138,9 @@ function makeCatalog(
   overrides: Partial<OpsDatasetCatalogInfo> = {},
 ): OpsDatasetCatalogInfo {
   return {
-    feature_kind: "weather",
+    feature_kind: "price",
     provider_state_default_scope: "target_grids",
-    label: "KMA 단기예보",
+    label: "OpiNet 주유소 가격",
     is_active: true,
     is_refreshable: true,
     scope_refresh: {
@@ -167,9 +167,9 @@ function makeCatalog(
 function makeGridRow(
   overrides: Partial<OpsDatasetGridRow> = {},
 ): OpsDatasetGridRow {
-  const provider = overrides.provider ?? KMA_PROVIDER;
-  const datasetKey = overrides.dataset_key ?? KMA_DATASET;
-  const syncScope = overrides.sync_scope ?? KMA_SCOPE;
+  const provider = overrides.provider ?? OPINET_PROVIDER;
+  const datasetKey = overrides.dataset_key ?? OPINET_DATASET;
+  const syncScope = overrides.sync_scope ?? OPINET_SCOPE;
   // ID는 **한 번만** 정한다. 아래 detail_url이 다시 `providerDatasetId(...)`를
   // 부르면 명시 override를 준 합성 fixture(`retired-provider` 등)에서도 등록표
   // 조회가 돌아 throw했다.
@@ -182,7 +182,7 @@ function makeGridRow(
     sync_scope: syncScope,
     // ADR-088 triple identity: 행이 가리키는 실행 operation. 갱신 POST의
     // scope.operation_key가 이 값으로 나가는지까지 테스트가 검증한다.
-    operation_key: KMA_OPERATION_KEY,
+    operation_key: OPINET_OPERATION_KEY,
     status: "active",
     last_success_at: FRESH_AT,
     last_failure_at: null,
@@ -209,9 +209,9 @@ function makeRefreshPolicy(
   overrides: Partial<ProviderRefreshPolicyRecord> = {},
 ): ProviderRefreshPolicyRecord {
   return {
-    provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-    provider: KMA_PROVIDER,
-    dataset_key: KMA_DATASET,
+    provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+    provider: OPINET_PROVIDER,
+    dataset_key: OPINET_DATASET,
     source_kind: "openapi",
     targeted_policy: "allow_targeted",
     config_source: "db",
@@ -242,19 +242,19 @@ function makeExecution(
     status: "done",
     pair_status: "done",
     operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-    operation_key: "feature_weather_kma_short_forecast_job",
+    operation_key: "feature_price_opinet_gas_station_prices_job",
     provider_datasets: [
       {
-        provider: KMA_PROVIDER,
-        dataset_key: KMA_DATASET,
-        provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-        sync_scope: KMA_SCOPE,
+        provider: OPINET_PROVIDER,
+        dataset_key: OPINET_DATASET,
+        provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+        sync_scope: OPINET_SCOPE,
         operation_key: "e2e_refresh",
         status: "done",
         operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       },
     ],
-    sync_scope: KMA_SCOPE,
+    sync_scope: OPINET_SCOPE,
     dagster_run_id: null,
     dagster_run_status: null,
     error_message: null,
@@ -279,7 +279,7 @@ function makeExecution(
       trigger_kind: "manual",
       detail_url: `/v1/ops/pipeline/executions/import_job/${JOB_ID}`,
       depth: 1,
-      operation_key: "feature_weather_kma_short_forecast_job",
+      operation_key: "feature_price_opinet_gas_station_prices_job",
     },
     ...overrides,
   };
@@ -360,9 +360,9 @@ function makeEventHistory(
 function makeDetail(
   overrides: Partial<OpsDatasetDetailData> = {},
 ): OpsDatasetDetailData {
-  const provider = overrides.provider ?? KMA_PROVIDER;
-  const datasetKey = overrides.dataset_key ?? KMA_DATASET;
-  const syncScope = overrides.scopes?.[0]?.sync_scope ?? KMA_SCOPE;
+  const provider = overrides.provider ?? OPINET_PROVIDER;
+  const datasetKey = overrides.dataset_key ?? OPINET_DATASET;
+  const syncScope = overrides.scopes?.[0]?.sync_scope ?? OPINET_SCOPE;
   const resolvedProviderDatasetId =
     overrides.provider_dataset_id ?? providerDatasetId(provider, datasetKey);
   return {
@@ -374,12 +374,12 @@ function makeDetail(
     catalog: makeCatalog(),
     scopes: [
       {
-        sync_scope: KMA_SCOPE,
+        sync_scope: OPINET_SCOPE,
         // grid 행(`makeGridRow`)이 내는 operation_key와 **같아야** 한다.
         // ADR-088 triple identity에서 선택은 (provider_dataset_id, sync_scope,
         // operation_key)이고 drawer는 detail.scopes에서 그 셋이 정확히 일치하는
         // scope를 못 찾으면 패널을 아예 렌더하지 않는다.
-        operation_key: KMA_OPERATION_KEY,
+        operation_key: OPINET_OPERATION_KEY,
         status: "active",
         cursor: { base_date: "20260714", base_time: "0500" },
         last_success_at: FRESH_AT,
@@ -438,12 +438,12 @@ function makeCreatedRequest(
     scope_type: "provider_dataset",
     scope: {
       type: "provider_dataset",
-      provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-      sync_scope: KMA_SCOPE,
-      operation_key: KMA_OPERATION_KEY,
+      provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+      sync_scope: OPINET_SCOPE,
+      operation_key: OPINET_OPERATION_KEY,
     },
     dataset_memberships: [
-      { provider_dataset_id: KMA_PROVIDER_DATASET_ID, sync_scope: KMA_SCOPE, operation_key: KMA_OPERATION_KEY },
+      { provider_dataset_id: OPINET_PROVIDER_DATASET_ID, sync_scope: OPINET_SCOPE, operation_key: OPINET_OPERATION_KEY },
     ],
     update_policy: {},
     run_mode: "now",
@@ -587,8 +587,8 @@ async function mockOpsDatasets(
       const response: OpsDatasetRefreshPolicyResponse = {
         data: makeRefreshPolicy({
           provider_dataset_id: providerDatasetId,
-          provider: row?.provider ?? KMA_PROVIDER,
-          dataset_key: row?.dataset_key ?? KMA_DATASET,
+          provider: row?.provider ?? OPINET_PROVIDER,
+          dataset_key: row?.dataset_key ?? OPINET_DATASET,
           source_kind: body.source_kind,
           targeted_policy: body.targeted_policy ?? "follow_system",
           enabled: body.enabled ?? true,
@@ -634,15 +634,15 @@ async function mockOpsDatasets(
       }
       const response: OpsDatasetPreviewResponse = {
         data: {
-          provider: KMA_PROVIDER,
-          dataset_key: KMA_DATASET,
-          provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-          sync_scope: KMA_SCOPE,
-          operation_key: KMA_OPERATION_KEY,
+          provider: OPINET_PROVIDER,
+          dataset_key: OPINET_DATASET,
+          provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+          sync_scope: OPINET_SCOPE,
+          operation_key: OPINET_OPERATION_KEY,
           source: "fixture",
-          variant: "WeatherValue",
-          description: "KMA 단기예보 fixture",
-          items: [{ metric_key: "temperature_c", value: 23.5 }],
+          variant: "PriceValue",
+          description: "OpiNet 주유소 가격 fixture",
+          items: [{ product_key: "gasoline", value: 1820 }],
           returned_items: 1,
           total_items: 1,
           truncated: false,
@@ -883,17 +883,17 @@ async function mockPipelineRequests(
             current_stage: null,
             job_kind: null,
             load_batch_id: null,
-            operation_key: "feature_weather_kma_short_forecast_job",
+            operation_key: "feature_price_opinet_gas_station_prices_job",
             operator: "local-admin",
             parent_job_id: null,
             priority: 75,
             progress: 100,
             provider_datasets: [
               {
-                provider: KMA_PROVIDER,
-                dataset_key: KMA_DATASET,
-                provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-                sync_scope: KMA_SCOPE,
+                provider: OPINET_PROVIDER,
+                dataset_key: OPINET_DATASET,
+                provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+                sync_scope: OPINET_SCOPE,
                 operation_key: "e2e_refresh",
                 status: executionStatus as "done",
                 operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -924,10 +924,10 @@ async function mockPipelineRequests(
             error_message: null,
             provider_datasets: [
               {
-                provider: KMA_PROVIDER,
-                dataset_key: KMA_DATASET,
-                provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-                sync_scope: KMA_SCOPE,
+                provider: OPINET_PROVIDER,
+                dataset_key: OPINET_DATASET,
+                provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+                sync_scope: OPINET_SCOPE,
                 operation_key: "e2e_refresh",
                 status: executionStatus as "done",
                 operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -944,7 +944,7 @@ async function mockPipelineRequests(
             run_mode: "now",
             scope_type: "provider_dataset",
             trigger_kind: "manual",
-            operation_key: "feature_weather_kma_short_forecast_job",
+            operation_key: "feature_price_opinet_gas_station_prices_job",
             detail_url: `/v1/ops/pipeline/executions/update_request/${queriedRequestId}`,
             cancellation: null,
             projected_job: {
@@ -964,7 +964,7 @@ async function mockPipelineRequests(
               depth: 1,
               load_batch_id: null,
               parent_job_id: null,
-              operation_key: "feature_weather_kma_short_forecast_job",
+              operation_key: "feature_price_opinet_gas_station_prices_job",
             },
           },
         },
@@ -989,7 +989,7 @@ function defaultGrid(): {
   items: OpsDatasetGridRow[];
   details: Record<string, OpsDatasetDetailData>;
 } {
-  const kma = makeGridRow();
+  const opinet = makeGridRow();
   const mois = makeGridRow({
     provider: MOIS_PROVIDER,
     dataset_key: MOIS_DATASET,
@@ -1056,9 +1056,9 @@ function defaultGrid(): {
     }),
   });
   return {
-    items: [kma, mois, krex],
+    items: [opinet, mois, krex],
     details: {
-      [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+      [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
         // source_kind는 서버 정본(openapi)이라 select가 아닌 readOnly로 뜨고,
         // null nullable 필드는 draft에 빈 값으로 로드돼 PUT에서 null로 보존된다.
         refresh_policy: makeRefreshPolicy({
@@ -1075,20 +1075,20 @@ function defaultGrid(): {
         }),
         latest_execution: makeExecution(),
         run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
-      KMA_SCOPE, {
+      OPINET_PROVIDER_DATASET_ID,
+      OPINET_SCOPE, {
           items: [makeExecution()],
         }),
         event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
-      KMA_SCOPE, {
+      OPINET_PROVIDER_DATASET_ID,
+      OPINET_SCOPE, {
           items: [
             {
               event_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
               job_id: JOB_ID,
               import_job_dataset_id: null,
-              provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-              sync_scope: KMA_SCOPE,
+              provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+              sync_scope: OPINET_SCOPE,
               operation_key: "e2e_refresh",
               stage: "loading",
               level: "error",
@@ -1127,7 +1127,7 @@ function defaultGrid(): {
         scopes: [
           {
             sync_scope: "dataset_wide",
-            operation_key: KMA_OPERATION_KEY,
+            operation_key: OPINET_OPERATION_KEY,
             status: "never_run",
             cursor: {},
             last_success_at: null,
@@ -1230,8 +1230,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       grid.getByRole("columnheader", { name: "마지막 실패" }),
     ).toBeVisible();
     // 3원 행 — scope가 canonical target_grids로 노출.
-    const kmaRow = grid.getByRole("row", { name: /kma_short_forecast/ });
-    await expect(kmaRow).toContainText(KMA_SCOPE);
+    const opinetRow = grid.getByRole("row", { name: /opinet_gas_station_prices/ });
+    await expect(opinetRow).toContainText(OPINET_SCOPE);
     // never_run 행은 "미실행" 상태 배지.
     const moisRow = grid.getByRole("row", {
       name: /mois_license_features_bulk/,
@@ -1299,7 +1299,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.goto("/ops/datasets");
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
-      grid.getByRole("row", { name: /kma_short_forecast/ }),
+      grid.getByRole("row", { name: /opinet_gas_station_prices/ }),
     ).toBeVisible();
 
     await page.getByLabel("검색").fill("krex");
@@ -1307,7 +1307,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       grid.getByRole("row", { name: /krex_rest_areas/ }),
     ).toBeVisible();
     await expect(
-      grid.getByRole("row", { name: /kma_short_forecast/ }),
+      grid.getByRole("row", { name: /opinet_gas_station_prices/ }),
     ).toHaveCount(0);
 
     await page.getByLabel("검색").fill("");
@@ -1390,12 +1390,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, { items, details });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
 
-    // 딥링크로 KMA 행을 선택해 drawer가 뜬다.
+    // 딥링크로 OpiNet 행을 선택해 drawer가 뜬다.
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
     await expect(
-      page.getByText(`${KMA_PROVIDER}/${KMA_DATASET}`).first(),
+      page.getByText(`${OPINET_PROVIDER}/${OPINET_DATASET}`).first(),
     ).toBeVisible();
     await expect.poll(() => mocks.counts.detail).toBeGreaterThanOrEqual(1);
 
@@ -1426,13 +1426,13 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await expect(runHistoryLink).toHaveAttribute(
       "href",
-      `/ops/pipeline?tab=executions&provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
-        `&sync_scope=${KMA_SCOPE}`,
+      `/ops/pipeline?tab=executions&provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
+        `&sync_scope=${OPINET_SCOPE}`,
     );
     await expect(runHistoryLink).toHaveAttribute(
       "data-api-history-url",
-      `/v1/ops/pipeline/executions?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
-        `&sync_scope=${KMA_SCOPE}`,
+      `/v1/ops/pipeline/executions?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
+        `&sync_scope=${OPINET_SCOPE}`,
     );
 
     // 최근 이벤트 + Feature 보기 링크.
@@ -1442,19 +1442,19 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await expect(eventHistoryLink).toHaveAttribute(
       "href",
-      `/ops/pipeline?tab=events&provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
-        `&sync_scope=${KMA_SCOPE}`,
+      `/ops/pipeline?tab=events&provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
+        `&sync_scope=${OPINET_SCOPE}`,
     );
     await expect(eventHistoryLink).toHaveAttribute(
       "data-api-history-url",
-      `/v1/ops/pipeline/events?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
-        `&sync_scope=${KMA_SCOPE}`,
+      `/v1/ops/pipeline/events?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
+        `&sync_scope=${OPINET_SCOPE}`,
     );
     await expect(
       page.getByRole("link", { name: "생성된 Feature 보기" }),
     ).toHaveAttribute(
       "href",
-      `/admin/features?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}`,
+      `/admin/features?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}`,
     );
   });
 
@@ -1465,7 +1465,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, { items, details });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
 
     await page.getByRole("tab", { name: "갱신 정책" }).click();
@@ -1481,7 +1481,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await expect.poll(() => mocks.policyPuts.length).toBe(1);
     expect(mocks.policyPuts[0].path).toBe(
-      `/v1/ops/datasets/refresh-policy?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}`,
+      `/v1/ops/datasets/refresh-policy?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}`,
     );
     expect(mocks.policyPuts[0].body).toMatchObject({
       expected_revision: "1",
@@ -1511,7 +1511,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, { items, details });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("tab", { name: "갱신 정책" }).click();
 
     await page.getByLabel("시간당 요청 수", { exact: true }).fill("0");
@@ -1540,7 +1540,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, {
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: (detailCount) =>
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: (detailCount) =>
           makeDetail({
             refresh_policy: detailCount === 1 ? initialPolicy : changedPolicy,
           }),
@@ -1548,7 +1548,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
     await expect(targetedPolicy).toHaveValue("follow_system");
     await targetedPolicy.selectOption("allow_targeted");
@@ -1597,17 +1597,17 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       },
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: (_detailCount, syncScope) =>
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: (_detailCount, syncScope) =>
           makeDetail({
             refresh_policy: makeRefreshPolicy({
               targeted_policy: "follow_system",
             }),
             scopes,
             run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       syncScope),
             event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       syncScope,
             ),
           }),
@@ -1615,7 +1615,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
     await targetedPolicy.selectOption("allow_targeted");
     await expect(targetedPolicy).toHaveValue("allow_targeted");
@@ -1624,7 +1624,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     try {
       await page
         .getByRole("button", {
-          name: `${KMA_PROVIDER} ${KMA_DATASET} ${ACTIVE_EXTERNAL_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
+          name: `${OPINET_PROVIDER} ${OPINET_DATASET} ${ACTIVE_EXTERNAL_SCOPE} ${OPINET_OPERATION_KEY} 상세 열기`,
         })
         .click();
       await activeScopeDetailStarted;
@@ -1662,7 +1662,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, {
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           refresh_policy: initialPolicy,
         }),
       },
@@ -1670,7 +1670,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
     await targetedPolicy.selectOption("allow_targeted");
     await page.getByRole("button", { name: "저장" }).click();
@@ -1721,7 +1721,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, {
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           refresh_policy: maxPolicy,
         }),
       },
@@ -1730,7 +1730,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     await page
       .getByLabel("타깃 갱신 정책", { exact: true })
       .selectOption("allow_targeted");
@@ -1764,7 +1764,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, {
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           refresh_policy: null,
         }),
       },
@@ -1772,7 +1772,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     const sourceKind = page.getByLabel("소스 종류", { exact: true });
     await sourceKind.selectOption("openapi");
     await page.getByRole("button", { name: "저장" }).click();
@@ -1800,7 +1800,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await mockOpsDatasets(page, {
       items,
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           refresh_policy: makeRefreshPolicy({
             targeted_policy: "follow_system",
             revision: "1",
@@ -1811,7 +1811,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
     const targetedPolicy = page.getByLabel("타깃 갱신 정책", { exact: true });
     await targetedPolicy.selectOption("allow_targeted");
     await page.getByRole("button", { name: "저장" }).click();
@@ -1879,12 +1879,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, {
       items: [row],
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({ mutable: false }),
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({ mutable: false }),
       },
     });
     await mockPipelineRequests(page);
 
-    await page.goto(`${KMA_DEEP_LINK}&panel=policy`);
+    await page.goto(`${OPINET_DEEP_LINK}&panel=policy`);
 
     await expect(page.getByTestId("policy-readonly-alert")).toContainText(
       "mutable=false",
@@ -1898,7 +1898,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const mocks = await mockOpsDatasets(page, { items, details });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("tab", { name: "ETL 미리보기" }).click();
     await page.getByRole("button", { name: "fixture 실행" }).click();
 
@@ -1906,12 +1906,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // preview도 ADR-088 triple로 나간다 — operation_key가 빠지면 서버가 어떤
     // canonical operation을 미리보는지 알 수 없다.
     expect(mocks.previewPosts[0].path).toBe(
-      `/v1/ops/datasets/${KMA_PROVIDER_DATASET_ID}/preview` +
-        `?sync_scope=${KMA_SCOPE}&operation_key=${KMA_OPERATION_KEY}`,
+      `/v1/ops/datasets/${OPINET_PROVIDER_DATASET_ID}/preview` +
+        `?sync_scope=${OPINET_SCOPE}&operation_key=${OPINET_OPERATION_KEY}`,
     );
     expect(mocks.previewPosts[0].source).toBe("fixture");
-    await expect(page.getByText("WeatherValue")).toBeVisible();
-    await expect(page.getByText(/"metric_key": "temperature_c"/)).toBeVisible();
+    await expect(page.getByText("PriceValue")).toBeVisible();
+    await expect(page.getByText(/"product_key": "gasoline"/)).toBeVisible();
   });
 
   test("ETL 미리보기 — capability 미지원이면 실행 버튼이 fail-closed로 비활성", async ({
@@ -1945,7 +1945,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       executionStatus: "done",
     });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
     const listCountBefore = datasetMocks.counts.list;
 
@@ -1956,9 +1956,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     expect(pipeline.posts[0].body).toMatchObject({
       scope: {
         type: "provider_dataset",
-        provider_dataset_id: KMA_PROVIDER_DATASET_ID,
-        sync_scope: KMA_SCOPE,
-        operation_key: KMA_OPERATION_KEY,
+        provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
+        sync_scope: OPINET_SCOPE,
+        operation_key: OPINET_OPERATION_KEY,
       },
       run_mode: "now",
     });
@@ -1998,7 +1998,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       createResponseLossOnce: true,
       executionStatus: "done",
     });
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
 
     await page.getByRole("button", { name: "지금 갱신" }).click();
     await expect.poll(() => pipeline.posts.length).toBe(1);
@@ -2024,7 +2024,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await mockOpsDatasets(page, { items, details });
     const pipeline = await mockPipelineRequests(page, { createStatus: 409 });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect.poll(() => pipeline.posts.length).toBe(1);
@@ -2050,7 +2050,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       conflictCode: "LOCK_BUSY",
     });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect(page.getByText(/약 30초 후 다시 시도/)).toBeVisible();
@@ -2067,7 +2067,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       reusedActiveRequest: true,
     });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect(page.getByTestId("refresh-create-result")).toHaveText(
@@ -2093,7 +2093,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         executionGetCount === 1 ? "running" : "done",
     });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("button", { name: "지금 갱신" }).click();
 
     await expect(page.getByTestId("active-local-request")).toBeVisible();
@@ -2133,12 +2133,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await mockOpsDatasets(page, {
       items: [row],
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           active_execution: activeExecution,
           latest_execution: terminalExecution,
           run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
-      KMA_SCOPE, {
+      OPINET_PROVIDER_DATASET_ID,
+      OPINET_SCOPE, {
             items: [activeExecution, terminalExecution],
           }),
         }),
@@ -2146,7 +2146,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     const pipeline = await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
 
     const active = page.getByTestId("active-execution");
     await expect(active).toBeVisible();
@@ -2182,13 +2182,13 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         }),
       ],
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: (detailCount) =>
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: (detailCount) =>
           makeDetail({
             active_execution: detailCount === 1 ? activeExecution : null,
             latest_execution: detailCount === 1 ? null : terminalExecution,
             run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
-      KMA_SCOPE, {
+      OPINET_PROVIDER_DATASET_ID,
+      OPINET_SCOPE, {
               items: [detailCount === 1 ? activeExecution : terminalExecution],
             }),
           }),
@@ -2196,7 +2196,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await expect(page.getByTestId("active-execution")).toBeVisible();
 
     await expect
@@ -2237,14 +2237,14 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       await mockOpsDatasets(page, {
         items: [makeGridRow({ refresh_policy: policyCase.policy })],
         details: {
-          [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+          [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
             refresh_policy: policyCase.policy,
           }),
         },
       });
       const pipeline = await mockPipelineRequests(page);
 
-      await page.goto(KMA_DEEP_LINK);
+      await page.goto(OPINET_DEEP_LINK);
 
       await expect(
         page.getByRole("button", { name: "지금 갱신" }),
@@ -2277,7 +2277,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
-          operation_key: KMA_OPERATION_KEY,
+          operation_key: OPINET_OPERATION_KEY,
           status: "never_run",
           cursor: {},
           last_success_at: null,
@@ -2294,25 +2294,25 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       // 다른 target scope의 이력만 존재 — external 첫 실행에는 섞이면 안 된다.
       run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
         {
           items: [],
         },
       ),
       event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
       items,
-      details: { [`${KMA_PROVIDER}/${KMA_DATASET}`]: detail },
+      details: { [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: detail },
     });
     const pipeline = await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
+      `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
         `&sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`,
     );
     await expect(page.getByRole("button", { name: "지금 갱신" })).toBeEnabled();
@@ -2324,7 +2324,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     expect(pipeline.posts[0].body.scope).toMatchObject({
       type: "provider_dataset",
       sync_scope: ACTIVE_EXTERNAL_SCOPE,
-      operation_key: KMA_OPERATION_KEY,
+      operation_key: OPINET_OPERATION_KEY,
     });
   });
 
@@ -2340,15 +2340,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       allowInvalidDetailContract: true,
       items: [externalRow],
       details: {
-        [`${KMA_PROVIDER}/${KMA_DATASET}`]: makeDetail({
+        [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: makeDetail({
           // capability allow-list에는 남아 있지만 exact state가 응답에서 사라진 경합.
           scopes: makeDetail().scopes,
           run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
           ),
           event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
           ),
         }),
@@ -2357,7 +2357,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const pipeline = await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
+      `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
         `&sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`,
     );
 
@@ -2378,9 +2378,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       sync_scope: ACTIVE_EXTERNAL_SCOPE,
       provider_datasets: [
         {
-          provider: KMA_PROVIDER,
-          dataset_key: KMA_DATASET,
-          provider_dataset_id: KMA_PROVIDER_DATASET_ID,
+          provider: OPINET_PROVIDER,
+          dataset_key: OPINET_DATASET,
+          provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
           sync_scope: ACTIVE_EXTERNAL_SCOPE,
           operation_key: "e2e_refresh",
           status: "done",
@@ -2402,25 +2402,25 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       latest_execution: externalExecution,
       run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
         {
           items: [externalExecution],
         },
       ),
       event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       ACTIVE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
       items: [externalRow],
-      details: { [`${KMA_PROVIDER}/${KMA_DATASET}`]: detail },
+      details: { [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: detail },
     });
     await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
+      `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
         `&sync_scope=${encodeURIComponent(ACTIVE_EXTERNAL_SCOPE)}`,
     );
 
@@ -2437,9 +2437,9 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       sync_scope: STALE_EXTERNAL_SCOPE,
       provider_datasets: [
         {
-          provider: KMA_PROVIDER,
-          dataset_key: KMA_DATASET,
-          provider_dataset_id: KMA_PROVIDER_DATASET_ID,
+          provider: OPINET_PROVIDER,
+          dataset_key: OPINET_DATASET,
+          provider_dataset_id: OPINET_PROVIDER_DATASET_ID,
           sync_scope: STALE_EXTERNAL_SCOPE,
           operation_key: "e2e_refresh",
           status: "done",
@@ -2456,7 +2456,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         ...makeDetail().scopes,
         {
           sync_scope: STALE_EXTERNAL_SCOPE,
-          operation_key: KMA_OPERATION_KEY,
+          operation_key: OPINET_OPERATION_KEY,
           status: "active",
           cursor: {},
           last_success_at: MOCK_OLD,
@@ -2468,25 +2468,25 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       ],
       latest_execution: staleExecution,
       run_history: makeRunHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       STALE_EXTERNAL_SCOPE,
         {
           items: [staleExecution],
         },
       ),
       event_history: makeEventHistory(
-      KMA_PROVIDER_DATASET_ID,
+      OPINET_PROVIDER_DATASET_ID,
       STALE_EXTERNAL_SCOPE,
       ),
     });
     await mockOpsDatasets(page, {
       items: [staleRow],
-      details: { [`${KMA_PROVIDER}/${KMA_DATASET}`]: detail },
+      details: { [`${OPINET_PROVIDER}/${OPINET_DATASET}`]: detail },
     });
     await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
+      `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
         `&sync_scope=${encodeURIComponent(STALE_EXTERNAL_SCOPE)}`,
     );
     await expect(
@@ -2537,7 +2537,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
         type: "provider_dataset",
         provider_dataset_id: MOIS_PROVIDER_DATASET_ID,
         sync_scope: "dataset_wide",
-        operation_key: KMA_OPERATION_KEY,
+        operation_key: OPINET_OPERATION_KEY,
       },
       run_mode: "now",
     });
@@ -2611,7 +2611,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       executionGetStatus: 503,
     });
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await page.getByRole("button", { name: "지금 갱신" }).click();
     await expect.poll(() => pipeline.posts.length).toBe(1);
 
@@ -2642,7 +2642,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // KREX 행 선택 → URL query 반영.
     await page
       .getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${KMA_OPERATION_KEY} 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${OPINET_OPERATION_KEY} 상세 열기`,
       })
       .click();
     await expect(page).toHaveURL(/provider_dataset_id=103/);
@@ -2668,7 +2668,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto("/ops/datasets");
     const rowButton = page.getByRole("button", {
-      name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
+      name: `${OPINET_PROVIDER} ${OPINET_DATASET} ${OPINET_SCOPE} ${OPINET_OPERATION_KEY} 상세 열기`,
     });
     await rowButton.click();
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
@@ -2754,8 +2754,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const pipeline = await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider=${KMA_PROVIDER}&dataset=${KMA_DATASET}` +
-        `&sync_scope=${KMA_SCOPE}`,
+      `/ops/datasets?provider=${OPINET_PROVIDER}&dataset=${OPINET_DATASET}` +
+        `&sync_scope=${OPINET_SCOPE}`,
     );
 
     await expect(page.getByTestId("invalid-dataset-deep-link")).toBeVisible();
@@ -2771,7 +2771,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await mockPipelineRequests(page);
 
     await page.goto(
-      `/ops/datasets?provider_dataset_id=${KMA_PROVIDER_DATASET_ID}` +
+      `/ops/datasets?provider_dataset_id=${OPINET_PROVIDER_DATASET_ID}` +
         "&sync_scope=external_system%3Amissing",
     );
 
@@ -2792,7 +2792,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
 
     await page.goto(
       "/ops/datasets?provider_dataset_id=999999" +
-        `&sync_scope=${KMA_SCOPE}`,
+        `&sync_scope=${OPINET_SCOPE}`,
     );
 
     await expect(page.getByTestId("invalid-dataset-deep-link")).toBeVisible();
@@ -2826,7 +2826,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await expect(page.getByText("데이터셋 상세")).toHaveCount(0);
     await expect(
       page.getByRole("button", {
-        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${KMA_OPERATION_KEY} 상세 열기`,
+        name: `${KREX_PROVIDER} ${KREX_DATASET} dataset_wide ${OPINET_OPERATION_KEY} 상세 열기`,
       }),
     ).toBeFocused();
   });
@@ -2847,7 +2847,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 행 선택 → 상세 → Escape로 닫힘 → 다시 빈 상태(딥링크와 일관).
     await page
       .getByRole("button", {
-        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
+        name: `${OPINET_PROVIDER} ${OPINET_DATASET} ${OPINET_SCOPE} ${OPINET_OPERATION_KEY} 상세 열기`,
       })
       .click();
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
@@ -2864,7 +2864,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("button", {
-        name: `${KMA_PROVIDER} ${KMA_DATASET} ${KMA_SCOPE} ${KMA_OPERATION_KEY} 상세 열기`,
+        name: `${OPINET_PROVIDER} ${OPINET_DATASET} ${OPINET_SCOPE} ${OPINET_OPERATION_KEY} 상세 열기`,
       }),
     ).toBeFocused();
   });
@@ -2876,7 +2876,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await mockOpsDatasets(page, { items, details });
     await mockPipelineRequests(page);
 
-    await page.goto(KMA_DEEP_LINK);
+    await page.goto(OPINET_DEEP_LINK);
     await expect(page.getByText("데이터셋 상세")).toBeVisible();
     const search = page.getByLabel("검색");
     await search.fill("no-matching-row");
@@ -2917,7 +2917,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
       grid
-        .getByRole("row", { name: /kma_short_forecast/ })
+        .getByRole("row", { name: /opinet_gas_station_prices/ })
         .getByText("확인 불가"),
     ).toBeVisible();
   });

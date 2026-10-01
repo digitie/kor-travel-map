@@ -170,8 +170,8 @@ async def test_poi_cache_target_generated_coord_and_active_key(
             )
             SELECT provider_dataset_id, 'openapi', 0
             FROM provider_sync.provider_datasets
-            WHERE provider = 'python-kma-api'
-              AND dataset_key = 'kma_weather_alerts'
+            WHERE provider = 'python-krex-api'
+              AND dataset_key = 'krex_traffic_notices'
             """,
             {},
         ),

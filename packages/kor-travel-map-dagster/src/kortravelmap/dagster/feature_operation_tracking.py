@@ -303,8 +303,7 @@ def _context_run_id(context: Any) -> str | None:
     돌려준다(pinned dagster 실측). 그래서 이 함수는 직접 호출 context에서 ``None``이
     아니라 ``"EPHEMERAL"``을 돌려주며, ``require_feature_operation_guard``의
     run 일치 검사도 그 값으로 성립한다. 패키지 테스트가 그 계약을 상수로 들고 있다
-    (``test_kma_weather._DIRECT_INVOCATION_RUN_ID``,
-    ``test_notice_assets._DIRECT_INVOCATION_RUN_ID``).
+    (``test_notice_assets._DIRECT_INVOCATION_RUN_ID``).
     """
 
     def _probe(target: Any, name: str) -> Any:

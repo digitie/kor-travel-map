@@ -61,13 +61,11 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.ops_dataset_service import (
     _catalog_info,
     _catalog_state_memberships,
-    _scope_refresh_capability,
 )
 from kortravelmap.api.provider_catalog import (
     ActiveOperationHandlerDriftError,
     ProviderDatasetCatalogEntry,
     assert_active_operation_handler_exact_set,
-    find_provider_dataset_catalog_entry,
     list_active_refresh_operation_bindings,
     list_provider_dataset_catalog,
 )
@@ -75,6 +73,8 @@ from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.dto import FeatureKind
 from kortravelmap.providers.feature_operation_registry import (
     feature_operation_handler_keys,
 )
@@ -772,10 +772,12 @@ _NON_DAGSTER_REFRESH_OPERATION_KEYS = frozenset(
 )
 
 
-#: retired `0224_c7_external_system_scope.py`의 historical declaration과 같은 값이어야 한다.
-_C7_PROVIDER = "python-kma-api"
-_C7_DATASET_KEY = "kma_ultra_short_nowcast"
-_C7_SYNC_SCOPE = "external_system:c7-e2e"
+#: KMA의 provider 정체성. ADR-104 이후 Map은 이 provider의 적재 operation을 하나도
+#: 켜 두지 않는다(`401_retire_map_kma_refresh`). KMA는 weather provider라 그 notice는
+#: 기상 원천 notice다(ADR-105).
+_KMA_PROVIDER = normalize_provider_name("kma")
+_WEATHER_KIND = FeatureKind.WEATHER.value
+_NOTICE_KIND = FeatureKind.NOTICE.value
 
 
 async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
@@ -793,37 +795,54 @@ async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
     assert verified >= _NON_DAGSTER_REFRESH_OPERATION_KEYS
 
 
-async def test_seed_declares_the_c7_acceptance_external_system_scope(
+async def test_head_serves_no_weather_dataset(
     seed_session: AsyncSession,
 ) -> None:
-    """C7 인수 scope 선언이 시드+migration 결과에 실제로 존재한다.
+    """head DB 카탈로그가 weather·기상 원천 notice를 실행 가능하다고 말하지 않는다.
 
-    ADR-088 이후 제출 가능한 ``sync_scope``의 정본은 이 선언이다 —
-    ``infra/feature_update_repo._ACTIVE_DATASET_MEMBERSHIPS_SQL``이 exact join으로
-    요구하고 ``feature_update_request_datasets``/``import_job_datasets``/
-    ``provider_sync_state``/``offline_uploads``의 exact FK가 구조로 강제한다.
+    ADR-104가 KMA 적재 operation을 껐고(401), ADR-105가 weather 기능 전체와 KMA notice를
+    내려놓으며 그 dataset을 비활성으로 내렸다(402). 실행 가능 집합의 정본은 이
+    카탈로그다 — ``POST /ops/pipeline/requests``의 membership 검증,
+    ``/ops/datasets``의 갱신 capability, offline upload 후보가 모두 ``is_active``와
+    ``operation.is_enabled``로 join한다. 코드에서 handler를 지우는 것만으로는 부족하다.
 
-    이 행이 조용히 사라지면 C7 prod live 인수(``ops-c7-kma-*-write``)가 preview
-    422로 죽는데, 그 실패는 **prod 실행에서만** 드러난다(실제로 그렇게 드러났다).
-    선언을 여기서 잠가 CI가 먼저 잡게 한다.
+    정체성은 이름이 아니라 capability와 provider다: ``produces``에 weather가 있는
+    dataset, 그리고 KMA가 내는 notice dataset. 하한은 본 것에 건다 — 대상 dataset이
+    시드에 실제로 보여야 이 검사가 무언가를 잰다. 행은 지우지 않는다(이력 FK).
     """
 
-    entry = await find_provider_dataset_catalog_entry(
-        seed_session,
-        provider=_C7_PROVIDER,
-        dataset_key=_C7_DATASET_KEY,
+    entries = [
+        entry
+        for entry in await list_provider_dataset_catalog(seed_session)
+        if _WEATHER_KIND in entry.produces
+        or (entry.provider == _KMA_PROVIDER and _NOTICE_KIND in entry.produces)
+    ]
+    assert len(entries) >= 2, (
+        "weather/KMA notice dataset이 시드에 없다 — 이 검사가 아무것도 재지 않는다: "
+        f"{[(entry.provider, entry.dataset_key) for entry in entries]}"
     )
-    assert entry is not None, f"{_C7_PROVIDER}/{_C7_DATASET_KEY} 시드가 없다"
-    assert _C7_SYNC_SCOPE in entry.refresh_scopes, (
-        f"C7 인수 scope 선언이 없다 — 0224_c7_external_system_scope 확인 "
-        f"(선언된 scope: {entry.refresh_scopes})"
+    assert any(entry.provider == _KMA_PROVIDER for entry in entries)
+    assert any(
+        operation.operation_kind == "refresh"
+        for entry in entries
+        for operation in entry.operations
+    ), "refresh operation 행 자체가 사라졌다 — 이력 FK가 가리키는 행은 지우지 않는다"
+
+    enabled = sorted(
+        f"{entry.provider}/{entry.dataset_key}:{operation.operation_key}:"
+        f"{operation.operation_kind}"
+        for entry in entries
+        for operation in entry.operations
+        if operation.is_enabled
     )
-    # capability(=API의 allowed_sync_scopes)까지 나와야 화면·서버가 같은 집합을 본다.
-    capability = _scope_refresh_capability(entry)
-    assert _C7_SYNC_SCOPE in capability.allowed_sync_scopes
-    # 선언이 늘어도 기본 scope는 여전히 target_grids다 — exact target은 좁힌 것이지
-    # 기본이 아니다.
-    assert entry.default_refresh_scope == "target_grids"
+    assert enabled == [], f"weather/KMA notice operation이 켜져 있다: {enabled}"
+    active = sorted(f"{e.provider}/{e.dataset_key}" for e in entries if e.is_active)
+    assert active == [], f"weather/KMA notice dataset이 활성이다: {active}"
+    assert not any(entry.is_refreshable for entry in entries)
+
+    targets = {(entry.provider, entry.dataset_key) for entry in entries}
+    bindings = await list_active_refresh_operation_bindings(seed_session)
+    assert not [b for b in bindings if (b.provider, b.dataset_key) in targets]
 
 
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(

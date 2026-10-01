@@ -51,16 +51,16 @@ type OpsDatasetGridRow = Schemas["OpsDatasetGridRow"];
 type OpsDatasetsGridResponse = Schemas["OpsDatasetsGridResponse"];
 
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
-const KMA_OPERATION_KEY = "kma_refresh";
+const KREX_OPERATION_KEY = "krex_refresh";
 // catalog grid(`makeCatalogRow`)가 투영하는 canonical operation_key. 요청 dialog는
 // 고른 catalog 행의 이 값을 그대로 실어 보내므로 단언도 여기에 묶는다.
 const CATALOG_OPERATION_KEY = "e2e_refresh";
 const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
-const SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule";
+const SCHEDULE_NAME = "feature_notice_krex_traffic_notices_hourly_schedule";
 const PROVIDER_DATASET_IDS = {
-  "python-kma-api/kma_short_forecast": 101,
+  "python-krex-api/krex_traffic_notices": 101,
   "python-mois-api/mois_licenses": 102,
   "python-opinet-api/opinet_stations": 103,
 } as const;
@@ -198,7 +198,7 @@ function canonicalPipelineUrl(
 
 function makeCatalogResponse(
   items: OpsDatasetGridRow[] = [
-    makeCatalogRow("python-kma-api", "kma_short_forecast", "target_grids"),
+    makeCatalogRow("python-krex-api", "krex_traffic_notices", "target_grids"),
     makeCatalogRow("python-mois-api", "mois_licenses", "dataset_wide"),
     makeCatalogRow("python-opinet-api", "opinet_stations", "dataset_wide"),
   ],
@@ -292,10 +292,10 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     created_at: "2026-07-14T10:00:00.000Z",
     provider_datasets: [
       {
-        provider: "python-kma-api",
-        dataset_key: "kma_short_forecast",
+        provider: "python-krex-api",
+        dataset_key: "krex_traffic_notices",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -410,10 +410,10 @@ function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
     created_at: createdAt,
     provider_datasets: [
       {
-        provider: "python-kma-api",
-        dataset_key: "kma_short_forecast",
+        provider: "python-krex-api",
+        dataset_key: "krex_traffic_notices",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: id,
@@ -444,7 +444,7 @@ function makeOverflowEvent(index: number): PipelineJobEventRecord {
     job_id: jobId,
     import_job_dataset_id: null,
     provider_dataset_id:
-      PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+      PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
     // member 없는 job-level event라 membership 두 축은 null이다.
     sync_scope: null,
     operation_key: null,
@@ -523,10 +523,10 @@ function makeDetail(): PipelineExecutionDetailResponse {
     job_kind: null,
     provider_datasets: [
       {
-        provider: "python-kma-api",
-        dataset_key: "kma_short_forecast",
+        provider: "python-krex-api",
+        dataset_key: "krex_traffic_notices",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -564,10 +564,10 @@ function makeDetail(): PipelineExecutionDetailResponse {
         operation_key: null,
         provider_datasets: [
           {
-            provider: "python-kma-api",
-            dataset_key: "kma_short_forecast",
+            provider: "python-krex-api",
+            dataset_key: "krex_traffic_notices",
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
             sync_scope: "target_grids",
             operation_key: "e2e_refresh",
             operation_member_id: TWIN_JOB_ID,
@@ -585,14 +585,14 @@ function makeDetail(): PipelineExecutionDetailResponse {
         scope: {
           type: "provider_dataset",
           provider_dataset_id:
-            PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+            PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
           sync_scope: "target_grids",
-          operation_key: KMA_OPERATION_KEY,
+          operation_key: KREX_OPERATION_KEY,
         },
         dataset_memberships: [
           {
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
             sync_scope: "target_grids",
             operation_key: "e2e_refresh",
           },
@@ -622,7 +622,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
           job_id: TWIN_JOB_ID,
           import_job_dataset_id: null,
           provider_dataset_id:
-            PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+            PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
           // 이 이벤트는 TWIN_JOB_ID의 canonical membership에서 나온다 —
           // 그 job의 membership과 같은 두 축을 갖는다. 축을 null로 두면
           // exact scope 딥링크가 무엇을 걸러 보여주는지 화면에서 확인할 수 없다.
@@ -632,7 +632,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
           stage: "loading",
           level: "error",
           code: "provider.timeout",
-          message: "kma fetch timeout",
+          message: "krex fetch timeout",
           payload: {},
           occurred_at: "2026-07-14T10:01:00.000Z",
         },
@@ -650,10 +650,10 @@ function makeImportDetail(): PipelineExecutionDetailResponse {
     status: "running",
     provider_datasets: [
       {
-        provider: "python-kma-api",
-        dataset_key: "kma_short_forecast",
+        provider: "python-krex-api",
+        dataset_key: "krex_traffic_notices",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -694,7 +694,7 @@ function makeSchedules(): PipelineSchedulesResponse {
         {
           name: SCHEDULE_NAME,
           description: null,
-          pipeline_name: "kma_short_forecast_job",
+          pipeline_name: "krex_traffic_notices_job",
           mode: "default",
           cron_schedule: "20 * * * *",
           default_cron_schedule: "20 * * * *",
@@ -1115,7 +1115,7 @@ async function installPipelineMocks(
           checked_at: "2026-07-14T10:00:00.000Z",
           run: {
             run_id: "run-orphan",
-            job_name: "kma_short_forecast_job",
+            job_name: "krex_traffic_notices_job",
             status: "FAILURE",
             start_time: 1789344000,
             end_time: null,
@@ -1125,7 +1125,7 @@ async function installPipelineMocks(
           events: [
             {
               event_type: "MessageEvent",
-              message: "step failed: kma fetch",
+              message: "step failed: krex fetch",
               timestamp: "1789344001000",
               level: "ERROR",
               step_id: "load_step",
@@ -1133,7 +1133,7 @@ async function installPipelineMocks(
               error: null,
             },
           ],
-          failure_reason: "STEP_FAILURE: kma fetch timeout",
+          failure_reason: "STEP_FAILURE: krex fetch timeout",
           failure_events: [],
           event_cursor: null,
           event_has_more: false,
@@ -1155,7 +1155,7 @@ async function installPipelineMocks(
           runs: [
             {
               run_id: "run-orphan",
-              job_name: "kma_short_forecast_job",
+              job_name: "krex_traffic_notices_job",
               status: "FAILURE",
               start_time: 1789344000,
               end_time: null,
@@ -1571,7 +1571,7 @@ async function installPipelineMocks(
             provider_dataset_id:
               PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
             sync_scope: "dataset_wide",
-            operation_key: KMA_OPERATION_KEY,
+            operation_key: KREX_OPERATION_KEY,
           },
           dataset_memberships: [
             {
@@ -1663,14 +1663,14 @@ async function installPipelineMocks(
           scope: {
             type: "provider_dataset",
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
             sync_scope: "target_grids",
-            operation_key: KMA_OPERATION_KEY,
+            operation_key: KREX_OPERATION_KEY,
           },
           dataset_memberships: [
             {
               provider_dataset_id:
-                PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+                PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
               sync_scope: "target_grids",
               operation_key: "e2e_refresh",
             },
@@ -1771,15 +1771,15 @@ test.describe("/ops/pipeline", () => {
     // 따로 exact match하던 이전 단언은 이제 존재하지 않는 노드를 찾았다.
     await expect(
       requestRow.getByText(
-        `python-kma-api/kma_short_forecast · #${
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"]
+        `python-krex-api/krex_traffic_notices · #${
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"]
         } · target_grids · e2e_refresh`,
         { exact: true },
       ),
     ).toBeVisible();
     await expect(
       requestRow.getByText(
-        "python-kma-api/kma_short_forecast · target_grids · e2e_refresh",
+        "python-krex-api/krex_traffic_notices · target_grids · e2e_refresh",
         { exact: true },
       ),
     ).toBeVisible();
@@ -1802,7 +1802,7 @@ test.describe("/ops/pipeline", () => {
       "pipeline-dagster-run-detail-run-orphan",
     );
     await expect(runDetail).toBeVisible();
-    await expect(runDetail).toContainText("STEP_FAILURE: kma fetch timeout");
+    await expect(runDetail).toContainText("STEP_FAILURE: krex fetch timeout");
   });
 
   // 회귀 잠금: `operations_by_status`는 GROUP BY 집계라 **0건 버킷이 응답에서 빠진다**
@@ -2042,7 +2042,7 @@ test.describe("/ops/pipeline", () => {
     const eventCursor = "event-overflow-page-2";
     const exactPagedScope: ExactPagedScope = {
       pageSize: 50,
-      providerDatasetId: PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+      providerDatasetId: PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
       syncScope: "target_grids",
     };
     const counters = await installPipelineMocks(page, {
@@ -2462,7 +2462,7 @@ test.describe("/ops/pipeline", () => {
 
     const panel = page.getByTestId("pipeline-execution-detail");
     await expect(panel).toBeVisible();
-    await expect(panel.getByText("kma fetch timeout")).toBeVisible();
+    await expect(panel.getByText("krex fetch timeout")).toBeVisible();
     await expect(panel.getByText("40% · loading")).toBeVisible();
     await expect(
       panel.getByRole("button", { name: "즉시 재큐잉 (run-now)" }),
@@ -3681,7 +3681,7 @@ test.describe("/ops/pipeline", () => {
           PROVIDER_DATASET_IDS["python-mois-api/mois_licenses"],
         sync_scope: "dataset_wide",
         // dialog는 고른 catalog 행의 operation_key를 그대로 싣는다 —
-        // KMA 행 상수를 기대하던 이전 단언은 fixture와 어긋나 있었다.
+        // KREX 행 상수를 기대하던 이전 단언은 fixture와 어긋나 있었다.
         operation_key: CATALOG_OPERATION_KEY,
       },
     });
@@ -4146,7 +4146,7 @@ test.describe("/ops/pipeline", () => {
     expect(counters.requestBodies.at(0)).toMatchObject({
       scope: {
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-kma-api/kma_short_forecast"],
+          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
         sync_scope: "target_grids",
         type: "provider_dataset",
       },

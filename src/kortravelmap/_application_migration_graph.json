@@ -3,6 +3,24 @@
     {
       "down_revision": [],
       "revision": "400"
+    },
+    {
+      "down_revision": [
+        "400"
+      ],
+      "revision": "401_retire_map_kma_refresh"
+    },
+    {
+      "down_revision": [
+        "401_retire_map_kma_refresh"
+      ],
+      "revision": "402_remove_map_weather_data"
+    },
+    {
+      "down_revision": [
+        "402_remove_map_weather_data"
+      ],
+      "revision": "403_drop_kma_notice_lineage"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

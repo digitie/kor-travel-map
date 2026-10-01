@@ -74,7 +74,6 @@ const DEDUP_KINDS = [
   "event",
   "notice",
   "price",
-  "weather",
   "route",
   "area",
 ] as const;
@@ -84,7 +83,6 @@ const FEATURE_KIND_LABELS: Record<(typeof DEDUP_KINDS)[number], string> = {
   event: "행사",
   notice: "공지",
   price: "가격",
-  weather: "날씨",
   route: "경로",
   area: "구역",
 };

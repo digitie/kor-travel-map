@@ -9,7 +9,7 @@ read 응답의 ``feature_id`` 필드 값은 legacy ``f_*`` 표기가 아니라 U
 - cursor/keyset encode·내부 join 키는 치환 **전** row의 값을 쓴다. 재키 후 그 축은
   더 이상 legacy가 아니라 정본 키(uuid) 자신이다.
 - echo 예외(요청 표기 보존): batch found/missing 키·item ``feature_id``,
-  weather-batch target echo, path-param echo. 이들은 치환 대상이 아니다 — 요청이
+  path-param echo. 이들은 치환 대상이 아니다 — 요청이
   legacy ``f_*``로 물었으면 응답의 그 자리는 물어본 표기를 되돌려준다.
 
 projection에 ``feature_uuid``가 빠졌거나 NULL이면 fail-close(ValueError). 재키 후

@@ -23,8 +23,9 @@ DDL 오류도 타입 오류도 나지 않는다.
 
 ## 이 검사가 공허해지는 경우
 
-``make_feature_id``를 감싼 헬퍼를 통해 부르면 (1)이 그 함수를 못 본다 —
-``providers/kma.py``의 ``kma_alert_notice_feature_id``가 실제로 그 모양이다. 그래서
+``make_feature_id``를 감싼 헬퍼를 통해 부르면 (1)이 그 함수를 못 본다 — 옛
+``providers/kma.py``(ADR-105로 제거)의 ``kma_alert_notice_feature_id``가 실제로 그
+모양이었다. 그래서
 **파일 단위 수 대조**를 함께 둔다: 한 모듈의 ``source_natural_key=`` 등장 수와
 ``provider_natural_key=`` 등장 수가 같아야 한다. 헬퍼로 감싸도 그 수는 맞아야 한다.
 """
@@ -92,7 +93,7 @@ def test_the_provider_modules_are_found() -> None:
 
     assert len(_MODULES) >= 15, [_relative(p) for p in _MODULES]
     names = {p.name for p in _MODULES}
-    for expected in ("opinet.py", "kma.py", "krex.py", "offline_upload.py"):
+    for expected in ("opinet.py", "krex.py", "offline_upload.py"):
         assert expected in names, f"{expected}를 찾지 못했다 — 탐색 경로가 옮겨졌다"
 
 

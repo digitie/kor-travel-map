@@ -28,8 +28,6 @@ from typing import Final
 
 PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     # ``kortravelmap.providers`` 모듈.Protocol → provider 패키지의 실모델 경로.
-    "airkorea.AirQualityStationItem": "airkorea.models.Station",
-    "airkorea.AirQualityMeasurementItem": "airkorea.models.AirQualityMeasurement",
     "datagokr_file_data.DataGoKrFileDataRecord": "datagokr.models.PublicFileDataRecord",
     "khoa.OceanBeachInfoItem": "khoa.models.OceanBeachInfo",
     "knps.KnpsPointRecord": "knps.models.KnpsPlaceRecord",
@@ -39,13 +37,10 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     "krairport.AirportMetadataItem": "krairport.models.AirportMetadata",
     "krex.KrexRestAreaItem": "krex.models.RestArea",
     "krex.KrexRestAreaFuelPriceRecord": "krex.models.RestAreaFuelPrice",
-    "krex.KrexRestAreaWeatherRecord": "krex.models.RestAreaWeather",
     "krex.KrexTrafficNoticeItem": "krex.models.Incident",
     "krforest.RecreationForestItem": "krforest.models.StandardRecreationForest",
     "krforest.ForestSpatialItem": "krforest.models.ForestSpatialPoint",
     "krforest.ForestTrailItem": "krforest.models.ForestSpatialFeature",
-    "krforest_safety.MountainWeatherItem": "krforest.models.MountainWeather",
-    "krforest_safety.WildfireRiskForecastItem": "krforest.models.WildfireRiskForecast",
     "krforest_safety.LandslideForecastIssueItem": "krforest.models.LandslideForecastIssue",
     "krheritage.KrHeritageItemKey": "krheritage.models.heritage.HeritageKey",
     "krheritage.KrHeritageItem": "krheritage.models.heritage.HeritageDetail",
@@ -72,33 +67,9 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
 PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
     # provider 모델이 직접 만족하지 않는 Protocol과 그 사유.
     # 사유 없이 여기에 넣는 것은 게이트를 무력화하는 것과 같다 — 반드시 근거를 적는다.
-    "kma.KmaShortForecastItem": (
-        "provider ``ForecastItem``의 typed 필드가 아니라 ``item.raw`` dict 키를 읽어 "
-        "Dagster ``KmaForecastRow``를 만든다(kma_weather.forecast_rows_from_items). "
-        "결박 대상은 모델 속성이 아니라 raw 키라 표면 대조가 성립하지 않는다."
-    ),
-    "kma.KmaUltraShortNowcastItem": (
-        "``WeatherSnapshot.raw['items']`` dict에서 Dagster ``KmaNowcastRow``를 만든다"
-        "(kma_weather.nowcast_rows_from_snapshot). 위와 같은 사유."
-    ),
-    "kma.KmaUltraShortForecastItem": "``KmaShortForecastItem``과 같은 raw 기반 row 경로.",
-    "kma.KmaWeatherAlertRegion": "특보 지역 — Map이 파싱해 만드는 중첩 shape.",
-    "kma.KmaWeatherAlertItem": (
-        "provider ``WeatherWarningItem``을 Map이 alert 도메인 shape으로 재구성한다. "
-        "필드명이 provider와 1:1이 아니다."
-    ),
-    "kma.KmaMidLandForecastItem": (
-        "중기육상예보 — provider ``MidForecastItem``의 단일 행을 Map이 "
-        "``rn_st_*`` 등 확장 필드로 펼친 shape."
-    ),
-    "kma.KmaMidTemperatureItem": "중기기온예보 — 위와 같은 펼침 shape(``ta_max_*``/``ta_min_*``).",
     "krex.KrexRestAreaPriceItem": (
         "etl_live fixture 전용 narrow row. 실 Dagster 경로는 "
         "``KrexRestAreaFuelPriceRecord``(provider ``RestAreaFuelPrice``)를 쓴다."
-    ),
-    "krex.KrexRestAreaWeatherItem": (
-        "etl_live fixture 전용 melt된 narrow row(1 metric/1행). 실 Dagster 경로는 "
-        "wide row인 ``KrexRestAreaWeatherRecord``(provider ``RestAreaWeather``)를 쓴다."
     ),
     "opinet.OpinetPriceItem": (
         "``uni_id``/``prodcd``/``trade_dt`` — provider 모델에 없는 이름이고 "
@@ -112,7 +83,9 @@ PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
 
 두 부류다.
 
-1. provider 모델의 ``raw`` dict를 읽어 Map이 자체 row를 만드는 경로(kma 전부).
-   이 경계의 취약점은 **모델 속성이 아니라 raw 키**이며 본 게이트의 대상이 아니다.
-2. fixture 전용 shape(krex narrow row, ``OpinetPriceItem``).
+1. fixture 전용 shape(krex narrow row, ``OpinetPriceItem``).
+2. Map 내부 shape(visitkorea 매처·매칭 결과).
+
+(옛 kma 전부 — raw dict 기반 row — 와 airkorea·krex 휴게소 기상·krforest 산악기상/
+산불위험 Protocol은 ADR-105로 weather 기능과 함께 제거했다.)
 """

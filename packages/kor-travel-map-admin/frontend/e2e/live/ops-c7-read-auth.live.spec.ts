@@ -49,8 +49,7 @@ const COUNT_STATE_TEST_TIMEOUT_MS = 180_000;
 // 응답 대기 상한은 click의 actionability 상한(`playwright.live.config.ts`의
 // `actionTimeout` 60s) **이상**이어야 한다. 짧게 잡으면 진행 중(aria-disabled) 버튼을
 // 기다리는 동안 응답 창이 먼저 만료돼, 그 클릭이 낸 응답을 아무도 보지 못한다.
-// 같은 규약이 `_ops-c7-admin-api.ts`의 `DATASET_DETAIL_FETCH_TIMEOUT_MS`와
-// `ops-c7-kma-empty-write.live.spec.ts:50-56`(리뷰 승인된 선례)에 이미 있다.
+// (같은 규약의 선례였던 KMA exact-scope spec들은 2026-10-01 퇴역했다, ADR-104/105.)
 const REFRESH_RESPONSE_TIMEOUT_MS = 60_000;
 const REFRESH_ATTEMPTS = 2;
 const REJECTION_TEST_TIMEOUT_MS = 90_000;
@@ -121,7 +120,7 @@ type TimedGridResponse = {
  * E2E_C7_EXPECTED_UI_ORIGIN_SHA256=<redacted> \
  * E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256=<redacted> \
  * E2E_ADMIN_PASSWORD=<redacted> E2E_ADMIN_WRITE=1 \
- * E2E_C7_READ_AUTH_WRITE=1 E2E_C7_KMA_STATE_FILE=<absolute-0600-path> \
+ * E2E_C7_READ_AUTH_WRITE=1 E2E_C7_TARGET_STATE_FILE=<absolute-0600-path> \
  * npm run e2e:live -- \
  * e2e/live/ops-c7-read-auth.live.spec.ts --workers=1 --retries=0
  *
@@ -571,11 +570,9 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       });
 
       expect(cleanup).toEqual({
-        allRequestsTerminal: true,
         preservedForManualCleanup: false,
         restored: true,
       });
-      expect(state.requestIds.size).toBe(0);
       expect(state.cleanupResult).toEqual(cleanup);
       expect(
         (await getPoiTarget(page, target.externalSystem, target.targetKey))
@@ -780,8 +777,7 @@ function isDatasetsGridResponse(response: Response): boolean {
  *  방금 누른 refetch가 대체되면 그 요청은 abort되고 `response` 이벤트가 오지 않는다
  *  (trace 실측: `status=-1`, `time_ms=-1`). 그러면 특정 응답 하나를 기다리는 코드는
  *  상한까지 매달렸다가 **지점 정보 없는 timeout**으로 죽는다 — 화면은 멀쩡해서 원인이
- *  보이지 않는다. 같은 상호작용의 선례가
- *  `ops-c7-kma-empty-write.live.spec.ts:88-93`에 있다.
+ *  보이지 않는다.
  *
  *  두 가지를 **가른다**.
  *  - 응답을 못 봤다 → 재시도한다(취소는 재시도로 넘어간다).

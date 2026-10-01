@@ -74,7 +74,7 @@ api = apis[0]
 # `ktm_feature_service`는 schema owner를 SET TRUE로 받는다(Map bootstrap).
 #
 # 소유권 키는 **name**이다 — fixture가 만드는 모든 행 이름에 run_id가 들어가고 `E2E `로
-# 시작한다(`_admin_fixture_name` / `E2E suppressed {weather,price} {run_id}`). `feature_id`는
+# 시작한다(`_admin_fixture_name` / `E2E suppressed price {run_id}`). `feature_id`는
 # uuid라 run_id 문자열과 비교할 수 없다. alias·request 두 줄은 옛 주소 체계의 잔재까지
 # 넓게 센다(지금 스키마에서는 대개 0이다). run_id는 SQL 문자열이 아니라 bind parameter다.
 # fixture는 feature 밖에도 행을 남긴다 — `provider_sync.provider_datasets`(key

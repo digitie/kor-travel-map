@@ -23,7 +23,7 @@ type AdminIssuePatchRequest = components["schemas"]["AdminIssuePatchRequest"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const ISSUE_ID = "issue-0000-1111-2222-3333-444455556666";
-const FEATURE_ID = "python-kma-api::kma_weather_values::mock-feature-1";
+const FEATURE_ID = "python-knps-api::knps_facilities::mock-feature-1";
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -37,17 +37,17 @@ function makeIssue(
   overrides: Partial<AdminIssueRecord> = {},
 ): AdminIssueRecord {
   return {
-    dataset_key: "kma_weather_values",
+    dataset_key: "knps_facilities",
     detected_at: MOCK_NOW,
     feature_id: FEATURE_ID,
     issue_id: ISSUE_ID,
     last_seen_at: MOCK_NOW,
     message: "주소를 확인할 수 없습니다.",
     payload: { rule: "address-required" },
-    provider: "python-kma-api",
+    provider: "python-knps-api",
     resolved_at: null,
     severity: "critical",
-    source_record_key: "kma::station::108",
+    source_record_key: "knps::facility::108",
     status: "open",
     violation_type: "missing_address",
     ...overrides,

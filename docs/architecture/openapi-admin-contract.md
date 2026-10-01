@@ -883,15 +883,8 @@ provider/dataset identity를 기준으로 처리한다.
   내부 `default` state는 API에서 `dataset_wide`로 투영한다. strict parser가 거부하는 legacy
   scope는 조작 URL로 노출하지 않으며, 그런 state만 남은 orphan provider/dataset은 비가변
   `dataset_wide` placeholder로 남겨 provider/dataset 자체의 존재는 숨기지 않는다.
-- KMA grid 3종은 `target_grids`와 `external_system:*`의 active target을 격자로 해석하고
-  cap을 적용한 뒤 유효 격자가 0개면 typed `KmaWeatherTargetScopeEmptyError`로 canonical
-  operation을 `failed` 처리한다. provider를 시도하지 않은 preflight 실패이므로 provider
-  호출·적재·sync-state failure/success/cursor/timestamp write는 없고 operation 오류가 durable
-  증거다. credential 확인·`kma` import·public client 생성도 target read → grid mapping/dedupe →
-  cap → empty 판정과 cursor skip 뒤로 지연한다. canonical terminal 전이와 같은 transaction에
-  `ops.import_job_events.code=kma.target_scope_empty`를 정확히 1건 기록하며, terminal replay는
-  중복 event를 만들지 않는다. UI는 오류 문자열을 파싱하지 않고 pipeline 상세 `events[].code`와
-  dataset 상세 `event_history.items[].code`에서 같은 code를 읽는다.
+- (제거) 옛 KMA grid 3종의 target 격자 preflight(`KmaWeatherTargetScopeEmptyError`,
+  `kma.target_scope_empty` event)는 ADR-104/105로 Map이 KMA를 적재하지 않게 되면서 사라졌다.
 - dataset 상세의 `event_history.items`는 선택한 논리 scope의 canonical effective scope를
   event 쿼리의 ORDER/LIMIT 전에 제한한 결과다. 각 event는 non-null `sync_scope`를 포함한다.
   `event_history={items,next_cursor,canonical_url}`은 같은 exact scope를 끝까지 이어 간다.

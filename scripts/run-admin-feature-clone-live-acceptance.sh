@@ -785,8 +785,9 @@ owned_feature_ids_sql() {
   local run_id="$1"
   [[ "$run_id" =~ ^[a-z0-9][a-z0-9-]{15,79}$ ]] ||
     die "API-owned feature ID run ID is invalid"
-  # T-VN-36 live spec은 여섯 개의 결정적 fixture id를 쓰지 않는다. 두 provider
-  # fixture(weather/price)의 id는 run_id 자연키로 **재계산**할 수 있다. 그러나 admin
+  # T-VN-36 live spec은 여섯 개의 결정적 fixture id를 쓰지 않는다. provider
+  # fixture(price 한 건 — weather는 ADR-105로 빠졌다)의 id는 run_id 자연키로
+  # **재계산**할 수 있다. 그러나 admin
   # create가 만드는 place Feature의 id는 M01 뒤로 `manual::{feature_uuid}`를 자연키로
   # 쓰고 그 uuid는 서버가 발급하는 랜덤 UUIDv7이라 **밖에서 재계산할 수 없다.**
   # 그래서 그 하나는 api-audit 증거에서 읽는다 — 아래 `owned_feature_uuids_sql`이
@@ -802,7 +803,6 @@ def make_id(kind: str, category: str, source_type: str, source_natural_key: str)
     return f"f_global_{kind[0]}_{hashlib.sha1(raw.encode()).hexdigest()[:16]}"
 
 ids = [
-    make_id("weather", "00000000", "e2e-live-acceptance", f"{run_id}:weather"),
     make_id("price", "00000000", "e2e-live-acceptance", f"{run_id}:price"),
 ]
 print(",".join(repr(value) for value in ids))
@@ -897,8 +897,7 @@ values = payload.get("summary_run_ids")
 if (
     payload.get("action") != "seed"
     or not isinstance(values, list)
-    or len(values) != 2
-    or len(set(values)) != 2
+    or len(values) != 1
     or not all(isinstance(value, int) and not isinstance(value, bool) and value > 0 for value in values)
 ):
     raise SystemExit("invalid current-summary receipt evidence")

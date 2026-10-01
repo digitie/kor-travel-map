@@ -5,18 +5,23 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "de41961d04c86225de48259fb86caa18e08efcd9cbd21820cfb3b0d768b6de0c"
+      "sha256": "d2935f46b308de5c71b00b27777d5a32aefca2b7ed5f0be1558d4ebc1f6f0c3a"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b"
+      "sha256": "3a847c8a53f36044080839855d634fbfa2c5b18fa769bcf95bcbbaa614f72da4"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d"
+      "sha256": "6677d41f572fe53b24269fc7d0a1f6a216ee774ce6744be0590959d8f8f2ddfb"
     }
   },
   "revisions": [
+    {
+      "date": "2026-10-01",
+      "task": "ADR-105 weather removal",
+      "change": "baseline sha256 3종 재고정 — Map이 weather 기능을 전부 내려놓으면서(ADR-105) 공개 weather 라우트(`GET /v1/features/{feature_id}/weather`·`/weather/forecast`·`GET /v1/features/weather/forecast`·`/weather/alerts`), service `POST /v1/features/weather/batch`, admin weather 조회와 응답의 weather 필드를 제거했다. 그 operation을 가리키던 목표 diff 항목도 함께 뺐다 — user `added` 4건(ADR-072 bitemporal 파라미터, 대상 operation 소멸)과 service `enum_changes` 1건(ADR-068 weather batch feature_id 값 전환, 대상 operation 소멸). 날씨의 정본은 kor-travel-weather다(ADR-068/T-365). counts는 user added 4→0, service enum_changes 2→1."
+    },
     {
       "date": "2026-09-03",
       "task": "T-VN-M05 debug surface removal",
@@ -166,7 +171,7 @@
   "surfaces": {
     "user": {
       "counts": {
-        "added": 4,
+        "added": 0,
         "removed": 15,
         "renamed": 2,
         "enum_changes": 8,
@@ -175,32 +180,7 @@
         "schema_changes": 0,
         "deferred": 2
       },
-      "added": [
-        {
-          "kind": "parameter",
-          "operation": "GET /v1/features/{feature_id}/weather",
-          "detail": "target_at/known_at bitemporal 조회 파라미터 — 공개 API가 두 시각을 수용한다",
-          "basis": "ADR-072"
-        },
-        {
-          "kind": "parameter",
-          "operation": "GET /v1/features/{feature_id}/weather/forecast",
-          "detail": "target_at/known_at bitemporal 조회 파라미터",
-          "basis": "ADR-072"
-        },
-        {
-          "kind": "parameter",
-          "operation": "GET /v1/features/weather/forecast",
-          "detail": "target_at/known_at bitemporal 조회 파라미터",
-          "basis": "ADR-072"
-        },
-        {
-          "kind": "parameter",
-          "operation": "GET /v1/features/weather/alerts",
-          "detail": "target_at/known_at bitemporal 조회 파라미터",
-          "basis": "ADR-072"
-        }
-      ],
+      "added": [],
       "removed": [
         {
           "operation": "GET /v1/curated-features",
@@ -367,7 +347,7 @@
         "added": 3,
         "removed": 0,
         "renamed": 0,
-        "enum_changes": 2,
+        "enum_changes": 1,
         "status_changes": 0,
         "error_changes": 0,
         "schema_changes": 0,
@@ -402,11 +382,6 @@
         {
           "operation": "POST /v1/features/batch",
           "detail": "요청/응답 item의 feature_id 값 UUID 전환 — PinVi는 검증된 alias map으로 DB-to-DB 이관 후 UUID를 소비한다",
-          "basis": "ADR-068"
-        },
-        {
-          "operation": "POST /v1/features/weather/batch",
-          "detail": "요청/응답 item의 feature_id 값 UUID 전환",
           "basis": "ADR-068"
         }
       ],

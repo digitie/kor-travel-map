@@ -34,10 +34,12 @@ _P = "python-mois-api"
 _D = "mois_license_features_history"
 _O = "mois_license_incremental_update"
 
-# ``dataset_wide``/``target_grids`` 두 scope가 모두 catalog에 등록된 유일한 계열.
-_SCOPED_P = "python-kma-api"
-_SCOPED_D = "kma_short_forecast"
-_SCOPED_O = "feature_weather_kma_short_forecast_job"
+# ``dataset_wide``/``target_grids`` 두 scope를 가진 refresh operation. 시드에서 그런
+# 계열은 KMA 격자뿐이었는데 401·402(ADR-104/105)가 꺼서, 쓰는 테스트가 자기
+# transaction 안에 probe catalog로 심는다.
+_SCOPED_P = "sync-state-probe"
+_SCOPED_D = "multi_scope_refresh"
+_SCOPED_O = "sync_state_multi_scope_probe_job"
 
 
 async def test_get_returns_none_when_absent(migrated_session: AsyncSession) -> None:
@@ -111,7 +113,56 @@ async def test_distinct_sync_scope_independent(
     T-VN-33 이후 PK는 ``(provider_dataset_id, sync_scope, operation_key)``이고
     ``sync_scope``는 catalog에 등록된 값(``dataset_wide``/``target_grids``)만
     FK로 허용된다 — 임의 문자열은 더 이상 쓸 수 없다(ADR-088).
+
+    두 scope를 가진 시드 operation은 KMA 격자뿐이었고 401·402(ADR-104/105)가 그것을
+    껐다. 검증 대상은 KMA가 아니라 scope별 cursor 분리이므로 이 transaction 안에 probe
+    catalog를 심는다.
     """
+    dataset_id = (
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind,
+                    is_active, capabilities
+                ) VALUES (
+                    :provider, :dataset_key, 'sync state probe', 'system', true,
+                    jsonb_build_object('schema_version', 1,
+                                       'produces', '[]'::jsonb,
+                                       'extensions', '{}'::jsonb)
+                )
+                RETURNING provider_dataset_id
+                """
+            ),
+            {"provider": _SCOPED_P, "dataset_key": _SCOPED_D},
+        )
+    ).scalar_one()
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.provider_dataset_operations (
+                provider_dataset_id, operation_key, operation_kind, is_enabled, config
+            ) VALUES (:dataset_id, :operation_key, 'refresh', true, '{}'::jsonb)
+            """
+        ),
+        {"dataset_id": dataset_id, "operation_key": _SCOPED_O},
+    )
+    for probe_scope in ("dataset_wide", "target_grids"):
+        await migrated_session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                    provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, :sync_scope, :operation_key, 'refresh')
+                """
+            ),
+            {
+                "dataset_id": dataset_id,
+                "sync_scope": probe_scope,
+                "operation_key": _SCOPED_O,
+            },
+        )
+    await migrated_session.flush()
     await record_sync_success(
         migrated_session,
         provider=_SCOPED_P,

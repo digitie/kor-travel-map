@@ -90,7 +90,6 @@ if TYPE_CHECKING:
     from kortravelmap.dto import Feature, FeatureBundle, SourceLink, SourceRecord
 
 __all__ = [
-    "AirQualityLoadResult",
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
@@ -125,7 +124,6 @@ __all__ = [
     "get_service_feature_batch_items",
     "public_active_notice_filter_sql",
     "public_active_notice_feature_identities",
-    "list_active_place_coords",
     "list_primary_place_locator",
     "find_place_features_without_phone",
     "set_feature_phones",
@@ -500,6 +498,11 @@ def _notice_lineage_sql(
 
     현행 read 경로는 ``_lineage_sql``로 물화된 값을 읽는다. 이 재계산은 값이
     맞는지 대조할 때와 컬럼이 없던 세대를 재생할 때만 쓴다.
+
+    DB 정본 ``provider_sync.notice_lineage_key``와 글자 단위로 같은 규칙이어야 한다
+    (``test_db_lineage_function_matches_frozen_replay_expression``). KMA 기상특보 분기는
+    403이 DB 함수에서 걷어낼 때 여기서도 함께 걷어냈다(ADR-105) — 한쪽만 바꾸면 두 벌이
+    갈린다.
     """
 
     return f"""
@@ -522,28 +525,6 @@ def _notice_lineage_sql(
         ),
         {entity_alias}.source_entity_id
       )
-      WHEN {dataset_alias}.provider = 'python-kma-api'
-       AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
-       AND {entity_alias}.source_entity_type = 'weather_alert'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(btrim({record_alias}.raw_data->>'region_code'), ''),
-            NULLIF(
-              btrim(
-                COALESCE(
-                  {record_alias}.raw_data->>'phenomenon',
-                  {record_alias}.raw_data->>'alert_type'
-                )
-              ),
-              ''
-            )
-          ),
-          ''
-        ),
-        {entity_alias}.source_entity_id
-      )
       ELSE {entity_alias}.source_entity_id
     END
     """
@@ -559,8 +540,9 @@ def _canonical_notice_feature_sql(
 ) -> str:
     """현재 사건 단위 identity로 만든 notice feature인지 판정하는 SQL.
 
-    KREX/KMA의 현 identity는 모두 ``bjd_code=None``과 고정 category를 사용하고,
-    ``source_natural_key``는 ``_notice_lineage_sql`` 결과와 같다. 따라서 같은
+    KREX 교통 notice의 현 identity는 ``bjd_code=None``과 고정 category를 사용하고,
+    ``source_natural_key``는 ``_notice_lineage_sql`` 결과와 같다. (KMA 특보 분기는
+    ADR-105로 Map이 기상특보를 적재하지 않게 되면서 제거했다.) 따라서 같은
     source record가 구/신 feature 양쪽에 연결된 identity 이행 동률에서도 현재
     ``make_feature_id`` 결과를 정확히 알아낼 수 있다. 그 외 provider는 근거가
     없으므로 ``false``로 두고 stable ``feature_id`` tie-break에 맡긴다.
@@ -582,15 +564,9 @@ def _canonical_notice_feature_sql(
     )
     return f"""
     CASE
-      WHEN (
-        ({dataset_alias}.provider = 'python-krex-api'
-         AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
-         AND {entity_alias}.source_entity_type = 'traffic_notice')
-        OR
-        ({dataset_alias}.provider = 'python-kma-api'
-         AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
-         AND {entity_alias}.source_entity_type = 'weather_alert')
-      )
+      WHEN {dataset_alias}.provider = 'python-krex-api'
+       AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
+       AND {entity_alias}.source_entity_type = 'traffic_notice'
       THEN EXISTS (
         SELECT 1
         FROM feature.feature_aliases AS canonical_notice_alias
@@ -618,7 +594,7 @@ def _canonical_notice_feature_sql(
 
 
 # 종료된 notice 숨김 — valid_end_time이 지난 notice는 지도/검색에서 제외한다
-# (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile·KMA 해제가 채운
+# (§9 "활성 notice만 표시", #632). KREX feed 소멸 reconcile이 채운
 # valid_end_time이 이 필터로 즉시 반영된다.
 #
 # T-VN-35D(ADR-086) — **typed timestamptz 비교**. 종전에는 free-form jsonb
@@ -1288,85 +1264,6 @@ price_summaries AS (
         ) AS price_summary
     FROM price_points
     GROUP BY feature_id
-),
-weather_ranked AS (
-    SELECT
-        candidate.feature_id,
-        fact.provider_dataset_id,
-        dataset.dataset_key,
-        dataset.display_name AS dataset_display_name,
-        dataset.provider,
-        fact.weather_domain,
-        fact.forecast_style,
-        fact.metric_key,
-        fact.metric_name,
-        fact.value_number,
-        fact.value_text,
-        fact.unit,
-        fact.issued_at,
-        fact.valid_at,
-        fact.observed_at,
-        fact.known_at,
-        summary.refresh_after,
-        row_number() OVER (
-            PARTITION BY candidate.feature_id
-            ORDER BY
-                CASE fact.metric_key
-                  WHEN 'T1H' THEN 10 WHEN 'TMP' THEN 20 WHEN 'TMN' THEN 30
-                  WHEN 'TMX' THEN 40 WHEN 'POP' THEN 50 WHEN 'SKY' THEN 60
-                  WHEN 'REH' THEN 70 WHEN 'PTY' THEN 80 WHEN 'PCP' THEN 90
-                  WHEN 'PM10' THEN 110 WHEN 'PM2_5' THEN 120 WHEN 'CAI' THEN 130
-                  WHEN 'O3' THEN 140 WHEN 'NO2' THEN 150 WHEN 'SO2' THEN 160
-                  WHEN 'CO' THEN 170 ELSE 100
-                END,
-                CASE fact.forecast_style
-                  WHEN 'observed' THEN 10 WHEN 'nowcast' THEN 20
-                  WHEN 'ultra_short' THEN 30 WHEN 'short' THEN 40 WHEN 'mid' THEN 50
-                  ELSE 100
-                END,
-                CASE WHEN fact.target_at >= now() THEN 0 ELSE 1 END,
-                abs(extract(epoch FROM (fact.target_at - now()))),
-                fact.known_at DESC,
-                fact.weather_value_key DESC
-        ) AS rank
-    FROM candidates AS candidate
-    JOIN feature.current_weather_summary AS summary
-      ON summary.feature_id = candidate.feature_id
-    JOIN feature.feature_weather_values AS fact
-      ON fact.weather_value_key = summary.weather_value_key
-    JOIN provider_sync.provider_datasets AS dataset
-      ON dataset.provider_dataset_id = fact.provider_dataset_id
-     AND dataset.is_active
-    WHERE candidate.kind = 'weather'
-      AND summary.refresh_after > clock_timestamp()
-      AND fact.metric_key IN (
-        'T1H', 'TMP', 'TMN', 'TMX', 'POP', 'SKY', 'REH', 'PTY', 'PCP',
-        'PM10', 'PM2_5', 'CAI', 'O3', 'NO2', 'SO2', 'CO'
-      )
-),
-weather_summaries AS (
-    SELECT
-        feature_id,
-        jsonb_build_object(
-            'provider_dataset_id', provider_dataset_id,
-            'dataset_key', dataset_key,
-            'dataset_display_name', dataset_display_name,
-            'provider', provider,
-            'weather_domain', weather_domain,
-            'forecast_style', forecast_style,
-            'metric_key', metric_key,
-            'metric_name', metric_name,
-            'value_number', value_number,
-            'value_text', value_text,
-            'unit', unit,
-            'issued_at', issued_at,
-            'valid_at', valid_at,
-            'observed_at', observed_at,
-            'known_at', known_at,
-            'refresh_after', refresh_after
-        ) AS weather_summary
-    FROM weather_ranked
-    WHERE rank = 1
 )
 """
 
@@ -1394,11 +1291,9 @@ SELECT
     candidate.kind, candidate.name, candidate.category,
     candidate.lon, candidate.lat,
     candidate.marker_icon, candidate.marker_color,
-    price_summaries.price_summary,
-    weather_summaries.weather_summary
+    price_summaries.price_summary
 FROM candidates AS candidate
 LEFT JOIN price_summaries USING (feature_id)
-LEFT JOIN weather_summaries USING (feature_id)
 ORDER BY candidate.feature_id ASC
 """
 
@@ -1443,12 +1338,10 @@ SELECT
     candidate.lon, candidate.lat,
     candidate.marker_icon, candidate.marker_color,
     price_summaries.price_summary,
-    weather_summaries.weather_summary,
     candidate.geometry,
     candidate.area_square_meters
 FROM candidates AS candidate
 LEFT JOIN price_summaries USING (feature_id)
-LEFT JOIN weather_summaries USING (feature_id)
 ORDER BY candidate.feature_id ASC
 """
 
@@ -2096,27 +1989,6 @@ class FeatureBatchItemRow:
     row_revision: int | None
     trip_card: dict[str, Any] | None
     feature_uuid: str | None = None
-
-
-@dataclass(frozen=True)
-class AirQualityLoadResult:
-    """``client.load_air_quality`` 결과 — 측정소 feature + 측정값 적재 카운트(T-RV-55d).
-
-    - ``stations`` — 측정소 weather feature ``FeatureLoadResult``.
-    - ``weather_values`` — ``feature_weather_values``에 upsert된 air_quality 값 수.
-    """
-
-    stations: FeatureLoadResult
-    weather_values: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "stations_total": self.stations.bundles_total,
-            "stations_features_inserted": self.stations.features_inserted,
-            "stations_features_updated": self.stations.features_updated,
-            "weather_values_loaded": self.weather_values,
-        }
 
 
 @dataclass(frozen=True)
@@ -5021,34 +4893,6 @@ async def public_active_notice_feature_identities(
         {"feature_ids": normalized},
     )
     return {str(row.feature_id): str(row.feature_uuid) for row in result}
-
-
-_LIST_ACTIVE_PLACE_COORDS_SQL: Final[str] = """
-SELECT
-    feature_id,
-    x_extension.ST_X(coord) AS lon,
-    x_extension.ST_Y(coord) AS lat
-FROM feature.features
-WHERE kind = 'place'
-  AND lifecycle_state = 'active'
-  AND quality_state = 'valid'
-  AND coord IS NOT NULL
-ORDER BY feature_id
-"""
-
-
-async def list_active_place_coords(
-    session: AsyncSession,
-) -> list[tuple[str, float, float]]:
-    """active place feature의 ``(feature_id, lon, lat)`` 전량 (T-219a).
-
-    KMA weather 격자→feature 매핑(옵션 B — `docs/etl/kma-weather-etl.md` §3)용.
-    호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와 일치하는
-    feature에 weather 값을 적재한다. 좌표 3컬럼만 조회하므로 수만 행에도 가볍고,
-    정렬은 결정적(feature_id).
-    """
-    rows = (await session.execute(text(_LIST_ACTIVE_PLACE_COORDS_SQL))).all()
-    return [(str(row.feature_id), float(row.lon), float(row.lat)) for row in rows]
 
 
 _LIST_PRIMARY_PLACE_LOCATOR_SQL: Final[str] = """

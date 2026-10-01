@@ -32,7 +32,6 @@ from kortravelmap.dagster.feature_operation_tracking import (
     DeclaredExecutionScope,
     declared_execution_scopes,
 )
-from kortravelmap.dagster.maintenance import CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS
 from kortravelmap.dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from kortravelmap.dagster.run_scope import MAP_CODE_LOCATION_NAME
 from kortravelmap.dagster.schedules import (
@@ -79,15 +78,6 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_khoa_beaches",
         "feature_place_krairport_airports",
         "feature_place_kor_travel_concierge_youtube",
-        "feature_weather_airkorea_air_quality",
-        "feature_weather_krex_rest_areas",
-        "feature_weather_kma_ultra_short_nowcast",
-        "feature_weather_kma_ultra_short_forecast",
-        "feature_weather_kma_short_forecast",
-        "feature_weather_kma_mid_forecast",
-        "feature_notice_kma_weather_alerts",
-        "feature_weather_krforest_mountain_weather",
-        "feature_weather_krforest_wildfire_risk_forecast",
         "feature_notice_krforest_landslide_forecast_issues",
         "feature_place_mcst_culture",
         "feature_event_visitkorea_enrichment",
@@ -164,9 +154,6 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("cache_target_snapshot_gc").name == (
         "cache_target_snapshot_gc"
     )
-    assert defs.get_job_def("current_weather_summary_refresh").name == (
-        "current_weather_summary_refresh"
-    )
     assert defs.get_job_def("full_load_batch_consistency_gate").name == (
         "full_load_batch_consistency_gate"
     )
@@ -227,7 +214,6 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "opinet_stations",
     "opinet_station_price_details",
     "krex_rest_areas",
-    "krex_rest_area_weather",
     "krex_rest_area_fuel_prices",
     "krex_traffic_notices",
     "krheritage_items",
@@ -239,8 +225,6 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "krforest_arboretums",
     "krforest_mountain_trails",
     "krforest_dulle_trails",
-    "krforest_mountain_weather",
-    "krforest_wildfire_risk_forecast",
     "krforest_landslide_forecast_issues",
     "standard_museums",
     "standard_tourist_attractions",
@@ -249,11 +233,8 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_file_data_records",
     "khoa_beaches",
     "krairport_airports",
-    "airkorea_stations",
-    "airkorea_air_quality",
     "visitkorea_festival_events",
     "kor_travel_concierge_youtube_features",
-    "kma_weather_alert_records",
     "mcst_culture_records",
 }
 
@@ -278,11 +259,6 @@ def test_feature_load_provider_guard_resources_registered() -> None:
         else:
             assert "provider record guard" in resource_def.description
 
-    for resource_key in ("kma_weather_client_factory", "kma_datagokr_client"):
-        assert {
-            "feature_operation_guard",
-            "kor_travel_map_client",
-        } <= top_level_resources[resource_key].required_resource_keys
     assert top_level_resources["reverse_geocoder"]
 
 
@@ -475,9 +451,6 @@ def test_job_definition_tags_carry_the_execution_manifest_declaration() -> None:
     assert {spec.job_name for spec in declaring} == {
         "feature_place_knps_points_job",
         "feature_geometry_knps_records_job",
-        "feature_weather_kma_ultra_short_nowcast_job",
-        "feature_weather_kma_ultra_short_forecast_job",
-        "feature_weather_kma_short_forecast_job",
     }
     for spec in declaring:
         job_tags = defs.resolve_job_def(spec.job_name).tags
@@ -608,7 +581,7 @@ def test_every_schedule_firing_faster_than_its_own_recovery_bound_is_protected()
 
     이 검사는 리터럴 목록이었다 — job 이름 세 개를 손으로 적고 그 tag가 "7200"인지
     확인했다. 그것은 **적어 둔 셋만** 재고, 같은 조건의 네 번째 job은 보지 않는다.
-    2026-09-12 감사가 정확히 그 네 번째를 찾았다:
+    2026-09-12 감사가 정확히 그 네 번째를 찾았다(그 job은 2026-10-01 ADR-105로 사라졌다):
     `feature_weather_krex_rest_areas_job`은 매시(3,600초)인데 전역 회수 상한은
     21,600초라, upstream이 trickle에 들어가면 같은 job의 멈춘 run이 최대 6개까지
     동시에 살아 10 슬롯 중 6개를 한 job이 먹는다. 리터럴 검사는 그때도 초록이었다.
@@ -731,61 +704,3 @@ def test_cache_target_snapshot_gc_hourly_schedule_registered() -> None:
     assert schedule.job_name == "cache_target_snapshot_gc"
     assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
     assert schedule.tags["kor_travel_map.job_kind"] == "cache_target_snapshot_gc"
-
-
-def test_current_weather_summary_refresh_schedule_is_running_and_minutely() -> None:
-    schedule = defs.resolve_schedule_def(
-        "current_weather_summary_refresh_minutely_schedule"
-    )
-    assert schedule.name == "current_weather_summary_refresh_minutely_schedule"
-    assert schedule.cron_schedule == "* * * * *"
-    assert schedule.execution_timezone == KST_TIMEZONE
-    assert schedule.default_status == DefaultScheduleStatus.RUNNING
-    assert schedule.job_name == "current_weather_summary_refresh"
-    assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
-    assert schedule.tags["kor_travel_map.job_kind"] == "current_weather_summary_refresh"
-
-
-def test_current_weather_summary_refresh_schedule_coalesces_active_global_run() -> None:
-    schedule = defs.resolve_schedule_def(
-        "current_weather_summary_refresh_minutely_schedule"
-    )
-    job = defs.resolve_job_def("current_weather_summary_refresh")
-    with DagsterInstance.local_temp() as instance:
-        # 실제 run은 schedule RunRequest·job 정의의 tag를 싣는다(n150 실측 1,000/1,000).
-        instance.create_run_for_job(
-            job,
-            status=DagsterRunStatus.STARTED,
-            tags=CURRENT_WEATHER_SUMMARY_REFRESH_JOB_TAGS,
-            remote_job_origin=_remote_origin(job.name),
-        )
-        with build_schedule_context(instance=instance) as context:
-            tick = schedule.evaluate_tick(context)
-
-    assert tick.run_requests == []
-    assert tick.skip_message is not None
-    assert "STARTED" in tick.skip_message
-
-
-def test_current_weather_summary_refresh_ignores_other_tenant_run() -> None:
-    """공유 plane: 같은 job 이름의 다른 프로젝트 active run은 minute tick을 막지 않는다.
-
-    다른 프로젝트 run에는 ``kor_travel_map.job_kind``가 없다(schedule context에는 location이
-    없어 location 상수 대신 이 tag로 좁힌다).
-    """
-
-    schedule = defs.resolve_schedule_def(
-        "current_weather_summary_refresh_minutely_schedule"
-    )
-    job = defs.resolve_job_def("current_weather_summary_refresh")
-    with DagsterInstance.local_temp() as instance:
-        instance.create_run_for_job(
-            job,
-            status=DagsterRunStatus.STARTED,
-            remote_job_origin=_remote_origin(job.name, "kor_travel_weather.definitions"),
-        )
-        with build_schedule_context(instance=instance) as context:
-            tick = schedule.evaluate_tick(context)
-
-    assert tick.skip_message is None
-    assert len(tick.run_requests) == 1

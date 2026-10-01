@@ -42,7 +42,8 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 77
+    # 2026-10-01 77 → 76: POST /v1/features/weather/batch가 ADR-105로 사라졌다.
+    assert len(writes) == 76
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:

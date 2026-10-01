@@ -1,5 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
+
+**다음 한 작업: CI 전량(통합 두 leg) + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(migration 401·402 전진, 되돌릴 수
+없음, 백업 면제) → n150 `.d2-live.env`의 `E2E_C7_SCHEDULE=feature_place_krairport_airports_monthly_schedule` → C7 재실행.**
+
+- weather kind 기능·KMA 특보 notice 기능을 Dagster·라이브러리·API·UI·DB에서 지웠다. 정의는 남는다. 산사태·교통 notice는 그대로.
+- 402는 weather 전용 표 둘·함수 하나·인덱스 하나를 DROP하고 weather/KMA 특보 dataset을 비활성화한다. prod에서 실제로 지워지는
+  행은 `ops.current_summary_runs` weather 2,875건뿐이다(feature 0행).
+- **PinVi가 다음 짝을 막는다(배포 차단).** Manager `m05_isolated_harness.py`는 OpenAPI hash 불일치를 거부하고, PinVi
+  `test_kor_travel_map_contract.py`는 `BeachPublicView.latest_weather`를 단언한다. 그래서 **PinVi PR
+  (`chore/map-drop-weather`: Map OpenAPI 재vendor + 계약 테스트) → Map PR → pair 회전** 순서가 필수다. PinVi 날씨 자체는
+  이미 kor-travel-weather를 쓴다.
+- 같은 브랜치 후속 반영: run gate probe `map_run_heartbeat`, C7 `ops-c7-update-request-write`(krairport 큐 왕복),
+  401 in-flight preflight, 403(KMA lineage 분기 제거), 핀 제거. 남은 것: Manager compose `KOR_TRAVEL_MAP_KMA_WEATHER_*`(Manager PR).
+
+## 2026-10-01 — Map Dagster의 KMA 적재 경로 제거(ADR-104): 브랜치 `feat/remove-map-kma-dagster`
+
+**다음 한 작업: CI 전량(통합 두 leg 포함) + 적대 리뷰 뒤 PR·머지 → 다음 Map pinned pair로 배포(migration 401 전진).**
+
+- KMA job·asset·schedule·resource·큐 runner spec·handler binding을 지웠고 `401_retire_map_kma_refresh`가 카탈로그의
+  KMA 적재 operation을 끈다. 재도입은 `test_map_dagster_has_no_weather.py`·`test_head_enables_no_kma_load_operation`이 막는다.
+- 배포 영향(prod 읽기 전용 실측): Map KMA instigator·run 0(공유·옛 instance 모두), KMA 멤버십 import job·요청 0,
+  KMA feature 0. 배포 뒤 Map location의 job 목록에서 KMA 5개가 사라지고 `/ops/datasets`의 KMA 갱신 capability가 없어진다.
+- 후속: C7 러너 가족 정리(KMA 기반, 이미 실행 불가), `python-kma-api` 핀 제거, Manager compose `KOR_TRAVEL_MAP_KMA_*` env 제거.
+
 ## 2026-10-01 — Map 공유 Dagster plane cutover 완료, flip 전 drain 문서 정정: 브랜치 `docs/shared-plane-drain`
 
 **다음 한 작업: 문서 PR 머지(소유자). 그 뒤 공유 plane soak 관찰(D6) — 옛 Map 전용 Dagster metadata DB는 보존(D1).**

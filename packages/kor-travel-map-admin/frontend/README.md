@@ -258,7 +258,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 |-------|-----------|------|
 | `/` | `/v1/ops/metrics`, `/v1/ops/pipeline/overview`, `/v1/ops/pipeline/executions`, `/v1/admin/features/dedup-reviews` | 구현됨. 운영 홈: Feature·canonical pipeline root·중복 검수·이슈·Dagster 상태 요약 |
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
-| `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/state`, `/v1/admin/features/{id}/state/reactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 3축 상태 전이·재활성화 |
+| `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/state`, `/v1/admin/features/{id}/state/reactivate`, `/v1/features/{id}` | 구현됨. 운영자용 table 목록, 상세 panel, 3축 상태 전이·재활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
 | `/admin/features/curated` | `/v1/admin/features/curated*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
@@ -271,7 +271,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/poi-cache-targets` | `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/settings` | `/v1/admin/public-api-keys`, `/v1/admin/auth-events` | 구현됨. public API key 생성/폐기와 로그인 감사 로그 조회 |
 | `/admin/features/new` | `/v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 | 구현됨. 수동 feature 작성 change request + 지도 좌표/geocode/reverse/중복 후보 |
-| `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/{id}/weather`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/weather/nearby |
+| `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/nearby |
 | `/admin/offline-uploads` | `/v1/admin/offline-uploads`, `/v1/admin/offline-uploads/{upload_id}/validate`, `/v1/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL/CSV/TSV upload·preview·validation·canonical load 실행 |
 | `/debug/explain` | 없음 | T-221e 재판정으로 제외. EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook에서 수행 |
 | `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/ops/datasets` preview로 분리 |

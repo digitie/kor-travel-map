@@ -24,7 +24,6 @@ from .file_registry_scan import (
     FILE_REGISTRY_SCAN_JOBS,
     FILE_REGISTRY_SCAN_SCHEDULES,
 )
-from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .manual_provider_dedup import (
     MANUAL_PROVIDER_DEDUP_JOBS,
@@ -37,12 +36,11 @@ from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
     datagokr_file_data_dataset_key_resource,
     feature_operation_guard_resource,
-    kma_datagokr_client_resource,
-    kma_weather_client_factory_resource,
     kor_travel_map_client_resource,
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
+from .run_heartbeat import RUN_HEARTBEAT_JOBS
 from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
@@ -59,7 +57,6 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "opinet_stations",
     "opinet_station_price_details",
     "krex_rest_areas",
-    "krex_rest_area_weather",
     "krex_rest_area_fuel_prices",
     "krex_traffic_notices",
     "krheritage_items",
@@ -74,8 +71,6 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "krforest_arboretums",
     "krforest_mountain_trails",
     "krforest_dulle_trails",
-    "krforest_mountain_weather",
-    "krforest_wildfire_risk_forecast",
     "krforest_landslide_forecast_issues",
     "standard_museums",
     "standard_tourist_attractions",
@@ -85,18 +80,10 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "datagokr_file_data_dataset_key",
     "khoa_beaches",
     "krairport_airports",
-    "airkorea_stations",
-    "airkorea_air_quality",
     "visitkorea_festival_events",
     "kor_travel_concierge_youtube_features",
-    "kma_weather_client_factory",
-    "kma_weather_extra_points",
-    "kma_weather_max_grids_per_run",
-    "kma_datagokr_client",
-    "kma_mid_region_features",
     "provider_upstream_retry_budget_minimum",
     "provider_upstream_retry_budget_percent",
-    "kma_weather_alert_records",
     "mcst_culture_records",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
@@ -110,14 +97,10 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
 
 # KNPS dataset key는 ``KorTravelMapSettings``에서 읽어 fetcher(``fetch_knps_*_records``)와
 # asset의 ``knps_*_dataset_key`` resource가 같은 dataset을 보게 한다(불일치 방지).
-# KMA weather 대상 설정 2종(T-219b)도 같은 메커니즘으로 asset에 주입한다.
 # strict_address는 주소/좌표 검증 모드(strict/drop/off, #376)를 settings에서 읽는다.
 SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "knps_point_dataset_key": "knps_point_dataset_key",
     "knps_geometry_dataset_key": "knps_geometry_dataset_key",
-    "kma_weather_extra_points": "kma_weather_extra_points",
-    "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
-    "kma_mid_region_features": "kma_mid_region_features",
     "provider_upstream_retry_budget_minimum": "provider_upstream_retry_budget_minimum",
     "provider_upstream_retry_budget_percent": "provider_upstream_retry_budget_percent",
     "strict_address": "dagster_address_validation",
@@ -130,8 +113,6 @@ DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
     "reverse_geocoder": reverse_geocoder_resource,
-    "kma_weather_client_factory": kma_weather_client_factory_resource,
-    "kma_datagokr_client": kma_datagokr_client_resource,
     "datagokr_file_data_dataset_key": datagokr_file_data_dataset_key_resource,
     **PROVIDER_RECORD_RESOURCE_DEFINITIONS,
 }
@@ -193,7 +174,6 @@ def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
 defs = Definitions(
     assets=[
         *FEATURE_LOAD_ASSETS,
-        *KMA_WEATHER_ASSETS,
         *MCST_FEATURE_ASSETS,
     ],
     jobs=cast(
@@ -207,6 +187,7 @@ defs = Definitions(
             *OFFLINE_UPLOAD_JOBS,
             *FILE_REGISTRY_SCAN_JOBS,
             *MANUAL_PROVIDER_DEDUP_JOBS,
+            *RUN_HEARTBEAT_JOBS,
         ],
     ),
     schedules=[

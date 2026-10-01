@@ -27,8 +27,9 @@ retries=3 → 4 HTTP 시도). 본 모듈은 그 위의 **두 번째** 레이어�
   (``asyncio.timeout``/``wait_for``)이 없다. 형제 저장소 ``kor-travel-weather``가
   같은 것을 값을 치르고 배웠다 — "``client_timeout``은 HTTP 클라이언트 설정이고
   이 코루틴에 대한 deadline이 아니다".
-- 우변: KMA job이 받는 상한은 6h가 아니라 job tag ``dagster/max_runtime`` = 7200초다.
-  그리고 격자 기본값은 187이 아니라 ``kma_weather_max_grids_per_run`` = 300(최대 500)이다.
+- 우변: 당시 KMA job이 받는 상한은 6h가 아니라 job tag ``dagster/max_runtime`` = 7200초였다.
+  그리고 격자 기본값은 187이 아니라 300(최대 500)이었다. (KMA 경로는 2026-10-01
+  ADR-104로 Map Dagster에서 제거됐다 — 이 단락은 계산 방식의 기록으로 남긴다.)
 
 **그리고 요청당 시간은 상수가 아니다.** 형제 저장소가 2026-09-12에 그것을 값을
 치르고 측정했다 — 무료 티어 쿼터를 초과해 throttle되자 요청이 ~0.3초에서 12~17초로
@@ -50,7 +51,7 @@ try 밖에서 ``_force_mark_as_failed``를 호출하므로, 소켓에 붙어 있
 같은 작업을 매 주기 반복한다.
 - **쿼터/레이트리밋은 재시도하지 않는다**: 일일 쿼터 소진(kma resultCode 22 —
   ``failure_kind="quota"``/``"rate_limit"``)은 transient가 아니고, 재시도는
-  쿼터 구멍만 키운다(``kma_weather_max_grids_per_run``의 일일 한도 보호 취지).
+  쿼터 구멍만 키운다(provider별 run당 호출 상한의 일일 한도 보호 취지).
   lib이 ``retryable=True``로 분류해도 여기서 걸러낸다.
 - **run 예산**(:class:`RetryBudget`): 상관 장애(전 격자 동시 열화)에서는 건별
   재시도가 무력하므로, run당 재시도 총량을 소진하면 이후 retryable 실패도

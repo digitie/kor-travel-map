@@ -10,16 +10,14 @@ gateway 신규 생성 금지 (ADR-006).
 
 | 모듈 | provider 라이브러리 | 비고 |
 |------|--------------------|------|
-| ``airkorea`` | python-airkorea-api | 대기질 측정소·측정값 |
 | ``datagokr_file_data`` | python-datagokr-api | data.go.kr fileData curated |
 | ``khoa`` | python-khoa-api | 해수욕장 place |
-| ``kma`` | python-kma-api | 단기·초단기·중기 예보 + 특보 |
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``krairport`` | python-krairport-api | 공항 메타데이터 |
 | ``krex`` | python-krex-api | 휴게소 multi-kind |
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
-| ``krforest_safety`` | python-krforest-api | 산악기상·산불위험·산사태 예보 |
+| ``krforest_safety`` | python-krforest-api | 산사태 예보 notice |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
@@ -36,8 +34,9 @@ gateway 신규 생성 금지 (ADR-006).
   ``_provider_surface.json``(핀된 SHA의 provider 표면)을 대조한다.
 
 ADR-034의 9단계 **계획 순서**와 krforest dataset의 정본은
-``docs/architecture/provider-contract.md``다. C05A route와 C05B~D 안전·기상 변환은
-이 namespace에서 구현한다.
+``docs/architecture/provider-contract.md``다. C05A route와 C05D 산사태 notice 변환은
+이 namespace에서 구현한다. weather kind 변환(KMA·AirKorea·휴게소 기상·산악기상·
+산불위험)은 ADR-105로 제거했다 — 날씨 정본은 kor-travel-weather다.
 
 ADR 참조
 --------
@@ -49,19 +48,6 @@ ADR 참조
 
 from __future__ import annotations
 
-from kortravelmap.providers.airkorea import (
-    AIR_QUALITY_MARKER_COLOR,
-    AIR_QUALITY_MARKER_ICON,
-    AIR_QUALITY_STATION_CATEGORY,
-    AIRKOREA_NORMALIZATION_VERSION,
-    AIRKOREA_PROVIDER_NAME,
-    DATASET_KEY_AIR_QUALITY,
-    DATASET_KEY_STATIONS,
-    AirQualityMeasurementItem,
-    AirQualityStationItem,
-    air_quality_stations_to_bundles,
-    air_quality_to_weather_values,
-)
 from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_BOOK_MARKER_COLOR,
     DATAGOKR_FILEDATA_DATASETS,
@@ -78,30 +64,6 @@ from kortravelmap.providers.khoa import (
     KHOA_PROVIDER_NAME,
     OceanBeachInfoItem,
     beaches_to_bundles,
-)
-from kortravelmap.providers.kma import (
-    KMA_ALERT_LEVEL_SEVERITY,
-    KMA_METRIC_NAMES,
-    KMA_METRIC_UNITS,
-    KMA_MID_FORECAST_DATASET_KEY,
-    KMA_PROVIDER_NAME,
-    KMA_WEATHER_ALERT_CATEGORY,
-    KMA_WEATHER_ALERT_DATASET_KEY,
-    KMA_WEATHER_ALERT_MARKER_COLOR,
-    KMA_WEATHER_ALERT_MARKER_ICON,
-    KmaMidLandForecastItem,
-    KmaMidTemperatureItem,
-    KmaShortForecastItem,
-    KmaUltraShortForecastItem,
-    KmaUltraShortNowcastItem,
-    KmaWeatherAlertItem,
-    KmaWeatherAlertRegion,
-    mid_land_forecast_to_weather_values,
-    mid_temperature_to_weather_values,
-    short_forecast_to_weather_values,
-    ultra_short_forecast_to_weather_values,
-    ultra_short_nowcast_to_weather_values,
-    weather_alerts_to_notice_bundles,
 )
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
@@ -138,20 +100,14 @@ from kortravelmap.providers.krex import (
     REST_AREA_MARKER_COLOR,
     REST_AREA_MARKER_ICON,
     REST_AREA_PRICES_DATASET_KEY,
-    REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
     TRAFFIC_NOTICE_MARKER_COLOR,
     TRAFFIC_NOTICE_MARKER_ICON,
     TRAFFIC_NOTICES_DATASET_KEY,
     KrexRestAreaItem,
     KrexRestAreaPriceItem,
-    KrexRestAreaWeatherItem,
-    KrexRestAreaWeatherRecord,
     KrexTrafficNoticeItem,
     rest_area_prices_to_values,
-    rest_area_weather_records_to_bundles,
-    rest_area_weather_records_to_values,
-    rest_area_weather_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -176,29 +132,13 @@ from kortravelmap.providers.krforest import (
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.krforest_safety import (
-    KRFOREST_SAFETY_NORMALIZATION_VERSION,
     LANDSLIDE_FORECAST_DATASET_KEY,
     LANDSLIDE_FORECAST_MARKER_COLOR,
     LANDSLIDE_FORECAST_MARKER_ICON,
     LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE,
-    MOUNTAIN_WEATHER_DATASET_KEY,
-    MOUNTAIN_WEATHER_MARKER_COLOR,
-    MOUNTAIN_WEATHER_MARKER_ICON,
-    MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
-    WILDFIRE_RISK_DATASET_KEY,
-    WILDFIRE_RISK_MARKER_COLOR,
-    WILDFIRE_RISK_MARKER_ICON,
-    WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
     LandslideForecastIssueItem,
-    MountainWeatherItem,
-    WildfireRiskForecastItem,
     landslide_active_lineage_keys,
     landslide_forecast_issues_to_bundles,
-    mountain_weather_stations_to_bundles,
-    mountain_weather_to_values,
-    wildfire_risk_forecasts_to_bundles,
-    wildfire_risk_region_key,
-    wildfire_risk_to_values,
 )
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_DATASET_KEY_EVENT,
@@ -352,18 +292,6 @@ __all__ = [
     "DATAGOKR_FILEDATA_DATASETS",
     "DATAGOKR_FILEDATA_BOOK_MARKER_COLOR",
     "DATAGOKR_FILEDATA_FOOD_MARKER_COLOR",
-    # airkorea 대기질 (T-RV-55d, ADR-034 보조 — weather kind + WeatherValue)
-    "AirQualityStationItem",
-    "AirQualityMeasurementItem",
-    "air_quality_stations_to_bundles",
-    "air_quality_to_weather_values",
-    "AIRKOREA_PROVIDER_NAME",
-    "DATASET_KEY_STATIONS",
-    "DATASET_KEY_AIR_QUALITY",
-    "AIR_QUALITY_STATION_CATEGORY",
-    "AIR_QUALITY_MARKER_ICON",
-    "AIR_QUALITY_MARKER_COLOR",
-    "AIRKOREA_NORMALIZATION_VERSION",
     # khoa 해수욕장 (T-RV-55, ADR-034 보조)
     "OceanBeachInfoItem",
     "beaches_to_bundles",
@@ -407,22 +335,7 @@ __all__ = [
     "FOREST_ROUTE_MARKER_COLOR",
     "KRFOREST_MARKER_COLOR",
     "KRFOREST_PROVIDER_NAME",
-    # krforest safety (C05B~D — 산악기상·산불위험·산사태)
-    "MountainWeatherItem",
-    "mountain_weather_stations_to_bundles",
-    "mountain_weather_to_values",
-    "MOUNTAIN_WEATHER_DATASET_KEY",
-    "MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE",
-    "MOUNTAIN_WEATHER_MARKER_ICON",
-    "MOUNTAIN_WEATHER_MARKER_COLOR",
-    "WildfireRiskForecastItem",
-    "wildfire_risk_forecasts_to_bundles",
-    "wildfire_risk_region_key",
-    "wildfire_risk_to_values",
-    "WILDFIRE_RISK_DATASET_KEY",
-    "WILDFIRE_RISK_SOURCE_ENTITY_TYPE",
-    "WILDFIRE_RISK_MARKER_ICON",
-    "WILDFIRE_RISK_MARKER_COLOR",
+    # krforest safety (C05D — 산사태 예보 notice; 산악기상·산불위험은 ADR-105로 제거)
     "LandslideForecastIssueItem",
     "landslide_forecast_issues_to_bundles",
     "landslide_active_lineage_keys",
@@ -430,31 +343,6 @@ __all__ = [
     "LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE",
     "LANDSLIDE_FORECAST_MARKER_ICON",
     "LANDSLIDE_FORECAST_MARKER_COLOR",
-    "KRFOREST_SAFETY_NORMALIZATION_VERSION",
-    # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
-    # ADR-010)
-    "KmaShortForecastItem",
-    "KmaUltraShortNowcastItem",
-    "KmaUltraShortForecastItem",
-    "KmaWeatherAlertItem",
-    "KmaWeatherAlertRegion",
-    "KmaMidLandForecastItem",
-    "KmaMidTemperatureItem",
-    "short_forecast_to_weather_values",
-    "ultra_short_nowcast_to_weather_values",
-    "ultra_short_forecast_to_weather_values",
-    "weather_alerts_to_notice_bundles",
-    "mid_land_forecast_to_weather_values",
-    "mid_temperature_to_weather_values",
-    "KMA_PROVIDER_NAME",
-    "KMA_METRIC_UNITS",
-    "KMA_METRIC_NAMES",
-    "KMA_MID_FORECAST_DATASET_KEY",
-    "KMA_WEATHER_ALERT_DATASET_KEY",
-    "KMA_WEATHER_ALERT_CATEGORY",
-    "KMA_WEATHER_ALERT_MARKER_ICON",
-    "KMA_WEATHER_ALERT_MARKER_COLOR",
-    "KMA_ALERT_LEVEL_SEVERITY",
     # opinet (PR#42 prices, PR#43 stations)
     "OpinetPriceItem",
     "OpinetStationItem",
@@ -476,22 +364,16 @@ __all__ = [
     "OPINET_STATION_CATEGORY",
     "OPINET_STATION_MARKER_ICON",
     "OPINET_STATION_MARKER_COLOR",
-    # krex (PR#45 4 dataset — Sprint 2 §2.4 multi-kind)
+    # krex (PR#45 — Sprint 2 §2.4 multi-kind; 휴게소 기상은 ADR-105로 제거)
     "KrexRestAreaItem",
     "KrexRestAreaPriceItem",
-    "KrexRestAreaWeatherItem",
-    "KrexRestAreaWeatherRecord",
     "KrexTrafficNoticeItem",
     "rest_areas_to_bundles",
     "rest_area_prices_to_values",
-    "rest_area_weather_to_values",
-    "rest_area_weather_records_to_bundles",
-    "rest_area_weather_records_to_values",
     "traffic_notices_to_bundles",
     "KREX_PROVIDER_NAME",
     "REST_AREA_DATASET_KEY",
     "REST_AREA_PRICES_DATASET_KEY",
-    "REST_AREA_WEATHER_DATASET_KEY",
     "TRAFFIC_NOTICES_DATASET_KEY",
     "REST_AREA_CATEGORY",
     "TRAFFIC_NOTICE_CATEGORY",

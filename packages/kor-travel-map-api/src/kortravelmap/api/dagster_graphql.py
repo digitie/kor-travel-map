@@ -61,7 +61,6 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_krex_rest_areas_monthly_schedule": "20 2 1 * *",
     "feature_price_krex_rest_areas_twice_daily_schedule": "28 6,18 * * *",
     "feature_notice_krex_traffic_notices_ten_minute_schedule": "*/10 * * * *",
-    "feature_weather_krex_rest_areas_hourly_schedule": "35 * * * *",
     "feature_place_krheritage_items_monthly_schedule": "15 2 2 * *",
     "feature_event_krheritage_events_monthly_schedule": "25 3 2 * *",
     "feature_place_mois_licenses_monthly_schedule": "35 4 2 * *",
@@ -71,8 +70,6 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_krforest_arboretums_monthly_schedule": "15 4 4 * *",
     "feature_route_krforest_mountain_trails_monthly_schedule": "25 4 4 * *",
     "feature_route_krforest_dulle_trails_monthly_schedule": "35 4 4 * *",
-    "feature_weather_krforest_mountain_weather_six_daily_schedule": "0 1,5,9,13,17,21 * * *",
-    "feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule": "10 1,5,9,13,17,21 * * *",
     "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule": (
         "20 1,5,9,13,17,21 * * *"
     ),
@@ -88,12 +85,6 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_krairport_airports_monthly_schedule": "5 5 4 * *",
     "feature_place_kor_travel_concierge_youtube_monthly_schedule": "40 3 3 * *",
     "feature_event_visitkorea_enrichment_monthly_schedule": "50 4 1 * *",
-    "feature_weather_airkorea_air_quality_hourly_schedule": "10 * * * *",
-    "feature_weather_kma_ultra_short_nowcast_hourly_schedule": "45 * * * *",
-    "feature_weather_kma_ultra_short_forecast_hourly_schedule": "50 * * * *",
-    "feature_weather_kma_short_forecast_hourly_schedule": "20 * * * *",
-    "feature_weather_kma_mid_forecast_hourly_schedule": "25 * * * *",
-    "feature_notice_kma_weather_alerts_hourly_schedule": "15 * * * *",
     "feature_place_mcst_culture_monthly_schedule": "30 4 3 * *",
 }
 

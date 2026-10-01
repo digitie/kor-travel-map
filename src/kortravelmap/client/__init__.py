@@ -22,8 +22,9 @@ commit/rollback을 잡는다 (단위 of work).
 engine 수명은 호출자 소유 (ADR-004 ``infra/db.py`` — ``await engine.dispose()``는
 호출자 책임). 따라서 ``__aexit__``는 engine을 닫지 않는다.
 
-후속(별도 PR): ``upload_feature_files`` / ``upsert_sync_state`` /
-``build_weather_card`` 등.
+후속(별도 PR): ``upload_feature_files`` / ``upsert_sync_state`` 등.
+weather 적재·조회(``load_weather_values``/``build_weather_card`` 등)는 ADR-105로
+제거했다 — 날씨 정본은 kor-travel-weather다.
 
 ADR 참조
 --------
@@ -41,7 +42,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,7 +152,6 @@ from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_memberships as repo_resolve_feature_operation_memberships,
 )
 from kortravelmap.infra.feature_repo import (
-    AirQualityLoadResult,
     EnrichmentLoadResult,
     FeatureLoadResult,
     FeatureSearchPage,
@@ -179,9 +179,6 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_repo import (
     get_notice_snapshot_watermark as repo_get_notice_snapshot_watermark,
-)
-from kortravelmap.infra.feature_repo import (
-    list_active_place_coords as repo_list_active_place_coords,
 )
 from kortravelmap.infra.feature_repo import (
     list_primary_place_locator as repo_list_primary_place_locator,
@@ -245,15 +242,6 @@ from kortravelmap.infra.integrity_violation_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
-from kortravelmap.infra.poi_cache_target_repo import (
-    has_active_poi_cache_targets_for_external_system as _repo_has_active_target_system,
-)
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_poi_cache_target_external_systems as _repo_list_active_target_systems,
-)
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_target_coords as repo_list_active_target_coords,
-)
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
@@ -282,19 +270,6 @@ from kortravelmap.infra.sync_state_repo import (
 )
 from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
-)
-from kortravelmap.infra.weather_repo import (
-    WeatherCard,
-    WeatherSummaryMaterializeResult,
-)
-from kortravelmap.infra.weather_repo import (
-    build_weather_card as repo_build_weather_card,
-)
-from kortravelmap.infra.weather_repo import (
-    load_weather_values as repo_load_weather_values,
-)
-from kortravelmap.infra.weather_repo import (
-    materialize_current_weather_summary as repo_materialize_current_weather_summary,
 )
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
@@ -354,7 +329,6 @@ if TYPE_CHECKING:
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
     from kortravelmap.dto import FeatureBundle, SourceRecord
     from kortravelmap.dto.price import PriceValue
-    from kortravelmap.dto.weather import WeatherValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
     from kortravelmap.providers.mois import MoisLicensePlaceRecord
@@ -362,7 +336,6 @@ if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
 __all__ = [
-    "AirQualityLoadResult",
     "AsyncKorTravelMapClient",
     "BatchDagRunResult",
     "CacheTargetSnapshotGcDrainResult",
@@ -537,7 +510,7 @@ class AsyncKorTravelMapClient:
         ``infra.make_async_engine`` 등으로 만든 ``AsyncEngine`` (호출자 소유).
     settings
         ``KorTravelMapSettings`` (선택). 현재 적재/dedup 경로는 사용하지 않으나,
-        후속 weather card / file upload 경로가 참조.
+        후속 file upload 경로가 참조.
 
     Examples
     --------
@@ -2463,51 +2436,6 @@ class AsyncKorTravelMapClient:
                 next_run_after=next_run_after,
             )
 
-    # ─── KMA weather 대상 조회 (T-219b) ─────────────────────────────────────
-
-    async def list_poi_cache_target_coords(
-        self,
-        *,
-        external_system: str | None = None,
-    ) -> list[tuple[float, float]]:
-        """활성(미삭제 + update_enabled) POI cache target ``(lon, lat)`` 목록 (read).
-
-        KMA weather 적재 대상 격자 산출용 — 외부 시스템이 등록한 관심 지점이
-        1차 weather 대상이다(`docs/etl/kma-weather-etl.md` §3 옵션 B). exact
-        ``external_system``을 주면 그 시스템의 target만 반환한다.
-        """
-        async with self._session_factory() as session:
-            return await repo_list_active_target_coords(
-                session,
-                external_system=external_system,
-            )
-
-    async def list_active_poi_cache_target_external_systems(self) -> list[str]:
-        """활성 POI cache target을 가진 canonical external system 목록 (read)."""
-        async with self._session_factory() as session:
-            return await _repo_list_active_target_systems(session)
-
-    async def has_active_poi_cache_targets_for_external_system(
-        self,
-        external_system: str,
-    ) -> bool:
-        """exact external system에 활성 POI cache target이 있는지 확인한다 (read)."""
-        async with self._session_factory() as session:
-            return await _repo_has_active_target_system(
-                session,
-                external_system,
-            )
-
-    async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
-        """active·valid place feature의 ``(feature_id, lon, lat)`` 전량 (read).
-
-        publication은 weather 적재 대상의 접근 제어 축이 아니므로 draft/suppressed도
-        포함한다. 호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와
-        일치하는 feature에 ``WeatherValue``를 적재한다.
-        """
-        async with self._session_factory() as session:
-            return await repo_list_active_place_coords(session)
-
     async def list_primary_place_locator(
         self,
         *,
@@ -2529,40 +2457,6 @@ class AsyncKorTravelMapClient:
                 provider=provider,
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
-            )
-
-    # ─── weather card (T-213e) ───────────────────────────────────────────────
-
-    async def load_weather_values(
-        self,
-        values: Iterable[WeatherValue],
-        *,
-        provider_dataset_id: int,
-        source_record: SourceRecord,
-        selected_at: datetime | None = None,
-    ) -> int:
-        """exact operation response가 소유하는 immutable weather facts를 append한다."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_load_weather_values(
-                session,
-                values,
-                provider_dataset_id=provider_dataset_id,
-                source_record=source_record,
-                selected_at=selected_at,
-            )
-
-    async def materialize_current_weather_summary(
-        self,
-        *,
-        selected_at: datetime,
-        run_kind: Literal["ingest", "reconcile", "backfill", "restore"] = "reconcile",
-    ) -> WeatherSummaryMaterializeResult:
-        """새 provider write 없이 weather current projection을 business time으로 갱신한다."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_materialize_current_weather_summary(
-                session,
-                selected_at=selected_at,
-                run_kind=run_kind,
             )
 
     # ─── price values (T-price) ───────────────────────────────────────────────
@@ -2603,61 +2497,6 @@ class AsyncKorTravelMapClient:
                 source_record=source_record,
             )
         return PriceFeatureLoadResult(features=features, price_values=value_count)
-
-    async def load_air_quality(
-        self,
-        station_bundles: Iterable[FeatureBundle],
-        weather_values: Iterable[WeatherValue],
-        *,
-        provider_dataset_id: int,
-        source_record: SourceRecord,
-        selected_at: datetime | None = None,
-    ) -> AirQualityLoadResult:
-        """대기질 측정소 weather feature + 측정값을 **한 transaction**으로 적재(T-RV-55d).
-
-        ① 측정소 weather-kind ``FeatureBundle``을 ``load_bundles``로 적재(FK 선결),
-        ② 같은 transaction에서 operation response ``SourceRecord``를 만든 뒤
-        air_quality ``WeatherValue``를 immutable append한다. weather value의
-        ``feature_id``는 같은 transaction에서 막 적재된 측정소 feature를 참조하므로
-        FK가 충족된다. 하나라도 실패하면 전체 rollback.
-
-        변환(측정소→bundle, 측정값→value)은 호출자(dagster asset) 책임 —
-        ``air_quality_stations_to_bundles`` / ``air_quality_to_weather_values``.
-        """
-        bundles = list(station_bundles)
-        values = list(weather_values)
-        async with self._session_factory() as session, session.begin():
-            stations = await load_bundles(session, bundles)
-            value_count = await repo_load_weather_values(
-                session,
-                values,
-                provider_dataset_id=provider_dataset_id,
-                source_record=source_record,
-                selected_at=selected_at,
-            )
-        return AirQualityLoadResult(stations=stations, weather_values=value_count)
-
-    async def build_weather_card(
-        self,
-        *,
-        feature_id: str,
-        freshness_seconds: int | None = None,
-    ) -> WeatherCard:
-        """feature weather card — forecast_style×metric_key 최신값 + freshness (read).
-
-        ``infra.weather_repo.build_weather_card`` 위임(T-213e).
-        """
-        from kortravelmap.infra.weather_repo import DEFAULT_WEATHER_FRESHNESS_SECONDS
-
-        fresh = (
-            freshness_seconds
-            if freshness_seconds is not None
-            else DEFAULT_WEATHER_FRESHNESS_SECONDS
-        )
-        async with self._session_factory() as session:
-            return await repo_build_weather_card(
-                session, feature_id=feature_id, freshness_seconds=fresh
-            )
 
     async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:
         """Feature update request 단건 조회. 없으면 ``None``."""

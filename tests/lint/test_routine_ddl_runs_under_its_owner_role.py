@@ -150,6 +150,27 @@ def _load(path: pathlib.Path) -> Any:
     return module
 
 
+#: 덤프를 통째로 적용하는 baseline root. 이 검사들이 보는 "role을 바꿔 가며 DDL을 내는
+#: 단계"가 없다.
+_BASELINE_ROOT_FILE = "400_schema_baseline.py"
+
+
+def _children_whose_source_has(token: str) -> list[str]:
+    """baseline 밖 migration 중 **소스 텍스트에** ``token``이 있는 것.
+
+    하한을 "본 것"에 건다(2026-10-01). 종전 하한(≥5 롤 전환, ≥100 문장 등)은 300~313
+    체인을 보고 박은 숫자라, 스쿼시 뒤 첫 child migration(401, 데이터만 바꾼다)에서
+    대상이 없는데도 빨갰다. 이제 하한은 "텍스트에 보이는 것을 추출도 전부 본다"이다 —
+    추출이 깨지면 여전히 빨갛고, 대상이 없으면 그 사실을 사유로 건너뛴다.
+    """
+    return [
+        path.name
+        for path in sorted(_VERSIONS.glob("[0-9]*.py"))
+        if path.name != _BASELINE_ROOT_FILE
+        and token.upper() in path.read_text(encoding="utf-8").upper()
+    ]
+
+
 def _statement_groups(attribute: str) -> list[tuple[str, tuple[str, ...]]]:
     """`attribute`를 가진 **모든** 마이그레이션의 (이름, 문장열).
 
@@ -174,28 +195,28 @@ def test_the_scan_sees_more_than_one_migration_and_many_statements() -> None:
     """**하한을 '본 것'에 건다.** 대상이 줄면 위 검사들이 조용히 항진명제가 된다."""
 
     groups = _statement_groups("_UPGRADE_STATEMENTS")
-    if not groups and len(list(_VERSIONS.glob("[0-9]*.py"))) <= 1:
+    expected = _children_whose_source_has("_UPGRADE_STATEMENTS")
+    if not expected:
         pytest.skip(
-            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
-            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
-            "추가되면 이 검사는 자동으로 다시 활성화된다."
+            "baseline 밖 migration 어디에도 `_UPGRADE_STATEMENTS`가 없다 — 볼 문장이 없다. "
+            "생기면 이 검사는 자동으로 다시 활성화된다."
         )
-    assert len(groups) >= 2, (
-        f"`_UPGRADE_STATEMENTS`를 가진 마이그레이션을 {len(groups)}개만 찾았다 — "
+    missing = sorted(set(expected) - {name for name, _ in groups})
+    assert not missing, (
+        f"소스에 `_UPGRADE_STATEMENTS`가 있는데 import로 읽지 못한 마이그레이션: {missing} — "
         "상수 이름이 바뀌었거나 import가 깨졌다."
     )
-    total = sum(len(statements) for _, statements in groups)
-    assert total >= 100, (
-        f"문장을 {total}개만 봤다 — 사이드카 해석이 깨지면 이 숫자가 먼저 무너진다."
-    )
+    assert all(statements for _, statements in groups), "빈 `_UPGRADE_STATEMENTS`가 있다"
     windows = sum(
         1
         for _, statements in groups
         for statement in statements
         if _SET_ROLE.match(_sql_head(statement)) is not None
     )
-    assert windows >= 10, (
-        f"`SET ROLE` 창을 {windows}개만 봤다 — 롤 창 검사가 볼 것이 거의 없다."
+    role_switching = set(_children_whose_source_has("SET ROLE")) & set(expected)
+    assert windows >= len(role_switching), (
+        f"`SET ROLE` 창을 {windows}개만 봤다 — 소스에 `SET ROLE`이 있는 마이그레이션은 "
+        f"{sorted(role_switching)}다. 사이드카 해석이 깨지면 이 숫자가 먼저 무너진다."
     )
 
 
@@ -310,11 +331,10 @@ def test_the_routine_stage_ends_on_the_schema_owner() -> None:
     # `_ROUTINE_STATEMENTS`는 309에만 있는 이름이다. 이름이 아니라 **있는 것을**
     # 전부 본다 — 다른 revision이 같은 단계를 두면 자동으로 따라온다.
     groups = _statement_groups("_ROUTINE_STATEMENTS")
-    if not groups and len(list(_VERSIONS.glob("[0-9]*.py"))) <= 1:
+    if not groups and not _children_whose_source_has("_ROUTINE_STATEMENTS"):
         pytest.skip(
-            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
-            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
-            "추가되면 이 검사는 자동으로 다시 활성화된다."
+            "baseline 밖 migration 어디에도 `_ROUTINE_STATEMENTS` 단계가 없다. "
+            "생기면 이 검사는 자동으로 다시 활성화된다."
         )
     assert groups, "`_ROUTINE_STATEMENTS` 단계를 가진 마이그레이션이 없다."
 
@@ -420,11 +440,10 @@ def test_trigger_creation_can_execute_its_trigger_function() -> None:
                 f"소유자는 {owner}이고 EXECUTE 부여도 없다"
             )
 
-    if seen == 0 and len(list(_VERSIONS.glob("[0-9]*.py"))) <= 1:
+    if seen == 0 and not _children_whose_source_has("CREATE TRIGGER"):
         pytest.skip(
-            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
-            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
-            "추가되면 이 검사는 자동으로 다시 활성화된다."
+            "baseline 밖 migration 어디에도 `CREATE TRIGGER`가 없다. "
+            "생기면 이 검사는 자동으로 다시 활성화된다."
         )
     assert seen >= 1, (
         "`CREATE TRIGGER ... EXECUTE FUNCTION`을 한 건도 찾지 못했다 — "

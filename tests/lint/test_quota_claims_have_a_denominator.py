@@ -10,6 +10,8 @@
 2. ``kma_weather_max_grids_per_run``의 설명이 "초과분은 다음 run으로"라고 적었다.
    코드는 이월하지 않는다 — ``KmaWeatherGridLimitExceeded``로 **run 전체를
    거부한다**. 운영자가 대상을 늘리면 "나눠서 처리"가 아니라 "수집 정지"다.
+   (2026-10-01 — 그 설정과 KMA 격자 asset은 ADR-104로 Map에서 제거됐다. 그래서
+   그 항목을 지키던 검사도 함께 지웠다.)
 3. ``settings.log_api_calls``가 "provider 호출 횟수를 ``ops.api_call_log``에 기록"
    한다고 적었다. 읽는 코드가 **없었고**, 그 표는 Map API로 들어오는 요청을 담는다.
 
@@ -43,15 +45,6 @@ _GRAPHQL = (
     / "dagster_graphql.py"
 )
 _SETTINGS = _ROOT / "src" / "kortravelmap" / "settings.py"
-_KMA = (
-    _ROOT
-    / "packages"
-    / "kor-travel-map-dagster"
-    / "src"
-    / "kortravelmap"
-    / "dagster"
-    / "kma_weather.py"
-)
 _QUOTA_DOC = _ROOT / "docs" / "etl" / "upstream-quota.md"
 
 #: 운영자에게 돌려주는 문자열에서 "N%" 모양을 찾는다.
@@ -121,62 +114,6 @@ def test_the_schedule_note_points_at_the_measured_denominators() -> None:
         "한도를 확인할 자리가 없어진다."
     )
     assert _QUOTA_DOC.is_file(), f"{relative}가 실재하지 않는다"
-
-
-def _field_description(path: Path, field_name: str) -> str:
-    """``<field>: T = Field(..., description=...)``의 description을 AST로 읽는다.
-
-    문자열 슬라이스로 블록을 자르면 description 안에 ``\\n    name: `` 모양이
-    생기는 순간 경계가 어긋난다(적대 리뷰 지적).
-    """
-
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.AnnAssign):
-            continue
-        if not isinstance(node.target, ast.Name) or node.target.id != field_name:
-            continue
-        call = node.value
-        assert isinstance(call, ast.Call), f"`{field_name}`이 Field(...) 호출이 아니다"
-        for keyword in call.keywords:
-            if keyword.arg == "description":
-                return "".join(
-                    part.value
-                    for part in ast.walk(keyword.value)
-                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
-                )
-        raise AssertionError(f"`{field_name}`에 description이 없다")
-    raise AssertionError(f"`{field_name}` 필드를 찾지 못했다 — 유도가 낡았다")
-
-
-def test_the_grid_cap_description_matches_the_code_that_enforces_it() -> None:
-    """설정 설명과 그것을 강제하는 코드가 같은 말을 해야 한다.
-
-    ``map_grid_targets``가 상한 초과분을 잘라내지만, asset은 잘린 것이 하나라도
-    있으면 ``KmaWeatherGridLimitExceeded``로 run 전체를 거부한다. 즉 이 설정은
-    "나눠서 처리"가 아니라 "넘으면 정지"다.
-    """
-
-    kma = _KMA.read_text(encoding="utf-8")
-    assert "KmaWeatherGridLimitExceeded(" in kma, (
-        "이 검사가 전제한 코드가 사라졌다 — 상한 초과가 더 이상 실패가 아니라면 "
-        "설정 설명과 이 검사를 함께 고쳐라."
-    )
-
-    description = _field_description(_SETTINGS, "kma_weather_max_grids_per_run")
-    assert "KmaWeatherGridLimitExceeded" in description, (
-        "`kma_weather_max_grids_per_run` **설명**이 초과 시 run이 실패한다는 것을 "
-        "말하지 않는다. 운영자는 '나눠서 처리된다'로 읽고 대상을 늘렸다가 "
-        "수집 정지를 만난다."
-    )
-    assert "다음 run으로 넘어가지 않는다" in description, (
-        "이월하지 않는다는 것을 명시해야 한다 — 지우려던 문구가 '초과분은 다음 "
-        "run으로'였다."
-    )
-    stale = re.search(r"초과분은 다음 run으로(?!\s*넘어가지 않는다)", description)
-    assert stale is None, (
-        f"이월을 약속하는 문구가 설명에 돌아왔다: {description!r}"
-    )
 
 
 def test_the_api_call_log_is_not_advertised_as_an_upstream_counter() -> None:

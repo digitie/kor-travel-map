@@ -9,16 +9,31 @@ run 완주를 본다"는 주장만 남는다 — 이 저장소가 반복한 실�
 2026-09-11 사고 config로 되돌렸을 때 red가 되는 것을 확인했고(`live-config` 두 축),
 그 기록은 acceptance §T-VN-DAGSTER-STORAGE에 있다. 여기서 잡는 것은 **그 술어가
 조용히 사라지는 것**이다.
+
+탐침 job만은 이름이 아니라 **성질**을 잰다(아래 "탐침 job의 성질") — 게이트의 기본 탐침을
+배포되는 Definitions에서 풀어, 일을 할 수 없는 job인지 resource·config·import·실행으로 본다.
 """
 
 from __future__ import annotations
 
 import ast
+import inspect
+import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [
+    pytest.mark.unit,
+    # Definitions를 로드하면 sensor `owners`의 BetaWarning이 난다.
+    # 루트 설정은 경고를 오류로 바꾸므로
+    # Dagster 패키지 테스트와 같은 필터를 단다(n150 실측: 이 필터 없이 setup ERROR 6건).
+    pytest.mark.filterwarnings(
+        "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
+        ".*:dagster_shared.utils.warnings.BetaWarning"
+    ),
+]
 
 _ROOT = Path(__file__).resolve().parents[2]
 _GATE = _ROOT / "scripts" / "dagster_run_completion_gate.py"
@@ -129,14 +144,224 @@ def test_the_gate_reads_the_live_config_not_the_repo_copy() -> None:
     )
 
 
-def test_the_probe_job_spends_no_upstream_quota() -> None:
-    """탐침이 **upstream 쿼터를 쓰지 않아야** 한다.
+# -- 탐침 job의 성질 ----------------------------------------------------------------------
+#
+# 게이트가 재는 것은 run 실행 **경로**다. 탐침 job이 일을 하면 게이트를 돌리는 것 자체가
+# 운영 행위가 된다 — 종전 기본 탐침 ``cache_target_snapshot_gc``는 prod에서 한 번도 돈 적
+# 없는 GC라 첫 실행이 최대 2,000 batch backlog를 지우고 600초 탐침 상한을 넘길 수 있었다
+# (2026-10-02 적대 리뷰). 종전 검사는 그 job **이름**이 기본값인지만 봤다 — 이름이 맞는
+# 동안 job이 무엇을 하든 초록이었다.
+#
+# 여기서는 이름을 적지 않는다. 게이트가 실제로 쓰는 기본값(``--probe-job``의 default)에서
+# 출발해 배포되는 ``defs``의 job을 풀고, 그 job이 **일을 할 수 없다**는 성질을 잰다.
+#
+# - 요구 resource ⊆ ``{"io_manager"}`` — Dagster는 run이 요구하는 resource만 초기화한다.
+#   DB client·provider record·geo client를 요구하지 않으면 그 run에서 만들어지지 않는다.
+# - run config 없이 유효하다 — 게이트는 config 없이 launch한다.
+# - op 모듈이 Map 코드·DB driver·HTTP client를 import하지 않는다(허용 목록), hook이 없다.
+# - operation key tag가 없다 — 있으면 상태 sensor가 ``ops.import_jobs``에 행을 만든다.
+# - in-process로 실제로 돌려 성공하고 수 초 안에 끝난다(효과 결박).
+#
+# - pool·retry policy가 없다 — pool은 탐침을 적재 뒤에 줄 세우고 retry는 실패를 가린다.
+#
+# **red 재현**(2026-10-02, WSL dagster 1.13.16에서 이 함수들을 직접 호출해 확인). 게이트의
+# ``_DEFAULT_PROBE_JOB``을 ``"cache_target_snapshot_gc"``로 되돌리면 resource 검사
+# (``kor_travel_map_client``), import 검사(``kortravelmap.infra.*``·상대 import), pool/retry
+# 검사(``MAINTENANCE_RETRY_POLICY``), in-process 검사(전제 실패) 넷이 빨개진다. config 검사와
+# operation key 검사는 초록으로 남는다 — 그 job의 config는 전부 기본값이 있고 operation key
+# tag도 없다. 그래서 그 둘 하나만으로는 이 성질을 잴 수 없다.
 
-    "부작용이 없다"가 아니다(적대 리뷰 정정) — 이 job은 projection 표를 다시
-    쓰고 분 단위 schedule의 tick 하나를 먹는다. 지켜야 하는 성질은 좁다:
-    provider 적재 job을 탐침으로 쓰면 게이트를 돌릴 때마다 일일 한도를 깎는다.
+#: 탐침이 요구해도 되는 resource. op 출력이 있으면 Dagster는 ``io_manager``를 언제나
+#: 요구한다. Map ``defs``가 그것을 바인딩하지 않는 동안(아래에서 확인) 구현은 Dagster 기본
+#: filesystem io_manager이고, 쓰는 자리는 ``local_artifact_storage`` — 게이트 축 A가 재는
+#: 2026-09-11 사고 자리다. 탐침이 거기 실제로 한 번 쓰는 것은 의도다.
+_PROBE_ALLOWED_RESOURCE_KEYS = frozenset({"io_manager"})
+
+#: 탐침 op 모듈이 import해도 되는 최상위 이름. 허용 목록이다 — 금지 목록은 새 driver를
+#: 놓친다. Map 패키지(``kortravelmap``)·상대 import도 허용하지 않는다: 그 길로 infra
+#: writer와 provider client에 닿는다.
+_PROBE_ALLOWED_IMPORT_ROOTS = frozenset({"__future__", "typing", "collections", "dagster"})
+
+#: in-process 완주 상한(초). 게이트의 탐침 상한(600초)보다 훨씬 작다 — 아무 일도 하지
+#: 않는 run이 수십 초 걸린다면 그것은 이미 일을 하고 있다.
+_PROBE_MAX_SECONDS = 30.0
+
+
+def _gate_default_probe_job() -> str:
+    """게이트가 **실제로** launch하는 기본 탐침 — ``--probe-job``의 ``default``를 푼다.
+
+    상수 이름이 아니라 argparse가 쓰는 값을 따른다. default가 상수를 가리키면 모듈
+    최상위 대입에서 그 값을 읽는다.
     """
-    source = _GATE.read_text(encoding="utf-8")
-    assert '_DEFAULT_PROBE_JOB = "current_weather_summary_refresh"' in source, (
-        "기본 탐침 job이 바뀌었다 — 부작용이 없는지 확인하고 이 검사를 갱신해라."
+
+    tree = ast.parse(_GATE.read_text(encoding="utf-8"))
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = node.value.value
+    defaults: list[str | None] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_argument"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "--probe-job"
+        ):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg != "default":
+                continue
+            value = keyword.value
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                defaults.append(value.value)
+            elif isinstance(value, ast.Name):
+                defaults.append(constants.get(value.id))
+            else:
+                defaults.append(None)
+    assert len(defaults) == 1, f"`--probe-job` 정의를 하나로 찾지 못했다: {defaults}"
+    assert defaults[0], "`--probe-job` 기본값을 문자열로 풀지 못했다 — 유도가 낡았다."
+    return defaults[0]
+
+
+@pytest.fixture(scope="module")
+def probe_job() -> Any:
+    from kortravelmap.dagster.definitions import defs
+
+    name = _gate_default_probe_job()
+    names = {job.name for job in defs.resolve_all_job_defs()}
+    assert name in names, (
+        f"게이트의 기본 탐침 `{name}`이 배포되는 Definitions에 없다 — 게이트가 exit 3"
+        "(탐침 job 부재)로 끝난다."
+    )
+    return defs.resolve_job_def(name)
+
+
+def test_the_probe_requires_no_resource_that_can_do_work(probe_job: Any) -> None:
+    from kortravelmap.dagster.definitions import defs
+
+    required = set(probe_job.required_resource_keys)
+    assert required <= _PROBE_ALLOWED_RESOURCE_KEYS, (
+        f"탐침 `{probe_job.name}`이 resource "
+        f"{sorted(required - _PROBE_ALLOWED_RESOURCE_KEYS)}를 요구한다 — 게이트를 돌릴 "
+        "때마다 그 resource가 만들어지고(DB·upstream) 탐침이 일을 한다."
+    )
+    assert "io_manager" not in defs.resources, (
+        "Map Definitions가 `io_manager`를 바인딩했다 — 허용의 전제(Dagster 기본 filesystem "
+        "구현)가 깨졌다. 그 구현이 무엇을 쓰는지 보고 이 허용을 다시 판단해라."
+    )
+
+
+def test_the_probe_needs_no_run_config(probe_job: Any) -> None:
+    from dagster import validate_run_config
+
+    # 유효하지 않으면 DagsterInvalidConfigError — 게이트는 config 없이 launch한다.
+    validate_run_config(probe_job, {})
+
+
+def _hook_defs(job: Any) -> set[Any]:
+    from dagster import GraphDefinition
+
+    hooks: set[Any] = set(job.hook_defs)
+
+    def walk(graph: Any) -> None:
+        for node in graph.nodes:
+            hooks.update(node.hook_defs)
+            if isinstance(node.definition, GraphDefinition):
+                walk(node.definition)
+
+    walk(job.graph)
+    return hooks
+
+
+def test_the_probe_ops_import_nothing_that_can_write(probe_job: Any) -> None:
+    op_defs = list(probe_job.graph.iterate_op_defs())
+    # 하한: op를 하나도 보지 못했으면 아래 import 검사가 항진명제다.
+    assert op_defs, f"탐침 `{probe_job.name}`에서 op를 하나도 읽지 못했다"
+    assert not _hook_defs(probe_job), "탐침에 hook이 있다 — hook은 step 뒤에 일을 한다"
+
+    modules = set()
+    for op_def in op_defs:
+        compute = getattr(op_def.compute_fn, "decorated_fn", op_def.compute_fn)
+        module = inspect.getmodule(compute)
+        assert module is not None, f"op `{op_def.name}`의 모듈을 찾지 못했다"
+        modules.add(module)
+
+    offenders: list[str] = []
+    for module in modules:
+        tree = ast.parse(inspect.getsource(module))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.level:
+                    offenders.append(f"{module.__name__}: 상대 import .{node.module or ''}")
+                elif (node.module or "").split(".")[0] not in _PROBE_ALLOWED_IMPORT_ROOTS:
+                    offenders.append(f"{module.__name__}: from {node.module}")
+            elif isinstance(node, ast.Import):
+                offenders.extend(
+                    f"{module.__name__}: import {alias.name}"
+                    for alias in node.names
+                    if alias.name.split(".")[0] not in _PROBE_ALLOWED_IMPORT_ROOTS
+                )
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "__import__"
+            ):
+                offenders.append(f"{module.__name__}: __import__ 호출")
+    assert not offenders, (
+        f"탐침 `{probe_job.name}`의 op 모듈이 일을 할 수 있는 코드를 import한다: {offenders}"
+    )
+
+
+def test_the_probe_ops_neither_queue_nor_retry(probe_job: Any) -> None:
+    """pool은 탐침을 적재 뒤에 줄 세우고, retry는 실패를 늦추거나 가린다."""
+    op_defs = list(probe_job.graph.iterate_op_defs())
+    assert op_defs, f"탐침 `{probe_job.name}`에서 op를 하나도 읽지 못했다"
+    pooled = sorted(f"{op.name}={op.pool}" for op in op_defs if op.pool)
+    assert not pooled, (
+        f"탐침 op가 pool에 있다: {pooled} — 게이트가 run 경로가 아니라 pool이 비었는지를 잰다."
+    )
+    retried = sorted(op.name for op in op_defs if op.retry_policy is not None)
+    assert not retried, f"탐침 op에 retry policy가 있다: {retried}"
+
+
+def test_the_probe_creates_no_operation_rows(probe_job: Any) -> None:
+    """operation key tag가 있으면 상태·reconcile sensor가 ``ops.import_jobs``에 행을 만든다.
+
+    sensor가 run을 operation으로 볼지 정하는 **바로 그 함수**로 판정한다 — tag 이름을 여기
+    다시 적으면 sensor 쪽 판정이 바뀌어도 초록이다.
+    """
+    from kortravelmap.dagster import feature_operation_sensors
+
+    tag = feature_operation_sensors._OPERATION_KEY_TAG
+    operation_key = feature_operation_sensors._operation_key(probe_job.tags)
+    assert tag not in probe_job.tags, f"탐침 `{probe_job.name}`이 `{tag}` tag를 단다"
+    assert operation_key is None, (
+        f"탐침 `{probe_job.name}`이 operation key `{operation_key}`를 단다 — 게이트 run마다 "
+        "provider operation 행이 생긴다."
+    )
+
+
+def test_the_probe_completes_in_process_without_doing_work(probe_job: Any) -> None:
+    """효과 결박: 실제로 돌려 성공하고, 수 초 안에 끝난다."""
+    required = set(probe_job.required_resource_keys)
+    if not required <= _PROBE_ALLOWED_RESOURCE_KEYS:
+        # 실행하면 DB·upstream resource를 만든다 — 실행하지 않고 실패한다.
+        pytest.fail(
+            f"전제 실패: 탐침 `{probe_job.name}`이 {sorted(required)}를 요구한다 — "
+            "실행하지 않는다."
+        )
+    started = time.monotonic()
+    result = probe_job.execute_in_process(raise_on_error=False)
+    elapsed = time.monotonic() - started
+    assert result.success, f"탐침 `{probe_job.name}`이 resource 없이 완주하지 못했다"
+    assert elapsed < _PROBE_MAX_SECONDS, (
+        f"탐침 `{probe_job.name}`이 in-process로 {elapsed:.1f}초 걸렸다 — 일을 하고 있다."
     )

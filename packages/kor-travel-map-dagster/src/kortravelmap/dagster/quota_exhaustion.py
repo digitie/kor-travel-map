@@ -10,7 +10,8 @@ Dagster가 60·120·240초 간격으로 같은 순회를 세 번 더 돌린다. 
 
 **무엇을 아끼는가 — 정확히.** 처음에 이 자리에 "요청이 네 배로 나간다"고 적었다.
 **그것이 틀렸다**(적대 리뷰 지적). 쿼터가 소진된 뒤의 재시도는 **첫 격자에서
-즉사한다** — ``kma_weather``의 격자 루프는 항상 ``grids[0]``부터 다시 시작하고
+즉사한다** — 당시 KMA 격자 루프(2026-10-01 ADR-104로 Map에서 제거)는
+항상 ``grids[0]``부터 다시 시작하고
 (성공 cursor는 루프 완주 뒤에만 전진한다) 그 첫 호출이 곧바로 code 22를 받는다.
 그래서 재시도 3회가 사는 것은 순회 3벌이 아니라 **요청 3건**이다. 실제로 아끼는
 것은 이것이다:
@@ -32,8 +33,9 @@ asset은 **한 달** 갱신되지 않는다. provider lib들이 429와 resultCod
 kma·krforest·visitkorea·kasi·khoa·mcst·enckc·krbluelink·knps이고
 airkorea·datagokr·krairport·krex·opinet·krheritage·mois·vworld는 붙이지 않는다
 (knps는 붙이지만 쿼터 분류는 쓰지 않는다 — network/auth 등만 단다).
-그래서 속성 하나에만 걸면 **가장 좁은 분모에서 한 번도 발화하지 않는다** —
-에어코리아가 오퍼레이션당 500/일이다(``docs/etl/upstream-quota.md``). 그 구멍을
+그래서 속성 하나에만 걸면 그 provider들에서 **한 번도 발화하지 않는다**(종전에는
+가장 좁은 분모인 에어코리아 500/일이 그 예였다 — 2026-10-01 ADR-105로 Map은 에어코리아를
+부르지 않는다, ``docs/etl/upstream-quota.md``). 그 구멍을
 :data:`QUOTA_EXCEPTION_TYPES`가 메운다.
 
 **이 기제가 실재한다는 근거.** Dagster 1.13.18 ``_core/execution/plan/utils.py``의
@@ -105,11 +107,9 @@ _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
 #: - ``datagokr`` · ``mois`` · ``krmois`` — 쿼터 전용 예외 자체가 없다.
 QUOTA_EXCEPTION_TYPES: Final[frozenset[tuple[str, str]]] = frozenset(
     {
-        # 429와 본문 LIMIT 마커를 같은 타입으로 던지고 속성이 없다. 그런데 airkorea
-        # schedule은 매시라 429를 쿼터로 오인해도 손실이 **한 시간**으로 묶인다.
-        # 이 저장소는 이미 이 예외가 "코드 22 — 일일 쿼터 소진"임을 알고 재시도에서
-        # 제외해 두었다(``provider_fetchers.AIRKOREA_RETRYABLE_EXCEPTION_NAMES``).
-        ("airkorea", "AirKoreaRateLimitError"),
+        # 2026-10-01 — ``("airkorea", "AirKoreaRateLimitError")``를 뺐다. Map은 에어코리아를
+        # 부르지 않는다(ADR-105: weather kind 적재 전부 제거) — 발화할 경로가 없는 선언은
+        # 실물 lib 계약 검사만 붙들고 있다.
         # 429에는 ``http_status``가 붙고 EXCEEDED_LIMIT/code 22에는 붙지 않는다 —
         # 아래 429 판정이 둘을 가른다.
         ("krex", "KrexQuotaExceededError"),

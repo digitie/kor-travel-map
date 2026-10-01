@@ -143,10 +143,9 @@ def _write_fixture(
     path: Path,
     *,
     features: int,
-    weather: int,
     price: int,
     foreign_key_references: int = 0,
-    summary_run_ids: tuple[int, int] = (101, 102),
+    summary_run_ids: tuple[int, ...] = (101,),
 ) -> None:
     action = path.stem.removeprefix("direct-")
     payload: dict[str, object] = {
@@ -154,7 +153,6 @@ def _write_fixture(
         "counts": {
             "features": features,
             "price_values": price,
-            "weather_values": weather,
         },
         "foreign_key_constraints_checked": 12,
         "foreign_key_references": foreign_key_references,
@@ -305,15 +303,14 @@ def _prepare_runtime(tmp_path: Path) -> tuple[Path, Path]:
     )
     _write_fixture(
         runtime / "direct-seed.json",
-        features=2,
-        weather=1,
+        features=1,
         price=1,
-        foreign_key_references=6,
+        foreign_key_references=3,
     )
     _write_fixture(
-        runtime / "direct-cleanup.json", features=0, weather=0, price=0
+        runtime / "direct-cleanup.json", features=0, price=0
     )
-    _write_fixture(runtime / "direct-audit.json", features=0, weather=0, price=0)
+    _write_fixture(runtime / "direct-audit.json", features=0, price=0)
     (runtime / "api-owned-audit.json").write_text(
         json.dumps(
             {
@@ -1068,7 +1065,6 @@ def test_recovered_result_preserves_hard_purge_evidence(tmp_path: Path) -> None:
                 "counts": {
                     "features": 0,
                     "price_values": 0,
-                    "weather_values": 0,
                 },
                 "foreign_key_constraints_checked": 12,
                 "foreign_key_references": 0,
@@ -1142,8 +1138,7 @@ def test_complete_rejects_false_green_evidence(
     elif mutation == "seed-fk":
         _write_fixture(
             runtime / "direct-seed.json",
-            features=2,
-            weather=1,
+            features=1,
             price=1,
             foreign_key_references=0,
         )

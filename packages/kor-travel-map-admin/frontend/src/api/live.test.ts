@@ -231,9 +231,9 @@ describe("ops live invalidation", () => {
     const datasetsKey = ["ops-datasets"];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-kma-api",
-      "kma_vilage_fcst",
-      "target_grids",
+      "python-krex-api",
+      "krex_traffic_notices",
+      "full_snapshot",
     ];
 
     seedQuery(queryClient, featureMapKey);
@@ -272,9 +272,9 @@ describe("ops live invalidation", () => {
     ];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-kma-api",
-      "kma_vilage_fcst",
-      "target_grids",
+      "python-krex-api",
+      "krex_traffic_notices",
+      "full_snapshot",
     ];
 
     seedQuery(queryClient, featureMapKey);
@@ -330,9 +330,9 @@ describe("ops live invalidation", () => {
     const datasetsKey = ["ops-datasets"];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-kma-api",
-      "forecast",
-      "target_grids",
+      "python-krex-api",
+      "krex_traffic_notices",
+      "full_snapshot",
     ];
     const schedulesKey = ["pipeline", "schedules"];
     const overviewKey = ["pipeline", "overview", 10];

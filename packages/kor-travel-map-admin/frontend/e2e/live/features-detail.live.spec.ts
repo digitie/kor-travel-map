@@ -12,9 +12,11 @@ import * as F from "./_fixtures";
  * selector/route/heading은 mock 참조 spec(`e2e/feature-detail.spec.ts`,
  * `e2e/feature-detail-sections.spec.ts`)에서 이미 검증된 것만 재사용한다:
  *   - 라우트: `/features/{featureId}` (admin 상세 GET `/v1/admin/features/{id}` 호출)
- *   - 컨테이너: `data-testid="feature-detail-view"` / `data-testid="feature-weather-panel"`
+ *   - 컨테이너: `data-testid="feature-detail-view"`
  *   - 헤더 dl 라벨: coord / sigungu / updated / provider
- *   - 섹션 타이틀: Sources / Issues / Overrides / History / Files / Raw / Nearby / Weather
+ *   - 섹션 타이틀: Sources / Issues / Overrides / History / Files / Raw / Nearby
+ *   - 2026-10-01 ADR-105: Map은 weather 기능을 걷어냈다 — 상세에 Weather 패널
+ *     (`feature-weather-panel`)이 **없어야** 한다(고정 시나리오에서 부재를 단언).
  *   - Raw <details> summary: detail / raw_refs / urls / address
  *   - AdminShell 상수 헤딩(h1): "Feature 상세"
  *
@@ -24,8 +26,8 @@ import * as F from "./_fixtures";
  * NOTE: Playwright는 Windows 호스트에서만 실행된다(라이브 검증은 Windows 런 필요).
  */
 
-// weather feature 상세는 대용량 raw 페이로드를 JsonBlock으로 렌더해 첫 페인트가
-// 느릴 수 있어(대상 몇 건 15s 초과) 여유 타임아웃을 준다.
+// 대용량 raw 페이로드를 JsonBlock으로 렌더하는 상세는 첫 페인트가 느릴 수 있어
+// (대상 몇 건 15s 초과) 여유 타임아웃을 준다.
 const TIMEOUT = { timeout: 30000 } as const;
 
 // 상한 — fixture가 비거나 과다해도 안전하게.
@@ -74,11 +76,6 @@ test.describe("features-detail LIVE — id별 상세 로드", () => {
 
       // 헤더 좌측 — 원문 feature_id(font-mono)가 그대로 노출된다.
       await expect(detailView.getByText(featureId, { exact: true })).toBeVisible(
-        TIMEOUT,
-      );
-
-      // weather 패널 landmark는 weather 성공/실패와 무관하게 렌더된다.
-      await expect(page.getByTestId("feature-weather-panel")).toBeVisible(
         TIMEOUT,
       );
     });
@@ -134,18 +131,12 @@ test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => 
     });
   }
 
-  // 우측 aside 패널들(Weather/Nearby/Raw 섹션 타이틀) 가시성.
+  // 우측 aside 패널들(Nearby/Raw 섹션 타이틀) 가시성.
   for (const featureId of DEEPLINK_IDS) {
     test(`aside panels — ${featureId}`, async ({ page }) => {
       await page.goto(`/features/${featureId}`);
 
       await expect(page.getByTestId("feature-detail-view")).toBeVisible(
-        TIMEOUT,
-      );
-
-      const weatherPanel = page.getByTestId("feature-weather-panel");
-      await expect(weatherPanel).toBeVisible(TIMEOUT);
-      await expect(weatherPanel.getByText("Weather").first()).toBeVisible(
         TIMEOUT,
       );
 
@@ -234,9 +225,6 @@ test.describe("features-detail LIVE — 반응형 viewport", () => {
         await expect(page.getByTestId("feature-detail-view")).toBeVisible(
           TIMEOUT,
         );
-        await expect(page.getByTestId("feature-weather-panel")).toBeVisible(
-          TIMEOUT,
-        );
       });
     }
   }
@@ -256,11 +244,12 @@ test.describe("features-detail LIVE — 고정 시나리오(fixture-독립)", ()
     await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
   });
 
-  test(`weather panel present — ${SAMPLE_ID}`, async ({ page }) => {
+  // ADR-105: weather 패널은 사라졌다. 상세가 다 렌더된 **뒤에** 부재를 본다 —
+  // 렌더 전 0건으로 공허하게 통과하지 않도록 detail-view 가시성을 먼저 기다린다.
+  test(`weather panel absent — ${SAMPLE_ID}`, async ({ page }) => {
     await page.goto(`/features/${SAMPLE_ID}`);
-    await expect(page.getByTestId("feature-weather-panel")).toBeVisible(
-      TIMEOUT,
-    );
+    await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
+    await expect(page.getByTestId("feature-weather-panel")).toHaveCount(0);
   });
 
   for (const [vpName, width, height] of VIEWPORTS) {

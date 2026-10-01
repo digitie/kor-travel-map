@@ -201,9 +201,6 @@ export function useAdminFeatureClustersInBbox(
 // ── feature 단건 상세 (`GET /v1/features/{feature_id}`) ────────────────────────
 
 export type FeatureDetail = FeatureSchemas["FeatureDetailResponse"];
-export type FeatureWeatherResponse = FeatureSchemas["FeatureWeatherResponse"];
-export type WeatherCardData = FeatureSchemas["WeatherCardData"];
-export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
 export type FeaturePriceResponse = FeatureSchemas["FeaturePriceResponse"];
 export type PriceCardData = FeatureSchemas["PriceCardData"];
 export type PricePoint = FeatureSchemas["PricePointOut"];
@@ -224,26 +221,6 @@ export type FeaturesNearbyParams = Omit<
   kind?: string[];
   provider?: string[];
 };
-
-async function fetchAdminFeatureWeather(
-  featureId: string,
-  signal?: AbortSignal,
-): Promise<FeatureWeatherResponse> {
-  return getJson<FeatureWeatherResponse>(
-    `/v1/admin/features/${encodeURIComponent(featureId)}/weather`,
-    { signal },
-  );
-}
-
-export function useAdminFeatureWeather(featureId: string | null) {
-  return useQuery<FeatureWeatherResponse, Error>({
-    queryKey: ["admin-feature-card", featureId, "weather"] as const,
-    queryFn: ({ signal }) =>
-      fetchAdminFeatureWeather(featureId as string, signal),
-    enabled: featureId !== null && featureId.length > 0,
-    staleTime: 60_000,
-  });
-}
 
 async function fetchAdminFeaturePrice(
   featureId: string,
@@ -351,14 +328,16 @@ export function useNearbyFeatures(
   });
 }
 
-// ── kind 필터 — backend가 받는 7종 (data-model.md §1 FeatureKind) ───────────
+// ── kind 필터 — UI가 선택지로 내는 kind (data-model.md §1 FeatureKind) ─────────
+// `weather` kind 정의는 core enum에 남지만 Map은 weather 기능을 제공하지 않는다
+// (owner 결정 2026-10-01, 날씨 정본은 kor-travel-weather) — UI 선택지에서 뺀다.
+// `src/app/map-ui-has-no-weather.test.ts`가 재등장을 막는다.
 
 export const FEATURE_KINDS = [
   "place",
   "event",
   "notice",
   "price",
-  "weather",
   "route",
   "area",
 ] as const;

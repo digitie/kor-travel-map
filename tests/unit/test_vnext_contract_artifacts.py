@@ -59,8 +59,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-03 T-VN-M05 — `/v1/debug/*` 표면 제거로 admin baseline sha256 재고정.
     # 계약이 운영이 제공하지 않는 라우트를 기술해 M05 live attestation이 구조적으로
     # 통과 불가였다(실측: 이미지 161 path / 계약 162 path).
+    # 2026-10-01 ADR-105 — weather 라우트 제거로 baseline sha256 3종 재고정, 사라진
+    # weather operation을 가리키던 목표 diff 항목 5건(user added 4·service enum 1) 제거.
     "openapi-diff-v1.json": (
-        "7d0b6d03e44ce5139d3f7cbd6fb6ed944abcee3f2b626b97d504c2498b2d35f1"
+        "6b8cf440863e2966f4d1741e957f7b142c590d27afa4ee534d09a1e58d731fe6"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -68,7 +70,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-09 T-VN-39/ADR-098 결정 6 — 32B 문안의 alias 원자 생성을 provider 경로로
     # 한정했다(manual·요청승인·큐레이션·core는 legacy 주소를 갖지 않는다).
     "consumer-rollout-v1.json": (
-        "ebdb1027506ab64ad166e02208dd6a4a378044fc0ca5f7d15b8aaad71c379bad"
+        "3a98bb3d6c837d6da10f97b3eccbb88ff185fdd267bf47c2b7edae386f0ca2bd"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

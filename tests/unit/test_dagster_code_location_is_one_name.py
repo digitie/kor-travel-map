@@ -70,29 +70,6 @@ def test_admin_ui_constant_is_the_workspace_location() -> None:
     assert match[1] == _workspace_location()
 
 
-@pytest.mark.parametrize(
-    "relative",
-    [
-        "packages/kor-travel-map-admin/frontend/e2e/live/_ops-c7-admin-api.ts",
-        "packages/kor-travel-map-admin/frontend/e2e/live/_ops-c7-dagster-sensor.ts",
-    ],
-)
-def test_c7_live_selectors_are_the_workspace_location(relative: str) -> None:
-    text = (_ROOT / relative).read_text(encoding="utf-8")
-    block = re.search(
-        r"const MAP_DAGSTER_REPOSITORY_SELECTOR = \{\n"
-        r'  repositoryName: "([^"]+)",\n'
-        r'  repositoryLocationName: "([^"]+)",\n'
-        r"\} as const;",
-        text,
-    )
-    assert block is not None, relative
-    assert block[1] == "__repository__"
-    assert block[2] == _workspace_location()
-    # 조회는 이 selector로 좁힌다 — 전 repository를 도는 조회가 돌아오지 않았다.
-    assert "repositoriesOrError" not in text, relative
-
-
 #: Dagster 조회 문자열이 살 수 있는 자리 — API·Dagster 패키지, core, 운영 스크립트
 #: (``scripts/lib``·``scripts/n150`` 포함, ``.sh`` 포함), admin UI(src·e2e의 ``.ts``/``.tsx``).
 _QUERY_SOURCE_ROOTS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -606,8 +583,9 @@ def test_no_instance_run_read_escapes_the_map_code_location() -> None:
             assert violations == [], (path.relative_to(_ROOT).as_posix(), violations)
             seen += count
     # 하한: 지금 있는 조회를 **본** 것 — reconcile sensor 둘(run 수·page), feature-load
-    # coalescing schedule, weather summary schedule. 새 조회가 늘면 올린다.
-    assert seen >= 4, seen
+    # coalescing schedule. 새 조회가 늘면 올린다.
+    # weather summary schedule은 ADR-105로 지워져 관측값이 3이다.
+    assert seen >= 3, seen
 
 
 @pytest.mark.parametrize(

@@ -157,7 +157,6 @@ def test_list_public_beaches_maps_page(
         # 응답 필드는 옵션 제거 뒤에도 모델 기본값(null/[])으로 유지된다(구현 시 재도입).
         assert item["latest_water_quality"] is None
         assert item["upcoming_index_forecasts"] == []
-        assert item["latest_weather"] is None
         assert body["meta"]["page"] == {
             "page_size": 10,
             "next_cursor": "n",
@@ -179,7 +178,6 @@ def test_openapi_drops_beach_noop_quality_forecast_options(client: TestClient) -
     beach_properties = spec["components"]["schemas"]["BeachPublicView"]["properties"]
     assert "latest_water_quality" in beach_properties
     assert "upcoming_index_forecasts" in beach_properties
-    assert "latest_weather" in beach_properties
 
 
 def test_public_beach_markers_reject_partial_bbox(client: TestClient) -> None:

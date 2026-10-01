@@ -86,7 +86,6 @@ from kortravelmap.api.routers import (
     admin_issues_router,
     admin_manual_provider_dedup_cases_router,
     admin_restore_router,
-    admin_weather_router,
     categories_router,
     curations_router,
     dedup_review_router,
@@ -112,7 +111,6 @@ from kortravelmap.api.routers import (
     service_feature_alias_maps_router,
     service_feature_reference_reconciliations_router,
     service_feature_requests_router,
-    weather_router,
 )
 from kortravelmap.api.routers.admin_features import (
     AdminManualFeatureCanonicalJSONResponse,
@@ -1123,7 +1121,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # 사용자/서비스 표면 ``/features`` · ``/categories`` · ``/providers``는 ``/v1``
         # prefix로 노출한다(T-214b, ADR-048 — clean cut, unversioned alias 없음). 브라우저
         # admin UI도 쓰는 공용 read라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
-        # ``POST /v1/features/batch``와 ``POST /v1/features/weather/batch``는 순수
+        # ``POST /v1/features/batch``는 순수
         # service-to-service read라 route-level에서 service token으로 게이트한다
         # (ADR-045 D-1; features.py). 나머지 ``/v1/features`` read는 공용이라
         # 앱 토큰을 강제하지 않는다.
@@ -1135,11 +1133,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             public_views_router,
-            prefix="/v1",
-            dependencies=public_dependencies,
-        )
-        application.include_router(
-            weather_router,
             prefix="/v1",
             dependencies=public_dependencies,
         )
@@ -1223,11 +1216,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_curation_candidates_router,
-            prefix="/v1",
-            dependencies=admin_dependencies,
-        )
-        application.include_router(
-            admin_weather_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

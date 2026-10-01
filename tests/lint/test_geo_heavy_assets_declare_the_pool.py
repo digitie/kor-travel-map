@@ -52,10 +52,12 @@ _POOL_CONSTANT: Final = "GEO_HEAVY_POOL"
 #: 여기 적지 않아도 schedule spec의 `max_runtime_seconds`로 자동 제외되지만,
 #: 그 유도가 낡으면(예: 상한이 다른 뜻으로 쓰이기 시작하면) 이 표와 어긋나면서
 #: 아래 검사가 그것을 말해 준다.
-_FRESHNESS_SENSITIVE: Final[dict[str, str]] = {
-    "feature_weather_airkorea_air_quality": "매시 10분 수집 — 월간 적재 뒤에 서면 한 시간을 잃는다",
-    "feature_weather_krex_rest_areas": "매시 35분 수집 — 같은 이유",
-}
+#:
+#: 2026-10-01 — 비었다. 여기 있던 둘(에어코리아 대기질·KREX 휴게소 기상, 매시 수집)은
+#: ADR-105로 asset째 사라졌다. 표와 아래 대조 검사는 남긴다 — geo를 쓰는 freshness 민감
+#: asset이 다시 생기면 `test_the_freshness_exclusions_are_still_the_ones_we_reasoned_about`이
+#: 이유를 적으라고 빨개진다.
+_FRESHNESS_SENSITIVE: Final[dict[str, str]] = {}
 
 
 def _module_source(path: pathlib.Path) -> str:

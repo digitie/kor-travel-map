@@ -13,12 +13,18 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly COMPOSE_PROJECT_DIR="$PWD"
-readonly SAFE_DAGSTER_JOB="feature_update_request_worker"
-readonly SAFE_SCHEDULE="feature_weather_kma_short_forecast_hourly_schedule"
-readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
+# 실수로 tick이 나가도 upstream 호출이 0인 schedule만 조작한다. 공항 fetcher는 krairport의
+# 번들 정적 데이터만 읽는다(keyless, network 없음). 옛 KMA schedule은 2026-09-09에 사라졌고
+# Map은 weather를 더 적재하지 않는다(ADR-104/105).
+readonly SAFE_SCHEDULE="feature_place_krairport_airports_monthly_schedule"
+# 기준 5(queue sensor → worker run)의 exact-scope request도 같은 upstream 0 dataset 하나로만
+# 만든다(`ops-c7-update-request-write`). 이것은 실제 prod 쓰기다 — 번들 공항을 place feature로
+# idempotent upsert한다. 상세는 spec 머리말과 runbook.
+readonly SAFE_UPDATE_OPERATION="feature_place_krairport_airports_job"
 # 공유 Dagster plane의 공개 GraphQL gateway(Manager ADR-54 D2)는 Basic Auth를 요구한다.
 # 자격증명 파일은 executor 안의 이 경로에 read-only로만 보인다(env에는 경로만 싣는다).
 readonly DAGSTER_BASIC_AUTH_CONTAINER_PATH="/run/secrets/c7-dagster-basic-auth"
+readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
 readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 STATE_ROOT=""
 EVIDENCE_ROOT=""
@@ -29,10 +35,10 @@ LOCK_GUARD_INPUT_FD=""
 LOCK_GUARD_OUTPUT_FD=""
 LOCK_GUARD_PID=""
 ORCHESTRATOR_VERIFIED=0
-RUN_STATE_FILE=""
 SCHEDULE_STATE_FILE=""
-KMA_STATE_FILE=""
+TARGET_STATE_FILE=""
 POI_STATE_FILE=""
+REQUEST_STATE_FILE=""
 RUNTIME_DIR=""
 PLAYWRIGHT_IMAGE_ID=""
 REPOSITORY_COMMIT=""
@@ -277,10 +283,10 @@ preserve_evidence() {
   python3 - \
     "$temporary" \
     "$RUNTIME_DIR" \
-    "$RUN_STATE_FILE" \
     "$SCHEDULE_STATE_FILE" \
-    "$KMA_STATE_FILE" \
+    "$TARGET_STATE_FILE" \
     "$POI_STATE_FILE" \
+    "$REQUEST_STATE_FILE" \
     "$status" \
     "$ORCHESTRATOR_VERIFIED" \
     "$REPOSITORY_COMMIT" \
@@ -298,10 +304,10 @@ from pathlib import Path
 (
     destination_raw,
     runtime_raw,
-    run_raw,
     schedule_raw,
-    kma_raw,
+    target_raw,
     poi_raw,
+    request_raw,
     status_raw,
     verified_raw,
     repository_commit,
@@ -323,10 +329,10 @@ def copy_regular(source: Path, target: Path) -> None:
 
 
 for name, raw in (
-    ("sensor.json", run_raw),
     ("schedule.json", schedule_raw),
-    ("kma.json", kma_raw),
+    ("targets.json", target_raw),
     ("poi.json", poi_raw),
+    ("requests.json", request_raw),
 ):
     source = Path(raw) if raw else None
     if source is not None and source.exists():
@@ -451,10 +457,10 @@ finish() {
   fi
   if (( status == 0 && ORCHESTRATOR_VERIFIED == 1 )); then
     if rm -f -- \
-      "$RUN_STATE_FILE" \
       "$SCHEDULE_STATE_FILE" \
-      "$KMA_STATE_FILE" \
-      "$POI_STATE_FILE"; then
+      "$TARGET_STATE_FILE" \
+      "$POI_STATE_FILE" \
+      "$REQUEST_STATE_FILE"; then
       rm -f -- "$BLOCKED_FILE" || status=1
       fsync_state_root || status=1
     else
@@ -482,7 +488,8 @@ create_blocked_sentinel() {
 
 has_residual_state() {
   # attestation-*/compatible-pair-*/pinned-runtime-* 사본은 ADR-102 이전 러너만 만든다.
-  # 이 러너는 더 만들지 않지만, 옛 러너가 남긴 잔여물은 여전히 복구 대상이다.
+  # run-*/kma-*(queue sensor·KMA journal)는 2026-10-01 퇴역했다(ADR-104/105). 이 러너는
+  # 더 만들지 않지만, 옛 러너가 남긴 잔여물은 여전히 복구 대상이다.
   compgen -G "$STATE_ROOT/run-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/schedule-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/kma-*.json" >/dev/null ||
@@ -524,7 +531,6 @@ validate_environment() {
   require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
   require_env E2E_DAGSTER_URL
   require_env E2E_ADMIN_PASSWORD
-  require_env E2E_DAGSTER_JOB
   require_env E2E_C7_SCHEDULE
   require_env E2E_C7_EXPECTED_GIT_COMMIT
   require_env E2E_C7_PLAYWRIGHT_IMAGE
@@ -538,6 +544,7 @@ validate_environment() {
   validate_service_env E2E_C7_PINVI_API_SERVICE
   validate_service_env E2E_C7_PINVI_WEB_SERVICE
   validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
+  require_env E2E_C7_UPDATE_REQUEST_OPERATION
   [[ -z "${E2E_DAGSTER_BASIC_AUTH_FILE-}" ]] || validate_dagster_basic_auth_file
 
   [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
@@ -548,15 +555,13 @@ validate_environment() {
   require_enabled E2E_LIVE_ALLOW_PROD
   require_enabled E2E_ADMIN_WRITE
   require_enabled E2E_C7_READ_AUTH_WRITE
-  require_enabled E2E_KMA_SCOPE_WRITE
   require_enabled E2E_DAGSTER_WRITE
-  require_enabled E2E_DAGSTER_RUN
-  require_enabled E2E_QUEUE_SENSOR_BARRIER
+  require_enabled E2E_C7_UPDATE_REQUEST_WRITE
 
-  [[ "$E2E_DAGSTER_JOB" == "$SAFE_DAGSTER_JOB" ]] ||
-    die "E2E_DAGSTER_JOB is not the allowlisted update-request worker"
   [[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
-    die "E2E_C7_SCHEDULE is not the allowlisted KMA schedule"
+    die "E2E_C7_SCHEDULE is not the allowlisted zero-upstream schedule"
+  [[ "$E2E_C7_UPDATE_REQUEST_OPERATION" == "$SAFE_UPDATE_OPERATION" ]] ||
+    die "E2E_C7_UPDATE_REQUEST_OPERATION is not the allowlisted zero-upstream operation"
 }
 
 validate_environment
@@ -652,32 +657,6 @@ if parsed[0] != parsed[1]:
     raise SystemExit(1)
 print(parsed[0])
 PY
-}
-
-read_cap() {
-  local service="$1"
-  local temporary value
-  local -a lines
-  temporary="$(mktemp /tmp/kor-travel-map-c7-cap.XXXXXX)" || return 1
-  chmod 600 -- "$temporary"
-  if ! docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T "$service" \
-    python -c \
-      'from kortravelmap.settings import KorTravelMapSettings
-value = KorTravelMapSettings().kma_weather_max_grids_per_run
-if type(value) is not int or not 1 <= value <= 500:
-    raise SystemExit(3)
-print(value)' \
-    >"$temporary" 2>/dev/null; then
-    rm -f -- "$temporary"
-    return 1
-  fi
-  mapfile -t lines <"$temporary"
-  rm -f -- "$temporary"
-  (( ${#lines[@]} == 1 )) || return 1
-  value="${lines[0]}"
-  [[ "$value" =~ ^[0-9]+$ ]] || return 1
-  (( value >= 1 && value <= 500 )) || return 1
-  printf '%s\n' "$value"
 }
 
 verify_ui_auth_preflight() {
@@ -829,13 +808,12 @@ docker_run_playwright() {
   for name in \
     E2E_BASE_URL NEXT_PUBLIC_KOR_TRAVEL_MAP_API E2E_DAGSTER_URL \
     E2E_ADMIN_PASSWORD E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE \
-    E2E_KMA_SCOPE_WRITE E2E_DAGSTER_WRITE E2E_DAGSTER_RUN \
-    E2E_QUEUE_SENSOR_BARRIER E2E_LIVE_ALLOW_PROD E2E_DAGSTER_JOB \
+    E2E_DAGSTER_WRITE E2E_LIVE_ALLOW_PROD \
     E2E_C7_SCHEDULE E2E_C7_EXPECTED_UI_ORIGIN_SHA256 \
     E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256 E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256 \
-    E2E_C7_ORCHESTRATOR_STATE_FILE E2E_C7_SCHEDULE_STATE_FILE \
-    E2E_C7_KMA_STATE_FILE E2E_C7_POI_STATE_FILE E2E_KMA_GRID_CAP \
-    E2E_KMA_GRID_CAP_FROM_RUNTIME E2E_LIVE_WORKERS E2E_POI_CACHE_WRITE \
+    E2E_C7_SCHEDULE_STATE_FILE E2E_C7_TARGET_STATE_FILE E2E_C7_POI_STATE_FILE \
+    E2E_C7_UPDATE_REQUEST_WRITE E2E_C7_UPDATE_REQUEST_OPERATION \
+    E2E_C7_REQUEST_STATE_FILE E2E_LIVE_WORKERS E2E_POI_CACHE_WRITE \
     E2E_STORAGE_STATE PLAYWRIGHT_ARTIFACT_ROOT; do
     environment_args+=(--env "$name")
   done
@@ -1020,11 +998,6 @@ ALEMBIC_HEAD="$(verify_alembic_state)" ||
   die "Map API Alembic current/head/check verification failed"
 [[ -n "$ALEMBIC_HEAD" ]] || die "Alembic head measurement is empty"
 [[ "$ALEMBIC_HEAD" =~ ^[0-9A-Za-z_]+$ ]] || die "Alembic head output is invalid"
-web_cap="$(read_cap "$E2E_C7_DAGSTER_WEB_SERVICE")" ||
-  die "Dagster web cap attestation failed"
-daemon_cap="$(read_cap "$E2E_C7_DAGSTER_DAEMON_SERVICE")" ||
-  die "Dagster daemon cap attestation failed"
-[[ "$web_cap" == "$daemon_cap" ]] || die "Dagster cap attestation mismatch"
 verify_ui_auth_preflight || die "UI login POST/Set-Cookie preflight failed"
 
 initialize_state_paths
@@ -1052,26 +1025,25 @@ ACTIVE_CONTAINER_REF_FILE="$STATE_ROOT/container-$$.json"
 ACTIVE_CREATE_OUTCOME_FILE="$STATE_ROOT/container-$$.outcome.json"
 ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
 
-RUN_STATE_FILE="$RUNTIME_DIR/journals/sensor.json"
 SCHEDULE_STATE_FILE="$RUNTIME_DIR/journals/schedule.json"
-KMA_STATE_FILE="$RUNTIME_DIR/journals/kma.json"
+TARGET_STATE_FILE="$RUNTIME_DIR/journals/targets.json"
 POI_STATE_FILE="$RUNTIME_DIR/journals/poi.json"
-printf -v run_state_payload \
-  '{"dagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_started","version":2}' \
-  "$actual_dagster_origin_sha256"
-atomic_replace_state "$RUN_STATE_FILE" "$run_state_payload"
+REQUEST_STATE_FILE="$RUNTIME_DIR/journals/requests.json"
 printf -v schedule_state_payload \
   '{"dagsterGraphqlEndpointSha256":"%s","phase":"schedule_snapshot_pending","version":2}' \
   "$actual_dagster_origin_sha256"
 atomic_replace_state "$SCHEDULE_STATE_FILE" "$schedule_state_payload"
-# helper의 이전-run fail-closed 검사와 호환되는 빈 restored baseline이다. 최종
-# 검증은 sentinel run_id와 null cleanup_result를 거부하므로 실행 생략을 성공으로
-# 오인하지 않는다.
+# target/POI journal은 첫 durable write 전 placeholder로 시작한다(helper가 이 정확한 꼴만
+# "이전 기록 없음"으로 받는다). 최종 검증은 `phase == "restored"`와 완결된 본문을
+# 요구하므로 실행 생략을 성공으로 오인하지 않는다.
 atomic_replace_state \
-  "$KMA_STATE_FILE" \
-  '{"cleanup_result":null,"completed_scenarios":[],"external_systems":[],"idempotency_entries":[],"phase":"restored","request_ids":[],"request_terminal_statuses":{},"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}'
+  "$TARGET_STATE_FILE" \
+  '{"phase":"orchestrator_pending","version":1}'
 atomic_replace_state \
   "$POI_STATE_FILE" \
+  '{"phase":"orchestrator_pending","version":1}'
+atomic_replace_state \
+  "$REQUEST_STATE_FILE" \
   '{"phase":"orchestrator_pending","version":1}'
 printf -v blocked_running_payload \
   '{"dagsterGraphqlEndpointSha256":"%s","expectedDagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_running","version":3}' \
@@ -1080,33 +1052,39 @@ printf -v blocked_running_payload \
 atomic_replace_state "$BLOCKED_FILE" "$blocked_running_payload"
 
 export E2E_LIVE_ALLOW_PROD
-export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE E2E_KMA_SCOPE_WRITE
-export E2E_DAGSTER_WRITE E2E_DAGSTER_RUN E2E_QUEUE_SENSOR_BARRIER
+export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE
+export E2E_DAGSTER_WRITE
 export E2E_C7_SCHEDULE
 export E2E_C7_EXPECTED_UI_ORIGIN_SHA256
 export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
 export E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
-export E2E_C7_ORCHESTRATOR_STATE_FILE="$RUN_STATE_FILE"
 export E2E_C7_SCHEDULE_STATE_FILE="$SCHEDULE_STATE_FILE"
-export E2E_C7_KMA_STATE_FILE="$KMA_STATE_FILE"
+export E2E_C7_TARGET_STATE_FILE="$TARGET_STATE_FILE"
 export E2E_C7_POI_STATE_FILE="$POI_STATE_FILE"
-export E2E_KMA_GRID_CAP="$daemon_cap"
-export E2E_KMA_GRID_CAP_FROM_RUNTIME=1
+export E2E_C7_UPDATE_REQUEST_WRITE E2E_C7_UPDATE_REQUEST_OPERATION
+export E2E_C7_REQUEST_STATE_FILE="$REQUEST_STATE_FILE"
 export E2E_LIVE_WORKERS=1
 export E2E_POI_CACHE_WRITE=1
 
-# C7 blocking gate = 5-spec. ops-c7-schedule-write는 T-ADM-C7-SCHEDCHURN에서 재편입됐다.
-# 근인은 render churn이 아니라(그 진단은 오진), cron 저장 응답이 유실돼 frozen-idempotency
-# 복구가 필요해질 때 cron 수정 dialog가 열린 채 남아 Base UI가 페이지 전체를 inert로 만들어
-# 모든 schedule 컨트롤이 접근 불가가 되던 것이다. fix=schedule-panel.tsx: 복구 필요 순간
-# (편집 스케줄의 frozen submission/recovery claim 등장) dialog close. live 재현으로 근인 확정 +
-# 수정 prod 재배포 후 5-spec 재검증 GREEN(2 passed, 37s). 상세: docs/journal.md.
+# C7 blocking gate = 3-spec + `@c7-causal` POI case(아래).
+# - ops-c7-read-auth: datasets/pipeline read 요약, invalid exact scope fail-closed, ops live
+#   ticket 거절·만료 복구·자연 rotation·로그아웃, 외부 dataset_projection mutation
+#   (`targets.json` journal로 소유·복원하는 POI target 하나)의 무-navigation 갱신.
+# - ops-c7-schedule-write: SAFE_SCHEDULE의 실제 UI stop/cron/start/stop과 최초 상태 exact 복원.
+# - ops-c7-update-request-write: SAFE_UPDATE_OPERATION(krairport `dataset_wide`) exact-scope
+#   request 하나 → Map queue sensor가 집은 `feature_update_request_worker` run(sensor/location/
+#   request tag 대조) → API `done` + Dagster `SUCCESS`(`requests.json` journal). 실제 prod 쓰기,
+#   upstream 0. Dagster에는 읽기 전용 GraphQL만 보낸다(sensor는 건드리지 않는다).
+# KMA exact-scope 갱신 3-spec(active/empty/cap)과 contract preflight는 2026-10-01 퇴역했다 —
+# Map은 weather를 더 적재하지 않고 KMA catalog operation은 거절된다(ADR-104/105). 그와 함께
+# sensor stop/start barrier(`sensor.json`)·KMA journal·grid cap 대조는 되살리지 않는다. 기준 5만
+# 위 update-request spec이 읽기 전용 Dagster client(+ 선택 Basic Auth bind)로 되살렸다.
+# schedule-write는 T-ADM-C7-SCHEDCHURN에서 재편입됐다(근인: cron 저장 응답 유실 시 열린
+# dialog가 페이지를 inert로 만들던 것, fix=schedule-panel.tsx). 상세: docs/journal.md.
 readonly SPECS=(
   "e2e/live/ops-c7-read-auth.live.spec.ts"
-  "e2e/live/ops-c7-kma-active-write.live.spec.ts"
-  "e2e/live/ops-c7-kma-empty-write.live.spec.ts"
-  "e2e/live/ops-c7-kma-cap-write.live.spec.ts"
   "e2e/live/ops-c7-schedule-write.live.spec.ts"
+  "e2e/live/ops-c7-update-request-write.live.spec.ts"
 )
 for spec in "${SPECS[@]}"; do
   artifact_name="${spec##*/}"
@@ -1133,12 +1111,13 @@ docker_run_playwright npm run e2e:live -- \
 state_is_exact_restored() {
   local kind="$1"
   local state_file="$2"
-  python3 - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" <<'PY'
+  python3 - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" \
+    "$SAFE_UPDATE_OPERATION" <<'PY'
 import json
 import re
 import sys
 
-kind, state_path, expected_hash = sys.argv[1:]
+kind, state_path, expected_hash, safe_update_operation = sys.argv[1:]
 
 
 def exact_dict(value, keys):
@@ -1152,34 +1131,29 @@ def nonempty_string(value):
 uuid_pattern = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
 )
+target_keys = {
+    "body",
+    "entityTag",
+    "externalSystem",
+    "lockVersion",
+    "status",
+    "targetId",
+    "targetKey",
+}
 
 
-def sensor_snapshot(value):
-    keys = {
-        "canReset",
-        "defaultStatus",
-        "minIntervalSeconds",
-        "selector",
-        "selectorId",
-        "sensorId",
-        "status",
-    }
-    selector_keys = {
-        "repositoryLocationName",
-        "repositoryName",
-        "sensorName",
-    }
-    if not exact_dict(value, keys) or not exact_dict(value["selector"], selector_keys):
-        return False
+def deleted_target(item):
     return (
-        type(value["canReset"]) is bool
-        and value["defaultStatus"] in {"RUNNING", "STOPPED"}
-        and type(value["minIntervalSeconds"]) is int
-        and value["minIntervalSeconds"] >= 0
-        and nonempty_string(value["selectorId"])
-        and nonempty_string(value["sensorId"])
-        and value["status"] in {"RUNNING", "STOPPED"}
-        and all(nonempty_string(item) for item in value["selector"].values())
+        exact_dict(item, target_keys)
+        and isinstance(item["body"], dict)
+        and nonempty_string(item["externalSystem"])
+        and nonempty_string(item["targetKey"])
+        and isinstance(item["targetId"], str)
+        and uuid_pattern.fullmatch(item["targetId"]) is not None
+        and type(item["lockVersion"]) is int
+        and item["lockVersion"] > 0
+        and item["entityTag"] == f'"{item["targetId"]}:{item["lockVersion"]}"'
+        and item["status"] == "deleted"
     )
 
 
@@ -1238,21 +1212,7 @@ if not isinstance(state, dict):
     raise SystemExit(15)
 if state.get("phase") != "restored":
     raise SystemExit(3)
-if kind == "sensor":
-    if state.get("version") != 3 or state.get("mutationIntent") is not None:
-        raise SystemExit(14)
-    snapshots = [
-        state.get("initialSensor"),
-        state.get("observedSensor"),
-        state.get("ownedExpectedSensor"),
-    ]
-    if not all(sensor_snapshot(item) for item in snapshots):
-        raise SystemExit(16)
-    if not (
-        snapshots[0] == snapshots[1] == snapshots[2]
-    ):
-        raise SystemExit(4)
-elif kind == "schedule":
+if kind == "schedule":
     if state.get("version") != 4 or state.get("mutationIntent") is not None:
         raise SystemExit(17)
     snapshots = [state.get("initial"), state.get("current"), state.get("ownedExpected")]
@@ -1262,76 +1222,50 @@ elif kind == "schedule":
         snapshots[0] == snapshots[1] == snapshots[2]
     ):
         raise SystemExit(5)
-elif kind == "kma":
-    # 최종 journal은 v4다(v3는 첫 durable write 전 bootstrap placeholder 전용).
-    # 소유권 결박이 없는 문서를 최종본으로 받으면 cleanup이 무엇을 취소했는지
-    # 사후에 말할 수 없으므로 request_ownership 존재도 함께 요구한다.
-    if state.get("version") != 4 or not isinstance(
-        state.get("request_ownership"), list
-    ):
+    if state.get("dagsterGraphqlEndpointSha256") != expected_hash:
+        raise SystemExit(6)
+    if state.get("expectedDagsterGraphqlEndpointSha256") != expected_hash:
+        raise SystemExit(7)
+elif kind == "targets":
+    # `_ops-c7-admin-api.ts`의 target 소유 journal 최종본(v1). orchestrator placeholder
+    # (`{"phase":"orchestrator_pending","version":1}`)는 위 phase 검사에서 이미 거절된다.
+    if not exact_dict(
+        state,
+        {
+            "cleanup_result",
+            "completed_scenarios",
+            "external_systems",
+            "phase",
+            "run_id",
+            "scenario",
+            "target_history",
+            "target_refs",
+            "updated_at",
+            "version",
+        },
+    ) or state.get("version") != 1:
         raise SystemExit(19)
-    cleanup = state.get("cleanup_result")
-    if (
-        not nonempty_string(state.get("run_id"))
-        or state["run_id"] == "__orchestrator_pending__"
+    if not nonempty_string(state.get("run_id")) or not nonempty_string(
+        state.get("updated_at")
     ):
         raise SystemExit(8)
-    if not exact_dict(
-        cleanup,
-        {"allRequestsTerminal", "preservedForManualCleanup", "restored"},
-    ):
+    cleanup = state.get("cleanup_result")
+    if not exact_dict(cleanup, {"preservedForManualCleanup", "restored"}):
         raise SystemExit(9)
     if not (
-        cleanup.get("allRequestsTerminal") is True
-        and cleanup.get("preservedForManualCleanup") is False
+        cleanup.get("preservedForManualCleanup") is False
         and cleanup.get("restored") is True
     ):
         raise SystemExit(10)
     target_refs = state.get("target_refs")
     if not isinstance(target_refs, list) or not target_refs:
         raise SystemExit(20)
-    if any(
-        not exact_dict(
-            item,
-            {
-                "body",
-                "entityTag",
-                "externalSystem",
-                "lockVersion",
-                "status",
-                "targetId",
-                "targetKey",
-            },
-        )
-        or not isinstance(item["body"], dict)
-        or not nonempty_string(item["externalSystem"])
-        or re.fullmatch(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}",
-            item["targetId"] if isinstance(item.get("targetId"), str) else "",
-        )
-        is None
-        or type(item["lockVersion"]) is not int
-        or item["lockVersion"] <= 0
-        or item["entityTag"] != f'"{item["targetId"]}:{item["lockVersion"]}"'
-        or not nonempty_string(item["targetKey"])
-        or item["status"] != "deleted"
-        for item in target_refs
-    ):
+    if not all(deleted_target(item) for item in target_refs):
         raise SystemExit(11)
+    # 실행 생략을 성공으로 오인하지 않도록 이 러너가 돌리는 시나리오 전부의 완료를 요구한다.
     completed = state.get("completed_scenarios")
-    if (
-        not isinstance(completed, list)
-        or not all(isinstance(item, str) for item in completed)
-        or sorted(completed) != [
-        "active",
-        "cap",
-        "empty",
-        "invalidation",
-        ]
-    ):
+    if completed != ["invalidation"] or state.get("scenario") != "invalidation":
         raise SystemExit(12)
-    if len(completed) != len(set(completed)):
-        raise SystemExit(13)
     external_systems = state.get("external_systems")
     if (
         not isinstance(external_systems, list)
@@ -1348,39 +1282,17 @@ elif kind == "kma":
     ]
     if len(identities) != len(set(identities)):
         raise SystemExit(23)
+    # 같은 natural key를 다시 만든 경우의 이전 identity. 비어 있을 수 있지만, 있으면
+    # 삭제가 증명돼야 하고 현재 identity와 겹치면 안 된다.
     target_history = state.get("target_history")
-    if not isinstance(target_history, list) or not target_history:
+    if not isinstance(target_history, list):
         raise SystemExit(33)
-    history_identities = []
-    for item in target_history:
-        if (
-            not exact_dict(
-                item,
-                {
-                    "body",
-                    "entityTag",
-                    "externalSystem",
-                    "lockVersion",
-                    "status",
-                    "targetId",
-                    "targetKey",
-                },
-            )
-            or not isinstance(item["body"], dict)
-            or not nonempty_string(item["externalSystem"])
-            or not nonempty_string(item["targetKey"])
-            or not isinstance(item["targetId"], str)
-            or uuid_pattern.fullmatch(item["targetId"]) is None
-            or type(item["lockVersion"]) is not int
-            or item["lockVersion"] <= 0
-            or item["entityTag"]
-            != f'"{item["targetId"]}:{item["lockVersion"]}"'
-            or item["status"] != "deleted"
-        ):
-            raise SystemExit(34)
-        history_identities.append(
-            (item["externalSystem"], item["targetKey"], item["targetId"])
-        )
+    if not all(deleted_target(item) for item in target_history):
+        raise SystemExit(34)
+    history_identities = [
+        (item["externalSystem"], item["targetKey"], item["targetId"])
+        for item in target_history
+    ]
     if len(history_identities) != len(set(history_identities)):
         raise SystemExit(35)
     current_by_natural_key = {
@@ -1395,47 +1307,6 @@ elif kind == "kma":
         for item in target_history
     ):
         raise SystemExit(36)
-    request_ids = state.get("request_ids")
-    if (
-        not isinstance(request_ids, list)
-        or not request_ids
-        or request_ids != sorted(set(request_ids))
-        or not all(
-            isinstance(item, str) and uuid_pattern.fullmatch(item)
-            for item in request_ids
-        )
-    ):
-        raise SystemExit(24)
-    terminal_statuses = state.get("request_terminal_statuses")
-    if (
-        not isinstance(terminal_statuses, dict)
-        or set(terminal_statuses) != set(request_ids)
-        or not all(
-            status in {"done", "failed", "cancelled"}
-            for status in terminal_statuses.values()
-        )
-    ):
-        raise SystemExit(25)
-    idempotency_entries = state.get("idempotency_entries")
-    if not isinstance(idempotency_entries, list) or not idempotency_entries:
-        raise SystemExit(26)
-    idempotency_keys = []
-    for item in idempotency_entries:
-        if (
-            not exact_dict(
-                item,
-                {"body", "idempotency_key", "request_id", "status"},
-            )
-            or not isinstance(item["body"], dict)
-            or not isinstance(item["idempotency_key"], str)
-            or uuid_pattern.fullmatch(item["idempotency_key"]) is None
-            or item["request_id"] not in request_ids
-            or not nonempty_string(item["status"])
-        ):
-            raise SystemExit(27)
-        idempotency_keys.append(item["idempotency_key"])
-    if len(idempotency_keys) != len(set(idempotency_keys)):
-        raise SystemExit(28)
 elif kind == "poi":
     if state.get("version") != 1:
         raise SystemExit(29)
@@ -1483,39 +1354,81 @@ elif kind == "poi":
         or receipts != sorted(set(receipts))
     ):
         raise SystemExit(32)
+elif kind == "requests":
+    # `ops-c7-update-request-write`의 journal 최종본(v1). 기준 5의 증거 그 자체다: 소유
+    # request가 API에서 `done`이고, 그 Dagster run이 queue sensor가 띄운 worker run으로
+    # `SUCCESS`였다. placeholder·create_intent·restore_failed는 위 phase 검사에서 거절된다.
+    any_uuid = re.compile(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    )
+    if not exact_dict(
+        state,
+        {
+            "dagster_run_id",
+            "dagster_run_status",
+            "generation",
+            "idempotency_key",
+            "job_id",
+            "operation_key",
+            "phase",
+            "provider_dataset_id",
+            "request_id",
+            "run_id",
+            "sensor_name",
+            "terminal_status",
+            "updated_at",
+            "version",
+        },
+    ) or state.get("version") != 1:
+        raise SystemExit(40)
+    if not (
+        state.get("operation_key") == safe_update_operation
+        and type(state.get("provider_dataset_id")) is int
+        and state["provider_dataset_id"] > 0
+        and all(
+            isinstance(state.get(field), str)
+            and any_uuid.fullmatch(state[field]) is not None
+            for field in ("idempotency_key", "job_id", "request_id")
+        )
+        and type(state.get("generation")) is int
+        and state["generation"] > 0
+        and nonempty_string(state.get("run_id"))
+        and nonempty_string(state.get("updated_at"))
+        and nonempty_string(state.get("dagster_run_id"))
+    ):
+        raise SystemExit(41)
+    if not (
+        state.get("terminal_status") == "done"
+        and state.get("dagster_run_status") == "SUCCESS"
+        and state.get("sensor_name") == "feature_update_request_queue_sensor"
+    ):
+        raise SystemExit(42)
 else:
     raise SystemExit(21)
-if kind in {"sensor", "schedule"}:
-    if state.get("dagsterGraphqlEndpointSha256") != expected_hash:
-        raise SystemExit(6)
-    if state.get("expectedDagsterGraphqlEndpointSha256") != expected_hash:
-        raise SystemExit(7)
 PY
 }
 
 remote_state_is_exact_restored() {
   docker_run_playwright node - \
-    "$RUN_STATE_FILE" \
     "$SCHEDULE_STATE_FILE" \
-    "$KMA_STATE_FILE" \
+    "$TARGET_STATE_FILE" \
     "$POI_STATE_FILE" \
+    "$REQUEST_STATE_FILE" \
     "$E2E_STORAGE_STATE" <<'NODE'
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
-const { readFileSync } = require("node:fs");
 const { readFile } = require("node:fs/promises");
 const { chromium, devices } = require("@playwright/test");
 
 const [
-  sensorStatePath,
   scheduleStatePath,
-  kmaStatePath,
+  targetStatePath,
   poiStatePath,
+  requestStatePath,
   storageStatePath,
 ] =
   process.argv.slice(2);
-const SAFE_SENSOR = "feature_update_request_queue_sensor";
-const SAFE_SCHEDULE = "feature_weather_kma_short_forecast_hourly_schedule";
+const SAFE_SCHEDULE = "feature_place_krairport_airports_monthly_schedule";
 const SCHEDULES_PATH = "/v1/ops/pipeline/schedules";
 
 function sha256(value) {
@@ -1538,19 +1451,6 @@ function canonicalDagsterGraphql(raw) {
     ? pathname
     : `${pathname}/graphql`;
   return url;
-}
-
-// `_dagster-basic-auth.ts`와 같은 계약 — 파일이 없으면 header도 없다.
-function dagsterAuthorizationHeaders() {
-  const path = process.env.E2E_DAGSTER_BASIC_AUTH_FILE;
-  if (!path) return {};
-  const credential = readFileSync(path, "utf8").replace(/\n$/, "");
-  if (!/^[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+$/.test(credential)) {
-    throw new Error("unsafe Dagster Basic Auth file");
-  }
-  return {
-    Authorization: `Basic ${Buffer.from(credential, "utf8").toString("base64")}`,
-  };
 }
 
 function requiredString(value) {
@@ -1598,70 +1498,11 @@ async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
-async function verifySensor(sensorState, graphqlUrl, expectedHash) {
-  const initial = sensorState.initialSensor;
-  assert.equal(initial.selector.sensorName, SAFE_SENSOR);
-  const query = `
-query C7FinalQueueSensorStatus($selector: SensorSelector!) {
-  sensorOrError(sensorSelector: $selector) {
-    __typename
-    ... on Sensor {
-      name
-      defaultStatus
-      canReset
-      minIntervalSeconds
-      sensorState {
-        id
-        selectorId
-        status
-        repositoryName
-        repositoryLocationName
-      }
-    }
-  }
-}`;
-  const response = await fetch(graphqlUrl, {
-    body: JSON.stringify({ query, variables: { selector: initial.selector } }),
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      ...dagsterAuthorizationHeaders(),
-    },
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error("sensor query failed");
-  const envelope = await response.json();
-  if (Array.isArray(envelope.errors) && envelope.errors.length > 0) {
-    throw new Error("sensor GraphQL error");
-  }
-  const sensor = envelope?.data?.sensorOrError;
-  if (sensor?.__typename !== "Sensor" || sensor.name !== SAFE_SENSOR) {
-    throw new Error("sensor identity mismatch");
-  }
-  const state = sensor.sensorState;
-  const observed = {
-    canReset: sensor.canReset,
-    defaultStatus: stableStatus(sensor.defaultStatus),
-    minIntervalSeconds: sensor.minIntervalSeconds,
-    selector: {
-      repositoryLocationName: requiredString(state.repositoryLocationName),
-      repositoryName: requiredString(state.repositoryName),
-      sensorName: SAFE_SENSOR,
-    },
-    selectorId: requiredString(state.selectorId),
-    sensorId: requiredString(state.id),
-    status: stableStatus(state.status),
-  };
-  assert.equal(sha256(graphqlUrl.href), expectedHash);
-  assert.deepEqual(observed, initial);
-}
-
-async function verifyScheduleAndKma(
+async function verifyScheduleAndTargets(
   scheduleState,
-  kmaState,
+  targetState,
   poiState,
+  requestState,
   storageStatePath,
   expectedHash,
 ) {
@@ -1711,7 +1552,7 @@ async function verifyScheduleAndKma(
     );
     assert.equal(matches.length, 1);
     assert.deepEqual(scheduleSnapshot(matches[0]), scheduleState.initial);
-    const kmaProbe = await page.evaluate(
+    const targetProbe = await page.evaluate(
       async ({ externalSystems, refs }) => {
         const exactKeys = (value, keys) =>
           value !== null &&
@@ -1839,12 +1680,12 @@ async function verifyScheduleAndKma(
       {
         externalSystems: [
           ...new Set([
-            ...kmaState.external_systems,
+            ...targetState.external_systems,
             poiState.natural_key.external_system,
           ]),
         ].sort(),
         refs: [
-          ...kmaState.target_refs,
+          ...targetState.target_refs,
           {
             externalSystem: poiState.natural_key.external_system,
             targetId: poiState.target_id,
@@ -1854,29 +1695,74 @@ async function verifyScheduleAndKma(
       },
     );
     assert.equal(
-      kmaProbe.targetStatuses.length,
-      kmaState.target_refs.length + 1,
+      targetProbe.targetStatuses.length,
+      targetState.target_refs.length + 1,
     );
     assert.equal(
-      kmaProbe.targetStatuses.every(
+      targetProbe.targetStatuses.every(
         (item) => item.status === 404 && item.exactNotFound,
       ),
       true,
     );
     assert.equal(
-      kmaProbe.systemCounts.length,
+      targetProbe.systemCounts.length,
       new Set([
-        ...kmaState.external_systems,
+        ...targetState.external_systems,
         poiState.natural_key.external_system,
       ]).size,
     );
     assert.equal(
-      kmaProbe.systemCounts.every(
+      targetProbe.systemCounts.every(
         (item) =>
           item.status === 200 && item.exactEnvelope && item.count === 0,
       ),
       true,
     );
+    // 기준 5: 소유 request를 API에서 다시 읽어 `done`·같은 Dagster run·같은 generation이고
+    // krairport dataset에 남은 활성 실행이 없는지 본다(읽기 전용).
+    const requestProbe = await page.evaluate(
+      async ({ operationKey, requestId }) => {
+        const read = async (path) => {
+          const response = await fetch(`/api/proxy${path}`, {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(60_000),
+          });
+          return { body: await response.json(), status: response.status };
+        };
+        const detail = await read(
+          `/v1/ops/pipeline/executions/update_request/${encodeURIComponent(requestId)}`,
+        );
+        const grid = await read("/v1/ops/datasets");
+        const rows =
+          grid.status === 200
+            ? (grid.body?.data?.items ?? []).filter(
+                (row) => row.operation_key === operationKey,
+              )
+            : [];
+        return {
+          activeCount: rows.filter((row) => row.active_execution !== null).length,
+          detailStatus: detail.status,
+          execution: detail.body?.data?.execution ?? null,
+          gridStatus: grid.status,
+          rowCount: rows.length,
+          updateRequest: detail.body?.data?.update_request ?? null,
+        };
+      },
+      {
+        operationKey: requestState.operation_key,
+        requestId: requestState.request_id,
+      },
+    );
+    assert.equal(requestProbe.detailStatus, 200);
+    assert.equal(requestProbe.execution?.status, "done");
+    assert.equal(requestProbe.execution?.dagster_run_id, requestState.dagster_run_id);
+    assert.equal(requestProbe.updateRequest?.request_id, requestState.request_id);
+    assert.equal(requestProbe.updateRequest?.generation, requestState.generation);
+    assert.equal(requestProbe.gridStatus, 200);
+    assert.equal(requestProbe.rowCount, 1);
+    assert.equal(requestProbe.activeCount, 0);
     await context.close();
   } finally {
     await browser.close();
@@ -1890,17 +1776,17 @@ async function main() {
   }
   const graphqlUrl = canonicalDagsterGraphql(process.env.E2E_DAGSTER_URL);
   assert.equal(sha256(graphqlUrl.href), expectedHash);
-  const [sensorState, scheduleState, kmaState, poiState] = await Promise.all([
-    readJson(sensorStatePath),
+  const [scheduleState, targetState, poiState, requestState] = await Promise.all([
     readJson(scheduleStatePath),
-    readJson(kmaStatePath),
+    readJson(targetStatePath),
     readJson(poiStatePath),
+    readJson(requestStatePath),
   ]);
-  await verifySensor(sensorState, graphqlUrl, expectedHash);
-  await verifyScheduleAndKma(
+  await verifyScheduleAndTargets(
     scheduleState,
-    kmaState,
+    targetState,
     poiState,
+    requestState,
     storageStatePath,
     expectedHash,
   );
@@ -1917,14 +1803,14 @@ NODE
 
 # 각 helper가 최초 상태와 최종 상태의 exact equality를 확인해 `restored`를
 # 원자 기록한 경우에만 상태 파일과 BLOCKED sentinel을 제거한다.
-state_is_exact_restored sensor "$RUN_STATE_FILE" ||
-  die "sensor exact restoration evidence is missing"
 state_is_exact_restored schedule "$SCHEDULE_STATE_FILE" ||
   die "schedule exact restoration evidence is missing"
-state_is_exact_restored kma "$KMA_STATE_FILE" ||
-  die "KMA exact restoration evidence is missing"
+state_is_exact_restored targets "$TARGET_STATE_FILE" ||
+  die "C7 target exact restoration evidence is missing"
 state_is_exact_restored poi "$POI_STATE_FILE" ||
   die "POI causal write exact restoration evidence is missing"
+state_is_exact_restored requests "$REQUEST_STATE_FILE" ||
+  die "queue sensor worker run evidence is missing"
 remote_state_is_exact_restored ||
   die "final remote exact restoration evidence is missing"
 ORCHESTRATOR_VERIFIED=1

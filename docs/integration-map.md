@@ -456,14 +456,30 @@ operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를
 
 **현재 선언된 이름.** `external_system:c7-e2e` 하나이며 migration
 `0224_c7_external_system_scope`가 KMA 초단기실황(`python-kma-api` /
-`kma_ultra_short_nowcast`)에 선언했다. 새 이름을 쓰려면 **migration으로 행을 선언**해야 하고,
+`kma_ultra_short_nowcast`)에 선언했다. **2026-10-01부터 이 행은 제출할 수 없다** — 그 dataset의
+refresh operation이 `401_retire_map_kma_refresh`로 꺼져(ADR-104) exact join이 0행이다. 행은
+이력 FK 때문에 남긴다. 그래서 지금 제출 가능한 `external_system:*` scope는 없다. 새 이름을 쓰려면 **migration으로 행을 선언**해야 하고,
 그 migration은 dataset의 enabled refresh operation이 정확히 하나임을 확인한 뒤 넣는다 —
 조용히 0행을 넣고 통과하면 소비자가 `422`로 죽고 원인이 감춰진다.
 
 **동시 실행 제약.** 같은 이름을 쓰는 실행끼리는 `provider_sync_state` 한 행과
-`membership_fingerprint`를 공유한다. 따라서 그 scope를 쓰는 live 실행은 서로 직렬화해야 한다
-(`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL). 잠금 없이 병렬로 돌리면 실패가
-실제 회귀인지 경합인지 구분할 수 없다.
+`membership_fingerprint`를 공유한다. 따라서 그 scope를 쓰는 live 실행은 서로 직렬화해야 한다.
+잠금 없이 병렬로 돌리면 실패가 실제 회귀인지 경합인지 구분할 수 없다. 이 직렬화를 맡던 C7 잠금
+(`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL)은 2026-10-01 KMA C7 spec과 함께
+지워졌다(ADR-104/105) — 지금은 제출 가능한 `external_system:*` scope가 없어 잠글 대상도 없다. 새 이름을
+선언하면 그 live 실행의 직렬화를 함께 다시 세운다.
+
+**C7 기준 5(queue sensor → worker run)는 `external_system:*` 없이 돈다.** 2026-10-02부터
+`ops-c7-update-request-write`가 `provider_dataset` × **`dataset_wide`** request 하나를
+krairport 공항(`python-krairport-api` / `krairport_airports`, operation
+`feature_place_krairport_airports_job`)에 낸다. 그 dataset이 선언한 scope가 `dataset_wide`
+하나라 membership이 정확히 한 행으로 고정되고(exact), fetcher가 번들 정적 데이터만 읽어 upstream
+호출이 0이다. migration은 필요 없었다. 직렬화는 API가 맡는다 — 같은 membership에 다른 활성
+request가 있으면 `409 ACTIVE_SCOPE_CONFLICT`라, spec은 만들기 전에 그 dataset의 활성 실행 0을
+확인하고 409면 남의 실행을 건드리지 않고 멈춘다. `dataset_wide`는 월간 스케줄 job과 같은
+`provider_sync_state` 행을 갱신한다 — 같은 번들을 다시 적재하는 것이라 스케줄 실행 한 번과 같은
+효과다. 실제 prod 쓰기(번들 공항 place feature의 idempotent upsert)다 — runbook
+`docs/runbooks/c7-prod-live-e2e.md`.
 
 ### 3.6 범용 Feature 요청 (T-VN-M04)
 

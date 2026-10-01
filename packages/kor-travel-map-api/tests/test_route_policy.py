@@ -334,12 +334,11 @@ def test_manual_feature_create_route_observes_both_admin_enforcements() -> None:
 
 
 @pytest.mark.unit
-def test_service_policy_covers_feature_and_weather_batches() -> None:
+def test_service_policy_covers_feature_batch_and_service_surfaces() -> None:
     matrix = build_route_policy_matrix(_representative_app())
     service_rows = [row for row in matrix if row.policy is RoutePolicy.SERVICE]
     assert {row.path for row in service_rows} == {
         "/v1/features/batch",
-        "/v1/features/weather/batch",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",
         "/v1/service/cache-target-event-acks",

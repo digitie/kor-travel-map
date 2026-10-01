@@ -83,24 +83,130 @@ _PAGE_SIZE = 10
 _OPERATOR = "integration-test"
 _PROXY_SECRET = "c3e-c-rest-proof-secret"
 
-#: 대상 membership. ``kma_short_forecast``는 한 operation이 두 sync_scope를 갖는
-#: 실측 시드라 scope decoy를 **지어내지 않고** 표현할 수 있다.
-_TARGET_PROVIDER = "python-kma-api"
-_TARGET_DATASET_KEY = "kma_short_forecast"
-_TARGET_OPERATION = "feature_weather_kma_short_forecast_job"
+#: 대상 membership. 한 operation이 두 sync_scope(``dataset_wide``·``target_grids``)를
+#: 갖는 dataset이라야 scope decoy를 표현할 수 있다.
+#:
+#: 시드에서 그런 dataset은 KMA 격자뿐이었는데 401(ADR-104)이 refresh operation을 끄고
+#: 402(ADR-105)가 dataset을 비활성으로 내렸다(preview operation까지 종류 불문). 검증
+#: 대상은 KMA 적재가 아니라 두 REST 표면의 canonical projection이므로, seed가 probe
+#: catalog(대상·dataset decoy 두 dataset)를 심고(commit) 정리가 지운다. 비활성 KMA
+#: 행을 되살려 commit하면 같은 DB를 읽는 다른 테스트가 그 중간 상태를 볼 수 있다.
+_TARGET_PROVIDER = "ops-datasets-projection-probe"
+_TARGET_DATASET_KEY = "multi_scope_target"
+_TARGET_OPERATION = "ops_datasets_projection_target_probe_job"
+#: preview 승인은 DB preview operation의 ``handler=fixture`` config로만 켜진다.
+_TARGET_PREVIEW_OPERATION = "ops_datasets_projection_target_probe_preview"
 _TARGET_SCOPE = "dataset_wide"
 _SIBLING_SCOPE = "target_grids"
 
 #: dataset decoy — 다른 dataset, 다른 operation.
-_DECOY_DATASET_KEY = "kma_ultra_short_nowcast"
-_DECOY_OPERATION = "feature_weather_kma_ultra_short_nowcast_job"
+_DECOY_DATASET_KEY = "multi_scope_decoy"
+_DECOY_OPERATION = "ops_datasets_projection_decoy_probe_job"
 
 #: 정책 PUT 전용 dataset — 다른 단언과 겹치지 않게 따로 둔다.
 _POLICY_PROVIDER = "python-khoa-api"
 _POLICY_DATASET_KEY = "khoa_beaches"
 
-_SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule"
+_SCHEDULE_NAME = "ops_datasets_projection_target_probe_hourly_schedule"
 _SCHEDULE_TICK = 2_000_000_000.0
+
+_INSERT_PROBE_DATASET_SQL = """
+INSERT INTO provider_sync.provider_datasets (
+    provider, dataset_key, display_name, source_kind, is_active, capabilities
+) VALUES (
+    :provider, :dataset_key, :display_name, 'system', true,
+    jsonb_build_object('schema_version', 1,
+                       'produces', '[]'::jsonb,
+                       'extensions', '{}'::jsonb)
+)
+RETURNING provider_dataset_id
+"""
+_INSERT_PROBE_OPERATION_SQL = """
+INSERT INTO provider_sync.provider_dataset_operations (
+    provider_dataset_id, operation_key, operation_kind, is_enabled, config
+) VALUES (
+    :dataset_id, :operation_key, :operation_kind, true, CAST(:config AS jsonb)
+)
+"""
+_INSERT_PROBE_SCOPE_SQL = """
+INSERT INTO provider_sync.provider_dataset_operation_scopes (
+    provider_dataset_id, sync_scope, operation_key, operation_kind
+) VALUES (:dataset_id, :sync_scope, :operation_key, 'refresh')
+"""
+
+
+async def _insert_probe_catalog(session: AsyncSession) -> None:
+    """대상(두 scope + fixture preview)·dataset decoy probe catalog를 심는다."""
+    probes = (
+        (
+            _TARGET_DATASET_KEY,
+            _TARGET_OPERATION,
+            (_TARGET_SCOPE, _SIBLING_SCOPE),
+            _TARGET_PREVIEW_OPERATION,
+        ),
+        (_DECOY_DATASET_KEY, _DECOY_OPERATION, (_TARGET_SCOPE,), None),
+    )
+    for dataset_key, operation_key, sync_scopes, preview_key in probes:
+        dataset_id = (
+            await session.execute(
+                text(_INSERT_PROBE_DATASET_SQL),
+                {
+                    "provider": _TARGET_PROVIDER,
+                    "dataset_key": dataset_key,
+                    "display_name": f"probe {dataset_key}",
+                },
+            )
+        ).scalar_one()
+        await session.execute(
+            text(_INSERT_PROBE_OPERATION_SQL),
+            {
+                "dataset_id": dataset_id,
+                "operation_key": operation_key,
+                "operation_kind": "refresh",
+                "config": "{}",
+            },
+        )
+        for sync_scope in sync_scopes:
+            await session.execute(
+                text(_INSERT_PROBE_SCOPE_SQL),
+                {
+                    "dataset_id": dataset_id,
+                    "sync_scope": sync_scope,
+                    "operation_key": operation_key,
+                },
+            )
+        if preview_key is not None:
+            await session.execute(
+                text(_INSERT_PROBE_OPERATION_SQL),
+                {
+                    "dataset_id": dataset_id,
+                    "operation_key": preview_key,
+                    "operation_kind": "preview",
+                    "config": '{"handler": "fixture"}',
+                },
+            )
+    await session.flush()
+
+
+async def _delete_probe_catalog(session: AsyncSession) -> None:
+    """probe catalog를 지운다(scope → operation → dataset 순, 실행 행 정리 뒤)."""
+    for statement in (
+        """
+        DELETE FROM provider_sync.provider_dataset_operation_scopes AS scope
+         USING provider_sync.provider_datasets AS dataset
+         WHERE dataset.provider_dataset_id = scope.provider_dataset_id
+           AND dataset.provider = :provider
+        """,
+        """
+        DELETE FROM provider_sync.provider_dataset_operations AS operation
+         USING provider_sync.provider_datasets AS dataset
+         WHERE dataset.provider_dataset_id = operation.provider_dataset_id
+           AND dataset.provider = :provider
+        """,
+        "DELETE FROM provider_sync.provider_datasets WHERE provider = :provider",
+    ):
+        await session.execute(text(statement), {"provider": _TARGET_PROVIDER})
+
 
 _CLEANUP_SQL = """
 TRUNCATE
@@ -428,6 +534,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
         AsyncSession(engine, expire_on_commit=False) as session,
         session.begin(),
     ):
+        await _insert_probe_catalog(session)
         dataset_keys = await _dataset_identity(session)
         target = await membership_for_dataset(
             session,
@@ -771,6 +878,9 @@ async def _cleanup_committed_operations(engine: AsyncEngine) -> None:
                 "WHERE operation_key LIKE '%.decoy@_%' ESCAPE '@'"
             )
         )
+        # seed가 심은 probe catalog를 지운다 — 남기면 다음 테스트의 카탈로그 전제가
+        # 조용히 달라진다.
+        await _delete_probe_catalog(session)
         await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
 

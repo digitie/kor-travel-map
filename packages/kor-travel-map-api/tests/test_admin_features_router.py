@@ -359,7 +359,6 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features/{feature_id}/field-overrides/revoke" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/deactivate" not in spec["paths"]
     assert "/v1/admin/features/in-bounds" in spec["paths"]
-    assert "/v1/admin/features/{feature_id}/weather" in spec["paths"]
     assert "/v1/admin/features/{feature_id}/price" in spec["paths"]
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
     assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
@@ -475,28 +474,17 @@ def test_admin_in_bounds_combines_state_axes_with_and_for_items_and_clusters(
 
 
 @pytest.mark.unit
-def test_admin_weather_and_price_cards_accept_nonpublic_feature(
+def test_admin_price_card_accepts_nonpublic_feature(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from kortravelmap.infra.price_repo import PriceCard
-    from kortravelmap.infra.weather_repo import WeatherCard
 
     from kortravelmap.api.routers import admin_features as router_mod
 
     async def _exists(_session: Any, feature_id: str) -> bool:
         # 경계가 해석한 정본 키로 존재 확인이 내려온다.
         return feature_id == _expected_uuid("hidden-1")
-
-    async def _weather(_session: Any, **kwargs: Any) -> WeatherCard:
-        assert kwargs["feature_id"] == _expected_uuid("hidden-1")
-        return WeatherCard(
-            feature_id="hidden-1",
-            source_styles=[],
-            metrics=[],
-            latest_at=None,
-            is_stale=True,
-        )
 
     async def _price(_session: Any, **kwargs: Any) -> PriceCard:
         assert kwargs["feature_id"] == _expected_uuid("hidden-1")
@@ -509,21 +497,14 @@ def test_admin_weather_and_price_cards_accept_nonpublic_feature(
         )
 
     monkeypatch.setattr(router_mod, "admin_feature_card_target_exists", _exists)
-    monkeypatch.setattr(router_mod.weather_repo, "build_admin_weather_card", _weather)
     monkeypatch.setattr(router_mod.price_repo, "build_price_card", _price)
 
-    weather = client.get("/v1/admin/features/hidden-1/weather")
     price = client.get("/v1/admin/features/hidden-1/price")
-    deleted_weather = client.get("/v1/admin/features/deleted-1/weather")
     deleted_price = client.get("/v1/admin/features/deleted-1/price")
 
-    assert weather.status_code == 200
-    # T-VN-32C 값 전환 — 단건 card 응답의 feature_id는 UUID 정본
-    # (repo 조회는 위 kwargs assert대로 legacy 축).
-    assert weather.json()["data"]["feature_id"] == _expected_uuid("hidden-1")
     assert price.status_code == 200
+    # T-VN-32C 값 전환 — 단건 card 응답의 feature_id는 UUID 정본.
     assert price.json()["data"]["feature_id"] == _expected_uuid("hidden-1")
-    assert deleted_weather.status_code == 404
     assert deleted_price.status_code == 404
 
 
