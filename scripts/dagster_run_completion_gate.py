@@ -20,7 +20,8 @@ B. metadata 표가 실재한다. ``should_autocreate_tables: false``이므로 �
 C. **daemon heartbeat가 신선하다.** 회수 기제(run_monitoring, queue dequeue)는 전부
    daemon 프로세스 안의 스레드다. 그것이 죽거나 끼이면 아래 D가 영원히 안 끝난다.
 D. **능동 탐침 run이 완주한다.** 이 호출이 만든 새 run 하나가 ``SUCCESS``에 닿는다.
-   이미 쌓인 성공 이력이 통과를 사 주지 못한다 — 매번 새 run을 요구한다.
+   이미 쌓인 성공 이력이 통과를 사 주지 못한다 — 매번 새 run을 요구한다. 탐침은 일을
+   하지 않는 전용 job ``map_run_heartbeat``다(아래 ``_DEFAULT_PROBE_JOB``).
 E. **멈춘 run이 없다.** 자기 상한을 넘겨 여전히 진행 중인 run은 슬롯을 붙잡고 있고,
    그것이 형제 저장소를 18시간 멈춘 상태다.
 
@@ -60,16 +61,18 @@ from sqlalchemy import create_engine, text
 
 #: 이미지가 appuser에게 넘긴 유일한 쓰기 자리.
 _LOCAL_STATE_ROOT = "/opt/dagster/state"
-#: 탐침. **upstream 호출이 없다** — DB 안의 만료·미참조 cache-target snapshot만 정리한다.
+#: 탐침. **일을 하지 않는 전용 job**이다(``kortravelmap.dagster.run_heartbeat``).
 #:
-#: "부작용이 없다"가 아니다(적대 리뷰 지적). 이 job은 만료되고 아무도 참조하지 않는
-#: snapshot item/header를 지우고 관측 행을 남긴다 — hourly schedule이 하는 일과 같고,
-#: 몇 번을 돌려도 결과가 같으며(멱등), 동시 실행은 session try-lock으로 건너뛴다. 모든
-#: config에 기본값이 있어 run config 없이 뜬다. 여기서 중요한 것은 **upstream 쿼터를
-#: 쓰지 않는 것**이고, 그 성질을 정적 검사가 결박한다 — provider 적재 job으로 바꾸면
-#: 게이트를 돌릴 때마다 일일 한도를 깎는다. (종전 탐침 ``current_weather_summary_refresh``는
-#: ADR-105로 날씨 기능과 함께 지워졌다.)
-_DEFAULT_PROBE_JOB = "cache_target_snapshot_gc"
+#: 게이트가 재는 것은 run 실행 **경로**(launch → 큐 → launcher → worker → step → 종결
+#: 이벤트)이고 job 내용이 아니다. 그래서 탐침은 resource·run config·upstream 호출·DB 쓰기가
+#: 없고 수 초 안에 끝나는 job이어야 한다. 종전 탐침 둘은 그렇지 않았다 —
+#: ``current_weather_summary_refresh``는 DB를 쓰는 분당 job이었고(ADR-105로 삭제),
+#: ``cache_target_snapshot_gc``는 prod에서 한 번도 돈 적 없는 GC라 첫 실행이 최대 2,000 batch
+#: backlog를 지우며 600초 탐침 상한을 넘길 수 있었다(2026-10-02 적대 리뷰). 성질은
+#: ``tests/lint/test_run_completion_gate_measures_what_it_claims.py``가 이 값에서 출발해
+#: Definitions의 job을 풀어 결박한다 — 이름이 아니라 요구 resource·config·op 모듈 import·
+#: 실제 in-process 완주로.
+_DEFAULT_PROBE_JOB = "map_run_heartbeat"
 #: Map의 code location. ``docker/workspace.yaml``의 ``location_name``이 정본이다
 #: (``tests/unit/test_dagster_code_location_is_one_name.py``가 결박).
 #:

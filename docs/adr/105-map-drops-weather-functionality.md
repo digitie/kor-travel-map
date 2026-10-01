@@ -44,7 +44,8 @@
 
 - **Dagster**: weather asset 넷(AirKorea 대기질·KREX 휴게소 기상·산림청 산악기상·산불위험예보)과 job·schedule·
   resource·fetcher·큐 runner spec·handler binding(33 → 29), `current_weather_summary_refresh` job/op/schedule을 지웠다.
-  run-completion gate의 기본 probe job은 DB 전용 `cache_target_snapshot_gc`로 바꿨다.
+  run-completion gate의 기본 probe job은 새 no-op job `map_run_heartbeat`(`kortravelmap.dagster.run_heartbeat`,
+  resource는 `io_manager`뿐, DB·upstream 없음)다. lint는 이름이 아니라 그 성질(resource·import·config·operation key)에 결박한다.
 - **라이브러리**: `infra/weather_repo.py`·`core/weather.py`·`providers/kma.py`·`providers/airkorea.py` 삭제, `providers/krex.py`
   휴게소 기상·`providers/krforest_safety.py` 산악기상/산불위험 변환 삭제, client의 `load_weather_values`·
   `materialize_current_weather_summary`·`load_air_quality`·`build_weather_card` 삭제. 정의(`dto/weather.py`,
@@ -72,7 +73,9 @@
 
 ### 후속
 
-- `pyproject.toml`의 `python-kma-api`·`python-airkorea-api` 의존 핀과 `_provider_surface.json` 항목 제거.
-- `.env.example`의 `KMA_API_KEY`·`AIRKOREA_API_KEY`, Manager compose의 `KOR_TRAVEL_MAP_KMA_WEATHER_*` env 제거.
-- `feature_repo`의 KMA notice 분기와 `provider_sync.notice_lineage_key`의 KMA 분기를 다음 migration에서 함께 제거.
-- n150 `/root/.d2-live.env`의 `E2E_C7_SCHEDULE`을 새 allowlist로 바꾼다(운영자).
+- (같은 브랜치에서 완료) `python-kma-api`·`python-airkorea-api` 핀·`_provider_surface.json` 항목, `.env.example` 키,
+  `feature_repo._notice_lineage_sql`과 `provider_sync.notice_lineage_key`의 KMA 분기(migration `403_drop_kma_notice_lineage`).
+  frozen H35 replay 함수(`_frozen_h35_*`)의 KMA 텍스트는 해시로 고정된 과거 replay라 남긴다.
+- Manager compose `KOR_TRAVEL_MAP_KMA_WEATHER_*` env 제거(Manager PR).
+- 운영자: pair 회전 전 매분 schedule stop, 회전 뒤 `.d2-live.env`(`E2E_C7_SCHEDULE`, `E2E_C7_UPDATE_REQUEST_*`,
+  `E2E_DAGSTER_BASIC_AUTH_FILE`) 갱신.

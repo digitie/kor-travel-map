@@ -33,6 +33,12 @@ Revises: 400
 0행을 바꾸고 조용히 통과하면 카탈로그가 다시 KMA를 실행 가능하다고 말한다. 이미 꺼져
 있는 DB(재적용)에서는 UPDATE가 0행이고 사후 조건은 그대로 성립한다.
 
+막는 것(preflight, 끄기 **전에** 잰다): 끌 operation을 member로 둔 queued/running job
+(import job 직접 member와 feature update request member 둘 다). operation이 꺼지면
+``assert_import_job_members_active``가 그 job의 쓰기를 전부 거부해 영영 종결로 갈 수
+없다. 402의 같은 preflight는 **아직 켜진** operation만 보므로, 같은 트랜잭션에서 이
+revision이 먼저 끈 KMA operation의 job은 402에서 보이지 않는다 — 그래서 여기서 막는다.
+
 부수 변경 하나: ``ops.application_schema_operation_receipts``의 head 값 열거 CHECK에 ``400``과
 이 revision을 더한다(graph의 모든 revision을 받아야 한다는 lint 계약). 표는 비어 있다.
 
@@ -83,6 +89,44 @@ SELECT operation.operation_key
  ORDER BY operation.operation_key
 """
 
+#: 끌 operation(= ``_DISABLE_KMA_LOAD_OPERATIONS_SQL``이 바꿀 행)을 member로 둔 in-flight job.
+_IN_FLIGHT_KMA_LOAD_JOBS_SQL: Final[str] = f"""
+SELECT in_flight.job_id
+  FROM (
+      SELECT job.job_id::text AS job_id
+        FROM ops.import_jobs AS job
+        JOIN ops.import_job_datasets AS member
+          ON member.job_id = job.job_id
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = member.provider_dataset_id
+         AND operation.operation_key = member.operation_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = operation.provider_dataset_id
+       WHERE job.status IN ('queued', 'running')
+         AND dataset.provider = '{KMA_PROVIDER}'
+         AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
+         AND operation.is_enabled
+      UNION
+      SELECT job.job_id::text AS job_id
+        FROM ops.feature_update_request_datasets AS member
+        JOIN ops.feature_update_requests AS request
+          ON request.request_id = member.request_id
+        JOIN ops.import_jobs AS job
+          ON job.job_id = request.job_id
+        JOIN provider_sync.provider_dataset_operations AS operation
+          ON operation.provider_dataset_id = member.provider_dataset_id
+         AND operation.operation_key = member.operation_key
+        JOIN provider_sync.provider_datasets AS dataset
+          ON dataset.provider_dataset_id = operation.provider_dataset_id
+       WHERE job.status IN ('queued', 'running')
+         AND dataset.provider = '{KMA_PROVIDER}'
+         AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
+         AND operation.is_enabled
+  ) AS in_flight
+ ORDER BY in_flight.job_id
+ LIMIT 10
+"""
+
 
 #: ``ops.application_schema_operation_receipts.destination_head``의 값 열거 CHECK는 graph의
 #: **모든** revision을 받아야 한다(``tests/lint/test_receipt_head_check_covers_the_graph_head.py``).
@@ -103,8 +147,14 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 
 
 def upgrade() -> None:
-    """KMA 적재 operation을 끄고, 남은 것이 없는지 잰다."""
+    """in-flight job이 없음을 확인하고, KMA 적재 operation을 끄고, 남은 것이 없는지 잰다."""
     bind = op.get_bind()
+    in_flight = [str(job_id) for job_id in bind.execute(text(_IN_FLIGHT_KMA_LOAD_JOBS_SQL)).scalars()]
+    if in_flight:
+        raise RuntimeError(
+            "401: queued/running job on a KMA load operation (would freeze) — "
+            f"아무것도 바꾸지 않았다. 먼저 종결하라: {in_flight!r}"
+        )
     for statement in _UPGRADE_STATEMENTS:
         bind.execute(text(statement))
     remaining = list(bind.execute(text(_ENABLED_KMA_LOAD_OPERATIONS_SQL)).scalars())

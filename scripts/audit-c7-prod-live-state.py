@@ -18,7 +18,8 @@ from typing import Final
 STATE_ROOT: Final = Path("/var/lib/kor-travel-map/c7-prod-live-e2e")
 # `run`(queue sensor)·`kma`(KMA exact-scope 갱신)는 2026-10-01 퇴역한 journal이다 — 러너는
 # 더 만들지 않지만, 옛 러너가 남긴 잔여물은 여전히 복구 대상으로 센다(ADR-104/105).
-_JOURNAL_PREFIXES: Final = ("run", "schedule", "kma", "poi", "targets")
+# `requests`는 그 기준 5를 upstream 0 dataset으로 되살린 update-request spec의 journal이다.
+_JOURNAL_PREFIXES: Final = ("run", "schedule", "kma", "poi", "targets", "requests")
 _SAFE_PHASES: Final = {
     "orchestrator_pending",
     "orchestrator_preflight",
@@ -31,6 +32,12 @@ _SAFE_PHASES: Final = {
     "starting",
     "running",
     "restoring",
+    # `requests.json`(ops-c7-update-request-write)의 중간 phase.
+    "create_intent",
+    "create_response_lost",
+    "create_rejected",
+    "submitted",
+    "dispatched",
 }
 _EVIDENCE_RUN_PATTERN: Final = re.compile(r"^run-\d{8}T\d{6}Z-\d+$")
 _CID_REFERENCE_PATTERN: Final = re.compile(r"^container-(\d+)\.cid$")
@@ -44,6 +51,7 @@ _RUNTIME_JOURNALS: Final = {
     "kma.json": "kma",
     "poi.json": "poi",
     "targets.json": "targets",
+    "requests.json": "requests",
 }
 
 

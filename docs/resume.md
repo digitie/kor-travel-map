@@ -8,8 +8,12 @@
 - weather kind 기능·KMA 특보 notice 기능을 Dagster·라이브러리·API·UI·DB에서 지웠다. 정의는 남는다. 산사태·교통 notice는 그대로.
 - 402는 weather 전용 표 둘·함수 하나·인덱스 하나를 DROP하고 weather/KMA 특보 dataset을 비활성화한다. prod에서 실제로 지워지는
   행은 `ops.current_summary_runs` weather 2,875건뿐이다(feature 0행).
-- PinVi: 이미 kor-travel-weather를 쓴다. 다음 짝에서 Map OpenAPI vendor 스냅샷만 다시 뜬다(`latest_weather` 소멸).
-- 후속: `python-kma-api`·`python-airkorea-api` 핀, `.env.example` 키, Manager compose `KOR_TRAVEL_MAP_KMA_*`, KMA notice 분기.
+- **PinVi가 다음 짝을 막는다(배포 차단).** Manager `m05_isolated_harness.py`는 OpenAPI hash 불일치를 거부하고, PinVi
+  `test_kor_travel_map_contract.py`는 `BeachPublicView.latest_weather`를 단언한다. 그래서 **PinVi PR
+  (`chore/map-drop-weather`: Map OpenAPI 재vendor + 계약 테스트) → Map PR → pair 회전** 순서가 필수다. PinVi 날씨 자체는
+  이미 kor-travel-weather를 쓴다.
+- 같은 브랜치 후속 반영: run gate probe `map_run_heartbeat`, C7 `ops-c7-update-request-write`(krairport 큐 왕복),
+  401 in-flight preflight, 403(KMA lineage 분기 제거), 핀 제거. 남은 것: Manager compose `KOR_TRAVEL_MAP_KMA_WEATHER_*`(Manager PR).
 
 ## 2026-10-01 — Map Dagster의 KMA 적재 경로 제거(ADR-104): 브랜치 `feat/remove-map-kma-dagster`
 

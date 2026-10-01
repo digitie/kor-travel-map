@@ -37,10 +37,8 @@ SIBLING_ROOT = REPO_ROOT.parent
 """형제 provider 체크아웃 위치 (ADR-044 — 로컬 우선 조회)."""
 
 PROVIDER_PACKAGES: Mapping[str, str] = {
-    "python-airkorea-api": "airkorea",
     "python-datagokr-api": "datagokr",
     "python-khoa-api": "khoa",
-    "python-kma-api": "kma",
     "python-knps-api": "knps",
     "python-krairport-api": "krairport",
     "python-krex-api": "krex",

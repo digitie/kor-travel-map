@@ -40,6 +40,7 @@ from .resources import (
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
+from .run_heartbeat import RUN_HEARTBEAT_JOBS
 from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
@@ -186,6 +187,7 @@ defs = Definitions(
             *OFFLINE_UPLOAD_JOBS,
             *FILE_REGISTRY_SCAN_JOBS,
             *MANUAL_PROVIDER_DEDUP_JOBS,
+            *RUN_HEARTBEAT_JOBS,
         ],
     ),
     schedules=[

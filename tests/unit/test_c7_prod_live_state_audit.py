@@ -89,6 +89,7 @@ def test_partial_restore_is_reported_without_payload_values(
         "kma": 0,
         "poi": 0,
         "targets": 0,
+        "requests": 0,
     }
     assert result.journal_phases["run"] == {"restore_failed": 1}
     assert result.runtime_directories == 1
@@ -153,6 +154,7 @@ def test_nested_runtime_journals_and_running_cid_are_reported(
     _write_json(journals / "sensor.json", {"phase": "restoring"})
     _write_json(journals / "schedule.json", {"phase": "restored"})
     _write_json(journals / "targets.json", {"phase": "orchestrator_pending"})
+    _write_json(journals / "requests.json", {"phase": "dispatched"})
     cid = root / "container-10.cid"
     cid.write_text("a" * 64, encoding="ascii")
     cid.chmod(0o600)
@@ -167,10 +169,12 @@ def test_nested_runtime_journals_and_running_cid_are_reported(
         "kma": 0,
         "poi": 0,
         "targets": 1,
+        "requests": 1,
     }
     assert result.journal_phases["run"] == {"restoring": 1}
     assert result.journal_phases["schedule"] == {"restored": 1}
     assert result.journal_phases["targets"] == {"orchestrator_pending": 1}
+    assert result.journal_phases["requests"] == {"dispatched": 1}
     assert result.container_reference_files == 2
     assert result.running_containers == 1
     assert result.requires_recovery is True

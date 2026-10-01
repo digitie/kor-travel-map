@@ -13,9 +13,7 @@ source record 쓰기**를 죽인다.
 
 1. writer가 ``lineage_key``를 **주지 않아도** 트리거가 채운다.
 2. KREX 전용 계보 규칙과 그 밖의 fallback이 각각 맞는 값을 만든다.
-   (KMA 특보 분기는 DB 함수와 재계산 식에 남아 있지만 실행될 수 없다 — 402(ADR-105)가
-   ``kma_weather_alerts`` dataset을 비활성으로 내려 그 dataset의 source 쓰기를
-   ``reject_inactive_*`` 트리거가 거절한다. 그래서 그 분기의 행 단위 사례도 뺐다.)
+   (KMA 기상특보 분기는 403(ADR-105)이 DB 함수와 재계산 식에서 함께 걷어냈다.)
 3. DB 정본 == 애플리케이션이 H35 고정 세대 replay에 쓰는 재계산 식. 갈리면
    리허설이 재생하는 표면이 현행 표면과 다른 계보로 묶인다. 값이 *틀린* 경우는
    NULL과 달리 fallback으로 막을 수 없다(값은 write-once다).
@@ -366,14 +364,18 @@ async def test_db_lineage_function_matches_frozen_replay_expression(
     recomputed_sql = feature_repo._notice_lineage_sql(
         "record", entity_alias="entity", dataset_alias="dataset"
     )
-    total, mismatched = (
+    total, mismatched, rule_branch, fallback = (
         await migrated_session.execute(
             text(
                 "SELECT count(*), count(*) FILTER (WHERE"
                 "   provider_sync.notice_lineage_key(head)"
                 f"     IS DISTINCT FROM ({recomputed_sql})"
                 "   OR head.lineage_key"
-                "     IS DISTINCT FROM provider_sync.notice_lineage_key(head))"
+                "     IS DISTINCT FROM provider_sync.notice_lineage_key(head)),"
+                " count(*) FILTER (WHERE provider_sync.notice_lineage_key(head)"
+                "   <> entity.source_entity_id),"
+                " count(*) FILTER (WHERE provider_sync.notice_lineage_key(head)"
+                "   = entity.source_entity_id)"
                 " FROM provider_sync.source_entity_heads AS head"
                 " JOIN provider_sync.source_entities AS entity"
                 "   ON entity.source_entity_key = head.source_entity_key"
@@ -385,4 +387,8 @@ async def test_db_lineage_function_matches_frozen_replay_expression(
         )
     ).one()
     assert total > 0, "대조할 record가 없으면 이 테스트는 공허하다"
+    # 하한은 본 것에 건다 — 계보 규칙 분기(KREX)와 fallback(entity id) 양쪽이 대조돼야
+    # 두 벌의 **모든** 남은 분기를 잰 것이다. 한쪽만 보면 다른 쪽의 갈림을 못 잡는다.
+    assert rule_branch > 0, "계보 규칙 분기를 탄 행이 없다 — 규칙 대조가 공허하다"
+    assert fallback > 0, "fallback 분기를 탄 행이 없다 — fallback 대조가 공허하다"
     assert mismatched == 0

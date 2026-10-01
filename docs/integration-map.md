@@ -469,6 +469,18 @@ refresh operation이 `401_retire_map_kma_refresh`로 꺼져(ADR-104) exact join�
 지워졌다(ADR-104/105) — 지금은 제출 가능한 `external_system:*` scope가 없어 잠글 대상도 없다. 새 이름을
 선언하면 그 live 실행의 직렬화를 함께 다시 세운다.
 
+**C7 기준 5(queue sensor → worker run)는 `external_system:*` 없이 돈다.** 2026-10-02부터
+`ops-c7-update-request-write`가 `provider_dataset` × **`dataset_wide`** request 하나를
+krairport 공항(`python-krairport-api` / `krairport_airports`, operation
+`feature_place_krairport_airports_job`)에 낸다. 그 dataset이 선언한 scope가 `dataset_wide`
+하나라 membership이 정확히 한 행으로 고정되고(exact), fetcher가 번들 정적 데이터만 읽어 upstream
+호출이 0이다. migration은 필요 없었다. 직렬화는 API가 맡는다 — 같은 membership에 다른 활성
+request가 있으면 `409 ACTIVE_SCOPE_CONFLICT`라, spec은 만들기 전에 그 dataset의 활성 실행 0을
+확인하고 409면 남의 실행을 건드리지 않고 멈춘다. `dataset_wide`는 월간 스케줄 job과 같은
+`provider_sync_state` 행을 갱신한다 — 같은 번들을 다시 적재하는 것이라 스케줄 실행 한 번과 같은
+효과다. 실제 prod 쓰기(번들 공항 place feature의 idempotent upsert)다 — runbook
+`docs/runbooks/c7-prod-live-e2e.md`.
+
 ### 3.6 범용 Feature 요청 (T-VN-M04)
 
 외부 consumer가 Map에 없는 Feature를 필요로 하면 직접 생성하지 않고 Map에 요청한다. Map admin만

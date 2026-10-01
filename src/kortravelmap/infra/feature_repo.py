@@ -500,8 +500,9 @@ def _notice_lineage_sql(
     맞는지 대조할 때와 컬럼이 없던 세대를 재생할 때만 쓴다.
 
     DB 정본 ``provider_sync.notice_lineage_key``와 글자 단위로 같은 규칙이어야 한다
-    (``test_db_lineage_function_matches_frozen_replay_expression``). KMA 분기는 Map이
-    더 이상 기상특보를 적재하지 않아도(ADR-105) DB 함수가 그 분기를 갖는 한 남긴다.
+    (``test_db_lineage_function_matches_frozen_replay_expression``). KMA 기상특보 분기는
+    403이 DB 함수에서 걷어낼 때 여기서도 함께 걷어냈다(ADR-105) — 한쪽만 바꾸면 두 벌이
+    갈린다.
     """
 
     return f"""
@@ -519,28 +520,6 @@ def _notice_lineage_sql(
             NULLIF(lower(btrim({record_alias}.raw_data->>'direction')), ''),
             NULLIF(lower(btrim({record_alias}.raw_data->>'point_name')), ''),
             NULLIF(lower(btrim({record_alias}.raw_data->>'incident_type_code')), '')
-          ),
-          ''
-        ),
-        {entity_alias}.source_entity_id
-      )
-      WHEN {dataset_alias}.provider = 'python-kma-api'
-       AND {dataset_alias}.dataset_key = 'kma_weather_alerts'
-       AND {entity_alias}.source_entity_type = 'weather_alert'
-      THEN COALESCE(
-        NULLIF(
-          concat_ws(
-            '::',
-            NULLIF(btrim({record_alias}.raw_data->>'region_code'), ''),
-            NULLIF(
-              btrim(
-                COALESCE(
-                  {record_alias}.raw_data->>'phenomenon',
-                  {record_alias}.raw_data->>'alert_type'
-                )
-              ),
-              ''
-            )
           ),
           ''
         ),

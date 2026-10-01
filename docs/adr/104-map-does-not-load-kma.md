@@ -67,6 +67,5 @@
 
 ### 후속(이 결정 밖)
 
-- `pyproject.toml`의 `python-kma-api` 의존 핀 제거(provider 표면 manifest·적합성 게이트와 함께).
-- Manager compose의 `KOR_TRAVEL_MAP_KMA_WEATHER_*` env 제거(무해하지만 죽은 값).
-- C7 러너 가족(`run-c7-prod-live-e2e.sh`, `ops-c7-*` spec, 관련 unit 테스트) 정리.
+- (완료, ADR-105 브랜치) `python-kma-api` 의존 핀 제거, C7 러너의 KMA spec 제거.
+- Manager compose의 `KOR_TRAVEL_MAP_KMA_WEATHER_*` env 제거 — Manager PR(소유자).

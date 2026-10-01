@@ -14592,28 +14592,6 @@ CREATE FUNCTION provider_sync.notice_lineage_key(head provider_sync.source_entit
                 ),
                 entity.source_entity_id
               )
-              WHEN dataset.provider = 'python-kma-api'
-               AND dataset.dataset_key = 'kma_weather_alerts'
-               AND entity.source_entity_type = 'weather_alert'
-              THEN COALESCE(
-                NULLIF(
-                  concat_ws(
-                    '::',
-                    NULLIF(btrim(record.raw_data->>'region_code'), ''),
-                    NULLIF(
-                      btrim(
-                        COALESCE(
-                          record.raw_data->>'phenomenon',
-                          record.raw_data->>'alert_type'
-                        )
-                      ),
-                      ''
-                    )
-                  ),
-                  ''
-                ),
-                entity.source_entity_id
-              )
               -- out-of-scope도 값을 갖는다. 읽는 쪽이
               -- COALESCE(head.lineage_key, entity.source_entity_id)로 물러나면
               -- **두 테이블에 걸친 식**이 되어 어떤 단일 인덱스도 받지 못한다.
@@ -16332,7 +16310,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),

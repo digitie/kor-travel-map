@@ -314,6 +314,119 @@ metadata의 `today_values_count`가 `price_values_upserted`보다 작으면 당�
 `loaded_at`과 같은 KST 날짜가 아니면 재시도해야 한다. `already_succeeded_today_kst` skip은
 같은 KST 날짜에 적재값 전체가 당일 가격인 뒤에만 정상이다.
 
+### 날씨 제거 배포의 전제 (ADR-105, 옛 분당 schedule)
+
+ADR-105는 Map의 마지막 RUNNING schedule인 `current_weather_summary_refresh_minutely_schedule`을
+코드에서 지운다. Dagster는 schedule이 코드에서 사라져도 **instigator state 행을 지우지 않는다.**
+RUNNING인 채로 pair를 교체하면, 공유 plane metadata DB(`dagster_shared`)의 `instigators`에
+**origin을 로드할 수 없는 RUNNING schedule**이 남는다. 그 schedule은 run을 띄우지 못한다(job이
+없다). 대신 Dagster UI의 unloadable 목록에 계속 보이고, 같은 이름이 나중에 코드로 돌아오면
+**그 순간 RUNNING으로 되살아난다.**
+
+배포 뒤 Map에는 RUNNING schedule이 0개이고 sensor만 남는다. 이것은 정상이다. 2026-10-02에
+`scripts/`·`scripts/lib/c7_prod_runtime.py`·`scripts/n150/*`·run 완주 게이트·Manager
+`scripts`·`backend/src`를 확인했다. RUNNING Map schedule이 1개 이상이기를 요구하는 하한은 없다.
+게이트가 요구하는 것은 `SCHEDULER` **daemon** heartbeat이고, 이것은 schedule 개수와 무관하다.
+
+**pair를 교체하기 전에** (옛 코드가 아직 로드돼 있을 때) 그 schedule을 멈춘다. 둘 중 하나를 쓴다.
+
+1. Map API(감사 기록이 남는 경로, admin UI `/ops/pipeline?tab=schedules`의 중지 버튼과 같다):
+   `POST /v1/ops/pipeline/schedules/current_weather_summary_refresh_minutely_schedule/commands`.
+   body는 `{"command": "stop", "reason": "ADR-105 weather removal"}`이고, 헤더는
+   `Idempotency-Key: <새 uuid>`와 ops operator 인증이다.
+2. Dagster GraphQL(Map Dagster webserver):
+
+   ```graphql
+   query ($s: ScheduleSelector!) {
+     scheduleOrError(scheduleSelector: $s) {
+       __typename ... on Schedule { scheduleState { id status } }
+     }
+   }
+   # $s = {repositoryName: "__repository__",
+   #       repositoryLocationName: "kortravelmap.dagster.definitions",
+   #       scheduleName: "current_weather_summary_refresh_minutely_schedule"}
+   mutation ($id: String!) {
+     stopRunningSchedule(id: $id) {
+       __typename ... on ScheduleStateResult { scheduleState { status } }
+       ... on PythonError { message }
+     }
+   }
+   ```
+
+**배포 뒤에는** Map instigator 중 로드할 수 없는 origin을 가리키는 것이 없는지 읽기 전용으로
+확인한다. 대상은 Dagster metadata DB(`dagster_shared`)다. DSN은 Map Dagster 컨테이너의
+`KOR_TRAVEL_MAP_DAGSTER_PG_URL`에서 유도한다.
+
+```sql
+SELECT instigator_type,
+       status,
+       (regexp_match(instigator_body,
+                     '"(?:job_name|instigator_name)": "([^"]+)"'))[1] AS name
+FROM instigators
+WHERE instigator_body ILIKE '%kortravelmap%'
+ORDER BY instigator_type, name;
+```
+
+여기 나온 이름은 전부 지금 로드된 Map 정의에 있어야 한다(Map API `GET /v1/ops/pipeline/schedules`
+목록 + Dagster UI sensor 목록). 판정은 이렇다. `current_weather_summary_refresh_minutely_schedule`
+(또는 ADR-105가 지운 다른 이름)이 `RUNNING`으로 남아 있으면 그것이 unloadable instigator다.
+`STOPPED`로 남은 행은 run을 띄우지 않으므로 그대로 둔다. 교체 전 단계를 놓쳐 `RUNNING`이
+남았다면, 코드가 없으므로 Map API는 그 schedule을 찾지 못한다. 그때는 Map Dagster webserver
+컨테이너 안에서 state를 직접 멈춘다. Dagster UI의 unloadable schedule 중지와 같은 동작이다.
+
+```sh
+C=$(docker ps --filter label=com.docker.compose.service=dagster --format '{{.Names}}' | head -1)
+docker exec -i "$C" python3 - <<'PY'
+from dagster import DagsterInstance
+from dagster._core.scheduler.instigation import InstigatorType
+
+NAME = "current_weather_summary_refresh_minutely_schedule"
+LOCATION = "kortravelmap.dagster.definitions"
+instance = DagsterInstance.get()
+for state in instance.all_instigator_state(instigator_type=InstigatorType.SCHEDULE):
+    location = state.origin.repository_origin.code_location_origin.location_name
+    if state.instigator_name == NAME and location == LOCATION and state.is_running:
+        instance.stop_schedule(state.instigator_origin_id, state.selector_id, None)
+        print("stopped", NAME)
+PY
+```
+
+그 뒤 위 SQL을 다시 돌려 `RUNNING`이 사라졌는지 본다.
+
+### 배포 뒤 run 완주 게이트 (`scripts/dagster_run_completion_gate.py`)
+
+컨테이너가 healthy인 것과 run이 끝나는 것은 다른 사실이다(2026-09-11 사고). 배포 뒤 Map
+Dagster webserver 컨테이너에서 게이트를 돌린다. `scripts/`는 이미지에 없으므로 stdin으로 넣는다.
+
+```sh
+C=$(docker ps --filter label=com.docker.compose.service=dagster --format '{{.Names}}' | head -1)
+docker exec -i "$C" python3 - --json < scripts/dagster_run_completion_gate.py
+```
+
+게이트는 매번 **새 탐침 run 하나**를 GraphQL로 띄우고 `SUCCESS`를 기다린다. 이것은 실제 run
+launcher 경로다(큐 → launcher → worker → step → 종결 이벤트). 기본 탐침은 `map_run_heartbeat`
+(`kortravelmap.dagster.run_heartbeat`)이고, 아무 일도 하지 않는 전용 job이다.
+
+- Map resource를 요구하지 않는다(op 출력용 Dagster 기본 io_manager만). 그래서 DB client·provider·geo client가 그 run에서 만들어지지 않는다.
+- run config·schedule·pool·retry가 없다.
+- `kor_travel_map.operation_key` tag가 없다. 그래서 상태·reconcile sensor는 이 run을
+  `panel_only`로 보고 `ops.import_jobs` 행을 만들지 않는다.
+- `dagster/max_runtime=300`이므로, 멈추더라도 5분 뒤 회수된다.
+
+남는 쓰기는 Dagster 자신의 run·event 행과, op 출력 하나가 기본 filesystem io_manager로
+`local_artifact_storage` 아래에 남기는 작은 파일뿐이다. 뒤의 파일은 의도다. 사고 자리였던
+로컬 쓰기를 실제로 한 번 해 본다.
+
+`--probe-job`으로 다른 job을 줄 수 있지만 **일을 하는 job을 주지 않는다.** 종전 탐침
+`cache_target_snapshot_gc`는 prod에서 한 번도 돈 적 없는 GC였다. 첫 실행이 최대 2,000 batch를
+지우며 600초 상한을 넘길 수 있었다. 기본 탐침이 일을 할 수 없다는 성질은
+`tests/lint/test_run_completion_gate_measures_what_it_claims.py`가 잰다. 이 테스트는 이름이 아니라
+요구 resource·config·op import·in-process 완주를 본다.
+
+exit code: `0` 통과, `1` 판정 실패, `2` env/config 부재, `3` 관측 불가(GraphQL·location·탐침 job
+부재). exit 3에 "job이 없습니다: map_run_heartbeat"가 찍히면 배포된 이미지가 이 job보다 오래된
+것이다.
+
 ### 공유 Dagster plane으로 옮기기 전의 drain (Map flip, Manager ADR-54)
 
 > **완료.** Map은 2026-10-01 05:54Z cutover로 **05:58Z부터 공유 plane에서 돈다**. C7은 06:02Z GREEN이었다.

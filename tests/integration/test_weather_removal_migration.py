@@ -49,6 +49,7 @@ pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _MIGRATION_PATH: Final = _ROOT / "alembic" / "versions" / "402_remove_map_weather_data.py"
+_BASELINE: Final = "400"
 _BEFORE: Final = "401_retire_map_kma_refresh"
 _AFTER: Final = "402_remove_map_weather_data"
 
@@ -111,6 +112,23 @@ async def db_at_401(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
     상태 전이 감사 트리거가 superuser 직접 쓰기만 fixture seeding으로 허용한다.
     """
 
+    async for value in _db_at(pg_container, stop_at_baseline=False):
+        yield value
+
+
+@pytest.fixture
+async def db_at_400(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
+    """``db_at_401``과 같되 **400**까지만 — 401·402를 한 번에 올리는 배포 경로를 잰다."""
+
+    async for value in _db_at(pg_container, stop_at_baseline=True):
+        yield value
+
+
+async def _db_at(
+    pg_container: object, *, stop_at_baseline: bool
+) -> AsyncIterator[tuple[Config, str]]:
+    # 목표 revision은 모듈 상수 리터럴로만 넘긴다 — squash 경계 lint가 실행 경로의 목표를
+    # 정적으로 해석한다(`tests/unit/test_alembic_squash_boundary.py`).
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     database = f"weather_removal_{uuid4().hex}"
     await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}"')
@@ -123,7 +141,10 @@ async def db_at_401(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
             await bootstrapped_application_300_migrator_dsn(normalize_async_dsn(superuser_dsn)),
         )
         with alembic_schema_owner_role():
-            await asyncio.to_thread(command.upgrade, config, _BEFORE)
+            if stop_at_baseline:
+                await asyncio.to_thread(command.upgrade, config, _BASELINE)
+            else:
+                await asyncio.to_thread(command.upgrade, config, _BEFORE)
         yield config, superuser_dsn
     finally:
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
@@ -977,5 +998,82 @@ async def test_402_refuses_when_a_kept_feature_is_bound_to_a_weather_dataset(
             "SELECT count(*) FROM provider_sync.provider_datasets AS row_ "
             f"WHERE row_.provider_dataset_id IN ({_TARGET_DATASETS_SQL}) AND NOT row_.is_active"
         ) == 0
+    finally:
+        await connection.close()
+
+
+async def test_400_to_402_refuses_when_a_job_is_queued_on_a_kma_load_operation(
+    db_at_400: tuple[Config, str],
+) -> None:
+    """KMA 적재 operation을 member로 둔 queued job이 있으면 401·402가 함께 멈춘다.
+
+    401이 그 operation을 끄면 job은 영영 종결로 갈 수 없다. 402의 in-flight preflight는
+    **아직 켜진** operation만 보므로, 같은 트랜잭션에서 401이 먼저 끈 operation은 402에서
+    보이지 않는다 — 401의 preflight가 없으면 이 업그레이드는 조용히 통과한다(빨강).
+    operation은 이름이 아니라 정체성(provider ``python-kma-api`` + 적재 종류)으로 고른다.
+    """
+
+    config, superuser_dsn = db_at_400
+    connection = await _connect(superuser_dsn)
+    try:
+        assert await _version(connection) == _BASELINE
+        member = await connection.fetchrow(
+            """
+            SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+              FROM provider_sync.provider_dataset_operation_scopes AS scope
+              JOIN provider_sync.provider_dataset_operations AS operation
+                ON operation.provider_dataset_id = scope.provider_dataset_id
+               AND operation.operation_key = scope.operation_key
+              JOIN provider_sync.provider_datasets AS dataset
+                ON dataset.provider_dataset_id = scope.provider_dataset_id
+             WHERE dataset.provider = 'python-kma-api'
+               AND dataset.is_active
+               AND operation.operation_kind IN ('refresh', 'feature_load')
+               AND operation.is_enabled
+             ORDER BY scope.provider_dataset_id, scope.operation_key, scope.sync_scope
+             LIMIT 1
+            """
+        )
+        assert member is not None, "seed 카탈로그에 켜진 KMA 적재 operation이 없다 — 전제가 깨졌다"
+        async with connection.transaction():
+            job_id = await connection.fetchval(
+                "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) "
+                "VALUES ('401-in-flight-probe', 'single') RETURNING job_id"
+            )
+            await connection.execute(
+                """
+                INSERT INTO ops.import_job_datasets (
+                    job_id, provider_dataset_id, sync_scope, operation_key
+                ) VALUES ($1, $2, $3, $4)
+                """,
+                job_id,
+                member["provider_dataset_id"],
+                member["sync_scope"],
+                member["operation_key"],
+            )
+        assert await connection.fetchval(
+            "SELECT status FROM ops.import_jobs WHERE job_id = $1", job_id
+        ) == "queued"
+    finally:
+        await connection.close()
+
+    with pytest.raises(Exception, match="queued/running job on a KMA load operation"):
+        await _upgrade_to_402(config)
+
+    connection = await _connect(superuser_dsn)
+    try:
+        # 트랜잭션 전체가 되돌아가 400 그대로다 — operation도 켜진 채, job도 queued다.
+        assert await _version(connection) == _BASELINE
+        assert await connection.fetchval(
+            """
+            SELECT is_enabled FROM provider_sync.provider_dataset_operations
+             WHERE provider_dataset_id = $1 AND operation_key = $2
+            """,
+            member["provider_dataset_id"],
+            member["operation_key"],
+        ) is True
+        assert await connection.fetchval(
+            "SELECT status FROM ops.import_jobs WHERE job_id = $1", job_id
+        ) == "queued"
     finally:
         await connection.close()

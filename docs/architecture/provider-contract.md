@@ -183,7 +183,7 @@ fileData/특화거리 source는 `feature.curated_source_rules`의 기본 후보�
 | python-mois-api | place | primary | 주 1회 (full) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — `docs/etl/mois-feature-etl.md` |
 | python-opinet-api | place + price | primary | hours (가격), 일 (상세) | PriceValue 시계열 |
 | python-krex-api | place + price + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지. 휴게소 기상(weather)은 2026-10-01 제거(ADR-105) |
-| python-kma-api | weather | weather_context | **Map 적재 없음(ADR-104)** | 2026-10-01부터 kor-travel-weather가 소유. Map은 KMA를 부르지 않는다 — 이미 적재된 feature 읽기와 변환 계약(Protocol `KmaShortForecastItem` (PR#38) / `KmaUltraShortNowcastItem` (PR#39))만 남는다 |
+| python-kma-api | weather | weather_context | **Map 적재 없음(ADR-104/105)** | 2026-10-01부터 kor-travel-weather가 소유. Map은 KMA를 부르지 않고, 변환 계약·의존 핀도 없다 |
 | python-krairport-api | weather, place | weather_context, enrichment | 시간 | 공항 운항·날씨 |
 | python-khoa-api | place, weather | primary, weather_context | 일 / 시간 | 해수욕장·해양 지수. C03에서 근거 source 없는 coastal notice 계획 폐기 |
 | python-airkorea-api | weather | weather_context | **Map 적재 없음(ADR-105)** | 2026-10-01 제거. 날씨·대기질은 kor-travel-weather가 소유 |
@@ -331,7 +331,7 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
 - **무조건 안정 (1종)**: `python-mois-api`만 source payload에 법정동 코드를
   native로 들고 있어, geocoder 없이도 같은 입력 → 같은 feature_id가 무조건 성립한다.
 - **조건부 안정 (~10종)**: `knps`, `krheritage`, `mcst`, `krforest`,
-  `datagokr_file_data`, `khoa`, `airkorea`, `krairport`, `opinet`, `standard_data`
+  `datagokr_file_data`, `khoa`, `krairport`, `opinet`, `standard_data`
   계열은 source에 bjd_code가 없어 **reverse-geocode로 bjd를 채운다**. 따라서
   feature_id 결정성은 geocoder(kor-travel-geo REST v2)의 **가용성 + 출력 안정성**에
   조건부다. geocoder가 응답하지 않거나 같은 좌표에 대해 다른 bjd를 돌려주면
@@ -451,8 +451,8 @@ def test_no_provider_wrapper_classes():
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | kor-travel-geo | REST 서비스(직접 의존 없음) | `KorTravelGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12501` 기준 |
 | python-datagokr-api | `@99d8427` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model. `b8f1254`: 공용 pagination 헬퍼 추출 — **종료 조건에서 `reached_known_end` 가드가 빠지고 행 단위 `except ValidationError: continue`가 들어와** 기형 행 하나가 목록을 조용히 끊을 수 있었다. `fd099b2` **상향(2026-09-11, PR#16)**: 짧은 페이지 종료를 declared total로 조건화해 그 퇴화를 닫았다(total이 없으면 멈추지 않고 빈 페이지를 기다린다). Map의 `_iter_datagokr_standard` 우회는 **그대로 둔다** — 방어는 중복이어도 좋다 |
-| python-kma-api | `@4ac9a32` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#24, PR#38~46, T-219b/c | ADR-010 두 축. **Map Dagster 경로는 2026-10-01 ADR-104로 제거** — 종전의 asset 5종(실황/초단기/단기 `KmaClient`, 중기 `DataGoKrClient`, 특보 record resource)과 큐 runner spec·handler binding이 없다. Map 런타임은 이 패키지를 import하지 않는다(의존 핀은 후속 정리 대상). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). `0868b76`: `resultCode=22`를 비재시도 quota로 분류하고 HTTP 200 XML `OpenAPI_ServiceResponse`의 `03`은 빈 결과, 임의 XML은 parse error로 fail-close(provider PR#24, T-VN-H45 후속). ASOS/해수욕장/APIHub 표면은 백로그 |
-| python-airkorea-api | `@fc5c009` | `AirQualityStationItem`/`AirQualityMeasurementItem` | — | PM10/PM2.5/CAI. `c4c8d12`: base URL http→https, totalCount 결측+만재 페이지 `AirKoreaParseError` |
+| python-kma-api | **제거** | — | — | ADR-104/105(2026-10-01). Map은 KMA를 부르지도 읽지도 않는다 — kor-travel-weather가 소유한다. Dagster 경로(ADR-104)·변환 Protocol·weather 적재(ADR-105)가 사라진 뒤 핀 `@4ac9a32`와 표면 manifest 항목도 걷어냈다. 이력은 git과 ADR-010/104/105 |
+| python-airkorea-api | **제거** | — | — | ADR-105(2026-10-01). 대기질은 kor-travel-weather가 소유한다. 핀 `@fc5c009`와 표면 manifest 항목을 걷어냈다 |
 | python-khoa-api | `@38a2b74` | (후속 PR) | PR#8 | 해수욕장·해양 지수. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump). `3314f68`: **asyncio 전용 전환(provider PR#13)** — sync `oceans_beach_info()`/`close()` 제거. Map `fetch_khoa_beaches`가 async generator로 이동하고 `aoceans_beach_info`/`aclose`를 쓴다. `20c7207`: `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환(provider PR#8, T-VN-H45 후속). C03에서 46개 ODMI catalog에 notice event/model이 없음을 확인해 coastal notice 계획 폐기 |
 | python-krforest-api | `@70814c9` | `ForestSpatialFeature`, `MountainWeather`, `WildfireRiskForecast`, `LandslideForecastIssue` | PR#9 merge | C05A nested SHP route + C05B typed observed weather + C05C V2 fire index + C05D issue lifecycle. provider PR#9 merge SHA 고정. `70814c9`(2026-09-19): 표준데이터 gateway가 `{header, body}` 래퍼를 벗어 산림 표준데이터 3종이 파싱에서 전멸한 것을 좁은 가지로 수용(provider PR#15) |
 | python-opinet-api | `@dcfb41a` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |

@@ -17,6 +17,13 @@ readonly COMPOSE_PROJECT_DIR="$PWD"
 # 번들 정적 데이터만 읽는다(keyless, network 없음). 옛 KMA schedule은 2026-09-09에 사라졌고
 # Map은 weather를 더 적재하지 않는다(ADR-104/105).
 readonly SAFE_SCHEDULE="feature_place_krairport_airports_monthly_schedule"
+# 기준 5(queue sensor → worker run)의 exact-scope request도 같은 upstream 0 dataset 하나로만
+# 만든다(`ops-c7-update-request-write`). 이것은 실제 prod 쓰기다 — 번들 공항을 place feature로
+# idempotent upsert한다. 상세는 spec 머리말과 runbook.
+readonly SAFE_UPDATE_OPERATION="feature_place_krairport_airports_job"
+# 공유 Dagster plane의 공개 GraphQL gateway(Manager ADR-54 D2)는 Basic Auth를 요구한다.
+# 자격증명 파일은 executor 안의 이 경로에 read-only로만 보인다(env에는 경로만 싣는다).
+readonly DAGSTER_BASIC_AUTH_CONTAINER_PATH="/run/secrets/c7-dagster-basic-auth"
 readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
 readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
 STATE_ROOT=""
@@ -31,6 +38,7 @@ ORCHESTRATOR_VERIFIED=0
 SCHEDULE_STATE_FILE=""
 TARGET_STATE_FILE=""
 POI_STATE_FILE=""
+REQUEST_STATE_FILE=""
 RUNTIME_DIR=""
 PLAYWRIGHT_IMAGE_ID=""
 REPOSITORY_COMMIT=""
@@ -231,6 +239,38 @@ validate_service_env() {
     die "invalid compose service env: $name"
 }
 
+# 선택: `E2E_DAGSTER_BASIC_AUTH_FILE`이 있으면 C7 Dagster client가 `Authorization: Basic`을
+# 보낸다. 파일은 러너 사용자(prod는 root) 소유, group·other 권한 없음, symlink 아님이고,
+# 내용은 `user:password` 한 줄(출력 가능한 ASCII, user에 `:` 없음)이다. 값은 출력하지 않는다.
+validate_dagster_basic_auth_file() {
+  local path="$E2E_DAGSTER_BASIC_AUTH_FILE"
+  [[ "$path" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
+    die "Dagster Basic Auth file path must be absolute and plain"
+  python3 -I - "$path" <<'PY' || die "Dagster Basic Auth file is unsafe (values redacted)"
+import os
+import re
+import stat
+import sys
+
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    payload = os.read(fd, 4097)
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != os.geteuid()
+    or stat.S_IMODE(observed.st_mode) & 0o077
+    or len(payload) > 4096
+):
+    raise SystemExit(1)
+credential = payload.removesuffix(b"\n")
+if re.fullmatch(rb"[\x21-\x39\x3b-\x7e]+:[\x21-\x7e]+", credential) is None:
+    raise SystemExit(1)
+PY
+}
+
 preserve_evidence() {
   local status="$1"
   local temporary
@@ -246,6 +286,7 @@ preserve_evidence() {
     "$SCHEDULE_STATE_FILE" \
     "$TARGET_STATE_FILE" \
     "$POI_STATE_FILE" \
+    "$REQUEST_STATE_FILE" \
     "$status" \
     "$ORCHESTRATOR_VERIFIED" \
     "$REPOSITORY_COMMIT" \
@@ -266,6 +307,7 @@ from pathlib import Path
     schedule_raw,
     target_raw,
     poi_raw,
+    request_raw,
     status_raw,
     verified_raw,
     repository_commit,
@@ -290,6 +332,7 @@ for name, raw in (
     ("schedule.json", schedule_raw),
     ("targets.json", target_raw),
     ("poi.json", poi_raw),
+    ("requests.json", request_raw),
 ):
     source = Path(raw) if raw else None
     if source is not None and source.exists():
@@ -416,7 +459,8 @@ finish() {
     if rm -f -- \
       "$SCHEDULE_STATE_FILE" \
       "$TARGET_STATE_FILE" \
-      "$POI_STATE_FILE"; then
+      "$POI_STATE_FILE" \
+      "$REQUEST_STATE_FILE"; then
       rm -f -- "$BLOCKED_FILE" || status=1
       fsync_state_root || status=1
     else
@@ -500,6 +544,8 @@ validate_environment() {
   validate_service_env E2E_C7_PINVI_API_SERVICE
   validate_service_env E2E_C7_PINVI_WEB_SERVICE
   validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
+  require_env E2E_C7_UPDATE_REQUEST_OPERATION
+  [[ -z "${E2E_DAGSTER_BASIC_AUTH_FILE-}" ]] || validate_dagster_basic_auth_file
 
   [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
     die "expected Git commit is invalid"
@@ -510,9 +556,12 @@ validate_environment() {
   require_enabled E2E_ADMIN_WRITE
   require_enabled E2E_C7_READ_AUTH_WRITE
   require_enabled E2E_DAGSTER_WRITE
+  require_enabled E2E_C7_UPDATE_REQUEST_WRITE
 
   [[ "$E2E_C7_SCHEDULE" == "$SAFE_SCHEDULE" ]] ||
     die "E2E_C7_SCHEDULE is not the allowlisted zero-upstream schedule"
+  [[ "$E2E_C7_UPDATE_REQUEST_OPERATION" == "$SAFE_UPDATE_OPERATION" ]] ||
+    die "E2E_C7_UPDATE_REQUEST_OPERATION is not the allowlisted zero-upstream operation"
 }
 
 validate_environment
@@ -763,11 +812,19 @@ docker_run_playwright() {
     E2E_C7_SCHEDULE E2E_C7_EXPECTED_UI_ORIGIN_SHA256 \
     E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256 E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256 \
     E2E_C7_SCHEDULE_STATE_FILE E2E_C7_TARGET_STATE_FILE E2E_C7_POI_STATE_FILE \
-    E2E_LIVE_WORKERS E2E_POI_CACHE_WRITE \
+    E2E_C7_UPDATE_REQUEST_WRITE E2E_C7_UPDATE_REQUEST_OPERATION \
+    E2E_C7_REQUEST_STATE_FILE E2E_LIVE_WORKERS E2E_POI_CACHE_WRITE \
     E2E_STORAGE_STATE PLAYWRIGHT_ARTIFACT_ROOT; do
     environment_args+=(--env "$name")
   done
   [[ -z "${E2E_ADMIN_USERNAME-}" ]] || environment_args+=(--env E2E_ADMIN_USERNAME)
+  # Basic Auth 자격증명은 env가 아니라 read-only bind로만 건넨다(`docker inspect`에 값이 없다).
+  if [[ -n "${E2E_DAGSTER_BASIC_AUTH_FILE-}" ]]; then
+    environment_args+=(
+      --mount "type=bind,src=$E2E_DAGSTER_BASIC_AUTH_FILE,dst=$DAGSTER_BASIC_AUTH_CONTAINER_PATH,readonly"
+      --env "E2E_DAGSTER_BASIC_AUTH_FILE=$DAGSTER_BASIC_AUTH_CONTAINER_PATH"
+    )
+  fi
   [[ -n "$LOCK_GUARD_PID" ]] && kill -0 "$LOCK_GUARD_PID" 2>/dev/null ||
     die "orchestrator lock guard is not alive"
   [[
@@ -971,6 +1028,7 @@ ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
 SCHEDULE_STATE_FILE="$RUNTIME_DIR/journals/schedule.json"
 TARGET_STATE_FILE="$RUNTIME_DIR/journals/targets.json"
 POI_STATE_FILE="$RUNTIME_DIR/journals/poi.json"
+REQUEST_STATE_FILE="$RUNTIME_DIR/journals/requests.json"
 printf -v schedule_state_payload \
   '{"dagsterGraphqlEndpointSha256":"%s","phase":"schedule_snapshot_pending","version":2}' \
   "$actual_dagster_origin_sha256"
@@ -983,6 +1041,9 @@ atomic_replace_state \
   '{"phase":"orchestrator_pending","version":1}'
 atomic_replace_state \
   "$POI_STATE_FILE" \
+  '{"phase":"orchestrator_pending","version":1}'
+atomic_replace_state \
+  "$REQUEST_STATE_FILE" \
   '{"phase":"orchestrator_pending","version":1}'
 printf -v blocked_running_payload \
   '{"dagsterGraphqlEndpointSha256":"%s","expectedDagsterGraphqlEndpointSha256":"%s","phase":"orchestrator_running","version":3}' \
@@ -1000,23 +1061,30 @@ export E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256
 export E2E_C7_SCHEDULE_STATE_FILE="$SCHEDULE_STATE_FILE"
 export E2E_C7_TARGET_STATE_FILE="$TARGET_STATE_FILE"
 export E2E_C7_POI_STATE_FILE="$POI_STATE_FILE"
+export E2E_C7_UPDATE_REQUEST_WRITE E2E_C7_UPDATE_REQUEST_OPERATION
+export E2E_C7_REQUEST_STATE_FILE="$REQUEST_STATE_FILE"
 export E2E_LIVE_WORKERS=1
 export E2E_POI_CACHE_WRITE=1
 
-# C7 blocking gate = 2-spec + `@c7-causal` POI case(아래).
+# C7 blocking gate = 3-spec + `@c7-causal` POI case(아래).
 # - ops-c7-read-auth: datasets/pipeline read 요약, invalid exact scope fail-closed, ops live
 #   ticket 거절·만료 복구·자연 rotation·로그아웃, 외부 dataset_projection mutation
 #   (`targets.json` journal로 소유·복원하는 POI target 하나)의 무-navigation 갱신.
 # - ops-c7-schedule-write: SAFE_SCHEDULE의 실제 UI stop/cron/start/stop과 최초 상태 exact 복원.
+# - ops-c7-update-request-write: SAFE_UPDATE_OPERATION(krairport `dataset_wide`) exact-scope
+#   request 하나 → Map queue sensor가 집은 `feature_update_request_worker` run(sensor/location/
+#   request tag 대조) → API `done` + Dagster `SUCCESS`(`requests.json` journal). 실제 prod 쓰기,
+#   upstream 0. Dagster에는 읽기 전용 GraphQL만 보낸다(sensor는 건드리지 않는다).
 # KMA exact-scope 갱신 3-spec(active/empty/cap)과 contract preflight는 2026-10-01 퇴역했다 —
 # Map은 weather를 더 적재하지 않고 KMA catalog operation은 거절된다(ADR-104/105). 그와 함께
-# queue sensor barrier(`sensor.json`)·KMA journal·grid cap 대조·C7 Dagster GraphQL client
-# (Basic Auth 포함)도 사라졌다 — 남은 spec은 Dagster에 직접 POST하지 않는다.
+# sensor stop/start barrier(`sensor.json`)·KMA journal·grid cap 대조는 되살리지 않는다. 기준 5만
+# 위 update-request spec이 읽기 전용 Dagster client(+ 선택 Basic Auth bind)로 되살렸다.
 # schedule-write는 T-ADM-C7-SCHEDCHURN에서 재편입됐다(근인: cron 저장 응답 유실 시 열린
 # dialog가 페이지를 inert로 만들던 것, fix=schedule-panel.tsx). 상세: docs/journal.md.
 readonly SPECS=(
   "e2e/live/ops-c7-read-auth.live.spec.ts"
   "e2e/live/ops-c7-schedule-write.live.spec.ts"
+  "e2e/live/ops-c7-update-request-write.live.spec.ts"
 )
 for spec in "${SPECS[@]}"; do
   artifact_name="${spec##*/}"
@@ -1043,12 +1111,13 @@ docker_run_playwright npm run e2e:live -- \
 state_is_exact_restored() {
   local kind="$1"
   local state_file="$2"
-  python3 - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" <<'PY'
+  python3 - "$kind" "$state_file" "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" \
+    "$SAFE_UPDATE_OPERATION" <<'PY'
 import json
 import re
 import sys
 
-kind, state_path, expected_hash = sys.argv[1:]
+kind, state_path, expected_hash, safe_update_operation = sys.argv[1:]
 
 
 def exact_dict(value, keys):
@@ -1285,6 +1354,55 @@ elif kind == "poi":
         or receipts != sorted(set(receipts))
     ):
         raise SystemExit(32)
+elif kind == "requests":
+    # `ops-c7-update-request-write`의 journal 최종본(v1). 기준 5의 증거 그 자체다: 소유
+    # request가 API에서 `done`이고, 그 Dagster run이 queue sensor가 띄운 worker run으로
+    # `SUCCESS`였다. placeholder·create_intent·restore_failed는 위 phase 검사에서 거절된다.
+    any_uuid = re.compile(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    )
+    if not exact_dict(
+        state,
+        {
+            "dagster_run_id",
+            "dagster_run_status",
+            "generation",
+            "idempotency_key",
+            "job_id",
+            "operation_key",
+            "phase",
+            "provider_dataset_id",
+            "request_id",
+            "run_id",
+            "sensor_name",
+            "terminal_status",
+            "updated_at",
+            "version",
+        },
+    ) or state.get("version") != 1:
+        raise SystemExit(40)
+    if not (
+        state.get("operation_key") == safe_update_operation
+        and type(state.get("provider_dataset_id")) is int
+        and state["provider_dataset_id"] > 0
+        and all(
+            isinstance(state.get(field), str)
+            and any_uuid.fullmatch(state[field]) is not None
+            for field in ("idempotency_key", "job_id", "request_id")
+        )
+        and type(state.get("generation")) is int
+        and state["generation"] > 0
+        and nonempty_string(state.get("run_id"))
+        and nonempty_string(state.get("updated_at"))
+        and nonempty_string(state.get("dagster_run_id"))
+    ):
+        raise SystemExit(41)
+    if not (
+        state.get("terminal_status") == "done"
+        and state.get("dagster_run_status") == "SUCCESS"
+        and state.get("sensor_name") == "feature_update_request_queue_sensor"
+    ):
+        raise SystemExit(42)
 else:
     raise SystemExit(21)
 PY
@@ -1295,6 +1413,7 @@ remote_state_is_exact_restored() {
     "$SCHEDULE_STATE_FILE" \
     "$TARGET_STATE_FILE" \
     "$POI_STATE_FILE" \
+    "$REQUEST_STATE_FILE" \
     "$E2E_STORAGE_STATE" <<'NODE'
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
@@ -1305,6 +1424,7 @@ const [
   scheduleStatePath,
   targetStatePath,
   poiStatePath,
+  requestStatePath,
   storageStatePath,
 ] =
   process.argv.slice(2);
@@ -1382,6 +1502,7 @@ async function verifyScheduleAndTargets(
   scheduleState,
   targetState,
   poiState,
+  requestState,
   storageStatePath,
   expectedHash,
 ) {
@@ -1597,6 +1718,51 @@ async function verifyScheduleAndTargets(
       ),
       true,
     );
+    // 기준 5: 소유 request를 API에서 다시 읽어 `done`·같은 Dagster run·같은 generation이고
+    // krairport dataset에 남은 활성 실행이 없는지 본다(읽기 전용).
+    const requestProbe = await page.evaluate(
+      async ({ operationKey, requestId }) => {
+        const read = async (path) => {
+          const response = await fetch(`/api/proxy${path}`, {
+            cache: "no-store",
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(60_000),
+          });
+          return { body: await response.json(), status: response.status };
+        };
+        const detail = await read(
+          `/v1/ops/pipeline/executions/update_request/${encodeURIComponent(requestId)}`,
+        );
+        const grid = await read("/v1/ops/datasets");
+        const rows =
+          grid.status === 200
+            ? (grid.body?.data?.items ?? []).filter(
+                (row) => row.operation_key === operationKey,
+              )
+            : [];
+        return {
+          activeCount: rows.filter((row) => row.active_execution !== null).length,
+          detailStatus: detail.status,
+          execution: detail.body?.data?.execution ?? null,
+          gridStatus: grid.status,
+          rowCount: rows.length,
+          updateRequest: detail.body?.data?.update_request ?? null,
+        };
+      },
+      {
+        operationKey: requestState.operation_key,
+        requestId: requestState.request_id,
+      },
+    );
+    assert.equal(requestProbe.detailStatus, 200);
+    assert.equal(requestProbe.execution?.status, "done");
+    assert.equal(requestProbe.execution?.dagster_run_id, requestState.dagster_run_id);
+    assert.equal(requestProbe.updateRequest?.request_id, requestState.request_id);
+    assert.equal(requestProbe.updateRequest?.generation, requestState.generation);
+    assert.equal(requestProbe.gridStatus, 200);
+    assert.equal(requestProbe.rowCount, 1);
+    assert.equal(requestProbe.activeCount, 0);
     await context.close();
   } finally {
     await browser.close();
@@ -1610,15 +1776,17 @@ async function main() {
   }
   const graphqlUrl = canonicalDagsterGraphql(process.env.E2E_DAGSTER_URL);
   assert.equal(sha256(graphqlUrl.href), expectedHash);
-  const [scheduleState, targetState, poiState] = await Promise.all([
+  const [scheduleState, targetState, poiState, requestState] = await Promise.all([
     readJson(scheduleStatePath),
     readJson(targetStatePath),
     readJson(poiStatePath),
+    readJson(requestStatePath),
   ]);
   await verifyScheduleAndTargets(
     scheduleState,
     targetState,
     poiState,
+    requestState,
     storageStatePath,
     expectedHash,
   );
@@ -1641,6 +1809,8 @@ state_is_exact_restored targets "$TARGET_STATE_FILE" ||
   die "C7 target exact restoration evidence is missing"
 state_is_exact_restored poi "$POI_STATE_FILE" ||
   die "POI causal write exact restoration evidence is missing"
+state_is_exact_restored requests "$REQUEST_STATE_FILE" ||
+  die "queue sensor worker run evidence is missing"
 remote_state_is_exact_restored ||
   die "final remote exact restoration evidence is missing"
 ORCHESTRATOR_VERIFIED=1

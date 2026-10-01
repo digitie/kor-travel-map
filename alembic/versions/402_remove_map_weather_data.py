@@ -61,9 +61,8 @@ notice(= provider ``python-kma-api``가 내는 notice, 즉 기상특보)도 함�
 
 **남기는 것**: ``ops.current_summary_runs``(price 공유), kind/capabilities CHECK의
 ``weather``(정의), ``source_links`` role ``weather_context``(정의 값), 그리고
-``provider_sync.notice_lineage_key``의 KMA 분기. 그 분기는 KMA head가 0행이고 dataset이
-비활성이라(쓰기 불가) 다시 평가될 수 없다 — 지우려면 모든 notice head 쓰기가 지나가는
-함수를 다시 써야 하는데 얻는 정확성이 없다.
+``provider_sync.notice_lineage_key``의 KMA 분기(이 revision 뒤에는 평가될 행이 없다 —
+함수 재작성은 애플리케이션 재계산 식과 함께 403이 한다).
 
 **남는 이력**: append-only 증거 표의 soft reference(``feature_state_transitions``·
 ``curation_link_decisions``·``import_job_events``·theme candidate observation 등)는
@@ -84,6 +83,9 @@ Feature 0행이라 전부 0이다 — 그래도 조건을 행 수에 걸지 않�
   지우면 남는 Feature의 lineage가 끊긴다.
 - 대상 dataset의 **아직 켜진** operation을 member로 둔 queued/running job — dataset을
   끄면 그 job은 영영 종결로 갈 수 없다(``assert_import_job_members_active``).
+  같은 트랜잭션에서 401이 먼저 끈 KMA 적재 operation은 여기서 보이지 않는다 — 그 job은
+  401이 끄기 전에 막는다. 402 이전부터 꺼져 있던 operation의 job은 이미 얼어 있어서
+  dataset을 끄는 것이 상태를 바꾸지 않는다.
 
 트랜잭션. env.py가 전 revision을 한 트랜잭션으로 돈다. 전부 되거나 전부 안 된다 —
 중간 상태(표는 지웠는데 dataset은 켜진)가 남지 않는다. ``DROP INDEX``가

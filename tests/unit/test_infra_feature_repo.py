@@ -1469,3 +1469,42 @@ def test_legacy_retire_reason_codes_exist_in_the_0095_backfill() -> None:
     ).read_text(encoding="utf-8")
     for reason_code in feature_repo._LEGACY_PROVIDER_RETIRE_REASON_CODES:
         assert f"'{reason_code}'" in backfill_sql, reason_code
+
+
+#: 계보 규칙 분기의 술어(provider, dataset_key, source_entity_type). DB 함수와 애플리케이션
+#: 재계산 식이 같은 alias(``dataset``/``entity``)로 쓰므로 같은 정규식으로 읽힌다.
+_LINEAGE_BRANCH: Final[str] = (
+    r"WHEN dataset\.provider = '([^']+)'"
+    r"\s+AND dataset\.dataset_key = '([^']+)'"
+    r"\s+AND entity\.source_entity_type = '([^']+)'"
+)
+
+
+def test_app_lineage_recompute_has_the_same_branches_as_the_db_function() -> None:
+    """재계산 식의 분기 집합 == DB 정본 ``provider_sync.notice_lineage_key``의 분기 집합.
+
+    통합 대조(``test_db_lineage_function_matches_frozen_replay_expression``)는 **적재할 수
+    있는 행**만 잰다. 비활성 dataset의 분기(예: 403 전의 KMA 기상특보)는 행을 심을 수 없어
+    한쪽에만 남아도 그 대조가 초록이다. 그래서 분기 술어를 두 정본에서 직접 읽어 맞춘다.
+    DB 쪽 정본은 ``alembic/head-schema.sql``이다.
+    """
+    import re
+
+    head_schema = (Path(__file__).resolve().parents[2] / "alembic" / "head-schema.sql").read_text(
+        encoding="utf-8"
+    )
+    start = head_schema.index("CREATE FUNCTION provider_sync.notice_lineage_key(")
+    body = head_schema[start : head_schema.index("$$;", start)]
+    db_branches = set(re.findall(_LINEAGE_BRANCH, body))
+    app_branches = set(
+        re.findall(
+            _LINEAGE_BRANCH,
+            feature_repo._notice_lineage_sql(
+                "record", entity_alias="entity", dataset_alias="dataset"
+            ),
+        )
+    )
+
+    # 하한은 본 것에 건다 — 분기를 하나도 못 읽으면 정규식이 낡은 것이다.
+    assert db_branches, "head-schema의 notice_lineage_key에서 분기를 하나도 읽지 못했다"
+    assert app_branches == db_branches

@@ -7,6 +7,11 @@
 
 ### Map은 날씨 feature와 기상특보 notice 기능을 지운다 — ADR-105 (2026-10-01)
 
+- **CHANGED (적대 리뷰 반영, 2026-10-02)**: run-completion gate 기본 probe가 no-op job `map_run_heartbeat`다(DB·upstream
+  없음). C7에 `ops-c7-update-request-write` — krairport 정적 데이터 dataset의 exact `provider_dataset` 요청이 queue sensor →
+  `feature_update_request_worker` → `done`/`SUCCESS`까지 가는 왕복(upstream 0, 공항 place 15건 멱등 upsert). 401은 KMA 적재
+  operation에 queued/running job이 있으면 끄기 전에 중단한다. migration `403_drop_kma_notice_lineage`가
+  `provider_sync.notice_lineage_key`의 KMA 분기를 지운다. `python-kma-api`·`python-airkorea-api` 의존 핀 제거.
 - **REMOVED (Dagster)**: weather asset/job/schedule 넷(AirKorea 대기질, KREX 휴게소 기상, 산림청 산악기상,
   산림청 산불위험예보)과 resource·fetcher·큐 runner spec·handler binding, 매분 `current_weather_summary_refresh`
   job/schedule. run-completion gate의 기본 probe job은 `cache_target_snapshot_gc`다.

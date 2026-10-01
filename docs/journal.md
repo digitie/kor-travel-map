@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
+
+- **MED-1 PinVi가 다음 짝을 막는다.** Manager M05 harness가 OpenAPI hash 불일치를 거부하고 PinVi 계약 테스트가
+  `BeachPublicView.latest_weather`를 단언한다. PinVi 브랜치 `chore/map-drop-weather`에서 재vendor한다. 순서: PinVi PR →
+  Map PR → pair 회전.
+- **MED-2 probe.** `cache_target_snapshot_gc`는 prod에서 돈 적이 없어(schedule STOPPED) 첫 gate가 GC 적체(최대 2,000
+  batch)를 health check 안에서 지울 수 있었다. 전용 no-op job `map_run_heartbeat`를 두고 lint를 성질(resource ⊆
+  {io_manager}, kortravelmap import 없음, run config 불필요, operation key 없음, in-process 성공)에 결박했다. 옛 기본값으로
+  되돌리면 4개가 빨갛다.
+- **MED-3 C7 왕복 복원.** KMA write spec이 덮던 "요청 → queue sensor → worker → 종결"을 krairport(번들 정적 데이터,
+  upstream 0)로 되살렸다. 실제 prod write(공항 place 15건 멱등)다. 공유 plane Basic Auth 파일을 다시 읽는다.
+- **LOW.** 401에 in-flight preflight(같은 upgrade에서 402의 `is_enabled` 필터를 빠져나가던 구멍; 막지 않으면 통과하는
+  통합 케이스 추가), 403으로 lineage 함수의 KMA 분기 제거(앱 식과 DB 함수의 분기 집합 일치 unit 테스트 추가), 핀 제거,
+  `.env.example` 키·stale docstring·삭제된 schedule mock 정리. frozen H35 replay의 KMA 텍스트는 해시 고정이라 남겼다.
+  매분 schedule의 RUNNING 상태 행은 회전 전 stop(runbook)으로 처리한다 — Map에 RUNNING schedule이 0이어도 gate는
+  SCHEDULER daemon heartbeat만 보므로 바닥이 빨갛게 고정되지 않는다.
+
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 같은 브랜치 `feat/remove-map-kma-dagster`
 
 ADR-104(KMA Dagster 경로 제거) 작업 중 소유자 결정이 넓어졌다: weather kind 기능 전부와 날씨 출처 notice(KMA 특보)만

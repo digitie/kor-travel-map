@@ -29,8 +29,27 @@
 > 러너 env에서 `E2E_DAGSTER_JOB`·`E2E_DAGSTER_RUN`·`E2E_KMA_SCOPE_WRITE`·
 > `E2E_QUEUE_SENSOR_BARRIER`·`E2E_DAGSTER_BASIC_AUTH_FILE`이 빠졌다. runtime journal은
 > `{schedule,targets,poi}.json`이다 — `targets.json`은 read-auth의 dataset_projection
-> invalidation 시나리오가 만드는 POI target 하나의 소유·복원 journal이다. 아래 §1 5번,
-> §2.4, §4의 KMA·sensor 서술은 이 날짜 이전 기록이다.
+> invalidation 시나리오가 만드는 POI target 하나의 소유·복원 journal이다. 아래 §2.4, §4의
+> KMA·sensor 서술은 이 날짜 이전 기록이다.
+
+> **2026-10-02 — 기준 5 복원(`ops-c7-update-request-write`).** KMA와 함께 사라졌던 "exact-scope
+> request → queue sensor → worker run" 경로를 upstream 호출이 0인 dataset 하나로 되살렸다:
+> `python-krairport-api` / `krairport_airports`, operation `feature_place_krairport_airports_job`,
+> scope `provider_dataset` × `dataset_wide`(그 dataset이 선언한 유일한 scope라 membership이 정확히
+> 한 행이다 — migration 없음). 흐름은 §1 5번, journal은 `requests.json`, 필요한 env는 §3.1이다.
+>
+> - **실제 prod 쓰기다.** worker가 krairport 번들 공항(2026-10 기준 활성 15곳)을 place feature로
+>   적재한다. 같은 번들이면 같은 feature로 수렴하는 idempotent upsert(authoritative snapshot)이고,
+>   주소는 kor-travel-geo reverse geocode(내부 서비스)로 채운다. data.go.kr 등 upstream 쿼터는 쓰지
+>   않는다. prod `feature.features`가 비어 있으면 첫 실행은 공항 feature를 **새로 만든다**.
+> - Dagster에는 **읽기 전용** GraphQL만 보낸다(worker job 정의, queue sensor 상태, run identity·
+>   status). sensor를 멈추거나 켜지 않는다 — run이 sensor가 띄운 것이라는 사실은 run의
+>   `dagster/sensor_name` tag가 증명한다. sensor가 RUNNING이 아니면 request를 만들지 않고 멈춘다.
+> - 같은 membership에 다른 활성 request가 있으면 API가 `409 ACTIVE_SCOPE_CONFLICT`로 거절한다.
+>   spec은 먼저 그 dataset의 활성 실행 0을 확인하고, 그래도 409면 남의 실행을 건드리지 않고 멈춘다
+>   (journal `create_rejected`). 활성 실행이 끝난 뒤 다시 돌린다.
+> - 공유 plane gateway의 Basic Auth 파일(`E2E_DAGSTER_BASIC_AUTH_FILE`)을 다시 받는다 —
+>   `scripts/n150/README.md`.
 
 이 문서는 `T-ADM-C7`의 n150 파괴적 live UI E2E를 실행하는 유일한 운영 순서를
 정의한다. 실제 host, URL, 계정, 비밀번호, token, hash는 gitignore된
@@ -54,11 +73,16 @@ C7은 다음 조건을 모두 만족해야 완료다.
    `mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
    기반의 C7 executor image에서 실행한다. executor label의 Git commit도 실행 checkout과
    같아야 한다.
-5. (2026-10-01 퇴역) ~~실제 Dagster repository에 `feature_update_request_worker` job이 정확히
-   하나 있고, 각 terminal request의 `runOrError.jobName`과 request/generation/scope/sensor tag가
-   해당 실행과 일치한다.~~ — C7은 더 이상 feature update request를 만들지 않는다.
+5. (2026-10-02 복원, krairport) Map code location에 `feature_update_request_worker` job이 정확히
+   하나 있고 `feature_update_request_queue_sensor`가 RUNNING이다. spec이 만든 request는 생성
+   응답에서 `queued`·Dagster run 없음이고, queue sensor가 집은 뒤 받은 run은 `jobName`이 worker,
+   `dagster/code_location`이 Map, `dagster/sensor_name`이 queue sensor, request id·generation·scope
+   type tag가 그 request와 같다. request는 API에서 `done`, run은 Dagster에서 `SUCCESS`이고, 대상
+   dataset에 남은 활성 실행이 없으며 최신 실행이 그 request다. 이 증거를 `requests.json`이
+   `restored`로 남기고 러너가 키 집합까지 검증한 뒤 UI session으로 request를 다시 읽는다.
 6. schedule·C7 target(`targets.json`)·POI 상태가 원래 값으로 정확히 복구되고, redacted 결과와
-   복구 증거가 root-owned evidence 디렉터리에 보존된다.
+   복구 증거가 root-owned evidence 디렉터리에 보존된다. 기준 5의 쓰기는 되돌릴 대상이 아니다
+   (idempotent upsert) — "복구"는 소유 request가 terminal이라는 뜻이다.
 
 단순 HTTP 200, Playwright pass 수, container `running`만으로는 완료 처리하지 않는다.
 
@@ -270,6 +294,23 @@ runner는 아래 순서를 지킨다.
 6. 원격 상태를 다시 읽어 exact restoration을 검증하고 evidence를 fsync한 뒤에만
    journal과 `BLOCKED.json`을 제거한다.
 
+### 3.1 C7 env 키 (`/root/.d2-live.env`)
+
+러너 env의 정본은 `scripts/run-c7-prod-live-e2e.sh`의 `validate_environment`다. 그중 손으로 두는
+키(repin이 쓰지 않는다)와 기준 5가 새로 요구하는 키:
+
+| 키 | 값 | 비고 |
+|---|---|---|
+| `E2E_C7_SCHEDULE` | `feature_place_krairport_airports_monthly_schedule` | schedule-write allowlist |
+| `E2E_C7_UPDATE_REQUEST_WRITE` | `1` | **2026-10-02 신규.** 기준 5의 실제 prod 쓰기 opt-in |
+| `E2E_C7_UPDATE_REQUEST_OPERATION` | `feature_place_krairport_airports_job` | **2026-10-02 신규.** 러너 allowlist와 정확히 같아야 한다 |
+| `E2E_DAGSTER_URL` · `E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256` | 공개 GraphQL URL과 그 sha256 | `scripts/n150/README.md` |
+| `E2E_DAGSTER_BASIC_AUTH_FILE` | `/root/.d2-dagster-basic-auth` | **2026-10-02 다시 받음.** 공유 plane gateway일 때만, root `0600` `user:password` 한 줄 |
+| `E2E_LIVE_ALLOW_PROD` · `E2E_ADMIN_WRITE` · `E2E_C7_READ_AUTH_WRITE` · `E2E_DAGSTER_WRITE` | `1` | 기존 opt-in |
+
+`E2E_C7_REQUEST_STATE_FILE`은 러너가 runtime 디렉터리 안 `journals/requests.json`으로 정해
+executor에 넘긴다 — env 파일에 두지 않는다.
+
 ## 4. `BLOCKED.json` 복구
 
 `BLOCKED.json`이 있으면 runner를 재실행하거나 파일을 바로 지우지 않는다.
@@ -292,7 +333,7 @@ sudo python3 scripts/stop-c7-prod-live-container.py
 `runtime.*`·`.state.*`, evidence 존재 여부만 보고한다. 다음 순서로 수동 복구한다.
 
 1. mutation window를 다시 독점하고 API/Dagster writer를 fence한다.
-2. `runtime.*/journals/{schedule,targets,poi}.json`을 root만 읽을 수 있는 recovery
+2. `runtime.*/journals/{schedule,targets,poi,requests}.json`을 root만 읽을 수 있는 recovery
    evidence로 복제하고 SHA-256을 기록한다. 2026-10-01 이전 runner가 남긴
    `{sensor,kma}.json`과 root 직하 journal도 있으면 함께 보존한다(감사기는 계속 센다).
 3. schedule은 journal의 최초 state와 admin schedule API를 비교해 복구한다. 옛 `sensor.json`이
@@ -301,6 +342,11 @@ sudo python3 scripts/stop-c7-prod-live-container.py
 4. C7 target(`targets.json`)과 POI target은 journal의 exact 자연키/UUID/ETag/body를 사용한다.
    옛 `kma.json`의 request는 KMA operation이 거절되므로 새로 실행될 수 없지만, 비terminal로
    남았으면 admin 파이프라인 화면에서 취소한다. `412`, UUID drift, 응답 유실은 자동 삭제하지 않는다.
+   `requests.json`(기준 5)은 되돌릴 쓰기가 없다 — `request_id`가 있으면 그 request가 terminal인지
+   파이프라인 화면에서 확인하고, queued로 남았으면 취소한다(spec의 실패 정리가 이미 시도한다).
+   `request_id`가 없고 phase가 `create_intent`·`create_response_lost`면 같은 `idempotency_key`의
+   request가 생겼을 수 있으니 krairport dataset의 최신 실행 reason에 journal `run_id`가 있는지 본다.
+   `create_rejected`는 남의 활성 request 때문에 아무것도 만들지 않은 것이다.
 5. 공개 UI session으로 schedule/target/POI의 최종 read-only equality와 owned scope 0건을
    다시 검증한다.
 6. 검증 결과를 evidence에 원자 기록하고 fsync한다. 그 뒤에만 operator가 journal과

@@ -20,7 +20,9 @@ import type { components } from "../../src/api/types";
 // 2026-10-01: Map은 weather를 더 적재하지 않는다(ADR-104/105). 이 helper가 들고 있던
 // KMA exact-scope 갱신 요청(`external_system:c7-e2e` × `kma_ultra_short_nowcast`)의
 // 제출·소유·취소·Dagster run 결박은 그 spec 넷과 함께 지웠다. journal에 남은 것은
-// target 소유권뿐이다 — 이 helper로는 feature update request를 만들지 않는다.
+// target 소유권뿐이다 — 이 helper로는 feature update request를 만들지 않는다. queue sensor →
+// worker run 기준(옛 기준 5)은 upstream 0인 krairport dataset으로
+// `ops-c7-update-request-write.live.spec.ts`가 자기 journal(`requests.json`)과 함께 맡는다.
 
 export type BrowserFetchResult<T> = {
   body: T | null;
