@@ -466,7 +466,8 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
         if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
         and "_add_output_metadata" in _called_names(node)
     ]
-    assert len(scanned) >= 10, (
+    # 2026-10-01 10 → 9: ``kma_weather.py``의 초크포인트 함수가 ADR-104로 사라졌다.
+    assert len(scanned) >= 9, (
         f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
     )
 

@@ -163,6 +163,16 @@ async def test_latest_dataset_execution_collapses_linked_request_job_root(
     dataset_id = await _provider_dataset_id(
         migrated_session, provider=_KMA_PROVIDER, dataset_key=_KMA_DATASET
     )
+    # scope가 둘인 시드 dataset은 KMA 격자뿐이다. 401(ADR-104)이 KMA refresh를 껐으므로
+    # 이 테스트의 transaction 안에서만 다시 켠다 — 검증 대상은 KMA가 아니라 projection이다.
+    await migrated_session.execute(
+        text(
+            "UPDATE provider_sync.provider_dataset_operations SET is_enabled = true "
+            "WHERE provider_dataset_id = :dataset_id AND operation_key = :operation_key "
+            "AND operation_kind = 'refresh'"
+        ),
+        {"dataset_id": dataset_id, "operation_key": _KMA_OPERATION},
+    )
     request = await enqueue_feature_update_request(
         migrated_session,
         scope={

@@ -40,6 +40,27 @@ _RESET_ROLE: Final = "reset role"
 _SET_ROLE: Final = "set role "
 
 
+#: 덤프를 통째로 적용하는 baseline root. 이 검사들이 보는 "role을 바꿔 가며 DDL을 내는
+#: 단계"가 없다.
+_BASELINE_ROOT_FILE = "400_schema_baseline.py"
+
+
+def _children_whose_source_has(token: str) -> list[str]:
+    """baseline 밖 migration 중 **소스 텍스트에** ``token``이 있는 것.
+
+    하한을 "본 것"에 건다(2026-10-01). 종전 하한(≥5 롤 전환, ≥100 문장 등)은 300~313
+    체인을 보고 박은 숫자라, 스쿼시 뒤 첫 child migration(401, 데이터만 바꾼다)에서
+    대상이 없는데도 빨갰다. 이제 하한은 "텍스트에 보이는 것을 추출도 전부 본다"이다 —
+    추출이 깨지면 여전히 빨갛고, 대상이 없으면 그 사실을 사유로 건너뛴다.
+    """
+    return [
+        path.name
+        for path in sorted(_VERSIONS.glob("[0-9]*.py"))
+        if path.name != _BASELINE_ROOT_FILE
+        and token.upper() in path.read_text(encoding="utf-8").upper()
+    ]
+
+
 def _migration_paths() -> list[pathlib.Path]:
     return sorted(_VERSIONS.glob("[0-9]*.py"))
 
@@ -211,14 +232,15 @@ def test_the_scan_actually_sees_role_switching_migrations() -> None:
         for path in paths
         if _trailing_role(_statements_for(path, "upgrade")) is not None
     ]
-    if not switching and len(paths) <= 1:
+    expected = _children_whose_source_has("SET ROLE")
+    if not expected:
         pytest.skip(
-            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
-            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
-            "추가되면 이 검사는 자동으로 다시 활성화된다."
+            "baseline 밖 migration 어디에도 `SET ROLE`이 없다 — 롤을 바꿔 가며 DDL을 내는 "
+            "단계가 없다. 생기면 이 검사는 자동으로 다시 활성화된다."
         )
-    assert len(switching) >= 5, (
-        f"`SET ROLE`로 끝나는 마이그레이션을 {len(switching)}개만 찾았다 — "
+    missing = sorted(set(expected) - set(switching))
+    assert not missing, (
+        f"소스에 `SET ROLE`이 있는데 추출이 롤 전환을 못 본 마이그레이션: {missing} — "
         "추출이 낡았다(상수 형태가 바뀌었을 수 있다)."
     )
 
@@ -245,11 +267,10 @@ def test_sidecar_migrations_are_not_read_through_the_ast_alone() -> None:
         if len(resolved) > len(ast_only):
             improved.append(f"{path.name}: {len(ast_only)} -> {len(resolved)}")
 
-    if not improved and len(paths) <= 1:
+    if not improved and not _children_whose_source_has("_sidecar("):
         pytest.skip(
-            "active graph에 baseline root 하나뿐이다 — 그 revision은 덤프를 통째로 "
-            "적용하므로 role을 바꿔 가며 DDL을 내는 단계가 없다. migration이 "
-            "추가되면 이 검사는 자동으로 다시 활성화된다."
+            "baseline 밖 migration 어디에도 사이드카가 없다 — import 해석이 AST보다 더 볼 "
+            "문장이 없다. 생기면 이 검사는 자동으로 다시 활성화된다."
         )
     assert improved, (
         "사이드카를 쓰는 마이그레이션이 없거나, import 해석이 AST보다 더 보지 "

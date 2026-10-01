@@ -85,6 +85,10 @@ _PROXY_SECRET = "c3e-c-rest-proof-secret"
 
 #: 대상 membership. ``kma_short_forecast``는 한 operation이 두 sync_scope를 갖는
 #: 실측 시드라 scope decoy를 **지어내지 않고** 표현할 수 있다.
+#:
+#: 401(ADR-104)이 KMA refresh operation을 껐으므로 seed가 target·decoy operation을
+#: 다시 켜고(commit), 정리가 head 상태(disabled)로 되돌린다. 검증 대상은 KMA 적재가
+#: 아니라 두 REST 표면의 canonical projection이다.
 _TARGET_PROVIDER = "python-kma-api"
 _TARGET_DATASET_KEY = "kma_short_forecast"
 _TARGET_OPERATION = "feature_weather_kma_short_forecast_job"
@@ -101,6 +105,30 @@ _POLICY_DATASET_KEY = "khoa_beaches"
 
 _SCHEDULE_NAME = "feature_weather_kma_short_forecast_hourly_schedule"
 _SCHEDULE_TICK = 2_000_000_000.0
+
+_SET_PROBE_OPERATIONS_ENABLED_SQL = """
+UPDATE provider_sync.provider_dataset_operations AS operation
+   SET is_enabled = CAST(:enabled AS boolean)
+  FROM provider_sync.provider_datasets AS dataset
+ WHERE dataset.provider_dataset_id = operation.provider_dataset_id
+   AND dataset.provider = :provider
+   AND operation.operation_key IN (:target_operation, :decoy_operation)
+   AND operation.operation_kind = 'refresh'
+"""
+
+
+async def _set_probe_operations_enabled(session: AsyncSession, *, enabled: bool) -> int:
+    result = await session.execute(
+        text(_SET_PROBE_OPERATIONS_ENABLED_SQL),
+        {
+            "enabled": enabled,
+            "provider": _TARGET_PROVIDER,
+            "target_operation": _TARGET_OPERATION,
+            "decoy_operation": _DECOY_OPERATION,
+        },
+    )
+    return int(result.rowcount)
+
 
 _CLEANUP_SQL = """
 TRUNCATE
@@ -429,6 +457,7 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
         session.begin(),
     ):
         dataset_keys = await _dataset_identity(session)
+        assert await _set_probe_operations_enabled(session, enabled=True) == 2
         target = await membership_for_dataset(
             session,
             provider=_TARGET_PROVIDER,
@@ -771,6 +800,8 @@ async def _cleanup_committed_operations(engine: AsyncEngine) -> None:
                 "WHERE operation_key LIKE '%.decoy@_%' ESCAPE '@'"
             )
         )
+        # seed가 켠 KMA operation을 head 상태(401: disabled)로 되돌린다.
+        await _set_probe_operations_enabled(session, enabled=False)
         await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
 

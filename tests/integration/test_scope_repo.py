@@ -468,7 +468,26 @@ async def test_count_provider_dataset_surfaces_requested_pair_at_zero_features(
     포함되어야 한다(preview == execute; UI preview 결과가 execute 대상 membership을
     그대로 노출). ``dataset_wide``가 아닌 ``target_grids`` scope를 골라 요청한
     ``sync_scope``가 그대로 반향되는지도 함께 고정한다.
+
+    ``target_grids`` scope를 가진 시드 operation은 KMA 격자뿐이고 401(ADR-104)이
+    그것을 껐다. 검증 대상은 KMA가 아니라 preview 반향이므로 이 transaction 안에서만
+    다시 켠다.
     """
+    enabled = await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_dataset_operations AS operation
+            SET is_enabled = true
+            FROM provider_sync.provider_datasets AS dataset
+            WHERE dataset.provider_dataset_id = operation.provider_dataset_id
+              AND dataset.provider = 'python-kma-api'
+              AND dataset.dataset_key = 'kma_ultra_short_nowcast'
+              AND operation.operation_kind = 'refresh'
+            """
+        )
+    )
+    assert enabled.rowcount == 1
+    await migrated_session.flush()
     provider_dataset_id, sync_scope, operation_key = await _refresh_membership(
         migrated_session,
         provider="python-kma-api",

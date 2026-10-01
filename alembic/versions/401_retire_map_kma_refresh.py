@@ -33,6 +33,9 @@ Revises: 400
 0행을 바꾸고 조용히 통과하면 카탈로그가 다시 KMA를 실행 가능하다고 말한다. 이미 꺼져
 있는 DB(재적용)에서는 UPDATE가 0행이고 사후 조건은 그대로 성립한다.
 
+부수 변경 하나: ``ops.application_schema_operation_receipts``의 head 값 열거 CHECK에 ``400``과
+이 revision을 더한다(graph의 모든 revision을 받아야 한다는 lint 계약). 표는 비어 있다.
+
 forward-only. downgrade는 두지 않는다(ADR-021) — 되살리는 것은 소유자 결정을 뒤집는
 일이고 그때는 새 revision과 새 ADR로 한다.
 """
@@ -45,6 +48,8 @@ from typing import Final
 from sqlalchemy import text
 
 from alembic import op
+
+# ruff: noqa: E501
 
 revision: str = "401_retire_map_kma_refresh"
 down_revision: str | Sequence[str] | None = "400"
@@ -79,10 +84,29 @@ SELECT operation.operation_key
 """
 
 
+#: ``ops.application_schema_operation_receipts.destination_head``의 값 열거 CHECK는 graph의
+#: **모든** revision을 받아야 한다(``tests/lint/test_receipt_head_check_covers_the_graph_head.py``).
+#: 400 스쿼시 이전 값(300~313)은 그대로 둔다 — 표에 남은 옛 행이 있으면 ``ADD CONSTRAINT``가
+#: 실패하기 때문이다(2026-10-01 prod는 0행이지만 조건을 행 수에 걸지 않는다).
+_RECEIPT_HEAD_CHECK_SQL: Final[str] = """
+ALTER TABLE ops.application_schema_operation_receipts
+    DROP CONSTRAINT ck_application_schema_operation_receipts_head,
+    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh'))
+"""
+
+#: 실행 순서대로의 upgrade 문장. 이 저장소 migration의 관례다 — lint 게이트가 이 tuple을
+#: import해 실제로 실행되는 DDL을 읽는다.
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _DISABLE_KMA_LOAD_OPERATIONS_SQL,
+    _RECEIPT_HEAD_CHECK_SQL,
+)
+
+
 def upgrade() -> None:
     """KMA 적재 operation을 끄고, 남은 것이 없는지 잰다."""
     bind = op.get_bind()
-    bind.execute(text(_DISABLE_KMA_LOAD_OPERATIONS_SQL))
+    for statement in _UPGRADE_STATEMENTS:
+        bind.execute(text(statement))
     remaining = list(bind.execute(text(_ENABLED_KMA_LOAD_OPERATIONS_SQL)).scalars())
     if remaining:
         raise RuntimeError(

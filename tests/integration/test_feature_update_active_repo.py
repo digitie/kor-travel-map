@@ -48,6 +48,20 @@ _ROOT = Path(__file__).resolve().parents[2]
 _PROVIDER = "python-kma-api"
 _DATASET = "kma_short_forecast"
 
+#: scope가 둘(``dataset_wide``·``target_grids``)인 시드 dataset은 KMA 격자뿐이다.
+#: 401(ADR-104)이 KMA refresh operation을 껐으므로, 이 파일은 active-scope 기제를
+#: 검증할 때만 그 operation을 자기 transaction(또는 격리 DB) 안에서 다시 켠다.
+#: 검증 대상은 KMA 적재가 아니라 active scope·idempotency 기제다.
+_ENABLE_GRID_OPERATION_SQL = """
+UPDATE provider_sync.provider_dataset_operations AS operation
+   SET is_enabled = true
+  FROM provider_sync.provider_datasets AS dataset
+ WHERE dataset.provider_dataset_id = operation.provider_dataset_id
+   AND dataset.provider = :provider
+   AND dataset.dataset_key = :dataset_key
+   AND operation.operation_kind = 'refresh'
+"""
+
 #: catalog에서 (dataset, sync_scope, operation) triple 하나를 고르는 SQL.
 #:
 #: T-VN-33 이후 provider_dataset scope의 identity는 자연키 쌍이 아니라
@@ -122,6 +136,16 @@ async def _operation_scope(
     )
 
 
+async def _enable_grid_operation(session: AsyncSession) -> None:
+    """401이 끈 KMA 격자 refresh operation을 이 session의 transaction 안에서 켠다."""
+    result = await session.execute(
+        text(_ENABLE_GRID_OPERATION_SQL),
+        {"provider": _PROVIDER, "dataset_key": _DATASET},
+    )
+    assert result.rowcount == 1
+    await session.flush()
+
+
 async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
     """활성 request가 점유하지 않은 triple을 골라 membership으로 만든다."""
     row = (await session.execute(text(_FREE_MEMBERSHIP_SQL))).one()
@@ -179,6 +203,9 @@ async def _isolated_membership(dsn: str, *, sync_scope: str) -> ImportJobDataset
     engine = make_async_engine(dsn)
     try:
         async with AsyncSession(engine) as session:
+            # 격리 DB는 테스트 끝에 통째로 drop되므로 여기서 켠 상태를 commit한다.
+            await _enable_grid_operation(session)
+            await session.commit()
             return await _operation_scope(session, sync_scope=sync_scope)
     finally:
         await engine.dispose()
@@ -199,6 +226,7 @@ async def _drop_isolated_database(pg_container: Any, dsn: str) -> None:
 async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
     migrated_session: AsyncSession,
 ) -> None:
+    await _enable_grid_operation(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     first = await enqueue_feature_update_request(
         migrated_session,
@@ -755,6 +783,7 @@ async def test_direct_writer_requires_canonical_effective_scope(
     operation_key``)이 든다. 종전 인자가 지키던 계약(정규 scope만 · 요청 scope와
     실행 scope 불일치 금지 · 자유 alias 금지)은 그대로 membership 축에서 검증한다.
     """
+    await _enable_grid_operation(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     dataset_wide = await _operation_scope(migrated_session, sync_scope="dataset_wide")
 
@@ -906,6 +935,7 @@ async def test_active_lookup_does_not_match_sibling_operation_on_same_scope(
     비교가 불일치를 내며 **정당한 요청에 409**를 준다 — Python 가드가 자기가 흉내
     내는 DB 가드보다 엄격해지는 상태다.
     """
+    await _enable_grid_operation(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     sibling_operation_key = f"{targeted.operation_key}.sibling"
     await migrated_session.execute(

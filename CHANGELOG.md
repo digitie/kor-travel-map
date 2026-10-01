@@ -5,6 +5,26 @@
 
 ## [Unreleased]
 
+### Map은 KMA를 적재하지 않는다 — ADR-104 (2026-10-01)
+
+- **REMOVED (Dagster)**: KMA(기상청) job·asset·schedule 다섯(`feature_weather_kma_{ultra_short_nowcast,
+  ultra_short_forecast,short_forecast,mid_forecast}`, `feature_notice_kma_weather_alerts`)과 그 resource
+  (`kma_weather_client_factory`·`kma_datagokr_client`·`kma_weather_alert_records`), 큐 runner spec·handler
+  binding. 수동 launch·백필·큐 요청 어느 경로로도 Map이 KMA를 부를 수 없다. `DISABLED_FEATURE_LOAD_SCHEDULES`
+  에서 KMA 이름이 빠졌다.
+- **CHANGED (DB)**: migration `401_retire_map_kma_refresh` — provider `python-kma-api`의 `refresh`·`feature_load`
+  operation을 `is_enabled = false`로 내린다. `/ops/datasets`는 KMA dataset에 갱신 capability를 내지 않고
+  `POST /ops/pipeline/requests`는 KMA membership을 받지 않는다. 행·dataset·preview는 남아 기존 KMA feature
+  읽기와 fixture preview는 그대로다. forward-only.
+- **REMOVED (settings)**: `kma_weather_extra_points`·`kma_weather_max_grids_per_run`·`kma_mid_region_features`·
+  `kma_weather_alert_lookback_days`. 남은 env(`KMA_WEATHER_*`, `KOR_TRAVEL_MAP_KMA_*`)는 무시된다.
+- **REMOVED (library)**: `AsyncKorTravelMapClient.list_poi_cache_target_coords`·
+  `list_active_poi_cache_target_external_systems`·`has_active_poi_cache_targets_for_external_system`·
+  `list_active_place_coords`와 대응 repo 함수, `providers.kma.parse_weather_extra_points`·
+  `parse_mid_region_features`·`KmaMidRegionSpec`(KMA Dagster 전용이었다).
+- **ADDED (test)**: `test_map_dagster_has_no_kma.py` — 카탈로그 정체성(provider)과 효과(KMA client import·
+  KMA data.go.kr 경로)로 재도입을 막는다. `test_head_enables_no_kma_load_operation`이 DB 축을 본다.
+
 ### 공유 Dagster plane 합류 전 차단 항목 (2026-10-01)
 
 - **CHANGED (Dagster)**: reconcile sensor의 run 조회가

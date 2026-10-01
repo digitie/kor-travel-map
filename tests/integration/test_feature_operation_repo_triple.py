@@ -2,7 +2,8 @@
 
 이 파일이 고정하는 것은 **``operation_key`` 축**이다. 같은 SQL/함수의
 ``sync_scope`` 축은 KMA 격자 dataset(한 operation이 ``dataset_wide``와
-``target_grids`` 두 member를 갖는다)이 이미 밟고 있지만, ``operation_key`` 축은
+``target_grids`` 두 member를 갖는다. 401 이후 disabled라 테스트가 transaction 안에서만
+다시 켠다)이 밟고 있지만, ``operation_key`` 축은
 형제 operation을 실제로 seed하는 fixture가 저장소에 없어 무방비였다. 0091이 scope
 PK를 pair에서 triple로 올린 명시적 목적이 그 형제 등록을 허용하는 것이므로,
 여기서는 형제를 **직접 seed해** 축을 만든 뒤 검증한다.
@@ -327,7 +328,24 @@ async def test_runtime_dataset_lookup_requires_exactly_one_membership(
 
     ``!= 1``을 ``< 1``로 되돌리면 2건 중 첫 행을 임의로 골라 조용히 진행한다 —
     provider callback이 어느 scope의 cursor를 미는지 알 수 없게 된다.
+
+    scope가 둘인 시드 operation은 KMA 격자뿐이고 401(ADR-104)이 그것을 껐다. 검증
+    대상은 KMA가 아니라 exact lookup이므로 이 transaction 안에서만 다시 켠다.
     """
+    enabled = await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_dataset_operations
+            SET is_enabled = true
+            WHERE operation_key = :operation_key
+              AND operation_kind = 'refresh'
+            """
+        ),
+        {"operation_key": _KMA_OPERATION},
+    )
+    assert enabled.rowcount == 1
+    await migrated_session.flush()
+
     with pytest.raises(FeatureOperationInvariantConflict) as ambiguous:
         await resolve_feature_operation_dataset_membership(
             migrated_session,

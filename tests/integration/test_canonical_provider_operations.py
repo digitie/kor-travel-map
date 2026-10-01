@@ -49,7 +49,6 @@ from kortravelmap.dagster.feature_operation_tracking import (
     finish_tracked_feature_membership,
     run_tracked_feature_asset,
 )
-from kortravelmap.dagster.kma_weather import _exact_kma_sync_membership
 from kortravelmap.dagster.schedules import (
     FEATURE_LOAD_SCHEDULE_SPECS,
     FeatureLoadScheduleSpec,
@@ -101,11 +100,6 @@ from kortravelmap.infra.pipeline_cancellation_types import (
 )
 from kortravelmap.providers.feature_operation_registry import (
     resolve_feature_operation_handler,
-)
-from kortravelmap.providers.kma import (
-    KMA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
 )
 from kortravelmap.providers.knps import KNPS_PLACE_DATASETS
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
@@ -2765,9 +2759,8 @@ async def test_run_without_trigger_tag_is_tracked_not_silently_dropped(
     ``ensure_authoritative_feature_operation_guard``는 그 guard에서 아무것도 쓰지 않고
     그대로 돌아온다. 그러면 **추적 레코드가 하나도 생기지 않는다** — root도 member도.
     (run이 통째로 조용히 지나가는 것은 아니다. sync state를 쓰는 asset은
-    ``assets._exact_sync_membership``과 ``kma_weather._exact_kma_sync_membership``에서
-    ``operation_key_missing``으로 죽는다. 하지만 그 raise는 추적 행을 만들어 주지
-    않으므로, 어느 쪽이든 이 run의 추적은 사라진다.)
+    ``assets._exact_sync_membership``에서 ``operation_key_missing``으로 죽는다. 하지만
+    그 raise는 추적 행을 만들어 주지 않으므로, 어느 쪽이든 이 run의 추적은 사라진다.)
 
     그래서 여기서는 guard 하나를 검증하는 게 아니라 resource init 경로를 그대로
     태우고 **DB에 행이 생겼는지**를 본다. fallback을 ``return None``으로 바꾸면
@@ -3219,102 +3212,6 @@ async def test_declaration_absent_from_the_catalog_is_rejected_at_resource_init(
             {"run_id": run_id},
         )
     assert root_id is None, "거부해야 할 run이 추적 root를 만들었다"
-
-
-@pytest.mark.parametrize(
-    ("job_name", "dataset_key"),
-    [
-        (
-            "feature_weather_kma_ultra_short_nowcast_job",
-            KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-        ),
-        (
-            "feature_weather_kma_ultra_short_forecast_job",
-            KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-        ),
-        ("feature_weather_kma_short_forecast_job", KMA_SHORT_FORECAST_DATASET_KEY),
-    ],
-)
-async def test_multi_scope_dataset_run_freezes_only_the_executable_scope(
-    job_name: str,
-    dataset_key: str,
-    migrated_engine: AsyncEngine,
-) -> None:
-    """scope가 둘인 dataset의 run이 실행 가능한 scope 하나만 frozen한다(KMA 격자).
-
-    ``0089_tvn33_expand_seed``는 refreshable dataset 전부에 ``dataset_wide``를 넣고
-    격자 dataset에만 ``target_grids``를 더 넣는다. 그런데 ``dataset_wide``는
-    ``_run_kma_weather_asset``과 queue runner ``_kma_grid_sync_scope``가 둘 다
-    ``ValueError``로 거부한다 — 실행 경로가 없다. 그래서 run은 ``target_grids``만
-    선언하고, ``_exact_kma_sync_membership``의 "manifest 1건" 게이트가 그 선언 위에서
-    성립한다.
-
-    격자 3종을 **모두** 태운다. 예전에는 단기예보 job 하나만 태워서, 다른 두 schedule
-    선언이 엉뚱한 dataset을 가리켜도(예: 초단기실황 schedule이 초단기예보 dataset을
-    선언) 3단 게이트 전부가 통과했다. 그 상태로 실행하면 manifest가 남의 dataset
-    member로 frozen되고, ``_exact_kma_sync_membership``이 그 member를 그대로 써서
-    **다른 dataset의 sync cursor에 기록**한다 — dataset_key 역산 fallback이 없으므로
-    조용히 어긋난다.
-
-    그래서 기대 dataset key는 spec에서 읽지 않고 provider 상수로 못 박는다. spec에서
-    읽으면 선언이 바뀌어도 기대값이 같이 따라가 이 회귀가 아무것도 검증하지 않는다.
-    """
-    client = AsyncKorTravelMapClient(migrated_engine)
-    spec = _schedule_spec(job_name)
-    tags = _feature_load_schedule_tags(spec)
-    assert [scope.dataset_key for scope in spec.execution_scopes] == [dataset_key], (
-        "KMA schedule 선언이 자기 dataset을 가리키지 않는다"
-    )
-
-    async with AsyncSession(migrated_engine) as setup:
-        executable = await memberships_for_operation(setup, operation_key=job_name)
-        target_grids = await membership_for_dataset(
-            setup,
-            provider="python-kma-api",
-            dataset_key=dataset_key,
-            operation_key=job_name,
-            sync_scope="target_grids",
-        )
-    # 전제: 같은 dataset에 scope가 둘 이상이다(그래서 dataset만으로는 지목되지 않는다).
-    # 개수를 2로 못 박지 않는 이유: `0224_c7_external_system_scope`가 nowcast dataset에
-    # exact-target scope(`external_system:c7-e2e`)를 하나 더 선언한다. 그 선언은 이 전제를
-    # **강화**하지 약화하지 않는다 — 확인할 것은 "정본 실행 scope 둘이 모두 있고, 선언 전부가
-    # 같은 dataset을 가리킨다"이다.
-    assert len(executable) >= 2
-    assert {"dataset_wide", "target_grids"} <= {member.sync_scope for member in executable}
-    assert len({member.provider_dataset_id for member in executable}) == 1
-
-    run_id = f"run-c3e-kma-manifest-{uuid4()}"
-    guard = await _guard_from_context_async(
-        _resource_init_context(client, run_id=run_id, tags=tags)
-    )
-    assert guard.memberships == (target_grids,), (
-        "frozen manifest가 이 job의 dataset이 아니다 — 남의 dataset cursor에 기록된다"
-    )
-    await guard.ensure()
-
-    resolved = await _exact_kma_sync_membership(
-        _tracking_context(guard, retry_number=0),
-        client,
-        expected_sync_scope="target_grids",
-    )
-    assert resolved == target_grids
-
-    async with AsyncSession(migrated_engine) as check:
-        root_id = str(
-            await check.scalar(
-                text(
-                    "SELECT job_id FROM ops.import_jobs "
-                    "WHERE kind = 'provider_feature_load_run' "
-                    "AND dagster_run_id = :run_id"
-                ),
-                {"run_id": run_id},
-            )
-        )
-        members = (
-            await check.execute(text(_CHILD_MEMBERS_SQL), {"root_id": root_id})
-        ).all()
-    assert [str(row.sync_scope) for row in members] == ["target_grids"]
 
 
 async def test_reconcile_sensor_uses_the_same_manifest_as_the_run(

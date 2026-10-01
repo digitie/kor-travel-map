@@ -456,7 +456,9 @@ operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를
 
 **현재 선언된 이름.** `external_system:c7-e2e` 하나이며 migration
 `0224_c7_external_system_scope`가 KMA 초단기실황(`python-kma-api` /
-`kma_ultra_short_nowcast`)에 선언했다. 새 이름을 쓰려면 **migration으로 행을 선언**해야 하고,
+`kma_ultra_short_nowcast`)에 선언했다. **2026-10-01부터 이 행은 제출할 수 없다** — 그 dataset의
+refresh operation이 `401_retire_map_kma_refresh`로 꺼져(ADR-104) exact join이 0행이다. 행은
+이력 FK 때문에 남긴다. 그래서 지금 제출 가능한 `external_system:*` scope는 없다. 새 이름을 쓰려면 **migration으로 행을 선언**해야 하고,
 그 migration은 dataset의 enabled refresh operation이 정확히 하나임을 확인한 뒤 넣는다 —
 조용히 0행을 넣고 통과하면 소비자가 `422`로 죽고 원인이 감춰진다.
 

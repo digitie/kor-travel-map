@@ -1752,6 +1752,10 @@ operation의 `dataset_wide`는 요청 중복 실행을 막는 조작 identity이
 갈리는 KMA grid 3종만 operation effective scope(`target_grids` 또는
 `external_system:<name>`)를 provider state namespace로 그대로 사용한다.
 
+> **2026-10-01(ADR-104): KMA grid 실행 경로는 Map에서 제거됐다.** KMA 적재 operation은
+> 카탈로그에서 꺼졌고(`401_retire_map_kma_refresh`) asset·runner·`kma_weather_client_factory`는 없다.
+> 아래 두 단락은 그 경로가 있던 동안의 계약 기록이다. scope·sync state 행은 이력으로 남는다.
+
 KMA grid operation은 선택 scope의 active target과 설정 extra point를 격자로 해석하고 cap을
 적용한 결과가 0개면 typed preflight failure로 종료한다. 이때 canonical request/job의 failure는
 영속하지만 provider 호출·feature/weather 적재와 `provider_sync_state` row/cursor/성공·실패

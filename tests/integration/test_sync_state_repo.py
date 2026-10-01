@@ -35,6 +35,7 @@ _D = "mois_license_features_history"
 _O = "mois_license_incremental_update"
 
 # ``dataset_wide``/``target_grids`` 두 scope가 모두 catalog에 등록된 유일한 계열.
+# 401(ADR-104)이 이 operation을 껐으므로 쓰는 테스트가 자기 transaction 안에서만 켠다.
 _SCOPED_P = "python-kma-api"
 _SCOPED_D = "kma_short_forecast"
 _SCOPED_O = "feature_weather_kma_short_forecast_job"
@@ -111,7 +112,23 @@ async def test_distinct_sync_scope_independent(
     T-VN-33 이후 PK는 ``(provider_dataset_id, sync_scope, operation_key)``이고
     ``sync_scope``는 catalog에 등록된 값(``dataset_wide``/``target_grids``)만
     FK로 허용된다 — 임의 문자열은 더 이상 쓸 수 없다(ADR-088).
+
+    두 scope를 가진 시드 operation은 KMA 격자뿐이고 401(ADR-104)이 그것을 껐다.
+    검증 대상은 KMA가 아니라 scope별 cursor 분리이므로 이 transaction 안에서만 켠다.
     """
+    enabled = await migrated_session.execute(
+        text(
+            """
+            UPDATE provider_sync.provider_dataset_operations
+            SET is_enabled = true
+            WHERE operation_key = :operation_key
+              AND operation_kind = 'refresh'
+            """
+        ),
+        {"operation_key": _SCOPED_O},
+    )
+    assert enabled.rowcount == 1
+    await migrated_session.flush()
     await record_sync_success(
         migrated_session,
         provider=_SCOPED_P,
