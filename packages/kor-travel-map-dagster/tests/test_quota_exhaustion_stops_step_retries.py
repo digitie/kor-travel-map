@@ -405,7 +405,8 @@ def test_the_derivation_actually_found_something() -> None:
     """항진명제 방지 — 유도가 비면 아래 단언이 무엇도 재지 못한다."""
 
     assets = _feature_load_assets()
-    assert len(assets) >= 35, (
+    # 2026-10-01 35 → 30: KMA asset 다섯이 ADR-104로 사라졌다(실측 30).
+    assert len(assets) >= 30, (
         f"재시도 정책을 단 asset을 {len(assets)}개만 찾았다 — 유도가 낡았다."
     )
     assert _quota_guarded_functions(), (

@@ -138,11 +138,28 @@ def test_no_dagster_job_or_schedule_belongs_to_kma() -> None:
     for schedule in repository.schedule_defs:
         if schedule.job_name in kma_keys:
             offenders.append(f"schedule {schedule.name} → {schedule.job_name}")
+    sensor_targets = 0
     for sensor in repository.sensor_defs:
-        for target in sensor.job_names:
+        for target in _sensor_target_job_names(sensor):
+            sensor_targets += 1
             if target in kma_keys:
                 offenders.append(f"sensor {sensor.name} → {target}")
+    # 항진명제 방지: 큐 sensor는 feature update job을 겨눈다 — 대상 추출이 0이면 낡았다.
+    assert sensor_targets > 0, "sensor 대상 job을 하나도 읽지 못했다 — 추출이 낡았다"
     assert not offenders, f"Map Dagster에 KMA instigator·job이 있다: {offenders}"
+
+
+def _sensor_target_job_names(sensor: Any) -> list[str]:
+    """sensor가 run을 요청하는 job 이름. run-status sensor처럼 대상이 없으면 빈 목록."""
+    names: list[str] = []
+    for target in getattr(sensor, "targets", None) or ():
+        try:
+            name = target.job_name
+        except Exception:  # noqa: BLE001 - 대상 종류마다 표면이 다르다
+            continue
+        if isinstance(name, str):
+            names.append(name)
+    return names
 
 
 def test_no_dagster_asset_is_bound_to_kma() -> None:
