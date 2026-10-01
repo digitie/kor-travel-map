@@ -182,12 +182,12 @@ fileData/특화거리 source는 `feature.curated_source_rules`의 기본 후보�
 | python-visitkorea-api | event, place | **enrichment** (축제, ADR-042 supersede) / primary (그 외) | 일 1회 | 축제는 좌표 nullable 허용. ADR-042 (2026-05-27) 이후 datagokr 1차 + visitkorea 2차 |
 | python-mois-api | place | primary | 주 1회 (full) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — `docs/etl/mois-feature-etl.md` |
 | python-opinet-api | place + price | primary | hours (가격), 일 (상세) | PriceValue 시계열 |
-| python-krex-api | place + price + weather + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지 |
+| python-krex-api | place + price + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지. 휴게소 기상(weather)은 2026-10-01 제거(ADR-105) |
 | python-kma-api | weather | weather_context | **Map 적재 없음(ADR-104)** | 2026-10-01부터 kor-travel-weather가 소유. Map은 KMA를 부르지 않는다 — 이미 적재된 feature 읽기와 변환 계약(Protocol `KmaShortForecastItem` (PR#38) / `KmaUltraShortNowcastItem` (PR#39))만 남는다 |
 | python-krairport-api | weather, place | weather_context, enrichment | 시간 | 공항 운항·날씨 |
 | python-khoa-api | place, weather | primary, weather_context | 일 / 시간 | 해수욕장·해양 지수. C03에서 근거 source 없는 coastal notice 계획 폐기 |
-| python-airkorea-api | weather | weather_context | 시간 | PM10/PM2.5/CAI |
-| python-krforest-api | place, route, weather, notice | primary | 월 1회 / 하루 6회 | 휴양림·수목원·등산로·둘레길, 산악기상, 산불위험 V2, 산사태 발령·해제 |
+| python-airkorea-api | weather | weather_context | **Map 적재 없음(ADR-105)** | 2026-10-01 제거. 날씨·대기질은 kor-travel-weather가 소유 |
+| python-krforest-api | place, route, notice | primary | 월 1회 / 하루 6회 | 휴양림·수목원·등산로·둘레길, 산사태 발령·해제. 산악기상·산불위험(weather)은 2026-10-01 제거(ADR-105) |
 | python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/etl/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (PinVi utility) |

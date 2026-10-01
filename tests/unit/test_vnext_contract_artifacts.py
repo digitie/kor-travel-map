@@ -70,7 +70,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-09 T-VN-39/ADR-098 결정 6 — 32B 문안의 alias 원자 생성을 provider 경로로
     # 한정했다(manual·요청승인·큐레이션·core는 legacy 주소를 갖지 않는다).
     "consumer-rollout-v1.json": (
-        "ebdb1027506ab64ad166e02208dd6a4a378044fc0ca5f7d15b8aaad71c379bad"
+        "3a98bb3d6c837d6da10f97b3eccbb88ff185fdd267bf47c2b7edae386f0ca2bd"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

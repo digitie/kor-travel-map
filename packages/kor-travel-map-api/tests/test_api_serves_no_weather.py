@@ -50,7 +50,6 @@ import typing
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi.routing import APIRoute
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     FeatureKind,
@@ -130,10 +129,12 @@ def test_no_openapi_schema_carries_a_weather_value_axis() -> None:
 
 
 def test_no_route_schema_or_property_is_named_for_the_weather_kind() -> None:
-    app = create_app(ApiSettings())
-    route_paths = [route.path for route in app.routes if isinstance(route, APIRoute)]
+    # route 목록은 OpenAPI의 paths에서 읽는다. ``app.routes``는 settings profile에 따라
+    # router가 sub-app으로 mount돼 APIRoute가 거의 보이지 않는다(n150 실측: ``/metrics``
+    # 하나) — 공개 표면의 정본은 OpenAPI다.
+    spec = _openapi()
+    route_paths = list(spec.get("paths", {}))
     assert len(route_paths) > 50, "route 순회가 거의 아무것도 보지 못했다"
-    spec = app.openapi()
     schema_names = list(spec.get("components", {}).get("schemas", {}))
     property_names = {name for _, name in _walk_properties(spec, "#")}
 

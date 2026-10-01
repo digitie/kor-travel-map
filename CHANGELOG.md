@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+### Map은 날씨 feature와 기상특보 notice 기능을 지운다 — ADR-105 (2026-10-01)
+
+- **REMOVED (Dagster)**: weather asset/job/schedule 넷(AirKorea 대기질, KREX 휴게소 기상, 산림청 산악기상,
+  산림청 산불위험예보)과 resource·fetcher·큐 runner spec·handler binding, 매분 `current_weather_summary_refresh`
+  job/schedule. run-completion gate의 기본 probe job은 `cache_target_snapshot_gc`다.
+- **REMOVED (API)**: `/v1/features/weather/{batch,forecast,alerts}`, `/v1/features/{feature_id}/weather`,
+  `…/weather/snapshot`, `…/weather/forecast`, `/v1/admin/features/weather/alerts`,
+  `/v1/admin/features/{feature_id}/weather`; 응답 필드 `FeatureSummary.weather_summary`,
+  `AdminFeatureMapItem.weather_summary`, `BeachPublicView.latest_weather`; weather·KMA 특보 preview fixture.
+- **REMOVED (library)**: `infra.weather_repo`, `core.weather`, `providers.kma`, `providers.airkorea`, `providers.krex`의
+  휴게소 기상 변환, `providers.krforest_safety`의 산악기상·산불위험 변환, client의 weather 적재·summary·카드 메서드.
+  정의(`dto.weather.WeatherValue`, `WeatherDomain` 등 enum, `make_weather_value_key`, kind 값)는 남는다.
+- **REMOVED (DB, 되돌릴 수 없음)**: migration `402_remove_map_weather_data` — weather·KMA 특보 dataset의 operation을 전부
+  끄고 dataset을 비활성화, weather feature와 KMA 특보 notice 및 의존 행 삭제, `feature.feature_weather_values`·
+  `feature.current_weather_summary`·`feature.reject_weather_value_mutation()`·`idx_features_public_weather_coord_5179_gist`
+  DROP, `ops.current_summary_runs`의 weather 행 삭제와 `projection_kind`를 `price`로 좁힘. 소유자가 배포 전 백업을
+  명시적으로 면제했다.
+- **REMOVED (UI)**: weather 패널, weather kind 토글(지도 기본 kind는 `notice`), KMA·AirKorea marker 분기, weather
+  fetcher. 산사태·교통 notice 표시는 그대로다.
+- **CHANGED (C7/D2)**: C7 러너는 KMA 없이 돈다 — `ops-c7-read-auth`, `ops-c7-schedule-write`(allowlist
+  `feature_place_krairport_airports_monthly_schedule`, upstream 호출 0), POI `@c7-causal`. n150 `.d2-live.env`의
+  `E2E_C7_SCHEDULE`을 그 값으로 바꿔야 한다. D2 fixture는 price feature 하나만 심는다.
+- **ADDED (test)**: `test_map_dagster_has_no_weather.py`·`test_api_serves_no_weather.py`·
+  `map-ui-has-no-weather.test.ts`·`test_weather_removal_migration.py` — kind·provider 정체성과 효과로 재도입을 막는다.
+
 ### Map은 KMA를 적재하지 않는다 — ADR-104 (2026-10-01)
 
 - **REMOVED (Dagster)**: KMA(기상청) job·asset·schedule 다섯(`feature_weather_kma_{ultra_short_nowcast,
