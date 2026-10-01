@@ -125,20 +125,6 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_weather_airkorea_air_quality",
     ),
     _handler(
-        "feature_weather_kma_ultra_short_nowcast_job",
-        "feature_weather_kma_ultra_short_nowcast",
-    ),
-    _handler(
-        "feature_weather_kma_ultra_short_forecast_job",
-        "feature_weather_kma_ultra_short_forecast",
-    ),
-    _handler("feature_weather_kma_short_forecast_job", "feature_weather_kma_short_forecast"),
-    _handler("feature_weather_kma_mid_forecast_job", "feature_weather_kma_mid_forecast"),
-    _handler(
-        "feature_notice_kma_weather_alerts_job",
-        "feature_notice_kma_weather_alerts",
-    ),
-    _handler(
         "feature_place_datagokr_seoul_bookstores_job",
         "feature_place_datagokr_file_data",
     ),

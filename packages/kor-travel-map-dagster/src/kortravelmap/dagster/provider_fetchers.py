@@ -70,7 +70,6 @@ __all__ = [
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
     "fetch_seoul_open_data_bookstores",
-    "fetch_kma_weather_alerts",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
     "fetch_krairport_airports",
@@ -1655,10 +1654,6 @@ async def fetch_mcst_culture_records(
         await client.aclose()
 
 
-KMA_WEATHER_ALERT_STN_ID: Final[str] = "108"
-"""KMA 특보 발표관서 — ``108`` = 전국(기상청 본청). 1차는 전국 단일 조회."""
-
-
 def _provider_retry_budget(
     settings: KorTravelMapSettings,
     *,
@@ -1670,96 +1665,6 @@ def _provider_retry_budget(
         expected_calls,
         percent=settings.provider_upstream_retry_budget_percent,
         minimum=settings.provider_upstream_retry_budget_minimum,
-    )
-
-
-async def fetch_kma_weather_alerts(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """KMA 기상특보 목록(getWthrWrnList) record를 kma public client로 stream한다.
-
-    ``settings.data_go_kr_service_key``로 ``DataGoKrClient(service_key=...)``를
-    열고 전국 발표관서(``108``)의 rolling window(오늘 포함
-    ``kma_weather_alert_lookback_days``일)를 ``weather_warning_list(stn_id,
-    from_tm_fc, to_tm_fc, page_no=N)``로 페이지네이션하며 record
-    (``kma.models.WeatherWarningItem`` — ``stn_id``/``tm_fc``/``seq``/``title``
-    + ``raw``)를 lazily yield한다. 특보 종류/등급/구역의 구조화 파싱은
-    ``kma_weather.weather_warning_rows``(asset 측 adapter)가 맡는다.
-    async generator, ``finally``에서 ``await client.aclose()``.
-    """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "kma weather alerts live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    kma = cast(Any, importlib.import_module("kma"))
-    client = kma.DataGoKrClient(
-        service_key=api_key,
-        timeout=settings.provider_http_timeout_seconds,
-        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-    )
-    kst = timezone(timedelta(hours=9))
-    today = datetime.now(kst).date()
-    window_start = today - timedelta(days=settings.kma_weather_alert_lookback_days - 1)
-    budget = _provider_retry_budget(settings, expected_calls=1)
-    num_of_rows = 100
-    try:
-        async def _page(page_no: int) -> ProviderPage:
-            # H45: 페이지 단건 호출만 유한 재시도 (kma ``retryable`` 규약 분류 —
-            # quota/rate_limit 제외는 default predicate 소관). client가 코루틴을
-            # 돌려주므로 재시도는 **await하는 쪽**(`retry_upstream_awaitable`)이어야
-            # 한다 — 동기 판에 넘기면 코루틴 객체만 반환돼 예외를 못 본다.
-            items = await upstream_retry.retry_upstream_awaitable(
-                partial(
-                    _weather_warning_page,
-                    client,
-                    from_tm_fc=window_start,
-                    to_tm_fc=today,
-                    page_no=page_no,
-                    num_of_rows=num_of_rows,
-                ),
-                label=f"kma weather_warning_list p{page_no}",
-                base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
-                budget=budget,
-                on_retry=_LOGGER.warning,
-            )
-            # ``weather_warning_list``는 Page가 아니라 list를 돌려주므로 upstream
-            # 선언 건수를 알 수 없다 — 짧은 페이지 휴리스틱만 쓸 수 있다.
-            return ProviderPage(items=items, total_count=None)
-
-        async for record in aiter_paginated_items(
-            _page,
-            num_of_rows=num_of_rows,
-            label="kma weather_warning_list",
-            warn=_LOGGER.warning,
-        ):
-            yield record
-    finally:
-        await client.aclose()
-
-
-async def _weather_warning_page(
-    client: Any,
-    *,
-    from_tm_fc: date,
-    to_tm_fc: date,
-    page_no: int,
-    num_of_rows: int,
-) -> list[Any]:
-    """특보 목록 1페이지를 재시도 경계 안에서 소진한다(H45 — lazy 우회 방지)."""
-
-    return list(
-        await client.weather_warning_list(
-            stn_id=KMA_WEATHER_ALERT_STN_ID,
-            from_tm_fc=from_tm_fc,
-            to_tm_fc=to_tm_fc,
-            page_no=page_no,
-            num_of_rows=num_of_rows,
-        )
     )
 
 

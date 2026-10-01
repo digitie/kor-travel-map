@@ -14,6 +14,9 @@
 즉 **사용자가 끈 provider가 살아 있는 경로로 그대로 나가고 있었다.** PinVi cache
 target refresh 하나가 반경 안 KMA weather feature를 잡으면 격자 순회가 나간다.
 
+(2026-10-01 — KMA는 이 목록에서 빠졌다. 끈 것이 아니라 Map Dagster에서 걷어냈다:
+ADR-104, ``test_map_dagster_has_no_kma.py``. 이 파일은 남은 "시계만 끈" provider를 잰다.)
+
 여기서 재는 것은 "목록에 이름이 있는가"가 아니라 **그 요청이 실제로 건너뛰어지는가**다.
 목록만 보는 검사는 이 결함을 통과시켰을 것이다 — 목록은 처음부터 맞았고 그것을
 읽는 실행 경계가 없었던 것이 결함이다.
@@ -59,8 +62,8 @@ def _scope(operation_key: str, *, scope_type: str = "provider_dataset") -> Any:
         provider_dataset_id=1,
         sync_scope="dataset_wide",
         operation_key=operation_key,
-        provider="python-kma-api",
-        dataset_key="kma_ultra_short_nowcast",
+        provider="python-airkorea-api",
+        dataset_key="airkorea_air_quality",
         scope_type=scope_type,
         request_scope=request_scope,
         update_policy={"prevent_provider_reactivation": True},

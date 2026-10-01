@@ -1918,7 +1918,7 @@ async def test_khoa_beaches_retries_transient_page_without_record_loss(
         delays.append(delay)
 
     # async 경계의 backoff는 `asyncio.sleep`으로 간다 — `time.sleep`을 막아도
-    # 아무 일도 일어나지 않는다. `test_kma_weather`가 쓰는 것과 같은 관용구다.
+    # 아무 일도 일어나지 않는다.
     monkeypatch.setattr(
         provider_fetchers.upstream_retry,
         "asyncio",

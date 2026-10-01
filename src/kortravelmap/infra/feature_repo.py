@@ -125,7 +125,6 @@ __all__ = [
     "get_service_feature_batch_items",
     "public_active_notice_filter_sql",
     "public_active_notice_feature_identities",
-    "list_active_place_coords",
     "list_primary_place_locator",
     "find_place_features_without_phone",
     "set_feature_phones",
@@ -5021,34 +5020,6 @@ async def public_active_notice_feature_identities(
         {"feature_ids": normalized},
     )
     return {str(row.feature_id): str(row.feature_uuid) for row in result}
-
-
-_LIST_ACTIVE_PLACE_COORDS_SQL: Final[str] = """
-SELECT
-    feature_id,
-    x_extension.ST_X(coord) AS lon,
-    x_extension.ST_Y(coord) AS lat
-FROM feature.features
-WHERE kind = 'place'
-  AND lifecycle_state = 'active'
-  AND quality_state = 'valid'
-  AND coord IS NOT NULL
-ORDER BY feature_id
-"""
-
-
-async def list_active_place_coords(
-    session: AsyncSession,
-) -> list[tuple[str, float, float]]:
-    """active place feature의 ``(feature_id, lon, lat)`` 전량 (T-219a).
-
-    KMA weather 격자→feature 매핑(옵션 B — `docs/etl/kma-weather-etl.md` §3)용.
-    호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와 일치하는
-    feature에 weather 값을 적재한다. 좌표 3컬럼만 조회하므로 수만 행에도 가볍고,
-    정렬은 결정적(feature_id).
-    """
-    rows = (await session.execute(text(_LIST_ACTIVE_PLACE_COORDS_SQL))).all()
-    return [(str(row.feature_id), float(row.lon), float(row.lat)) for row in rows]
 
 
 _LIST_PRIMARY_PLACE_LOCATOR_SQL: Final[str] = """

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -15,10 +14,6 @@ from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshScope,
 )
 from kortravelmap.providers.feature_operation_registry import feature_operation_handler_keys
-from kortravelmap.providers.kma import (
-    KMA_PROVIDER_NAME,
-    KMA_SHORT_FORECAST_DATASET_KEY,
-)
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.providers.mois import DATASET_KEY_BULK
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
@@ -28,7 +23,6 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_DATASET_KEY,
 )
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import SecretStr
 
 from kortravelmap.dagster import feature_update_runner as runner_mod
 from kortravelmap.dagster.assets import FEATURE_LOAD_ASSETS
@@ -36,10 +30,6 @@ from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateAssetRunner,
     FeatureUpdateRunnerSpec,
     RunnerResources,
-)
-from kortravelmap.dagster.kma_weather import (
-    KMA_WEATHER_ASSETS,
-    KmaWeatherTargetScopeEmptyError,
 )
 from kortravelmap.dagster.mcst_features import MCST_FEATURE_ASSETS
 from kortravelmap.dagster.provider_fetchers import ProviderCredentialMissing
@@ -221,7 +211,6 @@ def test_operation_specs_reference_only_module_raw_symbols() -> None:
         cast(Any, asset_def.op.compute_fn).decorated_fn
         for asset_def in (
             *FEATURE_LOAD_ASSETS,
-            *KMA_WEATHER_ASSETS,
             *MCST_FEATURE_ASSETS,
         )
     }
@@ -230,7 +219,7 @@ def test_operation_specs_reference_only_module_raw_symbols() -> None:
     for spec in runner_mod._OPERATION_RUNNER_SPECS.values():  # noqa: SLF001
         assert spec.run not in public_wrappers
         assert getattr(runner_mod, spec.run.__name__, None) is spec.run
-        assert spec.run.__name__.startswith(("run_feature_", "_run_kma_grid_"))
+        assert spec.run.__name__.startswith("run_feature_")
     assert frozenset(runner_mod._OPERATION_RUNNER_SPECS) == feature_operation_handler_keys()
 
 
@@ -362,9 +351,9 @@ async def test_feature_update_asset_runner_types_resource_initialization_failure
     assert str(failure) == "provider refresh resource initialization failed"
 
 
-async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope() -> None:
+async def test_generic_run_failure_uses_effective_external_system_scope() -> None:
     async def _run(_context: object) -> _FakeAssetResult:
-        raise RuntimeError("KMA provider failed")
+        raise RuntimeError("provider failed")
 
     runner = FeatureUpdateAssetRunner(
         common_resources={},
@@ -372,10 +361,10 @@ async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_weather_kma_short_forecast_job",
+                operation_key="feature_place_opinet_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_weather_kma_short_forecast",
+                asset_key="feature_place_opinet_stations",
             ),
         ),
     )
@@ -384,10 +373,10 @@ async def test_kma_grid_generic_run_failure_uses_effective_external_system_scope
         await runner(
             cast(Any, object()),
             _scope(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
+                provider=OPINET_PROVIDER_NAME,
+                dataset_key=OPINET_STATION_DATASET_KEY,
                 sync_scope="external_system:tripmate",
-                operation_key="feature_weather_kma_short_forecast_job",
+                operation_key="feature_place_opinet_stations_job",
             ),
         )
 
@@ -672,216 +661,6 @@ def test_mcst_runner_scopes_fetch_to_the_claimed_exact_member(
 
     assert captured == [(selected_slug,)]
     assert resources.values["mcst_culture_records"] == ()
-
-
-@pytest.mark.parametrize(
-    ("requested_scope", "effective_scope"),
-    [
-        ("target_grids", "target_grids"),
-        ("external_system:tripmate", "external_system:tripmate"),
-    ],
-)
-def test_kma_grid_resources_propagate_exact_persisted_scope(
-    requested_scope: str | None,
-    effective_scope: str,
-) -> None:
-    settings = KorTravelMapSettings.model_construct(
-        data_go_kr_service_key=None,
-        kma_weather_extra_points=None,
-        kma_weather_max_grids_per_run=17,
-    )
-
-    resources = runner_mod._kma_grid_resources(  # noqa: SLF001 - scope 경계 회귀
-        settings,
-        _scope(
-            provider="python-kma-api",
-            dataset_key="kma_short_forecast",
-            sync_scope=requested_scope,
-            operation_key="feature_weather_kma_short_forecast_job",
-        ),
-    )
-
-    assert resources.values["feature_update_dataset_key"] == "kma_short_forecast"
-    assert "feature_update_membership" not in resources.values
-    assert resources.values["kma_weather_sync_scope"] == effective_scope
-    assert resources.values["kma_weather_sync_failure_managed_by_executor"] is True
-    assert "kma_weather_client" not in resources.values
-    assert callable(resources.values["kma_weather_client_factory"])
-    assert resources.values["kma_weather_extra_points"] is None
-    assert resources.values["kma_weather_max_grids_per_run"] == 17
-
-
-async def test_kma_runner_clients_receive_timeout_and_inner_retries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """H45(재리뷰 N-4) — admin 재적재 runner 경로 2곳도 timeout·retries 정산값이
-    실제 client 생성자에 도달한다(스케줄 resource와 갈리면 진단이 흐려진다).
-
-    **정리도 함께 본다.** 종전에는 `teardown()`을 부르고 반환값을 버렸는데,
-    provider가 async-only가 되면서 그 반환값이 코루틴이 됐다 — 그대로 두면
-    client가 한 번도 닫히지 않는데 검사는 초록이다(2026-09-15 적대 리뷰가
-    이 자리를 실증했다). 그래서 `_close_teardowns`가 실제로 쓰는 경로로 돌린다.
-    """
-
-    import sys
-    from types import ModuleType
-
-    created: list[tuple[str, dict[str, Any]]] = []
-    instances: list[Any] = []
-
-    class _RecordingClient:
-        def __init__(self, *, service_key: str, **kwargs: Any) -> None:
-            created.append((type(self).__name__, dict(kwargs)))
-            self.service_key = service_key
-            self.closed = False
-            instances.append(self)
-
-        # 실물 `KmaClient`/`DataGoKrClient`의 정리 메서드는 `aclose`뿐이다
-        # (`python-kma-api/src/kma/client.py:93`, `datagokr.py:131`).
-        async def aclose(self) -> None:
-            self.closed = True
-
-    fake = ModuleType("kma")
-    fake.__dict__["KmaClient"] = type("KmaClient", (_RecordingClient,), {})
-    fake.__dict__["DataGoKrClient"] = type("DataGoKrClient", (_RecordingClient,), {})
-    monkeypatch.setitem(sys.modules, "kma", fake)
-    settings = KorTravelMapSettings.model_construct(
-        data_go_kr_service_key=SecretStr("svc"),
-        provider_http_timeout_seconds=20.0,
-        kma_mid_region_features=None,
-    )
-
-    runner_mod._new_kma_weather_client(  # noqa: SLF001 - 주입 경계 회귀
-        settings,
-        _scope(provider="python-kma-api", dataset_key="kma_short_forecast"),
-    )
-    resources = runner_mod._kma_mid_resources(  # noqa: SLF001 - 주입 경계 회귀
-        settings,
-        _scope(provider="python-kma-api", dataset_key="kma_mid_forecast"),
-    )
-    # 손으로 부르지 않고 **런너가 쓰는 자리**로 돌린다 — 그 자리가 awaitable을
-    # await하고, 손으로 부르면 코루틴이 버려져 "닫혔다"가 거짓이 된다.
-    assert resources.teardowns, "teardown이 하나도 등록되지 않았다"
-    await runner_mod._close_teardowns(resources.teardowns)  # noqa: SLF001 - 주입 경계 회귀
-
-    assert created == [
-        ("KmaClient", {"timeout": 20.0, "retries": 1}),
-        ("DataGoKrClient", {"timeout": 20.0, "retries": 1}),
-    ]
-    # client는 둘이다 — weather 쪽은 이 호출이 수명을 갖지 않으므로 여기서 닫히지
-    # 않는 것이 맞고(`_new_kma_weather_client`는 teardown을 돌려주지 않는다),
-    # teardown이 붙는 것은 mid 쪽뿐이다. 그 하나가 닫혔는지를 본다.
-    assert [client.closed for client in instances] == [False, True], (
-        f"정리 상태가 {[c.closed for c in instances]}다 — mid client가 닫혀야 하고 "
-        "teardown이 실물 정리 메서드(`aclose`)와 어긋나면 세션이 샌다"
-    )
-
-
-@pytest.mark.parametrize(
-    "service_key",
-    [None, SecretStr("configured-service-key")],
-    ids=["credential-missing", "constructor-sentinel"],
-)
-async def test_default_kma_runner_empty_target_precedes_lazy_credential_and_client(
-    monkeypatch: pytest.MonkeyPatch,
-    service_key: SecretStr | None,
-) -> None:
-    constructor_calls: list[str] = []
-
-    class _ForbiddenKmaClient:
-        def __init__(self, *, service_key: str) -> None:
-            constructor_calls.append(service_key)
-            raise AssertionError("empty target 뒤 KmaClient를 만들면 안 된다")
-
-    module = SimpleNamespace(KmaClient=_ForbiddenKmaClient)
-    import_calls: list[str] = []
-
-    def _import_module(name: str) -> object:
-        import_calls.append(name)
-        return module
-
-    class _EmptyTargetClient:
-        def __init__(self) -> None:
-            self.target_calls: list[str | None] = []
-
-        async def list_poi_cache_target_coords(
-            self,
-            *,
-            external_system: str | None = None,
-        ) -> list[tuple[float, float]]:
-            self.target_calls.append(external_system)
-            return []
-
-    monkeypatch.setattr(runner_mod.importlib, "import_module", _import_module)
-    target_client = _EmptyTargetClient()
-    runner = FeatureUpdateAssetRunner(
-        common_resources={
-            "kor_travel_map_client": target_client,
-            "reverse_geocoder": None,
-        },
-        log=_Log(),
-        settings_factory=lambda: KorTravelMapSettings.model_construct(
-            data_go_kr_service_key=service_key,
-            kma_weather_extra_points=None,
-            kma_weather_max_grids_per_run=50,
-        ),
-    )
-
-    with pytest.raises(KmaWeatherTargetScopeEmptyError) as exc_info:
-        await runner(
-            cast(Any, object()),
-            _scope(
-                provider=KMA_PROVIDER_NAME,
-                dataset_key=KMA_SHORT_FORECAST_DATASET_KEY,
-                sync_scope="target_grids",
-                operation_key="feature_weather_kma_short_forecast_job",
-            ),
-        )
-
-    assert exc_info.value.event_code == "kma.target_scope_empty"
-    assert target_client.target_calls == [None]
-    assert import_calls == []
-    assert constructor_calls == []
-
-
-def test_kma_grid_resources_reject_missing_exact_scope_at_membership_boundary(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _unexpected(*_args: object) -> RunnerResources:
-        raise AssertionError("missing typed scope must fail before KMA client creation")
-
-    monkeypatch.setattr(runner_mod, "_kma_weather_resources", _unexpected)
-
-    with pytest.raises(ValueError, match="sync_scope must be"):
-        runner_mod._kma_grid_resources(  # noqa: SLF001 - fail-closed 회귀
-            cast(KorTravelMapSettings, object()),
-            _scope(
-                provider="python-kma-api",
-                dataset_key="kma_short_forecast",
-                sync_scope=None,
-            ),
-        )
-
-
-@pytest.mark.parametrize("sync_scope", ["default", "all", "dataset_wide", " "])
-def test_kma_grid_resources_reject_non_target_scope_before_client_creation(
-    monkeypatch: pytest.MonkeyPatch,
-    sync_scope: str,
-) -> None:
-    def _unexpected(*_args: object) -> RunnerResources:
-        raise AssertionError("invalid scope must fail before KMA client creation")
-
-    monkeypatch.setattr(runner_mod, "_kma_weather_resources", _unexpected)
-
-    with pytest.raises(ValueError, match="sync_scope|KMA grid"):
-        runner_mod._kma_grid_resources(  # noqa: SLF001 - fail-closed 회귀
-            cast(KorTravelMapSettings, object()),
-            _scope(
-                provider="python-kma-api",
-                dataset_key="kma_short_forecast",
-                sync_scope=sync_scope,
-            ),
-        )
 
 
 def test_mois_runner_resources_sync_source_db_before_fetch(

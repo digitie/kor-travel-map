@@ -11,7 +11,6 @@ from .etl import (
     load_feature_bundles_for_dagster,
 )
 from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
-from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import (
     CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
     MAINTENANCE_JOBS,
@@ -38,7 +37,6 @@ from .validation import (
 
 __all__ = [
     "FEATURE_LOAD_ASSETS",
-    "KMA_WEATHER_ASSETS",
     "MCST_FEATURE_ASSETS",
     "BATCH_DAG_JOBS",
     "FEATURE_LOAD_JOBS",

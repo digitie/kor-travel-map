@@ -74,12 +74,12 @@ PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
     # 사유 없이 여기에 넣는 것은 게이트를 무력화하는 것과 같다 — 반드시 근거를 적는다.
     "kma.KmaShortForecastItem": (
         "provider ``ForecastItem``의 typed 필드가 아니라 ``item.raw`` dict 키를 읽어 "
-        "Dagster ``KmaForecastRow``를 만든다(kma_weather.forecast_rows_from_items). "
+        "Dagster ``KmaForecastRow``를 만들었다(옛 kma_weather 모듈, ADR-104로 제거). "
         "결박 대상은 모델 속성이 아니라 raw 키라 표면 대조가 성립하지 않는다."
     ),
     "kma.KmaUltraShortNowcastItem": (
-        "``WeatherSnapshot.raw['items']`` dict에서 Dagster ``KmaNowcastRow``를 만든다"
-        "(kma_weather.nowcast_rows_from_snapshot). 위와 같은 사유."
+        "``WeatherSnapshot.raw['items']`` dict에서 Dagster ``KmaNowcastRow``를 만들었다"
+        "(옛 kma_weather 모듈, ADR-104로 제거). 위와 같은 사유."
     ),
     "kma.KmaUltraShortForecastItem": "``KmaShortForecastItem``과 같은 raw 기반 row 경로.",
     "kma.KmaWeatherAlertRegion": "특보 지역 — Map이 파싱해 만드는 중첩 shape.",

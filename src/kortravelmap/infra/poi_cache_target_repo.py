@@ -39,8 +39,6 @@ __all__ = [
     "get_poi_cache_target",
     "get_poi_cache_target_by_key",
     "get_dataset_projection_revision",
-    "has_active_poi_cache_targets_for_external_system",
-    "list_active_poi_cache_target_external_systems",
     "list_poi_cache_target_feature_links",
     "list_poi_cache_targets",
     "mark_poi_cache_targets_refresh_failed",
@@ -50,7 +48,6 @@ __all__ = [
     "sync_poi_cache_target_feature_links",
     "upsert_poi_cache_target",
     "upsert_poi_cache_target_feature_link",
-    "list_active_target_coords",
 ]
 
 OnConflict = Literal["reject", "move"]
@@ -59,90 +56,9 @@ OnConflict = Literal["reject", "move"]
 # 소진되면 잠금 없는 DO UPDATE fall-through 대신 명확한 실패로 닫는다.
 _CREATE_RACE_MAX_ATTEMPTS: Final[int] = 3
 
-_LIST_ACTIVE_TARGET_COORDS_SQL: Final[str] = """
-SELECT lon, lat
-FROM ops.poi_cache_targets
-WHERE deleted_at IS NULL AND update_enabled
-ORDER BY lon, lat
-"""
-
-_LIST_ACTIVE_TARGET_COORDS_BY_SYSTEM_SQL: Final[str] = """
-SELECT lon, lat
-FROM ops.poi_cache_targets
-WHERE external_system = :external_system
-  AND deleted_at IS NULL
-  AND update_enabled
-ORDER BY lon, lat
-"""
-
-_LIST_ACTIVE_EXTERNAL_SYSTEMS_SQL: Final[str] = """
-SELECT DISTINCT external_system
-FROM ops.poi_cache_targets
-WHERE deleted_at IS NULL AND update_enabled
-ORDER BY external_system
-"""
-
-_HAS_ACTIVE_EXTERNAL_SYSTEM_SQL: Final[str] = """
-SELECT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_targets
-    WHERE external_system = :external_system
-      AND deleted_at IS NULL
-      AND update_enabled
-)
-"""
 
 def _validate_exact_external_system(external_system: str) -> None:
     validate_cache_target_external_system(external_system)
-
-
-async def list_active_target_coords(
-    session: AsyncSession,
-    *,
-    external_system: str | None = None,
-) -> list[tuple[float, float]]:
-    """활성(미삭제 + update_enabled) POI cache target의 ``(lon, lat)`` 목록.
-
-    KMA weather 적재 대상 격자 산출용(T-219a) — 외부 시스템이 등록한 관심 지점이
-    1차 weather 대상이다(`docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.1).
-    ``external_system``을 주면 그 exact system의 target만 반환한다.
-    정렬은 결정적(lon, lat) — 호출자(asset)가 격자 dedupe/상한을 적용한다.
-    """
-    if external_system is None:
-        rows = (await session.execute(text(_LIST_ACTIVE_TARGET_COORDS_SQL))).all()
-    else:
-        _validate_exact_external_system(external_system)
-        rows = (
-            await session.execute(
-                text(_LIST_ACTIVE_TARGET_COORDS_BY_SYSTEM_SQL),
-                {"external_system": external_system},
-            )
-        ).all()
-    return [(float(row.lon), float(row.lat)) for row in rows]
-
-
-async def list_active_poi_cache_target_external_systems(
-    session: AsyncSession,
-) -> list[str]:
-    """활성 target이 하나 이상인 canonical ``external_system`` 목록."""
-    rows = (await session.execute(text(_LIST_ACTIVE_EXTERNAL_SYSTEMS_SQL))).all()
-    return [str(row.external_system) for row in rows]
-
-
-async def has_active_poi_cache_targets_for_external_system(
-    session: AsyncSession,
-    external_system: str,
-) -> bool:
-    """exact ``external_system``에 활성 target이 존재하는지 반환한다."""
-    _validate_exact_external_system(external_system)
-    return bool(
-        (
-            await session.execute(
-                text(_HAS_ACTIVE_EXTERNAL_SYSTEM_SQL),
-                {"external_system": external_system},
-            )
-        ).scalar_one()
-    )
 
 
 _SCOPE_MODES: Final[frozenset[str]] = frozenset({"center_radius", "sigungu_by_radius"})

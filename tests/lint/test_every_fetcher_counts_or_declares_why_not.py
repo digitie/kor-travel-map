@@ -15,7 +15,8 @@ fetcher이고, 그것이 계수 호출을 (직접이든 헬퍼를 통해서든) 
 유도할 수 있다. 못 세는 것은 :data:`_UNCOUNTABLE`에 **이유와 함께** 적어야 한다 —
 목록에 이름을 올리는 일 자체가 결정의 기록이다.
 
-**KMA(기상청)·에어코리아는 이 게이트의 대상이 아니다**(2026-09-14 지시).
+**에어코리아는 이 게이트의 대상이 아니다**(2026-09-14 지시). KMA(기상청) 진입점은
+2026-10-01 ADR-104로 Map에서 코드째 사라졌다.
 :data:`_EXCLUDED_FROM_EVALUATION`에 이유와 함께 적혀 있다 — 둘 다 자동 적재가 꺼져
 있고 큐 경계가 그 결정을 강제하며, **날씨 관련 로직 자체를 걷어낼 예정**이다.
 계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
@@ -146,6 +147,9 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 
 #: **쿼터 평가 대상이 아닌** 진입점과 그 이유.
 #:
+#: 2026-10-01 — KMA(기상청) 진입점은 여기서 지웠다. 평가에서 뺀 것이 아니라 코드가
+#: 없어졌다(ADR-104: Map Dagster의 KMA 적재 경로 제거). 남은 것은 에어코리아다.
+#:
 #: 2026-09-14 지시로 KMA(기상청)·에어코리아가 빠졌다. 둘 다 2026-09-09부터 자동
 #: 적재가 꺼져 있고(`DISABLED_FEATURE_LOAD_SCHEDULES`), 큐 경계가 그 결정을 강제한다
 #: (`DISABLED_FEATURE_LOAD_OPERATION_KEYS`). 그리고 **날씨 관련 로직 자체를 걷어낼
@@ -155,12 +159,8 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
 #: 올리는 일 자체가 결정의 기록**이고, 지우면 "왜 빠졌는지"가 diff 밖으로 사라진다.
 #: 계수 호출은 코드에 그대로 있다(빼는 것은 평가이지 계측이 아니다).
 _EXCLUDED_FROM_EVALUATION: dict[str, str] = {
-    "fetch_kma_weather_alerts": "기상청 — 2026-09-14 지시로 쿼터 평가 대상에서 제외.",
     "fetch_airkorea_air_quality": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
     "fetch_airkorea_stations": "에어코리아 — 2026-09-14 지시로 평가 대상에서 제외.",
-    "_fetch_nowcast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
-    "_fetch_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
-    "_fetch_ultra_short_forecast_rows": "기상청 격자 콜백 — 평가 대상 provider가 아니다.",
 }
 
 #: 접두사에는 걸리지만 **진입점이 아닌** 이름과 그 이유.
@@ -439,7 +439,8 @@ def test_every_fetcher_counts_its_upstream_requests(fetcher: str) -> None:
 #:
 #: 손으로 박은 목록이라 **조용히 줄일 수 있다.** 그래서 아래 두 검사가 이름의
 #: 실재와 유도 결과의 비어 있지 않음을 따로 결박한다(4차 적대 리뷰).
-_FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "kma_weather.py", "mcst_features.py")
+#: 2026-10-01 — ``kma_weather.py``가 ADR-104로 삭제돼 셋에서 둘로 줄었다.
+_FEATURE_ASSET_MODULES: tuple[str, ...] = ("assets.py", "mcst_features.py")
 
 
 def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
@@ -452,7 +453,7 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
     modules = set(_module_trees())
     missing = sorted(set(_FEATURE_ASSET_MODULES) - modules)
     assert missing == [], f"선언된 feature asset 모듈이 없다: {missing}"
-    assert len(_FEATURE_ASSET_MODULES) >= 3, (
+    assert len(_FEATURE_ASSET_MODULES) >= 2, (
         f"feature asset 모듈 목록이 {len(_FEATURE_ASSET_MODULES)}개로 줄었다 — "
         "진짜로 사라졌으면 이 하한도 함께 낮춰라."
     )

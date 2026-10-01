@@ -334,52 +334,6 @@ class KorTravelMapSettings(BaseSettings):
             "env ``OPINET_RUN_CALL_BUDGET``."
         ),
     )
-    kma_weather_extra_points: str | None = Field(
-        default=None,
-        description=(
-            "KMA weather 적재 대상 추가 좌표 ``lon,lat;lon,lat`` (WGS84, 세미콜론 "
-            "구분, T-219a). 기본 대상은 활성 POI cache target 좌표이며 본 설정으로 "
-            "대표 지점을 명시 추가한다. 파서는 "
-            "``kortravelmap.providers.kma.parse_weather_extra_points``. "
-            "env ``KMA_WEATHER_EXTRA_POINTS``."
-        ),
-    )
-    kma_weather_max_grids_per_run: int = Field(
-        default=300,
-        ge=1,
-        le=500,
-        description=(
-            "KMA weather asset 1 run당 호출 격자 상한(T-219a) — data.go.kr 일일 "
-            "한도 보호. **대상 격자가 이 값을 넘으면 run이 실패한다** "
-            "(``KmaWeatherGridLimitExceeded``: partial execution is forbidden). "
-            "초과분은 다음 run으로 넘어가지 않는다 — 상한을 올리거나 대상을 줄여야 "
-            "한다. 이 값은 **호출 경계 수의 상한**이지 요청 수도 실제 격자 수도 "
-            "아니다 — 경계당 최대 4 HTTP 시도이고(upstream_retry: 안쪽 2 x 바깥 2) "
-            "2026-09-13 prod 실측 격자 수는 59다. 오퍼레이션당 실측 한도 10,000/일과의 "
-            "관계는 docs/etl/upstream-quota.md. "
-            "env ``KMA_WEATHER_MAX_GRIDS_PER_RUN``."
-        ),
-    )
-    kma_mid_region_features: str | None = Field(
-        default=None,
-        description=(
-            "KMA 중기예보 region→feature 매핑 JSON (T-219c). 중기는 격자가 아니라 "
-            "region 체계라 운영자가 광역시도 대표 feature를 명시 주입한다 — "
-            '미설정이면 mid asset skip. 형식 ``[{"land_reg_id": "11B00000", '
-            '"ta_reg_id": "11B10101", "feature_ids": ["..."]}]``. 파서는 '
-            "``kortravelmap.providers.kma.parse_mid_region_features``. "
-            "env ``KOR_TRAVEL_MAP_KMA_MID_REGION_FEATURES``."
-        ),
-    )
-    kma_weather_alert_lookback_days: int = Field(
-        default=3,
-        ge=1,
-        le=30,
-        description=(
-            "KMA 특보(getWthrWrnList) 조회 rolling window 일수(T-219c) — 오늘 "
-            "포함 N일. env ``KOR_TRAVEL_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS``."
-        ),
-    )
     provider_http_timeout_seconds: float = Field(
         default=20.0,
         gt=0.0,

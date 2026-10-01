@@ -9,10 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_target_coords,
-    upsert_poi_cache_target,
-)
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from tests.integration._feature_ids import feature_uuid
 
 if TYPE_CHECKING:
@@ -215,14 +212,10 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
         lon=126.9782,
         lat=37.5667,
     )
-    # 옛 ``status='inactive'`` 자리. 이 파일에서 그 행이 지던 역할은 **두 가지를
-    # 동시에** 만족하는 것이었다 — 공개 nearby 결과에서는 빠지되(아래 첫 단언),
-    # ``deleted_at IS NULL``이라 날씨 대상 좌표에는 남는다(아래 D-12 단언).
-    # 3축에서 그 교집합을 만드는 축은 publication 하나다: lifecycle은 'active'라
-    # 살아 있고, publication 'suppressed'라 ``feature.public_features``에서 빠진다.
-    # (0095 backfill이 legacy 'inactive'를 lifecycle 'retired'로 접은 것은 그
-    # 세대의 값 변환 규칙이고, 그대로 옮기면 이 행이 날씨 좌표에서도 사라져
-    # 두 번째 단언이 검증하려던 read 정합 자체가 없어진다.)
+    # 옛 ``status='inactive'`` 자리. lifecycle은 'active'라 살아 있고, publication
+    # 'suppressed'라 ``feature.public_features``에서 빠진다 — 공개 nearby 결과에서
+    # 빠지는 근거가 반경이 아니라 공개 표면 부재임을 아래 단언이 가른다. (이 행이
+    # 함께 지던 KMA 날씨 대상 좌표 단언은 ADR-104로 그 조회와 함께 사라졌다.)
     await _insert_feature(
         migrated_session,
         feature_id=unpublished_id,
@@ -263,32 +256,6 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     assert page.items[0].distance_m < 50
     assert page.items[0].primary_provider == "python-opinet-api"
     assert page.next_cursor is None
-
-    # T-219a — KMA weather 대상 조회 2종.
-    # 활성 target 좌표: 위에서 만든 target 1건.
-    coords = await list_active_target_coords(migrated_session)
-    assert (126.978, 37.5665) in coords
-    # active place 좌표 전량: 옛 기준 ``deleted_at IS NULL``이 3축에서는
-    # ``lifecycle_state='active'``다(0095가 soft delete를 lifecycle 축으로 접었다).
-    # 현행 repo는 여기에 quality 'valid'만 더 볼 뿐 publication 축은 보지 않으므로
-    # "공개되지 않아도 살아 있으면 날씨를 붙인다"는 D-12 read 정합이 그대로다.
-    place_coords = await feature_repo.list_active_place_coords(migrated_session)
-    by_id = {feature_id: (lon, lat) for feature_id, lon, lat in place_coords}
-    assert by_id[near_id] == (126.9782, 37.5667)
-    assert unpublished_id in by_id
-    # 옛 soft delete(``deleted_at = now()``)의 현행 등가물은 lifecycle 'retired'다.
-    # publication을 함께 내리는 것은 취향이 아니라 제약이다 — retired인데
-    # publication이 suppressed가 아니면 ``ck_features_state_tuple``이 막는다.
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features "
-            "SET lifecycle_state = 'retired', publication_state = 'suppressed' "
-            "WHERE feature_id = :feature_id"
-        ),
-        {"feature_id": far_id},
-    )
-    after = await feature_repo.list_active_place_coords(migrated_session)
-    assert all(feature_id != far_id for feature_id, _, _ in after)
 
 
 async def test_features_nearby_target_cursor_pages_distance_order(

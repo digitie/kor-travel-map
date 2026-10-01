@@ -4,6 +4,11 @@
 ``WeatherValue`` DTO로 정규화한다. provider client + typed model은 별도 lib
 (ADR-006 wrapper 금지: 본 모듈은 변환만, 호출은 호출자가 직접).
 
+**2026-10-01부터 Map에는 호출자가 없다(ADR-104).** KMA는 kor-travel-weather가 소유하고
+Map Dagster는 KMA data.go.kr 오퍼레이션을 부르지 않는다. 본 모듈은 이미 적재된 KMA
+feature의 정체성·변환 계약(읽기 경로, ``/ops/datasets`` fixture preview, 테스트 fixture)
+으로만 남는다.
+
 지원 dataset (Sprint 2~3, 점진 추가):
 
 | 함수 | dataset | forecast_style |
@@ -29,7 +34,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -102,9 +106,6 @@ __all__ = [
     "KMA_WEATHER_ALERT_MARKER_ICON",
     "KMA_WEATHER_ALERT_MARKER_COLOR",
     "KMA_ALERT_LEVEL_SEVERITY",
-    "KmaMidRegionSpec",
-    "parse_weather_extra_points",
-    "parse_mid_region_features",
 ]
 
 
@@ -326,107 +327,6 @@ KMA_METRIC_NAMES: Final[dict[str, str]] = {
     "VVV": "남북바람성분",
     "LGT": "낙뢰",
 }
-
-
-def parse_weather_extra_points(value: str | None) -> list[tuple[float, float]]:
-    """``kma_weather_extra_points`` 설정(``lon,lat;lon,lat``) 파서 (T-219a).
-
-    KMA weather 적재 대상에 명시 추가할 좌표 목록. 세미콜론으로 지점을, 콤마로
-    lon/lat을 구분한다(공백 허용). 빈 항목은 무시하고, 숫자가 아니거나 한국
-    bbox(경도 124~132, 위도 33~43) 밖이면 ``ValueError`` — 설정 오타가 조용히
-    빈 대상이 되지 않게 한다. ``None``/빈 문자열은 빈 목록.
-    """
-    if value is None or not value.strip():
-        return []
-    points: list[tuple[float, float]] = []
-    for chunk in value.split(";"):
-        part = chunk.strip()
-        if not part:
-            continue
-        pieces = [p.strip() for p in part.split(",")]
-        if len(pieces) != 2:
-            raise ValueError(f"좌표는 'lon,lat' 형식이어야 합니다: {part!r}")
-        try:
-            lon, lat = float(pieces[0]), float(pieces[1])
-        except ValueError as exc:
-            raise ValueError(f"좌표 숫자 변환 실패: {part!r}") from exc
-        if not (124.0 <= lon <= 132.0 and 33.0 <= lat <= 43.0):
-            raise ValueError(f"좌표가 한국 bbox(lon 124~132, lat 33~43) 밖입니다: {part!r}")
-        points.append((lon, lat))
-    return points
-
-
-@dataclass(frozen=True, slots=True)
-class KmaMidRegionSpec:
-    """중기예보 적재 대상 region 1건 (T-219c — `parse_mid_region_features` 결과).
-
-    중기 **육상**(`getMidLandFcst`)과 **기온**(`getMidTa`)은 예보구역 코드 체계가
-    다르다(예: 서울 육상 ``11B00000`` vs 기온 ``11B10101``) — 한 spec이 두 코드와
-    값을 적재할 feature 목록을 함께 갖는다.
-    """
-
-    land_reg_id: str
-    """중기육상예보 구역 코드 (``getMidLandFcst`` regId)."""
-
-    ta_reg_id: str
-    """중기기온예보 구역 코드 (``getMidTa`` regId)."""
-
-    feature_ids: tuple[str, ...]
-    """이 region의 ``WeatherValue``를 붙일 feature ID 목록 (비어 있으면 안 됨)."""
-
-
-def parse_mid_region_features(value: str | None) -> tuple[KmaMidRegionSpec, ...]:
-    """``kma_mid_region_features`` 설정(JSON) 파서 (T-219c).
-
-    중기예보는 격자가 아니라 region 107 지점 체계라 좌표→격자 매핑(옵션 B)을
-    쓸 수 없다 — 1차는 운영자가 광역시도 대표 feature 매핑을 설정으로 주입하고,
-    미설정이면 asset이 skip한다(계획 정본 §2.4). 형식:
-
-    ``[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101",
-    "feature_ids": ["..."]}]``
-
-    ``None``/빈 문자열은 빈 tuple. JSON 오류·필수 키 누락·빈 feature_ids·
-    중복 (land, ta) 페어는 ``ValueError`` — 설정 오타가 조용히 빈 대상이 되지
-    않게 한다.
-    """
-    if value is None or not value.strip():
-        return ()
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"kma_mid_region_features JSON 파싱 실패: {exc}") from exc
-    if not isinstance(parsed, list):
-        raise ValueError("kma_mid_region_features는 JSON 배열이어야 합니다.")
-    specs: list[KmaMidRegionSpec] = []
-    seen: set[tuple[str, str]] = set()
-    for entry in parsed:
-        if not isinstance(entry, dict):
-            raise ValueError(f"region 항목은 객체여야 합니다: {entry!r}")
-        land = entry.get("land_reg_id")
-        ta = entry.get("ta_reg_id")
-        feature_ids = entry.get("feature_ids")
-        if not isinstance(land, str) or not land.strip():
-            raise ValueError(f"land_reg_id 누락/형식 오류: {entry!r}")
-        if not isinstance(ta, str) or not ta.strip():
-            raise ValueError(f"ta_reg_id 누락/형식 오류: {entry!r}")
-        if (
-            not isinstance(feature_ids, list)
-            or not feature_ids
-            or not all(isinstance(f, str) and f.strip() for f in feature_ids)
-        ):
-            raise ValueError(f"feature_ids는 비어 있지 않은 문자열 배열이어야 합니다: {entry!r}")
-        pair = (land.strip(), ta.strip())
-        if pair in seen:
-            raise ValueError(f"중복 region 페어: {pair!r}")
-        seen.add(pair)
-        specs.append(
-            KmaMidRegionSpec(
-                land_reg_id=pair[0],
-                ta_reg_id=pair[1],
-                feature_ids=tuple(f.strip() for f in feature_ids),
-            )
-        )
-    return tuple(specs)
 
 
 # -- 입력 Protocol --------------------------------------------------------

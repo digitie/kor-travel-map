@@ -181,9 +181,6 @@ from kortravelmap.infra.feature_repo import (
     get_notice_snapshot_watermark as repo_get_notice_snapshot_watermark,
 )
 from kortravelmap.infra.feature_repo import (
-    list_active_place_coords as repo_list_active_place_coords,
-)
-from kortravelmap.infra.feature_repo import (
     list_primary_place_locator as repo_list_primary_place_locator,
 )
 from kortravelmap.infra.feature_repo import (
@@ -245,15 +242,6 @@ from kortravelmap.infra.integrity_violation_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
-from kortravelmap.infra.poi_cache_target_repo import (
-    has_active_poi_cache_targets_for_external_system as _repo_has_active_target_system,
-)
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_poi_cache_target_external_systems as _repo_list_active_target_systems,
-)
-from kortravelmap.infra.poi_cache_target_repo import (
-    list_active_target_coords as repo_list_active_target_coords,
-)
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
@@ -2462,51 +2450,6 @@ class AsyncKorTravelMapClient:
                 membership=membership,
                 next_run_after=next_run_after,
             )
-
-    # ─── KMA weather 대상 조회 (T-219b) ─────────────────────────────────────
-
-    async def list_poi_cache_target_coords(
-        self,
-        *,
-        external_system: str | None = None,
-    ) -> list[tuple[float, float]]:
-        """활성(미삭제 + update_enabled) POI cache target ``(lon, lat)`` 목록 (read).
-
-        KMA weather 적재 대상 격자 산출용 — 외부 시스템이 등록한 관심 지점이
-        1차 weather 대상이다(`docs/etl/kma-weather-etl.md` §3 옵션 B). exact
-        ``external_system``을 주면 그 시스템의 target만 반환한다.
-        """
-        async with self._session_factory() as session:
-            return await repo_list_active_target_coords(
-                session,
-                external_system=external_system,
-            )
-
-    async def list_active_poi_cache_target_external_systems(self) -> list[str]:
-        """활성 POI cache target을 가진 canonical external system 목록 (read)."""
-        async with self._session_factory() as session:
-            return await _repo_list_active_target_systems(session)
-
-    async def has_active_poi_cache_targets_for_external_system(
-        self,
-        external_system: str,
-    ) -> bool:
-        """exact external system에 활성 POI cache target이 있는지 확인한다 (read)."""
-        async with self._session_factory() as session:
-            return await _repo_has_active_target_system(
-                session,
-                external_system,
-            )
-
-    async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
-        """active·valid place feature의 ``(feature_id, lon, lat)`` 전량 (read).
-
-        publication은 weather 적재 대상의 접근 제어 축이 아니므로 draft/suppressed도
-        포함한다. 호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와
-        일치하는 feature에 ``WeatherValue``를 적재한다.
-        """
-        async with self._session_factory() as session:
-            return await repo_list_active_place_coords(session)
 
     async def list_primary_place_locator(
         self,

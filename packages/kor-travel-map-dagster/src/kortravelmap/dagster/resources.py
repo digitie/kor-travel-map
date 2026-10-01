@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import inspect
 import logging
 import threading
@@ -37,7 +36,6 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
-from . import upstream_retry
 from .feature_operation_tracking import (
     ensure_feature_operation_guard_for_provider,
     feature_operation_guard_resource,
@@ -49,7 +47,6 @@ from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
-    fetch_kma_weather_alerts,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
@@ -88,8 +85,6 @@ __all__ = [
     "create_s3_client_from_settings",
     "datagokr_file_data_dataset_key_resource",
     "feature_operation_guard_resource",
-    "kma_datagokr_client_resource",
-    "kma_weather_client_factory_resource",
     "kor_travel_map_client_resource",
     "offline_upload_store_resource",
     "reverse_geocoder_resource",
@@ -368,17 +363,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
             "kor-travel-concierge의 /api/v1/features/{snapshot|changes} REST export를 "
             "pull한다. kor-travel-concierge에서 발급한 DB read scope 키를 "
             "kor-travel-map API key로 주입하며 source env API_KEYS는 공유하지 않는다."
-        ),
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="kma_weather_alert_records",
-        provider_package="python-kma-api",
-        dataset_key="kma_weather_alerts",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note=(
-            "기상특보 getWthrWrnList — 전국 발표관서(108) rolling window 조회. "
-            "특보 종류/등급 구조화는 kma_weather.weather_warning_rows adapter."
         ),
     ),
     ProviderRecordResourceSpec(
@@ -1029,18 +1013,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["kor_travel_concierge_youtube_features"] = 
     )
 )
 
-_KMA_WEATHER_ALERT_RECORDS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "kma_weather_alert_records"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["kma_weather_alert_records"] = (
-    build_provider_record_live_resource(
-        _KMA_WEATHER_ALERT_RECORDS_SPEC,
-        fetch_kma_weather_alerts,
-    )
-)
-
 _MCST_CULTURE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -1143,101 +1115,6 @@ def _dispose_async_engine(engine: Any) -> None:
     dispose_result = engine.dispose()
     if inspect.isawaitable(dispose_result):
         _run_async_resource_teardown(cast("Awaitable[object]", dispose_result))
-
-
-@resource(
-    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
-    description=(
-        "kma_weather_client_factory lazy public client factory (python-kma-api, "
-        "kma_ultra_short_nowcast/kma_ultra_short_forecast/kma_short_forecast)."
-    )
-)
-def kma_weather_client_factory_resource(
-    context: InitResourceContext,
-) -> Callable[[], Any]:
-    """``python-kma-api`` public ``KmaClient``의 지연 생성 factory (T-219b).
-
-    KMA weather asset은 대상 격자가 DB(``ops.poi_cache_targets``)에서 나와
-    record-stream resource 패턴이 맞지 않는다 — client 자체를 resource로
-    선생성하지 않고 asset이 empty/cursor preflight를 통과한 뒤 public client를
-    직접 생성한다(ADR-006 wrapper 없음, 계획 정본 §2.3). resource 초기화는
-    credential을 검증하거나 provider module을 import하지 않는다.
-    """
-    ensure_feature_operation_guard_for_provider(
-        context,
-        boundary="kma_weather_client_factory",
-    )
-    settings = KorTravelMapSettings()
-
-    def _new_client() -> Any:
-        secret = settings.data_go_kr_service_key
-        if secret is None:
-            raise RuntimeError(
-                "Dagster resource 'kma_weather_client_factory'는 provider 호출 불가: "
-                "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
-                "dataset=kma_ultra_short_nowcast/kma_ultra_short_forecast/"
-                "kma_short_forecast. kor-travel-map env: "
-                "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY; source env: "
-                "DATA_GO_KR_SERVICE_KEY."
-            )
-        # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-        # 아니므로 실제 grid 호출 직전에만 import한다.
-        kma = cast(Any, importlib.import_module("kma"))
-        return kma.KmaClient(
-            service_key=secret.get_secret_value(),
-            # H45: lib 기본 10s는 data.go.kr 지연 스파이크에서 대량 격자 순회를
-            # 만성 실패시킨다. retries는 외부 upstream_retry(attempts 2)와 곱해
-            # 경계당 HTTP 4 시도가 되도록 1로 정산한다(리뷰 H — 레이어 곱셈 통제).
-            timeout=settings.provider_http_timeout_seconds,
-            retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-        )
-
-    return _new_client
-
-
-@resource(
-    required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
-    description=(
-        "kma_datagokr_client provider live client (python-kma-api DataGoKrClient, "
-        "kma_mid_forecast)."
-    )
-)
-def kma_datagokr_client_resource(context: InitResourceContext) -> Iterator[Any]:
-    """``python-kma-api`` ``DataGoKrClient`` live 인스턴스 (T-219c).
-
-    중기예보(``getMidLandFcst``/``getMidTa``)는 대상 region이 설정
-    (``kma_mid_region_features``)에서 나와 record-stream resource 패턴이 맞지
-    않는다 — client 자체를 resource로 노출하고 mid asset이 region별로 직접
-    호출한다(ADR-006 wrapper 없음). credential이 없으면 guard와 동일한
-    helpful message로 실패한다.
-    """
-    ensure_feature_operation_guard_for_provider(
-        context,
-        boundary="kma_datagokr_client",
-    )
-    settings = KorTravelMapSettings()
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise RuntimeError(
-            "Dagster resource 'kma_datagokr_client'는 기본 실행 비활성 상태: "
-            "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
-            "dataset=kma_mid_forecast. "
-            "kor-travel-map env: KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY; "
-            "source env: DATA_GO_KR_SERVICE_KEY."
-        )
-    kma = cast(Any, importlib.import_module("kma"))
-    client = kma.DataGoKrClient(
-        service_key=secret.get_secret_value(),
-        timeout=settings.provider_http_timeout_seconds,
-        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-    )
-    try:
-        yield client
-    finally:
-        # `kma`가 async-only가 되면서 `close()`가 `aclose()` 코루틴이 됐다
-        # (2026-09-15 provider 일괄 개편). Dagster sync generator resource의
-        # teardown이므로 이 저장소가 이미 쓰는 브리지를 그대로 쓴다.
-        _run_async_resource_teardown(client.aclose())
 
 
 @resource(description="admin offline upload 원본 파일을 읽는 RustFS/S3 store.")

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import importlib
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -19,7 +18,6 @@ from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
-from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
@@ -31,11 +29,6 @@ from kortravelmap.providers.feature_operation_registry import (
     feature_operation_handler_keys,
     resolve_feature_operation_handler,
 )
-from kortravelmap.providers.kma import (
-    KMA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-)
 from kortravelmap.providers.mcst import MCST_FILE_DATASETS
 from kortravelmap.providers.mois import DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY
 from kortravelmap.settings import KorTravelMapSettings
@@ -43,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from dagster import InitResourceContext, resource
 
-from . import upstream_retry
 from .assets import (
     run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
@@ -75,13 +67,6 @@ from .assets import (
     run_feature_weather_krforest_mountain_weather,
     run_feature_weather_krforest_wildfire_risk_forecast,
 )
-from .kma_weather import (
-    run_feature_notice_kma_weather_alerts,
-    run_feature_weather_kma_mid_forecast,
-    run_feature_weather_kma_short_forecast,
-    run_feature_weather_kma_ultra_short_forecast,
-    run_feature_weather_kma_ultra_short_nowcast,
-)
 from .mcst_features import run_feature_place_mcst_culture
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
@@ -91,7 +76,6 @@ from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
-    fetch_kma_weather_alerts,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
@@ -765,115 +749,6 @@ def _datagokr_file_data_resources(
     )
 
 
-def _kma_service_key(settings: KorTravelMapSettings, *, resource_key: str, dataset: str) -> str:
-    service_key = settings.data_go_kr_service_key
-    if service_key is None:
-        raise RuntimeError(
-            f"Dagster resource {resource_key!r}는 기본 실행 비활성 상태: "
-            "credential 환경변수가 설정되지 않았음. "
-            f"provider=python-kma-api, dataset={dataset}. "
-            "kor-travel-map env: KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY; "
-            "source env: DATA_GO_KR_SERVICE_KEY."
-        )
-    reveal = getattr(service_key, "get_" + "se" + "cret_value")
-    return str(reveal())
-
-
-def _close_method(value: object) -> Teardown:
-    """client 정리 teardown을 만든다 — 반환된 awaitable은 호출자가 await한다.
-
-    **이름을 `close`에서 `aclose`로 바꾼 것이 요점이 아니다.** 종전에는 메서드가
-    없으면 조용히 `None`을 돌려줬고, provider가 async-only가 되면서
-    (2026-09-15 일괄 개편) `close`가 사라지자 **그 침묵이 그대로 "닫지 않음"이
-    됐다** — 같은 client의 schedule 경로는 고쳐졌는데 이 direct/admin 경로만
-    남아 있었다. 그래서 가드를 없애고 없으면 터지게 둔다. 닫기 실패는
-    `_close_teardowns`가 부르는 자리에서 보이는 편이 낫다.
-    """
-
-    def _teardown() -> object:
-        return cast("Any", value).aclose()
-
-    return _teardown
-
-
-def _new_kma_weather_client(
-    settings: KorTravelMapSettings,
-    scope: ProviderDatasetRefreshScope,
-) -> object:
-    """target preflight를 통과한 direct run용 public KMA client를 만든다."""
-    service_key = _kma_service_key(
-        settings,
-        resource_key="kma_weather_client_factory",
-        dataset=scope.dataset_key,
-    )
-    kma = cast(Any, importlib.import_module("kma"))
-    # H45: 스케줄 경로(resources.py)와 동일 정산 — timeout·retries가 갈리면
-    # 수동 재적재 판정이 스케줄과 다르게 나와 진단을 흐린다(리뷰 1 M-4).
-    return kma.KmaClient(
-        service_key=service_key,
-        timeout=settings.provider_http_timeout_seconds,
-        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-    )
-
-
-def _kma_weather_resources(
-    settings: KorTravelMapSettings,
-    scope: ProviderDatasetRefreshScope,
-) -> RunnerResources:
-    def _client_factory() -> object:
-        return _new_kma_weather_client(settings, scope)
-
-    return RunnerResources(
-        {
-            "kma_weather_client_factory": _client_factory,
-            "kma_weather_extra_points": settings.kma_weather_extra_points,
-            "kma_weather_max_grids_per_run": settings.kma_weather_max_grids_per_run,
-            "provider_upstream_retry_budget_minimum": (
-                settings.provider_upstream_retry_budget_minimum
-            ),
-            "provider_upstream_retry_budget_percent": (
-                settings.provider_upstream_retry_budget_percent
-            ),
-        }
-    )
-
-
-def _kma_mid_resources(
-    settings: KorTravelMapSettings,
-    scope: ProviderDatasetRefreshScope,
-) -> RunnerResources:
-    kma = cast(Any, importlib.import_module("kma"))
-    client = kma.DataGoKrClient(
-        service_key=_kma_service_key(
-            settings,
-            resource_key="kma_datagokr_client",
-            dataset=scope.dataset_key,
-        ),
-        timeout=settings.provider_http_timeout_seconds,
-        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
-    )
-    return RunnerResources(
-        {
-            "kma_datagokr_client": client,
-            "kma_mid_region_features": settings.kma_mid_region_features,
-            "provider_upstream_retry_budget_minimum": (
-                settings.provider_upstream_retry_budget_minimum
-            ),
-            "provider_upstream_retry_budget_percent": (
-                settings.provider_upstream_retry_budget_percent
-            ),
-        },
-        teardowns=(_close_method(client),),
-    )
-
-
-def _kma_alert_resources(
-    settings: KorTravelMapSettings,
-    _scope: ProviderDatasetRefreshScope,
-) -> RunnerResources:
-    return RunnerResources({"kma_weather_alert_records": fetch_kma_weather_alerts(settings)})
-
-
 def _mcst_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
@@ -889,48 +764,6 @@ def _mcst_resources(
     return RunnerResources(
         {"mcst_culture_records": fetch_mcst_culture_records(settings, slugs=matched_slugs)}
     )
-
-
-async def _run_kma_grid_weather(context: Any) -> object:
-    dataset_key = cast(Any, context.resources).feature_update_dataset_key
-    if dataset_key == KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY:
-        return await run_feature_weather_kma_ultra_short_nowcast(context)
-    if dataset_key == KMA_ULTRA_SHORT_FORECAST_DATASET_KEY:
-        return await run_feature_weather_kma_ultra_short_forecast(context)
-    if dataset_key == KMA_SHORT_FORECAST_DATASET_KEY:
-        return await run_feature_weather_kma_short_forecast(context)
-    raise KeyError(f"KMA grid weather dataset_key가 아님: {dataset_key!r}")
-
-
-def _kma_grid_resources(
-    settings: KorTravelMapSettings,
-    scope: ProviderDatasetRefreshScope,
-) -> RunnerResources:
-    sync_scope = _kma_grid_sync_scope(scope)
-    base = _kma_weather_resources(settings, scope)
-    return RunnerResources(
-        {
-            **dict(base.values),
-            "feature_update_dataset_key": scope.dataset_key,
-            "kma_weather_sync_scope": sync_scope,
-            "kma_weather_sync_failure_managed_by_executor": True,
-        },
-        teardowns=base.teardowns,
-    )
-
-
-def _kma_grid_sync_scope(scope: ProviderDatasetRefreshScope) -> str:
-    raw_scope = scope.sync_scope
-    if raw_scope is None:
-        raise ValueError("KMA grid sync_scope is required")
-    if not isinstance(raw_scope, str):
-        raise ValueError("KMA grid sync_scope must be a string")
-    parsed_scope = parse_canonical_sync_scope(raw_scope)
-    if parsed_scope.kind == "dataset_wide":
-        raise ValueError(
-            "KMA grid datasets require target_grids or external_system:<name> sync_scope"
-        )
-    return parsed_scope.value
 
 
 def _operation_specs(
@@ -1143,36 +976,6 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_weather_airkorea_air_quality,
         resources=_airkorea_resources,
         asset_key="feature_weather_airkorea_air_quality",
-    ),
-    *_operation_specs(
-        "feature_weather_kma_ultra_short_nowcast_job",
-        run=_run_kma_grid_weather,
-        resources=_kma_grid_resources,
-        asset_key="feature_weather_kma_ultra_short_nowcast",
-    ),
-    *_operation_specs(
-        "feature_weather_kma_ultra_short_forecast_job",
-        run=_run_kma_grid_weather,
-        resources=_kma_grid_resources,
-        asset_key="feature_weather_kma_ultra_short_forecast",
-    ),
-    *_operation_specs(
-        "feature_weather_kma_short_forecast_job",
-        run=_run_kma_grid_weather,
-        resources=_kma_grid_resources,
-        asset_key="feature_weather_kma_short_forecast",
-    ),
-    *_operation_specs(
-        "feature_weather_kma_mid_forecast_job",
-        run=run_feature_weather_kma_mid_forecast,
-        resources=_kma_mid_resources,
-        asset_key="feature_weather_kma_mid_forecast",
-    ),
-    *_operation_specs(
-        "feature_notice_kma_weather_alerts_job",
-        run=run_feature_notice_kma_weather_alerts,
-        resources=_kma_alert_resources,
-        asset_key="feature_notice_kma_weather_alerts",
     ),
     *_operation_specs(
         "feature_place_mcst_culture_job",

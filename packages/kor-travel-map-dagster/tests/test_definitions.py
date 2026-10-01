@@ -81,11 +81,6 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_kor_travel_concierge_youtube",
         "feature_weather_airkorea_air_quality",
         "feature_weather_krex_rest_areas",
-        "feature_weather_kma_ultra_short_nowcast",
-        "feature_weather_kma_ultra_short_forecast",
-        "feature_weather_kma_short_forecast",
-        "feature_weather_kma_mid_forecast",
-        "feature_notice_kma_weather_alerts",
         "feature_weather_krforest_mountain_weather",
         "feature_weather_krforest_wildfire_risk_forecast",
         "feature_notice_krforest_landslide_forecast_issues",
@@ -253,7 +248,6 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "airkorea_air_quality",
     "visitkorea_festival_events",
     "kor_travel_concierge_youtube_features",
-    "kma_weather_alert_records",
     "mcst_culture_records",
 }
 
@@ -278,11 +272,6 @@ def test_feature_load_provider_guard_resources_registered() -> None:
         else:
             assert "provider record guard" in resource_def.description
 
-    for resource_key in ("kma_weather_client_factory", "kma_datagokr_client"):
-        assert {
-            "feature_operation_guard",
-            "kor_travel_map_client",
-        } <= top_level_resources[resource_key].required_resource_keys
     assert top_level_resources["reverse_geocoder"]
 
 
@@ -475,9 +464,6 @@ def test_job_definition_tags_carry_the_execution_manifest_declaration() -> None:
     assert {spec.job_name for spec in declaring} == {
         "feature_place_knps_points_job",
         "feature_geometry_knps_records_job",
-        "feature_weather_kma_ultra_short_nowcast_job",
-        "feature_weather_kma_ultra_short_forecast_job",
-        "feature_weather_kma_short_forecast_job",
     }
     for spec in declaring:
         job_tags = defs.resolve_job_def(spec.job_name).tags

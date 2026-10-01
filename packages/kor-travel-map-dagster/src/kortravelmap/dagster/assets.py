@@ -2220,7 +2220,6 @@ async def _exact_sync_membership(
     operation_key``다(ADR-088 §결정 2). provider/dataset label로는 어느 행을
     가리키는지 결정되지 않는다.
 
-    획득 경로는 ``kma_weather._exact_kma_sync_membership``과 같은 계약이다:
     queue worker가 request를 claim할 때 고정한 typed membership resource가 있으면
     그것을 쓰고, 없으면 guard가 고정한 **실행 manifest** 안에서 고른다.
     **provider나 dataset label에서 membership을 역산하는 fallback은 두지 않는다** —
@@ -2233,10 +2232,6 @@ async def _exact_sync_membership(
     ``0089_tvn33_expand_seed``는 ``feature_place_knps_points_job``과
     ``feature_geometry_knps_records_job``에 각각 dataset 5개를 결박하는데 asset은
     run 1회에 1개만 적재한다.
-
-    KMA 격자 dataset은 이 함수를 타지 않는다. 같은 계약의 게이트가
-    ``kma_weather._exact_kma_sync_membership``에 따로 있고, KMA weather asset은
-    그쪽만 호출한다.
     """
 
     resource_membership = await _resource_value(

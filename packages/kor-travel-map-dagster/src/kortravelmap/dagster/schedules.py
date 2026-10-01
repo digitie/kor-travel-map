@@ -6,17 +6,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-from kortravelmap.core.sync_scope import (
-    DATASET_WIDE_SYNC_SCOPE,
-    TARGET_GRIDS_SYNC_SCOPE,
-)
+from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
-from kortravelmap.providers.kma import (
-    KMA_PROVIDER_NAME,
-    KMA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
-    KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
-)
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -67,13 +58,6 @@ from .feature_operation_tracking import (
     EXECUTION_SCOPES_TAG,
     DeclaredExecutionScope,
     encode_execution_scopes,
-)
-from .kma_weather import (
-    feature_notice_kma_weather_alerts,
-    feature_weather_kma_mid_forecast,
-    feature_weather_kma_short_forecast,
-    feature_weather_kma_ultra_short_forecast,
-    feature_weather_kma_ultra_short_nowcast,
 )
 from .mcst_features import feature_place_mcst_culture
 from .run_scope import map_owned_runs_filter
@@ -204,24 +188,6 @@ _KNPS_GEOMETRY_SCHEDULE: Final[KnpsScheduleBinding] = knps_schedule_binding(
 )
 
 
-def _kma_grid_execution_scopes(dataset_key: str) -> tuple[DeclaredExecutionScope, ...]:
-    """KMA 격자 dataset의 실행 manifest.
-
-    seed는 refreshable dataset 전부에 ``dataset_wide``를 넣고 격자 dataset에만
-    ``target_grids``를 더 넣는다. 그래서 이 3종은 dataset당 scope가 2개지만,
-    ``dataset_wide``는 asset(``_run_kma_weather_asset``)과 queue
-    runner(``_kma_grid_sync_scope``)가 둘 다 ``ValueError``로 거부한다 — 실행 경로가
-    없다. run이 실행하는 것은 ``target_grids`` 하나뿐이므로 그것만 선언한다.
-    """
-    return (
-        DeclaredExecutionScope(
-            provider=KMA_PROVIDER_NAME,
-            dataset_key=dataset_key,
-            sync_scope=TARGET_GRIDS_SYNC_SCOPE,
-        ),
-    )
-
-
 def _datagokr_file_data_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
     return tuple(
         FeatureLoadScheduleSpec(
@@ -299,7 +265,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         job_name="feature_weather_krex_rest_areas_job",
         schedule_name="feature_weather_krex_rest_areas_hourly_schedule",
         cron_schedule="35 * * * *",
-        description="고속도로 휴게소 관측 기상 weather Feature 매시 적재(기온→T1H, KMA 빈틈 보강).",
+        description="고속도로 휴게소 관측 기상 weather Feature 매시 적재(기온→T1H).",
         # 자기 회수 상한보다 짧은 주기인데 합치기도 회수도 없었다. upstream이
         # trickle에 들어가면 매시 새 run이 뜨고 각 run이 전역 6시간을 쓰므로 같은
         # job의 멈춘 run이 최대 6개 — 10 슬롯 중 6개를 한 job이 먹는다. 같은 EX
@@ -473,58 +439,6 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         coalesce_active_runs=True,
         max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
-    # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/etl/kma-weather-etl.md §6)
-    # 에 맞춘 cron. 같은 base 재실행은 provider_sync_state cursor가 skip한다.
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_kma_ultra_short_nowcast,
-        job_name="feature_weather_kma_ultra_short_nowcast_job",
-        schedule_name="feature_weather_kma_ultra_short_nowcast_hourly_schedule",
-        cron_schedule="45 * * * *",
-        description="KMA 초단기실황 WeatherValue 매시 적재(발표 HH:00 + 40분 지연 후).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-        execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY),
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_kma_ultra_short_forecast,
-        job_name="feature_weather_kma_ultra_short_forecast_job",
-        schedule_name="feature_weather_kma_ultra_short_forecast_hourly_schedule",
-        cron_schedule="50 * * * *",
-        description="KMA 초단기예보 WeatherValue 매시 적재(발표 HH:30 + 15분 지연 후).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-        execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_FORECAST_DATASET_KEY),
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_kma_short_forecast,
-        job_name="feature_weather_kma_short_forecast_job",
-        schedule_name="feature_weather_kma_short_forecast_hourly_schedule",
-        cron_schedule="20 * * * *",
-        description=(
-            "KMA 단기예보 WeatherValue 매시 적재(발표 02~23시 3시간 간격 + 지연 후)."
-        ),
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-        execution_scopes=_kma_grid_execution_scopes(KMA_SHORT_FORECAST_DATASET_KEY),
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_weather_kma_mid_forecast,
-        job_name="feature_weather_kma_mid_forecast_job",
-        schedule_name="feature_weather_kma_mid_forecast_hourly_schedule",
-        cron_schedule="25 * * * *",
-        description="KMA 중기예보(육상+기온) WeatherValue 매시 적재(발표 06/18시 + 지연 후).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_notice_kma_weather_alerts,
-        job_name="feature_notice_kma_weather_alerts_job",
-        schedule_name="feature_notice_kma_weather_alerts_hourly_schedule",
-        cron_schedule="15 * * * *",
-        description="KMA 기상특보 notice Feature 매시 적재(rolling window 멱등 upsert).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
     # MCST 파일데이터 (T-220 재배선, #395) — 저빈도 시설 데이터, 월 1회.
     FeatureLoadScheduleSpec(
         asset=feature_place_mcst_culture,
@@ -639,6 +553,11 @@ def _coalescing_execution_fn(
 #:
 #: 2026-09-09 — KMA(기상청)·AirKorea 자동 적재 중지(사용자 지시).
 #:
+#: 2026-10-01 — KMA는 이 목록에서 **뺐다.** 끈 것이 아니라 Map의 Dagster 정의에서
+#: 걷어냈다(ADR-104, 소유자 결정): KMA는 kor-travel-weather가 소유하고 Map은 KMA
+#: data.go.kr 오퍼레이션을 부르지 않는다. 이 목록은 "시계만 끈" provider의
+#: 기록이고 KMA는 시계도 능력도 없으므로 여기 남을 이름이 아니다.
+#:
 #: 2026-09-18 — data.go.kr 활용신청이 되지 않은 넷과, 오픈API가 아예 없는 하나를
 #: 중지(사용자 지시). prod에서 32개 provider job을 한 번에 돌려 실패 원인을
 #: 전수로 확정한 결과다.
@@ -666,11 +585,6 @@ DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
         "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
         "feature_place_standard_special_streets_monthly_schedule",
         "feature_weather_airkorea_air_quality_hourly_schedule",
-        "feature_weather_kma_ultra_short_nowcast_hourly_schedule",
-        "feature_weather_kma_ultra_short_forecast_hourly_schedule",
-        "feature_weather_kma_short_forecast_hourly_schedule",
-        "feature_weather_kma_mid_forecast_hourly_schedule",
-        "feature_notice_kma_weather_alerts_hourly_schedule",
     }
 )
 

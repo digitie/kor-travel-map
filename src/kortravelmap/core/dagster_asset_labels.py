@@ -34,11 +34,6 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_place_kor_travel_concierge_youtube": "영상 기반 장소 후보",
     "feature_event_visitkorea_enrichment": "VisitKorea 축제 보강 후보",
     "feature_weather_airkorea_air_quality": "대기질",
-    "feature_weather_kma_ultra_short_nowcast": "기상청 초단기실황",
-    "feature_weather_kma_ultra_short_forecast": "기상청 초단기예보",
-    "feature_weather_kma_short_forecast": "기상청 단기예보",
-    "feature_weather_kma_mid_forecast": "기상청 중기예보",
-    "feature_notice_kma_weather_alerts": "기상특보",
     "feature_place_mcst_culture": "문화시설 파일데이터",
 }
 """asset code-level name → 한국어 표시명."""
