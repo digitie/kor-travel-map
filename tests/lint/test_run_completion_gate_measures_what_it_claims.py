@@ -26,7 +26,8 @@ import pytest
 
 pytestmark = [
     pytest.mark.unit,
-    # Definitions를 로드하면 sensor `owners`의 BetaWarning이 난다. 루트 설정은 경고를 오류로 바꾸므로
+    # Definitions를 로드하면 sensor `owners`의 BetaWarning이 난다.
+    # 루트 설정은 경고를 오류로 바꾸므로
     # Dagster 패키지 테스트와 같은 필터를 단다(n150 실측: 이 필터 없이 setup ERROR 6건).
     pytest.mark.filterwarnings(
         "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
