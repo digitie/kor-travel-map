@@ -1457,8 +1457,9 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         )
         or 0
     )
-    # 103 = 100 + kor-travel-transport 데이터셋(ADR-106). 은퇴한 opinet·krex·krairport 행은 비활성 상태로 남는다.
-    # 수백 행 규모는 여전히 Seq Scan이 싼 소형 차원 테이블이다.
+    # kor-travel-transport 데이터셋(ADR-106)으로 103행이 됐다.
+    # 은퇴한 opinet·krex·krairport 행은 비활성으로 남는다.
+    # 수백 행은 여전히 Seq Scan이 싼 소형 차원 테이블이다.
     assert provider_dataset_count <= 200, (
         "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
         f"count={provider_dataset_count}"
