@@ -1,6 +1,6 @@
 {
   "transport_repository": "digitie/kor-travel-transport",
-  "transport_revision": "a6ddd2611645f864fe61514e069ec4179a757dc8",
+  "transport_revision": "94e955f50c97459035110897229d91be0b9394f1",
   "source_path": "docs/openapi.json",
   "openapi_sha256": "fff3b2b0d3d9e0a230102880161d2a84cf4ead307f88471fe0024a2b7a99e383",
   "note": "transport ADR-012 service exports. 갱신: transport docs/openapi.json을 새 revision에서 복사하고 이 두 값을 함께 바꾼다(ADR-106)."
