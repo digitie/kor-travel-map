@@ -15,13 +15,14 @@ from kortravelmap.infra.feature_update_executor import (
 )
 from kortravelmap.providers.feature_operation_registry import feature_operation_handler_keys
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_FUEL_STATIONS as OPINET_STATION_DATASET_KEY,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME as OPINET_PROVIDER_NAME,
+)
 from kortravelmap.providers.mois import DATASET_KEY_BULK
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
-from kortravelmap.providers.opinet import (
-    OPINET_PRICE_DATASET_KEY,
-    OPINET_PROVIDER_NAME,
-    OPINET_STATION_DATASET_KEY,
-)
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import feature_update_runner as runner_mod
@@ -472,38 +473,17 @@ async def test_feature_update_asset_runner_rejects_unknown_operation_key() -> No
         await runner(object(), _scope(operation_key="feature_unknown_job"))
 
 
-@pytest.mark.parametrize(
-    ("dataset_key", "operation_key", "asset_key"),
-    [
-        (
-            OPINET_STATION_DATASET_KEY,
-            "feature_place_transport_fuel_stations_job",
-            "feature_place_transport_fuel_stations",
-        ),
-        (
-            OPINET_PRICE_DATASET_KEY,
-            "feature_price_transport_fuel_stations_job",
-            "feature_price_transport_fuel_stations",
-        ),
-    ],
-)
-async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
-    dataset_key: str,
-    operation_key: str,
-    asset_key: str,
-) -> None:
-    called = False
+async def test_feature_update_asset_runner_runs_targeted_transport_fuel_requests() -> None:
+    """OpiNet 쿼터 보호용 targeted 생략은 ADR-106으로 사라졌다 — transport export는 쿼터가 없다."""
+    called: list[str] = []
 
-    async def _run(_context: object) -> _FakeAssetResult:
-        nonlocal called
-        called = True
-        raise AssertionError("targeted OpiNet request가 asset fetch를 실행하면 안 된다.")
-
-    def _resources(
-        _settings: KorTravelMapSettings,
-        _scope: ProviderDatasetRefreshScope,
-    ) -> RunnerResources:
-        raise AssertionError("targeted OpiNet request가 resource를 만들면 안 된다.")
+    async def _run(context: object) -> _FakeAssetResult:
+        called.extend(cast(Any, cast(Any, context).resources).transport_fuel_stations)
+        return _FakeAssetResult(
+            provider=OPINET_PROVIDER_NAME,
+            dataset_key=OPINET_STATION_DATASET_KEY,
+            feature_ids=("station-1",),
+        )
 
     runner = FeatureUpdateAssetRunner(
         common_resources={},
@@ -511,10 +491,12 @@ async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key=operation_key,
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
-                resources=_resources,
-                asset_key=asset_key,
+                resources=lambda _s, _scope: RunnerResources(
+                    {"transport_fuel_stations": ("fetched",)}
+                ),
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -523,25 +505,14 @@ async def test_feature_update_asset_runner_skips_opinet_targeted_global_refetch(
         object(),
         _scope(
             provider=OPINET_PROVIDER_NAME,
-            dataset_key=dataset_key,
+            dataset_key=OPINET_STATION_DATASET_KEY,
             scope_type="center_radius",
-            operation_key=operation_key,
+            operation_key="feature_place_transport_fuel_stations_job",
         ),
     )
 
-    assert called is False
-    assert result.status == "skipped"
-    assert result.loaded_count == 0
-    assert result.metadata == {
-        "provider_dataset_id": 1,
-        "sync_scope": "dataset_wide",
-        "operation_key": operation_key,
-        "provider": OPINET_PROVIDER_NAME,
-        "dataset_key": dataset_key,
-        "skipped": True,
-        "skip_reason": "global_provider_not_targetable",
-        "scope_type": "center_radius",
-    }
+    assert called == ["fetched"]
+    assert result.status == "done"
 
 
 async def test_feature_update_asset_runner_allows_opinet_provider_wide_refresh() -> None:
@@ -784,7 +755,7 @@ def test_default_runner_covers_every_canonical_operation_handler() -> None:
     assert frozenset(runner._specs) == feature_operation_handler_keys()  # noqa: SLF001
 
 
-async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -> None:
+async def test_transport_missing_token_is_typed_before_any_request() -> None:
     runner = FeatureUpdateAssetRunner(
         common_resources={
             "kor_travel_map_client": object(),
@@ -793,21 +764,28 @@ async def test_opinet_missing_key_is_typed_before_provider_client_auth_error() -
             "strict_address": "off",
         },
         log=_Log(),
-        settings_factory=lambda: KorTravelMapSettings.model_construct(opinet_api_key=None),
+        settings_factory=lambda: KorTravelMapSettings.model_construct(
+            kor_travel_transport_base_url="http://127.0.0.1:14001",
+            kor_travel_transport_service_token=None,
+            kor_travel_transport_page_size=500,
+            kor_travel_transport_timeout_seconds=30.0,
+        ),
     )
 
     with pytest.raises(ProviderDatasetRefreshFailure) as exc_info:
         await runner(
             object(),
-            _scope(provider=OPINET_PROVIDER_NAME, dataset_key=OPINET_STATION_DATASET_KEY),
+            _scope(
+                provider=OPINET_PROVIDER_NAME,
+                dataset_key=OPINET_STATION_DATASET_KEY,
+                operation_key="feature_place_transport_fuel_stations_job",
+            ),
         )
 
     failure = exc_info.value
     assert failure.provider_dataset_id == 1
-    assert failure.sync_scope == "dataset_wide"
-    assert str(failure) == "provider refresh resource initialization failed"
     assert isinstance(failure.__cause__, ProviderCredentialMissing)
-    assert "KOR_TRAVEL_MAP_OPINET_API_KEY" in str(failure.__cause__)
+    assert "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN" in str(failure.__cause__)
 
 
 # -- spec 카탈로그 무결성 --------------------------------------------------
