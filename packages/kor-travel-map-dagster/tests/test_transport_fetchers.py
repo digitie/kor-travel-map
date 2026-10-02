@@ -63,9 +63,13 @@ def _golden_incident_now(monkeypatch: pytest.MonkeyPatch, *, after: timedelta) -
     monkeypatch.setattr(provider_fetchers, "_utcnow", lambda: collected + after)
 
 
+#: 진짜 client. 한 테스트가 ``_install``을 여러 번 불러도 패치된 factory를 겹쳐 감싸지 않는다.
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
 def _install(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Request]:
     seen: list[httpx.Request] = []
-    real_client = httpx.AsyncClient
+    real_client = _REAL_ASYNC_CLIENT
 
     def recording(request: httpx.Request) -> httpx.Response:
         seen.append(request)
