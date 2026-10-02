@@ -45,7 +45,7 @@
    Map은 transport OpenAPI를 vendoring하거나 revision/SHA로 핀하지 않는다(2026-10-03 소유자 결정 — repin
    절차는 과하다). 대신 `providers/kor_travel_transport.py`가 응답을 엄격히 검사해(필수 필드·타입·페이지·
    `collection` 상태) 어긋나면 `failure_kind`(`transport_contract` 등)와 함께 run을 실패시킨다. 파서·변환
-   테스트는 Map 소유 대표 응답 `tests/fixtures/kor-travel-transport/*.json`을 쓴다. transport 쪽 drift 방지는
+   테스트는 Map 소유 대표 응답 `tests/unit/golden/kor-travel-transport/*.json`을 쓴다. transport 쪽 drift 방지는
    transport CI의 `export_openapi.py --check`다.
 5. **인증.** `X-Kor-Travel-Transport-Service-Token`(Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` =
    transport `TRANSPORT_SERVICE_EXPORT_TOKEN`). transport는 토큰과 **접속 주소**(peer, 기본 loopback —

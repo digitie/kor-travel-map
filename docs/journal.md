@@ -26,7 +26,7 @@
   (`_transport_get`은 공항 export 상수로만 허용, 다른 경로는 빨강).
 - 계약 관계(2026-10-03 소유자 결정): Map은 transport export의 소비자다 — pin·vendoring·repin 절차 없음. Map에
   필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
-  `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/fixtures/kor-travel-transport/`)이 실 파서를 지난다. 처음
+  `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/unit/golden/kor-travel-transport/`)이 실 파서를 지난다. 처음
   만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
 
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`

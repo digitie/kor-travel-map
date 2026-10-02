@@ -16,7 +16,7 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
 - Map은 transport export의 **소비자**다. 계약을 pin·vendoring하지 않는다 — Map에 필드·모양이
   필요하면 transport API를 그에 맞게 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 이 모듈의
   엄격한 런타임 검증이 ``failure_kind``와 함께 run을 실패시켜 드러낸다. 파서 테스트는 Map 소유
-  대표 응답(``tests/fixtures/kor-travel-transport/*.json``)을 쓴다.
+  대표 응답(``tests/unit/golden/kor-travel-transport/*.json``)을 쓴다.
 - **신선도는 두 겹으로 지킨다.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면
   503을 낸다(transport ADR-013). Map은 그것만 믿지 않고 200 본문의 ``collection``도 다시
   확인하며(:func:`require_current_collection`), 돌발 집합은 ``collected_at`` 나이까지 잰다

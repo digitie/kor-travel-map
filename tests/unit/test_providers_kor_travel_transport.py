@@ -33,7 +33,7 @@ from kortravelmap.providers.opinet import (
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-GOLDEN_DIR = ROOT / "tests" / "fixtures" / "kor-travel-transport"
+GOLDEN_DIR = ROOT / "tests" / "unit" / "golden" / "kor-travel-transport"
 FETCHED_AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 
