@@ -5,7 +5,8 @@ ADR-106. Map은 transport ``docs/openapi.json``을 ``contracts/kor-travel-transp
 바꾼다 — 손으로 고치면 파일과 핀이 어긋난다(``tests/unit/test_providers_kor_travel_transport.py``가
 잡는다).
 
-transport가 머지된 뒤 **머지 커밋**으로 다시 핀한다(미머지 브랜치 커밋은 force-push로 사라질 수 있다)::
+transport가 머지된 뒤 **머지 커밋**으로 다시 핀한다(미머지 브랜치 커밋은 force-push로
+사라질 수 있다)::
 
     git -C ../kor-travel-transport fetch origin main
     python scripts/repin_transport_contract.py \
@@ -39,8 +40,12 @@ def _git(repo: Path, *args: str) -> bytes:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--transport-repo", type=Path, required=True, help="kor-travel-transport checkout")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--transport-repo", type=Path, required=True, help="kor-travel-transport checkout"
+    )
     parser.add_argument("--revision", required=True, help="transport revision (머지 커밋 권장)")
     parser.add_argument(
         "--allow-unmerged",
@@ -50,13 +55,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     pin = json.loads(PIN.read_text(encoding="utf-8"))
-    sha = _git(args.transport_repo, "rev-parse", "--verify", f"{args.revision}^{{commit}}").decode().strip()
+    revision = f"{args.revision}^{{commit}}"
+    sha = _git(args.transport_repo, "rev-parse", "--verify", revision).decode().strip()
     merged = subprocess.run(
         ["git", "-C", str(args.transport_repo), "merge-base", "--is-ancestor", sha, "origin/main"],
         check=False,
     ).returncode == 0
     if not merged and not args.allow_unmerged:
-        print(f"{sha}는 transport origin/main에 머지되지 않았다 — 머지 커밋으로 핀하라.", file=sys.stderr)
+        print(
+            f"{sha}는 transport origin/main에 머지되지 않았다 — 머지 커밋으로 핀하라.",
+            file=sys.stderr,
+        )
         return 2
     body = _git(args.transport_repo, "show", f"{sha}:{pin['source_path']}")
     digest = hashlib.sha256(body).hexdigest()

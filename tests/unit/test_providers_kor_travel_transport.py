@@ -55,7 +55,10 @@ def test_vendored_openapi_matches_its_pin() -> None:
 
 
 def test_vendored_openapi_declares_503_on_every_snapshot_export() -> None:
-    """Map은 503을 "근거 수집이 현재가 아님"으로 읽는다(transport ADR-012) — 계약에 적혀 있어야 한다."""
+    """Map은 503을 "근거 수집이 현재가 아님"으로 읽는다(transport ADR-012).
+
+    그 의미가 vendored 계약에 적혀 있어야 한다.
+    """
     spec = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))
     for path in (
         transport.EXPORT_PATH_FUEL_STATIONS,

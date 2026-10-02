@@ -124,7 +124,10 @@ async def test_missing_connection_settings_fail_before_any_request(
 async def test_a_hidden_route_is_not_reported_as_a_missing_credential(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """404는 토큰·접속 주소·버전 셋 중 하나다 — 설정 누락(ProviderCredentialMissing)과 가른다(M6)."""
+    """404는 토큰·접속 주소·버전 셋 중 하나다 — 설정 누락과 가른다(M6).
+
+    설정 누락은 요청 전에 ``ProviderCredentialMissing``으로 난다.
+    """
     seen = _install(
         monkeypatch, lambda request: httpx.Response(404, json={"detail": "Not Found"})
     )
@@ -166,7 +169,11 @@ async def test_an_empty_active_set_is_a_confirmed_fact(monkeypatch: pytest.Monke
 
 @pytest.mark.parametrize(
     "fetch",
-    [fetch_transport_fuel_stations, fetch_transport_rest_areas, fetch_transport_rest_area_fuel_prices],
+    [
+        fetch_transport_fuel_stations,
+        fetch_transport_rest_areas,
+        fetch_transport_rest_area_fuel_prices,
+    ],
 )
 async def test_a_snapshot_export_refuses_503_flags_and_zero_records(
     monkeypatch: pytest.MonkeyPatch, fetch: Any
@@ -192,7 +199,10 @@ async def test_a_snapshot_export_refuses_503_flags_and_zero_records(
 async def test_a_late_page_failure_still_fails_the_whole_export(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """앞 페이지가 성공해도 뒤 페이지가 503이면 전체가 실패한다 — 부분 집합으로 reconcile하지 않는다."""
+    """앞 페이지가 성공해도 뒤 페이지가 503이면 전체가 실패한다.
+
+    부분 집합으로 reconcile하지 않는다.
+    """
     body = _golden("rest-areas.json")
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -233,7 +243,8 @@ async def test_a_cycling_cursor_is_a_contract_violation(monkeypatch: pytest.Monk
 
     def handler(request: httpx.Request) -> httpx.Response:
         cursor = request.url.params.get("cursor")
-        return httpx.Response(200, json={**body, "has_more": True, "next_cursor": following[cursor]})
+        page = {**body, "has_more": True, "next_cursor": following[cursor]}
+        return httpx.Response(200, json=page)
 
     _install(monkeypatch, handler)
     with pytest.raises(TransportExportContractError, match="순환"):
@@ -247,7 +258,8 @@ async def test_the_page_loop_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None
     counter = iter(range(1, 100))
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={**body, "has_more": True, "next_cursor": str(next(counter))})
+        page = {**body, "has_more": True, "next_cursor": str(next(counter))}
+        return httpx.Response(200, json=page)
 
     seen = _install(monkeypatch, handler)
     with pytest.raises(TransportExportContractError, match="페이지"):

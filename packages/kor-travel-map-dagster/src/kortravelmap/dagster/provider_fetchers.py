@@ -25,7 +25,7 @@ from collections.abc import (
     Iterator,
     Mapping,
 )
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -230,19 +230,21 @@ def _transport_retryable(exc: BaseException) -> bool:
 
 def _utcnow() -> datetime:
     """돌발 집합 나이 기준 시각(테스트가 고정한다)."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _raise_transport_status(response: httpx.Response, path: str) -> None:
     status = response.status_code
     if status == 404:
-        # transport는 토큰·접속 주소가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012). 404만으로는
-        # 셋을 가를 수 없다 — 자격증명 부재(설정 누락)는 요청 전에 ProviderCredentialMissing으로 난다.
+        # transport는 토큰·접속 주소가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012).
+        # 404만으로는 셋을 가를 수 없다 — 자격증명 부재(설정 누락)는 요청 전에
+        # ProviderCredentialMissing으로 난다.
         raise TransportExportHidden(
             f"kor-travel-transport {path}가 404다 — 셋 중 하나다: (1) 토큰이 transport "
             "TRANSPORT_SERVICE_EXPORT_TOKEN과 다르다 (2) 접속 주소가 transport "
-            "SERVICE_EXPORT_ALLOWED_CLIENTS_CSV 밖이다(운영은 host network의 127.0.0.1, standalone은 "
-            "docker bridge 대역을 열어야 한다) (3) transport가 이 export가 없는 버전이다."
+            "SERVICE_EXPORT_ALLOWED_CLIENTS_CSV 밖이다(운영은 host network의 127.0.0.1, "
+            "standalone은 docker bridge 대역을 열어야 한다) (3) transport가 이 export가 없는 "
+            "버전이다."
         )
     if status == 503:
         raise TransportExportNotCurrent(
@@ -263,14 +265,14 @@ async def _transport_get(
 ) -> httpx.Response:
     """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다."""
 
-    async def call() -> httpx.Response:
+    async def _transport_request_once() -> httpx.Response:
         note_upstream_request()
         response = await client.get(path, params=dict(params))
         _raise_transport_status(response, path)
         return response
 
     return await upstream_retry.retry_upstream_awaitable(
-        call,
+        _transport_request_once,
         label=f"kor-travel-transport {path}",
         is_retryable=_transport_retryable,
         base_delay=_TRANSPORT_RETRY_BASE_DELAY_SECONDS,

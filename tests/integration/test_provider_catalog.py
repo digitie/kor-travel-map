@@ -887,7 +887,8 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
     assert len(moved) == len(_TRANSPORT_RETIRED_DATASETS)
     for entry in moved:
         kinds = {op.operation_kind for op in entry.operations if op.is_enabled}
-        assert entry.is_active and {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
+        assert entry.is_active, entry.dataset_key
+        assert {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
 
 
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(

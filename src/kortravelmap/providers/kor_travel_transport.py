@@ -153,7 +153,10 @@ class TransportFuelPrice:
     provider_updated_at: datetime | None
     """오피넷이 그 유종 가격을 마지막으로 바꾼 시각(``B027_DT`` 등). 가격 자체의 갱신 시각이다."""
     observed_at: datetime
-    """transport 원본 행의 관측 시각 — ``provider_updated_at``이 있으면 그것, 없으면 그 행의 수집 시각."""
+    """transport 원본 행의 관측 시각.
+
+    ``provider_updated_at``이 있으면 그것, 없으면 그 행의 수집 시각이다.
+    """
     collected_at: datetime
     """transport가 이 가격을 오피넷 현재가로 **마지막으로 확인한** 수집 시각."""
     raw: Mapping[str, Any]
