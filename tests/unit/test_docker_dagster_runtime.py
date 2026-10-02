@@ -4794,8 +4794,8 @@ def test_dagster_production_code_server_accepts_exactly_the_sealed_shapes(
 
     `code-server start`는 location reload에 definitions를 다시 import하는 유일한 모양이다 —
     `api grpc`는 reload를 무시해서 C7의 schedule override가 반영되지 않았다. `api grpc`는 Manager
-    compose가 바뀔 때까지의 전환용이다. 둘 다 같은 9-argv 모양(loopback `-h`, 숫자 `-p`, 고정 `-m`)이고,
-    자식 Python까지 `PYTHONSAFEPATH=1`이 이어진다.
+    compose가 바뀔 때까지의 전환용이다. 둘 다 같은 9-argv 모양(loopback `-h`, 숫자 `-p`,
+    고정 `-m`)이고, 자식 Python까지 `PYTHONSAFEPATH=1`이 이어진다.
     """
 
     result = _production_code_server_run(
