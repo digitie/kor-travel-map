@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -79,6 +79,9 @@ class _Festival:
     instt_nm: str | None = None
 
 
+_KST_TZ = timezone(timedelta(hours=9))
+
+
 @dataclass(frozen=True)
 class _Station:
     uni_id: str
@@ -94,10 +97,11 @@ class _Station:
 
 @dataclass(frozen=True)
 class _OilPrice:
+    """transport ``fuel-stations`` export의 유종별 최신 가격 행(ADR-106)."""
+
     product_code: str
-    price: int | None
-    trade_date: date
-    trade_time: time
+    price: Decimal | None
+    observed_at: datetime
     raw: dict[str, Any]
 
 
@@ -129,6 +133,7 @@ class _FuelPriceRecord:
     diesel_price: int | None
     lpg_price: int | None
     raw: dict[str, Any]
+    observed_at: datetime = datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ)
 
 
 @dataclass(frozen=True)
@@ -382,16 +387,14 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                     prices=(
                         _OilPrice(
                             product_code="B027",
-                            price=1820,
-                            trade_date=date(2026, 6, 2),
-                            trade_time=time(12, 0),
+                            price=Decimal(1820),
+                            observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
                             raw={"PRODCD": "B027", "PRICE": "1820"},
                         ),
                         _OilPrice(
                             product_code="D047",
-                            price=1650,
-                            trade_date=date(2026, 6, 2),
-                            trade_time=time(12, 0),
+                            price=Decimal(1650),
+                            observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
                             raw={"PRODCD": "D047", "PRICE": "1650"},
                         ),
                     ),

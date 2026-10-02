@@ -30,7 +30,6 @@ from kortravelmap.dagster.feature_operation_tracking import (
     run_tracked_feature_asset,
 )
 from kortravelmap.dagster.quota_exhaustion import (
-    QUOTA_EXCEPTION_TYPES,
     quota_exhaustion_cause,
     raise_terminal_if_quota_exhausted,
 )
@@ -258,26 +257,35 @@ def test_a_cyclic_cause_chain_terminates() -> None:
     assert quota_exhaustion_cause(first) is None
 
 
-def test_a_provider_without_failure_kind_is_caught_by_identity() -> None:
+def _declare_quota_exception(monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """선언 집합이 지금은 비어 있다(ADR-106) — 기제를 재려고 시험용 선언 하나를 끼운다."""
+    from kortravelmap.dagster import quota_exhaustion
+
+    pair = ("fakeprovider", "FakeQuotaExceededError")
+    monkeypatch.setattr(quota_exhaustion, "QUOTA_EXCEPTION_TYPES", frozenset({pair}))
+    return pair
+
+
+def test_a_provider_without_failure_kind_is_caught_by_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``failure_kind``를 붙이지 않는 lib이 절반이다 — 이름/모듈로 메운다.
 
-    종전 대표는 에어코리아였다(2026-10-01 ADR-105로 Map에서 빠졌다). 같은 성질의
-    opinet으로 옮겨 잰다 — ``status_code``가 없는 쿼터 예외는 이름/모듈로만 잡힌다.
+    종전 대표는 에어코리아(ADR-105)·opinet(ADR-106)이었다 — 둘 다 Map에서 빠졌다.
+    ``status_code``가 없는 쿼터 예외는 이름/모듈로만 잡힌다.
     """
 
-    module, class_name = next(
-        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "opinet"
-    )
+    module, class_name = _declare_quota_exception(monkeypatch)
     fake = type(class_name, (RuntimeError,), {"__module__": module})
     assert quota_exhaustion_cause(fake("daily limit exceeded")) is not None
 
 
-def test_identity_match_still_honours_the_429_exclusion() -> None:
+def test_identity_match_still_honours_the_429_exclusion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """선언 집합에 걸려도 429면 재시도를 남긴다."""
 
-    module, class_name = next(
-        pair for pair in sorted(QUOTA_EXCEPTION_TYPES) if pair[0] == "krex"
-    )
+    module, class_name = _declare_quota_exception(monkeypatch)
     fake = type(class_name, (RuntimeError,), {"__module__": module, "http_status": 429})
     assert quota_exhaustion_cause(fake("HTTP 429")) is None
 

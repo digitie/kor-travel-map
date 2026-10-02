@@ -22,9 +22,13 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_REST_AREAS as REST_AREA_DATASET_KEY,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME as KREX_PROVIDER_NAME,
+)
 from kortravelmap.providers.krex import (
-    KREX_PROVIDER_NAME,
-    REST_AREA_DATASET_KEY,
     REST_AREA_SOURCE_ENTITY_TYPE,
     rest_area_fuel_price_records_to_features_and_values,
     rest_area_place_locator_from_rows,
@@ -90,6 +94,7 @@ class _FuelPriceRecord:
     diesel_price: int | None
     lpg_price: int | None
     raw: dict[str, Any]
+    observed_at: datetime = _FETCHED
 
 
 async def test_fuel_price_feature_inherits_place_coord_and_renders_in_bbox(

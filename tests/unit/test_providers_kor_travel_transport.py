@@ -67,7 +67,7 @@ def test_vendored_openapi_declares_every_export_path_map_reads() -> None:
 
 
 def test_golden_items_carry_every_field_the_vendored_schema_requires() -> None:
-    """golden fixture가 vendored schema의 required 필드를 모두 가진다(계약과 fixture의 결박)."""
+    """golden fixture가 vendored schema와 필드 집합이 맞는다(계약과 fixture의 결박)."""
     schemas = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))["components"][
         "schemas"
     ]
@@ -80,8 +80,11 @@ def test_golden_items_carry_every_field_the_vendored_schema_requires() -> None:
     ]
     for file_name, schema_name in pairs:
         required = set(schemas[schema_name].get("required", []))
+        declared = set(schemas[schema_name]["properties"])
         for item in _golden(file_name)["items"]:
             assert required <= set(item), (file_name, required - set(item))
+            # golden이 계약에 없는 필드를 들고 있으면 파서가 존재하지 않는 값에 기대게 된다.
+            assert set(item) <= declared, (file_name, set(item) - declared)
 
 
 # -- 파서 -------------------------------------------------------------------

@@ -485,18 +485,19 @@ def test_provider_record_resource_env_mapping() -> None:
     assert specs["datagokr_cultural_festivals"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
     )
-    assert specs["transport_fuel_stations"].kor_travel_map_env_names == (
-        "KOR_TRAVEL_MAP_OPINET_API_KEY",
-    )
-    assert specs["transport_fuel_stations"].kor_travel_map_env_names == (
-        "KOR_TRAVEL_MAP_OPINET_API_KEY",
-    )
-    assert specs["transport_rest_area_fuel_prices"].kor_travel_map_env_names == (
-        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
-    )
-    assert specs["transport_highway_incidents"].kor_travel_map_env_names == (
-        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
-    )
+    # ADR-106: transport export resource 다섯은 같은 연결 설정(base URL + token)을 쓴다.
+    for key in (
+        "transport_fuel_stations",
+        "transport_rest_areas",
+        "transport_rest_area_fuel_prices",
+        "transport_highway_incidents",
+        "transport_airports",
+    ):
+        assert specs[key].kor_travel_map_env_names == (
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL",
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN",
+        ), key
+        assert specs[key].provider_package == "kor-travel-transport", key
     assert specs["mois_license_records"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH",
     )
