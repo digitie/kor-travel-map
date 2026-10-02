@@ -89,6 +89,8 @@ system
 
 `{provider_short}_{dataset_name}_{scope?}` 형태. 예:
 
+> **2026-10-02 ADR-106**: 아래 표의 `opinet_*`·`krex_*`·`krairport_*` dataset은 비활성이다. Map은 그 데이터를 provider `kor-travel-transport`(`source_kind=internal`)의 `transport_*` dataset 여섯으로 kor-travel-transport 내부 export에서 받는다. 이 라이브러리들은 Map 의존에서 빠졌다(쿼터·키는 transport가 진다).
+
 | dataset_key | provider | 의미 |
 |------------|----------|------|
 | `visitkorea_festival_events` | python-visitkorea-api | 축제/행사 검색 |

@@ -57,13 +57,7 @@ _POOL_CONSTANT: Final = "GEO_HEAVY_POOL"
 #: ADR-105로 asset째 사라졌다. 표와 아래 대조 검사는 남긴다 — geo를 쓰는 freshness 민감
 #: asset이 다시 생기면 `test_the_freshness_exclusions_are_still_the_ones_we_reasoned_about`이
 #: 이유를 적으라고 빨개진다.
-_FRESHNESS_SENSITIVE: Final[dict[str, str]] = {
-    "feature_price_transport_fuel_stations": (
-        "일 1회 유가 반영(transport 16시 오피넷 수집 뒤 18:18). 부모 주유소 place를 함께 "
-        "적재하느라 역지오코딩을 하지만, 몇 시간짜리 월간 geo 적재 뒤에 줄 서면 그날 가격이 "
-        "하루 밀린다(ADR-106)."
-    ),
-}
+_FRESHNESS_SENSITIVE: Final[dict[str, str]] = {}
 
 
 def _module_source(path: pathlib.Path) -> str:

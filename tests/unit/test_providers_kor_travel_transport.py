@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,7 @@ from kortravelmap.providers.opinet import (
     OpinetStationItem,
     OpinetStationPriceRow,
     OpinetStationWithPrices,
+    fuel_station_place_locator_from_rows,
     station_prices_to_features_and_values,
     stations_to_bundles,
 )
@@ -51,6 +52,18 @@ def test_vendored_openapi_matches_its_pin() -> None:
     body = (CONTRACT_DIR / "openapi.json").read_bytes()
     assert hashlib.sha256(body).hexdigest() == pin["openapi_sha256"]
     assert len(pin["transport_revision"]) == 40
+
+
+def test_vendored_openapi_declares_503_on_every_snapshot_export() -> None:
+    """Map은 503을 "근거 수집이 현재가 아님"으로 읽는다(transport ADR-012) — 계약에 적혀 있어야 한다."""
+    spec = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))
+    for path in (
+        transport.EXPORT_PATH_FUEL_STATIONS,
+        transport.EXPORT_PATH_REST_AREAS,
+        transport.EXPORT_PATH_REST_AREA_FUEL_PRICES,
+        transport.EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
+    ):
+        assert "503" in spec["paths"][path]["get"]["responses"], path
 
 
 def test_vendored_openapi_declares_every_export_path_map_reads() -> None:
@@ -131,6 +144,58 @@ def test_fuel_station_contract_violations_fail_loudly(mutation: Any, message: st
         transport.parse_fuel_station(item)
 
 
+@pytest.mark.parametrize(
+    ("collection", "message"),
+    [
+        ({"last_success_at": None}, "이력"),
+        ({"failed": True}, "실패"),
+        ({"stale": True}, "stale"),
+    ],
+)
+def test_a_page_whose_collection_is_not_current_is_refused(
+    collection: dict[str, Any], message: str
+) -> None:
+    """transport가 200을 주더라도 플래그가 서 있으면 그 집합으로 reconcile하지 않는다(M1)."""
+    body = _golden("rest-areas.json")
+    page = transport.parse_export_page(
+        {**body, "collection": {**body["collection"], **collection}}, where="rest-areas"
+    )
+    with pytest.raises(transport.TransportExportNotCurrent, match=message) as raised:
+        transport.require_current_collection(page.collection, where="rest-areas")
+    assert raised.value.failure_kind == "transport_not_current"
+
+
+def test_a_collection_without_flags_is_a_contract_violation() -> None:
+    body = _golden("rest-areas.json")
+    flagless = {key: value for key, value in body["collection"].items() if key != "stale"}
+    with pytest.raises(transport.TransportExportContractError, match="stale"):
+        transport.parse_export_page({**body, "collection": flagless}, where="rest-areas")
+
+
+def test_incident_set_age_is_measured_on_the_map_side() -> None:
+    """transport의 503에만 기대지 않는다(M2) — 30분 넘은 집합은 종료 판단 근거가 아니다."""
+    active = transport.parse_active_incident_set(_golden("highway-incidents-active.json"))
+    collected = active.collected_at
+    transport.require_fresh_incident_set(active, now=collected + timedelta(minutes=30))
+    with pytest.raises(transport.TransportExportNotCurrent, match="지났다"):
+        transport.require_fresh_incident_set(
+            active, now=collected + timedelta(minutes=30, seconds=1)
+        )
+    with pytest.raises(transport.TransportExportNotCurrent, match="미래"):
+        transport.require_fresh_incident_set(active, now=collected - timedelta(hours=1))
+    failed = transport.parse_active_incident_set(
+        {
+            **_golden("highway-incidents-active.json"),
+            "collection": {
+                **_golden("highway-incidents-active.json")["collection"],
+                "failed": True,
+            },
+        }
+    )
+    with pytest.raises(transport.TransportExportNotCurrent):
+        transport.require_fresh_incident_set(failed, now=collected)
+
+
 def test_page_with_more_but_no_cursor_is_a_contract_violation() -> None:
     page = {**_golden("rest-areas.json"), "has_more": True, "next_cursor": None}
     with pytest.raises(transport.TransportExportContractError, match="next_cursor"):
@@ -179,8 +244,13 @@ async def test_fuel_station_place_and_price_use_the_transport_identity() -> None
     assert [bundle.feature.provider_natural_key for bundle in places] == [
         station.uni_id for station in stations
     ]
-    parents, price_bundles, values = await station_prices_to_features_and_values(
-        stations, fetched_at=FETCHED_AT
+    # 가격 적재는 place를 다시 만들지 않는다 — 이미 적재된 place의 locator로 부모를 찾는다(M5).
+    locator = fuel_station_place_locator_from_rows(
+        (bundle.feature.provider_natural_key, bundle.feature.feature_id, 0.0, 0.0)
+        for bundle in places
+    )
+    price_bundles, values = station_prices_to_features_and_values(
+        stations, fetched_at=FETCHED_AT, place_locator=locator
     )
     assert price_bundles
     assert values
@@ -188,13 +258,50 @@ async def test_fuel_station_place_and_price_use_the_transport_identity() -> None
     assert {bundle.source_record.dataset_key for bundle in price_bundles} == {
         "transport_fuel_prices"
     }
-    parent_ids = {bundle.feature.feature_id for bundle in parents}
+    parent_ids = {bundle.feature.feature_id for bundle in places}
     assert all(bundle.feature.parent_feature_id in parent_ids for bundle in price_bundles)
+    assert all(bundle.feature.coord is not None for bundle in price_bundles)
+    # place가 아직 없는 주유소는 부모 없이 적재된다(다음 실행에서 붙는다).
+    orphans, _ = station_prices_to_features_and_values(
+        stations, fetched_at=FETCHED_AT, place_locator={}
+    )
+    assert {bundle.feature.parent_feature_id for bundle in orphans} == {None}
     assert {value.price_domain for value in values} == {PriceDomain.OPINET_GAS_STATION}
     # 판매가가 null인 유종은 값을 만들지 않는다.
     priced = sum(1 for station in stations for row in station.prices if row.price is not None)
     assert len(values) == priced
     assert all(isinstance(value.value_number, Decimal) for value in values)
+
+
+def test_fuel_price_observed_at_is_the_last_confirmation_not_the_price_change() -> None:
+    """M3: ``observed_at``은 transport가 그 값을 현재가로 마지막 확인한 시각(``collected_at``)이다.
+
+    오피넷 갱신시각(``*_DT``)은 가격을 **바꾼** 때라 며칠씩 묵는다 — 그것을 쓰면 가격을 유지 중인
+    주유소가 현재가 지평선(4일) 밖으로 밀려 사라진다. 갱신시각은 payload에 보존한다.
+    """
+    item = json.loads(json.dumps(_golden("fuel-stations.json")["items"][0]))
+    changed = "2026-09-20T08:00:00Z"
+    confirmed = "2026-10-02T07:34:44Z"
+    for row in item["prices"]:
+        row.update(provider_updated_at=changed, observed_at=changed, collected_at=confirmed)
+    station = transport.parse_fuel_station(item)
+    _, values = station_prices_to_features_and_values(
+        [station], fetched_at=FETCHED_AT, place_locator={}
+    )
+    assert values
+    assert {value.observed_at for value in values} == {
+        datetime(2026, 10, 2, 7, 34, 44, tzinfo=UTC)
+    }
+    assert {value.payload["provider_updated_at"] for value in values} == {
+        "2026-09-20T08:00:00+00:00"
+    }
+
+
+def test_fuel_price_rows_require_the_confirmation_time() -> None:
+    item = json.loads(json.dumps(_golden("fuel-stations.json")["items"][0]))
+    del item["prices"][0]["collected_at"]
+    with pytest.raises(transport.TransportExportContractError, match="collected_at"):
+        transport.parse_fuel_station(item)
 
 
 async def test_rest_area_natural_key_must_match_the_transport_key() -> None:

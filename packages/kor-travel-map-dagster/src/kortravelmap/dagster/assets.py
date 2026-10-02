@@ -123,6 +123,8 @@ from kortravelmap.providers.mois import (
     license_records_to_bundles,
 )
 from kortravelmap.providers.opinet import (
+    OPINET_STATION_SOURCE_ENTITY_TYPE,
+    fuel_station_place_locator_from_rows,
     station_prices_to_features_and_values,
     stations_to_bundles,
 )
@@ -408,20 +410,25 @@ async def feature_place_transport_fuel_stations(
 async def run_feature_price_transport_fuel_stations(
     context: AssetExecutionContext,
 ) -> PriceFeatureLoadResult:
-    """오피넷 주유소 유종별 최신 가격(transport export)을 price Feature + PriceValue로 적재한다."""
+    """오피넷 주유소 유종별 최신 가격(transport export)을 price Feature + PriceValue로 적재한다.
+
+    주유소 place를 다시 만들거나 역지오코딩하지 않는다(ADR-106 리뷰 M5) — 그것은 주간 place
+    job의 몫이고 geo-heavy pool 아래서 돈다. 가격 feature의 부모는 이미 적재된 place의
+    locator로 찾고, 좌표는 transport가 넘긴 WGS84를 그대로 쓴다. export가 0건·낡음이면 fetcher가
+    먼저 실패한다(``TransportExportEmpty``/``TransportExportNotCurrent``).
+    """
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     records = await _record_list(context, "transport_fuel_stations")
     fetched_at = await _fetched_at(context)
-    if not records:
-        # 0건을 RUN_SUCCESS로 기록하면 마지막 성공 cursor만 전진하고 실제 갱신 중단은 감춰진다.
-        raise RuntimeError(
-            "kor-travel-transport 주유소 export가 0건을 반환했다. "
-            "transport 오피넷 수집 상태를 확인하라."
-        )
-    station_bundles, bundles, values = await station_prices_to_features_and_values(
+    locator_rows = await client.list_primary_place_locator(
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_FUEL_STATIONS,
+        source_entity_type=OPINET_STATION_SOURCE_ENTITY_TYPE,
+    )
+    bundles, values = station_prices_to_features_and_values(
         records,
         fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
+        place_locator=fuel_station_place_locator_from_rows(locator_rows),
     )
     if not values:
         # 주유소는 있는데 판매가가 하나도 없으면 원천 drift다 — 성공으로 기록하지 않는다.
@@ -430,10 +437,6 @@ async def run_feature_price_transport_fuel_stations(
             "transport 최신 유가와 export 계약을 확인하라."
         )
     latest_observed_at = max(value.observed_at for value in values).astimezone(_KST)
-    # 가격 feature의 parent_feature_id가 가리키는 주유소 place feature를 가격보다 먼저 upsert한다
-    # (FK ``fk_features_parent_feature_id_features``).
-    if station_bundles:
-        await client.load_feature_bundles(station_bundles)
     membership = await _exact_sync_membership(
         context,
         client,
@@ -483,8 +486,8 @@ async def run_feature_price_transport_fuel_stations(
 @asset(
     group_name="features_price",
     # price feature의 parent_feature_id는 주유소 place feature를 가리킨다 → place asset을
-    # 상류 의존(deps)으로 선언해 계보·backfill 순서를 보장한다. 런타임 정합성은 price asset의
-    # parent place co-load가 보장한다.
+    # 상류 의존(deps)으로 선언해 계보·backfill 순서를 보장한다. 런타임에는 이미 적재된 place만
+    # locator로 부모 삼는다(place가 없는 새 주유소는 부모 없이 적재되고 다음 실행에 붙는다).
     deps=[feature_place_transport_fuel_stations],
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_fuel_stations"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,

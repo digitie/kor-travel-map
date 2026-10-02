@@ -22,8 +22,9 @@ export와 같은 부류다. **실행 가능 집합의 정본은 DB 카탈로그�
    ``(dataset, kind, natural_key)``이므로 이것이 없으면 옛 Feature가 있는 DB에서 새 적재가 같은
    대상을 두 번째 Feature로 주조한다. 자연키는 원천의 것 그대로다(주유소 uni_id, 휴게소
    ``name::route::direction``·휴게소 코드, IATA 코드). 2026-10-02 prod는 0행이다.
-4. 옛 dataset의 적재 operation(``refresh``·``feature_load``)을 끄고 dataset을 비활성으로 내린다.
-   **행은 지우지 않는다** — 이력이 exact FK로 가리킨다(401/402와 같은 규율).
+4. 옛 dataset의 operation을 **종류 불문**(``refresh``·``feature_load``·``preview``) 끄고 dataset을
+   비활성으로 내린다(402와 같다 — preview만 켜 두면 은퇴한 dataset이 운영 화면에서 미리보기로
+   살아 있다). **행은 지우지 않는다** — 이력이 exact FK로 가리킨다(401/402와 같은 규율).
 5. ``provider_sync.notice_lineage_key``의 돌발 분기를 새 dataset으로 옮긴다.
    ``feature_repo._notice_lineage_sql``이 글자 단위로 같은 규칙을 따른다.
 6. receipt head CHECK에 이 revision을 더한다.
@@ -31,7 +32,7 @@ export와 같은 부류다. **실행 가능 집합의 정본은 DB 카탈로그�
 막는 것(preflight, 하나라도 있으면 아무것도 바꾸지 않고 중단)
 --------------------------------------------------------------
 
-- 끌 operation을 member로 둔 queued/running job(401과 같은 이유 — 영영 종결로 못 간다).
+- 끌 operation(종류 불문)을 member로 둔 queued/running job(401과 같은 이유 — 영영 종결로 못 간다).
 - 옛 돌발 notice dataset의 source entity. 돌발 계보(lineage)는 dataset 범위의 활성 집합으로
   닫히는데(``supersede_stale_notice_features``), identity만 옮기면 옛 dataset의 열린 계보는
   어느 reconcile도 닫지 않아 영구 active로 남는다. 2026-10-02 prod는 0행이다 — 남아 있으면
@@ -86,7 +87,6 @@ SELECT dataset.provider_dataset_id
   FROM provider_sync.provider_datasets AS dataset
  WHERE (dataset.provider, dataset.dataset_key) IN ({_OLD_PAIRS_SQL})
 """
-_LOAD_OPERATION_KINDS_SQL: Final[str] = "('refresh', 'feature_load')"
 
 _SET_OWNER_ROLE_SQL: Final[str] = f"SET ROLE {_OWNER_ROLE}"
 
@@ -143,7 +143,6 @@ _DISABLE_OLD_LOAD_OPERATIONS_SQL: Final[str] = f"""
 UPDATE provider_sync.provider_dataset_operations AS operation
    SET is_enabled = false
  WHERE operation.provider_dataset_id IN ({_OLD_DATASETS_SQL})
-   AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
    AND operation.is_enabled
 """
 
@@ -215,7 +214,6 @@ SELECT in_flight.job_id
          AND operation.operation_key = member.operation_key
        WHERE job.status IN ('queued', 'running')
          AND operation.provider_dataset_id IN ({_OLD_DATASETS_SQL})
-         AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
          AND operation.is_enabled
       UNION
       SELECT job.job_id::text AS job_id
@@ -229,7 +227,6 @@ SELECT in_flight.job_id
          AND operation.operation_key = member.operation_key
        WHERE job.status IN ('queued', 'running')
          AND operation.provider_dataset_id IN ({_OLD_DATASETS_SQL})
-         AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
          AND operation.is_enabled
   ) AS in_flight
  ORDER BY in_flight.job_id
@@ -258,7 +255,6 @@ _ENABLED_OLD_LOAD_OPERATIONS_SQL: Final[str] = f"""
 SELECT operation.operation_key
   FROM provider_sync.provider_dataset_operations AS operation
  WHERE operation.provider_dataset_id IN ({_OLD_DATASETS_SQL})
-   AND operation.operation_kind IN {_LOAD_OPERATION_KINDS_SQL}
    AND operation.is_enabled
  ORDER BY operation.operation_key
 """
@@ -282,7 +278,7 @@ def upgrade() -> None:
     blockers: list[str] = []
     in_flight = [str(job_id) for job_id in bind.execute(text(_IN_FLIGHT_OLD_LOAD_JOBS_SQL)).scalars()]
     if in_flight:
-        blockers.append(f"queued/running job on an old load operation: {in_flight!r}")
+        blockers.append(f"queued/running job on an old operation: {in_flight!r}")
     notice_entities = [str(key) for key in bind.execute(text(_OLD_NOTICE_ENTITIES_SQL)).scalars()]
     if notice_entities:
         blockers.append(f"old KREX notice source entities would stay open forever: {notice_entities!r}")
@@ -295,7 +291,7 @@ def upgrade() -> None:
         bind.execute(text(statement))
     remaining = list(bind.execute(text(_ENABLED_OLD_LOAD_OPERATIONS_SQL)).scalars())
     if remaining:
-        raise RuntimeError(f"404: 옛 provider의 enabled load operation이 남았다: {remaining!r}")
+        raise RuntimeError(f"404: 옛 provider의 enabled operation이 남았다: {remaining!r}")
 
 
 def downgrade() -> None:

@@ -1,7 +1,7 @@
 {
   "transport_repository": "digitie/kor-travel-transport",
-  "transport_revision": "94e955f50c97459035110897229d91be0b9394f1",
+  "transport_revision": "cc9f9ec4f9c561ba1b756dd12f208d445ef2b9bd",
   "source_path": "docs/openapi.json",
-  "openapi_sha256": "fff3b2b0d3d9e0a230102880161d2a84cf4ead307f88471fe0024a2b7a99e383",
-  "note": "transport ADR-012 service exports. 갱신: transport docs/openapi.json을 새 revision에서 복사하고 이 두 값을 함께 바꾼다(ADR-106)."
+  "openapi_sha256": "fb47e673ed4611c9f8945b5e9b1ab451a388d7e59edc5303925ad4fec1a055d5",
+  "note": "transport ADR-012 service exports. 갱신은 손으로 하지 않는다: python scripts/repin_transport_contract.py --transport-repo <transport checkout> --revision <transport 머지 커밋> (ADR-106). transport 머지 전에는 --allow-unmerged로 브랜치 커밋에 임시 핀하고, 머지 뒤 머지 커밋으로 다시 핀한다."
 }

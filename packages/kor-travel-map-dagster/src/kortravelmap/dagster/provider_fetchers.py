@@ -39,6 +39,10 @@ from kortravelmap.providers.kor_travel_transport import (
     SERVICE_TOKEN_HEADER,
     TransportAirport,
     TransportExportContractError,
+    TransportExportEmpty,
+    TransportExportFailure,
+    TransportExportHidden,
+    TransportExportNotCurrent,
     TransportFuelStation,
     TransportHighwayIncident,
     TransportRestArea,
@@ -49,6 +53,8 @@ from kortravelmap.providers.kor_travel_transport import (
     parse_fuel_station,
     parse_rest_area,
     parse_rest_area_fuel_price,
+    require_current_collection,
+    require_fresh_incident_set,
 )
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -201,21 +207,75 @@ def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str
     return base_url.rstrip("/"), {SERVICE_TOKEN_HEADER: secret}
 
 
-def _transport_get(
-    client: httpx.AsyncClient, path: str, params: Mapping[str, Any]
-) -> Awaitable[httpx.Response]:
-    note_upstream_request()
-    return client.get(path, params=dict(params))
+_TRANSPORT_MAX_PAGES: Final[int] = 1000
+"""페이지 루프 상한. 최대 page size 1000이면 100만 행 — 주유소 약 1.2만·휴게소 수백의 수십 배다.
+넘으면 cursor가 순환하거나 계약이 깨진 것이다(같은 cursor 반복은 별도로 즉시 잡는다)."""
+
+_TRANSPORT_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({502, 504})
+"""재시도할 HTTP 상태 — 같은 호스트의 transport 재기동·게이트웨이 순간 장애. 503은 재시도하지
+않는다: transport가 "근거 수집이 현재가 아니다"라고 판정한 것이고 15초 안에 바뀌지 않는다."""
+
+_TRANSPORT_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
+"""재시도 간격 기준(테스트가 0으로 바꾼다). 다른 내부·provider 경계와 같은 값이다."""
+
+
+class _TransportTransientStatus(TransportExportFailure):
+    """재시도 대상 상태(502/504). 시도를 다 쓰면 그대로 전파된다."""
+
+
+def _transport_retryable(exc: BaseException) -> bool:
+    """연결·timeout 같은 전송 오류와 502/504만 재시도한다. 404·503·계약 위반은 즉시 전파."""
+    return isinstance(exc, httpx.TransportError | _TransportTransientStatus)
+
+
+def _utcnow() -> datetime:
+    """돌발 집합 나이 기준 시각(테스트가 고정한다)."""
+    return datetime.now(timezone.utc)
 
 
 def _raise_transport_status(response: httpx.Response, path: str) -> None:
-    if response.status_code == 404:
-        # transport는 토큰이나 Host가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012).
-        raise ProviderCredentialMissing(
-            f"kor-travel-transport {path}가 404다 — 토큰 불일치이거나 loopback이 아닌 Host로 "
-            "호출했다(base URL은 같은 호스트의 127.0.0.1:14001이어야 한다)."
+    status = response.status_code
+    if status == 404:
+        # transport는 토큰·접속 주소가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012). 404만으로는
+        # 셋을 가를 수 없다 — 자격증명 부재(설정 누락)는 요청 전에 ProviderCredentialMissing으로 난다.
+        raise TransportExportHidden(
+            f"kor-travel-transport {path}가 404다 — 셋 중 하나다: (1) 토큰이 transport "
+            "TRANSPORT_SERVICE_EXPORT_TOKEN과 다르다 (2) 접속 주소가 transport "
+            "SERVICE_EXPORT_ALLOWED_CLIENTS_CSV 밖이다(운영은 host network의 127.0.0.1, standalone은 "
+            "docker bridge 대역을 열어야 한다) (3) transport가 이 export가 없는 버전이다."
         )
+    if status == 503:
+        raise TransportExportNotCurrent(
+            f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
+            "stale이다(transport ADR-012). 이번 run은 아무것도 적재·삭제·종료하지 않는다."
+        )
+    if status in _TRANSPORT_TRANSIENT_STATUSES:
+        raise _TransportTransientStatus(f"kor-travel-transport {path}가 {status}다.")
     response.raise_for_status()
+
+
+async def _transport_get(
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any],
+    *,
+    budget: upstream_retry.RetryBudget,
+) -> httpx.Response:
+    """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다."""
+
+    async def call() -> httpx.Response:
+        note_upstream_request()
+        response = await client.get(path, params=dict(params))
+        _raise_transport_status(response, path)
+        return response
+
+    return await upstream_retry.retry_upstream_awaitable(
+        call,
+        label=f"kor-travel-transport {path}",
+        is_retryable=_transport_retryable,
+        base_delay=_TRANSPORT_RETRY_BASE_DELAY_SECONDS,
+        budget=budget,
+    )
 
 
 async def _iter_transport_export(
@@ -223,28 +283,50 @@ async def _iter_transport_export(
     path: str,
     parse: Callable[[Mapping[str, Any]], Any],
 ) -> AsyncIterator[Any]:
-    """cursor 페이지를 끝까지 읽어 파싱한 item을 낸다."""
+    """cursor 페이지를 끝까지 읽어 파싱한 item을 낸다.
+
+    각 페이지의 ``collection``이 현재가 아니면(이력 없음·실패·stale) 실패하고, 끝까지 0건이면
+    :class:`TransportExportEmpty`로 실패한다 — 이 export들은 완전 snapshot reconcile의 근거라서
+    빈·낡은 집합을 받아들이면 멀쩡한 feature가 지워진다. 소비자(``_record_list``)는 전부 모은 뒤에
+    적재하므로 뒤 페이지의 실패도 적재 전에 run을 멈춘다.
+    """
     base_url, headers = _transport_connection(settings)
+    budget = upstream_retry.RetryBudget()
     cursor: str | None = None
+    seen_cursors: set[str] = set()
+    total = 0
     async with httpx.AsyncClient(
         base_url=base_url,
         timeout=settings.kor_travel_transport_timeout_seconds,
         headers=headers,
     ) as client:
-        while True:
+        for _page_number in range(_TRANSPORT_MAX_PAGES):
             params: dict[str, Any] = {"limit": settings.kor_travel_transport_page_size}
             if cursor is not None:
                 params["cursor"] = cursor
-            response = await _transport_get(client, path, params)
-            _raise_transport_status(response, path)
+            response = await _transport_get(client, path, params, budget=budget)
             page = parse_export_page(response.json(), where=path)
+            require_current_collection(page.collection, where=path)
             for item in page.items:
+                total += 1
                 yield parse(item)
             if not page.has_more:
                 break
-            if page.next_cursor == cursor:
-                raise TransportExportContractError(f"{path}: next_cursor가 이전 cursor와 같다.")
+            assert page.next_cursor is not None  # parse_export_page가 보장한다.
+            if page.next_cursor in seen_cursors or page.next_cursor == cursor:
+                raise TransportExportContractError(
+                    f"{path}: next_cursor {page.next_cursor!r}가 이미 지난 cursor다(순환)."
+                )
+            seen_cursors.add(page.next_cursor)
             cursor = page.next_cursor
+        else:
+            raise TransportExportContractError(
+                f"{path}: {_TRANSPORT_MAX_PAGES}페이지를 넘었다 — cursor 계약 이상."
+            )
+    if total == 0:
+        raise TransportExportEmpty(
+            f"kor-travel-transport {path}가 0건이다. 완전 snapshot으로 전량 삭제하지 않고 실패한다."
+        )
 
 
 async def fetch_transport_fuel_stations(
@@ -282,7 +364,9 @@ async def fetch_transport_highway_incidents(
 
     transport는 수집이 실패했거나 30분 넘게 성공하지 못했으면 503을 낸다. 그때 이 fetcher가
     실패해야 notice reconcile이 오래된 집합으로 사건을 닫지 않는다 — 503을 빈 집합으로
-    바꾸면 활성 사건 전체가 해소로 오판된다.
+    바꾸면 활성 사건 전체가 해소로 오판된다. Map도 ``collection`` 플래그와 ``collected_at``
+    나이(30분)를 다시 잰다(:func:`require_fresh_incident_set`). 빈 목록은 그 검사를 통과한
+    뒤에만 "지금 돌발 없음"이라는 사실이다.
     """
     base_url, headers = _transport_connection(settings)
     async with httpx.AsyncClient(
@@ -290,9 +374,14 @@ async def fetch_transport_highway_incidents(
         timeout=settings.kor_travel_transport_timeout_seconds,
         headers=headers,
     ) as client:
-        response = await _transport_get(client, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE, {})
-        _raise_transport_status(response, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE)
+        response = await _transport_get(
+            client,
+            EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
+            {},
+            budget=upstream_retry.RetryBudget(),
+        )
         active = parse_active_incident_set(response.json())
+    require_fresh_incident_set(active, now=_utcnow())
     for incident in active.items:
         yield incident
 
@@ -307,8 +396,9 @@ async def fetch_transport_airports(
         timeout=settings.kor_travel_transport_timeout_seconds,
         headers=headers,
     ) as client:
-        response = await _transport_get(client, EXPORT_PATH_AIRPORTS, {})
-        _raise_transport_status(response, EXPORT_PATH_AIRPORTS)
+        response = await _transport_get(
+            client, EXPORT_PATH_AIRPORTS, {}, budget=upstream_retry.RetryBudget()
+        )
         airports = parse_airports(response.json())
     for airport in airports:
         yield airport

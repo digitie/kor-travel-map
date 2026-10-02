@@ -758,10 +758,10 @@ def _operation_fetcher_name(runner_source: str, operation_key: str) -> str:
 #: transport 헬퍼는 같은 플랫폼 내부 서비스로 가는 경로다 — 그중 요청을 보내는
 #: ``_transport_get``은 아래에서 **공항 export 경로로만** 허용한다(ADR-106).
 _ZERO_UPSTREAM_NAME_CALLS = frozenset(
-    {"cast", "dict", "_transport_connection", "_transport_get", "_raise_transport_status",
-     "parse_airports"}
+    {"cast", "dict", "_transport_connection", "_transport_get", "parse_airports"}
 )
-_ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset({"AsyncClient", "json", "aclose"})
+#: ``RetryBudget``은 재시도 횟수 장부를 만들 뿐 요청을 보내지 않는다(요청은 ``_transport_get``).
+_ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset({"AsyncClient", "json", "aclose", "RetryBudget"})
 #: ``_transport_get``이 부를 수 있는 유일한 경로 상수.
 _ZERO_UPSTREAM_TRANSPORT_PATH = "EXPORT_PATH_AIRPORTS"
 
@@ -907,7 +907,7 @@ def test_update_request_operation_is_one_zero_upstream_operation_everywhere() ->
         "note_upstream_request()",
         "async for page in client.iter_pages(client.departures):\n        pass",
         "_fetch_more(client)",
-        "await _transport_get(client, EXPORT_PATH_FUEL_STATIONS, {})",
+        "await _transport_get(client, EXPORT_PATH_FUEL_STATIONS, {}, budget=budget)",
         "async with httpx_mock.AsyncClient() as other:\n        pass",
     ],
 )

@@ -32,6 +32,18 @@
 > invalidation 시나리오가 만드는 POI target 하나의 소유·복원 journal이다. 아래 §2.4, §4의
 > KMA·sensor 서술은 이 날짜 이전 기록이다.
 
+> **2026-10-02 — 공항 operation이 kor-travel-transport로 옮겨졌다(ADR-106).** 아래 두 단락의
+> `krairport` 이름은 이전 기록이다. 지금 이름은 dataset `kor-travel-transport` / `transport_airports`,
+> operation `feature_place_transport_airports_job`, schedule
+> `feature_place_transport_airports_monthly_schedule`이다(§3.1 표). fetcher는 같은 호스트의
+> kor-travel-transport 내부 export(`GET /v1/service/exports/airports`)를 **한 번** 부른다 — 외부 provider·
+> data.go.kr 호출은 여전히 0이지만 **C7 기준 5가 GREEN이려면 transport가 떠 있고 Map code-server의
+> `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`이 transport `TRANSPORT_SERVICE_EXPORT_TOKEN`과 같아야
+> 한다.** 실패는 run의 `failure_kind`로 가른다: `transport_hidden`(404 — token·접속 주소·버전),
+> `transport_not_current`(503), `ProviderCredentialMissing`(Map token 미설정). 어느 경우도 아무것도
+> 적재·삭제하지 않으므로 원인을 고친 뒤 다시 돌리면 된다. schedule-write는 tick을 내보내지 않으므로
+> transport와 무관하다.
+
 > **2026-10-02 — 기준 5 복원(`ops-c7-update-request-write`).** KMA와 함께 사라졌던 "exact-scope
 > request → queue sensor → worker run" 경로를 upstream 호출이 0인 dataset 하나로 되살렸다:
 > `python-krairport-api` / `krairport_airports`, operation `feature_place_krairport_airports_job`,
@@ -73,7 +85,7 @@ C7은 다음 조건을 모두 만족해야 완료다.
    `mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
    기반의 C7 executor image에서 실행한다. executor label의 Git commit도 실행 checkout과
    같아야 한다.
-5. (2026-10-02 복원, krairport) Map code location에 `feature_update_request_worker` job이 정확히
+5. (2026-10-02 복원, 같은 날 ADR-106으로 `transport_airports`로 이름이 바뀜) Map code location에 `feature_update_request_worker` job이 정확히
    하나 있고 `feature_update_request_queue_sensor`가 RUNNING이다. spec이 만든 request는 생성
    응답에서 `queued`·Dagster run 없음이고, queue sensor가 집은 뒤 받은 run은 `jobName`이 worker,
    `dagster/code_location`이 Map, `dagster/sensor_name`이 queue sensor, request id·generation·scope
@@ -301,9 +313,9 @@ runner는 아래 순서를 지킨다.
 
 | 키 | 값 | 비고 |
 |---|---|---|
-| `E2E_C7_SCHEDULE` | `feature_place_krairport_airports_monthly_schedule` | schedule-write allowlist |
+| `E2E_C7_SCHEDULE` | `feature_place_transport_airports_monthly_schedule` | schedule-write allowlist(ADR-106 이름) |
 | `E2E_C7_UPDATE_REQUEST_WRITE` | `1` | **2026-10-02 신규.** 기준 5의 실제 prod 쓰기 opt-in |
-| `E2E_C7_UPDATE_REQUEST_OPERATION` | `feature_place_krairport_airports_job` | **2026-10-02 신규.** 러너 allowlist와 정확히 같아야 한다 |
+| `E2E_C7_UPDATE_REQUEST_OPERATION` | `feature_place_transport_airports_job` | **2026-10-02 신규.** 러너 allowlist와 정확히 같아야 한다(ADR-106 이름). transport가 떠 있고 Map token이 맞아야 GREEN |
 | `E2E_DAGSTER_URL` · `E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256` | 공개 GraphQL URL과 그 sha256 | `scripts/n150/README.md` |
 | `E2E_DAGSTER_BASIC_AUTH_FILE` | `/root/.d2-dagster-basic-auth` | **2026-10-02 다시 받음.** 공유 plane gateway일 때만, root `0600` `user:password` 한 줄 |
 | `E2E_LIVE_ALLOW_PROD` · `E2E_ADMIN_WRITE` · `E2E_C7_READ_AUTH_WRITE` · `E2E_DAGSTER_WRITE` | `1` | 기존 opt-in |
@@ -345,7 +357,7 @@ sudo python3 scripts/stop-c7-prod-live-container.py
    `requests.json`(기준 5)은 되돌릴 쓰기가 없다 — `request_id`가 있으면 그 request가 terminal인지
    파이프라인 화면에서 확인하고, queued로 남았으면 취소한다(spec의 실패 정리가 이미 시도한다).
    `request_id`가 없고 phase가 `create_intent`·`create_response_lost`면 같은 `idempotency_key`의
-   request가 생겼을 수 있으니 krairport dataset의 최신 실행 reason에 journal `run_id`가 있는지 본다.
+   request가 생겼을 수 있으니 `transport_airports` dataset의 최신 실행 reason에 journal `run_id`가 있는지 본다.
    `create_rejected`는 남의 활성 request 때문에 아무것도 만들지 않은 것이다.
 5. 공개 UI session으로 schedule/target/POI의 최종 read-only equality와 owned scope 0건을
    다시 검증한다.

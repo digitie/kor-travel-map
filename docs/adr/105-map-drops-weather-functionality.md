@@ -64,7 +64,8 @@
   공용 함수 `provider_sync.notice_lineage_key`는 남겼다(입력이 다시 생길 수 없다). 백업 단계 없음.
 - **UI**: weather 패널·kind 토글·marker 분기·fetcher 삭제, 지도 기본 kind `["notice"]`, 타입 재생성.
 - **C7/D2**: C7 러너에서 KMA spec 넷과 KMA 상태 저널·Dagster 직접 호출을 걷어내고, read-auth·schedule-write
-  (`feature_place_krairport_airports_monthly_schedule` — 번들 정적 데이터라 upstream 호출 0)·POI `@c7-causal`로
+  (`feature_place_krairport_airports_monthly_schedule` — 번들 정적 데이터라 upstream 호출 0; 2026-10-02 ADR-106로
+  `feature_place_transport_airports_monthly_schedule`이 되었고 transport 내부 export 한 번을 부른다)·POI `@c7-causal`로
   돌린다. D2 fixture는 price feature 하나만 심는다.
 - **재도입 방지**: `packages/kor-travel-map-dagster/tests/test_map_dagster_has_no_weather.py`,
   `packages/kor-travel-map-api/tests/test_api_serves_no_weather.py`,

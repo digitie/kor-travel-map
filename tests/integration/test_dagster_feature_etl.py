@@ -102,6 +102,7 @@ class _OilPrice:
     product_code: str
     price: Decimal | None
     observed_at: datetime
+    collected_at: datetime
     raw: dict[str, Any]
 
 
@@ -389,12 +390,14 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                             product_code="B027",
                             price=Decimal(1820),
                             observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
+                            collected_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
                             raw={"PRODCD": "B027", "PRICE": "1820"},
                         ),
                         _OilPrice(
                             product_code="D047",
                             price=Decimal(1650),
                             observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
+                            collected_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
                             raw={"PRODCD": "D047", "PRICE": "1650"},
                         ),
                     ),

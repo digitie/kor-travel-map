@@ -15,6 +15,14 @@
   중단) 옛 적재를 끄고 계보 함수의 돌발 분기를 옮긴다.
 - 지운 것: OpiNet 호출 예산·scope 모드·KST 일일 coalescing·POI target scope, krex 이중 snapshot 안정성 검사, krex rate
   gate 선언, krex/opinet 쿼터 예외 선언, 세 provider 핀, `KOR_TRAVEL_MAP_OPINET_*`·`KOR_TRAVEL_MAP_KREX_*` env.
+- 적대 리뷰 반영(같은 날): 신선도를 두 겹으로 — transport는 이력 없음·실패·stale이면 모든 export에서 503,
+  Map은 `collection` 플래그·완전 snapshot 0건·돌발 `collected_at` 30분을 다시 재고 `failure_kind`
+  (`transport_not_current`·`transport_empty`·`transport_hidden`)로 실패한다(아무것도 지우거나 닫지 않는다).
+  404는 자격증명 부재와 갈랐다. 유가 `observed_at`은 transport `collected_at`(마지막 확인)이다 — 오피넷
+  `*_DT`(가격을 바꾼 때)를 쓰면 가격을 유지하는 주유소가 4일 지평선 밖으로 사라진다. 유가 job은 주유소를
+  역지오코딩하지 않는다(locator로 부모만). UI "과거 날짜" 표식은 가격 도메인으로 고른다. 404 migration은
+  옛 preview operation도 끈다. 페이지 상한·cursor 순환 검출·전송 오류 재시도를 더했다.
+  `scripts/repin_transport_contract.py`가 vendored 계약 핀을 기계적으로 바꾼다.
 - C7: 공항 operation은 이제 transport 내부 export를 한 번 부른다. 계약 테스트를 "외부 provider 호출 0"으로 고쳐 적었다
   (`_transport_get`은 공항 export 상수로만 허용, 다른 경로는 빨강).
 - 계약: transport `docs/openapi.json`을 `contracts/kor-travel-transport/openapi.json`으로 vendoring하고 `PIN.json`에

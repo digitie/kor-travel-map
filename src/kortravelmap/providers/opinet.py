@@ -68,9 +68,12 @@ from kortravelmap.providers.kor_travel_transport import (
 )
 
 __all__ = [
+    "OPINET_STATION_SOURCE_ENTITY_TYPE",
+    "FuelStationPlaceLocator",
     "OpinetStationItem",
     "OpinetStationPriceRow",
     "OpinetStationWithPrices",
+    "fuel_station_place_locator_from_rows",
     "station_prices_to_features_and_values",
     "stations_to_bundles",
     # 메타
@@ -86,6 +89,9 @@ __all__ = [
 
 _OPINET_STATION_ENTITY_TYPE: Final[str] = "fuel_station"
 """``source_records.source_entity_type`` — 주유소."""
+
+OPINET_STATION_SOURCE_ENTITY_TYPE: Final[str] = _OPINET_STATION_ENTITY_TYPE
+"""가격 적재가 주유소 place locator를 조회할 때 쓰는 ``source_entity_type``."""
 
 _OPINET_PRICE_ENTITY_TYPE: Final[str] = "fuel_station_price"
 """``source_records.source_entity_type`` — 주유소 유종별 최신 가격 묶음."""
@@ -168,6 +174,8 @@ class OpinetStationPriceRow(Protocol):
     product_code: str
     price: Decimal | None
     observed_at: datetime
+    collected_at: datetime
+    """transport가 이 가격을 현재가로 마지막으로 확인한 시각 — ``PriceValue.observed_at``."""
     raw: Mapping[str, Any]
 
 
@@ -212,25 +220,36 @@ def _source_raw_or_fallback(
 # -- 주유소 + 유종별 가격 → price Feature + PriceValue --------------------
 
 
-async def _station_prices_to_bundle_and_values(
+FuelStationPlaceLocator = Mapping[str, str]
+"""주유소 자연키(uni_id) → 이미 적재된 주유소 place ``feature_id``."""
+
+
+def fuel_station_place_locator_from_rows(
+    rows: Iterable[tuple[str, str, float, float]],
+) -> dict[str, str]:
+    """``AsyncKorTravelMapClient.list_primary_place_locator`` 행 → ``uni_id → place feature_id``.
+
+    가격 적재는 주유소 place를 다시 만들지 않는다(역지오코딩은 place job의 몫, ADR-106 리뷰 M5).
+    이미 적재된 place의 ``feature_id``만 ``parent_feature_id``로 쓴다. 같은 자연키 중복은 첫 행.
+    """
+    locator: dict[str, str] = {}
+    for source_entity_id, feature_id, _lon, _lat in rows:
+        key = (source_entity_id or "").strip()
+        if key and key not in locator:
+            locator[key] = feature_id
+    return locator
+
+
+def _station_prices_to_bundle_and_values(
     station: OpinetStationWithPrices,
     *,
     fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None,
-    address_resolver: AddressResolver | None,
-) -> tuple[FeatureBundle, FeatureBundle, list[PriceValue]] | None:
-    # 반환: (주유소 place 부모 bundle, 가격 price bundle, PriceValue 목록).
+    place_locator: FuelStationPlaceLocator,
+) -> tuple[FeatureBundle, list[PriceValue]] | None:
     rows = list(station.prices)
     priced = [row for row in rows if row.price is not None]
     if not priced:
         return None
-    station_bundle = await _station_item_to_bundle(
-        station,
-        fetched_at=fetched_at,
-        reverse_geocoder=reverse_geocoder,
-        address_resolver=address_resolver,
-    )
-    station_feature = station_bundle.feature
 
     raw_data: dict[str, Any] = {
         "uni_id": station.uni_id,
@@ -245,7 +264,7 @@ async def _station_prices_to_bundle_and_values(
         raw_payload_hash=payload_hash,
     )
     feature_id = make_feature_id(
-        bjd_code=station_feature.address.bjd_code,
+        bjd_code=None,
         kind=FeatureKind.PRICE.value,
         category=OPINET_STATION_CATEGORY,
         source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_FUEL_PRICES}",
@@ -257,6 +276,7 @@ async def _station_prices_to_bundle_and_values(
         assert row.price is not None
         prodcd = row.product_code.strip()
         product_key = OPINET_PRODUCT_KEY_MAP.get(prodcd, prodcd.lower())
+        provider_updated_at = getattr(row, "provider_updated_at", None)
         values.append(
             PriceValue(
                 feature_id=feature_id,
@@ -265,34 +285,49 @@ async def _station_prices_to_bundle_and_values(
                 product_key=product_key,
                 product_name=OPINET_PRODUCT_NAME_KO.get(product_key),
                 source_product_key=prodcd,
-                observed_at=row.observed_at,
+                # 관측 시각 = transport가 이 값을 오피넷 현재가로 마지막으로 확인한 수집 시각.
+                # 오피넷 갱신시각(``*_DT``)은 그 유종 가격을 **바꾼** 때라 며칠씩 묵는다 — 그것을
+                # 관측 시각으로 쓰면 가격을 유지 중인 주유소가 현재가 지평선(4일) 밖으로 사라진다.
+                # 갱신시각은 payload ``provider_updated_at``으로 보존한다(ADR-106).
+                observed_at=row.collected_at,
                 value_number=row.price,
                 unit="KRW/L",
-                normalization_version="opinet-v1.0",
+                normalization_version="opinet-v1.1",
                 payload={
                     "uni_id": station.uni_id,
                     "station_name": station.name,
                     "prodcd": prodcd,
                     "product_key": product_key,
                     "price": str(row.price),
-                    "observed_at": row.observed_at.isoformat(),
+                    "observed_at": row.collected_at.isoformat(),
+                    "provider_updated_at": (
+                        provider_updated_at.isoformat()
+                        if isinstance(provider_updated_at, datetime)
+                        else None
+                    ),
                 },
                 source_record_key=source_record_key,
             )
         )
 
+    coord: Coordinate | None = None
+    if station.lon is not None and station.lat is not None:
+        coord = Coordinate(lon=Decimal(str(station.lon)), lat=Decimal(str(station.lat)))
+    road_address = normalize_korean_text(station.address_road)
+    jibun_address = normalize_korean_text(station.address_jibun)
     name_normalized = normalize_korean_text(station.name) or station.name
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=station.uni_id,
         kind=FeatureKind.PRICE,
         name=f"{name_normalized} 유가",
-        coord=station_feature.coord,
-        address=station_feature.address,
+        coord=coord,
+        address=Address(road=road_address or jibun_address),
         category=OPINET_STATION_CATEGORY,
         marker_icon=OPINET_STATION_MARKER_ICON,
         marker_color=OPINET_STATION_MARKER_COLOR,
-        parent_feature_id=station_feature.feature_id,
+        # place가 아직 없으면(새 주유소, 주간 place job 전) 부모 없이 적재하고 다음 실행에서 붙는다.
+        parent_feature_id=place_locator.get(station.uni_id),
         detail=None,
     )
     source_record = SourceRecord(
@@ -313,44 +348,36 @@ async def _station_prices_to_bundle_and_values(
         confidence=100,
     )
     return (
-        station_bundle,
         FeatureBundle(feature=feature, source_record=source_record, source_link=source_link),
         values,
     )
 
 
-async def station_prices_to_features_and_values(
+def station_prices_to_features_and_values(
     items: Iterable[OpinetStationWithPrices],
     *,
     fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None = None,
-    address_resolver: AddressResolver | None = None,
-) -> tuple[list[FeatureBundle], list[FeatureBundle], list[PriceValue]]:
-    """주유소 + 유종별 최신 가격 → (주유소 place 부모 bundle, price Feature, PriceValue).
+    place_locator: FuelStationPlaceLocator,
+) -> tuple[list[FeatureBundle], list[PriceValue]]:
+    """주유소 + 유종별 최신 가격 → (price Feature bundle, PriceValue).
 
-    가격 feature는 ``parent_feature_id``로 주유소 place feature를 가리킨다. 그 부모 bundle을
-    함께 반환해 호출자가 **가격보다 먼저** 적재하게 한다(FK). 판매가가 하나도 없는 주유소는
-    가격 feature를 만들지 않는다. place bundle은 ``feature_id``로 dedupe한다.
+    역지오코딩·주소 보강을 하지 않는다 — 좌표는 transport가 넘긴 WGS84 그대로, 부모는
+    ``place_locator``(이미 적재된 주유소 place)에서 찾는다. 주유소 place 적재·주소 보강은
+    place job(``feature_place_transport_fuel_stations``, geo-heavy pool)만 한다(ADR-106 리뷰 M5).
+    판매가가 하나도 없는 주유소는 가격 feature를 만들지 않는다.
     """
-    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
-    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
-    station_bundles: dict[str, FeatureBundle] = {}
     bundles: list[FeatureBundle] = []
     values: list[PriceValue] = []
     for item in items:
-        converted = await _station_prices_to_bundle_and_values(
-            item,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-            address_resolver=resolver,
+        converted = _station_prices_to_bundle_and_values(
+            item, fetched_at=fetched_at, place_locator=place_locator
         )
         if converted is None:
             continue
-        station_bundle, bundle, item_values = converted
-        station_bundles.setdefault(station_bundle.feature.feature_id, station_bundle)
+        bundle, item_values = converted
         bundles.append(bundle)
         values.extend(item_values)
-    return list(station_bundles.values()), bundles, values
+    return bundles, values
 
 
 # -- 주유소 place ------------------------------------------------------------

@@ -7469,6 +7469,16 @@
               }
             },
             "description": "애플리케이션 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "애플리케이션 오류"
           }
         },
         "summary": "Export Fuel Stations",
@@ -7604,6 +7614,16 @@
               }
             },
             "description": "애플리케이션 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "애플리케이션 오류"
           }
         },
         "summary": "Export Rest Area Fuel Prices",
@@ -7679,6 +7699,16 @@
             "description": "요청 검증 오류"
           },
           "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "애플리케이션 오류"
+          },
+          "503": {
             "content": {
               "application/problem+json": {
                 "schema": {

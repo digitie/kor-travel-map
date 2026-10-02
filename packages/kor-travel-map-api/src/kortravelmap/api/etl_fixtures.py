@@ -227,8 +227,8 @@ async def _convert_transport_fuel_stations(items: Sequence[Any]) -> list[Any]:
 
 
 async def _convert_transport_fuel_prices(items: Sequence[Any]) -> list[Any]:
-    _stations, _bundles, values = await station_prices_to_features_and_values(
-        items, fetched_at=_now()
+    _bundles, values = station_prices_to_features_and_values(
+        items, fetched_at=_now(), place_locator={}
     )
     return [v.model_dump(mode="json") for v in values]
 

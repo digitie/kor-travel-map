@@ -15,13 +15,18 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
   "성공"으로 기록되고 누락이 숨는다.
 - 계약 기계 정본은 vendoring한 ``contracts/kor-travel-transport/openapi.json``이다
   (``contracts/kor-travel-transport/PIN.json``의 SHA-256과 transport revision에 결박).
+- **신선도는 두 겹으로 지킨다.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면
+  503을 낸다(transport ADR-012). Map은 그것만 믿지 않고 200 본문의 ``collection``도 다시
+  확인하며(:func:`require_current_collection`), 돌발 집합은 ``collected_at`` 나이까지 잰다
+  (:func:`require_fresh_incident_set`). 어긋나면 :class:`TransportExportNotCurrent`로 실패한다 —
+  낡거나 빈 집합을 받아들이면 완전 snapshot reconcile이 멀쩡한 feature를 지우거나 사건을 닫는다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
@@ -38,10 +43,16 @@ __all__ = [
     "EXPORT_PATH_REST_AREAS",
     "EXPORT_PATH_REST_AREA_FUEL_PRICES",
     "KOR_TRAVEL_TRANSPORT_PROVIDER_NAME",
+    "INCIDENT_SET_MAX_AGE",
     "SERVICE_TOKEN_HEADER",
     "TransportAirport",
+    "TransportCollection",
     "TransportCoordinate",
     "TransportExportContractError",
+    "TransportExportEmpty",
+    "TransportExportFailure",
+    "TransportExportHidden",
+    "TransportExportNotCurrent",
     "TransportExportPage",
     "TransportFuelPrice",
     "TransportFuelStation",
@@ -52,10 +63,13 @@ __all__ = [
     "parse_active_incident_set",
     "parse_airport",
     "parse_airports",
+    "parse_collection",
     "parse_export_page",
     "parse_fuel_station",
     "parse_rest_area",
     "parse_rest_area_fuel_price",
+    "require_current_collection",
+    "require_fresh_incident_set",
 ]
 
 KOR_TRAVEL_TRANSPORT_PROVIDER_NAME: Final[str] = "kor-travel-transport"
@@ -84,8 +98,41 @@ EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
 
 
+INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
+"""돌발 활성 집합의 최대 나이. transport의 503 기준(5분 수집의 6배)과 같은 값이다."""
+
+
 class TransportExportContractError(ValueError):
     """transport export 응답이 vendored 계약과 어긋난다."""
+
+    failure_kind: str = "transport_contract"
+
+
+class TransportExportFailure(RuntimeError):
+    """transport export를 적재 근거로 쓸 수 없다. ``failure_kind``로 원인을 가른다.
+
+    어느 하위 클래스든 **아무것도 적재·삭제·종료하지 않고** run을 실패시킨다.
+    """
+
+    failure_kind: str = "transport_unavailable"
+
+
+class TransportExportNotCurrent(TransportExportFailure):
+    """근거 수집의 이력이 없거나, 실패했거나, stale이다(503이거나 ``collection`` 플래그)."""
+
+    failure_kind = "transport_not_current"
+
+
+class TransportExportEmpty(TransportExportFailure):
+    """완전 snapshot이어야 할 export가 0건이다 — 전량 삭제로 읽지 않는다."""
+
+    failure_kind = "transport_empty"
+
+
+class TransportExportHidden(TransportExportFailure):
+    """transport가 경로를 숨겼다(404): 토큰 불일치, 허용 대역 밖 접속, 또는 export가 없는 버전."""
+
+    failure_kind = "transport_hidden"
 
 
 # -- 입력 shape ---------------------------------------------------------------
@@ -104,7 +151,11 @@ class TransportFuelPrice:
     product_code: str
     price: Decimal | None
     provider_updated_at: datetime | None
+    """오피넷이 그 유종 가격을 마지막으로 바꾼 시각(``B027_DT`` 등). 가격 자체의 갱신 시각이다."""
     observed_at: datetime
+    """transport 원본 행의 관측 시각 — ``provider_updated_at``이 있으면 그것, 없으면 그 행의 수집 시각."""
+    collected_at: datetime
+    """transport가 이 가격을 오피넷 현재가로 **마지막으로 확인한** 수집 시각."""
     raw: Mapping[str, Any]
 
 
@@ -203,13 +254,23 @@ class TransportAirport:
 
 
 @dataclass(frozen=True, slots=True)
+class TransportCollection:
+    """export 근거 수집의 상태(``collection``)."""
+
+    source: str
+    last_success_at: datetime | None
+    failed: bool
+    stale: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TransportExportPage:
     """``{items, next_cursor, has_more, collection}`` 페이지."""
 
     items: tuple[Mapping[str, Any], ...]
     next_cursor: str | None
     has_more: bool
-    collection: Mapping[str, Any]
+    collection: TransportCollection
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +279,7 @@ class TransportIncidentActiveSet:
 
     collected_at: datetime
     items: tuple[TransportHighwayIncident, ...]
+    collection: TransportCollection
 
 
 # -- 엄격 파싱 ------------------------------------------------------------------
@@ -312,6 +374,58 @@ def _raw(item: Mapping[str, Any], where: str) -> Mapping[str, Any]:
     return _mapping(value, f"{where}.raw")
 
 
+def _strict_bool(item: Mapping[str, Any], key: str, where: str) -> bool:
+    value = item.get(key)
+    if not isinstance(value, bool):
+        raise TransportExportContractError(f"{where}.{key}: boolean이어야 한다.")
+    return value
+
+
+def parse_collection(value: Any, *, where: str) -> TransportCollection:
+    """``collection``을 엄격히 읽는다. 플래그가 빠지면 신선도를 알 수 없으니 계약 위반이다."""
+    body = _mapping(value, f"{where}.collection")
+    return TransportCollection(
+        source=_required_text(body, "source", f"{where}.collection"),
+        last_success_at=_datetime(body, "last_success_at", f"{where}.collection", required=False),
+        failed=_strict_bool(body, "failed", f"{where}.collection"),
+        stale=_strict_bool(body, "stale", f"{where}.collection"),
+    )
+
+
+def require_current_collection(collection: TransportCollection, *, where: str) -> None:
+    """이력 없음·실패·stale이면 :class:`TransportExportNotCurrent`.
+
+    transport는 이 경우 503을 내야 한다(ADR-012). 200인데 플래그가 서 있으면 transport가
+    계약을 어긴 것이지만, 결과는 같다 — 그 집합으로 reconcile하지 않는다.
+    """
+    if collection.last_success_at is None:
+        raise TransportExportNotCurrent(f"{where}: {collection.source} 수집 이력이 없다.")
+    if collection.failed:
+        raise TransportExportNotCurrent(f"{where}: {collection.source} 마지막 수집이 실패했다.")
+    if collection.stale:
+        raise TransportExportNotCurrent(f"{where}: {collection.source} 수집이 stale이다.")
+
+
+def require_fresh_incident_set(
+    active: TransportIncidentActiveSet,
+    *,
+    now: datetime,
+    max_age: timedelta = INCIDENT_SET_MAX_AGE,
+) -> None:
+    """돌발 집합이 지금의 활성 집합인지 Map 쪽에서도 잰다(transport 503에만 기대지 않는다)."""
+    require_current_collection(active.collection, where="highway-incidents/active")
+    age = now - active.collected_at
+    if age > max_age:
+        raise TransportExportNotCurrent(
+            f"highway-incidents/active: collected_at이 {age}만큼 지났다(상한 {max_age})."
+        )
+    if age < -max_age:
+        # 시계가 크게 어긋났다 — 미래 집합을 "지금"으로 믿으면 종료 판단이 틀어진다.
+        raise TransportExportNotCurrent(
+            f"highway-incidents/active: collected_at이 {-age}만큼 미래다(시계 불일치)."
+        )
+
+
 def parse_export_page(payload: Any, *, where: str) -> TransportExportPage:
     """페이지 envelope을 검사한다. ``has_more=true``면 새 ``next_cursor``가 있어야 한다."""
     page = _mapping(payload, where)
@@ -328,7 +442,7 @@ def parse_export_page(payload: Any, *, where: str) -> TransportExportPage:
         items=tuple(_mapping(item, f"{where}.items[]") for item in items),
         next_cursor=next_cursor if isinstance(next_cursor, str) else None,
         has_more=has_more,
-        collection=_mapping(page.get("collection"), f"{where}.collection"),
+        collection=parse_collection(page.get("collection"), where=where),
     )
 
 
@@ -347,6 +461,7 @@ def parse_fuel_station(item: Mapping[str, Any]) -> TransportFuelStation:
                 price, "provider_updated_at", f"{where}.prices[]", required=False
             ),
             observed_at=_required_datetime(price, "observed_at", f"{where}.prices[]"),
+            collected_at=_required_datetime(price, "collected_at", f"{where}.prices[]"),
             raw=dict(price),
         ))
     lpg = next((price for price in prices if price.product_code == "K015"), None)
@@ -444,6 +559,7 @@ def parse_active_incident_set(payload: Any) -> TransportIncidentActiveSet:
     return TransportIncidentActiveSet(
         collected_at=_required_datetime(body, "collected_at", where),
         items=parsed,
+        collection=parse_collection(body.get("collection"), where=where),
     )
 
 

@@ -42,15 +42,41 @@
    provider 정체성은 `kor-travel-transport`다.
 4. **계약 고정.** transport `docs/openapi.json`(transport CI `--check`)을
    `contracts/kor-travel-transport/openapi.json`으로 vendoring하고 `PIN.json`에 transport revision과
-   SHA-256을 적는다. golden fixture(`contracts/kor-travel-transport/golden/*.json`)가 실 파서를 지나고, vendored
+   SHA-256을 적는다. 갱신은 손으로 하지 않는다 — `python scripts/repin_transport_contract.py --transport-repo
+   <checkout> --revision <transport 머지 커밋>`이 두 값을 함께 바꾸고, `origin/main`에 머지되지 않은 revision은
+   `--allow-unmerged` 없이는 거부한다. Map 머지 전에 transport 머지 커밋으로 다시 핀한다. golden fixture(`contracts/kor-travel-transport/golden/*.json`)가 실 파서를 지나고, vendored
    schema의 required 필드를 모두 가진다(`tests/unit/test_providers_kor_travel_transport.py`).
 5. **인증.** `X-Kor-Travel-Transport-Service-Token`(Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` =
-   transport `TRANSPORT_SERVICE_EXPORT_TOKEN`). transport는 토큰과 loopback Host가 모두 맞아야 응답하고 아니면
-   404다. Map dagster는 같은 호스트의 `http://127.0.0.1:14001`로 부른다. 404는 "토큰 또는 Host 불일치"로
-   번역해 실패한다.
-6. **돌발 종료 의미 보존.** transport 활성 집합은 마지막 성공 수집이 본 사건 전체다. 수집이 실패했거나 30분 넘게
-   성공하지 못했으면 transport가 503을 내고 Map fetcher가 실패한다 — 오래된 집합으로 사건을 닫지 않는다.
-   Map 쪽 reconcile(#632)·watermark·DB lock은 그대로다.
+   transport `TRANSPORT_SERVICE_EXPORT_TOKEN`). transport는 토큰과 **접속 주소**(peer, 기본 loopback —
+   `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`)가 모두 맞아야 응답하고 아니면 404다. Map code-server는 host
+   network에서 `http://127.0.0.1:14001`로 부른다. 404는 설정 누락(`ProviderCredentialMissing`, 요청 전)과
+   가른다 — `TransportExportHidden`(`failure_kind=transport_hidden`: token·접속 주소·버전 중 하나).
+6. **신선도 계약 — 두 겹, 모든 dataset.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면 503을
+   낸다(transport ADR-012: 주유소 24시간, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
+   - 매 페이지 `collection`(`last_success_at`·`failed`·`stale`)을 엄격히 읽고 하나라도 어긋나면
+     `TransportExportNotCurrent`(`transport_not_current`)로 실패한다. 503도 같은 예외다.
+   - 완전 snapshot export(주유소·휴게소·휴게소 유가)가 끝까지 0건이면 `TransportExportEmpty`
+     (`transport_empty`)로 실패한다 — 0건을 전량 삭제로 읽지 않는다. 휴게소 수집이 꺼진 transport
+     (`REST_AREA_COLLECTION_ENABLED=false`)는 이력이 없어 503이므로 삭제로 번지지 않는다.
+   - 돌발 집합은 Map도 `collected_at` 나이(30분, 시계 역행 30분)를 잰다(`require_fresh_incident_set`).
+     빈 목록은 그 검사를 통과한 뒤에만 "지금 돌발 없음"이다.
+   - fetcher는 전부 모은 뒤 적재하므로(`_record_list`) 뒤 페이지의 실패도 적재·reconcile 전에 run을 멈춘다.
+     실패한 run은 아무것도 적재·삭제·종료하지 않는다. Map 쪽 reconcile(#632)·watermark·DB lock은 그대로다.
+   - 전송 오류·502/504만 유한 재시도(경계당 2회, run 예산 공유)하고, 페이지 수 상한과 이미 본 cursor
+     집합으로 cursor 순환을 잡는다.
+6a. **유가 관측 시각.** transport 주유소 가격 행에는 셋이 있다: `provider_updated_at`(오피넷 `*_DT` — 그 유종
+   가격을 **바꾼** 시각), `observed_at`(transport 원본 행 키 — `provider_updated_at`이 있으면 그것, 없으면 그 행의
+   수집 시각), `collected_at`(transport가 이 값을 현재가로 **마지막으로 확인한** 수집 시각). Map
+   `PriceValue.observed_at`은 `collected_at`이다. Map의 현재가 지평선(`KOR_TRAVEL_MAP_PRICE_STALE_HIDE_DAYS`,
+   기본 4일)은 "이 값이 아직 현재가라는 근거가 있는가"를 묻는데, 가격을 유지 중인 주유소의 `*_DT`는 며칠~몇 주
+   묵으므로 그것을 쓰면 멀쩡한 현재가가 지평선 밖으로 사라진다. 오피넷 갱신시각은 PriceValue payload
+   `provider_updated_at`으로 보존한다(normalization `opinet-v1.1`). 휴게소 유가도 같은 뜻(transport 수집 시각)이다.
+   관리 UI의 "과거 날짜" 표식은 provider가 아니라 가격 도메인 `opinet_gas_station`으로 고른다 — 이제 휴게소
+   유가도 같은 provider에서 온다.
+6b. **역지오코딩은 place job만.** 주유소 유가 job(일 1회)은 주유소 place를 다시 만들지 않는다. 가격 feature의
+   부모는 이미 적재된 place의 locator(`list_primary_place_locator`)로 찾고 좌표는 transport가 넘긴 WGS84를 쓴다.
+   place가 없는 새 주유소는 부모 없이 적재되고 다음 실행에 붙는다. 역지오코딩하는 place job(주 1회)은
+   geo-heavy pool 아래서 돈다.
 7. **지운 것.** OpiNet 호출 예산·scope 모드·KST 일일 coalescing·POI cache target scope, krex 돌발 이중 snapshot
    안정성 검사(transport가 수집 단위로 일관성을 진다), krex rate gate(장치는 남기고 선언 0), krex·opinet 쿼터
    예외 선언, 세 provider 핀과 env(`KOR_TRAVEL_MAP_OPINET_*`, `KOR_TRAVEL_MAP_KREX_*`).
@@ -63,4 +89,13 @@
   값처럼 적재하지 않는다).
 - (−) OpiNet 원천이 브라우저 수집(`opinet.experimental`)이라 공식 API보다 원천 변화에 약하다(소유자 수용).
 - (−) C7 운영 게이트가 쓰던 "upstream 0" 안전 operation(공항)이 이제 transport 내부 export를 한 번 부른다.
-  외부 provider 호출은 여전히 0이다 — 게이트 계약을 그 뜻으로 고쳐 적었다.
+  외부 provider 호출은 여전히 0이다 — 게이트 계약을 그 뜻으로 고쳐 적었다. 기준 5가 GREEN이려면 transport가
+  떠 있고 token이 맞아야 한다(`docs/runbooks/c7-prod-live-e2e.md`).
+- (−) migration 404는 옛 dataset의 operation을 종류 불문(`refresh`·`feature_load`·`preview`)으로 끈다(402와 같다).
+
+### 배포 순서
+
+transport(0022 → 0023, `TRANSPORT_SERVICE_EXPORT_TOKEN`·`REST_AREA_COLLECTION_ENABLED=true`, 휴게소 수집 1회 성공
+확인) → Map 머지(transport 머지 커밋으로 repin) → Map pinned pair(migration 404)와 Manager compose(token, 옛
+OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 반영하면 옛 Map job이 키 없이 실패하고, Map만
+먼저 올리면 token 없이 실패한다(어느 쪽도 데이터를 지우지 않는다).
