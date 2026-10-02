@@ -1,8 +1,7 @@
-"""kor-travel-transport export 계약(ADR-106) — 파서·Protocol 결박·변환·vendored 계약 핀."""
+"""kor-travel-transport export 소비(ADR-106) — 엄격 파서·Protocol 결박·변환."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -34,76 +33,12 @@ from kortravelmap.providers.opinet import (
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_DIR = ROOT / "contracts" / "kor-travel-transport"
-GOLDEN_DIR = CONTRACT_DIR / "golden"
+GOLDEN_DIR = ROOT / "tests" / "fixtures" / "kor-travel-transport"
 FETCHED_AT = datetime(2026, 10, 2, 9, 0, tzinfo=UTC)
 
 
 def _golden(name: str) -> dict[str, Any]:
     return json.loads((GOLDEN_DIR / name).read_text(encoding="utf-8"))
-
-
-# -- vendored 계약 핀 ---------------------------------------------------------
-
-
-def test_vendored_openapi_matches_its_pin() -> None:
-    """vendored OpenAPI가 PIN.json의 SHA-256과 같다 — 손으로 고치면 빨개진다."""
-    pin = json.loads((CONTRACT_DIR / "PIN.json").read_text(encoding="utf-8"))
-    body = (CONTRACT_DIR / "openapi.json").read_bytes()
-    assert hashlib.sha256(body).hexdigest() == pin["openapi_sha256"]
-    assert len(pin["transport_revision"]) == 40
-
-
-def test_vendored_openapi_declares_503_on_every_snapshot_export() -> None:
-    """Map은 503을 "근거 수집이 현재가 아님"으로 읽는다(transport ADR-013).
-
-    그 의미가 vendored 계약에 적혀 있어야 한다.
-    """
-    spec = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))
-    for path in (
-        transport.EXPORT_PATH_FUEL_STATIONS,
-        transport.EXPORT_PATH_REST_AREAS,
-        transport.EXPORT_PATH_REST_AREA_FUEL_PRICES,
-        transport.EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
-    ):
-        assert "503" in spec["paths"][path]["get"]["responses"], path
-
-
-def test_vendored_openapi_declares_every_export_path_map_reads() -> None:
-    spec = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))
-    paths = set(spec["paths"])
-    for path in (
-        transport.EXPORT_PATH_FUEL_STATIONS,
-        transport.EXPORT_PATH_REST_AREAS,
-        transport.EXPORT_PATH_REST_AREA_FUEL_PRICES,
-        transport.EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
-        transport.EXPORT_PATH_AIRPORTS,
-    ):
-        assert path in paths, path
-
-
-def test_golden_items_carry_every_field_the_vendored_schema_requires() -> None:
-    """golden fixture가 vendored schema와 필드 집합이 맞는다(계약과 fixture의 결박)."""
-    schemas = json.loads((CONTRACT_DIR / "openapi.json").read_text(encoding="utf-8"))["components"][
-        "schemas"
-    ]
-    pairs = [
-        ("fuel-stations.json", "ExportFuelStation"),
-        ("rest-areas.json", "ExportRestArea"),
-        ("rest-area-fuel-prices.json", "ExportRestAreaFuelPrice"),
-        ("highway-incidents-active.json", "ExportHighwayIncident"),
-        ("airports.json", "ExportAirport"),
-    ]
-    for file_name, schema_name in pairs:
-        required = set(schemas[schema_name].get("required", []))
-        declared = set(schemas[schema_name]["properties"])
-        for item in _golden(file_name)["items"]:
-            assert required <= set(item), (file_name, required - set(item))
-            # golden이 계약에 없는 필드를 들고 있으면 파서가 존재하지 않는 값에 기대게 된다.
-            assert set(item) <= declared, (file_name, set(item) - declared)
-
-
-# -- 파서 -------------------------------------------------------------------
 
 
 def test_fuel_station_golden_parses_into_the_opinet_protocols() -> None:

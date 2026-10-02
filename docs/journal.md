@@ -22,11 +22,12 @@
   `*_DT`(가격을 바꾼 때)를 쓰면 가격을 유지하는 주유소가 4일 지평선 밖으로 사라진다. 유가 job은 주유소를
   역지오코딩하지 않는다(locator로 부모만). UI "과거 날짜" 표식은 가격 도메인으로 고른다. 404 migration은
   옛 preview operation도 끈다. 페이지 상한·cursor 순환 검출·전송 오류 재시도를 더했다.
-  `scripts/repin_transport_contract.py`가 vendored 계약 핀을 기계적으로 바꾼다.
 - C7: 공항 operation은 이제 transport 내부 export를 한 번 부른다. 계약 테스트를 "외부 provider 호출 0"으로 고쳐 적었다
   (`_transport_get`은 공항 export 상수로만 허용, 다른 경로는 빨강).
-- 계약: transport `docs/openapi.json`을 `contracts/kor-travel-transport/openapi.json`으로 vendoring하고 `PIN.json`에
-  revision·SHA-256을 적었다. golden fixture 5종이 실 파서를 지난다.
+- 계약 관계(2026-10-03 소유자 결정): Map은 transport export의 소비자다 — pin·vendoring·repin 절차 없음. Map에
+  필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
+  `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/fixtures/kor-travel-transport/`)이 실 파서를 지난다. 처음
+  만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
 
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 

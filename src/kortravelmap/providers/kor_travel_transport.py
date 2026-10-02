@@ -13,8 +13,10 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
   (``providers.opinet``/``providers.krex``/``providers.krairport``)가 받는 입력 shape로 바꾼다.
   계약이 어긋나면 :class:`TransportExportContractError`로 실패한다 — 조용히 건너뛰면 적재가
   "성공"으로 기록되고 누락이 숨는다.
-- 계약 기계 정본은 vendoring한 ``contracts/kor-travel-transport/openapi.json``이다
-  (``contracts/kor-travel-transport/PIN.json``의 SHA-256과 transport revision에 결박).
+- Map은 transport export의 **소비자**다. 계약을 pin·vendoring하지 않는다 — Map에 필드·모양이
+  필요하면 transport API를 그에 맞게 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 이 모듈의
+  엄격한 런타임 검증이 ``failure_kind``와 함께 run을 실패시켜 드러낸다. 파서 테스트는 Map 소유
+  대표 응답(``tests/fixtures/kor-travel-transport/*.json``)을 쓴다.
 - **신선도는 두 겹으로 지킨다.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면
   503을 낸다(transport ADR-013). Map은 그것만 믿지 않고 200 본문의 ``collection``도 다시
   확인하며(:func:`require_current_collection`), 돌발 집합은 ``collected_at`` 나이까지 잰다
@@ -103,7 +105,7 @@ INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
 
 
 class TransportExportContractError(ValueError):
-    """transport export 응답이 vendored 계약과 어긋난다."""
+    """transport export 응답이 Map이 기대하는 모양과 어긋난다(필수 필드·타입·페이지)."""
 
     failure_kind: str = "transport_contract"
 

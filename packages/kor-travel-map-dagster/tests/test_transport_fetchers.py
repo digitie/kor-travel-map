@@ -33,7 +33,7 @@ from kortravelmap.dagster.upstream_requests import (
     observed_upstream_requests,
 )
 
-GOLDEN = Path(__file__).resolve().parents[3] / "contracts" / "kor-travel-transport" / "golden"
+GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "kor-travel-transport"
 TOKEN = "t" * 40
 
 

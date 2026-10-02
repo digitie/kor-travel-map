@@ -40,12 +40,13 @@
    **엄격히** 검사해 변환 함수가 받는 입력 shape(dataclass)로 바꾸는 계약 모듈이다. 정규화 변환은 원천 데이터
    영역별 모듈(`providers/opinet.py`·`krex.py`·`krairport.py`)에 그대로 둔다 — 모듈 이름은 데이터 영역이고
    provider 정체성은 `kor-travel-transport`다.
-4. **계약 고정.** transport `docs/openapi.json`(transport CI `--check`)을
-   `contracts/kor-travel-transport/openapi.json`으로 vendoring하고 `PIN.json`에 transport revision과
-   SHA-256을 적는다. 갱신은 손으로 하지 않는다 — `python scripts/repin_transport_contract.py --transport-repo
-   <checkout> --revision <transport 머지 커밋>`이 두 값을 함께 바꾸고, `origin/main`에 머지되지 않은 revision은
-   `--allow-unmerged` 없이는 거부한다. Map 머지 전에 transport 머지 커밋으로 다시 핀한다. golden fixture(`contracts/kor-travel-transport/golden/*.json`)가 실 파서를 지나고, vendored
-   schema의 required 필드를 모두 가진다(`tests/unit/test_providers_kor_travel_transport.py`).
+4. **계약 관계 — pin 없음.** Map은 transport export의 소비자일 뿐이다. transport export는 Map을 위해 있으므로
+   Map에 필드·모양이 필요하면 transport API를 직접 바꾼다(같은 PR 쌍, 버전·호환 층 없음, 옛 모양 shim 없음).
+   Map은 transport OpenAPI를 vendoring하거나 revision/SHA로 핀하지 않는다(2026-10-03 소유자 결정 — repin
+   절차는 과하다). 대신 `providers/kor_travel_transport.py`가 응답을 엄격히 검사해(필수 필드·타입·페이지·
+   `collection` 상태) 어긋나면 `failure_kind`(`transport_contract` 등)와 함께 run을 실패시킨다. 파서·변환
+   테스트는 Map 소유 대표 응답 `tests/fixtures/kor-travel-transport/*.json`을 쓴다. transport 쪽 drift 방지는
+   transport CI의 `export_openapi.py --check`다.
 5. **인증.** `X-Kor-Travel-Transport-Service-Token`(Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` =
    transport `TRANSPORT_SERVICE_EXPORT_TOKEN`). transport는 토큰과 **접속 주소**(peer, 기본 loopback —
    `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`)가 모두 맞아야 응답하고 아니면 404다. Map code-server는 host
@@ -96,6 +97,6 @@
 ### 배포 순서
 
 transport(0022 → 0023, `TRANSPORT_SERVICE_EXPORT_TOKEN`·`REST_AREA_COLLECTION_ENABLED=true`, 휴게소 수집 1회 성공
-확인) → Map 머지(transport 머지 커밋으로 repin) → Map pinned pair(migration 404)와 Manager compose(token, 옛
+확인) → Map 머지 → Map pinned pair(migration 404)와 Manager compose(token, 옛
 OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 반영하면 옛 Map job이 키 없이 실패하고, Map만
 먼저 올리면 token 없이 실패한다(어느 쪽도 데이터를 지우지 않는다).

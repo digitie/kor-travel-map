@@ -15,7 +15,7 @@
   휴게소 place 주 1회·price 일 2회, 돌발 10분, 공항 월 1회.
 - **ADDED**: `kortravelmap.providers.kor_travel_transport`(transport export 계약·엄격 파서), env
   `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_{BASE_URL,SERVICE_TOKEN,PAGE_SIZE,TIMEOUT_SECONDS}`,
-  `contracts/kor-travel-transport/`(vendored OpenAPI·PIN·golden).
+  대표 응답 fixture `tests/fixtures/kor-travel-transport/`(계약 pin·vendoring 없음 — Map은 소비자다).
 - **REMOVED**: env `KOR_TRAVEL_MAP_OPINET_*`·`KOR_TRAVEL_MAP_KREX_*`, OpiNet scope/예산 코드, krex rate gate 선언,
   `providers.opinet.prices_to_values`·`stations_to_price_features_and_values`·`station_details_to_price_features_and_values`,
   `providers.krex.rest_area_prices_to_values`, 세 provider 의존 핀.
