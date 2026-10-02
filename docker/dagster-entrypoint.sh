@@ -279,9 +279,11 @@ if [ "$dagster_profile" = "production" ]; then
   # 자식 gRPC와 run worker(`sys.executable -m dagster ...`) — 에는 걸리지 않는다(run
   # worker는 `api grpc` 때부터 그랬다). `-I`가 막던 것 중 user site(`-s`)는 위에서 요구한
   # `PYTHONNOUSERSITE=1`이, `-E`가 무시하던 `PYTHONPATH`·`PYTHONHOME`·`PYTHONUSERBASE`는
-  # 위의 거부가 env로 자식까지 막는다. 남은 하나 — `-m`이 cwd를 `sys.path` 앞에 넣는 것
-  # (`-P`) — 을 `PYTHONSAFEPATH=1`로 자식까지 막는다(cwd `/app`은 root 소유 0555라 지금도
-  # 쓸 수 없지만, 그것에 기대지 않는다).
+  # 위의 거부가 env로 자식까지 막는다. `PYTHONSAFEPATH=1`은 **인터프리터가** `-m` 때 cwd를
+  # `sys.path` 앞에 넣는 것(`-P`)만 자식까지 막는다. dagster 자신도 code location을 싣기 전에
+  # working directory(`-d`, 없으면 cwd)를 `sys.path`에 넣는다(`code_server.py`·
+  # `code_pointer.py`) — 그것은 이 변수로 막히지 않는다. 그 경로 `/app`은 root 소유 0555이고
+  # 비어 있어 거기서 import될 것이 없다; 막는 것은 그 디렉터리의 권한이다.
   export PYTHONSAFEPATH=1
   exec /usr/local/bin/python -I "$@"
 fi
