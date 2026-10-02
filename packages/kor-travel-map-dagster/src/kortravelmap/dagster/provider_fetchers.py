@@ -14,6 +14,7 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import pathlib
@@ -256,6 +257,16 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
     response.raise_for_status()
 
 
+async def _transport_request_once(
+    client: httpx.AsyncClient, path: str, params: Mapping[str, Any]
+) -> httpx.Response:
+    """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다)."""
+    note_upstream_request()
+    response = await client.get(path, params=dict(params))
+    _raise_transport_status(response, path)
+    return response
+
+
 async def _transport_get(
     client: httpx.AsyncClient,
     path: str,
@@ -263,21 +274,30 @@ async def _transport_get(
     *,
     budget: upstream_retry.RetryBudget,
 ) -> httpx.Response:
-    """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다."""
+    """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다.
 
-    async def _transport_request_once() -> httpx.Response:
-        note_upstream_request()
-        response = await client.get(path, params=dict(params))
-        _raise_transport_status(response, path)
-        return response
-
-    return await upstream_retry.retry_upstream_awaitable(
-        _transport_request_once,
-        label=f"kor-travel-transport {path}",
-        is_retryable=_transport_retryable,
-        base_delay=_TRANSPORT_RETRY_BASE_DELAY_SECONDS,
-        budget=budget,
-    )
+    재시도 규약은 ``upstream_retry``와 같다(시도 상한 ``DEFAULT_UPSTREAM_ATTEMPTS``, run 예산
+    공유, 지수 backoff). 그 헬퍼에 콜러블을 넘기지 않고 여기서 도는 이유는 계수 게이트
+    (``tests/lint/test_every_fetcher_counts_or_declares_why_not.py``)가 호출만 따라가기 때문이다 —
+    시도마다 :func:`_transport_request_once`를 직접 불러야 재시도 요청까지 센다고 보인다.
+    """
+    attempts = upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS
+    for attempt in range(1, attempts + 1):
+        try:
+            return await _transport_request_once(client, path, params)
+        except Exception as exc:
+            if attempt >= attempts or not _transport_retryable(exc) or not budget.try_consume():
+                raise
+            delay = min(
+                _TRANSPORT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+                upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+            )
+            _LOGGER.warning(
+                "kor-travel-transport %s 재시도 %d/%d (%s)", path, attempt, attempts,
+                type(exc).__name__,
+            )
+            await asyncio.sleep(delay)
+    raise AssertionError(f"unreachable: kor-travel-transport {path}")  # pragma: no cover
 
 
 async def _iter_transport_export(
