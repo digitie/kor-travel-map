@@ -57,10 +57,10 @@ _EXPECTED_C7_SPECS = (
 _UPDATE_REQUEST_SPEC = "ops-c7-update-request-write.live.spec.ts"
 #: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 upstream 호출이 0이어야
 #: 한다 — 공항 fetcher는 krairport 번들 정적 데이터만 읽는다.
-_EXPECTED_SAFE_SCHEDULE = "feature_place_krairport_airports_monthly_schedule"
+_EXPECTED_SAFE_SCHEDULE = "feature_place_transport_airports_monthly_schedule"
 #: update-request spec이 실제로 request를 만드는 operation. 이것도 upstream 호출이 0이어야
 #: 한다 — 이름이 아니라 operation → fetcher 배선과 fetcher 본문의 효과로 본다.
-_EXPECTED_SAFE_UPDATE_OPERATION = "feature_place_krairport_airports_job"
+_EXPECTED_SAFE_UPDATE_OPERATION = "feature_place_transport_airports_job"
 
 
 def _read(path: Path) -> str:
@@ -631,7 +631,7 @@ def test_runner_env_contract_still_rejects_each_kept_identity(name: str) -> None
     [
         # 2026-09-09에 사라진 옛 KMA schedule — 러너가 이것을 다시 받으면 안 된다.
         "feature_weather_kma_short_forecast_hourly_schedule",
-        "feature_place_krairport_airports_monthly_schedule_typo",
+        "feature_place_transport_airports_monthly_schedule_typo",
     ],
 )
 def test_runner_env_contract_rejects_a_non_allowlisted_schedule(schedule: str) -> None:

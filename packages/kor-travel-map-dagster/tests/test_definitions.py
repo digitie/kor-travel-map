@@ -56,11 +56,11 @@ def test_feature_load_asset_keys_registered() -> None:
     }
     assert {
         "feature_event_datagokr_cultural_festivals",
-        "feature_place_opinet_stations",
-        "feature_price_opinet_stations",
-        "feature_place_krex_rest_areas",
-        "feature_price_krex_rest_areas",
-        "feature_notice_krex_traffic_notices",
+        "feature_place_transport_fuel_stations",
+        "feature_price_transport_fuel_stations",
+        "feature_place_transport_rest_areas",
+        "feature_price_transport_rest_areas",
+        "feature_notice_transport_highway_incidents",
         "feature_place_krheritage_items",
         "feature_event_krheritage_events",
         "feature_place_mois_licenses",
@@ -76,7 +76,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_standard_special_streets",
         "feature_place_datagokr_file_data",
         "feature_place_khoa_beaches",
-        "feature_place_krairport_airports",
+        "feature_place_transport_airports",
         "feature_place_kor_travel_concierge_youtube",
         "feature_notice_krforest_landslide_forecast_issues",
         "feature_place_mcst_culture",
@@ -90,13 +90,13 @@ def test_feature_load_asset_keys_registered() -> None:
 #: 하나의 정책을 바꿔도 검사가 "그럴 수 있지"로 지나가거나, 반대로 정당한 예외
 #: 하나 때문에 검사를 통째로 느슨하게 만든다.
 _RETRY_POLICY_EXCEPTIONS: dict[str, str] = {
-    "feature_place_opinet_stations": (
+    "feature_place_transport_fuel_stations": (
         "OpiNet은 run당 호출 예산(기본 140)을 쓰는데 step 재시도는 asset을 처음부터 "
         "다시 실행해 그 예산을 전부 다시 쓴다. 무료키 일일 한도가 300회라 "
         "max_retries=3이면 하루 최악 560회다. 이 모드는 시군 윈도를 날짜로 "
         "회전시키므로 올바른 재시도 주기는 60초가 아니라 다음 스케줄이다."
     ),
-    "feature_price_opinet_stations": (
+    "feature_price_transport_fuel_stations": (
         "같은 이유 — 같은 상류, 같은 예산을 쓴다."
     ),
 }
@@ -211,11 +211,11 @@ def test_offline_upload_load_default_resources_registered() -> None:
 # T-RV-04b: provider별 live fetcher가 연결된 resource key. 나머지는 guard.
 _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_cultural_festivals",
-    "opinet_stations",
-    "opinet_station_price_details",
-    "krex_rest_areas",
-    "krex_rest_area_fuel_prices",
-    "krex_traffic_notices",
+    "transport_fuel_stations",
+    "transport_fuel_stations",
+    "transport_rest_areas",
+    "transport_rest_area_fuel_prices",
+    "transport_highway_incidents",
     "krheritage_items",
     "krheritage_events",
     "mois_license_records",
@@ -232,7 +232,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "standard_special_streets",
     "datagokr_file_data_records",
     "khoa_beaches",
-    "krairport_airports",
+    "transport_airports",
     "visitkorea_festival_events",
     "kor_travel_concierge_youtube_features",
     "mcst_culture_records",
@@ -303,15 +303,15 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert not any("provider" in key or "dataset" in key for key in schedule.tags)
 
 
-def test_krex_traffic_notices_schedule_runs_every_ten_minutes() -> None:
+def test_transport_highway_incidents_schedule_runs_every_ten_minutes() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        "feature_notice_transport_highway_incidents_ten_minute_schedule"
     )
 
     assert schedule.cron_schedule == "*/10 * * * *"
     assert schedule.execution_timezone == KST_TIMEZONE
     assert schedule.default_status == DefaultScheduleStatus.STOPPED
-    assert schedule.job_name == "feature_notice_krex_traffic_notices_job"
+    assert schedule.job_name == "feature_notice_transport_highway_incidents_job"
     assert schedule.tags["kor_travel_map.operation_key"] == schedule.job_name
     assert schedule.tags["kor_travel_map.trigger_kind"] == "schedule"
 
@@ -328,11 +328,11 @@ def _remote_origin(job_name: str, location_name: str = MAP_CODE_LOCATION_NAME) -
     )
 
 
-def test_krex_traffic_notices_schedule_coalesces_non_terminal_run() -> None:
+def test_transport_highway_incidents_schedule_coalesces_non_terminal_run() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        "feature_notice_transport_highway_incidents_ten_minute_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
 
     with DagsterInstance.local_temp() as instance:
         for run_status in (
@@ -367,9 +367,9 @@ def test_krex_coalescing_ignores_other_tenant_run() -> None:
     """
 
     schedule = defs.resolve_schedule_def(
-        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        "feature_notice_transport_highway_incidents_ten_minute_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
 
     with DagsterInstance.local_temp() as instance:
         instance.create_run_for_job(
@@ -387,9 +387,9 @@ def test_krex_coalescing_ignores_other_tenant_run() -> None:
 
 def test_krex_coalescing_ignores_untagged_run() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        "feature_notice_transport_highway_incidents_ten_minute_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
 
     with DagsterInstance.local_temp() as instance:
         instance.create_run_for_job(
@@ -404,11 +404,11 @@ def test_krex_coalescing_ignores_untagged_run() -> None:
     assert len(tick.run_requests) == 1
 
 
-def test_krex_traffic_notices_schedule_requests_run_without_non_terminal_run() -> None:
+def test_transport_highway_incidents_schedule_requests_run_without_non_terminal_run() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_krex_traffic_notices_ten_minute_schedule"
+        "feature_notice_transport_highway_incidents_ten_minute_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_krex_traffic_notices_job")
+    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
 
     with DagsterInstance.local_temp() as instance:
         with build_schedule_context(instance=instance) as context:
@@ -582,7 +582,7 @@ def test_every_schedule_firing_faster_than_its_own_recovery_bound_is_protected()
     이 검사는 리터럴 목록이었다 — job 이름 세 개를 손으로 적고 그 tag가 "7200"인지
     확인했다. 그것은 **적어 둔 셋만** 재고, 같은 조건의 네 번째 job은 보지 않는다.
     2026-09-12 감사가 정확히 그 네 번째를 찾았다(그 job은 2026-10-01 ADR-105로 사라졌다):
-    `feature_weather_krex_rest_areas_job`은 매시(3,600초)인데 전역 회수 상한은
+    `feature_weather_transport_rest_areas_job`은 매시(3,600초)인데 전역 회수 상한은
     21,600초라, upstream이 trickle에 들어가면 같은 job의 멈춘 run이 최대 6개까지
     동시에 살아 10 슬롯 중 6개를 한 job이 먹는다. 리터럴 검사는 그때도 초록이었다.
 

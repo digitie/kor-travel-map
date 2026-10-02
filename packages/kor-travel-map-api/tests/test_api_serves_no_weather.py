@@ -193,7 +193,7 @@ def test_etl_preview_serves_no_weather_and_no_weather_sourced_notice() -> None:
 def test_kept_notice_previews_still_convert() -> None:
     """비기상 notice preview가 남아 있어야 한다 — 하한은 '본 것'에 건다.
 
-    2026-10-01 기준 교통 돌발(``python-krex-api``)과 산사태 예보(``python-krforest-api``)
+    2026-10-01 기준 교통 돌발(``kor-travel-transport``)과 산사태 예보(``python-krforest-api``)
     두 dataset이 notice를 낸다.
     """
     notice_datasets: set[str] = set()

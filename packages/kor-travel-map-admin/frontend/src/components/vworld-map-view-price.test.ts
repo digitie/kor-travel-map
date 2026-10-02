@@ -10,14 +10,14 @@ function point(
 ): ClusterPriceSummaryPoint {
   return {
     provider_dataset_id: 17,
-    dataset_key: "opinet_gas_station_prices",
+    dataset_key: "transport_fuel_prices",
     dataset_display_name: "OpiNet 주유소 가격",
     known_at: "2026-07-27T00:05:00.000Z",
     observed_at: "2026-07-27T00:00:00.000Z",
     price_domain: "opinet_gas_station",
     product_key: "gasoline",
     product_name: "휘발유",
-    provider: "python-opinet-api",
+    provider: "kor-travel-transport",
     unit: "KRW/L",
     value_number: 1_820,
     ...overrides,
@@ -47,7 +47,7 @@ describe("priceMarkerLabel", () => {
     const label = priceMarkerLabel([point()]);
 
     expect(label).toContain("휘 1,820");
-    expect(label).not.toContain("python-opinet-api");
+    expect(label).not.toContain("kor-travel-transport");
     expect(label).not.toContain("opinet_gas_station");
   });
 });

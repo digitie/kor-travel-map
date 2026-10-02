@@ -40,12 +40,9 @@ PROVIDER_PACKAGES: Mapping[str, str] = {
     "python-datagokr-api": "datagokr",
     "python-khoa-api": "khoa",
     "python-knps-api": "knps",
-    "python-krairport-api": "krairport",
-    "python-krex-api": "krex",
     "python-krforest-api": "krforest",
     "python-krheritage-api": "krheritage",
     "python-mois-api": "mois",
-    "python-opinet-api": "opinet",
     "python-visitkorea-api": "visitkorea",
 }
 """핀 이름 → import 패키지 이름. ``Protocol`` 결박이 있는 provider만 넣는다."""

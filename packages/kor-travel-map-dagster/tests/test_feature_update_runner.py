@@ -65,7 +65,7 @@ def _scope(
     dataset_key: str = "places",
     scope_type: str = "provider_dataset",
     sync_scope: str | None = "dataset_wide",
-    operation_key: str = "feature_place_opinet_stations_job",
+    operation_key: str = "feature_place_transport_fuel_stations_job",
 ) -> ProviderDatasetRefreshScope:
     request_scope: dict[str, object]
     if scope_type == "provider_dataset":
@@ -136,10 +136,10 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -149,17 +149,17 @@ async def test_feature_update_asset_runner_dispatches_asset_spec() -> None:
     assert called == [
         {
             "records": ("a", "b"),
-            "asset_key": "feature_place_opinet_stations",
+            "asset_key": "feature_place_transport_fuel_stations",
             "membership": ProviderDatasetOperationMembership(
                 provider_dataset_id=1,
                 sync_scope="dataset_wide",
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
             ),
         }
     ]
     assert result.provider == "demo"
     assert result.dataset_key == "places"
-    assert result.operation_key == "feature_place_opinet_stations_job"
+    assert result.operation_key == "feature_place_transport_fuel_stations_job"
     assert result.loaded_feature_ids == ("feature-1", "feature-2")
     assert result.loaded_count == 2
     assert result.metadata is not None
@@ -192,10 +192,10 @@ async def test_feature_update_asset_runner_direct_raw_path_has_zero_tracking() -
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_raw,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -256,10 +256,10 @@ async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -305,10 +305,10 @@ async def test_feature_update_asset_runner_keeps_unbound_evidence_client(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -334,10 +334,10 @@ async def test_feature_update_asset_runner_types_resource_initialization_failure
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -361,10 +361,10 @@ async def test_generic_run_failure_uses_effective_external_system_scope() -> Non
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}),
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -376,7 +376,7 @@ async def test_generic_run_failure_uses_effective_external_system_scope() -> Non
                 provider=OPINET_PROVIDER_NAME,
                 dataset_key=OPINET_STATION_DATASET_KEY,
                 sync_scope="external_system:tripmate",
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
             ),
         )
 
@@ -391,7 +391,7 @@ async def test_feature_update_asset_runner_preserves_typed_failure_when_teardown
     failure = ProviderDatasetRefreshFailure(
         provider_dataset_id=1,
         sync_scope="dataset_wide",
-        operation_key="feature_place_opinet_stations_job",
+        operation_key="feature_place_transport_fuel_stations_job",
         message="provider failed",
     )
 
@@ -407,10 +407,10 @@ async def test_feature_update_asset_runner_preserves_typed_failure_when_teardown
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -438,10 +438,10 @@ async def test_feature_update_asset_runner_types_teardown_failure_after_success(
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=lambda _settings, _scope: RunnerResources({}, (_teardown,)),
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -477,13 +477,13 @@ async def test_feature_update_asset_runner_rejects_unknown_operation_key() -> No
     [
         (
             OPINET_STATION_DATASET_KEY,
-            "feature_place_opinet_stations_job",
-            "feature_place_opinet_stations",
+            "feature_place_transport_fuel_stations_job",
+            "feature_place_transport_fuel_stations",
         ),
         (
             OPINET_PRICE_DATASET_KEY,
-            "feature_price_opinet_stations_job",
-            "feature_price_opinet_stations",
+            "feature_price_transport_fuel_stations_job",
+            "feature_price_transport_fuel_stations",
         ),
     ],
 )
@@ -568,10 +568,10 @@ async def test_feature_update_asset_runner_allows_opinet_provider_wide_refresh()
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_run,
                 resources=_resources,
-                asset_key="feature_place_opinet_stations",
+                asset_key="feature_place_transport_fuel_stations",
             ),
         ),
     )
@@ -833,12 +833,12 @@ def test_runner_rejects_two_specs_claiming_the_same_operation_key() -> None:
     """
     duplicated = tuple(
         FeatureUpdateRunnerSpec(
-            operation_key="feature_place_opinet_stations_job",
+            operation_key="feature_place_transport_fuel_stations_job",
             run=_unused_run,
             resources=_empty_resources,
             asset_key=asset_key,
         )
-        for asset_key in ("feature_place_opinet_stations", "feature_price_opinet_stations")
+        for asset_key in ("feature_place_transport_fuel_stations", "feature_price_transport_fuel_stations")
     )
 
     with pytest.raises(ValueError, match="operation_key must be unique"):
@@ -873,17 +873,17 @@ async def test_runner_rejects_a_spec_whose_asset_key_is_not_the_handler_asset() 
         settings_factory=lambda: cast(KorTravelMapSettings, object()),
         specs=(
             FeatureUpdateRunnerSpec(
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 run=_unused_run,
                 resources=_empty_resources,
                 # 실재하는 asset이지만 이 operation의 handler asset은 아니다.
-                asset_key="feature_price_opinet_stations",
+                asset_key="feature_price_transport_fuel_stations",
             ),
         ),
     )
 
     with pytest.raises(RuntimeError, match="asset_key가 canonical operation handler와 다름"):
-        await runner(object(), _scope(operation_key="feature_place_opinet_stations_job"))
+        await runner(object(), _scope(operation_key="feature_place_transport_fuel_stations_job"))
 
 
 def test_mcst_runner_rejects_a_member_that_maps_to_no_registered_slug(

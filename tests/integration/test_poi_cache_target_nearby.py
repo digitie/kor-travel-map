@@ -64,8 +64,8 @@ async def _insert_feature(
     lifecycle_state: str = "active",
     publication_state: str = "published",
     quality_state: str = "valid",
-    provider: str = "python-opinet-api",
-    dataset_key: str = "opinet_stations",
+    provider: str = "kor-travel-transport",
+    dataset_key: str = "transport_fuel_stations",
     updated_at: datetime = _FETCHED,
 ) -> None:
     """provider 계보까지 붙은 place feature 1건을 심는다.
@@ -247,14 +247,14 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     page = await feature_repo.features_nearby_poi_cache_target(
         migrated_session,
         target_id=target.target_id,
-        providers=("python-opinet-api",),
+        providers=("kor-travel-transport",),
         categories=("06020000",),
         limit=10,
     )
 
     assert [item.feature_id for item in page.items] == [near_id]
     assert page.items[0].distance_m < 50
-    assert page.items[0].primary_provider == "python-opinet-api"
+    assert page.items[0].primary_provider == "kor-travel-transport"
     assert page.next_cursor is None
 
 

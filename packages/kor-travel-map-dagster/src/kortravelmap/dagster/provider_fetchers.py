@@ -14,10 +14,8 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import logging
-import math
 import pathlib
 from collections.abc import (
     AsyncIterator,
@@ -32,14 +30,27 @@ from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import httpx
-from kortravelmap.core.ids import make_payload_hash
-from kortravelmap.dto._time import kst_now
-from kortravelmap.infra.db import require_pg_dsn
-from kortravelmap.providers.opinet import (
-    OPINET_PROVIDER_NAME,
-    OPINET_STATION_DATASET_KEY,
+from kortravelmap.providers.kor_travel_transport import (
+    EXPORT_PATH_AIRPORTS,
+    EXPORT_PATH_FUEL_STATIONS,
+    EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
+    EXPORT_PATH_REST_AREA_FUEL_PRICES,
+    EXPORT_PATH_REST_AREAS,
+    SERVICE_TOKEN_HEADER,
+    TransportAirport,
+    TransportExportContractError,
+    TransportFuelStation,
+    TransportHighwayIncident,
+    TransportRestArea,
+    TransportRestAreaFuelPrice,
+    parse_active_incident_set,
+    parse_airports,
+    parse_export_page,
+    parse_fuel_station,
+    parse_rest_area,
+    parse_rest_area_fuel_price,
 )
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from . import upstream_retry
@@ -59,7 +70,6 @@ _LOGGER = logging.getLogger(__name__)
 logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 
 __all__ = [
-    "KrexTrafficNoticeSnapshotUnstable",
     "ProviderCredentialMissing",
     "SeoulOpenDataError",
     "fetch_datagokr_cultural_festivals",
@@ -68,10 +78,6 @@ __all__ = [
     "fetch_seoul_open_data_bookstores",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
-    "fetch_krairport_airports",
-    "fetch_krex_rest_area_fuel_prices",
-    "fetch_krex_rest_areas",
-    "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
     "fetch_krforest_dulle_trails",
     "fetch_krforest_landslide_forecast_issues",
@@ -81,39 +87,22 @@ __all__ = [
     "fetch_krheritage_items",
     "fetch_mcst_culture_records",
     "fetch_mois_license_records",
-    "fetch_opinet_stations",
-    "fetch_opinet_station_price_details",
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
     "fetch_standard_special_streets",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
+    "fetch_transport_airports",
+    "fetch_transport_fuel_stations",
+    "fetch_transport_highway_incidents",
+    "fetch_transport_rest_area_fuel_prices",
+    "fetch_transport_rest_areas",
     "fetch_visitkorea_festival_events",
 ]
 
 
 class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
-
-
-class KrexTrafficNoticeSnapshotUnstable(RuntimeError):
-    """KREX 돌발 feed가 bounded retry 내에 안정 snapshot을 확보하지 못했을 때.
-
-    휘발성(사건 appear/disappear) feed에서 연속 snapshot이 상한 내 한 번도
-    일치하지 않은 경우다. ``RuntimeError`` 하위형이라 기존 예외 처리와 호환되면서,
-    caller가 '일시 불일치가 아니라 지속적 불안정'을 특정해 구분할 수 있게 typed다.
-    """
-
-
-# 연속 snapshot 사건 집합 일치를 요구하되(불완전 pagination이 notice 종료를 오판하지
-# 않도록), 휘발성 feed의 일시 불일치를 sliding 재시도로 self-heal하기 위한 상한.
-# 초기 1회 + 최대 이 횟수만큼 추가 snapshot을 떠 직전과 비교한다(총 최대 상한+1 snapshot).
-_KREX_NOTICE_STABILITY_RETRIES: Final[int] = 4
-# 재시도 snapshot 사이의 간격(초). back-to-back으로 뜨면 같은 휘발 window를 관측해
-# self-heal이 무력화될 수 있으므로 휘발 사건이 정착할 시간을 준다(#700). 최초 pair
-# (initial vs 첫 재시도)는 full pagination의 자연 지연이 있으므로 delay를 넣지 않는다.
-# 테스트는 이 값을 0으로 monkeypatch해 즉시 실행한다.
-_KREX_NOTICE_RETRY_DELAY_SECONDS: Final[float] = 0.5
 
 
 async def fetch_kor_travel_concierge_youtube_features(
@@ -184,6 +173,146 @@ async def fetch_kor_travel_concierge_youtube_features(
                     "kor-travel-concierge feature export next_cursor가 이전 cursor와 같다."
                 )
             cursor = next_cursor
+
+# -- kor-travel-transport export (ADR-106) -----------------------------------------
+#
+# OpiNet 주유소·유가, KREX 휴게소·휴게소 유가·돌발, 공항은 provider 라이브러리가 아니라
+# kor-travel-transport의 ``/v1/service/exports/*``에서 받는다. 이것은 공개 provider client의
+# wrapper가 아니라(ADR-006은 그쪽 규칙이다) 같은 플랫폼 내부 서비스의 계약을 읽는 fetcher다 —
+# kor-travel-concierge export와 같은 부류. 응답은 ``providers.kor_travel_transport``가 엄격히
+# 파싱하고, 계약이 어긋나면 적재 전에 실패한다.
+
+
+def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str, str]]:
+    """base URL과 인증 header. 빈 문자열도 미설정으로 본다(compose ``${X:-}``)."""
+    base_url = (settings.kor_travel_transport_base_url or "").strip()
+    token = settings.kor_travel_transport_service_token
+    secret = token.get_secret_value().strip() if token is not None else ""
+    if not base_url:
+        raise ProviderCredentialMissing(
+            "kor-travel-transport export에는 "
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL이 필요하다."
+        )
+    if not secret:
+        raise ProviderCredentialMissing(
+            "kor-travel-transport export에는 KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN"
+            "(transport TRANSPORT_SERVICE_EXPORT_TOKEN과 같은 값)이 필요하다."
+        )
+    return base_url.rstrip("/"), {SERVICE_TOKEN_HEADER: secret}
+
+
+def _transport_get(
+    client: httpx.AsyncClient, path: str, params: Mapping[str, Any]
+) -> Awaitable[httpx.Response]:
+    note_upstream_request()
+    return client.get(path, params=dict(params))
+
+
+def _raise_transport_status(response: httpx.Response, path: str) -> None:
+    if response.status_code == 404:
+        # transport는 토큰이나 Host가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012).
+        raise ProviderCredentialMissing(
+            f"kor-travel-transport {path}가 404다 — 토큰 불일치이거나 loopback이 아닌 Host로 "
+            "호출했다(base URL은 같은 호스트의 127.0.0.1:14001이어야 한다)."
+        )
+    response.raise_for_status()
+
+
+async def _iter_transport_export(
+    settings: KorTravelMapSettings,
+    path: str,
+    parse: Callable[[Mapping[str, Any]], Any],
+) -> AsyncIterator[Any]:
+    """cursor 페이지를 끝까지 읽어 파싱한 item을 낸다."""
+    base_url, headers = _transport_connection(settings)
+    cursor: str | None = None
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=settings.kor_travel_transport_timeout_seconds,
+        headers=headers,
+    ) as client:
+        while True:
+            params: dict[str, Any] = {"limit": settings.kor_travel_transport_page_size}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = await _transport_get(client, path, params)
+            _raise_transport_status(response, path)
+            page = parse_export_page(response.json(), where=path)
+            for item in page.items:
+                yield parse(item)
+            if not page.has_more:
+                break
+            if page.next_cursor == cursor:
+                raise TransportExportContractError(f"{path}: next_cursor가 이전 cursor와 같다.")
+            cursor = page.next_cursor
+
+
+async def fetch_transport_fuel_stations(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportFuelStation]:
+    """오피넷 주유소 + 유종별 최신 가격(transport 전국 수집본)."""
+    async for station in _iter_transport_export(
+        settings, EXPORT_PATH_FUEL_STATIONS, parse_fuel_station
+    ):
+        yield station
+
+
+async def fetch_transport_rest_areas(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportRestArea]:
+    """고속도로 휴게소 기준정보."""
+    async for area in _iter_transport_export(settings, EXPORT_PATH_REST_AREAS, parse_rest_area):
+        yield area
+
+
+async def fetch_transport_rest_area_fuel_prices(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportRestAreaFuelPrice]:
+    """휴게소 주유소 현재 유가."""
+    async for price in _iter_transport_export(
+        settings, EXPORT_PATH_REST_AREA_FUEL_PRICES, parse_rest_area_fuel_price
+    ):
+        yield price
+
+
+async def fetch_transport_highway_incidents(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportHighwayIncident]:
+    """마지막 성공 수집의 활성 돌발 **전체**(페이지 없음).
+
+    transport는 수집이 실패했거나 30분 넘게 성공하지 못했으면 503을 낸다. 그때 이 fetcher가
+    실패해야 notice reconcile이 오래된 집합으로 사건을 닫지 않는다 — 503을 빈 집합으로
+    바꾸면 활성 사건 전체가 해소로 오판된다.
+    """
+    base_url, headers = _transport_connection(settings)
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=settings.kor_travel_transport_timeout_seconds,
+        headers=headers,
+    ) as client:
+        response = await _transport_get(client, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE, {})
+        _raise_transport_status(response, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE)
+        active = parse_active_incident_set(response.json())
+    for incident in active.items:
+        yield incident
+
+
+async def fetch_transport_airports(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportAirport]:
+    """국내 운영 공항 전체(transport의 krairport 번들 메타데이터)."""
+    base_url, headers = _transport_connection(settings)
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=settings.kor_travel_transport_timeout_seconds,
+        headers=headers,
+    ) as client:
+        response = await _transport_get(client, EXPORT_PATH_AIRPORTS, {})
+        _raise_transport_status(response, EXPORT_PATH_AIRPORTS)
+        airports = parse_airports(response.json())
+    for airport in airports:
+        yield airport
+
 
 #: datagokr 표준데이터 요청 페이지 크기. provider의 ``DEFAULT_MAX_PAGE_SIZE``와 같다.
 _DATAGOKR_STANDARD_PAGE_SIZE: Final[int] = 1000
@@ -412,59 +541,6 @@ async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncItera
 
 
 
-async def fetch_krex_rest_areas(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """고속도로 휴게소(rest_area) record를 krex public client로 stream한다.
-
-    ``settings.krex_go_api_key``(source ``KEX_GO_API_KEY``)에서 data.go.kr
-    service key를 읽어 ``KrexClient(go_api_key=...)``를 열고
-    ``await client.restarea.list_all(num_of_rows=1000, page_no=N)``을 페이지네이션하며
-    record(``krex.models.RestArea``, ``KrexRestAreaItem`` Protocol 충족)를 lazily
-    yield한다. ``list_all``은 ``tn_pubr_public_rest_area_api`` (data.go.kr) 호출
-    이므로 EX key가 아닌 **go key**를 쓴다.
-
-    이 dataset에는 안정 식별자가 없어 krtour 변환부가 name+route_name+direction
-    으로 자연키를 파생한다(ADR-044). 페이지네이션 종료 판정은
-    :func:`~kortravelmap.dagster.provider_pagination.aiter_paginated_items`가
-    소유한다 — ``total_count``가 권위이고 짧은 페이지는 그것이 없을 때만 쓰는
-    대체 휴리스틱이다(provider가 파싱 실패 행을 걸러도 조용히 절단되지 않게).
-    krex client는 native async라 async generator다. 소비 종료(또는 aclose)시
-    ``finally``에서 ``await client.aclose()``.
-    """
-    secret = settings.krex_go_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krex rest_areas live fetch에는 "
-            "KOR_TRAVEL_MAP_KREX_GO_API_KEY (source KEX_GO_API_KEY / "
-            "DATA_GO_KR_SERVICE_KEY)가 필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-    # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
-    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
-    krex = cast(Any, importlib.import_module("krex"))
-
-    client = krex.KrexClient(go_api_key=api_key)
-    num_of_rows = 1000
-    try:
-        async def _page(page_no: int) -> ProviderPage:
-            page = await client.restarea.list_all(num_of_rows=num_of_rows, page_no=page_no)
-            return ProviderPage(items=list(page.items), total_count=page.total_count)
-
-        async for record in aiter_paginated_items(
-            _page,
-            num_of_rows=num_of_rows,
-            label="krex restarea.list_all",
-            end_of_pages=_krex_end_of_pages_types(krex),
-            warn=_LOGGER.warning,
-        ):
-            yield record
-    finally:
-        await client.aclose()
-
-
 def fetch_mois_license_records(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -515,289 +591,6 @@ def fetch_mois_license_records(
     finally:
         session.close()
         engine.dispose()
-
-
-async def fetch_krex_traffic_notices(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """고속도로 교통 공지(돌발 incident) record를 krex public client로 stream한다.
-
-    ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
-    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``await client.traffic.incident(
-    num_of_rows=1000, page_no=N)``을 페이지네이션한다. 완전 snapshot 검증 뒤
-    record(``krex.models.Incident``, ``KrexTrafficNoticeItem`` Protocol 충족)를 yield한다.
-    rest_areas와 달리 EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
-
-    EX 돌발 feed는 휘발성(transient) — 해소된 사건은 사라진다(ADR-044). 서버가
-    요청한 ``num_of_rows``보다 작은 page size로 clamp할 수 있으므로 응답
-    ``total_count``까지 수집한다. 이 feed의 부재는 notice 종료를 뜻하므로
-    ``page.raw``에 endpoint 고유 목록 키와 count가 모두 있는 완결된 snapshot만
-    성공으로 인정한다. HTTP 200의 ``{}``, message-only, count-only 응답은 실패시켜
-    asset reconcile이 실행되지 않게 한다. page 사이 동일 사건 identity가 다시
-    나타나는 snapshot도 page boundary 이동으로 한 사건이 중복되고 다른 사건이
-    누락된 불완전 응답일 수 있으므로 거부한다. 완전 pagination을 수행하되, 휘발성
-    feed에서 연속 두 snapshot의 record 수·사건 identity set이 일치할 때까지
-    ``_KREX_NOTICE_STABILITY_RETRIES`` 상한 내에서 매 pass를 직전과 비교하는 sliding
-    재시도로 확인하고, 안정된 최신 pass만 yield한다. 상한 내 안정 pair를 못 잡으면
-    ``KrexTrafficNoticeSnapshotUnstable``(typed)로 실패한다(#700 — 일시 불일치가
-    run을 반복 중단시켜 notice 신선도를 정체시키던 문제). krex client는 native
-    async라 async generator다. 소비 종료(또는 aclose)시 ``finally``에서
-    ``await client.aclose()``.
-    """
-    secret = settings.krex_ex_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krex traffic_notices live fetch에는 "
-            "KOR_TRAVEL_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-    # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
-    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
-    krex = cast(Any, importlib.import_module("krex"))
-
-    client = krex.KrexClient(ex_api_key=api_key)
-    num_of_rows = 1000
-    try:
-        # 휘발성 feed에서 연속 2 snapshot이 한 번에 일치하지 않을 수 있으므로, 매 pass를
-        # 직전 pass와 비교하는 sliding 방식으로 상한(_KREX_NOTICE_STABILITY_RETRIES) 내
-        # 재시도해 일시 불일치를 self-heal한다. 상한 내 안정 pair를 못 잡으면 typed 실패로
-        # 명확히 신호한다(무한 재시도/불완전 snapshot yield 금지 — 완전 pagination 2회-일치
-        # 안전성은 유지). 안정 pair 확정 전에는 한 건도 yield하지 않아 destructive reconcile과 격리.
-        previous_records, previous_identities = await _fetch_krex_traffic_notice_snapshot(
-            client,
-            num_of_rows=num_of_rows,
-        )
-        stable_records: list[Any] | None = None
-        for attempt in range(_KREX_NOTICE_STABILITY_RETRIES):
-            # 첫 재시도(attempt 0)는 initial snapshot과 full pagination 자연 지연으로
-            # 이미 떨어져 있으므로 delay 없이 비교하고, 이후 재시도만 사건 정착 시간을 준다.
-            if attempt > 0 and _KREX_NOTICE_RETRY_DELAY_SECONDS > 0:
-                await asyncio.sleep(_KREX_NOTICE_RETRY_DELAY_SECONDS)
-            current_records, current_identities = await _fetch_krex_traffic_notice_snapshot(
-                client,
-                num_of_rows=num_of_rows,
-            )
-            if (
-                len(previous_records) == len(current_records)
-                and previous_identities == current_identities
-            ):
-                stable_records = current_records
-                break
-            previous_records, previous_identities = (
-                current_records,
-                current_identities,
-            )
-        if stable_records is None:
-            raise KrexTrafficNoticeSnapshotUnstable(
-                "KREX traffic_notices 연속 snapshot이 "
-                f"{_KREX_NOTICE_STABILITY_RETRIES}회 재시도 내 안정되지 않았다: "
-                f"last_count={len(previous_records)}"
-            )
-        for record in stable_records:
-            yield record
-    finally:
-        await client.aclose()
-
-
-async def _fetch_krex_traffic_notice_snapshot(
-    client: Any,
-    *,
-    num_of_rows: int,
-) -> tuple[list[Any], set[str]]:
-    """KREX incident snapshot 한 pass를 완전 수집하고 사건 identity를 반환한다."""
-    records: list[Any] = []
-    seen_lineage_identities: set[str] = set()
-    page_no = 1
-    expected_total: int | None = None
-    while True:
-        # 우리가 소유한 페이지 루프. 안정성 비교로 이 snapshot을 **최소 2회**
-        # 완주하므로 실제 요청은 페이지 수의 배수다 — 그 배수는 호출자가 돈다.
-        note_upstream_request()
-        page = await client.traffic.incident(num_of_rows=num_of_rows, page_no=page_no)
-        items = list(page.items)
-        total_count = _validate_krex_traffic_notice_page(
-            page,
-            page_no=page_no,
-            seen=len(records),
-            item_count=len(items),
-            expected_total=expected_total,
-        )
-        if expected_total is None:
-            expected_total = total_count
-        if not items:
-            break
-        for item_index, item in enumerate(items):
-            identity = _krex_traffic_notice_lineage_identity(item)
-            if identity in seen_lineage_identities:
-                raise RuntimeError(
-                    "KREX traffic_notices snapshot에 중복 사건 identity가 있다: "
-                    f"page_no={page_no}, item_index={item_index}"
-                )
-            seen_lineage_identities.add(identity)
-        records.extend(items)
-        if len(records) == total_count:
-            break
-        page_no += 1
-    if expected_total is None or len(records) != expected_total:
-        raise RuntimeError(
-            "KREX traffic_notices snapshot record 수가 count와 다르다: "
-            f"records={len(records)}, total_count={expected_total!r}"
-        )
-    return records, seen_lineage_identities
-
-
-def _krex_traffic_notice_lineage_identity(item: Any) -> str:
-    """map KREX 사건 자연키와 같은 필드로 pagination 중복을 판정한다.
-
-    converter ``_traffic_notice_natural_key``와 동일하게 typed natural-key 필드를
-    strip/lower한 뒤 빈 값을 제외해 ``::``로 잇는다. 전부 비면 ``series_no``를
-    별도 identity로 쓰지 않고 raw payload 전체의 hash로 fallback한다.
-    """
-    parts = tuple(
-        part
-        for part in (
-            (item.occurred_date or "").strip().lower(),
-            (item.occurred_time or "").strip().lower(),
-            (item.route_no or "").strip().lower(),
-            (item.direction or "").strip().lower(),
-            (item.point_name or "").strip().lower(),
-            (item.incident_type_code or "").strip().lower(),
-        )
-        if part
-    )
-    if parts:
-        return "::".join(parts)
-    return f"raw::{make_payload_hash(item.raw)}"
-
-
-def _validate_krex_traffic_notice_page(
-    page: Any,
-    *,
-    page_no: int,
-    seen: int,
-    item_count: int,
-    expected_total: int | None,
-) -> int:
-    """KREX incident page가 종료 판정에 쓸 수 있는 snapshot 조각인지 검증한다.
-
-    ``python-krex-api``의 범용 EX normalizer는 목록 키가 없는 HTTP 200 object도
-    빈 ``Page``로 정규화한다. 일반 조회에는 편리하지만, 빈 목록이 곧 모든 기존
-    notice 종료인 본 asset에서는 source 실패를 정상 empty로 오인한다. 로컬 provider의
-    live fixture가 고정한 ``realTimeSMSList`` + ``count`` 구조를 이 lifecycle 경계에서
-    한 번 더 확인한다. 단건 응답은 provider 계약대로 object도 허용한다.
-    """
-    raw = getattr(page, "raw", None)
-    if not isinstance(raw, dict):
-        raise RuntimeError(
-            f"KREX traffic_notices 응답 raw가 JSON object가 아니다: page_no={page_no}"
-        )
-    if "realTimeSMSList" not in raw:
-        raise RuntimeError(f"KREX traffic_notices 응답에 realTimeSMSList가 없다: page_no={page_no}")
-    raw_items = raw["realTimeSMSList"]
-    if isinstance(raw_items, list):
-        raw_item_count = len(raw_items)
-    elif isinstance(raw_items, dict):
-        raw_item_count = 1
-    else:
-        raise RuntimeError(
-            f"KREX traffic_notices realTimeSMSList가 list/object가 아니다: page_no={page_no}"
-        )
-    if raw_item_count != item_count:
-        raise RuntimeError(
-            "KREX traffic_notices raw/parsed item 수가 다르다: "
-            f"raw={raw_item_count}, parsed={item_count}, page_no={page_no}"
-        )
-
-    raw_page_no = _strict_non_negative_int(raw.get("pageNo"))
-    if raw_page_no != page_no or getattr(page, "page_no", None) != page_no:
-        raise RuntimeError(
-            "KREX traffic_notices 응답 pageNo가 요청과 다르다: "
-            f"requested={page_no}, raw={raw_page_no!r}, "
-            f"parsed={getattr(page, 'page_no', None)!r}"
-        )
-    raw_num_of_rows = _strict_non_negative_int(raw.get("numOfRows"))
-    if raw_num_of_rows is None or getattr(page, "num_of_rows", None) != raw_num_of_rows:
-        raise RuntimeError(
-            "KREX traffic_notices 응답에 유효한 numOfRows가 없다: "
-            f"raw={raw_num_of_rows!r}, parsed={getattr(page, 'num_of_rows', None)!r}, "
-            f"page_no={page_no}"
-        )
-
-    total_count = _strict_non_negative_int(raw.get("count"))
-    if total_count is None or total_count < 0:
-        raise RuntimeError(f"KREX traffic_notices 응답에 유효한 count가 없다: page_no={page_no}")
-    if getattr(page, "total_count", None) != total_count:
-        raise RuntimeError(
-            "KREX traffic_notices raw/parsed count가 다르다: "
-            f"raw={total_count}, parsed={getattr(page, 'total_count', None)!r}, "
-            f"page_no={page_no}"
-        )
-    if expected_total is not None and total_count != expected_total:
-        raise RuntimeError(
-            "KREX traffic_notices 페이지 사이 count가 바뀌었다: "
-            f"expected={expected_total}, actual={total_count}, page_no={page_no}"
-        )
-    if seen + item_count > total_count:
-        raise RuntimeError(
-            "KREX traffic_notices item 수가 count를 초과했다: "
-            f"seen={seen}, page_items={item_count}, total_count={total_count}, "
-            f"page_no={page_no}"
-        )
-    if item_count == 0 and seen < total_count:
-        raise RuntimeError(
-            "KREX traffic_notices pagination이 total_count 도달 전에 빈 page를 반환했다: "
-            f"seen={seen}, total_count={total_count}, page_no={page_no}"
-        )
-    return total_count
-
-
-def _strict_non_negative_int(value: Any) -> int | None:
-    """bool/float를 수로 오인하지 않는 provider metadata 정수 파서."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
-async def fetch_krex_rest_area_fuel_prices(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """고속도로 휴게소 유가(restarea.fuel_prices) record를 stream한다.
-
-    krex client는 native async라 async generator다. 소비 종료(또는 aclose)시
-    ``finally``에서 ``await client.aclose()``.
-    """
-    secret = settings.krex_ex_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "krex rest_area_fuel_prices live fetch에는 "
-            "KOR_TRAVEL_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    krex = cast(Any, importlib.import_module("krex"))
-    client = krex.KrexClient(ex_api_key=api_key)
-    num_of_rows = 1000
-    try:
-        async def _page(page_no: int) -> ProviderPage:
-            page = await client.restarea.fuel_prices(num_of_rows=num_of_rows, page_no=page_no)
-            return ProviderPage(items=list(page.items), total_count=page.total_count)
-
-        async for record in aiter_paginated_items(
-            _page,
-            num_of_rows=num_of_rows,
-            label="krex restarea.fuel_prices",
-            end_of_pages=_krex_end_of_pages_types(krex),
-            warn=_LOGGER.warning,
-        ):
-            yield record
-    finally:
-        await client.aclose()
 
 
 async def fetch_knps_point_records(
@@ -1399,35 +1192,6 @@ async def fetch_datagokr_file_data_records(
         await client.aclose()
 
 
-async def fetch_krairport_airports(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """공항 메타데이터 record를 krairport public client로 stream한다.
-
-    ``client.airports(active=True)``는 **번들 정적 데이터**라 credential 없이도 동작
-    한다(keyless). key가 있으면 network-backed 메서드용으로 주입하되, 본 fetcher는
-    bundled metadata만 yield한다(``AirportMetadata``, krtour ``AirportMetadataItem``
-    Protocol 충족).
-
-    **async generator지만 ``airports()`` 자체는 여전히 동기 함수다** — krairport가
-    async 전용이 되며 바뀐 것은 세션 종료뿐이라(``close()`` 제거, ``aclose()``만
-    남음) await 경계는 ``finally`` 하나다.
-    """
-    krairport = cast(Any, importlib.import_module("krairport"))
-    secret = settings.data_go_kr_service_key
-    kwargs: dict[str, str] = {}
-    if secret is not None:
-        key = secret.get_secret_value()
-        kwargs["kac_service_key"] = key
-        kwargs["iiac_service_key"] = key
-    client = krairport.KrairportClient(**kwargs)
-    try:
-        for airport in client.airports(active=True):
-            yield airport
-    finally:
-        await client.aclose()
-
-
 async def fetch_mcst_culture_records(
     settings: KorTravelMapSettings,
     *,
@@ -1633,662 +1397,6 @@ async def _khoa_beach_page(
 #: 하루치를 넘길 수 있다. 넘으면 조용히 자르지 않고 ``ProviderPaginationOverrun``으로
 #: 실패한다 — 그때 숫자를 의도적으로 올려라.
 _KHOA_BEACH_MAX_PAGES: Final = 30
-
-
-def _krex_end_of_pages_types(krex: Any) -> tuple[type[BaseException], ...]:
-    """krex가 "더 이상 페이지 없음"을 알리는 예외형 (ADR-006 — 직접 import 금지).
-
-    krex는 data.go.kr resultCode ``03``과 EX ``NO_DATA``를 모두
-    ``KrexNotFoundError``로 올린다(``_http.py``의 ``_raise_go_code``/``_raise_ex_code``).
-    빈 페이지가 아니라 예외이므로, 마지막 페이지 다음 요청은 이것을 종료로 읽어야
-    한다 — krex 자신도 ``RestareaService``에서 같은 예외를 종료로 잡는다.
-    """
-    resolved = getattr(krex, "KrexNotFoundError", None)
-    if isinstance(resolved, type) and issubclass(resolved, BaseException):
-        return (resolved,)
-    return ()
-
-
-def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:
-    """``"min_lon,min_lat,max_lon,max_lat"`` → 4-float tuple (검증 포함)."""
-    parts = [p.strip() for p in raw.split(",")]
-    if len(parts) != 4:
-        raise ProviderCredentialMissing(
-            "opinet_scope_bbox는 'min_lon,min_lat,max_lon,max_lat' 4개 값이어야 한다."
-        )
-    try:
-        min_lon, min_lat, max_lon, max_lat = (float(p) for p in parts)
-    except ValueError as exc:
-        raise ProviderCredentialMissing(f"opinet_scope_bbox 숫자 파싱 실패: {raw!r}") from exc
-    if not (min_lon < max_lon and min_lat < max_lat):
-        raise ProviderCredentialMissing(
-            "opinet_scope_bbox는 min_lon<max_lon, min_lat<max_lat 여야 한다."
-        )
-    return (min_lon, min_lat, max_lon, max_lat)
-
-
-async def _enumerate_opinet_stations(
-    client: Any,
-    bboxes: Iterable[tuple[float, float, float, float]],
-    *,
-    radius_m: int,
-) -> AsyncIterator[Any]:
-    """여러 bbox를 ``iter_stations_in_bbox``로 enumerate하며 ``uni_id`` dedup.
-
-    bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
-
-    **이 경로는 요청을 세지 못한다.** ``iter_stations_in_bbox``가 bbox를 격자로
-    덮으며 셀마다 ``aroundAll``을 부르는데, 그 셀 수 계산(``_bbox_grid_centers``)은
-    provider private이고 Map이 복제하면 drift가 난다 — 이 저장소가 이미 같은 이유로
-    복제를 거부했다. bbox 하나를 1로 세는 것은 1과 20,000을 같게 만들어 0만큼이나
-    오도한다.
-
-    그래서 **아무것도 세지 않는다**. 계수기 계약상 기록이 없으면
-    ``upstream_requests_min``이 metadata에 실리지 않으므로 "0번 요청했다"로 위장하지는
-    않는다. 같은 fetcher의 ``low_top_area`` 모드는 ``_OpinetCallBudget.spend()``로
-    정확히 센다 — 즉 **이 fetcher의 계측은 scope mode에 따라 다르다**(부분 계측).
-    총량을 실제로 묶는 것은 하루 한 번 coalescing이다(docs/etl/upstream-quota.md).
-    """
-    invalid_parameter = _opinet_invalid_parameter_error_type()
-    seen: set[str] = set()
-    for min_lon, min_lat, max_lon, max_lat in bboxes:
-        try:
-            # ``iter_stations_in_bbox``는 async generator **함수**라 호출 자체는
-            # await하지 않는다 — 격자 계산도 파라미터 검증도 첫 ``__anext__``에서야
-            # 돈다. 아래 ``except``가 호출과 순회를 함께 감싸야 하는 이유다.
-            stations = client.iter_stations_in_bbox(
-                min_lon=min_lon,
-                min_lat=min_lat,
-                max_lon=max_lon,
-                max_lat=max_lat,
-                radius_m=radius_m,
-            )
-            async for station in stations:
-                uni_id = getattr(station, "uni_id", None)
-                if isinstance(uni_id, str):
-                    if uni_id in seen:
-                        continue
-                    seen.add(uni_id)
-                yield station
-        except invalid_parameter as exc:
-            # `OpinetInvalidParameterError`는 격자 셀 수 상한만이 아니라 radius_m
-            # 범위(1..5000), bbox min>max, 좌표 변환 실패에서도 올라온다. 원인을
-            # 단정하면 잘못된 조치를 안내하게 되므로(예: radius_m>5000인데 "반경을
-            # 키우라"), **provider 원문을 그대로 싣고 관련 설정만 덧붙인다.**
-            # 셀 수 계산은 provider private이라 Map이 복제하면 drift가 난다.
-            raise RuntimeError(
-                "opinet bbox enumerate가 provider 파라미터 검증에 걸렸다: "
-                f"{exc}. "
-                f"bbox=({min_lon},{min_lat},{max_lon},{max_lat}), "
-                f"opinet_scope_radius_m={radius_m} "
-                "(provider 허용 1..5000, 격자 셀 수 상한 20,000). "
-                "셀 수 초과라면 반경을 키우거나 OPINET_SCOPE_BBOX를 좁게 나누고, "
-                "범위 위반이라면 해당 설정값을 고칠 것."
-            ) from exc
-
-
-def _center_radius_to_bbox(
-    lon: float, lat: float, radius_km: float
-) -> tuple[float, float, float, float]:
-    """중심(lon/lat) + 반경(km) → WGS84 bbox(min_lon,min_lat,max_lon,max_lat).
-
-    위도 1° ≈ 111km, 경도 1° ≈ 111·cos(lat)km 근사. 극단 위도 방어를 위해
-    cos는 최소값으로 clamp한다.
-    """
-    dlat = radius_km / 111.0
-    cos_lat = max(math.cos(math.radians(lat)), 0.01)
-    dlon = radius_km / (111.0 * cos_lat)
-    return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
-
-
-# OpiNet POI-타깃 enumeration 대상 = **모든 외부 시스템**의 활성 target.
-# ``external_system``은 provider명이 아니라 외부 호출자(예: external-app)다(POI 모델,
-# docs/poi-cache-update-targets.md) — provider명으로 재해석하면 실제 등록 target을
-# 전부 놓친다. active 정의는 scope_repo.resolve_cache_target_keys와 동일:
-# deleted_at IS NULL + update_enabled + refresh_policy<>'disabled'. 추가로 해당 target이
-# provider_overrides에서 opinet dataset을 targeted_policy='disabled'로 옵트아웃했으면 제외.
-_OPINET_POI_TARGETS_SQL: Final[str] = """
-SELECT lon, lat, radius_km
-FROM ops.poi_cache_targets
-WHERE deleted_at IS NULL
-  AND update_enabled
-  AND refresh_policy <> 'disabled'
-  AND COALESCE(
-        (provider_overrides -> :opinet_key) ->> 'targeted_policy', ''
-      ) <> 'disabled'
-"""
-
-_OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}"
-"""``provider_overrides`` JSONB 키(``<provider>:<dataset_key>``)."""
-
-_OPINET_LOW_TOP_PRODUCTS: Final[tuple[str, ...]] = ("B027", "D047", "B034")
-"""quota-safe 전국 분포용 제품 코드: 휘발유, 경유, 고급휘발유."""
-
-_OPINET_VALID_SIDO_CODES: Final[frozenset[str]] = frozenset(
-    {
-        "01",
-        "02",
-        "03",
-        "04",
-        "05",
-        "06",
-        "07",
-        "08",
-        "09",
-        "10",
-        "11",
-        "14",
-        "15",
-        "16",
-        "17",
-        "18",
-        "19",
-    }
-)
-"""``python-opinet-api``가 자식 area 조회에서 허용하는 OpiNet 시도 코드."""
-
-_OPINET_LOW_TOP_COUNT: Final[int] = 20
-"""OpiNet ``lowTop10`` endpoint 최대 허용 건수."""
-
-_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS: Final[int] = 500
-"""``lowTop10`` 부분 성공을 전국 분포로 보기 위한 최소 station 수."""
-
-_OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS: Final[int] = 180
-"""``lowTop10`` area×product 호출 상한 기본값. 이후 sample grid fallback으로 보강한다.
-
-``settings.opinet_low_top_max_calls`` (env ``KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS``)로
-run별 override 가능 — 기본 180 = 제품 3종 기준 시군 60개 윈도/run."""
-
-_OPINET_RUN_CALL_BUDGET: Final[int] = 140
-"""``low_top_area`` 한 run이 쓸 수 있는 OpiNet 호출 hard cap 기본값(#545).
-
-``get_area_codes`` + ``lowTop10`` + ``aroundAll``(``search_stations_around``)을
-모두 합산해 이 값을 넘으면 enumeration을 즉시 중단한다.
-
-**무료키 일일 한도는 300회다**(오피넷 이용안내 — 일반 API 19종이 300call/일이고
-1,500call/일은 유료 프리미엄 3종이다. 2026-09-14 확인). 이 저장소는 그것을
-1,500으로 알고 있었고 그 위에 600/run을 세웠다 — **한 run이 하루 한도의 2배**였고,
-월간 place job과 겹치면 4배였다. 켜져 있었다면 첫날에 막혔을 값이다(prod는
-``opinet_scope_mode=disabled``라 실제로 쓰이지는 않았다).
-
-140/run이면 place job과 같은 날 겹쳐도 280으로 300 아래다. ``lowTop10`` 상한(90)
-+ ``get_area_codes``(~19)를 빼면 grid fallback에 ~31회가 남는다 — 종전 ~400회에서
-줄어든 것이고, 그만큼 빈 운영 상태의 분포 보강이 느려진다. 더 쓰려면 run당 cap이
-아니라 **하루 예산**이 필요하다(`T-VN-QUEUE-QUOTA`).
-
-``settings.opinet_run_call_budget``
-(env ``KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET``)로 override 가능."""
-
-_OPINET_SAMPLE_GRID_BBOX: Final[tuple[float, float, float, float]] = (
-    124.8,
-    33.1,
-    131.6,
-    38.6,
-)
-"""``lowTop10``이 빈 응답일 때 쓰는 대한민국 주변 샘플 bbox."""
-
-_OPINET_SAMPLE_ANCHOR_CENTERS: Final[tuple[tuple[float, float], ...]] = (
-    (126.9780, 37.5665),  # 서울
-    (126.7052, 37.4563),  # 인천
-    (127.0286, 37.2636),  # 수원
-    (127.1265, 37.4200),  # 성남
-    (126.8319, 37.6584),  # 고양
-    (127.1776, 37.2411),  # 용인
-    (127.0471, 37.7381),  # 의정부
-    (127.7298, 37.8813),  # 춘천
-    (127.9202, 37.3422),  # 원주
-    (128.8962, 37.7519),  # 강릉
-    (127.3845, 36.3504),  # 대전
-    (127.4890, 36.6424),  # 청주
-    (127.9259, 36.9910),  # 충주
-    (127.1522, 36.8151),  # 천안
-    (127.0046, 36.7898),  # 아산
-    (127.2890, 36.4800),  # 세종
-    (127.1190, 36.4467),  # 공주
-    (127.1480, 35.8242),  # 전주
-    (126.7368, 35.9676),  # 군산
-    (126.9576, 35.9483),  # 익산
-    (126.8514, 35.1595),  # 광주
-    (126.3922, 34.8118),  # 목포
-    (127.6622, 34.7604),  # 여수
-    (127.4872, 34.9506),  # 순천
-    (128.6014, 35.8714),  # 대구
-    (129.3650, 36.0190),  # 포항
-    (128.3446, 36.1195),  # 구미
-    (128.7294, 36.5684),  # 안동
-    (129.2247, 35.8562),  # 경주
-    (129.0756, 35.1796),  # 부산
-    (129.3114, 35.5384),  # 울산
-    (128.6811, 35.2279),  # 창원
-    (128.1076, 35.1800),  # 진주
-    (128.8894, 35.2285),  # 김해
-    (128.6211, 34.8806),  # 거제
-    (126.5312, 33.4996),  # 제주
-    (126.5601, 33.2541),  # 서귀포
-)
-"""Sparse grid가 도심을 비켜갈 때 보강할 전국 주요 도심 fallback anchor."""
-
-_OPINET_SAMPLE_GRID_STEP_DEGREES: Final[float] = 0.4
-"""OpiNet fallback 샘플 그리드 간격. 도심 anchor 포함 3개 제품 기준 약 900회 호출."""
-
-
-def _opinet_poi_target_bboxes(
-    settings: KorTravelMapSettings,
-) -> list[tuple[float, float, float, float]]:
-    """``ops.poi_cache_targets``의 활성 target(중심+반경) → bbox 목록(OpiNet enumeration).
-
-    ``external_system``으로 필터하지 않는다(provider 아님). active target = deleted_at
-    없음 + update_enabled + refresh_policy<>'disabled'(scope_repo와 동일), opinet을
-    targeted_policy='disabled'로 옵트아웃한 target 제외.
-
-    **이 조회만 sync로 남는다.** ``settings.pg_dsn``(async driver)을 sync psycopg
-    DSN으로 바꿔 쿼리 1회를 돌린다. 호출자(fetcher)가 async가 된 뒤로 이 한 번은
-    이벤트 루프를 막는다 — enumeration이 시작되기 전 1회뿐이라 그대로 두었다.
-    async engine으로 옮기면 fetcher 수명 내내 engine을 들고 있어야 한다.
-    """
-    dsn = require_pg_dsn(settings).get_secret_value().replace("+asyncpg", "+psycopg")
-    engine = create_engine(dsn)
-    try:
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text(_OPINET_POI_TARGETS_SQL),
-                {"opinet_key": _OPINET_PROVIDER_OVERRIDE_KEY},
-            ).all()
-    finally:
-        engine.dispose()
-    return [
-        _center_radius_to_bbox(float(lon), float(lat), float(radius_km))
-        for lon, lat, radius_km in rows
-    ]
-
-
-def _opinet_bboxes_for_settings(
-    settings: KorTravelMapSettings,
-) -> list[tuple[float, float, float, float]]:
-    mode = settings.opinet_scope_mode
-    if mode == "disabled":
-        raise ProviderCredentialMissing(
-            "opinet 적재 비활성(opinet_scope_mode=disabled). "
-            "OPINET_SCOPE_MODE=bbox|poi_cache_target|low_top_area 설정이 필요하다."
-        )
-    if mode == "bbox":
-        if settings.opinet_scope_bbox is None:
-            raise ProviderCredentialMissing(
-                "opinet bbox scope에는 OPINET_SCOPE_BBOX "
-                "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
-            )
-        return [_parse_opinet_bbox(settings.opinet_scope_bbox)]
-
-    bboxes = _opinet_poi_target_bboxes(settings)
-    if not bboxes:
-        raise ProviderCredentialMissing(
-            "opinet poi_cache_target scope: ops.poi_cache_targets에 "
-            "external_system='opinet' 활성 target이 없다."
-        )
-    return bboxes
-
-
-class _OpinetCallBudget:
-    """``low_top_area`` run의 OpiNet 호출 수를 추적하는 hard cap(#545).
-
-    ``get_area_codes`` + ``lowTop10`` + ``aroundAll`` 호출을 한 카운터로 합산한다.
-    각 호출 **직전** ``spend()``로 차감하고, 남은 예산이 없으면 ``exhausted``가
-    ``True``가 되어 enumeration을 즉시 멈춘다. cap을 0 이하로 주면(또는 None)
-    무제한으로 동작한다(테스트/특수 운영용).
-    """
-
-    __slots__ = ("_remaining", "_unbounded")
-
-    def __init__(self, limit: int | None) -> None:
-        if limit is None or limit <= 0:
-            self._unbounded = True
-            self._remaining = 0
-        else:
-            self._unbounded = False
-            self._remaining = int(limit)
-
-    @property
-    def exhausted(self) -> bool:
-        return not self._unbounded and self._remaining <= 0
-
-    def spend(self) -> bool:
-        """호출 1건을 예산에서 차감한다. 차감 가능하면 ``True``.
-
-        **여기가 OpiNet의 분자다.** 이 메서드는 호출 **직전**에 정확히 1건씩
-        불린다 — 그래서 쿼터 계수기도 같은 자리에서 올린다. 2026-09-13 적대 리뷰
-        전까지 이 정확한 계수가 있는데도 metadata에는 0이 실렸다. 하필 OpiNet이
-        저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다
-        (`_OPINET_RUN_CALL_BUDGET` vs 무료키 300/일, #545). 예산을 짜 둔
-        자리의 분자가 0이었다.
-
-        예산이 소진돼 ``False``를 돌려줄 때는 호출이 일어나지 않으므로 세지 않는다.
-        """
-        if self._unbounded:
-            note_upstream_request()
-            return True
-        if self._remaining <= 0:
-            return False
-        self._remaining -= 1
-        note_upstream_request()
-        return True
-
-
-async def _opinet_sigungu_area_codes(
-    client: Any, *, budget: _OpinetCallBudget | None = None
-) -> list[str]:
-    """OpiNet 시군구 area code 목록.
-
-    ``lowTop10`` 전국 분포 모드에서 사용한다. 시도별 시군구가 없으면 해당 시도
-    코드를 fallback으로 사용해 호출량을 bounded하게 유지한다. ``budget``이 주어지면
-    각 ``get_area_codes`` 호출을 run 예산에서 차감하고, 소진되면 지금까지 모은 area를
-    반환하고 조기 종료한다(#545). 반환 순서는 시도별 round-robin으로 섞어 호출 상한에
-    걸려도 서울/수도권 같은 첫 시도에만 표본이 몰리지 않게 한다.
-    """
-    groups: list[list[str]] = []
-    if budget is not None and not budget.spend():
-        return []
-    for sido in await client.get_area_codes():
-        sido_code = str(getattr(sido, "code", "")).strip()
-        if not sido_code:
-            continue
-        if sido_code not in _OPINET_VALID_SIDO_CODES:
-            continue
-        if budget is not None and not budget.spend():
-            break
-        sigungu_codes = [
-            str(getattr(sigungu, "code", "")).strip()
-            for sigungu in await client.get_area_codes(sido_code)
-        ]
-        sigungu_codes = [code for code in sigungu_codes if code]
-        groups.append(sigungu_codes or [sido_code])
-
-    areas: list[str] = []
-    max_group_len = max((len(group) for group in groups), default=0)
-    for index in range(max_group_len):
-        for group in groups:
-            if index < len(group):
-                areas.append(group[index])
-    return areas
-
-
-def _opinet_sample_grid_centers() -> Iterator[tuple[float, float]]:
-    """전국 유가 분포용 bounded sample grid center를 반환한다."""
-    seen: set[tuple[float, float]] = set()
-    for lon, lat in _OPINET_SAMPLE_ANCHOR_CENTERS:
-        center = (round(lon, 6), round(lat, 6))
-        seen.add(center)
-        yield center
-
-    min_lon, min_lat, max_lon, max_lat = _OPINET_SAMPLE_GRID_BBOX
-    lat = min_lat
-    while lat <= max_lat:
-        lon = min_lon
-        while lon <= max_lon:
-            center = (round(lon, 6), round(lat, 6))
-            if center not in seen:
-                seen.add(center)
-                yield center
-            lon += _OPINET_SAMPLE_GRID_STEP_DEGREES
-        lat += _OPINET_SAMPLE_GRID_STEP_DEGREES
-
-
-def _opinet_invalid_parameter_error_type() -> type[Exception]:
-    """``OpinetInvalidParameterError``를 lazy resolve한다 (ADR-006 — 직접 import 금지).
-
-    provider 모듈에 그 **이름이 없으면** 아무것도 잡지 않도록 절대 매칭되지 않는
-    예외형을 돌려준다. 모듈 자체가 없는 경우는 덮지 않는다 —
-    ``importlib.import_module``이 먼저 ``ModuleNotFoundError``를 낸다. 실제로는
-    호출자가 이 함수 전에 ``opinet``을 import하고 client를 만들므로 도달하지 않는다.
-    """
-    opinet = importlib.import_module("opinet")
-    resolved = getattr(opinet, "OpinetInvalidParameterError", None)
-    if isinstance(resolved, type) and issubclass(resolved, Exception):
-        return resolved
-    return _NeverRaised
-
-
-class _NeverRaised(Exception):
-    """provider 예외형을 해석하지 못했을 때의 no-op sentinel."""
-
-
-def _opinet_no_data_error_type() -> type[Exception]:
-    """현재 설치된 ``opinet`` 모듈의 빈 응답 예외 타입."""
-    opinet = importlib.import_module("opinet")
-    error_type = getattr(opinet, "OpinetNoDataError", RuntimeError)
-    if isinstance(error_type, type) and issubclass(error_type, Exception):
-        return error_type
-    return RuntimeError
-
-
-def _opinet_rotation_offset(*, window_areas: int, on_date: date | None = None) -> int:
-    """시군 윈도 로테이션 offset (일 단위 결정적, KST 날짜 기준).
-
-    호출 상한 때문에 한 run은 시군 목록의 앞쪽 윈도(기본 60개)만 소비한다 —
-    offset 없이는 매일 같은 시군만 갱신되고 나머지는 영구 stale이 된다(37%가
-    3–7일 stale이던 prod 근본 원인). run 날짜의 ``toordinal() × 윈도 크기``를
-    offset으로 쓰면 매일 윈도 크기만큼 전진해 전국(~230 시군)을 ≈4일에 1주기로
-    순회한다. 실제 나머지 연산(``% len(areas)``)은 area 목록을 아는 사용처에서
-    수행한다. ``on_date``를 고정하면 테스트가 결정적이다.
-    """
-    if on_date is None:
-        on_date = kst_now().date()
-    return on_date.toordinal() * max(window_areas, 1)
-
-
-async def _opinet_low_top_area_stations(
-    client: Any,
-    *,
-    dedupe_by_product: bool,
-    max_low_top_calls: int = _OPINET_LOW_TOP_MAX_AREA_PRODUCT_CALLS,
-    run_call_budget: int = _OPINET_RUN_CALL_BUDGET,
-    rotation_offset: int | None = None,
-) -> AsyncIterator[Any]:
-    """시군구별 저가 주유소를 stream한다.
-
-    전국 bbox exhaustive enumeration은 OpiNet 일일 한도를 초과하므로, 지도
-    분포용으로 ``lowTop10``을 시군구×제품 단위로 먼저 호출한다. 운영 API가
-    빈 응답 또는 비정상적으로 작은 부분 응답을 반환하면 bounded sample grid의
-    ``aroundAll``로 fallback한다.
-
-    호출량 가드(#545):
-
-    - run당 hard budget(``run_call_budget``)으로 ``get_area_codes`` +
-      ``lowTop10`` + ``aroundAll`` 호출을 합산해 초과 시 즉시 중단한다.
-    - ``lowTop10``이 충분히(``_OPINET_LOW_TOP_FALLBACK_MIN_STATIONS``) 산출되면
-      grid fallback을 **건너뛴다**(부분 성공 후 전체 grid를 도는 케이스 차단).
-    - 서버가 먼저 ``OpinetRateLimitError``를 던지면 run을 실패시킨다. 일부 record를
-      얻었더라도 성공으로 삼으면 sync cursor가 전진해 갱신 장애가 숨겨지기 때문이다.
-
-    시군 윈도 로테이션: ``rotation_offset``(기본 = 오늘 KST 날짜 기반
-    ``_opinet_rotation_offset``)만큼 area 목록을 회전시켜 매 run이 다른 시군
-    윈도를 소비한다 — 전체 목록이 한 윈도에 다 들어가면 회전은 no-op이다.
-    """
-    seen: set[str | tuple[str, str | None]] = set()
-    yielded = 0
-    low_top_calls = 0
-    no_data_error = _opinet_no_data_error_type()
-    budget = _OpinetCallBudget(run_call_budget)
-    window_areas = max(max_low_top_calls // max(len(_OPINET_LOW_TOP_PRODUCTS), 1), 1)
-    if rotation_offset is None:
-        rotation_offset = _opinet_rotation_offset(window_areas=window_areas)
-
-    def _dedupe_key(station: Any) -> str | tuple[str, str | None] | None:
-        uni_id = getattr(station, "uni_id", None)
-        if not isinstance(uni_id, str):
-            return None
-        if not dedupe_by_product:
-            return uni_id
-        raw_product = getattr(station, "product_code", None)
-        product = getattr(raw_product, "value", raw_product)
-        return (uni_id, str(product) if product is not None else None)
-
-    def _emit(stations: Any) -> Iterator[Any]:
-        nonlocal yielded
-        for station in stations:
-            key = _dedupe_key(station)
-            if key is None:
-                yielded += 1
-                yield station
-                continue
-            if key in seen:
-                continue
-            seen.add(key)
-            yielded += 1
-            yield station
-
-    areas = await _opinet_sigungu_area_codes(client, budget=budget)
-    if len(areas) > window_areas:
-        # 윈도보다 목록이 크면 run 날짜 기반 offset으로 회전 — 매일 윈도 크기만큼
-        # 전진해 전국을 ≈ ceil(len/윈도)일에 1주기로 순회한다. round-robin 인접
-        # area는 서로 다른 시도라 윈도 안 지리 분포 공정성은 유지된다.
-        shift = rotation_offset % len(areas)
-        areas = areas[shift:] + areas[:shift]
-
-    for area in areas:
-        if budget.exhausted:
-            break
-        for product_code in _OPINET_LOW_TOP_PRODUCTS:
-            if low_top_calls >= max_low_top_calls:
-                break
-            if not budget.spend():
-                break
-            low_top_calls += 1
-            try:
-                stations = await client.get_lowest_price_top20(
-                    product_code,
-                    cnt=_OPINET_LOW_TOP_COUNT,
-                    area=area,
-                )
-            except no_data_error:
-                continue
-            for station in _emit(stations):
-                yield station
-        if budget.exhausted or low_top_calls >= max_low_top_calls:
-            break
-
-    # 부분 성공이라도 분포 임계치를 넘겼으면 grid fallback을 돌지 않는다(#545).
-    # budget이 이미 소진됐어도 grid를 시작하지 않는다.
-    if budget.exhausted or yielded >= _OPINET_LOW_TOP_FALLBACK_MIN_STATIONS:
-        return
-
-    for center_lon, center_lat in _opinet_sample_grid_centers():
-        if budget.exhausted:
-            break
-        for product_code in _OPINET_LOW_TOP_PRODUCTS:
-            if not budget.spend():
-                break
-            try:
-                stations = await client.search_stations_around(
-                    lon=center_lon,
-                    lat=center_lat,
-                    radius_m=5000,
-                    prodcd=product_code,
-                )
-            except no_data_error:
-                continue
-            for station in _emit(stations):
-                yield station
-
-
-async def fetch_opinet_stations(
-    settings: KorTravelMapSettings,
-    *,
-    rotation_offset: int | None = None,
-) -> AsyncIterator[Any]:
-    """OpiNet 주유소 record를 scope(bbox/POI-타깃)별로 stream한다(T-RV-04b).
-
-    OpiNet은 전국 dump endpoint가 없어 ``iter_stations_in_bbox``(aroundAll 격자
-    근사) 또는 ``lowTop10`` 지역별 목록으로 영역을 enumerate한다. scope는
-    ``settings.opinet_scope_mode``:
-
-    - ``disabled`` — 미적재(guard).
-    - ``bbox`` — ``opinet_scope_bbox`` 영역 1개 enumerate.
-    - ``poi_cache_target`` — ``ops.poi_cache_targets``의 opinet 활성 target(중심+반경)을
-      bbox로 변환해 enumerate(여러 target 간 ``uni_id`` dedup).
-    - ``low_top_area`` — 시군구별 저가 목록으로 전국 분포를 bounded 호출량으로 적재.
-
-    opinet client는 async라 async generator다. 소비 종료/조기 close 시
-    ``finally``에서 ``aclose()``.
-    """
-    secret = settings.opinet_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "opinet live fetch에는 KOR_TRAVEL_MAP_OPINET_API_KEY (source OPINET_API_KEY)가 "
-            "필요하다."
-        )
-
-    bboxes: list[tuple[float, float, float, float]] | None = None
-    if settings.opinet_scope_mode != "low_top_area":
-        bboxes = _opinet_bboxes_for_settings(settings)
-    opinet = cast(Any, importlib.import_module("opinet"))
-    client = opinet.OpinetClient(api_key=secret.get_secret_value())
-    try:
-        if settings.opinet_scope_mode == "low_top_area":
-            async for station in _opinet_low_top_area_stations(
-                client,
-                dedupe_by_product=False,
-                max_low_top_calls=settings.opinet_low_top_max_calls,
-                run_call_budget=settings.opinet_run_call_budget,
-                rotation_offset=rotation_offset,
-            ):
-                yield station
-            return
-        assert bboxes is not None
-        async for station in _enumerate_opinet_stations(
-            client, bboxes, radius_m=settings.opinet_scope_radius_m
-        ):
-            yield station
-    finally:
-        await client.aclose()
-
-
-async def fetch_opinet_station_price_details(
-    settings: KorTravelMapSettings,
-    *,
-    rotation_offset: int | None = None,
-) -> AsyncIterator[Any]:
-    """현재 OpiNet scope의 가격 record를 stream한다.
-
-    ``bbox``/``poi_cache_target``은 기존처럼 ``detailById``를 반환하고,
-    ``low_top_area``는 ``lowTop10`` Station row를 반환한다. asset 변환기가 row shape에
-    따라 detail/단일 제품 가격 경로를 고른다.
-
-    opinet client는 async라 async generator다. 소비 종료/조기 close 시
-    ``finally``에서 ``aclose()``.
-    """
-    secret = settings.opinet_api_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "opinet price live fetch에는 KOR_TRAVEL_MAP_OPINET_API_KEY "
-            "(source OPINET_API_KEY)가 필요하다."
-        )
-
-    bboxes: list[tuple[float, float, float, float]] | None = None
-    if settings.opinet_scope_mode != "low_top_area":
-        bboxes = _opinet_bboxes_for_settings(settings)
-    opinet = cast(Any, importlib.import_module("opinet"))
-    client = opinet.OpinetClient(api_key=secret.get_secret_value())
-    try:
-        if settings.opinet_scope_mode == "low_top_area":
-            async for station in _opinet_low_top_area_stations(
-                client,
-                dedupe_by_product=True,
-                max_low_top_calls=settings.opinet_low_top_max_calls,
-                run_call_budget=settings.opinet_run_call_budget,
-                rotation_offset=rotation_offset,
-            ):
-                yield station
-            return
-        assert bboxes is not None
-        async for station in _enumerate_opinet_stations(
-            client, bboxes, radius_m=settings.opinet_scope_radius_m
-        ):
-            # enumerate 자체는 세지 못하지만(`_enumerate_opinet_stations` 참고)
-            # 상세 조회는 uni_id마다 정확히 1건이다 - 셀 수 있는 쪽은 센다.
-            note_upstream_request()
-            yield await client.get_station_detail(station.uni_id)
-    finally:
-        await client.aclose()
 
 
 async def fetch_standard_parking_lots(

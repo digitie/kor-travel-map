@@ -485,16 +485,16 @@ def test_provider_record_resource_env_mapping() -> None:
     assert specs["datagokr_cultural_festivals"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
     )
-    assert specs["opinet_stations"].kor_travel_map_env_names == (
+    assert specs["transport_fuel_stations"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_OPINET_API_KEY",
     )
-    assert specs["opinet_station_price_details"].kor_travel_map_env_names == (
+    assert specs["transport_fuel_stations"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_OPINET_API_KEY",
     )
-    assert specs["krex_rest_area_fuel_prices"].kor_travel_map_env_names == (
+    assert specs["transport_rest_area_fuel_prices"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
     )
-    assert specs["krex_traffic_notices"].kor_travel_map_env_names == (
+    assert specs["transport_highway_incidents"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
     )
     assert specs["mois_license_records"].kor_travel_map_env_names == (

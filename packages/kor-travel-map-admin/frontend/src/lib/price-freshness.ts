@@ -1,5 +1,5 @@
 const KST_TIME_ZONE = "Asia/Seoul";
-const OPINET_PROVIDER = "python-opinet-api";
+const OPINET_PROVIDER = "kor-travel-transport";
 const KST_UTC_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
 const kstDateFormatter = new Intl.DateTimeFormat("en-US", {

@@ -14,14 +14,14 @@ from kortravelmap.dagster.assets import (
     run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
     run_feature_geometry_knps_records,
-    run_feature_notice_krex_traffic_notices,
+    run_feature_notice_transport_highway_incidents,
     run_feature_place_knps_points,
-    run_feature_place_krex_rest_areas,
+    run_feature_place_transport_rest_areas,
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
-    run_feature_place_opinet_stations,
-    run_feature_price_krex_rest_areas,
-    run_feature_price_opinet_stations,
+    run_feature_place_transport_fuel_stations,
+    run_feature_price_transport_rest_areas,
+    run_feature_price_transport_fuel_stations,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
@@ -349,9 +349,9 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_place_opinet_stations,
+            run_feature_place_transport_fuel_stations,
             map_client,
-            opinet_stations=[
+            transport_fuel_stations=[
                 _Station(
                     uni_id="DAGSTER-OPINET-001",
                     name="SK주유소 강남점",
@@ -366,9 +366,9 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_price_opinet_stations,
+            run_feature_price_transport_fuel_stations,
             map_client,
-            opinet_station_price_details=[
+            transport_fuel_stations=[
                 _StationDetail(
                     uni_id="DAGSTER-OPINET-001",
                     name="SK주유소 강남점",
@@ -399,9 +399,9 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_place_krex_rest_areas,
+            run_feature_place_transport_rest_areas,
             map_client,
-            krex_rest_areas=[
+            transport_rest_areas=[
                 _RestArea(
                     name="서산휴게소",
                     route_name="서해안고속도로",
@@ -413,9 +413,9 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_price_krex_rest_areas,
+            run_feature_price_transport_rest_areas,
             map_client,
-            krex_rest_area_fuel_prices=[
+            transport_rest_area_fuel_prices=[
                 _FuelPriceRecord(
                     service_area_code="DAGSTER-KREX-FUEL-001",
                     route_name="서해안고속도로",
@@ -432,9 +432,9 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_notice_krex_traffic_notices,
+            run_feature_notice_transport_highway_incidents,
             map_client,
-            krex_traffic_notices=[
+            transport_highway_incidents=[
                 _Notice(
                     occurred_date="2026.05.28",
                     occurred_time="05:00:00",
@@ -550,7 +550,7 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     notice_feature_ids = {
         feature_id
         for result in feature_results
-        if result.dataset_key == "krex_traffic_notices"
+        if result.dataset_key == "transport_highway_incidents"
         for feature_id in result.feature_ids
     }
 
@@ -604,10 +604,10 @@ async def _notice_valid_end(
 async def _krex_notice_sync_cursor(client: AsyncKorTravelMapClient) -> dict[str, Any]:
     """KREX notice snapshot asset이 마지막 성공에 기록한 cursor."""
     state = await client.get_sync_state(
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         # T-VN-33 — sync state identity는 (dataset, scope, operation) 3축이다.
-        operation_key="feature_notice_krex_traffic_notices_job",
+        operation_key="feature_notice_transport_highway_incidents_job",
     )
     assert state is not None
     return state.cursor
@@ -653,9 +653,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     b = _notice(occurred_time="10:01:00", route_no="0020", point_name="판교")
 
     seeded = await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[a, b],
+        transport_highway_incidents=[a, b],
         fetched_at=first_seen,
     )
     a_legacy, b_legacy = seeded.feature_ids
@@ -665,9 +665,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     assert await _notice_valid_end(map_client, b_id) is None
 
     await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[a],
+        transport_highway_incidents=[a],
         fetched_at=partial_at,
     )
     assert await _notice_valid_end(map_client, a_id) is None
@@ -675,9 +675,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
 
     await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[],
+        transport_highway_incidents=[],
         fetched_at=empty_at,
     )
     assert await _notice_valid_end(map_client, a_id) == empty_at
@@ -685,9 +685,9 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
 
     await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[a],
+        transport_highway_incidents=[a],
         fetched_at=reappeared_at,
     )
     assert await _notice_valid_end(map_client, a_id) is None
@@ -753,9 +753,9 @@ async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     target_again = _notice(point_name="기흥", process_status="정체해소중", revision=2)
 
     seeded = await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[target, bystander],
+        transport_highway_incidents=[target, bystander],
         fetched_at=seeded_at,
     )
     # 재키 뒤 "같은 feature인가"는 정본 키로만 판정된다 — 유도 ``f_*``는 자연키가
@@ -771,9 +771,9 @@ async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     assert seed_cursor["notices_closed"] == 0
 
     await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[],
+        transport_highway_incidents=[],
         fetched_at=closed_at,
     )
     for feature_id in sorted(seeded_ids):
@@ -783,9 +783,9 @@ async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     assert closed_cursor["notices_reopened"] == 0
 
     reappeared = await _run_asset(
-        run_feature_notice_krex_traffic_notices,
+        run_feature_notice_transport_highway_incidents,
         map_client,
-        krex_traffic_notices=[target_again],
+        transport_highway_incidents=[target_again],
         fetched_at=reappeared_at,
     )
     # 자연키가 같으니 새 feature가 아니라 닫혀 있던 그 feature여야 한다. 여기서

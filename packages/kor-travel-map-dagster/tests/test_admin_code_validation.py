@@ -708,7 +708,7 @@ def test_traffic_clue_joins_only_the_parts_that_exist(
     ("raw_data", "expected"),
     [
         # krex traffic notices — 좌표 없는 row가 실측 63/99. 원 payload 철자는
-        # dataset마다 다르다(`python-krex-api` `_get`가 다중 철자를 흡수한다).
+        # dataset마다 다르다(`kor-travel-transport` `_get`가 다중 철자를 흡수한다).
         ({"routeNo": "0010", "pointName": "양재"}, "0010 양재"),
         ({"route_no": "0010", "point_name": "양재"}, "0010 양재"),
         # mcst kcisa 방언은 대문자 `ADDRESS`로 온다.

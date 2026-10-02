@@ -697,9 +697,9 @@ _SCHEDULES_GRAPHQL_PAYLOAD: dict[str, Any] = {
             "location": {"name": "kortravelmap.dagster.definitions"},
             "schedules": [
                 {
-                    "name": ("feature_place_krairport_airports_monthly_schedule"),
+                    "name": ("feature_place_transport_airports_monthly_schedule"),
                     "cronSchedule": "5 5 4 * *",
-                    "pipelineName": "feature_place_krairport_airports_job",
+                    "pipelineName": "feature_place_transport_airports_job",
                     "mode": "default",
                     "executionTimezone": "Asia/Seoul",
                     "defaultStatus": "RUNNING",
@@ -766,7 +766,7 @@ _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
             "results": [
                 {
                     "runId": "run-1",
-                    "jobName": "feature_place_krairport_airports_job",
+                    "jobName": "feature_place_transport_airports_job",
                     "status": "FAILURE",
                     "startTime": 1.0,
                     "endTime": 2.0,
@@ -775,7 +775,7 @@ _RUNS_GRAPHQL_PAYLOAD: dict[str, Any] = {
                 },
                 {
                     "runId": "run-2",
-                    "jobName": "feature_place_krairport_airports_job",
+                    "jobName": "feature_place_transport_airports_job",
                     "status": "SUCCESS",
                     "startTime": 3.0,
                     "endTime": 4.0,
@@ -2580,7 +2580,7 @@ def test_schedules_merges_overrides_and_returns_sensors(
         return _SCHEDULES_GRAPHQL_PAYLOAD
 
     async def _overrides(_session: Any) -> dict[str, str]:
-        return {"feature_place_krairport_airports_monthly_schedule": "40 * * * *"}
+        return {"feature_place_transport_airports_monthly_schedule": "40 * * * *"}
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
     monkeypatch.setattr(dagster_schedule, "schedule_overrides", _overrides)
@@ -2591,7 +2591,7 @@ def test_schedules_merges_overrides_and_returns_sensors(
     data = response.json()["data"]
     assert data["status"] == "ok"
     schedule = data["schedules"][0]
-    assert schedule["name"] == "feature_place_krairport_airports_monthly_schedule"
+    assert schedule["name"] == "feature_place_transport_airports_monthly_schedule"
     assert schedule["override_cron_schedule"] == "40 * * * *"
     assert schedule["default_cron_schedule"] == "5 5 4 * *"
     assert schedule["effective_cron_schedule"] == "5 5 4 * *"
@@ -2639,7 +2639,7 @@ def test_patch_schedule_upserts_override(
     monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={
             "cron_schedule": "40 * * * *",
             "reason": "휴가철 증차",
@@ -2656,7 +2656,7 @@ def test_patch_schedule_upserts_override(
     assert data["effective_status"] == "pending_verification"
     assert upserts == [
         {
-            "schedule_name": "feature_place_krairport_airports_monthly_schedule",
+            "schedule_name": "feature_place_transport_airports_monthly_schedule",
             "cron_schedule": "40 * * * *",
             "actor": "local-dev",
             "reason": "휴가철 증차",
@@ -2664,7 +2664,7 @@ def test_patch_schedule_upserts_override(
     ]
     assert session.schedule_audit_events == [
         {
-            "schedule_name": "feature_place_krairport_airports_monthly_schedule",
+            "schedule_name": "feature_place_transport_airports_monthly_schedule",
             "command": "update",
             "actor": "local-dev",
             "reason": "휴가철 증차",
@@ -2672,7 +2672,7 @@ def test_patch_schedule_upserts_override(
             "details": {"cron_schedule": "40 * * * *"},
         },
         {
-            "schedule_name": "feature_place_krairport_airports_monthly_schedule",
+            "schedule_name": "feature_place_transport_airports_monthly_schedule",
             "command": "update",
             "actor": "local-dev",
             "reason": "휴가철 증차",
@@ -2714,7 +2714,7 @@ def test_patch_schedule_null_cron_clears_override(
     monkeypatch.setattr(dagster_schedule, "delete_schedule_override", _delete)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={
             "cron_schedule": None,
             "reason": "기본 주기 복귀",
@@ -2725,10 +2725,10 @@ def test_patch_schedule_null_cron_clears_override(
     data = response.json()["data"]
     assert data["status"] == "ok"
     assert data["command"] == "clear_override"
-    assert deletes == ["feature_place_krairport_airports_monthly_schedule"]
+    assert deletes == ["feature_place_transport_airports_monthly_schedule"]
     assert data["save_status"] == "cleared"
     assert session.schedule_audit_events[-1] == {
-        "schedule_name": "feature_place_krairport_airports_monthly_schedule",
+        "schedule_name": "feature_place_transport_airports_monthly_schedule",
         "command": "default",
         "actor": "local-dev",
         "reason": "기본 주기 복귀",
@@ -2757,13 +2757,13 @@ def test_patch_schedule_clear_override_failure_uses_canonical_command_name(
         }
 
     async def _delete(_session: Any, *, schedule_name: str) -> None:
-        assert schedule_name == "feature_place_krairport_airports_monthly_schedule"
+        assert schedule_name == "feature_place_transport_airports_monthly_schedule"
 
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
     monkeypatch.setattr(dagster_schedule, "delete_schedule_override", _delete)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={"cron_schedule": None, "reason": "clear partial"},
     )
 
@@ -2785,7 +2785,7 @@ def test_patch_schedule_rejects_high_frequency_cron(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={"cron_schedule": "*/5 * * * *"},
     )
 
@@ -2851,7 +2851,7 @@ def test_patch_schedule_reload_transport_failure_reports_saved_partial_result(
     monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={"cron_schedule": "40 * * * *", "reason": "partial result"},
     )
 
@@ -2896,7 +2896,7 @@ def test_patch_schedule_reload_location_load_error_is_problem_502(
     monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={"cron_schedule": "40 * * * *", "reason": "load failure"},
     )
 
@@ -2983,7 +2983,7 @@ def test_patch_schedule_unknown_reload_shape_is_uncertain(
     monkeypatch.setattr(dagster_schedule, "upsert_schedule_override", _upsert)
 
     response = client.patch(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule",
         json={"cron_schedule": "40 * * * *", "reason": "reload shape"},
     )
 
@@ -3040,7 +3040,7 @@ def test_schedule_command_start_mutates_state(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "start", "reason": "운영 재개"},
     )
 
@@ -3074,7 +3074,7 @@ def test_schedule_graphql_error_is_problem_502(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "start", "reason": "재개"},
     )
 
@@ -3120,7 +3120,7 @@ def test_schedule_mutation_response_loss_is_marked_uncertain(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "start"},
     )
 
@@ -3274,7 +3274,7 @@ def test_schedule_mutation_rejects_malformed_success_as_uncertain(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "start"},
     )
 
@@ -3326,7 +3326,7 @@ def test_schedule_mutation_unknown_union_is_uncertain(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "start"},
     )
 
@@ -3355,7 +3355,7 @@ def test_schedule_run_rejects_success_without_run_id_as_uncertain(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "run"},
     )
 
@@ -3404,7 +3404,7 @@ def test_schedule_run_unknown_union_is_uncertain(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "run"},
     )
 
@@ -3430,7 +3430,7 @@ def test_schedule_command_run_launches_job(
                     "run": {
                         "runId": "run-99",
                         "status": "QUEUED",
-                        "jobName": "feature_place_krairport_airports_job",
+                        "jobName": "feature_place_transport_airports_job",
                         "startTime": None,
                         "endTime": None,
                         "updateTime": None,
@@ -3443,7 +3443,7 @@ def test_schedule_command_run_launches_job(
     monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
 
     response = client.post(
-        "/v1/ops/pipeline/schedules/feature_place_krairport_airports_monthly_schedule/commands",
+        "/v1/ops/pipeline/schedules/feature_place_transport_airports_monthly_schedule/commands",
         json={"command": "run", "reason": "재적재"},
     )
 

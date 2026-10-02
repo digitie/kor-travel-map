@@ -1,6 +1,6 @@
 """상한이 **프로세스당**인 provider는 큐 경로에서 gate를 선언해야 한다.
 
-`python-krex-api`는 초당 5건을 지킨다 — 그러나 그 보증은 한 프로세스 안에서다. 큐
+`kor-travel-transport`는 초당 5건을 지킨다 — 그러나 그 보증은 한 프로세스 안에서다. 큐
 센서는 틱당 RunRequest를 10개 내고 `docker/dagster.yaml`이 4를 동시에 돌리므로,
 run마다 client가 따로면 버킷도 따로여서 합계가 **4배**가 된다(2026-09-14 적대 리뷰가
 두 명 독립적으로 짚었다).
@@ -152,7 +152,7 @@ _SIBLING_ROOTS: Final = (Path("F:/dev"), Path("/f/dev"), Path.home() / "dev")
 
 #: gate 이름 → (형제 저장소, 모듈, 기본 상한 상수를 담은 파일).
 _GATE_PROVIDER_SOURCES: Final[dict[str, tuple[str, str, str]]] = {
-    "KREX_RATE_GATE": ("python-krex-api", "krex", "_http.py"),
+    "KREX_RATE_GATE": ("kor-travel-transport", "krex", "_http.py"),
 }
 
 

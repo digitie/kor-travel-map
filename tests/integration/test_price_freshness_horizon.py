@@ -39,8 +39,8 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 
 _DATASET_KEYS = {
-    "python-opinet-api": "opinet_gas_station_prices",
-    "python-krex-api": "krex_rest_area_prices",
+    "kor-travel-transport": "transport_fuel_prices",
+    "kor-travel-transport": "transport_rest_area_fuel_prices",
 }
 
 
@@ -80,7 +80,7 @@ def _price_value(
     product_key: str,
     observed_at: datetime,
     price: int,
-    provider: str = "python-opinet-api",
+    provider: str = "kor-travel-transport",
     price_domain: PriceDomain = PriceDomain.OPINET_GAS_STATION,
 ) -> PriceValue:
     return PriceValue(
@@ -116,7 +116,7 @@ async def _append_price_response(
     session: AsyncSession,
     values: list[PriceValue],
     *,
-    provider: str = "python-opinet-api",
+    provider: str = "kor-travel-transport",
 ) -> None:
     """T-VN-38의 source response lineage를 포함해 test price facts를 적재한다."""
 
@@ -400,11 +400,11 @@ async def test_stale_price_excluded_from_bbox_price_summary(
                 product_key="gasoline",
                 observed_at=now - timedelta(minutes=30),
                 price=1710,
-                provider="python-krex-api",
+                provider="kor-travel-transport",
                 price_domain=PriceDomain.REST_AREA_FUEL,
             )
         ],
-        provider="python-krex-api",
+        provider="kor-travel-transport",
     )
     await migrated_session.flush()
 
@@ -420,8 +420,8 @@ async def test_stale_price_excluded_from_bbox_price_summary(
         migrated_session, feature_id=price_feature_id
     )
     expected_fresh_identities = {
-        ("python-krex-api", "rest_area_fuel", "gasoline"),
-        ("python-opinet-api", "opinet_gas_station", "gasoline"),
+        ("kor-travel-transport", "rest_area_fuel", "gasoline"),
+        ("kor-travel-transport", "opinet_gas_station", "gasoline"),
     }
     assert {
         (point.provider, point.price_domain, point.product_key)
@@ -457,5 +457,5 @@ async def test_stale_price_excluded_from_bbox_price_summary(
             (point["provider"], point["price_domain"], point["product_key"])
             for point in (hit_all["price_summary"] or [])
         } == expected_fresh_identities | {
-            ("python-opinet-api", "opinet_gas_station", "diesel")
+            ("kor-travel-transport", "opinet_gas_station", "diesel")
         }

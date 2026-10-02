@@ -159,7 +159,7 @@ def _request(
                 feature_update_request_dataset_id="membership-1",
                 provider_dataset_id=1,
                 sync_scope="dataset_wide",
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 provider="demo",
                 dataset_key="places",
             ),
@@ -199,7 +199,7 @@ def _execution_result(
                 feature_count=1,
                 provider_dataset_id=1,
                 sync_scope="dataset_wide",
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
             ),
         ),
     )
@@ -207,7 +207,7 @@ def _execution_result(
         request_id=request.request_id,
         provider_dataset_id=1,
         sync_scope="dataset_wide",
-        operation_key="feature_place_opinet_stations_job",
+        operation_key="feature_place_transport_fuel_stations_job",
         provider="demo",
         dataset_key="places",
         scope_type=request.scope_type,
@@ -230,7 +230,7 @@ def _execution_result(
             ProviderDatasetRefreshResult(
                 provider_dataset_id=1,
                 sync_scope="dataset_wide",
-                operation_key="feature_place_opinet_stations_job",
+                operation_key="feature_place_transport_fuel_stations_job",
                 provider="demo",
                 dataset_key="places",
                 loaded_feature_ids=("feature-1",),
@@ -347,7 +347,7 @@ def test_worker_job_executes_configured_request() -> None:
         {
             "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
-            "operation_key": "feature_place_opinet_stations_job",
+            "operation_key": "feature_place_transport_fuel_stations_job",
         }
     ]
 

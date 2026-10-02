@@ -343,7 +343,7 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     )
     opinet_value = PriceValue(
         feature_id=feature_id,
-        provider="python-opinet-api",
+        provider="kor-travel-transport",
         price_domain=PriceDomain.OPINET_GAS_STATION,
         product_key="gasoline",
         product_name="휘발유",
@@ -359,7 +359,7 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     )
     krex_value = PriceValue(
         feature_id=feature_id,
-        provider="python-krex-api",
+        provider="kor-travel-transport",
         price_domain=PriceDomain.REST_AREA_FUEL,
         product_key="gasoline",
         product_name="휘발유",
@@ -378,12 +378,12 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         [opinet_value],
         provider_dataset_id=await _current_dataset_id(
             migrated_session,
-            provider="python-opinet-api",
-            dataset_key="opinet_gas_station_prices",
+            provider="kor-travel-transport",
+            dataset_key="transport_fuel_prices",
         ),
         source_record=_response_record(
-            provider="python-opinet-api",
-            dataset_key="opinet_gas_station_prices",
+            provider="kor-travel-transport",
+            dataset_key="transport_fuel_prices",
             source_entity_type="price_response",
             raw_data={"feature_id": feature_id, "value": "1789"},
             fetched_at=current,
@@ -394,12 +394,12 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
         [krex_value],
         provider_dataset_id=await _current_dataset_id(
             migrated_session,
-            provider="python-krex-api",
-            dataset_key="krex_rest_area_prices",
+            provider="kor-travel-transport",
+            dataset_key="transport_rest_area_fuel_prices",
         ),
         source_record=_response_record(
-            provider="python-krex-api",
-            dataset_key="krex_rest_area_prices",
+            provider="kor-travel-transport",
+            dataset_key="transport_rest_area_fuel_prices",
             source_entity_type="price_response",
             raw_data={"feature_id": feature_id, "value": "1799"},
             fetched_at=current,
@@ -420,9 +420,9 @@ async def test_admin_price_card_and_map_summary_include_nonpublic_feature(
     )
 
     expected = {
-        ("python-krex-api", "rest_area_fuel", "gasoline", Decimal("1799")),
+        ("kor-travel-transport", "rest_area_fuel", "gasoline", Decimal("1799")),
         (
-            "python-opinet-api",
+            "kor-travel-transport",
             "opinet_gas_station",
             "gasoline",
             Decimal("1789"),

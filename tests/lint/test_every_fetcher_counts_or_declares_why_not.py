@@ -58,7 +58,7 @@ _NOTE = "note_upstream_request"
 #: 어긋났다** — ``file_data.iter_pages``는 public이었고, event 창은 14개월로 알 수
 #: 있었다. 못 센다는 선언은 값싸고, 값싼 선언은 계측을 대체하기 시작한다.
 _UNCOUNTABLE: dict[str, str] = {
-    "fetch_krairport_airports": (
+    "fetch_transport_airports": (
         "번들 정적 데이터 — credential 없이 동작하고 upstream 요청이 없다."
     ),
     "fetch_mois_license_records": "로컬 sqlite 파일을 읽는다 — upstream 요청이 없다.",
@@ -75,17 +75,17 @@ _UNCOUNTABLE: dict[str, str] = {
 #: 나간다(계약상 0으로 위장하지 않는다). 아래 하한은 이들을 **계측된 쪽으로
 #: 세지 않는다** — 부분 계측으로 강등하는 것이 공짜면 그것이 값싼 도피로가 된다.
 _PARTIALLY_COUNTED: dict[str, str] = {
-    "fetch_opinet_stations": (
+    "fetch_transport_fuel_stations": (
         "`low_top_area` 모드는 `_OpinetCallBudget.spend()`로 정확히 세지만, "
         "`bbox`/`poi_cache_target` 모드의 `iter_stations_in_bbox`는 provider가 "
         "bbox를 격자로 덮으며 셀마다 호출한다 — 셀 수 계산이 provider private이라 "
         "이 층에서는 셀 수 없다."
     ),
-    "fetch_opinet_station_price_details": (
+    "fetch_transport_fuel_stations": (
         "`low_top_area` 모드는 예산기가 정확히 센다(완전). `bbox`/`poi_cache_target` "
         "모드는 상세 조회(`get_station_detail`)가 uni_id마다 1건이라 그쪽은 세지만, "
         "그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 **key가 실리되 실제 사용량보다 "
-        "작다.** 같은 모드의 `fetch_opinet_stations`가 값을 아예 안 내는 것과 다르다."
+        "작다.** 같은 모드의 `fetch_transport_fuel_stations`가 값을 아예 안 내는 것과 다르다."
     ),
     "sync_mois_source_db": (
         "큐 runner 경로와 Phase A op 경로는 센다. **asset 경로는 못 센다** — "
@@ -111,10 +111,10 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_knps_geometry_records",
         "fetch_knps_point_records",
         "fetch_kor_travel_concierge_youtube_features",
-        "fetch_krairport_airports",
-        "fetch_krex_rest_area_fuel_prices",
-        "fetch_krex_rest_areas",
-        "fetch_krex_traffic_notices",
+        "fetch_transport_airports",
+        "fetch_transport_rest_area_fuel_prices",
+        "fetch_transport_rest_areas",
+        "fetch_transport_highway_incidents",
         "fetch_krforest_arboretums",
         "fetch_krforest_dulle_trails",
         "fetch_krforest_landslide_forecast_issues",
@@ -124,8 +124,8 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_krheritage_items",
         "fetch_mcst_culture_records",
         "fetch_mois_license_records",
-        "fetch_opinet_station_price_details",
-        "fetch_opinet_stations",
+        "fetch_transport_fuel_stations",
+        "fetch_transport_fuel_stations",
         "fetch_seoul_open_data_bookstores",
         "fetch_standard_museums",
         "fetch_standard_parking_lots",

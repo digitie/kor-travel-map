@@ -20,8 +20,8 @@ def test_canonical_names_include_core_providers() -> None:
         "python-kma-api",
         "python-knps-api",
         "python-mois-api",  # ADR-024
-        "python-opinet-api",
-        "python-krex-api",
+        "kor-travel-transport",
+        "kor-travel-transport",
         "python-krheritage-api",
         "data.go.kr-standard",
     }

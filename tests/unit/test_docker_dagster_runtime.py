@@ -6595,13 +6595,13 @@ def _opinet_worst_day_runs() -> int:
 
     from kortravelmap.dagster.assets import (
         OPINET_LOAD_RETRY_POLICY,
-        feature_place_opinet_stations,
-        feature_price_opinet_stations,
+        feature_place_transport_fuel_stations,
+        feature_price_transport_fuel_stations,
     )
 
     policies = [
         asset_def.op.retry_policy
-        for asset_def in (feature_place_opinet_stations, feature_price_opinet_stations)
+        for asset_def in (feature_place_transport_fuel_stations, feature_price_transport_fuel_stations)
     ]
     # 자리(상수 선언)가 아니라 **효과**(asset에 붙은 정책)에 결박한다.
     assert all(policy is not None for policy in policies), (

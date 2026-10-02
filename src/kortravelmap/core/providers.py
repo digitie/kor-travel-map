@@ -49,6 +49,10 @@ CANONICAL_PROVIDER_NAMES: Final[tuple[str, ...]] = (
     "google-places-api-new",
     # 외부 app provider (kor-travel-concierge YouTube 장소 후보)
     "kor-travel-concierge-youtube",
+    # 내부 서비스 provider — OpiNet·KREX·공항 데이터의 Map 원천(ADR-106).
+    # 옛 ``python-opinet-api``·``python-krex-api``·``python-krairport-api``는 비활성
+    # dataset 카탈로그 행과 lineage 이력에 남아 있어 이름 정규화가 계속 받아야 한다.
+    "kor-travel-transport",
 )
 """본 라이브러리가 알고 있는 provider canonical name.
 
@@ -93,6 +97,8 @@ PROVIDER_ALIASES: Final[dict[str, str]] = {
     "kor_travel_concierge": "kor-travel-concierge-youtube",
     "kor_travel_concierge_youtube": "kor-travel-concierge-youtube",
     "youtube_place_candidates": "kor-travel-concierge-youtube",
+    "transport": "kor-travel-transport",
+    "kor_travel_transport": "kor-travel-transport",
 }
 """provider name alias → canonical 매핑. provider raw에서 들어오는 다양한
 표기를 단일 canonical로 정규화."""

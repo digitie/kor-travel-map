@@ -1,17 +1,17 @@
 """``kortravelmap.providers.krairport`` — 공항 메타데이터 → FeatureBundle.
 
-``python-krairport-api``(``import krairport``)의 번들 공항 메타데이터
-(``AirportMetadata``)를 place ``FeatureBundle``로 정규화한다(ADR-034 보조). 공항
-메타데이터 목록(``client.airports()``)은 **번들 정적 데이터**라 credential 없이 쓸 수
-있다(knps와 동일 keyless).
+원천: kor-travel-transport ``/v1/service/exports/airports``(ADR-106). transport가
+``python-krairport-api`` 번들의 국내 운영 공항 전체(포항경주 KPO 포함)를 ICAO·소재지·좌표와 함께
+내고, ``providers.kor_travel_transport.parse_airports``가 이 모듈의 입력 shape로 바꾼다.
+Map은 krairport 라이브러리를 직접 import하지 않는다. provider 정체성은 ``kor-travel-transport``,
+자연키는 IATA 코드다.
 
 - 공항 → category ``TRANSPORT_AIRPORT``(06050000), place_kind ``airport``. MOIS dedup
   후보 없음.
 
-좌표는 provider ``Coordinate``(``.lat``/``.lon`` float) 중첩 객체로 온다. feature_id가
-bjd_code에 의존하므로(ADR-009) 변환은 async이고 좌표 reverse로 행정코드를 보강한다.
+좌표는 ``Coordinate``(``.lat``/``.lon`` float) 중첩 객체로 온다. 좌표 reverse로 행정코드를 보강한다.
 
-ADR 참조: ADR-006 / ADR-009 / ADR-012 / ADR-019 / ADR-024 / ADR-034
+ADR 참조: ADR-009 / ADR-012 / ADR-019 / ADR-098 / ADR-106
 """
 
 from __future__ import annotations
@@ -48,20 +48,18 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_AIRPORTS,
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+)
 
 __all__ = [
     "AirportMetadataItem",
     "airports_to_bundles",
-    "KRAIRPORT_PROVIDER_NAME",
-    "DATASET_KEY_AIRPORTS",
     "AIRPORT_CATEGORY",
     "AIRPORT_MARKER_COLOR",
 ]
 
-KRAIRPORT_PROVIDER_NAME: Final[str] = "python-krairport-api"
-"""canonical provider name (ADR-024)."""
-
-DATASET_KEY_AIRPORTS: Final[str] = "krairport_airports"
 _AIRPORT_ENTITY_TYPE: Final[str] = "airport"
 AIRPORT_CATEGORY: Final[str] = PlaceCategoryCode.TRANSPORT_AIRPORT.value
 """``Feature.category`` — 공항 06050000."""
@@ -146,7 +144,7 @@ async def _airport_to_bundle(
     }
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=KRAIRPORT_PROVIDER_NAME,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_AIRPORTS,
         source_entity_type=_AIRPORT_ENTITY_TYPE,
         source_entity_id=natural_key,
@@ -156,7 +154,7 @@ async def _airport_to_bundle(
         bjd_code=bjd_code,
         kind=FeatureKind.PLACE.value,
         category=AIRPORT_CATEGORY,
-        source_type=f"{KRAIRPORT_PROVIDER_NAME}:{DATASET_KEY_AIRPORTS}",
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_AIRPORTS}",
         source_natural_key=natural_key,
     )
     feature = Feature(
@@ -183,7 +181,7 @@ async def _airport_to_bundle(
         ),
     )
     source_record = SourceRecord(
-        provider=normalize_provider_name(KRAIRPORT_PROVIDER_NAME),
+        provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
         dataset_key=DATASET_KEY_AIRPORTS,
         source_entity_type=_AIRPORT_ENTITY_TYPE,
         source_entity_id=natural_key,

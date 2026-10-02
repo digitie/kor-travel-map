@@ -1,15 +1,16 @@
-"""``kortravelmap.providers.opinet`` — OpiNet 주유소/유가 정규화.
+"""``kortravelmap.providers.opinet`` — OpiNet 주유소/유가 정규화 (원천: kor-travel-transport).
 
-본 모듈은 `python-opinet-api` provider 라이브러리의 typed model을 본 라이브러리
-``FeatureBundle``/``PriceValue`` DTO로 정규화한다. 주유소 자체는
-``kind=place`` feature로, 유가 표시는 별도 ``kind=price`` anchor feature와
-``feature.feature_price_values`` row로 적재한다.
+OpiNet(한국석유공사) 주유소·유가 데이터를 ``FeatureBundle``/``PriceValue`` DTO로 정규화한다.
+Map은 OpiNet을 직접 부르지 않는다 — kor-travel-transport가 전국 주유소를 수집해
+``/v1/service/exports/fuel-stations``로 내고(ADR-106), 그 응답을
+``providers.kor_travel_transport.parse_fuel_station``이 이 모듈의 입력 shape로 바꾼다.
+provider 정체성은 ``kor-travel-transport``이고 자연키는 오피넷 주유소 ID(uni_id)다.
 
-OpiNet은 한국석유공사 운영. 주유소 ID(uni_id) + 제품코드(prodcd) + 관측시각이
-unique. 최신 detail 경로는 uni_id별 가격 anchor feature를 결정하고, 과거
-``prices_to_values`` helper는 호출자가 선택한 feature_id에 가격값을 붙인다.
+주유소 자체는 ``kind=place`` feature로, 유가는 주유소별 ``kind=price`` anchor feature와
+``feature.feature_price_values`` row로 적재한다. 한 주유소의 유종들은 같은 price feature에
+모인다 — ADR-098 identity ``(dataset, kind, natural_key=uni_id)``.
 
-OpiNet product code(KMA `category` 위치):
+OpiNet product code:
 
 | OpiNet `prodcd` | 본 lib `product_key` | 한글 |
 |----------------|---------------------|------|
@@ -19,19 +20,13 @@ OpiNet product code(KMA `category` 위치):
 | `C004` | `kerosene` | 등유 |
 | `K015` | `lpg` | LPG |
 
-ADR 참조
---------
-- ADR-006 — provider wrapper 금지
-- ADR-009 — `make_price_value_key`
-- ADR-013/014 — bulk insert + BRIN(observed_at) 시계열
-- ADR-019 — datetime aware
-- ADR-024 — canonical provider name `python-opinet-api`
+ADR 참조: ADR-009 / ADR-013/014 / ADR-019 / ADR-098 / ADR-106
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
@@ -66,45 +61,34 @@ from kortravelmap.geocoding import (
     cached_address_resolver,
     cached_reverse_geocoder,
 )
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_FUEL_PRICES,
+    DATASET_KEY_FUEL_STATIONS,
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+)
 
 __all__ = [
-    "OpinetPriceItem",
-    "OpinetStationPriceItem",
-    "OpinetStationDetailItem",
-    "OpinetStationDetailPriceItem",
     "OpinetStationItem",
-    "prices_to_values",
-    "station_details_to_price_features_and_values",
-    "stations_to_price_features_and_values",
+    "OpinetStationPriceRow",
+    "OpinetStationWithPrices",
+    "station_prices_to_features_and_values",
     "stations_to_bundles",
     # 메타
-    "OPINET_PROVIDER_NAME",
     "OPINET_PRODUCT_KEY_MAP",
     "OPINET_PRODUCT_NAME_KO",
-    "OPINET_PRICE_DATASET_KEY",
     "OPINET_STATION_CATEGORY",
     "OPINET_STATION_MARKER_ICON",
     "OPINET_STATION_MARKER_COLOR",
-    "OPINET_STATION_DATASET_KEY",
 ]
 
 
 # -- 상수 -----------------------------------------------------------------
 
-OPINET_PROVIDER_NAME: Final[str] = "python-opinet-api"
-"""canonical provider name (ADR-024)."""
-
-OPINET_STATION_DATASET_KEY: Final[str] = "opinet_fuel_station_details"
-"""``provider_sync.source_records.dataset_key`` — 주유소 station detail."""
-
-OPINET_PRICE_DATASET_KEY: Final[str] = "opinet_gas_station_prices"
-"""``provider_sync.source_records.dataset_key`` — 주유소 최신 유가 snapshot."""
-
 _OPINET_STATION_ENTITY_TYPE: Final[str] = "fuel_station"
-"""``source_records.source_entity_type`` — provider 내 entity 종류."""
+"""``source_records.source_entity_type`` — 주유소."""
 
 _OPINET_PRICE_ENTITY_TYPE: Final[str] = "fuel_station_price"
-"""``source_records.source_entity_type`` — 주유소 가격 snapshot."""
+"""``source_records.source_entity_type`` — 주유소 유종별 최신 가격 묶음."""
 
 OPINET_STATION_CATEGORY: Final[str] = "06020000"
 """``Feature.category`` — `PlaceCategoryCode.TRANSPORT_FUEL` 8자리."""
@@ -114,6 +98,15 @@ OPINET_STATION_MARKER_ICON: Final[str] = "fuel"
 
 OPINET_STATION_MARKER_COLOR: Final[str] = "P-08"
 """주유소 marker color palette (주황 계열)."""
+
+_FACILITY_FLAGS: Final[tuple[str, ...]] = (
+    "is_self",
+    "is_24h",
+    "has_carwash",
+    "has_maintenance",
+    "has_cvs",
+)
+"""transport가 넘기는 오피넷 편의시설 플래그. 값이 있을 때만 ``facility_info``에 싣는다."""
 
 
 # OpiNet 원천 product code → 본 lib 표준 product_key 매핑.
@@ -140,29 +133,20 @@ OPINET_PRODUCT_NAME_KO: Final[dict[str, str]] = {
 
 @runtime_checkable
 class OpinetStationItem(Protocol):
-    """OpiNet 주유소 row 1건의 입력 shape (place Feature 생성용, ADR-044 정렬).
+    """OpiNet 주유소 row 1건의 입력 shape (place Feature 생성용).
 
-    ``python-opinet-api``의 ``Station``(``iter_stations_in_bbox``/``search_stations_
-    around`` 반환) typed model 필드명에 정렬한다. ``Station``은 좌표를 KATEC에서
-    WGS84(``lon``/``lat`` float)로 이미 변환해 노출한다(본 lib는 WGS84만, ADR-012).
-
-    Notes
-    -----
-    - ``tel``/``lpg_yn``은 ``Station``엔 **없고** ``StationDetail``(단건 상세)에만
-      있다. 변환은 ``getattr``로 있을 때만 보강(N+1 detail 호출은 후속) — Protocol
-      필수에서 제외해 ``Station``이 그대로 만족하게 한다.
-    - ``brand``는 provider ``BrandCode`` enum(또는 None) — 변환에서 코드 문자열로
-      정규화해 보존.
+    ``providers.kor_travel_transport.TransportFuelStation``이 만족한다. ``tel``/``lpg_yn``과
+    편의시설 플래그는 있을 때만 ``getattr``로 보강한다.
     """
 
     uni_id: str
-    """OpiNet 주유소 자연키 (예: ``"A0019186"``). source_entity_id 매핑."""
+    """OpiNet 주유소 자연키 (예: ``"A0019186"``)."""
 
     name: str
-    """주유소 상호명. Feature.name 매핑."""
+    """주유소 상호명."""
 
     brand: Any
-    """브랜드 (provider ``BrandCode`` enum | None). 코드 문자열로 정규화 보존."""
+    """브랜드 코드(문자열) 또는 None."""
 
     address_road: str | None
     """도로명 주소 (우선)."""
@@ -170,105 +154,35 @@ class OpinetStationItem(Protocol):
     address_jibun: str | None
     """지번 주소 (도로명 없을 때 fallback)."""
 
-    lon: float
-    """경도 (WGS84, provider가 KATEC에서 변환)."""
+    lon: float | None
+    """경도 (WGS84)."""
 
-    lat: float
+    lat: float | None
     """위도 (WGS84)."""
 
 
 @runtime_checkable
-class OpinetPriceItem(Protocol):
-    """OpiNet 주유소 가격 시계열 row 1건의 입력 shape.
+class OpinetStationPriceRow(Protocol):
+    """주유소 유종 하나의 최신 가격. ``price=None``은 현재 판매하지 않음이다."""
 
-    `python-opinet-api`의 typed model이 본 Protocol을 만족해야 한다. OpiNet
-    원천 컬럼명을 영문 snake_case로 정규화된 형태 가정.
-    """
-
-    uni_id: str
-    """OpiNet 주유소 자연키 (provider 내 unique). source_entity_id로 매핑."""
-
-    prodcd: str
-    """제품 코드 (B027/D047/B034/K015/C004). source_product_key로 보존."""
-
-    price: str | Decimal | int | float
-    """판매가 (KRW/L). 원천 string일 수도 있으나 numeric 변환 후 적재."""
-
-    trade_dt: datetime
-    """관측 시각 (KST aware). observed_at에 매핑."""
-
-
-@runtime_checkable
-class OpinetStationDetailPriceItem(Protocol):
-    """OpiNet ``StationDetail.prices`` 안의 가격 row shape."""
-
-    product_code: Any
-    """provider ``ProductCode`` enum 또는 문자열."""
-
-    price: str | Decimal | int | float | None
-    """판매가 (KRW/L). None이면 해당 제품 값은 skip."""
-
-    trade_date: Any
-    """거래일(``datetime.date``)."""
-
-    trade_time: Any
-    """거래시각(``datetime.time``)."""
-
+    product_code: str
+    price: Decimal | None
+    observed_at: datetime
     raw: Mapping[str, Any]
-    """provider raw payload."""
 
 
 @runtime_checkable
-class OpinetStationPriceItem(OpinetStationItem, Protocol):
-    """OpiNet ``lowTop10``/``aroundAll`` Station row의 단일 제품 가격 shape."""
+class OpinetStationWithPrices(OpinetStationItem, Protocol):
+    """주유소 + 유종별 최신 가격."""
 
-    price: str | Decimal | int | float | None
-    """판매가 (KRW/L). None이면 skip."""
-
-    product_code: Any
-    """provider ``ProductCode`` enum 또는 문자열."""
-
-    product_name: str | None
-    """provider 제품명."""
-
-    trade_date: Any
-    """거래일. 없으면 asset ``fetched_at``을 관측시각으로 쓴다."""
-
-    trade_time: Any
-    """거래시각. 없으면 asset ``fetched_at``을 관측시각으로 쓴다."""
-
-    raw: Mapping[str, Any]
-    """provider raw payload."""
-
-
-@runtime_checkable
-class OpinetStationDetailItem(OpinetStationItem, Protocol):
-    """OpiNet ``StationDetail`` row shape (station + nested prices)."""
-
-    prices: Iterable[OpinetStationDetailPriceItem]
-    """``detailById`` 중첩 ``OIL_PRICE`` 목록."""
+    prices: Iterable[OpinetStationPriceRow]
 
 
 # -- 헬퍼 ---------------------------------------------------------------
 
 
-_KST: Final[timezone] = timezone(timedelta(hours=9))
-"""ADR-019 — OpiNet 날짜/시각 조합에 부착할 KST tzinfo."""
-
-
-def _parse_price_value(raw: str | Decimal | int | float) -> Decimal:
-    """가격을 `Decimal`로 변환. ``"1,820"`` (천 단위 구분자) 흡수."""
-    if isinstance(raw, Decimal):
-        return raw
-    if isinstance(raw, int | float):
-        return Decimal(str(raw))
-    # str — 천 단위 구분자 / 공백 흡수.
-    cleaned = str(raw).replace(",", "").strip()
-    return Decimal(cleaned)
-
-
 def _jsonable_raw(value: Any) -> Any:
-    """MappingProxyType/tuple/enum 등 provider raw를 JSONB 가능 값으로 정규화."""
+    """Mapping/tuple/enum/datetime을 JSONB 가능 값으로 정규화."""
     enum_value = getattr(value, "value", None)
     if isinstance(enum_value, str):
         return enum_value
@@ -278,8 +192,8 @@ def _jsonable_raw(value: Any) -> Any:
         return [_jsonable_raw(item) for item in value]
     if isinstance(value, datetime):
         return value.isoformat()
-    if isinstance(value, time):
-        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
     return value
 
 
@@ -287,262 +201,90 @@ def _source_raw_or_fallback(
     value: object,
     fallback: dict[str, Any],
 ) -> dict[str, Any]:
-    """provider raw row가 있으면 그것만 보존하고, 없는 legacy shape만 재구성한다."""
-    if isinstance(value, Mapping):
+    """원천 행이 있으면 그것만 보존하고, 없으면 정규화 필드로 재구성한다."""
+    if isinstance(value, Mapping) and value:
         result = _jsonable_raw(value)
         assert isinstance(result, dict)
         return result
     return fallback
 
 
-def _product_code_text(value: Any) -> str:
-    enum_value = getattr(value, "value", None)
-    if isinstance(enum_value, str):
-        return enum_value
-    return str(value)
+# -- 주유소 + 유종별 가격 → price Feature + PriceValue --------------------
 
 
-def _station_product_code_text(item: OpinetStationPriceItem) -> str | None:
-    value = getattr(item, "product_code", None)
-    if value is not None:
-        text = _product_code_text(value).strip()
-        if text and text != "None":
-            return text
-    raw = getattr(item, "raw", {})
-    if isinstance(raw, Mapping):
-        raw_code = raw.get("PRODCD")
-        if raw_code is not None:
-            text = str(raw_code).strip()
-            if text:
-                return text
-    return None
-
-
-def _combine_trade_datetime(trade_date: Any, trade_time: Any) -> datetime:
-    base_date = trade_date.date() if isinstance(trade_date, datetime) else trade_date
-    if not isinstance(trade_time, time):
-        raise TypeError(f"OpiNet trade_time은 time이어야 함: {trade_time!r}")
-    return datetime.combine(base_date, trade_time, tzinfo=_KST)
-
-
-# -- 단일 row → PriceValue -----------------------------------------------
-
-
-def _item_to_price_value(
-    item: OpinetPriceItem,
-    *,
-    feature_id: str,
-    source_record_key: str | None,
-) -> PriceValue:
-    """OpiNet 가격 row 한 건 → ``PriceValue``."""
-    product_key = OPINET_PRODUCT_KEY_MAP.get(item.prodcd, item.prodcd.lower())
-    product_name = OPINET_PRODUCT_NAME_KO.get(product_key)
-    value = _parse_price_value(item.price)
-
-    payload: dict[str, Any] = {
-        "uni_id": item.uni_id,
-        "prodcd": item.prodcd,
-        "price": str(item.price),
-        "trade_dt": item.trade_dt.isoformat(),
-    }
-
-    return PriceValue(
-        feature_id=feature_id,
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        price_domain=PriceDomain.OPINET_GAS_STATION,
-        product_key=product_key,
-        product_name=product_name,
-        source_product_key=item.prodcd,
-        observed_at=item.trade_dt,
-        value_number=value,
-        unit="KRW/L",
-        normalization_version="opinet-v1.0",
-        payload=payload,
-        source_record_key=source_record_key,
-    )
-
-
-# -- 공개 API -----------------------------------------------------------
-
-
-def prices_to_values(
-    items: Iterable[OpinetPriceItem],
-    *,
-    feature_id: str,
-    source_record_key: str | None = None,
-) -> list[PriceValue]:
-    """OpiNet 가격 items → ``list[PriceValue]``.
-
-    Parameters
-    ----------
-    items
-        `python-opinet-api`의 가격 시계열 typed model iterable. 본 Protocol을
-        만족해야 한다.
-    feature_id
-        주유소 ``Feature``의 ID (`make_feature_id` 결과, kind=place). 호출자가
-        OpiNet uni_id → feature_id 매핑을 사전 결정해서 명시 전달.
-    source_record_key
-        provider raw payload 추적용. 운영상 권장 — 누락 시 trace 불가.
-
-    Returns
-    -------
-    list[PriceValue]
-        입력 순서 유지. `price_domain=opinet_gas_station`,
-        `unit="KRW/L"`, `observed_at=trade_dt`.
-
-    Raises
-    ------
-    pydantic.ValidationError
-        observed_at naive 또는 value_number 음수 (ADR-019 / PriceValue
-        validator).
-
-    Examples
-    --------
-    호출자 측 사용 예시 (Dagster asset):
-
-    >>> # client = AsyncOpiNetClient(...)
-    >>> # async for page in client.aiter_prices(area="11", ...):
-    >>> #     values = prices_to_values(
-    >>> #         page.items,
-    >>> #         feature_id=station_feature_id,
-    >>> #         source_record_key=sr_key,
-    >>> #     )
-    >>> #     await kor_travel_map_client.load_price_values(values)
-
-    Notes
-    -----
-    - OpiNet uni_id → feature_id 매핑은 별도 catalog (`OpinetStationCatalog`
-      등) 책임. 본 함수는 매핑 X.
-    - 가격 시계열은 시간 단위로 들어옴 — BRIN(observed_at) 인덱스 적재 권장
-      (ADR-014). 호출자가 bulk insert 시 안전 마진 30k (ADR-013).
-    - PR#43+: gas station feature (`stations_to_bundles`) — `Feature(kind=
-      place, category="06020000" TRANSPORT_FUEL)` + SourceRecord + SourceLink.
-    """
-    return [
-        _item_to_price_value(
-            item,
-            feature_id=feature_id,
-            source_record_key=source_record_key,
-        )
-        for item in items
-    ]
-
-
-# -- detailById StationDetail → price Feature + PriceValue ---------------
-
-
-def _detail_price_to_value(
-    price: OpinetStationDetailPriceItem,
-    *,
-    station: OpinetStationDetailItem,
-    feature_id: str,
-    source_record_key: str,
-) -> PriceValue | None:
-    raw_price = price.price
-    if raw_price is None:
-        return None
-
-    prodcd = _product_code_text(price.product_code)
-    product_key = OPINET_PRODUCT_KEY_MAP.get(prodcd, prodcd.lower())
-    product_name = OPINET_PRODUCT_NAME_KO.get(product_key)
-    observed_at = _combine_trade_datetime(price.trade_date, price.trade_time)
-    value = _parse_price_value(raw_price)
-    raw = _jsonable_raw(getattr(price, "raw", {}))
-
-    payload: dict[str, Any] = {
-        "uni_id": station.uni_id,
-        "station_name": station.name,
-        "prodcd": prodcd,
-        "product_key": product_key,
-        "price": str(raw_price),
-        "trade_dt": observed_at.isoformat(),
-        "raw": raw,
-    }
-    return PriceValue(
-        feature_id=feature_id,
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        price_domain=PriceDomain.OPINET_GAS_STATION,
-        product_key=product_key,
-        product_name=product_name,
-        source_product_key=prodcd,
-        source_product_name=raw.get("PRODNM") if isinstance(raw, dict) else None,
-        observed_at=observed_at,
-        value_number=value,
-        unit="KRW/L",
-        normalization_version="opinet-v1.0",
-        payload=payload,
-        source_record_key=source_record_key,
-    )
-
-
-async def _station_detail_to_price_bundle_and_values(
-    detail: OpinetStationDetailItem,
+async def _station_prices_to_bundle_and_values(
+    station: OpinetStationWithPrices,
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
 ) -> tuple[FeatureBundle, FeatureBundle, list[PriceValue]] | None:
     # 반환: (주유소 place 부모 bundle, 가격 price bundle, PriceValue 목록).
-    prices = list(detail.prices)
+    rows = list(station.prices)
+    priced = [row for row in rows if row.price is not None]
+    if not priced:
+        return None
     station_bundle = await _station_item_to_bundle(
-        detail,
+        station,
         fetched_at=fetched_at,
         reverse_geocoder=reverse_geocoder,
         address_resolver=address_resolver,
     )
     station_feature = station_bundle.feature
-    bjd_code = station_feature.address.bjd_code
 
-    raw_prices = [_jsonable_raw(getattr(price, "raw", {})) for price in prices]
-    raw_data = _source_raw_or_fallback(
-        getattr(detail, "raw", None),
-        {
-            "uni_id": detail.uni_id,
-            "name": detail.name,
-            "brand": _brand_code(detail.brand),
-            "address_road": detail.address_road,
-            "address_jibun": detail.address_jibun,
-            "lon": str(detail.lon) if detail.lon is not None else None,
-            "lat": str(detail.lat) if detail.lat is not None else None,
-            "prices": raw_prices,
-        },
-    )
+    raw_data: dict[str, Any] = {
+        "uni_id": station.uni_id,
+        "prices": [_jsonable_raw(row.raw) for row in rows],
+    }
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_key=OPINET_PRICE_DATASET_KEY,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_FUEL_PRICES,
         source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
-        source_entity_id=detail.uni_id,
+        source_entity_id=station.uni_id,
         raw_payload_hash=payload_hash,
     )
     feature_id = make_feature_id(
-        bjd_code=bjd_code,
+        bjd_code=station_feature.address.bjd_code,
         kind=FeatureKind.PRICE.value,
         category=OPINET_STATION_CATEGORY,
-        source_type=f"{OPINET_PROVIDER_NAME}:{OPINET_PRICE_DATASET_KEY}",
-        source_natural_key=detail.uni_id,
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_FUEL_PRICES}",
+        source_natural_key=station.uni_id,
     )
-
-    values = [
-        value
-        for price in prices
-        if (
-            value := _detail_price_to_value(
-                price,
-                station=detail,
+    provider = normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME)
+    values: list[PriceValue] = []
+    for row in priced:
+        assert row.price is not None
+        prodcd = row.product_code.strip()
+        product_key = OPINET_PRODUCT_KEY_MAP.get(prodcd, prodcd.lower())
+        values.append(
+            PriceValue(
                 feature_id=feature_id,
+                provider=provider,
+                price_domain=PriceDomain.OPINET_GAS_STATION,
+                product_key=product_key,
+                product_name=OPINET_PRODUCT_NAME_KO.get(product_key),
+                source_product_key=prodcd,
+                observed_at=row.observed_at,
+                value_number=row.price,
+                unit="KRW/L",
+                normalization_version="opinet-v1.0",
+                payload={
+                    "uni_id": station.uni_id,
+                    "station_name": station.name,
+                    "prodcd": prodcd,
+                    "product_key": product_key,
+                    "price": str(row.price),
+                    "observed_at": row.observed_at.isoformat(),
+                },
                 source_record_key=source_record_key,
             )
         )
-        is not None
-    ]
-    if not values:
-        return None
 
-    name_normalized = normalize_korean_text(detail.name) or detail.name
+    name_normalized = normalize_korean_text(station.name) or station.name
     feature = Feature(
         feature_id=feature_id,
-        provider_natural_key=detail.uni_id,
+        provider_natural_key=station.uni_id,
         kind=FeatureKind.PRICE,
         name=f"{name_normalized} 유가",
         coord=station_feature.coord,
@@ -554,10 +296,10 @@ async def _station_detail_to_price_bundle_and_values(
         detail=None,
     )
     source_record = SourceRecord(
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        dataset_key=OPINET_PRICE_DATASET_KEY,
+        provider=provider,
+        dataset_key=DATASET_KEY_FUEL_PRICES,
         source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
-        source_entity_id=detail.uni_id,
+        source_entity_id=station.uni_id,
         raw_payload_hash=payload_hash,
         raw_data=raw_data,
         fetched_at=fetched_at,
@@ -572,44 +314,31 @@ async def _station_detail_to_price_bundle_and_values(
     )
     return (
         station_bundle,
-        FeatureBundle(
-            feature=feature,
-            source_record=source_record,
-            source_link=source_link,
-        ),
+        FeatureBundle(feature=feature, source_record=source_record, source_link=source_link),
         values,
     )
 
 
-async def station_details_to_price_features_and_values(
-    items: Iterable[OpinetStationDetailItem],
+async def station_prices_to_features_and_values(
+    items: Iterable[OpinetStationWithPrices],
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
 ) -> tuple[list[FeatureBundle], list[FeatureBundle], list[PriceValue]]:
-    """OpiNet station detail → (주유소 place 부모 bundle, price Feature, PriceValue).
+    """주유소 + 유종별 최신 가격 → (주유소 place 부모 bundle, price Feature, PriceValue).
 
-    가격 feature는 ``parent_feature_id``로 주유소 place feature를 가리킨다. 그
-    부모 place bundle을 함께 반환해 호출자가 **가격보다 먼저** 적재하게 한다 —
-    가격 detail에만 있고 stations 목록 asset에는 없는 주유소(coverage 불일치)도
-    부모가 보장돼 FK 위반이 없다. place bundle은 ``feature_id``로 dedupe한다.
+    가격 feature는 ``parent_feature_id``로 주유소 place feature를 가리킨다. 그 부모 bundle을
+    함께 반환해 호출자가 **가격보다 먼저** 적재하게 한다(FK). 판매가가 하나도 없는 주유소는
+    가격 feature를 만들지 않는다. place bundle은 ``feature_id``로 dedupe한다.
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     station_bundles: dict[str, FeatureBundle] = {}
     bundles: list[FeatureBundle] = []
     values: list[PriceValue] = []
     for item in items:
-        converted = await _station_detail_to_price_bundle_and_values(
+        converted = await _station_prices_to_bundle_and_values(
             item,
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
@@ -624,180 +353,7 @@ async def station_details_to_price_features_and_values(
     return list(station_bundles.values()), bundles, values
 
 
-# -- lowTop10/aroundAll Station → price Feature + PriceValue --------------
-
-
-def _station_price_observed_at(
-    item: OpinetStationPriceItem, *, fallback: datetime
-) -> datetime:
-    trade_date = getattr(item, "trade_date", None)
-    trade_time = getattr(item, "trade_time", None)
-    if trade_date is not None and trade_time is not None:
-        return _combine_trade_datetime(trade_date, trade_time)
-    return fallback
-
-
-async def _station_price_to_bundle_and_value(
-    item: OpinetStationPriceItem,
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None,
-    address_resolver: AddressResolver | None,
-) -> tuple[FeatureBundle, FeatureBundle, PriceValue] | None:
-    # 반환: (주유소 place 부모 bundle, 가격 price bundle, PriceValue).
-    raw_price = getattr(item, "price", None)
-    prodcd = _station_product_code_text(item)
-    if raw_price is None or prodcd is None:
-        return None
-
-    station_bundle = await _station_item_to_bundle(
-        item,
-        fetched_at=fetched_at,
-        reverse_geocoder=reverse_geocoder,
-        address_resolver=address_resolver,
-    )
-    station_feature = station_bundle.feature
-    product_key = OPINET_PRODUCT_KEY_MAP.get(prodcd, prodcd.lower())
-    product_name = OPINET_PRODUCT_NAME_KO.get(product_key) or getattr(
-        item, "product_name", None
-    )
-    observed_at = _station_price_observed_at(item, fallback=fetched_at)
-    value_number = _parse_price_value(raw_price)
-    raw = _jsonable_raw(getattr(item, "raw", {}))
-    name_normalized = normalize_korean_text(item.name) or item.name
-
-    raw_data = _source_raw_or_fallback(
-        getattr(item, "raw", None),
-        {
-            "uni_id": item.uni_id,
-            "name": item.name,
-            "brand": _brand_code(item.brand),
-            "address_road": item.address_road,
-            "address_jibun": item.address_jibun,
-            "lon": str(item.lon) if item.lon is not None else None,
-            "lat": str(item.lat) if item.lat is not None else None,
-            "prodcd": prodcd,
-            "product_key": product_key,
-            "price": str(raw_price),
-            "observed_at": observed_at.isoformat(),
-            "raw": raw,
-        },
-    )
-    payload_hash = make_payload_hash(raw_data)
-    source_record_key = make_source_record_key(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_key=OPINET_PRICE_DATASET_KEY,
-        source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
-        source_entity_id=f"{item.uni_id}:{prodcd}",
-        raw_payload_hash=payload_hash,
-    )
-    feature_id = make_feature_id(
-        bjd_code=station_feature.address.bjd_code,
-        kind=FeatureKind.PRICE.value,
-        category=OPINET_STATION_CATEGORY,
-        source_type=f"{OPINET_PROVIDER_NAME}:{OPINET_PRICE_DATASET_KEY}",
-        source_natural_key=item.uni_id,
-    )
-
-    feature = Feature(
-        feature_id=feature_id,
-        provider_natural_key=item.uni_id,
-        kind=FeatureKind.PRICE,
-        name=f"{name_normalized} 유가",
-        coord=station_feature.coord,
-        address=station_feature.address,
-        category=OPINET_STATION_CATEGORY,
-        marker_icon=OPINET_STATION_MARKER_ICON,
-        marker_color=OPINET_STATION_MARKER_COLOR,
-        parent_feature_id=station_feature.feature_id,
-        detail=None,
-    )
-    source_record = SourceRecord(
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        dataset_key=OPINET_PRICE_DATASET_KEY,
-        source_entity_type=_OPINET_PRICE_ENTITY_TYPE,
-        source_entity_id=f"{item.uni_id}:{prodcd}",
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=fetched_at,
-        source_record_key=source_record_key,
-    )
-    source_link = SourceLink(
-        feature_id=feature_id,
-        source_record_key=source_record_key,
-        source_role=SourceRole.PRIMARY,
-        match_method="natural_key",
-        confidence=100,
-    )
-    value = PriceValue(
-        feature_id=feature_id,
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        price_domain=PriceDomain.OPINET_GAS_STATION,
-        product_key=product_key,
-        product_name=product_name,
-        source_product_key=prodcd,
-        source_product_name=getattr(item, "product_name", None),
-        observed_at=observed_at,
-        value_number=value_number,
-        unit="KRW/L",
-        normalization_version="opinet-v1.0",
-        payload=raw_data,
-        source_record_key=source_record_key,
-    )
-    return (
-        station_bundle,
-        FeatureBundle(
-            feature=feature,
-            source_record=source_record,
-            source_link=source_link,
-        ),
-        value,
-    )
-
-
-async def stations_to_price_features_and_values(
-    items: Iterable[OpinetStationPriceItem],
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None = None,
-    address_resolver: AddressResolver | None = None,
-) -> tuple[list[FeatureBundle], list[FeatureBundle], list[PriceValue]]:
-    """OpiNet Station 단일 제품 가격 → price-kind Feature + ``PriceValue``.
-
-    ``lowTop10``은 주유소별 전체 가격 detail이 아니라 요청 제품 1개의 가격만
-    반환한다. 이 경로는 그 단일 제품 가격을 같은 price anchor feature에
-    누적해, 전국 저가 주유소 분포를 쿼터 안에서 표시하기 위한 보조 적재다.
-    """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
-    station_bundles: dict[str, FeatureBundle] = {}
-    bundles: list[FeatureBundle] = []
-    values: list[PriceValue] = []
-    for item in items:
-        converted = await _station_price_to_bundle_and_value(
-            item,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-            address_resolver=resolver,
-        )
-        if converted is None:
-            continue
-        station_bundle, bundle, value = converted
-        station_bundles.setdefault(station_bundle.feature.feature_id, station_bundle)
-        bundles.append(bundle)
-        values.append(value)
-    return list(station_bundles.values()), bundles, values
-
-
-# -- stations_to_bundles (PR#43) -----------------------------------------
+# -- 주유소 place ------------------------------------------------------------
 
 
 async def _station_item_to_bundle(
@@ -807,12 +363,9 @@ async def _station_item_to_bundle(
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
-    """OpiNet 주유소 row 한 건 → 한 ``FeatureBundle`` (place kind).
+    """OpiNet 주유소 row 한 건 → 한 ``FeatureBundle`` (place kind)."""
 
-    PR#34 datagokr `cultural_festivals_to_bundles`의 9-step 패턴과 동일.
-    """
-
-    # 0) provider 필드 정규화 — 주소(도로명 우선), 브랜드 코드, tel/lpg(Detail 한정).
+    # 0) 필드 정규화 — 주소(도로명 우선), 브랜드 코드, tel/lpg.
     road_address = normalize_korean_text(item.address_road)
     jibun_address = normalize_korean_text(item.address_jibun)
     display_address = road_address or jibun_address
@@ -820,7 +373,7 @@ async def _station_item_to_bundle(
     tel = getattr(item, "tel", None)
     lpg_yn = getattr(item, "lpg_yn", None)
 
-    # 1) Coordinate — Station은 lon/lat(WGS84 float)을 항상 노출.
+    # 1) Coordinate — transport가 KATEC을 WGS84 lon/lat으로 변환해 넘긴다.
     coord: Coordinate | None
     if item.lon is not None and item.lat is not None:
         coord = Coordinate(lon=Decimal(str(item.lon)), lat=Decimal(str(item.lat)))
@@ -880,8 +433,8 @@ async def _station_item_to_bundle(
 
     # 5) source_record_key (ADR-009).
     source_record_key = make_source_record_key(
-        provider=OPINET_PROVIDER_NAME,
-        dataset_key=OPINET_STATION_DATASET_KEY,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_FUEL_STATIONS,
         source_entity_type=_OPINET_STATION_ENTITY_TYPE,
         source_entity_id=item.uni_id,
         raw_payload_hash=payload_hash,
@@ -892,7 +445,7 @@ async def _station_item_to_bundle(
         bjd_code=bjd_code,
         kind=FeatureKind.PLACE.value,
         category=OPINET_STATION_CATEGORY,
-        source_type=f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}",
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_FUEL_STATIONS}",
         source_natural_key=item.uni_id,
     )
 
@@ -921,14 +474,19 @@ async def _station_item_to_bundle(
             facility_info={
                 "brand_code": brand_code,
                 "lpg_yn": _coerce_bool_str(lpg_yn),
+                **{
+                    flag: value
+                    for flag in _FACILITY_FLAGS
+                    if (value := getattr(item, flag, None)) is not None
+                },
             },
         ),
     )
 
     # 8) SourceRecord.
     source_record = SourceRecord(
-        provider=normalize_provider_name(OPINET_PROVIDER_NAME),
-        dataset_key=OPINET_STATION_DATASET_KEY,
+        provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
+        dataset_key=DATASET_KEY_FUEL_STATIONS,
         source_entity_type=_OPINET_STATION_ENTITY_TYPE,
         source_entity_id=item.uni_id,
         raw_payload_hash=payload_hash,
@@ -993,10 +551,9 @@ async def stations_to_bundles(
     Parameters
     ----------
     items
-        `python-opinet-api`의 주유소 typed model iterable.
-        ``OpinetStationItem`` Protocol을 만족해야 한다.
+        transport export를 파싱한 주유소(``OpinetStationItem`` Protocol).
     fetched_at
-        provider 호출 시각 (KST aware). 모든 bundle 공통.
+        export 조회 시각 (aware). 모든 bundle 공통.
     reverse_geocoder
         좌표 → ``Address`` async 역지오코더 (있으면). feature_id가 bjd_code에
         의존하므로(ADR-009) feature_id 계산 전에 await해 보강. 중복 좌표는
@@ -1016,10 +573,8 @@ async def stations_to_bundles(
     -----
     - 좌표 nullable 가능. 좌표 없으면 ``Feature.coord=None``으로 적재되고
       `features_in_bounds` 쿼리에서 자연 제외 (ADR-012).
-    - 가격 시계열은 `station_details_to_price_features_and_values` 경로에서
-      별도 `kind=price` anchor feature로 적재한다.
-    - legacy `prices_to_values`를 직접 쓰는 호출자는 선택한 anchor feature_id와
-      값의 feature_id를 직접 맞춰야 한다.
+    - 가격은 `station_prices_to_features_and_values`가 별도 `kind=price` anchor
+      feature로 적재한다.
     """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)

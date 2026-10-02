@@ -7,7 +7,7 @@ import {
   scheduleKstMidnightTicks,
 } from "./price-freshness";
 
-const OPINET = "python-opinet-api";
+const OPINET = "kor-travel-transport";
 
 describe("OpiNet 가격 KST 날짜 판정", () => {
   afterEach(() => {
@@ -41,7 +41,7 @@ describe("OpiNet 가격 KST 날짜 판정", () => {
   it("OpiNet이 아닌 provider의 예전 가격은 표시하지 않는다", () => {
     expect(
       opinetPastPriceLabel(
-        [{ provider: "python-krex-api", observed_at: "2026-07-01T00:00:00Z" }],
+        [{ provider: "kor-travel-transport", observed_at: "2026-07-01T00:00:00Z" }],
         new Date("2026-07-14T00:00:00+09:00"),
       ),
     ).toBeNull();

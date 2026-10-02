@@ -27,7 +27,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_datagokr_file_data_records,
     fetch_krheritage_events,
     fetch_krheritage_items,
-    fetch_opinet_station_price_details,
+    fetch_transport_fuel_stations,
 )
 from kortravelmap.dagster.provider_pagination import (
     ProviderPage,
@@ -601,7 +601,7 @@ async def test_opinet_price_details_counts_every_station_detail(
 
     with counting_upstream_requests():
         records = [
-            record async for record in fetch_opinet_station_price_details(settings)
+            record async for record in fetch_transport_fuel_stations(settings)
         ]
         observed = observed_upstream_requests()
 

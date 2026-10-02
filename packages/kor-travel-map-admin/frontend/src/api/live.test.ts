@@ -231,8 +231,8 @@ describe("ops live invalidation", () => {
     const datasetsKey = ["ops-datasets"];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-krex-api",
-      "krex_traffic_notices",
+      "kor-travel-transport",
+      "transport_highway_incidents",
       "full_snapshot",
     ];
 
@@ -272,8 +272,8 @@ describe("ops live invalidation", () => {
     ];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-krex-api",
-      "krex_traffic_notices",
+      "kor-travel-transport",
+      "transport_highway_incidents",
       "full_snapshot",
     ];
 
@@ -330,8 +330,8 @@ describe("ops live invalidation", () => {
     const datasetsKey = ["ops-datasets"];
     const datasetDetailKey = [
       "ops-dataset",
-      "python-krex-api",
-      "krex_traffic_notices",
+      "kor-travel-transport",
+      "transport_highway_incidents",
       "full_snapshot",
     ];
     const schedulesKey = ["pipeline", "schedules"];

@@ -47,8 +47,8 @@ _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 3, 12, 0, tzinfo=_KST)
 _SEARCH_CURSOR_KEY = b"integration-feature-search-cursor-signing-key-0001"
 
-_KREX = "python-krex-api"
-_KREX_DS = "krex_traffic_notices"
+_KREX = "kor-travel-transport"
+_KREX_DS = "transport_highway_incidents"
 _KREX_ET = "traffic_notice"
 _CROSS_PROVIDER = "python-cross-notice-api"
 _CROSS_DS = "cross_notice_snapshot"

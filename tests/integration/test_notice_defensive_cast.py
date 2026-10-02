@@ -371,7 +371,7 @@ async def _seed_public_curation_foundation(session: AsyncSession) -> tuple[str, 
         (
             await session.execute(
                 text(_FIXTURE_CATALOG_SQL),
-                {"provider": "python-krex-api", "dataset_key": "ndc-source"},
+                {"provider": "kor-travel-transport", "dataset_key": "ndc-source"},
             )
         ).scalar_one()
     )

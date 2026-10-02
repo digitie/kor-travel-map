@@ -1,6 +1,6 @@
 """큐가 run을 동시에 띄워도 gate를 선언한 provider는 **한 번에 하나만** 지난다.
 
-`python-krex-api`는 초당 5건을 지킨다 — 그 보증은 **프로세스당**이다. 큐 센서는 틱당
+`kor-travel-transport`는 초당 5건을 지킨다 — 그 보증은 **프로세스당**이다. 큐 센서는 틱당
 RunRequest를 10개 내고 `docker/dagster.yaml`이 `tag_concurrency_limits`로 4를 동시에
 돌리므로, run마다 `KrexClient`가 따로면 버킷도 따로여서 합계가 최대 **20 TPS**가
 된다(2026-09-14 적대 리뷰 둘이 독립적으로 짚은 자리).

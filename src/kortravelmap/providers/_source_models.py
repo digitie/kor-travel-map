@@ -34,10 +34,6 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     "knps.KnpsGeometryRecord": "knps.models.KnpsGeoRecord",
     "knps.KnpsCsvRow": "knps.models.CsvPreviewRow",
     "knps.KnpsCsvPreview": "knps.models.CsvPreview",
-    "krairport.AirportMetadataItem": "krairport.models.AirportMetadata",
-    "krex.KrexRestAreaItem": "krex.models.RestArea",
-    "krex.KrexRestAreaFuelPriceRecord": "krex.models.RestAreaFuelPrice",
-    "krex.KrexTrafficNoticeItem": "krex.models.Incident",
     "krforest.RecreationForestItem": "krforest.models.StandardRecreationForest",
     "krforest.ForestSpatialItem": "krforest.models.ForestSpatialPoint",
     "krforest.ForestTrailItem": "krforest.models.ForestSpatialFeature",
@@ -46,10 +42,6 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     "krheritage.KrHeritageItem": "krheritage.models.heritage.HeritageDetail",
     "krheritage.KrHeritageEvent": "krheritage.models.event.HeritageEvent",
     "mois.MoisLicensePlaceRecord": "mois.db.PlaceRecord",
-    "opinet.OpinetStationItem": "opinet.models.Station",
-    "opinet.OpinetStationPriceItem": "opinet.models.Station",
-    "opinet.OpinetStationDetailPriceItem": "opinet.models.OilPrice",
-    "opinet.OpinetStationDetailItem": "opinet.models.StationDetail",
     "standard_data.CulturalFestivalItem": "datagokr.models.PublicCulturalFestival",
     "standard_data.PublicMuseumArtItem": "datagokr.models.PublicMuseumArtGallery",
     "standard_data.PublicTouristAttractionItem": "datagokr.models.PublicTouristAttraction",
@@ -64,18 +56,25 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
 """
 
 
+def _transport_reason(dataclass_name: str) -> str:
+    return (
+        "kor-travel-transport export를 파싱한 first-party dataclass"
+        f"(``kor_travel_transport.{dataclass_name}``)가 만족한다 — Map은 provider 라이브러리를 "
+        "import하지 않는다(ADR-106). 결박은 "
+        "``tests/unit/test_providers_kor_travel_transport.py``가 isinstance로 고정한다."
+    )
+
+
 PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
     # provider 모델이 직접 만족하지 않는 Protocol과 그 사유.
     # 사유 없이 여기에 넣는 것은 게이트를 무력화하는 것과 같다 — 반드시 근거를 적는다.
-    "krex.KrexRestAreaPriceItem": (
-        "etl_live fixture 전용 narrow row. 실 Dagster 경로는 "
-        "``KrexRestAreaFuelPriceRecord``(provider ``RestAreaFuelPrice``)를 쓴다."
-    ),
-    "opinet.OpinetPriceItem": (
-        "``uni_id``/``prodcd``/``trade_dt`` — provider 모델에 없는 이름이고 "
-        "현재 소비자는 ``kortravelmap.api.etl_fixtures``뿐이다. 실 provider 경로는 "
-        "``OpinetStationPriceItem``/``OpinetStationDetailPriceItem``을 쓴다."
-    ),
+    "krairport.AirportMetadataItem": _transport_reason("TransportAirport"),
+    "krex.KrexRestAreaItem": _transport_reason("TransportRestArea"),
+    "krex.KrexRestAreaFuelPriceRecord": _transport_reason("TransportRestAreaFuelPrice"),
+    "krex.KrexTrafficNoticeItem": _transport_reason("TransportHighwayIncident"),
+    "opinet.OpinetStationItem": _transport_reason("TransportFuelStation"),
+    "opinet.OpinetStationWithPrices": _transport_reason("TransportFuelStation"),
+    "opinet.OpinetStationPriceRow": _transport_reason("TransportFuelPrice"),
     "visitkorea.FestivalMatch": "Map 내부 매칭 결과 shape — provider 모델이 아니다.",
     "visitkorea.FestivalMatcher": "Map이 주입받는 매처 콜백 shape — provider 모델이 아니다.",
 }
@@ -83,7 +82,8 @@ PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
 
 두 부류다.
 
-1. fixture 전용 shape(krex narrow row, ``OpinetPriceItem``).
+1. kor-travel-transport export 계약 shape(opinet·krex·krairport — ADR-106). provider 실모델이
+   아니라 ``providers.kor_travel_transport``의 dataclass가 만족한다.
 2. Map 내부 shape(visitkorea 매처·매칭 결과).
 
 (옛 kma 전부 — raw dict 기반 row — 와 airkorea·krex 휴게소 기상·krforest 산악기상/

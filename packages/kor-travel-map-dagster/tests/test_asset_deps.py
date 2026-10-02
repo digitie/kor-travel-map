@@ -13,19 +13,19 @@ import pytest
 from dagster import AssetsDefinition
 
 from kortravelmap.dagster.assets import (
-    KREX_NOTICE_SNAPSHOT_POOL,
+    HIGHWAY_INCIDENT_SNAPSHOT_POOL,
     OPINET_API_POOL,
-    feature_notice_krex_traffic_notices,
-    feature_place_krex_rest_areas,
-    feature_place_opinet_stations,
-    feature_price_krex_rest_areas,
-    feature_price_opinet_stations,
+    feature_notice_transport_highway_incidents,
+    feature_place_transport_rest_areas,
+    feature_place_transport_fuel_stations,
+    feature_price_transport_rest_areas,
+    feature_price_transport_fuel_stations,
 )
 
 # (price asset, 선행 place asset) — price.parent_feature_id가 place를 가리키는 쌍.
 _PRICE_PARENT_PLACE_PAIRS: list[tuple[AssetsDefinition, AssetsDefinition]] = [
-    (feature_price_opinet_stations, feature_place_opinet_stations),
-    (feature_price_krex_rest_areas, feature_place_krex_rest_areas),
+    (feature_price_transport_fuel_stations, feature_place_transport_fuel_stations),
+    (feature_price_transport_rest_areas, feature_place_transport_rest_areas),
 ]
 
 
@@ -43,13 +43,13 @@ def test_price_asset_depends_on_parent_place(
 
 def test_opinet_assets_share_serial_api_pool() -> None:
     """schedule/manual 실행 방식과 무관하게 OpiNet 호출 asset은 같은 pool을 쓴다."""
-    assert feature_place_opinet_stations.node_def.pool == OPINET_API_POOL
-    assert feature_price_opinet_stations.node_def.pool == OPINET_API_POOL
+    assert feature_place_transport_fuel_stations.node_def.pool == OPINET_API_POOL
+    assert feature_price_transport_fuel_stations.node_def.pool == OPINET_API_POOL
 
 
 def test_krex_notice_asset_uses_serial_snapshot_pool() -> None:
     """10분 schedule run이 겹쳐도 snapshot load/reconcile 순서가 역전되지 않는다."""
-    assert feature_notice_krex_traffic_notices.node_def.pool == KREX_NOTICE_SNAPSHOT_POOL
+    assert feature_notice_transport_highway_incidents.node_def.pool == HIGHWAY_INCIDENT_SNAPSHOT_POOL
 
 
 def test_every_pool_in_the_code_location_is_tenant_prefixed() -> None:
@@ -68,6 +68,6 @@ def test_every_pool_in_the_code_location_is_tenant_prefixed() -> None:
             if node.pool:
                 pools.add(node.pool)
     # 하한: OpiNet·KREX notice·geo-heavy 세 pool을 실제로 봤다.
-    assert {OPINET_API_POOL, KREX_NOTICE_SNAPSHOT_POOL} <= pools, pools
+    assert {OPINET_API_POOL, HIGHWAY_INCIDENT_SNAPSHOT_POOL} <= pools, pools
     assert len(pools) >= 3, pools
     assert all(pool.startswith(MAP_POOL_PREFIX) for pool in pools), sorted(pools)
