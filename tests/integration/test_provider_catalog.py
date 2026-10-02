@@ -845,6 +845,51 @@ async def test_head_serves_no_weather_dataset(
     assert not [b for b in bindings if (b.provider, b.dataset_key) in targets]
 
 
+#: ADR-106(migration 404)이 kor-travel-transport로 옮긴 옛 dataset.
+_TRANSPORT_RETIRED_DATASETS = frozenset(
+    {
+        ("python-opinet-api", "opinet_fuel_station_details"),
+        ("python-opinet-api", "opinet_gas_station_prices"),
+        ("python-krex-api", "krex_rest_areas"),
+        ("python-krex-api", "krex_rest_area_prices"),
+        ("python-krex-api", "krex_traffic_notices"),
+        ("python-krairport-api", "krairport_airports"),
+    }
+)
+
+
+async def test_head_retires_every_operation_of_the_transport_moved_datasets(
+    seed_session: AsyncSession,
+) -> None:
+    """404는 옛 dataset의 operation을 **종류 불문** 끈다 — preview만 살아 있으면 은퇴한 dataset이
+    운영 화면에서 미리보기로 남는다(ADR-106 리뷰 M7, 402와 같은 규율). 새 dataset은 켜져 있다.
+
+    하한은 본 것에 건다: 옛 dataset 여섯이 시드에 보이고 그중 preview operation 행이 실제로 있어야
+    이 검사가 preview를 잰다.
+    """
+
+    catalog = await list_provider_dataset_catalog(seed_session)
+    retired = [e for e in catalog if (e.provider, e.dataset_key) in _TRANSPORT_RETIRED_DATASETS]
+    assert {(e.provider, e.dataset_key) for e in retired} == set(_TRANSPORT_RETIRED_DATASETS)
+    assert any(
+        operation.operation_kind == "preview" for entry in retired for operation in entry.operations
+    ), "옛 dataset에 preview operation 행이 없다 — 이 검사가 preview를 재지 않는다"
+    enabled = sorted(
+        f"{entry.provider}/{entry.dataset_key}:{operation.operation_key}:{operation.operation_kind}"
+        for entry in retired
+        for operation in entry.operations
+        if operation.is_enabled
+    )
+    assert enabled == [], f"은퇴한 dataset의 operation이 켜져 있다: {enabled}"
+    assert not [e for e in retired if e.is_active]
+
+    moved = [e for e in catalog if e.provider == "kor-travel-transport"]
+    assert len(moved) == len(_TRANSPORT_RETIRED_DATASETS)
+    for entry in moved:
+        kinds = {op.operation_kind for op in entry.operations if op.is_enabled}
+        assert entry.is_active and {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
+
+
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(
     seed_session: AsyncSession,
 ) -> None:
