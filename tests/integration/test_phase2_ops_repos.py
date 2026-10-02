@@ -262,7 +262,9 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         lat=37.5665,
         radius_km=3.0,
         provider_overrides={
-            "kor-travel-transport:transport_highway_incidents": {"targeted_policy": "allow_targeted"}
+            "kor-travel-transport:transport_highway_incidents": {
+                "targeted_policy": "allow_targeted"
+            }
         },
         metadata={"external_poi_id": "poi-1"},
     )

@@ -212,7 +212,6 @@ def test_offline_upload_load_default_resources_registered() -> None:
 _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_cultural_festivals",
     "transport_fuel_stations",
-    "transport_fuel_stations",
     "transport_rest_areas",
     "transport_rest_area_fuel_prices",
     "transport_highway_incidents",

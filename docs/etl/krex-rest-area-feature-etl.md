@@ -1,5 +1,7 @@
 # krex-rest-area-feature-etl.md — 한국도로공사 휴게소 ETL
 
+> **2026-10-02 ADR-106 — 원천이 바뀌었다.** 이 dataset은 provider 라이브러리가 아니라 kor-travel-transport `GET /v1/service/exports/*`에서 받고 provider 정체성은 `kor-travel-transport`다(`providers/kor_travel_transport.py`, migration `404`). 아래 본문 중 provider 호출·쿼터·scope·핀에 관한 서술은 이력이다. dataset key: `transport_rest_areas`·`transport_rest_area_fuel_prices`·`transport_highway_incidents`.
+
 본 문서는 한국도로공사(`python-krex-api`) 휴게소 데이터 — 위치, 시설, 유가,
 기상 — 를 적재하는 ETL이다.
 

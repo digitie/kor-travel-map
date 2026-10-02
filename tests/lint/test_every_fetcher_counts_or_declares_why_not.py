@@ -58,9 +58,6 @@ _NOTE = "note_upstream_request"
 #: 어긋났다** — ``file_data.iter_pages``는 public이었고, event 창은 14개월로 알 수
 #: 있었다. 못 센다는 선언은 값싸고, 값싼 선언은 계측을 대체하기 시작한다.
 _UNCOUNTABLE: dict[str, str] = {
-    "fetch_transport_airports": (
-        "번들 정적 데이터 — credential 없이 동작하고 upstream 요청이 없다."
-    ),
     "fetch_mois_license_records": "로컬 sqlite 파일을 읽는다 — upstream 요청이 없다.",
 }
 
@@ -75,18 +72,6 @@ _UNCOUNTABLE: dict[str, str] = {
 #: 나간다(계약상 0으로 위장하지 않는다). 아래 하한은 이들을 **계측된 쪽으로
 #: 세지 않는다** — 부분 계측으로 강등하는 것이 공짜면 그것이 값싼 도피로가 된다.
 _PARTIALLY_COUNTED: dict[str, str] = {
-    "fetch_transport_fuel_stations": (
-        "`low_top_area` 모드는 `_OpinetCallBudget.spend()`로 정확히 세지만, "
-        "`bbox`/`poi_cache_target` 모드의 `iter_stations_in_bbox`는 provider가 "
-        "bbox를 격자로 덮으며 셀마다 호출한다 — 셀 수 계산이 provider private이라 "
-        "이 층에서는 셀 수 없다."
-    ),
-    "fetch_transport_fuel_stations": (
-        "`low_top_area` 모드는 예산기가 정확히 센다(완전). `bbox`/`poi_cache_target` "
-        "모드는 상세 조회(`get_station_detail`)가 uni_id마다 1건이라 그쪽은 세지만, "
-        "그 uni_id를 찾아온 enumerate는 세지 못한다 — 즉 **key가 실리되 실제 사용량보다 "
-        "작다.** 같은 모드의 `fetch_transport_fuel_stations`가 값을 아예 안 내는 것과 다르다."
-    ),
     "sync_mois_source_db": (
         "큐 runner 경로와 Phase A op 경로는 센다. **asset 경로는 못 센다** — "
         "`_sync_then_fetch_mois_license_records`가 Dagster resource init 시점에 "
@@ -125,7 +110,6 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_mcst_culture_records",
         "fetch_mois_license_records",
         "fetch_transport_fuel_stations",
-        "fetch_transport_fuel_stations",
         "fetch_seoul_open_data_bookstores",
         "fetch_standard_museums",
         "fetch_standard_parking_lots",
@@ -136,8 +120,6 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받는다 — 접두사로 유도하면
         # 이것이 통째로 게이트 밖이었다(2·3차 리뷰).
         "sync_mois_source_db",
-        # 이름에 밑줄이 앞서지만 upstream을 직접 부르는 자리다.
-        "_fetch_krex_traffic_notice_snapshot",
     }
 )
 

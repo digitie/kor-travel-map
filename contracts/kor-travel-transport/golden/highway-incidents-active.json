@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-10-02T08:00:00Z",
+  "collection": {
+    "source": "krex_traffic_incident",
+    "last_success_at": "2026-10-02T07:55:00Z",
+    "failed": false,
+    "stale": false
+  },
+  "collected_at": "2026-10-02T07:55:00Z",
+  "items": [
+    {
+      "identity_key": "series:232",
+      "source": "krex_traffic_incident",
+      "occurred_date": "2026.10.02",
+      "occurred_time": "09:11:24",
+      "incident_type": "작업",
+      "incident_type_code": "03",
+      "direction": "남이방향",
+      "message": "(갓길)교량점검작업중",
+      "point_name": "경기광주분기점부근(342.6K)-곤지암부근(341K)",
+      "route_no": "0352",
+      "route_name": "중부선",
+      "process_status": "진행",
+      "process_status_code": "1",
+      "latitude": 37.376743,
+      "longitude": 127.316252,
+      "congestion_length": null,
+      "series_no": 232,
+      "observed_at": "2026-10-02T04:47:34Z",
+      "collected_at": "2026-10-02T07:55:00Z",
+      "raw": {
+        "seriesNM": "232",
+        "accDate": "2026.10.02",
+        "accHour": "09:11:24"
+      }
+    }
+  ]
+}

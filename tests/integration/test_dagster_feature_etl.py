@@ -16,12 +16,12 @@ from kortravelmap.dagster.assets import (
     run_feature_geometry_knps_records,
     run_feature_notice_transport_highway_incidents,
     run_feature_place_knps_points,
-    run_feature_place_transport_rest_areas,
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
     run_feature_place_transport_fuel_stations,
-    run_feature_price_transport_rest_areas,
+    run_feature_place_transport_rest_areas,
     run_feature_price_transport_fuel_stations,
+    run_feature_price_transport_rest_areas,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,

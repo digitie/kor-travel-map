@@ -1,0 +1,29 @@
+{
+  "generated_at": "2026-10-02T08:00:00Z",
+  "items": [
+    {
+      "code": "ICN",
+      "icao_code": "RKSI",
+      "name_korean": "인천국제공항",
+      "name_english": "Incheon International Airport",
+      "municipality": "Incheon",
+      "longitude": 126.4407,
+      "latitude": 37.4602,
+      "airport_type": "large_airport",
+      "metadata_source": "OurAirports airports.csv",
+      "has_parking_data": true
+    },
+    {
+      "code": "KPO",
+      "icao_code": "RKTH",
+      "name_korean": "포항경주공항",
+      "name_english": "Pohang Gyeongju Airport",
+      "municipality": "Pohang",
+      "longitude": 129.42,
+      "latitude": 35.988,
+      "airport_type": "medium_airport",
+      "metadata_source": "OurAirports airports.csv",
+      "has_parking_data": false
+    }
+  ]
+}

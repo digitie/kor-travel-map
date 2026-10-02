@@ -13,14 +13,15 @@ umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly COMPOSE_PROJECT_DIR="$PWD"
-# 실수로 tick이 나가도 upstream 호출이 0인 schedule만 조작한다. 공항 fetcher는 krairport의
-# 번들 정적 데이터만 읽는다(keyless, network 없음). 옛 KMA schedule은 2026-09-09에 사라졌고
-# Map은 weather를 더 적재하지 않는다(ADR-104/105).
-readonly SAFE_SCHEDULE="feature_place_krairport_airports_monthly_schedule"
+# 실수로 tick이 나가도 외부 provider 호출이 0인 schedule만 조작한다. 공항 fetcher는
+# kor-travel-transport의 공항 export 하나만 읽고, transport는 그것을 krairport 번들 정적
+# 목록에서 낸다(ADR-106). 옛 KMA schedule은 2026-09-09에 사라졌고 Map은 weather를 더
+# 적재하지 않는다(ADR-104/105).
+readonly SAFE_SCHEDULE="feature_place_transport_airports_monthly_schedule"
 # 기준 5(queue sensor → worker run)의 exact-scope request도 같은 upstream 0 dataset 하나로만
 # 만든다(`ops-c7-update-request-write`). 이것은 실제 prod 쓰기다 — 번들 공항을 place feature로
 # idempotent upsert한다. 상세는 spec 머리말과 runbook.
-readonly SAFE_UPDATE_OPERATION="feature_place_krairport_airports_job"
+readonly SAFE_UPDATE_OPERATION="feature_place_transport_airports_job"
 # 공유 Dagster plane의 공개 GraphQL gateway(Manager ADR-54 D2)는 Basic Auth를 요구한다.
 # 자격증명 파일은 executor 안의 이 경로에 read-only로만 보인다(env에는 경로만 싣는다).
 readonly DAGSTER_BASIC_AUTH_CONTAINER_PATH="/run/secrets/c7-dagster-basic-auth"
@@ -1071,7 +1072,7 @@ export E2E_POI_CACHE_WRITE=1
 #   ticket 거절·만료 복구·자연 rotation·로그아웃, 외부 dataset_projection mutation
 #   (`targets.json` journal로 소유·복원하는 POI target 하나)의 무-navigation 갱신.
 # - ops-c7-schedule-write: SAFE_SCHEDULE의 실제 UI stop/cron/start/stop과 최초 상태 exact 복원.
-# - ops-c7-update-request-write: SAFE_UPDATE_OPERATION(krairport `dataset_wide`) exact-scope
+# - ops-c7-update-request-write: SAFE_UPDATE_OPERATION(transport 공항 `dataset_wide`) exact-scope
 #   request 하나 → Map queue sensor가 집은 `feature_update_request_worker` run(sensor/location/
 #   request tag 대조) → API `done` + Dagster `SUCCESS`(`requests.json` journal). 실제 prod 쓰기,
 #   upstream 0. Dagster에는 읽기 전용 GraphQL만 보낸다(sensor는 건드리지 않는다).
@@ -1428,7 +1429,7 @@ const [
   storageStatePath,
 ] =
   process.argv.slice(2);
-const SAFE_SCHEDULE = "feature_place_krairport_airports_monthly_schedule";
+const SAFE_SCHEDULE = "feature_place_transport_airports_monthly_schedule";
 const SCHEDULES_PATH = "/v1/ops/pipeline/schedules";
 
 function sha256(value) {
@@ -1719,7 +1720,7 @@ async function verifyScheduleAndTargets(
       true,
     );
     // 기준 5: 소유 request를 API에서 다시 읽어 `done`·같은 Dagster run·같은 generation이고
-    // krairport dataset에 남은 활성 실행이 없는지 본다(읽기 전용).
+    // transport 공항 dataset에 남은 활성 실행이 없는지 본다(읽기 전용).
     const requestProbe = await page.evaluate(
       async ({ operationKey, requestId }) => {
         const read = async (path) => {

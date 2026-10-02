@@ -1,5 +1,7 @@
 # krairport-feature-etl.md — KRAirport 공항 메타데이터 → place ETL
 
+> **2026-10-02 ADR-106 — 원천이 바뀌었다.** 이 dataset은 provider 라이브러리가 아니라 kor-travel-transport `GET /v1/service/exports/*`에서 받고 provider 정체성은 `kor-travel-transport`다(`providers/kor_travel_transport.py`, migration `404`). 아래 본문 중 provider 호출·쿼터·scope·핀에 관한 서술은 이력이다. dataset key: `transport_airports`.
+
 본 문서는 KRAirport(`python-krairport-api`)의 번들 공항 메타데이터를 `place`
 feature로 적재하는 ETL이다. 공항 메타데이터 목록(`client.airports()`)은 **번들
 정적 데이터**라 credential 없이 쓸 수 있다(knps와 동일 keyless).

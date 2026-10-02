@@ -27,6 +27,7 @@
 | **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | n150: postgres 공용 **11000**(DB `pinvi`) · api **12801** · dagster 12802 · web 12805 (PinVi 저장소 자체 기본값은 api 9021 · web 9022) | PinVi README, ADR-047 |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
 | **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **공용 PostGIS**(map 포함, ADR-103)·RustFS·관측 스택 소유 | PostGIS 공용 **11000**(map 전용 12700은 이전 창에서 퇴역, 아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35·ADR-53 |
+| **kor-travel-transport** | 교통 데이터 수집·저장(오피넷 주유소·유가, 고속도로 돌발·휴게소·휴게소 유가, 공항 주차·메타데이터) — Map 주유소·휴게소·돌발·공항 feature의 **provider**(ADR-106) | API **14001**(host network, loopback) · 공개 `pr-api` 경유 export 불가 | kor-travel-transport ADR-012, `docs/openapi.json` |
 | (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
 
 > ⚠️ **n150 prod의 PostgreSQL은 공용 instance 하나다 (ADR-103, Manager ADR-53).**
@@ -73,6 +74,9 @@
 ```
 [공공 API provider 라이브러리들]──────────────┐
                                               ▼ (krtour Dagster live fetch)
+[kor-travel-transport :14001] ──(service export pull, ADR-106)──┐
+   GET /v1/service/exports/{fuel-stations,rest-areas,          │
+       rest-area-fuel-prices,highway-incidents/active,airports}▼
 [kor-travel-concierge :12601] ──(REST export pull)──▶ [kor-travel-map :12701]
    GET /api/v1/features/{snapshot|changes}        feature_id 생성·dedup·정합성
    (krtour Dagster가 주기 pull, ADR-053)                │
@@ -176,6 +180,7 @@
 | kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-map C6c contract fixture (`/v1/ops/contract-fixtures/c6c-cancel-probe/*`) | Docker Manager만 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:fixture`; AdminBFF·PinVi·read/cancel token은 불허 | `{data, meta}` durable fixture receipt | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
+| kor-travel-transport export (`/v1/service/exports/*`) | `X-Kor-Travel-Transport-Service-Token`(32자+, transport `TRANSPORT_SERVICE_EXPORT_TOKEN` = Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`) **그리고** loopback Host. 어긋나면 404로 경로를 숨긴다 | **무-envelope** `{items, next_cursor, has_more, collection}`; 돌발은 활성 집합 전체(수집 실패·30분 정체면 503) | RFC7807 `problem+json` |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
@@ -533,6 +538,7 @@ echo 예외가 아니라, admin provenance가 해석된 Feature identity/evidenc
 | PinVi canonical ops | 본 repo `docs/reports/system-structure-api-schema-review-2026-07-16.md` D-11/F-17 + 본 문서 §2 principal 계약 | PinVi admin client·provider-sync proxy·contract test와 `docs/integrations/kor-travel-map-rest-api.md` |
 | PinVi T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/architecture/public-views-api.md` + `openapi.user.json`(T-222b 구현) | PinVi `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
 | canonical curation item → PinVi curated trip plans | 본 repo ADR-092 + service `openapi.service.json`의 `/v1/service/curation-items/{curation_item_id}/detail-snapshot`; 전용 `pinvi:curation-snapshot:read` ServiceToken만 허용하고 AdminBFF secret/CIDR은 공유하지 않음 | PinVi `docs/kor-travel-map-requirements.md`의 canonical curation item import 절과 vendored service contract |
+| kor-travel-transport service export | kor-travel-transport `docs/openapi.json`(CI `export_openapi.py --check`) + ADR-012 | 본 repo `contracts/kor-travel-transport/{openapi.json,PIN.json,golden/}` + `providers/kor_travel_transport.py`(ADR-106) |
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: `docs/etl/concierge-feature-etl.md` + `providers/kor_travel_concierge.py` docstring |
 | PinVi 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/rest-api.md` (구 ADR-051) | PinVi `docs/integrations/kor-travel-map-rest-api.md` §7 |
 | **PinVi M05 수동 Feature provenance attestation** | 본 repo `GET /v1/admin/features/{feature_id}/creation-provenance`의 full/admin OpenAPI + 본 문서 §3.7; top-level opaque `feature_id`/`feature_uuid` 쌍 | PinVi `m05_activation_attestation.py`와 vendored full/admin OpenAPI·pair provenance. 두 UUID의 semantic equality를 actual attestation에서 강제 |

@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 
 from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.kor_travel_transport import DATASET_KEY_AIRPORTS
 from kortravelmap.providers.krairport import (
     AIRPORT_CATEGORY,
     AIRPORT_MARKER_COLOR,
-    DATASET_KEY_AIRPORTS,
 )
 from kortravelmap.providers.krairport import (
     airports_to_bundles as _airports_async,
@@ -94,7 +94,7 @@ def test_airport_falls_back_to_english_name() -> None:
 @pytest.mark.unit
 def test_airport_source_link_primary_and_provider() -> None:
     bundle = airports_to_bundles([_A1], fetched_at=_now())[0]
-    assert bundle.source_record.provider == "python-krairport-api"
+    assert bundle.source_record.provider == "kor-travel-transport"
     assert bundle.source_link.source_role == SourceRole.PRIMARY
     assert bundle.source_link.confidence == 100
     assert bundle.source_link.match_method == "natural_key"

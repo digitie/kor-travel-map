@@ -55,8 +55,9 @@ _EXPECTED_C7_SPECS = (
     "e2e/live/ops-c7-update-request-write.live.spec.ts",
 )
 _UPDATE_REQUEST_SPEC = "ops-c7-update-request-write.live.spec.ts"
-#: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 upstream 호출이 0이어야
-#: 한다 — 공항 fetcher는 krairport 번들 정적 데이터만 읽는다.
+#: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 **외부 provider** 호출이
+#: 0이어야 한다 — 공항 fetcher는 kor-travel-transport의 공항 export 하나만 읽고, transport는
+#: 그것을 krairport 번들 정적 목록에서 낸다(ADR-106, transport ADR-012).
 _EXPECTED_SAFE_SCHEDULE = "feature_place_transport_airports_monthly_schedule"
 #: update-request spec이 실제로 request를 만드는 operation. 이것도 upstream 호출이 0이어야
 #: 한다 — 이름이 아니라 operation → fetcher 배선과 fetcher 본문의 효과로 본다.
@@ -753,11 +754,35 @@ def _operation_fetcher_name(runner_source: str, operation_key: str) -> str:
     return _operation_resource(runner_source, operation_key)[1]
 
 
-#: upstream에 닿지 않는 호출만. 여기 없는 호출은 위반이다(헬퍼를 거친 우회도 막는다).
-_ZERO_UPSTREAM_NAME_CALLS = frozenset({"cast", "dict"})
-_ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset(
-    {"import_module", "get_secret_value", "KrairportClient", "airports", "aclose"}
+#: 외부 provider에 닿지 않는 호출만. 여기 없는 호출은 위반이다(헬퍼를 거친 우회도 막는다).
+#: transport 헬퍼는 같은 플랫폼 내부 서비스로 가는 경로다 — 그중 요청을 보내는
+#: ``_transport_get``은 아래에서 **공항 export 경로로만** 허용한다(ADR-106).
+_ZERO_UPSTREAM_NAME_CALLS = frozenset(
+    {"cast", "dict", "_transport_connection", "_transport_get", "_raise_transport_status",
+     "parse_airports"}
 )
+_ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset({"AsyncClient", "json", "aclose"})
+#: ``_transport_get``이 부를 수 있는 유일한 경로 상수.
+_ZERO_UPSTREAM_TRANSPORT_PATH = "EXPORT_PATH_AIRPORTS"
+
+
+def _is_transport_get(call: ast.AST) -> bool:
+    return (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "_transport_get"
+    )
+
+
+def _is_transport_client(context: ast.withitem) -> bool:
+    expr = context.context_expr
+    return (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Attribute)
+        and expr.func.attr == "AsyncClient"
+        and isinstance(expr.func.value, ast.Name)
+        and expr.func.value.id == "httpx"
+    )
 
 
 def _zero_upstream_violations(fetchers_source: str, fetcher_name: str) -> list[str]:
@@ -765,10 +790,10 @@ def _zero_upstream_violations(fetchers_source: str, fetcher_name: str) -> list[s
 
     이름이 아니라 효과에 건다.
 
-    - 요청을 세는 자리(``note_upstream_request``)가 있으면 요청이 있다는 뜻이다.
-    - krairport client는 async 전용이다 — network method는 전부 coroutine이라 ``await``
-      없이 upstream에 닿을 수 없다. 그래서 ``await``는 세션 정리(``aclose``)만 허용한다.
-    - ``async for``/``async with``(page iterator·session)는 없어야 한다.
+    - 요청을 세는 자리(``note_upstream_request``)를 직접 부르면 다른 요청이 있다는 뜻이다.
+    - ``await``는 세션 정리(``aclose``)와 공항 export로 가는 ``_transport_get``만 허용한다.
+      ``_transport_get``의 경로 인자가 공항 export 상수가 아니면 위반이다.
+    - ``async with``는 transport용 ``httpx.AsyncClient`` 하나만, ``async for``는 없어야 한다.
     - 호출은 위 허용 목록만 — 새 헬퍼를 거쳐 우회하면 여기서 빨개진다.
     """
 
@@ -780,17 +805,29 @@ def _zero_upstream_violations(fetchers_source: str, fetcher_name: str) -> list[s
     assert len(functions) == 1, f"fetcher 정의가 정확히 하나가 아니다: {fetcher_name}"
     violations: list[str] = []
     for node in ast.walk(functions[0]):
-        if isinstance(node, ast.AsyncFor | ast.AsyncWith):
-            violations.append(f"async iteration/context at line {node.lineno}")
+        if isinstance(node, ast.AsyncFor):
+            violations.append(f"async iteration at line {node.lineno}")
+        elif isinstance(node, ast.AsyncWith):
+            if not all(_is_transport_client(item) for item in node.items):
+                violations.append(
+                    f"async context other than the transport client at line {node.lineno}"
+                )
         elif isinstance(node, ast.Await):
             awaited = node.value
-            if not (
+            if _is_transport_get(awaited):
+                assert isinstance(awaited, ast.Call)
+                path = awaited.args[1] if len(awaited.args) > 1 else None
+                if not (isinstance(path, ast.Name) and path.id == _ZERO_UPSTREAM_TRANSPORT_PATH):
+                    violations.append(
+                        f"transport request off the airport export at line {node.lineno}"
+                    )
+            elif not (
                 isinstance(awaited, ast.Call)
                 and isinstance(awaited.func, ast.Attribute)
                 and awaited.func.attr == "aclose"
             ):
-                violations.append(f"await other than aclose at line {node.lineno}")
-        elif isinstance(node, ast.Call):
+                violations.append(f"await other than aclose/airport export at line {node.lineno}")
+        if isinstance(node, ast.Call):
             func = node.func
             if isinstance(func, ast.Name):
                 if func.id not in _ZERO_UPSTREAM_NAME_CALLS:
@@ -870,6 +907,8 @@ def test_update_request_operation_is_one_zero_upstream_operation_everywhere() ->
         "note_upstream_request()",
         "async for page in client.iter_pages(client.departures):\n        pass",
         "_fetch_more(client)",
+        "await _transport_get(client, EXPORT_PATH_FUEL_STATIONS, {})",
+        "async with httpx_mock.AsyncClient() as other:\n        pass",
     ],
 )
 def test_zero_upstream_check_turns_red_on_an_upstream_call(statement: str) -> None:

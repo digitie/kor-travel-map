@@ -38,9 +38,10 @@ pytestmark = pytest.mark.integration
 
 _KST = timezone(timedelta(hours=9))
 
-_DATASET_KEYS = {
-    "kor-travel-transport": "transport_fuel_prices",
-    "kor-travel-transport": "transport_rest_area_fuel_prices",
+#: 두 가격 dataset은 provider가 같다(kor-travel-transport, ADR-106) — 가격 영역으로 가른다.
+_DATASET_KEYS_BY_DOMAIN = {
+    PriceDomain.OPINET_GAS_STATION: "transport_fuel_prices",
+    PriceDomain.REST_AREA_FUEL: "transport_rest_area_fuel_prices",
 }
 
 
@@ -120,7 +121,7 @@ async def _append_price_response(
 ) -> None:
     """T-VN-38의 source response lineage를 포함해 test price facts를 적재한다."""
 
-    dataset_key = _DATASET_KEYS[provider]
+    dataset_key = _DATASET_KEYS_BY_DOMAIN[values[0].price_domain]
     dataset_id = await session.scalar(
         text(
             """

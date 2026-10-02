@@ -314,7 +314,9 @@ async def test_notice_critical_path_skips_reverse_geocoding(
     monkeypatch.setattr(assets_module, "traffic_notices_to_bundles", _convert)
     client = _Client()
 
-    await run_feature_notice_transport_highway_incidents(_context(client, reverse_geocoder=object()))
+    await run_feature_notice_transport_highway_incidents(
+        _context(client, reverse_geocoder=object())
+    )
 
     assert seen_reverse_geocoders == [None]
 
@@ -328,7 +330,9 @@ async def test_incomplete_snapshot_fetch_does_not_reconcile() -> None:
     client = _Client()
 
     with pytest.raises(RuntimeError, match="중복 사건 identity"):
-        await run_feature_notice_transport_highway_incidents(_context(client, notices=_BrokenSnapshot()))
+        await run_feature_notice_transport_highway_incidents(
+            _context(client, notices=_BrokenSnapshot())
+        )
 
     assert client.events == [
         f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",

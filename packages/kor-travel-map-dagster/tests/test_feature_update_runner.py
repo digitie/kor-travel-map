@@ -838,7 +838,10 @@ def test_runner_rejects_two_specs_claiming_the_same_operation_key() -> None:
             resources=_empty_resources,
             asset_key=asset_key,
         )
-        for asset_key in ("feature_place_transport_fuel_stations", "feature_price_transport_fuel_stations")
+        for asset_key in (
+            "feature_place_transport_fuel_stations",
+            "feature_price_transport_fuel_stations",
+        )
     )
 
     with pytest.raises(ValueError, match="operation_key must be unique"):

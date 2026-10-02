@@ -6,7 +6,8 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
 
 - **provider 정체성**: 모든 dataset의 provider는 ``kor-travel-transport``
   (``source_kind=internal``)다. 자연키는 원천의 것을 그대로 쓴다(주유소 uni_id,
-  휴게소 ``name::route::direction``, 휴게소 코드, 돌발 사건 단서, IATA 코드) — ADR-098 identity ``(dataset, kind, natural_key)``의 세 번째 성분이다.
+  휴게소 ``name::route::direction``, 휴게소 코드, 돌발 사건 단서, IATA 코드) — ADR-098
+  identity ``(dataset, kind, natural_key)``의 세 번째 성분이다.
 - **이 모듈은 REST client wrapper가 아니다**(ADR-006은 공개 provider client에 대한 규칙이다).
   HTTP는 Dagster fetcher가 한다. 여기서는 이미 받은 JSON을 **엄격히** 검사해 변환 함수
   (``providers.opinet``/``providers.krex``/``providers.krairport``)가 받는 입력 shape로 바꾼다.
