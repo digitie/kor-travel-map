@@ -619,7 +619,7 @@ async def _run_feature_notice_transport_highway_incidents_locked(
 ) -> DagsterFeatureLoadResult:
     """고속도로 돌발을 notice Feature로 적재하고 활성 집합에 없는 계보를 닫는다.
 
-    transport export는 **마지막 성공 수집이 본 사건 전체**다(transport ADR-012). 수집이 실패했거나
+    transport export는 **마지막 성공 수집이 본 사건 전체**다(transport ADR-013). 수집이 실패했거나
     30분 넘게 성공하지 못했으면 transport가 503을 내고 fetcher가 실패한다 — 그때는 아무것도
     닫지 않는다. 적재 직후 reconcile(#632): 같은 계보의 중복 feature를 soft-delete하고, 이번
     집합에 없는 계보의 latest feature는 ``valid_end_time=fetched_at``으로 닫는다. 다시 나타난

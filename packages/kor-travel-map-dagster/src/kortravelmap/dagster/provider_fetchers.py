@@ -237,7 +237,7 @@ def _utcnow() -> datetime:
 def _raise_transport_status(response: httpx.Response, path: str) -> None:
     status = response.status_code
     if status == 404:
-        # transport는 토큰·접속 주소가 맞지 않으면 경로 자체를 숨긴다(transport ADR-012).
+        # transport는 토큰·접속 주소가 맞지 않으면 경로 자체를 숨긴다(transport ADR-013).
         # 404만으로는 셋을 가를 수 없다 — 자격증명 부재(설정 누락)는 요청 전에
         # ProviderCredentialMissing으로 난다.
         raise TransportExportHidden(
@@ -250,7 +250,7 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
     if status == 503:
         raise TransportExportNotCurrent(
             f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
-            "stale이다(transport ADR-012). 이번 run은 아무것도 적재·삭제·종료하지 않는다."
+            "stale이다(transport ADR-013). 이번 run은 아무것도 적재·삭제·종료하지 않는다."
         )
     if status in _TRANSPORT_TRANSIENT_STATUSES:
         raise _TransportTransientStatus(f"kor-travel-transport {path}가 {status}다.")

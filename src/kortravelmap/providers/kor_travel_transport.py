@@ -2,7 +2,7 @@
 
 Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 유가·고속도로 돌발,
 공항 메타데이터를 provider 라이브러리로 직접 받지 않는다. kor-travel-transport가 수집·저장한 값을
-``GET /v1/service/exports/*``(transport ADR-012)로 읽는다. 이 모듈은 그 계약의 Map 쪽 정본이다.
+``GET /v1/service/exports/*``(transport ADR-013)로 읽는다. 이 모듈은 그 계약의 Map 쪽 정본이다.
 
 - **provider 정체성**: 모든 dataset의 provider는 ``kor-travel-transport``
   (``source_kind=internal``)다. 자연키는 원천의 것을 그대로 쓴다(주유소 uni_id,
@@ -16,7 +16,7 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
 - 계약 기계 정본은 vendoring한 ``contracts/kor-travel-transport/openapi.json``이다
   (``contracts/kor-travel-transport/PIN.json``의 SHA-256과 transport revision에 결박).
 - **신선도는 두 겹으로 지킨다.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면
-  503을 낸다(transport ADR-012). Map은 그것만 믿지 않고 200 본문의 ``collection``도 다시
+  503을 낸다(transport ADR-013). Map은 그것만 믿지 않고 200 본문의 ``collection``도 다시
   확인하며(:func:`require_current_collection`), 돌발 집합은 ``collected_at`` 나이까지 잰다
   (:func:`require_fresh_incident_set`). 어긋나면 :class:`TransportExportNotCurrent`로 실패한다 —
   낡거나 빈 집합을 받아들이면 완전 snapshot reconcile이 멀쩡한 feature를 지우거나 사건을 닫는다.
@@ -89,7 +89,7 @@ DATASET_KEY_AIRPORTS: Final[str] = "transport_airports"
 """국내 운영 공항 place Feature."""
 
 SERVICE_TOKEN_HEADER: Final[str] = "X-Kor-Travel-Transport-Service-Token"
-"""transport export 토큰 header(transport ADR-012)."""
+"""transport export 토큰 header(transport ADR-013)."""
 
 EXPORT_PATH_FUEL_STATIONS: Final[str] = "/v1/service/exports/fuel-stations"
 EXPORT_PATH_REST_AREAS: Final[str] = "/v1/service/exports/rest-areas"
@@ -398,7 +398,7 @@ def parse_collection(value: Any, *, where: str) -> TransportCollection:
 def require_current_collection(collection: TransportCollection, *, where: str) -> None:
     """이력 없음·실패·stale이면 :class:`TransportExportNotCurrent`.
 
-    transport는 이 경우 503을 내야 한다(ADR-012). 200인데 플래그가 서 있으면 transport가
+    transport는 이 경우 503을 내야 한다(transport ADR-013). 200인데 플래그가 서 있으면 transport가
     계약을 어긴 것이지만, 결과는 같다 — 그 집합으로 reconcile하지 않는다.
     """
     if collection.last_success_at is None:

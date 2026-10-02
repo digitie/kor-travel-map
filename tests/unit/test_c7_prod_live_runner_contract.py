@@ -57,7 +57,7 @@ _EXPECTED_C7_SPECS = (
 _UPDATE_REQUEST_SPEC = "ops-c7-update-request-write.live.spec.ts"
 #: schedule-write가 실제로 조작하는 schedule. 실수로 tick이 나가도 **외부 provider** 호출이
 #: 0이어야 한다 — 공항 fetcher는 kor-travel-transport의 공항 export 하나만 읽고, transport는
-#: 그것을 krairport 번들 정적 목록에서 낸다(ADR-106, transport ADR-012).
+#: 그것을 krairport 번들 정적 목록에서 낸다(ADR-106, transport ADR-013).
 _EXPECTED_SAFE_SCHEDULE = "feature_place_transport_airports_monthly_schedule"
 #: update-request spec이 실제로 request를 만드는 operation. 이것도 upstream 호출이 0이어야
 #: 한다 — 이름이 아니라 operation → fetcher 배선과 fetcher 본문의 효과로 본다.

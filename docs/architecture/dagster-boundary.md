@@ -142,7 +142,7 @@ terminal receipt가 source observation과 candidate generation을 같은 transac
 
 `transport_*` asset 여섯(주유소 place/price, 휴게소 place/price, 고속도로 돌발, 공항)은 2026-10-02
 ADR-106부터 provider 라이브러리(OpiNet·KREX·krairport)가 아니라 kor-travel-transport의 내부 export
-(`GET /v1/service/exports/*`, transport ADR-012)를 읽는다. provider는 `kor-travel-transport`
+(`GET /v1/service/exports/*`, transport ADR-013)를 읽는다. provider는 `kor-travel-transport`
 (`source_kind=internal`)다. export가 404(토큰·접속 주소·버전)·503(근거 수집 이력 없음·실패·stale)이거나
 `collection` 플래그가 서 있거나 완전 snapshot이 0건이면 fetcher가 `failure_kind`를 가진 예외로 실패하고,
 그 run은 아무것도 적재·삭제·종료하지 않는다. 공항은 §10의 월 1회 schedule이 있다.

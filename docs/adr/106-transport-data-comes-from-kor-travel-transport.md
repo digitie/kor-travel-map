@@ -3,7 +3,7 @@
 - 상태: accepted (2026-10-02, 소유자 결정)
 - 관련: ADR-006(공개 provider client 직접 사용 — wrapper 금지), ADR-053(kor-travel-concierge pull),
   ADR-088(operation 카탈로그 정본), ADR-098(provider identity = `(dataset, kind, natural_key)`),
-  ADR-102(migration 전진 배포), kor-travel-transport ADR-012(내부 서비스 export)
+  ADR-102(migration 전진 배포), kor-travel-transport ADR-013(내부 서비스 export)
 
 ### 소유자 결정(원문 요지)
 
@@ -52,7 +52,7 @@
    network에서 `http://127.0.0.1:14001`로 부른다. 404는 설정 누락(`ProviderCredentialMissing`, 요청 전)과
    가른다 — `TransportExportHidden`(`failure_kind=transport_hidden`: token·접속 주소·버전 중 하나).
 6. **신선도 계약 — 두 겹, 모든 dataset.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면 503을
-   낸다(transport ADR-012: 주유소 24시간, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
+   낸다(transport ADR-013: 주유소 24시간, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
    - 매 페이지 `collection`(`last_success_at`·`failed`·`stale`)을 엄격히 읽고 하나라도 어긋나면
      `TransportExportNotCurrent`(`transport_not_current`)로 실패한다. 503도 같은 예외다.
    - 완전 snapshot export(주유소·휴게소·휴게소 유가)가 끝까지 0건이면 `TransportExportEmpty`

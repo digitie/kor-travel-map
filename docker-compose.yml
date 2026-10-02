@@ -622,7 +622,7 @@ services:
       KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY: ${KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY:-${SEOUL_OPEN_DATA_API_KEY:-}}
       # OpiNet·KREX·공항 데이터는 kor-travel-transport export에서 받는다(ADR-106). token은
       # transport의 TRANSPORT_SERVICE_EXPORT_TOKEN과 같은 값이고, 비면 해당 적재가 실패한다.
-      # transport export(ADR-106)는 접속 주소로도 닫힌다(transport ADR-012). 이 컨테이너는 docker bridge라
+      # transport export(ADR-106)는 접속 주소로도 닫힌다(transport ADR-013). 이 컨테이너는 docker bridge라
       # transport에는 bridge gateway 주소로 보인다 — standalone에서는 transport의
       # SERVICE_EXPORT_ALLOWED_CLIENTS_CSV에 bridge 대역(예: 172.16.0.0/12)을 더해야 404가 아니다.
       # 운영(Manager, host network)은 http://127.0.0.1:14001이다.
