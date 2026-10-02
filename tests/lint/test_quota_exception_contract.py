@@ -74,15 +74,16 @@ def _sibling_source(module: str) -> Path | None:
     return None
 
 
-def test_the_declaration_is_not_empty() -> None:
-    """항진명제 방지 — 선언이 비면 아래 파라미터가 0개가 되어 아무것도 재지 않는다."""
+def test_the_declaration_is_exactly_what_we_reasoned_about() -> None:
+    """선언 집합을 값으로 못박는다 — 비어 있는 것도 결정이다.
 
-    pairs = _declared_pairs()
-    # 2026-10-01 3 → 2: 에어코리아 쿼터 예외를 ADR-105로 뺐다(Map은 에어코리아를 부르지 않는다).
-    assert len(pairs) >= 2, (
-        f"선언된 쿼터 예외가 {len(pairs)}개뿐이다(유도 실패이거나 실제로 줄었다). "
-        "줄이려면 왜 그 provider가 더 이상 쿼터를 알리지 않는지 먼저 적어라."
-    )
+    2026-10-01 3 → 2: 에어코리아 쿼터 예외를 ADR-105로 뺐다. 2026-10-02 2 → 0: krex·opinet
+    쿼터 예외를 ADR-106으로 뺐다(그 데이터는 kor-travel-transport export에서 받고 상류 쿼터는
+    transport가 진다). 그래서 아래 파라미터 검사는 지금 0개다 — 이 검사가 그 사실이 유도
+    실패가 아니라 선언임을 고정한다. 새 쿼터 예외를 더하면 여기 기대값도 함께 바꾼다.
+    """
+
+    assert _declared_pairs() == []
 
 
 @pytest.mark.parametrize(

@@ -753,8 +753,8 @@ def _frozen_h35_notice_lineage_sql(alias: str) -> str:
 
     return f"""
     CASE
-      WHEN {alias}.provider = 'kor-travel-transport'
-       AND {alias}.dataset_key = 'transport_highway_incidents'
+      WHEN {alias}.provider = 'python-krex-api'
+       AND {alias}.dataset_key = 'krex_traffic_notices'
        AND {alias}.source_entity_type = 'traffic_notice'
       THEN COALESCE(
         NULLIF(
@@ -832,8 +832,8 @@ def _frozen_h35_canonical_notice_feature_sql(
     return f"""
     CASE
       WHEN (
-        ({source_alias}.provider = 'kor-travel-transport'
-         AND {source_alias}.dataset_key = 'transport_highway_incidents'
+        ({source_alias}.provider = 'python-krex-api'
+         AND {source_alias}.dataset_key = 'krex_traffic_notices'
          AND {source_alias}.source_entity_type = 'traffic_notice')
         OR
         ({source_alias}.provider = 'python-kma-api'

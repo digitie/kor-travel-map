@@ -21,6 +21,12 @@
         "402_remove_map_weather_data"
       ],
       "revision": "403_drop_kma_notice_lineage"
+    },
+    {
+      "down_revision": [
+        "403_drop_kma_notice_lineage"
+      ],
+      "revision": "404_transport_provider_identity"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -488,15 +488,10 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     services = _compose()["services"]
     shared_provider_keys = {
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
-        "KOR_TRAVEL_MAP_OPINET_API_KEY",
         "KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY",
-        "KOR_TRAVEL_MAP_OPINET_SCOPE_MODE",
-        "KOR_TRAVEL_MAP_OPINET_SCOPE_BBOX",
-        "KOR_TRAVEL_MAP_OPINET_SCOPE_RADIUS_M",
-        "KOR_TRAVEL_MAP_OPINET_LOW_TOP_MAX_CALLS",
-        "KOR_TRAVEL_MAP_OPINET_RUN_CALL_BUDGET",
-        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
-        "KOR_TRAVEL_MAP_KREX_GO_API_KEY",
+        # ADR-106: OpiNet·KREX·공항은 kor-travel-transport export에서 받는다.
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL",
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN",
     }
     all_provider_keys = shared_provider_keys | {"KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH"}
 

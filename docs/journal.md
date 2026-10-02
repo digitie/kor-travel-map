@@ -1,5 +1,25 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-02 — 주유소·휴게소·돌발·공항 원천을 kor-travel-transport export로 이관(ADR-106): 브랜치 `feat/transport-api-sources`
+
+- 소유자 결정: Map에서 transport로 얻을 수 있는 것은 transport API로 바꾸고, 필요하면 transport API를 고친다. OpiNet은
+  transport 브라우저 수집본을 쓴다. 공항도 옮긴다. 새 provider 정체성 `kor-travel-transport`(internal) + identity 재지정
+  보험. prod Map DB는 비어 있어(예상) shadow 없이 바로 전환한다.
+- transport 쪽(`kor-travel-transport` 브랜치 `fix/fuel-latest-prices-incremental` → `feat/map-service-exports`): 최신 유가
+  MV가 60초 timeout으로 영구 stale이던 것을 증분 테이블로 고쳤고(0022), 휴게소 기준정보·휴게소 유가 수집기와
+  `GET /v1/service/exports/*`(토큰 + loopback Host, 404 은닉), 돌발 활성 집합(수집 실패·30분 정체면 503), 공항 15곳(KPO
+  포함)을 더했다(transport ADR-012).
+- Map: `providers/kor_travel_transport.py`(계약·엄격 파서), fetcher 5개(`fetch_transport_*`), asset/job/operation 6개를
+  `*_transport_*`로 바꿨다. 정규화는 `opinet.py`·`krex.py`·`krairport.py`에 남고 provider 정체성만 바뀐다. migration
+  `404_transport_provider_identity`가 새 dataset·operation·scope를 넣고 옛 identity를 옮기고(옛 돌발 entity가 있으면
+  중단) 옛 적재를 끄고 계보 함수의 돌발 분기를 옮긴다.
+- 지운 것: OpiNet 호출 예산·scope 모드·KST 일일 coalescing·POI target scope, krex 이중 snapshot 안정성 검사, krex rate
+  gate 선언, krex/opinet 쿼터 예외 선언, 세 provider 핀, `KOR_TRAVEL_MAP_OPINET_*`·`KOR_TRAVEL_MAP_KREX_*` env.
+- C7: 공항 operation은 이제 transport 내부 export를 한 번 부른다. 계약 테스트를 "외부 provider 호출 0"으로 고쳐 적었다
+  (`_transport_get`은 공항 export 상수로만 허용, 다른 경로는 빨강).
+- 계약: transport `docs/openapi.json`을 `contracts/kor-travel-transport/openapi.json`으로 vendoring하고 `PIN.json`에
+  revision·SHA-256을 적었다. golden fixture 5종이 실 파서를 지난다.
+
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 
 - **MED-1 PinVi가 다음 짝을 막는다.** Manager M05 harness가 OpenAPI hash 불일치를 거부하고 PinVi 계약 테스트가

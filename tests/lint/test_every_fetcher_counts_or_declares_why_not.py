@@ -171,7 +171,7 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 그것은 면제할 이유가 아니다 — 면제는 '적다'가 아니라 '셀 수 없다'일 때다.
 #: 2026-10-01 27 → 24. 날씨 진입점 셋(KREX 휴게소 기상·산림청 산악기상·산불위험예보)이
 #: ADR-105로 사라졌다 — 셋 다 완전 계측이었다.
-_EXPECTED_FULLY_COUNTED: int = 24
+_EXPECTED_FULLY_COUNTED: int = 25
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -310,7 +310,9 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     """
 
     # 2026-10-01 31 → 29: 날씨 진입점 셋이 ADR-105로 사라졌다(32 → 29개).
-    assert len(_EXPECTED_FETCHERS) >= 29, (
+    # 2026-10-02 29 → 27: OpiNet 둘·krex 셋·krairport 하나·돌발 snapshot 헬퍼가 transport
+    # fetcher 다섯으로 바뀌었다(ADR-106).
+    assert len(_EXPECTED_FETCHERS) >= 27, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
@@ -340,7 +342,7 @@ def test_the_derivation_actually_found_the_counting_sites() -> None:
     """항진명제 방지 — 유도가 비면 아래 파라미터가 0개가 된다."""
 
     # 2026-10-01 31 → 29: 날씨 진입점 셋이 ADR-105로 사라졌다.
-    assert len(_fetchers()) >= 29, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
+    assert len(_fetchers()) >= 27, "진입점 유도가 낡았다 — 거의 아무것도 찾지 못했다."
     assert _counting_definitions(), (
         f"`{_NOTE}`를 부르는 정의를 하나도 찾지 못했다 — 계측이 사라졌다."
     )
@@ -452,7 +454,8 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
     # 2026-10-01 10 → 9: ``kma_weather.py``의 초크포인트 함수가 ADR-104로 사라졌다.
     # 2026-10-01 9 → 6: 에어코리아·KREX 휴게소 기상·산림청 weather 값 적재 함수가
     # ADR-105로 사라졌다.
-    assert len(scanned) >= 6, (
+    # 2026-10-02 6 → 5: OpiNet 가격 asset의 쿼터 초크포인트가 ADR-106으로 사라졌다.
+    assert len(scanned) >= 5, (
         f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
     )
 
