@@ -43,6 +43,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportExportEmpty,
     TransportExportFailure,
     TransportExportHidden,
+    TransportExportMalformed,
     TransportExportNotCurrent,
     TransportFuelStation,
     TransportHighwayIncident,
@@ -213,8 +214,10 @@ _TRANSPORT_MAX_PAGES: Final[int] = 1000
 넘으면 cursor가 순환하거나 계약이 깨진 것이다(같은 cursor 반복은 별도로 즉시 잡는다)."""
 
 _TRANSPORT_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({502, 504})
-"""재시도할 HTTP 상태 — 같은 호스트의 transport 재기동·게이트웨이 순간 장애. 503은 재시도하지
-않는다: transport가 "근거 수집이 현재가 아니다"라고 판정한 것이고 15초 안에 바뀌지 않는다."""
+"""HTTP 층에서 곧바로 다시 부를 상태 — 같은 호스트의 transport 재기동·게이트웨이 순간 장애.
+503은 여기서 다시 부르지 않는다: transport가 "근거 수집이 현재가 아니다"라고 판정한 것이고 15초
+안에 바뀌지 않는다. 대신 :class:`TransportExportNotCurrent`는 ``retryable=True``라 step 재시도
+(``FEATURE_LOAD_RETRY_POLICY``, 60초부터 지수)의 대상이다 — terminal로 끄지 않는다."""
 
 _TRANSPORT_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
 """재시도 간격 기준(테스트가 0으로 바꾼다). 다른 내부·provider 경계와 같은 값이다."""
@@ -227,6 +230,33 @@ class _TransportTransientStatus(TransportExportFailure):
 def _transport_retryable(exc: BaseException) -> bool:
     """연결·timeout 같은 전송 오류와 502/504만 재시도한다. 404·503·계약 위반은 즉시 전파."""
     return isinstance(exc, httpx.TransportError | _TransportTransientStatus)
+
+
+def _transport_run_budget() -> upstream_retry.RetryBudget:
+    """run 경계가 연 공유 재시도 예산. 경계 밖 단독 호출이면 이 호출만의 예산.
+
+    큐 run 하나는 transport export를 scope 수만큼 부른다. 호출마다 새 예산을 만들면 transport가
+    내려가 있을 때 run 하나가 export 수 × 예산만큼 재시도한다(적대 리뷰 후속, 2026-10-04).
+    """
+    shared = upstream_retry.active_run_retry_budget()
+    return shared if shared is not None else upstream_retry.RetryBudget()
+
+
+def _transport_json(response: httpx.Response, path: str) -> Any:
+    """본문을 JSON으로 읽는다. JSON이 아니면 :class:`TransportExportMalformed`.
+
+    ``json.JSONDecodeError``(``ValueError``)를 그대로 올리면 실패가 분류 없이(``failure_kind``
+    없음) 기록된다. 원문은 싣지 않는다 — 앞부분 길이와 content-type만 남긴다.
+    """
+    try:
+        return response.json()
+    except ValueError as exc:
+        content_type = response.headers.get("content-type", "")
+        raise TransportExportMalformed(
+            f"kor-travel-transport {path} 응답이 JSON이 아니다"
+            f"(status={response.status_code}, content-type={content_type!r}, "
+            f"bytes={len(response.content)})."
+        ) from exc
 
 
 def _utcnow() -> datetime:
@@ -313,7 +343,7 @@ async def _iter_transport_export(
     적재하므로 뒤 페이지의 실패도 적재 전에 run을 멈춘다.
     """
     base_url, headers = _transport_connection(settings)
-    budget = upstream_retry.RetryBudget()
+    budget = _transport_run_budget()
     cursor: str | None = None
     seen_cursors: set[str] = set()
     total = 0
@@ -327,7 +357,7 @@ async def _iter_transport_export(
             if cursor is not None:
                 params["cursor"] = cursor
             response = await _transport_get(client, path, params, budget=budget)
-            page = parse_export_page(response.json(), where=path)
+            page = parse_export_page(_transport_json(response, path), where=path)
             require_current_collection(page.collection, where=path)
             for item in page.items:
                 total += 1
@@ -400,9 +430,11 @@ async def fetch_transport_highway_incidents(
             client,
             EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
             {},
-            budget=upstream_retry.RetryBudget(),
+            budget=_transport_run_budget(),
         )
-        active = parse_active_incident_set(response.json())
+        active = parse_active_incident_set(
+            _transport_json(response, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE)
+        )
     require_fresh_incident_set(active, now=_utcnow())
     for incident in active.items:
         yield incident
@@ -419,9 +451,9 @@ async def fetch_transport_airports(
         headers=headers,
     ) as client:
         response = await _transport_get(
-            client, EXPORT_PATH_AIRPORTS, {}, budget=upstream_retry.RetryBudget()
+            client, EXPORT_PATH_AIRPORTS, {}, budget=_transport_run_budget()
         )
-        airports = parse_airports(response.json())
+        airports = parse_airports(_transport_json(response, EXPORT_PATH_AIRPORTS))
     for airport in airports:
         yield airport
 

@@ -757,8 +757,18 @@ def _operation_fetcher_name(runner_source: str, operation_key: str) -> str:
 #: 외부 provider에 닿지 않는 호출만. 여기 없는 호출은 위반이다(헬퍼를 거친 우회도 막는다).
 #: transport 헬퍼는 같은 플랫폼 내부 서비스로 가는 경로다 — 그중 요청을 보내는
 #: ``_transport_get``은 아래에서 **공항 export 경로로만** 허용한다(ADR-106).
+#: ``_transport_run_budget``은 run 공유 재시도 장부를 꺼낼 뿐이고, ``_transport_json``은 이미 받은
+#: 응답 본문을 JSON으로 읽을 뿐이다 — 둘 다 요청을 보내지 않는다(2026-10-04).
 _ZERO_UPSTREAM_NAME_CALLS = frozenset(
-    {"cast", "dict", "_transport_connection", "_transport_get", "parse_airports"}
+    {
+        "cast",
+        "dict",
+        "_transport_connection",
+        "_transport_get",
+        "_transport_json",
+        "_transport_run_budget",
+        "parse_airports",
+    }
 )
 #: ``RetryBudget``은 재시도 횟수 장부를 만들 뿐 요청을 보내지 않는다(요청은 ``_transport_get``).
 _ZERO_UPSTREAM_ATTRIBUTE_CALLS = frozenset({"AsyncClient", "json", "aclose", "RetryBudget"})
