@@ -22,7 +22,10 @@
   dagster README의 옛 `opinet_*`·`krex_*`·`krairport_*` resource/env/schedule 행과 external-apis의 OpiNet·KREX 키 행을
   정리했다. main의 `docs/resume.md`·`docs/journal.md`에 남아 있던 merge 표식 줄(`||||||| parent of 866d318c6`)도 지웠다.
 - **RED → GREEN(n150 `~/ci-scratch/ktm-lows`, Python 3.14).** 테스트 커밋 `1bea708d8`: unit 5 실패, dagster 경계 3
-  실패 + fetcher 테스트 collection 오류. 수정 head: 같은 표적 191건 통과.
+  실패 + fetcher 테스트 collection 오류. 수정 head: 같은 표적 191건 통과. 전량: ruff check·lint-imports(4 kept)·
+  mypy --strict 세 패키지 통과, unit+lint 3035 통과/16 실패(`test_docker_dagster_runtime.py` 13건은 main과 같은 집합 —
+  n150 checkout 환경, 나머지 3건은 부하 아래 signal/lock 타이밍이라 재실행 통과), api 1217·dagster 582 통과,
+  vitest RED(1 실패) → GREEN, tsc·eslint 통과.
 
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
