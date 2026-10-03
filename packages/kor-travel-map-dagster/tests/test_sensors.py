@@ -596,7 +596,7 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
 
 
 def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:
-    """큐 run 하나는 scope 여러 개를 돈다 — 그 전부가 run 예산 하나를 나눠 쓴다(transport 재시도)."""
+    """큐 run 하나는 scope 여러 개를 돈다 — 그 전부가 run 예산 하나를 나눠 쓴다."""
     from kortravelmap.dagster import upstream_retry
 
     seen: list[object] = []

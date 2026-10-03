@@ -190,8 +190,9 @@ _RUN_RETRY_BUDGET: Final[ContextVar[RetryBudget | None]] = ContextVar(
 def sharing_run_retry_budget(budget: RetryBudget | None = None) -> Iterator[RetryBudget]:
     """이 블록(= run 하나) 안의 fetcher가 나눠 쓸 재시도 예산을 연다.
 
-    여는 자리는 run 경계다 — asset step(:func:`~.feature_operation_tracking.run_tracked_feature_asset`)과
-    큐 run(:func:`~.sensors.execute_feature_update_request_op`, 그 안의 scope별 runner). 큐 run 하나는
+    여는 자리는 run 경계다 — asset step
+    (:func:`~.feature_operation_tracking.run_tracked_feature_asset`)과 큐 run
+    (:func:`~.sensors.execute_feature_update_request_op`, 그 안의 scope별 runner). 큐 run 하나는
     scope 여러 개를 차례로 돌므로 fetcher마다 예산을 새로 만들면 run 하나가 scope 수 × 예산만큼
     재시도한다. **이미 열려 있으면 바깥 예산을 그대로 쓴다** — 안쪽 경계가 예산을 되살리지 않는다.
     """

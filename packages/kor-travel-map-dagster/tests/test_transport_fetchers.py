@@ -327,10 +327,12 @@ async def test_transport_fetchers_in_one_run_share_one_retry_budget(
 
 def test_a_nested_run_scope_reuses_the_outer_budget() -> None:
     """큐 run(바깥)이 연 예산을 scope별 runner(안쪽)가 새로 만들지 않는다."""
-    with upstream_retry.sharing_run_retry_budget() as outer:
-        with upstream_retry.sharing_run_retry_budget() as inner:
-            assert inner is outer
-            assert upstream_retry.active_run_retry_budget() is outer
+    with (
+        upstream_retry.sharing_run_retry_budget() as outer,
+        upstream_retry.sharing_run_retry_budget() as inner,
+    ):
+        assert inner is outer
+        assert upstream_retry.active_run_retry_budget() is outer
     assert upstream_retry.active_run_retry_budget() is None
 
 

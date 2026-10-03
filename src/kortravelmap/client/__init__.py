@@ -2443,7 +2443,9 @@ class AsyncKorTravelMapClient:
         dataset_key: str,
         source_entity_type: str,
     ) -> list[tuple[str, str, float, float, Address]]:
-        """primary place feature의 ``(source_entity_id, feature_id, lon, lat, region)`` 전량 (read, #547).
+        """primary place feature의 ``(source_entity_id, feature_id, lon, lat, region)`` 전량.
+
+        read 전용(#547). ``region``은 place의 지역 코드만 담은 ``Address``다.
 
         ``(provider, dataset_key, source_entity_type)`` primary source이고 좌표가 있는
         place feature를 provider 파생 자연키(``source_entity_id``)와 함께 반환한다.
