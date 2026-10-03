@@ -6,6 +6,11 @@ const INTERNAL_BASE =
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
 const TRUST_PROXY_HEADERS_ENV = "KOR_TRAVEL_MAP_UI_TRUST_PROXY_HEADERS";
 const AUTH_AUDIT_ACTOR = "ui-auth";
+/**
+ * 감사 기록 요청의 상한. 로그인/로그아웃은 감사 저장에 의존하지 않는다 —
+ * API가 멈춰 있어도 로그인 응답이 이 시간 이상 붙잡히지 않는다.
+ */
+const AUTH_AUDIT_TIMEOUT_MS = 3_000;
 
 type AuthAuditEvent = {
   attemptedUsername?: string | null;
@@ -34,6 +39,7 @@ export async function recordAuthAuditEvent(
       method: "POST",
       headers,
       cache: "no-store",
+      signal: AbortSignal.timeout(AUTH_AUDIT_TIMEOUT_MS),
       body: JSON.stringify({
         attempted_username: event.attemptedUsername?.trim() || null,
         client_ip: clientIpFromRequest(request),
