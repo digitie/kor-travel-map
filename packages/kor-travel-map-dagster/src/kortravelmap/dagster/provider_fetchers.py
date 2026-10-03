@@ -224,7 +224,14 @@ _TRANSPORT_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BA
 
 
 class _TransportTransientStatus(TransportExportFailure):
-    """재시도 대상 상태(502/504). 시도를 다 쓰면 그대로 전파된다."""
+    """재시도 대상 상태(502/504). 시도를 다 쓰면 그대로 전파된다.
+
+    ``retryable=True``다 — HTTP 층 시도를 다 써도 step 재시도는 남아야 한다. 부모의 ``False``를
+    물려받으면 asset 경계가 짧은 transport 재기동을 terminal로 만들어 하루치 유가를 놓친다.
+    """
+
+    failure_kind = "transport_transient_status"
+    retryable = True
 
 
 def _transport_retryable(exc: BaseException) -> bool:

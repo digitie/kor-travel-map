@@ -1,5 +1,15 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-04 — delta 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
+
+- **MED 회귀.** `_TransportTransientStatus`(HTTP 층 재시도를 다 쓴 502/504)가 부모의 `retryable=False`를 물려받아
+  새 경계가 짧은 transport 재기동을 terminal로 만들었다(하루치 유가 손실). `retryable=True`·`failure_kind=
+  transport_transient_status`. 다른 하위 클래스(NotCurrent True, Malformed·Empty·Hidden·ContractError False)는 의도대로다.
+  경계 테스트에 503·502를 "재시도가 남아야 하는" 경우로 넣었다.
+- **LOW** 경계의 원인 추적은 `__cause__`만 따른다(`__context__`는 처리 중 난 다른 실패).
+- **LOW** locator 경고 logger(`kortravelmap.infra.feature_repo`)를 `docker/dagster.yaml` `managed_python_loggers`에
+  더했다(lint로 결박). 공용 Dagster plane에서는 instance 설정이 Manager 쪽이므로 그쪽 목록에도 있어야 run 로그에 보인다.
+
 ## 2026-10-04 — transport 소비 후속 적대 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
 
 - **MED locator 한 행이 전체를 죽였다.** `list_primary_place_locator`가 검증 없는 코드 칼럼으로 엄격한 `Address`를

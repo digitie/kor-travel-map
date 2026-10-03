@@ -238,4 +238,6 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
                 },
                 allow_retries=False,
             ) from current
-        current = current.__cause__ or current.__context__
+        # ``__cause__``(명시적 ``raise ... from``)만 따른다. ``__context__``는 처리 중에 난
+        # **다른** 실패라 그 원인이 아니다 — 따라가면 무관한 실패가 terminal이 된다.
+        current = current.__cause__
