@@ -4686,6 +4686,30 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
                 "kortravelmap.dagster.definitions",
             ],
         ),
+        (
+            "production",
+            [
+                "/usr/local/bin/dagster",
+                "code-server",
+                "start",
+                "-h",
+                "127.0.0.1",
+                "-p",
+                "4000",
+                "-m",
+                "kortravelmap.dagster.definitions",
+            ],
+        ),
+        (
+            "local-dev",
+            [
+                "dagster",
+                "code-server",
+                "start",
+                "-m",
+                "kortravelmap.dagster.definitions",
+            ],
+        ),
         ("local-dev", ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"]),
         (
             "local-dev",
@@ -4721,6 +4745,94 @@ def test_dagster_runtime_preflight_does_not_invoke_the_storage_command(
     assert result.returncode == 0, result.stderr
     assert "runtime-preflight" in result.stdout
     assert "-started" in result.stdout
+
+
+_SEALED_CODE_SERVER_TAIL = [
+    "-h",
+    "127.0.0.1",
+    "-p",
+    "12703",
+    "-m",
+    "kortravelmap.dagster.definitions",
+]
+
+
+def _production_code_server_run(
+    tmp_path: Path, command: list[str]
+) -> subprocess.CompletedProcess[str]:
+    path, _storage_command_marker, _runtime_dsn_marker = (
+        _dagster_production_runtime_stub_path(tmp_path)
+    )
+    # 실행 대상 대역이 자기가 받은 env를 말한다 — `-I`는 그 자식들(code-server의 자식 gRPC,
+    # run worker)에 이어지지 않으므로, 이어지는 것은 env뿐이다.
+    stub = Path(path.split(":", 1)[0]) / "dagster"
+    stub.write_text(
+        f"#!{sys.executable}\n"
+        "import os\n"
+        "print('dagster-started', 'PYTHONSAFEPATH=' + os.environ.get('PYTHONSAFEPATH', ''))\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    return _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        command,
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "DAGSTER_HOME": "/opt/dagster/dagster_home",
+            "KOR_TRAVEL_MAP_PG_DSN": "postgresql://dagster@example.invalid/x",
+        },
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("subcommand", [["code-server", "start"], ["api", "grpc"]])
+def test_dagster_production_code_server_accepts_exactly_the_sealed_shapes(
+    tmp_path: Path, subcommand: list[str]
+) -> None:
+    """code-server 봉인은 하위 명령 둘만 받는다(2026-10-02).
+
+    `code-server start`는 location reload에 definitions를 다시 import하는 유일한 모양이다 —
+    `api grpc`는 reload를 무시해서 C7의 schedule override가 반영되지 않았다. `api grpc`는 Manager
+    compose가 바뀔 때까지의 전환용이다. 둘 다 같은 9-argv 모양(loopback `-h`, 숫자 `-p`,
+    고정 `-m`)이고, 자식 Python까지 `PYTHONSAFEPATH=1`이 이어진다.
+    """
+
+    result = _production_code_server_run(
+        tmp_path, ["/usr/local/bin/dagster", *subcommand, *_SEALED_CODE_SERVER_TAIL]
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "runtime-preflight" in result.stdout
+    assert "dagster-started PYTHONSAFEPATH=1" in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 하위 명령이 섞이면 둘 중 어느 것도 아니다.
+        ["code-server", "grpc", *_SEALED_CODE_SERVER_TAIL],
+        ["api", "start", *_SEALED_CODE_SERVER_TAIL],
+        ["code-server", "stop", *_SEALED_CODE_SERVER_TAIL],
+        # 모양은 `code-server start`에서도 그대로 봉인이다.
+        ["code-server", "start", "-h", "0.0.0.0", *_SEALED_CODE_SERVER_TAIL[2:]],
+        ["code-server", "start", *_SEALED_CODE_SERVER_TAIL[:5], "other.definitions"],
+        ["code-server", "start", *_SEALED_CODE_SERVER_TAIL, "--heartbeat-ttl", "1"],
+        ["code-server", "start", *_SEALED_CODE_SERVER_TAIL[:4], "-f", "/tmp/defs.py"],
+    ],
+)
+def test_dagster_production_code_server_rejects_other_shapes(
+    tmp_path: Path, command: list[str]
+) -> None:
+    result = _production_code_server_run(tmp_path, ["/usr/local/bin/dagster", *command])
+
+    assert result.returncode != 0
+    assert (
+        "production Dagster code server argv does not match the sealed launch contract"
+        in result.stderr
+    )
+    assert "dagster-started" not in result.stdout
 
 
 @pytest.mark.unit

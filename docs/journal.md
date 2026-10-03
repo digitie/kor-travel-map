@@ -1,5 +1,26 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
+
+- **원인(n150 prod 2026-10-01 21:52Z).** C7 schedule-write spec은 cron override를 `ops.dagster_schedule_overrides`에
+  저장하고 location을 reload한다. Map은 override를 definitions import 때 읽는다. 그런데 code-server가 `dagster api
+  grpc`라 reload는 "not currently supported" 경고만 남기고 무시됐다 — override가 반영되지 않아 C7이 빨갛다.
+- **변경.** production 봉인의 code-server 분기가 하위 명령 `code-server start`도 받는다. 모양(9 argv, loopback `-h`,
+  숫자 `-p`, 고정 `-m kortravelmap.dagster.definitions`)은 그대로 정확 일치다. `api grpc`는 Manager compose가 바뀔
+  때까지의 전환용으로 남긴다. local-dev 분기도 같은 두 모양에서 runtime preflight를 돈다.
+- **`-I`는 자식에 이어지지 않는다.** `code-server start`의 proxy는 자식을 `sys.executable -m dagster api grpc`로
+  띄운다(run worker는 `api grpc` 때부터 같았다). user site는 요구된 `PYTHONNOUSERSITE=1`이, `PYTHONPATH`·`PYTHONHOME`·
+  `PYTHONUSERBASE`는 기존 거부가 env로 자식까지 막는다. 남는 cwd-on-`sys.path`(`-P`)는 production exec 직전
+  `PYTHONSAFEPATH=1`로 막는다(cwd `/app`은 root 0555라 지금도 쓸 수 없지만 기대지 않는다).
+- **n150 실측(Manager 브랜치 `fix/dagster-code-server-reloadable`과 함께).** live Map dagster 이미지(1.13.24)로 일회용
+  컨테이너를 빈 loopback 포트에 띄웠다: `api grpc`는 reload를 무시(import 1회), `code-server start`는 새 자식 pid로 다시
+  import했다. proxy health는 고정 SERVING이라 Manager probe가 자식에 전달되는 `ListRepositories`를 보고 확정된 실패면
+  PID 1을 끝낸다(load error·자식 kill 둘 다 재시작 확인).
+- **테스트.** 두 모양 수용(자식 env에 `PYTHONSAFEPATH=1`), 섞인 하위 명령·`-h 0.0.0.0`·다른 `-m`·`-f`·추가 인자 거부,
+  runtime preflight 매트릭스에 `code-server start`(production·local-dev) 추가.
+- **남은 것.** 저장소 자신의 `docker-compose.yml`(standalone)은 `api grpc` 그대로다 — 바꾸면 Manager처럼 probe를
+  자식에 묶어야 한다(후속).
+
 ## 2026-10-02 — 주유소·휴게소·돌발·공항 원천을 kor-travel-transport export로 이관(ADR-106): 브랜치 `feat/transport-api-sources`
 
 - 소유자 결정: Map에서 transport로 얻을 수 있는 것은 transport API로 바꾸고, 필요하면 transport API를 고친다. OpiNet은
@@ -28,6 +49,7 @@
   필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
   `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/unit/golden/kor-travel-transport/`)이 실 파서를 지난다. 처음
   만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
+||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 

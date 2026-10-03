@@ -192,9 +192,16 @@ if [ "$dagster_profile" = "production" ]; then
       # run worker는 이 프로세스의 자식으로 뜬다. gRPC에는 인증이 없으므로 `-h`는
       # loopback으로 고정한다(weather와 같은 이유 — Manager launch attestation
       # 이전에도 image 안에서 fail-close).
+      #
+      # 하위 명령은 정확히 둘 중 하나다. `code-server start`는 proxy가 자식 gRPC
+      # (`python -m dagster api grpc`, UDS socket)를 띄우고 location reload(`ReloadCode`)
+      # 때 자식을 새로 띄워 definitions를 다시 import한다 — schedule override처럼
+      # import 때 읽는 값이 reload로 반영되는 유일한 모양이다. `api grpc`는 reload를
+      # "not currently supported" 경고만 남기고 무시한다(2026-10-01 n150 C7). `api grpc`는
+      # 이 이미지를 핀에 올린 뒤 Manager compose가 바뀔 때까지의 전환용으로 남긴다.
       if [ "$#" -ne 9 ] \
-        || [ "${2:-}" != "api" ] \
-        || [ "${3:-}" != "grpc" ] \
+        || ! { { [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; } \
+          || { [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; }; } \
         || [ "${4:-}" != "-h" ] \
         || [ "${5:-}" != "127.0.0.1" ] \
         || [ "${6:-}" != "-p" ] \
@@ -243,7 +250,8 @@ else
       fi
       ;;
     dagster | /usr/local/bin/dagster)
-      if [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; then
+      if { [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; } \
+        || { [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; }; then
         runtime_preflight
       fi
       ;;
@@ -266,6 +274,17 @@ if [ "$dagster_profile" = "production" ]; then
   # Console-script shebang은 writable HOME의 user-site/sitecustomize를 읽을 수 있다.
   # 검증한 fixed script 자체를 isolated interpreter로 실행해 candidate 밖 Python
   # import 경로를 runtime/daemon/storage process에서도 끊는다.
+  #
+  # `-I`는 이 프로세스에만 걸린다. 이 프로세스가 띄우는 Python — `code-server start`의
+  # 자식 gRPC와 run worker(`sys.executable -m dagster ...`) — 에는 걸리지 않는다(run
+  # worker는 `api grpc` 때부터 그랬다). `-I`가 막던 것 중 user site(`-s`)는 위에서 요구한
+  # `PYTHONNOUSERSITE=1`이, `-E`가 무시하던 `PYTHONPATH`·`PYTHONHOME`·`PYTHONUSERBASE`는
+  # 위의 거부가 env로 자식까지 막는다. `PYTHONSAFEPATH=1`은 **인터프리터가** `-m` 때 cwd를
+  # `sys.path` 앞에 넣는 것(`-P`)만 자식까지 막는다. dagster 자신도 code location을 싣기 전에
+  # working directory(`-d`, 없으면 cwd)를 `sys.path`에 넣는다(`code_server.py`·
+  # `code_pointer.py`) — 그것은 이 변수로 막히지 않는다. 그 경로 `/app`은 root 소유 0555이고
+  # 비어 있어 거기서 import될 것이 없다; 막는 것은 그 디렉터리의 권한이다.
+  export PYTHONSAFEPATH=1
   exec /usr/local/bin/python -I "$@"
 fi
 exec "$@"

@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
+
+**다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(이 이미지가 핀에 오른다) → 그 뒤에만
+Manager `fix/dagster-code-server-reloadable` 설치(Map code-server를 `code-server start`로 바꾼다) → C7 재실행.**
+
+- 순서가 계약이다: 이 이미지 전의 Map은 `code-server start`를 봉인에서 거부하므로 Manager compose를 먼저 설치하면 Map
+  code-server가 뜨지 않는다. 이 이미지는 `api grpc`도 받으므로 지금 compose 아래에서 먼저 핀에 올려도 안전하다.
+- production exec가 `PYTHONSAFEPATH=1`을 내보낸다 — `-I`가 이어지지 않는 자식 Python의 cwd-on-`sys.path`를 막는다.
+- 후속: standalone `docker-compose.yml`의 code-server 전환(+자식에 묶은 probe), 전환이 끝나면 봉인에서 `api grpc` 제거.
+
 ## 2026-10-02 — 주유소·휴게소·돌발·공항 원천 이관(ADR-106): 브랜치 `feat/transport-api-sources`
 
 **다음 한 작업: 배포 순서 — transport `fix/fuel-latest-prices-incremental` → `feat/map-service-exports` 머지·배포(0022·0023,
@@ -12,6 +22,7 @@
 - transport export 계약은 pin하지 않는다(ADR-106 4번) — Map에 필요한 모양은 transport API를 직접 바꾼다.
 - C7 기준 5(공항 operation)는 transport가 떠 있고 token이 맞아야 GREEN이다(`docs/runbooks/c7-prod-live-e2e.md`).
 - 남은 것: transport 관리자 UI의 옛 `fuel_latest_prices` 읽기 모델 경고 코드(행이 사라져 표시되지 않음) 정리.
+||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
 
