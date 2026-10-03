@@ -51,6 +51,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
 import uuid
@@ -58,6 +59,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
@@ -134,6 +136,8 @@ __all__ = [
     "search_features",
     "features_nearby_poi_cache_target",
 ]
+
+_LOG = logging.getLogger(__name__)
 
 _FEATURE_CURATION_WRITE_LOCK_SQL: Final[str] = """
 SELECT pg_catalog.pg_advisory_xact_lock(
@@ -4964,16 +4968,33 @@ async def list_primary_place_locator(
             str(row.feature_id),
             float(row.lon),
             float(row.lat),
-            Address(
-                admin=row.admin_address,
-                bjd_code=row.legal_dong_code,
-                admin_dong_code=row.admin_dong_code,
-                sido_code=row.sido_code,
-                sigungu_code=row.sigungu_code,
-            ),
+            _locator_region(row),
         )
         for row in rows
     ]
+
+
+def _locator_region(row: Any) -> Address:
+    """place 행의 지역 코드 → ``Address``. 검증에 걸리는 행은 빈 주소로 두고 로그만 남긴다.
+
+    코드 칼럼은 검증 없는 text다 — 관리자 ``manual_override``가 일부 코드만 넣거나 오타를 내면
+    ``Address``가 ``ValidationError``를 낸다. 그 한 행 때문에 locator 전체가 실패하면 모든 가격
+    run이 실패하고, override가 provider 보정을 가리므로 저절로 낫지도 않는다.
+    """
+    try:
+        return Address(
+            admin=row.admin_address,
+            bjd_code=row.legal_dong_code,
+            admin_dong_code=row.admin_dong_code,
+            sido_code=row.sido_code,
+            sigungu_code=row.sigungu_code,
+        )
+    except ValidationError:
+        _LOG.warning(
+            "place locator: feature_id=%s의 지역 코드가 Address 검증에 걸려 빈 주소로 둔다",
+            row.feature_id,
+        )
+        return Address()
 
 
 # T-VN-35(ADR-086): 전화번호 정본은 ``feature_places.phones``(text[])다.
