@@ -1508,3 +1508,58 @@ def test_app_lineage_recompute_has_the_same_branches_as_the_db_function() -> Non
     # 하한은 본 것에 건다 — 분기를 하나도 못 읽으면 정규식이 낡은 것이다.
     assert db_branches, "head-schema의 notice_lineage_key에서 분기를 하나도 읽지 못했다"
     assert app_branches == db_branches
+
+
+async def test_place_locator_keeps_going_when_one_row_has_a_bad_region_code(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """지역 코드 한 행이 ``Address`` 검증에 걸려도 locator 전체가 죽지 않는다.
+
+    코드 칼럼은 검증 없는 text다 — 관리자 ``manual_override``가 시군구만 넣거나 오타를 내면
+    그 행만 지역 코드를 버리고(빈 주소) feature id를 로그에 남긴다. 목록을 통째로 버리면 모든
+    가격 run이 실패하고 override가 provider 보정을 가리므로 저절로 낫지 않는다.
+    """
+    from types import SimpleNamespace
+
+    good = SimpleNamespace(
+        source_entity_id="A1",
+        feature_id="f-good",
+        lon=127.0,
+        lat=37.0,
+        admin_address="서울특별시 종로구",
+        legal_dong_code="1111010100",
+        admin_dong_code=None,
+        sido_code="11",
+        sigungu_code="11110",
+    )
+    bad = SimpleNamespace(
+        source_entity_id="A2",
+        feature_id="f-bad",
+        lon=127.1,
+        lat=37.1,
+        admin_address=None,
+        legal_dong_code=None,
+        admin_dong_code=None,
+        sido_code=None,
+        sigungu_code="1111",  # 5자리여야 한다 — override 오타
+    )
+
+    class _Result:
+        def all(self) -> list[Any]:
+            return [good, bad]
+
+    class _Session:
+        async def execute(self, *_args: Any, **_kwargs: Any) -> _Result:
+            return _Result()
+
+    with caplog.at_level("WARNING", logger=feature_repo.__name__):
+        rows = await feature_repo.list_primary_place_locator(
+            _Session(),  # type: ignore[arg-type]
+            provider="kor-travel-transport",
+            dataset_key="transport_fuel_stations",
+            source_entity_type="fuel_station",
+        )
+    assert [row[1] for row in rows] == ["f-good", "f-bad"]
+    assert rows[0][4].sigungu_code == "11110"
+    assert rows[1][4].sigungu_code is None
+    assert "f-bad" in caplog.text

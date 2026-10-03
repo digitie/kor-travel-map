@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { recordAuthAuditEvent } from "./auth-audit";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -68,6 +69,27 @@ describe("admin 인증 감사", () => {
 
     controller.abort();
     await expect(pending).resolves.toBeUndefined();
-    timeoutSpy.mockRestore();
+  });
+
+  it("감사 기록이 실패하거나 시간을 넘기면 비밀값 없이 경고를 남긴다", async () => {
+    const secret = "s".repeat(32);
+    vi.stubEnv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", secret);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const request = { headers: new Headers() } as unknown as NextRequest;
+    const event = { eventType: "login", outcome: "failed", reason: "x" } as const;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")),
+    );
+    await recordAuthAuditEvent(request, event);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+    await recordAuthAuditEvent(request, event);
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("TimeoutError");
+    expect(logged).toContain("503");
+    expect(logged).not.toContain(secret);
   });
 });

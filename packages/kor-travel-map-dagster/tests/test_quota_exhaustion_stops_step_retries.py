@@ -684,3 +684,33 @@ def test_the_asset_boundary_opens_one_run_retry_budget(tracked: bool) -> None:
     assert isinstance(first, upstream_retry.RetryBudget)
     assert first is second
     assert upstream_retry.active_run_retry_budget() is None
+
+
+def _transport_failure(kind: str) -> Exception:
+    from kortravelmap.providers import kor_travel_transport as transport
+
+    return {
+        "hidden": transport.TransportExportHidden("404"),
+        "empty": transport.TransportExportEmpty("0건"),
+        "contract": transport.TransportExportContractError("items: 배열이어야 한다"),
+        "malformed": transport.TransportExportMalformed("JSON이 아니다"),
+    }[kind]
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("kind", ["hidden", "empty", "contract", "malformed"])
+def test_the_asset_boundary_stops_retries_for_unrecoverable_transport_failures(
+    tracked: bool, kind: str
+) -> None:
+    """404·0건·계약 위반·비-JSON은 60초 뒤 다시 돌아도 같다 — step 재시도를 끈다(503만 남긴다)."""
+    cause = _transport_failure(kind)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(Failure) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value.allow_retries is False
+    assert caught.value.__cause__ is cause
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["failure_kind"] == cause.failure_kind  # type: ignore[attr-defined]

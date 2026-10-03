@@ -179,7 +179,8 @@ def test_an_empty_airport_list_is_its_own_failure() -> None:
 
 
 def test_failure_classes_declare_whether_a_step_retry_can_help() -> None:
-    """503(근거 수집이 현재가 아님)만 step 재시도로 풀릴 수 있다. 나머지는 사람이 고친다."""
+    """분류 선언만 본다. 이 선언으로 asset 경계가 실제로 step 재시도를 끄는지는 dagster
+    ``test_quota_exhaustion_stops_step_retries.py``의 transport 경계 테스트가 확인한다."""
     assert transport.TransportExportNotCurrent("503").retryable is True
     assert transport.TransportExportNotCurrent("503").failure_kind == "transport_not_current"
     for terminal in (

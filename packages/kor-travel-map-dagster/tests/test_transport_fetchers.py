@@ -363,11 +363,23 @@ async def test_an_empty_airport_export_is_a_transport_empty_failure(
     assert raised.value.failure_kind == "transport_empty"
 
 
-async def test_a_503_is_a_retryable_step_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """503은 HTTP 층에서 곧바로 다시 부르지 않지만(15초 안에 바뀌지 않는다) step 재시도 대상이다."""
+async def test_a_503_is_not_retried_at_the_http_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """503은 HTTP 층에서 곧바로 다시 부르지 않는다(15초 안에 바뀌지 않는다).
+
+    step 재시도가 남는지는 ``test_quota_exhaustion_stops_step_retries.py``의 transport
+    경계 테스트가 실제 asset 경계로 확인한다.
+    """
     seen = _install(monkeypatch, lambda request: httpx.Response(503, json={"detail": "stale"}))
-    with pytest.raises(TransportExportNotCurrent) as raised:
+    with pytest.raises(TransportExportNotCurrent):
         _ = [item async for item in fetch_transport_airports(_settings())]
     assert len(seen) == 1
-    assert raised.value.retryable is True
-    assert upstream_retry.default_upstream_retryable(raised.value) is True
+
+
+def test_an_explicit_budget_under_an_open_run_scope_is_refused() -> None:
+    """바깥 run 예산이 열려 있으면 안쪽이 넘긴 예산은 쓰이지 않는다 — 조용히 무시하지 않는다."""
+    with (
+        upstream_retry.sharing_run_retry_budget(),
+        pytest.raises(ValueError, match="예산"),
+        upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(limit=1)),
+    ):
+        pass
