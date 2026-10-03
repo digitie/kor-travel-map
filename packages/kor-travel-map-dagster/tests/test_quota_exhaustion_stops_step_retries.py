@@ -723,7 +723,8 @@ def _recoverable_transport_failure(kind: str) -> Exception:
 
     return {
         "not_current_503": TransportExportNotCurrent("503"),
-        # HTTP 층 재시도(2회)를 다 쓴 502/504 — 짧은 transport 재기동이 하루치 유가를 날리면 안 된다.
+        # HTTP 층 재시도(2회)를 다 쓴 502/504.
+        # 짧은 transport 재기동이 하루치 유가를 날리면 안 된다.
         "transient_502": _TransportTransientStatus("502"),
     }[kind]
 
