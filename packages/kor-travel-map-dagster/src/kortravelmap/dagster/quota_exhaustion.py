@@ -214,8 +214,8 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
 
     ``FEATURE_LOAD_RETRY_POLICY``는 쿼터 말고는 모든 예외를 다시 돈다. 그런데 404(token·peer 주소·
     버전), 0건, 계약 위반, JSON이 아닌 본문은 60초 뒤에도 같다 — 같은 export를 세 번 더 부를 뿐이다.
-    ``retryable=False``인 transport 예외만 :class:`dagster.Failure` ``allow_retries=False``로 바꾼다.
-    503(``transport_not_current``, ``retryable=True``)과 그 밖의 예외는 그대로 둔다.
+    ``retryable=False``인 transport 예외만 :class:`dagster.Failure` ``allow_retries=False``로
+    바꾼다. 503(``transport_not_current``, ``retryable=True``)과 그 밖의 예외는 그대로 둔다.
     """
 
     seen: set[int] = set()
