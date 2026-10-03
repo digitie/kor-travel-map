@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-04 — transport 소비 후속(Low 다섯): 브랜치 `fix/transport-consumer-lows`
+
+**다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지(소유자 지시: PR은 머지 직전에) → 다음 Map pinned pair. 배포 영향 없음
+(migration 없음).**
+
+- 재시도 예산은 run 하나에 하나(`upstream_retry.sharing_run_retry_budget`) — 큐 run의 scope들이 나눠 쓴다.
+- transport 503은 `retryable=True` step 실패, 공항 0건은 `transport_empty`, 비-JSON 본문은 `transport_malformed_upstream`.
+- 가격 feature는 place locator로 bjd·시도·시군구를 이어받는다(`list_primary_place_locator` 행 5-tuple).
+- 관리 UI 로그인 감사 fetch 3초 timeout. transport 설정 문서는 `packages/kor-travel-map-dagster/README.md`가 정본.
+
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
 **다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(이 이미지가 핀에 오른다) → 그 뒤에만

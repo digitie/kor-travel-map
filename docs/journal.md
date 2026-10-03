@@ -1,5 +1,29 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-04 — transport 소비 후속(적대 리뷰 잔여 Low 다섯): 브랜치 `fix/transport-consumer-lows`
+
+- **재시도 예산은 run 하나에 하나.** ADR-106 리뷰 M8은 "run 예산 공유"라고 적었지만 실제로는 fetcher 호출마다
+  `RetryBudget()`을 새로 만들었다. 큐 run 하나는 scope 여러 개(주유소·휴게소·돌발·공항)를 돌므로 transport가
+  내려가 있으면 scope 수 × 예산만큼 재시도했다. `upstream_retry.sharing_run_retry_budget()`(ContextVar)를
+  asset step(`run_tracked_feature_asset`)·큐 op(`execute_feature_update_request`)·scope runner가 열고, 안쪽은 바깥
+  예산을 그대로 쓴다. 테스트: 예산 1에서 세 fetcher가 연결 오류면 요청 4건(종전 6건).
+- **failure_kind 분류.** 503·`collection` 어긋남(`transport_not_current`)은 `retryable=True`인 step 실패다 — HTTP
+  층에서 바로 다시 부르지 않고 `RetryPolicy`가 step을 다시 돈다(경계는 원 예외를 그대로 낸다). 공항 0건은
+  계약 위반이 아니라 `transport_empty`, JSON이 아닌 본문은 미분류 `JSONDecodeError`가 아니라
+  `transport_malformed_upstream`(`TransportExportMalformed`)이다. 나머지는 `retryable=False`.
+- **가격 feature 지역 코드.** transport 이관 뒤 주유소·휴게소 가격 feature는 `Address(road=...)`만 가져 bjd·시도·
+  시군구가 비었다(옛 OpiNet 경로는 주유소 place 주소를 그대로 썼다). transport export에는 지역 코드가 없고 가격 job은
+  역지오코딩하지 않으므로(M5) `list_primary_place_locator`가 place의 `legal_dong_code`·`admin_dong_code`·`sido_code`·
+  `sigungu_code`·행정동 주소를 함께 싣고 가격 feature가 이어받는다. locator 행은 5-tuple이 됐다.
+- **관리 UI 로그인 감사.** `recordAuthAuditEvent`의 fetch에 `AbortSignal.timeout(3000)` — 감사 API가 멈춰도 로그인
+  응답이 붙잡히지 않는다(vitest).
+- **문서.** transport 설정 표(BASE_URL·SERVICE_TOKEN·PAGE_SIZE·TIMEOUT_SECONDS)와 failure_kind 표를 dagster README에,
+  integration-map은 peer 주소 게이트(`Host` 아님)·export별 응답 모양으로, settings 설명의 "Host로 닫는다"를 고쳤다.
+  dagster README의 옛 `opinet_*`·`krex_*`·`krairport_*` resource/env/schedule 행과 external-apis의 OpiNet·KREX 키 행을
+  정리했다. main의 `docs/resume.md`·`docs/journal.md`에 남아 있던 merge 표식 줄(`||||||| parent of 866d318c6`)도 지웠다.
+- **RED → GREEN(n150 `~/ci-scratch/ktm-lows`, Python 3.14).** 테스트 커밋 `1bea708d8`: unit 5 실패, dagster 경계 3
+  실패 + fetcher 테스트 collection 오류. 수정 head: 같은 표적 191건 통과.
+
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
 - **원인(n150 prod 2026-10-01 21:52Z).** C7 schedule-write spec은 cron override를 `ops.dagster_schedule_overrides`에
