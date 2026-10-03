@@ -35,7 +35,7 @@ export async function recordAuthAuditEvent(
   }
   try {
     const target = new URL("/v1/admin/auth-events", INTERNAL_BASE);
-    await fetch(target, {
+    const response = await fetch(target, {
       method: "POST",
       headers,
       cache: "no-store",
@@ -51,9 +51,23 @@ export async function recordAuthAuditEvent(
         user_agent: request.headers.get("user-agent"),
       }),
     });
-  } catch {
+    if (!response.ok) {
+      warnAuditNotRecorded(event, `HTTP ${response.status}`);
+    }
+  } catch (error) {
     // Login/logout availability must not depend on audit persistence.
+    warnAuditNotRecorded(
+      event,
+      error instanceof Error ? error.name : "unknown error",
+    );
   }
+}
+
+/** 감사 기록 누락을 남긴다. 사용자명·header·proxy secret은 싣지 않는다. */
+function warnAuditNotRecorded(event: AuthAuditEvent, cause: string): void {
+  console.warn(
+    `[auth-audit] ${event.eventType}/${event.outcome} 감사 기록 실패: ${cause}`,
+  );
 }
 
 function clientIpFromRequest(request: NextRequest): string | null {
