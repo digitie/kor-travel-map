@@ -201,7 +201,9 @@ def sharing_run_retry_budget(budget: RetryBudget | None = None) -> Iterator[Retr
     if outer is not None:
         if budget is not None and budget is not outer:
             # 넘긴 예산은 쓰이지 않는다 — 조용히 무시하면 호출자가 상한을 잘못 믿는다.
-            raise ValueError("run 재시도 예산이 이미 열려 있다 — 안쪽에서 다른 예산을 넘길 수 없다.")
+            raise ValueError(
+                "run 재시도 예산이 이미 열려 있다 — 안쪽에서 다른 예산을 넘길 수 없다."
+            )
         yield outer
         return
     shared = budget if budget is not None else RetryBudget()

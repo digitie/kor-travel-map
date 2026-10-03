@@ -70,11 +70,12 @@ from __future__ import annotations
 
 from typing import Final
 
-from dagster import Failure
 from kortravelmap.providers.kor_travel_transport import (
     TransportExportContractError,
     TransportExportFailure,
 )
+
+from dagster import Failure
 
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
@@ -226,8 +227,9 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
                 return
             raise Failure(
                 description=(
-                    f"kor-travel-transport 실패({current.failure_kind}) — 기다려도 풀리지 않으므로 "
-                    f"step 재시도를 끈다. 원 예외: {type(current).__name__}: {current}"
+                    f"kor-travel-transport 실패({current.failure_kind}) — 기다려도 풀리지 "
+                    "않으므로 step 재시도를 끈다. "
+                    f"원 예외: {type(current).__name__}: {current}"
                 ),
                 metadata={
                     "failure_kind": current.failure_kind,
