@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### 주유소·휴게소·돌발·공항은 kor-travel-transport export에서 받는다 — ADR-106 (2026-10-02)
+
+- **CHANGED (provider 정체성)**: `python-opinet-api`·`python-krex-api`·`python-krairport-api` dataset 여섯을
+  `kor-travel-transport`(internal) dataset으로 바꿨다 — `transport_fuel_stations`·`transport_fuel_prices`·
+  `transport_rest_areas`·`transport_rest_area_fuel_prices`·`transport_highway_incidents`·`transport_airports`.
+  migration `404_transport_provider_identity`(forward-only)가 카탈로그·identity·계보 함수를 옮긴다.
+- **CHANGED (Dagster)**: asset/job/schedule 이름이 `feature_*_transport_*`로 바뀌었다. 주유소 place 주 1회·price 일 1회,
+  휴게소 place 주 1회·price 일 2회, 돌발 10분, 공항 월 1회.
+- **ADDED**: `kortravelmap.providers.kor_travel_transport`(transport export 계약·엄격 파서), env
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_{BASE_URL,SERVICE_TOKEN,PAGE_SIZE,TIMEOUT_SECONDS}`,
+  대표 응답 fixture `tests/unit/golden/kor-travel-transport/`(계약 pin·vendoring 없음 — Map은 소비자다).
+- **REMOVED**: env `KOR_TRAVEL_MAP_OPINET_*`·`KOR_TRAVEL_MAP_KREX_*`, OpiNet scope/예산 코드, krex rate gate 선언,
+  `providers.opinet.prices_to_values`·`stations_to_price_features_and_values`·`station_details_to_price_features_and_values`,
+  `providers.krex.rest_area_prices_to_values`, 세 provider 의존 핀.
+
 ### Map은 날씨 feature와 기상특보 notice 기능을 지운다 — ADR-105 (2026-10-01)
 
 - **CHANGED (적대 리뷰 반영, 2026-10-02)**: run-completion gate 기본 probe가 no-op job `map_run_heartbeat`다(DB·upstream

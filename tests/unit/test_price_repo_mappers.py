@@ -29,7 +29,7 @@ def _point(product_key: str, product_name: str | None = None):  # type: ignore[n
             "provider_dataset_id": 17,
             "dataset_key": "retail_prices",
             "dataset_display_name": "소매 가격",
-            "provider": "python-opinet-api",
+            "provider": "kor-travel-transport",
             "price_domain": "fuel",
             "product_key": product_key,
             "product_name": product_name,
@@ -57,7 +57,7 @@ def test_price_point_maps_row_columns() -> None:
         "provider_dataset_id": 17,
         "dataset_key": "retail_prices",
         "dataset_display_name": "소매 가격",
-        "provider": "python-opinet-api",
+        "provider": "kor-travel-transport",
         "price_domain": "fuel",
         "product_key": "gasoline",
         "product_name": "휘발유",
@@ -72,7 +72,7 @@ def test_price_point_maps_row_columns() -> None:
     assert point.provider_dataset_id == 17
     assert point.dataset_key == "retail_prices"
     assert point.dataset_display_name == "소매 가격"
-    assert point.provider == "python-opinet-api"
+    assert point.provider == "kor-travel-transport"
     assert point.price_domain == "fuel"
     assert point.product_key == "gasoline"
     assert point.product_name == "휘발유"
@@ -85,7 +85,7 @@ def test_price_point_maps_row_columns() -> None:
 def test_price_value_params_builds_deterministic_upsert_row() -> None:
     value = PriceValue(
         feature_id="f_1156010100_p_abc",
-        provider="python-opinet-api",
+        provider="kor-travel-transport",
         price_domain="opinet_gas_station",
         product_key="gasoline",
         product_name="휘발유",

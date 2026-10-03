@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-02 — 주유소·휴게소·돌발·공항 원천 이관(ADR-106): 브랜치 `feat/transport-api-sources`
+
+**다음 한 작업: 배포 순서 — transport `fix/fuel-latest-prices-incremental` → `feat/map-service-exports` 머지·배포(0022·0023,
+`TRANSPORT_SERVICE_EXPORT_TOKEN`·`REST_AREA_COLLECTION_ENABLED=true`) → Manager 브랜치(토큰을 Map dagster에) → Map PR
+머지 → 다음 Map pinned pair(migration 404 전진) → C7 재실행(`E2E_C7_SCHEDULE=feature_place_transport_airports_monthly_schedule`).**
+
+- Map 이 여섯 dataset의 원천은 transport export다. transport가 내려가 있으면 해당 적재가 실패한다(오래된 값을 새 값처럼
+  적재하지 않는다). 돌발은 transport 수집이 30분 넘게 성공하지 못하면 503 → Map run 실패 → notice를 닫지 않는다.
+- n150 `.d2-live.env`의 C7 schedule·update operation 이름이 바뀐다(`feature_place_transport_airports_*`).
+- transport export 계약은 pin하지 않는다(ADR-106 4번) — Map에 필요한 모양은 transport API를 직접 바꾼다.
+- C7 기준 5(공항 operation)는 transport가 떠 있고 token이 맞아야 GREEN이다(`docs/runbooks/c7-prod-live-e2e.md`).
+- 남은 것: transport 관리자 UI의 옛 `fuel_latest_prices` 읽기 모델 경고 코드(행이 사라져 표시되지 않음) 정리.
+
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
 
 **다음 한 작업: CI 전량(통합 두 leg) + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(migration 401·402 전진, 되돌릴 수

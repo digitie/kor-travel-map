@@ -101,8 +101,8 @@ async def _insert_record(
     [
         (
             "krex",
-            "python-krex-api",
-            "krex_traffic_notices",
+            "kor-travel-transport",
+            "transport_highway_incidents",
             "traffic_notice",
             {"occurred_date": "2026-08-01", "route_no": "1", "point_name": "p"},
             "2026-08-01::1::p",
@@ -111,8 +111,8 @@ async def _insert_record(
             # 대소문자·공백 정규화가 계보를 가른다 — 같은 사건이 두 계보가 되면
             # 밀려난 공지가 되살아난다.
             "krex-normalized",
-            "python-krex-api",
-            "krex_traffic_notices",
+            "kor-travel-transport",
+            "transport_highway_incidents",
             "traffic_notice",
             {"occurred_date": " 2026-08-01 ", "route_no": "AB", "point_name": "Foo Bar"},
             "2026-08-01::ab::foo bar",
@@ -132,8 +132,8 @@ async def _insert_record(
         (
             # 계보 구성요소가 전부 비면 entity id로 물러난다.
             "krex-empty",
-            "python-krex-api",
-            "krex_traffic_notices",
+            "kor-travel-transport",
+            "transport_highway_incidents",
             "traffic_notice",
             {"occurred_date": "  ", "route_no": ""},
             "ENT-lin-krex-empty",
@@ -232,8 +232,8 @@ async def test_head_advance_recomputes_lineage_key(
     first = await _insert_record(
         migrated_session,
         key="lin-repay",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         raw_data={"occurred_date": "2026-08-03", "route_no": "7"},
     )
@@ -241,8 +241,8 @@ async def test_head_advance_recomputes_lineage_key(
     updated = await _insert_record(
         migrated_session,
         key="lin-repay",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         raw_data={"occurred_date": "2026-08-04", "route_no": "8"},
         observed_at=_NOW + timedelta(hours=1),
@@ -262,8 +262,8 @@ async def test_direct_write_to_lineage_key_is_corrected(
     await _insert_record(
         migrated_session,
         key="lin-tamper",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         raw_data={"occurred_date": "2026-08-05", "route_no": "3"},
     )
@@ -293,16 +293,16 @@ async def test_production_upsert_preserves_the_derived_value(
     first = await _insert_record(
         migrated_session,
         key="lin-hot",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         raw_data={"occurred_date": "2026-08-06", "route_no": "4"},
     )
     second = await _insert_record(
         migrated_session,
         key="lin-hot",
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         raw_data={"occurred_date": "2026-08-06", "route_no": "4"},
         observed_at=_NOW + timedelta(hours=1),
@@ -346,8 +346,8 @@ async def test_db_lineage_function_matches_frozen_replay_expression(
     for label, provider, dataset_key, entity_type, raw in (
         (
             "k",
-            "python-krex-api",
-            "krex_traffic_notices",
+            "kor-travel-transport",
+            "transport_highway_incidents",
             "traffic_notice",
             {"occurred_date": "2026-08-02", "route_no": "9", "direction": "북"},
         ),

@@ -1,5 +1,7 @@
 # upstream 일일 한도 — 실측 분모와 하한 분자
 
+> **2026-10-02 ADR-106** — Map은 OpiNet·KREX(EX/data.go.kr 휴게소)·krairport를 더 부르지 않는다. 그 쿼터는 kor-travel-transport가 진다. 아래 OpiNet 300회/일·krex 5 TPS 절은 이력이다.
+
 > **Map의 날씨 호출은 0이다(2026-10-01, ADR-104·ADR-105).** KMA(기상청)·에어코리아·KREX 휴게소
 > 기상(`restWeatherList`)·산림청 산악기상·산불위험예보를 Map은 더는 부르지 않는다 — weather kind 기능과
 > KMA 기상특보 notice 기능이 코드·DB·UI에서 지워졌다. 아래 해당 행과 산수는 기록이다. 산사태 예보

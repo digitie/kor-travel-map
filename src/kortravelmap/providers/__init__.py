@@ -14,14 +14,15 @@ gateway 신규 생성 금지 (ADR-006).
 | ``khoa`` | python-khoa-api | 해수욕장 place |
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
-| ``krairport`` | python-krairport-api | 공항 메타데이터 |
-| ``krex`` | python-krex-api | 휴게소 multi-kind |
+| ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
+| ``krairport`` | kor-travel-transport | 공항 메타데이터 |
+| ``krex`` | kor-travel-transport | 휴게소·휴게소 유가·고속도로 돌발 |
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
 | ``krforest_safety`` | python-krforest-api | 산사태 예보 notice |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
-| ``opinet`` | python-opinet-api | 주유소·유가 |
+| ``opinet`` | kor-travel-transport | 주유소·유가 |
 | ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
 | ``visitkorea`` | python-visitkorea-api | TourAPI enrichment |
 
@@ -85,29 +86,31 @@ from kortravelmap.providers.kor_travel_concierge import (
     KorTravelConciergeFeatureItem,
     kor_travel_concierge_items_to_bundles,
 )
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_AIRPORTS,
+    DATASET_KEY_FUEL_PRICES,
+    DATASET_KEY_FUEL_STATIONS,
+    DATASET_KEY_HIGHWAY_INCIDENTS,
+    DATASET_KEY_REST_AREA_FUEL_PRICES,
+    DATASET_KEY_REST_AREAS,
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+    TransportExportContractError,
+)
 from kortravelmap.providers.krairport import (
     AIRPORT_CATEGORY,
     AIRPORT_MARKER_COLOR,
-    DATASET_KEY_AIRPORTS,
-    KRAIRPORT_PROVIDER_NAME,
     AirportMetadataItem,
     airports_to_bundles,
 )
 from kortravelmap.providers.krex import (
-    KREX_PROVIDER_NAME,
     REST_AREA_CATEGORY,
-    REST_AREA_DATASET_KEY,
     REST_AREA_MARKER_COLOR,
     REST_AREA_MARKER_ICON,
-    REST_AREA_PRICES_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
     TRAFFIC_NOTICE_MARKER_COLOR,
     TRAFFIC_NOTICE_MARKER_ICON,
-    TRAFFIC_NOTICES_DATASET_KEY,
     KrexRestAreaItem,
-    KrexRestAreaPriceItem,
     KrexTrafficNoticeItem,
-    rest_area_prices_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -198,17 +201,13 @@ from kortravelmap.providers.mois import (
 from kortravelmap.providers.opinet import (
     OPINET_PRODUCT_KEY_MAP,
     OPINET_PRODUCT_NAME_KO,
-    OPINET_PROVIDER_NAME,
     OPINET_STATION_CATEGORY,
-    OPINET_STATION_DATASET_KEY,
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
-    OpinetPriceItem,
     OpinetStationItem,
-    OpinetStationPriceItem,
-    prices_to_values,
+    OpinetStationWithPrices,
+    station_prices_to_features_and_values,
     stations_to_bundles,
-    stations_to_price_features_and_values,
 )
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
@@ -299,11 +298,18 @@ __all__ = [
     "DATASET_KEY_BEACHES",
     "BEACH_CATEGORY",
     "BEACH_MARKER_COLOR",
-    # krairport 공항 (T-RV-55, ADR-034 보조)
+    # kor-travel-transport export 계약 (ADR-106)
+    "KOR_TRAVEL_TRANSPORT_PROVIDER_NAME",
+    "DATASET_KEY_FUEL_STATIONS",
+    "DATASET_KEY_FUEL_PRICES",
+    "DATASET_KEY_REST_AREAS",
+    "DATASET_KEY_REST_AREA_FUEL_PRICES",
+    "DATASET_KEY_HIGHWAY_INCIDENTS",
+    "DATASET_KEY_AIRPORTS",
+    "TransportExportContractError",
+    # 공항 (원천 kor-travel-transport)
     "AirportMetadataItem",
     "airports_to_bundles",
-    "KRAIRPORT_PROVIDER_NAME",
-    "DATASET_KEY_AIRPORTS",
     "AIRPORT_CATEGORY",
     "AIRPORT_MARKER_COLOR",
     # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
@@ -343,12 +349,10 @@ __all__ = [
     "LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE",
     "LANDSLIDE_FORECAST_MARKER_ICON",
     "LANDSLIDE_FORECAST_MARKER_COLOR",
-    # opinet (PR#42 prices, PR#43 stations)
-    "OpinetPriceItem",
+    # opinet 주유소·유가 (원천 kor-travel-transport)
     "OpinetStationItem",
-    "OpinetStationPriceItem",
-    "prices_to_values",
-    "stations_to_price_features_and_values",
+    "OpinetStationWithPrices",
+    "station_prices_to_features_and_values",
     "stations_to_bundles",
     "MCST_EXCLUDED_FILE_DATASETS",
     "MCST_FILE_DATASETS",
@@ -357,24 +361,16 @@ __all__ = [
     "McstDatasetSpec",
     "file_rows_to_bundles",
     "parse_kcisa_coordinates",
-    "OPINET_PROVIDER_NAME",
     "OPINET_PRODUCT_KEY_MAP",
     "OPINET_PRODUCT_NAME_KO",
-    "OPINET_STATION_DATASET_KEY",
     "OPINET_STATION_CATEGORY",
     "OPINET_STATION_MARKER_ICON",
     "OPINET_STATION_MARKER_COLOR",
     # krex (PR#45 — Sprint 2 §2.4 multi-kind; 휴게소 기상은 ADR-105로 제거)
     "KrexRestAreaItem",
-    "KrexRestAreaPriceItem",
     "KrexTrafficNoticeItem",
     "rest_areas_to_bundles",
-    "rest_area_prices_to_values",
     "traffic_notices_to_bundles",
-    "KREX_PROVIDER_NAME",
-    "REST_AREA_DATASET_KEY",
-    "REST_AREA_PRICES_DATASET_KEY",
-    "TRAFFIC_NOTICES_DATASET_KEY",
     "REST_AREA_CATEGORY",
     "TRAFFIC_NOTICE_CATEGORY",
     "REST_AREA_MARKER_ICON",

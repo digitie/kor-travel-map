@@ -23,11 +23,9 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 from kortravelmap.dagster.provider_fetchers import (
-    _OpinetCallBudget,
     fetch_datagokr_file_data_records,
     fetch_krheritage_events,
     fetch_krheritage_items,
-    fetch_opinet_station_price_details,
 )
 from kortravelmap.dagster.provider_pagination import (
     ProviderPage,
@@ -517,109 +515,3 @@ async def test_krheritage_events_counts_every_month_including_the_empty_ones(
     )
 
 
-def test_the_opinet_budget_counts_exactly_the_calls_it_allows() -> None:
-    """OpiNet 예산기가 곧 분자다 — 예산이 끊은 호출은 나가지 않으므로 세지 않는다."""
-
-    with counting_upstream_requests():
-        budget = _OpinetCallBudget(3)
-        allowed = [budget.spend() for _ in range(5)]
-        observed = observed_upstream_requests()
-
-    assert allowed == [True, True, True, False, False]
-    assert observed == 3, f"허용된 3건만 세야 하는데 {observed}건을 셌다"
-
-
-def test_the_unbounded_opinet_budget_still_counts() -> None:
-    """예산이 없는 경로(`_unbounded`)도 요청은 나간다 — 세지 않으면 0으로 위장한다."""
-
-    with counting_upstream_requests():
-        budget = _OpinetCallBudget(None)
-        for _ in range(4):
-            assert budget.spend() is True
-        observed = observed_upstream_requests()
-
-    assert observed == 4
-
-
-async def test_opinet_price_details_counts_every_station_detail(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """bbox 모드의 상세 조회는 uni_id마다 1건이다 — 규모가 큰 자리라 효과로 잰다.
-
-    enumerate(`iter_stations_in_bbox`)는 provider가 격자 셀마다 부르므로 이 층에서
-    셀 수 없다(`_PARTIALLY_COUNTED`). 셀 수 있는 절반은 정확한지 여기서 결박한다.
-
-    대역은 실물 표면을 **인자 이름까지** 흉내낸다 — ``iter_stations_in_bbox``는
-    keyword-only async generator 함수이고(``opinet/client.py:548``) 호출 자체는
-    await하지 않는다, ``get_station_detail``은 await 대상
-    (``opinet/client.py:513``), 정리는 ``aclose``(``opinet/client.py:321``)다.
-    ``**_kwargs``로 받아 버리면 fetcher가 인자 이름을 바꿔도 초록이라 그 구멍을
-    닫는다. **필수 인자만으로는 부족하다** — 기본값이 있는 인자(`radius_m`)를
-    `radius`로 바꾸는 변이가 catch-all 아래에서 초록이었고, 실물은 `TypeError`를
-    낸 뒤 조용히 기본 5000m로 떨어졌을 자리다(적대 리뷰 실증). 그래서 기록한
-    bbox 튜플을 값까지 단언한다.
-    """
-
-    stations = [SimpleNamespace(uni_id=f"S{index:03d}") for index in range(7)]
-
-    class _Client:
-        def __init__(self, **_kwargs: Any) -> None:
-            self.details: list[str] = []
-            self.bboxes: list[tuple[float, float, float, float, int]] = []
-            self.closed = False
-
-        async def iter_stations_in_bbox(
-            self,
-            *,
-            min_lon: float,
-            min_lat: float,
-            max_lon: float,
-            max_lat: float,
-            radius_m: int = 5000,
-            prodcd: Any = None,
-            sort: Any = None,
-        ) -> AsyncIterator[Any]:
-            del prodcd, sort
-            self.bboxes.append((min_lon, min_lat, max_lon, max_lat, radius_m))
-            for station in stations:
-                yield station
-
-        async def get_station_detail(self, uni_id: str) -> object:
-            self.details.append(uni_id)
-            return SimpleNamespace(uni_id=uni_id)
-
-        async def aclose(self) -> None:
-            self.closed = True
-
-    client = _Client()
-    _install(monkeypatch, "opinet", OpinetClient=lambda **kwargs: client)
-    settings = KorTravelMapSettings(
-        opinet_api_key=SecretStr("k"),
-        opinet_scope_mode="bbox",
-        opinet_scope_bbox="126.9,37.5,127.0,37.6",
-    )
-
-    with counting_upstream_requests():
-        records = [
-            record async for record in fetch_opinet_station_price_details(settings)
-        ]
-        observed = observed_upstream_requests()
-
-    assert len(records) == len(stations)
-    assert observed == len(stations), (
-        f"uni_id {len(stations)}개의 상세를 부르고 {observed}건을 셌다 — "
-        "상세는 uni_id마다 정확히 1건이다"
-    )
-    assert client.details == [station.uni_id for station in stations], (
-        "센 수와 실제로 부른 uni_id가 갈라졌다 — 계수기가 호출과 무관해진 것이다"
-    )
-    # **값까지 본다.** 개수만 보면 `radius_m=`를 `radius=`로 바꾸는 변이가 통과하고
-    # (실물은 `TypeError`), settings의 bbox/반경이 실제로 도달하는지도 모른 채 지나간다.
-    assert client.bboxes == [(126.9, 37.5, 127.0, 37.6, settings.opinet_scope_radius_m)], (
-        f"enumerate에 도달한 인자가 {client.bboxes}다 — bbox 1개짜리 scope의 "
-        "좌표와 반경이 그대로 실려야 한다"
-    )
-    assert client.closed is True, (
-        "fetcher가 client를 닫지 않았다 — 정리 메서드 이름이 실물"
-        "(`OpinetClient.aclose`)과 어긋났다"
-    )

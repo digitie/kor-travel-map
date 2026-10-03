@@ -7,7 +7,7 @@ import {
   scheduleKstMidnightTicks,
 } from "./price-freshness";
 
-const OPINET = "python-opinet-api";
+const OPINET = "opinet_gas_station";
 
 describe("OpiNet 가격 KST 날짜 판정", () => {
   afterEach(() => {
@@ -22,29 +22,36 @@ describe("OpiNet 가격 KST 날짜 판정", () => {
     expect(isSameKstCalendarDate(yesterday, now)).toBe(false);
     expect(isSameKstCalendarDate(today, now)).toBe(true);
     expect(
-      opinetPastPriceLabel([{ provider: OPINET, observed_at: yesterday }], now),
+      opinetPastPriceLabel([{ price_domain: OPINET, observed_at: yesterday }], now),
     ).toBe("과거 7/13");
     expect(
-      opinetPastPriceLabel([{ provider: OPINET, observed_at: today }], now),
+      opinetPastPriceLabel([{ price_domain: OPINET, observed_at: today }], now),
     ).toBeNull();
   });
 
   it("오늘과 과거 관측이 섞이면 각 유종을 독립적으로 판정한다", () => {
     const now = new Date("2026-07-13T15:01:00.000Z"); // 7/14 00:01 KST
-    const yesterday = { provider: OPINET, observed_at: "2026-07-13T14:59:00.000Z" };
-    const today = { provider: OPINET, observed_at: "2026-07-13T15:00:00.000Z" };
+    const yesterday = { price_domain: OPINET, observed_at: "2026-07-13T14:59:00.000Z" };
+    const today = { price_domain: OPINET, observed_at: "2026-07-13T15:00:00.000Z" };
 
     expect(opinetPastPriceLabel([yesterday], now)).toBe("과거 7/13");
     expect(opinetPastPriceLabel([today], now)).toBeNull();
   });
 
-  it("OpiNet이 아닌 provider의 예전 가격은 표시하지 않는다", () => {
+  it("OpiNet 주유소가 아닌 가격 도메인의 예전 가격은 표시하지 않는다", () => {
+    // 휴게소 유가는 OpiNet과 같은 provider(kor-travel-transport)에서 온다 — 도메인으로 가른다.
     expect(
       opinetPastPriceLabel(
-        [{ provider: "python-krex-api", observed_at: "2026-07-01T00:00:00Z" }],
+        [{ price_domain: "rest_area_fuel", observed_at: "2026-07-01T00:00:00Z" }],
         new Date("2026-07-14T00:00:00+09:00"),
       ),
     ).toBeNull();
+    expect(
+      opinetPastPriceLabel(
+        [{ price_domain: OPINET, observed_at: "2026-07-01T00:00:00Z" }],
+        new Date("2026-07-14T00:00:00+09:00"),
+      ),
+    ).toBe("과거 7/1");
   });
 
   it("KST 자정 경계에서만 freshness callback을 실행하고 다음 자정을 예약한다", () => {

@@ -239,8 +239,8 @@ def _bundle(
     feature: Feature,
     *,
     source_entity_id: str,
-    provider: str = "python-krex-api",
-    dataset_key: str = "krex_traffic_notices",
+    provider: str = "kor-travel-transport",
+    dataset_key: str = "transport_highway_incidents",
     source_entity_type: str = "traffic_notice",
     raw_data: dict[str, Any] | None = None,
     fetched_at: datetime | None = None,
@@ -1199,8 +1199,8 @@ async def test_supersede_writes_typed_valid_end_time_and_read_filter_hides_it(
     closed_at = datetime.now(_KST) - timedelta(hours=1)
     await feature_repo.supersede_stale_notice_features(
         migrated_session,
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         active_lineage_keys=[],
         closed_at=closed_at,

@@ -1,5 +1,34 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-02 — 주유소·휴게소·돌발·공항 원천을 kor-travel-transport export로 이관(ADR-106): 브랜치 `feat/transport-api-sources`
+
+- 소유자 결정: Map에서 transport로 얻을 수 있는 것은 transport API로 바꾸고, 필요하면 transport API를 고친다. OpiNet은
+  transport 브라우저 수집본을 쓴다. 공항도 옮긴다. 새 provider 정체성 `kor-travel-transport`(internal) + identity 재지정
+  보험. prod Map DB는 비어 있어(예상) shadow 없이 바로 전환한다.
+- transport 쪽(`kor-travel-transport` 브랜치 `fix/fuel-latest-prices-incremental` → `feat/map-service-exports`): 최신 유가
+  MV가 60초 timeout으로 영구 stale이던 것을 증분 테이블로 고쳤고(0022), 휴게소 기준정보·휴게소 유가 수집기와
+  `GET /v1/service/exports/*`(토큰 + loopback Host, 404 은닉), 돌발 활성 집합(수집 실패·30분 정체면 503), 공항 15곳(KPO
+  포함)을 더했다(transport ADR-013).
+- Map: `providers/kor_travel_transport.py`(계약·엄격 파서), fetcher 5개(`fetch_transport_*`), asset/job/operation 6개를
+  `*_transport_*`로 바꿨다. 정규화는 `opinet.py`·`krex.py`·`krairport.py`에 남고 provider 정체성만 바뀐다. migration
+  `404_transport_provider_identity`가 새 dataset·operation·scope를 넣고 옛 identity를 옮기고(옛 돌발 entity가 있으면
+  중단) 옛 적재를 끄고 계보 함수의 돌발 분기를 옮긴다.
+- 지운 것: OpiNet 호출 예산·scope 모드·KST 일일 coalescing·POI target scope, krex 이중 snapshot 안정성 검사, krex rate
+  gate 선언, krex/opinet 쿼터 예외 선언, 세 provider 핀, `KOR_TRAVEL_MAP_OPINET_*`·`KOR_TRAVEL_MAP_KREX_*` env.
+- 적대 리뷰 반영(같은 날): 신선도를 두 겹으로 — transport는 이력 없음·실패·stale이면 모든 export에서 503,
+  Map은 `collection` 플래그·완전 snapshot 0건·돌발 `collected_at` 30분을 다시 재고 `failure_kind`
+  (`transport_not_current`·`transport_empty`·`transport_hidden`)로 실패한다(아무것도 지우거나 닫지 않는다).
+  404는 자격증명 부재와 갈랐다. 유가 `observed_at`은 transport `collected_at`(마지막 확인)이다 — 오피넷
+  `*_DT`(가격을 바꾼 때)를 쓰면 가격을 유지하는 주유소가 4일 지평선 밖으로 사라진다. 유가 job은 주유소를
+  역지오코딩하지 않는다(locator로 부모만). UI "과거 날짜" 표식은 가격 도메인으로 고른다. 404 migration은
+  옛 preview operation도 끈다. 페이지 상한·cursor 순환 검출·전송 오류 재시도를 더했다.
+- C7: 공항 operation은 이제 transport 내부 export를 한 번 부른다. 계약 테스트를 "외부 provider 호출 0"으로 고쳐 적었다
+  (`_transport_get`은 공항 export 상수로만 허용, 다른 경로는 빨강).
+- 계약 관계(2026-10-03 소유자 결정): Map은 transport export의 소비자다 — pin·vendoring·repin 절차 없음. Map에
+  필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
+  `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/unit/golden/kor-travel-transport/`)이 실 파서를 지난다. 처음
+  만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
+
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 
 - **MED-1 PinVi가 다음 짝을 막는다.** Manager M05 harness가 OpenAPI hash 불일치를 거부하고 PinVi 계약 테스트가

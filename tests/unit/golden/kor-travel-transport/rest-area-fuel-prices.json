@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-10-02T08:00:00Z",
+  "collection": {
+    "source": "krex_rest_area_fuel",
+    "last_success_at": "2026-10-02T07:25:00Z",
+    "failed": false,
+    "stale": false
+  },
+  "items": [
+    {
+      "service_area_code": "A00001",
+      "source": "krex_rest_area_fuel",
+      "service_area_code2": null,
+      "service_area_name": "행담도",
+      "route_code": "0150",
+      "route_name": "서해안선",
+      "direction": "목포",
+      "oil_company": "SK",
+      "has_lpg": false,
+      "phone_number": null,
+      "address": null,
+      "gasoline_price": 1700,
+      "diesel_price": 1600,
+      "lpg_price": null,
+      "observed_at": "2026-10-02T07:25:00Z",
+      "raw": {
+        "serviceAreaCode": "A00001",
+        "gasolinePrice": "1,700원"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

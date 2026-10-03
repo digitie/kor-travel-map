@@ -23,14 +23,14 @@ function point(
 ): CanonicalPricePoint {
   return {
     provider_dataset_id: 17,
-    dataset_key: "opinet_gas_station_prices",
+    dataset_key: "transport_fuel_prices",
     dataset_display_name: "OpiNet 주유소 가격",
     known_at: "2026-07-13T06:05:00.000Z",
     observed_at: "2026-07-13T06:00:00.000Z",
     price_domain: "opinet_gas_station",
     product_key: "gasoline",
     product_name: "휘발유",
-    provider: "python-opinet-api",
+    provider: "kor-travel-transport",
     source_product_key: "B027",
     source_product_name: "휘발유",
     unit: "KRW/L",

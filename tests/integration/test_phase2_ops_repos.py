@@ -52,8 +52,8 @@ _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 _MOIS_PROVIDER = "python-mois-api"
 _MOIS_DATASET = "mois_license_features_bulk"
 #: 정책 대상 openapi notice dataset. 옛 KMA 특보(402/ADR-105로 비활성)를 대신한다.
-_NOTICE_PROVIDER = "python-krex-api"
-_NOTICE_DATASET = "krex_traffic_notices"
+_NOTICE_PROVIDER = "kor-travel-transport"
+_NOTICE_DATASET = "transport_highway_incidents"
 
 # T-VN-39 재키(309) 뒤 ``feature.features.feature_id``는 uuid다 — 이 파일이 심는
 # seed identity도 그 형태여야 한다. 종전의 ``feature:poi:1`` 류 문자열은 legacy
@@ -186,17 +186,17 @@ async def test_provider_refresh_policy_upsert_get_list(
         max_concurrent=2,
         stale_after_minutes=45,
         rate_limit_source={
-            "provider_repo": "F:/dev/python-krex-api",
+            "provider_repo": "F:/dev/kor-travel-transport",
             "docs": ["docs/rate-limit.md"],
             "checked_at": "2026-06-03T12:00:00+09:00",
         },
     )
 
-    assert created.provider == "python-krex-api"
+    assert created.provider == "kor-travel-transport"
     assert created.targeted_policy == "allow_targeted"
     assert created.max_concurrent == 2
     assert created.stale_after_minutes == 45
-    assert created.rate_limit_source["provider_repo"] == "F:/dev/python-krex-api"
+    assert created.rate_limit_source["provider_repo"] == "F:/dev/kor-travel-transport"
 
     updated = await upsert_provider_refresh_policy(
         migrated_session,
@@ -262,13 +262,15 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         lat=37.5665,
         radius_km=3.0,
         provider_overrides={
-            "python-krex-api:krex_traffic_notices": {"targeted_policy": "allow_targeted"}
+            "kor-travel-transport:transport_highway_incidents": {
+                "targeted_policy": "allow_targeted"
+            }
         },
         metadata={"external_poi_id": "poi-1"},
     )
     assert target.coord_key == "126.978000:37.566500:p6"
     assert (
-        target.provider_overrides["python-krex-api:krex_traffic_notices"]["targeted_policy"]
+        target.provider_overrides["kor-travel-transport:transport_highway_incidents"]["targeted_policy"]
         == "allow_targeted"
     )
 

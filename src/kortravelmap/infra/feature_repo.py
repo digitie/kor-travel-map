@@ -507,8 +507,8 @@ def _notice_lineage_sql(
 
     return f"""
     CASE
-      WHEN {dataset_alias}.provider = 'python-krex-api'
-       AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
+      WHEN {dataset_alias}.provider = 'kor-travel-transport'
+       AND {dataset_alias}.dataset_key = 'transport_highway_incidents'
        AND {entity_alias}.source_entity_type = 'traffic_notice'
       THEN COALESCE(
         NULLIF(
@@ -564,8 +564,8 @@ def _canonical_notice_feature_sql(
     )
     return f"""
     CASE
-      WHEN {dataset_alias}.provider = 'python-krex-api'
-       AND {dataset_alias}.dataset_key = 'krex_traffic_notices'
+      WHEN {dataset_alias}.provider = 'kor-travel-transport'
+       AND {dataset_alias}.dataset_key = 'transport_highway_incidents'
        AND {entity_alias}.source_entity_type = 'traffic_notice'
       THEN EXISTS (
         SELECT 1

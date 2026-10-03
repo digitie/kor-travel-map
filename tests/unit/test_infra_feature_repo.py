@@ -979,8 +979,8 @@ def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
         lon=126.978,
         lat=37.5665,
         distance_m=12.5,
-        primary_provider="python-opinet-api",
-        primary_dataset_key="opinet_stations",
+        primary_provider="kor-travel-transport",
+        primary_dataset_key="transport_fuel_stations",
         last_updated_at=_NOW,
     )
 

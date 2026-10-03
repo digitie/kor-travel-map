@@ -111,19 +111,16 @@ providers = [
   "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@38a2b74aabc1c077ebd2e1aa5ad3b2a70ffc8dd5",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
   #
-  # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────
-  "python-opinet-api @ git+https://github.com/digitie/python-opinet-api.git@dcfb41a1862bb9718a778fdc0fc2e3e807ed7d47",
-  #
-  # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
-  # krex: incident → openapi/burstInfo/realTimeSms 재정렬 (krex PR#9, #378).
-  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@d153f3cdd87c9cfacceeb94310bbe6067a1bbfa8",
+  # ── Sprint 2 §2.3/§2.4 — opinet 유가·krex 휴게소/돌발 ─────────────────
+  # python-opinet-api·python-krex-api 핀은 제거했다(ADR-106) — 주유소·유가·휴게소·
+  # 휴게소 유가·고속도로 돌발은 kor-travel-transport export에서 받는다.
   #
   # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
   # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/
   # contentId 매핑) 책임 — Sprint 2 끝물 PR.
   "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@151ef90f07842863b986048a98a66a75d8e9d63d",
   #
-  # ── Sprint 3 — knps / krforest_trails / krheritage / krairport ────────
+  # ── Sprint 3 — knps / krforest_trails / krheritage ──────────────────────
   # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
   # PR#4 (codex/keyless-file-download-dtos) merged → ApiEndpoint/Page 삭제,
   # KNPS_SERVICE_KEY 사용 안 함. sha 5e88fb4.
@@ -153,7 +150,7 @@ providers = [
   # 사라졌다. 상세 조회 규율(복합키 3요소 필수·결측 row 경고)은 provider의 것을
   # 그대로 따른다.
   "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@be3a1a28a9bc5214b9349dcdc7ff7e1ad9b970ba",
-  "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@fe2143b1b064abfc4a3d4070bcfc9dcca6595c21",
+  # python-krairport-api 핀은 제거했다(ADR-106) — 공항도 kor-travel-transport export에서 받는다.
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
   "python-mois-api @ git+https://github.com/digitie/python-mois-api.git@3cdee09eb753edbdaf91c28a955e2c6ddd72ec17",

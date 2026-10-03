@@ -176,10 +176,41 @@ def _catalog_operation_bindings() -> list[tuple[int, str, str]]:
     return bindings
 
 
+def _transport_moves() -> dict[str, str]:
+    """ADR-106(migration 404)이 kor-travel-transport dataset으로 옮긴 적재 operation key.
+
+    시드(rev 300)는 옛 provider dataset을 담는다. 404가 그 operation을 끄고 새 dataset의
+    operation(이름이 다르다)을 켜므로, 시드에서 유도한 key를 404의 대응표로 번역한다.
+    """
+    import importlib.util
+
+    path = _REPO_ROOT / "alembic" / "versions" / "404_transport_provider_identity.py"
+    spec = importlib.util.spec_from_file_location("_migration_404", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    datasets = _catalog_datasets()
+    moved = {
+        (old_provider, old_dataset): job
+        for old_provider, old_dataset, _new, _label, _kind, job in module.DATASET_MOVES
+    }
+    return {
+        key: moved[(datasets[dataset_id].provider, datasets[dataset_id].dataset_key)]
+        for dataset_id, key, kind in _catalog_operation_bindings()
+        if kind != "preview"
+        and (datasets[dataset_id].provider, datasets[dataset_id].dataset_key) in moved
+    }
+
+
 def _operation_keys_for(dataset_ids: set[int]) -> frozenset[str]:
-    """그 dataset에 결박된 적재 operation key — preview(fixture-only)는 뺀다."""
+    """그 dataset에 결박된 적재 operation key — preview(fixture-only)는 뺀다.
+
+    ADR-106으로 옮겨진 operation은 404가 켠 새 key로 번역한다.
+    """
+    moves = _transport_moves()
     return frozenset(
-        key
+        moves.get(key, key)
         for dataset_id, key, kind in _catalog_operation_bindings()
         if dataset_id in dataset_ids and kind != "preview"
     )

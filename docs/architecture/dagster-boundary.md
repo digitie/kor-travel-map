@@ -106,9 +106,11 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | asset 이름 | resource key | dataset_key | group |
 |-----------|--------------|-------------|-------|
 | `feature_event_datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `features_event` |
-| `feature_place_opinet_stations` | `opinet_stations` | `opinet_fuel_station_details` | `features_place` |
-| `feature_place_krex_rest_areas` | `krex_rest_areas` | `krex_rest_areas` | `features_place` |
-| `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
+| `feature_place_transport_fuel_stations` | `transport_fuel_stations` | `transport_fuel_stations` | `features_place` |
+| `feature_price_transport_fuel_stations` | `transport_fuel_stations` | `transport_fuel_prices` | `features_price` |
+| `feature_place_transport_rest_areas` | `transport_rest_areas` | `transport_rest_areas` | `features_place` |
+| `feature_price_transport_rest_areas` | `transport_rest_area_fuel_prices` | `transport_rest_area_fuel_prices` | `features_price` |
+| `feature_notice_transport_highway_incidents` | `transport_highway_incidents` | `transport_highway_incidents` | `features_notice` |
 | `feature_place_krheritage_items` | `krheritage_items` | `krheritage_heritage_features` | `features_place` |
 | `feature_event_krheritage_events` | `krheritage_events` | `krheritage_event_list` | `features_event` |
 | `feature_place_mois_licenses` | `mois_license_records` | `mois_license_features_bulk` 기본 | `features_place` |
@@ -123,7 +125,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_standard_tourist_attractions` | `standard_tourist_attractions` | `datagokr_tourist_attractions` | `features_place` |
 | `feature_place_standard_parking_lots` | `standard_parking_lots` | `datagokr_parking_lots` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `khoa_beaches` | `features_place` |
-| `feature_place_krairport_airports` | `krairport_airports` | `krairport_airports` | `features_place` |
+| `feature_place_transport_airports` | `transport_airports` | `transport_airports` | `features_place` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
 | `feature_place_kor_travel_concierge_youtube` | `kor_travel_concierge_youtube_features` | `youtube_place_candidates` | `features_place` |
 | `feature_place_datagokr_file_data` | `datagokr_file_data_records` + `datagokr_file_data_dataset_key` | `datagokr_*` fileData 4종 (`DATAGOKR_FILEDATA_DATASETS`) | `features_place` |
@@ -138,9 +140,12 @@ notice asset, 매분 weather current summary schedule은 2026-10-01 ADR-104·ADR
 T-VN-40부터 별도 curated overlay asset group은 제거됐다. provider full-snapshot의 authoritative
 terminal receipt가 source observation과 candidate generation을 같은 transaction에서 실행한다.
 
-`feature_place_krairport_airports` asset은
-현재 §10 정기 schedule이 없다(on-demand 전용 — Dagster UI/API 수동 실행 또는 feature
-update request로만 적재).
+`transport_*` asset 여섯(주유소 place/price, 휴게소 place/price, 고속도로 돌발, 공항)은 2026-10-02
+ADR-106부터 provider 라이브러리(OpiNet·KREX·krairport)가 아니라 kor-travel-transport의 내부 export
+(`GET /v1/service/exports/*`, transport ADR-013)를 읽는다. provider는 `kor-travel-transport`
+(`source_kind=internal`)다. export가 404(토큰·접속 주소·버전)·503(근거 수집 이력 없음·실패·stale)이거나
+`collection` 플래그가 서 있거나 완전 snapshot이 0건이면 fetcher가 `failure_kind`를 가진 예외로 실패하고,
+그 run은 아무것도 적재·삭제·종료하지 않는다. 공항은 §10의 월 1회 schedule이 있다.
 
 `kortravelmap.providers.datagokr_file_data`는 공용
 `feature_place_datagokr_file_data` asset 하나를 사용한다. 정기 실행은
@@ -266,7 +271,7 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 |-----------|-------------|-------|
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `features_event` |
 | `feature_place_mois_licenses` | `mois_license_features_bulk` | `features_place` |
-| `feature_place_opinet_stations` | `opinet_fuel_station_details` | `features_place` |
+| `feature_place_transport_fuel_stations` | `transport_fuel_stations` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `features_place` |
 | `feature_place_krheritage_items` | `krheritage_heritage_features` | `features_place` |
 | `feature_area_krheritage_gis_spca` (forward-looking) | `krheritage_gis_spca` | `features_area` |
@@ -274,9 +279,9 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 | `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `features_place` |
 | `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `features_route` |
 | `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
-| `feature_place_krex_rest_areas` | `krex_rest_areas` | `features_place` |
-| `price_krex_rest_area_fuel` (forward-looking) | `krex_rest_area_prices` | `features_price` |
-| `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
+| `feature_place_transport_rest_areas` | `transport_rest_areas` | `features_place` |
+| `feature_price_transport_rest_areas` | `transport_rest_area_fuel_prices` | `features_price` |
+| `feature_notice_transport_highway_incidents` | `transport_highway_incidents` | `features_notice` |
 | `feature_notice_krforest_landslide_forecast_issues` (C05D) | `krforest_landslide_forecast_issues` | `features_notice` |
 | `feature_dedup_review` | (운영) | `features_quality` |
 | `feature_consistency_reports` | (운영, T-201) | `features_quality` |
@@ -496,14 +501,14 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | schedule | asset job | cron | 비고 |
 |----------|-----------|------|------|
 | `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` | 전국문화축제 월 1회 |
-| `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` | OpiNet 주유소 월 1회 |
-| `feature_price_opinet_stations_daily_schedule` | `feature_price_opinet_stations_job` | `18 18 * * *` | OpiNet 주유소 유가 일 1회(#545 quota guard) |
-| `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` | KREX 휴게소 월 1회 |
-| `feature_price_krex_rest_areas_twice_daily_schedule` | `feature_price_krex_rest_areas_job` | `28 6,18 * * *` | KREX 휴게소 유가 일 2회 |
+| `feature_place_transport_fuel_stations_weekly_schedule` | `feature_place_transport_fuel_stations_job` | `5 3 * * 1` | 주유소 place 주 1회(geo-heavy pool, transport export) |
+| `feature_price_transport_fuel_stations_daily_schedule` | `feature_price_transport_fuel_stations_job` | `18 18 * * *` | 주유소 유가 일 1회(transport 16시 수집 뒤, 역지오코딩 없음) |
+| `feature_place_transport_rest_areas_weekly_schedule` | `feature_place_transport_rest_areas_job` | `20 4 * * 1` | 휴게소 place 주 1회(transport export) |
+| `feature_price_transport_rest_areas_twice_daily_schedule` | `feature_price_transport_rest_areas_job` | `50 6,18 * * *` | 휴게소 유가 일 2회(transport export) |
 | `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `25 4 4 * *` | 산림청 등산로 월 1회(C05A) |
 | `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `35 4 4 * *` | 산림청 둘레길 월 1회(C05A) |
 | `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` | 산림청 산사태 예보발령·해제 하루 6회(C05D) |
-| `feature_notice_krex_traffic_notices_ten_minute_schedule` | `feature_notice_krex_traffic_notices_job` | `*/10 * * * *` | KREX 교통공지 10분마다 |
+| `feature_notice_transport_highway_incidents_ten_minute_schedule` | `feature_notice_transport_highway_incidents_job` | `*/10 * * * *` | 고속도로 돌발 활성 집합 10분마다(transport export) |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` | 국가유산 item 월 1회 |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` | 국가유산 행사 월 1회 |
 | `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` | MOIS bulk 월 1회 |
@@ -654,29 +659,29 @@ run/event/schedule metadata를 영속화한다. `dagster dev`는 로컬 단일 �
 사라지고 metadata가 `STARTED`/`STARTING`에 남으면 queued-run 동시성 슬롯이 영구 점유되므로,
 시작·취소 10분 및 전체 실행 6시간 상한으로 고아 run을 실패 처리해 슬롯을 회수한다.
 전역 상한은 과거 정상 MOIS bulk run(약 2시간 48분)을 끊지 않도록 잡았다. 최신성이 중요한
-KREX notice와 OpiNet place/price job은 Dagster 1.13의 공개
+고속도로 돌발 notice와 주유소 유가 job은 Dagster 1.13의 공개
 `MAX_RUNTIME_SECONDS_TAG`(`dagster/max_runtime`)를 `7200`으로 선언해 schedule·수동 실행
-모두 2시간 상한을 적용한다. process 재개는 하지 않아 부분 적재를 중복 실행하지 않는다
+모두 2시간 상한을 적용한다(2026-10-02 ADR-106 이후 이름). process 재개는 하지 않아 부분 적재를 중복 실행하지 않는다
 (`max_resume_run_attempts: 0`). provider 적재는 멱등이고 다음 schedule 또는 명시적 재실행으로
 복구한다.
 
-provider 동시성도 같은 파일에서 실제로 강제한다. OpiNet place/price asset은 모두
-`kor_travel_map.opinet_api` pool을 선언하고, `concurrency.pools.default_limit: 1`과
-`granularity: run`이 schedule·수동 실행을 포함한 instance 전역 동시 실행을 1개로 제한한다.
-Dagster DB에 운영자가 별도 pool 값을 수동 입력해야만 성립하는 계약이 아니다. 현재 pool을
-선언한 asset은 OpiNet 2개와 KREX notice 1개다. KREX notice의
-`kor_travel_map.krex_notice_snapshot` pool은 10분 schedule보다 실행이 길 때 이전/newer snapshot의
-load·reconcile 순서가 역전되는 것을 막는다. 다만 targeted feature update worker는 asset 함수를
-직접 호출하므로 pool만으로는 모든 실행 경로를 포괄하지 못한다. OpiNet place/price는 공통
-`provider-run:python-opinet-api`, KREX notice는 dataset 전용
-`provider-run:python-krex-api:krex_traffic_notices` PostgreSQL session advisory lock을
+provider 동시성도 같은 파일에서 실제로 강제한다. `concurrency.pools.default_limit: 1`과
+`granularity: run`이 schedule·수동 실행을 포함한 instance 전역 동시 실행을 pool마다 1개로 제한한다.
+Dagster DB에 운영자가 별도 pool 값을 수동 입력해야만 성립하는 계약이 아니다. 2026-10-02 ADR-106으로
+OpiNet 쿼터 pool(`kor_travel_map.opinet_api`)은 사라졌다 — 상류 쿼터는 kor-travel-transport가 진다.
+역지오코딩을 하는 적재(주유소·휴게소 place 포함)는 `kor_travel_map.kor_travel_geo` pool을 선언한다.
+고속도로 돌발 notice의 `kor_travel_map.highway_incident_snapshot` pool은 10분 schedule보다 실행이 길 때
+이전/newer snapshot의 load·reconcile 순서가 역전되는 것을 막는다. 다만 targeted feature update worker는
+asset 함수를 직접 호출하므로 pool만으로는 모든 실행 경로를 포괄하지 못한다. 돌발 notice는 dataset 전용
+`provider-run:kor-travel-transport:transport_highway_incidents` PostgreSQL session advisory lock을
 fetch 시작부터 load/reconcile/sync 성공 기록까지 유지한다. DB lock이 서로 다른 process와
 Dagster instance를 포함한 최종 상호 배제 경계이고, pool은 불필요한 시작과 lock 대기를 줄인다.
 connection이 끊기면 lock은 PostgreSQL이 회수한다. persisted sync cursor watermark도 이미 반영한
 과거/같은 notice snapshot의 load를 거부한다. 이후 다른 provider pool을 추가하면 안전한 기본값
 1에서 시작해 근거가 있을 때만 인스턴스 설정을 확장한다.
 
-OpiNet targeted update는 별도 예외 경계가 있다. 현재 `low_top_area` fetcher는 요청의
+아래 OpiNet targeted update·당일 coalescing 단락은 2026-10-02 ADR-106 이전 기록이다(코드에서 지웠다 —
+transport export에는 쿼터가 없다). OpiNet targeted update는 별도 예외 경계가 있었다. 현재 `low_top_area` fetcher는 요청의
 feature/bbox/cache-target scope가 아니라 설정된 전국 회전 window를 읽으므로,
 `provider_dataset` 이외 scope는 provider 호출 전에
 `skipped(global_provider_not_targetable)`로 끝낸다. 서로 다른 target 요청이 같은 전국 조회를
@@ -688,8 +693,8 @@ price는 성공 cursor의 적재값 전체가 실제 당일 관측값일 때만 
 `loaded_at`과 같은 KST 날짜여야 하므로, 전일 값만 또는 날짜가 섞인 성공 run은 다음 정식
 schedule을 막지 않는다.
 
-KREX notice schedule은 고빈도 snapshot에만 opt-in한 tick coalescing도 적용한다. 같은
-`provider=krex`/`dataset_key=krex_traffic_notices` tag의 run이 `QUEUED`, `STARTING`,
+고속도로 돌발 notice schedule은 고빈도 snapshot에만 opt-in한 tick coalescing도 적용한다. 같은
+`provider`/`dataset_key`(`kor-travel-transport`/`transport_highway_incidents`) tag의 run이 `QUEUED`, `STARTING`,
 `STARTED`, `CANCELING` 중 하나면 새 `RunRequest`를 만들지 않고 기존 run id와 상태를
 Dagster tick의 skip 사유로 남긴다. 따라서 10분보다 실행이 길어도 scheduled run backlog가
 계속 늘지 않는다. 조회와 run 생성 사이의 경합 또는 tag가 없는 수동 실행까지 원자적으로 막는

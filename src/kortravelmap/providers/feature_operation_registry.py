@@ -57,13 +57,25 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_event_datagokr_cultural_festivals_job",
         "feature_event_datagokr_cultural_festivals",
     ),
-    _handler("feature_place_opinet_stations_job", "feature_place_opinet_stations"),
-    _handler("feature_price_opinet_stations_job", "feature_price_opinet_stations"),
-    _handler("feature_place_krex_rest_areas_job", "feature_place_krex_rest_areas"),
-    _handler("feature_price_krex_rest_areas_job", "feature_price_krex_rest_areas"),
     _handler(
-        "feature_notice_krex_traffic_notices_job",
-        "feature_notice_krex_traffic_notices",
+        "feature_place_transport_fuel_stations_job",
+        "feature_place_transport_fuel_stations",
+    ),
+    _handler(
+        "feature_price_transport_fuel_stations_job",
+        "feature_price_transport_fuel_stations",
+    ),
+    _handler(
+        "feature_place_transport_rest_areas_job",
+        "feature_place_transport_rest_areas",
+    ),
+    _handler(
+        "feature_price_transport_rest_areas_job",
+        "feature_price_transport_rest_areas",
+    ),
+    _handler(
+        "feature_notice_transport_highway_incidents_job",
+        "feature_notice_transport_highway_incidents",
     ),
     _handler("feature_place_krheritage_items_job", "feature_place_krheritage_items"),
     _handler("feature_event_krheritage_events_job", "feature_event_krheritage_events"),
@@ -102,7 +114,7 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_place_standard_special_streets",
     ),
     _handler("feature_place_khoa_beaches_job", "feature_place_khoa_beaches"),
-    _handler("feature_place_krairport_airports_job", "feature_place_krairport_airports"),
+    _handler("feature_place_transport_airports_job", "feature_place_transport_airports"),
     _handler(
         "feature_place_kor_travel_concierge_youtube_job",
         "feature_place_kor_travel_concierge_youtube",

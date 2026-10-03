@@ -155,8 +155,8 @@ def _first_probe_notice_bundle(
     }
     raw_payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         source_entity_id=raw_data["natural_key"],
         raw_payload_hash=raw_payload_hash,
@@ -191,8 +191,8 @@ def _first_probe_notice_bundle(
         updated_at=fetched_at,
     )
     source_record = SourceRecord(
-        provider="python-krex-api",
-        dataset_key="krex_traffic_notices",
+        provider="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
         source_entity_type="traffic_notice",
         source_entity_id=raw_data["natural_key"],
         raw_payload_hash=raw_payload_hash,
@@ -929,15 +929,15 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
         }
         raw_payload_hash = make_payload_hash(raw_data)
         source_record_key = make_source_record_key(
-            provider="python-krex-api",
-            dataset_key="krex_traffic_notices",
+            provider="kor-travel-transport",
+            dataset_key="transport_highway_incidents",
             source_entity_type="traffic_notice",
             source_entity_id=source_entity_id,
             raw_payload_hash=raw_payload_hash,
         )
         source_entity_key = feature_repo._make_source_entity_key(
-            provider="python-krex-api",
-            dataset_key="krex_traffic_notices",
+            provider="kor-travel-transport",
+            dataset_key="transport_highway_incidents",
             source_entity_type="traffic_notice",
             source_entity_id=source_entity_id,
         )
@@ -953,8 +953,8 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
                     (
                         SELECT provider_dataset_id
                         FROM provider_sync.provider_datasets
-                        WHERE provider = 'python-krex-api'
-                          AND dataset_key = 'krex_traffic_notices'
+                        WHERE provider = 'kor-travel-transport'
+                          AND dataset_key = 'transport_highway_incidents'
                     ),
                     'traffic_notice', :source_entity_id,
                     :seen_at, :seen_at

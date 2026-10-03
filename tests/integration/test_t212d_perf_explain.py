@@ -205,7 +205,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 (0, 'python-mois-api', 'mois_license_features_bulk'),
                 (1, 'python-datagokr-api', 'standard_tourist_attractions'),
                 (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
-                (3, 'python-opinet-api', 'opinet_stations'),
+                (3, 'kor-travel-transport', 'transport_fuel_stations'),
                 (4, 'python-krheritage-api', 'krheritage_events')
             ) AS pair(bucket, provider, dataset_key)
             ON CONFLICT (provider, dataset_key)
@@ -233,7 +233,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 (0, 'python-mois-api', 'mois_license_features_bulk'),
                 (1, 'python-datagokr-api', 'standard_tourist_attractions'),
                 (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
-                (3, 'python-opinet-api', 'opinet_stations'),
+                (3, 'kor-travel-transport', 'transport_fuel_stations'),
                 (4, 'python-krheritage-api', 'krheritage_events')
             ) AS pair(bucket, provider, dataset_key) ON pair.bucket = g % 5
             JOIN provider_sync.provider_datasets AS pd
@@ -1457,7 +1457,10 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         )
         or 0
     )
-    assert provider_dataset_count <= 100, (
+    # kor-travel-transport 데이터셋(ADR-106)으로 103행이 됐다.
+    # 은퇴한 opinet·krex·krairport 행은 비활성으로 남는다.
+    # 수백 행은 여전히 Seq Scan이 싼 소형 차원 테이블이다.
+    assert provider_dataset_count <= 200, (
         "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
         f"count={provider_dataset_count}"
     )

@@ -1,60 +1,38 @@
-"""``kortravelmap.providers.krex`` — 휴게소 → multi-kind 변환 (Sprint 2 §2.4).
+"""``kortravelmap.providers.krex`` — 고속도로(한국도로공사) 데이터 → multi-kind 변환.
 
-본 모듈은 `python-krex-api` provider 라이브러리의 typed model을 4 kind으로
-정규화한다 — **multi-kind 통합 검증** (place + price + notice). 휴게소 관측 기상
-(``krex_rest_area_weather`` → weather kind)은 ADR-105로 제거했다 — 날씨 정본은
-kor-travel-weather다.
+원천: kor-travel-transport export(ADR-106). Map은 ``python-krex-api``를 직접 부르지 않는다 —
+transport가 휴게소 기준정보(data.go.kr 표준데이터)·휴게소 주유소 유가(EX)·고속도로 돌발(EX
+실시간)을 수집해 ``/v1/service/exports/*``로 내고, ``providers.kor_travel_transport``가 그 응답을
+이 모듈의 입력 Protocol shape로 바꾼다. provider 정체성은 ``kor-travel-transport``다.
 
 지원 dataset:
 
 | 함수 | dataset_key | Feature.kind | DTO |
 |------|-------------|--------------|-----|
-| ``rest_areas_to_bundles`` | ``krex_rest_areas`` | place | FeatureBundle |
-| ``rest_area_prices_to_values`` | ``krex_rest_area_prices`` | (시계열) | PriceValue |
+| ``rest_areas_to_bundles`` | ``transport_rest_areas`` | place | FeatureBundle |
 | ``rest_area_fuel_price_records_to_features_and_values`` |
-  ``krex_rest_area_prices`` | price | FeatureBundle + PriceValue |
-| ``traffic_notices_to_bundles`` | ``krex_traffic_notices`` | notice | FeatureBundle |
+  ``transport_rest_area_fuel_prices`` | price | FeatureBundle + PriceValue |
+| ``traffic_notices_to_bundles`` | ``transport_highway_incidents`` | notice | FeatureBundle |
 
 ADR 참조
 --------
-- ADR-006 — provider wrapper 금지 (Protocol input shape만)
 - ADR-009 — make_feature_id/source_record_key/payload_hash
-- ADR-013/014 — bulk insert + BRIN
 - ADR-018 — Feature.detail은 PlaceDetail/NoticeDetail instance
-- ADR-024 — canonical provider name `python-krex-api`
-- ADR-027 — NOTICE_TYPES (traffic/road_closure/roadwork/safety...) +
-  normalize_notice_type alias
-- ADR-041 — address utility 활용
+- ADR-027 — NOTICE_TYPES + normalize_notice_type alias
+- ADR-098 — identity ``(dataset, kind, natural_key)``
+- ADR-106 — 원천을 kor-travel-transport export로 이관
 
 설계 메모
 --------
-- rest_area dataset(`tn_pubr_public_rest_area_api`)에는 안정 식별자가 없어
-  (ADR-044 실측) 자연키를 krtour 측에서 `name`+`route_name`+`direction`으로
-  파생한다(`_rest_area_natural_key`). 이 파생키 → `feature_id` 매핑은 본 함수가
-  결정. 호출자는 prices 변환 시 동일 `feature_id`를 전달
-  (`KrexRestAreaCatalog` 같은 캐시 책임). prices row의 `uni_id`는 별도
-  dataset의 자연키로 본 reconciliation 범위 밖이다.
-- 가격은 `REST_AREA_FOOD`(식음료) 또는 `REST_AREA_FUEL`(주유) — 입력 row의
-  category 필드로 분기.
-- 교통 공지(traffic notice)는 provider ``krex.models.Incident``를 mirror한다
-  (ADR-044 실측 — provider PR#9에서 실시간 돌발 API ``openapi/burstInfo/
-  realTimeSms``(apiId 0611)로 repoint, #378). Incident가 노출하는 건
-  occurred_date/occurred_time/incident_type(+code)/direction/message/point_name/
-  route_no/route_name/process_status(+code)/latitude/longitude/congestion_length/
-  series_no/raw이며, notice Feature에 필요한 나머지 파생값(자연키·제목·
-  notice_type·효력기간·source_agency)은 krtour 변환부
-  (`_traffic_notice_item_to_bundle`)가 생성한다.
-- Incident에는 안정 식별자가 없어 자연키를 krtour 측에서 파생한다
-  (`_traffic_notice_natural_key`): occurred_date + occurred_time + route_no +
-  direction + point_name + incident_type_code. 좌표(latitude/longitude)는
-  일부 row에만 있다(실측 36/99) —
-  좌표가 있으면 Coordinate + reverse geocoding, 없으면 **coordless**
-  (bjd_code 미상 → global feature_id, 노선/지점/방향이 위치 단서).
-- **transient 주의**: EX 돌발(incident) feed는 해소된 사건이 사라지는 휘발성
-  피드다. notice Feature로 적재하면 재실행마다 현재 활성 집합으로 refresh된다.
-  realTimeSms에는 종료 시각 컬럼이 없어 `valid_until`은 None — 만료는 feed
-  refresh(사라짐) + `process_status`(payload 보존)가 표현한다. 실행 사이 stale
-  Feature가 남는 건 정상 동작이다.
+- 휴게소 기준정보에는 안정 식별자가 없어 자연키를 `name`+`route_name`+`direction`으로
+  파생한다(`_rest_area_natural_key`). transport가 같은 규칙으로 만든 ``natural_key``를 함께
+  주며, 두 값이 다르면 계약 위반으로 실패한다.
+- 돌발 notice는 사건 단서로 자연키를 파생한다(`_traffic_notice_natural_key`): occurred_date +
+  occurred_time + route_no + direction + point_name + incident_type_code. 좌표는 일부 사건에만
+  있다 — 없으면 **coordless**(bjd_code 미상 → global feature_id).
+- **transient**: 돌발 feed는 해소된 사건이 사라지는 휘발성 피드다. transport의 활성 집합
+  export(마지막 성공 수집이 본 사건 전체)를 그대로 reconcile하므로 여기 없는 계보는 닫힌다.
+  원천에 종료 시각 컬럼이 없어 `valid_until`은 None이다.
 """
 
 from __future__ import annotations
@@ -62,7 +40,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Final, Literal, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
 from kortravelmap.core.address import (
     extract_sido_code,
@@ -96,26 +74,26 @@ from kortravelmap.geocoding import (
     ReverseGeocoder,
     cached_reverse_geocoder,
 )
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_HIGHWAY_INCIDENTS,
+    DATASET_KEY_REST_AREA_FUEL_PRICES,
+    DATASET_KEY_REST_AREAS,
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+)
 
 __all__ = [
     # Protocols
     "KrexRestAreaItem",
     "KrexRestAreaFuelPriceRecord",
-    "KrexRestAreaPriceItem",
     "KrexTrafficNoticeItem",
     # 변환 함수
     "rest_areas_to_bundles",
-    "rest_area_prices_to_values",
     "rest_area_fuel_price_records_to_features_and_values",
     "build_rest_area_place_locator",
     "rest_area_place_locator_from_rows",
     "RestAreaPlaceLocator",
     "traffic_notices_to_bundles",
     # 메타
-    "KREX_PROVIDER_NAME",
-    "REST_AREA_DATASET_KEY",
-    "REST_AREA_PRICES_DATASET_KEY",
-    "TRAFFIC_NOTICES_DATASET_KEY",
     "REST_AREA_SOURCE_ENTITY_TYPE",
     "REST_AREA_CATEGORY",
     "TRAFFIC_NOTICE_CATEGORY",
@@ -129,13 +107,6 @@ __all__ = [
 
 
 # -- 상수 --------------------------------------------------------------
-
-KREX_PROVIDER_NAME: Final[str] = "python-krex-api"
-"""canonical provider name (ADR-024)."""
-
-REST_AREA_DATASET_KEY: Final[str] = "krex_rest_areas"
-REST_AREA_PRICES_DATASET_KEY: Final[str] = "krex_rest_area_prices"
-TRAFFIC_NOTICES_DATASET_KEY: Final[str] = "krex_traffic_notices"
 
 _REST_AREA_ENTITY_TYPE: Final[str] = "rest_area"
 _REST_AREA_PRICE_ENTITY_TYPE: Final[str] = "rest_area_price"
@@ -214,31 +185,8 @@ class KrexRestAreaItem(Protocol):
 
 
 @runtime_checkable
-class KrexRestAreaPriceItem(Protocol):
-    """krex 휴게소 가격 시계열 row shape (식음료 또는 주유)."""
-
-    uni_id: str
-    """휴게소 자연키."""
-
-    category: Literal["food", "fuel"]
-    """``food`` (식음료) 또는 ``fuel`` (주유) — PriceDomain 분기."""
-
-    product_key: str
-    """제품/메뉴 코드 (예: 'gasoline'/'diesel' 또는 'menu_001')."""
-
-    product_name: str | None
-    """제품/메뉴 한글 이름."""
-
-    price: str | Decimal | int | float
-    """가격 (KRW). food는 KRW/item, fuel은 KRW/L."""
-
-    observed_at: datetime
-    """관측 시각 (KST aware)."""
-
-
-@runtime_checkable
 class KrexRestAreaFuelPriceRecord(Protocol):
-    """krex ``restarea.fuel_prices`` row shape."""
+    """휴게소 주유소 현재 유가 row shape(transport ``rest-area-fuel-prices`` item)."""
 
     service_area_code: str
     """휴게소/주유소 안정 코드. price Feature 자연키."""
@@ -252,7 +200,9 @@ class KrexRestAreaFuelPriceRecord(Protocol):
     gasoline_price: int | Decimal | None
     diesel_price: int | Decimal | None
     lpg_price: int | Decimal | None
-    raw: dict[str, Any]
+    observed_at: datetime
+    """원천에 관측 시각이 없어 transport 수집 시각이다(PriceValue ``observed_at``)."""
+    raw: Mapping[str, Any]
 
 
 @runtime_checkable
@@ -331,7 +281,7 @@ class KrexTrafficNoticeItem(Protocol):
     series_no: int | None
     """연번. (provider ``Incident.series_no`` ← 원천 ``seriesNM``)"""
 
-    raw: dict[str, Any]
+    raw: Mapping[str, Any]
     """provider 원본 row. 자연키 hash + payload 보존에 사용. (provider ``Incident.raw``)"""
 
 
@@ -436,6 +386,12 @@ async def _rest_area_item_to_bundle(
     )
 
     natural_key = _rest_area_natural_key(item)
+    supplied_key = getattr(item, "natural_key", None)
+    if supplied_key is not None and supplied_key != natural_key:
+        # transport와 Map의 자연키 규칙이 갈라지면 같은 휴게소가 두 Feature로 갈린다.
+        raise ValueError(
+            f"휴게소 자연키 불일치: transport={supplied_key!r}, map={natural_key!r}"
+        )
     raw_data: dict[str, Any] = {
         "natural_key": natural_key,
         "name": item.name,
@@ -447,8 +403,8 @@ async def _rest_area_item_to_bundle(
     }
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_DATASET_KEY,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_REST_AREAS,
         source_entity_type=_REST_AREA_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
@@ -457,7 +413,7 @@ async def _rest_area_item_to_bundle(
         bjd_code=bjd_code,
         kind=FeatureKind.PLACE.value,
         category=REST_AREA_CATEGORY,
-        source_type=f"{KREX_PROVIDER_NAME}:{REST_AREA_DATASET_KEY}",
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_REST_AREAS}",
         source_natural_key=natural_key,
     )
 
@@ -492,8 +448,8 @@ async def _rest_area_item_to_bundle(
     )
 
     source_record = SourceRecord(
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        dataset_key=REST_AREA_DATASET_KEY,
+        provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
+        dataset_key=DATASET_KEY_REST_AREAS,
         source_entity_type=_REST_AREA_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
@@ -557,79 +513,7 @@ async def rest_areas_to_bundles(
     return bundles
 
 
-# -- rest_area_prices → PriceValue 시계열 ------------------------------
-
-
-def _price_domain_for(category: str) -> PriceDomain:
-    if category == "fuel":
-        return PriceDomain.REST_AREA_FUEL
-    if category == "food":
-        return PriceDomain.REST_AREA_FOOD
-    raise ValueError(
-        f"krex rest_area price category는 'food' or 'fuel' (got {category!r})."
-    )
-
-
-def _price_unit_for(category: str) -> str:
-    return "KRW/L" if category == "fuel" else "KRW"
-
-
-def _rest_area_price_item_to_value(
-    item: KrexRestAreaPriceItem,
-    *,
-    feature_id: str,
-    source_record_key: str | None,
-) -> PriceValue:
-    value_number = _parse_numeric(item.price)
-    if value_number is None:
-        raise ValueError(
-            f"krex rest_area price.price이 numeric이 아님 — uni_id={item.uni_id!r}, "
-            f"product_key={item.product_key!r}, raw={item.price!r}."
-        )
-
-    payload: dict[str, Any] = {
-        "uni_id": item.uni_id,
-        "category": item.category,
-        "product_key": item.product_key,
-        "product_name": item.product_name,
-        "price": str(item.price),
-        "observed_at": item.observed_at.isoformat(),
-    }
-
-    return PriceValue(
-        feature_id=feature_id,
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        price_domain=_price_domain_for(item.category),
-        product_key=item.product_key,
-        product_name=normalize_korean_text(item.product_name),
-        observed_at=item.observed_at,
-        value_number=value_number,
-        unit=_price_unit_for(item.category),
-        normalization_version="krex-v1.0",
-        payload=payload,
-        source_record_key=source_record_key,
-    )
-
-
-def rest_area_prices_to_values(
-    items: Iterable[KrexRestAreaPriceItem],
-    *,
-    feature_id: str,
-    source_record_key: str | None = None,
-) -> list[PriceValue]:
-    """krex 휴게소 가격 시계열 → ``list[PriceValue]``.
-
-    `feature_id`는 호출자가 `rest_areas_to_bundles` 결과의 feature_id를 전달.
-    """
-    return [
-        _rest_area_price_item_to_value(
-            item,
-            feature_id=feature_id,
-            source_record_key=source_record_key,
-        )
-        for item in items
-    ]
-
+# -- rest area fuel prices → price Feature + PriceValue -------------------
 
 _KREX_FUEL_PRODUCTS: Final[tuple[tuple[str, str, str, str], ...]] = (
     ("gasoline", "휘발유", "gasoline_price", "gasolinePrice"),
@@ -746,8 +630,8 @@ def _fuel_price_record_to_bundle_and_values(
     raw_data = _fuel_price_raw(record)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_REST_AREA_FUEL_PRICES,
         source_entity_type=_REST_AREA_PRICE_ENTITY_TYPE,
         source_entity_id=service_area_code,
         raw_payload_hash=payload_hash,
@@ -756,7 +640,7 @@ def _fuel_price_record_to_bundle_and_values(
         bjd_code=None,
         kind=FeatureKind.PRICE.value,
         category=REST_AREA_CATEGORY,
-        source_type=f"{KREX_PROVIDER_NAME}:{REST_AREA_PRICES_DATASET_KEY}",
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_REST_AREA_FUEL_PRICES}",
         source_natural_key=service_area_code,
     )
 
@@ -771,13 +655,13 @@ def _fuel_price_record_to_bundle_and_values(
         values.append(
             PriceValue(
                 feature_id=feature_id,
-                provider=normalize_provider_name(KREX_PROVIDER_NAME),
+                provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
                 price_domain=PriceDomain.REST_AREA_FUEL,
                 product_key=product_key,
                 product_name=product_name,
                 source_product_key=source_key,
                 source_product_name=product_name,
-                observed_at=fetched_at,
+                observed_at=record.observed_at,
                 value_number=value_number,
                 unit="KRW/L",
                 normalization_version="krex-v1.0",
@@ -787,7 +671,7 @@ def _fuel_price_record_to_bundle_and_values(
                     "product_key": product_key,
                     "product_name": product_name,
                     "price": str(raw_price),
-                    "observed_at": fetched_at.isoformat(),
+                    "observed_at": record.observed_at.isoformat(),
                 },
                 source_record_key=source_record_key,
             )
@@ -824,8 +708,8 @@ def _fuel_price_record_to_bundle_and_values(
         detail=None,
     )
     source_record = SourceRecord(
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+        provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
+        dataset_key=DATASET_KEY_REST_AREA_FUEL_PRICES,
         source_entity_type=_REST_AREA_PRICE_ENTITY_TYPE,
         source_entity_id=service_area_code,
         raw_payload_hash=payload_hash,
@@ -1041,8 +925,8 @@ async def _traffic_notice_item_to_bundle(
     raw_data = dict(item.raw)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
-        provider=KREX_PROVIDER_NAME,
-        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
         source_entity_type=_TRAFFIC_NOTICE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
@@ -1054,7 +938,7 @@ async def _traffic_notice_item_to_bundle(
         bjd_code=None,
         kind=FeatureKind.NOTICE.value,
         category=TRAFFIC_NOTICE_CATEGORY,
-        source_type=f"{KREX_PROVIDER_NAME}:{TRAFFIC_NOTICES_DATASET_KEY}",
+        source_type=f"{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_HIGHWAY_INCIDENTS}",
         source_natural_key=natural_key,
     )
 
@@ -1094,8 +978,8 @@ async def _traffic_notice_item_to_bundle(
     )
 
     source_record = SourceRecord(
-        provider=normalize_provider_name(KREX_PROVIDER_NAME),
-        dataset_key=TRAFFIC_NOTICES_DATASET_KEY,
+        provider=normalize_provider_name(KOR_TRAVEL_TRANSPORT_PROVIDER_NAME),
+        dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
         source_entity_type=_TRAFFIC_NOTICE_ENTITY_TYPE,
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,

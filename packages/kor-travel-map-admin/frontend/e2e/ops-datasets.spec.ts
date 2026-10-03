@@ -36,8 +36,8 @@ type ProviderRefreshPolicyUpsertRequest =
   components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
 
 const MOCK_OLD = "2026-06-01T00:00:00.000Z";
-const OPINET_PROVIDER = "python-opinet-api";
-const OPINET_DATASET = "opinet_gas_station_prices";
+const OPINET_PROVIDER = "kor-travel-transport";
+const OPINET_DATASET = "transport_fuel_prices";
 const OPINET_PROVIDER_DATASET_ID = 101;
 const OPINET_SCOPE = "target_grids";
 const OPINET_OPERATION_KEY = "opinet_refresh";
@@ -51,8 +51,8 @@ const OPINET_DEEP_LINK =
 const MOIS_PROVIDER = "python-mois-api";
 const MOIS_DATASET = "mois_license_features_bulk";
 const MOIS_PROVIDER_DATASET_ID = 102;
-const KREX_PROVIDER = "python-krex-api";
-const KREX_DATASET = "krex_rest_areas";
+const KREX_PROVIDER = "kor-travel-transport";
+const KREX_DATASET = "transport_rest_areas";
 const KREX_PROVIDER_DATASET_ID = 103;
 const REQUEST_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const NEW_REQUEST_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -112,9 +112,9 @@ function makeScheduleSummary(
   return {
     source: "dagster_graphql",
     basis: "dagster_operation_key_tag",
-    schedule_names: ["feature_price_opinet_gas_station_prices_hourly_schedule"],
+    schedule_names: ["feature_price_transport_fuel_prices_hourly_schedule"],
     active_schedule_names: [
-      "feature_price_opinet_gas_station_prices_hourly_schedule",
+      "feature_price_transport_fuel_prices_hourly_schedule",
     ],
     next_scheduled_at: "2026-07-15T01:20:00.000Z",
     status: "RUNNING",
@@ -242,7 +242,7 @@ function makeExecution(
     status: "done",
     pair_status: "done",
     operation_member_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-    operation_key: "feature_price_opinet_gas_station_prices_job",
+    operation_key: "feature_price_transport_fuel_prices_job",
     provider_datasets: [
       {
         provider: OPINET_PROVIDER,
@@ -279,7 +279,7 @@ function makeExecution(
       trigger_kind: "manual",
       detail_url: `/v1/ops/pipeline/executions/import_job/${JOB_ID}`,
       depth: 1,
-      operation_key: "feature_price_opinet_gas_station_prices_job",
+      operation_key: "feature_price_transport_fuel_prices_job",
     },
     ...overrides,
   };
@@ -883,7 +883,7 @@ async function mockPipelineRequests(
             current_stage: null,
             job_kind: null,
             load_batch_id: null,
-            operation_key: "feature_price_opinet_gas_station_prices_job",
+            operation_key: "feature_price_transport_fuel_prices_job",
             operator: "local-admin",
             parent_job_id: null,
             priority: 75,
@@ -944,7 +944,7 @@ async function mockPipelineRequests(
             run_mode: "now",
             scope_type: "provider_dataset",
             trigger_kind: "manual",
-            operation_key: "feature_price_opinet_gas_station_prices_job",
+            operation_key: "feature_price_transport_fuel_prices_job",
             detail_url: `/v1/ops/pipeline/executions/update_request/${queriedRequestId}`,
             cancellation: null,
             projected_job: {
@@ -964,7 +964,7 @@ async function mockPipelineRequests(
               depth: 1,
               load_batch_id: null,
               parent_job_id: null,
-              operation_key: "feature_price_opinet_gas_station_prices_job",
+              operation_key: "feature_price_transport_fuel_prices_job",
             },
           },
         },
@@ -1230,7 +1230,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       grid.getByRole("columnheader", { name: "마지막 실패" }),
     ).toBeVisible();
     // 3원 행 — scope가 canonical target_grids로 노출.
-    const opinetRow = grid.getByRole("row", { name: /opinet_gas_station_prices/ });
+    const opinetRow = grid.getByRole("row", { name: /transport_fuel_prices/ });
     await expect(opinetRow).toContainText(OPINET_SCOPE);
     // never_run 행은 "미실행" 상태 배지.
     const moisRow = grid.getByRole("row", {
@@ -1238,7 +1238,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     });
     await expect(moisRow).toContainText("미실행");
     // 이슈/실패/오래됨 배지 + 정책 요약.
-    const krexRow = grid.getByRole("row", { name: /krex_rest_areas/ });
+    const krexRow = grid.getByRole("row", { name: /transport_rest_areas/ });
     await expect(krexRow).toContainText("allow_targeted");
     await expect(krexRow).toContainText("오래됨");
     await expect(krexRow.getByText("2", { exact: true })).toBeVisible();
@@ -1299,15 +1299,15 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     await page.goto("/ops/datasets");
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
-      grid.getByRole("row", { name: /opinet_gas_station_prices/ }),
+      grid.getByRole("row", { name: /transport_fuel_prices/ }),
     ).toBeVisible();
 
     await page.getByLabel("검색").fill("krex");
     await expect(
-      grid.getByRole("row", { name: /krex_rest_areas/ }),
+      grid.getByRole("row", { name: /transport_rest_areas/ }),
     ).toBeVisible();
     await expect(
-      grid.getByRole("row", { name: /opinet_gas_station_prices/ }),
+      grid.getByRole("row", { name: /transport_fuel_prices/ }),
     ).toHaveCount(0);
 
     await page.getByLabel("검색").fill("");
@@ -1316,12 +1316,12 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       grid.getByRole("row", { name: /mois_license_features_bulk/ }),
     ).toBeVisible();
     await expect(
-      grid.getByRole("row", { name: /krex_rest_areas/ }),
+      grid.getByRole("row", { name: /transport_rest_areas/ }),
     ).toHaveCount(0);
 
     await page.locator("#datasets-status").selectOption("issues");
     await expect(
-      grid.getByRole("row", { name: /krex_rest_areas/ }),
+      grid.getByRole("row", { name: /transport_rest_areas/ }),
     ).toBeVisible();
     await expect(
       grid.getByRole("row", { name: /mois_license_features_bulk/ }),
@@ -2917,7 +2917,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     const grid = page.getByRole("table", { name: "데이터셋 그리드" });
     await expect(
       grid
-        .getByRole("row", { name: /opinet_gas_station_prices/ })
+        .getByRole("row", { name: /transport_fuel_prices/ })
         .getByText("확인 불가"),
     ).toBeVisible();
   });

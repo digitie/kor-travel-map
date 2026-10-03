@@ -84,8 +84,8 @@ __all__ = [
     "raise_terminal_if_quota_exhausted",
 ]
 
-#: HTTP 상태를 실어 나르는 속성 이름 — provider lib마다 다르다(실측: visitkorea·kma·
-#: opinet은 ``status_code``, krex는 ``http_status``).
+#: HTTP 상태를 실어 나르는 속성 이름 — provider lib마다 다르다(실측: visitkorea 등은
+#: ``status_code``, 일부는 ``http_status``).
 _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
 
 #: ``failure_kind``를 붙이지 않는 lib의 쿼터 예외 — ``(top-level 모듈, 클래스 이름)``.
@@ -105,18 +105,13 @@ _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
 #:   **어느 쪽인지 알려 주는 속성이 없다**(``_http.py:208``/``:225``). 가를 수단이
 #:   없어 넣지 않는다.
 #: - ``datagokr`` · ``mois`` · ``krmois`` — 쿼터 전용 예외 자체가 없다.
-QUOTA_EXCEPTION_TYPES: Final[frozenset[tuple[str, str]]] = frozenset(
-    {
-        # 2026-10-01 — ``("airkorea", "AirKoreaRateLimitError")``를 뺐다. Map은 에어코리아를
-        # 부르지 않는다(ADR-105: weather kind 적재 전부 제거) — 발화할 경로가 없는 선언은
-        # 실물 lib 계약 검사만 붙들고 있다.
-        # 429에는 ``http_status``가 붙고 EXCEEDED_LIMIT/code 22에는 붙지 않는다 —
-        # 아래 429 판정이 둘을 가른다.
-        ("krex", "KrexQuotaExceededError"),
-        # HTTP 경로에 ``status_code``가 붙는다. 같은 이유로 429는 걸러진다.
-        ("opinet", "OpinetRateLimitError"),
-    }
-)
+#:
+#: 2026-10-01 — ``("airkorea", "AirKoreaRateLimitError")``를 뺐다(ADR-105: Map은 에어코리아를
+#: 부르지 않는다). 2026-10-02 — ``("krex", "KrexQuotaExceededError")``·
+#: ``("opinet", "OpinetRateLimitError")``도 뺐다(ADR-106: 그 데이터는 kor-travel-transport
+#: export에서 받고 상류 쿼터는 transport가 진다). 남은 선언이 없어 집합이 비었다 —
+#: ``failure_kind`` 경로는 그대로 산다. 새 쿼터 예외는 여기 ``(모듈, 클래스)``로 더한다.
+QUOTA_EXCEPTION_TYPES: Final[frozenset[tuple[str, str]]] = frozenset()
 
 
 def _http_status(exc: BaseException) -> int | None:

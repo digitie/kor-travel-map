@@ -111,8 +111,8 @@ def _nearby_row() -> NearbyFeatureRow:
         lon=126.98,
         lat=37.56,
         distance_m=320.5,
-        primary_provider="python-opinet-api",
-        primary_dataset_key="opinet_stations",
+        primary_provider="kor-travel-transport",
+        primary_dataset_key="transport_fuel_stations",
         last_updated_at=now,
         feature_uuid=_nearby_expected_uuid("feature-1"),
     )
@@ -267,7 +267,7 @@ def test_put_poi_cache_target_uses_transaction(
         assert kwargs["lon"] == 126.978
         assert kwargs["on_conflict"] == "reject"
         assert kwargs["provider_overrides"] == {
-            "python-krex-api:krex_traffic_notices": {
+            "kor-travel-transport:transport_highway_incidents": {
                 "targeted_policy": "allow_targeted",
                 "min_interval_seconds": 300,
             }
@@ -290,7 +290,7 @@ def test_put_poi_cache_target_uses_transaction(
             "coord": {"lon": 126.978, "lat": 37.5665},
             "radius_km": 5.0,
             "provider_overrides": {
-                "python-krex-api:krex_traffic_notices": {
+                "kor-travel-transport:transport_highway_incidents": {
                     "targeted_policy": "allow_targeted",
                     "min_interval_seconds": 300,
                 }
@@ -666,7 +666,7 @@ def test_features_nearby_by_target_passes_filters(
         assert kwargs["radius_km"] == 3.0
         assert kwargs["kinds"] == ["place"]
         assert kwargs["categories"] == ["06020000"]
-        assert kwargs["providers"] == ["python-opinet-api"]
+        assert kwargs["providers"] == ["kor-travel-transport"]
         assert kwargs["sort"] == "distance"
         assert kwargs["limit"] == 10
         return NearbyFeaturePage(items=(_nearby_row(),), next_cursor="next")
@@ -686,7 +686,7 @@ def test_features_nearby_by_target_passes_filters(
             ("radius_km", "3.0"),
             ("kind", "place"),
             ("category", "06020000"),
-            ("provider", "python-opinet-api"),
+            ("provider", "kor-travel-transport"),
             ("page_size", "10"),
         ],
     )

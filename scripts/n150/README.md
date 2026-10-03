@@ -95,7 +95,7 @@ POST — gateway가 받는 모양). 인증 없는 Map 전용 공개 URL이면 �
 
 ```
 E2E_C7_UPDATE_REQUEST_WRITE=1
-E2E_C7_UPDATE_REQUEST_OPERATION=feature_place_krairport_airports_job
+E2E_C7_UPDATE_REQUEST_OPERATION=feature_place_transport_airports_job
 ```
 
 첫째는 실제 prod 쓰기에 대한 명시 opt-in이고(번들 공항 place feature의 idempotent upsert,

@@ -20,8 +20,8 @@ from kortravelmap.infra.feature_repo import (
 
 from kortravelmap.dagster import assets as assets_module
 from kortravelmap.dagster.assets import (
-    KREX_NOTICE_PROVIDER_RUN_LOCK,
-    run_feature_notice_krex_traffic_notices,
+    HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK,
+    run_feature_notice_transport_highway_incidents,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
@@ -34,7 +34,7 @@ _FETCHED_AT = datetime(2026, 7, 13, 12, 0, tzinfo=_KST)
 # (ADR-088). asset은 provider/dataset label에서 이 행을 역산하지 않고 feature
 # operation guard가 고정한 membership만 쓴다 — asset 이름과 operation key는
 # registry에서 1:1(`run_<asset>` ↔ `<asset>_job`)이다.
-_OPERATION_KEY = "feature_notice_krex_traffic_notices_job"
+_OPERATION_KEY = "feature_notice_transport_highway_incidents_job"
 _MEMBERSHIP = ProviderDatasetOperationMembership(
     provider_dataset_id=4101,
     sync_scope="dataset_wide",
@@ -104,8 +104,8 @@ class _Client:
     ) -> NoticeFeatureLoadResult:
         materialized = list(bundles)
         self.events.append("atomic_notice")
-        assert provider == "python-krex-api"
-        assert dataset_key == "krex_traffic_notices"
+        assert provider == "kor-travel-transport"
+        assert dataset_key == "transport_highway_incidents"
         assert source_entity_type == "traffic_notice"
         assert active_lineage_keys == set()
         assert observed_at == _FETCHED_AT
@@ -163,8 +163,8 @@ class _WatermarkClient(_Client):
         source_entity_type: str,
     ) -> datetime:
         self.events.append("scope_watermark")
-        assert provider == "python-krex-api"
-        assert dataset_key == "krex_traffic_notices"
+        assert provider == "kor-travel-transport"
+        assert dataset_key == "transport_highway_incidents"
         assert source_entity_type == "traffic_notice"
         return self.watermark
 
@@ -193,7 +193,7 @@ def _context(
             "reverse_geocoder": reverse_geocoder,
             "fetched_at": _FETCHED_AT,
             "strict_address": True,
-            "krex_traffic_notices": notices,
+            "transport_highway_incidents": notices,
             "feature_operation_guard": _guard(client),
         }
     )
@@ -202,14 +202,14 @@ def _context(
 async def test_empty_snapshot_reconciles_before_sync_success() -> None:
     client = _Client()
 
-    result = await run_feature_notice_krex_traffic_notices(_context(client))
+    result = await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert result.load.bundles_total == 0
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
         "atomic_notice",
         "sync_success",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
     [success] = client.success_calls
     assert success["cursor"]["notices_closed"] == 2
@@ -219,14 +219,14 @@ async def test_sync_state_is_read_and_written_on_the_guarded_membership() -> Non
     """T-VN-33: sync cursor read/write는 guard가 고정한 exact membership에만 간다."""
     client = _Client()
 
-    await run_feature_notice_krex_traffic_notices(_context(client))
+    await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert client.resolve_membership_calls == [_OPERATION_KEY, _OPERATION_KEY]
     assert client.resolve_dataset_membership_calls == [
         {
             "operation_key": _OPERATION_KEY,
-            "provider": "python-krex-api",
-            "dataset_key": "krex_traffic_notices",
+            "provider": "kor-travel-transport",
+            "dataset_key": "transport_highway_incidents",
         }
     ] * 2
     assert client.state_calls == [_MEMBERSHIP]
@@ -238,12 +238,12 @@ async def test_reconcile_failure_does_not_record_sync_success() -> None:
     client = _Client(reconcile_error=RuntimeError("reconcile failed"))
 
     with pytest.raises(RuntimeError, match="reconcile failed"):
-        await run_feature_notice_krex_traffic_notices(_context(client))
+        await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
         "atomic_notice",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
     assert client.success_calls == []
 
@@ -252,13 +252,13 @@ async def test_older_snapshot_fails_before_destructive_load() -> None:
     client = _WatermarkClient(_FETCHED_AT + timedelta(minutes=10))
 
     with pytest.raises(RuntimeError, match="watermark보다 과거"):
-        await run_feature_notice_krex_traffic_notices(_context(client))
+        await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
         "scope_watermark",
         "sync_watermark",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
     assert client.success_calls == []
 
@@ -266,30 +266,30 @@ async def test_older_snapshot_fails_before_destructive_load() -> None:
 async def test_same_snapshot_reaches_core_fingerprint_cas() -> None:
     client = _WatermarkClient(_FETCHED_AT)
 
-    await run_feature_notice_krex_traffic_notices(_context(client))
+    await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
         "scope_watermark",
         "sync_watermark",
         "atomic_notice",
         "sync_success",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
 
 
 async def test_newer_snapshot_records_applied_watermark() -> None:
     client = _WatermarkClient(_FETCHED_AT - timedelta(minutes=10))
 
-    await run_feature_notice_krex_traffic_notices(_context(client))
+    await run_feature_notice_transport_highway_incidents(_context(client))
 
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
         "scope_watermark",
         "sync_watermark",
         "atomic_notice",
         "sync_success",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
     [success] = client.success_calls
     assert success["cursor"]["snapshot_applied_at"] == _FETCHED_AT.isoformat()
@@ -314,7 +314,9 @@ async def test_notice_critical_path_skips_reverse_geocoding(
     monkeypatch.setattr(assets_module, "traffic_notices_to_bundles", _convert)
     client = _Client()
 
-    await run_feature_notice_krex_traffic_notices(_context(client, reverse_geocoder=object()))
+    await run_feature_notice_transport_highway_incidents(
+        _context(client, reverse_geocoder=object())
+    )
 
     assert seen_reverse_geocoders == [None]
 
@@ -328,10 +330,12 @@ async def test_incomplete_snapshot_fetch_does_not_reconcile() -> None:
     client = _Client()
 
     with pytest.raises(RuntimeError, match="중복 사건 identity"):
-        await run_feature_notice_krex_traffic_notices(_context(client, notices=_BrokenSnapshot()))
+        await run_feature_notice_transport_highway_incidents(
+            _context(client, notices=_BrokenSnapshot())
+        )
 
     assert client.events == [
-        f"lock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
-        f"unlock:{KREX_NOTICE_PROVIDER_RUN_LOCK}",
+        f"lock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
+        f"unlock:{HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK}",
     ]
     assert client.success_calls == []

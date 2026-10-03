@@ -1,5 +1,10 @@
 const KST_TIME_ZONE = "Asia/Seoul";
-const OPINET_PROVIDER = "python-opinet-api";
+/**
+ * OpiNet 주유소 가격 도메인. provider로 고르면 안 된다 — 2026-10-02(ADR-106)부터 OpiNet 주유소와
+ * 휴게소 유가가 같은 provider(`kor-travel-transport`)에서 오므로 휴게소 유가에도 OpiNet
+ * "과거 날짜" 표식이 붙는다. 도메인은 원천의 의미라서 provider가 바뀌어도 그대로다.
+ */
+const OPINET_PRICE_DOMAIN = "opinet_gas_station";
 const KST_UTC_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
 const kstDateFormatter = new Intl.DateTimeFormat("en-US", {
@@ -16,7 +21,7 @@ interface KstDateParts {
 }
 
 export interface PriceObservation {
-  provider?: string | null;
+  price_domain?: string | null;
   observed_at: string;
 }
 
@@ -84,7 +89,7 @@ export function opinetPastPriceLabel(
 ): string | null {
   const oldPoints: Array<{ point: PriceObservation; date: Date }> = [];
   for (const point of points) {
-    if (point.provider !== OPINET_PROVIDER) continue;
+    if (point.price_domain !== OPINET_PRICE_DOMAIN) continue;
     const date = new Date(point.observed_at);
     if (
       Number.isFinite(date.getTime()) &&

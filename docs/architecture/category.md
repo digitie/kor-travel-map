@@ -129,7 +129,7 @@ class PlaceCategory:
 | `03` | `LODGING` | 숙박 | MOIS 인허가 (숙박 슬러그), 산림청 휴양림, 표준데이터 |
 | `04` | `HOT_SPRING_SPA` | 온천·스파 | MOIS 인허가 (목욕장업) |
 | `05` | `CONVENIENCE` | 편의 | 표준데이터 (주차장은 교통에), 공중화장실 |
-| `06` | `TRANSPORT` | 교통 | OpiNet (주유소), KREX (휴게소), 표준데이터 (주차장), 공항 |
+| `06` | `TRANSPORT` | 교통 | OpiNet (주유소), KREX (휴게소), 표준데이터 (주차장), 공항 — 주유소·휴게소·공항은 2026-10-02부터 kor-travel-transport export 경유(ADR-106) |
 | `07` | `MEDICAL` | 의료 | MOIS 인허가 (의료 슬러그, 후속 검토) |
 
 `PlaceCategoryTier1Code` enum이 위 8개 코드를 정의. `PLACE_CATEGORY_TIER1_NAMES`
@@ -370,8 +370,8 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `python-mois-api` (숙박 슬러그) | `03010100`, `03050100`, `03050200`, `03060100`, `03060200`, `03070200` 등 | mois-feature-etl.md §6.1 |
 | `python-mois-api` (관광 슬러그) | `01070100` 전통사찰, `01080300` 관광유람선, `01040100` 박물관 등 | mois-feature-etl.md §6.1 |
 | `python-mois-api` (목욕장업) | `04020100` HOT_SPRING_SPA_SAUNA_BATHHOUSE | mois-feature-etl.md §6.1 |
-| `python-opinet-api` | `06020000` TRANSPORT_FUEL | opinet-place-price-etl.md |
-| `python-krex-api` (휴게소) | `06040101` TRANSPORT_REST_AREA_HIGHWAY_EX | krex-rest-area-feature-etl.md |
+| `kor-travel-transport` (`transport_fuel_stations`, OpiNet 원천 — ADR-106) | `06020000` TRANSPORT_FUEL | opinet-place-price-etl.md |
+| `kor-travel-transport` (`transport_rest_areas`, KREX 원천 — ADR-106) | `06040101` TRANSPORT_REST_AREA_HIGHWAY_EX | krex-rest-area-feature-etl.md |
 | `python-khoa-api` (해수욕장) | `01050100` TOURISM_NATURE_BEACH (전용 해수욕장 코드, DA-D-07 확정 2026-06-16) | khoa-beach-info-etl.md |
 | `python-krheritage-api` | `01070100` ~ `01070400` (사찰/궁궐/사적/한옥) | krheritage-feature-etl.md |
 | `python-krforest-api` (휴양림) | `03030000` LODGING_RECREATION_FOREST | forest-feature-etl.md |
@@ -385,7 +385,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | 공중화장실 (후속) | `05060000` CONVENIENCE_TOILET | (별도 dataset) |
 | `python-kma-api` (기상특보) | `99000000` sentinel (place 아님 — weather anchor) | kma-weather-etl.md |
 | `python-airkorea-api` (대기질 측정소) | `99000000` sentinel (place 아님 — air-quality anchor) | airkorea-feature-etl.md |
-| `python-krex-api` (교통 notice) | `99000000` sentinel (place 아님 — notice anchor) | notice-feature-etl.md |
+| `kor-travel-transport` (`transport_highway_incidents`, KREX 원천 — ADR-106) | `99000000` sentinel (place 아님 — notice anchor) | notice-feature-etl.md |
 
 위 매핑은 v2 1차 기준. 새 provider 추가 시 본 표 갱신 + ADR.
 

@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any
 
 import pytest
 
@@ -15,20 +15,24 @@ from kortravelmap.dto import (
     Address,
     FeatureBundle,
     FeatureKind,
-    PriceDomain,
     SourceRole,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_HIGHWAY_INCIDENTS as TRAFFIC_NOTICES_DATASET_KEY,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_REST_AREA_FUEL_PRICES as REST_AREA_PRICES_DATASET_KEY,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_REST_AREAS as REST_AREA_DATASET_KEY,
 )
 from kortravelmap.providers.krex import (
     REST_AREA_CATEGORY,
-    REST_AREA_DATASET_KEY,
     REST_AREA_MARKER_ICON,
-    REST_AREA_PRICES_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
-    TRAFFIC_NOTICES_DATASET_KEY,
     build_rest_area_place_locator,
     rest_area_fuel_price_records_to_features_and_values,
     rest_area_place_locator_from_rows,
-    rest_area_prices_to_values,
 )
 from kortravelmap.providers.krex import (
     rest_areas_to_bundles as _rest_areas_to_bundles_async,
@@ -185,7 +189,7 @@ def test_rest_areas_feature_metadata() -> None:
 def test_rest_areas_source_record_provider_dataset() -> None:
     [bundle] = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
     src = bundle.source_record
-    assert src.provider == "python-krex-api"
+    assert src.provider == "kor-travel-transport"
     assert src.dataset_key == REST_AREA_DATASET_KEY
     assert src.source_entity_type == "rest_area"
     assert src.fetched_at == _NOW
@@ -208,35 +212,6 @@ def test_rest_areas_bundle_fk_consistency() -> None:
         assert bundle.source_record.source_record_key == bundle.source_link.source_record_key
 
 
-# ── rest_area_prices → PriceValue ──────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _Price:
-    uni_id: str
-    category: Literal["food", "fuel"]
-    product_key: str
-    product_name: str | None
-    price: str | Decimal | int | float
-    observed_at: datetime
-
-
-_PRICE_FUEL = _Price(
-    uni_id="RA-001",
-    category="fuel",
-    product_key="gasoline",
-    product_name="휘발유",
-    price="1820",
-    observed_at=_NOW,
-)
-_PRICE_FOOD = _Price(
-    uni_id="RA-001",
-    category="food",
-    product_key="menu_001",
-    product_name="우동",
-    price="5500",
-    observed_at=_NOW,
-)
 _FEATURE_ID_RA_SEOSAN = "f_global_p_ra_seosan_demo"
 
 
@@ -253,52 +228,7 @@ class _FuelPriceRecord:
     diesel_price: int | None
     lpg_price: int | None
     raw: dict[str, Any]
-
-
-@pytest.mark.unit
-def test_prices_fuel_kw_per_l() -> None:
-    [v] = rest_area_prices_to_values([_PRICE_FUEL], feature_id=_FEATURE_ID_RA_SEOSAN)
-    assert v.price_domain == PriceDomain.REST_AREA_FUEL
-    assert v.unit == "KRW/L"
-    assert v.value_number == Decimal("1820")
-    assert v.product_key == "gasoline"
-    assert v.product_name == "휘발유"
-
-
-@pytest.mark.unit
-def test_prices_food_krw() -> None:
-    [v] = rest_area_prices_to_values([_PRICE_FOOD], feature_id=_FEATURE_ID_RA_SEOSAN)
-    assert v.price_domain == PriceDomain.REST_AREA_FOOD
-    assert v.unit == "KRW"
-    assert v.value_number == Decimal("5500")
-
-
-@pytest.mark.unit
-def test_prices_bad_category_raises() -> None:
-    bad = _Price(
-        uni_id="X",
-        category="other",  # type: ignore[arg-type]
-        product_key="x",
-        product_name=None,
-        price="100",
-        observed_at=_NOW,
-    )
-    with pytest.raises(ValueError, match="'food' or 'fuel'"):
-        rest_area_prices_to_values([bad], feature_id=_FEATURE_ID_RA_SEOSAN)
-
-
-@pytest.mark.unit
-def test_prices_non_numeric_raises() -> None:
-    bad = _Price(
-        uni_id="X",
-        category="food",
-        product_key="x",
-        product_name=None,
-        price="문자열입니다",
-        observed_at=_NOW,
-    )
-    with pytest.raises(ValueError, match="numeric이 아님"):
-        rest_area_prices_to_values([bad], feature_id=_FEATURE_ID_RA_SEOSAN)
+    observed_at: datetime = _NOW
 
 
 @pytest.mark.unit
@@ -800,7 +730,7 @@ def test_traffic_notice_with_coord_builds_coordinate() -> None:
 def test_traffic_notice_source_record_provider() -> None:
     [bundle] = traffic_notices_to_bundles([_N_ROADWORK], fetched_at=_NOW)
     src = bundle.source_record
-    assert src.provider == "python-krex-api"
+    assert src.provider == "kor-travel-transport"
     assert src.dataset_key == TRAFFIC_NOTICES_DATASET_KEY
     assert src.source_entity_type == "traffic_notice"
 
@@ -816,18 +746,6 @@ def test_traffic_notice_source_link_primary() -> None:
 
 
 @pytest.mark.unit
-def test_multi_kind_pipeline_uses_same_feature_id() -> None:
-    """rest_areas → bundles → 그 feature_id로 prices 호출이 일관."""
-    [station_bundle] = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
-    fid = station_bundle.feature.feature_id
-
-    prices = rest_area_prices_to_values([_PRICE_FUEL, _PRICE_FOOD], feature_id=fid)
-
-    assert all(p.feature_id == fid for p in prices)
-
-
-@pytest.mark.unit
 def test_empty_iterables() -> None:
     assert rest_areas_to_bundles([], fetched_at=_NOW) == []
-    assert rest_area_prices_to_values([], feature_id=_FEATURE_ID_RA_SEOSAN) == []
     assert traffic_notices_to_bundles([], fetched_at=_NOW) == []

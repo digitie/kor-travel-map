@@ -24,10 +24,12 @@ import {
 // request 하나 → Map queue sensor(`feature_update_request_queue_sensor`)가 집음 → 공유 plane의
 // `feature_update_request_worker` run → API terminal `done` + Dagster run `SUCCESS`.
 //
-// 대상은 **upstream 호출이 0인** dataset 하나로 고정한다: `python-krairport-api` /
-// `krairport_airports`, operation `feature_place_krairport_airports_job`. fetcher
-// (`provider_fetchers.py::fetch_krairport_airports`)는 krairport의 번들 정적 공항 목록만
-// 읽는다(keyless, network 없음 — `tests/unit/test_c7_prod_live_runner_contract.py`가 결박).
+// 대상은 **외부 provider 호출이 0인** dataset 하나로 고정한다: `kor-travel-transport` /
+// `transport_airports`, operation `feature_place_transport_airports_job`. fetcher
+// (`provider_fetchers.py::fetch_transport_airports`)는 같은 호스트의 kor-travel-transport
+// 내부 export(`GET /v1/service/exports/airports`, krairport 번들 정적 공항 목록)를 한 번 부른다 —
+// 외부 provider·data.go.kr 쿼터 0이지만 **transport가 떠 있고 Map의 export 토큰이 맞아야**
+// 한다(ADR-106). 그 경로 하나만 허용됨을 `tests/unit/test_c7_prod_live_runner_contract.py`가 결박한다.
 //
 // **이것은 실제 prod 쓰기다.** worker가 번들 공항(2026-10 기준 활성 15곳)을 place feature로
 // 적재한다 — 같은 번들이면 같은 feature로 수렴하는 idempotent upsert이고(authoritative
@@ -52,9 +54,9 @@ type PipelineCancellationResponse =
   components["schemas"]["PipelineCancellationResponse"];
 
 /** 러너가 `E2E_C7_UPDATE_REQUEST_OPERATION`으로 같은 값을 선언해야 실행한다. */
-const SAFE_UPDATE_OPERATION = "feature_place_krairport_airports_job" as const;
-const SAFE_PROVIDER = "python-krairport-api" as const;
-const SAFE_DATASET_KEY = "krairport_airports" as const;
+const SAFE_UPDATE_OPERATION = "feature_place_transport_airports_job" as const;
+const SAFE_PROVIDER = "kor-travel-transport" as const;
+const SAFE_DATASET_KEY = "transport_airports" as const;
 const DATASET_WIDE_SYNC_SCOPE = "dataset_wide" as const;
 
 const PIPELINE_REQUESTS_PATH = "/v1/ops/pipeline/requests";

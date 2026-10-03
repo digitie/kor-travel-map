@@ -58,11 +58,11 @@ const CATALOG_OPERATION_KEY = "e2e_refresh";
 const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
-const SCHEDULE_NAME = "feature_notice_krex_traffic_notices_hourly_schedule";
+const SCHEDULE_NAME = "feature_notice_transport_highway_incidents_hourly_schedule";
 const PROVIDER_DATASET_IDS = {
-  "python-krex-api/krex_traffic_notices": 101,
+  "kor-travel-transport/transport_highway_incidents": 101,
   "python-mois-api/mois_licenses": 102,
-  "python-opinet-api/opinet_stations": 103,
+  "kor-travel-transport/transport_fuel_stations": 103,
 } as const;
 
 function providerDatasetId(provider: string, datasetKey: string): number {
@@ -198,9 +198,9 @@ function canonicalPipelineUrl(
 
 function makeCatalogResponse(
   items: OpsDatasetGridRow[] = [
-    makeCatalogRow("python-krex-api", "krex_traffic_notices", "target_grids"),
+    makeCatalogRow("kor-travel-transport", "transport_highway_incidents", "target_grids"),
     makeCatalogRow("python-mois-api", "mois_licenses", "dataset_wide"),
-    makeCatalogRow("python-opinet-api", "opinet_stations", "dataset_wide"),
+    makeCatalogRow("kor-travel-transport", "transport_fuel_stations", "dataset_wide"),
   ],
 ): OpsDatasetsGridResponse {
   return {
@@ -264,10 +264,10 @@ function makeExecution(
     operation_key: null,
     provider_datasets: [
       {
-        provider: "python-opinet-api",
-        dataset_key: "opinet_stations",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_fuel_stations",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_fuel_stations"],
         sync_scope: "dataset_wide",
         operation_key: "e2e_refresh",
         operation_member_id: SOLO_JOB_ID,
@@ -292,10 +292,10 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     created_at: "2026-07-14T10:00:00.000Z",
     provider_datasets: [
       {
-        provider: "python-krex-api",
-        dataset_key: "krex_traffic_notices",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_highway_incidents",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -346,10 +346,10 @@ function makeRoots(): PipelineExecutionRootRecord[] {
     created_at: "2026-07-14T09:00:00.000Z",
     provider_datasets: [
       {
-        provider: "python-opinet-api",
-        dataset_key: "opinet_stations",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_fuel_stations",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-opinet-api/opinet_stations"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_fuel_stations"],
         sync_scope: "dataset_wide",
         operation_key: "e2e_refresh",
         operation_member_id: SOLO_JOB_ID,
@@ -410,10 +410,10 @@ function makeOverflowExecution(index: number): PipelineExecutionRootRecord {
     created_at: createdAt,
     provider_datasets: [
       {
-        provider: "python-krex-api",
-        dataset_key: "krex_traffic_notices",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_highway_incidents",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: id,
@@ -444,7 +444,7 @@ function makeOverflowEvent(index: number): PipelineJobEventRecord {
     job_id: jobId,
     import_job_dataset_id: null,
     provider_dataset_id:
-      PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+      PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
     // member 없는 job-level event라 membership 두 축은 null이다.
     sync_scope: null,
     operation_key: null,
@@ -523,10 +523,10 @@ function makeDetail(): PipelineExecutionDetailResponse {
     job_kind: null,
     provider_datasets: [
       {
-        provider: "python-krex-api",
-        dataset_key: "krex_traffic_notices",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_highway_incidents",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -564,10 +564,10 @@ function makeDetail(): PipelineExecutionDetailResponse {
         operation_key: null,
         provider_datasets: [
           {
-            provider: "python-krex-api",
-            dataset_key: "krex_traffic_notices",
+            provider: "kor-travel-transport",
+            dataset_key: "transport_highway_incidents",
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+              PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
             sync_scope: "target_grids",
             operation_key: "e2e_refresh",
             operation_member_id: TWIN_JOB_ID,
@@ -585,14 +585,14 @@ function makeDetail(): PipelineExecutionDetailResponse {
         scope: {
           type: "provider_dataset",
           provider_dataset_id:
-            PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+            PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
           sync_scope: "target_grids",
           operation_key: KREX_OPERATION_KEY,
         },
         dataset_memberships: [
           {
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+              PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
             sync_scope: "target_grids",
             operation_key: "e2e_refresh",
           },
@@ -622,7 +622,7 @@ function makeDetail(): PipelineExecutionDetailResponse {
           job_id: TWIN_JOB_ID,
           import_job_dataset_id: null,
           provider_dataset_id:
-            PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+            PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
           // 이 이벤트는 TWIN_JOB_ID의 canonical membership에서 나온다 —
           // 그 job의 membership과 같은 두 축을 갖는다. 축을 null로 두면
           // exact scope 딥링크가 무엇을 걸러 보여주는지 화면에서 확인할 수 없다.
@@ -650,10 +650,10 @@ function makeImportDetail(): PipelineExecutionDetailResponse {
     status: "running",
     provider_datasets: [
       {
-        provider: "python-krex-api",
-        dataset_key: "krex_traffic_notices",
+        provider: "kor-travel-transport",
+        dataset_key: "transport_highway_incidents",
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
         sync_scope: "target_grids",
         operation_key: "e2e_refresh",
         operation_member_id: TWIN_JOB_ID,
@@ -694,7 +694,7 @@ function makeSchedules(): PipelineSchedulesResponse {
         {
           name: SCHEDULE_NAME,
           description: null,
-          pipeline_name: "krex_traffic_notices_job",
+          pipeline_name: "transport_highway_incidents_job",
           mode: "default",
           cron_schedule: "20 * * * *",
           default_cron_schedule: "20 * * * *",
@@ -1115,7 +1115,7 @@ async function installPipelineMocks(
           checked_at: "2026-07-14T10:00:00.000Z",
           run: {
             run_id: "run-orphan",
-            job_name: "krex_traffic_notices_job",
+            job_name: "transport_highway_incidents_job",
             status: "FAILURE",
             start_time: 1789344000,
             end_time: null,
@@ -1155,7 +1155,7 @@ async function installPipelineMocks(
           runs: [
             {
               run_id: "run-orphan",
-              job_name: "krex_traffic_notices_job",
+              job_name: "transport_highway_incidents_job",
               status: "FAILURE",
               start_time: 1789344000,
               end_time: null,
@@ -1663,14 +1663,14 @@ async function installPipelineMocks(
           scope: {
             type: "provider_dataset",
             provider_dataset_id:
-              PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+              PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
             sync_scope: "target_grids",
             operation_key: KREX_OPERATION_KEY,
           },
           dataset_memberships: [
             {
               provider_dataset_id:
-                PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+                PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
               sync_scope: "target_grids",
               operation_key: "e2e_refresh",
             },
@@ -1771,15 +1771,15 @@ test.describe("/ops/pipeline", () => {
     // 따로 exact match하던 이전 단언은 이제 존재하지 않는 노드를 찾았다.
     await expect(
       requestRow.getByText(
-        `python-krex-api/krex_traffic_notices · #${
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"]
+        `kor-travel-transport/transport_highway_incidents · #${
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"]
         } · target_grids · e2e_refresh`,
         { exact: true },
       ),
     ).toBeVisible();
     await expect(
       requestRow.getByText(
-        "python-krex-api/krex_traffic_notices · target_grids · e2e_refresh",
+        "kor-travel-transport/transport_highway_incidents · target_grids · e2e_refresh",
         { exact: true },
       ),
     ).toBeVisible();
@@ -2042,7 +2042,7 @@ test.describe("/ops/pipeline", () => {
     const eventCursor = "event-overflow-page-2";
     const exactPagedScope: ExactPagedScope = {
       pageSize: 50,
-      providerDatasetId: PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+      providerDatasetId: PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
       syncScope: "target_grids",
     };
     const counters = await installPipelineMocks(page, {
@@ -4146,7 +4146,7 @@ test.describe("/ops/pipeline", () => {
     expect(counters.requestBodies.at(0)).toMatchObject({
       scope: {
         provider_dataset_id:
-          PROVIDER_DATASET_IDS["python-krex-api/krex_traffic_notices"],
+          PROVIDER_DATASET_IDS["kor-travel-transport/transport_highway_incidents"],
         sync_scope: "target_grids",
         type: "provider_dataset",
       },

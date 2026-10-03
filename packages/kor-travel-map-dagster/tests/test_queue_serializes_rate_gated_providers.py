@@ -1,9 +1,11 @@
 """큐가 run을 동시에 띄워도 gate를 선언한 provider는 **한 번에 하나만** 지난다.
 
-`python-krex-api`는 초당 5건을 지킨다 — 그 보증은 **프로세스당**이다. 큐 센서는 틱당
-RunRequest를 10개 내고 `docker/dagster.yaml`이 `tag_concurrency_limits`로 4를 동시에
-돌리므로, run마다 `KrexClient`가 따로면 버킷도 따로여서 합계가 최대 **20 TPS**가
-된다(2026-09-14 적대 리뷰 둘이 독립적으로 짚은 자리).
+provider 라이브러리의 초당 상한은 **프로세스당**이다. 큐 센서는 틱당 RunRequest를 10개 내고
+`docker/dagster.yaml`이 `tag_concurrency_limits`로 4를 동시에 돌리므로, run마다 client가
+따로면 버킷도 따로여서 합계가 상한의 4배가 된다(2026-09-14 적대 리뷰, 당시 krex).
+
+현재 선언된 gate는 없다(krex는 ADR-106으로 Map이 직접 부르지 않는다). 장치는 남으므로
+여기서는 시험용 gate 하나를 표에 끼워 그 성질을 고정한다.
 
 **한 프로세스 안에서만 재면 이 구멍이 보이지 않는다.** 그래서 여기서는 서로 다른
 worker run을 흉내 낸다 — advisory lock 상태를 공유하는 **별개의 session 객체** 둘이
@@ -13,17 +15,33 @@ worker run을 흉내 낸다 — advisory lock 상태를 공유하는 **별개의
 from __future__ import annotations
 
 import asyncio
+from types import MappingProxyType
 from typing import Any, Final
 
 import pytest
 
-from kortravelmap.dagster.feature_update_runner import (
-    KREX_RATE_GATE,
-    PROVIDER_RATE_GATES,
-    provider_rate_gate,
-)
+from kortravelmap.dagster import feature_update_runner
+from kortravelmap.dagster.feature_update_runner import provider_rate_gate
 
-_GATE_COOLDOWN: Final[float] = PROVIDER_RATE_GATES[KREX_RATE_GATE]
+KREX_RATE_GATE: Final[str] = "test-gate"
+"""시험용 gate 이름(옛 krex와 같은 5 TPS 교대 간격)."""
+_GATE_COOLDOWN: Final[float] = 1.0 / 5.0
+
+
+@pytest.fixture(autouse=True)
+def _declare_test_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        feature_update_runner,
+        "PROVIDER_RATE_GATES",
+        MappingProxyType({KREX_RATE_GATE: _GATE_COOLDOWN}),
+    )
+
+
+def test_no_production_gate_is_declared_today() -> None:
+    """선언된 gate가 없다는 사실 자체를 고정한다 — 새 gate는 이 테스트와 함께 바꾼다."""
+    from kortravelmap.dagster.feature_update_runner import _OPERATION_RUNNER_SPEC_ROWS
+
+    assert {spec.rate_gate for spec in _OPERATION_RUNNER_SPEC_ROWS} == {None}
 
 
 class _SharedLockTable:

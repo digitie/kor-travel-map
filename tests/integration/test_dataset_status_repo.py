@@ -63,8 +63,8 @@ async def test_count_open_issues_groups_by_dataset_and_severity(
     )
     krex_dataset_id = await _provider_dataset_id(
         migrated_session,
-        provider="python-krex-api",
-        dataset_key="krex_rest_areas",
+        provider="kor-travel-transport",
+        dataset_key="transport_rest_areas",
     )
     await create_data_integrity_violation(
         migrated_session,

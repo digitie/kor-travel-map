@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-10-02T08:00:00Z",
+  "collection": {
+    "source": "krex_rest_area",
+    "last_success_at": "2026-10-01T18:40:00Z",
+    "failed": false,
+    "stale": false
+  },
+  "items": [
+    {
+      "natural_key": "행담도휴게소::서해안고속도로::목포방향",
+      "source": "krex_rest_area",
+      "name": "행담도휴게소",
+      "route_name": "서해안고속도로",
+      "direction": "목포방향",
+      "longitude": 126.8,
+      "latitude": 36.9,
+      "has_gas_station": true,
+      "has_lpg_station": false,
+      "has_ev_charger": true,
+      "phone_number": "031-000-0000",
+      "data_reference_date": "2026-09-01",
+      "first_seen_at": "2026-10-01T18:40:00Z",
+      "last_seen_at": "2026-10-01T18:40:00Z",
+      "raw": {
+        "restAreaNm": "행담도휴게소"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

@@ -29,9 +29,21 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Final
 
 from kortravelmap.providers.khoa import beaches_to_bundles
+from kortravelmap.providers.kor_travel_transport import (
+    DATASET_KEY_AIRPORTS,
+    DATASET_KEY_FUEL_PRICES,
+    DATASET_KEY_FUEL_STATIONS,
+    DATASET_KEY_HIGHWAY_INCIDENTS,
+    DATASET_KEY_REST_AREA_FUEL_PRICES,
+    DATASET_KEY_REST_AREAS,
+    KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+    parse_fuel_station,
+    parse_rest_area,
+    parse_rest_area_fuel_price,
+)
 from kortravelmap.providers.krairport import airports_to_bundles
 from kortravelmap.providers.krex import (
-    rest_area_prices_to_values,
+    rest_area_fuel_price_records_to_features_and_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -48,7 +60,7 @@ from kortravelmap.providers.mcst import (
     file_rows_to_bundles,
 )
 from kortravelmap.providers.opinet import (
-    prices_to_values,
+    station_prices_to_features_and_values,
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
@@ -154,170 +166,111 @@ async def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
-# ── opinet 주유소 + 가격 fixture ───────────────────────────────────────
+# ── kor-travel-transport 주유소·휴게소 fixture (ADR-106) ─────────────────
+#
+# 아래 fixture는 transport export JSON 모양 그대로이고 실 파서(``kor_travel_transport``)를
+# 지난다 — preview가 실제 계약과 갈라지지 않게 한다.
 
 
-@dataclass(frozen=True)
-class _Station:
-    """`OpinetStationItem` Protocol 준수 (provider `Station` 정렬, ADR-044)."""
+def _transport_fuel_station_json(
+    uni_id: str,
+    name: str,
+    brand: str,
+    address: str,
+    lon: float,
+    lat: float,
+    prices: dict[str, int | None],
+) -> dict[str, Any]:
+    observed = "2026-05-28T03:00:00Z"
+    return {
+        "natural_key": uni_id,
+        "source": "opinet_browser",
+        "name": name,
+        "brand_code": brand,
+        "brand_name": None,
+        "phone": "02-1234-5678",
+        "address": address,
+        "longitude": lon,
+        "latitude": lat,
+        "is_self": True,
+        "is_24h": False,
+        "has_carwash": True,
+        "has_maintenance": False,
+        "has_cvs": False,
+        "first_seen_at": observed,
+        "last_seen_at": observed,
+        "prices": [
+            {"product_code": code, "price": price, "provider_updated_at": observed,
+             "observed_at": observed, "collected_at": observed}
+            for code, price in prices.items()
+        ],
+        "raw": {"UNI_ID": uni_id, "OS_NM": name},
+    }
 
-    uni_id: str
-    name: str
-    brand: object | None
-    address_road: str | None
-    address_jibun: str | None
-    lon: float | None
-    lat: float | None
-    tel: str | None = None
-    lpg_yn: str | bool | None = None
 
-
-def _opinet_stations_fixture() -> Sequence[_Station]:
+def _transport_fuel_stations_fixture() -> Sequence[Any]:
     return [
-        _Station(
-            uni_id="A0000001",
-            name="SK주유소 강남점",
-            brand="SKE",
-            address_road="서울특별시 강남구 테헤란로 100",
-            address_jibun=None,
-            lon=127.0376,
-            lat=37.4979,
-            tel="02-1234-5678",
-            lpg_yn="Y",
-        ),
-        _Station(
-            uni_id="A0000002",
-            name="GS칼텍스 부산점",
-            brand="GSC",
-            address_road="부산광역시 해운대구 해운대로 200",
-            address_jibun=None,
-            lon=129.1604,
-            lat=35.1587,
-            tel="0517491234",
-            lpg_yn="N",
-        ),
+        parse_fuel_station(_transport_fuel_station_json(
+            "A0000001", "SK주유소 강남점", "SKE", "서울특별시 강남구 테헤란로 100",
+            127.0376, 37.4979, {"B027": 1820, "D047": 1650, "K015": None},
+        )),
+        parse_fuel_station(_transport_fuel_station_json(
+            "A0000002", "GS칼텍스 부산점", "GSC", "부산광역시 해운대구 해운대로 200",
+            129.1604, 35.1587, {"B027": 1790, "C004": 1100},
+        )),
     ]
 
 
-async def _convert_opinet_stations(items: Sequence[Any]) -> list[Any]:
+async def _convert_transport_fuel_stations(items: Sequence[Any]) -> list[Any]:
     bundles = await stations_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
-@dataclass(frozen=True)
-class _Price:
-    """`OpinetPriceItem` Protocol 준수."""
-
-    uni_id: str
-    prodcd: str
-    price: str
-    trade_dt: datetime
-
-
-def _opinet_prices_fixture() -> Sequence[_Price]:
-    t1 = datetime(2026, 5, 28, 3, 0, tzinfo=KST)
-    return [
-        _Price(uni_id="A0000001", prodcd="B027", price="1820", trade_dt=t1),
-        _Price(uni_id="A0000001", prodcd="D047", price="1650", trade_dt=t1),
-        _Price(uni_id="A0000001", prodcd="C004", price="1100", trade_dt=t1),
-    ]
-
-
-_FEATURE_ID_OPINET_STATION_DEMO = "f_1156010100_p_opinet_demo"
-
-
-async def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
-    values = prices_to_values(
-        items, feature_id=_FEATURE_ID_OPINET_STATION_DEMO
+async def _convert_transport_fuel_prices(items: Sequence[Any]) -> list[Any]:
+    _bundles, values = station_prices_to_features_and_values(
+        items, fetched_at=_now(), place_locator={}
     )
     return [v.model_dump(mode="json") for v in values]
 
 
-# ── krex 4 dataset fixtures (PR#45) ─────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class _RestArea:
-    """`KrexRestAreaItem` Protocol 준수 (provider ``krex.models.RestArea`` 정합).
-
-    안정 식별자·주소 컬럼 없음 — 자연키는 변환부에서
-    name+route_name+direction으로 파생 (ADR-044). lat/lon은 provider처럼 float.
-    """
-
-    name: str
-    route_name: str | None
-    direction: str | None
-    lat: float | None
-    lon: float | None
-    phone_number: str | None
-
-
-def _krex_rest_areas_fixture() -> Sequence[_RestArea]:
+def _transport_rest_areas_fixture() -> Sequence[Any]:
     return [
-        _RestArea(
-            name="서산휴게소",
-            route_name="서해안고속도로",
-            direction="부산방향",
-            lat=36.7800,
-            lon=126.6500,
-            phone_number="041-1234-5678",
-        ),
-        _RestArea(
-            name="경주휴게소",
-            route_name="경부고속도로",
-            direction="서울방향",
-            lat=35.8400,
-            lon=129.2200,
-            phone_number="054-7491234",
-        ),
+        parse_rest_area({
+            "natural_key": "서산휴게소::서해안고속도로::부산방향", "source": "krex_rest_area",
+            "name": "서산휴게소", "route_name": "서해안고속도로", "direction": "부산방향",
+            "latitude": 36.78, "longitude": 126.65, "phone_number": "041-1234-5678",
+            "has_gas_station": True, "has_lpg_station": False, "has_ev_charger": True,
+            "raw": {"restAreaNm": "서산휴게소"},
+        }),
+        parse_rest_area({
+            "natural_key": "경주휴게소::경부고속도로::서울방향", "source": "krex_rest_area",
+            "name": "경주휴게소", "route_name": "경부고속도로", "direction": "서울방향",
+            "latitude": 35.84, "longitude": 129.22, "phone_number": "054-7491234",
+            "raw": {"restAreaNm": "경주휴게소"},
+        }),
     ]
 
 
-async def _convert_krex_rest_areas(items: Sequence[Any]) -> list[Any]:
+async def _convert_transport_rest_areas(items: Sequence[Any]) -> list[Any]:
     bundles = await rest_areas_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
-_FEATURE_ID_KREX_REST_AREA_DEMO = "f_global_p_krex_demo"
-
-
-@dataclass(frozen=True)
-class _KrexPrice:
-    """`KrexRestAreaPriceItem` Protocol 준수."""
-
-    uni_id: str
-    category: str  # 'food' or 'fuel'
-    product_key: str
-    product_name: str | None
-    price: str
-    observed_at: datetime
-
-
-def _krex_prices_fixture() -> Sequence[_KrexPrice]:
-    obs = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
+def _transport_rest_area_fuel_prices_fixture() -> Sequence[Any]:
     return [
-        _KrexPrice(
-            uni_id="RA-001",
-            category="fuel",
-            product_key="gasoline",
-            product_name="휘발유",
-            price="1820",
-            observed_at=obs,
-        ),
-        _KrexPrice(
-            uni_id="RA-001",
-            category="food",
-            product_key="menu_001",
-            product_name="우동",
-            price="5500",
-            observed_at=obs,
-        ),
+        parse_rest_area_fuel_price({
+            "service_area_code": "A00001", "source": "krex_rest_area_fuel",
+            "service_area_name": "서산", "route_name": "서해안선", "direction": "부산",
+            "oil_company": "SK", "has_lpg": False, "gasoline_price": 1820, "diesel_price": 1650,
+            "lpg_price": None, "observed_at": "2026-05-28T05:00:00Z",
+            "raw": {"serviceAreaCode": "A00001", "gasolinePrice": "1,820원"},
+        }),
     ]
 
 
-async def _convert_krex_prices(items: Sequence[Any]) -> list[Any]:
-    values = rest_area_prices_to_values(
-        items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
+async def _convert_transport_rest_area_fuel_prices(items: Sequence[Any]) -> list[Any]:
+    _bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        items, fetched_at=_now()
     )
     return [v.model_dump(mode="json") for v in values]
 
@@ -783,7 +736,7 @@ class _AirportCoordinate:
 
 @dataclass(frozen=True)
 class _Airport:
-    """`AirportMetadataItem` Protocol 준수 (provider `AirportMetadata`)."""
+    """`AirportMetadataItem` Protocol 준수 (transport ``airports`` export item 모양)."""
 
     code: str
     name_korean: str | None
@@ -921,42 +874,42 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_datagokr_festival,
     ),
     EtlFixtureEntry(
-        provider="python-opinet-api",
-        dataset="opinet_fuel_station_details",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_FUEL_STATIONS,
         variant="FeatureBundle",
-        description="OpiNet 주유소 place Feature. PR#43.",
-        build_fixture=_opinet_stations_fixture,
-        convert=_convert_opinet_stations,
+        description="주유소 place Feature (transport export, ADR-106).",
+        build_fixture=_transport_fuel_stations_fixture,
+        convert=_convert_transport_fuel_stations,
     ),
     EtlFixtureEntry(
-        provider="python-opinet-api",
-        dataset="opinet_gas_station_prices",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_FUEL_PRICES,
         variant="PriceValue",
-        description="OpiNet 가격 시계열 (B027/D047/C004 데모). PR#42.",
-        build_fixture=_opinet_prices_fixture,
-        convert=_convert_opinet_prices,
+        description="주유소 유종별 최신 가격 (transport export, ADR-106).",
+        build_fixture=_transport_fuel_stations_fixture,
+        convert=_convert_transport_fuel_prices,
     ),
     EtlFixtureEntry(
-        provider="python-krex-api",
-        dataset="krex_rest_areas",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_REST_AREAS,
         variant="FeatureBundle",
-        description="krex 휴게소 place Feature. PR#45.",
-        build_fixture=_krex_rest_areas_fixture,
-        convert=_convert_krex_rest_areas,
+        description="고속도로 휴게소 place Feature (transport export, ADR-106).",
+        build_fixture=_transport_rest_areas_fixture,
+        convert=_convert_transport_rest_areas,
     ),
     EtlFixtureEntry(
-        provider="python-krex-api",
-        dataset="krex_rest_area_prices",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_REST_AREA_FUEL_PRICES,
         variant="PriceValue",
-        description="krex 휴게소 food/fuel 가격 시계열. PR#45.",
-        build_fixture=_krex_prices_fixture,
-        convert=_convert_krex_prices,
+        description="휴게소 주유소 유가 (transport export, ADR-106).",
+        build_fixture=_transport_rest_area_fuel_prices_fixture,
+        convert=_convert_transport_rest_area_fuel_prices,
     ),
     EtlFixtureEntry(
-        provider="python-krex-api",
-        dataset="krex_traffic_notices",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_HIGHWAY_INCIDENTS,
         variant="FeatureBundle",
-        description="krex 교통 공지 → notice FeatureBundle. PR#45.",
+        description="고속도로 돌발 → notice FeatureBundle (transport export, ADR-106).",
         build_fixture=_krex_traffic_notices_fixture,
         convert=_convert_krex_traffic_notices,
     ),
@@ -1033,10 +986,10 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         convert=_convert_beaches,
     ),
     EtlFixtureEntry(
-        provider="python-krairport-api",
-        dataset="krairport_airports",
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_AIRPORTS,
         variant="FeatureBundle",
-        description="공항 메타데이터(번들 정적) → place Feature (ADR-034 보조). T-RV-55.",
+        description="국내 운영 공항 → place Feature (transport export, ADR-106).",
         build_fixture=_airport_fixture,
         convert=_convert_airports,
     ),

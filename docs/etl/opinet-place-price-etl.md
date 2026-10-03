@@ -1,5 +1,7 @@
 # opinet-place-price-etl.md — OpiNet 주유소 → place + price ETL
 
+> **2026-10-02 ADR-106 — 원천이 바뀌었다.** 이 dataset은 provider 라이브러리가 아니라 kor-travel-transport `GET /v1/service/exports/*`에서 받고 provider 정체성은 `kor-travel-transport`다(`providers/kor_travel_transport.py`, migration `404`). 아래 본문 중 provider 호출·쿼터·scope·핀에 관한 서술은 이력이다. dataset key: `transport_fuel_stations`·`transport_fuel_prices`.
+
 본 문서는 OpiNet의 주유소/충전소 데이터를 장소(`place`)와 가격 표시 anchor
 (`price`) + 가격 시계열(`PriceValue`)로 분리 적재하는 ETL이다.
 

@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-10-02T08:00:00Z",
+  "collection": {
+    "source": "opinet_browser",
+    "last_success_at": "2026-10-02T07:34:44Z",
+    "failed": false,
+    "stale": false
+  },
+  "items": [
+    {
+      "natural_key": "A0017055",
+      "source": "opinet_browser",
+      "name": "행복을파는주유소",
+      "brand_code": "SKE",
+      "brand_name": "SK에너지",
+      "phone": "041-672-5155",
+      "address": "충남 태안군 근흥면 근흥로 1043",
+      "longitude": 126.19767236191167,
+      "latitude": 36.69994706048986,
+      "is_self": true,
+      "is_24h": false,
+      "has_carwash": false,
+      "has_maintenance": false,
+      "has_cvs": false,
+      "first_seen_at": "2026-09-19T14:05:20Z",
+      "last_seen_at": "2026-10-02T07:34:44Z",
+      "prices": [
+        {
+          "product_code": "B027",
+          "price": 1835.0,
+          "provider_updated_at": "2026-10-01T08:01:08Z",
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        },
+        {
+          "product_code": "B034",
+          "price": null,
+          "provider_updated_at": null,
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        },
+        {
+          "product_code": "C004",
+          "price": null,
+          "provider_updated_at": null,
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        },
+        {
+          "product_code": "D047",
+          "price": 1735.0,
+          "provider_updated_at": "2026-10-01T08:01:08Z",
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        }
+      ],
+      "raw": {
+        "UNI_ID": "A0017055",
+        "OS_NM": "행복을파는주유소",
+        "POLL_DIV_CD": "SKE"
+      }
+    },
+    {
+      "natural_key": "A0000002",
+      "source": "opinet_browser",
+      "name": "GS칼텍스 부산점",
+      "brand_code": "GSC",
+      "brand_name": "GS칼텍스",
+      "phone": null,
+      "address": "부산 해운대구 해운대로 200",
+      "longitude": 129.1604,
+      "latitude": 35.1587,
+      "is_self": null,
+      "is_24h": true,
+      "has_carwash": null,
+      "has_maintenance": null,
+      "has_cvs": true,
+      "first_seen_at": "2026-09-19T14:05:20Z",
+      "last_seen_at": "2026-10-02T07:34:44Z",
+      "prices": [
+        {
+          "product_code": "B027",
+          "price": 1790.0,
+          "provider_updated_at": "2026-10-01T08:01:08Z",
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        },
+        {
+          "product_code": "K015",
+          "price": 1050.0,
+          "provider_updated_at": "2026-10-01T08:01:08Z",
+          "observed_at": "2026-10-01T08:01:08Z",
+          "collected_at": "2026-10-02T07:34:44Z"
+        }
+      ],
+      "raw": {
+        "UNI_ID": "A0000002"
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

@@ -41,42 +41,37 @@ from .assets import (
     run_feature_event_krheritage_events,
     run_feature_event_visitkorea_enrichment,
     run_feature_geometry_knps_records,
-    run_feature_notice_krex_traffic_notices,
     run_feature_notice_krforest_landslide_forecast_issues,
+    run_feature_notice_transport_highway_incidents,
     run_feature_place_datagokr_file_data,
     run_feature_place_khoa_beaches,
     run_feature_place_knps_points,
     run_feature_place_kor_travel_concierge_youtube,
-    run_feature_place_krairport_airports,
-    run_feature_place_krex_rest_areas,
     run_feature_place_krforest_arboretums,
     run_feature_place_krforest_recreation_forests,
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
-    run_feature_place_opinet_stations,
     run_feature_place_standard_museums,
     run_feature_place_standard_parking_lots,
     run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
-    run_feature_price_krex_rest_areas,
-    run_feature_price_opinet_stations,
+    run_feature_place_transport_airports,
+    run_feature_place_transport_fuel_stations,
+    run_feature_place_transport_rest_areas,
+    run_feature_price_transport_fuel_stations,
+    run_feature_price_transport_rest_areas,
     run_feature_route_krforest_dulle_trails,
     run_feature_route_krforest_mountain_trails,
 )
 from .mcst_features import run_feature_place_mcst_culture
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
-    ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
-    fetch_krairport_airports,
-    fetch_krex_rest_area_fuel_prices,
-    fetch_krex_rest_areas,
-    fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
     fetch_krforest_landslide_forecast_issues,
@@ -86,12 +81,15 @@ from .provider_fetchers import (
     fetch_krheritage_items,
     fetch_mcst_culture_records,
     fetch_mois_license_records,
-    fetch_opinet_station_price_details,
-    fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
+    fetch_transport_airports,
+    fetch_transport_fuel_stations,
+    fetch_transport_highway_incidents,
+    fetch_transport_rest_area_fuel_prices,
+    fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
 from .schedules import DISABLED_FEATURE_LOAD_OPERATION_KEYS
@@ -131,25 +129,12 @@ class RunnerResources:
     teardowns: tuple[Teardown, ...] = ()
 
 
-KREX_RATE_GATE: Final[str] = "krex"
-"""krex rate gate 이름. :data:`PROVIDER_RATE_GATES`의 키다."""
-
-
-PROVIDER_RATE_GATES: Final[Mapping[str, float]] = MappingProxyType(
-    {
-        # krex는 **초당 5건**이 상한이다(일일 한도는 미공개 — `docs/etl/upstream-quota.md`
-        # §2). 라이브러리(`python-krex-api`)가 그것을 지키지만 그 보증은 **프로세스당**
-        # 이다. 큐 센서는 틱당 RunRequest를 10개 내고 `docker/dagster.yaml`이 4를 동시에
-        # 돌리므로, gate가 없으면 버킷이 넷 = **20 TPS**가 된다(2026-09-14 적대 리뷰).
-        #
-        # 값은 **교대 간격**(초)이다. 직렬화만으로는 부족하다 — A가 마지막 요청을
-        # 보내고 즉시 lock을 놓으면 B의 첫 요청이 그 뒤에 바로 붙어 1초 창에 6건이
-        # 된다. lock을 놓기 전에 이만큼 쉬면 **전 프로세스를 통틀어** 요청 간격이
-        # 1/5초 아래로 내려가지 않는다.
-        KREX_RATE_GATE: 1.0 / 5.0,
-    }
-)
+PROVIDER_RATE_GATES: Final[Mapping[str, float]] = MappingProxyType({})
 """프로세스를 가로지르는 provider 단위 rate gate — 이름 → 교대 간격(초).
+
+**현재 선언된 gate는 없다.** 유일한 사용자였던 krex(초당 5건)는 ADR-106으로 Map이 직접
+부르지 않게 되었다 — 휴게소·돌발은 kor-travel-transport export에서 받고, 상류 rate는
+transport가 지킨다. 장치는 남긴다: 새 rate-limited provider가 생기면 여기 한 줄로 켠다.
 
 **왜 advisory lock인가.** 같은 Postgres를 보는 모든 worker run이 이 키를 두고
 경합하므로, Dagster 설정이나 프로세스 수와 무관하게 성립한다.
@@ -300,44 +285,6 @@ class FeatureUpdateAssetRunner:
                     "skip_reason": "provider_auto_load_disabled",
                     "scope_type": scope.scope_type,
                 },
-            )
-        if (
-            scope.operation_key
-            in {
-                "feature_place_opinet_stations_job",
-                "feature_price_opinet_stations_job",
-            }
-            and scope.scope_type != "provider_dataset"
-        ):
-            # OpiNet lowTop fetcher는 개별 feature/bbox/cache-target request scope를
-            # 소비하지 않고 현재 설정의 전국 회전 window를 다시 조회한다. targeted
-            # request마다 같은 무료키 quota를 소진하는 대신 system schedule에 맡긴다.
-            metadata: dict[str, object] = {
-                "provider_dataset_id": scope.provider_dataset_id,
-                "sync_scope": scope.sync_scope,
-                "operation_key": scope.operation_key,
-                "provider": scope.provider,
-                "dataset_key": scope.dataset_key,
-                "skipped": True,
-                "skip_reason": "global_provider_not_targetable",
-                "scope_type": scope.scope_type,
-            }
-            log_info = getattr(self._log, "info", None)
-            if callable(log_info):
-                log_info(
-                    "OpiNet %s targeted refresh 생략(scope_type=%s): "
-                    "현재 fetcher는 request scope를 적용할 수 없음.",
-                    scope.dataset_key,
-                    scope.scope_type,
-                )
-            return ProviderDatasetRefreshResult(
-                provider_dataset_id=scope.provider_dataset_id,
-                sync_scope=scope.sync_scope,
-                operation_key=scope.operation_key,
-                provider=scope.provider,
-                dataset_key=scope.dataset_key,
-                status="skipped",
-                metadata=metadata,
             )
         extra: RunnerResources | None = None
         refresh_failure: ProviderDatasetRefreshFailure | None = None
@@ -652,26 +599,6 @@ def _records(resource_key: str, fetch: Callable[[KorTravelMapSettings], object])
     return _factory
 
 
-def _opinet_records(
-    resource_key: str,
-    fetch: Callable[[KorTravelMapSettings], object],
-    *,
-    label: str,
-) -> ResourceFactory:
-    def _factory(
-        settings: KorTravelMapSettings,
-        _scope: ProviderDatasetRefreshScope,
-    ) -> RunnerResources:
-        if settings.opinet_api_key is None:
-            raise ProviderCredentialMissing(
-                f"{label} feature update에는 KOR_TRAVEL_MAP_OPINET_API_KEY "
-                "(source OPINET_API_KEY)가 필요하다."
-            )
-        return RunnerResources({resource_key: fetch(settings)})
-
-    return _factory
-
-
 def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
@@ -772,39 +699,36 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         asset_key="feature_event_datagokr_cultural_festivals",
     ),
     *_operation_specs(
-        "feature_place_opinet_stations_job",
-        run=run_feature_place_opinet_stations,
-        resources=_opinet_records("opinet_stations", fetch_opinet_stations, label="OpiNet station"),
-        asset_key="feature_place_opinet_stations",
+        "feature_place_transport_fuel_stations_job",
+        run=run_feature_place_transport_fuel_stations,
+        resources=_records("transport_fuel_stations", fetch_transport_fuel_stations),
+        asset_key="feature_place_transport_fuel_stations",
     ),
     *_operation_specs(
-        "feature_price_opinet_stations_job",
-        run=run_feature_price_opinet_stations,
-        resources=_opinet_records(
-            "opinet_station_price_details", fetch_opinet_station_price_details, label="OpiNet price"
+        "feature_price_transport_fuel_stations_job",
+        run=run_feature_price_transport_fuel_stations,
+        resources=_records("transport_fuel_stations", fetch_transport_fuel_stations),
+        asset_key="feature_price_transport_fuel_stations",
+    ),
+    *_operation_specs(
+        "feature_place_transport_rest_areas_job",
+        run=run_feature_place_transport_rest_areas,
+        resources=_records("transport_rest_areas", fetch_transport_rest_areas),
+        asset_key="feature_place_transport_rest_areas",
+    ),
+    *_operation_specs(
+        "feature_price_transport_rest_areas_job",
+        run=run_feature_price_transport_rest_areas,
+        resources=_records(
+            "transport_rest_area_fuel_prices", fetch_transport_rest_area_fuel_prices
         ),
-        asset_key="feature_price_opinet_stations",
+        asset_key="feature_price_transport_rest_areas",
     ),
     *_operation_specs(
-        "feature_place_krex_rest_areas_job",
-        run=run_feature_place_krex_rest_areas,
-        resources=_records("krex_rest_areas", fetch_krex_rest_areas),
-        asset_key="feature_place_krex_rest_areas",
-        rate_gate=KREX_RATE_GATE,
-    ),
-    *_operation_specs(
-        "feature_price_krex_rest_areas_job",
-        run=run_feature_price_krex_rest_areas,
-        resources=_records("krex_rest_area_fuel_prices", fetch_krex_rest_area_fuel_prices),
-        asset_key="feature_price_krex_rest_areas",
-        rate_gate=KREX_RATE_GATE,
-    ),
-    *_operation_specs(
-        "feature_notice_krex_traffic_notices_job",
-        run=run_feature_notice_krex_traffic_notices,
-        resources=_records("krex_traffic_notices", fetch_krex_traffic_notices),
-        asset_key="feature_notice_krex_traffic_notices",
-        rate_gate=KREX_RATE_GATE,
+        "feature_notice_transport_highway_incidents_job",
+        run=run_feature_notice_transport_highway_incidents,
+        resources=_records("transport_highway_incidents", fetch_transport_highway_incidents),
+        asset_key="feature_notice_transport_highway_incidents",
     ),
     *_operation_specs(
         "feature_place_krheritage_items_job",
@@ -909,10 +833,10 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         asset_key="feature_place_khoa_beaches",
     ),
     *_operation_specs(
-        "feature_place_krairport_airports_job",
-        run=run_feature_place_krairport_airports,
-        resources=_records("krairport_airports", fetch_krairport_airports),
-        asset_key="feature_place_krairport_airports",
+        "feature_place_transport_airports_job",
+        run=run_feature_place_transport_airports,
+        resources=_records("transport_airports", fetch_transport_airports),
+        asset_key="feature_place_transport_airports",
     ),
     *_operation_specs(
         "feature_place_kor_travel_concierge_youtube_job",

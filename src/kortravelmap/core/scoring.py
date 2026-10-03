@@ -324,9 +324,8 @@ SOURCE_PRIORITY: Final[dict[str, int]] = {
     # 한국관광공사 TourAPI
     "python-visitkorea-api": 30,
     # 기타 공공 provider(도메인 한정 원천)
-    "python-opinet-api": 25,
+    "kor-travel-transport": 25,  # OpiNet·KREX·공항 원천을 중계(ADR-106)
     "python-kma-api": 25,
-    "python-krex-api": 25,
     "python-airkorea-api": 25,
     "python-khoa-api": 25,
 }

@@ -59,7 +59,7 @@ def test_price_card_response_maps_current_and_history(
         provider_dataset_id=17,
         dataset_key="retail_prices",
         dataset_display_name="소매 가격",
-        provider="python-opinet-api",
+        provider="kor-travel-transport",
         price_domain="opinet_gas_station",
         product_key="gasoline",
         product_name="휘발유",

@@ -48,10 +48,6 @@ from .provider_fetchers import (
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
-    fetch_krairport_airports,
-    fetch_krex_rest_area_fuel_prices,
-    fetch_krex_rest_areas,
-    fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
     fetch_krforest_landslide_forecast_issues,
@@ -61,12 +57,15 @@ from .provider_fetchers import (
     fetch_krheritage_items,
     fetch_mcst_culture_records,
     fetch_mois_license_records,
-    fetch_opinet_station_price_details,
-    fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
+    fetch_transport_airports,
+    fetch_transport_fuel_stations,
+    fetch_transport_highway_incidents,
+    fetch_transport_rest_area_fuel_prices,
+    fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
 
@@ -129,45 +128,42 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
     ),
     ProviderRecordResourceSpec(
-        resource_key="opinet_stations",
-        provider_package="python-opinet-api",
-        dataset_key="opinet_fuel_station_details",
-        setting_names=("opinet_api_key",),
-        source_env_names=("OPINET_API_KEY",),
-        note="OpiNet은 전체 station dump endpoint가 없어 지역/좌표 scope 정책이 필요하다.",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="opinet_station_price_details",
-        provider_package="python-opinet-api",
-        dataset_key="opinet_gas_station_prices",
-        setting_names=("opinet_api_key",),
-        source_env_names=("OPINET_API_KEY",),
+        resource_key="transport_fuel_stations",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_fuel_stations",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
         note=(
-            "OpiNet 가격은 현재 station scope를 enumerate한 뒤 detailById를 N+1 호출해 "
-            "가져온다. 전국 dump endpoint는 없다."
+            "오피넷 전국 주유소 + 유종별 최신 가격(transport 브라우저 수집본). "
+            "place·price 두 job이 같이 쓴다."
         ),
     ),
     ProviderRecordResourceSpec(
-        resource_key="krex_rest_areas",
-        provider_package="python-krex-api",
-        dataset_key="krex_rest_areas",
-        setting_names=("krex_go_api_key", "data_go_kr_service_key"),
-        source_env_names=("KEX_GO_API_KEY", "DATA_GO_KR_SERVICE_KEY"),
+        resource_key="transport_rest_areas",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_rest_areas",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note="고속도로 휴게소 기준정보(data.go.kr 표준데이터, transport 수집).",
     ),
     ProviderRecordResourceSpec(
-        resource_key="krex_rest_area_fuel_prices",
-        provider_package="python-krex-api",
-        dataset_key="krex_rest_area_prices",
-        setting_names=("krex_ex_api_key",),
-        source_env_names=("KEX_GO_API_KEY",),
-        note="curStateStation(EX)은 전국 휴게소 주유 가격 snapshot을 반환.",
+        resource_key="transport_rest_area_fuel_prices",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_rest_area_fuel_prices",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note="휴게소 주유소 현재 유가(EX curStateStation, transport 수집).",
     ),
     ProviderRecordResourceSpec(
-        resource_key="krex_traffic_notices",
-        provider_package="python-krex-api",
-        dataset_key="krex_traffic_notices",
-        setting_names=("krex_ex_api_key",),
-        source_env_names=("KEX_GO_API_KEY",),
+        resource_key="transport_highway_incidents",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_highway_incidents",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note="마지막 성공 수집의 고속도로 돌발 활성 집합(transport 5분 수집).",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="transport_airports",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_airports",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note="국내 운영 공항 전체(transport의 krairport 번들 메타데이터).",
     ),
     ProviderRecordResourceSpec(
         resource_key="krheritage_items",
@@ -294,12 +290,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note="khoa 해수욕장정보는 시도별 페이지네이션으로 전국을 순회한다.",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="krairport_airports",
-        provider_package="python-krairport-api",
-        dataset_key="krairport_airports",
-        note="공항 메타데이터는 번들 정적 데이터(keyless).",
     ),
     ProviderRecordResourceSpec(
         resource_key="visitkorea_festival_events",
@@ -551,67 +541,63 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
     )
 )
 
-_OPINET_STATIONS_SPEC: ProviderRecordResourceSpec = next(
+_TRANSPORT_FUEL_STATIONS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "opinet_stations"
+    if spec.resource_key == "transport_fuel_stations"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_stations"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_fuel_stations"] = (
     build_provider_record_live_resource(
-        _OPINET_STATIONS_SPEC,
-        fetch_opinet_stations,
+        _TRANSPORT_FUEL_STATIONS_SPEC,
+        fetch_transport_fuel_stations,
     )
 )
 
-_OPINET_STATION_PRICE_DETAILS_SPEC: ProviderRecordResourceSpec = next(
+_TRANSPORT_REST_AREAS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "opinet_station_price_details"
+    if spec.resource_key == "transport_rest_areas"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_station_price_details"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_areas"] = (
     build_provider_record_live_resource(
-        _OPINET_STATION_PRICE_DETAILS_SPEC,
-        fetch_opinet_station_price_details,
+        _TRANSPORT_REST_AREAS_SPEC,
+        fetch_transport_rest_areas,
     )
 )
 
-_KREX_REST_AREAS_SPEC: ProviderRecordResourceSpec = next(
+_TRANSPORT_REST_AREA_FUEL_PRICES_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krex_rest_areas"
+    if spec.resource_key == "transport_rest_area_fuel_prices"
 )
-"""krex 휴게소 spec 참조 (live resource override용)."""
-
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_areas"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_area_fuel_prices"] = (
     build_provider_record_live_resource(
-        _KREX_REST_AREAS_SPEC,
-        fetch_krex_rest_areas,
+        _TRANSPORT_REST_AREA_FUEL_PRICES_SPEC,
+        fetch_transport_rest_area_fuel_prices,
     )
 )
 
-_KREX_REST_AREA_FUEL_PRICES_SPEC: ProviderRecordResourceSpec = next(
+_TRANSPORT_HIGHWAY_INCIDENTS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krex_rest_area_fuel_prices"
+    if spec.resource_key == "transport_highway_incidents"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_area_fuel_prices"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_highway_incidents"] = (
     build_provider_record_live_resource(
-        _KREX_REST_AREA_FUEL_PRICES_SPEC,
-        fetch_krex_rest_area_fuel_prices,
+        _TRANSPORT_HIGHWAY_INCIDENTS_SPEC,
+        fetch_transport_highway_incidents,
     )
 )
 
-_KREX_TRAFFIC_NOTICES_SPEC: ProviderRecordResourceSpec = next(
+_TRANSPORT_AIRPORTS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krex_traffic_notices"
+    if spec.resource_key == "transport_airports"
 )
-"""krex 교통 공지 spec 참조 (live resource override용)."""
-
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_traffic_notices"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_airports"] = (
     build_provider_record_live_resource(
-        _KREX_TRAFFIC_NOTICES_SPEC,
-        fetch_krex_traffic_notices,
+        _TRANSPORT_AIRPORTS_SPEC,
+        fetch_transport_airports,
     )
 )
 
@@ -867,18 +853,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["khoa_beaches"] = (
     build_provider_record_live_resource(
         _KHOA_BEACHES_SPEC,
         fetch_khoa_beaches,
-    )
-)
-
-_KRAIRPORT_AIRPORTS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "krairport_airports"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["krairport_airports"] = (
-    build_provider_record_live_resource(
-        _KRAIRPORT_AIRPORTS_SPEC,
-        fetch_krairport_airports,
     )
 )
 
