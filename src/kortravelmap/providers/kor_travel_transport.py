@@ -117,8 +117,8 @@ class TransportExportFailure(RuntimeError):
     """transport export를 적재 근거로 쓸 수 없다. ``failure_kind``로 원인을 가른다.
 
     어느 하위 클래스든 **아무것도 적재·삭제·종료하지 않고** run을 실패시킨다. ``retryable``은
-    provider lib 예외와 같은 규약이다(``upstream_retry.default_upstream_retryable``): 기다리면
-    풀리는 실패만 ``True``다.
+    provider lib 예외와 같은 규약이다: 기다리면 풀리는 실패만 ``True``다. Dagster asset 경계는
+    ``False``인 것의 step 재시도를 끈다(``quota_exhaustion.raise_terminal_if_transport_unrecoverable``).
     """
 
     failure_kind: str = "transport_unavailable"

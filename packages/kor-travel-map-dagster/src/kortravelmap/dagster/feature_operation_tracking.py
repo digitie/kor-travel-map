@@ -35,7 +35,10 @@ from kortravelmap.core.feature_operation import (
 
 from dagster import InitResourceContext, resource
 
-from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .quota_exhaustion import (
+    raise_terminal_if_quota_exhausted,
+    raise_terminal_if_transport_unrecoverable,
+)
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -581,6 +584,7 @@ async def run_tracked_feature_asset(
             except Exception as exc:
                 _log_spend_on_failure(context)
                 raise_terminal_if_quota_exhausted(exc)
+                raise_terminal_if_transport_unrecoverable(exc)
                 raise
         membership = _single_membership_for_asset(guard)
         try:
@@ -590,6 +594,7 @@ async def run_tracked_feature_asset(
             await _append_failed_attempt(context, guard, membership, exc)
             _log_spend_on_failure(context)
             raise_terminal_if_quota_exhausted(exc)
+            raise_terminal_if_transport_unrecoverable(exc)
             raise
         mutation = await guard.client.finish_dagster_feature_membership(
             dagster_run_id=guard.dagster_run_id,
