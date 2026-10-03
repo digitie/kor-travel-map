@@ -327,7 +327,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
-    from kortravelmap.dto import FeatureBundle, SourceRecord
+    from kortravelmap.dto import Address, FeatureBundle, SourceRecord
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
@@ -2442,8 +2442,8 @@ class AsyncKorTravelMapClient:
         provider: str,
         dataset_key: str,
         source_entity_type: str,
-    ) -> list[tuple[str, str, float, float]]:
-        """primary place feature의 ``(source_entity_id, feature_id, lon, lat)`` 전량 (read, #547).
+    ) -> list[tuple[str, str, float, float, Address]]:
+        """primary place feature의 ``(source_entity_id, feature_id, lon, lat, region)`` 전량 (read, #547).
 
         ``(provider, dataset_key, source_entity_type)`` primary source이고 좌표가 있는
         place feature를 provider 파생 자연키(``source_entity_id``)와 함께 반환한다.

@@ -561,12 +561,12 @@ def _fuel_price_match_key(record: KrexRestAreaFuelPriceRecord) -> str | None:
 # (place feature_id, place 좌표). 호출자(dagster price asset 등)가 이미 적재된
 # place feature bundle로 구성해 유가 변환에 주입한다 — provider는 geocoding 계층을
 # 호출하지 않고(레이어 규칙), 좌표는 place feature에서 상속한다(#547).
-RestAreaPlaceLocator = Mapping[str, "tuple[str, Coordinate]"]
+RestAreaPlaceLocator = Mapping[str, "tuple[str, Coordinate, Address]"]
 
 
 def build_rest_area_place_locator(
     place_bundles: Iterable[FeatureBundle],
-) -> dict[str, tuple[str, Coordinate]]:
+) -> dict[str, tuple[str, Coordinate, Address]]:
     """휴게소 place bundle → 유가 매칭용 locator(`자연키 → (feature_id, 좌표)`).
 
     `rest_areas_to_bundles` 결과(또는 DB에서 재구성한 동등 bundle)를 받아
@@ -576,7 +576,7 @@ def build_rest_area_place_locator(
     `rest_area_fuel_price_records_to_features_and_values`에 넘기면 유가 feature가
     place 좌표·`parent_feature_id`를 상속해 지도에 렌더된다(#547).
     """
-    locator: dict[str, tuple[str, Coordinate]] = {}
+    locator: dict[str, tuple[str, Coordinate, Address]] = {}
     for bundle in place_bundles:
         feature = bundle.feature
         coord = feature.coord
@@ -585,14 +585,17 @@ def build_rest_area_place_locator(
         key = bundle.source_record.source_entity_id
         if not key or key in locator:
             continue
-        locator[key] = (feature.feature_id, coord)
+        locator[key] = (feature.feature_id, coord, feature.address)
     return locator
 
 
 def rest_area_place_locator_from_rows(
-    rows: Iterable[tuple[str, str, float, float]],
-) -> dict[str, tuple[str, Coordinate]]:
-    """``(source_entity_id, feature_id, lon, lat)`` 행 → 유가 매칭용 locator(#547).
+    rows: Iterable[tuple[str, str, float, float, Address]],
+) -> dict[str, tuple[str, Coordinate, Address]]:
+    """``(source_entity_id, feature_id, lon, lat, region)`` 행 → 유가 매칭용 locator(#547).
+
+    ``region``(place의 bjd·시군구·시도 코드)은 유가 feature 주소로 이어받는다 — 유가 row와
+    transport export에는 지역 코드가 없고, 유가 job은 역지오코딩하지 않는다.
 
     `AsyncKorTravelMapClient.list_primary_place_locator`가 반환하는 DB 행
     (이미 적재된 휴게소 place feature의 자연키·feature_id·좌표)을 받아
@@ -601,13 +604,13 @@ def rest_area_place_locator_from_rows(
     `Decimal(str(...))`로 강제해(부동소수 잡음 회피) place 좌표와 동일 정밀도를
     유지한다. 같은 자연키 중복은 첫 행을 유지한다.
     """
-    locator: dict[str, tuple[str, Coordinate]] = {}
-    for source_entity_id, feature_id, lon, lat in rows:
+    locator: dict[str, tuple[str, Coordinate, Address]] = {}
+    for source_entity_id, feature_id, lon, lat, region in rows:
         key = (source_entity_id or "").strip()
         if not key or key in locator:
             continue
         coord = Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
-        locator[key] = (feature_id, coord)
+        locator[key] = (feature_id, coord, region)
     return locator
 
 
@@ -688,19 +691,24 @@ def _fuel_price_record_to_bundle_and_values(
     # 남되 PriceValue는 그대로 적재된다(좌표는 후속 place 적재로 회복 가능).
     coord: Coordinate | None = None
     parent_feature_id: str | None = None
+    address = Address(road=road_address)
     if place_locator is not None:
         match_key = _fuel_price_match_key(record)
         if match_key is not None:
             matched = place_locator.get(match_key)
             if matched is not None:
-                parent_feature_id, coord = matched
+                parent_feature_id, coord, place_address = matched
+                # 지역 코드(bjd·시군구·시도)도 place에서 상속한다.
+                address = place_address.model_copy(
+                    update={"road": road_address or place_address.road}
+                )
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=service_area_code,
         kind=FeatureKind.PRICE,
         name=f"{display_name} 유가",
         coord=coord,
-        address=Address(road=road_address),
+        address=address,
         category=REST_AREA_CATEGORY,
         marker_icon=REST_AREA_PRICE_MARKER_ICON,
         marker_color=REST_AREA_PRICE_MARKER_COLOR,

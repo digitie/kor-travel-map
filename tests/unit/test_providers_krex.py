@@ -374,10 +374,11 @@ def test_rest_area_place_locator_from_rows_builds_coordinate() -> None:
     `AsyncKorTravelMapClient.list_primary_place_locator`가 반환하는 행을
     유가 변환 locator로 변환하고, 그 locator로 유가 feature가 좌표를 상속하는지.
     """
-    rows = [(_NK_SEOSAN, "f_seosan_place", 126.6500, 36.7800)]
+    rows = [(_NK_SEOSAN, "f_seosan_place", 126.6500, 36.7800, Address(sido_code="44"))]
     locator = rest_area_place_locator_from_rows(rows)
     assert _NK_SEOSAN in locator
-    feature_id, coord = locator[_NK_SEOSAN]
+    feature_id, coord, region = locator[_NK_SEOSAN]
+    assert region.sido_code == "44"
     assert feature_id == "f_seosan_place"
     assert coord.lon == Decimal("126.65")
     assert coord.lat == Decimal("36.78")

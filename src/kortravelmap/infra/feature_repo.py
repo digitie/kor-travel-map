@@ -68,6 +68,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.dto import Address
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
@@ -4900,7 +4901,12 @@ SELECT
     se.source_entity_id,
     f.feature_id,
     x_extension.ST_X(f.coord) AS lon,
-    x_extension.ST_Y(f.coord) AS lat
+    x_extension.ST_Y(f.coord) AS lat,
+    f.legal_dong_code,
+    f.admin_dong_code,
+    f.sido_code,
+    f.sigungu_code,
+    f.address ->> 'admin' AS admin_address
 FROM feature.features f
 JOIN provider_sync.source_links sl
   ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
@@ -4925,8 +4931,12 @@ async def list_primary_place_locator(
     provider: str,
     dataset_key: str,
     source_entity_type: str,
-) -> list[tuple[str, str, float, float]]:
-    """primary place feature의 ``(source_entity_id, feature_id, lon, lat)`` 전량 (#547).
+) -> list[tuple[str, str, float, float, Address]]:
+    """primary place feature의 ``(source_entity_id, feature_id, lon, lat, region)`` 전량 (#547).
+
+    ``region``은 place의 지역 식별(법정동·행정동·시도·시군구 코드 + 행정동 주소)만 담은
+    :class:`~kortravelmap.dto.Address`다. 가격 feature는 역지오코딩하지 않으므로(ADR-106 M5) 이미
+    역지오코딩 보강을 거친 place의 코드를 이어받는다 — transport export에는 지역 코드가 없다.
 
     primary source가 ``(provider, dataset_key, source_entity_type)``이고 좌표가 있는
     place feature를 ``source_entity_id``(provider 파생 자연키)와 함께 반환한다. 좌표가
@@ -4947,8 +4957,21 @@ async def list_primary_place_locator(
             },
         )
     ).all()
+
     return [
-        (str(row.source_entity_id), str(row.feature_id), float(row.lon), float(row.lat))
+        (
+            str(row.source_entity_id),
+            str(row.feature_id),
+            float(row.lon),
+            float(row.lat),
+            Address(
+                admin=row.admin_address,
+                bjd_code=row.legal_dong_code,
+                admin_dong_code=row.admin_dong_code,
+                sido_code=row.sido_code,
+                sigungu_code=row.sigungu_code,
+            ),
+        )
         for row in rows
     ]
 
