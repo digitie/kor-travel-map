@@ -714,3 +714,47 @@ def test_the_asset_boundary_stops_retries_for_unrecoverable_transport_failures(
     assert caught.value.__cause__ is cause
     metadata = {key: value.value for key, value in caught.value.metadata.items()}
     assert metadata["failure_kind"] == cause.failure_kind  # type: ignore[attr-defined]
+
+
+def _recoverable_transport_failure(kind: str) -> Exception:
+    from kortravelmap.providers.kor_travel_transport import TransportExportNotCurrent
+
+    from kortravelmap.dagster.provider_fetchers import _TransportTransientStatus
+
+    return {
+        "not_current_503": TransportExportNotCurrent("503"),
+        # HTTP 층 재시도(2회)를 다 쓴 502/504 — 짧은 transport 재기동이 하루치 유가를 날리면 안 된다.
+        "transient_502": _TransportTransientStatus("502"),
+    }[kind]
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("kind", ["not_current_503", "transient_502"])
+def test_the_asset_boundary_keeps_retries_for_recoverable_transport_failures(
+    tracked: bool, kind: str
+) -> None:
+    cause = _recoverable_transport_failure(kind)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(type(cause)) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_an_unrecoverable_transport_error_seen_only_as_context_does_not_stop_retries(
+    tracked: bool,
+) -> None:
+    """``__context__``(처리 중 난 다른 예외)까지 따라가면 무관한 실패가 terminal이 된다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportHidden
+
+    async def _raise(_context: Any) -> None:
+        try:
+            raise TransportExportHidden("404")
+        except TransportExportHidden:
+            raise RuntimeError("정리 중 다른 실패") from None
+
+    with pytest.raises(RuntimeError, match="정리 중"):
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))

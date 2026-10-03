@@ -122,3 +122,16 @@ def test_every_managed_logger_name_resolves_to_a_real_module(
         f"`managed_python_loggers`의 `{managed_name}`이 import 가능한 모듈이 아니다. "
         "Dagster는 이 이름으로 logger를 만들 뿐이므로 오타가 에러 없이 지나간다."
     )
+
+
+def test_the_place_locator_warning_reaches_the_event_stream() -> None:
+    """가격 run이 버린 지역 코드 행(`feature_repo._LOG`)도 Dagster run 로그에 보여야 한다."""
+
+    from kortravelmap.infra import feature_repo
+
+    logger = getattr(feature_repo, "_LOG", None)
+    assert isinstance(logger, logging.Logger)
+    assert any(_covers(name, logger) for name in _managed_loggers()), (
+        f"`{logger.name}`의 경고를 받는 항목이 `managed_python_loggers`에 없다 — place locator가 "
+        "버린 행이 컨테이너 stdout에만 남는다."
+    )
