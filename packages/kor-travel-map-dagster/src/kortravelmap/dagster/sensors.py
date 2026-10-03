@@ -22,6 +22,8 @@ from dagster import (
     sensor,
 )
 
+from .upstream_retry import sharing_run_retry_budget
+
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
     from kortravelmap.infra.feature_update_executor import (
@@ -75,13 +77,16 @@ async def execute_feature_update_request_op(
     )
 
     try:
-        result = await client.execute_feature_update_request(
-            request_id,
-            runner=runner,
-            dagster_run_id=context.run_id,
-            expected_request_generation=request_generation,
-            sigungu_resolver=sigungu_resolver,
-        )
+        # request 하나는 scope 여러 개를 차례로 돈다. 그 전부가 재시도 예산 하나를 나눠 쓴다
+        # (scope별 runner는 이 예산을 그대로 쓴다 — `sharing_run_retry_budget`).
+        with sharing_run_retry_budget():
+            result = await client.execute_feature_update_request(
+                request_id,
+                runner=runner,
+                dagster_run_id=context.run_id,
+                expected_request_generation=request_generation,
+                sigungu_resolver=sigungu_resolver,
+            )
     except FeatureUpdateLockBusy as exc:
         metadata: dict[str, object] = {
             "request_id": request_id,

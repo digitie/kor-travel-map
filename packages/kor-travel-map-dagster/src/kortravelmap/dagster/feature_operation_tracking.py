@@ -41,6 +41,7 @@ from .upstream_requests import (
     counting_upstream_requests,
     observed_upstream_requests,
 )
+from .upstream_retry import sharing_run_retry_budget
 
 _T = TypeVar("_T")
 _MISSING = object()
@@ -568,7 +569,8 @@ async def run_tracked_feature_asset(
     **Failure metadata**에 싣고(output이 아니라 실패 이벤트에 붙으므로 남는다),
     그 밖의 실패는 아래 :func:`_log_spend_on_failure`가 경고 로그로 남긴다.
     """
-    with counting_upstream_requests():
+    # 재시도 예산도 step(run 경계) 하나에 하나다 — 이 안의 transport fetcher가 나눠 쓴다.
+    with counting_upstream_requests(), sharing_run_retry_budget():
         guard = await ensure_authoritative_feature_operation_guard(
             context,
             boundary="public_wrapper",
