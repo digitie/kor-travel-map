@@ -63,8 +63,18 @@
      빈 목록은 그 검사를 통과한 뒤에만 "지금 돌발 없음"이다.
    - fetcher는 전부 모은 뒤 적재하므로(`_record_list`) 뒤 페이지의 실패도 적재·reconcile 전에 run을 멈춘다.
      실패한 run은 아무것도 적재·삭제·종료하지 않는다. Map 쪽 reconcile(#632)·watermark·DB lock은 그대로다.
-   - 전송 오류·502/504만 유한 재시도(경계당 2회, run 예산 공유)하고, 페이지 수 상한과 이미 본 cursor
-     집합으로 cursor 순환을 잡는다.
+   - 전송 오류·502/504만 유한 재시도(경계당 2회)하고, 페이지 수 상한과 이미 본 cursor
+     집합으로 cursor 순환을 잡는다. 재시도 예산은 **run 하나에 하나**다(2026-10-04 정정 — 처음 구현은
+     fetcher 호출마다 새 예산이었다): asset step과 큐 run이 `upstream_retry.sharing_run_retry_budget`을 연다.
+   - 분류(2026-10-04): 503·`collection` 어긋남은 `retryable=True`인 step 실패다(HTTP 층에서는 바로 다시
+     부르지 않고 `RetryPolicy`가 step을 다시 돈다). 공항 0건은 `transport_empty`, JSON이 아닌 본문은
+     `transport_malformed_upstream`이다. 나머지(`transport_hidden`·`transport_empty`·`transport_contract`·
+     `transport_malformed_upstream`)는 `retryable=False`이고 asset 경계가 `Failure(allow_retries=False)`로 바꿔
+     step 재시도를 끈다(`quota_exhaustion.raise_terminal_if_transport_unrecoverable`). 큐 경로는 원인과 무관하게
+     실패한 request로 끝난다 — 503도 다시 큐에 넣지 않는다(결정, 다음 schedule/request가 다시 돈다).
+   - 가격 feature 주소(2026-10-04): transport export에는 지역 코드가 없고 가격 job은 역지오코딩하지 않으므로,
+     주유소·휴게소 가격 feature는 place locator(`list_primary_place_locator`)가 실어 오는 place의
+     bjd·행정동·시도·시군구 코드를 이어받는다(옛 OpiNet 경로가 주유소 주소를 그대로 쓰던 것과 같다).
 6a. **유가 관측 시각.** transport 주유소 가격 행에는 셋이 있다: `provider_updated_at`(오피넷 `*_DT` — 그 유종
    가격을 **바꾼** 시각), `observed_at`(transport 원본 행 키 — `provider_updated_at`이 있으면 그것, 없으면 그 행의
    수집 시각), `collected_at`(transport가 이 값을 현재가로 **마지막으로 확인한** 수집 시각). Map

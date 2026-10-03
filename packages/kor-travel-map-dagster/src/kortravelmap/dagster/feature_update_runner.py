@@ -98,6 +98,7 @@ from .upstream_requests import (
     counting_upstream_requests,
     observed_upstream_requests,
 )
+from .upstream_retry import sharing_run_retry_budget
 
 __all__ = [
     "FeatureUpdateAssetRunner",
@@ -302,7 +303,8 @@ class FeatureUpdateAssetRunner:
         # **프로세스를 가로질러** 직렬화된다. 계수기보다 **바깥**이어야 한다 —
         # 기다리는 동안은 요청을 보내지 않으므로 소비량에 섞이면 안 된다.
         async with provider_rate_gate(session, spec.rate_gate):
-            with counting_upstream_requests():
+            # 재시도 예산은 큐 run(op)이 연 것을 그대로 쓴다 — scope마다 새로 만들지 않는다.
+            with counting_upstream_requests(), sharing_run_retry_budget():
                 try:
                     try:
                         settings = self._settings_factory()

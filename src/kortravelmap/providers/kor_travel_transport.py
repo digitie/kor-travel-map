@@ -54,6 +54,7 @@ __all__ = [
     "TransportExportEmpty",
     "TransportExportFailure",
     "TransportExportHidden",
+    "TransportExportMalformed",
     "TransportExportNotCurrent",
     "TransportExportPage",
     "TransportFuelPrice",
@@ -108,21 +109,41 @@ class TransportExportContractError(ValueError):
     """transport export 응답이 Map이 기대하는 모양과 어긋난다(필수 필드·타입·페이지)."""
 
     failure_kind: str = "transport_contract"
+    retryable: bool = False
+    """같은 run의 step 재시도로 풀리지 않는다 — Map이나 transport 코드를 고쳐야 한다."""
 
 
 class TransportExportFailure(RuntimeError):
     """transport export를 적재 근거로 쓸 수 없다. ``failure_kind``로 원인을 가른다.
 
-    어느 하위 클래스든 **아무것도 적재·삭제·종료하지 않고** run을 실패시킨다.
+    어느 하위 클래스든 **아무것도 적재·삭제·종료하지 않고** run을 실패시킨다. ``retryable``은
+    provider lib 예외와 같은 규약이다: 기다리면 풀리는 실패만 ``True``다. Dagster asset 경계는
+    ``False``인 것의 step 재시도를 끈다
+    (``quota_exhaustion.raise_terminal_if_transport_unrecoverable``).
     """
 
     failure_kind: str = "transport_unavailable"
+    retryable: bool = False
 
 
 class TransportExportNotCurrent(TransportExportFailure):
-    """근거 수집의 이력이 없거나, 실패했거나, stale이다(503이거나 ``collection`` 플래그)."""
+    """근거 수집의 이력이 없거나, 실패했거나, stale이다(503이거나 ``collection`` 플래그).
+
+    transport의 다음 수집이 성공하면 풀린다 — **retryable step 실패**다. HTTP 층에서 곧바로 다시
+    부르지는 않고(15초 안에 바뀌지 않는다), Dagster ``RetryPolicy``가 step을 다시 돈다.
+    """
 
     failure_kind = "transport_not_current"
+    retryable = True
+
+
+class TransportExportMalformed(TransportExportFailure):
+    """본문이 JSON이 아니다(HTML 오류 페이지·잘린 본문 등) — malformed upstream.
+
+    ``json.JSONDecodeError``를 그대로 올리면 분류 없는(unknown) 실패로 남는다.
+    """
+
+    failure_kind = "transport_malformed_upstream"
 
 
 class TransportExportEmpty(TransportExportFailure):
@@ -588,7 +609,10 @@ def parse_airport(item: Mapping[str, Any]) -> TransportAirport:
 def parse_airports(payload: Any) -> tuple[TransportAirport, ...]:
     body = _mapping(payload, "airports")
     items = body.get("items")
-    if not isinstance(items, list) or not items:
-        raise TransportExportContractError("airports.items: 비어 있지 않은 배열이어야 한다.")
+    if not isinstance(items, list):
+        raise TransportExportContractError("airports.items: 배열이어야 한다.")
+    if not items:
+        # 다른 완전 snapshot export와 같은 분류다 — 0건을 "공항 전부 폐쇄"로 읽지 않는다.
+        raise TransportExportEmpty("kor-travel-transport airports가 0건이다.")
     return tuple(parse_airport(_mapping(item, "airports.items[]")) for item in items)
 

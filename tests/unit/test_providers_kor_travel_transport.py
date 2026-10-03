@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from kortravelmap.dto import FeatureKind, PriceDomain
+from kortravelmap.dto import Address, FeatureKind, PriceDomain
 from kortravelmap.providers import kor_travel_transport as transport
 from kortravelmap.providers.krairport import AirportMetadataItem, airports_to_bundles
 from kortravelmap.providers.krex import (
@@ -18,6 +18,7 @@ from kortravelmap.providers.krex import (
     KrexRestAreaItem,
     KrexTrafficNoticeItem,
     rest_area_fuel_price_records_to_features_and_values,
+    rest_area_place_locator_from_rows,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -167,7 +168,29 @@ def test_airports_golden_parses_into_the_airport_protocol() -> None:
     assert {airport.code for airport in airports} >= {"ICN", "KPO"}
     assert all(isinstance(airport, AirportMetadataItem) for airport in airports)
     with pytest.raises(transport.TransportExportContractError):
+        transport.parse_airports({"items": None})
+
+
+def test_an_empty_airport_list_is_its_own_failure() -> None:
+    """공항 0건은 계약 위반이 아니라 "빈 완전 snapshot"이다 — 다른 export와 같은 분류로 실패한다."""
+    with pytest.raises(transport.TransportExportEmpty) as raised:
         transport.parse_airports({"items": []})
+    assert raised.value.failure_kind == "transport_empty"
+
+
+def test_failure_classes_declare_whether_a_step_retry_can_help() -> None:
+    """분류 선언만 본다. 이 선언으로 asset 경계가 실제로 step 재시도를 끄는지는 dagster
+    ``test_quota_exhaustion_stops_step_retries.py``의 transport 경계 테스트가 확인한다."""
+    assert transport.TransportExportNotCurrent("503").retryable is True
+    assert transport.TransportExportNotCurrent("503").failure_kind == "transport_not_current"
+    for terminal in (
+        transport.TransportExportHidden("404"),
+        transport.TransportExportEmpty("0"),
+        transport.TransportExportContractError("shape"),
+        transport.TransportExportMalformed("<html>"),
+    ):
+        assert terminal.retryable is False, type(terminal).__name__
+    assert transport.TransportExportMalformed("x").failure_kind == "transport_malformed_upstream"
 
 
 # -- 변환: provider 정체성과 자연키 ---------------------------------------------
@@ -184,7 +207,7 @@ async def test_fuel_station_place_and_price_use_the_transport_identity() -> None
     ]
     # 가격 적재는 place를 다시 만들지 않는다 — 이미 적재된 place의 locator로 부모를 찾는다(M5).
     locator = fuel_station_place_locator_from_rows(
-        (bundle.feature.provider_natural_key, bundle.feature.feature_id, 0.0, 0.0)
+        (bundle.feature.provider_natural_key, bundle.feature.feature_id, 0.0, 0.0, Address())
         for bundle in places
     )
     price_bundles, values = station_prices_to_features_and_values(
@@ -233,6 +256,56 @@ def test_fuel_price_observed_at_is_the_last_confirmation_not_the_price_change() 
     assert {value.payload["provider_updated_at"] for value in values} == {
         "2026-09-20T08:00:00+00:00"
     }
+
+
+def test_fuel_price_feature_keeps_the_place_region_codes() -> None:
+    """가격 feature는 옛 OpiNet 경로처럼 주유소 place의 bjd·시군구·시도 코드를 가진다.
+
+    transport export에는 지역 코드가 없다. 가격 job은 역지오코딩하지 않으므로(M5) 이미 적재된
+    place(역지오코딩 보강을 거친 것)의 코드를 locator로 받는다.
+    """
+    station = transport.parse_fuel_station(_golden("fuel-stations.json")["items"][0])
+    region = Address(
+        admin="충청남도 태안군 근흥면",
+        bjd_code="4482534000",
+        sigungu_code="44825",
+        sido_code="44",
+    )
+    locator = fuel_station_place_locator_from_rows(
+        [(station.uni_id, "place-1", 126.19, 36.69, region)]
+    )
+    [bundle], _ = station_prices_to_features_and_values(
+        [station], fetched_at=FETCHED_AT, place_locator=locator
+    )
+    address = bundle.feature.address
+    assert (address.bjd_code, address.sigungu_code, address.sido_code) == (
+        "4482534000",
+        "44825",
+        "44",
+    )
+    assert address.admin == "충청남도 태안군 근흥면"
+    assert address.road == station.address_road
+    assert bundle.feature.parent_feature_id == "place-1"
+
+
+def test_rest_area_price_feature_keeps_the_place_region_codes() -> None:
+    record = transport.parse_rest_area_fuel_price(
+        _golden("rest-area-fuel-prices.json")["items"][0]
+    )
+    region = Address(bjd_code="4427010100", sigungu_code="44270", sido_code="44")
+    locator = rest_area_place_locator_from_rows(
+        [("행담도::서해안선::목포", "place-ra", 126.78, 36.95, region)]
+    )
+    [bundle], _ = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=FETCHED_AT, place_locator=locator
+    )
+    assert bundle.feature.parent_feature_id == "place-ra"
+    address = bundle.feature.address
+    assert (address.bjd_code, address.sigungu_code, address.sido_code) == (
+        "4427010100",
+        "44270",
+        "44",
+    )
 
 
 def test_fuel_price_rows_require_the_confirmation_time() -> None:

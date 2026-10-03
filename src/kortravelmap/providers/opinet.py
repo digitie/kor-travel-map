@@ -220,23 +220,25 @@ def _source_raw_or_fallback(
 # -- 주유소 + 유종별 가격 → price Feature + PriceValue --------------------
 
 
-FuelStationPlaceLocator = Mapping[str, str]
-"""주유소 자연키(uni_id) → 이미 적재된 주유소 place ``feature_id``."""
+FuelStationPlaceLocator = Mapping[str, "tuple[str, Address]"]
+"""주유소 자연키(uni_id) → 이미 적재된 주유소 place ``(feature_id, 지역 주소)``."""
 
 
 def fuel_station_place_locator_from_rows(
-    rows: Iterable[tuple[str, str, float, float]],
-) -> dict[str, str]:
-    """``AsyncKorTravelMapClient.list_primary_place_locator`` 행 → ``uni_id → place feature_id``.
+    rows: Iterable[tuple[str, str, float, float, Address]],
+) -> dict[str, tuple[str, Address]]:
+    """``AsyncKorTravelMapClient.list_primary_place_locator`` 행 → ``uni_id → (place id, 지역)``.
 
     가격 적재는 주유소 place를 다시 만들지 않는다(역지오코딩은 place job의 몫, ADR-106 리뷰 M5).
-    이미 적재된 place의 ``feature_id``만 ``parent_feature_id``로 쓴다. 같은 자연키 중복은 첫 행.
+    이미 적재된 place의 ``feature_id``를 ``parent_feature_id``로, place의 bjd·시군구·시도 코드를
+    가격 feature 주소로 쓴다(옛 OpiNet 경로가 주유소 주소를 그대로 이어받던 것과 같다). 같은 자연키
+    중복은 첫 행.
     """
-    locator: dict[str, str] = {}
-    for source_entity_id, feature_id, _lon, _lat in rows:
+    locator: dict[str, tuple[str, Address]] = {}
+    for source_entity_id, feature_id, _lon, _lat, region in rows:
         key = (source_entity_id or "").strip()
         if key and key not in locator:
-            locator[key] = feature_id
+            locator[key] = (feature_id, region)
     return locator
 
 
@@ -316,18 +318,23 @@ def _station_prices_to_bundle_and_values(
     road_address = normalize_korean_text(station.address_road)
     jibun_address = normalize_korean_text(station.address_jibun)
     name_normalized = normalize_korean_text(station.name) or station.name
+    place = place_locator.get(station.uni_id)
+    address = Address(road=road_address or jibun_address)
+    if place is not None:
+        # 지역 코드는 역지오코딩을 거친 place에서 — transport export에는 없다.
+        address = place[1].model_copy(update={"road": address.road or place[1].road})
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=station.uni_id,
         kind=FeatureKind.PRICE,
         name=f"{name_normalized} 유가",
         coord=coord,
-        address=Address(road=road_address or jibun_address),
+        address=address,
         category=OPINET_STATION_CATEGORY,
         marker_icon=OPINET_STATION_MARKER_ICON,
         marker_color=OPINET_STATION_MARKER_COLOR,
         # place가 아직 없으면(새 주유소, 주간 place job 전) 부모 없이 적재하고 다음 실행에서 붙는다.
-        parent_feature_id=place_locator.get(station.uni_id),
+        parent_feature_id=place[0] if place is not None else None,
         detail=None,
     )
     source_record = SourceRecord(

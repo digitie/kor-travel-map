@@ -652,3 +652,110 @@ def test_the_asset_boundaries_open_the_counter_around_the_run_callable() -> None
 # 요청을 보내는 것은 asset이 아니라 **fetcher**다. 그래서 커버리지 검사는
 # `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`로 옮겼다 — 거기서는
 # fetcher마다 계수 호출을 (전이 포함) 요구하고, 못 세는 것은 이유와 함께 선언한다.
+
+
+# ---------------------------------------------------------------- transport (ADR-106)
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_leaves_a_transport_503_retryable(tracked: bool) -> None:
+    """503(근거 수집이 현재가 아님)은 원형 그대로 나와야 ``RetryPolicy``가 step을 다시 돈다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportNotCurrent
+
+    async def _raise(_context: Any) -> None:
+        raise TransportExportNotCurrent("503")
+
+    with pytest.raises(TransportExportNotCurrent):
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_opens_one_run_retry_budget(tracked: bool) -> None:
+    from kortravelmap.dagster import upstream_retry
+
+    seen: list[object] = []
+
+    async def _run(_context: Any) -> None:
+        seen.append(upstream_retry.active_run_retry_budget())
+        seen.append(upstream_retry.active_run_retry_budget())
+
+    asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _run))
+    first, second = seen
+    assert isinstance(first, upstream_retry.RetryBudget)
+    assert first is second
+    assert upstream_retry.active_run_retry_budget() is None
+
+
+def _transport_failure(kind: str) -> Exception:
+    from kortravelmap.providers import kor_travel_transport as transport
+
+    return {
+        "hidden": transport.TransportExportHidden("404"),
+        "empty": transport.TransportExportEmpty("0건"),
+        "contract": transport.TransportExportContractError("items: 배열이어야 한다"),
+        "malformed": transport.TransportExportMalformed("JSON이 아니다"),
+    }[kind]
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("kind", ["hidden", "empty", "contract", "malformed"])
+def test_the_asset_boundary_stops_retries_for_unrecoverable_transport_failures(
+    tracked: bool, kind: str
+) -> None:
+    """404·0건·계약 위반·비-JSON은 60초 뒤 다시 돌아도 같다 — step 재시도를 끈다(503만 남긴다)."""
+    cause = _transport_failure(kind)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(Failure) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value.allow_retries is False
+    assert caught.value.__cause__ is cause
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["failure_kind"] == cause.failure_kind  # type: ignore[attr-defined]
+
+
+def _recoverable_transport_failure(kind: str) -> Exception:
+    from kortravelmap.providers.kor_travel_transport import TransportExportNotCurrent
+
+    from kortravelmap.dagster.provider_fetchers import _TransportTransientStatus
+
+    return {
+        "not_current_503": TransportExportNotCurrent("503"),
+        # HTTP 층 재시도(2회)를 다 쓴 502/504.
+        # 짧은 transport 재기동이 하루치 유가를 날리면 안 된다.
+        "transient_502": _TransportTransientStatus("502"),
+    }[kind]
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("kind", ["not_current_503", "transient_502"])
+def test_the_asset_boundary_keeps_retries_for_recoverable_transport_failures(
+    tracked: bool, kind: str
+) -> None:
+    cause = _recoverable_transport_failure(kind)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(type(cause)) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_an_unrecoverable_transport_error_seen_only_as_context_does_not_stop_retries(
+    tracked: bool,
+) -> None:
+    """``__context__``(처리 중 난 다른 예외)까지 따라가면 무관한 실패가 terminal이 된다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportHidden
+
+    async def _raise(_context: Any) -> None:
+        try:
+            raise TransportExportHidden("404")
+        except TransportExportHidden:
+            raise RuntimeError("정리 중 다른 실패") from None
+
+    with pytest.raises(RuntimeError, match="정리 중"):
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))

@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-04 — transport 소비 후속(Low 다섯): 브랜치 `fix/transport-consumer-lows`
+
+**다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지(소유자 지시: PR은 머지 직전에) → 다음 Map pinned pair. 배포 영향 없음
+(migration 없음).**
+
+- 재시도 예산은 run 하나에 하나(`upstream_retry.sharing_run_retry_budget`) — 큐 run의 scope들이 나눠 쓴다.
+- transport 503은 `retryable=True` step 실패, 공항 0건은 `transport_empty`, 비-JSON 본문은 `transport_malformed_upstream`.
+- 가격 feature는 place locator로 bjd·시도·시군구를 이어받는다(`list_primary_place_locator` 행 5-tuple).
+- 관리 UI 로그인 감사 fetch 3초 timeout(실패는 `console.warn`). transport 설정 문서는
+  `packages/kor-travel-map-dagster/README.md`가 정본.
+- 적대 리뷰 반영: locator 지역 코드는 행별 관대 처리, `retryable=False` transport 실패는 asset step 재시도를 끈다,
+  큐 경로 503은 재큐잉하지 않는다(결정). 배포 뒤 첫 가격 적재가 가격 feature 주소를 한 번 고쳐 쓴다.
+
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
 **다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지 → 다음 Map pinned pair 배포(이 이미지가 핀에 오른다) → 그 뒤에만
@@ -22,7 +35,6 @@ Manager `fix/dagster-code-server-reloadable` 설치(Map code-server를 `code-ser
 - transport export 계약은 pin하지 않는다(ADR-106 4번) — Map에 필요한 모양은 transport API를 직접 바꾼다.
 - C7 기준 5(공항 operation)는 transport가 떠 있고 token이 맞아야 GREEN이다(`docs/runbooks/c7-prod-live-e2e.md`).
 - 남은 것: transport 관리자 UI의 옛 `fuel_latest_prices` 읽기 모델 경고 코드(행이 사라져 표시되지 않음) 정리.
-||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
 

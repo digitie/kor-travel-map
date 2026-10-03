@@ -14,12 +14,14 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportExportContractError,
     TransportExportEmpty,
     TransportExportHidden,
+    TransportExportMalformed,
     TransportExportNotCurrent,
 )
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
 import kortravelmap.dagster.provider_fetchers as provider_fetchers
+from kortravelmap.dagster import upstream_retry
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_transport_airports,
@@ -296,3 +298,88 @@ async def test_airports_and_rest_areas_parse_the_golden_contract(
     assert [area.natural_key for area in areas] == [
         item["natural_key"] for item in _golden("rest-areas.json")["items"]
     ]
+
+
+async def test_transport_fetchers_in_one_run_share_one_retry_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """한 run 안의 transport fetcher는 재시도 예산 **하나**를 나눠 쓴다.
+
+    큐 run 하나는 scope 여러 개(주유소·휴게소·돌발·공항)를 차례로 돈다. fetcher마다 새 예산을
+    만들면 transport가 내려가 있을 때 run 하나가 fetcher 수 × 예산만큼 재시도한다.
+    """
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    seen = _install(monkeypatch, broken)
+    with upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(limit=1)) as budget:
+        with pytest.raises(httpx.ConnectError):
+            _ = [item async for item in fetch_transport_airports(_settings())]
+        with pytest.raises(httpx.ConnectError):
+            _ = [item async for item in fetch_transport_highway_incidents(_settings())]
+        with pytest.raises(httpx.ConnectError):
+            _ = [item async for item in fetch_transport_rest_areas(_settings())]
+    # 첫 fetcher가 예산 1을 다 쓰면(2회) 나머지는 재시도 없이 1회씩 — 종전은 2+2+2.
+    assert len(seen) == 4
+    assert budget.used == 1
+
+
+def test_a_nested_run_scope_reuses_the_outer_budget() -> None:
+    """큐 run(바깥)이 연 예산을 scope별 runner(안쪽)가 새로 만들지 않는다."""
+    with (
+        upstream_retry.sharing_run_retry_budget() as outer,
+        upstream_retry.sharing_run_retry_budget() as inner,
+    ):
+        assert inner is outer
+        assert upstream_retry.active_run_retry_budget() is outer
+    assert upstream_retry.active_run_retry_budget() is None
+
+
+@pytest.mark.parametrize(
+    ("fetch", "body"),
+    [
+        (fetch_transport_airports, "<html>bad gateway</html>"),
+        (fetch_transport_rest_areas, "{not json"),
+        (fetch_transport_highway_incidents, ""),
+    ],
+)
+async def test_a_non_json_body_is_malformed_upstream(
+    monkeypatch: pytest.MonkeyPatch, fetch: Any, body: str
+) -> None:
+    """JSON이 아닌 200 본문은 미분류 ``JSONDecodeError``가 아니라 malformed upstream이다."""
+    _install(monkeypatch, lambda request: httpx.Response(200, text=body))
+    with pytest.raises(TransportExportMalformed) as raised:
+        _ = [item async for item in fetch(_settings())]
+    assert raised.value.failure_kind == "transport_malformed_upstream"
+
+
+async def test_an_empty_airport_export_is_a_transport_empty_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, lambda request: httpx.Response(200, json={"items": []}))
+    with pytest.raises(TransportExportEmpty) as raised:
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert raised.value.failure_kind == "transport_empty"
+
+
+async def test_a_503_is_not_retried_at_the_http_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """503은 HTTP 층에서 곧바로 다시 부르지 않는다(15초 안에 바뀌지 않는다).
+
+    step 재시도가 남는지는 ``test_quota_exhaustion_stops_step_retries.py``의 transport
+    경계 테스트가 실제 asset 경계로 확인한다.
+    """
+    seen = _install(monkeypatch, lambda request: httpx.Response(503, json={"detail": "stale"}))
+    with pytest.raises(TransportExportNotCurrent):
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert len(seen) == 1
+
+
+def test_an_explicit_budget_under_an_open_run_scope_is_refused() -> None:
+    """바깥 run 예산이 열려 있으면 안쪽이 넘긴 예산은 쓰이지 않는다 — 조용히 무시하지 않는다."""
+    with (
+        upstream_retry.sharing_run_retry_budget(),
+        pytest.raises(ValueError, match="예산"),
+        upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(limit=1)),
+    ):
+        pass

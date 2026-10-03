@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### transport 소비 후속 (2026-10-04)
+
+- **FIXED**: transport fetcher의 재시도 예산이 run 하나에 하나다(`upstream_retry.sharing_run_retry_budget`) — 종전은
+  호출마다 새 예산이라 큐 run이 scope 수만큼 재시도했다.
+- **ADDED**: `TransportExportMalformed`(`failure_kind=transport_malformed_upstream`, JSON이 아닌 본문)와 transport 예외의
+  `retryable` 속성(503 `transport_not_current`만 `True`). 공항 0건은 `TransportExportEmpty`다.
+- **CHANGED**: `list_primary_place_locator`가 `(source_entity_id, feature_id, lon, lat, region: Address)`를 돌려주고
+  `fuel_station_place_locator_from_rows`·`rest_area_place_locator_from_rows`·`build_rest_area_place_locator`의
+  locator 값에 place 주소가 붙는다. 주유소·휴게소 가격 feature가 place의 bjd·시도·시군구 코드를 다시 갖는다.
+- **FIXED (admin UI)**: 로그인/로그아웃 감사 기록 fetch에 3초 timeout.
+
 ### 주유소·휴게소·돌발·공항은 kor-travel-transport export에서 받는다 — ADR-106 (2026-10-02)
 
 - **CHANGED (provider 정체성)**: `python-opinet-api`·`python-krex-api`·`python-krairport-api` dataset 여섯을

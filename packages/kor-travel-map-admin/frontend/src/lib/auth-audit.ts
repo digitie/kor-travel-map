@@ -6,6 +6,11 @@ const INTERNAL_BASE =
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
 const TRUST_PROXY_HEADERS_ENV = "KOR_TRAVEL_MAP_UI_TRUST_PROXY_HEADERS";
 const AUTH_AUDIT_ACTOR = "ui-auth";
+/**
+ * 감사 기록 요청의 상한. 로그인/로그아웃은 감사 저장에 의존하지 않는다 —
+ * API가 멈춰 있어도 로그인 응답이 이 시간 이상 붙잡히지 않는다.
+ */
+const AUTH_AUDIT_TIMEOUT_MS = 3_000;
 
 type AuthAuditEvent = {
   attemptedUsername?: string | null;
@@ -30,10 +35,11 @@ export async function recordAuthAuditEvent(
   }
   try {
     const target = new URL("/v1/admin/auth-events", INTERNAL_BASE);
-    await fetch(target, {
+    const response = await fetch(target, {
       method: "POST",
       headers,
       cache: "no-store",
+      signal: AbortSignal.timeout(AUTH_AUDIT_TIMEOUT_MS),
       body: JSON.stringify({
         attempted_username: event.attemptedUsername?.trim() || null,
         client_ip: clientIpFromRequest(request),
@@ -45,9 +51,23 @@ export async function recordAuthAuditEvent(
         user_agent: request.headers.get("user-agent"),
       }),
     });
-  } catch {
+    if (!response.ok) {
+      warnAuditNotRecorded(event, `HTTP ${response.status}`);
+    }
+  } catch (error) {
     // Login/logout availability must not depend on audit persistence.
+    warnAuditNotRecorded(
+      event,
+      error instanceof Error ? error.name : "unknown error",
+    );
   }
+}
+
+/** 감사 기록 누락을 남긴다. 사용자명·header·proxy secret은 싣지 않는다. */
+function warnAuditNotRecorded(event: AuthAuditEvent, cause: string): void {
+  console.warn(
+    `[auth-audit] ${event.eventType}/${event.outcome} 감사 기록 실패: ${cause}`,
+  );
 }
 
 function clientIpFromRequest(request: NextRequest): string | null {

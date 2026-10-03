@@ -65,10 +65,10 @@ find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
 | `KRHERITAGE_API_KEY` | python-krheritage-api | 국가유산청 OpenAPI | |
 | `KRFOREST_API_KEY` | python-krforest-api | 산림청 / 산림청 산악기상 | |
 | ~~`KNPS_SERVICE_KEY`~~ | ~~python-knps-api~~ | — | **사용 안 함**. ADR-028 amendment + knps-api PR#4 (keyless). §3.8.1 참조 |
-| `KREX_API_KEY` | python-krex-api | 한국도로공사 API | |
+| ~~`KREX_API_KEY`~~ | ~~python-krex-api~~ | — | **Map은 사용 안 함**(ADR-106 — kor-travel-transport export에서 받는다) |
 | `KHOA_API_KEY` | python-khoa-api | 국립해양조사원 | 해수욕장/해양지수 |
 | `AIRKOREA_API_KEY` | python-airkorea-api | 한국환경공단 AirKorea | 대기질 |
-| `OPINET_API_KEY` | python-opinet-api | 한국석유공사 OpiNet | 주유소·유가 |
+| ~~`OPINET_API_KEY`~~ | ~~python-opinet-api~~ | — | **Map은 사용 안 함**(ADR-106 — kor-travel-transport export에서 받는다) |
 | `DATAGOKR_API_KEY` | python-datagokr-api, data.go.kr-standard | data.go.kr 표준데이터 | 최우선 |
 | `DATA_GO_KR_SERVICE_KEY` | 동일 | 동일 | 폴백 1 |
 | `PUBLIC_DATA_SERVICE_KEY` | 동일 | 동일 | 폴백 2 |
@@ -82,6 +82,8 @@ find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
 | `KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY` | admin curated place search | Google Cloud Console (Places API New) | backend 직접 호출용. `GOOGLE_PLACES_API_KEY`에서 매핑 가능 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12601` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge DB `read` scope 키 | `X-API-Key` 헤더로만 전송, static `API_KEYS` 공유 금지 |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL` | kor-travel-transport export(주유소·유가·휴게소·돌발·공항) | 형제 앱 kor-travel-transport | scheme+host[:port]만, 운영 `http://127.0.0.1:14001`. 설정 표는 `packages/kor-travel-map-dagster/README.md` |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | 동일 | transport `TRANSPORT_SERVICE_EXPORT_TOKEN`과 같은 값 | `X-Kor-Travel-Transport-Service-Token` header로만 전송(32자 이상) |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `X-KTG-API-Key` header로만 전송한다. admin trusted-proxy secret/role을 Map에 위임하지 않는다. |

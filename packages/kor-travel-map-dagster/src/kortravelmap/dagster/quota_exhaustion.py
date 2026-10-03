@@ -70,6 +70,11 @@ from __future__ import annotations
 
 from typing import Final
 
+from kortravelmap.providers.kor_travel_transport import (
+    TransportExportContractError,
+    TransportExportFailure,
+)
+
 from dagster import Failure
 
 from .upstream_requests import (
@@ -82,6 +87,7 @@ __all__ = [
     "QUOTA_EXCEPTION_TYPES",
     "quota_exhaustion_cause",
     "raise_terminal_if_quota_exhausted",
+    "raise_terminal_if_transport_unrecoverable",
 ]
 
 #: HTTP 상태를 실어 나르는 속성 이름 — provider lib마다 다르다(실측: visitkorea 등은
@@ -201,3 +207,37 @@ def raise_terminal_if_quota_exhausted(exc: BaseException) -> None:
         },
         allow_retries=False,
     ) from exc
+
+
+def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
+    """kor-travel-transport 실패 중 기다려도 풀리지 않는 것이면 step 재시도를 끈다.
+
+    ``FEATURE_LOAD_RETRY_POLICY``는 쿼터 말고는 모든 예외를 다시 돈다. 그런데 404(token·peer 주소·
+    버전), 0건, 계약 위반, JSON이 아닌 본문은 60초 뒤에도 같다 — 같은 export를 세 번 더 부를 뿐이다.
+    ``retryable=False``인 transport 예외만 :class:`dagster.Failure` ``allow_retries=False``로
+    바꾼다. 503(``transport_not_current``, ``retryable=True``)과 그 밖의 예외는 그대로 둔다.
+    """
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TransportExportFailure | TransportExportContractError):
+            if current.retryable:
+                return
+            raise Failure(
+                description=(
+                    f"kor-travel-transport 실패({current.failure_kind}) — 기다려도 풀리지 "
+                    "않으므로 step 재시도를 끈다. "
+                    f"원 예외: {type(current).__name__}: {current}"
+                ),
+                metadata={
+                    "failure_kind": current.failure_kind,
+                    "provider_error": type(current).__name__,
+                    "step_retries_suppressed": "true",
+                },
+                allow_retries=False,
+            ) from current
+        # ``__cause__``(명시적 ``raise ... from``)만 따른다. ``__context__``는 처리 중에 난
+        # **다른** 실패라 그 원인이 아니다 — 따라가면 무관한 실패가 terminal이 된다.
+        current = current.__cause__

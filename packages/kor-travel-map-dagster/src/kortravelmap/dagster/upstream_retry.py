@@ -74,7 +74,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
@@ -88,10 +89,12 @@ __all__ = [
     "NONRETRYABLE_FAILURE_KINDS",
     "PROVIDER_CLIENT_INNER_RETRIES",
     "RetryBudget",
+    "active_run_retry_budget",
     "default_upstream_retryable",
     "retry_upstream",
     "retry_upstream_async",
     "retry_upstream_awaitable",
+    "sharing_run_retry_budget",
 ]
 
 T = TypeVar("T")
@@ -176,6 +179,45 @@ class RetryBudget:
             return False
         self.used += 1
         return True
+
+
+_RUN_RETRY_BUDGET: Final[ContextVar[RetryBudget | None]] = ContextVar(
+    "kortravelmap_run_retry_budget", default=None
+)
+
+
+@contextlib.contextmanager
+def sharing_run_retry_budget(budget: RetryBudget | None = None) -> Iterator[RetryBudget]:
+    """이 블록(= run 하나) 안의 fetcher가 나눠 쓸 재시도 예산을 연다.
+
+    여는 자리는 run 경계다 — asset step
+    (:func:`~.feature_operation_tracking.run_tracked_feature_asset`)과 큐 run
+    (:func:`~.sensors.execute_feature_update_request_op`, 그 안의 scope별 runner). 큐 run 하나는
+    scope 여러 개를 차례로 돌므로 fetcher마다 예산을 새로 만들면 run 하나가 scope 수 × 예산만큼
+    재시도한다. **이미 열려 있으면 바깥 예산을 그대로 쓴다** — 안쪽 경계가 예산을 되살리지 않는다.
+    """
+
+    outer = _RUN_RETRY_BUDGET.get()
+    if outer is not None:
+        if budget is not None and budget is not outer:
+            # 넘긴 예산은 쓰이지 않는다 — 조용히 무시하면 호출자가 상한을 잘못 믿는다.
+            raise ValueError(
+                "run 재시도 예산이 이미 열려 있다 — 안쪽에서 다른 예산을 넘길 수 없다."
+            )
+        yield outer
+        return
+    shared = budget if budget is not None else RetryBudget()
+    token = _RUN_RETRY_BUDGET.set(shared)
+    try:
+        yield shared
+    finally:
+        _RUN_RETRY_BUDGET.reset(token)
+
+
+def active_run_retry_budget() -> RetryBudget | None:
+    """지금 run 경계가 연 공유 예산. 경계 밖(단독 호출·테스트)이면 ``None``."""
+
+    return _RUN_RETRY_BUDGET.get()
 
 
 def _backoff_delay(attempt: int, *, base_delay: float, max_delay: float) -> float:

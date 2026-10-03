@@ -1,5 +1,59 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-04 — delta 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
+
+- **MED 회귀.** `_TransportTransientStatus`(HTTP 층 재시도를 다 쓴 502/504)가 부모의 `retryable=False`를 물려받아
+  새 경계가 짧은 transport 재기동을 terminal로 만들었다(하루치 유가 손실). `retryable=True`·`failure_kind=
+  transport_transient_status`. 다른 하위 클래스(NotCurrent True, Malformed·Empty·Hidden·ContractError False)는 의도대로다.
+  경계 테스트에 503·502를 "재시도가 남아야 하는" 경우로 넣었다.
+- **LOW** 경계의 원인 추적은 `__cause__`만 따른다(`__context__`는 처리 중 난 다른 실패).
+- **LOW** locator 경고 logger(`kortravelmap.infra.feature_repo`)를 `docker/dagster.yaml` `managed_python_loggers`에
+  더했다(lint로 결박). 공용 Dagster plane에서는 instance 설정이 Manager 쪽이므로 그쪽 목록에도 있어야 run 로그에 보인다.
+
+## 2026-10-04 — transport 소비 후속 적대 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
+
+- **MED locator 한 행이 전체를 죽였다.** `list_primary_place_locator`가 검증 없는 코드 칼럼으로 엄격한 `Address`를
+  만들어, `manual_override` 하나(시군구만·오타)가 목록 전체를 `ValidationError`로 실패시켰다 — 모든 가격 run이
+  실패하고 override가 provider 보정을 가리므로 저절로 낫지 않는다. 행마다 만들고 걸리면 빈 주소 + feature id 경고.
+- **LOW 2·3 `retryable`이 행동을 바꾸지 않았다.** `FEATURE_LOAD_RETRY_POLICY`는 쿼터 말고 모든 예외를 다시 돈다.
+  asset 경계가 `retryable=False` transport 실패(hidden·empty·contract·malformed)를 쿼터 소진과 같은 방식으로
+  `Failure(allow_retries=False)`로 바꾼다(`raise_terminal_if_transport_unrecoverable`). 503만 재시도로 남는다.
+  테스트는 `run_tracked_feature_asset`를 실제로 돌린다(두 갈래 × 네 종류).
+- **LOW 6** 바깥 run 예산이 열린 채 다른 예산을 넘기면 `ValueError`(종전은 조용히 무시).
+- **LOW 7** 감사 기록 실패·timeout·비-2xx는 `console.warn`(이벤트 종류·결과·오류 이름/HTTP 상태만, 비밀값 없음).
+  테스트는 `vi.restoreAllMocks()`로 spy를 되돌린다.
+- **LOW 5(수용, 기록).** 가격 feature가 place의 시군구 코드를 갖게 되어 시군구 범위 refresh가 이제 가격
+  dataset도 포함한다. 첫 적재는 기존 가격 feature 주소를 한 번 고쳐 쓴다.
+- **큐 경로 503(결정: 유지).** 큐 run의 실패한 update request는 원인과 무관하게 그 request로 끝나고 다시 큐에
+  넣지 않는다. 다음 schedule/request가 다시 돈다. dagster README·ADR-106에 적었다.
+
+## 2026-10-04 — transport 소비 후속(적대 리뷰 잔여 Low 다섯): 브랜치 `fix/transport-consumer-lows`
+
+- **재시도 예산은 run 하나에 하나.** ADR-106 리뷰 M8은 "run 예산 공유"라고 적었지만 실제로는 fetcher 호출마다
+  `RetryBudget()`을 새로 만들었다. 큐 run 하나는 scope 여러 개(주유소·휴게소·돌발·공항)를 돌므로 transport가
+  내려가 있으면 scope 수 × 예산만큼 재시도했다. `upstream_retry.sharing_run_retry_budget()`(ContextVar)를
+  asset step(`run_tracked_feature_asset`)·큐 op(`execute_feature_update_request`)·scope runner가 열고, 안쪽은 바깥
+  예산을 그대로 쓴다. 테스트: 예산 1에서 세 fetcher가 연결 오류면 요청 4건(종전 6건).
+- **failure_kind 분류.** 503·`collection` 어긋남(`transport_not_current`)은 `retryable=True`인 step 실패다 — HTTP
+  층에서 바로 다시 부르지 않고 `RetryPolicy`가 step을 다시 돈다(경계는 원 예외를 그대로 낸다). 공항 0건은
+  계약 위반이 아니라 `transport_empty`, JSON이 아닌 본문은 미분류 `JSONDecodeError`가 아니라
+  `transport_malformed_upstream`(`TransportExportMalformed`)이다. 나머지는 `retryable=False`.
+- **가격 feature 지역 코드.** transport 이관 뒤 주유소·휴게소 가격 feature는 `Address(road=...)`만 가져 bjd·시도·
+  시군구가 비었다(옛 OpiNet 경로는 주유소 place 주소를 그대로 썼다). transport export에는 지역 코드가 없고 가격 job은
+  역지오코딩하지 않으므로(M5) `list_primary_place_locator`가 place의 `legal_dong_code`·`admin_dong_code`·`sido_code`·
+  `sigungu_code`·행정동 주소를 함께 싣고 가격 feature가 이어받는다. locator 행은 5-tuple이 됐다.
+- **관리 UI 로그인 감사.** `recordAuthAuditEvent`의 fetch에 `AbortSignal.timeout(3000)` — 감사 API가 멈춰도 로그인
+  응답이 붙잡히지 않는다(vitest).
+- **문서.** transport 설정 표(BASE_URL·SERVICE_TOKEN·PAGE_SIZE·TIMEOUT_SECONDS)와 failure_kind 표를 dagster README에,
+  integration-map은 peer 주소 게이트(`Host` 아님)·export별 응답 모양으로, settings 설명의 "Host로 닫는다"를 고쳤다.
+  dagster README의 옛 `opinet_*`·`krex_*`·`krairport_*` resource/env/schedule 행과 external-apis의 OpiNet·KREX 키 행을
+  정리했다. main의 `docs/resume.md`·`docs/journal.md`에 남아 있던 merge 표식 줄(`||||||| parent of 866d318c6`)도 지웠다.
+- **RED → GREEN(n150 `~/ci-scratch/ktm-lows`, Python 3.14).** 테스트 커밋 `1bea708d8`: unit 5 실패, dagster 경계 3
+  실패 + fetcher 테스트 collection 오류. 수정 head: 같은 표적 191건 통과. 전량: ruff check·lint-imports(4 kept)·
+  mypy --strict 세 패키지 통과, unit+lint 3035 통과/16 실패(`test_docker_dagster_runtime.py` 13건은 main과 같은 집합 —
+  n150 checkout 환경, 나머지 3건은 부하 아래 signal/lock 타이밍이라 재실행 통과), api 1217·dagster 582 통과,
+  vitest RED(1 실패) → GREEN, tsc·eslint 통과.
+
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
 - **원인(n150 prod 2026-10-01 21:52Z).** C7 schedule-write spec은 cron override를 `ops.dagster_schedule_overrides`에
@@ -49,7 +103,6 @@
   필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
   `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/unit/golden/kor-travel-transport/`)이 실 파서를 지난다. 처음
   만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
-||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 

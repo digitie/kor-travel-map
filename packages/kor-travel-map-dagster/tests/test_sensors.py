@@ -593,3 +593,34 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
             ),
         }
     ]
+
+
+def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:
+    """큐 run 하나는 scope 여러 개를 돈다 — 그 전부가 run 예산 하나를 나눠 쓴다."""
+    from kortravelmap.dagster import upstream_retry
+
+    seen: list[object] = []
+
+    @dataclass
+    class _BudgetClient(_Client):
+        async def execute_feature_update_request(
+            self, request_id: str, **kwargs: Any
+        ) -> FeatureUpdateExecutionResult | None:
+            seen.append(upstream_retry.active_run_retry_budget())
+            return await super().execute_feature_update_request(request_id, **kwargs)
+
+    request = _request()
+    client = _BudgetClient(request=request, result=_execution_result(request))
+    result = feature_update_request_worker_job.execute_in_process(
+        run_config={
+            "ops": {
+                "execute_feature_update_request": {
+                    "config": {"request_id": request.request_id, "request_generation": 1}
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client, "feature_update_runner": object()},
+    )
+    assert result.success
+    [budget] = seen
+    assert isinstance(budget, upstream_retry.RetryBudget)
