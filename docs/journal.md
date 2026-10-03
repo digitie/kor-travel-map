@@ -49,7 +49,6 @@
   필요한 필드·모양은 transport API를 직접 바꾼다(같은 PR 쌍, 호환 층 없음). 어긋남은 엄격한 런타임 검증이
   `failure_kind`로 실패시킨다. 대표 응답 5종(`tests/unit/golden/kor-travel-transport/`)이 실 파서를 지난다. 처음
   만들었던 vendored OpenAPI·`PIN.json`·repin 스크립트는 같은 날 지웠다.
-||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-02 — ADR-105 적대 리뷰 반영: 같은 브랜치 `feat/remove-map-kma-dagster`
 

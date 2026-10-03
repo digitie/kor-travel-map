@@ -475,8 +475,10 @@ class KorTravelMapSettings(BaseSettings):
         description=(
             "kor-travel-transport REST API base URL. **scheme+host[:port]만** 넣는다 — fetcher가 "
             "절대경로 ``/v1/service/exports/*``로 호출한다(ADR-106). n150은 같은 호스트의 "
-            "``http://127.0.0.1:14001``이다. 외부 reverse proxy(pr-api)를 거치면 transport가 "
-            "Host로 닫으므로 404다. env ``KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL``."
+            "``http://127.0.0.1:14001``이다. transport는 접속 peer 주소"
+            "(``SERVICE_EXPORT_ALLOWED_CLIENTS_CSV``, 기본 loopback)로 닫으므로 reverse proxy나 "
+            "docker bridge를 거쳐 허용 대역 밖에서 오면 404다(``Host`` header는 보지 않는다). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL``."
         ),
     )
     kor_travel_transport_service_token: SecretStr | None = Field(

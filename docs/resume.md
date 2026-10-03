@@ -22,7 +22,6 @@ Manager `fix/dagster-code-server-reloadable` 설치(Map code-server를 `code-ser
 - transport export 계약은 pin하지 않는다(ADR-106 4번) — Map에 필요한 모양은 transport API를 직접 바꾼다.
 - C7 기준 5(공항 operation)는 transport가 떠 있고 token이 맞아야 GREEN이다(`docs/runbooks/c7-prod-live-e2e.md`).
 - 남은 것: transport 관리자 UI의 옛 `fuel_latest_prices` 읽기 모델 경고 코드(행이 사라져 표시되지 않음) 정리.
-||||||| parent of 866d318c6 (fix(dagster): entrypoint accepts `code-server start` for the code server)
 
 ## 2026-10-01 — Map에서 날씨 feature·기상특보 notice 기능 삭제(ADR-105): 브랜치 `feat/remove-map-kma-dagster`
 

@@ -40,7 +40,8 @@
 > data.go.kr 호출은 여전히 0이지만 **C7 기준 5가 GREEN이려면 transport가 떠 있고 Map code-server의
 > `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`이 transport `TRANSPORT_SERVICE_EXPORT_TOKEN`과 같아야
 > 한다.** 실패는 run의 `failure_kind`로 가른다: `transport_hidden`(404 — token·접속 주소·버전),
-> `transport_not_current`(503), `ProviderCredentialMissing`(Map token 미설정). 어느 경우도 아무것도
+> `transport_not_current`(503, step 재시도 대상), `transport_empty`(0건), `transport_malformed_upstream`(JSON이
+> 아닌 본문), `transport_contract`(모양 위반), `ProviderCredentialMissing`(Map token 미설정). 어느 경우도 아무것도
 > 적재·삭제하지 않으므로 원인을 고친 뒤 다시 돌리면 된다. schedule-write는 tick을 내보내지 않으므로
 > transport와 무관하다.
 

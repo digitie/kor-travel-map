@@ -69,9 +69,11 @@ PostgreSQL-backed instance config를 쓴다.
 provider record resource:
 
 - `datagokr_cultural_festivals`
-- `opinet_stations`
-- `krex_rest_areas`
-- `krex_traffic_notices`
+- `transport_fuel_stations`
+- `transport_rest_areas`
+- `transport_rest_area_fuel_prices`
+- `transport_highway_incidents`
+- `transport_airports`
 - `krheritage_items`
 - `krheritage_events`
 - `mois_license_records`
@@ -86,7 +88,6 @@ provider record resource:
 - `standard_tourist_attractions`
 - `standard_parking_lots`
 - `khoa_beaches`
-- `krairport_airports`
 - `visitkorea_festival_events`
 - `kor_travel_concierge_youtube_features`
 
@@ -103,9 +104,11 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | resource | provider package | kor-travel-map env | source env |
 |----------|------------------|----------------|------------|
 | `datagokr_cultural_festivals` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `opinet_stations` | `python-opinet-api` | `KOR_TRAVEL_MAP_OPINET_API_KEY` | `OPINET_API_KEY` |
-| `krex_rest_areas` | `python-krex-api` | `KOR_TRAVEL_MAP_KREX_GO_API_KEY`, `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `KEX_GO_API_KEY`, `DATA_GO_KR_SERVICE_KEY` |
-| `krex_traffic_notices` | `python-krex-api` | `KOR_TRAVEL_MAP_KREX_EX_API_KEY` | `KEX_GO_API_KEY` |
+| `transport_fuel_stations` | `kor-travel-transport` | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | transport `TRANSPORT_SERVICE_EXPORT_TOKEN`(같은 값) |
+| `transport_rest_areas` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
+| `transport_rest_area_fuel_prices` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
+| `transport_highway_incidents` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
+| `transport_airports` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
 | `krheritage_items` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krheritage_events` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `mois_license_records` | `python-mois-api` | `KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH` | 없음 |
@@ -120,9 +123,37 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `standard_tourist_attractions` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_parking_lots` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `khoa_beaches` | `python-khoa-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `krairport_airports` | `python-krairport-api` | 없음 | 없음 |
 | `visitkorea_festival_events` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `kor_travel_concierge_youtube_features` | `kor-travel-concierge` | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | 없음(DB `read` 키 발급) |
+
+### kor-travel-transport export (ADR-106)
+
+`transport_*` resource는 provider 라이브러리가 아니라 같은 호스트의 kor-travel-transport
+`GET /v1/service/exports/{fuel-stations,rest-areas,rest-area-fuel-prices,highway-incidents/active,airports}`를
+읽는다. 설정의 정본은 `kortravelmap.settings.KorTravelMapSettings`다.
+
+| env | 기본값 | 뜻 |
+|-----|--------|----|
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL` | 없음(필수) | scheme+host[:port]만. 운영(host network)은 `http://127.0.0.1:14001`, repo compose는 `http://host.docker.internal:14001` |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | 없음(필수) | header `X-Kor-Travel-Transport-Service-Token`. transport `TRANSPORT_SERVICE_EXPORT_TOKEN`과 같은 값(32자 이상) |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_PAGE_SIZE` | `500` | cursor 페이지 크기(1~1000, transport `MAX_PAGE_SIZE`) |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_TIMEOUT_SECONDS` | `30.0` | 요청 하나의 httpx timeout(0.2~120) |
+
+빈 문자열은 미설정과 같다(compose `${X:-}`) — 요청 전에 `ProviderCredentialMissing`으로 실패한다.
+transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`, 기본 loopback)가 맞아야
+응답하고 아니면 404로 경로를 숨긴다(`Host` header는 보지 않는다). 실패는 `failure_kind`로 가른다:
+
+| failure_kind | 원인 | step 재시도 |
+|--------------|------|-------------|
+| `transport_hidden` | 404 — token·peer 주소·export 없는 버전 | 의미 없음(`retryable=False`) |
+| `transport_not_current` | 503 또는 200 본문 `collection`이 이력 없음·실패·stale, 돌발 `collected_at` 30분 초과 | **재시도 대상**(`retryable=True`, HTTP 층에서는 바로 다시 부르지 않는다) |
+| `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | `retryable=False` |
+| `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | `retryable=False` |
+| `transport_malformed_upstream` | 본문이 JSON이 아니다 | `retryable=False` |
+
+전송 오류와 502/504만 HTTP 층에서 다시 부른다(경계당 2회). 그 재시도는 **run 하나에 예산 하나**다 —
+asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `upstream_retry.sharing_run_retry_budget`을
+열고 그 안의 transport fetcher가 모두 나눠 쓴다.
 
 ## Feature load schedules
 
@@ -132,9 +163,12 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | schedule | job | cron |
 |----------|-----|------|
 | `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` |
-| `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` |
-| `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` |
-| `feature_notice_krex_traffic_notices_ten_minute_schedule` | `feature_notice_krex_traffic_notices_job` | `*/10 * * * *` |
+| `feature_place_transport_fuel_stations_weekly_schedule` | `feature_place_transport_fuel_stations_job` | `5 3 * * 1` |
+| `feature_price_transport_fuel_stations_daily_schedule` | `feature_price_transport_fuel_stations_job` | `18 18 * * *` |
+| `feature_place_transport_rest_areas_weekly_schedule` | `feature_place_transport_rest_areas_job` | `20 4 * * 1` |
+| `feature_price_transport_rest_areas_twice_daily_schedule` | `feature_price_transport_rest_areas_job` | `50 6,18 * * *` |
+| `feature_notice_transport_highway_incidents_ten_minute_schedule` | `feature_notice_transport_highway_incidents_job` | `*/10 * * * *` |
+| `feature_place_transport_airports_monthly_schedule` | `feature_place_transport_airports_job` | `5 5 4 * *` |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` |
 | `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` |
