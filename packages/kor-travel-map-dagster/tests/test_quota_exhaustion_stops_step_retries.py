@@ -652,3 +652,35 @@ def test_the_asset_boundaries_open_the_counter_around_the_run_callable() -> None
 # 요청을 보내는 것은 asset이 아니라 **fetcher**다. 그래서 커버리지 검사는
 # `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`로 옮겼다 — 거기서는
 # fetcher마다 계수 호출을 (전이 포함) 요구하고, 못 세는 것은 이유와 함께 선언한다.
+
+
+# ---------------------------------------------------------------- transport (ADR-106)
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_leaves_a_transport_503_retryable(tracked: bool) -> None:
+    """503(근거 수집이 현재가 아님)은 원형 그대로 나와야 ``RetryPolicy``가 step을 다시 돈다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportNotCurrent
+
+    async def _raise(_context: Any) -> None:
+        raise TransportExportNotCurrent("503")
+
+    with pytest.raises(TransportExportNotCurrent):
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_opens_one_run_retry_budget(tracked: bool) -> None:
+    from kortravelmap.dagster import upstream_retry
+
+    seen: list[object] = []
+
+    async def _run(_context: Any) -> None:
+        seen.append(upstream_retry.active_run_retry_budget())
+        seen.append(upstream_retry.active_run_retry_budget())
+
+    asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _run))
+    first, second = seen
+    assert isinstance(first, upstream_retry.RetryBudget)
+    assert first is second
+    assert upstream_retry.active_run_retry_budget() is None

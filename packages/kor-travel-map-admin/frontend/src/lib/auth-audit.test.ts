@@ -36,4 +36,38 @@ describe("admin 인증 감사", () => {
       request_id: "e2e-auth-audit",
     });
   });
+
+  it("감사 API가 응답하지 않아도 짧은 timeout 뒤 로그인 흐름으로 돌아온다", async () => {
+    // 로그인은 감사 기록 저장에 의존하지 않는다 — 걸린 fetch가 로그인 응답을 붙잡으면 안 된다.
+    const controller = new AbortController();
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(controller.signal);
+    const fetchMock = vi.fn(
+      (_target: unknown, options: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () =>
+            reject(new DOMException("timed out", "TimeoutError")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const request = { headers: new Headers() } as unknown as NextRequest;
+
+    const pending = recordAuthAuditEvent(request, {
+      eventType: "login",
+      outcome: "failed",
+      reason: "invalid_credentials",
+    });
+    expect(timeoutSpy).toHaveBeenCalledTimes(1);
+    const [timeoutMs] = timeoutSpy.mock.calls[0] as [number];
+    expect(timeoutMs).toBeGreaterThan(0);
+    expect(timeoutMs).toBeLessThanOrEqual(5_000);
+    const [, options] = fetchMock.mock.calls[0] as [unknown, RequestInit];
+    expect(options.signal).toBe(controller.signal);
+
+    controller.abort();
+    await expect(pending).resolves.toBeUndefined();
+    timeoutSpy.mockRestore();
+  });
 });
