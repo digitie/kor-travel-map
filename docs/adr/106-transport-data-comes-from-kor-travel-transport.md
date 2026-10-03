@@ -69,7 +69,9 @@
    - 분류(2026-10-04): 503·`collection` 어긋남은 `retryable=True`인 step 실패다(HTTP 층에서는 바로 다시
      부르지 않고 `RetryPolicy`가 step을 다시 돈다). 공항 0건은 `transport_empty`, JSON이 아닌 본문은
      `transport_malformed_upstream`이다. 나머지(`transport_hidden`·`transport_empty`·`transport_contract`·
-     `transport_malformed_upstream`)는 `retryable=False`다.
+     `transport_malformed_upstream`)는 `retryable=False`이고 asset 경계가 `Failure(allow_retries=False)`로 바꿔
+     step 재시도를 끈다(`quota_exhaustion.raise_terminal_if_transport_unrecoverable`). 큐 경로는 원인과 무관하게
+     실패한 request로 끝난다 — 503도 다시 큐에 넣지 않는다(결정, 다음 schedule/request가 다시 돈다).
    - 가격 feature 주소(2026-10-04): transport export에는 지역 코드가 없고 가격 job은 역지오코딩하지 않으므로,
      주유소·휴게소 가격 feature는 place locator(`list_primary_place_locator`)가 실어 오는 place의
      bjd·행정동·시도·시군구 코드를 이어받는다(옛 OpiNet 경로가 주유소 주소를 그대로 쓰던 것과 같다).

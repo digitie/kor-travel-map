@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-04 — transport 소비 후속 적대 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
+
+- **MED locator 한 행이 전체를 죽였다.** `list_primary_place_locator`가 검증 없는 코드 칼럼으로 엄격한 `Address`를
+  만들어, `manual_override` 하나(시군구만·오타)가 목록 전체를 `ValidationError`로 실패시켰다 — 모든 가격 run이
+  실패하고 override가 provider 보정을 가리므로 저절로 낫지 않는다. 행마다 만들고 걸리면 빈 주소 + feature id 경고.
+- **LOW 2·3 `retryable`이 행동을 바꾸지 않았다.** `FEATURE_LOAD_RETRY_POLICY`는 쿼터 말고 모든 예외를 다시 돈다.
+  asset 경계가 `retryable=False` transport 실패(hidden·empty·contract·malformed)를 쿼터 소진과 같은 방식으로
+  `Failure(allow_retries=False)`로 바꾼다(`raise_terminal_if_transport_unrecoverable`). 503만 재시도로 남는다.
+  테스트는 `run_tracked_feature_asset`를 실제로 돌린다(두 갈래 × 네 종류).
+- **LOW 6** 바깥 run 예산이 열린 채 다른 예산을 넘기면 `ValueError`(종전은 조용히 무시).
+- **LOW 7** 감사 기록 실패·timeout·비-2xx는 `console.warn`(이벤트 종류·결과·오류 이름/HTTP 상태만, 비밀값 없음).
+  테스트는 `vi.restoreAllMocks()`로 spy를 되돌린다.
+- **LOW 5(수용, 기록).** 가격 feature가 place의 시군구 코드를 갖게 되어 시군구 범위 refresh가 이제 가격
+  dataset도 포함한다. 첫 적재는 기존 가격 feature 주소를 한 번 고쳐 쓴다.
+- **큐 경로 503(결정: 유지).** 큐 run의 실패한 update request는 원인과 무관하게 그 request로 끝나고 다시 큐에
+  넣지 않는다. 다음 schedule/request가 다시 돈다. dagster README·ADR-106에 적었다.
+
 ## 2026-10-04 — transport 소비 후속(적대 리뷰 잔여 Low 다섯): 브랜치 `fix/transport-consumer-lows`
 
 - **재시도 예산은 run 하나에 하나.** ADR-106 리뷰 M8은 "run 예산 공유"라고 적었지만 실제로는 fetcher 호출마다

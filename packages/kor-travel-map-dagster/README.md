@@ -145,11 +145,17 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 
 | failure_kind | 원인 | step 재시도 |
 |--------------|------|-------------|
-| `transport_hidden` | 404 — token·peer 주소·export 없는 버전 | 의미 없음(`retryable=False`) |
+| `transport_hidden` | 404 — token·peer 주소·export 없는 버전 | **끈다**(`retryable=False` → `Failure(allow_retries=False)`) |
 | `transport_not_current` | 503 또는 200 본문 `collection`이 이력 없음·실패·stale, 돌발 `collected_at` 30분 초과 | **재시도 대상**(`retryable=True`, HTTP 층에서는 바로 다시 부르지 않는다) |
-| `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | `retryable=False` |
-| `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | `retryable=False` |
-| `transport_malformed_upstream` | 본문이 JSON이 아니다 | `retryable=False` |
+| `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
+| `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |
+| `transport_malformed_upstream` | 본문이 JSON이 아니다 | 끈다 |
+
+step 재시도를 끄는 자리는 asset 경계 `run_tracked_feature_asset`의
+`quota_exhaustion.raise_terminal_if_transport_unrecoverable`이다(쿼터 소진과 같은 방식). **큐 경로
+(`feature_update_request_worker`)는 다르다** — 실패한 update request는 어떤 원인이든(503 포함) 그 request로
+끝나고 다시 큐에 넣지 않는다. 다음 schedule이나 새 request가 다시 돈다(2026-10-04 결정: 503 재큐잉은 하지
+않는다).
 
 전송 오류와 502/504만 HTTP 층에서 다시 부른다(경계당 2회). 그 재시도는 **run 하나에 예산 하나**다 —
 asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `upstream_retry.sharing_run_retry_budget`을

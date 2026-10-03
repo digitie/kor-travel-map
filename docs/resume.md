@@ -8,7 +8,10 @@
 - 재시도 예산은 run 하나에 하나(`upstream_retry.sharing_run_retry_budget`) — 큐 run의 scope들이 나눠 쓴다.
 - transport 503은 `retryable=True` step 실패, 공항 0건은 `transport_empty`, 비-JSON 본문은 `transport_malformed_upstream`.
 - 가격 feature는 place locator로 bjd·시도·시군구를 이어받는다(`list_primary_place_locator` 행 5-tuple).
-- 관리 UI 로그인 감사 fetch 3초 timeout. transport 설정 문서는 `packages/kor-travel-map-dagster/README.md`가 정본.
+- 관리 UI 로그인 감사 fetch 3초 timeout(실패는 `console.warn`). transport 설정 문서는
+  `packages/kor-travel-map-dagster/README.md`가 정본.
+- 적대 리뷰 반영: locator 지역 코드는 행별 관대 처리, `retryable=False` transport 실패는 asset step 재시도를 끈다,
+  큐 경로 503은 재큐잉하지 않는다(결정). 배포 뒤 첫 가격 적재가 가격 feature 주소를 한 번 고쳐 쓴다.
 
 ## 2026-10-02 — Dagster entrypoint가 `code-server start`를 받는다: 브랜치 `fix/dagster-entrypoint-code-server`
 
