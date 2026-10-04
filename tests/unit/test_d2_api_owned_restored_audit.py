@@ -418,3 +418,38 @@ def test_the_recovery_validator_rejects_counts_no_restored_chain_can_produce(
     path = _write_api_audit(tmp_path, impossible, 7)
     with pytest.raises(ValueError, match="direct evidence mismatch"):
         state._validate_api_audit(path, allow_restored=True)
+
+
+# ── 배선 ─────────────────────────────────────────────────────────────────────
+
+_RUNNER = _ROOT / "scripts" / "run-admin-feature-live-acceptance.sh"
+_SUPERVISOR = _ROOT / "scripts" / "admin_feature_live_supervisor.py"
+
+
+def _shell_function(name: str) -> str:
+    source = _RUNNER.read_text(encoding="utf-8")
+    start = source.index(f"\n{name}() {{\n")
+    return source[start : source.index("\n}\n", start)]
+
+
+def test_the_normal_lane_audits_restored_only_when_the_spec_failed() -> None:
+    body = _shell_function("run_new")
+    executor = body.index("run_executor executor-main")
+    choice = body.index("(( test_status == 0 )) || api_audit_expect=restored")
+    audit = body.index('run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" "$api_audit_expect"')
+    assert executor < choice < audit
+    assert "local api_audit_expect=complete" in body
+
+
+def test_the_recovery_lane_always_audits_restored() -> None:
+    body = _shell_function("recover_run")
+    assert 'run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" restored' in body
+    assert "api_audit_expect" not in body
+
+
+def test_the_supervisor_forwards_the_expectation_to_the_helper() -> None:
+    source = _SUPERVISOR.read_text(encoding="utf-8")
+    assert '"--helper-audit-expect", choices=("complete", "restored")' in source
+    assert 'helper_extra = [] if expect is None else ["--expect", expect]' in source
+    assert "*helper_extra," in source
+    assert '("complete", "restored")' in _FIXTURE.read_text(encoding="utf-8")
