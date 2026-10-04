@@ -1536,7 +1536,8 @@ def _require_complete_api_owned(inspection: _ApiOwnedInspection, run_id: str) ->
 def _require_restored_api_owned(inspection: _ApiOwnedInspection, run_id: str) -> None:
     """spec이 실패한 run 또는 recovery가 남기는 행 집합.
 
-    create가 커밋되지 않았으면 소유 행이 하나도 없다. 커밋됐으면 Feature는 하나이고
+    이름으로 찾은 소유 Feature가 없으면 0행이다(그 분기가 증명하는 범위는 아래 주석).
+    있으면 Feature는 하나이고
     (그 뒤 어디서 죽든 cleanup이 은퇴시킨다), 사슬은 `_restored_transition_chains`
     중 하나이며, 명령은 create 1건 + 은퇴까지의 state PATCH 수(= 사슬 길이 - 1)다.
     override는 create 6개 + 은퇴 1개로 완주 run과 같다 — 은퇴 전이가 무엇이었는지는
@@ -1544,6 +1545,12 @@ def _require_restored_api_owned(inspection: _ApiOwnedInspection, run_id: str) ->
     """
 
     if inspection.features == 0:
+        # 0행 분기는 **"이 이름의 Feature가 지금 없다"만** 증명한다. create가 커밋되지
+        # 않은 run과, 이미 purge됐거나 다른 경로로 사라진 run을 구별하지 못한다.
+        # 그리고 아래 세 개수는 `_inspect_api_owned`가 **찾은 Feature id로만** 조회하므로
+        # 여기서는 언제나 0이다 — 그 검사는 방어적 일관성 확인일 뿐, 찾지 못한 uuid에
+        # 매달린 전이·override·명령 receipt가 없다는 증거가 아니다. append-only 전이와
+        # 명령 receipt는 purge 뒤에도 남는 것이 정상이다(`_purge_api_owned`).
         if (
             inspection.feature_ids
             or inspection.state_transitions

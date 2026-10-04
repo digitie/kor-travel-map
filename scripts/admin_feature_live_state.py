@@ -660,6 +660,10 @@ def _validate_direct(
             for value in uuids
         ):
             raise ValueError("direct evidence mismatch")
+        # Feature 한 건당 UUID 하나다. 목록이 counts보다 짧으면 clone content digest가
+        # run-owned 행을 제외하지 못한다.
+        if len(uuids) != payload["counts"]["features"]:
+            raise ValueError("direct evidence mismatch")
         ids = payload["feature_ids"]
         # 309 뒤 두 표기는 같은 `features.feature_id`에서 나온다 — 그래서 형태만
         # 보는 것이 아니라 **서로 같은지**를 본다. 종전에는 legacy `f_global_*`

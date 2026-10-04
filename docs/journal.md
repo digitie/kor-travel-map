@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-04 — D2 실패 run이 `cleanup-failed`로 굳던 결함: 브랜치 `fix/d2-fixture-restored-audit`
+
+- **무엇이 일어났나.** D2(run `live-20261004102457-782ce6e6b79b`, a68c2b7d)의 main spec이 create 응답을 받지 못해
+  실패했다. create 트랜잭션은 10:36:31.7Z에 시작해 약 10:37:01.4Z에 커밋됐다(약 30초). API access log에는 그 POST가
+  없다 — 응답 전에 클라이언트가 떠났다. spec `finally`가 Feature를 `:cleanup`으로 은퇴시켰고, helper api-audit은
+  완주 사슬과 `:retire` lifecycle override만 받아 `API-owned field override 소유권이 다릅니다`로 죽었다 → BLOCKED
+  `cleanup-failed`(원래 `test-failed-restored`). 같은 감사를 부르는 `recover`와 helper `purge`도 구조적으로 통과 불가였다.
+  #1296(transport consumer)은 무관하다 — field override·admin create 경로를 건드리지 않는다. 동시 Map Dagster run도 없었다.
+- **고침.** lifecycle override의 reason을 **실제로 은퇴시킨 전이의 reason**(`:retire`|`:cleanup`)에 결박했다.
+  `api-audit --expect complete|restored`: 러너가 spec 실패 시와 `recover`에서 `restored`를 넘긴다(생략=complete라
+  clone lane은 그대로). 복구 증거 검증기는 restored 모양을 받고 purge `purged`를 감사한 개수와 대조한다.
+  `feature_uuids` 길이를 `counts.features`에 결박했다(적대 리뷰 LOW1).
+- **테스트.** `tests/unit/test_d2_api_owned_restored_audit.py`는 prod에 남은 행을 그대로 옮겼다. 고치기 전 a68c2b7d 코드가
+  같은 행에 prod와 똑같은 오류를 낸다는 것을 n150에서 재현했고, 새 테스트는 먼저 빨갛게 확인했다.
+- **~30초 절단은 저장소 밖이다.** Playwright(`page.evaluate` fetch 무제한, test 5분), Next proxy route(timeout 없음,
+  abort signal만 전달), API(요청 timeout 없음) 어디에도 30초가 없다. D2는 `https://map.digitie.mywire.org`로 가고
+  n150에는 443 listener가 없다 → OPNsense HAProxy edge. H27은 `timeout tunnel 1h`만 바꿨으므로 기본 `timeout server`
+  30초가 남아 있을 가능성이 가장 높다(라우터 설정은 직접 읽지 못했다 — 추정).
+- **현재 BLOCKED 정리.** a68c2b7d로는 lane 복구가 불가능하므로 n150 `~/d2-adjudicate-782ce6e6.sh`(0600, 미실행)에
+  판정 스크립트를 두었다: 잔여물 정확 대조 → `feature.purge_manual_feature`(감사되는 purge 명령) → 정본
+  `scripts/n150/adjudicate.sh` → 운영자 메모·run dir 사본 보관. `--dry-run`이 먼저다.
+
 ## 2026-10-04 — delta 리뷰 반영: 같은 브랜치 `fix/transport-consumer-lows`
 
 - **MED 회귀.** `_TransportTransientStatus`(HTTP 층 재시도를 다 쓴 502/504)가 부모의 `retryable=False`를 물려받아
