@@ -15,7 +15,7 @@
 - **테스트.** `tests/unit/test_d2_api_owned_restored_audit.py`는 prod에 남은 행을 그대로 옮겼다. 고치기 전 a68c2b7d 코드가
   같은 행에 prod와 똑같은 오류를 낸다는 것을 n150에서 재현했고, 새 테스트는 먼저 빨갛게 확인했다.
 - **~30초 절단은 저장소 밖이다.** Playwright(`page.evaluate` fetch 무제한, test 5분), Next proxy route(timeout 없음,
-  abort signal만 전달), API(요청 timeout 없음) 어디에도 30초가 없다. D2는 `https://map.digitie.mywire.org`로 가고
+  abort signal만 전달), API(요청 timeout 없음) 어디에도 30초가 없다. D2는 `https://<map-ui-host>`로 가고
   n150에는 443 listener가 없다 → OPNsense HAProxy edge. H27은 `timeout tunnel 1h`만 바꿨으므로 기본 `timeout server`
   30초가 남아 있을 가능성이 가장 높다(라우터 설정은 직접 읽지 못했다 — 추정).
 - **현재 BLOCKED 정리.** a68c2b7d로는 lane 복구가 불가능하므로 n150 `~/d2-adjudicate-782ce6e6.sh`(0600, 미실행)에
