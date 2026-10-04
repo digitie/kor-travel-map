@@ -58,32 +58,24 @@
   - #1296: transport 소비 경로 LOW
   - #1297: D2 fixture restored 감사 — **머지만 했고 아직 배포하지 않았다**
 
-## 2. 진행 중이던 작업 (이어받을 것)
+## 2. 진행 중이던 작업 — 완료(2026-10-04 23:00Z)
 
-- **weather `kma_ultra_short_nowcast_job` 수정: 구현과 테스트는 끝났고, PR·배포만 남았다.**
-  - 브랜치: weather 저장소 `fix/kma-nowcast-missing-sentinel`. 커밋 `9faf2f8`(RED 테스트), `ba42871`(수정),
-    `a53abab`(로깅 테스트 보정). n150에서 전체 353 passed, `ruff check` 통과.
-  - **원인:**
-    - nowcast run은 2026-09-30 이후 한 번도 성공하지 못했다. 10-02 09Z부터는 매번 "REH 값은 0 이상이어야 합니다"로 실패했다.
-    - 격자 (35,106)의 관측소가 관측값을 내지 않자 KMA가 결측 센티넬을 채워 보냈다: REH·VEC `-998`, RN1·WSD·UUU·VVV `-998.9`, T1H `-999`.
-    - `kortravelweather/providers/kma.py` `_nowcast_value`의 `WeatherValue` 검증이 이 값 하나로 run 전체를 중단시켰다.
-    - 더 나쁜 점: T1H `-999`와 UUU/VVV `-998.9`는 검증을 통과하므로 실제 값처럼 저장될 수 있었다.
+- **weather `kma_ultra_short_nowcast_job` 수정과 배포가 끝났다.** weather PR #73(`2575071a`)을 머지하고 배포했다.
+  배포 뒤 첫 정시 run(23:00Z)이 SUCCESS로 끝났다. 이 job은 2026-09-30 이후 처음 성공했다.
+  - **원인:** 오프라인 관측소의 KMA 결측 센티넬(-998, -998.9, -999)이 검증에 걸려 run 전체가 실패했다.
   - **수정:**
-    - 공용 converter(nowcast·초단기예보·단기예보)에서 |값| ≥ 900이면 결측으로 보고 그 지표만 건너뛴다.
-    - 센티넬이 아니면서 범위를 벗어난 값도 그 지표만 건너뛴다.
-    - 건너뛴 건수는 `values_skipped`, `values_skipped_by_reason` 필드와 run 로그 경고로 남긴다.
-    - 알 수 없는 category나 잘못된 시각이 오면 지금처럼 run이 실패한다.
-  - **남은 일:**
-    1. 적대 리뷰(HIGH·MED 0까지)
-    2. PR → CI → 머지
-    3. weather 배포(§4.6). api와 code-server를 둘 다 다시 빌드한다. 마이그레이션 없음.
-    4. 다음 정시 run이 SUCCESS인지 확인한다.
-  - **후속:**
-    - 이미 저장된 센티넬 값을 찾는다. `weather_values`에서 KMA 행 중 `abs(value_number) >= 900`을 조회하되,
-      partition이나 최근 시간 범위로 좁힌다. 전체를 조회하면 240s 넘게 걸려 timeout난다.
-    - python-kma-api 수정이 정석이다: `kma/_parsing.py`의 `float_or_none`·`int_or_none`이 |v| ≥ 900이면 None을 반환하게 하고,
-      `is_missing(value)` helper를 노출한다. 그 뒤 weather의 가드를 이 helper로 바꾼다.
-  - 초단기예보·단기예보 job이 간헐적으로 실패하는 원인은 REH가 아니라 advisory lock timeout이다(§3-2).
+    - |값| ≥ 900인 값, 빈 값, 공백 값은 `missing`으로 보고 그 지표만 건너뛴다. NaN과 Inf는 `invalid`로 본다.
+    - 다음 경우 run을 `partial`로 끝낸다(경보 대상).
+      - missing이 16건 이상이면서 10%를 넘을 때. prod에서는 10% 쪽이 결정하고, 관측소 약 17~34곳이 빠지는 규모다.
+      - invalid가 1건이라도 있을 때.
+    - 받아들인 값이 0건이면 `failed`로 끝낸다.
+    - 메트릭 `ktw_sync_values_skipped_total`을 추가했다.
+  - **후속(LOW):**
+    - 위 메트릭에 걸린 경보 규칙이 아직 없다.
+    - 이미 저장된 센티넬 값을 조회해야 한다. 범위를 좁혀서 볼 것.
+    - python-kma-api의 `float_or_none`이 |v| ≥ 900일 때 None을 돌려주도록 고친다.
+- 참고: weather main에는 Codex의 #72(`8ed94e7`)가 들어갔다. fact/raw 게시를 작은 batch로 나누는 변경, 특보 메모리 변경, admin Dagster UI가 포함돼 있다.
+  §3-2의 청크 축소 권고 일부가 이미 반영된 셈이다.
 
 ## 3. TODO (우선순위순)
 
