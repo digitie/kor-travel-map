@@ -60,16 +60,30 @@
 
 ## 2. 진행 중이던 작업 (이어받을 것)
 
-- **weather `kma_ultra_short_nowcast_job`이 매시간 100% 실패한다.**
-  - 오류 문구는 "REH 값은 0 이상이어야 합니다"이고, 2026-10-04 07Z 이후 14/14 FAILURE다.
-  - 가설: KMA 초단기실황의 결측 센티넬(-998.9 등)이 검증에 걸려 run 전체가 실패한다.
-  - 다른 에이전트가 weather 저장소 브랜치 `fix/kma-nowcast-missing-sentinel`에서 작업 중이었다. 끝났는지는 원격 브랜치로 확인한다.
-  - 해야 할 일:
-    1. 결측 센티넬은 None으로 처리한다.
-    2. 잘못된 레코드는 그 레코드만 건너뛰고 경고를 센다.
-    3. 실제 페이로드 모양으로 RED→GREEN 테스트를 만든다.
-    4. python-kma-api 쪽에 수정이 필요한지 판단한다.
-  - 수정이 끝나면 적대 리뷰 → PR → CI → 머지 → weather 배포(§4.6) 순으로 진행한다.
+- **weather `kma_ultra_short_nowcast_job` 수정: 구현과 테스트는 끝났고, PR·배포만 남았다.**
+  - 브랜치: weather 저장소 `fix/kma-nowcast-missing-sentinel`. 커밋 `9faf2f8`(RED 테스트), `ba42871`(수정),
+    `a53abab`(로깅 테스트 보정). n150에서 전체 353 passed, `ruff check` 통과.
+  - **원인:**
+    - nowcast run은 2026-09-30 이후 한 번도 성공하지 못했다. 10-02 09Z부터는 매번 "REH 값은 0 이상이어야 합니다"로 실패했다.
+    - 격자 (35,106)의 관측소가 관측값을 내지 않자 KMA가 결측 센티넬을 채워 보냈다: REH·VEC `-998`, RN1·WSD·UUU·VVV `-998.9`, T1H `-999`.
+    - `kortravelweather/providers/kma.py` `_nowcast_value`의 `WeatherValue` 검증이 이 값 하나로 run 전체를 중단시켰다.
+    - 더 나쁜 점: T1H `-999`와 UUU/VVV `-998.9`는 검증을 통과하므로 실제 값처럼 저장될 수 있었다.
+  - **수정:**
+    - 공용 converter(nowcast·초단기예보·단기예보)에서 |값| ≥ 900이면 결측으로 보고 그 지표만 건너뛴다.
+    - 센티넬이 아니면서 범위를 벗어난 값도 그 지표만 건너뛴다.
+    - 건너뛴 건수는 `values_skipped`, `values_skipped_by_reason` 필드와 run 로그 경고로 남긴다.
+    - 알 수 없는 category나 잘못된 시각이 오면 지금처럼 run이 실패한다.
+  - **남은 일:**
+    1. 적대 리뷰(HIGH·MED 0까지)
+    2. PR → CI → 머지
+    3. weather 배포(§4.6). api와 code-server를 둘 다 다시 빌드한다. 마이그레이션 없음.
+    4. 다음 정시 run이 SUCCESS인지 확인한다.
+  - **후속:**
+    - 이미 저장된 센티넬 값을 찾는다. `weather_values`에서 KMA 행 중 `abs(value_number) >= 900`을 조회하되,
+      partition이나 최근 시간 범위로 좁힌다. 전체를 조회하면 240s 넘게 걸려 timeout난다.
+    - python-kma-api 수정이 정석이다: `kma/_parsing.py`의 `float_or_none`·`int_or_none`이 |v| ≥ 900이면 None을 반환하게 하고,
+      `is_missing(value)` helper를 노출한다. 그 뒤 weather의 가드를 이 helper로 바꾼다.
+  - 초단기예보·단기예보 job이 간헐적으로 실패하는 원인은 REH가 아니라 advisory lock timeout이다(§3-2).
 
 ## 3. TODO (우선순위순)
 

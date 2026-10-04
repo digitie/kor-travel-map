@@ -3,7 +3,7 @@
 ## 2026-10-05 — 인계: 공용 Dagster 완주 이후 (Codex 등 다음 에이전트는 여기부터)
 
 **다음 한 작업: [`docs/handoff/2026-10-05-shared-dagster-handoff.md`](handoff/2026-10-05-shared-dagster-handoff.md)를
-읽고 §2(weather `kma_ultra_short_nowcast_job` 결측 센티넬 수정)부터 이어간다.** n150 변경 작업 전에는 반드시
+읽고 §2(weather `kma_ultra_short_nowcast_job` 결측 센티넬 수정 — 브랜치 구현·테스트 완료, 적대 리뷰·PR·배포만 남음)부터 이어간다.** n150 변경 작업 전에는 반드시
 사전 점검(`docs/handoff/n150-scripts/preflight.sh`)을 통과시킨다.
 
 - prod: Map `a68c2b7d`(D1·D2 GREEN, deploy-status committed) · PinVi `80c92b6c` · Manager `f14ed1a4` ·
