@@ -1,5 +1,15 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — 인계 문서와 n150 보조 스크립트를 저장소에 남김
+
+- 세션 교대(다음 에이전트: Codex)를 위해 `docs/handoff/2026-10-05-shared-dagster-handoff.md`에 상태·진행 중 작업·
+  TODO 7개·n150 운영 절차·실제로 밟은 함정을 정리했다. 운영 값은 넣지 않았다(#508).
+- `docs/handoff/n150-scripts/`: `preflight.sh`(변경 전 사전 점검), `guarded-rb.sh`(실패 시 즉시 docker start하는
+  pinned rebuild), `transport-deploy-unit.sh`, `weather-deploy.sh`, `dagster-job-status.py`. n150 `~/`에 실제 호스트가
+  든 사본이 있다.
+- 2026-10-03~04 사고 요약: 옛 메타DB 차단 뒤 rebuild가 옛 storage migrate에서 실패(→ Manager #459), 부하 cold start가
+  healthcheck 창 초과(→ #460), C6c smoke 첫 요청 timeout(→ #461), D2 fixture가 실패 경로 정리를 거부(→ #1297).
+
 ## 2026-10-04 — D2 실패 run이 `cleanup-failed`로 굳던 결함: 브랜치 `fix/d2-fixture-restored-audit`
 
 - **무엇이 일어났나.** D2(run `live-20261004102457-782ce6e6b79b`, a68c2b7d)의 main spec이 create 응답을 받지 못해
