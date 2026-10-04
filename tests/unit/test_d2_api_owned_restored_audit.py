@@ -267,14 +267,29 @@ def test_the_lifecycle_override_reason_is_bound_to_the_retiring_transition() -> 
         _audit(session, "restored")
 
 
-def test_a_lifecycle_override_without_a_retiring_transition_is_rejected() -> None:
+def test_a_retirement_under_a_non_retiring_reason_is_rejected() -> None:
+    """은퇴시킨 전이의 reason은 `:retire`나 `:cleanup`뿐이다.
+
+    `:suppress`는 run이 허용하는 전이 reason이라 일반 사슬 검사는 통과한다 — 이 거절은
+    은퇴 전이 결박에서만 나온다. (은퇴 전이 **없이** lifecycle override만 있는 경우는
+    여기까지 오지 못한다: 행이 retired면 사슬 끝 검사가, 아니면 fingerprint 검사가 먼저
+    거절한다.)
+    """
+
+    retire_as_suppress = _transition(
+        "admin",
+        f"{REASON}:suppress",
+        ("active", "published", "valid"),
+        ("retired", "suppressed", "valid"),
+        None,
+    )
     session = _Session(
         features=[_feature_row()],
-        transitions=[_INITIAL, _SUPPRESS],
-        overrides=_overrides(f"{REASON}:retire"),
+        transitions=[_INITIAL, retire_as_suppress],
+        overrides=_overrides(f"{REASON}:suppress"),
         commands=_commands(1),
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="API-owned 전이 사슬이 예상과 다릅니다"):
         _audit(session, "restored")
 
 
@@ -333,7 +348,7 @@ def test_a_cleanup_chain_with_a_missing_state_command_is_rejected() -> None:
         overrides=_overrides(f"{REASON}:cleanup"),
         commands=_commands(0),
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="복구 API-owned 행 집합이 예상과 다릅니다"):
         _audit(session, "restored")
 
 
@@ -455,3 +470,16 @@ def test_the_supervisor_forwards_the_expectation_to_the_helper() -> None:
     assert 'helper_extra = [] if expect is None else ["--expect", expect]' in source
     assert "*helper_extra," in source
     assert '("complete", "restored")' in _FIXTURE.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("_root_owned_reads")
+def test_the_validator_binds_the_uuid_list_to_the_feature_count(tmp_path: Path) -> None:
+    """counts가 Feature 1건이라면서 UUID 목록이 비면 clone digest가 소유 행을 놓친다."""
+
+    path = _write_api_audit(tmp_path, _OBSERVED_COUNTS, 7)
+    payload = json.loads(path.read_text())
+    payload["feature_uuids"] = []
+    payload["feature_ids"] = []
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="direct evidence mismatch"):
+        state._validate_api_audit(path, allow_restored=True)
