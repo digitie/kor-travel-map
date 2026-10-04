@@ -33,7 +33,8 @@ _STATE = _ROOT / "scripts" / "admin_feature_live_state.py"
 
 def _load(name: str, path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -318,7 +319,8 @@ def test_a_run_that_never_created_its_feature_is_restored_empty() -> None:
         "field_overrides": 0,
         "state_transitions": 0,
     }
-    assert uuids == () and ids == ()
+    assert uuids == ()
+    assert ids == ()
     assert not any(foreign_keys.values())
     with pytest.raises(RuntimeError, match="완료 API-owned 행 집합이 예상과 다릅니다"):
         _audit(session, "complete")
@@ -336,7 +338,7 @@ def test_a_cleanup_chain_with_a_missing_state_command_is_rejected() -> None:
 
 
 def test_an_unknown_expectation_is_rejected() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="api-audit expectation must be one of"):
         _audit(_observed_2026_10_04(), "lenient")
 
 
@@ -367,9 +369,7 @@ def _write_api_audit(tmp_path: Path, counts: dict[str, int], references: int) ->
 def _root_owned_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """검증기의 root:root 0600 소유 검사는 이 테스트의 대상이 아니다."""
 
-    monkeypatch.setattr(
-        state, "_read_root_json", lambda path: json.loads(Path(path).read_text())
-    )
+    monkeypatch.setattr(state, "_read_root_json", lambda path: json.loads(Path(path).read_text()))
 
 
 _OBSERVED_COUNTS = {
@@ -436,7 +436,9 @@ def test_the_normal_lane_audits_restored_only_when_the_spec_failed() -> None:
     body = _shell_function("run_new")
     executor = body.index("run_executor executor-main")
     choice = body.index("(( test_status == 0 )) || api_audit_expect=restored")
-    audit = body.index('run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" "$api_audit_expect"')
+    audit = body.index(
+        'run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" "$api_audit_expect"'
+    )
     assert executor < choice < audit
     assert "local api_audit_expect=complete" in body
 
