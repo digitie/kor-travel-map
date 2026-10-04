@@ -988,7 +988,7 @@ class _ApiOwnedInspection(NamedTuple):
     """live spec이 남긴 API-owned 행의 관측 결과.
 
     ``transition_chains``/``override_field_paths``/``command_operations``는 구조
-    판정용이고, 개수 필드는 완료 감사(`_audit_complete_api_owned`)와 clone
+    판정용이고, 개수 필드는 api-audit(`_audit_api_owned`)과 clone
     evidence가 쓴다.
     """
 
@@ -1088,7 +1088,7 @@ async def _inspect_api_owned(
 
     이 함수는 **부분 진행도 허용한다** — recovery lane이 중단된 run을 정리한 뒤
     hard purge를 부르는 경로에서도 같은 검사를 쓰기 때문이다. "정확히 이 집합만
-    있다"는 완료 판정은 `_audit_complete_api_owned`가 따로 한다.
+    있다"는 완료·복구 판정은 `_audit_api_owned`가 따로 한다.
     """
 
     fixture_name = _admin_fixture_name(run_id)
@@ -1145,9 +1145,13 @@ async def _inspect_api_owned(
     allowed_transition_reasons = {
         f"{reason_prefix}:{suffix}" for suffix in ("suppress", "retire", "cleanup")
     }
+    retiring_reasons_allowed = {
+        f"{reason_prefix}:{suffix}" for suffix in ("retire", "cleanup")
+    }
     chains: dict[str, list[tuple[str, str]]] = {}
     final_state: dict[str, tuple[str | None, str | None, str | None]] = {}
     create_command_ids: dict[str, int] = {}
+    retiring_reasons: dict[str, str] = {}
     for transition in transition_rows:
         feature_id = str(transition["feature_id"])
         if feature_id not in feature_states:
@@ -1191,6 +1195,13 @@ async def _inspect_api_owned(
             or from_state != final_state[feature_id]
         ):
             raise RuntimeError("API-owned 전이 사슬이 예상과 다릅니다")
+        if from_state[0] != "retired" and to_state[0] == "retired":
+            # 은퇴시킨 전이. spec 본문의 retire(`:retire`)이거나, spec이 중간에 죽어
+            # `finally`/recovery executor가 은퇴시킨 cleanup(`:cleanup`)이다. lifecycle
+            # override의 reason은 **이 전이의 reason**과 같아야 한다(아래).
+            if reason_code not in retiring_reasons_allowed or feature_id in retiring_reasons:
+                raise RuntimeError("API-owned 전이 사슬이 예상과 다릅니다")
+            retiring_reasons[feature_id] = reason_code
         final_state[feature_id] = to_state
         chain.append((kind, reason_code))
     for feature_id, state in feature_states.items():
@@ -1214,7 +1225,14 @@ async def _inspect_api_owned(
         if is_retire_override:
             # retire가 authoring하는 lifecycle override. field override와 달리
             # 재적재 잠금을 세우고 command_id를 남기지 않는다.
-            expected_reason = f"{reason_prefix}:retire"
+            #
+            # reason은 **그 Feature를 실제로 은퇴시킨 전이의 reason**이다. 종전에는
+            # `:retire`로 굳혀 있어, spec이 중간에 죽어 `finally`가 `:cleanup`으로
+            # 은퇴시킨 run은 이 감사를 구조적으로 통과할 수 없었다(2026-10-04 D2
+            # `cleanup-failed`, 그리고 같은 감사를 부르는 `recover`도 막혔다).
+            # 은퇴 전이가 없으면 lifecycle override가 있을 자리가 없다 — None과 같은
+            # reason은 없으므로 아래에서 거절된다.
+            expected_reason = retiring_reasons.get(feature_id)
             expected_command_id = None
             expected_prevent = True
         else:
@@ -1427,11 +1445,69 @@ def _expected_transition_chain(run_id: str) -> tuple[tuple[str, str], ...]:
     )
 
 
-async def _audit_complete_api_owned(
+def _restored_transition_chains(run_id: str) -> frozenset[tuple[tuple[str, str], ...]]:
+    """spec이 **실패한** run(과 그 recovery)이 남길 수 있는 전이 사슬 전부.
+
+    spec 본문은 create → suppress → retire 순서로만 나아가고, 어디서 죽든
+    `finally`(또는 recovery executor)의 `cleanupOwnedFeatures`가 아직 은퇴하지 않은
+    Feature를 `:cleanup`으로 은퇴시킨다. 그래서 create가 커밋된 실패 run의 사슬은
+    다음 셋뿐이다.
+
+    - create 뒤에 죽었다 → ``initial → :cleanup`` (2026-10-04 실측)
+    - suppress 뒤에 죽었다 → ``initial → :suppress → :cleanup``
+    - retire 뒤에 죽었다(timeline 단언 등) → 완주 사슬과 같다
+
+    create가 커밋되지 않았으면 Feature가 없다 — 그것은 사슬이 아니라 `features == 0`이다.
+    """
+
+    reason_prefix = _admin_reason_prefix(run_id)
+    initial = ("initial", _ADMIN_CREATE_TRANSITION_REASON)
+    suppress = ("admin", f"{reason_prefix}:suppress")
+    cleanup = ("admin", f"{reason_prefix}:cleanup")
+    return frozenset(
+        {
+            (initial, cleanup),
+            (initial, suppress, cleanup),
+            _expected_transition_chain(run_id),
+        }
+    )
+
+
+#: api-audit이 기대하는 결과. `complete`는 spec이 통과한 run의 정확한 행 집합이고,
+#: `restored`는 spec이 실패한 run 또는 recovery가 남기는 행 집합이다. 러너가 고른다
+#: (`run_helper api-audit … complete|restored`).
+_API_AUDIT_EXPECTATIONS: Final[tuple[str, str]] = ("complete", "restored")
+
+
+async def _audit_api_owned(
     session: AsyncSession,
     run_id: str,
+    *,
+    expect: str,
 ) -> tuple[dict[str, int], dict[str, int], tuple[str, ...], tuple[str, ...]]:
+    if expect not in _API_AUDIT_EXPECTATIONS:
+        raise ValueError(f"api-audit expectation must be one of {_API_AUDIT_EXPECTATIONS}")
     inspection = await _inspect_api_owned(session, run_id)
+    if expect == "complete":
+        _require_complete_api_owned(inspection, run_id)
+    else:
+        _require_restored_api_owned(inspection, run_id)
+    return (
+        {
+            "domain_commands": inspection.domain_commands,
+            "features": inspection.features,
+            "field_overrides": inspection.field_overrides,
+            "state_transitions": inspection.state_transitions,
+        },
+        inspection.foreign_keys,
+        inspection.feature_uuids,
+        inspection.feature_ids,
+    )
+
+
+def _require_complete_api_owned(inspection: _ApiOwnedInspection, run_id: str) -> None:
+    """spec이 통과한 run의 **정확한** 행 집합."""
+
     expected_chain = _expected_transition_chain(run_id)
     # id 리터럴을 밖에서 만들지 않는다 — `_inspect_api_owned`가 각 행의 id를 그 행의
     # uuid로 재현해 이미 대조했다. 여기서는 **소유 Feature가 정확히 하나**임을 보고
@@ -1455,17 +1531,51 @@ async def _audit_complete_api_owned(
         or inspection.domain_commands != sum(expected_operations.values())
     ):
         raise RuntimeError("완료 API-owned 행 집합이 예상과 다릅니다")
-    return (
-        {
-            "domain_commands": inspection.domain_commands,
-            "features": inspection.features,
-            "field_overrides": inspection.field_overrides,
-            "state_transitions": inspection.state_transitions,
-        },
-        inspection.foreign_keys,
-        inspection.feature_uuids,
-        inspection.feature_ids,
+
+
+def _require_restored_api_owned(inspection: _ApiOwnedInspection, run_id: str) -> None:
+    """spec이 실패한 run 또는 recovery가 남기는 행 집합.
+
+    이름으로 찾은 소유 Feature가 없으면 0행이다(그 분기가 증명하는 범위는 아래 주석).
+    있으면 Feature는 하나이고
+    (그 뒤 어디서 죽든 cleanup이 은퇴시킨다), 사슬은 `_restored_transition_chains`
+    중 하나이며, 명령은 create 1건 + 은퇴까지의 state PATCH 수(= 사슬 길이 - 1)다.
+    override는 create 6개 + 은퇴 1개로 완주 run과 같다 — 은퇴 전이가 무엇이었는지는
+    lifecycle override의 reason이 `_inspect_api_owned`에서 이미 결박됐다.
+    """
+
+    if inspection.features == 0:
+        # 0행 분기는 **"이 이름의 Feature가 지금 없다"만** 증명한다. create가 커밋되지
+        # 않은 run과, 이미 purge됐거나 다른 경로로 사라진 run을 구별하지 못한다.
+        # 그리고 아래 세 개수는 `_inspect_api_owned`가 **찾은 Feature id로만** 조회하므로
+        # 여기서는 언제나 0이다 — 그 검사는 방어적 일관성 확인일 뿐, 찾지 못한 uuid에
+        # 매달린 전이·override·명령 receipt가 없다는 증거가 아니다. append-only 전이와
+        # 명령 receipt는 purge 뒤에도 남는 것이 정상이다(`_purge_api_owned`).
+        if (
+            inspection.feature_ids
+            or inspection.state_transitions
+            or inspection.field_overrides
+            or inspection.domain_commands
+        ):
+            raise RuntimeError("복구 API-owned 행 집합이 예상과 다릅니다")
+        return
+    if inspection.features != 1 or len(inspection.feature_ids) != 1:
+        raise RuntimeError("복구 API-owned 행 집합이 예상과 다릅니다")
+    (feature_id,) = inspection.feature_ids
+    chain = inspection.transition_chains.get(feature_id)
+    if chain is None or chain not in _restored_transition_chains(run_id):
+        raise RuntimeError("복구 API-owned 행 집합이 예상과 다릅니다")
+    expected_operations = Counter(
+        {_ADMIN_CREATE_OPERATION: 1, _ADMIN_STATE_OPERATION: len(chain) - 1}
     )
+    if (
+        inspection.state_transitions != len(chain)
+        or inspection.override_field_paths != _EXPECTED_OVERRIDE_FIELD_PATHS
+        or inspection.field_overrides != len(_EXPECTED_OVERRIDE_FIELD_PATHS)
+        or inspection.command_operations != expected_operations
+        or inspection.domain_commands != sum(expected_operations.values())
+    ):
+        raise RuntimeError("복구 API-owned 행 집합이 예상과 다릅니다")
 
 
 def _auth_request_ids(run_id: str) -> dict[str, str]:
@@ -1654,7 +1764,15 @@ async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
 async def _run(
     action: str,
     run_id: str,
+    expect: str | None = None,
 ) -> dict[str, object]:
+    # `--expect`는 api-audit 전용이다. 다른 action에 붙으면 러너 배선이 틀린 것이다.
+    # 생략하면 `complete`다 — clone lane(`run-admin-feature-clone-live-acceptance.sh`)이
+    # 플래그 없이 완료 감사를 부른다.
+    if action != "api-audit" and expect is not None:
+        raise RuntimeError("--expect는 api-audit 전용입니다")
+    if action == "api-audit" and expect is None:
+        expect = "complete"
     settings = KorTravelMapSettings()
     # supervisor가 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮어쓴다. 비어 있으면
     # engine 생성 대신 여기서 멈춰 원인을 이름으로 말한다.
@@ -1697,7 +1815,9 @@ async def _run(
                         foreign_keys,
                         api_owned_feature_uuids,
                         api_owned_feature_ids,
-                    ) = await _audit_complete_api_owned(session, run_id)
+                    ) = await _audit_api_owned(
+                        session, run_id, expect=expect or "complete"
+                    )
                 elif action == "auth-reset":
                     auth_counts = await _reset_auth_audit(session, run_id)
                 elif action == "auth-verify":
@@ -1756,12 +1876,13 @@ def main() -> None:
         ),
     )
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--expect", choices=_API_AUDIT_EXPECTATIONS)
     args = parser.parse_args()
     if _RUN_ID_RE.fullmatch(args.run_id) is None:
         raise SystemExit("run-id 형식이 올바르지 않습니다")
     print(
         json.dumps(
-            asyncio.run(_run(args.action, args.run_id)),
+            asyncio.run(_run(args.action, args.run_id, args.expect)),
             sort_keys=True,
         )
     )

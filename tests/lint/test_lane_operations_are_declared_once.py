@@ -499,7 +499,7 @@ def test_purge_runs_only_after_every_gate_of_its_lane(entry: str) -> None:
     1. 감사가 red인 채로 그 감사 대상 행을 지운다. 운영자가 무엇이 걸렸는지
        DB에서 다시 볼 수 없다.
     2. **실패한 run의 소유 Feature가 사라진다.** 복구 lane의 api-audit은
-       `_audit_complete_api_owned`에서 그 행 1건을 요구하므로, 먼저 지우면
+       `_audit_api_owned`(`restored`)로 그 행을 감사하므로, 먼저 지우면
        `recover`가 구조적으로 통과 불가능해진다. BLOCKED는 `recover`로만 지워지고
        `run` 모드는 `prior BLOCKED state requires recover mode`로 막히므로,
        그 순간 D2 lane이 prod에서 **영구 정지**한다.

@@ -535,7 +535,82 @@ _DIRECT_EXTRA_KEYS: Final[dict[str, frozenset[str]]] = {
 }
 
 
-def _validate_direct(path: Path, action: str, counts: dict[str, int], references: int) -> int:
+#: api-audit이 감사하는 행 집합의 개수 — spec이 통과한 run(`complete`).
+#: 소유 Feature 1건, 그 위의 domain command 3건(create 1 + state PATCH 2), field
+#: override 7개(create 6 + 은퇴 1), 전이 3건. FK reference 7은 override 7이다 —
+#: 종전의 8은 `trg_features_legacy_alias`가 만들던 alias 행 하나를 더 센 것이고,
+#: 309가 그 트리거를 영구 제거했다(ADR-098 결정 6).
+_API_AUDIT_COMPLETE_COUNTS: Final[dict[str, int]] = {
+    "domain_commands": 3,
+    "features": 1,
+    "field_overrides": 7,
+    "state_transitions": 3,
+}
+_API_AUDIT_FEATURE_REFERENCES: Final[int] = 7
+
+
+def _api_audit_restored_shapes() -> list[tuple[dict[str, int], int]]:
+    """spec이 실패한 run·recovery가 남길 수 있는 `(counts, FK reference)` 전부.
+
+    helper의 `_require_restored_api_owned`와 같은 집합이다: create가 커밋되지 않았으면
+    전부 0, 커밋됐으면 전이 2(``initial → :cleanup``) 또는 3(``… :suppress → :cleanup``
+    이거나 완주)이고 domain command는 전이 수와 같다(create 1 + state PATCH 전이-1).
+    """
+
+    shapes = [
+        (
+            {
+                "domain_commands": 0,
+                "features": 0,
+                "field_overrides": 0,
+                "state_transitions": 0,
+            },
+            0,
+        )
+    ]
+    for transitions in (2, 3):
+        shapes.append(
+            (
+                {
+                    "domain_commands": transitions,
+                    "features": 1,
+                    "field_overrides": 7,
+                    "state_transitions": transitions,
+                },
+                _API_AUDIT_FEATURE_REFERENCES,
+            )
+        )
+    return shapes
+
+
+def _validate_api_audit(path: Path, *, allow_restored: bool) -> dict[str, int]:
+    """api-audit evidence를 검증하고 그 counts를 돌려준다(purge 대조용).
+
+    normal lane은 spec이 통과한 run에서만 여기까지 오므로 `complete`만 받는다.
+    recovery lane은 실패한 run을 다루므로 `restored` 모양도 받는다 — 그 모양은
+    helper가 사슬·override reason·명령 수까지 이미 결박했다.
+    """
+
+    payload = _read_root_json(path)
+    counts = payload.get("counts") if isinstance(payload, dict) else None
+    shapes = [(_API_AUDIT_COMPLETE_COUNTS, _API_AUDIT_FEATURE_REFERENCES)]
+    if allow_restored:
+        shapes.extend(_api_audit_restored_shapes())
+    for expected, references in shapes:
+        if counts == expected:
+            _validate_direct(path, "api-audit", dict(expected), references)
+            return dict(expected)
+    raise ValueError("direct evidence mismatch")
+
+
+def _validate_direct(
+    path: Path,
+    action: str,
+    counts: dict[str, int],
+    references: int,
+    *,
+    purged: dict[str, int] | None = None,
+) -> int:
     payload = _read_root_json(path)
     if (
         set(payload)
@@ -568,7 +643,10 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
         # `counts` 0은 '지운 뒤 남은 것이 없다'만 말한다. **무엇을 지웠는지**는
         # `purged`가 들고 있고, 그 숫자가 api-audit이 감사한 것과 같아야
         # 의미가 있다 — 0건을 지우고도 초록이 되는 통과를 막는다.
-        if payload["purged"] != {"features": 1, "field_overrides": 7}:
+        expected_purged = (
+            {"features": 1, "field_overrides": 7} if purged is None else purged
+        )
+        if payload["purged"] != expected_purged:
             raise ValueError("direct evidence mismatch")
         # 그리고 이 lane이 **여태까지** 남긴 것을 본다. 이번 run만 세면 이 task가
         # 고친다고 말하는 명제("run마다 하나씩 쌓인다")를 재지 못한다 — 종전 run의
@@ -581,6 +659,10 @@ def _validate_direct(path: Path, action: str, counts: dict[str, int], references
             not isinstance(value, str) or _UUID_RE.fullmatch(value) is None
             for value in uuids
         ):
+            raise ValueError("direct evidence mismatch")
+        # Feature 한 건당 UUID 하나다. 목록이 counts보다 짧으면 clone content digest가
+        # run-owned 행을 제외하지 못한다.
+        if len(uuids) != payload["counts"]["features"]:
             raise ValueError("direct evidence mismatch")
         ids = payload["feature_ids"]
         # 309 뒤 두 표기는 같은 `features.feature_id`에서 나온다 — 그래서 형태만
@@ -811,24 +893,12 @@ def _validate_evidence(args: argparse.Namespace) -> None:
         {"features": 0, "price_values": 0},
         0,
     )
-    # api-audit은 admin API가 만든 Feature의 **완료 상태**를 감사한다. fixture 감사와
-    # counts 모양이 다르다 — 소유 Feature 1건, 그 위의 domain command 3건(create 1 +
-    # state PATCH 2), field override 7개(create 6 + retire 1), 전이 3건. FK reference
-    # 8은 2026-09-06에 배포 스택에서 직접 측정했다.
-    _validate_direct(
+    # api-audit은 admin API가 만든 Feature를 감사한다. normal lane은 spec이 통과한
+    # run에서만 여기 오므로 완료 행 집합만 받고, recovery lane은 실패한 run의
+    # restored 행 집합도 받는다(`_validate_api_audit`).
+    api_audit = _validate_api_audit(
         runtime / "direct-api-audit.json",
-        "api-audit",
-        {
-            "domain_commands": 3,
-            "features": 1,
-            "field_overrides": 7,
-            "state_transitions": 3,
-        },
-        # 7 = override 7. 종전의 8은 `trg_features_legacy_alias`가 만들던 alias
-        # 행 하나를 더 센 것이고, 309가 그 트리거를 영구 제거했다(ADR-098 결정 6 —
-        # admin 수동 생성 경로는 alias를 발급하지 않는다). helper 쪽은 이미
-        # override 하나만 기대하므로 8은 구조적으로 만족될 수 없었다.
-        7,
+        allow_restored=args.mode != "normal",
     )
     # purge는 api-audit **뒤**에 돈다. 그래서 그 둘의 숫자는 같은 행 집합을
     # 두 번 센 것이어야 한다 — `purged`가 api-audit의 counts와 어긋나면
@@ -838,6 +908,10 @@ def _validate_evidence(args: argparse.Namespace) -> None:
         "purge",
         {"features": 0, "price_values": 0},
         0,
+        purged={
+            "features": api_audit["features"],
+            "field_overrides": api_audit["field_overrides"],
+        },
     )
     _validate_report(runtime / "playwright-recovery")
     phases: dict[str, set[str]] = {}

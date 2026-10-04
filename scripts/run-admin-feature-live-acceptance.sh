@@ -359,6 +359,19 @@ run_supervisor() {
 run_helper() {
   local action="$1"
   local output="$2"
+  # api-audit만 셋째 인자로 기대 결과를 받는다: spec이 통과한 run은 `complete`(정확한
+  # 완주 행 집합), spec이 실패한 run과 recovery는 `restored`(cleanup이 은퇴시킨 행 집합).
+  # 종전에는 언제나 완주를 요구해 실패한 run을 `cleanup-failed`로, recovery를 영구
+  # BLOCKED로 만들었다(2026-10-04 D2).
+  local expect="${3-}"
+  local -a extra=()
+  if [[ "$action" == "api-audit" ]]; then
+    [[ "$expect" == "complete" || "$expect" == "restored" ]] ||
+      die "api-audit expectation must be complete or restored"
+    extra+=(--helper-audit-expect "$expect")
+  elif [[ -n "$expect" ]]; then
+    die "only api-audit takes an expectation"
+  fi
   if [[ "$ACTOR" == "recovery" && "$action" == "seed" ]]; then
     die "recovery mode cannot seed fixtures"
   fi
@@ -367,7 +380,8 @@ run_helper() {
     --api-container "$API_CONTAINER_ID" \
     --fixture "$FIXTURE_HELPER" \
     --helper-action "$action" \
-    --output "$output"
+    --output "$output" \
+    "${extra[@]}"
 }
 
 run_executor() {
@@ -465,7 +479,8 @@ recover_run() {
   run_executor executor-recovery "$RUNTIME_DIR/playwright-recovery" 1 || browser_status=$?
   run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || helper_status=$?
   run_helper audit "$RUNTIME_DIR/direct-audit.json" || helper_status=$?
-  run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" || helper_status=$?
+  # recovery는 실패한(또는 중단된) run만 다룬다 — 완주 사슬을 기대할 근거가 없다.
+  run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" restored || helper_status=$?
   assert_container_residue_zero
   if (( browser_status != 0 || helper_status != 0 )); then
     write_blocked recovery-failed
@@ -528,7 +543,14 @@ PY
   # api-audit은 admin API가 만든 Feature의 완료 상태를 감사하고, 밖에서 재계산할 수
   # 없는 식별자(서버 발급 uuid와 그 uuid로 만들어진 feature_id)를 증거로 남긴다.
   # clone 러너의 content digest가 그 증거를 읽는다.
-  run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" || helper_cleanup_status=$?
+  #
+  # spec이 실패했으면 완주 행 집합이 있을 수 없다 — `finally`가 `:cleanup`으로 은퇴시킨
+  # 행 집합(`restored`)을 감사한다. 그래야 실패가 `cleanup-failed`가 아니라 아래의
+  # `test-failed-restored`로 기록된다.
+  local api_audit_expect=complete
+  (( test_status == 0 )) || api_audit_expect=restored
+  run_helper api-audit "$RUNTIME_DIR/direct-api-audit.json" "$api_audit_expect" ||
+    helper_cleanup_status=$?
   assert_container_residue_zero
   if (( browser_cleanup_status != 0 || helper_cleanup_status != 0 )); then
     write_blocked cleanup-failed
@@ -549,7 +571,7 @@ PY
   #   - 감사가 red인 채로 그 감사 대상 행을 지운다. 운영자가 무엇이 걸렸는지
   #     DB에서 다시 볼 수 없다.
   #   - **실패한 run의 소유 Feature가 사라진다.** 복구 lane의 api-audit은 그 행
-  #     1건을 요구하므로(`_audit_complete_api_owned`), 먼저 지우면 `recover`가
+  #     1건을 감사하므로(`_audit_api_owned`의 `restored`), 먼저 지우면 `recover`가
   #     구조적으로 통과 불가능해지고 BLOCKED가 영구화된다 — `run` 모드는
   #     `prior BLOCKED state requires recover mode`로 막히므로 lane이 prod에서
   #     영구 정지한다. 적대 리뷰가 두 렌즈에서 독립적으로 이것을 잡았다.

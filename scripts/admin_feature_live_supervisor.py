@@ -291,6 +291,11 @@ class Supervisor:
         ):
             raise RuntimeError("API runtime clone inputs are unsafe")
         ordered_networks = [] if host_networked else sorted(networks)
+        # 기대 결과는 api-audit에만, 그리고 api-audit에는 반드시 붙는다(러너 계약).
+        expect = self.args.helper_audit_expect
+        if (self.args.helper_action == "api-audit") != (expect is not None):
+            raise RuntimeError("api-audit expectation wiring mismatch")
+        helper_extra = [] if expect is None else ["--expect", expect]
         runtime_environment = _unique_environment(environment)
         process_environment = dict(os.environ)
         process_environment.update(runtime_environment)
@@ -344,6 +349,7 @@ class Supervisor:
             self.args.helper_action,
             "--run-id",
             self.args.run_id,
+            *helper_extra,
         ]
         self.create(
             command,
@@ -559,6 +565,8 @@ def _parser() -> argparse.ArgumentParser:
         "--helper-action",
         choices=("seed", "cleanup", "audit", "api-audit", "purge"),
     )
+    # api-audit의 기대 결과(helper `--expect`). 러너가 spec 결과·lane에서 고른다.
+    parser.add_argument("--helper-audit-expect", choices=("complete", "restored"))
     parser.add_argument("--output", type=Path)
     parser.add_argument("--artifact-dir", type=Path)
     parser.add_argument("--recovery-only", action="store_true")

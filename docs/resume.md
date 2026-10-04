@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-04 — D2 restored api-audit: 브랜치 `fix/d2-fixture-restored-audit`
+
+**다음 한 작업: PR(조정자가 연다) → CI 전량 → 머지 → 다음 Map pinned pair. 그 전에 현재 BLOCKED
+(`live-20261004102457-782ce6e6b79b`)는 n150 `~/d2-adjudicate-782ce6e6.sh --dry-run` → `--execute`로 판정한 뒤
+`/root/run-d2.sh`를 다시 돈다.**
+
+- spec이 실패한 run은 이제 `test-failed-restored`로 기록되고 `recover`가 통과할 수 있다(`api-audit --expect restored`).
+- **소유자 후속(edge, 저장소 밖):** OPNsense HAProxy의 Map UI backend `timeout server`를 30초에서 늘려라(예: 120초).
+  2026-10-04 D2의 admin create가 약 30초 걸려 edge에서 잘린 것으로 보인다. 별도로 그 create가 DB에서 30초 걸린 원인
+  (feature insert +12초, override +29초, 당시 load 약 9)도 조사 대상이다.
+- a68c2b7d로 다시 도는 D2는 여전히 엄격한 감사를 쓴다 — 같은 절단이 다시 나면 같은 방식으로 BLOCKED된다.
+
 ## 2026-10-04 — transport 소비 후속(Low 다섯): 브랜치 `fix/transport-consumer-lows`
 
 **다음 한 작업: CI 전량 + 적대 리뷰 → PR·머지(소유자 지시: PR은 머지 직전에) → 다음 Map pinned pair. 배포 영향 없음
