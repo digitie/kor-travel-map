@@ -314,7 +314,7 @@ export function PipelineEventsPanel({
 }
 
 /** C3c 정본(#690) — `GET /ops/pipeline/dagster-runs/{run_id}` 소비 상세. */
-function DagsterRunDetail({ runId }: { runId: string }) {
+export function DagsterRunDetail({ runId }: { runId: string }) {
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const after = cursorStack.at(-1) ?? null;
   const detail = usePipelineDagsterRunDetail(runId, {

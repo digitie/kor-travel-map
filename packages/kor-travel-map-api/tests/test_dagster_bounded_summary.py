@@ -70,3 +70,55 @@ async def test_post_graphql_rejects_compressed_body_before_decode() -> None:
                 query="{version}",
                 variables={},
             )
+
+
+@pytest.mark.parametrize(
+    "repository",
+    [
+        {"__typename": "Repository"},
+        {"__typename": "RepositoryConnection", "nodes": None},
+        {
+            "__typename": "Repository",
+            "name": "x",
+            "location": {"name": "y"},
+            "pipelines": [],
+            "schedules": [],
+            "sensors": [],
+            "assetNodes": None,
+        },
+        {
+            "__typename": "Repository",
+            "name": "x",
+            "location": {"name": "y"},
+            "pipelines": [None],
+            "schedules": [],
+            "sensors": [],
+            "assetNodes": [],
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_malformed_repository_is_not_a_healthy_empty_snapshot(repository: object) -> None:
+    from kortravelmap.api.dagster_query_service import get_summary
+    from kortravelmap.api.settings import ApiSettings
+
+    payload = {
+        "data": {
+            "repositoryOrError": repository,
+            "runsOrError": {"__typename": "Runs", "results": []},
+            "activeRunsOrError": {"__typename": "Runs", "results": []},
+        }
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        response = await get_summary(
+            settings=ApiSettings(
+                dagster_url="http://example.test", dagster_allowed_hosts=["example.test"]
+            ),
+            client=client,
+            overrides={},
+            page_size=30,
+        )
+    assert response.data.status == "error"
+    assert response.data.errors

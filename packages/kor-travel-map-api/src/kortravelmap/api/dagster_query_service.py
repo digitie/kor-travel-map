@@ -176,6 +176,43 @@ query KorTravelMapDagsterRunDetail(
 """
 
 
+def _valid_summary_repository(raw: object) -> bool:
+    """필수 GraphQL 필드를 잃은 repository를 정상 빈 스냅샷으로 표시하지 않는다."""
+    if not isinstance(raw, dict) or raw.get("__typename") != "Repository":
+        return False
+    if not isinstance(raw.get("name"), str) or not raw["name"].strip():
+        return False
+    location = raw.get("location")
+    if (
+        not isinstance(location, dict)
+        or not isinstance(location.get("name"), str)
+        or not location["name"].strip()
+    ):
+        return False
+    for key in ("pipelines", "schedules", "sensors", "assetNodes"):
+        rows = raw.get(key)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            return False
+        for row in rows:
+            if key == "assetNodes":
+                asset_key = row.get("assetKey")
+                path = asset_key.get("path") if isinstance(asset_key, dict) else None
+                if (
+                    not isinstance(path, list)
+                    or not path
+                    or any(not isinstance(part, str) or not part for part in path)
+                ):
+                    return False
+            elif (
+                not isinstance(row.get("name"), str)
+                or not row["name"].strip()
+                or key == "pipelines"
+                and not isinstance(row.get("isJob"), bool)
+            ):
+                return False
+    return True
+
+
 def _summary_response(data: DagsterSummaryData, *, started_at: float) -> DagsterSummaryResponse:
     return DagsterSummaryResponse(data=data, meta=make_meta(started_at=started_at))
 
@@ -316,6 +353,8 @@ async def get_summary(
         data, recent_limit=page_size
     )
     errors = [*repository_errors, *run_errors]
+    if not repository_errors and not _valid_summary_repository(data.get("repositoryOrError")):
+        errors.append("Dagster repository 응답의 필수 필드를 확인하지 못했습니다.")
     return _summary_response(
         DagsterSummaryData(
             status="error" if errors else "ok",

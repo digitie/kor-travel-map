@@ -1,15 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DagsterOperations } from "@kor-travel/ui/dagster-operations";
 import type { DagsterSnapshot } from "@kor-travel/ui/dagster-model";
+
+import { DagsterRunDetail } from "@/app/ops/pipeline/events-panel";
 
 import { getJson } from "@/api/client";
 import type { components } from "@/api/types";
 
 type Summary = components["schemas"]["DagsterSummaryResponse"];
 
-export function toDagsterSnapshot(data: Summary["data"]): DagsterSnapshot {
+function toDagsterSnapshot(data: Summary["data"]): DagsterSnapshot {
   return {
     checkedAt: data.checked_at,
     repositories: data.repositories.map(repository => ({
@@ -39,6 +42,7 @@ export function toDagsterSnapshot(data: Summary["data"]): DagsterSnapshot {
 }
 
 export function CommonDagsterPanel() {
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ["pipeline", "common-dagster-summary"],
     queryFn: async ({ signal }) => {
@@ -58,6 +62,9 @@ export function CommonDagsterPanel() {
       runUrl={id => `${base}/runs/${encodeURIComponent(id)}`}
       scheduleUrl={(name, repository) => `${base}/locations/${encodeURIComponent(`${repository.name}@${repository.locationName}`)}/schedules/${encodeURIComponent(name)}`}
       locationUrl={data?.repositories[0] ? `${base}/locations/${encodeURIComponent(`${data.repositories[0].name}@${data.repositories[0].location_name}`)}` : undefined}
+      showRunDetails selectedRunId={selectedRunId}
+      onSelectRun={id => setSelectedRunId(current => current === id ? null : id)}
+      renderRunDetail={run => run ? <DagsterRunDetail key={run.runId} runId={run.runId} /> : null}
       testId="map-common-dagster" />
   </section>;
 }
