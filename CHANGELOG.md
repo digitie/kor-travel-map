@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### standalone compose code-server는 `code-server start` (2026-10-05)
+
+- **CHANGED (compose)**: `docker-compose.yml`의 `dagster-code-server`가 `dagster api grpc` 대신 운영(Manager)과 같은
+  `dagster code-server start -h 127.0.0.1 -p <port> -m kortravelmap.dagster.definitions`로 뜬다 — location reload가
+  definitions를 다시 import한다. healthcheck는 proxy `DagsterApi` health(고정 SERVING) 뒤 자식에 전달되는
+  `ListRepositories`를 raw bytes로 불러 load error(`SerializableErrorInfo`)면 실패한다.
+
 ### transport 소비 후속 (2026-10-04)
 
 - **FIXED**: transport fetcher의 재시도 예산이 run 하나에 하나다(`upstream_retry.sharing_run_retry_budget`) — 종전은

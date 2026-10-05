@@ -571,6 +571,9 @@ services:
   # ADR-069 짝 — 실제 code location이 도는 유일한 프로세스(weather/geo/transport/
   # PinVi와 같은 패턴). gRPC에는 인증이 없으므로 host를 loopback으로 고정한다
   # (dagster-entrypoint.sh의 production 봉인과 같은 이유).
+  # `code-server start`(운영 Manager와 같은 모양): proxy가 자식 gRPC를 띄우고 location reload 때
+  # 자식을 새로 띄워 definitions를 다시 import한다. `api grpc`는 reload를 무시해서 schedule
+  # override처럼 import 때 읽는 값이 반영되지 않는다(2026-10-01 n150 C7).
   dagster-code-server:
     build:
       context: .
@@ -581,8 +584,8 @@ services:
         - github_token
     command:
       - /usr/local/bin/dagster
-      - api
-      - grpc
+      - code-server
+      - start
       - -h
       - 127.0.0.1
       - -p
@@ -658,15 +661,17 @@ services:
     # Dagster 컨테이너들에 좀비 565개, Manager #426).
     init: true
     healthcheck:
-      # dagster의 gRPC health protocol(`DagsterApi` → SERVING)을 dagster를 import하지 않고 부른다 — CLI
-      # `dagster api grpc-health-check`는 매번 dagster import(유휴 2초)를 치르고 deadline이 없다
-      # (Manager #426과 같은 probe).
+      # `code-server start`의 proxy는 `DagsterApi` health에 자식 상태와 무관하게 SERVING을 답한다. 그래서
+      # proxy health를 본 뒤 자식에 전달되는 `ListRepositories`를 raw bytes로 불러 load error
+      # (`SerializableErrorInfo`)면 실패한다. dagster를 import하지 않는다 — CLI `dagster api
+      # grpc-health-check`는 매번 dagster import(유휴 2초)를 치르고 deadline이 없으며 proxy health만 본다.
+      # 운영 Manager probe(실패 지속 시 PID 1 종료·orphan run 정리)의 축약본이다 — standalone은 판정만 한다.
       test:
         - CMD
         - python
         - -I
         - -c
-        - "import sys, grpc; from grpc_health.v1 import health_pb2 as h, health_pb2_grpc as g; r = g.HealthStub(grpc.insecure_channel('127.0.0.1:' + sys.argv[1])).Check(h.HealthCheckRequest(service='DagsterApi'), timeout=8); sys.exit(0 if r.status == h.HealthCheckResponse.SERVING else 1)"
+        - "import sys, grpc; from grpc_health.v1 import health_pb2 as h, health_pb2_grpc as g; c = grpc.insecure_channel('127.0.0.1:' + sys.argv[1]); r = g.HealthStub(c).Check(h.HealthCheckRequest(service='DagsterApi'), timeout=4); sys.exit(1) if r.status != h.HealthCheckResponse.SERVING else None; sys.exit(1 if b'SerializableErrorInfo' in c.unary_unary('/api.DagsterApi/ListRepositories')(b'', timeout=4) else 0)"
         - "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"
       interval: 30s
       timeout: 10s
