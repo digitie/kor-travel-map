@@ -1,0 +1,18 @@
+{
+  "status": "PASS",
+  "recorded_at": "2026-10-05T21:42:14.317689+00:00",
+  "head": "92d0f40e24c4b420e4d699eba4f2f98165e8e58f",
+  "workflow": 37375022437,
+  "attempt": 2,
+  "current_integration4_job": 111987068723,
+  "prior_integration4_job": 111981369332,
+  "prior_failure": "DockerHub testcontainers/ryuk image pull HTTP502; 166 setup errors",
+  "current_conclusion": "success",
+  "started_at": "2026-10-05T21:33:17Z",
+  "completed_at": "2026-10-05T21:37:25Z",
+  "current_summary": [
+    "178 passed, 543 deselected, 213 warnings in 217.31s (0:03:37)"
+  ],
+  "private_original_log_sha256": "8762675da8d76d9e86f9936cbbb9937dc7b1ecc903ad234f442b40e68918bebb",
+  "notes": "Original failed attempt remains immutable; actual same-HEAD retry succeeded without product change."
+}

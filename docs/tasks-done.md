@@ -1,5 +1,10 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-06 — Common Dagster·Map/PinVi paired 완료
+
+- [x] T-COMMON-DAGSTER — 공통 복구·메모리 제한·Admin UI 및 Map/PinVi 실제 paired 재구축·live 수용을 완료했다. [Common #28](https://github.com/digitie/kor-travel-common/pull/28) → [Map #1303](https://github.com/digitie/kor-travel-map/pull/1303) → [PinVi #576](https://github.com/digitie/pinvi/pull/576)의 exact CI와 병합 결과(Common·Map merge commit, PinVi squash)를 확인하고 머지 후 여섯 운영 서비스 healthy/설치 bytes/배포 identity가 유지됨을 재확인했다. [검증·실패·리뷰](reviews/common-dagster-2026-10-05/README.md), [머지 후 증거](reviews/common-dagster-2026-10-05/evidence/final-postmerge-runtime-attestation.json). 공유 운영 worker fault·RSS 실측 및 외부 task 완료는 포함하지 않는다.
+  원 작업의 [적용 가이드](runbooks/common-dagster.md)와 [해제 조건](tasks-acceptance.md#t-common-dagster)은 이 완료 항목에 보존한다.
+
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 

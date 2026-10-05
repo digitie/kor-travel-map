@@ -1,0 +1,314 @@
+{
+  "scope": "after actual 3 primary PR merges and unchanged actual production attestation: docs-only completion journal/resume/task/receipt closure",
+  "primary_merges": {
+    "28": {
+      "headRefOid": "082577a52d69d30cb813e4d920803eab126e322b",
+      "mergeCommit": {
+        "oid": "cb4d37823f88902f24b6f0e3362b77944e7b5e61"
+      },
+      "mergedAt": "2026-10-05T21:38:57Z",
+      "state": "MERGED",
+      "url": "https://github.com/digitie/kor-travel-common/pull/28"
+    },
+    "1303": {
+      "headRefOid": "4acadf7bbd9d70d80bb3db8be4708095913e23ff",
+      "mergeCommit": {
+        "oid": "0e09574738bdebfa00f58f257a4d9ef67617b797"
+      },
+      "mergedAt": "2026-10-05T21:58:40Z",
+      "state": "MERGED",
+      "url": "https://github.com/digitie/kor-travel-map/pull/1303"
+    },
+    "576": {
+      "headRefOid": "92d0f40e24c4b420e4d699eba4f2f98165e8e58f",
+      "mergeCommit": {
+        "oid": "1c6d2837002461c1b95a9fddd4df2164387a8929"
+      },
+      "mergedAt": "2026-10-05T22:01:29Z",
+      "state": "MERGED",
+      "url": "https://github.com/digitie/pinvi/pull/576"
+    }
+  },
+  "files": [
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/journal.md",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/journal.md",
+      "sha256": "fa0c8ea23f30ec94452103ead3740ddea93ee9fa1f27e15a50a9e109f3214d00"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/resume.md",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/resume.md",
+      "sha256": "73e42e804d9fb43bb52aa4aa75c28b9fd5e1f46520cad55afd2da633a5d29fbd"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/2026-10-05-map-health-closure.md",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/2026-10-05-map-health-closure.md",
+      "sha256": "e8a4a79f2b56592263e16ee8e5bd440c944946131a602d3343a4bff748527145"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-map-postgis-ci-receipt.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-map-postgis-ci-receipt.json",
+      "sha256": "54387e2a928432cff0e125d83cc042797d7800e4e4200b41322873cf17b11817"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pinvi-ci-retry-receipt.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pinvi-ci-retry-receipt.json",
+      "sha256": "8eeb27f5c1a02e467badfb89f1218358a9f8c0a15b87bc2315ece27c169a00c7"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-postmerge-runtime-attestation.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-postmerge-runtime-attestation.json",
+      "sha256": "b05e125e782f851cc34ad73f45a19d551e74aebecc8983cec9e00d2afe83266f"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-1303-merge-receipt.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-1303-merge-receipt.json",
+      "sha256": "5e4c8fb1b688566c3ea7fcb49e8becc70000c8f30b0355236987630eccad5b7c"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-28-merge-receipt.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-28-merge-receipt.json",
+      "sha256": "ad6d6b67074e14ce5c99199f6e35e2e81f69ed9a5b4725abd027ff2e43ec6f1f"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-576-merge-receipt.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-pr-576-merge-receipt.json",
+      "sha256": "bfc1d079b43ac2bfb6e5b77e8d913eb16f0aded134a1da202217490187e81200"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/final-product-byte-proof.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/final-product-byte-proof.json",
+      "sha256": "34f8914adadd51de73489781f94143f83f4a48c3eea4e2e0303afca3416bb456"
+    },
+    {
+      "repository": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "path": "docs/reviews/adversarial/evidence/map-health-2026-10-05/pinvi-squash-source-preservation.json",
+      "absolute_path": "/home/digitie/dev/kor-travel-common-map-recovery/docs/reviews/adversarial/evidence/map-health-2026-10-05/pinvi-squash-source-preservation.json",
+      "sha256": "ec41283acd775545f2735b47cb42efc3f78053e5fe257c0b20402934ac220ad8"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/journal.md",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/journal.md",
+      "sha256": "65002677662c244b2cf0432cfceca605978b38a467f37709590eb4776f36f4a4"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/resume.md",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/resume.md",
+      "sha256": "fbfe5bc86d56cd4dc6ff94a7631f126b7a49affe8601f6e2135f50519d520c56"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/README.md",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/README.md",
+      "sha256": "49768b41afeaa29bd833b67f578753288a30808fdba9713e21488772fb04484a"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/tasks-done.md",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/tasks-done.md",
+      "sha256": "beeb68f85381b9cfcbe669449017bd0471bf8dea56931a7e96c85a27977a437d"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/tasks.md",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/tasks.md",
+      "sha256": "10a59a4afccdb58d82055c88178ec0216cfa457c21b27423b5255675b5bf9fd7"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-map-postgis-ci-receipt.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-map-postgis-ci-receipt.json",
+      "sha256": "54387e2a928432cff0e125d83cc042797d7800e4e4200b41322873cf17b11817"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-pinvi-ci-retry-receipt.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-pinvi-ci-retry-receipt.json",
+      "sha256": "8eeb27f5c1a02e467badfb89f1218358a9f8c0a15b87bc2315ece27c169a00c7"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-postmerge-runtime-attestation.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-postmerge-runtime-attestation.json",
+      "sha256": "b05e125e782f851cc34ad73f45a19d551e74aebecc8983cec9e00d2afe83266f"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-pr-1303-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-pr-1303-merge-receipt.json",
+      "sha256": "5e4c8fb1b688566c3ea7fcb49e8becc70000c8f30b0355236987630eccad5b7c"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-pr-28-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-pr-28-merge-receipt.json",
+      "sha256": "ad6d6b67074e14ce5c99199f6e35e2e81f69ed9a5b4725abd027ff2e43ec6f1f"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-pr-576-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-pr-576-merge-receipt.json",
+      "sha256": "bfc1d079b43ac2bfb6e5b77e8d913eb16f0aded134a1da202217490187e81200"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/final-product-byte-proof.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/final-product-byte-proof.json",
+      "sha256": "34f8914adadd51de73489781f94143f83f4a48c3eea4e2e0303afca3416bb456"
+    },
+    {
+      "repository": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "path": "docs/reviews/common-dagster-2026-10-05/evidence/pinvi-squash-source-preservation.json",
+      "absolute_path": "/mnt/f/dev/kor-travel-map-codex-dagster/docs/reviews/common-dagster-2026-10-05/evidence/pinvi-squash-source-preservation.json",
+      "sha256": "ec41283acd775545f2735b47cb42efc3f78053e5fe257c0b20402934ac220ad8"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/journal.md",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/journal.md",
+      "sha256": "f36610af9756cb7622ea9e959b6ed0b3d8d3dc07bbe8442a5ab87ab9ea57f503"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/resume.md",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/resume.md",
+      "sha256": "ad67f0423761da1ec985974c4ab77708e35eb17199067972846ab1c176bc9be0"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/README.md",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/README.md",
+      "sha256": "49768b41afeaa29bd833b67f578753288a30808fdba9713e21488772fb04484a"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/tasks-done.md",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/tasks-done.md",
+      "sha256": "39e247af77d49a2f35573c1444cce3c716d96592fd6fe432acfb68f30cac56ca"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/tasks.md",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/tasks.md",
+      "sha256": "44b1b356e6f5440a8ddf4c8605fe80c7897691ecee06ee4f94f97bd26ea1cf5a"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-map-postgis-ci-receipt.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-map-postgis-ci-receipt.json",
+      "sha256": "54387e2a928432cff0e125d83cc042797d7800e4e4200b41322873cf17b11817"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pinvi-ci-retry-receipt.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pinvi-ci-retry-receipt.json",
+      "sha256": "8eeb27f5c1a02e467badfb89f1218358a9f8c0a15b87bc2315ece27c169a00c7"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-postmerge-runtime-attestation.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-postmerge-runtime-attestation.json",
+      "sha256": "b05e125e782f851cc34ad73f45a19d551e74aebecc8983cec9e00d2afe83266f"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-1303-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-1303-merge-receipt.json",
+      "sha256": "5e4c8fb1b688566c3ea7fcb49e8becc70000c8f30b0355236987630eccad5b7c"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-28-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-28-merge-receipt.json",
+      "sha256": "ad6d6b67074e14ce5c99199f6e35e2e81f69ed9a5b4725abd027ff2e43ec6f1f"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-576-merge-receipt.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-pr-576-merge-receipt.json",
+      "sha256": "bfc1d079b43ac2bfb6e5b77e8d913eb16f0aded134a1da202217490187e81200"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/final-product-byte-proof.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/final-product-byte-proof.json",
+      "sha256": "34f8914adadd51de73489781f94143f83f4a48c3eea4e2e0303afca3416bb456"
+    },
+    {
+      "repository": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "path": "docs/reviews/common-map-rebuild-2026-10-05/evidence/pinvi-squash-source-preservation.json",
+      "absolute_path": "/mnt/f/dev/pinvi-codex/docs/reviews/common-map-rebuild-2026-10-05/evidence/pinvi-squash-source-preservation.json",
+      "sha256": "ec41283acd775545f2735b47cb42efc3f78053e5fe257c0b20402934ac220ad8"
+    }
+  ],
+  "postfix_scope": "Only 3 task-tracking documents: move orphan task explanation to done archive and distinguish Common/Map merge commits from PinVi squash; all other 34 files unchanged",
+  "delta": [
+    {
+      "repository": "map",
+      "path": "docs/tasks-done.md",
+      "before_sha256": "ac39c025f3605996ce8b95910d2d1a99d570bb7ea48401ac46509cb5c5a5344c",
+      "after_sha256": "beeb68f85381b9cfcbe669449017bd0471bf8dea56931a7e96c85a27977a437d"
+    },
+    {
+      "repository": "map",
+      "path": "docs/tasks.md",
+      "before_sha256": "3cb08d569788588aa99afe6aea79760772fd76e7b03b06cbbaf90760359eb491",
+      "after_sha256": "10a59a4afccdb58d82055c88178ec0216cfa457c21b27423b5255675b5bf9fd7"
+    },
+    {
+      "repository": "pinvi",
+      "path": "docs/tasks-done.md",
+      "before_sha256": "a608fda23b94783a53cdac6aa2c9f1d0e38c0195e5ccf104623d35f99411d47b",
+      "after_sha256": "39e247af77d49a2f35573c1444cce3c716d96592fd6fe432acfb68f30cac56ca"
+    }
+  ]
+}

@@ -83,3 +83,7 @@ probe의 실제 실행/하니스 검토 원문은 각 `.py.source.json`의 `raw`
 ### 2026-10-06 builtin 수정 전 운영 재구축
 
 [세 번째 실제 재구축](evidence/rebuild-markers-third-negative.json)은 ETL의 digest 고정 외부 frontend가 종료되어 실패했다. 앞선 5개 이미지 빌드는 완료됐으나 운영 반영/live 성공은 아니다. 기존 6개 서비스와 generation은 유지됐다. API/ETL의 불필요한 외부 frontend를 제거한 PinVi `0058369c` 수정의 새 운영 재구축은 아직 NOT_RUN이다. 이전 본문의 RUNNING은 해당 시점 진행 기록이며 최종 결과는 이 실패 기록이다.
+
+## 실제 머지·완료 원장 동기화
+
+[Common #28](https://github.com/digitie/kor-travel-common/pull/28) → [Map #1303](https://github.com/digitie/kor-travel-map/pull/1303) → [PinVi #576](https://github.com/digitie/pinvi/pull/576)는 모두 실제 MERGED다. Common·Map은 merge commit으로 원본 main ancestry를 유지했다. PinVi는 main 규칙에 따라 squash를 사용하고 [원본 runtime/reviewed remote 참조](evidence/pinvi-squash-source-preservation.json)를 유지했다. [Common exact CI·머지 영수증](evidence/final-pr-28-merge-receipt.json), [Map exact CI·머지 영수증](evidence/final-pr-1303-merge-receipt.json), [PinVi exact CI·머지 영수증](evidence/final-pr-576-merge-receipt.json), [머지 후 read-only 여섯 운영 서비스 확인](evidence/final-postmerge-runtime-attestation.json)을 보존한다. 제품 source와 규범 가이드는 불변이며 완료 추적 문서만 동기화한다. 최초 CI 실패와 같은 source의 후속 retry 성공을 구분한다.
