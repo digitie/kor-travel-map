@@ -34,7 +34,7 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from kortravelmap.api import ops_dataset_schedule
+from kortravelmap.api import dagster_http, ops_dataset_schedule
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
 from kortravelmap.api.db import get_session
@@ -1009,10 +1009,20 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
             _preview_fixture,
         )
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(_dagster_schedule),
-        ) as dagster_client:
-            app.state.dagster_http_client = dagster_client
+        with monkeypatch.context() as client_patch:
+            # 요청 단위 client 정책에 맞춰 transport만 주입한다. 운영 연결이나
+            # 앱 전역 client 재사용으로 schedule 회귀를 우회하지 않는다.
+            def _request_dagster_client(
+                request: Any,
+                _settings: ApiSettings,
+            ) -> httpx.AsyncClient:
+                client = httpx.AsyncClient(transport=httpx.MockTransport(_dagster_schedule))
+                request.state.dagster_http_client = client
+                return client
+
+            client_patch.setattr(
+                dagster_http, "http_client_from_request", _request_dagster_client,
+            )
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(
                     app=app,

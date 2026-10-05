@@ -1,5 +1,9 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — 요청 단위 Dagster client의 PostGIS fixture 정렬
+
+Map CI의 glibc·alpine 통합 lane에서 동일한 projection 테스트 한 건이 실패했다. 앱 전역 client 주입을 제거한 뒤 기존 fixture가 실제 연결로 빠진 것이 원인이다. 두 schedule fixture에 요청마다 새 MockTransport client를 주입하고 실제 middleware의 정리를 유지했다. catalog 회귀도 schedule source가 `ok`인지 단언하여 묵시적 degrade를 막는다. 운영 Python·UI 코드는 이전 고정 후보와 동일하다. 실제 PostGIS 관련 22개 검사를 통과했으며 전체 CI를 다시 확인한다.
+
 ## 2026-10-05 — Map·PinVi 공통 Dagster 보강 (진행 중)
 
 ADR-107과 [적용·복구 가이드](runbooks/common-dagster.md)에 따라 공통 Python HTTP/Dagster·로그인·메뉴·대시보드를 채택했다. 요청별 연결·응답/시간 상한·활성 run 별도 조회·step/DB 연결/100개 batch를 적용한다. 쓰기 run 자동 복제 없이 기존 operation/lease/claim 복구 계약을 유지한다. [검증 기록](reviews/common-dagster-2026-10-05/README.md)의 고정 후보 2인 리뷰·운영 재구축·live·CI·merge를 완료해야 한다. 원래 인간 dirty checkout은 보존했다.
