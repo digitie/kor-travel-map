@@ -4871,6 +4871,8 @@ def test_standalone_compose_code_server_is_reloadable_and_sealed(tmp_path: Path)
     assert "/api.DagsterApi/ListRepositories" in probe
     assert "SerializableErrorInfo" in probe
     assert service["healthcheck"]["test"][-1] == port_default
+    # 4초 gRPC 호출 둘 + 인터프리터 기동·grpc import — 부하 아래 10초로는 모자랄 수 있다.
+    assert service["healthcheck"]["timeout"] == "15s"
 
 
 @pytest.mark.unit
