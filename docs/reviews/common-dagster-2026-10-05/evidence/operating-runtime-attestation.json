@@ -1,0 +1,97 @@
+{
+  "status": "PASS",
+  "scope": "actual six operating images/installed Python sources + read-only shared Dagster DB head",
+  "sources": {
+    "map_source_revision": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+    "pinvi_source_revision": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+    "common_source_revision": "a960bdb114d99a2ac1b9608a77b240635806e551",
+    "common_installed_commits": {
+      "kor-travel-map-api-latest": "a960bdb114d99a2ac1b9608a77b240635806e551",
+      "kor-travel-map-dagster-code-server-latest": "a960bdb114d99a2ac1b9608a77b240635806e551",
+      "pinvi-api-latest": "1f8e339c7c79f86f8952b0d4c326ab4dae56bee8",
+      "pinvi-dagster-code-server-latest": "73e3ff8b9398e533806d2d1a8435292570169de3"
+    },
+    "map_application_head": "404_transport_provider_identity",
+    "pinvi_head": "20260917_0102",
+    "pinset_sha256": "54de39d1be7a3539fb016565212e6182999ec195b9938d813b5e7801d728aa25",
+    "recorded_at": "2026-10-05T17:22:40+00:00"
+  },
+  "deploy_state": "committed",
+  "deploy_status_sha256": "c46e460a18ffca68963a871afd2390ca33347bbae2328b7e46315a5a3963eb1d",
+  "deploy_state_metadata_revalidated": true,
+  "deploy_run_id": "360afa9e-a50b-4968-bc63-0111153d5bfe",
+  "manager_revision": "e2a1a5b42fec207fc6c5e0638c652de04e5694d4",
+  "dagster_shared": {
+    "database": "dagster_shared",
+    "schema_head": "29b539ebc72a",
+    "read_only": true
+  },
+  "containers": {
+    "kor-travel-map-api-latest": {
+      "image_id": "sha256:43809da2706bbb0eb938fbd359d21a9c6152c37c21add43f61b139d70765e3f7",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+      "matches_committed_deploy": true,
+      "python_source_sha256": {
+        "kortravelcommon.http": "cbb6d44f3635807579cefdbf64d9431c3fc2b46d30b50ccb9ed77602d45d5f2d",
+        "kortravelmap.api.dagster_graphql": "ac55238ae4444b9ead8e3df6bb55036d6d001f23eebb92d0e377e63cb42375c0",
+        "kortravelmap.api.dagster_http": "59d6b623b646a14535887dc50160feab7102129688892c2aa7f75123854d8467",
+        "common_commit": "a960bdb114d99a2ac1b9608a77b240635806e551"
+      }
+    },
+    "kor-travel-map-ui-latest": {
+      "image_id": "sha256:14dfab450a5a0bf7f00794ee6bcab390e5258f268d4013081a8403f2a0baf355",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+      "matches_committed_deploy": true,
+      "admin_password_hash_nonempty": true
+    },
+    "kor-travel-map-dagster-code-server-latest": {
+      "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+      "matches_committed_deploy": true,
+      "python_source_sha256": {
+        "kortravelcommon.dagster": "ee1bce427711246b700f8d413d00500418d789dc30624607b3fdac800bdfd4d2",
+        "kortravelcommon.dagster_health": "5edaab3a9efebc5dd71d99255ecebb3a1703b5897a7e960c31e023d6f0ec6093",
+        "kortravelmap.dagster.definitions": "4f184adabd4082fce3e4440ac6d0b87364f46a9f811655ebc98cd1e815a95671",
+        "common_commit": "a960bdb114d99a2ac1b9608a77b240635806e551"
+      },
+      "common_child_health_cli": "PASS"
+    },
+    "pinvi-api-latest": {
+      "image_id": "sha256:354cbf0f63868998c35c19d117de647e5d43802612181b376aff09deece22eca",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+      "matches_committed_deploy": true,
+      "python_source_sha256": {
+        "kortravelcommon.http": "cbb6d44f3635807579cefdbf64d9431c3fc2b46d30b50ccb9ed77602d45d5f2d",
+        "app.services.admin_etl": "abc119c50cec196b4e08b11b136e4616b850282694d259aa94aabaa7eef0e313",
+        "common_commit": "1f8e339c7c79f86f8952b0d4c326ab4dae56bee8"
+      }
+    },
+    "pinvi-web-latest": {
+      "image_id": "sha256:ac30b1b823f3e433857bc949ca959154baf84a0ad39408b4f06efb1858fc3314",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+      "matches_committed_deploy": true
+    },
+    "pinvi-dagster-code-server-latest": {
+      "image_id": "sha256:cebcfb60ef5e41fd2d96c095dca8790c0d20fe2e5c5b4e66d36da7918b4df128",
+      "running": true,
+      "health": "healthy",
+      "source_revision": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+      "matches_committed_deploy": true,
+      "python_source_sha256": {
+        "kortravelcommon.dagster": "ee1bce427711246b700f8d413d00500418d789dc30624607b3fdac800bdfd4d2",
+        "pinvi.etl.definitions": "60dec6c4471d4fecb41f92de73ab8ccd08d3aed6a4c31b36b236d1c5e6b504e6",
+        "common_commit": "73e3ff8b9398e533806d2d1a8435292570169de3"
+      }
+    }
+  }
+}

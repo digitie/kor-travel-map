@@ -1,0 +1,112 @@
+# Map·PinVi 소비자 FULL 독립 적대 리뷰 — 복구·DB·메모리·격리
+
+- 작성일: 2026-10-05 KST
+- 최종 판정: **BLOCK**. 아래 R01–R04가 이 고정 후보에서 열려 있다.
+- Map 기준 `3b9b49d694c7dd544ec6ed86253f5935bde0f193` → 후보 `acde3726481b09f8710ab94c29fdcdb78713dcf7`.
+- PinVi 기준 `07cfef222c56d7e648c81b017aa8ffe4ccd1c386` → 후보 `640612af58248b1dfc8200b8dcb1a1512f9977d0`.
+- Common 제품 `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`.
+- 입력 manifest SHA256: `64c32eb2dfb9c4cb17d29e2708a9fee5be2f8eaabc36ea5168d0ff0ec7bbd10a`.
+
+## 독립성과 검토 범위
+
+Linux Git의 exact SHA를 각각 본인 `/home/digitie/.cache/recovery-review-map-acde372`, `recovery-review-pinvi-640612a`, `recovery-review-common-1f8e339`에 archive했다. 입력 manifest의 Map 54개·PinVi 13개 파일 SHA와 전체 git diff 경로 집합이 일치함을 직접 검증했다. Map·PinVi AGENTS/SKILL, 관련 runbook·ADR·변경 문서를 읽고 기존 CodeGraph 인덱스를 읽기 전용으로 조회했다. 제품 파일·원본 설치·Git index·외부 서비스·DB는 수정하지 않았다. 상대 리뷰어 원문을 읽거나 결과를 합산하지 않았다.
+
+FULL은 고정 후보의 전체 제품·문서 delta에 대한 독립 검토라는 뜻이며, 저장소 전체 pytest 또는 실제 PostgreSQL/N150 운영 검증을 수행했다는 뜻이 아니다. 부모가 전달한 대규모 suite·CI·운영 실행 수치는 본인 PASS에 포함하지 않는다. 후속 수정 커밋의 존재를 전달받았지만 이 원문의 BLOCK 판정은 위 고정 SHA에 한정하며 후속 제품을 검증한 것으로 처리하지 않는다.
+
+## 열린 findings
+
+### R01 — P2 / Map 새 Git 의존성을 설치할 API builder에 Git이 없다
+
+경로: `docker/api.Dockerfile:11–13,27–30`, `packages/kor-travel-map-api/pyproject.toml:31`.
+
+API에 새 Common Git 직접 의존성을 추가했지만 builder의 `apt-get install --no-install-recommends build-essential curl`에는 git이 없다. 이미지의 pip install이 해당 dependency를 해석할 때 Git 실행 파일을 요구한다. 본인 seed venv의 PATH를 Python/pip만 제공하도록 한 실제 pip dry-run에서 `git version` 단계의 ENOENT와 `Cannot find command 'git'`를 재현했다. clone/외부 fetch 이전 실패다. Dockerfile은 이 delta에서 변경되지 않았지만 새 dependency가 기존 builder 가정을 깨뜨린다.
+
+권고: 실제 dependency를 설치하는 builder 단계에 git을 설치하거나 사전 검증한 wheel 공급 경계를 사용하고 해당 Docker build를 검사한다. 이 리뷰에서는 실제 Docker image build는 NOT_RUN이다. 증거: `map-probe_no_git.py`, `map-pip-no-git.log`.
+
+### R02 — P2 / PinVi API wheel metadata 생성이 직접 의존성을 거부한다
+
+경로: `apps/api/pyproject.toml:9,56–61`.
+
+Hatchling 프로젝트에 새 Git 직접 의존성을 추가했지만 `[tool.hatch.metadata] allow-direct-references = true`가 없다. 고정 archive의 실제 `uv build --wheel`은 `Dependency #1 ... cannot be a direct reference unless ... allow-direct-references ... true`로 실패했다. 제품 테스트 실행용 기존 설치가 있다는 사실로 clean build 실패를 해결할 수 없다.
+
+권고: 프로젝트의 직접 의존성 metadata 허용 계약을 명시하고 clean wheel/API image build를 검사한다. 본인 wheel build는 실제 backend exit 1이며 기존 설치를 수정하지 않았다. 증거: `pinvi-independent-wheel-build.log`.
+
+### R03 — P2 / PinVi 전체 probe timeout 뒤 client 정리가 예산 없이 계속된다
+
+경로: `apps/api/app/services/admin_etl.py:600–609`.
+
+전체 probe timeout과 `AsyncClient` context가 같은 async-with 안에 있다. body에서 deadline 취소가 발생한 뒤 client의 `__aexit__ → aclose`에는 별도 deadline이 없으므로 늦은 transport 정리가 전체 probe 종료를 지연한다. Common의 50ms 제한은 response 정리 경계이며 이 바깥 client 정리를 제한하지 않는다.
+
+실제 현재 `_probe_pinvi_dagster`를 실행하고 총 예산 20ms·body wait 1s·협조적 custom transport close 250ms를 주입했을 때 `down` 반환까지 **271.177ms**가 걸렸다. 취소를 무시하는 악의적 coroutine이 아니라 정상적으로 await/cancel 가능한 transport다. 표준 AsyncHTTPTransport에서 250ms close 정체가 발생한다는 재현은 하지 않았다. context 구조는 기준 소스에도 있었으므로 새 HTTP adoption 회귀가 아니라 전체 예산 목표에 남아 있는 기존 결함이다.
+
+권고: client 생명주기를 명시적으로 분리하고 finally close에 별도 상한을 둔다. body 오류·외부 cancellation 원예외를 보존하며 불확실한 client를 재사용하지 않는다. 증거: `pinvi-probe_client_cleanup.py`, `pinvi-probe-client-cleanup.json`.
+
+### R04 — P2 / Map 손상된 repository 응답이 정상 빈 summary가 된다
+
+경로: `packages/kor-travel-map-api/src/kortravelmap/api/dagster_graphql.py:475–518`.
+
+selector의 `repositoryOrError` 결과와 내부 collection을 엄격하게 검증하지 않는다. `repository_connection`이 예상 밖의 RepositoryConnection을 통과시키고 `parse_repositories`의 permissive `_list`가 null을 []로 바꾼다. 실제 `get_summary`와 HTTPX MockTransport를 이용해 다음 응답을 각각 재현했다.
+
+1. `{"__typename":"RepositoryConnection","nodes":null}` → status=ok, repository_count=0, job_count=0, errors=[].
+2. 정상 이름/location을 가진 Repository의 pipelines/schedules/sensors/assetNodes=null → status=ok, repository_count=1, job_count=0, errors=[].
+
+새 Common panel이 정상 summary로 받아 이전 snapshot을 빈 결과로 교체할 수 있다. 정상 Dagster 서버가 이러한 GraphQL protocol 위반 응답을 생성한다고 주장하지 않는다. malformed 응답 fail-closed 계약에 대한 공격이다.
+
+권고: selector union typename·repository identity·필수 list와 element shape를 검증하고 malformed response를 오류/degraded로 반환해 마지막 정상 snapshot을 보존한다. 증거: `map-probe_malformed_repository.py`, `map-malformed-repository-evidence.json`.
+
+## 직접 실행한 검증과 결과
+
+- Map API/Dagster focused 241 PASS, 55.35s: snapshot batching, ETL, resources, asset deps, bounded summary, query service, request adapters, pipeline router.
+- Map provider/client/loss/contract focused 184 PASS, 5.60s: 변경 8종 provider에 해당하는 변환 tests, client, loss floor, code-location 이름, vnext artifacts, production runner contract.
+- PinVi API focused 35 PASS, 17.69s: Dagster probe와 vendored Map admin contract.
+- 직접 pytest 합계는 **460 PASS**이다. 부모 결과와 기존 Common 독립 실행을 더하지 않았다.
+- 실제 Dagster `job list` gRPC autoload: Map·PinVi 모두 exit 0. Map 39 resolved jobs, PinVi 8 named jobs. DB resource를 실행하지 않았다.
+- 실제 Map Definitions public config mapping: 39 jobs 모두 multiprocess executor max_concurrent=1. Common tags가 있는 것은 30개(29개 feature-load와 feature_update_request_worker)이며 max_retries=0, runtime tag 존재를 확인했다. 나머지 유지보수 job까지 Common 정책을 적용했다고 주장하지 않는다. `defs`가 유일한 loadable Definitions임도 직접 확인했다.
+- 8종 asset에 각각 301개 중복 fixture를 넣고 실제 converter를 실행했다. 생산자 선행 소비는 100개 이내, batch 크기는 [100,100,100,1]. 이전 full-list converter 결과와 같은 identity/raw/lineage/실질 payload를 확인했다. 서로 다른 실행 시 자동 생성되는 created_at/updated_at/imported_at 세 필드만 비교에서 정규화했다. 모든 원천 필드를 정규화한 비교가 아니다.
+- 실제 AsyncKorTravelMapClient batch loader + SQLite AsyncEngine(pool_size=1,max_overflow=0): 301 중복 입력의 upsert 결과 1행, 전 배치 뒤 seal 1회, 후반 iterator failure 시 이전 배치 write rollback·이전 seal 유지. 도메인 load_bundles/capture 함수는 본인 process에서 최소 SQLite upsert/seal adapter로 대체했으므로 PostgreSQL 도메인 SQL 원자성을 직접 실증했다고 주장하지 않는다.
+- 실제 localhost HTTP/1.1 서버 + 표준 AsyncHTTPTransport + Map post_graphql: gzip 압축/과대 Content-Length 사전 거부, JSON array 거부, 모든 요청 Accept-Encoding identity, 외부 cancellation 보존(약 3.17ms).
+- 실제 Map request middleware + 협조적 slow client: 원래 CancelledError를 보존하며 client 정리 약 50.52ms 후 종료. 경고에 원격 URL/credential이 노출되지 않음을 확인했다.
+- Common Dagster source는 기존 73e3ff8과 1f8e339 사이 diff 없음. PinVi 이번 delta에서 ETL/UI 제품 소스는 변경되지 않았다.
+- Map·PinVi UI dev.6 tarball bytes SHA256은 동일한 `e4945d01d9eb89ed505a95b551899fd0ecf41be66c9ee6b76246701350447e6d`, tokens는 동일한 `554ae3f6a18cbf453130b29f8a2d737ddb880101b55e14535cf8d63174b47505`.
+- 고정 문서/ADR는 운영 재구축·live·merge와 pending paired receipt를 완료로 주장하지 않는다. HTTP 제품 핀과 기존 UI/ETL 핀을 구분한다. 다만 “별도 연결 정리 제한 공유”라는 PinVi runbook 문구는 R03의 실제 client 정리까지 증명하지 못한다.
+
+## 명령과 재현 경계
+
+모든 실행은 `wsl -d Ubuntu-26.04 -- bash -lc`를 사용했다. `TMPDIR=/home/digitie/.cache`를 사용하며 PYTHONPATH는 본인 Common archive src와 각 소비자 archive src를 지정했다. Map interpreter는 `/home/digitie/.cache/map-common-recovery-venv/bin/python`; PinVi API/ETL은 기존 각 `.venv/bin/python`을 읽기 재사용했다.
+
+Map focused:
+```bash
+python -m pytest -q \
+  packages/kor-travel-map-dagster/tests/test_snapshot_batching.py \
+  packages/kor-travel-map-dagster/tests/test_etl.py \
+  packages/kor-travel-map-dagster/tests/test_resources.py \
+  packages/kor-travel-map-dagster/tests/test_asset_deps.py \
+  packages/kor-travel-map-api/tests/test_dagster_bounded_summary.py \
+  packages/kor-travel-map-api/tests/test_dagster_query_service.py \
+  packages/kor-travel-map-api/tests/test_application_http_adapters.py \
+  packages/kor-travel-map-api/tests/test_ops_pipeline_router.py
+```
+
+PinVi API:
+```bash
+python -m pytest -q tests/unit/test_admin_etl_dagster_probe.py tests/unit/test_kor_travel_map_admin_contract.py
+uv build --wheel --out-dir <own-archive>/independent-wheel-output
+```
+
+autoload:
+```bash
+python -m dagster job list -m kortravelmap.dagster.definitions -d <own-map-archive>
+python -m dagster job list -m pinvi.etl.definitions -d <own-pinvi-archive>/apps/etl
+```
+
+각 custom 공격은 보존된 `probe_*.py`를 동일 PYTHONPATH로 실행하면 된다. synthetic PG DSN은 localhost:1의 placeholder이며 연결/외부 DB 실행을 하지 않았다.
+
+**NOT_RUN:** 실제 PostgreSQL/PostGIS domain SQL 및 seal/curation stored procedures, 외부 provider 수집, N150 actual paired rebuild/live UI/E2E, 전체 저장소 suite, fresh 전체 dependency install/Docker image build, 운영 RSS, worker kill·shared Manager daemon 재설정, 표준 HTTP transport의 장시간 client-close 정체. SQL pool 상한은 engine마다이며 공유 daemon의 전역 run/queue 상한을 보장하지 않는다. run-monitoring이 terminal로 확정하지 못하는 영구 active run의 coalescing 해제는 운영 전제에 남아 있다. consumer YAML과 공유 instance를 같은 것으로 취급하지 않았다.
+
+## 증거 보존
+
+본인 raw probes/log/JSON 및 원래 입력 manifest 21개 파일을 Weather `.playwright-mcp/map-pinvi-consumer-review-recovery-evidence/`에 byte 그대로 보존했다. 보존 목록 `preservation-manifest.json` SHA256:
+
+`269b2176dfc43e5af7fc82004d15b585c3037224fbcd41589ca26536bc1ec433`.
+
+판정은 R01–R04가 실제 고정 후보에서 열려 있으므로 BLOCK이다. 후속 immutable manifest의 전체 delta와 직접 재현으로 각각 closure를 확인해야 한다. 이 원문과 이전 BLOCK/PASS 원문을 덮어쓰지 않는다.

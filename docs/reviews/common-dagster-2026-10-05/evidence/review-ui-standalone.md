@@ -1,0 +1,91 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (c) 2026 digitie -->
+
+# Map standalone code-server 후속 FULL 연속 리뷰 B
+
+판정: **BLOCK**. UI/API/auth/OpenAPI/PinVi 계약의 이전 본인 FULL 증거는 유효하지만 새 standalone healthcheck에서 **J-STANDALONE-P2-01 / P2 / OPEN**을 발견했다. 빈·잘못된 자식 RPC 응답을 정상 healthy로 오인하는 경계를 수정하고 고정 후속 후보에서 재검증해야 한다.
+
+## 고정 범위·격리
+
+- 리뷰어 James / 독립 B. 실행 ID `J-MAP-STANDALONE-5BA338-2A36E8-20261005`.
+- 고정 source/검증 단계: 2026-10-05T12:27:09.493578+00:00 ~ 2026-10-05T12:30:53.596174+00:00.
+- manifest `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-standalone-reviewed-manifest.json`, SHA256 `7052395b5b4efa6c499f28b3384dd0fa3bbf91090f6b05967032e018eaea86a2`.
+- Map 새 base `a46d7b92c0e727805348e20d60fe188592e16477` → 실제 candidate `5ba338672834431b43dbc2c5658af3b045987bc3`. 추가 upstream 변화는 이전 본인 검토 후보 `c4d62a793ba69a60543fafda7442b3ba2c019ad1`부터 전체 비교했다.
+- PinVi 실제 candidate `2a36e8973bb163c68f1a778a0c1215fa8e9d02d4` / base `07cfef222c56d7e648c81b017aa8ffe4ccd1c386`; Common Python `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`·기존 UI dev.6는 그대로다.
+- Linux Git 고정 객체로 Map59/PinVi15의 **74개 manifest blob SHA256**을 확인했다. 상대 원문·통합 판정은 열람하지 않고 docs/reviews 내용은 해시 확인 외 제외했다.
+- manifest의 새 base에 이미 포함된 standalone upstream delta도 별도로 검토했다. manifest59개가 모든 c4→5ba 파일을 포함한다고 가정하지 않았다.
+- Map 고정 Git archive를 own `/home/digitie/.cache/james-map-pinvi-standalone-20261005/map`에 추출했다. tar SHA256 `a11f011593247f0b774f66b9e3c7e6d60e7b13e264fa461a713b93399dd29c37`.
+- 테스트·protobuf/RPC fixture·결과는 own scratch에만 생성했다. 기존 venv는 읽기 재사용했다. N150·운영 DB·운영 컨테이너·타인 서비스에 접속하거나 변경하지 않았다. 제품·설치·기존 원문·타인 작업을 수정하지 않았다.
+
+## 전체 연속 범위와 이전 증거
+
+c4→5ba의 정확한 추가 파일은 CHANGELOG, docker-compose.yml, docker/dagster-entrypoint.sh, 공개 handoff, journal, resume, test_docker_dagster_runtime.py의 7개다.
+
+- UI/API/auth/OpenAPI·Python recovery/HTTP·vendor/lock 및 PinVi M05 source는 이 추가 delta에서 바뀌지 않는다. PinVi candidate 객체 자체가 이전과 같으므로 기존 본인 FULL 제품 검증을 재사용한다.
+- entrypoint 실행 로직은 변경되지 않고 주석만 갱신된다. 기존 봉인이 허용하던 code-server start 형태로 standalone compose command를 바꾼다. loopback host·모듈·port·init/secret·DB 경계는 유지한다.
+- 새 건강점검은 proxy Health 다음 자식으로 전달되는 ListRepositories RPC를 호출한다. 각각 4초 timeout, Compose의 전체 15초 timeout을 유지한다. PID1 종료·orphan 정리·자동 restart로 확대하지 않는 standalone 판정이라는 문서 설명을 확인했다.
+- journal/resume의 upstream 비어 있지 않은 문장들이 후보에 보존되고, 이전 Common 도입 문장도 함께 남음을 확인했다. 공개 handoff는 standalone api grpc 전환 완료와 남은 봉인 제거를 구분한다.
+- base→전체 범위는 UI/API·복구·배포 계약을 포함하는 **FULL** 대상 그대로다. 새 standalone 실행·건강점검 변화는 문서 closure 예외로 분류하지 않는다.
+- 이전 본인 원문 `map-pinvi-frontend-closure-review-ui.md` SHA256 `3980b9467cf3a37a3d3a07abf629750f734fb1fbf133af59178d831eb3f5cce0`의 불변성을 확인했다. 이전 Python83·hook RTL3·repository13·close4·wheel 및 request fixture8은 동일 제품의 **이전 직접 실행 증거**다. 이번 실행 건수로 다시 집계하지 않는다.
+- J-CONSUMER-P1-01/02(P1), J-CONSUMER-P2-01/02/03(P2)는 FIXED 유지한다. 새 finding 때문에 이전 PASS나 BLOCK 원문을 소급 수정하지 않는다.
+
+## 새 finding
+
+### J-STANDALONE-P2-01 — P2 / OPEN: 확인되지 않은 ListRepositories 응답도 healthy로 통과
+
+- 위치: `docker-compose.yml:675`, dagster-code-server healthcheck의 Python probe.
+- 구현은 proxy SERVING 뒤 raw 자식 RPC bytes에 `SerializableErrorInfo` 문자열이 없으면 rc0으로 종료한다.
+- 실패 시나리오: RPC 호출 자체는 성공했지만 `ListRepositoriesReply`가 빈 기본값이거나 serialized payload가 예상 ListRepositoriesResponse가 아닌 경우다. 응답에 오류 class 이름이 없다는 사실만으로는 정의가 정상 로드되었다는 확인이 되지 않는다.
+- 영향: protocol/응답 결함 또는 확인 불가능한 자식 상태를 정상 healthy로 오인하여 standalone의 새 자식 건강점검 목적을 놓친다. container alive/proxy SERVING과 정상 repository load를 혼동한다.
+- 본인 재현은 운영 Dagster에 장애를 유도한 것이 아니다. 설치된 Dagster 1.13.24의 **실제 ListRepositoriesReply protobuf**로 wire bytes를 만들고, fixed compose probe 문자열을 그대로 실행했다. HealthStub/Channel만 own fixture로 대체하며 호출 path·빈 request·각 4초 timeout을 그대로 검사했다.
+- 결과:
+
+| 실제 protobuf reply 내용 | raw bytes 길이 | fixed probe 실제 rc | 판정 |
+| --- | --- | --- | --- |
+| serialize_value(ListRepositoriesResponse) | 282 | 0 | 기대대로 정상 |
+| serialize_value(SerializableErrorInfo) | 144 | 1 | 기대대로 load error 거부 |
+| ListRepositoriesReply() 기본 빈 필드 | 0 | **0** | 확인 불가인데 잘못된 정상 판정 |
+| serialized_list_repositories_response_or_error="{}" | 4 | **0** | 예상 응답이 아닌데 잘못된 정상 판정 |
+
+- 최소 수정: 무거운 Dagster import를 회피하는 조건과 RPC/전체 timeout을 유지하면서, 실제 정상 ListRepositoriesResponse임도 확인한다. empty/unknown/malformed payload는 fail-closed해야 한다. 정상/실제 load error뿐 아니라 빈 reply와 잘못된 payload의 negative 회귀를 추가한다.
+- closure 조건: 후속 immutable 후보에서 위 4개 case를 재실행하여 정상만 rc0, 나머지는 nonzero를 확인하고, 봉인 argv 및 기존 건강점검 예산을 유지한다.
+- 재현 파일: `/home/digitie/.cache/james-map-pinvi-standalone-20261005/health-response-probe.py`.
+- 명령: own scratch cwd에서 `/home/digitie/.cache/map-common-recovery-venv/bin/python /home/digitie/.cache/james-map-pinvi-standalone-20261005/health-response-probe.py`.
+- 이 probe 파일은 네 case의 실제 exit값을 출력하는 도구다. probe runner 자체의 exit0을 전체 case PASS로 집계하지 않는다. 위 두 unknown case가 실패 재현이다.
+
+다른 새 P0/P1/P2/P3 finding은 없다. 예상 load error만 검사한 기존 새 unit의 문자열 assertion은 이 unknown 응답 경계를 검증하지 못한다.
+
+## 이번 EXECUTED
+
+1. manifest74 blob/actual candidate SHA 검증, 고정 archive 및 c4→5ba 전체 upstream diff 검토.
+2. own archive에서 sealed launch 관련 고정 단위 테스트 **10 PASS, 277 deselected, 0.91초**.
+   - `test_standalone_compose_code_server_is_reloadable_and_sealed`.
+   - `test_dagster_production_code_server_accepts_exactly_the_sealed_shapes`.
+   - `test_dagster_production_code_server_rejects_other_shapes`.
+   - `pytest -q -p no:cacheprovider tests/unit/test_docker_dagster_runtime.py -k 'standalone_compose_code_server_is_reloadable_and_sealed or production_code_server_accepts_exactly_the_sealed_shapes or production_code_server_rejects_other_shapes' --basetemp <own scratch>/pytest-temp`.
+   - 실제 entrypoint를 stub executable/environment로 검증하며 live Dagster·Docker/PG 실행이 아니다.
+3. 실제 Dagster protobuf + own RPC fixture **4개 case 관측**. 정상/error 두 case는 기대대로, empty/unknown 두 case는 잘못된 성공으로 재현했다. Health 및 ListRepositories 호출 각각 timeout4를 확인했다.
+4. upstream 문서와 Common 문장 보존 및 이전 원문 digest 불변성 확인.
+
+본인 protobuf probe 초안의 필드명을 실제 descriptor의 `serialized_list_repositories_response_or_error`로 정정한 뒤 최종 4개 case를 실행했다. 이 초안 fixture 오류를 제품 finding이나 제품 테스트 실패로 합산하지 않는다.
+
+## NOT_RUN 및 한계
+
+- 실제 자식 process crash/load/reload, grpc native server 운영 장애 주입, standalone Docker 시작·compose 실제 실행·image build/RootFS 비교.
+- 전체 unit/PG/integration/type/lint/build·새 CI 판정, sanctioned paired rebuild·N150 actual UI/browser/live, 운영 memory/RSS.
+- upstream 문서가 기록한 N150 smoke/368tests 등의 결과는 본인 직접 실행 증거가 아니다.
+- shared host의 concurrent build/active run 때문에 preflight가 거절했다는 root 정보는 운영 실행 gate 상태이며 본인 수행이나 이 code finding의 재현 환경으로 집계하지 않는다.
+
+## 증거 보존
+
+새 원문 `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-standalone-closure-review-ui.md`.
+
+Own metadata/probes `/home/digitie/.cache/james-map-pinvi-standalone-20261005`.
+
+| 증거 | SHA256 |
+| --- | --- |
+| sealed-argv-result.txt | 1993b164638f24632758d9d264df39e47a70abb1155d84b6ef5918cf7dc7bc64 |
+| health-response-probe.py | b995c0901086411cc88c0cb464993243f9aeda60c366e42d2eaf335f71f429f9 |
+| health-response-result.txt | 49d920358673732ad9addb0aaa083b5ed0c37f6b471ba1098db634862d088957 |
+
+Map5ba/PinVi2a36의 현재 FULL 연속 판정은 **BLOCK**, 이유는 J-STANDALONE-P2-01 OPEN이다. 이전 제품 검증과 원문은 유지하고 후속 후보에서 해당 수정과 새 delta를 독립 확인해야 한다.

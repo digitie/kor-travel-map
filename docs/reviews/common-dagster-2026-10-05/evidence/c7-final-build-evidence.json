@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "map_product": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "image_id": "sha256:02e52584dbd583e250573ad64fddcbbb84909c084bd943c0eeb9ad1b21185c47",
+  "base_image": "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
+  "state": {
+    "ActiveState": "active",
+    "SubState": "exited",
+    "Result": "success",
+    "ExecMainStartTimestamp": "Mon 2026-10-05 18:18:27 UTC",
+    "ExecMainExitTimestamp": "Mon 2026-10-05 18:37:58 UTC",
+    "ExecMainStatus": "0"
+  },
+  "scope": "Actual exact Git archive C7 executor build and labels, not domain ACL/D1/D2 or six-service rollout"
+}

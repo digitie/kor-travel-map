@@ -1,0 +1,34 @@
+{
+  "status": "PRE_START_BLOCKED",
+  "scope": "Actual standard rebuild preflight prevented pair rotation and guarded rebuild launch; later successful admission is a separate execution",
+  "map_candidate": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "pinvi_candidate": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "observed_launch_preflight": {
+    "fail": 1,
+    "warn": 1,
+    "load_1m": 13.6,
+    "load_5m": 12.22,
+    "iowait_percent": 65,
+    "mem_available_gib": 7
+  },
+  "subsequent_readonly_preflight": {
+    "exit_code": 1,
+    "fail": 1,
+    "warn": 0,
+    "load_1m": 11.56,
+    "load_5m": 11.99
+  },
+  "later_readonly_admission": {
+    "exit_code": 0,
+    "fail": 0,
+    "warn": 0,
+    "load_1m": 4.56,
+    "load_5m": 8.52
+  },
+  "final_sanctioned_launch_preflight": {
+    "exit_code": 0,
+    "fail": 0,
+    "warn": 1
+  },
+  "private_log_policy": "The launch log was subsequently reused for the successful admission; this record preserves observed tool output fields and does not claim original log byte preservation."
+}

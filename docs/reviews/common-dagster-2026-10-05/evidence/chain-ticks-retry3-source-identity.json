@@ -1,0 +1,6 @@
+{
+  "original_retry2_sha256": "a815ecd317f19bb268e816da02e06a065973eacc0d89bba17d4c6952f095c694",
+  "owned_copy_sha256": "f2e2e86bbfe27c6b7914915b0deb87c082e0c75a239b3d942a6fe7e7f88f980e",
+  "overlay_helper_sha256": "94cdbbb7ed09cc081f2650f7a74288f2b67c42750f1e21386b97c89ca445d413",
+  "scope": "Fresh retry3 names; test-only ESM layer proof uses bounded OCI index/platform/config/layer digest chain; production source and six operating images unchanged."
+}

@@ -1,0 +1,10 @@
+{
+  "original_sha256": "7f6558eebfbf3acceb7771e8025e161c028bbe6f8ff1e8d3177f103181b1bce4",
+  "owned_copy_sha256": "9947d89a113b8d0b924510839d4d3e9447704fda63cedda8153b14612d0b3696",
+  "changes": [
+    "atomic mkdir exact-source archive path; fail if existing",
+    "shared tmp recursive deletion omitted; D1 uses explicit owned artifact root",
+    "atomic mkdir owned D1 artifact root; fail if existing"
+  ],
+  "scope": "private owned acceptance wrapper only; no original operating script/product modification"
+}

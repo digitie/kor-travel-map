@@ -1,0 +1,26 @@
+# Native 하니스 좁은 독립 리뷰 — BLOCK 원문
+
+검토일: 2026-10-06. 이 원문은 수정 전 하니스에 대한 본인 직접 검토 결과를 후속 closure와 분리하여 보존한다. 제품 FULL 리뷰 판정을 변경하지 않는다.
+
+검토 대상 SHA256:
+
+- map-native-runtime-probe-launch.py: d404481ede05a87f6a8710a6ad5bc5b493dd416c89d434bd1ac8e5d2ac65930f
+- map-pinvi-operating-test-collect.py: e978bc33ea6a698d9b438726d4b32a0628c17a9318234ff506b304b6895507dc
+- map-native-runtime-probe.py: 64813b455c2f0b3c43ef3c37f16d26788eea87d8381da2d670ccce2e911e61d3
+
+판정: launcher의 권한 수정 PASS, collector의 성공 증거 승격 BLOCK(P2). 실제 운영 결과에 대한 판정은 아니다.
+
+Launcher는 실제 이미지에서 읽은 euid/gid를 int 및 양수로 검사하고 새 전용 evidence 디렉터리를 생성하여 0700과 해당 소유권을 설정한다. 기존 컨테이너·디렉터리·symlink를 거부하고, /work tmpfs mode1777, network none, 메모리 3GB/CPU 2, native 파일 readonly 단일 mount와 전용 evidence mount를 유지한다. native 소스 bytes는 동일했다.
+
+본인 직접 수행: outer 및 remote Python compile, launcher 격리 mock 13개. 정상 조건의 생성·소유권·실행 옵션을 검사했고 uid/gid 0·bool, 이미지/사용자 불일치, 기존 컨테이너/디렉터리, symlink/parent 불일치, mkdir/chown 실패가 docker run으로 진행하지 않았다.
+
+Collector 격리 mock 12개는 정상 1개를 수용하고 running/exit1/OOM/receipt 누락/image/Common 불일치/boolean False/timeout False/잘못된 cap을 거부했으나 다음 두 반례를 수용했다.
+
+1. local runtime attestation의 status만 FAIL로 바꾸고 image/Common 해시 및 commit을 맞추면 native operating evidence의 status를 PASS로 쓴다.
+2. native autonomous_daemon_monitoring을 boolean 대신 문자열 "false"로 바꾸면 Python truthiness 때문에 PASS로 쓴다.
+
+두 문제는 retry1 path/name 변경에서 새로 생긴 결함이 아니라 기존 native collector의 엄격 검증 누락이다. 현재 실제 attestation이 FAIL이거나 실제 native producer가 문자열을 출력했다는 주장은 하지 않는다. launcher는 attestation PASS를 검사하며, 고정 native producer는 실제 boolean을 생성한다. 증거 승격 경계 자체는 fail-closed해야 한다.
+
+수정 권고: native attestation status == "PASS", autonomous_daemon_monitoring 및 모든 native 검증 플래그를 is True로 검사한다. 동일한 UI 검증 플래그에도 같은 엄격 검사를 적용한다.
+
+실행 경계: unittest.mock/FakePath/sys.modules 격리로 모든 subprocess와 파일 쓰기를 대체했다. 원격 SSH/Docker/DB/실제 UID 조회/컨테이너 launch/운영 변경/실제 성공 receipt 생성은 NOT_RUN. 첫 실제 실패 및 새 retry 실행 상태는 작성자 제공 상황이며 본인이 수행하거나 증명한 결과로 합산하지 않는다. 제품·기존 원문·peer 결과는 수정하거나 열람하지 않았다.

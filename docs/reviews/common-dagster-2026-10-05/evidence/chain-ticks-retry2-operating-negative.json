@@ -1,0 +1,23 @@
+{
+  "status": "FAIL",
+  "state": {
+    "ActiveState": "failed",
+    "SubState": "failed",
+    "InvocationID": "65c0c0f070ff44749c4f3b2d8fd347f6",
+    "Result": "exit-code",
+    "ExecMainStartTimestamp": "Mon 2026-10-05 20:29:07 UTC",
+    "ExecMainExitTimestamp": "Mon 2026-10-05 20:34:39 UTC",
+    "ExecMainStatus": "1"
+  },
+  "raw_private_journal_sha256": "7510203b0d27069c10efba4388232931387bbbe7801cccb1e537f548d67601d3",
+  "sanitized_failure_lines": [
+    "===== 0. \ud540 \uc6d0\uc7a5 \ub300\uc870 =====",
+    "===== C. executor \uc774\ubbf8\uc9c0 (codex-common-execbuild-ticks-retry2-20261006) =====",
+    "!! ESM test overlay \uc2e4\ud328"
+  ],
+  "d1_artifact_root_exists": false,
+  "d1_artifact_filenames": [],
+  "lane_blocked": false,
+  "lane_active": false,
+  "scope": "Actual owned chain stopped in test-only ESM overlay saved-config identity check before repin/M01/D1/D2; no acceptance claimed"
+}

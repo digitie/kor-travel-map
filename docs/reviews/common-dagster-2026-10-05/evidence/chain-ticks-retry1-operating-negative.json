@@ -1,0 +1,30 @@
+{
+  "status": "FAIL",
+  "state": {
+    "ActiveState": "failed",
+    "SubState": "failed",
+    "InvocationID": "ebe2e13cd7b5470a809967d7b4fc79e0",
+    "Result": "exit-code",
+    "ExecMainStartTimestamp": "Mon 2026-10-05 20:03:05 UTC",
+    "ExecMainExitTimestamp": "Mon 2026-10-05 20:03:44 UTC",
+    "ExecMainStatus": "1"
+  },
+  "raw_private_journal_sha256": "8d600b418e92339904096999630fee5a01d84a41598c5d35ff8b3c0f730677db",
+  "sanitized_failure_lines": [
+    "===== 0. \ud540 \uc6d0\uc7a5 \ub300\uc870 =====",
+    "===== C. executor \uc774\ubbf8\uc9c0 (codex-common-execbuild-ticks-retry1-20261006) =====",
+    "===== D. repin (.d2-live.env) =====",
+    "===== E. M01 ACL preflight =====",
+    "   {'failed': 0, 'total': 40} passed",
+    "===== F. D1 =====",
+    "!! D1 executor \uc2e4\ud328: private \uc804\uccb4 \ub85c\uadf8 \ubcf4\uc874"
+  ],
+  "d1_artifact_root_exists": true,
+  "d1_artifact_filenames": [
+    "stdout-private.log",
+    "test-results"
+  ],
+  "lane_blocked": false,
+  "lane_active": false,
+  "scope": "Actual final-source owned chain stopped in D1; no D1/D2 acceptance claimed"
+}

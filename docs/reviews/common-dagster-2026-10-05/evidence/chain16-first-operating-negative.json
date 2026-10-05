@@ -1,0 +1,14 @@
+{
+  "status": "FAIL",
+  "scope": "Actual post-rebuild chain stopped at executor source-label gate. No ACL/D1/D2 verdict.",
+  "map_product": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "stage": "C executor",
+  "observed_executor_source": "13f87577acfc1b7f6eca81a4b7e4b38babd59f81",
+  "source_label_gate_rejected": true,
+  "acl_executed": false,
+  "d1_executed": false,
+  "d2_executed": false,
+  "shared_or_domain_database_changed_by_test": false,
+  "build_cause": "Under investigation; do not treat default systemctl Result=success as proof of a completed successful build"
+}

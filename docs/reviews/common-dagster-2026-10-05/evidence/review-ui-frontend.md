@@ -1,0 +1,68 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (c) 2026 digitie -->
+
+# Map·PinVi Docker frontend 고정 후속 FULL 연속 리뷰 B
+
+판정: **PASS — 고정 소스에 대한 FULL 연속 리뷰**. 새 P0/P1/P2/P3 finding은 없다. Docker parser pin의 정렬은 검토했으나 재구축 성공·gRPC 종료의 근본 원인 해결·운영 전환·live·새 CI 완료를 이 PASS로 주장하지 않는다.
+
+## 고정 후보와 독립 범위
+
+- 리뷰어 James / 독립 B, UI·API·인증·소비자 계약·접근성·메모리 및 해당 배포 delta 관점.
+- 실행 ID `J-MAP-PINVI-FRONTEND-C4D62A-2A36E8-20261005`.
+- 고정 지시자/동일성 검증 기록: 2026-10-05T12:02:41.502515+00:00 ~ 2026-10-05T12:02:42.825774+00:00. 앞서 고정 manifest와 두 Dockerfile 전체를 읽었다.
+- manifest `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-frontend-reviewed-manifest.json`, SHA256 `ee1ca0f4f5c1e6ebc196ecf42668f3ae7a82133059f0037143bd40e0a3647c01`.
+- Map base `0342034f020cc07af2094f216456f64e45e39ed2` → 실제 후보 `c4d62a793ba69a60543fafda7442b3ba2c019ad1`. 직전 본인 FULL 후보와 같은 객체다.
+- PinVi base `07cfef222c56d7e648c81b017aa8ffe4ccd1c386` → 실제 후보 `2a36e8973bb163c68f1a778a0c1215fa8e9d02d4`. 직전 `aa265cf1c3917b9d0e89316d06c35678d23757c2`와 전체 변경 집합을 비교했다.
+- Common Python `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`, 기존 UI dev.6 source/artifact 및 tokens는 불변이다.
+- Linux Git의 고정 rev-parse/show/cat-file만 사용했다. manifest Map59/PinVi15, 총 **74개** blob SHA256을 직접 확인했고 모두 일치했다. 상대 원문·통합 판정은 열람하지 않았으며 docs/reviews 내용은 해시 확인 외 제외했다.
+- N150 접속·실행·운영 변경·제품 편집은 하지 않았다. 기존 원문을 덮지 않고 새 보고서와 own metadata만 보존한다.
+
+## 실제 추가 delta 검토
+
+`git diff --name-only aa265cf... 2a36e8...`의 변경 파일은 정확히 다음 세 개다.
+
+1. `apps/api/Dockerfile`
+2. `apps/etl/Dockerfile`
+3. `docs/journal.md`
+
+두 Dockerfile `:1`은 기존 부동 `docker/dockerfile:1.7-labs`에서 다음 동일 지시자로 바뀐다.
+
+`# syntax=docker/dockerfile:1.7.1-labs@sha256:b99fecfe00268a8b556fad7d9c37ee25d716ae08a5d7320e6d51c4dd83246894`
+
+- 지시자는 실제 첫 줄이다. API/ETL/web 세 파일에서 같은 문자열임을 직접 비교했다.
+- API와 ETL의 추가 두 번째 설명 주석 외 나머지 본문은 이전 파일의 첫 줄 뒤 본문과 동일하다. FROM image digest, COPY·workspace·설치·uv lock export·build constraint·environment·healthcheck·command·revision/provenance 검증을 바꾸지 않았다.
+- API/ETL parser 자체를 고정하는 build-input 변화다. Python·API·ETL 실행 소스와 auth/UI/HTTP 계약이 동일하다는 근거이지, 새 build 결과의 image/RootFS bytes가 이전과 같다는 증명은 아니다.
+- 기존 web에 이미 고정된 parser digest를 소비하도록 정렬한다. 기존 web workspace COPY와 frozen vendor 계약을 이번 delta에서 완화하지 않는다.
+- journal은 첫 rebuild와 동일 pair retry의 frontend gRPC 종료를 실패로 구분하고, parser 재현성 보강일 뿐 단일 근본 원인을 확정하지 않았다고 명시한다. 새 후보의 CI·실제 재구축·live가 미완료라는 범위도 유지한다. 부모의 빌드 관측을 본인 실행으로 합산하지 않는다.
+
+## FULL 재사용 범위
+
+base→전체 pair 범위는 UI/API/auth/복구/HTTP·의존성·Docker·가이드 변경을 포함하므로 **FULL** 대상 그대로다. 이번 build-input delta를 문서 전용 예외로 분류하지 않는다.
+
+- Map candidate 자체가 이전과 같다. UI·Python·integration fixture 및 최신 main 공개 handoff 문서 보존에 대한 본인 FULL 판정이 유지된다.
+- PinVi의 Python·UI·locks·vendor·M05 provenance·OpenAPI는 aa265cf와 byte 동일하다. 전체 diff가 세 파일뿐임을 직접 검증했다.
+- 본인 이전 FULL 원문 `map-pinvi-latest-main-closure-review-ui.md` SHA256 `900a75c4aa62007ec789062d6a03d6462adf9f334a5f1c8cdc9951dddd4e11b9`의 불변성을 확인했다.
+- 해당 보고서가 연결한 본인 Python83·실제 상세 hook RTL3·repository 공격13·close fault4·clean wheel·artifact 검증, 후속 request fixture8·기존 assertion310 보존+추가1은 **이전 동일 소스 실행 증거의 재사용**이다. 이번에 재실행한 결과로 집계하지 않는다.
+- J-CONSUMER-P1-01/02(P1), J-CONSUMER-P2-01/02/03(P2)는 **FIXED 유지**. 이전 severity 및 BLOCK 원문을 소급 변경하지 않는다.
+- 별도로 읽었던 operating UI harness는 ignored 검증 도구이며 이 제품 manifest의 변경이나 실제 live 실행 증거가 아니다. harness 검토를 제품 FULL 테스트로 합산하지 않는다.
+
+## EXECUTED / NOT_RUN
+
+**직접 수행:** 고정 두 후보 SHA·manifest74 blob digest·전체 후속 변경 집합·두 Dockerfile 전체 읽기·API/ETL 본문 동일성·기존 web 지시자와 동일성·이전 원문 digest 확인.
+
+**NOT_RUN:** tests·provenance/pair102 재실행, 새 image build/registry pull/parser 실제 실행, Docker RootFS·배포 bytes 관측, 새 CI 직접 판정, 운영 guarded rebuild·N150 접속·browser/live·worker 장애 및 메모리 실측. 부모의 provenance/pair102 PASS 및 기존 retry 빌드 결과는 본인 실행 근거가 아니다. 실제 외부 frontend image가 이번 환경에서 정상 pull/실행되는지와 기존 gRPC 종료가 재발하지 않는지는 새 CI/rebuild gate가 확인해야 한다.
+
+새 finding: **없음**. 공개 HTTP·UI·auth·선택 상세·last-good·scope·memory 구조 계약의 변경은 없고, Docker 설치/배포 전제는 기존 본문을 유지한다.
+
+## 원문과 동일성 증거
+
+새 원문 `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-frontend-closure-review-ui.md`.
+
+Own metadata `/home/digitie/.cache/james-map-pinvi-frontend-20261005/verification.json`.
+
+| 고정 파일 | aa265cf SHA256 | 2a36e8 SHA256 |
+| --- | --- | --- |
+| apps/api/Dockerfile | 6aa96f93c4e81cc8d987b4a6f3cdf636d3a537cbe68b3b09272ab0fa2cd2b0ea | 562bf9b1624b8968040eab55892bb529a8a75352465de545e0fdc17363c8d952 |
+| apps/etl/Dockerfile | 3104c2a1f109ccf4476df8db17789fc13db5d0bf3401f128e21edabaf8000ae2 | 03e9686da6df3bd6ffc3e8e35980ff9e98c8d0f82698b078f8d8aaa1a3c2991c |
+
+명시한 Mapc4/PinVi2a36 소스에 대한 FULL 연속 PASS다. 운영/live/CI gate 및 PR merge 판단은 별도다.

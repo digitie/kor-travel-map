@@ -1,0 +1,57 @@
+{
+  "container": "codex-map-native-runtime-fault-probe-retry4",
+  "container_id": "bbd4456083fa53bdcee7cf3c06527b1ceb0a838a5689ac88e614dd152ed84429",
+  "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 0,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T18:00:09.424345542Z",
+    "FinishedAt": "2026-10-05T18:01:32.320203223Z"
+  },
+  "receipt": {
+    "dagster_version": "1.13.24",
+    "common_reference_contract": "1f8e339c7c79f86f8952b0d4c326ab4dae56bee8",
+    "actual_common_package_commit": "a960bdb114d99a2ac1b9608a77b240635806e551",
+    "actual_common_dagster_sha256": "ee1bce427711246b700f8d413d00500418d789dc30624607b3fdac800bdfd4d2",
+    "scope": "isolated SQLite instance inside exact rebuilt operating Map Dagster image; real gRPC launcher/multiprocess workers and autonomous dagster-daemon monitoring; shared plane and domain SQL untouched",
+    "autonomous_daemon_monitoring": true,
+    "max_runtime_seconds": 20,
+    "cases": [
+      {
+        "fault": "raise",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 7.698438001796603,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 4.688085561618209
+      },
+      {
+        "fault": "crash",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 3.9984089150093496,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 3.1684335926547647
+      },
+      {
+        "fault": "stall",
+        "terminal": "FAILURE",
+        "healthy_concurrent_job": "SUCCESS",
+        "healthy_elapsed_seconds": 3.1583788790740073,
+        "active_coalescing_released": true,
+        "same_job_manual_retry": "SUCCESS",
+        "stall_step_started": true,
+        "native_timeout_event_verified": true,
+        "run_intervals_overlap": true,
+        "max_runtime_tag": "20",
+        "monitor_wait_seconds_after_healthy": 11.906054296996444
+      }
+    ]
+  },
+  "actual_source_sha256": "7d9821abd4e590eadc1b476dcc0b7b5b12d4a9b0d854ef27c4d239d82c8181bf",
+  "status": "PASS"
+}

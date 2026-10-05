@@ -1,0 +1,128 @@
+{
+  "headRefOid": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "isDraft": true,
+  "mergeable": "MERGEABLE",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:04:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329881127/job/111830002366",
+      "name": "Aggregate CI gate",
+      "startedAt": "2026-10-05T15:04:57Z",
+      "status": "COMPLETED",
+      "workflowName": "Aggregate CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:04:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880780/job/111830050412",
+      "name": "Post MCP review reminder",
+      "startedAt": "2026-10-05T15:05:03Z",
+      "status": "COMPLETED",
+      "workflowName": "PR Review Reminder"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:07:50Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998599",
+      "name": "lint-typecheck-test",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:05:49Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880861/job/111829997573",
+      "name": "docker-image",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "etl"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:07:23Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998821",
+      "name": "integration-test (1)",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:05:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880861/job/111829997974",
+      "name": "sanity",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "etl"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:08:06Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998758",
+      "name": "integration-test (2)",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:10:15Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998751",
+      "name": "integration-test (3)",
+      "startedAt": "2026-10-05T15:05:01Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:09:16Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829999257",
+      "name": "integration-test (4)",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:05:52Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998311",
+      "name": "docker-provenance-image",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:05:19Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111829998679",
+      "name": "contract-pin-consistency",
+      "startedAt": "2026-10-05T15:04:59Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T15:04:56Z",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/digitie/pinvi/actions/runs/37329880893/job/111830000564",
+      "name": "contract-staleness",
+      "startedAt": "2026-10-05T15:04:56Z",
+      "status": "COMPLETED",
+      "workflowName": "api"
+    }
+  ]
+}

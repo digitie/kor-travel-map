@@ -1,0 +1,47 @@
+{
+  "common_candidate": "e0b5e31a549bd6cb35af65d4a7573a46d2035ec9",
+  "health_source_sha256": "7e0663de1a5a6f9361b5a68fd6fd1272f130198e24c0e2071892cd7d115a7220",
+  "scope": "same owned Linux Python venv; three fresh processes per variant; Linux ru_maxrss KiB for imports and a synthetic valid reply decode; not operating container RSS, provider/PG, or measured live RPC workload",
+  "variants": [
+    {
+      "variant": "lightweight_health",
+      "cold_processes": [
+        {
+          "peak_rss_kib": 36904,
+          "dagster_imported": false,
+          "dagster_version": "1.13.24"
+        },
+        {
+          "peak_rss_kib": 36972,
+          "dagster_imported": false,
+          "dagster_version": "1.13.24"
+        },
+        {
+          "peak_rss_kib": 36992,
+          "dagster_imported": false,
+          "dagster_version": "1.13.24"
+        }
+      ]
+    },
+    {
+      "variant": "full_dagster_import",
+      "cold_processes": [
+        {
+          "peak_rss_kib": 68576,
+          "dagster_imported": true,
+          "dagster_version": "1.13.24"
+        },
+        {
+          "peak_rss_kib": 68452,
+          "dagster_imported": true,
+          "dagster_version": "1.13.24"
+        },
+        {
+          "peak_rss_kib": 68516,
+          "dagster_imported": true,
+          "dagster_version": "1.13.24"
+        }
+      ]
+    }
+  ]
+}

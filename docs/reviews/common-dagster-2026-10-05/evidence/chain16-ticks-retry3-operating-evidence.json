@@ -1,0 +1,129 @@
+{
+  "status": "PASS",
+  "map_product": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "test_only_esm_overlay": {
+    "status": "PASS",
+    "scope": "test executor only: frontend package.json type=module; frozen product source and six production images unchanged",
+    "source_revision": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+    "parent_image_id": "sha256:c8e0f06b259a85973070b7f4de09afafd752589ed6235b1a27eedf416daeac77",
+    "derived_image_id": "sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4",
+    "oci_index_descriptor": {
+      "mediaType": "application/vnd.oci.image.index.v1+json",
+      "digest": "sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4",
+      "size": 856
+    },
+    "platform_manifest_descriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:c7d08349e1d1703097803c03930a89e960d0bdc9fa113864a133dbc1179fa2d7",
+      "size": 4277,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "config_descriptor": {
+      "mediaType": "application/vnd.oci.image.config.v1+json",
+      "digest": "sha256:4735b0c11ad5c8371a8493d4f8ff9af876afa518047ab9e33d3553c527166dd1",
+      "size": 10792
+    },
+    "last_compressed_layer_descriptor": {
+      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+      "digest": "sha256:2198d9580773c8564b92cddb74d53bb95bff879c95d903ded2a364bd0e237b39",
+      "size": 1363
+    },
+    "content_read_mode": "bounded direct containerd content; no full image export",
+    "parent_rootfs_layers": 20,
+    "added_layer_sha256": "a7105bc3b2631c357bfd3aceaf6bc0f0c789039bb5681a11d72d3b1abb266cb8",
+    "added_layer_files": [
+      "work/packages/kor-travel-map-admin/frontend/package.json"
+    ],
+    "before_package_sha256": "493836767291ac8c77515eb3820aa3a55068b39144e7ad0fca9489c408733cff",
+    "after_package_sha256": "c04d0996a05a9c55b3852d3af68a3d70ac9b3fbe354615e67b23dc98d19922d8",
+    "semantic_delta": {
+      "type": "module"
+    },
+    "retained_parent_tag": "codex-map-c7-esm-parent-ticks-retry3-20261006",
+    "derived_tag": "codex-map-c7-esm-ticks-retry3-20261006",
+    "pinned_base": "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
+  },
+  "overlay_proof_sha256": "863a8d4f679e31e23d8475488a475aa0817778b737748150a577298e85cfdba5",
+  "d1_container_id": "00e70a1236c2fcb2d803072b76d7fdb10682c299c298fbc888acac0266d3edbc",
+  "execution": {
+    "api_image_id": "sha256:bf1ca32aad6a83a530abfad871fa88f6019761c1d7780bfbb76469494af06e0f",
+    "playwright_image_id": "sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4",
+    "source_commit": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6"
+  },
+  "execution_identity_sha256": "43f38a553319234a271dda48588b2db05d7eed27ab76d6af505cf60f37640387",
+  "d1_passed": 11,
+  "m01_acl_passed": true,
+  "launch_nonce": "59794e43-7a9b-4022-bffc-97e6d0c4e541",
+  "chain_state": {
+    "ActiveState": "active",
+    "SubState": "exited",
+    "InvocationID": "e95d3c64de9e4a7296c186cb22143b50",
+    "Result": "success",
+    "ExecMainStartTimestamp": "Mon 2026-10-05 20:45:29 UTC",
+    "ExecMainExitTimestamp": "Mon 2026-10-05 20:47:29 UTC",
+    "ExecMainStatus": "0"
+  },
+  "d2_invocation_id": "3399bda39db24869bf76027d4844bc99",
+  "d2_terminal_event_us": "1791233232226925",
+  "new_runtime_id": "run-f7e6954901eeea34be057c0cb4c8a018bbaeb0020d4bfa69ef583f535d4c438e",
+  "terminal_result_sha256": "cedf21ddd6bba89e61b0fb0f98363d30e461a06ee3bfc960384846e4e4c57070",
+  "terminal_validation_sha256": "84b0a84265af4a2d773467720b7d5f293e702baa5fe38ea7455a32e8267ae935",
+  "fresh_validator_output_byte_identical": true,
+  "validated_original_evidence_fingerprint_sha256": "f97877540fb8615bdfa88b90b7969a8b10c3768861d2e678c992730e5bb84da7",
+  "d2_result": {
+    "execution_identity_sha256": "43f38a553319234a271dda48588b2db05d7eed27ab76d6af505cf60f37640387",
+    "owned_feature_id_sha256": [
+      "6774306d38de43cb461c8d3fde2a5a195464fe6b6e3dfaf0db38cb5aed634e10",
+      "5b29f096f9711a83e9ffb8d87bd5f0c4aa47eadfa74b58cfcaacda4858fe0cc0",
+      "4e0ee64dba50329445aa4631b81c36c759110632580dac44e6a1a4629a209e56",
+      "e2386e1c87d29bd10f7d755f5261f765c2ee27124c424e89e9d7547ad5227b46",
+      "e87ab11f3b3a89ce605cfe79690273ea678b2770bec9e044765b92532e57433d",
+      "8f320a0a3910e2a45b09b6a41068c07bde547cdead9838adc78f33e4ed2deb6d",
+      "d8ba9371c039fd71a24f3c1e053f9a9310d81e90030e29feb7b2d5df18df8905"
+    ],
+    "phase": "passed",
+    "recorded_at": "2026-10-05T20:47:12.142294+00:00",
+    "recovery_attempt": 0,
+    "run_id_sha256": "f7e6954901eeea34be057c0cb4c8a018bbaeb0020d4bfa69ef583f535d4c438e",
+    "status": "complete",
+    "version": 4
+  },
+  "direct_api_audit_counts": {
+    "domain_commands": 3,
+    "features": 1,
+    "field_overrides": 7,
+    "state_transitions": 3
+  },
+  "owned_purge": {
+    "features": 1,
+    "field_overrides": 7
+  },
+  "lane_residue_total": 0,
+  "blocked": false,
+  "active": false,
+  "evidence_validator": "normal/attempt0 PASS",
+  "reports": {
+    "playwright-main": {
+      "counts": {
+        "passed": 2
+      },
+      "result": "passed",
+      "testsObserved": 2,
+      "testsPlanned": 2,
+      "version": 1
+    },
+    "playwright-recovery": {
+      "counts": {
+        "passed": 2
+      },
+      "result": "passed",
+      "testsObserved": 2,
+      "testsPlanned": 2,
+      "version": 1
+    }
+  }
+}

@@ -1,0 +1,25 @@
+# Map1a3 최종 runtime/rebuild 및 C7 helper 정적 독립 리뷰
+
+검토일: 2026-10-06. 판정: 세 revision-only helper closure와 새 C7 launch/collector의 한정 정적·격리 mock 검증 PASS. 제품 FULL source와 실제 operating gate 결과는 별도이다.
+
+현재 고정 helper SHA256:
+
+- runtime ticks attest: 73c52d16a845db00c7eef0edd2a4522e30f7d20a1fcc354453fb8d2f9549d21b
+- ticks success collector: 807ed04ab06a47b028e53e9fd98fd3fd5ebcf2840c84e0ed1dcea0a50e9a1955
+- ticks sanctioned rebuild: 3e878024d77ffb9ee5b6dfff80f0230d7d0e2217182fdee68ca48b261e8c4e63
+- map-c7-final-build-launch.py: 3c48b0c7da07b218559660a9b936a9413b12cbe8b06f915d33adecc13cb69f44
+- map-c7-final-build-collect.py: 8a5371886ddebbb0085d605a78971f1606bfecffebdc9065fbf76f67dcfd1103
+
+세 기존 helper의 직접 역치환: 각 현재 파일의 Map1a3c4673790f51daa1a2f5ccf803d4e31673bad6을 이전885d6205a8ce8d9e79c38b9198eb05f51bcc9192로 역치환한 bytes의 SHA는 각각 ebac1daa2b68ea1175e0abcc89052d575e1775804f61659f39d36c96487eff5e / 3e43a4ae8ffbc44aa47772b7ae3b27bc151138335cbd8dc6d15a8a32f2cfa2d4 / 8afb16f386bfc2b4133b4e490d9cf7e774942698b39da719b221c037b5c8e34a와 정확히 같다. 이전 좁은 원문602d56ce7d3cd9d086d389fd1e72d8729f06c33da6ce0d02da75894074838bfb의 revision literal외 변경이0이다. 새 pair provenance와 private log namespace 수정도 유지된다.
+
+직접 compile: 세 outer Python, 완전 치환된 runtime remote, parent-free source hash program 네 개와 read-only DB program, success collector remote, sanctioned rebuild shell bash -n 모두 PASS. 원격 placeholder는 남지 않았다. runtime helper의 Git blob 조회·문자열 조립만 수행하고 main은 실행하지 않았다. query_service 기대 SHA는 unchanged frozen product bytes이다.
+
+새 C7 launcher 검토: installed preflight chain을 먼저 수행하고 전용 checkout의 clean 상태를 확인한다. exact1a3 fetch/detach 후 다시 clean 검사, canonical root·새 unit의 not-found 검증을 수행한다. Type=oneshot/RemainAfterExit=yes/TimeoutStartSec2400, 비root 계정과 전용 working directory에서 원래 exact Git archive build script를 실행한다. domain ACL/D1/D2 또는 기존 여섯 service rollout을 실행하지 않는다. outer Python, shell bash -n 및 nested remote Python compile PASS. 실제 checkout/실행 권한·preflight 통과는 검증하지 않았다.
+
+새 C7 collector 검토: ActiveState=activating이면 status RUNNING만 반환하고 image inspect를 수행하지 않는다. PASS에는 active/exited/Resultsuccess/ExecMainStatus0 네 조건 모두를 요구한다. 이어서 실제 tag image의 repository-commit1a3 및 고정 Playwright1.60 base digest를 확인한다. scope는 exact Git archive C7 executor build이고 domain/여섯service rollout 성공이라고 표시하지 않는다. 성공 receipt target은 새 전용 파일이고 이미 존재하면 거부한다. receipt를 남긴 뒤 해당 작업 소유 unit만 stop하며 container/image는 삭제하지 않는다. 본인은 이 stop을 실행하지 않았다.
+
+격리 remote mock13개: 정상 상태+source/base labels 한 개만 PASS, 초기 Resultsuccess/Exec0이지만 activating인 상태는 RUNNING 및 docker inspect0회였다. inactive, failed, SubState running, exit1, empty exit status, timeout, 실패 Result, 잘못된 source/base 및 두 label 누락은 모두 REJECT였다. systemctl/docker 응답은 unittest.mock으로 대체했다. 초기 systemd Resultsuccess만으로 build PASS를 만들지 않는 경계를 직접 확인했다.
+
+재현 사본: /home/digitie/.cache/recovery-c7-final-helper-probe.py. Python3로 실행한다. 이 사본은 실제 remote main이나 SSH를 실행하지 않고 Git object 조회·compile·bash -n·격리 subprocess 응답만 사용한다.
+
+실행 경계: 실제 운영 접속/rotation/launch/build/attestation/collector/receipt 생성은0회. 실행 중 C7의 완료나 새 pair 성공을 확인하지 않았다. 실제 terminal state·image label/id의 신선한 수집이 별도로 필요하다. source FULL113 PASS853c2c8b704ab222f683dc6cb9c3acb753c305ed11e472780c8f13345eefe2bc는 별도불변이며, 이 helper source PASS를 실제 operating 성공으로 합산하지 않는다. browser helpers는 이번 범위 밖이다. 제품·helper 원문·기존 증거·다른 agent resource는 수정하지 않았다.

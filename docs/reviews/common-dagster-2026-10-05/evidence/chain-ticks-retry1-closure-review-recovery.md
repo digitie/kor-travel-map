@@ -1,0 +1,57 @@
+# Map D1 retry1 하니스 최종 독립 closure
+
+- 판정: **PASS — 이번 하니스 변경의 정적·로컬 반례 검증 범위**.
+- 시점: 2026-10-06. 제품 Common a960 / Map 1a3 / PinVi 005의 기존 FULL113 원문과 판정은 별도이며 변경하지 않았다.
+- 운영 archive 이동, SSH, systemd, Docker 실행, D1/D2, 설치, 서비스 또는 DB 변경은 이번 검토에서 수행하지 않았다. 실제 재시도 성공을 주장하지 않는다.
+- 이전 BLOCK 원문 `map-chain-ticks-retry1-block-review-recovery.md` SHA256: `da83e32fb0a43765f8e1c5e2af7dd754e55682908fb725615900621b775078d5`. 원본은 불변 보존한다.
+
+## 검토한 현재 bytes
+
+| 대상 | SHA256 |
+| --- | --- |
+| own chain private shell | 86c16e271bca0e4f6754796c771c0389753a1739220930daaa6f7a75229fd038 |
+| map-chain-owned-archive-preserve.py | 8653e12436dfa3c60fbebc58178da393e66df44145158fc6f5c421bb6808dbd3 |
+| map-chain-ticks-retry1-prepare.py | af059e103eb10f4d11d5f8c66913bf88888a5bbb01b11c6b903c8af797977b05 |
+| map-pinvi-chain16-ticks-retry1-launch.py | a36d397fc769c7230a71f0350210ebbe5278f0696c5e89b6e4a4be5b96adab34 |
+| map-pinvi-chain16-ticks-retry1-collect.py | f5d9ed27b013d4a14ea1634ec9d1fed42a43d8bee9d7561660086531a10d8a06 |
+
+원본 chain의 SHA256은 `7f6558eebfbf3acceb7771e8025e161c028bbe6f8ff1e8d3177f103181b1bce4`이다. 새 D1 블록 밖의 앞·뒤 bytes가 원본과 동일함을 직접 비교했다. 생성기의 쓰기·SSH 부분을 실행하지 않고 AST에서 읽기·대입 노드만 평가했으며, 생성된 chain, launcher, collector가 위 실제 파일과 정확히 일치했다. 마지막 collector 보강도 이 비교에 포함했다.
+
+## 이전 지적 closure
+
+1. **살아 있는 프로세스의 source 사용 누락: CLOSED.** cwd/root/fd뿐 아니라 cmdline과 maps도 확인한다. source를 argv로 참조하고 cwd는 밖에 둔 실제 로컬 자식 프로세스를 현재 guard가 거부했다.
+2. **검사 이후 나타난 목적지 덮어쓰기: CLOSED.** parent directory fd와 `O_NOFOLLOW`, source의 directory/UID/device/inode 확인 후 `renameat2(RENAME_NOREPLACE)`를 사용한다. 실제 로컬 libc 호출에서 늦게 만든 목적지를 거부하고 두 directory inode를 모두 보존했다.
+3. **source 치환·예상외 directory 경계: CLOSED.** anchored stat와 최종 destination lstat가 directory/UID/device/inode를 검증한다. source를 symlink로 치환한 반례를 거부했다. untracked directory는 Git tracked file의 부모 ancestor만 허용하며 추가 빈 directory도 거부했다.
+4. **dangling lane symlink: CLOSED.** preserve와 최신 collector 모두 ACTIVE/BLOCKED에 대해 exists와 is_symlink를 함께 검사한다. dangling symlink를 로컬에서 거부했다.
+5. **receipt 덮어쓰기 race: CLOSED.** prepare, launch identity, collector receipt와 preserve receipt는 exclusive open x를 사용한다. 늦게 생성한 원문을 덮어쓰지 않았고 이전 bytes를 유지했다.
+6. **archive pipeline 실패 은폐: CLOSED.** pipefail 아래 archive|tar 실패는 명시적인 `|| die`로 종료한다. 실패 pipeline 로컬 재현은 exit 42로 거부했다.
+
+preserve는 exact failed own InvocationID/exit와 lane 상태, 여섯 실제 operating image/health, Git tracked blob bytes, 허용된 두 dependency symlink만 확인한 뒤 이동하도록 봉인되어 있다. 삭제와 shared dependency 수정이 없다. 프로세스 검사는 검사 시점의 읽기 결과이며 모든 미래 프로세스 생성까지 원자적으로 막는 잠금은 아니다. own 작업·lane·failed invocation 검증을 전제로 하는 이번 운영 하니스 범위에 맞는 경계로 판단했다.
+
+## 직접 수행한 검증
+
+WSL Ubuntu-26.04의 Python3 stdin probe와 own cache scratch만 사용했다. 현재 source에서 AST로 추출한 guard 및 실제 libc 호출을 실행했다.
+
+| 로컬 검증 | 결과 |
+| --- | --- |
+| 정상 atomic rename | PASS |
+| 늦게 등장한 목적지 | REJECT, 원본·목적지 보존 |
+| source symlink 치환 | REJECT |
+| 살아 있는 worker의 source argv | REJECT |
+| untracked 빈 directory | REJECT |
+| dangling lane symlink | REJECT |
+| exclusive output race | REJECT, 이전 원문 보존 |
+| archive pipeline 실패 | REJECT |
+| 생성기 current bytes 재현 | PASS |
+| outer Python 4파일 compile | PASS |
+| 완전 치환 launch 2 / collect 1 / preserve 1 Python 블록 compile | PASS |
+| 위 치환 shell 3개와 chain bash -n | PASS |
+| 원본 chain D1 밖 prefix/suffix | BYTE_IDENTICAL |
+
+첫 최신 검증에서 generator의 추가 대입 줄을 포함하지 않은 리뷰 probe가 비교 실패했다. probe의 AST 선택 범위를 최신 collector 대입까지 확장한 뒤 재검증해 실제 생성기·파일 byte 일치를 확인했다. 제품 또는 하니스 source는 수정하지 않았다.
+
+D1은 실제 C7 image ID와 source label을 확인하고 image 내부 Playwright/dependency를 사용한다. 전달 환경은 기존 여섯 D1 변수와 worker/artifact 설정으로 제한되며 D2 write opt-in을 추가하지 않는다. 선택된 네 spec, fresh container/evidence 경로, 전체 private 로그, Docker exit 0과 양수 passed 요약을 검증하고 failed/flaky를 거부한다. 기존 M01/repin/ACL/D2 흐름은 D1 밖 byte 비교로 유지됨을 확인했다.
+
+## 실행하지 않은 경계
+
+실제 preserve rename, 신규 archive 추출, D1 container, D2 공식 runner, 운영 DB/fixture 쓰기, 새 chain 성공·최종 domain lane 성공은 **NOT_RUN**이다. 기존 제품 broad suite와 operating UI/native 검증을 반복하거나 이번 직접 수행 결과에 합산하지 않았다. 별도 실제 실행의 strict receipt와 lane 결과가 있어야 운영 완료로 판단할 수 있다.

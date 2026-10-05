@@ -1,0 +1,10 @@
+{
+  "status": "FAIL",
+  "scope": "post-run collector revalidation, not a D1/D2 executor failure",
+  "chain_invocation_id": "e95d3c64de9e4a7296c186cb22143b50",
+  "collector_source_sha256": "35d64f8865958fb24028fe65a1925b8a5521d1b15c2a6c433402515247d618e4",
+  "private_failure_log_sha256": "913b346ba0a4fd2e3f7e0c7724fcb078ddee3e4fb7b1b62a388731a2829c8d34",
+  "cause": "Canonical validate-evidence writes validation.json after successful exact-file-set validation. Initial snapshot excluded result.json only and retained the generated validation.json, so canonical revalidation rejected the extra file.",
+  "pass_receipt_written": false,
+  "planned_closure": "Bind and verify original validation; remove only result+verified validation from private snapshot; regenerate with exact canonical validator; require generated validation bytes and all other evidence byte fingerprints to match original; original runtime remains unchanged."
+}

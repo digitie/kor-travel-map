@@ -1,0 +1,34 @@
+# Chain retry3 collector validation closure 독립 리뷰
+실행 ID: J-CHAIN-RETRY3-VALIDATION-CLOSURE-B-20261006
+판정: PASS — 최신 ignored collector 정적 closure 및 실제 identity/input metadata 읽기 전용 확인. 새 collector 실행·official snapshot 재검증 성공 영수증은 본인 NOT_RUN이다. 실제 D1/D2 실행은 부모가 수행했으며 제품113 FULL/UI 결과를 재집계하지 않는다.
+
+고정 SHA256:
+- 최신 collector63c08d0466d564982f321becf5d4ecabfe19b57636fa8b61fc3ae19a44f1370c
+- validation-fix generator5f7c8e06b9cbd2b9789802c2a195997e44ef9e942a0a015056b30cdb17877073
+- metadata-seal generatora91a2c92e57e01571f213d90d8a6ae1550f01fd6fbd16ec3dd65d279c9efc70b
+- 중간 c7e2ce7c0abaa85191407de355a5bc533d4037fc71973981fccee614ad98c3b7
+- 기존 원문 collector35d64f8865958fb24028fe65a1925b8a5521d1b15c2a6c433402515247d618e4는 변경되지 않았다.
+
+closure:
+공식 validator는 성공 시 validation.json을 생성한다. 기존 collector의 terminal snapshot에는 이 생성 파일이 남아 initial exact-file-set 검사와 충돌했다는 실제 실패는 부모 근거다. 본인은 fixed Git1a3의 공식 validator source를 확인했고 validation.json 생성·원자 기록·재독해 검증 동작과 새 처리 방식이 일치함을 확인했다.
+새 collector:83–113은 원본 validation의 정확한 7-key 집합과 normal/attempt0/lifecycle_files64/reports2/version1 내용을 봉인한다. result 및 봉인된 validation만 제외한 snapshot을 같은 normal/attempt0 validator에 전달한다. 재생성된 validation bytes==원본 bytes, 나머지 snapshot 전체 fingerprint==원본 non-result fingerprint, 최종 original result/validation/whole tree 불변을 요구한다. FK constraints 값 및 bool version 등의 잘못된 canonical 표현을 중간 검사만으로 승인하지 않고 최종 재생성 bytes 비교로 거절한다.
+fingerprint는 원본/snapshot root와 전체 entries의 UID/GID0, directory0700/file0600, regular/directory 및 non-symlink를 요구한다. copy의 owner/mode 정상화가 원본 불량 metadata를 숨기지 못한다. 검증 파일 제외 범위가 임의 파일로 확대되지 않았다.
+
+EXECUTED:
+- exact63c snapshot/validation 코드의 own root fixture17종: 정상, 원본 extra key, bool version, foreign FK output, file644, owner1000, root755, FIFO, symlink, validator 실패, 재생성 validation 변경, snapshot content 변경/extra file, 원본 content/validation/result/mode 변경. 정상 허용/음성 모두 거절. official command는 own fixture에서 stub으로 대체하여 외부 동작 없이 gate를 공격했다. 초기 non-root setup guard를 확인하고 실제 collector의 root 조건과 같은 own local root fixture로 재실행했으며 setup 차이를 제품 실패로 집계하지 않는다.
+- generator 순수 할당으로35d→c7e→63c exact byte 재현, local/실제 placeholder 치환 remote Python compile. 종료 직전 최신 bytes 및 원본35d 불변 확인.
+- 실제 current collector의 snapshot 이전 read-only AST만 실행해 fresh chain/D2 identity와 원본 metadata를 확인했다. source·nonce/Invocation/new run·6 image·derived C7/D1 exit·overlay source/proof binding을 통과했다. snapshot 생성/validator 실행/영수증 생성 main은 실행하지 않았다.
+
+독립 실제 read-only 관측:
+- chain Invocation e95d3c64de9e4a7296c186cb22143b50: active/exited/success/ExecMainStatus0.
+- D2 Invocation3399bda39db24869bf76027d4844bc99, 유일 새 runtime run-f7e6954901eeea34be057c0cb4c8a018bbaeb0020d4bfa69ef583f535d4c438e.
+- 원본 result SHA cedf21ddd6bba89e61b0fb0f98363d30e461a06ee3bfc960384846e4e4c57070.
+- 원본 validation SHA84b0a84265af4a2d773467720b7d5f293e702baa5fe38ea7455a32e8267ae935, lifecycle_files64/reports2. 이를 ‘Dagster 이벤트64개’로 바꾸어 표현하지 않는다.
+- whole original fingerprint SHA f97877540fb8615bdfa88b90b7969a8b10c3768861d2e678c992730e5bb84da7, root UID/GID0·모든 directory700/file600 확인.
+- actual canonical validator SHA245e37b1360a64d12afa31890457cd236cbf9b5931d8a27d49e7b0030ce0114a는 fixed Git1a3 source와 byte 동일.
+- D1 exited0/OOMFalse, derived C7 sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4.
+- own read-only metadata proof map-chain-retry3-readonly-d2-metadata-identity-ui.json SHA65dfed17d3d2bd12edc0d9f065919656acbf6c58b4758f34f722ffba6c044530. snapshot_revalidation은 명시적으로 NOT_RUN이다.
+
+잔여 P0/P1/P2 finding 없음. 원본 evidence/validation/source 및 운영 서비스·도메인 fixture·계정은 변경하지 않았다. 실제 새로운 closure collector 성공 여부는 부모의 실행 후 별도 실제 영수증으로 확인해야 한다. peer 원문 미열람, private 주소/credential/config는 이 보고서에 포함하지 않았다. 이전 static PASS 및 실제 실패 원문은 덮어쓰지 않는다.
+
+검토 종료/보존 시각(UTC): 2026-10-05T20:57:26.006630+00:00

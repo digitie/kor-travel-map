@@ -1,0 +1,32 @@
+# Chain retry1 정적 후속 독립 리뷰 원문
+실행 ID: J-CHAIN-RETRY1-PROC-20261006-B
+판정: BLOCK — J-CHAIN-RETRY1-P2-03 OPEN. 제품 FULL 113 PASS와 별도인 ignored helper 검토이며 실제 chain·보존 이동은 수행하지 않았다.
+
+고정 검토 bytes:
+- launch a36d397fc769c7230a71f0350210ebbe5278f0696c5e89b6e4a4be5b96adab34
+- collect f5d9ed27b013d4a14ea1634ec9d1fed42a43d8bee9d7561660086531a10d8a06
+- archive-preserve 8653e12436dfa3c60fbebc58178da393e66df44145158fc6f5c421bb6808dbd3
+- prepare af059e103eb10f4d11d5f8c66913bf88888a5bbb01b11c6b903c8af797977b05
+- owned shell 86c16e271bca0e4f6754796c771c0389753a1739220930daaa6f7a75229fd038
+- source identity 84c5db3d829d06a23983772222e81ed452742d03edf4d5c40c57fbb6819d32ad
+
+J-CHAIN-RETRY1-P2-03 — map-chain-owned-archive-preserve.py:58–61.
+실패 시나리오: SSH의 원격 sh -c 인자는 heredoc 전체를 포함하며 source canonical 경로도 그 안에 있다. 자식 Python이 모든 /proc/*/cmdline의 부분 문자열을 검사하면 보존 명령을 실행한 자기 부모 shell을 source 사용 프로세스로 판단하여 매번 assert 실패한다. 아무 프로세스도 archive 파일을 사용하는 상황이 아니어도 보존 단계가 막힌다.
+직접 재현: own cache 임시 빈 source를 만들고 subprocess.run(['sh','-c', "python3 - <<'PY'\\n"+검사코드+"\\nPY"])로 같은 heredoc 형태를 실행했다. 검사 결과 any_hit=True,parent_hit=True,self_hit=False였다. 실제 source/원격 보존은 실행하지 않았다.
+권고: 보존 명령 자체와 검증된 부모 chain의 cmdline 텍스트 검사 오인을 제거하고 실제 cwd/root/fd/maps 참조 검사는 유지한다. 임의 다른 프로세스는 계속 거절해야 한다.
+
+기존 finding disposition:
+- J-ARCHIVE-P2-01 FIXED: nofollow anchored directory·UID1000·dev/inode 검사, renameat2(RENAME_NOREPLACE), destination.lstat 검증. own 실제 libc rename fixture 정상 이동 PASS / 사전 source symlink·anchor 이후 symlink·늦은 destination 모두 거절. anchor 뒤 치환은 이동 후 최종 검사에서 거절되는 경우이므로 ‘경합 시 아무 이동도 없음’으로 과장하지 않는다.
+- J-CHAIN-RETRY1-P2-02 FIXED: current collector와 archive 모두 ACTIVE/BLOCKED dangling symlink를 거절. own 빈 lane 정상·두 dangling 음성 fixture PASS. 초기 BLOCK 원문은 별도 보존했다.
+
+EXECUTED:
+- 네 Python helper compile 및 실제 치환된 remote Python compile, launch/shell bash -n.
+- generator의 순수 할당만 평가하여 생성 launch/collector와 current bytes 동일 확인.
+- original trusted 7f6558…의 D1 블록만 교체하면 owned 86c16e…와 byte 동일. 블록 밖 M01/repin/D2 내용 동일, 환경 6개와 D1 4개 spec 보존, acceptance write opt-in 없음, rm -rf 없음, tar pipeline 오류 거절 명시.
+- own scratch rename/lane 및 heredoc 부모 오인 fixture.
+초기 자체 fixture의 E2E 정규식/namespace 누락을 정정 후 성공한 결과를 위에 기록했으며 초기 fixture 오류를 제품 실패로 집계하지 않았다.
+
+READ-ONLY: 최신 launch의 nonce/start/oldrunset/InvocationID/sourcecopy/attestation6image 연결, collector의 immutable parsed bytes·fingerprint·snapshot validator·최종 image fence·fresh receipt namespace 검토. 이전 FULL 제품 검증을 새 실행으로 재집계하지 않는다.
+NOT_RUN: 실제 archive 보존, 원격 chain launch/collector, D1/D2/M01 운영 실행. 제품/운영/peer 원문/계정·실주소는 변경하거나 공개하지 않았다.
+
+보존 시각(UTC): 2026-10-05T19:59:26.879410+00:00

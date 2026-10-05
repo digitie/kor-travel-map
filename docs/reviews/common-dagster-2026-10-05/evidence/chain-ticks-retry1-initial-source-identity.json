@@ -1,0 +1,5 @@
+{
+  "original_sha256": "7f6558eebfbf3acceb7771e8025e161c028bbe6f8ff1e8d3177f103181b1bce4",
+  "owned_copy_sha256": "aa98d5ba46408feea04c842c54defb662cea4d34abfc4976af4d3a90d5624191",
+  "scope": "기존 D1 블록만 fresh archive·C7 internal dependency·6 env allowlist·전체 private log·strict exit로 교체. 기타 M01/repin/D2 흐름 불변. 소유 failed archive 보존 이동은 별도 검증 후 실행."
+}

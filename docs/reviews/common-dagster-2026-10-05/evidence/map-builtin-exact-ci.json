@@ -1,0 +1,108 @@
+{
+  "headRefOid": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "isDraft": true,
+  "mergeable": "MERGEABLE",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:32:38Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111782272651",
+      "name": "pytest (Python 3.11)",
+      "startedAt": "2026-10-05T13:19:05Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:21:49Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672411/job/111781673322",
+      "name": "production Dockerfiles build",
+      "startedAt": "2026-10-05T13:17:41Z",
+      "status": "COMPLETED",
+      "workflowName": "docker-images"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:20:52Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672487/job/111781672551",
+      "name": "type-check + next build (Node 20)",
+      "startedAt": "2026-10-05T13:17:40Z",
+      "status": "COMPLETED",
+      "workflowName": "frontend"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:18:55Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672384/job/111781672751",
+      "name": "lint",
+      "startedAt": "2026-10-05T13:17:40Z",
+      "status": "COMPLETED",
+      "workflowName": "lint"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:19:10Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672484/job/111781672007",
+      "name": "openapi-drift",
+      "startedAt": "2026-10-05T13:17:40Z",
+      "status": "COMPLETED",
+      "workflowName": "openapi"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:40:49Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111782272386",
+      "name": "pytest (Python 3.12)",
+      "startedAt": "2026-10-05T13:19:06Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:31:19Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111782272780",
+      "name": "pytest (Python 3.13)",
+      "startedAt": "2026-10-05T13:19:05Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:19:47Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111782272395",
+      "name": "pytest fixture replay",
+      "startedAt": "2026-10-05T13:19:05Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:48:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111791829929",
+      "name": "pytest integration (PostGIS, alpine)",
+      "startedAt": "2026-10-05T13:40:52Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-05T13:47:44Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/digitie/kor-travel-map/actions/runs/37315672364/job/111791829987",
+      "name": "pytest integration (PostGIS, glibc)",
+      "startedAt": "2026-10-05T13:40:53Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    }
+  ]
+}

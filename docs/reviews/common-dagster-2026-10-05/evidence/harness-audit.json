@@ -1,0 +1,31 @@
+{
+  "scope": "two independent read-only test-harness reviews; separate from immutable FULL product reviews; actual execution not claimed",
+  "reviewers": {
+    "recovery": {
+      "findings": [
+        "stall STEP_START and exact native timeout cause required",
+        "healthy/stall execution overlap required",
+        "daemon finally and SSH exit status required",
+        "expected rebuilt image attestation required",
+        "raise/crash fixture cause verification required"
+      ],
+      "closure": "root added STEP_START, tag20, exact timeout RUN_FAILURE, RunRecord overlap, daemon finally/failure receipt, exit propagation and actual attestation image-ID comparison; reviewer source recheck closed timeout and isolation findings; root then added STEP_FAILURE cause assertions"
+    },
+    "ui": {
+      "findings": [
+        "PinVi logout204 vs Map200",
+        "connection-error slot differs from stalled-run alert",
+        "empty run list requires metadata last-good preservation",
+        "session/context/browser cleanup on failure",
+        "cookie deletion scope differs from server revocation"
+      ],
+      "closure": "reviewer read-only source recheck confirmed all five addressed and no new false PASS; root additionally preserved primary errors across context/browser close failures"
+    }
+  },
+  "final_root_harness_sha256": {
+    "map-native-runtime-probe.py": "64813b455c2f0b3c43ef3c37f16d26788eea87d8381da2d670ccce2e911e61d3",
+    "map-native-runtime-probe-launch.py": "e76ba14b80c9b816ab937038698ef4e22c5d40072bec38236af839b8959a53c7",
+    "map-pinvi-operating-ui.mjs": "36a60a3a8af311b589a5827857f006bc8b1f51bd8c3969482c70f94ffc32ebac"
+  },
+  "execution": "NOT_RUN at harness review; actual runtime/UI receipts must be collected separately"
+}

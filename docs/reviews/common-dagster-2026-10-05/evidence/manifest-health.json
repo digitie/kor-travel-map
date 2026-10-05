@@ -1,0 +1,476 @@
+{
+  "scope": "FULL independent Common/Map/PinVi child health closure review",
+  "common_product": "e0b5e31a549bd6cb35af65d4a7573a46d2035ec9",
+  "repositories": [
+    {
+      "name": "common",
+      "root": "/home/digitie/dev/kor-travel-common-map-recovery",
+      "base": "7dc1d6dda955b9b836cb3f24d6fd5bcd37fabe52",
+      "candidate": "e0b5e31a549bd6cb35af65d4a7573a46d2035ec9",
+      "files": [
+        {
+          "path": "CHANGELOG.md",
+          "sha256": "c005b9df3de0c3e98c7dee1a39e553f4ca670ef9c4d7858e7688e3ad396402ae"
+        },
+        {
+          "path": "docs/journal.md",
+          "sha256": "1f8f826613743e276fc9c8ffed247516accbb49dad8798a352aeed80686a2420"
+        },
+        {
+          "path": "docs/resume.md",
+          "sha256": "29b753827450e0b5a1eeadc015a0657d7867f54ca80b072c111104f2c1071803"
+        },
+        {
+          "path": "docs/reviews/adversarial/2026-10-05-map-http-closure.md",
+          "sha256": "c079b483f3131b1c1819215dd8c8a7715b12d6d62ba48e34b0f52dfe1d9e6245"
+        },
+        {
+          "path": "docs/reviews/adversarial/2026-10-05-map-http-recovery-closure.md",
+          "sha256": "2ac6ed239f0586e0c811c4fbec62747e230a71af39f2abb490ffe5cd85789e33"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-manifest.json",
+          "sha256": "718b0351c95c2adac66769b5f3e7cf3ae1e40445a4f743374f27a0160a3c5a9b"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a-archive.json",
+          "sha256": "074102c84fd251ced7cdd73bcf9d78bf6437413590524d6e879bdbbe7535d662"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a-final.json",
+          "sha256": "afd743f8801a7067a116d819fcbe61eef6138125124a0a84db5d405b0e7360a7"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a-final.md",
+          "sha256": "d11bc516b49791a74cb903531bf7981fcf7ce109146c608f720c722fde6e72d8"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a-postfix.json",
+          "sha256": "dc5d3f59cef20bbba0f40a81a51aba4400155f9960bc3cbc03d24f1eb70931f9"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a-postfix.md",
+          "sha256": "8a818baa26fd63eb2ea3ff26bbfae797a1b5b107b51fdff53388d781913ab23e"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a.json",
+          "sha256": "8aa4263e7d098e3f4ea368a262fc9e6da8f21aaba5f363bd4535da422aa51aa4"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-a.md",
+          "sha256": "3622f7661f03d29e9fab87ef167b7f32c1cfe1b83757868b67089b977d36b496"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-closure.json",
+          "sha256": "0b6ffde83d556502dd976cc7d7f84f82d1e8af6dbdd47b4b3bf7e2999c944981"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-closure.md",
+          "sha256": "1a8923e88061a468a5fdcb51ef40fcc63ddf1abfcad6590ad6d543ea86725c3d"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-final-raw.json",
+          "sha256": "1c9dff79dd73774670ccc66908e44ddb8961e2f5c5db4bd1056bd9511d22c0a1"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-final-raw.md",
+          "sha256": "a06b23254246fe1b52eb4c02a464941b73c107f1985da6e7ad2f6b384bc756c4"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-postfix-2f7a927-raw.json",
+          "sha256": "d0e0bbb5b809e4f1a278fdac3fb52c7b280b1da9dd2883693deed929e4a7e2f1"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-postfix-2f7a927-raw.md",
+          "sha256": "9d9a7aea8eca6aa738583bcee2b39c45964f308d581b55f87cd41f2f74e12baf"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-postfix-befbd6f-raw.json",
+          "sha256": "d39b6d73e37dae0327d5c3a0d479df5cf8174789c513cd5f2c78fb41cc1dd08e"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-postfix-befbd6f-raw.md",
+          "sha256": "fd13243d01d0b3ddccea7eebb888c5c8e93d2a64a0ba6f7598021c5ff033a8ca"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-precommit-raw.json",
+          "sha256": "c7823b99290aa94a85263d52d5ded0759a45e719b74d46b121437430e63abfb2"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b-precommit-raw.md",
+          "sha256": "56b1dbc10c62baa5c8d888080069c2ba0e7c666f7b5393d70b14153e2fce7a4c"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b.json",
+          "sha256": "abbca35598937442a148c8dd91f6df8d9c8facae9baa56ea2cee0c65b90de0a8"
+        },
+        {
+          "path": "docs/reviews/adversarial/evidence/2026-10-05-map-http-reviewer-b.md",
+          "sha256": "56b1dbc10c62baa5c8d888080069c2ba0e7c666f7b5393d70b14153e2fce7a4c"
+        },
+        {
+          "path": "docs/runbooks/dagster-adoption.md",
+          "sha256": "f44e6205231e368cbb028f312efb35af335281ac61d28a9dbb02e7e517cb975a"
+        },
+        {
+          "path": "docs/tasks/T-319-dagster-recovery.md",
+          "sha256": "0a1332977e3f09da919a4560b581f3cc1cc0c5d1dbc5e8a3ca660d0be0687642"
+        },
+        {
+          "path": "packages/py/kor-travel-common/README.md",
+          "sha256": "d064d2a27bcd6d8d79f90db06872563454ab20ee6421ce81f49352be7eb98f21"
+        },
+        {
+          "path": "packages/py/kor-travel-common/pyproject.toml",
+          "sha256": "ddbbaeafa6342cde3d1731fd62ae347aeb1257dc054a865c34d32d6b7c286faf"
+        },
+        {
+          "path": "packages/py/kor-travel-common/src/kortravelcommon/dagster_health.py",
+          "sha256": "7e0663de1a5a6f9361b5a68fd6fd1272f130198e24c0e2071892cd7d115a7220"
+        },
+        {
+          "path": "packages/py/kor-travel-common/src/kortravelcommon/http.py",
+          "sha256": "cbb6d44f3635807579cefdbf64d9431c3fc2b46d30b50ccb9ed77602d45d5f2d"
+        },
+        {
+          "path": "packages/py/kor-travel-common/src/kortravelcommon/py.typed",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "packages/py/kor-travel-common/tests/test_dagster_health.py",
+          "sha256": "953372af8c443f4ff28ad4794eac50fd2579a9bfe6313954195db81d6ad3078e"
+        },
+        {
+          "path": "packages/py/kor-travel-common/tests/test_http.py",
+          "sha256": "3e11aac7b341e27d5fcb0334f715341ede4d99c2a7b2211575030fe96991431d"
+        },
+        {
+          "path": "packages/py/kor-travel-common/uv.lock",
+          "sha256": "6b6c095140d778dcdbea0941cf8248a2801c46a91917ec5bbf0a9c0d94bcd812"
+        }
+      ]
+    },
+    {
+      "name": "map",
+      "root": "/mnt/f/dev/kor-travel-map-codex-dagster",
+      "base": "a46d7b92c0e727805348e20d60fe188592e16477",
+      "candidate": "6a54a73bfbddb804ccb1abbca7842be2445a5b21",
+      "files": [
+        {
+          "path": "CHANGELOG.md",
+          "sha256": "016d76a9b16e03139bbde416491180042332fc3ac4a1686a4328bd6647fab431"
+        },
+        {
+          "path": "contracts/vnext/consumer-rollout-v1.json",
+          "sha256": "cbada1ab88bcfb0fafb32a191ffafc31f28f4ca9e2eb5fb5467a6390ce4a8469"
+        },
+        {
+          "path": "contracts/vnext/openapi-diff-v1.json",
+          "sha256": "9d98a174c36f0a43de5aea31cefaf695ae25f5df2f9c143fec58910125d05eb9"
+        },
+        {
+          "path": "docker-compose.yml",
+          "sha256": "8589d6343377e8d6698947631a0eb16536b4f0950dcd453d945358e423fbaa22"
+        },
+        {
+          "path": "docker/api.Dockerfile",
+          "sha256": "99593c9facdbdf550c001e585945ff295a90f5c8ac5790cbea15838ac15de49f"
+        },
+        {
+          "path": "docker/frontend.Dockerfile",
+          "sha256": "77001c51b2051e4688885a0ac513c7d8c1b5feb0883f8e90af746d89d6c29ed2"
+        },
+        {
+          "path": "docs/adr/107-common-dagster-runtime.md",
+          "sha256": "2f11a09f255c8e6da650c8b79a3b70310b40690011ff3b78b6dc59b854734b31"
+        },
+        {
+          "path": "docs/adr/README.md",
+          "sha256": "bc0f10062dc749337bd6759c0de045a4288de9be871513152b95d74b7d3c99b7"
+        },
+        {
+          "path": "docs/journal.md",
+          "sha256": "d259ea06b09ebe4e58afc7fa23d94a4187e1b70dc4be48040bdb89470034583b"
+        },
+        {
+          "path": "docs/resume.md",
+          "sha256": "fe648b41213d8d5aa5dfe32175ddb1f9ad1b1eb2ea1627d6620d385a0904f27d"
+        },
+        {
+          "path": "docs/reviews/common-dagster-2026-10-05/README.md",
+          "sha256": "42889e020b1edb6a089dd3690d228ee09eb218d9e2a95e0e62ce3485d113ae63"
+        },
+        {
+          "path": "docs/runbooks/common-dagster.md",
+          "sha256": "d683671eb84820e6cffe020a882a378f94eedb782c74ae8a70036454f059f156"
+        },
+        {
+          "path": "docs/tasks-acceptance.md",
+          "sha256": "9d63bc8c5012407569e347f5cd2cb72ce84d07946686703e7875c9d513da248d"
+        },
+        {
+          "path": "docs/tasks.md",
+          "sha256": "954d160b32d92a4c2545b7c342be5e074d6ac4855213cbf51021fe40fa66bd55"
+        },
+        {
+          "path": "docs/third-party-common.md",
+          "sha256": "c2c97f2818ffa61aceb0953846115c67b0e5952f8ad1addfc6593105eadbfd64"
+        },
+        {
+          "path": "package-lock.json",
+          "sha256": "60fecf7fae591a3110adaf1241cd1632d1c3af258a47a53980e5c4138a965395"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/package.json",
+          "sha256": "493836767291ac8c77515eb3820aa3a55068b39144e7ad0fca9489c408733cff"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/api/types.ts",
+          "sha256": "160aab6514bdaa17bb78e5bfb06f7b243517ea50f08278fe7723b58c5805501a"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/app/globals.css",
+          "sha256": "96c2c4180fde41e3f2a7eefe25c720d8109d85e6fd5d0293bc1c159f2d7af4ce"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/app/ops/pipeline/events-panel.tsx",
+          "sha256": "b85af55c8a98f6dd3bcdc3dd230b93bdafc90fdb9ee2a25ca92f76afbc5f72a3"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/app/ops/pipeline/pipeline-client.tsx",
+          "sha256": "cd2f3359a029191d9e17ff57209c5d2b6ae918abdc3fadc79af62a18f155fc73"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/components/admin-shell.tsx",
+          "sha256": "fc95f4a95ba7b8709023671ced493118be24e05bf1779a52d2f74f2b68dbd214"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/components/common-dagster-panel.test.tsx",
+          "sha256": "e60d8440ec61ac55a2af6498bdd70e2b045592240fcf0bc672bfff15c4d6f53c"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/components/common-dagster-panel.tsx",
+          "sha256": "b31c1daf7ef2c54c70d40f0c773c80e0a95c19b41463349a32aa11ffda88cddb"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/components/login-form.test.tsx",
+          "sha256": "3f1dcfc8a7fe940aa7bbaac381c260c818833deb0b3686ebe513d0ff0d023a22"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/components/login-form.tsx",
+          "sha256": "551381b54cf9bcb9a4473b4d10c0adfda3b57867249be49b83e3ace693331773"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/lib/auth.test.ts",
+          "sha256": "f165c0f776c01cf1ac2a4bdf1c1d086c023d02cc7c33d582219d4ea9de0e5ec4"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/src/lib/auth.ts",
+          "sha256": "4aaab8148064770058ccf9ba9914729b0681575886af7362916ea380ca39a30e"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/vendor/kor-travel-tokens-0.1.0.tgz",
+          "sha256": "554ae3f6a18cbf453130b29f8a2d737ddb880101b55e14535cf8d63174b47505"
+        },
+        {
+          "path": "packages/kor-travel-map-admin/frontend/vendor/kor-travel-ui-0.1.0-dev.6.tgz",
+          "sha256": "e4945d01d9eb89ed505a95b551899fd0ecf41be66c9ee6b76246701350447e6d"
+        },
+        {
+          "path": "packages/kor-travel-map-api/openapi.json",
+          "sha256": "ccec0fd05d2e5fea6ab46192e7ac1a3f08d9b0137cefcd92672be794f4f95294"
+        },
+        {
+          "path": "packages/kor-travel-map-api/pyproject.toml",
+          "sha256": "6cd473fffa914bebdd136dd1d7468d57f469e1e6afb5306821a9860175f23811"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/app.py",
+          "sha256": "07feee808972d3d0cad7715709fa4053264b23dd0d7235ab864e766a15b94821"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/dagster_graphql.py",
+          "sha256": "ac55238ae4444b9ead8e3df6bb55036d6d001f23eebb92d0e377e63cb42375c0"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/dagster_http.py",
+          "sha256": "59d6b623b646a14535887dc50160feab7102129688892c2aa7f75123854d8467"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/dagster_query_service.py",
+          "sha256": "90bb357fa80e01a89f7e7e627484d7735acc1f4d07a2073a230bac17225fc91d"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/route_policy.py",
+          "sha256": "9a115aff0390a34245e36354fcc2b0f07ea0eccebc0ea2907a63be335c2a4825"
+        },
+        {
+          "path": "packages/kor-travel-map-api/src/kortravelmap/api/routers/ops_pipeline.py",
+          "sha256": "3d404d107736639330ade8a77a858f093f88e239fc0dd82a54b4edd7ce24cbed"
+        },
+        {
+          "path": "packages/kor-travel-map-api/tests/test_application_http_adapters.py",
+          "sha256": "b04475038e5fdd9a83be9a50386802bc630237cad1beeac93612086b9c802869"
+        },
+        {
+          "path": "packages/kor-travel-map-api/tests/test_dagster_bounded_summary.py",
+          "sha256": "924ac0ad327ee01930ea5f67cea304a0e142c6be6c87508035f347235e7ac577"
+        },
+        {
+          "path": "packages/kor-travel-map-api/tests/test_dagster_query_service.py",
+          "sha256": "50eb70c39b3889e3be70b07a662fb329f20032a7fa39262d68da5dda635905a9"
+        },
+        {
+          "path": "packages/kor-travel-map-api/tests/test_ops_pipeline_router.py",
+          "sha256": "6d42d8b648aff7c41ece16b94f2b3e93eda6d530440a5b7a662d0535c570d24f"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/pyproject.toml",
+          "sha256": "29f3cbad76ec153f88a2a1d741c913c6578ff93f2ee3728500c846183629d58f"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/assets.py",
+          "sha256": "a2fcb24c95655c2b5b969be8dc02b47d8f563502a169eb1d83d965ac9c045ed4"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/definitions.py",
+          "sha256": "4f184adabd4082fce3e4440ac6d0b87364f46a9f811655ebc98cd1e815a95671"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/file_registry_hooks.py",
+          "sha256": "b665c3b30c4634e6333d121bc4d58f01a589b758de583d4a71e16454aaabced0"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/file_registry_scan.py",
+          "sha256": "4662183f05573482a4d5516eaea9ffac41baecb8b93e7648949655a3e2e88fc4"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/manual_provider_dedup.py",
+          "sha256": "78c72b1d499da2eb202e7db97e8e79dca8ef7cfec73257fe4cc29a1f790cf593"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/resources.py",
+          "sha256": "835a07778a6d598b73ee4dcb42616861cec958b0b34f1ae5dcd34d16a79c72b2"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/runtime_preflight.py",
+          "sha256": "5a9f9e74dcc3cc8a1a239793e29d279977b6001558e3f5b3833475a32bd3d98b"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/schedules.py",
+          "sha256": "b7ae6323f5cb6d1f48b38e55297b399fc11d0c90d6abcb8ac2141f5c33c5dd01"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/src/kortravelmap/dagster/sensors.py",
+          "sha256": "a78f7dad64f4d1c5fcb5290e1fc266173ea3a8557b9457f230f43371c41e2311"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/tests/test_asset_deps.py",
+          "sha256": "191e992806fa58315f1fd8e942d5730075f4f2d3ca6496159e3285217686dbb8"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/tests/test_resources.py",
+          "sha256": "cb2bb471600712b9c940f046a1565d3abe55cfe536b1deb83733c61a1f24b5aa"
+        },
+        {
+          "path": "packages/kor-travel-map-dagster/tests/test_snapshot_batching.py",
+          "sha256": "1af0721bf057cbd6ee628c0c98aee6f0b5d8c8da4cb9becc854a206fe3cee078"
+        },
+        {
+          "path": "tests/integration/test_ops_datasets_api_projection.py",
+          "sha256": "748cb401e512c4c51ef2c9e080ee60249c1fe3ea2db2811e9051bf5cffb57506"
+        },
+        {
+          "path": "tests/integration/test_provider_catalog.py",
+          "sha256": "de56091a78ac49b55ed484c46bc5ab67b3e39ff490192a54ead3da4bcfe146e3"
+        },
+        {
+          "path": "tests/unit/test_c7_prod_live_runner_contract.py",
+          "sha256": "7469cfb9f756f8ce7f18ef66cce0f7d9475e85b21ca0617a0dd084cec9b5f5e3"
+        },
+        {
+          "path": "tests/unit/test_dagster_code_location_is_one_name.py",
+          "sha256": "6bf51b13771c76d45ca7c845a5dc21a365692fbb2e70de14b6d710f21c342b38"
+        },
+        {
+          "path": "tests/unit/test_docker_dagster_runtime.py",
+          "sha256": "b375ba58c132d9a03bb41d3ca7dafa1bc78062a23cc8f5062b3e8271ba2bae66"
+        },
+        {
+          "path": "tests/unit/test_vnext_contract_artifacts.py",
+          "sha256": "33421e10fb0e516194efe913876ff3d2e3865c613da88761bc965b5506b1ab5a"
+        }
+      ]
+    },
+    {
+      "name": "pinvi",
+      "root": "/mnt/f/dev/pinvi-codex",
+      "base": "07cfef222c56d7e648c81b017aa8ffe4ccd1c386",
+      "candidate": "2a36e8973bb163c68f1a778a0c1215fa8e9d02d4",
+      "files": [
+        {
+          "path": "apps/api/Dockerfile",
+          "sha256": "562bf9b1624b8968040eab55892bb529a8a75352465de545e0fdc17363c8d952"
+        },
+        {
+          "path": "apps/api/app/services/admin_etl.py",
+          "sha256": "abc119c50cec196b4e08b11b136e4616b850282694d259aa94aabaa7eef0e313"
+        },
+        {
+          "path": "apps/api/pyproject.toml",
+          "sha256": "0f7320020ff54579588278aa5ca1e04a91e3fa9ba6203abc4e00fd67fa3faceb"
+        },
+        {
+          "path": "apps/api/tests/contract/kor-travel-map-openapi-admin.json",
+          "sha256": "ccec0fd05d2e5fea6ab46192e7ac1a3f08d9b0137cefcd92672be794f4f95294"
+        },
+        {
+          "path": "apps/api/tests/unit/_kor_travel_map_snapshot_pin.py",
+          "sha256": "979accc56e6eb823919e96159ae9cb24212e3bd2bc0644af4551a697f1da4651"
+        },
+        {
+          "path": "apps/api/tests/unit/test_admin_etl_dagster_probe.py",
+          "sha256": "1adc6741e488cfe491ae3bde96020087f155aceb29e3958efbb42bede10078c9"
+        },
+        {
+          "path": "apps/api/tests/unit/test_kor_travel_map_admin_contract.py",
+          "sha256": "1983b3698b178abc51b9c771d1e6665e367e17206fc014ed0359e6a44d427497"
+        },
+        {
+          "path": "apps/api/uv.lock",
+          "sha256": "7884f4e9aa38774cdd72108065e6bbeb10815c8a158058514205315b61d72db6"
+        },
+        {
+          "path": "apps/etl/Dockerfile",
+          "sha256": "03e9686da6df3bd6ffc3e8e35980ff9e98c8d0f82698b078f8d8aaa1a3c2991c"
+        },
+        {
+          "path": "contracts/kor-travel-map-m05-pair-provenance-v1.json",
+          "sha256": "fc416a9cb22b605c78d10a258e1c9ca51519ef0831783d224744529634cb1b31"
+        },
+        {
+          "path": "docs/journal.md",
+          "sha256": "e6b52447d859ffcfa1738ae0b0de682bd86726b8afb226e4bc76444d2a7e1f14"
+        },
+        {
+          "path": "docs/resume.md",
+          "sha256": "f0c4140a0b6c926e653f21a3e894e2cb7f1c034dd0dbc789d05a8228ee9c66ae"
+        },
+        {
+          "path": "docs/reviews/common-map-rebuild-2026-10-05/README.md",
+          "sha256": "0af8c24f2f6ee67110531d5cda805a150dd215938f4670acfa792779b3563771"
+        },
+        {
+          "path": "docs/runbooks/common-dagster.md",
+          "sha256": "0e43f0107b640999b23b93f484cb5521e6a54e440850dc17bf6802535276cde4"
+        },
+        {
+          "path": "docs/tasks.md",
+          "sha256": "e99f2ed7aebb120de04be13951bb785bca8b788f2d6af008e16af0242b2e49cb"
+        }
+      ]
+    }
+  ],
+  "peer_results": "not disclosed",
+  "live": "NOT_RUN until reviewed candidates rebuild"
+}

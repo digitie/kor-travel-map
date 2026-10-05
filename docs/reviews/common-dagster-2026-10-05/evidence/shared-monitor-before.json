@@ -1,0 +1,21 @@
+{
+  "scope": "actual shared webserver/daemon YAML read only, before operating rebuild",
+  "policies": [
+    {
+      "enabled": true,
+      "start_timeout_seconds": 600,
+      "cancel_timeout_seconds": 600,
+      "max_runtime_seconds": 21600,
+      "max_resume_run_attempts": 0,
+      "poll_interval_seconds": 15
+    },
+    {
+      "enabled": true,
+      "start_timeout_seconds": 600,
+      "cancel_timeout_seconds": 600,
+      "max_runtime_seconds": 21600,
+      "max_resume_run_attempts": 0,
+      "poll_interval_seconds": 15
+    }
+  ]
+}

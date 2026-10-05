@@ -1,0 +1,19 @@
+{
+  "scope": "Actual first isolated native harness start failed before any job; not a product job failure or native recovery PASS",
+  "container": "codex-map-native-runtime-fault-probe",
+  "container_id": "8b730b161eb500e4c858718a647b3a12bce7ccadac1685b82f99e35d6e3cc1b3",
+  "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T17:25:50.62440763Z",
+    "FinishedAt": "2026-10-05T17:25:58.361211981Z"
+  },
+  "result_present": false,
+  "jobs_launched": 0,
+  "failure": "PermissionError at native-probe.py9 root.mkdir(/work/native-runtime-instance); actual image user appuser; tmpfs default root0755",
+  "probe_source_sha256": "64813b455c2f0b3c43ef3c37f16d26788eea87d8381da2d670ccce2e911e61d3",
+  "remediation": "Keep actual non-root user; fresh retry1 name/output with writable isolated work tmpfs and dedicated UID/GID owned evidence"
+}

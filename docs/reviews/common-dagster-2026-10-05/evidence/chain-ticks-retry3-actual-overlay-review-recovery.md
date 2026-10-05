@@ -1,0 +1,53 @@
+# retry3 실제 ESM 테스트 이미지 독립 운영 closure
+
+판정: **PASS — actual overlay proof·test image·운영 여섯 image의 좁은 읽기 검증**. D1/D2의 실제 결과는 이 판정에서 제외한다. 새 test image를 독립 리뷰어가 build/tag/repin/exec한 결과가 아니다.
+
+## 실제 증거와 시점
+
+2026-10-05 20:47:18 UTC 및 20:48:34 UTC에 read-only SSH/Docker inspect/작은 ctr content get으로 확인했다. actual proof 원문 SHA256은 `863a8d4f679e31e23d8475488a475aa0817778b737748150a577298e85cfdba5`이다. proof는 root/0600, regular/nonsymlink, nlink1이며 읽기 전후 device/inode/UID/mode/nlink와 원문 bytes가 같았다.
+
+실제 설치 overlay source SHA256 `94cdbbb7ed09cc081f2650f7a74288f2b67c42750f1e21386b97c89ca445d413`을 확인했고 root/0700·nonsymlink였다. proof의 source revision은 고정 Map `1a3c4673790f51daa1a2f5ccf803d4e31673bad6`이다.
+
+| 실제 대상 | ID / digest |
+| --- | --- |
+| retained parent image | sha256:c8e0f06b259a85973070b7f4de09afafd752589ed6235b1a27eedf416daeac77 |
+| derived image / OCI index | sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4 |
+| linux/amd64 manifest | sha256:c7d08349e1d1703097803c03930a89e960d0bdc9fa113864a133dbc1179fa2d7 |
+| config descriptor | sha256:4735b0c11ad5c8371a8493d4f8ff9af876afa518047ab9e33d3553c527166dd1 |
+| last compressed layer | sha256:2198d9580773c8564b92cddb74d53bb95bff879c95d903ded2a364bd0e237b39 |
+| last uncompressed diffId | sha256:a7105bc3b2631c357bfd3aceaf6bc0f0c789039bb5681a11d72d3b1abb266cb8 |
+
+standard C7 test tag 및 fresh derived tag가 derived image ID를 가리키고, fresh retained-parent tag는 parent ID를 가리킴을 실제 inspect로 확인했다. actual source/base/mode/parent labels가 맞았다.
+
+## 직접 재검증한 내용
+
+- actual inspect Descriptor와 proof의 OCI index descriptor가 같았다. content SHA/size를 확인했고 linux/amd64 manifest가 유일하며 proof의 선택 descriptor와 정확히 일치했다.
+- platform manifest의 config 및 마지막 layer descriptor가 proof와 같았다. config content SHA, rootfs.diff_ids 및 actual Config labels를 연결했다.
+- 실제 parent의20개 RootFS layer 전체 prefix 뒤에 추가 layer 한 개만 있었다. child Config 전체는 parent Config에 test mode/parent labels 두 개만 추가한 것과 같았다.
+- 마지막 compressed blob1,363 bytes를 읽고 manifest digest를 확인했다. 유한 gzip 해제 후 diffId가 actual RootFS[-1] 및 proof와 같았다.
+- 추가 layer는 frontend/package.json 정규 파일 하나만 있었다. symlink/hardlink·다른 file을 거부하는 검사로 읽었다. after JSON의 type=module을 제거하면 고정 before JSON과 정확히 같았다.
+- before package SHA `493836767291ac8c77515eb3820aa3a55068b39144e7ad0fca9489c408733cff`, after SHA `c04d0996a05a9c55b3852d3af68a3d70ac9b3fbe354615e67b23dc98d19922d8`를 확인했다.
+- 마지막에 actual child ID 및 standard tag를 다시 확인하고 proof의 원문·metadata race fence도 재검증했다.
+
+## 여섯 production image 경계
+
+원래 최종 runtime attestation과 비교해 아래 여섯 actual image ID가 모두 동일했고 running/healthy였다.
+
+| 서비스 | actual immutable image |
+| --- | --- |
+| Map API | bf1ca32aad6a83a530abfad871fa88f6019761c1d7780bfbb76469494af06e0f |
+| Map UI | 6d037af0a23cce67b6345821970d0928598e8bd9bd68a68bdad565832c51c4a4 |
+| Map Dagster code server | 197597501a0bc06bfaa5a3ca1be3e406aca6794f59306710fb79325c10d18d07 |
+| PinVi API | af884b398f35ca1d8b954e5e997f87023bb09cda1f7b68fcd192d454c9056875 |
+| PinVi Web | 1ac1a01ac5bd845bf72e04a3f96db0e6438b6095529480529af2a3361b19eec1 |
+| PinVi Dagster code server | 21b5c3241ab76302ee39237ceed1c5bd6f8f4166b3bb5912534b07cdfe7a57a0 |
+
+이 비교는 실제 image identity/health snapshot이다. 각 application source의 전체 재해시·공유 DB schema 변경 검증·D1/D2 성공 검증을 다시 수행했다고 주장하지 않는다. 고정 Common a960 / Map 1a3 / PinVi 005 제품 FULL113·기존 runtime source 검증과 별도의 테스트 image provenance다.
+
+own cache의 안전한 actual read 결과 JSON SHA256은 `fc462c0ba1d5dd450ea9c0d214e0cda3c6948f6a144b05c72ed6a42c978b3246`이다. 캐시 저장 뒤 로컬 출력 formatter의 hashlib import 누락을 수정해 저장된 결과를 읽었다. 원격 검증·원문 bytes·운영 상태를 변경한 오류는 아니다.
+
+## 수행·미수행 경계
+
+직접 수행: read-only inspect·known file stat/hash·작은 content 읽기와 hash/JSON/tar 검증. full Docker save를 반복하지 않았고 active helper를 수정하지 않았다.
+
+**NOT_RUN:** 독립 리뷰어의 build/tag/repin/rename/cleanup, 신규 container 또는 helper 실행, D1/D2·fixture/DB 쓰기·브라우저 재실행. 전체 chain terminal receipt·domain purge/lane PASS는 root의 별도 gate다. 이전 retry2 실패 원문과 retry3 source PASS 원문은 불변 보존한다.

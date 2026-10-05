@@ -1,6 +1,6 @@
 # Common Dagster 적용과 장애 복구
 
-Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/1f8e339c7c79f86f8952b0d4c326ab4dae56bee8/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
+Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/a960bdb114d99a2ac1b9608a77b240635806e551/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
 
 - GraphQL 조회는 plain 응답 4 MiB와 전체 10초 상한을 갖고 압축 응답을 읽기 전에 거부한다. 요청별 HTTP client를 종료 시 폐기하므로 실패·취소된 연결을 다른 요청에 재사용하지 않는다. client 정리는 별도의 50 ms 예산이다.
 - 최근 30개와 별도의 활성 실행 최대 1,000개를 조회한다. 두 조회 모두 `DagsterUrls.runs_filter()`가 Map code location 태그를 주입한다. 활성 상한 도달·잘못된 응답은 정상 0건으로 바꾸지 않고 오류 상태로 표시한다. 같은 run의 terminal 상태가 활성 샘플보다 우선한다.
@@ -16,4 +16,12 @@ Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인�
 
 ## 고정 의존성과 검증 경계
 
-Python API `[http]`와 Dagster `[dagster]`는 Common `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`에 고정한다. UI dev.6와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
+Python API `[http]`와 Dagster `[dagster]`는 Common `a960bdb114d99a2ac1b9608a77b240635806e551`에 고정한다. UI dev.6와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
+
+## code-server 자식의 경량 건강 점검
+
+standalone Compose는 `python -I -m kortravelcommon.dagster_health <port>`로 proxy SERVING과 실제 자식의 정상 repository 응답을 함께 확인한다. 전체 Dagster import 없이 설치된 생성 protobuf를 사용하고 RPC 각각 4초·수신 4MiB·health timeout 15초 상한을 둔다. 빈 응답·load error·잘못된 metadata는 실패다. 표준 module/file/package profile과 정상 default repository `__repository__`를 지원하며 stateful/custom metadata는 명시적인 확장 전까지 실패로 판정한다. 지원 profile은 위 고정 Common 가이드 §10이 정본이다. 이 CLI는 건강 판정만 수행하며 프로세스를 종료하거나 재시작하지 않는다. 재시작·orphan run 회수·공유 daemon 정책은 배포 소유자의 절차를 따른다.
+
+## 최신 tick 요약의 저장소 작업 상한
+
+`ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE])`로 Dagster 1.13.24의 전체 이력 batch rank 조회를 피한다. 네 상태를 모두 선택하여 실패 tick을 숨기지 않고 instigation별 최신 최대 3건을 표시한다. 운영 Map의 sensor tick storage statement timeout을 재현하고 같은 query의 정상 응답을 확인했다. Dagster upgrade 때 schema enum과 resolver 경로를 재검증하며 HTTP deadline·응답 cap은 계속 적용한다. 실제 재구축과 브라우저 검증은 해당 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)을 따른다.

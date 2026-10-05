@@ -1,0 +1,22 @@
+# Native retry3 명시적 run 태그 독립 검증
+
+검토일: 2026-10-06. 범위는 ignored 하니스의 run 태그 전달 한 줄, 새 launcher/upload와 실제 로컬 Dagster API semantics이다.
+
+고정 해시:
+
+- retry3 source: 6d7b6e191507f7a05b8c9825642c4d10227cd4487da23f3befd22b6c0728a099
+- retry3 launcher: 81ccdc9deea32630f20461557e91e32a6f14773d93a65a0dd243d811acb1fd77
+- retry3 upload: c144383885337f115868f6ee547386c5310a26a6e6d61a07b1ec73c8f8a4c115
+- 이전 retry2 source: 3bc13c28c833a4179c0e40dc0a0c1fc670e80a8f76d85dc6f1e84a2b28d3d126
+
+좁은 하니스 판정 PASS. source는 create_run_for_job(module.probe_job)에 tags=module.probe_job.tags를 추가한 한 keyword만 변경됐음을 직접 byte 비교했다. 이 호출은 raise/crash/stall/수동 ok 모두에 사용되므로 태그를 일관되게 전달한다. 기존 SQLite bootstrap, daemon 생성, fault 원인·timeout20·동시 healthy·interval overlap·coalescing 해제·수동 복구 assertion 및 실패 receipt/daemon cleanup은 동일하다. launcher와 upload는 retry2→retry3 및 source SHA 교체만 변경됐다. upload는 새 target 부재와 symlink 거부, transfer inode/owner/source hash 확인, 원본648 보존을 유지한다. launcher는 기존 UID/GID 및 전용 디렉터리·resource/network/mount 경계를 유지한다.
+
+직접 수행: source, launcher/upload outer 및 세 remote heredoc을 포함한 7개 Python compile PASS. 실제 로컬 Dagster 1.13.24에서 cap20와 추가 fixture 태그가 있는 job을 만들고 본인 새 SQLite instance에 두 run을 생성했다.
+
+- create_run_for_job(job) 결과 및 저장된 run.tags는 {}였다. job.tags를 자동 상속하지 않는 반례를 직접 확인했다.
+- create_run_for_job(job, tags=job.tags) 결과와 저장된 tags는 dagster/max_runtime=20 및 추가 태그를 포함하여 job.tags와 동일했다.
+- 두 run은 NOT_STARTED이며 작업 실행은 0회였다.
+
+본인 재현 사본: /home/digitie/.cache/recovery-native-retry3-tag-probe.py. 명령은 /home/digitie/.cache/map-common-recovery-venv/bin/python으로 이 사본을 실행한다. SQLite 변경은 본인 새 ext4 cache 디렉터리에만 발생했다.
+
+실행·판정 경계: 제품 bug나 실제 복구 성공을 주장하지 않는다. N150 SSH/Docker/운영 DB/실제 native 및 UI 실행·결과 수집은 NOT_RUN. 작성자가 보고한 retry2의 두 completed cases와 stall 태그 KeyError는 상황 설명이며 본인 운영 수행으로 합산하지 않는다. 이 검증은 명시적 태그가 저장되는 API 의미를 입증하며, 실제 autonomous daemon의 세 fault 완료는 새 운영 receipt에서 별도로 확인해야 한다. collector 역시 retry3 컨테이너와 새 evidence 경로를 수집해야 한다. 기존 실패·BLOCK·closure 원문 및 제품 FULL 원문은 수정하지 않았다.

@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "attempt": "ticks-query-new-pair-20261006",
+  "common_product": "a960bdb114d99a2ac1b9608a77b240635806e551",
+  "map_product": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "result": {
+    "success": true,
+    "returncode": 0,
+    "resumed": false,
+    "outcome": "deployed",
+    "transaction_id": "b1ad9ddd-a32d-4568-97f8-c965bb6ddcd5",
+    "phase": "committed",
+    "generation_sha256": "4a635b3fd4d01fdd3c8ebdfd3fbc4d64faa3fce372b59035d21be42141ec01a4",
+    "pinset_sha256": "7b0e2febd36a889e22acb070df16182cfad8d9d42a6ef62c01caa15bd3524021",
+    "schema_heads": {
+      "map_application": "404_transport_provider_identity",
+      "pinvi": "20260917_0102"
+    }
+  },
+  "warning_count": 1,
+  "original_result_sha256": "9773684389d865874793df7b4b28f8d272ec3c14093eb10635a1a4b78af32505",
+  "actual_committed_runtime_attestation_sha256": "8d998cecf435d270b704b5bb20912004d3143ce89b62a0dbe3710cefd737db99",
+  "scope": "Actual sanctioned tick query fix new-pair rebuild terminal success and matching committed six-service runtime; native/browser/D1/D2 results are separate."
+}

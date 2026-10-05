@@ -1,0 +1,45 @@
+{
+  "status": "PASS",
+  "scope": "test executor only: frontend package.json type=module; frozen product source and six production images unchanged",
+  "source_revision": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "parent_image_id": "sha256:c8e0f06b259a85973070b7f4de09afafd752589ed6235b1a27eedf416daeac77",
+  "derived_image_id": "sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4",
+  "oci_index_descriptor": {
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:871577c770a18be619c196bd3b9524075b9bf3226e13fe32ddc86e2e040224a4",
+    "size": 856
+  },
+  "platform_manifest_descriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:c7d08349e1d1703097803c03930a89e960d0bdc9fa113864a133dbc1179fa2d7",
+    "size": 4277,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  },
+  "config_descriptor": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:4735b0c11ad5c8371a8493d4f8ff9af876afa518047ab9e33d3553c527166dd1",
+    "size": 10792
+  },
+  "last_compressed_layer_descriptor": {
+    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+    "digest": "sha256:2198d9580773c8564b92cddb74d53bb95bff879c95d903ded2a364bd0e237b39",
+    "size": 1363
+  },
+  "content_read_mode": "bounded direct containerd content; no full image export",
+  "parent_rootfs_layers": 20,
+  "added_layer_sha256": "a7105bc3b2631c357bfd3aceaf6bc0f0c789039bb5681a11d72d3b1abb266cb8",
+  "added_layer_files": [
+    "work/packages/kor-travel-map-admin/frontend/package.json"
+  ],
+  "before_package_sha256": "493836767291ac8c77515eb3820aa3a55068b39144e7ad0fca9489c408733cff",
+  "after_package_sha256": "c04d0996a05a9c55b3852d3af68a3d70ac9b3fbe354615e67b23dc98d19922d8",
+  "semantic_delta": {
+    "type": "module"
+  },
+  "retained_parent_tag": "codex-map-c7-esm-parent-ticks-retry3-20261006",
+  "derived_tag": "codex-map-c7-esm-ticks-retry3-20261006",
+  "pinned_base": "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948"
+}

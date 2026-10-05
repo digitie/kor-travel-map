@@ -1,0 +1,68 @@
+{
+  "pinvi_candidate": "2a36e8973bb163c68f1a778a0c1215fa8e9d02d4",
+  "product_checks": [
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626284",
+      "name": "lint-typecheck-test",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283584/job/111750626699",
+      "name": "docker-image",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626538",
+      "name": "integration-test (1)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626579",
+      "name": "integration-test (2)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626588",
+      "name": "integration-test (3)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626451",
+      "name": "integration-test (4)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626457",
+      "name": "docker-provenance-image",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750626508",
+      "name": "contract-pin-consistency",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283584/job/111750626399",
+      "name": "sanity",
+      "state": "SUCCESS"
+    }
+  ],
+  "draft_and_advisory_checks": [
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283645/job/111750658042",
+      "name": "Aggregate CI gate",
+      "state": "SKIPPED"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283476/job/111750627863",
+      "name": "Post MCP review reminder",
+      "state": "SKIPPED"
+    },
+    {
+      "link": "https://github.com/digitie/pinvi/actions/runs/37306283588/job/111750628039",
+      "name": "contract-staleness",
+      "state": "SKIPPED"
+    }
+  ],
+  "scope": "exact source product CI; draft aggregate skip is not a passing aggregate gate; rebuilt operating evidence remains separate"
+}

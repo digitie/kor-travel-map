@@ -1,0 +1,6 @@
+{
+  "original_retry1_sha256": "86c16e271bca0e4f6754796c771c0389753a1739220930daaa6f7a75229fd038",
+  "owned_copy_sha256": "a815ecd317f19bb268e816da02e06a065973eacc0d89bba17d4c6952f095c694",
+  "overlay_helper_sha256": "ee825d52292a9126c17ab26f73a0b04eeccc7d2a4c4273fe929b1ca86a187977",
+  "scope": "Fresh retry2 names; sealed test-only ESM single package.json layer before repin. Other chain/D1/D2 assertions unchanged."
+}

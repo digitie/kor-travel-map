@@ -1,0 +1,53 @@
+# 최종 Map·PinVi 문서 및 증거 독립 리뷰 A
+
+판정: **PASS**. 문서·증거 closure 범위의 신규·잔여 P0/P1/P2는 0건이다. 원래 문구의 P3 한 건은 최종 postfix에서 FIXED다. 제품113 FULL 판정과 실제 운영 검증의 후속 문서 리뷰이며 새로운 제품 FULL 실행·CI·merge 완료로 집계하지 않는다.
+
+## 고정 기준과 소유 범위
+
+- 최초 manifest: map-pinvi-final-docs-reviewed-manifest.json, SHA256 6de8136a0ed71e0e375576ce43af5b85eceecdc0e5a1b07e0e34b5b6e4d9dc2c.
+- 최종 동일 범위 postfix manifest: map-pinvi-final-docs-reviewed-manifest-postfix.json, SHA256 89ac320a5f404faf667823d1deba832318a6225712ca789563e118cc199d7252.
+- 781개 파일: 현재 narrative/guide/task 16개, 보존 evidence 765개.
+- 제품 Common a960bdb114d99a2ac1b9608a77b240635806e551 / Map 1a3c4673790f51daa1a2f5ccf803d4e31673bad6 / PinVi 0058369c778f8c3357ee393e12e3447d7975cc1f.
+- 읽기 전용 검토이며 이 새 ignored 원문만 작성했다. 상대 리뷰어의 원문·JSON raw 내용은 열람하지 않았다. 보존 대상 peer 파일은 bytes/SHA만 확인했다.
+
+## 직접 수행 및 재사용
+
+두 manifest 자체 hash를 확인하고 최초 manifest 시점 781개, 최종 postfix의 781개 모두 실제 bytes 수와 SHA256이 일치함을 직접 검사했다. 최종 manifest는 최초 대비 정확히 journal/resume 6개만 달랐으며 나머지 775개는 불변이었다. 수정 생성기의 old/new 문구를 AST에서 읽어 현재 6개 파일을 메모리에서 역치환했을 때 각각 최초 파일 SHA와 정확히 일치했다. 제품·가이드·기존 증거의 변경은 없다.
+
+기존 고정 제품 manifest의 Common/Map/PinVi 전체113 blob을 각 immutable commit의 git show로 읽고 기록 SHA를 다시 대조했다: 113/113 일치. 그중 현재 비문서 파일69개도 immutable blob과 byte-identical이었다. 이전의 독립 FULL113 소스 검토와 직접 회귀·설치·실제 CLI 검증은 이 불변 범위에 재사용한다. 대규모 제품 suite를 다시 실행하지 않았다.
+
+현재 README/closure 문서, journal/resume의 최신 상태 절, T-216/T-319의 현 후속 절 및 PinVi T-371 작업 원장·외부 global task 상태를 읽었다. 큰 journal/resume의 과거 기록 전체를 새로운 사실로 다시 승인하지 않았으며 최신 절의 역사 구분과 참조를 확인했다. 기존 세 normative guide를 다시 읽고 이전 독립 PASS와 동일 hash임을 확인했다.
+
+- Common guide: ed75f864e2719d1130e94013c58cda8b15d14fb87904bda50ea3c5758cee7c6d.
+- Map guide: 5d199456a2ee01e600f8359c444f487a215dbd2846cd9eaaed1d9acfed9fd525.
+- PinVi guide: 0494412105ff63ad8119c9c72220397da7019d2103b44ac7b1c1b748a91f7f31.
+
+16개 문서에서 상대 링크436개의 대상 존재를 확인했다: missing0. Common §10/§11과 소비자 guide 참조 heading도 확인했다. 공개 GitHub 링크의 HTTP 가용성을 새로 조회한 결과는 아니며 고정 로컬 source/경로 정합성을 검토했다. 최신 상태 절·guide·현 task 문구의 private IP/URI userinfo/private-key 패턴은 발견0이었다. peer 원문을 읽지 않기 위해 archived raw 전체 content privacy scan은 수행하지 않았다. 파일 hash 보존 검사는 전체781 범위다.
+
+실행 방식은 WSL Ubuntu-26.04의 읽기 전용 Python SHA/JSON/링크 검사와 immutable git show였다. 제품/DB/서비스 수정, 운영 호출, source 재빌드·테스트 재실행·stage/commit/push는 수행하지 않았다.
+
+## 실제 증거와 문서 주장 대조
+
+선택된 작성자 actual receipt 및 source proof를 직접 읽어 해시 연결과 엄격한 성공 필드를 확인했다. 해당 실행은 작성자 결과이며 리뷰어의 신규 테스트 실행에 합산하지 않는다. 이전 독립 실제 읽기 전용 확인의 result·validation·overlay hash와도 일치했다.
+
+- 재구축 receipt: 21c0fc746d5916b74ecd557e8682d6a02cdd5a067058e30b08e60b37de3d0261. success is True, returncode는 int0, resumed is False, outcome deployed/phase committed. transaction b1ad9ddd-a32d-4568-97f8-c965bb6ddcd5는 attested deploy_run_id와 같다.
+- 실제 runtime attestation: 8d998cecf435d270b704b5bb20912004d3143ce89b62a0dbe3710cefd737db99. 여섯 서비스 image/source·schema·Common pin 증거를 기존 독립 실제 확인에 연결한다.
+- byte inheritance: 72c7f9ee69486695327ddd6a964d5f33f97f59f0f710cfdb637135ca3e0278d7. 이전 actual image와 최종 actual image ID는 서로 다르다. 관련 Common/Dagster Python bytes와 Dagster1.13.24 version/final image fence에 한정하여 이전 격리 native 결과를 이어받는다.
+- 실제 UI receipt: 38db579f14def71172965a3a7e8ba8e0f3469469d815392fcf814692f330a9c8. final attestation8d998에 결박되고 Chromium/Firefox × Map/PinVi 네 사례, desktop/mobile8 capture metadata가 있다. 로그인200·Secure HttpOnly cookie, Map UI logout200, PinVi API 테스트 세션 정리204, summary 요청 abort 뒤 정상 화면 유지·복구, width390/keyboard scroll의 범위가 문서와 같다. 화면의 신규 시각 검사는 수행하지 않았다.
+- 실제 D1/D2 closure receipt: 0958cf5bf98013473beaf4ea722e9860eae9ce5ba19b49073c120024ed6ed14c. D1 11 PASS, M01 ACL passed, D2 normal/attempt0, main/recovery 각 planned2/observed2/passed2, fixture purge feature1/field_override7 및 residue0/ACTIVE false/BLOCKED false다.
+- D2 원본 result cedf21ddd6bba89e61b0fb0f98363d30e461a06ee3bfc960384846e4e4c57070와 validation84b0a84265af4a2d773467720b7d5f293e702baa5fe38ea7455a32e8267ae935는 직전 독립 실제 읽기 전용 관측과 같다. 작성자의 collector63c 실행은 원본 metadata/fingerprint를 유지하며 fresh validator output byte-identical=True를 기록한다. 공식 validator의 신규 재실행을 본인이 수행했다고 주장하지 않는다.
+- 실제 test overlay proof863a8d4f679e31e23d8475488a475aa0817778b737748150a577298e85cfdba5는 이전 독립 실제 OCI index→unique amd64 manifest→config→layer/diffId 및 type=module 단일 키 검증 원문과 같고, D1/D2 actual image871577…과 결박된다. 이 변경은 테스트 executor image이며 frozen product source와 운영6 images의 변경이 아니다.
+
+old native trial, 최종 API tick query/C7 bytes, 최종 재구축, UI, 테스트 ESM layer, D1/D2를 서로 다른 증거 범위로 설명한다. synthetic allocation을 운영 RSS로, request abort를 daemon/worker 종료로, 새 이미지의 bytes inheritance를 새 native fault run으로 설명하지 않는다.
+
+이전 rebuild 실패·D1 host dependency/CJS 수집 실패·retry2 OCI digest 가정 실패·collector 재검증 실패와 수정 후 PASS는 개별 파일로 존재하며 manifest hash가 유지된다. collector negative3ae12…는 D1/D2 실행 자체의 실패가 아님을 문서와 원본 scope가 동일하게 구분한다. peer의 과거 판정은 현재 통합 narrative에 있는 역사적 메타데이터와 존재/hash만 확인했다.
+
+## finding 및 disposition
+
+**D-FINAL-A01 / P3 / FIXED** — 최초 manifest의 세 저장소 journal/resume 최신 절은 “관련 bytes/image/version이 동일”이라고 표현하여 이전 native image와 최종 image ID 자체가 같다는 의미로 읽힐 여지가 있었다. 실제 inheritance는 이전5ded…와 최종197597…의 서로 다른 image를 기록한다. 최종 postfix의 6개 문장은 설치 관련 코드·버전의 동일성과 최종 image ID의 배포 기록 대조를 분리한다. 역치환 byte-exact 확인으로 해당 한 문장 외 변경이 없음을 직접 검증했다. README는 처음부터 scope를 정확히 설명했고 현재 열린 blocking finding은 없다.
+
+## 남은 gate와 범위 밖
+
+T-371은 구현·실제 수용 완료와 문서 포함 exact CI/PR #576 merge 대기를 함께 기록하며 미완료 원장에 남아 있다. Common T-216/T-319의 IN_PROGRESS와 PinVi의 외부 M05/relay/backup task는 이번 완료만으로 닫지 않는다. 최신 journal/resume의 다음 작업은 Common #28 → Map #1303 → PinVi #576의 CI 확인 후 merge commit이며 현재 merge 완료 주장은 없다.
+
+generated preservation indexes, 최종 리뷰 원문 append 및 staging exact-byte 감사는 순환 방지를 위해 이 manifest 밖이다. 최종 HEAD CI, merge, 이후 main 결과는 NOT_RUN/미완료 gate다. 이 보고서는 현재 고정 문서·증거 의미와 보존 정합성의 PASS이며 그 gate를 대신하지 않는다.

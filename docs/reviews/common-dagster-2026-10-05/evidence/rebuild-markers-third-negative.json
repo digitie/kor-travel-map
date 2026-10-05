@@ -1,0 +1,18 @@
+{
+  "common_product": "a960bdb114d99a2ac1b9608a77b240635806e551",
+  "map_product": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "pinvi_product": "2a36e8973bb163c68f1a778a0c1215fa8e9d02d4",
+  "attempt": "markers-third",
+  "result": {
+    "status": "failed",
+    "stage": "candidate_compose_build"
+  },
+  "failed_service": "pinvi-dagster-code-server",
+  "failure": "Docker frontend grpc server closed unexpectedly at apps/etl/Dockerfile:1; external frontend docker/dockerfile:1.7.1-labs pinned b99fecfe",
+  "candidate_pinset": "77fcdec4d720f6f39ecd5c9bf832bd494c3005a393ff6f67561265ca63cbe580",
+  "five_prior_candidate_images_built": true,
+  "operating_generation_changed": false,
+  "existing_six_services_healthy": true,
+  "unit_exit_zero_is_not_rebuild_success": true,
+  "scope": "actual third negative paired build; source review/CI PASS does not imply runtime PASS"
+}

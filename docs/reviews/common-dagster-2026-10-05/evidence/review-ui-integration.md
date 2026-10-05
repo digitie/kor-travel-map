@@ -1,0 +1,84 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (c) 2026 digitie -->
+
+# Map·PinVi integration fixture 후속 FULL 연속 독립 리뷰 B
+
+판정: **PASS**. 이전 본인 FULL PASS 제품과 동일한 고정 제품에 integration fixture 수정만 추가되었다. 새 P0/P1/P2/P3 finding은 없다. 이번 PASS는 운영 재구축·live·진행 중인 전체 integration·최종 CI의 완료를 주장하지 않는다.
+
+## 고정 범위와 격리
+
+- 리뷰어 James / B. 실행 ID `J-MAP-PINVI-INTEGRATION-24DE4F-AA265C-20261005`.
+- 기록된 고정 source/검증 단계: 2026-10-05T09:59:07.794416+00:00 ~ 2026-10-05T10:01:30.409352+00:00.
+- manifest `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-integration-reviewed-manifest.json`, SHA256 `beb9b91236a8d5a62315b6569262ad0f61722f1be33873b877aede5dc2cb1d74`.
+- Map base `3b9b49d694c7dd544ec6ed86253f5935bde0f193` → 실제 candidate `24de4f288b40b3fe9033b32fa91231ede60d4d44`. 직전 FULL 후보 `e4e27f76a5ea276febea1f36ad0308aac87ea1d2`와 비교했다.
+- PinVi base `07cfef222c56d7e648c81b017aa8ffe4ccd1c386` → 실제 candidate `aa265cf1c3917b9d0e89316d06c35678d23757c2`, 직전과 동일 Git 객체다.
+- Common Python `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8` 및 Common UI dev.6 제품·artifact는 그대로다.
+- Map Git archive를 본인 `/home/digitie/.cache/james-map-pinvi-integration-20261005/map`에 추출했다. tar SHA256 `9fbfc099b96e46292bc0bf2dffb4d264dd278a7314e8ceba006482daae37248c`. PinVi 소스는 동일 aa265cf 객체에 대해 고정 Git show로 해시를 검증했다.
+- manifest Map 59개/PinVi 13개, 총 72개 파일의 고정 Git blob SHA256이 모두 일치한다. `docs/reviews/**`의 내용 및 상대 원문·통합 판정은 열람하지 않고 해시만 확인했다.
+- Linux Git/Python만 사용했다. 본인 scratch와 새 보고서 외 제품·기존 원문·DB·설치·서비스·타인의 작업을 수정하지 않았다. 외부 PG 및 현재 실행 중인 전체 integration은 사용하거나 중단하지 않았다.
+
+## 제품 동일성과 FULL 증거 재사용
+
+`git diff --name-only e4e27f76... 24de4f28...`의 정확한 변경 집합은 다음 세 파일뿐이다.
+
+1. `tests/integration/test_ops_datasets_api_projection.py`
+2. `tests/integration/test_provider_catalog.py`
+3. `docs/journal.md`
+
+따라서 Python runtime·UI·CSS·Docker·OpenAPI·배포 의존성·vendor·M05 provenance 및 runbook은 직전 본인 FULL PASS 후보와 byte 동일하다. PinVi는 candidate SHA 자체가 같다. 이전 전체 base→제품 범위를 축소하지 않고 본인 독립 FULL 보고서의 유효한 제품 증거를 재사용한다. **FULL 연속 리뷰**이며 문서 전용 예외나 별도 새로운 UI/live 검증으로 집계하지 않는다.
+
+직전 본인 원문: `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-final-closure-review-ui.md`, SHA256 `283c66a0d2ed2b24891828210b231e008d2603cf75e638855dd959538302f2d1`. 그 보고서의 직접 Map Python 37·PinVi 46, actual detail hook RTL 3, repository 공격 13, close fault 4, wheel·artifact 동일성 검증은 이번에 재실행한 결과가 아니라 **동일 제품에 대한 이전 본인 실행 증거**다. 이전 BLOCK 및 PASS 원문은 변경하지 않는다.
+
+## 변경 검토와 EXECUTED
+
+### 1. assertion 약화 여부 — PASS
+
+고정 이전/후속 Git source를 Python AST로 비교하고 assertion 개수와 AST multiset 포함 관계를 직접 검증했다.
+
+- `test_ops_datasets_api_projection.py`: 193 → 193. 기존 assertion 전부 동일하고 중복 개수까지 보존한다.
+- `test_provider_catalog.py`: 117 → 118. 기존 117개 전부 보존하고 `:1140`의 `schedule_source_status == "ok"` assertion 1개를 추가했다.
+- canonical operation projection, ID routing, preview/policy, pagination 및 기존 인증 거부 assertion을 삭제·완화하지 않았다. DB seed·commit·finally cleanup 코드는 diff에서 바뀌지 않는다.
+- 과거 global client fixture가 실제 adapter에서 소비되지 않아 schedule 회귀가 다른 결과로 보일 수 있던 경로를 request factory 주입으로 바꾼다. provider catalog의 새 assertion은 조용한 degraded 통과도 막는다.
+
+### 2. 실제 fixture factory + 제품 middleware 수명 공격 — 8/8 PASS
+
+고정 두 테스트 파일의 `_request_dagster_client` 함수 AST를 각각 그대로 추출·실행했다.
+
+- 위치: projection `:1015`~`:1025`, catalog `:1106`~`:1116`.
+- 실제 `dagster_http.dagster_http_dependencies` 및 `DagsterHttpClientMiddleware`를 own FastAPI fixture에서 사용했다. schedule/DB route 전체 실행은 아니며 request adapter/종료 동작의 직접 테스트다.
+- 각 factory마다 정상 요청 2개, 원래 ConnectError 발생 요청 1개, caller cancellation 요청 1개를 수행했다.
+- 총 8개 request client가 모두 서로 다른 인스턴스이고, 해당 요청 종료 후 모두 `is_closed=True`다.
+- 실패는 원래 ConnectError, 취소는 원래 CancelledError를 유지했다.
+- `request.state.dagster_http_client`에 client를 보관하므로 실제 제품 middleware finally가 종료했다. 앱 전역 client를 공유하거나 test context가 종료될 때까지 연결을 열어 두지 않는다.
+- fixture 주입 경계 종료 후 원래 `dagster_http.http_client_from_request`가 복원되었다. 원 테스트의 monkeypatch context 및 catalog async context manager의 yield/finally 경계를 정적으로 확인했다.
+- HTTPX ASGITransport/MockTransport만 사용하며 `socket.socket.connect`를 예외 guard로 막은 상태에서 전부 통과했다. 외부 Dagster·provider·PG 연결을 하지 않았다.
+- 정상 경로의 요청당 factory 호출은 1회다. 이 공격 결과를 임의의 중복 factory 호출이나 모든 service route의 timeout 검증으로 확대하지 않는다. 원래 runtime request 내 캐싱·50ms disposal 코드는 동일 제품으로 이전 FULL 검토를 유지한다.
+
+직접 재현 command: 본인 scratch cwd에서 `/home/digitie/.cache/map-common-recovery-venv/bin/python /home/digitie/.cache/james-map-pinvi-integration-20261005/fixture-lifetime-probe.py`. PYTHONPATH는 own archive의 API/core source와 본인이 보존한 Common 1f8 source를 우선했다. 외부 설정/설치는 변경하지 않았다.
+
+### 3. root 실행 증거 읽기 — 본인 실행에 합산하지 않음
+
+허용된 `/tmp/map-request-client-integration-final.log`를 읽었다. 내용은 `22 passed in 29.17s`, 읽은 bytes SHA256 `c444876c44bb0f256b5dcb7eeacc46e9be7fd0b7763b7ac7d3d878b020b145f6`이다. 이는 root의 local PostGIS 실행 결과이며 본인의 8건 fixture 검증이나 독립 PG 실행으로 표시하지 않는다. 로그만으로 실제 운영/live 완료를 판단하지 않는다.
+
+## 이전 finding과 최종 범위
+
+- J-CONSUMER-P1-01(P1), J-CONSUMER-P1-02(P1), J-CONSUMER-P2-01(P2), J-CONSUMER-P2-02(P2), J-CONSUMER-P2-03(P2): **FIXED 유지**. 수정된 제품 bytes는 직전 FULL 후보와 같다. 이전 severity 및 BLOCK 원문은 소급 수정하지 않는다.
+- 신규 P0/P1/P2/P3 finding: **없음**.
+- 정상 빈 snapshot과 repository mismatch 구분, 검색 후 선택 상세 identity, 실제 상세 pagination/cursor, last-good·AbortSignal, 로그인/auth/menu 계약 및 bounded memory 구조에 대한 기존 FULL 판정을 그대로 적용한다.
+- 실제 operating RSS 측정이나 모든 외부 provider의 장시간 안전성을 증명했다는 주장은 하지 않는다.
+
+**NOT_RUN:** 본인 native PostgreSQL integration/전체 integration 실행, 이번 후보의 전체 pytest·type/lint/build·Docker 실행, exact CI 37293186111 직접 판정, 실제 N150 rebuild/live/browser 및 운영 Dagster 장애 주입. root의 진행 중 결과는 미리 PASS로 표시하지 않는다.
+
+## 증거 보존
+
+원문: `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-integration-closure-review-ui.md`.
+
+본인 scratch: `/home/digitie/.cache/james-map-pinvi-integration-20261005`.
+
+| 증거 | SHA256 |
+| --- | --- |
+| fixture-lifetime-probe.py | ca0c6995997bf5d323dae6f8a613cb6a5543db70766fa61dba2584422c1cb2ab |
+| fixture-lifetime-result.txt | 22e2646d193cb9a69a86e5354dd91cf4acbe4e4367750d948ece6f33bc0d26af |
+| assertion-check.json | 603772fa36bf8831f456a086d34022c6a0eae4fed10d3a51819dfd5451ce7a8f |
+
+판정은 명시된 Map24de4f/PinVi aa265cf 제품과 테스트 delta에 대한 FULL 연속 PASS다. 미완료 운영/live/CI gate나 merge 승인으로 확대하지 않는다.

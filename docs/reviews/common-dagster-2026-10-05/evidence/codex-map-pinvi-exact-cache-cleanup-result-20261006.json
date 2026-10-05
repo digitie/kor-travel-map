@@ -1,0 +1,17 @@
+{
+  "selected_own_cache_record_count": 21,
+  "records_removed": [
+    "1vb6ramksc9ku7jp9atdgc7gk",
+    "3w4ev7hdcbsew8hcya3jc43cf",
+    "cp6lqdapb9ssfvkdpv45trtcb",
+    "f58fyavt6jblzc2b7bgvh47em",
+    "ivrsp027f1bvp1k2ybzlws7lm",
+    "tae50spcetoj0uxkkl0kvv9h1",
+    "ulpteh425ubp0d0e3y567p4gf",
+    "xl0ymwem1wdtmyw27eht1b3hm",
+    "y6p8lvbvrce5b2crl7douir5w"
+  ],
+  "freed_bytes_observed": 8556351488,
+  "all_six_operating_images_unchanged_healthy": true,
+  "scope": "exact verified own cache IDs only; engine boolean selectors previously selected zero, so omitted after direct metadata validation"
+}

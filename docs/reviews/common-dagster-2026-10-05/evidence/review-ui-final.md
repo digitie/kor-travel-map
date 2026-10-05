@@ -1,0 +1,97 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (c) 2026 digitie -->
+
+# Map·PinVi 최종 소비자 FULL 독립 적대 리뷰 B
+
+판정: **PASS — 고정 제품 소스에 대한 FULL 리뷰**. 본인 P1 2건·P2 3건은 모두 FIXED이며 새 P0/P1/P2/P3 finding은 없다. 운영 재구축·N150 live·최종 HEAD CI는 이 보고서의 PASS에 포함하지 않는다.
+
+## 실행과 격리
+
+- 리뷰어: James / reviewer B, UI·API·인증·소비자 계약·접근성·메모리 관점.
+- 실행 ID: J-MAP-PINVI-FINAL-E4E27F-AA265C-20261005.
+- 소스 고정·직접 테스트 시간: 2026-10-05T09:22:48.176852+00:00 ~ 2026-10-05T09:27:09.742749+00:00.
+- manifest: `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-final-reviewed-manifest.json`, SHA256 `75c7022815154989e91d83e1b8ac0010aa17cca4cf3e3bb78e8a61f979a8b544`.
+- Map base `3b9b49d694c7dd544ec6ed86253f5935bde0f193` → 실제 Git 객체 `e4e27f76a5ea276febea1f36ad0308aac87ea1d2`.
+- PinVi base `07cfef222c56d7e648c81b017aa8ffe4ccd1c386` → 실제 Git 객체 `aa265cf1c3917b9d0e89316d06c35678d23757c2`.
+- Common Python `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`, UI dev.6 source `e28559803c1ec1134ef7ba7736b9acf4cadb9a32`는 이전 본인 FULL 검토 제품과 동일하다.
+- Map/PinVi Git archive를 본인 ext4 경로 `/home/digitie/.cache/james-map-pinvi-final-20261005/{map,pinvi}`로 추출했다. archive SHA256: Map `ab533ff18a49709e9d6eb7193acfd835c535cf0b110fca19e2685c4880bbe694`, PinVi `c7ab4372fc7fa7701398467a4a2ce99136957df1f01b9ce82d7e8db952c13d24`.
+- manifest Map 57개·PinVi 13개 파일의 SHA256을 모두 확인했다. 원본 worktree의 후속 HEAD/dirty 파일을 제품 소스로 읽지 않았다.
+- Linux Git/Python/Node만 사용했다. 기존 venv·node_modules는 읽기 재사용하고, 테스트·Vite cache·wheel은 본인 scratch에만 만들었다. Common PYTHONPATH는 본인이 보존한 1f8 고정 archive를 우선했다. 제품·DB·운영 서비스·설치 환경·타인 파일을 수정하지 않았다.
+- 상대 원문 및 통합 판정은 열람하지 않았다. `docs/reviews/**`는 manifest 해시만 확인하고 내용 검토에서 제외했다. 본인의 이전 두 BLOCK 원문 SHA256 `47fff5e3709d44b76af3a3e33b558bbb0c2e982daca720034bec2d3abba84cbe`, `01f93d1d695d5bd37543ad1f4182c845ec560eb1af8db6285a98faeb3cb99688`의 불변성을 다시 확인했다.
+
+## FULL 범위와 변경 분리
+
+원 base→후보 전체 제품·계약·runbook delta를 대상으로 한다. 이전 본인의 전체 검토에서 확인한 공통 로그인/redirect/error clear, AppMenu와 logout, Dagster snapshot·active run·tick·링크, bounded HTTP, snapshot batch·DB/step 제한, Docker/vendor, OpenAPI·M05 pair 및 공개 의존성 계약을 연결해 재평가했다.
+
+이전 본인 고정 archive 72242b1/f93af32와 파일별 bytes를 비교했다. 이번 실제 추가 변경은 Map의 summary repository 소속 검사·선택 상세 wrapper·관련 테스트와 journal, PinVi의 repository 필수 collection/소속 검사·관련 테스트와 journal뿐이다. 나머지 제품은 본인이 이미 검토한 bytes와 같다. UI·API·복구·배포 의존성과 runbook을 바꾸는 base→전체 제품 범위이므로 **FULL** 대상이다. 작은 후속 delta만으로 light나 문서 closure 예외로 축소하지 않았다. 이후 원문/증거만 추가하는 커밋은 제품 리뷰와 별개다.
+
+PinVi `apps/web` 제품은 이 base→후보에서 변경되지 않는다. 기존 dev.6 UI 계약의 보존 검토이며 새 PinVi 로그인/메뉴 기능의 구현이나 새 live 실행으로 집계하지 않는다.
+
+## 이전 finding disposition
+
+| ID / 원 severity | 상태 | 직접 확인과 위치 |
+| --- | --- | --- |
+| J-CONSUMER-P1-01 / P1 | FIXED | PinVi `apps/api/pyproject.toml`의 Hatch direct-reference 허용. 이번 후보에서도 offline clean wheel을 직접 빌드했고 성공했다. |
+| J-CONSUMER-P1-02 / P1 | FIXED, Docker 실행 미포함 | Map `docker/api.Dockerfile:12` builder에 Git 설치가 유지된다. `docker/frontend.Dockerfile:17` frozen vendor COPY도 유지된다. 이번 직접 Docker build는 NOT_RUN이며 정적 prerequisite 수정과 제품 bytes를 확인한 것이다. |
+| J-CONSUMER-P2-01 / P2 | FIXED | `common-dagster-panel.tsx:65` controlled 선택과 `events-panel.tsx` 실제 상세 hook·event pagination을 유지한다. 선택 전 GET 0, 선택 후 상세, 다음 cursor, 다른 run 첫 페이지 cursor 초기화, degraded 때 선택·상세 유지, 재선택 닫기, unmount AbortSignal을 실제 hook RTL에서 직접 확인했다. |
+| J-CONSUMER-P2-02 / P2 | FIXED | Map `dagster_query_service.py:179`와 `:361`가 요청 selector name/location을 비교하고 잘못된 repository 행을 지운다. PinVi `admin_etl.py:627`와 `:733`은 필수 collection·소유 name/location을 먼저 검증한다. 이전 foreign identity 반례와 추가 단일 name/location 오류는 거부되며 정상 빈 metadata는 허용된다. |
+| J-CONSUMER-P2-03 / P2 | FIXED | Map `common-dagster-panel.tsx:67` wrapper가 jobName/runId/status/실제 cap 또는 미확인을 명시한다. 본인 실제 상세 hook fixture에서 alpha 선택→job_beta 검색→alpha 행 숨김 후에도 alpha 작업·ID·FAILURE·120초 및 기존 오류만 상세에 유지되고 beta identity는 섞이지 않았다. |
+
+severity를 낮추거나 이전 BLOCK 원문을 소급 수정하지 않았다.
+
+## EXECUTED
+
+1. **Map 고정 소스 Python 37 PASS, 2.59초.** 아래 네 파일을 자체 archive cwd에서 `/home/digitie/.cache/map-common-recovery-venv/bin/python -m pytest -q -p no:cacheprovider`로 실행했다.
+   - `packages/kor-travel-map-api/tests/test_dagster_bounded_summary.py`
+   - `packages/kor-travel-map-api/tests/test_application_http_adapters.py`
+   - `packages/kor-travel-map-api/tests/test_dagster_query_service.py`
+   - `packages/kor-travel-map-dagster/tests/test_snapshot_batching.py`
+   - 확인 범위: older active/cap·semantic 오류·repository shape/identity, 요청 adapter의 stream/압축/응답 경계, summary/query parsing, 100개 bundle batch. 실제 PostgreSQL transaction 검증으로 간주하지 않는다.
+
+2. **PinVi 고정 소스 Python 46 PASS, 1.59초.** 자체 `pinvi/apps/api` cwd에서 `/home/digitie/.cache/pinvi-api-common-venv/bin/python -m pytest -q -p no:cacheprovider tests/unit/test_admin_etl_dagster_probe.py tests/unit/test_kor_travel_map_admin_contract.py`.
+   - 확인 범위: nullable failure count·active run·malformed response·scope·필수 metadata·정상 empty·별도 close 예산·caller cancellation·M05 snapshot 계약.
+
+3. **본인 Map HTTP fixture 5/5 PASS.** `probes/repository-postfix-probe.py`는 실제 `get_summary`와 HTTPX MockTransport를 사용한다. original missing shape, foreign name+location, foreign name만, foreign location만은 `error/repositories=[]/repository_count=0`; owned empty는 `ok/repository_count=1/jobs=0`. 외부 서비스는 호출하지 않았다.
+
+4. **본인 PinVi HTTP fixture 8/8 PASS.** `probes/pinvi-repository-final-probe.py`는 실제 snapshot fetch를 사용한다. owned empty는 정상이며, foreign name/location·sensor collection 누락·문자열 isJob·잘못된 asset group·null location·배열 name은 `degraded/count=null/repositories=[]/recent_runs=[]`. 정상 metadata의 jobs 0과 실행 이력 1은 함께 허용하여 빈 job collection을 장애로 오인하지 않음을 확인했다.
+
+5. **본인 actual hook RTL 3 PASS, 23.60초.** `probes/detail.attack.test.tsx` 2건 및 `probes/detail-identity.attack.test.tsx` 1건. HTTP `getJson`만 mock하고 제품의 실제 run detail hook·실제 Common dev.6 component를 사용했다. 이전 identity 공격을 그대로 재실행하고 run ID·상태·cap·다른 job 혼입 부재 assertion을 추가했다. jsdom 결과이며 실제 브라우저/화면 폭 검증으로 표시하지 않는다.
+   - 실행: probes cwd에서 `/usr/local/bin/node /mnt/f/dev/kor-travel-map-codex-dagster/node_modules/vitest/vitest.mjs run --config /home/digitie/.cache/james-map-pinvi-final-20261005/probes/vitest.config.mts`.
+
+6. **본인 close fault fixture 4/4 PASS.** 정상 body, ConnectError, 전체 timeout, caller cancellation 각각 실제 HTTPX client의 `aclose`에서 합성 OSError를 주입했다. 정상 결과는 ok, 본문 오류/timeout은 down, 취소는 원래 CancelledError를 보존한다. client는 closed이며 private 오류 문자열은 로그/표시로 전달하지 않고 정적 정리 경고만 남는다. `probes/pinvi-close-postfix-probe.py`.
+
+7. **PinVi clean wheel PASS.** `uv build --wheel --offline --out-dir <own scratch>/pinvi-dist <own scratch>/pinvi/apps/api`. wheel SHA256 `e8862348c0e0aa886de24e20e75d42eda2a8f9ad3c1ddc47e5ef1a0d4873d524`. 기존 빌드 prerequisite finding의 재현 경로가 성공으로 바뀌었다. 실제 Docker image 생성으로 집계하지 않는다.
+
+8. **동일 bytes 확인 PASS.** manifest 70파일, UI tarball SHA256 `e4945d01d9eb89ed505a95b551899fd0ecf41be66c9ee6b76246701350447e6d`, 실제 읽기 재사용 설치 `@kor-travel/ui` 24파일과 frozen tarball 전체 파일 일치, Map OpenAPI와 PinVi vendored admin snapshot bytes 일치. 후보 외 node_modules bytes를 검증 없이 제품으로 가정하지 않았다.
+
+## 새 finding과 남은 검증 경계
+
+새 P0/P1/P2/P3 finding: **없음**.
+
+- foreign repository 응답을 healthy empty snapshot으로 저장하는 이전 경로는 막혔다. 정상 empty와 degraded를 구분하므로 소비자 query의 last-good 보존 계약이 유지된다.
+- 검색으로 행을 숨기는 일반 사용자 동작에서도 상세의 소속이 보인다. 상세 요청은 선택한 run만 수행하고 run 변경 시 컴포넌트 key가 바뀌어 event cursor가 다른 실행으로 넘어가지 않는다.
+- 새 validator는 입력 타입·collection을 검사한 뒤 metadata를 정상으로 공개하며, 확인 실패 시 count null 또는 error를 통해 0건 성공으로 오인시키지 않는다.
+- memory 개선은 유한 응답·batch·연결·step·GC 구조의 계약이다. 운영 RSS 감소량이나 모든 provider의 메모리 상한을 실측했다고 주장하지 않는다.
+- 저장소 name/location 검증은 응답 소유권 확인이며 서버 인증을 대체하지 않는다. 기존 인증·RBAC·CSRF와 endpoint 경계는 앱 소유 그대로다.
+
+**NOT_RUN:** N150 실제 운영 재구축/production browser live E2E, 실제 모바일 폭·keyboard scrolling·배포 artifact 관측, 이번 후보의 Docker build·전체 PostgreSQL/전체 회귀·전체 type/lint/build·GitHub CI 직접 관측, 운영 Dagster worker 중단/복구 및 실제 장기 memory 측정. 부모의 전체 API 1236 PASS나 UI/type/CI 결과를 본인 실행에 합산하지 않았다. 새 operational/live 원본이 나오면 제품 수정 없이 별도 evidence closure로만 판단할 수 있다.
+
+## 원문·재현 증거
+
+원문은 `/mnt/f/dev/kor-travel-weather/.playwright-mcp/map-pinvi-final-closure-review-ui.md`에 저장한다. 이전 BLOCK 두 원문은 불변이다. 본인 scratch `/home/digitie/.cache/james-map-pinvi-final-20261005`의 실행 결과 및 `verification.json`에 파일별 digest를 보존했다.
+
+| 증거 | SHA256 |
+| --- | --- |
+| probes/repository-postfix-probe.py | 6d1a97418995c9464e14e791c0b2455f83b6074dd469f04c974ba28dbf885210 |
+| probes/pinvi-repository-final-probe.py | 8c043ce3ef1ea0be79e062dc5a51fff472283d614d9780ca1e68c465dc387ce4 |
+| probes/detail-identity.attack.test.tsx | 35612cc0428cb2845bdd2c87b066c3ad17044d7cba92d257436a5243c823dcd9 |
+| probes/detail.attack.test.tsx | bb464d0bce8c68215079d3346dbf53c858446242a702d53cfe884262fb68b79b |
+| probes/pinvi-close-postfix-probe.py | 8544ce74aaf0bd37d57e381893116037f3c3e9e3d8b75240f82ad0632ad2038e |
+| map-focused-result.txt | 2189225b0bdaa0b1a711acfc3c0f1e5ddb599428d6caa2328614beb98adb44ad |
+| map-repository-result.txt | 7a81f425044b1928a676621f194e640386ddffd0c16e0491ee7231f25fdeb5df |
+| pinvi-focused-result.txt | 231940e64daca9d94e5461c55f3f4864662a6e92c5089be0dd279970c5142459 |
+| pinvi-repository-result.txt | 1e9468cd5a70afe869e44b2188a020e4ebd00002d37c9403393820f8679fe313 |
+| ui-detail-result.txt | 369fd836102b599338d6bf90148625821e40102e6f87f5aabb5b6f7d0faec279 |
+| pinvi-close-result.txt | 5c071dba6edf1f6e19cb77eaf45b79398b64305be2bc48f69237ec3f5b38dd99 |
+
+제품 FULL 리뷰 PASS는 명시된 두 candidate에만 적용한다. 실행하지 않은 운영/live/CI 게이트의 완료나 PR merge 승인으로 확대하지 않는다.
