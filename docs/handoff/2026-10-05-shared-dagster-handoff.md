@@ -21,11 +21,11 @@
 
 | 대상 | 버전 | 비고 |
 |---|---|---|
-| Map | `a68c2b7d` (#1296) | D1·D2 GREEN, deploy-status `committed` |
+| Map | `13f87577` (#1297 포함, 2026-10-05 04:05Z 회전) | D1·D2 GREEN(t71a), deploy-status `committed` |
 | PinVi | `80c92b6c` | Map과 pinned pair |
 | Manager | `f14ed1a4` (#461) | 설치·rebind·`pin verify` 0 |
 | transport | `e00e634` (#64·#65·#66) | 공용 plane 합류, admin 게이트 |
-| weather | `5da6e158` (#71) | KMA 특보 skip-locked |
+| weather | `2e53dc72` (#71·#73·#74·#75) | 특보 skip-locked, nowcast 결측 센티넬, skip 경보, python-kma-api `12e7f1f1` |
 
 - **공용 Dagster plane:** weather·pinvi·geo·map·transport 5개 tenant가 모두 하나의 storage DB `dagster_shared`
   (공용 webserver·daemon·gateway)에서 돈다.
@@ -56,7 +56,7 @@
 - **Map:**
   - #1294: Map→transport API 전환
   - #1296: transport 소비 경로 LOW
-  - #1297: D2 fixture restored 감사 — **머지만 했고 아직 배포하지 않았다**
+  - #1297: D2 fixture restored 감사 — 2026-10-05 04:05Z 회전(t71a)으로 배포했다
 
 ## 2. 진행 중이던 작업 — 완료(2026-10-04 23:00Z)
 
@@ -90,7 +90,7 @@
    - 지점 skip을 도입하면 "적재한다"는 약속이 바뀌므로 그 전에 소유자에게 묻는다.
    - 권고: `chunked_publish.py`의 `PUBLISH_CHUNK_VALUES`를 5000에서 1000~2000으로 낮춰 lock 보유 시간을 줄인다.
      특보 스케줄을 `:05`에서 `:40`으로 옮기는 안도 있다.
-3. **Map #1297 배포.** 다음 Map 변경이 생기면 같이 핀 쌍을 회전한다(§4.4). 단독으로 회전할 만큼 급하지 않다.
+3. ~~Map #1297 배포~~: 2026-10-05 04:05Z에 완료했다(t71a, D1·D2 GREEN). python-kma-api 결측 helper(#31)를 추가했고, weather는 이를 사용한다(#75).
 4. **소유자 확인 필요(저장소 밖):** OPNsense HAProxy의 Map UI backend `timeout server`를 30초에서 약 120초로 올려야 한다.
    - 2026-10-04 D2의 admin create가 약 30초 만에 edge에서 끊긴 것으로 추정한다.
    - 그 create가 DB에서 30초나 걸린 원인도 별도로 조사해야 한다. 당시 feature insert가 +12초, override가 +29초였고 load는 약 9였다.
