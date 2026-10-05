@@ -1,5 +1,9 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — child health의 nested metadata 검증 채택
+
+Common 경량 probe의 독립 리뷰 반례(null/미등록 pointer, 잘못된 executable/entry point 타입)를 반영한 표준 module/file/package profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.
+
 ## 2026-10-05 — standalone 자식 저장소 응답 fail-closed 보강
 
 최신 main #1304를 반영한 두 독립 리뷰에서 한 리뷰어가 빈 protobuf/잘못된 JSON이 substring 건강 점검을 통과하는 P2를 실제 reply fixture로 재현했다. 기존 PASS와 BLOCK 원문을 모두 보존한다. Common의 경량 `dagster_health`를 사용하여 proxy 뒤 자식의 정상 class·symbol schema와 wire/JSON을 검증한다. Dagster 전체 import를 피하며 각 RPC 4초·수신 4MiB·channel 정리를 유지한다. standalone은 건강 판정만 하므로 unhealthy 자체를 자동 재시작으로 설명하지 않는다. 새 source pin·두 리뷰·CI·운영 재구축/live는 아직 미완료다.

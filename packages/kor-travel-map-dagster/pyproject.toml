@@ -22,7 +22,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "kor-travel-common[dagster] @ git+https://github.com/digitie/kor-travel-common.git@e0b5e31a549bd6cb35af65d4a7573a46d2035ec9#subdirectory=packages/py/kor-travel-common",
+  "kor-travel-common[dagster] @ git+https://github.com/digitie/kor-travel-common.git@99d8b920438ee06eeaceb9b1240b1c48f2a62eab#subdirectory=packages/py/kor-travel-common",
   "kor-travel-map==0.2.0-dev",
   "dagster>=1.9,<2",
   "dagster-webserver>=1.9,<2",
