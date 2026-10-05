@@ -26,7 +26,8 @@ __all__ = [
 
 _DAGSTER_SUMMARY_QUERY = """
 query KorTravelMapDagsterSummary(
-  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+  $limit: Int!, $repositorySelector: RepositorySelector!,
+  $runsFilter: RunsFilter!, $activeRunsFilter: RunsFilter!
 ) {
   version
   repositoryOrError(repositorySelector: $repositorySelector) {
@@ -108,6 +109,23 @@ query KorTravelMapDagsterSummary(
       message
     }
   }
+  activeRunsOrError: runsOrError(filter: $activeRunsFilter, limit: 1000) {
+    __typename
+    ... on Runs {
+      results {
+        runId
+        jobName
+        status
+        startTime
+        endTime
+        updateTime
+        tags { key value }
+      }
+    }
+    ... on PythonError {
+      message
+    }
+  }
 }
 """
 
@@ -157,6 +175,7 @@ query KorTravelMapDagsterRunDetail(
 }
 """
 
+
 def _summary_response(data: DagsterSummaryData, *, started_at: float) -> DagsterSummaryResponse:
     return DagsterSummaryResponse(data=data, meta=make_meta(started_at=started_at))
 
@@ -173,7 +192,7 @@ def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResp
     started_at = perf_counter()
     try:
         dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError as exc:
+    except dagster_graphql.DagsterUrlConfigurationError:
         return _summary_response(
             DagsterSummaryData(
                 status="error",
@@ -188,7 +207,7 @@ def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResp
                 run_counts={},
                 repositories=[],
                 recent_runs=[],
-                errors=[str(exc)],
+                errors=["Dagster 조회를 완료하지 못했습니다. 잠시 후 다시 시도하세요."],
             ),
             started_at=started_at,
         )
@@ -241,10 +260,13 @@ async def get_summary(
                 "limit": page_size,
                 "repositorySelector": urls.repository_selector(),
                 "runsFilter": urls.runs_filter(),
+                "activeRunsFilter": urls.runs_filter(
+                    statuses=dagster_graphql.ACTIVE_RUN_STATUSES,
+                ),
             },
             query=_DAGSTER_SUMMARY_QUERY,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         return _summary_response(
             DagsterSummaryData(
                 status="unavailable",
@@ -259,7 +281,7 @@ async def get_summary(
                 run_counts={},
                 repositories=[],
                 recent_runs=[],
-                errors=[str(exc)],
+                errors=["Dagster 조회를 완료하지 못했습니다. 잠시 후 다시 시도하세요."],
             ),
             started_at=started_at,
         )
@@ -290,8 +312,8 @@ async def get_summary(
         ),
         overrides=overrides,
     )
-    recent_runs, run_counts, run_errors = dagster_graphql.parse_runs(
-        dagster_graphql.as_dict(data.get("runsOrError"))
+    recent_runs, run_counts, run_errors = dagster_graphql.merge_recent_active_runs(
+        data, recent_limit=page_size
     )
     errors = [*repository_errors, *run_errors]
     return _summary_response(

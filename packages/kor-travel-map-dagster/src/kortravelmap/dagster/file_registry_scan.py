@@ -102,7 +102,12 @@ async def run_managed_file_scan(
     """dagster-가시 location 전체 scan + DB backfill — op/테스트 공용 헬퍼."""
 
     results: list[ScanLocationResult] = []
-    engine = make_async_engine(require_pg_dsn(settings))
+    engine = make_async_engine(
+        require_pg_dsn(settings),
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+    )
     try:
         async with AsyncSession(engine) as session:
             # location별로 독립 커밋 — 한 location 실패가 다른 location의

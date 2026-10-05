@@ -29,6 +29,9 @@
  */
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "@kor-travel/tokens/theme.css";
+@import "@kor-travel/ui/dagster.css";
+@source "../../../../../node_modules/@kor-travel/ui/dist";
 
 @custom-variant data-checked {
   &:where([data-state="checked"]),
@@ -454,4 +457,22 @@
     animation-duration: 1.6s !important;
     animation-iteration-count: infinite !important;
   }
+}
+
+/* 공통 컴포넌트는 Map의 기존 의미 색상에 연결한다. */
+.map-common-surface {
+  --kt-surface-page: var(--surface-page);
+  --kt-surface-subtle: var(--surface-subtle);
+  --kt-surface-muted: var(--surface-muted);
+  --kt-text-primary: var(--text-primary);
+  --kt-text-secondary: var(--text-secondary);
+  --kt-control-line: var(--control-line);
+  --kt-brand: var(--brand);
+  --kt-brand-tint: var(--brand-tint);
+  --kt-focus: var(--focus);
+}
+@media (min-width: 1024px) {
+  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-group-label"],
+  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-link"] > span:not([aria-hidden]) { display: none; }
+  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-link"] { padding-inline: 0; justify-content: center; }
 }

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import httpx
 from fastapi import HTTPException, Request, status
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from kortravelmap.api import dagster_schedule_service
 from kortravelmap.api.dagster_schema import DagsterScheduleCommandResponse
@@ -11,6 +15,7 @@ from kortravelmap.api.response import ProblemDetail
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
+    "DagsterHttpClientMiddleware",
     "dagster_http_dependencies",
     "http_client_from_request",
     "schedule_command_response_or_raise",
@@ -156,13 +161,16 @@ def http_client_from_request(
     request: Request,
     settings: ApiSettings,
 ) -> httpx.AsyncClient:
-    """앱 수명 동안 재사용하는 Dagster HTTP client를 반환한다."""
+    """한 HTTP 요청 안에서만 Dagster client를 재사용한다."""
 
-    client = getattr(request.app.state, "dagster_http_client", None)
+    client = getattr(request.state, "dagster_http_client", None)
     if isinstance(client, httpx.AsyncClient) and not client.is_closed:
         return client
-    client = httpx.AsyncClient(timeout=settings.dagster_request_timeout_seconds)
-    request.app.state.dagster_http_client = client
+    client = httpx.AsyncClient(
+        timeout=settings.dagster_request_timeout_seconds,
+        limits=httpx.Limits(max_connections=4, max_keepalive_connections=0),
+    )
+    request.state.dagster_http_client = client
     return client
 
 
@@ -173,3 +181,28 @@ def dagster_http_dependencies(
 
     settings = settings_from_request(request)
     return settings, http_client_from_request(request, settings)
+
+
+class DagsterHttpClientMiddleware:
+    """조회 실패·취소의 client를 다른 HTTP 요청에 공유하지 않고 요청 종료 시 폐기한다."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            client = scope.get("state", {}).get("dagster_http_client")
+            if isinstance(client, httpx.AsyncClient):
+                try:
+                    await asyncio.wait_for(client.aclose(), timeout=0.05)
+                except Exception:
+                    # 응답/원래 예외를 정리 실패로 바꾸지 않는다. 요청 단위라 다음
+                    # 요청에 이 client를 재사용하지 않고 원격 URL/자격증명도 기록하지 않는다.
+                    logging.getLogger(__name__).warning(
+                        "Dagster HTTP client 정리를 완료하지 못했습니다."
+                    )

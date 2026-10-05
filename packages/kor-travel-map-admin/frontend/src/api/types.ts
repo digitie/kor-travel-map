@@ -2032,6 +2032,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/pipeline/dagster-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pipeline Dagster Summary
+         * @description 공용 대시보드용 Map code location 상태. 영속 명령·작업 큐 계약과 독립적이다.
+         */
+        get: operations["get_pipeline_dagster_summary_v1_ops_pipeline_dagster_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/pipeline/events": {
         parameters: {
             query?: never;
@@ -7700,6 +7720,30 @@ export interface components {
             title: string | null;
         };
         /**
+         * DagsterAssetGroup
+         * @description Dagster asset group 요약.
+         */
+        DagsterAssetGroup: {
+            /** Asset Count */
+            asset_count: number;
+            /** Asset Items */
+            asset_items?: components["schemas"]["DagsterAssetSummary"][];
+            /** Assets */
+            assets: string[];
+            /** Group Name */
+            group_name: string;
+        };
+        /**
+         * DagsterAssetSummary
+         * @description Dagster asset 표시 요약.
+         */
+        DagsterAssetSummary: {
+            /** Display Name */
+            display_name: string;
+            /** Name */
+            name: string;
+        };
+        /**
          * DagsterGraphqlError
          * @description Dagster GraphQL PythonError 요약.
          */
@@ -7733,6 +7777,36 @@ export interface components {
             tick_id: string;
             /** Timestamp */
             timestamp: number;
+        };
+        /**
+         * DagsterJob
+         * @description Dagster job/pipeline 요약.
+         */
+        DagsterJob: {
+            /** Is Job */
+            is_job: boolean;
+            /** Name */
+            name: string;
+        };
+        /**
+         * DagsterRepository
+         * @description Dagster code location/repository 요약.
+         */
+        DagsterRepository: {
+            /** Asset Count */
+            asset_count: number;
+            /** Asset Groups */
+            asset_groups: components["schemas"]["DagsterAssetGroup"][];
+            /** Jobs */
+            jobs: components["schemas"]["DagsterJob"][];
+            /** Location Name */
+            location_name: string;
+            /** Name */
+            name: string;
+            /** Schedules */
+            schedules: components["schemas"]["DagsterSchedule"][];
+            /** Sensors */
+            sensors: components["schemas"]["DagsterSensor"][];
         };
         /**
          * DagsterRunDetailData
@@ -7946,6 +8020,56 @@ export interface components {
             recent_ticks?: components["schemas"]["DagsterInstigationTick"][];
             /** Status */
             status?: string | null;
+        };
+        /**
+         * DagsterSummaryData
+         * @description Dagster repository/run summary application-service data.
+         */
+        DagsterSummaryData: {
+            /** Asset Count */
+            asset_count: number;
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Errors */
+            errors?: string[];
+            /** Graphql Url */
+            graphql_url: string;
+            /** Job Count */
+            job_count: number;
+            /** Recent Runs */
+            recent_runs: components["schemas"]["DagsterRunSummary"][];
+            /** Repositories */
+            repositories: components["schemas"]["DagsterRepository"][];
+            /** Repository Count */
+            repository_count: number;
+            /** Run Counts */
+            run_counts: {
+                [key: string]: number;
+            };
+            /** Schedule Count */
+            schedule_count: number;
+            /** Sensor Count */
+            sensor_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "unavailable" | "error";
+            /** Version */
+            version?: string | null;
+        };
+        /**
+         * DagsterSummaryResponse
+         * @description Dagster repository/run summary application-service envelope.
+         */
+        DagsterSummaryResponse: {
+            data: components["schemas"]["DagsterSummaryData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DedupFeatureRecord
@@ -20722,6 +20846,65 @@ export interface operations {
             };
             /** @description DAGSTER_UNAVAILABLE — Dagster 연결 실패 */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_pipeline_dagster_summary_v1_ops_pipeline_dagster_summary_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterSummaryResponse"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Token 누락 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description token 불일치 또는 token에 결박되지 않은 scope/method/exact path 요청 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description X-Kor-Travel-Map-Ops-Scope 누락 또는 알 수 없는 scope */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

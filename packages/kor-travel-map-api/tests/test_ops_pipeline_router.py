@@ -2138,11 +2138,16 @@ def test_dagster_runs_panel_parses_runs(
         assert kwargs["query"] == pipeline_mod._PIPELINE_DAGSTER_RUNS_QUERY
         assert kwargs["variables"] == {
             "limit": 5,
+            "activeRunsFilter": {
+                "tags": [_MAP_REPOSITORY_RUN_TAG],
+                "statuses": dagster_mod.ACTIVE_RUN_STATUSES,
+            },
             "repositorySelector": _MAP_REPOSITORY_SELECTOR,
             "runsFilter": {"tags": [_MAP_REPOSITORY_RUN_TAG]},
         }
         return {
             "data": {
+                "activeRunsOrError": {"__typename": "Runs", "results": []},
                 "repositoryOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["repositoryOrError"],
                 "runsOrError": _RUNS_GRAPHQL_PAYLOAD["data"]["runsOrError"],
             }
@@ -2156,7 +2161,7 @@ def test_dagster_runs_panel_parses_runs(
     data = response.json()["data"]
     assert data["status"] == "ok"
     assert data["run_counts"] == {"FAILURE": 1, "SUCCESS": 1}
-    assert [run["run_id"] for run in data["runs"]] == ["run-1", "run-2"]
+    assert [run["run_id"] for run in data["runs"]] == ["run-2", "run-1"]
 
 
 @pytest.mark.unit

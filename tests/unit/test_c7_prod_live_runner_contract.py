@@ -1044,7 +1044,7 @@ def test_update_request_spec_observes_the_queue_sensor_run_read_only() -> None:
         assert marker in dagster
     # 이름은 Dagster 정의와 같아야 한다.
     sensors = _read(DAGSTER_SRC / "sensors.py")
-    assert '@job(name="feature_update_request_worker")' in sensors
+    assert re.search(r'@job\(\s*name="feature_update_request_worker"', sensors)
     assert 'name="feature_update_request_queue_sensor",' in sensors
     assert 'QUEUE_WORKER_JOB = "feature_update_request_worker" as const;' in dagster
     assert 'QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;' in dagster

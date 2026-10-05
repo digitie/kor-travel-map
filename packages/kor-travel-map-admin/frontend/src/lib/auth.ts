@@ -1,3 +1,4 @@
+import { sanitizeLocalPath as commonSanitizeLocalPath } from "@kor-travel/ui/navigation";
 import type { NextRequest } from "next/server";
 
 export const SESSION_COOKIE_NAME = "ktm_admin_session";
@@ -261,22 +262,9 @@ export function clearLoginFailures(request: RequestLike): void {
   loginFailures.delete(loginAttemptKey(request));
 }
 
-export function sanitizeLocalPath(
-  raw: string | null | undefined,
-  fallback = "/",
-): string {
-  if (!raw) {
-    return fallback;
-  }
-  try {
-    const decoded = decodeURIComponent(raw);
-    if (!decoded.startsWith("/") || decoded.startsWith("//") || decoded.includes("\\")) {
-      return fallback;
-    }
-    return decoded;
-  } catch {
-    return fallback;
-  }
+export function sanitizeLocalPath(raw: string | null | undefined, fallback = "/"): string {
+  const safe = commonSanitizeLocalPath(raw);
+  return safe === "/" && raw !== "/" ? commonSanitizeLocalPath(fallback) : safe;
 }
 
 async function verifyPassword(password: string, encoded: string): Promise<boolean> {

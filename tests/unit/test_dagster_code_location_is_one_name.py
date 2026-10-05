@@ -51,9 +51,7 @@ def test_api_settings_default_is_the_workspace_location() -> None:
 
 
 def test_api_env_example_is_the_workspace_location() -> None:
-    text = (_ROOT / "packages" / "kor-travel-map-api" / ".env.example").read_text(
-        encoding="utf-8"
-    )
+    text = (_ROOT / "packages" / "kor-travel-map-api" / ".env.example").read_text(encoding="utf-8")
     match = re.search(
         r"^KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_LOCATION_NAME=(\S+)$", text, re.MULTILINE
     )
@@ -129,8 +127,8 @@ def _run_reader_selection() -> re.Pattern[str]:
 
 _GRAPHQL_COMMENT = re.compile(r"#[^\n]*")
 _OPERATION_START = re.compile(r"\b(?:query|mutation|subscription)\b\s*\w*\s*[({]")
-_RUNS_FILTER_ARGUMENT = re.compile(r"\bfilter:\s*\$runsFilter\b")
-_RUNS_FILTER_VARIABLE = re.compile(r"\$runsFilter:\s*RunsFilter!")
+_RUNS_FILTER_ARGUMENT = re.compile(r"\bfilter:\s*\$(runsFilter|activeRunsFilter)\b")
+_RUNS_FILTER_VARIABLE = re.compile(r"\$(runsFilter|activeRunsFilter):\s*RunsFilter!")
 _REPOSITORY_GUARD = "repositoryOrError(repositorySelector: $repositorySelector)"
 
 
@@ -175,12 +173,13 @@ def unscoped_runs_selections(query: str) -> list[str]:
             violations.append(f"bare selection: {snippet}")
             continue
         arguments = _balanced_arguments(text, match.end() - 1)
-        if not _RUNS_FILTER_ARGUMENT.search(arguments):
+        filter_match = _RUNS_FILTER_ARGUMENT.search(arguments)
+        if not filter_match:
             violations.append(f"filter is not $runsFilter: {snippet}")
             continue
         operations = list(_OPERATION_START.finditer(text, 0, match.start()))
         operation = text[operations[-1].start() : match.start()] if operations else ""
-        if not _RUNS_FILTER_VARIABLE.search(operation):
+        if not re.search(r"\$" + filter_match[1] + r":\s*RunsFilter!", operation):
             violations.append(f"operation does not declare $runsFilter: RunsFilter!: {snippet}")
         if _REPOSITORY_GUARD not in operation:
             violations.append(f"operation has no repositoryOrError guard: {snippet}")
@@ -263,8 +262,13 @@ def run_query_binding_violations(source: str) -> tuple[int, list[str]]:
             for key, value in zip(variables.keys, variables.values, strict=True)
             if isinstance(key, ast.Constant)
         }
-        if not _is_helper_call(entries.get("runsFilter"), "runs_filter"):
-            violations.append(f"{query_value.id}: runsFilter가 runs_filter(…)에서 오지 않는다")
+        for filter_name in {
+            match[1] for match in _RUNS_FILTER_ARGUMENT.finditer(queries[query_value.id])
+        }:
+            if not _is_helper_call(entries.get(filter_name), "runs_filter"):
+                violations.append(
+                    f"{query_value.id}: {filter_name}가 runs_filter(…)에서 오지 않는다"
+                )
         if not _is_helper_call(entries.get("repositorySelector"), "repository_selector"):
             violations.append(
                 f"{query_value.id}: repositorySelector가 repository_selector()에서 오지 않는다"
@@ -661,3 +665,10 @@ def test_dagster_run_scope_is_the_workspace_location() -> None:
 
     assert _workspace_location() == MAP_CODE_LOCATION_NAME
     assert CODE_LOCATION_RUN_TAG == CODE_LOCATION_TAG
+
+
+def test_active_filter_keeps_repository_binding_gate() -> None:
+    source = _BOUND_MODULE.replace("runsFilter", "activeRunsFilter")
+    assert run_query_binding_violations(source) == (1, [])
+    broken = source.replace('urls.runs_filter(statuses=["STARTED"])', '{"statuses": ["STARTED"]}')
+    assert run_query_binding_violations(broken)[1]

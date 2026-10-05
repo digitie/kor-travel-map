@@ -70,7 +70,12 @@ async def run_manual_provider_dedup_detection(
     `ck_m05_detector_isolation`으로 거부한다) 기본 격리 수준을 바꾸지 않는다.
     """
 
-    engine = make_async_engine(require_pg_dsn(settings))
+    engine = make_async_engine(
+        require_pg_dsn(settings),
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+    )
     try:
         # **런 전체를 한 트랜잭션으로 묶지 않는다.** 후보 기록 프로시저가 호출마다
         # xact-scoped advisory fence(`feature-curation-m05`)를 잡으므로, 하나로 묶으면

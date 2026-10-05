@@ -168,8 +168,8 @@
         "state": "pending",
         "map_user_openapi_sha256": "3a847c8a53f36044080839855d634fbfa2c5b18fa769bcf95bcbbaa614f72da4",
         "map_service_openapi_sha256": "6677d41f572fe53b24269fc7d0a1f6a216ee774ce6744be0590959d8f8f2ddfb",
-        "map_full_openapi_sha256": "d2935f46b308de5c71b00b27777d5a32aefca2b7ed5f0be1558d4ebc1f6f0c3a",
-        "blocking_reason": "T-VN-40 pending receipt remains pending: Map Admin provenance now has an opaque feature_id plus required feature_uuid. Re-vendor the exact full-admin artifact, require PinVi M05 attestation to compare provenance.feature_uuid with both case UUIDs, then re-run paired acceptance before restoring the complete receipt.",
+        "map_full_openapi_sha256": "ccec0fd05d2e5fea6ab46192e7ac1a3f08d9b0137cefcd92672be794f4f95294",
+        "blocking_reason": "T-VN-40 pending receipt remains pending: Map Admin provenance now has an opaque feature_id plus required feature_uuid. Re-vendor the exact full-admin artifact, require PinVi M05 attestation to compare provenance.feature_uuid with both case UUIDs, then re-run paired acceptance before restoring the complete receipt. ADR-107 관리자 Dagster summary 추가 bytes를 PinVi에 exact re-vendor하고 새 pair 재구축·live를 확인하기 전에는 pending을 유지한다.",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"
       }

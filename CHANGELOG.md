@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 공통 Dagster 채택 (2026-10-05)
+
+관리자 로그인·메뉴·Dagster 대시보드를 Common으로 통합하고 최근 실행 밖의 활성 job과 마지막 정상 상태를 표시한다. GraphQL 전체 timeout/본문 상한·요청별 연결, 쓰기 job runtime tags와 executor/DB 연결 제한, snapshot 8종의 100개 배치 적재를 적용했다. 관리자 summary OpenAPI/타입을 동기화했다. [가이드](docs/runbooks/common-dagster.md)를 따른다.
+
+
 본 라이브러리의 사용자 가시 변경을 기록한다. [Keep a Changelog](https://keepachangelog.com)
 형식을 따른다.
 

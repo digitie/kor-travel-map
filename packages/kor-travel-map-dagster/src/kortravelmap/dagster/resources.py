@@ -1047,7 +1047,12 @@ def kor_travel_map_client_resource(
 ) -> Iterator[AsyncKorTravelMapClient]:
     """Dagster ``kor_travel_map_client`` 기본 resource."""
     settings = KorTravelMapSettings()
-    engine = make_async_engine(require_pg_dsn(settings))
+    engine = make_async_engine(
+        require_pg_dsn(settings),
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+    )
     try:
         yield AsyncKorTravelMapClient(engine, settings=settings)
     finally:

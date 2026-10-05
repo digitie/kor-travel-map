@@ -25,6 +25,7 @@ import {
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { AppMenu, type AppMenuLinkProps } from "@kor-travel/ui/app-menu";
 import { usePathname } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -129,6 +130,17 @@ const NAV_GROUPS = [
   },
 ] as const;
 
+function MapMenuLink(props: AppMenuLinkProps) {
+  return <Link {...props} />;
+}
+
+const COMMON_MENU_GROUPS = NAV_GROUPS.map(group => ({
+  id: group.group ?? "root", label: group.group ?? undefined,
+  items: group.items.map(({ href, label, icon: Icon }) => ({
+    id: href, href, label, icon: <Icon aria-hidden="true" className="size-4" />,
+  })),
+}));
+
 const navItems = NAV_GROUPS.flatMap((group) =>
   group.items.map((item) => ({ ...item, section: group.section })),
 );
@@ -150,9 +162,6 @@ function isActive(pathname: string, href: string) {
  */
 const railRowClass =
   "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted";
-
-const railRowActiveClass =
-  "bg-brand-tint text-text-primary hover:bg-brand-tint before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-brand";
 
 const railRowCollapsedClass = "lg:size-control lg:justify-center lg:gap-0 lg:px-0";
 
@@ -186,7 +195,7 @@ export function AdminShell({
   children,
 }: AdminShellProps) {
   const pathname = usePathname();
-  const activeNavItemRef = useRef<HTMLAnchorElement | null>(null);
+  const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
@@ -204,7 +213,7 @@ export function AdminShell({
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    activeNavItemRef.current?.scrollIntoView({
+    menuContainerRef.current?.querySelector("[aria-current=page]")?.scrollIntoView({
       behavior: reduceMotion ? "auto" : "smooth",
       block: "nearest",
       inline: "center",
@@ -309,75 +318,11 @@ export function AdminShell({
                 </button>
               </div>
             </div>
-            <nav
-              aria-label="주요 메뉴"
-              className={cn(
-                "flex min-h-0 max-w-full gap-1 overflow-x-auto px-3 py-2 lg:flex-1 lg:flex-col lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:py-3",
-                sidebarCollapsed && "lg:items-center lg:px-2",
-              )}
-            >
-              {NAV_GROUPS.map((group) => (
-                <div
-                  className={cn(
-                    "flex shrink-0 items-center gap-1 lg:flex-col lg:items-stretch lg:gap-0.5",
-                    sidebarCollapsed && "lg:items-center",
-                  )}
-                  key={group.group ?? "root"}
-                >
-                  {group.group ? (
-                    <>
-                      {/* 그룹 라벨 12px/500 + hairline rule — 한글이라 uppercase/tracking 없음(m3). <lg 에서는 strip 안 인라인 라벨. */}
-                      <div
-                        className={cn(
-                          "ml-1 flex shrink-0 items-center gap-2 border-l border-border pl-3 text-2xs font-medium whitespace-nowrap text-text-secondary",
-                          "lg:ml-0 lg:border-l-0 lg:px-3 lg:pt-4 lg:pb-1 lg:after:h-px lg:after:flex-1 lg:after:bg-border",
-                          sidebarCollapsed && "lg:hidden",
-                        )}
-                      >
-                        {group.group}
-                      </div>
-                      {sidebarCollapsed ? (
-                        <span
-                          aria-hidden="true"
-                          className="mx-auto my-2 hidden h-px w-6 bg-border lg:block"
-                        />
-                      ) : null}
-                    </>
-                  ) : null}
-                  {group.items.map((item) => {
-                    const Icon = item.icon;
-                    const active = item.href === activeHref;
-                    return (
-                      <Link
-                        aria-current={active ? "page" : undefined}
-                        aria-label={sidebarCollapsed ? item.label : undefined}
-                        className={cn(
-                          railRowClass,
-                          "no-underline hover:no-underline",
-                          active && railRowActiveClass,
-                          sidebarCollapsed && railRowCollapsedClass,
-                        )}
-                        href={item.href}
-                        key={item.href}
-                        ref={active ? activeNavItemRef : undefined}
-                        title={sidebarCollapsed ? item.label : undefined}
-                      >
-                        <Icon
-                          aria-hidden="true"
-                          className={cn(
-                            "size-4 shrink-0",
-                            active ? "text-brand" : "text-icon-default",
-                          )}
-                        />
-                        <span className={cn(sidebarCollapsed && "lg:hidden")}>
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              ))}
-            </nav>
+            <div ref={menuContainerRef} data-collapsed={sidebarCollapsed}
+              className="map-common-menu map-common-surface min-h-0 max-w-full overflow-x-auto px-2 py-2 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto">
+              <AppMenu groups={COMMON_MENU_GROUPS} activeItemId={activeHref ?? null}
+                pathname={pathname} label="주요 메뉴" linkComponent={MapMenuLink} testId="map-common-menu" />
+            </div>
             {/* 로그아웃 = rail footer 의 plain row(M9). <lg 에서는 상단 워드마크 행의 아이콘 버튼이 대신한다. */}
             <div
               className={cn(
@@ -484,8 +429,29 @@ function ButtonLogout({
   className?: string;
 }) {
   const labelHidden = iconOnly || collapsed;
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+  async function logout() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST", signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error("logout failed");
+      publishAdminLogout();
+      window.location.assign("/login");
+    } catch {
+      setError("로그아웃하지 못했습니다. 다시 시도해 주세요.");
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
   return (
-    <button
+    <div>
+    <button aria-busy={busy} aria-disabled={busy}
       aria-label={labelHidden ? "로그아웃" : undefined}
       className={cn(
         railRowClass,
@@ -502,14 +468,7 @@ function ButtonLogout({
         로그아웃
       </span>
     </button>
+    {error ? <p role="alert" className="px-2 text-xs text-destructive">{error}</p> : null}
+    </div>
   );
-}
-
-async function logout() {
-  publishAdminLogout();
-  try {
-    await fetch("/api/auth/logout", { method: "POST" });
-  } finally {
-    window.location.assign("/login");
-  }
 }

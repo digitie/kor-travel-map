@@ -31,6 +31,15 @@ async def test_summary_service_parses_repository_and_run_payload(
     async def _post(**kwargs: object) -> dict[str, object]:
         assert kwargs["variables"] == {
             "limit": 3,
+            "activeRunsFilter": {
+                "tags": [
+                    {
+                        "key": ".dagster/repository",
+                        "value": "__repository__@kortravelmap.dagster.definitions",
+                    }
+                ],
+                "statuses": dagster_graphql.ACTIVE_RUN_STATUSES,
+            },
             "repositorySelector": {
                 "repositoryName": "__repository__",
                 "repositoryLocationName": "kortravelmap.dagster.definitions",
@@ -63,6 +72,7 @@ async def test_summary_service_parses_repository_and_run_payload(
                         }
                     ],
                 },
+                "activeRunsOrError": {"__typename": "Runs", "results": []},
                 "runsOrError": {
                     "__typename": "Runs",
                     "results": [
@@ -215,6 +225,7 @@ async def test_summary_reports_a_missing_code_location_as_an_error(
                     "__typename": "RepositoryNotFoundError",
                     "message": "Could not find Repository __repository__@x",
                 },
+                "activeRunsOrError": {"__typename": "Runs", "results": []},
                 "runsOrError": {"__typename": "Runs", "results": []},
             }
         }

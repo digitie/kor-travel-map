@@ -91,6 +91,7 @@ from kortravelmap.api.dagster_schema import (
     DagsterScheduleCommandResponse,
     DagsterScheduleOverrideRequest,
     DagsterSensor,
+    DagsterSummaryResponse,
 )
 from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import (
@@ -646,7 +647,8 @@ query KorTravelMapPipelineOverview(
 
 _PIPELINE_DAGSTER_RUNS_QUERY = """
 query KorTravelMapPipelineDagsterRuns(
-  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+  $limit: Int!, $repositorySelector: RepositorySelector!,
+  $runsFilter: RunsFilter!, $activeRunsFilter: RunsFilter!
 ) {
   repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
@@ -654,6 +656,23 @@ query KorTravelMapPipelineDagsterRuns(
     ... on PythonError { message }
   }
   runsOrError(filter: $runsFilter, limit: $limit) {
+    __typename
+    ... on Runs {
+      results {
+        runId
+        jobName
+        status
+        startTime
+        endTime
+        updateTime
+        tags { key value }
+      }
+    }
+    ... on PythonError {
+      message
+    }
+  }
+  activeRunsOrError: runsOrError(filter: $activeRunsFilter, limit: 1000) {
     __typename
     ... on Runs {
       results {
@@ -1579,6 +1598,18 @@ async def list_pipeline_events(
     )
 
 
+@router.get("/dagster-summary", response_model=DagsterSummaryResponse)
+async def get_pipeline_dagster_summary(request: Request) -> DagsterSummaryResponse:
+    """공용 대시보드용 Map code location 상태. 영속 명령·작업 큐 계약과 독립적이다."""
+    settings = _settings_from_request(request)
+    return await dagster_query_service.get_summary(
+        settings=settings,
+        client=_http_client_from_request(request, settings),
+        overrides={},
+        page_size=30,
+    )
+
+
 @router.get(
     "/dagster-runs",
     response_model=PipelineDagsterRunsResponse,
@@ -1618,17 +1649,20 @@ async def list_dagster_runs(
                 "limit": limit,
                 "repositorySelector": dagster_urls.repository_selector(),
                 "runsFilter": dagster_urls.runs_filter(),
+                "activeRunsFilter": dagster_urls.runs_filter(
+                    statuses=dagster_graphql.ACTIVE_RUN_STATUSES,
+                ),
             },
             query=_PIPELINE_DAGSTER_RUNS_QUERY,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         return PipelineDagsterRunsResponse(
             data=PipelineDagsterRunsData(
                 status="unavailable",
                 dagster_url=dagster_urls.dagster_url,
                 graphql_url=dagster_urls.public_graphql_url,
                 checked_at=checked_at,
-                errors=[str(exc)],
+                errors=["Dagster 조회를 완료하지 못했습니다. 잠시 후 다시 시도하세요."],
             ),
             meta=make_meta(started_at=started_at),
         )
@@ -1658,8 +1692,8 @@ async def list_dagster_runs(
             ),
             meta=make_meta(started_at=started_at),
         )
-    runs, run_counts, run_errors = dagster_graphql.parse_runs(
-        dagster_graphql.as_dict(data.get("runsOrError")),
+    runs, run_counts, run_errors = dagster_graphql.merge_recent_active_runs(
+        data, recent_limit=limit
     )
     return PipelineDagsterRunsResponse(
         data=PipelineDagsterRunsData(

@@ -160,7 +160,13 @@ async def test_kor_travel_map_client_resource_disposes_engine(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _FakeEngine()
-    monkeypatch.setattr(resources, "make_async_engine", lambda _dsn: engine)
+    options: dict[str, object] = {}
+
+    def make_engine(_dsn: object, **kwargs: object) -> _FakeEngine:
+        options.update(kwargs)
+        return engine
+
+    monkeypatch.setattr(resources, "make_async_engine", make_engine)
     monkeypatch.setattr(resources, "AsyncKorTravelMapClient", _FakeClient)
 
     resource_fn = cast(
@@ -169,6 +175,11 @@ async def test_kor_travel_map_client_resource_disposes_engine(
     )
     resource_iter = resource_fn(build_init_resource_context())
     client = next(resource_iter)
+    assert options == {
+        "pool_size": 1,
+        "max_overflow": 0,
+        "server_settings": {"statement_timeout": "600000", "lock_timeout": "30000"},
+    }
 
     assert client.engine is engine
     assert engine.disposed is False

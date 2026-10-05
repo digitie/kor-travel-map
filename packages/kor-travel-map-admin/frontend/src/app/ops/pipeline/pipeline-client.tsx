@@ -24,7 +24,8 @@ import { statusLabel, toneFor } from "@/lib/status-label";
 
 import { ExecutionDetailPanel } from "./execution-detail-panel";
 import { ExecutionTimeline, type TimelineFilters } from "./execution-timeline";
-import { DagsterRunsPanel, PipelineEventsPanel } from "./events-panel";
+import { PipelineEventsPanel } from "./events-panel";
+import { CommonDagsterPanel } from "@/components/common-dagster-panel";
 import { parseExecutionParam } from "./pipeline-shared";
 import { RequestCreateDialog } from "./request-dialog";
 import { SchedulePanel } from "./schedule-panel";
@@ -592,7 +593,7 @@ export function PipelineClient() {
                   onSelectExecution={selectExecution}
                   onUrlChange={updateUrl}
                 />
-                <DagsterRunsPanel />
+                <CommonDagsterPanel />
               </div>
               {selected ? (
                 <div className="min-w-0">

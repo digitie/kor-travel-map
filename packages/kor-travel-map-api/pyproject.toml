@@ -28,6 +28,7 @@ classifiers = [
 # 외부 배포 시에는 git URL+sha 핀 사용 (예: PinVi가 Python으로 직접 의존하지 않으므로
 # 주로 자체 시점에서만 사용).
 dependencies = [
+  "kor-travel-common[http] @ git+https://github.com/digitie/kor-travel-common.git@1f8e339c7c79f86f8952b0d4c326ab4dae56bee8#subdirectory=packages/py/kor-travel-common",
   # 같은 저장소 내 메인 패키지에 의존. monorepo editable install.
   # PyPI 배포 시점에는 "kor-travel-map>=0.2,<0.3" 같은 핀으로 교체.
   "kor-travel-map",

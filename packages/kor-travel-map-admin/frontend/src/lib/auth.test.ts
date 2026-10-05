@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  sanitizeLocalPath,
   checkLoginRateLimit,
   clearLoginFailures,
   createSessionCookieValue,
@@ -134,3 +135,10 @@ describe("requestHasSameOrigin (CSRF origin check)", () => {
     expect(requestHasSameOrigin(req("https://map.example.org"), {})).toBe(false);
   });
 });
+
+it.each(["/%09/attacker.test", "/%0a/attacker.test", "/%0d/attacker.test", "/%250a/attacker.test"])(
+  "브라우저가 외부 origin으로 정규화하는 제어문자 redirect를 차단: %s", raw => {
+    expect(sanitizeLocalPath(raw)).toBe("/");
+    expect(new URL(sanitizeLocalPath(raw), "https://local.test").origin).toBe("https://local.test");
+  },
+);

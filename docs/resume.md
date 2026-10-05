@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-05 — Map·PinVi 공통 Dagster 보강 (진행 중)
+
+ADR-107과 [적용·복구 가이드](runbooks/common-dagster.md)에 따라 공통 Python HTTP/Dagster·로그인·메뉴·대시보드를 채택했다. 요청별 연결·응답/시간 상한·활성 run 별도 조회·step/DB 연결/100개 batch를 적용한다. 쓰기 run 자동 복제 없이 기존 operation/lease/claim 복구 계약을 유지한다. [검증 기록](reviews/common-dagster-2026-10-05/README.md)의 고정 후보 2인 리뷰·운영 재구축·live·CI·merge를 완료해야 한다. 원래 인간 dirty checkout은 보존했다.
+
+
 ## 2026-10-05 — 인계: 공용 Dagster 완주 이후 (Codex 등 다음 에이전트는 여기부터)
 
 **다음 한 작업: [`docs/handoff/2026-10-05-shared-dagster-handoff.md`](handoff/2026-10-05-shared-dagster-handoff.md)를
