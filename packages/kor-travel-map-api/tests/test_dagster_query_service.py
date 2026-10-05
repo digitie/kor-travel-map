@@ -60,7 +60,7 @@ async def test_summary_service_parses_repository_and_run_payload(
                 "repositoryOrError": {
                     "__typename": "Repository",
                     "name": "__repository__",
-                    "location": {"name": "location"},
+                    "location": {"name": "kortravelmap.dagster.definitions"},
                     "pipelines": [{"name": "job", "isJob": True}],
                     "schedules": [],
                     "sensors": [],

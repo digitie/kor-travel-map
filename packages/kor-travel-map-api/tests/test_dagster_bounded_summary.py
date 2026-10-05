@@ -122,3 +122,50 @@ async def test_malformed_repository_is_not_a_healthy_empty_snapshot(repository: 
         )
     assert response.data.status == "error"
     assert response.data.errors
+
+
+@pytest.mark.parametrize(
+    ("name", "location", "expected"),
+    [
+        ("__repository__", "kortravelmap.dagster.definitions", "ok"),
+        ("foreign_repository", "kortravelmap.dagster.definitions", "error"),
+        ("__repository__", "geo_location", "error"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_summary_repository_must_match_requested_identity(
+    name: str, location: str, expected: str
+) -> None:
+    from kortravelmap.api.dagster_query_service import get_summary
+    from kortravelmap.api.settings import ApiSettings
+
+    payload = {
+        "data": {
+            "repositoryOrError": {
+                "__typename": "Repository",
+                "name": name,
+                "location": {"name": location},
+                "pipelines": [],
+                "schedules": [],
+                "sensors": [],
+                "assetNodes": [],
+            },
+            "runsOrError": {"__typename": "Runs", "results": []},
+            "activeRunsOrError": {"__typename": "Runs", "results": []},
+        }
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))
+    ) as client:
+        response = await get_summary(
+            settings=ApiSettings(
+                dagster_url="http://example.test", dagster_allowed_hosts=["example.test"]
+            ),
+            client=client,
+            overrides={},
+            page_size=30,
+        )
+    assert response.data.status == expected
+    assert bool(response.data.errors) == (expected == "error")
+    assert response.data.repository_count == (1 if expected == "ok" else 0)
+    assert len(response.data.repositories) == (1 if expected == "ok" else 0)

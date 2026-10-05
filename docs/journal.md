@@ -4,7 +4,7 @@
 
 ADR-107과 [적용·복구 가이드](runbooks/common-dagster.md)에 따라 공통 Python HTTP/Dagster·로그인·메뉴·대시보드를 채택했다. 요청별 연결·응답/시간 상한·활성 run 별도 조회·step/DB 연결/100개 batch를 적용한다. 쓰기 run 자동 복제 없이 기존 operation/lease/claim 복구 계약을 유지한다. [검증 기록](reviews/common-dagster-2026-10-05/README.md)의 고정 후보 2인 리뷰·운영 재구축·live·CI·merge를 완료해야 한다. 원래 인간 dirty checkout은 보존했다.
 
-적대적 원본 리뷰의 실패 상세·event cursor 회귀와 손상 Repository의 정상 빈 snapshot 오인을 보강했다. 선택한 run만 상세 조회하며 Docker deps에 고정 Common vendor를 복사한다. UI 390/API shape 24/strict mypy 96 및 production Next build PASS. React Doctor의 불필요한 mapper export를 제거했다. 후속 immutable 2인 FULL 리뷰·exact CI·실제 paired 재구축·live gate는 아직 미완료다.
+적대적 원본 리뷰의 실패 상세·event cursor 회귀와 손상 Repository의 정상 빈 snapshot 오인을 보강했다. 선택한 run만 상세 조회하며 Docker deps에 고정 Common vendor를 복사한다. UI 390/API shape 24/strict mypy 96 및 production Next build PASS. React Doctor의 불필요한 mapper export를 제거했다. 후속 리뷰의 repository 소속 불일치도 selector identity와 비교하여 fail-closed하고 다른 location의 행을 제거했다. 정상 empty와 외부 name/location을 실제 HTTP 응답 fixture로 구분한다. 후속 immutable 2인 FULL 리뷰·exact CI·실제 paired 재구축·live gate는 아직 미완료다.
 
 
 ## 2026-10-05 — 인계 문서와 n150 보조 스크립트를 저장소에 남김

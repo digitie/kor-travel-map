@@ -176,7 +176,7 @@ query KorTravelMapDagsterRunDetail(
 """
 
 
-def _valid_summary_repository(raw: object) -> bool:
+def _valid_summary_repository(raw: object, selector: dict[str, str]) -> bool:
     """필수 GraphQL 필드를 잃은 repository를 정상 빈 스냅샷으로 표시하지 않는다."""
     if not isinstance(raw, dict) or raw.get("__typename") != "Repository":
         return False
@@ -187,6 +187,11 @@ def _valid_summary_repository(raw: object) -> bool:
         not isinstance(location, dict)
         or not isinstance(location.get("name"), str)
         or not location["name"].strip()
+    ):
+        return False
+    if (
+        raw["name"] != selector["repositoryName"]
+        or location["name"] != selector["repositoryLocationName"]
     ):
         return False
     for key in ("pipelines", "schedules", "sensors", "assetNodes"):
@@ -353,8 +358,11 @@ async def get_summary(
         data, recent_limit=page_size
     )
     errors = [*repository_errors, *run_errors]
-    if not repository_errors and not _valid_summary_repository(data.get("repositoryOrError")):
-        errors.append("Dagster repository 응답의 필수 필드를 확인하지 못했습니다.")
+    if not repository_errors and not _valid_summary_repository(
+        data.get("repositoryOrError"), urls.repository_selector()
+    ):
+        repositories = []
+        errors.append("Dagster repository 응답의 필수 필드·소속을 확인하지 못했습니다.")
     return _summary_response(
         DagsterSummaryData(
             status="error" if errors else "ok",
