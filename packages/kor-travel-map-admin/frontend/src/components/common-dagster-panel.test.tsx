@@ -57,3 +57,32 @@ it("선택한 실패 run의 원인과 다음 이벤트 페이지를 기존 조�
   expect(screen.queryByText("fixture failure")).toBeNull();
   cache.clear();
 });
+
+
+it("검색으로 선택한 행이 숨겨져도 상세의 작업과 실행 소속을 명시한다", async () => {
+  vi.mocked(getJson).mockResolvedValue({ data: {
+    status: "ok", checked_at: "2026-10-05T00:00:00Z", dagster_url: "http://dagster.test",
+    repositories: [], recent_runs: [
+      { run_id: "run-alpha", job_name: "job_alpha", status: "FAILURE", tags: { "dagster/max_runtime": "120" } },
+      { run_id: "run-beta", job_name: "job_beta", status: "SUCCESS", tags: {} },
+    ],
+  }});
+  vi.mocked(usePipelineDagsterRunDetail).mockReturnValue({
+    data: { data: { failure_reason: "Worker 실패", events: [], event_has_more: false } },
+    isLoading: false, isError: false, isFetching: false,
+  } as unknown as ReturnType<typeof usePipelineDagsterRunDetail>);
+  const cache = new QueryClient();
+  render(<QueryClientProvider client={cache}><CommonDagsterPanel /></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: "실행 상세: job_alpha, run-alpha" }));
+  await screen.findByText("Worker 실패");
+  fireEvent.change(screen.getByRole("textbox", { name: "실행 검색" }), { target: { value: "job_beta" } });
+  expect(screen.queryByRole("button", { name: "실행 상세: job_alpha, run-alpha" })).toBeNull();
+  expect(screen.getByRole("button", { name: "실행 상세: job_beta, run-beta" })).toBeTruthy();
+  const detail = screen.getByTestId("map-selected-run-detail");
+  expect(detail.textContent).toContain("job_alpha");
+  expect(detail.textContent).toContain("run-alpha");
+  expect(detail.textContent).toContain("FAILURE");
+  expect(detail.textContent).toContain("120초");
+  expect(detail.textContent).not.toContain("job_beta");
+  cache.clear();
+});

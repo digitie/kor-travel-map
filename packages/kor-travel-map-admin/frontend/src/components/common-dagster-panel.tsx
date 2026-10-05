@@ -64,7 +64,12 @@ export function CommonDagsterPanel() {
       locationUrl={data?.repositories[0] ? `${base}/locations/${encodeURIComponent(`${data.repositories[0].name}@${data.repositories[0].location_name}`)}` : undefined}
       showRunDetails selectedRunId={selectedRunId}
       onSelectRun={id => setSelectedRunId(current => current === id ? null : id)}
-      renderRunDetail={run => run ? <DagsterRunDetail key={run.runId} runId={run.runId} /> : null}
+      renderRunDetail={run => run ? <div key={run.runId} className="min-w-0 space-y-2" data-testid="map-selected-run-detail">
+        <h3 className="font-semibold">{run.jobName}</h3>
+        <p className="break-all">실행 ID: <code>{run.runId}</code></p>
+        <p>상태: {run.status} · 실행 시간 상한: {run.maxRuntimeSeconds ? `${run.maxRuntimeSeconds}초` : "미확인"}</p>
+        <DagsterRunDetail runId={run.runId} />
+      </div> : null}
       testId="map-common-dagster" />
   </section>;
 }
