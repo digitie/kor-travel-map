@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "recorded_at": "2026-10-05T21:58:57.155532+00:00",
+  "head": "4acadf7bbd9d70d80bb3db8be4708095913e23ff",
+  "workflow": 37374998595,
+  "attempt": 1,
+  "jobs": [
+    {
+      "name": "pytest integration (PostGIS, glibc)",
+      "job": 111993381557,
+      "started_at": "2026-10-05T21:48:40Z",
+      "completed_at": "2026-10-05T21:55:27Z",
+      "conclusion": "success",
+      "summaries": [
+        "1138 passed, 12 skipped in 350.41s (0:05:50)"
+      ],
+      "private_raw_log_sha256": "c6f3d6405f18578d6ef281cc8c8d3ea411e26057cb6f34406ad43b60d61e6d9e"
+    },
+    {
+      "name": "pytest integration (PostGIS, alpine)",
+      "job": 111993381700,
+      "started_at": "2026-10-05T21:48:41Z",
+      "completed_at": "2026-10-05T21:57:13Z",
+      "conclusion": "success",
+      "summaries": [
+        "1132 passed, 18 skipped in 451.64s (0:07:31)"
+      ],
+      "private_raw_log_sha256": "d4cef8e6b0a9c3233a34ba6a756d21d72dccaed74e84292bcbe3da3baf4b4359"
+    }
+  ]
+}

@@ -31,9 +31,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
 
-- [ ] T-COMMON-DAGSTER — Common 복구·메모리·로그인/메뉴/대시보드 채택과 Map·PinVi paired 재구축·live UI 검증.
 
-  후보 구현 후 두 독립 적대적 리뷰·live·CI·merge를 확인한다. [적용 가이드](runbooks/common-dagster.md), [해제 조건](tasks-acceptance.md#t-common-dagster).
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 

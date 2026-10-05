@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "recorded_at": "2026-10-05T22:01:07.640696+00:00",
+  "repository": "digitie/pinvi",
+  "main_allowed_merge_methods": [
+    "squash"
+  ],
+  "main_required_linear_history": true,
+  "main_rules": [
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "digitie/pinvi",
+      "ruleset_id": 17146781
+    },
+    {
+      "type": "required_linear_history",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "digitie/pinvi",
+      "ruleset_id": 17146781
+    },
+    {
+      "type": "non_fast_forward",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "digitie/pinvi",
+      "ruleset_id": 17146781
+    },
+    {
+      "type": "deletion",
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "digitie/pinvi",
+      "ruleset_id": 17146781
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "Aggregate CI gate"
+          }
+        ]
+      },
+      "ruleset_source_type": "Repository",
+      "ruleset_source": "digitie/pinvi",
+      "ruleset_id": 17146781
+    }
+  ],
+  "retained_remote_refs": {
+    "refs/tags/codex/pinvi-map-runtime-20261006": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+    "refs/tags/codex/pinvi-map-reviewed-20261006": "92d0f40e24c4b420e4d699eba4f2f98165e8e58f"
+  },
+  "runtime_source_is_ancestor_of_reviewed_source_tag": true,
+  "release_created": false,
+  "notes": "Preserve original deployed and fully reviewed commits under explicit remote Git tags, keep source feature branch, and follow existing main squash-only rules. No repository/ruleset settings changed."
+}
