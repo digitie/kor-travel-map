@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-10-05 — standalone compose code-server `code-server start`: 브랜치 `chore/standalone-compose-code-server-start`
+
+**다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포 영향 없음(standalone compose·주석·문서만, prod는 Manager
+compose).** 그 뒤 후속: `docker/dagster-entrypoint.sh` 봉인에서 `api grpc` 분기 제거(+ 수용 테스트 parametrize 정리).
+
+- standalone healthcheck는 proxy health + 자식 `ListRepositories`(load error면 실패). n150 실측으로 CLI
+  `grpc-health-check`는 load error에도 rc=0임을 확인했다.
+
 ## 2026-10-05 — 인계: 공용 Dagster 완주 이후 (Codex 등 다음 에이전트는 여기부터)
 
 **다음 한 작업: [`docs/handoff/2026-10-05-shared-dagster-handoff.md`](handoff/2026-10-05-shared-dagster-handoff.md)를

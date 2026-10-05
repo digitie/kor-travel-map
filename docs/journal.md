@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — standalone compose code-server를 `code-server start`로: 브랜치 `chore/standalone-compose-code-server-start`
+
+- **변경.** `docker-compose.yml`의 `dagster-code-server` command가 `dagster api grpc`에서 운영(Manager)과 같은
+  `dagster code-server start -h 127.0.0.1 -p ${PORT} -m kortravelmap.dagster.definitions`가 됐다(#1295 봉인이 받는 모양).
+  `api grpc`는 location reload를 무시해서 import 때 읽는 schedule override가 반영되지 않는다. host·external-infra
+  overlay는 command를 건드리지 않는다.
+- **healthcheck.** 옛 probe(`DagsterApi` health → SERVING)는 `code-server start`에서는 proxy만 본다 — proxy health는 자식이
+  load error여도 SERVING이다. proxy health 뒤 자식에 전달되는 `ListRepositories`를 raw bytes로 불러
+  `SerializableErrorInfo`면 실패한다(dagster import 없음, 4초 deadline 둘). Manager probe의 PID 1 종료·orphan run 정리는
+  standalone에 옮기지 않았다(판정만).
+- **테스트.** `test_standalone_compose_code_server_is_reloadable_and_sealed`: compose argv 정확 일치 + 그 argv(포트 기본값
+  풀어)를 실제 entrypoint 봉인에 넣어 통과 + probe가 `ListRepositories`/`SerializableErrorInfo`를 본다. dagster 프로세스
+  서비스 유도 marker를 `dagster api grpc` → `dagster code-server start`로 바꿨다. 먼저 RED(2 failed: argv 불일치,
+  유도 서비스 2개) 확인 후 GREEN.
+- **n150 증거.** 영향 파일 3개(`test_docker_dagster_runtime.py`·`test_c7_prod_runtime.py`·
+  `test_n150_repin_derives_dagster_services.py`) 368 통과/13 실패 — 13건은 main과 같은 집합(n150 checkout에 frontend
+  node_modules 없음). CI 범위 ruff 통과. `docker compose config` base·host·external-infra 셋 다 `code-server start`로 렌더.
+  live Map dagster 이미지로 일회용 컨테이너(host network, 빈 loopback 포트): 정상 모듈은 compose probe rc=0(~40초),
+  `dagster api grpc-health-check` rc=0, `ListRepositories` 응답이 `ListRepositoriesResponse`. 없는 모듈은 compose probe
+  rc=1인데 proxy health는 SERVING, `grpc-health-check`는 rc=0 — CLI probe로는 load error를 못 잡는다는 실측. 컨테이너는 치웠다.
+- **남은 것.** entrypoint 봉인에서 `api grpc` 제거(이제 어느 compose도 쓰지 않는다).
+
 ## 2026-10-05 — 인계 문서와 n150 보조 스크립트를 저장소에 남김
 
 - 세션 교대(다음 에이전트: Codex)를 위해 `docs/handoff/2026-10-05-shared-dagster-handoff.md`에 상태·진행 중 작업·

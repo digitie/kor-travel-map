@@ -197,8 +197,9 @@ if [ "$dagster_profile" = "production" ]; then
       # (`python -m dagster api grpc`, UDS socket)를 띄우고 location reload(`ReloadCode`)
       # 때 자식을 새로 띄워 definitions를 다시 import한다 — schedule override처럼
       # import 때 읽는 값이 reload로 반영되는 유일한 모양이다. `api grpc`는 reload를
-      # "not currently supported" 경고만 남기고 무시한다(2026-10-01 n150 C7). `api grpc`는
-      # 이 이미지를 핀에 올린 뒤 Manager compose가 바뀔 때까지의 전환용으로 남긴다.
+      # "not currently supported" 경고만 남기고 무시한다(2026-10-01 n150 C7). Manager compose와
+      # 저장소 standalone compose는 모두 `code-server start`다(2026-10-05). `api grpc`는 전환용으로
+      # 남아 있고 후속에서 제거한다.
       if [ "$#" -ne 9 ] \
         || ! { { [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; } \
           || { [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; }; } \
