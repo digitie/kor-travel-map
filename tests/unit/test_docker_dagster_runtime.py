@@ -4868,8 +4868,10 @@ def test_standalone_compose_code_server_is_reloadable_and_sealed(tmp_path: Path)
     # proxy의 `DagsterApi` health는 자식이 load error여도 고정 SERVING이다 — probe는 자식에
     # 전달되는 `ListRepositories`를 봐야 load error를 잡는다.
     probe = " ".join(service["healthcheck"]["test"])
-    assert "/api.DagsterApi/ListRepositories" in probe
-    assert "SerializableErrorInfo" in probe
+    assert "kortravelcommon.dagster_health" in probe
+    assert service["healthcheck"]["test"] == [
+        "CMD", "python", "-I", "-m", "kortravelcommon.dagster_health", port_default
+    ]
     assert service["healthcheck"]["test"][-1] == port_default
     # 4초 gRPC 호출 둘 + 인터프리터 기동·grpc import — 부하 아래 10초로는 모자랄 수 있다.
     assert service["healthcheck"]["timeout"] == "15s"

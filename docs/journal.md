@@ -1,5 +1,9 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — standalone 자식 저장소 응답 fail-closed 보강
+
+최신 main #1304를 반영한 두 독립 리뷰에서 한 리뷰어가 빈 protobuf/잘못된 JSON이 substring 건강 점검을 통과하는 P2를 실제 reply fixture로 재현했다. 기존 PASS와 BLOCK 원문을 모두 보존한다. Common의 경량 `dagster_health`를 사용하여 proxy 뒤 자식의 정상 class·symbol schema와 wire/JSON을 검증한다. Dagster 전체 import를 피하며 각 RPC 4초·수신 4MiB·channel 정리를 유지한다. standalone은 건강 판정만 하므로 unhealthy 자체를 자동 재시작으로 설명하지 않는다. 새 source pin·두 리뷰·CI·운영 재구축/live는 아직 미완료다.
+
 ## 2026-10-05 — 요청 단위 Dagster client의 PostGIS fixture 정렬
 
 Map CI의 glibc·alpine 통합 lane에서 동일한 projection 테스트 한 건이 실패했다. 앱 전역 client 주입을 제거한 뒤 기존 fixture가 실제 연결로 빠진 것이 원인이다. 두 schedule fixture에 요청마다 새 MockTransport client를 주입하고 실제 middleware의 정리를 유지했다. catalog 회귀도 schedule source가 `ok`인지 단언하여 묵시적 degrade를 막는다. 운영 Python·UI 코드는 이전 고정 후보와 동일하다. 실제 PostGIS 관련 22개 검사를 통과했으며 전체 CI를 다시 확인한다.

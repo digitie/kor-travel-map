@@ -662,8 +662,8 @@ services:
     init: true
     healthcheck:
       # `code-server start`의 proxy는 `DagsterApi` health에 자식 상태와 무관하게 SERVING을 답한다. 그래서
-      # proxy health를 본 뒤 자식에 전달되는 `ListRepositories`를 raw bytes로 불러 load error
-      # (`SerializableErrorInfo`)면 실패한다. dagster를 import하지 않는다 — CLI `dagster api
+      # 공통 경량 probe가 proxy health 뒤 자식의 `ListRepositories` protobuf/JSON을 검증하고
+      # 빈/손상 reply·load error(`SerializableErrorInfo`)면 실패한다. dagster를 import하지 않는다 — CLI `dagster api
       # grpc-health-check`는 매번 dagster import(유휴 2초)를 치르고 deadline이 없으며 proxy health만 본다.
       # 운영 Manager probe(실패 지속 시 PID 1 종료·orphan run 정리)의 축약본이다 — standalone은 판정만 한다.
       # 자식이 죽거나 load error면 컨테이너는 Up인 채 unhealthy로 남는다 — Manager probe와 달리 PID 1을 끝내 재시작시키지 않는다(의도).
@@ -671,8 +671,8 @@ services:
         - CMD
         - python
         - -I
-        - -c
-        - "import sys, grpc; from grpc_health.v1 import health_pb2 as h, health_pb2_grpc as g; c = grpc.insecure_channel('127.0.0.1:' + sys.argv[1]); r = g.HealthStub(c).Check(h.HealthCheckRequest(service='DagsterApi'), timeout=4); sys.exit(1) if r.status != h.HealthCheckResponse.SERVING else None; sys.exit(1 if b'SerializableErrorInfo' in c.unary_unary('/api.DagsterApi/ListRepositories')(b'', timeout=4) else 0)"
+        - -m
+        - kortravelcommon.dagster_health
         - "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"
       interval: 30s
       # gRPC 호출 둘(각 4초) 앞에 인터프리터 기동·grpc import가 붙는다 — 부하 아래 10초를 넘을 수 있다.
