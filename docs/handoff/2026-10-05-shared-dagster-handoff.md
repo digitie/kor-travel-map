@@ -70,8 +70,12 @@
       - invalid가 1건이라도 있을 때.
     - 받아들인 값이 0건이면 `failed`로 끝낸다.
     - 메트릭 `ktw_sync_values_skipped_total`을 추가했다.
+  - **경보 규칙 완료(weather PR #74 `4e9c5b96`, 2026-10-05 00:33Z 배포).** `KorTravelWeatherValuesInvalid`(missing이 아닌
+    skip이 1건이라도 있으면 즉시)와 `KorTravelWeatherValuesMissingHigh`(3h30m 창에서 60 초과가 1h 지속)를 추가했다.
+    양쪽 차분은 10분 `max_over_time`으로 평활해 scrape 공백이나 카운터 dip에 오발하지 않는다.
+    skip 카운터는 worker를 import할 때 0으로 미리 만든다.
+    alertmanager가 없으므로 firing은 Prometheus 화면에만 보인다.
   - **후속(LOW):**
-    - 위 메트릭에 걸린 경보 규칙이 아직 없다.
     - 이미 저장된 센티넬 값을 조회해야 한다. 범위를 좁혀서 볼 것.
     - python-kma-api의 `float_or_none`이 |v| ≥ 900일 때 None을 돌려주도록 고친다.
 - 참고: weather main에는 Codex의 #72(`8ed94e7`)가 들어갔다. fact/raw 게시를 작은 batch로 나누는 변경, 특보 메모리 변경, admin Dagster UI가 포함돼 있다.
@@ -181,6 +185,11 @@ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/ktdctl pin verify
    호스트 dagster를 올릴 때는 transport 고정 버전도 함께 올린다.
 
 ### 4.6 weather 배포
+- **알림 규칙(`deploy/prometheus/alerts.yml`)이 바뀌었다면 배포 뒤 반드시**
+  `docker kill --signal=SIGHUP kor-travel-weather-prometheus`를 보낸다. 배포 스크립트는 SIGHUP을 보내지 않는다.
+  Manager의 weather `ensure`는 보낸다. 그런 다음 14104 `/api/v1/rules`에서 새 규칙이 올라왔는지 확인한다.
+- systemd unit은 **`--uid=digitie`**로 띄운다. root로 실행하면 weather 체크아웃에서 git이 dubious ownership으로 거부한다.
+- ghcr.io나 Docker Hub의 TLS timeout은 일시적인 경우가 대부분이니 재시도한다. preflight가 둘 다 WARN으로 미리 알려 준다.
 `n150-scripts/weather-deploy.sh <merge-sha>`를 실행한다.
 - 하는 일: 호스트의 weather 체크아웃을 ff-only로 올린다. Manager compose로 weather api와 code-server를 build·migrate·up한다.
   마지막에 orphan run을 정리한다.

@@ -74,6 +74,9 @@ echo "== 외부 의존"
 c=$(curl -s -o /dev/null -m 15 -w '%{http_code}' 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/node:pull')
 [ "$c" = 200 ] && ok "Docker Hub auth $c" || wrn "Docker Hub auth $c — 빌드가 base image 확인에서 실패할 수 있음"
 
+c=$(curl -s -o /dev/null -m 15 -w '%{http_code}' 'https://ghcr.io/token?scope=repository:astral-sh/uv:pull&service=ghcr.io')
+[ "$c" = 200 ] && ok "ghcr.io auth $c" || wrn "ghcr.io auth $c — uv 등 ghcr base image 빌드가 실패할 수 있음"
+
 echo "== 판정: FAIL=$fail WARN=$warn"
 [ $fail -eq 0 ] && echo "PREFLIGHT_PASS" || echo "PREFLIGHT_FAIL"
 exit $fail
