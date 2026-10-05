@@ -1,5 +1,9 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-05 — child health의 reserved metadata marker 차단 채택
+
+Common 경량 probe의 독립 리뷰 반례(pointer/library map의 reserved serdes marker)를 차단하고 정상 default repository __repository__를 허용하는 profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.
+
 ## 2026-10-05 — child health의 nested metadata 검증 채택
 
 Common 경량 probe의 독립 리뷰 반례(null/미등록 pointer, 잘못된 executable/entry point 타입)를 반영한 표준 module/file/package profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.
