@@ -24,6 +24,8 @@ __all__ = [
     "get_summary_configuration_error",
 ]
 
+# 모든 tick 상태를 명시하면 전체 이력 batch rank 대신 selector별 LIMIT 조회를 사용한다.
+# 공용 Dagster의 이력이 커져도 최신 3건의 정보와 상태를 그대로 제공한다.
 _DAGSTER_SUMMARY_QUERY = """
 query KorTravelMapDagsterSummary(
   $limit: Int!, $repositorySelector: RepositorySelector!,
@@ -51,7 +53,7 @@ query KorTravelMapDagsterSummary(
           status
           repositoryName
           repositoryLocationName
-          ticks(limit: 3) {
+          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
             tickId
             status
             timestamp
@@ -68,7 +70,7 @@ query KorTravelMapDagsterSummary(
         name
         sensorState {
           status
-          ticks(limit: 3) {
+          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
             tickId
             status
             timestamp
