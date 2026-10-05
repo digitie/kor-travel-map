@@ -1,0 +1,49 @@
+{
+  "scope": "실제 운영 공통 Dagster 패널 8개. root가 전부 확인했고 독립 UI 리뷰어의 actual/visual/privacy PASS 뒤 게시한다. 계정·비밀·실제 운영 URL 표시 없음.",
+  "test_run_id": "b579716c-80e4-4b26-843d-ad47d62bd74c",
+  "ui_receipt_sha256": "38db579f14def71172965a3a7e8ba8e0f3469469d815392fcf814692f330a9c8",
+  "files": [
+    {
+      "file": "map-chromium-desktop.png",
+      "sha256": "16e1874b5fc4e9266bb67a309adcd72cce1e926330cef81f379454a103b229e9",
+      "bytes": 617306
+    },
+    {
+      "file": "map-chromium-mobile.png",
+      "sha256": "d7c8d31235bc90bfa773e5583fb91999afc8522cdee66450abd227fd74e8b959",
+      "bytes": 349537
+    },
+    {
+      "file": "map-firefox-desktop.png",
+      "sha256": "a3578128b6a21dc9c8a37197c81914beacb6ef129e6dc479af837c009e81d3b1",
+      "bytes": 981867
+    },
+    {
+      "file": "map-firefox-mobile.png",
+      "sha256": "add38846d51578c3d0d2f9745a20427d78cbae8953d50b78d228879715f6dfce",
+      "bytes": 568648
+    },
+    {
+      "file": "pinvi-chromium-desktop.png",
+      "sha256": "86c8d17130c238b6605650d27355ea717cd028d145b85906c52435321b3dd6d5",
+      "bytes": 455777
+    },
+    {
+      "file": "pinvi-chromium-mobile.png",
+      "sha256": "91afd1d6442d6d9cecbdbc9770bdebd790bf6278ed4583f4acc8bce955a54f80",
+      "bytes": 292431
+    },
+    {
+      "file": "pinvi-firefox-desktop.png",
+      "sha256": "f0d7d11299a80da0613624b8906e18d8f80d0deb1270d99a60694b474f5d899d",
+      "bytes": 658800
+    },
+    {
+      "file": "pinvi-firefox-mobile.png",
+      "sha256": "c21f8fbb58f1dda3ef44eda7714f47083b8d014f36aaae2de9f32016e6970aa4",
+      "bytes": 362036
+    }
+  ],
+  "root_visual_images_checked": 8,
+  "independent_visual_review_original_sha256": "d9cb1a845d20a6cb6527cbd9bc550da8b4644a8f75675c3e3d5bc76308c3d18f"
+}

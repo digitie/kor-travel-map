@@ -1,0 +1,28 @@
+{
+  "scope": "Pre-live documentation checks; independent of product/native/UI gates",
+  "common": {
+    "document_links": {
+      "documents": 606,
+      "local_targets": 2731,
+      "errors": 0
+    },
+    "plan": {
+      "detailed_tasks": 109,
+      "errors": 0
+    },
+    "validator_unittest": {
+      "run": 337,
+      "passed": 336,
+      "skipped": 1,
+      "failed": 0,
+      "seconds": 62.173
+    },
+    "diff_check_exit": 0
+  },
+  "map": {
+    "prod_redaction_exit": 0,
+    "task_ledger_lint_exit": 0,
+    "diff_check_exit": 0
+  },
+  "validator_log_sha256": "1857b808d215ddf18fdce4c6d11a354776fda23a97243ef023d3cf65f756ee21"
+}

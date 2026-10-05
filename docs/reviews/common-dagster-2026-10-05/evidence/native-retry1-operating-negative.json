@@ -1,0 +1,21 @@
+{
+  "status": "FAIL",
+  "container_id": "a9e484c417aa5e4395bfd0f2d2791e1bdc866b9d8c5dc411e16f33df1bfea6f0",
+  "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T17:40:51.307560799Z",
+    "FinishedAt": "2026-10-05T17:41:26.24696522Z"
+  },
+  "operating_products_changed": false,
+  "successful_cases": 0,
+  "failure_receipt": {
+    "status": "FAIL",
+    "error_type": "OperationalError",
+    "completed_cases": []
+  },
+  "cause": "Isolated SQLite first initialization raced between daemon and test process: table runs already exists; no jobs launched"
+}

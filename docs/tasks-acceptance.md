@@ -2992,3 +2992,10 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 **변이 검증**(초기 9축 + 적대 리뷰 후속 5축 = 14축 전부 RED). 넷은 처음에 공허했다 —
 소비·marker 배선이 `finally` 안에 인라인이라 직접 잴 수 없었다. 이 파일이 이미 같은
 이유로 `driver_exit_code`를 꺼낸 전례가 있어 같은 방식으로 추출했다.
+
+## T-COMMON-DAGSTER
+
+- 고정 제품의 두 독립 적대적 FULL 리뷰와 finding closure.
+- 공통 의존성·OpenAPI·타입·실패/활성/배치/정합성 검사 PASS.
+- sanctioned Map·PinVi pair 재구축 및 실제 로그인·공통 Dagster UI·D1/D2와 PinVi live PASS.
+- 필수 exact-head CI green 후 PR merge. 운영 RSS 수치는 실측 전에는 제외.

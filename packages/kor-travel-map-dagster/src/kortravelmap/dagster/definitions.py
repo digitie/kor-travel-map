@@ -10,6 +10,7 @@ from dagster import (
     Definitions,
     InitResourceContext,
     ResourceDefinition,
+    multiprocess_executor,
     resource,
 )
 from dagster import (
@@ -171,6 +172,7 @@ def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
 
 
 defs = Definitions(
+    executor=multiprocess_executor.configured({"max_concurrent": 1}),
     assets=[
         *FEATURE_LOAD_ASSETS,
         *MCST_FEATURE_ASSETS,

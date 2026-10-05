@@ -56,6 +56,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from kortravelmap.api import dagster_http
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
 from kortravelmap.api.ops_dataset_service import (
@@ -1101,10 +1102,18 @@ async def _seeded_ops_api(
             def _dagster(_request: httpx.Request) -> httpx.Response:
                 return httpx.Response(200, json=_empty_schedule_payload())
 
-            async with httpx.AsyncClient(
-                transport=httpx.MockTransport(_dagster)
-            ) as dagster_client:
-                app.state.dagster_http_client = dagster_client
+            with pytest.MonkeyPatch.context() as client_patch:
+                def _request_dagster_client(
+                    request: Any,
+                    _settings: ApiSettings,
+                ) -> httpx.AsyncClient:
+                    client = httpx.AsyncClient(transport=httpx.MockTransport(_dagster))
+                    request.state.dagster_http_client = client
+                    return client
+
+                client_patch.setattr(
+                    dagster_http, "http_client_from_request", _request_dagster_client,
+                )
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app),
                     base_url="http://testserver",
@@ -1128,6 +1137,7 @@ async def test_ops_datasets_grid_survives_schema_allowed_boundary_states(
         response = await client.get("/v1/ops/datasets")
 
     assert response.status_code == 200, response.text
+    assert response.json()["data"]["schedule_source_status"] == "ok"
     rows: list[Mapping[str, object]] = response.json()["data"]["items"]
     by_dataset_id: dict[int, list[Mapping[str, object]]] = {}
     for row in rows:

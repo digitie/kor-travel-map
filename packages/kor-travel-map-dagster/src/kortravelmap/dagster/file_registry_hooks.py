@@ -86,7 +86,12 @@ def record_mois_source_download(
             meta["sync"] = summary_meta
 
         async def _write() -> None:
-            engine = make_async_engine(require_pg_dsn(settings))
+            engine = make_async_engine(
+                require_pg_dsn(settings),
+                pool_size=1,
+                max_overflow=0,
+                server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+            )
             try:
                 async with AsyncSession(engine) as session, session.begin():
                     await file_registry.register_file(
@@ -128,7 +133,12 @@ def record_mois_source_loaded(
         name = pathlib.Path(db_path).name
 
         async def _write() -> None:
-            engine = make_async_engine(require_pg_dsn(settings))
+            engine = make_async_engine(
+                require_pg_dsn(settings),
+                pool_size=1,
+                max_overflow=0,
+                server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+            )
             try:
                 async with AsyncSession(engine) as session, session.begin():
                     await file_registry.touch_loaded(

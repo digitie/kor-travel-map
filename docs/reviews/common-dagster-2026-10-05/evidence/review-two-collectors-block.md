@@ -1,0 +1,9 @@
+판정: **하니스 BLOCK**. 제품 FULL PASS는 유지합니다. 실행·운영 변경은 하지 않았습니다.
+
+- **P2 — 성공 receipt 연결 부족** (`success collector:7,29–39`): 검증한 attestation과 나중에 hash한 파일이 달라질 수 있습니다. 한 번 읽은 bytes로 검증/hash하고, 실제 운영 source 및 동일 배포 실행 identity도 연결해야 합니다.
+- **P2 — 캡처 provenance 부족** (`screenshot collector:7–8,17,24–29`): PASS와 case 개수만으로 오래된 PNG를 현재 캡처로 수집할 수 있습니다. 정확한 네 조합의 성공과 실행별 이미지 digest를 확인해야 합니다.
+- **P2 — 전송 실패 후 재시도 불가** (`screenshot collector:9–25`): 부분 다운로드가 최종 디렉터리를 남겨 재시도를 차단합니다. 임시 디렉터리에 수집·검증한 뒤 승격해야 합니다.
+
+PNG signature는 잘림·개인정보 검증을 대신하지 않습니다. 명시한 게시 전 시각 검사는 계속 필요합니다.
+
+검토 SHA: 성공 collector `b65e80bf…33792`, screenshot collector `e3b3c251…3b375`.

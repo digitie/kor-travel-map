@@ -1,0 +1,17 @@
+{
+  "map_product": "c4d62a793ba69a60543fafda7442b3ba2c019ad1",
+  "pinvi_product": "aa265cf1c3917b9d0e89316d06c35678d23757c2",
+  "attempt": "retry1",
+  "result": {
+    "status": "failed",
+    "stage": "candidate_compose_build"
+  },
+  "failed_service": "pinvi-dagster-code-server",
+  "failure": "Docker frontend grpc server closed unexpectedly at apps/etl/Dockerfile:1; syntax=docker/dockerfile:1.7-labs",
+  "pinvi_api_build_passed": true,
+  "pinvi_web_build_passed": true,
+  "operating_generation_changed": false,
+  "existing_six_services_healthy": true,
+  "unit_exit_zero_is_not_rebuild_success": true,
+  "scope": "actual second negative rebuild; old generation retained; no new frontend rebuild/live result inferred"
+}

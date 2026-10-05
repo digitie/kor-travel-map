@@ -1,0 +1,30 @@
+# 최종 Map1a3/PinVi005 pair 초기 운영 읽기 전용 audit
+
+검토시각: 2026-10-05 18:49:58Z~18:52:17Z(한국시간2026-10-06). 대상은 승인된 표준 pair rebuild의 작업 소유 guard/inner unit과 현재 설치 pinset/ledger다.
+
+판정: 표준 실행 attribution과 초기 build 상태 확인. rebuild 성공은 아직 미확인이다. launch exit0, 초기 Resultsuccess/Exec0 및 기존 committed deploy를 새 success로 해석하지 않는다.
+
+실제 초기 unit·process(18:49:58Z):
+
+- guard와 inner 모두 activating/start이며 시작은18:45:58Z였다.
+- inner bash→ktdctl→docker/docker-buildx child에서 operation=build와 api.Dockerfile을 확인했다. Docker child 경과는 약120초였다.
+- 실제 build argv의 전체 내용을 출력하지 않고 operation 종류·Dockerfile basename·BUILDKIT_SYNTAX override 존재 여부만 추출했다. override=false였다.
+- 작업 소유 result.json은 아직 존재하지 않았다. stderr.log는0bytes였다. JSON 완료 결과나 application 전환을 주장하지 않는다.
+
+현재 source 및 실행 계약: 설치된 run-pinned-rebuild-once SHAa355e1689b47adfd53c2351afff07bf50e8cce589cdfcb6357b11950e14b9aec가 기존 직접 감사본과 동일했다. 설치 source callsite는 code 상수가 아닌 current_pinned_runtime_release accessor의 root 소유 registry에서 installed pinset을 읽는다. 당시 ktdctl argv에서 독립적인 revision 토큰을 찾는 방식으로는 source를 확인할 수 없어 그 결과를 source mismatch로 판단하지 않았다. 대신 같은 실제 installed accessor를 읽기 전용으로 호출했다.
+
+18:52:17Z current_pinned_runtime_release 결과:
+
+- source revisions에는1a3c4673790f51daa1a2f5ccf803d4e31673bad6 /0058369c778f8c3357ee393e12e3447d7975cc1f가 있었다.
+- pinset SHA2567b0e2febd36a889e22acb070df16182cfad8d9d42a6ef62c01caa15bd3524021.
+- accessor 반환 type은 PinnedRuntimeRelease였다. registry의 private path/환경·자격값은 출력하지 않았다.
+
+Own ledger 직접 확인(18:50:39Z): 설치된 고정 ledger root가 실제 root UID0/mode0700 디렉터리였다. 새 ticks output_directory를 정확히 가리키는 claim은1개였고 root UID0/mode0600/regular file/nlink1이었다. claim에는 manager_source_revision, output_directory, pinset_sha256 세 key만 있었다. 실제 manager source e2a1a5b42fec207fc6c5e0638c652de04e5694d4와 pinset7b0e가 현재 accessor와 일치했다. output tag 일치만 공개하고 private 경로를 재인용하지 않는다. claim raw SHA256596f317275d1862d13de0fa0f7995836251a543629dd8e470a0e89ed2e2d2597. claim만으로 배포 완료를 증명하지 않는다.
+
+기존 서비스 보존(18:50:39Z): 기존 Map API/UI/Dagster 및 PinVi API/web/Dagster 여섯 container 모두 Up/healthy였다. 새 후보 build 중의 기존 정상 서비스이며 새 image attestation이 아니다.
+
+이때 실제 committed deploy-status는 여전히 Map1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e/PinVi005, pinset54de39d1be7a3539fb016565212e6182999ec195b9938d813b5e7801d728aa25, run_id360afa9e-a50b-4968-bc63-0111153d5bfe였다. raw SHAc46e460a18ffca68963a871afd2390ca33347bbae2328b7e46315a5a3963eb1d. 이를 새1a3 배포 success로 재사용하지 않는다.
+
+수행 경계: 실제 systemctl/process read, installed wrapper source hash, root registry accessor, own claim metadata/hash 및 기존 container health 조회만 수행했다. 환경은 읽기 전용 설정 경로 해석에만 사용했으며 값·DSN·credentials·full process argv/URLs를 출력하거나 저장하지 않았다. rotation/ledger override/build/stop/restart/prune/DB 변경/attestation/성공 receipt 생성은0회다. root가 수행한 preflight FAIL 보류와 fresh PASS/WARN1·launch는 본인 수행으로 합산하지 않는다. source FULL113853c와 C7 artifact2b42, helper443a는 별도불변 증거다.
+
+다음 gate는 실제 rebuild canonical terminal result와 새 committed deploy transaction/pinset 및 여섯 image/installed source/runtime attestation의 일치다. 현재는 해당 gate NOT_RUN/미완료로 남긴다.

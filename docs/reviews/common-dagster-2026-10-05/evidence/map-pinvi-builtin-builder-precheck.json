@@ -1,0 +1,8 @@
+{
+  "installed_manager_builder_source_syntax_override_references": [],
+  "manager_env_syntax_override_present": false,
+  "engine": "29.6.1",
+  "buildx": "github.com/docker/buildx v0.35.0 a319e5b15052cf6557ceb666eb8ff6e32380b782",
+  "buildkit": "v0.31.1",
+  "scope": "installed builder source and manager env read-only; actual candidate invocation must also be checked"
+}

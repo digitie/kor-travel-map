@@ -1,0 +1,42 @@
+# Map tick query 고정 후보 FULL 연속 독립 closure
+
+검토일: 2026-10-06. 전문축은 복구·DB·메모리·격리 및 실패 전파다. 판정: 전체 고정 source 범위 FULL 연속 PASS. 이는 새 operating rebuild/UI 성공 판정이 아니다.
+
+고정 입력:
+
+- manifest map-pinvi-ticks-reviewed-manifest.json SHA256 9d53eed9d50fdc1c6f5044005efa0c9686303d91e9e14f08c28aad140f177d28
+- Common baseline7dc1d6dda955b9b836cb3f24d6fd5bcd37fabe52 → a960bdb114d99a2ac1b9608a77b240635806e551
+- Map baselinea46d7b92c0e727805348e20d60fe188592e16477 → 885d6205a8ce8d9e79c38b9198eb05f51bcc9192
+- PinVi baseline07cfef222c56d7e648c81b017aa8ffe4ccd1c386 → 0058369c778f8c3357ee393e12e3447d7975cc1f
+
+전체 범위 봉인: 각 repository의 immutable git object에서 manifest 모든112 blobs(Common35/Map62/PinVi15)의 SHA256을 직접 검증했다. 각 baseline→candidate의 전체 diff path set도 manifest와 같았다. 이전 builtin manifest SHA954edf0fe117091c4d39c9fbe1e4d797981c73ade359f74eaeb0d67184dbe866와 비교하여 Common35/PinVi15 모두 동일, Map 이전61 중59 동일이다. Map의 전체 old1ba→885 tree delta는 query service, resume, handoff 세 파일뿐이다. manifest coverage에 handoff가 새로 포함되어 현재 총112이며, 이 파일이 원래 tree에 없었다는 뜻은 아니다. 이전manifest111과 동일한109 blobs는 내용·검증 근거를 재사용한다.
+
+본인 고정 archive: /home/digitie/.cache/recovery-ticks-fixed-885d620-pfmgy3f1/map.
+전체검증 metadata verification.json SHA256 1c51ffc955611731ea128598ee79d4a7e3b1ded6727e23a2a7374f1f0f73760a.
+원본 dirty checkout의 파일을 테스트 대상으로 사용하지 않았다. peer raw 내용은 열람하지 않았다.
+
+새 delta 직접 검토:
+
+1. dagster_query_service.py SHA fce5e6d13f217860e3a1b022dd2f9c3656502c01b47ea87212991efcd27d8d3a.
+   source 변경은 두 한국어 설명과 scheduleState/sensorState ticks(limit:3)에 statuses:[STARTED,SKIPPED,SUCCESS,FAILURE]를 추가한 두 literal뿐이다. AST로 새 query가 old query의 두 literal 치환과 정확히 같음을 확인하고 GraphQL parse가 통과했다. 필드·selector·active/recent limit·error/timeout·parser·HTTP cap·client 수명은 같다. 네 상태는 실제 설치 enum 전부이므로 tick 상태/시간/오류를 생략하거나 미조회 이력을 빈 이력으로 꾸미지 않는다.
+2. docs/resume.md SHA 8bfedf62b713007b9345a49b87babeceb087820a5c28ad866108c1a9c83d61bd.
+   transport revision의 최신 main 상속 변경을 확인했다. 2026-10-05 인계 시점의 기존 prod 표와 새 Map885 operating 성공을 혼동하지 않는다.
+3. docs/handoff/2026-10-05-shared-dagster-handoff.md SHA43caa41d89c568b3f2653b648353735d4a5d44b5baa728999e397a963dd39549.
+   최신 main의 transport op 오류 redaction·과거 원문 정리 소유권·standalone 변경 설명·디스크 이력 변경이다. shared DB schema/이력 cleanup을 이 후보에서 승인하거나 수행하는 내용으로 해석하지 않는다. 두 문서의 로컬 Markdown link5개가 실제 고정 archive에서 존재했다. 이 문서의 외부 운영 주장 전체를 새로 실증한 것으로 집계하지 않는다.
+
+새 후보 직접 수행: own archive의 API source와 fixed Common source를 PYTHONPATH로 사용했다. 테스트 Python은 /home/digitie/.cache/map-common-recovery-venv/bin/python, TMPDIR은 ext4 own cache다.
+명령: python -m pytest -q packages/kor-travel-map-api/tests/test_dagster_query_service.py packages/kor-travel-map-api/tests/test_dagster_bounded_summary.py
+결과:27 passed in1.16s/exit0/stderr0. malformed response·repository identity·recent/active merge·압축 차단 및 failure envelope 계약을 확인한다. parser 검증의 최초 system Python 호출에는 graphql extra가 없어 ModuleNotFoundError가 났고, 이미 준비된 테스트 venv로 실행하여 통과했다. 제품 실패로 판단하지 않는다. root의29 tests/Ruff 결과는 본인 수행으로 합산하지 않는다.
+
+정확히 동일한 새 query에 재사용하는 본인 독립 근거:
+
+- map-operating-summary-timeout-review-recovery.md SHA e907c2e6ea01cf3696fae0f593ca0d5d051802672e14e679d93d21f8847ec95a: 실제 original full summary의 sensorState.ticks DB statement timeout 및 bounded10초 unavailable 원인 분리.
+- map-summary-tick-query-review-recovery.md SHA f405112cc18aeb3398f09df8c6058d2cbae93fb9ac33e7b9d987cd4a922c6502: 실제 설치 enum4개/argument type, 별도 container exec 프로세스에서 두 literal만 바꾼 동일 query가2.077초/statusok/errors0/repo1/jobs39/schedules30/sensors10/recentruns30/ticks30/state당최대3.
+- 같은 버전 Dagster1.13.24 primary fetch_ticks와 SQL schedule storage를 직접 읽었다. nonempty statuses는 batch rank를 회피하여 selector별 get_ticks(limit3)로 간다. own SQLite의 TickStatus 네 fixture에서 all4 filter와 무필터의 최신3 ID가 동일하고 전체4 상태가 포함됐으며 batch loader가 호출되지 않았다.
+- 전체 query의 HTTP4MiB/10초, active1000 및 recent30은 그대로다. selector별 DB 호출 수는 늘지만 실제40 state 결과가2.077초였다. 향후 느린 DB는 여전히 unavailable/error로 처리해야 한다. timestamp 동률 batch rank와 strict LIMIT3, legacy NULL selector 이력 포함은 정확한 배열 동일성까지 보장하지 않으며 bounded 최신3 의미를 유지하는 것으로 판단한다. 향후 enum 추가 시 전체상태 목록 검증도 갱신해야 한다.
+
+이전 FULL source 근거 재사용:
+
+map-pinvi-builtin-review-recovery.md SHA413dcf384f0b189f649d86b871272b84895f5696cff28bfba255c683f7e18dd2의 원문 bytes/hash가 불변임을 직접 확인했다. 해당 FULL 연속 리뷰와 그에 연결된 본인 functional/HTTP/health/markers/PinVi source 검증 범위는 동일109 blobs에 그대로 유효하다. SQLite snapshot authoritative seal·100배치/dedup·lease/operation 복구·configured executor/run retry0·owner selector/active merge·bounded HTTP 및 cancellation/client cleanup·Common health marker failclosed·PinVi native autoload/Gitpin·builtin Dockerfile 계약에 새 delta가 없음을 전체 Git tree/SHA 비교로 확인했다. 변경 없는 대규모 suite는 재실행하지 않았다. 기존 OPEN 항목을 peer 결과로 닫거나 작성자 tests를 본인 PASS로 합산하지 않는다.
+
+최종 판정과 실행 경계: 새 source blocker 없음, 전체112 고정 source FULL 연속 PASS. 새 Map885 pair rotation/rebuild/실제 runtime source attestation/UI live는 NOT_RUN. 기존 deployed Map1ba 및 Common동일 native 성공이 존재한다는 작성자 상황은 새Map885 image 성공 증거가 아니며 본인 결과로 합산하지 않는다. root dirty docs와 실행 전 helpers는 이 제품 source manifest에 포함하지 않는다. 제품 변경/commit/push/운영 mutation/DB cleanup은 수행하지 않았다. 기존 FAIL/BLOCK/FULL 원문은 불변이고 이 closure는 새 원문으로만 보존한다.

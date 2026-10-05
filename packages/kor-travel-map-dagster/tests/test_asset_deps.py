@@ -57,6 +57,9 @@ def test_highway_incident_asset_uses_serial_snapshot_pool() -> None:
     assert pool == HIGHWAY_INCIDENT_SNAPSHOT_POOL
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Parameter `owners` of initializer `SensorDefinition.__init__` is currently in beta"
+)
 def test_every_pool_in_the_code_location_is_tenant_prefixed() -> None:
     """pool 이름공간은 instance 전역이다 — 공유 plane에서 다른 프로젝트와 슬롯을 나누지 않는다.
 

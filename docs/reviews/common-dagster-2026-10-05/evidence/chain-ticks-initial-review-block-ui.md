@@ -1,0 +1,41 @@
+# chain16 ticks 하니스 독립 초기 리뷰
+
+<!-- SPDX-License-Identifier: MIT -->
+<!-- SPDX-FileCopyrightText: 2026 kor-travel contributors -->
+
+판정: **하니스 BLOCK**. 제품 Map1a3/Commona960/PinVi005 FULL SOURCE PASS는 변경하지 않는다. 실제 C7/chain/D1/D2 성공으로 확장하지 않는다. 실행 ID J-CHAIN-TICKS-INITIAL-20261006.
+
+고정 읽기 bytes:
+- map-pinvi-chain16-ticks-launch.py f1bfc3717d95d07410eea086b41c0fe2a938e9e91694004cb29e5298ba32697e
+- map-pinvi-chain16-ticks-collect.py 3897da1ff578e5cb714df5e12813e8ed33aba45828b391d91d41c90a69ec699c
+- map-pinvi-chain16-ticks-status.py 0c6aead0c9cd2763dca20bafdc7570e6c1a90c531a0252020e21058024ebcb56
+
+## J-CHAIN-P1-01 — 과거 D2 receipt와 이번 M01/D1 proof를 합쳐 PASS
+
+P1 OPEN. collect16–23/29–43.
+lane에서 source/current API/C7 image digest가 같고 passed/complete인 어느 이전 result든 선택한다. 이번 chain/D2 invocation의 시작·완료시간, 신규 run_id, terminal 성공과 연결하지 않는다. trusted chain G는 과거 run receipt를 삭제하지 않는다.
+
+재현 시나리오: 같은 source/image의 이전 정상 D2 receipt가 있고 이번 chain의 M01/D1는 통과했지만 D2 기동/실행이 실패하여 ACTIVE/BLOCKED가 없다. collector는 이전 D2 audit/purge와 이번 M01/D1 log를 합쳐 PASS할 수 있다. exact fingerprint는 같은 후보의 이전 invocation 배제에 충분하지 않다.
+
+권고: prelaunch run set/start/nonce/attestation·source/images를 immutable identity에 고정하고 이번 새 run_id/시간·같은 chain/D2 invocation 및 terminal success와 result를 연결한다. fresh Type=oneshot D2의 successful start-job-done journal proof는 이용할 수 있지만 고정 Type·이번 invocation·시각·실패 event 부재·parent terminal success·신규 result를 함께 확인해야 한다.
+
+## J-CHAIN-P2-01 — 완료 runtime에 preterminal exact-file validator 호출
+
+P2 OPEN. collect23; fixed Map1a3 scripts/admin_feature_live_state.py:801–882 / run-admin-feature-live-acceptance.sh:588–589.
+validate-evidence는 runtime의 정확한 파일 집합을 요구하며 result.json을 허용하지 않는다. 실제 runner는 validation 후 result.json을 쓴다. collector가 completed result를 발견한 동일 directory에 validator를 다시 실행하면 extra result.json 때문에 항상 실패한다.
+
+권고: 제품/원본 runtime을 변경하거나 result를 삭제하지 않는다. terminal result를 별도로 엄격히 검증·hash하고 root-owned private snapshot에서 검증된 result.json만 제외한 exact evidence를 원래 validator로 검증하는 방법 등을 사용한다. snapshot 권한·파일형식/symlink·byte 연결도 확인해야 한다. 이후 고정 하니스에서 재검토할 조건이다.
+
+## J-CHAIN-P2-02 — 초기 ABSENT 확인과 실제 recursive delete 사이 경합
+
+P2 OPEN. launch14–18 및 trusted chain118/125/128.
+wrapper는 targets가 부재이고 absolute/canonical/non-symlink임을 C7 build 전에 확인한다. 실제 rm-rf는 긴 build 후 F단계에서 실행한다. 그 사이 다른 작업이 공유 /tmp/kor-travel-map-playwright 등을 만들면 foreign 파일이 삭제될 수 있다. 고정 path 검사는 point-in-time이며 삭제 시점 ownership을 증명하지 않는다.
+
+권고: 모든 관련 사용자가 따르는 exclusive lease/ownership 재검증 또는 소유 private chaincopy에서 atomic mkdir로 fail-if-exists하고 shared/tmp recursive removal을 제거한다. 원본7f는 유지하고 새 copy bytes/hash·역치환 proof·root ownership·exact args를 따로 검토해야 한다. 제안만을 실행 PASS로 보지 않는다.
+
+다른 확인: pair literals1a3/005 및 trusted chain7f digest 고정, lane ACTIVE/BLOCKED gate, exact C7 source label·source/images digest, strict audit/purge counts와 normal/attempt0 validator 요구를 읽었다. 그러나 위 finding이 invocation proof·postterminal validation·삭제 안전성 gate를 막는다. launch attestation은 PASS만 확인하므로 수정본에서는 기대 source/pair·attested image와 launch identity 연결도 함께 확인해야 한다.
+
+EXECUTED: 초기 세 source/hash 읽기, 소유 trusted chain 고정 copy의 제어흐름/삭제지점 확인, fixed Map1a3 evidence validator/runner의 validation-before-result source 읽기. peer 원문을 읽지 않았다. 이후 수정 중인 파일을 원래 bytes로 간주하지 않는다.
+NOT_RUN: helper main/SSH/systemd/Docker/validator/chain/build/ACL/M01/D1/D2/삭제/제품 테스트. 소스·운영·공개 archive·타인 변경 수정 없음. 보고서에는 private endpoint·secret·전체 private chain/logger bytes를 복사하지 않았다. 초기 원문을 보존하고 새 수정 후보는 별도 closure로 검토한다.
+
+검토/보존 시각(UTC): 2026-10-05T18:45:58.821594+00:00

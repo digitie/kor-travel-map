@@ -16,7 +16,12 @@ async def _preflight() -> None:
         raise RuntimeError(
             "KOR_TRAVEL_MAP_PG_DSN Dagster runtime DSN is required for ADR-090 preflight"
         )
-    engine = make_async_engine(settings.pg_dsn)
+    engine = make_async_engine(
+        settings.pg_dsn,
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
+    )
     try:
         await assert_runtime_db_privilege_boundary(
             engine,

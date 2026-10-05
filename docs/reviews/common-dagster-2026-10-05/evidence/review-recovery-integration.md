@@ -1,0 +1,69 @@
+# Map·PinVi integration fixture 후속 독립 FULL 연속 리뷰
+
+- 날짜: 2026-10-05 KST
+- 판정: **FULL 연속 PASS (Map·PinVi)**. 제품 변경 없음, 새 fixture delta에서 블로커 없음.
+- Map base `3b9b49d694c7dd544ec6ed86253f5935bde0f193` → 후보 `24de4f288b40b3fe9033b32fa91231ede60d4d44`.
+- PinVi base `07cfef222c56d7e648c81b017aa8ffe4ccd1c386` → 후보 `aa265cf1c3917b9d0e89316d06c35678d23757c2`, 이전 FULL PASS와 동일.
+- Common 제품 `1f8e339c7c79f86f8952b0d4c326ab4dae56bee8`.
+- 동일 입력 manifest SHA256: `beb9b91236a8d5a62315b6569262ad0f61722f1be33873b877aede5dc2cb1d74`.
+
+## 고정 범위와 유효한 증거 재사용
+
+새 Map 후보를 본인 ext4 `/home/digitie/.cache/recovery-review-map-integration-24de4f2`에 Linux Git archive로 고정했다. PinVi는 동일 exact HEAD의 기존 본인 archive를 사용했다. manifest의 Map 59파일·PinVi 13파일 SHA256와 base부터 후보까지 전체 diff 파일 집합을 직접 검증했다.
+
+Map의 이전 FULL PASS `e4e27f76a5ea276febea1f36ad0308aac87ea1d2`부터 새 후보까지 전체 Git diff는 아래 세 파일만이다.
+
+- `tests/integration/test_ops_datasets_api_projection.py`
+- `tests/integration/test_provider_catalog.py`
+- `docs/journal.md`
+
+따라서 운영 Python/UI/Docker/spec/의존성·Dagster·배치·HTTP 소스는 모두 byte 동일하다. 변경 3파일을 독립 검토하고, 불변 전체 제품 범위는 이전 본인 FULL 리뷰와 실행 증거를 재사용한다. 새 제품 재검토 횟수나 새 전체 pytest 실행으로 중복 집계하지 않는다.
+
+이전 본인 FULL PASS 원문 `map-pinvi-final-closure-review-recovery.md` SHA256:
+
+`e60fc4115dde0c64b8650dfe416e08efab28f9bbed20f278a4d750e8fe73b6b4`.
+
+그 원문의 R01–R06 FIXED, 본인 직접 1,517 pytest PASS, wheel·배치·SQLite·실제 HTTP·정리 예산·Definitions 검증은 동일 제품 bytes에 유효하다. 기존 두 BLOCK와 마지막 FULL PASS 원문은 수정하지 않았다. 부모의 local PostGIS 22 PASS·전체 integration·CI 수치는 본인 수행으로 합산하지 않았다. 상대 리뷰어 원문은 미열람이다.
+
+## fixture 검토와 직접 실행
+
+앱 전역 client 대신 요청마다 새 MockTransport AsyncClient를 만들고 `request.state.dagster_http_client`에 저장한다. 실제 DagsterHttpClientMiddleware가 그 state를 읽어 종료 시 정리하는 경계를 유지한다. patch는 context 안에서 적용되어 fixture가 끝나면 복원된다. 대상 datasets route의 dependency 함수는 patched module global을 호출하며 해당 경로의 요청에서 transport 주입이 유효하다. canonical executions 조회 등 기존 DB projection 경로를 바꾸지 않는다.
+
+두 파일의 실제 `_request_dagster_client` 함수 AST를 고정 source에서 추출해 본인 probe에서 실행했다. 실제 Starlette Request.state·HTTPX MockTransport·운영 middleware를 사용하고, 기본 AsyncHTTPTransport의 HTTP 호출은 AssertionError로 금지했다. 이는 fixture factory/lifetime 검증이며 전체 DB integration 테스트를 실행한 것이 아니다.
+
+정상·downstream ValueError·downstream CancelledError를 각 fixture마다 수행한 **6개 직접 경로 모두 PASS**였다.
+
+- 요청별 서로 다른 client 6개 생성.
+- Mock HTTP 요청 6개, 기본 외부 HTTP transport 호출 없음.
+- 각 client가 실제 middleware에서 정확히 1회 aclose되고 closed 상태.
+- 기존 예외·취소 marker 유지.
+- 제품 소스 또는 원본 설치 수정 없음.
+
+기존 Mock handler의 AST도 두 파일에서 이전 후보와 정확히 같다. 원격 schedule payload를 느슨한 값으로 바꾸어 검사를 우회한 것이 아니다.
+
+## assertion 보존
+
+전체 파일의 기존 Assert AST multiset을 비교했다.
+
+| 파일 | 이전 → 현재 assertion | 검증 |
+| --- | --- | --- |
+| canonical projection integration | 193 → 193 | 기존 assertion 전부 byte-independent AST 동일 |
+| provider catalog integration | 117 → 118 | 기존 assertion 전부 동일, schedule_source_status == "ok" 1개 추가 |
+
+기존 canonical membership/operation/scope·REST projection·인증·legacy surface·preview·policy 검사는 제거하거나 약화하지 않았다. catalog의 schedule 상태를 추가로 확인해 테스트가 묵시적으로 degraded 상태에서도 통과하는 경우를 차단한다.
+
+factory는 대상 fixture의 요청별 단일 dependency 호출에 맞는다. 생산 코드의 요청 내부 client 캐시 구현을 이 테스트로 새로 검증했다고 주장하지 않는다. 전체 integration의 실제 PostgreSQL canonical projection 실행은 부모/CI 범위로 남긴다.
+
+## 실행·미실행과 보존
+
+실행은 WSL Ubuntu-26.04, TMPDIR=/home/digitie/.cache, 본인 fixed Common/Map archive src의 PYTHONPATH, `/home/digitie/.cache/map-common-recovery-venv/bin/python`을 사용했다. 실행 명령은 본인 archive cwd의 `python probe_fixture_lifetime.py`이며 static manifest/Git delta/Assert·Mock handler AST 검증을 별도 수행했다.
+
+**이번 NOT_RUN:** actual local/운영 PostgreSQL·PostGIS integration, 전체 integration/pytest 재실행, N150 guarded rebuild/live E2E, Docker/UI build, 최종 CI 결과 확인, 운영 RSS·worker kill·shared production daemon. 이전 원문의 미실행 경계도 유지한다. 원문의 기존 1,517 PASS를 이번에 다시 실행한 숫자로 표시하지 않는다.
+
+journal은 CI stale fixture 실패와 local PostGIS 22 PASS를 부모의 실행 범위로 기록한다. 운영 제품과 이전 고정 후보의 동일성 주장은 직접 Git delta 검증과 일치한다. actual live/merge를 완료로 승격하지 않는다.
+
+본인 원본 manifest·검증 JSON·factory probe·결과·Mock handler binding **5파일**을 Weather `.playwright-mcp/map-pinvi-integration-review-recovery-evidence/`에 byte 그대로 보존했다. preservation-manifest.json SHA256:
+
+`291a86d86b4451121589937d55819898bfdb969b0af814cb0f8bf37cfd6c47f5`.
+
+현재 고정 제품의 독립 FULL PASS는 연속 유지된다. 실제 PG·CI·paired rebuild/live·merge 완료 여부는 별도 운영 게이트다.

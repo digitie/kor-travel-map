@@ -1,0 +1,20 @@
+{
+  "source": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "run_id": 37315672364,
+  "jobs": [
+    {
+      "job": "pytest integration (PostGIS, alpine)",
+      "conclusion": "success",
+      "test_summaries": [
+        "1132 passed, 18 skipped in 420.99s (0:07:00)"
+      ]
+    },
+    {
+      "job": "pytest integration (PostGIS, glibc)",
+      "conclusion": "success",
+      "test_summaries": [
+        "1138 passed, 12 skipped in 349.60s (0:05:49)"
+      ]
+    }
+  ]
+}

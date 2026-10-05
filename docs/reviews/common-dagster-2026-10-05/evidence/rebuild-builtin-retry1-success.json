@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "attempt": "builtin-fifth-same-pair-retry1",
+  "common_product": "a960bdb114d99a2ac1b9608a77b240635806e551",
+  "map_product": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "result": {
+    "success": true,
+    "returncode": 0,
+    "resumed": false,
+    "outcome": "deployed",
+    "transaction_id": "360afa9e-a50b-4968-bc63-0111153d5bfe",
+    "phase": "committed",
+    "generation_sha256": "31a3557d5b679d95ab56614d4bd2f9e80896de96963c4b2cbeb6703c10391a64",
+    "pinset_sha256": "54de39d1be7a3539fb016565212e6182999ec195b9938d813b5e7801d728aa25",
+    "schema_heads": {
+      "map_application": "404_transport_provider_identity",
+      "pinvi": "20260917_0102"
+    }
+  },
+  "warning_count": 0,
+  "original_result_sha256": "4a7ff2e853959507e8fcf0406fd324fa874c5ebcd83550258abaaecd9b4ed9a4",
+  "actual_committed_runtime_attestation_sha256": "de4be912a7327e155c65242ee48b1bac108c03c8818431855fc33bc442701312",
+  "scope": "Actual sanctioned fifth same-pair retry terminal success and matching committed six-service runtime; native/browser/D1/D2 results are separate."
+}

@@ -1,0 +1,169 @@
+{
+  "scope": "actual shared webserver/daemon YAML read-only; no config mutation",
+  "policies": [
+    {
+      "surface": "kor-travel-dagster-webserver",
+      "policy": {
+        "run_monitoring": {
+          "enabled": true,
+          "start_timeout_seconds": 600,
+          "cancel_timeout_seconds": 600,
+          "max_runtime_seconds": 21600,
+          "max_resume_run_attempts": 0,
+          "poll_interval_seconds": 15
+        },
+        "run_queue": {
+          "max_user_code_failure_retries": 3,
+          "user_code_failure_retry_delay": 60
+        },
+        "concurrency": {
+          "pools": {
+            "default_limit": 1,
+            "granularity": "run"
+          },
+          "runs": {
+            "max_concurrent_runs": 12,
+            "tag_concurrency_limits": [
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelmap.dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "pinvi.etl.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelgeo_dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelweather_dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kor-travel-transport",
+                "limit": 3
+              },
+              {
+                "key": "kor_travel_map.feature_update_request_id",
+                "limit": 4
+              },
+              {
+                "key": "kortravelweather/run_group",
+                "value": "external_weather",
+                "limit": 3
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "fuel",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "parking",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "highway",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "reference",
+                "limit": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "surface": "kor-travel-dagster-daemon",
+      "policy": {
+        "run_monitoring": {
+          "enabled": true,
+          "start_timeout_seconds": 600,
+          "cancel_timeout_seconds": 600,
+          "max_runtime_seconds": 21600,
+          "max_resume_run_attempts": 0,
+          "poll_interval_seconds": 15
+        },
+        "run_queue": {
+          "max_user_code_failure_retries": 3,
+          "user_code_failure_retry_delay": 60
+        },
+        "concurrency": {
+          "pools": {
+            "default_limit": 1,
+            "granularity": "run"
+          },
+          "runs": {
+            "max_concurrent_runs": 12,
+            "tag_concurrency_limits": [
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelmap.dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "pinvi.etl.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelgeo_dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kortravelweather_dagster.definitions",
+                "limit": 10
+              },
+              {
+                "key": "dagster/code_location",
+                "value": "kor-travel-transport",
+                "limit": 3
+              },
+              {
+                "key": "kor_travel_map.feature_update_request_id",
+                "limit": 4
+              },
+              {
+                "key": "kortravelweather/run_group",
+                "value": "external_weather",
+                "limit": 3
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "fuel",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "parking",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "highway",
+                "limit": 1
+              },
+              {
+                "key": "kortraveltransport/run_group",
+                "value": "reference",
+                "limit": 1
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

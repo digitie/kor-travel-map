@@ -5,6 +5,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
+from kortravelcommon.dagster import RecoveryPolicy
 from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
 
 from dagster import (
@@ -108,7 +109,12 @@ async def execute_feature_update_request_op(
     return metadata
 
 
-@job(name="feature_update_request_worker")
+@job(
+    name="feature_update_request_worker",
+    tags=RecoveryPolicy(max_runtime_seconds=21_600).tags(
+        project="map", job_name="feature_update_request_worker"
+    ),
+)
 def feature_update_request_worker_job() -> None:
     """Dagster run 1개가 feature update request 1건을 실행한다."""
     execute_feature_update_request_op()

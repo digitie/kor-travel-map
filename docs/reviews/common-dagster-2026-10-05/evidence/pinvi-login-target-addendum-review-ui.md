@@ -1,0 +1,11 @@
+# PinVi 로그인 공개 target 진단의 독립 추가 원문
+실행 ID: J-PINVI-LOGIN-PUBLIC-TARGET-20261006-B.
+이전 원문 map-pinvi-operating-pinvi-login-diagnosis-ui.md / SHA256 20662e8d129adcdf75cfbdb3ae6026ad74aa3a58ea36f95dadccb6ae3a9123ca는 불변이다.
+
+EXECUTED: private 두 UI base를 메모리에서 읽어 /admin/login GET만 비교했다. urllib는 redirect를 따른다. PinVi HTTP404 / Map 최종HTTP200, Next static asset 집합은 서로 다름(11/26개, 교집합1개), title도 다르다. asset 집합 SHA256은 PinVi 7323a19709a15d51fbbc8a2bbca59a3b908dc498412dbca8943ada0ebfe513cb / Map bcf0493ee6e81ffd991307cb7e8d801da5239027edc7521aa945b73776ed83b1이다.
+
+따라서 env 값이 같은 URL이거나 두 응답이 같은 Next asset body라는 근거는 없다. 이것만으로 proxy target이 올바르다는 결론은 내리지 않는다. 실제 주소·title·asset 경로는 출력하거나 이 원문에 남기지 않았다.
+
+NOT_RUN: trusted Manager proxy mapping 조회, 직접 내부 web GET, 로그인 입력/POST, 제품·서비스 수정. 제품 FULL PASS를 바꾸지 않으며 운영 UI gate의 이전 실패 상태를 성공으로 바꾸지 않는다. 타 리뷰어 원문은 읽지 않았다.
+
+검토/보존 시각(UTC): 2026-10-05T19:28:57.742236+00:00

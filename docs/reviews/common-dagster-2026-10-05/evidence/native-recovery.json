@@ -1,0 +1,30 @@
+{
+  "dagster_version": "1.13.25",
+  "common_product": "1f8e339c7c79f86f8952b0d4c326ab4dae56bee8",
+  "scope": "isolated local SQLite instance, real gRPC DefaultRunLauncher and multiprocess workers; native monitor function called by probe; not shared production daemon or domain SQL",
+  "cases": [
+    {
+      "fault": "raise",
+      "terminal": "FAILURE",
+      "elapsed_seconds": 2.042372982017696,
+      "same_job_manual_retry": "SUCCESS",
+      "retry_elapsed_seconds": 2.0466305802110583
+    },
+    {
+      "fault": "crash",
+      "terminal": "FAILURE",
+      "elapsed_seconds": 1.571843973826617,
+      "same_job_manual_retry": "SUCCESS",
+      "retry_elapsed_seconds": 2.0393443079665303
+    },
+    {
+      "fault": "stall",
+      "terminal": "FAILURE",
+      "healthy_concurrent_job": "SUCCESS",
+      "healthy_elapsed_seconds": 2.0434736649040133,
+      "active_coalescing_released": true,
+      "same_job_manual_retry": "SUCCESS",
+      "monitor_wait_seconds_after_healthy": 16.70142463198863
+    }
+  ]
+}

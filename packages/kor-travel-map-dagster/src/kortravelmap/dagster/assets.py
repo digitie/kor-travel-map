@@ -328,6 +328,8 @@ def _value_response_source_record(
             raw_payload_hash=payload_hash,
         ),
     )
+
+
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "feature_operation_guard",
     "kor_travel_map_client",
@@ -1039,19 +1041,21 @@ async def run_feature_place_krforest_recreation_forests(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국자연휴양림 record를 place Feature로 적재한다(ADR-034 8단계)."""
-    records = await _record_list(context, "krforest_recreation_forests")
     fetched_at = await _fetched_at(context)
-    bundles = await recreation_forests_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(
+            context, "krforest_recreation_forests", batch_size=100
+        ):
+            yield await recreation_forests_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_RECREATION_FORESTS_DATASET_KEY,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1073,19 +1077,19 @@ async def run_feature_place_krforest_arboretums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """휴양림 수목원(SHP) record를 place Feature로 적재한다."""
-    records = await _record_list(context, "krforest_arboretums")
     fetched_at = await _fetched_at(context)
-    bundles = await arboretums_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "krforest_arboretums", batch_size=100):
+            yield await arboretums_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_ARBORETUMS_DATASET_KEY,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1237,23 +1241,25 @@ async def feature_notice_krforest_landslide_forecast_issues(
     return await run_tracked_feature_asset(
         context, run_feature_notice_krforest_landslide_forecast_issues
     )
+
+
 async def run_feature_place_standard_museums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국박물관미술관표준데이터 record를 place Feature로 적재한다(ADR-034 9단계)."""
-    records = await _record_list(context, "standard_museums")
     fetched_at = await _fetched_at(context)
-    bundles = await museums_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "standard_museums", batch_size=100):
+            yield await museums_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_MUSEUMS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1273,19 +1279,21 @@ async def run_feature_place_standard_tourist_attractions(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국관광지표준데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
-    records = await _record_list(context, "standard_tourist_attractions")
     fetched_at = await _fetched_at(context)
-    bundles = await tourist_attractions_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(
+            context, "standard_tourist_attractions", batch_size=100
+        ):
+            yield await tourist_attractions_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1307,19 +1315,19 @@ async def run_feature_place_standard_parking_lots(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국주차장표준데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
-    records = await _record_list(context, "standard_parking_lots")
     fetched_at = await _fetched_at(context)
-    bundles = await parking_lots_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "standard_parking_lots", batch_size=100):
+            yield await parking_lots_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_PARKING_LOTS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1341,19 +1349,19 @@ async def run_feature_place_standard_special_streets(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국지역특화거리표준데이터 record를 place anchor Feature로 적재한다."""
-    records = await _record_list(context, "standard_special_streets")
     fetched_at = await _fetched_at(context)
-    bundles = await special_streets_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "standard_special_streets", batch_size=100):
+            yield await special_streets_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_SPECIAL_STREETS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1410,19 +1418,19 @@ async def run_feature_place_khoa_beaches(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """해양수산부 해수욕장정보 record를 place Feature로 적재한다(ADR-034 보조)."""
-    records = await _record_list(context, "khoa_beaches")
     fetched_at = await _fetched_at(context)
-    bundles = await beaches_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "khoa_beaches", batch_size=100):
+            yield await beaches_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=KHOA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_BEACHES,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1442,19 +1450,19 @@ async def run_feature_place_transport_airports(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """국내 운영 공항(transport export)을 place Feature로 적재한다."""
-    records = await _record_list(context, "transport_airports")
     fetched_at = await _fetched_at(context)
-    bundles = await airports_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-    )
-    return await _load(
+
+    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
+        async for records in _record_batches(context, "transport_airports", batch_size=100):
+            yield await airports_to_bundles(
+                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            )
+
+    return await _load_snapshot_batches(
         context,
         provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_AIRPORTS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        batches=_bundle_batches(),
     )
 
 
@@ -1638,6 +1646,44 @@ FEATURE_LOAD_ASSETS: Final = [
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 
 
+async def _load_snapshot_batches(
+    context: AssetExecutionContext,
+    *,
+    provider: str,
+    dataset_key: str,
+    batches: AsyncIterable[Sequence[Any]],
+) -> DagsterFeatureLoadResult:
+    """전체 snapshot을 보관하지 않고 기존 단일 transaction·봉인 계약으로 적재한다."""
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    strict_address = cast(
+        "bool | str", await _resource_value(context, "strict_address", default="strict")
+    )
+
+    async def _load_all(items: AsyncIterable[Sequence[Any]]) -> FeatureLoadResult:
+        return await client.load_feature_bundle_batches(
+            items, curation_dataset=(provider, dataset_key)
+        )
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,
+        client=client,
+        batches=batches,
+        provider=provider,
+        dataset_key=dataset_key,
+        strict_address=strict_address,
+        load_all=_load_all,
+    )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=provider,
+        dataset_key=dataset_key,
+        cursor_extra=_feature_result_cursor_extra(result),
+        observation_receipt=result.observation_receipt,
+    )
+    return result
+
+
 async def _load(
     context: AssetExecutionContext,
     *,
@@ -1689,7 +1735,6 @@ def _feature_result_cursor_extra(result: DagsterFeatureLoadResult) -> dict[str, 
         "source_links_inserted": result.load.source_links_inserted,
         "source_links_updated": result.load.source_links_updated,
     }
-
 
 
 async def _exact_sync_membership(

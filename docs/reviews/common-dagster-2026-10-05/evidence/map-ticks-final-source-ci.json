@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "repository": "digitie/kor-travel-map",
+  "head": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "successful_checks": 10,
+  "checks": [
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111923962030",
+      "name": "pytest integration (PostGIS, alpine)",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111923962059",
+      "name": "pytest integration (PostGIS, glibc)",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111913170967",
+      "name": "pytest (Python 3.11)",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111913171345",
+      "name": "pytest (Python 3.12)",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111913170699",
+      "name": "pytest (Python 3.13)",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373285/job/111913171087",
+      "name": "pytest fixture replay",
+      "state": "SUCCESS",
+      "workflow": "ci"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373254/job/111912928876",
+      "name": "type-check + next build (Node 20)",
+      "state": "SUCCESS",
+      "workflow": "frontend"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373155/job/111912928874",
+      "name": "lint",
+      "state": "SUCCESS",
+      "workflow": "lint"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373208/job/111912928557",
+      "name": "production Dockerfiles build",
+      "state": "SUCCESS",
+      "workflow": "docker-images"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37354373226/job/111912928785",
+      "name": "openapi-drift",
+      "state": "SUCCESS",
+      "workflow": "openapi"
+    }
+  ],
+  "scope": "Exact final product source CI; future documentation head CI is separate"
+}

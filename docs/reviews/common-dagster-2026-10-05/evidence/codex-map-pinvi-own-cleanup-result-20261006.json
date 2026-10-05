@@ -1,0 +1,30 @@
+{
+  "own_failed_images_removed": 5,
+  "cache_ids_selected": [
+    "0q5nq6m1ng81c797wzlwhg5mw",
+    "1vb6ramksc9ku7jp9atdgc7gk",
+    "2y5x6zjopyc02p8b2lofhl1hw",
+    "3w4ev7hdcbsew8hcya3jc43cf",
+    "cp6lqdapb9ssfvkdpv45trtcb",
+    "d0kjhj6melhfoeuux636w08bk",
+    "f58fyavt6jblzc2b7bgvh47em",
+    "i52eqx82h71xk8bun9e5tiikg",
+    "ivrsp027f1bvp1k2ybzlws7lm",
+    "mkbzdslmooxclqqt5buaad5v1",
+    "q4u3yyze937xqx6w8uu97fvuo",
+    "q9pgyml6tnva5zjxgrsgj4ajo",
+    "sa5r8dg00raluw0ao5oumkf3t",
+    "sf1uvhy54r6jrfit5wp5nx6z3",
+    "tae50spcetoj0uxkkl0kvv9h1",
+    "ulpteh425ubp0d0e3y567p4gf",
+    "xecpgktknjjpwiysznvszhbum",
+    "xl0ymwem1wdtmyw27eht1b3hm",
+    "xvhq25g2g7llb6r737197f8g1",
+    "y24fioeuq2yrknvjkj0o3v1xd",
+    "y6p8lvbvrce5b2crl7douir5w"
+  ],
+  "protected_image_count": 36,
+  "all_six_operating_images_unchanged_healthy": true,
+  "freed_bytes_observed": 2749231104,
+  "scope": "exact own failed-build refs/cache only; no global pruning; reserved-space zero applies only to these selected unused records"
+}

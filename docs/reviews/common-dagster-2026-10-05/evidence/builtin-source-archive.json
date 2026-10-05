@@ -1,0 +1,71 @@
+{
+  "scope": "고정 제품 소스 리뷰·CI·작성자 로컬 테스트 보존이며 운영 결과가 아님",
+  "common_sha": "a960bdb114d99a2ac1b9608a77b240635806e551",
+  "map_sha": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "pinvi_sha": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "manifest_sha256": "954edf0fe117091c4d39c9fbe1e4d797981c73ade359f74eaeb0d67184dbe866",
+  "manifest_blob_count": 111,
+  "raw_reviews": [
+    {
+      "source_filename": "map-pinvi-builtin-review-recovery.md",
+      "original_sha256": "413dcf384f0b189f649d86b871272b84895f5696cff28bfba255c683f7e18dd2",
+      "display_sha256": "413dcf384f0b189f649d86b871272b84895f5696cff28bfba255c683f7e18dd2",
+      "display_policy": "원문 raw byte 보존, 읽기용 Markdown trailing whitespace만 정규화"
+    },
+    {
+      "source_filename": "map-pinvi-builtin-review-ui.md",
+      "original_sha256": "b4e2629d16ed41197f8a5d5ebd9d4797d6eae61a4c9ea9bbe7e6c28ddeb7a9d3",
+      "display_sha256": "b4e2629d16ed41197f8a5d5ebd9d4797d6eae61a4c9ea9bbe7e6c28ddeb7a9d3",
+      "display_policy": "원문 raw byte 보존, 읽기용 Markdown trailing whitespace만 정규화"
+    }
+  ],
+  "ci_receipts": [
+    {
+      "file": "common-builtin-exact-ci.json",
+      "head_sha": "a960bdb114d99a2ac1b9608a77b240635806e551",
+      "success": 8,
+      "skipped_names": [],
+      "sha256": "5ff256a6a31051ccf82d8ac0d8658d688d693326d66f5aab2ac64045b6070d09"
+    },
+    {
+      "file": "map-builtin-exact-ci.json",
+      "head_sha": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+      "success": 10,
+      "skipped_names": [],
+      "sha256": "27ad27c5457b42abfbfc861f51396c37861e8096eade21ace4774a826c697797"
+    },
+    {
+      "file": "pinvi-builtin-exact-ci.json",
+      "head_sha": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+      "success": 9,
+      "skipped_names": [
+        "Aggregate CI gate",
+        "Post MCP review reminder",
+        "contract-staleness"
+      ],
+      "sha256": "bc102a376168e7c6aba8d01cad1651e2354e59e152688655f75a47647821c9c7"
+    }
+  ],
+  "test_logs": [
+    {
+      "file": "root-pinvi-builtin-api-provenance87.log",
+      "result": "87 passed in 64.84s",
+      "sha256": "d257bec6fe94b00e99c9374b5e4315bdbc67a6b8c7cfa274c6ef9bc21be7616e",
+      "executed_by": "작성자",
+      "reviewer_execution": false
+    },
+    {
+      "file": "root-pinvi-builtin-etl-version10.log",
+      "result": "10 passed in 0.55s",
+      "sha256": "b220c9eee751387028ae617abc12f3cc285ab465873a3ef02e4fb2e5e65c0dd2",
+      "executed_by": "작성자",
+      "reviewer_execution": false
+    }
+  ],
+  "privacy_review": {
+    "new_inputs_private_address_credential_patterns": "검출 없음",
+    "private_helper_copies": false
+  },
+  "runtime_rebuild": "NOT_RUN",
+  "live_e2e": "NOT_RUN"
+}

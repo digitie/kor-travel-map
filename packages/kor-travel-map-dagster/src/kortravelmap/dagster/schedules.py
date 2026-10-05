@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
+from kortravelcommon.dagster import RecoveryPolicy
 from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
@@ -427,7 +428,10 @@ def _execution_scope_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
 
 
 def _feature_load_definition_tags(spec: FeatureLoadScheduleSpec) -> dict[str, str]:
-    tags = {"kor_travel_map.operation_key": spec.job_name}
+    tags = RecoveryPolicy(max_runtime_seconds=spec.max_runtime_seconds or 21_600).tags(
+        project="map", job_name=spec.job_name
+    )
+    tags["kor_travel_map.operation_key"] = spec.job_name
     tags.update(_execution_scope_tags(spec))
     if spec.max_runtime_seconds is not None:
         tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
@@ -576,11 +580,7 @@ FEATURE_LOAD_SCHEDULES: Final = [
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
         run_config=None if spec.coalesce_active_runs else _resolved_run_config(spec),
-        execution_fn=(
-            _coalescing_execution_fn(spec)
-            if spec.coalesce_active_runs
-            else None
-        ),
+        execution_fn=(_coalescing_execution_fn(spec) if spec.coalesce_active_runs else None),
         tags=_feature_load_schedule_tags(spec),
         description=spec.description,
     )

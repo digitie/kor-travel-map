@@ -1,0 +1,156 @@
+{
+  "container": "codex-map-pinvi-operating-ui-browser-ticks-retry1",
+  "container_id": "18b32f547ce1652ebc92ed923fc3dbdad229141d352653a08eb2a46d9d366b23",
+  "image_id": "sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 0,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T19:40:14.053549488Z",
+    "FinishedAt": "2026-10-05T19:40:53.605171376Z"
+  },
+  "receipt": {
+    "map_product": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+    "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+    "test_run_id": "b579716c-80e4-4b26-843d-ad47d62bd74c",
+    "started_at": "2026-10-05T19:40:14.763Z",
+    "finished_at": "2026-10-05T19:40:53.582Z",
+    "runtime_attestation_sha256": "8d998cecf435d270b704b5bb20912004d3143ce89b62a0dbe3710cefd737db99",
+    "captures": [
+      {
+        "file": "map-chromium-desktop.png",
+        "sha256": "16e1874b5fc4e9266bb67a309adcd72cce1e926330cef81f379454a103b229e9",
+        "bytes": 617306
+      },
+      {
+        "file": "map-chromium-mobile.png",
+        "sha256": "d7c8d31235bc90bfa773e5583fb91999afc8522cdee66450abd227fd74e8b959",
+        "bytes": 349537
+      },
+      {
+        "file": "map-firefox-desktop.png",
+        "sha256": "a3578128b6a21dc9c8a37197c81914beacb6ef129e6dc479af837c009e81d3b1",
+        "bytes": 981867
+      },
+      {
+        "file": "map-firefox-mobile.png",
+        "sha256": "add38846d51578c3d0d2f9745a20427d78cbae8953d50b78d228879715f6dfce",
+        "bytes": 568648
+      },
+      {
+        "file": "pinvi-chromium-desktop.png",
+        "sha256": "86c8d17130c238b6605650d27355ea717cd028d145b85906c52435321b3dd6d5",
+        "bytes": 455777
+      },
+      {
+        "file": "pinvi-chromium-mobile.png",
+        "sha256": "91afd1d6442d6d9cecbdbc9770bdebd790bf6278ed4583f4acc8bce955a54f80",
+        "bytes": 292431
+      },
+      {
+        "file": "pinvi-firefox-desktop.png",
+        "sha256": "f0d7d11299a80da0613624b8906e18d8f80d0deb1270d99a60694b474f5d899d",
+        "bytes": 658800
+      },
+      {
+        "file": "pinvi-firefox-mobile.png",
+        "sha256": "c21f8fbb58f1dda3ef44eda7714f47083b8d014f36aaae2de9f32016e6970aa4",
+        "bytes": 362036
+      }
+    ],
+    "scope": "actual operating UI/API/GraphQL, browser summary request abort injection only; shared service or worker not stopped",
+    "cases": [
+      {
+        "app": "map",
+        "browser": "chromium",
+        "actual_login_status": 200,
+        "session_cookie_present": true,
+        "login_set_cookie_present": true,
+        "secure_http_only_session": true,
+        "actual_logout_status": 200,
+        "session_cookie_cleared": true,
+        "logout_scope": "actual UI logout button",
+        "owned_repository": true,
+        "job_count": 39,
+        "recent_run_count": 30,
+        "run_detail": "selected-identity-visible",
+        "browser_request_abort_last_good_recovery": "PASS",
+        "mobile_geometry": {
+          "width": 390,
+          "document": 390
+        },
+        "table_keyboard": "focus-arrow-scroll"
+      },
+      {
+        "app": "pinvi",
+        "browser": "chromium",
+        "actual_login_status": 200,
+        "session_cookie_present": true,
+        "login_set_cookie_present": true,
+        "secure_http_only_session": true,
+        "actual_logout_status": 204,
+        "session_cookie_cleared": true,
+        "logout_scope": "actual API test-session cleanup; admin UI has no logout button",
+        "owned_repository": true,
+        "job_count": 9,
+        "recent_run_count": 30,
+        "run_detail": "selected-identity-visible",
+        "browser_request_abort_last_good_recovery": "PASS",
+        "mobile_geometry": {
+          "width": 390,
+          "document": 390
+        },
+        "table_keyboard": "focus-arrow-scroll"
+      },
+      {
+        "app": "map",
+        "browser": "firefox",
+        "actual_login_status": 200,
+        "session_cookie_present": true,
+        "login_set_cookie_present": true,
+        "secure_http_only_session": true,
+        "actual_logout_status": 200,
+        "session_cookie_cleared": true,
+        "logout_scope": "actual UI logout button",
+        "owned_repository": true,
+        "job_count": 39,
+        "recent_run_count": 30,
+        "run_detail": "selected-identity-visible",
+        "browser_request_abort_last_good_recovery": "PASS",
+        "mobile_geometry": {
+          "width": 390,
+          "document": 390
+        },
+        "table_keyboard": "focus-arrow-scroll"
+      },
+      {
+        "app": "pinvi",
+        "browser": "firefox",
+        "actual_login_status": 200,
+        "session_cookie_present": true,
+        "login_set_cookie_present": true,
+        "secure_http_only_session": true,
+        "actual_logout_status": 204,
+        "session_cookie_cleared": true,
+        "logout_scope": "actual API test-session cleanup; admin UI has no logout button",
+        "owned_repository": true,
+        "job_count": 9,
+        "recent_run_count": 30,
+        "run_detail": "selected-identity-visible",
+        "browser_request_abort_last_good_recovery": "PASS",
+        "mobile_geometry": {
+          "width": 390,
+          "document": 390
+        },
+        "table_keyboard": "focus-arrow-scroll"
+      }
+    ]
+  },
+  "test_identity_environment": {
+    "UI_TEST_RUN_ID": "b579716c-80e4-4b26-843d-ad47d62bd74c",
+    "RUNTIME_ATTESTATION_SHA256": "8d998cecf435d270b704b5bb20912004d3143ce89b62a0dbe3710cefd737db99"
+  },
+  "actual_source_sha256": "7e4b9d49ac8739787f267fad16b53b02cca87930289823a8550f12c4aa554f78",
+  "status": "PASS"
+}

@@ -312,6 +312,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/ops/datasets/{provider_dataset_id:int}": RoutePolicy.OPERATOR,
     "/v1/ops/datasets/{provider_dataset_id:int}/preview": RoutePolicy.OPERATOR,
     "/v1/ops/datasets/refresh-policy": RoutePolicy.OPERATOR,
+    "/v1/ops/pipeline/dagster-summary": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/dagster-runs": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/dagster-runs/{run_id:path}": RoutePolicy.OPERATOR,
     "/v1/ops/pipeline/events": RoutePolicy.OPERATOR,

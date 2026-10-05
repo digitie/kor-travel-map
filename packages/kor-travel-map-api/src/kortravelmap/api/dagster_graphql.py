@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from kortravelcommon.http import bounded_request
 from kortravelmap.core.dagster_asset_labels import DAGSTER_ASSET_KOREAN_LABELS
 
 from kortravelmap.api.dagster_schema import (
@@ -517,34 +518,69 @@ def parse_repositories(
     return repositories, errors
 
 
-def parse_runs(raw_runs: JsonDict) -> tuple[list[DagsterRunSummary], dict[str, int], list[str]]:
-    if raw_runs.get("__typename") != "Runs":
-        message = optional_string(raw_runs.get("message")) or "Dagster run 조회 실패"
-        return [], {}, [message]
+_RUN_STATUSES = frozenset(
+    {
+        "NOT_STARTED",
+        "QUEUED",
+        "STARTING",
+        "STARTED",
+        "CANCELING",
+        "SUCCESS",
+        "FAILURE",
+        "CANCELED",
+        "MANAGED",
+    }
+)
+ACTIVE_RUN_STATUSES = ["NOT_STARTED", "QUEUED", "STARTING", "STARTED", "CANCELING"]
+ACTIVE_RUN_LIMIT = 1000
 
+
+def parse_runs(
+    raw_runs: JsonDict,
+    *,
+    limit: int = ACTIVE_RUN_LIMIT,
+) -> tuple[list[DagsterRunSummary], dict[str, int], list[str]]:
+    """불완전·손상된 조회를 빈 정상 결과로 바꾸지 않는다."""
+    if raw_runs.get("__typename") != "Runs":
+        return [], {}, ["Dagster run 조회 실패"]
+    results = raw_runs.get("results")
+    if not isinstance(results, list) or len(results) > limit:
+        return [], {}, ["Dagster run 목록 형식 또는 조회 상한이 올바르지 않습니다."]
     runs: list[DagsterRunSummary] = []
-    counts: Counter[str] = Counter()
-    for raw in _list(raw_runs.get("results")):
-        entry = as_dict(raw)
-        status = _string(entry.get("status"), "UNKNOWN")
-        counts[status] += 1
-        tags = {
-            _string(as_dict(tag).get("key")): _string(as_dict(tag).get("value"))
-            for tag in _list(entry.get("tags"))
-            if _string(as_dict(tag).get("key"))
-        }
-        runs.append(
-            DagsterRunSummary(
-                run_id=_string(entry.get("runId"), "unknown_run"),
-                job_name=optional_string(entry.get("jobName")),
-                status=status,
-                start_time=_optional_float(entry.get("startTime")),
-                end_time=_optional_float(entry.get("endTime")),
-                update_time=_optional_float(entry.get("updateTime")),
-                tags=tags,
-            )
-        )
-    return runs, dict(counts), []
+    for raw in results:
+        if not isinstance(raw, dict):
+            return [], {}, ["Dagster run 행 형식이 올바르지 않습니다."]
+        run_id, status = raw.get("runId"), raw.get("status")
+        if (
+            not isinstance(run_id, str)
+            or not run_id.strip()
+            or not isinstance(status, str)
+            or status not in _RUN_STATUSES
+        ):
+            return [], {}, ["Dagster run identity/status가 올바르지 않습니다."]
+        runs.append(_parse_run_summary(raw))
+    return runs, dict(Counter(run.status for run in runs)), []
+
+
+def merge_recent_active_runs(
+    data: JsonDict,
+    *,
+    recent_limit: int,
+) -> tuple[list[DagsterRunSummary], dict[str, int], list[str]]:
+    """최근 페이지 밖 활성 run을 별도 조회해 합치고 run id로 중복을 제거한다."""
+    recent, _, errors = parse_runs(as_dict(data.get("runsOrError")), limit=recent_limit)
+    active, _, active_errors = parse_runs(as_dict(data.get("activeRunsOrError")))
+    errors.extend(active_errors)
+    if any(run.status not in ACTIVE_RUN_STATUSES for run in active):
+        errors.append("활성 run 조회에 종료된 실행이 포함됐습니다.")
+    if len(active) >= ACTIVE_RUN_LIMIT:
+        errors.append("활성 run 조회 상한에 도달했습니다. 전체 목록을 확인할 수 없습니다.")
+    merged = {run.run_id: run for run in active}
+    merged.update({run.run_id: run for run in recent})
+    runs = sorted(
+        merged.values(), key=lambda run: run.update_time or run.start_time or 0, reverse=True
+    )
+    return runs, dict(Counter(run.status for run in runs)), errors
 
 
 def _parse_run_summary(entry: JsonDict) -> DagsterRunSummary:
@@ -799,10 +835,14 @@ async def post_graphql(
     variables: dict[str, object],
     query: str,
 ) -> JsonDict:
-    response = await client.post(
+    response = await bounded_request(
+        client,
+        "POST",
         graphql_url,
         json={"query": query, "variables": variables},
     )
     response.raise_for_status()
     payload = response.json()
-    return as_dict(payload)
+    if not isinstance(payload, dict):
+        raise ValueError("Dagster 응답은 객체이어야 합니다.")
+    return payload

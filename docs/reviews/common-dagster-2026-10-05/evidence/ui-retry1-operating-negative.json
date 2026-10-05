@@ -1,0 +1,16 @@
+{
+  "status": "FAIL",
+  "container_id": "59dff97bb07c96f70b8edc6260670c85edca1b85ea0aac3be3a628408834e419",
+  "image_id": "sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T17:50:02.646721407Z",
+    "FinishedAt": "2026-10-05T17:50:30.03899374Z"
+  },
+  "operating_products_changed": false,
+  "cause": "Map actual login proceeded to pipeline panel, summary.status unavailable caused strict failure. Storage path investigation in progress; not a UI PASS.",
+  "successful_cases": 0
+}

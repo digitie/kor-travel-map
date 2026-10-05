@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "scope": "Inheritance of unchanged Common/Dagster source bytes and installed Dagster version. Native fault tests ran on the previous actual image; no native fault test on the new image is claimed. New API query/C7 bytes require separate final rebuild/UI/domain acceptance.",
+  "previous_map_source": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "final_map_source": "1a3c4673790f51daa1a2f5ccf803d4e31673bad6",
+  "previous_actual_image": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "final_actual_image": "sha256:197597501a0bc06bfaa5a3ca1be3e406aca6794f59306710fb79325c10d18d07",
+  "dagster_version": "1.13.24",
+  "actual_version_read_fence": {
+    "image_id_before": "sha256:197597501a0bc06bfaa5a3ca1be3e406aca6794f59306710fb79325c10d18d07",
+    "image_id_after": "sha256:197597501a0bc06bfaa5a3ca1be3e406aca6794f59306710fb79325c10d18d07",
+    "dagster_version": "1.13.24"
+  },
+  "unchanged_installed_python_source_sha256": {
+    "kortravelcommon.dagster": "ee1bce427711246b700f8d413d00500418d789dc30624607b3fdac800bdfd4d2",
+    "kortravelcommon.dagster_health": "5edaab3a9efebc5dd71d99255ecebb3a1703b5897a7e960c31e023d6f0ec6093",
+    "kortravelmap.dagster.definitions": "4f184adabd4082fce3e4440ac6d0b87364f46a9f811655ebc98cd1e815a95671",
+    "common_commit": "a960bdb114d99a2ac1b9608a77b240635806e551"
+  },
+  "changed_product_files": [
+    "docker/c7-playwright.Dockerfile",
+    "packages/kor-travel-map-api/src/kortravelmap/api/dagster_query_service.py"
+  ],
+  "old_runtime_attestation_sha256": "de4be912a7327e155c65242ee48b1bac108c03c8818431855fc33bc442701312",
+  "final_runtime_attestation_sha256": "8d998cecf435d270b704b5bb20912004d3143ce89b62a0dbe3710cefd737db99",
+  "native_actual_receipt_sha256": "bd31491f4bee7d2962089445d50852185e3935f625d8d5961b3f925f27ef6bf6"
+}

@@ -1,0 +1,19 @@
+{
+  "common_product": "a960bdb114d99a2ac1b9608a77b240635806e551",
+  "map_product": "1ba6ef4c52f64200e3bc3e9a4fee1dd5f8d4e77e",
+  "pinvi_product": "0058369c778f8c3357ee393e12e3447d7975cc1f",
+  "attempt": "builtin-fourth",
+  "result": {
+    "status": "failed",
+    "stage": "candidate_compose_build"
+  },
+  "original_result_sha256": "11644d556ca5ea19dc3766d3e23a271f199cc5021605faffc0c443efd86a3cad",
+  "failed_service": "pinvi-dagster-code-server",
+  "failure": "ETL Dockerfile7: pinned uv0.11.21 index metadata not found from GHCR; API/ETL no external frontend directive",
+  "candidate_pinset": "54de39d1be7a3539fb016565212e6182999ec195b9938d813b5e7801d728aa25",
+  "five_prior_candidate_images_built": true,
+  "operating_generation_changed": false,
+  "existing_six_services_healthy": true,
+  "subsequent_exact_registry_metadata_read": "same exact version/index/amd64 manifest succeeded from WSL and actual builder host; not an ETL build or runtime PASS",
+  "scope": "Actual fourth negative build; exact root cause of transient GHCR response is not established. Source PASS and subsequent registry availability do not imply operating/native/UI/D1/D2 PASS."
+}

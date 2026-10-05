@@ -1,0 +1,40 @@
+{
+  "status": "FAIL",
+  "container_id": "13b2f309f75d4fdf2d27f9391c38877322db7b512d6e6030a97af1ea37253d91",
+  "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T17:51:22.480066299Z",
+    "FinishedAt": "2026-10-05T17:52:53.887124905Z"
+  },
+  "operating_products_changed": false,
+  "failure_receipt": {
+    "status": "FAIL",
+    "error_type": "AssertionError",
+    "completed_cases": [
+      {
+        "fault": "raise",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 4.560655092820525,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 4.547746315132827
+      },
+      {
+        "fault": "crash",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 2.1962976958602667,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 2.8289160076528788
+      }
+    ]
+  },
+  "cause": "Stall reached FAILURE; immediate exact RUN_FAILURE timeout-event assertion failed. Cause still being investigated; not a full recovery PASS.",
+  "successful_cases": 2
+}

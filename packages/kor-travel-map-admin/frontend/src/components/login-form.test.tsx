@@ -33,3 +33,14 @@ describe("LoginForm", () => {
     });
   });
 });
+
+it("네트워크 실패는 오류를 표시하고 비밀번호를 지워 다시 제출할 수 있다", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("private network detail")));
+  render(<LoginForm nextPath="/" />);
+  const input = screen.getByLabelText("비밀번호") as HTMLInputElement;
+  input.value = "synthetic-input";
+  fireEvent.submit(screen.getByRole("button", { name: "로그인" }).closest("form") as HTMLFormElement);
+  await screen.findByText("로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  expect(input.value).toBe("");
+  expect(screen.queryByText("private network detail")).toBeNull();
+});

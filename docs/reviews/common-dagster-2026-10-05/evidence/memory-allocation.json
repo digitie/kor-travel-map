@@ -1,0 +1,14 @@
+{
+  "map_product": "72242b1a0c964893778ee7e0ef25e698097e1dfa",
+  "scope": "synthetic lazy provider 5000 records, 8KiB raw each; Python allocation only, not operating RSS or PG SQL",
+  "whole_list": {
+    "records": 5000,
+    "largest_batch": 5000,
+    "python_peak_bytes": 42325367
+  },
+  "bounded_batches": {
+    "records": 5000,
+    "largest_batch": 100,
+    "python_peak_bytes": 1701991
+  }
+}

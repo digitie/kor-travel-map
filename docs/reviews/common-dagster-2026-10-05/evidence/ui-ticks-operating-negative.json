@@ -1,0 +1,31 @@
+{
+  "status": "FAIL",
+  "container": "codex-map-pinvi-operating-ui-browser-ticks",
+  "container_id": "78c6c27a6bf95de0748b747c4855a760354d4fc9769fa01c89a12055fa50c9a8",
+  "image_id": "sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T19:18:59.823124142Z",
+    "FinishedAt": "2026-10-05T19:19:23.242853837Z"
+  },
+  "raw_private_log_sha256": "cb541a12224aa0643f7993c7c11e13df63ed842ae46babe17f645c6409a5264a",
+  "sanitized_assertion_lines": [
+    "ExpectError: expect(locator).toBeVisible() failed",
+    "Expected: visible",
+    "Error: element(s) not found",
+    "Call log:",
+    "    at /work/live.mjs:33:62 {",
+    "      'Expected: visible\\n' +",
+    "      'Error: element(s) not found\\n' +",
+    "      'Call log:\\n' +"
+  ],
+  "partial_capture_files": [
+    "map-chromium-desktop.png",
+    "map-chromium-mobile.png"
+  ],
+  "successful_complete_cases": 0,
+  "scope": "Actual final-pair UI attempt failed; no PASS receipt and no full-case success claimed"
+}

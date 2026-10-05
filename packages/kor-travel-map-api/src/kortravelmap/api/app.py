@@ -56,6 +56,7 @@ from kortravelmap.api.cors import (
     SurfaceScopedCORSMiddleware,
     build_cors_surface_patterns,
 )
+from kortravelmap.api.dagster_http import DagsterHttpClientMiddleware
 from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.domain_command_service import (
     DomainCommandFingerprintConflict,
@@ -803,9 +804,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             offline_upload_close = getattr(offline_upload_s3_client, "close", None)
             if callable(offline_upload_close):
                 offline_upload_close()
-            client = getattr(application.state, "dagster_http_client", None)
-            if isinstance(client, httpx.AsyncClient):
-                await client.aclose()
 
     # ADR-066 D-1 (T-VN-02) — 인증 없는 interactive docs UI(``/docs``·``/redoc``·
     # swagger oauth2 redirect)는 production에서 내린다. D-1의
@@ -833,6 +831,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.settings = settings
+    application.add_middleware(DagsterHttpClientMiddleware)
 
     prometheus_metrics: PrometheusMetrics | None = None
     if settings.prometheus_metrics_enabled:

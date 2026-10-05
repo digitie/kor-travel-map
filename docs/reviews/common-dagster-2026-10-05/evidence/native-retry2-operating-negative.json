@@ -1,0 +1,40 @@
+{
+  "status": "FAIL",
+  "container_id": "6cc5ffd8c8d00cfafd5d8c7f87851217f84214e341e067c43626b0214b12a89f",
+  "image_id": "sha256:5ded0abe5dc4deddfc1e7ccc5353cffa8ecab001449abeb3f606267d0348ad9f",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "ExitCode": 1,
+    "OOMKilled": false,
+    "StartedAt": "2026-10-05T17:47:51.810934166Z",
+    "FinishedAt": "2026-10-05T17:48:56.857129353Z"
+  },
+  "failure_receipt": {
+    "status": "FAIL",
+    "error_type": "KeyError",
+    "completed_cases": [
+      {
+        "fault": "raise",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 4.6833587400615215,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 2.6536081391386688
+      },
+      {
+        "fault": "crash",
+        "terminal": "FAILURE",
+        "elapsed_seconds": 3.3308788840658963,
+        "step_started": true,
+        "fault_cause_verified": true,
+        "same_job_manual_retry": "SUCCESS",
+        "retry_elapsed_seconds": 2.658075167797506
+      }
+    ]
+  },
+  "cause": "Fixture create_run_for_job omitted explicit tags=job.tags; no maximum-runtime tag persisted. Stall step reached but full stall recovery verdict absent.",
+  "operating_products_changed": false,
+  "successful_cases": 2
+}

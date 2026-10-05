@@ -1,0 +1,7 @@
+{
+  "source_filename": "map-pinvi-normative-guide-postfix-review-ui.md",
+  "original_sha256": "d660088819fc0e6f097964858e7ce76cb44baba26619aab6e5950727c70bcd39",
+  "raw": "# 규범 가이드 설명 수정의 독립 후속 리뷰\n실행 ID: J-NORMATIVE-GUIDE-POSTFIX-20261006-B.\n판정: **PASS**. J-GUIDE-P3-01 / P3 **FIXED**.\n\nPinVi docs/runbooks/common-dagster.md 고정 SHA256: 0494412105ff63ad8119c9c72220397da7019d2103b44ac7b1c1b748a91f7f31.\n49~50행은 운영 작업 미포함을 초기 T-370 검증 시점으로 한정하고 현재 Map paired 운영 후속 절로 연결한다. 52행 검증 heading도 초기 범위를 명시한다. 이전 fixture 검증 설명을 현재 운영 성공 주장으로 오해할 여지를 없앴다.\n\nEXECUTED: 위 최소 문장/heading 변경을 역치환하여 이전 b17feb6412cde0651f7df822e5da9a6ea822b527fbe884b3467e1291a407f19d bytes/SHA와 정확히 일치함을 확인했다. Common ed75f864… / Map 5d199456… 두 가이드 bytes는 불변이다.\nNOT_RUN: 제품 테스트·운영 접속·배포/build/native/UI/D1/D2. 제품 소스와 운영 결과의 판정을 새로 하지 않는다. 다른 리뷰어 원문을 읽거나 제품/문서를 수정하지 않았다.\n\n이전 PASS/P3 OPEN 원문 map-pinvi-normative-guide-review-ui.md 및 SHA256 3b8b95e3644fc78daf19ba3e33f0d2830eedf60d41b952e26672416bcfdcd366은 변경하지 않았다. 새 문서 결함은 없다.\n\n검토/보존 시각(UTC): 2026-10-05T19:00:36.249099+00:00\n",
+  "display_sha256": "d660088819fc0e6f097964858e7ce76cb44baba26619aab6e5950727c70bcd39",
+  "scope": "독립 리뷰 원문. 제품 전체·하니스 정적·실제 운영 검증 범위는 원문을 따른다."
+}

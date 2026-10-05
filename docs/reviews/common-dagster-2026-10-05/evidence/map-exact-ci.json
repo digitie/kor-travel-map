@@ -1,0 +1,67 @@
+{
+  "map_candidate": "c4d62a793ba69a60543fafda7442b3ba2c019ad1",
+  "ci_run": 37294003422,
+  "checks": [
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111719728737",
+      "name": "pytest integration (PostGIS, alpine)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111719728826",
+      "name": "pytest integration (PostGIS, glibc)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111711256674",
+      "name": "pytest (Python 3.11)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111711256707",
+      "name": "pytest (Python 3.12)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111711256698",
+      "name": "pytest (Python 3.13)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003422/job/111711256455",
+      "name": "pytest fixture replay",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003327/job/111710835233",
+      "name": "production Dockerfiles build",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003274/job/111710834840",
+      "name": "type-check + next build (Node 20)",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003352/job/111710835595",
+      "name": "lint",
+      "state": "SUCCESS"
+    },
+    {
+      "link": "https://github.com/digitie/kor-travel-map/actions/runs/37294003275/job/111710835261",
+      "name": "openapi-drift",
+      "state": "SUCCESS"
+    }
+  ],
+  "integration": {
+    "alpine": {
+      "passed": 1132,
+      "skipped": 18
+    },
+    "glibc": {
+      "passed": 1138,
+      "skipped": 12
+    }
+  },
+  "scope": "exact pushed candidate public CI; operating rebuild/live results separate"
+}

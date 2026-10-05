@@ -1,4 +1,40 @@
+## 2026-10-06 — Map·PinVi 공통 Dagster 실제 재구축·live 수용 완료
+
+Common a960bdb, Map 1a3c467, PinVi 0058369의 제품113파일 두 독립 FULL 리뷰와 가이드 리뷰를 통과했다. 공용 Python은 bounded HTTP·경량 child health·실행 복구 정책을 제공하며 앱의 operation/lease/claim·비멱등 쓰기 계약을 유지한다. 요청별 응답4MiB/10초와 정리50ms, DB pool/step 제한·100개 batch를 적용했다. Map tick 조회의 오래된 batch history 정렬 지연은 상태 조건을 명시하여 native indexed LIMIT 경로로 줄였고 실제 summary/UI 복구를 확인했다.
+
+운영 paired 재구축과 설치 source·관련 Common bytes·실제 이미지 identity·여섯 서비스 healthy를 검증했다. Chromium/Firefox×Map/PinVi 실제 UI4건과 캡처8개를 직접 확인했다. ACL40·D1 11건·D2 정상 수용/validator·소유 fixture purge1/7·잔존0/ACTIVE없음/BLOCKED없음까지 통과했다. Common의 ESM export를 읽기 위한 type=module은 별도 테스트 이미지 package.json에만 추가하고 실제 마지막 layer/semantic delta를 증명했다. 앞선 모든 실패·초기 BLOCK와 수정 후 PASS 원문은 보존한다.
+
+격리 native Dagster에서 실제 raise·worker crash·stall/timeout 뒤 수동 재시도와 동시 정상 job을 확인했다. 최종 Map 운영 Dagster 이미지의 관련 설치 코드와 버전이 이전 격리 이미지와 같은지, 실제 최종 이미지 ID가 배포 기록과 맞는지 독립 검증했다. 이 결과는 해당 불변 코드 범위에 한정해 이어받는다. 공유 운영 DB의 worker 장애 주입이나 운영 RSS 감소율 실측으로 설명하지 않는다. 유한 응답·batch·동시성 구조와 합성 메모리 측정은 운영 RSS와 구분한다. 기존 인간 dirty checkout·외부 transport/HAProxy 후속은 보존한다.
+
+도구 제한: Map own CodeGraph의 최종 sync/status는 NTFS disk I/O error로 완료하지 못했다. 기존 격리 인덱스와 SQLite immutable quick_check 정상은 보존했으며 원본 인덱스/프로세스의 강제 정리는 하지 않았다. 마지막 제품 변경은 tick 조회 조건과 C7 테스트 Docker COPY 순서이며 공개 Python/DTO 계약은 유지한다.
+
+다음 한 작업은 문서 포함 exact HEAD CI 통과 후 Common #28 → Map #1303 → PinVi #576 순서로 merge commit 병합하는 것이다. 제품 Git pin의 ancestry를 보존한다. 이 절이 현재 상태이며 아래의 진행 중/NOT_RUN 문단은 이전 시점의 이력이다.
+
+[실제 검증·리뷰 원문과 실패 이력](reviews/common-dagster-2026-10-05/README.md), [공통 적용 가이드](runbooks/common-dagster.md).
+
 # journal.md — 작업 일지 (역시간순)
+
+## 2026-10-05 — child health의 reserved metadata marker 차단 채택
+
+Common 경량 probe의 독립 리뷰 반례(pointer/library map의 reserved serdes marker)를 차단하고 정상 default repository __repository__를 허용하는 profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.
+
+## 2026-10-05 — child health의 nested metadata 검증 채택
+
+Common 경량 probe의 독립 리뷰 반례(null/미등록 pointer, 잘못된 executable/entry point 타입)를 반영한 표준 module/file/package profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.
+
+## 2026-10-05 — standalone 자식 저장소 응답 fail-closed 보강
+
+최신 main #1304를 반영한 두 독립 리뷰에서 한 리뷰어가 빈 protobuf/잘못된 JSON이 substring 건강 점검을 통과하는 P2를 실제 reply fixture로 재현했다. 기존 PASS와 BLOCK 원문을 모두 보존한다. Common의 경량 `dagster_health`를 사용하여 proxy 뒤 자식의 정상 class·symbol schema와 wire/JSON을 검증한다. Dagster 전체 import를 피하며 각 RPC 4초·수신 4MiB·channel 정리를 유지한다. standalone은 건강 판정만 하므로 unhealthy 자체를 자동 재시작으로 설명하지 않는다. 새 source pin·두 리뷰·CI·운영 재구축/live는 아직 미완료다.
+
+## 2026-10-05 — 요청 단위 Dagster client의 PostGIS fixture 정렬
+
+Map CI의 glibc·alpine 통합 lane에서 동일한 projection 테스트 한 건이 실패했다. 앱 전역 client 주입을 제거한 뒤 기존 fixture가 실제 연결로 빠진 것이 원인이다. 두 schedule fixture에 요청마다 새 MockTransport client를 주입하고 실제 middleware의 정리를 유지했다. catalog 회귀도 schedule source가 `ok`인지 단언하여 묵시적 degrade를 막는다. 운영 Python·UI 코드는 이전 고정 후보와 동일하다. 실제 PostGIS 관련 22개 검사를 통과했으며 전체 CI를 다시 확인한다.
+
+## 2026-10-05 — Map·PinVi 공통 Dagster 보강 (진행 중)
+
+ADR-107과 [적용·복구 가이드](runbooks/common-dagster.md)에 따라 공통 Python HTTP/Dagster·로그인·메뉴·대시보드를 채택했다. 요청별 연결·응답/시간 상한·활성 run 별도 조회·step/DB 연결/100개 batch를 적용한다. 쓰기 run 자동 복제 없이 기존 operation/lease/claim 복구 계약을 유지한다. [검증 기록](reviews/common-dagster-2026-10-05/README.md)의 고정 후보 2인 리뷰·운영 재구축·live·CI·merge를 완료해야 한다. 원래 인간 dirty checkout은 보존했다.
+
+적대적 원본 리뷰의 실패 상세·event cursor 회귀와 손상 Repository의 정상 빈 snapshot 오인을 보강했다. 선택한 run만 상세 조회하며 Docker deps에 고정 Common vendor를 복사한다. UI 390/API shape 24/strict mypy 96 및 production Next build PASS. React Doctor의 불필요한 mapper export를 제거했다. 후속 리뷰의 repository 소속 불일치도 selector identity와 비교하여 fail-closed하고 다른 location의 행을 제거했다. 정상 empty와 외부 name/location을 실제 HTTP 응답 fixture로 구분한다. 검색으로 선택한 run의 행이 숨겨져도 상세에 job/run identity·상태·시간 상한을 명시하여 다른 작업의 실패로 오인하지 않도록 보강했다. 후속 immutable 2인 FULL 리뷰·exact CI·실제 paired 재구축·live gate는 아직 미완료다.
 
 ## 2026-10-05 — standalone compose code-server를 `code-server start`로: 브랜치 `chore/standalone-compose-code-server-start`
 

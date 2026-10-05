@@ -24,9 +24,12 @@ __all__ = [
     "get_summary_configuration_error",
 ]
 
+# 모든 tick 상태를 명시하면 전체 이력 batch rank 대신 selector별 LIMIT 조회를 사용한다.
+# 공용 Dagster의 이력이 커져도 최신 3건의 정보와 상태를 그대로 제공한다.
 _DAGSTER_SUMMARY_QUERY = """
 query KorTravelMapDagsterSummary(
-  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+  $limit: Int!, $repositorySelector: RepositorySelector!,
+  $runsFilter: RunsFilter!, $activeRunsFilter: RunsFilter!
 ) {
   version
   repositoryOrError(repositorySelector: $repositorySelector) {
@@ -50,7 +53,7 @@ query KorTravelMapDagsterSummary(
           status
           repositoryName
           repositoryLocationName
-          ticks(limit: 3) {
+          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
             tickId
             status
             timestamp
@@ -67,7 +70,7 @@ query KorTravelMapDagsterSummary(
         name
         sensorState {
           status
-          ticks(limit: 3) {
+          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
             tickId
             status
             timestamp
@@ -92,6 +95,23 @@ query KorTravelMapDagsterSummary(
     }
   }
   runsOrError(filter: $runsFilter, limit: $limit) {
+    __typename
+    ... on Runs {
+      results {
+        runId
+        jobName
+        status
+        startTime
+        endTime
+        updateTime
+        tags { key value }
+      }
+    }
+    ... on PythonError {
+      message
+    }
+  }
+  activeRunsOrError: runsOrError(filter: $activeRunsFilter, limit: 1000) {
     __typename
     ... on Runs {
       results {
@@ -157,6 +177,49 @@ query KorTravelMapDagsterRunDetail(
 }
 """
 
+
+def _valid_summary_repository(raw: object, selector: dict[str, str]) -> bool:
+    """필수 GraphQL 필드를 잃은 repository를 정상 빈 스냅샷으로 표시하지 않는다."""
+    if not isinstance(raw, dict) or raw.get("__typename") != "Repository":
+        return False
+    if not isinstance(raw.get("name"), str) or not raw["name"].strip():
+        return False
+    location = raw.get("location")
+    if (
+        not isinstance(location, dict)
+        or not isinstance(location.get("name"), str)
+        or not location["name"].strip()
+    ):
+        return False
+    if (
+        raw["name"] != selector["repositoryName"]
+        or location["name"] != selector["repositoryLocationName"]
+    ):
+        return False
+    for key in ("pipelines", "schedules", "sensors", "assetNodes"):
+        rows = raw.get(key)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            return False
+        for row in rows:
+            if key == "assetNodes":
+                asset_key = row.get("assetKey")
+                path = asset_key.get("path") if isinstance(asset_key, dict) else None
+                if (
+                    not isinstance(path, list)
+                    or not path
+                    or any(not isinstance(part, str) or not part for part in path)
+                ):
+                    return False
+            elif (
+                not isinstance(row.get("name"), str)
+                or not row["name"].strip()
+                or key == "pipelines"
+                and not isinstance(row.get("isJob"), bool)
+            ):
+                return False
+    return True
+
+
 def _summary_response(data: DagsterSummaryData, *, started_at: float) -> DagsterSummaryResponse:
     return DagsterSummaryResponse(data=data, meta=make_meta(started_at=started_at))
 
@@ -173,7 +236,7 @@ def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResp
     started_at = perf_counter()
     try:
         dagster_graphql.dagster_urls(settings)
-    except dagster_graphql.DagsterUrlConfigurationError as exc:
+    except dagster_graphql.DagsterUrlConfigurationError:
         return _summary_response(
             DagsterSummaryData(
                 status="error",
@@ -188,7 +251,7 @@ def get_summary_configuration_error(settings: ApiSettings) -> DagsterSummaryResp
                 run_counts={},
                 repositories=[],
                 recent_runs=[],
-                errors=[str(exc)],
+                errors=["Dagster 조회를 완료하지 못했습니다. 잠시 후 다시 시도하세요."],
             ),
             started_at=started_at,
         )
@@ -241,10 +304,13 @@ async def get_summary(
                 "limit": page_size,
                 "repositorySelector": urls.repository_selector(),
                 "runsFilter": urls.runs_filter(),
+                "activeRunsFilter": urls.runs_filter(
+                    statuses=dagster_graphql.ACTIVE_RUN_STATUSES,
+                ),
             },
             query=_DAGSTER_SUMMARY_QUERY,
         )
-    except (httpx.HTTPError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError):
         return _summary_response(
             DagsterSummaryData(
                 status="unavailable",
@@ -259,7 +325,7 @@ async def get_summary(
                 run_counts={},
                 repositories=[],
                 recent_runs=[],
-                errors=[str(exc)],
+                errors=["Dagster 조회를 완료하지 못했습니다. 잠시 후 다시 시도하세요."],
             ),
             started_at=started_at,
         )
@@ -290,10 +356,15 @@ async def get_summary(
         ),
         overrides=overrides,
     )
-    recent_runs, run_counts, run_errors = dagster_graphql.parse_runs(
-        dagster_graphql.as_dict(data.get("runsOrError"))
+    recent_runs, run_counts, run_errors = dagster_graphql.merge_recent_active_runs(
+        data, recent_limit=page_size
     )
     errors = [*repository_errors, *run_errors]
+    if not repository_errors and not _valid_summary_repository(
+        data.get("repositoryOrError"), urls.repository_selector()
+    ):
+        repositories = []
+        errors.append("Dagster repository 응답의 필수 필드·소속을 확인하지 못했습니다.")
     return _summary_response(
         DagsterSummaryData(
             status="error" if errors else "ok",

@@ -1,0 +1,39 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Youn-sok Choi (digitie) -->
+
+# 운영 attestation 하니스 독립 리뷰 B — 원본 BLOCK
+
+**하니스 BLOCK. 제품 builtin FULL PASS는 유지한다.** 제품 코드/운영 결과를 재판정하거나 새 source gate로 집계한 리뷰가 아니다.
+
+실행 ID J-ATTEST-HARNESS-20261006-48b2. 대상은 ignored map-pinvi-runtime-attest.py, 고정 SHA256 48b2bccaf268e7dbcc4983798d553faa3b37063624834d7605dcaae0047e6e82이다. 같은 고정 코드의 main/functions를 AST로 추출한 자체 mock에서 검증했다. 실제 SSH·Docker·운영 DB·배포 상태 파일은 접근/실행/변경하지 않았다. Peer raw는 읽지 않았다.
+
+## J-ATTEST-P2-01 — P2 OPEN
+
+runtime_program:55의 importlib.util.find_spec(module)는 leaf 해시 조회 전에 parent package __init__를 실행한다. 고정 Map1ba6의 kortravelmap.dagster/__init__.py는 assets/batch_dag/definitions/resources 등을 eager import한다. 따라서 단순 설치 파일 해시 관측이 code location 실행·무거운 import·잠재적 초기화 경로까지 확장된다.
+
+자체 scratch package의 __init__에 sentinel 파일 생성을 넣고 find_spec(parent.leaf)를 호출해 부모가 실제 실행됨을 확인했다. 설치 파일 탐색은 parent를 실행하지 않는 PathFinder 또는 distribution/file 탐색 경로로 바꾸고, namespace/editable install도 실제 파일을 찾아야 한다. 단순 경로 hardcode로 잘못된 파일을 정상 검증해서는 안 된다.
+
+## J-ATTEST-P2-02 — P2 OPEN
+
+remote main:121~128의 state directory/file 소유권·0700/0600 검사는 초기뿐이다. 마지막 :209는 deploy file bytes만 비교한다. Shared DB mock 검사 중 file0600→0644로 바꿔도 bytes가 같으면 최종 PASS였다. 현재 조건은 st_uid==os.geteuid()라 자체 UID1000/state0700/file0600 mock도 PASS였다. 실제 launcher는 sudo를 요청하지만 “actual UID0” attestation을 코드에서 명시적으로 확인하지 않는다.
+
+로컬 결과:
+- normal_mock: PASS, UID1000, file0600.
+- file_mode_changes_during_attestation: PASS, UID1000, file0644.
+- find_spec_parent_side_effect: parent_init_executed=true.
+
+명시적 UID0와 state/file 타입·소유권·권한·identity metadata를 초기/최종으로 확인하고, 교체·권한 변화가 receipt에 섞이지 않도록 fence가 필요하다. 이 문제를 제품 DB/운영 서비스의 실제 권한 변경으로 재현한 것은 아니다.
+
+## 검증 근거·적절한 경계
+
+Mock /home/digitie/.cache/james-runtime-attest-mock-20261006.py SHA256 51c0aa5f7387ef95da4c29f36fc1578b22516d00384867143f54785d6bc771d7. python3로 실행했다. 실제 고정 하니스 main을 사용하고 Docker/installed reader/DB는 controlled local fake로 대체했다. Scratch는 종료 후 제거했다.
+
+정적 검토에서 committed installed read_deploy_status·six image/source label·per-repository Common VCS commit·최종 container identity/health·deploy bytes fence는 확인했다. Shared Dagster DB query는 transaction READ ONLY를 SELECT 전에 설정하고 local statement/lock timeout, database/user/head 검증, engine disposal을 유지한다. SQLAlchemy/container 예외 원문·DSN/stderr를 PASS/FAIL 공개 receipt에 복사하지 않는 경계도 적절하다.
+
+인접 native launcher97e833의 /work tmpfs·exact probe file readonly·/evidence writable·networknone/memory3g/cpu2 구성은 정적으로 타당했다. 당시 remote probe hash assert는 없어 확인을 권고했으며 후속 launcher 변경은 이 원문에 소급하지 않는다.
+
+## NOT_RUN
+
+실제 full-success operating attestation, SSH/N150 Docker inspect/exec, DB query, native probe launcher 실행, 운영 pair 재구축/live는 모두 NOT_RUN. 제품 source 수정·stage/commit·공개 archive 변경을 수행하지 않았다. 새 하니스 SHA에서 같은 반례/정상 control과 editable·namespace 탐색을 재검토해야 한다.
+
+**최종 하니스 BLOCK — 두 P2 OPEN. 제품 builtin FULL PASS 불변.**

@@ -8,6 +8,8 @@ COPY package.json package-lock.json ./
 COPY .npmrc ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
+# workspace의 file:vendor 의존성은 npm ci 전에 exact archive에서 제공해야 한다.
+COPY packages/kor-travel-map-admin/frontend/vendor ./packages/kor-travel-map-admin/frontend/vendor
 COPY packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-user-client/package.json
 COPY scripts/patch-redocly-openapi-core.mjs ./scripts/patch-redocly-openapi-core.mjs
 COPY scripts/c7-loopback-ui-proxy.mjs ./scripts/c7-loopback-ui-proxy.mjs
