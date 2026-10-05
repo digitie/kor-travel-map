@@ -23,8 +23,8 @@
 |---|---|---|
 | Map | `13f87577` (#1297 포함, 2026-10-05 04:05Z 회전) | D1·D2 GREEN(t71a), deploy-status `committed` |
 | PinVi | `80c92b6c` | Map과 pinned pair |
-| Manager | `f14ed1a4` (#461) | 설치·rebind·`pin verify` 0 |
-| transport | `e00e634` (#64·#65·#66) | 공용 plane 합류, admin 게이트 |
+| Manager | `e2a1a5b4` (#462) | 설치·rebind·`pin verify` 0, instance digest `ff189facb6d6cf1a` |
+| transport | `50d5636b` (#64·#65·#66·#68) | 공용 plane 합류, admin 게이트, code-server start_period 600s, crash 로그·DB 오류 redaction |
 | weather | `2e53dc72` (#71·#73·#74·#75) | 특보 skip-locked, nowcast 결측 센티넬, skip 경보, python-kma-api `12e7f1f1` |
 
 - **공용 Dagster plane:** weather·pinvi·geo·map·transport 5개 tenant가 모두 하나의 storage DB `dagster_shared`
@@ -96,21 +96,20 @@
    - 그 create가 DB에서 30초나 걸린 원인도 별도로 조사해야 한다. 당시 feature insert가 +12초, override가 +29초였고 load는 약 9였다.
 5. **2026-10-19 무렵:** weather DEFAULT 파티션(약 38GB) purge. weather 저장소의 purge_default 스크립트를 dry-run한 뒤 `--execute`한다.
 6. **2026-11-02 무렵:** 옛 메타DB 5개를 `DROP DATABASE`한다(dump는 위 경로). 그 전에 접속 0건을 확인한다.
-7. **LOW 후속(선택):**
-   - **Manager:**
-     - C6c smoke 전체에 deadline이 없다.
-     - urllib timeout은 소켓 동작마다 걸리므로, 주석의 "최악 115s"는 실제 상한이 아니다.
-     - `IncompleteRead`를 재시도하지 않는다.
-     - `start_period` 600s 때문에 깨진 이미지를 늦게 탐지한다.
-   - **transport:**
-     - crash 경로의 traceback 로그가 마스킹되지 않는다.
-     - normal 경로는 원문 오류를 DB에 저장한다.
-     - `docker-compose.shared.yml`의 code-server `start_period`가 180s다. Manager처럼 600s로 맞춘다.
-   - **Map:**
-     - locator 경고(`kortravelmap.infra.feature_repo`)가 prod run 로그에 보이려면 Manager 공용 `dagster.yaml`의
-       `managed_python_loggers`에 추가해야 한다.
-     - 큐 경로의 503은 그 요청에서 최종 실패로 끝난다. 재큐잉하지 않는다는 결정을 문서화했다.
-     - standalone `docker-compose.yml`은 아직 `api grpc`다.
+7. **LOW 후속:** 대부분 끝났다(2026-10-05).
+   - Manager #462에서 끝낸 것:
+     - Map locator 경고 logger를 공용 `dagster.yaml`에 추가했다.
+     - C6c smoke의 Map 요청 시간을 누적 180s로 묶었다. 각 호출의 첫 시도는 항상 10s를 다 쓴다.
+     - `IncompleteRead`·`HTTPException`을 감싼다.
+   - transport #68에서 끝낸 것: code-server start_period 600s, crash 로그 filter, 저장되는 오류의 sanitize.
+   - 남은 것:
+     - transport Dagster op가 실패하면 원문 `str(exc)`와 traceback이 공용 Dagster event log에 남는다(`collection.py` 마지막 except가 그대로 re-raise한다).
+     - Map standalone `docker-compose.yml`은 아직 `api grpc`다.
+     - 큐 경로의 503은 재큐잉하지 않는다는 결정만 문서화했다.
+8. **n150 디스크:** 2026-10-05에 `/`가 91%까지 찼다.
+   - 48h 넘은 build cache와 dangling image를 prune해서 87%로 낮췄다.
+   - 쓰지 않는 태그 이미지가 약 74GB 남아 있다. 퇴역 보관 이미지(옛 postgis 등)가 섞여 있을 수 있으므로 지우기 전에 소유자에게 확인한다.
+   - preflight는 90%를 넘으면 FAIL을 낸다.
 
 ## 4. n150 운영 절차
 

@@ -6,8 +6,8 @@
 읽고 §3 TODO부터 이어간다(§2 weather nowcast는 2026-10-04 23:00Z 배포·첫 SUCCESS로 완료).** n150 변경 작업 전에는 반드시
 사전 점검(`docs/handoff/n150-scripts/preflight.sh`)을 통과시킨다.
 
-- prod: Map `13f87577`(D1·D2 GREEN t71a, deploy-status committed) · PinVi `80c92b6c` · Manager `f14ed1a4` ·
-  transport `e00e634` · weather `2e53dc72`(python-kma-api `12e7f1f1`). 5개 tenant 모두 공용 Dagster plane.
+- prod: Map `13f87577`(D1·D2 GREEN t71a, deploy-status committed) · PinVi `80c92b6c` · Manager `e2a1a5b4` ·
+  transport `50d5636b` · weather `2e53dc72`(python-kma-api `12e7f1f1`). 5개 tenant 모두 공용 Dagster plane.
 - 일정: ~10-19 weather DEFAULT purge, ~11-02 옛 Dagster 메타DB 5개 DROP.
 - 소유자 확인 대기: OPNsense HAProxy Map UI `timeout server` 30s→120s.
 
