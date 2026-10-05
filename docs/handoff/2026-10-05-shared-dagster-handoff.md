@@ -24,7 +24,7 @@
 | Map | `13f87577` (#1297 포함, 2026-10-05 04:05Z 회전) | D1·D2 GREEN(t71a), deploy-status `committed` |
 | PinVi | `80c92b6c` | Map과 pinned pair |
 | Manager | `e2a1a5b4` (#462) | 설치·rebind·`pin verify` 0, instance digest `ff189facb6d6cf1a` |
-| transport | `50d5636b` (#64·#65·#66·#68) | 공용 plane 합류, admin 게이트, code-server start_period 600s, crash 로그·DB 오류 redaction |
+| transport | `c6105233` (#64·#65·#66·#68·#69) | 공용 plane 합류, admin 게이트, code-server start_period 600s, crash 로그·DB 오류 redaction, Dagster op 실패를 redact된 Failure로 공용 event log에 기록 |
 | weather | `2e53dc72` (#71·#73·#74·#75) | 특보 skip-locked, nowcast 결측 센티넬, skip 경보, python-kma-api `12e7f1f1` |
 
 - **공용 Dagster plane:** weather·pinvi·geo·map·transport 5개 tenant가 모두 하나의 storage DB `dagster_shared`
@@ -102,13 +102,13 @@
      - C6c smoke의 Map 요청 시간을 누적 180s로 묶었다. 각 호출의 첫 시도는 항상 10s를 다 쓴다.
      - `IncompleteRead`·`HTTPException`을 감싼다.
    - transport #68에서 끝낸 것: code-server start_period 600s, crash 로그 filter, 저장되는 오류의 sanitize.
-   - 남은 것:
-     - transport Dagster op가 실패하면 원문 `str(exc)`와 traceback이 공용 Dagster event log에 남는다(`collection.py` 마지막 except가 그대로 re-raise한다).
-     - ~~Map standalone `docker-compose.yml`은 아직 `api grpc`다.~~ 2026-10-05 `code-server start`로 바꿨다
-       (브랜치 `chore/standalone-compose-code-server-start`). 남은 것: entrypoint 봉인에서 `api grpc` 제거.
-     - 큐 경로의 503은 재큐잉하지 않는다는 결정만 문서화했다.
+   - transport #69(2026-10-05 배포): Dagster op 실패를 redact된 `Failure`로 바꿨다. frame 위치와 예외 chain 타입은 metadata에 남기고, 전체 traceback은 stderr에 redact해서 남긴다. 그래서 공용 event log에는 원문이 기록되지 않는다.
+     **배포 전에 이미 `dagster_shared`에 남은 원문 실패 레코드를 정리할지는 소유자가 결정한다.**
+   - Map #1304: standalone `docker-compose.yml`도 `code-server start`와 load-aware probe를 쓴다. 로컬 전용이라 배포하지 않는다.
+     후속: entrypoint에서 `api grpc` 허용을 제거한다(별도 변경).
+   - 큐 경로 503은 재큐잉하지 않기로 결정했다(문서화됨).
 8. **n150 디스크:** 2026-10-05에 `/`가 91%까지 찼다.
-   - 48h 넘은 build cache와 dangling image를 prune해서 87%로 낮췄다.
+   - build cache prune(48h·24h)과 dangling image prune을 했다. 다른 세션의 빌드로 다시 92%까지 올랐다가, 2026-10-05에 89%로 낮췄다.
    - 쓰지 않는 태그 이미지가 약 74GB 남아 있다. 퇴역 보관 이미지(옛 postgis 등)가 섞여 있을 수 있으므로 지우기 전에 소유자에게 확인한다.
    - preflight는 90%를 넘으면 FAIL을 낸다.
 
