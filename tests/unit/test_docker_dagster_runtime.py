@@ -4836,6 +4836,46 @@ def test_dagster_production_code_server_rejects_other_shapes(
 
 
 @pytest.mark.unit
+def test_standalone_compose_code_server_is_reloadable_and_sealed(tmp_path: Path) -> None:
+    """standalone compose의 code-server는 운영(Manager)과 같은 `code-server start`다(2026-10-05).
+
+    `api grpc`는 location reload를 무시한다 — schedule override처럼 definitions import 때
+    읽는 값이 reload로 반영되지 않는다. 문자열 비교에 그치지 않고 compose의 argv를(포트 기본값을
+    풀어) 실제 entrypoint 봉인에 넣어 받아들여지는지 본다.
+    """
+
+    service = _compose()["services"]["dagster-code-server"]
+    port_default = "${KOR_TRAVEL_MAP_DAGSTER_CODE_SERVER_PORT:-12703}"
+    command = service["command"]
+    assert command == [
+        "/usr/local/bin/dagster",
+        "code-server",
+        "start",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        port_default,
+        "-m",
+        "kortravelmap.dagster.definitions",
+    ]
+
+    result = _production_code_server_run(
+        tmp_path, [part.replace(port_default, "12703") for part in command]
+    )
+    assert result.returncode == 0, result.stderr
+    assert "dagster-started PYTHONSAFEPATH=1" in result.stdout
+
+    # proxy의 `DagsterApi` health는 자식이 load error여도 고정 SERVING이다 — probe는 자식에
+    # 전달되는 `ListRepositories`를 봐야 load error를 잡는다.
+    probe = " ".join(service["healthcheck"]["test"])
+    assert "/api.DagsterApi/ListRepositories" in probe
+    assert "SerializableErrorInfo" in probe
+    assert service["healthcheck"]["test"][-1] == port_default
+    # 4초 gRPC 호출 둘 + 인터프리터 기동·grpc import — 부하 아래 10초로는 모자랄 수 있다.
+    assert service["healthcheck"]["timeout"] == "15s"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "dagster_home",
     ["/tmp/alternate-dagster-home", "", "/opt/dagster/dagster_home/../other"],
@@ -6705,7 +6745,7 @@ def test_the_seoul_open_data_key_travels_with_the_datagokr_file_data_services() 
 
 def _dagster_process_services() -> dict[str, dict[str, Any]]:
     """dagster 프로세스(webserver·daemon·code-server)를 띄우는 서비스. **이름으로 찾지 않는다.**"""
-    markers = ("dagster-webserver", "dagster-daemon", "dagster api grpc")
+    markers = ("dagster-webserver", "dagster-daemon", "dagster code-server start")
     services = _compose()["services"]
     return {
         name: service

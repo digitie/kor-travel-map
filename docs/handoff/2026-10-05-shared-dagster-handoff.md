@@ -104,7 +104,8 @@
    - transport #68에서 끝낸 것: code-server start_period 600s, crash 로그 filter, 저장되는 오류의 sanitize.
    - 남은 것:
      - transport Dagster op가 실패하면 원문 `str(exc)`와 traceback이 공용 Dagster event log에 남는다(`collection.py` 마지막 except가 그대로 re-raise한다).
-     - Map standalone `docker-compose.yml`은 아직 `api grpc`다.
+     - ~~Map standalone `docker-compose.yml`은 아직 `api grpc`다.~~ 2026-10-05 `code-server start`로 바꿨다
+       (브랜치 `chore/standalone-compose-code-server-start`). 남은 것: entrypoint 봉인에서 `api grpc` 제거.
      - 큐 경로의 503은 재큐잉하지 않는다는 결정만 문서화했다.
 8. **n150 디스크:** 2026-10-05에 `/`가 91%까지 찼다.
    - 48h 넘은 build cache와 dangling image를 prune해서 87%로 낮췄다.
