@@ -83,13 +83,33 @@
 
 ## 3. TODO (우선순위순)
 
-1. **weather nowcast 수정과 배포:** §2.
+1. ~~weather nowcast 수정과 배포~~: 완료(§2).
 2. **weather 다른 job의 lock timeout 정책(소유자 결정 필요).**
    - 대상: openweathermap·open_meteo·weatherapi(current/forecast), airkorea_realtime_measurement, kma_ultra_short_forecast.
      지점 lock timeout 한 번에 run 전체가 실패한다.
    - 지점 skip을 도입하면 "적재한다"는 약속이 바뀌므로 그 전에 소유자에게 묻는다.
    - 권고: `chunked_publish.py`의 `PUBLISH_CHUNK_VALUES`를 5000에서 1000~2000으로 낮춰 lock 보유 시간을 줄인다.
      특보 스케줄을 `:05`에서 `:40`으로 옮기는 안도 있다.
+2b. **[최우선] weather `weather_retention_job` 수정 — 소유자 승인(2026-10-06), 착수 전.**
+   - **증상:** retention이 1/1 실패했다. 오류는 `LockNotAvailable: LOCK TABLE weather_values IN ACCESS EXCLUSIVE MODE`이다. 수집이 쉬지 않으니 부모 테이블에 ACCESS EXCLUSIVE를 거의 얻을 수 없다. 결국 16일 보존이 조용히 멈추고 디스크가 계속 늘어난다.
+   - **구현:**
+     - 만료된 일 파티션(`weather_values_YYYYMMDD`)을 하나씩 `ALTER TABLE weather_values DETACH PARTITION … CONCURRENTLY`로 떼어낸 뒤 `DROP TABLE`한다.
+       - 트랜잭션 밖에서(autocommit) 실행해야 한다.
+       - 중단된 detach는 `FINALIZE`로 마무리한다.
+       - FK와 default partition이 detach를 막는지 확인한다(#68 선례).
+     - 파티션마다 짧은 `lock_timeout`을 주고 몇 번 재시도한다. 실패한 파티션은 건너뛰고 다음 run에서 다시 한다. 연속으로 실패할 때만 partial/failed로 처리한다.
+     - 16일 규칙과 dry-run은 그대로 유지한다. 스케줄은 한가한 시각으로 옮긴다.
+   - **신호:** 다음 둘 중 하나를 메트릭으로 내보낸다. 마지막 성공 시각, 또는 가장 오래된 파티션의 나이.
+     - 경보 규칙: 2일 동안 성공이 없거나, 가장 오래된 파티션이 retention + 2일보다 오래되면 울린다. promtool 테스트를 붙이고, 배포 후 SIGHUP을 보낸다.
+   - **테스트:** 실제 Postgres에서 동시 수집이 lock을 잡고 있는 상황으로 RED부터 만든다.
+   - **브랜치:** weather `fix/retention-detach-and-overlap-skip`. 현재 main과 같고 커밋이 없다.
+2c. **weather "이미 진행 중" 겹침을 skip으로 처리한다 — 소유자 승인, 착수 전.**
+   - 현재 `RuntimeError: 동일 provider/dataset 실행이 이미 진행 중입니다`로 run이 FAILURE가 된다. 24h 동안 3건이었다.
+   - 앞선 run이 아직 정상적으로 돌고 있으면 SUCCESS(skipped)로 끝내고, 로그와 metadata에 기록한다. sync_runs와 메트릭에는 실패로 세지 않는다.
+   - 앞선 run이 stale(lease 만료)이면 지금처럼 실패로 처리한다.
+   - 같은 브랜치에서 작업한다.
+2d. 소유자 결정(2026-10-06): 지점 단위 skip을 다른 weather job으로 넓히지 않는다. 24h 동안 지점 lock 실패가 2건뿐이었고, 다음 tick이 다시 가져온다.
+   - 참고: 24h 실패 분류는 배포 재시작 6건, 겹침 3건, 지점 lock 2건, lease 1건, retention 1건이다.
 3. ~~Map #1297 배포~~: 2026-10-05 04:05Z에 완료했다(t71a, D1·D2 GREEN). python-kma-api 결측 helper(#31)를 추가했고, weather는 이를 사용한다(#75).
 4. **소유자 확인 필요(저장소 밖):** OPNsense HAProxy의 Map UI backend `timeout server`를 30초에서 약 120초로 올려야 한다.
    - 2026-10-04 D2의 admin create가 약 30초 만에 edge에서 끊긴 것으로 추정한다.
