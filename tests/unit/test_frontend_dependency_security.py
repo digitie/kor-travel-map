@@ -86,6 +86,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         "node scripts/verify-next-sharp.mjs"
     )
     assert root_package["overrides"] == {
+        "source-map-js": "1.2.2",
         "next": {"postcss": declared_postcss, "sharp": declared_sharp},
         "@redocly/openapi-core": {
             "js-yaml": "4.3.0",
@@ -103,6 +104,10 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert "reactDom.configs.recommended" in eslint_config
     assert '"import-x/no-anonymous-default-export": "warn"' in eslint_config
 
+    # GHSA-68fv-2mgg-jv7q: postcss·tailwind·magicast가 공유하는 한 벌이 핀과 같아야 한다.
+    assert lock_packages["node_modules/source-map-js"]["version"] == (
+        root_package["overrides"]["source-map-js"]
+    )
     assert lock_packages["node_modules/next"]["version"] == declared_next
     assert lock_packages["node_modules/@next/env"]["version"] == declared_next
     assert lock_packages["node_modules/next"]["dependencies"]["@next/env"] == (
