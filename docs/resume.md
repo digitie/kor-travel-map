@@ -1,3 +1,15 @@
+## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
+
+**다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포는 하지 않는다 — 다음 Map pinned-pair 회전 때 이미지에 실려
+반영된다.** 안전한 이유: 운영 Manager compose(#1295)와 standalone compose(#1304)가 이미 `code-server start`로 띄우므로
+최상위 `api grpc`를 띄우는 곳이 없다.
+
+- `docker/dagster-entrypoint.sh` production 봉인은 `/usr/local/bin/dagster code-server start -h 127.0.0.1 -p <port> -m
+  kortravelmap.dagster.definitions`(정확한 9-argv) 하나만 받는다. `api grpc`는 다른 모양과 같은 문구("production Dagster
+  code server argv does not match the sealed launch contract")로 거부한다. local-dev의 preflight 분기에서도 뺐다.
+- proxy가 띄우는 자식(`python -m dagster api grpc --socket …`)은 entrypoint를 지나지 않으므로 영향이 없다(n150 실측).
+- 테스트: rejects parametrize에 `api grpc` 추가(먼저 RED 확인), accepts는 `code-server start` 정확한 argv 하나.
+
 ## 2026-10-06 — Map·PinVi 공통 Dagster 구현·재구축·live·머지 완료
 
 [Common #28](https://github.com/digitie/kor-travel-common/pull/28) → [Map #1303](https://github.com/digitie/kor-travel-map/pull/1303) → [PinVi #576](https://github.com/digitie/pinvi/pull/576) 순서로 병합했다. Common·Map은 merge commit, PinVi는 main ruleset의 squash-only·linear history 정책에 따라 squash로 병합했다. PinVi 재구축 원본0058369와 검증 HEAD92d0f40는 remote tags codex/pinvi-map-runtime-20261006·codex/pinvi-map-reviewed-20261006 및 유지한 feature branch에 원본 이력을 보존했다. 저장소 설정은 변경하지 않았다. 최종 문서 포함 HEAD의 필수 CI, Common·Map main ancestry와 PinVi 보존 참조, 병합 tree 일치를 확인했다. 실제 paired 재구축, 두 독립 FULL 제품 리뷰·가이드 리뷰·최종 문서 리뷰, Chromium/Firefox×Map/PinVi live UI4건·8캡처, ACL40·D1 11건·D2 normal/attempt0·소유 fixture 정리·잔존0 검증을 완료했다.
@@ -21,18 +33,6 @@ Common a960bdb, Map 1a3c467, PinVi 0058369의 제품113파일 두 독립 FULL �
 [실제 검증·리뷰 원문과 실패 이력](reviews/common-dagster-2026-10-05/README.md), [공통 적용 가이드](runbooks/common-dagster.md).
 
 # resume.md — 현재 진척도와 다음 한 작업
-
-## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
-
-**다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포는 하지 않는다 — 다음 Map pinned-pair 회전 때 이미지에 실려
-반영된다.** 안전한 이유: 운영 Manager compose(#1295)와 standalone compose(#1304)가 이미 `code-server start`로 띄우므로
-최상위 `api grpc`를 띄우는 곳이 없다.
-
-- `docker/dagster-entrypoint.sh` production 봉인은 `/usr/local/bin/dagster code-server start -h 127.0.0.1 -p <port> -m
-  kortravelmap.dagster.definitions`(정확한 9-argv) 하나만 받는다. `api grpc`는 다른 모양과 같은 문구("production Dagster
-  code server argv does not match the sealed launch contract")로 거부한다. local-dev의 preflight 분기에서도 뺐다.
-- proxy가 띄우는 자식(`python -m dagster api grpc --socket …`)은 entrypoint를 지나지 않으므로 영향이 없다(n150 실측).
-- 테스트: rejects parametrize에 `api grpc` 추가(먼저 RED 확인), accepts는 `code-server start` 정확한 argv 하나.
 
 ## 2026-10-05 — Map·PinVi 공통 Dagster 보강 (진행 중)
 
