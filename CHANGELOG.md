@@ -10,6 +10,12 @@
 
 ## [Unreleased]
 
+### npm 보안 권고 둘을 닫는다 — sharp 0.35.5 · source-map-js 1.2.2 (2026-10-07)
+
+- `sharp <0.35.5` **high**: librsvg 취약점(GHSA-wq5f-xc86-pv6w). `next` 아래 override를 **0.35.5**로 올렸다.
+- `source-map-js 1.0.0–1.2.1` **high**: event-loop DoS(GHSA-68fv-2mgg-jv7q). 최상위 override를 **1.2.2**로 지정했다.
+- 영향: 이 권고 때문에 `audit:high` gate가 main과 모든 PR에서 빨갛게 떠 있었다(2026-10-06부터). lockfile에서는 `sharp`·`@img/*`·`source-map-js`의 버전만 바뀌었다.
+
 ### standalone compose code-server는 `code-server start` (2026-10-05)
 
 - **CHANGED (compose)**: `docker-compose.yml`의 `dagster-code-server`가 `dagster api grpc` 대신 운영(Manager)과 같은
