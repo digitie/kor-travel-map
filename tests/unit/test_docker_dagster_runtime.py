@@ -4811,7 +4811,9 @@ def test_dagster_production_code_server_accepts_exactly_the_sealed_shapes(
 @pytest.mark.parametrize(
     "command",
     [
-        # 하위 명령이 섞이면 둘 중 어느 것도 아니다.
+        # `api grpc`는 location reload를 무시한다 — 전환이 끝나(2026-10-07) 봉인에서 뺐다.
+        ["api", "grpc", *_SEALED_CODE_SERVER_TAIL],
+        # 하위 명령이 섞이면 `code-server start`가 아니다.
         ["code-server", "grpc", *_SEALED_CODE_SERVER_TAIL],
         ["api", "start", *_SEALED_CODE_SERVER_TAIL],
         ["code-server", "stop", *_SEALED_CODE_SERVER_TAIL],
