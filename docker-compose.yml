@@ -573,7 +573,8 @@ services:
   # (dagster-entrypoint.sh의 production 봉인과 같은 이유).
   # `code-server start`(운영 Manager와 같은 모양): proxy가 자식 gRPC를 띄우고 location reload 때
   # 자식을 새로 띄워 definitions를 다시 import한다. `api grpc`는 reload를 무시해서 schedule
-  # override처럼 import 때 읽는 값이 반영되지 않는다(2026-10-01 n150 C7).
+  # override처럼 import 때 읽는 값이 반영되지 않는다(2026-10-01 n150 C7) — entrypoint 봉인도 이제
+  # `code-server start`만 받는다(2026-10-07).
   dagster-code-server:
     build:
       context: .

@@ -24,6 +24,22 @@ Common a960bdb, Map 1a3c467, PinVi 0058369의 제품113파일 두 독립 FULL �
 
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
+
+- **변경.** `docker/dagster-entrypoint.sh`의 production `/usr/local/bin/dagster` 봉인이 하위 명령 `code-server start`
+  하나만 받는다(9-argv, loopback `-h`, 숫자 `-p`, 고정 `-m` 그대로). 최상위 `api grpc`는 location reload를 무시해서
+  전환용으로만 남아 있었고, Manager compose(#1295)·standalone compose(#1304)가 모두 옮겨 쓰는 곳이 없다. 거부 문구는
+  다른 모양과 같다. local-dev의 preflight 분기에서도 `api grpc`를 뺐다.
+- **테스트.** `test_dagster_production_code_server_rejects_other_shapes`에 `api grpc`를 넣어 n150에서 먼저 RED(1 failed)를
+  보고 고쳤다. accepts는 `code-server start` 정확한 argv 하나, runtime-preflight 목록에서 `api grpc` 행을 뺐다.
+  n150: `ruff check`(CI 범위) 통과, `test_docker_dagster_runtime.py`+code-location+constraints 332 passed / 14 failed —
+  실패 14건은 main(8f9dd1cb) 기준선과 같은 집합(frontend dotenv validator·local admin stack 등 환경 의존).
+- **실측(throwaway, 운영 Map code-server 이미지 `197597501a0b`, rev 1a3c467).** 새 entrypoint를 읽기전용 마운트:
+  `api grpc` → rc=1 + 봉인 문구, `code-server start` → 35초 안에 `ListRepositories` 610 bytes(정상 응답, 오류 없음).
+  proxy의 자식 `python -m dagster api grpc --socket …`은 entrypoint를 지나지 않아 영향이 없음을 프로세스 목록으로 확인.
+  이미지 자체 entrypoint는 `api grpc`를 여전히 받는다(대조). 컨테이너·임시 파일 정리 완료.
+- **배포.** 하지 않았다. 다음 Map pinned-pair 회전 때 반영되며, 운영은 이미 `code-server start`라 안전하다.
+
 ## 2026-10-05 — child health의 reserved metadata marker 차단 채택
 
 Common 경량 probe의 독립 리뷰 반례(pointer/library map의 reserved serdes marker)를 차단하고 정상 default repository __repository__를 허용하는 profile을 API·Dagster 동일 Git revision으로 채택한다. unsupported stateful/custom metadata는 fail-closed하며 가이드에 지원 경계를 명시했다. 두 독립 재리뷰·현재 CI·실제 PinVi/Map paired 재구축/live는 아직 진행 중이다.

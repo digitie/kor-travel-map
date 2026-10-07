@@ -10,6 +10,13 @@
 
 ## [Unreleased]
 
+### Dagster entrypoint 봉인에서 `api grpc` 제거 (2026-10-07)
+
+- **REMOVED (image)**: `docker/dagster-entrypoint.sh`의 production code-server 봉인이 `dagster api grpc`를 더 이상 받지
+  않는다 — `/usr/local/bin/dagster code-server start -h 127.0.0.1 -p <port> -m kortravelmap.dagster.definitions`만
+  받고, 그 밖의 모양은 전과 같은 문구로 거부한다. Manager compose(#1295)와 standalone compose(#1304)가 이미
+  `code-server start`라 쓰는 곳이 없다. 다음 Map pinned-pair 회전 때 반영된다.
+
 ### npm 보안 권고 둘을 닫는다 — sharp 0.35.5 · source-map-js 1.2.2 (2026-10-07)
 
 - `sharp <0.35.5` **high**: librsvg 취약점(GHSA-wq5f-xc86-pv6w). `next` 아래 override를 **0.35.5**로 올렸다.
