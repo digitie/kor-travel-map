@@ -125,7 +125,7 @@
    - transport #69(2026-10-05 배포): Dagster op 실패를 redact된 `Failure`로 바꿨다. frame 위치와 예외 chain 타입은 metadata에 남기고, 전체 traceback은 stderr에 redact해서 남긴다. 그래서 공용 event log에는 원문이 기록되지 않는다.
      **배포 전에 이미 `dagster_shared`에 남은 원문 실패 레코드를 정리할지는 소유자가 결정한다.**
    - Map #1304: standalone `docker-compose.yml`도 `code-server start`와 load-aware probe를 쓴다. 로컬 전용이라 배포하지 않는다.
-     후속: entrypoint에서 `api grpc` 허용을 제거한다(별도 변경).
+     후속: entrypoint에서 `api grpc` 허용을 제거한다(별도 변경) — 2026-10-07 브랜치 `chore/entrypoint-drop-api-grpc`.
    - 큐 경로 503은 재큐잉하지 않기로 결정했다(문서화됨).
 8. **n150 디스크:** 2026-10-05에 `/`가 91%까지 찼다.
    - build cache prune(48h·24h)과 dangling image prune을 했다. 다른 세션의 빌드로 다시 92%까지 올랐다가, 2026-10-05에 89%로 낮췄다.

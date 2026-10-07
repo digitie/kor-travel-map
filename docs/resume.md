@@ -1,3 +1,15 @@
+## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
+
+**다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포는 하지 않는다 — 다음 Map pinned-pair 회전 때 이미지에 실려
+반영된다.** 안전한 이유: 운영 Manager compose(#1295)와 standalone compose(#1304)가 이미 `code-server start`로 띄우므로
+최상위 `api grpc`를 띄우는 곳이 없다.
+
+- `docker/dagster-entrypoint.sh` production 봉인은 `/usr/local/bin/dagster code-server start -h 127.0.0.1 -p <port> -m
+  kortravelmap.dagster.definitions`(정확한 9-argv) 하나만 받는다. `api grpc`는 다른 모양과 같은 문구("production Dagster
+  code server argv does not match the sealed launch contract")로 거부한다. local-dev의 preflight 분기에서도 뺐다.
+- proxy가 띄우는 자식(`python -m dagster api grpc --socket …`)은 entrypoint를 지나지 않으므로 영향이 없다(n150 실측).
+- 테스트: rejects parametrize에 `api grpc` 추가(먼저 RED 확인), accepts는 `code-server start` 정확한 argv 하나.
+
 ## 2026-10-06 — Map·PinVi 공통 Dagster 구현·재구축·live·머지 완료
 
 [Common #28](https://github.com/digitie/kor-travel-common/pull/28) → [Map #1303](https://github.com/digitie/kor-travel-map/pull/1303) → [PinVi #576](https://github.com/digitie/pinvi/pull/576) 순서로 병합했다. Common·Map은 merge commit, PinVi는 main ruleset의 squash-only·linear history 정책에 따라 squash로 병합했다. PinVi 재구축 원본0058369와 검증 HEAD92d0f40는 remote tags codex/pinvi-map-runtime-20261006·codex/pinvi-map-reviewed-20261006 및 유지한 feature branch에 원본 이력을 보존했다. 저장소 설정은 변경하지 않았다. 최종 문서 포함 HEAD의 필수 CI, Common·Map main ancestry와 PinVi 보존 참조, 병합 tree 일치를 확인했다. 실제 paired 재구축, 두 독립 FULL 제품 리뷰·가이드 리뷰·최종 문서 리뷰, Chromium/Firefox×Map/PinVi live UI4건·8캡처, ACL40·D1 11건·D2 normal/attempt0·소유 fixture 정리·잔존0 검증을 완료했다.
@@ -29,7 +41,7 @@ ADR-107과 [적용·복구 가이드](runbooks/common-dagster.md)에 따라 공�
 ## 2026-10-05 — standalone compose code-server `code-server start`: 브랜치 `chore/standalone-compose-code-server-start`
 
 **다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포 영향 없음(standalone compose·주석·문서만, prod는 Manager
-compose).** 그 뒤 후속: `docker/dagster-entrypoint.sh` 봉인에서 `api grpc` 분기 제거(+ 수용 테스트 parametrize 정리).
+compose).** 그 뒤 후속: `docker/dagster-entrypoint.sh` 봉인에서 `api grpc` 분기 제거(+ 수용 테스트 parametrize 정리) — 2026-10-07 `chore/entrypoint-drop-api-grpc`에서 처리.
 
 - standalone healthcheck는 proxy health + 자식 `ListRepositories`(load error면 실패). n150 실측으로 CLI
   `grpc-health-check`는 load error에도 rc=0임을 확인했다.
@@ -78,7 +90,7 @@ Manager `fix/dagster-code-server-reloadable` 설치(Map code-server를 `code-ser
 - 순서가 계약이다: 이 이미지 전의 Map은 `code-server start`를 봉인에서 거부하므로 Manager compose를 먼저 설치하면 Map
   code-server가 뜨지 않는다. 이 이미지는 `api grpc`도 받으므로 지금 compose 아래에서 먼저 핀에 올려도 안전하다.
 - production exec가 `PYTHONSAFEPATH=1`을 내보낸다 — `-I`가 이어지지 않는 자식 Python의 cwd-on-`sys.path`를 막는다.
-- 후속: standalone `docker-compose.yml`의 code-server 전환(+자식에 묶은 probe), 전환이 끝나면 봉인에서 `api grpc` 제거.
+- 후속: standalone `docker-compose.yml`의 code-server 전환(+자식에 묶은 probe), 전환이 끝나면 봉인에서 `api grpc` 제거(둘 다 처리: #1304, 2026-10-07 `chore/entrypoint-drop-api-grpc`).
 
 ## 2026-10-02 — 주유소·휴게소·돌발·공항 원천 이관(ADR-106): 브랜치 `feat/transport-api-sources`
 
