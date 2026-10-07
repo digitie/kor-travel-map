@@ -22,7 +22,7 @@ for c in $(docker ps -q); do docker inspect -f '{{.Name}} {{index .Config.Labels
 rc=0; DC up -d --no-deps kor-travel-weather-api kor-travel-weather-dagster-code-server </dev/null >"$LOG/up.out" 2>&1 || rc=$?
 echo "up rc=$rc"; grep -v -i -E "password|secret" "$LOG/up.out" | tail -6
 for c in $(docker ps -q); do docker inspect -f '{{.Name}} {{index .Config.Labels "com.docker.compose.config-hash"}}' "$c"; done | sort > "$LOG/post.txt"
-echo "== changed"; { diff "$LOG/pre.txt" "$LOG/post.txt" || true; } | grep -E '^[<>]' | awk '{print $1,$2}' | sort -u -k2,2 | awk '{print $2}' | sort -u
+echo "== changed"; { diff "$LOG/pre.txt" "$LOG/post.txt" || true; } | grep -E '^[<>]' | awk '{print $1,$2}' | sort -u -k2,2 | awk '{print $2}' | sort -u || true  # 이미지만 바뀌면 config-hash가 같아 비어 있다(grep 1 → pipefail)
 exit $rc
 EOS
 sudo bash /tmp/wk-inner.sh </dev/null; rc=$?; rm -f /tmp/wk-inner.sh

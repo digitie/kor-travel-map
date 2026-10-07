@@ -49,11 +49,13 @@ compose).** 그 뒤 후속: `docker/dagster-entrypoint.sh` 봉인에서 `api grp
 ## 2026-10-05 — 인계: 공용 Dagster 완주 이후 (Codex 등 다음 에이전트는 여기부터)
 
 **다음 한 작업: [`docs/handoff/2026-10-05-shared-dagster-handoff.md`](handoff/2026-10-05-shared-dagster-handoff.md)를
-읽고 §3 TODO 2b(weather retention이 ACCESS EXCLUSIVE lock 때문에 실패 — DETACH CONCURRENTLY로 수정, 최우선)부터 이어간다.** n150 변경 작업 전에는 반드시
+읽고 §3 TODO를 이어간다.** 2b·2c(weather retention·겹침 skip)는 2026-10-07에 완료하고 배포했다. 다음은 2b의 새 retention 첫 run 확인(2026-10-07 16:45Z)이다. n150 변경 작업 전에는 반드시
 사전 점검(`docs/handoff/n150-scripts/preflight.sh`)을 통과시킨다.
 
-- prod: Map `13f87577`(D1·D2 GREEN t71a, deploy-status committed) · PinVi `80c92b6c` · Manager `e2a1a5b4` ·
-  transport `c6105233` · weather `2e53dc72`(python-kma-api `12e7f1f1`). 5개 tenant 모두 공용 Dagster plane.
+- prod(2026-10-07): Map `1a3c4673` · PinVi `0058369c` · Manager `b5f4dcfb`(#466 C6c family 규칙) ·
+  transport `c6105233` · weather `a44ed9c3`(python-kma-api `12e7f1f1`). concierge까지 6개 location이 모두 공용 Dagster plane에 있다.
+- 2026-10-07: Map main frontend `audit:high`가 10-06부터 빨갛던 것을 #1309(sharp 0.35.5 · source-map-js 1.2.2)로 닫았다.
+  entrypoint 봉인에서 `api grpc`를 뺐다(#1308). 이 변경은 다음 Map 회전 때 prod에 반영된다.
 - 일정: ~10-19 weather DEFAULT purge, ~11-02 옛 Dagster 메타DB 5개 DROP.
 - 소유자 확인 대기: OPNsense HAProxy Map UI `timeout server` 30s→120s.
 
