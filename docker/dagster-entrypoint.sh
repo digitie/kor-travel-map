@@ -193,16 +193,16 @@ if [ "$dagster_profile" = "production" ]; then
       # loopback으로 고정한다(weather와 같은 이유 — Manager launch attestation
       # 이전에도 image 안에서 fail-close).
       #
-      # 하위 명령은 정확히 둘 중 하나다. `code-server start`는 proxy가 자식 gRPC
-      # (`python -m dagster api grpc`, UDS socket)를 띄우고 location reload(`ReloadCode`)
-      # 때 자식을 새로 띄워 definitions를 다시 import한다 — schedule override처럼
-      # import 때 읽는 값이 reload로 반영되는 유일한 모양이다. `api grpc`는 reload를
-      # "not currently supported" 경고만 남기고 무시한다(2026-10-01 n150 C7). Manager compose와
-      # 저장소 standalone compose는 모두 `code-server start`다(2026-10-05). `api grpc`는 전환용으로
-      # 남아 있고 후속에서 제거한다.
+      # 하위 명령은 정확히 `code-server start`다. proxy가 자식 gRPC(UDS socket)를 띄우고
+      # location reload(`ReloadCode`) 때 자식을 새로 띄워 definitions를 다시 import한다 —
+      # schedule override처럼 import 때 읽는 값이 reload로 반영되는 유일한 모양이다.
+      # 최상위 `api grpc`는 reload를 "not currently supported" 경고만 남기고 무시해서
+      # (2026-10-01 n150 C7), Manager compose(#1295)와 standalone compose(#1304)가 모두
+      # `code-server start`로 옮긴 뒤 봉인에서 뺐다(2026-10-07). proxy의 자식 gRPC는 이
+      # 프로세스가 직접 띄우므로 이 봉인을 다시 지나지 않는다.
       if [ "$#" -ne 9 ] \
-        || ! { { [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; } \
-          || { [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; }; } \
+        || [ "${2:-}" != "code-server" ] \
+        || [ "${3:-}" != "start" ] \
         || [ "${4:-}" != "-h" ] \
         || [ "${5:-}" != "127.0.0.1" ] \
         || [ "${6:-}" != "-p" ] \
@@ -251,8 +251,7 @@ else
       fi
       ;;
     dagster | /usr/local/bin/dagster)
-      if { [ "${2:-}" = "api" ] && [ "${3:-}" = "grpc" ]; } \
-        || { [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; }; then
+      if [ "${2:-}" = "code-server" ] && [ "${3:-}" = "start" ]; then
         runtime_preflight
       fi
       ;;
@@ -278,7 +277,7 @@ if [ "$dagster_profile" = "production" ]; then
   #
   # `-I`는 이 프로세스에만 걸린다. 이 프로세스가 띄우는 Python — `code-server start`의
   # 자식 gRPC와 run worker(`sys.executable -m dagster ...`) — 에는 걸리지 않는다(run
-  # worker는 `api grpc` 때부터 그랬다). `-I`가 막던 것 중 user site(`-s`)는 위에서 요구한
+  # worker는 최상위 `api grpc`를 쓰던 때부터 그랬다). `-I`가 막던 것 중 user site(`-s`)는 위에서 요구한
   # `PYTHONNOUSERSITE=1`이, `-E`가 무시하던 `PYTHONPATH`·`PYTHONHOME`·`PYTHONUSERBASE`는
   # 위의 거부가 env로 자식까지 막는다. `PYTHONSAFEPATH=1`은 **인터프리터가** `-m` 때 cwd를
   # `sys.path` 앞에 넣는 것(`-P`)만 자식까지 막는다. dagster 자신도 code location을 싣기 전에

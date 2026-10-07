@@ -4676,20 +4676,6 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
             "production",
             [
                 "/usr/local/bin/dagster",
-                "api",
-                "grpc",
-                "-h",
-                "127.0.0.1",
-                "-p",
-                "4000",
-                "-m",
-                "kortravelmap.dagster.definitions",
-            ],
-        ),
-        (
-            "production",
-            [
-                "/usr/local/bin/dagster",
                 "code-server",
                 "start",
                 "-h",
@@ -4786,20 +4772,31 @@ def _production_code_server_run(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("subcommand", [["code-server", "start"], ["api", "grpc"]])
-def test_dagster_production_code_server_accepts_exactly_the_sealed_shapes(
-    tmp_path: Path, subcommand: list[str]
+def test_dagster_production_code_server_accepts_exactly_the_sealed_shape(
+    tmp_path: Path,
 ) -> None:
-    """code-server 봉인은 하위 명령 둘만 받는다(2026-10-02).
+    """code-server 봉인은 하위 명령 `code-server start` 하나만 받는다(2026-10-07).
 
     `code-server start`는 location reload에 definitions를 다시 import하는 유일한 모양이다 —
-    `api grpc`는 reload를 무시해서 C7의 schedule override가 반영되지 않았다. `api grpc`는 Manager
-    compose가 바뀔 때까지의 전환용이다. 둘 다 같은 9-argv 모양(loopback `-h`, 숫자 `-p`,
-    고정 `-m`)이고, 자식 Python까지 `PYTHONSAFEPATH=1`이 이어진다.
+    `api grpc`는 reload를 무시해서 C7의 schedule override가 반영되지 않았고, Manager(#1295)와
+    standalone(#1304) compose가 모두 옮긴 뒤 봉인에서 빠졌다(거부는 아래 rejects 테스트).
+    정확한 9-argv(loopback `-h`, 숫자 `-p`, 고정 `-m`)이고, 자식 Python까지
+    `PYTHONSAFEPATH=1`이 이어진다.
     """
 
     result = _production_code_server_run(
-        tmp_path, ["/usr/local/bin/dagster", *subcommand, *_SEALED_CODE_SERVER_TAIL]
+        tmp_path,
+        [
+            "/usr/local/bin/dagster",
+            "code-server",
+            "start",
+            "-h",
+            "127.0.0.1",
+            "-p",
+            "12703",
+            "-m",
+            "kortravelmap.dagster.definitions",
+        ],
     )
 
     assert result.returncode == 0, result.stderr
