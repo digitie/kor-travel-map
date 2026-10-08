@@ -42,6 +42,12 @@ const MAKI_GLYPH: Readonly<Record<string, string>> = Object.freeze({
   "alert": "⚠", // ⚠️
   "info": "ℹ", // ℹ️
   "construction": "\u{1F6A7}", // 🚧
+  // krex 고속도로 교통 공지(providers.krex TRAFFIC_NOTICE_MARKER_ICON, P-13) —
+  // 사고·통제·공사·정체. Unicode의 바리케이드 글리프는 U+1F6A7 하나뿐이라
+  // `construction`과 같은 글리프를 쓴다(색 P-13으로 구분).
+  "roadblock": "\u{1F6A7}", // 🚧
+  // 산사태 예보(providers.krforest_safety LANDSLIDE_FORECAST_MARKER_ICON).
+  "warning": "⚠", // ⚠️ (= alert)
   // 날씨/대기질 (kma, airkorea)
   "weather": "☀", // ☀️
   "air-quality": "\u{1F32B}", // 🌫️

@@ -55,3 +55,34 @@ def test_python_category_maki_icons_are_renderable_by_ts() -> None:
         "Python category가 쓰는 maki 아이콘이 TS MAKI_GLYPH에 없음(drift) — "
         f"packages/map-marker-react/src/maki.ts에 추가 필요: {missing}"
     )
+
+
+def test_provider_direct_marker_icons_are_renderable_by_ts() -> None:
+    """category catalog를 거치지 않고 provider가 직접 emit하는 marker_icon도 TS에 있어야 한다.
+
+    catalog 검사는 ``PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES``만 본다. 공지/특보처럼
+    category 없이 상수로 박는 아이콘(``roadblock``이 첫 글자 "R" 배지로 떨어졌던 사례)은
+    그 검사에 걸리지 않으므로 provider 상수 값 자체를 대조한다.
+    """
+    from kortravelmap.providers import (
+        FESTIVAL_MARKER_ICON,
+        LANDSLIDE_FORECAST_MARKER_ICON,
+        OPINET_STATION_MARKER_ICON,
+        REST_AREA_MARKER_ICON,
+        TRAFFIC_NOTICE_MARKER_ICON,
+    )
+    from kortravelmap.providers.krex import REST_AREA_PRICE_MARKER_ICON
+
+    emitted = {
+        FESTIVAL_MARKER_ICON,
+        LANDSLIDE_FORECAST_MARKER_ICON,
+        OPINET_STATION_MARKER_ICON,
+        REST_AREA_MARKER_ICON,
+        REST_AREA_PRICE_MARKER_ICON,
+        TRAFFIC_NOTICE_MARKER_ICON,
+    }
+    missing = sorted(emitted - _ts_maki_glyph_keys())
+    assert not missing, (
+        "provider가 직접 emit하는 marker_icon이 TS MAKI_GLYPH에 없음(첫 글자 배지 fallback) — "
+        f"packages/map-marker-react/src/maki.ts에 추가 필요: {missing}"
+    )
