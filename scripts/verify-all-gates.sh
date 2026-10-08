@@ -284,6 +284,8 @@ run_gate "admin react-doctor" doctor_on_native_fs
 run_gate "verify:next-sharp"       repo "$NPM run verify:next-sharp"
 # vitest도 NTFS 마운트에서 느리다(react-doctor와 같은 이유). 네이티브 fs 사본에서 돌린다.
 run_gate "admin vitest" vitest_on_native_fs
+run_gate "map-marker-react vitest" repo "$NPM -w packages/map-marker-react run test"
+run_gate "map-marker-react typecheck" repo "$NPM -w packages/map-marker-react run typecheck"
 run_gate "admin gen:types:check"   repo "$NPM -w $ADMIN run gen:types:check"
 run_gate "user-client gen:types:check" repo "$NPM -w packages/kor-travel-map-user-client run gen:types:check"
 run_gate "user-client type-check"  repo "$NPM -w packages/kor-travel-map-user-client run type-check"
