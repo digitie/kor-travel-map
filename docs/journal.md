@@ -1,3 +1,18 @@
+## 2026-10-08 — map-marker-react `roadblock`·`warning` 글리프: 브랜치 `feat/marker-roadblock-symbol`
+
+- **변경.** `packages/map-marker-react/src/maki.ts`의 `MAKI_GLYPH`에 `roadblock`(🚧 U+1F6A7, `construction`과 같은
+  글리프 — Unicode 바리케이드는 그것 하나다)과 `warning`(⚠, `alert`와 같음)을 더했다. krex 교통 공지와 krforest_safety
+  산사태 예보가 첫 글자 배지("R"·"W")로 떨어지고 있었다. 이 패키지의 "심볼"은 SVG가 아니라 Unicode 글리프 표다.
+- **누락 조사.** category catalog 58종은 T-017 gate가 이미 막고 있어 누락 0. catalog 밖 provider 상수 중 표에 없던 것은
+  위 둘뿐이었다. 그 경로를 지키는 검사가 없어 `test_provider_direct_marker_icons_are_renderable_by_ts`를 더했다(상수
+  값 자체를 import해 대조).
+- **CI 사각.** 패키지 자체 vitest(`src/maki.test.ts`)는 admin vitest 범위 밖이라 어떤 워크플로도 돌리지 않았다.
+  `frontend.yml`에 `map-marker-react unit tests + typecheck` 단계를 넣고 `scripts/verify-all-gates.sh`에도 미러링했다.
+- **테스트(n150, node:22.23.1).** marker vitest 4 passed·typecheck 0; admin vitest 46 files/391 passed(첫 실행 1회 exit 1 —
+  출력이 잘려 원인 미확인, 재실행 2회 green), admin type-check·lint 0, next build(CI env) 성공. Python: drift 2파일 6 passed,
+  새 provider-direct 검사는 `maki.ts`에서 두 키를 지우면 `['roadblock', 'warning']`으로 RED; workflow·mirror 포함 38 passed;
+  ruff 통과. npm 게시 없음(ADR-043). kor-travel-transport의 vendored 사본도 같은 내용으로 다시 복사했다.
+
 ## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
 
 - **변경.** `docker/dagster-entrypoint.sh`의 production `/usr/local/bin/dagster` 봉인이 하위 명령 `code-server start`

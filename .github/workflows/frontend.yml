@@ -71,6 +71,13 @@ jobs:
         # Playwright e2e는 서비스 기동이 필요해 여기 넣지 않는다(n150에서 돈다).
         run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run test
 
+      - name: map-marker-react unit tests + typecheck
+        # 공용 마커 패키지 자체의 vitest(`src/maki.test.ts`)는 admin vitest 범위 밖이라
+        # 어떤 단계도 돌리지 않았다. 글리프 누락(첫 글자 배지 fallback)을 여기서 잡는다.
+        run: |
+          npx --yes npm@12.0.1 -w packages/map-marker-react run test
+          npx --yes npm@12.0.1 -w packages/map-marker-react run typecheck
+
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
         # packages/kor-travel-map-api/openapi.json과 drift 나지 않게 고정한다.

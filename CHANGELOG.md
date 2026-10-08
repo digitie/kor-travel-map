@@ -10,6 +10,16 @@
 
 ## [Unreleased]
 
+### map-marker-react: `roadblock`·`warning` 글리프 (2026-10-08)
+
+- **FIXED (marker)**: `@kor-travel-map/map-marker-react`의 `MAKI_GLYPH`에 `roadblock`(🚧, U+1F6A7)과
+  `warning`(⚠, `alert`와 같음)을 더했다. 고속도로 교통 공지(`providers.krex` `TRAFFIC_NOTICE_MARKER_ICON`, P-13)와
+  산사태 예보(`providers.krforest_safety` `LANDSLIDE_FORECAST_MARKER_ICON`)가 첫 글자 배지 "R"·"W"로 떨어지던 것을
+  고친다. 관리자 지도 폼의 마커 아이콘 선택지(`KNOWN_MAKI_NAMES`)에도 둘이 생긴다.
+- **ADDED (test)**: `test_provider_direct_marker_icons_are_renderable_by_ts` — category catalog를 거치지 않는 provider
+  상수 marker_icon도 TS 글리프 표에 있어야 한다.
+- **CI**: `frontend.yml`이 `packages/map-marker-react`의 vitest·typecheck를 돌린다(전에는 어떤 단계도 돌리지 않았다).
+
 ### Dagster entrypoint 봉인에서 `api grpc` 제거 (2026-10-07)
 
 - **REMOVED (image)**: `docker/dagster-entrypoint.sh`의 production code-server 봉인이 `dagster api grpc`를 더 이상 받지
