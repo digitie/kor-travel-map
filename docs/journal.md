@@ -6,8 +6,12 @@
 - **누락 조사.** category catalog 58종은 T-017 gate가 이미 막고 있어 누락 0. catalog 밖 provider 상수 중 표에 없던 것은
   위 둘뿐이었다. 그 경로를 지키는 검사가 없어 `test_provider_direct_marker_icons_are_renderable_by_ts`를 더했다(상수
   값 자체를 import해 대조).
-- **테스트.** vitest에 roadblock/warning이 글리프로 나오고 배지가 아님 + 모르는 이름은 여전히 배지(대조군). n150 결과는
-  커밋 메시지·보고에 남긴다. npm 게시 없음(ADR-043). kor-travel-transport의 vendored 사본도 같은 내용으로 다시 복사한다.
+- **CI 사각.** 패키지 자체 vitest(`src/maki.test.ts`)는 admin vitest 범위 밖이라 어떤 워크플로도 돌리지 않았다.
+  `frontend.yml`에 `map-marker-react unit tests + typecheck` 단계를 넣고 `scripts/verify-all-gates.sh`에도 미러링했다.
+- **테스트(n150, node:22.23.1).** marker vitest 4 passed·typecheck 0; admin vitest 46 files/391 passed(첫 실행 1회 exit 1 —
+  출력이 잘려 원인 미확인, 재실행 2회 green), admin type-check·lint 0, next build(CI env) 성공. Python: drift 2파일 6 passed,
+  새 provider-direct 검사는 `maki.ts`에서 두 키를 지우면 `['roadblock', 'warning']`으로 RED; workflow·mirror 포함 38 passed;
+  ruff 통과. npm 게시 없음(ADR-043). kor-travel-transport의 vendored 사본도 같은 내용으로 다시 복사했다.
 
 ## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
 

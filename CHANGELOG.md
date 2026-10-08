@@ -18,6 +18,7 @@
   고친다. 관리자 지도 폼의 마커 아이콘 선택지(`KNOWN_MAKI_NAMES`)에도 둘이 생긴다.
 - **ADDED (test)**: `test_provider_direct_marker_icons_are_renderable_by_ts` — category catalog를 거치지 않는 provider
   상수 marker_icon도 TS 글리프 표에 있어야 한다.
+- **CI**: `frontend.yml`이 `packages/map-marker-react`의 vitest·typecheck를 돌린다(전에는 어떤 단계도 돌리지 않았다).
 
 ### Dagster entrypoint 봉인에서 `api grpc` 제거 (2026-10-07)
 
