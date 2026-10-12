@@ -2161,9 +2161,13 @@ async def create_pipeline_update_request(
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
 ) -> FeatureUpdateRequestCreateResponse:
-    # ADR-108: 이 route는 MOIS source sync 선행조건을 더 보지 않는다. MOIS의 유일한 operation은
-    # 전용 job 전용이라 MOIS뿐인 계획은 409 `PROVIDER_DEDICATED_JOB_ONLY`로 거부되고, 섞인 계획의
-    # MOIS 부분은 plan guard에 넘어오지 않는다 — 큐가 실행하지 않는 것의 선행조건이기 때문이다.
+    # ADR-108: 이 route는 MOIS source sync 선행조건을 더 보지 않는다. 그 선행조건은 큐가 MOIS
+    # 원천 SQLite를 읽을 때만 의미가 있다. 카탈로그(seed)의 MOIS refresh operation은 넷이다 —
+    # `feature_place_mois_licenses_job`은 전용 job 전용(MOIS뿐이면 409
+    # `PROVIDER_DEDICATED_JOB_ONLY`, 섞이면 실행 계획이 건너뛴다)이고, 나머지 셋
+    # (`mois_license_incremental_update`·`mois_license_closed_update`·
+    # `mois_license_detail_update`)은
+    # 큐 handler가 없어 실행 단계에서 실패한다. 어느 쪽도 원천을 읽지 않는다.
 
     async def _resolved_plan_guard(
         resolved_memberships: frozenset[tuple[int, str]],

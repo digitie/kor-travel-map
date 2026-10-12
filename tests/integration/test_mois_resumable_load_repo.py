@@ -217,3 +217,89 @@ async def test_empty_inputs_do_not_touch_the_database(
         )
         == 0
     )
+
+
+# -- ADR-108 §3a-3: 역지오코딩 불가 표식(finding 재사용) ------------------------------------
+
+
+async def _seed_marker(
+    session: AsyncSession, *, dedupe_key: str, source_record_key: str
+) -> None:
+    from kortravelmap.infra.feature_repo import resolve_active_provider_dataset_id
+    from kortravelmap.infra.integrity_violation_repo import sync_integrity_findings
+
+    dataset_id = await resolve_active_provider_dataset_id(
+        session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_BULK
+    )
+    await sync_integrity_findings(
+        session,
+        provider_dataset_id=dataset_id,
+        findings=[
+            {
+                "provider": PROVIDER_NAME,
+                "dataset_key": DATASET_KEY_BULK,
+                "source_record_key": None,
+                "feature_id": None,
+                "violation_type": "mois_reverse_geocode_unresolvable",
+                "severity": "info",
+                "message": "marker",
+                "payload": {
+                    "dedupe_key": dedupe_key,
+                    "occurrence_count": 1,
+                    "source_record_key": source_record_key,
+                },
+            }
+        ],
+    )
+
+
+def _marker_key(entity_id: str) -> str:
+    from kortravelmap.core.ids import make_integrity_finding_key
+
+    return make_integrity_finding_key(
+        provider=PROVIDER_NAME,
+        dataset_key=DATASET_KEY_BULK,
+        source_entity_type=_ENTITY_TYPE,
+        source_entity_id=entity_id,
+        violation_type="mois_reverse_geocode_unresolvable",
+    )
+
+
+async def test_fresh_open_marker_matches_only_the_same_payload_and_ages_out(
+    migrated_session: AsyncSession,
+) -> None:
+    from kortravelmap.infra.integrity_violation_repo import find_fresh_open_findings
+
+    marker = _marker_key("bakeries::adr108-marker")
+    missing = _marker_key("bakeries::adr108-never-marked")
+    await _seed_marker(migrated_session, dedupe_key=marker, source_record_key="srk-a")
+
+    async def _find(expected: dict[str, str], *, days: int = 30) -> frozenset[str]:
+        return await find_fresh_open_findings(
+            migrated_session,
+            violation_type="mois_reverse_geocode_unresolvable",
+            expected_source_record_keys=expected,
+            max_age_days=days,
+        )
+
+    assert await _find({marker: "srk-a"}) == frozenset({marker})
+    assert await _find({marker: "srk-changed"}) == frozenset()
+    assert await _find({missing: "srk-a"}) == frozenset()
+
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.data_integrity_violations SET last_seen_at = now() - interval '31 days' "
+            "WHERE payload ->> 'dedupe_key' = :key"
+        ),
+        {"key": marker},
+    )
+    assert await _find({marker: "srk-a"}) == frozenset(), "낡은 표식을 믿었다"
+
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.data_integrity_violations SET status = 'resolved', last_seen_at = now(), "
+            "resolved_at = now() WHERE payload ->> 'dedupe_key' = :key"
+        ),
+        {"key": marker},
+    )
+    assert await _find({marker: "srk-a"}) == frozenset(), "닫힌 표식을 믿었다"

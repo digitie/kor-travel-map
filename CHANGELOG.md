@@ -36,6 +36,11 @@
   run을 degraded로 표시해 봉인·sync 성공을 남기지 않는다. probe는 기준점과 마지막 좋은 좌표 둘 다 묻는다.
 - **CHANGED (api)**: 생성 route는 MOIS source sync precheck를 더 부르지 않는다(도달 불가). 그 route의 502/503
   설명은 실제 원인(kor-travel-geo resolver)으로. 실행된 scope 없이 `dedicated_job_only`가 섞인 빈 계획은 실패.
+  죽은 helper `ensure_mois_source_sync_for_plan`·`ensure_mois_source_sync_for_memberships`·
+  `MOIS_SOURCE_PRECHECK_ERROR_RESPONSES`·`MoisSourceSyncRequired`와 그 테스트를 걷어냈다.
+- **ADDED (dagster)**: 역지오코딩 불가 표식(finding `mois_reverse_geocode_unresolvable`, info) — 같은 payload는 30일
+  동안 조회하지 않는다. degraded 비율 분모는 조회한 행(최소 50). 연속 두 전체 run이 degraded면 FAILURE.
+- **ADDED (db)**: migration `405_mois_freshness_sla` — MOIS bulk dataset policy `stale_after_minutes=57600`.
 - **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
   `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
   큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.

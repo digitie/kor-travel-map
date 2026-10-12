@@ -374,7 +374,7 @@ class KorTravelMapSettings(BaseSettings):
     )
     mois_geocode_degraded_ratio: float = Field(
         default=0.05,
-        ge=0.0,
+        gt=0.0,
         le=1.0,
         description=(
             "MOIS 재개형 적재(ADR-108)에서 역지오코딩이 빈 답을 낸 행의 비율 상한. 업종 하나(관측 "

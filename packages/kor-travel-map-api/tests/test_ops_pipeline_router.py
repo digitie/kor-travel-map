@@ -193,13 +193,6 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _empty_schedule_overrides(_session: Any) -> dict[str, str]:
         return {}
 
-    async def _ready_mois_source_sync(
-        _session: Any,
-        _resolved_memberships: frozenset[tuple[int, str]],
-        **_kwargs: Any,
-    ) -> None:
-        return None
-
     async def _preview_provider_dataset(
         _session: Any,
         *,
@@ -328,11 +321,6 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         dagster_schedule,
         "execute_audited_schedule_command",
         _audit_schedule_command,
-    )
-    monkeypatch.setattr(
-        mois_source_precheck,
-        "ensure_mois_source_sync_for_memberships",
-        _ready_mois_source_sync,
     )
     monkeypatch.setattr(
         fur_mod,
@@ -3959,39 +3947,6 @@ def test_create_request_persists_with_new_status_url(
     )
     assert body["data"]["generation"] == 1
     assert session.begin_count == 1
-
-
-@pytest.mark.unit
-def test_create_request_no_longer_consults_the_mois_source_precheck(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """ADR-108: 큐는 MOIS를 실행하지 않으므로 생성 route는 MOIS source sync를 보지 않는다."""
-
-    async def _must_not_run(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("생성 route가 MOIS source precheck를 불렀다")
-
-    async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
-        return _update_request()
-
-    monkeypatch.setattr(
-        mois_source_precheck, "ensure_mois_source_sync_for_memberships", _must_not_run
-    )
-    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
-
-    response = client.post(
-        "/v1/ops/pipeline/requests",
-        json={
-            "scope": {
-                "type": "provider_dataset",
-                "provider_dataset_id": 1,
-                "sync_scope": "dataset_wide",
-                "operation_key": _SAMPLE_OPERATION_KEY,
-            }
-        },
-    )
-
-    assert response.status_code == 201
 
 
 @pytest.mark.unit

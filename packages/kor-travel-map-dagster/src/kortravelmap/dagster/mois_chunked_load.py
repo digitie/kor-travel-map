@@ -32,7 +32,9 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, cast
 
-from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.client import AddressValidationFinding, AsyncKorTravelMapClient
+from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
+from kortravelmap.core.ids import make_integrity_finding_key, make_source_record_key
 from kortravelmap.dto import Coordinate, FeatureBundle
 from kortravelmap.geocoding import PrefetchingReverseGeocoder, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
@@ -64,6 +66,7 @@ from .etl import (
     FEATURE_ID_METADATA_LIMIT,
     DagsterFeatureLoadResult,
     _add_output_metadata,
+    _dagster_run_id,
     _normalize_address_validation_mode,
     load_feature_bundles_for_dagster,
 )
@@ -108,6 +111,23 @@ MOIS_LOAD_AVAILABLE_TAG: Final[str] = "kor_travel_map.mois_load.budget_available
 
 MOIS_LOAD_GEOCODE_DEGRADED_TAG: Final[str] = "kor_travel_map.mois_load.geocode_degraded"
 """역지오코딩이 부분 장애로 보인 업종(쉼표 구분). 있으면 run은 봉인·sync 성공을 남기지 않는다."""
+
+MOIS_LOAD_FULL_COVERAGE_TAG: Final[str] = "kor_travel_map.mois_load.full_coverage"
+"""전 PROMOTED 업종 run인가. 연속 degraded 판정이 "봉인 자격이 있는 run"만 비교하게 한다."""
+
+UNRESOLVABLE_MARKER_TYPE: Final[str] = "mois_reverse_geocode_unresolvable"
+"""역지오코딩 불가 표식의 finding 종류(``ops.data_integrity_violations.violation_type``).
+
+geo가 건강한데(chunk가 장애 판정 없이 commit됨) 빈 답을 받은 행을
+``(slug::mng_no 의 dedupe key, payload.source_record_key)``로 남긴다. ``source_record_key``가
+payload hash에서 파생되므로 payload가 바뀌면 표식이 저절로 맞지 않는다(ADR-108 §3a-3).
+"""
+
+UNRESOLVABLE_MARKER_RETRY_DAYS: Final[int] = 30
+"""표식이 이보다 오래 다시 관측되지 않았으면 믿지 않고 다시 지오코딩한다(geo 데이터 갱신 반영)."""
+
+GEOCODE_RATIO_MIN_SAMPLE: Final[int] = 50
+"""degraded 비율을 재기 시작하는 **지오코더로 보낸 행** 수(업종·run 각각)."""
 
 GEO_PASSING_TRIPS_DEGRADE: Final[int] = 3
 """같은 업종에서 "빈 답 문턱은 넘었지만 probe는 통과"가 이만큼 거듭되면 그 업종을 degraded로 본다.
@@ -257,6 +277,10 @@ class MoisChunkedLoadOutcome:
     geocode_degraded_slugs: tuple[str, ...] = ()
     geo_probes: int = 0
     geo_probe_passes: int = 0
+    geocoded_rows: int = 0
+    """지오코더로 보낸 행 수(이미 적재된 행·원천 법정동 코드 행·역지오코딩 불가 표식 행 제외)."""
+    known_unresolvable: int = 0
+    """역지오코딩 불가 표식이 현재 payload와 맞아 조회하지 않은 행 수."""
 
     @property
     def outcome(self) -> str:
@@ -294,6 +318,8 @@ class MoisChunkedLoadOutcome:
             "mois_geocode_degraded_slugs": list(self.geocode_degraded_slugs),
             "mois_geo_probes": self.geo_probes,
             "mois_geo_probe_passes": self.geo_probe_passes,
+            "mois_geocoded_rows": self.geocoded_rows,
+            "mois_known_unresolvable": self.known_unresolvable,
         }
 
 
@@ -338,6 +364,8 @@ class _ChunkLoad:
     geocode_empty: int
     invalid_drops: int
     passing_trip: bool
+    geocoded: int
+    known_unresolvable: int
 
 
 def _run_clock_start(context: Any, fallback: float) -> float:
@@ -441,6 +469,19 @@ async def load_mois_license_records_chunked(
         to_convert = [
             record for record in chunk if license_source_entity_id(record) not in unchanged
         ]
+        known = await _known_unresolvable(
+            client,
+            dataset_key=dataset_key,
+            records=[r for r in to_convert if license_reverse_geocode_coordinate(r) is not None],
+            payload_hashes=payload_hashes,
+        )
+        if known:
+            # 같은 payload로 최근 빈 답을 받은 행 — 조회하지 않고 적재하지도 않는다
+            # (빈 답 행과 같다).
+            to_convert = [r for r in to_convert if license_source_entity_id(r) not in known]
+        geocoded = sum(
+            1 for record in to_convert if license_reverse_geocode_coordinate(record) is not None
+        )
         if prefetcher is not None and to_convert:
             await prefetcher.prefetch(
                 coord
@@ -457,6 +498,7 @@ async def load_mois_license_records_chunked(
             reverse_geocoder=prefetcher if prefetcher is not None else reverse_geocoder,
         )
         geocode_empty_ids, invalid_drops = _classify_drops(bundles, mode=mode)
+        empty_bundles = [b for b in bundles if b.feature.feature_id in geocode_empty_ids]
         if geocode_empty_ids and mode == "off":
             # off 모드는 원래 전부 적재한다. 그러나 빈 bjd로 commit하면 payload가 같은 한 다음
             # run이 "그대로"로 건너뛰고, 같은 payload의 재적재는 feature 본문을 다시 쓰지 않아
@@ -484,6 +526,10 @@ async def load_mois_license_records_chunked(
             ),
             enforce_loss_guard=False,
         )
+        # chunk가 장애 판정 없이 commit됐다 = geo는 건강했다. 그때의 빈 답 행에 표식을 남긴다.
+        await _record_unresolvable_markers(
+            context, client, dataset_key=dataset_key, bundles=empty_bundles
+        )
         return _ChunkLoad(
             result=result,
             unchanged=len(unchanged),
@@ -491,6 +537,8 @@ async def load_mois_license_records_chunked(
             geocode_empty=len(geocode_empty_ids),
             invalid_drops=invalid_drops,
             passing_trip=passing_trip,
+            geocoded=geocoded,
+            known_unresolvable=len(known),
         )
 
     merged: DagsterFeatureLoadResult | None = None
@@ -498,8 +546,8 @@ async def load_mois_license_records_chunked(
     current_slug: str | None = None
     stopped_in_slug: str | None = None
     records_seen = records_unchanged = records_converted = chunks = 0
-    slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = 0
-    run_geocode_empty = 0
+    slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = slug_geocoded = 0
+    run_geocode_empty = run_geocoded = run_known_unresolvable = 0
     degraded: list[str] = []
 
     def _mark_degraded(slug: str, reason: str) -> None:
@@ -521,7 +569,7 @@ async def load_mois_license_records_chunked(
                 slugs_completed.append(current_slug)
                 context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
             current_slug = slug
-            slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = 0
+            slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = slug_geocoded = 0
         # 상한 판정은 chunk **사이**에서만 한다 — 시작한 chunk는 끝까지 commit한다. 첫
         # chunk는 언제나 시작하므로 run마다 최소 한 chunk는 전진한다(무한 이어 달리기 방지).
         if chunks > 0 and clock() >= deadline:
@@ -555,15 +603,20 @@ async def load_mois_license_records_chunked(
         slug_invalid += loaded.invalid_drops
         slug_geocode_empty += loaded.geocode_empty
         run_geocode_empty += loaded.geocode_empty
+        slug_geocoded += loaded.geocoded
+        run_geocoded += loaded.geocoded
+        run_known_unresolvable += loaded.known_unresolvable
         if loaded.passing_trip:
             slug_passing_trips += 1
             if slug_passing_trips >= GEO_PASSING_TRIPS_DEGRADE:
                 _mark_degraded(slug, f"probe 통과 뒤에도 빈 답 문턱 초과 {slug_passing_trips}회")
+        # 분모는 **지오코더로 보낸 행**이다 — 이미 적재돼 건너뛴 행으로 희석하면 정상 상태의
+        # 지역 장애가 보이지 않는다(델타 리뷰 LOW-1).
         if (
-            slug_seen >= LOSS_GUARD_MIN_SAMPLE
-            and slug_geocode_empty > slug_seen * plan.geocode_degraded_ratio
+            slug_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
+            and slug_geocode_empty > slug_geocoded * plan.geocode_degraded_ratio
         ):
-            _mark_degraded(slug, f"빈 답 {slug_geocode_empty}/{slug_seen}행")
+            _mark_degraded(slug, f"빈 답 {slug_geocode_empty}/{slug_geocoded}건 조회")
 
     if complete and current_slug is not None:
         slugs_completed.append(current_slug)
@@ -571,10 +624,10 @@ async def load_mois_license_records_chunked(
     # run 전체 상한 — 업종마다 표본이 모자라 업종 판정을 피한 작은 업종들의 빈 답도 센다.
     if (
         not degraded
-        and records_seen >= LOSS_GUARD_MIN_SAMPLE
-        and run_geocode_empty > records_seen * plan.geocode_degraded_ratio
+        and run_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
+        and run_geocode_empty > run_geocoded * plan.geocode_degraded_ratio
     ):
-        _mark_degraded("(run)", f"빈 답 {run_geocode_empty}/{records_seen}행")
+        _mark_degraded("(run)", f"빈 답 {run_geocode_empty}/{run_geocoded}건 조회")
 
     if merged is None:
         # 선택 업종에 영업중 record가 하나도 없다. 빈 load로 같은 모양의 결과를 만든다.
@@ -609,6 +662,8 @@ async def load_mois_license_records_chunked(
         geocode_degraded_slugs=tuple(degraded),
         geo_probes=prefetcher.probes if prefetcher is not None else 0,
         geo_probe_passes=prefetcher.probe_passes if prefetcher is not None else 0,
+        geocoded_rows=run_geocoded,
+        known_unresolvable=run_known_unresolvable,
     )
 
     if outcome.authoritative:
@@ -637,6 +692,7 @@ async def load_mois_license_records_chunked(
             MOIS_LOAD_CONVERTED_TAG: str(outcome.records_converted),
             MOIS_LOAD_BUDGET_TAG: str(int(effective_budget)),
             MOIS_LOAD_AVAILABLE_TAG: str(budget_available),
+            MOIS_LOAD_FULL_COVERAGE_TAG: "true" if outcome.full_coverage else "false",
             **(
                 {MOIS_LOAD_GEOCODE_DEGRADED_TAG: ",".join(outcome.geocode_degraded_slugs)}
                 if outcome.geocode_degraded_slugs
@@ -644,7 +700,140 @@ async def load_mois_license_records_chunked(
             ),
         },
     )
+    if outcome.geocode_degraded_slugs and outcome.complete and outcome.full_coverage:
+        previous = _previous_eligible_full_run(context)
+        previous_degraded = (
+            previous.tags.get(MOIS_LOAD_GEOCODE_DEGRADED_TAG) if previous is not None else None
+        )
+        if previous_degraded:
+            # 두 번 연속이면 일시적 흔들림이 아니다 — 붉은 run으로 드러낸다. outcome은 이미
+            # complete로 tag됐으므로 이어 달리기 사슬을 막지 않고, 재시도는 같은 결과라 끈다.
+            raise Failure(
+                description=(
+                    "MOIS 역지오코딩이 연속 두 전체 run에서 부분 장애로 보인다 — 이번 "
+                    f"{list(outcome.geocode_degraded_slugs)}, 직전 run {previous.run_id} "
+                    f"[{previous_degraded}]. 빈 답 행은 적재하지 않았고 봉인·sync 성공도 없다. "
+                    "kor-travel-geo 데이터(해당 지역 layer)를 확인할 것."
+                ),
+                metadata={
+                    "mois_geocode_degraded_slugs": list(outcome.geocode_degraded_slugs),
+                    "mois_previous_degraded_run": previous.run_id,
+                },
+                allow_retries=False,
+            )
     return outcome
+
+
+def _previous_eligible_full_run(context: Any) -> Any:
+    """이 run 직전의, 끝까지 본 전 업종 MOIS run(봉인 자격이 있던 run). 없으면 ``None``."""
+    instance = getattr(context, "instance", None)
+    get_runs = getattr(instance, "get_runs", None)
+    try:
+        run_id = context.run_id
+    except Exception:  # noqa: BLE001 — 직접 호출 context에는 run이 없다
+        return None
+    if not run_id or not callable(get_runs):
+        return None
+    runs = get_runs(
+        filters=map_owned_runs_filter(
+            job_name=MOIS_LOAD_JOB_NAME,
+            tags={
+                "kor_travel_map.operation_key": MOIS_LOAD_JOB_NAME,
+                MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE,
+                MOIS_LOAD_FULL_COVERAGE_TAG: "true",
+            },
+        ),
+        limit=2,
+    )
+    return next((run for run in runs if run.run_id != run_id), None)
+
+
+def _unresolvable_marker_key(dataset_key: str, source_entity_id: str) -> str:
+    return make_integrity_finding_key(
+        provider=PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=_LICENSE_ENTITY_TYPE,
+        source_entity_id=source_entity_id,
+        violation_type=UNRESOLVABLE_MARKER_TYPE,
+    )
+
+
+async def _known_unresolvable(
+    client: AsyncKorTravelMapClient,
+    *,
+    dataset_key: str,
+    records: Sequence[Any],
+    payload_hashes: Mapping[str, str],
+) -> frozenset[str]:
+    """같은 payload로 최근(``UNRESOLVABLE_MARKER_RETRY_DAYS``) 빈 답 표식이 있는 행의 entity id."""
+    if not records:
+        return frozenset()
+    by_marker: dict[str, str] = {}
+    expected: dict[str, str] = {}
+    for record in records:
+        entity_id = license_source_entity_id(record)
+        marker = _unresolvable_marker_key(dataset_key, entity_id)
+        by_marker[marker] = entity_id
+        expected[marker] = make_source_record_key(
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            source_entity_type=_LICENSE_ENTITY_TYPE,
+            source_entity_id=entity_id,
+            raw_payload_hash=payload_hashes[entity_id],
+        )
+    fresh = await client.find_fresh_open_findings(
+        violation_type=UNRESOLVABLE_MARKER_TYPE,
+        expected_source_record_keys=expected,
+        max_age_days=UNRESOLVABLE_MARKER_RETRY_DAYS,
+    )
+    return frozenset(by_marker[marker] for marker in fresh)
+
+
+async def _record_unresolvable_markers(
+    context: Any,
+    client: AsyncKorTravelMapClient,
+    *,
+    dataset_key: str,
+    bundles: Sequence[FeatureBundle],
+) -> None:
+    """빈 답 행에 표식을 남긴다(이미 있으면 ``last_seen_at``·payload가 전진). 실패는 무해하다.
+
+    표식을 못 남기면 다음 run이 그 행을 다시 지오코딩할 뿐이다 — 적재를 멈출 이유가 아니다.
+    """
+    if not bundles:
+        return
+    findings = tuple(
+        AddressValidationFinding(
+            dedupe_key=_unresolvable_marker_key(
+                dataset_key, bundle.source_record.source_entity_id
+            ),
+            violation_type=UNRESOLVABLE_MARKER_TYPE,
+            severity="info",
+            message=(
+                "좌표가 kor-travel-geo에서 법정동으로 풀리지 않는다(해상·매립지·좌표 오류 추정). "
+                f"같은 payload는 {UNRESOLVABLE_MARKER_RETRY_DAYS}일 동안 다시 조회하지 않는다."
+            ),
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            linked=False,
+            payload={
+                "source_record_key": bundle.source_record.source_record_key,
+                "source_entity_id": bundle.source_record.source_entity_id,
+                "lon": float(bundle.feature.coord.lon) if bundle.feature.coord else None,
+                "lat": float(bundle.feature.coord.lat) if bundle.feature.coord else None,
+            },
+        )
+        for bundle in bundles
+    )
+    try:
+        await client.record_address_validation_findings(
+            findings,
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            run_id=_dagster_run_id(context),
+        )
+    except IntegrityFindingPersistenceError as exc:
+        context.log.warning(f"MOIS 역지오코딩 불가 표식 {len(findings)}건 기록 실패(무해): {exc}")
 
 
 def _classify_drops(

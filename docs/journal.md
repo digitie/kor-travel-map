@@ -1,3 +1,22 @@
+## 2026-10-12 — MOIS ADR-108 최종 설계: 역지오코딩 불가 표식·조회 행 분모·연속 degraded·SLA
+
+- **원인.** 해상·매립지·잘못된 TM 좌표는 정상 geo에서도 늘 빈 답이라 적재되지 않고 매 run 다시 조회돼, 정상 상태에서
+  조회 창·비율을 지배하고 건강한 업종을 매달 degraded로 만든다(MED-1). degraded는 tag·로그로만 보였다(MED-2). 비율이
+  미변경 행으로 희석됐다(LOW-1).
+- **표식.** geo가 건강할 때(chunk가 장애 판정 없이 commit) 빈 답을 받은 행을 finding `mois_reverse_geocode_unresolvable`
+  (info, dedupe key = slug::mng_no, payload.source_record_key = 현재 payload)로 남기고, 다음 run은 같은 payload의 열린 표식이
+  30일 안이면 조회·적재하지 않는다(`mois_known_unresolvable`). 새 표 대신 finding 표를 재사용한 이유는 ADR-108 §3a-3.
+- **분모.** degraded 비율은 조회한 행 기준(최소 50) — 업종·run 둘 다.
+- **드러내기.** 직전 봉인 자격 전체 run도 degraded면 FAILURE(재시도 없음). migration 405가 MOIS bulk policy에 40일 SLA를
+  심어 `/v1/ops/datasets` overdue로 보인다(운영자 값 보존). graph artifact는 생성기로, head-schema는 receipt CHECK만.
+- **LOW.** 생성 route 주석 정정(seed의 MOIS refresh operation 넷 중 셋은 handler 없음), 죽은 `ensure_mois_source_sync_*`·
+  `MOIS_SOURCE_PRECHECK_ERROR_RESPONSES`·`MoisSourceSyncRequired`·테스트(통합 1파일 포함) 제거 — 운영 화면 precheck는 유지.
+  비율 설정 `> 0`. 기준점 서울시청 문서화. run 전체 판정 테스트.
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·graph `--check`·migration lint. 관련
+  테스트 249 + 578(전체 `tests/lint` 포함) passed. mutation 5종(표식 무시·분모 원복·연속 실패 제거·run 판정 제거·표식 미기록)
+  전부 RED. 표식 SQL 통합 테스트(`test_fresh_open_marker_matches_only_the_same_payload_and_ages_out`)와 migration 405는 로컬에서
+  돌리지 않았다 — GitHub CI가 게이트다.
+
 ## 2026-10-12 — MOIS ADR-108 최종 델타 리뷰 MED 1·LOW 2 반영
 
 - **MED-1 지역 geo 장애.** probe가 다른 지역 좌표로 통과해 한 시·도가 통째로 빠진 채 봉인될 수 있었다. 빈 답 행은 어느 모드에서도
