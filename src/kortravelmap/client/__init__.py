@@ -993,7 +993,7 @@ class AsyncKorTravelMapClient:
     ) -> ProviderDatasetOperationMembership:
         """provider callback의 runtime dataset을 exact canonical member로 바꾼다.
 
-        dataset이 한 operation 아래 scope를 여러 개 갖는 경우(KMA 격자 dataset)는
+        dataset이 한 operation 아래 scope를 여러 개 갖는 경우는
         ``sync_scope``까지 주어야 exact 해석이 된다.
         """
         async with self._session_factory() as session, session.begin():
@@ -1282,7 +1282,8 @@ class AsyncKorTravelMapClient:
     ) -> int:
         """notice 발표/해제 계보 상태를 반영하고 닫힌 Feature 수를 반환한다.
 
-        KMA 특보 등 event feed 경계 — mapping key는 사건 ``lineage_key``다.
+        발표/해제가 있는 event feed 경계 — mapping key는 사건 ``lineage_key``다.
+        (원래 호출자였던 KMA 특보 적재는 ADR-105로 제거됐다 — 현재 production 호출자 없음.)
         ``infra.feature_repo.close_notice_features`` 위임. 한 transaction.
         """
         async with self._session_factory() as session, session.begin():

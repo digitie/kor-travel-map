@@ -1,5 +1,11 @@
 # forest-feature-etl.md — 산림청 + 국립공원공단(KNPS) ETL
 
+> **부분 제거(2026-10-01, ADR-105).** 산림청 **산악기상**(`krforest_mountain_weather`)과 **산불위험예보**
+> (`krforest_wildfire_risk_forecast`)는 weather-kind 출처라 Map에서 지워졌다(`providers/krforest_safety.py`의
+> 해당 변환·Dagster asset 삭제, `feature_weather_values`는 migration `402`가 DROP). 아래 §7 산악기상 매핑과
+> 그 두 dataset에 관한 행·절은 **기록**이다. **산사태 예보 notice**(`krforest_landslide_forecast_issues`)와
+> 휴양림·수목원·숲길·등산로 등 place/route/area 적재는 그대로 유효하다.
+
 본 문서는 다음 두 기관 데이터를 `place`/`area`/`route` + `WeatherValue`로
 정규화하는 ETL이다:
 

@@ -119,7 +119,7 @@ MOIS_SOURCE_SYNC_COVERAGE_TAG: Final[str] = "kor_travel_map.mois_source_sync.cov
 """Dagster MOIS Phase A run이 성공적으로 실행한 범위 tag."""
 
 # source_natural_key 구분자. make_feature_id/make_source_record_key는 구성요소
-# 내부 ``|``를 금지하므로 ``::`` 사용 (kma.py alert×region 패턴과 동일).
+# 내부 ``|``를 금지하므로 ``::`` 사용.
 _NATURAL_KEY_SEP: Final[str] = "::"
 
 

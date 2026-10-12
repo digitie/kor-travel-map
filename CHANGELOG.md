@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### weather 잔재 정리 (2026-10-13, ADR-105 후속)
+
+- **REMOVED (library)**: `kortravelmap.core.make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`(및
+  `core.ids`의 같은 이름). 호출자가 없던 weather 적재 경로의 키 함수다. kind·DTO·enum 정의는 그대로 남는다.
+- **CHANGED (library)**: `core.scoring.SOURCE_PRIORITY`에서 `python-kma-api`·`python-airkorea-api` 항목 제거 —
+  해당 provider는 이제 미등록 기본값(`DEFAULT_SOURCE_PRIORITY`)으로 읽힌다. 402/403 뒤 그 provider의 feature는 없다.
+- **CHANGED (admin UI)**: 지도 겹침 목록·POI cache target 표의 weather 라벨·색 항목 제거(도달 불가였다).
+
 ### MOIS 인허가 재개형 chunk commit 적재 (2026-10-12, ADR-108)
 
 - **CHANGED (dagster)**: `feature_place_mois_licenses`가 98만 행을 한 transaction으로 넣지 않는다. 업종 안 500행

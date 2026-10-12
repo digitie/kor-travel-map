@@ -1,3 +1,36 @@
+## 2026-10-13 — weather 잔재 정리(ADR-104/105 후속): 브랜치 `chore/weather-remnant-cleanup`
+
+소유자 승인 정리. 세 갈래 스캔이 live weather 경로는 없고 죽은 코드와 낡은 문서만 남았다고 봤다. PR·머지·배포는 하지 않았다.
+
+- **지운 코드.** `core.ids.make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`와 `core` 재수출,
+  `tests/unit/test_ids_weather.py`(호출자 0, grep 전수). `core.scoring.SOURCE_PRIORITY`의 `python-kma-api`·
+  `python-airkorea-api` 항목(읽는 곳은 `source_priority()` 하나, master 선정 후보에 그 provider feature가 402/403 뒤
+  남지 않는다). `test_export_openapi.py`의 `_CURATED_*` 상수 다섯 개 — `"weather"` variant만 죽은 게 아니라 #1023이
+  소비 테스트를 지운 뒤 블록 전체가 아무도 읽지 않았다. admin frontend `vworld-map-view`·`poi-cache-targets`의
+  weather 라벨·색(`Record<string,string>` + `??` fallback이라 kind union과 무관; dedup-review 표는 이미 깨끗했다).
+- **남긴 것(결정).** `FeatureKind.WEATHER`·kind CHECK, `WeatherValue` DTO·weather enum(API 재도입 방지 검사가 기댄다),
+  provider alias, baseline/seed/legacy migration, frozen H35 SQL(`feature_repo`의 KMA 분기 포함), maki weather 아이콘,
+  `SourceRole.WEATHER_CONTEXT`(migration 필요 → 백로그).
+- **문서.** ADR-062·072 superseded by ADR-104/105(본문 유지, 머리 노트), README 색인. ADR-105의 소유 참조를 ADR-068
+  (Feature UUID)에서 ADR-104로 정정. integration-map(service resource는 `/v1/features/batch`뿐), live 인수 runbook
+  (owned ID 7개 = place 6 + price 1, `_owned_ids` 대조), ETL 배너 다섯, architecture·data-model(§8.2 제거 노트,
+  `current_summary_runs` CHECK는 402 이후 `'price'`)·feature-model·public-views(`latest_weather` 행)·poi-cache·test-strategy.
+  stale 주석: maki.ts·mois.py·client docstring·dto/bundle.py.
+- **백로그.** `T-WX-VNEXT-FREEZE`(계약↔계약 대조라 지워진 weather 표를 못 잡는다 — 확인함), `T-WX-SOURCEROLE`,
+  `T-WX-DTO`, 그리고 스캔 중 찾은 `T-WX-NOTICE-CLOSE`(`close_notice_features`의 production 호출자 0). Manager compose
+  `KOR_TRAVEL_MAP_KMA_*` env 제거는 외부 추적(Manager 저장소에서 진행 중).
+- 검증(로컬 WSL ext4 사본 + uv venv, n150은 IO 포화라 쓰지 않았다): ruff check(CI 경로) 통과, mypy --strict
+  main 153·api 67·dagster 30 통과, lint-imports 4 kept, `check_prod_redaction` 통과. pytest: core import 단위 704 passed,
+  `tests/lint` 303 passed(+ `test_sealed_runtime_tree_ship` 2건은 git이 필요해 실제 worktree에서 2 passed),
+  `test_export_openapi.py` 11 passed. frontend: admin type-check·touched ESLint 0 경고·vitest 46파일 391 passed,
+  map-marker-react vitest 4 passed·typecheck 통과. 최종 게이트는 GitHub CI다.
+- 기존 결함(이번 변경과 무관, 기록만): `make_feature_id` doctest 기대값이 origin/main에서도 틀린다(CI는 doctest를
+  돌리지 않는다). 로컬 ruff의 `format --check`는 손대지 않은 줄 다수에 diff를 낸다(CI format step은 `if: false`).
+- **journal 분리(규약 §8).** 이 항목으로 `journal.md`가 225,613 bytes가 돼 CI의
+  `test_every_docs_markdown_stays_within_readable_limit`(225,280)이 붉었다. 가장 오래된 2026-09-11~09-13 5개 절을
+  `archive/journal-2026-09b.md`로 옮겼다(하단 인덱스 표 갱신, 현행 창 2026-09-14~). 옮긴 절에 상대 링크는 없다.
+  바이트 보존 검산: 새 live 문서에서 인덱스 행·창 문구를 되돌리고 옮긴 블록을 제자리에 넣으면 원본과 byte 단위로 같다.
+
 ## 2026-10-12 — MOIS ADR-108 통합 테스트 resource 누락·직접 호출 tag 실패
 
 - PR CI 통합 두 lane이 `test_dagster_assets_validate_coordinates_and_load_to_postgis` 하나로 붉었다 —
@@ -2129,411 +2162,14 @@ RUNNING). 큐 경로의 분자는 asset output metadata가 아니라
 "실제 Dagster 문맥에서 배선이 살아남는가"뿐이다 — 그 축은 스케줄이 켜지는 날
 공짜로 확인된다.
 
-## 2026-09-13 — 분자를 세기 시작했고, 적대 리뷰 다섯 판이 각각 blocker를 냈다
-
-분모를 얻은 다음 날의 절반은 분자였다. **"한도의 몇 %를 쓰는가"는 분자 없이는
-질문이 되지 않는다.** 그런데 분자는 fetcher가 generator라 값을 흘릴 배선이 없었다 —
-요청을 세는 자리(페이지 루프)와 내보내는 자리(asset output metadata) 사이에 인자가
-없다. `ContextVar`가 그 배선을 대신한다. 시그니처는 하나도 바꾸지 않았다.
-
-### 1차 리뷰: 배선은 맞는데 **커버리지가 없었다**
-
-계수기는 asset 35개 전부에서 열리는데 세는 자리는 셋뿐이었다. 그래서 OpiNet이
-수천 건을 쓰면서 `upstream_requests_min: 0`을 냈다 — 하필 저장소가 유일하게 **한도 대비 run 예산을 코드에 박아 둔** provider다
-(`_OPINET_RUN_CALL_BUDGET = 600` vs 무료키 1,500/일, #545). **예산을 짜 둔 자리의
-분자가 0이었고**, 그 예산기는 호출마다 정확히 1을 차감하고 있었다. 한 줄이면 됐다. 그리고 그때 내가 갖고 있던 구조 검사는 "asset이 계수 범위 안에서
-도는가"를 물었는데 wrapper가 **항상** 열므로 항진명제였다. 같은 실패 형태를 그날
-네 번째로 반복한 것이다.
-
-고친 것: (1) 한 번도 기록되지 않았으면 `None` — 계측되지 않은 fetcher가 0으로
-위장하지 못한다. (2) 세지 않던 경로를 계측. (3) 검사를 asset이 아니라 **fetcher**
-단위로.
-
-### 2차 리뷰: 같은 형태가 **다른 자리에** 남아 있었다
-
-**(a) krheritage detail.** OpiNet에서 고친 것과 정확히 같은 모양이 그대로 있었다.
-목록 페이지는 세는데 record당 1 HTTP인 detail은 세지 않았다 — run 하나가 목록 ~45건
-+ detail ~4,000건이므로 실린 수가 **실제의 약 1%**였다. 그리고 목록을 세는 덕에
-key는 실려 나갔다. 즉 "0으로 위장하지 않는다"는 계약이 여기서는 작동하지 않았다.
-두 자릿수가 네 자릿수인 척했다.
-
-**(b) 큐 경로.** 계수기를 여는 자리는 asset wrapper 둘뿐인데, feature-update queue
-runner는 wrapper가 아니라 **원본 run 함수**를 직접 부른다. 그 경로에서는 모든
-`note_upstream_request()`가 no-op이었다.
-
-**(c) 내가 쓴 문장 하나가 거짓이었다.** "실패 경로에도 함께 실린다" — 실패한 step은
-output을 내지 않으므로 `add_output_metadata`로 실은 값은 사라진다. 지금은 쿼터
-소진이면 `Failure` metadata가, 그 밖이면 경고 로그가 받는다.
-
-**(d) 면제 사유 둘이 provider 소스와 어긋났다.** `file_data.iter_pages`는 public이고
-`iter_all`이 그것을 감싼 것뿐이었다. 행사 창은 14개월로 알 수 있었다 — 비어 있는
-달도 요청 1건이라 record 수로는 역산되지 않는다. **못 센다는 선언은 값싸고, 값싼
-선언은 계측을 대체하기 시작한다.** 넷이던 면제가 둘로 줄었다.
-
-### 3차: 2차 수정이 **만든** blocker
-
-**MOIS 계수가 항상 no-op이었다.** 2차에서 "MOIS Phase A가 게이트 밖"이라는 지적을
-받고 계수를 넣고 게이트 목록에 올렸는데, Phase A는 Dagster **resource init 시점**에
-돈다 — 계수기는 compute 안에서야 열린다. 프로덕션 세 경로 전부에서 조용한 no-op이었고,
-**게이트와 문서가 그것을 "센다"로 보증했다.** 지적을 게이트 안으로 옮겼을 뿐 계측은
-생기지 않은 것이다.
-
-**초크포인트가 유일하지 않았다.** `_add_output_metadata`가 "유일한 자리"라고 적어
-뒀는데 op/sensor/maintenance는 `context.add_output_metadata`를 직접 부른다. feature
-asset 둘(visitkorea enrichment, concierge YouTube)이 그 길로 새면서 **자기가 센 값을
-버리고 있었다.**
-
-**그리고 내가 6곳에 복제한 문장이 거짓이었다** — "OpiNet은 분모를 실측한 유일한
-provider". 같은 문서가 "OpiNet 일일 한도 실측이 그다음 단계다"라고 적고 있었다.
-
-### 4차: 규약이 시키는 일을 게이트가 막았다
-
-acceptance 파일이 읽기 한도를 넘어 규약 §8대로 닫힌 절 31개를 아카이브로 옮겼더니,
-`check_task_ledger_deletions.py`가 **37건을 "근거 없는 삭제"로 판정**했다. 그 게이트는
-감시 3파일만 보고 `docs/archive/`를 모른다. 아카이브 이동은 삭제가 아니라 **이관**이므로
-게이트 쪽을 고쳤다.
-
-그리고 3차가 고친 문장 셋이 **다른 파일에서 되살아나 있었다**(새 모듈 head docstring,
-acceptance 본문, 런타임 테스트 docstring). 같은 사실을 여러 파일에 복제하면 정정도
-복제해야 한다 — 4차가 그 대가를 청구했다.
-
-### 5차: 되돌린 것 하나
-
-4차가 고친 게이트가 **다른 구멍을 열었다.** 아카이브를 "근거"로만 더하면 거기로
-옮겨 간 항목이 그 뒤로 영원히 감시 밖이 된다 — 다음 PR이 아카이브에서 통째로 지워도
-조용하다. 그리고 확인해 보니 **헤딩으로 자르는 분리 자체가 안전하지 않았다**: 코드
-펜스가 섹션 경계를 넘나들어(odd fence 섹션 10개) 같은 줄이 base에서는 체크박스이고
-아카이브에서는 아니게 된다. 파서가 보는 것이 달라진다.
-
-그래서 **분리를 되돌리고** 그 문제를 `T-VN-LEDGER-ARCHIVE`로 남겼다. acceptance
-파일은 내 추가분을 정본 포인터로 줄여 한도 아래로 내렸다 — 같은 수를 여섯 곳에
-복제한 것이 3·4·5차 재발의 공통 원인이었으니 방향도 맞다.
-
-그리고 4차가 자랑스럽게 적은 수정 하나가 **죽은 코드**였다. MOIS Phase A에 건
-쿼터 판정은 발화할 수 없다 — `mois` lib은 쿼터 예외도 `failure_kind`도 `status_code`도
-갖지 않는다. 걸어 두면 구조 검사가 그 op을 "쿼터 판정을 거는 경계"로 세어 **막았다고
-보증한다.** 3차가 없앤 '이름으로 초록'이 같은 자리에서 재발할 뻔했다. 뺐다.
-
-### 이번 판의 교훈은 검사기 쪽이다
-
-(a)를 **내 정적 검사가 통과시켰다.** 그 검사는 "계수 호출 자리가 있는가"만 본다 —
-루프 밖 1회도, 도달 불가 분기도, 죽은 중첩 함수도 초록이다. 전이 폐쇄가 bare name
-기준이라 모듈 간 동명 함수를 뭉개기까지 했다.
-
-그래서 층을 나눴다. 정적 검사는 **"빠진 진입점이 없는가"**만 지키고(우주는 명시
-목록, 하한은 선언에 정확히 — 여유 상수를 쓰지 않는다), 효과는 **가짜 client로 N번
-부르게 하고 계수가 N인지 재는 런타임 테스트**가 본다. 그쪽이 (a)를 실제로 잡는
-유일한 층이다.
-
-진입점 40개 중 35개가 전부 센다. 못 세는 둘은 upstream 요청이 아예 없고, 부분
-계측 셋은 OpiNet bbox enumerate 둘(provider가 격자 셀마다 부르는데 그 셀 수가
-provider private이다 — 1로 세면 1과 20,000이 같아진다)과 MOIS asset 경로다.
-
-## 2026-09-13 — 분모를 얻었고, 적대 리뷰가 내 주장 셋을 뒤집었다
-
-`T-VN-QUOTA-ARITHMETIC`은 "쿼터에 대해 이 저장소가 하는 진술 대부분이 근거가 없다"는
-task였다. 그 근거의 절반이 오늘 들어왔고, 나머지 절반에서 **내가 새 근거 없는 주장을
-만들었다**. 둘 다 적는다.
-
-### 분모는 서비스가 아니라 오퍼레이션마다 걸린다
-
-data.go.kr 마이페이지의 활용신청 상세에 "상세기능" 표가 있고, 거기 **오퍼레이션마다**
-일일 트래픽이 따로 적혀 있다. `기상청_단기예보 조회서비스`의 네 오퍼레이션이 각각
-10,000/일이고 **공유하지 않는다.** 이 저장소는 반대 가능성을 열어 두고 있었고, 그
-차이가 KMA 산수를 3배 갈랐다.
-
-가장 좁은 자리는 KMA가 아니라 **에어코리아(op당 500)** 와 **전국표준데이터·
-visitkorea(op당 1,000)** 였다. 그리고 `krheritage`·`opinet`·`krex`·`mois`는 그 포털에
-아예 없다 — 분모가 다른 곳에 있고 아직 보지 않았다.
-
-### G도 쟀고, 300은 상한이지 대상 수가 아니었다
-
-`ops.poi_cache_targets`가 **0행**이다(파괴적 rebuild 직후, PinVi 미등록). 설정
-extra point 60개가 DFS 격자로 dedupe돼 **G = 59**. 즉 오늘 KMA를 다시 켜면 14%/14%/5%
-이고 4배 배수를 전부 얹어도 57%다. 상한 300에 닿아야 72%가 된다.
-
-**숫자 하나를 안 재고 여섯 문단을 썼다면 그 여섯 문단이 다 틀렸을 것이다.**
-
-### 적대 리뷰가 뒤집은 것 셋
-
-**"쿼터 실패가 4배로 청구된다"가 틀렸다.** 쿼터가 소진된 뒤의 재시도는 순회를 다시
-도는 것이 아니라 **첫 격자에서 즉사한다** — 격자 루프는 항상 `grids[0]`부터 시작하고
-성공 cursor는 완주 뒤에만 전진하므로, 재시도의 첫 호출이 곧바로 code 22를 받는다.
-재시도 3회가 사는 것은 순회 3벌이 아니라 요청 3건이다. 내가 지우겠다고 선언한
-부류(분모 없는 수량 주장)를 같은 PR 안에서 새로 만들었다.
-
-**판정이 가장 좁은 분모에서 한 번도 발화하지 않았다.** `failure_kind`를 예외에 붙이는
-provider lib은 절반뿐이고, 하필 에어코리아·datagokr가 안 붙인다. 속성 하나에 건
-판정은 한도 10,000짜리에서만 작동했다.
-
-**krforest 정당화가 거꾸로였다.** "상한을 안 주면 10,000페이지까지 간다"고 적었는데
-라이브러리는 반대로 **1페이지로 조용히 잘린다**(`totalCount` 부재 시 `len(items)`로
-채움 → 추정치 1). 그리고 저장소 헬퍼로 옮겨도 **그 절단은 그대로다** — 2,500행에서
-1,000행에 멈추는 것을 실측했다. 즉 내 수정은 내가 말한 문제를 고치지 않았다.
-
-### 오늘의 규칙
-
-1. **탐지기는 이름이 아니라 효과에 결박한다.** 같은 날 만든 탐지기 셋이 같은 방식으로
-   뚫렸다 — 함수 **이름**으로 결박하니 두 실패 분기 중 하나만 지워도 35개가 초록,
-   모듈의 **모든 문자열**을 세니 판정을 지우고 docstring에 이름만 남겨도 초록,
-   문자열 슬라이스로 파싱하니 삼중따옴표 하나에 검사 구간이 본문 밖으로 밀렸다.
-   결박 단위를 `except` 핸들러·`require(...)` 첫 인자·AST로 내리자 같은 변이에서
-   36건이 빨개졌다.
-2. **변이는 '삭제'가 아니라 '가장 그럴듯한 회피'로 한다.** 절반만 지우기, 이름은
-   남기고 호출만 지우기 — 그것이 실제로 일어나는 모양이다.
-3. **"고쳤다"는 주장도 재야 한다.** krforest는 옮기기만 하고 고쳤다고 적었다. 실제로
-   재 보니 같은 절단을 했다. 옮긴 것과 고친 것은 다른 사실이다.
-4. **없는 신호를 있다고 적지 않는다.** krex의 "빈 Page로 시끄럽게 실패한다"는 문장에
-   대응하는 코드가 없었다. 빈 Page는 예외가 아니고, 0행이 `record_sync_success`까지
-   가서 실패 카운터를 0으로 되돌렸다 — Dagster는 초록, 데이터는 갱신 없음.
-5. **분모 없는 문장은 상수다.** 관리자 UI가 32개 schedule 중 31개에 같은
-   "rate limit의 90% 이하"를 돌려주고 있었다. 같은 답을 모두에게 주는 것은 그 대상에
-   대한 진술이 아니다.
-
-### 배포 — 손으로 만든 경로가 막히고, sanctioned 경로가 왜 있는지 알았다
-
-prod에 올리려고 host-direct `docker compose build`를 썼다가 두 번 막혔다. 두 번째가
-결정적이다 — compose는 **대상 서비스만 빌드해도 파일 전체를 보간**하는데 prod
-`.env`에 내가 건드리지도 않는 서비스(concierge)의 키가 없었다. 계속하려면 비밀값을
-내가 넣거나 "파괴적"이라 표시된 경로를 쓰는 수밖에 없어 거기서 멈추고 `.env`를
-원복했다. sanctioned 경로(`run-pinned-rebuild-once`)는 Manager가 env를 통째로
-구성해 넘긴다 — 내가 흉내 낼 수 있는 것이 아니었다.
-
-그 다음 정찰이 더 중요한 것을 잡았다. 내가 배포하려던 `e037ab01`은
-`refs/pull/1227/head`이고 **#1226을 담고 있지 않았다** — 그것을 핀했다면 같은 날
-머지한 run 완주 게이트를 prod에서 되돌리는 것이었다. 핀 원장은 `repository_commit`을
-exact로 새기므로 미머지 head를 핀하는 것 자체가 오래 남는 오염이다. 머지 후 main
-커밋(`0b60a850`)으로 간 것이 옳았고, `chain17.sh`가 그것을 인자 하나로 받아
-회전→rebuild→executor→repin→ACL→D1→D2를 전부 GREEN으로 끌고 갔다.
-
-**리터럴을 들고 있지 않은 스크립트가 재사용된다.** `chain12`는 Manager revision을
-본문에 박아 두어 낡자마자 못 쓰게 됐고, `chain17`은 Map만 인자로 받고 PinVi는 핀
-원장, Manager는 설치 매니페스트에서 유도해 오늘 그대로 돌았다. 그 주석이 스스로
-그 이유를 적어 두었다.
-
-## 2026-09-12 — 고침이 스택을 내렸고, 그 뒤에 진짜 고침이 있었다
-
-`T-VN-DAGSTER-STORAGE`가 닫히는 과정에서 prod가 한 시간 넘게 내려가 있었다. 그 한
-시간이 가르쳐 준 것을 적는다.
-
-### 파괴적 rebuild는 실패해도 파괴는 되돌리지 않는다
-
-rebuild는 스택을 먼저 내린다. 그 뒤 단계에서 죽으면 **내려간 채로 남는다.** 06:18에
-그렇게 됐고 나는 08:20이 되어서야 스택이 내려가 있다는 것을 알았다 — 원인을 좇느라
-`docker ps`를 한 번도 안 봤기 때문이다. 실패를 조사할 때 **무엇이 지금 죽어 있는가**를
-먼저 보는 것은 원인 규명보다 앞선다.
-
-### `--json`이 원문을 삼킨다
-
-launcher는 `ktdctl ... --json`으로 부르고, CLI는 봉인 밖 실패의 원문을 JSON에 넣지
-않는다. 남는 것은 `{"status":"failed","classification":"unclassified"}` 한 줄과
-0바이트 stderr다. 노출 계약으로는 옳지만 **운영자가 이유를 볼 방법이 없다.** 같은
-CLI를 `--json` 없이 한 번 더 돌려 회수했다. 47초짜리였으니 값쌌지만 70분짜리였다면
-같은 값을 두 번 치렀을 것이다.
-
-### 두 번 틀렸다
-
-**추론을 증거로 착각했다.** 실패 단계를 Manager 소스의 phase 목록에서 읽고 그것을
-관측처럼 적었다. 영수증에는 그런 말이 없었다. 나중에 docker daemon 로그가
-`…dagster-storage-migrate-run-dc953676ad41` 컨테이너가 2초 만에 죽은 것을 보여
-주면서 확정됐지만, 그때 내가 한 것은 확인이 아니라 짐작이었다.
-
-**내가 만든 사실을 세상의 사실로 읽었다.** 원문을 회수하려고 lock을 잡고 CLI를
-돌렸는데 launcher처럼 FD를 넘기지 않았다. `c6c_deployment_lock`이 새로 잡으려다 내
-flock에 막혀 "another C6c compatible-pair operation is already active"를 냈다.
-하마터면 그것을 원인으로 적을 뻔했다 — 어제 pair contract v1 거절에서 같은 실수를
-했으니 두 번째다.
-
-### 간헐 실패와 결함은 로그가 같다
-
-봉인을 고친 뒤 rebuild가 다시 죽었다. 이번엔 `pinvi-db-runtime-role` 단계였고 18분을
-돌았다. **같은 입력으로 재시도하니 9분 40초에 완주했다** — resume journal에서
-이어받았다. 코드를 의심하기 전에 한 번 더 돌리는 것이 이 계열에서는 옳다.
-
-### 그래서 무엇이 달라졌나
-
-수정 전 이 prod의 Dagster run은 **전부 실패**였다. 지금은 `SUCCESS 23 · FAILURE 1`
-이고, 그 하나는 rebuild가 스택을 내리던 순간에 걸린 run이다. provider 적재 job이
-이 prod에서 처음으로 `SUCCESS`로 끝났고 `claims 1047 · aliases 1047 · links 1047`이
-다시 맞물렸다.
-
-### 적대 리뷰가 막은 것
-
-같은 날 D2 lane 변경에서 blocker 2건이 나왔다. 두 렌즈가 **독립적으로 같은 결함**에
-도달했다 — purge를 게이트 앞에 두면 실패한 run의 소유 Feature가 사라지고, 복구
-lane의 api-audit이 그 행 1건을 요구하므로 `recover`가 구조적으로 통과 불가능해진다.
-BLOCKED는 `recover`로만 지워지고 `run`은 BLOCKED가 있으면 막히므로, 배포됐다면 D2가
-prod에서 **영구 정지**했을 것이다. 두 줄의 상대 위치가 그것을 갈랐고 둘 다 그냥
-helper 호출로 보였다.
-
-## 2026-09-12 — 같은 집합을 각자 들고 있으면 언젠가 어긋난다
-
-`T-VN-DAGSTER-STORAGE`를 고친 #1216이 prod rebuild를 깼다. 고침이 결함이 된 경위를
-적는다 — 코드보다 **검사의 모양**에 관한 이야기다.
-
-### 두 파일이 같은 집합을 각자 들고 있었다
-
-`docker/dagster.yaml`의 최상위 key 집합과, `docker/dagster-storage-migrate.py`의
-`_validate_dagster_config`가 요구하는 key 집합. 이 둘은 같아야 하는데 서로를 본 적이
-없다. #1216이 한쪽에 `local_artifact_storage`/`compute_logs`를 더하자 다른 쪽이
-`dagster_storage_target_not_sealed`로 거절했고, 그 사실은 CI에서가 아니라 **prod
-rebuild가 스택을 내린 뒤**에 드러났다.
-
-### 검사는 있었다. 통과하는 쪽을 안 봤을 뿐이다
-
-`test_dagster_storage_rejects_alternate_top_level_storage_keys`는 실제
-`dagster.yaml`을 읽는다. 그런데 그것이 보는 것은 **거절되는 것**이다 — 임의의 key를
-더해 거절을 확인한다. 두 파일이 어긋나면 그 거절은 **이유만 바뀐 채 여전히
-일어난다.** 항진명제다.
-
-어긋남을 보려면 **통과하는 것**을 봐야 한다. 배에 실리는 config가 봉인 검사기를
-통과하는지 보는 검사 하나를 심었더니, 변이에서 정확히 그것 하나만 빨갛다:
-
-    ① 수정본 전체                    : 42 passed
-    ② 검사기만 5-key 봉인으로 되돌림 : 1 failed, 41 passed
-    ③ config에서 compute_logs 제거   : 4 failed, 38 passed
-
-②가 핵심이다. 같은 두 파일을 읽는 기존 41건이 어긋남에 눈이 멀어 있었다.
-
-### 진단이 두 번 틀렸다
-
-**한 번은 추론을 증거로 착각했다.** 실패 단계를 Manager 소스의 phase 목록에서
-읽고 "`map_dagster_storage_intent_durable`이 실패했다"고 적었다. 영수증에는 그런
-말이 없었다 — `{"status":"failed","classification":"unclassified"}` 한 줄과 0바이트
-stderr뿐이었다. 나중에 docker daemon 로그가 실제로 그 단계임을 확정해 주었지만,
-그때 내가 한 것은 확인이 아니라 짐작이었다.
-
-**한 번은 자기 자신에게 막혔다.** 삼켜진 원문을 회수하려고 `--json` 없이 CLI를
-돌렸는데, lock을 잡기만 하고 launcher처럼 FD를 넘기지 않았다. `c6c_deployment_lock`이
-새로 잡으려다 내 flock에 막혀 "another C6c compatible-pair operation is already
-active"를 냈다. 하마터면 그것을 원인으로 적을 뻔했다 — **내가 만든 사실을 세상의
-사실로 읽는 것**이 이 세션에서 두 번째다(어제는 pair contract v1 거절이 그랬다).
-
-### 원문을 삼키는 계약
-
-`--json` 경로는 봉인 밖 실패의 원문을 내지 않는다. 노출 계약으로서는 옳지만,
-launcher가 그 경로만 쓰므로 **운영자가 이유를 볼 방법이 없다.** 이번에는 같은 CLI를
-비-JSON으로 한 번 더 돌려 회수했다. 47초짜리 실행이면 값싸지만, 70분짜리였다면
-같은 값을 두 번 치렀을 것이다.
-
-## 2026-09-11 — 결함을 만든 자리와 그것을 가린 자리는 따로 있었다
-
-T-VN-39가 착지했다(#1197). 마지막 두 라운드에서 배운 것을 적는다.
-
-### 고친 것을 다시 봤다
-
-1라운드 적대 리뷰의 지적을 전부 닫은 뒤, **그 수정 자체**를 5축 × 2인으로 다시
-걸었다. 그 절반이 검사기·테스트 하네스를 바꾼 것이라 특히 위험했다 — 검사기가
-틀리면 초록이 거짓말을 한다. 25건 중 11건이 반박을 견뎠고 blocker는 없었다.
-
-가장 값진 것이 마지막이었다. uuid 필터 표면 하나가 변환을 못 받아 여전히 500이었다
-(`/admin/theme-feature-candidates`). 22P02는 `sqlalchemy.exc.DataError`로 오는데
-그것은 `ValueError`가 아니라서 라우터의 422 handler를 그대로 통과한다.
-
-회귀 테스트를 붙이는데 계속 200이 나왔다. 라우터 코드에 helper 호출이 있고,
-컴파일된 code object의 `co_names`에도 그 이름이 있고, helper를 직접 부르면 제대로
-422를 던지는데, 테스트 안에서만 원문이 통과했다. `.pyc` 캐시·경로 그림자·라우트
-중복을 차례로 배제하고 나서야 원인이 나왔다 — 코드가 아니라 API 패키지 conftest의
-**autouse** fixture였다:
-
-    async def _resolve(_session, ref):
-        return FeatureIdentity(feature_id=ref, ...)   # 재키 이전의 등식
-
-DB 없는 패키지에서 경계 해석을 태우려는 echo-resolve이고 재키 전에는 옳았다.
-지금은 `feature_id=ref`가 거짓이고, 이 echo는 **모든** 참조를 "해석 성공"으로
-만들기 때문에 그것이 깔린 채로는 "legacy 주소가 uuid로 바뀌는가"도 "없는 참조가
-422인가"도 관측할 수 없다. **major #1이 깨뜨린 바로 그 두 축이다.**
-
-즉 결함을 만든 자리와 그것을 가린 자리가 따로 있었고, 검사기를 아무리 고쳐도 이
-층에서는 보이지 않았다.
-
-### 개수 세기는 전칭 명제가 아니다
-
-그 구멍을 새 lint도 못 봤다. uuid 쪽 단언이 helper **호출 개수 ≥ 5**뿐이었기
-때문이다. "uuid에 바인드되는 feature 필터는 전부 이 helper를 지난다"는 명제를
-어디서도 재지 않으므로 변환 안 된 표면이 남아 있어도 초록이다.
-
-개수 세기를 **표면 열거**로 바꿨다 — 라우터에서
-`Annotated[str | None, Query()]`로 선언된 `*feature_id` 파라미터를 전부 찾아
-하나씩 확인한다. 고친 자리를 되돌려 확인했다: 검사가 그 표면을 이름으로 집는다.
-되돌리기 전에는 되돌려도 초록이었다.
-
-### provider 핀 — 조용한 절단이 두 곳에서 동시에 자랐다
-
-형제 리포를 확인해 뒤처진 핀 8종을 올렸다. breaking은 khoa 하나(asyncio 전용
-전환)였는데, 정작 무거운 것은 다른 데 있었다.
-
-datagokr가 공용 pagination 헬퍼를 뽑으면서 종료 조건의 `reached_known_end` 가드를
-떨어뜨리고, 같은 범위에서 행 단위 `except ValidationError: continue`를 넣었다.
-둘이 겹치면 **기형 행 하나가 만재 페이지를 짧게 만들어** 18,000건짜리 데이터셋이
-999건에서 끝난다 — 예외도 로그도 없이. 그리고 Map은 그것을
-`authoritative_snapshot_complete=True`로 봉인한다.
-
-이 부류를 이 저장소는 이미 안다. `provider_pagination` 모듈이 존재하는 이유가
-`python-krex-api`의 똑같은 변화이고, 그 규칙은 "`total_count`가 권위이고 짧은
-페이지는 total을 모를 때만 쓰는 대체 휴리스틱"이다. 더 나아가 krheritage 핀은
-**정확히 같은 이유로 이미 묶여 있었고** 해제 조건까지 적혀 있었다 — "provider 측에서
-total 기반 종료를 복구한 뒤 상향한다."
-
-upstream은 복구하지 않았다. 그래서 기다리는 대신 **Map이 권위를 되찾았다** — 두
-경로를 자기 페이지네이터 아래로 옮겨 provider 종료 조건에 대한 위임을 끊었다.
-위임을 끊었으므로 보류 조건 자체가 사라졌다.
-
-### CI가 구조적으로 못 보는 자리
-
-khoa 파손을 잡은 것은 CI가 아니라 n150이었다. **CI는 provider extra를 설치하지
-않는다**(`pip install -e ".[dev]"`) — 그것은 의도된 절충이지만(provider는 네트워크
-의존), 그래서 "sync 진입점이 사라졌다" 같은 실제 파손을 CI 혼자서는 볼 수 없다.
-그 빈자리를 `_provider_surface.json`이 메운다 — 핀된 SHA의 공개 표면을 굳혀
-대조하고, 핀만 올리고 manifest를 안 고치면 즉시 빨개진다. 이번에 실제로 그랬다.
-
-그리고 Map 쪽 테스트도 못 잡았을 것이다. fake khoa 모듈이 sync 표면을 들고 있어서
-실제 provider가 그것을 없앤 뒤에도 초록이었을 것이다. fake를 실제 표면에 맞췄다.
-
-### 규칙 하나를 더 얻었다
-
-**하네스가 흉내내는 표면이 낡으면, 그 축은 초록인 채로 사라진다.** echo-resolve도
-fake khoa도 fake datagokr도 전부 같은 모양이었다 — 만들 때는 옳았고, 세상이 바뀐
-뒤에는 결함을 가리는 쪽으로만 작동했다. 계약을 바꾸는 작업에서는 **그 계약을
-흉내내는 자리**를 함께 세는 것이 범위의 일부다.
-
-### 배포: "막혔다"는 내 오독이었다
-
-prod 배포를 열면서 회전 게이트가 `rotation pair contract version is unsupported: 1`로
-거부했다. 나는 그것을 "PinVi가 v2 계약을 main에 올려야 풀린다"로 읽고 T-VN-40
-선행조건과 같은 종류의 blocker로 적으려 했다. 틀렸다.
-
-게이트는 **내가 넘긴 PinVi revision**의 계약을 읽는다. 나는 PinVi `origin/main`을
-넘겼고 그것이 v1이었다. 핀된 `f62e7ef1`은 2026-09-07에 이미 v2로 회전했다 — 그
-revision으로 다시 부르니 preflight가 그대로 통과했다(exit 0).
-
-그리고 v2의 요지가 바로 이 경우다. v2는 revision이 아니라 digest만 담으므로, Map의
-세 OpenAPI 표면이 핀된 revision과 바이트 동일하면 **PinVi를 건드리지 않고 Map만**
-전진한다. `2099b8a6`와 `3b11c975`(18커밋 차) 사이에서 셋 다 동일했다. 재키는 내부
-타입을 바꿨을 뿐 바깥 이름을 바꾸지 않았다는 경계 규칙이 여기서 실물로 갚였다.
-
-교훈은 게이트에 대한 것이다. **거부 메시지는 내가 건넨 인자에 대한 사실이지 세상에
-대한 사실이 아니다.** 나는 그 둘을 바꿔 읽고 하마터면 다른 저장소의 작업을
-선행조건으로 적을 뻔했다.
-
-### 레지스트리는 배포를 기록하지만 실물을 강제하지 않는다
-
-배포 전 점검 중에 정본과 live가 갈라져 있는 것을 봤다. 정본 generation은
-`2099b8a6`/`c10d6782`를 가리키는데, 실제로 돌고 있는 컨테이너는 `cf65e973`(8/27)에
-`0169fe90`이었다 — F1D v5 rehearsal state가 03:46에 live 위에 자기 candidate를
-얹었고, 정본 generation 파일은 9/7자 그대로였다.
-
-즉 "무엇이 배포됐는가"를 레지스트리에만 물으면 틀린 답을 얻을 수 있다. 그래서
-T-VN-39-DEPLOY 완료 조건에 **정본과 실제 컨테이너의 일치**를 넣었다. 배포가 끝나면
-둘이 같아야 하고, 같은지는 따로 봐야 한다.
-
 ## 과거 기록 아카이브
 
-> 현행 작업 창(2026-09-11~) 이전 기록은 아래로 분리했다. 검색은
+> 현행 작업 창(2026-09-14~) 이전 기록은 아래로 분리했다. 검색은
 > `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
+| [`journal-2026-09b.md`](archive/journal-2026-09b.md) | 2026-09-11 ~ 2026-09-13 | 5건 | 26 KB |
 | [`journal-2026-09a.md`](archive/journal-2026-09a.md) | 2026-09-01 ~ 2026-09-10 | 23건 | 84 KB |
 | [`journal-2026-08d.md`](archive/journal-2026-08d.md) | 2026-08-29 ~ 2026-08-31 | 14건 | 25 KB |
 | [`journal-2026-08c.md`](archive/journal-2026-08c.md) | 2026-08-28 ~ 2026-08-28 | 21건 | 20 KB |

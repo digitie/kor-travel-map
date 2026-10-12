@@ -2999,3 +2999,43 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 - 공통 의존성·OpenAPI·타입·실패/활성/배치/정합성 검사 PASS.
 - sanctioned Map·PinVi pair 재구축 및 실제 로그인·공통 Dagster UI·D1/D2와 PinVi live PASS.
 - 필수 exact-head CI green 후 PR merge. 운영 RSS 수치는 실측 전에는 제외.
+
+## T-WX-VNEXT-FREEZE
+
+2026-10-13 weather 잔재 정리에서 열었다(ADR-105 후속). 닫히는 조건 — 둘 중 하나:
+
+- 재동결: `target-schema-v1.sql`·`target-invariants-v1.sql`·`violation-fixtures-v1.sql`·
+  `expected-rejections-v1.json`·`target-schema-fingerprints-v1.json`에서 weather 표
+  (`feature.feature_weather_values`·`feature.current_weather_summary`)와
+  `feature.reject_weather_value_mutation()`을 빼고 새 fingerprint로 다시 동결하며,
+  `test_vnext_target_freeze.py`의 `_TARGET_TABLES`와 weather positive fixture를 함께 고친다.
+  head에 없는 relation을 계약이 선언하면 실패하는 검사를 하나 더하고, 일부러 빨갛게 만들어 본다.
+- 기록 유지: 계약을 rev 300 당시 동결본으로 남긴다는 결정을 ADR-105 또는 계약 머리말에 적고,
+  테스트 docstring이 그 범위를 밝힌다.
+
+## T-WX-SOURCEROLE
+
+2026-10-13 weather 잔재 정리에서 열었다(선택 항목). 닫히는 조건:
+
+- `provider_sync.source_links`에 `source_role = 'weather_context'` 행이 0임을 확인한 뒤
+  CHECK에서 그 값을 빼는 전진 migration과 `SourceRole.WEATHER_CONTEXT` enum 제거가 같은 PR에 있다.
+  `feature-model.md` SourceRole 표와 `data-model.md` CHECK 서술도 함께 고친다.
+- 또는 하지 않기로 결정하고 그 사유를 이 절에 적는다.
+
+## T-WX-DTO
+
+2026-10-13 weather 잔재 정리에서 열었다. 닫히는 조건:
+
+- 지우기로 하면: API 재도입 방지 검사를 `WeatherValue`·weather enum import 없이 kind/provider
+  정체성과 효과에 결박해 다시 쓰고, 그 검사가 일부러 넣은 weather 경로를 잡는 것을 보인 뒤
+  `dto/weather.py`·관련 enum·`NOTICE_TYPE_WEATHER_ALERT` 사용처를 지운다. ADR-105 결정 3을 개정한다.
+- 남기기로 하면: 그 결정과 이유를 ADR-105에 한 줄로 적는다.
+
+## T-WX-NOTICE-CLOSE
+
+2026-10-13 weather 잔재 정리에서 발견했다. `AsyncKorTravelMapClient.close_notice_features`와
+`infra.feature_repo.close_notice_features`는 통합 테스트(`test_notice_lifecycle.py`) 외 호출자가 없다.
+닫히는 조건:
+
+- 지운다면 client 메서드·repo 함수·전용 통합 테스트를 함께 지우고 공개 API 표면 변경을 CHANGELOG에 적는다.
+- 남긴다면 다음 사용처(예: 산사태 예보 해제 반영)를 이 절에 적는다.

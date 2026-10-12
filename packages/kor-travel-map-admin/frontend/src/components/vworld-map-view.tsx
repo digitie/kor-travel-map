@@ -598,7 +598,6 @@ const FEATURE_KIND_LABELS: Record<string, string> = {
   event: "행사",
   notice: "공지",
   price: "가격",
-  weather: "날씨",
   route: "경로",
   area: "구역",
 };
@@ -608,7 +607,6 @@ const FEATURE_KIND_FALLBACK_COLORS: Record<string, string> = {
   event: "#db2777",
   notice: "#dc2626",
   price: "#16a34a",
-  weather: "#0284c7",
   route: "#7c3aed",
   area: "#d97706",
 };

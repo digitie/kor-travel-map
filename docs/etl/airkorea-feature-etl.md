@@ -1,5 +1,9 @@
 # airkorea-feature-etl.md — AirKorea 대기질 측정소/측정값 ETL
 
+> **제거(2026-10-01, ADR-105).** AirKorea 측정소 feature와 측정값 적재는 Map에서 지워졌다
+> (`providers/airkorea.py` 삭제, weather 값 표는 migration `402`가 DROP). 날씨·대기질 정본은
+> kor-travel-weather다. 아래 본문은 **기록**이다 — 운영 절차로 읽지 말 것.
+
 본 문서는 AirKorea(`python-airkorea-api`)의 대기질 데이터를 두 갈래로 적재하는
 ETL이다 — **측정소(station)는 `weather`-kind `Feature`**, **측정값(measurement)은
 오염물질별 `WeatherValue`**. 측정값은 장소가 아니라 관측값이므로(ADR-010) 측정소를

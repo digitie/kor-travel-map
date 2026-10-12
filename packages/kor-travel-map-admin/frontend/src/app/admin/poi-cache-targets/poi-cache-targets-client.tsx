@@ -50,7 +50,6 @@ const FEATURE_KIND_LABELS: Record<string, string> = {
   event: "행사",
   notice: "공지",
   price: "가격",
-  weather: "날씨",
   route: "경로",
   area: "구역",
 };

@@ -67,7 +67,6 @@ __all__ = [
     "make_source_record_key",
     "make_integrity_finding_key",
     "make_payload_hash",
-    "make_weather_value_key",
     "make_price_value_key",
     "feature_uuid_from_legacy",
     "FEATURE_ID_HASH_LENGTH",
@@ -75,7 +74,6 @@ __all__ = [
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
-    "WEATHER_VALUE_KEY_HASH_LENGTH",
     "PRICE_VALUE_KEY_HASH_LENGTH",
 ]
 
@@ -110,10 +108,9 @@ def make_feature_id(
         prefix 1자만 ID에 박힘 (``'p'``/``'e'``/``'n'``/...).
     category
         카테고리 enum value (예: ``'PLACE_RESTAURANT'``,
-        ``'WEATHER_TEMPERATURE'``, ``'EVENT_FESTIVAL'``).
+        ``'EVENT_FESTIVAL'``).
     source_type
-        provider 또는 dataset 타입 (예: ``'krex_rest_area'``,
-        ``'kma_weather_ultra_short'``).
+        provider 또는 dataset 타입 (예: ``'krex_rest_area'``).
     source_natural_key
         source 시스템 내 자연키 (예: rest area code ``'RA00012'``).
     content_hash
@@ -493,95 +490,11 @@ def _normalize_payload_value(value: Any) -> Any:
     )
 
 
-# ── make_weather_value_key (PR#38, ADR-010) ────────────────────────────────
-
-
-WEATHER_VALUE_KEY_HASH_LENGTH: Final[int] = 20
-"""SHA1 hex digest의 prefix 길이 (20 hex chars = 80 bits). source_record_key
-와 동등 — weather 시계열 row 수가 수억 단위로 늘어도 충돌 안전."""
-
-
-def make_weather_value_key(
-    *,
-    feature_id: str,
-    provider_dataset_id: int,
-    weather_domain: str,
-    forecast_style: str,
-    metric_key: str,
-    target_at: datetime,
-    source_record_key: str,
-) -> str:
-    """``WeatherValue.weather_value_key`` PK를 결정적으로 계산.
-
-    ADR-089 immutable fact identity와 동일 input이다.
-
-    Parameters
-    ----------
-    feature_id
-        weather kind ``Feature``의 ID (`make_feature_id` 결과).
-    provider_dataset_id
-        canonical provider dataset surrogate key.
-    weather_domain
-        ``WeatherDomain.value`` 또는 동등 문자열 (예: ``"kma_short_forecast"``).
-    forecast_style
-        ``ForecastStyle.value`` (예: ``"short"``).
-    metric_key
-        표준 metric_key (예: ``"TMP"``, ``"PM10"``).
-    target_at / source_record_key
-        business-time와 immutable raw response revision.
-
-    Returns
-    -------
-    str
-        ``wv_{sha1[:20]}``.
-
-    Raises
-    ------
-    ValueError
-        구성요소 중 빈 문자열 또는 ``|`` 구분자 포함.
-
-    Examples
-    --------
-    >>> from datetime import datetime, timezone, timedelta
-    >>> KST = timezone(timedelta(hours=9))
-    >>> key = make_weather_value_key(
-    ...     feature_id="f_global_w_abc",
-    ...     provider_dataset_id=42,
-    ...     weather_domain="kma_short_forecast",
-    ...     forecast_style="short",
-    ...     metric_key="TMP",
-    ...     target_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
-    ...     source_record_key="sr_example",
-    ... )
-    >>> key.startswith("wv_")
-    True
-    >>> len(key)
-    23
-
-    Notes
-    -----
-    같은 입력 → 같은 key다. correction은 다른 response record key를 가져 새 fact가 된다.
-    """
-    _validate_component("feature_id", feature_id)
-    if provider_dataset_id <= 0:
-        raise ValueError("provider_dataset_id must be positive")
-    _validate_component("weather_domain", weather_domain)
-    _validate_component("forecast_style", forecast_style)
-    _validate_component("metric_key", metric_key)
-
-    raw = (
-        f"{feature_id}|{provider_dataset_id}|{weather_domain}|{forecast_style}|"
-        f"{metric_key}|{target_at.isoformat()}|{source_record_key}"
-    )
-    digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
-    return f"wv_{digest[:WEATHER_VALUE_KEY_HASH_LENGTH]}"
-
-
 # ── make_price_value_key (PR#42) ──────────────────────────────────────────
 
 
 PRICE_VALUE_KEY_HASH_LENGTH: Final[int] = 20
-"""SHA1 hex digest의 prefix 길이 — weather_value_key와 동등."""
+"""SHA1 hex digest의 prefix 길이 (20 hex chars = 80 bits) — source_record_key와 동등."""
 
 
 def make_price_value_key(

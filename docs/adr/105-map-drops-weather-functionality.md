@@ -1,7 +1,7 @@
 # ADR-105: Map에서 날씨 feature와 날씨 notice 기능을 지운다 — 정의는 남긴다
 
 - 상태: accepted (2026-10-01, 소유자 결정) · 확장 대상: ADR-104(Map은 KMA를 적재하지 않는다)
-- 관련: ADR-010(weather 두 축, 이관 문서), ADR-068(날씨는 kor-travel-weather가 소유), ADR-088(operation 카탈로그
+- 관련: ADR-010(weather 두 축, 이관 문서), ADR-104(KMA·날씨는 kor-travel-weather가 소유), ADR-088(operation 카탈로그
   정본), ADR-089(weather fact·summary receipt), ADR-102(migration 전진 배포)
 
 ### 소유자 결정(원문 요지)
@@ -50,6 +50,8 @@
   휴게소 기상·`providers/krforest_safety.py` 산악기상/산불위험 변환 삭제, client의 `load_weather_values`·
   `materialize_current_weather_summary`·`load_air_quality`·`build_weather_card` 삭제. 정의(`dto/weather.py`,
   `dto/_enums.py`, `core/ids.make_weather_value_key`, `NOTICE_TYPE_WEATHER_ALERT`)는 남겼다.
+  (후속 2026-10-13: 호출자가 없던 `make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`는 잔재 정리에서
+  지웠다 — 정의 유지 대상은 kind/enum/DTO이고 키 함수는 적재 경로의 일부였다.)
 - **API**: weather 경로 8개와 `weather_summary`(FeatureSummary·AdminFeatureMapItem)·`latest_weather`(BeachPublicView) 필드,
   weather·KMA 특보 preview fixture를 지웠다. 세 OpenAPI를 다시 뽑았다. PinVi는 T-365부터 이 경로를 부르지 않지만 계약
   스냅샷의 선택 필드 `latest_weather`가 사라지므로 PinVi vendor 스냅샷을 다음 짝에서 다시 떠야 한다(rollout receipt는

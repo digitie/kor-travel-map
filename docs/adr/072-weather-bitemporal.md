@@ -1,9 +1,14 @@
 # ADR-072: Weather bitemporal 사실과 current summary
 
-- **상태**: accepted
+- **상태**: superseded by ADR-104/105 (2026-10-01 — Map에서 날씨 기능 제거)
 - **날짜**: 2026-07-18
 - **결정자**: 사용자 + Codex
 - **출처**: `docs/reports/system-structure-api-schema-review-2026-07-16.md` D-8
+
+> **superseded (2026-10-01, ADR-104/105)**: Map은 KMA를 적재하지 않고(ADR-104) weather feature·날씨 notice
+> 기능·데이터·전용 스키마를 지웠다(ADR-105). 이 ADR의 weather fact 표(`feature.feature_weather_values`)와
+> weather current summary(`current_weather_summary`)는 migration `402`가 DROP했다. price 쪽 fact·summary
+> 결정은 ADR-089가 이어받아 유효하다. 날씨 정본은 kor-travel-weather다. 아래 본문은 당시 결정 기록으로 남긴다.
 
 ## 컨텍스트
 

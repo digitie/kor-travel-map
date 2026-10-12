@@ -47,7 +47,7 @@ T-VN-31 이후 shadow migration으로 전환한다.
 | lineage | DB-owned provider dataset → source entity → immutable record/head | ADR-069 |
 | subtype | 작은 Feature core + typed point/event/notice/route/area table과 geometry/category 제약 | ADR-070 |
 | 수동 보정 | provider base + field override + effective projection; whole-row freeze 없음 | ADR-071 |
-| weather | `target_at`/`known_at` bitemporal fact + semantic UNIQUE/FK/range + current summary | ADR-072 |
+| ~~weather~~ | ADR-105로 제거(2026-10-01) — weather fact·current summary 표는 migration `402`가 DROP. price fact·summary는 ADR-089 | ~~ADR-072~~ |
 | 쓰기 | resource revision, domain replay ledger, generation/restore epoch, outbox | ADR-074 |
 
 각 축은 다른 축의 상태나 payload를 복제하지 않는다. JSONB는 원문·확장 metadata에만 사용하고,
@@ -900,8 +900,8 @@ kind별 값의 정본은 core가 아니라 typed subtype 테이블이다(ADR-086
   `FOREIGN KEY (feature_id, feature_uuid)` → `feature.features (feature_id, feature_uuid)`.
   뒤쪽은 `feature_aliases`와 같은 identity 사본 일치 계약이고, 둘 다 `ON DELETE CASCADE`다.
 
-price/weather subtype은 **두지 않는다** — detail이 비어 있고 값 정본은
-`feature.feature_price_values`/`feature_weather_values`가 이미 소유한다(§8). 빈 테이블은
+price/weather subtype은 **두지 않는다** — detail이 비어 있고 price 값 정본은
+`feature.feature_price_values`가 이미 소유한다(§8; weather 값 표는 ADR-105로 제거). 빈 테이블은
 단일 정본 원칙 위반이다.
 
 ### 6.1 `feature.feature_places`
@@ -1159,7 +1159,10 @@ CREATE TABLE feature.feature_special_days (
 CREATE INDEX idx_special_date ON feature.feature_special_days (special_date);
 ```
 
-## 8. weather / price immutable fact와 current summary
+## 8. price immutable fact와 current summary (weather는 ADR-105로 제거)
+
+> weather fact(`feature.feature_weather_values`)와 `feature.current_weather_summary`는 ADR-105
+> migration `402`가 DROP했다. 아래 규칙은 이제 price에만 적용된다(§8.2 참조).
 
 T-VN-38부터 weather와 price는 current 값을 원본 fact 행에 upsert하지 않는다. 모든 writer는
 canonical `provider_dataset_id`와 immutable raw source revision을 함께 받고 새 fact만 INSERT한다.
@@ -1171,7 +1174,7 @@ current summary를 set join한다. 명시 time-travel·timeline만 raw fact의 r
 ```sql
 CREATE TABLE ops.current_summary_runs (
   summary_run_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  projection_kind TEXT NOT NULL CHECK (projection_kind IN ('weather', 'price')),
+  projection_kind TEXT NOT NULL CHECK (projection_kind = 'price'),  -- 402가 'weather'를 뺐다
   run_kind TEXT NOT NULL CHECK (run_kind IN ('ingest', 'reconcile', 'backfill', 'restore')),
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1195,57 +1198,13 @@ CREATE TABLE ops.current_summary_runs (
 - weather와 price global projection은 각기 transaction advisory lock을 **desired set 계산 전**에
   취한다. 오래된 writer가 더 최신 winner pointer를 되돌리거나 stale delete하는 race를 막는다.
 
-### 8.2 weather
+### 8.2 weather — 제거됨
 
-```sql
-CREATE TABLE feature.feature_weather_values (
-  weather_value_key TEXT PRIMARY KEY,
-  feature_id TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  provider_dataset_id BIGINT NOT NULL,
-  weather_domain TEXT NOT NULL,
-  forecast_style TEXT NOT NULL,
-  timeline_bucket TEXT,
-  metric_key TEXT NOT NULL,
-  metric_name TEXT,
-  source_metric_key TEXT,
-  source_metric_name TEXT,
-  value_number NUMERIC(14,4), value_text TEXT, unit TEXT, severity TEXT,
-  issued_at TIMESTAMPTZ, valid_at TIMESTAMPTZ, valid_during TSTZRANGE,
-  observed_at TIMESTAMPTZ,
-  target_at TIMESTAMPTZ NOT NULL,
-  known_at TIMESTAMPTZ NOT NULL,
-  normalization_version TEXT,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-  source_entity_key TEXT NOT NULL,
-  source_record_key TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  FOREIGN KEY (source_entity_key, provider_dataset_id)
-    REFERENCES provider_sync.source_entities (source_entity_key, provider_dataset_id),
-  FOREIGN KEY (source_record_key, source_entity_key, known_at)
-    REFERENCES provider_sync.source_records (source_record_key, source_entity_key, fetched_at),
-  CHECK (value_number IS NOT NULL OR value_text IS NOT NULL),
-  CHECK (issued_at IS NULL OR issued_at <= known_at),
-  UNIQUE (feature_id, provider_dataset_id, weather_domain, forecast_style,
-          metric_key, target_at, source_record_key)
-);
-
-CREATE INDEX idx_weather_values_feature_target_known
-  ON feature.feature_weather_values (feature_id, target_at DESC, known_at DESC);
-
-CREATE TABLE feature.current_weather_summary (
-  feature_id TEXT NOT NULL, provider_dataset_id BIGINT NOT NULL,
-  weather_domain TEXT NOT NULL, forecast_style TEXT NOT NULL, metric_key TEXT NOT NULL,
-  weather_value_key TEXT NOT NULL, summary_run_id BIGINT NOT NULL,
-  selected_at TIMESTAMPTZ NOT NULL, refresh_after TIMESTAMPTZ NOT NULL,
-  projection_kind TEXT NOT NULL DEFAULT 'weather', receipt_status TEXT NOT NULL DEFAULT 'succeeded',
-  PRIMARY KEY (feature_id, provider_dataset_id, weather_domain, forecast_style, metric_key)
-);
-```
-
-weather candidate는 `known_at <= selected_at`, `target_at <= selected_at`, valid range containment를
-만족해야 한다. winner는 `target_at DESC, known_at DESC` 뒤 temporal tie-break와 fact key로
-결정한다. 정상 summary는 active dataset의 `refresh_after > clock_timestamp()`만 공개한다.
-deadline-only reconciliation이 새 provider write 없이 만료 summary를 제거·재물화한다.
+ADR-105(2026-10-01)로 Map은 weather를 적재·저장·조회하지 않는다. 이 절이 정의하던
+`feature.feature_weather_values`·`feature.current_weather_summary`·`reject_weather_value_mutation()`은
+migration `402_remove_map_weather_data`가 DROP했고, `ops.current_summary_runs`의 weather receipt도 지웠다.
+당시 DDL은 `alembic/baseline/schema.sql`(rev 300 사본)과 ADR-072에 기록으로 남는다. 날씨 정본은
+kor-travel-weather다.
 
 ### 8.3 price
 
@@ -2892,8 +2851,7 @@ statement trigger는 원본 write와 같은 transaction에서 `revision = revisi
 ## 10. 보관 정책 (ADR-017) → purge 작업
 
 ```sql
--- weather_values: 기본 3년 보존(ADR-062). 예보 발표 이력 비교용이므로
--- 별도 승인된 purge 작업 전에는 삭제하지 않는다.
+-- weather_values: ADR-105로 표째 제거(migration 402) — 보존 정책 대상 아님.
 
 -- notice: 종료일 또는 발표일 +1년.
 -- 기간 판정은 subtype의 typed timestamptz로 한다(문자열 파싱·방어 cast 없음).
@@ -2945,12 +2903,7 @@ _make_source_entity_key(*, provider: str, dataset_key: str,
 make_payload_hash(data: Any, *, length: int = 32) -> str
 # canonical_json(data) → sha256 → [:length]
 
-make_weather_value_key(*, feature_id: str, provider: str, weather_domain: str,
-                       forecast_style: str, metric_key: str,
-                       issued_at: datetime | None = None,
-                       valid_at: datetime | None = None,
-                       observed_at: datetime | None = None) -> str
-# 포맷: wv_{sha1(input)[:20]}. WeatherValue.identity() tuple과 동일 input.
+# make_weather_value_key — ADR-105 잔재 정리(2026-10-13)로 제거.
 
 make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
                      product_key: str, observed_at: datetime) -> str
@@ -3045,7 +2998,7 @@ purge는 Dagster asset에 위임한다(purge SQL 표준 예시는 §10, `infra/p
 | `event` | 종료일(`ends_on`) +20년 |
 | `notice` | 종료일 또는 발표일 +1년 |
 | `feature_price_values` | 가격 domain별 기본값(초기 유가 10년 권장, purge asset에서 관리) |
-| `weather_values` | 기본 3년(예보 발표 이력 비교용, ADR-062) |
+| ~~`weather_values`~~ | ADR-105로 제거(표 DROP, migration `402`) |
 | `source_records` | entity 현재 record는 보존. 과거 payload는 대응 Feature 보존 기간 이상 또는 명시 `expires_at` 정책으로 purge |
 
 ### feature 정합성 리포트 단계적 도입 (구 ADR-033)

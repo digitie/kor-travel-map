@@ -133,9 +133,8 @@
 | `beach_material` | string/null | KHOA 상세 필드. 현재는 `beach_type`/`beach_material` raw key를 projection |
 | `emergency_contact` | string/null | `detail.phones[0]` 또는 provider payload |
 | `homepage_url`, `image_url` | string/null | `urls.homepage`, `detail.facility_info.image_url`, FeatureFile |
-| `latest_water_quality` | object/null | 현재 null. KHOA 수질 값 projection은 후속 marine/weather 확정 후 채움 |
+| `latest_water_quality` | object/null | 현재 null. KHOA 수질 값 projection은 후속 marine 확정 후 채움 |
 | `upcoming_index_forecasts` | array | 현재 빈 배열. KHOA index forecast projection은 후속 확정 후 채움 |
-| `latest_weather` | object/null | 현재 null. `/v1/features/{feature_id}/weather` projection 연결은 후속 |
 | `source_providers` | array[string] | SourceLink 또는 provider 요약 |
 | `updated_at` | datetime | feature updated_at |
 
@@ -187,8 +186,8 @@
 2. KHOA 해수욕장 폭/길이/재질은 공개 schema에 nullable 필드로 열어 두고,
    현재는 `facility_info` 또는 primary raw payload에 값이 있으면 projection한다.
    provider 모델 보강은 후속 task로 분리한다.
-3. 수질·KHOA index·latest weather는 이번 구현에서 null/빈 배열로 고정한다. 별도
-   marine 표면 또는 weather metric 확장은 후속 결정으로 둔다.
+3. 수질·KHOA index는 이번 구현에서 null/빈 배열로 고정한다. 별도 marine 표면은 후속 결정으로
+   둔다. (`latest_weather` 필드는 ADR-105로 응답에서 제거됐다 — 날씨 정본은 kor-travel-weather.)
 4. 축제 상세 content/주최/주관/후원/reference_date는 `source_records.raw_data`의
    primary source payload를 함께 읽어 projection한다.
 

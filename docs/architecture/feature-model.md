@@ -9,9 +9,9 @@
 |-------|------|
 | `place` | 장소·시설·주차장·화장실·주유소·휴게소·해수욕장 등 |
 | `event` | 축제·공연·전시 (기간성) |
-| `notice` | 교통·기상·안전·해양 공지 (short-lived) |
+| `notice` | 교통·안전·해양·재해(산사태) 공지 (short-lived; 기상특보 notice는 ADR-105로 제거) |
 | `price` | 가격 시계열 anchor marker (`feature_price_values`와 연결) |
-| `weather` | weather-only marker (place와 분리된 관측소 등) |
+| `weather` | 정의만 유지 — ADR-105로 Map은 weather feature를 적재·조회하지 않는다(날씨 정본은 kor-travel-weather) |
 | `route` | 산책로·등산로·자전거길·관광도로 (LINESTRING) |
 | `area` | 국립공원·해수욕장구역·매장유산구역 (MULTIPOLYGON) |
 
@@ -37,7 +37,7 @@
 | `correction` | 수동/자동 보정 |
 | `duplicate_candidate` | dedup 검수 후보 |
 | `media` | 이미지/문서 출처 |
-| `weather_context` | weather 시계열 출처 |
+| `weather_context` | weather 시계열 출처 — ADR-105 이후 생산자 없음(enum 값 퇴역은 백로그, DB CHECK 마이그레이션 필요) |
 
 ## 4. `Feature` 본체
 
@@ -371,6 +371,10 @@ class FeatureFileSource(BaseModel):
 `upload_feature_files(sources)` → 다운로드 + 업로드 + FeatureFile 메타 생성.
 
 ## 14. `WeatherValue` (ADR-010)
+
+> **정의만 유지(ADR-105).** Map은 `WeatherValue`를 적재·저장·조회하지 않는다 — 값 표는 migration
+> `402`가 DROP했고 키 함수 `make_weather_value_key`도 제거됐다. DTO와 enum은 API 재도입 방지 검사가
+> 기대는 정의로 남긴다. 아래는 당시 계약 기록이다.
 
 ```python
 class WeatherValue(BaseModel):

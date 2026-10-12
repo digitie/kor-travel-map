@@ -78,7 +78,7 @@
 | ADR-059 | 벤더링된 agent/skill 설정의 언어·context-discovery 예외 정책 | → 이관 [agent-guide.md](../agent-guide.md) |
 | ADR-060 | Admin 로그인, frontend proxy, public API key | [060-admin-login-frontend-proxy-public-api-keys.md](060-admin-login-frontend-proxy-public-api-keys.md) |
 | ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule; auto-publish는 ADR-092로 superseded) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
-| ADR-062 | 공개 Weather API와 3년 이력 보존 | [062-public-weather-api-three-year-history.md](062-public-weather-api-three-year-history.md) |
+| ADR-062 | 공개 Weather API와 3년 이력 보존 (ADR-104/105로 superseded — Map에서 날씨 기능 제거) | [062-public-weather-api-three-year-history.md](062-public-weather-api-three-year-history.md) |
 | ADR-063 | Feature 관측과 큐레이션 collection 분리 | [063-feature-observations-curation-collections.md](063-feature-observations-curation-collections.md) |
 | ADR-064 | admin ops 표면을 파이프라인/데이터셋 2페이지로 통합 재작성 | [064-admin-ops-consolidation-two-pages.md](064-admin-ops-consolidation-two-pages.md) |
 | ADR-065 | POI target mutation causal receipt와 ETag 조건부 삭제 | [065-poi-target-causal-receipt-conditional-delete.md](065-poi-target-causal-receipt-conditional-delete.md) |
@@ -88,7 +88,7 @@
 | ADR-069 | DB 소유 provider dataset과 immutable lineage 정본 | [069-provider-datasets-canonical.md](069-provider-datasets-canonical.md) |
 | ADR-070 | Feature core와 typed subtype 분해 | [070-feature-subtype-decomposition.md](070-feature-subtype-decomposition.md) |
 | ADR-071 | Field-level override 단일화 | [071-field-level-override.md](071-field-level-override.md) |
-| ADR-072 | Weather bitemporal 사실과 current summary | [072-weather-bitemporal.md](072-weather-bitemporal.md) |
+| ADR-072 | Weather bitemporal 사실과 current summary (weather 부분은 ADR-104/105로 superseded) | [072-weather-bitemporal.md](072-weather-bitemporal.md) |
 | ADR-073 | Typed public/service/operator REST 계약 | [073-public-rest-contract.md](073-public-rest-contract.md) |
 | ADR-074 | Domain-owned replay, revision, outbox 쓰기 안전성 | [074-write-safety.md](074-write-safety.md) |
 | ADR-075 | 보존 우선 cutover와 DDL 규율 | [075-cutover-and-ddl-discipline.md](075-cutover-and-ddl-discipline.md) |
