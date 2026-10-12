@@ -14,10 +14,11 @@ runtime preflight는 C7 러너와 같은 모듈(`scripts/lib/c7_prod_runtime.py`
 ## 1. 불변식
 
 - 실행은 root, 단일 orchestrator, Playwright worker 1개로 제한한다.
-- 운영 기존 row를 fixture로 빌리지 않는다. `run_id`에서 파생한 Feature ID 8개만 소유한다.
-  place 6개는 admin API로 생성·승인·soft-delete하고, weather/price 2개만 전용 helper가
-  transaction으로 만들고 물리 삭제한다.
-- Map API runtime role은 read-only를 유지한다. weather/price 두 행의 fixture seed·cleanup은
+- 운영 기존 row를 fixture로 빌리지 않는다. `run_id`에서 파생한 Feature ID 7개만 소유한다.
+  place 6개는 admin API로 생성·승인·soft-delete하고, price 1개만 전용 helper가
+  transaction으로 만들고 물리 삭제한다. (weather fixture는 ADR-105로 weather 기능과 함께 빠졌다 —
+  `scripts/admin_feature_live_fixture.py` 머리말, `scripts/admin_feature_live_state.py` `_owned_ids`.)
+- Map API runtime role은 read-only를 유지한다. price 한 행의 fixture seed·cleanup은
   `E2E_ADMIN_FEATURE_FIXTURE_PG_DSN`으로만 전달되는 root-only DSN을 helper가 사용하고,
   helper는 mutation/role 전환 전에 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`,
   `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE`,
@@ -123,12 +124,12 @@ sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,
 `/var/lib/kor-travel-map/admin-feature-live-acceptance`의 orchestrator lock과 Docker lifecycle
 barrier를 잡은 뒤 다음 순서로 실행한다.
 
-1. `BLOCKED.json`에 run identity·owned ID 8개·phase를 durable 기록한다.
+1. `BLOCKED.json`에 run identity·owned ID 7개·phase를 durable 기록한다.
 2. exact API image를 `network=none`, read-only, capability 0으로 띄우되 cursor secret을 빼고
    dummy credential·production profile·features=true를 넣는다. Alembic 전에 exit 1과 generic
    cursor-secret 누락 문구가 정확히 나오는지 확인한다.
 3. exact API image의 env/volume/network를 복제한 standalone labeled helper가 hidden
-   weather/price Feature와 value 각 1건을 seed한다. helper만 API runtime DSN 대신
+   price Feature와 value 1건을 seed한다. helper만 API runtime DSN 대신
    root-only fixture DSN을 받고, supplied DB/login/head confirmation이 모두 실제 값과
    일치할 때만 schema-owner role을 명시적으로 설정한다. generic provider procedure 호출은
    dedicated manual procedure owner로 좁게 임시 전환한다. inspect한 environment는 중복 없는
@@ -139,7 +140,7 @@ barrier를 잡은 뒤 다음 순서로 실행한다.
 4. browser가 draft/inactive/hidden marker, correction, 같은 검색 이름을 공유하는 active
    search alpha/beta를 admin change request로 만들고 승인한다. idempotency key는 Feature ID의
    SHA256이라 각 생성이 충돌하지 않는다.
-5. #741은 admin bbox/marker/detail/weather·price card/UI panel과 public 404를 확인한다.
+5. #741은 admin bbox/marker/detail/price card/UI panel과 public 404를 확인한다.
    public bbox는 owned 좌표 주위의 좁은 범위에서 `mode=items`, `truncated=false`,
    `coverage.returned < coverage.limit`를 먼저 확인한 뒤 hidden ID 미포함을 단언한다.
 6. `T-VN-15`는 BFF search `q + page_size=1`에서 `include_total=false`의 `total=null`과 서로
@@ -205,8 +206,8 @@ recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 �
 - terminal ACTIVE drain과 exact owned container removal
 - API-owned pending request reject 또는 delete approve, 모든 API-owned Feature `deleted`·public 404,
   exact search query의 `items=[]`, `total=0`, cursor null/absent
-- direct weather/price parent와 기존 weather/price child row를 모두 `SELECT ... FOR UPDATE`로 잠근
-  같은 transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 두 parent를 삭제
+- direct price parent와 기존 price child row를 모두 `SELECT ... FOR UPDATE`로 잠근
+  같은 transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 parent를 삭제
 - cleanup helper도 동일한 confirmed root-only fixture DSN/schema-owner connection을 사용한다.
   API runtime role로 write grant를 추가하거나 provider executor role을 우회하지 않는다.
 - 삭제 후 direct 0/0/0·FK reference 0, label/name container 0, ACTIVE 없음 확인

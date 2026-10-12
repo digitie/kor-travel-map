@@ -1,9 +1,13 @@
 # ADR-062 — 공개 Weather API와 3년 이력 보존
 
-- 상태: accepted
+- 상태: superseded by ADR-104/105 (2026-10-01 — Map에서 날씨 기능 제거)
 - 날짜: 2026-07-09
 - 결정자: user + codex
 - 관련: ADR-072 — bitemporal 시간 의미·무결성·batch/current projection
+
+> **superseded (2026-10-01, ADR-104/105)**: Map은 KMA를 적재하지 않고(ADR-104) weather feature·날씨 notice
+> 기능·데이터·전용 스키마를 지웠다(ADR-105, migration `402`). 이 ADR이 정한 공개 weather API(`/v1/features/weather/*`)와 3년 보존은 더 이상 Map에 없다 —
+> 날씨 정본은 kor-travel-weather다. 아래 본문은 당시 결정 기록으로 남긴다.
 
 ## 컨텍스트
 

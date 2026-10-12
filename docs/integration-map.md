@@ -83,9 +83,9 @@
                                                         │ OpenAPI /v1 (HTTP)
                                                         ▼
                           [PinVi api :9021] ◀──(read: in-bounds/search/nearby/
-                            trip·POI·공유·협업          {id}/weather/batch/categories
+                            trip·POI·공유·협업          batch/categories
                                   ▲                     /providers + curations
-                                  │                     + /weather/* forecast/history)
+                                  │                     — weather 경로는 ADR-105로 제거)
                                   │                  ◀──(admin: /v1/admin/features*
                           [PinVi web :9022]          — 사용자 제안 승인 반영, ADR-051;
                                                        ops: canonical datasets/pipeline)
@@ -173,7 +173,7 @@
 | 표면 | 현재 인증 경계 | 성공 envelope | 에러 |
 |---|---|---|---|
 | kor-travel-map 공용 read (`RoutePolicy.PUBLIC_KEYED`) | production에서 `X-Kor-Travel-Map-Api-Key` 또는 `X-Kor-Travel-Map-Service-Token`. URL `key` query는 폐기했고 full/user OpenAPI는 route policy에서 같은 OR 계약을 생성한다 | `{data, meta}` — `meta.page.next_cursor` | RFC7807 `problem+json`(top-level `code`) |
-| kor-travel-map service resource (`/v1/features/{batch,weather/batch}`, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`, `/v1/service/feature-alias-maps*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache-target은 command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}` exact 역할 principal과 canonical consumer/system binding을 추가 결박 | 〃 | 〃 |
+| kor-travel-map service resource (`/v1/features/batch` — weather batch는 ADR-105로 제거, `/v1/service/cache-target*`, `/v1/service/refresh-requests*`, `/v1/service/feature-alias-maps*`) | production 필수 `X-Kor-Travel-Map-Service-Token`; cache-target은 command=`{command}`, consumer=`{read,claim,ack,nack,snapshot}`, restore=`{restore-fence}`, recovery=`{recovery,recovery-replay}` exact 역할 principal과 canonical consumer/system binding을 추가 결박 | 〃 | 〃 |
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
@@ -189,7 +189,7 @@
 ### 3.1 vNext PinVi 단계적 cutover
 
 ADR-073의 공개 조회·검색, canonical ops principal, 5-state feature batch는 현재 OpenAPI와
-production compatible pair에 반영됐다. sparse weather batch처럼 생산자만 먼저 반영되거나
+production compatible pair에 반영됐다. (sparse weather batch는 ADR-105로 Map에서 제거됐다.)
 cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 compatible
 pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
@@ -263,7 +263,7 @@ root-owned leaf의 정확히 한 번인 launcher다. terminal receipt가 나오�
 | ops 관측 read | **완료** — consistency/log caller `ops:read` 전환과 direct caller inventory | **완료** — operator gate·route exception 0건, production principal smoke |
 | feature batch | 5-state typed DTO, transport 503 stale 유지, opaque UUID 보존 | state classifier와 revision, pinned service OpenAPI |
 | Feature UUID | legacy alias-map DB 이관과 모든 FK/consumer 참조 shadow 검증 | UUID read/write 전환, alias lookup 보존, checksum 일치 |
-| weather | sparse 다중 `targets[]`/`known_at`, item `card_key`·target-local `cards[]` typed consumer | 단일 snapshot bitemporal projection, 공유 card 정규화, metric budget, parent 404 |
+| ~~weather~~ | **제거(ADR-105, 2026-10-01)** — 날씨 정본은 kor-travel-weather, PinVi는 T-365에서 이미 옮겼다 | 해당 없음 — Map에 weather 경로 없음 |
 | cache target/refresh | **paired PR 전 미완** — generation·conditional ETag·Idempotency-Key·strict pull consumer | **producer foundation 진행** — service resource, restore fence, same-tx outbox, pull lease/replay/snapshot |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 
@@ -279,8 +279,8 @@ pair로의 rollback은 지원하지 않는다. 어느 gate든 실패하면 새 w
 typed 422를 포함한다. production API의 cursor signing secret은 다른 runtime과 frontend로
 전파하지 않으며 실제 값은 배포 전용 env에만 둔다.
 
-현재 compatible pair에 포함된 공개 read·feature batch는 활성 계약이다. sparse weather
-batch와 후속 service resource는 각 T-VN task와 PinVi mirror task가 활성화 시점을 소유한다.
+현재 compatible pair에 포함된 공개 read·feature batch는 활성 계약이다. 후속 service resource는
+각 T-VN task와 PinVi mirror task가 활성화 시점을 소유한다.
 어느 경우에도 구 계약용 호환 alias는 두지 않는다.
 
 #### cache target paired stream (ADR-081)
@@ -369,9 +369,9 @@ feature, `missing`은 저장소에 없는 identity다. 따라서 비공개와 �
 축약하지 않으며 PinVi는 같은 typed state를 Web·Map·Mobile 표시 resolver에서 사용한다.
 
 **echo 계약 (T-VN-32C 값 전환에서 명문화)**: batch item·found/missing 키의
-`feature_id`**와 found item의 `trip_card.feature_id`(item echo와 동일 값)**,
-weather batch(`POST /v1/features/weather/batch`)의 target `feature_id` echo는
-**요청 표기를 그대로 보존**한다 — Map이 응답 read 표면의 `feature_id` 값을
+`feature_id`**와 found item의 `trip_card.feature_id`(item echo와 동일 값)**는
+**요청 표기를 그대로 보존**한다(옛 weather batch `POST /v1/features/weather/batch`의 target echo도
+같은 규칙이었으나 ADR-105로 경로째 제거됐다) — Map이 응답 read 표면의 `feature_id` 값을
 UUID 정본으로 전환(T-VN-32C PR-2)한 뒤에도, batch 계열 echo는 canonicalize하지
 않는다. 소비자(PinVi `kor_travel_map.py`의 echo 등식 검증)는 legacy `f_*`로
 보내면 legacy를, UUID로 보내면 UUID를 그대로 돌려받는다. 조회 자체는 Map
