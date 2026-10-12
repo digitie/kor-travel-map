@@ -511,13 +511,18 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_notice_transport_highway_incidents_ten_minute_schedule` | `feature_notice_transport_highway_incidents_job` | `*/10 * * * *` | 고속도로 돌발 활성 집합 10분마다(transport export) |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` | 국가유산 item 월 1회 |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` | 국가유산 행사 월 1회 |
-| `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` | MOIS bulk 월 1회 |
+| `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` | MOIS 재개형 적재 월 1회 시작(활성 run과 합침, ADR-108) |
 | `feature_place_knps_points_monthly_schedule` | `feature_place_knps_points_job` | `45 3 3 * *` | KNPS point 월 1회 |
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` | KNPS geometry 월 1회 |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` | kor-travel-concierge YouTube 후보 월 1회 |
 | `feature_place_mcst_culture_monthly_schedule` | `feature_place_mcst_culture_job` | `30 4 3 * *` | MCST 문화 파일데이터 13종 월 1회 |
 | `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |
+
+MOIS 적재 run은 시간 상한(기본 4시간)에서 멈추고 `kor_travel_map.mois_load.outcome=budget_exhausted`를
+남긴다. `feature_place_mois_licenses_continuation_sensor`(기본 STOPPED, 5분 간격)가 마지막 run이
+성공·`budget_exhausted`일 때만 같은 run_config로 다음 run을 띄운다. 큐 runner는 MOIS를 건너뛴다
+(`dedicated_job_only`). 운영 절차는 [mois-license-feature-etl.md §13](../etl/mois-license-feature-etl.md).
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 kor-travel-map 운영자가 조정한다.
 T-208f 기준 maintenance schedule도 기본 `STOPPED`다. 로컬 개발에서 자동으로 큐와

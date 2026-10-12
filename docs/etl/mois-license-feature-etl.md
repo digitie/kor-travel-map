@@ -246,3 +246,93 @@ async def run_mois_weekly_update(
 - 관리번호 공백 row는 fingerprint 정책을 `python-mois-api`에서 먼저 안정화.
 - 새 업종 추가는 ADR + `MOIS_LICENSE_PROMOTION_MAPPINGS` 업데이트.
 - MOIS sigun_code → 법정동코드 변환 표 (`python-mois-api` 책임).
+
+## 13. 재개형 적재와 운영 절차 (ADR-108)
+
+> §9의 단일 transaction 흐름은 **더 이상 Dagster 경로가 아니다.** Dagster
+> `feature_place_mois_licenses`는 `kortravelmap.dagster.mois_chunked_load`로 적재한다.
+> 결정과 근거는 [ADR-108](../adr/108-mois-resumable-chunked-load.md).
+
+### 13.1 동작 요약
+
+| 항목 | 값 |
+|------|----|
+| commit 단위 | 업종 하나 안의 최대 500행 chunk(`MOIS_LOAD_CHUNK_SIZE`) |
+| 재개 키 | `source_entity_id`(`{slug}::{mng_no}`) + `raw_payload_hash` — 이미 같은 payload로 적재돼 있고 primary feature가 active면 변환·지오코딩 없이 재관측만 |
+| 지오코딩 | chunk 좌표를 중복 없이 모아 bounded 동시 선조회(`KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY`, 기본 2), run 수명 LRU 5만 좌표. 원천 `legal_dong_code`가 있는 행은 조회하지 않는다 |
+| run 크기 | `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 14,400초)까지만 새 chunk 시작 → 정상 종료 + run tag `kor_travel_map.mois_load.outcome=budget_exhausted` |
+| 이어 달리기 | `feature_place_mois_licenses_continuation_sensor`(기본 **STOPPED**) — 마지막 run이 성공·`budget_exhausted`면 같은 run_config로 다음 run. 실패 run은 잇지 않는다 |
+| retry | 1회, 5분 뒤(재시도도 이어 간다) |
+| 봉인·sync 성공 | 전 업종을 한 run 안에서 끝까지 본 run만(`outcome=complete` + 전 업종) |
+| 큐 경로 | 건너뛴다(`skip_reason=dedicated_job_only`) — 큐는 쓰기를 한 transaction에 묶는다 |
+| 원천 SQLite | `/opt/dagster/state/mois/mois_source.db`(이미지 기본값, appuser 소유). 운영 compose가 그 디렉터리에 named volume을 붙인다 |
+
+run 결과 metadata: `mois_load_outcome`, `mois_load_slugs_completed`, `mois_load_stopped_in_slug`,
+`mois_load_records_{seen,unchanged,converted}`, `mois_load_chunks_committed`,
+`mois_reverse_geocode_{live_calls,cache_hits,prefetch_failures}`. 업종 하나가 끝날 때마다
+run 로그에 `MOIS 업종 <slug> 완료`가 남는다.
+
+### 13.2 업종 하나로 검증하기 (전체 적재 전, prod)
+
+**전제.** (1) 이 변경을 담은 Map pair가 회전돼 있다. (2) Manager의 MOIS 원천 volume 변경이
+설치돼 code-server가 `/opt/dagster/state/mois`에 volume을 갖는다. (3) n150 사전 점검
+(`~/preflight.sh`)이 PASS다. 이어 달리기 sensor는 **끈 채로** 둔다.
+
+1. **원천 sync.** `mois_localdata_source_sync` job을 한 번 돌린다(전국 42업종, 실측 약 24분·5GB).
+   Map API의 schedule "지금 실행" 또는 Dagster UI. 끝나면 `<db>.synced` marker가 생긴다.
+2. **작은 업종 고르기.** code-server 컨테이너에서 영업중 행 수를 읽기 전용으로 센다.
+
+   ```bash
+   docker exec <map-dagster-code-server-container> python -c "import os,sqlite3; c=sqlite3.connect('file:'+os.environ['KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH']+'?mode=ro', uri=True); print(c.execute('SELECT service_slug, count(*) FROM mois_place_master WHERE is_open = 1 GROUP BY 1 ORDER BY 2').fetchall())"
+   ```
+
+   수십~수백 행인 PROMOTED 업종(예: `yacht_marinas`, `international_convention_facilities`,
+   `tourist_railways`) 하나를 고른다.
+3. **한 업종만 적재.** 공용 Dagster GraphQL(`http://127.0.0.1:11002/graphql`, n150 안에서)에
+   run_config로 업종을 준다. Map API의 "지금 실행"은 run_config를 비워 **전 업종**을 돌리므로
+   이 단계에 쓰지 않는다.
+
+   ```bash
+   cat > /tmp/mois-one-slug.json <<'JSON'
+   {"query": "mutation($p: ExecutionParams!) { launchRun(executionParams: $p) { __typename ... on LaunchRunSuccess { run { runId } } ... on RunConfigValidationInvalid { errors { message } } ... on PythonError { message } } }",
+    "variables": {"p": {
+      "selector": {"jobName": "feature_place_mois_licenses_job",
+                   "repositoryName": "__repository__",
+                   "repositoryLocationName": "kortravelmap.dagster.definitions"},
+      "runConfigData": {"resources": {"mois_load_plan": {"config": {"service_slugs": ["yacht_marinas"]}}}},
+      "executionMetadata": {"tags": [
+        {"key": "kor_travel_map.trigger_kind", "value": "manual"},
+        {"key": "kor_travel_map.operator", "value": "<operator>"},
+        {"key": "kor_travel_map.reason", "value": "ADR-108 one-slug verification"}]}}}}
+   JSON
+   curl -sS -H 'Content-Type: application/json' --data @/tmp/mois-one-slug.json http://127.0.0.1:11002/graphql
+   ```
+
+   기대: run SUCCESS, tag `kor_travel_map.mois_load.outcome=complete`,
+   `mois_load_records_seen` = 2단계의 행 수, `mois_load_records_unchanged=0`. 업종 선택 run이므로
+   sync 성공·봉인은 남지 않는다(정상).
+4. **재개 확인.** 3단계를 그대로 한 번 더 돌린다. 기대: `mois_load_records_unchanged` =
+   `mois_load_records_seen`, `mois_load_records_converted=0`, `mois_reverse_geocode_live_calls=0`.
+   이것이 "다시 돌려도 이미 적재된 것은 지오코딩·적재하지 않는다"의 실증이다.
+5. **(선택) 상한 정지·이어 달리기.** 수천 행 업종으로 `"run_budget_seconds": 60`을 함께 주면
+   첫 chunk 뒤 `budget_exhausted`로 끝난다. sensor를 잠시 켜면 같은 run_config로 이어 달려
+   `complete`로 끝나는지 본다. 확인 뒤 sensor를 다시 끈다.
+6. **적재 확인(읽기 전용).** 공용 PG의 Map DATABASE에서:
+
+   ```sql
+   SELECT count(*) FROM provider_sync.source_entities AS e
+   JOIN provider_sync.provider_datasets AS d USING (provider_dataset_id)
+   WHERE d.provider = 'python-mois-api' AND d.dataset_key = 'mois_license_features_bulk'
+     AND e.source_entity_id LIKE 'yacht_marinas::%';
+   ```
+
+   3단계 행 수에서 주소/좌표 검증으로 버린 행(`address_validation_dropped_count`)을 뺀 값이다.
+
+### 13.3 전체 적재
+
+1. `KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS`를 168 이상으로 둔다(운영 env) — 캠페인 중 run이
+   Phase A를 다시 받지 않게(주간 sync job이 갱신한다). 소유자 결정 사항이다(ADR-108 열린 결정 2).
+2. `feature_place_mois_licenses_continuation_sensor`를 켠다.
+3. run_config 없이 `feature_place_mois_licenses_job`을 한 번 띄운다(Map API "지금 실행" 가능).
+   이후 run은 sensor가 잇는다. 마지막 run이 `complete`(전 업종)면 봉인·sync 성공이 남는다.
+4. 실패 run이 나오면 sensor는 멈춘다. 원인을 본 뒤 같은 job을 다시 띄우면 이어서 적재한다.

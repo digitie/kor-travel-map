@@ -33,9 +33,8 @@ from kortravelmap.providers.knps import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 
-from dagster import Array, String
+from dagster import Array, InitResourceContext, Int, ResourceDefinition, String, resource
 from dagster import Field as DagsterField
-from dagster import InitResourceContext, ResourceDefinition, resource
 
 from .feature_operation_tracking import (
     ensure_feature_operation_guard_for_provider,
@@ -655,7 +654,17 @@ _MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
                 "적재할 MOIS 업종 slug. 비어 있으면 PROMOTED 전 업종이다. 검증 run은 작은 "
                 "업종 하나를 준다(ADR-108). PROMOTED가 아닌 이름은 run 시작에서 거부한다."
             ),
-        )
+        ),
+        "run_budget_seconds": DagsterField(
+            Int,
+            default_value=0,
+            is_required=False,
+            description=(
+                "이 run의 시간 상한(초, 60~19800). 0이면 settings "
+                "(KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS). 검증 run이 상한 정지와 이어 "
+                "달리기를 작게 시험할 때 쓴다."
+            ),
+        ),
     },
     description=(
         "MOIS 재개형 적재 plan — run_config의 업종 선택 + settings의 지오코딩 동시성·run "
@@ -664,9 +673,11 @@ _MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
 )
 def mois_load_plan_resource(context: InitResourceContext) -> MoisLoadPlan:
     """run_config에서 업종 선택을 받아 검증된 plan을 만든다."""
+    budget = int(context.resource_config.get("run_budget_seconds") or 0)
     return resolve_mois_load_plan(
         KorTravelMapSettings(),
         cast(list[str], context.resource_config.get("service_slugs") or []),
+        run_budget_seconds=budget or None,
     )
 
 

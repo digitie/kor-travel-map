@@ -666,7 +666,7 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
     )
 
     assert resources.values["mois_license_records"] is sentinel
-    assert getattr(resources.values["mois_load_plan"], "full_coverage") is True
+    assert resources.values["mois_load_plan"].full_coverage is True
     assert resources.values["mois_dataset_key"] == DATASET_KEY_BULK
     assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
 

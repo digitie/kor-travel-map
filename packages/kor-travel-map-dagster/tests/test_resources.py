@@ -510,11 +510,18 @@ def test_mois_load_plan_resource_reads_the_slug_selection_from_run_config() -> N
     )
     everything = resource_fn(_guarded_init_resource_context(config={"service_slugs": []}))
 
-    assert getattr(selected, "service_slugs") == ("yacht_marinas",)
-    assert getattr(selected, "full_coverage") is False
-    assert getattr(everything, "full_coverage") is True
+    assert selected.service_slugs == ("yacht_marinas",)
+    assert selected.full_coverage is False
+    assert everything.full_coverage is True
+    assert everything.run_budget_seconds == KorTravelMapSettings().mois_load_run_budget_seconds
     with pytest.raises(ValueError, match="billiard_halls"):
         resource_fn(_guarded_init_resource_context(config={"service_slugs": ["billiard_halls"]}))
+
+    # 검증 run은 상한 정지·이어 달리기를 작은 업종으로 시험할 수 있다 — 범위는 settings와 같다.
+    short = resource_fn(_guarded_init_resource_context(config={"run_budget_seconds": 120}))
+    assert short.run_budget_seconds == 120
+    with pytest.raises(ValueError, match="60~19800"):
+        resource_fn(_guarded_init_resource_context(config={"run_budget_seconds": 30}))
 
 
 def test_provider_record_resource_env_mapping() -> None:

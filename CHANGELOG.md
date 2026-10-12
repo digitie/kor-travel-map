@@ -10,6 +10,22 @@
 
 ## [Unreleased]
 
+### MOIS 인허가 재개형 chunk commit 적재 (2026-10-12, ADR-108)
+
+- **CHANGED (dagster)**: `feature_place_mois_licenses`가 98만 행을 한 transaction으로 넣지 않는다. 업종 안 500행
+  chunk마다 commit하고, 이미 같은 payload로 적재된 행(`source_entity_id` + `raw_payload_hash`, primary feature
+  active)은 지오코딩·변환 없이 재관측만 한다. 중단 뒤 재실행·다음 원천 snapshot은 남은 것·바뀐 것만 적재한다.
+- **ADDED (geocoding)**: `kortravelmap.geocoding.PrefetchingReverseGeocoder` — bounded 동시성 선조회 + run 수명 LRU.
+  `KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY`(기본 2).
+- **ADDED (dagster)**: run 시간 상한 `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 4시간), run tag
+  `kor_travel_map.mois_load.outcome`, 이어 달리기 sensor `feature_place_mois_licenses_continuation_sensor`(기본
+  STOPPED), run_config `resources.mois_load_plan.config.{service_slugs,run_budget_seconds}`(업종 선택 검증 run).
+- **CHANGED (dagster)**: MOIS asset retry 3회 → 1회(5분 뒤). 월간 schedule은 활성 run과 tick을 합친다. curation
+  봉인·provider sync 성공은 전 업종을 한 run에서 끝까지 본 run만 남긴다. MOIS finding의 stale close는 하지 않는다.
+- **CHANGED (queue)**: feature update 큐 runner는 MOIS를 `skipped`(`dedicated_job_only`)로 돌려준다.
+- **CHANGED (image/compose)**: MOIS 원천 SQLite 기본 경로가 `/opt/dagster/state/mois/mois_source.db`(이미지가
+  appuser 소유로 만든다). standalone compose의 named volume도 그 디렉터리에 붙는다. 운영 compose는 Manager 변경.
+
 ### map-marker-react: `roadblock`·`warning` 글리프 (2026-10-08)
 
 - **FIXED (marker)**: `@kor-travel-map/map-marker-react`의 `MAKI_GLYPH`에 `roadblock`(🚧, U+1F6A7)과

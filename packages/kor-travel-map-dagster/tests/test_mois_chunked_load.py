@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from dagster import DagsterRunStatus, DefaultSensorStatus, RunRequest, SkipReason
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.dto import Address, Coordinate, FeatureBundle
 from kortravelmap.infra.feature_repo import (
@@ -26,8 +27,6 @@ from kortravelmap.providers.mois import (
     license_source_entity_id,
 )
 from kortravelmap.settings import KorTravelMapSettings
-
-from dagster import DagsterRunStatus, DefaultSensorStatus, RunRequest, SkipReason
 
 from kortravelmap.dagster import mois_chunked_load as chunked
 from kortravelmap.dagster.mois_chunked_load import (

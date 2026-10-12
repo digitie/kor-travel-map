@@ -106,14 +106,32 @@ class MoisLoadPlan:
     run_budget_seconds: int
 
 
+_MIN_RUN_BUDGET_SECONDS: Final[int] = 60
+_MAX_RUN_BUDGET_SECONDS: Final[int] = 19_800
+
+
 def resolve_mois_load_plan(
-    settings: KorTravelMapSettings, service_slugs: Iterable[str] = ()
+    settings: KorTravelMapSettings,
+    service_slugs: Iterable[str] = (),
+    *,
+    run_budget_seconds: int | None = None,
 ) -> MoisLoadPlan:
     """run_config의 업종 선택을 검증해 plan으로 만든다. 빈 선택은 전 업종이다.
 
     PROMOTED 밖의 이름은 조용히 버리지 않고 거부한다 — 오타 하나가 "0건 적재 성공"이 되면
-    검증 run이 아무것도 검증하지 않은 채 초록이 된다.
+    검증 run이 아무것도 검증하지 않은 채 초록이 된다. ``run_budget_seconds``는 검증 run이
+    상한 정지·이어 달리기를 작은 업종으로 시험할 수 있게 하는 run 단위 override다(settings와
+    같은 범위).
     """
+    budget = (
+        settings.mois_load_run_budget_seconds
+        if run_budget_seconds is None
+        else run_budget_seconds
+    )
+    if not _MIN_RUN_BUDGET_SECONDS <= budget <= _MAX_RUN_BUDGET_SECONDS:
+        raise ValueError(
+            f"MOIS run 시간 상한은 {_MIN_RUN_BUDGET_SECONDS}~{_MAX_RUN_BUDGET_SECONDS}초다: {budget}"
+        )
     requested = tuple(str(slug).strip() for slug in service_slugs if str(slug).strip())
     unknown = sorted(set(requested) - PROMOTED_SERVICE_SLUGS)
     if unknown:
@@ -124,7 +142,7 @@ def resolve_mois_load_plan(
         full_coverage=set(selected) == PROMOTED_SERVICE_SLUGS,
         source_db_path=settings.mois_source_db_path,
         geocode_concurrency=settings.mois_geocode_concurrency,
-        run_budget_seconds=settings.mois_load_run_budget_seconds,
+        run_budget_seconds=budget,
     )
 
 

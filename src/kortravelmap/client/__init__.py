@@ -184,9 +184,6 @@ from kortravelmap.infra.feature_repo import (
     get_notice_snapshot_watermark as repo_get_notice_snapshot_watermark,
 )
 from kortravelmap.infra.feature_repo import (
-    reobserve_unchanged_source_entities as repo_reobserve_unchanged_source_entities,
-)
-from kortravelmap.infra.feature_repo import (
     list_primary_place_locator as repo_list_primary_place_locator,
 )
 from kortravelmap.infra.feature_repo import (
@@ -197,6 +194,9 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_repo import (
     purge_expired_notices as repo_purge_expired_notices,
+)
+from kortravelmap.infra.feature_repo import (
+    reobserve_unchanged_source_entities as repo_reobserve_unchanged_source_entities,
 )
 from kortravelmap.infra.feature_repo import (
     search_features as repo_search_features,
