@@ -65,7 +65,12 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
-from kortravelmap.infra.advisory_lock import advisory_lock, try_advisory_lock
+from kortravelmap.infra.advisory_lock import (
+    advisory_lock,
+    connection_advisory_lock,
+    discard_connection_on_failure,
+    try_advisory_lock,
+)
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
     BatchDagMvPrepared,
@@ -102,7 +107,10 @@ from kortravelmap.infra.consistency import (
 from kortravelmap.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
-from kortravelmap.infra.db import make_async_session_factory
+from kortravelmap.infra.db import (
+    make_async_session_factory,
+    make_connection_session_factory,
+)
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
     list_dedup_refresh_features,
@@ -562,15 +570,48 @@ class AsyncKorTravelMapClient:
 
         Dagster asset pool은 scheduled/manual asset run의 불필요한 동시 시작을
         줄이지만, feature update worker가 같은 실행 함수를 직접 부르는 경로까지
-        포괄하지 못한다. 별도 DB session에 session-level advisory lock을 유지해
-        어느 process/실행 경로에서 호출하든 같은 ``key``의 provider 작업이 겹치지
-        않게 한다. process가 종료되면 PostgreSQL connection과 함께 lock도 해제된다.
+        포괄하지 못한다. session-level advisory lock을 유지해 어느 process/실행
+        경로에서 호출하든 같은 ``key``의 provider 작업이 겹치지 않게 한다. process가
+        종료되면 PostgreSQL connection과 함께 lock도 해제된다.
+
+        **lock과 본문은 같은 physical connection 하나를 순차로 쓴다.** Dagster
+        ``kor_travel_map_client`` resource는 ADR-107에 따라 ``pool_size=1,
+        max_overflow=0``이다. 종전에는 lock이 session 하나(=연결 하나)를 끝까지 쥔
+        채 본문의 client 호출이 각자 새 session을 열었으므로, 본문의 첫 DB 호출이
+        pool의 유일한 연결을 기다리다 ``QueuePool limit of size 1 overflow 0``으로
+        죽었다(2026-10-12 prod run ``bfd18ef5``, 4회 시도 모두 30초 만에 같은 자리).
+        이제 lock을 잡은 connection에 이 client의 session factory를 lock 구간 동안
+        다시 묶는다. client **객체는 그대로**다 — Dagster guard가 resource client와
+        identity로 대조하고(``require_feature_operation_guard``), 본문 helper가
+        ``context.resources``에서 client를 다시 꺼내므로 복사본을 넘기면 안 된다.
+        본문은 이 client로 DB 호출을 **동시에** 하면 안 된다(연결 하나는 한 번에
+        한 문장).
+
+        feature update runner가 executor transaction에 결합한 client
+        (``_transaction_bound``)는 이미 그 executor connection 하나에 묶여 있으므로
+        종전처럼 그 session에서 lock만 잡는다.
         """
+        if self._transaction_bound:
+            async with (
+                self._session_factory() as session,
+                advisory_lock(session, key),
+            ):
+                yield
+            return
+
+        # `connection_advisory_lock`이 획득 autobegin을 commit해 connection을 transaction
+        # 밖에 두고, 본문이 실패·취소되거나 해제가 실패하면 connection을 버려(server가
+        # lock을 푼다) lock을 쥔 연결이 pool로 돌아가지 않게 한다.
         async with (
-            self._session_factory() as session,
-            advisory_lock(session, key),
+            self._engine.connect() as connection,
+            connection_advisory_lock(connection, key),
         ):
-            yield
+            unpinned_session_factory = self._session_factory
+            self._session_factory = make_connection_session_factory(connection)
+            try:
+                yield
+            finally:
+                self._session_factory = unpinned_session_factory
 
     async def drain_expired_cache_target_snapshots(
         self,
@@ -629,10 +670,13 @@ class AsyncKorTravelMapClient:
         # AsyncConnection context가 physical connection을 끝까지 pin한다. lock 획득
         # transaction은 즉시 commit하되 session-level advisory lock은 같은 backend에
         # 남고, finally의 unlock도 동일 connection에서 실행된다.
-        async with self._engine.connect() as lock_connection, try_advisory_lock(
-            lock_connection,
-            "cache-target-snapshot-gc",
-        ) as acquired:
+        # 실패·취소(망가진 connection에서의 unlock 실패 포함)면 lock 연결을 버려 server가
+        # lock을 풀게 한다 — lock을 쥔 채 pool로 돌아가지 않게.
+        async with (
+            self._engine.connect() as lock_connection,
+            discard_connection_on_failure(lock_connection),
+            try_advisory_lock(lock_connection, "cache-target-snapshot-gc") as acquired,
+        ):
             await lock_connection.commit()
             if not acquired:
                 return CacheTargetSnapshotGcDrainResult(
@@ -645,6 +689,12 @@ class AsyncKorTravelMapClient:
                     remaining_headers=None,
                     compacted_materials=0,
                 )
+            # batch·관측 session도 lock 연결 위에서 순차로 연다. Dagster
+            # ``kor_travel_map_client`` resource는 pool 1·추가 0이라(ADR-107) lock이
+            # 연결을 쥔 채 새 session을 열면 두 번째 연결을 기다리다 pool timeout으로
+            # 죽는다(고속도로 돌발 ``provider_run_lock``과 같은 결함, prod run
+            # ``bfd18ef5``). 각 session은 자기 transaction을 commit해 끝낸다.
+            pinned_session_factory = make_connection_session_factory(lock_connection)
             batches = 0
             deleted_items = 0
             deleted_headers = 0
@@ -663,7 +713,7 @@ class AsyncKorTravelMapClient:
                     max(1, int(remaining_seconds * 1_000)),
                 )
                 async with (
-                    self._session_factory() as batch_session,
+                    pinned_session_factory() as batch_session,
                     batch_session.begin(),
                 ):
                     await batch_session.execute(
@@ -710,7 +760,7 @@ class AsyncKorTravelMapClient:
                     break
 
             async with (
-                self._session_factory() as observation_session,
+                pinned_session_factory() as observation_session,
                 observation_session.begin(),
             ):
                 await observation_session.execute(

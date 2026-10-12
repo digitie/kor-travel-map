@@ -34,6 +34,7 @@ ADR 참조
 from __future__ import annotations
 
 import hashlib
+import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -46,10 +47,17 @@ if TYPE_CHECKING:
 AdvisoryLockExecutor = AsyncSession | AsyncConnection
 
 __all__ = [
+    "acquire_session_advisory_lock",
     "advisory_lock_key",
     "advisory_lock",
+    "connection_advisory_lock",
+    "discard_connection",
+    "discard_connection_on_failure",
+    "release_session_advisory_lock",
     "try_advisory_lock",
 ]
+
+_LOGGER = logging.getLogger(__name__)
 
 # signed int64 경계 — pg advisory lock은 bigint(-2^63 ~ 2^63-1).
 _INT64_OFFSET = 2**63
@@ -133,3 +141,90 @@ async def try_advisory_lock(
             await session.execute(
                 text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id}
             )
+
+
+async def acquire_session_advisory_lock(
+    executor: AdvisoryLockExecutor, key: str | int
+) -> None:
+    """``pg_advisory_lock`` 한 문장 — 획득할 때까지 대기한다(session-level)."""
+    lock_id = key if isinstance(key, int) else advisory_lock_key(key)
+    await executor.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": lock_id})
+
+
+async def release_session_advisory_lock(
+    executor: AdvisoryLockExecutor, key: str | int
+) -> None:
+    """``pg_advisory_unlock`` 한 문장."""
+    lock_id = key if isinstance(key, int) else advisory_lock_key(key)
+    await executor.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
+
+
+async def discard_connection(connection: AsyncConnection) -> None:
+    """상태를 믿을 수 없는 connection을 pool에 돌려보내지 않고 버린다.
+
+    session-level advisory lock은 rollback으로 풀리지 않고, pool의 reset-on-return도
+    ROLLBACK만 한다. 그래서 lock을 쥐었을지 모르는 connection을 그대로 돌려보내면
+    **lock을 쥔 채** 다음 checkout에 재사용된다. invalidate는 physical connection을
+    닫으므로 server가 그 backend의 lock을 모두 푼다. 이미 다른 예외가 전파되는
+    중에 부르므로 invalidate 자체의 실패는 경고로만 남긴다.
+    """
+    try:
+        await connection.invalidate()
+    except Exception:
+        _LOGGER.warning("advisory lock connection invalidate 실패", exc_info=True)
+
+
+@asynccontextmanager
+async def discard_connection_on_failure(
+    connection: AsyncConnection,
+) -> AsyncIterator[None]:
+    """감싼 구간이 실패·취소되면 connection을 버린다(:func:`discard_connection`).
+
+    lock helper **바깥**에 두면 lock 해제(unlock) 실패까지 덮는다 — 해제가 실패한
+    connection은 lock을 쥐고 있을 수 있다.
+    """
+    try:
+        yield
+    except BaseException:
+        await discard_connection(connection)
+        raise
+
+
+@asynccontextmanager
+async def connection_advisory_lock(
+    connection: AsyncConnection, key: str | int
+) -> AsyncIterator[None]:
+    """checkout한 ``AsyncConnection`` 하나에 blocking session lock을 건다.
+
+    본문이 같은 connection을 phase별 transaction으로 쓰는 경우용이다
+    (:func:`kortravelmap.infra.db.make_connection_session_factory`). 획득 SELECT의
+    autobegin은 곧바로 commit해 connection을 transaction 밖에 둔다.
+
+    해제 규칙(연결이 망가졌을 수 있는 경로에서 lock을 쥔 채 pool로 돌아가지 않게):
+
+    - 획득이 실패·취소되면 lock 획득 여부를 알 수 없으므로 connection을 버린다.
+    - 본문이 실패·취소되면 **unlock을 시도하지 않고** connection을 버린다 —
+      server가 lock을 풀고, 망가진 connection에서의 unlock 실패가 원래 예외를
+      가리지 않는다.
+    - 본문이 성공하면 남은 transaction을 되감고 unlock한다. 그것이 실패하면
+      connection을 버리고 그 실패를 올린다.
+    """
+    try:
+        await acquire_session_advisory_lock(connection, key)
+        await connection.commit()
+    except BaseException:
+        await discard_connection(connection)
+        raise
+    try:
+        yield
+    except BaseException:
+        await discard_connection(connection)
+        raise
+    try:
+        if connection.in_transaction():
+            await connection.rollback()
+        await release_session_advisory_lock(connection, key)
+        await connection.commit()
+    except BaseException:
+        await discard_connection(connection)
+        raise

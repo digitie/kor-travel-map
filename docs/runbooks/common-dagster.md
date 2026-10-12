@@ -5,7 +5,7 @@ Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인�
 - GraphQL 조회는 plain 응답 4 MiB와 전체 10초 상한을 갖고 압축 응답을 읽기 전에 거부한다. 요청별 HTTP client를 종료 시 폐기하므로 실패·취소된 연결을 다른 요청에 재사용하지 않는다. client 정리는 별도의 50 ms 예산이다.
 - 최근 30개와 별도의 활성 실행 최대 1,000개를 조회한다. 두 조회 모두 `DagsterUrls.runs_filter()`가 Map code location 태그를 주입한다. 활성 상한 도달·잘못된 응답은 정상 0건으로 바꾸지 않고 오류 상태로 표시한다. 같은 run의 terminal 상태가 활성 샘플보다 우선한다.
 - UI는 마지막 정상 스냅샷을 유지하면서 현재 갱신 실패를 표시한다. 알려진 `dagster/max_runtime`에만 정체 의심 기준을 적용한다. 비밀·tick의 오류 원문은 공통 패널로 넘기지 않는다.
-- asset executor의 step 동시성은 1이며 Dagster DB engine은 연결 1개·추가 연결 0개다. SQL 실행 10분·lock 대기 30초 상한을 둔다. 운영 shared daemon의 전역 정책은 Manager 소유이며 이 저장소가 임의로 변경하지 않는다.
+- asset executor의 step 동시성은 1이며 Dagster DB engine은 연결 1개·추가 연결 0개다. SQL 실행 10분·lock 대기 30초 상한을 둔다. 따라서 연결을 쥔 채(session-level advisory lock 등) 같은 client로 새 session을 열면 30초 뒤 `QueuePool limit of size 1 overflow 0`으로 죽는다. lock 본문은 lock 연결에 묶은 session으로 순차 실행한다(`provider_run_lock`, `make_connection_session_factory` — 2026-10-12 prod run `bfd18ef5`). 운영 shared daemon의 전역 정책은 Manager 소유이며 이 저장소가 임의로 변경하지 않는다.
 - snapshot 8종은 원천 레코드와 변환 bundle을 100개씩 소비한다. 기존 `load_feature_bundle_batches`의 단일 transaction·최종 봉인·curation reconciliation을 유지한다. 실패하면 봉인과 sync 성공을 남기지 않는다. 특수 가격·삭제·중복 합성 계약은 기존 처리 경로를 유지한다.
 
 ## 실패와 중단 복구

@@ -9,6 +9,8 @@
 - ``make_async_engine(dsn)`` — DSN → ``AsyncEngine`` (asyncpg driver 강제).
 - ``make_async_session_factory(engine)`` — ``AsyncEngine`` →
   ``async_sessionmaker[AsyncSession]``.
+- ``make_connection_session_factory(connection)`` — 이미 잡은 ``AsyncConnection``
+  하나에 묶인 ``async_sessionmaker[AsyncSession]`` (pool에서 두 번째 연결을 꺼내지 않음).
 
 ADR 참조
 --------
@@ -32,6 +34,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
+    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
@@ -50,6 +53,7 @@ __all__ = [
     "assert_runtime_db_privilege_boundary",
     "make_async_engine",
     "make_async_session_factory",
+    "make_connection_session_factory",
     "normalize_async_dsn",
 ]
 
@@ -930,6 +934,34 @@ def make_async_session_factory(
     """
     return async_sessionmaker(
         bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
+
+
+def make_connection_session_factory(
+    connection: AsyncConnection,
+) -> async_sessionmaker[AsyncSession]:
+    """이미 checkout한 ``AsyncConnection`` 하나에 묶인 session factory.
+
+    ``make_async_session_factory``와 같은 session 옵션을 쓰되 bind가 engine이 아니라
+    **connection**이다. 이 factory가 만드는 session은 pool에서 연결을 새로 꺼내지
+    않고 주어진 physical connection을 순차로 재사용한다. 각 session은 connection이
+    transaction 밖일 때 자기 transaction을 시작하고, 자기 ``commit``/``rollback``으로
+    그것을 끝낸다. 그래서 session-level advisory lock을 쥔 connection 위에서 여러
+    단계를 각각 commit할 수 있다.
+
+    호출자 계약
+    -----------
+    - ``connection``은 transaction 밖이어야 한다(lock 획득 SELECT의 autobegin을
+      먼저 commit). 그렇지 않으면 session이 바깥 transaction에 합류해 commit이
+      실제로 일어나지 않는다.
+    - 한 connection은 동시에 한 문장만 실행한다. 이 factory의 session들을
+      ``asyncio.gather`` 등으로 동시에 쓰면 안 된다.
+    """
+    return async_sessionmaker(
+        bind=connection,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,

@@ -76,6 +76,10 @@ class _LockConnection:
     def __init__(self) -> None:
         self.execute_calls: list[str] = []
         self.commits = 0
+        self.invalidations = 0
+
+    async def invalidate(self) -> None:
+        self.invalidations += 1
 
     async def execute(self, statement: object) -> None:
         self.execute_calls.append(str(statement))
@@ -103,6 +107,34 @@ class _Engine:
         return _LockConnectionContext(self.connection)
 
 
+def _pin_sessions_to_lock_connection(
+    monkeypatch: pytest.MonkeyPatch,
+    client: AsyncKorTravelMapClient,
+    lock_engine: _Engine,
+    factory: _SessionFactory,
+) -> list[object]:
+    """drain의 batch·관측 session이 lock 연결에 묶인 factory에서만 나오게 한다.
+
+    Dagster ``kor_travel_map_client``는 pool 1·추가 0이라(ADR-107) lock 연결을 쥔 채
+    engine에서 session을 새로 열면 pool timeout으로 죽는다. engine-bound
+    ``_session_factory``는 호출되면 실패하고, ``make_connection_session_factory``는
+    lock 연결을 받았을 때만 fake factory를 돌려준다.
+    """
+    pinned_to: list[object] = []
+
+    def _connection_factory(connection: object) -> _SessionFactory:
+        assert connection is lock_engine.connection
+        pinned_to.append(connection)
+        return factory
+
+    def _engine_bound_factory() -> object:
+        pytest.fail("drain이 lock 연결 밖의 engine-bound session을 열었다")
+
+    monkeypatch.setattr(client, "_session_factory", _engine_bound_factory)
+    monkeypatch.setattr(client_mod, "make_connection_session_factory", _connection_factory)
+    return pinned_to
+
+
 async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -111,7 +143,7 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
     factory = _SessionFactory()
     lock_engine = _Engine()
     monkeypatch.setattr(client, "_engine", lock_engine)
-    monkeypatch.setattr(client, "_session_factory", factory)
+    pinned_to = _pin_sessions_to_lock_connection(monkeypatch, client, lock_engine, factory)
     lock_calls: list[str] = []
 
     @asynccontextmanager
@@ -262,6 +294,8 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
     )
     assert lock_engine.connection.commits == 3
     assert lock_engine.connection.execute_calls == ["SELECT 1", "SELECT 1"]
+    assert pinned_to == [lock_engine.connection]
+    assert lock_engine.connection.invalidations == 0
 
 
 async def test_snapshot_gc_drain_skips_when_global_lock_is_held(
@@ -322,7 +356,7 @@ async def test_snapshot_gc_drain_propagates_cancellation_and_unwinds_lock(
     factory = _SessionFactory()
     lock_engine = _Engine()
     monkeypatch.setattr(client, "_engine", lock_engine)
-    monkeypatch.setattr(client, "_session_factory", factory)
+    pinned_to = _pin_sessions_to_lock_connection(monkeypatch, client, lock_engine, factory)
     lock_exited = False
 
     @asynccontextmanager
@@ -352,6 +386,9 @@ async def test_snapshot_gc_drain_propagates_cancellation_and_unwinds_lock(
     assert lock_exited
     assert factory.sessions[0].begin_exits == 1
     assert lock_engine.connection.commits == 1
+    assert pinned_to == [lock_engine.connection]
+    # 취소된 connection은 상태를 믿을 수 없다 — pool로 돌려보내지 않고 버린다.
+    assert lock_engine.connection.invalidations == 1
 
 
 async def test_snapshot_gc_drain_stops_after_full_round_without_progress(
@@ -362,7 +399,7 @@ async def test_snapshot_gc_drain_stops_after_full_round_without_progress(
     factory = _SessionFactory()
     lock_engine = _Engine()
     monkeypatch.setattr(client, "_engine", lock_engine)
-    monkeypatch.setattr(client, "_session_factory", factory)
+    pinned_to = _pin_sessions_to_lock_connection(monkeypatch, client, lock_engine, factory)
 
     @asynccontextmanager
     async def _try_lock(_connection: _LockConnection, _key: str):  # type: ignore[no-untyped-def]
@@ -400,3 +437,5 @@ async def test_snapshot_gc_drain_stops_after_full_round_without_progress(
     assert result.remaining_items == 25
     assert result.remaining_headers == 2
     assert lock_engine.connection.commits == 4
+    assert pinned_to == [lock_engine.connection]
+    assert lock_engine.connection.invalidations == 0

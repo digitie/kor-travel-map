@@ -1,3 +1,11 @@
+## 2026-10-13 — 고속도로 돌발 job pool 고갈 수정: 브랜치 `fix/highway-incidents-pool`
+
+**다음 한 작업: 적대 리뷰 → PR·CI(통합 두 lane)·머지 → 다음 Map pair 회전 뒤 `feature_notice_transport_highway_incidents_job`
+수동 첫 적재 재시도.** PR은 열지 않았고 prod에는 아무것도 하지 않았다. 원인·증거는 journal 2026-10-13.
+
+- `provider_run_lock` 본문이 lock 연결 하나를 순차로 쓴다(Dagster pool 1/0, ADR-107). GC drain도 같은 수정.
+- 미결: 큐 경로 strict 실패 증거 client는 실패 경로에서 두 번째 연결을 요구한다(설계 결정 필요).
+
 ## 2026-10-13 — weather 잔재 정리: 브랜치 `chore/weather-remnant-cleanup`
 
 **다음 한 작업: CI 전량 green → PR(조정자가 연다)·머지. 배포 영향 없음** — 죽은 코드·주석·문서만 바뀌었고 migration·

@@ -714,6 +714,78 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
     assert cursor["loaded_at"] == reappeared_at.isoformat()
 
 
+async def test_highway_incident_asset_runs_on_dagster_single_connection_pool(
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: Any,
+    dagster_runtime_engine: Any,
+) -> None:
+    """회귀(prod run ``bfd18ef5``): 실제 asset 경로가 Dagster pool 1/0에서 끝까지 돈다.
+
+    Dagster ``kor_travel_map_client`` resource는 ``pool_size=1, max_overflow=0``이다
+    (ADR-107). 이 파일의 다른 테스트는 기본 pool(5+10)인 ``migrated_engine``을 써서
+    ``provider_run_lock``이 연결을 쥔 채 본문이 두 번째 연결을 요구하던 결함을 보지
+    못했다. 여기서는 같은 pool 모양의 engine으로 asset 본문(watermark 조회 → 적재 →
+    reconcile → sync cursor) 전체를 두 번 돌린다. prod와 같이 **실제 Dagster runtime
+    login**(``ktm_feature_service``)으로 접속한다. ``map_client``는 검증과 정리용이다.
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    def _notice(*, occurred_time: str, route_no: str, point_name: str) -> _Notice:
+        return _Notice(
+            occurred_date="2026.10.12",
+            occurred_time=occurred_time,
+            incident_type="사고",
+            incident_type_code="1",
+            direction="서울방향",
+            message=f"{point_name} 교통사고",
+            point_name=point_name,
+            route_no=route_no,
+            route_name="경부고속도로",
+            process_status="진행",
+            process_status_code="1",
+            latitude=None,
+            longitude=None,
+            congestion_length=None,
+            series_no=1,
+            raw={"routeNo": route_no, "pointName": point_name},
+        )
+
+    engine = create_async_engine(
+        dagster_runtime_engine.url,
+        pool_size=1,
+        max_overflow=0,
+        # prod는 30초다. 판정은 같고 회귀 시 실패만 빨라진다.
+        pool_timeout=2,
+    )
+    single_connection_client = AsyncKorTravelMapClient(engine)
+    a = _notice(occurred_time="10:00:00", route_no="0010", point_name="양재")
+    b = _notice(occurred_time="10:01:00", route_no="0020", point_name="판교")
+    partial_at = _FETCHED + timedelta(minutes=10)
+    try:
+        seeded = await _run_asset(
+            run_feature_notice_transport_highway_incidents,
+            single_connection_client,
+            transport_highway_incidents=[a, b],
+            fetched_at=_FETCHED,
+        )
+        await _run_asset(
+            run_feature_notice_transport_highway_incidents,
+            single_connection_client,
+            transport_highway_incidents=[a],
+            fetched_at=partial_at,
+        )
+    finally:
+        await engine.dispose()
+
+    canonical = await _canonical_ids(migrated_engine, seeded.feature_ids)
+    a_legacy, b_legacy = seeded.feature_ids
+    assert await _notice_valid_end(map_client, canonical[a_legacy]) is None
+    assert await _notice_valid_end(map_client, canonical[b_legacy]) == partial_at
+    cursor = await _krex_notice_sync_cursor(map_client)
+    assert cursor["notices_closed"] == 1
+    assert cursor["snapshot_applied_at"] == partial_at.isoformat()
+
+
 async def test_krex_notice_content_change_reappearance_reopens_and_counts(
     map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
