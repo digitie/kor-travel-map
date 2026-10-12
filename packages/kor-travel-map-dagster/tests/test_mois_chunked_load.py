@@ -11,7 +11,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Final, cast
 
 import pytest
 from dagster import DagsterRunStatus, DefaultSensorStatus, Failure, RunRequest, SkipReason
@@ -139,6 +139,7 @@ class _FakeDb:
     """표식 나이를 재는 DB 시계(일)."""
     resolved: list[str] = field(default_factory=list)
     marker_write_error: Exception | None = None
+    resolve_error: Exception | None = None
 
 
 class _FakeClient:
@@ -241,6 +242,8 @@ class _FakeClient:
     ) -> int:
         del reason
         assert violation_type == chunked.UNRESOLVABLE_MARKER_TYPE
+        if self.db.resolve_error is not None:
+            raise self.db.resolve_error
         closed = [key for key in dedupe_keys if self.db.markers.pop(key, None) is not None]
         self.db.resolved.extend(closed)
         return len(closed)
@@ -1033,7 +1036,7 @@ async def test_regional_outage_completes_but_is_degraded_not_sealed(
     )
 
     assert outcome.complete
-    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert "bakeries" in outcome.geocode_degraded_slugs
     assert not outcome.authoritative
     assert db.seals == 0, "지역 장애 run이 봉인됐다"
     assert outcome.geocode_empty == 150
@@ -1093,7 +1096,7 @@ async def test_repeated_trips_with_a_passing_probe_in_one_slug_mark_it_degraded(
     )
 
     assert outcome.geo_probe_passes >= chunked.GEO_PASSING_TRIPS_DEGRADE
-    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert "bakeries" in outcome.geocode_degraded_slugs
     assert not outcome.authoritative
 
 
@@ -1220,7 +1223,7 @@ async def test_steady_state_regional_outage_is_judged_on_geocoded_rows(
 
     assert outcome.records_unchanged == 2000
     assert outcome.geocoded_rows == 100
-    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert "bakeries" in outcome.geocode_degraded_slugs
     assert not outcome.authoritative
 
 
@@ -1310,10 +1313,10 @@ async def test_a_second_consecutive_degraded_full_run_fails_red(
         assert caught.value.allow_retries is False
     else:
         outcome = await _go()
-        assert outcome.geocode_degraded_slugs == ("bakeries",)
+        assert "bakeries" in outcome.geocode_degraded_slugs
     # 실패해도 이 run은 degraded·complete·전체로 tag된다 — 다음 판정의 근거이고 사슬을 막지 않는다.
     assert context.tagged[MOIS_LOAD_OUTCOME_TAG] == MOIS_LOAD_OUTCOME_COMPLETE
-    assert context.tagged[chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG] == "bakeries"
+    assert "bakeries" in context.tagged[chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG].split(",")
     assert context.tagged[chunked.MOIS_LOAD_FULL_COVERAGE_TAG] == "true"
 
 
@@ -1343,7 +1346,7 @@ async def test_regional_outage_with_a_passing_probe_leaves_no_markers_and_turns_
         strict_address="drop",
         context=first_context,
     )
-    assert first.geocode_degraded_slugs == ("bakeries",)
+    assert "bakeries" in first.geocode_degraded_slugs
     assert first.geo_probe_passes >= 1
     assert db.markers == {}, "probe를 통과한 지역 장애의 행에 표식을 남겼다"
 
@@ -1358,7 +1361,7 @@ async def test_regional_outage_with_a_passing_probe_leaves_no_markers_and_turns_
             strict_address="drop",
             context=second_context,
         )
-    assert second_context.tagged[chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG] == "bakeries"
+    assert "bakeries" in second_context.tagged[chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG].split(",")
     assert db.markers == {}
 
 
@@ -1409,7 +1412,7 @@ async def test_consecutive_check_spans_the_chain_back_to_the_last_complete_run(
         with pytest.raises(Failure, match="연속 두 전체 run"):
             await _go()
     else:
-        assert (await _go()).geocode_degraded_slugs == ("bakeries",)
+        assert "bakeries" in (await _go()).geocode_degraded_slugs
 
 
 @pytest.mark.parametrize("destroyed", [True, False])
@@ -1477,5 +1480,117 @@ async def test_a_slug_degraded_by_ratio_alone_leaves_no_markers() -> None:
     )
 
     assert outcome.geo_probes == 0
-    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert "bakeries" in outcome.geocode_degraded_slugs
     assert db.markers == {}
+
+
+# -- narrow 리뷰 MED-1·L-1·L-3 ---------------------------------------------------------
+
+
+def _interleaved(slug: str, good: int, empty: int) -> list[_Record]:
+    """같은 업종 안에 빈 답 행을 낮은 밀도로 흩는다(문턱을 넘지 않게)."""
+    rows: list[_Record] = []
+    land = _land(good, slug=slug)
+    sea = _sea(empty, slug=slug)
+    step = max(1, good // max(1, empty))
+    for index, row in enumerate(land):
+        rows.append(replace(row, mng_no=f"{slug[:3]}-{len(rows):05d}"))
+        if index % step == 0 and sea:
+            rows.append(replace(sea.pop(), mng_no=f"{slug[:3]}-{len(rows):05d}"))
+    rows += [replace(r, mng_no=f"{slug[:3]}-{len(rows) + i:05d}") for i, r in enumerate(sea)]
+    return rows
+
+
+_SMALL_SLUGS: Final = ("lodgings", "rest_cafes", "tourist_restaurants")
+
+
+def _outage_plan() -> MoisLoadPlan:
+    return replace(
+        _plan(full_coverage=True),
+        service_slugs=tuple(sorted({"bakeries", "general_restaurants", *_SMALL_SLUGS})),
+    )
+
+
+async def test_small_slugs_of_the_same_outage_get_no_markers_when_a_large_slug_degrades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """큰 업종 하나가 degraded이고 run 전체는 상한 아래 — 표본이 모자라 스스로 판정받지 못한 작은
+    업종들의 빈 답은 같은 지역 장애일 수 있으므로 표식을 남기지 않는다(narrow 리뷰 MED-1)."""
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    records = _interleaved("bakeries", 50, 10) + _land(2000, prefix="g", slug="general_restaurants")
+    for slug in _SMALL_SLUGS:
+        records += _interleaved(slug, 9, 1)
+    records.sort(key=lambda r: (r.service_slug, r.mng_no))
+    db = _FakeDb()
+
+    outcome = await _run(
+        records, db, geocoder=_SeaIsEmpty(), plan=_outage_plan(), strict_address="drop"
+    )
+
+    assert outcome.geo_probes == 0
+    assert outcome.geocode_degraded_slugs == ("bakeries",), "run 전체는 상한 아래여야 한다"
+    assert outcome.geocode_empty == 10 + len(_SMALL_SLUGS)
+    assert db.markers == {}, "degraded run에서 표본 미달 업종에 표식을 남겼다"
+
+
+async def test_run_wide_ratio_is_evaluated_even_after_a_slug_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    records = _interleaved("bakeries", 50, 10)
+    for slug in _SMALL_SLUGS:
+        records += _interleaved(slug, 6, 4)
+    records.sort(key=lambda r: (r.service_slug, r.mng_no))
+    plan = replace(_plan(full_coverage=True), service_slugs=("bakeries", *_SMALL_SLUGS))
+
+    outcome = await _run(
+        records, _FakeDb(), geocoder=_SeaIsEmpty(), plan=plan, strict_address="drop"
+    )
+
+    assert "bakeries" in outcome.geocode_degraded_slugs
+    assert "(run)" in outcome.geocode_degraded_slugs
+
+
+async def test_a_chain_longer_than_the_lookback_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    monkeypatch.setattr(chunked, "_CHAIN_LOOKBACK_LIMIT", 5)
+    context = _HistoryContext(
+        history=[{MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED}] * 10
+    )
+
+    with pytest.raises(Failure, match="unknown"):
+        await _run(
+            _province_records(150, empty_province=True),
+            _FakeDb(),
+            geocoder=_ProvinceLayerEmpty(),
+            plan=_plan(full_coverage=True),
+            strict_address="drop",
+            context=context,
+        )
+
+
+@pytest.mark.parametrize("destroyed", [True, False])
+async def test_resolve_failure_is_fatal_only_when_it_destroyed_the_transaction(
+    destroyed: bool,
+) -> None:
+    from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
+
+    db = _FakeDb(
+        resolve_error=IntegrityFindingPersistenceError(
+            provider="(resolve)",
+            dataset_key="x",
+            observed_count=1,
+            unique_count=1,
+            error_type="OperationalError",
+            transaction_destroyed=destroyed,
+        )
+    )
+    records = _land(2)
+
+    if destroyed:
+        with pytest.raises(IntegrityFindingPersistenceError):
+            await _run(records, db, geocoder=_Geocoder())
+    else:
+        assert (await _run(records, db, geocoder=_Geocoder())).complete

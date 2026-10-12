@@ -1,3 +1,13 @@
+## 2026-10-12 — MOIS ADR-108 narrow 리뷰 MED 1·LOW 3 반영
+
+- **MED-1.** run 전체 비율을 업종 degraded가 있어도 언제나 잰다. 무엇이든 degraded면 조회 50행 미만 업종의 빈 답에도
+  표식을 쓰지 않는다 — 큰 업종 하나를 degraded로 만든 지역 장애가 작은 업종들에 남긴 빈 답이 30일 가려지지 않게.
+- **L-1.** 다시 풀린 표식 닫기 실패는 `IntegrityFindingPersistenceError`로 정규화해 경고만 남긴다(`transaction_destroyed`면 올린다).
+- **L-3.** 연속 degraded 사슬은 최근 500 run까지 보고, 그 안에서 완료 run에 닿지 못하면 degraded로 본다(닫힌 쪽).
+- **L-4.** ADR-108 남는 위험에 "문턱 아래·5% 아래 지역 장애는 여전히 표식이 되어 최대 30일 조회되지 않는다"를 되살렸다.
+- 검증(로컬): MOIS 적재기 72 passed. mutation 4종(표본 미달 업종 표식·run 전체 판정 생략·사슬 상한 열린 쪽·닫기 실패
+  전파) 전부 RED. 통합 테스트는 CI가 게이트다.
+
 ## 2026-10-12 — MOIS ADR-108 최종 리뷰 MED 1·LOW 3 반영
 
 - **MED-1.** 표식이 문턱 초과(probe 통과) chunk와 degraded 업종에도 쓰여, 실제 지역 장애가 다음 run에서 표식으로 가려져

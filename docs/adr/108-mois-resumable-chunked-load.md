@@ -150,6 +150,11 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
   probe가 통과했다면 지역 장애와 구별할 수 없고, degraded 업종은 정의상 장애 의심이다 — 그 행에 표식을 남기면
   다음 run이 그 행을 보지 않아 degraded가 사라지고 봉인·sync 성공이 남아 overdue도 울리지 않는다(최종 리뷰
   MED-1). 그런 행은 표식 없이 매 run 다시 조회되므로 geo가 회복될 때까지 degraded가 지속된다.
+  run 전체 비율은 다른 업종이 이미 degraded여도 **언제나** 잰다. 그리고 무엇이든 degraded면 조회 행이
+  표본(50행)에 못 미쳐 스스로 판정받지 못한 업종에도 표식을 쓰지 않는다 — 큰 업종 하나를 degraded로 만든
+  지역 장애가 작은 업종들에도 빈 답을 남겼을 수 있다(narrow 리뷰 MED-1). 연속 degraded 판정은 최근
+  500개 run 안에서 직전 완료 run에 닿지 못하면 degraded로 본다(닫힌 쪽, L-3). 다시 풀린 표식 닫기 실패는
+  무해하게 경고만 남기되 `transaction_destroyed`면 올린다(L-1).
   표식은 `ops.data_integrity_violations`의 finding 하나다 — `violation_type=mois_reverse_geocode_unresolvable`,
   `severity=info`, dedupe key는 `make_integrity_finding_key(provider, dataset, license_place, slug::mng_no,
   그 type)`, `payload.source_record_key`에 현재 payload의 source record key를 싣는다(payload hash에서
@@ -170,6 +175,9 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
   지역 장애와 구별할 수 없어 표식이 되지 않고 매 run 다시 조회된다. 비율 상한(조회 대비 5%) 아래면 봉인을
   막지 않는다. 위면 그 업종은 매번 degraded이고 두 번째부터 붉다 — 그때는 사람이 좌표를 확인한다(geo
   데이터 문제인지 원천 좌표 문제인지). 낮은 밀도로 흩어진 해상 좌표는 표식이 되어 30일마다 한 번 조회된다.
+  거꾸로, probe 문턱을 넘지 않고 어느 업종·run에서도 5% 아래인 지역 장애는 정상 해상 좌표와 구별되지
+  않으므로 **여전히 표식이 되어 최대 30일 조회되지 않는다** — 그 행들은 30일 뒤 재조회되거나 finding을
+  닫으면 다음 run에 돌아온다. 이것이 5% 상한이 받아들이는 대가다.
 
 ### 3b. 재관측 충돌은 run 안에서 그 chunk만 다시 (적대 리뷰 MED-2)
 

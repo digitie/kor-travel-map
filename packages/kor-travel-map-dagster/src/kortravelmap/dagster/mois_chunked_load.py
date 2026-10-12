@@ -30,6 +30,7 @@ from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Se
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, Final, cast
 
 from kortravelmap.client import AddressValidationFinding, AsyncKorTravelMapClient
@@ -548,11 +549,18 @@ async def load_mois_license_records_chunked(
             and b.admin_evidence.obs_code is not None
         ]
         if resolved_ids:
-            await client.resolve_open_findings_by_key(
-                violation_type=UNRESOLVABLE_MARKER_TYPE,
-                dedupe_keys=[_unresolvable_marker_key(dataset_key, i) for i in resolved_ids],
-                reason="reverse geocode resolved",
-            )
+            try:
+                await client.resolve_open_findings_by_key(
+                    violation_type=UNRESOLVABLE_MARKER_TYPE,
+                    dedupe_keys=[_unresolvable_marker_key(dataset_key, i) for i in resolved_ids],
+                    reason="reverse geocode resolved",
+                )
+            except IntegrityFindingPersistenceError as exc:
+                # 표식을 못 닫으면 열린 표식이 남을 뿐이다(그 행은 이미 적재돼 다음 run이 건너뛴다).
+                # 결합된 transaction까지 되감았다면 적재가 사라진 것이라 삼킬 수 없다.
+                if exc.transaction_destroyed:
+                    raise
+                context.log.warning(f"MOIS 역지오코딩 불가 표식 닫기 실패(무해): {exc}")
         return _ChunkLoad(
             result=result,
             unchanged=len(unchanged),
@@ -581,6 +589,8 @@ async def load_mois_license_records_chunked(
     slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = slug_geocoded = 0
     run_geocode_empty = run_geocoded = run_known_unresolvable = 0
     degraded: list[str] = []
+    slug_geocoded_totals: dict[str, int] = {}
+    """업종별 조회 행 수 — 표본(``GEOCODE_RATIO_MIN_SAMPLE``)에 못 미친 업종을 가린다."""
     marker_candidates: dict[str, list[_Unresolvable]] = {}
     """업종별 표식 후보. 문턱 초과(probe 통과) chunk의 빈 답은 넣지 않는다 — 지역 장애일 수 있다."""
 
@@ -640,6 +650,7 @@ async def load_mois_license_records_chunked(
         slug_geocoded += loaded.geocoded
         run_geocoded += loaded.geocoded
         run_known_unresolvable += loaded.known_unresolvable
+        slug_geocoded_totals[slug] = slug_geocoded_totals.get(slug, 0) + loaded.geocoded
         if not loaded.passing_trip:
             marker_candidates.setdefault(slug, []).extend(loaded.empties)
         if loaded.passing_trip:
@@ -658,15 +669,17 @@ async def load_mois_license_records_chunked(
         slugs_completed.append(current_slug)
         context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
     # run 전체 상한 — 업종마다 표본이 모자라 업종 판정을 피한 작은 업종들의 빈 답도 센다.
+    # 다른 업종이 이미 degraded여도 **언제나** 잰다 — 같은 지역 장애의 작은 업종들이 숨지 않게.
     if (
-        not degraded
-        and run_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
+        run_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
         and run_geocode_empty > run_geocoded * plan.geocode_degraded_ratio
     ):
         _mark_degraded("(run)", f"빈 답 {run_geocode_empty}/{run_geocoded}건 조회")
     # 표식은 run 끝에 한 번 쓴다 — degraded 업종(그리고 run 전체가 degraded면 전부)은 쓰지 않는다.
     # 표식이 생기면 다음 run이 그 행을 보지 않아 degraded가 사라지고 봉인·sync 성공이 남는다
     # (최종 리뷰 MED-1). 실패로 여기까지 오지 못한 run은 아무것도 쓰지 않는다 — 다시 조회할 뿐이다.
+    # 무엇이든 degraded면 표본이 모자라 스스로 판정받지 못한 업종도 믿지 않는다 — 같은 지역 장애의
+    # 작은 업종일 수 있다(narrow 리뷰 MED-1). 그 업종의 빈 답은 표식 없이 다음 run이 다시 조회한다.
     if "(run)" not in degraded:
         await _record_unresolvable_markers(
             context,
@@ -676,6 +689,10 @@ async def load_mois_license_records_chunked(
                 row
                 for slug_name, rows in marker_candidates.items()
                 if slug_name not in degraded
+                and (
+                    not degraded
+                    or slug_geocoded_totals.get(slug_name, 0) >= GEOCODE_RATIO_MIN_SAMPLE
+                )
                 for row in rows
             ],
         )
@@ -797,7 +814,7 @@ def _degraded_full_run_since_last_complete(context: Any) -> Any:
                 MOIS_LOAD_FULL_COVERAGE_TAG: "true",
             },
         ),
-        limit=50,
+        limit=_CHAIN_LOOKBACK_LIMIT,
     )
     for run in runs:
         if run.run_id == run_id:
@@ -806,7 +823,21 @@ def _degraded_full_run_since_last_complete(context: Any) -> Any:
             return run
         if run.tags.get(MOIS_LOAD_OUTCOME_TAG) == MOIS_LOAD_OUTCOME_COMPLETE:
             return None
+    if len(runs) >= _CHAIN_LOOKBACK_LIMIT:
+        # 완료 run까지 닿지 못했다 — 사슬 안의 degraded를 확인할 수 없으므로 닫힌 쪽(degraded).
+        context.log.warning(
+            f"MOIS 연속 degraded 판정이 {_CHAIN_LOOKBACK_LIMIT}개 run 안에서 직전 완료 run에 닿지 "
+            "못했다 — degraded 여부를 알 수 없으므로 degraded로 본다."
+        )
+        return SimpleNamespace(
+            run_id=f"(완료 run이 최근 {_CHAIN_LOOKBACK_LIMIT}개 run 밖)",
+            tags={MOIS_LOAD_GEOCODE_DEGRADED_TAG: "unknown"},
+        )
     return None
+
+
+_CHAIN_LOOKBACK_LIMIT: Final[int] = 500
+"""사슬을 거슬러 볼 최대 run 수. 4시간 run 하나가 수만 행이라 98만 행 첫 적재도 수십 run이다."""
 
 
 def _unresolvable_marker_key(dataset_key: str, source_entity_id: str) -> str:

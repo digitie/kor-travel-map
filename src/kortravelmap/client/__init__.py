@@ -2623,14 +2623,28 @@ class AsyncKorTravelMapClient:
         dedupe_keys: Sequence[str],
         reason: str,
     ) -> int:
-        """열린 finding을 dedupe key로 닫는다(ADR-108: 다시 풀린 역지오코딩 불가 표식)."""
-        async with self._session_factory() as session, session.begin():
-            return await resolve_open_findings_by_key(
-                session,
-                violation_type=violation_type,
-                dedupe_keys=dedupe_keys,
-                reason=reason,
-            )
+        """열린 finding을 dedupe key로 닫는다(ADR-108: 다시 풀린 역지오코딩 불가 표식).
+
+        실패는 ``record_address_validation_findings``와 같이 ``IntegrityFindingPersistenceError``로
+        정규화한다 — ``transaction_destroyed``가 호출자에게 "삼켜도 되는 실패"인지를 알려 준다.
+        """
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await resolve_open_findings_by_key(
+                    session,
+                    violation_type=violation_type,
+                    dedupe_keys=dedupe_keys,
+                    reason=reason,
+                )
+        except Exception as exc:  # noqa: BLE001
+            raise IntegrityFindingPersistenceError(
+                provider="(resolve)",
+                dataset_key=violation_type,
+                observed_count=len(dedupe_keys),
+                unique_count=len(set(dedupe_keys)),
+                error_type=type(exc).__name__,
+                transaction_destroyed=self._transaction_bound,
+            ) from None
 
     async def record_address_validation_findings(
         self,

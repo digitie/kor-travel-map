@@ -44,6 +44,9 @@
 - **FIXED (dagster)**: 역지오코딩 불가 표식은 run 끝에 degraded가 아닌 업종·문턱 초과가 없던 chunk의 행에만 남긴다(지역
   장애가 표식으로 가려지지 않는다). 다시 풀린 행의 표식은 닫는다. 연속 degraded 판정은 이어 달리기 사슬 전체를 본다.
   결합 transaction을 되감은 표식 기록 실패는 삼키지 않는다.
+- **FIXED (dagster)**: run 전체 degraded 비율은 업종 degraded가 있어도 언제나 잰다. 무엇이든 degraded면 조회 50행
+  미만 업종에도 표식을 남기지 않는다. 연속 degraded 사슬이 최근 500 run 안에서 완료 run에 닿지 못하면 degraded로
+  본다. 다시 풀린 표식 닫기 실패는 경고만(결합 transaction을 되감았으면 올린다).
 - **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
   `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
   큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.
