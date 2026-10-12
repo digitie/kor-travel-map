@@ -267,9 +267,9 @@ async def run_mois_weekly_update(
 | 소실 하한 | 데이터 무효 drop을 업종 누적·관측 200행 이상에서만 판정(> 50%면 commit 전 실패). 지오코더 원인 drop은 따로 세고 다음 run이 다시 시도 |
 | geo 장애 | 최근 조회 20건 이상 중 80% 이상이 빈 답이면 고정 기준점과 마지막 좋은 좌표를 둘 다 다시 묻고, 하나라도 빈 답이면 chunk 적재 전 upstream 장애로 실패(행을 버리지 않는다). 둘 다 답하면 계속 |
 | 빈 답 행 | 어느 검증 모드에서도 적재하지 않는다(off 포함) — 다음 run이 다시 시도 |
-| 역지오코딩 불가 표식 | geo가 건강할 때 빈 답을 받은 행은 finding `mois_reverse_geocode_unresolvable`(info)로 기억한다. 같은 payload면 30일 동안 조회·적재하지 않는다(`mois_known_unresolvable`). payload가 바뀌거나 30일이 지나거나 finding을 닫으면 다시 조회 |
+| 역지오코딩 불가 표식 | run 끝에, degraded가 아닌 업종에서 문턱 초과가 없던 chunk의 빈 답 행만 finding `mois_reverse_geocode_unresolvable`(info)로 기억한다. 같은 payload면 30일 동안 조회·적재하지 않는다(`mois_known_unresolvable`). payload가 바뀌거나 30일이 지나거나 finding을 닫으면 다시 조회하고, 풀리면 표식을 닫는다 |
 | degraded | **조회한 행** 대비 빈 답 비율이 업종 또는 run(조회 50행 이상)에서 `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%) 초과, 또는 같은 업종에서 "문턱 초과 + probe 통과" 3회 → run은 실패하지 않지만 봉인·sync 성공 없음, tag `kor_travel_map.mois_load.geocode_degraded`, metadata `mois_geocode_degraded*`·`mois_geocoded_rows`·`mois_geo_probes`·`mois_geo_probe_passes` |
-| 연속 degraded | 직전 봉인 자격 전체 run도 degraded면 이번 run은 FAILURE(재시도 없음) — 붉은 run |
+| 연속 degraded | 직전 완료 전체 run까지의 사슬(`budget_exhausted` 포함) 중 degraded 전체 run이 있으면 degraded로 끝난 이번 완료 run은 FAILURE(재시도 없음) — 붉은 run |
 | freshness SLA | migration 405가 MOIS bulk policy에 `stale_after_minutes=57600`(40일) — 봉인·sync 성공이 그보다 오래 없으면 `/v1/ops/datasets`가 overdue |
 | 봉인·sync 성공 | 전 업종을 한 run 안에서 끝까지 본 run만(`outcome=complete` + 전 업종) |
 | 큐 경로 | MOIS뿐인 요청은 접수 시 409 `PROVIDER_DEDICATED_JOB_ONLY`. 섞인 요청은 MOIS를 건너뛰고 `done` + error_message로 남긴다. 실행할 것이 MOIS뿐인 cache target 요청은 `failed` + `error_code=PROVIDER_DEDICATED_JOB_ONLY` |

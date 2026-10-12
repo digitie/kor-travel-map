@@ -1,3 +1,16 @@
+## 2026-10-12 — MOIS ADR-108 최종 리뷰 MED 1·LOW 3 반영
+
+- **MED-1.** 표식이 문턱 초과(probe 통과) chunk와 degraded 업종에도 쓰여, 실제 지역 장애가 다음 run에서 표식으로 가려져
+  봉인·sync 성공이 남고 overdue도 울리지 않았다. 표식은 run 끝에 한 번, degraded가 아닌 업종에서 문턱 초과가 없던 chunk의
+  행에만 쓴다(run 전체 degraded면 쓰지 않는다). 그런 행은 표식 없이 매 run 다시 조회돼 geo가 회복될 때까지 degraded가
+  지속된다. 연속 degraded 판정은 직전 완료 전체 run까지의 사슬 전체(`budget_exhausted` 포함)를 본다. ADR-108 정정.
+- **LOW.** 로그 문구(degraded 업종은 표식 없이 다음 run이 다시 조회; off 모드 주석은 표식 30일 반영). 다시 풀린 행의 열린
+  표식을 닫는다(SELECT 뒤 있을 때만 UPDATE — statement trigger hot row 보호). 표식 기록 실패가 `transaction_destroyed`면
+  올린다.
+- 검증(로컬): ruff·mypy strict·lint-imports·OpenAPI drift. MOIS 적재기 67 + 관련 498(전체 `tests/lint` 포함) + API 240 passed.
+  mutation 5종(문턱 초과 chunk 표식·degraded 업종 표식·사슬을 완료 run만·표식 닫기 제거·destroyed 삼킴) 전부 RED — 앞의 둘은
+  지역 장애 테스트에서 서로를 가려 각자 전용 테스트를 더했다. 통합 테스트(표식 닫기 SQL 포함)는 CI가 게이트다.
+
 ## 2026-10-12 — MOIS ADR-108 최종 설계: 역지오코딩 불가 표식·조회 행 분모·연속 degraded·SLA
 
 - **원인.** 해상·매립지·잘못된 TM 좌표는 정상 geo에서도 늘 빈 답이라 적재되지 않고 매 run 다시 조회돼, 정상 상태에서

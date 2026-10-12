@@ -303,3 +303,53 @@ async def test_fresh_open_marker_matches_only_the_same_payload_and_ages_out(
         {"key": marker},
     )
     assert await _find({marker: "srk-a"}) == frozenset(), "닫힌 표식을 믿었다"
+
+
+async def test_resolving_a_marker_closes_only_open_findings_of_that_type(
+    migrated_session: AsyncSession,
+) -> None:
+    from kortravelmap.infra.integrity_violation_repo import (
+        find_fresh_open_findings,
+        resolve_open_findings_by_key,
+    )
+
+    marker = _marker_key("bakeries::adr108-resolve")
+    await _seed_marker(migrated_session, dedupe_key=marker, source_record_key="srk-r")
+
+    assert (
+        await resolve_open_findings_by_key(
+            migrated_session,
+            violation_type="mois_reverse_geocode_unresolvable",
+            dedupe_keys=[_marker_key("bakeries::adr108-not-marked")],
+            reason="test",
+        )
+        == 0
+    )
+    assert (
+        await resolve_open_findings_by_key(
+            migrated_session,
+            violation_type="mois_reverse_geocode_unresolvable",
+            dedupe_keys=[marker, marker],
+            reason="reverse geocode resolved",
+        )
+        == 1
+    )
+    assert (
+        await find_fresh_open_findings(
+            migrated_session,
+            violation_type="mois_reverse_geocode_unresolvable",
+            expected_source_record_keys={marker: "srk-r"},
+            max_age_days=30,
+        )
+        == frozenset()
+    )
+    status = (
+        await migrated_session.execute(
+            text(
+                "SELECT status FROM ops.data_integrity_violations "
+                "WHERE payload ->> 'dedupe_key' = :key"
+            ),
+            {"key": marker},
+        )
+    ).scalar_one()
+    assert status == "resolved"

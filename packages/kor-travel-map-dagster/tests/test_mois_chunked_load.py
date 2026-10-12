@@ -137,6 +137,8 @@ class _FakeDb:
     """역지오코딩 불가 표식: dedupe key → (payload.source_record_key, 마지막 관측 일)."""
     today: float = 0.0
     """표식 나이를 재는 DB 시계(일)."""
+    resolved: list[str] = field(default_factory=list)
+    marker_write_error: Exception | None = None
 
 
 class _FakeClient:
@@ -217,6 +219,10 @@ class _FakeClient:
         self, findings: Sequence[Any], *, provider: str, dataset_key: str, run_id: str | None
     ) -> IntegrityFindingSyncResult:
         del provider, dataset_key, run_id
+        if self.db.marker_write_error is not None and any(
+            f.violation_type == chunked.UNRESOLVABLE_MARKER_TYPE for f in findings
+        ):
+            raise self.db.marker_write_error
         for finding in findings:
             if finding.violation_type == chunked.UNRESOLVABLE_MARKER_TYPE:
                 self.db.markers[finding.dedupe_key] = (
@@ -229,6 +235,15 @@ class _FakeClient:
             upserted_count=len(findings),
         )
 
+
+    async def resolve_open_findings_by_key(
+        self, *, violation_type: str, dedupe_keys: Sequence[str], reason: str
+    ) -> int:
+        del reason
+        assert violation_type == chunked.UNRESOLVABLE_MARKER_TYPE
+        closed = [key for key in dedupe_keys if self.db.markers.pop(key, None) is not None]
+        self.db.resolved.extend(closed)
+        return len(closed)
 
     async def find_fresh_open_findings(
         self,
@@ -1056,6 +1071,9 @@ async def test_off_mode_rows_with_an_empty_geocode_are_retried_next_run() -> Non
     assert converted.ids == [license_source_entity_id(records[1])]
     assert second.geocode_empty == 0
     assert set(db.current) == {license_source_entity_id(r) for r in records}
+    # 이제 풀린 행의 표식은 닫힌다 — 열린 표식이 끝없이 쌓이지 않는다(L-2).
+    assert db.markers == {}
+    assert len(db.resolved) == 1
 
 
 async def test_repeated_trips_with_a_passing_probe_in_one_slug_mark_it_degraded(
@@ -1132,13 +1150,24 @@ async def test_persistent_empties_are_marked_once_then_skipped_and_the_run_seals
     """정상 상태: 미변경 행이 대부분이고 해상 좌표 60행이 몰려 있다. 첫 run이 표식을 남기면
     다음 run은 그 행을 조회하지 않고, degraded가 아니며, 봉인한다(최종 델타 리뷰 MED-1)."""
     monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
-    records = sorted(_land(2000) + _sea(60), key=lambda r: r.mng_no)
+    # 해상 좌표 60행이 2,000행 사이에 흩어져 있다(낮은 밀도) — 문턱을 넘지 않으므로 표식이 남는다.
+    # 몰려 있어 문턱을 넘는 빈 답은 지역 장애와 구별할 수 없으므로 표식을 남기지 않는다
+    # (아래 테스트).
+    land = _land(2000)
+    sea = _sea(60)
+    records = []
+    for index, row in enumerate(land):
+        records.append(replace(row, mng_no=f"m-{len(records):05d}"))
+        if index % 33 == 0 and sea:
+            records.append(replace(sea.pop(), mng_no=f"m-{len(records):05d}"))
+    assert not sea
     db = _FakeDb()
 
     first = await _run(
         records, db, geocoder=_SeaIsEmpty(), plan=_plan(full_coverage=True), strict_address="drop"
     )
     assert first.geocode_empty == 60
+    assert first.geo_probes == 0, "낮은 밀도의 해상 좌표가 장애 문턱을 넘었다"
     assert len(db.markers) == 60
 
     geocoder = _SeaIsEmpty()
@@ -1217,25 +1246,30 @@ async def test_run_wide_ratio_catches_what_no_single_slug_can(
 
 
 class _HistoryContext(_Context):
-    """직전 전체 run 하나를 아는 run context."""
+    """앞선 전체 run들(최신순)을 아는 run context."""
 
-    def __init__(self, previous_tags: dict[str, str] | None) -> None:
+    def __init__(
+        self,
+        previous_tags: dict[str, str] | None = None,
+        *,
+        history: list[dict[str, str]] | None = None,
+        run_id: str = "run-now",
+    ) -> None:
         super().__init__()
-        self.run_id = "run-now"
+        self.run_id = run_id
         self.tagged: dict[str, str] = {}
-        previous = (
-            SimpleNamespace(run_id="run-before", tags=previous_tags)
-            if previous_tags is not None
-            else None
-        )
+        runs = history if history is not None else ([previous_tags] if previous_tags else [])
+        previous = [
+            SimpleNamespace(run_id=f"run-before-{index}", tags=tags)
+            for index, tags in enumerate(runs)
+        ]
 
         def _get_runs(*, filters: Any, limit: int) -> list[Any]:
             del limit
             assert filters.tags[chunked.MOIS_LOAD_FULL_COVERAGE_TAG] == "true"
-            assert filters.tags[MOIS_LOAD_OUTCOME_TAG] == MOIS_LOAD_OUTCOME_COMPLETE
-            return [SimpleNamespace(run_id="run-now", tags=self.tagged)] + (
-                [previous] if previous else []
-            )
+            # 사슬의 budget_exhausted run을 빼면 안 된다 — outcome으로 거르지 않는다.
+            assert MOIS_LOAD_OUTCOME_TAG not in filters.tags
+            return [SimpleNamespace(run_id=self.run_id, tags=self.tagged), *previous]
 
         self.instance = SimpleNamespace(
             get_runs=_get_runs,
@@ -1288,3 +1322,160 @@ def test_degraded_ratio_setting_must_be_positive() -> None:
 
     with pytest.raises(ValidationError):
         KorTravelMapSettings(mois_geocode_degraded_ratio=0)
+
+
+# -- 최종 리뷰 MED-1: 지역 장애는 표식이 되지 않고, 사슬 전체를 비교한다 ---------------------
+
+
+async def test_regional_outage_with_a_passing_probe_leaves_no_markers_and_turns_red(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    records = _province_records(150, empty_province=True)
+    db = _FakeDb()
+
+    first_context = _HistoryContext(run_id="run-1")
+    first = await _run(
+        records,
+        db,
+        geocoder=_ProvinceLayerEmpty(),
+        plan=_plan(full_coverage=True),
+        strict_address="drop",
+        context=first_context,
+    )
+    assert first.geocode_degraded_slugs == ("bakeries",)
+    assert first.geo_probe_passes >= 1
+    assert db.markers == {}, "probe를 통과한 지역 장애의 행에 표식을 남겼다"
+
+    # 다음 run은 그 행을 다시 조회한다 — 여전히 degraded이고, 연속 두 번이므로 붉다.
+    second_context = _HistoryContext(history=[first_context.tagged], run_id="run-2")
+    with pytest.raises(Failure, match="연속 두 전체 run"):
+        await _run(
+            records,
+            db,
+            geocoder=_ProvinceLayerEmpty(),
+            plan=_plan(full_coverage=True),
+            strict_address="drop",
+            context=second_context,
+        )
+    assert second_context.tagged[chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG] == "bakeries"
+    assert db.markers == {}
+
+
+@pytest.mark.parametrize(
+    ("history", "fails"),
+    [
+        (
+            [
+                {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED},
+                {
+                    MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED,
+                    chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG: "bakeries",
+                },
+                {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE},
+            ],
+            True,
+        ),
+        (
+            [
+                {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE},
+                {
+                    MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE,
+                    chunked.MOIS_LOAD_GEOCODE_DEGRADED_TAG: "bakeries",
+                },
+            ],
+            False,
+        ),
+    ],
+    ids=["degraded-budget-run-in-chain", "older-than-last-complete"],
+)
+async def test_consecutive_check_spans_the_chain_back_to_the_last_complete_run(
+    monkeypatch: pytest.MonkeyPatch, history: list[dict[str, str]], fails: bool
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    context = _HistoryContext(history=history)
+
+    async def _go() -> chunked.MoisChunkedLoadOutcome:
+        return await _run(
+            _province_records(150, empty_province=True),
+            _FakeDb(),
+            geocoder=_ProvinceLayerEmpty(),
+            plan=_plan(full_coverage=True),
+            strict_address="drop",
+            context=context,
+        )
+
+    if fails:
+        with pytest.raises(Failure, match="연속 두 전체 run"):
+            await _go()
+    else:
+        assert (await _go()).geocode_degraded_slugs == ("bakeries",)
+
+
+@pytest.mark.parametrize("destroyed", [True, False])
+async def test_marker_write_failure_is_fatal_only_when_it_destroyed_the_transaction(
+    destroyed: bool,
+) -> None:
+    from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
+
+    db = _FakeDb(
+        marker_write_error=IntegrityFindingPersistenceError(
+            provider="python-mois-api",
+            dataset_key="mois_license_features_bulk",
+            observed_count=1,
+            unique_count=1,
+            error_type="OperationalError",
+            transaction_destroyed=destroyed,
+        )
+    )
+    records = _sea(1)
+
+    if destroyed:
+        with pytest.raises(IntegrityFindingPersistenceError):
+            await _run(records, db, geocoder=_SeaIsEmpty(), strict_address="drop")
+    else:
+        outcome = await _run(records, db, geocoder=_SeaIsEmpty(), strict_address="drop")
+        assert outcome.complete
+        assert db.markers == {}
+
+
+async def test_a_dense_cluster_that_trips_the_detector_is_not_marked_even_when_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """문턱을 넘은(probe 통과) chunk의 빈 답은 지역 장애와 구별할 수 없다 — 업종이 degraded가
+    아니어도 표식을 남기지 않는다. 다음 run이 다시 조회할 뿐이다(비율 2%라 봉인은 막지 않는다)."""
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    land = _land(2000)
+    records = [replace(r, mng_no=f"m-{i:05d}") for i, r in enumerate(land[:1000])]
+    records += [replace(r, mng_no=f"m-{1000 + i:05d}") for i, r in enumerate(_sea(40))]
+    records += [replace(r, mng_no=f"m-{1040 + i:05d}") for i, r in enumerate(land[1000:])]
+    db = _FakeDb()
+
+    outcome = await _run(
+        records, db, geocoder=_SeaIsEmpty(), plan=_plan(full_coverage=True), strict_address="drop"
+    )
+
+    assert outcome.geo_probe_passes == 1
+    assert outcome.geocode_degraded_slugs == ()
+    assert outcome.authoritative
+    assert db.markers == {}
+
+
+async def test_a_slug_degraded_by_ratio_alone_leaves_no_markers() -> None:
+    """문턱은 넘지 않았지만(낮은 밀도) 조회 대비 빈 답이 10%라 degraded — 표식을 남기지 않는다."""
+    records: list[_Record] = []
+    land = _land(180)
+    sea = _sea(20)
+    for index, row in enumerate(land):
+        records.append(replace(row, mng_no=f"m-{len(records):05d}"))
+        if index % 9 == 0 and sea:
+            records.append(replace(sea.pop(), mng_no=f"m-{len(records):05d}"))
+    db = _FakeDb()
+
+    outcome = await _run(
+        records, db, geocoder=_SeaIsEmpty(), plan=_plan(full_coverage=True), strict_address="drop"
+    )
+
+    assert outcome.geo_probes == 0
+    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert db.markers == {}

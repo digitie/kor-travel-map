@@ -130,9 +130,11 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
   metadata `mois_geocode_degraded`·`mois_geocode_degraded_slugs`·`mois_reverse_geocode_empty`·
   `mois_geo_probes`·`mois_geo_probe_passes`·`mois_geocoded_rows`·`mois_known_unresolvable`, 경고 로그를
   남긴다. outcome은 `complete`라 sensor는 잇지 않고, 다음 schedule·수동 run이 빈 행만 다시 한다.
-- **붉게 드러낸다**: 직전의 봉인 자격 있는 전체 run(tag `outcome=complete`·`full_coverage=true`)도
-  degraded였으면 이번 run은 **FAILURE**(재시도 없음)로 끝나며 두 run의 degraded 업종을 적는다. tag는 실패
-  전에 남기므로 다음 판정의 근거가 되고, outcome이 이미 `complete`라 이어 달리기 사슬을 막지 않는다.
+- **붉게 드러낸다**: 이번 run이 끝까지 본 전체 run(`outcome=complete`·`full_coverage=true`)이고 degraded일
+  때, 직전 완료 전체 run까지(포함) 거슬러 올라간 **이어 달리기 사슬의 어느 전체 run**(`budget_exhausted`
+  포함)이라도 degraded였으면 이번 run은 **FAILURE**(재시도 없음)로 끝나며 두 run의 degraded 업종을 적는다.
+  사슬 중간의 degraded run을 빼고 마지막 완료 run만 비교하면 두 번째 degraded를 놓친다(최종 리뷰 MED-1).
+  tag는 실패 전에 남기므로 다음 판정의 근거가 되고, outcome이 이미 `complete`라 사슬을 막지 않는다.
 - **overdue로 드러낸다**: migration `405_mois_freshness_sla`가 MOIS bulk dataset policy에
   `stale_after_minutes=57600`(40일 = 월간 schedule + 여유)을 심는다. 봉인·sync 성공이 40일 넘게 없으면
   `/v1/ops/datasets`가 overdue로 보인다. 운영자가 이미 정한 값은 바꾸지 않는다.
@@ -143,24 +145,31 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
 정상 상태에서는 그 행들이 조회 창과 비율을 지배해, 건강한 업종이 매달 degraded가 되고 다시는 봉인되지
 않는다. 그래서 그런 행을 기억한다.
 
-- **표식**: chunk가 장애 판정 없이 commit됐을 때(= geo가 건강했다) 빈 답을 받은 행마다
-  `ops.data_integrity_violations`에 finding 하나를 남긴다 — `violation_type=mois_reverse_geocode_unresolvable`,
+- **표식**: 빈 답을 받은 행의 표식은 **run 끝에 한 번** 쓴다. 쓰는 것은 그 업종이 degraded가 아니고, run
+  전체도 degraded가 아니며, 그 행이 문턱 초과(probe 통과) chunk에서 나온 것이 아닐 때뿐이다. 문턱을 넘었는데
+  probe가 통과했다면 지역 장애와 구별할 수 없고, degraded 업종은 정의상 장애 의심이다 — 그 행에 표식을 남기면
+  다음 run이 그 행을 보지 않아 degraded가 사라지고 봉인·sync 성공이 남아 overdue도 울리지 않는다(최종 리뷰
+  MED-1). 그런 행은 표식 없이 매 run 다시 조회되므로 geo가 회복될 때까지 degraded가 지속된다.
+  표식은 `ops.data_integrity_violations`의 finding 하나다 — `violation_type=mois_reverse_geocode_unresolvable`,
   `severity=info`, dedupe key는 `make_integrity_finding_key(provider, dataset, license_place, slug::mng_no,
   그 type)`, `payload.source_record_key`에 현재 payload의 source record key를 싣는다(payload hash에서
-  파생된다). 이미 있으면 upsert가 `last_seen_at`과 payload를 전진시킨다.
+  파생된다). 이미 있으면 upsert가 `last_seen_at`과 payload를 전진시킨다. 표식 기록 실패는 무해하게 경고만
+  남기지만, 결합된 transaction까지 되감은 실패(`transaction_destroyed`)는 그대로 올린다(etl과 같은 규칙).
 - **다음 run**: 같은 dedupe key의 **열린**(open/acknowledged) 표식이 있고 `payload.source_record_key`가
   현재 payload와 같고 `last_seen_at`이 30일(`UNRESOLVABLE_MARKER_RETRY_DAYS`) 안이면 "알려진 불가 행"이다 —
   조회하지 않고, 조회 창·비율에 넣지 않고, 적재하지도 않는다(`mois_known_unresolvable`로 센다). payload가
   바뀌면 key가 맞지 않아 저절로 다시 조회한다. 30일이 지나면 다시 조회해 geo 데이터 갱신을 반영한다 —
-  여전히 빈 답이면 표식이 전진한다. 운영자가 finding을 닫으면(`resolved`) 다음 run이 다시 조회한다.
+  여전히 빈 답이면 표식이 전진한다. 다시 조회해 **풀리면** 그 행의 열린 표식을 `resolved`로 닫는다 — 열린
+  표식이 끝없이 쌓이지 않는다. 운영자가 finding을 닫으면(`resolved`) 다음 run이 다시 조회한다.
 - **저장소 선택**: 새 표를 만들지 않고 finding 표를 재사용했다. 필요한 것(엔티티 단위 dedupe key, 열린
   표식 unique 인덱스 `uq_violations_open_dedupe_key`, 관측 시각 `last_seen_at`, payload jsonb, runtime
   쓰기 경로 `record_address_validation_findings`)이 모두 있고, 표식이 `/admin/issues`에 정보 수준 이슈로
   보이는 것이 오히려 운영에 맞다(어느 좌표가 왜 빠지는지). 대가: 표식 수만큼 issue 행이 늘고, finding 정리
   정책이 표식 수명에 영향을 준다(닫으면 재조회 — 안전한 방향).
-- **남는 위험**: probe를 통과하는 지역 장애가 비율 상한(5%) **아래**로 작으면 그 행들도 표식이 되어 최대
-  30일 동안 조회되지 않는다. 비율을 넘는 지역 장애는 첫 run이 degraded이고, 표식이 생긴 뒤의 run은 그 행을
-  보지 않으므로 degraded가 아니게 된다 — 그래서 첫 degraded run의 업종 목록과 overdue가 그 사건의 기록이다.
+- **남는 위험·대가**: 문턱을 넘을 만큼 **몰려 있는** 정상 해상 좌표(섬 지자체 행이 `mng_no`로 모인 경우)는
+  지역 장애와 구별할 수 없어 표식이 되지 않고 매 run 다시 조회된다. 비율 상한(조회 대비 5%) 아래면 봉인을
+  막지 않는다. 위면 그 업종은 매번 degraded이고 두 번째부터 붉다 — 그때는 사람이 좌표를 확인한다(geo
+  데이터 문제인지 원천 좌표 문제인지). 낮은 밀도로 흩어진 해상 좌표는 표식이 되어 30일마다 한 번 조회된다.
 
 ### 3b. 재관측 충돌은 run 안에서 그 chunk만 다시 (적대 리뷰 MED-2)
 

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "find_fresh_open_findings",
+    "resolve_open_findings_by_key",
     "DataIntegrityViolation",
     "DataIntegrityViolationStateConflict",
     "IntegrityObservationRun",
@@ -426,6 +427,65 @@ async def find_fresh_open_findings(
         )
     ).scalars().all()
     return frozenset(str(row) for row in rows)
+
+
+_OPEN_FINDING_IDS_BY_KEY_SQL: Final[str] = """
+SELECT finding.issue_id
+FROM ops.data_integrity_violations AS finding
+WHERE finding.payload ? 'dedupe_key'
+  AND (finding.payload ->> 'dedupe_key') = ANY(CAST(:dedupe_keys AS text[]))
+  AND finding.status = 'open'
+  AND finding.violation_type = :violation_type
+"""
+
+_RESOLVE_FINDINGS_BY_ID_SQL: Final[str] = """
+UPDATE ops.data_integrity_violations AS v
+   SET status = 'resolved',
+       resolved_at = now(),
+       payload = v.payload || jsonb_build_object('resolution', CAST(:resolution AS jsonb))
+ WHERE v.issue_id = ANY(CAST(:issue_ids AS uuid[]))
+   AND v.status = 'open'
+RETURNING v.issue_id
+"""
+
+
+async def resolve_open_findings_by_key(
+    session: AsyncSession,
+    *,
+    violation_type: str,
+    dedupe_keys: Sequence[str],
+    reason: str,
+) -> int:
+    """열린(``open``) finding 중 주어진 dedupe key를 ``resolved``로 닫는다. commit은 호출자 책임.
+
+    표식으로 쓰이던 finding의 사실이 더는 참이 아닐 때(ADR-108: 역지오코딩 불가였던 행이 이제
+    풀린다) 쓴다. ``acknowledged``는 사람이 인지한 표시라 기계가 닫지 않는다. 먼저 SELECT로
+    닫을 행을 고르고 있을 때만 UPDATE한다 — 이 표의 statement 단위 trigger가 ``ops_live``
+    revision hot row를 갱신하므로 0행 UPDATE를 chunk마다 쏘지 않는다.
+    """
+    if not dedupe_keys:
+        return 0
+    issue_ids = [
+        str(issue_id)
+        for issue_id in (
+            await session.execute(
+                text(_OPEN_FINDING_IDS_BY_KEY_SQL),
+                {"dedupe_keys": sorted(set(dedupe_keys)), "violation_type": violation_type},
+            )
+        ).scalars()
+    ]
+    if not issue_ids:
+        return 0
+    rows = (
+        await session.execute(
+            text(_RESOLVE_FINDINGS_BY_ID_SQL),
+            {
+                "issue_ids": issue_ids,
+                "resolution": json.dumps({"reason": reason}, ensure_ascii=False),
+            },
+        )
+    ).scalars().all()
+    return len(rows)
 
 
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """

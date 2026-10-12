@@ -245,6 +245,7 @@ from kortravelmap.infra.integrity_violation_repo import (
     close_stale_integrity_findings,
     find_fresh_open_findings,
     purge_resolved_integrity_findings,
+    resolve_open_findings_by_key,
     sync_integrity_findings,
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
@@ -2613,6 +2614,22 @@ class AsyncKorTravelMapClient:
                 violation_type=violation_type,
                 expected_source_record_keys=expected_source_record_keys,
                 max_age_days=max_age_days,
+            )
+
+    async def resolve_open_findings_by_key(
+        self,
+        *,
+        violation_type: str,
+        dedupe_keys: Sequence[str],
+        reason: str,
+    ) -> int:
+        """열린 finding을 dedupe key로 닫는다(ADR-108: 다시 풀린 역지오코딩 불가 표식)."""
+        async with self._session_factory() as session, session.begin():
+            return await resolve_open_findings_by_key(
+                session,
+                violation_type=violation_type,
+                dedupe_keys=dedupe_keys,
+                reason=reason,
             )
 
     async def record_address_validation_findings(

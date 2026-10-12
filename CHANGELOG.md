@@ -41,6 +41,9 @@
 - **ADDED (dagster)**: 역지오코딩 불가 표식(finding `mois_reverse_geocode_unresolvable`, info) — 같은 payload는 30일
   동안 조회하지 않는다. degraded 비율 분모는 조회한 행(최소 50). 연속 두 전체 run이 degraded면 FAILURE.
 - **ADDED (db)**: migration `405_mois_freshness_sla` — MOIS bulk dataset policy `stale_after_minutes=57600`.
+- **FIXED (dagster)**: 역지오코딩 불가 표식은 run 끝에 degraded가 아닌 업종·문턱 초과가 없던 chunk의 행에만 남긴다(지역
+  장애가 표식으로 가려지지 않는다). 다시 풀린 행의 표식은 닫는다. 연속 degraded 판정은 이어 달리기 사슬 전체를 본다.
+  결합 transaction을 되감은 표식 기록 실패는 삼키지 않는다.
 - **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
   `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
   큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.
