@@ -21,11 +21,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from kortravelmap import client as client_module
 from kortravelmap.client import AsyncKorTravelMapClient
 from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from kortravelmap import client as client_module
 
 _KEY = "provider-run:test:single-connection"
 
@@ -106,22 +107,28 @@ async def test_locked_body_failure_restores_factory_and_releases_lock(
         client = AsyncKorTravelMapClient(engine)
         unpinned = client._session_factory
 
+        leaked: list[Any] = []
+
         class _BodyFailed(RuntimeError):
             pass
 
-        with pytest.raises(_BodyFailed):
+        async def _fail_inside_lock() -> None:
             async with client.provider_run_lock(_KEY):
                 session = client._session_factory()
+                leaked.append(session)
                 await session.execute(text("SELECT 1"))
                 # session을 닫지 않고 transaction을 연 채로 실패한다.
                 raise _BodyFailed
+
+        with pytest.raises(_BodyFailed):
+            await _fail_inside_lock()
 
         assert client._session_factory is unpinned
         assert lock_events == [f"lock:{_KEY}", f"unlock:{_KEY}"]
         # 유일한 연결이 pool로 돌아왔다 — 막혀 있으면 pool timeout으로 죽는다.
         async with client._session_factory() as again:
             assert (await again.execute(text("SELECT 1"))).scalar_one() == 1
-        await session.close()
+        await leaked[0].close()
     finally:
         await engine.dispose()
 
