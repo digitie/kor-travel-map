@@ -1,3 +1,12 @@
+## 2026-10-13 — weather 잔재 정리: 브랜치 `chore/weather-remnant-cleanup`
+
+**다음 한 작업: CI 전량 green → PR(조정자가 연다)·머지. 배포 영향 없음** — 죽은 코드·주석·문서만 바뀌었고 migration·
+OpenAPI·런타임 경로 변화가 없다. 다음 Map pinned-pair 회전 때 이미지에 실린다.
+
+- 지운 것: `make_weather_value_key`(+테스트), `SOURCE_PRIORITY`의 kma/airkorea, api 테스트의 고아 `_CURATED_*` 블록,
+  admin UI의 weather 라벨·색. 남긴 것과 이유는 journal 같은 날짜 항목.
+- 새 백로그: `T-WX-VNEXT-FREEZE`·`T-WX-SOURCEROLE`·`T-WX-DTO`·`T-WX-NOTICE-CLOSE`(+ Manager KMA env 외부 추적).
+
 ## 2026-10-12 — MOIS 재개형 chunk commit 적재(ADR-108): 브랜치 `feat/mois-chunked-resumable-load`
 
 **다음 한 작업: 소유자 결정(ADR-108 "열린 결정") → 적대 리뷰 → PR·CI·머지 → Map pair 회전 → Manager

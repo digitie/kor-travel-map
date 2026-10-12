@@ -16,7 +16,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `tests/lint/test_task_ledger_conventions.py`가 길이를 강제한다.
 
 **외부 저장소 항목**은 규약 §6에 따라 여기 세지 않고 "외부 추적"으로만 둔다.
-현재 하나다 — `GM-17`(Manager production compose required-set 완화). 소유자 지시로
+현재 둘이다 — Manager compose의 `KOR_TRAVEL_MAP_KMA_*` env 제거(ADR-104/105 뒤 Map이 읽지
+않는 키다. 2026-10-13 Manager 저장소에서 진행 중이며 정본은 그 저장소의 PR이다)와
+`GM-17`(Manager production compose required-set 완화). 소유자 지시로
 **열린 항목 중 가장 마지막**이고, 착수 전 오너와 범위 재확인이 조건이다. 정본은
 `kor-travel-docker-manager` 저장소의 `docs/general-mgmt-audit.md`와 `docs/tasks.md`다.
 
@@ -78,3 +80,24 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   하지 않는다. 재개하려면 목표 SLO 정의와, exact-viewport(ADR-073 accepted 계약)
   vs region-total 의미 택일이 선행한다 — 후자는 ADR 개정과 PinVi 소비자 계약
   변경을 함께 부른다.
+
+- [ ] T-WX-VNEXT-FREEZE — **vNext target freeze 계약이 지워진 weather 표를 여전히 선언한다**
+
+  `contracts/vnext/target-schema-v1.sql`·invariants·violation fixtures가 402가 DROP한 weather
+  표·함수를 들고 있고, `test_vnext_target_freeze.py`는 계약↔계약 대조라 이를 못 잡는다.
+  재동결할지, 기록으로 둘지 정한다.
+
+- [ ] T-WX-SOURCEROLE — **`SourceRole.WEATHER_CONTEXT` 퇴역 migration(선택)**
+
+  ADR-105 뒤 생산자가 없다. enum 값과 `source_links` CHECK를 함께 좁히는 migration이
+  필요하다. 남은 행이 0인지 먼저 확인한다.
+
+- [ ] T-WX-DTO — **`WeatherValue` DTO·weather enum 삭제 여부 결정**
+
+  ADR-105가 정의 유지로 남겼고 API 재도입 방지 검사가 그 정의에 기댄다. 지우려면 그
+  검사를 kind/provider 정체성만으로 다시 써야 한다.
+
+- [ ] T-WX-NOTICE-CLOSE — **production 호출자 없는 `close_notice_features` 정리**
+
+  유일한 호출자였던 KMA 특보 적재가 ADR-105로 사라졌다. client 메서드·repo 함수·통합 테스트를
+  지울지, 다른 event feed용으로 남길지 정한다.

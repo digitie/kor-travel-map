@@ -1,3 +1,32 @@
+## 2026-10-13 — weather 잔재 정리(ADR-104/105 후속): 브랜치 `chore/weather-remnant-cleanup`
+
+소유자 승인 정리. 세 갈래 스캔이 live weather 경로는 없고 죽은 코드와 낡은 문서만 남았다고 봤다. PR·머지·배포는 하지 않았다.
+
+- **지운 코드.** `core.ids.make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`와 `core` 재수출,
+  `tests/unit/test_ids_weather.py`(호출자 0, grep 전수). `core.scoring.SOURCE_PRIORITY`의 `python-kma-api`·
+  `python-airkorea-api` 항목(읽는 곳은 `source_priority()` 하나, master 선정 후보에 그 provider feature가 402/403 뒤
+  남지 않는다). `test_export_openapi.py`의 `_CURATED_*` 상수 다섯 개 — `"weather"` variant만 죽은 게 아니라 #1023이
+  소비 테스트를 지운 뒤 블록 전체가 아무도 읽지 않았다. admin frontend `vworld-map-view`·`poi-cache-targets`의
+  weather 라벨·색(`Record<string,string>` + `??` fallback이라 kind union과 무관; dedup-review 표는 이미 깨끗했다).
+- **남긴 것(결정).** `FeatureKind.WEATHER`·kind CHECK, `WeatherValue` DTO·weather enum(API 재도입 방지 검사가 기댄다),
+  provider alias, baseline/seed/legacy migration, frozen H35 SQL(`feature_repo`의 KMA 분기 포함), maki weather 아이콘,
+  `SourceRole.WEATHER_CONTEXT`(migration 필요 → 백로그).
+- **문서.** ADR-062·072 superseded by ADR-104/105(본문 유지, 머리 노트), README 색인. ADR-105의 소유 참조를 ADR-068
+  (Feature UUID)에서 ADR-104로 정정. integration-map(service resource는 `/v1/features/batch`뿐), live 인수 runbook
+  (owned ID 7개 = place 6 + price 1, `_owned_ids` 대조), ETL 배너 다섯, architecture·data-model(§8.2 제거 노트,
+  `current_summary_runs` CHECK는 402 이후 `'price'`)·feature-model·public-views(`latest_weather` 행)·poi-cache·test-strategy.
+  stale 주석: maki.ts·mois.py·client docstring·dto/bundle.py.
+- **백로그.** `T-WX-VNEXT-FREEZE`(계약↔계약 대조라 지워진 weather 표를 못 잡는다 — 확인함), `T-WX-SOURCEROLE`,
+  `T-WX-DTO`, 그리고 스캔 중 찾은 `T-WX-NOTICE-CLOSE`(`close_notice_features`의 production 호출자 0). Manager compose
+  `KOR_TRAVEL_MAP_KMA_*` env 제거는 외부 추적(Manager 저장소에서 진행 중).
+- 검증(로컬 WSL ext4 사본 + uv venv, n150은 IO 포화라 쓰지 않았다): ruff check(CI 경로) 통과, mypy --strict
+  main 153·api 67·dagster 30 통과, lint-imports 4 kept, `check_prod_redaction` 통과. pytest: core import 단위 704 passed,
+  `tests/lint` 303 passed(+ `test_sealed_runtime_tree_ship` 2건은 git이 필요해 실제 worktree에서 2 passed),
+  `test_export_openapi.py` 11 passed. frontend: admin type-check·touched ESLint 0 경고·vitest 46파일 391 passed,
+  map-marker-react vitest 4 passed·typecheck 통과. 최종 게이트는 GitHub CI다.
+- 기존 결함(이번 변경과 무관, 기록만): `make_feature_id` doctest 기대값이 origin/main에서도 틀린다(CI는 doctest를
+  돌리지 않는다). 로컬 ruff의 `format --check`는 손대지 않은 줄 다수에 diff를 낸다(CI format step은 `if: false`).
+
 ## 2026-10-12 — MOIS ADR-108 통합 테스트 resource 누락·직접 호출 tag 실패
 
 - PR CI 통합 두 lane이 `test_dagster_assets_validate_coordinates_and_load_to_postgis` 하나로 붉었다 —

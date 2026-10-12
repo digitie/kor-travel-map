@@ -6,7 +6,8 @@ provider 변환 함수의 출력 = load 함수의 입력. 하나의 raw payload 
 - ``feature`` (필수) — Feature 본체
 - ``source_record`` (필수) — provider raw payload 보존
 - ``source_link`` (필수) — feature ↔ source 매핑
-- ``file_sources``. PriceValue는 전용 적재 메서드가 별도로 받는다(WeatherValue 적재는 ADR-105로 제거).
+- ``file_sources``. PriceValue는 전용 적재 메서드가 별도로 받는다
+  (WeatherValue 적재는 ADR-105로 제거).
 
 ``AsyncKorTravelMapClient.load_feature_bundles(bundles)``가 본 DTO 리스트를 받아
 DB upsert + 객체 저장소 업로드 + source_link 생성을 한 transaction에서 수행.
