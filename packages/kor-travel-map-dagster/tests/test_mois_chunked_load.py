@@ -8,7 +8,7 @@ DB는 대역이지만 **commit 의미는 지킨다**: chunk transaction 안에�
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -751,8 +751,11 @@ def test_geocode_drops_are_counted_apart_from_data_invalid_drops() -> None:
             reverse_geocoder=_Geocoder(always_empty=True),
         )
     )
-    assert chunked._drop_counts(bundles, mode="drop") == (1, 1)  # noqa: SLF001
-    assert chunked._drop_counts(bundles, mode="off") == (0, 0)  # noqa: SLF001
+    geocode, invalid = chunked._classify_drops(bundles, mode="drop")  # noqa: SLF001
+    assert (len(geocode), invalid) == (1, 1)
+    # 빈 답 행은 모드와 무관하게 센다(off 모드도 적재하지 않는다). 데이터 무효는 drop에서만 버린다.
+    geocode, invalid = chunked._classify_drops(bundles, mode="off")  # noqa: SLF001
+    assert (len(geocode), invalid) == (1, 0)
 
 
 # -- 재관측 충돌 (적대 리뷰 MED-2) ------------------------------------------------
@@ -933,6 +936,9 @@ async def test_resumed_run_dominated_by_legitimately_empty_coordinates_completes
     resumed = await _run(records, db, geocoder=geocoder, strict_address="drop")
 
     assert resumed.complete, "정상적으로 빈 좌표가 대부분인 재개 run이 장애로 판정됐다"
+    # 바다 좌표 40행이 이번 run 관측의 대부분이다 — 장애가 아니라 행 단위 빈 답이지만 상한(5%)을
+    # 넘으므로 이 run은 봉인할 수 없다(degraded). 실패는 아니다 — 영구 정지가 아니다.
+    assert resumed.geocode_empty == len(sea)
     assert resumed.records_unchanged == len(land)
     assert resumed.records_converted == len(sea)
     # probe가 실제로 나갔다(최근 40건 전부 빈 답 → 좋은 좌표 하나로 확인).
@@ -979,3 +985,122 @@ def test_run_clock_start_uses_a_sane_run_start() -> None:
         ),
     )
     assert chunked._run_clock_start(context, 1_000.0) == 400.0  # noqa: SLF001
+
+
+# -- 최종 델타 리뷰 MED-1: 지역 장애는 조용한 손실이 아니라 degraded run이다 -------------
+
+
+def _province_records(count: int, *, empty_province: bool) -> list[_Record]:
+    """mng_no가 발급 지자체 순이라 한 시·도의 행이 연속으로 온다."""
+    good = [
+        _Record(service_slug="bakeries", mng_no=f"a-{i:04d}", lon=126.9 + i / 10_000, lat=37.5)
+        for i in range(count)
+    ]
+    bad = [
+        _Record(service_slug="bakeries", mng_no=f"b-{i:04d}", lon=128.5 + i / 10_000, lat=35.8)
+        for i in range(count if empty_province else 0)
+    ]
+    return good + bad
+
+
+class _ProvinceLayerEmpty(_Geocoder):
+    """경도 128.4 이상(한 시·도)의 layer만 비었다. 기준점·다른 지역은 답한다."""
+
+    async def __call__(self, coord: Coordinate) -> Address:
+        self.calls.append(coord)
+        if float(coord.lon) >= 128.4:
+            return Address()
+        return Address(bjd_code="1111010100", sigungu_code="11110", sido_code="11")
+
+
+@pytest.mark.parametrize("mode", ["drop", "off"])
+async def test_regional_outage_completes_but_is_degraded_not_sealed(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    records = _province_records(150, empty_province=True)
+    db = _FakeDb()
+    context = _Context()
+
+    outcome = await _run(
+        records,
+        db,
+        geocoder=_ProvinceLayerEmpty(),
+        plan=_plan(full_coverage=True),
+        strict_address=mode,
+        context=context,
+    )
+
+    assert outcome.complete
+    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert not outcome.authoritative
+    assert db.seals == 0, "지역 장애 run이 봉인됐다"
+    assert outcome.geocode_empty == 150
+    assert context.metadata["mois_geocode_degraded"] is True
+    assert context.metadata["mois_geo_probes"] >= 1
+    assert context.metadata["mois_geo_probe_passes"] == context.metadata["mois_geo_probes"]
+    # 빈 bjd 행은 어느 모드에서도 적재되지 않았다 — 다음 run이 "그대로"로 건너뛰지 않고 다시 한다.
+    assert set(db.current) == {license_source_entity_id(r) for r in records[:150]}
+
+
+async def test_off_mode_rows_with_an_empty_geocode_are_retried_next_run() -> None:
+    """off 모드에서 빈 bjd로 commit하면 같은 payload는 영원히 "그대로"다 — 적재하지 않는다."""
+    records = [
+        _Record(service_slug="bakeries", mng_no=f"x-{i}", lon=126.9 + i / 1000, lat=37.5)
+        for i in range(3)
+    ]
+    db = _FakeDb()
+    first = await _run(
+        records, db, geocoder=_Geocoder(empty_at_lon=126.901), strict_address="off"
+    )
+    assert first.geocode_empty == 1
+    assert license_source_entity_id(records[1]) not in db.current
+
+    converted = _Converted()
+    second = await _run(
+        records, db, geocoder=_Geocoder(), converted=converted, strict_address="off"
+    )
+    assert converted.ids == [license_source_entity_id(records[1])]
+    assert second.geocode_empty == 0
+    assert set(db.current) == {license_source_entity_id(r) for r in records}
+
+
+async def test_repeated_trips_with_a_passing_probe_in_one_slug_mark_it_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """비율 판정을 끄고(상한 1.0), K회 연속 "문턱 초과 + probe 통과"만으로 degraded가 된다."""
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 25)
+    records = _province_records(10, empty_province=False) + [
+        _Record(service_slug="bakeries", mng_no=f"c-{i:04d}", lon=128.5 + i / 10_000, lat=35.8)
+        # 첫 chunk는 좋은 행 10과 섞여 문턱을 넘지 않는다 — 문턱 초과 K회를 보려면 한 chunk 더.
+        for i in range(25 * (chunked.GEO_PASSING_TRIPS_DEGRADE + 1))
+    ]
+    plan = replace(_plan(full_coverage=True), geocode_degraded_ratio=1.0)
+
+    outcome = await _run(
+        records, _FakeDb(), geocoder=_ProvinceLayerEmpty(), plan=plan, strict_address="drop"
+    )
+
+    assert outcome.geo_probe_passes >= chunked.GEO_PASSING_TRIPS_DEGRADE
+    assert outcome.geocode_degraded_slugs == ("bakeries",)
+    assert not outcome.authoritative
+
+
+async def test_a_healthy_run_with_few_empty_rows_is_still_sealed() -> None:
+    """상한(5%) 아래의 행 단위 빈 답은 정상이다 — 봉인을 막지 않는다."""
+    records = [
+        _Record(service_slug="bakeries", mng_no=f"h-{i:04d}", lon=126.9 + i / 10_000, lat=37.5)
+        for i in range(400)
+    ]
+    db = _FakeDb()
+    outcome = await _run(
+        records,
+        db,
+        geocoder=_Geocoder(empty_at_lon=126.9005),
+        plan=_plan(full_coverage=True),
+        strict_address="drop",
+    )
+    assert outcome.geocode_empty == 1
+    assert outcome.geocode_degraded_slugs == ()
+    assert outcome.authoritative
+    assert db.seals == 1

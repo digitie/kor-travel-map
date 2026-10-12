@@ -441,17 +441,15 @@ _DEDICATED_JOB_ONLY_EVENT_CODE = "PROVIDER_DEDICATED_JOB_ONLY"
 
 
 def _plan_emptied_by_dedicated_job_only(plan: FeatureUpdateExecutionPlan) -> bool:
-    """실행할 것이 없고, 건너뛴 것이 **전부** 전용 job 전용 operation인가.
+    """실행할 것이 없고, 건너뛴 것 중에 전용 job 전용 operation이 있는가.
 
-    policy가 꺼서 비어 버린 계획은 종전처럼 ``done``으로 닫는다 — 그 요청은 원래도 아무것도
-    하지 않았을 것이다. 전용 job 사유만으로 비었을 때만 실패로 드러낸다(적대 리뷰 LOW-c).
+    policy만으로 비어 버린 계획은 종전처럼 ``done``으로 닫는다 — 그 요청은 원래도 아무것도
+    하지 않았을 것이다(적대 리뷰 LOW-c). 그러나 전용 job 사유가 하나라도 섞이면 그 부분은 요청자가
+    갱신을 기대한 것이므로 ``done``으로 닫으면 PinVi cache target이 갱신됐다고 믿는다 — 실패로
+    드러낸다(최종 델타 리뷰 LOW). 실행된 scope가 하나라도 있으면 ``done`` + error_message다.
     """
-    return (
-        not plan.refresh_scopes
-        and bool(plan.skipped_scopes)
-        and all(
-            scope.reason == DEDICATED_JOB_ONLY_SKIP_REASON for scope in plan.skipped_scopes
-        )
+    return not plan.refresh_scopes and any(
+        scope.reason == DEDICATED_JOB_ONLY_SKIP_REASON for scope in plan.skipped_scopes
     )
 
 

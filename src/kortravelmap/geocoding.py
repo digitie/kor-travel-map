@@ -325,27 +325,39 @@ class PrefetchingReverseGeocoder:
         self.last_good_coord: Coordinate | None = None
         """이 run에서 마지막으로 법정동코드를 받아 온 좌표(장애 판정 probe의 1순위)."""
         self.probes = 0
-        """:meth:`probe_healthy`가 upstream으로 보낸 확인 조회 수."""
+        """:meth:`probe_healthy` 호출 수."""
+        self.probe_passes = 0
+        """:meth:`probe_healthy`가 건강하다고 판정한 수."""
 
-    async def probe_healthy(self, reference: Coordinate) -> bool:
-        """캐시를 거치지 않고 알려진 좋은 좌표 하나를 조회해 geo가 살아 있는지 본다.
-
-        최근 창의 빈 답 비율만으로는 "geo 장애"와 "빈 답이 정상인 좌표(바다·경계)만 남은
-        재개 run"을 가를 수 없다. 이 run에서 법정동코드를 받아 온 좌표(없으면 호출자가 준
-        ``reference``)를 다시 묻는다. 답이 오면 건강하다 — 최근 창을 비워 다음 판정이 새 표본으로
-        다시 시작하게 한다. 빈 답이면 ``False``. 예외는 그대로 올라간다(그것도 장애다).
-        이 조회는 통계 창에 넣지 않는다.
-        """
-        coord = self.last_good_coord or reference
-        self.probes += 1
+    async def _resolves(self, coord: Coordinate) -> bool:
         if isinstance(self._geocoder, ObservedReverseGeocoder):
             address = (await self._geocoder.observe(coord)).address
         else:
             address = await self._geocoder(coord)
-        healthy = address is not None and address.bjd_code is not None
-        if healthy:
-            self._recent_empty.clear()
-        return healthy
+        return address is not None and address.bjd_code is not None
+
+    async def probe_healthy(self, reference: Coordinate) -> bool:
+        """캐시를 거치지 않고 알려진 좋은 좌표를 다시 물어 geo가 살아 있는지 본다.
+
+        최근 창의 빈 답 비율만으로는 "geo 장애"와 "빈 답이 정상인 좌표(바다·경계)만 남은
+        재개 run"을 가를 수 없다. 고정 기준 좌표 ``reference``와 이 run에서 법정동코드를 받아 온
+        마지막 좌표를 **둘 다** 묻고, 둘 다 답하면 건강하다 — 최근 창을 비워 다음 판정이 새
+        표본으로 시작하게 한다. 하나라도 빈 답이면 ``False``. 예외는 그대로 올라간다(그것도
+        장애다). 이 조회는 통계 창에 넣지 않는다.
+
+        probe가 통과해도 **지역** 장애(한 시·도 layer만 빈 경우)는 가리지 못한다 — 호출자가 같은
+        업종에서 통과한 판정이 거듭되는지와 빈 답 비율 상한으로 따로 본다.
+        """
+        self.probes += 1
+        coords = [reference]
+        if self.last_good_coord is not None and self.last_good_coord != reference:
+            coords.append(self.last_good_coord)
+        for coord in coords:
+            if not await self._resolves(coord):
+                return False
+        self.probe_passes += 1
+        self._recent_empty.clear()
+        return True
 
     @property
     def recent_lookups(self) -> int:

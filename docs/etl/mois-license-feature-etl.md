@@ -265,7 +265,9 @@ async def run_mois_weekly_update(
 | retry | 1회, 5분 뒤(재시도도 이어 간다). 재관측 충돌은 run 안에서 그 chunk만 최대 2회 다시 |
 | 시간 기준 | run 시작(run record `start_time`) — 상한은 `min(설정, run 상한 tag - 30분)` |
 | 소실 하한 | 데이터 무효 drop을 업종 누적·관측 200행 이상에서만 판정(> 50%면 commit 전 실패). 지오코더 원인 drop은 따로 세고 다음 run이 다시 시도 |
-| geo 장애 | 최근 조회 20건 이상 중 80% 이상이 빈 답이면 알려진 좋은 좌표를 다시 묻고, 그것도 빈 답이면 chunk 적재 전 upstream 장애로 실패(행을 버리지 않는다). 답이 오면 계속 |
+| geo 장애 | 최근 조회 20건 이상 중 80% 이상이 빈 답이면 고정 기준점과 마지막 좋은 좌표를 둘 다 다시 묻고, 하나라도 빈 답이면 chunk 적재 전 upstream 장애로 실패(행을 버리지 않는다). 둘 다 답하면 계속 |
+| 빈 답 행 | 어느 검증 모드에서도 적재하지 않는다(off 포함) — 다음 run이 다시 시도 |
+| degraded | 업종(관측 200행 이상)·run의 빈 답 비율 > `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%), 또는 같은 업종에서 "문턱 초과 + probe 통과" 3회 → run은 실패하지 않지만 봉인·sync 성공 없음, tag `kor_travel_map.mois_load.geocode_degraded`, metadata `mois_geocode_degraded*`·`mois_geo_probes`·`mois_geo_probe_passes` |
 | 봉인·sync 성공 | 전 업종을 한 run 안에서 끝까지 본 run만(`outcome=complete` + 전 업종) |
 | 큐 경로 | MOIS뿐인 요청은 접수 시 409 `PROVIDER_DEDICATED_JOB_ONLY`. 섞인 요청은 MOIS를 건너뛰고 `done` + error_message로 남긴다. 실행할 것이 MOIS뿐인 cache target 요청은 `failed` + `error_code=PROVIDER_DEDICATED_JOB_ONLY` |
 | 이어 달리기 정지 | 실패 run, 미종료 run 존재, 마지막 run이 상한의 절반 이상을 받고도 새 행 0건(`…records_converted=0`, `…budget_seconds`·`…budget_available_seconds`)으로 상한 도달 |

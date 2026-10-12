@@ -73,6 +73,8 @@ def test_create_route_documents_every_409_it_returns() -> None:
     run_now = spec["paths"]["/v1/ops/pipeline/requests/{request_id}/run-now"]["post"]["responses"][
         "409"
     ]
-    for code in ("PROVIDER_DEDICATED_JOB_ONLY", "MOIS_SOURCE_SYNC_REQUIRED", "LOCK_BUSY"):
+    for code in ("PROVIDER_DEDICATED_JOB_ONLY", "LOCK_BUSY"):
         assert code in create["description"], code
+    # 생성 route는 더 이상 MOIS source precheck를 부르지 않는다 — 문서에도 없어야 한다.
+    assert "MOIS_SOURCE_SYNC_REQUIRED" not in create["description"]
     assert "PROVIDER_DEDICATED_JOB_ONLY" not in run_now["description"]

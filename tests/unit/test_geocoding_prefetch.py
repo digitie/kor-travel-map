@@ -118,9 +118,24 @@ async def test_probe_prefers_a_coordinate_that_resolved_in_this_run_and_resets_t
 
     reference = Coordinate(lon=Decimal("127.5"), lat=Decimal("36.5"))
     assert await geocoder.probe_healthy(reference) is True
-    assert upstream.calls[-1] == geocoder.last_good_coord
+    # 고정 기준점과 이 run의 마지막 좋은 좌표를 **둘 다** 묻는다.
+    assert upstream.calls[-2:] == [reference, geocoder.last_good_coord]
     assert geocoder.recent_lookups == 0
-    assert geocoder.probes == 1
+    assert (geocoder.probes, geocoder.probe_passes) == (1, 1)
+
+
+async def test_probe_fails_if_either_the_reference_or_the_last_good_coordinate_is_empty() -> None:
+    reference = Coordinate(lon=Decimal("127.5"), lat=Decimal("36.5"))
+
+    async def _reference_only_empty(coord: Coordinate) -> Address | None:
+        return None if coord == reference else Address(bjd_code="1111010100")
+
+    geocoder = PrefetchingReverseGeocoder(_reference_only_empty, concurrency=1)
+    await geocoder.prefetch([_coord(1)])
+    assert geocoder.last_good_coord is not None
+
+    assert await geocoder.probe_healthy(reference) is False
+    assert (geocoder.probes, geocoder.probe_passes) == (1, 0)
 
 
 async def test_probe_falls_back_to_the_reference_and_reports_empty() -> None:

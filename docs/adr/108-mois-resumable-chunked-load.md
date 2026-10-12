@@ -97,15 +97,35 @@ chunk 적재 함수의 하한은 끄고(`enforce_loss_guard=False`) 적재기가
   작은 업종의 drop은 행 단위 finding으로만 남는다.
 - **지오코더 원인**(`reverse_geocode_failed`)은 따로 센다. 이런 행은 적재되지 않으므로 다음 run이
   다시 변환한다 — 영구 손실이 아니다. 대신 **geo 장애**는 run 장애로 다룬다: 최근 50건 조회 중
-  20건 이상이 모였고 그 80% 이상이 법정동코드 없이 돌아오면, **알려진 좋은 좌표 하나를 캐시 없이
-  다시 묻는다**(이 run에서 법정동코드를 받은 마지막 좌표, 없으면 내륙 기준점). 그것도 빈 답(또는
-  예외)이면 그 chunk를 적재하기 전에 upstream 장애로 실패한다(행을 버리며 진행하지 않는다). 답이
-  오면 geo는 건강하고 그 빈 답들은 행 단위 사실이다 — 창을 비우고 계속한다.
+  20건 이상이 모였고 그 80% 이상이 법정동코드 없이 돌아오면, **알려진 좋은 좌표를 캐시 없이
+  다시 묻는다** — 고정 내륙 기준점(서울시청)과 이 run에서 법정동코드를 받은 마지막 좌표 **둘 다**.
+  하나라도 빈 답(또는 예외)이면 그 chunk를 적재하기 전에 upstream 장애로 실패한다(행을 버리며
+  진행하지 않는다). 둘 다 답하면 geo 전체는 건강하다 — 창을 비우고 계속한다.
   비율만으로 판정하면 재개 run이 영구히 막힌다(델타 리뷰 HIGH-1): 바다·경계처럼 빈 답이 정상인
   좌표의 행은 적재되지 않아 매 run 다시 변환되고, 적재된 행은 건너뛰므로 재개 run의 조회는 거의
   전부 그 빈 답이 된다. 표식 표를 두어 그 행을 건너뛰는 안도 검토했으나, 새 저장소·무효화 규칙 없이
   probe 한 번(최대 50조회마다 1회)으로 같은 판정이 된다. 대가로 그런 행은 매 run 다시 지오코딩된다
   (소수이고 run 캐시가 중복을 막는다).
+
+### 3a-2. 지역 장애는 실패가 아니라 degraded run이다 (최종 델타 리뷰 MED-1)
+
+probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer만 빈 **지역 장애**는 가리지 못한다.
+`mng_no`가 발급 지자체 순이라 그 지역의 행이 한 업종 안에서 연속으로 오고, 문턱 초과 → probe 통과 →
+창 비움이 끝없이 반복되며 그 지역이 통째로 빠진 채 run이 `complete`·봉인될 수 있었다. 그래서:
+
+- **빈 답 행은 어느 검증 모드에서도 적재하지 않는다.** drop은 적재 함수가 버리고, off는 적재기가
+  뺀다(off에서 빈 bjd로 commit하면 같은 payload는 다음 run에 "그대로"로 건너뛰고, 같은 payload의
+  재적재는 feature 본문을 다시 쓰지 않아 빈 bjd가 영원히 남는다). strict는 원래대로 run을 멈춘다.
+  그래서 그 행은 다음 run이 언제나 다시 시도한다.
+- **비율 상한**: 업종 하나(관측 200행 이상) 또는 run 전체에서 빈 답 행이
+  `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%)를 넘으면 그 업종을 **degraded**로 표시한다.
+- **K회 통과 판정**: 같은 업종에서 "문턱 초과 + probe 통과"가 3회(`GEO_PASSING_TRIPS_DEGRADE`) 쌓이면
+  degraded로 표시한다.
+- degraded run은 **실패시키지 않는다**(영구 정지를 다시 만들지 않는다). 대신 authoritative가 아니다 —
+  봉인·provider sync 성공을 남기지 않는다. run tag `kor_travel_map.mois_load.geocode_degraded`(업종 목록),
+  metadata `mois_geocode_degraded`·`mois_geocode_degraded_slugs`·`mois_reverse_geocode_empty`·
+  `mois_geo_probes`·`mois_geo_probe_passes`, 경고 로그를 남긴다. outcome은 `complete`라 sensor는 잇지
+  않고, 다음 schedule·수동 run이 빈 행만 다시 한다.
 
 ### 3b. 재관측 충돌은 run 안에서 그 chunk만 다시 (적대 리뷰 MED-2)
 
@@ -134,10 +154,12 @@ provider sync 성공을 남긴다. 부분 run·업종 선택 run은 non-authorit
   갱신하지 않은" 요청이 된다.
 - **섞인 계획**: 받는다. 실행 계획이 MOIS 부분을 `skipped_provider_scopes[].reason=dedicated_job_only`로
   빼고, 나머지를 실행한 뒤 request를 `done`으로 닫으면서 **job `error_message`에** 건너뛴
-  dataset·전용 job을 적는다 — `done`이 전부 갱신됐다는 뜻으로 읽히지 않게. 접수 때의 plan 선행조건
-  (MOIS source sync)은 큐가 실제로 실행할 membership에만 건다 — 건너뛸 MOIS 때문에 섞인 요청을 막지 않는다.
-- **skip 사유 순서**: 운영자가 끈 dataset(`policy_disabled`)은 그 사유가 먼저다. 그렇게 policy가 비운
-  계획은 종전처럼 `done`이고, 실패는 건너뛴 것이 **전부** `dedicated_job_only`일 때뿐이다.
+  dataset·전용 job을 적는다 — `done`이 전부 갱신됐다는 뜻으로 읽히지 않게. 접수 때의 plan 선행조건은
+  큐가 실제로 실행할 membership에만 건다. 생성 route는 MOIS source sync precheck를 더 부르지 않는다 —
+  MOIS의 유일한 operation이 전용 job 전용이라 그 409(`MOIS_SOURCE_SYNC_REQUIRED`)에 도달할 수 없다.
+- **skip 사유 순서**: 운영자가 끈 dataset(`policy_disabled`)은 그 사유가 먼저다. policy만으로 비운 계획은
+  종전처럼 `done`이다. 실행된 scope가 없고 건너뛴 것에 `dedicated_job_only`가 **하나라도** 있으면 실패다 —
+  그 부분은 요청자가 갱신을 기대했으므로 PinVi target을 갱신됐다고 보고하면 안 된다.
 - **실행할 것이 MOIS뿐인 요청**(PinVi cache target refresh처럼 enqueue 거부를 거치지 않는 경로 포함):
   기존 실패 어휘로 끝낸다 — request `failed` + error_message, cache target status event `failed` +
   `error_code=PROVIDER_DEDICATED_JOB_ONLY`, target `last_failed_at` 갱신. 새 상태값을 만들지 않았다.

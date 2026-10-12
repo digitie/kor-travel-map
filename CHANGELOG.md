@@ -31,6 +31,11 @@
 - **FIXED (dagster)**: geo 장애 판정이 빈 답 비율 뒤에 알려진 좋은 좌표 probe를 한다 — 바다·경계 좌표 행이
   대부분인 재개 run이 영구 실패하던 것을 막는다. 0행 정지는 상한 절반 이상을 받은 run에만(step 재시도 정체 방지).
   `_run_clock_start`가 쓸 수 없는 start_time을 무시한다.
+- **FIXED (dagster)**: 지역 geo 장애가 조용한 손실로 끝나지 않는다 — 빈 답 행은 어느 모드에서도 적재하지 않고,
+  업종·run 빈 답 비율 > `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%) 또는 probe 통과 문턱 초과 3회면
+  run을 degraded로 표시해 봉인·sync 성공을 남기지 않는다. probe는 기준점과 마지막 좋은 좌표 둘 다 묻는다.
+- **CHANGED (api)**: 생성 route는 MOIS source sync precheck를 더 부르지 않는다(도달 불가). 그 route의 502/503
+  설명은 실제 원인(kor-travel-geo resolver)으로. 실행된 scope 없이 `dedicated_job_only`가 섞인 빈 계획은 실패.
 - **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
   `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
   큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.

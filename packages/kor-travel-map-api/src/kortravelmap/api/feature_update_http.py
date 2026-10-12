@@ -16,13 +16,11 @@ __all__ = [
 
 FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION: Final[str] = (
     "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, "
-    "LOCK_BUSY(이 경우에만 Retry-After header 포함), "
+    "LOCK_BUSY(이 경우에만 Retry-After header 포함) 또는 "
     "전용 Dagster job으로만 갱신하는 dataset뿐인 계획(PROVIDER_DEDICATED_JOB_ONLY, "
-    "details.dagster_jobs에 실행할 job) 또는 "
-    "MOIS full source sync 선행조건 미충족(MOIS_SOURCE_SYNC_REQUIRED)"
+    "details.dagster_jobs에 실행할 job)"
 )
-"""생성 route의 409 설명. 생성 route는 MOIS precheck 409와 같은 status를 공유하므로 dict 병합으로
-두 설명 중 하나가 사라지지 않게 한 문장으로 둔다(적대 리뷰 LOW-a)."""
+"""생성 route의 409 설명 — 이 route가 실제로 내는 409 전부(ADR-108)."""
 
 FEATURE_UPDATE_CONFLICT_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
     409: {

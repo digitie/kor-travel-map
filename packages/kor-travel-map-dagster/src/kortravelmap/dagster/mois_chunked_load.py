@@ -106,6 +106,17 @@ MOIS_LOAD_BUDGET_TAG: Final[str] = "kor_travel_map.mois_load.budget_seconds"
 MOIS_LOAD_AVAILABLE_TAG: Final[str] = "kor_travel_map.mois_load.budget_available_seconds"
 """적재 loop가 시작할 때 남아 있던 시간(초). step 재시도는 run 시작 기준이라 이것이 작다."""
 
+MOIS_LOAD_GEOCODE_DEGRADED_TAG: Final[str] = "kor_travel_map.mois_load.geocode_degraded"
+"""역지오코딩이 부분 장애로 보인 업종(쉼표 구분). 있으면 run은 봉인·sync 성공을 남기지 않는다."""
+
+GEO_PASSING_TRIPS_DEGRADE: Final[int] = 3
+"""같은 업종에서 "빈 답 문턱은 넘었지만 probe는 통과"가 이만큼 거듭되면 그 업종을 degraded로 본다.
+
+probe는 다른 지역의 좋은 좌표를 묻기 때문에 시·도 하나의 layer만 빈 **지역 장애**를 가리지
+못한다(최종 델타 리뷰 MED-1). ``mng_no``가 발급 지자체 순이라 그런 장애는 한 업종 안에서
+연속된 문턱 초과로 나타난다.
+"""
+
 _LICENSE_ENTITY_TYPE: Final[str] = "license_place"
 """``providers.mois``가 ``SourceRecord.source_entity_type``으로 쓰는 값."""
 
@@ -154,6 +165,8 @@ class MoisLoadPlan:
     source_db_path: str | None
     geocode_concurrency: int
     run_budget_seconds: int
+    geocode_degraded_ratio: float = 0.05
+    """업종(관측 200행 이상)·run의 역지오코딩 빈 답 비율 상한. 넘으면 run은 degraded다."""
 
 
 _MIN_RUN_BUDGET_SECONDS: Final[int] = 60
@@ -194,6 +207,7 @@ def resolve_mois_load_plan(
         source_db_path=settings.mois_source_db_path,
         geocode_concurrency=settings.mois_geocode_concurrency,
         run_budget_seconds=budget,
+        geocode_degraded_ratio=settings.mois_geocode_degraded_ratio,
     )
 
 
@@ -235,6 +249,14 @@ class MoisChunkedLoadOutcome:
     reverse_geocode_cache_hits: int
     reverse_geocode_prefetch_failures: int
     dropped_count: int
+    geocode_empty: int = 0
+    """역지오코딩이 빈 답을 낸 행 수.
+
+    이 행들은 적재하지 않는다(모든 검증 모드) — 다음 run이 다시 한다.
+    """
+    geocode_degraded_slugs: tuple[str, ...] = ()
+    geo_probes: int = 0
+    geo_probe_passes: int = 0
 
     @property
     def outcome(self) -> str:
@@ -247,7 +269,12 @@ class MoisChunkedLoadOutcome:
         본 record가 0건이면 봉인하지 않는다. 빈 원천(sync 실패로 비어 버린 SQLite 등)을
         "snapshot 전체를 확인했다"로 승격하면 그 빈 관측이 curation의 기준이 된다.
         """
-        return self.complete and self.full_coverage and self.records_seen > 0
+        return (
+            self.complete
+            and self.full_coverage
+            and self.records_seen > 0
+            and not self.geocode_degraded_slugs
+        )
 
     def as_metadata(self) -> dict[str, object]:
         return {
@@ -262,6 +289,11 @@ class MoisChunkedLoadOutcome:
             "mois_reverse_geocode_live_calls": self.reverse_geocode_live_calls,
             "mois_reverse_geocode_cache_hits": self.reverse_geocode_cache_hits,
             "mois_reverse_geocode_prefetch_failures": self.reverse_geocode_prefetch_failures,
+            "mois_reverse_geocode_empty": self.geocode_empty,
+            "mois_geocode_degraded": bool(self.geocode_degraded_slugs),
+            "mois_geocode_degraded_slugs": list(self.geocode_degraded_slugs),
+            "mois_geo_probes": self.geo_probes,
+            "mois_geo_probe_passes": self.geo_probe_passes,
         }
 
 
@@ -303,8 +335,9 @@ class _ChunkLoad:
     result: DagsterFeatureLoadResult
     unchanged: int
     converted: int
-    geocode_drops: int
+    geocode_empty: int
     invalid_drops: int
+    passing_trip: bool
 
 
 def _run_clock_start(context: Any, fallback: float) -> float:
@@ -414,14 +447,22 @@ async def load_mois_license_records_chunked(
                 for record in to_convert
                 if (coord := license_reverse_geocode_coordinate(record)) is not None
             )
-            await _raise_if_geo_outage(prefetcher, slug=str(chunk[0].service_slug))
+            passing_trip = await _raise_if_geo_outage(prefetcher, slug=str(chunk[0].service_slug))
+        else:
+            passing_trip = False
         bundles = await convert(
             to_convert,
             fetched_at=fetched_at,
             dataset_key=dataset_key,
             reverse_geocoder=prefetcher if prefetcher is not None else reverse_geocoder,
         )
-        geocode_drops, invalid_drops = _drop_counts(bundles, mode=mode)
+        geocode_empty_ids, invalid_drops = _classify_drops(bundles, mode=mode)
+        if geocode_empty_ids and mode == "off":
+            # off 모드는 원래 전부 적재한다. 그러나 빈 bjd로 commit하면 payload가 같은 한 다음
+            # run이 "그대로"로 건너뛰고, 같은 payload의 재적재는 feature 본문을 다시 쓰지 않아
+            # 빈 bjd가 영원히 남는다(최종 델타 리뷰 MED-1 ③). 그래서 MOIS 적재기는 모드와 무관하게
+            # 지오코더가 빈 답을 낸 행을 적재하지 않는다 — 다음 run이 다시 시도한다.
+            bundles = [b for b in bundles if b.feature.feature_id not in geocode_empty_ids]
         _raise_if_slug_lost(
             slug=str(chunk[0].service_slug),
             seen=slug_seen + len(chunk),
@@ -447,8 +488,9 @@ async def load_mois_license_records_chunked(
             result=result,
             unchanged=len(unchanged),
             converted=len(to_convert),
-            geocode_drops=geocode_drops,
+            geocode_empty=len(geocode_empty_ids),
             invalid_drops=invalid_drops,
+            passing_trip=passing_trip,
         )
 
     merged: DagsterFeatureLoadResult | None = None
@@ -456,7 +498,20 @@ async def load_mois_license_records_chunked(
     current_slug: str | None = None
     stopped_in_slug: str | None = None
     records_seen = records_unchanged = records_converted = chunks = 0
-    slug_seen = slug_invalid = 0
+    slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = 0
+    run_geocode_empty = 0
+    degraded: list[str] = []
+
+    def _mark_degraded(slug: str, reason: str) -> None:
+        if slug in degraded:
+            return
+        degraded.append(slug)
+        context.log.warning(
+            f"MOIS 업종 {slug} 역지오코딩 부분 장애로 보인다({reason}) — "
+            "빈 답 행은 적재하지 않았고 다음 run이 다시 시도한다. "
+            "이 run은 봉인·sync 성공을 남기지 않는다."
+        )
+
     complete = True
 
     for chunk in iter_slug_chunks(records, MOIS_LOAD_CHUNK_SIZE):
@@ -466,7 +521,7 @@ async def load_mois_license_records_chunked(
                 slugs_completed.append(current_slug)
                 context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
             current_slug = slug
-            slug_seen = slug_invalid = 0
+            slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = 0
         # 상한 판정은 chunk **사이**에서만 한다 — 시작한 chunk는 끝까지 commit한다. 첫
         # chunk는 언제나 시작하므로 run마다 최소 한 chunk는 전진한다(무한 이어 달리기 방지).
         if chunks > 0 and clock() >= deadline:
@@ -498,10 +553,28 @@ async def load_mois_license_records_chunked(
         records_converted += loaded.converted
         slug_seen += len(chunk)
         slug_invalid += loaded.invalid_drops
+        slug_geocode_empty += loaded.geocode_empty
+        run_geocode_empty += loaded.geocode_empty
+        if loaded.passing_trip:
+            slug_passing_trips += 1
+            if slug_passing_trips >= GEO_PASSING_TRIPS_DEGRADE:
+                _mark_degraded(slug, f"probe 통과 뒤에도 빈 답 문턱 초과 {slug_passing_trips}회")
+        if (
+            slug_seen >= LOSS_GUARD_MIN_SAMPLE
+            and slug_geocode_empty > slug_seen * plan.geocode_degraded_ratio
+        ):
+            _mark_degraded(slug, f"빈 답 {slug_geocode_empty}/{slug_seen}행")
 
     if complete and current_slug is not None:
         slugs_completed.append(current_slug)
         context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
+    # run 전체 상한 — 업종마다 표본이 모자라 업종 판정을 피한 작은 업종들의 빈 답도 센다.
+    if (
+        not degraded
+        and records_seen >= LOSS_GUARD_MIN_SAMPLE
+        and run_geocode_empty > records_seen * plan.geocode_degraded_ratio
+    ):
+        _mark_degraded("(run)", f"빈 답 {run_geocode_empty}/{records_seen}행")
 
     if merged is None:
         # 선택 업종에 영업중 record가 하나도 없다. 빈 load로 같은 모양의 결과를 만든다.
@@ -532,6 +605,10 @@ async def load_mois_license_records_chunked(
             prefetcher.prefetch_failures if prefetcher is not None else 0
         ),
         dropped_count=sink.dropped,
+        geocode_empty=run_geocode_empty,
+        geocode_degraded_slugs=tuple(degraded),
+        geo_probes=prefetcher.probes if prefetcher is not None else 0,
+        geo_probe_passes=prefetcher.probe_passes if prefetcher is not None else 0,
     )
 
     if outcome.authoritative:
@@ -560,26 +637,38 @@ async def load_mois_license_records_chunked(
             MOIS_LOAD_CONVERTED_TAG: str(outcome.records_converted),
             MOIS_LOAD_BUDGET_TAG: str(int(effective_budget)),
             MOIS_LOAD_AVAILABLE_TAG: str(budget_available),
+            **(
+                {MOIS_LOAD_GEOCODE_DEGRADED_TAG: ",".join(outcome.geocode_degraded_slugs)}
+                if outcome.geocode_degraded_slugs
+                else {}
+            ),
         },
     )
     return outcome
 
 
-def _drop_counts(bundles: Sequence[FeatureBundle], *, mode: str) -> tuple[int, int]:
-    """drop 모드에서 버려질 행 수를 (지오코더 원인, 데이터 무효)로 나눠 센다.
+def _classify_drops(
+    bundles: Sequence[FeatureBundle], *, mode: str
+) -> tuple[frozenset[str], int]:
+    """(지오코더가 빈 답을 낸 행의 feature id, drop 모드의 데이터 무효 drop 수).
 
-    적재 함수와 **같은 판정**(``blocking_issues``)을 적재 전에 미리 돌린다. drop 모드가
-    아니면 버리는 행이 없다(strict는 error에서 run을 멈추고, off는 전부 적재한다).
-    지오코더 원인 drop은 적재되지 않았으므로 다음 run이 다시 변환한다 — 영구 손실이 아니다.
+    빈 답 행은 **모드와 무관하게** 센다 — drop은 적재 함수가 버리고, off는 호출자가 빼고, strict는
+    run을 멈춘다. 데이터 무효(위치 단서 없음)는 drop 모드에서만 버려지므로 그때만 센다.
     """
-    if mode != "drop" or not bundles:
-        return 0, 0
+    if not bundles:
+        return frozenset(), 0
     validation = validate_feature_bundles_address(bundles)
-    geocode: set[str] = set()
-    invalid: set[str] = set()
-    for issue in validation.blocking_issues:
-        (geocode if issue.code in _GEOCODE_DROP_CODES else invalid).add(issue.feature_id)
-    return len(geocode), len(invalid - geocode)
+    geocode = frozenset(
+        issue.feature_id for issue in validation.issues if issue.code in _GEOCODE_DROP_CODES
+    )
+    if mode != "drop":
+        return geocode, 0
+    invalid = {
+        issue.feature_id
+        for issue in validation.blocking_issues
+        if issue.code not in _GEOCODE_DROP_CODES
+    }
+    return geocode, len(invalid - geocode)
 
 
 def _raise_if_slug_lost(*, slug: str, seen: int, invalid: int) -> None:
@@ -600,7 +689,7 @@ def _raise_if_slug_lost(*, slug: str, seen: int, invalid: int) -> None:
     )
 
 
-async def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> None:
+async def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> bool:
     """최근 조회 대부분이 빈 답이고 **알려진 좋은 좌표도** 빈 답이면 upstream 장애로 멈춘다.
 
     빈 답 비율만으로 멈추면 재개 run이 영구히 막힌다(적대 리뷰 HIGH-1): drop 모드에서 정상적으로
@@ -612,10 +701,11 @@ async def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: 
         prefetcher.recent_lookups < GEO_OUTAGE_MIN_LOOKUPS
         or prefetcher.recent_empty_ratio < GEO_OUTAGE_EMPTY_RATIO
     ):
-        return
+        return False
     lookups, ratio = prefetcher.recent_lookups, prefetcher.recent_empty_ratio
     if await prefetcher.probe_healthy(GEO_PROBE_REFERENCE):
-        return
+        # 문턱은 넘었지만 probe는 통과 — 행 단위 빈 답이거나 지역 장애다. 호출자가 센다.
+        return True
     raise Failure(
         description=(
             f"kor-travel-geo 역지오코딩이 최근 {lookups}건 중 {ratio:.0%}를 빈 결과로 돌려주고 "

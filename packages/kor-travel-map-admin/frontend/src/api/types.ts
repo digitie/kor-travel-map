@@ -21539,7 +21539,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, LOCK_BUSY(이 경우에만 Retry-After header 포함), 전용 Dagster job으로만 갱신하는 dataset뿐인 계획(PROVIDER_DEDICATED_JOB_ONLY, details.dagster_jobs에 실행할 job) 또는 MOIS full source sync 선행조건 미충족(MOIS_SOURCE_SYNC_REQUIRED) */
+            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, LOCK_BUSY(이 경우에만 Retry-After header 포함) 또는 전용 Dagster job으로만 갱신하는 dataset뿐인 계획(PROVIDER_DEDICATED_JOB_ONLY, details.dagster_jobs에 실행할 job) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21557,7 +21557,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Dagster precheck 응답 오류 */
+            /** @description kor-travel-geo 호출 실패(PROVIDER_ERROR) */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -21566,7 +21566,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Dagster precheck transport/설정 오류 */
+            /** @description kor-travel-geo resolver 설정 없음(GEO_AUTH_NOT_CONFIGURED) */
             503: {
                 headers: {
                     [name: string]: unknown;

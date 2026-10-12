@@ -1,3 +1,18 @@
+## 2026-10-12 — MOIS ADR-108 최종 델타 리뷰 MED 1·LOW 2 반영
+
+- **MED-1 지역 geo 장애.** probe가 다른 지역 좌표로 통과해 한 시·도가 통째로 빠진 채 봉인될 수 있었다. 빈 답 행은 어느 모드에서도
+  적재하지 않고(off 포함 — 빈 bjd commit은 같은 payload에서 영원히 건너뛰어진다), 업종(관측 200행+)·run 빈 답 비율이
+  `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%)를 넘거나 같은 업종에서 "문턱 초과 + probe 통과"가 3회면 degraded로
+  표시한다 — 실패시키지 않고(영구 정지 재발 방지) 봉인·sync 성공을 남기지 않는다. tag `kor_travel_map.mois_load.geocode_degraded`,
+  metadata `mois_geocode_degraded*`·`mois_reverse_geocode_empty`·`mois_geo_probes`·`mois_geo_probe_passes`, 경고 로그.
+  probe는 고정 기준점과 마지막 좋은 좌표 둘 다 묻는다.
+- **LOW.** 생성 route는 MOIS source sync precheck를 부르지 않는다(유일한 MOIS operation이 전용 job 전용이라 도달 불가) —
+  409 설명·테스트에서 `MOIS_SOURCE_SYNC_REQUIRED` 제거, 우연히 MOIS dict로 문서화되던 502/503은 실제 원인(geo resolver)으로.
+  실행된 scope 없이 `dedicated_job_only`가 섞인 빈 계획은 실패(PinVi target을 갱신됐다고 보고하지 않는다).
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·TS 타입(lock 7.13.0) 일치. 지역 장애(drop/off)·off 모드
+  재시도·K회 판정·건강한 run 봉인 유지 테스트 포함 296 + 177 passed. mutation 5종(봉인 조건에서 degraded 무시·off 모드 commit·
+  K회 판정 제거·probe 좌표 하나·빈 계획 any→all) 전부 RED.
+
 ## 2026-10-12 — MOIS ADR-108 델타 리뷰(PR #1312) HIGH 1·MED 1·LOW 4 반영
 
 - **HIGH-1 geo 장애 오판.** drop 모드에서 바다·경계 좌표 행은 적재되지 않아 매 run 다시 변환되고, 재개 run의 조회를 지배해

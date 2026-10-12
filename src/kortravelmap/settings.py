@@ -372,6 +372,19 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
         ),
     )
+    mois_geocode_degraded_ratio: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "MOIS 재개형 적재(ADR-108)에서 역지오코딩이 빈 답을 낸 행의 비율 상한. 업종 하나(관측 "
+            "200행 이상) 또는 run 전체가 이 비율을 넘으면 run을 실패시키지 않고 **degraded**로 "
+            "표시한다 — 봉인·sync 성공을 남기지 않고, 그 행들은 적재하지 않았으므로 "
+            "다음 run이 다시 시도한다. 지역 하나의 geo layer가 비는 부분 장애를 "
+            "조용한 손실로 끝내지 않게 한다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO``."
+        ),
+    )
     mois_load_run_budget_seconds: int = Field(
         default=14_400,
         ge=60,

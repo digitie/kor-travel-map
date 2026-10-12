@@ -531,7 +531,7 @@ def test_a_disabled_policy_keeps_its_own_reason_for_a_dedicated_job_operation() 
     ("reasons", "fails"),
     [
         (("dedicated_job_only",), True),
-        (("dedicated_job_only", "policy_disabled"), False),
+        (("dedicated_job_only", "policy_disabled"), True),
         (("policy_disabled",), False),
         ((), False),
     ],
@@ -540,7 +540,7 @@ def test_a_disabled_policy_keeps_its_own_reason_for_a_dedicated_job_operation() 
 def test_only_a_plan_emptied_by_dedicated_job_skips_fails(
     reasons: tuple[str, ...], fails: bool
 ) -> None:
-    """policy가 비운 계획은 종전처럼 done이다 — 실패는 전용 job 사유만으로 비었을 때뿐이다."""
+    """policy만으로 비운 계획은 종전처럼 done이다 — 전용 job 사유가 섞인 빈 계획은 실패다."""
     resolution = ScopeResolution(scope_type="cache_target_keys", features=(), cache_targets=())
     plan = executor.FeatureUpdateExecutionPlan(
         request=_request(),

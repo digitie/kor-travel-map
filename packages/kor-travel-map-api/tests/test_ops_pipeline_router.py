@@ -3962,43 +3962,22 @@ def test_create_request_persists_with_new_status_url(
 
 
 @pytest.mark.unit
-def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
+def test_create_request_no_longer_consults_the_mois_source_precheck(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guarded_memberships: list[frozenset[tuple[int, str]]] = []
+    """ADR-108: 큐는 MOIS를 실행하지 않으므로 생성 route는 MOIS source sync를 보지 않는다."""
 
-    async def _blocked(
-        _session: Any,
-        resolved_memberships: frozenset[tuple[int, str]],
-        **_kwargs: Any,
-    ) -> None:
-        guarded_memberships.append(resolved_memberships)
-        raise mois_source_precheck.MoisSourceSyncRequired(
-            mois_source_precheck.MoisSourceSyncPrecheck(
-                job_name=mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME,
-                ready=False,
-                checked_at=_NOW,
-                max_age_hours=7,
-                age_hours=None,
-                latest_run=None,
-                disabled_reason="MOIS source sync 실행 이력이 없습니다.",
-            )
-        )
+    async def _must_not_run(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("생성 route가 MOIS source precheck를 불렀다")
 
-    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
-        raise AssertionError("precheck 실패 뒤 request를 enqueue하면 안 됩니다")
+    async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        return _update_request()
 
     monkeypatch.setattr(
-        mois_source_precheck,
-        "ensure_mois_source_sync_for_memberships",
-        _blocked,
+        mois_source_precheck, "ensure_mois_source_sync_for_memberships", _must_not_run
     )
-    monkeypatch.setattr(
-        fur_mod,
-        "enqueue_feature_update_request",
-        _unexpected_enqueue,
-    )
+    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _enqueue)
 
     response = client.post(
         "/v1/ops/pipeline/requests",
@@ -4012,9 +3991,7 @@ def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
         },
     )
 
-    assert response.status_code == 409
-    assert response.json()["code"] == "MOIS_SOURCE_SYNC_REQUIRED"
-    assert guarded_memberships == [frozenset({(1, "dataset_wide")})]
+    assert response.status_code == 201
 
 
 @pytest.mark.unit
