@@ -95,6 +95,53 @@ async def test_client_provider_run_lock_excludes_other_process_path(
             assert acquired is True
 
 
+async def test_provider_run_lock_body_runs_on_the_dagster_single_connection_pool(
+    migrated_engine: AsyncEngine,
+    dagster_runtime_engine: AsyncEngine,
+) -> None:
+    """회귀(prod run ``bfd18ef5``): lock 본문이 pool 두 번째 연결을 기다리지 않는다.
+
+    Dagster ``kor_travel_map_client`` resource는 ``pool_size=1, max_overflow=0``이다
+    (ADR-107). 고속도로 돌발 asset은 ``provider_run_lock`` 안에서 첫 DB 호출로
+    ``get_notice_snapshot_watermark``를 부르고, 수정 전에는 lock session이 유일한
+    연결을 쥔 탓에 그 자리에서 ``QueuePool limit of size 1 overflow 0``으로 죽었다.
+    실제 Dagster runtime login으로 같은 pool 모양의 engine을 만들어 그 순서를 재현한다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    from kortravelmap.providers.kor_travel_transport import (
+        DATASET_KEY_HIGHWAY_INCIDENTS,
+        KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+    )
+
+    key = "provider-run:test:dagster-single-connection"
+    engine = create_async_engine(
+        dagster_runtime_engine.url,
+        pool_size=1,
+        max_overflow=0,
+        # prod는 30초다. 판정은 같고 회귀 시 실패만 빨라진다.
+        pool_timeout=2,
+    )
+    client = AsyncKorTravelMapClient(engine)
+    try:
+        # advisory lock은 database 단위다 — 경쟁자는 runtime engine과 같은 DB에 붙는다.
+        async with AsyncSession(migrated_engine) as competitor:
+            async with client.provider_run_lock(key):
+                watermark = await client.get_notice_snapshot_watermark(
+                    provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
+                    source_entity_type="traffic_notice",
+                )
+                assert watermark is None or watermark.utcoffset() is not None
+                # 본문이 lock 연결을 빌려 쓰는 동안에도 lock은 유지된다.
+                async with try_advisory_lock(competitor, key) as acquired:
+                    assert acquired is False
+            async with try_advisory_lock(competitor, key) as acquired:
+                assert acquired is True
+    finally:
+        await engine.dispose()
+
+
 async def test_snapshot_gc_lock_survives_acquisition_commit_and_skips_overlap(
     pg_engine: AsyncEngine,
 ) -> None:
