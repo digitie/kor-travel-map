@@ -102,7 +102,10 @@ from kortravelmap.infra.consistency import (
 from kortravelmap.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
-from kortravelmap.infra.db import make_async_session_factory
+from kortravelmap.infra.db import (
+    make_async_session_factory,
+    make_connection_session_factory,
+)
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
     list_dedup_refresh_features,
@@ -562,15 +565,53 @@ class AsyncKorTravelMapClient:
 
         Dagster asset pool은 scheduled/manual asset run의 불필요한 동시 시작을
         줄이지만, feature update worker가 같은 실행 함수를 직접 부르는 경로까지
-        포괄하지 못한다. 별도 DB session에 session-level advisory lock을 유지해
-        어느 process/실행 경로에서 호출하든 같은 ``key``의 provider 작업이 겹치지
-        않게 한다. process가 종료되면 PostgreSQL connection과 함께 lock도 해제된다.
+        포괄하지 못한다. session-level advisory lock을 유지해 어느 process/실행
+        경로에서 호출하든 같은 ``key``의 provider 작업이 겹치지 않게 한다. process가
+        종료되면 PostgreSQL connection과 함께 lock도 해제된다.
+
+        **lock과 본문은 같은 physical connection 하나를 순차로 쓴다.** Dagster
+        ``kor_travel_map_client`` resource는 ADR-107에 따라 ``pool_size=1,
+        max_overflow=0``이다. 종전에는 lock이 session 하나(=연결 하나)를 끝까지 쥔
+        채 본문의 client 호출이 각자 새 session을 열었으므로, 본문의 첫 DB 호출이
+        pool의 유일한 연결을 기다리다 ``QueuePool limit of size 1 overflow 0``으로
+        죽었다(2026-10-12 prod run ``bfd18ef5``, 4회 시도 모두 30초 만에 같은 자리).
+        이제 lock을 잡은 connection에 이 client의 session factory를 lock 구간 동안
+        다시 묶는다. client **객체는 그대로**다 — Dagster guard가 resource client와
+        identity로 대조하고(``require_feature_operation_guard``), 본문 helper가
+        ``context.resources``에서 client를 다시 꺼내므로 복사본을 넘기면 안 된다.
+        본문은 이 client로 DB 호출을 **동시에** 하면 안 된다(연결 하나는 한 번에
+        한 문장).
+
+        feature update runner가 executor transaction에 결합한 client
+        (``_transaction_bound``)는 이미 그 executor connection 하나에 묶여 있으므로
+        종전처럼 그 session에서 lock만 잡는다.
         """
+        if self._transaction_bound:
+            async with (
+                self._session_factory() as session,
+                advisory_lock(session, key),
+            ):
+                yield
+            return
+
         async with (
-            self._session_factory() as session,
-            advisory_lock(session, key),
+            self._engine.connect() as connection,
+            advisory_lock(connection, key),
         ):
-            yield
+            # lock SELECT의 autobegin을 닫는다. session-level lock은 commit 뒤에도
+            # 같은 backend에 남고, 본문 session이 각자 transaction을 열고 commit한다.
+            await connection.commit()
+            unpinned_session_factory = self._session_factory
+            self._session_factory = make_connection_session_factory(connection)
+            try:
+                yield
+            finally:
+                self._session_factory = unpinned_session_factory
+                # 본문 session은 닫힐 때 자기 transaction을 끝낸다. 그래도 열린
+                # transaction이 남았다면(실패한 상태일 수 있다) unlock 전에 되감아야
+                # unlock SELECT가 "current transaction is aborted"로 막히지 않는다.
+                if connection.in_transaction():
+                    await connection.rollback()
 
     async def drain_expired_cache_target_snapshots(
         self,
