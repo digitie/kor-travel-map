@@ -12,6 +12,12 @@
 - 수정: lock을 잡은 연결에 client의 session factory를 lock 구간 동안 묶는다(객체 identity 유지 — guard identity 대조와
   `context.resources` 재조회 때문에 복사본은 안 된다). 전역 pool 상향은 하지 않았다 — ADR-107 runbook의 "DB 연결 1개" 계약을
   지키고, 본문은 원래 순차다. 같은 결함의 `cache_target_snapshot_gc` drain(prod 미실행, 잠복)도 같은 방식으로 고쳤다.
+- 리뷰(PR #1314 @ffa0986e) 반영: H1 — GC drain 수정이 `tests/unit/test_cache_target_snapshot_gc_client.py` 3건을
+  깼다(fake connection에 실제 `make_connection_session_factory`가 불림, 내 전체 unit run이 그 commit보다 먼저 시작됐다).
+  테스트가 그 함수를 lock 연결일 때만 fake factory를 주도록 바꾸고 engine-bound factory는 호출되면 실패시켜 "lock 연결
+  위에서만 session을 연다"를 단언한다. L3 — `connection_advisory_lock`/`discard_connection_on_failure`(infra): 획득·본문
+  실패·해제 실패 때 lock 연결을 invalidate해(server가 lock을 푼다) lock을 쥔 채 pool로 돌아가지 않게 한다. 본문 실패 때는
+  unlock을 시도하지 않아 원래 예외를 가리지 않는다. L4 — asset 통합 테스트를 Dagster runtime login으로. mutation 5종 RED.
 - 남은 것(미수정): 큐 경로 strict 실패 증거(`feature_update_evidence_client`)는 executor 연결 밖에서 별도 commit하려고
   두 번째 연결을 요구한다 — 실패 경로에서만, 설계 결정이 필요하다.
 - 검증(로컬 WSL + testcontainers PostGIS): 회귀 테스트 4종(단위 SQLite pool 1/0 2건, 통합 lock·asset 전체·GC drain) 모두
