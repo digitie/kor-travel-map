@@ -70,14 +70,12 @@ from kortravelmap.core.ids import (
     PAYLOAD_HASH_DEFAULT_LENGTH,
     PRICE_VALUE_KEY_HASH_LENGTH,
     SOURCE_RECORD_KEY_HASH_LENGTH,
-    WEATHER_VALUE_KEY_HASH_LENGTH,
     feature_uuid_from_legacy,
     make_feature_id,
     make_integrity_finding_key,
     make_payload_hash,
     make_price_value_key,
     make_source_record_key,
-    make_weather_value_key,
 )
 from kortravelmap.core.providers import (
     CANONICAL_PROVIDER_NAMES,
@@ -133,13 +131,12 @@ __all__ = [
     "FeatureSearchCursorVersionUnsupportedError",
     "FeatureSearchCursorTamperedError",
     "FeatureSearchCursorQueryMismatchError",
-    # ids (PR#20 ADR-009 / PR#26 source key + payload hash / PR#38 weather /
-    # PR#42 price)
+    # ids (PR#20 ADR-009 / PR#26 source key + payload hash / PR#42 price;
+    # weather value key는 ADR-105로 제거)
     "make_feature_id",
     "make_integrity_finding_key",
     "make_source_record_key",
     "make_payload_hash",
-    "make_weather_value_key",
     "make_price_value_key",
     # ids — UUID identity shadow (T-VN-32A, ADR-068)
     "feature_uuid_from_legacy",
@@ -148,7 +145,6 @@ __all__ = [
     "INTEGRITY_FINDING_KEY_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
-    "WEATHER_VALUE_KEY_HASH_LENGTH",
     "PRICE_VALUE_KEY_HASH_LENGTH",
     # providers (PR#29, ADR-024/028)
     "CANONICAL_PROVIDER_NAMES",

@@ -38,7 +38,7 @@ const MAKI_GLYPH: Readonly<Record<string, string>> = Object.freeze({
   "star": "⭐", // ⭐
   "music": "\u{1F3B5}", // 🎵
   "stadium": "\u{1F3DF}", // 🏟️
-  // 공지/특보 (kma weather_alerts, krex notices)
+  // 공지 (krex notices; kma weather_alerts 출처는 ADR-105로 제거)
   "alert": "⚠", // ⚠️
   "info": "ℹ", // ℹ️
   "construction": "\u{1F6A7}", // 🚧
