@@ -15,6 +15,7 @@ lock이 연결을 쥐는 성질은 그대로 지킨다(그것이 결함의 원�
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,11 +23,14 @@ from typing import Any
 
 import pytest
 from kortravelmap.client import AsyncKorTravelMapClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from kortravelmap import client as client_module
+
+# `kortravelmap.infra`가 같은 이름의 함수를 재노출하므로 모듈은 이름으로 가져온다.
+advisory_lock_module = importlib.import_module("kortravelmap.infra.advisory_lock")
 
 _KEY = "provider-run:test:single-connection"
 
@@ -49,21 +53,33 @@ def _single_connection_engine(db_path: Path) -> AsyncEngine:
 
 @pytest.fixture
 def lock_events(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """``advisory_lock``을 연결을 실제로 쥐는 SQLite 대역으로 바꾼다."""
+    """PostgreSQL 전용 lock SQL을 연결을 실제로 쥐는 SQLite 대역으로 바꾼다.
+
+    수정 후 경로는 ``connection_advisory_lock``이 부르는 infra의 획득·해제 한 문장을,
+    수정 전 경로(그리고 큐 결합 경로)는 ``advisory_lock``을 쓴다 — 둘 다 바꿔야 수정
+    전 코드에서도 같은 pool timeout이 재현된다. 대역도 lock 문장을 executor에서
+    실행하므로 session이면 그 순간 pool에서 연결을 꺼내 lock 구간 내내 쥔다.
+    """
     events: list[str] = []
+
+    async def _acquire(executor: Any, key: str | int) -> None:
+        await executor.execute(text("SELECT 1"))
+        events.append(f"lock:{key}")
+
+    async def _release(executor: Any, key: str | int) -> None:
+        await executor.execute(text("SELECT 1"))
+        events.append(f"unlock:{key}")
 
     @asynccontextmanager
     async def _holding_lock(executor: Any, key: str | int) -> AsyncIterator[None]:
-        # 실 구현처럼 lock 문장을 executor에서 실행한다 — session이면 이 순간 pool에서
-        # 연결을 꺼내 lock 구간 내내 쥔다.
-        await executor.execute(text("SELECT 1"))
-        events.append(f"lock:{key}")
+        await _acquire(executor, key)
         try:
             yield
         finally:
-            await executor.execute(text("SELECT 1"))
-            events.append(f"unlock:{key}")
+            await _release(executor, key)
 
+    monkeypatch.setattr(advisory_lock_module, "acquire_session_advisory_lock", _acquire)
+    monkeypatch.setattr(advisory_lock_module, "release_session_advisory_lock", _release)
     monkeypatch.setattr(client_module, "advisory_lock", _holding_lock)
     return events
 
@@ -97,17 +113,23 @@ async def test_locked_body_db_calls_reuse_the_single_pooled_connection(
         await engine.dispose()
 
 
-async def test_locked_body_failure_restores_factory_and_releases_lock(
+async def test_locked_body_failure_discards_the_lock_connection(
     tmp_path: Path,
     lock_events: list[str],
 ) -> None:
-    """본문이 실패해도 unlock이 실행되고 연결이 pool로 돌아온다."""
+    """본문이 실패·취소되면 lock 연결을 pool로 돌려보내지 않고 버린다.
+
+    session-level lock은 rollback으로 풀리지 않고 pool reset도 ROLLBACK만 한다.
+    망가졌을 수 있는 연결에 unlock을 시도하지 않고 invalidate해 server가 lock을
+    풀게 한다 — 원래 예외는 가려지지 않는다.
+    """
     engine = _single_connection_engine(tmp_path / "fail.db")
     try:
         client = AsyncKorTravelMapClient(engine)
         unpinned = client._session_factory
-
         leaked: list[Any] = []
+        invalidated: list[object] = []
+        event.listen(engine.sync_engine, "invalidate", lambda *_a: invalidated.append(1))
 
         class _BodyFailed(RuntimeError):
             pass
@@ -124,11 +146,48 @@ async def test_locked_body_failure_restores_factory_and_releases_lock(
             await _fail_inside_lock()
 
         assert client._session_factory is unpinned
-        assert lock_events == [f"lock:{_KEY}", f"unlock:{_KEY}"]
-        # 유일한 연결이 pool로 돌아왔다 — 막혀 있으면 pool timeout으로 죽는다.
+        assert lock_events == [f"lock:{_KEY}"]
+        assert invalidated == [1]
+        # 버린 자리에 새 연결이 생긴다 — 막혀 있으면 pool timeout으로 죽는다.
         async with client._session_factory() as again:
             assert (await again.execute(text("SELECT 1"))).scalar_one() == 1
         await leaked[0].close()
+    finally:
+        await engine.dispose()
+
+
+async def test_lock_release_failure_discards_the_connection_and_raises(
+    tmp_path: Path,
+    lock_events: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """unlock이 실패하면 lock을 쥐었을 수 있는 연결을 버리고 실패를 올린다."""
+    engine = _single_connection_engine(tmp_path / "release.db")
+    try:
+        client = AsyncKorTravelMapClient(engine)
+        invalidated: list[object] = []
+        event.listen(engine.sync_engine, "invalidate", lambda *_a: invalidated.append(1))
+
+        class _UnlockFailed(RuntimeError):
+            pass
+
+        async def _failing_release(_executor: Any, _key: str | int) -> None:
+            raise _UnlockFailed
+
+        monkeypatch.setattr(
+            advisory_lock_module, "release_session_advisory_lock", _failing_release
+        )
+
+        async def _run() -> None:
+            # 두 번째 context는 lock 진입 뒤에 평가된다 — lock 연결에 묶인 factory다.
+            async with client.provider_run_lock(_KEY), client._session_factory() as session:
+                await session.execute(text("SELECT 1"))
+
+        with pytest.raises(_UnlockFailed):
+            await _run()
+        assert invalidated == [1]
+        async with client._session_factory() as again:
+            assert (await again.execute(text("SELECT 1"))).scalar_one() == 1
     finally:
         await engine.dispose()
 

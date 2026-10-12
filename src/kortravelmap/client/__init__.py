@@ -65,7 +65,12 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
-from kortravelmap.infra.advisory_lock import advisory_lock, try_advisory_lock
+from kortravelmap.infra.advisory_lock import (
+    advisory_lock,
+    connection_advisory_lock,
+    discard_connection_on_failure,
+    try_advisory_lock,
+)
 from kortravelmap.infra.batch_dag import (
     BatchDagCancellationWon,
     BatchDagMvPrepared,
@@ -594,24 +599,19 @@ class AsyncKorTravelMapClient:
                 yield
             return
 
+        # `connection_advisory_lock`이 획득 autobegin을 commit해 connection을 transaction
+        # 밖에 두고, 본문이 실패·취소되거나 해제가 실패하면 connection을 버려(server가
+        # lock을 푼다) lock을 쥔 연결이 pool로 돌아가지 않게 한다.
         async with (
             self._engine.connect() as connection,
-            advisory_lock(connection, key),
+            connection_advisory_lock(connection, key),
         ):
-            # lock SELECT의 autobegin을 닫는다. session-level lock은 commit 뒤에도
-            # 같은 backend에 남고, 본문 session이 각자 transaction을 열고 commit한다.
-            await connection.commit()
             unpinned_session_factory = self._session_factory
             self._session_factory = make_connection_session_factory(connection)
             try:
                 yield
             finally:
                 self._session_factory = unpinned_session_factory
-                # 본문 session은 닫힐 때 자기 transaction을 끝낸다. 그래도 열린
-                # transaction이 남았다면(실패한 상태일 수 있다) unlock 전에 되감아야
-                # unlock SELECT가 "current transaction is aborted"로 막히지 않는다.
-                if connection.in_transaction():
-                    await connection.rollback()
 
     async def drain_expired_cache_target_snapshots(
         self,
@@ -670,10 +670,13 @@ class AsyncKorTravelMapClient:
         # AsyncConnection context가 physical connection을 끝까지 pin한다. lock 획득
         # transaction은 즉시 commit하되 session-level advisory lock은 같은 backend에
         # 남고, finally의 unlock도 동일 connection에서 실행된다.
-        async with self._engine.connect() as lock_connection, try_advisory_lock(
-            lock_connection,
-            "cache-target-snapshot-gc",
-        ) as acquired:
+        # 실패·취소(망가진 connection에서의 unlock 실패 포함)면 lock 연결을 버려 server가
+        # lock을 풀게 한다 — lock을 쥔 채 pool로 돌아가지 않게.
+        async with (
+            self._engine.connect() as lock_connection,
+            discard_connection_on_failure(lock_connection),
+            try_advisory_lock(lock_connection, "cache-target-snapshot-gc") as acquired,
+        ):
             await lock_connection.commit()
             if not acquired:
                 return CacheTargetSnapshotGcDrainResult(
