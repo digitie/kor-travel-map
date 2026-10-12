@@ -26,6 +26,7 @@ from kortravelmap.dagster.assets import (
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
 )
+from kortravelmap.dagster.mois_chunked_load import resolve_mois_load_plan
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,7 @@ from kortravelmap.dto import Address, Coordinate
 from kortravelmap.providers.feature_operation_registry import (
     FEATURE_OPERATION_HANDLERS,
 )
+from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
 pytestmark = pytest.mark.integration
@@ -508,6 +510,15 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             run_feature_place_mois_licenses,
             map_client,
             mois_license_records=[_MoisRecord(service_slug="general_restaurants")],
+            # 운영 기본 plan(전 업종 = 월간 schedule 경로) — definitions.py의 mois_load_plan
+            # resource가 빈 run_config에서 만드는 것과 같다(ADR-108).
+            mois_load_plan=resolve_mois_load_plan(
+                KorTravelMapSettings.model_construct(
+                    mois_source_db_path=None,
+                    mois_geocode_concurrency=2,
+                    mois_load_run_budget_seconds=14_400,
+                )
+            ),
         ),
         await _run_asset(
             run_feature_place_knps_points,

@@ -54,6 +54,7 @@ from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import (
     AssetExecutionContext,
+    DagsterRunNotFoundError,
     DagsterRunStatus,
     DefaultSensorStatus,
     Failure,
@@ -1049,8 +1050,13 @@ def _tag_run_outcome(context: Any, tags: Mapping[str, str]) -> None:
     except Exception:  # noqa: BLE001 — 직접 호출 context에는 run이 없다
         return
     add_run_tags = getattr(instance, "add_run_tags", None)
-    if run_id and callable(add_run_tags):
+    if not run_id or not callable(add_run_tags):
+        return
+    try:
         add_run_tags(run_id, dict(tags))
+    except DagsterRunNotFoundError:
+        # ``build_asset_context``는 instance에 없는 run id(``EPHEMERAL``)를 준다 — 직접 호출이다.
+        return
 
 
 _ACTIVE_RUN_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (

@@ -1,3 +1,16 @@
+## 2026-10-12 — MOIS ADR-108 통합 테스트 resource 누락·직접 호출 tag 실패
+
+- PR CI 통합 두 lane이 `test_dagster_assets_validate_coordinates_and_load_to_postgis` 하나로 붉었다 —
+  `Dagster resource 없음: mois_load_plan`. 테스트가 asset을 `build_asset_context`로 직접 부르며 resource dict를
+  손으로 만든다. 운영 경로는 빠질 수 없다: `definitions.py`가 resource를 등록하고 asset이
+  `required_resource_keys`로 선언하며(누락이면 Dagster가 정의 load에서 거부) 큐 runner도 plan을 넣는다. 그래서
+  기본값을 두지 않고 fixture에 운영 기본 plan(전 업종 = 월간 schedule 경로)을 넣었다. 다른 직접 호출은
+  `test_mois_assets.py`(이미 plan 제공)뿐이고 scripts에는 없다.
+- 그 뒤에 숨은 두 번째 실패: `build_asset_context`의 run id `EPHEMERAL`은 instance에 없어 결과 tag 쓰기가
+  `DagsterRunNotFoundError`로 터진다(로컬 probe로 확인). `_tag_run_outcome`이 그 예외만 삼킨다 — 실제 run에서는
+  나지 않는다. 진짜 `build_asset_context`로 부르는 단위 테스트를 더했다(mutation RED 확인).
+- 검증(로컬): dagster MOIS·assets·definitions·resources·runner 138 passed, ruff·mypy strict. 통합은 CI가 게이트다.
+
 ## 2026-10-12 — MOIS ADR-108 OpenAPI admin 계약 재핀(description만)
 
 - PR CI의 vnext 계약 테스트 2건이 붉었다 — `openapi.json`(full-admin)이 diff freeze baseline·T-VN-40 receipt와 달랐다.

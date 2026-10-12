@@ -1594,3 +1594,14 @@ async def test_resolve_failure_is_fatal_only_when_it_destroyed_the_transaction(
             await _run(records, db, geocoder=_Geocoder())
     else:
         assert (await _run(records, db, geocoder=_Geocoder())).complete
+
+
+def test_run_outcome_tag_is_skipped_for_a_direct_asset_context() -> None:
+    """``build_asset_context``의 run id(``EPHEMERAL``)는 instance에 없다 — tag 쓰기가 터지지 않는다
+
+    통합 테스트가 asset을 직접 호출하는 경로(test_dagster_feature_etl)를 그대로 흉내낸다.
+    """
+    from dagster import build_asset_context
+
+    context = build_asset_context(resources={})
+    chunked._tag_run_outcome(context, {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE})
