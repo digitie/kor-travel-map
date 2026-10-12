@@ -475,6 +475,44 @@ def test_mois_fetch_raises_when_source_db_file_missing(tmp_path: Any) -> None:
         next(generator)
 
 
+def test_mois_fetch_reads_only_the_selected_slugs(tmp_path: Any) -> None:
+    """업종 선택(ADR-108)은 SQLite 질의까지 내려간다 — 다른 업종 행은 나오지 않는다."""
+    mois_db = pytest.importorskip("mois.db")
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    db_file = tmp_path / "mois-source.sqlite"
+    setup_engine = create_engine(f"sqlite:///{db_file}")
+    mois_db.Base.metadata.create_all(setup_engine)
+    with Session(setup_engine) as setup_session:
+        for slug, mng_no in (
+            ("bakeries", "B-2"),
+            ("bakeries", "B-1"),
+            ("yacht_marinas", "Y-1"),
+            ("general_restaurants", "G-1"),
+        ):
+            setup_session.add(
+                mois_db.PlaceMaster(
+                    service_slug=slug, mng_no=mng_no, place_name=mng_no, is_open=True
+                )
+            )
+        setup_session.commit()
+    setup_engine.dispose()
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file))
+
+    selected = list(
+        fetch_mois_license_records(settings, service_slugs=("yacht_marinas", "bakeries"))
+    )
+
+    assert [(r.service_slug, r.mng_no) for r in selected] == [
+        ("bakeries", "B-1"),
+        ("bakeries", "B-2"),
+        ("yacht_marinas", "Y-1"),
+    ]
+    with pytest.raises(ValueError, match="billiard_halls"):
+        next(fetch_mois_license_records(settings, service_slugs=("billiard_halls",)))
+
+
 def test_mois_fetch_yields_open_records_and_cleans_up(
     tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

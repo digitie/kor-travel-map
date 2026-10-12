@@ -647,7 +647,12 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
         # freshness 게이트(ensure_mois_source_db_fresh)가 read 전에 호출됨을 검증.
         calls.append(("sync", actual_settings.mois_source_db_path))
 
-    def _fake_fetch(actual_settings: KorTravelMapSettings) -> list[object]:
+    def _fake_fetch(
+        actual_settings: KorTravelMapSettings,
+        *,
+        service_slugs: tuple[str, ...] | None = None,
+    ) -> list[object]:
+        assert service_slugs is not None and len(service_slugs) == 42
         calls.append(("fetch", actual_settings.mois_source_db_path))
         return sentinel
 
@@ -660,6 +665,7 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
     )
 
     assert resources.values["mois_license_records"] is sentinel
+    assert getattr(resources.values["mois_load_plan"], "full_coverage") is True
     assert resources.values["mois_dataset_key"] == DATASET_KEY_BULK
     assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
 

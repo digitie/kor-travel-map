@@ -699,9 +699,10 @@ def mois_license_records_resource(context: InitResourceContext) -> Iterable[Any]
         )
     plan = cast(MoisLoadPlan, context.resources.mois_load_plan)
     ensure_mois_source_db_fresh(settings)
-    return _ProviderRecordIterable(
-        fetch_mois_license_records(settings, service_slugs=plan.service_slugs)
-    )
+    records = fetch_mois_license_records(settings, service_slugs=plan.service_slugs)
+    if isinstance(records, Iterator):
+        return _ProviderRecordIterable(records)
+    return records
 
 
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = mois_license_records_resource

@@ -1,8 +1,7 @@
-"""MOIS 대용량 authoritative load의 bounded-batch 경계를 검증한다."""
+"""MOIS asset 경계 — 재개형 적재기로 넘기고, 끝까지 본 전 업종 run만 sync 성공을 남긴다 (ADR-108)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,103 +13,110 @@ from kortravelmap.dagster.etl import (
     AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
 )
+from kortravelmap.dagster.mois_chunked_load import MoisChunkedLoadOutcome, MoisLoadPlan
 from kortravelmap.dagster.validation import FeatureAddressValidationSummary
 
+_PLAN = MoisLoadPlan(
+    service_slugs=("bakeries",),
+    full_coverage=False,
+    source_db_path=None,
+    geocode_concurrency=2,
+    run_budget_seconds=14_400,
+)
 
-@dataclass(frozen=True)
-class _Bundle:
-    batch: int
-    ordinal: int
+
+def _outcome(*, complete: bool, full_coverage: bool) -> MoisChunkedLoadOutcome:
+    result = DagsterFeatureLoadResult(
+        provider="python-mois-api",
+        dataset_key="bulk",
+        feature_ids=(),
+        load=FeatureLoadResult(bundles_total=5),
+        address_validation=FeatureAddressValidationSummary(
+            total=5, issue_count=0, error_count=0, warning_count=0, issues=()
+        ),
+        observation_receipt=AddressFindingObservationReceipt(
+            authoritative_snapshot_complete=complete and full_coverage,
+            source_observations=5,
+            findings_observed=0,
+            findings_unique=0,
+            findings_upserted=0,
+            finding_persistence_complete=True,
+        ),
+    )
+    return MoisChunkedLoadOutcome(
+        result=result,
+        complete=complete,
+        full_coverage=full_coverage,
+        slugs_completed=("bakeries",) if complete else (),
+        stopped_in_slug=None if complete else "bakeries",
+        records_seen=5,
+        records_unchanged=0,
+        records_converted=5,
+        chunks_committed=1,
+        reverse_geocode_live_calls=0,
+        reverse_geocode_cache_hits=0,
+        reverse_geocode_prefetch_failures=0,
+        dropped_count=0,
+    )
 
 
-async def test_mois_asset_streams_transformed_batches_once(
+@pytest.mark.parametrize(
+    ("complete", "full_coverage", "records_success"),
+    [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
+)
+async def test_mois_asset_delegates_and_records_success_only_for_a_full_finished_snapshot(
     monkeypatch: pytest.MonkeyPatch,
+    complete: bool,
+    full_coverage: bool,
+    records_success: bool,
 ) -> None:
-    context = object()
+    records = [object(), object()]
+    geocoder = object()
     client = object()
-    transformed_sizes: list[int] = []
-    consumed_batches: list[tuple[int, ...]] = []
-    sync_calls: list[tuple[str, str]] = []
+    seen: dict[str, Any] = {}
+    sync_calls: list[dict[str, Any]] = []
+    outcome = _outcome(complete=complete, full_coverage=full_coverage)
 
-    async def _record_batches(*args: Any, **kwargs: Any) -> Any:
-        del args, kwargs
-        for batch in ([1, 2], [3, 4], [5]):
-            yield batch
+    async def _resource_value(_context: object, key: str, *, default: object = None) -> object:
+        return {
+            "mois_dataset_key": "bulk",
+            "strict_address": "drop",
+            "mois_load_plan": _PLAN,
+            "mois_license_records": records,
+        }.get(key, default)
 
-    async def _to_bundles(records: list[int], **kwargs: Any) -> list[_Bundle]:
-        del kwargs
-        transformed_sizes.append(len(records))
-        return [
-            _Bundle(batch=records[0], ordinal=ordinal)
-            for ordinal, _record in enumerate(records)
-        ]
+    async def _chunked(**kwargs: Any) -> MoisChunkedLoadOutcome:
+        seen.update(kwargs)
+        return outcome
 
-    async def _resource_value(
-        _context: object, key: str, *, default: object = None
-    ) -> object:
-        del _context
-        return {"mois_dataset_key": "bulk", "strict_address": "off"}.get(
-            key, default
-        )
+    async def _record_success(_context: object, _client: object, **kwargs: Any) -> None:
+        sync_calls.append(kwargs)
 
-    async def _load_batches(**kwargs: Any) -> DagsterFeatureLoadResult:
-        async for batch in kwargs["batches"]:
-            consumed_batches.append(tuple(item.batch for item in batch))
-        return DagsterFeatureLoadResult(
-            provider="python-mois-api",
-            dataset_key="bulk",
-            feature_ids=(),
-            load=FeatureLoadResult(bundles_total=5),
-            address_validation=FeatureAddressValidationSummary(
-                total=5,
-                issue_count=0,
-                error_count=0,
-                warning_count=0,
-                issues=(),
-            ),
-            observation_receipt=AddressFindingObservationReceipt(
-                authoritative_snapshot_complete=True,
-                source_observations=5,
-                findings_observed=0,
-                findings_unique=0,
-                findings_upserted=0,
-                finding_persistence_complete=True,
-            ),
-        )
-
-    async def _record_success(
-        _context: object,
-        _client: object,
-        *,
-        provider: str,
-        dataset_key: str,
-        **kwargs: Any,
-    ) -> None:
-        del _context, _client, kwargs
-        sync_calls.append((provider, dataset_key))
-
-    monkeypatch.setattr(assets, "_record_batches", _record_batches)
-    monkeypatch.setattr(assets, "license_records_to_bundles", _to_bundles)
     monkeypatch.setattr(assets, "_resource_value", _resource_value)
-    monkeypatch.setattr(assets, "_resource_object", lambda *_args: client)
-    monkeypatch.setattr(assets, "_reverse_geocoder", lambda *_args: object())
+    monkeypatch.setattr(assets, "_resource_object", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(assets, "_reverse_geocoder", lambda *_args: geocoder)
     monkeypatch.setattr(
-        assets,
-        "_fetched_at",
-        lambda *_args: _async_value(datetime(2026, 8, 14, tzinfo=UTC)),
+        assets, "_fetched_at", lambda *_args: _async(datetime(2026, 10, 12, tzinfo=UTC))
     )
-    monkeypatch.setattr(
-        assets, "load_feature_bundle_batches_for_dagster", _load_batches
-    )
+    monkeypatch.setattr(assets, "load_mois_license_records_chunked", _chunked)
     monkeypatch.setattr(assets, "_record_feature_sync_success", _record_success)
 
-    result = await assets.run_feature_place_mois_licenses(context)  # type: ignore[arg-type]
+    result = await assets.run_feature_place_mois_licenses(object())  # type: ignore[arg-type]
 
-    assert transformed_sizes == [2, 2, 1]
-    assert consumed_batches == [(1, 1), (3, 3), (5,)]
-    assert sync_calls == [(assets.MOIS_PROVIDER_NAME, "bulk")]
-    assert result.load.bundles_total == 5
+    assert result is outcome.result
+    assert seen["records"] is records
+    assert seen["plan"] is _PLAN
+    assert seen["reverse_geocoder"] is geocoder
+    assert seen["strict_address"] == "drop"
+    assert seen["dataset_key"] == "bulk"
+    if records_success:
+        assert len(sync_calls) == 1
+        # 이 run은 이미 적재돼 있던 행을 다시 검증하지 않는다 — 미관측 finding을 닫지 않는다.
+        assert sync_calls[0]["observation_receipt"] is None
+        assert sync_calls[0]["cursor_extra"]["mois_load_outcome"] == "complete"
+    else:
+        assert sync_calls == []
 
 
-async def _async_value(value: Any) -> Any:
+async def _async(value: Any) -> Any:
     return value

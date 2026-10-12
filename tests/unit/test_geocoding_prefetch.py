@@ -1,0 +1,110 @@
+"""``PrefetchingReverseGeocoder`` — run 수명 캐시 + bounded 동시성 선조회 (ADR-108)."""
+
+from __future__ import annotations
+
+import asyncio
+from decimal import Decimal
+
+import pytest
+
+from kortravelmap.dto import Address, Coordinate
+from kortravelmap.geocoding import (
+    ObservedReverseGeocoder,
+    PrefetchingReverseGeocoder,
+    cached_reverse_geocoder,
+)
+
+
+def _coord(i: int) -> Coordinate:
+    return Coordinate(lon=Decimal("126.9") + Decimal(i) / 1000, lat=Decimal("37.5"))
+
+
+class _SlowGeocoder:
+    """동시에 몇 건이 떠 있는지 재는 대역."""
+
+    def __init__(self, *, fail: set[int] | None = None) -> None:
+        self.calls: list[Coordinate] = []
+        self.in_flight = 0
+        self.peak = 0
+        self._fail = fail or set()
+
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        self.calls.append(coord)
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            index = int((coord.lon - Decimal("126.9")) * 1000)
+            if index in self._fail:
+                raise TimeoutError(f"geo timeout #{index}")
+            return Address(bjd_code="1111010100")
+        finally:
+            self.in_flight -= 1
+
+
+async def test_prefetch_dedupes_and_respects_the_concurrency_bound() -> None:
+    upstream = _SlowGeocoder()
+    geocoder = PrefetchingReverseGeocoder(upstream, concurrency=3)
+
+    coords = [_coord(i % 10) for i in range(40)]  # 고유 좌표 10개가 4번씩
+    sent = await geocoder.prefetch(coords)
+
+    assert sent == 10
+    assert len(upstream.calls) == 10
+    assert upstream.peak <= 3, f"동시 요청이 상한을 넘었다: {upstream.peak}"
+    assert upstream.peak > 1, "선조회가 순차로 돌았다 — 동시성이 실제로 쓰이지 않는다"
+
+    # 선조회한 좌표는 변환이 다시 불러도 upstream으로 가지 않는다.
+    for coord in coords:
+        assert await geocoder(coord) == Address(bjd_code="1111010100")
+    assert len(upstream.calls) == 10
+    assert geocoder.live_calls == 10
+
+
+async def test_second_prefetch_of_the_same_coordinates_sends_nothing() -> None:
+    upstream = _SlowGeocoder()
+    geocoder = PrefetchingReverseGeocoder(upstream, concurrency=2)
+
+    await geocoder.prefetch([_coord(1), _coord(2)])
+    assert await geocoder.prefetch([_coord(2), _coord(1)]) == 0
+    assert len(upstream.calls) == 2
+
+
+async def test_prefetch_failure_is_not_cached_and_the_live_retry_raises() -> None:
+    """실패를 ``None``으로 캐시하면 bjd 없는 feature가 조용히 적재된다 — 그러면 안 된다."""
+    upstream = _SlowGeocoder(fail={7})
+    geocoder = PrefetchingReverseGeocoder(upstream, concurrency=2)
+
+    await geocoder.prefetch([_coord(6), _coord(7)])
+    assert geocoder.prefetch_failures == 1
+
+    with pytest.raises(TimeoutError):
+        await geocoder(_coord(7))
+    # 실시간 재시도가 실제로 나갔다(선조회 1 + 재시도 1).
+    assert [c for c in upstream.calls if c == _coord(7)] == [_coord(7), _coord(7)]
+
+
+async def test_cache_is_bounded() -> None:
+    upstream = _SlowGeocoder()
+    geocoder = PrefetchingReverseGeocoder(upstream, concurrency=4, max_entries=5)
+
+    await geocoder.prefetch([_coord(i) for i in range(8)])
+    await geocoder(_coord(0))  # 가장 오래된 항목 — 이미 밀려나 다시 조회한다
+
+    assert len(upstream.calls) == 9
+
+
+async def test_it_is_an_observed_geocoder_so_the_converter_cache_uses_it() -> None:
+    """변환 함수는 주입된 geocoder를 ``cached_reverse_geocoder``로 감싼다. 그 래퍼가
+    ``observe``를 부르도록 Protocol을 만족해야 후보 시군구명 증거가 사라지지 않는다."""
+    geocoder = PrefetchingReverseGeocoder(_SlowGeocoder(), concurrency=1)
+
+    assert isinstance(geocoder, ObservedReverseGeocoder)
+    wrapped = cached_reverse_geocoder(geocoder)
+    assert await wrapped(_coord(3)) == Address(bjd_code="1111010100")
+
+
+@pytest.mark.parametrize("bad", [{"concurrency": 0}, {"concurrency": 1, "max_entries": 0}])
+def test_rejects_non_positive_bounds(bad: dict[str, int]) -> None:
+    with pytest.raises(ValueError):
+        PrefetchingReverseGeocoder(_SlowGeocoder(), **bad)

@@ -72,6 +72,7 @@ __all__ = [
     "MoisLoadPlan",
     "iter_slug_chunks",
     "load_mois_license_records_chunked",
+    "mois_load_continuation_decision",
     "mois_load_continuation_sensor",
     "resolve_mois_load_plan",
 ]
@@ -445,9 +446,13 @@ def mois_load_continuation_sensor(
         ),
         limit=1,
     )
-    if not runs:
+    return mois_load_continuation_decision(runs[0] if runs else None)
+
+
+def mois_load_continuation_decision(last: Any) -> RunRequest | SkipReason:
+    """가장 최근 MOIS 적재 run(``DagsterRun`` 또는 ``None``)으로 이어 달릴지 정한다."""
+    if last is None:
         return SkipReason("MOIS 적재 run이 아직 없다")
-    last = runs[0]
     if not last.is_finished:
         return SkipReason(f"MOIS 적재 run {last.run_id}이 진행 중이다({last.status.value})")
     if last.status != DagsterRunStatus.SUCCESS:
