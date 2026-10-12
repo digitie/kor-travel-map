@@ -717,6 +717,7 @@ async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
 async def test_highway_incident_asset_runs_on_dagster_single_connection_pool(
     map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
+    dagster_runtime_engine: Any,
 ) -> None:
     """회귀(prod run ``bfd18ef5``): 실제 asset 경로가 Dagster pool 1/0에서 끝까지 돈다.
 
@@ -724,7 +725,8 @@ async def test_highway_incident_asset_runs_on_dagster_single_connection_pool(
     (ADR-107). 이 파일의 다른 테스트는 기본 pool(5+10)인 ``migrated_engine``을 써서
     ``provider_run_lock``이 연결을 쥔 채 본문이 두 번째 연결을 요구하던 결함을 보지
     못했다. 여기서는 같은 pool 모양의 engine으로 asset 본문(watermark 조회 → 적재 →
-    reconcile → sync cursor) 전체를 두 번 돌린다. ``map_client``는 검증과 정리용이다.
+    reconcile → sync cursor) 전체를 두 번 돌린다. prod와 같이 **실제 Dagster runtime
+    login**(``ktm_feature_service``)으로 접속한다. ``map_client``는 검증과 정리용이다.
     """
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -749,7 +751,7 @@ async def test_highway_incident_asset_runs_on_dagster_single_connection_pool(
         )
 
     engine = create_async_engine(
-        migrated_engine.url,
+        dagster_runtime_engine.url,
         pool_size=1,
         max_overflow=0,
         # prod는 30초다. 판정은 같고 회귀 시 실패만 빨라진다.
