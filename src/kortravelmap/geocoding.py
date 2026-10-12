@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections import Counter, OrderedDict
+from collections import Counter, OrderedDict, deque
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -302,6 +302,7 @@ class PrefetchingReverseGeocoder:
         concurrency: int,
         max_entries: int = 50_000,
         precision: int = _DEFAULT_COORD_PRECISION,
+        recent_window: int = 50,
     ) -> None:
         if concurrency < 1:
             raise ValueError("concurrency must be >= 1")
@@ -318,6 +319,26 @@ class PrefetchingReverseGeocoder:
         """캐시에서 바로 답한 조회 수(선조회 단계의 중복 제거 포함)."""
         self.prefetch_failures = 0
         """선조회에서 예외가 나 캐시하지 않은 좌표 수."""
+        self.empty_results = 0
+        """upstream이 답은 했지만 법정동코드를 내지 못한 조회 수."""
+        self._recent_empty: deque[bool] = deque(maxlen=recent_window)
+
+    @property
+    def recent_lookups(self) -> int:
+        """최근 창(``recent_window``)에 든 upstream 조회 수."""
+        return len(self._recent_empty)
+
+    @property
+    def recent_empty_ratio(self) -> float:
+        """최근 창에서 법정동코드 없이 돌아온 조회의 비율. 조회가 없으면 0.
+
+        좌표 하나가 빈 답을 받는 것은 정상(바다·경계)이지만, 연속 대부분이 빈 답이면
+        geo가 사실상 죽은 것이다. 호출자가 이것으로 "행 단위 실패"와 "upstream 장애"를
+        가른다.
+        """
+        if not self._recent_empty:
+            return 0.0
+        return sum(self._recent_empty) / len(self._recent_empty)
 
     def _key(self, coord: Coordinate) -> tuple[str, str]:
         return (
@@ -334,10 +355,17 @@ class PrefetchingReverseGeocoder:
     async def _lookup(self, coord: Coordinate) -> ReverseGeocodeObservation:
         self.live_calls += 1
         if isinstance(self._geocoder, ObservedReverseGeocoder):
-            return await self._geocoder.observe(coord)
-        address = await self._geocoder(coord)
-        names = (address.sigungu_name,) if address is not None and address.sigungu_name else ()
-        return ReverseGeocodeObservation(address, names)
+            observation = await self._geocoder.observe(coord)
+        else:
+            address = await self._geocoder(coord)
+            names = (
+                (address.sigungu_name,) if address is not None and address.sigungu_name else ()
+            )
+            observation = ReverseGeocodeObservation(address, names)
+        empty = observation.address is None or observation.address.bjd_code is None
+        self.empty_results += int(empty)
+        self._recent_empty.append(empty)
+        return observation
 
     async def prefetch(self, coords: Iterable[Coordinate]) -> int:
         """캐시에 없는 좌표를 중복 없이 최대 ``concurrency``개씩 동시에 조회한다.

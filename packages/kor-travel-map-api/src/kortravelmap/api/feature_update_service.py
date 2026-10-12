@@ -16,6 +16,7 @@ from uuid import UUID
 
 import httpx
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
+from kortravelmap.core.feature_operation import DEDICATED_JOB_ONLY_OPERATION_KEYS
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.geocoding import KorTravelGeoRestClient, resolve_sigungu_by_radius
 from kortravelmap.infra.feature_update_active_repo import (
@@ -63,6 +64,7 @@ from kortravelmap.api.response import make_meta
 
 __all__ = [
     "FeatureUpdateEnqueueError",
+    "FeatureUpdateDedicatedJobOnly",
     "FeatureUpdateActiveScopeConflict",
     "FeatureUpdateDispatchStateConflict",
     "FeatureUpdateIdempotencyConflict",
@@ -168,6 +170,37 @@ class FeatureUpdateResolverError(GeoRequestError, FeatureUpdateServiceError):
 
 class FeatureUpdateEnqueueError(RuntimeError, FeatureUpdateServiceError):
     """분류할 수 없는 큐 적재 실패."""
+
+
+class FeatureUpdateDedicatedJobOnly(RuntimeError, FeatureUpdateServiceError):
+    """요청 계획이 큐로 실행하지 않는 operation뿐이다 (ADR-108).
+
+    큐는 provider 쓰기를 transaction 하나에 묶는다. MOIS 재개형 적재는 chunk마다 commit해야
+    하므로 전용 Dagster job으로만 돈다. 받아 두면 실행기가 건너뛸 수밖에 없어 "접수됐는데
+    아무것도 갱신하지 않은" 요청이 된다 — 접수 시점에 거부한다.
+    """
+
+    code = "PROVIDER_DEDICATED_JOB_ONLY"
+
+    def __init__(self, operation_keys: Sequence[str]) -> None:
+        super().__init__(
+            "이 요청의 dataset은 feature update 큐로 갱신하지 않는다 — 전용 Dagster job("
+            + ", ".join(operation_keys)
+            + ")으로 실행하라(ADR-108)."
+        )
+        self.operation_keys = tuple(operation_keys)
+
+
+def _reject_dedicated_job_only_plan(
+    memberships: Sequence[FeatureUpdateRequestDataset],
+) -> None:
+    """계획 전체가 전용 job 전용 operation이면 거부한다. 섞인 계획은 받는다.
+
+    섞인 계획의 그 부분은 실행기가 ``dedicated_job_only``로 건너뛰고 terminal 상세에 남긴다.
+    """
+    operation_keys = sorted({membership.operation_key for membership in memberships})
+    if operation_keys and set(operation_keys) <= DEDICATED_JOB_ONLY_OPERATION_KEYS:
+        raise FeatureUpdateDedicatedJobOnly(operation_keys)
 
 
 def _scope_payload(scope: FeatureUpdateScope) -> dict[str, Any]:
@@ -870,6 +903,7 @@ async def create_feature_update_request(
                 priority=body.priority,
                 settings=settings,
             )
+            _reject_dedicated_job_only_plan(preview.dataset_memberships)
             dataset_memberships = _membership_targets(preview.dataset_memberships)
             canonical_body = _canonical_feature_update_request_body(
                 body,

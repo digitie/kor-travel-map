@@ -72,6 +72,37 @@ schedule 표·admin UI가 모두 의존하는 축을 바꾼다. 시간 상한 + 
 
 retry는 1회·5분 뒤로 줄인다(`MOIS_LOAD_RETRY_POLICY`). 재시도도 이어 가기 때문이다.
 
+**시간은 run 시작부터 잰다**(적대 리뷰 MED-3). 기준은 Dagster run record의 `start_time`이다 —
+step 시작으로 재면 resource init의 Phase A sync(약 24분)와 step 재시도가 쓴 시간이 빠져 run 상한
+6시간을 넘을 수 있다. 실제 상한은 `min(plan 상한, run의 dagster/max_runtime tag - 30분)`이다(30분 =
+`RUN_FINAL_MARGIN_SECONDS`, 마지막 chunk·봉인 질의·sync 기록 여유). settings 최대값 19,800초는 이
+job의 run 상한 21,600초 - 30분이고, 둘이 갈라지면 테스트가 빨개진다.
+
+**이어 달리기 방어**: sensor는 미종료 MOIS run이 하나라도 있으면 띄우지 않고(schedule tick과의 경합),
+마지막 run이 새 행을 0건 적재하고 상한에 닿았으면(tag `kor_travel_map.mois_load.records_converted=0`)
+멈춘다 — 같은 자리에서 영원히 멈추는 고리를 막는다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1, run
+단위)이 실행을 직렬화하고, 재개형이라 뒤 run은 건너뛰기만 한다.
+
+### 3a. 소실 하한과 geo 장애 (적대 리뷰 MED-1)
+
+종전 drop 모드 소실 하한(버린 비율 > 50%)을 chunk마다 재면 1~3행 꼬리 chunk의 한 행이 100%
+소실이 되어 run이 실패하고, 재시도도 같은 자리에서 실패해 이어 달리기가 영구히 멈춘다. 그래서
+chunk 적재 함수의 하한은 끄고(`enforce_loss_guard=False`) 적재기가 직접 잰다.
+
+- **데이터 무효**(`missing_address` 등 위치 단서 없음)는 **업종 누적**으로 재고, 관측 200행
+  (`LOSS_GUARD_MIN_SAMPLE`) 이상일 때만 판정한다. 넘으면 그 chunk를 commit하기 **전에** 멈춘다.
+  작은 업종의 drop은 행 단위 finding으로만 남는다.
+- **지오코더 원인**(`reverse_geocode_failed`)은 따로 센다. 이런 행은 적재되지 않으므로 다음 run이
+  다시 변환한다 — 영구 손실이 아니다. 대신 **geo 장애**는 run 장애로 다룬다: 최근 50건 조회 중
+  20건 이상이 모였고 그 80% 이상이 법정동코드 없이 돌아오면 그 chunk를 적재하기 전에 upstream
+  장애로 실패한다(행을 버리며 진행하지 않는다). 예외(timeout 등)는 원래대로 run을 실패시킨다.
+
+### 3b. 재관측 충돌은 run 안에서 그 chunk만 다시 (적대 리뷰 MED-2)
+
+확인과 기록 사이에 dedup·관리자 변경이 끼면 `ProviderEntityReobservationConflict`로 chunk가 통째로
+되돌아간다. 적재기는 그 chunk만 다시 확인·변환·적재한다(최대 2회, 지오코딩은 run 캐시에서 나온다).
+그래도 충돌하면 run이 실패한다.
+
 ### 4. 완료와 봉인
 
 **선택 업종을 한 run 안에서 끝까지 본 run**만 `complete`다. 그것이 PROMOTED 전 업종이고 본
@@ -83,10 +114,24 @@ provider sync 성공을 남긴다. 부분 run·업종 선택 run은 non-authorit
 미관측 finding의 stale close는 **하지 않는다.** 건너뛴 행은 다시 검증하지 않으므로 "이번 run이
 보지 못했다"가 "고쳐졌다"를 뜻하지 않는다.
 
-### 5. 큐 경로는 MOIS를 건너뛴다
+### 5. 큐 경로는 MOIS를 실행하지 않고, 그 사실을 숨기지 않는다 (적대 리뷰 MED-4)
 
-`DEDICATED_JOB_ONLY_OPERATION_KEYS`. scope 종류와 무관하게 `skipped`(`dedicated_job_only`)로
-돌려준다. MOIS 적재는 전용 job(schedule·sensor·수동 launch)만 한다.
+정본은 `kortravelmap.core.feature_operation.DEDICATED_JOB_ONLY_OPERATION_KEYS` 하나다. MOIS 적재는
+전용 job(schedule·sensor·수동 launch)만 한다. 큐 요청은 셋으로 갈린다.
+
+- **접수 시 MOIS뿐인 계획**: `POST /v1/ops/pipeline/requests`가 **409 `PROVIDER_DEDICATED_JOB_ONLY`**
+  (`details.dagster_jobs`에 전용 job 이름)로 거부한다. 받아 두고 건너뛰면 "접수됐는데 아무것도
+  갱신하지 않은" 요청이 된다.
+- **섞인 계획**: 받는다. 실행 계획이 MOIS 부분을 `skipped_provider_scopes[].reason=dedicated_job_only`로
+  빼고, 나머지를 실행한 뒤 request를 `done`으로 닫으면서 **job `error_message`에** 건너뛴
+  dataset·전용 job을 적는다 — `done`이 전부 갱신됐다는 뜻으로 읽히지 않게.
+- **실행할 것이 MOIS뿐인 요청**(PinVi cache target refresh처럼 enqueue 거부를 거치지 않는 경로 포함):
+  기존 실패 어휘로 끝낸다 — request `failed` + error_message, cache target status event `failed` +
+  `error_code=PROVIDER_DEDICATED_JOB_ONLY`, target `last_failed_at` 갱신. 새 상태값을 만들지 않았다.
+  PinVi는 이미 `failed`를 다루므로 "조용히 갱신 안 됨"이 남지 않는다. 그 target의 MOIS feature는
+  전용 job이 적재·갱신한다.
+
+Dagster 큐 runner의 skip은 방어선으로 남는다(정상 경로에서는 실행 계획이 먼저 뺀다).
 
 ### 6. 원천 SQLite는 영속 경로에
 
@@ -111,7 +156,9 @@ compose는 그 디렉터리에 named volume을 붙인다(새 named volume은 이
 2. Phase B freshness TTL(`KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS`, 기본 24h). 캠페인 중
    run이 Phase A를 다시 받지 않게 운영 값으로 168h 이상을 권한다(주간 sync job이 갱신한다).
 3. snapshot에서 사라진(폐업) MOIS feature retire — 지금도 하지 않는다. 완료 run에 붙일지.
-4. 큐로 오던 MOIS 요청(admin dataset refresh)을 전용 job launch로 바꿀지.
+4. 큐로 오던 MOIS 요청은 지금 409(접수)·`failed`(cache target)로 드러난다. 이를 전용 job launch로
+   자동 전환할지. 그리고 섞인 큐 계획에도 MOIS source sync 선행조건(`MOIS_SOURCE_SYNC_REQUIRED`)이
+   여전히 걸린다 — 큐가 MOIS를 실행하지 않으므로 그 검사를 섞인 계획에서 뺄지.
 5. 동시성 기본 2와 상한 4시간 — 검증 run의 geo 지연·n150 IO 압력을 보고 조정.
 6. 재관측 쓰기 비용 — 새 원천 snapshot(주 1회)마다 미변경 행 전부의 head `observed_at`·entity
    `last_seen_at`을 한 번 갱신한다(약 98만 × 2행). `load_bundle`의 재관측 의미를 지키기 위한 것이고 같은

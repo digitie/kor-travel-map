@@ -14,7 +14,8 @@ FEATURE_UPDATE_CONFLICT_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
     409: {
         "description": (
             "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, "
-            "dispatch 불가 상태 또는 "
+            "dispatch 불가 상태, 전용 Dagster job으로만 갱신하는 dataset뿐인 계획"
+            "(PROVIDER_DEDICATED_JOB_ONLY) 또는 "
             "LOCK_BUSY(이 경우에만 Retry-After header 포함)"
         ),
     },
@@ -72,6 +73,15 @@ def to_http_exception(
                     "status": exc.current_status,
                     "detail_url": (f"/v1/ops/pipeline/executions/update_request/{exc.request_id}"),
                 },
+            },
+        )
+    if isinstance(exc, feature_update_service.FeatureUpdateDedicatedJobOnly):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "details": {"dagster_jobs": list(exc.operation_keys)},
             },
         )
     if isinstance(exc, feature_update_service.FeatureUpdateRequestNotFound):

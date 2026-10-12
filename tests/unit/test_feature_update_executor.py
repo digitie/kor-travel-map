@@ -429,3 +429,83 @@ async def test_direct_plan_rebuilds_transient_read_scope_from_membership(
     assert len(plan.refresh_scopes) == 1
     assert plan.refresh_scopes[0].provider_dataset_id == 11
     assert plan.refresh_scopes[0].feature_count == 1
+
+
+# -- ADR-108: 전용 job 전용 operation -------------------------------------------
+
+
+def test_dedicated_job_only_operation_is_skipped_before_any_policy() -> None:
+    """큐는 MOIS를 실행하지 않는다 — 허용 policy가 있어도 skip 사유가 먼저다."""
+    from kortravelmap.core.feature_operation import (
+        DEDICATED_JOB_ONLY_OPERATION_KEYS,
+        DEDICATED_JOB_ONLY_SKIP_REASON,
+    )
+
+    resolution = ScopeResolution(
+        scope_type="cache_target_keys",
+        features=(FeatureScopeRow("feature-1", "11110"),),
+        cache_targets=(_target(),),
+    )
+    for operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+        assert (
+            executor._skip_reason(
+                request=_request(),
+                provider="python-mois-api",
+                dataset_key="mois_license_features_bulk",
+                operation_key=operation_key,
+                policy=_policy(targeted_policy="allow_targeted"),
+                resolution=resolution,
+            )
+            == DEDICATED_JOB_ONLY_SKIP_REASON
+        )
+    assert (
+        executor._skip_reason(
+            request=_request(),
+            provider="python-a-api",
+            dataset_key="dataset-a",
+            operation_key="refresh_test_dataset",
+            policy=_policy(targeted_policy="allow_targeted"),
+            resolution=resolution,
+        )
+        is None
+    )
+
+
+def _skipped(reason: str, *, provider_dataset_id: int = 7) -> SkippedProviderDatasetRefresh:
+    return SkippedProviderDatasetRefresh(
+        provider_dataset_id=provider_dataset_id,
+        sync_scope="dataset_wide",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        reason=reason,
+        feature_count=3,
+        operation_key="feature_place_mois_licenses_job",
+    )
+
+
+def test_dedicated_job_only_note_names_the_skipped_dataset_and_job() -> None:
+    """섞인 계획의 terminal 상세 — "done"이 전부 갱신됐다는 뜻으로 읽히지 않게 한다."""
+    resolution = ScopeResolution(scope_type="cache_target_keys", features=(), cache_targets=())
+    plan = executor.FeatureUpdateExecutionPlan(
+        request=_request(),
+        resolution=resolution,
+        refresh_scopes=(),
+        skipped_scopes=(
+            _skipped("dedicated_job_only"),
+            _skipped("policy_disabled", provider_dataset_id=8),
+        ),
+        matched_scope={},
+    )
+    note = executor._dedicated_job_only_note(plan)
+    assert note is not None
+    assert "python-mois-api/mois_license_features_bulk" in note
+    assert "feature_place_mois_licenses_job" in note
+
+    other_only = executor.FeatureUpdateExecutionPlan(
+        request=_request(),
+        resolution=resolution,
+        refresh_scopes=(),
+        skipped_scopes=(_skipped("policy_disabled"),),
+        matched_scope={},
+    )
+    assert executor._dedicated_job_only_note(other_only) is None

@@ -21697,7 +21697,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
+            /** @description Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, dispatch 불가 상태, 전용 Dagster job으로만 갱신하는 dataset뿐인 계획(PROVIDER_DEDICATED_JOB_ONLY) 또는 LOCK_BUSY(이 경우에만 Retry-After header 포함) */
             409: {
                 headers: {
                     [name: string]: unknown;

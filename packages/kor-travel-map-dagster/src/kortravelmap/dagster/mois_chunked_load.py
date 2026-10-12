@@ -33,7 +33,10 @@ from typing import Any, Final, cast
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.dto import FeatureBundle
 from kortravelmap.geocoding import PrefetchingReverseGeocoder, ReverseGeocoder
-from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.feature_repo import (
+    FeatureLoadResult,
+    ProviderEntityReobservationConflict,
+)
 from kortravelmap.providers.mois import (
     PROMOTED_SERVICE_SLUGS,
     PROVIDER_NAME,
@@ -48,6 +51,7 @@ from dagster import (
     AssetExecutionContext,
     DagsterRunStatus,
     DefaultSensorStatus,
+    Failure,
     RunRequest,
     SensorEvaluationContext,
     SkipReason,
@@ -58,9 +62,11 @@ from .etl import (
     FEATURE_ID_METADATA_LIMIT,
     DagsterFeatureLoadResult,
     _add_output_metadata,
+    _normalize_address_validation_mode,
     load_feature_bundles_for_dagster,
 )
 from .run_scope import map_owned_runs_filter
+from .validation import validate_feature_bundles_address
 
 __all__ = [
     "MOIS_LOAD_CHUNK_SIZE",
@@ -89,8 +95,39 @@ MOIS_LOAD_OUTCOME_TAG: Final[str] = "kor_travel_map.mois_load.outcome"
 MOIS_LOAD_OUTCOME_COMPLETE: Final[str] = "complete"
 MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
 
+MOIS_LOAD_CONVERTED_TAG: Final[str] = "kor_travel_map.mois_load.records_converted"
+"""이번 run이 실제로 변환·적재한 행 수. 0이면 이어 달려도 전진하지 않는다."""
+
 _LICENSE_ENTITY_TYPE: Final[str] = "license_place"
 """``providers.mois``가 ``SourceRecord.source_entity_type``으로 쓰는 값."""
+
+LOSS_GUARD_MIN_SAMPLE: Final[int] = 200
+"""업종 소실 하한을 재기 시작하는 최소 관측 행 수.
+
+종전 하한(drop 비율 > 0.5)을 chunk마다 재면 1~3행짜리 꼬리 chunk의 한 행이 100% 소실이
+되어 run이 영구히 실패했다(적대 리뷰 MED-1). 업종 누적으로 재고, 표본이 이만큼 모이기 전에는
+판정하지 않는다 — 작은 업종의 drop은 행 단위 finding으로 남는다.
+"""
+
+LOSS_GUARD_DROP_RATIO: Final[float] = 0.5
+"""업종 누적 **데이터 무효** drop 비율 상한(종전 ``_DATASET_LOSS_DROP_RATIO``와 같은 값)."""
+
+GEO_OUTAGE_MIN_LOOKUPS: Final[int] = 20
+"""geo 장애 판정을 시작하는 최근 조회 수."""
+
+GEO_OUTAGE_EMPTY_RATIO: Final[float] = 0.8
+"""최근 조회 중 법정동코드 없이 돌아온 비율이 이 이상이면 upstream 장애로 본다."""
+
+REOBSERVATION_CONFLICT_RETRIES: Final[int] = 2
+"""확인 뒤 entity가 바뀐 chunk를 run 안에서 다시 확인·적재하는 횟수."""
+
+RUN_FINAL_MARGIN_SECONDS: Final[int] = 1_800
+"""run 상한 앞에 남기는 여유 — 마지막 chunk·봉인 질의·sync 기록."""
+
+_RUN_MAX_RUNTIME_TAG: Final[str] = "dagster/max_runtime"
+
+_GEOCODE_DROP_CODES: Final[frozenset[str]] = frozenset({"reverse_geocode_failed"})
+"""drop 사유 중 지오코더가 답을 못 낸 것. 나머지 drop 사유는 원천 데이터 무효다."""
 
 
 @dataclass(frozen=True)
@@ -246,6 +283,56 @@ def _cap_feature_ids(result: DagsterFeatureLoadResult) -> DagsterFeatureLoadResu
     )
 
 
+@dataclass(frozen=True)
+class _ChunkLoad:
+    """chunk 하나를 commit한 결과."""
+
+    result: DagsterFeatureLoadResult
+    unchanged: int
+    converted: int
+    geocode_drops: int
+    invalid_drops: int
+
+
+def _run_clock_start(context: Any, fallback: float) -> float:
+    """run이 **시작한** 시각(epoch 초). 직접 호출·테스트면 ``fallback``.
+
+    step 시작이 아니라 run 시작이다 — resource init의 Phase A sync(실측 약 24분)와 step
+    재시도가 이미 쓴 시간을 run 상한에서 빼야 한다(적대 리뷰 MED-3).
+    """
+    instance = getattr(context, "instance", None)
+    try:
+        run_id = context.run_id
+    except Exception:  # noqa: BLE001 — 직접 호출 context에는 run이 없다
+        return fallback
+    get_record = getattr(instance, "get_run_record_by_id", None)
+    if not run_id or not callable(get_record):
+        return fallback
+    record = get_record(run_id)
+    start_time = getattr(record, "start_time", None)
+    return float(start_time) if start_time else fallback
+
+
+def _run_max_runtime_seconds(context: Any) -> int | None:
+    """이 run에 걸린 Dagster run 상한(``dagster/max_runtime`` tag), 없으면 ``None``."""
+    try:
+        tags = context.run.tags
+    except Exception:  # noqa: BLE001 — 직접 호출 context에는 run이 없다
+        return None
+    raw = tags.get(_RUN_MAX_RUNTIME_TAG) if isinstance(tags, Mapping) else None
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def effective_run_budget_seconds(plan_budget: int, run_max_runtime: int | None) -> int:
+    """plan 상한을 run 상한 - 여유(``RUN_FINAL_MARGIN_SECONDS``) 안으로 깎는다."""
+    if run_max_runtime is None:
+        return plan_budget
+    return max(0, min(plan_budget, run_max_runtime - RUN_FINAL_MARGIN_SECONDS))
+
+
 async def load_mois_license_records_chunked(
     *,
     context: AssetExecutionContext,
@@ -256,13 +343,15 @@ async def load_mois_license_records_chunked(
     dataset_key: str,
     strict_address: bool | str,
     reverse_geocoder: ReverseGeocoder | None,
-    clock: Callable[[], float] = time.monotonic,
+    clock: Callable[[], float] = time.time,
     convert: Callable[..., Awaitable[list[FeatureBundle]]] = license_records_to_bundles,
 ) -> MoisChunkedLoadOutcome:
     """선택 업종의 영업중 record를 chunk 단위로 commit하며 적재한다(재개형).
 
     ``records``는 ``(service_slug, mng_no)`` 순 stream이다(provider가 그 순서를 보장).
-    ``clock``·``convert``는 테스트가 시간과 변환을 대신하기 위한 자리다.
+    ``clock``(epoch 초)·``convert``는 테스트가 시간과 변환을 대신하기 위한 자리다.
+    시간 상한은 **run 시작**부터 재고, run 상한 tag(``dagster/max_runtime``)에서
+    ``RUN_FINAL_MARGIN_SECONDS``를 뺀 값을 넘지 않는다.
     """
     from .mois_source_sync import read_mois_source_synced_at  # schedules→assets 순환 회피
 
@@ -275,31 +364,13 @@ async def load_mois_license_records_chunked(
         if reverse_geocoder is not None
         else None
     )
+    mode = _normalize_address_validation_mode(strict_address)
     sink = _ChunkMetadataSink(context)
-    started = clock()
-    deadline = started + plan.run_budget_seconds
+    deadline = _run_clock_start(context, clock()) + effective_run_budget_seconds(
+        plan.run_budget_seconds, _run_max_runtime_seconds(context)
+    )
 
-    merged: DagsterFeatureLoadResult | None = None
-    slugs_completed: list[str] = []
-    current_slug: str | None = None
-    stopped_in_slug: str | None = None
-    records_seen = records_unchanged = records_converted = chunks = 0
-    complete = True
-
-    for chunk in iter_slug_chunks(records, MOIS_LOAD_CHUNK_SIZE):
-        slug = str(chunk[0].service_slug)
-        if slug != current_slug:
-            if current_slug is not None:
-                slugs_completed.append(current_slug)
-                context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
-            current_slug = slug
-        # 상한 판정은 chunk **사이**에서만 한다 — 시작한 chunk는 끝까지 commit한다. 첫
-        # chunk는 언제나 시작하므로 run마다 최소 한 chunk는 전진한다(무한 이어 달리기 방지).
-        if chunks > 0 and clock() >= deadline:
-            complete = False
-            stopped_in_slug = slug
-            break
-
+    async def _load_chunk(chunk: list[Any], slug_seen: int, slug_invalid: int) -> _ChunkLoad:
         payload_hashes = {
             license_source_entity_id(record): license_record_payload_hash(record)
             for record in chunk
@@ -319,13 +390,20 @@ async def load_mois_license_records_chunked(
                 for record in to_convert
                 if (coord := license_reverse_geocode_coordinate(record)) is not None
             )
+            _raise_if_geo_outage(prefetcher, slug=str(chunk[0].service_slug))
         bundles = await convert(
             to_convert,
             fetched_at=fetched_at,
             dataset_key=dataset_key,
             reverse_geocoder=prefetcher if prefetcher is not None else reverse_geocoder,
         )
-        chunk_result = await load_feature_bundles_for_dagster(
+        geocode_drops, invalid_drops = _drop_counts(bundles, mode=mode)
+        _raise_if_slug_lost(
+            slug=str(chunk[0].service_slug),
+            seen=slug_seen + len(chunk),
+            invalid=slug_invalid + invalid_drops,
+        )
+        result = await load_feature_bundles_for_dagster(
             context=cast(AssetExecutionContext, sink),
             client=client,
             bundles=bundles,
@@ -339,13 +417,63 @@ async def load_mois_license_records_chunked(
                 reobserved={key: payload_hashes[key] for key in unchanged},
                 observed_at=observed_at,
             ),
-            loss_guard_observations=len(chunk),
+            enforce_loss_guard=False,
         )
-        merged = _cap_feature_ids(chunk_result if merged is None else merged.merge(chunk_result))
+        return _ChunkLoad(
+            result=result,
+            unchanged=len(unchanged),
+            converted=len(to_convert),
+            geocode_drops=geocode_drops,
+            invalid_drops=invalid_drops,
+        )
+
+    merged: DagsterFeatureLoadResult | None = None
+    slugs_completed: list[str] = []
+    current_slug: str | None = None
+    stopped_in_slug: str | None = None
+    records_seen = records_unchanged = records_converted = chunks = 0
+    slug_seen = slug_invalid = 0
+    complete = True
+
+    for chunk in iter_slug_chunks(records, MOIS_LOAD_CHUNK_SIZE):
+        slug = str(chunk[0].service_slug)
+        if slug != current_slug:
+            if current_slug is not None:
+                slugs_completed.append(current_slug)
+                context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
+            current_slug = slug
+            slug_seen = slug_invalid = 0
+        # 상한 판정은 chunk **사이**에서만 한다 — 시작한 chunk는 끝까지 commit한다. 첫
+        # chunk는 언제나 시작하므로 run마다 최소 한 chunk는 전진한다(무한 이어 달리기 방지).
+        if chunks > 0 and clock() >= deadline:
+            complete = False
+            stopped_in_slug = slug
+            break
+
+        attempt = 0
+        while True:
+            try:
+                loaded = await _load_chunk(chunk, slug_seen, slug_invalid)
+                break
+            except ProviderEntityReobservationConflict as exc:
+                # 확인과 기록 사이에 dedup·관리자 변경이 끼었다. chunk는 통째로 되돌아갔으므로
+                # 그 chunk만 다시 확인해 적재한다(지오코딩은 run 캐시에서 나온다).
+                attempt += 1
+                if attempt > REOBSERVATION_CONFLICT_RETRIES:
+                    raise
+                context.log.warning(
+                    f"MOIS 업종 {slug} chunk 재확인({attempt}/"
+                    f"{REOBSERVATION_CONFLICT_RETRIES}): {exc}"
+                )
+        merged = _cap_feature_ids(
+            loaded.result if merged is None else merged.merge(loaded.result)
+        )
         chunks += 1
         records_seen += len(chunk)
-        records_unchanged += len(unchanged)
-        records_converted += len(to_convert)
+        records_unchanged += loaded.unchanged
+        records_converted += loaded.converted
+        slug_seen += len(chunk)
+        slug_invalid += loaded.invalid_drops
 
     if complete and current_slug is not None:
         slugs_completed.append(current_slug)
@@ -401,8 +529,69 @@ async def load_mois_license_records_chunked(
     if outcome.dropped_count:
         metadata["address_validation_dropped_count"] = outcome.dropped_count
     _add_output_metadata(context, metadata)
-    _tag_run_outcome(context, outcome.outcome)
+    _tag_run_outcome(
+        context,
+        {
+            MOIS_LOAD_OUTCOME_TAG: outcome.outcome,
+            MOIS_LOAD_CONVERTED_TAG: str(outcome.records_converted),
+        },
+    )
     return outcome
+
+
+def _drop_counts(bundles: Sequence[FeatureBundle], *, mode: str) -> tuple[int, int]:
+    """drop 모드에서 버려질 행 수를 (지오코더 원인, 데이터 무효)로 나눠 센다.
+
+    적재 함수와 **같은 판정**(``blocking_issues``)을 적재 전에 미리 돌린다. drop 모드가
+    아니면 버리는 행이 없다(strict는 error에서 run을 멈추고, off는 전부 적재한다).
+    지오코더 원인 drop은 적재되지 않았으므로 다음 run이 다시 변환한다 — 영구 손실이 아니다.
+    """
+    if mode != "drop" or not bundles:
+        return 0, 0
+    validation = validate_feature_bundles_address(bundles)
+    geocode: set[str] = set()
+    invalid: set[str] = set()
+    for issue in validation.blocking_issues:
+        (geocode if issue.code in _GEOCODE_DROP_CODES else invalid).add(issue.feature_id)
+    return len(geocode), len(invalid - geocode)
+
+
+def _raise_if_slug_lost(*, slug: str, seen: int, invalid: int) -> None:
+    """업종 누적 데이터 무효 drop이 하한을 넘으면 그 chunk를 commit하기 **전에** 멈춘다."""
+    if seen < LOSS_GUARD_MIN_SAMPLE or invalid / seen <= LOSS_GUARD_DROP_RATIO:
+        return
+    raise Failure(
+        description=(
+            f"MOIS 업종 {slug}: 관측 {seen}건 중 {invalid}건이 위치 단서 없는 데이터 무효로 "
+            "버려진다 — 적재가 아니라 소실이다. provider payload가 바뀌었는지 확인할 것."
+        ),
+        metadata={
+            "mois_load_loss_slug": slug,
+            "mois_load_loss_seen": seen,
+            "mois_load_loss_invalid": invalid,
+            "mois_load_loss_ratio_limit": LOSS_GUARD_DROP_RATIO,
+        },
+    )
+
+
+def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> None:
+    """최근 조회 대부분이 법정동코드 없이 돌아오면 upstream 장애로 멈춘다 — 행을 버리지 않는다."""
+    if (
+        prefetcher.recent_lookups < GEO_OUTAGE_MIN_LOOKUPS
+        or prefetcher.recent_empty_ratio < GEO_OUTAGE_EMPTY_RATIO
+    ):
+        return
+    raise Failure(
+        description=(
+            f"kor-travel-geo 역지오코딩이 최근 {prefetcher.recent_lookups}건 중 "
+            f"{prefetcher.recent_empty_ratio:.0%}를 빈 결과로 돌려준다 — upstream 장애로 보고 "
+            f"업종 {slug} 적재를 멈춘다(행을 버리지 않는다). 재시도·재실행은 이어서 적재한다."
+        ),
+        metadata={
+            "mois_geo_outage_recent_lookups": prefetcher.recent_lookups,
+            "mois_geo_outage_empty_ratio": prefetcher.recent_empty_ratio,
+        },
+    )
 
 
 def _chunk_loader(
@@ -431,7 +620,7 @@ async def _empty_load() -> FeatureLoadResult:
     return FeatureLoadResult()
 
 
-def _tag_run_outcome(context: Any, outcome: str) -> None:
+def _tag_run_outcome(context: Any, tags: Mapping[str, str]) -> None:
     """이어 달리기 sensor가 읽을 결과 tag. 실제 Dagster run 밖(직접 호출)에서는 생략한다."""
     instance = getattr(context, "instance", None)
     try:
@@ -440,8 +629,17 @@ def _tag_run_outcome(context: Any, outcome: str) -> None:
         return
     add_run_tags = getattr(instance, "add_run_tags", None)
     if run_id and callable(add_run_tags):
-        add_run_tags(run_id, {MOIS_LOAD_OUTCOME_TAG: outcome})
+        add_run_tags(run_id, dict(tags))
 
+
+_ACTIVE_RUN_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (
+    DagsterRunStatus.QUEUED,
+    DagsterRunStatus.NOT_STARTED,
+    DagsterRunStatus.MANAGED,
+    DagsterRunStatus.STARTING,
+    DagsterRunStatus.STARTED,
+    DagsterRunStatus.CANCELING,
+)
 
 _CONTINUATION_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.operation_key": MOIS_LOAD_JOB_NAME,
@@ -471,11 +669,20 @@ def mois_load_continuation_sensor(
     - 성공했고 ``budget_exhausted``면 같은 run_config(업종 선택 포함)로 다음 run을 요청한다.
       ``run_key``가 직전 run id라 같은 run에 대해 두 번 요청하지 않는다.
     """
-    runs = context.instance.get_runs(
+    owned = {"kor_travel_map.operation_key": MOIS_LOAD_JOB_NAME}
+    # 마지막 run만 보면 schedule tick이 막 띄운 run(아직 목록 맨 앞이 아닌 queued)을 놓칠 수
+    # 있다. 미종료 run이 하나라도 있으면 띄우지 않는다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1,
+    # run 단위)이 실행을 직렬화하고 재개형이라 뒤 run은 건너뛰기만 한다 — 이것은 낭비 방지다.
+    active = context.instance.get_runs(
         filters=map_owned_runs_filter(
-            job_name=MOIS_LOAD_JOB_NAME,
-            tags={"kor_travel_map.operation_key": MOIS_LOAD_JOB_NAME},
+            job_name=MOIS_LOAD_JOB_NAME, statuses=_ACTIVE_RUN_STATUSES, tags=owned
         ),
+        limit=1,
+    )
+    if active:
+        return SkipReason(f"MOIS 적재 run {active[0].run_id}이 아직 끝나지 않았다")
+    runs = context.instance.get_runs(
+        filters=map_owned_runs_filter(job_name=MOIS_LOAD_JOB_NAME, tags=owned),
         limit=1,
     )
     return mois_load_continuation_decision(runs[0] if runs else None)
@@ -494,6 +701,12 @@ def mois_load_continuation_decision(last: Any) -> RunRequest | SkipReason:
         )
     if last.tags.get(MOIS_LOAD_OUTCOME_TAG) != MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED:
         return SkipReason(f"마지막 MOIS 적재 run {last.run_id}이 선택 범위를 끝냈다")
+    if last.tags.get(MOIS_LOAD_CONVERTED_TAG) == "0":
+        # 상한까지 건너뛰기만 하다 멈췄다 — 같은 run_config로 다시 띄워도 같은 자리에서 멈춘다.
+        return SkipReason(
+            f"마지막 MOIS 적재 run {last.run_id}이 새 행을 하나도 적재하지 못하고 상한에 "
+            "닿았다 — 이어 달려도 전진하지 않는다. 시간 상한을 늘리거나 원인을 본다."
+        )
     return RunRequest(
         run_key=f"mois-continue:{last.run_id}",
         run_config=dict(last.run_config or {}),

@@ -1,3 +1,22 @@
+## 2026-10-12 — MOIS ADR-108 적대 리뷰 MED 4건·LOW 반영: 브랜치 `feat/mois-chunked-resumable-load`
+
+- **MED-1 소실 하한.** chunk마다 재던 drop 비율 하한을 끄고(`enforce_loss_guard=False`) 업종 누적·최소 표본 200행에서
+  데이터 무효(`missing_address`)만 판정한다. 지오코더 원인(`reverse_geocode_failed`)은 따로 세고(다음 run이 다시 변환),
+  geo가 최근 20건+ 중 80%+를 빈 답으로 내면 chunk 적재 전 upstream 장애로 실패한다(`PrefetchingReverseGeocoder`의
+  최근 창 50건).
+- **MED-2 재관측 충돌.** `ProviderEntityReobservationConflict`를 잡아 그 chunk만 run 안에서 최대 2회 다시 확인·적재.
+- **MED-3 시간 기준.** run record `start_time`부터 재고, `min(설정, dagster/max_runtime tag - 30분)`. settings 최대값과
+  job run 상한의 관계를 테스트로 고정.
+- **MED-4 큐.** 정본 `core.feature_operation.DEDICATED_JOB_ONLY_OPERATION_KEYS`. MOIS뿐인 enqueue는 409
+  `PROVIDER_DEDICATED_JOB_ONLY`, 섞인 요청은 실행 계획에서 빼고 `done` + error_message, 실행할 것이 MOIS뿐이면
+  `failed` + cache target event `error_code=PROVIDER_DEDICATED_JOB_ONLY`(기존 실패 어휘). OpenAPI 409 설명·admin 타입 갱신.
+  router 테스트의 큐 sample operation을 MOIS에서 khoa로 바꿨다(MOIS는 이제 큐로 받지 않는다).
+- **LOW.** 이어 달리기: 미종료 run 재확인, 0행 전진이면 정지. sync 성공 = 봉인 조건(`authoritative`).
+- 검증(로컬 py3.13 venv, n150 미사용): ruff·mypy strict(core/api/dagster)·lint-imports 통과. 관련 unit/api/dagster/lint
+  테스트 MOIS 34·executor+provider+prefetch 52·dagster 관련 109·API router 163·API 관련 249·lint 175 passed.
+  mutation 8건(chunk 하한 재활성·충돌 재시도 제거·step 시계·장애 판정 제거·0행 정지 제거·활성 run 재확인 제거 등) 전부 RED.
+  통합 테스트는 돌리지 않았다(GitHub CI가 게이트).
+
 ## 2026-10-12 — MOIS 재개형 chunk commit 적재(ADR-108): 브랜치 `feat/mois-chunked-resumable-load`
 
 소유자가 2026-10-12에 MOIS 적재 재구성을 승인했다(prod `1a3c4673` 읽기 전용 조사: 42업종 약 98만 행, 순차 역지오코딩

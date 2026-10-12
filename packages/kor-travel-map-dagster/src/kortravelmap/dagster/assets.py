@@ -931,7 +931,8 @@ async def run_feature_place_mois_licenses(
         strict_address=strict_address,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    if outcome.complete and outcome.full_coverage:
+    # 봉인과 같은 조건이다 — 본 record가 0건인 "완료"는 sync 성공이 아니다.
+    if outcome.authoritative:
         await _record_feature_sync_success(
             context,
             client,

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import DagsterRunStatus, DefaultSensorStatus, RunRequest, SkipReason
+from dagster import DagsterRunStatus, DefaultSensorStatus, Failure, RunRequest, SkipReason
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.dto import Address, Coordinate, FeatureBundle
 from kortravelmap.infra.feature_repo import (
@@ -39,6 +39,15 @@ from kortravelmap.dagster.mois_chunked_load import (
     mois_load_continuation_decision,
     resolve_mois_load_plan,
 )
+
+pytestmark = [
+    # Definitions를 로드하는 검사가 있다 — sensor `owners`의 BetaWarning을 루트 설정
+    # (경고=오류)에서도 무시한다. tests/lint의 run completion gate 검사와 같은 필터다.
+    pytest.mark.filterwarnings(
+        "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
+        ".*:dagster_shared.utils.warnings.BetaWarning"
+    ),
+]
 
 _FETCHED = datetime(2026, 10, 12, 4, 35, tzinfo=UTC)
 
@@ -122,6 +131,8 @@ class _FakeDb:
     crash_on_commit: int | None = None
     """N번째(1부터) chunk transaction에서 절반을 쓴 뒤 죽는다."""
     seals: int = 0
+    conflicts: int = 0
+    """다음 N개 chunk transaction을 "확인 뒤 entity가 바뀌었다"로 되돌린다."""
 
 
 class _FakeClient:
@@ -156,6 +167,9 @@ class _FakeClient:
     ) -> FeatureLoadResult:
         del provider, dataset_key, source_entity_type, observed_at
         self._transactions += 1
+        if self.db.conflicts > 0:
+            self.db.conflicts -= 1
+            raise ProviderEntityReobservationConflict("dedup moved an entity mid-chunk")
         staged = dict(self.db.current)  # transaction-local
         for key, value in reobserved_payload_hashes.items():
             if staged.get(key) != value:
@@ -207,14 +221,27 @@ class _FakeClient:
 
 
 class _Geocoder:
-    def __init__(self, *, fail_at_lon: float | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_at_lon: float | None = None,
+        empty_at_lon: float | None = None,
+        always_empty: bool = False,
+    ) -> None:
         self.calls: list[Coordinate] = []
         self._fail_at_lon = fail_at_lon
+        self._empty_at_lon = empty_at_lon
+        self._always_empty = always_empty
 
     async def __call__(self, coord: Coordinate) -> Address:
         self.calls.append(coord)
-        if self._fail_at_lon is not None and abs(float(coord.lon) - self._fail_at_lon) < 1e-9:
+        lon = float(coord.lon)
+        if self._fail_at_lon is not None and abs(lon - self._fail_at_lon) < 1e-9:
             raise TimeoutError("kor-travel-geo ReadTimeout")
+        if self._always_empty or (
+            self._empty_at_lon is not None and abs(lon - self._empty_at_lon) < 1e-9
+        ):
+            return Address()  # geo가 답은 했지만 법정동코드가 없다
         return Address(bjd_code="1111010100", sigungu_code="11110", sido_code="11")
 
 
@@ -257,18 +284,20 @@ async def _run(
     converted: _Converted | None = None,
     plan: MoisLoadPlan | None = None,
     clock: Any = None,
+    strict_address: str = "off",
+    context: Any = None,
 ) -> chunked.MoisChunkedLoadOutcome:
     kwargs: dict[str, Any] = {}
     if clock is not None:
         kwargs["clock"] = clock
     return await load_mois_license_records_chunked(
-        context=cast(Any, _Context()),
+        context=cast(Any, context or _Context()),
         client=cast(Any, _FakeClient(db)),
         records=records,
         plan=plan or _plan(),
         fetched_at=_FETCHED,
         dataset_key="mois_license_features_bulk",
-        strict_address="off",
+        strict_address=strict_address,
         reverse_geocoder=geocoder,
         convert=converted or _Converted(),
         **kwargs,
@@ -648,3 +677,191 @@ async def test_queue_runner_refuses_mois_for_every_scope_type() -> None:
         assert result.status == "skipped"
         assert result.metadata["skip_reason"] == "dedicated_job_only"
     assert called == []
+
+
+# -- 소실 하한·geo 장애 (적대 리뷰 MED-1) ------------------------------------------
+
+
+def _slug_records(slug: str, count: int, **overrides: Any) -> list[_Record]:
+    return [
+        _Record(service_slug=slug, mng_no=f"{slug[:3]}-{i:04d}", **overrides)
+        for i in range(count)
+    ]
+
+
+async def test_one_geocode_miss_in_a_tail_chunk_drops_that_row_and_the_run_completes() -> None:
+    """꼬리 chunk(1행)의 역지오코딩 실패 한 건이 run을 멈추면 이어 달리기가 영구히 막힌다."""
+    records = [
+        _Record(service_slug="yacht_marinas", mng_no=f"y-{i}", lon=126.97 + i / 1000, lat=37.56)
+        for i in range(4)  # chunk 3 + 꼬리 1
+    ]
+    db = _FakeDb()
+
+    outcome = await _run(
+        records, db, geocoder=_Geocoder(empty_at_lon=126.973), strict_address="drop"
+    )
+
+    assert outcome.complete
+    assert outcome.dropped_count == 1
+    assert set(db.current) == {license_source_entity_id(r) for r in records[:3]}
+
+
+async def test_geo_returning_empty_answers_is_an_upstream_outage_not_a_data_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """geo가 빈 답만 내면 행을 버리며 진행하지 않는다 — chunk를 적재하기 전에 멈춘다."""
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 30)
+    records = [
+        _Record(service_slug="bakeries", mng_no=f"b-{i:03d}", lon=126.9 + i / 1000, lat=37.5)
+        for i in range(25)
+    ]
+    db = _FakeDb()
+
+    with pytest.raises(Failure, match="upstream"):
+        await _run(records, db, geocoder=_Geocoder(always_empty=True), strict_address="drop")
+
+    assert db.commits == [], "장애 판정 전에 행을 버린 chunk를 commit했다"
+
+
+async def test_data_invalid_drops_fail_the_slug_only_past_the_minimum_sample() -> None:
+    no_location = {"lon": None, "lat": None, "road_address": None, "lot_address": None}
+    small = _slug_records("yacht_marinas", 10, **no_location)
+    outcome = await _run(small, _FakeDb(), geocoder=_Geocoder(), strict_address="drop")
+    assert outcome.complete, "작은 업종은 표본이 모자라 판정하지 않는다(행 단위 finding만)"
+    assert outcome.dropped_count == 10
+
+    large = _slug_records("bakeries", chunked.LOSS_GUARD_MIN_SAMPLE + 10, **no_location)
+    db = _FakeDb()
+    with pytest.raises(Failure, match="bakeries"):
+        await _run(large, db, geocoder=_Geocoder(), strict_address="drop")
+    assert db.commits, "표본이 모이기 전 chunk는 정상적으로 commit된다"
+
+
+def test_geocode_drops_are_counted_apart_from_data_invalid_drops() -> None:
+    import asyncio
+
+    bundles = asyncio.run(
+        license_records_to_bundles(
+            [
+                _Record(service_slug="bakeries", mng_no="g", lon=126.9, lat=37.5),
+                _Record(service_slug="bakeries", mng_no="m", lon=None, lat=None),
+            ],
+            fetched_at=_FETCHED,
+            dataset_key="mois_license_features_bulk",
+            reverse_geocoder=_Geocoder(always_empty=True),
+        )
+    )
+    assert chunked._drop_counts(bundles, mode="drop") == (1, 1)  # noqa: SLF001
+    assert chunked._drop_counts(bundles, mode="off") == (0, 0)  # noqa: SLF001
+
+
+# -- 재관측 충돌 (적대 리뷰 MED-2) ------------------------------------------------
+
+
+async def test_reobservation_conflict_redoes_only_that_chunk_in_process() -> None:
+    records = _snapshot(per_slug=4)
+    db = _FakeDb()
+    await _run(records, db, geocoder=_Geocoder())
+
+    db.conflicts = chunked.REOBSERVATION_CONFLICT_RETRIES
+    outcome = await _run(records, db, geocoder=_Geocoder())
+
+    assert outcome.complete
+    assert set(db.current) == {license_source_entity_id(r) for r in records}
+    assert outcome.chunks_committed == 4
+
+
+async def test_persistent_reobservation_conflict_still_fails_after_bounded_retries() -> None:
+    db = _FakeDb(conflicts=chunked.REOBSERVATION_CONFLICT_RETRIES + 1)
+
+    with pytest.raises(ProviderEntityReobservationConflict):
+        await _run(_snapshot(per_slug=4), db, geocoder=_Geocoder())
+    assert db.commits == []
+
+
+# -- run 시계 (적대 리뷰 MED-3) ----------------------------------------------------
+
+
+class _RunContext(_Context):
+    """실제 run처럼 run 시작 시각과 run 상한 tag를 갖는 context."""
+
+    def __init__(self, *, started_at: float, max_runtime: int) -> None:
+        super().__init__()
+        self.run_id = "run-1"
+        self.run = SimpleNamespace(tags={"dagster/max_runtime": str(max_runtime)})
+        self.instance = SimpleNamespace(
+            get_run_record_by_id=lambda _run_id: SimpleNamespace(start_time=started_at),
+            add_run_tags=lambda *_a, **_k: None,
+        )
+
+
+async def test_budget_is_measured_from_run_start_not_step_start() -> None:
+    """Phase A sync(resource init)와 step 재시도가 쓴 시간은 상한에서 빠진다."""
+    now = 1_000_000.0
+    clock = _Clock(step=10)
+    clock.now = now
+    context = _RunContext(started_at=now - 14_390, max_runtime=21_600)
+
+    outcome = await _run(
+        _snapshot(per_slug=7), _FakeDb(), geocoder=_Geocoder(), clock=clock, context=context
+    )
+
+    assert not outcome.complete
+    assert outcome.chunks_committed == 1
+
+
+def test_effective_budget_is_capped_by_the_run_max_runtime_minus_margin() -> None:
+    margin = chunked.RUN_FINAL_MARGIN_SECONDS
+    assert chunked.effective_run_budget_seconds(14_400, None) == 14_400
+    assert chunked.effective_run_budget_seconds(14_400, 21_600) == 14_400
+    assert chunked.effective_run_budget_seconds(19_800, 21_600) == 21_600 - margin
+    assert chunked.effective_run_budget_seconds(19_800, 7_200) == 7_200 - margin
+
+
+def test_settings_budget_ceiling_is_derived_from_the_job_run_cap() -> None:
+    """settings 최대값 = 이 job의 run 상한 tag - 여유. 둘이 갈라지면 여기서 빨개진다."""
+    from kortravelmap.dagster.definitions import defs
+
+    job = defs.resolve_job_def(chunked.MOIS_LOAD_JOB_NAME)
+    run_cap = int(job.tags["dagster/max_runtime"])
+    field_info = KorTravelMapSettings.model_fields["mois_load_run_budget_seconds"]
+    le = next(m.le for m in field_info.metadata if hasattr(m, "le"))
+    assert le == run_cap - chunked.RUN_FINAL_MARGIN_SECONDS
+
+
+# -- 이어 달리기 sensor LOW ---------------------------------------------------------
+
+
+def test_continuation_stops_when_the_last_run_made_no_progress() -> None:
+    decision = mois_load_continuation_decision(
+        _Run(
+            DagsterRunStatus.SUCCESS,
+            {
+                MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED,
+                chunked.MOIS_LOAD_CONVERTED_TAG: "0",
+            },
+        )
+    )
+    assert isinstance(decision, SkipReason)
+
+
+def test_continuation_sensor_waits_while_any_mois_run_is_active() -> None:
+    from dagster import build_sensor_context
+
+    budget_stopped = _Run(
+        DagsterRunStatus.SUCCESS,
+        {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED},
+    )
+    queued = _Run(DagsterRunStatus.QUEUED, run_id="run-2")
+
+    class _Instance:
+        def get_runs(self, *, filters: Any, limit: int) -> list[_Run]:
+            del limit
+            return [queued] if filters.statuses else [budget_stopped]
+
+    from kortravelmap.dagster.mois_chunked_load import mois_load_continuation_sensor
+
+    context = build_sensor_context()
+    object.__setattr__(context, "_instance", _Instance())
+    result = mois_load_continuation_sensor._raw_fn(context)  # noqa: SLF001
+    assert isinstance(result, SkipReason)

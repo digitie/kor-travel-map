@@ -17,7 +17,11 @@ from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.feature_operation import (
+    DEDICATED_JOB_ONLY_OPERATION_KEYS,
+    DEDICATED_JOB_ONLY_SKIP_REASON,
+    ProviderDatasetOperationMembership,
+)
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
@@ -123,18 +127,6 @@ _COMMON_RESOURCE_KEYS: Final[set[str]] = {
 
 _MISSING: Final = object()
 
-DEDICATED_JOB_ONLY_OPERATION_KEYS: Final[frozenset[str]] = frozenset(
-    {"feature_place_mois_licenses_job"}
-)
-"""큐로는 실행하지 않고 **전용 Dagster job으로만** 도는 operation (ADR-108).
-
-큐 runner는 asset의 client 호출을 executor가 소유한 transaction **하나**에 결합한다
-(:func:`_bind_client_to_session`). MOIS 재개형 적재는 chunk마다 commit해야 성립하므로 이
-경로에서는 98만 행이 다시 한 transaction이 된다 — 늦은 실패가 전부를 되감고, run 상한 안에
-끝나지도 않는다. 게다가 MOIS fetcher는 scope를 보지 않으므로 반경 하나짜리 targeted 요청도
-전국 적재가 된다. 그래서 scope 종류와 무관하게 건너뛰고, 적재는
-``feature_place_mois_licenses_job``(schedule·이어 달리기 sensor·수동 launch)이 맡는다.
-"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +249,8 @@ class FeatureUpdateAssetRunner:
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
         if scope.operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+            # 방어선이다 — 실행 계획(``feature_update_executor._skip_reason``)이 이미 이
+            # operation을 건너뛰므로 정상 경로에서는 여기 오지 않는다(ADR-108).
             log_info = getattr(self._log, "info", None)
             if callable(log_info):
                 log_info(
@@ -277,7 +271,7 @@ class FeatureUpdateAssetRunner:
                     "provider": scope.provider,
                     "dataset_key": scope.dataset_key,
                     "skipped": True,
-                    "skip_reason": "dedicated_job_only",
+                    "skip_reason": DEDICATED_JOB_ONLY_SKIP_REASON,
                     "scope_type": scope.scope_type,
                 },
             )

@@ -29,6 +29,19 @@ DagsterFeatureOperationBlockReason: TypeAlias = Literal["cancellation", "termina
 FEATURE_OPERATION_ROOT_KIND = "provider_feature_load_run"
 FEATURE_OPERATION_MEMBER_KIND = "provider_feature_load"
 FEATURE_UPDATE_REQUEST_JOB_KIND = "feature_update_request"
+
+DEDICATED_JOB_ONLY_OPERATION_KEYS: frozenset[str] = frozenset(
+    {"feature_place_mois_licenses_job"}
+)
+"""feature update 큐로는 실행하지 않고 **전용 Dagster job으로만** 도는 operation (ADR-108).
+
+큐 runner는 provider 쓰기를 executor transaction 하나에 묶는다. MOIS 재개형 적재는 chunk마다
+commit해야 성립하므로 큐로는 돌 수 없다. 이 집합이 API enqueue 거부, 실행 계획의 skip 사유,
+Dagster 큐 runner의 방어 skip이 함께 읽는 단일 정본이다.
+"""
+
+DEDICATED_JOB_ONLY_SKIP_REASON = "dedicated_job_only"
+"""실행 계획이 위 operation을 건너뛸 때 ``skipped_provider_scopes[].reason`` 값."""
 C6C_CANCEL_PROBE_JOB_KIND = "c6c_cancel_probe"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
     {
@@ -166,6 +179,8 @@ class FeatureOperationInvariantConflict(RuntimeError):
 
 
 __all__ = [
+    "DEDICATED_JOB_ONLY_OPERATION_KEYS",
+    "DEDICATED_JOB_ONLY_SKIP_REASON",
     "DAGSTER_FEATURE_ACTIVE_STATUS_VALUES",
     "DAGSTER_FEATURE_RUN_STATUS_VALUES",
     "DAGSTER_FEATURE_TERMINAL_STATUS_VALUES",
