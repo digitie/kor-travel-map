@@ -3,8 +3,9 @@
 > **퇴역(2026-10-01, ADR-104).** Map은 KMA를 적재하지 않는다 — KMA는 kor-travel-weather가
 > 소유하고, Map Dagster에서 이 문서가 설명하는 job·asset·schedule·resource·큐 runner spec은
 > 전부 제거됐으며 DB 카탈로그의 KMA 적재 operation은 `401_retire_map_kma_refresh`로 꺼졌다.
-> 남은 것은 `kortravelmap.providers.kma`의 변환·정체성 계약(이미 적재된 KMA feature 읽기,
-> `/ops/datasets` fixture preview)뿐이다. 아래 본문은 **기록**이다 — 운영 절차로 읽지 말 것.
+> 이어서 ADR-105(2026-10-01)가 `kortravelmap.providers.kma` 변환 모듈·KMA preview fixture·weather
+> 데이터와 전용 스키마(migration `402`)까지 지웠다 — Map에 남은 KMA 코드 경로는 없다(kind/enum
+> 정의와 provider alias만 남는다). 아래 본문은 **기록**이다 — 운영 절차로 읽지 말 것.
 
 본 문서는 KMA(`python-kma-api`)의 4종 weather endpoint를 `WeatherValue`로
 적재하는 ETL이다. 표준 metric_key / forecast_style / timeline_bucket 매핑은

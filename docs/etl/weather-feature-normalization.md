@@ -1,5 +1,11 @@
 # weather-feature-normalization.md — weather 정규화
 
+> **제거(2026-10-01, ADR-104/105).** Map은 weather feature를 적재·저장·조회하지 않는다. 이 문서가 정의한
+> `feature.feature_weather_values`·`current_weather_summary`는 migration `402`가 DROP했고, weather 적재
+> 경로(KMA·AirKorea·휴게소 기상·산악기상·산불위험)와 REST 표면도 지워졌다. 남은 것은 정의(`FeatureKind.WEATHER`,
+> `dto.weather.WeatherValue`, `WeatherDomain`/`ForecastStyle`/`TimelineBucket` enum)뿐이다. 날씨 정본은
+> kor-travel-weather다. 아래 본문은 **기록**이다.
+
 본 문서는 여러 provider의 날씨/대기/지수 데이터를 KMA 시간축 기준 단일
 `WeatherValue` + `feature_weather_values` table로 정규화하는 규약이다. PinVi는
 별도 weather DB를 만들지 않고 이 계약을 그대로 사용한다.

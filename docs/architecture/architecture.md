@@ -82,7 +82,7 @@ JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
 - 메인 패키지 내 화살표를 거스르는 import는 `import-linter`로 CI에서 차단
   (ADR-002 / 7). `kortravelmap.api`는 별도 API distribution이며 메인 계층 계약
   밖에 있다(ADR-055).
-- `core/`는 순수 도메인 로직(`scoring`/`dedup`/`ids`/`weather`)이며 DB·FastAPI·
+- `core/`는 순수 도메인 로직(`scoring`/`dedup`/`ids`; `weather`는 ADR-105로 제거)이며 DB·FastAPI·
   네트워크 의존이 없다. repository 구현은 `infra/`(`feature_repo`/`source_repo`/
   `sync_repo`/`jobs_repo`/`file_store`)에 있고 `client.py`가 조립한다. (초기 설계의
   core-side Repository Protocol 주입은 현재 미구현 — 구체 infra repo를 직접 쓴다.)
@@ -191,7 +191,7 @@ OpenAPI 연동 규칙은 `docs/architecture/openapi-admin-contract.md` §9,
 [provider API] → python-*-api client (raw + typed model)
               → providers/<name>.py (순수 변환)
               → dto.FeatureBundle (Feature + Detail + SourceRecord + SourceLink
-                + FeatureFileSource + (optional) WeatherValue / PriceValue)
+                + FeatureFileSource + (optional) PriceValue)
               → core.load_pipeline (validation, dedup blocking, FeatureFileSource
                 업로드)
               → infra.repos (raw SQL upsert; bulk는 COPY)
@@ -214,7 +214,7 @@ OpenAPI 연동 규칙은 `docs/architecture/openapi-admin-contract.md` §9,
 
 - `feature` — `features`, `feature_*_details`, `feature_files`,
   `feature_opening_periods`, `feature_special_days`,
-  `feature_weather_values`, `feature_price_values`,
+  `feature_price_values` (`feature_weather_values`는 ADR-105 migration `402`로 DROP),
   `feature_merge_history`, `feature_overrides`.
 - `provider_sync` — `source_records`, `source_links`, `provider_sync_state`.
 - `ops` — `import_jobs`, `dedup_review_queue`, `feature_merge_history`,
@@ -234,7 +234,7 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 |------|------|
 | `dto/feature.py` | `Feature`, `FeatureKind`, `FeatureStatus`, `FeatureUrls` |
 | `dto/place.py`, `dto/event.py`, `dto/notice.py`, `dto/route.py`, `dto/area.py` | `PlaceDetail`, `EventDetail`, `NoticeDetail`, `RouteDetail`, `AreaDetail` (kind별 파일) |
-| `dto/weather.py` | `WeatherValue`, `ForecastStyle`, `TimelineBucket`, `WeatherDomain` |
+| `dto/weather.py` | `WeatherValue`, `ForecastStyle`, `TimelineBucket`, `WeatherDomain` — 정의만 유지(ADR-105, 적재·조회 경로 없음) |
 | `dto/price.py` | `PriceValue` (`kind=price` anchor feature에 연결되는 시계열 값) |
 | `dto/source.py` | `SourceRecord`, `SourceLink`, `SourceRole`, `RawDataRef` |
 | `dto/file.py` | `FeatureFile`, `FeatureFileSource` |
@@ -243,7 +243,6 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 | `core/ids.py` | `make_feature_id`, `make_source_record_key`, `make_payload_hash` |
 | `core/providers.py` | `CANONICAL_PROVIDER_NAMES`, `normalize_provider_name` |
 | `core/scoring.py` | Record Linkage scoring + `normalize_kr_place_name` |
-| `core/weather.py` | `build_weather_card`, `latest_weather_values` |
 | `core/types.py` | KST tzinfo·`kst_now` 등 시간 헬퍼 re-export shim (Repository Protocol 정의는 현재 없음) |
 | `core/exceptions.py` | 도메인 예외 |
 | `settings.py` (top-level) | Pydantic settings (`KOR_TRAVEL_MAP_*`, `SecretStr`) |
@@ -278,14 +277,14 @@ kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), �
 | ADR-007 | Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 채택 |
 | ADR-008 | PostGIS extension은 `x_extension` schema 격리 |
 | ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) |
-| ADR-010 | weather: `forecast_style` + `timeline_bucket` 분리 |
+| ADR-010 | weather: `forecast_style` + `timeline_bucket` 분리 (정의만 유지 — 기능은 ADR-105로 제거) |
 | ADR-011 | 작업 큐는 `import_jobs` 영속화, advisory lock + SKIP LOCKED |
 | ADR-012 | 공간 쿼리는 입력 좌표 1회 변환, 반경은 `coord_5179`(meter) |
 | ADR-013 | bulk insert는 `psycopg.copy_*` 우선, 안전 마진 30k |
 | ADR-014 | 테스트 4단계 (unit/integration/e2e/fixture) + Coverage 목표 |
 | ADR-015 | 객체 저장소는 S3 호환만 가정, RustFS 1차, MinIO/Ceph/R2 swap |
 | ADR-016 | Record Linkage: blocking(`ST_DWithin 100m + bjd_code + kind`) → scoring(0.45/0.35/0.20) → 임계값 0.85/0.65 |
-| ADR-017/062 | 보관 정책: place 무기한, event +20y, notice +1y, weather 기본 3년, price 카테고리별 |
+| ADR-017/062 | 보관 정책: place 무기한, event +20y, notice +1y, price 카테고리별 (weather 3년 보존은 ADR-105로 기능째 제거) |
 | ADR-018 | `Feature.detail`은 자유 dict 금지 (`DETAIL_MODELS` 분기 강제) |
 | ADR-019 | KST aware datetime만 허용 (`kst_now()`) |
 | ADR-020 | 메인 라이브러리에서 FastAPI/Uvicorn 의존 분리 (ADR-005 위치 부분 supersede) |

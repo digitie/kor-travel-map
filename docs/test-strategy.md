@@ -260,7 +260,7 @@ async def test_all_required_indexes_exist(pg_engine):
     required = {
         "idx_features_coord_gist", "idx_features_coord_5179_gist",
         "idx_features_kind_category", "idx_features_name_trgm",
-        "idx_weather_feature_metric_time", "idx_price_values_observed_at_brin",
+        "idx_price_values_observed_at_brin",  # weather 인덱스는 ADR-105 402로 DROP
         # ... 전체 목록
     }
     async with pg_engine.connect() as conn:
@@ -526,6 +526,10 @@ UUID·strong ETag·version을 보강한다. 모든 DELETE/cleanup은 직전 exac
 `live_revision >= dataset_projection_revision`을 확인한다. 최종 read-only 검증은 각 자연키의
 exact RFC7807 `404 application/problem+json`과 owned external-system active list 0을 다시 확인한다.
 
+> **2026-10-01 — KMA lane 퇴역(ADR-104/105).** 아래 단락 중 KMA request·KMA exact pair·KMA journal·
+> KMA cursor를 다루는 계약은 KMA exact-scope 3-spec과 함께 지워진 경로의 **기록**이다. 현재 C7 blocking
+> gate는 `docs/runbooks/c7-prod-live-e2e.md` 머리말이 정본이다. POI target·journal·lock 일반 계약은 유효하다.
+
 KMA request 전에는 owned external-system의 active target 전체 key/UUID/ETag 집합을 journal과 exact
 비교한다. 실행·event 다음 페이지는 request의 provider/dataset/sync_scope/cursor와 response item
 tuple·`next_cursor`를 함께 검증한다. `route.fetch()`를 사용하는 interception은 handler in-flight
@@ -599,10 +603,6 @@ tests/fixtures/
     heritage_place_natural_monument.json
     heritage_area_with_boundary.json
     heritage_event_monthly.json
-  kma/
-    short_forecast_typical.json
-    short_forecast_sky_change.json
-    ultra_short_nowcast.json
   ...
 ```
 
@@ -731,7 +731,10 @@ def mask_sensitive(obj):
 | writer | offline validate/load/reserve, MOIS 3종, exact update member는 실컬럼+event pair; multi-scope/batch aggregate NULL; event mismatch 거부 |
 | 배포 | API/manual/backfill/schedule/sensor ingress 차단, active 0 drain, 두 번 backfill, Dagster 전 구성 재기동, 신 API/Dagster 정지 후 migration-image downgrade |
 
-### 7.3 Weather semantic UNIQUE cutover 회귀 (T-VN-17R)
+### 7.3 Weather semantic UNIQUE cutover 회귀 (T-VN-17R) — 기록
+
+> ADR-105 migration `402`가 `feature.feature_weather_values`를 DROP했다. 7.3·7.4는 당시 0060 cutover와
+> writer 회귀의 기록이며 현행 head에는 해당 표·writer가 없다.
 
 0060은 실제 migration을 0059 DB에 적용하는 두-connection 회귀로 검증한다. DELETE trigger의
 advisory gate로 dedup statement 내부를 결정적으로 멈춘 동안 다른 connection의 weather INSERT는
@@ -747,7 +750,7 @@ DB backend 종료와 bounded join 뒤에만 fresh DB를 drop한다. 기존 range
 전 `23514`, 현재 head에서 0060 아래로 향하는 downgrade는 descendant DDL 전에 schema/version/index
 무변경 fail-closed여야 한다. SQL 문자열 순서만 확인하는 테스트는 수용 증거가 아니다.
 
-### 7.4 Weather collected_at 단조 upsert 회귀 (T-VN-H09)
+### 7.4 Weather collected_at 단조 upsert 회귀 (T-VN-H09) — 기록
 
 head schema의 실제 `ON CONFLICT` writer에 같은 semantic tuple을 T1→T2와 T2→T1 순서로 각각
 적재한다. 두 순서 모두 최종 `collected_at/value`가 T2에 대응해야 하며, T2→T1 provider
@@ -792,7 +795,7 @@ backfill은 row `ctid`도 바꾸지 않아야 한다. 같은 `collected_at`에�
 ## 11. 부하/카오스 테스트 (nightly)
 
 - 100k feature seed → in-bounds 응답시간 < 200ms (p95)
-- 10k weather values bulk COPY → 10초 이내
+- 10k price values bulk COPY → 10초 이내 (weather 값 표는 ADR-105로 제거)
 - 1k import_jobs 동시 큐잉 → advisory lock 동작 확인
 - 동일 fixture를 10회 적재 → row count 변동 없음
 - Postgres 재시작 → `import_jobs` 재시작 시 running→failed 자동 마크

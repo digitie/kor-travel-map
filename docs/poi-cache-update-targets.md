@@ -1,5 +1,8 @@
 # poi-cache-update-targets.md - 외부 POI 기반 feature 캐시 갱신 타깃
 
+> 날씨·기상특보는 ADR-104/105로 Map에서 제거됐다 — 외부 앱의 날씨 캐시는 kor-travel-weather를
+> 쓴다. 아래 예시의 provider/dataset은 현행 dataset으로 바꿔 두었다(2026-10-13).
+
 본 문서는 ADR-045의 OpenAPI 기반 feature update request를 **외부 앱 POI 캐시
 갱신** 용도로 구체화한 사양이다. 대표 외부 앱은 PinVi지만, API는 특정 앱 이름에
 묶지 않고 `external_system` + `target_key`로 식별한다.
@@ -9,10 +12,9 @@
 외부 앱은 사용자가 저장한 POI 주변의 자주 바뀌는 데이터를 최신으로 유지하고 싶다.
 예:
 
-- 주변 날씨
 - 주변 유가
 - 주변 휴일/영업일 정보
-- 기상/재난 경고
+- 재난 경고(산사태 예보 등)
 - 교통 유고/공지
 - provider별 최신 상태가 필요한 주변 feature
 
@@ -113,7 +115,7 @@ provider마다 갱신 주기가 다르다. cache target에 등록되었다고 �
   `allow_targeted`를 기본값으로 둘 수 있다.
 - filedata 기반 provider는 기본값이 `follow_system`이다. POI 등록 여부로 파일 다운로드/
   파싱을 매번 트리거하지 않는다.
-- 날씨/유가/경고처럼 자주 바뀌는 provider는 최적 interval을 짧게 둘 수 있다.
+- 유가/경고처럼 자주 바뀌는 provider는 최적 interval을 짧게 둘 수 있다.
 - 문화유산/휴게소 장소 기본정보처럼 드물게 바뀌는 provider는 target 등록과 무관하게
   시스템 schedule이 기본이다.
 
@@ -275,12 +277,12 @@ BIGINT를 양수 10진 문자열로 표현하며 conflict는 현재 record/revis
 
 ```json
 {
-  "provider_repo": "F:/dev/python-kma-api",
+  "provider_repo": "F:/dev/python-krforest-api",
   "provider_commit": "abc123",
   "docs": ["docs/rate-limit.md", "src/.../config.py"],
   "official_docs_url": "https://...",
   "checked_at": "2026-06-01T12:00:00+09:00",
-  "notes": "초단기 예보는 ... 기준"
+  "notes": "data.go.kr 일일 트래픽은 오퍼레이션당 ... 기준"
 }
 ```
 
@@ -301,7 +303,7 @@ BIGINT를 양수 10진 문자열로 표현하며 conflict는 현재 record/revis
   "update_enabled": true,
   "refresh_policy": "provider_default",
   "provider_overrides": {
-    "python-kma-api:kma_ultra_short_nowcast": {
+    "kor-travel-transport:transport_rest_area_fuel_prices": {
       "targeted_policy": "allow_targeted"
     },
     "python-knps-api:knps_trails": {
@@ -509,7 +511,7 @@ relay event는 내지 않는다 — consumer는 fence 뒤 reconciliation으로 �
 - feature summary: `last_updated_at`
 - feature detail: `last_updated_at`
 - detail section: 가능하면 `detail_last_updated_at`
-- weather/price/source/file 관련 section: 각 item 또는 section에 `last_updated_at`
+- price/source/file 관련 section: 각 item 또는 section에 `last_updated_at`
 - cache target: `last_updated_at`, `last_refreshed_at`, `next_eligible_refresh_at`
 - update request: `created_at`, 정수 `generation`; canonical job: `created_at`,
   `started_at`, `heartbeat_at`, `finished_at`
@@ -519,7 +521,7 @@ DB 규칙:
 - `feature.features.updated_at`은 feature summary의 `last_updated_at` 정본이다.
 - source 기반 갱신은 `provider_sync.source_records.imported_at` 또는 관련 row
   `updated_at`을 함께 갱신한다.
-- weather/price처럼 시계열 row는 `observed_at`/`valid_at`과 별개로 적재/갱신 시각을
+- price처럼 시계열 row는 `observed_at`/`valid_at`과 별개로 적재/갱신 시각을
   API에서 알 수 있어야 한다. 기존 스키마에 `updated_at`이 없으면 migration 후보로
   추가한다.
 - API는 naive datetime을 반환하지 않는다.
@@ -550,7 +552,7 @@ DB 규칙:
 상세 API:
 
 - `GET /features/{feature_id}`에서 `detail`, `address`, `urls`, source summary,
-  file summary, 관련 weather/price 최신값, JSON 추가 데이터를 반환한다.
+  file summary, 관련 price 최신값, JSON 추가 데이터를 반환한다.
 - raw payload 전체는 운영자용 toggle 또는 별도 `/features/{id}/sources`에서만
   노출한다.
 
