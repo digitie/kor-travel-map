@@ -20,7 +20,17 @@
   운영은 Manager 브랜치 `feat/map-mois-source-volume`(internal named volume, 경로·target 같은 변수).
 - **검증 경로.** run_config `resources.mois_load_plan.config.{service_slugs, run_budget_seconds}`. 절차는
   `docs/etl/mois-license-feature-etl.md` §13.2.
-- 테스트: (n150 결과는 아래 resume 절에 기록)
+- 테스트(n150, python:3.13, `-c docker/constraints-dagster.txt`, CI 세션 경계 그대로):
+  - 정적: `ruff check`(CI 범위) 통과, `mypy --strict` core 153·api 67·dagster 30 파일 이슈 0, `lint-imports` 4 kept.
+  - A unit+lint: 3056 passed / 26 failed — 같은 컨테이너의 main(`bcbd14c2`) 기준선과 실패 집합 동일(docker CLI·node·git 소유권
+    환경 25건) + `test_orchestrator_guardian_lock_is_not_inherited_by_external_child` 1건(flock/SIGKILL 타이밍 — 부하 중 같은
+    컨테이너에서 2/3 실패, 별도 컨테이너에서 4/4 통과, main도 통과; MOIS 무관).
+  - B api: 1236 passed, coverage 78.1%(≥70). C dagster: 626 passed·4 skipped, coverage 82.9%(≥80), `mois_chunked_load.py` 95%.
+  - 새 통합 `test_mois_resumable_load_repo.py`: 실 PostGIS 4 passed. 전체 D는 n150 IO 포화(`/proc/pressure/io` full avg300 ≈44%,
+    `map-load-phase14` 적재 중)로 PostGIS testcontainer가 120초 안에 뜨지 못해 setup error — 두 번. 부하를 더하지 않으려 중단하고
+    IO가 가라앉으면 도는 user unit `mois-gate-d-ready`로 넘겼다(로그 `~/mois-gate-logs/d3-*`). GitHub CI가 정본 게이트다.
+  - 실제 python-mois-api(3cdee09)를 깐 상태에서 fetcher 업종 선택 테스트 포함 4 passed(CI는 `providers` extra를 깔지 않아 skip).
+  - mutation(일부러 깨기): 재개 건너뛰기 제거 → 4건 RED, 선조회 동시성 1로 → 1건 RED, 시간 상한 제거 → 3건 RED. 모두 원복.
 
 ## 2026-10-08 — map-marker-react `roadblock`·`warning` 글리프: 브랜치 `feat/marker-roadblock-symbol`
 
