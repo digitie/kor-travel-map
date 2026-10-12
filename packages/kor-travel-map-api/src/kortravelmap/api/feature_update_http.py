@@ -8,7 +8,19 @@ from fastapi import HTTPException, status
 
 from kortravelmap.api import feature_update_service
 
-__all__ = ["FEATURE_UPDATE_CONFLICT_RESPONSES", "to_http_exception"]
+__all__ = [
+    "FEATURE_UPDATE_CONFLICT_RESPONSES",
+    "FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION",
+    "to_http_exception",
+]
+
+FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION: Final[str] = (
+    "Idempotency-Key body 불일치, 동일 effective scope의 다른 활성 요청, "
+    "LOCK_BUSY(이 경우에만 Retry-After header 포함) 또는 "
+    "전용 Dagster job으로만 갱신하는 dataset뿐인 계획(PROVIDER_DEDICATED_JOB_ONLY, "
+    "details.dagster_jobs에 실행할 job)"
+)
+"""생성 route의 409 설명 — 이 route가 실제로 내는 409 전부(ADR-108)."""
 
 FEATURE_UPDATE_CONFLICT_RESPONSES: Final[dict[int | str, dict[str, Any]]] = {
     409: {
@@ -72,6 +84,15 @@ def to_http_exception(
                     "status": exc.current_status,
                     "detail_url": (f"/v1/ops/pipeline/executions/update_request/{exc.request_id}"),
                 },
+            },
+        )
+    if isinstance(exc, feature_update_service.FeatureUpdateDedicatedJobOnly):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "details": {"dagster_jobs": list(exc.operation_keys)},
             },
         )
     if isinstance(exc, feature_update_service.FeatureUpdateRequestNotFound):

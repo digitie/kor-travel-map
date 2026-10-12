@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "ccec0fd05d2e5fea6ab46192e7ac1a3f08d9b0137cefcd92672be794f4f95294"
+      "sha256": "54dbc8b1c07cfc80662dd97c550438a5d97fb52d1349841546c236907a1be693"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-10-12",
+      "task": "ADR-108 MOIS dedicated job",
+      "change": "admin baseline sha256 재고정 — `POST /v1/ops/pipeline/requests`의 409·502·503 응답 description 문자열만 바꿨다(MOIS 전용 job 409 `PROVIDER_DEDICATED_JOB_ONLY`, 옛 MOIS precheck 문구를 kor-travel-geo resolver 오류로). schema·operation·status code는 불변이고 user/service bytes와 목표 diff 항목·counts도 무변경이다."
+    },
     {
       "date": "2026-10-05",
       "task": "ADR-107 Common Dagster",

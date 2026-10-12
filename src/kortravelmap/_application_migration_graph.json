@@ -27,6 +27,12 @@
         "403_drop_kma_notice_lineage"
       ],
       "revision": "404_transport_provider_identity"
+    },
+    {
+      "down_revision": [
+        "404_transport_provider_identity"
+      ],
+      "revision": "405_mois_freshness_sla"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

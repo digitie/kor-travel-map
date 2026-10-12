@@ -76,6 +76,7 @@ __all__ = [
     "MoisSourceSyncSummary",
     "mois_localdata_source_sync_job",
     "mois_localdata_source_sync_op",
+    "read_mois_source_synced_at",
     "sync_mois_source_db",
 ]
 
@@ -353,6 +354,29 @@ def _write_sync_marker(
     finally:
         with contextlib.suppress(OSError):
             temporary.unlink(missing_ok=True)
+
+
+def read_mois_source_synced_at(db_path: str | None) -> datetime | None:
+    """마지막 **전국 full coverage** Phase A sync 시각(marker), 없거나 못 읽으면 ``None``.
+
+    재개형 적재(ADR-108)가 "이 원천 snapshot의 시각"으로 쓴다. 같은 snapshot을 다시
+    돌린 run은 이 시각보다 이미 새로 관측된 행을 다시 쓰지 않는다.
+    """
+    if db_path is None:
+        return None
+    try:
+        payload = json.loads(_sync_marker_path(db_path).read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("coverage") != MOIS_SOURCE_SYNC_FULL_COVERAGE:
+            return None
+        synced_at = payload.get("synced_at")
+        if not isinstance(synced_at, str):
+            return None
+        stamp = datetime.fromisoformat(synced_at)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
 
 
 def _source_db_is_fresh(db_path: str, ttl_hours: float) -> bool:

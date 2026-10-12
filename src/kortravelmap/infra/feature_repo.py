@@ -70,6 +70,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorTamperedError,
     FeatureSearchCursorVersionUnsupportedError,
 )
+from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import Address
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
@@ -109,6 +110,9 @@ __all__ = [
     "upsert_source_link",
     "load_bundle",
     "load_bundles",
+    "ProviderEntityReobservationConflict",
+    "find_unchanged_active_source_entities",
+    "reobserve_unchanged_source_entities",
     "load_authoritative_notice_snapshot",
     "load_notice_event_bundles",
     "retire_features_absent_from_snapshot",
@@ -3173,6 +3177,188 @@ async def load_bundles(
     for bundle in bundles:
         total = total.merge(await load_bundle(session, bundle))
     return total
+
+
+class ProviderEntityReobservationConflict(RuntimeError):
+    """재관측하려던 원천 entity가 확인 뒤에 바뀌었다 (ADR-108).
+
+    재개형 적재는 "이미 같은 payload로 적재돼 있다"고 확인한 entity를 변환하지 않고
+    관측만 전진시킨다. 확인과 기록 사이에 다른 쓰기가 끼어 그 사실이 깨졌으면 그
+    chunk를 통째로 되돌린다 — 다음 실행이 다시 확인하고 필요한 것만 적재한다.
+    """
+
+
+#: 이미 같은 payload로 적재되어 있고, 그 primary feature가 active인 entity.
+#:
+#: ``load_bundle``이 같은 record를 다시 받았을 때 **아무것도 바꾸지 않는** 조건과 같다.
+#: head의 current record가 같은 payload hash면 ``became_current``가 거짓이라 feature 본문을
+#: 다시 쓰지 않고, feature가 active면 provider lifecycle 전이도 없다. 그 경우 남는 효과는
+#: 관측 시각 전진뿐이고, 그것은 :data:`_REOBSERVE_UNCHANGED_SQL`이 맡는다.
+#: retired feature(재활성화 후보)나 head가 다른 payload를 가리키는 entity는 여기서 빠지므로
+#: 호출자가 평소 적재 경로로 보낸다. 읽는 표·열은 ``load_bundle``이 이미 읽는 것과 같다.
+_UNCHANGED_ACTIVE_ENTITIES_CTE: Final[str] = """
+wanted AS (
+    SELECT *
+    FROM unnest(
+        CAST(:source_entity_keys AS text[]),
+        CAST(:source_entity_ids AS text[]),
+        CAST(:raw_payload_hashes AS text[])
+    ) AS wanted(source_entity_key, source_entity_id, raw_payload_hash)
+), unchanged AS (
+    SELECT wanted.source_entity_key, wanted.source_entity_id
+    FROM wanted
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = wanted.source_entity_key
+    JOIN provider_sync.source_records AS record
+      ON record.source_record_key = head.current_source_record_key
+     AND record.raw_payload_hash = wanted.raw_payload_hash
+    WHERE EXISTS (
+        SELECT 1
+        FROM provider_sync.source_links AS link
+        JOIN feature.features AS feature
+          ON feature.feature_id = link.feature_id
+        WHERE link.source_entity_key = wanted.source_entity_key
+          AND link.source_role = 'primary'
+          AND feature.lifecycle_state = 'active'
+    )
+)
+"""
+
+_FIND_UNCHANGED_ACTIVE_ENTITIES_SQL: Final[str] = (
+    "WITH "
+    + _UNCHANGED_ACTIVE_ENTITIES_CTE
+    + "SELECT source_entity_id FROM unchanged"
+)
+
+#: 확인을 **같은 transaction 안에서** 다시 하고, 확인된 것만 관측 시각을 전진시킨다.
+#:
+#: ``observed_at``이 이미 그 시각 이상이면 쓰지 않는다 — 같은 원천 snapshot으로 다시 돌린
+#: run이 백만 행을 매번 다시 쓰지 않게 하려는 것이다(dead tuple·WAL). 트리거
+#: ``enforce_source_entity_head_freshness``/``..._seen_at``은 뒤로 가는 것만 막으므로
+#: 앞으로만 가는 이 갱신과 충돌하지 않는다. ``expires_at``은 건드리지 않는다 — 같은 시각
+#: 재관측에서 그것만 바꾸면 트리거가 거부하고, MOIS record는 만료가 없다.
+_REOBSERVE_UNCHANGED_SQL: Final[str] = (
+    "WITH "
+    + _UNCHANGED_ACTIVE_ENTITIES_CTE
+    + """
+, heads AS (
+    UPDATE provider_sync.source_entity_heads AS head
+    SET observed_at = CAST(:observed_at AS timestamptz),
+        updated_at = clock_timestamp()
+    FROM unchanged
+    WHERE head.source_entity_key = unchanged.source_entity_key
+      AND head.observed_at < CAST(:observed_at AS timestamptz)
+    RETURNING head.source_entity_key
+), entities AS (
+    UPDATE provider_sync.source_entities AS entity
+    SET last_seen_at = CAST(:observed_at AS timestamptz)
+    FROM unchanged
+    WHERE entity.source_entity_key = unchanged.source_entity_key
+      AND entity.last_seen_at < CAST(:observed_at AS timestamptz)
+    RETURNING entity.source_entity_key
+)
+SELECT
+    unchanged.source_entity_id,
+    (SELECT count(*) FROM heads) AS heads_touched
+FROM unchanged
+"""
+)
+
+
+def _unchanged_entity_params(
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    payload_hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    entity_ids = sorted(payload_hashes)
+    return {
+        "source_entity_keys": [
+            _make_source_entity_key(
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                source_entity_id=entity_id,
+            )
+            for entity_id in entity_ids
+        ],
+        "source_entity_ids": entity_ids,
+        "raw_payload_hashes": [payload_hashes[entity_id] for entity_id in entity_ids],
+    }
+
+
+async def find_unchanged_active_source_entities(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    payload_hashes: Mapping[str, str],
+) -> frozenset[str]:
+    """``source_entity_id → raw_payload_hash`` 중 이미 그대로 적재돼 있는 id를 돌려준다.
+
+    "그대로"는 :data:`_UNCHANGED_ACTIVE_ENTITIES_CTE`의 조건이다 — 다시 적재해도
+    관측 시각 말고는 바뀌지 않는 entity. 읽기 전용이며 commit하지 않는다(ADR-108).
+    """
+    if not payload_hashes:
+        return frozenset()
+    rows = (
+        await session.execute(
+            text(_FIND_UNCHANGED_ACTIVE_ENTITIES_SQL),
+            _unchanged_entity_params(
+                provider=normalize_provider_name(provider),
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                payload_hashes=payload_hashes,
+            ),
+        )
+    ).scalars().all()
+    return frozenset(str(row) for row in rows)
+
+
+async def reobserve_unchanged_source_entities(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    payload_hashes: Mapping[str, str],
+    observed_at: datetime,
+) -> int:
+    """확인된 미변경 entity의 관측 시각을 전진시킨다 (``load_bundle``의 재관측과 같은 효과).
+
+    ``payload_hashes``는 호출자가 앞서 :func:`find_unchanged_active_source_entities`로
+    확인한 집합이다. 여기서 **같은 조건을 다시** 확인하고, 하나라도 빠지면
+    :class:`ProviderEntityReobservationConflict`로 transaction을 죽인다 — 확인과 기록
+    사이에 바뀐 entity를 적재 없이 지나치면 조용한 누락이 된다. 반환값은 실제로 관측
+    시각을 갱신한 head 수다. commit은 호출자 책임.
+    """
+    if not payload_hashes:
+        return 0
+    await lock_feature_curation_write(session)
+    rows = (
+        await session.execute(
+            text(_REOBSERVE_UNCHANGED_SQL),
+            {
+                **_unchanged_entity_params(
+                    provider=normalize_provider_name(provider),
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                    payload_hashes=payload_hashes,
+                ),
+                "observed_at": observed_at,
+            },
+        )
+    ).all()
+    confirmed = {str(row.source_entity_id) for row in rows}
+    missing = set(payload_hashes) - confirmed
+    if missing:
+        raise ProviderEntityReobservationConflict(
+            f"{len(missing)}개 원천 entity가 확인 뒤에 바뀌었다 "
+            f"(예: {sorted(missing)[:3]}) — 이 chunk를 되돌리고 다음 실행이 다시 확인한다."
+        )
+    return int(rows[0].heads_touched) if rows else 0
 
 
 async def retire_features_absent_from_snapshot(

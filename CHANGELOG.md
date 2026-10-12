@@ -10,6 +10,49 @@
 
 ## [Unreleased]
 
+### MOIS 인허가 재개형 chunk commit 적재 (2026-10-12, ADR-108)
+
+- **CHANGED (dagster)**: `feature_place_mois_licenses`가 98만 행을 한 transaction으로 넣지 않는다. 업종 안 500행
+  chunk마다 commit하고, 이미 같은 payload로 적재된 행(`source_entity_id` + `raw_payload_hash`, primary feature
+  active)은 지오코딩·변환 없이 재관측만 한다. 중단 뒤 재실행·다음 원천 snapshot은 남은 것·바뀐 것만 적재한다.
+- **ADDED (geocoding)**: `kortravelmap.geocoding.PrefetchingReverseGeocoder` — bounded 동시성 선조회 + run 수명 LRU.
+  `KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY`(기본 2).
+- **ADDED (dagster)**: run 시간 상한 `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 4시간), run tag
+  `kor_travel_map.mois_load.outcome`, 이어 달리기 sensor `feature_place_mois_licenses_continuation_sensor`(기본
+  STOPPED), run_config `resources.mois_load_plan.config.{service_slugs,run_budget_seconds}`(업종 선택 검증 run).
+- **CHANGED (dagster)**: MOIS asset retry 3회 → 1회(5분 뒤). 월간 schedule은 활성 run과 tick을 합친다. curation
+  봉인·provider sync 성공은 전 업종을 한 run에서 끝까지 본 run만 남긴다. MOIS finding의 stale close는 하지 않는다.
+- **CHANGED (api/queue)**: MOIS뿐인 `POST /v1/ops/pipeline/requests`는 409 `PROVIDER_DEDICATED_JOB_ONLY`.
+  섞인 요청은 MOIS를 실행 계획에서 빼고 `done` + error_message로 드러낸다. 실행할 것이 MOIS뿐인 요청(cache
+  target 포함)은 `failed` + `error_code=PROVIDER_DEDICATED_JOB_ONLY`. OpenAPI 409 설명 갱신.
+- **CHANGED (dagster)**: 소실 하한은 업종 누적·최소 표본(200행)으로, geo가 빈 답만 내면 upstream 장애로 실패,
+  재관측 충돌은 그 chunk만 run 안에서 최대 2회 재시도, 시간 상한은 run 시작 기준·run 상한 tag - 30분 이내,
+  이어 달리기는 미종료 run이 있거나 마지막 run이 0행이면 멈춘다(적대 리뷰 MED 4건·LOW).
+- **FIXED (dagster)**: geo 장애 판정이 빈 답 비율 뒤에 알려진 좋은 좌표 probe를 한다 — 바다·경계 좌표 행이
+  대부분인 재개 run이 영구 실패하던 것을 막는다. 0행 정지는 상한 절반 이상을 받은 run에만(step 재시도 정체 방지).
+  `_run_clock_start`가 쓸 수 없는 start_time을 무시한다.
+- **FIXED (dagster)**: 지역 geo 장애가 조용한 손실로 끝나지 않는다 — 빈 답 행은 어느 모드에서도 적재하지 않고,
+  업종·run 빈 답 비율 > `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%) 또는 probe 통과 문턱 초과 3회면
+  run을 degraded로 표시해 봉인·sync 성공을 남기지 않는다. probe는 기준점과 마지막 좋은 좌표 둘 다 묻는다.
+- **CHANGED (api)**: 생성 route는 MOIS source sync precheck를 더 부르지 않는다(도달 불가). 그 route의 502/503
+  설명은 실제 원인(kor-travel-geo resolver)으로. 실행된 scope 없이 `dedicated_job_only`가 섞인 빈 계획은 실패.
+  죽은 helper `ensure_mois_source_sync_for_plan`·`ensure_mois_source_sync_for_memberships`·
+  `MOIS_SOURCE_PRECHECK_ERROR_RESPONSES`·`MoisSourceSyncRequired`와 그 테스트를 걷어냈다.
+- **ADDED (dagster)**: 역지오코딩 불가 표식(finding `mois_reverse_geocode_unresolvable`, info) — 같은 payload는 30일
+  동안 조회하지 않는다. degraded 비율 분모는 조회한 행(최소 50). 연속 두 전체 run이 degraded면 FAILURE.
+- **ADDED (db)**: migration `405_mois_freshness_sla` — MOIS bulk dataset policy `stale_after_minutes=57600`.
+- **FIXED (dagster)**: 역지오코딩 불가 표식은 run 끝에 degraded가 아닌 업종·문턱 초과가 없던 chunk의 행에만 남긴다(지역
+  장애가 표식으로 가려지지 않는다). 다시 풀린 행의 표식은 닫는다. 연속 degraded 판정은 이어 달리기 사슬 전체를 본다.
+  결합 transaction을 되감은 표식 기록 실패는 삼키지 않는다.
+- **FIXED (dagster)**: run 전체 degraded 비율은 업종 degraded가 있어도 언제나 잰다. 무엇이든 degraded면 조회 50행
+  미만 업종에도 표식을 남기지 않는다. 연속 degraded 사슬이 최근 500 run 안에서 완료 run에 닿지 못하면 degraded로
+  본다. 다시 풀린 표식 닫기 실패는 경고만(결합 transaction을 되감았으면 올린다).
+- **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
+  `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
+  큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.
+- **CHANGED (image/compose)**: MOIS 원천 SQLite 기본 경로가 `/opt/dagster/state/mois/mois_source.db`(이미지가
+  appuser 소유로 만든다). standalone compose의 named volume도 그 디렉터리에 붙는다. 운영 compose는 Manager 변경.
+
 ### map-marker-react: `roadblock`·`warning` 글리프 (2026-10-08)
 
 - **FIXED (marker)**: `@kor-travel-map/map-marker-react`의 `MAKI_GLYPH`에 `roadblock`(🚧, U+1F6A7)과

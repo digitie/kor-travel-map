@@ -178,6 +178,9 @@ from kortravelmap.infra.feature_repo import (
     features_nearby_poi_cache_target as repo_features_nearby_poi_cache_target,
 )
 from kortravelmap.infra.feature_repo import (
+    find_unchanged_active_source_entities as repo_find_unchanged_active_source_entities,
+)
+from kortravelmap.infra.feature_repo import (
     get_notice_snapshot_watermark as repo_get_notice_snapshot_watermark,
 )
 from kortravelmap.infra.feature_repo import (
@@ -191,6 +194,9 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_repo import (
     purge_expired_notices as repo_purge_expired_notices,
+)
+from kortravelmap.infra.feature_repo import (
+    reobserve_unchanged_source_entities as repo_reobserve_unchanged_source_entities,
 )
 from kortravelmap.infra.feature_repo import (
     search_features as repo_search_features,
@@ -237,7 +243,9 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt,
     close_stale_integrity_findings,
+    find_fresh_open_findings,
     purge_resolved_integrity_findings,
+    resolve_open_findings_by_key,
     sync_integrity_findings,
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
@@ -1019,6 +1027,58 @@ class AsyncKorTravelMapClient:
                     )
                 )
             return result
+
+    async def find_unchanged_active_source_entities(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        payload_hashes: Mapping[str, str],
+    ) -> frozenset[str]:
+        """이미 같은 payload로 적재돼 있고 primary feature가 active인 entity id (ADR-108).
+
+        재개형 적재가 지오코딩 **전에** 묻는다. 여기 든 record는 다시 적재해도 관측 시각
+        말고는 바뀌지 않으므로 변환을 건너뛰고
+        :meth:`load_feature_bundles_reobserving`의 재관측으로 넘긴다. 읽기 전용이다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_find_unchanged_active_source_entities(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                payload_hashes=payload_hashes,
+            )
+
+    async def load_feature_bundles_reobserving(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        reobserved_payload_hashes: Mapping[str, str],
+        observed_at: datetime,
+    ) -> FeatureLoadResult:
+        """chunk 하나를 **한 transaction**으로 닫는다 — 미변경 재관측 + 변경분 적재 (ADR-108).
+
+        재관측 대상이 확인 뒤에 바뀌었으면
+        :class:`~kortravelmap.infra.feature_repo.ProviderEntityReobservationConflict`로
+        chunk 전체를 되돌린다. 이 경계가 "반쯤 쓰인 chunk"를 만들지 않는 단위다 —
+        commit된 chunk는 그 안의 행이 전부 있고, 되돌린 chunk는 하나도 없다.
+        """
+        materialized = list(bundles)
+        async with self._session_factory() as session, session.begin():
+            await repo_reobserve_unchanged_source_entities(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                payload_hashes=reobserved_payload_hashes,
+                observed_at=observed_at,
+            )
+            return await load_bundles(session, materialized)
 
     async def load_feature_bundle_batches(
         self,
@@ -2539,6 +2599,52 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session:
             return await gather_status_counts(session)
+
+    async def find_fresh_open_findings(
+        self,
+        *,
+        violation_type: str,
+        expected_source_record_keys: Mapping[str, str],
+        max_age_days: int,
+    ) -> frozenset[str]:
+        """같은 payload로 최근 열려 있는 finding의 dedupe key(ADR-108 역지오코딩 불가 표식)."""
+        async with self._session_factory() as session, session.begin():
+            return await find_fresh_open_findings(
+                session,
+                violation_type=violation_type,
+                expected_source_record_keys=expected_source_record_keys,
+                max_age_days=max_age_days,
+            )
+
+    async def resolve_open_findings_by_key(
+        self,
+        *,
+        violation_type: str,
+        dedupe_keys: Sequence[str],
+        reason: str,
+    ) -> int:
+        """열린 finding을 dedupe key로 닫는다(ADR-108: 다시 풀린 역지오코딩 불가 표식).
+
+        실패는 ``record_address_validation_findings``와 같이 ``IntegrityFindingPersistenceError``로
+        정규화한다 — ``transaction_destroyed``가 호출자에게 "삼켜도 되는 실패"인지를 알려 준다.
+        """
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await resolve_open_findings_by_key(
+                    session,
+                    violation_type=violation_type,
+                    dedupe_keys=dedupe_keys,
+                    reason=reason,
+                )
+        except Exception as exc:  # noqa: BLE001
+            raise IntegrityFindingPersistenceError(
+                provider="(resolve)",
+                dataset_key=violation_type,
+                observed_count=len(dedupe_keys),
+                unique_count=len(set(dedupe_keys)),
+                error_type=type(exc).__name__,
+                transaction_destroyed=self._transaction_bound,
+            ) from None
 
     async def record_address_validation_findings(
         self,

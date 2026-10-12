@@ -74,6 +74,10 @@ from kortravelmap.api.settings import ApiSettings
 _NOW = datetime(2026, 7, 14, 9, 0, tzinfo=UTC)
 # T-VN-33: 실행 membership identity는 (provider_dataset_id, sync_scope, operation_key)
 # triple이다(ADR-088). provider/dataset_key는 표시용 projection일 뿐이다.
+# 큐 요청 sample operation이다. 종전에는 MOIS bulk였지만 ADR-108부터 MOIS는 큐로 받지 않는다
+# (``PROVIDER_DEDICATED_JOB_ONLY``) — 일반 enqueue 의미를 재는 sample은 큐로 도는 operation이어야
+# 한다. 표시용 provider/dataset 값은 그대로 둔다(identity는 operation key다).
+_SAMPLE_OPERATION_KEY = "feature_place_khoa_beaches_job"
 _MOIS_BULK_OPERATION_KEY = "feature_place_mois_licenses_job"
 _OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 _OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
@@ -189,13 +193,6 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
     async def _empty_schedule_overrides(_session: Any) -> dict[str, str]:
         return {}
 
-    async def _ready_mois_source_sync(
-        _session: Any,
-        _resolved_memberships: frozenset[tuple[int, str]],
-        **_kwargs: Any,
-    ) -> None:
-        return None
-
     async def _preview_provider_dataset(
         _session: Any,
         *,
@@ -220,7 +217,7 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
                 "operation_key": dataset_memberships[0].operation_key,
             }
             or dataset_memberships[0].provider_dataset_id != 1
-            or dataset_memberships[0].operation_key != _MOIS_BULK_OPERATION_KEY
+            or dataset_memberships[0].operation_key != _SAMPLE_OPERATION_KEY
         ):
             raise fur_mod.FeatureUpdateValidationError(
                 "존재하지 않거나 비활성인 provider_dataset_id입니다."
@@ -240,7 +237,7 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
                     sync_scope=sync_scope,
                     provider=MOIS_PROVIDER_NAME,
                     dataset_key=DATASET_KEY_BULK,
-                    operation_key=_MOIS_BULK_OPERATION_KEY,
+                    operation_key=_SAMPLE_OPERATION_KEY,
                 ),
             ),
             update_policy=update_policy,
@@ -324,11 +321,6 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         dagster_schedule,
         "execute_audited_schedule_command",
         _audit_schedule_command,
-    )
-    monkeypatch.setattr(
-        mois_source_precheck,
-        "ensure_mois_source_sync_for_memberships",
-        _ready_mois_source_sync,
     )
     monkeypatch.setattr(
         fur_mod,
@@ -465,7 +457,7 @@ def _update_request(
             "type": "provider_dataset",
             "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
-            "operation_key": _MOIS_BULK_OPERATION_KEY,
+            "operation_key": _SAMPLE_OPERATION_KEY,
         },
         dataset_membership_mode="single",
         dataset_memberships=(
@@ -475,7 +467,7 @@ def _update_request(
                 sync_scope="dataset_wide",
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
-                operation_key=_MOIS_BULK_OPERATION_KEY,
+                operation_key=_SAMPLE_OPERATION_KEY,
             ),
         ),
         update_policy={},
@@ -600,7 +592,7 @@ def _event(
         import_job_dataset_id="11111111-1111-1111-1111-111111111111",
         provider_dataset_id=1,
         sync_scope="dataset_wide",
-        operation_key=_MOIS_BULK_OPERATION_KEY,
+        operation_key=_SAMPLE_OPERATION_KEY,
         feature_id=None,
         stage="loading",
         level="error",
@@ -629,7 +621,7 @@ def _execution(
                 provider=MOIS_PROVIDER_NAME,
                 dataset_key=DATASET_KEY_BULK,
                 sync_scope="dataset_wide",
-                operation_key=_MOIS_BULK_OPERATION_KEY,
+                operation_key=_SAMPLE_OPERATION_KEY,
                 operation_member_id="11111111-1111-1111-1111-111111111111",
                 status="running",
             ),
@@ -1386,7 +1378,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "dataset_wide",
-            "operation_key": _MOIS_BULK_OPERATION_KEY,
+            "operation_key": _SAMPLE_OPERATION_KEY,
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -1405,7 +1397,7 @@ def test_executions_list_passes_filters_and_maps_rows(
             "provider": MOIS_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_BULK,
             "sync_scope": "dataset_wide",
-            "operation_key": _MOIS_BULK_OPERATION_KEY,
+            "operation_key": _SAMPLE_OPERATION_KEY,
             "operation_member_id": "11111111-1111-1111-1111-111111111111",
             "status": "running",
         }
@@ -2063,7 +2055,7 @@ def test_events_global_list_passes_filters(
     # join해 뽑는 projection이다. T-VN-33이 없앤 것은 event 테이블에 identity를
     # **복제해 저장**하던 열이고, 그 규칙은 그대로다.
     assert event["sync_scope"] == "dataset_wide"
-    assert event["operation_key"] == _MOIS_BULK_OPERATION_KEY
+    assert event["operation_key"] == _SAMPLE_OPERATION_KEY
 
 
 @pytest.mark.unit
@@ -3585,7 +3577,7 @@ def test_preview_request_returns_preview(
                     sync_scope="dataset_wide",
                     provider=MOIS_PROVIDER_NAME,
                     dataset_key=DATASET_KEY_BULK,
-                    operation_key=_MOIS_BULK_OPERATION_KEY,
+                    operation_key=_SAMPLE_OPERATION_KEY,
                 ),
             ),
             update_policy={},
@@ -3603,7 +3595,7 @@ def test_preview_request_returns_preview(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
         },
     )
@@ -3633,7 +3625,7 @@ def test_create_request_rejects_dry_run_flag(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
             "dry_run": True,
         },
@@ -3675,7 +3667,7 @@ def test_create_request_requires_uuid_idempotency_key(client: TestClient) -> Non
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             }
         },
     )
@@ -3726,7 +3718,7 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
             "type": "provider_dataset",
             "provider_dataset_id": 1,
             "sync_scope": "dataset_wide",
-            "operation_key": _MOIS_BULK_OPERATION_KEY,
+            "operation_key": _SAMPLE_OPERATION_KEY,
         },
         "reason": "same",
     }
@@ -3835,7 +3827,7 @@ def test_create_request_idempotency_replays_and_rejects_mismatch(
                     "type": "provider_dataset",
                     "provider_dataset_id": 1,
                     "sync_scope": "dataset_wide",
-                    "operation_key": _MOIS_BULK_OPERATION_KEY,
+                    "operation_key": _SAMPLE_OPERATION_KEY,
                 },
                 "providers": [MOIS_PROVIDER_NAME],
                 "dataset_keys": [DATASET_KEY_BULK],
@@ -3942,7 +3934,7 @@ def test_create_request_persists_with_new_status_url(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
             "reason": "stale 복구",
         },
@@ -3958,62 +3950,6 @@ def test_create_request_persists_with_new_status_url(
 
 
 @pytest.mark.unit
-def test_create_request_enforces_mois_precheck_at_canonical_write_boundary(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    guarded_memberships: list[frozenset[tuple[int, str]]] = []
-
-    async def _blocked(
-        _session: Any,
-        resolved_memberships: frozenset[tuple[int, str]],
-        **_kwargs: Any,
-    ) -> None:
-        guarded_memberships.append(resolved_memberships)
-        raise mois_source_precheck.MoisSourceSyncRequired(
-            mois_source_precheck.MoisSourceSyncPrecheck(
-                job_name=mois_source_precheck.MOIS_SOURCE_SYNC_JOB_NAME,
-                ready=False,
-                checked_at=_NOW,
-                max_age_hours=7,
-                age_hours=None,
-                latest_run=None,
-                disabled_reason="MOIS source sync 실행 이력이 없습니다.",
-            )
-        )
-
-    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
-        raise AssertionError("precheck 실패 뒤 request를 enqueue하면 안 됩니다")
-
-    monkeypatch.setattr(
-        mois_source_precheck,
-        "ensure_mois_source_sync_for_memberships",
-        _blocked,
-    )
-    monkeypatch.setattr(
-        fur_mod,
-        "enqueue_feature_update_request",
-        _unexpected_enqueue,
-    )
-
-    response = client.post(
-        "/v1/ops/pipeline/requests",
-        json={
-            "scope": {
-                "type": "provider_dataset",
-                "provider_dataset_id": 1,
-                "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
-            }
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.json()["code"] == "MOIS_SOURCE_SYNC_REQUIRED"
-    assert guarded_memberships == [frozenset({(1, "dataset_wide")})]
-
-
-@pytest.mark.unit
 def test_create_request_rejects_unknown_provider_dataset_id(client: TestClient) -> None:
     response = client.post(
         "/v1/ops/pipeline/requests",
@@ -4022,7 +3958,7 @@ def test_create_request_rejects_unknown_provider_dataset_id(client: TestClient) 
                 "type": "provider_dataset",
                 "provider_dataset_id": 999_999,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             }
         },
     )
@@ -4041,7 +3977,7 @@ def test_create_request_rejects_sync_scope_for_dataset_wide_catalog_entry(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "target_grids",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             }
         },
     )
@@ -4075,7 +4011,7 @@ def test_create_request_reuses_same_active_effective_scope(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
             "reason": "same",
         },
@@ -4105,7 +4041,7 @@ def test_create_request_rejects_different_plan_on_active_effective_scope(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
             "priority": 51,
             "reason": "same",
@@ -4133,7 +4069,7 @@ def test_create_request_scope_lock_busy_maps_to_409(
                 "type": "provider_dataset",
                 "provider_dataset_id": 1,
                 "sync_scope": "dataset_wide",
-                "operation_key": _MOIS_BULK_OPERATION_KEY,
+                "operation_key": _SAMPLE_OPERATION_KEY,
             },
             "run_mode": "now",
         },
@@ -4289,3 +4225,54 @@ def test_pipeline_nux_seen_route_is_removed(client: TestClient) -> None:
 
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/problem+json")
+
+
+@pytest.mark.unit
+def test_create_request_rejects_a_mois_only_plan_with_a_pointer_to_the_dedicated_job(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-108: 큐는 MOIS를 실행하지 않는다 — 받아 두고 조용히 "done"으로 끝내지 않는다."""
+
+    async def _mois_preview(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPreview:
+        return FeatureUpdateRequestPreview(
+            scope_type="provider_dataset",
+            scope=kwargs["scope"],
+            dataset_memberships=(
+                FeatureUpdateRequestDataset(
+                    feature_update_request_dataset_id=None,
+                    provider_dataset_id=1,
+                    sync_scope="dataset_wide",
+                    provider=MOIS_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_BULK,
+                    operation_key=_MOIS_BULK_OPERATION_KEY,
+                ),
+            ),
+            update_policy=kwargs["update_policy"],
+            run_mode=kwargs["run_mode"],
+            priority=kwargs["priority"],
+            matched_scope={"feature_count": 1},
+        )
+
+    async def _unexpected_enqueue(*_args: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise AssertionError("MOIS-only 계획을 enqueue하면 안 됩니다")
+
+    monkeypatch.setattr(fur_mod, "preview_feature_update_request_repo", _mois_preview)
+    monkeypatch.setattr(fur_mod, "enqueue_feature_update_request", _unexpected_enqueue)
+
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": {
+                "type": "provider_dataset",
+                "provider_dataset_id": 1,
+                "sync_scope": "dataset_wide",
+                "operation_key": _MOIS_BULK_OPERATION_KEY,
+            }
+        },
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == "PROVIDER_DEDICATED_JOB_ONLY"
+    assert body["details"]["dagster_jobs"] == [_MOIS_BULK_OPERATION_KEY]

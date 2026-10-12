@@ -466,15 +466,17 @@ def test_mois_license_records_resource_syncs_source_db_before_fetch(
 ) -> None:
     db_path = tmp_path / "mois.db"
     monkeypatch.setenv("KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH", str(db_path))
-    calls: list[tuple[str, str | None]] = []
+    calls: list[tuple[object, ...]] = []
     sentinel = [object()]
 
     def _fake_sync(settings: KorTravelMapSettings, **_kwargs: object) -> None:
         # freshness 게이트(ensure_mois_source_db_fresh)가 read 전에 호출됨을 검증.
         calls.append(("sync", settings.mois_source_db_path))
 
-    def _fake_fetch(settings: KorTravelMapSettings) -> list[object]:
-        calls.append(("fetch", settings.mois_source_db_path))
+    def _fake_fetch(
+        settings: KorTravelMapSettings, *, service_slugs: tuple[str, ...] | None = None
+    ) -> list[object]:
+        calls.append(("fetch", settings.mois_source_db_path, service_slugs))
         return sentinel
 
     monkeypatch.setattr(resources, "ensure_mois_source_db_fresh", _fake_sync)
@@ -483,11 +485,43 @@ def test_mois_license_records_resource_syncs_source_db_before_fetch(
         "mois_license_records"
     ]
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
+    context = _guarded_init_resource_context()
+    # ADR-108: 업종 선택은 plan resource에서 오고 SQLite 질의까지 내려간다.
+    context.resources.mois_load_plan = resources.resolve_mois_load_plan(
+        KorTravelMapSettings(), ["bakeries"]
+    )
 
-    result = resource_fn(_guarded_init_resource_context())
+    result = resource_fn(context)
 
     assert result is sentinel
-    assert calls == [("sync", str(db_path)), ("fetch", str(db_path))]
+    assert calls == [
+        ("sync", str(db_path)),
+        ("fetch", str(db_path), ("bakeries",)),
+    ]
+
+
+def test_mois_load_plan_resource_reads_the_slug_selection_from_run_config() -> None:
+    resource_fn = cast(
+        "Callable[[object], object]", resources.mois_load_plan_resource.resource_fn
+    )
+
+    selected = resource_fn(
+        _guarded_init_resource_context(config={"service_slugs": ["yacht_marinas"]})
+    )
+    everything = resource_fn(_guarded_init_resource_context(config={"service_slugs": []}))
+
+    assert selected.service_slugs == ("yacht_marinas",)
+    assert selected.full_coverage is False
+    assert everything.full_coverage is True
+    assert everything.run_budget_seconds == KorTravelMapSettings().mois_load_run_budget_seconds
+    with pytest.raises(ValueError, match="billiard_halls"):
+        resource_fn(_guarded_init_resource_context(config={"service_slugs": ["billiard_halls"]}))
+
+    # 검증 run은 상한 정지·이어 달리기를 작은 업종으로 시험할 수 있다 — 범위는 settings와 같다.
+    short = resource_fn(_guarded_init_resource_context(config={"run_budget_seconds": 120}))
+    assert short.run_budget_seconds == 120
+    with pytest.raises(ValueError, match="60~19800"):
+        resource_fn(_guarded_init_resource_context(config={"run_budget_seconds": 30}))
 
 
 def test_provider_record_resource_env_mapping() -> None:

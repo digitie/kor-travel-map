@@ -361,6 +361,42 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
         ),
     )
+    mois_geocode_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "MOIS 재개형 적재(ADR-108)가 kor-travel-geo 역지오코딩을 동시에 보내는 상한. "
+            "geo에는 batch endpoint가 없어 이것이 처리량과 geo 부하를 함께 정한다 — n150은 "
+            "디스크 대기로 포화돼 있어(ReadTimeout) 기본값은 보수적으로 2다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
+        ),
+    )
+    mois_geocode_degraded_ratio: float = Field(
+        default=0.05,
+        gt=0.0,
+        le=1.0,
+        description=(
+            "MOIS 재개형 적재(ADR-108)에서 역지오코딩이 빈 답을 낸 행의 비율 상한. 업종 하나(관측 "
+            "200행 이상) 또는 run 전체가 이 비율을 넘으면 run을 실패시키지 않고 **degraded**로 "
+            "표시한다 — 봉인·sync 성공을 남기지 않고, 그 행들은 적재하지 않았으므로 "
+            "다음 run이 다시 시도한다. 지역 하나의 geo layer가 비는 부분 장애를 "
+            "조용한 손실로 끝내지 않게 한다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO``."
+        ),
+    )
+    mois_load_run_budget_seconds: int = Field(
+        default=14_400,
+        ge=60,
+        le=19_800,
+        description=(
+            "MOIS 재개형 적재 run 하나가 새 chunk를 시작하지 않는 시간 상한(초, ADR-108). "
+            "run 상한 6시간(21,600초) 안에서 Phase A sync·마지막 chunk·봉인 여유를 남긴다 — "
+            "기본 4시간, 최대 5.5시간. 상한에 닿으면 그때까지 commit한 chunk를 남기고 "
+            "정상 종료하며 다음 run이 이어 간다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS``."
+        ),
+    )
     backup_last_success_warn_hours: int = Field(
         default=BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT,
         ge=1,

@@ -17,7 +17,11 @@ from types import MappingProxyType, SimpleNamespace
 from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.feature_operation import (
+    DEDICATED_JOB_ONLY_OPERATION_KEYS,
+    DEDICATED_JOB_ONLY_SKIP_REASON,
+    ProviderDatasetOperationMembership,
+)
 from kortravelmap.infra.advisory_lock import advisory_lock
 from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshFailure,
@@ -64,6 +68,7 @@ from .assets import (
     run_feature_route_krforest_mountain_trails,
 )
 from .mcst_features import run_feature_place_mcst_culture
+from .mois_chunked_load import resolve_mois_load_plan
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
@@ -101,6 +106,7 @@ from .upstream_requests import (
 from .upstream_retry import sharing_run_retry_budget
 
 __all__ = [
+    "DEDICATED_JOB_ONLY_OPERATION_KEYS",
     "FeatureUpdateAssetRunner",
     "FeatureUpdateRunnerSpec",
     "feature_update_runner_resource",
@@ -120,6 +126,7 @@ _COMMON_RESOURCE_KEYS: Final[set[str]] = {
 }
 
 _MISSING: Final = object()
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +248,33 @@ class FeatureUpdateAssetRunner:
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
+        if scope.operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+            # 방어선이다 — 실행 계획(``feature_update_executor._skip_reason``)이 이미 이
+            # operation을 건너뛰므로 정상 경로에서는 여기 오지 않는다(ADR-108).
+            log_info = getattr(self._log, "info", None)
+            if callable(log_info):
+                log_info(
+                    "%s는 전용 Dagster job으로만 적재한다 — 큐 요청을 건너뛴다(ADR-108).",
+                    scope.operation_key,
+                )
+            return ProviderDatasetRefreshResult(
+                provider_dataset_id=scope.provider_dataset_id,
+                sync_scope=scope.sync_scope,
+                operation_key=scope.operation_key,
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                status="skipped",
+                metadata={
+                    "provider_dataset_id": scope.provider_dataset_id,
+                    "sync_scope": scope.sync_scope,
+                    "operation_key": scope.operation_key,
+                    "provider": scope.provider,
+                    "dataset_key": scope.dataset_key,
+                    "skipped": True,
+                    "skip_reason": DEDICATED_JOB_ONLY_SKIP_REASON,
+                    "scope_type": scope.scope_type,
+                },
+            )
         spec = self._spec_for_scope(scope)
         failure_sync_scope = scope.sync_scope
         if (
@@ -605,10 +639,16 @@ def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    # 큐는 MOIS를 건너뛴다(``DEDICATED_JOB_ONLY_OPERATION_KEYS``). 이 factory는 spec을
+    # asset 계약과 맞춰 두기 위해 남는다 — 직접 부르면 전 업종 plan을 쓴다.
+    plan = resolve_mois_load_plan(settings)
     ensure_mois_source_db_fresh(settings)
     return RunnerResources(
         {
-            "mois_license_records": fetch_mois_license_records(settings),
+            "mois_load_plan": plan,
+            "mois_license_records": fetch_mois_license_records(
+                settings, service_slugs=plan.service_slugs
+            ),
             "mois_dataset_key": scope.dataset_key or MOIS_BULK_DATASET_KEY,
         }
     )

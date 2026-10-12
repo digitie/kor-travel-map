@@ -20,7 +20,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import SAWarning
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.feature_operation import (
+    DEDICATED_JOB_ONLY_OPERATION_KEYS,
+    DEDICATED_JOB_ONLY_SKIP_REASON,
+    ProviderDatasetOperationMembership,
+)
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_event_repo import (
@@ -375,6 +379,7 @@ def _skip_reason(
     request: FeatureUpdateRequest,
     provider: str,
     dataset_key: str,
+    operation_key: str | None = None,
     policy: ProviderRefreshPolicy | None,
     resolution: ScopeResolution,
 ) -> str | None:
@@ -383,6 +388,12 @@ def _skip_reason(
     )
     if policy is not None and not policy.enabled:
         return "policy_disabled"
+    if operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+        # ADR-108: 큐는 쓰기를 transaction 하나에 묶어 MOIS chunk commit 적재를 할 수 없다.
+        # 운영자가 끈 dataset(policy_disabled)은 그 사유를 그대로 보인다 — 그 요청은 원래도
+        # 아무것도 하지 않을 것이므로 실패가 아니다. 켜진 것은 어떤 targeted policy로도 큐에서
+        # 돌지 않는다.
+        return DEDICATED_JOB_ONLY_SKIP_REASON
     effective_targeted_policy = override or (
         policy.targeted_policy if policy is not None else "allow_targeted"
     )
@@ -424,6 +435,40 @@ def _target_ids_for_provider(
         seen.add(match.target_id)
         values.append(match.target_id)
     return tuple(values)
+
+
+_DEDICATED_JOB_ONLY_EVENT_CODE = "PROVIDER_DEDICATED_JOB_ONLY"
+
+
+def _plan_emptied_by_dedicated_job_only(plan: FeatureUpdateExecutionPlan) -> bool:
+    """실행할 것이 없고, 건너뛴 것 중에 전용 job 전용 operation이 있는가.
+
+    policy만으로 비어 버린 계획은 종전처럼 ``done``으로 닫는다 — 그 요청은 원래도 아무것도
+    하지 않았을 것이다(적대 리뷰 LOW-c). 그러나 전용 job 사유가 하나라도 섞이면 그 부분은 요청자가
+    갱신을 기대한 것이므로 ``done``으로 닫으면 PinVi cache target이 갱신됐다고 믿는다 — 실패로
+    드러낸다(최종 델타 리뷰 LOW). 실행된 scope가 하나라도 있으면 ``done`` + error_message다.
+    """
+    return not plan.refresh_scopes and any(
+        scope.reason == DEDICATED_JOB_ONLY_SKIP_REASON for scope in plan.skipped_scopes
+    )
+
+
+def _dedicated_job_only_note(plan: FeatureUpdateExecutionPlan) -> str | None:
+    """전용 job 전용이라 건너뛴 scope가 있으면 사람이 읽을 terminal 상세를 만든다."""
+    skipped = [
+        scope for scope in plan.skipped_scopes if scope.reason == DEDICATED_JOB_ONLY_SKIP_REASON
+    ]
+    if not skipped:
+        return None
+    names = ", ".join(
+        sorted(
+            {f"{scope.provider}/{scope.dataset_key} ({scope.operation_key})" for scope in skipped}
+        )
+    )
+    return (
+        f"{DEDICATED_JOB_ONLY_SKIP_REASON}: {names}는 큐로 갱신하지 않는다 — "
+        "전용 Dagster job으로만 적재한다(ADR-108). 이 요청은 그 dataset을 갱신하지 않았다."
+    )
 
 
 def _matched_scope(
@@ -497,6 +542,7 @@ async def build_feature_update_execution_plan(
             request=request,
             provider=member.provider,
             dataset_key=member.dataset_key,
+            operation_key=member.operation_key,
             policy=policy,
             resolution=resolution,
         )
@@ -1199,6 +1245,20 @@ async def _execute_feature_update_request_locked(
             await mark_poi_cache_targets_refresh_requested(session, target_ids)
 
         assert plan is not None
+        dedicated_only = _dedicated_job_only_note(plan)
+        if dedicated_only is not None and _plan_emptied_by_dedicated_job_only(plan):
+            # 실행할 것이 전용 job 전용 operation뿐이다. "done"으로 닫으면 요청자(PinVi cache
+            # target 포함)는 갱신됐다고 믿는다 — 기존 실패 어휘(failed + error_code, target
+            # last_failed_at)로 드러낸다(ADR-108).
+            return await _finish_failed_execution(
+                session,
+                started,
+                plan=plan,
+                results=results,
+                error_message=dedicated_only,
+                owner_dagster_run_id=dagster_run_id,
+                event_code=_DEDICATED_JOB_ONLY_EVENT_CODE,
+            )
         total = max(len(plan.refresh_scopes), 1)
         for index, scope in enumerate(plan.refresh_scopes, start=1):
             async with session.begin():
@@ -1289,6 +1349,9 @@ async def _execute_feature_update_request_locked(
                 status="done",
                 owner_dagster_run_id=dagster_run_id,
                 expected_generation=started.generation,
+                # 일부가 전용 job 전용이라 건너뛰었으면 terminal 상세에 남긴다 — matched_scope의
+                # skipped 목록만으로는 "done"이 전부 갱신됐다는 뜻으로 읽힌다(ADR-108).
+                error_message=dedicated_only,
             )
             if done is None:
                 raise _FeatureUpdateExecutionStopped

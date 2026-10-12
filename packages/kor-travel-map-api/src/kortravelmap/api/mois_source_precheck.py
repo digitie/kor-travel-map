@@ -1,9 +1,8 @@
-"""MOIS Phase A full-coverage Dagster run 선행조건.
+"""MOIS Phase A full-coverage Dagster run 선행조건(운영 화면 안내).
 
-UI 안내와 canonical feature-update write 경계가 같은 exact job/tag/TTL
-판정을 사용한다. Dagster run ``SUCCESS``만으로는 custom
-``service_slugs``/``org_code`` 부분 동기화를 전국 full sync로 인정하지
-않는다.
+Dagster run ``SUCCESS``만으로는 custom ``service_slugs``/``org_code`` 부분 동기화를
+전국 full sync로 인정하지 않는다. 종전에는 feature-update 큐의 쓰기 경계도 이 판정으로
+막았으나, ADR-108부터 큐는 MOIS를 실행하지 않으므로 그 경계(``ensure_*``)는 걷어냈다.
 """
 
 from __future__ import annotations
@@ -18,39 +17,21 @@ from kortravelmap.providers.mois import (
     MOIS_SOURCE_SYNC_COVERAGE_TAG,
     MOIS_SOURCE_SYNC_FULL_COVERAGE,
 )
-from kortravelmap.providers.mois import (
-    PROVIDER_NAME as MOIS_PROVIDER_NAME,
-)
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api.dagster_graphql import DagsterUrlConfigurationError
 from kortravelmap.api.dagster_schema import DagsterRunSummary
-from kortravelmap.api.response import ProblemDetail
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = [
     "MOIS_SOURCE_SYNC_JOB_NAME",
     "MoisSourceSyncPrecheck",
     "MoisSourceSyncPrecheckError",
-    "MoisSourceSyncRequired",
-    "MOIS_SOURCE_PRECHECK_ERROR_RESPONSES",
-    "ensure_mois_source_sync_for_memberships",
-    "ensure_mois_source_sync_for_plan",
     "fetch_mois_source_sync_precheck",
     "to_http_exception",
 ]
 
 MOIS_SOURCE_SYNC_JOB_NAME: Final = "mois_localdata_source_sync"
-MOIS_SOURCE_PRECHECK_ERROR_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
-    409: {
-        "model": ProblemDetail,
-        "description": "요청 계획 충돌/잠금 또는 MOIS full source sync 선행조건 미충족",
-    },
-    502: {"model": ProblemDetail, "description": "Dagster precheck 응답 오류"},
-    503: {"model": ProblemDetail, "description": "Dagster precheck transport/설정 오류"},
-}
 
 _QUERY: Final = """
 query KorTravelMapMoisSourceSyncPrecheck(
@@ -88,14 +69,6 @@ class MoisSourceSyncPrecheckError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
-
-
-class MoisSourceSyncRequired(RuntimeError):
-    """MOIS canonical write plan이 full source sync 선행조건을 만족하지 못했다."""
-
-    def __init__(self, precheck: MoisSourceSyncPrecheck) -> None:
-        super().__init__(precheck.disabled_reason or "MOIS source sync가 필요합니다.")
-        self.precheck = precheck
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,90 +219,9 @@ async def fetch_mois_source_sync_precheck(
     )
 
 
-async def ensure_mois_source_sync_for_plan(
-    resolved_pairs: frozenset[tuple[str, str]],
-    *,
-    settings: ApiSettings,
-    client: httpx.AsyncClient,
-) -> None:
-    """resolved canonical plan에 MOIS가 포함되면 full sync를 fail-closed로 검사한다."""
-
-    if not any(provider == MOIS_PROVIDER_NAME for provider, _dataset in resolved_pairs):
-        return
-    precheck = await fetch_mois_source_sync_precheck(
-        settings=settings,
-        client=client,
-    )
-    if not precheck.ready:
-        raise MoisSourceSyncRequired(precheck)
-
-
-async def ensure_mois_source_sync_for_memberships(
-    session: AsyncSession,
-    memberships: frozenset[tuple[int, str]],
-    *,
-    settings: ApiSettings,
-    client: httpx.AsyncClient,
-) -> None:
-    """canonical dataset membership snapshot에 MOIS가 있을 때만 선행조건을 검사한다.
-
-    HTTP/Dagster 경계가 natural provider/dataset key를 전달하지 않게 하고, 이
-    조회도 provider dataset id만 정본으로 사용한다. ``sync_scope``는 snapshot
-    complete 여부 검증을 위해 입력에 보존하지만 MOIS 판정은 dataset relation이
-    담당한다.
-    """
-    if not memberships:
-        return
-    rows = await session.execute(
-        text(
-            """
-            SELECT 1
-            FROM provider_sync.provider_datasets
-            WHERE provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[]))
-              AND provider = :mois_provider
-            LIMIT 1
-            """
-        ),
-        {
-            "provider_dataset_ids": [dataset_id for dataset_id, _scope in memberships],
-            "mois_provider": MOIS_PROVIDER_NAME,
-        },
-    )
-    if rows.scalar_one_or_none() is None:
-        return
-    precheck = await fetch_mois_source_sync_precheck(settings=settings, client=client)
-    if not precheck.ready:
-        raise MoisSourceSyncRequired(precheck)
-
-
-def to_http_exception(
-    exc: MoisSourceSyncPrecheckError | MoisSourceSyncRequired,
-) -> HTTPException:
+def to_http_exception(exc: MoisSourceSyncPrecheckError) -> HTTPException:
     """MOIS source precheck exception을 일관된 RFC7807 중앙 handler 입력으로 바꾼다."""
 
-    if isinstance(exc, MoisSourceSyncRequired):
-        precheck = exc.precheck
-        latest_run = precheck.latest_run
-        return HTTPException(
-            status_code=409,
-            detail={
-                "code": "MOIS_SOURCE_SYNC_REQUIRED",
-                "message": str(exc),
-                "details": {
-                    "job_name": precheck.job_name,
-                    "checked_at": precheck.checked_at.isoformat(),
-                    "max_age_hours": precheck.max_age_hours,
-                    "age_hours": precheck.age_hours,
-                    "latest_run_id": latest_run.run_id if latest_run else None,
-                    "latest_run_status": latest_run.status if latest_run else None,
-                    "coverage": (
-                        latest_run.tags.get(MOIS_SOURCE_SYNC_COVERAGE_TAG)
-                        if latest_run
-                        else None
-                    ),
-                },
-            },
-        )
     return HTTPException(
         status_code=exc.status_code,
         detail={

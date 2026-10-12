@@ -99,6 +99,11 @@ _RETRY_POLICY_EXCEPTIONS: dict[str, str] = {
     "feature_price_transport_fuel_stations": (
         "같은 이유 — 같은 상류, 같은 예산을 쓴다."
     ),
+    "feature_place_mois_licenses": (
+        "ADR-108 재개형 적재 — 재시도는 commit된 chunk를 건너뛰고 이어 가므로 여러 번일 "
+        "이유가 없다(max_retries=1, 5분 뒤). 같은 원인으로 반복 실패하면 사람이 본다 — "
+        "이어 달리기 sensor도 실패 run은 잇지 않는다."
+    ),
 }
 
 

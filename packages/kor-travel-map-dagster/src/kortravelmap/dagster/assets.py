@@ -119,9 +119,6 @@ from kortravelmap.providers.mois import (
 from kortravelmap.providers.mois import (
     PROVIDER_NAME as MOIS_PROVIDER_NAME,
 )
-from kortravelmap.providers.mois import (
-    license_records_to_bundles,
-)
 from kortravelmap.providers.opinet import (
     OPINET_STATION_SOURCE_ENTITY_TYPE,
     fuel_station_place_locator_from_rows,
@@ -157,6 +154,7 @@ from .feature_operation_tracking import (
     require_feature_operation_guard,
     run_tracked_feature_asset,
 )
+from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -898,60 +896,72 @@ async def feature_event_krheritage_events(
 async def run_feature_place_mois_licenses(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """MOIS 인허가 record를 place Feature로 적재한다."""
+    """MOIS 인허가 record를 place Feature로 **재개형**으로 적재한다 (ADR-108).
+
+    업종별·500행 chunk마다 commit하고, 이미 같은 payload로 적재된 행은 지오코딩 없이
+    건너뛰며, run 시간 상한에 닿으면 정상 종료한다 — 다음 run(이어 달리기 sensor)이
+    그 자리부터 잇는다. 세부는 :mod:`~.mois_chunked_load`.
+
+    provider sync 성공은 **전 업종을 끝까지 본 run**만 기록한다. 부분 run이 성공을 남기면
+    "MOIS가 동기화됐다"는 신호가 거짓이 된다. 그리고 미관측 finding의 stale close는 하지
+    않는다 — 이 run은 이미 적재돼 있던 행을 다시 검증하지 않으므로 "이번 run이 보지
+    못했다"가 "고쳐졌다"를 뜻하지 않는다.
+    """
     fetched_at = await _fetched_at(context)
-    dataset_key = await _resource_value(context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY)
+    dataset_key = str(
+        await _resource_value(context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY)
+    )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     strict_address = cast(
         "bool | str",
         await _resource_value(context, "strict_address", default="strict"),
     )
+    plan = cast(MoisLoadPlan, await _resource_value(context, "mois_load_plan"))
+    records = await _resource_value(context, "mois_license_records")
+    if isinstance(records, str | bytes) or not isinstance(records, Iterable):
+        raise TypeError("mois_license_records resource는 record iterable이어야 함.")
 
-    async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
-        async for records in _record_batches(
-            context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
-        ):
-            # 변환 결과도 현재 1,000-record batch만 유지한다. 전체 snapshot은
-            # 아래 client transaction에서 순차 적재되고 마지막에 한 번 봉인된다.
-            yield await license_records_to_bundles(
-                records,
-                fetched_at=fetched_at,
-                dataset_key=str(dataset_key),
-                reverse_geocoder=_reverse_geocoder(context),
-            )
-
-    async def _load_all(
-        batches: AsyncIterable[Sequence[Any]],
-    ) -> FeatureLoadResult:
-        return await client.load_feature_bundle_batches(
-            batches,
-            curation_dataset=(MOIS_PROVIDER_NAME, str(dataset_key)),
-        )
-
-    result = await load_feature_bundle_batches_for_dagster(
+    outcome = await load_mois_license_records_chunked(
         context=context,
         client=client,
-        batches=_bundle_batches(),
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=str(dataset_key),
+        records=records,
+        plan=plan,
+        fetched_at=fetched_at,
+        dataset_key=dataset_key,
         strict_address=strict_address,
-        load_all=_load_all,
+        reverse_geocoder=_reverse_geocoder(context),
     )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=MOIS_PROVIDER_NAME,
-        dataset_key=str(dataset_key),
-        cursor_extra=_feature_result_cursor_extra(result),
-        observation_receipt=result.observation_receipt,
-    )
-    return result
+    # 봉인과 같은 조건이다 — 본 record가 0건인 "완료"는 sync 성공이 아니다.
+    if outcome.authoritative:
+        await _record_feature_sync_success(
+            context,
+            client,
+            provider=MOIS_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            cursor_extra={
+                **_feature_result_cursor_extra(outcome.result),
+                "mois_load_outcome": outcome.outcome,
+                "mois_load_records_seen": outcome.records_seen,
+            },
+            observation_receipt=None,
+        )
+    return outcome.result
+
+
+MOIS_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(max_retries=1, delay=300)
+"""MOIS 재개형 적재 retry — 한 번, 5분 뒤.
+
+종전 ``FEATURE_LOAD_RETRY_POLICY``(3회)는 매번 처음부터 다시 했다. 이제 재시도는 commit된
+chunk를 건너뛰고 이어 가므로 횟수가 많을 이유가 없고, 같은 원인으로 반복 실패하면 사람이
+봐야 한다(이어 달리기 sensor도 실패 run은 잇지 않는다).
+"""
 
 
 @asset(
     group_name="features_place",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"mois_license_records", "mois_dataset_key"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    required_resource_keys=_COMMON_RESOURCE_KEYS
+    | {"mois_license_records", "mois_dataset_key", "mois_load_plan"},
+    retry_policy=MOIS_LOAD_RETRY_POLICY,
     pool=GEO_HEAVY_POOL,
 )
 async def feature_place_mois_licenses(

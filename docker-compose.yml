@@ -634,7 +634,7 @@ services:
       KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN: ${KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN:-}
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL:-http://host.docker.internal:12501}
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
-      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/opt/dagster/state/mois/mois_source.db}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -656,7 +656,7 @@ services:
       api:
         condition: service_healthy
     volumes:
-      - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-mois-source:/opt/dagster/state/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     # healthcheck·exec가 남긴 고아를 거둔다(PID 1인 dagster는 거두지 않는다 — 2026-09-27 n150
     # Dagster 컨테이너들에 좀비 565개, Manager #426).
@@ -737,7 +737,7 @@ services:
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL:-http://host.docker.internal:12501}
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
-      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/opt/dagster/state/mois/mois_source.db}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -756,7 +756,7 @@ services:
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     volumes:
-      - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-mois-source:/opt/dagster/state/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     # healthcheck·exec가 남긴 고아를 거둔다(PID 1인 dagster는 거두지 않는다 — 2026-09-27 n150
     # Dagster 컨테이너들에 좀비 565개, Manager #426).
@@ -814,7 +814,7 @@ services:
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX:-offline-uploads}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
       KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
-      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/opt/dagster/state/mois/mois_source.db}
       # 서울 열린데이터광장은 data.go.kr과 **다른 포털이고 키도 다르다**.
       # 서울 책방(OA-21062) 하나가 쓴다 — 종전 odcloud 원천이 404로 사라졌다.
       KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY: ${KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY:-${SEOUL_OPEN_DATA_API_KEY:-}}
@@ -848,7 +848,7 @@ services:
       api:
         condition: service_healthy
     volumes:
-      - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-mois-source:/opt/dagster/state/mois
       - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     command: ["/usr/local/bin/dagster-daemon", "run", "-w", "/opt/dagster/dagster_home/workspace.yaml"]
     # **회수 기제가 살아 있는지 본다.**

@@ -96,6 +96,7 @@ from kortravelmap.api.dagster_schema import (
 from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
+    FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION,
     to_http_exception,
 )
 from kortravelmap.api.feature_update_schema import (
@@ -2142,29 +2143,36 @@ async def resolve_pipeline_schedule_claim(
             ),
         },
         **FEATURE_UPDATE_CONFLICT_RESPONSES,
-        **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES,
+        409: {"model": ProblemDetail, "description": FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION},
+        # sigungu_by_radius scope의 kor-travel-geo resolver 오류
+        # (feature_update_http.to_http_exception).
+        # 종전에는 MOIS precheck 응답 dict가 우연히 이 두 status를 문서화하고 있었다.
+        502: {"model": ProblemDetail, "description": "kor-travel-geo 호출 실패(PROVIDER_ERROR)"},
+        503: {
+            "model": ProblemDetail,
+            "description": "kor-travel-geo resolver 설정 없음(GEO_AUTH_NOT_CONFIGURED)",
+        },
     },
 )
 async def create_pipeline_update_request(
-    request: Request,
     body: FeatureUpdateRequestCreateRequest,
     response: Response,
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[OpsOperatorContext, Depends(require_ops_operator)],
 ) -> FeatureUpdateRequestCreateResponse:
-    api_settings = _settings_from_request(request)
-    dagster_client = _http_client_from_request(request, api_settings)
+    # ADR-108: 이 route는 MOIS source sync 선행조건을 더 보지 않는다. 그 선행조건은 큐가 MOIS
+    # 원천 SQLite를 읽을 때만 의미가 있다. 카탈로그(seed)의 MOIS refresh operation은 넷이다 —
+    # `feature_place_mois_licenses_job`은 전용 job 전용(MOIS뿐이면 409
+    # `PROVIDER_DEDICATED_JOB_ONLY`, 섞이면 실행 계획이 건너뛴다)이고, 나머지 셋
+    # (`mois_license_incremental_update`·`mois_license_closed_update`·
+    # `mois_license_detail_update`)은
+    # 큐 handler가 없어 실행 단계에서 실패한다. 어느 쪽도 원천을 읽지 않는다.
 
     async def _resolved_plan_guard(
         resolved_memberships: frozenset[tuple[int, str]],
     ) -> None:
-        await mois_source_precheck.ensure_mois_source_sync_for_memberships(
-            session,
-            resolved_memberships,
-            settings=api_settings,
-            client=dagster_client,
-        )
+        del resolved_memberships
 
     try:
         result = await feature_update_service.create_feature_update_request(
@@ -2176,11 +2184,6 @@ async def create_pipeline_update_request(
             settings=KorTravelMapSettings(),
             resolved_plan_guard=_resolved_plan_guard,
         )
-    except (
-        mois_source_precheck.MoisSourceSyncPrecheckError,
-        mois_source_precheck.MoisSourceSyncRequired,
-    ) as exc:
-        raise mois_source_precheck.to_http_exception(exc) from exc
     except feature_update_service.FeatureUpdateServiceError as exc:
         raise to_http_exception(exc) from exc
     if result.idempotent_replay or result.reused_active_request:

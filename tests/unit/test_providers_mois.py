@@ -487,3 +487,61 @@ def test_raw_data_round_trip_empties_facility_info_blocks() -> None:
     )
     assert after["subtype_name"] is None
     assert after["sales_method_name"] is None
+
+
+# -- 재개형 적재 사전 계산 (ADR-108) -----------------------------------------------
+
+
+async def test_payload_hash_helper_matches_the_bundle_it_predicts() -> None:
+    """재개 키가 변환 결과와 **같은 값**이어야 한다 — 다르면 모든 행이 매번 "바뀐 것"이 된다.
+
+    좌표만 있는 record(역지오코딩을 탄다)와 법정동 코드를 가진 record 둘 다 본다. 해시는
+    지오코딩 결과와 무관해야 하므로 geocoder가 무엇을 돌려주든 같아야 한다.
+    """
+    from kortravelmap.providers.mois import license_record_payload_hash
+
+    records = [
+        _Record(service_slug="general_restaurants", mng_no="h-1", lon=126.97, lat=37.56),
+        _Record(service_slug="bakeries", mng_no="h-2", legal_dong_code="1111010100"),
+    ]
+    for address in (Address(bjd_code="1111010100"), Address(bjd_code="2611010100")):
+        bundles = await _bundles(records, reverse_geocoder=_FakeGeocoder(address))
+        assert [b.source_record.raw_payload_hash for b in bundles] == [
+            license_record_payload_hash(r) for r in records
+        ]
+
+
+def test_payload_hash_helper_rejects_non_promoted_slug() -> None:
+    from kortravelmap.providers.mois import license_record_payload_hash
+
+    with pytest.raises(ValueError, match="PROMOTED"):
+        license_record_payload_hash(_Record(service_slug="billiard_halls"))
+
+
+async def test_reverse_coordinate_helper_matches_what_the_converter_geocodes() -> None:
+    """선조회할 좌표 = 변환이 실제로 geocoder에 넘기는 좌표. 법정동 코드가 있으면 없다."""
+    from kortravelmap.providers.mois import license_reverse_geocode_coordinate
+
+    seen: list[Coordinate] = []
+
+    async def _geo(coord: Coordinate) -> Address:
+        seen.append(coord)
+        return Address(bjd_code="1111010100")
+
+    records = [
+        _Record(service_slug="general_restaurants", mng_no="c-1", lon=126.97, lat=37.56),
+        _Record(
+            service_slug="general_restaurants",
+            mng_no="c-2",
+            lon=127.01,
+            lat=37.50,
+            legal_dong_code="1168010100",
+        ),
+        _Record(service_slug="general_restaurants", mng_no="c-3"),
+    ]
+    await _bundles(records, reverse_geocoder=_geo)
+
+    predicted = [license_reverse_geocode_coordinate(r) for r in records]
+    assert predicted[1] is None
+    assert predicted[2] is None
+    assert [c for c in predicted if c is not None] == seen

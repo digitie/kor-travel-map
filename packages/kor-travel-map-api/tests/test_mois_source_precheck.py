@@ -158,23 +158,6 @@ async def test_fetch_precheck_rejects_noncanonical_or_invalid_completion(
 
 
 @pytest.mark.asyncio
-async def test_non_mois_plan_does_not_query_dagster(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def _unexpected(**_kwargs: Any) -> dict[str, Any]:
-        raise AssertionError("non-MOIS plan은 Dagster precheck를 호출하면 안 됩니다")
-
-    monkeypatch.setattr(dagster_graphql, "post_graphql", _unexpected)
-
-    async with httpx.AsyncClient() as client:
-        await mois_source_precheck.ensure_mois_source_sync_for_plan(
-            frozenset({("kma", "short_forecast")}),
-            settings=_settings(),
-            client=client,
-        )
-
-
-@pytest.mark.asyncio
 async def test_fetch_precheck_fails_loudly_when_the_code_location_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

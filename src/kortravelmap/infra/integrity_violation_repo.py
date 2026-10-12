@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "find_fresh_open_findings",
+    "resolve_open_findings_by_key",
     "DataIntegrityViolation",
     "DataIntegrityViolationStateConflict",
     "IntegrityObservationRun",
@@ -374,6 +376,116 @@ async def list_data_integrity_violations(
         )
     ).all()
     return tuple(_row_to_violation(row) for row in rows)
+
+
+#: dedupe key마다 기대하는 ``payload.source_record_key``가 같고, 아직 열려 있으며, 최근에 다시
+#: 관측된 finding. ``uq_violations_open_dedupe_key``(열린 finding의 dedupe key unique)를 탄다.
+_FRESH_OPEN_FINDINGS_SQL: Final[str] = """
+SELECT finding.payload ->> 'dedupe_key' AS dedupe_key
+FROM unnest(
+        CAST(:dedupe_keys AS text[]),
+        CAST(:source_record_keys AS text[])
+    ) AS wanted(dedupe_key, source_record_key)
+JOIN ops.data_integrity_violations AS finding
+  ON (finding.payload ->> 'dedupe_key') = wanted.dedupe_key
+ AND finding.payload ? 'dedupe_key'
+ AND finding.status IN ('open', 'acknowledged')
+WHERE finding.violation_type = :violation_type
+  AND finding.payload ->> 'source_record_key' = wanted.source_record_key
+  AND finding.last_seen_at >= statement_timestamp() - make_interval(days => :max_age_days)
+"""
+
+
+async def find_fresh_open_findings(
+    session: AsyncSession,
+    *,
+    violation_type: str,
+    expected_source_record_keys: Mapping[str, str],
+    max_age_days: int,
+) -> frozenset[str]:
+    """``dedupe_key → source_record_key`` 중 같은 payload로 최근 열려 있는 finding의 dedupe key.
+
+    finding이 "이 payload에 대해 이미 관측된 사실"을 기억하는 표식으로 쓰일 때의 조회다
+    (ADR-108: MOIS 역지오코딩 불가 행). payload가 바뀌면 ``source_record_key``가 달라져 맞지
+    않고, ``max_age_days``보다 오래 다시 관측되지 않았으면 표식으로 보지 않는다 — 호출자가 다시
+    확인하게 한다. 읽기 전용이다.
+    """
+    if not expected_source_record_keys:
+        return frozenset()
+    if max_age_days <= 0:
+        raise ValueError("max_age_days must be positive")
+    keys = sorted(expected_source_record_keys)
+    rows = (
+        await session.execute(
+            text(_FRESH_OPEN_FINDINGS_SQL),
+            {
+                "dedupe_keys": keys,
+                "source_record_keys": [expected_source_record_keys[key] for key in keys],
+                "violation_type": violation_type,
+                "max_age_days": max_age_days,
+            },
+        )
+    ).scalars().all()
+    return frozenset(str(row) for row in rows)
+
+
+_OPEN_FINDING_IDS_BY_KEY_SQL: Final[str] = """
+SELECT finding.issue_id
+FROM ops.data_integrity_violations AS finding
+WHERE finding.payload ? 'dedupe_key'
+  AND (finding.payload ->> 'dedupe_key') = ANY(CAST(:dedupe_keys AS text[]))
+  AND finding.status = 'open'
+  AND finding.violation_type = :violation_type
+"""
+
+_RESOLVE_FINDINGS_BY_ID_SQL: Final[str] = """
+UPDATE ops.data_integrity_violations AS v
+   SET status = 'resolved',
+       resolved_at = now(),
+       payload = v.payload || jsonb_build_object('resolution', CAST(:resolution AS jsonb))
+ WHERE v.issue_id = ANY(CAST(:issue_ids AS uuid[]))
+   AND v.status = 'open'
+RETURNING v.issue_id
+"""
+
+
+async def resolve_open_findings_by_key(
+    session: AsyncSession,
+    *,
+    violation_type: str,
+    dedupe_keys: Sequence[str],
+    reason: str,
+) -> int:
+    """열린(``open``) finding 중 주어진 dedupe key를 ``resolved``로 닫는다. commit은 호출자 책임.
+
+    표식으로 쓰이던 finding의 사실이 더는 참이 아닐 때(ADR-108: 역지오코딩 불가였던 행이 이제
+    풀린다) 쓴다. ``acknowledged``는 사람이 인지한 표시라 기계가 닫지 않는다. 먼저 SELECT로
+    닫을 행을 고르고 있을 때만 UPDATE한다 — 이 표의 statement 단위 trigger가 ``ops_live``
+    revision hot row를 갱신하므로 0행 UPDATE를 chunk마다 쏘지 않는다.
+    """
+    if not dedupe_keys:
+        return 0
+    issue_ids = [
+        str(issue_id)
+        for issue_id in (
+            await session.execute(
+                text(_OPEN_FINDING_IDS_BY_KEY_SQL),
+                {"dedupe_keys": sorted(set(dedupe_keys)), "violation_type": violation_type},
+            )
+        ).scalars()
+    ]
+    if not issue_ids:
+        return 0
+    rows = (
+        await session.execute(
+            text(_RESOLVE_FINDINGS_BY_ID_SQL),
+            {
+                "issue_ids": issue_ids,
+                "resolution": json.dumps({"reason": reason}, ensure_ascii=False),
+            },
+        )
+    ).scalars().all()
+    return len(rows)
 
 
 _UPSERT_FINDINGS_BATCH_SQL: Final[str] = """

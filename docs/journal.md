@@ -1,3 +1,154 @@
+## 2026-10-12 — MOIS ADR-108 통합 테스트 resource 누락·직접 호출 tag 실패
+
+- PR CI 통합 두 lane이 `test_dagster_assets_validate_coordinates_and_load_to_postgis` 하나로 붉었다 —
+  `Dagster resource 없음: mois_load_plan`. 테스트가 asset을 `build_asset_context`로 직접 부르며 resource dict를
+  손으로 만든다. 운영 경로는 빠질 수 없다: `definitions.py`가 resource를 등록하고 asset이
+  `required_resource_keys`로 선언하며(누락이면 Dagster가 정의 load에서 거부) 큐 runner도 plan을 넣는다. 그래서
+  기본값을 두지 않고 fixture에 운영 기본 plan(전 업종 = 월간 schedule 경로)을 넣었다. 다른 직접 호출은
+  `test_mois_assets.py`(이미 plan 제공)뿐이고 scripts에는 없다.
+- 그 뒤에 숨은 두 번째 실패: `build_asset_context`의 run id `EPHEMERAL`은 instance에 없어 결과 tag 쓰기가
+  `DagsterRunNotFoundError`로 터진다(로컬 probe로 확인). `_tag_run_outcome`이 그 예외만 삼킨다 — 실제 run에서는
+  나지 않는다. 진짜 `build_asset_context`로 부르는 단위 테스트를 더했다(mutation RED 확인).
+- 검증(로컬): dagster MOIS·assets·definitions·resources·runner 138 passed, ruff·mypy strict. 통합은 CI가 게이트다.
+
+## 2026-10-12 — MOIS ADR-108 OpenAPI admin 계약 재핀(description만)
+
+- PR CI의 vnext 계약 테스트 2건이 붉었다 — `openapi.json`(full-admin)이 diff freeze baseline·T-VN-40 receipt와 달랐다.
+  merge-base 대비 바뀐 것은 `POST /v1/ops/pipeline/requests`의 409·502·503 응답 description 세 줄뿐이다(schema·
+  operation·status code 불변). user/service spec bytes는 그대로라 그 두 핀은 손대지 않았다.
+- 생성 스크립트는 없다 — 2026-10-05 ADR-107 선례(acde37264)대로 `openapi-diff-v1.json` admin baseline sha256 +
+  revisions 항목, `consumer-rollout-v1.json` T-VN-40 pending receipt의 `map_full_openapi_sha256` + blocking_reason
+  문장, 테스트의 `ARTIFACT_SHA256` 두 상수를 갱신했다. 검증(로컬): vnext·contract 단위 135 passed.
+- PinVi 측: `apps/api/tests/contract/kor-travel-map-openapi-admin.json`이 full-admin bytes를 vendor한다 — receipt가
+  이미 pending(exact re-vendor 대기)이라 이번 bytes도 그 re-vendor에 포함된다. PinVi는 이 operation을 호출하지
+  않는다(`/v1/ops/pipeline/*` 읽기만). PinVi 변경은 이 작업 범위 밖이다.
+
+## 2026-10-12 — MOIS ADR-108 narrow 리뷰 MED 1·LOW 3 반영
+
+- **MED-1.** run 전체 비율을 업종 degraded가 있어도 언제나 잰다. 무엇이든 degraded면 조회 50행 미만 업종의 빈 답에도
+  표식을 쓰지 않는다 — 큰 업종 하나를 degraded로 만든 지역 장애가 작은 업종들에 남긴 빈 답이 30일 가려지지 않게.
+- **L-1.** 다시 풀린 표식 닫기 실패는 `IntegrityFindingPersistenceError`로 정규화해 경고만 남긴다(`transaction_destroyed`면 올린다).
+- **L-3.** 연속 degraded 사슬은 최근 500 run까지 보고, 그 안에서 완료 run에 닿지 못하면 degraded로 본다(닫힌 쪽).
+- **L-4.** ADR-108 남는 위험에 "문턱 아래·5% 아래 지역 장애는 여전히 표식이 되어 최대 30일 조회되지 않는다"를 되살렸다.
+- 검증(로컬): MOIS 적재기 72 passed. mutation 4종(표본 미달 업종 표식·run 전체 판정 생략·사슬 상한 열린 쪽·닫기 실패
+  전파) 전부 RED. 통합 테스트는 CI가 게이트다.
+
+## 2026-10-12 — MOIS ADR-108 최종 리뷰 MED 1·LOW 3 반영
+
+- **MED-1.** 표식이 문턱 초과(probe 통과) chunk와 degraded 업종에도 쓰여, 실제 지역 장애가 다음 run에서 표식으로 가려져
+  봉인·sync 성공이 남고 overdue도 울리지 않았다. 표식은 run 끝에 한 번, degraded가 아닌 업종에서 문턱 초과가 없던 chunk의
+  행에만 쓴다(run 전체 degraded면 쓰지 않는다). 그런 행은 표식 없이 매 run 다시 조회돼 geo가 회복될 때까지 degraded가
+  지속된다. 연속 degraded 판정은 직전 완료 전체 run까지의 사슬 전체(`budget_exhausted` 포함)를 본다. ADR-108 정정.
+- **LOW.** 로그 문구(degraded 업종은 표식 없이 다음 run이 다시 조회; off 모드 주석은 표식 30일 반영). 다시 풀린 행의 열린
+  표식을 닫는다(SELECT 뒤 있을 때만 UPDATE — statement trigger hot row 보호). 표식 기록 실패가 `transaction_destroyed`면
+  올린다.
+- 검증(로컬): ruff·mypy strict·lint-imports·OpenAPI drift. MOIS 적재기 67 + 관련 498(전체 `tests/lint` 포함) + API 240 passed.
+  mutation 5종(문턱 초과 chunk 표식·degraded 업종 표식·사슬을 완료 run만·표식 닫기 제거·destroyed 삼킴) 전부 RED — 앞의 둘은
+  지역 장애 테스트에서 서로를 가려 각자 전용 테스트를 더했다. 통합 테스트(표식 닫기 SQL 포함)는 CI가 게이트다.
+
+## 2026-10-12 — MOIS ADR-108 최종 설계: 역지오코딩 불가 표식·조회 행 분모·연속 degraded·SLA
+
+- **원인.** 해상·매립지·잘못된 TM 좌표는 정상 geo에서도 늘 빈 답이라 적재되지 않고 매 run 다시 조회돼, 정상 상태에서
+  조회 창·비율을 지배하고 건강한 업종을 매달 degraded로 만든다(MED-1). degraded는 tag·로그로만 보였다(MED-2). 비율이
+  미변경 행으로 희석됐다(LOW-1).
+- **표식.** geo가 건강할 때(chunk가 장애 판정 없이 commit) 빈 답을 받은 행을 finding `mois_reverse_geocode_unresolvable`
+  (info, dedupe key = slug::mng_no, payload.source_record_key = 현재 payload)로 남기고, 다음 run은 같은 payload의 열린 표식이
+  30일 안이면 조회·적재하지 않는다(`mois_known_unresolvable`). 새 표 대신 finding 표를 재사용한 이유는 ADR-108 §3a-3.
+- **분모.** degraded 비율은 조회한 행 기준(최소 50) — 업종·run 둘 다.
+- **드러내기.** 직전 봉인 자격 전체 run도 degraded면 FAILURE(재시도 없음). migration 405가 MOIS bulk policy에 40일 SLA를
+  심어 `/v1/ops/datasets` overdue로 보인다(운영자 값 보존). graph artifact는 생성기로, head-schema는 receipt CHECK만.
+- **LOW.** 생성 route 주석 정정(seed의 MOIS refresh operation 넷 중 셋은 handler 없음), 죽은 `ensure_mois_source_sync_*`·
+  `MOIS_SOURCE_PRECHECK_ERROR_RESPONSES`·`MoisSourceSyncRequired`·테스트(통합 1파일 포함) 제거 — 운영 화면 precheck는 유지.
+  비율 설정 `> 0`. 기준점 서울시청 문서화. run 전체 판정 테스트.
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·graph `--check`·migration lint. 관련
+  테스트 249 + 578(전체 `tests/lint` 포함) passed. mutation 5종(표식 무시·분모 원복·연속 실패 제거·run 판정 제거·표식 미기록)
+  전부 RED. 표식 SQL 통합 테스트(`test_fresh_open_marker_matches_only_the_same_payload_and_ages_out`)와 migration 405는 로컬에서
+  돌리지 않았다 — GitHub CI가 게이트다.
+
+## 2026-10-12 — MOIS ADR-108 최종 델타 리뷰 MED 1·LOW 2 반영
+
+- **MED-1 지역 geo 장애.** probe가 다른 지역 좌표로 통과해 한 시·도가 통째로 빠진 채 봉인될 수 있었다. 빈 답 행은 어느 모드에서도
+  적재하지 않고(off 포함 — 빈 bjd commit은 같은 payload에서 영원히 건너뛰어진다), 업종(관측 200행+)·run 빈 답 비율이
+  `KOR_TRAVEL_MAP_MOIS_GEOCODE_DEGRADED_RATIO`(기본 5%)를 넘거나 같은 업종에서 "문턱 초과 + probe 통과"가 3회면 degraded로
+  표시한다 — 실패시키지 않고(영구 정지 재발 방지) 봉인·sync 성공을 남기지 않는다. tag `kor_travel_map.mois_load.geocode_degraded`,
+  metadata `mois_geocode_degraded*`·`mois_reverse_geocode_empty`·`mois_geo_probes`·`mois_geo_probe_passes`, 경고 로그.
+  probe는 고정 기준점과 마지막 좋은 좌표 둘 다 묻는다.
+- **LOW.** 생성 route는 MOIS source sync precheck를 부르지 않는다(유일한 MOIS operation이 전용 job 전용이라 도달 불가) —
+  409 설명·테스트에서 `MOIS_SOURCE_SYNC_REQUIRED` 제거, 우연히 MOIS dict로 문서화되던 502/503은 실제 원인(geo resolver)으로.
+  실행된 scope 없이 `dedicated_job_only`가 섞인 빈 계획은 실패(PinVi target을 갱신됐다고 보고하지 않는다).
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·TS 타입(lock 7.13.0) 일치. 지역 장애(drop/off)·off 모드
+  재시도·K회 판정·건강한 run 봉인 유지 테스트 포함 296 + 177 passed. mutation 5종(봉인 조건에서 degraded 무시·off 모드 commit·
+  K회 판정 제거·probe 좌표 하나·빈 계획 any→all) 전부 RED.
+
+## 2026-10-12 — MOIS ADR-108 델타 리뷰(PR #1312) HIGH 1·MED 1·LOW 4 반영
+
+- **HIGH-1 geo 장애 오판.** drop 모드에서 바다·경계 좌표 행은 적재되지 않아 매 run 다시 변환되고, 재개 run의 조회를 지배해
+  비율 판정이 영구 실패를 냈다. 비율이 문턱을 넘으면 `PrefetchingReverseGeocoder.probe_healthy`가 이 run에서 법정동코드를
+  받은 마지막 좌표(없으면 서울시청 기준점)를 캐시 없이 다시 묻고, 그것도 빈 답일 때만 장애로 실패한다. 표식 표 대신 probe를
+  고른 이유와 대가는 ADR-108 §3a.
+- **MED-1 재시도 정체.** run tag에 실제 상한(`…budget_seconds`)과 loop 시작 때 남은 시간(`…budget_available_seconds`)을 남기고,
+  0행 정지는 상한 절반 이상을 받은 run에만 적용한다. tag가 없거나 깨지면 이어 달린다.
+- **LOW.** (a) 생성 route 409 설명을 실제 409 전부로(dict 병합이 MOIS precheck 설명으로 덮던 것; run-now 설명은 원복),
+  OpenAPI·admin 타입은 `openapi-typescript@7.13.0`(lock 버전)로 재생성. (b) plan 선행조건은 큐가 실행할 membership만.
+  (c) `policy_disabled`가 먼저, 실패는 건너뛴 것이 전부 `dedicated_job_only`일 때만. (d) `_run_clock_start`가 비숫자·NaN·
+  무한·0 이하·미래 start_time을 무시.
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·TS 타입 재생성 일치. 테스트 84(새·수정)
+  + 377(API 관련) + 163(dagster·lint 관련) passed. mutation 5종(probe 제거·budget tag 무시·any/all·guard 필터 제거·
+  start_time 검사 제거) 전부 RED.
+
+## 2026-10-12 — MOIS ADR-108 적대 리뷰 MED 4건·LOW 반영: 브랜치 `feat/mois-chunked-resumable-load`
+
+- **MED-1 소실 하한.** chunk마다 재던 drop 비율 하한을 끄고(`enforce_loss_guard=False`) 업종 누적·최소 표본 200행에서
+  데이터 무효(`missing_address`)만 판정한다. 지오코더 원인(`reverse_geocode_failed`)은 따로 세고(다음 run이 다시 변환),
+  geo가 최근 20건+ 중 80%+를 빈 답으로 내면 chunk 적재 전 upstream 장애로 실패한다(`PrefetchingReverseGeocoder`의
+  최근 창 50건).
+- **MED-2 재관측 충돌.** `ProviderEntityReobservationConflict`를 잡아 그 chunk만 run 안에서 최대 2회 다시 확인·적재.
+- **MED-3 시간 기준.** run record `start_time`부터 재고, `min(설정, dagster/max_runtime tag - 30분)`. settings 최대값과
+  job run 상한의 관계를 테스트로 고정.
+- **MED-4 큐.** 정본 `core.feature_operation.DEDICATED_JOB_ONLY_OPERATION_KEYS`. MOIS뿐인 enqueue는 409
+  `PROVIDER_DEDICATED_JOB_ONLY`, 섞인 요청은 실행 계획에서 빼고 `done` + error_message, 실행할 것이 MOIS뿐이면
+  `failed` + cache target event `error_code=PROVIDER_DEDICATED_JOB_ONLY`(기존 실패 어휘). OpenAPI 409 설명·admin 타입 갱신.
+  router 테스트의 큐 sample operation을 MOIS에서 khoa로 바꿨다(MOIS는 이제 큐로 받지 않는다).
+- **LOW.** 이어 달리기: 미종료 run 재확인, 0행 전진이면 정지. sync 성공 = 봉인 조건(`authoritative`).
+- 검증(로컬 py3.13 venv, n150 미사용): ruff·mypy strict(core/api/dagster)·lint-imports 통과. 관련 unit/api/dagster/lint
+  테스트 MOIS 34·executor+provider+prefetch 52·dagster 관련 109·API router 163·API 관련 249·lint 175 passed.
+  mutation 8건(chunk 하한 재활성·충돌 재시도 제거·step 시계·장애 판정 제거·0행 정지 제거·활성 run 재확인 제거 등) 전부 RED.
+  통합 테스트는 돌리지 않았다(GitHub CI가 게이트).
+
+## 2026-10-12 — MOIS 재개형 chunk commit 적재(ADR-108): 브랜치 `feat/mois-chunked-resumable-load`
+
+소유자가 2026-10-12에 MOIS 적재 재구성을 승인했다(prod `1a3c4673` 읽기 전용 조사: 42업종 약 98만 행, 순차 역지오코딩
+약 35시간 vs run 상한 6시간, 단일 transaction, `/tmp` 원천 SQLite). PR·머지·배포·prod 데이터 실행은 하지 않았다.
+
+- **재개 키 = 원천 내용.** chunk(업종 안 최대 500행)마다 `(slug::mng_no, raw_payload_hash)`를 지오코딩 **전에** 계산해
+  "head가 같은 payload이고 primary feature가 active인가"를 묻는다(`find_unchanged_active_source_entities`). 그 행은
+  `load_bundle`이 관측 시각 말고 아무것도 바꾸지 않는 행이므로 재관측만 하고(`reobserve_unchanged_source_entities`,
+  Phase A marker `synced_at` 기준 — 같은 snapshot 재실행은 다시 쓰지 않는다), 나머지만 변환·적재한다. 둘은 chunk
+  transaction 하나(`load_feature_bundles_reobserving`). 새 표·cursor·마이그레이션 없음 — `load_bundle`이 읽는 표·열만 읽는다.
+- **지오코딩.** kor-travel-geo에 batch endpoint가 없다(geo origin/main `02a3c2e`: `/v2/reverse`·`/v2/geocode` 단건).
+  `PrefetchingReverseGeocoder`가 chunk 좌표를 중복 없이 bounded 동시성(`KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY`, 기본 2)으로
+  선조회하고 run 수명 LRU(5만)에 둔다. 원천 `legal_dong_code`가 있는 행·이미 적재된 행은 조회하지 않는다. 선조회 실패는
+  캐시하지 않는다(변환이 한 번 더 시도, 그래도 실패면 예외).
+- **run 크기.** `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 4시간)에서 새 chunk 시작을 멈추고 tag
+  `kor_travel_map.mois_load.outcome=budget_exhausted`. `feature_place_mois_licenses_continuation_sensor`(STOPPED)가 같은
+  run_config로 잇는다. retry 1회·5분. 월간 schedule은 활성 run과 합친다. 봉인·sync 성공은 전 업종을 한 run에서 끝까지 본
+  run만. 큐 runner는 MOIS를 `dedicated_job_only`로 건너뛴다(큐는 쓰기를 한 transaction에 묶는다).
+- **원천 영속.** 이미지가 `/opt/dagster/state/mois`(appuser)를 만들고 기본 경로로 둔다. standalone compose volume도 그리로.
+  운영은 Manager 브랜치 `feat/map-mois-source-volume`(internal named volume, 경로·target 같은 변수).
+- **검증 경로.** run_config `resources.mois_load_plan.config.{service_slugs, run_budget_seconds}`. 절차는
+  `docs/etl/mois-license-feature-etl.md` §13.2.
+- 테스트(n150, python:3.13, `-c docker/constraints-dagster.txt`, CI 세션 경계 그대로):
+  - 정적: `ruff check`(CI 범위) 통과, `mypy --strict` core 153·api 67·dagster 30 파일 이슈 0, `lint-imports` 4 kept.
+  - A unit+lint: 3056 passed / 26 failed — 같은 컨테이너의 main(`bcbd14c2`) 기준선과 실패 집합 동일(docker CLI·node·git 소유권
+    환경 25건) + `test_orchestrator_guardian_lock_is_not_inherited_by_external_child` 1건(flock/SIGKILL 타이밍 — 부하 중 같은
+    컨테이너에서 2/3 실패, 별도 컨테이너에서 4/4 통과, main도 통과; MOIS 무관).
+  - B api: 1236 passed, coverage 78.1%(≥70). C dagster: 626 passed·4 skipped, coverage 82.9%(≥80), `mois_chunked_load.py` 95%.
+  - 새 통합 `test_mois_resumable_load_repo.py`: 실 PostGIS 4 passed. 전체 D는 n150 IO 포화(`/proc/pressure/io` full avg300 ≈44%,
+    `map-load-phase14` 적재 중)로 PostGIS testcontainer가 120초 안에 뜨지 못해 setup error — 두 번. 부하를 더하지 않으려 중단하고
+    IO가 가라앉으면 도는 user unit `mois-gate-d-ready`로 넘겼다(로그 `~/mois-gate-logs/d3-*`). GitHub CI가 정본 게이트다.
+  - 실제 python-mois-api(3cdee09)를 깐 상태에서 fetcher 업종 선택 테스트 포함 4 passed(CI는 `providers` extra를 깔지 않아 skip).
+  - mutation(일부러 깨기): 재개 건너뛰기 제거 → 4건 RED, 선조회 동시성 1로 → 1건 RED, 시간 상한 제거 → 3건 RED. 모두 원복.
+
 ## 2026-10-08 — map-marker-react `roadblock`·`warning` 글리프: 브랜치 `feat/marker-roadblock-symbol`
 
 - **변경.** `packages/map-marker-react/src/maki.ts`의 `MAKI_GLYPH`에 `roadblock`(🚧 U+1F6A7, `construction`과 같은

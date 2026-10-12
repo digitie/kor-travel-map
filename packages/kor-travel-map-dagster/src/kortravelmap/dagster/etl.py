@@ -318,12 +318,17 @@ async def load_feature_bundles_for_dagster(
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
     load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
     | None = None,
+    enforce_loss_guard: bool = True,
 ) -> DagsterFeatureLoadResult:
     """주소/좌표 검증 후 ``AsyncKorTravelMapClient``로 PostGIS에 적재한다.
 
     ``strict_address``(모드 ``strict``/``drop``/``off``, bool 하위호환)는
     error-severity 검증 이슈 처리 정책을 정한다 — ``strict``는 run 실패,
     ``drop``은 해당 row만 제외 + 메타데이터 기록, ``off``는 전부 적재 (#376).
+
+    ``enforce_loss_guard=False``는 drop 모드 소실 하한을 이 호출에서 끈다. 재개형 적재
+    (ADR-108)는 한 호출이 chunk 하나(꼬리 chunk는 1~3행)라 여기서 비율을 재면 한 행이
+    100% 소실이 된다. 그 적재기는 업종 누적·최소 표본으로 같은 하한을 스스로 잰다.
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
@@ -383,7 +388,7 @@ async def load_feature_bundles_for_dagster(
         # 적재 **전에** 센다. 이 하한이 터지면 아무것도 적재하지 않는다 —
         # dataset의 절반 넘게 버린 실행을 성공으로 남기면, 남은 조각이 그 dataset의
         # 전부인 것처럼 보이고 그 상태가 다음 snapshot의 기준이 된다.
-        if _dataset_was_lost(
+        if enforce_loss_guard and _dataset_was_lost(
             dropped=dropped_feature_count, observed=source_observations
         ):
             await _fail_before_load(
