@@ -113,3 +113,7 @@ compose는 그 디렉터리에 named volume을 붙인다(새 named volume은 이
 3. snapshot에서 사라진(폐업) MOIS feature retire — 지금도 하지 않는다. 완료 run에 붙일지.
 4. 큐로 오던 MOIS 요청(admin dataset refresh)을 전용 job launch로 바꿀지.
 5. 동시성 기본 2와 상한 4시간 — 검증 run의 geo 지연·n150 IO 압력을 보고 조정.
+6. 재관측 쓰기 비용 — 새 원천 snapshot(주 1회)마다 미변경 행 전부의 head `observed_at`·entity
+   `last_seen_at`을 한 번 갱신한다(약 98만 × 2행). `load_bundle`의 재관측 의미를 지키기 위한 것이고 같은
+   snapshot 재실행은 쓰지 않는다. n150 디스크 대기가 문제면 "관측 시각을 전진시키지 않는다"로 바꿀 수 있다
+   (그러면 MOIS의 last-seen은 첫 적재 시각에 머문다).

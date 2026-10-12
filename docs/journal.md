@@ -1,3 +1,27 @@
+## 2026-10-12 — MOIS 재개형 chunk commit 적재(ADR-108): 브랜치 `feat/mois-chunked-resumable-load`
+
+소유자가 2026-10-12에 MOIS 적재 재구성을 승인했다(prod `1a3c4673` 읽기 전용 조사: 42업종 약 98만 행, 순차 역지오코딩
+약 35시간 vs run 상한 6시간, 단일 transaction, `/tmp` 원천 SQLite). PR·머지·배포·prod 데이터 실행은 하지 않았다.
+
+- **재개 키 = 원천 내용.** chunk(업종 안 최대 500행)마다 `(slug::mng_no, raw_payload_hash)`를 지오코딩 **전에** 계산해
+  "head가 같은 payload이고 primary feature가 active인가"를 묻는다(`find_unchanged_active_source_entities`). 그 행은
+  `load_bundle`이 관측 시각 말고 아무것도 바꾸지 않는 행이므로 재관측만 하고(`reobserve_unchanged_source_entities`,
+  Phase A marker `synced_at` 기준 — 같은 snapshot 재실행은 다시 쓰지 않는다), 나머지만 변환·적재한다. 둘은 chunk
+  transaction 하나(`load_feature_bundles_reobserving`). 새 표·cursor·마이그레이션 없음 — `load_bundle`이 읽는 표·열만 읽는다.
+- **지오코딩.** kor-travel-geo에 batch endpoint가 없다(geo origin/main `02a3c2e`: `/v2/reverse`·`/v2/geocode` 단건).
+  `PrefetchingReverseGeocoder`가 chunk 좌표를 중복 없이 bounded 동시성(`KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY`, 기본 2)으로
+  선조회하고 run 수명 LRU(5만)에 둔다. 원천 `legal_dong_code`가 있는 행·이미 적재된 행은 조회하지 않는다. 선조회 실패는
+  캐시하지 않는다(변환이 한 번 더 시도, 그래도 실패면 예외).
+- **run 크기.** `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 4시간)에서 새 chunk 시작을 멈추고 tag
+  `kor_travel_map.mois_load.outcome=budget_exhausted`. `feature_place_mois_licenses_continuation_sensor`(STOPPED)가 같은
+  run_config로 잇는다. retry 1회·5분. 월간 schedule은 활성 run과 합친다. 봉인·sync 성공은 전 업종을 한 run에서 끝까지 본
+  run만. 큐 runner는 MOIS를 `dedicated_job_only`로 건너뛴다(큐는 쓰기를 한 transaction에 묶는다).
+- **원천 영속.** 이미지가 `/opt/dagster/state/mois`(appuser)를 만들고 기본 경로로 둔다. standalone compose volume도 그리로.
+  운영은 Manager 브랜치 `feat/map-mois-source-volume`(internal named volume, 경로·target 같은 변수).
+- **검증 경로.** run_config `resources.mois_load_plan.config.{service_slugs, run_budget_seconds}`. 절차는
+  `docs/etl/mois-license-feature-etl.md` §13.2.
+- 테스트: (n150 결과는 아래 resume 절에 기록)
+
 ## 2026-10-08 — map-marker-react `roadblock`·`warning` 글리프: 브랜치 `feat/marker-roadblock-symbol`
 
 - **변경.** `packages/map-marker-react/src/maki.ts`의 `MAKI_GLYPH`에 `roadblock`(🚧 U+1F6A7, `construction`과 같은

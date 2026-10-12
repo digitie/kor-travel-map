@@ -1,3 +1,16 @@
+## 2026-10-12 — MOIS 재개형 chunk commit 적재(ADR-108): 브랜치 `feat/mois-chunked-resumable-load`
+
+**다음 한 작업: 소유자 결정(ADR-108 "열린 결정") → 적대 리뷰 → PR·CI·머지 → Map pair 회전 → Manager
+`feat/map-mois-source-volume` 설치 → `docs/etl/mois-license-feature-etl.md` §13.2의 업종 하나 검증 run.** 전체 적재는 그
+검증 뒤 §13.3(이어 달리기 sensor를 켠다). PR은 열지 않았고 prod에는 아무것도 하지 않았다.
+
+- 재개 키 = `(slug::mng_no, raw_payload_hash)` + primary feature active. 이미 그대로인 행은 지오코딩·변환 없이 재관측만,
+  chunk(업종 안 500행)마다 transaction 하나. 새 표·마이그레이션 없음.
+- 지오코딩: geo에 batch endpoint 없음 → bounded 동시 선조회(기본 2) + run 수명 LRU. 원천 `legal_dong_code` 행·적재된 행은 조회 안 함.
+- run 크기: 기본 4시간 상한 → `budget_exhausted` tag → 이어 달리기 sensor(STOPPED). retry 1회. 큐는 MOIS를 건너뛴다.
+- 원천 SQLite: 이미지 기본 `/opt/dagster/state/mois/mois_source.db`(appuser). 운영 volume은 Manager 브랜치.
+- 설치 순서 주의: **Map 회전이 먼저**, Manager compose가 뒤(새 named volume이 이미지 디렉터리 소유자를 물려받아야 한다).
+
 ## 2026-10-07 — entrypoint 봉인에서 `api grpc` 제거: 브랜치 `chore/entrypoint-drop-api-grpc`
 
 **다음 한 작업: CI 전량 → PR(조정자가 연다)·머지. 배포는 하지 않는다 — 다음 Map pinned-pair 회전 때 이미지에 실려
