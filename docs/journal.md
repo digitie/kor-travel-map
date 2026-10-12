@@ -1,3 +1,15 @@
+## 2026-10-12 — MOIS ADR-108 OpenAPI admin 계약 재핀(description만)
+
+- PR CI의 vnext 계약 테스트 2건이 붉었다 — `openapi.json`(full-admin)이 diff freeze baseline·T-VN-40 receipt와 달랐다.
+  merge-base 대비 바뀐 것은 `POST /v1/ops/pipeline/requests`의 409·502·503 응답 description 세 줄뿐이다(schema·
+  operation·status code 불변). user/service spec bytes는 그대로라 그 두 핀은 손대지 않았다.
+- 생성 스크립트는 없다 — 2026-10-05 ADR-107 선례(acde37264)대로 `openapi-diff-v1.json` admin baseline sha256 +
+  revisions 항목, `consumer-rollout-v1.json` T-VN-40 pending receipt의 `map_full_openapi_sha256` + blocking_reason
+  문장, 테스트의 `ARTIFACT_SHA256` 두 상수를 갱신했다. 검증(로컬): vnext·contract 단위 135 passed.
+- PinVi 측: `apps/api/tests/contract/kor-travel-map-openapi-admin.json`이 full-admin bytes를 vendor한다 — receipt가
+  이미 pending(exact re-vendor 대기)이라 이번 bytes도 그 re-vendor에 포함된다. PinVi는 이 operation을 호출하지
+  않는다(`/v1/ops/pipeline/*` 읽기만). PinVi 변경은 이 작업 범위 밖이다.
+
 ## 2026-10-12 — MOIS ADR-108 narrow 리뷰 MED 1·LOW 3 반영
 
 - **MED-1.** run 전체 비율을 업종 degraded가 있어도 언제나 잰다. 무엇이든 degraded면 조회 50행 미만 업종의 빈 답에도
