@@ -142,6 +142,37 @@ async def test_provider_run_lock_body_runs_on_the_dagster_single_connection_pool
         await engine.dispose()
 
 
+async def test_snapshot_gc_drain_runs_on_the_dagster_single_connection_pool(
+    dagster_runtime_engine: AsyncEngine,
+) -> None:
+    """회귀: GC drain의 batch·관측 session이 lock 연결 외의 연결을 요구하지 않는다.
+
+    ``cache_target_snapshot_gc`` job도 pool 1·추가 0인 Dagster
+    ``kor_travel_map_client``를 쓴다(ADR-107). 수정 전에는 lock 연결을 쥔 채 첫 batch
+    session이 두 번째 연결을 기다리다 ``QueuePool limit of size 1 overflow 0``으로
+    죽었다(고속도로 돌발 ``provider_run_lock``과 같은 결함).
+    """
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    engine = create_async_engine(
+        dagster_runtime_engine.url,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=2,
+    )
+    try:
+        result = await AsyncKorTravelMapClient(engine).drain_expired_cache_target_snapshots(
+            max_batches=2,
+            max_seconds=30,
+        )
+    finally:
+        await engine.dispose()
+    assert result.acquired is True
+    assert result.skipped is False
+    assert result.batches >= 1
+    assert result.remaining_items is not None
+
+
 async def test_snapshot_gc_lock_survives_acquisition_commit_and_skips_overlap(
     pg_engine: AsyncEngine,
 ) -> None:

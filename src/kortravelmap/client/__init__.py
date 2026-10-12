@@ -686,6 +686,12 @@ class AsyncKorTravelMapClient:
                     remaining_headers=None,
                     compacted_materials=0,
                 )
+            # batch·관측 session도 lock 연결 위에서 순차로 연다. Dagster
+            # ``kor_travel_map_client`` resource는 pool 1·추가 0이라(ADR-107) lock이
+            # 연결을 쥔 채 새 session을 열면 두 번째 연결을 기다리다 pool timeout으로
+            # 죽는다(고속도로 돌발 ``provider_run_lock``과 같은 결함, prod run
+            # ``bfd18ef5``). 각 session은 자기 transaction을 commit해 끝낸다.
+            pinned_session_factory = make_connection_session_factory(lock_connection)
             batches = 0
             deleted_items = 0
             deleted_headers = 0
@@ -704,7 +710,7 @@ class AsyncKorTravelMapClient:
                     max(1, int(remaining_seconds * 1_000)),
                 )
                 async with (
-                    self._session_factory() as batch_session,
+                    pinned_session_factory() as batch_session,
                     batch_session.begin(),
                 ):
                     await batch_session.execute(
@@ -751,7 +757,7 @@ class AsyncKorTravelMapClient:
                     break
 
             async with (
-                self._session_factory() as observation_session,
+                pinned_session_factory() as observation_session,
                 observation_session.begin(),
             ):
                 await observation_session.execute(
