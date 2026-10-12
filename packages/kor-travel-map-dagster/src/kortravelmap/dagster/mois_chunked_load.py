@@ -130,7 +130,8 @@ def resolve_mois_load_plan(
     )
     if not _MIN_RUN_BUDGET_SECONDS <= budget <= _MAX_RUN_BUDGET_SECONDS:
         raise ValueError(
-            f"MOIS run 시간 상한은 {_MIN_RUN_BUDGET_SECONDS}~{_MAX_RUN_BUDGET_SECONDS}초다: {budget}"
+            f"MOIS run 시간 상한은 {_MIN_RUN_BUDGET_SECONDS}~{_MAX_RUN_BUDGET_SECONDS}초다: "
+            f"{budget}"
         )
     requested = tuple(str(slug).strip() for slug in service_slugs if str(slug).strip())
     unknown = sorted(set(requested) - PROMOTED_SERVICE_SLUGS)
