@@ -1,4 +1,7 @@
-"""MOIS asset 경계 — 재개형 적재기로 넘기고, 끝까지 본 전 업종 run만 sync 성공을 남긴다 (ADR-108)."""
+"""MOIS asset 경계 — 재개형 적재기로 넘기고, 끝까지 본 전 업종 run만 sync 성공을 남긴다.
+
+ADR-108.
+"""
 
 from __future__ import annotations
 

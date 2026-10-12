@@ -292,7 +292,7 @@ def test_chunks_never_span_a_service_slug() -> None:
 
 
 def test_chunk_size_must_be_positive() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="positive"):
         list(iter_slug_chunks([], 0))
 
 
@@ -472,7 +472,8 @@ async def test_only_a_complete_full_coverage_run_seals_the_snapshot() -> None:
 
     subset_db = _FakeDb()
     subset = await _run(records, subset_db, geocoder=_Geocoder(), plan=_plan(full_coverage=False))
-    assert subset.complete and not subset.authoritative
+    assert subset.complete
+    assert not subset.authoritative
     assert subset_db.seals == 0
 
     full_db = _FakeDb()

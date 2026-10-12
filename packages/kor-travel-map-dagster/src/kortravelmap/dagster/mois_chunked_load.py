@@ -25,7 +25,7 @@ resource는 호출자가 꺼내 넘긴다.
 """
 
 import time
-from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Final, cast
@@ -306,20 +306,6 @@ async def load_mois_license_records_chunked(
             dataset_key=dataset_key,
             reverse_geocoder=prefetcher if prefetcher is not None else reverse_geocoder,
         )
-        reobserved = {key: payload_hashes[key] for key in unchanged}
-
-        async def _load_chunk(
-            batch: list[FeatureBundle], reobserved: dict[str, str] = reobserved
-        ) -> FeatureLoadResult:
-            return await client.load_feature_bundles_reobserving(
-                batch,
-                provider=PROVIDER_NAME,
-                dataset_key=dataset_key,
-                source_entity_type=_LICENSE_ENTITY_TYPE,
-                reobserved_payload_hashes=reobserved,
-                observed_at=observed_at,
-            )
-
         chunk_result = await load_feature_bundles_for_dagster(
             context=cast(AssetExecutionContext, sink),
             client=client,
@@ -328,7 +314,12 @@ async def load_mois_license_records_chunked(
             dataset_key=dataset_key,
             strict_address=strict_address,
             authoritative_snapshot_complete=False,
-            load_all=_load_chunk,
+            load_all=_chunk_loader(
+                client,
+                dataset_key=dataset_key,
+                reobserved={key: payload_hashes[key] for key in unchanged},
+                observed_at=observed_at,
+            ),
             loss_guard_observations=len(chunk),
         )
         merged = _cap_feature_ids(chunk_result if merged is None else merged.merge(chunk_result))
@@ -393,6 +384,28 @@ async def load_mois_license_records_chunked(
     _add_output_metadata(context, metadata)
     _tag_run_outcome(context, outcome.outcome)
     return outcome
+
+
+def _chunk_loader(
+    client: AsyncKorTravelMapClient,
+    *,
+    dataset_key: str,
+    reobserved: Mapping[str, str],
+    observed_at: datetime,
+) -> Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]:
+    """chunk 하나의 transaction — 미변경 재관측 + 변경분 적재를 함께 commit한다."""
+
+    async def _load(batch: Sequence[FeatureBundle]) -> FeatureLoadResult:
+        return await client.load_feature_bundles_reobserving(
+            batch,
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            source_entity_type=_LICENSE_ENTITY_TYPE,
+            reobserved_payload_hashes=reobserved,
+            observed_at=observed_at,
+        )
+
+    return _load
 
 
 async def _empty_load() -> FeatureLoadResult:

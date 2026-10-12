@@ -106,5 +106,5 @@ async def test_it_is_an_observed_geocoder_so_the_converter_cache_uses_it() -> No
 
 @pytest.mark.parametrize("bad", [{"concurrency": 0}, {"concurrency": 1, "max_entries": 0}])
 def test_rejects_non_positive_bounds(bad: dict[str, int]) -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be >= 1"):
         PrefetchingReverseGeocoder(_SlowGeocoder(), **bad)

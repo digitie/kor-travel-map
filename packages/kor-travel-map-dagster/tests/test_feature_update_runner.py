@@ -652,7 +652,8 @@ def test_mois_runner_resources_sync_source_db_before_fetch(
         *,
         service_slugs: tuple[str, ...] | None = None,
     ) -> list[object]:
-        assert service_slugs is not None and len(service_slugs) == 42
+        assert service_slugs is not None
+        assert len(service_slugs) == 42
         calls.append(("fetch", actual_settings.mois_source_db_path))
         return sentinel
 

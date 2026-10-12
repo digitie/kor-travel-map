@@ -380,7 +380,8 @@ class KorTravelMapSettings(BaseSettings):
             "MOIS 재개형 적재 run 하나가 새 chunk를 시작하지 않는 시간 상한(초, ADR-108). "
             "run 상한 6시간(21,600초) 안에서 Phase A sync·마지막 chunk·봉인 여유를 남긴다 — "
             "기본 4시간, 최대 5.5시간. 상한에 닿으면 그때까지 commit한 chunk를 남기고 "
-            "정상 종료하며 다음 run이 이어 간다. env ``KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS``."
+            "정상 종료하며 다음 run이 이어 간다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS``."
         ),
     )
     backup_last_success_warn_hours: int = Field(
