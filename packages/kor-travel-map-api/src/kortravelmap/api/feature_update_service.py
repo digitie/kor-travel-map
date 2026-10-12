@@ -191,6 +191,21 @@ class FeatureUpdateDedicatedJobOnly(RuntimeError, FeatureUpdateServiceError):
         self.operation_keys = tuple(operation_keys)
 
 
+def _guarded_memberships(
+    memberships: Sequence[FeatureUpdateRequestDataset],
+) -> frozenset[tuple[int, str]]:
+    """plan 선행조건(MOIS source sync 등)을 볼 membership — 큐가 실제로 실행할 것만.
+
+    전용 job 전용 operation은 실행 계획이 건너뛰므로 그 선행조건으로 섞인 요청을 막지 않는다
+    (적대 리뷰 LOW-b). 큐로 도는 다른 operation이 같은 provider를 쓰면 그것은 여전히 검사된다.
+    """
+    return frozenset(
+        (membership.provider_dataset_id, membership.sync_scope)
+        for membership in memberships
+        if membership.operation_key not in DEDICATED_JOB_ONLY_OPERATION_KEYS
+    )
+
+
 def _reject_dedicated_job_only_plan(
     memberships: Sequence[FeatureUpdateRequestDataset],
 ) -> None:
@@ -913,12 +928,7 @@ async def create_feature_update_request(
                 canonical_body,
                 operator=operator,
             )
-            await resolved_plan_guard(
-                frozenset(
-                    (membership.provider_dataset_id, membership.sync_scope)
-                    for membership in preview.dataset_memberships
-                )
-            )
+            await resolved_plan_guard(_guarded_memberships(preview.dataset_memberships))
             result = await _find_reusable_active_request(
                 session,
                 scope=scope,

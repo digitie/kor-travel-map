@@ -28,6 +28,12 @@
 - **CHANGED (dagster)**: 소실 하한은 업종 누적·최소 표본(200행)으로, geo가 빈 답만 내면 upstream 장애로 실패,
   재관측 충돌은 그 chunk만 run 안에서 최대 2회 재시도, 시간 상한은 run 시작 기준·run 상한 tag - 30분 이내,
   이어 달리기는 미종료 run이 있거나 마지막 run이 0행이면 멈춘다(적대 리뷰 MED 4건·LOW).
+- **FIXED (dagster)**: geo 장애 판정이 빈 답 비율 뒤에 알려진 좋은 좌표 probe를 한다 — 바다·경계 좌표 행이
+  대부분인 재개 run이 영구 실패하던 것을 막는다. 0행 정지는 상한 절반 이상을 받은 run에만(step 재시도 정체 방지).
+  `_run_clock_start`가 쓸 수 없는 start_time을 무시한다.
+- **CHANGED (api/queue)**: 생성 route 409 설명이 실제로 내는 409(`PROVIDER_DEDICATED_JOB_ONLY`·
+  `MOIS_SOURCE_SYNC_REQUIRED`·`LOCK_BUSY` 등)를 모두 적는다(run-now 설명은 원래대로). 섞인 계획의 plan 선행조건은
+  큐가 실행할 membership에만. `policy_disabled`가 `dedicated_job_only`보다 먼저이고 policy가 비운 계획은 `done`.
 - **CHANGED (image/compose)**: MOIS 원천 SQLite 기본 경로가 `/opt/dagster/state/mois/mois_source.db`(이미지가
   appuser 소유로 만든다). standalone compose의 named volume도 그 디렉터리에 붙는다. 운영 compose는 Manager 변경.
 

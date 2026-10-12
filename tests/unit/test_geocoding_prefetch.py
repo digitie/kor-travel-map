@@ -108,3 +108,30 @@ async def test_it_is_an_observed_geocoder_so_the_converter_cache_uses_it() -> No
 def test_rejects_non_positive_bounds(bad: dict[str, int]) -> None:
     with pytest.raises(ValueError, match="must be >= 1"):
         PrefetchingReverseGeocoder(_SlowGeocoder(), **bad)
+
+
+async def test_probe_prefers_a_coordinate_that_resolved_in_this_run_and_resets_the_window() -> None:
+    upstream = _SlowGeocoder()
+    geocoder = PrefetchingReverseGeocoder(upstream, concurrency=2, recent_window=10)
+    await geocoder.prefetch([_coord(1), _coord(2)])
+    assert geocoder.recent_lookups == 2
+
+    reference = Coordinate(lon=Decimal("127.5"), lat=Decimal("36.5"))
+    assert await geocoder.probe_healthy(reference) is True
+    assert upstream.calls[-1] == geocoder.last_good_coord
+    assert geocoder.recent_lookups == 0
+    assert geocoder.probes == 1
+
+
+async def test_probe_falls_back_to_the_reference_and_reports_empty() -> None:
+    seen: list[Coordinate] = []
+
+    async def _empty(coord: Coordinate) -> Address | None:
+        seen.append(coord)
+        return None
+
+    geocoder = PrefetchingReverseGeocoder(_empty, concurrency=1)
+    reference = Coordinate(lon=Decimal("127.5"), lat=Decimal("36.5"))
+
+    assert await geocoder.probe_healthy(reference) is False
+    assert seen == [reference]

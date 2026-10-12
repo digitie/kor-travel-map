@@ -80,7 +80,10 @@ job의 run 상한 21,600초 - 30분이고, 둘이 갈라지면 테스트가 빨�
 
 **이어 달리기 방어**: sensor는 미종료 MOIS run이 하나라도 있으면 띄우지 않고(schedule tick과의 경합),
 마지막 run이 새 행을 0건 적재하고 상한에 닿았으면(tag `kor_travel_map.mois_load.records_converted=0`)
-멈춘다 — 같은 자리에서 영원히 멈추는 고리를 막는다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1, run
+멈춘다 — 같은 자리에서 영원히 멈추는 고리를 막는다. 단 그 run이 **상한의 절반 이상을 받고 시작했을
+때만**이다(tag `…budget_seconds`·`…budget_available_seconds`). 늦은 실패 뒤의 step 재시도는 run 시작
+기준 상한이 이미 지나 한 chunk(대개 미변경)만 하고 멈추는데, 그것을 "전진 불가"로 보면 다음 월간
+tick까지 정체된다(델타 리뷰 MED-1). tag가 없거나 깨졌으면 이어 달린다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1, run
 단위)이 실행을 직렬화하고, 재개형이라 뒤 run은 건너뛰기만 한다.
 
 ### 3a. 소실 하한과 geo 장애 (적대 리뷰 MED-1)
@@ -94,8 +97,15 @@ chunk 적재 함수의 하한은 끄고(`enforce_loss_guard=False`) 적재기가
   작은 업종의 drop은 행 단위 finding으로만 남는다.
 - **지오코더 원인**(`reverse_geocode_failed`)은 따로 센다. 이런 행은 적재되지 않으므로 다음 run이
   다시 변환한다 — 영구 손실이 아니다. 대신 **geo 장애**는 run 장애로 다룬다: 최근 50건 조회 중
-  20건 이상이 모였고 그 80% 이상이 법정동코드 없이 돌아오면 그 chunk를 적재하기 전에 upstream
-  장애로 실패한다(행을 버리며 진행하지 않는다). 예외(timeout 등)는 원래대로 run을 실패시킨다.
+  20건 이상이 모였고 그 80% 이상이 법정동코드 없이 돌아오면, **알려진 좋은 좌표 하나를 캐시 없이
+  다시 묻는다**(이 run에서 법정동코드를 받은 마지막 좌표, 없으면 내륙 기준점). 그것도 빈 답(또는
+  예외)이면 그 chunk를 적재하기 전에 upstream 장애로 실패한다(행을 버리며 진행하지 않는다). 답이
+  오면 geo는 건강하고 그 빈 답들은 행 단위 사실이다 — 창을 비우고 계속한다.
+  비율만으로 판정하면 재개 run이 영구히 막힌다(델타 리뷰 HIGH-1): 바다·경계처럼 빈 답이 정상인
+  좌표의 행은 적재되지 않아 매 run 다시 변환되고, 적재된 행은 건너뛰므로 재개 run의 조회는 거의
+  전부 그 빈 답이 된다. 표식 표를 두어 그 행을 건너뛰는 안도 검토했으나, 새 저장소·무효화 규칙 없이
+  probe 한 번(최대 50조회마다 1회)으로 같은 판정이 된다. 대가로 그런 행은 매 run 다시 지오코딩된다
+  (소수이고 run 캐시가 중복을 막는다).
 
 ### 3b. 재관측 충돌은 run 안에서 그 chunk만 다시 (적대 리뷰 MED-2)
 
@@ -124,7 +134,10 @@ provider sync 성공을 남긴다. 부분 run·업종 선택 run은 non-authorit
   갱신하지 않은" 요청이 된다.
 - **섞인 계획**: 받는다. 실행 계획이 MOIS 부분을 `skipped_provider_scopes[].reason=dedicated_job_only`로
   빼고, 나머지를 실행한 뒤 request를 `done`으로 닫으면서 **job `error_message`에** 건너뛴
-  dataset·전용 job을 적는다 — `done`이 전부 갱신됐다는 뜻으로 읽히지 않게.
+  dataset·전용 job을 적는다 — `done`이 전부 갱신됐다는 뜻으로 읽히지 않게. 접수 때의 plan 선행조건
+  (MOIS source sync)은 큐가 실제로 실행할 membership에만 건다 — 건너뛸 MOIS 때문에 섞인 요청을 막지 않는다.
+- **skip 사유 순서**: 운영자가 끈 dataset(`policy_disabled`)은 그 사유가 먼저다. 그렇게 policy가 비운
+  계획은 종전처럼 `done`이고, 실패는 건너뛴 것이 **전부** `dedicated_job_only`일 때뿐이다.
 - **실행할 것이 MOIS뿐인 요청**(PinVi cache target refresh처럼 enqueue 거부를 거치지 않는 경로 포함):
   기존 실패 어휘로 끝낸다 — request `failed` + error_message, cache target status event `failed` +
   `error_code=PROVIDER_DEDICATED_JOB_ONLY`, target `last_failed_at` 갱신. 새 상태값을 만들지 않았다.
@@ -157,8 +170,7 @@ compose는 그 디렉터리에 named volume을 붙인다(새 named volume은 이
    run이 Phase A를 다시 받지 않게 운영 값으로 168h 이상을 권한다(주간 sync job이 갱신한다).
 3. snapshot에서 사라진(폐업) MOIS feature retire — 지금도 하지 않는다. 완료 run에 붙일지.
 4. 큐로 오던 MOIS 요청은 지금 409(접수)·`failed`(cache target)로 드러난다. 이를 전용 job launch로
-   자동 전환할지. 그리고 섞인 큐 계획에도 MOIS source sync 선행조건(`MOIS_SOURCE_SYNC_REQUIRED`)이
-   여전히 걸린다 — 큐가 MOIS를 실행하지 않으므로 그 검사를 섞인 계획에서 뺄지.
+   자동 전환할지.
 5. 동시성 기본 2와 상한 4시간 — 검증 run의 geo 지연·n150 IO 압력을 보고 조정.
 6. 재관측 쓰기 비용 — 새 원천 snapshot(주 1회)마다 미변경 행 전부의 head `observed_at`·entity
    `last_seen_at`을 한 번 갱신한다(약 98만 × 2행). `load_bundle`의 재관측 의미를 지키기 위한 것이고 같은

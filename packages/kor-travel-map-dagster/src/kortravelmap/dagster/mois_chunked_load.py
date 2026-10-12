@@ -24,14 +24,16 @@ run_config로 다음 run을 띄운다. 모든 선택 업종을 끝까지 본 run
 resource는 호출자가 꺼내 넘긴다.
 """
 
+import math
 import time
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Final, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
-from kortravelmap.dto import FeatureBundle
+from kortravelmap.dto import Coordinate, FeatureBundle
 from kortravelmap.geocoding import PrefetchingReverseGeocoder, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -98,6 +100,12 @@ MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED: Final[str] = "budget_exhausted"
 MOIS_LOAD_CONVERTED_TAG: Final[str] = "kor_travel_map.mois_load.records_converted"
 """이번 run이 실제로 변환·적재한 행 수. 0이면 이어 달려도 전진하지 않는다."""
 
+MOIS_LOAD_BUDGET_TAG: Final[str] = "kor_travel_map.mois_load.budget_seconds"
+"""이번 run의 실제 시간 상한(초, run 상한 tag로 깎은 값)."""
+
+MOIS_LOAD_AVAILABLE_TAG: Final[str] = "kor_travel_map.mois_load.budget_available_seconds"
+"""적재 loop가 시작할 때 남아 있던 시간(초). step 재시도는 run 시작 기준이라 이것이 작다."""
+
 _LICENSE_ENTITY_TYPE: Final[str] = "license_place"
 """``providers.mois``가 ``SourceRecord.source_entity_type``으로 쓰는 값."""
 
@@ -117,6 +125,11 @@ GEO_OUTAGE_MIN_LOOKUPS: Final[int] = 20
 
 GEO_OUTAGE_EMPTY_RATIO: Final[float] = 0.8
 """최근 조회 중 법정동코드 없이 돌아온 비율이 이 이상이면 upstream 장애로 본다."""
+
+GEO_PROBE_REFERENCE: Final[Coordinate] = Coordinate(
+    lon=Decimal("126.9779692"), lat=Decimal("37.5662952")
+)
+"""장애 판정 probe의 기본 좌표(서울시청, 내륙). 이 run에서 답을 받은 좌표가 있으면 그것이 먼저다."""
 
 REOBSERVATION_CONFLICT_RETRIES: Final[int] = 2
 """확인 뒤 entity가 바뀐 chunk를 run 안에서 다시 확인·적재하는 횟수."""
@@ -310,7 +323,13 @@ def _run_clock_start(context: Any, fallback: float) -> float:
         return fallback
     record = get_record(run_id)
     start_time = getattr(record, "start_time", None)
-    return float(start_time) if start_time else fallback
+    if isinstance(start_time, bool) or not isinstance(start_time, int | float):
+        return fallback
+    started = float(start_time)
+    # 0·음수·무한·미래 시각은 run 시작으로 믿지 않는다 — 상한 계산을 망가뜨린다.
+    if not math.isfinite(started) or started <= 0 or started > fallback:
+        return fallback
+    return started
 
 
 def _run_max_runtime_seconds(context: Any) -> int | None:
@@ -366,9 +385,14 @@ async def load_mois_license_records_chunked(
     )
     mode = _normalize_address_validation_mode(strict_address)
     sink = _ChunkMetadataSink(context)
-    deadline = _run_clock_start(context, clock()) + effective_run_budget_seconds(
+    effective_budget = effective_run_budget_seconds(
         plan.run_budget_seconds, _run_max_runtime_seconds(context)
     )
+    deadline = _run_clock_start(context, clock()) + effective_budget
+    # 0행 정지 규칙은 "상한을 거의 다 쓰고도 전진하지 못한" run에만 적용해야 한다. 늦은 실패
+    # 뒤의 step 재시도는 run 시작 기준 상한이 이미 지나 한 chunk만 하고 멈추므로, 그 run을 보고
+    # 멈추면 한 달짜리 정체가 된다(적대 리뷰 MED-1) — 남은 시간을 tag로 남긴다.
+    budget_available = max(0, int(deadline - clock()))
 
     async def _load_chunk(chunk: list[Any], slug_seen: int, slug_invalid: int) -> _ChunkLoad:
         payload_hashes = {
@@ -390,7 +414,7 @@ async def load_mois_license_records_chunked(
                 for record in to_convert
                 if (coord := license_reverse_geocode_coordinate(record)) is not None
             )
-            _raise_if_geo_outage(prefetcher, slug=str(chunk[0].service_slug))
+            await _raise_if_geo_outage(prefetcher, slug=str(chunk[0].service_slug))
         bundles = await convert(
             to_convert,
             fetched_at=fetched_at,
@@ -534,6 +558,8 @@ async def load_mois_license_records_chunked(
         {
             MOIS_LOAD_OUTCOME_TAG: outcome.outcome,
             MOIS_LOAD_CONVERTED_TAG: str(outcome.records_converted),
+            MOIS_LOAD_BUDGET_TAG: str(int(effective_budget)),
+            MOIS_LOAD_AVAILABLE_TAG: str(budget_available),
         },
     )
     return outcome
@@ -574,22 +600,31 @@ def _raise_if_slug_lost(*, slug: str, seen: int, invalid: int) -> None:
     )
 
 
-def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> None:
-    """최근 조회 대부분이 법정동코드 없이 돌아오면 upstream 장애로 멈춘다 — 행을 버리지 않는다."""
+async def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> None:
+    """최근 조회 대부분이 빈 답이고 **알려진 좋은 좌표도** 빈 답이면 upstream 장애로 멈춘다.
+
+    빈 답 비율만으로 멈추면 재개 run이 영구히 막힌다(적대 리뷰 HIGH-1): drop 모드에서 정상적으로
+    빈 답을 받는 좌표(바다·경계)의 행은 적재되지 않으므로 다음 run마다 다시 변환되고, 이미 적재된
+    행은 건너뛰므로 그 행들이 조회의 대부분이 된다. 그래서 비율이 문턱을 넘으면 probe 한 번으로
+    가른다 — 좋은 좌표가 답을 내면 geo는 건강하고 그 빈 답은 행 단위 사실이다(창을 비우고 계속).
+    """
     if (
         prefetcher.recent_lookups < GEO_OUTAGE_MIN_LOOKUPS
         or prefetcher.recent_empty_ratio < GEO_OUTAGE_EMPTY_RATIO
     ):
         return
+    lookups, ratio = prefetcher.recent_lookups, prefetcher.recent_empty_ratio
+    if await prefetcher.probe_healthy(GEO_PROBE_REFERENCE):
+        return
     raise Failure(
         description=(
-            f"kor-travel-geo 역지오코딩이 최근 {prefetcher.recent_lookups}건 중 "
-            f"{prefetcher.recent_empty_ratio:.0%}를 빈 결과로 돌려준다 — upstream 장애로 보고 "
+            f"kor-travel-geo 역지오코딩이 최근 {lookups}건 중 {ratio:.0%}를 빈 결과로 돌려주고 "
+            "알려진 좋은 좌표 probe도 빈 결과다 — upstream 장애로 보고 "
             f"업종 {slug} 적재를 멈춘다(행을 버리지 않는다). 재시도·재실행은 이어서 적재한다."
         ),
         metadata={
-            "mois_geo_outage_recent_lookups": prefetcher.recent_lookups,
-            "mois_geo_outage_empty_ratio": prefetcher.recent_empty_ratio,
+            "mois_geo_outage_recent_lookups": lookups,
+            "mois_geo_outage_empty_ratio": ratio,
         },
     )
 
@@ -688,6 +723,20 @@ def mois_load_continuation_sensor(
     return mois_load_continuation_decision(runs[0] if runs else None)
 
 
+def _had_most_of_its_budget(tags: Mapping[str, str]) -> bool:
+    """run이 상한의 절반 이상을 받고 시작했는가. tag가 없거나 깨졌으면 아니다(이어 달린다).
+
+    아니면 0행은 "전진할 수 없다"가 아니라 "시간을 못 받았다"이다 — step 재시도가 run 시작
+    기준 상한을 넘겨 한 chunk만 하고 멈춘 경우다. 다음 run은 상한 전체를 받는다.
+    """
+    try:
+        budget = int(tags[MOIS_LOAD_BUDGET_TAG])
+        available = int(tags[MOIS_LOAD_AVAILABLE_TAG])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return budget > 0 and available * 2 >= budget
+
+
 def mois_load_continuation_decision(last: Any) -> RunRequest | SkipReason:
     """가장 최근 MOIS 적재 run(``DagsterRun`` 또는 ``None``)으로 이어 달릴지 정한다."""
     if last is None:
@@ -701,7 +750,7 @@ def mois_load_continuation_decision(last: Any) -> RunRequest | SkipReason:
         )
     if last.tags.get(MOIS_LOAD_OUTCOME_TAG) != MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED:
         return SkipReason(f"마지막 MOIS 적재 run {last.run_id}이 선택 범위를 끝냈다")
-    if last.tags.get(MOIS_LOAD_CONVERTED_TAG) == "0":
+    if last.tags.get(MOIS_LOAD_CONVERTED_TAG) == "0" and _had_most_of_its_budget(last.tags):
         # 상한까지 건너뛰기만 하다 멈췄다 — 같은 run_config로 다시 띄워도 같은 자리에서 멈춘다.
         return SkipReason(
             f"마지막 MOIS 적재 run {last.run_id}이 새 행을 하나도 적재하지 못하고 상한에 "

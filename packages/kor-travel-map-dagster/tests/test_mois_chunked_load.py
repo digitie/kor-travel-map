@@ -832,17 +832,48 @@ def test_settings_budget_ceiling_is_derived_from_the_job_run_cap() -> None:
 # -- 이어 달리기 sensor LOW ---------------------------------------------------------
 
 
-def test_continuation_stops_when_the_last_run_made_no_progress() -> None:
+def _zero_progress_run(*, budget: int, available: int) -> _Run:
+    return _Run(
+        DagsterRunStatus.SUCCESS,
+        {
+            MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED,
+            chunked.MOIS_LOAD_CONVERTED_TAG: "0",
+            chunked.MOIS_LOAD_BUDGET_TAG: str(budget),
+            chunked.MOIS_LOAD_AVAILABLE_TAG: str(available),
+        },
+    )
+
+
+def test_continuation_stops_when_a_full_budget_run_made_no_progress() -> None:
     decision = mois_load_continuation_decision(
-        _Run(
-            DagsterRunStatus.SUCCESS,
-            {
-                MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED,
-                chunked.MOIS_LOAD_CONVERTED_TAG: "0",
-            },
-        )
+        _zero_progress_run(budget=14_400, available=14_000)
     )
     assert isinstance(decision, SkipReason)
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [
+        {chunked.MOIS_LOAD_BUDGET_TAG: "14400", chunked.MOIS_LOAD_AVAILABLE_TAG: "0"},
+        {},
+        {chunked.MOIS_LOAD_BUDGET_TAG: "x", chunked.MOIS_LOAD_AVAILABLE_TAG: "y"},
+    ],
+    ids=["retry-started-past-deadline", "untagged", "garbled"],
+)
+def test_continuation_relaunches_a_zero_progress_run_that_never_had_its_budget(
+    tags: dict[str, str],
+) -> None:
+    """늦은 실패 뒤 step 재시도는 run 시작 기준 상한을 넘겨 한 chunk(미변경)만 하고 멈춘다 —
+    그것을 "전진할 수 없다"로 보면 다음 월간 tick까지 정체된다(적대 리뷰 MED-1)."""
+    run = _Run(
+        DagsterRunStatus.SUCCESS,
+        {
+            MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_BUDGET_EXHAUSTED,
+            chunked.MOIS_LOAD_CONVERTED_TAG: "0",
+            **tags,
+        },
+    )
+    assert isinstance(mois_load_continuation_decision(run), RunRequest)
 
 
 def test_continuation_sensor_waits_while_any_mois_run_is_active() -> None:
@@ -865,3 +896,86 @@ def test_continuation_sensor_waits_while_any_mois_run_is_active() -> None:
     object.__setattr__(context, "_instance", _Instance())
     result = mois_load_continuation_sensor._raw_fn(context)  # noqa: SLF001
     assert isinstance(result, SkipReason)
+
+
+# -- HIGH-1: 재개 run에서 빈 답이 정상인 좌표가 조회를 지배해도 막히지 않는다 ------------
+
+
+async def test_resumed_run_dominated_by_legitimately_empty_coordinates_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """drop 모드에서 바다·경계 좌표 행은 적재되지 않아 다음 run마다 다시 변환된다. 이미 적재된
+    행은 건너뛰므로 재개 run의 조회는 거의 전부 그 빈 답이다 — 비율만 보면 영구히 "장애"다."""
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 50)
+    sea = [
+        _Record(service_slug="bakeries", mng_no=f"s-{i:03d}", lon=129.5 + i / 1000, lat=35.0)
+        for i in range(40)
+    ]
+    land = [
+        _Record(service_slug="bakeries", mng_no=f"l-{i:03d}", lon=126.9 + i / 1000, lat=37.5)
+        for i in range(10)
+    ]
+    records = sorted(sea + land, key=lambda r: r.mng_no)
+
+    class _SeaIsEmpty(_Geocoder):
+        async def __call__(self, coord: Coordinate) -> Address:
+            self.calls.append(coord)
+            if float(coord.lon) >= 129.5:
+                return Address()
+            return Address(bjd_code="1111010100", sigungu_code="11110", sido_code="11")
+
+    db = _FakeDb()
+    first = await _run(records, db, geocoder=_SeaIsEmpty(), strict_address="drop")
+    assert first.complete
+    assert set(db.current) == {license_source_entity_id(r) for r in land}
+
+    geocoder = _SeaIsEmpty()
+    resumed = await _run(records, db, geocoder=geocoder, strict_address="drop")
+
+    assert resumed.complete, "정상적으로 빈 좌표가 대부분인 재개 run이 장애로 판정됐다"
+    assert resumed.records_unchanged == len(land)
+    assert resumed.records_converted == len(sea)
+    # probe가 실제로 나갔다(최근 40건 전부 빈 답 → 좋은 좌표 하나로 확인).
+    assert any(float(c.lon) < 129.5 for c in geocoder.calls)
+
+
+async def test_outage_is_still_detected_when_the_probe_also_comes_back_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chunked, "MOIS_LOAD_CHUNK_SIZE", 30)
+    records = [
+        _Record(service_slug="bakeries", mng_no=f"b-{i:03d}", lon=126.9 + i / 1000, lat=37.5)
+        for i in range(25)
+    ]
+    geocoder = _Geocoder(always_empty=True)
+    db = _FakeDb()
+
+    with pytest.raises(Failure, match="probe"):
+        await _run(records, db, geocoder=geocoder, strict_address="drop")
+    assert db.commits == []
+
+
+# -- LOW-d: run 시작 시각이 쓸 수 없는 값이면 step 시계로 물러난다 -----------------
+
+
+@pytest.mark.parametrize(
+    "start_time", [None, "1700000000", float("nan"), float("inf"), -5.0, 0, True, 9e18]
+)
+def test_run_clock_start_ignores_unusable_start_times(start_time: object) -> None:
+    context = SimpleNamespace(
+        run_id="run-1",
+        instance=SimpleNamespace(
+            get_run_record_by_id=lambda _run_id: SimpleNamespace(start_time=start_time)
+        ),
+    )
+    assert chunked._run_clock_start(context, 1_000.0) == 1_000.0  # noqa: SLF001
+
+
+def test_run_clock_start_uses_a_sane_run_start() -> None:
+    context = SimpleNamespace(
+        run_id="run-1",
+        instance=SimpleNamespace(
+            get_run_record_by_id=lambda _run_id: SimpleNamespace(start_time=400.0)
+        ),
+    )
+    assert chunked._run_clock_start(context, 1_000.0) == 400.0  # noqa: SLF001

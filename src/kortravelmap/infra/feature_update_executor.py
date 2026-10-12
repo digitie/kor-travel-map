@@ -383,15 +383,17 @@ def _skip_reason(
     policy: ProviderRefreshPolicy | None,
     resolution: ScopeResolution,
 ) -> str | None:
-    if operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
-        # ADR-108: 큐는 쓰기를 transaction 하나에 묶어 MOIS chunk commit 적재를 할 수 없다.
-        # policy보다 앞이다 — 어떤 policy도 이 operation을 큐에서 돌게 할 수 없다.
-        return DEDICATED_JOB_ONLY_SKIP_REASON
     override = _override_targeted_policy(
         provider=provider, dataset_key=dataset_key, resolution=resolution
     )
     if policy is not None and not policy.enabled:
         return "policy_disabled"
+    if operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+        # ADR-108: 큐는 쓰기를 transaction 하나에 묶어 MOIS chunk commit 적재를 할 수 없다.
+        # 운영자가 끈 dataset(policy_disabled)은 그 사유를 그대로 보인다 — 그 요청은 원래도
+        # 아무것도 하지 않을 것이므로 실패가 아니다. 켜진 것은 어떤 targeted policy로도 큐에서
+        # 돌지 않는다.
+        return DEDICATED_JOB_ONLY_SKIP_REASON
     effective_targeted_policy = override or (
         policy.targeted_policy if policy is not None else "allow_targeted"
     )
@@ -436,6 +438,21 @@ def _target_ids_for_provider(
 
 
 _DEDICATED_JOB_ONLY_EVENT_CODE = "PROVIDER_DEDICATED_JOB_ONLY"
+
+
+def _plan_emptied_by_dedicated_job_only(plan: FeatureUpdateExecutionPlan) -> bool:
+    """실행할 것이 없고, 건너뛴 것이 **전부** 전용 job 전용 operation인가.
+
+    policy가 꺼서 비어 버린 계획은 종전처럼 ``done``으로 닫는다 — 그 요청은 원래도 아무것도
+    하지 않았을 것이다. 전용 job 사유만으로 비었을 때만 실패로 드러낸다(적대 리뷰 LOW-c).
+    """
+    return (
+        not plan.refresh_scopes
+        and bool(plan.skipped_scopes)
+        and all(
+            scope.reason == DEDICATED_JOB_ONLY_SKIP_REASON for scope in plan.skipped_scopes
+        )
+    )
 
 
 def _dedicated_job_only_note(plan: FeatureUpdateExecutionPlan) -> str | None:
@@ -1231,7 +1248,7 @@ async def _execute_feature_update_request_locked(
 
         assert plan is not None
         dedicated_only = _dedicated_job_only_note(plan)
-        if dedicated_only is not None and not plan.refresh_scopes:
+        if dedicated_only is not None and _plan_emptied_by_dedicated_job_only(plan):
             # 실행할 것이 전용 job 전용 operation뿐이다. "done"으로 닫으면 요청자(PinVi cache
             # target 포함)는 갱신됐다고 믿는다 — 기존 실패 어휘(failed + error_code, target
             # last_failed_at)로 드러낸다(ADR-108).

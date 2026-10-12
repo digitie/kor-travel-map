@@ -434,8 +434,8 @@ async def test_direct_plan_rebuilds_transient_read_scope_from_membership(
 # -- ADR-108: 전용 job 전용 operation -------------------------------------------
 
 
-def test_dedicated_job_only_operation_is_skipped_before_any_policy() -> None:
-    """큐는 MOIS를 실행하지 않는다 — 허용 policy가 있어도 skip 사유가 먼저다."""
+def test_dedicated_job_only_operation_is_never_run_by_the_queue() -> None:
+    """큐는 MOIS를 실행하지 않는다 — 허용 targeted policy가 있어도 skip이다."""
     from kortravelmap.core.feature_operation import (
         DEDICATED_JOB_ONLY_OPERATION_KEYS,
         DEDICATED_JOB_ONLY_SKIP_REASON,
@@ -509,3 +509,47 @@ def test_dedicated_job_only_note_names_the_skipped_dataset_and_job() -> None:
         matched_scope={},
     )
     assert executor._dedicated_job_only_note(other_only) is None
+
+
+def test_a_disabled_policy_keeps_its_own_reason_for_a_dedicated_job_operation() -> None:
+    """운영자가 끈 dataset은 그 사유를 그대로 보인다 — 그 요청은 원래도 아무것도 안 한다."""
+    resolution = ScopeResolution(scope_type="cache_target_keys", features=(), cache_targets=())
+    assert (
+        executor._skip_reason(
+            request=_request(),
+            provider="python-mois-api",
+            dataset_key="mois_license_features_bulk",
+            operation_key="feature_place_mois_licenses_job",
+            policy=_policy(enabled=False),
+            resolution=resolution,
+        )
+        == "policy_disabled"
+    )
+
+
+@pytest.mark.parametrize(
+    ("reasons", "fails"),
+    [
+        (("dedicated_job_only",), True),
+        (("dedicated_job_only", "policy_disabled"), False),
+        (("policy_disabled",), False),
+        ((), False),
+    ],
+    ids=["dedicated-only", "mixed-with-policy", "policy-only", "nothing-skipped"],
+)
+def test_only_a_plan_emptied_by_dedicated_job_skips_fails(
+    reasons: tuple[str, ...], fails: bool
+) -> None:
+    """policy가 비운 계획은 종전처럼 done이다 — 실패는 전용 job 사유만으로 비었을 때뿐이다."""
+    resolution = ScopeResolution(scope_type="cache_target_keys", features=(), cache_targets=())
+    plan = executor.FeatureUpdateExecutionPlan(
+        request=_request(),
+        resolution=resolution,
+        refresh_scopes=(),
+        skipped_scopes=tuple(
+            _skipped(reason, provider_dataset_id=index + 1)
+            for index, reason in enumerate(reasons)
+        ),
+        matched_scope={},
+    )
+    assert executor._plan_emptied_by_dedicated_job_only(plan) is fails

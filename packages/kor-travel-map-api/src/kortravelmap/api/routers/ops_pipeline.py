@@ -96,6 +96,7 @@ from kortravelmap.api.dagster_schema import (
 from kortravelmap.api.db import get_engine, get_session
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
+    FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION,
     to_http_exception,
 )
 from kortravelmap.api.feature_update_schema import (
@@ -2143,6 +2144,12 @@ async def resolve_pipeline_schedule_claim(
         },
         **FEATURE_UPDATE_CONFLICT_RESPONSES,
         **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES,
+        # 위 두 dict가 같은 409를 갖는다 — 병합하면 뒤의 것이 앞의 설명을 지운다. 이 route가
+        # 실제로 내는 409 전부를 한 설명으로 둔다.
+        409: {
+            **mois_source_precheck.MOIS_SOURCE_PRECHECK_ERROR_RESPONSES[409],
+            "description": FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION,
+        },
     },
 )
 async def create_pipeline_update_request(

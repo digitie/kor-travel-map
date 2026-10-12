@@ -322,6 +322,30 @@ class PrefetchingReverseGeocoder:
         self.empty_results = 0
         """upstream이 답은 했지만 법정동코드를 내지 못한 조회 수."""
         self._recent_empty: deque[bool] = deque(maxlen=recent_window)
+        self.last_good_coord: Coordinate | None = None
+        """이 run에서 마지막으로 법정동코드를 받아 온 좌표(장애 판정 probe의 1순위)."""
+        self.probes = 0
+        """:meth:`probe_healthy`가 upstream으로 보낸 확인 조회 수."""
+
+    async def probe_healthy(self, reference: Coordinate) -> bool:
+        """캐시를 거치지 않고 알려진 좋은 좌표 하나를 조회해 geo가 살아 있는지 본다.
+
+        최근 창의 빈 답 비율만으로는 "geo 장애"와 "빈 답이 정상인 좌표(바다·경계)만 남은
+        재개 run"을 가를 수 없다. 이 run에서 법정동코드를 받아 온 좌표(없으면 호출자가 준
+        ``reference``)를 다시 묻는다. 답이 오면 건강하다 — 최근 창을 비워 다음 판정이 새 표본으로
+        다시 시작하게 한다. 빈 답이면 ``False``. 예외는 그대로 올라간다(그것도 장애다).
+        이 조회는 통계 창에 넣지 않는다.
+        """
+        coord = self.last_good_coord or reference
+        self.probes += 1
+        if isinstance(self._geocoder, ObservedReverseGeocoder):
+            address = (await self._geocoder.observe(coord)).address
+        else:
+            address = await self._geocoder(coord)
+        healthy = address is not None and address.bjd_code is not None
+        if healthy:
+            self._recent_empty.clear()
+        return healthy
 
     @property
     def recent_lookups(self) -> int:
@@ -365,6 +389,8 @@ class PrefetchingReverseGeocoder:
         empty = observation.address is None or observation.address.bjd_code is None
         self.empty_results += int(empty)
         self._recent_empty.append(empty)
+        if not empty:
+            self.last_good_coord = coord
         return observation
 
     async def prefetch(self, coords: Iterable[Coordinate]) -> int:

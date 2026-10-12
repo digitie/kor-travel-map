@@ -265,10 +265,10 @@ async def run_mois_weekly_update(
 | retry | 1회, 5분 뒤(재시도도 이어 간다). 재관측 충돌은 run 안에서 그 chunk만 최대 2회 다시 |
 | 시간 기준 | run 시작(run record `start_time`) — 상한은 `min(설정, run 상한 tag - 30분)` |
 | 소실 하한 | 데이터 무효 drop을 업종 누적·관측 200행 이상에서만 판정(> 50%면 commit 전 실패). 지오코더 원인 drop은 따로 세고 다음 run이 다시 시도 |
-| geo 장애 | 최근 조회 20건 이상 중 80% 이상이 빈 답이면 chunk 적재 전 upstream 장애로 실패(행을 버리지 않는다) |
+| geo 장애 | 최근 조회 20건 이상 중 80% 이상이 빈 답이면 알려진 좋은 좌표를 다시 묻고, 그것도 빈 답이면 chunk 적재 전 upstream 장애로 실패(행을 버리지 않는다). 답이 오면 계속 |
 | 봉인·sync 성공 | 전 업종을 한 run 안에서 끝까지 본 run만(`outcome=complete` + 전 업종) |
 | 큐 경로 | MOIS뿐인 요청은 접수 시 409 `PROVIDER_DEDICATED_JOB_ONLY`. 섞인 요청은 MOIS를 건너뛰고 `done` + error_message로 남긴다. 실행할 것이 MOIS뿐인 cache target 요청은 `failed` + `error_code=PROVIDER_DEDICATED_JOB_ONLY` |
-| 이어 달리기 정지 | 실패 run, 미종료 run 존재, 마지막 run이 새 행 0건(`kor_travel_map.mois_load.records_converted=0`)으로 상한 도달 |
+| 이어 달리기 정지 | 실패 run, 미종료 run 존재, 마지막 run이 상한의 절반 이상을 받고도 새 행 0건(`…records_converted=0`, `…budget_seconds`·`…budget_available_seconds`)으로 상한 도달 |
 | 원천 SQLite | `/opt/dagster/state/mois/mois_source.db`(이미지 기본값, appuser 소유). 운영 compose가 그 디렉터리에 named volume을 붙인다 |
 
 run 결과 metadata: `mois_load_outcome`, `mois_load_slugs_completed`, `mois_load_stopped_in_slug`,

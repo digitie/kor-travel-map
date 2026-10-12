@@ -1,3 +1,19 @@
+## 2026-10-12 — MOIS ADR-108 델타 리뷰(PR #1312) HIGH 1·MED 1·LOW 4 반영
+
+- **HIGH-1 geo 장애 오판.** drop 모드에서 바다·경계 좌표 행은 적재되지 않아 매 run 다시 변환되고, 재개 run의 조회를 지배해
+  비율 판정이 영구 실패를 냈다. 비율이 문턱을 넘으면 `PrefetchingReverseGeocoder.probe_healthy`가 이 run에서 법정동코드를
+  받은 마지막 좌표(없으면 서울시청 기준점)를 캐시 없이 다시 묻고, 그것도 빈 답일 때만 장애로 실패한다. 표식 표 대신 probe를
+  고른 이유와 대가는 ADR-108 §3a.
+- **MED-1 재시도 정체.** run tag에 실제 상한(`…budget_seconds`)과 loop 시작 때 남은 시간(`…budget_available_seconds`)을 남기고,
+  0행 정지는 상한 절반 이상을 받은 run에만 적용한다. tag가 없거나 깨지면 이어 달린다.
+- **LOW.** (a) 생성 route 409 설명을 실제 409 전부로(dict 병합이 MOIS precheck 설명으로 덮던 것; run-now 설명은 원복),
+  OpenAPI·admin 타입은 `openapi-typescript@7.13.0`(lock 버전)로 재생성. (b) plan 선행조건은 큐가 실행할 membership만.
+  (c) `policy_disabled`가 먼저, 실패는 건너뛴 것이 전부 `dedicated_job_only`일 때만. (d) `_run_clock_start`가 비숫자·NaN·
+  무한·0 이하·미래 start_time을 무시.
+- 검증(로컬, n150 미사용): ruff·mypy strict 3패키지·lint-imports·OpenAPI drift·TS 타입 재생성 일치. 테스트 84(새·수정)
+  + 377(API 관련) + 163(dagster·lint 관련) passed. mutation 5종(probe 제거·budget tag 무시·any/all·guard 필터 제거·
+  start_time 검사 제거) 전부 RED.
+
 ## 2026-10-12 — MOIS ADR-108 적대 리뷰 MED 4건·LOW 반영: 브랜치 `feat/mois-chunked-resumable-load`
 
 - **MED-1 소실 하한.** chunk마다 재던 drop 비율 하한을 끄고(`enforce_loss_guard=False`) 업종 누적·최소 표본 200행에서
