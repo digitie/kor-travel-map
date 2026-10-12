@@ -81,6 +81,8 @@ __all__ = [
     "resolve_license_category",
     "resolve_license_place_kind",
     "license_source_entity_id",
+    "license_record_payload_hash",
+    "license_reverse_geocode_coordinate",
     "PROVIDER_NAME",
     "DATASET_KEY_BULK",
     "DATASET_KEY_HISTORY",
@@ -515,6 +517,35 @@ def license_source_entity_id(record: MoisLicensePlaceRecord) -> str:
     (bulk 적재 시와 동일 공식, ADR-009 — ``|`` 금지 ``::``).
     """
     return f"{record.service_slug}{_NATURAL_KEY_SEP}{record.mng_no or ''}"
+
+
+def license_record_payload_hash(record: MoisLicensePlaceRecord) -> str:
+    """``license_record_to_bundle``이 ``SourceRecord.raw_payload_hash``로 쓸 값을 미리 계산한다.
+
+    지오코딩 **전에** 알 수 있는 값이다 — ``_raw_data``는 원천 필드만 담고 역지오코딩
+    결과를 담지 않는다. 그래서 재개형 적재(ADR-108)가 "이 record는 이미 같은 payload로
+    적재돼 있는가"를 지오코딩 없이 물을 수 있다. PROMOTED 슬러그가 아니면 변환 함수와
+    같은 이유로 ``ValueError``다.
+    """
+    category = resolve_license_category(record.service_slug)
+    if category is None:
+        raise ValueError(
+            f"service_slug={record.service_slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가."
+        )
+    return make_payload_hash(_raw_data(record, category=category))
+
+
+def license_reverse_geocode_coordinate(record: MoisLicensePlaceRecord) -> Coordinate | None:
+    """변환이 역지오코딩을 **부를** record면 그 좌표를, 아니면 ``None``을 돌려준다.
+
+    ``license_record_to_bundle``의 분기와 같은 조건이다 — 원천이 법정동 코드를 이미
+    주면(``legal_dong_code``) 역지오코딩하지 않고, 좌표가 없거나 한국 경계 밖이어도
+    부르지 않는다. 적재기는 이것으로 chunk의 좌표를 미리 모아 bounded 동시성으로
+    한 번에 조회한다(ADR-108).
+    """
+    if normalize_bjd_code(record.legal_dong_code) is not None:
+        return None
+    return _coord_from(record.lon, record.lat)
 
 
 def _maki_for(category: str) -> str:

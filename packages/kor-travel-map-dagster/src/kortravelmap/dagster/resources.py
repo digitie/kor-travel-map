@@ -33,6 +33,7 @@ from kortravelmap.providers.knps import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 
+from dagster import Array, String
 from dagster import Field as DagsterField
 from dagster import InitResourceContext, ResourceDefinition, resource
 
@@ -40,6 +41,7 @@ from .feature_operation_tracking import (
     ensure_feature_operation_guard_for_provider,
     feature_operation_guard_resource,
 )
+from .mois_chunked_load import MoisLoadPlan, resolve_mois_load_plan
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
@@ -71,6 +73,8 @@ from .provider_fetchers import (
 
 __all__ = [
     "PROVIDER_RECORD_RESOURCE_DEFINITIONS",
+    "mois_license_records_resource",
+    "mois_load_plan_resource",
     "PROVIDER_RECORD_RESOURCE_SPECS",
     "ProviderRecordResourceSpec",
     "build_offline_upload_store_from_settings",
@@ -641,23 +645,66 @@ _MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
 """MOIS 인허가 spec 참조 (live resource override용)."""
 
 
-def _sync_then_fetch_mois_license_records(
-    settings: KorTravelMapSettings,
-) -> Iterable[Any]:
-    """MOIS Phase A source DB가 stale/missing일 때만 sync한 뒤 Phase B record를 읽는다.
+@resource(
+    config_schema={
+        "service_slugs": DagsterField(
+            Array(String),
+            default_value=[],
+            is_required=False,
+            description=(
+                "적재할 MOIS 업종 slug. 비어 있으면 PROMOTED 전 업종이다. 검증 run은 작은 "
+                "업종 하나를 준다(ADR-108). PROMOTED가 아닌 이름은 run 시작에서 거부한다."
+            ),
+        )
+    },
+    description=(
+        "MOIS 재개형 적재 plan — run_config의 업종 선택 + settings의 지오코딩 동시성·run "
+        "시간 상한(ADR-108)."
+    ),
+)
+def mois_load_plan_resource(context: InitResourceContext) -> MoisLoadPlan:
+    """run_config에서 업종 선택을 받아 검증된 plan을 만든다."""
+    return resolve_mois_load_plan(
+        KorTravelMapSettings(),
+        cast(list[str], context.resource_config.get("service_slugs") or []),
+    )
+
+
+@resource(
+    required_resource_keys={
+        "feature_operation_guard",
+        "kor_travel_map_client",
+        "mois_load_plan",
+    },
+    description=(
+        f"{_MOIS_LICENSE_RECORDS_SPEC.resource_key} provider record live fetcher "
+        f"({_MOIS_LICENSE_RECORDS_SPEC.provider_package}, plan 업종만)."
+    ),
+)
+def mois_license_records_resource(context: InitResourceContext) -> Iterable[Any]:
+    """MOIS Phase A source DB가 stale/missing일 때만 sync한 뒤 plan 업종의 record를 읽는다.
 
     #617 리뷰: 매 read마다 전국 Phase A sync를 돌리지 않고 freshness 게이트를 통과한
-    경우에만 sync한다(``ensure_mois_source_db_fresh``).
+    경우에만 sync한다(``ensure_mois_source_db_fresh``). 업종 선택은 SQLite 질의까지
+    내려간다 — 검증 run이 전국 행을 읽고 버리지 않게.
     """
-    ensure_mois_source_db_fresh(settings)
-    return fetch_mois_license_records(settings)
-
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = (
-    build_provider_record_live_resource(
-        _MOIS_LICENSE_RECORDS_SPEC,
-        _sync_then_fetch_mois_license_records,
+    ensure_feature_operation_guard_for_provider(
+        context,
+        boundary=_MOIS_LICENSE_RECORDS_SPEC.resource_key,
     )
-)
+    settings = KorTravelMapSettings()
+    if settings.mois_source_db_path is None:
+        raise RuntimeError(
+            _provider_guard_message(_MOIS_LICENSE_RECORDS_SPEC, has_required_settings=False)
+        )
+    plan = cast(MoisLoadPlan, context.resources.mois_load_plan)
+    ensure_mois_source_db_fresh(settings)
+    return _ProviderRecordIterable(
+        fetch_mois_license_records(settings, service_slugs=plan.service_slugs)
+    )
+
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = mois_license_records_resource
 
 _KNPS_POINT_RECORDS_SPEC: ProviderRecordResourceSpec = next(
     spec

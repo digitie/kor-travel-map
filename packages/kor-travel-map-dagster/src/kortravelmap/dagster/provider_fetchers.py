@@ -694,6 +694,8 @@ async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncItera
 
 def fetch_mois_license_records(
     settings: KorTravelMapSettings,
+    *,
+    service_slugs: tuple[str, ...] | None = None,
 ) -> Iterator[Any]:
     """미리 sync된 MOIS 소스 SQLite DB에서 영업중 인허가 record를 stream한다.
 
@@ -707,6 +709,9 @@ def fetch_mois_license_records(
     ``mois.db.iter_open_place_records(session, service_slugs=...)``의 record
     (``mois.db.PlaceRecord``, krtour ``MoisLicensePlaceRecord`` Protocol 충족)를
     lazily yield한다. scope는 krtour ``PROMOTED_SERVICE_SLUGS``(42 업종)로 좁힌다.
+    ``service_slugs``를 주면 그 업종만 읽는다(재개형 적재의 업종 선택, ADR-108) — PROMOTED
+    밖의 이름은 조용히 비우지 않고 ``ValueError``로 거부한다. 순서는 provider가 정한
+    ``(service_slug, mng_no)``이므로 업종은 한 번에 하나씩 연속으로 나온다.
     generator가 살아 있는 동안 session은 열려 있고, 소비 종료(또는 close)시
     ``finally``에서 ``session.close()`` + ``engine.dispose()``로 정리한다.
     """
@@ -725,6 +730,16 @@ def fetch_mois_license_records(
     # PROMOTED_SERVICE_SLUGS는 krtour(본 repo)이므로 top-level import으로 충분.
     from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
 
+    if service_slugs is None:
+        selected = tuple(sorted(PROMOTED_SERVICE_SLUGS))
+    else:
+        unknown = sorted(set(service_slugs) - PROMOTED_SERVICE_SLUGS)
+        if unknown or not service_slugs:
+            raise ValueError(
+                f"MOIS 적재 업종 선택이 PROMOTED 업종이 아니다: {unknown or '(빈 선택)'}"
+            )
+        selected = tuple(sorted(set(service_slugs)))
+
     # 파일 registry hook (H9) — Phase B가 소스 DB 소비를 시작했음을 기록.
     # consumer가 run당 generator를 한 번 생성하는 경로라 memo 불필요, 내부에서
     # 실패 무해화. 지연 import로 모듈 초기화 순환을 피한다.
@@ -735,10 +750,7 @@ def fetch_mois_license_records(
     engine = create_engine(f"sqlite:///{db_path}")
     session = Session(engine)
     try:
-        yield from mois_db.iter_open_place_records(
-            session,
-            service_slugs=tuple(sorted(PROMOTED_SERVICE_SLUGS)),
-        )
+        yield from mois_db.iter_open_place_records(session, service_slugs=selected)
     finally:
         session.close()
         engine.dispose()

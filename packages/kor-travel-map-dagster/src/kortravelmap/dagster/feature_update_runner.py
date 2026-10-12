@@ -64,6 +64,7 @@ from .assets import (
     run_feature_route_krforest_mountain_trails,
 )
 from .mcst_features import run_feature_place_mcst_culture
+from .mois_chunked_load import resolve_mois_load_plan
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
@@ -101,6 +102,7 @@ from .upstream_requests import (
 from .upstream_retry import sharing_run_retry_budget
 
 __all__ = [
+    "DEDICATED_JOB_ONLY_OPERATION_KEYS",
     "FeatureUpdateAssetRunner",
     "FeatureUpdateRunnerSpec",
     "feature_update_runner_resource",
@@ -120,6 +122,19 @@ _COMMON_RESOURCE_KEYS: Final[set[str]] = {
 }
 
 _MISSING: Final = object()
+
+DEDICATED_JOB_ONLY_OPERATION_KEYS: Final[frozenset[str]] = frozenset(
+    {"feature_place_mois_licenses_job"}
+)
+"""큐로는 실행하지 않고 **전용 Dagster job으로만** 도는 operation (ADR-108).
+
+큐 runner는 asset의 client 호출을 executor가 소유한 transaction **하나**에 결합한다
+(:func:`_bind_client_to_session`). MOIS 재개형 적재는 chunk마다 commit해야 성립하므로 이
+경로에서는 98만 행이 다시 한 transaction이 된다 — 늦은 실패가 전부를 되감고, run 상한 안에
+끝나지도 않는다. 게다가 MOIS fetcher는 scope를 보지 않으므로 반경 하나짜리 targeted 요청도
+전국 적재가 된다. 그래서 scope 종류와 무관하게 건너뛰고, 적재는
+``feature_place_mois_licenses_job``(schedule·이어 달리기 sensor·수동 launch)이 맡는다.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +256,31 @@ class FeatureUpdateAssetRunner:
         session: AsyncSession,
         scope: ProviderDatasetRefreshScope,
     ) -> ProviderDatasetRefreshResult:
+        if scope.operation_key in DEDICATED_JOB_ONLY_OPERATION_KEYS:
+            log_info = getattr(self._log, "info", None)
+            if callable(log_info):
+                log_info(
+                    "%s는 전용 Dagster job으로만 적재한다 — 큐 요청을 건너뛴다(ADR-108).",
+                    scope.operation_key,
+                )
+            return ProviderDatasetRefreshResult(
+                provider_dataset_id=scope.provider_dataset_id,
+                sync_scope=scope.sync_scope,
+                operation_key=scope.operation_key,
+                provider=scope.provider,
+                dataset_key=scope.dataset_key,
+                status="skipped",
+                metadata={
+                    "provider_dataset_id": scope.provider_dataset_id,
+                    "sync_scope": scope.sync_scope,
+                    "operation_key": scope.operation_key,
+                    "provider": scope.provider,
+                    "dataset_key": scope.dataset_key,
+                    "skipped": True,
+                    "skip_reason": "dedicated_job_only",
+                    "scope_type": scope.scope_type,
+                },
+            )
         spec = self._spec_for_scope(scope)
         failure_sync_scope = scope.sync_scope
         if (
@@ -605,10 +645,16 @@ def _mois_resources(
     settings: KorTravelMapSettings,
     scope: ProviderDatasetRefreshScope,
 ) -> RunnerResources:
+    # 큐는 MOIS를 건너뛴다(``DEDICATED_JOB_ONLY_OPERATION_KEYS``). 이 factory는 spec을
+    # asset 계약과 맞춰 두기 위해 남는다 — 직접 부르면 전 업종 plan을 쓴다.
+    plan = resolve_mois_load_plan(settings)
     ensure_mois_source_db_fresh(settings)
     return RunnerResources(
         {
-            "mois_license_records": fetch_mois_license_records(settings),
+            "mois_load_plan": plan,
+            "mois_license_records": fetch_mois_license_records(
+                settings, service_slugs=plan.service_slugs
+            ),
             "mois_dataset_key": scope.dataset_key or MOIS_BULK_DATASET_KEY,
         }
     )

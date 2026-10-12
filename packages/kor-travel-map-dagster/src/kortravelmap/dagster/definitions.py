@@ -31,6 +31,7 @@ from .manual_provider_dedup import (
     MANUAL_PROVIDER_DEDUP_SCHEDULES,
 )
 from .mcst_features import MCST_FEATURE_ASSETS
+from .mois_chunked_load import mois_load_continuation_sensor
 from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
@@ -38,6 +39,7 @@ from .resources import (
     datagokr_file_data_dataset_key_resource,
     feature_operation_guard_resource,
     kor_travel_map_client_resource,
+    mois_load_plan_resource,
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
@@ -63,6 +65,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "krheritage_events",
     "mois_license_records",
     "mois_dataset_key",
+    "mois_load_plan",
     "knps_point_records",
     "knps_point_dataset_key",
     "knps_geometry_records",
@@ -113,6 +116,7 @@ DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
     "reverse_geocoder": reverse_geocoder_resource,
+    "mois_load_plan": mois_load_plan_resource,
     "datagokr_file_data_dataset_key": datagokr_file_data_dataset_key_resource,
     **PROVIDER_RECORD_RESOURCE_DEFINITIONS,
 }
@@ -198,7 +202,11 @@ defs = Definitions(
         *MANUAL_PROVIDER_DEDUP_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
     ],
-    sensors=[*FEATURE_UPDATE_SENSORS, *FEATURE_OPERATION_TRACKING_SENSORS],
+    sensors=[
+        *FEATURE_UPDATE_SENSORS,
+        *FEATURE_OPERATION_TRACKING_SENSORS,
+        mois_load_continuation_sensor,
+    ],
     resources={
         key: (
             _value_resource(key, DEFAULT_RESOURCE_VALUES[key])

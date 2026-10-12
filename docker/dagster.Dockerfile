@@ -65,7 +65,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DAGSTER_HOME=/opt/dagster/dagster_home \
     HOME=/opt/dagster/state \
     KOR_TRAVEL_MAP_IMAGE_REVISION="$KOR_TRAVEL_MAP_GIT_COMMIT" \
-    KOR_TRAVEL_MAP_DAGSTER_PROFILE=production
+    KOR_TRAVEL_MAP_DAGSTER_PROFILE=production \
+    KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH=/opt/dagster/state/mois/mois_source.db
 
 WORKDIR /app
 
@@ -74,9 +75,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system appuser \
     && useradd --system --gid appuser --home-dir /opt/dagster/state --shell /usr/sbin/nologin appuser \
-    && mkdir -p "$DAGSTER_HOME" /opt/dagster/state \
+    && mkdir -p "$DAGSTER_HOME" /opt/dagster/state/mois \
     && chown -R root:root /app /opt/dagster \
-    && chown appuser:appuser /opt/dagster/state
+    && chown appuser:appuser /opt/dagster/state /opt/dagster/state/mois
 
 COPY --from=builder /install /usr/local
 # Map application Alembic graph와 baseline sidecar는 API image만 소유한다. Dagster

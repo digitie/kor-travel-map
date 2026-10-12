@@ -318,12 +318,18 @@ async def load_feature_bundles_for_dagster(
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
     load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
     | None = None,
+    loss_guard_observations: int | None = None,
 ) -> DagsterFeatureLoadResult:
     """주소/좌표 검증 후 ``AsyncKorTravelMapClient``로 PostGIS에 적재한다.
 
     ``strict_address``(모드 ``strict``/``drop``/``off``, bool 하위호환)는
     error-severity 검증 이슈 처리 정책을 정한다 — ``strict``는 run 실패,
     ``drop``은 해당 row만 제외 + 메타데이터 기록, ``off``는 전부 적재 (#376).
+
+    ``loss_guard_observations``는 drop 모드 소실 하한의 분모다. 기본은 ``bundles`` 수다.
+    재개형 적재(ADR-108)는 이미 적재돼 있어 변환하지 않은 record도 "관측했고 남아
+    있는" 것이므로 분모에 넣어 준다 — 넣지 않으면 변경분 두 건이 둘 다 버려진 chunk가
+    100% 소실로 판정돼, 정상 상태에서 run이 영구히 실패한다.
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
@@ -383,8 +389,13 @@ async def load_feature_bundles_for_dagster(
         # 적재 **전에** 센다. 이 하한이 터지면 아무것도 적재하지 않는다 —
         # dataset의 절반 넘게 버린 실행을 성공으로 남기면, 남은 조각이 그 dataset의
         # 전부인 것처럼 보이고 그 상태가 다음 snapshot의 기준이 된다.
+        loss_denominator = (
+            source_observations
+            if loss_guard_observations is None
+            else loss_guard_observations
+        )
         if _dataset_was_lost(
-            dropped=dropped_feature_count, observed=source_observations
+            dropped=dropped_feature_count, observed=loss_denominator
         ):
             await _fail_before_load(
                 context,
@@ -394,13 +405,13 @@ async def load_feature_bundles_for_dagster(
                 dataset_key=dataset_key,
                 source_identities=source_identities,
                 description=(
-                    f"{dataset_key}: 상류 {source_observations}건 중 "
+                    f"{dataset_key}: 상류 {loss_denominator}건 중 "
                     f"{dropped_feature_count}건을 주소/좌표 검증에서 버렸다 — "
                     "적재가 아니라 소실이다. provider payload가 바뀌었는지, "
                     "변환이 위치 단서를 잃었는지 확인할 것."
                 ),
                 extra_metadata=_dataset_loss_metadata(
-                    dropped=dropped_feature_count, observed=source_observations
+                    dropped=dropped_feature_count, observed=loss_denominator
                 ),
             )
 

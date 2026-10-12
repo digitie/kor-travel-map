@@ -273,7 +273,13 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         job_name="feature_place_mois_licenses_job",
         schedule_name="feature_place_mois_licenses_monthly_schedule",
         cron_schedule="35 4 2 * *",
-        description="MOIS 인허가 place Feature 월 1회 bulk 적재.",
+        description=(
+            "MOIS 인허가 place Feature 월 1회 재개형 적재 시작(ADR-108). run 하나는 시간 "
+            "상한까지만 가고, 나머지는 feature_place_mois_licenses_continuation_sensor가 잇는다."
+        ),
+        # 이어 달리기 run이 도는 중에 월간 tick이 오면 겹쳐 띄우지 않는다 — 재개형이라
+        # 겹쳐도 틀리지는 않지만 GEO_HEAVY pool 뒤에 같은 일을 하나 더 줄 세울 뿐이다.
+        coalesce_active_runs=True,
     ),
     # KNPS: ``0089_tvn33_expand_seed``가 이 두 operation에 각각 dataset 5개를
     # 결박하지만 asset은 run 1회에 ``knps_*_dataset_key`` resource가 가리키는 1개만

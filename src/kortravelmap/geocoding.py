@@ -43,9 +43,10 @@ ADR 참조
 
 from __future__ import annotations
 
+import asyncio
 import math
-from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections import Counter, OrderedDict
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import (
@@ -152,6 +153,7 @@ __all__ = [
     "AddressGeocoder",
     "AddressResolver",
     "ObservedReverseGeocoder",
+    "PrefetchingReverseGeocoder",
     "ReverseGeocodeObservation",
     "ReverseGeocoder",
     "cached_address_resolver",
@@ -269,6 +271,115 @@ class _CachedObservedReverseGeocoder:
                 observation = ReverseGeocodeObservation(address, names)
             self._cache[key] = observation
         return self._cache[key]
+
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        return (await self.observe(coord)).address
+
+
+class PrefetchingReverseGeocoder:
+    """run 수명의 bounded LRU 캐시 + bounded 동시성 선조회를 갖는 역지오코더 (ADR-108).
+
+    ``cached_reverse_geocoder``는 변환 호출 **한 번** 동안만 살고 좌표를 하나씩 순서대로
+    부른다. 수십만 건 적재에서는 두 가지가 모자라다 — chunk를 넘어 같은 건물 좌표가
+    반복되고, kor-travel-geo는 batch endpoint가 없어 왕복 지연이 그대로 누적된다.
+
+    그래서 적재기가 chunk의 좌표를 먼저 모아 :meth:`prefetch`로 **최대
+    ``concurrency``개까지 동시에** 조회해 캐시에 채운다. 그 뒤 변환 함수가 평소처럼
+    좌표를 하나씩 부르면 캐시에서 바로 나온다. 동시성 상한은 geo의 용량을 지키는
+    유일한 손잡이이므로 보수적으로 둔다(호출자가 settings에서 읽는다).
+
+    - 결과가 ``None``인 좌표도 캐시한다(``cached_reverse_geocoder``와 같다).
+    - 선조회에서 **예외**가 난 좌표는 캐시하지 않는다. 변환이 그 좌표를 다시 부를 때 한 번
+      더 실시간으로 시도하고, 그래도 실패하면 예외가 그대로 올라간다 — 실패를 ``None``으로
+      삼키면 bjd가 빈 feature가 조용히 적재된다.
+    - 캐시는 ``max_entries``에서 가장 오래 안 쓴 항목부터 버린다(메모리 상한).
+    """
+
+    def __init__(
+        self,
+        geocoder: ReverseGeocoder,
+        *,
+        concurrency: int,
+        max_entries: int = 50_000,
+        precision: int = _DEFAULT_COORD_PRECISION,
+    ) -> None:
+        if concurrency < 1:
+            raise ValueError("concurrency must be >= 1")
+        if max_entries < 1:
+            raise ValueError("max_entries must be >= 1")
+        self._geocoder = geocoder
+        self._concurrency = concurrency
+        self._max_entries = max_entries
+        self._precision = precision
+        self._cache: OrderedDict[tuple[str, str], ReverseGeocodeObservation] = OrderedDict()
+        self.live_calls = 0
+        """upstream으로 실제로 나간 조회 수(선조회 + 캐시 미스)."""
+        self.cache_hits = 0
+        """캐시에서 바로 답한 조회 수(선조회 단계의 중복 제거 포함)."""
+        self.prefetch_failures = 0
+        """선조회에서 예외가 나 캐시하지 않은 좌표 수."""
+
+    def _key(self, coord: Coordinate) -> tuple[str, str]:
+        return (
+            f"{coord.lon:.{self._precision}f}",
+            f"{coord.lat:.{self._precision}f}",
+        )
+
+    def _remember(self, key: tuple[str, str], observation: ReverseGeocodeObservation) -> None:
+        self._cache[key] = observation
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._max_entries:
+            self._cache.popitem(last=False)
+
+    async def _lookup(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        self.live_calls += 1
+        if isinstance(self._geocoder, ObservedReverseGeocoder):
+            return await self._geocoder.observe(coord)
+        address = await self._geocoder(coord)
+        names = (address.sigungu_name,) if address is not None and address.sigungu_name else ()
+        return ReverseGeocodeObservation(address, names)
+
+    async def prefetch(self, coords: Iterable[Coordinate]) -> int:
+        """캐시에 없는 좌표를 중복 없이 최대 ``concurrency``개씩 동시에 조회한다.
+
+        반환값은 이번에 upstream으로 보낸 조회 수다.
+        """
+        pending: dict[tuple[str, str], Coordinate] = {}
+        for coord in coords:
+            key = self._key(coord)
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                self.cache_hits += 1
+            elif key in pending:
+                self.cache_hits += 1
+            else:
+                pending[key] = coord
+        if not pending:
+            return 0
+        gate = asyncio.Semaphore(self._concurrency)
+
+        async def _one(key: tuple[str, str], coord: Coordinate) -> None:
+            async with gate:
+                try:
+                    observation = await self._lookup(coord)
+                except Exception:  # noqa: BLE001 — 캐시하지 않고 변환의 실시간 재시도에 맡긴다
+                    self.prefetch_failures += 1
+                    return
+            self._remember(key, observation)
+
+        await asyncio.gather(*(_one(key, coord) for key, coord in pending.items()))
+        return len(pending)
+
+    async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        key = self._key(coord)
+        cached = self._cache.get(key)
+        if cached is not None:
+            self._cache.move_to_end(key)
+            self.cache_hits += 1
+            return cached
+        observation = await self._lookup(coord)
+        self._remember(key, observation)
+        return observation
 
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address

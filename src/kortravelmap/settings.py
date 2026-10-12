@@ -361,6 +361,28 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS``. 0이면 항상 sync."
         ),
     )
+    mois_geocode_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "MOIS 재개형 적재(ADR-108)가 kor-travel-geo 역지오코딩을 동시에 보내는 상한. "
+            "geo에는 batch endpoint가 없어 이것이 처리량과 geo 부하를 함께 정한다 — n150은 "
+            "디스크 대기로 포화돼 있어(ReadTimeout) 기본값은 보수적으로 2다. "
+            "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
+        ),
+    )
+    mois_load_run_budget_seconds: int = Field(
+        default=14_400,
+        ge=60,
+        le=19_800,
+        description=(
+            "MOIS 재개형 적재 run 하나가 새 chunk를 시작하지 않는 시간 상한(초, ADR-108). "
+            "run 상한 6시간(21,600초) 안에서 Phase A sync·마지막 chunk·봉인 여유를 남긴다 — "
+            "기본 4시간, 최대 5.5시간. 상한에 닿으면 그때까지 commit한 chunk를 남기고 "
+            "정상 종료하며 다음 run이 이어 간다. env ``KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS``."
+        ),
+    )
     backup_last_success_warn_hours: int = Field(
         default=BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT,
         ge=1,
