@@ -10,6 +10,17 @@
 
 ## [Unreleased]
 
+### 고속도로 돌발 job pool 고갈 수정 (2026-10-13)
+
+- **FIXED (client)**: `AsyncKorTravelMapClient.provider_run_lock`이 advisory lock을 잡은 연결에 client의 session
+  factory를 lock 구간 동안 묶는다. Dagster `kor_travel_map_client`(ADR-107: `pool_size=1, max_overflow=0`)에서
+  `feature_notice_transport_highway_incidents_job`이 첫 DB 호출에서 `QueuePool limit of size 1 overflow 0`으로
+  죽던 결함(prod run `bfd18ef5`)을 고친다. client 객체 identity는 그대로이고, 큐 경로(executor transaction에 결합된
+  client)는 종전 동작이다.
+- **FIXED (client)**: `drain_expired_cache_target_snapshots`의 batch·관측 session도 lock 연결 위에서 연다
+  (`cache_target_snapshot_gc` job의 같은 잠복 결함).
+- **ADDED (infra)**: `kortravelmap.infra.db.make_connection_session_factory(connection)`.
+
 ### weather 잔재 정리 (2026-10-13, ADR-105 후속)
 
 - **REMOVED (library)**: `kortravelmap.core.make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`(및
