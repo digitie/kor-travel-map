@@ -594,7 +594,8 @@ class PipelineScheduleClaimResolutionResponse(BaseModel):
 
 _PIPELINE_OVERVIEW_QUERY = """
 query KorTravelMapPipelineOverview(
-  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!
+  $limit: Int!, $repositorySelector: RepositorySelector!, $runsFilter: RunsFilter!,
+  $sensorTicksAfter: Float!
 ) {
   version
   repositoryOrError(repositorySelector: $repositorySelector) {
@@ -607,7 +608,7 @@ query KorTravelMapPipelineOverview(
         name
         sensorState {
           status
-          ticks(limit: 3) {
+          ticks(limit: 3, afterTimestamp: $sensorTicksAfter) {
             tickId
             status
             timestamp
@@ -694,7 +695,10 @@ query KorTravelMapPipelineDagsterRuns(
 """
 
 _PIPELINE_SCHEDULES_QUERY = """
-query KorTravelMapPipelineSchedules($repositorySelector: RepositorySelector!) {
+query KorTravelMapPipelineSchedules(
+  $repositorySelector: RepositorySelector!,
+  $scheduleTicksAfter: Float!, $sensorTicksAfter: Float!
+) {
   repositoryOrError(repositorySelector: $repositorySelector) {
     __typename
     ... on Repository {
@@ -715,7 +719,7 @@ query KorTravelMapPipelineSchedules($repositorySelector: RepositorySelector!) {
           status
           repositoryName
           repositoryLocationName
-          ticks(limit: 3) {
+          ticks(limit: 3, afterTimestamp: $scheduleTicksAfter) {
             tickId
             status
             timestamp
@@ -732,7 +736,7 @@ query KorTravelMapPipelineSchedules($repositorySelector: RepositorySelector!) {
         name
         sensorState {
           status
-          ticks(limit: 3) {
+          ticks(limit: 3, afterTimestamp: $sensorTicksAfter) {
             tickId
             status
             timestamp
@@ -1160,6 +1164,7 @@ async def get_pipeline_overview(
                     "limit": run_limit,
                     "repositorySelector": dagster_urls.repository_selector(),
                     "runsFilter": dagster_urls.runs_filter(),
+                    **dagster_graphql.tick_window_variables(schedules=False),
                 },
                 query=_PIPELINE_OVERVIEW_QUERY,
             )
@@ -1859,7 +1864,10 @@ async def list_pipeline_schedules(
         payload = await dagster_graphql.post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"repositorySelector": dagster_urls.repository_selector()},
+            variables={
+                "repositorySelector": dagster_urls.repository_selector(),
+                **dagster_graphql.tick_window_variables(),
+            },
             query=_PIPELINE_SCHEDULES_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:

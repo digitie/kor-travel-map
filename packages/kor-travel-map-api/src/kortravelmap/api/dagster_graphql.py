@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from time import time
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -33,6 +34,8 @@ __all__ = [
     "DagsterUrls",
     "JsonDict",
     "REPOSITORY_RUN_TAG_KEY",
+    "SCHEDULE_TICK_WINDOW_SECONDS",
+    "SENSOR_TICK_WINDOW_SECONDS",
     "as_dict",
     "candidate_graphql_url",
     "candidate_internal_graphql_url",
@@ -47,6 +50,7 @@ __all__ = [
     "repository_connection",
     "repository_guard_error",
     "run_repository_origin",
+    "tick_window_variables",
 ]
 
 JsonDict = dict[str, Any]
@@ -106,6 +110,38 @@ _FILE_DOWNLOAD_SCHEDULE_HINTS = {
 #: ``.dagster/*``(``TagType.HIDDEN``)를 걸러 내고 돌려준다(``GrapheneRun.resolve_tags``,
 #: n150 1.13.24 실측). run 하나의 소속은 ``Run.repositoryOrigin``으로 읽는다.
 REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
+
+
+#: ``ticks(limit: N)`` 조회 창. ``afterTimestamp``가 없으면 Dagster는 instigator의 **전체**
+#: tick 이력을 storage에서 읽는다 — 공유 ``dagster_shared``의 ``job_ticks``(2026-10-13 약
+#: 40만 행)에서 overview 한 번이 cold 10초를 넘겨 ``bounded_request`` 상한에 걸렸고, 관리자
+#: UI는 "Dagster 연결 불가"로 큐 sensor를 신뢰할 수 없다며 갱신 요청을 막았다(n150 실측:
+#: 창 없음 cold 10.0초 → 창 있음 0.13~0.32초, 같은 문서). PinVi #581과 같은 처방이다.
+#:
+#: schedule 창은 **가장 긴 cron 주기의 2배**다. Map에는 월간 schedule이 있어(예: 매월 1일)
+#: PinVi의 2일을 그대로 쓰면 정상 월간 schedule이 한 달 대부분 "최근 tick 없음"으로 보인다.
+#: sensor 창은 가장 느린 sensor 최소 간격(300초)의 10배를 넘는 1시간이다. 둘 다
+#: ``tests/unit/test_dagster_tick_window.py``가 배포되는 Definitions에 대조한다. 창보다 오래
+#: 멈춘 instigator는 ``recent_ticks``가 빈 목록이다.
+SCHEDULE_TICK_WINDOW_SECONDS = 62 * 24 * 60 * 60
+SENSOR_TICK_WINDOW_SECONDS = 60 * 60
+
+
+def tick_window_variables(
+    *, schedules: bool = True, sensors: bool = True, now: float | None = None
+) -> dict[str, float]:
+    """``$scheduleTicksAfter``·``$sensorTicksAfter`` 값 — 호출 시각에서 창만큼 뺀 epoch 초.
+
+    GraphQL은 선언만 하고 쓰지 않는 변수를 거부하므로 문서가 선언한 쪽만 고른다.
+    """
+
+    current = time() if now is None else now
+    variables: dict[str, float] = {}
+    if schedules:
+        variables["scheduleTicksAfter"] = current - SCHEDULE_TICK_WINDOW_SECONDS
+    if sensors:
+        variables["sensorTicksAfter"] = current - SENSOR_TICK_WINDOW_SECONDS
+    return variables
 
 
 @dataclass(frozen=True)
