@@ -2333,8 +2333,8 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 
 2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
 열린 결정 7; 소유자가 다른 접두사를 고르면 `T-GR-00`~`08`을 일괄 재번호하되 journal·acceptance 참조도 함께).
-PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 406) → PR-2(T-GR-04+05+08,
-407+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
+PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 407) → PR-2(T-GR-04+05+08,
+408+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
 PR은 머지 직전.
 
 - 분리 실행(2026-10-13, 이 브랜치): `scripts/archive_task_ledger_section.py --apply`로 닫힌 절 7개
@@ -2461,7 +2461,7 @@ journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실�
 
 ## T-GR-01
 
-ADR-109 결정 1·2. 수정 파일: `alembic/versions/406_feature_geocode_stamps.py`(직전 head `405_mois_freshness_sla`),
+ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps.py`(직전 head `406_feature_write_gate`, ADR-111),
 `alembic/head-schema.sql`, `src/kortravelmap/dto/geo_dataset.py`(신규 `DatasetRef`·`GeoApplied`),
 `infra/models.py`(`FeatureGeocodeStampRow`), `infra/feature_geocode_stamp_repo.py`(신규), `src/kortravelmap/geocoding.py`
 (`dataset_version()`, `_RestReverseV2Response.dataset` :935, `GeoCallStats.observed_data_tokens`·`empty[endpoint]`
@@ -2470,7 +2470,7 @@ ADR-109 결정 1·2. 수정 파일: `alembic/versions/406_feature_geocode_stamps
 
 - `alembic/head-schema.sql` 재생성이 byte 일치하고 마이그레이션 lint 4종(`test_migrations_keep_the_schema_owner_role`·
   `test_routine_ddl_runs_under_its_owner_role`·`test_receipt_head_check_covers_the_graph_head`·
-  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 406은 `SET ROLE ktm_feature_schema_owner` 아래
+  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 407은 `SET ROLE ktm_feature_schema_owner` 아래
   DDL·`OWNER TO`·RESET ROLE 없음·receipt head CHECK에 자기 revision.
 - 스탬프 삽입: 어느 outcome이든 `geo_version_token`/`geo_data_token` NULL은 NOT NULL이 거부한다(NULL 스탬프는
   만들지 않는다 — ADR-109 결정 1).
@@ -2549,7 +2549,7 @@ ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`lo
 
 ## T-GR-04
 
-ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/407_kor_travel_geo_releases.py`,
+ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/408_kor_travel_geo_releases.py`,
 `alembic/head-schema.sql`, `infra/models.py`, `infra/geo_release_repo.py`(신규 — `plan_geo_release`·
 `run_config_for_dataset`·항목 전이·`coverage` 호출·`complete_plan`), `src/kortravelmap/core/feature_operation.py`
 (`GEO_DEPENDENT_OPERATION_KEYS` — `DEDICATED_JOB_ONLY_OPERATION_KEYS` :33-41 옆, 런타임 정본),
@@ -2574,7 +2574,7 @@ ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일
   ①~⑤(concierge·MOIS 마지막).
 - `coverage` 응답에 `excluded_by_skip`·`not_called_by_kind`·`unstamped_non_provider`가 있고 분모가 인자 dataset으로
   한정된다.
-- 마이그레이션 lint 4종 초록(407도 owner role·receipt CHECK·RESET ROLE 없음).
+- 마이그레이션 lint 4종 초록(408도 owner role·receipt CHECK·RESET ROLE 없음).
 - `openapi.user.json`·`openapi.service.json`이 byte 불변이다(테스트가 export 전후 sha256 비교); `openapi.json`에
   `/v1/ops/geo-releases` 5 operation(슬래시 동사)이 있고 `require_ops_operator`가 붙는다.
 - `POST /detect`가 센서와 같은 `plan_geo_release`를 호출한다(단일 정본 테스트 — 함수 identity).

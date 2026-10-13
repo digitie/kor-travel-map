@@ -58,7 +58,7 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
   실측 `journal.md` 208,660 B·`tasks-done.md` 200,699 B(상한 225,280)에서 가장 오래된 묶음을 `docs/archive/`로
   분리(규약 §8, 인덱스 표 갱신·바이트 보존 검산). T-GR-01의 의존.
 
-- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 406)
+- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 407)
 
   `feature.feature_geocode_stamps`(세 outcome, 토큰 열 NOT NULL)·`dto/geo_dataset.py`·`dataset_version()`·응답
   `dataset` 선택 파싱·`GeoCallStats.empty`. provider 모듈·`Address`·`ReverseGeocoder` diff 0. 의존: T-GR-00-LEDGER.
@@ -73,7 +73,7 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
   `load_bundle` stale 분기와 MOIS CTE 토큰 조건, 값 동일 무쓰기(override 열 제외, 스냅샷 열 2개 추가), 빈 답
   가드(행 집합 G·run), `mois.py` evidence 1필드, concierge 토큰 kwarg·신뢰 규칙·해시 제외. 의도적 빨강 3건.
 
-- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 407)
+- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 408)
 
   `ops.kor_travel_geo_releases(+items)`, `plan_geo_release`(`plan_id`+`plan_seq`, DB 정본 항목, KNPS dataset별
   run_config), `/v1/ops/geo-releases`(admin만, 슬래시 동사). 머지 뒤 PinVi admin 스냅샷 재vendor.

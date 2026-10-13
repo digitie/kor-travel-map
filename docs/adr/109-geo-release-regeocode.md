@@ -48,7 +48,7 @@ geo가 주소 DB를 새 릴리스로 바꿔도 Map은 알지 못하고, 알아�
 ### 1. 지오코딩 스탬프는 별도 표다 — `feature.feature_geocode_stamps`
 
 행마다 `(geo_version_token, geo_data_token, reverse_outcome, stamped_at)`를 `features`와 **분리된 표**에 둔다
-(migration `406_feature_geocode_stamps`, `feature_id uuid PK FK ON DELETE CASCADE`, `OWNER TO
+(migration `407_feature_geocode_stamps`, `feature_id uuid PK FK ON DELETE CASCADE`, `OWNER TO
 ktm_feature_schema_owner`, `SET ROLE` 아래 DDL·RESET ROLE 없음). `features` 컬럼이나 `address` jsonb 키로
 두면 스탬프 갱신이 `row_revision`을 전진시킨다(컨텍스트 4). 표 1개·마이그레이션 1개가 그 대가다.
 
@@ -189,7 +189,7 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    `version_token` 대체 비교는 두지 않는다 — 그 계획은 결정 4의 `stale` 규칙상 행을 하나도 고르지 않아
    쿼터·시간만 쓴다. 커서 = 마지막으로 계획을 만든 `data_token`; 같으면(재빌드) 계획 0건.
 2. **계획 identity = `plan_id` surrogate + `(data_token, plan_seq)`.** 표 `ops.kor_travel_geo_releases`
-   (+ `ops.kor_travel_geo_release_items`, migration `407_kor_travel_geo_releases`, owner role·receipt CHECK).
+   (+ `ops.kor_travel_geo_release_items`, migration `408_kor_travel_geo_releases`, owner role·receipt CHECK).
    같은 토큰에 `planned|running` 계획이 있으면 그것(부분 UNIQUE, 멱등); 없으면 `plan_seq = max+1` 새 행 —
    롤백·재활성화(A→B→A)에서 두 번째 A도 새 계획이 되어 다시 돈다. 단 관측 토큰의 최신 계획이 terminal이고
    `coverage(token, 비-skipped datasets).stamped_other + unstamped == 0`이면 계획을 만들지 않는다(이미 그
@@ -279,7 +279,7 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
   새 pool·태그·Manager 변경 없음. `openapi.user/service.json` 불변.
 - **부정·비용.** 롤아웃 첫 tick은 스탬프가 비어 있으므로 **전 geo-의존 dataset의 전량 계획 1회**가
   배포 순서와 무관하게 반드시 발생한다(비-MOIS는 prod 좌표 보유 활성 35,754행 × reverse p50 86 ms ≈ 51 min
-  순차 하한; MOIS는 replay 수 run). 표 2개·마이그레이션 2개(406·407)·resource 2개·센서 1개·admin
+  순차 하한; MOIS는 replay 수 run). 표 2개·마이그레이션 2개(407·408)·resource 2개·센서 1개·admin
   router 1개가 는다. 전용 job은 fetch 모드 provider의 월간 적재 1회분 쿼터를 더 쓴다(운영자가 항목 `skip`).
   재실행(attempt 2)은 쓰기만 건너뛰고 비-MOIS reverse는 전량 다시 부른다.
 - **잃는 것.** 행 단위 "어느 토큰으로 해석됐나"의 정밀도(run 단위로 대체; 불일치는 WARNING·재계획으로

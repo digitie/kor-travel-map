@@ -71,6 +71,7 @@ lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor�
   그냥 tick 실패 → 30초 뒤 재시도이고 닫는 경로가 없다. manifest 해석의 guard 축소는 남겼다 — main sensor에서 일시
   실패가 이제 다른 DB 실패처럼 tick을 실패시킬 뿐 관측 오류로 watermark를 지나가지 않는다. 리뷰 결과는 ADR-111 결정 4와
   `T-RECONCILE-RETRY`(해제 조건: 잃지 않음·tick 시간 유계·경과 시간 알림·gate 전용 SQLSTATE·명시 목록만 닫기)로.
+- **migration 번호.** #1319가 406(`406_feature_write_gate`)을 쓰므로 Track 1(ADR-109)의 계획 번호를 하나씩 민다 — `feature_geocode_stamps` 406 → 407, `kor_travel_geo_releases` 407 → 408(tasks·acceptance·ADR-109·address-geocoding).
 
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
