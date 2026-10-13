@@ -1,3 +1,25 @@
+## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
+
+n150 chain16 D1(Map `c4d17343`)이 테스트를 하나도 돌리기 전에 `Error: Package subpath './navigation' is not defined by
+"exports" in …/@kor-travel/ui/package.json`으로 끝났다(require stack `src/lib/auth.ts:1` ← `e2e/auth-session.ts:5` ←
+`e2e/live/auth.setup.ts:4`). acde3726(2026-10-06)이 `auth.ts`에 `@kor-travel/ui/navigation` import를 넣었는데, vendored
+`kor-travel-ui-0.1.0-dev.6.tgz`는 `"type":"module"`이고 `exports`에 `types`+`import` 조건만 있다. admin frontend는
+`"type":"module"`이 아니라 Playwright가 e2e TS를 CJS로 변환해 `require()`하므로 그 subpath를 해석하지 못한다. Next·tsc·
+eslint·vitest는 모두 ESM/번들러 해석이라 통과했다.
+
+- **영향 범위(n150 실측, `playwright test --list`).** `c4d17343`에서 mocked(`playwright.config.ts`)·live·cache-target-streams
+  세 config 모두 rc=1 — mocked `e2e/auth.setup.ts`도 같은 `auth-session.ts`를 쓴다. 즉 10-06 이후 D1·M05 등 live와 mocked
+  checkpoint 모두 로드 불가였다. CI가 못 잡은 이유: GitHub 워크플로 어디서도 Playwright spec을 로드하지 않는다
+  (`frontend.yml`은 "e2e는 서비스가 필요해 n150에서 돈다"며 제외).
+- **수정.** `SESSION_COOKIE_NAME`을 import 없는 `src/lib/session-cookie.ts`로 옮기고 `auth.ts`는 재export, e2e 두 곳
+  (`e2e/auth-session.ts`, `e2e/live/cache-target-streams-isolated.live.spec.ts`)은 새 모듈에서 가져간다. 대안이던 frontend
+  `"type":"module"`(Playwright ESM 로드)은 next/eslint/postcss config와 스크립트 전체의 모듈 해석을 바꿔 범위가 크다.
+- **재발 방지(효과 결박).** frontend 패키지 `e2e:list` = 세 config의 `playwright test --list`, `frontend.yml`이 vitest 뒤에
+  실행한다. 서비스·브라우저 없이 spec import 그래프를 실제로 require한다. n150에서 `c4d17343` 사본은 세 config 모두 rc=1
+  (같은 오류), 이 브랜치는 rc=0(mocked 271 tests/28 files, live 1142/28, cache-target-streams 1/1) — 검사가 이 결함에서
+  빨갛게 되는 것을 확인했다.
+- **live 검증.** n150에서 이 브랜치 사본(`bb602ea7`)으로 D1 4 spec을 prod 대상 읽기 전용 실행(`--workers=1`): 11건 중 **9 passed, 2 failed** — live `auth.setup.ts`를 포함해 전부 로드·실행됐다(이전엔 0건 실행). 실패 둘은 이 수정과 무관한 브라우저 단언이라 범위 밖으로 남긴다: (1) `admin-scenario-catalog` "pipeline live UI calls datasets catalog…"가 15초 안에 `GET /v1/ops/datasets` 관측 실패, (2) `home-dashboard-roundtrip` "pipeline overview와 root 목록…"이 `getByRole("row", {name: /import_job/})` strict mode 위반(prod 데이터에 import_job 행 8개). 둘 다 10-06 이후 spec이 한 번도 로드되지 않아 가려져 있던 것이다.
+
 ## 2026-10-13 — chain17 B 단계가 같은 Map·새 PinVi 회전을 건너뛰던 결함: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 
 n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변형, `PINVI_OVERRIDE` 추가본)가 B 단계에서

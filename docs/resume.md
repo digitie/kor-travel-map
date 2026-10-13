@@ -1,3 +1,12 @@
+## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
+
+**다음 한 작업: draft PR CI 초록(새 `e2e:list` 단계 포함) → 적대 리뷰 → 머지 → chain16 D1·M05 재실행.**
+
+- 바뀐 것: `SESSION_COOKIE_NAME`을 의존성 없는 `src/lib/session-cookie.ts`로 옮겨 e2e가 `auth.ts`(→ ESM 전용
+  `@kor-travel/ui/navigation`)를 끌어오지 않는다. `frontend.yml`에 `e2e:list`(mocked·live·cache-target-streams config
+  `playwright test --list`) 단계. 원인·증거·D1 결과는 journal 2026-10-13.
+- 바뀌지 않은 것: vendored tgz, 앱 동작(쿠키 이름 동일), n150(읽기 전용 live 실행만).
+
 ## 2026-10-13 — chain17 B 단계 pair 회전 수정: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 
 **다음 한 작업: CI(lint·unit) 초록 → 적대 리뷰 → 머지 → n150에서 `sudo install -o root -g root -m 0700

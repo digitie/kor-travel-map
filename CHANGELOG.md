@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### admin e2e 로드 실패 수정 (2026-10-13)
+
+- **FIXED (admin frontend e2e)**: 2026-10-06부터 `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import해
+  Playwright(CJS 변환) e2e가 `e2e/auth-session.ts` 경유로 로드 단계에서 전부 실패하던 결함. 세션 쿠키 이름을 import 없는
+  `src/lib/session-cookie.ts`로 옮겼다.
+- **ADDED (CI)**: `frontend.yml`이 `e2e:list`(mocked·live·cache-target-streams config의 `playwright test --list`)로
+  spec 로드를 검사한다.
+
 ### chain17 B 단계가 핀 원장을 pair로 비교 (2026-10-13)
 
 - **FIXED (scripts/n150)**: `chain17.sh` B 단계의 "이미 회전됨 — 건너뛴다"가 원장 `map`만 보던 것을
