@@ -889,6 +889,7 @@ class AsyncKorTravelMapClient:
         self,
         *,
         dagster_run_id: str,
+        dagster_status: str,
         failure: str,
         attempts: int,
         closable: bool,
@@ -898,6 +899,7 @@ class AsyncKorTravelMapClient:
             await record_feature_operation_reconcile_stalled(
                 session,
                 dagster_run_id=dagster_run_id,
+                dagster_status=dagster_status,
                 failure=failure,
                 attempts=attempts,
                 closable=closable,

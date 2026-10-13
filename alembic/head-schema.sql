@@ -6368,8 +6368,9 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
-  -- At most two Features (old and new), in uuid order.  A NULL key locks nothing
-  -- (pg_advisory_xact_lock is strict), as the old set form skipped NULLs.
+  -- At most two Features (old and new), in uuid order.  LEAST/GREATEST ignore a NULL
+  -- argument, so one NULL locks the other Feature (twice, re-entrant); only when both
+  -- are NULL is the key NULL and the strict lock a no-op — as the old set form did.
   PERFORM pg_advisory_xact_lock(
     hashtextextended('feature-write:' || LEAST(v_hint.feature_id, p_feature_id), 0)
   );

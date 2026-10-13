@@ -1197,6 +1197,7 @@ async def abandon_dagster_feature_run(
         {member.membership.provider_dataset_id for member in operation.members}
     )
     message = (
+        "feature_operation.reconcile_abandoned: "
         f"terminal reconcile abandoned after {attempts} identical failures ({failure}); "
         f"curation is not finalized — re-run the dataset(s) {provider_dataset_ids}"
     )
@@ -1239,28 +1240,42 @@ async def record_feature_operation_reconcile_stalled(
     session: AsyncSession,
     *,
     dagster_run_id: str,
+    dagster_status: str,
     failure: str,
     attempts: int,
     closable: bool,
 ) -> None:
-    """reconcile이 같은 run에서 같은 실패를 상한만큼 봤다는 사실을 운영 로그로 올린다(ADR-111)."""
+    """reconcile이 한 run에서 같은 실패를 상한만큼 봤다는 사실을 운영 로그로 올린다(ADR-111).
+
+    적어도 한 번 남는다 — sensor tick이 cursor를 쓰기 전에 버려지면 다음 tick이 다시 남길 수 있다.
+    """
     normalized_run_id = _run_id(dagster_run_id)
-    action = (
-        "root will be closed as failed; re-run the dataset"
-        if closable
-        else "reconcile keeps retrying with backoff; operator must fix the cause"
-    )
+    status = _validate_run_status(dagster_status)
+    if closable:
+        action = "the root is being closed as failed; re-run the dataset"
+    elif status in DAGSTER_FEATURE_TERMINAL_STATUS_VALUES:
+        action = (
+            "the Dagster run has finished but Map cannot record it; reconcile keeps retrying "
+            "with backoff — fix the cause"
+        )
+    else:
+        action = (
+            "the Dagster run is still active and Map cannot track it; reconcile keeps "
+            "retrying with backoff — fix the cause"
+        )
+    event = "feature_operation.reconcile_stalled"
     await record_system_log(
         session,
         level="error",
         source="feature_operation",
-        event="feature_operation.reconcile_stalled",
+        event=event,
         message=(
-            f"terminal reconcile for run {normalized_run_id} failed {attempts} times "
-            f"with {failure}; {action}"
+            f"{event}: run {normalized_run_id} ({status}) failed reconcile {attempts} times "
+            f"in a row with {failure}; {action}"
         ),
         detail={
             "dagster_run_id": normalized_run_id,
+            "dagster_status": status,
             "failure": failure,
             "attempts": attempts,
             "closable": closable,

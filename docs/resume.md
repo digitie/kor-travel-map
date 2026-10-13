@@ -4,27 +4,35 @@
 12:59:54Z부터 prod에서 꺼져 있다 — `alembic_version`이 `406_feature_write_gate`가 되고 함수 정의를 확인하기
 전에는 다시 켜지 않는다.**
 
-배포 runbook(n150, 운영자):
-0. 머지된 main 체크아웃에서 호스트 chain 스크립트를 다시 맞춘다 —
-   `sudo install -o root -g root -m 0700 scripts/n150/chain1{6,7}.sh /root/` (호스트 `chain16.sh`는 아직 느슨한 D1 게이트다).
-1. Map pair 배포(`/root/chain17.sh`, 마이그레이션 전진 — `scripts/n150/README.md`). 같은 pair면 launcher 직접.
-2. 확인(Map API 컨테이너 DSN에서 유도한 map DB, 읽기만):
+배포 runbook(n150, 운영자 — prod는 읽기 외에 이 순서로만 바꾼다):
+0. **사전 점검.** `~/preflight.sh`가 PASS일 때만 시작한다. 머지된 main 체크아웃에서 호스트 chain 스크립트를
+   다시 맞춘다 — `sudo install -o root -g root -m 0700 scripts/n150/chain1{6,7}.sh /root/` (호스트 `chain16.sh`는
+   아직 느슨한 D1 게이트다).
+1. **pair를 명시해 배포.** Map = 이 PR이 머지된 main의 sha(40자), PinVi = 현재 원장 값 `2fa1c166…`(40자 전체를
+   `ktdctl pin show`에서 읽어 넣는다). ssh 세션에 걸지 않고 systemd-run 유닛으로 띄운다:
+   `sudo systemd-run --unit=chain17-adr111 --property=StandardOutput=append:/root/chain17-adr111.log
+   --property=StandardError=append:/root/chain17-adr111.log env PINVI_OVERRIDE=<pinvi sha40> /root/chain17.sh <map sha40> "<reason>"`
+   → `journalctl -u chain17-adr111`·로그로 끝까지 본다. 끝나면 `ktdctl pin show`로 원장이 (map, pinvi) 그 pair인지 확인한다.
+2. **스키마 확인**(Map API 컨테이너 DSN에서 유도한 map DB, 읽기만):
    `SELECT version_num FROM alembic_version;` → `406_feature_write_gate`.
    `SELECT pg_get_functiondef('feature.finalize_provider_curation_root'::regproc)` → `pg_try_advisory_xact_lock(hashtextextended('feature-write-all'`
    포함, `'feature-write:'` 없음. `SELECT proname FROM pg_proc WHERE prosrc LIKE '%feature-write:%' ORDER BY 1;` → 단건 writer
    여섯만(approve·archive/create/patch curation item·manual item·promote). `to_regprocedure('feature.finalize_provider_curation_receipts(bigint,uuid,text,text)')`
    → NULL.
-3. 그 뒤에만 `feature_operation_reconciliation_sensor`를 켠다. root `97ac4e01-…`가 다음 tick에 완결되는지
-   (`ops.import_jobs.status='done'`) 본다. 실패하면 sensor는 30s→15분 backoff로 다시 할 뿐 53200으로는 닫지 않는다.
-   SQLSTATE 22/23/P0이 5연속이면 root는 `failed`가 되고 `ops.system_log` `feature_operation.reconcile_abandoned`가 남는다.
-   그 밖의 실패는 다섯 번째에 `feature_operation.reconcile_stalled`가 한 번 남고, 실패한 run만 미뤄 둔 채 나머지 reconcile은 계속 돈다.
-4. 문제가 생기면 sensor를 멈추고 앞으로 고친다(406은 forward-only — 405 재배포를 약속하지 않는다). 앞 판 코드가 다시 돌아야
-   한다면 cursor에서 `deferred` 키만 뺀 값을 `dagster sensor cursor --set`으로 넣는다(`--delete` 금지 — prod는 null cursor 초기화를 거부).
+3. **sensor cursor 확인.** `feature_operation_reconciliation_sensor`의 현재 cursor를 Dagster UI(또는 GraphQL
+   `sensorState.typeSpecificData.lastCursor`)로 읽어 키가 정확히 `database`·`dagster`·`version`뿐인지 본다(앞 판 cursor).
+4. 그 뒤에만 sensor를 켠다. root `97ac4e01-…`가 다음 tick에 완결되는지(`ops.import_jobs.status='done'`) 본다. 실패하면
+   Dagster page가 그 run에서 멈춰 30초→15분 물러서며 다시 하고(53200으로는 닫지 않는다), 다섯 번째에
+   `ops.system_log` `feature_operation.reconcile_stalled`가 남는다(운영 로그 `q=reconcile_stalled`로 검색). SQLSTATE
+   22/23/P0이 5연속이면 root는 `failed`가 되고 `feature_operation.reconcile_abandoned`가 남는다.
+5. **문제가 생기면** sensor를 멈추고 앞으로 고친다(406은 forward-only — 405 재배포를 약속하지 않는다). 앞 판 코드가
+   다시 돌아야 한다면 cursor의 `head_failure.run_id`를 기록한 뒤 그 키만 뺀 값을 `dagster sensor cursor --set`으로
+   넣는다(`--delete` 금지 — prod는 null cursor 초기화를 거부).
 
 - 바뀐 것: alembic 406(대량 writer 8개 gate 배타 — root 완결만 try-lock·55P03, 단건 6개 gate 공유 +
   `lock_timeout 5s`, 죽은 범위 재검사 제거, 호출자 없는 `finalize_provider_curation_receipts` DROP), reconcile sensor
-  허용 목록(22/23/P0)·지수 backoff, API 55P03 → 503 `LOCK_TIMEOUT`, lint(호출·trigger 전개)·격리 DB 통합·sensor 테스트,
-  ADR-111. OpenAPI 바이트 변경 없음(PinVi 재vendor 불필요).
+  backpressure(머리 run에서 멈춤·`head_failure` 하나·지수 backoff, DB page 예산)·허용 목록(22/23/P0), API 55P03 → 503
+  `LOCK_TIMEOUT`, lint(호출·trigger 전개)·격리 DB 통합·sensor 테스트, ADR-111. journal 2026-09-16~19 7건 아카이브. OpenAPI 바이트 변경 없음(PinVi 재vendor 불필요).
 - 바뀌지 않은 것: Manager `max_locks_per_transaction` 상향(별도 응급조치), prod 컨테이너·DB.
 
 ## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`

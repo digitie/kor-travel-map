@@ -20,13 +20,15 @@
   단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡고 `lock_timeout = 5s`를 갖는다. root 완결은 gate를
   `pg_try_advisory_xact_lock`으로 시도하고 바쁘면 55P03(다음 tick 재시도). 대량 명령 6개의 죽은 범위
   재검사(두 scan + 40001)를 지웠고, 호출자 없는 `finalize_provider_curation_receipts`를 DROP한다.
-- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`에서 한 run의 반영 실패가 더는 tick 전체를
-  멈추지 않는다. 실패한 run은 cursor `deferred` 표(run별 서명·횟수·`retry_after`, 최대 200)에 미뤄 두고 watermark와
-  DB page는 계속 간다. 미뤄 둔 run은 30초→15분 지수 backoff(55P03은 30초 고정) 뒤 run_id로 다시 집는다. 같은 실패
-  5연속이면 `feature_operation.reconcile_stalled`를 한 번 남기고, SQLSTATE 22/23/P0이며 run이 terminal이면 root를
-  `failed`로 닫는다(`AsyncKorTravelMapClient.abandon_dagster_feature_run`, `reconcile_abandoned` 로그 —
-  `provider_dataset_ids`·`action`; `blocked`면 표에 남긴다). 53xxx 등은 닫지 않는다. 표가 비면 cursor는 종전과
-  바이트가 같다(되돌릴 때 절차는 ADR-111).
+- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`의 Dagster page는 반영이 실패한 run에서 멈추고
+  (backpressure — watermark는 마지막으로 반영한 run, 아무것도 건너뛰지 않는다) cursor `head_failure` 하나에 그 run을
+  적어 30초→15분 지수 backoff 동안 쉰다(55P03은 30초 고정·멈춤 보고 제외). DB page는 매 tick 실패 3회·20초 예산
+  안에서 계속 간다. 같은 실패 5회째 `feature_operation.reconcile_stalled`(적어도 한 번). SQLSTATE 22/23/P0이며 run이
+  끝났으면 root를 `failed`로 닫고 지나간다(`AsyncKorTravelMapClient.abandon_dagster_feature_run`,
+  `reconcile_abandoned` 로그 — `provider_dataset_ids`·`action`; `blocked/terminal`은 지나가고 `blocked/cancellation`은
+  다시 한다). 53xxx 등은 닫지 않는다. `head_failure`가 없으면 cursor는 종전과 바이트가 같다(되돌릴 때 절차는 ADR-111).
+  실행 manifest 해석의 일시 DB 실패는 더는 guard 거부(관측 오류)로 감싸지 않는다 — 카탈로그 부재만 거부다.
+- **docs**: `docs/journal.md` 2026-09-16 ~ 2026-09-19 7건을 `docs/archive/journal-2026-09d.md`로 분리(§8, 본문 바이트 보존).
 - **CHANGED (api)**: SQLSTATE 55P03(lock timeout)은 typed `DBAPIError` 처리기에서 `503 LOCK_TIMEOUT` +
   `Retry-After: 5`(다른 DB 오류는 종전 500 경로). OpenAPI 바이트 변경 없음.
 - **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서, 호출·trigger 전개),

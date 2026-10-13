@@ -83,34 +83,42 @@ trigger `trg_curation_source_observation_sync_concierge` → `sync_concierge_the
 `feature-curation-write`를 잡지 않는다. 지우면 그 명령과 root 완결이 같은 Feature를 동시에 바꿀 수
 있다. gate는 그 경로들을 고치지 않고 같은 직렬화를 유지한다.
 
-### 4. reconcile sensor는 실패한 run을 미뤄 두고, 결정적 실패만 root를 닫는다
+### 4. reconcile sensor: 머리 run에서 멈추고(backpressure), 결정적 실패만 root를 닫는다
 
-`feature_operation_reconciliation_sensor`에서 한 run의 반영 실패는 **tick을 멈추지 않는다.** 실패한
-run은 cursor의 `deferred` 표(`run_id → {서명, 연속 횟수, retry_after, blocked}`)에 미뤄 두고 다음 run으로
-간다 — Dagster watermark는 그 run을 지나가고, 같은 page의 나머지 run과 DB 쪽 page도 같은 tick에 돈다.
-미뤄 둔 run은 `retry_after`가 지나면 run_id로 다시 집는다(그 전에는 Dagster page·DB page에 다시 나와도
-건너뛴다). 성공하면 표에서 지운다. 표는 page 크기(200)를 넘지 않는다 — 넘치면 가장 늦게 다시 돌
-것부터 버리고(로그), 버려진 run도 operation이 끝나지 않았으면 DB page가 다시 집는다. 앞 판은 실패한
-run 하나가 tick 전체를 실패시켜, 영구 실패(배포 뒤 42xxx, jsonb 봉인 54000, SQLSTATE 없는 Python 예외)
-하나가 reconcile 전부를 멈출 수 있었다.
+`feature_operation_reconciliation_sensor`는 두 갈래다 — Dagster run storage를 insertion 순서로 훑는
+**Dagster page**(watermark)와, 끝나지 않은 DB root를 keyset으로 훑는 **DB page**.
 
-기다림은 30초에서 두 배씩 늘어 15분에서 멈춘다 — 무거운 트랜잭션(대형 root 완결)이 30초마다 다시
-돌며 공유 자원을 흔들지 않게 한다. 예외는 root 완결의 gate try가 바쁜 `SQLSTATE 55P03`으로, 잠깐의
-경합이라 30초 고정이다. 서명은 `SQLSTATE xxxxx` 또는 예외 class 이름이고 메시지 본문은 담지 않는다.
+- **Dagster page — 머리에서 멈춘다.** 한 run의 반영이 실패하면 그 tick의 Dagster page를 거기서
+  멈추고 watermark를 **마지막으로 반영한 run**에 둔다. 아무것도 건너뛰지 않으므로 잃는 run이 없다.
+  cursor에는 그 머리 run 하나의 `head_failure = {run_id, 서명, 연속 횟수, retry_after}`만 적고,
+  `retry_after` 전에는 Dagster page를 통째로 쉰다(그 run의 무거운 반영을 다시 돌지 않는다). 기다림은
+  30초에서 두 배씩 15분까지다. 머리가 반영되면(또는 아래 규칙으로 닫히면) 키를 지운다 — 비면 cursor는
+  앞 판과 바이트가 같다.
+- **DB page — 매 tick 돈다, 예산 안에서.** 실패 세 번이나 20초가 넘으면 거기서 멈추고 DB cursor를
+  마지막으로 다룬 항목에 둔다 — sensor 평가 timeout(기본 60초) 안에 cursor 갱신까지 끝난다. DB page의
+  실패는 기록하지 않는다. keyset이 한 바퀴 돌아 다시 집는다. 물러서 있는 머리 run은 DB page에서도
+  돌지 않는다.
+- **잃는 것(의도한 trade-off).** 머리 run이 멈춰 있는 동안 그 뒤의 run을 Dagster page라는 **안전망**으로는
+  반영하지 못한다. 새 run의 상태는 그동안에도 run-status sensor들(QUEUED~CANCELED)이 실시간으로 반영하고,
+  DB page는 계속 나아간다 — 안전망만 멈춘다.
+- **55P03(root 완결의 gate가 바쁨)**은 잠깐의 경합이다. 30초 고정으로 다시 하고, 멈춤 보고·닫기의
+  셈에 넣지 않는다.
 
-같은 run이 같은 서명으로 5회 연속 실패하면 그 순간 **한 번** `feature_operation.reconcile_stalled`
-error 로그(`closable`, `action`)를 남긴다 — 닫을 수 있든 없든 운영 화면에 보인다. root를 닫는 것은
-**허용 목록**뿐이다: SQLSTATE class 22(데이터 예외)·23(무결성 위반)·P0(plpgsql RAISE)이고 Dagster run이
-terminal일 때다. 기존 terminal 전이(`ops.transition_provider_feature_operation_terminal_command`,
+같은 머리 run이 같은 서명으로 5회째 실패하면 `feature_operation.reconcile_stalled` error 로그를 남긴다
+(메시지에 이벤트 이름·Dagster 상태·서명·조치가 들어가 운영 로그 `q` 검색에 걸린다). tick이 cursor를 쓰기
+전에 버려지면 다음 tick이 다시 남길 수 있다 — **적어도 한 번**이다. root를 닫는 것은 **허용 목록**뿐이다:
+SQLSTATE class 22(데이터 예외)·23(무결성 위반)·P0(plpgsql RAISE)이고, 머리 run이며, Dagster run이 끝나
+종료 시각이 있고, 5회 이상일 때. 기존 terminal 전이(`ops.transition_provider_feature_operation_terminal_command`,
 `failed`/stage `failed`)로 닫고 `feature_operation.reconcile_abandoned` 로그(`provider_dataset_ids`,
-`action: re-run the dataset`)를 남긴다. 닫기가 `applied`일 때만 표에서 지운다. `blocked`(이미 terminal이거나
-취소 중)면 표에 남기고 `blocked`로 표시해 다시 닫으려 하지 않으며 멈춘 run으로 올린다 — 그 run의 반영은
-terminal 판정 **전**에 실패하므로 다음 tick이 저절로 지나가지 않는다. 그 밖 — 53xxx(53200처럼 cluster의
-다른 tenant가 일으킬 수 있는 자원 고갈), 54000, 배포 중 42xxx, 25006, 40001, 55P03, 57014, 58xxx,
-XX000, SQLSTATE 없는 실패 — 는 물러섰다가 다시 할 뿐 닫지 않는다. 특히 406 배포 전에 sensor가 다시
-켜져도 53200으로 막힌 root는 닫히지 않는다. 새 상태·새 컬럼은 없다(`ops.import_jobs.quarantined_at`은
-migration 소유라 런타임이 쓰지 않는다). 멈춘 기간 지표는 두지 않았다 — `reconcile_stalled` 로그가 그
-시작을 알린다.
+`action: re-run the dataset`)를 남긴다. 닫기가 `applied`이거나 `blocked`/`terminal`(이미 끝난 root)이면 그
+run을 지나간다. `blocked`/`cancellation`이면 취소가 끝날 수 있으니 머리에 둔 채 다시 한다. 그 밖 —
+53xxx(53200처럼 cluster의 다른 tenant가 일으킬 수 있는 자원 고갈), 54000, 배포 중 42xxx, 25006, 40001,
+57014, 58xxx, XX000, SQLSTATE 없는 실패 — 는 물러섰다가 다시 할 뿐 닫지 않는다. 특히 406 배포 전에
+sensor가 다시 켜져도 53200으로 막힌 root는 닫히지 않는다. 새 상태·새 컬럼은 없다.
+
+서명은 `SQLSTATE xxxxx` 또는 예외 class 이름이고 메시지 본문은 담지 않는다. 실행 manifest 해석에서
+카탈로그가 선언을 모를 때(`FeatureOperationInvariantConflict`)만 guard 거부(관측 오류 → 지나감)이고,
+연결·timeout 같은 다른 실패는 그대로 올라와 머리 실패로 세어진다.
 
 ### 5. `finalize_provider_curation_receipts`는 걷어낸다
 
@@ -126,8 +134,9 @@ migration 소유라 런타임이 쓰지 않는다). 멈춘 기간 지표는 두�
 - 서로 다른 dataset의 대량 writer는 직렬화된다. root 완결은 대량 관리 명령이 도는 동안 기다리지 않고
   다음 tick으로 미뤄진다.
 - 단건 API 명령은 대량 writer 뒤에서 최대 5초 기다리고, 넘으면 503 `LOCK_TIMEOUT`(재시도 가능)이다.
-- 실패한 run 하나가 reconcile 전체를 멈추지 않는다. 결정적으로(22/23/P0) 막힌 root는 다섯 번 물러선 뒤(약 7분 반)
-  `failed`로 보이고, 그 밖의 실패는 다섯 번째에 `reconcile_stalled`로 보인 뒤 15분 간격까지 물러서며 다시 한다.
+- 실패한 머리 run은 Dagster page 안전망만 멈추고(run-status sensor·DB page는 계속), 결정적으로(22/23/P0) 막힌
+  root는 다섯 번 물러선 뒤(약 7분 반) `failed`로 닫혀 지나가며, 그 밖의 실패는 다섯 번째에 `reconcile_stalled`로
+  보인 뒤 15분 간격까지 물러서며 다시 한다.
 - OpenAPI·PinVi 계약 변경 없음.
 
 ### 되돌릴 때(rollback)
@@ -135,8 +144,8 @@ migration 소유라 런타임이 쓰지 않는다). 멈춘 기간 지표는 두�
 - **sensor를 멈추고 앞으로 고친다(fix forward).** 406은 forward-only이고, 405 판 코드를 406 DB에 다시
   올리는 것은 검증하지 않았다 — 되돌림을 약속하지 않는다.
 - **cursor.** 앞 판 코드의 `FeatureOperationReconcileCursor.from_json`은 키가 정확히
-  `{database, dagster, version}`이어야 한다. 새 코드는 미뤄 둔 run이 없으면 `deferred` 키를 쓰지 않아
-  바이트가 같지만, 미뤄 둔 run이 있는 채로 앞 판이 돌면 그 cursor를 거부하고 tick마다 조용히 건너뛴다.
-  그때는 sensor를 멈춘 뒤 **`deferred` 키만 뺀 cursor를 `dagster sensor cursor --set`으로 넣는다.**
-  cursor를 지우면(`--delete`) 안 된다 — Map run이 200건을 넘는 prod에서는 null cursor가 초기화를 거부한다.
-  (표를 Dagster KV에 두는 대안도 봤으나, cursor 안에 두고 비면 키를 빼는 쪽이 더 단순하다.)
+  `{database, dagster, version}`이어야 한다. 새 코드는 머리 실패가 없으면 `head_failure` 키를 쓰지 않아
+  바이트가 같다. 머리 실패가 있는 채로 앞 판이 돌아야 한다면, sensor를 멈추고 **`head_failure.run_id`를
+  기록한 뒤** 그 키만 뺀 cursor를 `dagster sensor cursor --set`으로 넣는다(watermark는 그 run 앞에 있으므로
+  앞 판이 그 run부터 다시 본다). cursor를 지우면(`--delete`) 안 된다 — Map run이 200건을 넘는 prod에서는
+  null cursor가 초기화를 거부한다.

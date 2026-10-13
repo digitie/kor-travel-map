@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 from kortravelmap.core.feature_operation import (
+    FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
     TriggerKind,
 )
@@ -433,6 +434,7 @@ class _ManifestClient:
     ) -> None:
         self._executable = executable
         self._resolved = resolved
+        self.resolve_error: Exception | None = None
 
     async def resolve_feature_operation_memberships(
         self, *, operation_key: str
@@ -448,8 +450,14 @@ class _ManifestClient:
         sync_scope: str | None = None,
     ) -> ProviderDatasetOperationMembership:
         key = (provider, dataset_key, str(sync_scope))
+        if self.resolve_error is not None:
+            raise self.resolve_error
         if key not in self._resolved:
-            raise LookupError(key)
+            # 실제 resolver(`resolve_feature_operation_dataset_membership`)가 카탈로그에 없을 때
+            # 던지는 것과 같은 예외다 — 다른 예외로 흉내 내면 guard 경계가 거짓 초록이 된다.
+            raise FeatureOperationInvariantConflict(
+                "dataset membership is not in the catalog", dagster_run_id="unit"
+            )
         return self._resolved[key]
 
 
@@ -518,6 +526,25 @@ def test_declaration_absent_from_the_catalog_is_rejected() -> None:
         )
 
     assert excinfo.value.reason == "execution_scope_not_in_catalog"
+
+
+def test_transient_resolver_failure_is_not_a_guard_rejection() -> None:
+    """연결 끊김 같은 일시 실패는 guard 거부로 감싸지 않는다(ADR-111).
+
+    감싸면 reconcile sensor가 관측 오류로 보고 watermark를 지나가, 그 run을 다시 집지 않는다.
+    """
+    client = _ManifestClient(executable=(_member(70),), resolved={})
+    client.resolve_error = ConnectionResetError("database connection reset")
+
+    with pytest.raises(ConnectionResetError):
+        asyncio.run(
+            resolve_run_execution_manifest(
+                client,  # type: ignore[arg-type]
+                operation_key="feature_place_knps_points_job",
+                declared=(_scope("knps_restrooms"),),
+                boundary="unit",
+            )
+        )
 
 
 def test_declaration_outside_the_executable_set_is_rejected() -> None:
