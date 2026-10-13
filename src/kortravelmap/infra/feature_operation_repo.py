@@ -1191,8 +1191,12 @@ async def abandon_dagster_feature_run(
         return DagsterFeatureOperationMutation(
             outcome="blocked", operation=operation, block_reason="terminal"
         )
+    provider_dataset_ids = sorted(
+        {member.membership.provider_dataset_id for member in operation.members}
+    )
     message = (
-        f"terminal reconcile abandoned after {attempts} identical failures ({failure})"
+        f"terminal reconcile abandoned after {attempts} identical failures ({failure}); "
+        f"curation is not finalized — re-run the dataset(s) {provider_dataset_ids}"
     )
     await session.execute(
         text(_TERMINAL_OPERATION_COMMAND_SQL),
@@ -1219,6 +1223,8 @@ async def abandon_dagster_feature_run(
             "terminal_status": terminal,
             "failure": failure,
             "attempts": attempts,
+            "provider_dataset_ids": provider_dataset_ids,
+            "action": "re-run the dataset",
         },
     )
     return DagsterFeatureOperationMutation(

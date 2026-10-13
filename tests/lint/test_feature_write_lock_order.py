@@ -50,9 +50,21 @@ _ROUTINE = re.compile(
 )
 _ROUTINE_END = re.compile(r"^ALTER (?:PROCEDURE|FUNCTION) ", re.MULTILINE)
 _LOCK = re.compile(
-    r"pg_advisory_xact_lock(?P<shared>_shared)?\(\s*hashtextextended\(\s*'(?P<key>[^']*)'"
+    r"pg_(?:try_)?advisory_xact_lock(?P<shared>_shared)?\(\s*hashtextextended\(\s*'(?P<key>[^']*)'"
 )
-_CALL = re.compile(r"\b(?:CALL|PERFORM|:=|FROM)\s+(?P<name>feature\.[a-z_0-9]+)\(")
+_SCHEMAS = r"(?:feature|ops|provider_sync)"
+#: 다른 루틴 호출. 스키마 셋 전부를 본다 — ``ops.transition_provider_cancellation_job_command``가
+#: root 완결을 부르듯 다른 스키마에서 들어오는 경로가 있다.
+_CALL = re.compile(rf"\b(?:CALL|PERFORM|:=|FROM|SELECT)\s+(?P<name>{_SCHEMAS}\.[a-z_0-9]+)\(")
+#: 행 쓰기. 그 표의 trigger 함수가 같은 트랜잭션에서 돈다.
+_WRITE = re.compile(
+    rf"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+(?P<table>{_SCHEMAS}\.[a-z_0-9]+)\b"
+)
+_TRIGGER = re.compile(
+    r"^CREATE (?:CONSTRAINT )?TRIGGER \S+ .*? ON (?P<table>[a-z_]+\.[a-z_0-9]+) .*?"
+    r"EXECUTE FUNCTION (?P<function>[a-z_]+\.[a-z_0-9]+)\(",
+    re.MULTILINE,
+)
 
 #: 전역 잠금의 순서. 표에 없는 키(collection·plan별 키, m05 등)는 이 순서와 무관하다.
 _RANK: Final[dict[str, int]] = {
@@ -115,8 +127,18 @@ def _per_feature_violations(name: str, body: str) -> list[str]:
     return violations
 
 
-def _events(body: str) -> list[tuple[int, object]]:
+def _triggers(schema: str) -> dict[str, list[str]]:
+    by_table: dict[str, list[str]] = {}
+    for match in _TRIGGER.finditer(schema):
+        by_table.setdefault(match["table"], []).append(match["function"])
+    return by_table
+
+
+def _events(body: str, triggers: dict[str, list[str]]) -> list[tuple[int, object]]:
     events: list[tuple[int, object]] = []
+    for match in _WRITE.finditer(body):
+        for function in triggers.get(match["table"], ()):
+            events.append((match.start(), function))
     for match in _LOCK.finditer(body):
         key = match["key"]
         rank_key = _PER_FEATURE if key.startswith(_PER_FEATURE) else key
@@ -127,7 +149,9 @@ def _events(body: str) -> list[tuple[int, object]]:
     return sorted(events, key=lambda event: event[0])
 
 
-def _order_violations(routines: dict[str, str]) -> list[str]:
+def _order_violations(
+    routines: dict[str, str], triggers: dict[str, list[str]] | None = None
+) -> list[str]:
     """중첩 호출을 펼친 잠금 열이 전역 순서와 공유→배타 승격 금지를 지키는가."""
 
     violations: list[str] = []
@@ -140,7 +164,7 @@ def _order_violations(routines: dict[str, str]) -> list[str]:
     ) -> None:
         if name in stack or name not in routines:
             return
-        for _offset, event in _events(routines[name]):
+        for _offset, event in _events(routines[name], triggers or {}):
             if isinstance(event, str):
                 walk(event, held, (*stack, name), origin)
                 continue
@@ -183,7 +207,12 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
     per_feature = [name for name, body in routines.items() if "'feature-write:'" in body]
     gated = [name for name, body in routines.items() if f"'{_GATE}'" in body]
     assert len(per_feature) >= 6, per_feature
-    assert len(gated) >= len(per_feature) + 9, gated
+    assert len(gated) >= len(per_feature) + 8, gated
+    triggers = _triggers(schema)
+    assert sum(len(functions) for functions in triggers.values()) >= 100, "trigger 추출이 깨졌다"
+    assert "feature.sync_concierge_catalog_after_observation" in triggers.get(
+        "ops.curation_source_observation_receipts", []
+    )
 
 
 def test_per_feature_locks_are_scalar_and_gated() -> None:
@@ -203,8 +232,8 @@ def test_per_feature_locks_are_scalar_and_gated() -> None:
 
 
 def test_global_lock_order_holds_through_nested_calls() -> None:
-    routines = _routines(_HEAD_SCHEMA.read_text(encoding="utf-8"))
-    violations = sorted(set(_order_violations(routines)))
+    schema = _HEAD_SCHEMA.read_text(encoding="utf-8")
+    violations = sorted(set(_order_violations(_routines(schema), _triggers(schema))))
     assert not violations, (
         "전역 advisory 잠금 순서(import → feature-curation-write → feature-write-all → "
         "feature-write:<id> → curation-catalog-write)를 어긴다:\n  " + "\n  ".join(violations)
@@ -268,3 +297,23 @@ def test_the_detectors_turn_red_on_planted_violations() -> None:
     assert any(v.startswith("feature.catalog_then_gate:") for v in found), found
     assert any(v.startswith("feature.shared_then_bulk:") and "upgrade" in v for v in found)
     assert not any(v.startswith("feature.reentrant:") for v in found), found
+
+    # trigger 경유: 표에 쓰면 그 trigger 함수의 잠금이 같은 트랜잭션에서 잡힌다.
+    via_trigger = {
+        "feature.catalog_then_observe": (
+            "  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));\n"
+            "  INSERT INTO ops.observations (x) VALUES (1);\n"
+        ),
+        "feature.on_observation": (
+            "  IF NOT pg_try_advisory_xact_lock(hashtextextended('feature-write-all', 0)) THEN\n"
+        ),
+    }
+    trigger_schema = (
+        "CREATE TRIGGER trg_obs AFTER INSERT ON ops.observations FOR EACH ROW "
+        "EXECUTE FUNCTION feature.on_observation();\n"
+    )
+    found = _order_violations(via_trigger, _triggers(trigger_schema))
+    assert any(v.startswith("feature.catalog_then_observe:") for v in found), found
+    assert not any(
+        v.startswith("feature.catalog_then_observe:") for v in _order_violations(via_trigger)
+    )

@@ -1,5 +1,5 @@
 -- 406 (ADR-111): feature.archive_curated_source_command
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
@@ -15,8 +15,6 @@ DECLARE
   -- 어느 쪽이 규칙인지 묻게 된다. lock 키는 `text || anynonarray`가 uuid의
   -- canonical 표기를 내므로 바이트 단위로 같다.
   v_feature_id uuid;
-  v_prelock_features uuid[];
-  v_current_features uuid[];
   v_before_hashes jsonb := '{}'::jsonb;
   v_before_hash text;
   v_after_input jsonb;
@@ -45,18 +43,6 @@ BEGIN
     RAISE EXCEPTION 'domain command does not match source archive'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
   END IF;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
-  INTO STRICT v_prelock_features
-  FROM (
-    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM feature.curated_sources AS source
-    JOIN provider_sync.source_entities AS entity ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE source.source_id = p_source_id
-  ) AS scope;
   -- ADR-111: one exclusive gate instead of one lock per touched Feature.
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
@@ -76,20 +62,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
-  INTO STRICT v_current_features
-  FROM (
-    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_source.provider_dataset_id
-  ) AS scope;
-  IF v_current_features <> v_prelock_features THEN
-    RAISE EXCEPTION 'source archive scope changed while acquiring the catalog lock' USING ERRCODE = '40001';
-  END IF;
   FOR v_rule_id IN SELECT rule.rule_id FROM feature.curated_source_rules AS rule
     WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
   LOOP

@@ -15,10 +15,16 @@ SQLSTATE 53200 ``out of shared memory``로 죽었다 — 그 한 트랜잭션이
 
 무엇을 하는가. 잠금 하나를 더한다: ``feature-write-all``.
 
-- **대량 writer**(아홉): Feature별 잠금 대신 ``feature-write-all``을 **배타**로 한 번 잡는다.
+- **대량 writer**(여덟): Feature별 잠금 대신 ``feature-write-all``을 **배타**로 한 번 잡는다.
   잡는 자리는 종전 Feature 잠금 루프가 있던 자리 그대로다(``curation-catalog-write`` 직전).
+  그 루프를 덮던 "잠그는 동안 범위가 바뀌었나" 재검사(두 번의 scan + 40001)는 gate가 전부를
+  덮으므로 지운다. ``finalize_provider_curation_root``만은 ``feature-curation-write``를 든 채라
+  기다리지 않고 ``pg_try_advisory_xact_lock``으로 한 번 시도하고, 바쁘면 55P03으로 끝난다
+  (reconcile sensor가 다음 tick에 다시 한다).
 - **단건 writer**(여섯): ``feature-write:<id>`` 바로 앞에서 ``feature-write-all``을
   **공유**로 잡는다. 단건끼리는 종전처럼 서로 막지 않고, 대량 writer와는 서로 막는다.
+  API 엔진에는 ``lock_timeout``이 없으므로 이 여섯은 루틴 설정으로 ``lock_timeout = 5s``를
+  갖는다(API는 55P03을 503 ``LOCK_TIMEOUT``으로 돌려준다).
 
 종전의 "Feature별 잠금이 서로 겹치면 직렬화" 보장은 그대로다 — 대량 writer는 모든
 Feature를 덮는 하나의 배타 잠금을 들고, 단건 writer는 그 잠금의 공유 몫을 먼저 든다.
@@ -30,8 +36,8 @@ Feature를 덮는 하나의 배타 잠금을 들고, 단건 writer는 그 잠금
 본문은 ``alembic/versions/_406_<루틴>.sql`` 사이드카다. 각 파일은 head-schema.sql 원문에서
 잠금 몇 줄만 바꾼 사본이다(나머지는 바이트 동일).
 
-``finalize_provider_curation_receipts``는 지금 호출자가 없다(0209가 root 완결로 대체).
-같은 패턴이라 함께 고친다 — 지우는 것은 이 변경의 범위가 아니다.
+``finalize_provider_curation_receipts``는 호출자가 없고(0209가 root 완결로 대체) gate 앞에서
+``ops.import_jobs`` 행을 갱신한다 — 고치지 않고 걷어낸다.
 
 receipt head CHECK에 이 revision을 더한다(401~405와 같은 계약).
 
@@ -59,7 +65,7 @@ _VERSIONS_DIR: Final[Path] = Path(__file__).resolve().parent
 
 #: 스키마 소유자. env가 켠 롤이고, 마이그레이션은 이 롤로 끝나야 한다.
 _SCHEMA_OWNER_ROLE: Final[str] = "ktm_feature_schema_owner"
-#: 아래 루틴 열넷의 소유자(``alembic/head-schema.sql``의 ``ALTER PROCEDURE ... OWNER TO``).
+#: 아래 루틴 열셋(과 걷어낼 하나)의 소유자(``alembic/head-schema.sql``의 ``ALTER PROCEDURE ... OWNER TO``).
 _CURATION_OWNER_ROLE: Final[str] = "ktm_curation_command_owner"
 #: ``approve_feature_request_with_initial_state``의 소유자.
 _FEATURE_REQUEST_OWNER_ROLE: Final[str] = "ktm_feature_request_procedure_owner"
@@ -70,7 +76,6 @@ BULK_WRITERS: Final[tuple[str, ...]] = (
     "archive_curated_source_rule_command",
     "archive_curated_theme_command",
     "create_curated_source_rule_command",
-    "finalize_provider_curation_receipts",
     "finalize_provider_curation_root",
     "materialize_theme_candidate_generation",
     "patch_curated_source_rule_command",
@@ -85,6 +90,13 @@ SINGLE_WRITERS: Final[tuple[str, ...]] = (
     "promote_theme_feature_candidate",
 )
 _FEATURE_REQUEST_WRITER: Final[str] = "approve_feature_request_with_initial_state"
+
+
+#: 호출자가 없다(0209가 root 완결로 대체). 같은 Feature별 잠금 패턴에 더해 gate 앞에서
+#: ``ops.import_jobs`` 행을 갱신하므로, 고치는 대신 걷어낸다(ADR-111 결정 5).
+_DROP_RETIRED_RECEIPTS_SQL: Final[str] = (
+    "DROP PROCEDURE feature.finalize_provider_curation_receipts(bigint, uuid, text, text)"
+)
 
 
 def _sidecar(routine: str) -> str:
@@ -102,6 +114,7 @@ ALTER TABLE ops.application_schema_operation_receipts
 #: 롤로 돌아와 끝난다 — alembic의 ``UPDATE alembic_version``이 그 롤로 나간다.
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     f"SET ROLE {_CURATION_OWNER_ROLE}",
+    _DROP_RETIRED_RECEIPTS_SQL,
     *(_sidecar(routine) for routine in (*BULK_WRITERS, *SINGLE_WRITERS)),
     f"SET ROLE {_FEATURE_REQUEST_OWNER_ROLE}",
     _sidecar(_FEATURE_REQUEST_WRITER),
@@ -111,7 +124,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 
 
 def upgrade() -> None:
-    """Feature advisory fence를 전역 gate로 바꾼 루틴 열다섯을 다시 쓴다."""
+    """Feature advisory fence를 전역 gate로 바꾼 루틴 열넷을 다시 쓰고 하나를 걷어낸다."""
     bind = op.get_bind()
     for statement in _UPGRADE_STATEMENTS:
         bind.execute(text(statement))

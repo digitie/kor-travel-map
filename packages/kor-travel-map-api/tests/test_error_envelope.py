@@ -224,6 +224,31 @@ def test_unhandled_exception_uses_problem_json_500() -> None:
     assert "Traceback" not in serialized
 
 
+def test_lock_timeout_is_a_retryable_503() -> None:
+    """단건 writer가 gate를 lock_timeout 안에 못 얻으면 503 + Retry-After(ADR-111)."""
+
+    class _LockNotAvailable(Exception):
+        sqlstate = "55P03"
+
+    class _Wrapped(Exception):
+        def __init__(self) -> None:
+            super().__init__("postgresql://admin:secret@database/internal")
+            self.orig = _LockNotAvailable("canceling statement due to lock timeout")
+
+    app = create_app(ApiSettings())
+
+    @app.post("/busy")
+    async def _busy() -> None:
+        raise _Wrapped()
+
+    response = TestClient(app, raise_server_exceptions=False).post("/busy")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["code"] == "LOCK_TIMEOUT"
+    assert "secret" not in response.text
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("error", "expected_status", "expected_code"),

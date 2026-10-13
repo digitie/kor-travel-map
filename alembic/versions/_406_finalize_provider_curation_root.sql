@@ -1,5 +1,5 @@
 -- 406 (ADR-111): feature.finalize_provider_curation_root
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
@@ -150,8 +150,14 @@ BEGIN
     RETURN;
   END IF;
 
-  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.  This
+  -- transaction already holds feature-curation-write, so it must not queue behind
+  -- an admin bulk command and stall provider loads: try once and let the reconcile
+  -- sensor retry on its next tick.
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('feature-write-all', 0)) THEN
+    RAISE EXCEPTION 'feature-write-all gate is busy; provider curation root retries later'
+      USING ERRCODE = '55P03';
+  END IF;
   PERFORM 1
   FROM provider_sync.source_links AS link
   JOIN provider_sync.source_entities AS entity

@@ -1,8 +1,9 @@
 -- 406 (ADR-111): feature.patch_curation_item_command
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_command ops.domain_commands%ROWTYPE;

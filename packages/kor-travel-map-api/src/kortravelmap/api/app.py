@@ -62,6 +62,7 @@ from kortravelmap.api.domain_command_service import (
     DomainCommandFingerprintConflict,
     DomainCommandPending,
     DomainCommandReplay,
+    sqlstate_of,
 )
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
@@ -1043,6 +1044,18 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         않는다 — 내부 정보 누출 방지.
         """
         request_id = _request_id(request)
+        if sqlstate_of(exc) == "55P03":
+            # 단건 Feature writer가 대량 curation writer의 `feature-write-all` gate를
+            # lock_timeout(5s) 안에 얻지 못했다 — 잠시 뒤 다시 하면 된다(ADR-111).
+            _logger.warning("lock_timeout (request_id=%s): %s", request_id, request.url.path)
+            return _error_response(
+                status_code=503,
+                code="LOCK_TIMEOUT",
+                message="다른 대량 작업이 같은 Feature를 쓰는 중입니다. 잠시 뒤 다시 시도하세요.",
+                details={},
+                request_id=request_id,
+                headers={"Retry-After": "5"},
+            )
         _logger.error(
             "처리되지 않은 예외 (request_id=%s): %s",
             request_id,

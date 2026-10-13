@@ -1,5 +1,5 @@
 -- 406 (ADR-111): feature.patch_curated_source_rule_command
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
@@ -8,10 +8,6 @@ DECLARE
   v_command ops.domain_commands%ROWTYPE;
   v_rule feature.curated_source_rules%ROWTYPE;
   v_provider_dataset_id bigint;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_before_input jsonb;
   v_after_input jsonb;
   v_before_hash text;
@@ -51,18 +47,6 @@ BEGIN
   FROM feature.curated_source_rules AS rule
   JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
   WHERE rule.rule_id = p_rule_id;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
   -- ADR-111: one exclusive gate instead of one lock per touched Feature.
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
@@ -73,22 +57,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_sources AS source
   WHERE source.source_id = v_rule.source_id
     AND source.provider_dataset_id = v_provider_dataset_id FOR SHARE;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'rule patch scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
-  END IF;
   IF v_rule.row_revision <> p_expected_rule_revision THEN
     RAISE EXCEPTION 'rule revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';

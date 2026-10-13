@@ -1,8 +1,9 @@
 -- 406 (ADR-111): feature.promote_theme_feature_candidate
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_candidate_hint feature.theme_feature_candidates%ROWTYPE;

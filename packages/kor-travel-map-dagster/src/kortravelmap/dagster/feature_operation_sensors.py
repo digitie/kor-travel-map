@@ -53,16 +53,21 @@ FEATURE_OPERATION_SETTLE_LAG_SECONDS: Final[int] = 300
 FEATURE_OPERATION_RECONCILE_CURSOR_VERSION: Final[int] = 1
 
 FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT: Final[int] = 5
-"""같은 run이 같은 SQLSTATE로 연속 실패하면 terminal root를 닫는 횟수(ADR-111).
+"""같은 run이 같은 **데이터·불변식** SQLSTATE로 연속 실패하면 terminal root를 닫는 횟수(ADR-111)."""
 
-30초 tick 기준 약 2분 반이다. 결정적 실패(예: 53200 lock table 고갈)는 몇 번을 다시 돌아도
-같고, 실패하는 transaction이 공유 자원을 잡을 때마다 같은 cluster의 다른 tenant를 흔든다.
+FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS: Final[int] = 30
+FEATURE_OPERATION_RECONCILE_BACKOFF_MAX_SECONDS: Final[int] = 900
+"""실패한 run을 다시 돌기 전 기다리는 시간. 30초에서 두 배씩, 15분에서 멈춘다.
+
+무거운 트랜잭션(대형 dataset root 완결)이 실패할 때마다 30초 간격으로 다시 돌면 그 자체가
+공유 자원을 계속 흔든다. 그래서 실패는 **모두** 물러선다 — 닫는 것은 아래 허용 목록뿐이다.
 """
 
-#: 다시 돌면 지나갈 수 있는 SQLSTATE — 세지 않는다. 08 연결, 40 직렬화·교착,
-#: 57 운영자 개입(statement timeout·shutdown), 그리고 cluster 전체의 일시 상태 셋.
-_TRANSIENT_SQLSTATE_CLASSES: Final[frozenset[str]] = frozenset({"08", "40", "57"})
-_TRANSIENT_SQLSTATES: Final[frozenset[str]] = frozenset({"53300", "55P03", "55006"})
+#: root를 닫아도 되는 SQLSTATE class — 데이터 예외(22)·무결성 위반(23)·plpgsql RAISE(P0).
+#: 다시 돌려도 같은 답이 나오는 결정적 실패다. 그 밖(53 자원 고갈처럼 cluster의 다른 tenant가
+#: 일으킬 수 있는 것, 배포 중 42xxx, 40001, 57014, 55P03, 58xxx, XX000, SQLSTATE 없음)은
+#: 물러서서 다시 돌 뿐 닫지 않는다.
+_CLOSABLE_SQLSTATE_CLASSES: Final[frozenset[str]] = frozenset({"22", "23", "P0"})
 
 _ACTIVE_STATUSES: Final[frozenset[DagsterRunStatus]] = frozenset(
     {
@@ -167,25 +172,28 @@ class DagsterRunWatermark:
 
 @dataclass(frozen=True)
 class ReconcileFailure:
-    """마지막으로 tick을 멈춘 run과 그 실패의 SQLSTATE 서명, 연속 횟수."""
+    """마지막으로 tick을 멈춘 run, 그 실패의 서명, 연속 횟수, 다시 돌 수 있는 시각."""
 
     run_id: str
     signature: str
     count: int
+    retry_after: datetime
 
     def __post_init__(self) -> None:
         _non_empty_string(self.run_id, name="failure run_id")
         _non_empty_string(self.signature, name="failure signature")
         _positive_int(self.count, name="failure count")
+        _aware_datetime(self.retry_after, name="failure retry_after")
 
 
 @dataclass(frozen=True)
 class FeatureOperationReconcileCursor:
     """Dagster→DB watermark와 DB→Dagster keyset cursor의 단일 commit 단위.
 
-    ``last_failure``는 결정적 실패가 연속된 횟수다(ADR-111). 실패한 tick은 watermark를
-    옮기지 않고 이 값만 갱신한다. 끝까지 성공한 tick은 이 값을 지운다. 값이 없을 때는
-    JSON에 키를 쓰지 않는다 — 그 앞 판의 cursor와 모양이 같다.
+    ``last_failure``는 한 run의 반영이 연속 실패한 기록과 물러설 시각이다(ADR-111). 실패한
+    tick은 watermark를 옮기지 않고 이 값만 갱신한다. 끝까지 성공한 tick은 이 값을 지운다.
+    값이 없을 때는 JSON에 키를 쓰지 않는다 — 그 앞 판의 cursor와 모양이 같다. 앞 판 코드는
+    이 키가 있는 cursor를 거부하므로, 되돌릴 때는 cursor를 지우거나 키를 뺀다(ADR-111 결과).
     """
 
     dagster: DagsterRunWatermark | None = None
@@ -215,6 +223,7 @@ class FeatureOperationReconcileCursor:
         if self.last_failure is not None:
             value["last_failure"] = {
                 "count": self.last_failure.count,
+                "retry_after": self.last_failure.retry_after.isoformat(),
                 "run_id": self.last_failure.run_id,
                 "signature": self.last_failure.signature,
             }
@@ -267,6 +276,7 @@ class FeatureOperationReconcileCursor:
         if failure_raw is not None:
             if not isinstance(failure_raw, dict) or set(failure_raw) != {
                 "count",
+                "retry_after",
                 "run_id",
                 "signature",
             }:
@@ -275,6 +285,7 @@ class FeatureOperationReconcileCursor:
                 run_id=_non_empty_string(failure_raw["run_id"], name="failure run_id"),
                 signature=_non_empty_string(failure_raw["signature"], name="failure signature"),
                 count=_positive_int(failure_raw["count"], name="failure count"),
+                retry_after=_parse_datetime(failure_raw["retry_after"]),
             )
         return cls(dagster=dagster_cursor, database=database_cursor, last_failure=last_failure)
 
@@ -284,12 +295,17 @@ class FeatureOperationObservationError(RuntimeError):
 
 
 class _CountedReconcileFailure(RuntimeError):
-    """한 run의 DB 반영이 결정적 SQLSTATE로 실패함 — tick은 그대로 실패한다."""
+    """한 run의 DB 반영이 실패함 — tick은 그대로 실패하고, 실패는 세어진다."""
 
-    def __init__(self, record: _RunRecord, signature: str) -> None:
+    def __init__(self, record: _RunRecord, signature: str, *, closable: bool) -> None:
         super().__init__(signature)
         self.record = record
         self.signature = signature
+        self.closable = closable
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
@@ -430,6 +446,13 @@ async def _reconcile_tick(
             "cursor readback 뒤 다음 tick부터 처음부터 양방향 reconcile 수행"
         )
     cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
+    if cursor.last_failure is not None and _utcnow() < cursor.last_failure.retry_after:
+        return SkipReason(
+            "provider feature operation reconcile 대기: "
+            f"run_id={cursor.last_failure.run_id} {cursor.last_failure.signature} "
+            f"consecutive={cursor.last_failure.count} "
+            f"retry_after={cursor.last_failure.retry_after.isoformat()}"
+        )
     dagster_records = _dagster_run_page(
         context.instance,
         watermark=cursor.dagster,
@@ -555,27 +578,30 @@ def _sqlstate(error: BaseException) -> str | None:
     return None
 
 
-def _failure_signature(error: BaseException) -> str | None:
-    """결정적일 수 있는 DB 실패의 서명. 일시적이거나 SQLSTATE가 없으면 ``None``."""
+def _failure_signature(error: BaseException) -> tuple[str, bool]:
+    """실패의 서명(본문 없이)과, 그 실패가 root를 닫아도 되는 결정적 실패인지."""
     sqlstate = _sqlstate(error)
     if sqlstate is None:
-        return None
-    if sqlstate[:2] in _TRANSIENT_SQLSTATE_CLASSES or sqlstate in _TRANSIENT_SQLSTATES:
-        return None
-    return f"SQLSTATE {sqlstate}"
+        return type(error).__name__, False
+    return f"SQLSTATE {sqlstate}", sqlstate[:2] in _CLOSABLE_SQLSTATE_CLASSES
+
+
+def _backoff_seconds(count: int) -> int:
+    return min(
+        FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS * 2 ** min(count - 1, 16),
+        FEATURE_OPERATION_RECONCILE_BACKOFF_MAX_SECONDS,
+    )
 
 
 async def _apply_counted(record: _RunRecord, client: AsyncKorTravelMapClient) -> str:
-    """``_apply_run_record``와 같되, 결정적 DB 실패는 셀 수 있게 표시해 다시 던진다."""
+    """``_apply_run_record``와 같되, 반영 실패를 셀 수 있게 표시해 다시 던진다."""
     try:
         return await _apply_run_record(record, client)
     except FeatureOperationObservationError:
         raise
     except Exception as exc:
-        signature = _failure_signature(exc)
-        if signature is None:
-            raise
-        raise _CountedReconcileFailure(record, signature) from exc
+        signature, closable = _failure_signature(exc)
+        raise _CountedReconcileFailure(record, signature, closable=closable) from exc
 
 
 async def _record_counted_failure(
@@ -583,10 +609,11 @@ async def _record_counted_failure(
     client: AsyncKorTravelMapClient,
     failure: _CountedReconcileFailure,
 ) -> SkipReason:
-    """실패를 세고, 상한에 닿은 terminal run은 root를 닫는다(ADR-111).
+    """실패를 세고 물러서며, 결정적 실패가 상한에 닿은 terminal run은 root를 닫는다(ADR-111).
 
-    watermark는 옮기지 않는다 — 실패한 tick의 의미는 그대로다. cursor에는 연속 횟수만
-    더 쓴다. 상한에 닿아도 run이 아직 진행 중이면 닫지 않는다(Dagster가 끝내야 한다).
+    watermark는 옮기지 않는다 — 실패한 tick의 의미는 그대로다. cursor에는 연속 횟수와
+    다시 돌 시각만 더 쓴다. 닫는 것은 데이터·불변식 SQLSTATE(22/23/P0)뿐이고, 상한에 닿아도
+    run이 아직 진행 중이면 닫지 않는다(Dagster가 끝내야 한다).
     """
     run = failure.record.dagster_run
     cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
@@ -599,7 +626,10 @@ async def _record_counted_failure(
         else 1
     )
     ledger: ReconcileFailure | None = ReconcileFailure(
-        run_id=run.run_id, signature=failure.signature, count=count
+        run_id=run.run_id,
+        signature=failure.signature,
+        count=count,
+        retry_after=_utcnow() + timedelta(seconds=_backoff_seconds(count)),
     )
     message = (
         "provider feature operation reconcile 실패: "
@@ -609,7 +639,8 @@ async def _record_counted_failure(
     context.log.error(message)
     finished_at = _timestamp_datetime(failure.record.end_time, name="Dagster finish timestamp")
     if (
-        count >= FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
+        failure.closable
+        and count >= FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
         and run.status in _TERMINAL_STATUSES
         and finished_at is not None
     ):
@@ -888,6 +919,8 @@ def _run_async(awaitable: Coroutine[Any, Any, _T]) -> _T:
 
 
 __all__ = [
+    "FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS",
+    "FEATURE_OPERATION_RECONCILE_BACKOFF_MAX_SECONDS",
     "FEATURE_OPERATION_RECONCILE_CURSOR_VERSION",
     "FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT",
     "FEATURE_OPERATION_RECONCILE_INTERVAL_SECONDS",

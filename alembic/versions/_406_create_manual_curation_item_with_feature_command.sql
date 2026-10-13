@@ -1,8 +1,9 @@
 -- 406 (ADR-111): feature.create_manual_curation_item_with_feature_command
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;

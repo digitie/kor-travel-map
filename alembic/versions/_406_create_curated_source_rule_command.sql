@@ -1,5 +1,5 @@
 -- 406 (ADR-111): feature.create_curated_source_rule_command
--- head-schema.sql 원문에서 Feature advisory fence 한 곳만 바꾼 사본이다.
+-- head-schema.sql(405) 원문에서 Feature advisory fence와 그 주변만 바꾼 사본이다.
 CREATE OR REPLACE PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
@@ -7,10 +7,6 @@ CREATE OR REPLACE PROCEDURE feature.create_curated_source_rule_command(IN p_them
 DECLARE
   v_command ops.domain_commands%ROWTYPE;
   v_provider_dataset_id bigint;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_rule_input jsonb;
   v_rule_input_hash text;
   v_operation_id uuid;
@@ -45,13 +41,6 @@ BEGIN
 
   SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
   FROM feature.curated_sources AS source WHERE source.source_id = p_source_id;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id;
   -- ADR-111: one exclusive gate instead of one lock per touched Feature.
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
@@ -69,17 +58,6 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'source is missing, moved, or archived'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_source_active';
-  END IF;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'rule create scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
   END IF;
 
   INSERT INTO feature.curated_source_rules (
