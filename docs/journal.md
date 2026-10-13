@@ -27,24 +27,42 @@ eslint·vitest는 모두 ESM/번들러 해석이라 통과했다.
   연결 불가 — 응답 전체 대기 상한 초과"와 큐 sensor 차단 alert가 떠 `queueOperational=false`, 갱신 요청 dialog(=
   `/v1/ops/datasets` 호출)가 렌더되지 않았다. 원인은 PinVi #581과 같다: overview·schedules·summary 세 GraphQL 문서의
   `ticks(limit: 3)`가 `afterTimestamp` 없이 instigator의 전체 tick 이력을 읽는다(공유 `dagster_shared.job_ticks` 약 40만
-  행). n150 읽기 전용 실측(127.0.0.1:11002, 같은 문서): 창 없음 overview cold **10.0초**·warm 1.3초 → 창 있음 **0.08~0.12초**
-  (schedules 0.27~0.54초, summary 0.50~0.53초), 큐 sensor RUNNING·tick 3건 그대로. 수정: `dagster_graphql`에
-  `SCHEDULE_TICK_WINDOW_SECONDS`(62일)·`SENSOR_TICK_WINDOW_SECONDS`(1시간)와 `tick_window_variables()`를 두고 세 문서가
-  `afterTimestamp: $scheduleTicksAfter|$sensorTicksAfter`를 싣는다. **schedule 창은 PinVi의 2일이 아니다** — Map에는 월간
-  cron(`10 3 1 * *` 등)이 있어 2일이면 정상 월간 schedule이 한 달 대부분 "최근 tick 없음"이 된다. 규칙(최장 cron 주기의 2배)을
-  Map에 적용한 값이 62일이다. OpenAPI 변경 없음(PinVi 재vendor 불필요). spec은 전제(큐 sensor 차단 alert 부재)를 먼저 단언해
+  행). 수정: `dagster_graphql`에 `SCHEDULE_TICK_WINDOW_SECONDS`(2일)·`SENSOR_TICK_WINDOW_SECONDS`(1시간)·
+  `MAX_TICKS_IN_WINDOW`(300)와 `tick_window_variables()`를 두고 세 문서가 `afterTimestamp: $scheduleTicksAfter|$sensorTicksAfter`를
+  싣는다. OpenAPI 변경 없음(PinVi 재vendor 불필요). spec은 전제(overview HTTP 성공, 큐 sensor 차단 alert 부재)를 먼저 단언해
   원인을 메시지로 낸다.
+- **실측(n150, 127.0.0.1:11002, 읽기 전용, 문서별).** overview(sensor tick만): 창 없음은 이 시점 4회 모두 **HTTP 500 at
+  15.1~15.4초**(webserver statement timeout; 앞서 cold 10.0초·warm 1.3초도 봤다) → 창 있음 **0.08~0.12초**(같은 시각 교차
+  측정 4회). 단 디스크 대기가 큰 순간(load 12~14, iowait 44~52%) 창 있음 첫 호출 1회가 27.4초였다 — 창은 읽는 행 수를 줄일 뿐
+  n150의 I/O 정체까지 없애지는 못한다. schedules: 창 있음 0.18~0.24초. summary: 창 있음 0.20~0.22초(2일 창 기준; 62일
+  창일 때 0.27~0.54초·0.50~0.53초). 오늘은 Map schedule이 전부 STOPPED라 schedule 쪽 행은 거의 없다.
+- **schedule 창 2일(리뷰 4라운드 MED).** 처음엔 월간 cron(`10 3 1 * *`)을 덮으려 62일(최장 주기 2배)로 두었으나, Dagster
+  `get_ticks`는 `selector_id = X OR (selector_id IS NULL AND origin = Y)`라 인덱스 순서 scan을 못 하고 창 안 전 행을 읽어
+  정렬한다 — 비용은 창 안 tick 수에 비례한다. 같은 sensor 하나의 EXPLAIN ANALYZE(`BEGIN READ ONLY`): 창 안 211행 0.45초,
+  9,690행 cold **7.4초**, 33,971행 warm 0.14~0.22초. 62일은 schedule이 전부 STOPPED인 오늘만 쌌고, `*/10` schedule
+  (`feature_notice_transport_highway_incidents_ten_minute_schedule`) 하나가 켜지면 8,900행 → 7초대로 돌아간다. 검토한
+  대안: schedule마다 자기 cron으로 창을 잡는 것(두 번째 요청·별칭 문서·cron 파서가 세 호출 지점에 필요)보다, **창 하나 +
+  비용 상한 테스트**가 단순하다 — `test_schedule_window_cost_is_bounded_by_the_densest_cron`이 배포 Definitions의 최단 cron
+  간격으로 창 안 tick 수(`*/10` × 2일 = 288)를 `MAX_TICKS_IN_WINDOW` 이하로 강제해, 더 조밀한 schedule을 더하면 창을 줄일지
+  상한을 올릴지 고르게 한다(sensor도 같은 상한, 15초 × 1시간 = 240). 대가: 주간·월간 schedule은 마지막 tick이 2일보다
+  오래면 `recent_ticks`가 비고, 1시간 넘게 멈춘 sensor도 그렇다. 관리자 UI는 RUNNING인데 비면 "최근 2일/1시간 tick 없음"으로
+  표시한다(`src/lib/dagster-tick-window.ts`; 값은 같은 테스트가 API 창과 대조). sensor `typeSpecificData.lastTickTimestamp`로
+  멈춤을 드러내는 안은 응답 DTO에 필드를 더해야 해(OpenAPI 변경 → PinVi 재vendor) 이번엔 표지로 그쳤다. 운영자 cron
+  override(`load_schedule_cron_overrides`)는 정의에 없어 테스트가 못 본다 — override 간격이 2일보다 길면 같은 빈 목록, `*/10`보다
+  조밀하면 비용이 그만큼 커진다.
 - **효과 결박 테스트.** `tests/unit/test_dagster_tick_window.py`가 세 문서를 Map code location을 in-process로 실은 Dagster
   (1.13.24)에 실행해 storage `get_ticks`가 받는 `after`를 기록한다. main의 문서로 되돌리면 세 건 모두 빨갛다(n150 실측:
-  summary는 `after=None`, overview·schedules는 batch 경로로 빠져 `get_ticks` 0건). 창이 배포 Definitions를 덮는지(schedule
-  2×최장 cron 주기, sensor 10×최장 최소 간격)와 tick 선택 문서 목록도 본다. 기존 router·service 테스트는 시계를 고정해
-  호출 지점 변수까지 대조한다.
+  summary는 `after=None`, overview·schedules는 batch 경로로 빠져 `get_ticks` 0건). 시계를 고정하고 instigator 종류별
+  `after` 다중집합을 대조해 두 변수를 바꿔치기해도 빨갛다. 창 비용 상한(위), sensor 창 ≥ 10×최장 최소 간격, tick 선택 문서
+  목록(`Assign`·`AnnAssign` 모두), UI 표지 값도 본다. 기존 router·service 테스트는 시계를 고정해 호출 지점 변수까지 대조한다.
 - **리뷰 반영 3 — 게이트·config.** `scripts/verify-all-gates.sh`에 `e2e:list` 게이트(빠져서 CI pytest의
   `test_gate_script_covers_every_ci_blocking_command`가 빨갰다, HIGH-1). `e2e:list`의 live 실행은
   `e2e/reporter-load-check.ts`로 커스텀 reporter 둘(C7 redacted, mocked failure)을 **로드만** 한다(인스턴스·훅 없음 — n150에서
   파일 0개 확인, reporter에 ESM 전용 import를 넣으면 rc=1). `playwright.live.config.ts`의 top-level `testIgnore`가 chromium
   project의 `testIgnore`에 대체돼 격리 전용 `cache-target-streams-isolated` spec이 live suite에 들어가 있었다 — project-level로
-  옮겨 live 목록이 1142/28 → 1141/27. CI 단계는 `forbidOnly`로 `test.only`도 잡는다(n150에서 `CI=1` 변이로 확인).
+  옮겨 live 목록이 1142/28 → 1141/27. CI 단계는 `forbidOnly`로 `test.only`도 잡는다(n150에서 `CI=1` 변이로 확인);
+  `verify-all-gates.sh`도 `CI=1`로 같은 조건에서 돈다. `scripts/n150/chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이고
+  skipped·did not run·interrupted도 실패로 본다(전에는 failed/flaky 줄이 없으면 초록).
 - **D1 재실행(브랜치 사본, prod 읽기 전용).** 11건 중 **10 passed, 1 failed**. `home-dashboard-roundtrip`은 이제 통과한다. 남은 1건은 `admin-scenario-catalog`의 새 전제 단언이 "큐 sensor 차단 alert — Dagster 상태 스냅샷을 신뢰할 수 없습니다"로 정확히 원인을 내며 실패한 것이다 — prod Map API가 아직 창 없는 문서를 쓰기 때문이고, 이 PR의 API 수정은 배포 뒤에야 live에 보인다. 배포 전 증명으로 이 브랜치의 세 문서를 그대로 prod Dagster에 보냈다(위 실측). **D1 11/11은 Map API 배포 뒤 재실행으로 확인할 일이다.**
 
 ## 2026-10-13 — chain17 B 단계가 같은 Map·새 PinVi 회전을 건너뛰던 결함: 브랜치 `fix/chain17-rotate-when-pinvi-changes`

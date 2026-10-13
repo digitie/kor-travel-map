@@ -57,9 +57,8 @@ pytestmark = [
 
 _ROOT = Path(__file__).resolve().parents[2]
 _API_SRC = _ROOT / "packages" / "kor-travel-map-api" / "src" / "kortravelmap" / "api"
-_ADMIN_WINDOW_TS = (
-    _ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "src" / "lib" / "dagster-tick-window.ts"
-)
+_ADMIN_FRONTEND = _ROOT / "packages" / "kor-travel-map-admin" / "frontend"
+_ADMIN_WINDOW_TS = _ADMIN_FRONTEND / "src" / "lib" / "dagster-tick-window.ts"
 _LOCATION = "kortravelmap.dagster.definitions"
 _SELECTOR = {"repositoryName": "__repository__", "repositoryLocationName": _LOCATION}
 _RUN_TAG = {"key": ".dagster/repository", "value": f"__repository__@{_LOCATION}"}
@@ -190,7 +189,9 @@ def _cron_gaps_seconds(cron: str, timezone: str | None) -> tuple[float, float]:
 
     fires = list(
         islice(
-            cron_string_iterator(start_timestamp=_NOW, cron_string=cron, execution_timezone=timezone),
+            cron_string_iterator(
+                start_timestamp=_NOW, cron_string=cron, execution_timezone=timezone
+            ),
             400,
         )
     )
@@ -237,7 +238,10 @@ def test_schedule_window_cost_is_bounded_by_the_densest_cron() -> None:
 
 
 def test_schedule_window_covers_two_periods_of_some_schedules() -> None:
-    """창이 어떤 schedule의 2주기도 못 덮으면 의미가 없다. 나머지(주간·월간)는 UI가 표지로 보인다."""
+    """창이 어떤 schedule의 2주기도 못 덮으면 의미가 없다.
+
+    나머지(주간·월간)는 관리자 UI가 "창 안 tick 없음" 표지로 보인다.
+    """
 
     gaps = _schedule_gaps()
     covered = [

@@ -17,9 +17,14 @@
   `src/lib/session-cookie.ts`로 옮겼다.
 - **ADDED (CI)**: `frontend.yml`(+ `scripts/verify-all-gates.sh`)이 `e2e:list`(mocked·live·cache-target-streams config의
   `playwright test --list`, 커스텀 reporter 로드 포함)로 spec 로드를 검사한다.
-- **FIXED (api)**: Dagster GraphQL overview·schedules·summary 문서의 `ticks(limit: 3)`에 `afterTimestamp` 창(schedule 62일,
-  sensor 1시간)을 둔다. 공유 `job_ticks`의 전체 이력을 읽어 overview가 cold 10초를 넘겨 관리자 UI가 "Dagster 연결 불가"로
-  갱신 요청을 막던 결함(n150 실측 창 적용 후 0.08~0.54초). 응답 계약·OpenAPI 변경 없음.
+- **FIXED (api)**: Dagster GraphQL overview·schedules·summary 문서의 `ticks(limit: 3)`에 `afterTimestamp` 창(schedule 2일,
+  sensor 1시간)을 둔다. 공유 `job_ticks`의 전체 이력을 읽어 overview가 webserver statement timeout(HTTP 500 at 15초)에
+  걸리거나 cold 10초로 `bounded_request` 상한을 넘겨 관리자 UI가 "Dagster 연결 불가"로 갱신 요청을 막던 결함. n150 실측(창 적용
+  후, 문서별): overview 0.08~0.12초, schedules 0.18~0.24초, summary 0.20~0.22초.
+- **CHANGED (api, 의미)**: 스키마는 같지만 `recent_ticks`가 이제 **창 안의 tick만** 담는다 — 마지막 tick이 2일(schedule)·
+  1시간(sensor)보다 오래면 빈 목록이다(주간·월간 schedule, 멈춘 sensor). 관리자 UI는 RUNNING인데 비면 "최근 2일/1시간 tick
+  없음"으로 표시한다. 창보다 긴 간격의 운영자 cron override도 같은 빈 목록을 낸다.
+- **CHANGED (scripts/n150)**: `chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이다(skipped·did not run도 실패).
 - **FIXED (admin frontend e2e)**: live config의 top-level `testIgnore`가 project `testIgnore`에 대체돼 격리 전용
   cache-target-streams spec이 live suite에 포함되던 것; home 대시보드 live spec의 행 찾기 strict mode 위반.
 

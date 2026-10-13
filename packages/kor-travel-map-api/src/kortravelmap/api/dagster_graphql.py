@@ -116,8 +116,10 @@ REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
 #: ``ticks(limit: N)`` 조회 창. ``afterTimestamp``가 없으면 Dagster storage는 instigator의
 #: **전체** tick 이력을 읽는다(``selector_id = X OR (selector_id IS NULL AND origin = Y)``라
 #: 인덱스 순서 scan이 안 되고 BitmapOr → 전 행 heap 읽기 → 정렬). 공유 ``dagster_shared``의
-#: ``job_ticks``(2026-10-13 약 40만 행)에서 overview 문서가 cold 10.0초(warm 1.3초)로
-#: ``bounded_request`` 상한에 걸려, 관리자 UI가 큐 sensor를 신뢰할 수 없다며 갱신 요청을 막았다.
+#: ``job_ticks``(2026-10-13 약 40만 행)에서 overview 문서가 webserver statement timeout(HTTP
+#: 500 at 15초)이나 cold 10.0초로 ``bounded_request`` 상한에 걸려, 관리자 UI가 큐 sensor를 신뢰할
+#: 수 없다며 갱신 요청을 막았다. n150 실측(창 적용 후, 문서별): overview 0.08~0.12초, schedules
+#: 0.18~0.24초, summary 0.20~0.22초(디스크 대기가 큰 순간의 첫 호출은 이보다 훨씬 길 수 있다).
 #: PinVi #581과 같은 처방이고 두 창 값도 같다.
 #:
 #: **비용은 창 안의 tick 수에 비례한다**(n150 읽기 전용 EXPLAIN ANALYZE, 같은 sensor 하나:

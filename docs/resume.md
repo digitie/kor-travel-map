@@ -6,8 +6,9 @@ D1은 **Map API 배포 전까지 빨갛다** — `admin-scenario-catalog`의 갱
 
 - 바뀐 것: (1) `SESSION_COOKIE_NAME`을 의존성 없는 `src/lib/session-cookie.ts`로 옮겨 e2e가 ESM 전용
   `@kor-travel/ui/navigation`을 끌어오지 않는다. (2) `frontend.yml`·`scripts/verify-all-gates.sh`에 `e2e:list`(세 config
-  `--list` + 커스텀 reporter 로드). (3) Map API Dagster GraphQL 세 문서의 `ticks`에 `afterTimestamp` 창(schedule 62일·sensor
-  1시간) + 효과 결박 테스트 `tests/unit/test_dagster_tick_window.py`. (4) live spec 둘(home 행 찾기, catalog 전제 단언),
+  `--list` + 커스텀 reporter 로드). (3) Map API Dagster GraphQL 세 문서의 `ticks`에 `afterTimestamp` 창(schedule 2일·sensor
+  1시간, 창 안 tick 300 상한을 Definitions에 대조) + 효과 결박 테스트 `tests/unit/test_dagster_tick_window.py`, UI는 빈 창을
+  "최근 2일/1시간 tick 없음"으로 표시. (3b) chain16 D1은 `--list` 개수만큼 passed여야 초록. (4) live spec 둘(home 행 찾기, catalog 전제 단언),
   live config `testIgnore` 대체 버그. 원인·실측은 journal 2026-10-13.
 - 바뀌지 않은 것: vendored tgz, OpenAPI(PinVi 재vendor 불필요), n150(읽기 전용 live 실행·GraphQL 조회만).
 
