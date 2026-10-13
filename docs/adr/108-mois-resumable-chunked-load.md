@@ -56,6 +56,11 @@ DB에 한 번 묻는다: "head의 current record가 같은 payload hash이고 pr
 선조회 실패는 캐시하지 않는다 — 변환이 한 번 더 실시간으로 시도하고, 그래도 실패하면 예외가
 올라간다(빈 bjd로 조용히 적재하지 않는다).
 
+> **예외(계획, ADR-109 열린 결정 6 — 소유자 승인 전에는 적용하지 않는다).** geo 릴리스 재지오코딩의
+> 전용 job run(run 태그 `kor_travel_map.geo_release_plan_id` — `trigger_kind=sensor`는 §3 이어 달리기 run에도
+> 붙으므로 판별자가 아니다)에서만 reverse timeout에 1회 재시도를 허용한다 — 그 run은 실패하면 dataset reverse
+> 전량을 다시 부르기 때문이다. 월간·수동·이어 달리기 run의 "건별 재시도 없음"은 그대로다.
+
 ### 3. run 크기 — 시간 상한 + 이어 달리기 sensor
 
 run 하나는 `KOR_TRAVEL_MAP_MOIS_LOAD_RUN_BUDGET_SECONDS`(기본 14,400초=4시간, 최대 19,800초)까지만
@@ -85,6 +90,10 @@ job의 run 상한 21,600초 - 30분이고, 둘이 갈라지면 테스트가 빨�
 기준 상한이 이미 지나 한 chunk(대개 미변경)만 하고 멈추는데, 그것을 "전진 불가"로 보면 다음 월간
 tick까지 정체된다(델타 리뷰 MED-1). tag가 없거나 깨졌으면 이어 달린다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1, run
 단위)이 실행을 직렬화하고, 재개형이라 뒤 run은 건너뛰기만 한다.
+
+> **계획(ADR-109 proposed, 미구현).** geo 릴리스 계획이 활성인 동안은 릴리스 센서가 `budget_exhausted`
+> 이어 달리기를 대신한다(`mois_load_continuation_decision`을 그대로 호출). 그동안 이 sensor를 켤 필요가
+> 없고, 켜져 있어도 릴리스 센서의 Skip 조건이 이중 요청을 막는다 — 상한·Skip 규칙은 ADR-109 결정 5.
 
 ### 3a. 소실 하한과 geo 장애 (적대 리뷰 MED-1)
 
@@ -166,6 +175,9 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
   바뀌면 key가 맞지 않아 저절로 다시 조회한다. 30일이 지나면 다시 조회해 geo 데이터 갱신을 반영한다 —
   여전히 빈 답이면 표식이 전진한다. 다시 조회해 **풀리면** 그 행의 열린 표식을 `resolved`로 닫는다 — 열린
   표식이 끝없이 쌓이지 않는다. 운영자가 finding을 닫으면(`resolved`) 다음 run이 다시 조회한다.
+  **계획(ADR-109 proposed, 미구현)**: 표식 payload에 `geo_data_token`을 더하고, "알려진 불가" 조건에
+  "그 토큰이 run의 현재 geo 데이터 토큰과 같다"를 더한다(현재 토큰이 None이면 조건 생략). geo 릴리스 뒤
+  첫 run이 표식 행을 전부 다시 조회하고, 30일 만료는 backstop으로 남는다.
 - **저장소 선택**: 새 표를 만들지 않고 finding 표를 재사용했다. 필요한 것(엔티티 단위 dedupe key, 열린
   표식 unique 인덱스 `uq_violations_open_dedupe_key`, 관측 시각 `last_seen_at`, payload jsonb, runtime
   쓰기 경로 `record_address_validation_findings`)이 모두 있고, 표식이 `/admin/issues`에 정보 수준 이슈로

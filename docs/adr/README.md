@@ -1,7 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-109.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-110.**
 
+- [ADR-109 — geo 주소 데이터셋 릴리스 감지·재지오코딩](109-geo-release-regeocode.md) — proposed, 2026-10-13 (미구현, T-GR-01~08).
 - [ADR-108 — MOIS 인허가 재개형 chunk commit 적재](108-mois-resumable-chunked-load.md) — proposed, 2026-10-12.
 - [ADR-107 — Dagster 공통 런타임·관리자 UI 채택](107-common-dagster-runtime.md) — accepted, 2026-10-05.
 
@@ -123,7 +124,9 @@
 | ADR-104 | Map은 KMA(기상청)를 적재하지 않는다 — KMA는 kor-travel-weather가 소유한다 | [104-map-does-not-load-kma.md](104-map-does-not-load-kma.md) |
 | ADR-105 | Map에서 날씨 feature와 날씨 notice 기능을 지운다 — 정의는 남긴다 | [105-map-drops-weather-functionality.md](105-map-drops-weather-functionality.md) |
 | ADR-106 | 주유소·유가·휴게소·고속도로 돌발·공항은 kor-travel-transport export에서 받는다 | [106-transport-data-comes-from-kor-travel-transport.md](106-transport-data-comes-from-kor-travel-transport.md) |
+| ADR-107 | Dagster 복구·제한 전송과 관리자 UI의 Common 채택 | [107-common-dagster-runtime.md](107-common-dagster-runtime.md) |
 | ADR-108 | MOIS 인허가 적재는 원천 내용을 재개 키로 하는 chunk commit 적재다 | [108-mois-resumable-chunked-load.md](108-mois-resumable-chunked-load.md) |
+| ADR-109 | geo 주소 데이터셋 릴리스는 데이터 토큰(`dd1-`)으로 감지하고, 적재 경로를 재사용해 다시 지오코딩한다 (proposed, 미구현) | [109-geo-release-regeocode.md](109-geo-release-regeocode.md) |
 
 ## 새 ADR 작성 규약
 

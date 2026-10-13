@@ -28,7 +28,7 @@
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
 | **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **공용 PostGIS**(map 포함, ADR-103)·RustFS·관측 스택 소유 | PostGIS 공용 **11000**(map 전용 12700은 이전 창에서 퇴역, 아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35·ADR-53 |
 | **kor-travel-transport** | 교통 데이터 수집·저장(오피넷 주유소·유가, 고속도로 돌발·휴게소·휴게소 유가, 공항 주차·메타데이터) — Map 주유소·휴게소·돌발·공항 feature의 **provider**(ADR-106) | API **14001**(host network, loopback) · 공개 `pr-api` 경유 export 불가 | kor-travel-transport ADR-013, `docs/openapi.json` |
-| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
+| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열. **계획(ADR-109 proposed, 미구현)**: Map은 `POST /v2/dataset/version`의 데이터 토큰 `data_token`(`dd1-`, geo ADR-069) **동등성** 소비자 — 다르면 재지오코딩, 없으면 계획 없이 Skip | **12501** | ADR-046/047, ADR-109 |
 
 > ⚠️ **n150 prod의 PostgreSQL은 공용 instance 하나다 (ADR-103, Manager ADR-53).**
 > map은 2026-09-29 10:48~11:33Z 이전 창에서 옮겼다(Part A 공용 튜닝 재시작 → Part B 이전, V1~V9 통과).
@@ -165,6 +165,12 @@
   `reject`·`tombstone` → 대응 feature `status='inactive'` 전환(ADR-050 #4, T-217b).
 - PinVi ↛ kor-travel-concierge: 직접 연동 없음 — YouTube 후보는 kor-travel-map feature를 통해서만
   PinVi에 도달한다. PinVi `curated_trip_plans` 생성에도 kor-travel-concierge는 관여하지 않는다.
+- kor-travel-geo ↔ kor-travel-map — **Map → geo(현재)**: `POST /v2/{reverse,geocode}`·`/v2/regions/within-radius`를
+  적재·admin 이슈 액션·`sigungu_by_radius` scope가 호출한다(header key 인증, §4). **geo → Map(계획, ADR-109
+  proposed, 미구현)**: geo는 Map을 호출하지 않는다. Map Dagster 센서 `kor_travel_geo_release_sensor`가
+  `POST /v2/dataset/version`을 폴링해 `data_token`이 바뀌면 in-process로 계획을 만들고 전용 feature load
+  job을 RunRequest로 띄운다(큐 `feature_update_requests` 아님). 재빌드(토큰 동일)는 0건, `data_token` 없음은 Skip.
+  주기·Skip 조건·전이 규칙은 ADR-109 결정 5.
 
 ## 3. 인증·envelope — 표면별 의도적 차이 (D-08)
 
@@ -547,7 +553,7 @@ echo 예외가 아니라, admin provenance가 해석된 Feature identity/evidenc
 | **C6c cancel-probe fixture** | `docs/architecture/c6c-cancel-probe-fixture.md` + `openapi.service.json`의 `ops:fixture` 3 route + ADR-084 | Docker Manager F1D orchestrator; PinVi는 기존 cancel relay만 소비 |
 | **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | runtime identity lookup 소비자는 없음. PinVi pinned OpenAPI snapshot의 schema field hit는 호출 소비가 아님(2026-07-30) |
 | **feature alias-map 이관 (T-VN-32C)** | 본 repo `contracts/feature-alias-map-v1-golden.json`(`feature-alias-map-v1` — Map/PinVi 독립 재계산 golden) + `GET /v1/service/feature-alias-maps{,/checksum}`(`openapi.service.json`). 이관·복구 경계 전용 bulk read(ADR-068 결정 3) — 런타임 alias lookup 표면이 아니다 | PinVi vendored `apps/api/tests/contract/feature-alias-map-v1-golden.json` + 독립 구현 `app/core/feature_alias_contract.py` + 이관 실행기 `pinvi-feature-uuid-cutover` |
-| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증 | ADR-046 + geo ADR-064 |
+| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증. **계획(ADR-109 proposed, 미구현)**: 네 v2 응답 최상위 `dataset{version_token, data_token}`(geo ADR-069)을 Map 클라이언트가 선택 파싱(없으면 None)하고 `KorTravelGeoRestClient.dataset_version()`이 `POST /v2/dataset/version`을 읽는다. Map은 geo 스펙을 vendoring·핀하지 않는다(자체 픽스처 — `dataset` 있음/없음 둘 다) | ADR-046 + geo ADR-064; ADR-109 + geo ADR-069(계획) |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 
 > **`collection_key`는 안정 식별자가 아니다 (2026-07-30).** 공개/admin 응답에 실리지만
@@ -573,3 +579,15 @@ Map UI의 server-only `KOR_TRAVEL_GEO_API_KEY`로만 별칭 결선한다. Next.j
 프록시는 public/VWorld alias나 browser query key를 받지 않고 같은 header로 전송하며,
 geo의 credential rejection은 `503 GEO_API_KEY_REJECTED`로 fail-close한다. 이 credential은
 frontend Docker build arg/source digest나 `NEXT_PUBLIC_*` runtime에 포함하지 않는다.
+
+**Map admin OpenAPI(`packages/kor-travel-map-api/openapi.json`)가 바뀌면 PinVi의 vendored admin 스냅샷을 재vendor해야
+한다** — 단일 핀 `apps/api/tests/unit/_kor_travel_map_snapshot_pin.py`(`UPSTREAM_COMMIT`·`SNAPSHOT_SHA256`) +
+`test_kor_travel_map_admin_contract.py` 이중 핀 + `scripts/generate_m05_pair_contract.py` 재실행, Map API 배포 **전**
+머지(2026-10-12 t1013b에서 회전 preflight가 digest 불일치로 거부됐다; user/service 스냅샷은 별도 핀).
+
+**전역 잠금과 큐 단일 transaction** — 모든 feature 쓰기는 전역 advisory xact lock
+`lock_feature_curation_write`(`src/kortravelmap/infra/feature_repo.py:146-156`)를 지나고, 큐 runner는 dataset 전체를
+executor transaction 하나로 묶는다(`dagster/feature_update_runner.py:490-518`) — 현재 사실. 그래서 geo 릴리스 전용
+job(계획, ADR-109 proposed, 미구현)이 큐 run과 겹치면 첫 chunk가 잠금 대기로 `GEO_HEAVY_POOL`을 쥔 채 run 상한까지
+멎을 수 있다. 릴리스 센서의 Skip 규칙은 ADR-109 결정 5(4)가 정본이다. 반대 방향(전용 job 중 큐 run)은 chunk
+사이에 끼어들 뿐 손상이 없다(둘 다 run-scoped 토큰).
