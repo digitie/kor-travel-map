@@ -6368,13 +6368,14 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT v_hint.feature_id AS feature_id
-    UNION SELECT p_feature_id WHERE p_feature_id IS NOT NULL
-  ) AS touched
-  WHERE touched.feature_id IS NOT NULL
-  ORDER BY touched.feature_id;
+  -- At most two Features (old and new), in uuid order.  A NULL key locks nothing
+  -- (pg_advisory_xact_lock is strict), as the old set form skipped NULLs.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || LEAST(v_hint.feature_id, p_feature_id), 0)
+  );
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || GREATEST(v_hint.feature_id, p_feature_id), 0)
+  );
   SELECT collection.* INTO STRICT v_collection
   FROM feature.curation_collections AS collection
   WHERE collection.collection_id = p_collection_id FOR UPDATE;
