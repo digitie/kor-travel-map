@@ -41,6 +41,18 @@ lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor�
   호출과 행 쓰기의 trigger까지 펼친다(심은 trigger 위반으로 red 확인). ADR-111에 새 Feature에도 gate를 잡는 이유.
 - **함정.** 시드의 `created_at`·`started_at`을 `clock_timestamp()` 두 번으로 넣어 μs 차이로
   `ck_import_jobs_ck_import_jobs_feature_engine_timeline`에 걸렸다 — 한 문장의 `now()`로.
+- **델타 리뷰 반영(00630d19 위).** 마이그레이션·테스트는 GO, 재시도 논리에 HIGH 하나. (H1) 실패한 run 하나가
+  tick 전체를 실패시켜 두 cursor가 멈추고 DB page에 닿지 못했다 — 42xxx·54000·SQLSTATE 없는 예외 같은 영구 실패면
+  15분 backoff 아래 reconcile 전체가 무기한 선다. → run별 `deferred` 표로 실패한 run만 미뤄 두고 watermark·같은 page·
+  DB page를 계속 돌며, 미뤄 둔 run은 시각이 되면 run_id로 다시 집는다(표 최대 200). 변이 확인: 앞 run이 계속 실패해도
+  뒤 run과 DB page run이 같은 tick에 반영된다(`test_a_parked_run_does_not_block_the_others`). (M1) 같은 실패 5연속에
+  `feature_operation.reconcile_stalled`를 한 번. (M2) 닫기는 `applied`일 때만 표에서 지우고, `blocked`면 표에 남겨 다시
+  닫지 않고 멈춘 run으로 올린다(잘못된 "failed로 닫음(outcome=blocked)" 로그 제거). (M3) rollback은 `deferred` 키만 뺀
+  cursor `--set`(prod는 null cursor 초기화 거부라 `--delete` 금지), 405 재배포 약속 대신 fix forward. (M4) 55P03은
+  30초 고정 backoff, ADR에 "공유 보유자도 try를 막는다". (L) `_sqlstate`/`sqlstate_of`는 `orig`·`__cause__`만;
+  API는 typed `DBAPIError` 처리기(55P03만, 나머지는 다시 던져 종전 500); lint는 lock 문장의 어떤 FROM도 scan으로 —
+  그래서 `patch_curation_item_command`의 두 Feature 잠금을 `LEAST`/`GREATEST` 두 스칼라 문장으로 바꿨다. CHANGELOG·
+  journal·resume에 남아 있던 diff3 base 표지(`|||||||`) 세 줄 제거.
 
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
@@ -108,7 +120,6 @@ eslint·vitest는 모두 ESM/번들러 해석이라 통과했다.
   `verify-all-gates.sh`도 `CI=1`로 같은 조건에서 돈다. `scripts/n150/chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이고
   skipped·did not run·interrupted도 실패로 본다(전에는 failed/flaky 줄이 없으면 초록).
 - **D1 재실행(브랜치 사본, prod 읽기 전용).** 11건 중 **10 passed, 1 failed**. `home-dashboard-roundtrip`은 이제 통과한다. 남은 1건은 `admin-scenario-catalog`의 새 전제 단언이 "큐 sensor 차단 alert — Dagster 상태 스냅샷을 신뢰할 수 없습니다"로 정확히 원인을 내며 실패한 것이다 — prod Map API가 아직 창 없는 문서를 쓰기 때문이고, 이 PR의 API 수정은 배포 뒤에야 live에 보인다. 배포 전 증명으로 이 브랜치의 세 문서를 그대로 prod Dagster에 보냈다(위 실측). **D1 11/11은 Map API 배포 뒤 재실행으로 확인할 일이다.**
-||||||| parent of 725f517d4 (docs(journal,resume): ADR-111 lock table 고갈 수정 기록 — n150 red(53200)/green 증거)
 
 ## 2026-10-13 — chain17 B 단계가 같은 Map·새 PinVi 회전을 건너뛰던 결함: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 

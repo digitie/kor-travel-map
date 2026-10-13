@@ -155,6 +155,7 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_operation_repo import (
     record_feature_operation_invariant_conflict,
+    record_feature_operation_reconcile_stalled,
 )
 from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_dataset_membership as repo_resolve_operation_dataset_member,
@@ -883,6 +884,24 @@ class AsyncKorTravelMapClient:
     ) -> None:
         async with self._session_factory() as session, session.begin():
             await record_feature_operation_invariant_conflict(session, conflict)
+
+    async def record_feature_operation_reconcile_stalled(
+        self,
+        *,
+        dagster_run_id: str,
+        failure: str,
+        attempts: int,
+        closable: bool,
+    ) -> None:
+        """reconcile이 한 run에서 같은 실패를 상한만큼 봤다고 운영 로그에 남긴다(ADR-111)."""
+        async with self._session_factory() as session, session.begin():
+            await record_feature_operation_reconcile_stalled(
+                session,
+                dagster_run_id=dagster_run_id,
+                failure=failure,
+                attempts=attempts,
+                closable=closable,
+            )
 
     async def ensure_dagster_feature_operation(
         self,

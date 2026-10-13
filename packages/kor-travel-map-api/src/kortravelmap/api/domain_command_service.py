@@ -77,7 +77,11 @@ _SERIALIZATION_ATTEMPTS = 3
 
 
 def sqlstate_of(error: BaseException) -> str | None:
-    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다."""
+    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다.
+
+    명시적 연결(``orig``·``raise ... from``)만 따른다 — ``__context__``는 처리 중에 우연히
+    겹친 다른 예외일 수 있다.
+    """
 
     current: BaseException | None = error
     seen: set[int] = set()
@@ -87,7 +91,6 @@ def sqlstate_of(error: BaseException) -> str | None:
             current,
             getattr(current, "orig", None),
             getattr(current, "__cause__", None),
-            getattr(current, "__context__", None),
         ):
             if candidate is None:
                 continue

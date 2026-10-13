@@ -5,6 +5,8 @@
 전에는 다시 켜지 않는다.**
 
 배포 runbook(n150, 운영자):
+0. 머지된 main 체크아웃에서 호스트 chain 스크립트를 다시 맞춘다 —
+   `sudo install -o root -g root -m 0700 scripts/n150/chain1{6,7}.sh /root/` (호스트 `chain16.sh`는 아직 느슨한 D1 게이트다).
 1. Map pair 배포(`/root/chain17.sh`, 마이그레이션 전진 — `scripts/n150/README.md`). 같은 pair면 launcher 직접.
 2. 확인(Map API 컨테이너 DSN에서 유도한 map DB, 읽기만):
    `SELECT version_num FROM alembic_version;` → `406_feature_write_gate`.
@@ -15,7 +17,9 @@
 3. 그 뒤에만 `feature_operation_reconciliation_sensor`를 켠다. root `97ac4e01-…`가 다음 tick에 완결되는지
    (`ops.import_jobs.status='done'`) 본다. 실패하면 sensor는 30s→15분 backoff로 다시 할 뿐 53200으로는 닫지 않는다.
    SQLSTATE 22/23/P0이 5연속이면 root는 `failed`가 되고 `ops.system_log` `feature_operation.reconcile_abandoned`가 남는다.
-4. 되돌릴 때: sensor를 멈추고 cursor에서 `last_failure` 키를 빼거나 cursor를 지운 뒤 앞 판을 배포한다(ADR-111 결과).
+   그 밖의 실패는 다섯 번째에 `feature_operation.reconcile_stalled`가 한 번 남고, 실패한 run만 미뤄 둔 채 나머지 reconcile은 계속 돈다.
+4. 문제가 생기면 sensor를 멈추고 앞으로 고친다(406은 forward-only — 405 재배포를 약속하지 않는다). 앞 판 코드가 다시 돌아야
+   한다면 cursor에서 `deferred` 키만 뺀 값을 `dagster sensor cursor --set`으로 넣는다(`--delete` 금지 — prod는 null cursor 초기화를 거부).
 
 - 바뀐 것: alembic 406(대량 writer 8개 gate 배타 — root 완결만 try-lock·55P03, 단건 6개 gate 공유 +
   `lock_timeout 5s`, 죽은 범위 재검사 제거, 호출자 없는 `finalize_provider_curation_receipts` DROP), reconcile sensor
@@ -36,7 +40,6 @@ D1은 **Map API 배포 전까지 빨갛다** — `admin-scenario-catalog`의 갱
   "최근 2일/1시간 tick 없음"으로 표시. (3b) chain16 D1은 `--list` 개수만큼 passed여야 초록. (4) live spec 둘(home 행 찾기, catalog 전제 단언),
   live config `testIgnore` 대체 버그. 원인·실측은 journal 2026-10-13.
 - 바뀌지 않은 것: vendored tgz, OpenAPI(PinVi 재vendor 불필요), n150(읽기 전용 live 실행·GraphQL 조회만).
-||||||| parent of 725f517d4 (docs(journal,resume): ADR-111 lock table 고갈 수정 기록 — n150 red(53200)/green 증거)
 
 ## 2026-10-13 — chain17 B 단계 pair 회전 수정: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 

@@ -118,7 +118,8 @@ def _per_feature_violations(name: str, body: str) -> list[str]:
         if key != _PER_FEATURE:
             continue
         statement = _statement(body, match.start())
-        if re.search(r"\b(?:feature|provider_sync|ops)\.[a-z_]+", statement):
+        # 어떤 FROM이든 집합이다 — 스키마 없는 표 이름(`FROM source_links`)이나 부분 질의도.
+        if re.search(r"\bFROM\b", statement, re.IGNORECASE):
             violations.append(f"{name}: per-Feature lock over a relation scan")
         if _loop_depth(body, match.start()) > 0:
             violations.append(f"{name}: per-Feature lock inside a loop")
@@ -259,6 +260,11 @@ _PLANTED_SCAN = """
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || link.feature_id, 0))
   FROM provider_sync.source_links AS link ORDER BY link.feature_id;
 """
+_PLANTED_UNQUALIFIED_SCAN = """
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || l.feature_id, 0))
+  FROM source_links AS l;
+"""
 _PLANTED_UNGATED = """
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || p_feature_id, 0));
 """
@@ -268,6 +274,9 @@ def test_the_detectors_turn_red_on_planted_violations() -> None:
     """탐지기 자신이 빨개지는지 — 일부러 어긴 본문을 먹인다."""
     assert any("loop" in v for v in _per_feature_violations("planted", _PLANTED_LOOP))
     assert any("relation" in v for v in _per_feature_violations("planted", _PLANTED_SCAN))
+    assert any(
+        "relation" in v for v in _per_feature_violations("planted", _PLANTED_UNQUALIFIED_SCAN)
+    )
     assert any("gate" in v for v in _per_feature_violations("planted", _PLANTED_UNGATED))
     assert _per_feature_violations(
         "fine",

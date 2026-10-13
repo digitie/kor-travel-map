@@ -26,9 +26,9 @@ from kortravelmap.dagster.feature_operation_sensors import (
     FEATURE_OPERATION_SETTLE_LAG_SECONDS,
     FEATURE_OPERATION_TRACKING_SENSORS,
     DagsterRunWatermark,
+    DeferredRun,
     FeatureOperationObservationError,
     FeatureOperationReconcileCursor,
-    ReconcileFailure,
     _apply_run_record,
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
@@ -79,6 +79,9 @@ class _Client:
     reconcile_error: Exception | None = None
     abandon_calls: list[dict[str, Any]] = field(default_factory=list)
     abandon_error: Exception | None = None
+    abandon_outcome: str = "applied"
+    stalled_calls: list[dict[str, Any]] = field(default_factory=list)
+    reconcile_errors_by_run: dict[str, Exception] = field(default_factory=dict)
     list_error: Exception | None = None
     page: object = field(default_factory=lambda: DagsterFeatureOperationPage((), None))
     pages: list[object] = field(default_factory=list)
@@ -96,6 +99,8 @@ class _Client:
 
     async def reconcile_dagster_feature_run(self, **kwargs: Any) -> object:
         self.reconcile_calls.append(kwargs)
+        if kwargs["dagster_run_id"] in self.reconcile_errors_by_run:
+            raise self.reconcile_errors_by_run[kwargs["dagster_run_id"]]
         if self.reconcile_error is not None:
             raise self.reconcile_error
         return SimpleNamespace(outcome="applied")
@@ -104,9 +109,15 @@ class _Client:
         self.abandon_calls.append(kwargs)
         if self.abandon_error is not None:
             raise self.abandon_error
+        if self.abandon_outcome != "applied":
+            return SimpleNamespace(outcome=self.abandon_outcome, block_reason="terminal")
         # root가 닫혔으니 그 뒤의 terminal reconcile은 DB가 terminal로 막는다.
         self.reconcile_error = None
+        self.reconcile_errors_by_run.pop(kwargs["dagster_run_id"], None)
         return SimpleNamespace(outcome="applied")
+
+    async def record_feature_operation_reconcile_stalled(self, **kwargs: Any) -> None:
+        self.stalled_calls.append(kwargs)
 
     async def list_reconcilable_dagster_feature_runs(self, **kwargs: Any) -> object:
         self.list_calls.append(kwargs)
@@ -781,7 +792,7 @@ async def test_deleted_dagster_cursor_anchor_fails_loud_without_advancing() -> N
     ]
 
 
-async def test_dagster_write_failure_is_redacted_and_does_not_advance_cursor() -> None:
+async def test_dagster_write_failure_is_redacted_and_parks_the_run() -> None:
     context = _Context(
         instance=_Instance([_record(DagsterRunStatus.STARTED)]),
         cursor=FeatureOperationReconcileCursor(
@@ -792,8 +803,12 @@ async def test_dagster_write_failure_is_redacted_and_does_not_advance_cursor() -
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert _watermarks(context) == (DagsterRunWatermark(1, "previous"), None)
-    assert client.list_calls == []
+    # ADR-111: 실패한 run은 미뤄 두고 watermark는 지나간다 — DB page도 이번 tick에 돈다.
+    cursor = _only_cursor(context)
+    assert cursor.dagster == DagsterRunWatermark(2, "run-1")
+    assert set(cursor.deferred) == {"run-1"}
+    assert cursor.deferred["run-1"].signature == "RuntimeError"
+    assert len(client.list_calls) == 1
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -816,7 +831,9 @@ async def test_database_page_list_error_is_redacted_without_cursor_advance() -> 
     assert "secret" not in context.log.errors[0]
 
 
-async def test_partial_dagster_page_failure_restarts_and_replays_committed_prefix() -> None:
+async def test_partial_dagster_page_failure_parks_the_run_and_retries_it_when_due(
+    clock: _Clock,
+) -> None:
     records = [
         _record(DagsterRunStatus.STARTED, run_id="run-1"),
         _record(
@@ -825,32 +842,38 @@ async def test_partial_dagster_page_failure_restarts_and_replays_committed_prefi
             created_at=_NOW + timedelta(seconds=1),
             storage_id=3,
         ),
+        _record(
+            DagsterRunStatus.STARTED,
+            run_id="run-3",
+            created_at=_NOW + timedelta(seconds=2),
+            storage_id=4,
+        ),
     ]
-    initial_cursor = FeatureOperationReconcileCursor(
-        dagster=DagsterRunWatermark(1, "previous")
-    ).to_json()
-    context = _Context(instance=_Instance(records), cursor=initial_cursor)
-    first_client = _Client(ensure_errors=[None, RuntimeError("second write failed")])
+    context = _Context(
+        instance=_Instance(records),
+        cursor=FeatureOperationReconcileCursor(
+            dagster=DagsterRunWatermark(1, "previous")
+        ).to_json(),
+    )
+    client = _Client(ensure_errors=[None, RuntimeError("second write failed"), None])
 
-    with pytest.raises(RuntimeError) as failed:
-        await _reconcile_tick(context, first_client)
-    assert str(failed.value.__cause__) == "second write failed"
+    await _reconcile_tick(context, client)
 
-    assert [call["dagster_run_id"] for call in first_client.ensure_calls] == [
-        "run-1",
-        "run-2",
-    ]
-    assert context.updated_cursors == []
+    # run-2가 실패해도 run-3은 같은 tick에 반영되고 watermark는 끝까지 간다.
+    assert [call["dagster_run_id"] for call in client.ensure_calls] == ["run-1", "run-2", "run-3"]
+    cursor = _only_cursor(context)
+    assert cursor.dagster == DagsterRunWatermark(4, "run-3")
+    assert set(cursor.deferred) == {"run-2"}
 
-    replay_context = _Context(instance=_Instance(records), cursor=initial_cursor)
-    replay_client = _Client()
-    await _reconcile_tick(replay_context, replay_client)
-
-    assert [call["dagster_run_id"] for call in replay_client.ensure_calls] == [
-        "run-1",
-        "run-2",
-    ]
-    assert len(replay_context.updated_cursors) == 1
+    # 다시 돌 시각 전에는 집지 않고, 지나면 run_id로 다시 집어 반영한다.
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+    assert len(client.ensure_calls) == 3
+    clock.now = cursor.deferred["run-2"].retry_after
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+    assert [call["dagster_run_id"] for call in client.ensure_calls][3:] == ["run-2"]
+    assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1]).deferred == {}
 
 
 async def test_database_keyset_restart_continues_then_wraps_and_revisits_start() -> None:
@@ -887,7 +910,7 @@ async def test_database_keyset_restart_continues_then_wraps_and_revisits_start()
     assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[1]).database is None
 
 
-async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -> None:
+async def test_database_page_write_failure_parks_the_run_and_advances_the_page() -> None:
     record = _record(DagsterRunStatus.CANCELED, run_id="db-active-run")
     database_cursor = DagsterFeatureOperationCursor(
         created_at=_NOW - timedelta(minutes=2),
@@ -911,18 +934,17 @@ async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert _watermarks(context) == (DagsterRunWatermark(1, "previous"), database_cursor)
+    cursor = _only_cursor(context)
+    assert (cursor.dagster, cursor.database) == (DagsterRunWatermark(1, "previous"), None)
+    assert set(cursor.deferred) == {"db-active-run"}
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
 
 
-def _watermarks(context: _Context) -> tuple[object, object]:
-    """실패한 tick은 watermark를 옮기지 않는다 — ledger만 쓴다(ADR-111)."""
+def _only_cursor(context: _Context) -> FeatureOperationReconcileCursor:
     assert len(context.updated_cursors) == 1
-    cursor = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
-    assert cursor.last_failure is not None
-    return cursor.dagster, cursor.database
+    return FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
 
 
 def _map_runs(count: int) -> list[_Record]:
@@ -1198,31 +1220,40 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     return fake
 
 
-def _stuck_success_context() -> _Context:
+def _stuck_success_context(*runs: str) -> _Context:
+    records = [
+        _record(
+            DagsterRunStatus.SUCCESS,
+            run_id=run_id,
+            created_at=_NOW + timedelta(seconds=index),
+            storage_id=index + 2,
+        )
+        for index, run_id in enumerate(runs or ("stuck-run",))
+    ]
     return _Context(
-        instance=_Instance([_record(DagsterRunStatus.SUCCESS, run_id="stuck-run")]),
+        instance=_Instance(records),
         cursor=FeatureOperationReconcileCursor(
             dagster=DagsterRunWatermark(1, "previous")
         ).to_json(),
     )
 
 
-async def _tick(context: _Context, client: _Client, clock: _Clock) -> None:
-    """한 tick을 돌고, 물러선 시간만큼 시계를 앞당긴다."""
-    before = len(context.updated_cursors)
+async def _tick(
+    context: _Context, client: _Client, clock: _Clock, run_id: str = "stuck-run"
+) -> None:
+    """한 tick을 돌고, 그 run이 다시 돌 시각까지 시계를 앞당긴다."""
     await _evaluate_reconciliation_sensor(context, client)
-    if len(context.updated_cursors) > before:
-        context.cursor = context.updated_cursors[-1]
-    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    if ledger is not None:
-        clock.now = ledger.retry_after
+    context.cursor = context.updated_cursors[-1]
+    entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred.get(run_id)
+    if entry is not None:
+        clock.now = entry.retry_after
 
 
 async def test_deterministic_failures_close_the_terminal_root_at_the_cap(clock: _Clock) -> None:
     """같은 run의 같은 데이터·불변식 실패(23514)는 상한에서 root를 닫는다.
 
-    상한 직전까지는 watermark가 그대로이고(실패한 tick의 의미 유지) 횟수만 쌓인다.
-    상한에서 root를 한 번 닫고, 다음 tick은 그 run을 지나 watermark를 옮긴다.
+    watermark는 첫 tick에 그 run을 지나가고, 실패한 run은 미뤄 둔 표에서 run_id로 다시 집힌다.
+    상한에서 root를 한 번 닫고(applied) 표에서 지운다.
     """
     context = _stuck_success_context()
     client = _Client(reconcile_error=_WrappedDatabaseError("23514"))
@@ -1230,15 +1261,10 @@ async def test_deterministic_failures_close_the_terminal_root_at_the_cap(clock: 
     for attempt in range(1, FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT):
         await _tick(context, client, clock)
         cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
-        assert cursor.dagster == DagsterRunWatermark(1, "previous")
-        assert cursor.last_failure is not None
-        assert (cursor.last_failure.run_id, cursor.last_failure.signature) == (
-            "stuck-run",
-            "SQLSTATE 23514",
-        )
-        assert cursor.last_failure.count == attempt
+        assert cursor.dagster == DagsterRunWatermark(2, "stuck-run")
+        entry = cursor.deferred["stuck-run"]
+        assert (entry.signature, entry.count, entry.blocked) == ("SQLSTATE 23514", attempt, False)
         assert client.abandon_calls == []
-        assert client.list_calls == []
 
     await _tick(context, client, clock)
 
@@ -1249,17 +1275,9 @@ async def test_deterministic_failures_close_the_terminal_root_at_the_cap(clock: 
     assert call["failure"] == "SQLSTATE 23514"
     assert call["attempts"] == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
     assert call["engine_finished_at"] == _NOW + timedelta(minutes=1)
-    closed = FeatureOperationReconcileCursor.from_json(context.cursor)
-    assert closed.last_failure is None
-    assert closed.dagster == DagsterRunWatermark(1, "previous")
+    assert FeatureOperationReconcileCursor.from_json(context.cursor).deferred == {}
+    assert client.stalled_calls == []
     assert all("secret" not in message for message in context.log.errors)
-
-    await _tick(context, client, clock)
-
-    advanced = FeatureOperationReconcileCursor.from_json(context.cursor)
-    assert advanced.dagster == DagsterRunWatermark(2, "stuck-run")
-    assert advanced.last_failure is None
-    assert len(client.abandon_calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -1267,17 +1285,17 @@ async def test_deterministic_failures_close_the_terminal_root_at_the_cap(clock: 
     [
         _WrappedDatabaseError("53200"),
         _WrappedDatabaseError("53100"),
+        _WrappedDatabaseError("54000"),
         _WrappedDatabaseError("40001"),
         _WrappedDatabaseError("42P01"),
         _WrappedDatabaseError("25006"),
-        _WrappedDatabaseError("55P03"),
         _WrappedDatabaseError("57014"),
         _WrappedDatabaseError("58030"),
         _WrappedDatabaseError("XX000"),
         RuntimeError("postgresql://admin:secret@database/internal"),
     ],
 )
-async def test_non_deterministic_failures_back_off_but_never_close(
+async def test_non_deterministic_failures_back_off_report_once_and_never_close(
     error: Exception, clock: _Clock
 ) -> None:
     """53200은 cluster의 다른 tenant가 일으킬 수 있다 — 2026-10-12 root를 닫으면 안 된다."""
@@ -1288,15 +1306,49 @@ async def test_non_deterministic_failures_back_off_but_never_close(
         await _tick(context, client, clock)
 
     assert client.abandon_calls == []
-    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    assert ledger is not None
-    assert ledger.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT * 2
+    entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred["stuck-run"]
+    assert entry.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT * 2
+    # 상한에 닿는 순간 한 번만 운영 로그로 올린다.
+    assert len(client.stalled_calls) == 1
+    assert client.stalled_calls[0]["closable"] is False
+    assert client.stalled_calls[0]["attempts"] == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
     assert all("secret" not in message for message in context.log.errors)
 
 
-async def test_backoff_skips_the_tick_without_rerunning_the_heavy_transaction(
-    clock: _Clock,
-) -> None:
+async def test_a_parked_run_does_not_block_the_others(clock: _Clock) -> None:
+    """H1 회귀: 영구 실패 run 하나가 reconcile 전체를 15분씩 멈추지 않는다.
+
+    앞의 run이 계속 실패해도 같은 page의 뒤 run과 DB 쪽 page가 같은 tick에 돈다.
+    """
+    context = _stuck_success_context("stuck-run", "healthy-run")
+    database_run = _record(
+        DagsterRunStatus.CANCELED,
+        run_id="db-run",
+        created_at=_NOW - timedelta(minutes=5),
+        storage_id=1_000,
+    )
+    context.instance.records.append(database_run)
+    context.instance.scan_records = list(context.instance.records[:2])
+    client = _Client(
+        reconcile_errors_by_run={"stuck-run": _WrappedDatabaseError("42P01")},
+        page=SimpleNamespace(
+            items=(SimpleNamespace(dagster_run_id="db-run"),),
+            next_cursor=None,
+        ),
+    )
+
+    for _ in range(3):
+        await _tick(context, client, clock)
+
+    reconciled = [call["dagster_run_id"] for call in client.reconcile_calls]
+    assert reconciled[:3] == ["stuck-run", "healthy-run", "db-run"]
+    assert reconciled.count("stuck-run") == 3
+    cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
+    assert cursor.dagster == DagsterRunWatermark(3, "healthy-run")
+    assert set(cursor.deferred) == {"stuck-run"}
+
+
+async def test_backoff_parks_without_rerunning_the_heavy_transaction(clock: _Clock) -> None:
     context = _stuck_success_context()
     client = _Client(reconcile_error=_WrappedDatabaseError("53200"))
     delays = []
@@ -1304,21 +1356,30 @@ async def test_backoff_skips_the_tick_without_rerunning_the_heavy_transaction(
         started = clock.now
         await _evaluate_reconciliation_sensor(context, client)
         context.cursor = context.updated_cursors[-1]
-        ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-        assert ledger is not None
-        delays.append((ledger.retry_after - started).total_seconds())
+        entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred["stuck-run"]
+        delays.append((entry.retry_after - started).total_seconds())
         attempts = len(client.reconcile_calls)
-        # 물러선 시간 안의 tick은 아무것도 하지 않는다.
-        clock.now = ledger.retry_after - timedelta(seconds=1)
-        skipped = await _evaluate_reconciliation_sensor(context, client)
-        assert "대기" in str(skipped.skip_message)
+        clock.now = entry.retry_after - timedelta(seconds=1)
+        await _evaluate_reconciliation_sensor(context, client)
+        context.cursor = context.updated_cursors[-1]
         assert len(client.reconcile_calls) == attempts
-        clock.now = ledger.retry_after
+        clock.now = entry.retry_after
 
     assert delays == [
         float(min(FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS * 2**n, 900)) for n in range(8)
     ]
     assert delays[-1] == FEATURE_OPERATION_RECONCILE_BACKOFF_MAX_SECONDS
+
+
+async def test_busy_gate_retries_on_a_flat_short_backoff(clock: _Clock) -> None:
+    """root 완결의 gate try-lock이 바쁜 55P03은 잠깐의 경합 — 늘리지 않는다."""
+    context = _stuck_success_context()
+    client = _Client(reconcile_error=_WrappedDatabaseError("55P03"))
+    for _ in range(6):
+        started = clock.now
+        await _tick(context, client, clock)
+        waited = (clock.now - started).total_seconds()
+        assert waited == FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS
 
 
 async def test_a_different_failure_restarts_the_count(clock: _Clock) -> None:
@@ -1329,9 +1390,9 @@ async def test_a_different_failure_restarts_the_count(clock: _Clock) -> None:
         await _tick(context, client, clock)
 
     assert client.abandon_calls == []
-    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    assert ledger is not None
-    assert ledger.count == 1
+    assert client.stalled_calls == []
+    deferred = FeatureOperationReconcileCursor.from_json(context.cursor).deferred
+    assert deferred["stuck-run"].count == 1
 
 
 async def test_running_run_is_counted_but_never_closed(clock: _Clock) -> None:
@@ -1345,15 +1406,31 @@ async def test_running_run_is_counted_but_never_closed(clock: _Clock) -> None:
     client = _Client(ensure_error=_WrappedDatabaseError("23514"))
 
     for _ in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 2):
-        await _tick(context, client, clock)
+        await _tick(context, client, clock, run_id="running-run")
 
     assert client.abandon_calls == []
-    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    assert ledger is not None
-    assert ledger.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 2
+    entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred["running-run"]
+    assert entry.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 2
+    assert len(client.stalled_calls) == 1
 
 
-async def test_failed_close_keeps_counting_and_retries_next_tick(clock: _Clock) -> None:
+async def test_blocked_close_keeps_the_run_parked_and_stalled(clock: _Clock) -> None:
+    """M2: 닫기가 blocked면 표에서 지우지 않고, 다시 닫으려 하지 않으며, 멈춘 run으로 올린다."""
+    context = _stuck_success_context()
+    client = _Client(reconcile_error=_WrappedDatabaseError("23514"), abandon_outcome="blocked")
+    for _ in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 3):
+        await _tick(context, client, clock)
+
+    assert len(client.abandon_calls) == 1
+    entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred["stuck-run"]
+    assert entry.blocked is True
+    assert entry.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 3
+    assert len(client.stalled_calls) == 1
+    assert client.stalled_calls[0]["closable"] is False
+    assert not any("failed로 닫았다" in message for message in context.log.errors)
+
+
+async def test_failed_close_keeps_counting_and_retries_next_time(clock: _Clock) -> None:
     context = _stuck_success_context()
     client = _Client(
         reconcile_error=_WrappedDatabaseError("23514"),
@@ -1363,20 +1440,30 @@ async def test_failed_close_keeps_counting_and_retries_next_tick(clock: _Clock) 
         await _tick(context, client, clock)
 
     assert len(client.abandon_calls) == 2
-    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    assert ledger is not None
-    assert ledger.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 1
+    entry = FeatureOperationReconcileCursor.from_json(context.cursor).deferred["stuck-run"]
+    assert entry.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 1
     assert all("secret" not in message for message in context.log.errors)
 
 
-def test_cursor_without_failure_ledger_keeps_the_previous_shape() -> None:
-    """ledger가 없으면 키도 없다 — 배포 전 cursor를 읽고, ledger가 빈 cursor는 앞 판도 읽는다."""
+async def test_deferred_table_is_bounded(
+    clock: _Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(feature_operation_sensors, "FEATURE_OPERATION_RECONCILE_DEFERRED_MAX", 3)
+    context = _stuck_success_context(*(f"run-{index}" for index in range(5)))
+    client = _Client(reconcile_error=_WrappedDatabaseError("42P01"))
+    await _evaluate_reconciliation_sensor(context, client)
+    cursor = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
+    assert len(cursor.deferred) == 3
+
+
+def test_cursor_without_deferred_runs_keeps_the_previous_shape() -> None:
+    """표가 비면 키도 없다 — 배포 전 cursor를 읽고, 표가 빈 cursor는 앞 판도 그대로 읽는다."""
     legacy = FeatureOperationReconcileCursor(dagster=DagsterRunWatermark(3, "run-3"))
-    assert "last_failure" not in legacy.to_json()
+    assert "deferred" not in legacy.to_json()
     assert FeatureOperationReconcileCursor.from_json(legacy.to_json()) == legacy
 
     with_failure = FeatureOperationReconcileCursor(
         dagster=DagsterRunWatermark(3, "run-3"),
-        last_failure=ReconcileFailure("run-4", "SQLSTATE 23514", 2, _NOW),
+        deferred={"run-4": DeferredRun("SQLSTATE 23514", 2, _NOW, blocked=True)},
     )
     assert FeatureOperationReconcileCursor.from_json(with_failure.to_json()) == with_failure

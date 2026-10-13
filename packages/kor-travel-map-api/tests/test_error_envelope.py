@@ -224,28 +224,33 @@ def test_unhandled_exception_uses_problem_json_500() -> None:
     assert "Traceback" not in serialized
 
 
-def test_lock_timeout_is_a_retryable_503() -> None:
-    """단건 writer가 gate를 lock_timeout 안에 못 얻으면 503 + Retry-After(ADR-111)."""
+@pytest.mark.parametrize(
+    ("sqlstate", "status", "code"),
+    [("55P03", 503, "LOCK_TIMEOUT"), ("42P01", 500, "INTERNAL_ERROR")],
+)
+def test_lock_timeout_is_a_retryable_503(sqlstate: str, status: int, code: str) -> None:
+    """단건 writer가 gate를 lock_timeout 안에 못 얻으면 503 + Retry-After(ADR-111).
 
-    class _LockNotAvailable(Exception):
-        sqlstate = "55P03"
+    다른 DB 오류는 typed 처리기를 그대로 지나 일반 500으로 간다.
+    """
+    from sqlalchemy.exc import DBAPIError
 
-    class _Wrapped(Exception):
+    class _DriverError(Exception):
         def __init__(self) -> None:
             super().__init__("postgresql://admin:secret@database/internal")
-            self.orig = _LockNotAvailable("canceling statement due to lock timeout")
+            self.sqlstate = sqlstate
 
     app = create_app(ApiSettings())
 
     @app.post("/busy")
     async def _busy() -> None:
-        raise _Wrapped()
+        raise DBAPIError("CALL feature.x()", {}, _DriverError())
 
     response = TestClient(app, raise_server_exceptions=False).post("/busy")
 
-    assert response.status_code == 503
-    assert response.headers["retry-after"] == "5"
-    assert response.json()["code"] == "LOCK_TIMEOUT"
+    assert response.status_code == status
+    assert response.json()["code"] == code
+    assert ("retry-after" in response.headers) is (status == 503)
     assert "secret" not in response.text
 
 

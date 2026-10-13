@@ -39,6 +39,7 @@ from kortravelmap.infra.db import assert_runtime_db_privilege_boundary
 from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
 from kortravelmap.settings import KorTravelMapSettings
+from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
@@ -1030,6 +1031,27 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request_id=_request_id(request),
         )
 
+    @application.exception_handler(DBAPIError)
+    async def lock_timeout_handler(request: Request, exc: DBAPIError) -> JSONResponse:
+        """lock_timeout(55P03)만 재시도 가능한 503으로 — 나머지는 그대로 다시 던진다(ADR-111).
+
+        단건 Feature writer가 대량 curation writer의 전역 Feature gate를 루틴의
+        ``lock_timeout``(5s) 안에 얻지 못한 경우다. 다른 DB 오류는 아래 일반 처리기(500,
+        traceback 로깅)로 간다.
+        """
+        if sqlstate_of(exc) != "55P03":
+            raise exc
+        request_id = _request_id(request)
+        _logger.warning("lock_timeout (request_id=%s): %s", request_id, request.url.path)
+        return _error_response(
+            status_code=503,
+            code="LOCK_TIMEOUT",
+            message="다른 대량 작업이 같은 Feature를 쓰는 중입니다. 잠시 뒤 다시 시도하세요.",
+            details={},
+            request_id=request_id,
+            headers={"Retry-After": "5"},
+        )
+
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(
         request: Request,
@@ -1044,18 +1066,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         않는다 — 내부 정보 누출 방지.
         """
         request_id = _request_id(request)
-        if sqlstate_of(exc) == "55P03":
-            # 단건 Feature writer가 대량 curation writer의 전역 Feature gate를
-            # lock_timeout(5s) 안에 얻지 못했다 — 잠시 뒤 다시 하면 된다(ADR-111).
-            _logger.warning("lock_timeout (request_id=%s): %s", request_id, request.url.path)
-            return _error_response(
-                status_code=503,
-                code="LOCK_TIMEOUT",
-                message="다른 대량 작업이 같은 Feature를 쓰는 중입니다. 잠시 뒤 다시 시도하세요.",
-                details={},
-                request_id=request_id,
-                headers={"Retry-After": "5"},
-            )
         _logger.error(
             "처리되지 않은 예외 (request_id=%s): %s",
             request_id,

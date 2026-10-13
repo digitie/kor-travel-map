@@ -20,12 +20,15 @@
   단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡고 `lock_timeout = 5s`를 갖는다. root 완결은 gate를
   `pg_try_advisory_xact_lock`으로 시도하고 바쁘면 55P03(다음 tick 재시도). 대량 명령 6개의 죽은 범위
   재검사(두 scan + 40001)를 지웠고, 호출자 없는 `finalize_provider_curation_receipts`를 DROP한다.
-- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`가 실패한 run을 cursor `last_failure`
-  (`retry_after` 포함)로 세어 30초→15분 지수 backoff한다. root를 `failed`로 닫는 것은 SQLSTATE 22/23/P0이
-  같은 run에서 5회 연속일 때뿐이다(`AsyncKorTravelMapClient.abandon_dagster_feature_run`,
-  `feature_operation.reconcile_abandoned` error 로그 — `provider_dataset_ids`·`action`). 53xxx 등은 닫지 않는다.
-  ledger가 비면 cursor 모양은 종전 그대로다(되돌릴 때 절차는 ADR-111).
-- **CHANGED (api)**: SQLSTATE 55P03(lock timeout)은 `503 LOCK_TIMEOUT` + `Retry-After: 5`. OpenAPI 바이트 변경 없음.
+- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`에서 한 run의 반영 실패가 더는 tick 전체를
+  멈추지 않는다. 실패한 run은 cursor `deferred` 표(run별 서명·횟수·`retry_after`, 최대 200)에 미뤄 두고 watermark와
+  DB page는 계속 간다. 미뤄 둔 run은 30초→15분 지수 backoff(55P03은 30초 고정) 뒤 run_id로 다시 집는다. 같은 실패
+  5연속이면 `feature_operation.reconcile_stalled`를 한 번 남기고, SQLSTATE 22/23/P0이며 run이 terminal이면 root를
+  `failed`로 닫는다(`AsyncKorTravelMapClient.abandon_dagster_feature_run`, `reconcile_abandoned` 로그 —
+  `provider_dataset_ids`·`action`; `blocked`면 표에 남긴다). 53xxx 등은 닫지 않는다. 표가 비면 cursor는 종전과
+  바이트가 같다(되돌릴 때 절차는 ADR-111).
+- **CHANGED (api)**: SQLSTATE 55P03(lock timeout)은 typed `DBAPIError` 처리기에서 `503 LOCK_TIMEOUT` +
+  `Retry-After: 5`(다른 DB 오류는 종전 500 경로). OpenAPI 바이트 변경 없음.
 - **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서, 호출·trigger 전개),
   `tests/integration/test_feature_write_gate_lock_budget.py`(모듈 전용 DB에서 lock table 칸 수의 2배 Feature root
   완결 + abandon).
@@ -47,7 +50,6 @@
 - **CHANGED (scripts/n150)**: `chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이다(skipped·did not run도 실패).
 - **FIXED (admin frontend e2e)**: live config의 top-level `testIgnore`가 project `testIgnore`에 대체돼 격리 전용
   cache-target-streams spec이 live suite에 포함되던 것; home 대시보드 live spec의 행 찾기 strict mode 위반.
-||||||| parent of 9ae323181 (fix(curation): head-schema 재생성·ADR-111·CHANGELOG, lint 정리)
 
 ### chain17 B 단계가 핀 원장을 pair로 비교 (2026-10-13)
 

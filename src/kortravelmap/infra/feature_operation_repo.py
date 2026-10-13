@@ -52,6 +52,7 @@ __all__ = [
     "resolve_feature_operation_dataset_membership",
     "reconcile_dagster_feature_run",
     "record_feature_operation_invariant_conflict",
+    "record_feature_operation_reconcile_stalled",
 ]
 
 _RUNNING_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset(
@@ -1148,10 +1149,11 @@ async def abandon_dagster_feature_run(
 ) -> DagsterFeatureOperationMutation:
     """terminal reconcile이 같은 이유로 거듭 죽는 root를 ``failed``로 닫는다(ADR-111).
 
-    reconcile sensor는 실패한 tick을 30초마다 다시 돈다. 실패가 결정적이면(예: SQLSTATE
-    53200) 그 재시도는 끝나지 않고, 실패하는 transaction이 공유 자원을 잡을 때마다 다른
-    tenant까지 흔든다. sensor가 같은 실패를 상한만큼 보면 이 함수로 root를 기존 terminal
-    전이(``stage='failed'``)로 닫고 운영 로그에 남긴다 — 새 상태는 만들지 않는다.
+    reconcile sensor는 실패한 run을 미뤄 두고 물러서며 다시 한다. 실패가 데이터·불변식
+    SQLSTATE(class 22/23/P0)로 같은 run에서 상한만큼 거듭되면 다시 해도 같은 답이므로, 이 함수로
+    root를 기존 terminal 전이(``stage='failed'``)로 닫고 운영 로그에 남긴다 — 새 상태는 만들지
+    않는다. 자원 고갈(53xxx — 예: 53200)처럼 cluster의 다른 tenant가 일으킬 수 있는 실패로는
+    부르지 않는다(ADR-111 결정 4).
     """
     normalized_run_id = _run_id(dagster_run_id)
     terminal = _validate_run_status(terminal_status)
@@ -1230,6 +1232,40 @@ async def abandon_dagster_feature_run(
     return DagsterFeatureOperationMutation(
         outcome="applied",
         operation=await _load_operation(session, normalized_run_id),
+    )
+
+
+async def record_feature_operation_reconcile_stalled(
+    session: AsyncSession,
+    *,
+    dagster_run_id: str,
+    failure: str,
+    attempts: int,
+    closable: bool,
+) -> None:
+    """reconcile이 같은 run에서 같은 실패를 상한만큼 봤다는 사실을 운영 로그로 올린다(ADR-111)."""
+    normalized_run_id = _run_id(dagster_run_id)
+    action = (
+        "root will be closed as failed; re-run the dataset"
+        if closable
+        else "reconcile keeps retrying with backoff; operator must fix the cause"
+    )
+    await record_system_log(
+        session,
+        level="error",
+        source="feature_operation",
+        event="feature_operation.reconcile_stalled",
+        message=(
+            f"terminal reconcile for run {normalized_run_id} failed {attempts} times "
+            f"with {failure}; {action}"
+        ),
+        detail={
+            "dagster_run_id": normalized_run_id,
+            "failure": failure,
+            "attempts": attempts,
+            "closable": closable,
+            "action": action,
+        },
     )
 
 
