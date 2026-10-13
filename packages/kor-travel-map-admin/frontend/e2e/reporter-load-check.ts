@@ -13,7 +13,10 @@ import MockedFailureReporter from "./mocked-failure-reporter";
  * 만들지 않는다 — 훅이 없으니 아무것도 쓰지 않는다. `printsToStdio()`가 false라
  * Playwright가 list-mode reporter를 앞에 붙여 목록·로드 오류를 그대로 출력한다.
  */
-const LOADED_REPORTERS = [C7RedactedReporter, MockedFailureReporter] as const;
+const LOADED_REPORTERS: readonly unknown[] = [
+  C7RedactedReporter,
+  MockedFailureReporter,
+];
 
 export default class ReporterLoadCheck implements Reporter {
   printsToStdio(): boolean {
