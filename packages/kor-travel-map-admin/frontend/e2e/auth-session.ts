@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-import { SESSION_COOKIE_NAME } from "../src/lib/auth";
+import { SESSION_COOKIE_NAME } from "../src/lib/session-cookie";
 
 /** 대상 UI에 로그인하고 후속 project가 사용할 browser storage state를 저장한다. */
 export async function authenticateAdmin(

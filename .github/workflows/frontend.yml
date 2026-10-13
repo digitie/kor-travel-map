@@ -71,6 +71,15 @@ jobs:
         # Playwright e2e는 서비스 기동이 필요해 여기 넣지 않는다(n150에서 돈다).
         run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run test
 
+      - name: Playwright e2e load check (mocked + live configs, --list)
+        # e2e 실행 자체는 서비스가 필요해 n150에서 돌지만, spec **로드**는 서비스도
+        # 브라우저도 필요 없다. `--list`는 세 config의 모든 spec과 그 import 그래프를
+        # Playwright의 CommonJS 변환으로 실제 require한다. 2026-10-06 acde3726에서
+        # `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import하자
+        # e2e 헬퍼가 그것을 끌어와 live·mocked spec 전부가 로드 단계에서 죽었는데,
+        # 어떤 CI도 spec을 로드하지 않아 일주일 동안 드러나지 않았다.
+        run: npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run e2e:list
+
       - name: map-marker-react unit tests + typecheck
         # 공용 마커 패키지 자체의 vitest(`src/maki.test.ts`)는 admin vitest 범위 밖이라
         # 어떤 단계도 돌리지 않았다. 글리프 누락(첫 글자 배지 fallback)을 여기서 잡는다.

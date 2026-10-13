@@ -7,7 +7,7 @@ import {
 } from "@playwright/test";
 
 import { LIVE_STORAGE_STATE, removeStorageState } from "../_auth-state";
-import { SESSION_COOKIE_NAME } from "../../src/lib/auth";
+import { SESSION_COOKIE_NAME } from "../../src/lib/session-cookie";
 
 type CacheTargetStreamStatus = {
   blocked_event_id: string | null;
