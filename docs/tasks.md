@@ -25,6 +25,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
+**reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
+#1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
+
 **geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-00`·`T-GR-00-LEDGER`·`T-GR-01`~`08`, 의존 순서대로 아래에
 둔다. 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.

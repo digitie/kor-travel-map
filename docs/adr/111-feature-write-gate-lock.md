@@ -1,6 +1,7 @@
 # ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다
 
-- 상태: proposed (PR #1319, 미머지·미배포)
+- 상태: proposed (PR #1319, 미머지·미배포 — 머지 때 accepted로, n150 배포 확인 때 배포 날짜를 이 줄과
+  `docs/adr/README.md` 색인에 함께 고친다)
 - 날짜: 2026-10-13
 - 결정자: Claude (소유자 승인 대기)
 - 관계: ADR-103(Map DB가 공용 instance 안에 있다), ADR-011(advisory lock), ADR-021(forward-only)
