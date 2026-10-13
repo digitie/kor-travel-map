@@ -27,6 +27,21 @@ lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor�
   진행 중 run 미닫힘·닫기 실패 재시도·cursor 하위호환).
 - **열린 것.** `finalize_provider_curation_receipts`는 호출자 없음(지우지 않고 같이 고침). 서로 다른 dataset 대량 writer는
   이제 직렬화된다. 배포·sensor 재시작은 운영자 몫.
+- **적대 리뷰 2건 반영(같은 브랜치, #1318 위로 리베이스).** 둘 다 잠금 순서·교착 결함은 찾지 못했고 CI가
+  빨갰다. (1) BLOCKER — 통합 검사가 세션 공유 DB에 1.5만 Feature·active dataset·done job을 남겨 뒤의
+  `test_mois_loader.py` 2건(glibc lane)을 깼다 → 그 모듈만의 DB를 같은 컨테이너에 만들어 head까지 올리고 지운다;
+  active rule 하나를 걸어 중첩 materialize도 같은 규모로 돌린다(`observed_candidate_count == Feature 수`).
+  (2) HIGH — 53200은 cluster의 다른 tenant가 일으킬 수 있으니 세면 안 된다(406 전에 sensor가 켜지면 2분 반 만에
+  97ac4e01을 닫는다) → root를 닫는 SQLSTATE는 22/23/P0 허용 목록뿐, 그 밖은 cursor `retry_after`로 30s→15분 backoff.
+  (3) MED — root 완결은 `feature-curation-write`를 든 채 gate를 기다리지 않는다(`pg_try_advisory_xact_lock`, 바쁘면 55P03);
+  단건 writer 여섯은 `SET lock_timeout TO '5s'`, API는 55P03 → 503 `LOCK_TIMEOUT`(OpenAPI 바이트 불변, openapi-drift 초록).
+  abandon 통합 검사(root failed/failed, done member 그대로, 로그 1행에 `provider_dataset_ids`·`action`, 두 번째 호출
+  blocked/terminal). rollback 시 cursor 처리 ADR에 기록. (4) LOW — 대량 명령 여섯의 죽은 범위 재검사(두 scan + 40001)
+  제거, 호출자 없고 gate 앞에서 행을 갱신하던 `finalize_provider_curation_receipts` DROP, lint가 `ops`·`provider_sync`
+  호출과 행 쓰기의 trigger까지 펼친다(심은 trigger 위반으로 red 확인). ADR-111에 새 Feature에도 gate를 잡는 이유.
+- **함정.** 시드의 `created_at`·`started_at`을 `clock_timestamp()` 두 번으로 넣어 μs 차이로
+  `ck_import_jobs_ck_import_jobs_feature_engine_timeline`에 걸렸다 — 한 문장의 `now()`로.
+
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 n150 chain16 D1(Map `c4d17343`)이 테스트를 하나도 돌리기 전에 `Error: Package subpath './navigation' is not defined by

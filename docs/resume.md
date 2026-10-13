@@ -1,12 +1,28 @@
 ## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319, draft)
 
-**다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → Map 배포(406 마이그레이션 전진) → prod `feature_operation_reconciliation_sensor`
-재시작(2026-10-13 12:59:54Z 정지) → 막혀 있던 root `97ac4e01-…`가 다음 tick에 완결되는지(또는 5연속 실패 뒤 `failed`로
-닫히는지) `ops.import_jobs`·`feature_operation.reconcile_abandoned` 로그로 확인.**
+**다음 한 작업: CI(PostGIS 두 lane 포함) 초록 → 소유자 머지 → 아래 배포 순서. reconcile sensor는 2026-10-13
+12:59:54Z부터 prod에서 꺼져 있다 — `alembic_version`이 `406_feature_write_gate`가 되고 함수 정의를 확인하기
+전에는 다시 켜지 않는다.**
 
-- 바뀐 것: alembic 406(대량 writer 9개 gate 배타, 단건 6개 gate 공유), reconcile sensor 결정적 실패 5연속 상한 →
-  `abandon_dagster_feature_run`, lint·통합·sensor 테스트, ADR-111. OpenAPI 변경 없음(PinVi 재vendor 불필요).
-- 바뀌지 않은 것: Manager `max_locks_per_transaction` 상향(별도 응급조치), prod 컨테이너·DB(읽기 외 손대지 않음).
+배포 runbook(n150, 운영자):
+1. Map pair 배포(`/root/chain17.sh`, 마이그레이션 전진 — `scripts/n150/README.md`). 같은 pair면 launcher 직접.
+2. 확인(Map API 컨테이너 DSN에서 유도한 map DB, 읽기만):
+   `SELECT version_num FROM alembic_version;` → `406_feature_write_gate`.
+   `SELECT pg_get_functiondef('feature.finalize_provider_curation_root'::regproc)` → `pg_try_advisory_xact_lock(hashtextextended('feature-write-all'`
+   포함, `'feature-write:'` 없음. `SELECT proname FROM pg_proc WHERE prosrc LIKE '%feature-write:%' ORDER BY 1;` → 단건 writer
+   여섯만(approve·archive/create/patch curation item·manual item·promote). `to_regprocedure('feature.finalize_provider_curation_receipts(bigint,uuid,text,text)')`
+   → NULL.
+3. 그 뒤에만 `feature_operation_reconciliation_sensor`를 켠다. root `97ac4e01-…`가 다음 tick에 완결되는지
+   (`ops.import_jobs.status='done'`) 본다. 실패하면 sensor는 30s→15분 backoff로 다시 할 뿐 53200으로는 닫지 않는다.
+   SQLSTATE 22/23/P0이 5연속이면 root는 `failed`가 되고 `ops.system_log` `feature_operation.reconcile_abandoned`가 남는다.
+4. 되돌릴 때: sensor를 멈추고 cursor에서 `last_failure` 키를 빼거나 cursor를 지운 뒤 앞 판을 배포한다(ADR-111 결과).
+
+- 바뀐 것: alembic 406(대량 writer 8개 gate 배타 — root 완결만 try-lock·55P03, 단건 6개 gate 공유 +
+  `lock_timeout 5s`, 죽은 범위 재검사 제거, 호출자 없는 `finalize_provider_curation_receipts` DROP), reconcile sensor
+  허용 목록(22/23/P0)·지수 backoff, API 55P03 → 503 `LOCK_TIMEOUT`, lint(호출·trigger 전개)·격리 DB 통합·sensor 테스트,
+  ADR-111. OpenAPI 바이트 변경 없음(PinVi 재vendor 불필요).
+- 바뀌지 않은 것: Manager `max_locks_per_transaction` 상향(별도 응급조치), prod 컨테이너·DB.
+
 ## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 **다음 한 작업: draft PR CI 초록 → 적대 리뷰 → 머지 → Map API 배포 → chain16 D1 재실행(11/11 기대) → M05.**
