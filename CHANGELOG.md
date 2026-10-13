@@ -15,8 +15,13 @@
 - **FIXED (admin frontend e2e)**: 2026-10-06부터 `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import해
   Playwright(CJS 변환) e2e가 `e2e/auth-session.ts` 경유로 로드 단계에서 전부 실패하던 결함. 세션 쿠키 이름을 import 없는
   `src/lib/session-cookie.ts`로 옮겼다.
-- **ADDED (CI)**: `frontend.yml`이 `e2e:list`(mocked·live·cache-target-streams config의 `playwright test --list`)로
-  spec 로드를 검사한다.
+- **ADDED (CI)**: `frontend.yml`(+ `scripts/verify-all-gates.sh`)이 `e2e:list`(mocked·live·cache-target-streams config의
+  `playwright test --list`, 커스텀 reporter 로드 포함)로 spec 로드를 검사한다.
+- **FIXED (api)**: Dagster GraphQL overview·schedules·summary 문서의 `ticks(limit: 3)`에 `afterTimestamp` 창(schedule 62일,
+  sensor 1시간)을 둔다. 공유 `job_ticks`의 전체 이력을 읽어 overview가 cold 10초를 넘겨 관리자 UI가 "Dagster 연결 불가"로
+  갱신 요청을 막던 결함(n150 실측 창 적용 후 0.08~0.54초). 응답 계약·OpenAPI 변경 없음.
+- **FIXED (admin frontend e2e)**: live config의 top-level `testIgnore`가 project `testIgnore`에 대체돼 격리 전용
+  cache-target-streams spec이 live suite에 포함되던 것; home 대시보드 live spec의 행 찾기 strict mode 위반.
 
 ### chain17 B 단계가 핀 원장을 pair로 비교 (2026-10-13)
 

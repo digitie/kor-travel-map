@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from kortravelmap.api import dagster_graphql
 from kortravelmap.api import dagster_query_service as summary_mod
 from kortravelmap.api.routers import ops_pipeline as pipeline_mod
@@ -207,7 +206,6 @@ def test_schedule_window_covers_twice_the_longest_cron_period() -> None:
 
 def test_sensor_window_covers_ten_sensor_intervals() -> None:
     from dagster._core.definitions.sensor_definition import DEFAULT_SENSOR_DAEMON_INTERVAL
-
     from kortravelmap.dagster.definitions import defs
 
     intervals = {

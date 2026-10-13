@@ -1,11 +1,15 @@
 ## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
-**다음 한 작업: draft PR CI 초록(새 `e2e:list` 단계 포함) → 적대 리뷰 → 머지 → chain16 D1·M05 재실행.**
+**다음 한 작업: draft PR CI 초록 → 적대 리뷰 → 머지 → Map API 배포 → chain16 D1 재실행(11/11 기대) → M05.**
+D1은 **Map API 배포 전까지 빨갛다** — `admin-scenario-catalog`의 갱신 요청 dialog는 prod overview가 Dagster tick 조회
+시간 초과로 큐 sensor를 신뢰하지 못하는 동안 렌더되지 않는다(배포 전 D1 재실행: 10 passed / 1 failed, 그 하나가 이것).
 
-- 바뀐 것: `SESSION_COOKIE_NAME`을 의존성 없는 `src/lib/session-cookie.ts`로 옮겨 e2e가 `auth.ts`(→ ESM 전용
-  `@kor-travel/ui/navigation`)를 끌어오지 않는다. `frontend.yml`에 `e2e:list`(mocked·live·cache-target-streams config
-  `playwright test --list`) 단계. 원인·증거·D1 결과는 journal 2026-10-13.
-- 바뀌지 않은 것: vendored tgz, 앱 동작(쿠키 이름 동일), n150(읽기 전용 live 실행만).
+- 바뀐 것: (1) `SESSION_COOKIE_NAME`을 의존성 없는 `src/lib/session-cookie.ts`로 옮겨 e2e가 ESM 전용
+  `@kor-travel/ui/navigation`을 끌어오지 않는다. (2) `frontend.yml`·`scripts/verify-all-gates.sh`에 `e2e:list`(세 config
+  `--list` + 커스텀 reporter 로드). (3) Map API Dagster GraphQL 세 문서의 `ticks`에 `afterTimestamp` 창(schedule 62일·sensor
+  1시간) + 효과 결박 테스트 `tests/unit/test_dagster_tick_window.py`. (4) live spec 둘(home 행 찾기, catalog 전제 단언),
+  live config `testIgnore` 대체 버그. 원인·실측은 journal 2026-10-13.
+- 바뀌지 않은 것: vendored tgz, OpenAPI(PinVi 재vendor 불필요), n150(읽기 전용 live 실행·GraphQL 조회만).
 
 ## 2026-10-13 — chain17 B 단계 pair 회전 수정: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 

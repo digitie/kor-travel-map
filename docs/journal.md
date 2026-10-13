@@ -18,7 +18,34 @@ eslint·vitest는 모두 ESM/번들러 해석이라 통과했다.
   실행한다. 서비스·브라우저 없이 spec import 그래프를 실제로 require한다. n150에서 `c4d17343` 사본은 세 config 모두 rc=1
   (같은 오류), 이 브랜치는 rc=0(mocked 271 tests/28 files, live 1142/28, cache-target-streams 1/1) — 검사가 이 결함에서
   빨갛게 되는 것을 확인했다.
-- **live 검증.** n150에서 이 브랜치 사본(`bb602ea7`)으로 D1 4 spec을 prod 대상 읽기 전용 실행(`--workers=1`): 11건 중 **9 passed, 2 failed** — live `auth.setup.ts`를 포함해 전부 로드·실행됐다(이전엔 0건 실행). 실패 둘은 이 수정과 무관한 브라우저 단언이라 범위 밖으로 남긴다: (1) `admin-scenario-catalog` "pipeline live UI calls datasets catalog…"가 15초 안에 `GET /v1/ops/datasets` 관측 실패, (2) `home-dashboard-roundtrip` "pipeline overview와 root 목록…"이 `getByRole("row", {name: /import_job/})` strict mode 위반(prod 데이터에 import_job 행 8개). 둘 다 10-06 이후 spec이 한 번도 로드되지 않아 가려져 있던 것이다.
+- **첫 live 실행(`bb602ea7`).** n150 prod 대상 읽기 전용 D1 4 spec(`--workers=1`): 11건 중 9 passed, 2 failed — live
+  `auth.setup.ts`를 포함해 전부 로드·실행됐다(이전엔 0건). 처음엔 두 실패를 "무관·범위 밖"으로 적었으나 적대 리뷰
+  (HIGH-2)가 chain16 D1은 spec 하나만 실패해도 죽으므로 둘을 남기면 D1이 계속 빨갛다고 짚어 **이 PR에서 고쳤다**(아래).
+- **리뷰 반영 1 — `home-dashboard-roundtrip`(spec 결함).** 첫 실행 행을 `getByRole("row", {name: kind})`로 찾아 첫 페이지에
+  같은 kind가 여럿이면(prod `import_job` 8행) strict mode 위반이었다. id(`shortId`)+kind 필터로 찾고 `toHaveCount(1)`.
+- **리뷰 반영 2 — `admin-scenario-catalog` "pipeline live UI calls datasets catalog…"(실제 prod 결함).** 화면에 "Dagster
+  연결 불가 — 응답 전체 대기 상한 초과"와 큐 sensor 차단 alert가 떠 `queueOperational=false`, 갱신 요청 dialog(=
+  `/v1/ops/datasets` 호출)가 렌더되지 않았다. 원인은 PinVi #581과 같다: overview·schedules·summary 세 GraphQL 문서의
+  `ticks(limit: 3)`가 `afterTimestamp` 없이 instigator의 전체 tick 이력을 읽는다(공유 `dagster_shared.job_ticks` 약 40만
+  행). n150 읽기 전용 실측(127.0.0.1:11002, 같은 문서): 창 없음 overview cold **10.0초**·warm 1.3초 → 창 있음 **0.08~0.12초**
+  (schedules 0.27~0.54초, summary 0.50~0.53초), 큐 sensor RUNNING·tick 3건 그대로. 수정: `dagster_graphql`에
+  `SCHEDULE_TICK_WINDOW_SECONDS`(62일)·`SENSOR_TICK_WINDOW_SECONDS`(1시간)와 `tick_window_variables()`를 두고 세 문서가
+  `afterTimestamp: $scheduleTicksAfter|$sensorTicksAfter`를 싣는다. **schedule 창은 PinVi의 2일이 아니다** — Map에는 월간
+  cron(`10 3 1 * *` 등)이 있어 2일이면 정상 월간 schedule이 한 달 대부분 "최근 tick 없음"이 된다. 규칙(최장 cron 주기의 2배)을
+  Map에 적용한 값이 62일이다. OpenAPI 변경 없음(PinVi 재vendor 불필요). spec은 전제(큐 sensor 차단 alert 부재)를 먼저 단언해
+  원인을 메시지로 낸다.
+- **효과 결박 테스트.** `tests/unit/test_dagster_tick_window.py`가 세 문서를 Map code location을 in-process로 실은 Dagster
+  (1.13.24)에 실행해 storage `get_ticks`가 받는 `after`를 기록한다. main의 문서로 되돌리면 세 건 모두 빨갛다(n150 실측:
+  summary는 `after=None`, overview·schedules는 batch 경로로 빠져 `get_ticks` 0건). 창이 배포 Definitions를 덮는지(schedule
+  2×최장 cron 주기, sensor 10×최장 최소 간격)와 tick 선택 문서 목록도 본다. 기존 router·service 테스트는 시계를 고정해
+  호출 지점 변수까지 대조한다.
+- **리뷰 반영 3 — 게이트·config.** `scripts/verify-all-gates.sh`에 `e2e:list` 게이트(빠져서 CI pytest의
+  `test_gate_script_covers_every_ci_blocking_command`가 빨갰다, HIGH-1). `e2e:list`의 live 실행은
+  `e2e/reporter-load-check.ts`로 커스텀 reporter 둘(C7 redacted, mocked failure)을 **로드만** 한다(인스턴스·훅 없음 — n150에서
+  파일 0개 확인, reporter에 ESM 전용 import를 넣으면 rc=1). `playwright.live.config.ts`의 top-level `testIgnore`가 chromium
+  project의 `testIgnore`에 대체돼 격리 전용 `cache-target-streams-isolated` spec이 live suite에 들어가 있었다 — project-level로
+  옮겨 live 목록이 1142/28 → 1141/27. CI 단계는 `forbidOnly`로 `test.only`도 잡는다(n150에서 `CI=1` 변이로 확인).
+- **D1 재실행(브랜치 사본, prod 읽기 전용).** 11건 중 **10 passed, 1 failed**. `home-dashboard-roundtrip`은 이제 통과한다. 남은 1건은 `admin-scenario-catalog`의 새 전제 단언이 "큐 sensor 차단 alert — Dagster 상태 스냅샷을 신뢰할 수 없습니다"로 정확히 원인을 내며 실패한 것이다 — prod Map API가 아직 창 없는 문서를 쓰기 때문이고, 이 PR의 API 수정은 배포 뒤에야 live에 보인다. 배포 전 증명으로 이 브랜치의 세 문서를 그대로 prod Dagster에 보냈다(위 실측). **D1 11/11은 Map API 배포 뒤 재실행으로 확인할 일이다.**
 
 ## 2026-10-13 — chain17 B 단계가 같은 Map·새 PinVi 회전을 건너뛰던 결함: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 
