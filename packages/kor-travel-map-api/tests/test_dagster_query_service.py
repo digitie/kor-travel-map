@@ -28,9 +28,14 @@ _MAP_RUN_ORIGIN: dict[str, str] = {
 async def test_summary_service_parses_repository_and_run_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # tick 창은 호출 시각 기준이다 — 시계를 고정해 값까지 대조한다.
+    monkeypatch.setattr(dagster_graphql, "time", lambda: 1_000_000_000.0)
+
     async def _post(**kwargs: object) -> dict[str, object]:
         assert kwargs["variables"] == {
             "limit": 3,
+            "scheduleTicksAfter": 1_000_000_000.0 - dagster_graphql.SCHEDULE_TICK_WINDOW_SECONDS,
+            "sensorTicksAfter": 1_000_000_000.0 - dagster_graphql.SENSOR_TICK_WINDOW_SECONDS,
             "activeRunsFilter": {
                 "tags": [
                     {
