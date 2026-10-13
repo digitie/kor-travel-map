@@ -175,3 +175,9 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
 
   유일한 호출자였던 KMA 특보 적재가 ADR-105로 사라졌다. client 메서드·repo 함수·통합 테스트를
   지울지, 다른 event feed용으로 남길지 정한다.
+
+- [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
+
+  `feature_operation_reconciliation_sensor`는 한 run의 반영 실패가 tick 전체를 멈추고 30초마다 같은 일을 다시 한다.
+  #1319가 세 판을 시도했다가 되돌렸다 — 리뷰 결과(H1–H3·M1–M3·L1–L4, parking 표 결함)를 설계 입력으로
+  해제 조건을 만족하는 한 판을 낸다. 조건은 tasks-acceptance §T-RECONCILE-RETRY.

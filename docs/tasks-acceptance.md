@@ -2651,3 +2651,22 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
 - `became_current`가 항상 False(`fetched_at` 원 값 유지)이고 lifecycle 전이가 없다 — provider에서 사라진 entity를
   되살리지 않는다.
 - MOIS replay 1 run 소요(격리 스택, 업종 하나)를 PR 본문에 기록한다.
+
+## T-RECONCILE-RETRY
+
+배경: ADR-111 결과 §"reconcile sensor 재시도 설계는 후속". 406이 2026-10-12 고착(53200)의 원인을 없앴으므로 급하지
+않다. 아래가 모두 참이면 닫는다.
+
+- **잃지 않는다.** 어떤 실패·넘침·재시작에서도 Dagster watermark가 반영하지 않은 run을 지나가지 않는다(DB root가
+  없는 run 포함 — 넘침으로 버린 run을 DB page가 다시 집는다는 가정 금지).
+- **tick 시간이 유계다.** 실패·성공 합계로 한 tick의 벽시계 상한이 sensor 평가 timeout(기본 60초)보다 확실히 짧고,
+  그 상한 안에 cursor 갱신이 끝난다. cursor commit이 DB page 목록 조회 성공에 결박되지 않는다.
+- **알림은 경과 시간으로.** "같은 run이 처음 실패한 뒤 N분"으로 멈춤을 알린다 — 서명이 번갈아 바뀌어도 시계가
+  초기화되지 않는다. 55P03 같은 일시 실패도 오래 지속되면 알린다.
+- **gate 경합과 lock_timeout을 가른다.** root 완결의 gate try 실패는 lock_timeout과 다른 전용 SQLSTATE(또는 표지)로
+  구별한다 — 모든 55P03을 "gate 바쁨"으로 보지 않는다.
+- **닫기는 명시 목록만.** 닫을 수 있는 SQLSTATE를 명시 목록으로 두고, DB root가 없는 run·취소 중 root·이미 terminal인
+  root에서 각각 무엇을 하는지 정한다(닫을 수 없는 머리를 영구히 잡지 않는다).
+- **retry_after는 실패 시각 기준**, tick 시작 기준이 아니다. cursor는 비면 앞 판과 바이트가 같고, 커져도 tick body
+  크기가 유계다.
+- 설계 입력: #1319 리뷰 3회(parking 표 A-H1·A-H2·A-M1~M3·A-L3·B, 최종 H1~H3·M1~M3·L1~L4)와 journal 2026-10-13 ADR-111 항목.

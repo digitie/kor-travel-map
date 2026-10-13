@@ -133,9 +133,6 @@ from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
 from kortravelmap.infra.feature_operation_repo import (
-    abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
-)
-from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event as repo_append_dagster_feature_attempt_event,
 )
 from kortravelmap.infra.feature_operation_repo import (
@@ -155,7 +152,6 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_operation_repo import (
     record_feature_operation_invariant_conflict,
-    record_feature_operation_reconcile_stalled,
 )
 from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_dataset_membership as repo_resolve_operation_dataset_member,
@@ -885,26 +881,6 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session, session.begin():
             await record_feature_operation_invariant_conflict(session, conflict)
 
-    async def record_feature_operation_reconcile_stalled(
-        self,
-        *,
-        dagster_run_id: str,
-        dagster_status: str,
-        failure: str,
-        attempts: int,
-        closable: bool,
-    ) -> None:
-        """reconcile이 한 run에서 같은 실패를 상한만큼 봤다고 운영 로그에 남긴다(ADR-111)."""
-        async with self._session_factory() as session, session.begin():
-            await record_feature_operation_reconcile_stalled(
-                session,
-                dagster_run_id=dagster_run_id,
-                dagster_status=dagster_status,
-                failure=failure,
-                attempts=attempts,
-                closable=closable,
-            )
-
     async def ensure_dagster_feature_operation(
         self,
         *,
@@ -1016,30 +992,6 @@ class AsyncKorTravelMapClient:
                     engine_started_at=engine_started_at,
                     engine_finished_at=engine_finished_at,
                     error=error,
-                )
-        except FeatureOperationInvariantConflict as exc:
-            await self._record_feature_operation_conflict(exc)
-            raise
-
-    async def abandon_dagster_feature_run(
-        self,
-        *,
-        dagster_run_id: str,
-        terminal_status: str,
-        engine_finished_at: datetime,
-        failure: str,
-        attempts: int,
-    ) -> DagsterFeatureOperationMutation:
-        """같은 이유로 거듭 실패한 terminal reconcile의 root를 ``failed``로 닫는다(ADR-111)."""
-        try:
-            async with self._session_factory() as session, session.begin():
-                return await repo_abandon_dagster_feature_run(
-                    session,
-                    dagster_run_id=dagster_run_id,
-                    terminal_status=terminal_status,
-                    engine_finished_at=engine_finished_at,
-                    failure=failure,
-                    attempts=attempts,
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)

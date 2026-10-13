@@ -64,6 +64,13 @@ lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor�
   — 일시 실패가 관측 오류로 둔갑해 watermark를 지나가던 구멍(테스트 대역이 `LookupError`를 던져 가리고 있었다). 변이 확인
   둘: watermark를 지나가게 바꾸면, DB 예산을 없애면 해당 테스트가 빨개진다. journal 2026-09-16~19 7건을 아카이브로(§8,
   분리 전후 본문 sha256 `97fd54c2…` 동일). runbook은 pair 명시·preflight·systemd-run·원장/cursor 확인으로.
+- **분할 결정 — sensor 재시도 설계를 되돌리고 후속으로.** 최종 리뷰(6d0ebfc98)가 backpressure 판에서도 HIGH 셋을 더 찾았다
+  (DB root 없는 닫을 수 있는 머리의 영구 고착, 모든 lock_timeout 55P03을 gate 바쁨으로 봄, 서명이 번갈아 바뀌면 횟수
+  초기화) — 설계가 매 판 새 구멍을 냈다. 406이 고착의 원인을 없애므로 sensor·`abandon_dagster_feature_run`·
+  `reconcile_stalled`/`reconcile_abandoned` 로그와 그 테스트·대역을 origin/main으로 되돌렸다. main sensor에서 55P03은
+  그냥 tick 실패 → 30초 뒤 재시도이고 닫는 경로가 없다. manifest 해석의 guard 축소는 남겼다 — main sensor에서 일시
+  실패가 이제 다른 DB 실패처럼 tick을 실패시킬 뿐 관측 오류로 watermark를 지나가지 않는다. 리뷰 결과는 ADR-111 결정 4와
+  `T-RECONCILE-RETRY`(해제 조건: 잃지 않음·tick 시간 유계·경과 시간 알림·gate 전용 SQLSTATE·명시 목록만 닫기)로.
 
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 

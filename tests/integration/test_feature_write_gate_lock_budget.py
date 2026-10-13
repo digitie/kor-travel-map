@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -30,10 +29,9 @@ import pytest
 from psycopg import sql
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from kortravelmap.infra.feature_operation_repo import abandon_dagster_feature_run
 from tests.integration._application_300_bootstrap import (
     _TEST_MIGRATOR_PASSWORD,
     upgrade_head_with_application_300_bootstrap,
@@ -404,71 +402,3 @@ async def test_root_finalize_over_a_dataset_larger_than_the_lock_table(
         )
     # 중첩 materialize가 같은 규모를 실제로 훑었다(규칙이 아무것도 안 봤다면 위 잠금 수도 공허하다).
     assert observed == feature_count
-
-
-async def test_abandon_closes_the_root_once_and_leaves_done_members(
-    isolated_engine: AsyncEngine,
-) -> None:
-    suffix = uuid4().hex
-    run_id = f"adr111-abandon-{suffix}"
-    async with isolated_engine.begin() as connection:
-        dataset_id = await _seed_dataset(connection, suffix=suffix, feature_count=0)
-        root_job_id, member_job_id = await _seed_root(
-            connection, dataset_id=dataset_id, run_id=run_id, root_status="running", rows=0
-        )
-
-    finished_at = datetime.now(UTC)
-    runtime = _runtime_engine(isolated_engine)
-    try:
-        async with AsyncSession(runtime) as session, session.begin():
-            closed = await abandon_dagster_feature_run(
-                session,
-                dagster_run_id=run_id,
-                terminal_status="SUCCESS",
-                engine_finished_at=finished_at,
-                failure="SQLSTATE 23514",
-                attempts=5,
-            )
-        async with AsyncSession(runtime) as session, session.begin():
-            again = await abandon_dagster_feature_run(
-                session,
-                dagster_run_id=run_id,
-                terminal_status="SUCCESS",
-                engine_finished_at=finished_at,
-                failure="SQLSTATE 23514",
-                attempts=6,
-            )
-    finally:
-        await runtime.dispose()
-
-    assert closed.outcome == "applied"
-    assert (again.outcome, again.block_reason) == ("blocked", "terminal")
-    async with isolated_engine.connect() as connection:
-        jobs = {
-            str(row.job_id): (row.status, row.current_stage)
-            for row in await connection.execute(
-                text(
-                    "SELECT job_id, status, current_stage FROM ops.import_jobs "
-                    "WHERE job_id IN (CAST(:root AS uuid), CAST(:member AS uuid))"
-                ),
-                {"root": root_job_id, "member": member_job_id},
-            )
-        }
-        logs = (
-            await connection.execute(
-                text(
-                    """
-                    SELECT detail FROM ops.system_log
-                    WHERE event = 'feature_operation.reconcile_abandoned'
-                      AND detail ->> 'dagster_run_id' = :run_id
-                    """
-                ),
-                {"run_id": run_id},
-            )
-        ).scalars().all()
-    assert jobs[root_job_id] == ("failed", "failed")
-    assert jobs[member_job_id] == ("done", "completed")
-    assert len(logs) == 1
-    assert logs[0]["provider_dataset_ids"] == [dataset_id]
-    assert logs[0]["action"] == "re-run the dataset"
-    assert logs[0]["failure"] == "SQLSTATE 23514"
