@@ -1361,6 +1361,7 @@ BEGIN
         RAISE EXCEPTION 'Feature request approval Feature UUID must be UUIDv7'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
     SELECT * INTO v_key FROM feature.manual_feature_identity_key(v_feature_kind, v_feature_name, v_lon, v_lat);
     INSERT INTO feature.manual_feature_identity_claims (feature_id, feature_kind, name_key, lon_e6, lat_e6, claimed_by_command_id, claim_basis, claimed_at)
@@ -1459,9 +1460,8 @@ BEGIN
     JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
     WHERE source.source_id = p_source_id
   ) AS scope;
-  FOREACH v_feature_id IN ARRAY v_prelock_features LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT source.* INTO STRICT v_source FROM feature.curated_sources AS source
   WHERE source.source_id = p_source_id FOR UPDATE;
@@ -1599,15 +1599,8 @@ BEGIN
     JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
   ) AS touched;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
   WHERE rule.rule_id = p_rule_id FOR UPDATE;
@@ -1737,25 +1730,8 @@ BEGIN
     JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
     WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ) AS touched;
-  FOR v_feature_id IN
-    SELECT touched.feature_id FROM (
-      SELECT candidate.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-      JOIN provider_sync.source_entities AS entity
-        ON entity.provider_dataset_id = source.provider_dataset_id
-      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-    ) AS touched ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT theme.* INTO STRICT v_theme
   FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
@@ -1950,6 +1926,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   IF v_hint.feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_hint.feature_id, 0));
   END IF;
   SELECT collection.* INTO STRICT v_collection
@@ -3113,11 +3090,8 @@ BEGIN
   FROM provider_sync.source_entities AS entity
   JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
   WHERE entity.provider_dataset_id = v_provider_dataset_id;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || link.feature_id, 0))
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ORDER BY link.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   PERFORM 1 FROM feature.curated_themes AS theme
@@ -3448,6 +3422,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   IF p_feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || p_feature_id, 0));
   END IF;
   SELECT collection.* INTO STRICT v_collection
@@ -3913,6 +3888,7 @@ BEGIN
 
     PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
     SELECT collection.* INTO STRICT v_collection
     FROM feature.curation_collections AS collection
@@ -4766,25 +4742,8 @@ BEGIN
     );
   END IF;
 
-  PERFORM pg_advisory_xact_lock(
-    hashtextextended('feature-write:' || touched.feature_id, 0)
-  )
-  FROM (
-    SELECT link.feature_id
-    FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link
-      ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = p_provider_dataset_id
-    UNION
-    SELECT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN feature.theme_feature_candidates AS candidate
-      ON candidate.rule_id = rule.rule_id
-     AND candidate.disposition = 'active'
-    WHERE source.provider_dataset_id = p_provider_dataset_id
-  ) AS touched
-  ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
 
   FOR v_rule IN
     SELECT rule.rule_id
@@ -5013,23 +4972,8 @@ BEGIN
     RETURN;
   END IF;
 
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT link.feature_id
-    FROM ops.curation_provider_snapshot_receipts AS receipt
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = receipt.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE receipt.root_job_id = p_root_job_id
-    UNION
-    SELECT candidate.feature_id
-    FROM ops.curation_provider_snapshot_receipts AS receipt
-    JOIN feature.curated_sources AS source
-      ON source.provider_dataset_id = receipt.provider_dataset_id
-    JOIN feature.curated_source_rules AS rule ON rule.source_id = source.source_id
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE receipt.root_job_id = p_root_job_id AND candidate.disposition = 'active'
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM 1
   FROM provider_sync.source_links AS link
   JOIN provider_sync.source_entities AS entity
@@ -5634,26 +5578,8 @@ BEGIN
   FROM feature.curated_sources AS source
   WHERE source.source_id = v_rule_hint.source_id;
 
-  FOR v_feature_id IN
-    SELECT touched.feature_id
-    FROM (
-      SELECT candidate.feature_id
-      FROM feature.theme_feature_candidates AS candidate
-      WHERE candidate.rule_id = p_rule_id
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM provider_sync.source_entities AS entity
-      JOIN provider_sync.source_links AS link
-        ON link.source_entity_key = entity.source_entity_key
-      WHERE entity.provider_dataset_id = v_provider_dataset_id
-    ) AS touched
-    ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(
-      hashtextextended('feature-write:' || v_feature_id, 0)
-    );
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   -- Common order after every Feature advisory fence: catalog → source evidence
@@ -6455,15 +6381,8 @@ BEGIN
     JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
   ) AS touched;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
@@ -6637,25 +6556,8 @@ BEGIN
     JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
     WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ) AS touched;
-  FOR v_feature_id IN
-    SELECT touched.feature_id FROM (
-      SELECT candidate.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-      JOIN provider_sync.source_entities AS entity
-        ON entity.provider_dataset_id = source.provider_dataset_id
-      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-    ) AS touched ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT theme.* INTO STRICT v_theme
   FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
@@ -6878,6 +6780,7 @@ BEGIN
     AND item.curation_item_id = p_curation_item_id;
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
   FROM (
     SELECT v_hint.feature_id AS feature_id
@@ -7334,6 +7237,7 @@ BEGIN
   SELECT candidate.* INTO STRICT v_candidate_hint
   FROM feature.theme_feature_candidates AS candidate
   WHERE candidate.candidate_id = p_candidate_id;
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(
     hashtextextended('feature-write:' || v_candidate_hint.feature_id, 0)
   );
@@ -16310,7 +16214,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),

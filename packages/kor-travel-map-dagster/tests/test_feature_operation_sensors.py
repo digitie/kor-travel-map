@@ -1246,7 +1246,8 @@ async def test_a_different_failure_restarts_the_count() -> None:
 
     assert client.abandon_calls == []
     ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
-    assert ledger is not None and ledger.count == 1
+    assert ledger is not None
+    assert ledger.count == 1
 
 
 async def test_running_run_is_counted_but_never_closed() -> None:

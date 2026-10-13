@@ -45,7 +45,9 @@ _HEAD_SCHEMA = _ROOT / "alembic" / "head-schema.sql"
 
 #: 루틴 하나의 머리. 본문은 이 머리에서 그 루틴의 ``ALTER ... OWNER TO``까지다 — pg_dump는
 #: 루틴마다 그 둘을 붙여 쓴다. 따옴표 태그(``$$``·``$_$``)나 ``LANGUAGE sql`` 모양에 기대지 않는다.
-_ROUTINE = re.compile(r"^CREATE (?:PROCEDURE|FUNCTION) (?P<name>[a-z_]+\.[a-z_0-9]+)\(", re.MULTILINE)
+_ROUTINE = re.compile(
+    r"^CREATE (?:PROCEDURE|FUNCTION) (?P<name>[a-z_]+\.[a-z_0-9]+)\(", re.MULTILINE
+)
 _ROUTINE_END = re.compile(r"^ALTER (?:PROCEDURE|FUNCTION) ", re.MULTILINE)
 _LOCK = re.compile(
     r"pg_advisory_xact_lock(?P<shared>_shared)?\(\s*hashtextextended\(\s*'(?P<key>[^']*)'"
@@ -195,7 +197,8 @@ def test_per_feature_locks_are_scalar_and_gated() -> None:
         "Feature advisory 잠금 수가 데이터 크기를 따라 자란다(53200 lock table 고갈):\n  "
         + "\n  ".join(violations)
         + "\n\n대량 writer는 `pg_advisory_xact_lock(hashtextextended('feature-write-all', 0))` "
-        "한 번, 단건 writer는 Feature 잠금 앞에 `pg_advisory_xact_lock_shared(...'feature-write-all'...)`(ADR-111)."
+        "한 번, 단건 writer는 Feature 잠금 앞에 "
+        "`pg_advisory_xact_lock_shared(...'feature-write-all'...)`(ADR-111)."
     )
 
 

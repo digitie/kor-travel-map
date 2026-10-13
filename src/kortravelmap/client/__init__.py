@@ -133,13 +133,13 @@ from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
 from kortravelmap.infra.feature_operation_repo import (
+    abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
+)
+from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event as repo_append_dagster_feature_attempt_event,
 )
 from kortravelmap.infra.feature_operation_repo import (
     ensure_dagster_feature_operation as repo_ensure_dagster_feature_operation,
-)
-from kortravelmap.infra.feature_operation_repo import (
-    abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
 )
 from kortravelmap.infra.feature_operation_repo import (
     finish_dagster_feature_membership as repo_finish_dagster_feature_membership,

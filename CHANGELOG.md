@@ -10,6 +10,20 @@
 
 ## [Unreleased]
 
+### Feature advisory fence 전역 gate — 공용 PG lock table 고갈 수정 (2026-10-13, ADR-111)
+
+- **FIXED (schema, alembic `406_feature_write_gate`)**: 대량 curation writer 9개
+  (`finalize_provider_curation_root`·`_receipts`, `materialize_theme_candidate_generation`, curated
+  source/rule/theme create·patch·archive)가 대상 Feature마다 잡던 `feature-write:<id>` advisory lock을 전역
+  `feature-write-all` 배타 1회로 바꿨다. 11,820 Feature dataset root 완결이 공용 PostgreSQL
+  (`max_locks_per_transaction=64`)의 lock table을 고갈시켜 SQLSTATE 53200으로 죽고 같은 cluster의 다른
+  tenant까지 막던 결함(2026-10-12 09:25Z~). 단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡는다.
+- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`가 같은 run의 같은 결정적 SQLSTATE 실패를
+  5회 연속 보면 terminal root를 `failed`로 닫고 `feature_operation.reconcile_abandoned` error 로그를 남긴다
+  (`AsyncKorTravelMapClient.abandon_dagster_feature_run`). 일시 SQLSTATE는 세지 않는다. cursor에
+  `last_failure`가 생기며, 비어 있으면 종전 모양 그대로다.
+- **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서),
+  `tests/integration/test_feature_write_gate_lock_budget.py`(lock table 칸 수의 2배 Feature root 완결).
 ### admin e2e 로드 실패 수정 (2026-10-13)
 
 - **FIXED (admin frontend e2e)**: 2026-10-06부터 `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import해
@@ -27,6 +41,7 @@
 - **CHANGED (scripts/n150)**: `chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이다(skipped·did not run도 실패).
 - **FIXED (admin frontend e2e)**: live config의 top-level `testIgnore`가 project `testIgnore`에 대체돼 격리 전용
   cache-target-streams spec이 live suite에 포함되던 것; home 대시보드 live spec의 행 찾기 strict mode 위반.
+||||||| parent of 9ae323181 (fix(curation): head-schema 재생성·ADR-111·CHANGELOG, lint 정리)
 
 ### chain17 B 단계가 핀 원장을 pair로 비교 (2026-10-13)
 
