@@ -29,6 +29,7 @@ from kortravelmap.core.feature_operation import (
     TRIGGER_KIND_VALUES,
     DagsterFeatureOperationMutation,
     DagsterFeatureRunStatus,
+    FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
     TriggerKind,
 )
@@ -271,7 +272,10 @@ async def resolve_run_execution_manifest(
                 dataset_key=scope.dataset_key,
                 sync_scope=scope.sync_scope,
             )
-        except Exception as exc:
+        except FeatureOperationInvariantConflict as exc:
+            # 카탈로그가 그 선언을 모른다는 판정만 guard 거부다. 연결·timeout 같은 다른
+            # 실패는 그대로 올린다 — reconcile sensor가 그것을 일시 실패로 세고 다시 한다
+            # (ADR-111). 감싸면 관측 오류로 둔갑해 watermark가 그 run을 지나간다.
             raise FeatureOperationGuardUnavailable(
                 boundary=boundary,
                 reason="execution_scope_not_in_catalog",

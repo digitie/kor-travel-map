@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-111.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-112.**
+
+- [ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다](111-feature-write-gate-lock.md) — proposed, 2026-10-13 (PR #1319; 공용 PG lock table 고갈 53200 근본 수정, alembic 406).
 
 - [ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다](110-geo-transport-hosts-move-to-odroid.md) — proposed, 2026-10-13 (미구현, T-MAP-01~02; ADR-109 amend; 호스트 플립은 Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed, 병렬 PR 미머지).
 - [ADR-109 — geo 주소 데이터셋 릴리스 감지·재지오코딩](109-geo-release-regeocode.md) — proposed, 2026-10-13 (미구현, T-GR-01~08).
@@ -129,6 +131,7 @@
 | ADR-108 | MOIS 인허가 적재는 원천 내용을 재개 키로 하는 chunk commit 적재다 | [108-mois-resumable-chunked-load.md](108-mois-resumable-chunked-load.md) |
 | ADR-109 | geo 주소 데이터셋 릴리스는 데이터 토큰(`dd1-`)으로 감지하고, 적재 경로를 재사용해 다시 지오코딩한다 (proposed, 미구현) | [109-geo-release-regeocode.md](109-geo-release-regeocode.md) |
 | ADR-110 | geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다 (proposed, 미구현; ADR-109 amend) | [110-geo-transport-hosts-move-to-odroid.md](110-geo-transport-hosts-move-to-odroid.md) |
+| ADR-111 | Feature advisory fence는 Feature마다가 아니라 전역 gate `feature-write-all` 하나다 — 대량 writer 배타 1회·단건 writer 공유 (proposed) | [111-feature-write-gate-lock.md](111-feature-write-gate-lock.md) |
 
 ## 새 ADR 작성 규약
 

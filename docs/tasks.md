@@ -25,6 +25,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
+**reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
+#1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
+
 **geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-00`·`T-GR-00-LEDGER`·`T-GR-01`~`08`, 의존 순서대로 아래에
 둔다. 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
@@ -55,7 +58,7 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
   실측 `journal.md` 208,660 B·`tasks-done.md` 200,699 B(상한 225,280)에서 가장 오래된 묶음을 `docs/archive/`로
   분리(규약 §8, 인덱스 표 갱신·바이트 보존 검산). T-GR-01의 의존.
 
-- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 406)
+- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 407)
 
   `feature.feature_geocode_stamps`(세 outcome, 토큰 열 NOT NULL)·`dto/geo_dataset.py`·`dataset_version()`·응답
   `dataset` 선택 파싱·`GeoCallStats.empty`. provider 모듈·`Address`·`ReverseGeocoder` diff 0. 의존: T-GR-00-LEDGER.
@@ -70,7 +73,7 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
   `load_bundle` stale 분기와 MOIS CTE 토큰 조건, 값 동일 무쓰기(override 열 제외, 스냅샷 열 2개 추가), 빈 답
   가드(행 집합 G·run), `mois.py` evidence 1필드, concierge 토큰 kwarg·신뢰 규칙·해시 제외. 의도적 빨강 3건.
 
-- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 407)
+- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 408)
 
   `ops.kor_travel_geo_releases(+items)`, `plan_geo_release`(`plan_id`+`plan_seq`, DB 정본 항목, KNPS dataset별
   run_config), `/v1/ops/geo-releases`(admin만, 슬래시 동사). 머지 뒤 PinVi admin 스냅샷 재vendor.
@@ -175,3 +178,9 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
 
   유일한 호출자였던 KMA 특보 적재가 ADR-105로 사라졌다. client 메서드·repo 함수·통합 테스트를
   지울지, 다른 event feed용으로 남길지 정한다.
+
+- [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
+
+  `feature_operation_reconciliation_sensor`는 한 run의 반영 실패가 tick 전체를 멈추고 30초마다 같은 일을 다시 한다.
+  #1319가 세 판을 시도했다가 되돌렸다 — 리뷰 결과(H1–H3·M1–M3·L1–L4, parking 표 결함)를 설계 입력으로
+  해제 조건을 만족하는 한 판을 낸다. 조건은 tasks-acceptance §T-RECONCILE-RETRY.

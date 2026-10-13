@@ -1287,6 +1287,7 @@ ALTER PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id uuid,
 CREATE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
@@ -1361,6 +1362,7 @@ BEGIN
         RAISE EXCEPTION 'Feature request approval Feature UUID must be UUIDv7'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
     END IF;
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
     SELECT * INTO v_key FROM feature.manual_feature_identity_key(v_feature_kind, v_feature_name, v_lon, v_lat);
     INSERT INTO feature.manual_feature_identity_claims (feature_id, feature_kind, name_key, lon_e6, lat_e6, claimed_by_command_id, claim_basis, claimed_at)
@@ -1417,8 +1419,6 @@ DECLARE
   -- 어느 쪽이 규칙인지 묻게 된다. lock 키는 `text || anynonarray`가 uuid의
   -- canonical 표기를 내므로 바이트 단위로 같다.
   v_feature_id uuid;
-  v_prelock_features uuid[];
-  v_current_features uuid[];
   v_before_hashes jsonb := '{}'::jsonb;
   v_before_hash text;
   v_after_input jsonb;
@@ -1447,21 +1447,8 @@ BEGIN
     RAISE EXCEPTION 'domain command does not match source archive'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
   END IF;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
-  INTO STRICT v_prelock_features
-  FROM (
-    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM feature.curated_sources AS source
-    JOIN provider_sync.source_entities AS entity ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE source.source_id = p_source_id
-  ) AS scope;
-  FOREACH v_feature_id IN ARRAY v_prelock_features LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT source.* INTO STRICT v_source FROM feature.curated_sources AS source
   WHERE source.source_id = p_source_id FOR UPDATE;
@@ -1479,20 +1466,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
-  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::uuid[])
-  INTO STRICT v_current_features
-  FROM (
-    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_source.provider_dataset_id
-  ) AS scope;
-  IF v_current_features <> v_prelock_features THEN
-    RAISE EXCEPTION 'source archive scope changed while acquiring the catalog lock' USING ERRCODE = '40001';
-  END IF;
   FOR v_rule_id IN SELECT rule.rule_id FROM feature.curated_source_rules AS rule
     WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
   LOOP
@@ -1547,10 +1520,6 @@ DECLARE
   v_command ops.domain_commands%ROWTYPE;
   v_rule feature.curated_source_rules%ROWTYPE;
   v_provider_dataset_id bigint;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_before_input jsonb;
   v_after_input jsonb;
   v_before_hash text;
@@ -1587,46 +1556,11 @@ BEGIN
   FROM feature.curated_source_rules AS rule
   JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
   WHERE rule.rule_id = p_rule_id;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
   WHERE rule.rule_id = p_rule_id FOR UPDATE;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'rule archive scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
-  END IF;
   IF v_rule.row_revision <> p_expected_rule_revision THEN
     RAISE EXCEPTION 'rule revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
@@ -1685,10 +1619,6 @@ DECLARE
   v_rule_id uuid;
   v_rule_revision bigint;
   v_feature_id text;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_before_hashes jsonb := '{}'::jsonb;
   v_before_hash text;
   v_after_input jsonb;
@@ -1718,44 +1648,8 @@ BEGIN
     RAISE EXCEPTION 'domain command does not match theme archive'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_domain_command';
   END IF;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM (
-    SELECT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-      AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-  ) AS touched;
-  FOR v_feature_id IN
-    SELECT touched.feature_id FROM (
-      SELECT candidate.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-      JOIN provider_sync.source_entities AS entity
-        ON entity.provider_dataset_id = source.provider_dataset_id
-      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-    ) AS touched ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT theme.* INTO STRICT v_theme
   FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
@@ -1777,29 +1671,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM (
-    SELECT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-      AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-  ) AS touched;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'theme archive scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
-  END IF;
   FOR v_rule_id IN
     SELECT rule.rule_id FROM feature.curated_source_rules AS rule
     WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
@@ -1915,6 +1786,7 @@ ALTER PROCEDURE feature.archive_curation_collection_command(IN p_collection_id u
 CREATE PROCEDURE feature.archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_command ops.domain_commands%ROWTYPE;
@@ -1950,6 +1822,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   IF v_hint.feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_hint.feature_id, 0));
   END IF;
   SELECT collection.* INTO STRICT v_collection
@@ -3068,10 +2941,6 @@ CREATE PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, 
 DECLARE
   v_command ops.domain_commands%ROWTYPE;
   v_provider_dataset_id bigint;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_rule_input jsonb;
   v_rule_input_hash text;
   v_operation_id uuid;
@@ -3106,18 +2975,8 @@ BEGIN
 
   SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
   FROM feature.curated_sources AS source WHERE source.source_id = p_source_id;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || link.feature_id, 0))
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ORDER BY link.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   PERFORM 1 FROM feature.curated_themes AS theme
@@ -3133,17 +2992,6 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'source is missing, moved, or archived'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_source_active';
-  END IF;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM provider_sync.source_entities AS entity
-  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-  WHERE entity.provider_dataset_id = v_provider_dataset_id;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'rule create scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
   END IF;
 
   INSERT INTO feature.curated_source_rules (
@@ -3401,6 +3249,7 @@ ALTER PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id 
 CREATE PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_command ops.domain_commands%ROWTYPE;
@@ -3448,6 +3297,7 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
   IF p_feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || p_feature_id, 0));
   END IF;
   SELECT collection.* INTO STRICT v_collection
@@ -3776,6 +3626,7 @@ ALTER PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN
 CREATE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_id uuid)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
     v_command ops.domain_commands%ROWTYPE;
@@ -3913,6 +3764,7 @@ BEGIN
 
     PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
     SELECT collection.* INTO STRICT v_collection
     FROM feature.curation_collections AS collection
@@ -4625,241 +4477,6 @@ $$;
 ALTER FUNCTION feature.fence_features_identity_update() OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: finalize_provider_curation_receipts(bigint, uuid, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
---
-
-CREATE PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean)
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
-    AS $_$
-DECLARE
-  v_job ops.import_jobs%ROWTYPE;
-  v_rule record;
-  v_generation_id uuid;
-  v_observed_candidate_count bigint;
-  v_removed_candidate_count bigint;
-  v_generation_input_set_hash text;
-  v_generation_replayed boolean;
-  v_source_id uuid;
-  v_source_revision bigint;
-  v_observation_revision bigint;
-  v_row_count integer;
-BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
-    RAISE EXCEPTION 'provider curation finalization requires SERIALIZABLE transaction'
-      USING ERRCODE = '25001';
-  END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
-    RAISE EXCEPTION 'provider curation finalization requires the provider executor'
-      USING ERRCODE = '42501';
-  END IF;
-
-  SELECT job.* INTO STRICT v_job
-  FROM ops.import_jobs AS job
-  WHERE job.job_id = p_import_job_id
-  FOR UPDATE;
-  IF v_job.kind <> 'provider_feature_load'
-     OR v_job.status <> 'done'
-     OR v_job.finished_at IS NULL
-     OR v_job.parent_job_id IS NULL
-     OR v_job.cancellation_id IS NOT NULL
-     OR v_job.quarantined_at IS NOT NULL
-     OR COALESCE(
-       (v_job.payload ->> 'authoritative_snapshot_complete')::boolean,
-       false
-     ) IS NOT TRUE
-     OR NOT EXISTS (
-       SELECT 1
-       FROM ops.import_jobs AS root
-       WHERE root.job_id = v_job.parent_job_id
-         AND root.kind = 'provider_feature_load_run'
-         AND root.status = 'done'
-         AND root.dagster_run_status = 'SUCCESS'
-         AND root.dagster_run_id = v_job.dagster_run_id
-         AND root.cancellation_id IS NULL
-         AND root.quarantined_at IS NULL
-     )
-     OR (SELECT count(*) FROM ops.import_job_datasets AS member
-         WHERE member.job_id = p_import_job_id) <> 1
-     OR NOT EXISTS (
-       SELECT 1
-       FROM ops.import_job_datasets AS member
-       WHERE member.job_id = p_import_job_id
-         AND member.provider_dataset_id = p_provider_dataset_id
-         AND member.sync_scope = p_sync_scope
-         AND member.operation_key = p_operation_key
-     ) THEN
-    RAISE EXCEPTION 'provider curation finalization requires a done exact member'
-      USING ERRCODE = '23514',
-            CONSTRAINT = 'ck_tvn40_provider_curation_finalization_job';
-  END IF;
-
-  IF v_job.payload ? 'candidate_generation_sealed_at' THEN
-    o_generation_count := (v_job.payload ->> 'candidate_generation_count')::bigint;
-    o_generation_set_hash := v_job.payload ->> 'candidate_generation_set_hash';
-    IF o_generation_count IS NULL
-       OR COALESCE(o_generation_set_hash, '') !~ '^[0-9a-f]{64}$' THEN
-      RAISE EXCEPTION 'sealed provider curation receipt is malformed'
-        USING ERRCODE = '23514',
-              CONSTRAINT = 'ck_tvn40_provider_curation_finalization_seal';
-    END IF;
-    o_replayed := true;
-    RETURN;
-  END IF;
-
-  WITH observation AS (
-    SELECT
-      count(head.source_entity_key)::integer AS row_count,
-      max(record.imported_at)::date AS last_source_modified_at,
-      encode(
-        x_extension.digest(
-          convert_to(
-            COALESCE(
-              jsonb_agg(
-                jsonb_build_array(
-                  entity.source_entity_key,
-                  head.current_source_record_key,
-                  record.raw_payload_hash
-                ) ORDER BY entity.source_entity_key
-              ) FILTER (WHERE head.source_entity_key IS NOT NULL),
-              '[]'::jsonb
-            )::text,
-            'UTF8'
-          ),
-          'sha256'
-        ),
-        'hex'
-      ) AS input_set_hash
-    FROM provider_sync.source_entities AS entity
-    LEFT JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = entity.source_entity_key
-    LEFT JOIN provider_sync.source_records AS record
-      ON record.source_entity_key = head.source_entity_key
-     AND record.source_record_key = head.current_source_record_key
-    WHERE entity.provider_dataset_id = p_provider_dataset_id
-  )
-  UPDATE ops.import_jobs AS job
-  SET payload = job.payload || jsonb_build_object(
-    'source_observation', jsonb_build_object(
-      'schema_version', 1,
-      'row_count', observation.row_count,
-      'last_source_modified_at', observation.last_source_modified_at,
-      'input_set_hash', observation.input_set_hash
-    )
-  )
-  FROM observation
-  WHERE job.job_id = p_import_job_id;
-
-  IF EXISTS (
-    SELECT 1
-    FROM feature.curated_sources AS source
-    WHERE source.provider_dataset_id = p_provider_dataset_id
-      AND source.archived_at IS NULL
-  ) THEN
-    CALL feature.refresh_curated_source_observation(
-      p_provider_dataset_id,
-      p_import_job_id,
-      v_source_id,
-      v_source_revision,
-      v_observation_revision,
-      v_row_count
-    );
-  END IF;
-
-  PERFORM pg_advisory_xact_lock(
-    hashtextextended('feature-write:' || touched.feature_id, 0)
-  )
-  FROM (
-    SELECT link.feature_id
-    FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link
-      ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = p_provider_dataset_id
-    UNION
-    SELECT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN feature.theme_feature_candidates AS candidate
-      ON candidate.rule_id = rule.rule_id
-     AND candidate.disposition = 'active'
-    WHERE source.provider_dataset_id = p_provider_dataset_id
-  ) AS touched
-  ORDER BY touched.feature_id;
-
-  FOR v_rule IN
-    SELECT rule.rule_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
-    WHERE source.provider_dataset_id = p_provider_dataset_id
-      AND source.archived_at IS NULL
-      AND theme.archived_at IS NULL
-      AND rule.archived_at IS NULL
-      AND rule.enabled
-      AND rule.default_action = 'candidate'
-    ORDER BY rule.rule_id
-  LOOP
-    CALL feature.materialize_theme_candidate_generation(
-      v_rule.rule_id,
-      'provider_full_snapshot',
-      p_import_job_id,
-      NULL,
-      NULL,
-      NULL,
-      jsonb_build_object(
-        'schema_version', 1,
-        'sync_scope', p_sync_scope,
-        'operation_key', p_operation_key
-      ),
-      v_generation_id,
-      v_observed_candidate_count,
-      v_removed_candidate_count,
-      v_generation_input_set_hash,
-      v_generation_replayed
-    );
-  END LOOP;
-
-  SELECT
-    count(*)::bigint,
-    encode(
-      x_extension.digest(
-        convert_to(
-          COALESCE(
-            jsonb_agg(
-              jsonb_build_array(
-                generation.rule_id::text,
-                generation.generation_id::text,
-                generation.generation_input_set_hash
-              ) ORDER BY generation.rule_id
-            )::text,
-            '[]'
-          ),
-          'UTF8'
-        ),
-        'sha256'
-      ),
-      'hex'
-    )
-  INTO STRICT o_generation_count, o_generation_set_hash
-  FROM feature.theme_candidate_generations AS generation
-  WHERE generation.source_job_id = p_import_job_id
-    AND generation.generation_kind = 'provider_full_snapshot';
-
-  UPDATE ops.import_jobs AS job
-  SET payload = job.payload || jsonb_build_object(
-    'candidate_generation_count', o_generation_count,
-    'candidate_generation_set_hash', o_generation_set_hash,
-    'candidate_generation_sealed_at', clock_timestamp()
-  )
-  WHERE job.job_id = p_import_job_id;
-  o_replayed := false;
-END
-$_$;
-
-
-ALTER PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean) OWNER TO ktm_curation_command_owner;
-
---
 -- Name: finalize_provider_curation_root(uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -5013,23 +4630,14 @@ BEGIN
     RETURN;
   END IF;
 
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT link.feature_id
-    FROM ops.curation_provider_snapshot_receipts AS receipt
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = receipt.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE receipt.root_job_id = p_root_job_id
-    UNION
-    SELECT candidate.feature_id
-    FROM ops.curation_provider_snapshot_receipts AS receipt
-    JOIN feature.curated_sources AS source
-      ON source.provider_dataset_id = receipt.provider_dataset_id
-    JOIN feature.curated_source_rules AS rule ON rule.source_id = source.source_id
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE receipt.root_job_id = p_root_job_id AND candidate.disposition = 'active'
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.  This
+  -- transaction already holds feature-curation-write, so it must not queue behind
+  -- an admin bulk command and stall provider loads: try once and let the reconcile
+  -- sensor retry on its next tick.
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('feature-write-all', 0)) THEN
+    RAISE EXCEPTION 'feature-write-all gate is busy; provider curation root retries later'
+      USING ERRCODE = '55P03';
+  END IF;
   PERFORM 1
   FROM provider_sync.source_links AS link
   JOIN provider_sync.source_entities AS entity
@@ -5634,26 +5242,8 @@ BEGIN
   FROM feature.curated_sources AS source
   WHERE source.source_id = v_rule_hint.source_id;
 
-  FOR v_feature_id IN
-    SELECT touched.feature_id
-    FROM (
-      SELECT candidate.feature_id
-      FROM feature.theme_feature_candidates AS candidate
-      WHERE candidate.rule_id = p_rule_id
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM provider_sync.source_entities AS entity
-      JOIN provider_sync.source_links AS link
-        ON link.source_entity_key = entity.source_entity_key
-      WHERE entity.provider_dataset_id = v_provider_dataset_id
-    ) AS touched
-    ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(
-      hashtextextended('feature-write:' || v_feature_id, 0)
-    );
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   -- Common order after every Feature advisory fence: catalog → source evidence
@@ -6400,10 +5990,6 @@ DECLARE
   v_command ops.domain_commands%ROWTYPE;
   v_rule feature.curated_source_rules%ROWTYPE;
   v_provider_dataset_id bigint;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_before_input jsonb;
   v_after_input jsonb;
   v_before_hash text;
@@ -6443,27 +6029,8 @@ BEGIN
   FROM feature.curated_source_rules AS rule
   JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
   WHERE rule.rule_id = p_rule_id;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched ORDER BY touched.feature_id;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
 
   SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
@@ -6472,22 +6039,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_sources AS source
   WHERE source.source_id = v_rule.source_id
     AND source.provider_dataset_id = v_provider_dataset_id FOR SHARE;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM (
-    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
-    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
-    UNION
-    SELECT link.feature_id FROM provider_sync.source_entities AS entity
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE entity.provider_dataset_id = v_provider_dataset_id
-  ) AS touched;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'rule patch scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
-  END IF;
   IF v_rule.row_revision <> p_expected_rule_revision THEN
     RAISE EXCEPTION 'rule revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
@@ -6577,10 +6128,6 @@ DECLARE
   v_theme feature.curated_themes%ROWTYPE;
   v_rule_id uuid;
   v_feature_id text;
-  v_prelock_count bigint;
-  v_prelock_hash text;
-  v_current_count bigint;
-  v_current_hash text;
   v_before_hashes jsonb := '{}'::jsonb;
   v_before_hash text;
   v_after_input jsonb;
@@ -6618,44 +6165,8 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_domain_command';
   END IF;
 
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_prelock_count, v_prelock_hash
-  FROM (
-    SELECT DISTINCT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-      AND candidate.disposition = 'active'
-    UNION
-    SELECT DISTINCT link.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-  ) AS touched;
-  FOR v_feature_id IN
-    SELECT touched.feature_id FROM (
-      SELECT candidate.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-        AND candidate.disposition = 'active'
-      UNION
-      SELECT link.feature_id
-      FROM feature.curated_source_rules AS rule
-      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-      JOIN provider_sync.source_entities AS entity
-        ON entity.provider_dataset_id = source.provider_dataset_id
-      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-    ) AS touched ORDER BY touched.feature_id
-  LOOP
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
-  END LOOP;
+  -- ADR-111: one exclusive gate instead of one lock per touched Feature.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
   SELECT theme.* INTO STRICT v_theme
   FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
@@ -6677,29 +6188,6 @@ BEGIN
   PERFORM 1 FROM feature.curated_source_rules AS rule
   WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
   ORDER BY rule.rule_id FOR SHARE;
-  SELECT count(*), encode(x_extension.digest(convert_to(
-    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
-    'UTF8'), 'sha256'), 'hex')
-  INTO STRICT v_current_count, v_current_hash
-  FROM (
-    SELECT DISTINCT candidate.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-      AND candidate.disposition = 'active'
-    UNION
-    SELECT DISTINCT link.feature_id
-    FROM feature.curated_source_rules AS rule
-    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
-    JOIN provider_sync.source_entities AS entity
-      ON entity.provider_dataset_id = source.provider_dataset_id
-    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
-    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
-  ) AS touched;
-  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
-    RAISE EXCEPTION 'theme patch scope changed while acquiring the catalog lock'
-      USING ERRCODE = '40001';
-  END IF;
   IF v_theme.theme_slug = p_theme_slug AND v_theme.theme_name = p_theme_name
      AND v_theme.theme_description = p_theme_description
      AND v_theme.theme_group = p_theme_group AND v_theme.visibility = p_visibility
@@ -6824,6 +6312,7 @@ ALTER PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uui
 CREATE PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id uuid, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'ops'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_command ops.domain_commands%ROWTYPE;
@@ -6878,13 +6367,16 @@ BEGIN
     AND item.curation_item_id = p_curation_item_id;
   PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
   PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
-  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
-  FROM (
-    SELECT v_hint.feature_id AS feature_id
-    UNION SELECT p_feature_id WHERE p_feature_id IS NOT NULL
-  ) AS touched
-  WHERE touched.feature_id IS NOT NULL
-  ORDER BY touched.feature_id;
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
+  -- At most two Features (old and new), in uuid order.  LEAST/GREATEST ignore a NULL
+  -- argument, so one NULL locks the other Feature (twice, re-entrant); only when both
+  -- are NULL is the key NULL and the strict lock a no-op — as the old set form did.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || LEAST(v_hint.feature_id, p_feature_id), 0)
+  );
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || GREATEST(v_hint.feature_id, p_feature_id), 0)
+  );
   SELECT collection.* INTO STRICT v_collection
   FROM feature.curation_collections AS collection
   WHERE collection.collection_id = p_collection_id FOR UPDATE;
@@ -7264,6 +6756,7 @@ ALTER FUNCTION feature.prepare_feature_state_context(p_context jsonb, p_mode tex
 CREATE PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    SET lock_timeout TO '5s'
     AS $$
 DECLARE
   v_candidate_hint feature.theme_feature_candidates%ROWTYPE;
@@ -7334,6 +6827,7 @@ BEGIN
   SELECT candidate.* INTO STRICT v_candidate_hint
   FROM feature.theme_feature_candidates AS candidate
   WHERE candidate.candidate_id = p_candidate_id;
+  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));
   PERFORM pg_advisory_xact_lock(
     hashtextextended('feature-write:' || v_candidate_hint.feature_id, 0)
   );
@@ -16310,7 +15804,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -24843,13 +24337,6 @@ GRANT ALL ON FUNCTION feature.current_provider_curation_input_set(p_provider_dat
 
 REVOKE ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id uuid) TO ktm_feature_schema_owner;
-
-
---
--- Name: PROCEDURE finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
---
-
-REVOKE ALL ON PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean) FROM PUBLIC;
 
 
 --

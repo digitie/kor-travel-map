@@ -10,6 +10,26 @@
 
 ## [Unreleased]
 
+### Feature advisory fence 전역 gate — 공용 PG lock table 고갈 수정 (2026-10-13, ADR-111)
+
+- **FIXED (schema, alembic `406_feature_write_gate`)**: 대량 curation writer 8개
+  (`finalize_provider_curation_root`, `materialize_theme_candidate_generation`, curated source/rule/theme
+  create·patch·archive)가 대상 Feature마다 잡던 `feature-write:<id>` advisory lock을 전역 `feature-write-all`
+  배타 1회로 바꿨다. 11,820 Feature dataset root 완결이 공용 PostgreSQL(`max_locks_per_transaction=64`)의 lock
+  table을 고갈시켜 SQLSTATE 53200으로 죽고 같은 cluster의 다른 tenant까지 막던 결함(2026-10-12 09:25Z~).
+  단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡고 `lock_timeout = 5s`를 갖는다. root 완결은 gate를
+  `pg_try_advisory_xact_lock`으로 시도하고 바쁘면 55P03(다음 tick 재시도). 대량 명령 6개의 죽은 범위
+  재검사(두 scan + 40001)를 지웠고, 호출자 없는 `finalize_provider_curation_receipts`를 DROP한다.
+- **FIXED (dagster)**: 실행 manifest 해석의 일시 DB 실패(연결 끊김 등)를 더는 guard 거부로 감싸지 않는다 — 카탈로그
+  부재(`FeatureOperationInvariantConflict`)만 거부다. 종전에는 reconcile sensor가 그것을 관측 오류로 보고 그 run을 다시
+  집지 않았다. reconcile sensor의 재시도·알림 설계는 후속(`T-RECONCILE-RETRY`, ADR-111 결정 4).
+- **docs**: `docs/journal.md` 2026-09-16 ~ 2026-09-19 7건을 `docs/archive/journal-2026-09d.md`로 분리(§8, 본문 바이트 보존).
+- **CHANGED (api)**: SQLSTATE 55P03(lock timeout)은 typed `DBAPIError` 처리기에서 `503 LOCK_TIMEOUT` +
+  `Retry-After: 5`(다른 DB 오류는 종전 500 경로). OpenAPI 바이트 변경 없음.
+- **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서, 호출·trigger 전개),
+  `tests/integration/test_feature_write_gate_lock_budget.py`(모듈 전용 DB에서 lock table 칸 수의 2배 Feature root
+  완결).
+
 ### admin e2e 로드 실패 수정 (2026-10-13)
 
 - **FIXED (admin frontend e2e)**: 2026-10-06부터 `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import해

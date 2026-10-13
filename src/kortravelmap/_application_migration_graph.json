@@ -33,6 +33,12 @@
         "404_transport_provider_identity"
       ],
       "revision": "405_mois_freshness_sla"
+    },
+    {
+      "down_revision": [
+        "405_mois_freshness_sla"
+      ],
+      "revision": "406_feature_write_gate"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

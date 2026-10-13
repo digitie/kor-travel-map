@@ -55,6 +55,7 @@ __all__ = [
     "current_domain_command",
     "domain_command_transaction",
     "idempotent_domain_command",
+    "sqlstate_of",
 ]
 
 _DOMAIN_POLICIES = {
@@ -75,8 +76,12 @@ _ACTIVE_DOMAIN_COMMAND: ContextVar[DomainCommandHandle | None] = ContextVar(
 _SERIALIZATION_ATTEMPTS = 3
 
 
-def _sqlstate(error: BaseException) -> str | None:
-    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다."""
+def sqlstate_of(error: BaseException) -> str | None:
+    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다.
+
+    명시적 연결(``orig``·``raise ... from``)만 따른다 — ``__context__``는 처리 중에 우연히
+    겹친 다른 예외일 수 있다.
+    """
 
     current: BaseException | None = error
     seen: set[int] = set()
@@ -86,7 +91,6 @@ def _sqlstate(error: BaseException) -> str | None:
             current,
             getattr(current, "orig", None),
             getattr(current, "__cause__", None),
-            getattr(current, "__context__", None),
         ):
             if candidate is None:
                 continue
@@ -486,7 +490,7 @@ def idempotent_domain_command(
                 except DBAPIError as error:
                     if (
                         policy.transaction_isolation != "serializable"
-                        or _sqlstate(error) != "40001"
+                        or sqlstate_of(error) != "40001"
                         or attempt + 1 == _SERIALIZATION_ATTEMPTS
                     ):
                         raise

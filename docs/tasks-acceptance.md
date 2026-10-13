@@ -2333,8 +2333,8 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 
 2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
 열린 결정 7; 소유자가 다른 접두사를 고르면 `T-GR-00`~`08`을 일괄 재번호하되 journal·acceptance 참조도 함께).
-PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 406) → PR-2(T-GR-04+05+08,
-407+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
+PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 407) → PR-2(T-GR-04+05+08,
+408+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
 PR은 머지 직전.
 
 - 분리 실행(2026-10-13, 이 브랜치): `scripts/archive_task_ledger_section.py --apply`로 닫힌 절 7개
@@ -2461,7 +2461,7 @@ journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실�
 
 ## T-GR-01
 
-ADR-109 결정 1·2. 수정 파일: `alembic/versions/406_feature_geocode_stamps.py`(직전 head `405_mois_freshness_sla`),
+ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps.py`(직전 head `406_feature_write_gate`, ADR-111),
 `alembic/head-schema.sql`, `src/kortravelmap/dto/geo_dataset.py`(신규 `DatasetRef`·`GeoApplied`),
 `infra/models.py`(`FeatureGeocodeStampRow`), `infra/feature_geocode_stamp_repo.py`(신규), `src/kortravelmap/geocoding.py`
 (`dataset_version()`, `_RestReverseV2Response.dataset` :935, `GeoCallStats.observed_data_tokens`·`empty[endpoint]`
@@ -2470,7 +2470,7 @@ ADR-109 결정 1·2. 수정 파일: `alembic/versions/406_feature_geocode_stamps
 
 - `alembic/head-schema.sql` 재생성이 byte 일치하고 마이그레이션 lint 4종(`test_migrations_keep_the_schema_owner_role`·
   `test_routine_ddl_runs_under_its_owner_role`·`test_receipt_head_check_covers_the_graph_head`·
-  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 406은 `SET ROLE ktm_feature_schema_owner` 아래
+  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 407은 `SET ROLE ktm_feature_schema_owner` 아래
   DDL·`OWNER TO`·RESET ROLE 없음·receipt head CHECK에 자기 revision.
 - 스탬프 삽입: 어느 outcome이든 `geo_version_token`/`geo_data_token` NULL은 NOT NULL이 거부한다(NULL 스탬프는
   만들지 않는다 — ADR-109 결정 1).
@@ -2549,7 +2549,7 @@ ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`lo
 
 ## T-GR-04
 
-ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/407_kor_travel_geo_releases.py`,
+ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/408_kor_travel_geo_releases.py`,
 `alembic/head-schema.sql`, `infra/models.py`, `infra/geo_release_repo.py`(신규 — `plan_geo_release`·
 `run_config_for_dataset`·항목 전이·`coverage` 호출·`complete_plan`), `src/kortravelmap/core/feature_operation.py`
 (`GEO_DEPENDENT_OPERATION_KEYS` — `DEDICATED_JOB_ONLY_OPERATION_KEYS` :33-41 옆, 런타임 정본),
@@ -2574,7 +2574,7 @@ ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일
   ①~⑤(concierge·MOIS 마지막).
 - `coverage` 응답에 `excluded_by_skip`·`not_called_by_kind`·`unstamped_non_provider`가 있고 분모가 인자 dataset으로
   한정된다.
-- 마이그레이션 lint 4종 초록(407도 owner role·receipt CHECK·RESET ROLE 없음).
+- 마이그레이션 lint 4종 초록(408도 owner role·receipt CHECK·RESET ROLE 없음).
 - `openapi.user.json`·`openapi.service.json`이 byte 불변이다(테스트가 export 전후 sha256 비교); `openapi.json`에
   `/v1/ops/geo-releases` 5 operation(슬래시 동사)이 있고 `require_ops_operator`가 붙는다.
 - `POST /detect`가 센서와 같은 `plan_geo_release`를 호출한다(단일 정본 테스트 — 함수 identity).
@@ -2651,3 +2651,22 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
 - `became_current`가 항상 False(`fetched_at` 원 값 유지)이고 lifecycle 전이가 없다 — provider에서 사라진 entity를
   되살리지 않는다.
 - MOIS replay 1 run 소요(격리 스택, 업종 하나)를 PR 본문에 기록한다.
+
+## T-RECONCILE-RETRY
+
+배경: ADR-111 결과 §"reconcile sensor 재시도 설계는 후속". 406이 2026-10-12 고착(53200)의 원인을 없앴으므로 급하지
+않다. 아래가 모두 참이면 닫는다.
+
+- **잃지 않는다.** 어떤 실패·넘침·재시작에서도 Dagster watermark가 반영하지 않은 run을 지나가지 않는다(DB root가
+  없는 run 포함 — 넘침으로 버린 run을 DB page가 다시 집는다는 가정 금지).
+- **tick 시간이 유계다.** 실패·성공 합계로 한 tick의 벽시계 상한이 sensor 평가 timeout(기본 60초)보다 확실히 짧고,
+  그 상한 안에 cursor 갱신이 끝난다. cursor commit이 DB page 목록 조회 성공에 결박되지 않는다.
+- **알림은 경과 시간으로.** "같은 run이 처음 실패한 뒤 N분"으로 멈춤을 알린다 — 서명이 번갈아 바뀌어도 시계가
+  초기화되지 않는다. 55P03 같은 일시 실패도 오래 지속되면 알린다.
+- **gate 경합과 lock_timeout을 가른다.** root 완결의 gate try 실패는 lock_timeout과 다른 전용 SQLSTATE(또는 표지)로
+  구별한다 — 모든 55P03을 "gate 바쁨"으로 보지 않는다.
+- **닫기는 명시 목록만.** 닫을 수 있는 SQLSTATE를 명시 목록으로 두고, DB root가 없는 run·취소 중 root·이미 terminal인
+  root에서 각각 무엇을 하는지 정한다(닫을 수 없는 머리를 영구히 잡지 않는다).
+- **retry_after는 실패 시각 기준**, tick 시작 기준이 아니다. cursor는 비면 앞 판과 바이트가 같고, 커져도 tick body
+  크기가 유계다.
+- 설계 입력: #1319 리뷰 3회(parking 표 A-H1·A-H2·A-M1~M3·A-L3·B, 최종 H1~H3·M1~M3·L1~L4)와 journal 2026-10-13 ADR-111 항목.

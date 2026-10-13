@@ -1,3 +1,37 @@
+## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319, draft)
+
+**다음 한 작업: CI(PostGIS 두 lane 포함) 초록 → 소유자 머지 → 아래 배포 순서. reconcile sensor는 2026-10-13
+12:59:54Z부터 prod에서 꺼져 있다 — `alembic_version`이 `406_feature_write_gate`가 되고 함수 정의를 확인하기
+전에는 다시 켜지 않는다.**
+
+배포 runbook(n150, 운영자 — prod는 읽기 외에 이 순서로만 바꾼다):
+0. **사전 점검.** `~/preflight.sh`가 PASS일 때만 시작한다. 머지된 main 체크아웃에서 호스트 스크립트 다섯을 다시 맞춘다
+   (`scripts/n150/README.md`) — `sudo install -o root -g root -m 0700 scripts/n150/chain17.sh scripts/n150/chain16.sh
+   scripts/n150/repin.sh scripts/n150/run-d2.sh scripts/n150/adjudicate.sh /root/` (호스트 `chain16.sh`는 아직 느슨한 D1 게이트다).
+1. **pair를 명시해 배포.** ssh 세션에 걸지 않고 systemd-run 유닛으로 띄운다(`chain17.sh` 인자 여섯:
+   `MAP REASON REBUILD_UNIT EXECBUILD_UNIT D2_UNIT TAG`):
+   `MAP=<merged main sha40>; PINVI=2fa1c166fadc7f744e5179738c97b4b136d08351; T=adr111-$(date -u +%m%d%H%M)`
+   `sudo systemd-run --unit=chain17-$T --property=StandardOutput=append:/root/chain17-$T.log --property=StandardError=append:/root/chain17-$T.log env PINVI_OVERRIDE=$PINVI /root/chain17.sh $MAP "ADR-111 gate lock (#1319)" rb-$T eb-$T d2-$T $T`
+   → `journalctl -u chain17-$T`·`/root/chain17-$T.log`로 끝까지 본다. 끝나면 `ktdctl pin show`로 원장이 ($MAP, $PINVI)인지 확인한다.
+2. **스키마 확인**(Map API 컨테이너 DSN에서 유도한 map DB, 읽기만):
+   `SELECT version_num FROM alembic_version;` → `406_feature_write_gate`.
+   `SELECT pg_get_functiondef('feature.finalize_provider_curation_root'::regproc)` → `pg_try_advisory_xact_lock(hashtextextended('feature-write-all'`
+   포함, `'feature-write:'` 없음. `SELECT proname FROM pg_proc WHERE prosrc LIKE '%feature-write:%' ORDER BY 1;` → 단건 writer
+   여섯만(approve·archive/create/patch curation item·manual item·promote). `to_regprocedure('feature.finalize_provider_curation_receipts(bigint,uuid,text,text)')`
+   → NULL.
+3. **sensor가 아직 꺼져 있는지 확인.** Map Dagster GraphQL(`http://127.0.0.1:11002/graphql`)에서
+   `feature_operation_reconciliation_sensor`의 `sensorState.status`가 `STOPPED`인지 본다(2026-10-13 12:59:54Z에 운영자가 껐다).
+4. 그 뒤에만 `feature_operation_reconciliation_sensor`를 켠다. root `97ac4e01-…`가 다음 tick에 완결되는지
+   (`ops.import_jobs.status='done'`) 본다. sensor는 main 그대로라 실패하면 그 tick을 실패로 두고 30초 뒤 다시 한다 —
+   그때는 다시 끄고 원인을 본다(재시도 설계는 `T-RECONCILE-RETRY`).
+5. **문제가 생기면** sensor를 멈추고 앞으로 고친다(406은 forward-only — 405 재배포를 약속하지 않는다).
+
+- 바뀐 것: alembic 406(대량 writer 8개 gate 배타 — root 완결만 try-lock·55P03, 단건 6개 gate 공유 +
+  `lock_timeout 5s`, 죽은 범위 재검사 제거, 호출자 없는 `finalize_provider_curation_receipts` DROP), API 55P03 → 503
+  `LOCK_TIMEOUT`, manifest 해석의 일시 실패를 guard 거부로 감싸지 않음, lint(호출·trigger 전개)·격리 DB 통합 테스트,
+  ADR-111. reconcile sensor 재시도 설계는 되돌리고 `T-RECONCILE-RETRY`로 분리. journal 2026-09-16~19 7건 아카이브. OpenAPI 바이트 변경 없음(PinVi 재vendor 불필요).
+- 바뀌지 않은 것: Manager `max_locks_per_transaction` 상향(별도 응급조치), prod 컨테이너·DB.
+
 ## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 **다음 한 작업: draft PR CI 초록 → 적대 리뷰 → 머지 → Map API 배포 → chain16 D1 재실행(11/11 기대) → M05.**
