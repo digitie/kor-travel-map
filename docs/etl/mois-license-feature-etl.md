@@ -345,3 +345,9 @@ run 로그에 `MOIS 업종 <slug> 완료`가 남는다.
 3. run_config 없이 `feature_place_mois_licenses_job`을 한 번 띄운다(Map API "지금 실행" 가능).
    이후 run은 sensor가 잇는다. 마지막 run이 `complete`(전 업종)면 봉인·sync 성공이 남는다.
 4. 실패 run이 나오면 sensor는 멈춘다. 원인을 본 뒤 같은 job을 다시 띄우면 이어서 적재한다.
+
+> **geo 릴리스 재지오코딩(ADR-109 proposed, 미구현).** geo 데이터 토큰이 바뀌면 릴리스 센서가 이 job을
+> `source_mode=replay`(원천 재fetch 없이 `source_records.raw_data`로 같은 변환기 실행; 제외는 `not_called`
+> **스탬프**가 있는 행뿐 — 스탬프 없는 payload-bjd 행은 변환되어 스탬프를 받는다)로
+> 띄우고 `budget_exhausted` 이어 달리기도 대신한다(ADR-109 결정 5). unchanged 판정에 "스탬프 토큰 == 현재
+> 토큰" 조건이, 표식 "알려진 불가" 조건에 토큰 일치가 더해진다. 상세는 [`address-geocoding.md`](address-geocoding.md).

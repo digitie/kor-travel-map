@@ -1,3 +1,17 @@
+## 2026-10-13 — geo 릴리스 재지오코딩 설계(ADR-109 proposed): 브랜치 `docs/adr-109-geo-release-regeocode`
+
+**다음 한 작업: 이 doc-only PR을 docs lint 초록 확인 뒤 즉시 머지해 `T-GR-00`을 닫는다 → `T-GR-00-LEDGER`(journal·
+tasks-done 다음 경계 분리, doc-only — `T-GR-00`의 `[x]` 전환·tasks-done 이관을 함께) → `T-GR-01`(스탬프 표
+406·`dto/geo_dataset.py`·`dataset_version()`·`GeoCallStats.empty`) 착수.** 실측 `journal.md` 208,660 B·`tasks-done.md`
+200,699 B(acceptance §T-GR-00-LEDGER). 소유자 결정 — ADR-109 "열린 결정" 13건, 특히 task 접두사(`T-GR-`
+임시)·센서 기본 RUNNING·replay 적용 범위; 미결이면 권장안 기준(결정별 영향 조문은 §T-GR-00). T-GR-01은 결정
+비의존이다. 코드는 geo ADR-069 배포와 병렬 가능하고(`dataset` 없는 응답 허용), 활성화 검증은 geo 배포 뒤다.
+PR 묶음·의존은 acceptance §T-GR-00.
+
+- 정본: ADR-109(결정·근거) + `docs/etl/address-geocoding.md`(코딩용 상세·테스트 목록). 연동 문서 `integration-map.md`
+  §1·§2·§4에 "계획" 표식으로 넣었다. 구현 전까지 모든 서술은 "proposed, 미구현"이다.
+- 배포 제약(T-GR-04 뒤): PinVi admin OpenAPI 스냅샷 재vendor가 Map API 배포보다 먼저.
+
 ## 2026-10-13 — 고속도로 돌발 job pool 고갈 수정: 브랜치 `fix/highway-incidents-pool`
 
 **다음 한 작업: 적대 리뷰 → PR·CI(통합 두 lane)·머지 → 다음 Map pair 회전 뒤 `feature_notice_transport_highway_incidents_job`

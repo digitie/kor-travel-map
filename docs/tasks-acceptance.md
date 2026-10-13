@@ -28,6 +28,13 @@
 > | `T-VN-39-DEPLOY` (완료) | [archive/tasks-acceptance-39-deploy.md](archive/tasks-acceptance-39-deploy.md) | 약 7 KB |
 > | `T-VN-M02` (완료) | [archive/tasks-acceptance-m02.md](archive/tasks-acceptance-m02.md) | 약 12 KB |
 > | `T-VN-LEDGER-ARCHIVE` (완료) | [archive/tasks-acceptance-ledger-archive.md](archive/tasks-acceptance-ledger-archive.md) | 약 4 KB |
+> | `T-VN-41F1D-D1` (완료) | [archive/tasks-acceptance-41f1d-d1.md](archive/tasks-acceptance-41f1d-d1.md) | 약 2 KB |
+> | `T-VN-41F1D-E` (완료) | [archive/tasks-acceptance-41f1d-e.md](archive/tasks-acceptance-41f1d-e.md) | 약 5 KB |
+> | `T-VN-M01` (완료) | [archive/tasks-acceptance-m01.md](archive/tasks-acceptance-m01.md) | 약 6 KB |
+> | `T-VN-M04` (완료) | [archive/tasks-acceptance-m04.md](archive/tasks-acceptance-m04.md) | 약 5 KB |
+> | `T-VN-39` (완료) | [archive/tasks-acceptance-39.md](archive/tasks-acceptance-39.md) | 약 8 KB |
+> | `T-VN-DAGSTER-STORAGE` (완료) | [archive/tasks-acceptance-dagster-storage.md](archive/tasks-acceptance-dagster-storage.md) | 약 12 KB |
+> | `T-VN-QUOTA-ARITHMETIC` (완료) | [archive/tasks-acceptance-quota-arithmetic.md](archive/tasks-acceptance-quota-arithmetic.md) | 약 17 KB |
 
 ## 지금 무엇이 사실인가 — `T-VN-FINAL-REBUILD`
 
@@ -310,77 +317,11 @@ attestation v4와 pinned runtime manifest v6 + rebuild journal v8을 그대로 �
 
 ## T-VN-41F1D-D1
 
-```markdown
-- [~] **T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation** *(공동, docs-only)*
-
-  > H46H의 fresh rebuild와 data-independent UI/provenance subset은 committed됐다. 남은 D1
-  > 후속은 `T-VN-FINAL-REBUILD` barrier가 현재 candidate를 유지한다고 판정한 뒤 실행한다.
-
-  C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 **데이터
-  비의존** 관리자 UI smoke(로그인 포함)를 기록한다. 2026-08-06 n150 rebuild는 committed했고
-  Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와
-  fixture `finalized`/정확한 `409 PIPELINE_CANCELLATION_UNSAFE`를 확인했다.
-
-  **선행**: T-VN-33 merge와 `T-VN-FINAL-REBUILD`의 current candidate 확인이다. H46H가 이미
-  수행한 `rebuild-pinned --confirm`의 v6/v8 evidence를 사용하되, 이전 C3의 pin·smoke는 새
-  schema acceptance 증거로 재사용하지 않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
-  API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
-  provenance가 candidate에 attest되어야 한다. v6 active generation과 v8 journal만 실행
-  authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
-```
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-41f1d-d1.md](archive/tasks-acceptance-41f1d-d1.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-41F1D-E
 
-**2026-09-06 완료.** 남았다고 적힌 "n150 data-dependent 실행"은 D2가 pinset `48166bd2`에서
-수행했다 — lane이 v6 manifest·v8 journal·host attestation을 검증기에 넘기고 세 해시를
-`result.json`에 남긴 뒤 `phase: passed`로 닫혔다. 검증기가 대조하는 축이 아래 열거와 일치한다.
-
-`run-c7-prod-live-e2e.sh`(6-spec C7 prod gate)는 v6/v8 전환 이후 돌지 않았고 **앞으로도 이
-baseline에서는 돌 수 없다** — `docs/runbooks/c7-prod-live-e2e.md`가 스스로
-`[보존 이력 · 실행 금지]`이고 "300 baseline의 n150 배포에는 사용하지 않는다"고 적는다.
-`T-VN-M01`의 restore 축과 같은 계열이다. 되살릴 조건: 300 baseline에 맞는 C7 prod gate 운영
-순서가 생기면 그때 다시 세운다.
-
-`/etc/kor-travel-map/`의 v6/v8 pinset 쌍 여섯은 같은 포맷의 이력이고 롤백 입력이라 퇴역
-대상이 아니다. 퇴역한 것은 **포맷**이다 — v4/v5/v7이 `retired-de5206dc/`에 있다.
-(ADR-102 결정 6 이후 러너는 v6/v8 사본을 읽지 않는다 — 위 사본은 운영자 정리 대상인 이력이다.)
-
-```markdown
-- [x] **T-VN-41F1D-E — 구 generation 퇴역·v6/v8 attestation 전환** (2026-09-06 완료)
-
-  > 2026-08-25 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
-  > n150 data-dependent 실행뿐이다. `E2E_C7_COMPATIBLE_PAIR_MANIFEST`가
-  > `E2E_C7_PINNED_RUNTIME_MANIFEST` + `E2E_C7_REBUILD_JOURNAL`로 바뀌었고, runtime role은
-  > 다섯에서 **일곱**으로(PinVi web/dagster 추가), host attestation은 version 3 → 4로,
-  > 세 schema head와 pinset이 generation 값과 exact 대조된다. 2026-08-25에는 Manager의
-  > manifest v6/journal v8에 맞춰 application `300` candidate evidence, application/Dagster
-  > DB identity, root/finalize result, application/metadata permit까지 exact 검증하도록 올렸다.
-  > 최종 보강에서는 PinVi DB의 PostgreSQL system identifier·name/OID·owner-login identity와 Dagster
-  > metadata LOGIN role의 connection limit·password expiry·role/database-local setting 잔여까지
-  > 같은 journal/permit field set으로 결박해 **세 DB identity**를 committed resume에서 재대조한다.
-  > journal은 phase `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
-  > 넣어 통과하는 경로는 만들지 않았고, runner 계약 테스트가 v4 env 부재를 단언한다.
-  > 변이(phase/candidate/candidate evidence/DB identity/result/permit/cancel probe/schema
-  > head/journal digest/pinset/image 대조/manifest version)가 전부 red임을 실측했다. 실행 전제: v6/v8은
-  > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
-  > 과거 v5/v7 파일은 보존 이력일 뿐 current runner 입력이 아니며, 현 세대 v6/v8 문서는
-  > H46H의 committed fresh rebuild가 이미 만들었고, D1/F1D-E가 이를 후속 검증에 사용한다.
-
-  `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
-  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v6
-  `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
-  head·pinset·application `300` candidate evidence를 확인하고 v8 journal/host attestation과
-  함께 발행한다. v4/v5 manifest와 v7 journal을 억지 입력해
-  통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
-  contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
-  (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
-
-### T-VN-FINAL-REBUILD — 주요 개발 완료 후 최종 acceptance 배리어 (2026-08-20 신설)
-
-> **범위 정정(2026-08-26)**: H46H baseline의 파괴적 fresh rebuild는 사용자 승인에 따라
-> 이미 실행·committed됐다. 이 task는 후보가 바뀌어 rebuild를 다시 해야 하는 경우가 아니면
-> 재실행하지 않고, 남은 D1/D2/F1D-E와 41C의 최종 acceptance 순서·barrier를 소유한다.
-```
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-41f1d-e.md](archive/tasks-acceptance-41f1d-e.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-41F1D-D2
 
@@ -692,70 +633,7 @@ baseline에서는 돌 수 없다** — `docs/runbooks/c7-prod-live-e2e.md`가 �
 
 ## T-VN-M01
 
-```markdown
-- [x] **T-VN-M01 — admin Feature 생성 API clean cutover** (2026-09-06 완료). Map PR #1029
-  (merge `57c9d99a`)에 `0226_m01_manual_feature_create`의 DB/ACL/backup manifest와 API·Admin BFF가
-  함께 착지했다. PinVi direct-create fail-close는 [PinVi #458](https://github.com/digitie/pinvi/pull/458)로
-  완료됐다. 남은 것은 `KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false`를 유지한
-  route 활성화 전 fresh restore/ACL/live gate다.
-```
-
-**활성화 전제 셋** (설계 문서 §1). 셋을 모두 만족하기 전에는 플래그를 `true`로 바꾸지
-않는다. **2026-09-06에 셋 다 닫혔고 플래그는 `true`다.**
-
-| 전제 | 상태 |
-|---|---|
-| PinVi `new_place` 직접 create 제거 배포 | **완료** (PinVi #458) |
-| M01 DB/API/admin UI + 최소 backup·restore·ACL reconciliation 배포 | DB/API/UI 완료(#1029). ACL reconciler는 API 부팅마다 실행. **ACL 축 55/55**(rebuild 앞뒤 두 번). **restore 축은 300 baseline이 대체**(아래) |
-| 전용 BFF 자격 성공 · PinVi/일반 AdminBFF 거부 · DB zero-write smoke | **완료** — 성공 201, 거부 4/4 403, witness 8관계 증분 0 |
-
-**ACL 축 — 2026-09-05 배포 런타임 실측 통과(55/55).** `scripts/m01_activation_preflight.py`가
-설계 §8.1~8.3을 재실행 가능한 형태로 확인한다. 아무것도 쓰지 않으므로(catalog
-`has_*_privilege`/`pg_has_role`만) 활성화 전 프로덕션에서 그대로 돌린다. §8.2가
-**"restore 뒤 동일"**을 요구하므로 restore·rebuild 뒤에도 다시 돌린다. 확인 내용:
-
-    role 속성(NOLOGIN NOINHERIT) · membership exact option(admin/inherit/set)
-    교차 멤버십 부재 · runtime login의 owner SET ROLE 불가
-    claim/origin direct SELECT/INSERT/UPDATE/DELETE/TRUNCATE 부재(API·Dagster·PUBLIC)
-    relation owner = ktm_feature_schema_owner
-    wrapper  create_admin_manual_feature_with_initial_state  api=true  dagster=false public=false
-    generic  create_feature_with_initial_state               api=false dagster=true  public=false
-
-**restore 축 — 300 baseline이 대체했다(소유자 판정 2026-09-06).** 설계 §10.3은
-`pg_restore --no-owner --no-privileges` 뒤 owner repair·ACL reconciler·§8.3 재통과를
-요구한다. 그런데 그 설계(2026-08-19) **이후**의 300 baseline 결정이 복구 경로를 없앴다 —
-`scripts/docker-restore.sh`·`docker-restore-verify.sh`·`docker-restore-swap.sh` 셋 다 본문
-없이 종료하며 이유를 이렇게 적는다:
-
-    restore is disabled: backup artifacts are audit-only under the 300 baseline
-    Alembic archive replay, previous-revision restore, and hot swap are unsupported
-
-즉 검증된 복구 형식이 존재하지 않으므로 이 전제는 **수행 가능한 형태가 아니다.** 같은
-방향의 운영 결정이 원장에 이미 있다 — `T-VN-H43`이 "n150은 실 production이 아니며 손상 시
-재적재가 정책"이라 적는다. 그래서 restore 축을 활성화 전제에서 **뺀다.**
-
-되살릴 조건: 300 baseline에 맞는 검증된 restore 경로가 생기면 §10.3을 그대로 다시 세운다.
-그때 §8.3 재통과는 `scripts/m01_activation_preflight.py`가 그대로 수행한다 — 그 스크립트를
-남긴 이유가 이것이다.
-
-**남은 순서 — 2026-09-06 기준 셋 다 수행됐다.**
-
-| 단계 | 결과 |
-|---|---|
-| (1) 플래그 활성화 | `KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=true` (`/opt/kor-travel-docker-manager/.env`, 2026-09-05T20:27:59Z, 백업 `.env.bak-pre-m01-activation-20260905T202759Z`). `environment_sha256`이 바뀌므로 rebuild가 따라왔다 |
-| (2a) 거부 축 | `scripts/m01_activation_live_gate.py` — 잘못된 자격 조합 넷이 전부 **403**: 자격 없음 · admin proxy secret만(일반 AdminBFF) · create token만 · proxy secret + 틀린 create token. body는 **유효한 것**을 보낸다 — 422가 아니라 자격 때문에 거부됐음을 보이려면 body 검증보다 자격 검증이 먼저 돌아야 한다 |
-| (2b) zero-write 축 | 같은 스크립트가 거부 실행 전후로 witness 8관계(`feature.features`·`feature_places`·`feature_state_transitions`·`manual_feature_identity_claims`·`feature_creation_origins`·`ops.feature_overrides`·`domain_commands`·`domain_command_results`) count를 대조 — **증분 0** |
-| (2c) 성공 축 | 플래그가 켜져야 관측 가능하다고 적었던 그것이다. 배포 스택에서 `POST /v1/admin/features` → **201**(2026-09-05 실측). D2 lane이 매 실행 재관측한다 |
-| (3) D2 | 이제 503에 막히지 않는다. 잔여는 D2 자신의 lane 완주다 |
-
-**ACL 축은 rebuild 뒤에도 다시 측정했다.** §8.2가 "restore 뒤 동일"을 요구하므로 활성화
-rebuild 앞뒤로 각각 돌려 **두 번 다 55/55**였다. 즉 플래그 활성화가 ACL 계약을 흔들지
-않는다는 것이 값으로 남아 있다.
-
-**아직 이 배포에서 한 번도 돌지 않은 것.** backup 축은 저장소에 구현돼 있으나
-(`scripts/docker-backup.sh`가 4관계 count·PK 순 canonical JSONL SHA-256 root를 manifest에
-쓴다) 이 배포에는 backup root 설정도 산출물도 없다(2026-09-06 실측). 활성화 전제로 세지
-않지만 사실로 남긴다 — `T-VN-H49` 계열이 소유한다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-m01.md](archive/tasks-acceptance-m01.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-M02
 
@@ -776,83 +654,7 @@ import 행별 child-command는 `302_m03_child_issuance` + `curation_repo` 발급
 
 ## T-VN-M04
 
-```markdown
-- [x] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2, 구현 병합). #1029의 `0233` service submit/admin
-  approve·reject queue와 `manual_request` origin, OpenAPI/ACL/restore gate가 정본이다. 첫 consumer
-  PinVi #458과 Map #1051 service re-vendor를 반영한 PinVi #465는 병합됐지만 paired
-  request→approval receipt와 isolated acceptance는 `T-VN-41C`에서 완료한다.
-```
-
-**2026-09-07 전수 조사 — 위임이 dangling pointer다.**
-
-`docs/tasks.md`와 이 문서가 "남은 paired request→approval receipt와 isolated
-acceptance는 `T-VN-41C`가 소유한다"고 적어 왔다. 그런데 **§T-VN-41C 어디에도 "M04"가
-없다** — 받는 절이 그 범위를 수락한 적이 없다. 게다가 41C는 보류라 잔여를 세지
-않으므로, 위임이 유효했다면 이 범위는 아무도 세지 않는 상태였다.
-
-위임한 물건은 이미 산출됐다 — `T-VN-PAIR-V2` §6의 e2e-03 m04 attestation이
-`scope: isolated`·`status: passed`이고 `map_pending_receipt_sha256`·
-`pinvi_approval_sha256`을 담는다.
-
-**선행**: 위임 문장을 걷고 이 절이 자기 해제 조건을 갖는다. 그 조건은 위 산출물로
-판정 가능해야 한다.
-
-**2026-09-07 — 위임을 걷고 판정 가능한 조문을 세운다.**
-
-위임 문장은 dangling pointer였다(위 참조). 아래가 이 절의 해제 조건이며, 전부 이미
-산출된 물건으로 판정한다.
-
-```markdown
-- [x] **M04-1 — 큐 표면이 병합됐다.** `/v1/service/feature-requests`(SERVICE)와
-  `/v1/admin/feature-requests{,/{id},/{id}/approve,/{id}/reject}`(OPERATOR)가
-  `route_policy.py`·`openapi.json`에 있고, service 번들(`openapi.service.json`)에는
-  service 경로만 노출된다. DB 권한은 submit=service_executor /
-  approve·reject=admin_executor로 `runtime_privileges.py`에서 갈린다.
-- [x] **M04-2 — origin이 `manual_request`다.** `models.py`의 origin_kind CHECK와
-  `feature_request_repo.py`의 `manual_request_v1`, 통합 테스트
-  `test_feature_request_submit_then_admin_approval_creates_only_manual_request_feature`
-  와 `…_direct_relation_access_and_invalid_payload_are_denied`.
-- [x] **M04-3 — restore evidence를 뜬다.** `scripts/docker-backup.sh`가 app snapshot에서
-  `feature_requests.jsonl`을 캡처하고 count/sha256을 남기며
-  `test_docker_backup_runbook.py`가 고정한다. (restore 쪽이 그 해시를 대조·거부하는지는
-  이 절의 범위가 아니다 — backup/restore 축은 `T-VN-H49` 계열이 소유한다.)
-- [x] **M04-4 — paired request→approval receipt가 격리에서 실측됐다.** 단일 격리 실행의
-  **두 서명**이 같은 `feature_request_id`로 서로를 가리킨다.
-  (a) `m04-attestation.json` — `scope=isolated`·`status=passed`·`version=2`,
-      `map_pending_receipt_sha256`·`pinvi_approval_sha256`이 marker가 아니라 PinVi API
-      재조회로 독립 재계산돼 일치(`_pinvi_m04_approval_snapshot` ↔
-      `_validate_m04_ui_marker`), PinVi 컨테이너 라벨이 pinset의 PinVi revision과
-      `io.pinvi.build.environment=isolated`에 결박.
-  (b) `m05/attestation.json` — `m04_server_side_chain_verified=true`,
-      `m04_attestation_sha256`이 (a)의 파일 해시와 동일,
-      `m04_map_request_sha256`·`m04_map_provenance_sha256`·`m04_map_feature_uuid`가
-      Map `/v1/admin/feature-requests/{id}`=approved와
-      `/v1/admin/features/{uuid}/creation-provenance`.origin_kind=`manual_request`에서
-      나온 값.
-- [x] **M04-5 — reject도 실제로 호출된다.** admin reject가 pending→rejected 전이를 만들고
-      사유·resolution command를 보존하며 **Feature를 만들지 않는다**는 것을 통합 테스트
-      `test_feature_request_admin_rejection_closes_the_request_without_a_feature`가
-      프로시저를 직접 불러 보인다.
-```
-
-**M04-4 판정 근거 — `/root/pairv2-e2e-03`** (Manager `0406b14d`, pinset `b229446a`,
-Map `2099b8a6`, PinVi `f62e7ef1`):
-
-| | 값 |
-|---|---|
-| `feature_request_id` | `24cdee5f-ef1a-4876-8be3-7460db79ce05` |
-| m04 attestation | `950762d6…` (`scope=isolated`, `status=passed`, `version=2`) |
-| m05 attestation | `ac818411…` (`m04_server_side_chain_verified=true`) |
-| Map feature uuid | `01a07ab9-a007-74c4-9cf9-4629987034a7` |
-| leaf `result.json` | `status=passed`, `phase=completed` |
-
-해시 사슬은 **독립 재계산으로 확인했다** — n150에서 9개 파일을 `sha256sum`해
-`result.json`의 값과 대조했고 전부 일치했다(적대 리뷰 2가 수행). `/root/pairv2-e2e-02`
-(Manager `d36847e2`)도 같은 형태로 passed다.
-
-**M04-5는 이 조사가 만든 것이다.** reject는 라우터·프로시저·ACL·OpenAPI에 전부
-있었으나 **호출하는 테스트가 없었다.** 승인만 검증된 큐는 "거절이 무엇을 남기는지
-아무도 모르는" 상태이고, 그대로 닫으면 reject 회귀는 운영에서만 드러난다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-m04.md](archive/tasks-acceptance-m04.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-H34
 
@@ -1557,122 +1359,7 @@ drift를 잡고, AC4의 manifest 결박은 HEAD에서 방금 재계산했다. �
 
 ## T-VN-39 — **완료(2026-09-11, #1197 `e8c66c47`)**
 
-> 이 절은 판정 근거로 남긴다. 착지 실측은 아래 "착지 확인"이고, 후속 셋은
-> `T-VN-39-DEPLOY` · `T-VN-39-ECHO` · `T-VN-39-PROVIDER-PAGINATION`이 소유한다.
-
-**착지 확인(head-schema 실측).** feature_id류 컬럼 52개가 uuid이고, text로 남은 셋은
-정당한 생존자다 — `manual_feature_purge_records.legacy_feature_id` ·
-`ops.tvn36_legacy_freeze_preflight_manifest.legacy_feature_id` · plpgsql 지역변수
-`v_legacy_feature_id`. shadow `feature_uuid` 컬럼 0개.
-`ck_feature_aliases_legacy_alias_shape`가 주소 등록부를 지킨다.
-게이트: GitHub CI 9종 전량 · n150(provider 실제 설치) dagster 575 · api 1,223 ·
-lint+unit 2,832 · 제품 SQL 786문 head Parse · live(DB→API→브라우저, 필터 3갈래
-200/200/422).
-
-
-```markdown
-- [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
-
-  consumer-first 배포, write fence와 순차 전환을 수행한다. **T-VN-33C의 legacy
-  column/index/route/repository/trigger/table은 서비스 전 단계 원칙에 따라 같은 final-schema
-  migration에서 이미 물리 삭제한다.** 따라서 이 task는 T-VN-33 보존·rollback·removal을
-  소유하지 않는다. 이후 task가 만든 held component만 그 task의 manifest와 함께 판단하며,
-  intermediate data는 backup/restore가 아니라 최종 schema ETL로 재생성한다.
-```
-
-**2026-09-07 전수 조사 — 유일한 실질 blocker는 미구현 대체물이다.**
-
-removal manifest (c)의 대체물 `provider_sync.notice_states`가 **구현된 적이 없고, 그
-구현을 소유하는 열린 항목이 없다.** 대체 대상 두 테이블은 현행 정상 writer 경로이므로
-그것부터 옮기지 않으면 물리 제거가 성립하지 않는다.
-
-규모 실측(prod): text/varchar `%feature_id%` 컬럼 40개, `feature.features` 참조 FK
-34개, `feature_id`를 언급하는 인덱스 57개, baseline `schema.sql`에서 `feature_id`
-언급 900줄. **이 백로그에서 가장 큰 축이다.**
-
-manifest (b) provider_sync source lineage는 **이미 제거 완료**이므로 충족 처리해도
-된다.
-
-**2026-09-08 소유자 판정 — 계약을 개정해 (c)를 뺐다.**
-
-**대체를 정당화한 결함이 이미 없다.** manifest 항목이 대는 이유는 하나,
-"문자열 시각 판정"이다. 그런데 두 표의 시각 컬럼은 전부 typed다 —
-`notice_lineage_states.changed_at`·`valid_until`, `notice_lifecycle_scopes.applied_at`이
-모두 `timestamp with time zone`이고 writer도 `CAST(:closed_at AS timestamptz)`와
-`>= scope.applied_at`로 typed 비교를 쓴다. 저장소에 남은 `pg_input_is_valid`는
-`_frozen_h35_ended_notice_hidden_sql` 하나뿐이고, 그것은 0079 세대 표면을 리허설용으로
-**일부러 글자 그대로 보존한** 함수다(그 docstring이 "현행 코드가 이 형태를 되살리는 것을
-막기 위해 이 함수 안에만 존재한다"고 적는다). 즉 살아 있는 결함이 아니라 박제다.
-문자열 시각 판정은 `T-VN-35B`와 `T-VN-37D`가 이미 없앴다.
-
-**fence가 처음부터 없었다.** 이 항목의 `fenced_by`는 `T-VN-37B`인데 그런 항목은 원장에
-**존재한 적이 없다.** 다른 여섯 entry는 전부 실재하는 fence를 가리킨다(34C·32C·33C·
-36D·38C·40C) — (c)만 유일하게 fence 없이 등록돼 있었다. 그 fence가 소유했어야 할
-`tstzrange` 표현은 `T-VN-37D`가 다른 표(`feature.feature_notices.valid_during`)에 이미
-착지시켰다.
-
-**새로 짓는 쪽의 값이 없다.** `notice_states`가 주는 것은 정규화(`valid_during` +
-`is_current` 부분 유니크 + GiST)인데, 그 값을 사려면 살아 있는 writer 경로
-(`feature_repo.py:3226-3500`)를 통째로 재작성하고 freeze 계약을 재계산해야 한다. 그런데
-두 표 모두 **prod 0행**이고, 성능 문제는 `T-VN-37`이 이미 해결했다(20.4초 → 0.19초,
-118.4초 → 0.36초). 해결된 문제를 위해 살아 있는 경로를 재작성하는 셈이고, 그 근거 문장은
-이미 거짓이다.
-
-**목표 상태 기술은 지우지 않는다.** `contracts/vnext/target-schema-v1.sql`의
-`notice_states` DDL과 invariant는 "**채택되지 않음**" 표시만 달고 남긴다 — 정합성 요구가
-생기면 다시 꺼낼 값이 있고, 지우면 같은 논의를 처음부터 다시 해야 한다(오늘
-`b2543d68`이 지운 실측 기록을 되살린 것과 같은 이유다).
-
-**이 판정이 틀릴 수 있는 지점.** `notice_states`가 성능이 아니라 **정합성**을 위한
-것이었다면 판단이 뒤집힌다 — `is_current` 부분 유니크와 range 중첩 금지는 지금 두 표가
-선언적으로 강제하지 못하는 불변식이다. 다만 그것을 요구하는 조문을 저장소에서 찾지
-못했고, manifest가 대는 이유도 "문자열 시각 판정" 하나뿐이었다.
-
-**2026-09-09 실측 — 본체는 재타입이 아니라 멱등 앵커 교체다.**
-
-`feature_id`를 uuid로 바꾸면 둘 중 하나가 **반드시** 일어난다. provider가 계산한
-`f_*`를 그대로 보내면 22P02이고, 새 UUIDv7을 보내면
-`create_feature_with_initial_state`의 `ON CONFLICT (feature_id) DO NOTHING`이 **영원히
-걸리지 않아** 매 ETL마다 중복 Feature가 생긴다. 후자는 DDL 초록·1회 적재 테스트 전부
-초록이고, 증상은 **두 번째 ETL**에서 처음 나온다.
-
-**앵커 축을 두 번 틀렸고 두 번 다 실측이 잡았다.**
-
-1차(09-08): `provider_sync.source_links`의 `source_role='primary'`에
-`UNIQUE (source_entity_key)`를 심었다가 **통합 1179건 중 17건이 빨개졌다** —
-identity 이행 중에는 구·신 Feature가 둘 다 primary이고
-`tests/integration/test_notice_lifecycle.py:529`가 그 형태를 의도적으로 재현한다.
-
-2차(09-09): 되돌린 뒤 조사가 **축 자체가 틀렸다**는 것을 보였다.
-`src/kortravelmap/providers/opinet.py`는 `source_entity_id`가 제품별
-(`f"{uni_id}:{prodcd}"`, :689)이고 `source_natural_key`는 주유소별(`uni_id`, :697)이며,
-그 경로 docstring이 "단일 제품 가격을 **같은 price anchor feature에 누적**"이라
-명시한다(:762). entity → Feature가 정당하게 **N:1**이므로, entity를 축으로 삼으면 새
-제품코드마다 새 Feature가 주조된다 — 재키가 고치려던 중복을 재키가 만든다.
-
-**확정 축**: `(provider_dataset_id, feature_kind, natural_key)`.
-`make_feature_id` 입력(`bjd_code|kind|category|source_type|source_natural_key`)에서
-ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다. 착지처는
-`provider_sync.provider_feature_identities`(308)이고, `feature.features`로 가는 FK를
-두지 않는다 — claim이 Feature보다 먼저 서야 하기 때문이며
-`feature.manual_feature_identity_claims`가 같은 이유로 같은 모양이다.
-
-**규모**는 숫자를 박지 않는다(2026-09-08의 "인덱스 57"이 실측 59와 어긋났다). 산출
-쿼리로 둔다 — `information_schema.columns`의 `%feature_id%` 비-uuid 컬럼,
-`pg_constraint`의 `confrelid='feature.features'::regclass`, `pg_indexes`의
-`feature_id|feature_uuid` 언급.
-
-**부수 발견**: `tests/integration/test_khoa_{rekey_hardening,recategorize_cleanup}.py`는
-제품 코드를 0줄도 타지 않았다 — `_cleanup_sql()`이 아카이브 상수를 읽어 부분문자열만
-확인하고 자기 파일의 SQL을 반환한다. 삭제했고, 삭제 전후 유닛·lint가
-`244 failed / 2508 passed`로 동일했다.
-
-**남은 것.** 이 항목의 소유자 판정 대기는 사라졌다. `T-VN-39`에 남는 것은 legacy TEXT
-`feature_id` PK 제거 하나이고, **그것은 판정 대상이 아니다** — 대체 identity
-(`feature_uuid` + unique 둘)와 fence 트리거가 이미 prod에 있고 `feature.features`가
-0행이라 데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다
-(2026-09-07 조문이 적은 "컬럼 40개"는 `pg_catalog`/`information_schema`를 뺀 실측에서
-37개다).
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-39.md](archive/tasks-acceptance-39.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-39-DEPLOY
 
@@ -1680,409 +1367,11 @@ ADR-068 결정 2가 배제하라고 한 `bjd_code`·`category`만 뺀 것이다.
 
 ## T-VN-DAGSTER-STORAGE
 
-```markdown
-- [ ] T-VN-DAGSTER-STORAGE — **prod Dagster run이 compute-log storage에 쓸 수 없다**
-```
-
-**무엇이 참이면 닫히는가.**
-
-1. [x] prod에서 provider asset job 하나가 `SUCCESS`로 끝난다 — run launcher에 제출한
-   run이 step 실패 없이 완주한다. **2026-09-12 충족.**
-
-   `feature_place_standard_museums_job`이 정식 경로(`dagster job launch`)로 제출돼
-   `SUCCESS`로 끝났다. **이 prod에서 provider 적재 job이 SUCCESS로 끝난 첫 사례다.**
-
-   run 이력이 뒤집혔다 — 2026-09-11에는 조회 시점 8건이 **전부 실패**였는데,
-   수정 배포 뒤에는 `SUCCESS 23 · FAILURE 1`이다. 그 FAILURE 1건은 08:09의
-   `current_weather_summary_refresh`로, rebuild가 스택을 내리던 순간에 걸린 run이다.
-   스택이 올라온 08:22 이후의 run은 전부 성공했다.
-
-   로컬 쓰기 자리도 실물로 확인했다 — 컨테이너 안에서 `uid=999(appuser)`가
-   `/opt/dagster/state/{artifacts,compute_logs}`를 소유하고, compute log가 실제로
-   쌓이고 있다. 종전에는 그 자리가 봉인된 `DAGSTER_HOME` 아래라 만들 수조차 없었다.
-
-   적재 축도 다시 맞물린다: `claims 1047 · aliases 1047 · links 1047`
-   (`features 1048`은 D2가 남긴 은퇴 행 1개를 포함한다 — §T-VN-D2-RESIDUE).
-
-   **2026-09-13 새 세대(pinset `b71cbefc`, map `2b65e5b3`)에서 재확인.** 같은 job이
-   다시 `SUCCESS`로 끝났고 이번에는 `features 1047`이다 — D2가 자기 행을 스스로
-   지웠으므로 은퇴 행이 없다(§T-VN-D2-RESIDUE 실측 `lane_residue_total=0`). 네 축이
-   정확히 같다: `features 1047 · claims 1047 · aliases 1047 · links 1047`.
-
-   **2026-09-16 — 이 조문의 증거가 한 번 사라졌다가 다시 섰다.** 배포는 prod DB를
-   **새로 만든다**(`kor_travel_map` 생성 2026-09-15 12:29:55Z = t44a 배포 시각).
-   그래서 위 두 실측이 담겨 있던 run 이력은 t44a 뒤에 존재하지 않았고, 조회 시점
-   run 897건은 전부 분 단위 `current_weather_summary_refresh`(배포 후 15시간치)였다.
-   **`[x]`는 붙어 있는데 그것을 뒷받침하는 관측은 없는 상태였다는 뜻이다.**
-   같은 job을 현 세대에 다시 제출해 run `0f70d0d5`가 `SUCCESS`로 끝나고
-   `features 1047`이 다시 섰다(§T-VN-CURATION-SEAL-ACL 조문 1과 같은 실행). 이
-   조문이 왜 이렇게 되는지는 `docs/tasks-rule.md` §6이 규약으로 적는다.
-2. [x] **그 성질이 배포마다 유지된다.** (2026-09-13 t41a 배포로 확인) generation이
-   `b71cbefc` → `bae61363`으로 바뀐 뒤 **새 세대에서 run 완주 게이트가 15/15로
-   통과**했다 — 탐침 run이 실제로 `SUCCESS`로 완주하고, live config의 로컬 쓰기 두
-   축이 여전히 `/opt/dagster/state` 아래이며, 필수 daemon 4종이 전부 fresh였다.
-   즉 storage 부착이 세대 교체를 따라온다는 것이 **한 번의 관측이 아니라 두 세대의
-   비교**로 보인다.
-3. [x] **이 축을 재는 검사가 있다.** (2026-09-13, #1226) `scripts/dagster_run_completion_gate.py`가
-   다섯 축을 독립으로 판정한다 — live config(컨테이너 안 `$DAGSTER_HOME/dagster.yaml`),
-   metadata 표 실재, daemon heartbeat 신선도, **능동 탐침 run 완주**, 멈춘 run 0건.
-   prod 실측으로 2026-09-11 사고 config를 되돌리면 red가 되는 것까지 확인했다
-   (config 변이 5종 + daemon tolerance 변이 전부 red, 대조군 0/15).
-
-   첫 판은 **초록이었지만 네 자리에서 아무것도 재지 않았다** — `floor/runs-observed`는
-   게이트가 방금 만든 탐침 때문에 항진명제였고, stuck은 큐 대기 시간을 섞어 재면서
-   `STARTING`을 6시간 기준으로 봤고(띄우지 못하는 launcher가 안 보인다), daemon 하한은
-   상수 1이라 회수 daemon만 죽어도 초록이었으며, 신선도는 꺼진 daemon의 heartbeat 행이
-   영구 잔류하면 절대 초록이 될 수 없는 구조였다. 두 차례 적대 리뷰가 하나씩 잡았고
-   전부 prod에서 다시 쟀다.
-4. [x] **봉인 검사기와 배에 실리는 `dagster.yaml`이 서로를 본다.** (2026-09-12, #1219/#1224)
-   검사기가 8개 key 집합을 봉인하고, 이 저장소가 실제로 싣는 config를 그 검사기로
-   통과시키는 테스트가 CI에 있다(`test_sealed_validator_accepts_the_config_this_repo_actually_ships`).
-   그 테스트가 없던 동안 검사기가 자기 config를 거부해 prod 스택이 내려갔다.
-5. [x] **"run이 왜 죽었나"를 UI로 확인할 수 있다. — 2026-09-13 실측으로 정정.**
-
-   처음에 이 조문을 "UI에서 step의 stdout/stderr가 보인다"로 적었다. 근거는
-   `dagster`(webserver)와 `dagster-daemon`이 별개 컨테이너이고 `/opt/dagster/state`에
-   공유 volume이 없다는 것이었다 — 그 사실 자체는 맞다(실측: webserver 0 디렉터리,
-   daemon 42 디렉터리). 그래서 공유 named volume을 넣으려 했다.
-
-   **고치기 전에 재 봤더니 그 자리가 정보를 담지 않는다.**
-
-   ```
-   compute_logs : 42 run · 286 파일 · 전부 0바이트 · 352K
-   artifacts    : 528K
-   ```
-
-   286개가 **전부 0바이트**이고, 여기에는 방금 1,047건을 수 분간 적재한
-   `feature_place_standard_museums_job`의 것도 포함된다. 이 배포의 step은 stdout으로
-   인쇄하지 않는다 — 모든 로깅이 Dagster 로거를 지나 **event log(postgres)**로 간다.
-   그 표는 40 run에 699행이고(ENGINE_EVENT · STEP_START · RESOURCE_INIT ·
-   STEP_OUTPUT · HANDLED_OUTPUT · LOGS_CAPTURED …) 두 컨테이너가 같은 DB를 보므로
-   **이미 공유되고 UI에 보인다.** 실패는 `STEP_FAILURE` 이벤트가 오류 본문을 담아
-   같은 경로로 표시된다.
-
-   그러므로 공유 volume은 **빈 파일을 공유하는 일**이다. 그리고 공짜가 아니다 —
-   파괴적 rebuild는 volume이 아니라 데이터베이스 수준에서 비우므로(`postgres`
-   컨테이너가 rebuild를 여러 번 겪고도 `Up 7 days`였다) 공유 volume은 배포를 넘어
-   살아남고, `retention`은 compute log를 덮지 않는다. 측정된 증가율 ~31 MB/일
-   (분 단위 schedule 기준)이 상한 없이 쌓인다. **정보 이득 0에 무한 증가를 더하는
-   교환이다** — 같은 날 `retention`에서 저지른 실수와 같은 모양이다.
-
-   **남는 진짜 틈(좁다).** step이 stdout/stderr로 **직접** 쓰는 경우 — 라이브러리
-   인쇄, 또는 Dagster 핸들러 밖에서 나는 하드 크래시 traceback — 그것은 daemon
-   컨테이너에만 남고 UI가 보여 주지 못한다. 그때는 `docker logs
-   kor-travel-map-dagster-daemon-latest`가 정본이다. 그 경로를 아는 것이 이 조문의
-   실질이고, 그것을 위해 무한 증가를 사지 않는다.
-
-**무엇이 관측됐나 — 2026-09-11.**
-
-**범위 정정(2026-09-12).** 이 결함은 run을 FAILURE로 **표시**하고 compute log를
-남기지 못하게 한다. 그러나 **적재 자체를 막지는 않는다** — 같은 run이 남긴 데이터가
-정합성 검사 여섯 축을 0건으로 통과했다(§T-VN-39-DEPLOY 조문 4). 그래서 이 task는
-"적재가 안 된다"가 아니라 **"run의 성공/실패 신호와 compute log를 믿을 수 없다"**를
-소유한다. 신호를 믿을 수 없다는 것은 그 자체로 운영 결함이다 — 2026-09-12에 나는
-정확히 그 신호를 믿고 조문 4를 "막혀 있다"로 잘못 적었다.
-
-정식 경로(`dagster job launch` → run launcher 제출, operation key = job 이름)로 제출한
-run이 step 실패로 끝났다:
-
-    PermissionError: [Errno 13] Permission denied: '/opt/dagster/dagster_home/storage'
-    Exception initializing logger write stream: PermissionError ...
-
-실물:
-
-| | |
-|---|---|
-| 컨테이너 사용자 | `uid=999(appuser)` |
-| `/opt/dagster/dagster_home` | `dr-xr-xr-x root root` — appuser가 쓸 수 없다 |
-| `.../storage` | **없다** |
-| 마운트 | `dagster-storage-permit` (읽기 전용, generation `461cafcc…` 산출물) |
-
-prod Dagster storage는 별도 관리 컴포넌트다 — `/usr/local/bin/ktm-dagster-storage`가
-`verify-identity`와 sealed launch contract를 갖고, entrypoint가 `storage_input_preflight`
-로 argv를 대조한다. 즉 storage 부착은 pinned runtime이 통제하는 축이고, 현
-generation에서 그것이 붙지 않았다.
-
-**재키가 만든 것이 아니다.** 이 prod의 Dagster run 이력은 전부 실패다(조회 시점
-8건 중 7 FAILURE + 1 진행). `feature.features`가 0행이었던 것과 앞서 찾은 seal ACL
-유실이 같은 사실의 다른 면이다 — **이 prod에서 provider 적재가 한 번도 완주한 적이
-없다.** 그래서 이 조건도 그때부터 있었고 아무도 관측하지 않았다.
-
-**조문 3이 그 구멍을 겨냥한다.** 배포 사후점검은 컨테이너 healthy와 정본/실물 image
-일치를 보지만, "run이 완주한다"는 보지 않는다. 그 둘은 다른 사실이다.
-
-**무엇이 관측됐나 — 2026-09-12. 고침이 결함이 됐다.**
-
-#1216(`dagster.yaml`에 `local_artifact_storage`/`compute_logs` 선언)이 머지된 뒤 첫
-회전 사이클이 prod 스택을 내린 상태에서 죽었다. `docker/dagster-storage-migrate.py`의
-`_validate_dagster_config`가 최상위 key 집합을 **정확히 5개로** 봉인하고 있었다.
-
-    06:34:05  …kor-travel-map-dagster-storage-migrate-run-dc953676ad41  기동
-    06:34:07  task-delete                                              (2초)
-    06:34:09  pinned runtime rebuild Compose run command failed (exit 1)
-
-#1219가 봉인을 그 둘만큼 넓히되, 두 `base_dir`가 이미지가 appuser에게 넘긴
-`/opt/dagster/state` 안인지까지 본다 — key를 허용하는 것으로 끝내면 "로컬로 새지
-않는다"는 봉인의 뜻이 그 구멍으로 빠져나간다.
-
-**조문 4 — 봉인 검사기와 배에 실리는 config가 서로를 본다.** 기존
-`test_dagster_storage_rejects_alternate_top_level_storage_keys`는 실제 `dagster.yaml`을
-읽으면서도 이 어긋남을 못 잡았다. **거절되는 것**만 보기 때문이다 — 두 파일이
-어긋나면 그 거절은 이유만 바뀐 채 여전히 일어난다. #1219가 **통과하는 것**을 보는
-검사를 심었고, 변이 ②(검사기만 되돌림)에서 그 하나만 빨갛다.
-
-**알려진 한계.** `/opt/dagster/state`에는 volume이 없다. artifact와 compute log는
-컨테이너 재생성마다 사라지고 컨테이너 경계를 넘지도 못한다. **그것이 문제가 아닌
-이유는 조문 5에 적었다** — 그 파일들은 이 배포에서 전부 0바이트이고, 진단 내용은
-postgres의 event log에 있다. run/event/schedule storage가 postgres이므로 조문 1·2에도
-영향이 없다.
-
-**호스트 dev 스택도 같은 파일을 읽는다.** `scripts/run-admin-stack.sh`가
-`docker/dagster.yaml`을 바이트 그대로 호스트 `DAGSTER_HOME`에 깐다. #1216의
-`base_dir`는 이미지 안에만 있는 경로라 그대로 두면 dev에서 같은 PermissionError가
-난다. #1219가 설치 뒤 두 경로만 `$DAGSTER_HOME` 아래로 옮기고, 그 요구를
-`dagster.yaml`이 선언한 key 집합에서 유도하는 검사를 붙였다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-dagster-storage.md](archive/tasks-acceptance-dagster-storage.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-QUOTA-ARITHMETIC
 
-```markdown
-- [ ] T-VN-QUOTA-ARITHMETIC — **쿼터에 대해 저장소가 하는 진술 대부분이 근거가 없다**
-```
-
-**왜 이 task가 있나.** 형제 저장소 `kor-travel-weather`가 2026-09-12에 정지 원인을
-확정했다(커밋 `a0c4dbb`) — 번역하지 않고 인용한다:
-
-> **It was arithmetic, not a hang.** Each external provider swept 1,428 locations with
-> one request each, hourly, against free tiers it exceeded by up to **43x**. Throttled,
-> a request took **12-17s instead of ~0.3s**, so a *successful* sweep ran **4-13
-> hours** — work arriving every hour that takes six to finish can only end one way.
-
-그 뒤 Map을 같은 기준으로 쟀다(3렌즈 감사: 요청량 · 쿼터 · 적합).
-
-**Map의 활성 schedule 산술은 성립한다 — 방어 장치가 아니라 순회 모양 때문이다.**
-
-weather는 **지점당 1요청**으로 훑었다. Map의 상시 고빈도 경로는 전부 집계/bulk
-endpoint다 — krex 교통공지 R=2~5, 휴게소 기상 R=1(전국 snapshot), 유가 R≈1,
-krforest 3종 R≈1~2. weather와 같은 모양은 KMA 격자 3종뿐이고 그것은 2026-09-09부터
-`DISABLED_FEATURE_LOAD_SCHEDULES`로 제거돼 있다. 나머지 27개는 월간이고, 요청당
-17초를 대입해도 최악 봉투가 전역 상한의 65%다.
-
-**weather와 구조적으로 다른 것 둘.**
-
-1. **실패 모양.** weather의 vendor는 throttle했다 — run이 *살아서 일하므로* 회수되지
-   않고 쌓였다. data.go.kr은 느려지지 않는다: resultCode 22를
-   `failure_kind="quota", retryable=False`로 즉시 올린다. Map의 쿼터 초과는 조용한
-   큐 포화가 아니라 **시끄러운 즉시 실패**다.
-2. **큐 포화가 구조적으로 막혀 있다.** 고빈도·disabled schedule 전부
-   `coalesce_active_runs=True`라 한 job이 슬롯 1개를 넘길 수 없다. weather의 "ten runs
-   sat STARTED"는 재현되지 않는다 — 재현 가능한 것은 그쪽의 *다른* 증상, **tick이
-   생략되고 데이터가 갱신되지 않는 것**뿐이다.
-
-**무엇이 참이면 닫히는가.**
-
-1. [x] **분모가 기록돼 있다.** (2026-09-13) data.go.kr 활용신청 17개 서비스의
-   오퍼레이션당 일일 트래픽이 `docs/etl/upstream-quota.md` §2 표에 나눗셈과 함께
-   적혀 있다(그 표가 정본이다 — 여기에 수를 복제하지 않는다). 표에 **없는** 넷
-   (`krheritage`·`opinet`·`krex`·`mois`)은 data.go.kr 활용신청이 아니라 각자
-   포털에 있고 아직 보지 않았다. 그 넷은 분모가 없다.
-2. [x] **분자가 있다.** (2026-09-13) upstream 진입점 대부분이 요청을 세고 그 수가
-   `upstream_requests_min`으로 metadata에 실린다. **커버리지·면제·부분 계측의
-   정본은 `docs/etl/upstream-quota.md` §4**이고 그 수는
-   `tests/lint/test_every_fetcher_counts_or_declares_why_not.py`가 선언에 결박한다 —
-   여기에 복제하지 않는다(같은 수를 여러 파일에 복제한 것이 적대 리뷰 3·4·5차
-   재발의 공통 원인이었다).
-
-   **배선이 없던 것이 이 조문이 오래 열려 있던 이유였다.** fetcher가 generator라
-   "세는 자리"와 "내보내는 자리" 사이에 값을 흘릴 인자가 없었다.
-   `kortravelmap.dagster.upstream_requests`가 `ContextVar`로 그것을 대신하고
-   **실행 경계 넷**이 계수기를 연다 — provider fetcher의 시그니처는 하나도 바꾸지
-   않는다. `settings.log_api_calls`는 **지웠다**(읽는 코드가 없었고, 그 표는
-   provider 호출이 아니라 Map API로 들어오는 요청을 기록한다).
-
-   **"세지 않았다"는 값을 내지 않는다.** 계수기가 열려 있어도 한 번도 기록되지
-   않았으면 key 자체가 실리지 않는다 — 계측되지 않은 경로가 "0번 요청했다"로
-   위장하지 못한다. 틀린 0은 읽는 사람을 멈추게 하지 못한다.
-
-   **적대 리뷰 여섯 판이 이 조문을 만들었고 3·4·5차 blocker는 전부 직전 판의
-   수정이 만든 것이었다.** 서사는 `docs/journal.md` 2026-09-13. 교훈은 검사기
-   쪽이다 — 2차 blocker를 정적 검사가 통과시켰다("계수 호출 자리가 있는가"만
-   보므로 루프 밖 1회도 초록). 그래서 층을 나눴다: 정적 검사는 "빠진 진입점이
-   없는가"만, 효과는 **가짜 client로 N번 부르게 하고 계수가 N인지 재는** 런타임
-   테스트가 본다.
-3. [x] **쿼터성 실패가 재시도를 사지 않는다.** (2026-09-13)
-
-   `kortravelmap.dagster.quota_exhaustion`이 예외 연쇄를 걸어
-   `Failure(allow_retries=False)`로 바꾼다. 문자열을 파싱하지 않는다. asset 35개 중
-   34개가 지나는 `run_tracked_feature_asset`와 multi-member인
-   `feature_place_mcst_culture` 둘에 결박하고, 결박 단위는 함수 이름이 아니라
-   **`except` 핸들러**다 — 한 함수 안의 두 실패 분기 중 하나만 지워도 초록이던
-   첫 판을 적대 리뷰가 잡았다.
-
-   **"4배"는 틀렸다(적대 리뷰 정정).** 쿼터가 소진된 뒤의 재시도는 순회를 다시
-   도는 것이 아니라 **첫 격자에서 즉사한다** — 격자 루프는 항상 `grids[0]`부터
-   시작하고(성공 cursor는 완주 뒤에만 전진) 그 첫 호출이 곧바로 code 22를 받는다.
-   실제로 아끼는 것은 순회 3벌이 아니라 **요청 3건 + backoff 420초 + 큐 슬롯
-   점유 3회 + 실패 attempt 기록 3건**이다. 요청이 4배가 되는 것은 순회 *도중*
-   나는 **재시도 가능한** 실패(H45가 겨냥한 쪽)이고 이 변경은 그쪽을 건드리지
-   않는다.
-
-   **HTTP 429는 제외한다.** provider lib들이 429와 resultCode 22에 같은
-   `failure_kind="rate_limit"`를 붙이는데(visitkorea·mcst·krforest 실측) 이
-   저장소 schedule 다수가 월 1회라, 429 한 번에 재시도를 끄면 그 asset은 한 달
-   갱신되지 않는다. 예외가 든 HTTP 상태로 가른다.
-
-   **`failure_kind`를 붙이는 provider가 절반뿐이다.** airkorea·datagokr·krairport·
-   krex·opinet·krheritage·mois·knps는 붙이지 않는다. 속성 하나에만 걸면
-   **가장 좁은 분모에서 한 번도 발화하지 않는다** — 에어코리아가 오퍼레이션당
-   500/일이다. `QUOTA_EXCEPTION_TYPES`가 `(모듈, 클래스)` 선언으로 그 구멍을
-   메우고, contract 테스트가 그 이름이 실물 lib에 실재하는지 형제 소스로 확인한다.
-
-   **여전히 덮이지 않는 것**: `krheritage`는 쿼터 소진을 알려 주지 않는다
-   (`RateLimitError`가 클라이언트 측 limiter이고 lib 안에서 raise되지 않는다).
-   아래 "krheritage run 하나가 4 × ~3,950 = 15,800요청"은 이 기제로 닫히지 않는다.
-   `datagokr`(전국표준데이터, 1,000/일)도 쿼터 전용 예외가 없다. `FEATURE_LOAD_RETRY_POLICY`
-   (`max_retries=3`)가 35개 asset 전부에 붙어 있고, asset 경계가 `failure_kind`를
-   예외 **문자열에 녹여**(`f"KMA provider refresh failed: {exc}"`) step 층이 분류를
-   보지 못한다. code 22는 자정까지 같은 코드를 주므로 재시도의 성공 확률은 0인데,
-   쿼터 소진된 KMA run 하나가 **4 × 300 = 1,200요청**, krheritage run 하나가
-   **4 × ~3,950 = 15,800요청**을 쓴다.
-4. [x] **선언 없는 증폭기가 없다.** (2026-09-13)
-
-   krex `lookback_hours` 48 → 6(호출 한 번의 요청 상한이 `lookback+1`이다),
-   krforest 4곳과 visitkorea를 저장소 공통 헬퍼로 옮기고 `absolute_max_pages`를
-   줬다. **OpiNet은 무제한이 아니었다** — 라이브러리가 격자 셀 20,000을 넘으면
-   호출 전에 거부하고, 총량을 실제로 묶는 것은 하루 한 번 coalescing이다.
-
-   이 과정에서 **저장소 헬퍼 자체의 결함**이 드러났다: `max_pages`는 천장이 아니라
-   바닥이었다(`absorb`가 선언 건수에 맞춰 올린다). upstream이 `total_count`를
-   거짓으로 크게 말하면 요청 수가 그 숫자를 따라간다. `absolute_max_pages`를
-   더해 닫았다.
-
-   **krforest 정당화가 거꾸로였다(적대 리뷰 정정).** 라이브러리는 유도가 실패할 때
-   10,000페이지로 폭주하는 것이 아니라 **1페이지로 조용히 잘린다** — 응답에
-   `totalCount`가 없으면 `_http.py`가 `total_count = len(items)`로 채워 추정치가
-   1이 된다. 그리고 **저장소 헬퍼로 옮겨도 그 절단은 그대로다**(2026-09-13 실측:
-   2,500행 dataset에서 1,000행에서 멈춘다). 종료 규칙을 바꾸면 범위 밖 page에
-   예외를 던지는 provider에서 새 실패가 생기므로 고치지 않고 **경고로 들리게** 했다.
-   실제 위험은 쿼터 폭주가 아니라 **행 누락이 성공으로 보이는 것**이다.
-
-   **krex의 "시끄럽게 실패"도 없었다(적대 리뷰).** 빈 Page는 예외가 아니라 정상
-   반환이고, 적재 경로에 빈 가드가 없어 0행이 `record_sync_success`까지 가서
-   `consecutive_failures`를 0으로 되돌렸다. `KrexRestAreaWeatherUnavailable`을
-   더했다 — 그 fetcher에는 테스트가 하나도 없었다.
-
-   **visitkorea 라이브러리에서 잃은 '전진하지 않는 페이지네이션' 가드**도
-   `ProviderPage.fingerprint` + `ProviderPaginationStalled`로 헬퍼에 복원했다. 세 곳이 Map 코드에서 1줄로 보이는데 provider
-   안에서 팬아웃한다 — 휴게소 기상 `latest_weather()`가 최대 **49요청**
-   (`lookback_hours=48`), krforest 3종이 `max_pages` 미지정으로 lib 상한 **10,000
-   page**, OpiNet bbox/poi_cache_target 모드가 예산 미전달로 무제한.
-5. [x] **UI가 근거 없는 보증을 하지 않는다.** (2026-09-13 — `_schedule_note`가
-   비율 대신 실측 표를 가리킨다. `tests/lint/test_quota_claims_have_a_denominator.py`가
-   비율 주장이 돌아오면 빨개진다.) admin의 schedule note가 두 갈래 모두
-   "rate limit의 약 90% 이하를 목표로 한"을 돌려주는데, 그 90%의 분모는 31개
-   schedule에 대해 존재하지 않는다. **그 화면이 운영자가 cron을 올리는 화면이다.**
-6. [x] **KMA 격자 재활성화의 전제조건이 적혀 있다.** (2026-09-14)
-   전제조건과 그 수는 `docs/etl/upstream-quota.md` §3이 정본이다 — 여기 복제하지
-   않는다. 조문이 요구한 것은 전부 들어왔다: 오퍼레이션별 분모(§2), 세 오퍼레이션이
-   쿼터를 공유하지 않는다는 사실, **G = 59**(2026-09-13 prod 실측), 증폭기 선언
-   (조문 4), 쿼터성 실패가 재시도를 사지 않는다는 것(조문 3 — 조문 6이 스스로 적은
-   전제다), 그리고 켠 뒤 비율을 확인할 분자(조문 2).
-
-   **조문 본문이 이미 끝난 측정을 "남은 것"으로 적고 있었다** — "남은 것은 G 실측"은
-   같은 절의 표가 같은 날 G=59로 답했고, 헤드라인 72%/72%/24%는 반증된 G=300 열이다.
-   낡은 조문 하나로 task가 열려 있었다.
-
-   **2026-09-14 지시로 KMA·에어코리아는 쿼터 평가 대상에서 빠졌다**(§3 참고) —
-   재활성화는 그 지시를 되돌리는 일이지 이 조문이 판단할 것이 아니다.
-
-   (원래 조문) "24×300×2 + 8×300 = 16,800요청/일 → 1.68배"는 **분모를 잘못 잡은
-   것**이었다(오퍼레이션마다 따로 걸린다). "초과분은 다음 run으로"도 거짓이었다 —
-   코드는 `KmaWeatherGridLimitExceeded`로 전면 실패한다.
-
-**바꾸기 전에 측정해야 하는 것.** 이 task의 절반은 코드가 아니라 숫자였다.
-
-| 무엇 | 어떻게 | 상태 |
-|---|---|---|
-| 각 활용신청의 일일 한도 | data.go.kr 마이페이지 → 활용신청 상세 | **2026-09-13 실측** |
-| `VilageFcstInfoService_2.0`의 3 operation이 한 통을 공유하는가 | 같은 화면 | **공유하지 않는다** |
-| G = 실제 KMA 격자 수 | `ops.poi_cache_targets`의 활성 target을 `kma.grid.to_grid`로 dedupe | **G = 59** (2026-09-13 prod) |
-| dataset별 선언 건수 | 각 endpoint에 `pageNo=1&numOfRows=1` 1요청 | 미측정 |
-| Map이 throttle 구간에 들어간 적이 있는가 | Dagster run 지속시간 분포 + asset metadata | 미측정 |
-
-### 2026-09-13 실측 — 분모를 얻었고, 그것이 조문 6의 전제를 뒤집었다
-
-**일일 트래픽은 서비스가 아니라 오퍼레이션마다 따로 걸린다.** 활용신청 상세의
-"상세기능" 표에 오퍼레이션마다 "일일 트래픽" 열이 있다. `기상청_단기예보
-조회서비스`는 `getUltraSrtNcst` / `getUltraSrtFcst` / `getVilageFcst` /
-`getFcstVersion` **넷이 각각 10,000/일**이다. 전체 표는
-`docs/etl/upstream-quota.md`.
-
-그래서 조문 6의 "한 활용신청에 16,800요청/일 → 1.68배"는 **분모를 잘못 잡은
-것**이었다. 오퍼레이션별로 다시 세면:
-
-| schedule | 오퍼레이션 | G=300(상한)일 때 | G=59(오늘 실측)일 때 | 한도 |
-|---|---|---:|---:|---:|
-| `..._ultra_short_nowcast_hourly` (`45 * * * *`) | `getUltraSrtNcst` | 7,200 (72%) | **1,416 (14%)** | 10,000 |
-| `..._ultra_short_forecast_hourly` (`50 * * * *`) | `getUltraSrtFcst` | 7,200 (72%) | **1,416 (14%)** | 10,000 |
-| `..._short_forecast_hourly` (`20 * * * *`, cursor skip) | `getVilageFcst` | 2,400 (24%) | **472 (5%)** | 10,000 |
-
-**세 schedule은 서로의 쿼터를 먹지 않는다.** 합산해서 터지는 그림이 아니다.
-
-**그리고 300은 상한이지 대상 수가 아니었다.** prod 실측: `ops.poi_cache_targets`가
-**0행**이고(파괴적 rebuild 직후, PinVi 미등록) `KMA_WEATHER_EXTRA_POINTS`의 60점이
-DFS 격자로 dedupe되어 **G = 59**다. 오늘 KMA를 다시 켜는 것은 쿼터 관점에서
-넉넉하다 — 4배 배수를 전부 얹어도 57%다.
-
-**그런데 72%는 여유가 아니다.** 조문 3의 4배 배수가 여기에 곱해지면 한 번의
-재시도 순환이 그 run을 300 → 1,200으로 만들고, 하루 세 번이면 9,900으로 한도에
-닿는다. 즉 재시도는 쿼터 초과의 *결과*가 아니라 *원인*이 될 수 있는 구간에 이미
-들어와 있었다. **조문 3을 닫는 것이 조문 6의 전제조건이다.**
-
-가장 좁은 자리는 KMA가 아니다 — 에어코리아 **500/op/일**, 전국\*표준데이터와
-visitkorea 전부 **1,000/op/일**이다.
-
-`krheritage`(국가유산청) · `opinet` · `krex`(도로공사) · `mois`/`localdata`는
-data.go.kr 활용신청이 **아니라서** 이 화면에 없다. 그쪽 분모는 여전히 미측정이고,
-"krheritage run 하나가 15,800요청"의 분모도 그래서 아직 없다.
-
-**측정 전에 상한 숫자를 바꾸지 않는다**는 원칙은 유효했다. 분모를 몰라도 정당한
-것 — 폭주 상한, 재시도 배수 제거, 분자 만들기, 오도하는 문구 지우기 — 만 먼저
-했고, 그 사이에 분모가 들어왔다.
-
-### 2026-09-13 prod 배포 (t41a) — 전 사이클 GREEN
-
-`chain17.sh`로 sanctioned 재핀 사이클을 돌렸다(`0b60a850` = #1227 머지 커밋).
-
-```
-A. 회전 preflight     OK (OpenAPI 표면 3종 digest 동일)
-B. 회전               49번째 · pinset bae61363a6fdd7ff
-C. rebuild            success · phase=committed
-                      heads 3종 불변 → 마이그레이션 없음이 실측으로 확인됨
-0. 핀 원장 대조        map=0b60a850 ✓ pinvi=f62e7ef1 ✓
-C. executor 이미지     success · 라벨=0b60a850…
-D. repin              repository_commit=0b60a850… · VERIFIER PASS
-                      attestation_sha256=10fd0f1f…
-E. M01 ACL preflight   failed 0 / total 55
-F. D1 (live Playwright) 11 passed (26.0s)
-G. lane 정리           BLOCKED 없음
-H. D2                 phase=passed · status=complete · recovery_attempt=0 · 잔여물 0
-```
-
-배포 뒤 **새 세대에서 run 완주 게이트(#1226)가 15/15 통과**했다 — 탐침 run이 실제로
-SUCCESS로 완주했고 필수 daemon 4종이 전부 fresh, 멈춘 run 0건이다.
-
-**UI에서 실제로 바뀐 것**: prod API 컨테이너가 돌려주는 schedule note가
-"provider rate limit의 약 90% 이하를 목표로 한 …"에서
-"이 저장소가 고른 …기본값입니다. upstream 일일 한도 대비 소비량은 schedule마다
-다릅니다 — 실측 한도는 docs/etl/upstream-quota.md에 있습니다."로 바뀌었다.
-32개 schedule에 똑같이 붙던 근거 없는 비율이 화면에서 사라졌다.
-
-**배포 경로에서 배운 것 둘.** (1) host-direct `docker compose build`는 이제 쓸 수
-없다 — 대상 서비스만 빌드해도 compose 파일 **전체**를 보간하는데 prod `.env`에
-다른 서비스(concierge)의 키가 없다. sanctioned 경로(`run-pinned-rebuild-once`)는
-Manager가 env를 통째로 구성해 넘긴다. (2) prod postgres는 소켓 기본 경로가 아니라
-`127.0.0.1:12700`이고 백업 대상은 `$POSTGRES_DB`(=postgres, 7MB)가 아니라
-애플리케이션 DB `kor_travel_map`(44MB)이다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-quota-arithmetic.md](archive/tasks-acceptance-quota-arithmetic.md)로 옮겼다(2026-10-13, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-LEDGER-ARCHIVE
 
@@ -3039,3 +2328,238 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 
 - 지운다면 client 메서드·repo 함수·전용 통합 테스트를 함께 지우고 공개 API 표면 변경을 CHANGELOG에 적는다.
 - 남긴다면 다음 사용처(예: 산사태 예보 해제 반영)를 이 절에 적는다.
+
+## T-GR-00
+
+2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
+열린 결정 7; 소유자가 다른 접두사를 고르면 `T-GR-00`~`08`을 일괄 재번호하되 journal·acceptance 참조도 함께).
+PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 406) → PR-2(T-GR-04+05+08,
+407+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
+PR은 머지 직전.
+
+- 분리 실행(2026-10-13, 이 브랜치): `scripts/archive_task_ledger_section.py --apply`로 닫힌 절 7개
+  (`T-VN-41F1D-D1`·`T-VN-41F1D-E`·`T-VN-M01`·`T-VN-M04`·`T-VN-39`·`T-VN-DAGSTER-STORAGE`·
+  `T-VN-QUOTA-ARITHMETIC`, 파일 순서로 가장 오래된 movable 절부터)를 `docs/archive/tasks-acceptance-*.md`로
+  옮겼다 — 216,950 → 166,931 bytes, 매 이동마다 도구의 다중집합 검산 통과. 거절된 절(`T-VN-41F1D-D2`·
+  `T-VN-D2-API-AUDIT`·`T-VN-H34`: 상대 링크, `T-VN-M03`: 349 B라 stub 비용이 더 큼)은 두었다.
+- 해제 조건: 이 PR에서 `tests/unit/test_docs_archive_links.py`(아카이브 링크·225,280 B 상한)와
+  `tests/lint/test_task_ledger_conventions.py`·`scripts/check_task_ledger_deletions.py`가 초록이고 머지된다.
+  T-GR 절 9개를 더한 이 PR 최종 크기는 §T-GR-00 아래 "실측" 줄(ADR-109 설계 수용 기준 ≤ 200,000 B).
+  `[x]` 전환·`tasks-done.md` 이관은 머지가 조건이라 이 PR 안에서 할 수 없다 — T-GR-00-LEDGER의 doc-only PR에 함께 싣는다.
+- 잔여 바이트 실측(2026-10-13, 이 브랜치): `tasks-acceptance.md`는 2차 리뷰 반영 뒤 §T-GR-00 아래 "최종 실측" 줄;
+  `journal.md`·`tasks-done.md`의 분리는 독립 task **T-GR-00-LEDGER**(이 PR 범위 아님)다.
+- 최종 실측(2차 리뷰 반영 뒤): 커밋 직전 `stat`으로 잰 값을 journal 2026-10-13 항목에 적는다 — 이 절은
+  append-only가 아니므로 PR-1에서 수치를 갱신해도 된다.
+- 열린 결정(ADR-109)이 미결이면 각 절은 ADR의 권장안을 기준으로 한다. 결정별 영향 조문: 3 → T-GR-05
+  `default_status`; 4 → T-GR-08 적용 범위; 5·9 → T-GR-04 `complete_plan`(sweep·링크 재동기화 범위)과 T-GR-05 완료
+  전이; 6 → T-GR-05 timeout 재시도 옵션(T-GR-01에서 뺐다 — T-GR-01은 결정 비의존); 7 → 전 절 ID 재번호; 10 →
+  T-GR-03 override finding; 11 → T-GR-05 기동 방식; 12 → T-GR-03 concierge 해시; 13 → 이 묶음 밖 백로그.
+- T-GR-07 범위 메모: 설계 §11 T-GR-07의 문서 항목 중 ADR-109·README·integration-map·`address-geocoding.md`·etl
+  3문서·ADR-108 각주·원장은 PR-0(이 PR)가 선반영했고, T-GR-07에는 구현 뒤 남는 것(accepted 전환·runbook·CHANGELOG·
+  "계획" 표식 제거)만 둔다.
+
+## T-GR-00-LEDGER
+
+journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실측 `journal.md` 208,660 B(HEAD 202,686 + PR-0
+항목)·`tasks-done.md` 200,699 B — 상한 225,280 B까지 각각 16,620·24,581 B라 PR-1~3·T-GR-07의 journal 항목이 들어오면
+`tests/unit/test_every_docs_markdown_stays_within_readable_limit`가 빨개질 수 있다. `tasks-rule.md` §8의 "200 KB 근접"
+분리 기준을 둘 다 이미 넘었다. 의존: T-GR-00 머지. 규모 S. T-GR-00의 `[x]` 전환·tasks-done 이관을 함께 싣는다.
+
+- journal 현행 창(2026-09-14~)에서 가장 오래된 묶음을 `docs/archive/journal-2026-09c.md`(이름은 §8 규약)로, `tasks-done.md`
+  가장 오래된 절 묶음을 `docs/archive/tasks-done-*.md`로 옮기고 각 파일 상단 "과거 기록 아카이브" 인덱스 표를 갱신한다.
+- 바이트 보존 검산(이동 전 원본 바이트 == 이동 후 잔여 + 아카이브 - stub)을 PR 본문에 적는다; 두 파일 모두 분리 뒤
+  ≤ 200,000 B.
+- `tests/unit/test_docs_archive_links.py`·`scripts/check_journal_update.py`·docs 크기 lint 초록. 즉시 머지(doc-only).
+
+## T-GR-01
+
+ADR-109 결정 1·2. 수정 파일: `alembic/versions/406_feature_geocode_stamps.py`(직전 head `405_mois_freshness_sla`),
+`alembic/head-schema.sql`, `src/kortravelmap/dto/geo_dataset.py`(신규 `DatasetRef`·`GeoApplied`),
+`infra/models.py`(`FeatureGeocodeStampRow`), `infra/feature_geocode_stamp_repo.py`(신규), `src/kortravelmap/geocoding.py`
+(`dataset_version()`, `_RestReverseV2Response.dataset` :935, `GeoCallStats.observed_data_tokens`·`empty[endpoint]`
+:1112·`ObservedReverseGeocoder` 기록 :1405), tests. 의존: T-GR-00-LEDGER(원장 분리; 코드 의존 없음 — geo ADR-069 배포와
+병렬 가능, `dataset` 없는 응답 허용; 열린 결정 비의존). 규모 S. timeout 재시도 옵션(열린 결정 6)은 T-GR-05로 옮겼다.
+
+- `alembic/head-schema.sql` 재생성이 byte 일치하고 마이그레이션 lint 4종(`test_migrations_keep_the_schema_owner_role`·
+  `test_routine_ddl_runs_under_its_owner_role`·`test_receipt_head_check_covers_the_graph_head`·
+  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 406은 `SET ROLE ktm_feature_schema_owner` 아래
+  DDL·`OWNER TO`·RESET ROLE 없음·receipt head CHECK에 자기 revision.
+- 스탬프 삽입: 어느 outcome이든 `geo_version_token`/`geo_data_token` NULL은 NOT NULL이 거부한다(NULL 스탬프는
+  만들지 않는다 — ADR-109 결정 1).
+- `dataset` 필드가 없는 옛 응답 픽스처 → `None`, 있는 픽스처 → `DatasetRef`; `dataset_version()`은
+  `POST /v2/dataset/version` 본문 `{}`를 보낸다(효과 테스트).
+- `GeoCallStats.empty['reverse']`: 200 응답에 `bjd_code` None인 reverse 2건·정상 3건·전송 실패 1건 픽스처 →
+  `calls=6, failures=1, empty=2`(빈 답은 `failures`에 들지 않는다).
+- `is_stale`/`select_stale_feature_ids` 5분기(스탬프 없음·`not_called`·`geocoded` 다른 토큰·다른 토큰·같은 토큰)와
+  "현재 토큰 None → stale 0건"이 통합 테스트로 고정된다. `decide_outcome`은 `address-geocoding.md` §2 판정 표 전 행.
+- `lint-imports` 초록(`DatasetRef`·`GeoApplied`를 `infra`가 import해도 `infra → geocoding` 역행 없음).
+- 이 task에서 provider 모듈·`Address`·`ReverseGeocoder` diff 0.
+
+## T-GR-02
+
+ADR-109 결정 2·3. 수정 파일: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/resources.py`
+(`kor_travel_geo_client_resource`·`kor_travel_geo_dataset_resource`·`fetch_current_dataset`), `definitions.py`
+(`DEFAULT_RESOURCE_DEFINITIONS`), `feature_update_runner.py`(`_COMMON_RESOURCE_KEYS`), `assets.py`(각 feature load
+asset이 `load_feature_bundles`에 `geo_applied=` 전달; `required_resource_keys`), `offline_uploads.py`,
+`src/kortravelmap/cli/main.py`, `dagster/etl.py`(공통 chunk 루프: 전달 + 빈 답 비율 가드 — 분모 `GeoCallStats.calls['reverse']`·
+분자 `empty['reverse']` chunk 간 누적, 상수·비율 계산은 MOIS와 공유), tests. 의존: T-GR-01(+ 아래 "(T-GR-03 뒤)"
+표시 항목은 스탬프 쓰기·CTE 조건이 T-GR-03에 있어 PR-1에서 셋을 함께 판정한다 — 단독으로는 스탬프 표가 비어
+항진명제다). 규모 S.
+
+- (T-GR-03 뒤) geo 실패(HTTP 예외·`available=false`)를 주입하면 `current_dataset=None`으로 run이 **계속**되고 경고 로그가
+  정확히 1건이며, unchanged 집합이 토큰 도입 전 집합과 **동일**하다(같은 픽스처로 두 번 실행해 집합 비교).
+- 성공 시 asset·큐 runner·offline upload·CLI 네 경로가 같은 `DatasetRef` 값을 받는다(팩토리 1개 — 단위 테스트가
+  호출 지점을 센다).
+- 응답 `dataset`이 run-scoped 값과 다른 픽스처 → op 메타 `geo_dataset_mismatch=true` + WARNING 1건.
+- (T-GR-03 뒤) `feature_price_transport_*`·`feature_notice_transport_highway_incidents` 적재 뒤 스탬프 0건, `coverage` 분모 불변.
+- AST lint: asset이 `_reverse_geocoder(context)`를 쓰면 `geo_applied.reverse=True`, `address_resolver=`를 넘기면
+  `geocode=True`를 넘긴다 — 현재 asset은 전부 `geocode=False`(`assets.py`에 `address_resolver=` 0건,
+  `address-geocoding.md` §1 호출자 표)이고 offline upload·CLI만 `geocode=True`. `assets.py`에서 하나를 일부러
+  False로 바꿔 빨간 것을 확인한다.
+- (T-GR-03 뒤) 빈 답 비율 가드: 좌표 있는 50건 중 빈 답(200, `bjd_code` None) 3건(> 5%) 픽스처 → run FAILURE·그 chunk
+  스탬프 0건; 좌표 없는 1,000건을 섞어도 분모(`calls['reverse']`)가 불변이다. **같은 조건의 MOIS run은 FAILURE가
+  아니다**(ADR-108 §3a-2 degraded 그대로 — 회귀 테스트; 상수·비율 계산 함수는 한 곳).
+
+## T-GR-03
+
+ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`load_bundle(current_dataset=, geo_applied=)`
+:3035, 빈 답 가드(판정 집합 G — `address-geocoding.md` §4), 무쓰기(override 열 제외), CTE 토큰 조건 :3199-3231,
+`find_unchanged_active_source_entities` :3291), `infra/feature_address_repo.py`(`FeatureAddressSnapshot` :104-117에
+`road_name_code`·`admin_dong_code` 추가 — 현재 6개 주소 열 중 4개만 담는다),
+`src/kortravelmap/client/__init__.py`(`load_feature_bundles` :1058, `find_unchanged_active_source_entities` :1081,
+`load_feature_bundles_reobserving` :1104, `find_fresh_open_findings(expected_payload_fields=)` :2654),
+`dagster/mois_chunked_load.py`(:473-485 토큰 전달·행별 evidence outcome → chunk commit 안 bulk upsert, :853-882, :905-944),
+`infra/integrity_violation_repo.py:399`, `dagster/validation.py`(`address_override_geo_stale` 상수·dedupe 키),
+`providers/mois.py`(:721-730 분기에서 `AdminEvidence.geocode_attempted=True`, :817), `dto/admin_evidence.py`(1필드),
+`providers/kor_travel_concierge.py`(`kor_travel_concierge_items_to_bundles(…, current_data_token: str | None = None)`
+:125-131 additive kwarg → `_item_to_bundle` → `_address` :523-556 토큰 신뢰 규칙; :278-290 `address.geo_data_token` 제외
+해시), `dagster/assets.py:1508`(호출처 — `kor_travel_geo_dataset` resource의 `data_token` 전달),
+`tests/lint/test_converters_call_geo_when_input_present.py`(신규, 변환 **함수** 단위), 통합 tests. 의존: T-GR-01·02. 규모 M.
+
+- `address-geocoding.md` §7 "통합(DB)" 열의 케이스 전부가 통합 테스트로 있다.
+- 스탬프가 채워진 뒤 릴리스(재빌드 아님) 뒤 첫 MOIS run에서 변환된 행 수 == `called|geocoded` 스탬프 행 수이고
+  `not_called` 스탬프 행의 변환은 0건이다. 스탬프가 **없는** 행(롤아웃 첫 run)은 payload-bjd라도 변환되어 reverse
+  0회로 `not_called` 스탬프를 받는다(T-GR-08 replay와 같은 술어).
+- **의도적 빨강 3건을 PR 본문에 기록한다**: (1) 빈 답 가드를 끄면 저장 코드 non-NULL 행이 NULL로 덮이고 현재
+  토큰으로 봉인된다 — **krheritage·standard_data·concierge 픽스처(원문 `legal` 있음 + geo None)에서도** `row_revision`
+  불변·스탬프 미전진이어야 하고, 판정 집합에 `address.legal`을 넣으면 그 세 픽스처가 빨갛다; (2) override 열을 비교
+  집합에 넣으면 값 동일에도 `row_revision`이 전진한다; (3) 토큰을 `raw_payload_hash`에 넣으면 토큰만 바뀐 concierge
+  payload가 `became_current`가 된다.
+- stale + 값 동일 → `row_revision` 불변(ETag 단언)·스탬프만 전진; `road_name_code`만 바뀐 행 → UPDATE(스냅샷 열
+  추가 결박). 현재 토큰 None(`DatasetRef is None` **또는** `data_token is None`) → 쓰기 0이고 `DatasetRef(data_token=None)`
+  픽스처로 적재해도 기존 스탬프 행 바이트 불변.
+- asset run에서 resource 토큰 ≠ payload `geo_data_token` 픽스처 → geo `bjd_code` 채택(kwarg 전달 경로 결박);
+  kwarg 생략(None) → 옛 동작과 bundle 동일.
+- override 불일치 → `address_override_geo_stale` 1건, 같은 토큰 두 번째 run 0건, 일치 → 0건.
+- 변환 함수 단위 lint가 `opinet`·`krex`의 price/notice 변환기를 유도 제외하고 초록이며, place 변환기의 reverse 호출을
+  하나 지우면 빨갛다. `address_resolver=`를 받아 쓰는 6모듈(mois·standard_data·datagokr_file_data·krforest·
+  krheritage·opinet)마다 "reverse None/빈 bjd 또는 좌표 없음 → geocode 1회", krex는 "geocode 0회"(`address-geocoding.md`
+  §1 표) — 하나를 지우면 빨갛다.
+- concierge 스탬프: 좌표 있는 행은 payload 코드를 썼어도 `called`, 좌표 없는 payload 코드 행만 `not_called`
+  (`decide_outcome` 순서 ③/⑤).
+- 롤아웃 첫 run의 전 행 1회 스탬프 비용(행 수·소요)을 PR 본문에 실측 기록한다(격리 스택).
+
+## T-GR-04
+
+ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/407_kor_travel_geo_releases.py`,
+`alembic/head-schema.sql`, `infra/models.py`, `infra/geo_release_repo.py`(신규 — `plan_geo_release`·
+`run_config_for_dataset`·항목 전이·`coverage` 호출·`complete_plan`), `src/kortravelmap/core/feature_operation.py`
+(`GEO_DEPENDENT_OPERATION_KEYS` — `DEDICATED_JOB_ONLY_OPERATION_KEYS` :33-41 옆, 런타임 정본),
+`tests/lint/test_geo_heavy_assets_declare_the_pool.py`(AST 유도 집합 == 상수 단언 추가 — pool 술어 `_passes_reverse_geocoder`
+:81-87은 **불변**(pool 필요 집합 ≠ geo 의존 집합, 과결박 회피); 별도 ① `_passes_geo_callable`(`reverse_geocoder=` 또는
+`address_resolver=`에 `None` 상수가 아닌 값 — 현재 술어는 키워드 존재만 봐 `assets.py:643`의 `=None`도 센다)
+② asset → `FEATURE_LOAD_SCHEDULE_SPECS.job_name` 매핑(현재 `_geo_heavy_assets()` :101-132는 asset 이름만)
+③ 모듈 간 참조 허용 또는 그 한계 단언(현재는 같은 모듈만 잇는다)), `src/kortravelmap/client/__init__.py`(래퍼),
+`packages/kor-travel-map-api/src/kortravelmap/api/routers/ops_geo_releases.py`(신규), `api/app.py`(mount, admin
+프로필), `packages/kor-travel-map-api/openapi.json`(`scripts/export_openapi.py --profile all`), tests. 의존: T-GR-01.
+규모 M. **배포 제약**: 머지 뒤 PinVi admin 스냅샷 재vendor(`apps/api/tests/unit/_kor_travel_map_snapshot_pin.py`
+`UPSTREAM_COMMIT`·`SNAPSHOT_SHA256` + `test_kor_travel_map_admin_contract.py` 이중 핀 + `scripts/generate_m05_pair_contract.py`
+재실행)가 Map API 배포보다 먼저다(memory `map-admin-openapi-change-needs-pinvi-revendor`).
+
+- `plan_geo_release` 멱등: 같은 토큰·활성 계획으로 두 번 호출 → 행 1개. A→B→A → 두 번째 A에서 `plan_seq=2` 새 행.
+  최신 계획 terminal + `coverage(비-skipped).stamped_other + unstamped == 0` → None.
+- 항목 생성: `provider_dataset_operations(feature_load, is_enabled) ⋈ is_active` 입력에서 geo 의존은
+  `GEO_DEPENDENT_OPERATION_KEYS`로 판정(센서·`/detect` 둘 다 — API 프로세스는 `kortravelmap.dagster`를 import하지
+  않는다; lint가 AST 유도 집합과의 동등을 단언하고, 상수에서 하나를 빼면 빨갛다; `assets.py:643`을
+  `_reverse_geocoder(context)`로 바꾸면 동등 단언이 빨갛다), **KNPS 5 dataset이 항목 5개가 되고 run_config가 dataset마다
+  다르다**, `DISABLED_FEATURE_LOAD_OPERATION_KEYS` → `skipped(disabled)`, 쿼터 민감 → replay run_config, 순서
+  ①~⑤(concierge·MOIS 마지막).
+- `coverage` 응답에 `excluded_by_skip`·`not_called_by_kind`·`unstamped_non_provider`가 있고 분모가 인자 dataset으로
+  한정된다.
+- 마이그레이션 lint 4종 초록(407도 owner role·receipt CHECK·RESET ROLE 없음).
+- `openapi.user.json`·`openapi.service.json`이 byte 불변이다(테스트가 export 전후 sha256 비교); `openapi.json`에
+  `/v1/ops/geo-releases` 5 operation(슬래시 동사)이 있고 `require_ops_operator`가 붙는다.
+- `POST /detect`가 센서와 같은 `plan_geo_release`를 호출한다(단일 정본 테스트 — 함수 identity).
+- 완료 단계가 활성 cache target 전부에 `sync_poi_cache_target_feature_links`를 1회 호출하고, `sigungu_code`가 바뀐
+  feature 1건의 `same_sigungu` 링크가 새 target으로 옮겨진다. prod 활성 target 수를 PR 본문에 기록한다(가정 검증).
+
+## T-GR-05
+
+ADR-109 결정 5(센서). 수정 파일: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/sensors.py`
+(`kor_travel_geo_release_sensor`), `definitions.py`, `run_scope.py`(필요 시 `dagster/run_key` 조회 헬퍼),
+`src/kortravelmap/geocoding.py`(열린 결정 6 승인 시에만 — run 태그 `kor_travel_map.geo_release_plan_id` 보유 run 한정
+reverse timeout 1회 재시도 옵션, `trigger_kind=sensor`는 MOIS 이어 달리기 run에도 붙어 판별자가 아니다
+`mois_chunked_load.py:1071-1075`; 기각이면 attempt 2로만 복구), `tests/lint/`(효과 테스트·새 pool/limit 태그 없음),
+tests. 의존: T-GR-02·04. 규모 M.
+열린 결정 3(`default_status`)·6(재시도)·9(완료 전이)·11(기동 방식)에 걸린다 — §T-GR-00 영향 조문 표.
+
+- `address-geocoding.md` §7 "센서" 열의 케이스 전부가 테스트로 있다 — 특히 `data_token` None → 계획 0 + Skip 문구;
+  재빌드(토큰 동일) → 계획·RunRequest 0; A→B→A → `plan_seq=2` 계획과 RunRequest ≥ 1; SUCCESS + `budget_exhausted` →
+  `done`이 아니라 같은 run_config로 재요청 1건(`converted==0`이면 `failed(no_progress)`); `requested` 3 tick 무run →
+  `failed(run_not_launched)`; 활성 `feature_update_request_worker` run → Skip; DISABLED 1개 포함 계획이 sweep 없이 done.
+- 효과 테스트: 센서 tick의 외부 효과는 `dataset_version` HTTP 1회 + DB 조회뿐이고 `reverse_geocoder` resource를
+  초기화하지 않는다(WARNING 로그 0건); `jobs=` 집합 == `FEATURE_LOAD_SCHEDULE_SPECS` job 집합; 새 pool·limit 태그가
+  없다(Manager `dagster.yaml` 변경 0).
+- `trigger_kind=sensor` run이 `feature_operation_*` 센서·`map_owned_runs_filter`에서 Map 소유로 집계된다; RunRequest
+  태그에 `kor_travel_map.geo_release_plan_id`가 있고 MOIS 이어 달리기 run(`_CONTINUATION_TAGS`)에는 없다;
+  `replan` 뒤 RunRequest의 run_key가 유일해 실제 run이 생긴다.
+- 격리 스택 e2e: **첫 계획 완료 후** `manual_rebuild` → RunRequest 0건; 소량 delta → 1 tick → 계획 1 → RunRequest 1
+  → 커버리지 상승.
+
+## T-GR-06
+
+ADR-109 결정 8(UI). 수정 파일: `packages/kor-travel-map-admin/frontend/src/app/admin/ops/geo-releases/*`,
+`npm run gen:types`(T-GR-04의 admin OpenAPI에 의존), `docs/runbooks/admin-ui-screen-checklist.md`(route 행), Playwright
+스펙(n150 우선). 의존: T-GR-04. 규모 M.
+
+- Playwright: 계획 항목 skip 클릭 → badge `skipped`; "지금 감지" 클릭 → `/detect` 호출 정확히 1회·계획 행 표시;
+  커버리지 게이지 수치가 API 응답과 일치; `data_token` 없음 → 빨간 상태 + Skip 사유 문구.
+- `/admin/issues`·features 목록은 diff 0.
+- `admin-ui-screen-checklist.md`에 `/admin/ops/geo-releases` 행과 e2e 매핑이 있다.
+
+## T-GR-07
+
+구현 뒤 문서 — 설계 §11 T-GR-07의 문서 항목 중 ADR·etl·integration-map·원장은 PR-0(이 PR)가 선반영했고 남은 것만
+여기(§T-GR-00 범위 메모). 수정 파일: `docs/adr/109-geo-release-regeocode.md`(상태 accepted, 열린 결정의 결론 반영),
+`docs/runbooks/geo-release-regeocode.md`(신규 1쪽: 흐름도, 배포 순서 geo backfill → PinVi 재vendor → Map pair →
+Manager `dagster.yaml` concierge lane(concierge ADR-49 refresh job용, Map 변경 아님 — ADR-109 결정 5.4) → concierge(설계 §9), "재빌드인데 왜 첫 tick에 전량이 도는가" FAQ, `data_token` 없음 빨간 Skip 대응, `run_not_launched`/`no_progress`
+대응, 큐 worker 겹침, 검증 지표, 롤백 A→B→A가 새 `plan_seq`로 도는 이유), `CHANGELOG.md`(`### geo 릴리스 재지오코딩
+(2026-10-xx, ADR-109)`), `docs/etl/address-geocoding.md`·`integration-map.md`·`mois-license-feature-etl.md`·
+`concierge-feature-etl.md`·`feature-id-determinism.md`·ADR-108의 "계획/미구현" 표식 제거, `docs/tasks.md`/
+`tasks-done.md`/`resume.md`/`journal.md`. 의존: T-GR-01~06·08. 규모 S. doc-only, 즉시 머지.
+
+- `scripts/check_journal_update.py`·`tests/lint/test_task_ledger_conventions.py`·docs 크기 lint 초록.
+- `integration-map.md` §2에 geo ↔ Map 항목이 "계획"이 아니라 현재 동작으로 적혀 있고, geo 저장소 ADR-069 참조
+  (저장소명+번호)가 남아 있으며 geo 쪽 ADR-069 상태가 accepted임을 확인해 적었다(교차 저장소라 링크가 아니라 참조).
+- 정본 문서에 "proposed, 미구현" 표식이 남아 있지 않다 — `rg "ADR-109 proposed" docs/ --glob '!docs/journal.md'
+  --glob '!docs/resume.md' --glob '!docs/tasks-done.md' --glob '!docs/archive/**'` 0건(append-only 원장·아카이브는
+  과거 항목을 편집하지 않는다, `tasks-rule.md` §8).
+
+## T-GR-08
+
+ADR-109 결정 7. 수정 파일: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/resources.py`(`mois_license_records`
+:695 config `source_mode`; `PROVIDER_RECORD_RESOURCE_DEFINITIONS`의 datagokr_file_data·standard_data records resource),
+`src/kortravelmap/infra/`(entity head current `source_records.raw_data` 조회 — `provider_dataset_id` 단위 keyset), 각
+provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **별도 코드가 아니라** T-GR-03의 unchanged CTE
+토큰 조건(`feature_geocode_stamps.reverse_outcome = 'not_called'`)이다 — replay 읽기 keyset이 선필터한다면 같은 술어로만
+(`raw_data.legal_dong_code` 유무로 빼면 스탬프 없는 행이 `coverage.unstamped`에 영구히 남아 완료 판정이 불가능하다).
+의존: T-GR-03·04. 규모 M. **가정**: `raw_data`가 fetch 시 record 모델 직렬화와 1:1 — 첫 단계에서 golden으로 확인하고,
+아니면 그 provider는 fetch 모드로 남기고 이 절에 적는다.
+
+- replay bundle == fetch bundle(golden, MOIS·datagokr_file_data·standard_data 3 provider).
+- 스탬프 없는 payload-bjd 행 N건을 가진 MOIS 픽스처에서 replay 1 run 뒤 `not_called` 스탬프 N건·reverse 호출 0회·
+  `coverage.unstamped` 0; 같은 픽스처로 두 번째 run은 변환 0건.
+- replay run은 provider HTTP 0회(효과 테스트 — 전송 계층 fake가 호출을 센다).
+- `became_current`가 항상 False(`fetched_at` 원 값 유지)이고 lifecycle 전이가 없다 — provider에서 사라진 entity를
+  되살리지 않는다.
+- MOIS replay 1 run 소요(격리 스택, 업종 하나)를 PR 본문에 기록한다.

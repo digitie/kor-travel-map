@@ -25,6 +25,10 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
+**geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-00`·`T-GR-00-LEDGER`·`T-GR-01`~`08`, 의존 순서대로 아래에
+둔다. 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
+설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
+
 
 - [ ] **prod Map/PinVi outage — pinned-rebuild journal이 pinset `3705983b`에서 영구 고착** — **보류**(소유자 지시 2026-09-20, weather/concierge/geo/pinvi/map DB 통합을 먼저 진행)
 
@@ -32,6 +36,56 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
   pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
+
+- [ ] T-GR-00 — **문서 원장 분리 선행** (doc-only, 이 PR)
+
+  `tasks-acceptance.md`를 `scripts/archive_task_ledger_section.py`로 216,950 → 166,931 B로 줄였다(닫힌 절 7개).
+  해제는 이 PR의 docs lint 초록 + 머지(`[x]`·tasks-done 이관은 다음 doc-only PR에). journal·tasks-done 분리는 T-GR-00-LEDGER.
+
+- [ ] T-GR-00-LEDGER — **journal·tasks-done 다음 경계 분리** (doc-only, PR-1 선행)
+
+  실측 `journal.md` 208,660 B·`tasks-done.md` 200,699 B(상한 225,280)에서 가장 오래된 묶음을 `docs/archive/`로
+  분리(규약 §8, 인덱스 표 갱신·바이트 보존 검산). T-GR-01의 의존.
+
+- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 406)
+
+  `feature.feature_geocode_stamps`(세 outcome, 토큰 열 NOT NULL)·`dto/geo_dataset.py`·`dataset_version()`·응답
+  `dataset` 선택 파싱·`GeoCallStats.empty`. provider 모듈·`Address`·`ReverseGeocoder` diff 0. 의존: T-GR-00-LEDGER.
+
+- [ ] T-GR-02 — **run-scoped 현재 토큰 resource와 `geo_applied` 배선**
+
+  `kor_travel_geo_dataset` resource(실패 시 None·run 계속)를 asset·큐 runner·offline upload·CLI가 같은 팩토리로 쓴다.
+  price/notice asset은 둘 다 False.
+
+- [ ] T-GR-03 — **unchanged-skip 보강·빈 답 가드·무쓰기·스탬프·override finding·MOIS 표식·concierge 토큰 규칙**
+
+  `load_bundle` stale 분기와 MOIS CTE 토큰 조건, 값 동일 무쓰기(override 열 제외, 스냅샷 열 2개 추가), 빈 답
+  가드(행 집합 G·run), `mois.py` evidence 1필드, concierge 토큰 kwarg·신뢰 규칙·해시 제외. 의도적 빨강 3건.
+
+- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 407)
+
+  `ops.kor_travel_geo_releases(+items)`, `plan_geo_release`(`plan_id`+`plan_seq`, DB 정본 항목, KNPS dataset별
+  run_config), `/v1/ops/geo-releases`(admin만, 슬래시 동사). 머지 뒤 PinVi admin 스냅샷 재vendor.
+
+- [ ] T-GR-05 — **`kor_travel_geo_release_sensor`**
+
+  감지 → 계획 → Skip 조건(큐 worker run·같은 operation run) → 전이(`budget_exhausted` 이어 달리기, `run_not_launched`)
+  → tick당 1건 RunRequest(태그 `geo_release_plan_id`) → 완료 판정. 효과 lint 포함. timeout 재시도 옵션은 열린 결정 6 승인 시.
+
+- [ ] T-GR-06 — **admin UI `/admin/ops/geo-releases`**
+
+  현재 토큰(없음=빨강)·커버리지 게이지·계획 항목 표·skip·지금 감지·다시 계획. `gen:types`는 T-GR-04 뒤.
+  Playwright(n150 우선) + 화면 체크리스트 route 행.
+
+- [ ] T-GR-07 — **구현 반영 문서** (doc-only)
+
+  구현 뒤 잔여만(ADR·etl·integration-map은 PR-0 선반영): ADR-109 accepted, runbook `docs/runbooks/geo-release-regeocode.md`
+  신규(§9 흐름·배포 순서·첫 tick 전량 FAQ), CHANGELOG, "계획" 표식 제거.
+
+- [ ] T-GR-08 — **replay 모드(쿼터 민감 dataset)**
+
+  records resource `source_mode=replay`로 entity head `source_records.raw_data`를 같은 record 모델·변환기에 넣는다.
+  MOIS 제외 술어는 `not_called` 스탬프(스탬프 없는 행은 포함). 1단계 MOIS·datagokr_file_data·standard_data — golden으로 1:1 확인되는 provider만.
 
 
 
