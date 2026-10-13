@@ -52,6 +52,18 @@ FEATURE_OPERATION_SETTLE_LAG_SECONDS: Final[int] = 300
 
 FEATURE_OPERATION_RECONCILE_CURSOR_VERSION: Final[int] = 1
 
+FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT: Final[int] = 5
+"""같은 run이 같은 SQLSTATE로 연속 실패하면 terminal root를 닫는 횟수(ADR-111).
+
+30초 tick 기준 약 2분 반이다. 결정적 실패(예: 53200 lock table 고갈)는 몇 번을 다시 돌아도
+같고, 실패하는 transaction이 공유 자원을 잡을 때마다 같은 cluster의 다른 tenant를 흔든다.
+"""
+
+#: 다시 돌면 지나갈 수 있는 SQLSTATE — 세지 않는다. 08 연결, 40 직렬화·교착,
+#: 57 운영자 개입(statement timeout·shutdown), 그리고 cluster 전체의 일시 상태 셋.
+_TRANSIENT_SQLSTATE_CLASSES: Final[frozenset[str]] = frozenset({"08", "40", "57"})
+_TRANSIENT_SQLSTATES: Final[frozenset[str]] = frozenset({"53300", "55P03", "55006"})
+
 _ACTIVE_STATUSES: Final[frozenset[DagsterRunStatus]] = frozenset(
     {
         DagsterRunStatus.QUEUED,
@@ -154,14 +166,34 @@ class DagsterRunWatermark:
 
 
 @dataclass(frozen=True)
+class ReconcileFailure:
+    """마지막으로 tick을 멈춘 run과 그 실패의 SQLSTATE 서명, 연속 횟수."""
+
+    run_id: str
+    signature: str
+    count: int
+
+    def __post_init__(self) -> None:
+        _non_empty_string(self.run_id, name="failure run_id")
+        _non_empty_string(self.signature, name="failure signature")
+        _positive_int(self.count, name="failure count")
+
+
+@dataclass(frozen=True)
 class FeatureOperationReconcileCursor:
-    """Dagster→DB watermark와 DB→Dagster keyset cursor의 단일 commit 단위."""
+    """Dagster→DB watermark와 DB→Dagster keyset cursor의 단일 commit 단위.
+
+    ``last_failure``는 결정적 실패가 연속된 횟수다(ADR-111). 실패한 tick은 watermark를
+    옮기지 않고 이 값만 갱신한다. 끝까지 성공한 tick은 이 값을 지운다. 값이 없을 때는
+    JSON에 키를 쓰지 않는다 — 그 앞 판의 cursor와 모양이 같다.
+    """
 
     dagster: DagsterRunWatermark | None = None
     database: DagsterFeatureOperationCursor | None = None
+    last_failure: ReconcileFailure | None = None
 
     def to_json(self) -> str:
-        value = {
+        value: dict[str, object] = {
             "database": (
                 {
                     "created_at": self.database.created_at.isoformat(),
@@ -180,6 +212,12 @@ class FeatureOperationReconcileCursor:
             ),
             "version": FEATURE_OPERATION_RECONCILE_CURSOR_VERSION,
         }
+        if self.last_failure is not None:
+            value["last_failure"] = {
+                "count": self.last_failure.count,
+                "run_id": self.last_failure.run_id,
+                "signature": self.last_failure.signature,
+            }
         return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
     @classmethod
@@ -190,7 +228,11 @@ class FeatureOperationReconcileCursor:
             raw = json.loads(value)
         except (TypeError, json.JSONDecodeError) as exc:
             raise ValueError("feature operation reconcile cursor is not valid JSON") from exc
-        if not isinstance(raw, dict) or set(raw) != {"database", "dagster", "version"}:
+        if not isinstance(raw, dict) or set(raw) - {"last_failure"} != {
+            "database",
+            "dagster",
+            "version",
+        }:
             raise ValueError("feature operation reconcile cursor shape is invalid")
         if raw["version"] != FEATURE_OPERATION_RECONCILE_CURSOR_VERSION:
             raise ValueError("feature operation reconcile cursor version is unsupported")
@@ -220,11 +262,34 @@ class FeatureOperationReconcileCursor:
                     database_raw["root_job_id"], name="database root_job_id"
                 ),
             )
-        return cls(dagster=dagster_cursor, database=database_cursor)
+        last_failure = None
+        failure_raw = raw.get("last_failure")
+        if failure_raw is not None:
+            if not isinstance(failure_raw, dict) or set(failure_raw) != {
+                "count",
+                "run_id",
+                "signature",
+            }:
+                raise ValueError("reconcile failure ledger shape is invalid")
+            last_failure = ReconcileFailure(
+                run_id=_non_empty_string(failure_raw["run_id"], name="failure run_id"),
+                signature=_non_empty_string(failure_raw["signature"], name="failure signature"),
+                count=_positive_int(failure_raw["count"], name="failure count"),
+            )
+        return cls(dagster=dagster_cursor, database=database_cursor, last_failure=last_failure)
 
 
 class FeatureOperationObservationError(RuntimeError):
     """run record가 canonical DB mutation에 필요한 정보를 제공하지 못함."""
+
+
+class _CountedReconcileFailure(RuntimeError):
+    """한 run의 DB 반영이 결정적 SQLSTATE로 실패함 — tick은 그대로 실패한다."""
+
+    def __init__(self, record: _RunRecord, signature: str) -> None:
+        super().__init__(signature)
+        self.record = record
+        self.signature = signature
 
 
 def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
@@ -374,7 +439,7 @@ async def _reconcile_tick(
     dagster_panel_only = 0
     for record in dagster_records:
         try:
-            outcome = await _apply_run_record(record, client)
+            outcome = await _apply_counted(record, client)
         except FeatureOperationObservationError as exc:
             context.log.error("provider feature operation panel-only conflict: %s", exc)
             dagster_panel_only += 1
@@ -424,6 +489,8 @@ async def _evaluate_reconciliation_sensor(
         # 설정 오류는 SKIP으로 숨기지 않는다 — tick이 FAILURE로 보여야 한다.
         context.log.error(str(exc))
         raise
+    except _CountedReconcileFailure as failure:
+        return await _record_counted_failure(context, client, failure)
     except Exception as exc:
         message = f"provider feature operation reconcile 실패: error_type={type(exc).__name__}"
         context.log.error(message)
@@ -456,7 +523,7 @@ async def _reconcile_database_page(
             observation_errors += 1
             continue
         try:
-            outcome = await _apply_run_record(record, client)
+            outcome = await _apply_counted(record, client)
         except FeatureOperationObservationError as exc:
             context.log.error(
                 "active feature operation의 Dagster identity 관측 실패: run_id=%s error=%s",
@@ -468,6 +535,113 @@ async def _reconcile_database_page(
         if outcome != "panel_only":
             applied += 1
     return applied, observation_errors
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다."""
+    seen: set[int] = set()
+    pending: list[BaseException | None] = [error]
+    while pending:
+        current = pending.pop(0)
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        value = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        if isinstance(value, str) and value:
+            return value
+        pending.extend(
+            (getattr(current, "orig", None), current.__cause__, current.__context__)
+        )
+    return None
+
+
+def _failure_signature(error: BaseException) -> str | None:
+    """결정적일 수 있는 DB 실패의 서명. 일시적이거나 SQLSTATE가 없으면 ``None``."""
+    sqlstate = _sqlstate(error)
+    if sqlstate is None:
+        return None
+    if sqlstate[:2] in _TRANSIENT_SQLSTATE_CLASSES or sqlstate in _TRANSIENT_SQLSTATES:
+        return None
+    return f"SQLSTATE {sqlstate}"
+
+
+async def _apply_counted(record: _RunRecord, client: AsyncKorTravelMapClient) -> str:
+    """``_apply_run_record``와 같되, 결정적 DB 실패는 셀 수 있게 표시해 다시 던진다."""
+    try:
+        return await _apply_run_record(record, client)
+    except FeatureOperationObservationError:
+        raise
+    except Exception as exc:
+        signature = _failure_signature(exc)
+        if signature is None:
+            raise
+        raise _CountedReconcileFailure(record, signature) from exc
+
+
+async def _record_counted_failure(
+    context: _ReconcileContext,
+    client: AsyncKorTravelMapClient,
+    failure: _CountedReconcileFailure,
+) -> SkipReason:
+    """실패를 세고, 상한에 닿은 terminal run은 root를 닫는다(ADR-111).
+
+    watermark는 옮기지 않는다 — 실패한 tick의 의미는 그대로다. cursor에는 연속 횟수만
+    더 쓴다. 상한에 닿아도 run이 아직 진행 중이면 닫지 않는다(Dagster가 끝내야 한다).
+    """
+    run = failure.record.dagster_run
+    cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
+    previous = cursor.last_failure
+    count = (
+        previous.count + 1
+        if previous is not None
+        and previous.run_id == run.run_id
+        and previous.signature == failure.signature
+        else 1
+    )
+    ledger: ReconcileFailure | None = ReconcileFailure(
+        run_id=run.run_id, signature=failure.signature, count=count
+    )
+    message = (
+        "provider feature operation reconcile 실패: "
+        f"error_type={type(failure.__cause__).__name__} run_id={run.run_id} "
+        f"{failure.signature} consecutive={count}/{FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT}"
+    )
+    context.log.error(message)
+    finished_at = _timestamp_datetime(failure.record.end_time, name="Dagster finish timestamp")
+    if (
+        count >= FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
+        and run.status in _TERMINAL_STATUSES
+        and finished_at is not None
+    ):
+        try:
+            mutation = await client.abandon_dagster_feature_run(
+                dagster_run_id=run.run_id,
+                terminal_status=run.status.value,
+                engine_finished_at=finished_at,
+                failure=failure.signature,
+                attempts=count,
+            )
+        except Exception as exc:
+            context.log.error(
+                "provider feature operation root 닫기 실패: run_id=%s error_type=%s",
+                run.run_id,
+                type(exc).__name__,
+            )
+        else:
+            ledger = None
+            message = (
+                f"{message} → root를 failed로 닫음(outcome={mutation.outcome}); "
+                "다음 tick이 terminal로 지나간다"
+            )
+            context.log.error(message)
+    context.update_cursor(
+        FeatureOperationReconcileCursor(
+            dagster=cursor.dagster,
+            database=cursor.database,
+            last_failure=ledger,
+        ).to_json()
+    )
+    return SkipReason(message)
 
 
 async def _apply_run_record(
@@ -715,6 +889,7 @@ def _run_async(awaitable: Coroutine[Any, Any, _T]) -> _T:
 
 __all__ = [
     "FEATURE_OPERATION_RECONCILE_CURSOR_VERSION",
+    "FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT",
     "FEATURE_OPERATION_RECONCILE_INTERVAL_SECONDS",
     "FEATURE_OPERATION_RECONCILE_PAGE_SIZE",
     "FEATURE_OPERATION_SETTLE_LAG_SECONDS",
@@ -722,6 +897,7 @@ __all__ = [
     "DagsterRunWatermark",
     "FeatureOperationObservationError",
     "FeatureOperationReconcileCursor",
+    "ReconcileFailure",
     "feature_operation_canceled_sensor",
     "feature_operation_canceling_sensor",
     "feature_operation_failure_sensor",

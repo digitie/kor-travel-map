@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "abandon_dagster_feature_run",
     "append_dagster_feature_attempt_event",
     "ensure_dagster_feature_operation",
     "finish_dagster_feature_membership",
@@ -1130,6 +1131,96 @@ async def reconcile_dagster_feature_run(
                 "mismatches": mismatches,
             },
         )
+    return DagsterFeatureOperationMutation(
+        outcome="applied",
+        operation=await _load_operation(session, normalized_run_id),
+    )
+
+
+async def abandon_dagster_feature_run(
+    session: AsyncSession,
+    *,
+    dagster_run_id: str,
+    terminal_status: str,
+    engine_finished_at: datetime,
+    failure: str,
+    attempts: int,
+) -> DagsterFeatureOperationMutation:
+    """terminal reconcile이 같은 이유로 거듭 죽는 root를 ``failed``로 닫는다(ADR-111).
+
+    reconcile sensor는 실패한 tick을 30초마다 다시 돈다. 실패가 결정적이면(예: SQLSTATE
+    53200) 그 재시도는 끝나지 않고, 실패하는 transaction이 공유 자원을 잡을 때마다 다른
+    tenant까지 흔든다. sensor가 같은 실패를 상한만큼 보면 이 함수로 root를 기존 terminal
+    전이(``stage='failed'``)로 닫고 운영 로그에 남긴다 — 새 상태는 만들지 않는다.
+    """
+    normalized_run_id = _run_id(dagster_run_id)
+    terminal = _validate_run_status(terminal_status)
+    if terminal not in DAGSTER_FEATURE_TERMINAL_STATUS_VALUES:
+        raise ValueError("terminal_status must be SUCCESS, FAILURE, or CANCELED")
+    finished_at = _aware(
+        engine_finished_at,
+        name="engine_finished_at",
+        dagster_run_id=normalized_run_id,
+    )
+    if not failure or failure != failure.strip():
+        raise ValueError("failure must be a trimmed non-empty signature")
+    if isinstance(attempts, bool) or attempts < 1:
+        raise ValueError("attempts must be a positive integer")
+
+    await lock_pipeline_lineage_mutation(session)
+    root = (
+        await session.execute(
+            text(_LOCK_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
+        )
+    ).one_or_none()
+    if root is None:
+        raise FeatureOperationInvariantConflict(
+            "abandoning a terminal reconcile requires an ensured operation root",
+            dagster_run_id=normalized_run_id,
+        )
+    root_job_id = str(root.root_job_id)
+    await lock_pipeline_cancellation_root(
+        session, root_kind="import_job", root_id=root_job_id
+    )
+    operation = await _load_operation(session, normalized_run_id)
+    if root.root_cancellation_id is not None:
+        return DagsterFeatureOperationMutation(
+            outcome="blocked", operation=operation, block_reason="cancellation"
+        )
+    if operation.status in {"done", "failed", "cancelled"}:
+        return DagsterFeatureOperationMutation(
+            outcome="blocked", operation=operation, block_reason="terminal"
+        )
+    message = (
+        f"terminal reconcile abandoned after {attempts} identical failures ({failure})"
+    )
+    await session.execute(
+        text(_TERMINAL_OPERATION_COMMAND_SQL),
+        {
+            "target_status": "failed",
+            "dagster_run_status": terminal,
+            "stage": "failed",
+            "error_message": message,
+            "started_at": None,
+            "finished_at": finished_at,
+            "root_job_id": root_job_id,
+            "update_members": True,
+        },
+    )
+    await record_system_log(
+        session,
+        level="error",
+        source="feature_operation",
+        event="feature_operation.reconcile_abandoned",
+        message=message,
+        detail={
+            "dagster_run_id": normalized_run_id,
+            "root_job_id": root_job_id,
+            "terminal_status": terminal,
+            "failure": failure,
+            "attempts": attempts,
+        },
+    )
     return DagsterFeatureOperationMutation(
         outcome="applied",
         operation=await _load_operation(session, normalized_run_id),

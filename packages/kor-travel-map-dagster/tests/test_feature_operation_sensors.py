@@ -18,12 +18,14 @@ from kortravelmap.core.feature_operation import (
 )
 
 from kortravelmap.dagster.feature_operation_sensors import (
+    FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT,
     FEATURE_OPERATION_RECONCILE_PAGE_SIZE,
     FEATURE_OPERATION_SETTLE_LAG_SECONDS,
     FEATURE_OPERATION_TRACKING_SENSORS,
     DagsterRunWatermark,
     FeatureOperationObservationError,
     FeatureOperationReconcileCursor,
+    ReconcileFailure,
     _apply_run_record,
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
@@ -72,6 +74,8 @@ class _Client:
     ensure_errors: list[Exception | None] = field(default_factory=list)
     ensure_error: Exception | None = None
     reconcile_error: Exception | None = None
+    abandon_calls: list[dict[str, Any]] = field(default_factory=list)
+    abandon_error: Exception | None = None
     list_error: Exception | None = None
     page: object = field(default_factory=lambda: DagsterFeatureOperationPage((), None))
     pages: list[object] = field(default_factory=list)
@@ -91,6 +95,14 @@ class _Client:
         self.reconcile_calls.append(kwargs)
         if self.reconcile_error is not None:
             raise self.reconcile_error
+        return SimpleNamespace(outcome="applied")
+
+    async def abandon_dagster_feature_run(self, **kwargs: Any) -> object:
+        self.abandon_calls.append(kwargs)
+        if self.abandon_error is not None:
+            raise self.abandon_error
+        # root가 닫혔으니 그 뒤의 terminal reconcile은 DB가 terminal로 막는다.
+        self.reconcile_error = None
         return SimpleNamespace(outcome="applied")
 
     async def list_reconcilable_dagster_feature_runs(self, **kwargs: Any) -> object:
@@ -1143,3 +1155,144 @@ async def test_admin_manual_run_is_recorded_as_manual_not_schedule() -> None:
     await _apply_run_record(schedule_record, schedule_client)
 
     assert schedule_client.ensure_calls[0]["trigger_kind"] == "schedule"
+
+
+class _DatabaseError(Exception):
+    """asyncpg처럼 ``sqlstate``를 들고 SQLAlchemy가 ``orig``로 감싸는 실패."""
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(f"postgresql://admin:secret@database/internal {sqlstate}")
+        self.sqlstate = sqlstate
+
+
+class _WrappedDatabaseError(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__("(sqlalchemy) wrapped")
+        self.orig = _DatabaseError(sqlstate)
+
+
+def _stuck_success_context() -> _Context:
+    return _Context(
+        instance=_Instance([_record(DagsterRunStatus.SUCCESS, run_id="stuck-run")]),
+        cursor=FeatureOperationReconcileCursor(
+            dagster=DagsterRunWatermark(1, "previous")
+        ).to_json(),
+    )
+
+
+async def _tick(context: _Context, client: _Client) -> None:
+    await _evaluate_reconciliation_sensor(context, client)
+    if context.updated_cursors:
+        context.cursor = context.updated_cursors[-1]
+
+
+async def test_identical_deterministic_failures_close_the_terminal_root_at_the_cap() -> None:
+    """2026-10-12 사고 재현: SUCCESS run의 root 완결이 53200으로 끝없이 재시도됐다.
+
+    상한 직전까지는 watermark가 그대로이고(실패한 tick의 의미 유지) 횟수만 쌓인다.
+    상한에서 root를 한 번 닫고, 다음 tick은 그 run을 지나 watermark를 옮긴다.
+    """
+    context = _stuck_success_context()
+    client = _Client(reconcile_error=_WrappedDatabaseError("53200"))
+
+    for attempt in range(1, FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT):
+        await _tick(context, client)
+        cursor = FeatureOperationReconcileCursor.from_json(context.cursor)
+        assert cursor.dagster == DagsterRunWatermark(1, "previous")
+        assert cursor.last_failure == ReconcileFailure("stuck-run", "SQLSTATE 53200", attempt)
+        assert client.abandon_calls == []
+        assert client.list_calls == []
+
+    await _tick(context, client)
+
+    assert len(client.abandon_calls) == 1
+    call = client.abandon_calls[0]
+    assert call["dagster_run_id"] == "stuck-run"
+    assert call["terminal_status"] == "SUCCESS"
+    assert call["failure"] == "SQLSTATE 53200"
+    assert call["attempts"] == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT
+    assert call["engine_finished_at"] == _NOW + timedelta(minutes=1)
+    closed = FeatureOperationReconcileCursor.from_json(context.cursor)
+    assert closed.last_failure is None
+    assert closed.dagster == DagsterRunWatermark(1, "previous")
+    assert all("secret" not in message for message in context.log.errors)
+
+    await _tick(context, client)
+
+    advanced = FeatureOperationReconcileCursor.from_json(context.cursor)
+    assert advanced.dagster == DagsterRunWatermark(2, "stuck-run")
+    assert advanced.last_failure is None
+    assert len(client.abandon_calls) == 1
+
+
+@pytest.mark.parametrize("sqlstate", ["40001", "40P01", "08006", "57014", "53300"])
+async def test_transient_failures_are_not_counted(sqlstate: str) -> None:
+    context = _stuck_success_context()
+    client = _Client(reconcile_error=_WrappedDatabaseError(sqlstate))
+
+    for _ in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 1):
+        await _tick(context, client)
+
+    assert context.updated_cursors == []
+    assert client.abandon_calls == []
+
+
+async def test_a_different_failure_restarts_the_count() -> None:
+    context = _stuck_success_context()
+    client = _Client()
+    for index in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT * 2):
+        client.reconcile_error = _WrappedDatabaseError("53200" if index % 2 else "23514")
+        await _tick(context, client)
+
+    assert client.abandon_calls == []
+    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
+    assert ledger is not None and ledger.count == 1
+
+
+async def test_running_run_is_counted_but_never_closed() -> None:
+    """진행 중인 run의 root는 Dagster가 끝내야 한다 — 상한을 넘어도 닫지 않는다."""
+    context = _Context(
+        instance=_Instance([_record(DagsterRunStatus.STARTED, run_id="running-run")]),
+        cursor=FeatureOperationReconcileCursor(
+            dagster=DagsterRunWatermark(1, "previous")
+        ).to_json(),
+    )
+    client = _Client(ensure_error=_WrappedDatabaseError("53200"))
+
+    for _ in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 2):
+        await _tick(context, client)
+
+    assert client.abandon_calls == []
+    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
+    assert ledger == ReconcileFailure(
+        "running-run", "SQLSTATE 53200", FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 2
+    )
+
+
+async def test_failed_close_keeps_counting_and_retries_next_tick() -> None:
+    context = _stuck_success_context()
+    client = _Client(
+        reconcile_error=_WrappedDatabaseError("53200"),
+        abandon_error=RuntimeError("postgresql://admin:secret@database/internal"),
+    )
+    for _ in range(FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 1):
+        await _tick(context, client)
+
+    assert len(client.abandon_calls) == 2
+    ledger = FeatureOperationReconcileCursor.from_json(context.cursor).last_failure
+    assert ledger is not None
+    assert ledger.count == FEATURE_OPERATION_RECONCILE_FAILURE_LIMIT + 1
+    assert all("secret" not in message for message in context.log.errors)
+
+
+def test_cursor_without_failure_ledger_keeps_the_previous_shape() -> None:
+    """ledger가 없으면 키도 없다 — 배포 전 cursor를 읽고, ledger가 빈 cursor는 이전 판도 읽는다."""
+    legacy = FeatureOperationReconcileCursor(dagster=DagsterRunWatermark(3, "run-3"))
+    assert "last_failure" not in legacy.to_json()
+    assert FeatureOperationReconcileCursor.from_json(legacy.to_json()) == legacy
+
+    with_failure = FeatureOperationReconcileCursor(
+        dagster=DagsterRunWatermark(3, "run-3"),
+        last_failure=ReconcileFailure("run-4", "SQLSTATE 53200", 2),
+    )
+    assert FeatureOperationReconcileCursor.from_json(with_failure.to_json()) == with_failure

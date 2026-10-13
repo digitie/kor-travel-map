@@ -139,6 +139,9 @@ from kortravelmap.infra.feature_operation_repo import (
     ensure_dagster_feature_operation as repo_ensure_dagster_feature_operation,
 )
 from kortravelmap.infra.feature_operation_repo import (
+    abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
+)
+from kortravelmap.infra.feature_operation_repo import (
     finish_dagster_feature_membership as repo_finish_dagster_feature_membership,
 )
 from kortravelmap.infra.feature_operation_repo import (
@@ -992,6 +995,30 @@ class AsyncKorTravelMapClient:
                     engine_started_at=engine_started_at,
                     engine_finished_at=engine_finished_at,
                     error=error,
+                )
+        except FeatureOperationInvariantConflict as exc:
+            await self._record_feature_operation_conflict(exc)
+            raise
+
+    async def abandon_dagster_feature_run(
+        self,
+        *,
+        dagster_run_id: str,
+        terminal_status: str,
+        engine_finished_at: datetime,
+        failure: str,
+        attempts: int,
+    ) -> DagsterFeatureOperationMutation:
+        """같은 이유로 거듭 실패한 terminal reconcile의 root를 ``failed``로 닫는다(ADR-111)."""
+        try:
+            async with self._session_factory() as session, session.begin():
+                return await repo_abandon_dagster_feature_run(
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    terminal_status=terminal_status,
+                    engine_finished_at=engine_finished_at,
+                    failure=failure,
+                    attempts=attempts,
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)
