@@ -43,7 +43,9 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
   **prod에 `5432`를 듣는 것은 없다.** map DB의 port를 외워 쓰지 말고 Map API 컨테이너의
   DSN에서 유도한다(`scripts/n150/`가 그렇게 한다). 자세히는 `docs/integration-map.md`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
-  `http://127.0.0.1:12501`(ADR-046/047).
+  `http://127.0.0.1:12501`(ADR-046/047). prod origin은 Manager가 정본(오늘 compose 기본값 + root `.env`; Manager
+  ADR-58 뒤에는 registry 파생 기본값만, `.env` URL 재정의는 validate 거부) — geo·transport 호스트의 odroid 이전 계획은
+  ADR-110(proposed, 미구현).
 - **frontend 정본**: Next.js 16 + React 19 + `maplibre-gl` + in-repo VWorld style
   builder(`src/lib/vworld-style.ts`). maplibre-vworld-js dep는 #476(T-MAP-VWORLD-04)에서
   제거됨 — ADR-036(v0.1.3 핀)은 무효, 정본은 `docs/architecture/debug-ui-package.md`.

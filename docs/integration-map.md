@@ -27,8 +27,8 @@
 | **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | n150: postgres 공용 **11000**(DB `pinvi`) · api **12801** · dagster 12802 · web 12805 (PinVi 저장소 자체 기본값은 api 9021 · web 9022) | PinVi README, ADR-047 |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
 | **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **공용 PostGIS**(map 포함, ADR-103)·RustFS·관측 스택 소유 | PostGIS 공용 **11000**(map 전용 12700은 이전 창에서 퇴역, 아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35·ADR-53 |
-| **kor-travel-transport** | 교통 데이터 수집·저장(오피넷 주유소·유가, 고속도로 돌발·휴게소·휴게소 유가, 공항 주차·메타데이터) — Map 주유소·휴게소·돌발·공항 feature의 **provider**(ADR-106) | API **14001**(host network, loopback) · 공개 `pr-api` 경유 export 불가 | kor-travel-transport ADR-013, `docs/openapi.json` |
-| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열. **계획(ADR-109 proposed, 미구현)**: Map은 `POST /v2/dataset/version`의 데이터 토큰 `data_token`(`dd1-`, geo ADR-069) **동등성** 소비자 — 다르면 재지오코딩, 없으면 계획 없이 Skip | **12501** | ADR-046/047, ADR-109 |
+| **kor-travel-transport** | 교통 데이터 수집·저장(오피넷 주유소·유가, 고속도로 돌발·휴게소·휴게소 유가, 공항 주차·메타데이터) — Map 주유소·휴게소·돌발·공항 feature의 **provider**(ADR-106) | API **14001**(host network; 오늘 n150 loopback) · 공개 `pr-api` 경유 export 불가. **계획(ADR-110 proposed, 미구현)**: 호스트 **odroid**(LAN; 주소는 Manager root `.env`), 포트·이름 불변 — 운영 origin 정본은 오늘 Manager compose 기본값 + root `.env`; Manager ADR-58 R2(proposed, 병렬 PR 미머지) 뒤에는 registry `hosts:` 파생 기본값뿐이고 root `.env`의 URL 재정의는 `targets validate`가 거부한다(키·토큰만 `.env`) | kor-travel-transport ADR-013·ADR-014(proposed, 병렬 PR 미머지), `docs/openapi.json` |
+| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열. **계획(ADR-109 proposed, 미구현)**: Map은 `POST /v2/dataset/version`의 데이터 토큰 `data_token`(`dd1-`, geo ADR-069) **동등성** 소비자 — 다르면 재지오코딩, 없으면 계획 없이 Skip. **계획(ADR-110 proposed, 미구현)**: 호스트 **odroid**(메모리 예산 조건 통과 시, 아니면 n150 잔류; 주소는 Manager root `.env`), 포트 불변 — 운영 origin 정본은 오늘 Manager compose 기본값 + root `.env`(Map 서비스 4곳에 같은 기본값, ADR-110 컨텍스트 1); Manager ADR-58 R2(proposed, 병렬 PR 미머지) 뒤에는 registry `hosts:` 파생 기본값뿐이고 `.env` URL 재정의는 validate가 거부 | **12501** | ADR-046/047, ADR-109, ADR-110·geo ADR-070(proposed, 병렬 PR 미머지) |
 
 > ⚠️ **n150 prod의 PostgreSQL은 공용 instance 하나다 (ADR-103, Manager ADR-53).**
 > map은 2026-09-29 10:48~11:33Z 이전 창에서 옮겼다(Part A 공용 튜닝 재시작 → Part B 이전, V1~V9 통과).
@@ -171,6 +171,14 @@
   `POST /v2/dataset/version`을 폴링해 `data_token`이 바뀌면 in-process로 계획을 만들고 전용 feature load
   job을 RunRequest로 띄운다(큐 `feature_update_requests` 아님). 재빌드(토큰 동일)는 0건, `data_token` 없음은 Skip.
   주기·Skip 조건·전이 규칙은 ADR-109 결정 5.
+- **Map → geo·transport가 LAN을 건넌다(계획, ADR-110 proposed, 미구현).** 두 피호출자가 odroid로 가면 화살표는
+  n150 → odroid LAN이고, 피호출자 다운은 RST가 아니라 **timeout**이다 — 오늘 단일 timeout(geo 10 s·transport 30 s),
+  계획은 connect 분리(T-MAP-02; 생성 지점·file:line은 ADR-110 컨텍스트 3). 값의 자리는 오늘 Manager compose 기본값 +
+  root `.env`이고, Manager ADR-58 R2(proposed, 병렬 PR 미머지) 뒤에는 registry `hosts:` 파생 기본값뿐이라 root `.env`의
+  URL 재정의는 `targets validate`가 거부한다 — Map 저장소에는 주소를 적지 않는다(#508 redaction
+  guard도 같은 뜻). geo 키 검증의 의미는 바뀌지 않는다(오늘도 대조된다 — ADR-110 컨텍스트 4; geo 재적재 뒤 재발급만
+  절차). UI 재빌드 없음(BFF `/api/geo`는 런타임 `KOR_TRAVEL_GEO_INTERNAL_URL` 우선). weather는 Map이 호출하지
+  않으므로(ADR-105) 해당 없음.
 
 ## 3. 인증·envelope — 표면별 의도적 차이 (D-08)
 
@@ -186,7 +194,7 @@
 | kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-map C6c contract fixture (`/v1/ops/contract-fixtures/c6c-cancel-probe/*`) | Docker Manager만 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:fixture`; AdminBFF·PinVi·read/cancel token은 불허 | `{data, meta}` durable fixture receipt | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
-| kor-travel-transport export (`/v1/service/exports/*`) | `X-Kor-Travel-Transport-Service-Token`(32자+, transport `TRANSPORT_SERVICE_EXPORT_TOKEN` = Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`) **그리고** 접속 peer 주소(transport `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`, 기본 loopback — `Host` header는 보지 않는다). 어긋나면 404로 경로를 숨긴다. Map 쪽 base URL은 `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`(운영 `http://127.0.0.1:14001`) | **무-envelope**. 주유소·휴게소·휴게소 유가는 `{items, next_cursor, has_more, collection}` cursor 페이지, 돌발은 `{collected_at, items, collection}` 활성 집합 전체, 공항은 `{generated_at, items}`. 근거 수집 이력 없음·실패·stale이면 모든 export가 503 | RFC7807 `problem+json`. Map은 `failure_kind`(`transport_hidden`·`transport_not_current`·`transport_empty`·`transport_contract`·`transport_malformed_upstream`)로 가른다 — packages/kor-travel-map-dagster/README.md |
+| kor-travel-transport export (`/v1/service/exports/*`) | `X-Kor-Travel-Transport-Service-Token`(32자+, transport `TRANSPORT_SERVICE_EXPORT_TOKEN` = Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`) **그리고** 접속 peer 주소(transport `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`, 기본 loopback — `Host` header는 보지 않는다). 어긋나면 404로 경로를 숨긴다. Map 쪽 base URL은 `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`(운영 `http://127.0.0.1:14001`; **계획(ADR-110 proposed, 미구현)**: 호스트 odroid로 — 값은 Manager compose/root `.env`, transport `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`에 n150 LAN 주소 `/32` 추가 필요(transport ADR-014 proposed, 병렬 PR 미머지; XFF 불가, peer = Map code-server의 LAN 주소)) | **무-envelope**. 주유소·휴게소·휴게소 유가는 `{items, next_cursor, has_more, collection}` cursor 페이지, 돌발은 `{collected_at, items, collection}` 활성 집합 전체, 공항은 `{generated_at, items}`. 근거 수집 이력 없음·실패·stale이면 모든 export가 503 | RFC7807 `problem+json`. Map은 `failure_kind`(`transport_hidden`·`transport_not_current`·`transport_empty`·`transport_contract`·`transport_malformed_upstream`)로 가른다 — packages/kor-travel-map-dagster/README.md |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
@@ -553,7 +561,7 @@ echo 예외가 아니라, admin provenance가 해석된 Feature identity/evidenc
 | **C6c cancel-probe fixture** | `docs/architecture/c6c-cancel-probe-fixture.md` + `openapi.service.json`의 `ops:fixture` 3 route + ADR-084 | Docker Manager F1D orchestrator; PinVi는 기존 cancel relay만 소비 |
 | **curation collection 표면** | 본 repo `packages/kor-travel-map-api/src/kortravelmap/api/routers/curations.py` + `openapi{,.user}.json`. CSV 정본은 `resources/curations/*.csv` + `manifest.json` | runtime identity lookup 소비자는 없음. PinVi pinned OpenAPI snapshot의 schema field hit는 호출 소비가 아님(2026-07-30) |
 | **feature alias-map 이관 (T-VN-32C)** | 본 repo `contracts/feature-alias-map-v1-golden.json`(`feature-alias-map-v1` — Map/PinVi 독립 재계산 golden) + `GET /v1/service/feature-alias-maps{,/checksum}`(`openapi.service.json`). 이관·복구 경계 전용 bulk read(ADR-068 결정 3) — 런타임 alias lookup 표면이 아니다 | PinVi vendored `apps/api/tests/contract/feature-alias-map-v1-golden.json` + 독립 구현 `app/core/feature_alias_contract.py` + 이관 실행기 `pinvi-feature-uuid-cutover` |
-| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증. **계획(ADR-109 proposed, 미구현)**: 네 v2 응답 최상위 `dataset{version_token, data_token}`(geo ADR-069)을 Map 클라이언트가 선택 파싱(없으면 None)하고 `KorTravelGeoRestClient.dataset_version()`이 `POST /v2/dataset/version`을 읽는다. Map은 geo 스펙을 vendoring·핀하지 않는다(자체 픽스처 — `dataset` 있음/없음 둘 다) | ADR-046 + geo ADR-064; ADR-109 + geo ADR-069(계획) |
+| geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) + public API key header 인증. **계획(ADR-109 proposed, 미구현)**: 네 v2 응답 최상위 `dataset{version_token, data_token}`(geo ADR-069)을 Map 클라이언트가 선택 파싱(없으면 None)하고 `KorTravelGeoRestClient.dataset_version()`이 `POST /v2/dataset/version`을 읽는다. Map은 geo 스펙을 vendoring·핀하지 않는다(자체 픽스처 — `dataset` 있음/없음 둘 다). 호스트 이전(ADR-110 계획)은 계약을 바꾸지 않는다 — 핀 금지 그대로 | ADR-046 + geo ADR-064; ADR-109 + geo ADR-069(계획); ADR-110(호스트) |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 
 > **`collection_key`는 안정 식별자가 아니다 (2026-07-30).** 공개/admin 응답에 실리지만

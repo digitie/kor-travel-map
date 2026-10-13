@@ -1,3 +1,97 @@
+## 2026-10-13 — geo·transport 호스트 odroid 이전(Track 2) Map 쪽 문서: 브랜치 `docs/adr-110-geo-transport-on-odroid`
+
+문서만 바뀐 PR(doc-only, origin/main `f7affea8` 위). Track 2 설계(geo·weather·transport 세 스택과 그 PG를 odroid로,
+포트·이름 동일·host만 n150 → odroid; 3차 적대 리뷰·2026-10-13 odroid 실측 반영본)에서 **Map 저장소가
+책임지는 것**만 ADR-110(proposed, 미구현)으로 옮기고 `T-MAP-01`·`T-MAP-02`를 열었다. 코드·`.env.example`·compose·
+CHANGELOG·OpenAPI·테스트는 건드리지 않았다. 호스트 플립 자체는 Manager ADR-58·geo ADR-070·transport ADR-014의 일이다.
+
+- **결정 요약(ADR-110).** (1) Map 저장소는 값을 바꾸지 않는다 — geo·transport origin의 정본은 오늘 Manager compose
+  기본값 + root `.env`(geo 기본값은 Map 서비스 **4곳** `:1582,1723,1813,1920`·transport는 code-server `:1732-1733`,
+  @08a515e; registry `hosts:` 파생은 Manager ADR-58 R2 — 오늘 registry에 host 필드 없음, 그 뒤 `.env` URL 재정의는
+  validate 거부); 플립 뒤 `ensure map`은 Map target 전 서비스 재생성(옛 값 든 컨테이너 0개 게이트);
+  `.env.example:198,234`는 standalone 값(주석은 T-MAP-02 코드 PR). (2) UI 재빌드
+  없음 — BFF `/api/geo`는 런타임 `KOR_TRAVEL_GEO_INTERNAL_URL` 우선(`route.ts:3-6`), 빌드 인자는 공개 host라 변경 0
+  (설계 §14-10은 열린 결정 1 — 설계는 추천 없이 두 선택지). (3) 장애 의미가 RST → timeout으로 바뀐다 — geo 10 s·
+  transport 30 s 단일 timeout(`settings.py:159-164,537-542`)을 `httpx.Timeout(<기존>, connect=<connect 필드>)`(기본값이
+  read·write·pool을 덮는다 — `Timeout(connect=, read=)` 둘만은 httpx 0.28.1에서 ValueError)으로 팩토리
+  하나씩(geo `geocoding.py`·transport `_transport_connection` 옆)으로 분리(T-MAP-02, 코드 후속; **geo 8곳·transport
+  3곳** — geo 8곳 중 `admin_issues.py:276,306`은 timeout 인자 없음(httpx 기본 5 s), `dagster/offline_uploads.py:50-53`·
+  `cli/main.py:447`은 10.0 하드코딩이라 settings를 읽지 않는다; 적용 범위는 lint로 효과 결박), 회로차단은 Map에
+  두지 않음(배치 호출이라 run 실패가 곧 신호; PinVi만), transport ±30 min 시계 검사는 fail-closed 유지. (4) geo
+  공개 키는 **오늘도 대조된다** — 이전으로 바뀌는 것 없음(geo 면제는 admin 프록시 컨텍스트만, `security.py:154-170`;
+  Map은 `X-KTG-API-Key`만 보냄 `geocoding.py:1289`; 08-13 401 사고가 저장소 안 증거). 위험은 geo 재적재로
+  `public_api_keys`가 비는 것뿐 → 키 재발급·root `.env` 재적용·컨테이너 전부 재생성·키 경로 200이 플립 9단계 필수
+  (외부 추적). VWorld 폴백은 Map #979 가드와 충돌해 채택 불가(열린 결정 3은 '추천 없음·(나)만 가능'). `9-전` curl은
+  선택적 smoke로 격하. (5) transport export allow-list에 n150 LAN 주소 `/32`(transport 쪽 변경; XFF 불가). (6) ADR-109 amend(109 상단에 역포인터 한 줄) — `GEO_HEAVY_POOL`
+  유지·근거만 'n150 디스크 대기' → 'odroid geo CPU 보호'; 센서·재지오코딩은 LAN 키 경로(RTT 9.7 ms, 전량 ≈2.5 h+
+  추정); odroid 풀로드 뒤 플립 시 전량 재계획 **수용을 추천**(소유자 결정 대기 — 열린 결정 2, 대안은 운영자 UI skip;
+  수용이면 mv_refresh 다음 날·야간 창 밖; dump 복원이면 0). (7) 전환 절차에서 Map이 하는 일은 단계 1·5·9-전·9·drill·11
+  (설계 §11.2 발췌; 2~4b·8a/8b는 외부 단계로 Map이 확인할 선행 효과만 — odroid plane healthy·`targets validate`
+  host·시계 동기) — 게이트는 효과(n150 피호출자 stop 상태에서 export 1회·키 경로 200·peer = n150 LAN 주소 로그·MOIS run
+  예산 10 % 안 FAILURE — 유도: 첫 chunk 500행 ÷ 동시성 2 × connect 2 s ≈ ≤502 s, 10 s면 ≈2,502 s로 10 % 초과).
+- **odroid 상태(FB §A3, 03:4xZ).** WSL 직접 ssh·NOPASSWD sudo·docker 그룹·NTP 수동 동기 **완료**; timesyncd 부팅
+  사이클 drop-in·compose v2/buildx·방화벽·fstab bind·swapfile **미완** — ADR 컨텍스트 7에 완료/미완을 그대로 적었다.
+- **설계와 달리 쓴 것(head `f7affea8` 재확인).** `docker/frontend.Dockerfile` 빌드 인자는 `:56`이 아니라 `:57`(ARG)·
+  `:62`(ENV); `kor_travel_geo_preflight_required`는 `:164-176`이 아니라 `:165-176`, transport base URL은 `:509-519`
+  (초고의 `:165-177`·`:509-520`은 한 줄 초과 — 1차 리뷰 정정); MOIS 동시성 `:364-374`, 예산 `:388-`; transport 시계
+  검사는 `kor_travel_transport.py:104`(`INCIDENT_SET_MAX_AGE` 30 min)·`:435-452`(설계 `:441-453`). geo client 생성
+  지점은 설계에 없던 file:line을 더한 것인데 초고의 "4곳"이 틀렸다 — 1차 리뷰(HIGH)가 `admin_issues.py:276,306`(timeout
+  없음)·`dagster/offline_uploads.py:50-53`·`cli/main.py:447`(10.0 하드코딩)을 찾아 **8곳**으로 고쳤고, 팩토리 자리
+  (`geocoding.py` 지역 import / `_transport_connection` 옆)와 lint 결박을 적었다. 설계 §9.1의 Map 행은 connect 분리만
+  요구하므로 회로차단은 Map 결정에서 명시적으로 뺐다(ADR-110 결정 3·열린 결정 4). weather는 Map이 호출하지 않아
+  (ADR-105) 범위 밖임을 한 줄로 못박았다. 설계 T-MAP-01의 `.env.example` 주석은 이 PR이 `.env.example`을 금지하므로
+  T-MAP-02 코드 PR로 옮겼다. 설계 정본 파일은 세션 scratchpad라 ADR 본문을 정본으로 선언하고 §는 출처 표기로 낮췄다.
+  **설계 §9.1 키 행·§5.6 ⑥의 "geo 키는 loopback 면제라 검증된 적 없다"는 틀렸다** — geo 면제는 admin 프록시
+  컨텍스트(CIDR+proxy secret+actor/roles)만이고 Map 호출은 오늘도 대조된다(ADR 컨텍스트 4에서 정정, geo ADR-070
+  작성자에게 전달). **T-MAP-02 착수 순서**를 설계 §13의 MGR → MAP 사슬에서 분리해 병렬을 제안했다(코드 의존 없음 —
+  열린 결정 6, 소유자 확인; 선행 T-GR-00-LEDGER·`geocoding.py` T-GR-01 공유). **LAN 주소 리터럴은 쓰지 않았다** —
+  `scripts/check_prod_redaction.py`(#508, `lint.yml`·pre-commit)가 docs의 사설 IP를 거부해 호스트 이름(`n150`·`odroid`)
+  으로 썼다(설계·지시문은 호스트를 LAN 주소 끝자리로 적지만 여기서는 조각도 쓰지 않는다).
+- **1차 리뷰 반영(2건, 19 finding).** 전부 반영: timesyncd 상태를 §A3(수동 동기 완료·drop-in 미완)로, §14-19를
+  '수용 추천 + 열린 결정 2'로, CLAUDE.md의 'Manager registry 정본'을 '오늘은 compose 기본값 + root `.env`(registry
+  파생은 ADR-58 계획)'·'값 없음'을 'standalone 값'으로, ADR-109에 amend 역포인터를, 제목 3곳 통일(connect 분리 포함),
+  열린 결정 1의 추천 출처 표기, 'Map만 끊긴다' → 'n150 consumer', T-MAP-02 동반 문구에 `settings.py:509-519` 설명,
+  T-MAP-01 종결 소유자(T-GR-00-LEDGER/T-MAP-02 PR), 'CI 대기 없이' → 'lint.yml 초록 뒤(소유자 지시)', T-GR-00-LEDGER
+  수치 갱신.
+- **2차 리뷰 반영(2건, 17 finding — 전부 반영).** HIGH 2: geo 키 전제 정정(위; 결정 4를 '재적재 시 키 소실'로 축소,
+  `9-전` curl을 선택 smoke로, integration-map·resume·acceptance 동일), `#508` redaction guard 실측 11 hit EXIT=1 →
+  IP 리터럴 전부 호스트 이름/placeholder로(EXIT=0 재확인). MED: (가) VWorld 폴백 '추천' 철회(Map #979 가드
+  `test_geo_key_provenance:493,506`·`test_compose_geo_key_resolution:143`·`test_deploy_automation:382`와 충돌 → 열린
+  결정 3 '추천 없음·(나)만'); `12501:12501` publish 인용 삭제(host network에서 `ports:` 무효 — 실제는
+  `KTG_API_HOST: 0.0.0.0` Manager compose `:1089`@08a515e); T-MAP-02 의존을 '선행 없음'에서 'T-GR-00-LEDGER 선행 +
+  T-GR-01과 `geocoding.py` 공유(늦은 PR 리베이스)'로 + 열린 결정 6; MockTransport 픽스처 삭제(항진명제 — backlog
+  포화 서버만); T-MAP-02 해제를 '(1)(2)(3) 초록 + 머지 + 4a 전 배포'로 한정하고 curl·drill을 종결 조건에서 뺌. LOW:
+  lint를 '`timeout=`이 팩토리 호출'로(settings float 직접 전달도 빨강), '설계 파일 보존은 T-MGR-07 몫' 삭제, 교차
+  ADR 번호에 '(계획, 미작성)', CLAUDE.md를 한 문장으로, Manager sha 드리프트(origin/main `094d3976`, transport 줄
+  `:1736` 부근) 주석, integration-map §2의 file:line·'8곳 중 4곳' 복제 삭제(ADR 포인터만), ADR-110 `## 후속` 절 추가.
+  범위 목록 밖 수정 1건: `docs/adr/109-geo-release-regeocode.md` amended-by 3줄(역포인터).
+- **3차 리뷰 반영(2건, 17 finding — 전부 반영, 기각 0).** HIGH 1: T-MAP-02의 유일한 코드 사양
+  `httpx.Timeout(connect=2.0, read=…)`이 httpx 0.28.1에서 `ValueError`(worktree에서 실행 재확인) → ADR 결정 3·tasks·
+  acceptance를 `httpx.Timeout(<기존>, connect=<connect 필드>)`(기본값이 read·write·pool을 덮는다)로, acceptance (1)에
+  `write == pool == read` 단언 추가. MED 5: geo base URL이 Manager compose의 Map 서비스 **4곳**(api·code-server·dagster·
+  daemon `:1582,1723,1813,1920`@08a515e — 로컬 Manager 체크아웃 `git show`로 두 ref 모두 확인)에 주입되는데 `:1582` 하나만
+  적고 단계 9를 'cs·API 재생성'이라 쓴 것을 '전 서비스 재생성 + 옛 값 든 컨테이너 0개 게이트'로 통일(결정 1·4(a)·7);
+  결정 7 표에 '2~4b(외부)'·'8a/8b(외부)' 행을 넣어 단계 5·9의 선행 조건(odroid plane healthy·`targets validate`
+  host·`timedatectl` synchronized·풀로드/mv_refresh/키 정책 완료)을 결박; 단계 9의 '센서 계획 1건' 게이트를 열린 결정
+  2(풀로드+수용 / dump 복원이면 0건 / T-GR-05 미배포면 해당 없음)로 분기; 교차 ADR 셋을 '미작성'에서 '**proposed·병렬
+  PR 미머지**'로(로컬 체크아웃 `ktdm-t2docs`·`geo-t2docs`·`transport-t2docs`에 본문 존재, origin/main에는 없음 — 6곳);
+  transport env 파일을 계획 이름 `.env.prod`가 아니라 오늘 이름 `.env.server14`(transport `README.md:123-124`)로 적고
+  `.env.prod`는 ADR-014 개명 계획으로. LOW 11: backlog 포화 레시피를 '사전 connect ≥3건으로 큐를 채운 뒤 측정, Linux
+  전제, non-routable 주소 금지'로; 잔존 `.13`/`.14` 조각(journal (7)·acceptance T-MAP-01)을 호스트 이름으로; T-MAP-01
+  종결 소유자를 T-GR-00-LEDGER 단일로(tasks·acceptance·resume); 'T-GR-01과 같은 client 생성 지점' → '같은 모듈, 충돌
+  범위는 import·새 함수 자리뿐'; drill 10 % 유도식(prefetch는 예외를 삼키고 `geocoding.py:430-432`, 실시간 조회가
+  `GeoRequestError`를 전파해 첫 chunk에서 FAILURE — ≤502 s vs 10 s면 2,502 s); ADR-58 R2 뒤 `.env` URL 재정의가
+  validate에서 **거부**됨을 컨텍스트 1·결정 1·integration-map·CLAUDE.md에 명시하고 "후속"에 표식 교체 세 시점을 둠;
+  결정 6 셋째 bullet의 'skip 쓰지 않는다/대안은 skip' 모순을 조건부 문장으로; `up{host="odroid"}`에 'ADR-58 파생물
+  계획, 오늘 Prometheus에 host 라벨 없음' 표식; 저장소 밖 메모리 파일 인용을 `integration-map.md` §4 포인터로.
+- **원장.** `tasks.md`에 `T-MAP-01`·`02`(접두사 임시, ADR-110 열린 결정 5), `tasks-acceptance.md`에 두 절
+  (`tests/lint/test_task_ledger_conventions.py`가 열린 task마다 절을 요구한다). `journal.md`는 이 항목 포함 약 224 KB로
+  상한 225,280 B 아래라 아카이브 분리는 하지 않았다 — 여유 ≈1.3 KB라 다음 경계 분리(`T-GR-00-LEDGER`)는 어느 PR보다
+  먼저다.
+- **미결 소유자 결정**: ADR-110 열린 결정 6건(BFF 경로 §14-10·geo 적재 방식 §14-8 + 재계획 수용/skip §14-19·키 정책
+  §14-21(재적재 시점의 일)·회로차단·task 접두사·T-MAP-02 착수 순서) + 외부: geo가 실제로 odroid로 가는지(설계 §3.2
+  조건 3·§14-12 — 미달이면 ADR-110 geo 절은 발효하지 않는다).
+
 ## 2026-10-13 — geo 릴리스 재지오코딩 설계: 브랜치 `docs/adr-109-geo-release-regeocode`
 
 문서만 바뀐 PR(doc-only). geo 주소 데이터셋 릴리스 → Map 반영 설계(Track 1, 2차 적대 리뷰 2명 반영)를 ADR-109

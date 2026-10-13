@@ -8,6 +8,9 @@
   geo 저장소의 ADR이며 본 저장소의 ADR-069와 다르다), ADR-080(finding generation), ADR-081(cache target
   generation), ADR-098(provider identity는 claim), ADR-106(transport export), ADR-108(MOIS 재개형 적재 —
   본 ADR이 표식 조건·재시도 규칙·이어 달리기를 amend한다)
+- amended by: **ADR-110**(proposed, 2026-10-13) — `GEO_HEAVY_POOL` 유지 근거('n150 디스크 대기' → 'odroid geo CPU
+  보호')와 geo 호스트 플립(odroid 풀로드) 직후 센서가 만드는 전량 재계획 비용·센서/재지오코딩의 LAN 키 경로. 본 ADR의
+  결정 자체는 바뀌지 않는다.
 - 코딩용 상세(표·판정 표·run_key·테스트 목록): [`docs/etl/address-geocoding.md`](../etl/address-geocoding.md)
 
 ## 컨텍스트
