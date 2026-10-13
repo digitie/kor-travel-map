@@ -1045,7 +1045,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         """
         request_id = _request_id(request)
         if sqlstate_of(exc) == "55P03":
-            # 단건 Feature writer가 대량 curation writer의 `feature-write-all` gate를
+            # 단건 Feature writer가 대량 curation writer의 전역 Feature gate를
             # lock_timeout(5s) 안에 얻지 못했다 — 잠시 뒤 다시 하면 된다(ADR-111).
             _logger.warning("lock_timeout (request_id=%s): %s", request_id, request.url.path)
             return _error_response(

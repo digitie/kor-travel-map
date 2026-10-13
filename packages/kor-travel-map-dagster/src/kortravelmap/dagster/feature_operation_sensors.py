@@ -588,7 +588,7 @@ def _failure_signature(error: BaseException) -> tuple[str, bool]:
 
 def _backoff_seconds(count: int) -> int:
     return min(
-        FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS * 2 ** min(count - 1, 16),
+        FEATURE_OPERATION_RECONCILE_BACKOFF_BASE_SECONDS << min(count - 1, 16),
         FEATURE_OPERATION_RECONCILE_BACKOFF_MAX_SECONDS,
     )
 
