@@ -71,7 +71,11 @@ def test_chain17_keeps_pair_preflight_as_a_hard_gate_before_rotation() -> None:
     source = _read("chain17.sh")
     preflight = source.index('--rotation-preflight "$MAP" "$PINVI"')
     refusal = source.index('die "rotation preflight 거부:', preflight)
-    rotation = source.index("/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair")
+    # 회전은 Manager launcher의 **호출** 자리로 본다 — `ROTATE` 경로 대입은 상단이다.
+    assert _assignment(source, "ROTATE") == (
+        "/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair"
+    )
+    rotation = source.index('"$ROTATE" "$MAP" "$PINVI" "$REASON"')
     rebuild = source.index("/opt/kor-travel-docker-manager/scripts/run-pinned-rebuild-once")
     assert preflight < refusal < rotation < rebuild
     assert '/root/chain16.sh "$MAP" "$PINVI"' in source

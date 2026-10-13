@@ -1,3 +1,16 @@
+## 2026-10-13 — chain17 B 단계 pair 회전 수정: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
+
+**다음 한 작업: CI(lint·unit) 초록 → 적대 리뷰 → 머지 → n150에서 `sudo install -o root -g root -m 0700
+scripts/n150/chain17.sh /root/`로 재복사하고 `/root/chain17-pv.sh`를 치운 뒤, 실패했던 pair(Map `c4d17343`·PinVi `2fa1c166`)를
+`PINVI_OVERRIDE=<sha40> /root/chain17.sh …`로 재실행해 B 단계가 회전(또는 이미 수동 회전됐으면 pair 일치로 skip)하는지 본다.**
+
+- 바뀐 것: `scripts/n150/chain17.sh` B 단계 skip 조건이 원장 map·pinvi **둘 다** 일치할 때로 좁혀졌고 회전 뒤 검증도 pair다;
+  `PINVI_OVERRIDE`(운영자 `-pv` 변형; 원장과 다른 PinVi를 올릴 때는 같은 Map이든 새 Map이든 준다)를 정본에 흡수;
+  원장을 못 읽은 빈 값은 회전 시도 없이 멈춤; launcher 경로 `ROTATE` 변수. 효과 결박 테스트
+  `tests/lint/test_chain17_rotates_when_only_pinvi_changes.py`(stub ktdctl·rotate-pinned-pair 위에서 B 단계 실행).
+  journal은 §8 상한 초과로 2026-09-14~15 8건을 `docs/archive/journal-2026-09c.md`로 분리했다.
+- 바뀌지 않은 것: Manager registry·launcher, chain16 이하, n150 호스트(읽기만). 원인·증거는 journal 2026-10-13.
+
 ## 2026-10-13 — geo·transport 호스트 odroid 이전(ADR-110 proposed, Track 2): 브랜치 `docs/adr-110-geo-transport-on-odroid`
 
 **다음 한 작업: 이 doc-only PR을 `lint.yml` 초록 뒤 머지해 `T-MAP-01`을 닫는다(`[x]`·tasks-done 이관은 T-GR-00-LEDGER

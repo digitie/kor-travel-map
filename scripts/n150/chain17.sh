@@ -7,7 +7,9 @@
 #
 # chain12.sh와 같은 일을 하지만 **리터럴을 하나도 들고 있지 않다**:
 #   - Map revision: 인자
-#   - PinVi revision: 핀 원장(`ktdctl pin show`)
+#   - PinVi revision: 핀 원장(`ktdctl pin show`)의 **현재** pinvi가 기본 — 생략하면 그 값을
+#     그대로 다시 핀한다. 원하는 PinVi가 원장과 다를 때는(같은 Map이든 새 Map이든)
+#     `PINVI_OVERRIDE=<sha40>` 환경변수로 준다(B 단계가 원장과 pair로 비교해 회전한다)
 #   - Manager revision: 설치본의 `.ktdm-source-revision`
 # chain12는 Manager revision을 본문에 박아 두었고 그것이 낡아 재사용이 불가능했다.
 #
@@ -26,21 +28,26 @@ D2U="${5:?d2 unit}"
 TAG="${6:?tag}"
 
 KTDCTL=/opt/kor-travel-docker-manager/backend/.venv/bin/ktdctl
+ROTATE=/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair
 DRIVER=/opt/kor-travel-docker-manager/scripts/m05_isolated_e2e.py
 PYTHON=/opt/kor-travel-docker-manager/backend/.venv/bin/python
 
 die() { echo "!! $1" >&2; exit 1; }
 say() { printf '\n===== %s =====\n' "$1"; }
+# 핀 원장의 한 항목(`map`·`pinvi`)을 읽는다. 원장은 `ktdctl pin show`로만 읽는다(README).
+pin() { "$KTDCTL" pin show 2>/dev/null | awk -v key="$1" '$1==key{print $2; exit}'; }
 
 [[ "$MAP" =~ ^[0-9a-f]{40}$ ]] || die "MAP revision이 40-hex가 아니다"
 
 say "0. 인자 유도"
-PINVI="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="pinvi"{print $2; exit}')"
-[[ "$PINVI" =~ ^[0-9a-f]{40}$ ]] || die "핀 원장에서 PinVi revision을 읽지 못했다"
+PINVI="${PINVI_OVERRIDE:-}"
+PINVI_SOURCE="PINVI_OVERRIDE"
+[ -n "$PINVI" ] || { PINVI="$(pin pinvi)"; PINVI_SOURCE="핀 원장의 현재 pinvi를 그대로 다시 핀한다"; }
+[[ "$PINVI" =~ ^[0-9a-f]{40}$ ]] || die "PinVi revision이 40-hex가 아니다(핀 원장 또는 PINVI_OVERRIDE)"
 MGR="$(cat /opt/kor-travel-docker-manager/.ktdm-source-revision 2>/dev/null | tr -d '[:space:]')"
 [[ "$MGR" =~ ^[0-9a-f]{40}$ ]] || die "설치된 Manager revision을 읽지 못했다"
 echo "  map     =$MAP"
-echo "  pinvi   =$PINVI  (핀 원장)"
+echo "  pinvi   =$PINVI  ($PINVI_SOURCE)"
 echo "  manager =$MGR  (설치 매니페스트)"
 
 say "A. 회전 preflight"
@@ -51,13 +58,20 @@ fi
 echo "  OK"
 
 say "B. 회전"
-CURRENT_MAP="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="map"{print $2; exit}')"
-if [ "$CURRENT_MAP" = "$MAP" ]; then
-  # C에서 실패한 뒤 다시 돌리는 경우다. 같은 pair로의 회전은 registry가 거부한다(바뀌는 revision 없음).
-  echo "  이미 회전됨(원장 map=$MAP) — 건너뛴다"
+# 원장은 pair다 — "이미 회전됨"은 map·pinvi **둘 다** 원장과 같을 때뿐이다(C에서 실패한 뒤 다시
+# 돌리는 경우; 같은 pair로의 회전은 registry가 거부한다). 하나라도 다르면 회전한다 — 같은 Map에
+# 새 PinVi를 PINVI_OVERRIDE로 준 경우가 그렇다(registry는 같은 Map·다른 PinVi 회전을 허용한다).
+# map만 보고 건너뛰면 원장의 옛 PinVi로 재구축·스모크가 돌아 같은 실패가 재현된다(2026-10-13 t1013e).
+CURRENT_MAP="$(pin map)"
+CURRENT_PINVI="$(pin pinvi)"
+# 원장을 못 읽은 것(빈 값)은 "다른 pair"가 아니다 — 회전을 시도하지 않고 그 사유로 멈춘다.
+[[ "$CURRENT_MAP" =~ ^[0-9a-f]{40}$ && "$CURRENT_PINVI" =~ ^[0-9a-f]{40}$ ]] \
+  || die "핀 원장에서 map·pinvi를 읽지 못했다(ktdctl pin show)"
+if [ "$CURRENT_MAP" = "$MAP" ] && [ "$CURRENT_PINVI" = "$PINVI" ]; then
+  echo "  이미 회전됨(원장 map=$MAP pinvi=$PINVI) — 건너뛴다"
 else
   # 성공하면 history 두 줄만, 실패하면 출력 전체를 보인다 — 거르면 실패 사유가 사라진다.
-  ROTATION="$(/opt/kor-travel-docker-manager/scripts/rotate-pinned-pair "$MAP" "$PINVI" "$REASON" 2>&1)"
+  ROTATION="$("$ROTATE" "$MAP" "$PINVI" "$REASON" 2>&1)"
   ROTATION_STATUS=$?
   if [ "$ROTATION_STATUS" -ne 0 ]; then
     printf '%s\n' "$ROTATION" >&2
@@ -65,8 +79,9 @@ else
   fi
   printf '%s\n' "$ROTATION" | grep -A 1 'history ' | head -2
 fi
-NEWMAP="$("$KTDCTL" pin show 2>/dev/null | awk '$1=="map"{print $2; exit}')"
-[ "$NEWMAP" = "$MAP" ] || die "회전 뒤에도 원장이 $MAP 을 가리키지 않는다"
+# 회전 뒤 검증도 pair로 한다 — map만 보면 위와 같은 구멍이 여기서 다시 열린다.
+[ "$(pin map)" = "$MAP" ] || die "회전 뒤에도 원장 map이 $MAP 이 아니다"
+[ "$(pin pinvi)" = "$PINVI" ] || die "회전 뒤에도 원장 pinvi가 $PINVI 가 아니다"
 
 say "C. rebuild ($RB)"
 OUT="/root/rebuild-$RB"
