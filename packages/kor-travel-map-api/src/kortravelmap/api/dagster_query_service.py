@@ -25,11 +25,13 @@ __all__ = [
 ]
 
 # 모든 tick 상태를 명시하면 전체 이력 batch rank 대신 selector별 LIMIT 조회를 사용한다.
-# 공용 Dagster의 이력이 커져도 최신 3건의 정보와 상태를 그대로 제공한다.
+# 그래도 ``afterTimestamp``가 없으면 storage가 instigator의 전체 이력을 읽으므로 창을 둔다
+# (``dagster_graphql.SCHEDULE_TICK_WINDOW_SECONDS``·``SENSOR_TICK_WINDOW_SECONDS``).
 _DAGSTER_SUMMARY_QUERY = """
 query KorTravelMapDagsterSummary(
   $limit: Int!, $repositorySelector: RepositorySelector!,
-  $runsFilter: RunsFilter!, $activeRunsFilter: RunsFilter!
+  $runsFilter: RunsFilter!, $activeRunsFilter: RunsFilter!,
+  $scheduleTicksAfter: Float!, $sensorTicksAfter: Float!
 ) {
   version
   repositoryOrError(repositorySelector: $repositorySelector) {
@@ -53,7 +55,10 @@ query KorTravelMapDagsterSummary(
           status
           repositoryName
           repositoryLocationName
-          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
+          ticks(
+            limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE],
+            afterTimestamp: $scheduleTicksAfter
+          ) {
             tickId
             status
             timestamp
@@ -70,7 +75,10 @@ query KorTravelMapDagsterSummary(
         name
         sensorState {
           status
-          ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE]) {
+          ticks(
+            limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE],
+            afterTimestamp: $sensorTicksAfter
+          ) {
             tickId
             status
             timestamp
@@ -307,6 +315,7 @@ async def get_summary(
                 "activeRunsFilter": urls.runs_filter(
                     statuses=dagster_graphql.ACTIVE_RUN_STATUSES,
                 ),
+                **dagster_graphql.tick_window_variables(),
             },
             query=_DAGSTER_SUMMARY_QUERY,
         )

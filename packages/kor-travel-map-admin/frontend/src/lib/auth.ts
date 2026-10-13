@@ -1,7 +1,9 @@
 import { sanitizeLocalPath as commonSanitizeLocalPath } from "@kor-travel/ui/navigation";
 import type { NextRequest } from "next/server";
 
-export const SESSION_COOKIE_NAME = "ktm_admin_session";
+import { SESSION_COOKIE_NAME } from "./session-cookie";
+
+export { SESSION_COOKIE_NAME };
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 
 const ADMIN_USERNAME_ENV = "KOR_TRAVEL_MAP_UI_ADMIN_USERNAME";

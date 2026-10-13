@@ -1193,12 +1193,16 @@ def test_overview_combines_db_counts_and_dagster(
     async def _fake_counts(_session: Any) -> PipelineStatusCounts:
         return _counts()
 
+    # tick 창은 호출 시각 기준이다 — 시계를 고정해 값까지 대조한다.
+    monkeypatch.setattr(dagster_mod, "time", lambda: 1_000_000_000.0)
+
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == pipeline_mod._PIPELINE_OVERVIEW_QUERY
         assert kwargs["variables"] == {
             "limit": 5,
             "repositorySelector": _MAP_REPOSITORY_SELECTOR,
             "runsFilter": {"tags": [_MAP_REPOSITORY_RUN_TAG]},
+            "sensorTicksAfter": 1_000_000_000.0 - dagster_mod.SENSOR_TICK_WINDOW_SECONDS,
         }
         return _RUNS_GRAPHQL_PAYLOAD
 
@@ -2572,8 +2576,15 @@ def test_mois_source_sync_precheck_transport_failure_is_problem_503(
 def test_schedules_merges_overrides_and_returns_sensors(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(dagster_mod, "time", lambda: 1_000_000_000.0)
+
     async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
         assert kwargs["query"] == pipeline_mod._PIPELINE_SCHEDULES_QUERY
+        assert kwargs["variables"] == {
+            "repositorySelector": _MAP_REPOSITORY_SELECTOR,
+            "scheduleTicksAfter": 1_000_000_000.0 - dagster_mod.SCHEDULE_TICK_WINDOW_SECONDS,
+            "sensorTicksAfter": 1_000_000_000.0 - dagster_mod.SENSOR_TICK_WINDOW_SECONDS,
+        }
         return _SCHEDULES_GRAPHQL_PAYLOAD
 
     async def _overrides(_session: Any) -> dict[str, str]:

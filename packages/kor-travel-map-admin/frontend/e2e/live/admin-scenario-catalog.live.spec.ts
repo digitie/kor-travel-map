@@ -81,10 +81,40 @@ test.describe("admin live scenario catalog", () => {
       observed.add(apiContract(request.url(), request.method()));
     });
 
+    const overviewResponse = page.waitForResponse(
+      (response) =>
+        apiContract(response.url(), response.request().method()) ===
+        "GET /v1/ops/pipeline/overview",
+      { timeout: 60_000 },
+    );
     await page.goto("/ops/pipeline");
     await expect(
       page.getByRole("heading", { level: 1, name: "파이프라인" }),
     ).toBeVisible(READY);
+    // 전제 1: overview 자체가 성공해야 한다. 실패하면 화면은 비활성 버튼만 남겨
+    // 아래 단언이 원인 없는 15초 timeout이 된다 — 여기서 상태 코드로 끝낸다.
+    const overview = await overviewResponse;
+    if (!overview.ok()) {
+      throw new Error(
+        `전제 미충족: GET /v1/ops/pipeline/overview가 HTTP ${overview.status()}로 실패했다`,
+      );
+    }
+    // 전제 2: 갱신 요청 dialog(= `/v1/ops/datasets` 호출)는 큐 sensor가 RUNNING으로
+    // 확인될 때만 렌더된다. overview가 도착하면 둘 중 하나가 반드시 보이므로 먼저
+    // 그것을 기다리고, 차단 alert면 datasets 관측 timeout 대신 원인을 그대로 낸다.
+    const queueAlert = page.getByTestId("queue-sensor-alert");
+    const createButton = page.getByRole("button", {
+      name: "갱신 요청 생성",
+      exact: true,
+    });
+    await expect(queueAlert.or(createButton)).toBeVisible(READY);
+    if (await queueAlert.isVisible()) {
+      throw new Error(
+        `전제 미충족: 큐 sensor 차단 alert가 떠 있어 갱신 요청 dialog가 렌더되지 않는다 — ${(
+          await queueAlert.innerText()
+        ).replace(/\s+/g, " ")}`,
+      );
+    }
     await expect
       .poll(() => observed.has("GET /v1/ops/datasets"), READY)
       .toBe(true);

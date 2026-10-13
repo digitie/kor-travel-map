@@ -21,6 +21,7 @@
     "e2e:mocked:checkpoint": "node e2e/run-mocked-checkpoint.mjs",
     "e2e:live": "playwright test --config playwright.live.config.ts",
     "e2e:live:cache-target-streams": "playwright test --config playwright.cache-target-streams.live.config.ts",
+    "e2e:list": "playwright test --list --reporter=dot && playwright test --config playwright.live.config.ts --list --reporter=./e2e/reporter-load-check.ts && playwright test --config playwright.cache-target-streams.live.config.ts --list --reporter=dot",
     "e2e:ui": "playwright test --ui",
     "e2e:install": "playwright install chromium",
     "e2e:report": "playwright show-report"

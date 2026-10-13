@@ -123,12 +123,20 @@ chown -R digitie:digitie "$NEW"
 [ -e "$NEW/node_modules" ] || sudo -u digitie ln -s /home/digitie/kor-travel-map/node_modules "$NEW/node_modules"
 [ -e "$NEW/$FE/node_modules" ] || sudo -u digitie ln -s "/home/digitie/kor-travel-map/$FE/node_modules" "$NEW/$FE/node_modules"
 rm -rf /tmp/kor-travel-map-playwright
-D1OUT=$(sudo -u digitie -H \
-  --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_USERNAME,E2E_ADMIN_PASSWORD,E2E_LIVE_ALLOW_PROD \
-  bash -c "cd $NEW/$FE && export E2E_LIVE_WORKERS=1 PLAYWRIGHT_ARTIFACT_ROOT=$D1ROOT && rm -rf $D1ROOT && /home/digitie/kor-travel-map/node_modules/.bin/playwright test --config playwright.live.config.ts --workers=1 --reporter=line e2e/live/admin-scenario-catalog.live.spec.ts e2e/live/backups-restore.live.spec.ts e2e/live/home-dashboard-roundtrip.live.spec.ts e2e/live/logs.live.spec.ts 2>&1 | tail -3")
+D1SPECS="e2e/live/admin-scenario-catalog.live.spec.ts e2e/live/backups-restore.live.spec.ts e2e/live/home-dashboard-roundtrip.live.spec.ts e2e/live/logs.live.spec.ts"
+d1() {
+  sudo -u digitie -H \
+    --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_USERNAME,E2E_ADMIN_PASSWORD,E2E_LIVE_ALLOW_PROD \
+    bash -c "cd $NEW/$FE && export E2E_LIVE_WORKERS=1 PLAYWRIGHT_ARTIFACT_ROOT=$D1ROOT && rm -rf $D1ROOT && /home/digitie/kor-travel-map/node_modules/.bin/playwright test --config playwright.live.config.ts --workers=1 $* $D1SPECS 2>&1"
+}
+# 초록은 "실패 줄이 없다"가 아니라 "목록의 모든 테스트가 passed"다. skipped·did not run도
+# 초록이 아니다 — 전제가 빠져 건너뛴 spec을 통과로 세면 D1이 본 것이 줄어도 모른다.
+D1EXPECT=$(d1 --list | sed -nE 's/^Total: ([0-9]+) tests? in .*/\1/p')
+[ -n "$D1EXPECT" ] && [ "$D1EXPECT" -gt 0 ] || die "D1 목록(--list)을 읽지 못했다"
+D1OUT=$(d1 --reporter=line | tail -4)
 echo "$D1OUT"
-echo "$D1OUT" | grep -qE '[0-9]+ passed' || die "D1 결과를 읽지 못했다"
-echo "$D1OUT" | grep -qE '[0-9]+ (failed|flaky)' && die "D1 실패"
+echo "$D1OUT" | grep -qE "^ *$D1EXPECT passed" || die "D1: 목록 ${D1EXPECT}건이 전부 passed가 아니다"
+echo "$D1OUT" | grep -qE '[0-9]+ (failed|flaky|skipped|did not run|interrupted)' && die "D1 실패"
 
 say "G. lane 정리"
 if [ -e "$R/BLOCKED.json" ]; then

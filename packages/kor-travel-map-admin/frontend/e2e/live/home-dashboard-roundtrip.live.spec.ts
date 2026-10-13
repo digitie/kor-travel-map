@@ -58,10 +58,13 @@ test.describe("운영 홈 live canonical round-trip", () => {
 
     const first = executionsBody.data.items[0];
     if (first) {
-      const row = page.getByRole("row", {
-        name: new RegExp(first.kind),
-      });
-      await expect(row).toContainText(shortId(first.id));
+      // 행은 **id로** 찾는다. kind로 찾으면 첫 페이지에 같은 kind 실행이 여럿일 때
+      // (prod 2026-10-13: import_job 8행) strict mode 위반으로 죽는다.
+      const row = page
+        .getByRole("row")
+        .filter({ hasText: shortId(first.id) })
+        .filter({ hasText: first.kind });
+      await expect(row).toHaveCount(1);
       await expect(row.getByRole("link")).toHaveAttribute(
         "href",
         `/ops/pipeline?execution=${first.kind}:${encodeURIComponent(first.id)}`,

@@ -41,6 +41,7 @@ import {
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SENSOR_TICK_WINDOW_LABEL } from "@/lib/dagster-tick-window";
 import { NULL_GLYPH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -855,6 +856,10 @@ function ScheduleSummary({
               {sensor.recent_ticks?.[0]?.error ? (
                 <span className="text-xs text-destructive">
                   최근 tick 오류: {sensor.recent_ticks[0].error.message}
+                </span>
+              ) : sensor.status === "RUNNING" && !sensor.recent_ticks?.length ? (
+                <span className="text-xs text-muted-foreground">
+                  {SENSOR_TICK_WINDOW_LABEL}
                 </span>
               ) : null}
             </li>
