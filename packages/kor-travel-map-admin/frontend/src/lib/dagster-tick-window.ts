@@ -6,11 +6,18 @@
  * 창 밖의 tick은 응답에 없다 — RUNNING인데 `recent_ticks`가 비면 "멈춤"인지 "아직 안 돎"인지
  * 응답만으로는 모른다. 그래서 빈 목록을 "tick 없음"이 아니라 "창 안 tick 없음"으로 표시한다.
  */
-export const SCHEDULE_TICK_WINDOW_SECONDS = 2 * 24 * 60 * 60;
-export const SENSOR_TICK_WINDOW_SECONDS = 60 * 60;
+const SCHEDULE_TICK_WINDOW_SECONDS = 2 * 24 * 60 * 60;
+const SENSOR_TICK_WINDOW_SECONDS = 60 * 60;
 
-export const SCHEDULE_TICK_WINDOW_LABEL = "최근 2일 tick 없음";
-export const SENSOR_TICK_WINDOW_LABEL = "최근 1시간 tick 없음";
+/** 창 길이를 사람이 읽는 말로 — 하루 단위로 떨어지면 "N일", 아니면 "N시간". */
+function windowLabel(seconds: number): string {
+  const span =
+    seconds % 86_400 === 0 ? `${seconds / 86_400}일` : `${Math.round(seconds / 3_600)}시간`;
+  return `최근 ${span} tick 없음`;
+}
+
+export const SCHEDULE_TICK_WINDOW_LABEL = windowLabel(SCHEDULE_TICK_WINDOW_SECONDS);
+export const SENSOR_TICK_WINDOW_LABEL = windowLabel(SENSOR_TICK_WINDOW_SECONDS);
 
 type Tick = { status: string; timestamp: number | null } | null;
 

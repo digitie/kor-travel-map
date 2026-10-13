@@ -16,7 +16,7 @@ storage에서 읽는다. 공유 ``dagster_shared``의 ``job_ticks``가 커지자
    줄이거나(주간·월간 tick이 더 자주 빈다) 상한을 근거와 함께 올리는 선택을 강제한다. sensor
    창은 가장 느린 sensor 간격의 10배 이상이어야 정상 sensor가 비지 않는다.
 3. tick을 고르는 문서가 이 세 개뿐인가 — 새 문서가 생기면 여기에 더해야 1이 그것을 본다.
-4. 관리자 UI의 창 표지 값이 API 창과 같은가.
+4. 관리자 UI 표지가 쓰는 창 값이 API 창과 같은가.
 
 dagster 비공개 경로(``instance_for_test``·``InProcessCodeLocationOrigin``·
 ``cron_string_iterator``)는 ``docker/constraints-dagster.txt``의 버전에서 확인했다. 올릴 때
@@ -293,21 +293,15 @@ def test_every_tick_selecting_document_is_covered() -> None:
     assert found == set(_DOCUMENTS), found ^ set(_DOCUMENTS)
 
 
-def test_admin_ui_window_labels_match_the_api_windows() -> None:
+def test_admin_ui_windows_match_the_api_windows() -> None:
+    """UI 표지("최근 N일/N시간 tick 없음")는 이 값에서 만들어진다(vitest가 문구를 본다)."""
+
     source = _ADMIN_WINDOW_TS.read_text(encoding="utf-8")
     for name, value in (
         ("SCHEDULE_TICK_WINDOW_SECONDS", dagster_graphql.SCHEDULE_TICK_WINDOW_SECONDS),
         ("SENSOR_TICK_WINDOW_SECONDS", dagster_graphql.SENSOR_TICK_WINDOW_SECONDS),
     ):
-        match = re.search(rf"export const {name} = ([0-9 *]+);", source)
+        match = re.search(rf"^(?:export )?const {name} = ([0-9 *]+);", source, flags=re.M)
         assert match is not None, f"{_ADMIN_WINDOW_TS}에 {name}이 없다"
         factors = [int(part) for part in match.group(1).split("*")]
         assert math.prod(factors) == value, (name, match.group(1), value)
-    for label, seconds in (
-        ("SCHEDULE_TICK_WINDOW_LABEL", dagster_graphql.SCHEDULE_TICK_WINDOW_SECONDS),
-        ("SENSOR_TICK_WINDOW_LABEL", dagster_graphql.SENSOR_TICK_WINDOW_SECONDS),
-    ):
-        text = re.search(rf'export const {label} = "([^"]+)";', source)
-        assert text is not None, label
-        human = f"{seconds // 86400}일" if seconds % 86400 == 0 else f"{seconds // 3600}시간"
-        assert human in text.group(1), (label, text.group(1), human)

@@ -2,8 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   lastTickOrWindowNotice,
+  SCHEDULE_TICK_WINDOW_LABEL,
   SENSOR_TICK_WINDOW_LABEL,
 } from "./dagster-tick-window";
+
+describe("window labels", () => {
+  it("names the API windows in the operator's words", () => {
+    expect(SCHEDULE_TICK_WINDOW_LABEL).toBe("최근 2일 tick 없음");
+    expect(SENSOR_TICK_WINDOW_LABEL).toBe("최근 1시간 tick 없음");
+  });
+});
 
 describe("lastTickOrWindowNotice", () => {
   it("returns the newest tick when the window has one", () => {
