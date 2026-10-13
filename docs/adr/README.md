@@ -1,7 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-110.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-111.**
 
+- [ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다](110-geo-transport-hosts-move-to-odroid.md) — proposed, 2026-10-13 (미구현, T-MAP-01~02; ADR-109 amend; 호스트 플립은 Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed, 병렬 PR 미머지).
 - [ADR-109 — geo 주소 데이터셋 릴리스 감지·재지오코딩](109-geo-release-regeocode.md) — proposed, 2026-10-13 (미구현, T-GR-01~08).
 - [ADR-108 — MOIS 인허가 재개형 chunk commit 적재](108-mois-resumable-chunked-load.md) — proposed, 2026-10-12.
 - [ADR-107 — Dagster 공통 런타임·관리자 UI 채택](107-common-dagster-runtime.md) — accepted, 2026-10-05.
@@ -127,6 +128,7 @@
 | ADR-107 | Dagster 복구·제한 전송과 관리자 UI의 Common 채택 | [107-common-dagster-runtime.md](107-common-dagster-runtime.md) |
 | ADR-108 | MOIS 인허가 적재는 원천 내용을 재개 키로 하는 chunk commit 적재다 | [108-mois-resumable-chunked-load.md](108-mois-resumable-chunked-load.md) |
 | ADR-109 | geo 주소 데이터셋 릴리스는 데이터 토큰(`dd1-`)으로 감지하고, 적재 경로를 재사용해 다시 지오코딩한다 (proposed, 미구현) | [109-geo-release-regeocode.md](109-geo-release-regeocode.md) |
+| ADR-110 | geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다 (proposed, 미구현; ADR-109 amend) | [110-geo-transport-hosts-move-to-odroid.md](110-geo-transport-hosts-move-to-odroid.md) |
 
 ## 새 ADR 작성 규약
 

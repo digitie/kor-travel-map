@@ -1,3 +1,32 @@
+## 2026-10-13 — geo·transport 호스트 odroid 이전(ADR-110 proposed, Track 2): 브랜치 `docs/adr-110-geo-transport-on-odroid`
+
+**다음 한 작업: 이 doc-only PR을 `lint.yml` 초록 뒤 머지해 `T-MAP-01`을 닫는다(`[x]`·tasks-done 이관은 T-GR-00-LEDGER
+PR — 단일 소유) → **T-GR-00-LEDGER(journal 분리)가 어느 코드 PR보다 먼저** → `T-MAP-02`(geo·transport client
+connect timeout 분리 — `httpx.Timeout(<기존>, connect=<connect 필드>)` 꼴, 팩토리 하나씩, geo 8곳·transport 3곳)는 Manager·Track 1과 코드 의존이 없어 병렬 착수를
+제안하되(ADR-110 열린 결정 6, 설계 §13 사슬과 다름 — 소유자 확인) `geocoding.py`를 T-GR-01과 공유하므로 늦은 PR이
+리베이스하고, 배포는 **첫 호스트 플립(transport 4a) 전**이다.**
+Map은 n150에 남고 값은 Manager가 갖는다 — Map 쪽에서 기다리는 외부 조건: (a) Manager ADR-58 머지·T-MGR-01b의 compose
+`map-api → geo-api` 간선 삭제 뒤 n150 `ensure map` 성공, (b) transport 플립(설계 §11.2 4a/5; T-MGR-01c의 compose 기본값
+파생물)은 **odroid plane healthy ∧ `targets validate` transport.host == odroid ∧ odroid `timedatectl` synchronized yes**
+(ADR-110 결정 7 '2~4b' 행)가 PASS인 뒤에만 n150 `ensure map`(Map target 전 서비스 재생성, 옛 URL 든 컨테이너 0개) +
+transport allow-list에 n150 LAN 주소 `/32`(오늘 파일은 `.env.server14`), (c) geo 플립(8a/9, 메모리 예산 조건 통과 시만)은
+풀로드·mv_refresh·키 정책 적용 완료('8a/8b' 행) 뒤 다음 날 n150 `ensure map`(전 서비스) + (풀로드였으면) geo 소비자 키
+재발급·root `.env` 재적용 + 키 경로 200 + Track 1 효과 분기(풀로드+수용이고 T-GR-05 배포면 계획 1건 / dump 복원이면
+0건 / 센서 미배포면 해당 없음 — 수용 추천, 소유자 결정 대기). geo 키는 오늘도 대조되므로 이전 자체로
+키 의미가 바뀌지는 않는다(ADR-110 컨텍스트 4 — `9-전` curl은 선택 smoke). 소유자 결정 — ADR-110 열린 결정 6건(BFF
+경로·geo 적재 방식+재계획 수용/skip·키 정책(VWorld 폴백은 Map 가드와 충돌해 불가)·회로차단·task 접두사 `T-MAP-`
+임시·T-MAP-02 착수 순서).
+
+- 정본: ADR-110(결정·근거·전환 절차 발췌 — 본문이 정본; Track 2 설계 파일은 세션 scratchpad 출처로 보존되지 않는다).
+  연동 문서 `integration-map.md` §1~§4와 CLAUDE.md geocoding 줄에 "계획(ADR-110 proposed, 미구현)" 표식으로 넣었다.
+  구현 전까지 모든 서술은 계획이다. LAN 주소 리터럴은 `#508` redaction guard 때문에 호스트 이름으로 썼다. 1차 리뷰
+  19 finding + 2차 리뷰 17 finding + 3차 리뷰 17 finding(HIGH 1·MED 5·LOW 11) 전부 반영, 기각 0(journal 2026-10-13
+  항목). T-MAP-02 코드 사양은 `httpx.Timeout(<기존>, connect=…)`이다 — `Timeout(connect=, read=)` 둘만은 httpx 0.28.1에서
+  ValueError(설계 §13·§9.1 표기는 그 오류, Manager ADR-58·geo ADR-070 작성자에게 전달). 교차 ADR 셋(Manager 58·geo
+  070·transport 014)은 병렬 PR에 작성돼 있고 미머지다.
+- 코드 변경 없음. `.env.example:198,234` standalone 주석과 `GEO_HEAVY_POOL`/`mois_geocode_concurrency` 근거 문구 갱신은
+  T-MAP-02 코드 PR에 싣는다.
+
 ## 2026-10-13 — geo 릴리스 재지오코딩 설계(ADR-109 proposed): 브랜치 `docs/adr-109-geo-release-regeocode`
 
 **다음 한 작업: 이 doc-only PR을 docs lint 초록 확인 뒤 즉시 머지해 `T-GR-00`을 닫는다 → `T-GR-00-LEDGER`(journal·
