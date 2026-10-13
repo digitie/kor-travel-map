@@ -5,7 +5,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 
 | 파일 | 역할 |
 | --- | --- |
-| `chain17.sh` | 전체 사이클: pair 계약 preflight → 회전 → Manager rebuild → `chain16.sh` |
+| `chain17.sh` | 전체 사이클: pair 계약 preflight → 회전 → Manager rebuild → `chain16.sh`. PinVi는 생략하면 핀 원장의 현재 pinvi를 그대로 다시 핀하고, 원장과 다른 PinVi를 올릴 때는(같은 Map이든 새 Map이든) `PINVI_OVERRIDE=<sha40>` |
 | `chain16.sh` | 후반부: C7 executor 이미지 → `repin.sh` → M01 ACL preflight → D1 → lane 정리 → D2 |
 | `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, Dagster service 키를 Manager 토폴로지에서 유도, D2 fixture DSN 유도 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
@@ -122,6 +122,12 @@ sudo install -o root -g root -m 0700 scripts/n150/chain17.sh scripts/n150/chain1
   **hard gate**다. 거부되면 아무것도 바꾸지 않고 멈춘다.
 - 핀 원장은 `ktdctl pin show`로만 읽는다. Manager의 내부 파일(v6 pinned runtime
   manifest, v8 rebuild journal, 앞으로의 `deploy-status.json`)은 읽지 않는다.
+- `chain17.sh` B 단계의 "이미 회전됨 — 건너뛴다"는 원장 map·pinvi **둘 다** 인자와 같을 때뿐이다
+  (같은 pair 회전은 registry가 거부한다). **같은 Map·새 PinVi**(`PINVI_OVERRIDE`)는 회전한다 — registry가
+  허용하고, map만 보고 건너뛰면 옛 PinVi로 재구축·스모크가 돈다(2026-10-13 t1013e). 회전 뒤 검증도 pair다.
+  원장을 못 읽어 빈 값이면 "다른 pair"로 보지 않고 회전 시도 없이 그 사유로 멈춘다.
+  `tests/lint/test_chain17_rotates_when_only_pinvi_changes.py`가 가짜 `ktdctl`·`rotate-pinned-pair` 위에서
+  B 단계 본문을 실행해 효과를 고정한다.
 
 ## ADR-102로 사라진 것
 

@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### chain17 B 단계가 핀 원장을 pair로 비교 (2026-10-13)
+
+- **FIXED (scripts/n150)**: `chain17.sh` B 단계의 "이미 회전됨 — 건너뛴다"가 원장 `map`만 보던 것을
+  `map`·`pinvi` 둘 다 인자와 같을 때로 좁혔다. 같은 Map에 새 PinVi를 올리는 회전(registry 허용)이 건너뛰어져
+  옛 PinVi로 재구축·스모크가 돌던 결함(n150 chain t1013e, 2026-10-13 09:11Z). 회전 뒤 검증도 `map`·`pinvi`
+  둘 다 본다. 원장을 못 읽은 빈 값은 "다른 pair"가 아니다 — 회전을 시도하지 않고 그 사유로 멈춘다.
+- **ADDED (scripts/n150)**: `chain17.sh`가 `PINVI_OVERRIDE=<sha40>` 환경변수를 받는다 — 생략하면 핀 원장의
+  현재 pinvi를 그대로 다시 핀하고, 원장과 다른 PinVi를 올릴 때(같은 Map이든 새 Map이든) 준다. 운영자가
+  `/root/chain17-pv.sh`로 손수 들고 있던 변형을 정본에 흡수했다. launcher 경로는 `ROTATE` 변수다.
+- **docs**: `docs/journal.md`가 §8 상한(225,280 B)을 넘어 2026-09-14 ~ 2026-09-15 8건을
+  `docs/archive/journal-2026-09c.md`로 분리했다(본문 바이트 보존).
+
 ### 고속도로 돌발 job pool 고갈 수정 (2026-10-13)
 
 - **FIXED (client)**: `AsyncKorTravelMapClient.provider_run_lock`이 advisory lock을 잡은 연결에 client의 session
