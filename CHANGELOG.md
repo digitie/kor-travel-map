@@ -12,18 +12,24 @@
 
 ### Feature advisory fence 전역 gate — 공용 PG lock table 고갈 수정 (2026-10-13, ADR-111)
 
-- **FIXED (schema, alembic `406_feature_write_gate`)**: 대량 curation writer 9개
-  (`finalize_provider_curation_root`·`_receipts`, `materialize_theme_candidate_generation`, curated
-  source/rule/theme create·patch·archive)가 대상 Feature마다 잡던 `feature-write:<id>` advisory lock을 전역
-  `feature-write-all` 배타 1회로 바꿨다. 11,820 Feature dataset root 완결이 공용 PostgreSQL
-  (`max_locks_per_transaction=64`)의 lock table을 고갈시켜 SQLSTATE 53200으로 죽고 같은 cluster의 다른
-  tenant까지 막던 결함(2026-10-12 09:25Z~). 단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡는다.
-- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`가 같은 run의 같은 결정적 SQLSTATE 실패를
-  5회 연속 보면 terminal root를 `failed`로 닫고 `feature_operation.reconcile_abandoned` error 로그를 남긴다
-  (`AsyncKorTravelMapClient.abandon_dagster_feature_run`). 일시 SQLSTATE는 세지 않는다. cursor에
-  `last_failure`가 생기며, 비어 있으면 종전 모양 그대로다.
-- **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서),
-  `tests/integration/test_feature_write_gate_lock_budget.py`(lock table 칸 수의 2배 Feature root 완결).
+- **FIXED (schema, alembic `406_feature_write_gate`)**: 대량 curation writer 8개
+  (`finalize_provider_curation_root`, `materialize_theme_candidate_generation`, curated source/rule/theme
+  create·patch·archive)가 대상 Feature마다 잡던 `feature-write:<id>` advisory lock을 전역 `feature-write-all`
+  배타 1회로 바꿨다. 11,820 Feature dataset root 완결이 공용 PostgreSQL(`max_locks_per_transaction=64`)의 lock
+  table을 고갈시켜 SQLSTATE 53200으로 죽고 같은 cluster의 다른 tenant까지 막던 결함(2026-10-12 09:25Z~).
+  단건 writer 6개는 Feature 잠금 앞에 gate를 공유로 잡고 `lock_timeout = 5s`를 갖는다. root 완결은 gate를
+  `pg_try_advisory_xact_lock`으로 시도하고 바쁘면 55P03(다음 tick 재시도). 대량 명령 6개의 죽은 범위
+  재검사(두 scan + 40001)를 지웠고, 호출자 없는 `finalize_provider_curation_receipts`를 DROP한다.
+- **CHANGED (dagster)**: `feature_operation_reconciliation_sensor`가 실패한 run을 cursor `last_failure`
+  (`retry_after` 포함)로 세어 30초→15분 지수 backoff한다. root를 `failed`로 닫는 것은 SQLSTATE 22/23/P0이
+  같은 run에서 5회 연속일 때뿐이다(`AsyncKorTravelMapClient.abandon_dagster_feature_run`,
+  `feature_operation.reconcile_abandoned` error 로그 — `provider_dataset_ids`·`action`). 53xxx 등은 닫지 않는다.
+  ledger가 비면 cursor 모양은 종전 그대로다(되돌릴 때 절차는 ADR-111).
+- **CHANGED (api)**: SQLSTATE 55P03(lock timeout)은 `503 LOCK_TIMEOUT` + `Retry-After: 5`. OpenAPI 바이트 변경 없음.
+- **ADDED (tests)**: `tests/lint/test_feature_write_lock_order.py`(Feature 잠금 개수·전역 잠금 순서, 호출·trigger 전개),
+  `tests/integration/test_feature_write_gate_lock_budget.py`(모듈 전용 DB에서 lock table 칸 수의 2배 Feature root
+  완결 + abandon).
+
 ### admin e2e 로드 실패 수정 (2026-10-13)
 
 - **FIXED (admin frontend e2e)**: 2026-10-06부터 `src/lib/auth.ts`가 ESM 전용 `@kor-travel/ui/navigation`을 import해
