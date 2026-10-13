@@ -276,12 +276,14 @@ const authRequestHeaders = isolatedAuthRequestHeaders();
  * #520 인증 게이트: `E2E_ADMIN_PASSWORD`(+ 선택 `E2E_ADMIN_USERNAME`, 기본 admin)를 주면
  * auth.setup이 로그인 세션을 만들어 모든 spec이 인증 상태로 돈다(미설정 시 인증 미적용 대상으로 간주).
  *
- * CI에서는 돌리지 않는다(라이브 배포 + 실데이터 필요 — admin e2e는 CI job 없음).
+ * CI에서는 **실행하지 않고 로드만 한다**(라이브 배포 + 실데이터 필요). frontend CI의
+ * `npm run e2e:list`가 세 config의 spec과 커스텀 reporter를 `--list`로 require해
+ * ESM 전용 import 같은 로드 실패를 잡는다. `forbidOnly`는 CI env에서 켜지므로 그
+ * 단계는 커밋된 `test.only`도 실패로 만든다.
  */
 export default defineConfig({
   testDir: "./e2e/live",
   globalTeardown: "./e2e/live/global-teardown.ts",
-  testIgnore: ["**/cache-target-streams-isolated.live.spec.ts"],
   timeout: 30_000,
   expect: { timeout: 15_000 },
   // C7의 raw attachment/error output은 evidence bind 밖 container tmpfs에만 둔다.
@@ -348,7 +350,13 @@ export default defineConfig({
     },
     {
       name: "chromium",
-      testIgnore: /auth\.setup\.ts/,
+      // project-level testIgnore는 top-level 값을 **대체**한다(병합하지 않는다). 그래서
+      // 격리 전용 cache-target-streams spec 제외도 여기 둔다 — top-level에만 두면
+      // 이 project가 그것을 다시 집는다(별도 config가 소유한다).
+      testIgnore: [
+        /auth\.setup\.ts/,
+        "**/cache-target-streams-isolated.live.spec.ts",
+      ],
       use: { ...devices["Desktop Chrome"], storageState: LIVE_STORAGE_STATE },
       dependencies: ["setup"],
     },
