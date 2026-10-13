@@ -223,7 +223,7 @@ async def _seed_root(
                   CASE WHEN :status = 'done' THEN 'completed' ELSE 'running' END,
                   :run_id, 'root', 'schedule', 'load',
                   CASE WHEN :status = 'done' THEN 'SUCCESS' ELSE 'STARTED' END,
-                  clock_timestamp() - interval '2 hours', clock_timestamp() - interval '2 hours'
+                  now() - interval '2 hours', now() - interval '2 hours'
                 ) RETURNING job_id
                 """
             ),
