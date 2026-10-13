@@ -1,3 +1,32 @@
+## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정 — Feature advisory fence 전역 gate(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319)
+
+2026-10-12 09:25Z부터 root `97ac4e01-…`의 `feature.finalize_provider_curation_root`가 dataset 99(`transport_fuel_stations`,
+11,820 Feature)의 링크 Feature마다 `pg_advisory_xact_lock('feature-write:<id>')`를 잡다가 공용 PG(`max_locks_per_transaction=64`)
+lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor가 30초마다 무한 재시도하며 같은 cluster 전 tenant를
+깨뜨렸다(12:59:54Z prod sensor 정지 — 운영자 조치, 이 PR 범위 밖). 같은 패턴이 프로시저 여덟 곳에 더 있었다.
+
+- **설계(ADR-111).** 전역 gate `feature-write-all`: 대량 writer 9개(finalize root·receipts, materialize, curated
+  source/rule/theme create·patch·archive)는 종전 Feature 잠금 루프 자리에서 gate **배타** 1회, 단건 writer 6개(approve
+  request, curation item create/patch/archive, manual item, promote candidate)는 `feature-write:<id>` 바로 앞에 gate **공유**.
+  순서 `curation-import → feature-curation-write → feature-write-all → feature-write:<id> → curation-catalog-write`.
+  "Feature 잠금을 그냥 지운다"는 기각 — curated theme/source/rule 명령·promote·approve는 `feature-curation-write`를 잡지
+  않아 증명이 성립하지 않는다(ADR §3). Python은 `feature-write`를 잡지 않는다.
+- **migration `406_feature_write_gate`.** 사이드카 15개(`_406_<루틴>.sql`) = head 원문에서 잠금 몇 줄만 바꾼 사본
+  (생성 후 head 원문과 diff해 잠금 줄 외 차이 0 확인). 소유자 창 `ktm_curation_command_owner` →
+  `ktm_feature_request_procedure_owner` → `ktm_feature_schema_owner`로 끝남(RESET ROLE 없음). receipt head CHECK에 406.
+  head-schema.sql은 n150에서 `KTM_WRITE_HEAD_SCHEMA=1`로 재생성(+25/−121, 잠금 줄과 CHECK만).
+- **sensor 하드닝.** 결정적 SQLSTATE(08·40·57 class와 53300·55P03·55006 제외) 실패는 tick을 종전대로 실패시키되
+  cursor `last_failure{run_id, SQLSTATE, count}`만 갱신(watermark 불변). 같은 run·같은 SQLSTATE 5연속 + terminal run이면
+  `abandon_dagster_feature_run`이 기존 terminal 전이(`failed`/stage `failed`)로 root를 닫고 `feature_operation.reconcile_abandoned`
+  error 로그. 새 상태·컬럼 없음(`quarantined_at`은 migration 소유라 쓰지 않음). ledger가 비면 cursor 모양은 종전 그대로.
+- **테스트(효과 결박).** `tests/integration/test_feature_write_gate_lock_budget.py` — lock table 칸 수(설정에서 유도)의
+  2배 Feature를 한 dataset에 링크하고 root 완결, 그 트랜잭션의 advisory lock 수 < 16. n150 실측: 405 스키마(406 제거)에서
+  `asyncpg OutOfMemoryError: out of shared memory`로 **red**, 406에서 green. `tests/lint/test_feature_write_lock_order.py` —
+  head 전 루틴(203)을 중첩 CALL까지 펼쳐 Feature 잠금 스칼라·gate 선행·전역 순서·공유→배타 승격 금지; 406 전 head에서
+  위반 24건으로 red, 심은 위반 셋으로 탐지기 red 확인. sensor unit 6건(상한 도달·일시 SQLSTATE 미계수·다른 실패 리셋·
+  진행 중 run 미닫힘·닫기 실패 재시도·cursor 하위호환).
+- **열린 것.** `finalize_provider_curation_receipts`는 호출자 없음(지우지 않고 같이 고침). 서로 다른 dataset 대량 writer는
+  이제 직렬화된다. 배포·sensor 재시작은 운영자 몫.
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 n150 chain16 D1(Map `c4d17343`)이 테스트를 하나도 돌리기 전에 `Error: Package subpath './navigation' is not defined by
@@ -64,6 +93,7 @@ eslint·vitest는 모두 ESM/번들러 해석이라 통과했다.
   `verify-all-gates.sh`도 `CI=1`로 같은 조건에서 돈다. `scripts/n150/chain16.sh` D1은 `--list` 개수만큼 passed여야 초록이고
   skipped·did not run·interrupted도 실패로 본다(전에는 failed/flaky 줄이 없으면 초록).
 - **D1 재실행(브랜치 사본, prod 읽기 전용).** 11건 중 **10 passed, 1 failed**. `home-dashboard-roundtrip`은 이제 통과한다. 남은 1건은 `admin-scenario-catalog`의 새 전제 단언이 "큐 sensor 차단 alert — Dagster 상태 스냅샷을 신뢰할 수 없습니다"로 정확히 원인을 내며 실패한 것이다 — prod Map API가 아직 창 없는 문서를 쓰기 때문이고, 이 PR의 API 수정은 배포 뒤에야 live에 보인다. 배포 전 증명으로 이 브랜치의 세 문서를 그대로 prod Dagster에 보냈다(위 실측). **D1 11/11은 Map API 배포 뒤 재실행으로 확인할 일이다.**
+||||||| parent of 725f517d4 (docs(journal,resume): ADR-111 lock table 고갈 수정 기록 — n150 red(53200)/green 증거)
 
 ## 2026-10-13 — chain17 B 단계가 같은 Map·새 PinVi 회전을 건너뛰던 결함: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 

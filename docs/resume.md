@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ## 2026-10-13 — admin e2e 로드 실패 수정(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 **다음 한 작업: draft PR CI 초록 → 적대 리뷰 → 머지 → Map API 배포 → chain16 D1 재실행(11/11 기대) → M05.**
@@ -11,6 +12,18 @@ D1은 **Map API 배포 전까지 빨갛다** — `admin-scenario-catalog`의 갱
   "최근 2일/1시간 tick 없음"으로 표시. (3b) chain16 D1은 `--list` 개수만큼 passed여야 초록. (4) live spec 둘(home 행 찾기, catalog 전제 단언),
   live config `testIgnore` 대체 버그. 원인·실측은 journal 2026-10-13.
 - 바뀌지 않은 것: vendored tgz, OpenAPI(PinVi 재vendor 불필요), n150(읽기 전용 live 실행·GraphQL 조회만).
+||||||| parent of 725f517d4 (docs(journal,resume): ADR-111 lock table 고갈 수정 기록 — n150 red(53200)/green 증거)
+=======
+## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319, draft)
+
+**다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → Map 배포(406 마이그레이션 전진) → prod `feature_operation_reconciliation_sensor`
+재시작(2026-10-13 12:59:54Z 정지) → 막혀 있던 root `97ac4e01-…`가 다음 tick에 완결되는지(또는 5연속 실패 뒤 `failed`로
+닫히는지) `ops.import_jobs`·`feature_operation.reconcile_abandoned` 로그로 확인.**
+
+- 바뀐 것: alembic 406(대량 writer 9개 gate 배타, 단건 6개 gate 공유), reconcile sensor 결정적 실패 5연속 상한 →
+  `abandon_dagster_feature_run`, lint·통합·sensor 테스트, ADR-111. OpenAPI 변경 없음(PinVi 재vendor 불필요).
+- 바뀌지 않은 것: Manager `max_locks_per_transaction` 상향(별도 응급조치), prod 컨테이너·DB(읽기 외 손대지 않음).
+>>>>>>> 725f517d4 (docs(journal,resume): ADR-111 lock table 고갈 수정 기록 — n150 red(53200)/green 증거)
 
 ## 2026-10-13 — chain17 B 단계 pair 회전 수정: 브랜치 `fix/chain17-rotate-when-pinvi-changes`
 
