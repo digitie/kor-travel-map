@@ -33,6 +33,7 @@ __all__ = [
     "DagsterUrlConfigurationError",
     "DagsterUrls",
     "JsonDict",
+    "MAX_TICKS_IN_WINDOW",
     "REPOSITORY_RUN_TAG_KEY",
     "SCHEDULE_TICK_WINDOW_SECONDS",
     "SENSOR_TICK_WINDOW_SECONDS",
@@ -112,19 +113,30 @@ _FILE_DOWNLOAD_SCHEDULE_HINTS = {
 REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
 
 
-#: ``ticks(limit: N)`` 조회 창. ``afterTimestamp``가 없으면 Dagster는 instigator의 **전체**
-#: tick 이력을 storage에서 읽는다 — 공유 ``dagster_shared``의 ``job_ticks``(2026-10-13 약
-#: 40만 행)에서 overview 한 번이 cold 10초를 넘겨 ``bounded_request`` 상한에 걸렸고, 관리자
-#: UI는 "Dagster 연결 불가"로 큐 sensor를 신뢰할 수 없다며 갱신 요청을 막았다(n150 실측:
-#: 창 없음 cold 10.0초 → 창 있음 0.13~0.32초, 같은 문서). PinVi #581과 같은 처방이다.
+#: ``ticks(limit: N)`` 조회 창. ``afterTimestamp``가 없으면 Dagster storage는 instigator의
+#: **전체** tick 이력을 읽는다(``selector_id = X OR (selector_id IS NULL AND origin = Y)``라
+#: 인덱스 순서 scan이 안 되고 BitmapOr → 전 행 heap 읽기 → 정렬). 공유 ``dagster_shared``의
+#: ``job_ticks``(2026-10-13 약 40만 행)에서 overview 문서가 cold 10.0초(warm 1.3초)로
+#: ``bounded_request`` 상한에 걸려, 관리자 UI가 큐 sensor를 신뢰할 수 없다며 갱신 요청을 막았다.
+#: PinVi #581과 같은 처방이고 두 창 값도 같다.
 #:
-#: schedule 창은 **가장 긴 cron 주기의 2배**다. Map에는 월간 schedule이 있어(예: 매월 1일)
-#: PinVi의 2일을 그대로 쓰면 정상 월간 schedule이 한 달 대부분 "최근 tick 없음"으로 보인다.
-#: sensor 창은 가장 느린 sensor 최소 간격(300초)의 10배를 넘는 1시간이다. 둘 다
-#: ``tests/unit/test_dagster_tick_window.py``가 배포되는 Definitions에 대조한다. 창보다 오래
-#: 멈춘 instigator는 ``recent_ticks``가 빈 목록이다.
-SCHEDULE_TICK_WINDOW_SECONDS = 62 * 24 * 60 * 60
+#: **비용은 창 안의 tick 수에 비례한다**(n150 읽기 전용 EXPLAIN ANALYZE, 같은 sensor 하나:
+#: 창 안 211행 0.45초, 9,690행 cold 7.4초, 33,971행 warm 0.14~0.22초). 그래서 창은 "가장 조밀한
+#: instigator가 창 안에 남기는 tick 수"로 묶는다 — ``tests/unit/test_dagster_tick_window.py``가
+#: 배포되는 Definitions의 가장 짧은 cron 간격·sensor 최소 간격으로 그 수를 ``MAX_TICKS_IN_WINDOW``
+#: 이하로 강제한다(``*/10`` schedule × 2일 = 288행). 처음 둔 62일(월간 cron 2주기)은 schedule이
+#: 전부 STOPPED인 오늘만 쌌다 — ``*/10`` 하나가 켜지면 8,900행이 되어 위 7초대로 돌아간다.
+#:
+#: 대가: 주간·월간 schedule은 마지막 tick이 2일보다 오래면 ``recent_ticks``가 빈 목록이고,
+#: 1시간 넘게 tick이 없는 sensor도 그렇다(멈춘 것과 아직 안 돈 것이 응답에서 구분되지 않는다).
+#: 관리자 UI는 RUNNING인데 빈 목록이면 "창 안 tick 없음"으로 표시한다(값은
+#: ``packages/kor-travel-map-admin/frontend/src/lib/dagster-tick-window.ts``, 같은 테스트가 대조).
+#: 운영자 cron override(``load_schedule_cron_overrides``)는 정의에 없으므로 테스트가 보지 못한다 —
+#: override 간격이 창보다 길면 같은 빈 목록이고, ``*/10``보다 조밀하면 비용이 그만큼 커진다.
+SCHEDULE_TICK_WINDOW_SECONDS = 2 * 24 * 60 * 60
 SENSOR_TICK_WINDOW_SECONDS = 60 * 60
+#: 위 창 안에 instigator 하나가 남길 수 있는 tick 수의 상한(테스트가 정의에 대조한다).
+MAX_TICKS_IN_WINDOW = 300
 
 
 def tick_window_variables(

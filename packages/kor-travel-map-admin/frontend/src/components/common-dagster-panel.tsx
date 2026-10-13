@@ -9,6 +9,11 @@ import { DagsterRunDetail } from "@/app/ops/pipeline/events-panel";
 
 import { getJson } from "@/api/client";
 import type { components } from "@/api/types";
+import {
+  lastTickOrWindowNotice,
+  SCHEDULE_TICK_WINDOW_LABEL,
+  SENSOR_TICK_WINDOW_LABEL,
+} from "@/lib/dagster-tick-window";
 
 type Summary = components["schemas"]["DagsterSummaryResponse"];
 
@@ -22,14 +27,10 @@ function toDagsterSnapshot(data: Summary["data"]): DagsterSnapshot {
       schedules: repository.schedules.map(schedule => ({
         name: schedule.name, status: schedule.status ?? null, cron: schedule.effective_cron_schedule,
         jobName: schedule.pipeline_name ?? null, timezone: schedule.execution_timezone,
-        lastTick: schedule.recent_ticks?.[0] ? {
-          status: schedule.recent_ticks?.[0].status, timestamp: schedule.recent_ticks?.[0].timestamp,
-        } : null,
+        lastTick: lastTickOrWindowNotice(schedule.recent_ticks, schedule.status, SCHEDULE_TICK_WINDOW_LABEL),
       })),
       sensors: repository.sensors.map(sensor => ({ name: sensor.name, status: sensor.status ?? null,
-        lastTick: sensor.recent_ticks?.[0] ? {
-          status: sensor.recent_ticks?.[0].status, timestamp: sensor.recent_ticks?.[0].timestamp,
-        } : null,
+        lastTick: lastTickOrWindowNotice(sensor.recent_ticks, sensor.status, SENSOR_TICK_WINDOW_LABEL),
       })),
     })),
     runs: data.recent_runs.map(run => {
