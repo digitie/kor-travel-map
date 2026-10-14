@@ -1,3 +1,21 @@
+## 2026-10-14 — chain16 C단계(C7 executor 이미지) 실패 원인 규명 + `file:` 의존성 COPY 게이트: 브랜치 `fix/c7-executor-vendor-tgz`
+
+prod pair(Map 4931f9c0 · PinVi 2fa1c166) 배포 뒤 `/root/chain16.sh` C단계(unit `eb-adr111-10132219`)가
+`scripts/build-c7-playwright-image.sh`에서 "executor image build failed (values redacted)"로 멈췄다.
+
+- **원인은 소스가 아니라 일시적 네트워크다.** `docker buildx history logs`(BuildKit 이력, 스크립트의 `--quiet`·가림과
+  무관하게 남는다)로 본 실패 빌드의 실제 출력은 `npm ci` 49.9초 시점 `npm error code ECONNRESET` / `network aborted`.
+  같은 n150에서 같은 커밋 archive를 그대로(기본 umask, 스크립트와 같은 umask 077 둘 다) 다시 빌드하니 `npm ci` ·
+  `verify:npm-tree` · `verify:next-sharp` 모두 통과했다. 당시 n150에는 다른 이미지 빌드가 겹쳐 있었다(디스크 대기).
+- **가설(vendor tgz 누락)은 기각.** `c7-playwright.Dockerfile`은 1a3c46737(10-06)부터 `frontend/vendor`를 `npm ci` 전에
+  복사하고 `.dockerignore`도 그것을 빼지 않는다. 다만 그 수정에는 게이트가 없었다 — `frontend.Dockerfile`은 72242b1a0에서
+  vendor를 복사했는데 C7 쪽은 따라오지 않은 틈이 실제로 있었다.
+- **게이트.** `tests/unit/test_dockerfile_workspace_manifest_coverage.py`에 매니페스트(루트 + 워크스페이스)의 `file:` 값을
+  정본으로, `npm ci --workspaces`를 도는 모든 Dockerfile이 그 stage에서 `npm ci` **이전** COPY로 그 경로를 덮고
+  `.dockerignore`가 그것을 빼지 않는지 본다. 하한(file: 의존성 ≥1·실재)과 matcher 자기검사 포함. 1a3c46737^의
+  Dockerfile과 vendor를 빼는 `.dockerignore` 각각에서 빨갛게 되는 것을 확인했다.
+- **재실행.** 소스 수정이 필요 없으므로 chain16을 배포된 같은 MAP/PINVI로 C단계부터 다시 돌리면 된다(핀 변경 없음).
+
 ## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정 — Feature advisory fence 전역 gate(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319)
 
 2026-10-12 09:25Z부터 root `97ac4e01-…`의 `feature.finalize_provider_curation_root`가 dataset 99(`transport_fuel_stations`,
