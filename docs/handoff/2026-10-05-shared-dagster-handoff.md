@@ -190,8 +190,9 @@ sudo /opt/kor-travel-docker-manager/backend/.venv/bin/ktdctl pin verify
   - 실행 identity(이미지·커밋)가 바뀐 뒤에는 `recover`를 쓸 수 없다. runbook §6의 운영자 판정 절차를 따른다.
   - 2026-10-04 사례: 감사된 purge 경로(`feature.purge_manual_feature`)로 정리하고, 정본 `scripts/n150/adjudicate.sh`를 실행했다.
     증거: `adjudicated-20261004T110949Z`.
-- **D2 키 갱신:** Map 마이그레이션 head가 바뀌면 `/root/.d2-live.env`의 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION`을
-  손으로 고친다. 현재 값은 `404_transport_provider_identity`다.
+- **D2 키 갱신:** ~~Map 마이그레이션 head가 바뀌면 `/root/.d2-live.env`의 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION`을
+  손으로 고친다.~~ 2026-10-14부터 `repin.sh` 5단계가 실행 중인 Map API 이미지의 `ktm-application-schema head`에서
+  유도한다(`scripts/n150/README.md`). 손으로 고치지 않는다.
 
 ### 4.5 transport 배포
 1. 로컬 WSL에서 origin/main을 detach 체크아웃한 worktree로 들어가 `DEPLOY_STAGE_ONLY=true ./scripts/deploy-server14.sh`를
