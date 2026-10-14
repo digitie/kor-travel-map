@@ -1,3 +1,28 @@
+## 2026-10-14 — chain16 C단계(C7 executor 이미지) 실패 원인 규명 + `file:` 의존성 COPY 게이트: 브랜치 `fix/c7-executor-vendor-tgz` (PR #1320)
+
+prod pair(Map 4931f9c0 · PinVi 2fa1c166) 배포 뒤 `/root/chain16.sh` C단계(unit `eb-adr111-10132219`)가
+`scripts/build-c7-playwright-image.sh`에서 "executor image build failed (values redacted)"로 멈췄다.
+
+- **원인은 소스가 아니라 일시적 네트워크다.** `docker buildx history logs`(BuildKit 이력, 스크립트의 `--quiet`·가림과
+  무관하게 남는다)로 본 실패 빌드의 실제 출력은 `npm ci` 49.9초 시점 `npm error code ECONNRESET` / `network aborted`.
+  같은 n150에서 같은 커밋 archive를 그대로(기본 umask, 스크립트와 같은 umask 077 둘 다) 다시 빌드하니 `npm ci` ·
+  `verify:npm-tree` · `verify:next-sharp` 모두 통과했다. 같은 입력의 빌드 다섯 번 중 둘(둘 다 스크립트 경유, 49.9초·177초)이
+  같은 `ECONNRESET`으로 죽고 셋(`--quiet` 포함)은 통과 — 플래그가 아니라 확률이다. 실패 시점 n150은 iowait 64~70%·swap
+  in/out 진행(load 15~21)이었다. 재실행 한 번이면 지나가지만 같은 부하에서는 다시 날 수 있다.
+- **보이지 않던 이유 둘.** ① 스크립트가 `--quiet`로 빌드하고 실패를 가린다 — 원문은 `docker buildx history logs <id>`에
+  남는다(`docker buildx history ls`의 최신 Error 행). ② chain16 C단계가 `Result=success`를 찍었다 — `systemd-run
+  --collect`가 실패한 unit을 즉시 회수해 `systemctl show -p Result`가 기본값을 돌려준다. 실제 판정은 뒤의 라벨 대조
+  (옛 이미지 c4d17343 ≠ MAP)가 했다.
+- **가설(vendor tgz 누락)은 기각.** `c7-playwright.Dockerfile`은 1a3c46737(10-06)부터 `frontend/vendor`를 `npm ci` 전에
+  복사하고 `.dockerignore`도 그것을 빼지 않는다. 다만 그 수정에는 게이트가 없었다 — `frontend.Dockerfile`은 72242b1a0에서
+  vendor를 복사했는데 C7 쪽은 따라오지 않은 틈이 실제로 있었다.
+- **게이트.** `tests/unit/test_dockerfile_workspace_manifest_coverage.py`: 정본은 `npm ci`가 읽는 `package-lock.json`의
+  `packages[*].resolved` 중 `file:`(워크스페이스 `link: true` 제외). `npm ci --workspaces`를 도는 모든 Dockerfile이 그
+  stage에서 그 RUN **이전** build-context COPY로 각 경로를 WORKDIR/<path>(루트 `package.json`과 같은 자리)에 두고,
+  `.dockerignore`가 그것을 빼지 않는지 본다. 하한(file: 의존성 ≥1·실재), `.dockerignore`/COPY 배치 matcher는 인라인
+  규칙으로 자기검사. 1a3c46737^의 Dockerfile, vendor를 빼는 `.dockerignore`, 틀린 COPY 목적지 각각에서 빨갛게 된다.
+- **재실행.** 소스 수정이 필요 없으므로 chain16을 배포된 같은 MAP/PINVI로 C단계부터 다시 돌리면 된다(핀 변경 없음).
+
 ## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정 — Feature advisory fence 전역 gate(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319)
 
 2026-10-12 09:25Z부터 root `97ac4e01-…`의 `feature.finalize_provider_curation_root`가 dataset 99(`transport_fuel_stations`,
