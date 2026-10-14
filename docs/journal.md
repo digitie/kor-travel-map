@@ -98,6 +98,12 @@ lock table을 고갈시켜 SQLSTATE 53200으로 롤백됐고, reconcile sensor�
   `T-RECONCILE-RETRY`(해제 조건: 잃지 않음·tick 시간 유계·경과 시간 알림·gate 전용 SQLSTATE·명시 목록만 닫기)로.
 - **migration 번호.** #1319가 406(`406_feature_write_gate`)을 쓰므로 Track 1(ADR-109)의 계획 번호를 하나씩 민다 — `feature_geocode_stamps` 406 → 407, `kor_travel_geo_releases` 407 → 408(tasks·acceptance·ADR-109·address-geocoding).
 
+## 2026-10-14 — chain16 D1 판정이 ANSI 커서 제어 때문에 11/11 통과를 실패로 읽음: 브랜치 `fix/chain16-d1-ansi`
+
+- 증상: 배포(Map 4931f9c0 + PinVi 2fa1c166) 뒤 chain16 F(D1)가 `11 passed (32.2s)`를 냈는데 `!! D1: 목록 11건이 전부 passed가 아니다`로 중단.
+- 원인: Playwright line reporter가 진행 줄을 `ESC[1A ESC[2K`로 덮어써 마지막 줄이 `^[[1A^[[2K  11 passed`가 되고, #1318의 판정 `grep -qE "^ *$D1EXPECT passed"`가 줄머리 앵커에서 실패.
+- 수정: `scripts/n150/chain16.sh` D1 출력에서 ANSI CSI 시퀀스를 `sed`로 걷어낸 뒤 판정. 판정 규칙(목록 수 == passed, skipped/did not run도 실패)은 그대로.
+
 ## 2026-10-13 — admin e2e 전체가 로드 단계에서 죽던 결함(ESM 전용 `@kor-travel/ui`): 브랜치 `fix/e2e-esm-kor-travel-ui`
 
 n150 chain16 D1(Map `c4d17343`)이 테스트를 하나도 돌리기 전에 `Error: Package subpath './navigation' is not defined by

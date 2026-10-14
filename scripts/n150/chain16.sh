@@ -133,7 +133,8 @@ d1() {
 # 초록이 아니다 — 전제가 빠져 건너뛴 spec을 통과로 세면 D1이 본 것이 줄어도 모른다.
 D1EXPECT=$(d1 --list | sed -nE 's/^Total: ([0-9]+) tests? in .*/\1/p')
 [ -n "$D1EXPECT" ] && [ "$D1EXPECT" -gt 0 ] || die "D1 목록(--list)을 읽지 못했다"
-D1OUT=$(d1 --reporter=line | tail -4)
+# line reporter는 진행 줄을 ANSI 커서 제어(ESC[1A ESC[2K)로 덮어쓴다 — 판정 전에 걷어낸다.
+D1OUT=$(d1 --reporter=line | sed -E 's/\[[0-9;]*[A-Za-z]//g' | tail -4)
 echo "$D1OUT"
 echo "$D1OUT" | grep -qE "^ *$D1EXPECT passed" || die "D1: 목록 ${D1EXPECT}건이 전부 passed가 아니다"
 echo "$D1OUT" | grep -qE '[0-9]+ (failed|flaky|skipped|did not run|interrupted)' && die "D1 실패"
