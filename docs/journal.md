@@ -1,3 +1,21 @@
+## 2026-10-14 — D2 fixture `Alembic revision confirmation mismatch`: 확인 키를 repin이 API 이미지 head에서 유도: 브랜치 `fix/d2-fixture-alembic-head`
+
+- 증상: Map 4931f9c0(#1319, head `406_feature_write_gate`) 배포 뒤 chain16 H(unit `d2-adr111h`)의 D2가
+  `fixture-seed-failed`로 BLOCKED. `direct-seed.json.stderr`는 `scripts/admin_feature_live_fixture.py`
+  `_prepare_fixture_connection`의 `fixture target Alembic revision confirmation mismatch`.
+- 원인: 기대값 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION`은 `/root/.d2-live.env`의 **손으로 적은** 값
+  (`404_transport_provider_identity`)이었다. repin은 이 키를 쓰지 않았고(2026-10-05 인계 문서가 "head가 바뀌면 손으로
+  고친다"고 적었다), 405·406이 들어오는 동안 아무도 고치지 않았다. 백업 사본 기록상 이 키는 303→309→400→403→404로
+  다섯 번 손으로 바뀌었다. DB(`alembic_version`)는 정상적으로 406이다 — fixture는 mutation 전에 멈췄다(잔여물 없음).
+- 수정: `scripts/n150/repin.sh` 5단계가 4단계의 같은 Map API 컨테이너에서 `ktm-application-schema head`(이미지가 설치된
+  migration graph만 읽는 attest 명령, API entrypoint head 게이트와 같은 정본)를 읽어 그 줄을 다시 쓴다. schema·revision
+  문법·줄 개수 확인, 0600 임시 파일 + source 값 대조 + rename.
+- 게이트: `tests/unit/test_n150_repin_derives_fixture_alembic_head.py` — 생산자(`docker/application-schema-head.py`)를 이
+  저장소 graph 위에서 실제로 돌린 출력을 repin 프로그램에 넣어 옛 `404_…` 줄이 현재 head로 바뀌는지 본다(리터럴 head
+  없음). 거부 경로 11가지, 호출 경로가 `api.Dockerfile`의 설치 자리·schema 상수와 같은지도 본다.
+- 재실행: 호스트 `/root/repin.sh` 재설치 → chain16 재실행(D 단계가 새 키를 쓰고, G 단계 `adjudicate.sh`가 이번 BLOCKED를
+  잔여물 0 실측 뒤 정리).
+
 ## 2026-10-14 — chain16 D1 판정이 ANSI 커서 제어 때문에 11/11 통과를 실패로 읽음: 브랜치 `fix/chain16-d1-ansi`
 
 - 증상: 배포(Map 4931f9c0 + PinVi 2fa1c166) 뒤 chain16 F(D1)가 `11 passed (32.2s)`를 냈는데 `!! D1: 목록 11건이 전부 passed가 아니다`로 중단.

@@ -7,7 +7,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 | --- | --- |
 | `chain17.sh` | 전체 사이클: pair 계약 preflight → 회전 → Manager rebuild → `chain16.sh`. PinVi는 생략하면 핀 원장의 현재 pinvi를 그대로 다시 핀하고, 원장과 다른 PinVi를 올릴 때는(같은 Map이든 새 Map이든) `PINVI_OVERRIDE=<sha40>` |
 | `chain16.sh` | 후반부: C7 executor 이미지 → `repin.sh` → M01 ACL preflight → D1 → lane 정리 → D2 |
-| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, Dagster service 키를 Manager 토폴로지에서 유도, D2 fixture DSN 유도 |
+| `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, Dagster service 키를 Manager 토폴로지에서 유도, D2 fixture DSN 유도, D2 fixture Alembic head 키를 API 이미지에서 유도 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
 | `adjudicate.sh` | rebuild가 가로지른 v4 BLOCKED lane을 잔여물 0 실측 뒤 `clear-blocked`로 정리 (chain16 lane 정리 단계) |
 
@@ -45,6 +45,13 @@ PostgreSQL client 호출, PostgreSQL 서버 이미지, DSN 문자열, libpq 연�
   API DSN과 같을 때만 rename한다(`:~`처럼 문자 검사는 지나도 tilde 확장으로 바뀌는 값을 막는다).
   rename 뒤에는 그 키가 정확히 한 줄로 바뀌었는지 센다.
   DB가 어느 instance로 옮겨 가든 다음 주기의 repin이 그 값을 따라간다.
+- `repin.sh` 5단계는 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION` 한 줄을 같은 API 컨테이너의
+  `docker exec "$API" /usr/local/bin/ktm-application-schema head`(이미지가 설치된 migration graph만 읽어
+  attest하는 head, DB·env 없음)로 바꾼다. 종전에는 migration이 늘 때마다 손으로 고쳤고, #1319(head
+  `406_feature_write_gate`) 배포 뒤 옛 `404_…`가 남아 D2 fixture가 `Alembic revision confirmation
+  mismatch`로 멈췄다(2026-10-14). **이 키를 손으로 고치는 것은 지원하지 않는다** — 매 repin이 다시 쓴다.
+  출력 JSON의 schema·revision 문법(따옴표 없이 source해도 보존)과 줄이 정확히 하나인지 보고, 4단계와
+  같은 0600 임시 파일 + source 값 대조 + rename으로 쓴다.
 - `chain16.sh`의 M01 ACL preflight는 여전히 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮는다.
   repin 뒤에는 같은 값이라 결과가 같다 — preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 남긴다.
 

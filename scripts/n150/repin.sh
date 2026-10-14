@@ -9,7 +9,7 @@
 # ADR-102 이전의 repin은 Manager의 v6 manifest·v8 journal을 `/etc`에 사본으로 뜨고,
 # 러너 두 벌을 root 소유 스냅샷으로 설치하고, host attestation을 발행·검증했다. 그
 # 두 번째 증명은 걷어냈다 — Manager가 이미 모든 컨테이너 image를 핀된 세대와 대조한다.
-# 남은 일은 다섯이다(전부 멱등):
+# 남은 일은 여섯이다(전부 멱등):
 #   0. 인자가 핀 원장과 같은지 본다(`ktdctl pin show` — Manager 내부 파일은 읽지 않는다).
 #   1. C7 executor 이미지 라벨이 MAP인지 본다.
 #   2. /root/.d2-live.env의 비밀이 아닌 두 키를 갱신하고 퇴역한 두 키를 지운다.
@@ -17,6 +17,8 @@
 #      유도한다 — 공유 Dagster plane(Manager ADR-54)으로 옮긴 프로젝트의 Dagster는
 #      code-server 하나다.
 #   4. D2 fixture DSN을 실행 중인 Map API 컨테이너의 DSN에서 유도한다(ADR-103).
+#   5. D2 fixture의 Alembic head 확인 키를 실행 중인 Map API 이미지의 application head
+#      (`ktm-application-schema head`)에서 유도한다.
 set -euo pipefail
 
 if [[ "$#" -ne 2 ]]; then
@@ -278,5 +280,71 @@ if written != [f"{KEY}={dsn}"]:
     refuse(f"{KEY}가 정확히 한 줄로 갱신되지 않았다")
 print(f"  {KEY} = API DSN (사용자·DB 확인, 값은 출력하지 않는다)")
 PY
+
+say "5. D2 fixture Alembic head (Map API 이미지에서 유도)"
+# fixture helper는 mutation 전에 `public.alembic_version`이 이 키와 exact로 같은지 본다. 종전에는
+# 이 키를 migration이 늘 때마다 손으로 고쳤고, 고치지 않은 채 새 head(406)가 배포되자 D2가
+# `fixture target Alembic revision confirmation mismatch`로 멈췄다(2026-10-14). 그래서 매 주기
+# 실행 중인 Map API 컨테이너 — 4단계와 같은 `$API` — 의 이미지가 **스스로 attest하는** head를
+# 쓴다. `ktm-application-schema head`는 DB·env·cwd 없이 이미지에 설치된 migration graph만
+# 읽는다(`docker/application-schema-head.py`, API entrypoint의 head 게이트와 같은 정본).
+# 값은 비밀이 아니다(revision id). 쓰기는 3·4단계와 같은 0600 임시 파일 + source 대조 + rename이다.
+HEAD_JSON="$(docker exec "$API" /usr/local/bin/ktm-application-schema head)" ||
+  die "Map API 이미지에서 application head를 읽지 못했다"
+FIXTURE_HEAD_PROGRAM="$(cat <<'PY'
+import json, os, re, subprocess, sys, tempfile
+
+env_file = sys.argv[1]
+KEY = "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION"
+HEAD_SCHEMA = "kor-travel-map.application-head.v1"
+# `docker/application-schema-head.py`의 revision 문법과 같다 — 따옴표 없이 source해도 값이 보존된다.
+REVISION = re.compile(r"[0-9a-z][0-9a-z_.-]{0,127}")
+
+
+def refuse(reason):
+    raise SystemExit(f"  {reason}")
+
+
+try:
+    payload = json.loads(sys.stdin.read())
+except json.JSONDecodeError:
+    refuse("ktm-application-schema head 출력이 JSON이 아니다")
+if not isinstance(payload, dict) or payload.get("schema") != HEAD_SCHEMA:
+    refuse(f"ktm-application-schema head 출력의 schema가 {HEAD_SCHEMA}가 아니다")
+head = payload.get("head")
+if not isinstance(head, str) or REVISION.fullmatch(head) is None:
+    refuse("ktm-application-schema head의 head가 revision id가 아니다")
+
+with open(env_file, encoding="utf-8") as handle:
+    lines = handle.read().splitlines(keepends=True)
+hits = [index for index, line in enumerate(lines) if line.startswith(KEY + "=")]
+if len(hits) != 1:
+    refuse(f"{KEY} 줄이 정확히 하나가 아니다({len(hits)}줄)")
+previous = lines[hits[0]][len(KEY) + 1:].rstrip("\n")
+lines[hits[0]] = f"{KEY}={head}\n"
+
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(env_file), prefix=".d2-live.env.")
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.writelines(lines)
+    os.chmod(tmp, 0o600)
+    # 소비자와 같은 방법으로 읽어 본다. 이 프로세스는 옛 값을 env로 물려받았으므로 먼저 지운다.
+    sourced = subprocess.run(
+        ["bash", "-c", f'unset {KEY}; set -a; . "$1"; printf %s "${{{KEY}}}"', "_", tmp],
+        check=False, capture_output=True, text=True, timeout=60,
+    )
+    if sourced.returncode != 0 or sourced.stdout != head:
+        refuse(f"{KEY}를 source한 값이 이미지 head와 다르다")
+    os.replace(tmp, env_file)
+except BaseException:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+    raise
+note = "" if previous == head else f" (이전 {previous})"
+print(f"  {KEY}={head}{note}")
+PY
+)"
+printf '%s' "$HEAD_JSON" | python3 -I -c "$FIXTURE_HEAD_PROGRAM" "$ENV_FILE" ||
+  die "fixture Alembic head 키를 유도하지 못했다"
 
 say "완료 — 다음은 D1, 그 다음 D2 (같은 체크아웃)"
