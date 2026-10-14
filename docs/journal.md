@@ -6,7 +6,13 @@ prod pair(Map 4931f9c0 · PinVi 2fa1c166) 배포 뒤 `/root/chain16.sh` C단계(
 - **원인은 소스가 아니라 일시적 네트워크다.** `docker buildx history logs`(BuildKit 이력, 스크립트의 `--quiet`·가림과
   무관하게 남는다)로 본 실패 빌드의 실제 출력은 `npm ci` 49.9초 시점 `npm error code ECONNRESET` / `network aborted`.
   같은 n150에서 같은 커밋 archive를 그대로(기본 umask, 스크립트와 같은 umask 077 둘 다) 다시 빌드하니 `npm ci` ·
-  `verify:npm-tree` · `verify:next-sharp` 모두 통과했다. 당시 n150에는 다른 이미지 빌드가 겹쳐 있었다(디스크 대기).
+  `verify:npm-tree` · `verify:next-sharp` 모두 통과했다. 같은 입력의 빌드 다섯 번 중 둘(둘 다 스크립트 경유, 49.9초·177초)이
+  같은 `ECONNRESET`으로 죽고 셋(`--quiet` 포함)은 통과 — 플래그가 아니라 확률이다. 실패 시점 n150은 iowait 64~70%·swap
+  in/out 진행(load 15~21)이었다. 재실행 한 번이면 지나가지만 같은 부하에서는 다시 날 수 있다.
+- **보이지 않던 이유 둘.** ① 스크립트가 `--quiet`로 빌드하고 실패를 가린다 — 원문은 `docker buildx history logs <id>`에
+  남는다(`docker buildx history ls`의 최신 Error 행). ② chain16 C단계가 `Result=success`를 찍었다 — `systemd-run
+  --collect`가 실패한 unit을 즉시 회수해 `systemctl show -p Result`가 기본값을 돌려준다. 실제 판정은 뒤의 라벨 대조
+  (옛 이미지 c4d17343 ≠ MAP)가 했다.
 - **가설(vendor tgz 누락)은 기각.** `c7-playwright.Dockerfile`은 1a3c46737(10-06)부터 `frontend/vendor`를 `npm ci` 전에
   복사하고 `.dockerignore`도 그것을 빼지 않는다. 다만 그 수정에는 게이트가 없었다 — `frontend.Dockerfile`은 72242b1a0에서
   vendor를 복사했는데 C7 쪽은 따라오지 않은 틈이 실제로 있었다.
