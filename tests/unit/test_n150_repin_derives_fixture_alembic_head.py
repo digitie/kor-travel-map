@@ -7,7 +7,8 @@
 
 스크립트의 python 프로그램을 **그대로 떼어** 임시 env 파일에 실행하고, 입력은 생산자
 (`docker/application-schema-head.py`)를 이 저장소의 migration graph 위에서 실제로 돌린 출력이다.
-그래서 migration이 하나 늘면 기대값도 함께 움직인다 — 리터럴 head는 이 파일 어디에도 없다.
+그래서 migration이 하나 늘면 기대값도 함께 움직인다 — 어떤 기대값도 리터럴이 아니다
+(no expected value is a literal; 아래 `406_…`·`404_…`는 거부·재현 입력일 뿐이다).
 """
 
 from __future__ import annotations
@@ -45,6 +46,37 @@ def _program() -> str:
     )
     assert match is not None, "repin.sh에서 fixture Alembic head 프로그램을 찾지 못했다"
     return match.group(1)
+
+
+#: 5단계가 프로그램을 실제로 부르는 줄. 이것이 없으면 프로그램은 정의만 되고 아무것도 쓰지 않는다.
+_CALL = 'printf \'%s\' "$HEAD_JSON" | python3 -I -c "$FIXTURE_HEAD_PROGRAM" "$ENV_FILE" ||'
+
+
+def test_step_5_actually_calls_the_program() -> None:
+    """프로그램 정의만 남고 호출 줄이 지워지면 빨갛다 — 호출은 5단계 안, 완료 앞이다."""
+
+    source = _SCRIPT.read_text(encoding="utf-8")
+    lines = source.splitlines()
+    assert lines.count(_CALL) == 1, "5단계 호출 줄이 정확히 하나가 아니다"
+    call = source.index(_CALL + "\n")
+    assert source.index('say "5.') < call < source.index('say "완료')
+    following = lines[lines.index(_CALL) + 1].strip()
+    assert following.startswith("die "), "호출 실패가 repin을 멈추지 않는다"
+
+
+def _revision_gate() -> str:
+    """4단계의 API 이미지 revision 라벨 대조 셸 조각."""
+
+    source = _SCRIPT.read_text(encoding="utf-8")
+    match = re.search(
+        r'^API_IMAGE="\$\(docker inspect .*?'
+        r'^\[\[ "\$API_REVISION" == "\$MAP" \]\] \|\| die [^\n]*$',
+        source,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match is not None, "repin.sh에서 API 이미지 revision 대조를 찾지 못했다"
+    assert source.index('say "4.') < match.start() < source.index('say "5.')
+    return match.group(0)
 
 
 def _producer() -> ModuleType:
@@ -158,6 +190,55 @@ def test_refuses_and_leaves_the_file_untouched(tmp_path: Path, env_text: str, st
     assert proc.returncode != 0
     assert env_file.read_text(encoding="utf-8") == env_text
     assert sorted(path.name for path in tmp_path.iterdir()) == [".d2-live.env"]
+
+
+_MAP = "4931f9c010ab9ef1f1aa2a334d8e708f9a74a551"
+
+
+@pytest.mark.parametrize(
+    ("label", "docker_ok", "passes"),
+    [
+        (_MAP, True, True),
+        # rebuild 전 옛 컨테이너 — 옛 head를 새 사이클의 키로 쓰면 안 된다.
+        ("c807695d9a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", True, False),
+        ("", True, False),
+        (_MAP, False, False),
+    ],
+)
+def test_api_image_revision_must_be_the_pinned_map(
+    tmp_path: Path, label: str, docker_ok: bool, passes: bool
+) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/bin/sh\n"
+        + ("" if docker_ok else "exit 1\n")
+        + 'if [ "$1" = inspect ]; then [ "$4" = api123 ] || exit 9; echo sha256:img; exit 0; fi\n'
+        + 'if [ "$1 $2" = "image inspect" ]; then [ "$5" = sha256:img ] || exit 9; '
+        + f'echo "{label}"; exit 0; fi\n'
+        + "exit 9\n",
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    script = (
+        'set -euo pipefail\ndie() { echo "!! $1" >&2; exit 1; }\n'
+        f"MAP={_MAP}\nAPI=api123\n" + _revision_gate() + "\necho passed\n"
+    )
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if passes:
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == "passed\n"
+    else:
+        assert proc.returncode != 0
+        assert "passed" not in proc.stdout
 
 
 def test_program_reads_the_producer_the_api_image_installs() -> None:

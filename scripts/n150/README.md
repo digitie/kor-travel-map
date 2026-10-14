@@ -52,6 +52,8 @@ PostgreSQL client 호출, PostgreSQL 서버 이미지, DSN 문자열, libpq 연�
   mismatch`로 멈췄다(2026-10-14). **이 키를 손으로 고치는 것은 지원하지 않는다** — 매 repin이 다시 쓴다.
   출력 JSON의 schema·revision 문법(따옴표 없이 source해도 보존)과 줄이 정확히 하나인지 보고, 4단계와
   같은 0600 임시 파일 + source 값 대조 + rename으로 쓴다.
+  4단계는 그 전에 API 이미지의 `org.opencontainers.image.revision` 라벨이 `MAP`과 같은지 본다 — 옛 컨테이너의
+  DSN·head를 새 사이클에 쓰지 않는다.
 - `chain16.sh`의 M01 ACL preflight는 여전히 `KOR_TRAVEL_MAP_PG_DSN`을 fixture DSN으로 덮는다.
   repin 뒤에는 같은 값이라 결과가 같다 — preflight가 D2가 쓸 바로 그 DSN을 본다는 것을 남긴다.
 

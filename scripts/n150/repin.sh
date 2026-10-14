@@ -212,6 +212,13 @@ set -a; . "$ENV_FILE"; set +a
 API="$(docker compose --project-directory "$COMPOSE_DIR" ps --no-trunc -q \
   "${E2E_C7_MAP_API_SERVICE:?E2E_C7_MAP_API_SERVICE}" 2>/dev/null)" || die "Map API compose 조회 실패"
 [[ "$API" =~ ^[0-9a-f]{64}$ ]] || die "Map API 컨테이너가 정확히 하나가 아니다"
+# 4·5단계는 이 컨테이너에서 DSN과 schema head를 읽는다 — 그것이 핀된 MAP의 이미지가 아니면
+# (rebuild 전·도중의 옛 컨테이너) 옛 head를 새 사이클의 확인 키로 쓰게 된다. 이미지의 OCI
+# revision 라벨이 MAP과 같을 때만 계속한다(`scripts/lib/c7_prod_runtime.py`와 같은 라벨).
+API_IMAGE="$(docker inspect --format '{{.Image}}' "$API")" || die "Map API 컨테이너의 이미지를 읽지 못했다"
+API_REVISION="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE")" ||
+  die "Map API 이미지의 revision 라벨을 읽지 못했다"
+[[ "$API_REVISION" == "$MAP" ]] || die "Map API 이미지 revision 라벨(${API_REVISION:-없음})이 MAP과 다르다"
 python3 -I - "$ENV_FILE" "$API" <<'PY' || die "fixture DSN을 유도하지 못했다"
 import json, os, re, subprocess, sys, tempfile
 from urllib.parse import urlsplit
