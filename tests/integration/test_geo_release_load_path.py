@@ -866,3 +866,84 @@ async def test_chunk_reads_geo_facts_once_and_writes_stamps_in_one_statement(
         stamp = await get_stamp(migrated_session, await _feature_id(migrated_session, bundle))
         assert stamp is not None
         assert stamp.geo_data_token == TOKEN_B
+
+
+# -- 3차 리뷰 반영(#1328): 선읽기 소비·chunk 도중 전환 ----------------------------------------
+
+
+async def test_a_non_geo_row_consumes_the_pre_read_so_a_later_row_rereads(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 Feature가 chunk에 두 번 — 첫 행은 geo 대상이 아니지만 payload를 바꿔 주소를 고쳐 쓴다.
+
+    두 번째 행(같은 payload, geo 대상, stale)이 chunk 시작의 낡은 선읽기와 비교하면 "값 동일"로
+    오판해 첫 행이 쓴 값을 그대로 남긴다. 첫 행이 선읽기를 소비해야 두 번째 행이 다시 읽는다.
+    """
+    from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
+
+    seed = "consume-pre-read"
+    first = await _festival(seed, _FakeReverse(_geo(road_name_code="115603118001")))
+    await load_bundles(migrated_session, [first], geo=_ctx(REF_A))
+    feature_id = await _feature_id(migrated_session, first)
+
+    changed = await _festival(
+        seed, _FakeReverse(_geo(road_name_code="115603118999")), description="바뀐 설명"
+    )
+    not_geo = changed.model_copy(
+        update={"geo_attempt": GeoAttemptEvidence(reverse_attempted=False)}
+    )
+    reanswered = await _festival(
+        seed, _FakeReverse(_geo(road_name_code="115603118001")), description="바뀐 설명"
+    )
+    geo_row = reanswered.model_copy(
+        update={"geo_attempt": GeoAttemptEvidence(reverse_attempted=True)}
+    )
+    assert geo_row.source_record.raw_payload_hash == not_geo.source_record.raw_payload_hash
+
+    result = await load_bundles(migrated_session, [not_geo, geo_row], geo=_ctx(REF_B))
+
+    assert (await _row(migrated_session, feature_id))["road_name_code"] == "115603118001"
+    assert result.geo_stale_rewritten == 1
+
+
+async def test_a_dataset_switch_inside_a_chunk_writes_features_but_no_stamps(
+    migrated_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """chunk 도중 응답 토큰이 바뀌었다 — 전환 전 행은 다시 쓰이되 스탬프는 0건, 다음 run이 본다."""
+    from kortravelmap.infra import feature_repo
+    from kortravelmap.infra.feature_geocode_stamp_repo import is_stale
+
+    seeds = ["switch-in-chunk-1", "switch-in-chunk-2"]
+    for seed in seeds:
+        await _load_a(migrated_session, seed)
+    observed: set[str] = {TOKEN_B}
+    context = GeoLoadContext(
+        geo_applied=_REVERSE, current_dataset=REF_B, observed_data_tokens=observed
+    )
+    original = feature_repo.load_bundle
+    rows_seen = 0
+
+    async def switching(*args: Any, **kwargs: Any) -> Any:
+        nonlocal rows_seen
+        result = await original(*args, **kwargs)
+        rows_seen += 1
+        if rows_seen == 1:
+            observed.add(TOKEN_A)  # 첫 행 뒤에 geo가 데이터셋을 바꿨다
+        return result
+
+    monkeypatch.setattr(feature_repo, "load_bundle", switching)
+    changed = [
+        await _festival(seed, _FakeReverse(_geo(road_name_code="115603118999"))) for seed in seeds
+    ]
+    result = await load_bundles(migrated_session, changed, geo=context)
+
+    first_id = await _feature_id(migrated_session, changed[0])
+    assert result.geo_stale_rewritten == 1
+    assert (await _row(migrated_session, first_id))["road_name_code"] == "115603118999"
+    assert result.geo_stamps_written == 0
+    for bundle in changed:
+        feature_id = await _feature_id(migrated_session, bundle)
+        stamp = await get_stamp(migrated_session, feature_id)
+        assert stamp is not None
+        assert stamp.geo_data_token == TOKEN_A  # 전진하지 않았다
+        assert await is_stale(migrated_session, feature_id, TOKEN_B) is True

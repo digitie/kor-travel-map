@@ -208,18 +208,19 @@ def empty_answer_guard(
     return stored_any and new_all_empty
 
 
-#: 부분 퇴행 유지 대상 — geo에서만 오고, 같은 법정동 안에서 사라질 이유가 없는 필드.
-PARTIAL_REGRESSION_FIELDS: Final[tuple[str, ...]] = (
-    "road_name_code",
-    "admin_dong_code",
-    "zipcode",
-)
+#: 부분 퇴행 유지 대상 중 낱개로 지키는 필드 — geo에서만 오고 같은 법정동 안에서 사라질 이유가 없다.
+#: ``road_name_code``는 도로명주소와 짝이라 :func:`keep_partially_regressed_fields`가 따로 다룬다.
+PARTIAL_REGRESSION_FIELDS: Final[tuple[str, ...]] = ("admin_dong_code", "zipcode")
 
 
 def keep_partially_regressed_fields(
     stored: StoredGeoColumns, address: Address
 ) -> tuple[Address, tuple[str, ...]]:
     """새 답이 저장값과 같은 법정동인데 geo 전용 필드만 잃었으면 그 필드는 저장값을 지킨다.
+
+    ``admin_dong_code``·``zipcode``는 낱개로 지킨다. ``road_name_code``는 새 도로명 텍스트가
+    저장값과 같을 때만 낱개로, 아니면 ``road_address_management_no``와 **함께** 사라졌을 때만 짝으로
+    지킨다(서로 다른 릴리스의 코드를 섞지 않는다).
 
     돌려주는 것은 (보정한 ``Address``, 지킨 필드). 법정동코드가 없거나 다르면 그대로다 — 위치·행정
     구역이 바뀐 행은 새 답이 정답이다. 그 필드에 override가 있으면 손대지 않는다(override가 이긴다).
@@ -230,12 +231,25 @@ def keep_partially_regressed_fields(
     stored_address = stored.values.get("address") or {}
     overridden = stored.overridden_columns()
     kept: dict[str, Any] = {}
+
+    def lost(field_name: str) -> bool:
+        return (
+            field_name not in overridden
+            and getattr(address, field_name) is None
+            and stored_address.get(field_name) not in (None, "")
+        )
+
     for field_name in PARTIAL_REGRESSION_FIELDS:
-        if field_name in overridden:
-            continue
-        stored_value = stored_address.get(field_name)
-        if getattr(address, field_name) is None and stored_value not in (None, ""):
-            kept[field_name] = stored_value
+        if lost(field_name):
+            kept[field_name] = stored_address[field_name]
+    # 도로명코드는 도로명주소와 짝이다 — 서로 다른 릴리스의 코드를 섞지 않는다. 새 도로명 텍스트가
+    # 저장값과 같으면 그 코드만, 다르면 도로명주소 관리번호도 함께 사라졌을 때 **둘을 함께** 지킨다.
+    if lost("road_name_code"):
+        if address.road is not None and address.road == stored_address.get("road"):
+            kept["road_name_code"] = stored_address["road_name_code"]
+        elif lost("road_address_management_no"):
+            kept["road_name_code"] = stored_address["road_name_code"]
+            kept["road_address_management_no"] = stored_address["road_address_management_no"]
     if not kept:
         return address, ()
     return address.model_copy(update=kept), tuple(sorted(kept))

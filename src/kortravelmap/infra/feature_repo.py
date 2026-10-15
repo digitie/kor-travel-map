@@ -3176,9 +3176,15 @@ async def load_bundle(
         if geo is not None and geo_relevant and not feature_missing
         else None
     )
-    prefetched = (
-        _chunk.take(target_id) if _chunk is not None and target_id is not None else None
+    # 기존 Feature를 건드리는 행은 geo와 무관해도 선읽기를 **소비**한다 — 이 행이 주소 열을
+    # 고쳐 쓸 수 있으므로(payload 변경) 같은 chunk의 뒤 행이 낡은 선읽기로 "값 동일"을 오판하지
+    # 않게 그 뒤로는 행 단위로 다시 묻는다. 선읽기 값은 geo 대상 행만 쓴다.
+    taken = (
+        _chunk.take(resolved_feature_id)
+        if _chunk is not None and not feature_missing and resolved_feature_id is not None
+        else None
     )
+    prefetched = taken if target_id is not None else None
     if prefetched is not None:
         stale = token is not None and prefetched[0]
     else:

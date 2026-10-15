@@ -457,9 +457,10 @@ def test_partial_regression_keeps_only_geo_only_fields_under_the_same_legal_dong
     )
     new = Address(bjd_code="1156011000", sido_name=None)
     kept, fields = keep_partially_regressed_fields(stored, new)  # type: ignore[arg-type]
-    assert fields == ("admin_dong_code", "road_name_code", "zipcode")
+    # 도로명 텍스트도 관리번호도 없는 답 — 도로명코드는 짝을 확인할 수 없어 지키지 않는다.
+    assert fields == ("admin_dong_code", "zipcode")
     assert (kept.road_name_code, kept.admin_dong_code, kept.zipcode) == (
-        "115603118001",
+        None,
         "1156054000",
         "07237",
     )
@@ -479,3 +480,46 @@ def test_partial_regression_keeps_only_geo_only_fields_under_the_same_legal_dong
         overridden, Address(bjd_code="1156011000")
     )
     assert override_fields == ()
+
+
+def test_road_name_code_is_kept_only_with_its_road_text_or_its_management_number() -> None:
+    """도로명코드는 도로명주소와 짝 — 서로 다른 릴리스의 코드를 섞지 않는다(#1328 3차 리뷰)."""
+    from kortravelmap.dto import Address
+    from kortravelmap.infra.feature_geocode_load import keep_partially_regressed_fields
+
+    road = "서울특별시 영등포구 여의공원로 120"
+    mgmt = "11560110100100008000000001"[:25]
+    stored = _stored(
+        {
+            "bjd_code": "1156011000",
+            "road": road,
+            "road_name_code": "115603118001",
+            "road_address_management_no": mgmt,
+        }
+    )
+
+    # 같은 도로명 텍스트 — 코드만 지킨다.
+    same_road, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011000", road=road, road_address_management_no=mgmt)
+    )
+    assert fields == ("road_name_code",)
+    assert same_road.road_name_code == "115603118001"
+
+    # 도로명 텍스트가 다르고 관리번호도 함께 사라졌다 — 둘을 짝으로 지킨다.
+    pair, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011000", road="서울특별시 영등포구 다른로 1")
+    )
+    assert fields == ("road_address_management_no", "road_name_code")
+    assert (pair.road_name_code, pair.road_address_management_no) == ("115603118001", mgmt)
+
+    # 도로명 텍스트가 다르고 새 답이 자기 관리번호를 냈다 — 옛 코드를 섞지 않는다.
+    mixed, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored,
+        Address(
+            bjd_code="1156011000",
+            road="서울특별시 영등포구 다른로 1",
+            road_address_management_no="1156011010010000900000000",
+        ),
+    )
+    assert fields == ()
+    assert mixed.road_name_code is None
