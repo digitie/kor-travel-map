@@ -617,7 +617,8 @@ async def test_empty_answer_guard_holds_for_concierge(migrated_session: AsyncSes
 
 
 async def test_row_evidence_decides_the_outcome(migrated_session: AsyncSession) -> None:
-    """MOIS처럼 행 evidence가 있으면 그것으로 outcome을 정한다 — payload 코드 행은 ``not_called``."""
+    """MOIS처럼 행 evidence가 있으면 그것으로 outcome을 정한다 — payload 코드 행은 "
+    "``not_called``."""
     from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
     from kortravelmap.infra.feature_geocode_stamp_repo import is_stale
 
