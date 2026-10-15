@@ -173,10 +173,10 @@ class KorTravelMapSettings(BaseSettings):
         description=(
             "kor-travel-geo TCP 연결 수립 timeout seconds(ADR-110 결정 3). geo는 다른 "
             "호스트(odroid)에 있어 그 호스트가 꺼지면 연결 거부(RST)가 아니라 무응답이다 — "
-            "이 값이 없으면 호출마다 read 상한까지 기다린다. 기본 4초 — Linux는 SYN을 약 1초·3초에 "
-            "재전송하므로 2초면 첫 재전송 하나만 기다리고, geo 호출에는 재시도가 없어 과부하 순간의 "
-            "느린 수립 한 번이 MOIS run 전체를 실패시킨다(Manager compose가 이 env를 넘기지 않으므로 "
-            "기본값이 곧 운영 값이다). "
+            "이 값이 없으면 호출마다 read 상한까지 기다린다. 기본 4초 — Linux는 SYN을 "
+            "약 1초·3초에 재전송하므로 2초면 첫 재전송 하나만 기다리고, geo 호출에는 재시도가 "
+            "없어 과부하 순간의 느린 수립 한 번이 MOIS run 전체를 실패시킨다(Manager compose가 "
+            "이 env를 넘기지 않으므로 기본값이 곧 운영 값이다). "
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS``."
         ),
     )
@@ -569,7 +569,8 @@ class KorTravelMapSettings(BaseSettings):
         le=10.0,
         description=(
             "kor-travel-transport TCP 연결 수립 timeout seconds(ADR-110 결정 3). transport는 다른 "
-            "호스트(odroid)에 있어 꺼지면 무응답이다. 기본 4초(SYN 재전송 약 1초·3초를 둘 다 기다린다). "
+            "호스트(odroid)에 있어 꺼지면 무응답이다. "
+            "기본 4초(SYN 재전송 약 1초·3초를 둘 다 기다린다). "
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_CONNECT_TIMEOUT_SECONDS``."
         ),
     )
