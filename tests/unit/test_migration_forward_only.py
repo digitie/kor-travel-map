@@ -30,7 +30,7 @@ _SEARCH_ROOTS = (VERSIONS,)
 
 # 지금은 revision이 하나뿐이지만 목록을 박아 두는 이유는 그대로다 — 선언 문자열만
 # 보면 선언을 지워 게이트를 빠져나갈 수 있다.
-FORWARD_ONLY_REVISIONS = ("400_schema_baseline",)
+FORWARD_ONLY_REVISIONS = ("400_schema_baseline", "407_feature_geocode_stamps")
 
 
 def _path_for(stem: str) -> Path:

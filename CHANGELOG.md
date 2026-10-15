@@ -15,7 +15,7 @@
 - **ADDED (schema, alembic `407_feature_geocode_stamps`)**: `feature.feature_geocode_stamps(feature_id PK FK CASCADE,
   geo_version_token, geo_data_token, reverse_outcome, stamped_at)` — 두 토큰 NOT NULL·형식 CHECK(`dv1-`/`dd1-` + 32 hex),
   `reverse_outcome ∈ (called, geocoded, not_called)`, `geo_data_token` 인덱스. receipt head CHECK에 407. 런타임 role은
-  SELECT·INSERT·UPDATE(배포 조정기 `_FEATURE_TABLE_PRIVILEGES`). 407은 표 하나뿐이라 downgrade가 있다(개발 왕복용).
+  SELECT·INSERT·UPDATE(배포 조정기 `_FEATURE_TABLE_PRIVILEGES`). forward-only.
 - **ADDED (core)**: `kortravelmap.dto.geo_dataset`(`DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`),
   `infra/feature_geocode_stamp_repo.py`(`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`).
   아직 적재 경로에 배선되지 않았다(T-GR-02/03).

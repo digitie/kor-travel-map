@@ -27,10 +27,9 @@ Revises: 406_feature_write_gate
   (``infra/runtime_privileges.py`` ``_FEATURE_TABLE_PRIVILEGES``)가 건다.
 - receipt head CHECK에 이 revision을 더한다(401~406과 같은 계약).
 
-downgrade. 이 revision은 **새 표 하나**만 더하므로 되돌릴 수 있다 — 표를 지우고 receipt head
-CHECK를 406 목록으로 돌린다. 지워지는 것은 스탬프뿐이고, 스탬프 부재는 "stale"로 읽히므로
-(ADR-109 결정 1) 다시 올린 뒤 첫 적재가 채운다. 배포는 여전히 마이그레이션 전진이다(ADR-102) —
-이 downgrade는 개발·검증용 왕복이지 운영 절차가 아니다.
+forward-only. downgrade는 두지 않는다(ADR-021·ADR-102 — ``alembic/env.py``가 모든 downgrade를
+해석 전에 거부한다). 되돌릴 일이 생기면 forward revision으로 표를 지운다 — 지워지는 것은
+스탬프뿐이고 스탬프 부재는 stale로 읽히므로(ADR-109 결정 1) 잃는 것이 없다.
 """
 
 from __future__ import annotations
@@ -82,20 +81,11 @@ _INDEX_DATA_TOKEN_SQL: Final[str] = (
     "ON feature.feature_geocode_stamps USING btree (geo_data_token)"
 )
 
-_DROP_STAMPS_SQL: Final[str] = "DROP TABLE feature.feature_geocode_stamps"
-
 #: receipt head 값 열거 CHECK — graph의 **모든** revision(401과 같은 계약).
 _RECEIPT_HEAD_CHECK_SQL: Final[str] = """
 ALTER TABLE ops.application_schema_operation_receipts
     DROP CONSTRAINT ck_application_schema_operation_receipts_head,
     ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps'))
-"""
-
-#: downgrade가 되돌리는 406의 receipt head CHECK(407 없음).
-_RECEIPT_HEAD_CHECK_406_SQL: Final[str] = """
-ALTER TABLE ops.application_schema_operation_receipts
-    DROP CONSTRAINT ck_application_schema_operation_receipts_head,
-    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate'))
 """
 
 #: 실행 순서대로의 upgrade 문장. 창은 소유자 롤로 열고 같은 롤로 끝난다 — env가 켠
@@ -108,12 +98,6 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _RECEIPT_HEAD_CHECK_SQL,
 )
 
-_DOWNGRADE_STATEMENTS: Final[tuple[str, ...]] = (
-    _SET_OWNER_ROLE_SQL,
-    _DROP_STAMPS_SQL,
-    _RECEIPT_HEAD_CHECK_406_SQL,
-)
-
 
 def upgrade() -> None:
     """스탬프 표·인덱스를 만들고 receipt head CHECK에 407을 더한다."""
@@ -123,7 +107,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """스탬프 표를 지우고 receipt head CHECK를 406으로 돌린다(스탬프 부재 = stale)."""
-    bind = op.get_bind()
-    for statement in _DOWNGRADE_STATEMENTS:
-        bind.execute(text(statement))
+    """되돌리지 않는다 — 스탬프 표는 forward revision으로만 걷는다."""
+    raise RuntimeError(
+        "407_feature_geocode_stamps is forward-only: 스탬프 표는 forward revision으로만 걷는다(ADR-109)."
+    )

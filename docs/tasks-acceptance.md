@@ -2499,9 +2499,9 @@ ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps
   geocode_obtained_code}`로 받는다(T-GR-03이 `AdminEvidence`에서 만든다). (2) `upsert_stamps(session, *, current, outcomes)`:
   run 토큰을 인자로 받아 None·`data_token` None이면 0건(쓰지도 덮지도 않음)을 함수가 강제한다. (3) `coverage()`는
   `excluded_by_skip`이 408의 계획 표에 기대므로 T-GR-04로 미룬다. (4) 토큰 형식 CHECK(`dv1-`/`dd1-` + 32 hex)를
-  407에 더했다 — 틀린 값이 비교 키가 되면 모든 행이 영구 stale이다. (5) 407에는 **실제 downgrade**(표 DROP + receipt
-  CHECK 406 복원)가 있다 — 새 표 하나뿐이고 스탬프 부재 = stale이라 잃는 것이 없다; 왕복은
-  `test_407_geocode_stamps_round_trips_to_406_and_back`가 fresh DB에서 고정한다. 배포는 여전히 전진(ADR-102).
+  407에 더했다 — 틀린 값이 비교 키가 되면 모든 행이 영구 stale이다. (5) 407은 forward-only다(`alembic/env.py`가 모든
+  downgrade를 해석 전에 거부한다 — ADR-021·102). 왕복 확인은 scratch DB에서 손으로 했다(406까지 올림 → head →
+  역 SQL로 표·CHECK 원복 + `alembic_version`=406 → 다시 head, PR 본문).
   (6) 응답 `dataset`의 형식 위반은 선택 파싱이라 None으로 삼키고(지오코딩 응답 자체는 쓴다), `dataset_version()`의
   형식 위반은 typed 오류로 올린다(현재 토큰은 엄격). (7) `GeoCallStats.empty`는 endpoint 단위다 — reverse가 비고 region
   fallback이 채우면 `empty['reverse']` 1건이고 fallback은 `regions_within_radius`로 따로 센다(T-GR-03 run 가드가 어느
