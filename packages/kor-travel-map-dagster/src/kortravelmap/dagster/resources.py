@@ -19,6 +19,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.geocoding import (
     GeoCallStats,
     KorTravelGeoRestClient,
+    geo_http_timeout,
     kor_travel_geo_reverse_geocoder,
 )
 from kortravelmap.infra.db import make_async_engine, require_pg_dsn
@@ -1072,7 +1073,7 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
 
     http = httpx.AsyncClient(
         base_url=settings.kor_travel_geo_base_url.get_secret_value(),
-        timeout=settings.kor_travel_geo_timeout_seconds,
+        timeout=geo_http_timeout(settings),
     )
     # **이 resource가 geo 경계 계수의 소유자다.** 아래 `region_fallback_radius_km`이
     # 켜져 있어서 좌표 하나가 왕복 1회일 수도 2회일 수도 있는데, 그 비율이 오늘

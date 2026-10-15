@@ -45,6 +45,7 @@ from kortravelmap.core.offline_upload_states import (
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
+    geo_http_timeout,
     kor_travel_geo_address_resolver,
     kor_travel_geo_reverse_geocoder,
 )
@@ -1479,7 +1480,7 @@ async def validate_offline_upload_request(
         if settings.kor_travel_geo_base_url:
             async with httpx.AsyncClient(
                 base_url=settings.kor_travel_geo_base_url.get_secret_value(),
-                timeout=settings.kor_travel_geo_timeout_seconds,
+                timeout=geo_http_timeout(settings),
             ) as http:
                 kraddr = KorTravelGeoRestClient(
                     http,

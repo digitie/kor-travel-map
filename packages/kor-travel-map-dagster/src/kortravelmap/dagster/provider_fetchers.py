@@ -209,6 +209,20 @@ def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str
     return base_url.rstrip("/"), {SERVICE_TOKEN_HEADER: secret}
 
 
+def transport_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
+    """kor-travel-transport client의 ``httpx.Timeout`` — export fetcher 전부가 이것을 쓴다(ADR-110 결정 3).
+
+    첫 위치 인자(``kor_travel_transport_timeout_seconds``)가 read·write·pool을 덮고 연결 수립만
+    ``kor_travel_transport_connect_timeout_seconds``로 따로 둔다. transport는 odroid에 있어 꺼지면
+    무응답이다 — 분리하지 않으면 시도마다 read 상한(기본 30 s)까지 기다린다.
+    ``tests/lint/test_geo_transport_clients_use_timeout_factory.py``가 생성 지점마다 강제한다.
+    """
+    return httpx.Timeout(
+        settings.kor_travel_transport_timeout_seconds,
+        connect=settings.kor_travel_transport_connect_timeout_seconds,
+    )
+
+
 _TRANSPORT_MAX_PAGES: Final[int] = 1000
 """페이지 루프 상한. 최대 page size 1000이면 100만 행 — 주유소 약 1.2만·휴게소 수백의 수십 배다.
 넘으면 cursor가 순환하거나 계약이 깨진 것이다(같은 cursor 반복은 별도로 즉시 잡는다)."""
@@ -356,7 +370,7 @@ async def _iter_transport_export(
     total = 0
     async with httpx.AsyncClient(
         base_url=base_url,
-        timeout=settings.kor_travel_transport_timeout_seconds,
+        timeout=transport_http_timeout(settings),
         headers=headers,
     ) as client:
         for _page_number in range(_TRANSPORT_MAX_PAGES):
@@ -430,7 +444,7 @@ async def fetch_transport_highway_incidents(
     base_url, headers = _transport_connection(settings)
     async with httpx.AsyncClient(
         base_url=base_url,
-        timeout=settings.kor_travel_transport_timeout_seconds,
+        timeout=transport_http_timeout(settings),
         headers=headers,
     ) as client:
         response = await _transport_get(
@@ -454,7 +468,7 @@ async def fetch_transport_airports(
     base_url, headers = _transport_connection(settings)
     async with httpx.AsyncClient(
         base_url=base_url,
-        timeout=settings.kor_travel_transport_timeout_seconds,
+        timeout=transport_http_timeout(settings),
         headers=headers,
     ) as client:
         response = await _transport_get(

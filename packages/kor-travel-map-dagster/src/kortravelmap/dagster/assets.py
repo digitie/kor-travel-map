@@ -199,6 +199,11 @@ n150은 4코어이고 단일 회전 디스크를 weather/concierge/geo/airport�
 geo를 대량으로 쓰는 asset 중 pool을 선언한 것은 **하나도 없었다.** cron은 월간
 job을 10분 간격으로 엇갈려 두었지만, 한 job이 3시간이면 그 엇갈림은 무의미하다.
 
+**근거 갱신(2026-10-15, ADR-110 결정 6).** geo는 2026-10-14~15 odroid로 옮겨져 위
+n150 디스크 대기는 더 이상 geo 쪽 원인이 아니다. pool은 **유지**하되 이유가 바뀌었다 —
+**odroid geo CPU 보호**(A55 ×4 1.8 GHz, geo·weather·transport가 함께 쓴다). 대량 역지오코딩
+run 둘이 겹치면 그 CPU를 나눠 다른 소비자의 지연이 커진다. 술어와 limit은 그대로다.
+
 `docker/dagster.yaml`의 `concurrency.pools`가 `default_limit: 1`,
 `granularity: run`이므로 **이 이름을 선언하는 것만으로** 인스턴스 전역에서 한
 번에 하나만 돈다(`HIGHWAY_INCIDENT_SNAPSHOT_POOL`과 같은 기제).
