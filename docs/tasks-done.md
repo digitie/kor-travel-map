@@ -2,6 +2,11 @@
 
 ## 2026-10-15 — geo 재지오코딩·odroid 이전 묶음의 doc-only 선행 둘
 
+- [x] T-GR-00-LEDGER — **journal·tasks-done 다음 경계 분리.** [#1323](https://github.com/digitie/kor-travel-map/pull/1323)이
+  journal 2026-09-20~25 8건을 `archive/journal-2026-09e.md`로, tasks-done 2026-08-04~05 2절을 `archive/tasks-done-2026-08a.md`로
+  옮겼다(바이트 보존 검산 — journal 209,356 = 182,096 + 27,260, tasks-done 200,699 = 89,636 + 111,063; 예외는 상대 링크 4개
+  `../` 재기준화와 끝 빈 줄). 머지가 조건이라 다음 doc-only PR(ADR-110 사실 갱신)이 `[x]`·이관을 싣는다. 해제 조건 전문은
+  [acceptance §T-GR-00-LEDGER](tasks-acceptance.md#t-gr-00-ledger).
 - [x] T-GR-00 — **`tasks-acceptance.md` 원장 분리 선행.** [#1315](https://github.com/digitie/kor-travel-map/pull/1315)
   (`f7affea8`, 2026-10-13 머지, lint.yml 초록)가 `scripts/archive_task_ledger_section.py --apply`로 닫힌 절 7개를
   `docs/archive/tasks-acceptance-*.md`로 옮기고(216,950 → 166,931 B, 매 이동 다중집합 검산 통과) ADR-109를 함께 실었다.

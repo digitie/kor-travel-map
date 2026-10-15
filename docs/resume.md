@@ -1,3 +1,12 @@
+## 2026-10-15 — ADR-110 사실 갱신(odroid 이전 실행됨) + T-GR-00-LEDGER 종결 이관: 브랜치 `docs/adr-110-odroid-facts`
+
+**다음 한 작업: T-MAP-02(connect timeout 분리, 코드 PR) — 해제 조건은 소유자 결정(2026-10-15)으로 "머지 뒤 첫 prod 배포".
+그다음 T-GR-01(PR-1, migration 407). Track 1의 '없음 → 첫 data_token = 기준선' 규칙(소유자 결정)은 T-GR-04/05가 구현한다.**
+
+- 바뀐 것: ADR-110 "사실 갱신(2026-10-15)" 절과 포트·머지 상태 갱신, `integration-map.md` §1~§4, CLAUDE.md geocoding 줄,
+  ADR README, ADR-109 역포인터(기준선 소유자 결정), T-GR-00-LEDGER `[x]`·이관, acceptance §T-MAP-02 해제 조건(소유자 결정). 실측은 journal 2026-10-15.
+- 바뀌지 않은 것: 코드·`.env.example`·OpenAPI·n150(읽기만)·ADR-110의 결정과 열린 결정(전부 proposed 그대로).
+
 ## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER) + T-GR-00·T-MAP-01 종결 이관: 브랜치 `docs/t-gr-00-ledger`
 
 **다음 한 작업: lint.yml 초록 → 머지(doc-only) → ADR-110 사실 갱신 doc-only PR(2026-10-14~15 geo·weather·transport의
