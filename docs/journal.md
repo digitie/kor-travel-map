@@ -11,8 +11,11 @@
   workspace에는 없음); chain t1015d(Map `4931f9c0` + PinVi `44d8ecc8`) D1 11 passed·D2 `phase=passed`.
 - **관찰 하나.** 같은 확인 직전 odroid geo `/v2/reverse`가 세 번 약 9 s 뒤 504였다가 다음 호출은 1.0 s에 200. 원인은 보지
   않았다 — Map 단일 timeout 10 s에 가깝다는 점만 적는다(T-MAP-02가 다루는 것은 connect이지 이 read 지연이 아니다).
-- **결정과 어긋난 순서.** T-MAP-02(connect 분리)는 "transport 플립 전 배포"였는데 플립이 먼저 일어났다. acceptance
-  §T-MAP-02에 "첫 prod 배포로 읽기"를 **제안**으로만 적었다(조문은 소유자 확인 전이라 그대로).
+- **결정과 어긋난 순서.** T-MAP-02(connect 분리)는 "transport 플립 전 배포"였는데 플립이 먼저 일어났다. 소유자가
+  2026-10-15 해제 조건을 "머지 뒤 첫 prod 배포"로 바꿨다(acceptance §T-MAP-02).
+- **리뷰 반영.** odroid geo는 2026-10-12 n150 백업의 dump 복원(`pg_restore` rc=0, alembic `0029`)이고 `data_token`은 그
+  위에서 처음 저장됐다. Map geo 키는 복원으로 보존됐다(활성 label `kor-travel-map`, 재발급 없음) — geo ADR-070 "실행 기록"
+  (geo PR #575). 소유자 결정: '없음 → 첫 data_token'은 기준선이지 재계획이 아니다(ADR-109 역포인터; 구현은 T-GR-04/05).
 - **문서.** ADR-110 머리말·"사실 갱신(2026-10-15)" 절 신설·컨텍스트/결정 5/후속의 포트·머지 상태 갱신(교차 ADR 셋은
   2026-10-13 main에 proposed로 머지돼 있었다), `integration-map.md` §1(transport·geo 행, Manager 행의 낡은 관측 포트
   12401/12301/12205 → 12102/12103/12104)·§2(그림의 transport 포트, LAN 단락)·§3(transport export 행)·§4(geocoding 행),

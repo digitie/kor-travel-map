@@ -51,8 +51,9 @@
    "오늘 = compose 기본값 + root `.env`"는 여전히 맞고, 바뀐 것은 그 기본값의 값뿐이다(compose 기본값은 registry를 읽지
    못하는 리터럴이고 Manager 렌더 스캔 테스트 `backend/tests/test_consumer_origin_defaults.py`가 registry `host:`와 대조한다).
 3. **효과(Map 쪽에서 본 것).** Map API 컨테이너에서 odroid geo `POST /v2/reverse` **200**(1.0 s)·`POST /v2/dataset/version`
-   **200** — Map 소비자 키가 odroid geo에서 받아들여진다(결정 4: 키는 오늘도 대조된다. 재발급이었는지 이관이었는지는
-   geo 쪽 기록 몫이고 여기서는 효과만 본다). 같은 확인 직전 `/v2/reverse` 세 번이 약 9 s 뒤 **504**였다가 그다음 200이
+   **200** — Map 소비자 키가 odroid geo에서 받아들여진다(결정 4: 키는 오늘도 대조된다). 재발급은 없었다 — odroid geo가
+   n150 dump **복원**이라 `public_api_keys`가 함께 왔고 Map의 활성 키(label `kor-travel-map`)가 그대로다(geo ADR-070
+   "실행 기록", geo PR #575). 결정 4 (a)의 재발급 절차는 **풀로드**일 때의 일이라 이번에는 발동하지 않았다. 같은 확인 직전 `/v2/reverse` 세 번이 약 9 s 뒤 **504**였다가 그다음 200이
    됐다 — 원인은 보지 않았고 관찰로만 남긴다(odroid geo 부하·워밍업 가능성; 결정 3의 read 상한 10 s와 가까운 값이다).
    Map code-server에서 odroid transport gateway export(`airports`·`highway-incidents/active`) 토큰 있음 **200**(0.6 s),
    토큰 없음 **404**(경로 숨김) — 결정 5의 allow-list·토큰 경계가 gateway에서 성립한다. n150에는 transport·weather
@@ -68,8 +69,14 @@
    하지 않았다. (ㄷ) **단계 11은 아직이다** — n150 `kor-travel-geo-api`·`-ui` 컨테이너가 살아 있고 n150 loopback
    `12501` `/v1/healthz`도 200이다. Manager 기록상 compose의 `map → geo` depends_on 간선(R7, T-MGR-01b)이 남아 n150
    `ensure map`이 n150 geo 컨테이너를 되살리며, n150 workspace에는 geo가 없어 이중 적재는 없다. Map은 그 n150 geo를
-   부르지 않는다(위 2의 env). (ㄹ) odroid geo가 풀로드였는지 dump 복원이었는지는 이 문서가 확인하지 않았다 — Map
-   릴리스 센서(T-GR-05)가 미배포라 결정 6의 전량 재계획은 어느 쪽이든 발생하지 않았다.
+   부르지 않는다(위 2의 env). (ㄹ) odroid geo는 **풀로드가 아니라 dump 복원**이다 — 2026-10-12 n150 백업을
+   `pg_restore`(rc=0)로 올렸고 alembic `0029`, 그 위에서 `data_token`을 **처음** 저장했다(n150 geo는 토큰을 가진 적이
+   없다; geo ADR-070 "실행 기록", geo PR #575). Map 릴리스 센서(T-GR-05)는 미배포라 결정 6의 전량 재계획은 생기지 않았다.
+   **소유자 결정(2026-10-15)**: 소비자가 geo `data_token`이 '없음'에서 첫 토큰으로 바뀌는 것을 보면 그것은 **기준선
+   (baseline)**이지 재계획 사유가 아니다 — 정본 기록은 ADR-109(T-GR-04/05가 구현한다). 결정 6의 "풀로드 → 전량 재계획"
+   권고는 그대로다(dump 복원이면 토큰이 같다는 문장은 n150에 토큰이 없었으므로 이번에는 '없음 → 첫 토큰'으로 읽는다).
+   (ㅁ) **소유자 결정(2026-10-15)**: T-MAP-02의 해제 조건 "transport 플립 4a 전 배포"는 "머지 뒤 **첫 prod 배포**"로
+   바꾼다(acceptance §T-MAP-02).
 6. **검증된 pair.** Map `4931f9c0`(#1319) + PinVi `44d8ecc8` pinned pair가 이전 뒤 상태에서 n150 chain(`/root/chain-t1015d.log`,
    2026-10-15)으로 **D1 11 passed**, **D2 `phase=passed`**(BLOCKED 없음)를 냈다.
 7. **바뀌지 않은 것.** Map·PinVi·concierge는 n150에 남고, Map DB는 n150 `kor-travel-shared-postgres` **`11000`** 안의
