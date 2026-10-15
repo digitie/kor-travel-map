@@ -27,6 +27,7 @@ resource는 호출자가 꺼내 넘긴다.
 import math
 import time
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -37,6 +38,7 @@ from kortravelmap.client import AddressValidationFinding, AsyncKorTravelMapClien
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.ids import make_integrity_finding_key, make_source_record_key
 from kortravelmap.dto import Coordinate, FeatureBundle
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.geocoding import PrefetchingReverseGeocoder, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -440,6 +442,7 @@ async def load_mois_license_records_chunked(
     reverse_geocoder: ReverseGeocoder | None,
     clock: Callable[[], float] = time.time,
     convert: Callable[..., Awaitable[list[FeatureBundle]]] = license_records_to_bundles,
+    current_dataset: DatasetRef | None = None,
 ) -> MoisChunkedLoadOutcome:
     """선택 업종의 영업중 record를 chunk 단위로 commit하며 적재한다(재개형).
 
@@ -447,6 +450,11 @@ async def load_mois_license_records_chunked(
     ``clock``(epoch 초)·``convert``는 테스트가 시간과 변환을 대신하기 위한 자리다.
     시간 상한은 **run 시작**부터 재고, run 상한 tag(``dagster/max_runtime``)에서
     ``RUN_FINAL_MARGIN_SECONDS``를 뺀 값을 넘지 않는다.
+
+    ``current_dataset``은 run 시작에(첫 지오코딩 **전에**) 읽은 geo 현재 토큰이다(ADR-109 결정 2·4).
+    있으면 "그대로" 판정에 스탬프 토큰 조건이 붙고(스탬프가 없거나 옛 토큰인 ``called|geocoded``
+    행은 다시 변환), 행마다 변환 evidence로 스탬프를 쓰며, 빈 답 표식은 같은 토큰에서만 믿는다.
+    응답에서 다른 토큰을 보면 그 뒤로는 스탬프를 쓰지 않는다(:class:`GeoLoadContext`).
     """
     from .mois_source_sync import read_mois_source_synced_at  # schedules→assets 순환 회피
 
@@ -470,6 +478,12 @@ async def load_mois_license_records_chunked(
     # 멈추면 한 달짜리 정체가 된다(적대 리뷰 MED-1) — 남은 시간을 tag로 남긴다.
     budget_available = max(0, int(deadline - clock()))
 
+    geo = GeoLoadContext(
+        geo_applied=GeoApplied(reverse=reverse_geocoder is not None, geocode=False),
+        current_dataset=current_dataset,
+        observed_data_tokens=_observed_tokens(reverse_geocoder),
+    )
+
     async def _load_chunk(chunk: list[Any], slug_seen: int, slug_invalid: int) -> _ChunkLoad:
         payload_hashes = {
             license_source_entity_id(record): license_record_payload_hash(record)
@@ -480,6 +494,7 @@ async def load_mois_license_records_chunked(
             dataset_key=dataset_key,
             source_entity_type=_LICENSE_ENTITY_TYPE,
             payload_hashes=payload_hashes,
+            current_data_token=geo.effective_token(),
         )
         to_convert = [
             record for record in chunk if license_source_entity_id(record) not in unchanged
@@ -489,6 +504,7 @@ async def load_mois_license_records_chunked(
             dataset_key=dataset_key,
             records=[r for r in to_convert if license_reverse_geocode_coordinate(r) is not None],
             payload_hashes=payload_hashes,
+            current_data_token=geo.effective_token(),
         )
         if known:
             # 같은 payload로 최근 빈 답을 받은 행 — 조회하지 않고 적재하지도 않는다
@@ -539,8 +555,11 @@ async def load_mois_license_records_chunked(
                 dataset_key=dataset_key,
                 reobserved={key: payload_hashes[key] for key in unchanged},
                 observed_at=observed_at,
+                geo=geo,
             ),
             enforce_loss_guard=False,
+            geo_applied=geo.geo_applied,
+            current_dataset=current_dataset,
         )
         # 이번에 풀린 행에 열려 있던 표식은 더는 참이 아니다 — 닫는다(open 표식이 쌓이지 않게).
         resolved_ids = [
@@ -685,6 +704,7 @@ async def load_mois_license_records_chunked(
             context,
             client,
             dataset_key=dataset_key,
+            geo_data_token=geo.effective_token(),
             rows=[
                 row
                 for slug_name, rows in marker_candidates.items()
@@ -707,7 +727,7 @@ async def load_mois_license_records_chunked(
             dataset_key=dataset_key,
             strict_address=strict_address,
             authoritative_snapshot_complete=False,
-            load_all=lambda _batch: _empty_load(),
+            load_all=lambda _batch, _geo: _empty_load(),
         )
 
     outcome = MoisChunkedLoadOutcome(
@@ -856,8 +876,13 @@ async def _known_unresolvable(
     dataset_key: str,
     records: Sequence[Any],
     payload_hashes: Mapping[str, str],
+    current_data_token: str | None = None,
 ) -> frozenset[str]:
-    """같은 payload로 최근(``UNRESOLVABLE_MARKER_RETRY_DAYS``) 빈 답 표식이 있는 행의 entity id."""
+    """같은 payload로 최근(``UNRESOLVABLE_MARKER_RETRY_DAYS``) 빈 답 표식이 있는 행의 entity id.
+
+    현재 geo 토큰이 있으면 같은 토큰으로 남긴 표식만 믿는다 — 새 데이터셋에서는 다시 조회한다
+    (ADR-109 결정 4).
+    """
     if not records:
         return frozenset()
     by_marker: dict[str, str] = {}
@@ -877,6 +902,9 @@ async def _known_unresolvable(
         violation_type=UNRESOLVABLE_MARKER_TYPE,
         expected_source_record_keys=expected,
         max_age_days=UNRESOLVABLE_MARKER_RETRY_DAYS,
+        expected_payload_fields=(
+            {"geo_data_token": current_data_token} if current_data_token is not None else None
+        ),
     )
     return frozenset(by_marker[marker] for marker in fresh)
 
@@ -887,14 +915,21 @@ async def _record_unresolvable_markers(
     *,
     dataset_key: str,
     rows: Sequence[_Unresolvable],
+    geo_data_token: str | None = None,
 ) -> None:
     """빈 답 행에 표식을 남긴다(이미 있으면 ``last_seen_at``·payload가 전진). 실패는 무해하다.
+
+    ``geo_data_token``(ADR-109 결정 4)을 payload에 싣는다 — 다른 토큰에서는 그 표식을 믿지 않는다.
 
     표식을 못 남기면 다음 run이 그 행을 다시 지오코딩할 뿐이다 — 적재를 멈출 이유가 아니다.
     """
     for start in range(0, len(rows), _MARKER_WRITE_BATCH):
         await _record_marker_batch(
-            context, client, dataset_key=dataset_key, rows=rows[start : start + _MARKER_WRITE_BATCH]
+            context,
+            client,
+            dataset_key=dataset_key,
+            rows=rows[start : start + _MARKER_WRITE_BATCH],
+            geo_data_token=geo_data_token,
         )
 
 
@@ -907,6 +942,7 @@ async def _record_marker_batch(
     *,
     dataset_key: str,
     rows: Sequence[_Unresolvable],
+    geo_data_token: str | None = None,
 ) -> None:
     findings = tuple(
         AddressValidationFinding(
@@ -925,6 +961,7 @@ async def _record_marker_batch(
                 "source_entity_id": row.source_entity_id,
                 "lon": row.lon,
                 "lat": row.lat,
+                **({"geo_data_token": geo_data_token} if geo_data_token is not None else {}),
             },
         )
         for row in rows
@@ -1021,10 +1058,17 @@ def _chunk_loader(
     dataset_key: str,
     reobserved: Mapping[str, str],
     observed_at: datetime,
-) -> Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]:
-    """chunk 하나의 transaction — 미변경 재관측 + 변경분 적재를 함께 commit한다."""
+    geo: GeoLoadContext,
+) -> Callable[[Sequence[FeatureBundle], GeoLoadContext | None], Awaitable[FeatureLoadResult]]:
+    """chunk 하나의 transaction — 미변경 재관측 + 변경분 적재 + 지오코딩 스탬프를 함께 commit한다.
 
-    async def _load(batch: Sequence[FeatureBundle]) -> FeatureLoadResult:
+    wrapper가 넘기는 geo 입력 대신 이 run의 것(관측 토큰 포함)을 쓴다 — MOIS는 wrapper에 계수를
+    넘기지 않는다(run 빈 답 가드는 자기 루프의 degraded 규칙이다).
+    """
+
+    async def _load(
+        batch: Sequence[FeatureBundle], _wrapper_geo: GeoLoadContext | None
+    ) -> FeatureLoadResult:
         return await client.load_feature_bundles_reobserving(
             batch,
             provider=PROVIDER_NAME,
@@ -1032,6 +1076,7 @@ def _chunk_loader(
             source_entity_type=_LICENSE_ENTITY_TYPE,
             reobserved_payload_hashes=reobserved,
             observed_at=observed_at,
+            geo=geo,
         )
 
     return _load
@@ -1039,6 +1084,13 @@ def _chunk_loader(
 
 async def _empty_load() -> FeatureLoadResult:
     return FeatureLoadResult()
+
+
+def _observed_tokens(reverse_geocoder: object) -> AbstractSet[str]:
+    """역지오코더의 계수가 응답에서 본 ``data_token`` 집합(살아 있는 참조). 계수가 없으면 빈 "
+    "집합."""
+    stats = getattr(reverse_geocoder, "stats", None)
+    return getattr(stats, "observed_data_tokens", frozenset()) if stats is not None else frozenset()
 
 
 def _tag_run_outcome(context: Any, tags: Mapping[str, str]) -> None:

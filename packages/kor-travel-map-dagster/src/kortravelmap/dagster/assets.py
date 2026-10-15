@@ -949,6 +949,8 @@ async def run_feature_place_mois_licenses(
         dataset_key=dataset_key,
         strict_address=strict_address,
         reverse_geocoder=_reverse_geocoder(context),
+        # 첫 지오코딩·"그대로" 판정 **전에** 읽는다(ADR-109 결정 2·4).
+        current_dataset=await _current_geo_dataset(context),
     )
     # 봉인과 같은 조건이다 — 본 record가 0건인 "완료"는 sync 성공이 아니다.
     if outcome.authoritative:
@@ -2005,24 +2007,74 @@ async def _geo_run_inputs(
     """
     current: DatasetRef | None = None
     if geo_applied.reverse or geo_applied.geocode:
-        handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
-        if handle is None:
-            context.log.warning(
-                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — "
-                "현재 토큰 None으로 진행"
-            )
-        else:
-            current = await cast("GeoDatasetHandle", handle).current()
+        current = await _current_geo_dataset(context)
     stats: GeoCallStats | None = None
     if geo_applied.reverse:
         stats = cast("GeoCallStats | None", getattr(_reverse_geocoder(context), "stats", None))
     return {"geo_applied": geo_applied, "current_dataset": current, "geo_stats": stats}
 
 
+async def _current_geo_dataset(context: AssetExecutionContext) -> DatasetRef | None:
+    """run-scoped 현재 토큰 — resource handle이 처음 읽은 값(이후 같은 값). 키 미배선은 WARNING."""
+    handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
+    if handle is None:
+        context.log.warning(
+            "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — 현재 토큰 None으로 "
+            "진행"
+        )
+        return None
+    return await cast("GeoDatasetHandle", handle).current()
+
+
+class _TokenFirstReverseGeocoder:
+    """첫 역지오코딩 **전에** run의 현재 토큰을 읽게 하는 감싸개(ADR-109 결정 2, #1327 최종 리뷰).
+
+    ``_load`` 경로는 변환(지오코딩)이 끝난 뒤에야 적재 wrapper로 들어가므로, 현재 토큰을 거기서 처음
+    읽으면 run 도중 geo가 데이터셋을 바꿨을 때 옛 데이터로 해석한 행이 **새** 토큰으로 봉인될 수
+    있다 (위험한 방향). 이 감싸개는 처음 불릴 때 handle을 먼저 읽고 그 뒤에 지오코딩한다 — handle이
+    값을 기억하므로 적재 wrapper가 나중에 읽는 값은 지오코딩 **전** 값이다. 계수(``stats``)는 그대로
+    보인다.
+    """
+
+    def __init__(self, inner: Any, before: Callable[[], Awaitable[object]]) -> None:
+        self._inner = inner
+        self._before = before
+        self._ready = False
+
+    @property
+    def stats(self) -> GeoCallStats | None:
+        return cast("GeoCallStats | None", getattr(self._inner, "stats", None))
+
+    async def _ensure_token(self) -> None:
+        if not self._ready:
+            await self._before()
+            self._ready = True
+
+    async def __call__(self, coord: Any) -> Any:
+        await self._ensure_token()
+        return await self._inner(coord)
+
+
+class _TokenFirstObservedReverseGeocoder(_TokenFirstReverseGeocoder):
+    """``observe``가 있는 역지오코더용(``ObservedReverseGeocoder`` 프로토콜을 유지한다)."""
+
+    async def observe(self, coord: Any) -> Any:
+        await self._ensure_token()
+        return await self._inner.observe(coord)
+
+
 def _reverse_geocoder(context: AssetExecutionContext) -> ReverseGeocoder | None:
+    inner = _resource_object(context, "reverse_geocoder", default=None)
+    if inner is None or _resource_object(context, "kor_travel_geo_dataset", default=None) is None:
+        return cast("ReverseGeocoder | None", inner)
+    wrapper_type = (
+        _TokenFirstObservedReverseGeocoder
+        if callable(getattr(inner, "observe", None))
+        else _TokenFirstReverseGeocoder
+    )
     return cast(
-        "ReverseGeocoder | None",
-        _resource_object(context, "reverse_geocoder", default=None),
+        "ReverseGeocoder",
+        wrapper_type(inner, lambda: _current_geo_dataset(context)),
     )
 
 

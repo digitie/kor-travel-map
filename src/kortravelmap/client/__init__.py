@@ -2666,6 +2666,7 @@ class AsyncKorTravelMapClient:
         violation_type: str,
         expected_source_record_keys: Mapping[str, str],
         max_age_days: int,
+        expected_payload_fields: Mapping[str, str] | None = None,
     ) -> frozenset[str]:
         """같은 payload로 최근 열려 있는 finding의 dedupe key(ADR-108 역지오코딩 불가 표식)."""
         async with self._session_factory() as session, session.begin():
@@ -2674,6 +2675,7 @@ class AsyncKorTravelMapClient:
                 violation_type=violation_type,
                 expected_source_record_keys=expected_source_record_keys,
                 max_age_days=max_age_days,
+                expected_payload_fields=expected_payload_fields,
             )
 
     async def resolve_open_findings_by_key(

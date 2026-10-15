@@ -393,6 +393,10 @@ JOIN ops.data_integrity_violations AS finding
 WHERE finding.violation_type = :violation_type
   AND finding.payload ->> 'source_record_key' = wanted.source_record_key
   AND finding.last_seen_at >= statement_timestamp() - make_interval(days => :max_age_days)
+  AND (
+      CAST(:expected_payload AS jsonb) IS NULL
+      OR finding.payload @> CAST(:expected_payload AS jsonb)
+  )
 """
 
 
@@ -402,8 +406,12 @@ async def find_fresh_open_findings(
     violation_type: str,
     expected_source_record_keys: Mapping[str, str],
     max_age_days: int,
+    expected_payload_fields: Mapping[str, str] | None = None,
 ) -> frozenset[str]:
     """``dedupe_key → source_record_key`` 중 같은 payload로 최근 열려 있는 finding의 dedupe key.
+
+    ``expected_payload_fields``가 있으면 finding payload가 그 필드·값을 **포함**할 때만 센다
+    (ADR-109 결정 4 — MOIS 역지오코딩 불가 표식은 같은 geo 데이터 토큰에서만 믿는다).
 
     finding이 "이 payload에 대해 이미 관측된 사실"을 기억하는 표식으로 쓰일 때의 조회다
     (ADR-108: MOIS 역지오코딩 불가 행). payload가 바뀌면 ``source_record_key``가 달라져 맞지
@@ -423,6 +431,11 @@ async def find_fresh_open_findings(
                 "source_record_keys": [expected_source_record_keys[key] for key in keys],
                 "violation_type": violation_type,
                 "max_age_days": max_age_days,
+                "expected_payload": (
+                    json.dumps(dict(expected_payload_fields), ensure_ascii=False)
+                    if expected_payload_fields
+                    else None
+                ),
             },
         )
     ).scalars().all()
