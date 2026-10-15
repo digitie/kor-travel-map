@@ -1,3 +1,12 @@
+## 2026-10-15 — geo·transport connect timeout 분리(T-MAP-02): 브랜치 `feat/t-map-02-connect-timeout`
+
+**다음 한 작업: CI(unit 3·integration 2 lane·lint) 초록 → 적대 리뷰 → 머지 → 첫 prod 배포(해제 조건, 소유자 결정 2026-10-15) —
+배포 generation을 acceptance §T-MAP-02에 적는다. 그다음 T-GR-01(PR-1, migration 407).**
+
+- 바뀐 것: 설정 필드 2개·팩토리 2개, geo 생성 지점 8곳·transport 3곳, 문구(GEO_HEAVY_POOL·MOIS 동시성·transport URL·
+  `.env.example`), 테스트 3종(팩토리 값·SYN 드롭 connect 상한·생성 지점 lint), CHANGELOG. 근거는 journal 2026-10-15.
+- 바뀌지 않은 것: read timeout 값(geo 10 s·transport 30 s), pool 술어·동시성 값, OpenAPI, Manager compose.
+
 ## 2026-10-15 — ADR-110 사실 갱신(odroid 이전 실행됨) + T-GR-00-LEDGER 종결 이관: 브랜치 `docs/adr-110-odroid-facts`
 
 **다음 한 작업: T-MAP-02(connect timeout 분리, 코드 PR) — 해제 조건은 소유자 결정(2026-10-15)으로 "머지 뒤 첫 prod 배포".

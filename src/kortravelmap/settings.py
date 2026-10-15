@@ -160,7 +160,25 @@ class KorTravelMapSettings(BaseSettings):
         default=10.0,
         ge=0.2,
         le=30.0,
-        description="kor-travel-geo REST 호출 timeout seconds.",
+        description=(
+            "kor-travel-geo REST 호출의 read·write·pool timeout seconds(ADR-110 결정 3). "
+            "연결 수립 상한은 ``kor_travel_geo_connect_timeout_seconds``가 따로 정한다. "
+            "모든 geo client는 ``kortravelmap.geocoding.geo_http_timeout``으로 두 값을 함께 읽는다."
+        ),
+    )
+    kor_travel_geo_connect_timeout_seconds: float = Field(
+        default=4.0,
+        ge=0.2,
+        le=10.0,
+        description=(
+            "kor-travel-geo TCP 연결 수립 timeout seconds(ADR-110 결정 3). geo는 다른 "
+            "호스트(odroid)에 있어 그 호스트가 꺼지면 연결 거부(RST)가 아니라 무응답이다 — "
+            "이 값이 없으면 호출마다 read 상한까지 기다린다. 기본 4초 — Linux는 SYN을 "
+            "약 1초·3초에 재전송하므로 2초면 첫 재전송 하나만 기다리고, geo 호출에는 재시도가 "
+            "없어 과부하 순간의 느린 수립 한 번이 MOIS run 전체를 실패시킨다(Manager compose가 "
+            "이 env를 넘기지 않으므로 기본값이 곧 운영 값이다). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS``."
+        ),
     )
     kor_travel_geo_preflight_required: bool = Field(
         default=False,
@@ -367,8 +385,9 @@ class KorTravelMapSettings(BaseSettings):
         le=8,
         description=(
             "MOIS 재개형 적재(ADR-108)가 kor-travel-geo 역지오코딩을 동시에 보내는 상한. "
-            "geo에는 batch endpoint가 없어 이것이 처리량과 geo 부하를 함께 정한다 — n150은 "
-            "디스크 대기로 포화돼 있어(ReadTimeout) 기본값은 보수적으로 2다. "
+            "geo에는 batch endpoint가 없어 이것이 처리량과 geo 부하를 함께 정한다 — geo는 "
+            "odroid(A55 ×4)에서 돌아 CPU가 좁으므로 기본값은 보수적으로 2다(ADR-110 결정 6, "
+            "odroid geo CPU 보호). "
             "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
         ),
     )
@@ -510,8 +529,9 @@ class KorTravelMapSettings(BaseSettings):
         default=None,
         description=(
             "kor-travel-transport REST API base URL. **scheme+host[:port]만** 넣는다 — fetcher가 "
-            "절대경로 ``/v1/service/exports/*``로 호출한다(ADR-106). n150은 같은 호스트의 "
-            "``http://127.0.0.1:14001``이다. transport는 접속 peer 주소"
+            "절대경로 ``/v1/service/exports/*``로 호출한다(ADR-106). 운영 origin은 Manager compose "
+            "기본값/root ``.env``가 정하고 호스트는 ADR-110을 따른다(2026-10-14부터 odroid의 API "
+            "gateway). transport는 접속 peer 주소"
             "(``SERVICE_EXPORT_ALLOWED_CLIENTS_CSV``, 기본 loopback)로 닫으므로 reverse proxy나 "
             "docker bridge를 거쳐 허용 대역 밖에서 오면 404다(``Host`` header는 보지 않는다). "
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL``."
@@ -538,7 +558,21 @@ class KorTravelMapSettings(BaseSettings):
         default=30.0,
         ge=0.2,
         le=120.0,
-        description="kor-travel-transport REST 호출 timeout seconds.",
+        description=(
+            "kor-travel-transport REST 호출의 read·write·pool timeout seconds(ADR-110 결정 3). "
+            "연결 수립 상한은 ``kor_travel_transport_connect_timeout_seconds``가 따로 정한다."
+        ),
+    )
+    kor_travel_transport_connect_timeout_seconds: float = Field(
+        default=4.0,
+        ge=0.2,
+        le=10.0,
+        description=(
+            "kor-travel-transport TCP 연결 수립 timeout seconds(ADR-110 결정 3). transport는 다른 "
+            "호스트(odroid)에 있어 꺼지면 무응답이다. "
+            "기본 4초(SYN 재전송 약 1초·3초를 둘 다 기다린다). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_CONNECT_TIMEOUT_SECONDS``."
+        ),
     )
 
     # ── 로깅 ─────────────────────────────────────────────────────────────

@@ -1,3 +1,25 @@
+## 2026-10-15 — geo·transport client connect timeout 분리(T-MAP-02, ADR-110 결정 3): 브랜치 `feat/t-map-02-connect-timeout`
+
+- **왜 지금.** geo·weather·transport가 2026-10-14~15 odroid로 옮겨졌다(ADR-110 사실 갱신 절). 같은 호스트의
+  피호출자가 죽으면 커널이 즉시 RST를 주지만, 다른 호스트가 꺼지면 SYN이 응답 없이 timeout까지 간다. Map geo client는
+  timeout 하나(10 s)라 연결 수립에도 그만큼을 썼고, admin 이슈 액션 2곳은 timeout 인자가 없었으며(httpx 기본 5 s)
+  offline upload·CLI 2곳은 `10.0` 하드코딩이었다. 원래 순서는 "transport 플립 전 배포"였으나 플립이 먼저 일어났다 —
+  소유자 결정(2026-10-15)으로 해제 조건은 "머지 뒤 첫 prod 배포"다.
+- **바꾼 것.** 설정 필드 2개(connect, 기본 4 s — 첫 판은 2 s였으나 리뷰에서 올렸다: Linux SYN 재전송이 약 1 s·3 s라
+  2 s는 첫 재전송만 기다리고, geo `_post`는 재시도가 없어 과부하 odroid의 느린 수립 한 번이 MOIS run 전체를 죽인다;
+  Manager compose는 이 env를 넘기지 않으므로 기본값이 운영 값이다), 팩토리 둘(`geocoding.geo_http_timeout`·`provider_fetchers.
+  transport_http_timeout`), geo 8곳·transport 3곳이 팩토리를 쓴다. `httpx.Timeout(connect=…, read=…)` 둘만 주는 꼴은
+  httpx 0.28이 `ValueError`로 거부하므로 첫 위치 인자(기존 timeout)가 read·write·pool을 덮는다. 문구: `GEO_HEAVY_POOL`
+  근거('n150 디스크 대기' → 'odroid geo CPU 보호'), `mois_geocode_concurrency` 설명, transport base URL 설명,
+  `.env.example`의 standalone 주석과 새 키 2개.
+- **게이트.** (1) 팩토리 값(필드를 바꾸면 빨강), (2) accept 큐를 미리 채운 `listen(0)` 서버로 SYN을 드롭시켜 geo client와
+  실제 transport fetcher가 connect + 0.5 s 안에 실패하는지(전제 — 새 connect가 매달리는지 — 를 먼저 확인), (3) lint:
+  `KorTravelGeoRestClient(`·`_transport_connection(`을 부르는 함수 안의 모든 `httpx.AsyncClient(`가 `timeout=<팩토리
+  호출>`이 아니면 빨강(리터럴·부재·settings float 직접 전달·그 함수 밖에서 만든 client). 낡은 대역 하나
+  (`test_resources.py`의 `http.timeout == 2.5`)를 새 계약으로 고쳤다.
+- **관찰(범위 밖).** 2026-10-15 08:3xZ odroid geo `/v2/reverse`가 Map 컨테이너에서 세 번 약 9 s 뒤 504였다가 다음 호출
+  1.0 s 200. connect가 아니라 응답 지연이라 이 변경과 무관하고 read 상한(10 s)은 task 범위대로 그대로 뒀다.
+
 ## 2026-10-15 — ADR-110 사실 갱신: geo·weather·transport가 실제로 odroid로 갔다: 브랜치 `docs/adr-110-odroid-facts`
 
 - **무엇이 바뀌었나.** ADR-110 초안(2026-10-13)은 "포트·URL 동일, 호스트만 이전"을 전제했지만 소유자가 2026-10-14~15

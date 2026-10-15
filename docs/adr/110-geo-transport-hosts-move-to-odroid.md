@@ -1,7 +1,7 @@
 # ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다
 
 - 상태: proposed (설계 2026-10-13, Track 2 적대 리뷰 3차 반영본 기준. Map 쪽 task는 `T-MAP-01`(이 문서, #1316
-  머지)·`T-MAP-02`(connect timeout 분리, **미구현**). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다).
+  머지)·`T-MAP-02`(connect timeout 분리, **구현됨(#1325), 배포 대기**). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다).
   **2026-10-14~15에 geo·weather·transport가 실제로 odroid로 옮겨졌고 소비자 포트가 바뀌었다** — 아래 "사실 갱신
   (2026-10-15)" 절이 그 뒤의 정본 사실이고, 본문의 2026-10-13 서술과 다르면 그 절이 이긴다. 결정·열린 결정은 그대로
   proposed다(소유자 승인 전)
@@ -179,7 +179,7 @@ geo·transport client의 단일 float timeout을 `httpx.Timeout(<기존 *_timeou
 기존 단일 timeout의 의미 보존). `httpx.Timeout(connect=…, read=…)`처럼 둘만 주는 꼴은 쓰지 않는다 — 저장소 환경
 httpx 0.28.1에서 `ValueError: httpx.Timeout must either include a default, or set all four parameters explicitly`로
 죽는다(3차 리뷰에서 실행 확인; 설계 §13 T-MAP-02·§9.1의 `Timeout(connect=2, read=10)` 표기는 그 오류다). 연결
-거부·무응답 호스트는 2 s 안에 예외, 느린 응답의 read 상한은 그대로(geo 10 s·transport 30 s). 대상은 컨텍스트 3의
+거부·무응답 호스트는 connect 상한(기본 4 s) 안에 예외, 느린 응답의 read 상한은 그대로(geo 10 s·transport 30 s). 대상은 컨텍스트 3의
 client 생성 지점 **전부(geo 8곳·transport 3곳)**이고, 모양이 다른 (b)(c) — `admin_issues.py:276,306`의 timeout 부재,
 `dagster/offline_uploads.py:50-53`·`cli/main.py:447`의 `10.0` 하드코딩 — 도 같은 팩토리로 settings를 읽게 바꾼다
 (오늘 그 네 곳은 `kor_travel_geo_timeout_seconds`를 무시한다). 팩토리는 **하나씩**: geo는 `src/kortravelmap/geocoding.py`
@@ -187,7 +187,9 @@ client 생성 지점 **전부(geo 8곳·transport 3곳)**이고, 모양이 다�
 안 지역 import로)에 `geo_http_timeout(settings) -> httpx.Timeout`, transport는 `dagster/provider_fetchers.py:194`
 `_transport_connection` 옆. 값은 설정 필드 `kor_travel_geo_connect_timeout_seconds`·
 `kor_travel_transport_connect_timeout_seconds`(env `KOR_TRAVEL_MAP_KOR_TRAVEL_{GEO,TRANSPORT}_CONNECT_TIMEOUT_SECONDS`,
-기본 2.0)로 둔다. 적용 범위는 개수 세기나 이름이 아니라 효과로 결박한다 — geo/transport client 생성의 `timeout=`
+기본 4.0 — 2026-10-15 리뷰에서 2.0 → 4.0: Linux SYN 재전송이 약 1 s·3 s라 2 s는 첫 재전송만 기다리고, geo `_post`는
+재시도가 없어 과부하 odroid의 느린 수립 한 번이 MOIS run 전체를 죽인다; Manager compose가 이 env를 넘기지 않으므로
+기본값이 곧 운영 값이다)로 둔다. 적용 범위는 개수 세기나 이름이 아니라 효과로 결박한다 — geo/transport client 생성의 `timeout=`
 값이 팩토리 호출(`geo_http_timeout(`/`transport_http_timeout(`)이 아니면(리터럴·부재·settings float 직접 전달 모두)
 lint가 빨갛다(T-MAP-02; 오늘의 (a) 4곳처럼 `timeout=settings.kor_travel_geo_timeout_seconds`를 넘기는 모양은 connect
 분리 없이 초록이 되므로 이름 결박으로는 부족하다). 효과 기준: odroid 전원 off drill에서 MOIS run이 예산(14,400 s)의
@@ -196,8 +198,8 @@ lint가 빨갛다(T-MAP-02; 오늘의 (a) 4곳처럼 `timeout=settings.kor_trave
 (동시성 2)를 먼저 돌리는데 prefetch는 예외를 삼키고(`src/kortravelmap/geocoding.py:430-432` `prefetch_failures`)
 변환의 실시간 재조회(`:438-445` `observe`)는 `GeoRequestError`를 그대로 전파한다 — `mois_chunked_load.py`·
 `providers/mois.py`에 그것을 잡는 except가 없으므로 run은 **첫 chunk에서** FAILURE다(ADR-108 §3a-2의 degraded
-규칙은 '빈 답'의 비율이지 전송 실패가 아니라 여기 관여하지 않는다). 시간 상한 ≈ 500행 ÷ 동시성 2 × connect 2 s +
-실시간 1회 ≈ **≤ 502 s < 1,440 s**(예산 10 %); T-MAP-02 전(호출당 10 s)에는 같은 식이 ≈ 2,502 s로 10 %를 **넘는다** —
+규칙은 '빈 답'의 비율이지 전송 실패가 아니라 여기 관여하지 않는다). 시간 상한 ≈ 500행 ÷ 동시성 2 × connect 4 s +
+실시간 1회 ≈ **≤ 1,004 s < 1,440 s**(예산 10 %; connect 2 s였던 초안 값으로는 ≈ 502 s); T-MAP-02 전(호출당 10 s)에는 같은 식이 ≈ 2,502 s로 10 %를 **넘는다** —
 drill이 T-MAP-02 배포 뒤의 검증 행인 이유다. 회로차단은
 Map에 두지 않는다 — Map 호출은 배치(Dagster run·admin 액션)라 run 실패가 곧 신호이고, 요청 경로에서 사용자를
 기다리게 하는 PinVi(T-PNV-02)와 다르다. 필요가 드러나면 열린 결정 4.
@@ -277,7 +279,7 @@ odroid transport **API gateway `12301`**이 `/v1/service/exports/*`를 n150 LAN 
 geo/weather/transport가 빠지면 Map code-server의 디스크 대기 timeout 사망이 줄어든다(설계 §3.6).
 
 부정·한계 — (1) odroid 다운은 RST가 아니라 timeout이다. T-MAP-02 전에는 MOIS run이 호출마다 10 s를 소모하고, 그
-뒤에도 2 s × 호출 수만큼은 쓴다. (2) 전환 창에 geo/transport 수집·조회 공백이 생긴다(이중 수집 금지, 설계 §14-13).
+뒤에도 connect 상한(기본 4 s) × 호출 수만큼은 쓴다. (2) 전환 창에 geo/transport 수집·조회 공백이 생긴다(이중 수집 금지, 설계 §14-13).
 (3) geo 풀로드 뒤 첫 플립은 전량 재지오코딩(≈2.5 h+ 추정)을 부른다(수용 시). (4) DHCP 임대 변경으로 odroid의 LAN
 주소가 바뀌면 n150 consumer(Map 포함 — PinVi·concierge·HAProxy backend도)가 조용히 끊긴다(설계 §4.5 — OPNsense 예약은
 소유자 결정 §14-20; 호스트 생사 신호는 Manager 관측 스택 몫 — `up{host="odroid"}`는 Manager ADR-58 파생물

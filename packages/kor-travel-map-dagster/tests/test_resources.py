@@ -11,6 +11,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from dagster import build_init_resource_context
 from kortravelmap.geocoding import GeoCallStats
@@ -225,6 +226,7 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
         "http://127.0.0.1:12501",
     )
     monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS", "0.75")
     monkeypatch.setenv(
         "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
         "geo-public-key",
@@ -275,7 +277,8 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     assert len(_FakeHttpClient.instances) == 1
     http = _FakeHttpClient.instances[0]
     assert http.base_url == "http://127.0.0.1:12501"
-    assert http.timeout == 2.5
+    # connect는 따로, read·write·pool은 기존 timeout(ADR-110 결정 3).
+    assert http.timeout == httpx.Timeout(2.5, connect=0.75)
     assert not http.closed
 
     with pytest.raises(StopIteration):

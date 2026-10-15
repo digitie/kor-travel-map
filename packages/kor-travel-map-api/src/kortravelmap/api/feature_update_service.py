@@ -18,7 +18,11 @@ import httpx
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.core.feature_operation import DEDICATED_JOB_ONLY_OPERATION_KEYS
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
-from kortravelmap.geocoding import KorTravelGeoRestClient, resolve_sigungu_by_radius
+from kortravelmap.geocoding import (
+    KorTravelGeoRestClient,
+    geo_http_timeout,
+    resolve_sigungu_by_radius,
+)
 from kortravelmap.infra.feature_update_active_repo import (
     FeatureUpdateDispatchConflict,
     find_active_provider_dataset_request,
@@ -524,7 +528,7 @@ async def _sigungu_resolver_for_scope(
 
     async with httpx.AsyncClient(
         base_url=base_url.get_secret_value(),
-        timeout=settings.kor_travel_geo_timeout_seconds,
+        timeout=geo_http_timeout(settings),
     ) as http:
         client = KorTravelGeoRestClient(
             http,

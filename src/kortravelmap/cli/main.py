@@ -440,12 +440,13 @@ async def _geocoders_for(
 
     from kortravelmap.geocoding import (
         KorTravelGeoRestClient,
+        geo_http_timeout,
         kor_travel_geo_address_resolver,
         kor_travel_geo_reverse_geocoder,
     )
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-        settings = KorTravelMapSettings()
+    settings = KorTravelMapSettings()
+    async with httpx.AsyncClient(base_url=base_url, timeout=geo_http_timeout(settings)) as http:
         client = KorTravelGeoRestClient(
             http,
             api_key=settings.kor_travel_geo_api_key,

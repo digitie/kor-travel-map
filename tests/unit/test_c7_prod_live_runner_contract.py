@@ -768,6 +768,8 @@ _ZERO_UPSTREAM_NAME_CALLS = frozenset(
         "_transport_json",
         "_transport_run_budget",
         "parse_airports",
+        # timeout 값을 만들 뿐 요청을 보내지 않는다(ADR-110 결정 3, T-MAP-02).
+        "transport_http_timeout",
     }
 )
 #: ``RetryBudget``은 재시도 횟수 장부를 만들 뿐 요청을 보내지 않는다(요청은 ``_transport_get``).

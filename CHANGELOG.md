@@ -10,6 +10,22 @@
 
 ## [Unreleased]
 
+### geo·transport client connect timeout 분리 (2026-10-15, ADR-110 결정 3, T-MAP-02)
+
+- **CHANGED (settings)**: `kor_travel_geo_connect_timeout_seconds`·`kor_travel_transport_connect_timeout_seconds`
+  (기본 4.0, 0.2~10; env `KOR_TRAVEL_MAP_KOR_TRAVEL_{GEO,TRANSPORT}_CONNECT_TIMEOUT_SECONDS`) 신설. 4초는 Linux SYN
+  재전송(약 1초·3초)을 둘 다 기다리는 값이다 — geo 호출에는 재시도가 없고 Manager compose가 이 env를 넘기지 않아
+  기본값이 곧 운영 값이다. 기존
+  `*_timeout_seconds`는 값·env 그대로 read·write·pool 상한으로 의미만 좁혔다. geo·transport가 odroid로 옮겨져
+  피호출자 다운이 연결 거부가 아니라 무응답이 됐기 때문이다.
+- **CHANGED (api·dagster·cli)**: geo client 생성 8곳(종전 settings float 4곳·timeout 없음 2곳·`10.0` 하드코딩 2곳)과
+  transport export fetcher 3곳이 팩토리 `geo_http_timeout(settings)`·`transport_http_timeout(settings)`
+  (`httpx.Timeout(<read>, connect=<connect>)`)로 timeout을 만든다. admin 이슈 액션·offline upload·CLI geo 호출은 이제
+  `kor_travel_geo_timeout_seconds`를 따른다(종전 httpx 기본 5 s·10 s 고정).
+- **ADDED (tests)**: 팩토리 값 단위 테스트, accept 큐를 채운 로컬 서버(SYN 드롭)에서 geo client·transport fetcher가
+  connect 상한 안에 실패하는지 재는 테스트, `tests/lint/test_geo_transport_clients_use_timeout_factory.py`(생성 지점의
+  `timeout=`이 팩토리 호출이 아니면 빨강).
+
 ### Feature advisory fence 전역 gate — 공용 PG lock table 고갈 수정 (2026-10-13, ADR-111)
 
 - **FIXED (schema, alembic `406_feature_write_gate`)**: 대량 curation writer 8개

@@ -706,11 +706,11 @@ async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings
         return
 
     from kortravelmap.core.exceptions import GeoRequestError
-    from kortravelmap.geocoding import KorTravelGeoRestClient
+    from kortravelmap.geocoding import KorTravelGeoRestClient, geo_http_timeout
 
     async with httpx.AsyncClient(
         base_url=base_url.get_secret_value(),
-        timeout=core_settings.kor_travel_geo_timeout_seconds,
+        timeout=geo_http_timeout(core_settings),
     ) as http_client:
         client = KorTravelGeoRestClient(
             http_client,

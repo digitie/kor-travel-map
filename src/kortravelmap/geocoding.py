@@ -74,7 +74,28 @@ from kortravelmap.dto import Address, Coordinate
 if TYPE_CHECKING:
     import httpx
 
+    from kortravelmap.settings import KorTravelMapSettings
+
 _GeoResponseT = TypeVar("_GeoResponseT")
+
+
+def geo_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
+    """kor-travel-geo client의 ``httpx.Timeout`` — 모든 geo client 생성 지점이 쓴다(ADR-110 결정 3).
+
+    첫 위치 인자(``kor_travel_geo_timeout_seconds``)가 read·write·pool을 덮고, 연결 수립만
+    ``kor_travel_geo_connect_timeout_seconds``로 따로 둔다. geo가 다른 호스트(odroid)에 있어
+    그 호스트가 꺼지면 연결은 거부(RST)가 아니라 무응답이 되므로, 분리하지 않으면 호출마다
+    read 상한(기본 10 s)까지 기다린다. ``httpx.Timeout(connect=…, read=…)``처럼 둘만 주면
+    httpx 0.28이 ``ValueError``로 거부하므로 그 꼴은 쓰지 않는다.
+    ``tests/lint/test_geo_transport_clients_use_timeout_factory.py``가 생성 지점마다 이
+    호출을 강제한다. httpx는 TYPE_CHECKING-only 규약(``pyproject.toml``)이라 지역 import다.
+    """
+    import httpx as _httpx
+
+    return _httpx.Timeout(
+        settings.kor_travel_geo_timeout_seconds,
+        connect=settings.kor_travel_geo_connect_timeout_seconds,
+    )
 
 
 def _is_public_key_rejection(resp: httpx.Response) -> bool:
@@ -178,6 +199,7 @@ __all__ = [
     "GeoCallStats",
     # REST client + 콜러블 팩토리
     "KorTravelGeoRestClient",
+    "geo_http_timeout",
     "kor_travel_geo_reverse_geocoder",
     "kor_travel_geo_address_geocoder",
     "kor_travel_geo_address_resolver",

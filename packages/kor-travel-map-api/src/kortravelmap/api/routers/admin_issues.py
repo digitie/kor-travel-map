@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
+    geo_http_timeout,
     geocode_response_to_address,
     geocode_response_to_coordinate,
     reverse_response_to_address,
@@ -273,7 +274,10 @@ def _kor_travel_geo_api_key() -> SecretStr | None:
 async def _forward_geocode(address: str) -> dict[str, Any] | None:
     """주소 문자열 → kor-travel-geo 정지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
-    async with httpx.AsyncClient(base_url=base_url) as http:
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=geo_http_timeout(KorTravelMapSettings()),
+    ) as http:
         client = KorTravelGeoRestClient(
             http,
             api_key=_kor_travel_geo_api_key(),
@@ -303,7 +307,10 @@ async def _forward_geocode(address: str) -> dict[str, Any] | None:
 async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     """좌표 → kor-travel-geo 역지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
-    async with httpx.AsyncClient(base_url=base_url) as http:
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=geo_http_timeout(KorTravelMapSettings()),
+    ) as http:
         client = KorTravelGeoRestClient(
             http,
             api_key=_kor_travel_geo_api_key(),
