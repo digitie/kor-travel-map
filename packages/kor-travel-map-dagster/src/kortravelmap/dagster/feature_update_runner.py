@@ -121,6 +121,7 @@ Teardown = Callable[[], object]
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "kor_travel_map_client",
     "reverse_geocoder",
+    "kor_travel_geo_dataset",
     "fetched_at",
     "strict_address",
 }

@@ -440,6 +440,7 @@ async def _geocoders_for(
 
     from kortravelmap.geocoding import (
         KorTravelGeoRestClient,
+        fetch_current_dataset,
         geo_http_timeout,
         kor_travel_geo_address_resolver,
         kor_travel_geo_reverse_geocoder,
@@ -452,6 +453,18 @@ async def _geocoders_for(
             api_key=settings.kor_travel_geo_api_key,
         )
         # 인증 결선 검증은 생성 시점(require_auth 기본 True)에서 이뤄진다.
+        # run-scoped 현재 토큰(ADR-109 결정 2) — asset·큐 runner·offline upload와 같은 팩토리.
+        # 적재 경로에 넘기는 것은 T-GR-03이다; 여기서는 어느 geo 데이터셋으로 적재하는지 알린다.
+        current_dataset = await fetch_current_dataset(client)
+        print(
+            "geo dataset: "
+            + (
+                current_dataset.data_token or f"{current_dataset.version_token} (data_token 없음)"
+                if current_dataset is not None
+                else "none"
+            ),
+            file=sys.stderr,
+        )
         yield (
             kor_travel_geo_reverse_geocoder(client),
             kor_travel_geo_address_resolver(client, fallback="api"),

@@ -12,13 +12,16 @@ import logging
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import httpx
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
+from kortravelmap.dto.geo_dataset import DatasetRef
 from kortravelmap.geocoding import (
     GeoCallStats,
     KorTravelGeoRestClient,
+    fetch_current_dataset,
     geo_http_timeout,
     kor_travel_geo_reverse_geocoder,
 )
@@ -83,12 +86,15 @@ __all__ = [
     "create_s3_client_from_settings",
     "datagokr_file_data_dataset_key_resource",
     "feature_operation_guard_resource",
+    "current_geo_dataset_from_settings",
+    "kor_travel_geo_dataset_resource",
     "kor_travel_map_client_resource",
     "offline_upload_store_resource",
     "reverse_geocoder_resource",
 ]
 
 
+_T = TypeVar("_T")
 _LOGGER = logging.getLogger(__name__)
 """geo 경계 계수를 Dagster event stream까지 나르는 표준 logger.
 
@@ -1099,6 +1105,72 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         # INFO로 내면 Dagster event stream에 실리지 않아 조용해진다.
         _LOGGER.warning("%s", stats.summary())
         _run_async_resource_teardown(http.aclose())
+
+
+async def current_geo_dataset_from_settings(
+    settings: KorTravelMapSettings,
+) -> DatasetRef | None:
+    """settings로 만든 짧은 수명 client로 :func:`fetch_current_dataset`를 한 번 부른다.
+
+    client는 이 coroutine 안에서 만들고 닫는다 — resource 초기화의 event loop와 asset의 loop가
+    다르므로 httpx client를 loop 너머로 넘기지 않는다. base URL이 없으면 client 없이 부른다
+    (None + WARNING 1건).
+    """
+    if settings.kor_travel_geo_base_url is None:
+        return await fetch_current_dataset(None)
+    async with httpx.AsyncClient(
+        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
+        timeout=geo_http_timeout(settings),
+    ) as http:
+        try:
+            client = KorTravelGeoRestClient(http, api_key=settings.kor_travel_geo_api_key)
+        except GeoAuthNotConfiguredError:
+            return await fetch_current_dataset(None)
+        return await fetch_current_dataset(client)
+
+
+def _run_async_resource_value(factory: Callable[[], Awaitable[_T]]) -> _T:
+    """Dagster sync resource 초기화에서 coroutine 하나를 실행해 값을 돌려준다."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_await_value(factory))
+
+    box: list[_T] = []
+    raised: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            box.append(asyncio.run(_await_value(factory)))
+        except BaseException as exc:  # pragma: no cover - 아래 re-raise 경로
+            raised.append(exc)
+
+    thread = threading.Thread(target=_runner, name="kor-travel-map-dagster-resource-init")
+    thread.start()
+    thread.join()
+    if raised:
+        raise raised[0]
+    return box[0]
+
+
+async def _await_value(factory: Callable[[], Awaitable[_T]]) -> _T:
+    return await factory()
+
+
+@resource(
+    description=(
+        "run 시작에 kor-travel-geo 현재 데이터셋(DatasetRef)을 한 번 읽는다(ADR-109 결정 2). "
+        "실패·available=false는 None + WARNING 1건이고 run은 계속된다."
+    ),
+)
+def kor_travel_geo_dataset_resource(_context: InitResourceContext) -> DatasetRef | None:
+    """Dagster ``kor_travel_geo_dataset`` 기본 resource — run-scoped 현재 토큰.
+
+    asset과 큐 runner가 같은 resource를 쓰고, offline upload·CLI는 같은 함수
+    (:func:`kortravelmap.geocoding.fetch_current_dataset`)를 직접 부른다.
+    """
+    settings = KorTravelMapSettings()
+    return _run_async_resource_value(lambda: current_geo_dataset_from_settings(settings))
 
 
 @resource(description="kor-travel-map app DB에 연결된 AsyncKorTravelMapClient.")
