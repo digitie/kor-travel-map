@@ -10,6 +10,15 @@
   채우는 산악 centroid run이 정상인데 실패할 뻔했다(테스트로 결박). concierge `current_data_token=None`은 acceptance대로 종전
   동작(설계 §4 문구와 모순). 해시 자체 계산은 payload에 토큰이 있을 때만(롤아웃이 전 행을 흔들지 않게). override 테스트에서
   `core.address` jsonb에도 코드가 들어 있어 열 하나의 override로는 "값 동일"이 되지 않는다는 것을 확인했다(문서화).
+- **2차 적대 리뷰(같은 날) 반영.** MOIS 롤아웃이 수십만 행이라 행마다 stale·저장값·스탬프를 따로 묻던 것을 chunk 단위로
+  바꿨다(선읽기 두 문장 + 스탬프 한 문장; 같은 Feature가 두 번이면 두 번째는 행 단위). concierge 해시에서 최상위
+  `updated_at`·`operation`도 뺐다 — producer가 토큰만 바뀌어도 `updated_at`을 새로 찍어 전 행이 매 릴리스 "바뀜"이 될
+  뻔했다. stale 분기에서 같은 법정동인데 geo 전용 필드만 사라진 답은 저장값을 지킨다(`geo_partial_kept`). 빈 답 가드가
+  `address` override 값을 provider base로 옮겨 적지 않게, 관측 집합이 없으면 토큰을 닫게(fail closed) 했다. 문서는
+  포인터가 아니라 본문을 고쳤다(`address-geocoding.md` §4 run 가드 분자·concierge 기본, ADR-109 결정 4).
+- **실측은 격리 스택에서.** n150에 별도 PostGIS 컨테이너를 띄우고 배포 bootstrap 경로로 올린 DB에서 MOIS 루프 그대로
+  12,000행을 돌렸다(일괄/행 단위 번갈아 2회). 롤아웃 101~103초 대 116~117초. 첫 정상 run이 17초로 튀어 계획을 의심했지만
+  EXPLAIN은 스탬프 PK 인덱스(chunk당 9ms)였고 두 번째 run부터 1.1초 — 대량 쓰기 직후 hint bit 비용이었다.
 - **게이트·빨강.** 통합 23건(새 파일) + 기존 스탬프 22건. 의도적 빨강 11종을 n150에서 확인(빈 답 가드 끔·판정 집합에 legal·
   override 열 비교·토큰을 해시에·전환 관측 무시·CTE 조건 제거·표식 조건 무시·값 동일 재쓰기·concierge 신뢰 무시·토큰 선행
   제거·run 가드 분자를 endpoint로) — 각각 그 테스트만 빨갰다. 롤아웃 비용 프록시(통합 DB, 300행): 첫 적재 8.31 s, geo 없는

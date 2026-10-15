@@ -24,6 +24,10 @@
   `FeatureBundle.geo_attempt`로 스탬프, 역지오코딩 불가 표식에 `geo_data_token`(다른 토큰에서는 믿지 않는다).
 - **CHANGED (concierge)**: `kor_travel_concierge_items_to_bundles(…, current_data_token=)` — payload `geo_data_token`이 현재와
   같을 때만 payload 코드를 믿는다(생략하면 종전). payload에 토큰이 있으면 해시는 토큰·producer 해시를 뺀 원문으로 Map이 잰다.
+- **CHANGED (load, 2차 리뷰)**: geo 사실은 chunk 단위(stale 판정·저장값 각 한 문장, 스탬프 한 문장); stale 행에서 같은
+  법정동인데 geo 전용 필드만 사라진 답은 저장값 유지(`geo_partial_kept`); 빈 답 가드는 `address` override 값을 provider
+  base로 옮기지 않는다; 관측 집합 없는 geo run은 토큰을 쓰지 않는다(fail closed); concierge 해시에서 최상위
+  `updated_at`·`operation` 제외.
 - **ADDED (tests)**: 적재 경로 통합(무쓰기·`road_name_code`만 바뀐 행·토큰 없음·전환 run·빈 답 가드 standard_data/krheritage/
   concierge·override·CTE 6분기·표식 토큰·concierge 토큰/해시), 변환 함수 단위 geo 소비 lint, 토큰 선행·run 가드 단위.
 

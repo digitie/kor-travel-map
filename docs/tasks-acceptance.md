@@ -2618,7 +2618,13 @@ geocode_obtained_code}`(T-GR-01, `dto/geo_dataset.py`)로 내보낸다 — `Admi
   정본 키를 dataset별로 한 번에 풀고(`feature.resolve_provider_feature_id`를 `unnest`로), stale 판정(`stale_among`)·
   저장값(`read_stored_geo_columns_many`)을 각 한 문장으로 읽고, 스탬프는 chunk 끝 한 문장(같은 transaction)이다. 같은
   Feature가 chunk에 두 번 나오면 두 번째부터는 행 단위로 다시 묻는다(선읽기가 낡았다). 끝에서 유효 토큰을 다시 보고
-  None이면 스탬프를 쓰지 않는다. 실측은 PR 본문 표(격리 PostGIS 컨테이너, 배포 bootstrap 경로, MOIS 루프 그대로, 12,000행).
+  None이면 스탬프를 쓰지 않는다. **실측(2026-10-16, n150 격리 PostGIS 컨테이너 — 통합 testcontainer가 아니라 배포
+  bootstrap 경로로 올린 별도 DB, MOIS 재개형 루프 그대로, 12,000행 = 500행 × 24 chunk, 역지오코더는 네트워크 없는 가짜,
+  chunk 일괄(이 브랜치)과 행 단위(54002adb)를 번갈아 2회)**: 롤아웃 run(전 행 스탬프 없음 → 다시 변환 → 값 동일 → 스탬프만)
+  일괄 103.0·101.1초 / 행 단위 115.9·116.6초, 다음 릴리스 run 일괄 90.6·106.2초 / 행 단위 110.7·118.4초 — 행당 약 8.5ms
+  (MOIS 50만 행이면 geo 호출을 뺀 적재 쪽만 약 70분). 빈 dataset 첫 적재는 스탬프 없음 301~325초·있음 279~363초로 차이가
+  n150 부하 변동(load 3~8) 안이다. 정상 상태(전 행 현재 토큰) "그대로" 판정은 토큰 없음과 같은 1.1초 — EXPLAIN은 스탬프
+  PK 인덱스 스캔(chunk당 9ms); 대량 쓰기 직후 첫 정상 run만 3.4~17초(hint bit 설정 — 두 번째부터 1.1초).
   (10) **부분 퇴행 유지** — stale 분기에서 새 답의 법정동코드가 저장값과 같은데 `road_name_code`·`admin_dong_code`·
   `zipcode`가 새 답에서만 비었으면 저장값을 지킨다(override 열은 손대지 않는다), 메타 `geo_partial_kept`. 법정동이
   바뀌었으면 새 답이 정답이다. (11) concierge 해시 입력에서 최상위 `updated_at`·`operation`도 뺀다 — producer
