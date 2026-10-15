@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -86,17 +86,25 @@ class GeoLoadContext:
     토큰과 다른 값이 하나라도 있으면 이 run은 데이터셋 전환을 가로질렀다는 뜻이고, 그때
     :meth:`effective_token`은 None이다 — stale 분기·스탬프 쓰기를 하지 않는다(옛 데이터로 해석한
     행이 새 토큰으로 봉인되는 것을 막는 안전 방향; 다음 계획이 다시 고른다).
+
+    geo를 쓰는 run(``geo_applied``의 어느 쪽이든 참)이 관측 집합을 넘기지 않으면(None) 전환을
+    볼 수 없으므로 :meth:`effective_token`은 None이다(fail closed). geo를 전혀 쓰지 않는 run은
+    관측할 것이 없으니 None이 빈 집합과 같다.
     """
 
     geo_applied: GeoApplied
     current_dataset: DatasetRef | None = None
-    observed_data_tokens: AbstractSet[str] = field(default_factory=frozenset)
+    observed_data_tokens: AbstractSet[str] | None = None
 
     def effective_token(self) -> str | None:
-        """이 적재에서 비교·스탬프에 쓸 토큰. 없거나 run이 전환을 가로질렀으면 None."""
+        """이 적재에서 비교·스탬프에 쓸 토큰. 없거나, 전환을 가로질렀거나, 볼 수 없으면 None."""
         if self.current_dataset is None or self.current_dataset.data_token is None:
             return None
         token = self.current_dataset.data_token
-        if any(observed != token for observed in self.observed_data_tokens):
+        observed = self.observed_data_tokens
+        if observed is None:
+            uses_geo = self.geo_applied.reverse or self.geo_applied.geocode
+            return None if uses_geo else token
+        if any(seen != token for seen in observed):
             return None
         return token

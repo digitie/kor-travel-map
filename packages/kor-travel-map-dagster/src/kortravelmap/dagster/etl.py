@@ -157,6 +157,7 @@ class DagsterFeatureLoadResult:
             "geo_stale_unchanged": self.load.geo_stale_unchanged,
             "geo_empty_guarded": self.load.geo_empty_guarded,
             "geo_override_stale_findings": self.load.geo_override_stale_findings,
+            "geo_partial_kept": self.load.geo_partial_kept,
         }
         if any(geo_counts.values()):
             metadata.update(geo_counts)
@@ -929,9 +930,8 @@ def _geo_load_context(
     return GeoLoadContext(
         geo_applied=geo_applied,
         current_dataset=current_dataset,
-        observed_data_tokens=(
-            geo_stats.observed_data_tokens if geo_stats is not None else frozenset()
-        ),
+        # 계수가 없으면 None — geo를 쓰는 run이면 effective_token이 닫힌다(fail closed).
+        observed_data_tokens=geo_stats.observed_data_tokens if geo_stats is not None else None,
     )
 
 

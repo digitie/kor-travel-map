@@ -8,12 +8,14 @@
   스탬프만 전진한다 — ``row_revision``(ETag·seal·cache target 입력)을 값 변화 없이 흔들지 않는다.
   사람이 고정한 열(active override)은 비교에서 뺀다 — patch가 어차피 건너뛰므로 넣으면 "항상
   다름"이다.
-- **빈 답 가드(행).** geo가 부분장애로 빈 답을 내면 새 bundle의 geo 유도 필드가 전부 None이 된다.
-저장된
-  같은 필드에 값이 있는데 새 값이 전부 None이면 주소 열을 덮지 않고 스탬프도 찍지 않는다(다음 run이
-  다시 본다). 판정 필드는 **geo에서만 오는 것**이다 — ``road/legal/admin``은 여러 provider가
-  원문으로 채우므로 넣으면 그 provider에서 가드가 영영 발화하지
-  않는다(``docs/etl/address-geocoding.md`` §4).
+- **빈 답 가드(행).** geo가 부분장애로 빈 답을 내면 새 bundle의 geo 유도 필드가 전부
+  None이 된다. 저장된 같은 필드에 값이 있는데 새 값이 전부 None이면 주소 열을 덮지 않고
+  스탬프도 찍지 않는다(다음 run이 다시 본다). 판정 필드는 **geo에서만 오는 것**이다 —
+  ``road/legal/admin``은 여러 provider가 원문으로 채우므로 넣으면 그 provider에서 가드가 영영
+  발화하지 않는다(``docs/etl/address-geocoding.md`` §4).
+- **부분 퇴행 유지.** stale 행에서 새 답의 법정동코드가 저장값과 같은데 geo에서만 오는 필드
+  (``road_name_code``·``admin_dong_code``·``zipcode``)가 새 답에서만 비었으면 그 필드는 저장값을
+  지킨다 — 같은 위치의 같은 법정동인데 값이 사라진 것은 데이터 변경보다 부분 응답일 가능성이 크다.
 - **override finding.** override 값과 새 geo 값이 다르면 ``address_override_geo_stale``(info) 1건을
   ``(feature_id, geo_data_token)``로 dedupe해 남긴다. 사람의 결정은 자동으로 바꾸지 않는다.
 """
@@ -25,23 +27,31 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.types import Text
 
 from kortravelmap.dto import Address
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
+    from sqlalchemy.engine import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
     "ADDRESS_GEO_COLUMNS",
     "GEO_GUARD_ADDRESS_FIELDS",
+    "PARTIAL_REGRESSION_FIELDS",
     "StoredGeoColumns",
     "address_column_values",
     "differing_columns",
     "empty_answer_guard",
     "override_mismatches",
     "provider_code_present",
+    "keep_partially_regressed_fields",
     "read_stored_geo_columns",
+    "read_stored_geo_columns_many",
     "record_override_geo_stale",
 ]
 
@@ -112,9 +122,8 @@ class StoredGeoColumns:
         return frozenset(path.removeprefix("core.") for path in self.overrides)
 
 
-_READ_STORED_SQL: Final = text(
-    """
-SELECT feature.address, feature.legal_dong_code, feature.road_name_code,
+_STORED_COLUMNS_SQL: Final[str] = """
+       feature.address, feature.legal_dong_code, feature.road_name_code,
        feature.road_address_management_no, feature.admin_dong_code,
        feature.sido_code, feature.sigungu_code,
        COALESCE(
@@ -125,22 +134,28 @@ SELECT feature.address, feature.legal_dong_code, feature.road_name_code,
                AND override.field_path = ANY(CAST(:field_paths AS text[]))),
            '{}'::jsonb
        ) AS overrides
-  FROM feature.features AS feature
+"""
+
+_READ_STORED_SQL: Final = text(
+    "SELECT"
+    + _STORED_COLUMNS_SQL
+    + """  FROM feature.features AS feature
  WHERE feature.feature_id = CAST(:feature_id AS uuid)
 """
 )
 
+_READ_STORED_MANY_SQL: Final = text(
+    "SELECT feature.feature_id::text AS feature_id,"
+    + _STORED_COLUMNS_SQL
+    + """  FROM feature.features AS feature
+ WHERE feature.feature_id = ANY(CAST(:feature_ids AS uuid[]))
+"""
+).bindparams(bindparam("feature_ids", type_=ARRAY(Text)))
 
-async def read_stored_geo_columns(session: AsyncSession, feature_id: str) -> StoredGeoColumns:
-    row = (
-        await session.execute(
-            _READ_STORED_SQL,
-            {
-                "feature_id": feature_id,
-                "field_paths": [f"core.{column}" for column in ADDRESS_GEO_COLUMNS],
-            },
-        )
-    ).mappings().one()
+_FIELD_PATHS: Final[list[str]] = [f"core.{column}" for column in ADDRESS_GEO_COLUMNS]
+
+
+def _stored_from_row(row: RowMapping) -> StoredGeoColumns:
     values = {column: row[column] for column in ADDRESS_GEO_COLUMNS}
     if isinstance(values["address"], str):
         values["address"] = json.loads(values["address"])
@@ -148,6 +163,30 @@ async def read_stored_geo_columns(session: AsyncSession, feature_id: str) -> Sto
     if isinstance(overrides, str):
         overrides = json.loads(overrides)
     return StoredGeoColumns(values=values, overrides=dict(overrides or {}))
+
+
+async def read_stored_geo_columns(session: AsyncSession, feature_id: str) -> StoredGeoColumns:
+    row = (
+        await session.execute(
+            _READ_STORED_SQL, {"feature_id": feature_id, "field_paths": _FIELD_PATHS}
+        )
+    ).mappings().one()
+    return _stored_from_row(row)
+
+
+async def read_stored_geo_columns_many(
+    session: AsyncSession, feature_ids: Collection[str]
+) -> dict[str, StoredGeoColumns]:
+    """:func:`read_stored_geo_columns`의 chunk 판 — 한 번의 왕복으로 ``feature_id → 저장값``."""
+    if not feature_ids:
+        return {}
+    rows = (
+        await session.execute(
+            _READ_STORED_MANY_SQL,
+            {"feature_ids": list(feature_ids), "field_paths": _FIELD_PATHS},
+        )
+    ).mappings().all()
+    return {str(row["feature_id"]): _stored_from_row(row) for row in rows}
 
 
 def _guard_values(values: Mapping[str, Any], *, provider_code: bool) -> list[Any]:
@@ -167,6 +206,39 @@ def empty_answer_guard(
     stored_any = any(value not in (None, "") for value in stored_values)
     new_all_empty = all(value in (None, "") for value in new_values)
     return stored_any and new_all_empty
+
+
+#: 부분 퇴행 유지 대상 — geo에서만 오고, 같은 법정동 안에서 사라질 이유가 없는 필드.
+PARTIAL_REGRESSION_FIELDS: Final[tuple[str, ...]] = (
+    "road_name_code",
+    "admin_dong_code",
+    "zipcode",
+)
+
+
+def keep_partially_regressed_fields(
+    stored: StoredGeoColumns, address: Address
+) -> tuple[Address, tuple[str, ...]]:
+    """새 답이 저장값과 같은 법정동인데 geo 전용 필드만 잃었으면 그 필드는 저장값을 지킨다.
+
+    돌려주는 것은 (보정한 ``Address``, 지킨 필드). 법정동코드가 없거나 다르면 그대로다 — 위치·행정
+    구역이 바뀐 행은 새 답이 정답이다. 그 필드에 override가 있으면 손대지 않는다(override가 이긴다).
+    """
+    stored_bjd = stored.values.get("legal_dong_code")
+    if stored_bjd is None or address.bjd_code != stored_bjd:
+        return address, ()
+    stored_address = stored.values.get("address") or {}
+    overridden = stored.overridden_columns()
+    kept: dict[str, Any] = {}
+    for field_name in PARTIAL_REGRESSION_FIELDS:
+        if field_name in overridden:
+            continue
+        stored_value = stored_address.get(field_name)
+        if getattr(address, field_name) is None and stored_value not in (None, ""):
+            kept[field_name] = stored_value
+    if not kept:
+        return address, ()
+    return address.model_copy(update=kept), tuple(sorted(kept))
 
 
 def differing_columns(stored: StoredGeoColumns, new: Mapping[str, Any]) -> frozenset[str]:

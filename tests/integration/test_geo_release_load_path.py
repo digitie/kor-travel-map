@@ -236,8 +236,8 @@ async def test_no_current_token_writes_nothing(
 async def test_mid_run_dataset_switch_never_produces_fresh_looking_stamps(
     migrated_session: AsyncSession,
 ) -> None:
-    """run 토큰은 B인데 응답이 다른 토큰을 냈다(전환을 가로지른 run) — 스탬프도 stale 분기도 "
-    "없다."""
+    """run 토큰은 B인데 응답이 다른 토큰을 냈다(전환을 가로지른 run) — 스탬프도 stale 분기도
+    없다."""
     _, feature_id = await _load_a(migrated_session, "mid-run-switch")
     before_stamp = await _stamp_row(migrated_session, feature_id)
 
@@ -333,8 +333,8 @@ async def test_override_mismatch_is_a_finding_once_and_not_a_rewrite(
 
 
 async def test_no_geo_context_writes_no_stamps(migrated_session: AsyncSession) -> None:
-    """geo를 배선하지 않은 경로(price 적재는 ``load_bundles(session, bundles)``)는 스탬프가 "
-    "0이다."""
+    """geo를 배선하지 않은 경로(price 적재는 ``load_bundles(session, bundles)``)는 스탬프가
+    0이다."""
     bundle = await _festival("no-geo", _FakeReverse(_geo()))
     result = await load_bundles(migrated_session, [bundle])
     assert result.geo_stamps_written == 0
@@ -414,7 +414,14 @@ async def test_unresolvable_marker_is_trusted_only_under_its_token(
     assert await fresh(None) == {key}
 
 
-def _concierge_item(*, token: str | None, legal_dong_code: str | None) -> dict[str, Any]:
+def _concierge_item(
+    *,
+    token: str | None,
+    legal_dong_code: str | None,
+    updated_at: str = "2026-10-16T00:00:00Z",
+    entity_id: int = 77001,
+    with_coord: bool = True,
+) -> dict[str, Any]:
     address: dict[str, Any] = {
         "official_address": "제주특별자치도 서귀포시 성산읍",
         "road_address": None,
@@ -425,8 +432,8 @@ def _concierge_item(*, token: str | None, legal_dong_code: str | None) -> dict[s
     if token is not None:
         address["geo_data_token"] = token
     return {
-        "export_id": "ytpc_geo_1",
-        "candidate_id": 77001,
+        "export_id": f"ytpc_{entity_id}",
+        "candidate_id": entity_id,
         "operation": "upsert",
         "schema_version": 1,
         "place": {
@@ -434,8 +441,8 @@ def _concierge_item(*, token: str | None, legal_dong_code: str | None) -> dict[s
             "description": "geo 토큰 테스트",
             "category_label": "관광지",
             "category_code_suggestion": "01010100",
-            "longitude": 126.9410,
-            "latitude": 33.4580,
+            "longitude": 126.9410 if with_coord else None,
+            "latitude": 33.4580 if with_coord else None,
             "address": address,
         },
         "youtube": {"video_id": "geo-1", "video_url": "https://www.youtube.com/watch?v=geo-1"},
@@ -444,10 +451,10 @@ def _concierge_item(*, token: str | None, legal_dong_code: str | None) -> dict[s
             "provider": KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
             "dataset_key": "kor_travel_concierge_youtube_place_candidates",
             "source_entity_type": KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
-            "source_entity_id": "77001",
+            "source_entity_id": str(entity_id),
             "raw_payload_hash": f"sha256:{(token or 'none')[-8:].rjust(64, '0')}",
         },
-        "updated_at": "2026-10-16T00:00:00Z",
+        "updated_at": updated_at,
     }
 
 
@@ -478,10 +485,14 @@ class _ObservedFake:
 
 
 async def _concierge_bundle(
-    *, payload_token: str | None, current: str | None, legal_dong_code: str | None
+    *,
+    payload_token: str | None,
+    current: str | None,
+    legal_dong_code: str | None,
+    **item: Any,
 ) -> FeatureBundle:
     bundles = await kor_travel_concierge_items_to_bundles(
-        [_concierge_item(token=payload_token, legal_dong_code=legal_dong_code)],  # type: ignore[list-item]
+        [_concierge_item(token=payload_token, legal_dong_code=legal_dong_code, **item)],  # type: ignore[list-item]
         fetched_at=_FETCHED,
         reverse_geocoder=_ObservedFake(_jeju_geo()),  # type: ignore[arg-type]
         current_data_token=current,
@@ -617,8 +628,8 @@ async def test_empty_answer_guard_holds_for_concierge(migrated_session: AsyncSes
 
 
 async def test_row_evidence_decides_the_outcome(migrated_session: AsyncSession) -> None:
-    """MOIS처럼 행 evidence가 있으면 그것으로 outcome을 정한다 — payload 코드 행은 "
-    "``not_called``."""
+    """MOIS처럼 행 evidence가 있으면 그것으로 outcome을 정한다 — payload 코드 행은
+    ``not_called``."""
     from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
     from kortravelmap.infra.feature_geocode_stamp_repo import is_stale
 
@@ -641,3 +652,217 @@ async def test_row_evidence_decides_the_outcome(migrated_session: AsyncSession) 
     # 새 토큰에서 다시 계획되는 것은 geo를 쓴 행뿐이다.
     assert await is_stale(migrated_session, payload_id, TOKEN_B) is False
     assert await is_stale(migrated_session, reversed_id, TOKEN_B) is True
+
+
+# -- 2차 리뷰 반영(#1328): 해시·부분 퇴행·override base·chunk 단위 ------------------------------
+
+
+def _json(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else json.loads(value)
+
+
+async def test_concierge_token_and_updated_at_change_together_is_not_became_current(
+    migrated_session: AsyncSession,
+) -> None:
+    """producer는 토큰이 바뀌면 export 행의 ``updated_at``도 새 시각으로 낸다 — 둘 다 해시 밖."""
+    first = await _concierge_bundle(
+        payload_token=TOKEN_A,
+        current=TOKEN_A,
+        legal_dong_code=None,
+        updated_at="2026-10-16T00:00:00Z",
+    )
+    await load_bundles(migrated_session, [first], geo=_ctx(REF_A))
+    feature_id = await _feature_id(migrated_session, first)
+    before = await _row(migrated_session, feature_id)
+
+    second = await _concierge_bundle(
+        payload_token=TOKEN_B,
+        current=TOKEN_B,
+        legal_dong_code=None,
+        updated_at="2026-10-17T09:30:00Z",
+    )
+    assert second.source_record.raw_payload_hash == first.source_record.raw_payload_hash
+    result = await load_bundles(migrated_session, [second], geo=_ctx(REF_B))
+
+    assert result.source_records_inserted == 0
+    assert (await _row(migrated_session, feature_id))["row_revision"] == before["row_revision"]
+
+
+async def test_concierge_stamps_coordinate_rows_called_and_payload_only_rows_not_called(
+    migrated_session: AsyncSession,
+) -> None:
+    with_coord = await _concierge_bundle(
+        payload_token=TOKEN_A, current=TOKEN_A, legal_dong_code=None, entity_id=77101
+    )
+    payload_only = await _concierge_bundle(
+        payload_token=TOKEN_A,
+        current=TOKEN_A,
+        legal_dong_code="5013025300",
+        entity_id=77102,
+        with_coord=False,
+    )
+    assert payload_only.feature.coord is None
+    result = await load_bundles(migrated_session, [with_coord, payload_only], geo=_ctx(REF_A))
+
+    assert result.geo_stamps_written == 2
+    coord_stamp = await get_stamp(migrated_session, await _feature_id(migrated_session, with_coord))
+    payload_stamp = await get_stamp(
+        migrated_session, await _feature_id(migrated_session, payload_only)
+    )
+    assert coord_stamp is not None
+    assert coord_stamp.reverse_outcome == "called"
+    assert payload_stamp is not None
+    assert payload_stamp.reverse_outcome == "not_called"
+
+
+def _geo_without(*fields: str) -> Address:
+    return _geo().model_copy(update=dict.fromkeys(fields))
+
+
+async def test_partial_regression_keeps_stored_geo_only_fields(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 법정동인데 새 답이 도로명코드·행정동코드·우편번호를 잃었다 — 저장값을 지킨다."""
+    _, feature_id = await _load_a(migrated_session, "partial-regression")
+    before = await _row(migrated_session, feature_id)
+
+    again = await _festival(
+        "partial-regression",
+        _FakeReverse(_geo_without("road_name_code", "admin_dong_code", "zipcode")),
+    )
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    after = await _row(migrated_session, feature_id)
+    assert result.geo_partial_kept == 1
+    assert after["road_name_code"] == "115603118001"
+    address = _json(after["address"])
+    assert (address["admin_dong_code"], address["zipcode"]) == ("1156054000", "07237")
+    # 지킨 뒤 값이 같으니 다시 쓰지 않는다 — 스탬프만 전진.
+    assert result.geo_stale_unchanged == 1
+    assert after["row_revision"] == before["row_revision"]
+
+
+async def test_partial_regression_under_a_new_legal_dong_takes_the_new_answer(
+    migrated_session: AsyncSession,
+) -> None:
+    """법정동이 바뀌었으면 새 답이 정답이다 — 사라진 필드를 지키지 않는다."""
+    _, feature_id = await _load_a(migrated_session, "partial-moved")
+    moved = _geo_without("road_name_code").model_copy(update={"bjd_code": "1156011100"})
+
+    again = await _festival("partial-moved", _FakeReverse(moved))
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    after = await _row(migrated_session, feature_id)
+    assert result.geo_partial_kept == 0
+    assert result.geo_stale_rewritten == 1
+    assert after["legal_dong_code"] == "1156011100"
+    assert after["road_name_code"] is None
+
+
+async def _override(session: AsyncSession, feature_id: str, path: str, value: Any) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO ops.feature_overrides (feature_id, field_path, override_value, status)"
+            "VALUES (CAST(:id AS uuid), :path, CAST(:value AS jsonb), 'active')"
+        ),
+        {"id": feature_id, "path": path, "value": json.dumps(value)},
+    )
+
+
+async def test_override_matching_the_new_answer_is_not_a_finding(
+    migrated_session: AsyncSession,
+) -> None:
+    _, feature_id = await _load_a(migrated_session, "override-match")
+    await _override(migrated_session, feature_id, "core.road_name_code", "115603118999")
+
+    again = await _festival("override-match", _FakeReverse(_geo(road_name_code="115603118999")))
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    assert result.geo_override_stale_findings == 0
+    count = (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM ops.data_integrity_violations "
+                "WHERE violation_type = 'address_override_geo_stale' "
+                "AND feature_id = CAST(:id AS uuid)"
+            ),
+            {"id": feature_id},
+        )
+    ).scalar_one()
+    assert count == 0
+
+
+async def test_empty_guard_never_copies_an_address_override_into_the_provider_base(
+    migrated_session: AsyncSession,
+) -> None:
+    _, feature_id = await _load_a(migrated_session, "guard-override")
+    before = await _row(migrated_session, feature_id)
+    human = {**_json(before["address"]), "road": "사람이 고친 도로명 주소 1"}
+    await _override(migrated_session, feature_id, "core.address", human)
+    # effective 열은 override 값이다(물화는 patch 경로의 몫이라 여기서는 직접 맞춘다).
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET address = CAST(:a AS jsonb) "
+            "WHERE feature_id = CAST(:id AS uuid)"
+        ),
+        {"a": json.dumps(human), "id": feature_id},
+    )
+
+    again = await _festival("guard-override", _FakeReverse(None), description="바뀐 설명")
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    assert result.geo_empty_guarded == 1
+    base = (
+        await migrated_session.execute(
+            text(
+                "SELECT value_json FROM feature.feature_base_field_values "
+                "WHERE feature_id = CAST(:id AS uuid) AND field_path = 'core.address'"
+            ),
+            {"id": feature_id},
+        )
+    ).scalar_one()
+    assert _json(base).get("road") != "사람이 고친 도로명 주소 1"
+
+
+async def test_chunk_reads_geo_facts_once_and_writes_stamps_in_one_statement(
+    migrated_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """chunk 안의 행마다 stale·저장값을 묻거나 스탬프를 따로 쓰지 않는다(MOIS 롤아웃 비용)."""
+    from kortravelmap.infra import feature_repo
+
+    seeds = [f"chunk-{index}" for index in range(5)]
+    for seed in seeds:
+        await _load_a(migrated_session, seed)
+    calls = {"is_stale": 0, "read_stored": 0, "upsert_stamps": 0}
+
+    def counting(name: str, original: Any) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            calls[name] += 1
+            return await original(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(feature_repo, "is_stale", counting("is_stale", feature_repo.is_stale))
+    monkeypatch.setattr(
+        feature_repo,
+        "read_stored_geo_columns",
+        counting("read_stored", feature_repo.read_stored_geo_columns),
+    )
+    monkeypatch.setattr(
+        feature_repo, "upsert_stamps", counting("upsert_stamps", feature_repo.upsert_stamps)
+    )
+    changed = [
+        await _festival(seed, _FakeReverse(_geo(road_name_code="115603118999"))) for seed in seeds
+    ]
+    # 같은 Feature가 chunk에 두 번 — 두 번째는 미리 읽은 값이 낡았으니 행 단위로 다시 묻는다
+    # (첫 번째가 이미 고쳐 써서 값이 같다 → 무쓰기).
+    result = await load_bundles(migrated_session, [*changed, changed[0]], geo=_ctx(REF_B))
+
+    assert result.geo_stale_rewritten == 5
+    assert result.geo_stale_unchanged == 1
+    assert result.geo_stamps_written == 5
+    assert calls == {"is_stale": 1, "read_stored": 1, "upsert_stamps": 1}
+    for bundle in changed:
+        stamp = await get_stamp(migrated_session, await _feature_id(migrated_session, bundle))
+        assert stamp is not None
+        assert stamp.geo_data_token == TOKEN_B

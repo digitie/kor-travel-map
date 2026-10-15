@@ -391,8 +391,14 @@ def test_effective_token_is_none_when_the_run_crossed_a_dataset_switch() -> None
 
     current = DatasetRef(version_token=VERSION, data_token=DATA)
     applied = GeoApplied(reverse=True, geocode=False)
-    assert GeoLoadContext(geo_applied=applied, current_dataset=current).effective_token() == DATA
-    observed = {DATA}
+    observed: set[str] = set()
+    assert (
+        GeoLoadContext(
+            geo_applied=applied, current_dataset=current, observed_data_tokens=observed
+        ).effective_token()
+        == DATA
+    )
+    observed.add(DATA)
     context = GeoLoadContext(
         geo_applied=applied, current_dataset=current, observed_data_tokens=observed
     )
@@ -406,3 +412,70 @@ def test_effective_token_is_none_when_the_run_crossed_a_dataset_switch() -> None
         ).effective_token()
         is None
     )
+
+
+def test_effective_token_fails_closed_without_a_live_observation_set() -> None:
+    """geo를 쓰는 run이 관측 집합을 넘기지 않으면 전환을 볼 수 없다 — 토큰을 쓰지 않는다."""
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
+
+    current = DatasetRef(version_token=VERSION, data_token=DATA)
+    for applied in (
+        GeoApplied(reverse=True, geocode=False),
+        GeoApplied(reverse=False, geocode=True),
+    ):
+        context = GeoLoadContext(geo_applied=applied, current_dataset=current)
+        assert context.effective_token() is None
+    # geo를 전혀 쓰지 않는 run은 관측할 것이 없다 — 없는 집합이 빈 집합과 같다.
+    unused = GeoApplied(reverse=False, geocode=False)
+    assert GeoLoadContext(geo_applied=unused, current_dataset=current).effective_token() == DATA
+
+
+# -- 부분 퇴행 유지(#1328 M2) ------------------------------------------------------------------
+
+
+def _stored(address: dict[str, object], *, overrides: dict[str, object] | None = None) -> object:
+    from kortravelmap.infra.feature_geocode_load import StoredGeoColumns
+
+    return StoredGeoColumns(
+        values={"address": address, "legal_dong_code": address.get("bjd_code")},
+        overrides=overrides or {},
+    )
+
+
+def test_partial_regression_keeps_only_geo_only_fields_under_the_same_legal_dong() -> None:
+    from kortravelmap.dto import Address
+    from kortravelmap.infra.feature_geocode_load import keep_partially_regressed_fields
+
+    stored = _stored(
+        {
+            "bjd_code": "1156011000",
+            "road_name_code": "115603118001",
+            "admin_dong_code": "1156054000",
+            "zipcode": "07237",
+            "sido_name": "서울특별시",
+        }
+    )
+    new = Address(bjd_code="1156011000", sido_name=None)
+    kept, fields = keep_partially_regressed_fields(stored, new)  # type: ignore[arg-type]
+    assert fields == ("admin_dong_code", "road_name_code", "zipcode")
+    assert (kept.road_name_code, kept.admin_dong_code, kept.zipcode) == (
+        "115603118001",
+        "1156054000",
+        "07237",
+    )
+    assert kept.sido_name is None  # 대상 밖 필드는 새 답 그대로
+
+    moved, moved_fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011100")
+    )
+    assert moved_fields == ()
+    assert moved.road_name_code is None
+
+    overridden = _stored(
+        {"bjd_code": "1156011000", "road_name_code": "115603118001"},
+        overrides={"core.road_name_code": "115603118001"},
+    )
+    _, override_fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        overridden, Address(bjd_code="1156011000")
+    )
+    assert override_fields == ()

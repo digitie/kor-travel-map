@@ -535,10 +535,19 @@ def _decimal_or_none(value: Any) -> Decimal | None:
         return None
 
 
+#: producer(``feature_export_service._serialize_item``)가 export 행에서 덧붙이는 최상위 필드 중
+#: 원문 내용이 아닌 것. ``updated_at``은 payload가 바뀔 때마다(토큰만 바뀌어도) 새 시각이라 넣으면
+#: 릴리스마다 전 행이 "바뀜"이 된다. ``operation``은 Map이 변환하는 행에서는 늘 ``upsert``다 —
+#: 내용이 아니라 export 상태라 뺀다(tombstone은 변환 전에 걸러진다).
+_HASH_EXCLUDED_TOP_LEVEL: Final[tuple[str, ...]] = ("updated_at", "operation")
+
+
 def _hash_input_without_geo_token(raw_data: Mapping[str, Any]) -> dict[str, Any]:
-    """해시 입력에서 geo 산출(``place.address.geo_data_token``)과 그것을 담은 producer 해시를 "
-    "뺀다."""
+    """해시 입력에서 geo 산출(``place.address.geo_data_token``)·그것을 담은 producer 해시·export
+    상태 필드(:data:`_HASH_EXCLUDED_TOP_LEVEL`)를 뺀다."""
     trimmed: dict[str, Any] = json.loads(json.dumps(raw_data))
+    for key in _HASH_EXCLUDED_TOP_LEVEL:
+        trimmed.pop(key, None)
     place = trimmed.get("place")
     if isinstance(place, dict) and isinstance(place.get("address"), dict):
         place["address"].pop("geo_data_token", None)

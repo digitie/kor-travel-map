@@ -1086,11 +1086,14 @@ async def _empty_load() -> FeatureLoadResult:
     return FeatureLoadResult()
 
 
-def _observed_tokens(reverse_geocoder: object) -> AbstractSet[str]:
-    """역지오코더의 계수가 응답에서 본 ``data_token`` 집합(살아 있는 참조). 계수가 없으면 빈 "
-    "집합."""
+def _observed_tokens(reverse_geocoder: object) -> AbstractSet[str] | None:
+    """역지오코더의 계수가 응답에서 본 ``data_token`` 집합(살아 있는 참조).
+
+    계수가 없으면 None이다 — 그 run은 전환을 볼 수 없으므로 스탬프를 쓰지 않는다(fail closed).
+    """
     stats = getattr(reverse_geocoder, "stats", None)
-    return getattr(stats, "observed_data_tokens", frozenset()) if stats is not None else frozenset()
+    observed = getattr(stats, "observed_data_tokens", None) if stats is not None else None
+    return cast("AbstractSet[str] | None", observed)
 
 
 def _tag_run_outcome(context: Any, tags: Mapping[str, str]) -> None:

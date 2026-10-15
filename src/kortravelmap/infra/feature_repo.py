@@ -55,14 +55,16 @@ import logging
 import math
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.types import Text
 
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
@@ -84,14 +86,17 @@ from kortravelmap.infra.feature_geocode_load import (
     address_column_values,
     differing_columns,
     empty_answer_guard,
+    keep_partially_regressed_fields,
     override_mismatches,
     provider_code_present,
     read_stored_geo_columns,
+    read_stored_geo_columns_many,
     record_override_geo_stale,
 )
 from kortravelmap.infra.feature_geocode_stamp_repo import (
     decide_outcome,
     is_stale,
+    stale_among,
     upsert_stamps,
 )
 from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
@@ -107,7 +112,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from kortravelmap.dto import Feature, FeatureBundle, SourceLink, SourceRecord
-    from kortravelmap.dto.geo_dataset import GeoLoadContext
+    from kortravelmap.dto.geo_dataset import GeoLoadContext, ReverseOutcome
 
 __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
@@ -1952,6 +1957,8 @@ class FeatureLoadResult:
     geo_empty_guarded: int = 0
     #: ``address_override_geo_stale`` finding을 새로 남긴 행.
     geo_override_stale_findings: int = 0
+    #: stale 행에서 같은 법정동인데 새 답이 잃은 geo 전용 필드를 저장값으로 지킨 행.
+    geo_partial_kept: int = 0
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -1979,6 +1986,7 @@ class FeatureLoadResult:
             geo_override_stale_findings=(
                 self.geo_override_stale_findings + other.geo_override_stale_findings
             ),
+            geo_partial_kept=self.geo_partial_kept + other.geo_partial_kept,
         )
 
 
@@ -3065,11 +3073,33 @@ async def resolve_primary_features_for_entity(
     return tuple(str(row) for row in rows)
 
 
+@dataclass
+class _GeoChunk:
+    """chunk 단위 geo 사실 — :func:`load_bundles`가 한 번에 읽고, 행이 쓰고, 끝에 한 번에 쓴다.
+
+    ``stale``·``stored``는 chunk 시작에 미리 읽은 값이다. 같은 Feature가 chunk에 두 번 나오면 두
+    번째부터는 미리 읽은 값이 낡았을 수 있으므로 쓴 id를 ``consumed``에 넣고 그 뒤로는 행 단위로
+    다시 묻는다. ``stamps``는 행이 정한 outcome을 모아 chunk 끝에 한 문장으로 쓴다.
+    """
+
+    stale: frozenset[str]
+    stored: dict[str, StoredGeoColumns]
+    stamps: dict[str, ReverseOutcome] = field(default_factory=dict)
+    consumed: set[str] = field(default_factory=set)
+
+    def take(self, feature_id: str) -> tuple[bool, StoredGeoColumns] | None:
+        if feature_id in self.consumed or feature_id not in self.stored:
+            return None
+        self.consumed.add(feature_id)
+        return feature_id in self.stale, self.stored[feature_id]
+
+
 async def load_bundle(
     session: AsyncSession,
     bundle: FeatureBundle,
     *,
     geo: GeoLoadContext | None = None,
+    _chunk: _GeoChunk | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
@@ -3141,24 +3171,32 @@ async def load_bundle(
         )
         token = geo.effective_token()
     geo_relevant = outcome in ("called", "geocoded")
-    stale = (
-        token is not None
-        and geo_relevant
-        and not feature_missing
-        and resolved_feature_id is not None
-        and await is_stale(session, resolved_feature_id, token)
+    target_id = (
+        resolved_feature_id
+        if geo is not None and geo_relevant and not feature_missing
+        else None
     )
-    new_geo_values = address_column_values(bundle.feature.address)
+    prefetched = (
+        _chunk.take(target_id) if _chunk is not None and target_id is not None else None
+    )
+    if prefetched is not None:
+        stale = token is not None and prefetched[0]
+    else:
+        stale = (
+            token is not None
+            and target_id is not None
+            and await is_stale(session, target_id, token)
+        )
+    new_address = bundle.feature.address
+    new_geo_values = address_column_values(new_address)
     stored: StoredGeoColumns | None = None
     guarded = False
-    if (
-        geo is not None
-        and geo_relevant
-        and not feature_missing
-        and resolved_feature_id is not None
-        and (record_state.became_current or stale)
-    ):
-        stored = await read_stored_geo_columns(session, resolved_feature_id)
+    if target_id is not None and (record_state.became_current or stale):
+        stored = (
+            prefetched[1]
+            if prefetched is not None
+            else await read_stored_geo_columns(session, target_id)
+        )
         guarded = empty_answer_guard(
             stored,
             new_geo_values,
@@ -3166,11 +3204,15 @@ async def load_bundle(
         )
     stale_unchanged = False
     stale_rewritten = False
+    partial_kept = False
 
     if record_state.became_current or feature_missing:
         feature_to_write = bundle.feature
-        if guarded and stored is not None:
+        if guarded and stored is not None and "address" not in stored.overridden_columns():
             # 빈 답 가드: payload가 바뀐 행도 주소 열만은 저장값을 지킨다(나머지 필드는 패치).
+            # ``address``에 override가 있으면 저장값은 override 값이다 — 그것을 provider base로
+            # 옮겨 적지 않는다(override를 걷으면 사람 값이 provider 값처럼 남는다). 그 열은
+            # patch가 어차피 건너뛰므로 새 답을 그대로 base에 둔다.
             feature_to_write = bundle.feature.model_copy(
                 update={"address": Address.model_validate(stored.values["address"] or {})}
             )
@@ -3185,10 +3227,17 @@ async def load_bundle(
         )
         feature_updated = not feature_inserted
     elif stale and not guarded and stored is not None:
+        new_address, kept_fields = keep_partially_regressed_fields(stored, new_address)
+        if kept_fields:
+            # 같은 법정동인데 geo 전용 필드만 사라졌다 — 부분 응답으로 보고 저장값을 지킨다.
+            partial_kept = True
+            new_geo_values = address_column_values(new_address)
         if differing_columns(stored, new_geo_values):
             feature_inserted = await upsert_feature(
                 session,
-                bundle.feature,
+                bundle.feature.model_copy(update={"address": new_address})
+                if kept_fields
+                else bundle.feature,
                 provider_dataset_id=record_state.provider_dataset_id,
                 source_membership=_ProviderSourceMembership(
                     source_entity_key=record_state.source_entity_key,
@@ -3273,11 +3322,14 @@ async def load_bundle(
             mismatches=override_mismatches(stored, new_geo_values),
         )
     stamped = 0
-    if geo is not None and outcome is not None and not guarded:
-        stamped = await upsert_stamps(
-            session, current=geo.current_dataset if token is not None else None,
-            outcomes={lifecycle_feature_id: outcome},
-        )
+    if geo is not None and outcome is not None and not guarded and token is not None:
+        if _chunk is not None:
+            # chunk 끝에 한 문장으로 쓴다(:func:`load_bundles`) — 개수는 그때 센다.
+            _chunk.stamps[lifecycle_feature_id] = outcome
+        else:
+            stamped = await upsert_stamps(
+                session, current=geo.current_dataset, outcomes={lifecycle_feature_id: outcome}
+            )
     return FeatureLoadResult(
         bundles_total=1,
         features_inserted=int(feature_inserted),
@@ -3290,6 +3342,73 @@ async def load_bundle(
         geo_stale_unchanged=int(stale_unchanged),
         geo_empty_guarded=int(guarded),
         geo_override_stale_findings=int(override_finding),
+        geo_partial_kept=int(partial_kept),
+    )
+
+
+_RESOLVE_PROVIDER_FEATURE_IDS_SQL: Final = text(
+    """
+SELECT input.ordinal::int AS ordinal,
+       feature.resolve_provider_feature_id(
+           CAST(:provider_dataset_id AS bigint), input.feature_kind, input.natural_key
+       )::text AS feature_id
+  FROM unnest(CAST(:feature_kinds AS text[]), CAST(:natural_keys AS text[]))
+       WITH ORDINALITY AS input(feature_kind, natural_key, ordinal)
+"""
+).bindparams(
+    bindparam("feature_kinds", type_=ARRAY(Text)),
+    bindparam("natural_keys", type_=ARRAY(Text)),
+)
+
+
+async def _prefetch_geo_chunk(
+    session: AsyncSession, bundles: Sequence[FeatureBundle], geo: GeoLoadContext
+) -> _GeoChunk:
+    """chunk의 기존 Feature에 대해 stale 여부와 저장 주소 열을 한 번에 읽는다(ADR-109 결정 4).
+
+    행마다 ``is_stale``·``read_stored_geo_columns``를 따로 물으면 MOIS 롤아웃(수십만 행)에서 행당
+    왕복이 2~3번 늘어난다. 그래서 chunk 시작에 정본 키를 dataset별로 한 번에 풀고(SECURITY
+    DEFINER 해석 함수 — runtime 롤은 claim 표를 직접 읽지 않는다), 스탬프·저장값을 각각 한
+    문장으로 읽는다. 첫 적재(claim 없음)는 미리 읽을 것이 없다 — 그런 행은 stale 분기가 없다.
+    """
+    groups: dict[tuple[str, str], list[FeatureBundle]] = {}
+    for bundle in bundles:
+        if not bundle.feature.provider_natural_key:
+            continue
+        outcome = decide_outcome(
+            geo.geo_applied,
+            has_coord=bundle.feature.coord is not None,
+            provider_code_present=provider_code_present(bundle.source_record.raw_data),
+            legal_dong_code_present=bundle.feature.address.bjd_code is not None,
+            evidence=bundle.geo_attempt,
+        )
+        if outcome not in ("called", "geocoded"):
+            continue
+        key = (bundle.source_record.provider, bundle.source_record.dataset_key)
+        groups.setdefault(key, []).append(bundle)
+    feature_ids: set[str] = set()
+    for (provider, dataset_key), members in groups.items():
+        provider_dataset_id = await resolve_active_provider_dataset_id(
+            session, provider=provider, dataset_key=dataset_key, lock=True
+        )
+        rows = (
+            await session.execute(
+                _RESOLVE_PROVIDER_FEATURE_IDS_SQL,
+                {
+                    "provider_dataset_id": provider_dataset_id,
+                    "feature_kinds": [member.feature.kind.value for member in members],
+                    "natural_keys": [
+                        str(member.feature.provider_natural_key) for member in members
+                    ],
+                },
+            )
+        ).mappings().all()
+        feature_ids.update(str(row["feature_id"]) for row in rows if row["feature_id"])
+    if not feature_ids:
+        return _GeoChunk(stale=frozenset(), stored={})
+    return _GeoChunk(
+        stale=await stale_among(session, feature_ids, geo.effective_token()),
+        stored=await read_stored_geo_columns_many(session, feature_ids),
     )
 
 
@@ -3303,10 +3422,27 @@ async def load_bundles(
 
     commit은 호출자 책임 (단위 of work — 하나라도 실패하면 호출자가 rollback).
     bulk COPY 최적화(ADR-013)는 후속 — 본 함수는 정확성 우선 순차 upsert.
+
+    ``geo``가 있으면 geo 사실은 chunk 단위다(:func:`_prefetch_geo_chunk`) — stale 판정·저장값
+    읽기는 시작에 한 번, 스탬프는 끝에 한 문장. 끝에서 토큰을 다시 보고, 그 사이 run이 데이터셋
+    전환을 가로질렀으면(:meth:`GeoLoadContext.effective_token` None) 스탬프를 쓰지 않는다.
     """
+    materialized = list(bundles)
+    chunk: _GeoChunk | None = None
+    if geo is not None and materialized:
+        await lock_feature_curation_write(session)
+        chunk = await _prefetch_geo_chunk(session, materialized, geo)
     total = FeatureLoadResult()
-    for bundle in bundles:
-        total = total.merge(await load_bundle(session, bundle, geo=geo))
+    for bundle in materialized:
+        total = total.merge(await load_bundle(session, bundle, geo=geo, _chunk=chunk))
+    if geo is not None and chunk is not None and chunk.stamps:
+        token = geo.effective_token()
+        stamped = await upsert_stamps(
+            session,
+            current=geo.current_dataset if token is not None else None,
+            outcomes=chunk.stamps,
+        )
+        total = total.merge(FeatureLoadResult(geo_stamps_written=stamped))
     return total
 
 

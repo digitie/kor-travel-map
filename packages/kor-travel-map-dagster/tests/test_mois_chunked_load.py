@@ -140,6 +140,8 @@ class _FakeDb:
     resolved: list[str] = field(default_factory=list)
     marker_write_error: Exception | None = None
     resolve_error: Exception | None = None
+    tokens_seen: list[tuple[str, str | None]] = field(default_factory=list)
+    """토큰 조건을 받는 세 자리가 받은 토큰: ("unchanged"|"marker"|"load", token)."""
 
 
 class _FakeClient:
@@ -157,6 +159,7 @@ class _FakeClient:
         current_data_token: str | None = None,
     ) -> frozenset[str]:
         del provider, dataset_key, source_entity_type
+        self.db.tokens_seen.append(("unchanged", current_data_token))
         return frozenset(
             key
             for key, value in payload_hashes.items()
@@ -175,6 +178,7 @@ class _FakeClient:
         geo: Any = None,
     ) -> FeatureLoadResult:
         del provider, dataset_key, source_entity_type, observed_at
+        self.db.tokens_seen.append(("load", geo.effective_token() if geo is not None else None))
         self._transactions += 1
         if self.db.conflicts > 0:
             self.db.conflicts -= 1
@@ -260,6 +264,9 @@ class _FakeClient:
         expected_payload_fields: Mapping[str, str] | None = None,
     ) -> frozenset[str]:
         assert violation_type == chunked.UNRESOLVABLE_MARKER_TYPE
+        self.db.tokens_seen.append(
+            ("marker", (expected_payload_fields or {}).get("geo_data_token"))
+        )
         return frozenset(
             key
             for key, expected in expected_source_record_keys.items()
@@ -335,10 +342,13 @@ async def _run(
     clock: Any = None,
     strict_address: str = "off",
     context: Any = None,
+    current_dataset: Any = None,
 ) -> chunked.MoisChunkedLoadOutcome:
     kwargs: dict[str, Any] = {}
     if clock is not None:
         kwargs["clock"] = clock
+    if current_dataset is not None:
+        kwargs["current_dataset"] = current_dataset
     return await load_mois_license_records_chunked(
         context=cast(Any, context or _Context()),
         client=cast(Any, _FakeClient(db)),
@@ -1609,3 +1619,75 @@ def test_run_outcome_tag_is_skipped_for_a_direct_asset_context() -> None:
 
     context = build_asset_context(resources={})
     chunked._tag_run_outcome(context, {MOIS_LOAD_OUTCOME_TAG: MOIS_LOAD_OUTCOME_COMPLETE})
+
+
+# -- geo 토큰(ADR-109 결정 4, T-GR-03) ---------------------------------------------------------
+
+_TOKEN: Final[str] = "dd1-" + "1" * 32
+_OTHER_TOKEN: Final[str] = "dd1-" + "2" * 32
+
+
+class _ObservingGeocoder(_Geocoder):
+    """응답마다 ``data_token``을 관측 계수에 남긴다. ``switch_after``번째 호출부터 다른 토큰."""
+
+    def __init__(self, *, switch_after: int | None = None) -> None:
+        super().__init__()
+        self.stats = SimpleNamespace(observed_data_tokens=set())
+        self._switch_after = switch_after
+
+    async def __call__(self, coord: Coordinate) -> Address:
+        switched = self._switch_after is not None and len(self.calls) >= self._switch_after
+        self.stats.observed_data_tokens.add(_OTHER_TOKEN if switched else _TOKEN)
+        return await super().__call__(coord)
+
+
+def _current() -> Any:
+    from kortravelmap.dto.geo_dataset import DatasetRef
+
+    return DatasetRef(version_token="dv1-" + "a" * 32, data_token=_TOKEN)
+
+
+async def test_every_token_condition_receives_the_run_token() -> None:
+    """"그대로" 판정·빈 답 표식·적재 셋 다 run 시작에 읽은 토큰을 받는다(chunk마다)."""
+    db = _FakeDb()
+    await _run(
+        _snapshot(per_slug=4), db, geocoder=_ObservingGeocoder(), current_dataset=_current()
+    )
+
+    kinds = {kind for kind, _ in db.tokens_seen}
+    assert kinds == {"unchanged", "marker", "load"}
+    assert all(token == _TOKEN for _, token in db.tokens_seen), db.tokens_seen
+
+
+async def test_without_a_current_dataset_no_token_condition_applies() -> None:
+    db = _FakeDb()
+    await _run(_snapshot(per_slug=4), db, geocoder=_ObservingGeocoder())
+    assert db.tokens_seen
+    assert all(token is None for _, token in db.tokens_seen)
+
+
+async def test_a_geocoder_without_observation_stats_fails_closed() -> None:
+    """관측 계수가 없는 역지오코더면 전환을 볼 수 없다 — 토큰 조건도 스탬프도 쓰지 않는다."""
+    db = _FakeDb()
+    await _run(_snapshot(per_slug=4), db, geocoder=_Geocoder(), current_dataset=_current())
+    assert all(token is None for _, token in db.tokens_seen)
+
+
+async def test_mid_run_dataset_switch_stops_using_the_token_from_the_next_chunk_on() -> None:
+    """run 도중 geo가 데이터셋을 바꾸면 그 뒤 chunk는 토큰을 쓰지 않는다(옛 토큰으로 봉인 안 함)."""
+    db = _FakeDb()
+    await _run(
+        _snapshot(per_slug=6),
+        db,
+        geocoder=_ObservingGeocoder(switch_after=3),
+        current_dataset=_current(),
+    )
+
+    loads = [token for kind, token in db.tokens_seen if kind == "load"]
+    assert loads[0] == _TOKEN
+    assert None in loads
+    # 한 번 전환을 보면 다시 토큰을 쓰지 않는다.
+    first_none = loads.index(None)
+    assert all(token is None for token in loads[first_none:])
+    later = [token for kind, token in db.tokens_seen[db.tokens_seen.index(("load", None)) :]]
+    assert all(token is None for token in later)
