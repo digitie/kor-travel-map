@@ -1,3 +1,20 @@
+## 2026-10-16 — 적재 경로의 geo 재해석(T-GR-03, ADR-109 결정 4·6): 브랜치 `feat/t-gr-03-stale-stamps`
+
+- **무엇.** `load_bundle`이 `GeoLoadContext`를 받아 스탬프·stale 분기·값 동일 무쓰기·빈 답 가드·override finding을 한다.
+  MOIS "그대로" 판정에 스탬프 토큰 조건, 행 evidence, 표식 토큰. concierge 토큰 신뢰 규칙·해시 제외. 비-MOIS run 빈 답 가드.
+  변환 함수 단위 geo 소비 lint. T-GR-02 이월 넷(client·repo 전달, run 가드, MOIS 배선, price 스탬프 0) 포함.
+- **#1327 최종 리뷰 HARD 요구 — 토큰은 지오코딩 전에.** `_load` 경로는 변환이 끝난 뒤 wrapper로 들어가 토큰을 그때 처음
+  읽었다 — 전환 run이 옛 데이터를 새 토큰으로 봉인할 수 있었다. 역지오코더를 감싸 처음 불릴 때 handle을 먼저 읽게 했고
+  (MOIS·concierge는 run 시작에), 응답이 다른 토큰을 내면 그 적재는 스탬프·stale 분기를 하지 않는다(이중 방어).
+- **설계를 고친 자리.** run 빈 답 가드의 분자를 endpoint 빈 답에서 **행 단위 최종 빈 답**으로 — reverse가 비고 region fallback이
+  채우는 산악 centroid run이 정상인데 실패할 뻔했다(테스트로 결박). concierge `current_data_token=None`은 acceptance대로 종전
+  동작(설계 §4 문구와 모순). 해시 자체 계산은 payload에 토큰이 있을 때만(롤아웃이 전 행을 흔들지 않게). override 테스트에서
+  `core.address` jsonb에도 코드가 들어 있어 열 하나의 override로는 "값 동일"이 되지 않는다는 것을 확인했다(문서화).
+- **게이트·빨강.** 통합 23건(새 파일) + 기존 스탬프 22건. 의도적 빨강 11종을 n150에서 확인(빈 답 가드 끔·판정 집합에 legal·
+  override 열 비교·토큰을 해시에·전환 관측 무시·CTE 조건 제거·표식 조건 무시·값 동일 재쓰기·concierge 신뢰 무시·토큰 선행
+  제거·run 가드 분자를 endpoint로) — 각각 그 테스트만 빨갰다. 롤아웃 비용 프록시(통합 DB, 300행): 첫 적재 8.31 s, geo 없는
+  재적재 2.40 s, 스탬프 롤아웃 재적재 2.04 s(값 동일 무쓰기 300·스탬프 300) — 행당 추가 비용은 잡음 수준.
+
 ## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
 
 - **무엇.** 팩토리 `fetch_current_dataset`(geocoding — CLI가 dagster를 import할 수 없어 여기), Dagster resource

@@ -84,6 +84,12 @@ run**(지문 backfill 전·fail-open 창)도 같은 취급이다 — stale 분�
 run-scoped 값과 다른 토큰이 관측되면 WARNING + op 메타 `geo_dataset_mismatch=true`만 남긴다 — 그 run의
 스탬프는 옛 토큰이므로 다음 센서 tick이 다시 계획한다(안전 방향).
 
+**현재 토큰은 첫 지오코딩 전에 읽는다(2026-10-16, #1327 최종 리뷰 — T-GR-03 구현).** run 도중 geo가 데이터셋을
+바꿨을 때 옛 데이터로 해석한 행이 **새** 토큰으로 봉인되면 다시 계획되지 않는다(위험한 방향). 그래서 asset의
+역지오코더는 처음 불릴 때 run-scoped handle을 먼저 읽고, MOIS·concierge는 run 시작에 읽는다. 덧붙여 응답에서 run
+토큰과 다른 `data_token`을 보면 그 적재는 stale 분기·스탬프를 하지 않는다(`GeoLoadContext.effective_token()`) —
+위의 "그 run의 스탬프는 옛 토큰"보다 한 걸음 더 보수적이다(스탬프 없음 = stale이라 다음 계획이 고른다).
+
 `DatasetRef`·`GeoApplied`는 **`src/kortravelmap/dto/geo_dataset.py`**에 둔다. `infra`가 import하므로
 `geocoding` 층에 두면 `infra → geocoding` 역행이다(`CLAUDE.md` §5 4항, `lint-imports`).
 

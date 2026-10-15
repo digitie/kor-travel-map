@@ -9,7 +9,9 @@
 > **구현 진척(2026-10-15)**: §2의 스탬프 표(migration 407)·`dto/geo_dataset.py`·`infra/feature_geocode_stamp_repo.py`
 > (`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`)와 §3 첫 항목(`dataset_version()`·
 > 응답 `dataset` 선택 파싱·`GeoCallStats.empty`/`observed_data_tokens`)은 T-GR-01로 구현됐다. 시그니처 차이와
-> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. 나머지는 계획이다.
+> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. §3의 resource·`geo_applied` 배선은 T-GR-02,
+> §4 전부(stale 분기·무쓰기·빈 답 가드 행/run·override finding·MOIS 토큰 조건·표식·concierge 규칙)는 T-GR-03이 구현했다 —
+> 차이는 acceptance §T-GR-03 "구현 메모"(특히 run 가드 분자 = 행 단위 최종 빈 답). 나머지(§5 이후)는 계획이다.
 
 ## 1. 저장되는 geo 유도 값과 provider별 출처 (현재 사실)
 

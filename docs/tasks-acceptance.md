@@ -2595,6 +2595,25 @@ geocode_obtained_code}`(T-GR-01, `dto/geo_dataset.py`)로 내보낸다 — `Admi
 - concierge 스탬프: 좌표 있는 행은 payload 코드를 썼어도 `called`, 좌표 없는 payload 코드 행만 `not_called`
   (`decide_outcome` 순서 ③/⑤).
 - 롤아웃 첫 run의 전 행 1회 스탬프 비용(행 수·소요)을 PR 본문에 실측 기록한다(격리 스택).
+- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-03-stale-stamps`): (1) **현재 토큰은 첫 지오코딩 전에 읽는다**(#1327 최종 리뷰
+  HARD 요구) — asset의 역지오코더를 감싸 처음 불릴 때 resource handle을 먼저 읽고(`_TokenFirstReverseGeocoder`), MOIS·
+  concierge는 run 시작에 명시적으로 읽는다. 덧붙여 응답이 run 토큰과 다른 `data_token`을 내면(`GeoLoadContext.
+  effective_token()` None) 그 적재는 stale 분기·스탬프를 하지 않는다 — 전환 run이 새 토큰으로 봉인되지 않는다(통합 테스트
+  `test_mid_run_dataset_switch_never_produces_fresh_looking_stamps`). (2) 적재 경로 입력은 `GeoLoadContext{geo_applied,
+  current_dataset, observed_data_tokens}`(dto) 하나다 — client 4 메서드(`load_feature_bundles`·`…_reobserving`·
+  `…_batches`·`load_authoritative_feature_snapshot`)와 repo `load_bundles/load_bundle`이 받고, 적재 wrapper의 `load_all`
+  callable은 `(bundles, geo)`를 받는다. (3) run 빈 답 가드의 분자는 endpoint 빈 답(`empty['reverse']`)이 아니라 **행 단위
+  최종** 빈 답(`empty['reverse_result']` — region fallback까지 비었을 때)이다 — 산악 centroid처럼 reverse가 거의 늘 비고
+  fallback이 채우는 dataset이 정상 run에서 실패하지 않게. 판정은 `dagster/geocode_ratio.py` 한 곳(MOIS와 공유, 비율은
+  `mois_geocode_degraded_ratio`). (4) 행 빈 답 가드의 finding은 기존 주소 검증의 `reverse_geocode_failed`(좌표 + bjd 없음)가
+  이미 남긴다 — 가드는 쓰기·스탬프를 막고 메타 `geo_empty_guarded`로 센다. (5) concierge: `current_data_token` 생략(None)은
+  acceptance대로 **종전과 같다(payload 코드 우선)** — 설계 §4 문구 "기본 None = payload 코드 불신·geo 우선"은 이
+  acceptance와 모순이라 acceptance를 따랐다; 해시는 payload가 `geo_data_token`을 실어 올 때만 Map이 직접 잰다(토큰·
+  producer 해시 제외) — 토큰 없는 오늘의 payload는 종전 producer 해시라 롤아웃이 전 행을 흔들지 않는다. (6) override와 다르면
+  `address_override_geo_stale`(info)를 적재 경로가 `(feature_id, geo_data_token)` dedupe로 쓴다; override는 열 단위라
+  `core.address` jsonb에도 같은 코드가 있으면 address도 override돼 있어야 "값 동일"이 된다. (7) MOIS 행 evidence는
+  `FeatureBundle.geo_attempt`(`GeoAttemptEvidence`)다. (8) 롤아웃 비용은 격리 스택 대신 통합 DB 프록시로 쟀다(PR 본문) —
+  격리 스택 실측은 live e2e 단계에서.
 
 ## T-GR-04
 

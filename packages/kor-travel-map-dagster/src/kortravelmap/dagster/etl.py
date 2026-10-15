@@ -150,6 +150,16 @@ class DagsterFeatureLoadResult:
         }
         metadata.update(self.address_validation.as_metadata())
         metadata.update(self.observation_receipt.as_metadata())
+        # 지오코딩 스탬프·geo 재해석 계수(ADR-109) — geo를 배선한 적재에서만 0이 아니다.
+        geo_counts = {
+            "geo_stamps_written": self.load.geo_stamps_written,
+            "geo_stale_rewritten": self.load.geo_stale_rewritten,
+            "geo_stale_unchanged": self.load.geo_stale_unchanged,
+            "geo_empty_guarded": self.load.geo_empty_guarded,
+            "geo_override_stale_findings": self.load.geo_override_stale_findings,
+        }
+        if any(geo_counts.values()):
+            metadata.update(geo_counts)
         if not self.feature_ids_complete:
             metadata["feature_ids_truncated"] = True
         return metadata

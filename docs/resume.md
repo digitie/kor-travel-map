@@ -1,3 +1,12 @@
+## 2026-10-16 — 적재 경로의 geo 재해석(T-GR-03): 브랜치 `feat/t-gr-03-stale-stamps`
+
+**다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → 배포(롤아웃 첫 run이 스탬프를 채운다 — 격리 스택에서 비용 실측) → T-GR-04(계획 표·
+`coverage()`·admin API).**
+
+- 바뀐 것: `GeoLoadContext`·`load_bundle` geo 재해석, client·wrapper 전달, MOIS 토큰 조건·evidence·표식, concierge 규칙·해시,
+  run 빈 답 가드(행 단위 최종 빈 답), 토큰 선행 감싸개, 변환 함수 lint, 테스트, ADR-109 결정 2 보강, acceptance 구현 메모.
+- 바뀌지 않은 것: 스키마(407 그대로), OpenAPI, price 경로(geo 없음 → 스탬프 0).
+
 ## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
 
 **다음 한 작업: CI 초록 → 적대 리뷰 반영 → 머지 → T-GR-03(stale 분기·스탬프·
