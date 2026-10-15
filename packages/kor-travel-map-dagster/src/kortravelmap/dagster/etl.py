@@ -568,7 +568,10 @@ async def load_feature_bundles_for_dagster(
         ),
     )
     metadata.update(result.observation_receipt.as_metadata())
-    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log))
+    if geo_applied is not None:  # 배선 안 된 경로(테스트 대역 포함)는 context.log를 건드리지 않는다
+        metadata.update(
+            geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log)
+        )
     _add_output_metadata(context, metadata)
     return result
 
@@ -784,7 +787,10 @@ async def load_feature_bundle_batches_for_dagster(
         metadata["address_validation_dropped_feature_ids_truncated"] = (
             dropped_feature_ids_truncated
         )
-    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log))
+    if geo_applied is not None:  # 배선 안 된 경로(테스트 대역 포함)는 context.log를 건드리지 않는다
+        metadata.update(
+            geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log)
+        )
     _add_output_metadata(context, metadata)
     return result
 
