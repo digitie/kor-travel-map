@@ -24,6 +24,10 @@
   마커는 본문이 아니라 깨진 이관의 잔재라 규약 §8의 복구 예외로 본다. 같은 날 이 PR과 #1325의 리베이스도 journal·
   resume에 같은 줄을 남겼다(리뷰가 잡음). `tests/lint/test_docs_have_no_conflict_markers.py`가 docs·루트 Markdown의
   줄머리 마커를 막는다(UTF-16 보고서 하나는 BOM으로 읽는다) — 정리 전 main에서는 빨갛다.
+- **3차 리뷰 반영.** ADR-109 규칙 ②·acceptance §T-GR-03 수정 파일을 `geocode_obtained_code`(시도 필드 없음)로 맞췄고,
+  `address-geocoding.md`의 커서 정의·롤아웃 문단(backfill 뒤 첫 토큰 = 기준선, '순서와 무관하게 1회' 문장 삭제)과 §7 센서
+  행·acceptance §T-GR-05에 기준선 케이스(빈 커서 + 토큰 → 커서 기록·계획 0)를 더했다. keyset 질의는 첫 페이지와 다음
+  페이지를 다른 문장으로 나눴다(`(:after IS NULL OR …)`는 generic plan에서 범위 스캔을 잃을 수 있다).
 - **게이트.** 통합: NULL·형식 위반 토큰은 outcome 셋 모두 DB가 거부, 토큰 없음 = 0건, stale 5분기와 "현재 토큰 None →
   0건", primary 링크·활성·dataset 범위, 런타임 role 쓰기·읽기, CASCADE. 단위: 응답 `dataset`
   있음/없음/형식 위반, `dataset_version()` 경로·본문 `{}`·`available=false`·계약 위반 typed 오류, 빈 답 계수(reverse 6 =

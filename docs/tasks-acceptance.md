@@ -2542,7 +2542,8 @@ ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`lo
 `load_feature_bundles_reobserving` :1104, `find_fresh_open_findings(expected_payload_fields=)` :2654),
 `dagster/mois_chunked_load.py`(:473-485 토큰 전달·행별 evidence outcome → chunk commit 안 bulk upsert, :853-882, :905-944),
 `infra/integrity_violation_repo.py:399`, `dagster/validation.py`(`address_override_geo_stale` 상수·dedupe 키),
-`providers/mois.py`(:721-730 분기에서 `AdminEvidence.geocode_attempted=True`, :817), `dto/admin_evidence.py`(1필드),
+`providers/mois.py`(:721-730 geocode 분기의 결과(코드를 받았는가)를 행별 `GeoAttemptEvidence{reverse_attempted,
+geocode_obtained_code}`(T-GR-01, `dto/geo_dataset.py`)로 내보낸다 — `AdminEvidence`에 시도 필드는 더하지 않는다, :817),
 `providers/kor_travel_concierge.py`(`kor_travel_concierge_items_to_bundles(…, current_data_token: str | None = None)`
 :125-131 additive kwarg → `_item_to_bundle` → `_address` :523-556 토큰 신뢰 규칙; :278-290 `address.geo_data_token` 제외
 해시), `dagster/assets.py:1508`(호출처 — `kor_travel_geo_dataset` resource의 `data_token` 전달),
@@ -2618,6 +2619,8 @@ tests. 의존: T-GR-02·04. 규모 M.
 열린 결정 3(`default_status`)·6(재시도)·9(완료 전이)·11(기동 방식)에 걸린다 — §T-GR-00 영향 조문 표.
 
 - `address-geocoding.md` §7 "센서" 열의 케이스 전부가 테스트로 있다 — 특히 `data_token` None → 계획 0 + Skip 문구;
+  **빈 커서 + 토큰 → 커서에 그 토큰을 기준선으로 기록, 계획 0행·RunRequest 0**(소유자 결정 2026-10-15, ADR-109 결정 5.1 —
+  다음 tick에 같은 토큰이면 여전히 0, 다른 토큰이면 계획 1);
   재빌드(토큰 동일) → 계획·RunRequest 0; A→B→A → `plan_seq=2` 계획과 RunRequest ≥ 1; SUCCESS + `budget_exhausted` →
   `done`이 아니라 같은 run_config로 재요청 1건(`converted==0`이면 `failed(no_progress)`); `requested` 3 tick 무run →
   `failed(run_not_launched)`; 활성 `feature_update_request_worker` run → Skip; DISABLED 1개 포함 계획이 sweep 없이 done.
@@ -2627,7 +2630,7 @@ tests. 의존: T-GR-02·04. 규모 M.
 - `trigger_kind=sensor` run이 `feature_operation_*` 센서·`map_owned_runs_filter`에서 Map 소유로 집계된다; RunRequest
   태그에 `kor_travel_map.geo_release_plan_id`가 있고 MOIS 이어 달리기 run(`_CONTINUATION_TAGS`)에는 없다;
   `replan` 뒤 RunRequest의 run_key가 유일해 실제 run이 생긴다.
-- 격리 스택 e2e: **첫 계획 완료 후** `manual_rebuild` → RunRequest 0건; 소량 delta → 1 tick → 계획 1 → RunRequest 1
+- 격리 스택 e2e: **첫 tick이 기준선을 기록한 뒤**(계획 0) `manual_rebuild` → RunRequest 0건; 소량 delta → 1 tick → 계획 1 → RunRequest 1
   → 커버리지 상승.
 
 ## T-GR-06

@@ -93,8 +93,9 @@ run-scoped 값과 다른 토큰이 관측되면 WARNING + op 메타 `geo_dataset
 "이 run이 `reverse_geocoder=`/`address_resolver=`를 실제로 넘겼는가"를 넘긴다(컨텍스트 5). 행 규칙은
 **순서가 규칙이다** — 처음 맞는 것이 답이다: ① `geo_applied` 둘 다 False인 run(price/notice)은 **스탬프를
 쓰지 않는다**; ② MOIS는 **행별** 변환 evidence로 outcome을 정하고 chunk commit 안에서 bulk upsert한다
-(`AdminEvidence.reverse_attempted`(`dto/admin_evidence.py:102`, `mois.py:817`) → `called`, 아니고 신규
-`geocode_attempted`이면서 `bjd_code`를 받았으면 → `geocoded`, 그 외 `not_called` — ④와 같은 결과 기준);
+(`AdminEvidence.reverse_attempted`(`dto/admin_evidence.py:102`, `mois.py:817`) → `called`, 아니고 geocode로
+`bjd_code`를 **받았으면**(`GeoAttemptEvidence.geocode_obtained_code`, T-GR-01) → `geocoded`, 그 외 `not_called` —
+④와 같은 결과 기준; '받았다'가 '시도했다'를 함의하므로 시도 여부 필드는 두지 않는다);
 ③ `reverse and coord IS NOT NULL → called`(payload 코드를 썼어도 — geo가 빈칸을 채웠으므로
 비교 대상); ④ `geocode and coord IS NULL and legal_dong_code IS NOT NULL and provider 코드 없음 → geocoded`;
 ⑤ 그 외 `not_called`. 좌표가 있고 reverse가 비어 geocode로 코드를 받은 행은 ③에서 `called`다 — 둘 다 토큰

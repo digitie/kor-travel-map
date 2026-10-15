@@ -143,8 +143,10 @@ SELECT {_STALE_PREDICATE} AS stale
 )
 
 #: provider dataset에 **primary** source_link를 가진 활성 Feature 중 stale인 것.
-_SELECT_STALE_SQL: Final = text(
-    f"""
+#: 첫 페이지와 다음 페이지를 **다른 문장**으로 둔다 — ``(:after IS NULL OR id > :after)``
+#: 한 문장은 재사용된 prepared statement의 generic plan에서 ``feature_id`` 범위 스캔을
+#: 잃을 수 있다.
+_SELECT_STALE_BASE: Final[str] = f"""
 SELECT feature.feature_id::text AS feature_id
   FROM feature.features AS feature
   LEFT JOIN feature.feature_geocode_stamps AS stamp
@@ -160,10 +162,14 @@ SELECT feature.feature_id::text AS feature_id
            AND entity.provider_dataset_id = :provider_dataset_id
    )
    AND {_STALE_PREDICATE}
-   AND (CAST(:after AS uuid) IS NULL OR feature.feature_id > CAST(:after AS uuid))
- ORDER BY feature.feature_id
- LIMIT :limit
 """
+_SELECT_STALE_FIRST_SQL: Final = text(
+    _SELECT_STALE_BASE + " ORDER BY feature.feature_id\n LIMIT :limit\n"
+)
+_SELECT_STALE_AFTER_SQL: Final = text(
+    _SELECT_STALE_BASE
+    + "   AND feature.feature_id > CAST(:after AS uuid)\n"
+    + " ORDER BY feature.feature_id\n LIMIT :limit\n"
 )
 
 
@@ -249,14 +255,14 @@ async def select_stale_feature_ids(
         return []
     if limit <= 0:
         raise ValueError("limit must be positive")
-    rows = await session.execute(
-        _SELECT_STALE_SQL,
-        {
-            "current_data_token": current_data_token,
-            "provider_dataset_id": provider_dataset_id,
-            "limit": limit,
-            "after": after,
-        },
-    )
+    params: dict[str, object] = {
+        "current_data_token": current_data_token,
+        "provider_dataset_id": provider_dataset_id,
+        "limit": limit,
+    }
+    if after is None:
+        rows = await session.execute(_SELECT_STALE_FIRST_SQL, params)
+    else:
+        rows = await session.execute(_SELECT_STALE_AFTER_SQL, {**params, "after": after})
     return [str(feature_id) for feature_id in rows.scalars().all()]
 
