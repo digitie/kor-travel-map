@@ -598,7 +598,6 @@ receipt"라는 **같은 사건 하나**에 종속된 중복 부기였다. 그 �
   `target_not_isolated`·`foreign_membership`·`foreign_membership` terminal로 보존하고
   재시도하지 않는다는 것이 문서로 선언돼 있다. 수용 판정문은 "실행 잔여 없음 —
   `tasks-done.md` 이관 대상"이며, 왜 열려 있었는지는 문서에 근거가 없다고 적고 있었다.
-||||||| parent of c7360b8e (docs(ledger): T-VN-M03 완료 이관 — import child·격리 live acceptance 판정 근거)
 
 ## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION 완료 이관
 

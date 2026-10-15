@@ -18,6 +18,12 @@
   `geocode_attempted` 삭제('받았다'가 '시도했다'를 함의 — 판정에 안 쓰이는 필드), `address-geocoding.md` §2 시그니처를
   구현에 맞춤, T-GR-04 acceptance 수정 파일에 스탬프 repo(`coverage()`). 테스트: ①→② 순서·④의 geocode run 조건·
   덮어쓰기의 version token·keyset 페이지.
+- **충돌 마커 정리·가드(별도 커밋).** main에 몇 주 전 리베이스가 남긴 `|||||||` 줄 둘(`docs/archive/journal-2026-08d.md`
+  `## 2026-08-31 — head 값 고정을…` 앞, `docs/tasks-done.md` `## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION…` 앞)을
+  지웠다 — 마커 줄 하나씩만(98 B·121 B), 앞뒤 절은 저장소에 각각 1회뿐이라 중복 본문은 없다. 아카이브는 읽기 전용이지만
+  마커는 본문이 아니라 깨진 이관의 잔재라 규약 §8의 복구 예외로 본다. 같은 날 이 PR과 #1325의 리베이스도 journal·
+  resume에 같은 줄을 남겼다(리뷰가 잡음). `tests/lint/test_docs_have_no_conflict_markers.py`가 docs·루트 Markdown의
+  줄머리 마커를 막는다(UTF-16 보고서 하나는 BOM으로 읽는다) — 정리 전 main에서는 빨갛다.
 - **게이트.** 통합: NULL·형식 위반 토큰은 outcome 셋 모두 DB가 거부, 토큰 없음 = 0건, stale 5분기와 "현재 토큰 None →
   0건", primary 링크·활성·dataset 범위, 런타임 role 쓰기·읽기, CASCADE. 단위: 응답 `dataset`
   있음/없음/형식 위반, `dataset_version()` 경로·본문 `{}`·`available=false`·계약 위반 typed 오류, 빈 답 계수(reverse 6 =
