@@ -120,7 +120,7 @@ class _Context:
 async def _run_materialized(
     bundles: Sequence[FeatureBundle], client: _SpyClient
 ) -> Any:
-    async def _load_all(kept: Sequence[FeatureBundle]) -> Any:
+    async def _load_all(kept: Sequence[FeatureBundle], geo: Any = None) -> Any:
         client.load_calls += 1
         return _load_result(len(kept))
 
@@ -155,7 +155,7 @@ async def _run_chunked(
         for start in range(0, len(bundles), 3):
             yield list(bundles[start : start + 3])
 
-    async def _load_all(stream: Any) -> Any:
+    async def _load_all(stream: Any, geo: Any = None) -> Any:
         total = 0
         async for batch in stream:
             total += len(batch)

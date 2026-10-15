@@ -24,7 +24,7 @@ class _FakeConciergeClient:
         self.loaded_bundles: list[Any] = []
         self.retire_calls: list[dict[str, Any]] = []
 
-    async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
+    async def load_feature_bundles(self, bundles: Any, geo: Any = None) -> FeatureLoadResult:
         materialized = list(bundles)
         self.loaded_bundles.extend(materialized)
         return FeatureLoadResult(
@@ -41,6 +41,7 @@ class _FakeConciergeClient:
         source_entity_type: str,
         retired_source_entity_ids: set[str] | None = None,
         retire_geometryless_areas: bool = False,
+        geo: Any = None,
     ) -> tuple[FeatureLoadResult, int]:
         assert not retire_geometryless_areas
         result = await self.load_feature_bundles(bundles)

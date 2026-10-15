@@ -154,6 +154,7 @@ class _FakeClient:
         dataset_key: str,
         source_entity_type: str,
         payload_hashes: Mapping[str, str],
+        current_data_token: str | None = None,
     ) -> frozenset[str]:
         del provider, dataset_key, source_entity_type
         return frozenset(
@@ -171,6 +172,7 @@ class _FakeClient:
         source_entity_type: str,
         reobserved_payload_hashes: Mapping[str, str],
         observed_at: datetime,
+        geo: Any = None,
     ) -> FeatureLoadResult:
         del provider, dataset_key, source_entity_type, observed_at
         self._transactions += 1
@@ -207,6 +209,7 @@ class _FakeClient:
         bundles: Iterable[FeatureBundle],
         *,
         curation_dataset: tuple[str, str] | None = None,
+        geo: Any = None,
     ) -> FeatureLoadResult:
         assert not list(bundles), "봉인 transaction은 아무것도 적재하지 않는다"
         assert curation_dataset is not None
@@ -254,6 +257,7 @@ class _FakeClient:
         violation_type: str,
         expected_source_record_keys: Mapping[str, str],
         max_age_days: int,
+        expected_payload_fields: Mapping[str, str] | None = None,
     ) -> frozenset[str]:
         assert violation_type == chunked.UNRESOLVABLE_MARKER_TYPE
         return frozenset(

@@ -280,9 +280,15 @@ async def test_load_wrapper_never_touches_context_log_without_geo_applied() -> N
         assert geo is None
         return FeatureLoadResult()
 
+    class _FindingClient:
+        async def record_address_validation_findings(self, *args: object, **kwargs: object) -> object:
+            from types import SimpleNamespace
+
+            return SimpleNamespace(observed=0, unique=0, upserted=0)
+
     await load_feature_bundles_for_dagster(
         context=_NoLogContext(),  # type: ignore[arg-type]
-        client=object(),  # type: ignore[arg-type]
+        client=_FindingClient(),  # type: ignore[arg-type]
         bundles=[],
         provider="p",
         dataset_key="d",

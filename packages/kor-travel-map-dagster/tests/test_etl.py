@@ -260,6 +260,8 @@ async def test_authoritative_snapshot_can_retire_absent_source_entities(
             "dataset_key": "krforest_mountain_trails",
             "source_entity_type": "mountain_trail_segment",
             "retire_absent_from_snapshot": True,
+            # geo를 배선하지 않은 호출(geo_applied 없음)은 geo 입력이 없다(ADR-109 T-GR-03).
+            "geo": None,
         }
     ]
 
@@ -293,7 +295,7 @@ async def test_streaming_feature_batches_keep_one_atomic_loader_call(
         2,
     )
 
-    async def _load_all(batches: Any) -> FeatureLoadResult:
+    async def _load_all(batches: Any, geo: Any = None) -> FeatureLoadResult:
         result = FeatureLoadResult()
         async for batch in batches:
             consumed.append(tuple(item.feature.feature_id for item in batch))
@@ -348,7 +350,7 @@ async def test_streaming_clean_snapshot_records_empty_finding_observation(
         ),
     )
 
-    async def _load_all(batches: Any) -> FeatureLoadResult:
+    async def _load_all(batches: Any, geo: Any = None) -> FeatureLoadResult:
         loaded = 0
         async for batch in batches:
             loaded += len(batch)
@@ -403,7 +405,7 @@ async def test_streaming_drop_metadata_keeps_total_beyond_id_sample(
     )
     monkeypatch.setattr("kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT", 2)
 
-    async def _load_all(batches: Any) -> FeatureLoadResult:
+    async def _load_all(batches: Any, geo: Any = None) -> FeatureLoadResult:
         loaded = 0
         async for batch in batches:
             loaded += len(batch)
@@ -461,7 +463,7 @@ async def test_streaming_drop_counts_rows_but_samples_unique_ids(
     )
     monkeypatch.setattr("kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT", 1)
 
-    async def _load_all(batches: Any) -> FeatureLoadResult:
+    async def _load_all(batches: Any, geo: Any = None) -> FeatureLoadResult:
         loaded = 0
         async for batch in batches:
             loaded += len(batch)
@@ -522,7 +524,7 @@ async def test_streaming_feature_batches_bound_issue_metadata_and_finding_chunks
         3,
     )
 
-    async def _load_all(batches: Any) -> FeatureLoadResult:
+    async def _load_all(batches: Any, geo: Any = None) -> FeatureLoadResult:
         result = FeatureLoadResult()
         async for batch in batches:
             result = result.merge(
@@ -720,7 +722,7 @@ async def test_load_feature_bundles_for_dagster_uses_atomic_load_all_once(
         ),
     )
 
-    async def _load_all(items: Any) -> FeatureLoadResult:
+    async def _load_all(items: Any, geo: Any = None) -> FeatureLoadResult:
         materialized = list(items)
         atomic_calls.append(
             tuple(bundle.feature.feature_id for bundle in materialized)
