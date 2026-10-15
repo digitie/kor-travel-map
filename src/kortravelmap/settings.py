@@ -172,8 +172,9 @@ class KorTravelMapSettings(BaseSettings):
         le=10.0,
         description=(
             "kor-travel-geo TCP 연결 수립 timeout seconds(ADR-110 결정 3). geo는 다른 "
-            "호스트(odroid)에 있어 그 호스트가 꺼지면 연결 거부(RST)가 아니라 무응답이다 — 이 값이 없으면 호출마다 "
-            "read 상한까지 기다린다. env ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS``."
+            "호스트(odroid)에 있어 그 호스트가 꺼지면 연결 거부(RST)가 아니라 무응답이다 — "
+            "이 값이 없으면 호출마다 read 상한까지 기다린다. "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS``."
         ),
     )
     kor_travel_geo_preflight_required: bool = Field(
