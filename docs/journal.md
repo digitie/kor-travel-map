@@ -1,3 +1,19 @@
+## 2026-10-16 — `docker-buildx.sh`의 `$!` 경주(고아 tar writer): 브랜치 `fix/buildx-archive-pid-race`
+
+- **무엇이었나.** `test_buildx_cleans_partial_archive_when_materialization_is_terminated`가 n150에서 멈췄다 — 테스트의
+  가짜 `git archive`(무한 루프)가 고아로 남아 97% CPU로 2시간 49분 돌았다. **flake가 아니라 경주다.**
+  `git archive … &`가 fork된 직후 `archive_pid="$!"`가 실행되기 전에 TERM이 오면 trap이 먼저 돌고, 그때 변수가 비어
+  있어 정리가 writer를 죽이지 못한다. 부하가 큰 n150에서만 그 창이 열렸다. #1325~#1327 PR 본문에서 이 실패를
+  "n150 부하성 flake"로 부른 것은 틀렸다(각 PR에 정정 코멘트). 같은 실행에서 함께 실패한
+  `test_lifecycle_preserves_signal_exit_status[INT-130]`은 다른 원인이다 — 하네스를 `nohup … &`로 띄워 SIGINT가
+  ignored-at-entry로 상속됐고 bash는 그 신호를 다시 trap하지 못한다(이 저널의 기존 "환경 실패" 판정이 맞다).
+- **고친 것.** 정리는 `$!`를 담은 변수가 아니라 bash job 표(`jobs -p`)로 writer를 찾는다 — job 표는 fork와 같은
+  명령 안에서 채워지고 trap은 명령 사이에서만 돌므로 창이 없다. 테스트의 가짜 writer는 부모가 사라지거나 30초가
+  지나면 스스로 끝나고, 그렇게 끝났으면(아무도 죽이지 않았으면) 표식을 남겨 테스트가 **고아였음**을 단언한다.
+  `pytest-timeout`을 dev 의존성에 더하고 두 테스트에 `timeout(60)`을 건다.
+- **결정적 재현.** 스크립트 사본에서 fork 줄 바로 뒤에 `kill -TERM $$`를 넣어 경주 창을 매번 연다
+  (`test_buildx_reaps_the_writer_even_when_term_lands_before_the_pid_is_recorded`). 옛 정리로 돌리면 빨갛다.
+
 ## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
 
 - **무엇.** 팩토리 `fetch_current_dataset`(geocoding — CLI가 dagster를 import할 수 없어 여기), Dagster resource

@@ -63,12 +63,18 @@ fi
 # ignored 파일 혼입과 세 순차 build 사이의 TOCTOU를 함께 차단한다. directory에 풀지 않고
 # 단일 tar를 세 build의 stdin으로 재사용해 materialize 도중 취소와 writer의 cleanup 경합도 없앤다.
 BUILD_CONTEXT_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kor-travel-map-buildx.XXXXXX.tar")"
-archive_pid=""
+# writer 정리는 `$!`를 대입한 변수가 아니라 bash의 job 표(`jobs -p`)로 한다. `git archive … &`가 fork된
+# 직후, `archive_pid="$!"`가 실행되기 **전에** TERM이 오면 trap이 먼저 돈다 — 변수는 아직 비어 있어
+# writer가 고아로 남는다(부하 중 n150에서 실제로 났다: 테스트의 가짜 git이 몇 시간 CPU를 썼다).
+# job 표는 fork와 같은 명령 안에서 채워지고 trap은 명령 사이에서만 돌므로 이 경주가 없다.
 cleanup() {
-  if [[ -n "$archive_pid" ]]; then
-    kill "$archive_pid" >/dev/null 2>&1 || true
-    wait "$archive_pid" >/dev/null 2>&1 || true
-    archive_pid=""
+  local writers
+  writers="$(jobs -p)"
+  if [[ -n "$writers" ]]; then
+    # shellcheck disable=SC2086 # pid 목록을 낱개 인자로 넘긴다.
+    kill $writers >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086
+    wait $writers >/dev/null 2>&1 || true
   fi
   rm -f -- "$BUILD_CONTEXT_ARCHIVE"
 }
@@ -76,13 +82,11 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 git archive --format=tar "$GIT_REVISION" >"$BUILD_CONTEXT_ARCHIVE" &
-archive_pid="$!"
-if wait "$archive_pid"; then
+if wait "$!"; then
   archive_status=0
 else
   archive_status="$?"
 fi
-archive_pid=""
 trap - INT TERM
 if [[ "$archive_status" -ne 0 ]]; then
   echo "failed to materialize the exact Git revision build context" >&2
