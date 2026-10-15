@@ -2494,11 +2494,11 @@ ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps
 - 이 task에서 provider 모듈·`Address`·`ReverseGeocoder` diff 0.
 - 구현 메모(2026-10-15, 브랜치 `feat/t-gr-01-geocode-stamps`): 설계 §2의 시그니처와 다르게 쓴 것 — (1) `decide_outcome(
   geo_applied, *, has_coord, provider_code_present, legal_dong_code_present, evidence)`: 판정 표 ④의 "법정동코드가 생겼다"를
-  입력으로 받아야 해서 `legal_dong_code_present`를 더했고, MOIS evidence는 `AdminEvidence`를 바꾸지 않으려고(T-GR-03의
-  `geocode_attempted` 1필드 전) `dto/geo_dataset.py`의 `GeoAttemptEvidence{reverse_attempted, geocode_attempted,
-  geocode_obtained_code}`로 받는다(T-GR-03이 `AdminEvidence`에서 만든다). (2) `upsert_stamps(session, *, current, outcomes)`:
+  입력으로 받아야 해서 `legal_dong_code_present`를 더했고, MOIS evidence는 `AdminEvidence`를 바꾸지 않으려고 `dto/geo_dataset.py`의
+  `GeoAttemptEvidence{reverse_attempted, geocode_obtained_code}`로 받는다(T-GR-03이 `AdminEvidence`와 geocode 분기
+  결과에서 만든다 — '받았다'가 '시도했다'를 함의하므로 `geocode_attempted`는 판정에 필요 없어 두지 않는다). (2) `upsert_stamps(session, *, current, outcomes)`:
   run 토큰을 인자로 받아 None·`data_token` None이면 0건(쓰지도 덮지도 않음)을 함수가 강제한다. (3) `coverage()`는
-  `excluded_by_skip`이 408의 계획 표에 기대므로 T-GR-04로 미룬다. (4) 토큰 형식 CHECK(`dv1-`/`dd1-` + 32 hex)를
+  `excluded_by_skip`이 408의 계획 표에 기대므로 T-GR-04로 미룬다. (3b) `select_stale_feature_ids`에 keyset 커서 `after`(`feature_id > after`)를 더했다(T-GR-04 페이지용). (4) 토큰 형식 CHECK(`dv1-`/`dd1-` + 32 hex)를
   407에 더했다 — 틀린 값이 비교 키가 되면 모든 행이 영구 stale이다. (5) 407은 forward-only다(`alembic/env.py`가 모든
   downgrade를 해석 전에 거부한다 — ADR-021·102). 왕복 확인은 scratch DB에서 손으로 했다(406까지 올림 → head →
   역 SQL로 표·CHECK 원복 + `alembic_version`=406 → 다시 head, PR 본문).
@@ -2575,7 +2575,9 @@ ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`lo
 
 ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일: `alembic/versions/408_kor_travel_geo_releases.py`,
 `alembic/head-schema.sql`, `infra/models.py`, `infra/geo_release_repo.py`(신규 — `plan_geo_release`·
-`run_config_for_dataset`·항목 전이·`coverage` 호출·`complete_plan`), `src/kortravelmap/core/feature_operation.py`
+`run_config_for_dataset`·항목 전이·`coverage` 호출·`complete_plan`), `infra/feature_geocode_stamp_repo.py`(`coverage()`
+신규 — T-GR-01에서 이월; `select_stale_feature_ids(after=)` 호출자를 geo 의존 dataset으로 한정),
+`src/kortravelmap/core/feature_operation.py`
 (`GEO_DEPENDENT_OPERATION_KEYS` — `DEDICATED_JOB_ONLY_OPERATION_KEYS` :33-41 옆, 런타임 정본),
 `tests/lint/test_geo_heavy_assets_declare_the_pool.py`(AST 유도 집합 == 상수 단언 추가 — pool 술어 `_passes_reverse_geocoder`
 :81-87은 **불변**(pool 필요 집합 ≠ geo 의존 집합, 과결박 회피); 별도 ① `_passes_geo_callable`(`reverse_geocoder=` 또는
@@ -2644,7 +2646,7 @@ ADR-109 결정 8(UI). 수정 파일: `packages/kor-travel-map-admin/frontend/src
 구현 뒤 문서 — 설계 §11 T-GR-07의 문서 항목 중 ADR·etl·integration-map·원장은 PR-0(이 PR)가 선반영했고 남은 것만
 여기(§T-GR-00 범위 메모). 수정 파일: `docs/adr/109-geo-release-regeocode.md`(상태 accepted, 열린 결정의 결론 반영),
 `docs/runbooks/geo-release-regeocode.md`(신규 1쪽: 흐름도, 배포 순서 geo backfill → PinVi 재vendor → Map pair →
-Manager `dagster.yaml` concierge lane(concierge ADR-49 refresh job용, Map 변경 아님 — ADR-109 결정 5.4) → concierge(설계 §9), "재빌드인데 왜 첫 tick에 전량이 도는가" FAQ, `data_token` 없음 빨간 Skip 대응, `run_not_launched`/`no_progress`
+Manager `dagster.yaml` concierge lane(concierge ADR-49 refresh job용, Map 변경 아님 — ADR-109 결정 5.4) → concierge(설계 §9), "첫 토큰은 왜 계획 0건인가(기준선, 소유자 결정 2026-10-15)" FAQ, `data_token` 없음 빨간 Skip 대응, `run_not_launched`/`no_progress`
 대응, 큐 worker 겹침, 검증 지표, 롤백 A→B→A가 새 `plan_seq`로 도는 이유), `CHANGELOG.md`(`### geo 릴리스 재지오코딩
 (2026-10-xx, ADR-109)`), `docs/etl/address-geocoding.md`·`integration-map.md`·`mois-license-feature-etl.md`·
 `concierge-feature-etl.md`·`feature-id-determinism.md`·ADR-108의 "계획/미구현" 표식 제거, `docs/tasks.md`/

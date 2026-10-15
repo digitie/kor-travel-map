@@ -64,17 +64,22 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 NOT NULL, reverse_outcome text CHECK IN (called, geocoded, not_called), stamped_at timestamptz NOT NULL)` +
 `INDEX (geo_data_token)`. NULL 토큰 스탬프는 만들지 않는다(ADR-109 결정 1 — run 토큰이 없으면 쓰지도 덮지도 않는다;
 `not_called`도 토큰을 가진다). migration `407_feature_geocode_stamps`
-(직전 head `405_mois_freshness_sla`; `SET ROLE ktm_feature_schema_owner` 아래 DDL, `OWNER TO`, RESET ROLE 없음,
+(직전 head `406_feature_write_gate`(ADR-111); forward-only; 토큰 형식 CHECK `dv1-`/`dd1-` + 32 hex; `SET ROLE ktm_feature_schema_owner` 아래 DDL, `OWNER TO`, RESET ROLE 없음,
 receipt head CHECK에 407 추가; lint 4종 `tests/lint/test_migrations_keep_the_schema_owner_role.py`·
 `test_routine_ddl_runs_under_its_owner_role.py`·`test_receipt_head_check_covers_the_graph_head.py`·
 `test_migration_revision_ids_fit_the_version_column.py`). ORM `infra/models.py` `FeatureGeocodeStampRow`.
 
-repo `infra/feature_geocode_stamp_repo.py`: `upsert_stamps(session, rows)`, `is_stale(session, feature_id,
-current_data_token)`, `select_stale_feature_ids(session, current_data_token, *, provider_dataset_id, limit)`,
-`coverage(session, current_data_token, *, provider_dataset_ids) -> {total_provider_with_coord, stamped_current,
-stamped_other, unstamped, not_called_by_kind, excluded_by_skip, unstamped_non_provider}`, `decide_outcome(geo_applied,
-coord, provider_code_present, evidence)`. 분모 `total_provider_with_coord`는 **인자로 받은 dataset에 primary
-source_link를 가진 좌표 보유 활성 feature**다.
+repo `infra/feature_geocode_stamp_repo.py`(T-GR-01 구현): `upsert_stamps(session, *, current: DatasetRef | None,
+outcomes: Mapping[feature_id, ReverseOutcome]) -> int`(current 또는 `current.data_token`이 None이면 0건 — 쓰지도 덮지도
+않는다), `get_stamp(session, feature_id)`, `is_stale(session, feature_id, current_data_token)`,
+`select_stale_feature_ids(session, current_data_token, *, provider_dataset_id, limit, after=None)`(`feature_id > after`
+keyset 페이지; **호출자가 geo 의존 dataset으로 한정**한다 — T-GR-04 `GEO_DEPENDENT_OPERATION_KEYS`),
+`decide_outcome(geo_applied, *, has_coord, provider_code_present, legal_dong_code_present, evidence:
+GeoAttemptEvidence | None) -> ReverseOutcome | None`. **T-GR-04가 더한다**: `coverage(session, current_data_token, *,
+provider_dataset_ids) -> {total_provider_with_coord, stamped_current, stamped_other, unstamped, not_called_by_kind,
+excluded_by_skip, unstamped_non_provider}` — 분모 `total_provider_with_coord`는 **인자로 받은 dataset에 primary
+source_link를 가진 좌표 보유 활성 feature**다(`excluded_by_skip`이 408 계획 표에 기대므로 T-GR-01에서 미뤘다).
+인덱스 `idx_feature_geocode_stamps_data_token`은 T-GR-04 `coverage`의 토큰 동등 계수용이다.
 
 **outcome 판정 표(`decide_outcome`).** 입력은 호출자의 run 신호 `GeoApplied{reverse, geocode}`
 (`src/kortravelmap/dto/geo_dataset.py`) + 행 사실. **위에서 아래로 처음 맞는 행이 답이다**(평가 순서가 규칙이다 —
@@ -84,7 +89,7 @@ ADR-109 결정 3). "reverse를 불렀다"는 입력이 갖춰졌다는 뜻이지
 | 순서 | 조건 | outcome |
 |---|---|---|
 | ① | `geo_applied.reverse=False and geocode=False`(price/notice asset) | **스탬프 없음** |
-| ② | MOIS(**행별** 변환 evidence로 정하고 chunk commit 안에서 bulk upsert): `AdminEvidence.reverse_attempted` → `called`; 아니고 `geocode_attempted`(신규 1필드, `mois.py:721-730` 분기)이면서 `bjd_code`를 받았으면 → `geocoded`; 그 외(payload bjd 행, geocode 시도 실패 행) → `not_called` — ④와 같은 결과 기준 | evidence 기준 |
+| ② | MOIS(**행별** 변환 evidence로 정하고 chunk commit 안에서 bulk upsert): 입력은 `GeoAttemptEvidence{reverse_attempted, geocode_obtained_code}`(`dto/geo_dataset.py` — T-GR-03이 `AdminEvidence.reverse_attempted`와 `mois.py:721-730` geocode 분기의 결과로 만든다). `reverse_attempted` → `called`; 아니고 `geocode_obtained_code`(geocode로 `bjd_code`를 받았다) → `geocoded`; 그 외(payload bjd 행, geocode 시도 실패 행) → `not_called` — ④와 같은 결과 기준 | evidence 기준 |
 | ③ | `geo_applied.reverse=True and coord IS NOT NULL`(reverse를 불렀다 — payload 코드를 썼어도 geo가 명칭·우편번호·도로명코드를 채우므로 비교 대상; concierge 포함) | `called` |
 | ④ | `geo_applied.geocode=True and coord IS NULL and legal_dong_code IS NOT NULL and provider 코드 없음` | `geocoded` |
 | ⑤ | 그 외(provider 코드만 썼고 geo 유도 값 0개 — 좌표 없는 concierge payload 코드 행; 좌표·주소 둘 다 없는 행; 좌표 없이 geocode를 시도했으나 코드를 못 받은 행 — 릴리스 재해석 대상 아님, ADR-109 열린 결정 1) | `not_called` |
@@ -225,8 +230,9 @@ replay면 `provider_dataset_id` 단위 keyset으로 entity head의 current `sour
 스탬프 없는 payload-bjd 행은 replay에 포함되어 reverse 없이 변환되고 `not_called` 스탬프만 받는다(geo 0회).
 `fetched_at`은 원 레코드 값 → `became_current` 항상 False.
 
-**롤아웃 첫 tick**: 커서·스탬프가 비어 있으므로 `data_token`이 이미 있어도 전 geo-의존 dataset 계획 1회가
-생긴다(`stamp is None` = stale). 값 동일 행은 무쓰기라 ETag·seal 불변. 배포 순서(geo backfill → PinVi
+**롤아웃 첫 tick**: ~~커서·스탬프가 비어 있으므로 전 geo-의존 dataset 계획 1회가 생긴다~~ — **소유자 결정
+(2026-10-15, ADR-109 결정 5.1)**: 커서가 빈 첫 관측 토큰은 **기준선**으로 기록하고 계획 0건이다. 스탬프 없는 행은
+평소 적재가 채운다(`stamp is None` = stale은 적재 경로 규칙). 아래 문장은 기준선 이후 토큰이 바뀐 릴리스에 대한 것이다. 값 동일 행은 무쓰기라 ETag·seal 불변. 배포 순서(geo backfill → PinVi
 재vendor → Map pair → Manager `dagster.yaml` concierge lane(concierge ADR-49 `concierge_admin_region_refresh` job용 —
 Map 변경 아님, ADR-109 결정 5.4) → concierge; 설계 §9)와 무관하게 1회 든다 — geo
 backfill 전에 Map을 배포하면 Skip만 하고(계획 0) backfill 뒤 같은 계획이 생긴다(지연만; ADR-109 열린 결정 8).

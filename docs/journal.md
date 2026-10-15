@@ -11,6 +11,13 @@
   토큰 형식 CHECK, endpoint 단위 빈 답 계수. 407은 forward-only다 — 처음에 실제 downgrade와 왕복 테스트를
   넣었으나 `alembic/env.py`가 모든 downgrade를 해석 전에 거부해(ADR-021·102) 빨갰다. 정책을 따르고 왕복은 scratch
   DB에서 손으로 확인했다(PR 본문).
+- **리뷰 반영(1·2차, main `6e1eb9ed` 위로 리베이스).** ADR-109의 자기모순(결과 "부정·비용"의 롤아웃 첫 tick 전량 계획,
+  열린 결정 8)을 소유자 결정(첫 토큰 = 기준선)으로 고쳤고 커서 정의를 "계획했거나 기준선으로 기록한 토큰"으로,
+  ADR-110 결정 6·단계 9의 "풀로드 → 센서 계획 1건"을 "커서가 비면 기준선·0건, 그 뒤의 풀로드만 계획"으로 고쳤다.
+  `select_stale_feature_ids`에 keyset 커서 `after`(호출자가 geo 의존 dataset으로 한정 — T-GR-04), `GeoAttemptEvidence`의
+  `geocode_attempted` 삭제('받았다'가 '시도했다'를 함의 — 판정에 안 쓰이는 필드), `address-geocoding.md` §2 시그니처를
+  구현에 맞춤, T-GR-04 acceptance 수정 파일에 스탬프 repo(`coverage()`). 테스트: ①→② 순서·④의 geocode run 조건·
+  덮어쓰기의 version token·keyset 페이지.
 - **게이트.** 통합: NULL·형식 위반 토큰은 outcome 셋 모두 DB가 거부, 토큰 없음 = 0건, stale 5분기와 "현재 토큰 None →
   0건", primary 링크·활성·dataset 범위, 런타임 role 쓰기·읽기, CASCADE. 단위: 응답 `dataset`
   있음/없음/형식 위반, `dataset_version()` 경로·본문 `{}`·`available=false`·계약 위반 typed 오류, 빈 답 계수(reverse 6 =

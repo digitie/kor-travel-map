@@ -268,6 +268,16 @@ _NONE = GeoApplied(reverse=False, geocode=False)
     [
         # ① price/notice — 스탬프 없음(좌표가 있어도)
         ("1-no-geo", {"geo_applied": _NONE, "has_coord": True}, None),
+        # ①이 ②보다 먼저 — geo를 넘기지 않은 run이면 행 evidence가 있어도 스탬프 없음
+        (
+            "1-before-2",
+            {
+                "geo_applied": _NONE,
+                "has_coord": True,
+                "evidence": GeoAttemptEvidence(reverse_attempted=True),
+            },
+            None,
+        ),
         # ② MOIS evidence — reverse 시도 → called(좌표 없음 신호와 무관)
         (
             "2-mois-reverse",
@@ -286,7 +296,7 @@ _NONE = GeoApplied(reverse=False, geocode=False)
                 "geo_applied": _BOTH,
                 "has_coord": False,
                 "evidence": GeoAttemptEvidence(
-                    reverse_attempted=False, geocode_attempted=True, geocode_obtained_code=True
+                    reverse_attempted=False, geocode_obtained_code=True
                 ),
             },
             "geocoded",
@@ -298,7 +308,7 @@ _NONE = GeoApplied(reverse=False, geocode=False)
                 "geo_applied": _BOTH,
                 "has_coord": False,
                 "legal_dong_code_present": True,
-                "evidence": GeoAttemptEvidence(reverse_attempted=False, geocode_attempted=True),
+                "evidence": GeoAttemptEvidence(reverse_attempted=False),
             },
             "not_called",
         ),
@@ -320,9 +330,10 @@ _NONE = GeoApplied(reverse=False, geocode=False)
             {"geo_applied": _REVERSE_ONLY, "has_coord": True, "provider_code_present": True},
             "called",
         ),
-        # ③이 ④보다 먼저 — 좌표 있고 geocode로 코드가 채워져도 called
+        # ③ — 좌표가 있으면 reverse가 비어 geocode가 코드를 채운 행도 called(③과 ④는 좌표
+        #   유무로 서로소라 둘 사이 순서는 의미가 없다; 규칙의 이름이 이 행을 정한다)
         (
-            "3-before-4",
+            "3-coord-row-even-if-geocode-filled",
             {"geo_applied": _BOTH, "has_coord": True, "legal_dong_code_present": True},
             "called",
         ),
@@ -345,6 +356,12 @@ _NONE = GeoApplied(reverse=False, geocode=False)
         ),
         # ⑤ 좌표·코드 둘 다 없음 → not_called
         ("5-nothing", {"geo_applied": _BOTH, "has_coord": False}, "not_called"),
+        # ④는 geocode를 넘긴 run에서만 — reverse만 넘긴 run이면 좌표 없이 코드가 있어도 not_called
+        (
+            "4-requires-geocode-run",
+            {"geo_applied": _REVERSE_ONLY, "has_coord": False, "legal_dong_code_present": True},
+            "not_called",
+        ),
         # ⑤ reverse만 넘긴 run의 좌표 없는 행 → not_called
         (
             "5-reverse-run-no-coord",

@@ -245,7 +245,9 @@ odroid transport **API gateway `12301`**이 `/v1/service/exports/*`를 n150 LAN 
   (T-GR-05, 배포돼 있을 때)가 전량 재계획을 만든다. **수용을 추천한다**(설계 §14-19 — 소유자 결정 대기, 열린 결정 2):
   새 소스로 적재했으면 재지오코딩이 정확성상 옳다. 수용(추천)을 고르면 단계 9는 geo `mv_refresh` 완료 **다음 날**,
   geo 야간 job 창 밖에서 실행하고 운영자 UI의 계획 skip은 쓰지 않는다. 수용하지 않으면 운영자 UI skip이 그 자리이고,
-  n150 dump **복원**이면 토큰이 같아 재계획 자체가 0이다(적재 방식은 geo ADR-070 몫).
+  n150 dump **복원**이면 토큰이 같아 재계획 자체가 0이다(적재 방식은 geo ADR-070 몫). **2026-10-15 소유자 결정
+  (ADR-109 결정 5.1)**: Map 커서가 비어 있을 때 처음 관측한 토큰은 풀로드든 복원이든 **기준선**이라 계획 0건이다 —
+  위 "풀로드 → 전량 재계획"은 Map이 이미 토큰을 기준선으로 가진 뒤의 풀로드에만 적용된다.
 
 ### 7. 전환 절차에서 Map이 하는 일(설계 §11.2 발췌)
 
@@ -256,7 +258,7 @@ odroid transport **API gateway `12301`**이 `/v1/service/exports/*`를 n150 LAN 
 | 5 | transport 플립 뒤 n150 `ensure map` — Map target **전 서비스** 재생성(compose 기본값이 바뀐 파생물이지 `.env` 편집이 아니다) | 옛 transport URL을 든 Map 컨테이너 0개(`docker inspect` env 대조); n150 transport backend stop 상태에서 Map export 1회 성공; odroid access log peer = n150 LAN 주소 |
 | 8a/8b(외부: Manager·geo — §3.2 메모리 조건 통과 시만) | geo 플립 PR + n150 재설치 + n150 geo cs stop(8a) → odroid 소스 반입·`ensure geo`·풀로드(또는 dump 복원)·`mv_refresh`·키 정책 적용(8b). Map 저장소 변경 없음 | **단계 9의 선행 조건** — odroid plane healthy ∧ `/v2/reverse` smoke ∧ 풀로드 run SUCCESS·`mv_refresh` 완료 ∧ 키 정책 적용 완료(열린 결정 3 — 발급 키면 Map 소비자 키 재발급까지) |
 | 9-전(선택) | geo 플립 PR **전**, n150 geo-api가 살아 있을 때 n150에서 `curl --interface <n150 LAN 주소> http://<n150 LAN 주소>:12501/v2/reverse …`(키 헤더 포함) smoke — 키는 오늘도 대조되므로(컨텍스트 4) "면제 아님"을 확인하는 게 아니라 LAN 인터페이스 경유 경로를 미리 한 번 보는 것뿐이다. geo-api가 n150 LAN 인터페이스에서 들리는 이유는 host network + `KTG_API_HOST: 0.0.0.0`(Manager compose `:1089`@08a515e; `ports:`는 host 모드에서 무시된다, compose 머리말 `:3-5`) | 200. 401이면 Map 키 자체가 무효(재발급 — 결정 4 (a)) |
-| 9 | geo 플립 뒤(mv_refresh 다음 날) n150 `ensure map` — Map target **전 서비스** 재생성, 풀로드였으면 root `.env` geo 키 재발급·재적용(결정 4 (a)), BFF 경로(결정 2) | 옛 geo URL/키를 든 Map 컨테이너 0개(`docker inspect` env 대조); n150 geo-api stop 상태에서 Map geocode e2e **키 경로 200**; Track 1 효과는 **분기** — 풀로드 + 수용(열린 결정 2)이고 T-GR-05 센서가 배포돼 있으면 센서 계획 1건 생성 / dump 복원이면 계획 **0건이 정답** / 센서 미배포면 해당 없음(토큰 변화만 `POST /v2/dataset/version`으로 기록) |
+| 9 | geo 플립 뒤(mv_refresh 다음 날) n150 `ensure map` — Map target **전 서비스** 재생성, 풀로드였으면 root `.env` geo 키 재발급·재적용(결정 4 (a)), BFF 경로(결정 2) | 옛 geo URL/키를 든 Map 컨테이너 0개(`docker inspect` env 대조); n150 geo-api stop 상태에서 Map geocode e2e **키 경로 200**; Track 1 효과는 **분기** — Map 커서가 비어 있으면(첫 토큰) 풀로드든 복원이든 **기준선 기록·계획 0건**(소유자 결정 2026-10-15, ADR-109 결정 5.1) / 기준선 이후의 풀로드 + 수용(열린 결정 2)이고 T-GR-05 센서가 배포돼 있으면 센서 계획 1건 생성 / dump 복원이면 계획 **0건이 정답** / 센서 미배포면 해당 없음(토큰 변화만 `POST /v2/dataset/version`으로 기록) |
 | drill | odroid 전원 off(T-MAP-02 배포 뒤 검증 행 — 측정 시각·배포 generation 기록; T-MAP-02 종결 조건은 아니다) | MOIS run이 예산 10 % 안에 FAILURE |
 | 11 | n150 해체 뒤 | `ensure map` 성공, n150에 geo/transport 컨테이너 0개 |
 

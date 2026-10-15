@@ -37,10 +37,11 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 VERSION = "dv1-" + "a" * 32
+OLD_VERSION = "dv1-" + "b" * 32
 CURRENT = "dd1-" + "1" * 32
 OLD = "dd1-" + "0" * 32
 CURRENT_REF = DatasetRef(version_token=VERSION, data_token=CURRENT)
-OLD_REF = DatasetRef(version_token=VERSION, data_token=OLD)
+OLD_REF = DatasetRef(version_token=OLD_VERSION, data_token=OLD)
 
 _INSERT_FEATURE = text(
     """
@@ -182,7 +183,11 @@ async def test_upsert_overwrites_the_previous_stamp(migrated_session: AsyncSessi
     ) == 1
     stamp = await get_stamp(migrated_session, feature_id)
     assert stamp is not None
-    assert (stamp.geo_data_token, stamp.reverse_outcome) == (CURRENT, "geocoded")
+    assert (stamp.geo_version_token, stamp.geo_data_token, stamp.reverse_outcome) == (
+        VERSION,
+        CURRENT,
+        "geocoded",
+    )
 
 
 async def _five_branches(session: AsyncSession, dataset_id: int) -> dict[str, str]:
@@ -250,6 +255,27 @@ async def test_select_stale_matches_is_stale_and_scopes_to_the_dataset(
         migrated_session, CURRENT, provider_dataset_id=dataset_id, limit=1
     )
     assert len(limited) == 1
+
+
+async def test_select_stale_pages_by_feature_id_cursor(migrated_session: AsyncSession) -> None:
+    """keyset 페이지(``after``)가 이 검사가 만든 stale 행을 빠짐없이·겹침 없이 오름차순으로 돈다."""
+    dataset_id, _ = await _dataset_ids(migrated_session)
+    mine = {await _feature(migrated_session, dataset_id=dataset_id) for _ in range(5)}
+    seen: list[str] = []
+    after: str | None = None
+    while True:
+        page = await select_stale_feature_ids(
+            migrated_session, CURRENT, provider_dataset_id=dataset_id, limit=2, after=after
+        )
+        if not page:
+            break
+        assert len(page) <= 2
+        assert after is None or all(uuid.UUID(item) > uuid.UUID(after) for item in page)
+        seen.extend(page)
+        after = page[-1]
+    assert seen == sorted(seen, key=uuid.UUID)
+    assert len(seen) == len(set(seen))
+    assert mine <= set(seen)
 
 
 async def test_no_current_token_means_zero_stale(migrated_session: AsyncSession) -> None:

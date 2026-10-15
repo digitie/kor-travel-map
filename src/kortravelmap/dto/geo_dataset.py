@@ -63,11 +63,12 @@ class GeoAttemptEvidence(BaseModel):
     """행 단위 geo 시도 증거(MOIS 판정 표 ②).
 
     ``geocode_obtained_code``는 geocode를 시도해 법정동코드를 **받았는가**다 — 시도만 하고 못 받은
-    행은 geo 유도 값이 0개라 ``not_called``다(판정 표 ④와 같은 결과 기준).
+    행은 geo 유도 값이 0개라 ``not_called``다(판정 표 ④와 같은 결과 기준). "받았다"가 "시도했다"를
+    함의하므로 시도 여부는 따로 두지 않는다 — 판정에 쓰이지 않는 필드는 틀려도 아무것도
+    빨개지지 않는다.
     """
 
     model_config = ConfigDict(frozen=True)
 
     reverse_attempted: bool
-    geocode_attempted: bool = False
     geocode_obtained_code: bool = False

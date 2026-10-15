@@ -86,7 +86,7 @@ def decide_outcome(
     if evidence is not None:
         if evidence.reverse_attempted:
             return "called"
-        if evidence.geocode_attempted and evidence.geocode_obtained_code:
+        if evidence.geocode_obtained_code:
             return "geocoded"
         return "not_called"
     if geo_applied.reverse and has_coord:
@@ -160,6 +160,7 @@ SELECT feature.feature_id::text AS feature_id
            AND entity.provider_dataset_id = :provider_dataset_id
    )
    AND {_STALE_PREDICATE}
+   AND (CAST(:after AS uuid) IS NULL OR feature.feature_id > CAST(:after AS uuid))
  ORDER BY feature.feature_id
  LIMIT :limit
 """
@@ -233,8 +234,17 @@ async def select_stale_feature_ids(
     *,
     provider_dataset_id: int,
     limit: int,
+    after: str | None = None,
 ) -> list[str]:
-    """provider dataset의 stale Feature id(정렬, ``limit`` 상한). 현재 토큰이 None이면 빈 목록."""
+    """provider dataset의 stale Feature id — ``feature_id`` 오름차순, ``limit`` 상한.
+
+    현재 토큰이 None이면 빈 목록이다. 페이지는 keyset이다 — 앞 페이지의 마지막 id를 ``after``로
+    넘기면 ``feature_id > after``부터 이어진다(OFFSET 없음).
+
+    **호출자가 geo를 쓰는 dataset으로 한정한다.** 이 함수는 dataset이 geo 의존인지 보지 않는다 —
+    price/notice처럼 geo를 쓰지 않는 dataset은 스탬프가 영영 없으므로 전 행이 "stale"로 나온다.
+    한정의 정본은 T-GR-04의 ``GEO_DEPENDENT_OPERATION_KEYS``다.
+    """
     if current_data_token is None:
         return []
     if limit <= 0:
@@ -245,6 +255,7 @@ async def select_stale_feature_ids(
             "current_data_token": current_data_token,
             "provider_dataset_id": provider_dataset_id,
             "limit": limit,
+            "after": after,
         },
     )
     return [str(feature_id) for feature_id in rows.scalars().all()]

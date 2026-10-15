@@ -11,7 +11,7 @@
 - amended by: **ADR-110**(proposed, 2026-10-13) — `GEO_HEAVY_POOL` 유지 근거('n150 디스크 대기' → 'odroid geo CPU
   보호')와 geo 호스트 플립(odroid 풀로드) 직후 센서가 만드는 전량 재계획 비용·센서/재지오코딩의 LAN 키 경로. 본 ADR의
   결정 자체는 바뀌지 않는다. 2026-10-15 갱신: geo 플립은 2026-10-14~15 실행됐고 본 ADR의 센서(T-GR-05)가 미배포라
-  전량 재계획은 생기지 않았다(ADR-110 사실 갱신 절 5). **소유자 결정(2026-10-15)**: geo `data_token`이 '없음'에서 첫
+  전량 재계획은 생기지 않았다(ADR-110 "사실 갱신 (2026-10-15)" 절 5항 (ㄹ)). **소유자 결정(2026-10-15)**: geo `data_token`이 '없음'에서 첫
   토큰으로 바뀌는 것(n150 geo는 토큰이 없었고 odroid dump 복원 뒤 처음 생겼다)은 **기준선**이지 재계획 사유가 아니다 —
   감지 규칙(결정 5)에 이 분기를 더하는 것은 T-GR-04/05 구현 몫이다.
 - 코딩용 상세(표·판정 표·run_key·테스트 목록): [`docs/etl/address-geocoding.md`](../etl/address-geocoding.md)
@@ -190,10 +190,10 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
 1. **감지.** `dataset_version()` → `current`. HTTP 실패·`available=false` → `SkipReason`(커서 불변).
    **`data_token`이 None이면 계획을 만들지 않고 빨간 사유로 Skip한다**(geo 지문 backfill/복구 필요).
    `version_token` 대체 비교는 두지 않는다 — 그 계획은 결정 4의 `stale` 규칙상 행을 하나도 고르지 않아
-   쿼터·시간만 쓴다. 커서 = 마지막으로 계획을 만든 `data_token`; 같으면(재빌드) 계획 0건.
+   쿼터·시간만 쓴다. 커서 = 마지막으로 계획했거나 기준선으로 기록한 `data_token`; 같으면(재빌드) 계획 0건.
    **소유자 결정(2026-10-15) — 첫 토큰은 기준선이다.** 소비자가 `data_token`이 '없음'에서 **첫** 토큰으로
    바뀌는 것을 보면(커서가 비어 있다 — n150 geo는 토큰을 가진 적이 없고, odroid는 n150 dump 복원 뒤 처음
-   토큰을 저장했다; ADR-110 사실 갱신 절 5) 그 토큰을 커서에 **기준선**으로 기록하고 계획을 만들지 않는다.
+   토큰을 저장했다; ADR-110 "사실 갱신 (2026-10-15)" 절 5항 (ㄹ)) 그 토큰을 커서에 **기준선**으로 기록하고 계획을 만들지 않는다.
    재계획은 기준선 이후 토큰이 **바뀔 때**만이다. 스탬프 없는 행은 평소 적재가 채운다(결정 4 — 스탬프 부재 =
    stale은 적재 경로의 규칙이고 센서 계획의 근거가 아니다). 구현은 T-GR-04/05.
 2. **계획 identity = `plan_id` surrogate + `(data_token, plan_seq)`.** 표 `ops.kor_travel_geo_releases`
@@ -285,9 +285,12 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
 - **긍정.** 재빌드(토큰 동일)는 계획 0건. 값이 바뀐 행만 `row_revision`이 전진해 ETag·seal·cache target
   무효화가 기존 기제로 전파된다. provider 변환이 단일 정본으로 남는다. replay 모드는 provider HTTP 0회.
   새 pool·태그·Manager 변경 없음. `openapi.user/service.json` 불변.
-- **부정·비용.** 롤아웃 첫 tick은 스탬프가 비어 있으므로 **전 geo-의존 dataset의 전량 계획 1회**가
-  배포 순서와 무관하게 반드시 발생한다(비-MOIS는 prod 좌표 보유 활성 35,754행 × reverse p50 86 ms ≈ 51 min
-  순차 하한; MOIS는 replay 수 run). 표 2개·마이그레이션 2개(407·408)·resource 2개·센서 1개·admin
+- **부정·비용.** ~~롤아웃 첫 tick은 스탬프가 비어 있으므로 전 geo-의존 dataset의 전량 계획 1회가 반드시
+  발생한다~~ — **소유자 결정(2026-10-15)으로 철회**: 커서가 빈 첫 tick은 관측 토큰을 기준선으로 기록할 뿐
+  계획을 만들지 않는다(결정 5.1). 스탬프는 평소 적재가 채운다 — 비-MOIS는 unchanged에도 reverse를 이미 부르므로
+  추가 geo 비용 0(스탬프 부재 = stale이라 적재 경로를 타되 값이 같으면 무쓰기, 결정 4), MOIS는 다음 run이 스탬프
+  없는 행을 1회 변환한다(ADR-108 재개형 chunk). 전량 **계획**은 기준선 이후 토큰이 바뀐 릴리스에서만 생긴다(비-MOIS
+  prod 좌표 보유 활성 35,754행 × reverse p50 86 ms ≈ 51 min 순차 하한; MOIS는 replay 수 run). 표 2개·마이그레이션 2개(407·408)·resource 2개·센서 1개·admin
   router 1개가 는다. 전용 job은 fetch 모드 provider의 월간 적재 1회분 쿼터를 더 쓴다(운영자가 항목 `skip`).
   재실행(attempt 2)은 쓰기만 건너뛰고 비-MOIS reverse는 전량 다시 부른다.
 - **잃는 것.** 행 단위 "어느 토큰으로 해석됐나"의 정밀도(run 단위로 대체; 불일치는 WARNING·재계획으로
@@ -309,9 +312,9 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
 6. geo-release run 한정 reverse timeout 1회 재시도(ADR-108 예외, 판별자 `geo_release_plan_id` 태그) 승인 vs 재시도
    없이 attempt 2로만 복구 — 승인 전에는 적용하지 않는다.
 7. task ID 접두사 `T-GR-NN`(임시 사용 중) vs `T-VN-GR-NN` vs 연번(`docs/tasks-rule.md` §3은 묶음 prefix 허용).
-8. 롤아웃 첫 tick 전량 1회 비용 승인(배포 순서와 무관하게 반드시 1회; geo 지문 backfill **전**에 Map을
-   배포하면 `data_token` 없음으로 **계획 없이 Skip만** 하고 backfill 뒤 같은 계획이 생긴다 — 추가 비용 0,
-   지연만. 이 과도기 동작 승인 포함); MOIS payload-bjd 행의 `not_called` 선채움(마이그레이션)은 **선택**이다 —
+8. ~~롤아웃 첫 tick 전량 1회 비용 승인~~ — **해소(소유자 결정 2026-10-15)**: 첫 토큰은 기준선이다(결정 5.1).
+   첫 tick은 계획을 만들지 않고, geo 지문이 없는 동안(`data_token` 없음)은 계획 없이 Skip한다 — 지문이 생긴 뒤
+   첫 관측도 기준선이다. 남는 것은 MOIS payload-bjd 행의 `not_called` 선채움(마이그레이션)이 **선택**이라는 점뿐이다 —
    결정 7대로 스탬프 없는 행이 replay에 포함되어 첫 run이 스탬프를 찍으므로, 선채움은 첫 run 시간 단축용일 뿐이다.
 9. 완료 판정(비-skipped `stamped_other + unstamped == 0`, 아니면 sweep 1회 뒤 `residual_stale` 기록·done) 승인.
 10. override 처리 = finding만(자동 적용 없음) 승인.

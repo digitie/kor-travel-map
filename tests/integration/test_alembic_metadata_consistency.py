@@ -375,4 +375,3 @@ async def test_downgrade_is_rejected_without_mutation(
         )
 
     assert await _raw_version(admin_dsn) == (_HEAD,)
-

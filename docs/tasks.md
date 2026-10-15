@@ -82,7 +82,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-GR-07 — **구현 반영 문서** (doc-only)
 
   구현 뒤 잔여만(ADR·etl·integration-map은 PR-0 선반영): ADR-109 accepted, runbook `docs/runbooks/geo-release-regeocode.md`
-  신규(§9 흐름·배포 순서·첫 tick 전량 FAQ), CHANGELOG, "계획" 표식 제거.
+  신규(§9 흐름·배포 순서·첫 토큰 기준선 FAQ), CHANGELOG, "계획" 표식 제거.
 
 - [ ] T-GR-08 — **replay 모드(쿼터 민감 dataset)**
 

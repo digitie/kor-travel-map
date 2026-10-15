@@ -22,7 +22,8 @@ Revises: 406_feature_write_gate
   비교 키로 들어가면 모든 행이 영구 stale이 된다.
 - ``reverse_outcome``은 ``called|geocoded|not_called`` 셋이다(판정 규칙은
   ``docs/etl/address-geocoding.md`` §2).
-- ``geo_data_token`` 인덱스 — 릴리스 계획(T-GR-04)이 "현재 토큰과 다른 행"을 고른다.
+- ``geo_data_token`` 인덱스 — T-GR-04 ``coverage()``의 토큰 **동등** 계수(``stamped_current``)용이다. stale 선택은
+  Feature 쪽에서 출발해 PK로 스탬프를 붙이므로 이 인덱스에 기대지 않는다.
 - 소유자 ``ktm_feature_schema_owner``. 런타임 권한은 이 마이그레이션이 아니라 배포 조정기
   (``infra/runtime_privileges.py`` ``_FEATURE_TABLE_PRIVILEGES``)가 건다.
 - receipt head CHECK에 이 revision을 더한다(401~406과 같은 계약).
