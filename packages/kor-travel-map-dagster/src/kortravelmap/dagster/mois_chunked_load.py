@@ -72,6 +72,7 @@ from .etl import (
     _normalize_address_validation_mode,
     load_feature_bundles_for_dagster,
 )
+from .geocode_ratio import GEOCODE_RATIO_MIN_SAMPLE, geocode_ratio_exceeded
 from .run_scope import map_owned_runs_filter
 from .validation import validate_feature_bundles_address
 
@@ -128,8 +129,8 @@ payload hash에서 파생되므로 payload가 바뀌면 표식이 저절로 맞�
 UNRESOLVABLE_MARKER_RETRY_DAYS: Final[int] = 30
 """표식이 이보다 오래 다시 관측되지 않았으면 믿지 않고 다시 지오코딩한다(geo 데이터 갱신 반영)."""
 
-GEOCODE_RATIO_MIN_SAMPLE: Final[int] = 50
-"""degraded 비율을 재기 시작하는 **지오코더로 보낸 행** 수(업종·run 각각)."""
+# degraded 비율을 재기 시작하는 **지오코더로 보낸 행** 수(업종·run 각각)와 비율 판정은
+# :mod:`.geocode_ratio`가 정본이다 — 비-MOIS 공통 적재 루프와 공유한다(ADR-109 결정 4).
 
 GEO_PASSING_TRIPS_DEGRADE: Final[int] = 3
 """같은 업종에서 "빈 답 문턱은 넘었지만 probe는 통과"가 이만큼 거듭되면 그 업종을 degraded로 본다.
@@ -660,9 +661,8 @@ async def load_mois_license_records_chunked(
                 _mark_degraded(slug, f"probe 통과 뒤에도 빈 답 문턱 초과 {slug_passing_trips}회")
         # 분모는 **지오코더로 보낸 행**이다 — 이미 적재돼 건너뛴 행으로 희석하면 정상 상태의
         # 지역 장애가 보이지 않는다(델타 리뷰 LOW-1).
-        if (
-            slug_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
-            and slug_geocode_empty > slug_geocoded * plan.geocode_degraded_ratio
+        if geocode_ratio_exceeded(
+            empty=slug_geocode_empty, total=slug_geocoded, ratio=plan.geocode_degraded_ratio
         ):
             _mark_degraded(slug, f"빈 답 {slug_geocode_empty}/{slug_geocoded}건 조회")
 
@@ -671,9 +671,8 @@ async def load_mois_license_records_chunked(
         context.log.info(f"MOIS 업종 {current_slug} 완료 ({len(slugs_completed)}개째)")
     # run 전체 상한 — 업종마다 표본이 모자라 업종 판정을 피한 작은 업종들의 빈 답도 센다.
     # 다른 업종이 이미 degraded여도 **언제나** 잰다 — 같은 지역 장애의 작은 업종들이 숨지 않게.
-    if (
-        run_geocoded >= GEOCODE_RATIO_MIN_SAMPLE
-        and run_geocode_empty > run_geocoded * plan.geocode_degraded_ratio
+    if geocode_ratio_exceeded(
+        empty=run_geocode_empty, total=run_geocoded, ratio=plan.geocode_degraded_ratio
     ):
         _mark_degraded("(run)", f"빈 답 {run_geocode_empty}/{run_geocoded}건 조회")
     # 표식은 run 끝에 한 번 쓴다 — degraded 업종(그리고 run 전체가 degraded면 전부)은 쓰지 않는다.

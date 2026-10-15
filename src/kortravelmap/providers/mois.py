@@ -67,6 +67,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
+from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
 from kortravelmap.geocoding import (
     AddressResolver,
     ReverseGeocoder,
@@ -713,6 +714,9 @@ async def license_record_to_bundle(
     # payload에 bjd가 있으면 아래 분기를 타지 않으므로, 입력 기준으로 판정하면
     # 그 흔한 경우 전부가 "reverse 시도했는데 실패"로 잘못 보고된다.
     reverse_called = False
+    # ADR-109 결정 3 ②: geocode로 법정동코드를 **받았는가**(시도만 하고 못 받은 행은 geo 유도 값
+    # 0개).
+    geocode_obtained_code = False
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
         reverse_called = True
         geo = await reverse_geocoder(coord)
@@ -728,6 +732,7 @@ async def license_record_to_bundle(
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
             bjd_code = resolved.bjd_code
+            geocode_obtained_code = True
     address = _build_address(record, geo=geo, bjd_code=bjd_code)
 
     raw_data = _raw_data(record, category=category)
@@ -820,6 +825,10 @@ async def license_record_to_bundle(
                 "bjd" if normalize_bjd_code(record.legal_dong_code) else None
             ),
             claim_text=record.road_address or record.lot_address or None,
+        ),
+        geo_attempt=GeoAttemptEvidence(
+            reverse_attempted=reverse_called,
+            geocode_obtained_code=geocode_obtained_code,
         ),
     )
 

@@ -19,7 +19,7 @@ from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
-from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -661,7 +661,9 @@ async def _run_feature_notice_transport_highway_incidents_locked(
 
     async def load_snapshot_atomically(
         validated_bundles: Sequence[Any],
+        _geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
+        # notice 활성 집합은 geo를 쓰지 않는다(geo_applied 전부 False) — 스탬프 대상이 아니다.
         nonlocal reconciled
         atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
         if not callable(atomic_load):
@@ -835,6 +837,7 @@ async def run_feature_place_krheritage_items(
 
     async def _load_and_retire(
         snapshot_bundles: Sequence[Any],
+        geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
         nonlocal retired
         load, retired = await client.load_authoritative_feature_snapshot(
@@ -843,6 +846,7 @@ async def run_feature_place_krheritage_items(
             dataset_key=KRHERITAGE_DATASET_KEY,
             source_entity_type="heritage",
             retire_geometryless_areas=True,
+            geo=geo,
         )
         return load
 
@@ -1223,7 +1227,9 @@ async def run_feature_notice_krforest_landslide_forecast_issues(
 
     async def load_snapshot_atomically(
         validated_bundles: Sequence[Any],
+        _geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
+        # notice 활성 집합은 geo를 쓰지 않는다(geo_applied 전부 False) — 스탬프 대상이 아니다.
         nonlocal reconciled
         atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
         if not callable(atomic_load):
@@ -1571,6 +1577,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
 
     async def _load_and_retire(
         snapshot_bundles: Sequence[Any],
+        geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
         nonlocal retired
         load, retired = await client.load_authoritative_feature_snapshot(
@@ -1579,6 +1586,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
             dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
             source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
             retired_source_entity_ids=retired_entity_ids,
+            geo=geo,
         )
         return load
 
@@ -1700,9 +1708,11 @@ async def _load_snapshot_batches(
         "bool | str", await _resource_value(context, "strict_address", default="strict")
     )
 
-    async def _load_all(items: AsyncIterable[Sequence[Any]]) -> FeatureLoadResult:
+    async def _load_all(
+        items: AsyncIterable[Sequence[Any]], geo: GeoLoadContext | None
+    ) -> FeatureLoadResult:
         return await client.load_feature_bundle_batches(
-            items, curation_dataset=(provider, dataset_key)
+            items, curation_dataset=(provider, dataset_key), geo=geo
         )
 
     result = await load_feature_bundle_batches_for_dagster(
@@ -1736,7 +1746,8 @@ async def _load(
     source_entity_type: str | None = None,
     retire_absent_from_snapshot: bool = False,
     record_sync_state: bool = True,
-    load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
+    load_all: Callable[[Sequence[Any], GeoLoadContext | None], Awaitable[FeatureLoadResult]]
+    | None = None,
     geo_applied: GeoApplied,
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
