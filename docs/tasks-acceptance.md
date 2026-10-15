@@ -2613,7 +2613,23 @@ geocode_obtained_code}`(T-GR-01, `dto/geo_dataset.py`)로 내보낸다 — `Admi
   `address_override_geo_stale`(info)를 적재 경로가 `(feature_id, geo_data_token)` dedupe로 쓴다; override는 열 단위라
   `core.address` jsonb에도 같은 코드가 있으면 address도 override돼 있어야 "값 동일"이 된다. (7) MOIS 행 evidence는
   `FeatureBundle.geo_attempt`(`GeoAttemptEvidence`)다. (8) 롤아웃 비용은 격리 스택 대신 통합 DB 프록시로 쟀다(PR 본문) —
-  격리 스택 실측은 live e2e 단계에서.
+  격리 스택 실측은 live e2e 단계에서. → **2차 리뷰(2026-10-16)로 대체**: 아래 (9)의 격리 스택 실측이 정본이다.
+- 구현 메모 2(2026-10-16, #1328 적대 리뷰 2인 반영): (9) **geo 사실은 chunk 단위다** — `load_bundles`가 chunk 시작에
+  정본 키를 dataset별로 한 번에 풀고(`feature.resolve_provider_feature_id`를 `unnest`로), stale 판정(`stale_among`)·
+  저장값(`read_stored_geo_columns_many`)을 각 한 문장으로 읽고, 스탬프는 chunk 끝 한 문장(같은 transaction)이다. 같은
+  Feature가 chunk에 두 번 나오면 두 번째부터는 행 단위로 다시 묻는다(선읽기가 낡았다). 끝에서 유효 토큰을 다시 보고
+  None이면 스탬프를 쓰지 않는다. 실측은 PR 본문 표(격리 PostGIS 컨테이너, 배포 bootstrap 경로, MOIS 루프 그대로, 12,000행).
+  (10) **부분 퇴행 유지** — stale 분기에서 새 답의 법정동코드가 저장값과 같은데 `road_name_code`·`admin_dong_code`·
+  `zipcode`가 새 답에서만 비었으면 저장값을 지킨다(override 열은 손대지 않는다), 메타 `geo_partial_kept`. 법정동이
+  바뀌었으면 새 답이 정답이다. (11) concierge 해시 입력에서 최상위 `updated_at`·`operation`도 뺀다 — producer
+  `_serialize_item`(kor-travel-concierge `feature_export_service.py`)은 payload가 바뀌면(토큰만 바뀌어도) `updated_at`을
+  새로 찍는다; `operation`은 변환되는 행에서 늘 `upsert`인 export 상태다(`export_id`는 `ytpc_{candidate_id}`로 안정이라
+  남긴다). (12) 빈 답 가드가 `address`에 override가 있는 행을 만나면 저장값(=override 값)을 provider base로 옮겨 적지
+  않는다 — 그 열은 patch가 건너뛰므로 새 답을 base에 둔다(runtime 롤은 base 표를 읽을 수 없어 "base 값 사용"은 택하지
+  않았다). (13) `GeoLoadContext.observed_data_tokens`의 기본은 None이고, geo를 쓰는 run이 관측 집합을 넘기지 않으면
+  `effective_token()`은 None이다(fail closed) — `_geo_load_context`·MOIS `_observed_tokens`가 계수 없음을 None으로 넘긴다.
+  (14) 설계와 다른 자리: `FeatureAddressSnapshot`은 넓히지 않고 `read_stored_geo_columns`를 썼다(6열 + `address` +
+  active override를 한 문장으로 — snapshot을 넓히면 그 소비처 전부의 계약이 바뀐다).
 
 ## T-GR-04
 
