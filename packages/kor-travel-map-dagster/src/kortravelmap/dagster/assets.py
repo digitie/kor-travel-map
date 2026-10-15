@@ -160,6 +160,8 @@ from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
 
+    from .resources import GeoDatasetHandle
+
 DATAGOKR_STANDARD_PROVIDER_NAME: Final[str] = "data.go.kr-standard"
 """전국 표준데이터 provider canonical name."""
 
@@ -1711,7 +1713,7 @@ async def _load_snapshot_batches(
         dataset_key=dataset_key,
         strict_address=strict_address,
         load_all=_load_all,
-        **_geo_run_inputs(context, geo_applied),
+        **(await _geo_run_inputs(context, geo_applied)),
     )
     await _record_feature_sync_success(
         context,
@@ -1754,7 +1756,7 @@ async def _load(
         source_entity_type=source_entity_type,
         retire_absent_from_snapshot=retire_absent_from_snapshot,
         load_all=load_all,
-        **_geo_run_inputs(context, geo_applied),
+        **(await _geo_run_inputs(context, geo_applied)),
     )
     if record_sync_state:
         await _record_feature_sync_success(
@@ -1980,15 +1982,26 @@ class _GeoRunInputs(TypedDict):
     geo_stats: GeoCallStats | None
 
 
-def _geo_run_inputs(context: AssetExecutionContext, geo_applied: GeoApplied) -> _GeoRunInputs:
+async def _geo_run_inputs(
+    context: AssetExecutionContext, geo_applied: GeoApplied
+) -> _GeoRunInputs:
     """적재 wrapper에 넘길 run의 geo 입력 — 사용 신호·run-scoped 현재 토큰·관측 계수(ADR-109).
 
-    현재 토큰은 resource ``kor_travel_geo_dataset``(run 시작 1회)이다 — 큐 runner도 같은 resource를
-    common resource로 넘긴다. 계수는 이 run이 reverse를 넘겼을 때만 의미가 있다.
+    현재 토큰은 resource ``kor_travel_geo_dataset``의 handle이 처음 쓰일 때 한 번 읽는다 — 큐
+    runner도 같은 resource를 common resource로 넘긴다. geo 콜러블을 하나도 넘기지 않은 run은
+    읽지 않는다(쓸 데가 없고, geo가 꺼져 있으면 connect 상한만큼 기다리게 된다). 키가 배선되지
+    않은 context는 "geo 장애"와 구별되도록 WARNING을 남긴다.
     """
-    current = cast(
-        "DatasetRef | None", _resource_object(context, "kor_travel_geo_dataset", default=None)
-    )
+    current: DatasetRef | None = None
+    if geo_applied.reverse or geo_applied.geocode:
+        handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
+        if handle is None:
+            context.log.warning(
+                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — "
+                "현재 토큰 None으로 진행"
+            )
+        else:
+            current = await cast("GeoDatasetHandle", handle).current()
     stats: GeoCallStats | None = None
     if geo_applied.reverse:
         stats = cast("GeoCallStats | None", getattr(_reverse_geocoder(context), "stats", None))

@@ -42,8 +42,6 @@ if TYPE_CHECKING:
 
     from dagster import AssetExecutionContext
 
-_LOGGER = logging.getLogger(__name__)
-
 
 FEATURE_LOAD_CHUNK_SIZE: Final[int] = 1000
 """Dagster asset이 FeatureBundle을 DB에 적재할 때 사용하는 기본 chunk 크기."""
@@ -570,7 +568,7 @@ async def load_feature_bundles_for_dagster(
         ),
     )
     metadata.update(result.observation_receipt.as_metadata())
-    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats))
+    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log))
     _add_output_metadata(context, metadata)
     return result
 
@@ -786,7 +784,7 @@ async def load_feature_bundle_batches_for_dagster(
         metadata["address_validation_dropped_feature_ids_truncated"] = (
             dropped_feature_ids_truncated
         )
-    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats))
+    metadata.update(geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log))
     _add_output_metadata(context, metadata)
     return result
 
@@ -889,19 +887,23 @@ def geo_run_metadata(
     geo_applied: GeoApplied | None,
     current_dataset: DatasetRef | None,
     geo_stats: GeoCallStats | None,
+    *,
+    log: logging.Logger,
 ) -> dict[str, object]:
     """run의 geo 사용 신호·현재 토큰·관측 불일치를 output metadata로 낸다(ADR-109 결정 2·3).
 
     ``geo_applied``가 None인 호출(아직 배선되지 않은 경로 — MOIS 재개형 적재는 T-GR-03)은 아무것도
     싣지 않는다. 응답이 run-scoped 현재 토큰과 다른 ``data_token``을 냈으면 WARNING 1건 +
     ``geo_dataset_mismatch=true`` — 그 run의 스탬프는 옛 토큰이고 다음 센서 tick이 다시 계획한다.
+    경고는 ``log``(적재 wrapper가 넘기는 ``context.log``)로 낸다 — 모듈 logger는
+    ``managed_python_loggers``에 없어 Dagster event stream에 닿지 않는다.
     """
     if geo_applied is None:
         return {}
     observed = sorted(geo_stats.observed_data_tokens) if geo_stats is not None else []
     mismatch = geo_dataset_mismatch(current_dataset, observed)
     if mismatch:
-        _LOGGER.warning(
+        log.warning(
             "kor-travel-geo 데이터셋이 run 도중 바뀌었다: run-scoped %s, 응답 관측 %s — "
             "이 run의 스탬프는 옛 토큰이다(다음 tick이 다시 계획한다)",
             current_dataset.data_token if current_dataset is not None else None,

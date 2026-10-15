@@ -5,7 +5,8 @@
 사실과 같다는 것을 효과로 결박한다: ``assets.py``에서 ``_load(``/``_load_snapshot_batches(``를
 부르는 함수마다
 
-- ``reverse`` == 그 함수 안에 ``_reverse_geocoder(context)`` 호출이 있는가
+- ``reverse`` == 그 함수 안에 ``_reverse_geocoder(context)`` 호출이나 ``None``이 아닌
+  ``reverse_geocoder=`` 인자가 있는가(한쪽만 보면 다른 모양의 run을 ``reverse=False``로 민다)
 - ``geocode`` == 그 함수 안에 ``None``이 아닌 ``address_resolver=`` 인자가 있는가
 
 이고, ``geo_applied=GeoApplied(reverse=<bool>, geocode=<bool>)`` 리터럴로 넘겨야 한다(변수 금지 —
@@ -49,7 +50,12 @@ def _violations(source: str) -> tuple[list[str], int]:
         loads = [call for call in calls if _name(call) in _LOADERS]
         if not loads:
             continue
-        reverse = any(_name(call) == "_reverse_geocoder" for call in calls)
+        reverse = any(_name(call) == "_reverse_geocoder" for call in calls) or any(
+            keyword.arg == "reverse_geocoder"
+            and not (isinstance(keyword.value, ast.Constant) and keyword.value.value is None)
+            for call in calls
+            for keyword in call.keywords
+        )
         geocode = any(
             keyword.arg == "address_resolver"
             and not (isinstance(keyword.value, ast.Constant) and keyword.value.value is None)
@@ -122,6 +128,12 @@ async def run(context):
             "실제 geo 콜러블",
         ),
         (_SAMPLE.replace("geo_applied=GeoApplied(reverse=True, geocode=False)", "x=1"), "리터럴"),
+        (
+            _SAMPLE.replace("_reverse_geocoder(context)", "geocoder").replace(
+                "reverse=True", "reverse=False"
+            ),
+            "실제 geo 콜러블",
+        ),
         (_SAMPLE.replace("GeoApplied(reverse=True, geocode=False)", "applied"), "리터럴"),
         (
             _SAMPLE.replace("records,", "records, address_resolver=resolver,"),

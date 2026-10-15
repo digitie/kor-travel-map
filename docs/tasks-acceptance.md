@@ -2535,7 +2535,10 @@ asset이 `load_feature_bundles`에 `geo_applied=` 전달; `required_resource_key
   `kortravelmap.geocoding`에 있다 — CLI가 `kortravelmap.dagster`를 import할 수 없어서다. Dagster resource
   `kor_travel_geo_dataset`(asset·큐 runner 공통 resource 키)이 짧은 수명 client로 한 번 부르고, offline upload·CLI는 같은
   함수를 직접 부른다(호출 지점 3 — `tests/lint/test_geo_applied_matches_asset_geo_callables.py`가 센다). (2) 설계의
-  `kor_travel_geo_client_resource`(경량 client)는 이 PR에 넣지 않았다 — 쓰는 곳이 센서(T-GR-05)뿐이라 그때 더한다.
+  `kor_travel_geo_client_resource`(경량 client)는 이 PR에 넣지 않았다 — 쓰는 곳이 센서(T-GR-05)뿐이라 그때 더한다(§T-GR-05 수정 파일에 적었다). 리뷰 반영(2026-10-16): resource는
+  **lazy handle**(`GeoDatasetHandle.current()` — 처음 쓰일 때 1회, 동시 호출도 1회)이라 geo 콜러블이 없는 run(price/notice·
+  visitkorea·MOIS)은 읽지 않는다; 경고는 managed logger(`kortravelmap.dagster.resources`)·`context.log`로 낸다(event
+  stream 결박 테스트); 키 미배선은 WARNING.
   (3) `geo_applied`는 `_load`·`_load_snapshot_batches`의 필수 인자이고 asset 21곳 + MCST 1곳이 리터럴로 넘긴다(AST lint가
   run 함수의 실제 콜러블과 대조 — 하나를 False로 바꾸면 빨갛다). 적재 wrapper는 그것과 현재 토큰·reverse 계수를 받아
   output 메타 `geo_applied_reverse/geocode`·`geo_data_token`·`geo_dataset_mismatch`를 낸다(불일치면 WARNING 1건).
@@ -2544,6 +2547,16 @@ asset이 `load_feature_bundles`에 `geo_applied=` 전달; `required_resource_key
   `geo_data_token`, CLI는 stderr 한 줄로 어느 데이터셋으로 적재했는지 남긴다.
 
 ## T-GR-03
+
+**T-GR-02에서 넘어온 것(2026-10-16, #1327)** — 이 task가 함께 판정한다: (a) `current_dataset`·`geo_applied`를 적재
+wrapper(`dagster/etl.py` `load_feature_bundles_for_dagster`·`load_feature_bundle_batches_for_dagster` — T-GR-02가 이미 받는다)
+에서 client(`load_feature_bundles`·`load_feature_bundle_batches`·`load_authoritative_feature_snapshot`·asset `load_all`
+callable)와 repo(`load_bundles`/`load_bundle`)로 넘긴다; (b) `dagster/etl.py` run 단위 빈 답 비율 가드 — 분모
+`GeoCallStats.calls['reverse']`·분자 `empty['reverse']`를 chunk 간 누적, 상수·비율 계산 함수는 MOIS(ADR-108 §3a-2)와
+**한 곳**에서 공유, **같은 조건의 MOIS run은 FAILURE가 아니다**(degraded 그대로 — 회귀 테스트); (c) MOIS 재개형 경로
+(`mois_chunked_load.py`)의 `geo_applied`·현재 토큰 배선(행별 evidence); (d) price asset(`assets.py`
+`feature_price_transport_fuel_stations`·`…_rest_areas`, `load_price_features`)은 `geo_applied`를 받지 않는 별도 적재
+경로다 — 적재 뒤 스탬프 0건·`coverage` 분모 불변 검사(§T-GR-02 "(T-GR-03 뒤)" 항목)에 이 경로를 포함한다.
 
 ADR-109 결정 4·6. 수정 파일: `src/kortravelmap/infra/feature_repo.py`(`load_bundle(current_dataset=, geo_applied=)`
 :3035, 빈 답 가드(판정 집합 G — `address-geocoding.md` §4), 무쓰기(override 열 제외), CTE 토큰 조건 :3199-3231,
@@ -2622,7 +2635,8 @@ ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일
 ## T-GR-05
 
 ADR-109 결정 5(센서). 수정 파일: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/sensors.py`
-(`kor_travel_geo_release_sensor`), `definitions.py`, `run_scope.py`(필요 시 `dagster/run_key` 조회 헬퍼),
+(`kor_travel_geo_release_sensor`), `resources.py`(`kor_travel_geo_client_resource` — 센서용 경량 client, T-GR-02에서 이월),
+`definitions.py`, `run_scope.py`(필요 시 `dagster/run_key` 조회 헬퍼),
 `src/kortravelmap/geocoding.py`(열린 결정 6 승인 시에만 — run 태그 `kor_travel_map.geo_release_plan_id` 보유 run 한정
 reverse timeout 1회 재시도 옵션, `trigger_kind=sensor`는 MOIS 이어 달리기 run에도 붙어 판별자가 아니다
 `mois_chunked_load.py:1071-1075`; 기각이면 attempt 2로만 복구), `tests/lint/`(효과 테스트·새 pool/limit 태그 없음),

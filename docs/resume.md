@@ -1,6 +1,6 @@
 ## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
 
-**다음 한 작업: #1326(T-GR-01) 머지 → 이 브랜치를 main에 리베이스 → CI 초록 → 적대 리뷰 → 머지 → T-GR-03(stale 분기·스탬프·
+**다음 한 작업: CI 초록 → 적대 리뷰 반영 → 머지 → T-GR-03(stale 분기·스탬프·
 빈 답 가드·MOIS·concierge — `current_dataset`/`geo_applied`를 client·infra 적재 함수로 넘긴다).**
 
 - 바뀐 것: `fetch_current_dataset`·`geo_dataset_mismatch`, resource `kor_travel_geo_dataset`, asset·MCST `geo_applied`,

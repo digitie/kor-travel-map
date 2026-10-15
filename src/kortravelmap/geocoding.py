@@ -1584,7 +1584,11 @@ class _KorTravelGeoObservedReverseGeocoder:
 _LOGGER = logging.getLogger(__name__)
 
 
-async def fetch_current_dataset(client: KorTravelGeoRestClient | None) -> DatasetRef | None:
+async def fetch_current_dataset(
+    client: KorTravelGeoRestClient | None,
+    *,
+    logger: logging.Logger | None = None,
+) -> DatasetRef | None:
     """run 시작에 geo의 현재 데이터셋을 **한 번** 읽는다 — run-scoped 현재 토큰(ADR-109 결정 2).
 
     asset·큐 runner(Dagster resource ``kor_travel_geo_dataset``)·offline upload·CLI가 모두 이
@@ -1595,22 +1599,26 @@ async def fetch_current_dataset(client: KorTravelGeoRestClient | None) -> Datase
 
     ``data_token``이 None인 ``DatasetRef``(지문 backfill 전)는 그대로 돌려준다 — 판정 불가는
     소비자(적재 경로·센서)가 같은 규칙으로 처리한다. 경고는 내지 않는다(geo가 답했다).
+
+    ``logger``는 경고를 낼 logger다 — Dagster 경로는 ``managed_python_loggers``에 든 logger(또는
+    ``context.log``)를 넘겨야 경고가 event stream에 닿는다(2026-09-19 "이벤트 0건"과 같은 부류).
     """
+    log = logger if logger is not None else _LOGGER
     if client is None:
-        _LOGGER.warning(
+        log.warning(
             "kor-travel-geo 현재 데이터셋: client 없음(base URL 미설정) — 이 run의 현재 토큰은 None"
         )
         return None
     try:
         current = await client.dataset_version()
     except (GeoRequestError, GeoAuthNotConfiguredError) as exc:
-        _LOGGER.warning(
+        log.warning(
             "kor-travel-geo 현재 데이터셋 조회 실패(%s) — 이 run의 현재 토큰은 None",
             type(exc).__name__,
         )
         return None
     if current is None:
-        _LOGGER.warning(
+        log.warning(
             "kor-travel-geo 현재 데이터셋: 활성 릴리스 없음(available=false) — "
             "이 run의 현재 토큰은 None"
         )
