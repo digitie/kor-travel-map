@@ -281,7 +281,9 @@ async def test_load_wrapper_never_touches_context_log_without_geo_applied() -> N
         return FeatureLoadResult()
 
     class _FindingClient:
-        async def record_address_validation_findings(self, *args: object, **kwargs: object) -> object:
+        async def record_address_validation_findings(
+            self, *args: object, **kwargs: object
+        ) -> object:
             from types import SimpleNamespace
 
             return SimpleNamespace(observed=0, unique=0, upserted=0)

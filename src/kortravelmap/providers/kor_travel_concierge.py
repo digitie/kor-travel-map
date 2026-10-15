@@ -538,7 +538,7 @@ def _decimal_or_none(value: Any) -> Decimal | None:
 def _hash_input_without_geo_token(raw_data: Mapping[str, Any]) -> dict[str, Any]:
     """해시 입력에서 geo 산출(``place.address.geo_data_token``)과 그것을 담은 producer 해시를 "
     "뺀다."""
-    trimmed = json.loads(json.dumps(raw_data))
+    trimmed: dict[str, Any] = json.loads(json.dumps(raw_data))
     place = trimmed.get("place")
     if isinstance(place, dict) and isinstance(place.get("address"), dict):
         place["address"].pop("geo_data_token", None)
