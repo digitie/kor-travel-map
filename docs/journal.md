@@ -6,6 +6,10 @@
 - **범위를 자른 자리.** client·infra 적재 함수로 `current_dataset`·`geo_applied`를 넘기는 것과 빈 답 비율 가드, MOIS 배선은
   T-GR-03이다 — 지금 넘기면 받는 쪽이 아무것도 하지 않는 인자다. acceptance의 "(T-GR-03 뒤)" 항목도 그때 판정한다.
   설계의 경량 `kor_travel_geo_client` resource는 센서(T-GR-05)가 쓸 때 더한다.
+- **#1326 델타 리뷰 후속(이 PR에 함께).** `tasks-rule.md` §8의 아카이브 복구 예외에 "충돌 마커 줄 자체의 삭제"를 정식으로
+  더했다(T-GR-01 journal의 '§8 복구 예외' 인용이 가리킬 조문). 마커 lint는 CRLF·CR 줄끝과 첫 줄 UTF-8 BOM을 정규화한 뒤
+  보고, `=======`는 같은 파일에 시작·기준·끝 마커가 있을 때만 센다(홀로 있는 setext 제목 밑줄은 통과). CRLF·BOM 임시
+  파일로 빨강을 확인했다. `address-geocoding.md` §7 e2e 행을 acceptance와 같은 "첫 tick이 기준선을 기록한 뒤"로.
 - **게이트.** 단위: 팩토리 성공·지문 없음(경고 0)·전송/5xx/키 거부/계약/`available=false`/client 없음(경고 정확히 1건),
   불일치 판정 5분기. dagster: 메타 4키·불일치 WARNING 1건·현재 토큰 None이면 불일치 아님, resource가 base URL 없으면 None,
   있으면 `/v2/dataset/version` 1회. lint: run 함수의 실제 콜러블(`_reverse_geocoder(context)`·`address_resolver=`) ==

@@ -264,7 +264,7 @@ route 행은 구현 PR(T-GR-06)에서. `/admin/issues`·features 목록 변경 �
 | 계약 | `openapi.user.json`·`openapi.service.json` byte 불변; PinVi `_kor_travel_map_snapshot_pin.py` admin sha + `test_kor_travel_map_admin_contract.py` 이중 핀 + `test_m05_pair_contract_is_derived`; user/service 스냅샷 diff 0 |
 | 효과 lint | 센서 tick 외부 효과 = `dataset_version` HTTP 1회 + DB 조회(`reverse_geocoder` resource 미초기화, WARNING 0건); `jobs=` == `FEATURE_LOAD_SCHEDULE_SPECS` job 집합; 새 pool/limit 태그 없음; 변환 함수 단위 geo 호출 lint; `lint-imports`(`DatasetRef`·`GeoApplied`는 dto) |
 | 센서 | geo 실패 → Skip·커서 불변; `data_token` None → 계획 0·Skip 문구; **빈 커서 + 토큰 → 커서에 기준선 기록·계획 0행·RunRequest 0**(소유자 결정 2026-10-15); 기준선 뒤 토큰 변경 → 계획 1행; 두 번 → 1행; 재빌드 → 0; A→B→A → `plan_seq=2`·RunRequest ≥ 1; terminal+커버리지 0 → 계획 0; SUCCESS → done; FAILURE → attempt 2 한 번만; SUCCESS+`budget_exhausted` → 재요청(`converted==0` → `no_progress`); `replan` run_key 유일; 3 tick 무run → `run_not_launched`; 활성 worker run → Skip; DISABLED → `skipped`(센서·`/detect` 동일); DISABLED 1개 포함 계획이 sweep 없이 done; `trigger_kind=sensor` run이 Map 소유로 집계 |
-| e2e(n150 격리) | 첫 계획 완료 후 `manual_rebuild` → 요청 0; 소량 delta → 1 tick → 계획 → RunRequest 1 → 커버리지 상승; UI skip → badge, "지금 감지" → 계획 행 |
+| e2e(n150 격리) | 첫 tick이 기준선을 기록한 뒤(계획 0) `manual_rebuild` → 요청 0; 소량 delta → 1 tick → 계획 → RunRequest 1 → 커버리지 상승; UI skip → badge, "지금 감지" → 계획 행 |
 | 실측 | 35,754행 전량 재처리 **p95 + 실패 run 수**(p50 순차 ≈ 51 min은 하한), concierge refresh 동시 실행 조건 1회; geo p95 변동 < 20%; MOIS replay 1 run 소요 |
 
 **의도적 빨강 3건(PR 본문 기록)**: 빈 답 가드를 빼면 주소 열이 NULL로 덮인다; override 열을 비교에 넣으면
