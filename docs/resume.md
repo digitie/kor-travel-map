@@ -6,6 +6,7 @@
 - 바뀐 것: 설정 필드 2개·팩토리 2개, geo 생성 지점 8곳·transport 3곳, 문구(GEO_HEAVY_POOL·MOIS 동시성·transport URL·
   `.env.example`), 테스트 3종(팩토리 값·SYN 드롭 connect 상한·생성 지점 lint), CHANGELOG. 근거는 journal 2026-10-15.
 - 바뀌지 않은 것: read timeout 값(geo 10 s·transport 30 s), pool 술어·동시성 값, OpenAPI, Manager compose.
+
 ## 2026-10-15 — ADR-110 사실 갱신(odroid 이전 실행됨) + T-GR-00-LEDGER 종결 이관: 브랜치 `docs/adr-110-odroid-facts`
 
 **다음 한 작업: T-MAP-02(connect timeout 분리, 코드 PR) — 해제 조건은 소유자 결정(2026-10-15)으로 "머지 뒤 첫 prod 배포".
@@ -14,7 +15,6 @@
 - 바뀐 것: ADR-110 "사실 갱신(2026-10-15)" 절과 포트·머지 상태 갱신, `integration-map.md` §1~§4, CLAUDE.md geocoding 줄,
   ADR README, ADR-109 역포인터(기준선 소유자 결정), T-GR-00-LEDGER `[x]`·이관, acceptance §T-MAP-02 해제 조건(소유자 결정). 실측은 journal 2026-10-15.
 - 바뀌지 않은 것: 코드·`.env.example`·OpenAPI·n150(읽기만)·ADR-110의 결정과 열린 결정(전부 proposed 그대로).
-||||||| parent of 72bb32f83 (docs: T-MAP-02 journal·resume·CHANGELOG)
 
 ## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER) + T-GR-00·T-MAP-01 종결 이관: 브랜치 `docs/t-gr-00-ledger`
 

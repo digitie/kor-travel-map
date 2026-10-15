@@ -19,6 +19,7 @@
   (`test_resources.py`의 `http.timeout == 2.5`)를 새 계약으로 고쳤다.
 - **관찰(범위 밖).** 2026-10-15 08:3xZ odroid geo `/v2/reverse`가 Map 컨테이너에서 세 번 약 9 s 뒤 504였다가 다음 호출
   1.0 s 200. connect가 아니라 응답 지연이라 이 변경과 무관하고 read 상한(10 s)은 task 범위대로 그대로 뒀다.
+
 ## 2026-10-15 — ADR-110 사실 갱신: geo·weather·transport가 실제로 odroid로 갔다: 브랜치 `docs/adr-110-odroid-facts`
 
 - **무엇이 바뀌었나.** ADR-110 초안(2026-10-13)은 "포트·URL 동일, 호스트만 이전"을 전제했지만 소유자가 2026-10-14~15
@@ -41,7 +42,6 @@
   2026-10-13 main에 proposed로 머지돼 있었다), `integration-map.md` §1(transport·geo 행, Manager 행의 낡은 관측 포트
   12401/12301/12205 → 12102/12103/12104)·§2(그림의 transport 포트, LAN 단락)·§3(transport export 행)·§4(geocoding 행),
   CLAUDE.md geocoding 줄, ADR README 두 줄, ADR-109 역포인터. T-GR-00-LEDGER(#1323) `[x]`·이관.
-||||||| parent of 72bb32f83 (docs: T-MAP-02 journal·resume·CHANGELOG)
 
 ## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER): 브랜치 `docs/t-gr-00-ledger`
 

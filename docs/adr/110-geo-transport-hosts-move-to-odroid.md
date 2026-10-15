@@ -1,7 +1,7 @@
 # ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다
 
 - 상태: proposed (설계 2026-10-13, Track 2 적대 리뷰 3차 반영본 기준. Map 쪽 task는 `T-MAP-01`(이 문서, #1316
-  머지)·`T-MAP-02`(connect timeout 분리, **미구현**). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다).
+  머지)·`T-MAP-02`(connect timeout 분리, **구현됨(#1325), 배포 대기**). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다).
   **2026-10-14~15에 geo·weather·transport가 실제로 odroid로 옮겨졌고 소비자 포트가 바뀌었다** — 아래 "사실 갱신
   (2026-10-15)" 절이 그 뒤의 정본 사실이고, 본문의 2026-10-13 서술과 다르면 그 절이 이긴다. 결정·열린 결정은 그대로
   proposed다(소유자 승인 전)
