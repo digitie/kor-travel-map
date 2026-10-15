@@ -1,3 +1,19 @@
+## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01, ADR-109 결정 1~3): 브랜치 `feat/t-gr-01-geocode-stamps`
+
+- **무엇.** migration 407 `feature.feature_geocode_stamps`, DTO `DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`, 스탬프 repo
+  (`upsert_stamps`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`), geo client `dataset_version()`·응답 `dataset` 선택
+  파싱·`GeoCallStats.empty`/`observed_data_tokens`. 적재 경로 배선은 T-GR-02/03이다 — 이 PR은 아무 행도 스탬프하지 않는다.
+- **현실 확인.** odroid geo는 v2 응답 최상위에 `dataset{version_token, data_token}`을 싣는다(geo #573); n150 geo는 토큰을
+  가진 적이 없다. 그래서 파싱은 선택이고(없음 → None), 소유자 결정(2026-10-15)으로 '없음 → 첫 토큰'은 기준선이다 —
+  ADR-109 결정 5에 기록(구현 T-GR-04/05).
+- **설계와 다르게 쓴 것.** acceptance §T-GR-01 "구현 메모" 7항 — `decide_outcome`의 `legal_dong_code_present` 입력,
+  `GeoAttemptEvidence`(AdminEvidence diff 0), `upsert_stamps`가 토큰 없음 = 0건을 강제, `coverage()`는 T-GR-04로,
+  토큰 형식 CHECK, 407의 실제 downgrade(왕복 테스트), endpoint 단위 빈 답 계수.
+- **게이트.** 통합: NULL·형식 위반 토큰은 outcome 셋 모두 DB가 거부, 토큰 없음 = 0건, stale 5분기와 "현재 토큰 None →
+  0건", primary 링크·활성·dataset 범위, 런타임 role 쓰기·읽기, CASCADE, 407 → 406 → head 왕복. 단위: 응답 `dataset`
+  있음/없음/형식 위반, `dataset_version()` 경로·본문 `{}`·`available=false`·계약 위반 typed 오류, 빈 답 계수(reverse 6 =
+  정상 3·빈 답 2·전송 실패 1 → calls 6·failures 1·empty 2), 판정 표 전 행.
+
 ## 2026-10-15 — geo·transport client connect timeout 분리(T-MAP-02, ADR-110 결정 3): 브랜치 `feat/t-map-02-connect-timeout`
 
 - **왜 지금.** geo·weather·transport가 2026-10-14~15 odroid로 옮겨졌다(ADR-110 사실 갱신 절). 같은 호스트의

@@ -191,6 +191,11 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    **`data_token`이 None이면 계획을 만들지 않고 빨간 사유로 Skip한다**(geo 지문 backfill/복구 필요).
    `version_token` 대체 비교는 두지 않는다 — 그 계획은 결정 4의 `stale` 규칙상 행을 하나도 고르지 않아
    쿼터·시간만 쓴다. 커서 = 마지막으로 계획을 만든 `data_token`; 같으면(재빌드) 계획 0건.
+   **소유자 결정(2026-10-15) — 첫 토큰은 기준선이다.** 소비자가 `data_token`이 '없음'에서 **첫** 토큰으로
+   바뀌는 것을 보면(커서가 비어 있다 — n150 geo는 토큰을 가진 적이 없고, odroid는 n150 dump 복원 뒤 처음
+   토큰을 저장했다; ADR-110 사실 갱신 절 5) 그 토큰을 커서에 **기준선**으로 기록하고 계획을 만들지 않는다.
+   재계획은 기준선 이후 토큰이 **바뀔 때**만이다. 스탬프 없는 행은 평소 적재가 채운다(결정 4 — 스탬프 부재 =
+   stale은 적재 경로의 규칙이고 센서 계획의 근거가 아니다). 구현은 T-GR-04/05.
 2. **계획 identity = `plan_id` surrogate + `(data_token, plan_seq)`.** 표 `ops.kor_travel_geo_releases`
    (+ `ops.kor_travel_geo_release_items`, migration `408_kor_travel_geo_releases`, owner role·receipt CHECK).
    같은 토큰에 `planned|running` 계획이 있으면 그것(부분 UNIQUE, 멱등); 없으면 `plan_seq = max+1` 새 행 —

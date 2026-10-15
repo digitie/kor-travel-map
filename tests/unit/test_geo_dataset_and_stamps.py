@@ -1,12 +1,14 @@
 """geo 데이터셋 토큰 파싱·``dataset_version()``·빈 답 계수·outcome 판정 (ADR-109 결정 1~3, T-GR-01).
 
-효과에 결박한다 — ``dataset_version()``은 가짜 transport가 **실제로 받은** 요청(경로·본문)과 대조하고,
+효과에 결박한다 — ``dataset_version()``은 가짜 transport가 **실제로 받은** 요청(경로·본문)과
+대조하고,
 빈 답 계수는 응답 픽스처의 bjd 유무로 정한 분자와 대조한다(파생값에 맞추지 않는다).
 """
 
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from typing import Any
 
 import httpx
@@ -40,7 +42,12 @@ _CANDIDATE_WITH_BJD: dict[str, Any] = {
         "road_address": "서울특별시 영등포구 여의공원로 120",
         "legal_dong_code": "1156010100",
     },
-    "region": {"sig_cd": "11560", "bjd_cd": "1156010100", "sido": "서울특별시", "sigungu": "영등포구"},
+    "region": {
+        "sig_cd": "11560",
+        "bjd_cd": "1156010100",
+        "sido": "서울특별시",
+        "sigungu": "영등포구",
+    },
 }
 
 
@@ -225,10 +232,8 @@ async def test_empty_answers_are_counted_apart_from_failures() -> None:
     try:
         for index in range(len(responses)):
             coord = Coordinate(lon=127.0 + index * 0.001, lat=37.0)
-            try:
+            with suppress(GeoRequestError):
                 await geocoder(coord)
-            except GeoRequestError:
-                pass
     finally:
         await http.aclose()
 
@@ -297,7 +302,8 @@ _NONE = GeoApplied(reverse=False, geocode=False)
             },
             "not_called",
         ),
-        # ② MOIS evidence — payload bjd 행(아무것도 시도 안 함) → not_called(좌표·reverse 신호가 있어도)
+        # ② MOIS evidence — payload bjd 행(아무것도 시도 안 함) → not_called
+        #   (좌표·reverse 신호가 있어도)
         (
             "2-mois-payload-bjd",
             {
@@ -340,7 +346,11 @@ _NONE = GeoApplied(reverse=False, geocode=False)
         # ⑤ 좌표·코드 둘 다 없음 → not_called
         ("5-nothing", {"geo_applied": _BOTH, "has_coord": False}, "not_called"),
         # ⑤ reverse만 넘긴 run의 좌표 없는 행 → not_called
-        ("5-reverse-run-no-coord", {"geo_applied": _REVERSE_ONLY, "has_coord": False}, "not_called"),
+        (
+            "5-reverse-run-no-coord",
+            {"geo_applied": _REVERSE_ONLY, "has_coord": False},
+            "not_called",
+        ),
     ],
 )
 def test_decide_outcome_table(label: str, kwargs: dict[str, Any], expected: str | None) -> None:

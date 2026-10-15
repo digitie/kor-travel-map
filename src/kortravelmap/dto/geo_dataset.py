@@ -39,7 +39,10 @@ ReverseOutcome = Literal["called", "geocoded", "not_called"]
 
 
 class DatasetRef(BaseModel):
-    """geo 답의 근거 데이터셋. ``data_token``이 None이면 "변화를 판정할 수 없다"이지 "바뀌었다"가 아니다."""
+    """geo 답의 근거 데이터셋.
+
+    ``data_token``이 None이면 "변화를 판정할 수 없다"이지 "바뀌었다"가 아니다.
+    """
 
     model_config = ConfigDict(frozen=True, extra="ignore")
 

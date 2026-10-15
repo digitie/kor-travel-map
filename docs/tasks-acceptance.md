@@ -2492,6 +2492,20 @@ ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps
   "현재 토큰 None → stale 0건"이 통합 테스트로 고정된다. `decide_outcome`은 `address-geocoding.md` §2 판정 표 전 행.
 - `lint-imports` 초록(`DatasetRef`·`GeoApplied`를 `infra`가 import해도 `infra → geocoding` 역행 없음).
 - 이 task에서 provider 모듈·`Address`·`ReverseGeocoder` diff 0.
+- 구현 메모(2026-10-15, 브랜치 `feat/t-gr-01-geocode-stamps`): 설계 §2의 시그니처와 다르게 쓴 것 — (1) `decide_outcome(
+  geo_applied, *, has_coord, provider_code_present, legal_dong_code_present, evidence)`: 판정 표 ④의 "법정동코드가 생겼다"를
+  입력으로 받아야 해서 `legal_dong_code_present`를 더했고, MOIS evidence는 `AdminEvidence`를 바꾸지 않으려고(T-GR-03의
+  `geocode_attempted` 1필드 전) `dto/geo_dataset.py`의 `GeoAttemptEvidence{reverse_attempted, geocode_attempted,
+  geocode_obtained_code}`로 받는다(T-GR-03이 `AdminEvidence`에서 만든다). (2) `upsert_stamps(session, *, current, outcomes)`:
+  run 토큰을 인자로 받아 None·`data_token` None이면 0건(쓰지도 덮지도 않음)을 함수가 강제한다. (3) `coverage()`는
+  `excluded_by_skip`이 408의 계획 표에 기대므로 T-GR-04로 미룬다. (4) 토큰 형식 CHECK(`dv1-`/`dd1-` + 32 hex)를
+  407에 더했다 — 틀린 값이 비교 키가 되면 모든 행이 영구 stale이다. (5) 407에는 **실제 downgrade**(표 DROP + receipt
+  CHECK 406 복원)가 있다 — 새 표 하나뿐이고 스탬프 부재 = stale이라 잃는 것이 없다; 왕복은
+  `test_407_geocode_stamps_round_trips_to_406_and_back`가 fresh DB에서 고정한다. 배포는 여전히 전진(ADR-102).
+  (6) 응답 `dataset`의 형식 위반은 선택 파싱이라 None으로 삼키고(지오코딩 응답 자체는 쓴다), `dataset_version()`의
+  형식 위반은 typed 오류로 올린다(현재 토큰은 엄격). (7) `GeoCallStats.empty`는 endpoint 단위다 — reverse가 비고 region
+  fallback이 채우면 `empty['reverse']` 1건이고 fallback은 `regions_within_radius`로 따로 센다(T-GR-03 run 가드가 어느
+  분자를 쓸지 정한다). 소유자 결정(2026-10-15, '없음 → 첫 data_token = 기준선')은 ADR-109 결정 5에 기록했다(구현 T-GR-04/05).
 
 ## T-GR-02
 

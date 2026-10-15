@@ -5,6 +5,11 @@
 > [ADR-109](../adr/109-geo-release-regeocode.md)가 정본이고 이 문서는 코딩용 상세(표·판정 규칙·run_key·
 > 테스트 목록)만 갖는다 — 결정·상수를 여기서 다시 쓰지 않는다. geo 쪽 계약(`data_token`·응답 `dataset`)은
 > kor-travel-geo ADR-069(그 저장소, proposed).
+>
+> **구현 진척(2026-10-15)**: §2의 스탬프 표(migration 407)·`dto/geo_dataset.py`·`infra/feature_geocode_stamp_repo.py`
+> (`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`)와 §3 첫 항목(`dataset_version()`·
+> 응답 `dataset` 선택 파싱·`GeoCallStats.empty`/`observed_data_tokens`)은 T-GR-01로 구현됐다. 시그니처 차이와
+> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. 나머지는 계획이다.
 
 ## 1. 저장되는 geo 유도 값과 provider별 출처 (현재 사실)
 

@@ -1059,11 +1059,13 @@ def _parse_geocode_response(data: dict[str, Any]) -> _RestGeocodeV2Response:
 
 
 def _parse_dataset_version_response(data: dict[str, Any]) -> DatasetRef | None:
-    """``POST /v2/dataset/version`` → 현재 ``DatasetRef``. 활성 릴리스가 없으면(``available=false``) None.
+    """``POST /v2/dataset/version`` → 현재 ``DatasetRef``.
+
+    활성 릴리스가 없으면(``available=false``) None.
 
     엄격하다 — ``available``이 bool이 아니거나, 참인데 ``current.version_token``이 없거나 토큰
-    형식이 틀리면 ``ValueError``(호출부에서 typed provider 오류로 바뀐다). run의 현재 토큰은 스탬프의
-    비교 키라 틀린 값을 받아들이면 모든 행이 영구 stale이 된다.
+    형식이 틀리면 ``ValueError``(호출부에서 typed provider 오류로 바뀐다). run의 현재
+    토큰은 스탬프의 비교 키라 틀린 값을 받아들이면 모든 행이 영구 stale이 된다.
     """
     available = data.get("available")
     if not isinstance(available, bool):

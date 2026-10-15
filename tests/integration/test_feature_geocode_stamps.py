@@ -2,7 +2,8 @@
 
 고정하는 것:
 
-- 두 토큰 열은 NOT NULL이고 형식 CHECK가 있다 — 어느 outcome이든 NULL·틀린 형식 스탬프는 DB가 거부한다.
+- 두 토큰 열은 NOT NULL이고 형식 CHECK가 있다 — 어느 outcome이든 NULL·틀린 형식 스탬프는
+  DB가 거부한다.
 - 현재 토큰이 없거나 ``data_token``이 None이면 :func:`upsert_stamps`는 아무것도 쓰지 않는다.
 - stale 5분기(스탬프 없음·``not_called``·``geocoded`` 다른 토큰·``called`` 다른 토큰·같은 토큰)와
   "현재 토큰 None → stale 0건"이 :func:`is_stale`·:func:`select_stale_feature_ids`에서 같다.
@@ -163,14 +164,19 @@ async def test_no_current_token_writes_nothing(
     migrated_session: AsyncSession, current: DatasetRef | None
 ) -> None:
     feature_id = await _feature(migrated_session)
-    written = await upsert_stamps(migrated_session, current=current, outcomes={feature_id: "called"})
+    written = await upsert_stamps(
+        migrated_session, current=current, outcomes={feature_id: "called"}
+    )
     assert written == 0
     assert await get_stamp(migrated_session, feature_id) is None
 
 
 async def test_upsert_overwrites_the_previous_stamp(migrated_session: AsyncSession) -> None:
     feature_id = await _feature(migrated_session)
-    assert await upsert_stamps(migrated_session, current=OLD_REF, outcomes={feature_id: "called"}) == 1
+    assert (
+        await upsert_stamps(migrated_session, current=OLD_REF, outcomes={feature_id: "called"})
+        == 1
+    )
     assert await upsert_stamps(
         migrated_session, current=CURRENT_REF, outcomes={feature_id: "geocoded"}
     ) == 1

@@ -1,4 +1,4 @@
-"""``feature_geocode_stamp_repo`` — 행별 지오코딩 스탬프 SQL과 outcome 판정 (ADR-109 결정 1·3, T-GR-01).
+"""``feature_geocode_stamp_repo`` — 지오코딩 스탬프 SQL과 outcome 판정 (ADR-109, T-GR-01).
 
 스탬프 표 ``feature.feature_geocode_stamps``(migration 407)는 "이 Feature의 geo 유도 값을 어느 geo
 데이터 지문(``geo_data_token``)으로 해석했는가"를 ``features`` 밖에 둔다. 이 모듈은 그 표의 쓰기·
@@ -7,10 +7,11 @@ stale 판정과, 행 사실에서 ``reverse_outcome``을 정하는 순수 함수
 규칙(ADR-109):
 
 - **NULL 토큰 스탬프는 만들지 않는다.** run의 현재 토큰(``DatasetRef``)이 없거나 ``data_token``이
-  None이면 쓰지도 덮지도 않는다(:func:`upsert_stamps`가 0건을 돌려준다) — 그렇지 않으면 토큰 A로 찍힌
-  스탬프가 NULL로 덮여 지문 복구 뒤 전량 재변환이 돈다.
+  None이면 쓰지도 덮지도 않는다(:func:`upsert_stamps`가 0건을 돌려준다) — 그렇지 않으면
+  토큰 A로 찍힌 스탬프가 NULL로 덮여 지문 복구 뒤 전량 재변환이 돈다.
 - **스탬프 부재가 stale이다.** ``not_called`` 스탬프는 토큰 비교 대상이 아니다.
-- 현재 토큰이 None이면 stale은 **0건**이다(fail-to-current — geo 장애가 전량 재변환으로 번지지 않는다).
+- 현재 토큰이 None이면 stale은 **0건**이다(fail-to-current — geo 장애가 전량 재변환으로
+  번지지 않는다).
 
 raw SQL은 이 모듈의 상수다(ADR-004). commit은 호출자 책임이다.
 """
