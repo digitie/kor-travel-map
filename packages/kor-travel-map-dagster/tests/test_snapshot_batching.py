@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from kortravelmap.dto.geo_dataset import GeoApplied
 
 from kortravelmap.dagster import assets
 
@@ -68,6 +69,10 @@ async def test_failed_snapshot_never_records_sync_success(monkeypatch: Any) -> N
     monkeypatch.setattr(assets, "_record_feature_sync_success", record)
     with pytest.raises(RuntimeError, match="transaction rolled back"):
         await assets._load_snapshot_batches(
-            context, provider="demo", dataset_key="demo", batches=batches()
+            context,
+            provider="demo",
+            dataset_key="demo",
+            batches=batches(),
+            geo_applied=GeoApplied(reverse=False, geocode=False),
         )
     assert not calls

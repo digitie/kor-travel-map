@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import pickle
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Final, NoReturn
 from kortravelmap.client import AddressValidationFinding
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.ids import make_integrity_finding_key
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied
+from kortravelmap.geocoding import GeoCallStats, geo_dataset_mismatch
 
 from dagster import Failure
 from kortravelmap.dagster.validation import (
@@ -319,6 +322,9 @@ async def load_feature_bundles_for_dagster(
     load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
     | None = None,
     enforce_loss_guard: bool = True,
+    geo_applied: GeoApplied | None = None,
+    current_dataset: DatasetRef | None = None,
+    geo_stats: GeoCallStats | None = None,
 ) -> DagsterFeatureLoadResult:
     """주소/좌표 검증 후 ``AsyncKorTravelMapClient``로 PostGIS에 적재한다.
 
@@ -562,6 +568,10 @@ async def load_feature_bundles_for_dagster(
         ),
     )
     metadata.update(result.observation_receipt.as_metadata())
+    if geo_applied is not None:  # 배선 안 된 경로(테스트 대역 포함)는 context.log를 건드리지 않는다
+        metadata.update(
+            geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log)
+        )
     _add_output_metadata(context, metadata)
     return result
 
@@ -577,6 +587,9 @@ async def load_feature_bundle_batches_for_dagster(
     load_all: Callable[
         [AsyncIterable[Sequence[FeatureBundle]]], Awaitable[FeatureLoadResult]
     ],
+    geo_applied: GeoApplied | None = None,
+    current_dataset: DatasetRef | None = None,
+    geo_stats: GeoCallStats | None = None,
 ) -> DagsterFeatureLoadResult:
     """대용량 provider batch를 materialize하지 않고 한 DB transaction으로 적재한다.
 
@@ -774,6 +787,10 @@ async def load_feature_bundle_batches_for_dagster(
         metadata["address_validation_dropped_feature_ids_truncated"] = (
             dropped_feature_ids_truncated
         )
+    if geo_applied is not None:  # 배선 안 된 경로(테스트 대역 포함)는 context.log를 건드리지 않는다
+        metadata.update(
+            geo_run_metadata(geo_applied, current_dataset, geo_stats, log=context.log)
+        )
     _add_output_metadata(context, metadata)
     return result
 
@@ -870,6 +887,44 @@ def _merge_validation_summaries(
         name_state_counts=dict(merged_name_states),
         issues=(left.issues + right.issues)[:ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT],
     )
+
+
+def geo_run_metadata(
+    geo_applied: GeoApplied | None,
+    current_dataset: DatasetRef | None,
+    geo_stats: GeoCallStats | None,
+    *,
+    log: logging.Logger,
+) -> dict[str, object]:
+    """run의 geo 사용 신호·현재 토큰·관측 불일치를 output metadata로 낸다(ADR-109 결정 2·3).
+
+    ``geo_applied``가 None인 호출(아직 배선되지 않은 경로 — MOIS 재개형 적재는 T-GR-03)은 아무것도
+    싣지 않는다. 응답이 run-scoped 현재 토큰과 다른 ``data_token``을 냈으면 WARNING 1건 +
+    ``geo_dataset_mismatch=true`` — 그 run의 스탬프는 옛 토큰이고 다음 센서 tick이 다시 계획한다.
+    경고는 ``log``(적재 wrapper가 넘기는 ``context.log``)로 낸다 — 모듈 logger는
+    ``managed_python_loggers``에 없어 Dagster event stream에 닿지 않는다.
+    """
+    if geo_applied is None:
+        return {}
+    observed = sorted(geo_stats.observed_data_tokens) if geo_stats is not None else []
+    mismatch = geo_dataset_mismatch(current_dataset, observed)
+    if mismatch:
+        log.warning(
+            "kor-travel-geo 데이터셋이 run 도중 바뀌었다: run-scoped %s, 응답 관측 %s — "
+            "이 run의 스탬프는 옛 토큰이다(다음 tick이 다시 계획한다)",
+            current_dataset.data_token if current_dataset is not None else None,
+            observed,
+        )
+    return {
+        "geo_applied_reverse": geo_applied.reverse,
+        "geo_applied_geocode": geo_applied.geocode,
+        "geo_data_token": (
+            current_dataset.data_token
+            if current_dataset is not None and current_dataset.data_token is not None
+            else "none"
+        ),
+        "geo_dataset_mismatch": mismatch,
+    }
 
 
 def _add_output_metadata(

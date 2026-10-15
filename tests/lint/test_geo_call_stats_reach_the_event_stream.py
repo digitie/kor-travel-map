@@ -135,3 +135,42 @@ def test_the_place_locator_warning_reaches_the_event_stream() -> None:
         f"`{logger.name}`의 경고를 받는 항목이 `managed_python_loggers`에 없다 — place locator가 "
         "버린 행이 컨테이너 stdout에만 남는다."
     )
+
+
+def test_the_current_geo_dataset_warning_reaches_the_event_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run-scoped 현재 토큰(ADR-109 결정 2)을 못 읽었다는 경고가 Dagster run 로그에 보여야 한다.
+
+    **실제 resource 경로를 돌려 레코드를 받는다** — 팩토리(`kortravelmap.geocoding`)의 기본
+    logger는 `managed_python_loggers`에 없으므로, resource가 관리되는 logger를 넘기지 않으면 이
+    경고는 stdout에만 남는다(2026-10-16 #1327 리뷰가 잡은 자리).
+    """
+
+    import asyncio
+
+    from kortravelmap.dagster import resources
+
+    from kortravelmap.settings import KorTravelMapSettings
+
+    monkeypatch.delenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL", raising=False)
+    received: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            received.append(record)
+
+    handlers = []
+    for name in _managed_loggers():
+        handler = _Capture(level=logging.NOTSET)
+        logging.getLogger(name).addHandler(handler)
+        handlers.append((name, handler))
+    try:
+        value = asyncio.run(resources.current_geo_dataset_from_settings(KorTravelMapSettings()))
+    finally:
+        for name, handler in handlers:
+            logging.getLogger(name).removeHandler(handler)
+    assert value is None
+    assert [record for record in received if record.levelno >= _REQUIRED_LEVEL], (
+        "현재 토큰 조회 실패 경고가 managed logger 어디에도 닿지 않았다"
+    )

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.dto.geo_dataset import GeoApplied
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
     MCST_PROVIDER_NAME,
@@ -205,6 +206,7 @@ async def run_feature_place_mcst_culture(
             dataset_key=spec.dataset_key,
             bundles=bundles,
             authoritative_snapshot_complete=True,
+            geo_applied=GeoApplied(reverse=True, geocode=False),
         )
         results.append(loaded)
     if slug_failures:

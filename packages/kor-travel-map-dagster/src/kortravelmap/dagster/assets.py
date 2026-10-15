@@ -13,13 +13,14 @@ from collections.abc import (
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
-from kortravelmap.geocoding import ReverseGeocoder
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied
+from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
@@ -158,6 +159,8 @@ from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
+
+    from .resources import GeoDatasetHandle
 
 DATAGOKR_STANDARD_PROVIDER_NAME: Final[str] = "data.go.kr-standard"
 """전국 표준데이터 provider canonical name."""
@@ -337,6 +340,7 @@ _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "feature_operation_guard",
     "kor_travel_map_client",
     "reverse_geocoder",
+    "kor_travel_geo_dataset",
     "fetched_at",
     "strict_address",
 }
@@ -359,6 +363,7 @@ async def run_feature_event_datagokr_cultural_festivals(
         dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -397,6 +402,7 @@ async def run_feature_place_transport_fuel_stations(
         dataset_key=DATASET_KEY_FUEL_STATIONS,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -520,6 +526,7 @@ async def run_feature_place_transport_rest_areas(
         dataset_key=DATASET_KEY_REST_AREAS,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -683,6 +690,7 @@ async def _run_feature_notice_transport_highway_incidents_locked(
         authoritative_snapshot_complete=True,
         record_sync_state=False,
         load_all=load_snapshot_atomically,
+        geo_applied=GeoApplied(reverse=False, geocode=False),
     )
     if reconciled is None:
         raise RuntimeError("고속도로 돌발 atomic load가 reconcile 결과를 반환하지 않았다.")
@@ -845,6 +853,7 @@ async def run_feature_place_krheritage_items(
         bundles=bundles,
         authoritative_snapshot_complete=True,
         load_all=_load_and_retire,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
     if retired:
         context.log.info(
@@ -883,6 +892,7 @@ async def run_feature_event_krheritage_events(
         dataset_key=KRHERITAGE_EVENT_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -998,6 +1008,7 @@ async def run_feature_place_knps_points(
         dataset_key=dataset_key,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1036,6 +1047,7 @@ async def run_feature_geometry_knps_records(
         dataset_key=dataset_key,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1071,6 +1083,7 @@ async def run_feature_place_krforest_recreation_forests(
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_RECREATION_FORESTS_DATASET_KEY,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1105,6 +1118,7 @@ async def run_feature_place_krforest_arboretums(
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_ARBORETUMS_DATASET_KEY,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1139,6 +1153,7 @@ async def run_feature_route_krforest_mountain_trails(
         authoritative_snapshot_complete=True,
         source_entity_type="mountain_trail_segment",
         retire_absent_from_snapshot=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1173,6 +1188,7 @@ async def run_feature_route_krforest_dulle_trails(
         authoritative_snapshot_complete=True,
         source_entity_type="dulle_trail_segment",
         retire_absent_from_snapshot=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1233,6 +1249,7 @@ async def run_feature_notice_krforest_landslide_forecast_issues(
         bundles=bundles,
         authoritative_snapshot_complete=True,
         load_all=load_snapshot_atomically,
+        geo_applied=GeoApplied(reverse=False, geocode=False),
     )
     if reconciled is None:
         raise RuntimeError("산사태 notice atomic load가 reconcile 결과를 반환하지 않았다.")
@@ -1275,6 +1292,7 @@ async def run_feature_place_standard_museums(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_MUSEUMS,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1309,6 +1327,7 @@ async def run_feature_place_standard_tourist_attractions(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1343,6 +1362,7 @@ async def run_feature_place_standard_parking_lots(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_PARKING_LOTS,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1377,6 +1397,7 @@ async def run_feature_place_standard_special_streets(
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_SPECIAL_STREETS,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1413,6 +1434,7 @@ async def run_feature_place_datagokr_file_data(
         dataset_key=dataset_key,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1446,6 +1468,7 @@ async def run_feature_place_khoa_beaches(
         provider=KHOA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_BEACHES,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1478,6 +1501,7 @@ async def run_feature_place_transport_airports(
         provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_AIRPORTS,
         batches=_bundle_batches(),
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
 
@@ -1565,6 +1589,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
         bundles=bundles,
         authoritative_snapshot_complete=True,
         load_all=_load_and_retire,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
     )
     if retired_entity_ids:
         context.log.info(
@@ -1667,6 +1692,7 @@ async def _load_snapshot_batches(
     provider: str,
     dataset_key: str,
     batches: AsyncIterable[Sequence[Any]],
+    geo_applied: GeoApplied,
 ) -> DagsterFeatureLoadResult:
     """전체 snapshot을 보관하지 않고 기존 단일 transaction·봉인 계약으로 적재한다."""
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
@@ -1687,6 +1713,7 @@ async def _load_snapshot_batches(
         dataset_key=dataset_key,
         strict_address=strict_address,
         load_all=_load_all,
+        **(await _geo_run_inputs(context, geo_applied)),
     )
     await _record_feature_sync_success(
         context,
@@ -1710,6 +1737,7 @@ async def _load(
     retire_absent_from_snapshot: bool = False,
     record_sync_state: bool = True,
     load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
+    geo_applied: GeoApplied,
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     # bool(True/False) 하위호환 + settings 모드 문자열(strict/drop/off, #376).
@@ -1728,6 +1756,7 @@ async def _load(
         source_entity_type=source_entity_type,
         retire_absent_from_snapshot=retire_absent_from_snapshot,
         load_all=load_all,
+        **(await _geo_run_inputs(context, geo_applied)),
     )
     if record_sync_state:
         await _record_feature_sync_success(
@@ -1945,6 +1974,38 @@ async def _fetched_at(context: AssetExecutionContext) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError("fetched_at resource는 datetime이어야 함.")
     return value
+
+
+class _GeoRunInputs(TypedDict):
+    geo_applied: GeoApplied
+    current_dataset: DatasetRef | None
+    geo_stats: GeoCallStats | None
+
+
+async def _geo_run_inputs(
+    context: AssetExecutionContext, geo_applied: GeoApplied
+) -> _GeoRunInputs:
+    """적재 wrapper에 넘길 run의 geo 입력 — 사용 신호·run-scoped 현재 토큰·관측 계수(ADR-109).
+
+    현재 토큰은 resource ``kor_travel_geo_dataset``의 handle이 처음 쓰일 때 한 번 읽는다 — 큐
+    runner도 같은 resource를 common resource로 넘긴다. geo 콜러블을 하나도 넘기지 않은 run은
+    읽지 않는다(쓸 데가 없고, geo가 꺼져 있으면 connect 상한만큼 기다리게 된다). 키가 배선되지
+    않은 context는 "geo 장애"와 구별되도록 WARNING을 남긴다.
+    """
+    current: DatasetRef | None = None
+    if geo_applied.reverse or geo_applied.geocode:
+        handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
+        if handle is None:
+            context.log.warning(
+                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — "
+                "현재 토큰 None으로 진행"
+            )
+        else:
+            current = await cast("GeoDatasetHandle", handle).current()
+    stats: GeoCallStats | None = None
+    if geo_applied.reverse:
+        stats = cast("GeoCallStats | None", getattr(_reverse_geocoder(context), "stats", None))
+    return {"geo_applied": geo_applied, "current_dataset": current, "geo_stats": stats}
 
 
 def _reverse_geocoder(context: AssetExecutionContext) -> ReverseGeocoder | None:

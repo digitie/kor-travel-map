@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
+    fetch_current_dataset,
     geo_http_timeout,
     kor_travel_geo_address_resolver,
     kor_travel_geo_reverse_geocoder,
@@ -56,6 +57,10 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
                 http,
                 api_key=settings.kor_travel_geo_api_key,
             )
+            # run-scoped 현재 토큰(ADR-109 결정 2) — asset·큐 runner와 같은 팩토리. 적재 경로의
+            # stale 분기·스탬프에 쓰는 것은 T-GR-03이다; 여기서는 어느 geo 데이터셋으로 적재했는지
+            # 남긴다.
+            current_dataset = await fetch_current_dataset(kraddr, logger=context.log)
             result = await client.run_offline_upload_load_job(
                 upload_id,
                 store=store,
@@ -64,12 +69,18 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
                 reverse_geocoder=kor_travel_geo_reverse_geocoder(kraddr),
             )
     else:
+        current_dataset = None
         result = await client.run_offline_upload_load_job(
             upload_id,
             store=store,
             dagster_run_id=context.run_id,
         )
     metadata = result.as_metadata()
+    metadata["geo_data_token"] = (
+        current_dataset.data_token
+        if current_dataset is not None and current_dataset.data_token is not None
+        else "none"
+    )
     context.add_output_metadata(metadata)
     if not result.acquired:
         raise Failure(description=result.error_message or "offline upload load lock busy")

@@ -44,6 +44,7 @@ ADR 참조
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from collections import Counter, OrderedDict, deque
 from collections.abc import Awaitable, Callable, Iterable
@@ -200,6 +201,8 @@ __all__ = [
     "GeoCallStats",
     # REST client + 콜러블 팩토리
     "KorTravelGeoRestClient",
+    "fetch_current_dataset",
+    "geo_dataset_mismatch",
     "geo_http_timeout",
     "kor_travel_geo_reverse_geocoder",
     "kor_travel_geo_address_geocoder",
@@ -1517,6 +1520,11 @@ class _KorTravelGeoObservedReverseGeocoder:
         self._max_distance_m = max_distance_m
         self._region_fallback_radius_km = region_fallback_radius_km
 
+    @property
+    def stats(self) -> GeoCallStats | None:
+        """주입된 client의 경계 계수(없으면 None). 적재 wrapper가 관측 토큰 불일치를 본다."""
+        return self._client._stats
+
     async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
         response = await self._client.reverse(
             float(coord.lon), float(coord.lat), radius_m=self._radius_m
@@ -1571,6 +1579,64 @@ class _KorTravelGeoObservedReverseGeocoder:
 
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+async def fetch_current_dataset(
+    client: KorTravelGeoRestClient | None,
+    *,
+    logger: logging.Logger | None = None,
+) -> DatasetRef | None:
+    """run 시작에 geo의 현재 데이터셋을 **한 번** 읽는다 — run-scoped 현재 토큰(ADR-109 결정 2).
+
+    asset·큐 runner(Dagster resource ``kor_travel_geo_dataset``)·offline upload·CLI가 모두 이
+    함수를 쓴다(팩토리 1개). 실패는 run을 멈추지 않는다 — client가 없거나(base URL 미설정),
+    geo가 답하지 못하거나(전송·HTTP·계약 오류, 키 거부), 활성 릴리스가 없으면(``available=false``)
+    **None + WARNING 1건**이다. None이면 적재 경로의 stale 분기가 꺼져 토큰 도입 전과 같아진다
+    (fail-to-current — geo 장애가 전량 재변환으로 번지지 않는다).
+
+    ``data_token``이 None인 ``DatasetRef``(지문 backfill 전)는 그대로 돌려준다 — 판정 불가는
+    소비자(적재 경로·센서)가 같은 규칙으로 처리한다. 경고는 내지 않는다(geo가 답했다).
+
+    ``logger``는 경고를 낼 logger다 — Dagster 경로는 ``managed_python_loggers``에 든 logger(또는
+    ``context.log``)를 넘겨야 경고가 event stream에 닿는다(2026-09-19 "이벤트 0건"과 같은 부류).
+    """
+    log = logger if logger is not None else _LOGGER
+    if client is None:
+        log.warning(
+            "kor-travel-geo 현재 데이터셋: client 없음(base URL 미설정) — 이 run의 현재 토큰은 None"
+        )
+        return None
+    try:
+        current = await client.dataset_version()
+    except (GeoRequestError, GeoAuthNotConfiguredError) as exc:
+        log.warning(
+            "kor-travel-geo 현재 데이터셋 조회 실패(%s) — 이 run의 현재 토큰은 None",
+            type(exc).__name__,
+        )
+        return None
+    if current is None:
+        log.warning(
+            "kor-travel-geo 현재 데이터셋: 활성 릴리스 없음(available=false) — "
+            "이 run의 현재 토큰은 None"
+        )
+    return current
+
+
+def geo_dataset_mismatch(
+    current: DatasetRef | None, observed_data_tokens: Iterable[str]
+) -> bool:
+    """run 도중 응답이 run-scoped 현재 토큰과 **다른** ``data_token``을 냈는가(ADR-109 결정 2).
+
+    현재 토큰이 없으면(None 또는 ``data_token`` None) 비교할 기준이 없어 False다. 참이면 그 run의
+    스탬프는 옛 토큰으로 찍히고 다음 센서 tick이 새 토큰으로 다시 계획한다(안전 방향) — 호출자는
+    WARNING 1건과 메타 ``geo_dataset_mismatch=true``만 남긴다.
+    """
+    if current is None or current.data_token is None:
+        return False
+    return any(token != current.data_token for token in observed_data_tokens)
 
 
 def kor_travel_geo_reverse_geocoder(

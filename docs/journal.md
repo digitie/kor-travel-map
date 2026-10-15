@@ -1,3 +1,32 @@
+## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
+
+- **무엇.** 팩토리 `fetch_current_dataset`(geocoding — CLI가 dagster를 import할 수 없어 여기), Dagster resource
+  `kor_travel_geo_dataset`(asset·큐 runner 공통 키), offline upload·CLI의 같은 팩토리 호출, asset 21곳 + MCST 1곳의
+  `geo_applied` 리터럴과 적재 wrapper 메타(`geo_*`, 불일치 WARNING 1건). 적재·스탬프 동작은 바뀌지 않는다.
+- **범위를 자른 자리.** client·infra 적재 함수로 `current_dataset`·`geo_applied`를 넘기는 것과 빈 답 비율 가드, MOIS 배선은
+  T-GR-03이다 — 지금 넘기면 받는 쪽이 아무것도 하지 않는 인자다. acceptance의 "(T-GR-03 뒤)" 항목도 그때 판정한다.
+  설계의 경량 `kor_travel_geo_client` resource는 센서(T-GR-05)가 쓸 때 더한다.
+- **#1326 델타 리뷰 후속(이 PR에 함께).** `tasks-rule.md` §8의 아카이브 복구 예외에 "충돌 마커 줄 자체의 삭제"를 정식으로
+  더했다(T-GR-01 journal의 '§8 복구 예외' 인용이 가리킬 조문). 마커 lint는 CRLF·CR 줄끝과 첫 줄 UTF-8 BOM을 정규화한 뒤
+  보고, `=======`는 같은 파일에 시작·기준·끝 마커가 있을 때만 센다(홀로 있는 setext 제목 밑줄은 통과). CRLF·BOM 임시
+  파일로 빨강을 확인했다. `address-geocoding.md` §7 e2e 행을 acceptance와 같은 "첫 tick이 기준선을 기록한 뒤"로.
+- **리뷰 A·B 반영.** resource를 lazy handle(`GeoDatasetHandle.current()`, 처음 쓰일 때 1회·동시 호출 1회)로 바꿨다 —
+  geo 콜러블이 없는 run(price/notice·visitkorea·MOIS)은 odroid가 꺼져도 connect 상한을 기다리지 않고, sync 초기화의 별도
+  loop·무기한 `thread.join()`도 사라졌다. 경고 경로: 팩토리는 `logger=`를 받아 resource는 managed logger
+  (`kortravelmap.dagster.resources`), offline upload은 `context.log`로, 불일치 경고는 wrapper가 넘기는 `context.log`로 낸다
+  (모듈 logger는 `managed_python_loggers`에 없어 event stream에 닿지 않는다 — 실제 resource 경로를 돌려 managed logger가
+  받는지 보는 테스트를 더했다). API key 미설정은 "base URL 미설정"이 아니라 그 원인으로 경고한다. 키 미배선 context는
+  WARNING. lint는 `None`이 아닌 `reverse_geocoder=` 인자도 reverse 사용으로 센다. 실제 역지오코더의 `stats`가 wrapper까지
+  가는 테스트. T-GR-03·T-GR-05 acceptance와 tasks.md에 이월 항목(client·repo 전달, run 빈 답 가드·MOIS 공유 상수, MOIS 배선,
+  price 경로 스탬프 0 검사, 경량 client resource)을 적었다.
+- **`test_archive_markdown_relative_links_resolve` 실패의 실제 원인.** 링크가 아니었다 — 로그의 오류는
+  `PytestUnraisableExceptionWarning`(앞선 subprocess 테스트가 남긴 `Popen`·`FileIO`가 이 테스트 도중 GC되며 잡힘)이었고,
+  n150 clone 두 곳의 `git status --porcelain --ignored docs/archive`는 비어 있다(낯선 아카이브 파일 없음). 격리 재실행은 초록.
+- **게이트.** 단위: 팩토리 성공·지문 없음(경고 0)·전송/5xx/키 거부/계약/`available=false`/client 없음(경고 정확히 1건),
+  불일치 판정 5분기. dagster: 메타 4키·불일치 WARNING 1건·현재 토큰 None이면 불일치 아님, resource가 base URL 없으면 None,
+  있으면 `/v2/dataset/version` 1회. lint: run 함수의 실제 콜러블(`_reverse_geocoder(context)`·`address_resolver=`) ==
+  `geo_applied` 리터럴(asset 하나를 False로 바꾸면 빨갛다), 팩토리 호출 지점 3곳·`dataset_version()` 직접 호출 0곳.
+
 ## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01, ADR-109 결정 1~3): 브랜치 `feat/t-gr-01-geocode-stamps`
 
 - **무엇.** migration 407 `feature.feature_geocode_stamps`, DTO `DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`, 스탬프 repo

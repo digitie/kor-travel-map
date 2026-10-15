@@ -17,7 +17,11 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[2]
-_MARKER = re.compile(r"^(?:<{7}|\|{7}|>{7})(?: |$)|^={7}$", re.MULTILINE)
+#: 어느 맥락에서도 마커인 줄(시작·기준·끝).
+_EDGE_MARKER = re.compile(r"^(?:<{7}|\|{7}|>{7})(?: |$)", re.MULTILINE)
+#: 구분 줄 ``=======``은 Markdown setext 제목 밑줄(정확히 7개)과 모양이 같다 — 같은 파일에
+#: 시작·기준·끝 마커가 하나라도 있을 때만 충돌 마커로 센다(홀로 있는 것은 제목 밑줄이다).
+_SEPARATOR = re.compile(r"^={7}$", re.MULTILINE)
 
 
 def _markdown_files() -> list[Path]:
@@ -31,11 +35,16 @@ def _read(path: Path) -> str:
     raw = path.read_bytes()
     if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return raw.decode("utf-16")
-    return raw.decode("utf-8")
+    return raw.decode("utf-8-sig")  # 첫 줄의 UTF-8 BOM을 떼어 줄머리 앵커가 맞게 한다
 
 
 def offenders(text: str) -> list[int]:
-    return [text.count("\n", 0, match.start()) + 1 for match in _MARKER.finditer(text)]
+    """마커 줄 번호(1부터). BOM을 떼고 CRLF·CR 줄끝을 LF로 맞춘 뒤 본다."""
+    text = text.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
+    hits = [match.start() for match in _EDGE_MARKER.finditer(text)]
+    if hits:
+        hits += [match.start() for match in _SEPARATOR.finditer(text)]
+    return sorted(text.count("\n", 0, start) + 1 for start in hits)
 
 
 def test_no_conflict_markers_in_markdown() -> None:
@@ -55,8 +64,11 @@ def test_no_conflict_markers_in_markdown() -> None:
         ("a\n||||||| parent of abc (x)\nb\n", [2]),
         ("<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> abc\n", [1, 3, 5]),
         ("| a || b |||||||\n|---|---|\n", []),
-        ("=======\n", [1]),
+        ("Title\n=======\n", []),  # setext 제목 밑줄 — 다른 마커 없음
+        ("<<<<<<< HEAD\nx\n=======\n", [1, 3]),
         ("text ======= text\n", []),
+        ("a\r\n||||||| parent of abc (x)\r\nb\r\n", [2]),  # CRLF
+        ("﻿<<<<<<< HEAD\nx\n", [1]),  # 첫 줄의 UTF-8 BOM
     ],
 )
 def test_marker_matcher(text: str, lines: list[int]) -> None:
