@@ -2022,10 +2022,12 @@ async def _current_geo_dataset(context: AssetExecutionContext) -> DatasetRef | N
     """run-scoped 현재 토큰 — resource handle이 처음 읽은 값(이후 같은 값). 키 미배선은 WARNING."""
     handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
     if handle is None:
-        context.log.warning(
-            "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — 현재 토큰 None으로 "
-            "진행"
-        )
+        log = getattr(context, "log", None)  # 직접 호출 테스트 대역에는 log가 없을 수 있다
+        if log is not None:
+            log.warning(
+                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — 현재 토큰 "
+                "None으로 진행"
+            )
         return None
     return await cast("GeoDatasetHandle", handle).current()
 
