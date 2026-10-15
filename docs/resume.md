@@ -1,3 +1,12 @@
+## 2026-10-15 — ADR-110 사실 갱신(odroid 이전 실행됨) + T-GR-00-LEDGER 종결 이관: 브랜치 `docs/adr-110-odroid-facts`
+
+**다음 한 작업: #1323(T-GR-00-LEDGER) 머지 → 이 브랜치를 main에 리베이스 → lint.yml 초록 → 머지(doc-only) → T-MAP-02를
+가능한 한 빨리(transport 플립이 이미 일어났다 — acceptance §T-MAP-02 2026-10-15 줄은 소유자 확인 대상) · T-GR-01(PR-1).**
+
+- 바뀐 것: ADR-110 "사실 갱신(2026-10-15)" 절과 포트·머지 상태 갱신, `integration-map.md` §1~§4, CLAUDE.md geocoding 줄,
+  ADR README, ADR-109 역포인터, T-GR-00-LEDGER `[x]`·이관, acceptance §T-MAP-02 제안 줄. 실측은 journal 2026-10-15.
+- 바뀌지 않은 것: 코드·`.env.example`·OpenAPI·n150(읽기만)·ADR-110의 결정과 열린 결정(전부 proposed 그대로).
+
 ## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER) + T-GR-00·T-MAP-01 종결 이관: 브랜치 `docs/t-gr-00-ledger`
 
 **다음 한 작업: lint.yml 초록 → 머지(doc-only) → ADR-110 사실 갱신 doc-only PR(2026-10-14~15 geo·weather·transport의

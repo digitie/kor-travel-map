@@ -10,7 +10,8 @@
   본 ADR이 표식 조건·재시도 규칙·이어 달리기를 amend한다)
 - amended by: **ADR-110**(proposed, 2026-10-13) — `GEO_HEAVY_POOL` 유지 근거('n150 디스크 대기' → 'odroid geo CPU
   보호')와 geo 호스트 플립(odroid 풀로드) 직후 센서가 만드는 전량 재계획 비용·센서/재지오코딩의 LAN 키 경로. 본 ADR의
-  결정 자체는 바뀌지 않는다.
+  결정 자체는 바뀌지 않는다. 2026-10-15 갱신: geo 플립은 2026-10-14~15 실행됐고 본 ADR의 센서(T-GR-05)가 미배포라
+  전량 재계획은 생기지 않았다 — 센서 첫 배포 때의 동작은 T-GR-07 runbook의 "첫 tick 전량" FAQ 몫이다(ADR-110 사실 갱신 절 5).
 - 코딩용 상세(표·판정 표·run_key·테스트 목록): [`docs/etl/address-geocoding.md`](../etl/address-geocoding.md)
 
 ## 컨텍스트

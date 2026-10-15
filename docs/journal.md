@@ -1,3 +1,23 @@
+## 2026-10-15 — ADR-110 사실 갱신: geo·weather·transport가 실제로 odroid로 갔다: 브랜치 `docs/adr-110-odroid-facts`
+
+- **무엇이 바뀌었나.** ADR-110 초안(2026-10-13)은 "포트·URL 동일, 호스트만 이전"을 전제했지만 소유자가 2026-10-14~15
+  Manager ADR-58 "잠정 시행"으로 세 스택을 먼저 옮기고 odroid 소비자 포트를 통일했다 — geo `12501`(UI `12505`), weather
+  `12201`, transport **API gateway `12301`**(odroid backend `12302`·frontend `12303`). Map 소비자 값은 Manager #476/#479의
+  compose 기본값으로 옮겨졌다(Map 저장소 변경 0 — ADR-110 결정 1이 맞았다). n150 공용 workspace는 concierge·map·pinvi
+  세 location, geo Dagster는 odroid 자체 plane.
+- **확인한 방법**(2026-10-15 08:34~08:40Z, n150 읽기 전용, 상태 코드만 출력): Map api·code-server env의 geo/transport base가
+  odroid; Map API 컨테이너에서 odroid geo `/v2/reverse`·`/v2/dataset/version` 200; code-server에서 transport gateway export
+  토큰 200·무토큰 404; n150에 transport·weather 컨테이너 0개, geo-api·ui는 남아 있음(Manager `map → geo` depends_on 때문,
+  workspace에는 없음); chain t1015d(Map `4931f9c0` + PinVi `44d8ecc8`) D1 11 passed·D2 `phase=passed`.
+- **관찰 하나.** 같은 확인 직전 odroid geo `/v2/reverse`가 세 번 약 9 s 뒤 504였다가 다음 호출은 1.0 s에 200. 원인은 보지
+  않았다 — Map 단일 timeout 10 s에 가깝다는 점만 적는다(T-MAP-02가 다루는 것은 connect이지 이 read 지연이 아니다).
+- **결정과 어긋난 순서.** T-MAP-02(connect 분리)는 "transport 플립 전 배포"였는데 플립이 먼저 일어났다. acceptance
+  §T-MAP-02에 "첫 prod 배포로 읽기"를 **제안**으로만 적었다(조문은 소유자 확인 전이라 그대로).
+- **문서.** ADR-110 머리말·"사실 갱신(2026-10-15)" 절 신설·컨텍스트/결정 5/후속의 포트·머지 상태 갱신(교차 ADR 셋은
+  2026-10-13 main에 proposed로 머지돼 있었다), `integration-map.md` §1(transport·geo 행, Manager 행의 낡은 관측 포트
+  12401/12301/12205 → 12102/12103/12104)·§2(그림의 transport 포트, LAN 단락)·§3(transport export 행)·§4(geocoding 행),
+  CLAUDE.md geocoding 줄, ADR README 두 줄, ADR-109 역포인터. T-GR-00-LEDGER(#1323) `[x]`·이관.
+
 ## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER): 브랜치 `docs/t-gr-00-ledger`
 
 - **분리.** `journal.md` 209,356 B에서 가장 오래된 묶음 2026-09-20~25 8건(27,260 B)을 `docs/archive/journal-2026-09e.md`로,

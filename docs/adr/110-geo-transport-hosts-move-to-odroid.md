@@ -1,8 +1,11 @@
 # ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다
 
-- 상태: proposed (설계 2026-10-13, Track 2 적대 리뷰 3차 반영본 기준. **미구현** — Map 쪽 task는 `T-MAP-01`(이
-  문서)·`T-MAP-02`(connect timeout 분리). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다)
-- 날짜: 2026-10-13
+- 상태: proposed (설계 2026-10-13, Track 2 적대 리뷰 3차 반영본 기준. Map 쪽 task는 `T-MAP-01`(이 문서, #1316
+  머지)·`T-MAP-02`(connect timeout 분리, **미구현**). 호스트 플립 자체는 Manager·geo·transport 저장소의 일이다).
+  **2026-10-14~15에 geo·weather·transport가 실제로 odroid로 옮겨졌고 소비자 포트가 바뀌었다** — 아래 "사실 갱신
+  (2026-10-15)" 절이 그 뒤의 정본 사실이고, 본문의 2026-10-13 서술과 다르면 그 절이 이긴다. 결정·열린 결정은 그대로
+  proposed다(소유자 승인 전)
+- 날짜: 2026-10-13 (사실 갱신 2026-10-15)
 - 결정자: human(승인 대기), Claude
 - 관계: **Manager ADR-58**(두 번째 Docker 호스트 odroid — registry `hosts:`·호스트 프로필 Manager·호스트당 Dagster
   plane/PG·target별 host 플립 PR; 값의 **정본**), **geo ADR-070**(geo 스택의 odroid 운영·빈 호스트 풀로드·공개 키
@@ -16,16 +19,71 @@
   여부는 소유자 결정이다(Manager ADR-58 작성 시 첨부 여부). 본 ADR은 그중 **Map 저장소가 책임지는 것**만 적는다.
 - 표기: LAN 주소 리터럴은 적지 않는다 — 저장소 `scripts/check_prod_redaction.py`(#508, `lint.yml`·pre-commit)가
   committed docs의 사설 IP를 거부한다. 호스트는 이름(`n150`·`odroid`)으로 쓰고 실제 주소는 Manager root `.env`·
-  registry(ADR-58 계획)에만 있다. 교차 저장소 ADR 번호(Manager ADR-58·geo ADR-070·transport ADR-014)는 고정 번호이고
-  각 저장소의 **병렬 PR에 작성돼 있으나 아직 main에 머지되지 않았다**(2026-10-13 로컬 체크아웃 기준 — Manager
-  `docs/decisions.md` ADR-58 절, geo `docs/adr/070-odroid-host-and-empty-host-full-load.md`, transport
-  `docs/adr/014-odroid-host-and-deploy-host-flag.md`; 각 origin/main에는 없다). 본문의 "(proposed, 미머지)" 표식은 그
-  저장소가 머지한 뒤 "후속"의 accepted 전환 항목과 같은 자리에서 걷는다.
+  registry(`config/docker-targets.yml` `hosts:` — 2026-10-14 Manager #476부터 존재)에만 있다. 교차 저장소 ADR 번호(Manager
+  ADR-58·geo ADR-070·transport ADR-014)는 고정 번호이고 2026-10-13 초안 시점에는 병렬 PR이었으나 **2026-10-13에 셋 다
+  main에 proposed로 머지됐다**(Manager `docs/decisions.md` ADR-58 절 #470 `d935311`, geo
+  `docs/adr/070-odroid-host-and-empty-host-full-load.md` #572 `3ee05ee`, transport `docs/adr/014-odroid-host-and-deploy-host-flag.md`
+  #77 `859d7a0`; 2026-10-15 각 origin/main으로 확인). 그래서 본문에 남은 "(proposed, 미머지)" 표식은 "(proposed)"로 읽는다 —
+  후속 표식 교체 ①이 충족됐다.
+
+## 사실 갱신 (2026-10-15)
+
+2026-10-13 초안 뒤 소유자가 호스트 이전을 Manager ADR-58의 "잠정 시행"(2026-10-14 승인, T-MGR-01a~02 앞당김의
+부분집합)으로 먼저 실행했다. 아래는 2026-10-15 이 세션에서 다시 확인한 사실이고, 확인 방법을 각 줄에 적는다. n150
+읽기 전용 확인은 2026-10-15 08:34~08:40Z이다(Map 컨테이너 안에서 env 값을 써서 호출하고 **상태 코드만** 찍었다 — 키·
+토큰·주소 값은 출력하지 않았다). 결정·열린 결정은 바꾸지 않는다 — 바뀐 것은 그 전제가 되는 사실과 순서다.
+
+1. **세 스택이 odroid로 옮겨졌다.** geo·weather·transport가 2026-10-14~15 odroid로 이전됐고 소유자가 odroid 쪽 소비자
+   포트를 공개 대역으로 **통일**했다: geo API **`12501`**(UI `12505`), weather API **`12201`**(n150의 `14101`이 아니다),
+   transport **API gateway `12301`**(n150의 backend `14001`이 아니다 — 소비자는 gateway를 부른다). odroid의 transport
+   backend는 `12302`, frontend는 `12303`이다(소유자 요청으로 맞바꾼 배치; transport 저장소 main 문서에는 아직 반영되지
+   않았고 그 문서의 `12302`는 사라진 옛 Dagster gateway를 가리킨다). 근거: Manager `docs/ports.md`·`docs/decisions.md`
+   ADR-58 "잠정 시행" 절(origin/main `409833e`), odroid `12201`·`12301`·`12302` `/health` 200, geo `12501` `/v1/healthz`
+   200(`{"status":"ok"}`), odroid `14001`·`14101`은 응답 없음. 이로써 컨텍스트 첫 문단의 "포트·URL 동일" 전제는 세
+   소비자 origin에 한해 대체됐다. Map은 weather를 부르지 않으므로(ADR-105) weather 포트는 기록으로만 둔다.
+2. **Map의 소비자 값은 Manager compose 기본값이 바뀌어 옮겨졌다**(결정 1 그대로 — Map 저장소 변경 0). Manager #476
+   (`a2fd1de`, T-MGR-06i)이 `config/docker-targets.yml`에 `hosts:`(n150 default·odroid)와 weather·transport `host: odroid`를
+   넣고 소비자 기본값 8곳을 바꿨다 — Map 쪽은 `KOR_TRAVEL_MAP_DOCKER_GEO_BASE_URL` 기본 `http://<odroid>:12501`(Map 서비스
+   4곳, `docker-compose.yml:1590,1735,1830,1937`@409833e)과 `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL` 기본
+   `http://<odroid>:12301`(code-server 1곳, `:1747`). #479(`0de5040`)가 geo에도 `host: odroid`를 줬다. 실행 중인 Map
+   컨테이너 env 대조: api·code-server의 geo base = odroid `12501`, code-server의 transport base = odroid `12301`. 다만
+   ADR-58 R1 렌더·`targets validate --json`·root `.env` URL 재정의 거부(T-MGR-01a~c)는 **아직 없다** — 컨텍스트 1·결정 1의
+   "오늘 = compose 기본값 + root `.env`"는 여전히 맞고, 바뀐 것은 그 기본값의 값뿐이다(compose 기본값은 registry를 읽지
+   못하는 리터럴이고 Manager 렌더 스캔 테스트 `backend/tests/test_consumer_origin_defaults.py`가 registry `host:`와 대조한다).
+3. **효과(Map 쪽에서 본 것).** Map API 컨테이너에서 odroid geo `POST /v2/reverse` **200**(1.0 s)·`POST /v2/dataset/version`
+   **200** — Map 소비자 키가 odroid geo에서 받아들여진다(결정 4: 키는 오늘도 대조된다. 재발급이었는지 이관이었는지는
+   geo 쪽 기록 몫이고 여기서는 효과만 본다). 같은 확인 직전 `/v2/reverse` 세 번이 약 9 s 뒤 **504**였다가 그다음 200이
+   됐다 — 원인은 보지 않았고 관찰로만 남긴다(odroid geo 부하·워밍업 가능성; 결정 3의 read 상한 10 s와 가까운 값이다).
+   Map code-server에서 odroid transport gateway export(`airports`·`highway-incidents/active`) 토큰 있음 **200**(0.6 s),
+   토큰 없음 **404**(경로 숨김) — 결정 5의 allow-list·토큰 경계가 gateway에서 성립한다. n150에는 transport·weather
+   컨테이너가 0개다.
+4. **Dagster.** n150 공용 plane workspace는 `ktc.dagster.definitions`·`kortravelmap.dagster.definitions`·
+   `pinvi.etl.definitions` **세 location**이다(Manager #479, workspace digest `4461abc13cce9c4f`; n150 설치 release의
+   `config/dagster-shared/workspace.yaml`로 확인). geo Dagster는 2026-10-15부터 odroid 자체 plane에서 돈다(Manager ADR-58
+   "geo workspace 제외" 절 — schedule·sensor는 그 기록 시점 STOPPED), weather·transport 수집도 odroid 자체 Dagster다. Map
+   Dagster(map location)는 n150 공용 plane에 그대로 있다.
+5. **전환 절차(결정 7)와의 차이.** 단계 5·9의 consumer 전환은 위 2로 일어났다. 그러나 (ㄱ) **T-MAP-02(connect 분리)는
+   transport 플립 전에 배포되지 않았다** — 결정 3·후속의 "배포는 4a 전" 순서는 이제 지킬 수 없고, 남은 요구는 "가능한
+   한 빨리 배포"다. 그때까지 odroid 다운은 Map geo 호출마다 최대 10 s(transport 30 s)를 쓴다. (ㄴ) 전원 off drill은
+   하지 않았다. (ㄷ) **단계 11은 아직이다** — n150 `kor-travel-geo-api`·`-ui` 컨테이너가 살아 있고 n150 loopback
+   `12501` `/v1/healthz`도 200이다. Manager 기록상 compose의 `map → geo` depends_on 간선(R7, T-MGR-01b)이 남아 n150
+   `ensure map`이 n150 geo 컨테이너를 되살리며, n150 workspace에는 geo가 없어 이중 적재는 없다. Map은 그 n150 geo를
+   부르지 않는다(위 2의 env). (ㄹ) odroid geo가 풀로드였는지 dump 복원이었는지는 이 문서가 확인하지 않았다 — Map
+   릴리스 센서(T-GR-05)가 미배포라 결정 6의 전량 재계획은 어느 쪽이든 발생하지 않았다.
+6. **검증된 pair.** Map `4931f9c0`(#1319) + PinVi `44d8ecc8` pinned pair가 이전 뒤 상태에서 n150 chain(`/root/chain-t1015d.log`,
+   2026-10-15)으로 **D1 11 passed**, **D2 `phase=passed`**(BLOCKED 없음)를 냈다.
+7. **바뀌지 않은 것.** Map·PinVi·concierge는 n150에 남고, Map DB는 n150 `kor-travel-shared-postgres` **`11000`** 안의
+   전용 DATABASE 그대로다(ADR-103). Map UI 이미지는 다시 만들지 않았다 — 실행 중인 map-ui의
+   `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`은 공개 host(결정 2·열린 결정 1의 "공개 host 유지" 쪽)이고 런타임
+   `KOR_TRAVEL_GEO_INTERNAL_URL`은 없다.
 
 ## 컨텍스트
 
-Map의 두 피호출자 geo(12501)·transport(14001)가 n150에서 odroid로 옮겨진다(소유자 지시 — 포트·URL·컨테이너명·
-compose 프로젝트명은 n150과 **동일**, 호스트(LAN 주소)만 n150 → odroid; 설계 §4.2, 점유 포트 충돌 0 §4.6).
+Map의 두 피호출자 geo(12501)·transport(초안 시점 n150 backend 14001)가 n150에서 odroid로 옮겨진다(초안 시점 소유자
+지시 — 포트·URL·컨테이너명·compose 프로젝트명은 n150과 **동일**, 호스트(LAN 주소)만 n150 → odroid; 설계 §4.2, 점유
+포트 충돌 0 §4.6). **2026-10-15 갱신: 이전은 2026-10-14~15에 실행됐고 "포트 동일"은 세 소비자 origin에 한해 소유자
+결정으로 대체됐다** — geo API `12501`(불변), weather API `12201`, transport는 backend가 아니라 **API gateway `12301`**
+(사실 갱신 절 1·2).
 Map·PinVi·concierge는 n150에 남는다. Map이 오늘 그 둘을 어떻게 부르는지가 바뀌는 것의 전부다.
 
 1. **값의 자리는 Map 저장소가 아니다.** 운영 Map이 읽는 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL`은 Manager compose가
@@ -33,12 +91,13 @@ Map·PinVi·concierge는 n150에 남는다. Map이 오늘 그 둘을 어떻게 �
    기본값이 Map 서비스 4곳**(`kor-travel-map-api`·`-dagster-code-server`·`-dagster`·`-dagster-daemon`; Manager
    `docker-compose.yml:1582,1723,1813,1920`@08a515e)에 복제돼 있어 플립 PR은 **키 이름으로 4곳을 함께** 바꾼다
    (Manager ADR-58 R2의 "4곳"). transport는 code-server 1곳뿐이다 — `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`·
-   `_SERVICE_TOKEN`(`:1732-1733`@08a515e, 기본 `http://127.0.0.1:14001`). Manager origin/main은 이미 그 뒤(`094d3976`,
+   `_SERVICE_TOKEN`(`:1732-1733`@08a515e, 기본 `http://127.0.0.1:14001` — **2026-10-14 #476 뒤 `http://<odroid>:12301`**,
+   사실 갱신 절 2). Manager origin/main은 이미 그 뒤(`094d3976`,
    compose +14/−3)라 같은 키가 geo `:1582,1727,1819,1926`·transport `:1736-1737`에 있다 — Manager 플립 PR 작성 시
    **키 이름으로** 재확인한다. Map 코드의 설정 필드는 `src/kortravelmap/settings.py:150`(geo base)·`:509-519`(transport
    base — "n150은 같은 호스트의 `http://127.0.0.1:14001`" 설명 포함)이고, 저장소의 `.env.example:198`·`:234`는
    **standalone 스택** 값이다. 오늘 Manager registry(`config/docker-targets.yml`@08a515e)에는 `hosts:` 필드가 없다 —
-   Manager ADR-58 R2(proposed, 미머지)가 이 기본값을 registry `hosts:`에서 파생한 **커밋된 파생물**로 만들고, 그 뒤에는
+   Manager ADR-58 R2(proposed)가 이 기본값을 registry `hosts:`에서 파생한 **커밋된 파생물**로 만들고, 그 뒤에는
    URL의 자리가 그 파생 기본값뿐이라 root `.env`의 URL 재정의는 `targets validate`가 **거부**한다(`.env`에는 키·토큰만
    남는다 — T-MGR-01c 수용 기준). 즉 "오늘 = compose 기본값 + root `.env`", "ADR-58 R2 뒤 = 파생 기본값만"이고, 그때
    `.env`에 URL을 적어 validate가 거부하는 것은 Manager 결함이 아니라 설계다.
@@ -85,13 +144,14 @@ Map·PinVi·concierge는 n150에 남는다. Map이 오늘 그 둘을 어떻게 �
    2026) **완료**; timesyncd 부팅 순서 사이클의 영속화(drop-in)·`docker compose` v2/buildx 설치·호스트 방화벽·fstab
    bind·swapfile은 **미완**. 이전 순서는 transport → weather → geo(설계 §3.7·§11.2)이고 geo는 메모리 예산 조건
    (설계 §3.2 조건 3, §14-12)을 통과할 때만 간다 — 미달이면 geo는 n150 잔류이고 본 ADR의 geo 절은 발효하지 않는다.
+   **2026-10-15 갱신: 세 스택 모두 옮겨졌다(geo 포함) — 본 ADR의 geo 절도 발효 상태다**(사실 갱신 절 1).
 
 ## 결정
 
 ### 1. Map 저장소는 값을 바꾸지 않는다 — 정본은 Manager(오늘은 compose 기본값 + root `.env`, ADR-58 R2 뒤에는 registry `hosts:` 파생 기본값만 — `.env`의 URL 재정의는 validate가 거부)
 
 geo·transport의 운영 origin은 **오늘** Manager compose의 리터럴 기본값(geo 4곳 `:1582,1723,1813,1920`·transport 1곳
-`:1732`@08a515e — 컨텍스트 1) + root `.env`가 정하고, Manager ADR-58 R2(proposed, 미머지) 뒤에는 그 기본값이 registry
+`:1732`@08a515e — 컨텍스트 1) + root `.env`가 정하고, Manager ADR-58 R2(proposed) 뒤에는 그 기본값이 registry
 `hosts:`에서 파생한 커밋 파생물이 되며 root `.env`의 URL 재정의는 `targets validate`가 거부한다. 호스트 플립은
 **그 저장소의 플립 PR + n150 `ensure map` — Map target 전 서비스 재생성**(옛 URL/키를 든 컨테이너 0개가 게이트:
 `docker inspect`로 env 대조; 08-13 사고처럼 api만 재생성하면 dagster/daemon이 옛 값을 든 채 남는다 — 결정 4 (a)·결정
@@ -158,9 +218,11 @@ PR 절차(외부 추적)다. (b) `kor_travel_geo_preflight_required`가 켜져 �
 
 `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV += <n150 LAN 주소>/32`는 transport 운영 env 파일의 변경이다 — 오늘 그 파일은
 `.env.server14`(transport `README.md:123-124`; `.env.server14.example`이 시작점)이고, `.env.prod`는 transport ADR-014
-(proposed, 미머지)가 **개명하기로 한 계획 이름**이다(플립 전 운영자가 `.env.prod`를 찾지 않도록 둘 다 적는다). Map은 요구
+(proposed)가 **개명하기로 한 계획 이름**이다(플립 전 운영자가 `.env.prod`를 찾지 않도록 둘 다 적는다). Map은 요구
 사항만 적고(peer = Map code-server의 LAN 주소; XFF 불가) 토큰·base URL 외 아무것도 보내지 않는다. 전환 게이트:
-n150 transport backend가 **stop인 상태에서** Map export 1회 성공(설계 §11.2 단계 5).
+n150 transport backend가 **stop인 상태에서** Map export 1회 성공(설계 §11.2 단계 5). **2026-10-15 갱신**: 실제 경계는
+odroid transport **API gateway `12301`**이 `/v1/service/exports/*`를 n150 LAN 주소에만 여는 것이다(Manager ADR-58 "잠정
+시행") — 효과는 사실 갱신 절 3(토큰 200·무토큰 404, n150 transport 컨테이너 0개).
 
 ### 6. ADR-109 amend — `GEO_HEAVY_POOL` 근거와 플립 직후 전량 재계획
 
@@ -213,15 +275,16 @@ geo/weather/transport가 빠지면 Map code-server의 디스크 대기 timeout �
 주소가 바뀌면 n150 consumer(Map 포함 — PinVi·concierge·HAProxy backend도)가 조용히 끊긴다(설계 §4.5 — OPNsense 예약은
 소유자 결정 §14-20; 호스트 생사 신호는 Manager 관측 스택 몫 — `up{host="odroid"}`는 Manager ADR-58 파생물
 **계획**이고 오늘 Manager `config/prometheus/prometheus.yml`에는 `host` 라벨이 없다). (5) 본 ADR의 geo 절은 geo가 실제로
-odroid로 가는 경우에만 발효한다 — n150 잔류면 transport 절만 남는다.
+odroid로 가는 경우에만 발효한다 — n150 잔류면 transport 절만 남는다(2026-10-15: geo도 옮겨져 발효했다).
 
 ## 후속
 
 - **T-MAP-01**(이 문서 PR): ADR-110·README·`integration-map.md`·CLAUDE.md·ADR-109 역포인터·원장. 머지로 끝.
 - **T-MAP-02**(코드): connect timeout 분리 + 팩토리 lint + `.env.example` standalone 주석 + `GEO_HEAVY_POOL`·
-  `mois_geocode_concurrency`·transport base URL 설명 문구. 선행 T-GR-00-LEDGER, 배포는 transport 플립(4a) 전.
+  `mois_geocode_concurrency`·transport base URL 설명 문구. 선행 T-GR-00-LEDGER, 배포는 transport 플립(4a) 전 —
+  **2026-10-15 갱신: 플립이 이미 일어나 이 순서는 지킬 수 없게 됐다. 지금은 가능한 한 빨리 배포한다**(사실 갱신 절 5).
 - **외부**(Map 저장소 밖, 외부 추적): Manager ADR-58·T-MGR-01b/01c 플립 PR, geo ADR-070(키 재발급 절차 포함),
-  transport ADR-014(allow-list) — 셋 다 proposed·병렬 PR 미머지. 설계 §9.1 키 행·§5.6 ⑥의 정정과 §13 T-MAP-02·§9.1의
+  transport ADR-014(allow-list) — 셋 다 proposed(2026-10-13 main 머지; 실제 이전은 Manager ADR-58 "잠정 시행" 2026-10-14~15). 설계 §9.1 키 행·§5.6 ⑥의 정정과 §13 T-MAP-02·§9.1의
   `httpx.Timeout` 표기 오류(결정 3)는 geo ADR-070·Manager ADR-58 작성자에게 전달한다.
 - **표식 교체(세 시점)**: ① 교차 ADR의 "(proposed, 미머지)"는 그 저장소가 머지할 때; ② "오늘 = compose 기본값 +
   root `.env`" 문구(컨텍스트 1·결정 1·`integration-map.md` §1/§2·CLAUDE.md)는 Manager ADR-58 R2가 적용돼 `.env` URL

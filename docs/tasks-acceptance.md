@@ -2439,6 +2439,9 @@ run이 호출마다 10 s를 소모한다. 규모 S.
   ADR-110"으로. journal·resume 갱신(`scripts/check_journal_update.py`).
 - 해제 조건: 빨간 입력 (1)(2)(3) 초록 + CI green 머지 + **transport 플립 4a 전 배포**(배포 generation을 이 절에
   기록, 규약 §6). 여기까지가 `[x]`다 — ops 게이트는 종결 조건이 아니다.
+- 2026-10-15 사실 갱신(ADR-110 사실 갱신 절 5): transport(와 geo) 플립이 2026-10-14~15 이 task보다 **먼저** 일어나 위
+  조문의 "4a 전 배포"는 충족할 수 없다. 이 조문을 "머지 뒤 **첫 prod 배포**(generation 기록)"로 읽기를 **제안**한다 —
+  소유자 확인 대상이라 조문 문구는 바꾸지 않았다. 그때까지 odroid 다운은 호출마다 read 상한(geo 10 s·transport 30 s)을 쓴다.
 - 참고(배포 뒤 검증, 재적용을 견디는 축 아님 — 외부 추적, ADR-110 결정 7 drill 행): odroid 전원 off drill에서 MOIS
   run이 `mois_load_run_budget_seconds`(14,400 s)의 10 % 안에 FAILURE — 측정 시각·배포 generation을 함께 적는다. 키
   경로 curl smoke(`9-전`)는 connect timeout과 무관한 Manager/geo 플립 절차 항목이라 이 절에 두지 않는다.
