@@ -292,14 +292,22 @@ async def test_override_mismatch_is_a_finding_once_and_not_a_rewrite(
     migrated_session: AsyncSession,
 ) -> None:
     _, feature_id = await _load_a(migrated_session, "override")
-    await migrated_session.execute(
-        text(
-            "INSERT INTO ops.feature_overrides (feature_id, field_path, override_value, status) "
-            "VALUES (CAST(:id AS uuid), 'core.road_name_code', CAST(:value AS jsonb), 'active')"
-        ),
-        {"id": feature_id, "value": json.dumps("115603118001")},
-    )
     before = await _row(migrated_session, feature_id)
+    # 사람이 도로명코드를 고정했다 — 열과, 같은 값을 담은 address jsonb 둘 다(address에도 코드가 있다).
+    stored_address = before["address"]
+    if isinstance(stored_address, str):
+        stored_address = json.loads(stored_address)
+    for path, value in (
+        ("core.road_name_code", "115603118001"),
+        ("core.address", stored_address),
+    ):
+        await migrated_session.execute(
+            text(
+                "INSERT INTO ops.feature_overrides (feature_id, field_path, override_value, status) "
+                "VALUES (CAST(:id AS uuid), :path, CAST(:value AS jsonb), 'active')"
+            ),
+            {"id": feature_id, "path": path, "value": json.dumps(value)},
+        )
 
     again = await _festival("override", _FakeReverse(_geo(road_name_code="115603118999")))
     first = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
@@ -307,7 +315,8 @@ async def test_override_mismatch_is_a_finding_once_and_not_a_rewrite(
 
     assert first.geo_override_stale_findings == 1
     assert second.geo_override_stale_findings == 0
-    # override가 있는 열만 달랐다 — 값 동일로 보아 다시 쓰지 않는다(row_revision 불변).
+    # override가 있는 열만 달랐다 — 비교에서 빼므로 다시 쓰지 않는다(row_revision 불변).
+    # 의도적 빨강(2): override 열을 비교에 넣으면 여기서 row_revision이 전진한다.
     assert (await _row(migrated_session, feature_id))["row_revision"] == before["row_revision"]
     count = (
         await migrated_session.execute(
