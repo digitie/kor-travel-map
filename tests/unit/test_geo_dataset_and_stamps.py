@@ -243,7 +243,8 @@ async def test_empty_answers_are_counted_apart_from_failures() -> None:
     assert stats.observed_data_tokens == {DATA, OTHER_DATA}
     metadata = stats.as_metadata()
     assert metadata["geo_empty_reverse"] == 2
-    assert metadata["geo_empty_total"] == 2
+    # 행 단위 최종 빈 답(region fallback 없음 — endpoint 빈 답과 같다, T-GR-03 run 가드의 분자).
+    assert metadata["geo_empty_reverse_result"] == 2
 
 
 # -- DTO ---------------------------------------------------------------------------------
@@ -380,3 +381,28 @@ def test_decide_outcome_table(label: str, kwargs: dict[str, Any], expected: str 
     arguments.update(kwargs)
     geo_applied = arguments.pop("geo_applied")
     assert decide_outcome(geo_applied, **arguments) == expected, label
+
+
+# -- GeoLoadContext.effective_token (T-GR-03) ---------------------------------------------
+
+
+def test_effective_token_is_none_when_the_run_crossed_a_dataset_switch() -> None:
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
+
+    current = DatasetRef(version_token=VERSION, data_token=DATA)
+    applied = GeoApplied(reverse=True, geocode=False)
+    assert GeoLoadContext(geo_applied=applied, current_dataset=current).effective_token() == DATA
+    observed = {DATA}
+    context = GeoLoadContext(
+        geo_applied=applied, current_dataset=current, observed_data_tokens=observed
+    )
+    assert context.effective_token() == DATA
+    observed.add(OTHER_DATA)  # 살아 있는 참조 — 적재 시점의 관측이 반영된다
+    assert context.effective_token() is None
+    assert GeoLoadContext(geo_applied=applied).effective_token() is None
+    assert (
+        GeoLoadContext(
+            geo_applied=applied, current_dataset=DatasetRef(version_token=VERSION)
+        ).effective_token()
+        is None
+    )
