@@ -13,6 +13,7 @@ from dagster import AssetKey, Failure, build_asset_context
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
+from kortravelmap.dto.geo_dataset import GeoApplied
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
@@ -330,9 +331,12 @@ async def test_culture_raw_callback_emits_no_membership_on_late_failure(
         dataset_key: str,
         bundles: object,
         authoritative_snapshot_complete: bool,
+        geo_applied: GeoApplied,
     ) -> Any:
         del provider, bundles
         assert authoritative_snapshot_complete is True
+        # MCST 변환은 reverse를 넘긴다(ADR-109 결정 3).
+        assert geo_applied == GeoApplied(reverse=True, geocode=False)
         events.append(("load", dataset_key))
         if dataset_key == second_dataset:
             raise RuntimeError("late MCST failure")
@@ -444,9 +448,12 @@ async def test_culture_public_wrapper_retries_canonical_members_stably(
         dataset_key: str,
         bundles: object,
         authoritative_snapshot_complete: bool,
+        geo_applied: GeoApplied,
     ) -> Any:
         del provider, bundles
         assert authoritative_snapshot_complete is True
+        # MCST 변환은 reverse를 넘긴다(ADR-109 결정 3).
+        assert geo_applied == GeoApplied(reverse=True, geocode=False)
         if dataset_key == second_dataset:
             raise RuntimeError("late MCST failure")
         return object()
