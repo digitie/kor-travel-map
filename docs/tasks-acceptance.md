@@ -2636,6 +2636,11 @@ geocode_obtained_code}`(T-GR-01, `dto/geo_dataset.py`)로 내보낸다 — `Admi
   `effective_token()`은 None이다(fail closed) — `_geo_load_context`·MOIS `_observed_tokens`가 계수 없음을 None으로 넘긴다.
   (14) 설계와 다른 자리: `FeatureAddressSnapshot`은 넓히지 않고 `read_stored_geo_columns`를 썼다(6열 + `address` +
   active override를 한 문장으로 — snapshot을 넓히면 그 소비처 전부의 계약이 바뀐다).
+- 구현 메모 3(2026-10-16, #1328 3차 리뷰): (15) 선읽기는 기존 Feature를 건드리는 **모든** 행이 소비한다(geo 대상이
+  아니어도) — payload를 바꾼 행이 주소를 고쳐 쓴 뒤 같은 chunk의 뒤 행이 낡은 선읽기로 "값 동일"을 오판하지 않게.
+  (16) 부분 퇴행 유지의 `road_name_code`는 도로명 텍스트가 같을 때만 낱개로, 아니면 `road_address_management_no`와
+  함께 사라졌을 때만 짝으로 지킨다. (17) chunk 도중 전환 통합 테스트 — 전환 전 행은 다시 쓰이고 스탬프 0건, 다음 run은
+  stale로 다시 본다.
 
 ## T-GR-04
 
