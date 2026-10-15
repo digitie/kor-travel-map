@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
+from dataclasses import dataclass, field
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +28,7 @@ __all__ = [
     "DatasetRef",
     "GeoApplied",
     "GeoAttemptEvidence",
+    "GeoLoadContext",
     "ReverseOutcome",
 ]
 
@@ -72,3 +75,28 @@ class GeoAttemptEvidence(BaseModel):
 
     reverse_attempted: bool
     geocode_obtained_code: bool = False
+
+
+@dataclass(frozen=True)
+class GeoLoadContext:
+    """적재 경로가 받는 run의 geo 입력 — 사용 신호·run-scoped 현재 토큰·관측 토큰(ADR-109).
+
+    ``observed_data_tokens``는 run의 ``GeoCallStats.observed_data_tokens``를 **그대로
+    가리키는**(복사가 아닌) 집합이다 — 적재 시점까지 응답에서 본 토큰이 다 들어 있다. 그 안에 현재
+    토큰과 다른 값이 하나라도 있으면 이 run은 데이터셋 전환을 가로질렀다는 뜻이고, 그때
+    :meth:`effective_token`은 None이다 — stale 분기·스탬프 쓰기를 하지 않는다(옛 데이터로 해석한
+    행이 새 토큰으로 봉인되는 것을 막는 안전 방향; 다음 계획이 다시 고른다).
+    """
+
+    geo_applied: GeoApplied
+    current_dataset: DatasetRef | None = None
+    observed_data_tokens: AbstractSet[str] = field(default_factory=frozenset)
+
+    def effective_token(self) -> str | None:
+        """이 적재에서 비교·스탬프에 쓸 토큰. 없거나 run이 전환을 가로질렀으면 None."""
+        if self.current_dataset is None or self.current_dataset.data_token is None:
+            return None
+        token = self.current_dataset.data_token
+        if any(observed != token for observed in self.observed_data_tokens):
+            return None
+        return token

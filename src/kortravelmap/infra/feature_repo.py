@@ -79,6 +79,21 @@ from kortravelmap.infra.domain_command_repo import (
     create_domain_command_record,
     lock_domain_command,
 )
+from kortravelmap.infra.feature_geocode_load import (
+    StoredGeoColumns,
+    address_column_values,
+    differing_columns,
+    empty_answer_guard,
+    override_mismatches,
+    provider_code_present,
+    read_stored_geo_columns,
+    record_override_geo_stale,
+)
+from kortravelmap.infra.feature_geocode_stamp_repo import (
+    decide_outcome,
+    is_stale,
+    upsert_stamps,
+)
 from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
 from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
@@ -92,6 +107,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from kortravelmap.dto import Feature, FeatureBundle, SourceLink, SourceRecord
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
 
 __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
@@ -1926,6 +1942,16 @@ class FeatureLoadResult:
     source_links_updated: int = 0
     curation_input_member_count: int | None = None
     curation_input_set_hash: str | None = None
+    #: 지오코딩 스탬프를 쓴 행(ADR-109 결정 1).
+    geo_stamps_written: int = 0
+    #: payload는 그대로인데 스탬프가 낡아(stale) 새 geo 값으로 다시 쓴 행.
+    geo_stale_rewritten: int = 0
+    #: stale이었지만 새 geo 값이 저장값과 같아 ``features``를 쓰지 않고 스탬프만 전진한 행.
+    geo_stale_unchanged: int = 0
+    #: 빈 답 가드로 주소 열을 덮지 않고 스탬프도 찍지 않은 행.
+    geo_empty_guarded: int = 0
+    #: ``address_override_geo_stale`` finding을 새로 남긴 행.
+    geo_override_stale_findings: int = 0
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -1945,6 +1971,13 @@ class FeatureLoadResult:
                 other.curation_input_set_hash
                 if other.curation_input_set_hash is not None
                 else self.curation_input_set_hash
+            ),
+            geo_stamps_written=self.geo_stamps_written + other.geo_stamps_written,
+            geo_stale_rewritten=self.geo_stale_rewritten + other.geo_stale_rewritten,
+            geo_stale_unchanged=self.geo_stale_unchanged + other.geo_stale_unchanged,
+            geo_empty_guarded=self.geo_empty_guarded + other.geo_empty_guarded,
+            geo_override_stale_findings=(
+                self.geo_override_stale_findings + other.geo_override_stale_findings
             ),
         )
 
@@ -3032,7 +3065,12 @@ async def resolve_primary_features_for_entity(
     return tuple(str(row) for row in rows)
 
 
-async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLoadResult:
+async def load_bundle(
+    session: AsyncSession,
+    bundle: FeatureBundle,
+    *,
+    geo: GeoLoadContext | None = None,
+) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
     동일 source record 재수집이면 원문은 immutable로 유지하고 entity head의 관측만
@@ -3041,6 +3079,13 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     다시 보낸 active feature가 과거 retirement 상태라면 복구한다.
     ``user_request`` feature와 provider 재활성화 방지 override는 복구하지 않는다.
     commit은 호출자 책임.
+
+    ``geo``(ADR-109 결정 3·4)가 있으면 지오코딩 스탬프를 관리한다 — 행의 outcome을 정하고, 같은
+    payload라도 스탬프가 현재 토큰과 다르면(stale) 새 geo 값으로 주소 열을 다시 맞추며(값이 같으면
+    스탬프만), 빈 답이면 덮지 않고, override와 다르면 finding을 남긴다. 토큰이 없거나 run이 데이터셋
+    전환을 가로질렀으면(:meth:`GeoLoadContext.effective_token` None) stale 분기도 스탬프 쓰기도 없다
+    — 토큰 도입 전과 같다. ``geo``가 None이면(geo를 배선하지 않은 경로 — price 등) 아무것도 바뀌지
+    않는다.
     """
     await lock_feature_curation_write(session)
     record_state = await _upsert_source_record_state(
@@ -3082,10 +3127,56 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         link_inserted = await upsert_source_link(
             session, bundle.source_link, feature_id=resolved_feature_id
         )
+
+    # -- geo 재해석(ADR-109 결정 3·4) -------------------------------------------------
+    outcome = None
+    token: str | None = None
+    if geo is not None:
+        outcome = decide_outcome(
+            geo.geo_applied,
+            has_coord=bundle.feature.coord is not None,
+            provider_code_present=provider_code_present(bundle.source_record.raw_data),
+            legal_dong_code_present=bundle.feature.address.bjd_code is not None,
+            evidence=bundle.geo_attempt,
+        )
+        token = geo.effective_token()
+    geo_relevant = outcome in ("called", "geocoded")
+    stale = (
+        token is not None
+        and geo_relevant
+        and not feature_missing
+        and resolved_feature_id is not None
+        and await is_stale(session, resolved_feature_id, token)
+    )
+    new_geo_values = address_column_values(bundle.feature.address)
+    stored: StoredGeoColumns | None = None
+    guarded = False
+    if (
+        geo is not None
+        and geo_relevant
+        and not feature_missing
+        and resolved_feature_id is not None
+        and (record_state.became_current or stale)
+    ):
+        stored = await read_stored_geo_columns(session, resolved_feature_id)
+        guarded = empty_answer_guard(
+            stored,
+            new_geo_values,
+            provider_code=provider_code_present(bundle.source_record.raw_data),
+        )
+    stale_unchanged = False
+    stale_rewritten = False
+
     if record_state.became_current or feature_missing:
+        feature_to_write = bundle.feature
+        if guarded and stored is not None:
+            # 빈 답 가드: payload가 바뀐 행도 주소 열만은 저장값을 지킨다(나머지 필드는 패치).
+            feature_to_write = bundle.feature.model_copy(
+                update={"address": Address.model_validate(stored.values["address"] or {})}
+            )
         feature_inserted = await upsert_feature(
             session,
-            bundle.feature,
+            feature_to_write,
             provider_dataset_id=record_state.provider_dataset_id,
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
@@ -3093,6 +3184,21 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             ),
         )
         feature_updated = not feature_inserted
+    elif stale and not guarded and stored is not None:
+        if differing_columns(stored, new_geo_values):
+            feature_inserted = await upsert_feature(
+                session,
+                bundle.feature,
+                provider_dataset_id=record_state.provider_dataset_id,
+                source_membership=_ProviderSourceMembership(
+                    source_entity_key=record_state.source_entity_key,
+                    source_record_key=record_state.source_record_key,
+                ),
+            )
+            feature_updated = not feature_inserted
+            stale_rewritten = True
+        else:
+            stale_unchanged = True
     if feature_missing:
         # create wrapper가 claim을 확정했으니 이제 claim 축이 정본 키를 돌려준다.
         # link의 FK 대상은 그 uuid다 — DTO의 legacy ``f_*``를 그대로 넣으면 22P02다.
@@ -3155,6 +3261,23 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
             source_record_key=record_state.source_record_key,
         ),
     )
+
+    # -- override finding·스탬프(ADR-109 결정 1·4) ---------------------------------------
+    override_finding = False
+    if token is not None and stored is not None and not guarded:
+        override_finding = await record_override_geo_stale(
+            session,
+            feature_id=lifecycle_feature_id,
+            provider_dataset_id=record_state.provider_dataset_id,
+            geo_data_token=token,
+            mismatches=override_mismatches(stored, new_geo_values),
+        )
+    stamped = 0
+    if geo is not None and outcome is not None and not guarded:
+        stamped = await upsert_stamps(
+            session, current=geo.current_dataset if token is not None else None,
+            outcomes={lifecycle_feature_id: outcome},
+        )
     return FeatureLoadResult(
         bundles_total=1,
         features_inserted=int(feature_inserted),
@@ -3162,11 +3285,19 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
         source_records_inserted=int(record_inserted),
         source_links_inserted=int(link_inserted),
         source_links_updated=int(not link_inserted),
+        geo_stamps_written=stamped,
+        geo_stale_rewritten=int(stale_rewritten),
+        geo_stale_unchanged=int(stale_unchanged),
+        geo_empty_guarded=int(guarded),
+        geo_override_stale_findings=int(override_finding),
     )
 
 
 async def load_bundles(
-    session: AsyncSession, bundles: Iterable[FeatureBundle]
+    session: AsyncSession,
+    bundles: Iterable[FeatureBundle],
+    *,
+    geo: GeoLoadContext | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 다수를 같은 session(transaction)에서 순차 적재.
 
@@ -3175,7 +3306,7 @@ async def load_bundles(
     """
     total = FeatureLoadResult()
     for bundle in bundles:
-        total = total.merge(await load_bundle(session, bundle))
+        total = total.merge(await load_bundle(session, bundle, geo=geo))
     return total
 
 
@@ -3220,6 +3351,20 @@ wanted AS (
         WHERE link.source_entity_key = wanted.source_entity_key
           AND link.source_role = 'primary'
           AND feature.lifecycle_state = 'active'
+          -- ADR-109 결정 4: 현재 geo 토큰이 있으면 스탬프가 그 토큰이거나 `not_called`인 행만
+          -- "그대로"다. 스탬프가 없거나 옛 토큰(`called|geocoded`)이면 다시 변환한다.
+          AND (
+              CAST(:current_data_token AS text) IS NULL
+              OR EXISTS (
+                  SELECT 1
+                  FROM feature.feature_geocode_stamps AS stamp
+                  WHERE stamp.feature_id = feature.feature_id
+                    AND (
+                        stamp.reverse_outcome = 'not_called'
+                        OR stamp.geo_data_token = CAST(:current_data_token AS text)
+                    )
+              )
+          )
     )
 )
 """
@@ -3271,9 +3416,11 @@ def _unchanged_entity_params(
     dataset_key: str,
     source_entity_type: str,
     payload_hashes: Mapping[str, str],
+    current_data_token: str | None = None,
 ) -> dict[str, Any]:
     entity_ids = sorted(payload_hashes)
     return {
+        "current_data_token": current_data_token,
         "source_entity_keys": [
             _make_source_entity_key(
                 provider=provider,
@@ -3295,11 +3442,14 @@ async def find_unchanged_active_source_entities(
     dataset_key: str,
     source_entity_type: str,
     payload_hashes: Mapping[str, str],
+    current_data_token: str | None = None,
 ) -> frozenset[str]:
     """``source_entity_id → raw_payload_hash`` 중 이미 그대로 적재돼 있는 id를 돌려준다.
 
     "그대로"는 :data:`_UNCHANGED_ACTIVE_ENTITIES_CTE`의 조건이다 — 다시 적재해도
-    관측 시각 말고는 바뀌지 않는 entity. 읽기 전용이며 commit하지 않는다(ADR-108).
+    관측 시각 말고는 바뀌지 않는 entity. ``current_data_token``이 있으면 지오코딩 스탬프가 그
+    토큰이거나 ``not_called``인 행만 "그대로"다(ADR-109 결정 4); None이면 토큰 도입 전과 같다.
+    읽기 전용이며 commit하지 않는다(ADR-108).
     """
     if not payload_hashes:
         return frozenset()
@@ -3311,6 +3461,7 @@ async def find_unchanged_active_source_entities(
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
                 payload_hashes=payload_hashes,
+                current_data_token=current_data_token,
             ),
         )
     ).scalars().all()
@@ -3325,6 +3476,7 @@ async def reobserve_unchanged_source_entities(
     source_entity_type: str,
     payload_hashes: Mapping[str, str],
     observed_at: datetime,
+    current_data_token: str | None = None,
 ) -> int:
     """확인된 미변경 entity의 관측 시각을 전진시킨다 (``load_bundle``의 재관측과 같은 효과).
 
@@ -3346,6 +3498,7 @@ async def reobserve_unchanged_source_entities(
                     dataset_key=dataset_key,
                     source_entity_type=source_entity_type,
                     payload_hashes=payload_hashes,
+                    current_data_token=current_data_token,
                 ),
                 "observed_at": observed_at,
             },
