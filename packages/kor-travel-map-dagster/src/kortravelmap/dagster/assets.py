@@ -1542,11 +1542,15 @@ async def run_feature_place_kor_travel_concierge_youtube(
     # T-VN-H28B: 건별 격리를 실제로 결선한다. 결선하지 않으면 item 1건의 구성 실패가
     # batch 전체를 죽인다(concierge export는 1회 1,477건 전량 재생이라 손실이 전부다).
     quarantined: list[KorTravelConciergeQuarantine] = []
+    # ADR-109 결정 6(a): run-scoped 현재 토큰(첫 지오코딩 전에 읽는다)과 payload 토큰이 같을 때만
+    # payload 행정코드를 믿는다.
+    current_dataset = await _current_geo_dataset(context)
     bundles = await kor_travel_concierge_items_to_bundles(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
         quarantine=quarantined,
+        current_data_token=current_dataset.data_token if current_dataset is not None else None,
     )
     upsert_count = kor_travel_concierge_upsert_count(records)
     accounted_count = len(bundles) + len(quarantined)
