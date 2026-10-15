@@ -458,6 +458,12 @@ def test_buildx_reaps_the_writer_even_when_term_lands_before_the_pid_is_recorded
     script = scripts / "docker-buildx.sh"
     script.write_text("".join(lines), encoding="utf-8")
 
+    # 빨강이 **결정적인** 이유: writer는 스크립트의 stdout(=tar)만 바꾸고 stderr는
+    # 부모와 같은 pipe를 물려받는다. 정리가 writer를 놓치면 그 고아가 stderr pipe를 쥔 채
+    # 남으므로 ``communicate``는 고아가 스스로 끝날 때까지 기다린다(부모가 사라진 것을 보고
+    # ``*.orphaned`` 표식을 쓴 뒤). 그래서 아래 단언 시점에는 표식이 **반드시** 있다 — 타이밍에
+    # 기대지 않는다. writer는 archive 분기의 첫 명령으로 pid를 남기므로 pid 파일이 없으면
+    # writer가 그 전에 죽은 것이고(정리가 이겼다) 그때는 고아도 없다.
     status, stdout, stderr = _run_until_terminated(script, env, temp_dir)
 
     assert status == 143
