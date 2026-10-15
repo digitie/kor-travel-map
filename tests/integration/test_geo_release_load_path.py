@@ -523,3 +523,94 @@ async def test_concierge_payload_code_trusted_only_under_the_current_token() -> 
     assert trusted.feature.address.bjd_code == stale_code
     assert distrusted.feature.address.bjd_code == "5013025300"  # geo bjd 채택
     assert legacy.feature.address.bjd_code == stale_code  # kwarg 생략 = 종전(payload 우선)
+
+
+# -- 빈 답 가드: 원문 legal을 채우는 provider 셋 모두(acceptance §T-GR-03 의도적 빨강 1) -------
+
+
+@dataclass(frozen=True)
+class _HeritageKey:
+    ccba_kdcd: str
+    ccba_asno: str
+    ccba_ctcd: str
+
+    @property
+    def natural_key(self) -> str:
+        return f"{self.ccba_kdcd}-{self.ccba_asno}-{self.ccba_ctcd}"
+
+
+@dataclass(frozen=True)
+class _HeritageItem:
+    key: _HeritageKey
+    name_ko: str
+    category: str | None = None
+    region: str | None = None
+    sigungu: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    location_text: str | None = None
+    designated_at: str | None = None
+    owner: str | None = None
+    image_url: str | None = None
+    geom_wkt: str | None = None
+    boundary_source: str | None = None
+
+
+async def _heritage(reverse: _FakeReverse) -> FeatureBundle:
+    from kortravelmap.providers.krheritage import heritage_items_to_bundles
+
+    item = _HeritageItem(
+        key=_HeritageKey("11", "990001", "11"),
+        name_ko="geo 릴리스 유적",
+        longitude=126.9239,
+        latitude=37.5263,
+        location_text="서울특별시 영등포구 여의도동 8",  # 원문 legal — geo 빈 답에도 남는다
+    )
+    return (
+        await heritage_items_to_bundles(
+            [item],  # type: ignore[list-item]
+            fetched_at=_FETCHED,
+            reverse_geocoder=reverse,
+        )
+    )[0]
+
+
+async def test_empty_answer_guard_holds_for_krheritage(migrated_session: AsyncSession) -> None:
+    first = await _heritage(_FakeReverse(_geo()))
+    await load_bundles(migrated_session, [first], geo=_ctx(REF_A))
+    feature_id = await _feature_id(migrated_session, first)
+    before_row = await _row(migrated_session, feature_id)
+    before_stamp = await _stamp_row(migrated_session, feature_id)
+
+    again = await _heritage(_FakeReverse(None))
+    assert again.feature.address.legal is not None
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    assert result.geo_empty_guarded == 1
+    assert await _row(migrated_session, feature_id) == before_row
+    assert await _stamp_row(migrated_session, feature_id) == before_stamp
+
+
+async def test_empty_answer_guard_holds_for_concierge(migrated_session: AsyncSession) -> None:
+    async def bundle(answer: Address | None) -> FeatureBundle:
+        return (
+            await kor_travel_concierge_items_to_bundles(
+                [_concierge_item(token=None, legal_dong_code=None)],  # type: ignore[list-item]
+                fetched_at=_FETCHED,
+                reverse_geocoder=_ObservedFake(answer),  # type: ignore[arg-type]
+            )
+        )[0]
+
+    first = await bundle(_jeju_geo())
+    await load_bundles(migrated_session, [first], geo=_ctx(REF_A))
+    feature_id = await _feature_id(migrated_session, first)
+    before_row = await _row(migrated_session, feature_id)
+    before_stamp = await _stamp_row(migrated_session, feature_id)
+
+    again = await bundle(None)
+    assert again.feature.address.legal is not None  # official_address 원문
+    result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
+
+    assert result.geo_empty_guarded == 1
+    assert await _row(migrated_session, feature_id) == before_row
+    assert await _stamp_row(migrated_session, feature_id) == before_stamp
