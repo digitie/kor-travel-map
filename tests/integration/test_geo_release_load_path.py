@@ -293,7 +293,8 @@ async def test_override_mismatch_is_a_finding_once_and_not_a_rewrite(
 ) -> None:
     _, feature_id = await _load_a(migrated_session, "override")
     before = await _row(migrated_session, feature_id)
-    # 사람이 도로명코드를 고정했다 — 열과, 같은 값을 담은 address jsonb 둘 다(address에도 코드가 있다).
+    # 사람이 도로명코드를 고정했다 — 열과, 같은 값을 담은 address jsonb 둘 다(address에도 코드가
+    # 있다).
     stored_address = before["address"]
     if isinstance(stored_address, str):
         stored_address = json.loads(stored_address)
@@ -303,7 +304,7 @@ async def test_override_mismatch_is_a_finding_once_and_not_a_rewrite(
     ):
         await migrated_session.execute(
             text(
-                "INSERT INTO ops.feature_overrides (feature_id, field_path, override_value, status) "
+                "INSERT INTO ops.feature_overrides (feature_id, field_path, override_value, status)"
                 "VALUES (CAST(:id AS uuid), :path, CAST(:value AS jsonb), 'active')"
             ),
             {"id": feature_id, "path": path, "value": json.dumps(value)},
