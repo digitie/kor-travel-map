@@ -163,7 +163,6 @@ acceptance 본문 도달은 0건 — 후보 예산 전부가 인프라 단계에
 
 Manager 쪽 채택분(I-1/I-2/I-4/I-5/I-8/I-9)은 Manager PR #278, PinVi 쪽(I-10)은
 PinVi #505가 소유한다.
-||||||| parent of 09d018d8 (docs: M03 302 완주 기록과 다음 작업(격리 live acceptance))
 
 ## 2026-08-31 — head 값 고정을 걷어내고, `301`이 왜 아직 못 올라가는지 실증했다
 

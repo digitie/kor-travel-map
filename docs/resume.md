@@ -1,3 +1,12 @@
+## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01): 브랜치 `feat/t-gr-01-geocode-stamps`
+
+**다음 한 작업: CI(unit 3·integration 2 lane·lint) 초록 → 적대 리뷰 → 머지 → T-GR-02(run-scoped 현재 토큰 resource·
+`geo_applied` 배선). 407은 표 하나라 배포는 평소 전진 배포에 실린다.**
+
+- 바뀐 것: migration 407·`head-schema.sql`·migration graph, DTO·repo·geo client(`dataset_version()`·`dataset` 파싱·빈 답
+  계수), 런타임 ACL 선언, ADR-109 결정 5 소유자 결정(첫 토큰 = 기준선), acceptance §T-GR-01 구현 메모, CHANGELOG.
+- 바뀌지 않은 것: provider 모듈·`Address`·`ReverseGeocoder`·적재 경로(아직 스탬프를 쓰지 않는다)·OpenAPI.
+
 ## 2026-10-15 — geo·transport connect timeout 분리(T-MAP-02): 브랜치 `feat/t-map-02-connect-timeout`
 
 **다음 한 작업: CI(unit 3·integration 2 lane·lint) 초록 → 적대 리뷰 → 머지 → 첫 prod 배포(해제 조건, 소유자 결정 2026-10-15) —

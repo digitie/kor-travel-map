@@ -61,6 +61,9 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
+    # ADR-109 결정 1(migration 407): 적재 경로가 스탬프를 쓰고(upsert) stale을 읽는다. 지우는
+    # 경로는 없다 — Feature 삭제는 FK CASCADE가 따라간다.
+    "feature_geocode_stamps": ("SELECT", "INSERT", "UPDATE"),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_price_values": ("SELECT", "INSERT"),

@@ -10,6 +10,19 @@
 
 ## [Unreleased]
 
+### 지오코딩 스탬프 표와 geo 데이터셋 토큰 (2026-10-15, ADR-109 결정 1~3, T-GR-01)
+
+- **ADDED (schema, alembic `407_feature_geocode_stamps`)**: `feature.feature_geocode_stamps(feature_id PK FK CASCADE,
+  geo_version_token, geo_data_token, reverse_outcome, stamped_at)` — 두 토큰 NOT NULL·형식 CHECK(`dv1-`/`dd1-` + 32 hex),
+  `reverse_outcome ∈ (called, geocoded, not_called)`, `geo_data_token` 인덱스. receipt head CHECK에 407. 런타임 role은
+  SELECT·INSERT·UPDATE(배포 조정기 `_FEATURE_TABLE_PRIVILEGES`). forward-only.
+- **ADDED (core)**: `kortravelmap.dto.geo_dataset`(`DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`),
+  `infra/feature_geocode_stamp_repo.py`(`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`).
+  아직 적재 경로에 배선되지 않았다(T-GR-02/03).
+- **ADDED (geocoding)**: `KorTravelGeoRestClient.dataset_version()`(`POST /v2/dataset/version`, 본문 `{}`), reverse·geocode
+  응답 최상위 `dataset`의 선택 파싱(없거나 형식 위반이면 None), `GeoCallStats.empty`(endpoint별 빈 답)·
+  `observed_data_tokens`, Dagster 메타 `geo_empty_*`. 기존 호출 동작은 바뀌지 않는다.
+
 ### geo·transport client connect timeout 분리 (2026-10-15, ADR-110 결정 3, T-MAP-02)
 
 - **CHANGED (settings)**: `kor_travel_geo_connect_timeout_seconds`·`kor_travel_transport_connect_timeout_seconds`

@@ -1,0 +1,382 @@
+"""geo 데이터셋 토큰 파싱·``dataset_version()``·빈 답 계수·outcome 판정 (ADR-109 결정 1~3, T-GR-01).
+
+효과에 결박한다 — ``dataset_version()``은 가짜 transport가 **실제로 받은** 요청(경로·본문)과
+대조하고,
+빈 답 계수는 응답 픽스처의 bjd 유무로 정한 분자와 대조한다(파생값에 맞추지 않는다).
+"""
+
+from __future__ import annotations
+
+import json
+from contextlib import suppress
+from typing import Any
+
+import httpx
+import pytest
+from pydantic import SecretStr, ValidationError
+
+from kortravelmap.core.exceptions import GeoRequestError
+from kortravelmap.dto import Coordinate
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoAttemptEvidence
+from kortravelmap.geocoding import (
+    GeoCallStats,
+    KorTravelGeoRestClient,
+    kor_travel_geo_reverse_geocoder,
+)
+from kortravelmap.infra.feature_geocode_stamp_repo import decide_outcome
+
+pytestmark = pytest.mark.unit
+
+_API_KEY = SecretStr("test-key")
+VERSION = "dv1-" + "a" * 32
+DATA = "dd1-" + "b" * 32
+OTHER_DATA = "dd1-" + "c" * 32
+
+_CANDIDATE_WITH_BJD: dict[str, Any] = {
+    "point": {"lon": 127.0, "lat": 37.0},
+    "distance_m": 1.0,
+    "confidence": 0.9,
+    "match_kind": "road",
+    "address": {
+        "full": "서울특별시 영등포구 여의공원로 120",
+        "road_address": "서울특별시 영등포구 여의공원로 120",
+        "legal_dong_code": "1156010100",
+    },
+    "region": {
+        "sig_cd": "11560",
+        "bjd_cd": "1156010100",
+        "sido": "서울특별시",
+        "sigungu": "영등포구",
+    },
+}
+
+
+def _reverse_payload(*, bjd: bool, dataset: object = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": "OK" if bjd else "ZERO_RESULTS",
+        "candidates": [_CANDIDATE_WITH_BJD] if bjd else [],
+    }
+    if dataset is not None:
+        payload["dataset"] = dataset
+    return payload
+
+
+class _Transport(httpx.AsyncBaseTransport):
+    """경로별 응답을 차례로 내고, 받은 요청(경로·본문)을 기록한다."""
+
+    def __init__(self, responses: list[dict[str, Any] | Exception]) -> None:
+        self._responses = list(responses)
+        self.seen: list[tuple[str, Any]] = []
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        self.seen.append((request.url.path, body))
+        item = self._responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return httpx.Response(200, json=item, request=request)
+
+
+def _client(
+    transport: _Transport, stats: GeoCallStats | None = None
+) -> tuple[KorTravelGeoRestClient, httpx.AsyncClient]:
+    http = httpx.AsyncClient(base_url="http://geo.test", transport=transport)
+    return KorTravelGeoRestClient(http, api_key=_API_KEY, stats=stats), http
+
+
+# -- 응답 dataset 선택 파싱 ----------------------------------------------------------
+
+
+async def test_reverse_without_dataset_field_parses_to_none() -> None:
+    client, http = _client(_Transport([_reverse_payload(bjd=True)]))
+    try:
+        response = await client.reverse(127.0, 37.0)
+    finally:
+        await http.aclose()
+    assert response.dataset is None
+    assert response.candidates  # 옛 응답은 그대로 읽힌다
+
+
+async def test_reverse_with_dataset_field_parses_to_dataset_ref() -> None:
+    dataset = {"version_token": VERSION, "data_token": DATA}
+    client, http = _client(_Transport([_reverse_payload(bjd=True, dataset=dataset)]))
+    try:
+        response = await client.reverse(127.0, 37.0)
+    finally:
+        await http.aclose()
+    assert response.dataset == DatasetRef(version_token=VERSION, data_token=DATA)
+
+
+@pytest.mark.parametrize(
+    "dataset",
+    [
+        {"version_token": "dv1-short", "data_token": DATA},
+        {"version_token": VERSION, "data_token": "dd1-" + "Z" * 32},
+        "not-an-object",
+    ],
+)
+async def test_malformed_response_dataset_is_dropped_not_fatal(dataset: object) -> None:
+    client, http = _client(_Transport([_reverse_payload(bjd=True, dataset=dataset)]))
+    try:
+        response = await client.reverse(127.0, 37.0)
+    finally:
+        await http.aclose()
+    assert response.dataset is None
+    assert response.candidates
+
+
+async def test_dataset_without_data_token_keeps_version_only() -> None:
+    client, http = _client(
+        _Transport([_reverse_payload(bjd=True, dataset={"version_token": VERSION})])
+    )
+    try:
+        response = await client.reverse(127.0, 37.0)
+    finally:
+        await http.aclose()
+    assert response.dataset == DatasetRef(version_token=VERSION, data_token=None)
+
+
+# -- dataset_version() -----------------------------------------------------------------
+
+
+async def test_dataset_version_posts_empty_body_and_returns_current_ref() -> None:
+    transport = _Transport(
+        [
+            {
+                "status": "OK",
+                "available": True,
+                "current": {
+                    "version_token": VERSION,
+                    "activated_at": "2026-10-15T00:00:00Z",
+                    "change_type": "full",
+                    "data_token": DATA,
+                },
+            }
+        ]
+    )
+    client, http = _client(transport)
+    try:
+        ref = await client.dataset_version()
+    finally:
+        await http.aclose()
+    assert transport.seen == [("/v2/dataset/version", {})]
+    assert ref == DatasetRef(version_token=VERSION, data_token=DATA)
+
+
+async def test_dataset_version_unavailable_is_none() -> None:
+    client, http = _client(_Transport([{"status": "OK", "available": False}]))
+    try:
+        assert await client.dataset_version() is None
+    finally:
+        await http.aclose()
+
+
+async def test_dataset_version_release_without_fingerprint_has_none_data_token() -> None:
+    client, http = _client(
+        _Transport(
+            [{"status": "OK", "available": True, "current": {"version_token": VERSION}}]
+        )
+    )
+    try:
+        ref = await client.dataset_version()
+    finally:
+        await http.aclose()
+    assert ref == DatasetRef(version_token=VERSION, data_token=None)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"status": "OK"},  # available 없음
+        {"status": "OK", "available": True},  # current 없음
+        {"status": "OK", "available": True, "current": {"version_token": "dv1-x"}},
+        {
+            "status": "OK",
+            "available": True,
+            "current": {"version_token": VERSION, "data_token": "dd1-" + "0" * 31},
+        },
+    ],
+)
+async def test_dataset_version_contract_violation_is_a_typed_error(
+    payload: dict[str, Any],
+) -> None:
+    """현재 토큰은 스탬프의 비교 키다 — 틀린 값을 받아들이면 모든 행이 영구 stale이다."""
+    client, http = _client(_Transport([payload]))
+    try:
+        with pytest.raises(GeoRequestError, match="응답 계약 오류"):
+            await client.dataset_version()
+    finally:
+        await http.aclose()
+
+
+# -- GeoCallStats.empty / observed_data_tokens ----------------------------------------
+
+
+async def test_empty_answers_are_counted_apart_from_failures() -> None:
+    """reverse 6건: 정상 3·bjd 없음 2·전송 실패 1 → calls 6, failures 1, empty 2."""
+    dataset = {"version_token": VERSION, "data_token": DATA}
+    responses: list[dict[str, Any] | Exception] = [
+        _reverse_payload(bjd=True, dataset=dataset),
+        _reverse_payload(bjd=False, dataset=dataset),
+        _reverse_payload(bjd=True, dataset={"version_token": VERSION, "data_token": OTHER_DATA}),
+        httpx.ConnectError("refused"),
+        _reverse_payload(bjd=False),
+        _reverse_payload(bjd=True),
+    ]
+    expected_empty = sum(
+        1 for item in responses if isinstance(item, dict) and not item["candidates"]
+    )
+    stats = GeoCallStats()
+    client, http = _client(_Transport(responses), stats)
+    geocoder = kor_travel_geo_reverse_geocoder(client)
+    try:
+        for index in range(len(responses)):
+            coord = Coordinate(lon=127.0 + index * 0.001, lat=37.0)
+            with suppress(GeoRequestError):
+                await geocoder(coord)
+    finally:
+        await http.aclose()
+
+    assert stats.calls["reverse"] == 6
+    assert stats.failures["reverse"] == 1
+    assert stats.empty["reverse"] == expected_empty == 2
+    assert stats.observed_data_tokens == {DATA, OTHER_DATA}
+    metadata = stats.as_metadata()
+    assert metadata["geo_empty_reverse"] == 2
+    assert metadata["geo_empty_total"] == 2
+
+
+# -- DTO ---------------------------------------------------------------------------------
+
+
+def test_dataset_ref_rejects_malformed_tokens() -> None:
+    with pytest.raises(ValidationError):
+        DatasetRef(version_token="dv1-" + "a" * 31)
+    with pytest.raises(ValidationError):
+        DatasetRef(version_token=VERSION, data_token="dv1-" + "b" * 32)
+
+
+# -- decide_outcome: address-geocoding.md §2 판정 표 전 행 ------------------------------
+
+_BOTH = GeoApplied(reverse=True, geocode=True)
+_REVERSE_ONLY = GeoApplied(reverse=True, geocode=False)
+_NONE = GeoApplied(reverse=False, geocode=False)
+
+
+@pytest.mark.parametrize(
+    ("label", "kwargs", "expected"),
+    [
+        # ① price/notice — 스탬프 없음(좌표가 있어도)
+        ("1-no-geo", {"geo_applied": _NONE, "has_coord": True}, None),
+        # ①이 ②보다 먼저 — geo를 넘기지 않은 run이면 행 evidence가 있어도 스탬프 없음
+        (
+            "1-before-2",
+            {
+                "geo_applied": _NONE,
+                "has_coord": True,
+                "evidence": GeoAttemptEvidence(reverse_attempted=True),
+            },
+            None,
+        ),
+        # ② MOIS evidence — reverse 시도 → called(좌표 없음 신호와 무관)
+        (
+            "2-mois-reverse",
+            {
+                "geo_applied": _REVERSE_ONLY,
+                "has_coord": True,
+                "provider_code_present": False,
+                "evidence": GeoAttemptEvidence(reverse_attempted=True),
+            },
+            "called",
+        ),
+        # ② MOIS evidence — geocode로 코드를 받음 → geocoded
+        (
+            "2-mois-geocoded",
+            {
+                "geo_applied": _BOTH,
+                "has_coord": False,
+                "evidence": GeoAttemptEvidence(
+                    reverse_attempted=False, geocode_obtained_code=True
+                ),
+            },
+            "geocoded",
+        ),
+        # ② MOIS evidence — geocode 시도했지만 코드 없음 → not_called
+        (
+            "2-mois-geocode-failed",
+            {
+                "geo_applied": _BOTH,
+                "has_coord": False,
+                "legal_dong_code_present": True,
+                "evidence": GeoAttemptEvidence(reverse_attempted=False),
+            },
+            "not_called",
+        ),
+        # ② MOIS evidence — payload bjd 행(아무것도 시도 안 함) → not_called
+        #   (좌표·reverse 신호가 있어도)
+        (
+            "2-mois-payload-bjd",
+            {
+                "geo_applied": _REVERSE_ONLY,
+                "has_coord": True,
+                "provider_code_present": True,
+                "evidence": GeoAttemptEvidence(reverse_attempted=False),
+            },
+            "not_called",
+        ),
+        # ③ reverse + 좌표 → called(payload 코드가 있어도)
+        (
+            "3-called-with-provider-code",
+            {"geo_applied": _REVERSE_ONLY, "has_coord": True, "provider_code_present": True},
+            "called",
+        ),
+        # ③ — 좌표가 있으면 reverse가 비어 geocode가 코드를 채운 행도 called(③과 ④는 좌표
+        #   유무로 서로소라 둘 사이 순서는 의미가 없다; 규칙의 이름이 이 행을 정한다)
+        (
+            "3-coord-row-even-if-geocode-filled",
+            {"geo_applied": _BOTH, "has_coord": True, "legal_dong_code_present": True},
+            "called",
+        ),
+        # ④ geocode + 좌표 없음 + 코드 생김 + provider 코드 없음 → geocoded
+        (
+            "4-geocoded",
+            {"geo_applied": _BOTH, "has_coord": False, "legal_dong_code_present": True},
+            "geocoded",
+        ),
+        # ⑤ 좌표 없는 payload 코드 행 → not_called
+        (
+            "5-provider-code-no-coord",
+            {
+                "geo_applied": _BOTH,
+                "has_coord": False,
+                "legal_dong_code_present": True,
+                "provider_code_present": True,
+            },
+            "not_called",
+        ),
+        # ⑤ 좌표·코드 둘 다 없음 → not_called
+        ("5-nothing", {"geo_applied": _BOTH, "has_coord": False}, "not_called"),
+        # ④는 geocode를 넘긴 run에서만 — reverse만 넘긴 run이면 좌표 없이 코드가 있어도 not_called
+        (
+            "4-requires-geocode-run",
+            {"geo_applied": _REVERSE_ONLY, "has_coord": False, "legal_dong_code_present": True},
+            "not_called",
+        ),
+        # ⑤ reverse만 넘긴 run의 좌표 없는 행 → not_called
+        (
+            "5-reverse-run-no-coord",
+            {"geo_applied": _REVERSE_ONLY, "has_coord": False},
+            "not_called",
+        ),
+    ],
+)
+def test_decide_outcome_table(label: str, kwargs: dict[str, Any], expected: str | None) -> None:
+    arguments: dict[str, Any] = {
+        "has_coord": False,
+        "provider_code_present": False,
+        "legal_dong_code_present": False,
+        "evidence": None,
+    }
+    arguments.update(kwargs)
+    geo_applied = arguments.pop("geo_applied")
+    assert decide_outcome(geo_applied, **arguments) == expected, label

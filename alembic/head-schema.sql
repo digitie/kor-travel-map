@@ -15216,6 +15216,24 @@ CREATE TABLE feature.feature_events (
 ALTER TABLE feature.feature_events OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: feature_geocode_stamps; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.feature_geocode_stamps (
+    feature_id uuid NOT NULL,
+    geo_version_token text NOT NULL,
+    geo_data_token text NOT NULL,
+    reverse_outcome text NOT NULL,
+    stamped_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_feature_geocode_stamps_data_token CHECK ((geo_data_token ~ '^dd1-[0-9a-f]{32}$'::text)),
+    CONSTRAINT ck_feature_geocode_stamps_reverse_outcome CHECK ((reverse_outcome = ANY (ARRAY['called'::text, 'geocoded'::text, 'not_called'::text]))),
+    CONSTRAINT ck_feature_geocode_stamps_version_token CHECK ((geo_version_token ~ '^dv1-[0-9a-f]{32}$'::text))
+);
+
+
+ALTER TABLE feature.feature_geocode_stamps OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_notices; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -15804,7 +15822,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -18288,6 +18306,14 @@ ALTER TABLE ONLY feature.feature_events
 
 
 --
+-- Name: feature_geocode_stamps pk_feature_geocode_stamps; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_geocode_stamps
+    ADD CONSTRAINT pk_feature_geocode_stamps PRIMARY KEY (feature_id);
+
+
+--
 -- Name: feature_notices pk_feature_notices; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -19895,6 +19921,13 @@ CREATE INDEX idx_feature_events_opening_hours ON feature.feature_events USING bt
 --
 
 CREATE INDEX idx_feature_events_period ON feature.feature_events USING btree (starts_on, ends_on);
+
+
+--
+-- Name: idx_feature_geocode_stamps_data_token; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_geocode_stamps_data_token ON feature.feature_geocode_stamps USING btree (geo_data_token);
 
 
 --
@@ -22653,6 +22686,14 @@ ALTER TABLE ONLY feature.feature_creation_origins
 
 ALTER TABLE ONLY feature.feature_events
     ADD CONSTRAINT fk_feature_events_feature_kind FOREIGN KEY (feature_id, kind) REFERENCES feature.features(feature_id, kind) ON DELETE CASCADE;
+
+
+--
+-- Name: feature_geocode_stamps fk_feature_geocode_stamps_feature; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_geocode_stamps
+    ADD CONSTRAINT fk_feature_geocode_stamps_feature FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE;
 
 
 --

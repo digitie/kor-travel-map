@@ -1,3 +1,38 @@
+## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01, ADR-109 결정 1~3): 브랜치 `feat/t-gr-01-geocode-stamps`
+
+- **무엇.** migration 407 `feature.feature_geocode_stamps`, DTO `DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`, 스탬프 repo
+  (`upsert_stamps`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`), geo client `dataset_version()`·응답 `dataset` 선택
+  파싱·`GeoCallStats.empty`/`observed_data_tokens`. 적재 경로 배선은 T-GR-02/03이다 — 이 PR은 아무 행도 스탬프하지 않는다.
+- **현실 확인.** odroid geo는 v2 응답 최상위에 `dataset{version_token, data_token}`을 싣는다(geo #573); n150 geo는 토큰을
+  가진 적이 없다. 그래서 파싱은 선택이고(없음 → None), 소유자 결정(2026-10-15)으로 '없음 → 첫 토큰'은 기준선이다 —
+  ADR-109 결정 5에 기록(구현 T-GR-04/05).
+- **설계와 다르게 쓴 것.** acceptance §T-GR-01 "구현 메모" 7항 — `decide_outcome`의 `legal_dong_code_present` 입력,
+  `GeoAttemptEvidence`(AdminEvidence diff 0), `upsert_stamps`가 토큰 없음 = 0건을 강제, `coverage()`는 T-GR-04로,
+  토큰 형식 CHECK, endpoint 단위 빈 답 계수. 407은 forward-only다 — 처음에 실제 downgrade와 왕복 테스트를
+  넣었으나 `alembic/env.py`가 모든 downgrade를 해석 전에 거부해(ADR-021·102) 빨갰다. 정책을 따르고 왕복은 scratch
+  DB에서 손으로 확인했다(PR 본문).
+- **리뷰 반영(1·2차, main `6e1eb9ed` 위로 리베이스).** ADR-109의 자기모순(결과 "부정·비용"의 롤아웃 첫 tick 전량 계획,
+  열린 결정 8)을 소유자 결정(첫 토큰 = 기준선)으로 고쳤고 커서 정의를 "계획했거나 기준선으로 기록한 토큰"으로,
+  ADR-110 결정 6·단계 9의 "풀로드 → 센서 계획 1건"을 "커서가 비면 기준선·0건, 그 뒤의 풀로드만 계획"으로 고쳤다.
+  `select_stale_feature_ids`에 keyset 커서 `after`(호출자가 geo 의존 dataset으로 한정 — T-GR-04), `GeoAttemptEvidence`의
+  `geocode_attempted` 삭제('받았다'가 '시도했다'를 함의 — 판정에 안 쓰이는 필드), `address-geocoding.md` §2 시그니처를
+  구현에 맞춤, T-GR-04 acceptance 수정 파일에 스탬프 repo(`coverage()`). 테스트: ①→② 순서·④의 geocode run 조건·
+  덮어쓰기의 version token·keyset 페이지.
+- **충돌 마커 정리·가드(별도 커밋).** main에 몇 주 전 리베이스가 남긴 `|||||||` 줄 둘(`docs/archive/journal-2026-08d.md`
+  `## 2026-08-31 — head 값 고정을…` 앞, `docs/tasks-done.md` `## 2026-08-30 — T-VN-M05-MANAGER-PIN-ROTATION…` 앞)을
+  지웠다 — 마커 줄 하나씩만(98 B·121 B), 앞뒤 절은 저장소에 각각 1회뿐이라 중복 본문은 없다. 아카이브는 읽기 전용이지만
+  마커는 본문이 아니라 깨진 이관의 잔재라 규약 §8의 복구 예외로 본다. 같은 날 이 PR과 #1325의 리베이스도 journal·
+  resume에 같은 줄을 남겼다(리뷰가 잡음). `tests/lint/test_docs_have_no_conflict_markers.py`가 docs·루트 Markdown의
+  줄머리 마커를 막는다(UTF-16 보고서 하나는 BOM으로 읽는다) — 정리 전 main에서는 빨갛다.
+- **3차 리뷰 반영.** ADR-109 규칙 ②·acceptance §T-GR-03 수정 파일을 `geocode_obtained_code`(시도 필드 없음)로 맞췄고,
+  `address-geocoding.md`의 커서 정의·롤아웃 문단(backfill 뒤 첫 토큰 = 기준선, '순서와 무관하게 1회' 문장 삭제)과 §7 센서
+  행·acceptance §T-GR-05에 기준선 케이스(빈 커서 + 토큰 → 커서 기록·계획 0)를 더했다. keyset 질의는 첫 페이지와 다음
+  페이지를 다른 문장으로 나눴다(`(:after IS NULL OR …)`는 generic plan에서 범위 스캔을 잃을 수 있다).
+- **게이트.** 통합: NULL·형식 위반 토큰은 outcome 셋 모두 DB가 거부, 토큰 없음 = 0건, stale 5분기와 "현재 토큰 None →
+  0건", primary 링크·활성·dataset 범위, 런타임 role 쓰기·읽기, CASCADE. 단위: 응답 `dataset`
+  있음/없음/형식 위반, `dataset_version()` 경로·본문 `{}`·`available=false`·계약 위반 typed 오류, 빈 답 계수(reverse 6 =
+  정상 3·빈 답 2·전송 실패 1 → calls 6·failures 1·empty 2), 판정 표 전 행.
+
 ## 2026-10-15 — geo·transport client connect timeout 분리(T-MAP-02, ADR-110 결정 3): 브랜치 `feat/t-map-02-connect-timeout`
 
 - **왜 지금.** geo·weather·transport가 2026-10-14~15 odroid로 옮겨졌다(ADR-110 사실 갱신 절). 같은 호스트의
