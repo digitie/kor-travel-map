@@ -284,9 +284,9 @@ async def test_load_wrapper_never_touches_context_log_without_geo_applied() -> N
         async def record_address_validation_findings(
             self, *args: object, **kwargs: object
         ) -> object:
-            from types import SimpleNamespace
+            from kortravelmap.client import IntegrityFindingSyncResult
 
-            return SimpleNamespace(observed=0, unique=0, upserted=0)
+            return IntegrityFindingSyncResult(observed_count=0, unique_count=0, upserted_count=0)
 
     await load_feature_bundles_for_dagster(
         context=_NoLogContext(),  # type: ignore[arg-type]
