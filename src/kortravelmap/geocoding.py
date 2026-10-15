@@ -70,6 +70,7 @@ from kortravelmap.core.address import (
 )
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.dto import Address, Coordinate
+from kortravelmap.dto.geo_dataset import DatasetRef
 
 if TYPE_CHECKING:
     import httpx
@@ -957,12 +958,15 @@ class _RestCandidateV2:
 class _RestReverseV2Response:
     status: str
     candidates: tuple[_RestCandidateV2, ...] = field(default_factory=tuple)
+    #: 응답 최상위 ``dataset``(geo ADR-069 D7). 없는 옛 응답·형식 위반이면 None(ADR-109 결정 2).
+    dataset: DatasetRef | None = None
 
 
 @dataclass(frozen=True)
 class _RestGeocodeV2Response:
     status: str
     candidates: tuple[_RestCandidateV2, ...] = field(default_factory=tuple)
+    dataset: DatasetRef | None = None
 
 
 def _parse_point(data: dict[str, Any] | None) -> _RestPoint | None:
@@ -1020,17 +1024,60 @@ def _parse_candidate_v2(data: dict[str, Any]) -> _RestCandidateV2:
     )
 
 
+def _parse_optional_dataset(data: dict[str, Any]) -> DatasetRef | None:
+    """응답 최상위 ``dataset``의 **선택** 파싱 — 없거나 형식이 틀리면 None.
+
+    이 값은 run-scoped 현재 토큰과의 불일치 관측에만 쓰인다(ADR-109 결정 2). 형식이 틀린 값 때문에
+    지오코딩 응답 자체를 버리면 geo의 사소한 계약 어긋남이 적재 실패로 번진다 — 그래서 여기서는
+    삼킨다. 현재 토큰(:meth:`KorTravelGeoRestClient.dataset_version`)은 반대로 엄격하다.
+    """
+    raw = data.get("dataset")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return DatasetRef.model_validate(raw)
+    except ValueError:
+        return None
+
+
 def _parse_reverse_response(data: dict[str, Any]) -> _RestReverseV2Response:
     cands = tuple(_parse_candidate_v2(c) for c in data.get("candidates", ()))
     return _RestReverseV2Response(
-        status=str(data.get("status", "ERROR")), candidates=cands
+        status=str(data.get("status", "ERROR")),
+        candidates=cands,
+        dataset=_parse_optional_dataset(data),
     )
 
 
 def _parse_geocode_response(data: dict[str, Any]) -> _RestGeocodeV2Response:
     cands = tuple(_parse_candidate_v2(c) for c in data.get("candidates", ()))
     return _RestGeocodeV2Response(
-        status=str(data.get("status", "ERROR")), candidates=cands
+        status=str(data.get("status", "ERROR")),
+        candidates=cands,
+        dataset=_parse_optional_dataset(data),
+    )
+
+
+def _parse_dataset_version_response(data: dict[str, Any]) -> DatasetRef | None:
+    """``POST /v2/dataset/version`` → 현재 ``DatasetRef``. 활성 릴리스가 없으면(``available=false``) None.
+
+    엄격하다 — ``available``이 bool이 아니거나, 참인데 ``current.version_token``이 없거나 토큰
+    형식이 틀리면 ``ValueError``(호출부에서 typed provider 오류로 바뀐다). run의 현재 토큰은 스탬프의
+    비교 키라 틀린 값을 받아들이면 모든 행이 영구 stale이 된다.
+    """
+    available = data.get("available")
+    if not isinstance(available, bool):
+        raise ValueError("kor-travel-geo dataset/version response available must be a bool")
+    if not available:
+        return None
+    current = data.get("current")
+    if not isinstance(current, dict):
+        raise ValueError("kor-travel-geo dataset/version response current must be an object")
+    return DatasetRef.model_validate(
+        {
+            "version_token": current.get("version_token"),
+            "data_token": current.get("data_token"),
+        }
     )
 
 
@@ -1161,10 +1208,31 @@ class GeoCallStats:
     failures: Counter[str] = field(default_factory=Counter)
     """endpoint별 **전송 실패** 수(``calls``의 부분집합)."""
 
+    empty: Counter[str] = field(default_factory=Counter)
+    """endpoint별 **빈 답** 수 — 예외 없이 끝났는데 ``Address``가 None이거나 ``bjd_code``가 None.
+
+    ``failures``와 겹치지 않는다(빈 답은 전송 실패가 아니다). ADR-109 결정 4 run 가드의 분자다.
+    역지오코더(:meth:`_KorTravelGeoObservedReverseGeocoder.observe`)가 endpoint 단위로 기록한다 —
+    reverse가 비고 region fallback이 채우면 ``reverse``는 빈 답 1건이고 fallback은 별도 endpoint다.
+    """
+
+    observed_data_tokens: set[str] = field(default_factory=set)
+    """응답 ``dataset.data_token``으로 관측한 토큰 집합(ADR-109 결정 2).
+
+    run-scoped 현재 토큰과 다른 값이 있으면 그 run 도중 릴리스가 바뀐 것이다(경고 + 메타만).
+    """
+
     def record(self, endpoint: str, *, failed: bool) -> None:
         self.calls[endpoint] += 1
         if failed:
             self.failures[endpoint] += 1
+
+    def record_empty(self, endpoint: str) -> None:
+        self.empty[endpoint] += 1
+
+    def observe_dataset(self, dataset: DatasetRef | None) -> None:
+        if dataset is not None and dataset.data_token is not None:
+            self.observed_data_tokens.add(dataset.data_token)
 
     @property
     def total_calls(self) -> int:
@@ -1177,8 +1245,10 @@ class GeoCallStats:
         metadata.update(
             {f"geo_failures_{name}": count for name, count in self.failures.items()}
         )
+        metadata.update({f"geo_empty_{name}": count for name, count in self.empty.items()})
         metadata["geo_calls_total"] = self.total_calls
         metadata["geo_failures_total"] = sum(self.failures.values())
+        metadata["geo_empty_total"] = sum(self.empty.values())
         return metadata
 
     def summary(self) -> str:
@@ -1360,7 +1430,10 @@ class KorTravelGeoRestClient:
             body["radius_m"] = radius_m
         resp = await self._post(f"{self._base}/reverse", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_response_sanitized(resp, _parse_reverse_response)
+        parsed = _parse_response_sanitized(resp, _parse_reverse_response)
+        if self._stats is not None:
+            self._stats.observe_dataset(parsed.dataset)
+        return parsed
 
     async def geocode(
         self,
@@ -1381,7 +1454,26 @@ class KorTravelGeoRestClient:
             body["jibun_address"] = address
         resp = await self._post(f"{self._base}/geocode", json=body)
         _raise_for_status_sanitized(resp)
-        return _parse_response_sanitized(resp, _parse_geocode_response)
+        parsed = _parse_response_sanitized(resp, _parse_geocode_response)
+        if self._stats is not None:
+            self._stats.observe_dataset(parsed.dataset)
+        return parsed
+
+    async def dataset_version(self) -> DatasetRef | None:
+        """``POST /v2/dataset/version`` (본문 ``{}``) — geo가 지금 서빙하는 데이터셋.
+
+        활성 릴리스가 없으면 None. ``data_token``이 없는 릴리스(지문 backfill 전)는
+        ``DatasetRef(data_token=None)``이다 — 소비자는 그것을 "판정 불가"로 읽는다(ADR-109 결정 2).
+        전송 실패·HTTP 오류·계약 위반은 다른 메서드와 같은 typed 예외로 올린다. 실패를 None으로
+        바꿔 run을 계속할지는 호출자(run-scoped resource, T-GR-02)가 정한다.
+        """
+        resp = await self._post(f"{self._base}/dataset/version", json={})
+        _raise_for_status_sanitized(resp)
+        return _parse_response_sanitized(resp, _parse_dataset_version_response)
+
+    def _note_empty(self, endpoint: str) -> None:
+        if self._stats is not None:
+            self._stats.record_empty(endpoint)
 
     async def regions_within_radius(
         self,
@@ -1435,6 +1527,8 @@ class _KorTravelGeoObservedReverseGeocoder:
                 response, max_distance_m=self._max_distance_m
             )
         )
+        if address is None or address.bjd_code is None:
+            self._client._note_empty("reverse")
         if (
             address is not None and address.bjd_code is not None
         ) or self._region_fallback_radius_km is None:
@@ -1451,6 +1545,8 @@ class _KorTravelGeoObservedReverseGeocoder:
             if name and name not in names:
                 names.append(name)
         region_address = _regions_within_radius_response_to_address(regions)
+        if region_address is None or region_address.bjd_code is None:
+            self._client._note_empty("regions_within_radius")
         if address is None or region_address is None:
             return ReverseGeocodeObservation(
                 region_address or address,

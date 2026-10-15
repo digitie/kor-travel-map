@@ -39,6 +39,12 @@
         "405_mois_freshness_sla"
       ],
       "revision": "406_feature_write_gate"
+    },
+    {
+      "down_revision": [
+        "406_feature_write_gate"
+      ],
+      "revision": "407_feature_geocode_stamps"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

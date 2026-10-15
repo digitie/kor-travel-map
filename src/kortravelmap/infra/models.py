@@ -1659,6 +1659,49 @@ class FeatureAreaRow(_FeatureSubtypeBase):
     )
 
 
+class FeatureGeocodeStampRow(Base):
+    """``feature.feature_geocode_stamps`` — 행별 지오코딩 스탬프(ADR-109 결정 1, migration 407).
+
+    "이 Feature의 geo 유도 값은 어느 geo 데이터 지문(``geo_data_token``)으로 해석됐는가"를
+    ``features`` **밖에** 둔다 — ``features`` 열로 두면 스탬프 갱신이 ``row_revision``을 전진시켜
+    ETag·seal·PinVi cache target을 값 변화 없이 흔든다. 두 토큰은 NOT NULL이다(NULL 스탬프를
+    만들지 않는다 — 스탬프 **부재**가 stale이다). 읽기·쓰기는
+    ``infra/feature_geocode_stamp_repo.py``.
+    """
+
+    __tablename__ = "feature_geocode_stamps"
+    __table_args__ = (
+        CheckConstraint(
+            "reverse_outcome IN ('called', 'geocoded', 'not_called')",
+            name=conv("ck_feature_geocode_stamps_reverse_outcome"),
+        ),
+        CheckConstraint(
+            "geo_version_token ~ '^dv1-[0-9a-f]{32}$'",
+            name=conv("ck_feature_geocode_stamps_version_token"),
+        ),
+        CheckConstraint(
+            "geo_data_token ~ '^dd1-[0-9a-f]{32}$'",
+            name=conv("ck_feature_geocode_stamps_data_token"),
+        ),
+        ForeignKeyConstraint(
+            ["feature_id"],
+            ["feature.features.feature_id"],
+            name=conv("fk_feature_geocode_stamps_feature"),
+            ondelete="CASCADE",
+        ),
+        Index("idx_feature_geocode_stamps_data_token", "geo_data_token"),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    geo_version_token: Mapped[str] = mapped_column(Text, nullable=False)
+    geo_data_token: Mapped[str] = mapped_column(Text, nullable=False)
+    reverse_outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    stamped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class FeatureAliasRow(Base):
     """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
 

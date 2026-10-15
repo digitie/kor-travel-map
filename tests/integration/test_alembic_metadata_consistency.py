@@ -375,3 +375,45 @@ async def test_downgrade_is_rejected_without_mutation(
         )
 
     assert await _raw_version(admin_dsn) == (_HEAD,)
+
+
+async def _regclass(url: str, name: str) -> str | None:
+    connection = await _connect(url)
+    try:
+        value = await connection.fetchval("SELECT to_regclass($1)::text", name)
+        return None if value is None else str(value)
+    finally:
+        await connection.close()
+
+
+@pytest.mark.asyncio
+async def test_407_geocode_stamps_round_trips_to_406_and_back(
+    application_300_config: tuple[Config, str],
+) -> None:
+    """407은 새 표 하나뿐이라 되돌릴 수 있다 — 406으로 내렸다가 head로 다시 올린다.
+
+    내린 뒤에는 표가 없고 버전이 406이며, 다시 올린 뒤에는 표와 head가 돌아온다. receipt head
+    CHECK도 왕복한다(406 목록 ↔ 407 포함) — 내린 상태에서 407을 쓰는 receipt는 거부된다.
+    """
+    config, admin_dsn = application_300_config
+    assert await _regclass(admin_dsn, "feature.feature_geocode_stamps") is not None
+
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.downgrade, config, "406_feature_write_gate")
+    assert await _raw_version(admin_dsn) == ("406_feature_write_gate",)
+    assert await _regclass(admin_dsn, "feature.feature_geocode_stamps") is None
+    connection = await _connect(admin_dsn)
+    try:
+        check = await connection.fetchval(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conname = 'ck_application_schema_operation_receipts_head'"
+        )
+    finally:
+        await connection.close()
+    assert "406_feature_write_gate" in str(check)
+    assert "407_feature_geocode_stamps" not in str(check)
+
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "head")
+    assert await _raw_version(admin_dsn) == (_HEAD,)
+    assert await _regclass(admin_dsn, "feature.feature_geocode_stamps") is not None
