@@ -1,3 +1,16 @@
+## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
+
+- **무엇.** 팩토리 `fetch_current_dataset`(geocoding — CLI가 dagster를 import할 수 없어 여기), Dagster resource
+  `kor_travel_geo_dataset`(asset·큐 runner 공통 키), offline upload·CLI의 같은 팩토리 호출, asset 21곳 + MCST 1곳의
+  `geo_applied` 리터럴과 적재 wrapper 메타(`geo_*`, 불일치 WARNING 1건). 적재·스탬프 동작은 바뀌지 않는다.
+- **범위를 자른 자리.** client·infra 적재 함수로 `current_dataset`·`geo_applied`를 넘기는 것과 빈 답 비율 가드, MOIS 배선은
+  T-GR-03이다 — 지금 넘기면 받는 쪽이 아무것도 하지 않는 인자다. acceptance의 "(T-GR-03 뒤)" 항목도 그때 판정한다.
+  설계의 경량 `kor_travel_geo_client` resource는 센서(T-GR-05)가 쓸 때 더한다.
+- **게이트.** 단위: 팩토리 성공·지문 없음(경고 0)·전송/5xx/키 거부/계약/`available=false`/client 없음(경고 정확히 1건),
+  불일치 판정 5분기. dagster: 메타 4키·불일치 WARNING 1건·현재 토큰 None이면 불일치 아님, resource가 base URL 없으면 None,
+  있으면 `/v2/dataset/version` 1회. lint: run 함수의 실제 콜러블(`_reverse_geocoder(context)`·`address_resolver=`) ==
+  `geo_applied` 리터럴(asset 하나를 False로 바꾸면 빨갛다), 팩토리 호출 지점 3곳·`dataset_version()` 직접 호출 0곳.
+
 ## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01, ADR-109 결정 1~3): 브랜치 `feat/t-gr-01-geocode-stamps`
 
 - **무엇.** migration 407 `feature.feature_geocode_stamps`, DTO `DatasetRef`·`GeoApplied`·`GeoAttemptEvidence`, 스탬프 repo

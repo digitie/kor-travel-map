@@ -1,3 +1,12 @@
+## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
+
+**다음 한 작업: #1326(T-GR-01) 머지 → 이 브랜치를 main에 리베이스 → CI 초록 → 적대 리뷰 → 머지 → T-GR-03(stale 분기·스탬프·
+빈 답 가드·MOIS·concierge — `current_dataset`/`geo_applied`를 client·infra 적재 함수로 넘긴다).**
+
+- 바뀐 것: `fetch_current_dataset`·`geo_dataset_mismatch`, resource `kor_travel_geo_dataset`, asset·MCST `geo_applied`,
+  적재 wrapper `geo_*` 메타, offline upload·CLI 팩토리 호출, 테스트 3종, CHANGELOG·acceptance 구현 메모.
+- 바뀌지 않은 것: 적재·스탬프 동작, client·infra 시그니처, MOIS 경로, OpenAPI.
+
 ## 2026-10-15 — 지오코딩 스탬프 표·geo 데이터셋 토큰(T-GR-01): 브랜치 `feat/t-gr-01-geocode-stamps`
 
 **다음 한 작업: CI(unit 3·integration 2 lane·lint) 초록 → 적대 리뷰 → 머지 → T-GR-02(run-scoped 현재 토큰 resource·

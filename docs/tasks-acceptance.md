@@ -2531,6 +2531,17 @@ asset이 `load_feature_bundles`에 `geo_applied=` 전달; `required_resource_key
 - (T-GR-03 뒤) 빈 답 비율 가드: 좌표 있는 50건 중 빈 답(200, `bjd_code` None) 3건(> 5%) 픽스처 → run FAILURE·그 chunk
   스탬프 0건; 좌표 없는 1,000건을 섞어도 분모(`calls['reverse']`)가 불변이다. **같은 조건의 MOIS run은 FAILURE가
   아니다**(ADR-108 §3a-2 degraded 그대로 — 회귀 테스트; 상수·비율 계산 함수는 한 곳).
+- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-02-geo-dataset-resource`, #1326 위에 쌓음): (1) 팩토리 `fetch_current_dataset(client)`는
+  `kortravelmap.geocoding`에 있다 — CLI가 `kortravelmap.dagster`를 import할 수 없어서다. Dagster resource
+  `kor_travel_geo_dataset`(asset·큐 runner 공통 resource 키)이 짧은 수명 client로 한 번 부르고, offline upload·CLI는 같은
+  함수를 직접 부른다(호출 지점 3 — `tests/lint/test_geo_applied_matches_asset_geo_callables.py`가 센다). (2) 설계의
+  `kor_travel_geo_client_resource`(경량 client)는 이 PR에 넣지 않았다 — 쓰는 곳이 센서(T-GR-05)뿐이라 그때 더한다.
+  (3) `geo_applied`는 `_load`·`_load_snapshot_batches`의 필수 인자이고 asset 21곳 + MCST 1곳이 리터럴로 넘긴다(AST lint가
+  run 함수의 실제 콜러블과 대조 — 하나를 False로 바꾸면 빨갛다). 적재 wrapper는 그것과 현재 토큰·reverse 계수를 받아
+  output 메타 `geo_applied_reverse/geocode`·`geo_data_token`·`geo_dataset_mismatch`를 낸다(불일치면 WARNING 1건).
+  **client·infra 적재 함수로 넘기는 것과 빈 답 비율 가드는 T-GR-03**이다 — 이 PR이 넘기면 받는 쪽이 아무것도 하지 않는
+  인자가 된다. MOIS 재개형 적재(`mois_chunked_load.py`)도 T-GR-03(행별 evidence)에서 배선한다. offline upload은 메타
+  `geo_data_token`, CLI는 stderr 한 줄로 어느 데이터셋으로 적재했는지 남긴다.
 
 ## T-GR-03
 

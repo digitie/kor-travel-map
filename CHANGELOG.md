@@ -10,6 +10,15 @@
 
 ## [Unreleased]
 
+### run-scoped geo 현재 토큰 resource·`geo_applied` 배선 (2026-10-16, ADR-109 결정 2·3, T-GR-02)
+
+- **ADDED (geocoding)**: `fetch_current_dataset(client)` — run 시작에 `POST /v2/dataset/version`을 한 번 읽는다. 실패·
+  `available=false`·client 없음은 None + WARNING 1건이고 run은 계속된다. `geo_dataset_mismatch(current, observed)`.
+- **ADDED (dagster)**: resource `kor_travel_geo_dataset`(asset·큐 runner 공통 resource 키, `DEFAULT_RESOURCE_DEFINITIONS`).
+  feature load asset이 `geo_applied=GeoApplied(reverse, geocode)`를 적재 wrapper에 넘기고 output 메타
+  `geo_applied_reverse`·`geo_applied_geocode`·`geo_data_token`·`geo_dataset_mismatch`가 생긴다(불일치면 WARNING 1건).
+  offline upload 메타 `geo_data_token`, CLI stderr `geo dataset: …`. 적재·스탬프 동작은 아직 바뀌지 않는다(T-GR-03).
+
 ### 지오코딩 스탬프 표와 geo 데이터셋 토큰 (2026-10-15, ADR-109 결정 1~3, T-GR-01)
 
 - **ADDED (schema, alembic `407_feature_geocode_stamps`)**: `feature.feature_geocode_stamps(feature_id PK FK CASCADE,

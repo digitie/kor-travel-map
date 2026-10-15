@@ -74,8 +74,32 @@ def _violations(source: str) -> tuple[list[str], int]:
     return problems, seen
 
 
+def _loader_modules() -> list[Path]:
+    """``assets.py``와, 거기서 ``_load``/``_load_snapshot_batches``를 import하는 모듈(예: MCST)."""
+    modules = [_ASSETS]
+    for path in sorted(_DAGSTER.glob("*.py")):
+        if path == _ASSETS:
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and (node.module or "").endswith("assets")
+                and any(alias.name in _LOADERS for alias in node.names)
+            ):
+                modules.append(path)
+                break
+    return modules
+
+
 def test_asset_geo_applied_matches_the_callables_it_passes() -> None:
-    problems, seen = _violations(_ASSETS.read_text(encoding="utf-8"))
+    modules = _loader_modules()
+    assert any(path.name == "mcst_features.py" for path in modules), modules
+    problems: list[str] = []
+    seen = 0
+    for path in modules:
+        found, count = _violations(path.read_text(encoding="utf-8"))
+        problems.extend(f"{path.name}:{item}" for item in found)
+        seen += count
     assert seen >= 10, f"적재 호출을 {seen}건밖에 못 봤다 — 로더 이름이 바뀌었나"
     assert not problems, "geo_applied가 사실과 다르다:\n" + "\n".join(problems)
 
