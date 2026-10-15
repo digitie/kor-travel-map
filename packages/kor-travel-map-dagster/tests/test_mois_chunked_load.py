@@ -1679,7 +1679,7 @@ async def test_mid_run_dataset_switch_stops_using_the_token_from_the_next_chunk_
     await _run(
         _snapshot(per_slug=6),
         db,
-        geocoder=_ObservingGeocoder(switch_after=3),
+        geocoder=_ObservingGeocoder(switch_after=2),
         current_dataset=_current(),
     )
 
