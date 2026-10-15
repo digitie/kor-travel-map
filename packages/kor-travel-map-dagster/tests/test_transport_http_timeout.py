@@ -11,7 +11,7 @@ import socket
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 import httpx
 import pytest
@@ -55,10 +55,8 @@ def _unresponsive_port() -> Iterator[int]:
         for _ in range(8):
             filler = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             filler.setblocking(False)
-            try:
+            with suppress(BlockingIOError):
                 filler.connect(("127.0.0.1", port))
-            except BlockingIOError:
-                pass
             fillers.append(filler)
         time.sleep(0.2)
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -108,8 +108,8 @@ def test_geo_and_transport_clients_use_the_timeout_factory() -> None:
         for kind, count in counts.items():
             seen[kind] += count
     # 하한은 '본 것'에 건다 — 마커 이름이 바뀌어 아무것도 안 보이면 이 검사는 항진명제다.
-    assert seen["geo"] >= 1, "geo client 생성 지점(KorTravelGeoRestClient 호출)을 하나도 못 봤다"
-    assert seen["transport"] >= 1, "transport 생성 지점(_transport_connection 호출)을 하나도 못 봤다"
+    assert seen["geo"] >= 1, "geo 생성 지점(KorTravelGeoRestClient 호출)을 못 봤다"
+    assert seen["transport"] >= 1, "transport 생성 지점(_transport_connection 호출)을 못 봤다"
     assert not problems, "connect timeout 분리 없는 client:\n" + "\n".join(problems)
 
 
@@ -157,7 +157,9 @@ def test_checker_accepts_the_factory_shapes() -> None:
     transport = (
         "async def f(settings):\n"
         "    base, headers = _transport_connection(settings)\n"
-        "    async with httpx.AsyncClient(base_url=base, timeout=transport_http_timeout(settings)):\n"
+        "    async with httpx.AsyncClient(\n"
+        "        base_url=base, timeout=transport_http_timeout(settings)\n"
+        "    ):\n"
         "        pass\n"
     )
     for source in (_GOOD_GEO, transport):

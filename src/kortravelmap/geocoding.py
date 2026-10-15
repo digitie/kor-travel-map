@@ -80,7 +80,7 @@ _GeoResponseT = TypeVar("_GeoResponseT")
 
 
 def geo_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
-    """kor-travel-geo client의 ``httpx.Timeout`` — 모든 geo client 생성 지점이 이것을 쓴다(ADR-110 결정 3).
+    """kor-travel-geo client의 ``httpx.Timeout`` — 모든 geo client 생성 지점이 쓴다(ADR-110 결정 3).
 
     첫 위치 인자(``kor_travel_geo_timeout_seconds``)가 read·write·pool을 덮고, 연결 수립만
     ``kor_travel_geo_connect_timeout_seconds``로 따로 둔다. geo가 다른 호스트(odroid)에 있어

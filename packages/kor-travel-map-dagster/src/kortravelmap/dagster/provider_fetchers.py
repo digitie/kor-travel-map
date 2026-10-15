@@ -210,7 +210,7 @@ def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str
 
 
 def transport_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
-    """kor-travel-transport client의 ``httpx.Timeout`` — export fetcher 전부가 이것을 쓴다(ADR-110 결정 3).
+    """kor-travel-transport client의 ``httpx.Timeout`` — export fetcher 전부가 쓴다(ADR-110 결정 3).
 
     첫 위치 인자(``kor_travel_transport_timeout_seconds``)가 read·write·pool을 덮고 연결 수립만
     ``kor_travel_transport_connect_timeout_seconds``로 따로 둔다. transport는 odroid에 있어 꺼지면
