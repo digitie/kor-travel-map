@@ -40,7 +40,7 @@ def test_transport_http_timeout_carries_both_settings_fields() -> None:
 
 def test_transport_connect_timeout_defaults() -> None:
     timeout = transport_http_timeout(KorTravelMapSettings())
-    assert timeout.connect == 2.0
+    assert timeout.connect == 4.0
     assert timeout.read == 30.0
 
 

@@ -5,7 +5,9 @@
   timeout 하나(10 s)라 연결 수립에도 그만큼을 썼고, admin 이슈 액션 2곳은 timeout 인자가 없었으며(httpx 기본 5 s)
   offline upload·CLI 2곳은 `10.0` 하드코딩이었다. 원래 순서는 "transport 플립 전 배포"였으나 플립이 먼저 일어났다 —
   소유자 결정(2026-10-15)으로 해제 조건은 "머지 뒤 첫 prod 배포"다.
-- **바꾼 것.** 설정 필드 2개(connect, 기본 2 s), 팩토리 둘(`geocoding.geo_http_timeout`·`provider_fetchers.
+- **바꾼 것.** 설정 필드 2개(connect, 기본 4 s — 첫 판은 2 s였으나 리뷰에서 올렸다: Linux SYN 재전송이 약 1 s·3 s라
+  2 s는 첫 재전송만 기다리고, geo `_post`는 재시도가 없어 과부하 odroid의 느린 수립 한 번이 MOIS run 전체를 죽인다;
+  Manager compose는 이 env를 넘기지 않으므로 기본값이 운영 값이다), 팩토리 둘(`geocoding.geo_http_timeout`·`provider_fetchers.
   transport_http_timeout`), geo 8곳·transport 3곳이 팩토리를 쓴다. `httpx.Timeout(connect=…, read=…)` 둘만 주는 꼴은
   httpx 0.28이 `ValueError`로 거부하므로 첫 위치 인자(기존 timeout)가 read·write·pool을 덮는다. 문구: `GEO_HEAVY_POOL`
   근거('n150 디스크 대기' → 'odroid geo CPU 보호'), `mois_geocode_concurrency` 설명, transport base URL 설명,

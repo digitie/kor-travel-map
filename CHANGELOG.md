@@ -13,7 +13,9 @@
 ### geo·transport client connect timeout 분리 (2026-10-15, ADR-110 결정 3, T-MAP-02)
 
 - **CHANGED (settings)**: `kor_travel_geo_connect_timeout_seconds`·`kor_travel_transport_connect_timeout_seconds`
-  (기본 2.0, 0.2~10; env `KOR_TRAVEL_MAP_KOR_TRAVEL_{GEO,TRANSPORT}_CONNECT_TIMEOUT_SECONDS`) 신설. 기존
+  (기본 4.0, 0.2~10; env `KOR_TRAVEL_MAP_KOR_TRAVEL_{GEO,TRANSPORT}_CONNECT_TIMEOUT_SECONDS`) 신설. 4초는 Linux SYN
+  재전송(약 1초·3초)을 둘 다 기다리는 값이다 — geo 호출에는 재시도가 없고 Manager compose가 이 env를 넘기지 않아
+  기본값이 곧 운영 값이다. 기존
   `*_timeout_seconds`는 값·env 그대로 read·write·pool 상한으로 의미만 좁혔다. geo·transport가 odroid로 옮겨져
   피호출자 다운이 연결 거부가 아니라 무응답이 됐기 때문이다.
 - **CHANGED (api·dagster·cli)**: geo client 생성 8곳(종전 settings float 4곳·timeout 없음 2곳·`10.0` 하드코딩 2곳)과

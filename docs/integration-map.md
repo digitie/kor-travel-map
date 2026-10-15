@@ -173,9 +173,9 @@
   주기·Skip 조건·전이 규칙은 ADR-109 결정 5.
 - **Map → geo·transport가 LAN을 건넌다(2026-10-14~15 이전 실행, ADR-110 proposed — 사실 갱신 절).** 두 피호출자는
   odroid에 있고(geo `12501`, transport API gateway `12301` — 위 transport 박스의 포트) 화살표는
-  n150 → odroid LAN이며, 피호출자 다운은 RST가 아니라 **timeout**이다 — 오늘 단일 timeout(geo 10 s·transport 30 s),
-  connect 분리(T-MAP-02; 생성 지점·file:line은 ADR-110 컨텍스트 3)는 **미구현**이다(플립 전 배포 순서는 놓쳤고 이제
-  가능한 한 빨리). 값의 자리는 오늘 Manager compose 기본값 +
+  n150 → odroid LAN이며, 피호출자 다운은 RST가 아니라 **timeout**이다 — client timeout은 connect/read로 나뉜다(T-MAP-02):
+  connect **4 s**(geo·transport 공통), read·write·pool geo **10 s**·transport **30 s**. 생성 지점은 팩토리
+  `geo_http_timeout`·`transport_http_timeout`만 쓴다(lint 강제; file:line은 ADR-110 컨텍스트 3). 값의 자리는 오늘 Manager compose 기본값 +
   root `.env`이고, Manager ADR-58 R2(proposed) 뒤에는 registry `hosts:` 파생 기본값뿐이라 root `.env`의
   URL 재정의는 `targets validate`가 거부한다 — Map 저장소에는 주소를 적지 않는다(#508 redaction
   guard도 같은 뜻). geo 키 검증의 의미는 바뀌지 않는다(오늘도 대조된다 — ADR-110 컨텍스트 4; geo 재적재 뒤 재발급만

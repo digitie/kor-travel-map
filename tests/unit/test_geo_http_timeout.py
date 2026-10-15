@@ -40,7 +40,7 @@ def test_geo_http_timeout_carries_both_settings_fields() -> None:
 
 def test_geo_connect_timeout_defaults() -> None:
     timeout = geo_http_timeout(KorTravelMapSettings())
-    assert timeout.connect == 2.0
+    assert timeout.connect == 4.0
     assert timeout.read == 10.0
 
 

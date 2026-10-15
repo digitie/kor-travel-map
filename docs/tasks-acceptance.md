@@ -2404,7 +2404,8 @@ T-GR-01(`dataset_version()` 메서드·`_RestReverseV2Response.dataset`·`GeoCal
 **첫 호스트 플립(transport 4a) 전** 배포. 플립 뒤에는 피호출자 다운이 RST가 아니라 timeout이라 이 변경 없이는 MOIS
 run이 호출마다 10 s를 소모한다. 규모 S.
 
-- 설정: `kor_travel_geo_connect_timeout_seconds`·`kor_travel_transport_connect_timeout_seconds`(기본 2.0, 0.2~10,
+- 설정: `kor_travel_geo_connect_timeout_seconds`·`kor_travel_transport_connect_timeout_seconds`(기본 **4.0**(2026-10-15
+  리뷰에서 2.0 → 4.0 — SYN 재전송 약 1 s·3 s, geo `_post` 무재시도, Manager compose 미전달; ADR-110 결정 3), 0.2~10,
   env `KOR_TRAVEL_MAP_KOR_TRAVEL_{GEO,TRANSPORT}_CONNECT_TIMEOUT_SECONDS`); 기존 `*_timeout_seconds`는 read·write·pool
   상한으로 의미만 좁힌다(값·env 불변) — 오늘 settings를 읽지 않는 네 곳(아래 (b)(c))도 이 두 필드를 읽게 된다. 팩토리가
   돌려주는 값은 `httpx.Timeout(settings.<x>_timeout_seconds, connect=settings.<x>_connect_timeout_seconds)` 꼴이다 —
