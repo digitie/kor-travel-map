@@ -28,14 +28,14 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
 #1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
 
-**geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-00`·`T-GR-00-LEDGER`·`T-GR-01`~`08`, 의존 순서대로 아래에
-둔다. 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
+**geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-00-LEDGER`·`T-GR-01`~`08`, 의존 순서대로 아래에
+둔다(`T-GR-00`은 2026-10-15 `tasks-done.md`로 이관). 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
 
-**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-01`·`T-MAP-02`, `T-GR-08`
+**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관), `T-GR-08`
 바로 뒤에 둔다(목록 위치일 뿐 의존이 아니다). 접두사 `T-MAP-`는 **임시**다(ADR-110 열린 결정 5). 호스트 플립 자체는
 외부 저장소(Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed, 병렬 PR 미머지)의 일이라 여기 세지 않는다. 의존:
-T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
+T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 의존이 없다고 보고 병렬 착수를 **제안**한다(ADR-110 열린 결정 6, 소유자 확인) — 선행은 **T-GR-00-LEDGER**(journal
 분리; 코드 PR의 journal 항목이 225,280 B 상한을 넘긴다), `geocoding.py`를 T-GR-01과 공유하므로 늦은 PR이 리베이스,
 배포는 **transport 플립(설계 §11.2 4a) 전**.
@@ -48,15 +48,10 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
 
-- [ ] T-GR-00 — **문서 원장 분리 선행** (doc-only, 이 PR)
-
-  `tasks-acceptance.md`를 `scripts/archive_task_ledger_section.py`로 216,950 → 166,931 B로 줄였다(닫힌 절 7개).
-  해제는 이 PR의 docs lint 초록 + 머지(`[x]`·tasks-done 이관은 다음 doc-only PR에). journal·tasks-done 분리는 T-GR-00-LEDGER.
-
 - [ ] T-GR-00-LEDGER — **journal·tasks-done 다음 경계 분리** (doc-only, PR-1 선행)
 
-  실측 `journal.md` 208,660 B·`tasks-done.md` 200,699 B(상한 225,280)에서 가장 오래된 묶음을 `docs/archive/`로
-  분리(규약 §8, 인덱스 표 갱신·바이트 보존 검산). T-GR-01의 의존.
+  `journal.md` 209,356 → 2026-09-20~25 8건을 `archive/journal-2026-09e.md`로, `tasks-done.md` 200,699 → 2026-08-04~05
+  2절을 `archive/tasks-done-2026-08a.md`로(규약 §8, 인덱스 표·바이트 보존 검산). T-GR-01의 의존; `[x]`는 머지 뒤 다음 doc-only PR.
 
 - [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 407)
 
@@ -97,12 +92,6 @@ T-MAP-01은 ADR-109 머지 뒤(번호 110 고정 — 충족); T-MAP-02는 설계
 
   records resource `source_mode=replay`로 entity head `source_records.raw_data`를 같은 record 모델·변환기에 넣는다.
   MOIS 제외 술어는 `not_called` 스탬프(스탬프 없는 행은 포함). 1단계 MOIS·datagokr_file_data·standard_data — golden으로 1:1 확인되는 provider만.
-
-- [ ] T-MAP-01 — **ADR-110·연동 문서·CLAUDE.md 포인터** (doc-only, 브랜치 `docs/adr-110-geo-transport-on-odroid`)
-
-  ADR-110(proposed)·README 카운터 111·`integration-map.md` §1/§2/§3/§4·CLAUDE.md geocoding 줄·ADR-109 역포인터·원장.
-  코드·`.env.example` 변경 없음(standalone 주석은 T-MAP-02에). 해제는 docs lint 초록 + 머지; `[x]`·tasks-done 이관은
-  **T-GR-00-LEDGER** PR에(단일 소유 — T-MAP-02는 T-GR-00-LEDGER를 선행으로 두므로 닫을 일이 없다).
 
 - [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 선행 T-GR-00-LEDGER·배포는 transport 플립 전)
 

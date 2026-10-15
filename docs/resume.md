@@ -1,3 +1,13 @@
+## 2026-10-15 — journal·tasks-done 다음 경계 분리(T-GR-00-LEDGER) + T-GR-00·T-MAP-01 종결 이관: 브랜치 `docs/t-gr-00-ledger`
+
+**다음 한 작업: lint.yml 초록 → 머지(doc-only) → ADR-110 사실 갱신 doc-only PR(2026-10-14~15 geo·weather·transport의
+odroid 실제 이전·포트 통일·Manager compose 기본값 — 같은 PR이 T-GR-00-LEDGER `[x]`·이관을 싣는다) → T-GR-01(PR-1)·T-MAP-02.**
+
+- 바뀐 것: `journal.md` 2026-09-20~25 8건 → `docs/archive/journal-2026-09e.md`, `tasks-done.md` 2026-08-04~05 2절 →
+  `docs/archive/tasks-done-2026-08a.md`(상대 링크 4개 `../` 재기준화), 두 인덱스 표 갱신. T-GR-00(#1315)·T-MAP-01(#1316)
+  `[x]`·tasks-done 이관(둘 다 2026-10-13 머지·lint.yml 초록 확인). 실측·검산은 journal 2026-10-15와 acceptance §T-GR-00-LEDGER.
+- 바뀌지 않은 것: 코드·테스트·OpenAPI·`tasks-acceptance.md`의 다른 절·n150.
+
 ## 2026-10-13 — 공용 PG lock table 고갈(53200) 근본 수정(ADR-111): 브랜치 `fix/bulk-curation-locks` (PR #1319, draft)
 
 **다음 한 작업: CI(PostGIS 두 lane 포함) 초록 → 소유자 머지 → 아래 배포 순서. reconcile sensor는 2026-10-13

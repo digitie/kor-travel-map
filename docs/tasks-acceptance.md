@@ -2458,6 +2458,12 @@ journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실�
 - 바이트 보존 검산(이동 전 원본 바이트 == 이동 후 잔여 + 아카이브 - stub)을 PR 본문에 적는다; 두 파일 모두 분리 뒤
   ≤ 200,000 B.
 - `tests/unit/test_docs_archive_links.py`·`scripts/check_journal_update.py`·docs 크기 lint 초록. 즉시 머지(doc-only).
+- 실행(2026-10-15, 브랜치 `docs/t-gr-00-ledger`): journal 2026-09-20~25 8건 → `archive/journal-2026-09e.md`(위 첫 조문의
+  `09c`는 이미 쓰였고 09d도 #1319가 썼다 — 규약 §8의 다음 글자), tasks-done 2026-08-04~05 2절 → `archive/tasks-done-2026-08a.md`.
+  검산 journal 209,356 = 182,096 + 27,260, tasks-done 200,699 = 89,636 + 111,063(아카이브 본문 = 이동 바이트, 예외는 상대 링크
+  4개 `../` 재기준화 +12 B와 끝 빈 줄 1 B — journal 2026-10-15). T-GR-00·T-MAP-01 `[x]`·tasks-done 이관을 실었다.
+- 실측(커밋 직전 `wc -c`, 이 PR의 journal·resume 항목 포함): `journal.md` 184,071 B · `tasks-done.md` 91,029 B — 둘 다
+  ≤ 200,000 B. 이 절의 `[x]`·이관은 머지가 조건이라 다음 doc-only PR(ADR-110 사실 갱신)이 싣는다.
 
 ## T-GR-01
 
