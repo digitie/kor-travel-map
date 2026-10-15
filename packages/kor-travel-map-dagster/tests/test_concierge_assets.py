@@ -205,3 +205,63 @@ async def test_concierge_asset_rejects_unaccounted_upsert(
         await run_feature_place_kor_travel_concierge_youtube(context)
 
     assert client.loaded_bundles == []
+
+
+# -- ADR-109 결정 6(a): resource 토큰이 변환기까지 간다(kwarg 전달 경로 결박, T-GR-03) ----------
+
+_PAYLOAD_BJD = "5011025900"
+_GEO_BJD = "5011025000"
+_TOKEN_A = "dd1-" + "1" * 32
+_TOKEN_B = "dd1-" + "2" * 32
+
+
+class _Handle:
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    async def current(self) -> Any:
+        from kortravelmap.dto.geo_dataset import DatasetRef
+
+        return DatasetRef(version_token="dv1-" + "a" * 32, data_token=self.token)
+
+
+class _ObservedGeo:
+    async def observe(self, coord: Any) -> Any:
+        from kortravelmap.dto import Address
+        from kortravelmap.geocoding import ReverseGeocodeObservation
+
+        return ReverseGeocodeObservation(
+            Address(bjd_code=_GEO_BJD, sigungu_code="50110", sido_code="50"), ()
+        )
+
+    async def __call__(self, coord: Any) -> Any:
+        return (await self.observe(coord)).address
+
+
+@pytest.mark.parametrize(
+    ("resource_token", "expected_bjd"),
+    [(_TOKEN_B, _GEO_BJD), (_TOKEN_A, _PAYLOAD_BJD)],
+    ids=["payload-token-stale", "payload-token-current"],
+)
+async def test_concierge_asset_passes_the_run_token_to_the_converter(
+    resource_token: str, expected_bjd: str
+) -> None:
+    item = _export_item("upsert")
+    item["place"]["address"]["legal_dong_code"] = _PAYLOAD_BJD
+    item["place"]["address"]["geo_data_token"] = _TOKEN_A
+    client = _FakeConciergeClient()
+    context = build_asset_context(
+        resources={
+            "kor_travel_map_client": client,
+            "reverse_geocoder": _ObservedGeo(),
+            "kor_travel_geo_dataset": _Handle(resource_token),
+            "fetched_at": None,
+            "strict_address": "off",
+            "kor_travel_concierge_youtube_features": [item],
+        }
+    )
+
+    await run_feature_place_kor_travel_concierge_youtube(context)
+
+    [bundle] = client.loaded_bundles
+    assert bundle.feature.address.bjd_code == expected_bjd

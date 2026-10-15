@@ -614,3 +614,29 @@ async def test_empty_answer_guard_holds_for_concierge(migrated_session: AsyncSes
     assert result.geo_empty_guarded == 1
     assert await _row(migrated_session, feature_id) == before_row
     assert await _stamp_row(migrated_session, feature_id) == before_stamp
+
+
+async def test_row_evidence_decides_the_outcome(migrated_session: AsyncSession) -> None:
+    """MOIS처럼 행 evidence가 있으면 그것으로 outcome을 정한다 — payload 코드 행은 ``not_called``."""
+    from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
+    from kortravelmap.infra.feature_geocode_stamp_repo import is_stale
+
+    payload_code = (await _festival("evidence-payload", _FakeReverse(_geo()))).model_copy(
+        update={"geo_attempt": GeoAttemptEvidence(reverse_attempted=False)}
+    )
+    reversed_row = (await _festival("evidence-reverse", _FakeReverse(_geo()))).model_copy(
+        update={"geo_attempt": GeoAttemptEvidence(reverse_attempted=True)}
+    )
+    await load_bundles(migrated_session, [payload_code, reversed_row], geo=_ctx(REF_A))
+
+    payload_id = await _feature_id(migrated_session, payload_code)
+    reversed_id = await _feature_id(migrated_session, reversed_row)
+    payload_stamp = await get_stamp(migrated_session, payload_id)
+    reversed_stamp = await get_stamp(migrated_session, reversed_id)
+    assert payload_stamp is not None
+    assert payload_stamp.reverse_outcome == "not_called"
+    assert reversed_stamp is not None
+    assert reversed_stamp.reverse_outcome == "called"
+    # 새 토큰에서 다시 계획되는 것은 geo를 쓴 행뿐이다.
+    assert await is_stale(migrated_session, payload_id, TOKEN_B) is False
+    assert await is_stale(migrated_session, reversed_id, TOKEN_B) is True
