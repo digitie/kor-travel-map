@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,11 @@ class DatasetRef(BaseModel):
 
     version_token: str = Field(pattern=VERSION_TOKEN_PATTERN)
     data_token: str | None = Field(default=None, pattern=DATA_TOKEN_PATTERN)
+    #: 관측용 — ``POST /v2/dataset/version``의 ``current``만 싣는다(응답 ``dataset``에는 없다).
+    #: 비교에 쓰지 않는다(geo 계약: ``reference_months``는 비단조, 도출 실패 시 생략). 릴리스
+    #: 계획 표가 운영 화면용으로 기록한다(ADR-109 결정 5, T-GR-04).
+    activated_at: datetime | None = None
+    reference_months: dict[str, str] | None = None
 
 
 class GeoApplied(BaseModel):

@@ -7765,6 +7765,138 @@ class DagsterScheduleClaimResolutionRow(Base):
     )
 
 
+class KorTravelGeoReleaseRow(Base):
+    """``ops.kor_travel_geo_releases`` — geo 릴리스 재지오코딩 계획(ADR-109 결정 5, migration 408).
+
+    계획 1행 = ``(geo_data_token, plan_seq)``. ``baseline``은 처음 관측한 토큰의 기준선
+    기록이다(계획 없음 — 소유자 결정 2026-10-15). 같은 토큰의 활성(``planned|running``) 계획은
+    하나다. 읽기·쓰기는 ``infra/geo_release_repo.py``.
+    """
+
+    __tablename__ = "kor_travel_geo_releases"
+    __table_args__ = (
+        UniqueConstraint(
+            "geo_data_token", "plan_seq", name="uq_kor_travel_geo_releases_token_seq"
+        ),
+        CheckConstraint(
+            "state IN ('baseline', 'planned', 'running', 'done', 'superseded')",
+            name=conv("ck_kor_travel_geo_releases_state"),
+        ),
+        CheckConstraint("plan_seq >= 1", name=conv("ck_kor_travel_geo_releases_plan_seq")),
+        CheckConstraint(
+            "residual_stale IS NULL OR residual_stale >= 0",
+            name=conv("ck_kor_travel_geo_releases_residual"),
+        ),
+        CheckConstraint(
+            "reference_months IS NULL OR jsonb_typeof(reference_months) = 'object'",
+            name=conv("ck_kor_travel_geo_releases_reference_months"),
+        ),
+        CheckConstraint(
+            "geo_version_token ~ '^dv1-[0-9a-f]{32}$'",
+            name=conv("ck_kor_travel_geo_releases_version_token"),
+        ),
+        CheckConstraint(
+            "geo_data_token ~ '^dd1-[0-9a-f]{32}$'",
+            name=conv("ck_kor_travel_geo_releases_data_token"),
+        ),
+        Index(
+            "uq_kor_travel_geo_releases_active_token",
+            "geo_data_token",
+            unique=True,
+            postgresql_where=text("state IN ('planned', 'running')"),
+        ),
+        {"schema": "ops"},
+    )
+
+    plan_id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True
+    )
+    geo_data_token: Mapped[str] = mapped_column(Text, nullable=False)
+    plan_seq: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    geo_version_token: Mapped[str] = mapped_column(Text, nullable=False)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reference_months: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    residual_stale: Mapped[int | None] = mapped_column(Integer)
+    sweep_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class KorTravelGeoReleaseItemRow(Base):
+    """``ops.kor_travel_geo_release_items`` — 계획의 dataset 항목(ADR-109 결정 5.3, migration 408).
+
+    ``(operation_key, provider_dataset_id)``마다 1행, ``position``이 실행 순서다. ``run_config``가
+    NULL이면 job 기본값이다. ``attempt_seq``는 같은 행에서 단조 증가한다(run_key의 마지막 성분).
+    """
+
+    __tablename__ = "kor_travel_geo_release_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "operation_key",
+            "provider_dataset_id",
+            name="uq_kor_travel_geo_release_items_dataset",
+        ),
+        ForeignKeyConstraint(
+            ["plan_id"],
+            ["ops.kor_travel_geo_releases.plan_id"],
+            name=conv("fk_kor_travel_geo_release_items_plan"),
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name=conv("fk_kor_travel_geo_release_items_dataset"),
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'requested', 'done', 'failed', 'skipped')",
+            name=conv("ck_kor_travel_geo_release_items_state"),
+        ),
+        CheckConstraint(
+            "state <> 'skipped' OR state_reason IS NOT NULL",
+            name=conv("ck_kor_travel_geo_release_items_skip_reason"),
+        ),
+        CheckConstraint(
+            '"position" >= 1', name=conv("ck_kor_travel_geo_release_items_position")
+        ),
+        CheckConstraint(
+            "attempt_seq >= 1", name=conv("ck_kor_travel_geo_release_items_attempt")
+        ),
+        CheckConstraint(
+            "run_config IS NULL OR jsonb_typeof(run_config) = 'object'",
+            name=conv("ck_kor_travel_geo_release_items_run_config"),
+        ),
+        {"schema": "ops"},
+    )
+
+    plan_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    run_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    attempt_seq: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    state_reason: Mapped[str | None] = mapped_column(Text)
+    run_key: Mapped[str | None] = mapped_column(Text)
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class DagsterScheduleOverrideRow(Base):
     """``ops.dagster_schedule_overrides`` row mapping.
 

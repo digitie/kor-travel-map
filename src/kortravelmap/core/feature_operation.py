@@ -42,6 +42,140 @@ Dagster 큐 runner의 방어 skip이 함께 읽는 단일 정본이다.
 
 DEDICATED_JOB_ONLY_SKIP_REASON = "dedicated_job_only"
 """실행 계획이 위 operation을 건너뛸 때 ``skipped_provider_scopes[].reason`` 값."""
+
+# -- geo 릴리스 재지오코딩 계획의 입력(ADR-109 결정 3·5, T-GR-04) -----------------------------
+#
+# 계획은 Dagster 센서(T-GR-05)와 Map API ``POST /v1/ops/geo-releases/detect``가 **같은 함수**
+# (``infra/geo_release_repo.plan_geo_release``)로 만든다. API 프로세스는 ``kortravelmap.dagster``를
+# import하지 않으므로 계획이 읽는 job 사실은 여기 core에 둔다 — 각 값이 Dagster 정의와 같다는 것은
+# lint(``tests/lint/test_geo_heavy_assets_declare_the_pool.py``)와 dagster 패키지 테스트가 고정한다.
+
+FEATURE_LOAD_JOB_OPERATION_KEYS: frozenset[str] = frozenset(
+    {
+        "feature_event_datagokr_cultural_festivals_job",
+        "feature_event_krheritage_events_job",
+        "feature_event_visitkorea_enrichment_job",
+        "feature_geometry_knps_records_job",
+        "feature_notice_krforest_landslide_forecast_issues_job",
+        "feature_notice_transport_highway_incidents_job",
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
+        "feature_place_datagokr_seoul_bookstores_job",
+        "feature_place_khoa_beaches_job",
+        "feature_place_knps_points_job",
+        "feature_place_kor_travel_concierge_youtube_job",
+        "feature_place_krforest_arboretums_job",
+        "feature_place_krforest_recreation_forests_job",
+        "feature_place_krheritage_items_job",
+        "feature_place_mcst_culture_job",
+        "feature_place_mois_licenses_job",
+        "feature_place_standard_museums_job",
+        "feature_place_standard_parking_lots_job",
+        "feature_place_standard_special_streets_job",
+        "feature_place_standard_tourist_attractions_job",
+        "feature_place_transport_airports_job",
+        "feature_place_transport_fuel_stations_job",
+        "feature_place_transport_rest_areas_job",
+        "feature_price_transport_fuel_stations_job",
+        "feature_price_transport_rest_areas_job",
+        "feature_route_krforest_dulle_trails_job",
+        "feature_route_krforest_mountain_trails_job",
+    }
+)
+"""Dagster 전용 적재 job이 있는 operation(= ``FEATURE_LOAD_SCHEDULE_SPECS``의 ``job_name`` 전부).
+
+DB의 ``refresh`` operation 중 여기 없는 것(MOIS 증분·상세·폐업 갱신 등)은 큐 runner로만 돈다 —
+릴리스 계획은 그 항목을 ``skipped(queue_only)``로 남긴다(센서는 job으로만 run을 낸다).
+"""
+
+GEO_DEPENDENT_OPERATION_KEYS: frozenset[str] = frozenset(
+    {
+        "feature_event_datagokr_cultural_festivals_job",
+        "feature_event_krheritage_events_job",
+        "feature_geometry_knps_records_job",
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
+        "feature_place_datagokr_seoul_bookstores_job",
+        "feature_place_khoa_beaches_job",
+        "feature_place_knps_points_job",
+        "feature_place_kor_travel_concierge_youtube_job",
+        "feature_place_krforest_arboretums_job",
+        "feature_place_krforest_recreation_forests_job",
+        "feature_place_krheritage_items_job",
+        "feature_place_mcst_culture_job",
+        "feature_place_mois_licenses_job",
+        "feature_place_standard_museums_job",
+        "feature_place_standard_parking_lots_job",
+        "feature_place_standard_special_streets_job",
+        "feature_place_standard_tourist_attractions_job",
+        "feature_place_transport_airports_job",
+        "feature_place_transport_fuel_stations_job",
+        "feature_place_transport_rest_areas_job",
+        "feature_route_krforest_dulle_trails_job",
+        "feature_route_krforest_mountain_trails_job",
+    }
+)
+"""geo 유도 값을 만드는 operation — asset이 ``reverse_geocoder=``/``address_resolver=``에
+None이 아닌 값을 넘긴다(ADR-109 결정 3). 런타임 정본이고, lint가 AST 유도 집합과의 **집합
+동등**으로 고정한다."""
+
+FEATURE_LOAD_DISABLED_OPERATION_KEYS: frozenset[str] = frozenset(
+    {
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
+        "feature_place_standard_special_streets_job",
+    }
+)
+"""자동 적재를 끈 operation — Dagster ``schedules.DISABLED_FEATURE_LOAD_OPERATION_KEYS``와 같은
+값이다(dagster 패키지 테스트가 동등을 고정한다). 릴리스 계획은 ``skipped(disabled)``로 남긴다."""
+
+DATASET_CONFIGURED_OPERATION_RESOURCES: dict[str, tuple[str, ...]] = {
+    "feature_place_knps_points_job": ("knps_point_dataset_key", "knps_point_records"),
+    "feature_geometry_knps_records_job": ("knps_geometry_dataset_key", "knps_geometry_records"),
+    "feature_place_datagokr_seoul_bookstores_job": (
+        "datagokr_file_data_dataset_key",
+        "datagokr_file_data_records",
+    ),
+    "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job": (
+        "datagokr_file_data_dataset_key",
+        "datagokr_file_data_records",
+    ),
+    "feature_place_datagokr_ansan_world_restaurants_job": (
+        "datagokr_file_data_dataset_key",
+        "datagokr_file_data_records",
+    ),
+    "feature_place_datagokr_jeju_local_restaurants_job": (
+        "datagokr_file_data_dataset_key",
+        "datagokr_file_data_records",
+    ),
+}
+"""dataset을 run_config로 고르는 operation → ``{"config": {"dataset_key": …}}``를 받는 resource들.
+
+KNPS는 job 하나에 dataset 다섯이 결박돼 있어 dataset마다 run이 하나씩이다(``knps_schedule_binding``
+꼴). datagokr fileData job은 job마다 dataset 하나지만 run_config가 없으면 resource가 기본값을 쓴다.
+dagster 패키지 테스트가 schedule spec의 run_config resource 이름과 같음을 고정한다."""
+
+REPLAY_RECORDS_RESOURCES: dict[str, str] = {
+    "feature_place_mois_licenses_job": "mois_license_records",
+    "feature_event_datagokr_cultural_festivals_job": "datagokr_cultural_festivals",
+    "feature_place_standard_museums_job": "standard_museums",
+    "feature_place_standard_tourist_attractions_job": "standard_tourist_attractions",
+    "feature_place_standard_parking_lots_job": "standard_parking_lots",
+    "feature_place_standard_special_streets_job": "standard_special_streets",
+    "feature_place_datagokr_seoul_bookstores_job": "datagokr_file_data_records",
+    "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job": (
+        "datagokr_file_data_records"
+    ),
+    "feature_place_datagokr_ansan_world_restaurants_job": "datagokr_file_data_records",
+    "feature_place_datagokr_jeju_local_restaurants_job": "datagokr_file_data_records",
+}
+"""쿼터 민감 operation → ``source_mode=replay``를 받을 records resource(ADR-109 결정 7·열린 결정 4
+1단계 범위: MOIS·datagokr fileData·standard_data). **resource 쪽 ``source_mode``는 T-GR-08이
+더한다** — 그 전에 이 run_config로 run을 내면 Dagster config 검증이 거부한다(T-GR-05 센서는
+replay 항목을 T-GR-08 뒤에만 낸다)."""
 C6C_CANCEL_PROBE_JOB_KIND = "c6c_cancel_probe"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
     {

@@ -44,11 +44,13 @@ ADR 참조
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 from collections import Counter, OrderedDict, deque
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import (
     TYPE_CHECKING,
@@ -1083,8 +1085,27 @@ def _parse_dataset_version_response(data: dict[str, Any]) -> DatasetRef | None:
         {
             "version_token": current.get("version_token"),
             "data_token": current.get("data_token"),
+            **_dataset_observation_fields(current),
         }
     )
+
+
+def _dataset_observation_fields(current: dict[str, Any]) -> dict[str, Any]:
+    """``current``의 관측용 필드(``activated_at``·``reference_months``) — **선택** 파싱.
+
+    토큰과 달리 비교 키가 아니므로 형식이 틀리면 버린다(현재 토큰 판정을 막지 않는다).
+    """
+    fields: dict[str, Any] = {}
+    activated_at = current.get("activated_at")
+    if isinstance(activated_at, str):
+        with contextlib.suppress(ValueError):
+            fields["activated_at"] = datetime.fromisoformat(activated_at)
+    months = current.get("reference_months")
+    if isinstance(months, dict) and all(
+        isinstance(key, str) and isinstance(value, str) for key, value in months.items()
+    ):
+        fields["reference_months"] = dict(months)
+    return fields
 
 
 def _parse_region_center(data: dict[str, Any]) -> RegionWithinRadiusCenter:

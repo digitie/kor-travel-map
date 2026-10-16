@@ -296,6 +296,10 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # relation remains write-free for API/Dagster; the maintenance HTTP scope
     # is enforced above the database role boundary.
     "curation_cutover_identity_mappings": ("SELECT",),
+    # ADR-109 결정 5(migration 408): 센서와 운영 API가 계획을 만들고(INSERT) 항목·상태를
+    # 전이한다(UPDATE). 계획 이력은 지우지 않는다 — 옛 계획은 `superseded`로 남는다.
+    "kor_travel_geo_release_items": ("SELECT", "INSERT", "UPDATE"),
+    "kor_travel_geo_releases": ("SELECT", "INSERT", "UPDATE"),
     "curation_rule_reconcile_operations": (),
     "curation_rule_reconcile_scope_members": (),
     "feature_override_field_paths": ("SELECT",),
