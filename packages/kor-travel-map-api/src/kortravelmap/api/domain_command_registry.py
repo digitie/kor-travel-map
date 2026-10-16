@@ -605,6 +605,17 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "service.cache-target-reconciliation.complete",
         "consumer checksum receipt와 terminal resume 결과를 exact replay",
     ),
+    # ADR-109 결정 8(T-GR-04) — geo 릴리스 재지오코딩 계획.
+    ("POST", "/v1/ops/geo-releases/detect"): _resource(
+        "같은 토큰의 활성 계획 부분 UNIQUE와 advisory 잠금이 재감지를 기존 계획으로 수렴(멱등)"
+    ),
+    (
+        "POST",
+        "/v1/ops/geo-releases/{plan_id}/items/{position}/skip",
+    ): _resource("대기·실패 항목만 skipped로 전이 — 재시도는 409로 끝나고 상태는 그대로다"),
+    ("POST", "/v1/ops/geo-releases/{plan_id}/replan"): _non_retryable(
+        "호출마다 plan_seq + 1 새 계획을 만든다 — 재시도는 계획을 하나 더 만든다"
+    ),
     ("POST", "/v1/ops/datasets/{provider_dataset_id}/preview"): _query(
         "provider fixture/live preview를 반환하지만 durable mutation은 없음"
     ),

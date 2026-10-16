@@ -38,7 +38,9 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "GeoCoverage",
     "GeocodeStamp",
+    "coverage",
     "decide_outcome",
     "get_stamp",
     "is_stale",
@@ -298,3 +300,134 @@ async def select_stale_feature_ids(
         rows = await session.execute(_SELECT_STALE_AFTER_SQL, {**params, "after": after})
     return [str(feature_id) for feature_id in rows.scalars().all()]
 
+
+
+@dataclass(frozen=True)
+class GeoCoverage:
+    """현재 토큰 기준 스탬프 커버리지(ADR-109 결정 5.6, T-GR-04).
+
+    분모 ``total_provider_with_coord``는 **인자로 받은 dataset**에 primary source_link를 가진
+    좌표 보유 활성 Feature다. 그 집합은 네 칸으로 나뉜다 — ``stamped_current``(현재 토큰,
+    ``called|geocoded``) + ``stamped_other``(다른 토큰 ``called|geocoded`` = stale) +
+    ``not_called``(토큰 비교 대상 아님, ``not_called_by_kind``의 합) + ``unstamped``(스탬프 없음 =
+    stale). ``excluded_by_skip``은 skip된 dataset의 같은 계수, ``unstamped_non_provider``는 provider
+    기원이 아닌(primary link 없음) 좌표 보유 활성 Feature 중 스탬프 없는 것이다 — 둘 다 표시만
+    한다(완료 판정에 넣지 않는다).
+    """
+
+    total_provider_with_coord: int
+    stamped_current: int
+    stamped_other: int
+    unstamped: int
+    not_called_by_kind: dict[str, int]
+    excluded_by_skip: int
+    unstamped_non_provider: int
+
+    @property
+    def remaining(self) -> int:
+        """다시 적재해야 할 행 — ``stamped_other + unstamped``(완료 판정의 잔여)."""
+        return self.stamped_other + self.unstamped
+
+
+_SCOPED_FEATURES_CTE: Final[str] = """
+scoped AS (
+    SELECT DISTINCT feature.feature_id, feature.kind
+      FROM feature.features AS feature
+      JOIN provider_sync.source_links AS link
+        ON link.feature_id = feature.feature_id
+       AND link.source_role = 'primary'
+      JOIN provider_sync.source_entities AS entity
+        ON entity.source_entity_key = link.source_entity_key
+     WHERE feature.lifecycle_state = 'active'
+       AND feature.coord IS NOT NULL
+       AND entity.provider_dataset_id = ANY(CAST(:provider_dataset_ids AS bigint[]))
+)
+"""
+
+_COVERAGE_BY_KIND_SQL: Final = text(
+    "WITH"
+    + _SCOPED_FEATURES_CTE
+    + """
+SELECT scoped.kind,
+       count(*) AS total,
+       count(*) FILTER (
+           WHERE stamp.reverse_outcome <> 'not_called'
+             AND stamp.geo_data_token = CAST(:current_data_token AS text)
+       ) AS stamped_current,
+       count(*) FILTER (
+           WHERE stamp.reverse_outcome <> 'not_called'
+             AND stamp.geo_data_token IS DISTINCT FROM CAST(:current_data_token AS text)
+       ) AS stamped_other,
+       count(*) FILTER (WHERE stamp.feature_id IS NULL) AS unstamped,
+       count(*) FILTER (WHERE stamp.reverse_outcome = 'not_called') AS not_called
+  FROM scoped
+  LEFT JOIN feature.feature_geocode_stamps AS stamp
+    ON stamp.feature_id = scoped.feature_id
+ GROUP BY scoped.kind
+"""
+)
+
+_COUNT_SCOPED_SQL: Final = text("WITH" + _SCOPED_FEATURES_CTE + "SELECT count(*) FROM scoped")
+
+_UNSTAMPED_NON_PROVIDER_SQL: Final = text(
+    """
+SELECT count(*)
+  FROM feature.features AS feature
+ WHERE feature.lifecycle_state = 'active'
+   AND feature.coord IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM provider_sync.source_links AS link
+         WHERE link.feature_id = feature.feature_id AND link.source_role = 'primary'
+   )
+   AND NOT EXISTS (
+        SELECT 1 FROM feature.feature_geocode_stamps AS stamp
+         WHERE stamp.feature_id = feature.feature_id
+   )
+"""
+)
+
+
+async def coverage(
+    session: AsyncSession,
+    current_data_token: str | None,
+    *,
+    provider_dataset_ids: Collection[int],
+    skipped_provider_dataset_ids: Collection[int] = (),
+) -> GeoCoverage:
+    """``provider_dataset_ids``로 한정한 현재 토큰 커버리지(:class:`GeoCoverage`).
+
+    현재 토큰이 None이면 ``called|geocoded`` 스탬프는 전부 ``stamped_other``다(비교할 현재가 없다).
+    """
+    ids = sorted({int(value) for value in provider_dataset_ids})
+    rows = (
+        (
+            await session.execute(
+                _COVERAGE_BY_KIND_SQL,
+                {"provider_dataset_ids": ids, "current_data_token": current_data_token},
+            )
+        )
+        .mappings()
+        .all()
+    )
+    skipped = sorted({int(value) for value in skipped_provider_dataset_ids} - set(ids))
+    excluded = (
+        int(
+            (
+                await session.execute(_COUNT_SCOPED_SQL, {"provider_dataset_ids": skipped})
+            ).scalar_one()
+        )
+        if skipped
+        else 0
+    )
+    non_provider = int((await session.execute(_UNSTAMPED_NON_PROVIDER_SQL)).scalar_one())
+    return GeoCoverage(
+        total_provider_with_coord=sum(int(row["total"]) for row in rows),
+        stamped_current=sum(int(row["stamped_current"]) for row in rows),
+        stamped_other=sum(int(row["stamped_other"]) for row in rows),
+        unstamped=sum(int(row["unstamped"]) for row in rows),
+        not_called_by_kind={
+            str(row["kind"]): int(row["not_called"]) for row in rows if int(row["not_called"])
+        },
+        excluded_by_skip=excluded,
+        unstamped_non_provider=non_provider,
+    )

@@ -65,6 +65,7 @@ from kortravelmap.enrichment import (
     find_place_phone_candidates,
 )
 from kortravelmap.infra import feature_update_repo as fur_repo
+from kortravelmap.infra import geo_release_repo
 from kortravelmap.infra.advisory_lock import (
     advisory_lock,
     connection_advisory_lock,
@@ -344,9 +345,10 @@ if TYPE_CHECKING:
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
     from kortravelmap.dto import Address, FeatureBundle, SourceRecord
-    from kortravelmap.dto.geo_dataset import GeoLoadContext
+    from kortravelmap.dto.geo_dataset import DatasetRef, GeoLoadContext
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
+    from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
     from kortravelmap.providers.mois import MoisLicensePlaceRecord
     from kortravelmap.providers.visitkorea import VisitKoreaFestivalItem
@@ -1104,6 +1106,45 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 payload_hashes=payload_hashes,
                 current_data_token=current_data_token,
+            )
+
+    # -- geo 릴리스 재지오코딩 계획(ADR-109 결정 5, T-GR-04) -----------------------------------
+
+    async def create_geo_release_plan(
+        self, current: DatasetRef
+    ) -> geo_release_repo.GeoReleasePlanOutcome:
+        """관측한 geo 현재 데이터셋으로 계획을 만들거나 기존 계획을 돌려준다(한 transaction).
+
+        Dagster 센서(T-GR-05)가 부른다. API ``POST /v1/ops/geo-releases/detect``는 같은
+        :func:`~kortravelmap.infra.geo_release_repo.plan_geo_release`를 요청 session으로 부른다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.plan_geo_release(session, current)
+
+    async def get_geo_release_plan(
+        self, plan_id: int
+    ) -> geo_release_repo.GeoReleasePlan | None:
+        """계획 1건과 항목(없으면 None). 읽기 전용."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.get_geo_release_plan(session, plan_id)
+
+    async def geo_release_plan_coverage(
+        self, plan: geo_release_repo.GeoReleasePlan
+    ) -> GeoCoverage:
+        """계획 토큰 기준 커버리지(분모는 그 계획의 비-skip 항목 dataset). 읽기 전용."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.plan_coverage(session, plan)
+
+    async def complete_geo_release_plan(
+        self,
+        plan_id: int,
+        *,
+        sigungu_resolver: SigunguByRadiusResolver | None,
+    ) -> geo_release_repo.GeoReleaseCompletion:
+        """끝난 계획의 완료 판정 — 잔여 1회 sweep, 또는 링크 재동기화 뒤 ``done``."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.complete_plan(
+                session, plan_id, sigungu_resolver=sigungu_resolver
             )
 
     async def load_feature_bundles_reobserving(

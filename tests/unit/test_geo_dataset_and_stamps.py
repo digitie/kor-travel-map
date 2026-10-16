@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -160,7 +161,46 @@ async def test_dataset_version_posts_empty_body_and_returns_current_ref() -> Non
     finally:
         await http.aclose()
     assert transport.seen == [("/v2/dataset/version", {})]
-    assert ref == DatasetRef(version_token=VERSION, data_token=DATA)
+    assert ref == DatasetRef(
+        version_token=VERSION,
+        data_token=DATA,
+        activated_at=datetime(2026, 10, 15, tzinfo=UTC),
+    )
+
+
+async def test_dataset_version_carries_observation_fields_and_drops_malformed_ones() -> None:
+    """``activated_at``·``reference_months``는 관측용 선택 필드다(T-GR-04 계획 표가 기록) —
+    형식이 틀리면 버리고 토큰 판정은 그대로다."""
+    current = {
+        "version_token": VERSION,
+        "data_token": DATA,
+        "activated_at": "2026-08-20T03:12:45+09:00",
+        "reference_months": {"juso": "202607", "navi": "202606"},
+    }
+    broken = {
+        "version_token": VERSION,
+        "data_token": DATA,
+        "activated_at": "어제",
+        "reference_months": {"juso": 202607},
+    }
+    client, http = _client(
+        _Transport(
+            [
+                {"status": "OK", "available": True, "current": current},
+                {"status": "OK", "available": True, "current": broken},
+            ]
+        )
+    )
+    try:
+        good = await client.dataset_version()
+        dropped = await client.dataset_version()
+    finally:
+        await http.aclose()
+    assert good is not None
+    assert good.reference_months == {"juso": "202607", "navi": "202606"}
+    assert good.activated_at is not None
+    assert good.activated_at.utcoffset() is not None
+    assert dropped == DatasetRef(version_token=VERSION, data_token=DATA)
 
 
 async def test_dataset_version_unavailable_is_none() -> None:

@@ -100,6 +100,7 @@ from kortravelmap.api.routers import (
     ops_cache_target_streams_router,
     ops_contract_fixtures_router,
     ops_datasets_router,
+    ops_geo_releases_router,
     ops_live_router,
     ops_logs_router,
     ops_pipeline_router,
@@ -197,6 +198,7 @@ _CACHE_TARGET_GONE_CODES = frozenset({"snapshot_material_compacted"})
 
 _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
+    "/v1/ops/geo-releases",
     "/v1/ops/pipeline",
 )
 _OPS_OBSERVABILITY_PATHS = frozenset(
@@ -1341,6 +1343,15 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     if ops_routes_enabled:
         application.include_router(
             ops_pipeline_router,
+            prefix="/v1",
+            dependencies=[Depends(require_ops_operator)],
+        )
+
+    # ADR-109 결정 8 (T-GR-04) — geo 릴리스 재지오코딩 계획. admin 프로필만(센서는 이 API를 치지
+    # 않는다 — in-process client), GET은 ops:read principal도, POST는 admin BFF만.
+    if ops_routes_enabled:
+        application.include_router(
+            ops_geo_releases_router,
             prefix="/v1",
             dependencies=[Depends(require_ops_operator)],
         )

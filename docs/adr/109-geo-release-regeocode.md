@@ -208,15 +208,26 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    토큰을 저장했다; ADR-110 "사실 갱신 (2026-10-15)" 절 5항 (ㄹ)) 그 토큰을 커서에 **기준선**으로 기록하고 계획을 만들지 않는다.
    재계획은 기준선 이후 토큰이 **바뀔 때**만이다. 스탬프 없는 행은 평소 적재가 채운다(결정 4 — 스탬프 부재 =
    stale은 적재 경로의 규칙이고 센서 계획의 근거가 아니다). 구현은 T-GR-04/05.
+   **구현(T-GR-04)**: 기준선은 계획 표의 `state='baseline'` 행이다(항목 없음) — 센서 커서가 없는 `/detect`도 같은
+   판단을 하게. 그 행이 **최신 행**일 때만 "계획 없음"이고, 그 뒤 다른 토큰 계획이 있었으면 일반 규칙(잔여 판정)을 탄다.
 2. **계획 identity = `plan_id` surrogate + `(data_token, plan_seq)`.** 표 `ops.kor_travel_geo_releases`
    (+ `ops.kor_travel_geo_release_items`, migration `408_kor_travel_geo_releases`, owner role·receipt CHECK).
    같은 토큰에 `planned|running` 계획이 있으면 그것(부분 UNIQUE, 멱등); 없으면 `plan_seq = max+1` 새 행 —
-   롤백·재활성화(A→B→A)에서 두 번째 A도 새 계획이 되어 다시 돈다. 단 관측 토큰의 최신 계획이 terminal이고
-   `coverage(token, 비-skipped datasets).stamped_other + unstamped == 0`이면 계획을 만들지 않는다(이미 그
-   토큰으로 끝났다). `replan`은 `plan_seq+1`의 새 행이다. 진행 중 옛 계획은 `superseded`.
-3. **항목 입력은 DB 정본이다.** `provider_sync.provider_dataset_operations WHERE operation_kind='feature_load'
+   롤백·재활성화(A→B→A)에서 두 번째 A도 새 계획이 되어 다시 돈다. 계획을 만들지 않는 경우는 둘이다 —
+   (가) **계획 표 전체의 최신 행이 이 토큰의 `done` 행**이면 잔여가 남았어도 계획하지 않는다(그 토큰은 이미 한
+   사이클을 돌았고 남은 것은 `residual_stale`로 기록됐다 — 다시 돌리는 것은 운영자 `replan`이다; 이 규칙이
+   없으면 감지·tick마다 MOIS·replay 쿼터를 다시 쓴다, #1331 리뷰). A→B→A의 두 번째 A는 B가 더 새 행이라
+   여기 걸리지 않는다. (나) 이 토큰의 이전 행이 있고 `coverage(token, 비-skipped datasets).stamped_other +
+   unstamped == 0`이면 계획하지 않되, **다른 토큰의 활성 계획을 먼저 `superseded`로 닫는다**(B 계획이 돌기 전에
+   geo가 A로 롤백된 경우 — B가 활성으로 남지 않게). `replan`은 `plan_seq+1`의 새 행이고 **최신 관측 토큰의,
+   기준선이 아닌 계획만** 허용한다(그 외 409). 진행 중 옛 계획은 `superseded`.
+3. **항목 입력은 DB 정본이다.**(구현 T-GR-04: kind는 `refresh` — `feature_load` 행은 DB에 없고 job을 dataset에 결박하는
+   kind가 `refresh`다. job 없는 operation은 `skipped(queue_only)`.) `provider_sync.provider_dataset_operations WHERE operation_kind='feature_load'
    AND is_enabled` ⋈ `provider_datasets.is_active`(`head-schema.sql:18458-18470`) → `(operation_key,
-   provider_dataset_id)` 쌍. geo 의존 여부는 `GEO_DEPENDENT_OPERATION_KEYS`(결정 3 — pool lint의 AST 유도와 집합
+   provider_dataset_id)` 쌍(**항목 모양 — 구현 T-GR-04 결정**: 항목 1행 = Dagster run 1개다.
+   `(operation_key, run_config)`가 같은 dataset은 `provider_dataset_ids` 배열 하나로 묶인다 — MCST는
+   dataset 13개가 run 1개, KNPS는 dataset마다 run_config가 달라 항목 5개. `attempt_seq`는 같은 행에서
+   단조 증가하고 UNIQUE에 넣지 않는다 — 시도 이력은 Dagster run tag가 갖는다; 단순성). geo 의존 여부는 `GEO_DEPENDENT_OPERATION_KEYS`(결정 3 — pool lint의 AST 유도와 집합
    동등으로 고정된 core 상수)로 본다.
    KNPS처럼 job 1개에 dataset 5개가 결박된 operation은 dataset마다 항목 1개 + **run_config를 dataset마다**
    (`knps_schedule_binding`의 꼴, `schedules.py:158-165`). 쿼터 민감 dataset은 `source_mode=replay`(결정 7).

@@ -45,6 +45,12 @@
         "406_feature_write_gate"
       ],
       "revision": "407_feature_geocode_stamps"
+    },
+    {
+      "down_revision": [
+        "407_feature_geocode_stamps"
+      ],
+      "revision": "408_kor_travel_geo_releases"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

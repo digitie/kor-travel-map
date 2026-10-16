@@ -63,8 +63,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # weather operation을 가리키던 목표 diff 항목 5건(user added 4·service enum 1) 제거.
     # 2026-10-12 ADR-108 — admin baseline 재고정(`POST /v1/ops/pipeline/requests` 응답
     # description 문자열만 변경, schema·user/service 불변).
+    # 2026-10-16 T-GR-04 — admin baseline 재고정(`/v1/ops/geo-releases` 5 operation 추가,
+    # 기존 경로·user/service 불변).
     "openapi-diff-v1.json": (
-        "76993263f5c4fa4a011e9d240911c78505f9af62f4768cb92832fc0891965216"
+        "7d57ded14898fc9e58bb8f8a4013e68087697e69900bba999c832cbb63734b93"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -72,8 +74,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-09 T-VN-39/ADR-098 결정 6 — 32B 문안의 alias 원자 생성을 provider 경로로
     # 한정했다(manual·요청승인·큐레이션·core는 legacy 주소를 갖지 않는다).
     # 2026-10-12 ADR-108 — T-VN-40 pending receipt의 full-admin sha 재핀(description만 변경).
+    # 2026-10-16 T-GR-04 — 같은 receipt의 full-admin sha 재핀(geo-releases 5 operation 추가).
     "consumer-rollout-v1.json": (
-        "459cfad97c4c4c09dc378b1275a3b08a69fd7438e8a0b5a46cb9586d89be007a"
+        "364b472e40e155b776f0b036a3650dcc056b37e393454ff32d207fa82df65e7a"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
