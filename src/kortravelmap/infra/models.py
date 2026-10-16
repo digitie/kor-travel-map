@@ -7831,10 +7831,11 @@ class KorTravelGeoReleaseRow(Base):
 
 
 class KorTravelGeoReleaseItemRow(Base):
-    """``ops.kor_travel_geo_release_items`` — 계획의 dataset 항목(ADR-109 결정 5.3, migration 408).
+    """``ops.kor_travel_geo_release_items`` — 계획의 항목(ADR-109 결정 5.3, migration 408).
 
-    ``(operation_key, provider_dataset_id)``마다 1행, ``position``이 실행 순서다. ``run_config``가
-    NULL이면 job 기본값이다. ``attempt_seq``는 같은 행에서 단조 증가한다(run_key의 마지막 성분).
+    1행 = Dagster run 1개 — ``(operation_key, run_config)``가 같은 dataset은
+    ``provider_dataset_ids`` 하나로 묶인다. ``position``이 실행 순서, ``run_config`` NULL은 job
+    기본값이다. dataset FK는 없다(배열 — dataset은 지우지 않고 비활성화만 한다).
     """
 
     __tablename__ = "kor_travel_geo_release_items"
@@ -7842,8 +7843,8 @@ class KorTravelGeoReleaseItemRow(Base):
         UniqueConstraint(
             "plan_id",
             "operation_key",
-            "provider_dataset_id",
-            name="uq_kor_travel_geo_release_items_dataset",
+            "provider_dataset_ids",
+            name="uq_kor_travel_geo_release_items_run",
         ),
         ForeignKeyConstraint(
             ["plan_id"],
@@ -7851,10 +7852,15 @@ class KorTravelGeoReleaseItemRow(Base):
             name=conv("fk_kor_travel_geo_release_items_plan"),
             ondelete="CASCADE",
         ),
-        ForeignKeyConstraint(
-            ["provider_dataset_id"],
-            ["provider_sync.provider_datasets.provider_dataset_id"],
-            name=conv("fk_kor_travel_geo_release_items_dataset"),
+        CheckConstraint(
+            "cardinality(provider_dataset_ids) >= 1",
+            name=conv("ck_kor_travel_geo_release_items_datasets"),
+        ),
+        CheckConstraint(
+            "state_reason IS NULL OR state_reason IN ('disabled', 'no_geo_dependency', "
+            "'queue_only', 'operator', 'sweep', 'run_not_launched', 'no_progress', "
+            "'run_failed')",
+            name=conv("ck_kor_travel_geo_release_items_state_reason"),
         ),
         CheckConstraint(
             "state IN ('pending', 'requested', 'done', 'failed', 'skipped')",
@@ -7880,7 +7886,7 @@ class KorTravelGeoReleaseItemRow(Base):
     plan_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     operation_key: Mapped[str] = mapped_column(Text, nullable=False)
-    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_dataset_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
     run_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     attempt_seq: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1")

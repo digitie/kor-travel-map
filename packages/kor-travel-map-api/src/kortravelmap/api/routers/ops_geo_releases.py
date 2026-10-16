@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -44,6 +44,18 @@ _LOGGER = logging.getLogger(__name__)
 router = APIRouter(prefix="/ops/geo-releases", tags=["ops"])
 
 CurrentStatus = Literal["ok", "no_token", "unavailable"]
+PlanState = Literal["baseline", "planned", "running", "done", "superseded"]
+ItemState = Literal["pending", "requested", "done", "failed", "skipped"]
+ItemStateReason = Literal[
+    "disabled",
+    "no_geo_dependency",
+    "queue_only",
+    "operator",
+    "sweep",
+    "run_not_launched",
+    "no_progress",
+    "run_failed",
+]
 
 
 class GeoDatasetRecord(BaseModel):
@@ -57,20 +69,29 @@ class GeoDatasetRecord(BaseModel):
     reference_months: dict[str, str] | None = None
 
 
+class GeoReleaseDatasetRecord(BaseModel):
+    """항목이 다시 적재하는 dataset."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+
+
 class GeoReleaseItemRecord(BaseModel):
-    """계획 항목."""
+    """계획 항목 — Dagster run 1개(그 run이 다시 적재하는 dataset 목록)."""
 
     model_config = ConfigDict(extra="forbid")
 
     position: int
     operation_key: str
-    provider_dataset_id: int
-    provider: str
-    dataset_key: str
+    datasets: list[GeoReleaseDatasetRecord]
     run_config: dict[str, Any] | None
+    launch_blocked_reason: Literal["replay_not_launchable_before_t_gr_08"] | None
     attempt_seq: int
-    state: str
-    state_reason: str | None
+    state: ItemState
+    state_reason: ItemStateReason | None
     run_key: str | None
     dagster_run_id: str | None
     requested_at: datetime | None
@@ -87,7 +108,7 @@ class GeoReleasePlanRecord(BaseModel):
     geo_version_token: str
     activated_at: datetime | None
     reference_months: dict[str, Any] | None
-    state: str
+    state: PlanState
     residual_stale: int | None
     sweep_started_at: datetime | None
     observed_at: datetime
@@ -181,13 +202,19 @@ def _item(item: geo_release_repo.GeoReleaseItem) -> GeoReleaseItemRecord:
     return GeoReleaseItemRecord(
         position=item.position,
         operation_key=item.operation_key,
-        provider_dataset_id=item.provider_dataset_id,
-        provider=item.provider,
-        dataset_key=item.dataset_key,
+        datasets=[
+            GeoReleaseDatasetRecord(
+                provider_dataset_id=dataset.provider_dataset_id,
+                provider=dataset.provider,
+                dataset_key=dataset.dataset_key,
+            )
+            for dataset in item.datasets
+        ],
         run_config=item.run_config,
+        launch_blocked_reason=item.launch_blocked_reason,
         attempt_seq=item.attempt_seq,
-        state=item.state,
-        state_reason=item.state_reason,
+        state=cast("ItemState", item.state),
+        state_reason=cast("ItemStateReason | None", item.state_reason),
         run_key=item.run_key,
         dagster_run_id=item.dagster_run_id,
         requested_at=item.requested_at,
@@ -202,7 +229,7 @@ def _plan(plan: geo_release_repo.GeoReleasePlan) -> GeoReleasePlanRecord:
         geo_version_token=plan.geo_version_token,
         activated_at=plan.activated_at,
         reference_months=plan.reference_months,
-        state=plan.state,
+        state=cast("PlanState", plan.state),
         residual_stale=plan.residual_stale,
         sweep_started_at=plan.sweep_started_at,
         observed_at=plan.observed_at,
@@ -340,10 +367,10 @@ async def skip_geo_release_item(
     """활성 계획의 대기·실패 항목을 ``skipped(operator)``로 둔다."""
     started_at = perf_counter()
     async with session.begin():
-        if await geo_release_repo.get_geo_release_plan(session, plan_id) is None:
-            raise HTTPException(status_code=404, detail=f"geo 릴리스 계획 {plan_id}이 없다")
         try:
             await geo_release_repo.skip_item(session, plan_id, position)
+        except geo_release_repo.GeoReleaseNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except geo_release_repo.GeoReleaseConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     return GeoReleaseDetailResponse(
@@ -355,19 +382,26 @@ async def skip_geo_release_item(
     "/{plan_id}/replan",
     response_model=GeoReleaseDetailResponse,
     summary="geo 릴리스 다시 계획",
-    responses={404: {"description": "없는 계획"}},
+    responses={
+        404: {"description": "없는 계획"},
+        409: {"description": "기준선이거나 최신 관측 토큰이 아닌 계획"},
+    },
 )
 async def replan_geo_release(
     plan_id: Annotated[int, Path(ge=1)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> GeoReleaseDetailResponse:
-    """그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``)."""
+    """그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``).
+
+    최신 관측 토큰의 계획만, 기준선이 아닌 것만 — 그 외는 409다."""
     started_at = perf_counter()
     async with session.begin():
         try:
             plan = await geo_release_repo.replan(session, plan_id)
-        except geo_release_repo.GeoReleaseConflict as exc:
+        except geo_release_repo.GeoReleaseNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except geo_release_repo.GeoReleaseConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     return GeoReleaseDetailResponse(
         data=await _detail(session, plan.plan_id), meta=make_meta(started_at=started_at)
     )

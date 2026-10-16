@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -61,9 +60,13 @@ def _plan(plan_id: int = 7, *, state: str = "planned") -> geo_release_repo.GeoRe
                 plan_id=plan_id,
                 position=1,
                 operation_key="feature_place_knps_points_job",
-                provider_dataset_id=54,
-                provider="python-knps-api",
-                dataset_key="knps_visitor_centers",
+                datasets=(
+                    geo_release_repo.GeoReleaseDataset(
+                        provider_dataset_id=54,
+                        provider="python-knps-api",
+                        dataset_key="knps_visitor_centers",
+                    ),
+                ),
                 run_config={"resources": {}},
                 attempt_seq=1,
                 state="pending",
@@ -136,11 +139,9 @@ def test_five_operations_are_mounted_on_the_admin_surface(client: TestClient) ->
 def test_user_and_service_contracts_do_not_carry_the_geo_release_api(filename: str) -> None:
     """admin 프로필만 — 센서는 API를 치지 않으므로 user·service 계약에 둘 이유가 없다."""
     raw = (_API_ROOT / filename).read_bytes()
+    # 바이트 불변은 openapi-drift CI(재생성 결과와 커밋 파일 비교)가 고정한다 — 여기서는 경로가
+    # 들어가지 않았음만 본다.
     assert b"/v1/ops/geo-releases" not in raw
-    # 바이트 불변은 openapi-drift CI가 재생성 결과와 비교해 고정한다. 여기서는 그 파일이 유효한 JSON
-    # 계약임만 다시 본다(지문은 리뷰 기록용).
-    assert json.loads(raw)["paths"]
-    assert hashlib.sha256(raw).hexdigest()
 
 
 @pytest.mark.unit
@@ -167,7 +168,9 @@ def test_detect_calls_the_single_plan_function(
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert data["outcome"] == "created"
-    assert data["plan"]["items"][0]["dataset_key"] == "knps_visitor_centers"
+    item = data["plan"]["items"][0]
+    assert item["datasets"][0]["dataset_key"] == "knps_visitor_centers"
+    assert item["launch_blocked_reason"] is None
     assert data["current"]["reference_months"] == {"juso": "202609"}
     assert calls == [_CURRENT]
     # 라우터와 client는 모듈 속성으로 부른다(복사본 없음) — 같은 함수 identity.
@@ -216,11 +219,15 @@ def test_detail_skip_and_replan_map_errors(
         return _plan(plan_id) if plan_id in (7, 8) else None
 
     async def _skip(_session: Any, plan_id: int, position: int) -> Any:
+        if plan_id == 9:
+            raise geo_release_repo.GeoReleaseNotFound("없다")
         raise geo_release_repo.GeoReleaseConflict("이미 끝난 항목")
 
     async def _replan(_session: Any, plan_id: int) -> Any:
-        if plan_id != 7:
-            raise geo_release_repo.GeoReleaseConflict("없다")
+        if plan_id == 9:
+            raise geo_release_repo.GeoReleaseNotFound("없다")
+        if plan_id == 6:
+            raise geo_release_repo.GeoReleaseConflict("최신 토큰이 아니다")
         return _plan(8)
 
     monkeypatch.setattr(geo_release_repo, "get_geo_release_plan", _get)
@@ -234,4 +241,5 @@ def test_detail_skip_and_replan_map_errors(
     assert client.post("/v1/ops/geo-releases/9/items/1/skip").status_code == 404
     assert client.post("/v1/ops/geo-releases/7/items/1/skip").status_code == 409
     assert client.post("/v1/ops/geo-releases/9/replan").status_code == 404
+    assert client.post("/v1/ops/geo-releases/6/replan").status_code == 409
     assert client.post("/v1/ops/geo-releases/7/replan").status_code == 200

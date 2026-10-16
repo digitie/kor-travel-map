@@ -176,6 +176,12 @@ REPLAY_RECORDS_RESOURCES: dict[str, str] = {
 1단계 범위: MOIS·datagokr fileData·standard_data). **resource 쪽 ``source_mode``는 T-GR-08이
 더한다** — 그 전에 이 run_config로 run을 내면 Dagster config 검증이 거부한다(T-GR-05 센서는
 replay 항목을 T-GR-08 뒤에만 낸다)."""
+
+SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS: frozenset[str] = frozenset()
+"""replay run_config로 센서가 **실제로 run을 내도 되는** operation — 그 records resource가
+``source_mode=replay``를 구현했다는 선언이다. T-GR-08이 resource를 구현하며 채운다. 여기 없는
+replay 항목은 계획에는 들어가되 ``launch_blocked_reason``이 붙고 센서(T-GR-05)는 내지 않는다
+(메모가 아니라 코드 게이트 — #1331 리뷰)."""
 C6C_CANCEL_PROBE_JOB_KIND = "c6c_cancel_probe"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
     {

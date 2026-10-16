@@ -254,6 +254,17 @@ def test_the_freshness_exclusions_are_still_the_ones_we_reasoned_about() -> None
 #    geo 의존을 옮기지 않게.
 # ③ asset → job은 `FEATURE_LOAD_SCHEDULE_SPECS`의 `job_name`이다(datagokr fileData는 asset
 #    하나에 job 넷).
+#
+# 한계(알고 쓴다):
+# - **이름 매칭이다.** 함수는 이름으로 잇는다 — 다른 모듈의 같은 이름 함수는 하나로 섞이고,
+#   속성 이름(`x.observe`)도 이름으로 센다. 그래서 과대 유도 쪽으로 틀린다(geo 아닌 asset이 geo
+#   의존으로 잡히면 상수와 어긋나 빨갛다 — 조용히 빠지는 방향보다 낫다).
+# - **패키지 최상위 모듈만 본다**(`kortravelmap/dagster/*.py`, 하위 패키지·main 패키지의 변환기
+#   본문은 보지 않는다). 변환기가 받은 콜러블을 실제로 부르는지는 별도 lint
+#   (`test_converters_call_geo_when_input_present.py`)가 본다.
+# - replay records resource 검사는 **부분집합**이다(선언한 resource가 asset의 required key에
+#   있는가) — 그 resource가 `source_mode`를 구현했는지는 보지 않는다(T-GR-08, 런타임 게이트는
+#   `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`).
 
 
 def _passes_geo_callable(node: ast.AST) -> bool:

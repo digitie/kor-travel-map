@@ -16,10 +16,16 @@ DB에 두어야 센서(T-GR-05)와 운영 API ``POST /v1/ops/geo-releases/detect
   결정 5.1)의 기록이다 — 처음 관측한 토큰은 계획 없이 기준선으로만 남긴다. 그것을 DB 행으로 두어야
   센서 커서가 없는 API ``/detect``도 같은 판단을 한다. 같은 토큰의 활성(``planned|running``) 계획은
   하나뿐이다(부분 UNIQUE). ``sweep_started_at``은 완료 판정의 "잔여 1회 sweep"을 한 번만 하게 한다.
-- ``ops.kor_travel_geo_release_items`` — 계획의 dataset 항목. ``(operation_key,
-  provider_dataset_id)``마다 1행, ``position``이 실행 순서다. ``run_config``는 그 dataset을 고르는
-  Dagster run_config(KNPS·datagokr fileData)와 replay 지시(쿼터 민감)이고 NULL이면 job 기본값이다.
-  ``attempt_seq``는 같은 행에서 단조 증가한다(재요청·sweep — Dagster run_key의 마지막 성분).
+- ``ops.kor_travel_geo_release_items`` — 계획의 항목. **1행 = Dagster run 1개**다:
+  ``(operation_key, run_config)``가 같은 dataset은 ``provider_dataset_ids`` 배열 하나로 묶인다(MCST는
+  job 하나에 dataset 13개가 run 1개, KNPS는 dataset마다 run_config가 달라 항목 5개). ``position``이
+  실행 순서다. ``run_config``는 그 dataset을 고르는 run_config(KNPS·datagokr fileData)와 replay
+  지시(쿼터 민감)이고 NULL이면 job 기본값이다. ``attempt_seq``는 같은 행에서 단조 증가하고(재요청·
+  sweep — run_key의 마지막 성분) UNIQUE에 넣지 않는다 — 시도 이력은 Dagster run tag가 갖는다.
+  ``state_reason``은 고정 어휘(CHECK)다.
+- **dataset FK는 없다.** ``provider_dataset_ids``는 배열이라 FK를 걸 수 없고, ON DELETE 동작도 없다.
+  provider dataset은 지우지 않고 ``is_active``로 비활성화만 한다(저장소에 삭제 경로가 없다) — 계획
+  이력의 id는 그 행을 계속 가리킨다.
 - 토큰 형식 CHECK는 407과 같은 식이다(geo 계약 ``dv1-``/``dd1-`` + 32 lowercase hex).
 - 소유자 ``ktm_feature_schema_owner``. 런타임 권한은 배포 조정기
   (``infra/runtime_privileges.py`` ``_OPS_TABLE_PRIVILEGES``)가 건다.
@@ -96,7 +102,7 @@ CREATE TABLE ops.kor_travel_geo_release_items (
     plan_id bigint NOT NULL,
     "position" integer NOT NULL,
     operation_key text NOT NULL,
-    provider_dataset_id bigint NOT NULL,
+    provider_dataset_ids bigint[] NOT NULL,
     run_config jsonb,
     attempt_seq integer DEFAULT 1 NOT NULL,
     state text DEFAULT 'pending' NOT NULL,
@@ -106,14 +112,19 @@ CREATE TABLE ops.kor_travel_geo_release_items (
     requested_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT pk_kor_travel_geo_release_items PRIMARY KEY (plan_id, "position"),
-    CONSTRAINT uq_kor_travel_geo_release_items_dataset
-        UNIQUE (plan_id, operation_key, provider_dataset_id),
+    CONSTRAINT uq_kor_travel_geo_release_items_run
+        UNIQUE (plan_id, operation_key, provider_dataset_ids),
     CONSTRAINT fk_kor_travel_geo_release_items_plan FOREIGN KEY (plan_id)
         REFERENCES ops.kor_travel_geo_releases(plan_id) ON DELETE CASCADE,
-    CONSTRAINT fk_kor_travel_geo_release_items_dataset FOREIGN KEY (provider_dataset_id)
-        REFERENCES provider_sync.provider_datasets(provider_dataset_id),
+    CONSTRAINT ck_kor_travel_geo_release_items_datasets
+        CHECK (cardinality(provider_dataset_ids) >= 1),
     CONSTRAINT ck_kor_travel_geo_release_items_state
         CHECK (state IN ('pending', 'requested', 'done', 'failed', 'skipped')),
+    CONSTRAINT ck_kor_travel_geo_release_items_state_reason
+        CHECK (state_reason IS NULL OR state_reason IN (
+            'disabled', 'no_geo_dependency', 'queue_only', 'operator', 'sweep',
+            'run_not_launched', 'no_progress', 'run_failed'
+        )),
     CONSTRAINT ck_kor_travel_geo_release_items_skip_reason
         CHECK (state <> 'skipped' OR state_reason IS NOT NULL),
     CONSTRAINT ck_kor_travel_geo_release_items_position CHECK ("position" >= 1),

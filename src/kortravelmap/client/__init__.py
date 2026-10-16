@@ -1139,7 +1139,7 @@ class AsyncKorTravelMapClient:
         self,
         plan_id: int,
         *,
-        sigungu_resolver: SigunguByRadiusResolver | None = None,
+        sigungu_resolver: SigunguByRadiusResolver | None,
     ) -> geo_release_repo.GeoReleaseCompletion:
         """끝난 계획의 완료 판정 — 잔여 1회 sweep, 또는 링크 재동기화 뒤 ``done``."""
         async with self._session_factory() as session, session.begin():
