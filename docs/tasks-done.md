@@ -1,5 +1,24 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-16 — geo 릴리스 재지오코딩 구현(ADR-109)
+
+- [x] T-GR-01 — **지오코딩 스탬프 표·DTO·geo 클라이언트.** [#1326](https://github.com/digitie/kor-travel-map/pull/1326)
+  (`21629ff9`) — migration 407, `DatasetRef`, `dataset_version()`, 응답 `dataset` 선택 파싱. 해제 조건은
+  [acceptance §T-GR-01](tasks-acceptance.md#t-gr-01).
+- [x] T-GR-02 — **run-scoped 현재 토큰 resource·`geo_applied` 배선.** [#1327](https://github.com/digitie/kor-travel-map/pull/1327)
+  (`ba707686`). [acceptance §T-GR-02](tasks-acceptance.md#t-gr-02).
+- [x] T-GR-03 — **적재 경로 stale 분기·스탬프·빈 답 가드·override·MOIS/concierge 토큰.**
+  [#1328](https://github.com/digitie/kor-travel-map/pull/1328)(`a6bf62ce`) — 격리 스택 12,000행 실측 포함.
+  [acceptance §T-GR-03](tasks-acceptance.md#t-gr-03).
+- [x] T-GR-04 — **릴리스 계획 표·계획 함수·coverage·admin API.** [#1331](https://github.com/digitie/kor-travel-map/pull/1331)
+  (`e179dcf1`) — migration 408, 항목 = run 1개. PinVi 재vendor는 coordinator 몫. [acceptance §T-GR-04](tasks-acceptance.md#t-gr-04).
+- [x] T-GR-05 — **`kor_travel_geo_release_sensor`.** [#1332](https://github.com/digitie/kor-travel-map/pull/1332)(`2324d9d2`) —
+  기본 STOPPED, migration 409. [acceptance §T-GR-05](tasks-acceptance.md#t-gr-05).
+- [x] T-GR-08 — **replay 모드.** [#1333](https://github.com/digitie/kor-travel-map/pull/1333)(`dcdfa532`) — 9 operation,
+  MOIS는 golden 실패로 제외·센서 수동. [acceptance §T-GR-08](tasks-acceptance.md#t-gr-08).
+- [x] T-GR-06 — **admin UI `/admin/ops/geo-releases`.** [#1334](https://github.com/digitie/kor-travel-map/pull/1334)
+  (`391b0d94`) — mock·격리 스택 live Playwright. [acceptance §T-GR-06](tasks-acceptance.md#t-gr-06).
+
 ## 2026-10-15 — geo 재지오코딩·odroid 이전 묶음의 doc-only 선행 둘
 
 - [x] T-GR-00-LEDGER — **journal·tasks-done 다음 경계 분리.** [#1323](https://github.com/digitie/kor-travel-map/pull/1323)이

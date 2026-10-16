@@ -346,7 +346,7 @@ run 로그에 `MOIS 업종 <slug> 완료`가 남는다.
    이후 run은 sensor가 잇는다. 마지막 run이 `complete`(전 업종)면 봉인·sync 성공이 남는다.
 4. 실패 run이 나오면 sensor는 멈춘다. 원인을 본 뒤 같은 job을 다시 띄우면 이어서 적재한다.
 
-> **geo 릴리스 재지오코딩(ADR-109 proposed).** geo 데이터 토큰이 바뀌면 릴리스 계획에 이 job 항목이
+> **geo 릴리스 재지오코딩(ADR-109 accepted, 운영은 [runbook](../runbooks/geo-release-regeocode.md) §4).** geo 데이터 토큰이 바뀌면 릴리스 계획에 이 job 항목이
 > run_config 없이 들어가지만 **센서는 내지 않는다**(`SENSOR_MANUAL_OPERATION_KEYS`, #1333 리뷰) — 전국 Phase A·
 > 50만 행 변환·snapshot 은퇴를 예정 밖에 돌리지 않으려는 것이다. 운영자가 이 job을 수동 실행하고 끝나면 계획
 > 항목을 `skip`한다. fetch는 소스 DB가 TTL 안이면 쿼터를 쓰지 않지만 TTL이 지나면 증분 Phase A sync가

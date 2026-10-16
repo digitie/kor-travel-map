@@ -91,9 +91,10 @@ job의 run 상한 21,600초 - 30분이고, 둘이 갈라지면 테스트가 빨�
 tick까지 정체된다(델타 리뷰 MED-1). tag가 없거나 깨졌으면 이어 달린다. 둘이 겹쳐 떠도 GEO_HEAVY pool(limit 1, run
 단위)이 실행을 직렬화하고, 재개형이라 뒤 run은 건너뛰기만 한다.
 
-> **계획(ADR-109 proposed, 미구현).** geo 릴리스 계획이 활성인 동안은 릴리스 센서가 `budget_exhausted`
-> 이어 달리기를 대신한다(`mois_load_continuation_decision`을 그대로 호출). 그동안 이 sensor를 켤 필요가
-> 없고, 켜져 있어도 릴리스 센서의 Skip 조건이 이중 요청을 막는다 — 상한·Skip 규칙은 ADR-109 결정 5.
+> **ADR-109(accepted, 2026-10-16 구현).** geo 릴리스 계획의 MOIS 항목은 **릴리스 센서가 내지 않는다** — 운영자가
+> 이 job을 수동 실행하고(이어 달리기는 이 sensor가 잇는다) 끝나면 항목을 건너뛴다(ADR-109 결정 7 결과, #1333 리뷰
+> R2; runbook [`geo-release-regeocode.md`](../runbooks/geo-release-regeocode.md) §4). 릴리스 run(태그
+> `kor_travel_map.geo_release_plan_id`)이 MOIS를 돌리는 경우 이 sensor는 그 run을 건너뛴다(이중 체인 방지, 결정 5.5).
 
 ### 3a. 소실 하한과 geo 장애 (적대 리뷰 MED-1)
 
@@ -175,7 +176,7 @@ probe는 다른 지역의 좋은 좌표를 묻으므로 시·도 하나의 layer
   바뀌면 key가 맞지 않아 저절로 다시 조회한다. 30일이 지나면 다시 조회해 geo 데이터 갱신을 반영한다 —
   여전히 빈 답이면 표식이 전진한다. 다시 조회해 **풀리면** 그 행의 열린 표식을 `resolved`로 닫는다 — 열린
   표식이 끝없이 쌓이지 않는다. 운영자가 finding을 닫으면(`resolved`) 다음 run이 다시 조회한다.
-  **계획(ADR-109 proposed, 미구현)**: 표식 payload에 `geo_data_token`을 더하고, "알려진 불가" 조건에
+  **ADR-109(accepted, T-GR-03 구현)**: 표식 payload에 `geo_data_token`을 더하고, "알려진 불가" 조건에
   "그 토큰이 run의 현재 geo 데이터 토큰과 같다"를 더한다(현재 토큰이 None이면 조건 생략). geo 릴리스 뒤
   첫 run이 표식 행을 전부 다시 조회하고, 30일 만료는 backstop으로 남는다.
 - **저장소 선택**: 새 표를 만들지 않고 finding 표를 재사용했다. 필요한 것(엔티티 단위 dedupe key, 열린

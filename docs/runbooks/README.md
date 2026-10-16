@@ -19,6 +19,7 @@ Codex / Google Antigravity 가 **같은 파일을 공유**한다 — 내용은 �
 | [docker-app.md](./docker-app.md) | 독립 Docker app 기동/중지/스모크. 고정 포트: API 12701, admin UI 12705, Dagster 12702 |
 | [c7-prod-live-e2e.md](./c7-prod-live-e2e.md) | C6c 뒤 n150 production 파괴적 C7 live E2E의 image/schema/job attestation, 실행, evidence, `BLOCKED.json` 복구 |
 | [admin-feature-live-acceptance.md](./admin-feature-live-acceptance.md) | #741/#785/T-VN-15 owned Feature production live lane, 핀된 SHA 체크아웃 + C7과 같은 runtime preflight(ADR-102), SIGKILL-safe supervisor·별도 recovery |
+| [geo-release-regeocode.md](./geo-release-regeocode.md) | geo 릴리스 재지오코딩(ADR-109) 운영 — 센서 켜기 전 확인, MOIS 수동 실행 후 skip, replan, replay 실패, 롤백 A→B→A |
 | [admin-ui-screen-checklist.md](./admin-ui-screen-checklist.md) | admin UI 16 route 화면별 점검(필터/cursor/빈·에러/kill-switch/a11y/e2e 매트릭스) + 신규 폼 추가 절차 (T-218f) |
 | [cross-repo-audit-checklist.md](./cross-repo-audit-checklist.md) | 분기 1회 4-repo 계약/문서 drift 점검(origin/main 실측·계약 대조·전제 신선도·결정 전파) (T-217d) — 연동 지도는 [`../integration-map.md`](../integration-map.md) |
 | [coord-5179-proj-pin.md](./coord-5179-proj-pin.md) | `feature.features.coord_5179`(STORED generated) PROJ 버전 고정·drift 검사·재계산·GiST REINDEX (T-VN-H04) |

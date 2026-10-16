@@ -1,3 +1,12 @@
+## 2026-10-16 — geo 릴리스 재지오코딩 구현 반영 문서(T-GR-07, doc-only): 브랜치 `docs/t-gr-07-geo-release-docs`
+
+- **무엇.** ADR-109 accepted(구현 기록 표·열린 결정 13개 결론), runbook `geo-release-regeocode.md` 신규, 정본 문서의
+  "ADR-109 proposed, 미구현" 표식 제거, T-GR-01~06·08 `tasks-done.md` 이관(T-GR-07은 머지가 조건).
+- **문서가 코드와 달랐던 자리.** `address-geocoding.md` §5의 센서 위치(`sensors.py` → `geo_release_sensor.py`)·커서(없음 —
+  기준선은 계획 표 행)·`kor_travel_geo_client` resource(만들지 않음 — `open_geo_client`)·run_key 다섯째 칸(`provider_dataset_id`
+  → `position`)·상수 이름, ADR-108의 "릴리스 센서가 MOIS 이어 달리기를 대신한다"(MOIS는 이제 센서가 내지 않는다).
+  geo ADR-069는 그 저장소에서 2026-10-13 accepted(GitHub 원문 확인).
+
 ## 2026-10-16 — admin UI geo 릴리스 화면(T-GR-06, ADR-109 결정 8): 브랜치 `feat/t-gr-06-geo-releases-ui`
 
 - **무엇.** `/admin/ops/geo-releases` — 현재 geo 데이터셋(`data_token` 없음 = 빨간 상태 + 센서 Skip 사유), 계획 목록, 계획 상세

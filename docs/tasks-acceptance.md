@@ -2333,7 +2333,7 @@ print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스
 
 ## T-GR-00
 
-2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
+2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109, 당시 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
 열린 결정 7; 소유자가 다른 접두사를 고르면 `T-GR-00`~`08`을 일괄 재번호하되 journal·acceptance 참조도 함께).
 PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 407) → PR-2(T-GR-04+05+08,
 408+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
@@ -2760,7 +2760,7 @@ Manager `dagster.yaml` concierge lane(concierge ADR-49 refresh job용, Map 변�
 - `scripts/check_journal_update.py`·`tests/lint/test_task_ledger_conventions.py`·docs 크기 lint 초록.
 - `integration-map.md` §2에 geo ↔ Map 항목이 "계획"이 아니라 현재 동작으로 적혀 있고, geo 저장소 ADR-069 참조
   (저장소명+번호)가 남아 있으며 geo 쪽 ADR-069 상태가 accepted임을 확인해 적었다(교차 저장소라 링크가 아니라 참조).
-- 정본 문서에 "proposed, 미구현" 표식이 남아 있지 않다 — `rg "ADR-109 proposed" docs/ --glob '!docs/journal.md'
+- 정본 문서에 "proposed, 미구현" 표식이 남아 있지 않다 — `rg "ADR-109 p[r]oposed" docs/ --glob '!docs/journal.md'
   --glob '!docs/resume.md' --glob '!docs/tasks-done.md' --glob '!docs/archive/**'` 0건(append-only 원장·아카이브는
   과거 항목을 편집하지 않는다, `tasks-rule.md` §8).
 
