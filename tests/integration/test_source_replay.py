@@ -275,8 +275,15 @@ async def test_file_data_rows_survive_the_jsonb_round_trip(migrated_session: Asy
         [REPLAY_FROM_RAW["datagokr_file_data_records"](stored[0].raw_data)], reverse
     )
     assert replayed[0].source_record.raw_payload_hash == stored[0].raw_payload_hash
-    assert [b.model_dump(mode="json") for b in replayed] == [
-        b.model_dump(mode="json") for b in fetched
+    generated = {"imported_at", "created_at", "updated_at"}  # 변환을 부른 순간(kst_now)
+
+    def content(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: content(v) for k, v in value.items() if k not in generated}
+        return value
+
+    assert [content(b.model_dump(mode="json")) for b in replayed] == [
+        content(b.model_dump(mode="json")) for b in fetched
     ]
 
 

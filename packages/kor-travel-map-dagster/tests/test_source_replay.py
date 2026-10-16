@@ -535,14 +535,20 @@ def test_launchable_replay_operations_accept_the_replay_run_config(operation_key
     validate_run_config(job, config)
 
 
-def test_mois_job_rejects_a_replay_run_config() -> None:
+@pytest.mark.parametrize("operation_key", sorted(SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS))
+def test_the_replay_config_is_checked_not_merely_tolerated(operation_key: str) -> None:
+    """대조군 — schema 없는 resource는 아무 config나 받는다(그러면 위 검증은 항진명제). 값이 틀리면
+    거부되어야 ``source_mode``가 실제로 선언된 것이다."""
     from dagster import DagsterInvalidConfigError
 
-    job = defs.resolve_job_def("feature_place_mois_licenses_job")
+    job = defs.resolve_job_def(operation_key)
+    config = run_config_for_dataset(operation_key, "datagokr_seoul_bookstores")
+    assert config is not None
+    for resource in config["resources"].values():
+        if "source_mode" in resource["config"]:
+            resource["config"]["source_mode"] = "bogus"
     with pytest.raises(DagsterInvalidConfigError):
-        validate_run_config(
-            job, {"resources": {"mois_license_records": {"config": {"source_mode": "replay"}}}}
-        )
+        validate_run_config(job, config)
 
 
 # -- provenance -------------------------------------------------------------------------------
@@ -649,7 +655,8 @@ async def test_standard_asset_reads_before_loading_and_skips_sync_state(
     assert {b.source_record.imported_at for b in seen["bundles"]} == {_STORED_OBSERVED}
     def features(bundles: Sequence[FeatureBundle]) -> dict[str, Any]:
         return {
-            b.source_record.source_record_key: b.feature.model_dump(mode="json") for b in bundles
+            b.source_record.source_record_key: _content(b.feature.model_dump(mode="json"))
+            for b in bundles
         }
 
     assert features(seen["bundles"]) == features(fetched)
