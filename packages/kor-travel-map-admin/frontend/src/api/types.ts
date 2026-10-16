@@ -2047,6 +2047,8 @@ export interface paths {
         /**
          * geo 릴리스 다시 계획
          * @description 그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``).
+         *
+         *     최신 관측 토큰의 계획만, 기준선이 아닌 것만 — 그 외는 409다.
          */
         post: operations["replan_geo_release_v1_ops_geo_releases__plan_id__replan_post"];
         delete?: never;
@@ -9847,6 +9849,18 @@ export interface components {
             version_token: string;
         };
         /**
+         * GeoReleaseDatasetRecord
+         * @description 항목이 다시 적재하는 dataset.
+         */
+        GeoReleaseDatasetRecord: {
+            /** Dataset Key */
+            dataset_key: string;
+            /** Provider */
+            provider: string;
+            /** Provider Dataset Id */
+            provider_dataset_id: number;
+        };
+        /**
          * GeoReleaseDetailData
          * @description 계획·항목·커버리지.
          */
@@ -9887,23 +9901,21 @@ export interface components {
         };
         /**
          * GeoReleaseItemRecord
-         * @description 계획 항목.
+         * @description 계획 항목 — Dagster run 1개(그 run이 다시 적재하는 dataset 목록).
          */
         GeoReleaseItemRecord: {
             /** Attempt Seq */
             attempt_seq: number;
             /** Dagster Run Id */
             dagster_run_id: string | null;
-            /** Dataset Key */
-            dataset_key: string;
+            /** Datasets */
+            datasets: components["schemas"]["GeoReleaseDatasetRecord"][];
+            /** Launch Blocked Reason */
+            launch_blocked_reason: "replay_not_launchable_before_t_gr_08" | null;
             /** Operation Key */
             operation_key: string;
             /** Position */
             position: number;
-            /** Provider */
-            provider: string;
-            /** Provider Dataset Id */
-            provider_dataset_id: number;
             /** Requested At */
             requested_at: string | null;
             /** Run Config */
@@ -9912,10 +9924,13 @@ export interface components {
             } | null;
             /** Run Key */
             run_key: string | null;
-            /** State */
-            state: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "requested" | "done" | "failed" | "skipped";
             /** State Reason */
-            state_reason: string | null;
+            state_reason: ("disabled" | "no_geo_dependency" | "queue_only" | "operator" | "sweep" | "run_not_launched" | "no_progress" | "run_failed") | null;
         };
         /**
          * GeoReleaseListData
@@ -9969,8 +9984,11 @@ export interface components {
             } | null;
             /** Residual Stale */
             residual_stale: number | null;
-            /** State */
-            state: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "baseline" | "planned" | "running" | "done" | "superseded";
             /** Sweep Started At */
             sweep_started_at: string | null;
         };
@@ -21121,6 +21139,15 @@ export interface operations {
             };
             /** @description 없는 계획 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 기준선이거나 최신 관측 토큰이 아닌 계획 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
