@@ -37,6 +37,8 @@ from tests.integration.test_geo_release_load_path import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from kortravelmap.dto import FeatureBundle
+
 pytestmark = pytest.mark.integration
 
 _KNPS_POINTS = "feature_place_knps_points_job"
@@ -44,15 +46,21 @@ _KNPS_GEOMETRY = "feature_geometry_knps_records_job"
 _FESTIVALS = "feature_event_datagokr_cultural_festivals_job"
 
 
-async def _dataset_id(session: AsyncSession, dataset_key: str) -> int:
+async def _dataset_id(session: AsyncSession, bundle: FeatureBundle) -> int:
+    """적재된 bundle의 primary link가 가리키는 dataset — dataset_key만으로는 유일하지 않다(다른
+    테스트가 같은 key를 다른 provider로 등록한다)."""
+    feature_id = await _feature_id(session, bundle)
     return int(
         (
             await session.execute(
                 text(
-                    "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
-                    "WHERE dataset_key = :key"
+                    "SELECT DISTINCT entity.provider_dataset_id "
+                    "FROM provider_sync.source_links AS link "
+                    "JOIN provider_sync.source_entities AS entity "
+                    "  ON entity.source_entity_key = link.source_entity_key "
+                    "WHERE link.feature_id = CAST(:id AS uuid) AND link.source_role = 'primary'"
                 ),
-                {"key": dataset_key},
+                {"id": feature_id},
             )
         ).scalar_one()
     )
@@ -260,8 +268,8 @@ async def test_coverage_is_limited_to_the_given_datasets(migrated_session: Async
         text("DELETE FROM feature.feature_geocode_stamps WHERE feature_id = CAST(:id AS uuid)"),
         {"id": ids[2]},
     )
-    festivals = await _dataset_id(migrated_session, "datagokr_cultural_festivals")
-    heritage_items = await _dataset_id(migrated_session, "krheritage_heritage_features")
+    festivals = await _dataset_id(migrated_session, bundles[0])
+    heritage_items = await _dataset_id(migrated_session, heritage)
 
     result = await coverage(
         migrated_session,
