@@ -650,7 +650,14 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                     publication_state, quality_state, updated_at
                 )
                 SELECT
-                    {_PERF_FEATURE_ID_SQL}, 'place', 'hidden draft station', '06020000',
+                    {_PERF_FEATURE_ID_SQL}, 'place',
+                    -- 이름 keyset 쌍(partial/admin `lower(name)`)도 갈라 둔다 —
+                    -- 같은 이름의 비공개 행이 있으면 admin 경로는 그것을 걸러야 한다.
+                    CASE
+                        WHEN g % 1000 = 0 THEN 'tvn34 needle place'
+                        ELSE 'hidden draft station'
+                    END,
+                    '06020000',
                     x_extension.st_setsrid(
                         x_extension.st_makepoint(126.80 + g * 0.000001, 37.40 + g * 0.000001),
                         4326
@@ -681,6 +688,20 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
         )
         await _insert_subtype(migrated_session, table="feature_routes", feature_id=route_id)
         await _insert_subtype(migrated_session, table="feature_areas", feature_id=area_id)
+        # 크기를 이 테스트의 데이터로만 정한다(T-TEST-PLANNER-INDEX 실측). 같은 열의
+        # partial/admin 인덱스 쌍은 앞 테스트들의 이력에 따라 크기가 갈린다 — 운영 admin 목록처럼
+        # admin 인덱스만 훑은 쿼리는 죽은 항목에 LP_DEAD 표시를 남겨 다음 insert가 **admin
+        # 쪽에서만** 그 자리를 다시 쓰고, partial 쪽은 page를 쪼갠다. 그러면 partial이 더 커져
+        # 3축 술어 몫의 비용 이점(약 0.19)을 넘고 planner가 admin 인덱스를 고른다(n150 재현:
+        # 25 000행 commit→delete→admin 순회를 반복하면 partial 523 page > admin 489 page). 이
+        # transaction 안의 REINDEX는 롤백되므로 DB에 흔적이 남지 않는다.
+        for index_name in (
+            "idx_features_updated_keyset",
+            "idx_features_admin_updated_keyset",
+            "idx_features_lower_name_keyset",
+            "idx_features_admin_lower_name_keyset",
+        ):
+            await migrated_session.execute(text(f"REINDEX INDEX feature.{index_name}"))
         await migrated_session.execute(text("ANALYZE feature.features"))
         await migrated_session.execute(text("ANALYZE feature.feature_routes"))
         await migrated_session.execute(text("ANALYZE feature.feature_areas"))
