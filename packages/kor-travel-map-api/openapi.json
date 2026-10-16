@@ -17888,6 +17888,484 @@
         "title": "FestivalPublicView",
         "type": "object"
       },
+      "GeoCoverageRecord": {
+        "additionalProperties": false,
+        "description": "계획 토큰 기준 커버리지 — 분모는 그 계획의 비-skip 항목 dataset이다.",
+        "properties": {
+          "excluded_by_skip": {
+            "title": "Excluded By Skip",
+            "type": "integer"
+          },
+          "not_called_by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Not Called By Kind",
+            "type": "object"
+          },
+          "stamped_current": {
+            "title": "Stamped Current",
+            "type": "integer"
+          },
+          "stamped_other": {
+            "title": "Stamped Other",
+            "type": "integer"
+          },
+          "total_provider_with_coord": {
+            "title": "Total Provider With Coord",
+            "type": "integer"
+          },
+          "unstamped": {
+            "title": "Unstamped",
+            "type": "integer"
+          },
+          "unstamped_non_provider": {
+            "title": "Unstamped Non Provider",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_provider_with_coord",
+          "stamped_current",
+          "stamped_other",
+          "unstamped",
+          "not_called_by_kind",
+          "excluded_by_skip",
+          "unstamped_non_provider"
+        ],
+        "title": "GeoCoverageRecord",
+        "type": "object"
+      },
+      "GeoDatasetRecord": {
+        "additionalProperties": false,
+        "description": "geo가 지금 서빙하는 데이터셋(``POST /v2/dataset/version``의 ``current``).",
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "data_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Token"
+          },
+          "reference_months": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Months"
+          },
+          "version_token": {
+            "title": "Version Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_token",
+          "data_token"
+        ],
+        "title": "GeoDatasetRecord",
+        "type": "object"
+      },
+      "GeoReleaseDetailData": {
+        "additionalProperties": false,
+        "description": "계획·항목·커버리지.",
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/GeoCoverageRecord"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/GeoReleasePlanRecord"
+          }
+        },
+        "required": [
+          "plan",
+          "coverage"
+        ],
+        "title": "GeoReleaseDetailData",
+        "type": "object"
+      },
+      "GeoReleaseDetailResponse": {
+        "additionalProperties": false,
+        "description": "계획 1건 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeoReleaseDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "GeoReleaseDetailResponse",
+        "type": "object"
+      },
+      "GeoReleaseDetectData": {
+        "additionalProperties": false,
+        "description": "``POST /ops/geo-releases/detect`` data — 감지 결과와 (있으면) 계획.",
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/GeoDatasetRecord"
+          },
+          "outcome": {
+            "enum": [
+              "no_token",
+              "baseline_recorded",
+              "baseline",
+              "existing",
+              "created",
+              "already_complete"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeoReleasePlanRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "superseded_plan_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Superseded Plan Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "outcome",
+          "current",
+          "plan",
+          "superseded_plan_ids"
+        ],
+        "title": "GeoReleaseDetectData",
+        "type": "object"
+      },
+      "GeoReleaseDetectResponse": {
+        "additionalProperties": false,
+        "description": "``POST /ops/geo-releases/detect`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeoReleaseDetectData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "GeoReleaseDetectResponse",
+        "type": "object"
+      },
+      "GeoReleaseItemRecord": {
+        "additionalProperties": false,
+        "description": "계획 항목.",
+        "properties": {
+          "attempt_seq": {
+            "title": "Attempt Seq",
+            "type": "integer"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "operation_key": {
+            "title": "Operation Key",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At"
+          },
+          "run_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Config"
+          },
+          "run_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Key"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "state_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State Reason"
+          }
+        },
+        "required": [
+          "position",
+          "operation_key",
+          "provider_dataset_id",
+          "provider",
+          "dataset_key",
+          "run_config",
+          "attempt_seq",
+          "state",
+          "state_reason",
+          "run_key",
+          "dagster_run_id",
+          "requested_at"
+        ],
+        "title": "GeoReleaseItemRecord",
+        "type": "object"
+      },
+      "GeoReleaseListData": {
+        "additionalProperties": false,
+        "description": "``GET /ops/geo-releases`` data.",
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeoDatasetRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_status": {
+            "enum": [
+              "ok",
+              "no_token",
+              "unavailable"
+            ],
+            "title": "Current Status",
+            "type": "string"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/GeoReleasePlanRecord"
+            },
+            "title": "Plans",
+            "type": "array"
+          }
+        },
+        "required": [
+          "current",
+          "current_status",
+          "plans"
+        ],
+        "title": "GeoReleaseListData",
+        "type": "object"
+      },
+      "GeoReleaseListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/geo-releases`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/GeoReleaseListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "GeoReleaseListResponse",
+        "type": "object"
+      },
+      "GeoReleasePlanRecord": {
+        "additionalProperties": false,
+        "description": "계획 1건. 목록에서는 ``items``가 비어 있다.",
+        "properties": {
+          "activated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "geo_data_token": {
+            "title": "Geo Data Token",
+            "type": "string"
+          },
+          "geo_version_token": {
+            "title": "Geo Version Token",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GeoReleaseItemRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "integer"
+          },
+          "plan_seq": {
+            "title": "Plan Seq",
+            "type": "integer"
+          },
+          "reference_months": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Months"
+          },
+          "residual_stale": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Stale"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "sweep_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweep Started At"
+          }
+        },
+        "required": [
+          "plan_id",
+          "geo_data_token",
+          "plan_seq",
+          "geo_version_token",
+          "activated_at",
+          "reference_months",
+          "state",
+          "residual_stale",
+          "sweep_started_at",
+          "observed_at",
+          "completed_at",
+          "items"
+        ],
+        "title": "GeoReleasePlanRecord",
+        "type": "object"
+      },
       "HealthData": {
         "additionalProperties": false,
         "properties": {
@@ -41863,6 +42341,396 @@
         "summary": "fixture ETL 변환 preview",
         "tags": [
           "ops-datasets"
+        ]
+      }
+    },
+    "/v1/ops/geo-releases": {
+      "get": {
+        "description": "최근 계획과 지금 geo가 서빙하는 데이터셋. ``current_status``가 ``no_token``이면 계획을 만들\n수 없다(geo 지문 backfill/복구 필요), ``unavailable``이면 geo가 답하지 않았다.",
+        "operationId": "list_geo_releases_v1_ops_geo_releases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoReleaseListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "geo 릴리스 계획 목록",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/geo-releases/detect": {
+      "post": {
+        "description": "geo 현재 데이터셋으로 계획을 만들거나 기존 계획을 돌려준다 — 센서와 같은 함수, 멱등.\n\n처음 관측한 토큰은 기준선으로만 기록하고 계획을 만들지 않는다(소유자 결정 2026-10-15).",
+        "operationId": "detect_geo_release_v1_ops_geo_releases_detect_post",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoReleaseDetectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "kor-travel-geo 현재 데이터셋을 읽지 못했다"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "geo 릴리스 지금 감지",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/geo-releases/{plan_id}": {
+      "get": {
+        "description": "계획·항목과 계획 토큰 기준 커버리지.",
+        "operationId": "get_geo_release_v1_ops_geo_releases__plan_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Plan Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+            "in": "header",
+            "name": "X-Kor-Travel-Map-Ops-Scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다.",
+              "title": "X-Kor-Travel-Map-Ops-Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoReleaseDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "없는 계획"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          },
+          {
+            "OpsScope": [],
+            "OpsToken": []
+          }
+        ],
+        "summary": "geo 릴리스 계획",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/geo-releases/{plan_id}/items/{position}/skip": {
+      "post": {
+        "description": "활성 계획의 대기·실패 항목을 ``skipped(operator)``로 둔다.",
+        "operationId": "skip_geo_release_item_v1_ops_geo_releases__plan_id__items__position__skip_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Plan Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "position",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Position",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoReleaseDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "없는 계획"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "활성이 아닌 계획이거나 건너뛸 수 없는 항목"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "geo 릴리스 계획 항목 건너뛰기",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/geo-releases/{plan_id}/replan": {
+      "post": {
+        "description": "그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``).",
+        "operationId": "replan_geo_release_v1_ops_geo_releases__plan_id__replan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Plan Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoReleaseDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "없는 계획"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "geo 릴리스 다시 계획",
+        "tags": [
+          "ops"
         ]
       }
     },

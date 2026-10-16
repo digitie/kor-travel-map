@@ -213,7 +213,7 @@ def test_detail_skip_and_replan_map_errors(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _get(_session: Any, plan_id: int) -> Any:
-        return _plan(plan_id) if plan_id == 7 else None
+        return _plan(plan_id) if plan_id in (7, 8) else None
 
     async def _skip(_session: Any, plan_id: int, position: int) -> Any:
         raise geo_release_repo.GeoReleaseConflict("이미 끝난 항목")
