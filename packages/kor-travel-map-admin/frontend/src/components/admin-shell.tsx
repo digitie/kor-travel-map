@@ -109,6 +109,11 @@ const NAV_GROUPS = [
         label: "캐시 전파",
         icon: ActivityIcon,
       },
+      {
+        href: "/admin/ops/geo-releases",
+        label: "geo 릴리스",
+        icon: RadarIcon,
+      },
     ],
   },
   {

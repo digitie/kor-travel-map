@@ -85,6 +85,11 @@ class GeoReleaseItemRecord(BaseModel):
     operation_key: str
     datasets: list[GeoReleaseDatasetRecord]
     run_config: dict[str, Any] | None
+    # 센서가 내지 않는 이유. 값은 하나뿐이고 두 경우에 쓴다(OpenAPI enum을 바꾸지 않으려고 — PinVi
+    # 재vendor 회피, #1333 리뷰): (1) records resource가 replay를 받지 않는 operation, (2) 센서가
+    # 자동으로 내지 않는 MOIS(`SENSOR_MANUAL_OPERATION_KEYS`) — 운영자가 수동 실행한 뒤 이 항목을
+    # skip해야 계획이 끝난다. 화면(`/admin/ops/geo-releases`)은 operation key로 둘을 구분해 보인다.
+    # (주석이지 docstring이 아니다 — 모델 docstring은 OpenAPI description이 된다.)
     launch_blocked_reason: Literal["replay_not_launchable_before_t_gr_08"] | None
     attempt_seq: int
     state: ItemState

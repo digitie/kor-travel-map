@@ -252,6 +252,18 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     reflectedSurfaces: ["/admin/issues", "/ops/pipeline"],
   },
   {
+    id: "geo-releases",
+    route: "/admin/ops/geo-releases",
+    readyHeading: "geo 릴리스",
+    readApis: ["/v1/ops/geo-releases", "/v1/ops/geo-releases/{plan_id}"],
+    writeApis: [
+      writeApi("POST", "/v1/ops/geo-releases/detect"),
+      writeApi("POST", "/v1/ops/geo-releases/{plan_id}/items/{position}/skip"),
+      writeApi("POST", "/v1/ops/geo-releases/{plan_id}/replan"),
+    ],
+    reflectedSurfaces: ["/ops/pipeline"],
+  },
+  {
     id: "logs",
     route: "/ops/logs",
     readyHeading: "운영 로그",

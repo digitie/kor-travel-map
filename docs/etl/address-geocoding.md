@@ -251,6 +251,8 @@ client 연결 1개). bundle에는 저장된 `fetched_at`과 head `observed_at`(�
 않고, sync state·curation seal을 쓰지 않으며, 부분·빈 replay(`ReplayIncomplete`)와 hash 불일치
 (`ReplayPayloadDrift`)는 commit 전에 실패한다. **MOIS는 golden 실패로 replay가 없고 센서도 내지 않는다**(ADR-109
 결정 7 결과).
+replay로 다시 지오코딩해도 그 dataset의 stale 주소 finding(`reverse_geocode_failed` 등)은 **다음 fetch run까지 열려
+있다** — replay는 sync 성공을 기록하지 않아 "이번 run이 관측하지 않은 finding 닫기"(stale-close)를 하지 않는다.
 
 **롤아웃 첫 tick**: ~~커서·스탬프가 비어 있으므로 전 geo-의존 dataset 계획 1회가 생긴다~~ — **소유자 결정
 (2026-10-15, ADR-109 결정 5.1)**: 커서가 빈 첫 관측 토큰은 **기준선**으로 기록하고 계획 0건이다. 스탬프 없는 행은
