@@ -78,7 +78,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-GR-06 — **admin UI `/admin/ops/geo-releases`**
 
   현재 토큰(없음=빨강)·커버리지 게이지·계획 항목 표·skip·지금 감지·다시 계획. `gen:types`는 T-GR-04 뒤.
-  Playwright(n150 우선) + 화면 체크리스트 route 행.
+  Playwright(n150 우선) + 화면 체크리스트 route 행. 진행: 브랜치 `feat/t-gr-06-geo-releases-ui` — 머지 대기.
 
 - [ ] T-GR-07 — **구현 반영 문서** (doc-only)
 

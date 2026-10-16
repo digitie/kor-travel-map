@@ -2742,6 +2742,9 @@ ADR-109 결정 8(UI). 수정 파일: `packages/kor-travel-map-admin/frontend/src
   커버리지 게이지 수치가 API 응답과 일치; `data_token` 없음 → 빨간 상태 + Skip 사유 문구.
 - `/admin/issues`·features 목록은 diff 0.
 - `admin-ui-screen-checklist.md`에 `/admin/ops/geo-releases` 행과 e2e 매핑이 있다.
+- 구현 메모(2026-10-16, `feat/t-gr-06-geo-releases-ui`): nav "수집 파이프라인 › geo 릴리스". gen:types 변경 없음(T-GR-04가
+  이미 생성). MOIS 항목은 operation key로 "수동 실행 후 skip 필요"(#1333 재리뷰 Low — enum 불변). 격리 스택(PostGIS·가짜
+  geo·API·prod frontend, n150) live 스펙이 기준선 → 새 토큰 감지 → 실제 계획 항목·MOIS 안내·건너뛰기를 확인한다.
 
 ## T-GR-07
 

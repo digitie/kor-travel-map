@@ -193,6 +193,7 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
       await expect(page.getByTestId(testId)).toContainText(value);
     }
     await expect(page.getByTestId("geo-coverage-not-called")).toContainText("place 977 · event 3");
+    await page.screenshot({ fullPage: true, path: test.info().outputPath("geo-releases-desktop.png") });
     // 현재 토큰은 정상 — 빨간 상태가 없다.
     await expect(page.getByTestId("geo-release-skip-reason")).toHaveCount(0);
     // run 링크는 Dagster run id로 간다.
@@ -275,6 +276,8 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
     await page.getByRole("button", { name: "다시 계획" }).click();
     const dialog = page.getByRole("alertdialog");
     await dialog.getByRole("button", { name: "취소" }).click();
+    // 닫힘 애니메이션 동안 dialog의 같은 이름 버튼이 남아 있다 — 사라진 뒤 다시 연다.
+    await expect(dialog).toHaveCount(0);
     expect(mock.calls.filter((call) => call.endsWith("/replan"))).toHaveLength(0);
 
     await page.getByRole("button", { name: "다시 계획" }).click();
@@ -296,5 +299,7 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
+    // 시각 점검용 증거(실패 판정 아님).
+    await page.screenshot({ fullPage: true, path: test.info().outputPath("geo-releases-375.png") });
   });
 });
