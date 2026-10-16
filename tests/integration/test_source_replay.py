@@ -107,7 +107,7 @@ def _bookstore(seq: int) -> dict[str, Any]:
         "STORE_SEQ_NO": float(seq),
         "STORE_NAME": f"가상 책방 {seq}",
         "ADRES": f"영등포구 여의공원로 {seq}",
-        "XCNTS": 37.5263123456789 + seq / 1000,
+        "XCNTS": 37.5263123456789 + (seq % 100) / 100000,
         "YDNTS": 126.923912,
         "TEL_NO": "02-1",
     }

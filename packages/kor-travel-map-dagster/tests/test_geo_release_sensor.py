@@ -413,8 +413,12 @@ def test_mois_budget_exhausted_is_continued_not_done() -> None:
             )
         },
     )
-    _tick(client, _Runs(by_key={"k": _mois_run(converted="500")}))
-    assert (client.items[1].state, client.items[1].attempt_seq) == ("pending", 2)
+    result = _tick(client, _Runs(by_key={"k": _mois_run(converted="500")}))
+    # 이어 달리기 = 다음 attempt로 되돌리고, 게이트가 없으니(fetch) 같은 tick에 그 attempt를 낸다.
+    assert (client.items[1].state, client.items[1].attempt_seq) == ("requested", 2)
+    assert isinstance(result, RunRequest)
+    assert result.run_key is not None
+    assert result.run_key.endswith("/2")
 
 
 def test_mois_budget_exhausted_without_progress_fails() -> None:

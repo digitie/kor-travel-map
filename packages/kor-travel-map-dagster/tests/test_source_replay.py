@@ -321,9 +321,21 @@ def _fetch_records(resource_key: str, records: list[Any]) -> list[Any]:
     return [_materialize(record) for record in records]
 
 
+#: 생성 시각 기본값(``kst_now``) — 내용이 아니라 변환을 부른 순간이다.
+_GENERATED_AT = frozenset({"imported_at", "created_at", "updated_at"})
+
+
+def _content(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _content(v) for k, v in value.items() if k not in _GENERATED_AT}
+    if isinstance(value, list):
+        return [_content(v) for v in value]
+    return value
+
+
 def _by_key(bundles: Sequence[FeatureBundle]) -> dict[str, dict[str, Any]]:
     return {
-        bundle.source_record.source_record_key: bundle.model_dump(mode="json")
+        bundle.source_record.source_record_key: _content(bundle.model_dump(mode="json"))
         for bundle in bundles
     }
 
@@ -435,21 +447,22 @@ class _ReplayClient:
         return self.records
 
 
-_GUARD = FeatureOperationExecutionGuard(
-    client=cast(Any, object()),
-    instance=object(),
-    operation_key=None,
-    memberships=(),
-    dagster_run_id="replay-test",
-    trigger_kind=None,
-)
+_INSTANCE = object()
 
 
 def _context(client: object, config: dict[str, object]) -> Any:
+    guard = FeatureOperationExecutionGuard(
+        client=cast(Any, client),
+        instance=_INSTANCE,
+        operation_key=None,
+        memberships=(),
+        dagster_run_id="replay-test",
+        trigger_kind=None,
+    )
     return SimpleNamespace(
         resource_config=config,
-        resources=SimpleNamespace(feature_operation_guard=_GUARD, kor_travel_map_client=client),
-        instance=_GUARD.instance,
+        resources=SimpleNamespace(feature_operation_guard=guard, kor_travel_map_client=client),
+        instance=_INSTANCE,
         run=SimpleNamespace(job_name="panel_only_job", run_id="replay-test"),
     )
 
@@ -516,7 +529,7 @@ def test_replay_resource_sends_no_provider_request(resource_key: str, sends: lis
 
 @pytest.mark.parametrize("operation_key", sorted(SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS))
 def test_launchable_replay_operations_accept_the_replay_run_config(operation_key: str) -> None:
-    job = defs.get_job_def(operation_key)
+    job = defs.resolve_job_def(operation_key)
     config = run_config_for_dataset(operation_key, "datagokr_seoul_bookstores")
     assert config is not None
     validate_run_config(job, config)
@@ -525,7 +538,7 @@ def test_launchable_replay_operations_accept_the_replay_run_config(operation_key
 def test_mois_job_rejects_a_replay_run_config() -> None:
     from dagster import DagsterInvalidConfigError
 
-    job = defs.get_job_def("feature_place_mois_licenses_job")
+    job = defs.resolve_job_def("feature_place_mois_licenses_job")
     with pytest.raises(DagsterInvalidConfigError):
         validate_run_config(
             job, {"resources": {"mois_license_records": {"config": {"source_mode": "replay"}}}}
