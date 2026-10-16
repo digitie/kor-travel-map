@@ -20,14 +20,9 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal, cast
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from kortravelmap.dto.geo_dataset import DatasetRef
-from kortravelmap.geocoding import (
-    KorTravelGeoRestClient,
-    fetch_current_dataset,
-    geo_http_timeout,
-)
+from kortravelmap.geocoding import fetch_current_dataset, open_geo_client
 from kortravelmap.infra import geo_release_repo
 from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage
 from kortravelmap.settings import KorTravelMapSettings
@@ -55,6 +50,8 @@ ItemStateReason = Literal[
     "run_not_launched",
     "no_progress",
     "run_failed",
+    "superseded",
+    "canceled",
 ]
 
 
@@ -255,14 +252,7 @@ async def _current_dataset() -> DatasetRef | None:
 
     run 경로와 같은 팩토리(``fetch_current_dataset``)를 쓴다(ADR-109 결정 2 — 팩토리 1개).
     """
-    settings = KorTravelMapSettings()
-    base_url = settings.kor_travel_geo_base_url
-    if base_url is None:
-        return await fetch_current_dataset(None, logger=_LOGGER)
-    async with httpx.AsyncClient(
-        base_url=base_url.get_secret_value(), timeout=geo_http_timeout(settings)
-    ) as http:
-        client = KorTravelGeoRestClient(http, api_key=settings.kor_travel_geo_api_key)
+    async with open_geo_client(KorTravelMapSettings(), logger=_LOGGER) as client:
         return await fetch_current_dataset(client, logger=_LOGGER)
 
 

@@ -7859,7 +7859,7 @@ class KorTravelGeoReleaseItemRow(Base):
         CheckConstraint(
             "state_reason IS NULL OR state_reason IN ('disabled', 'no_geo_dependency', "
             "'queue_only', 'operator', 'sweep', 'run_not_launched', 'no_progress', "
-            "'run_failed')",
+            "'run_failed', 'superseded', 'canceled')",
             name=conv("ck_kor_travel_geo_release_items_state_reason"),
         ),
         CheckConstraint(

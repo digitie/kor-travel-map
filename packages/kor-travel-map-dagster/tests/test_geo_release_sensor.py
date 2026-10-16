@@ -82,6 +82,7 @@ class _FakeClient:
 
     kind: str
     items: dict[int, GeoReleaseItem] = field(default_factory=dict)
+    plan_seq: int = 2
     calls: list[str] = field(default_factory=list)
     completions: list[object] = field(default_factory=list)
 
@@ -89,7 +90,7 @@ class _FakeClient:
         return GeoReleasePlan(
             plan_id=7,
             geo_data_token=_TOKEN,
-            plan_seq=2,
+            plan_seq=self.plan_seq,
             geo_version_token=_CURRENT.version_token,
             activated_at=None,
             reference_months=None,
@@ -373,6 +374,11 @@ def _mois_run(*, converted: str, budget: str = "3600", available: str = "3600") 
     )
 
 
+# 아래 MOIS 이어 달리기 두 테스트는 **지금은 운영에서 도달하지 않는다** — MOIS 항목은
+# replay run_config라 게이트(`SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`가 비어 있다)에 막혀
+# `requested`가 되지 않는다. T-GR-08이 게이트를 열면 이 경로가 산다 — 그때를 위해 지금 고정한다.
+
+
 def test_mois_budget_exhausted_is_continued_not_done() -> None:
     client = _FakeClient(
         "existing",
@@ -444,3 +450,119 @@ def test_sensor_declaration_is_stopped_light_and_covers_every_feature_load_job()
 def test_mois_continuation_runs_are_not_release_runs() -> None:
     assert gs.GEO_RELEASE_PLAN_ID_TAG not in _CONTINUATION_TAGS
     assert gs.GEO_RELEASE_PLAN_ID_TAG.startswith("kor_travel_map.")
+
+
+def test_a_canceled_run_is_not_retried() -> None:
+    """운영자의 취소를 존중한다 — 재요청 없이 ``failed(canceled)``."""
+    client = _FakeClient(
+        "existing",
+        items={1: _item(1, _MCST, state="requested", run_key="k", requested_at=_NOW)},
+    )
+    _tick(client, _Runs(by_key={"k": _Run(DagsterRunStatus.CANCELED)}))
+    assert (client.items[1].state, client.items[1].state_reason, client.items[1].attempt_seq) == (
+        "failed",
+        "canceled",
+        1,
+    )
+
+
+def test_a_replanned_token_gets_a_new_run_key() -> None:
+    """A→B→A — 두 번째 A 계획(``plan_seq=2``)의 run_key는 첫 계획과 달라 실제 run이 생긴다."""
+    first = _FakeClient("created", items={1: _item(1, _MCST)}, plan_seq=1)
+    first_request = _tick(first)
+    second = _FakeClient("created", items={1: _item(1, _MCST)}, plan_seq=2)
+    second_request = _tick(second)
+    assert isinstance(first_request, RunRequest)
+    assert isinstance(second_request, RunRequest)
+    assert f"/{_TOKEN}/1/" in (first_request.run_key or "")
+    assert f"/{_TOKEN}/2/" in (second_request.run_key or "")
+    assert first_request.run_key != second_request.run_key
+
+
+# -- 실제 run storage(``DagsterInstance.ephemeral``) --------------------------------------------
+
+
+def _add_run(
+    instance: Any, *, run_id: str, job_name: str, status: DagsterRunStatus, tags: dict[str, str]
+) -> None:
+    from dagster import DagsterRun
+
+    instance.add_run(DagsterRun(job_name=job_name, run_id=run_id, tags=tags, status=status))
+
+
+def test_instance_lookups_use_the_release_tags() -> None:
+    from dagster import DagsterInstance
+
+    from kortravelmap.dagster.run_scope import CODE_LOCATION_RUN_TAG, MAP_CODE_LOCATION_NAME
+
+    with DagsterInstance.ephemeral() as instance:
+        _add_run(
+            instance,
+            run_id="release-1",
+            job_name=_KNPS,
+            status=DagsterRunStatus.STARTED,
+            tags={
+                "kor_travel_map.operation_key": _KNPS,
+                gs.GEO_RELEASE_RUN_KEY_TAG: "geo_release/x/1/knps/1/1",
+                gs.GEO_RELEASE_PLAN_ID_TAG: "7",
+            },
+        )
+        _add_run(
+            instance,
+            run_id="done-1",
+            job_name=_MCST,
+            status=DagsterRunStatus.SUCCESS,
+            tags={"kor_travel_map.operation_key": _MCST},
+        )
+        _add_run(
+            instance,
+            run_id="worker-1",
+            job_name="feature_update_request_worker",
+            status=DagsterRunStatus.STARTED,
+            tags={CODE_LOCATION_RUN_TAG: MAP_CODE_LOCATION_NAME},
+        )
+        runs = gs._InstanceRuns(instance)  # noqa: SLF001
+
+        found = runs.run_for_key("geo_release/x/1/knps/1/1")
+        assert found is not None
+        assert found.run_id == "release-1"
+        assert runs.run_for_key("geo_release/x/1/knps/1/2") is None
+        assert runs.active_run_for(_KNPS) == "release-1"
+        assert runs.active_run_for(_MCST) is None  # 끝난 run은 활성이 아니다
+        assert runs.active_queue_worker() == "worker-1"
+
+
+def test_mois_continuation_sensor_leaves_release_runs_to_the_release_sensor() -> None:
+    """이중 continuation 체인 방지 — 마지막 MOIS run이 릴리스 run이면 이어 달리기 센서는 Skip."""
+    from dagster import DagsterInstance, build_sensor_context
+
+    from kortravelmap.dagster.mois_chunked_load import mois_load_continuation_sensor
+
+    tags = {
+        "kor_travel_map.operation_key": MOIS_LOAD_JOB_NAME,
+        MOIS_LOAD_OUTCOME_TAG: "budget_exhausted",
+        MOIS_LOAD_CONVERTED_TAG: "500",
+    }
+    with DagsterInstance.ephemeral() as instance:
+        _add_run(
+            instance,
+            run_id="mois-release",
+            job_name=MOIS_LOAD_JOB_NAME,
+            status=DagsterRunStatus.SUCCESS,
+            tags={**tags, gs.GEO_RELEASE_PLAN_ID_TAG: "7"},
+        )
+        result = mois_load_continuation_sensor(build_sensor_context(instance=instance))
+        assert isinstance(result, SkipReason)
+        assert "릴리스" in (result.skip_message or "")
+    with DagsterInstance.ephemeral() as instance:
+        _add_run(
+            instance,
+            run_id="mois-plain",
+            job_name=MOIS_LOAD_JOB_NAME,
+            status=DagsterRunStatus.SUCCESS,
+            tags=tags,
+        )
+        # 릴리스 run이 아니면 종전대로 이어 달린다.
+        assert isinstance(
+            mois_load_continuation_sensor(build_sensor_context(instance=instance)), RunRequest
+        )

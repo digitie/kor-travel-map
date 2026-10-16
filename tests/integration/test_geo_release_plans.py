@@ -669,3 +669,34 @@ async def test_sensor_transitions_request_settle_and_requeue(
     assert not await geo_release_repo.settle_item(
         migrated_session, plan.plan_id, item.position, state="done"
     )
+
+
+async def test_superseding_a_plan_fails_its_in_flight_items(migrated_session: AsyncSession) -> None:
+    """옛 계획의 ``requested`` 항목은 ``failed(superseded)`` — 진행 중 고아가 남지 않는다."""
+    bundle = await _festival("supersede-in-flight", _FakeReverse(_geo()))
+    assert (await geo_release_repo.plan_geo_release(migrated_session, REF_B)).kind == (
+        "baseline_recorded"
+    )
+    await load_bundles(migrated_session, [bundle], geo=_ctx(REF_B))  # A 기준 stale
+    created = await geo_release_repo.plan_geo_release(migrated_session, REF_A)
+    assert created.plan is not None
+    plan = created.plan
+    item = next(i for i in plan.items if i.state == "pending" and i.launch_blocked_reason is None)
+    assert await geo_release_repo.mark_item_requested(
+        migrated_session, plan.plan_id, item.position, attempt_seq=1, run_key="k-a"
+    )
+    feature_id = await _feature_id(migrated_session, bundle)
+    await upsert_stamps(migrated_session, current=REF_A, outcomes={feature_id: "called"})
+
+    # geo가 B를 서빙한다 — 행은 A로 봉인돼 있어 B 계획이 생기고 A 계획은 닫힌다.
+    outcome = await geo_release_repo.plan_geo_release(migrated_session, REF_B)
+    assert outcome.kind == "created"
+    assert outcome.superseded_plan_ids == (plan.plan_id,)
+    closed = await geo_release_repo.get_geo_release_plan(migrated_session, plan.plan_id)
+    assert closed is not None
+    orphan = next(i for i in closed.items if i.position == item.position)
+    assert (closed.state, orphan.state, orphan.state_reason) == (
+        "superseded",
+        "failed",
+        "superseded",
+    )

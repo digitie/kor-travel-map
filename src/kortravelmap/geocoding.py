@@ -48,7 +48,7 @@ import contextlib
 import logging
 import math
 from collections import Counter, OrderedDict, deque
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -205,6 +205,7 @@ __all__ = [
     "KorTravelGeoRestClient",
     "REVERSE_RESULT_EMPTY_KEY",
     "fetch_current_dataset",
+    "open_geo_client",
     "geo_dataset_mismatch",
     "geo_http_timeout",
     "kor_travel_geo_reverse_geocoder",
@@ -1622,6 +1623,42 @@ class _KorTravelGeoObservedReverseGeocoder:
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@contextlib.asynccontextmanager
+async def open_geo_client(
+    settings: KorTravelMapSettings,
+    *,
+    logger: logging.Logger | None = None,
+) -> AsyncIterator[KorTravelGeoRestClient | None]:
+    """settings로 짧은 수명 geo client를 열고 닫는다 — 열 수 없으면 None을 준다.
+
+    base URL이 없거나 API key가 형태 위반이면 None(+ key 위반은 WARNING 1건)이다. 호출자는 None을
+    :func:`fetch_current_dataset` 등에 그대로 넘긴다(그쪽이 "client 없음"을 같은 규칙으로 처리한다).
+    운영 API(``/v1/ops/geo-releases``)와 릴리스 센서(T-GR-05)가 이 하나를 쓴다 — client 생성
+    지점을 줄인다(acceptance §T-GR-05의 ``kor_travel_geo_client_resource`` 대신 이 helper — 소유자
+    위임 결정).
+    """
+    import httpx as _httpx  # noqa: PLC0415 — 모듈 머리의 httpx는 TYPE_CHECKING 전용이다
+
+    log = logger if logger is not None else _LOGGER
+    if settings.kor_travel_geo_base_url is None:
+        yield None
+        return
+    async with _httpx.AsyncClient(
+        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
+        timeout=geo_http_timeout(settings),
+    ) as http:
+        try:
+            client = KorTravelGeoRestClient(http, api_key=settings.kor_travel_geo_api_key)
+        except GeoAuthNotConfiguredError:
+            log.warning(
+                "kor-travel-geo API key 미설정·형태 위반(KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY) — "
+                "geo client 없이 진행한다"
+            )
+            yield None
+            return
+        yield client
 
 
 async def fetch_current_dataset(

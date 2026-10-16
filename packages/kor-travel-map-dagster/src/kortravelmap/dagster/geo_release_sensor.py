@@ -39,11 +39,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 
-import httpx
 from kortravelmap.geocoding import (
     KorTravelGeoRestClient,
     fetch_current_dataset,
-    geo_http_timeout,
+    open_geo_client,
     resolve_sigungu_by_radius,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -63,7 +62,7 @@ from .mois_chunked_load import (
     MOIS_LOAD_OUTCOME_TAG,
     mois_load_continuation_decision,
 )
-from .run_scope import map_owned_runs_filter, map_runs_filter
+from .run_scope import GEO_RELEASE_PLAN_ID_TAG, map_owned_runs_filter, map_runs_filter
 from .schedules import FEATURE_LOAD_JOBS
 
 if TYPE_CHECKING:
@@ -100,8 +99,6 @@ MOIS_RELEASE_ATTEMPT_CAP: Final[int] = 12
 NON_MOIS_RETRY_ATTEMPTS: Final[int] = 2
 """비-MOIS 항목은 실패 시 자동 재요청 1회(``attempt_seq`` 2까지), 그 다음은 운영자."""
 
-GEO_RELEASE_PLAN_ID_TAG: Final[str] = "kor_travel_map.geo_release_plan_id"
-"""전용 run의 유일한 판별자(MOIS 이어 달리기 run도 ``trigger_kind=sensor``를 쓴다)."""
 
 GEO_RELEASE_RUN_KEY_TAG: Final[str] = "kor_travel_map.geo_release_run_key"
 """항목 → run 조회 키(``map_owned_runs_filter``는 ``kor_travel_map.*`` tag로만 거른다)."""
@@ -191,17 +188,8 @@ class _SettingsGeoSource:
 
 @asynccontextmanager
 async def _settings_geo_source() -> AsyncIterator[GeoTickSource]:
-    settings = KorTravelMapSettings()
-    if settings.kor_travel_geo_base_url is None:
-        yield _SettingsGeoSource(None)
-        return
-    async with httpx.AsyncClient(
-        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
-        timeout=geo_http_timeout(settings),
-    ) as http:
-        yield _SettingsGeoSource(
-            KorTravelGeoRestClient(http, api_key=settings.kor_travel_geo_api_key)
-        )
+    async with open_geo_client(KorTravelMapSettings()) as client:
+        yield _SettingsGeoSource(client)
 
 
 def _run_key(plan: GeoReleasePlan, item: GeoReleaseItem) -> str:
@@ -272,6 +260,17 @@ async def _settle_requested(
             )
             events.append(f"{item.position}:done")
             continue
+        if run.status == DagsterRunStatus.CANCELED:
+            # 운영자가 취소했다 — 다시 내지 않는다(취소를 존중한다).
+            await client.settle_geo_release_item(
+                plan.plan_id,
+                item.position,
+                state="failed",
+                reason="canceled",
+                dagster_run_id=run_id,
+            )
+            events.append(f"{item.position}:canceled")
+            continue
         if item.operation_key != MOIS_LOAD_JOB_NAME and item.attempt_seq < NON_MOIS_RETRY_ATTEMPTS:
             await client.requeue_geo_release_item(plan.plan_id, item.position)
             events.append(f"{item.position}:retry")
@@ -305,7 +304,8 @@ async def evaluate_geo_release_tick(
     2. geo 현재 데이터셋 — 못 읽거나 ``data_token``이 없으면 Skip(계획 없음).
     3. 공용 계획 함수 — 기준선·끝난 토큰·롤백 정리는 그 함수가 정한다. 계획이 없으면 Skip.
     4. ``requested`` 항목을 run 결과로 전이(SUCCESS → done, MOIS ``budget_exhausted`` → 이어 달리기,
-       실패 → 비-MOIS 1회 재요청, 3 tick 무run → ``run_not_launched``).
+       실패 → 비-MOIS 1회 재요청, 취소 → ``failed(canceled)``(재요청 없음), 3 tick 무run →
+       ``run_not_launched``).
     5. 항목이 전부 끝났으면 완료 판정(sweep 또는 링크 재동기화 → done).
     6. 진행 중 run이 없으면 다음 대기 항목 하나(게이트 통과·같은 operation run 없음)를 낸다.
     """

@@ -2764,6 +2764,18 @@ tests. 의존: T-GR-02·04. 규모 M.
   run_key = `geo_release/{token}/{plan_seq}/{operation}/{position}/{attempt}` — replan은 `plan_seq`가 달라 유일하다.
   (7) 범위 밖으로 남긴 것: PinVi에 링크 변경을 알리는 stream 이벤트(메모만), 열린 결정 6(geo-release run 한정 timeout
   재시도 — 미승인이라 attempt 2로만 복구), 격리 스택 e2e(배포 뒤).
+- 구현 메모 2(2026-10-16, #1332 적대 리뷰 2인 반영): (8) **MOIS 이중 이어 달리기 차단** — `mois_load_continuation_sensor`는
+  마지막 run에 `kor_travel_map.geo_release_plan_id`(상수는 `run_scope.GEO_RELEASE_PLAN_ID_TAG`)가 있으면 Skip한다(ADR-109
+  5.5 문장 정정). 지금은 MOIS가 replay 게이트에 막혀 잠복이지만 T-GR-08부터 실제로 난다. (9) **supersede 고아 정리** — 계획이
+  닫힐 때 그 계획의 `requested` 항목은 `failed(superseded)`; **CANCELED는 재요청 없이 `failed(canceled)`**. 두 사유를
+  어휘에 더하느라 **migration 409**(`409_geo_release_item_reasons` — 408은 배포 경로에 있어 고치지 않았다)와 admin
+  OpenAPI의 `state_reason` enum이 바뀐다(**PinVi 재vendor 필요**). (10) **geo client 생성은 `geocoding.open_geo_client(settings)`
+  하나** — 운영 API와 센서가 쓴다. acceptance 머리의 `kor_travel_geo_client_resource`(센서용 경량 resource) 대신 이
+  helper다(소유자 위임 결정 — resource를 두면 센서가 tick마다 쓰지 않을 client를 초기화하고, helper는 tick 안에서만 산다).
+  (11) **replay가 막힌 계획은 T-GR-08 전까지 `running`으로 둔다**(소유자 위임 결정 — skip으로 바꾸지 않는다). 센서를 켜도
+  replay 항목(MOIS·datagokr fileData·standard_data)이 든 계획의 완료를 기대하지 말 것. (12) 운영 메모: `attempt_seq`는 단조라
+  sweep 뒤에도 재요청 상한(비-MOIS 2, MOIS 12)이 누적된다; `failed(run_not_launched)`·`failed(canceled)`는 최종 상태다(센서가
+  다시 내지 않는다 — 운영자 `replan`).
 
 ## T-GR-06
 

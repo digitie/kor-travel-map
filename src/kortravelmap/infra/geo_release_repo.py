@@ -83,7 +83,8 @@ __all__ = [
 
 PlanState = Literal["baseline", "planned", "running", "done", "superseded"]
 ItemState = Literal["pending", "requested", "done", "failed", "skipped"]
-#: 항목 ``state_reason`` 어휘 — migration 408의 CHECK와 같다. 뒤 셋은 센서(T-GR-05)가 쓴다.
+#: 항목 ``state_reason`` 어휘 — migration 408·409의 CHECK와 같다. ``run_not_launched``부터는
+#: 센서(T-GR-05)가 쓴다.
 ItemStateReason = Literal[
     "disabled",
     "no_geo_dependency",
@@ -93,6 +94,8 @@ ItemStateReason = Literal[
     "run_not_launched",
     "no_progress",
     "run_failed",
+    "superseded",
+    "canceled",
 ]
 LaunchBlockedReason = Literal["replay_not_launchable_before_t_gr_08"]
 PlanOutcomeKind = Literal[
@@ -565,6 +568,14 @@ UPDATE ops.kor_travel_geo_releases
  WHERE plan_id = :plan_id AND state IN ('planned', 'running')
 """
 )
+#: 닫히는 계획의 진행 중 항목 — 진행 중으로 남은 고아가 없어야 "한 번에 run 1개" 상한이 성립한다.
+_SUPERSEDE_REQUESTED_ITEMS_SQL: Final = text(
+    """
+UPDATE ops.kor_travel_geo_release_items
+   SET state = 'failed', state_reason = 'superseded', updated_at = now()
+ WHERE plan_id = :plan_id AND state = 'requested'
+"""
+)
 _INSERT_ITEM_SQL: Final = text(
     """
 INSERT INTO ops.kor_travel_geo_release_items (
@@ -635,6 +646,9 @@ async def _supersede_active(session: AsyncSession) -> tuple[int, ...]:
     superseded: list[int] = []
     for active in (await session.execute(_ACTIVE_PLANS_SQL)).mappings().all():
         await session.execute(_SUPERSEDE_SQL, {"plan_id": int(active["plan_id"])})
+        await session.execute(
+            _SUPERSEDE_REQUESTED_ITEMS_SQL, {"plan_id": int(active["plan_id"])}
+        )
         superseded.append(int(active["plan_id"]))
     return tuple(superseded)
 
