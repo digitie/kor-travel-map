@@ -31,6 +31,14 @@ _PUBLIC_PREDICATE = (
 _PERF_ROW_COUNT = 25000
 _PERF_ROUTE_ORDINAL = _PERF_ROW_COUNT + 1
 _PERF_AREA_ORDINAL = _PERF_ROW_COUNT + 2
+#: 비공개(`draft`) 행 — 공개 seed와 같은 수를, 그보다 **새** `updated_at`으로 심는다
+#: (T-TEST-PLANNER-INDEX). 공개 행만 있으면 3축 술어의 선택도가 1이라 partial
+#: `idx_features_updated_keyset`과 술어 없는 admin `idx_features_admin_updated_keyset`(같은 열)의
+#: 추정 비용이 몇 % 안쪽에서 맞붙고, 앞 테스트들이 남긴 사본·dead tuple에 따라 planner가 어느 쪽이든
+#: 고른다(n150 실측). 비공개 행이 반을 차지하면 admin 경로는 그것을 거르며 걸어야 해 추정 비용이
+#: 약 두 배가 된다 — 판정이 데이터 분포로 결정된다.
+_PERF_HIDDEN_FIRST = _PERF_AREA_ORDINAL + 1
+_PERF_HIDDEN_LAST = _PERF_AREA_ORDINAL + _PERF_ROW_COUNT
 
 #: SQL이 같은 값을 만드는 식. Python과 두 벌이 되면 심은 행과 지우는 행이 갈라진다.
 _PERF_FEATURE_ID_SQL = "CAST(CAST(:run AS text) || lpad(to_hex(g), 16, '0') AS uuid)"
@@ -634,6 +642,27 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
             ),
             {"run": run, "row_count": _PERF_ROW_COUNT},
         )
+        await migrated_session.execute(
+            text(
+                f"""
+                INSERT INTO feature.features (
+                    feature_id, kind, name, category, coord, lifecycle_state,
+                    publication_state, quality_state, updated_at
+                )
+                SELECT
+                    {_PERF_FEATURE_ID_SQL}, 'place', 'hidden draft station', '06020000',
+                    x_extension.st_setsrid(
+                        x_extension.st_makepoint(126.80 + g * 0.000001, 37.40 + g * 0.000001),
+                        4326
+                    ),
+                    'active', 'draft', 'valid', now() + (g || ' seconds')::interval
+                FROM generate_series(
+                    CAST(:first AS integer), CAST(:last AS integer)
+                ) AS g
+                """
+            ),
+            {"run": run, "first": _PERF_HIDDEN_FIRST, "last": _PERF_HIDDEN_LAST},
+        )
         route_id = _perf_feature_id(run, _PERF_ROUTE_ORDINAL)
         area_id = _perf_feature_id(run, _PERF_AREA_ORDINAL)
         await _insert_feature(
@@ -762,10 +791,12 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                     text(f"EXPLAIN (ANALYZE, BUFFERS) {query}")
                 )
             )
-            assert index_name in plan, (index_name, plan)
+            if index_name not in plan:
+                # plan 전문을 남긴다 — assert repr는 잘려 원인(어느 인덱스를 골랐나)이 사라진다.
+                pytest.fail(f"{index_name}을 쓰지 않았다. plan 전문:\n{plan}", pytrace=False)
     finally:
         # uuid에는 LIKE가 없다 — seed와 같은 유도 규칙으로 같은 집합을 되짚는다
-        # (route/area는 일련번호 뒤 두 자리라 이 한 문장이 셋을 다 데려간다).
+        # (route/area·비공개 행은 일련번호 뒤 자리라 이 한 문장이 전부 데려간다).
         await migrated_session.execute(
             text(
                 f"""
@@ -776,5 +807,5 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                 )
                 """
             ),
-            {"run": run, "last_ordinal": _PERF_AREA_ORDINAL},
+            {"run": run, "last_ordinal": _PERF_HIDDEN_LAST},
         )
