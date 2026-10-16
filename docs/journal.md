@@ -1,3 +1,16 @@
+## 2026-10-16 — admin UI geo 릴리스 화면(T-GR-06, ADR-109 결정 8): 브랜치 `feat/t-gr-06-geo-releases-ui`
+
+- **무엇.** `/admin/ops/geo-releases` — 현재 geo 데이터셋(`data_token` 없음 = 빨간 상태 + 센서 Skip 사유), 계획 목록, 계획 상세
+  (커버리지 게이지·항목 표·Dagster run 링크·건너뛰기·다시 계획), "지금 감지". 기존 Rail-Workbench 체계(AdminShell·SectionCard·
+  DataTable·StatStrip·확인 dialog)를 그대로 쓴다. nav "수집 파이프라인"에 넣었고, nav 거울 표(`home-nav.spec`)가 그동안 빠뜨린
+  `수동/provider 판정`도 같이 맞췄다.
+- **MOIS 문구.** API 사유 값은 하나라 replay 미지원과 MOIS(센서 수동)를 가르지 못한다 — enum을 바꾸면 PinVi 재vendor라
+  화면이 operation key로 "수동 실행 후 skip 필요"를 보인다. API 필드에는 docstring이 아니라 주석을 달았다(모델 docstring은
+  OpenAPI description이 된다).
+- **격리 스택 e2e.** n150에 PostGIS(배포 bootstrap → head 409)·가짜 geo(토큰 전환 제어)·실 API·prod frontend를 띄워, 기준선
+  기록 → 토큰 전환 → 실제 계획 생성 → MOIS 안내 → 건너뛰기를 실 API로 돌렸다. mock 스펙은 skip·detect 1회·게이지 수치·
+  no_token·replan 확인·375px 가로 넘침 0.
+
 ## 2026-10-16 — records resource replay 모드(T-GR-08, ADR-109 결정 7): 브랜치 `feat/t-gr-08-replay-mode`
 
 - **무엇.** 쿼터 민감 records resource에 `source_mode=replay` — 저장된 current 원본을 provider 모델로 되살려 같은 변환기로

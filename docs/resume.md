@@ -1,3 +1,12 @@
+## 2026-10-16 — admin UI geo 릴리스 화면(T-GR-06): 브랜치 `feat/t-gr-06-geo-releases-ui`
+
+**다음 한 작업: CI 초록 → 리뷰 → 머지 → (배포는 coordinator) → T-GR-07(문서 마감).**
+
+- 바뀐 것: `src/app/admin/ops/geo-releases/*`, `src/api/geoReleases.ts`, nav, mock·live Playwright 스펙, live 시나리오 카탈로그,
+  화면 체크리스트 행·메모, `ReplayIncomplete` 문구, `ops_geo_releases.py` 필드 주석(OpenAPI 불변).
+- 바뀌지 않은 것: OpenAPI·gen:types, `/admin/issues`·features 목록.
+- 운영 메모: replay 뒤에도 stale 주소 finding은 다음 fetch까지 열려 있다(정상).
+
 ## 2026-10-16 — records resource replay 모드(T-GR-08): 브랜치 `feat/t-gr-08-replay-mode`
 
 **다음 한 작업: CI 초록 → 리뷰 → 머지 → 배포 → T-GR-06(admin UI `/admin/ops/geo-releases`).**
