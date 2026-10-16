@@ -12,6 +12,13 @@
   적재 전에 끝낸다(`prefetch_replay`). (3) provider 라이브러리는 CI에 없다(`providers` extra) — 실모델 golden은 설치된
   환경에서만 돌고(importorskip), CI에는 "변환기가 raw에 있는 필드만 읽는다"는 구조 golden lint를 두었다(MOIS 대조군 포함).
   런타임 backstop은 hash 불일치 시 적재 전 실패다.
+- **#1333 리뷰 2인 반영.** (R2) 차단이 풀린 MOIS를 센서가 full fetch로 자동 launch하면 전국 Phase A·50만 행 변환·예정
+  밖 은퇴가 일어난다 — `SENSOR_MANUAL_OPERATION_KEYS`로 막고 운영자 수동으로(사유 값 재사용, OpenAPI 불변). (R1) 빈·부분
+  replay가 성공으로 끝나던 것 — 읽은 건수를 같은 술어의 active entity 수와, 변환 결과를 읽은 레코드와 대조해
+  `ReplayIncomplete`. seal 영수증 `observed_at`이 replay에서도 찍히던 것 — replay는 authoritative를 주장하지 않는다
+  (operation 경로 통합 테스트). "MOIS fetch는 쿼터 0"은 TTL 안에서만 참이라 문서를 고쳤다. launchable은 replay 목록에서
+  파생, 복원 함수는 `REPLAY_FROM_RAW` 하나, CI dagster job에 `python-datagokr-api` 설치(public 핀)로 golden이 CI에서 돈다.
+  drift 검사는 hash가 변환기 안에서 나오므로 변환 뒤 — 문서를 "commit 전 실패"로 맞췄다.
 
 ## 2026-10-16 — geo 릴리스 센서(T-GR-05, ADR-109 결정 5): 브랜치 `feat/t-gr-05-geo-release-sensor`
 

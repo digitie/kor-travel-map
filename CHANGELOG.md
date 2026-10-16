@@ -18,9 +18,14 @@
   `fetched_at`·head `observed_at`을 되돌려 head가 전진하지 않고, sync state를 쓰지 않으며, payload hash가 저장값과 다르면
   적재 전에 `ReplayPayloadDrift`로 실패한다.
 - **ADDED (infra/client)**: `infra/source_replay_repo.read_current_source_records`(keyset), `client.read_current_source_records`.
-- **CHANGED (core)**: `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`에 9 operation — 릴리스 센서가 replay 항목을 낸다. **MOIS는
-  replay 목록에서 빠졌다**(raw가 record 1:1이 아니다 — golden 실패) — 계획 항목 run_config가 없어지고 fetch로 나간다.
+- **CHANGED (core)**: `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS = frozenset(REPLAY_RECORDS_RESOURCES)`(9 operation) —
+  릴리스 센서가 replay 항목을 낸다. **MOIS는 replay 목록에서 빠졌고**(raw가 record 1:1이 아니다 — golden 실패) 새
+  `SENSOR_MANUAL_OPERATION_KEYS`로 센서가 내지 않는다(운영자 수동 실행 뒤 항목 skip). 차단 사유 값은 기존 값을 재사용해
   OpenAPI 변경 없음.
+- **ADDED (dagster)**: 부분·빈 replay는 `ReplayIncomplete`로 실패(읽은 건수 ≠ active entity 수, 변환 결과가 레코드를 다
+  덮지 않음). replay run은 curation seal(`authoritative_snapshot_complete`)을 쓰지 않는다.
+- **CHANGED (ci)**: dagster 단위 테스트 전에 `python-datagokr-api`(pyproject 핀)만 설치 — replay golden·HTTP 0회
+  테스트가 CI에서 돈다.
 
 ### geo 릴리스 센서 `kor_travel_geo_release_sensor` (2026-10-16, ADR-109 결정 5, T-GR-05)
 

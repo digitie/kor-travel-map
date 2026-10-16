@@ -296,11 +296,11 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     )
     assert reasons["mois_license_incremental_update"] == ("skipped", "queue_only")
 
-    # MOIS는 fetch(T-GR-08 — raw가 record 1:1이 아니다); 쿼터 민감 datagokr → replay run_config,
-    # T-GR-08 뒤 게이트가 열려 있다.
+    # MOIS는 replay가 없다(T-GR-08) — run_config 없이 계획에 들되 센서가 내지 않는다(운영자 수동,
+    # #1333 리뷰 R2, 사유 값은 OpenAPI 계약 때문에 재사용). datagokr replay 항목은 열려 있다.
     mois = by_op["feature_place_mois_licenses_job"][0]
     assert mois.run_config is None
-    assert mois.launch_blocked_reason is None
+    assert mois.launch_blocked_reason == "replay_not_launchable_before_t_gr_08"
     bookstores = by_op["feature_place_datagokr_seoul_bookstores_job"][0]
     assert bookstores.run_config == {
         "resources": {
@@ -356,6 +356,10 @@ def test_every_replay_operation_is_launchable_after_t_gr_08() -> None:
     MOIS는 replay가 아니다(raw가 record 1:1이 아니다 — fetch run_config)."""
     assert frozenset(REPLAY_RECORDS_RESOURCES) == SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS
     assert "feature_place_mois_licenses_job" not in REPLAY_RECORDS_RESOURCES
+    assert (
+        geo_release_repo.launch_blocked_reason("feature_place_mois_licenses_job", None)
+        == "replay_not_launchable_before_t_gr_08"
+    )
     for operation_key in REPLAY_RECORDS_RESOURCES:
         config = geo_release_repo.run_config_for_dataset(operation_key, "any")
         assert geo_release_repo.launch_blocked_reason(operation_key, config) is None

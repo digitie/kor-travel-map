@@ -615,8 +615,12 @@ async def load_feature_bundle_batches_for_dagster(
     geo_applied: GeoApplied | None = None,
     current_dataset: DatasetRef | None = None,
     geo_stats: GeoCallStats | None = None,
+    authoritative_snapshot_complete: bool = True,
 ) -> DagsterFeatureLoadResult:
     """대용량 provider batch를 materialize하지 않고 한 DB transaction으로 적재한다.
+
+    ``authoritative_snapshot_complete=False``는 replay run(ADR-109 결정 7)이다 — 영수증이 snapshot
+    완료를 주장하지 않으므로 membership 완료가 curation seal을 쓰지 않는다.
 
     변환된 bundle은 현재 batch만 보유한다. validation summary와 durable finding,
     경량 feature id만 누적하고, ``load_all``은 모든 batch를 동일 session/transaction에
@@ -800,7 +804,7 @@ async def load_feature_bundle_batches_for_dagster(
         load=load,
         address_validation=validation,
         observation_receipt=AddressFindingObservationReceipt(
-            authoritative_snapshot_complete=True,
+            authoritative_snapshot_complete=authoritative_snapshot_complete,
             source_observations=validation.total,
             findings_observed=sync_observed,
             findings_unique=sync_unique,

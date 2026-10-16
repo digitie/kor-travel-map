@@ -39,6 +39,7 @@ from kortravelmap.core.feature_operation import (
     GEO_DEPENDENT_OPERATION_KEYS,
     REPLAY_RECORDS_RESOURCES,
     SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS,
+    SENSOR_MANUAL_OPERATION_KEYS,
 )
 from kortravelmap.dto.geo_dataset import DatasetRef
 from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage, coverage
@@ -258,8 +259,11 @@ def launch_blocked_reason(
     replay run_config(records resource의 ``source_mode=replay``)를 가진 항목은 그 operation이
     ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``에 들 때만 낼 수 있다(T-GR-08이 1단계 replay 전부를
     채웠다). records resource가 ``source_mode``를 받지 않는 operation에 내면 Dagster config 검증이
-    run을 거부한다. 이유 값의 이름(``…_before_t_gr_08``)은 OpenAPI 계약이라 그대로 둔다.
+    run을 거부한다. ``SENSOR_MANUAL_OPERATION_KEYS``(MOIS)는 run_config와 무관하게 막는다 — 운영자
+    수동 실행(#1333 리뷰 R2). 이유 값의 이름(``…_before_t_gr_08``)은 OpenAPI 계약이라 그대로 둔다.
     """
+    if operation_key in SENSOR_MANUAL_OPERATION_KEYS:
+        return "replay_not_launchable_before_t_gr_08"
     resources = (run_config or {}).get("resources")
     if not isinstance(resources, dict):
         return None

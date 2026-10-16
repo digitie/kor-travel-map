@@ -47,9 +47,11 @@ from kortravelmap.dagster import assets, resources
 from kortravelmap.dagster.definitions import defs
 from kortravelmap.dagster.feature_operation_tracking import FeatureOperationExecutionGuard
 from kortravelmap.dagster.source_replay import (
+    ReplayIncomplete,
     ReplayPayloadDrift,
     ReplayRecordStream,
     apply_replay_provenance,
+    ensure_replay_complete,
 )
 
 pytestmark = pytest.mark.filterwarnings(
@@ -436,15 +438,16 @@ class _Sent(BaseException):
 
 
 class _ReplayClient:
-    def __init__(self, records: list[CurrentSourceRecord]) -> None:
+    def __init__(self, records: list[CurrentSourceRecord], *, active: int | None = None) -> None:
         self.records = records
+        self.active = len(records) if active is None else active
         self.reads: list[tuple[str, str]] = []
 
     async def read_current_source_records(
         self, *, provider: str, dataset_key: str, batch_size: int = 1000
-    ) -> list[CurrentSourceRecord]:
+    ) -> tuple[list[CurrentSourceRecord], int]:
         self.reads.append((provider, dataset_key))
-        return self.records
+        return self.records, self.active
 
 
 _INSTANCE = object()
@@ -598,6 +601,60 @@ async def test_a_payload_that_differs_from_the_stored_one_fails_before_loading()
         apply_replay_provenance(_stream_with(bundles[:1], hash_of=lambda h: h), bundles)
 
 
+# -- 부분·빈 replay는 실패(#1333 리뷰 R1) --------------------------------------------------------
+
+
+def _stored(bundles: Sequence[FeatureBundle]) -> list[CurrentSourceRecord]:
+    return [
+        CurrentSourceRecord(
+            source_entity_key=f"se_{index}",
+            source_entity_type=b.source_record.source_entity_type,
+            source_entity_id=b.source_record.source_entity_id,
+            raw_data=_jsonb_round_trip(b.source_record.raw_data),
+            raw_payload_hash=b.source_record.raw_payload_hash,
+            fetched_at=_STORED_FETCHED,
+            observed_at=_STORED_OBSERVED,
+        )
+        for index, b in enumerate(bundles)
+    ]
+
+
+def _stream(client: _ReplayClient) -> ReplayRecordStream:
+    return ReplayRecordStream(
+        cast(Any, client),
+        provider="p",
+        dataset_key="d",
+        from_raw=resources.REPLAY_FROM_RAW["datagokr_file_data_records"],
+    )
+
+
+@pytest.mark.parametrize(("read", "active"), [(0, 2), (1, 2), (2, 3)])
+async def test_a_read_short_of_the_active_entities_fails(read: int, active: int) -> None:
+    """빈 읽기(active가 있는데 0건)와 부분 읽기 — 계획이 그 dataset을 끝났다고 보면 안 된다."""
+    stored = _stored(await _bookstore_bundles())[:read]
+    with pytest.raises(ReplayIncomplete, match=f"{read}건을 읽었는데 active entity는 {active}건"):
+        await _stream(_ReplayClient(stored, active=active)).prefetch()
+
+
+async def test_an_empty_dataset_replays_to_nothing() -> None:
+    stream = _stream(_ReplayClient([], active=0))
+    assert await stream.prefetch() == 0
+    ensure_replay_complete(stream)
+
+
+async def test_bundles_that_miss_a_record_fail_before_the_load_finishes() -> None:
+    bundles = await _bookstore_bundles()
+    stream = _stream(_ReplayClient(_stored(bundles)))
+    await stream.prefetch()
+    apply_replay_provenance(stream, bundles[:1])  # 변환이 하나를 잃었다
+    with pytest.raises(ReplayIncomplete, match="2건 중 1건이 변환 결과에 없다"):
+        ensure_replay_complete(stream)
+    with pytest.raises(ReplayIncomplete, match="두 번"):
+        apply_replay_provenance(stream, bundles[:1])  # 같은 entity가 또 나왔다
+    apply_replay_provenance(stream, bundles[1:])
+    ensure_replay_complete(stream)  # 전부 덮었다
+
+
 # -- asset 배선 -------------------------------------------------------------------------------
 
 
@@ -637,7 +694,7 @@ async def test_standard_asset_reads_before_loading_and_skips_sync_state(
 
     async def _fake_load(context: object, **kwargs: Any) -> str:
         seen["reads_before_load"] = len(client.reads)
-        seen["record_sync_state"] = kwargs["record_sync_state"]
+        seen["replay"] = kwargs["replay"]
         seen["bundles"] = [b async for batch in kwargs["batches"] for b in batch]
         return "loaded"
 
@@ -651,7 +708,7 @@ async def test_standard_asset_reads_before_loading_and_skips_sync_state(
 
     assert await assets.run_feature_place_standard_museums(cast(Any, context)) == "loaded"
     assert seen["reads_before_load"] == 1
-    assert seen["record_sync_state"] is False
+    assert seen["replay"] is True  # seal·authoritative·sync state를 쓰지 않는다
     assert {b.source_record.imported_at for b in seen["bundles"]} == {_STORED_OBSERVED}
     def features(bundles: Sequence[FeatureBundle]) -> dict[str, Any]:
         return {
@@ -704,5 +761,7 @@ async def test_file_data_asset_in_replay_skips_sync_state(
 
     assert await assets.run_feature_place_datagokr_file_data(cast(Any, context)) == "loaded"
     assert seen["record_sync_state"] is False
+    # seal 영수증의 관측 시각을 꾸미지 않는다.
+    assert seen["authoritative_snapshot_complete"] is False
     assert {b.source_record.fetched_at for b in seen["bundles"]} == {_STORED_FETCHED}
     assert len(seen["bundles"]) == len(fetched)

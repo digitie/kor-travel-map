@@ -22,7 +22,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from kortravelmap.dagster.resources import REPLAY_FROM_RAW
-from kortravelmap.dagster.source_replay import ReplayRecordStream, apply_replay_provenance
+from kortravelmap.dagster.source_replay import (
+    ReplayRecordStream,
+    apply_replay_provenance,
+    ensure_replay_complete,
+)
 from sqlalchemy import text
 
 from kortravelmap.dto import Address, Coordinate
@@ -37,6 +41,7 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.source_replay_repo import (
     CurrentSourceRecord,
+    count_active_source_entities,
     read_current_source_records,
 )
 from kortravelmap.providers.datagokr_file_data import (
@@ -128,8 +133,11 @@ class _SessionClient:
 
     async def read_current_source_records(
         self, *, provider: str, dataset_key: str, batch_size: int = 1000
-    ) -> list[CurrentSourceRecord]:
-        return await _read_all(self.session, self.provider_dataset_id, limit=batch_size)
+    ) -> tuple[list[CurrentSourceRecord], int]:
+        expected = await count_active_source_entities(
+            self.session, provider_dataset_id=self.provider_dataset_id
+        )
+        return await _read_all(self.session, self.provider_dataset_id, limit=batch_size), expected
 
 
 async def _read_all(
@@ -228,6 +236,8 @@ async def test_replay_regeocodes_without_a_new_observation_and_never_resurrects(
     }
     assert [r.source_entity_key for r in paged] == sorted(r.source_entity_key for r in paged)
     assert len({r.source_entity_key for r in paged}) == 2  # 중복 없음, retired 제외
+    # 읽어야 할 건수(같은 술어, head 조인 제외)도 2 — retired는 세지 않는다.
+    assert await count_active_source_entities(session, provider_dataset_id=dataset_id) == 2
     heads_before = {r.source_entity_key: await _head(session, r.source_entity_key) for r in paged}
 
     stream = ReplayRecordStream(
@@ -243,6 +253,7 @@ async def test_replay_regeocodes_without_a_new_observation_and_never_resurrects(
         records, dataset_key=_BOOKSTORES, fetched_at=_REPLAY_RUN, reverse_geocoder=reverse
     )
     replayed = apply_replay_provenance(stream, converted)
+    ensure_replay_complete(stream)
     assert reverse.calls == 2
     assert {b.source_record.fetched_at for b in replayed} == {_FETCHED}
 

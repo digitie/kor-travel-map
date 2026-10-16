@@ -11,10 +11,16 @@ replay가 지키는 것:
 - **provider 호출 0회.** replay resource는 provider client를 만들지 않는다(자격증명도 읽지 않는다).
 - **관측을 꾸미지 않는다.** 되살린 bundle의 ``fetched_at``은 원 레코드 값, ``imported_at``(= head의
   관측 시각 입력)은 head의 ``observed_at`` 그대로다 — head가 전진하지 않고 ``became_current``는
-  거짓이다. sync state(성공 cursor)도 쓰지 않는다(:func:`is_replay`).
+  거짓이다. sync state(성공 cursor)도, curation seal(``authoritative_snapshot_complete``)도 쓰지
+  않는다(:func:`is_replay`) — 쓰면 seal 영수증의 ``observed_at``이 provider 관측처럼 남는다.
 - **같은 payload만 적재한다.** 변환기가 낸 ``raw_payload_hash``가 저장된 current hash와 다르면
-  (``from_raw``가 1:1이 아니면) 아무것도 쓰기 전에 :class:`ReplayPayloadDrift`로 실패한다 — 그대로
-  두면 새 source record가 current가 되어 provider가 주지 않은 값을 관측으로 적는다.
+  (``from_raw``가 1:1이 아니면) **commit 전에** :class:`ReplayPayloadDrift`로 실패한다 — 그대로
+  두면 새 source record가 current가 되어 provider가 주지 않은 값을 관측으로 적는다. 검사는 변환
+  뒤다(hash 입력은 변환기 안에서 만들어진다): 목록 적재는 쓰기 전에, 표준데이터 batch 적재는 한
+  transaction 안 batch마다라 실패하면 그 transaction 전체가 롤백된다.
+- **빠짐없이.** 읽은 건수가 그 dataset의 active entity 수와 다르거나(빈 읽기 포함), 변환 결과가
+  읽은 레코드를 다 덮지 않으면 :class:`ReplayIncomplete`로 실패한다(#1333 리뷰 R1) — 부분 replay가
+  성공으로 끝나면 계획은 그 dataset을 다 했다고 본다.
 - **되살리지 않는다.** primary Feature가 retired인 entity는 읽지 않는다(infra 술어).
 """
 
@@ -34,9 +40,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SOURCE_MODE_CONFIG_SCHEMA",
+    "ReplayIncomplete",
     "ReplayPayloadDrift",
     "ReplayRecordStream",
     "apply_replay_provenance",
+    "ensure_replay_complete",
     "datagokr_model_from_raw",
     "is_replay",
     "prefetch_replay",
@@ -71,6 +79,10 @@ def source_mode(resource_config: Mapping[str, Any] | None) -> str:
 
 class ReplayPayloadDrift(RuntimeError):
     """되살린 record의 변환 결과가 저장된 current 원본과 같은 payload가 아니다."""
+
+
+class ReplayIncomplete(RuntimeError):
+    """replay가 dataset 전부를 덮지 않았다 — 읽기가 모자라거나 변환이 레코드를 잃었다."""
 
 
 def datagokr_model_from_raw(model_name: str) -> Callable[[dict[str, Any]], Any]:
@@ -114,17 +126,28 @@ class ReplayRecordStream:
         self.dataset_key = dataset_key
         self._from_raw = from_raw
         self.provenance: dict[tuple[str, str], CurrentSourceRecord] = {}
+        self.matched: set[tuple[str, str]] = set()
         self._records: list[CurrentSourceRecord] | None = None
 
     async def prefetch(self) -> int:
-        """current 원본을 전부 읽어 둔다(한 번만). 읽은 건수를 돌려준다."""
+        """current 원본을 전부 읽어 둔다(한 번만). 읽은 건수를 돌려준다.
+
+        읽은 건수가 그 dataset의 active entity 수와 다르면(0건 포함) :class:`ReplayIncomplete`다.
+        """
         if self._records is None:
-            self._records = await self._client.read_current_source_records(
+            records, expected = await self._client.read_current_source_records(
                 provider=self.provider, dataset_key=self.dataset_key
             )
+            if len(records) != expected:
+                raise ReplayIncomplete(
+                    f"{self.provider}/{self.dataset_key} replay: current 원본 {len(records)}건을 "
+                    f"읽었는데 active entity는 {expected}건이다 — head·record 누락 또는 읽기 중 "
+                    "변경. 부분 replay로 계획을 끝내지 않는다."
+                )
+            self._records = records
             self.provenance = {
                 (record.source_entity_type, record.source_entity_id): record
-                for record in self._records
+                for record in records
             }
         return len(self._records)
 
@@ -156,13 +179,19 @@ def apply_replay_provenance(
     if not isinstance(value, ReplayRecordStream):
         return list(bundles)
     drifted: list[str] = []
+    repeated: list[str] = []
     replayed: list[FeatureBundle] = []
     for bundle in bundles:
         source = bundle.source_record
-        stored = value.provenance.get((source.source_entity_type, source.source_entity_id))
+        key = (source.source_entity_type, source.source_entity_id)
+        stored = value.provenance.get(key)
         if stored is None or stored.raw_payload_hash != source.raw_payload_hash:
             drifted.append(source.source_entity_id)
             continue
+        if key in value.matched:
+            repeated.append(source.source_entity_id)
+            continue
+        value.matched.add(key)
         replayed.append(
             bundle.model_copy(
                 update={
@@ -181,4 +210,26 @@ def apply_replay_provenance(
             f"저장된 current 원본과 다르다(예: {sorted(drifted)[:3]}) — raw_data → record "
             "복원이 1:1이 아니다. 이 dataset은 fetch 모드로 돌려야 한다."
         )
+    if repeated:
+        raise ReplayIncomplete(
+            f"{value.provider}/{value.dataset_key} replay: 같은 entity의 bundle이 두 번 나왔다"
+            f"(예: {sorted(repeated)[:3]})."
+        )
     return replayed
+
+
+def ensure_replay_complete(value: object) -> None:
+    """replay면 변환된 bundle이 읽은 레코드를 전부(정확히 한 번씩) 덮었는지 본다. fetch면 통과.
+
+    asset이 모든 batch를 넘긴 뒤 — 적재 transaction이 끝나기 전 — 부른다.
+    """
+    if not isinstance(value, ReplayRecordStream):
+        return
+    missing = set(value.provenance) - value.matched
+    if missing:
+        sample = sorted(entity_id for _, entity_id in missing)[:3]
+        raise ReplayIncomplete(
+            f"{value.provider}/{value.dataset_key} replay: current 원본 "
+            f"{len(value.provenance)}건 중 {len(missing)}건이 변환 결과에 없다"
+            f"(예: {sample}) — 부분 replay로 끝내지 않는다."
+        )

@@ -410,14 +410,12 @@ def build_provider_record_guard_resource(
 class ReplaySource:
     """records resource의 ``source_mode=replay`` 입력(ADR-109 결정 7, T-GR-08).
 
-    ``provider``·``dataset_key``는 적재가 ``SourceRecord``에 쓰는 값(provider 변환 모듈 상수)이고,
-    ``from_raw``는 저장된 ``raw_data``를 fetch와 **같은 record 모델**로 되살린다. golden 테스트가
-    "replay bundle == fetch bundle"을 확인한 provider만 이것을 받는다.
+    ``provider``·``dataset_key``는 적재가 ``SourceRecord``에 쓰는 값(provider 변환 모듈 상수)이다.
+    복원 함수는 :data:`REPLAY_FROM_RAW`의 그 resource 항목 하나다(중복 없음).
     """
 
     provider: str
     dataset_key: str
-    from_raw: Callable[[dict[str, Any]], Any]
 
 
 def build_provider_record_live_resource(
@@ -467,7 +465,7 @@ def build_provider_record_live_resource(
                 cast(AsyncKorTravelMapClient, context.resources.kor_travel_map_client),
                 provider=replay.provider,
                 dataset_key=replay.dataset_key,
-                from_raw=replay.from_raw,
+                from_raw=REPLAY_FROM_RAW[spec.resource_key],
             )
         settings = KorTravelMapSettings()
         has_required_settings = all(
@@ -614,7 +612,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_CULTURAL_FESTIVALS,
-            REPLAY_FROM_RAW["datagokr_cultural_festivals"],
         ),
     )
 )
@@ -895,7 +892,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_museums"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_MUSEUMS,
-            REPLAY_FROM_RAW["standard_museums"],
         ),
     )
 )
@@ -912,7 +908,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_tourist_attractions"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_TOURIST_ATTRACTIONS,
-            REPLAY_FROM_RAW["standard_tourist_attractions"],
         ),
     )
 )
@@ -929,7 +924,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_parking_lots"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_PARKING_LOTS,
-            REPLAY_FROM_RAW["standard_parking_lots"],
         ),
     )
 )
@@ -946,7 +940,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_special_streets"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_SPECIAL_STREETS,
-            REPLAY_FROM_RAW["standard_special_streets"],
         ),
     )
 )

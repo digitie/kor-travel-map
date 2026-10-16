@@ -283,8 +283,9 @@ concierge export `place.address.geo_data_token`(concierge ADR-49, 계획)은 Map
 
 ### 7. 쿼터 민감 dataset은 `source_mode=replay`
 
-geo만 바뀐 릴리스에서 MOIS 50만 행·datagokr 계열을 provider HTTP로 다시 받으면 data.go.kr 오퍼레이션당
-일일 한도를 소모한다(memory `data-go-kr-quota-per-operation`). `provider_sync.source_records.raw_data jsonb
+geo만 바뀐 릴리스에서 datagokr 계열을 provider HTTP로 다시 받으면 data.go.kr 오퍼레이션당 일일 한도를
+소모한다(memory `data-go-kr-quota-per-operation`). (초안은 MOIS 50만 행을 주 이유로 들었으나 MOIS fetch는 로컬
+SQLite 소스 DB를 읽고 Phase A 내려받기만 TTL 게이트로 원천을 부른다 — 아래 결과 참조.) `provider_sync.source_records.raw_data jsonb
 NOT NULL`(`head-schema.sql:18591-18600`)에 원문이 있으므로 records resource의 run_config
 `{"resources": {"<records_resource>": {"config": {"source_mode": "replay"}}}}`가 HTTP 대신 entity head의
 current `raw_data`를 **같은 record 모델**로 되살려 **같은 변환기**에 넣는다(중복 기제 아님). `fetched_at`은
@@ -295,13 +296,27 @@ current `raw_data`를 **같은 record 모델**로 되살려 **같은 변환기**
 (geo 0회, 비용은 변환뿐). 그래야 롤아웃 첫 run이 그 행에 스탬프를 찍어 결정 5.6의 `unstamped == 0`이 성립한다.
 1단계 적용 범위는 MOIS + `datagokr_file_data` + `standard_data`(열린 결정 4).
 **가정**: `raw_data → record 모델` 복원이 provider마다 1:1 — golden으로 확인되는 provider만 켠다.
-**결과(T-GR-08, 2026-10-16)**: golden 통과 = datagokr 축제·standard_data 4종·fileData 4종(9 operation). **MOIS는
-실패** — `raw_data`가 변환기가 쓰는 record 필드 24개(우편번호 2·건물관리번호·업종별 시설 21)를 남기지 않아 되살린
-bundle의 `facility_info`·주소가 달라진다. 그래서 MOIS는 replay 목록(`REPLAY_RECORDS_RESOURCES`)에서 빠지고 fetch
-run_config로 나간다 — MOIS fetch는 data.go.kr 쿼터를 쓰지 않는다(로컬 SQLite 소스 DB, Phase A 내려받기는 TTL 24h 게이트).
-스탬프 없는 payload-bjd 행의 `not_called` 스탬프는 fetch run이 같은 술어로 찍는다(결정 4). replay 적재는 `fetched_at`과
-함께 head 관측 시각 입력(`imported_at`)도 저장값으로 되돌려 head를 전진시키지 않고, sync state를 쓰지 않으며, 변환
-payload hash가 저장값과 다르면 적재 전에 실패한다.
+**결과(T-GR-08, 2026-10-16, #1333 리뷰 반영)**: golden 통과 = datagokr 축제·standard_data 4종·fileData 4종(9
+operation, `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS = frozenset(REPLAY_RECORDS_RESOURCES)` — 자동 적재를 끈 넷은 들어
+있어도 계획이 `skipped(disabled)`로 만들어 효과가 없다). **MOIS는 실패** — `raw_data`가 변환기가 쓰는 record 필드
+24개(우편번호 2·건물관리번호·업종별 시설 21)를 남기지 않아 되살린 bundle의 `facility_info`·주소가 달라진다. 그래서
+MOIS는 replay 목록에서 빠진다.
+- **MOIS는 센서가 내지 않는다(R2).** fetch로 자동 launch하면 릴리스 시점에 전국 Phase A sync와 50만 행 변환이
+  예정 없이 돌고, 월간 실행보다 먼저 snapshot 은퇴가 일어나며 n150 디스크 대기가 커진다. MOIS 항목은 계획에
+  run_config 없이 들되 `SENSOR_MANUAL_OPERATION_KEYS`로 launch 차단 상태로 남는다 — 사유 값은 OpenAPI 계약을 바꾸지
+  않으려고 기존 `replay_not_launchable_before_t_gr_08`을 재사용한다. 운영자가 MOIS job을 수동 실행하고(스탬프 없는
+  payload-bjd 행은 그 run이 reverse 없이 `not_called`로 찍는다, 결정 4) 끝나면 그 항목을 `skip`한다.
+- **MOIS fetch의 쿼터.** 소스 DB가 TTL(`KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS`) 안이면 쿼터 0이지만, TTL이
+  지나면 증분 Phase A sync가 `apis.data.go.kr`를 부른다 — 운영 권고 TTL ≥168h(`mois-license-feature-etl.md`
+  §13.3).
+- **MOIS replay 결정(소유자 위임, 2026-10-16).** 당분간 fetch(수동) 유지. (1) `raw_data`에 record 전 필드 저장은
+  기각 — payload hash가 전 행에서 바뀌어 한 번 전량 `became_current`가 된다. (2) "로컬 SQLite를 Phase A 내려받기
+  없이 읽기"는 릴리스가 TTL 뒤에 자주 온다는 것이 확인되면 그때 추가한다.
+- **replay 적재 규칙.** `fetched_at`과 함께 head 관측 입력(`imported_at`)도 저장값으로 되돌려 head를 전진시키지
+  않고, sync state도 curation seal(`authoritative_snapshot_complete`, 영수증 `observed_at = clock_timestamp()`)도
+  쓰지 않는다. 읽은 건수가 active entity 수와 다르거나(빈 읽기 포함) 변환 결과가 읽은 레코드를 다 덮지 않으면
+  `ReplayIncomplete`로, payload hash가 저장값과 다르면 `ReplayPayloadDrift`로 **commit 전에** 실패한다(hash는 변환기
+  안에서 만들어지므로 검사는 변환 뒤다 — 목록 적재는 쓰기 전, 표준데이터 batch 적재는 한 transaction이 롤백).
 
 ### 8. 운영 API는 admin 프로필만, 슬래시 동사
 
@@ -327,7 +342,7 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
   계획을 만들지 않는다(결정 5.1). 스탬프는 평소 적재가 채운다 — 비-MOIS는 unchanged에도 reverse를 이미 부르므로
   추가 geo 비용 0(스탬프 부재 = stale이라 적재 경로를 타되 값이 같으면 무쓰기, 결정 4), MOIS는 다음 run이 스탬프
   없는 행을 1회 변환한다(ADR-108 재개형 chunk). 전량 **계획**은 기준선 이후 토큰이 바뀐 릴리스에서만 생긴다(비-MOIS
-  prod 좌표 보유 활성 35,754행 × reverse p50 86 ms ≈ 51 min 순차 하한; MOIS는 replay 수 run). 표 2개·마이그레이션 2개(407·408)·resource 2개·센서 1개·admin
+  prod 좌표 보유 활성 35,754행 × reverse p50 86 ms ≈ 51 min 순차 하한; MOIS는 운영자 수동 fetch 수 run — 결정 7 결과). 표 2개·마이그레이션 2개(407·408)·resource 2개·센서 1개·admin
   router 1개가 는다. 전용 job은 fetch 모드 provider의 월간 적재 1회분 쿼터를 더 쓴다(운영자가 항목 `skip`).
   재실행(attempt 2)은 쓰기만 건너뛰고 비-MOIS reverse는 전량 다시 부른다.
 - **잃는 것.** 행 단위 "어느 토큰으로 해석됐나"의 정밀도(run 단위로 대체; 불일치는 WARNING·재계획으로

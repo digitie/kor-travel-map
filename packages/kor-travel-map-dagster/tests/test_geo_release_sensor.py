@@ -47,7 +47,7 @@ _KNPS_CONFIG = {
         "knps_point_records": {"config": {"dataset_key": "knps_restrooms"}},
     }
 }
-_MOIS_CONFIG: dict[str, Any] | None = None  # MOIS는 fetch run_config다(T-GR-08 — raw가 1:1 아님)
+_MOIS_CONFIG: dict[str, Any] | None = None  # MOIS는 replay가 없다(T-GR-08) — 센서가 내지 않는다
 _FESTIVALS = "feature_event_datagokr_cultural_festivals_job"
 _FESTIVALS_REPLAY = {
     "resources": {"datagokr_cultural_festivals": {"config": {"source_mode": "replay"}}}
@@ -303,13 +303,14 @@ def test_a_launchable_replay_item_runs_with_its_replay_config() -> None:
     assert (result.job_name, result.run_config) == (_FESTIVALS, _FESTIVALS_REPLAY)
 
 
-def test_a_mois_item_runs_in_fetch_mode() -> None:
-    """MOIS는 replay가 아니다 — run_config 없이(fetch) 나간다."""
+def test_a_mois_item_is_left_for_the_operator() -> None:
+    """MOIS는 센서가 내지 않는다(#1333 리뷰 R2) — 전국 Phase A·50만 행 변환·은퇴를 예정 밖에 돌리지
+    않는다. 운영자가 수동 실행한다."""
     client = _FakeClient("created", items={1: _item(1, MOIS_LOAD_JOB_NAME)})
     result = _tick(client)
-    assert isinstance(result, RunRequest)
-    assert result.job_name == MOIS_LOAD_JOB_NAME
-    assert not result.run_config
+    assert isinstance(result, SkipReason)
+    assert "replay_not_launchable_before_t_gr_08" in (result.skip_message or "")
+    assert client.items[1].state == "pending"
 
 
 def test_one_run_in_flight_at_a_time() -> None:
@@ -396,7 +397,9 @@ def _mois_run(*, converted: str, budget: str = "3600", available: str = "3600") 
     )
 
 
-# MOIS 이어 달리기 — T-GR-08부터 MOIS 항목은 fetch run_config로 나가므로 운영 경로다.
+# 아래 MOIS 이어 달리기 두 테스트는 **운영에서 도달하지 않는다** — MOIS 항목은
+# `SENSOR_MANUAL_OPERATION_KEYS`라 센서가 내지 않으므로(#1333 리뷰 R2) `requested`가 되지 않는다.
+# 그 결정이 바뀌면 이 경로가 산다 — 그때를 위해 전이 규칙을 고정해 둔다.
 
 
 def test_mois_budget_exhausted_is_continued_not_done() -> None:
@@ -413,12 +416,8 @@ def test_mois_budget_exhausted_is_continued_not_done() -> None:
             )
         },
     )
-    result = _tick(client, _Runs(by_key={"k": _mois_run(converted="500")}))
-    # 이어 달리기 = 다음 attempt로 되돌리고, 게이트가 없으니(fetch) 같은 tick에 그 attempt를 낸다.
-    assert (client.items[1].state, client.items[1].attempt_seq) == ("requested", 2)
-    assert isinstance(result, RunRequest)
-    assert result.run_key is not None
-    assert result.run_key.endswith("/2")
+    _tick(client, _Runs(by_key={"k": _mois_run(converted="500")}))
+    assert (client.items[1].state, client.items[1].attempt_seq) == ("pending", 2)
 
 
 def test_mois_budget_exhausted_without_progress_fails() -> None:

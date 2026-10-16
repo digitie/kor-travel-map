@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CurrentSourceRecord",
+    "count_active_source_entities",
     "read_current_source_records",
 ]
 
@@ -48,6 +49,28 @@ class CurrentSourceRecord:
     observed_at: datetime
 
 
+#: primary Feature가 ``active``인 entity — 읽기 SQL과 같은 술어(head 조인만 뺐다).
+_ACTIVE_PRIMARY_EXISTS: Final = """
+      EXISTS (
+          SELECT 1
+          FROM provider_sync.source_links AS link
+          JOIN feature.features AS feature
+            ON feature.feature_id = link.feature_id
+          WHERE link.source_entity_key = entity.source_entity_key
+            AND link.source_role = 'primary'
+            AND feature.lifecycle_state = 'active'
+      )
+"""
+
+_COUNT_ACTIVE_SOURCE_ENTITIES_SQL: Final = text(
+    """
+    SELECT count(*)
+    FROM provider_sync.source_entities AS entity
+    WHERE entity.provider_dataset_id = :provider_dataset_id
+      AND"""
+    + _ACTIVE_PRIMARY_EXISTS
+)
+
 _CURRENT_SOURCE_RECORDS_SQL: Final = text(
     """
     SELECT
@@ -65,15 +88,9 @@ _CURRENT_SOURCE_RECORDS_SQL: Final = text(
       ON record.source_record_key = head.current_source_record_key
     WHERE entity.provider_dataset_id = :provider_dataset_id
       AND entity.source_entity_key > :after_source_entity_key
-      AND EXISTS (
-          SELECT 1
-          FROM provider_sync.source_links AS link
-          JOIN feature.features AS feature
-            ON feature.feature_id = link.feature_id
-          WHERE link.source_entity_key = entity.source_entity_key
-            AND link.source_role = 'primary'
-            AND feature.lifecycle_state = 'active'
-      )
+      AND"""
+    + _ACTIVE_PRIMARY_EXISTS
+    + """
     ORDER BY entity.source_entity_key
     LIMIT :limit
     """
@@ -124,3 +141,20 @@ async def read_current_source_records(
         )
         for row in rows
     ]
+
+
+async def count_active_source_entities(
+    session: AsyncSession, *, provider_dataset_id: int
+) -> int:
+    """primary Feature가 ``active``인 entity 수 — replay가 읽어야 할 건수(head 유무와 무관).
+
+    replay 읽기가 이보다 적으면(head·record 누락, 읽기 도중 변경) 부분 replay다 — 호출자가
+    실패시킨다.
+    """
+    return int(
+        (
+            await session.execute(
+                _COUNT_ACTIVE_SOURCE_ENTITIES_SQL, {"provider_dataset_id": provider_dataset_id}
+            )
+        ).scalar_one()
+    )

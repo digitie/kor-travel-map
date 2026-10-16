@@ -195,7 +195,8 @@ current_data_token: str | None = None)`(`:125-131`, additive kwarg) → `_item_t
 > 센서(T-GR-05): `dagster/geo_release_sensor.py`, 기본 STOPPED, run_key `geo_release/{token}/{plan_seq}/{operation}/{position}/{attempt}`,
 > 한 번에 run 1개, CANCELED → `failed(canceled)`, supersede → 그 계획의 `requested` 항목 `failed(superseded)`(migration 409),
 > geo client는 `geocoding.open_geo_client`. T-GR-08(replay 구현) 뒤 1단계 replay 항목은 모두 launchable이고
-> MOIS 항목은 fetch run_config다(아래 replay 모드 — MOIS golden 실패).
+> MOIS 항목은 run_config 없이 계획에 들되 센서가 내지 않는다(`SENSOR_MANUAL_OPERATION_KEYS` — 운영자 수동 실행 뒤
+> `skip`, #1333 리뷰). 그 항목이 남은 계획은 운영자가 skip할 때까지 `running`이다.
 > 판정은 `infra/geo_release_repo.py` `plan_geo_release`(센서·`/detect` 단일 정본), 완료는 `complete_plan`.
 
 **표** `ops.kor_travel_geo_releases(plan_id identity PK, geo_data_token NOT NULL, plan_seq int DEFAULT 1,
@@ -219,7 +220,7 @@ MOIS 이어 달리기 상한은 **ADR-109 결정 5가 정본**이다 — 여기�
   (`infra/geo_release_repo.py`; `/detect`와 같은 함수). 항목 입력 `provider_dataset_operations(feature_load,
   is_enabled) ⋈ provider_datasets.is_active`, geo 의존은 `GEO_DEPENDENT_OPERATION_KEYS`(§2). 순서 ① 공개 필터·
   클러스터에 노출되는 `place` kind dataset, stale 수 DESC ② `event`·geo 의존 `price` ③ concierge ④
-  datagokr_file_data·standard_data(**replay**)·MOIS(fetch, 맨 끝) ⑤ geo 미사용 `skipped(no_geo_dependency)`;
+  datagokr_file_data·standard_data(**replay**)·MOIS(운영자 수동, 맨 끝) ⑤ geo 미사용 `skipped(no_geo_dependency)`;
   `DISABLED_FEATURE_LOAD_OPERATION_KEYS` → `skipped(disabled)`. `run_config_for_dataset(operation_key, dataset_key)
   -> dict | None`: KNPS는 `knps_schedule_binding` 꼴(`schedules.py:158-165`) dataset마다, 쿼터 민감은
   `{"resources": {"<records_resource>": {"config": {"source_mode": "replay"}}}}` 합성.
@@ -243,11 +244,13 @@ replay면 `provider_dataset_id` 단위 keyset으로 entity head의 current `sour
 술어 — 별도 제외 코드 없음; keyset 선필터는 같은 술어로만). `raw_data.legal_dong_code` 유무로 빼지 **않는다** —
 스탬프 없는 payload-bjd 행은 replay에 포함되어 reverse 없이 변환되고 `not_called` 스탬프만 받는다(geo 0회).
 `fetched_at`은 원 레코드 값 → `became_current` 항상 False.
-**구현(T-GR-08)**: `dagster/source_replay.py`(`ReplayRecordStream`·`apply_replay_provenance`), 읽기
-`infra/source_replay_repo.py`(primary Feature `active` entity만 — retired는 되살리지 않는다), 복원 함수
-`resources.REPLAY_FROM_RAW`. 읽기는 적재 전에 끝낸다(Dagster client 연결 1개). bundle에는 저장된 `fetched_at`과
-head `observed_at`(→ `imported_at`)을 되돌려 head가 전진하지 않고, sync state는 쓰지 않으며, hash가 다르면 적재 전
-실패(`ReplayPayloadDrift`). **MOIS는 golden 실패로 fetch 유지**(raw가 record 1:1 아님, ADR-109 결정 7 결과).
+**구현(T-GR-08)**: `dagster/source_replay.py`(`ReplayRecordStream`·`apply_replay_provenance`·
+`ensure_replay_complete`), 읽기 `infra/source_replay_repo.py`(primary Feature `active` entity만 — retired는 되살리지
+않는다; 같은 술어로 읽어야 할 건수도 센다), 복원 함수 `resources.REPLAY_FROM_RAW`. 읽기는 적재 전에 끝낸다(Dagster
+client 연결 1개). bundle에는 저장된 `fetched_at`과 head `observed_at`(→ `imported_at`)을 되돌려 head가 전진하지
+않고, sync state·curation seal을 쓰지 않으며, 부분·빈 replay(`ReplayIncomplete`)와 hash 불일치
+(`ReplayPayloadDrift`)는 commit 전에 실패한다. **MOIS는 golden 실패로 replay가 없고 센서도 내지 않는다**(ADR-109
+결정 7 결과).
 
 **롤아웃 첫 tick**: ~~커서·스탬프가 비어 있으므로 전 geo-의존 dataset 계획 1회가 생긴다~~ — **소유자 결정
 (2026-10-15, ADR-109 결정 5.1)**: 커서가 빈 첫 관측 토큰은 **기준선**으로 기록하고 계획 0건이다. 스탬프 없는 행은

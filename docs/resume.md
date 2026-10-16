@@ -5,8 +5,10 @@
 - 바뀐 것: `dagster/source_replay.py`, records resource 6개의 `source_mode`, asset 6개(provenance·sync state 생략·선읽기),
   `infra/source_replay_repo.py`·client 읽기, core replay 상수(9 operation launchable, MOIS 제외), 테스트, ADR-109 결정 7 결과.
 - 바뀌지 않은 것: OpenAPI(이유 값 이름 `replay_not_launchable_before_t_gr_08`은 계약이라 그대로), 스키마, MOIS 적재 경로.
-- **운영 주의.** (1) 릴리스 계획의 MOIS 항목은 이제 run_config 없이(fetch) 나간다 — Phase A 내려받기는 TTL 24h 게이트를
-  그대로 따른다. (2) replay run은 sync state를 쓰지 않는다 — dataset "마지막 성공"이 replay로 갱신되지 않는다.
+- **운영 주의.** (1) 릴리스 계획의 MOIS 항목은 센서가 내지 않는다 — 운영자가 MOIS job을 수동 실행하고 그 항목을
+  skip해야 계획이 끝난다. MOIS fetch는 소스 DB TTL 안에서만 쿼터 0(TTL ≥168 권고). (2) replay run은 sync state·curation
+  seal을 쓰지 않는다 — dataset "마지막 성공"이 replay로 갱신되지 않는다. (3) dagster CI job이 `python-datagokr-api`를
+  설치한다(replay golden).
 
 ## 2026-10-16 — geo 릴리스 센서(T-GR-05): 브랜치 `feat/t-gr-05-geo-release-sensor`
 

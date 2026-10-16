@@ -346,9 +346,12 @@ run 로그에 `MOIS 업종 <slug> 완료`가 남는다.
    이후 run은 sensor가 잇는다. 마지막 run이 `complete`(전 업종)면 봉인·sync 성공이 남는다.
 4. 실패 run이 나오면 sensor는 멈춘다. 원인을 본 뒤 같은 job을 다시 띄우면 이어서 적재한다.
 
-> **geo 릴리스 재지오코딩(ADR-109 proposed).** geo 데이터 토큰이 바뀌면 릴리스 센서가 이 job을 **fetch
-> run_config로**(로컬 SQLite 소스 DB 읽기 — data.go.kr 쿼터 없음) 띄우고 `budget_exhausted` 이어 달리기도
-> 대신한다(ADR-109 결정 5). `source_mode=replay`는 MOIS에 **없다** — `source_records.raw_data`가 record 필드
-> 24개(우편번호·건물관리번호·업종별 시설)를 남기지 않아 golden이 실패했다(T-GR-08, ADR-109 결정 7 결과). 제외는
-> `not_called` **스탬프**가 있는 행뿐 — 스탬프 없는 payload-bjd 행은 변환되어 스탬프를 받는다. unchanged 판정에 "스탬프 토큰 == 현재
+> **geo 릴리스 재지오코딩(ADR-109 proposed).** geo 데이터 토큰이 바뀌면 릴리스 계획에 이 job 항목이
+> run_config 없이 들어가지만 **센서는 내지 않는다**(`SENSOR_MANUAL_OPERATION_KEYS`, #1333 리뷰) — 전국 Phase A·
+> 50만 행 변환·snapshot 은퇴를 예정 밖에 돌리지 않으려는 것이다. 운영자가 이 job을 수동 실행하고 끝나면 계획
+> 항목을 `skip`한다. fetch는 소스 DB가 TTL 안이면 쿼터를 쓰지 않지만 TTL이 지나면 증분 Phase A sync가
+> `apis.data.go.kr`를 부른다 — 위 §13.3의 TTL ≥168 권고를 따른다. `source_mode=replay`는 MOIS에 **없다** —
+> `source_records.raw_data`가 record 필드 24개(우편번호·건물관리번호·업종별 시설)를 남기지 않아 golden이
+> 실패했다(T-GR-08, ADR-109 결정 7 결과). 제외는 `not_called` **스탬프**가 있는 행뿐 — 스탬프 없는 payload-bjd
+> 행은 변환되어 스탬프를 받는다. unchanged 판정에 "스탬프 토큰 == 현재
 > 토큰" 조건이, 표식 "알려진 불가" 조건에 토큰 일치가 더해진다. 상세는 [`address-geocoding.md`](address-geocoding.md).

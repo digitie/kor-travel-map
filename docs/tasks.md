@@ -88,7 +88,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-GR-08 — **replay 모드(쿼터 민감 dataset)**
 
   records resource `source_mode=replay`로 entity head `source_records.raw_data`를 같은 record 모델·변환기에 넣는다.
-  1단계 datagokr 축제·fileData·standard_data(golden 통과). **MOIS는 golden 실패로 fetch 유지**(raw가 record 1:1 아님).
+  1단계 datagokr 축제·fileData·standard_data(golden 통과). **MOIS는 golden 실패로 replay 없음 — 센서도 내지 않는다**
+  (운영자 수동 fetch, #1333 리뷰).
   진행: 브랜치 `feat/t-gr-08-replay-mode` — 머지 대기.
 
 - [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 배포는 가능한 한 빨리 — transport 플립이 2026-10-14 먼저 일어났다)
