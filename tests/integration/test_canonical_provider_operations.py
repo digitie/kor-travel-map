@@ -3370,6 +3370,8 @@ async def test_replay_run_finishes_its_membership_without_a_curation_seal(
         context.resources.reverse_geocoder = _reverse
         context.resources.fetched_at = datetime(2026, 10, 16, tzinfo=UTC)
         context.log = SimpleNamespace(info=lambda *_a, **_k: None, warning=lambda *_a, **_k: None)
+        metadata: dict[str, object] = {}
+        context.add_output_metadata = metadata.update
 
         result = await run_tracked_feature_asset(context, run_feature_place_datagokr_file_data)
 
