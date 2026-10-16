@@ -182,3 +182,21 @@ def test_branch_protection_runbook_tracks_t203_required_checks() -> None:
         assert check_name in runbook
 
     assert "path filter를 제거" in runbook
+
+
+@pytest.mark.unit
+def test_dagster_job_installs_the_pinned_datagokr_for_the_replay_golden() -> None:
+    """T-GR-08 replay golden은 provider 실모델이 있어야 돈다 — CI dagster job이 pyproject와 **같은
+    핀**으로 설치한다(핀을 올리고 CI를 잊으면 golden이 옛 모델로 돈다)."""
+    pin = re.compile(
+        r"python-datagokr-api @ git\+https://github\.com/digitie/python-datagokr-api\.git@[0-9a-f]{40}"
+    )
+    name = "Install python-datagokr-api (replay golden only)"
+    pyproject = pin.findall(_read("pyproject.toml"))
+    workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+    by_name = _steps_by_name(workflow["jobs"]["unit"])
+    steps = list(by_name)
+    assert len(pyproject) == 1
+    assert pin.findall(by_name[name]["run"]) == pyproject
+    assert steps.index("Run unit + lint tests") < steps.index(name)
+    assert steps.index(name) < steps.index("Run kor-travel-map-dagster unit tests")

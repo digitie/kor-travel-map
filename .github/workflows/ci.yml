@@ -90,10 +90,11 @@ jobs:
 
       - name: Install python-datagokr-api (replay golden only)
         # T-GR-08: replay golden·provider HTTP 0회 테스트(`test_source_replay.py`)는 provider 실모델이
-        # 있어야 돈다. `providers` extra 전체가 아니라 이 하나만, pyproject 핀 그대로(public repo).
+        # 있어야 돈다. `providers` extra 전체가 아니라 이 하나만(public repo). 핀은 pyproject와 같아야
+        # 한다 — tests/unit/test_ci_workflows.py가 고정한다.
         # unit/lint·api 단계 뒤라 그 세션은 종전처럼 provider 없이 돈다.
         run: |
-          pip install -c docker/constraints-dagster.txt "$(grep -o 'python-datagokr-api @ git+[^"]*' pyproject.toml)"
+          pip install -c docker/constraints-dagster.txt "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@99d8427510b027d7280fd8bc9532828c3c25f4f5"
 
       - name: Run kor-travel-map-dagster unit tests
         env:
