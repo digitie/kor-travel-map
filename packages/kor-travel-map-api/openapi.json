@@ -17989,6 +17989,31 @@
         "title": "GeoDatasetRecord",
         "type": "object"
       },
+      "GeoReleaseDatasetRecord": {
+        "additionalProperties": false,
+        "description": "항목이 다시 적재하는 dataset.",
+        "properties": {
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_dataset_id",
+          "provider",
+          "dataset_key"
+        ],
+        "title": "GeoReleaseDatasetRecord",
+        "type": "object"
+      },
       "GeoReleaseDetailData": {
         "additionalProperties": false,
         "description": "계획·항목·커버리지.",
@@ -18091,7 +18116,7 @@
       },
       "GeoReleaseItemRecord": {
         "additionalProperties": false,
-        "description": "계획 항목.",
+        "description": "계획 항목 — Dagster run 1개(그 run이 다시 적재하는 dataset 목록).",
         "properties": {
           "attempt_seq": {
             "title": "Attempt Seq",
@@ -18108,9 +18133,24 @@
             ],
             "title": "Dagster Run Id"
           },
-          "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/GeoReleaseDatasetRecord"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "launch_blocked_reason": {
+            "anyOf": [
+              {
+                "const": "replay_not_launchable_before_t_gr_08",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Blocked Reason"
           },
           "operation_key": {
             "title": "Operation Key",
@@ -18118,14 +18158,6 @@
           },
           "position": {
             "title": "Position",
-            "type": "integer"
-          },
-          "provider": {
-            "title": "Provider",
-            "type": "string"
-          },
-          "provider_dataset_id": {
-            "title": "Provider Dataset Id",
             "type": "integer"
           },
           "requested_at": {
@@ -18164,12 +18196,29 @@
             "title": "Run Key"
           },
           "state": {
+            "enum": [
+              "pending",
+              "requested",
+              "done",
+              "failed",
+              "skipped"
+            ],
             "title": "State",
             "type": "string"
           },
           "state_reason": {
             "anyOf": [
               {
+                "enum": [
+                  "disabled",
+                  "no_geo_dependency",
+                  "queue_only",
+                  "operator",
+                  "sweep",
+                  "run_not_launched",
+                  "no_progress",
+                  "run_failed"
+                ],
                 "type": "string"
               },
               {
@@ -18182,10 +18231,9 @@
         "required": [
           "position",
           "operation_key",
-          "provider_dataset_id",
-          "provider",
-          "dataset_key",
+          "datasets",
           "run_config",
+          "launch_blocked_reason",
           "attempt_seq",
           "state",
           "state_reason",
@@ -18333,6 +18381,13 @@
             "title": "Residual Stale"
           },
           "state": {
+            "enum": [
+              "baseline",
+              "planned",
+              "running",
+              "done",
+              "superseded"
+            ],
             "title": "State",
             "type": "string"
           },
@@ -42667,7 +42722,7 @@
     },
     "/v1/ops/geo-releases/{plan_id}/replan": {
       "post": {
-        "description": "그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``).",
+        "description": "그 계획의 토큰으로 ``plan_seq + 1`` 새 계획을 만든다(활성 계획은 ``superseded``).\n\n최신 관측 토큰의 계획만, 기준선이 아닌 것만 — 그 외는 409다.",
         "operationId": "replan_geo_release_v1_ops_geo_releases__plan_id__replan_post",
         "parameters": [
           {
@@ -42701,6 +42756,16 @@
               }
             },
             "description": "없는 계획"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "기준선이거나 최신 관측 토큰이 아닌 계획"
           },
           "422": {
             "content": {

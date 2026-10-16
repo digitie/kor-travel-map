@@ -17026,7 +17026,7 @@ CREATE TABLE ops.kor_travel_geo_release_items (
     plan_id bigint NOT NULL,
     "position" integer NOT NULL,
     operation_key text NOT NULL,
-    provider_dataset_id bigint NOT NULL,
+    provider_dataset_ids bigint[] NOT NULL,
     run_config jsonb,
     attempt_seq integer DEFAULT 1 NOT NULL,
     state text DEFAULT 'pending'::text NOT NULL,
@@ -17036,10 +17036,12 @@ CREATE TABLE ops.kor_travel_geo_release_items (
     requested_at timestamp with time zone,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_kor_travel_geo_release_items_attempt CHECK ((attempt_seq >= 1)),
+    CONSTRAINT ck_kor_travel_geo_release_items_datasets CHECK ((cardinality(provider_dataset_ids) >= 1)),
     CONSTRAINT ck_kor_travel_geo_release_items_position CHECK (("position" >= 1)),
     CONSTRAINT ck_kor_travel_geo_release_items_run_config CHECK (((run_config IS NULL) OR (jsonb_typeof(run_config) = 'object'::text))),
     CONSTRAINT ck_kor_travel_geo_release_items_skip_reason CHECK (((state <> 'skipped'::text) OR (state_reason IS NOT NULL))),
-    CONSTRAINT ck_kor_travel_geo_release_items_state CHECK ((state = ANY (ARRAY['pending'::text, 'requested'::text, 'done'::text, 'failed'::text, 'skipped'::text])))
+    CONSTRAINT ck_kor_travel_geo_release_items_state CHECK ((state = ANY (ARRAY['pending'::text, 'requested'::text, 'done'::text, 'failed'::text, 'skipped'::text]))),
+    CONSTRAINT ck_kor_travel_geo_release_items_state_reason CHECK (((state_reason IS NULL) OR (state_reason = ANY (ARRAY['disabled'::text, 'no_geo_dependency'::text, 'queue_only'::text, 'operator'::text, 'sweep'::text, 'run_not_launched'::text, 'no_progress'::text, 'run_failed'::text]))))
 );
 
 
@@ -19671,11 +19673,11 @@ ALTER TABLE ONLY ops.integrity_observation_scopes
 
 
 --
--- Name: kor_travel_geo_release_items uq_kor_travel_geo_release_items_dataset; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: kor_travel_geo_release_items uq_kor_travel_geo_release_items_run; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY ops.kor_travel_geo_release_items
-    ADD CONSTRAINT uq_kor_travel_geo_release_items_dataset UNIQUE (plan_id, operation_key, provider_dataset_id);
+    ADD CONSTRAINT uq_kor_travel_geo_release_items_run UNIQUE (plan_id, operation_key, provider_dataset_ids);
 
 
 --
@@ -23866,14 +23868,6 @@ ALTER TABLE ONLY ops.integrity_observation_runs
 
 ALTER TABLE ONLY ops.integrity_observation_scopes
     ADD CONSTRAINT fk_integrity_observation_scopes_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
-
-
---
--- Name: kor_travel_geo_release_items fk_kor_travel_geo_release_items_dataset; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY ops.kor_travel_geo_release_items
-    ADD CONSTRAINT fk_kor_travel_geo_release_items_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
 
 
 --
