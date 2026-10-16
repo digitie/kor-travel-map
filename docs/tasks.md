@@ -170,7 +170,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-TEST-PLANNER-INDEX — **public partial index EXPLAIN 테스트의 플래너 흔들림 고정**
 
   `test_public_partial_indexes_have_exact_state_predicate_and_explain_proof`가 `idx_features_updated_keyset`을 못 보고
-  간헐 실패한다(#1328 CI 2/3). 시드 뒤 `ANALYZE` 또는 플래너 설정 고정으로 결정적으로 만든다.
+  간헐 실패한다(#1328 CI 2/3). 원인은 LP_DEAD 비대칭(admin 인덱스만 압축) — 테스트 안 REINDEX·비공개 행으로 고정.
+  진행: 브랜치 `fix/t-test-planner-index` — 머지 대기.
 
 - [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
 

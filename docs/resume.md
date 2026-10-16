@@ -1,3 +1,10 @@
+## 2026-10-17 — 통합 planner flake 결정화(T-TEST-PLANNER-INDEX): 브랜치 `fix/t-test-planner-index`
+
+**다음 한 작업: CI 초록 → 리뷰 → 머지.**
+
+- 바뀐 것: `tests/integration/test_tvn34_public_projection_spine.py` 한 파일(REINDEX·비공개 행 seed·plan 전문), acceptance 구현
+  메모. 원인과 재현은 journal 2026-10-17.
+
 ## 2026-10-16 — admin UI geo 릴리스 화면(T-GR-06): 브랜치 `feat/t-gr-06-geo-releases-ui`
 
 **다음 한 작업: CI 초록 → 리뷰 → 머지 → (배포는 coordinator) → T-GR-07(문서 마감).**
