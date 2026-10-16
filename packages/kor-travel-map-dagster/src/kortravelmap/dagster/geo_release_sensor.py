@@ -101,6 +101,11 @@ NON_MOIS_RETRY_ATTEMPTS: Final[int] = 2
 """비-MOIS 항목은 실패 시 자동 재요청 1회(``attempt_seq`` 2까지), 그 다음은 운영자."""
 
 
+NO_DATA_TOKEN_SKIP_REASON = "geo data_token 없음 — 지문 backfill/복구 필요"
+"""geo가 data_token을 내지 않을 때의 Skip 사유 — admin 화면(`/admin/ops/geo-releases`)이 같은 문장을
+보인다(`tests/unit/test_geo_release_ui_mirrors_core.py`가 고정한다)."""
+
+
 GEO_RELEASE_RUN_KEY_TAG: Final[str] = "kor_travel_map.geo_release_run_key"
 """항목 → run 조회 키(``map_owned_runs_filter``는 ``kor_travel_map.*`` tag로만 거른다)."""
 
@@ -317,7 +322,7 @@ async def evaluate_geo_release_tick(
     if current is None:
         return SkipReason("kor-travel-geo 현재 데이터셋을 읽지 못했다(미설정·장애·릴리스 없음)")
     if current.data_token is None:
-        return SkipReason("geo data_token 없음 — 지문 backfill/복구 필요(계획하지 않는다)")
+        return SkipReason(f"{NO_DATA_TOKEN_SKIP_REASON}(계획하지 않는다)")
     outcome = await client.create_geo_release_plan(current)
     plan = outcome.plan
     if plan is None or outcome.kind not in ("existing", "created"):

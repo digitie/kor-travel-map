@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### admin UI `/admin/ops/geo-releases` (2026-10-16, ADR-109 결정 8, T-GR-06)
+
+- **ADDED (admin UI)**: geo 릴리스 화면 — 현재 geo 데이터셋(`data_token` 없음은 빨간 상태 + 센서 Skip 사유), 계획 목록,
+  계획 상세(커버리지 게이지·항목 표·Dagster run 링크·건너뛰기·다시 계획 확인), "지금 감지". nav "수집 파이프라인"에 추가.
+  MOIS 항목은 "수동 실행 후 skip 필요"로 보인다(API 사유 값은 그대로).
+- **CHANGED (dagster)**: `ReplayIncomplete` 메시지에 "건수와 읽기 사이 경쟁이면 재시도로 해소"를 더했다.
+- OpenAPI·gen:types 변경 없음.
+
 ### records resource `source_mode=replay` (2026-10-16, ADR-109 결정 7, T-GR-08)
 
 - **ADDED (dagster)**: datagokr 축제·standard_data 4종·fileData 4종 records resource가 config `source_mode`(fetch | replay)를

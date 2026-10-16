@@ -329,7 +329,7 @@ service 프로필에 둘 이유가 없다 → `openapi.user.json`·`openapi.serv
 바뀐다. **PinVi 영향**: admin 스냅샷 단일 핀 `apps/api/tests/unit/_kor_travel_map_snapshot_pin.py:16-17`과
 `test_kor_travel_map_admin_contract.py` 이중 핀, M05 pair contract digest가 깨지므로 PinVi 재vendor PR이
 Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight 거부, memory
-`map-admin-openapi-change-needs-pinvi-revendor`). admin UI `/admin/ops/geo-releases`(T-GR-06);
+`map-admin-openapi-change-needs-pinvi-revendor`). admin UI `/admin/ops/geo-releases`(T-GR-06 구현 — MOIS 항목은 operation key로 "수동 실행 후 skip 필요");
 `/admin/issues`는 변경 없음(`violation_type` 원문 표시가 유형 무관).
 
 ## 결과

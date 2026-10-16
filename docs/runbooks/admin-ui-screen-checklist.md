@@ -48,11 +48,21 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 | `/admin/backups` | command_enabled 배지 | — | — | ✓ | ✓ | backup create | label(기존) | `admin-ops`(T-218c, 렌더+액션) |
 | `/ops/pipeline` | kind/status/provider/dataset | — | ✓ | ✓ | ✓ | cancel/run-now/schedule | 필터·조작 라벨 | `ops-pipeline.spec` |
 | `/ops/datasets` | provider/dataset/status | — | —(bounded grid) | ✓ | ✓ | refresh policy/fixture preview | 필터·조작 라벨 | `ops-datasets.spec` |
+| `/admin/ops/geo-releases` (geo 릴리스, T-GR-06) | 계획 목록 행 선택 | — | —(최근 20) | ✓ | ✓ | 지금 감지·건너뛰기·다시 계획(확인) | — | `geo-releases.spec`(mock: skip·detect 1회·게이지·no_token·replan·375px) · `live/geo-releases.live.spec`(격리 스택) |
 | `/ops/consistency` | status | — | — | ✓ | ✓ | — | — | `admin-ops`(smoke) |
 | `/ops/logs` | system/api tab + level/source/method/path/min_status | — | ✓ | ✓ | ✓ | — | 필터 라벨 | `admin-ops`(tab/filter) |
 
 범례: ✓=확인/적용, `—`=해당 없음. e2e 열의 `admin-ops`는 `e2e/admin-ops.spec.ts`,
 `e2e 없음`=페이지 단위 e2e 미커버(갭 매트릭스 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
+
+### geo 릴리스 화면 메모(T-GR-06)
+
+- **MOIS 항목은 "수동 실행 후 skip 필요"**로 보인다. API의 `launch_blocked_reason`은 값이 하나(`replay_not_launchable_before_t_gr_08`)라
+  replay 미지원 항목과 MOIS(센서가 자동으로 내지 않음, `SENSOR_MANUAL_OPERATION_KEYS`)를 구분하지 않는다 — OpenAPI enum을
+  바꾸지 않으려는 것(PinVi 재vendor 회피)이고, 화면이 operation key로 구분한다. 운영자는 MOIS job을 수동 실행하고, 끝나면 그
+  항목을 건너뛴다(그 전에는 계획이 `running`이다).
+- replay로 다시 지오코딩한 뒤에도 그 dataset의 stale 주소 finding은 다음 fetch run까지 열려 있다(replay는 sync 성공·stale-close를
+  하지 않는다) — `/admin/issues`에 남아 있어도 정상이다.
 
 ## 3. T-218 적용 결과 요약
 

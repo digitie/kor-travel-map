@@ -141,8 +141,9 @@ class ReplayRecordStream:
             if len(records) != expected:
                 raise ReplayIncomplete(
                     f"{self.provider}/{self.dataset_key} replay: current 원본 {len(records)}건을 "
-                    f"읽었는데 active entity는 {expected}건이다 — head·record 누락 또는 읽기 중 "
-                    "변경. 부분 replay로 계획을 끝내지 않는다."
+                    f"읽었는데 active entity는 {expected}건이다 — head·record 누락이거나, 건수를 "
+                    "센 transaction과 페이지 읽기 사이에 같은 dataset이 바뀐 경쟁일 수 있다"
+                    "(그 경우 재시도로 해소된다). 부분 replay로 계획을 끝내지 않는다."
                 )
             self._records = records
             self.provenance = {
