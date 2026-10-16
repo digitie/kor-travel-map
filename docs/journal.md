@@ -5,6 +5,8 @@
   client). repo·client에 항목 전이 셋(`mark_item_requested`·`settle_item`·`requeue_item`).
 - **판정을 새로 만들지 않았다.** 기준선·멱등·끝난 토큰·롤백 정리는 #1331 함수 그대로라, 센서 테스트는 "공용 함수의 결과를
   따르는가"만 본다. 커서도 쓰지 않는다(기준선이 DB 행).
+- **원장 분리.** `tasks-acceptance.md`가 220 KiB 상한을 넘어(226,696 bytes) 닫힌 절 `T-MAP-01`·`T-GR-00-LEDGER`를
+  `scripts/archive_task_ledger_section.py`로 `docs/archive/`에 옮겼다(체크박스 다중집합 검산 통과, 221,385 bytes).
 - **replay 게이트가 지금은 계획 완료를 막는다.** replay 항목(MOIS·datagokr fileData·standard_data)은 T-GR-08 전까지 내지
   않으므로 그 항목이 남은 계획은 `running`으로 남는다 — Skip 사유가 막힌 항목과 이유를 말한다.
 

@@ -35,6 +35,8 @@
 > | `T-VN-39` (완료) | [archive/tasks-acceptance-39.md](archive/tasks-acceptance-39.md) | 약 8 KB |
 > | `T-VN-DAGSTER-STORAGE` (완료) | [archive/tasks-acceptance-dagster-storage.md](archive/tasks-acceptance-dagster-storage.md) | 약 12 KB |
 > | `T-VN-QUOTA-ARITHMETIC` (완료) | [archive/tasks-acceptance-quota-arithmetic.md](archive/tasks-acceptance-quota-arithmetic.md) | 약 17 KB |
+> | `T-MAP-01` (완료) | [archive/tasks-acceptance-map-01.md](archive/tasks-acceptance-map-01.md) | 약 4 KB |
+> | `T-GR-00-LEDGER` (완료) | [archive/tasks-acceptance-gr-00-ledger.md](archive/tasks-acceptance-gr-00-ledger.md) | 약 3 KB |
 
 ## 지금 무엇이 사실인가 — `T-VN-FINAL-REBUILD`
 
@@ -2360,36 +2362,7 @@ PR은 머지 직전.
 
 ## T-MAP-01
 
-2026-10-13 Track 2 설계(geo·weather·transport의 odroid 이전)에서 열었다. 접두사 `T-MAP-`는 임시다(ADR-110 열린
-결정 5; 소유자가 `T-NNN` 정식화를 고르면 `T-MAP-01`·`02`를 재번호하되 journal·acceptance 참조도 함께). 문서만
-바꾸는 PR이다 — 브랜치 `docs/adr-110-geo-transport-on-odroid`(origin/main `f7affea8`에서).
-
-- 만든/고친 것: `docs/adr/110-geo-transport-hosts-move-to-odroid.md`(proposed), `docs/adr/README.md`(다음 후보 111,
-  110 행), `docs/integration-map.md` §1(geo·transport 행 '계획: 호스트 odroid' + Manager ADR-58 포인터)·§2(LAN
-  화살표·timeout)·§3(transport export 행 allow-list)·§4(geocoding 행 핀 금지 재확인), `CLAUDE.md` geocoding 정본 줄,
-  `docs/tasks.md`·이 절·journal·resume.
-- 하지 않은 것(범위 밖, 금지): `src`·`packages`·`alembic`·`tests`·`.env.example`·`docker/**`·CHANGELOG·`openapi.json`.
-  `.env.example:198,234`의 standalone 주석은 T-MAP-02 코드 PR에 싣는다.
-- 해제 조건: 문서 lint(`tests/unit/test_docs_archive_links.py` 225,280 B 상한 포함·`tests/lint/test_task_ledger_conventions.py`·
-  `scripts/check_task_ledger_deletions.py`·`scripts/check_prod_redaction.py` #508 — docs에 사설 IP 리터럴 0건, 호스트는
-  이름으로) 초록 + ADR README 카운터 연속(109 → 110 → 다음 111) + 인용 file:line이
-  head에 존재(`settings.py:150,159-164,165-176,364-374,388,509-519,537-542`; `route.ts:3-6`; `frontend.Dockerfile:57,62`;
-  `kor_travel_transport.py:104,435-452`; `assets.py:184`; geo client 8곳 `resources.py:1073-1076`·`app.py:709-712`·
-  `feature_update_service.py:527`·`api/routers/offline_uploads.py:1482`·`admin_issues.py:276,306`·
-  `dagster/offline_uploads.py:50-53`·`cli/main.py:447`) + 머지(doc-only — 소유자 지시(2026-07-28 이후 반복)로 pytest
-  세션은 생략하되 `lint.yml` 초록 뒤; CLAUDE.md §5-1의 "CI green"은 doc-only PR에서 lint.yml로 충족한다).
-- 종결 소유자: `[x]` 전환·`tasks-done.md` 이관은 머지가 조건이라 이 PR 안에서 할 수 없다 — **T-GR-00-LEDGER**가
-  단일 소유다(§T-GR-00-LEDGER 마지막 문장; T-MAP-02는 T-GR-00-LEDGER를 선행으로 두므로 닫을 경우가 없다 — '또는'은
-  두 PR이 서로 상대가 했다고 믿는 구멍이라 쓰지 않는다. T-GR-00 선례).
-- 설계와 달리 쓴 것: `frontend.Dockerfile` 인용을 `:56` → `:57`(ARG)·`:62`(ENV)로, preflight를 `:164-176` → `:165-176`로
-  정정(1차 리뷰가 초고의 `:165-177`·`:509-520` 한 줄 초과를 잡았다); geo client 생성 지점은 설계의 암묵 "4곳"이 아니라
-  **8곳**(1차 리뷰 HIGH — `admin_issues.py` 2곳은 timeout 인자 없음, `dagster/offline_uploads.py`·`cli/main.py`는
-  `10.0` 하드코딩); Map에는 회로차단을 두지 않는다(ADR-110 결정 3 — 설계 §9.1의 Map 행은 connect 분리만 요구한다);
-  설계 §14-19(전량 재계획 수용 vs 운영자 skip)는 결정이 아니라 추천으로 적고 열린 결정 2에 올렸다; 설계 §9.1·§5.6 ⑥의
-  "geo 키는 loopback 면제라 검증된 적 없다"는 **틀려서** 정정했다(geo 면제는 admin 프록시 컨텍스트만 — geo
-  `security.py:154-170`; Map 호출은 오늘도 대조된다, 08-13 사고 `settings.py:168-171`; ADR-110 컨텍스트 4·결정 4·열린
-  결정 3 — 2차 리뷰); LAN 주소 리터럴은 `scripts/check_prod_redaction.py`(#508) 때문에 호스트 이름으로 썼다; T-MAP-02
-  착수 순서는 설계 §13 사슬과 달리 병렬을 **제안**만 하고 열린 결정 6으로 올렸다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-map-01.md](archive/tasks-acceptance-map-01.md)로 옮겼다(2026-10-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-MAP-02
 
@@ -2449,25 +2422,7 @@ run이 호출마다 10 s를 소모한다. 규모 S.
 
 ## T-GR-00-LEDGER
 
-journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실측 `journal.md` **≈224,0xx B**(ADR-110 doc PR
-`docs/adr-110-geo-transport-on-odroid` 3차 리뷰 반영 뒤 — 커밋 전 측정 223,970 B; T-GR-00 PR-0 시점 208,660 = HEAD 202,686
-+ PR-0 항목)·`tasks-done.md` 200,699 B — 상한 225,280 B까지 각각 **≈1.3 KB**·24,581 B라 journal 항목 한 건(≈7~12 KB)은
-물론 한 문단만 더해도 `tests/unit/test_every_docs_markdown_stays_within_readable_limit`가 빨개진다. **T-GR-01·T-MAP-02
-어느 코드 PR보다도, 그리고 어느 doc-only PR보다도 먼저 선행한다(여유 ≈1.3 KB) — tasks.md·resume의 T-MAP-02 의존도 같은
-말이다.** `tasks-rule.md` §8의 "200 KB 근접" 분리
-기준을 둘 다 이미 넘었다. 의존: T-GR-00 머지. 규모 S. T-GR-00·T-MAP-01의 `[x]` 전환·tasks-done 이관을 함께 싣는다.
-
-- journal 현행 창(2026-09-14~)에서 가장 오래된 묶음을 `docs/archive/journal-2026-09c.md`(이름은 §8 규약)로, `tasks-done.md`
-  가장 오래된 절 묶음을 `docs/archive/tasks-done-*.md`로 옮기고 각 파일 상단 "과거 기록 아카이브" 인덱스 표를 갱신한다.
-- 바이트 보존 검산(이동 전 원본 바이트 == 이동 후 잔여 + 아카이브 - stub)을 PR 본문에 적는다; 두 파일 모두 분리 뒤
-  ≤ 200,000 B.
-- `tests/unit/test_docs_archive_links.py`·`scripts/check_journal_update.py`·docs 크기 lint 초록. 즉시 머지(doc-only).
-- 실행(2026-10-15, 브랜치 `docs/t-gr-00-ledger`): journal 2026-09-20~25 8건 → `archive/journal-2026-09e.md`(위 첫 조문의
-  `09c`는 이미 쓰였고 09d도 #1319가 썼다 — 규약 §8의 다음 글자), tasks-done 2026-08-04~05 2절 → `archive/tasks-done-2026-08a.md`.
-  검산 journal 209,356 = 182,096 + 27,260, tasks-done 200,699 = 89,636 + 111,063(아카이브 본문 = 이동 바이트, 예외는 상대 링크
-  4개 `../` 재기준화 +12 B와 끝 빈 줄 1 B — journal 2026-10-15). T-GR-00·T-MAP-01 `[x]`·tasks-done 이관을 실었다.
-- 실측(커밋 직전 `wc -c`, 이 PR의 journal·resume 항목 포함): `journal.md` 184,071 B · `tasks-done.md` 91,029 B — 둘 다
-  ≤ 200,000 B. 이 절의 `[x]`·이관은 머지가 조건이라 다음 doc-only PR(ADR-110 사실 갱신)이 싣는다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-gr-00-ledger.md](archive/tasks-acceptance-gr-00-ledger.md)로 옮겼다(2026-10-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-GR-01
 
