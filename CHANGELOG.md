@@ -10,6 +10,13 @@
 
 ## [Unreleased]
 
+### `docker-buildx.sh` — materialize 취소 시 tar writer 고아 경주 수정 (2026-10-16)
+
+- **FIXED (scripts)**: `git archive … &` 직후 `$!`를 변수에 담기 전에 TERM이 오면 정리가 writer를 놓쳐 고아로 남던 경주를
+  닫았다 — 정리는 bash job 표(`jobs -p`)로 writer를 찾는다.
+- **CHANGED (tests)**: 가짜 writer는 스스로 끝나고 고아였는지 표식을 남긴다; fork 직후 TERM을 결정적으로 재현하는 테스트
+  추가; dev 의존성 `pytest-timeout`과 `timeout(60)` marker.
+
 ### run-scoped geo 현재 토큰 resource·`geo_applied` 배선 (2026-10-16, ADR-109 결정 2·3, T-GR-02)
 
 - **ADDED (geocoding)**: `fetch_current_dataset(client, *, logger=None)` — `POST /v2/dataset/version`을 한 번 읽는다. 실패·
