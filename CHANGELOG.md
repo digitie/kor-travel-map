@@ -10,6 +10,23 @@
 
 ## [Unreleased]
 
+### records resource `source_mode=replay` (2026-10-16, ADR-109 결정 7, T-GR-08)
+
+- **ADDED (dagster)**: datagokr 축제·standard_data 4종·fileData 4종 records resource가 config `source_mode`(fetch | replay)를
+  받는다. replay는 provider를 부르지 않고 entity head의 current `source_records.raw_data`(primary Feature `active`만)를 같은
+  record 모델로 되살려 같은 변환기에 넣는다(`dagster/source_replay.py`, `resources.REPLAY_FROM_RAW`). bundle에는 저장된
+  `fetched_at`·head `observed_at`을 되돌려 head가 전진하지 않고, sync state를 쓰지 않으며, payload hash가 저장값과 다르면
+  적재 전에 `ReplayPayloadDrift`로 실패한다.
+- **ADDED (infra/client)**: `infra/source_replay_repo.read_current_source_records`(keyset), `client.read_current_source_records`.
+- **CHANGED (core)**: `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS = frozenset(REPLAY_RECORDS_RESOURCES)`(9 operation) —
+  릴리스 센서가 replay 항목을 낸다. **MOIS는 replay 목록에서 빠졌고**(raw가 record 1:1이 아니다 — golden 실패) 새
+  `SENSOR_MANUAL_OPERATION_KEYS`로 센서가 내지 않는다(운영자 수동 실행 뒤 항목 skip). 차단 사유 값은 기존 값을 재사용해
+  OpenAPI 변경 없음.
+- **ADDED (dagster)**: 부분·빈 replay는 `ReplayIncomplete`로 실패(읽은 건수 ≠ active entity 수, 변환 결과가 레코드를 다
+  덮지 않음). replay run은 curation seal(`authoritative_snapshot_complete`)을 쓰지 않는다.
+- **CHANGED (ci)**: dagster 단위 테스트 전에 `python-datagokr-api`(pyproject 핀)만 설치 — replay golden·HTTP 0회
+  테스트가 CI에서 돈다.
+
 ### geo 릴리스 센서 `kor_travel_geo_release_sensor` (2026-10-16, ADR-109 결정 5, T-GR-05)
 
 - **ADDED (dagster)**: 센서(기본 STOPPED, tick 300초, 진행 중 run 1개) — 공용 `plan_geo_release`로 감지·계획(첫 토큰 기준선,

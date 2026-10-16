@@ -2779,6 +2779,14 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
 - `became_current`가 항상 False(`fetched_at` 원 값 유지)이고 lifecycle 전이가 없다 — provider에서 사라진 entity를
   되살리지 않는다.
 - MOIS replay 1 run 소요(격리 스택, 업종 하나)를 PR 본문에 기록한다.
+- 구현 메모(2026-10-16, `feat/t-gr-08-replay-mode`, #1333 리뷰 반영): golden 통과 = 축제·standard 4종·fileData
+  4종(9 operation, launchable = replay 목록 파생; 비활성 넷은 `skipped(disabled)`라 효과 없음). **MOIS는 golden
+  실패**(raw가 record 필드 24개를 남기지 않는다) → replay 없음, **센서도 내지 않는다**(R2 — 전국 Phase A·50만 행·
+  예정 밖 은퇴 방지; `SENSOR_MANUAL_OPERATION_KEYS`, 사유 값 재사용으로 OpenAPI 불변) → 운영자 수동 실행 뒤 skip.
+  MOIS fetch는 TTL 안에서만 쿼터 0, 지나면 증분 Phase A가 data.go.kr 호출(TTL ≥168 권고). MOIS replay는 소유자 위임
+  결정으로 당분간 없음(raw 전체 저장 기각, SQLite 무다운로드 replay는 필요 확인 시). "MOIS replay 소요"는 해당
+  없음; MOIS 술어 항목은 fetch 경로 통합 테스트. replay는 seal·sync state를 쓰지 않고, 부분·빈 읽기/변환과 hash
+  불일치는 commit 전 실패.
 
 ## T-TEST-PLANNER-INDEX
 

@@ -1,3 +1,25 @@
+## 2026-10-16 — records resource replay 모드(T-GR-08, ADR-109 결정 7): 브랜치 `feat/t-gr-08-replay-mode`
+
+- **무엇.** 쿼터 민감 records resource에 `source_mode=replay` — 저장된 current 원본을 provider 모델로 되살려 같은 변환기로
+  다시 적재한다(provider HTTP 0회). `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`를 채워 릴리스 센서가 replay 항목을 낸다.
+- **MOIS는 golden에서 떨어졌다.** MOIS `raw_data`는 payload hash 입력용 21개 필드뿐이고 변환기는 우편번호·건물관리번호·
+  업종별 시설 필드 24개를 더 읽는다 — 되살린 bundle의 `facility_info`·주소가 달라진다. 결정 7의 가정대로 MOIS는 replay
+  목록에서 빼고 fetch로 낸다(로컬 SQLite라 data.go.kr 쿼터 없음). acceptance의 MOIS 술어(N `not_called`·reverse 0·
+  `unstamped` 0·두 번째 변환 0)는 fetch 경로 통합 테스트로 확인했다.
+- **설계에 없던 것 셋.** (1) `fetched_at`만으로는 부족하다 — head 관측 입력은 `imported_at`이라 replay가 head를 전진시켜
+  관측을 꾸민다. 저장된 `observed_at`을 되돌려 head 갱신 자체가 일어나지 않게 했다. (2) Dagster client는 연결 1개이고
+  표준데이터 snapshot 적재는 batch stream을 한 transaction 안에서 소비한다 — 적재 중 읽으면 그 연결과 경합하므로 읽기를
+  적재 전에 끝낸다(`prefetch_replay`). (3) provider 라이브러리는 CI에 없다(`providers` extra) — 실모델 golden은 설치된
+  환경에서만 돌고(importorskip), CI에는 "변환기가 raw에 있는 필드만 읽는다"는 구조 golden lint를 두었다(MOIS 대조군 포함).
+  런타임 backstop은 hash 불일치 시 적재 전 실패다.
+- **#1333 리뷰 2인 반영.** (R2) 차단이 풀린 MOIS를 센서가 full fetch로 자동 launch하면 전국 Phase A·50만 행 변환·예정
+  밖 은퇴가 일어난다 — `SENSOR_MANUAL_OPERATION_KEYS`로 막고 운영자 수동으로(사유 값 재사용, OpenAPI 불변). (R1) 빈·부분
+  replay가 성공으로 끝나던 것 — 읽은 건수를 같은 술어의 active entity 수와, 변환 결과를 읽은 레코드와 대조해
+  `ReplayIncomplete`. seal 영수증 `observed_at`이 replay에서도 찍히던 것 — replay는 authoritative를 주장하지 않는다
+  (operation 경로 통합 테스트). "MOIS fetch는 쿼터 0"은 TTL 안에서만 참이라 문서를 고쳤다. launchable은 replay 목록에서
+  파생, 복원 함수는 `REPLAY_FROM_RAW` 하나, CI dagster job에 `python-datagokr-api` 설치(public 핀)로 golden이 CI에서 돈다.
+  drift 검사는 hash가 변환기 안에서 나오므로 변환 뒤 — 문서를 "commit 전 실패"로 맞췄다.
+
 ## 2026-10-16 — geo 릴리스 센서(T-GR-05, ADR-109 결정 5): 브랜치 `feat/t-gr-05-geo-release-sensor`
 
 - **무엇.** `kor_travel_geo_release_sensor`(기본 STOPPED, 300초) — 공용 계획 함수로 감지·계획하고, 항목(run 단위)을

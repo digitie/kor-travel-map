@@ -39,6 +39,7 @@ from kortravelmap.core.feature_operation import (
     GEO_DEPENDENT_OPERATION_KEYS,
     REPLAY_RECORDS_RESOURCES,
     SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS,
+    SENSOR_MANUAL_OPERATION_KEYS,
 )
 from kortravelmap.dto.geo_dataset import DatasetRef
 from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage, coverage
@@ -237,8 +238,9 @@ def run_config_for_dataset(operation_key: str, dataset_key: str) -> dict[str, An
 
     - dataset을 run_config로 고르는 operation(KNPS 2개·datagokr fileData)은 resource마다
       ``{"config": {"dataset_key": …}}`` — ``knps_schedule_binding``과 같은 꼴이다.
-    - 쿼터 민감 operation은 records resource에 ``source_mode=replay``(ADR-109 결정 7). resource
-      쪽 구현은 T-GR-08이다 — 그 전에는 이 run_config를 Dagster가 거부한다.
+    - 쿼터 민감 operation은 records resource에 ``source_mode=replay``(ADR-109 결정 7, resource
+      구현은 T-GR-08 ``dagster/source_replay.py``). MOIS는 replay가 아니다
+      (``REPLAY_RECORDS_RESOURCES``).
     """
     resources: dict[str, dict[str, dict[str, Any]]] = {}
     for resource in DATASET_CONFIGURED_OPERATION_RESOURCES.get(operation_key, ()):
@@ -255,9 +257,13 @@ def launch_blocked_reason(
     """센서가 이 항목의 run을 낼 수 없는 이유(없으면 None) — replay 게이트.
 
     replay run_config(records resource의 ``source_mode=replay``)를 가진 항목은 그 operation이
-    ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``에 들 때만 낼 수 있다(T-GR-08이 resource를 구현하며
-    채운다). 그 전에 내면 Dagster config 검증이 run을 거부한다.
+    ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``에 들 때만 낼 수 있다(T-GR-08이 1단계 replay 전부를
+    채웠다). records resource가 ``source_mode``를 받지 않는 operation에 내면 Dagster config 검증이
+    run을 거부한다. ``SENSOR_MANUAL_OPERATION_KEYS``(MOIS)는 run_config와 무관하게 막는다 — 운영자
+    수동 실행(#1333 리뷰 R2). 이유 값의 이름(``…_before_t_gr_08``)은 OpenAPI 계약이라 그대로 둔다.
     """
+    if operation_key in SENSOR_MANUAL_OPERATION_KEYS:
+        return "replay_not_launchable_before_t_gr_08"
     resources = (run_config or {}).get("resources")
     if not isinstance(resources, dict):
         return None

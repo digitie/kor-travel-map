@@ -3269,3 +3269,124 @@ async def test_reconcile_sensor_uses_the_same_manifest_as_the_run(
             )
         ).one()
     assert (row.status, row.current_stage) == ("done", "completed")
+
+
+# -- replay run은 operation을 끝내되 curation seal을 쓰지 않는다(T-GR-08, #1333 리뷰) -----------
+
+_REPLAY_TRUNCATE_SQL = (
+    "TRUNCATE feature.features, provider_sync.source_entities, "
+    "provider_sync.source_entity_heads, provider_sync.source_records, "
+    "provider_sync.source_links, provider_sync.provider_sync_state "
+    "RESTART IDENTITY CASCADE"
+)
+
+
+class _DelegatingOperationClient(_RecordingOperationClient):
+    """기록 probe + 나머지 client 표면(적재·finding)은 실제 client로 넘긴다."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.client, name)
+
+
+async def test_replay_run_finishes_its_membership_without_a_curation_seal(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """replay run이 실제 operation 경로(ensure → asset → finish)를 끝까지 지나되 seal 영수증
+    (``curation_provider_snapshot_receipts``, ``observed_at = clock_timestamp()``)을 쓰지 않는다 —
+    replay는 provider를 관측하지 않았다."""
+    from kortravelmap.dagster.assets import run_feature_place_datagokr_file_data
+    from kortravelmap.dagster.resources import REPLAY_FROM_RAW
+    from kortravelmap.dagster.source_replay import ReplayRecordStream
+
+    from kortravelmap.dto import Address, Coordinate
+    from kortravelmap.providers.datagokr_file_data import (
+        DATAGOKR_FILEDATA_PROVIDER_NAME,
+        file_data_rows_to_bundles,
+    )
+    from tests.integration._db_cleanup import truncate_committed_test_rows
+
+    operation_key = "feature_place_datagokr_seoul_bookstores_job"
+    dataset_key = "datagokr_seoul_bookstores"
+
+    async def _reverse(_coord: Coordinate) -> Address:
+        return Address(
+            bjd_code="1144012000", sigungu_code="11440", sido_code="11", admin="서교동"
+        )
+
+    base_client = AsyncKorTravelMapClient(migrated_engine)
+    rows = [
+        {
+            "STORE_SEQ_NO": float(seq),
+            "STORE_NAME": f"가상 책방 {seq}",
+            "ADRES": f"마포구 동교로 {seq}",
+            "XCNTS": 37.5571,
+            "YDNTS": 126.9221,
+        }
+        for seq in (101, 102)
+    ]
+    fetched = await file_data_rows_to_bundles(
+        rows,
+        dataset_key=dataset_key,
+        fetched_at=datetime(2026, 9, 1, tzinfo=UTC),
+        reverse_geocoder=_reverse,
+    )
+    async with AsyncSession(migrated_engine) as seed:
+        memberships = await memberships_for_operation(seed, operation_key=operation_key)
+    assert len(memberships) == 1
+    dataset_id = memberships[0].provider_dataset_id
+
+    async def _receipts() -> int:
+        async with AsyncSession(migrated_engine) as probe:
+            return int(
+                await probe.scalar(
+                    text(
+                        "SELECT count(*) FROM ops.curation_provider_snapshot_receipts "
+                        "WHERE provider_dataset_id = :id"
+                    ),
+                    {"id": dataset_id},
+                )
+                or 0
+            )
+
+    probe = _DelegatingOperationClient(base_client)
+    root_id: str | None = None
+    try:
+        await base_client.load_feature_bundles(fetched)
+        receipts_before = await _receipts()
+        guard = _tracking_guard(
+            probe,
+            operation_key=operation_key,
+            memberships=memberships,
+            run_id=f"run-tgr08-replay-{uuid4()}",
+        )
+        context = _tracking_context(guard, retry_number=0)
+        context.resources.datagokr_file_data_records = ReplayRecordStream(
+            base_client,
+            provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            from_raw=REPLAY_FROM_RAW["datagokr_file_data_records"],
+        )
+        context.resources.datagokr_file_data_dataset_key = dataset_key
+        context.resources.reverse_geocoder = _reverse
+        context.resources.fetched_at = datetime(2026, 10, 16, tzinfo=UTC)
+        context.log = SimpleNamespace(info=lambda *_a, **_k: None, warning=lambda *_a, **_k: None)
+        metadata: dict[str, object] = {}
+        context.add_output_metadata = metadata.update
+
+        result = await run_tracked_feature_asset(context, run_feature_place_datagokr_file_data)
+
+        root_id = probe.ensure_mutations[0].operation.root_job_id
+        assert result.load.source_records_inserted == 0
+        assert result.observation_receipt.authoritative_snapshot_complete is False
+        assert [item.outcome for item in probe.finish_mutations] == ["applied"]
+        assert {
+            member.status for member in probe.finish_mutations[0].operation.members
+        } == {"done"}
+        assert await _receipts() == receipts_before  # seal 영수증 없음
+    finally:
+        if root_id is None and probe.ensure_mutations:
+            root_id = probe.ensure_mutations[0].operation.root_job_id
+        if root_id is not None:
+            await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await truncate_committed_test_rows(cleanup, _REPLAY_TRUNCATE_SQL)

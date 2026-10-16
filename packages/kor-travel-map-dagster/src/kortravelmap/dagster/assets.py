@@ -156,6 +156,12 @@ from .feature_operation_tracking import (
     run_tracked_feature_asset,
 )
 from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
+from .source_replay import (
+    apply_replay_provenance,
+    ensure_replay_complete,
+    is_replay,
+    prefetch_replay,
+)
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -350,6 +356,7 @@ async def run_feature_event_datagokr_cultural_festivals(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국문화축제표준데이터 record를 event Feature로 적재한다."""
+    source = await _resource_value(context, "datagokr_cultural_festivals")
     records = await _record_list(context, "datagokr_cultural_festivals")
     fetched_at = await _fetched_at(context)
     bundles = await cultural_festivals_to_bundles(
@@ -361,8 +368,10 @@ async def run_feature_event_datagokr_cultural_festivals(
         context,
         provider=DATAGOKR_STANDARD_PROVIDER_NAME,
         dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        bundles=_replayed(source, bundles),
+        # replay는 provider를 관측하지 않았다 — seal(관측 시각 영수증)·sync state를 쓰지 않는다.
+        authoritative_snapshot_complete=not is_replay(source),
+        record_sync_state=not is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1287,19 +1296,26 @@ async def run_feature_place_standard_museums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국박물관미술관표준데이터 record를 place Feature로 적재한다(ADR-034 9단계)."""
+    source = await _resource_value(context, "standard_museums")
+    await prefetch_replay(source)
     fetched_at = await _fetched_at(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "standard_museums", batch_size=100):
-            yield await museums_to_bundles(
-                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            yield apply_replay_provenance(
+                source,
+                await museums_to_bundles(
+                    records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+                ),
             )
+        ensure_replay_complete(source)
 
     return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_MUSEUMS,
         batches=_bundle_batches(),
+        replay=is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1320,21 +1336,28 @@ async def run_feature_place_standard_tourist_attractions(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국관광지표준데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
+    source = await _resource_value(context, "standard_tourist_attractions")
+    await prefetch_replay(source)
     fetched_at = await _fetched_at(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(
             context, "standard_tourist_attractions", batch_size=100
         ):
-            yield await tourist_attractions_to_bundles(
-                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            yield apply_replay_provenance(
+                source,
+                await tourist_attractions_to_bundles(
+                    records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+                ),
             )
+        ensure_replay_complete(source)
 
     return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
         batches=_bundle_batches(),
+        replay=is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1357,19 +1380,26 @@ async def run_feature_place_standard_parking_lots(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국주차장표준데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
+    source = await _resource_value(context, "standard_parking_lots")
+    await prefetch_replay(source)
     fetched_at = await _fetched_at(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "standard_parking_lots", batch_size=100):
-            yield await parking_lots_to_bundles(
-                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            yield apply_replay_provenance(
+                source,
+                await parking_lots_to_bundles(
+                    records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+                ),
             )
+        ensure_replay_complete(source)
 
     return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_PARKING_LOTS,
         batches=_bundle_batches(),
+        replay=is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1392,19 +1422,26 @@ async def run_feature_place_standard_special_streets(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """전국지역특화거리표준데이터 record를 place anchor Feature로 적재한다."""
+    source = await _resource_value(context, "standard_special_streets")
+    await prefetch_replay(source)
     fetched_at = await _fetched_at(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "standard_special_streets", batch_size=100):
-            yield await special_streets_to_bundles(
-                records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+            yield apply_replay_provenance(
+                source,
+                await special_streets_to_bundles(
+                    records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+                ),
             )
+        ensure_replay_complete(source)
 
     return await _load_snapshot_batches(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
         dataset_key=DATASET_KEY_SPECIAL_STREETS,
         batches=_bundle_batches(),
+        replay=is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1428,6 +1465,7 @@ async def run_feature_place_datagokr_file_data(
 ) -> DagsterFeatureLoadResult:
     """data.go.kr curated fileData raw row를 dataset별 place Feature로 적재한다."""
     dataset_key = str(await _resource_value(context, "datagokr_file_data_dataset_key"))
+    source = await _resource_value(context, "datagokr_file_data_records")
     records = await _record_list(context, "datagokr_file_data_records")
     fetched_at = await _fetched_at(context)
     bundles = await file_data_rows_to_bundles(
@@ -1440,8 +1478,10 @@ async def run_feature_place_datagokr_file_data(
         context,
         provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
         dataset_key=dataset_key,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
+        bundles=_replayed(source, bundles),
+        # replay는 provider를 관측하지 않았다 — seal(관측 시각 영수증)·sync state를 쓰지 않는다.
+        authoritative_snapshot_complete=not is_replay(source),
+        record_sync_state=not is_replay(source),
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -1700,6 +1740,13 @@ FEATURE_LOAD_ASSETS: Final = [
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 
 
+def _replayed(source: object, bundles: Sequence[Any]) -> list[Any]:
+    """replay면 provenance를 되돌리고 전부 덮었는지 본다(목록 적재 — 쓰기 전). fetch면 그대로."""
+    replayed = apply_replay_provenance(source, bundles)
+    ensure_replay_complete(source)
+    return replayed
+
+
 async def _load_snapshot_batches(
     context: AssetExecutionContext,
     *,
@@ -1707,8 +1754,13 @@ async def _load_snapshot_batches(
     dataset_key: str,
     batches: AsyncIterable[Sequence[Any]],
     geo_applied: GeoApplied,
+    replay: bool = False,
 ) -> DagsterFeatureLoadResult:
-    """전체 snapshot을 보관하지 않고 기존 단일 transaction·봉인 계약으로 적재한다."""
+    """전체 snapshot을 보관하지 않고 기존 단일 transaction·봉인 계약으로 적재한다.
+
+    ``replay=True``(ADR-109 결정 7)는 provider를 관측하지 않은 run이다 — curation seal(영수증
+    ``observed_at``)·authoritative 완료·sync 성공 cursor를 쓰지 않는다. 적재는 같은 한 transaction.
+    """
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     strict_address = cast(
         "bool | str", await _resource_value(context, "strict_address", default="strict")
@@ -1718,7 +1770,7 @@ async def _load_snapshot_batches(
         items: AsyncIterable[Sequence[Any]], geo: GeoLoadContext | None
     ) -> FeatureLoadResult:
         return await client.load_feature_bundle_batches(
-            items, curation_dataset=(provider, dataset_key), geo=geo
+            items, curation_dataset=None if replay else (provider, dataset_key), geo=geo
         )
 
     result = await load_feature_bundle_batches_for_dagster(
@@ -1729,16 +1781,18 @@ async def _load_snapshot_batches(
         dataset_key=dataset_key,
         strict_address=strict_address,
         load_all=_load_all,
+        authoritative_snapshot_complete=not replay,
         **(await _geo_run_inputs(context, geo_applied)),
     )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=provider,
-        dataset_key=dataset_key,
-        cursor_extra=_feature_result_cursor_extra(result),
-        observation_receipt=result.observation_receipt,
-    )
+    if not replay:
+        await _record_feature_sync_success(
+            context,
+            client,
+            provider=provider,
+            dataset_key=dataset_key,
+            cursor_extra=_feature_result_cursor_extra(result),
+            observation_receipt=result.observation_receipt,
+        )
     return result
 
 

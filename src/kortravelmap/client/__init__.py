@@ -57,6 +57,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationKey,
     ProviderDatasetOperationMembership,
 )
+from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
@@ -262,6 +263,13 @@ from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
+)
+from kortravelmap.infra.source_replay_repo import CurrentSourceRecord
+from kortravelmap.infra.source_replay_repo import (
+    count_active_source_entities as repo_count_active_source_entities,
+)
+from kortravelmap.infra.source_replay_repo import (
+    read_current_source_records as repo_read_current_source_records,
 )
 from kortravelmap.infra.status_repo import StatusCounts, gather_status_counts
 from kortravelmap.infra.sync_state_repo import (
@@ -1107,6 +1115,45 @@ class AsyncKorTravelMapClient:
                 payload_hashes=payload_hashes,
                 current_data_token=current_data_token,
             )
+
+    async def read_current_source_records(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        batch_size: int = 1000,
+    ) -> tuple[list[CurrentSourceRecord], int]:
+        """dataset의 current 원본 전부(primary Feature가 active인 entity) — replay 읽기(T-GR-08).
+
+        돌려주는 값은 ``(원본들, 읽어야 할 건수)``다. 건수는 첫 transaction에서 같은 술어(head 조인
+        제외)로 센다 — 둘이 다르면 부분 replay라 호출자가 실패시킨다(#1333 리뷰 R1).
+
+        ``provider_dataset_id`` 안 ``source_entity_key`` keyset으로 ``batch_size``건씩 읽되
+        **적재 전에 끝까지 읽는다**. Dagster client는 연결 한 개(pool 1)이고 snapshot 적재는 한
+        transaction이라, 적재 도중 다음 페이지를 읽으면 그 연결을 기다리며 멈춘다. 페이지마다
+        짧은 읽기 transaction이다.
+        """
+        async with self._session_factory() as session, session.begin():
+            provider_dataset_id = await resolve_active_provider_dataset_id(
+                session, provider=normalize_provider_name(provider), dataset_key=dataset_key
+            )
+            expected = await repo_count_active_source_entities(
+                session, provider_dataset_id=provider_dataset_id
+            )
+        records: list[CurrentSourceRecord] = []
+        after = ""
+        while True:
+            async with self._session_factory() as session, session.begin():
+                page = await repo_read_current_source_records(
+                    session,
+                    provider_dataset_id=provider_dataset_id,
+                    after_source_entity_key=after,
+                    limit=batch_size,
+                )
+            records.extend(page)
+            if len(page) < batch_size:
+                return records, expected
+            after = page[-1].source_entity_key
 
     # -- geo 릴리스 재지오코딩 계획(ADR-109 결정 5, T-GR-04) -----------------------------------
 
