@@ -22,6 +22,7 @@ raw SQL은 이 모듈의 상수다(ADR-004). commit은 호출자 책임이다.
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -100,6 +101,8 @@ CompletionKind = Literal["not_ready", "sweep", "done"]
 #: 만들 때 다른 토큰의 활성 계획을 ``superseded``로 닫으므로 전체에서도 하나다.
 _ACTIVE_STATES: Final[tuple[str, ...]] = ("planned", "running")
 _TERMINAL_ITEM_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "skipped"})
+
+_LOGGER = logging.getLogger(__name__)
 
 #: 센서와 ``/detect``가 동시에 감지해도 계획이 둘 생기지 않게 하는 transaction 잠금.
 _PLAN_LOCK_SQL: Final = text(
@@ -249,11 +252,14 @@ def launch_blocked_reason(
     ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``에 들 때만 낼 수 있다(T-GR-08이 resource를 구현하며
     채운다). 그 전에 내면 Dagster config 검증이 run을 거부한다.
     """
-    resources = (run_config or {}).get("resources", {})
+    resources = (run_config or {}).get("resources")
+    if not isinstance(resources, dict):
+        return None
     replay = any(
-        (resource.get("config") or {}).get("source_mode") == "replay"
+        isinstance(resource, dict)
+        and isinstance(resource.get("config"), dict)
+        and resource["config"].get("source_mode") == "replay"
         for resource in resources.values()
-        if isinstance(resource, dict)
     )
     if replay and operation_key not in SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS:
         return "replay_not_launchable_before_t_gr_08"
@@ -409,6 +415,10 @@ _GET_PLAN_SQL: Final = text(
 _LATEST_PLAN_SQL: Final = text(
     f"SELECT {_PLAN_COLUMNS} FROM ops.kor_travel_geo_releases ORDER BY plan_id DESC LIMIT 1"
 )
+_LATEST_NON_SUPERSEDED_SQL: Final = text(
+    f"SELECT {_PLAN_COLUMNS} FROM ops.kor_travel_geo_releases "
+    "WHERE state <> 'superseded' ORDER BY plan_id DESC LIMIT 1"
+)
 _LATEST_FOR_TOKEN_SQL: Final = text(
     f"SELECT {_PLAN_COLUMNS} FROM ops.kor_travel_geo_releases "
     "WHERE geo_data_token = :token ORDER BY plan_seq DESC LIMIT 1"
@@ -459,13 +469,31 @@ def _plan(row: RowMapping, items: Sequence[GeoReleaseItem] = ()) -> GeoReleasePl
     )
 
 
+def _dataset_or_placeholder(
+    provider_dataset_id: int, datasets: dict[int, GeoReleaseDataset]
+) -> GeoReleaseDataset:
+    """항목의 dataset id에 ``provider_datasets`` 행이 없으면 경고하고 빈 이름으로 채운다.
+
+    dataset은 지우지 않고 비활성화만 하므로(408 docstring) 정상 경로에서는 일어나지 않는다 —
+    일어나면 누가 행을 지웠다는 뜻이라 조용히 넘기지 않는다.
+    """
+    found = datasets.get(provider_dataset_id)
+    if found is not None:
+        return found
+    _LOGGER.warning(
+        "geo 릴리스 항목의 provider_dataset_id=%s에 provider_datasets 행이 없다 — 누가 지웠다",
+        provider_dataset_id,
+    )
+    return GeoReleaseDataset(provider_dataset_id, "", "")
+
+
 def _item(row: RowMapping, datasets: dict[int, GeoReleaseDataset]) -> GeoReleaseItem:
     return GeoReleaseItem(
         plan_id=int(row["plan_id"]),
         position=int(row["position"]),
         operation_key=str(row["operation_key"]),
         datasets=tuple(
-            datasets.get(int(value), GeoReleaseDataset(int(value), "", ""))
+            _dataset_or_placeholder(int(value), datasets)
             for value in row["provider_dataset_ids"]
         ),
         run_config=_json_value(row["run_config"]),
@@ -741,7 +769,9 @@ async def replan(session: AsyncSession, plan_id: int) -> GeoReleasePlan:
         raise GeoReleaseNotFound(f"geo 릴리스 계획 {plan_id}이 없다")
     if source.state == "baseline":
         raise GeoReleaseConflict(f"계획 {plan_id}은 기준선이다 — 기준선은 다시 계획하지 않는다")
-    latest = (await session.execute(_LATEST_PLAN_SQL)).mappings().one()
+    # 기준은 **최신 비-superseded 행**이다 — 롤백(규칙 5)은 B를 superseded로 닫고 A 행을 새로 쓰지
+    # 않으므로, 최신 행 그대로 보면 geo가 서빙하는 A의 replan을 거부하고 B의 replan을 허용한다.
+    latest = (await session.execute(_LATEST_NON_SUPERSEDED_SQL)).mappings().one()
     if str(latest["geo_data_token"]) != source.geo_data_token:
         raise GeoReleaseConflict(
             f"계획 {plan_id}의 토큰은 최신 관측 토큰이 아니다 — 옛 토큰은 다시 계획하지 않는다"
@@ -856,17 +886,11 @@ async def complete_plan(
     - 그 외(잔여 0, 또는 sweep 뒤에도 남음) → 잔여를 ``residual_stale``로 기록하고 활성 cache
       target 링크를 재동기화한 뒤 ``done``. 두 번째 sweep은 운영자 ``replan``이다.
 
-    ``sigungu_resolver``는 필수 인자다(None도 명시). 활성 ``sigungu_by_radius`` target이 있는데
-    None이면 아무것도 쓰기 전에 :class:`GeoReleaseResolverRequired`다.
+    ``sigungu_resolver``는 필수 인자다(None도 명시). 완료 단계(링크 재동기화)에 이르렀는데 활성
+    ``sigungu_by_radius`` target이 있고 None이면 쓰기 전에 :class:`GeoReleaseResolverRequired`다.
     """
     await session.execute(_PLAN_LOCK_SQL)
     plan = await _active_plan(session, plan_id)
-    if sigungu_resolver is None and int(
-        (await session.execute(_SIGUNGU_TARGETS_SQL)).scalar_one()
-    ):
-        raise GeoReleaseResolverRequired(
-            "sigungu_by_radius cache target이 있다 — 링크 재동기화에 sigungu resolver가 필요하다"
-        )
     if any(item.state not in _TERMINAL_ITEM_STATES for item in plan.items):
         return GeoReleaseCompletion(kind="not_ready", plan=plan)
     cov = await _coverage_for_specs(session, plan.geo_data_token, plan.items)
@@ -897,6 +921,13 @@ async def complete_plan(
             return GeoReleaseCompletion(
                 kind="sweep", plan=refreshed, coverage=cov, sweep_positions=positions
             )
+    # resolver는 링크 재동기화에만 필요하다 — not_ready·sweep에서는 묻지 않는다.
+    if sigungu_resolver is None and int(
+        (await session.execute(_SIGUNGU_TARGETS_SQL)).scalar_one()
+    ):
+        raise GeoReleaseResolverRequired(
+            "sigungu_by_radius cache target이 있다 — 링크 재동기화에 sigungu resolver가 필요하다"
+        )
     targets, links = await _resync_cache_target_links(session, sigungu_resolver=sigungu_resolver)
     await session.execute(_FINISH_PLAN_SQL, {"plan_id": plan_id, "residual": cov.remaining})
     finished = await get_geo_release_plan(session, plan_id)

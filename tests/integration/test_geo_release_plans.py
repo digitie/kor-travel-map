@@ -538,3 +538,83 @@ async def _active_link_targets(
         {"id": feature_id, "relation": relation},
     )
     return {str(row[0]) for row in rows}
+
+
+async def test_replan_follows_the_latest_non_superseded_plan_after_a_rollback(
+    migrated_session: AsyncSession,
+) -> None:
+    """A done → B planned → geo가 A로 롤백(잔여 0, B만 superseded) — 지금 서빙되는 A는 replan할 수
+    있고, 닫힌 B는 409다(최신 행 그대로 보면 반대가 된다 — #1331 재리뷰 F1)."""
+    bundle = await _festival("replan-rollback", _FakeReverse(_geo()))
+    assert (await geo_release_repo.plan_geo_release(migrated_session, REF_B)).kind == (
+        "baseline_recorded"
+    )
+    await load_bundles(migrated_session, [bundle], geo=_ctx(REF_B))  # A 기준 stale
+    feature_id = await _feature_id(migrated_session, bundle)
+    a_outcome = await geo_release_repo.plan_geo_release(migrated_session, REF_A)
+    assert a_outcome.kind == "created"
+    assert a_outcome.plan is not None
+    a_plan = a_outcome.plan
+    await upsert_stamps(migrated_session, current=REF_A, outcomes={feature_id: "called"})
+    await _set_all_items(migrated_session, a_plan.plan_id, "done")
+    done = await geo_release_repo.complete_plan(
+        migrated_session, a_plan.plan_id, sigungu_resolver=None
+    )
+    assert done.kind == "done"
+    b_outcome = await geo_release_repo.plan_geo_release(migrated_session, REF_B)
+    assert b_outcome.kind == "created"
+    assert b_outcome.plan is not None
+    rollback = await geo_release_repo.plan_geo_release(migrated_session, REF_A)
+    assert rollback.kind == "already_complete"
+    assert rollback.superseded_plan_ids == (b_outcome.plan.plan_id,)
+
+    replanned = await geo_release_repo.replan(migrated_session, a_plan.plan_id)
+    assert (replanned.geo_data_token, replanned.state) == (TOKEN_A, "planned")
+    with pytest.raises(geo_release_repo.GeoReleaseConflict) as refused:
+        await geo_release_repo.replan(migrated_session, b_outcome.plan.plan_id)
+    assert not isinstance(refused.value, geo_release_repo.GeoReleaseNotFound)
+
+
+async def test_resolver_is_only_required_when_completion_reaches_the_link_resync(
+    migrated_session: AsyncSession,
+) -> None:
+    """``not_ready``·``sweep``에서는 sigungu resolver를 묻지 않는다(#1331 재리뷰 F2)."""
+    await upsert_poi_cache_target(
+        migrated_session,
+        external_system="geo-release-test",
+        target_key="needs-resolver",
+        lon=126.92,
+        lat=37.52,
+        radius_km=1.0,
+        scope_mode="sigungu_by_radius",
+    )
+    bundle = await _festival("resolver-late", _FakeReverse(_geo()))
+    await load_bundles(migrated_session, [bundle], geo=_ctx(REF_A))  # B 기준 stale → sweep
+    plan = await _baseline_then(migrated_session, REF_B)
+    not_ready = await geo_release_repo.complete_plan(
+        migrated_session, plan.plan_id, sigungu_resolver=None
+    )
+    assert not_ready.kind == "not_ready"
+    await _set_all_items(migrated_session, plan.plan_id, "done")
+    sweep = await geo_release_repo.complete_plan(
+        migrated_session, plan.plan_id, sigungu_resolver=None
+    )
+    assert sweep.kind == "sweep"
+    await _set_all_items(migrated_session, plan.plan_id, "done")
+    with pytest.raises(geo_release_repo.GeoReleaseResolverRequired):
+        await geo_release_repo.complete_plan(
+            migrated_session, plan.plan_id, sigungu_resolver=None
+        )
+
+
+def test_launch_gate_tolerates_malformed_run_config() -> None:
+    """resource config가 dict가 아니어도 게이트가 죽지 않는다(#1331 재리뷰 F4)."""
+    for config in (
+        {"resources": "x"},
+        {"resources": {"mois_license_records": "replay"}},
+        {"resources": {"mois_license_records": {"config": "replay"}}},
+    ):
+        assert (
+            geo_release_repo.launch_blocked_reason("feature_place_mois_licenses_job", config)
+            is None
+        )
