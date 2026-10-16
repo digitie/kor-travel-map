@@ -18217,7 +18217,9 @@
                   "sweep",
                   "run_not_launched",
                   "no_progress",
-                  "run_failed"
+                  "run_failed",
+                  "superseded",
+                  "canceled"
                 ],
                 "type": "string"
               },
