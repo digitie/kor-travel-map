@@ -78,6 +78,7 @@ from kortravelmap.api.routers.ops_contract_fixtures import (
     router as ops_contract_fixtures_router,
 )
 from kortravelmap.api.routers.ops_datasets import router as ops_datasets_router
+from kortravelmap.api.routers.ops_geo_releases import router as ops_geo_releases_router
 from kortravelmap.api.routers.ops_live import router as ops_live_router
 from kortravelmap.api.routers.ops_logs import router as ops_logs_router
 from kortravelmap.api.routers.ops_pipeline import router as ops_pipeline_router
@@ -115,6 +116,7 @@ __all__ = [
     "ops_cache_target_streams_router",
     "ops_datasets_router",
     "ops_live_router",
+    "ops_geo_releases_router",
     "ops_logs_router",
     "ops_pipeline_router",
     "public_status_router",
