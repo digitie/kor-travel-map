@@ -524,7 +524,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     });
   }
 
-  test("admin shell: 19개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 21개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
