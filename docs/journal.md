@@ -1,3 +1,16 @@
+## 2026-10-16 — geo 릴리스 계획 표·계획 함수·admin API(T-GR-04, ADR-109 결정 5·8): 브랜치 `feat/t-gr-04-geo-release-plan`
+
+- **무엇.** migration 408(계획·항목 표), `plan_geo_release`(센서·`/detect` 단일 정본), 항목 생성(core 상수 + DB 정본),
+  `coverage()`, skip·replan·완료(1회 sweep → 링크 재동기화), client 래퍼, admin API 5 operation, core 상수와 Dagster 정의의
+  동등 lint.
+- **실측이 설계를 고친 자리.** (1) 항목 입력의 kind — 설계는 `feature_load`인데 head DB에 그 kind 행이 0건이었다(통합 DB
+  덤프로 확인). job을 dataset에 결박하는 것은 `refresh`다. (2) MCST는 job 하나에 dataset 13개라 항목 13개가 run 하나를 나눠
+  써야 한다 — T-GR-05 몫으로 기록. (3) prod 활성 cache target은 0개(전체 4, 전부 삭제) — 링크 재동기화의 stream 이벤트를
+  지금 만들지 않은 근거. (4) 기준선은 센서 커서가 아니라 DB 행이어야 `/detect`도 같은 판단을 한다 — 상태 `baseline`.
+- **lint의 유도.** geo 의존을 `reverse_geocoder=`의 존재로 세면 돌발정보 notice(`=None`)가 들어오고, 함수 본문 전체의 이름을
+  보면 price asset이 `deps=[place asset]` 데코레이터 때문에 geo 의존으로 잘못 잡힌다(첫 시제품에서 실제로 났다). None 상수
+  제외 + 본문만 + 모듈 횡단 전이로 바꿨다.
+
 ## 2026-10-16 — 적재 경로의 geo 재해석(T-GR-03, ADR-109 결정 4·6): 브랜치 `feat/t-gr-03-stale-stamps`
 
 - **무엇.** `load_bundle`이 `GeoLoadContext`를 받아 스탬프·stale 분기·값 동일 무쓰기·빈 답 가드·override finding을 한다.

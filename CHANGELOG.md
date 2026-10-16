@@ -10,6 +10,22 @@
 
 ## [Unreleased]
 
+### geo 릴리스 재지오코딩 계획 표·계획 함수·admin API (2026-10-16, ADR-109 결정 5·8, T-GR-04)
+
+- **ADDED (schema)**: migration `408_kor_travel_geo_releases` — `ops.kor_travel_geo_releases`(계획: 토큰·`plan_seq`·
+  `baseline|planned|running|done|superseded`, 같은 토큰 활성 계획 1개) + `ops.kor_travel_geo_release_items`(dataset 항목·
+  run_config·`attempt_seq`·상태). forward-only.
+- **ADDED (core/infra)**: `plan_geo_release`(센서와 운영 API의 단일 정본 — 첫 관측 토큰은 기준선, 같은 토큰 멱등,
+  A→B→A 재계획, 끝났고 잔여 0이면 계획 없음), `build_release_items`(DB operation ⋈ 활성 dataset, core 상수로 job·geo
+  의존·자동 적재 꺼짐 판정, KNPS dataset별 run_config, 쿼터 민감 replay run_config, 실행 순서), `coverage()`(분모를 인자
+  dataset으로 한정, `excluded_by_skip`·`not_called_by_kind`·`unstamped_non_provider`), `skip_item`·`replan`·`complete_plan`
+  (잔여 1회 sweep → 활성 cache target 링크 재동기화 → `done`). core `GEO_DEPENDENT_OPERATION_KEYS` 등 — lint가 Dagster
+  정의(AST·schedule spec)와의 동등을 고정한다.
+- **ADDED (api, admin 프로필만)**: `GET /v1/ops/geo-releases`·`GET /{plan_id}`·`POST /detect`·
+  `POST /{plan_id}/items/{position}/skip`·`POST /{plan_id}/replan`. `openapi.json`만 바뀌고 user·service 계약은 불변 —
+  **PinVi admin 스냅샷 재vendor가 Map API 배포보다 먼저**다.
+- **CHANGED (dto)**: `DatasetRef`에 관측용 `activated_at`·`reference_months`(선택 — `dataset_version()`에서만, 비교에 쓰지 않음).
+
 ### 적재 경로의 geo 재해석 — stale 분기·무쓰기·빈 답 가드·override (2026-10-16, ADR-109 결정 4·6, T-GR-03)
 
 - **CHANGED (load)**: geo를 배선한 적재(`GeoLoadContext`)는 행마다 지오코딩 스탬프를 쓴다. 같은 payload라도 스탬프가 현재

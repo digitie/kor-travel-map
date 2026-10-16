@@ -1,3 +1,12 @@
+## 2026-10-16 — geo 릴리스 계획 표·계획 함수·admin API(T-GR-04): 브랜치 `feat/t-gr-04-geo-release-plan`
+
+**다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → PinVi admin 스냅샷 재vendor(Map API 배포 **전**) → 배포(408) → T-GR-05(센서).**
+
+- 바뀐 것: migration 408·head-schema, `infra/geo_release_repo.py`, `coverage()`, core 계획 상수, client 래퍼, admin
+  `/v1/ops/geo-releases` 5 operation(`openapi.json`), lint·통합·API 테스트, `DatasetRef` 관측 필드.
+- 바뀌지 않은 것: 적재 경로, Dagster 정의(센서는 T-GR-05), user·service OpenAPI.
+- T-GR-05에 넘기는 것: replay 항목은 T-GR-08 뒤에만 실행, MCST 13 항목은 run 하나로 묶기, 링크 변경 stream 이벤트 재검토.
+
 ## 2026-10-16 — 적재 경로의 geo 재해석(T-GR-03): 브랜치 `feat/t-gr-03-stale-stamps`
 
 **다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → 배포(롤아웃 첫 run이 스탬프를 채운다 — 격리 스택에서 비용 실측) → T-GR-04(계획 표·
