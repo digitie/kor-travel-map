@@ -449,13 +449,6 @@ function usePlanColumns(): ColumnDef<GeoReleasePlanRecord, unknown>[] {
         ),
       },
       {
-        accessorKey: "geo_data_token",
-        header: "data_token",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">{shortId(row.original.geo_data_token, 14)}</span>
-        ),
-      },
-      {
         accessorKey: "state",
         header: "상태",
         cell: ({ row }) => planStatus(row.original.state),
