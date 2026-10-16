@@ -77,4 +77,50 @@ test.describe("geo 릴리스 live surface", () => {
       ).toBeVisible({ timeout: TIMEOUT });
     }
   });
+
+  test("새 토큰 감지 → 계획 항목·MOIS 수동 안내·건너뛰기가 실제 API로 돈다", async ({ page }) => {
+    test.skip(
+      process.env.E2E_GEO_RELEASE_EXPECT_PLAN !== "1",
+      "geo 토큰이 기준선과 다른 격리 스택에서만 — 계획을 쓰고 항목을 건너뛴다",
+    );
+    await page.goto(ROUTE);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "geo 릴리스" }),
+    ).toBeVisible({ timeout: TIMEOUT });
+    const detect = waitFor(page, "POST", "/v1/ops/geo-releases/detect");
+    await page.getByRole("button", { name: "지금 감지" }).click();
+    const detected = await detect;
+    expect(detected.ok(), `detect HTTP ${detected.status()}`).toBe(true);
+    const body = (await detected.json()) as components["schemas"]["GeoReleaseDetectResponse"];
+    expect(["created", "existing"]).toContain(body.data.outcome);
+    const plan = body.data.plan;
+    expect(plan, "detect가 계획을 돌려줘야 한다").not.toBeNull();
+    if (!plan) return;
+    await expect(page.getByTestId(`geo-release-plan-${plan.plan_id}`)).toBeVisible({
+      timeout: TIMEOUT,
+    });
+    const mois = plan.items.find((item) => item.operation_key === "feature_place_mois_licenses_job");
+    expect(mois, "계획에 MOIS 항목이 있어야 한다").toBeDefined();
+    if (mois) {
+      await expect(page.getByTestId(`geo-release-item-${mois.position}`)).toContainText(
+        "수동 실행 후 skip 필요",
+        { timeout: TIMEOUT },
+      );
+    }
+    const target = plan.items.find(
+      (item) => item.state === "pending" && item.operation_key !== mois?.operation_key,
+    );
+    expect(target, "건너뛸 대기 항목이 있어야 한다").toBeDefined();
+    if (!target) return;
+    const row = page.getByTestId(`geo-release-item-${target.position}`);
+    const skip = waitFor(
+      page,
+      "POST",
+      `/v1/ops/geo-releases/${plan.plan_id}/items/${target.position}/skip`,
+    );
+    await row.getByRole("button", { name: `항목 ${target.position} 건너뛰기` }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "건너뛰기", exact: true }).click();
+    expect((await skip).ok()).toBe(true);
+    await expect(row).toContainText("건너뜀", { timeout: TIMEOUT });
+  });
 });
