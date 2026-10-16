@@ -182,7 +182,7 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
     await expect(page.getByRole("heading", { level: 1, name: "geo 릴리스" })).toBeVisible();
     await expect(page.getByTestId("geo-coverage-ratio")).toHaveText("12,001 / 35,754 (33.6%)");
     const meter = page.getByRole("meter", { name: "현재 토큰 커버리지" });
-    await expect(meter).toHaveAttribute("aria-valuenow", "33.6");
+    await expect(meter).toHaveAttribute("value", "33.6");
     for (const [testId, value] of [
       ["geo-coverage-stamped-other", "20,500"],
       ["geo-coverage-unstamped", "3,253"],

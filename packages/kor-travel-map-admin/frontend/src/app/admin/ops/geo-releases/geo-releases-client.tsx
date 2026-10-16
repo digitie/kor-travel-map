@@ -42,7 +42,7 @@ import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
 
 /** 센서 Skip 사유와 같은 문장(`dagster/geo_release_sensor.py`) — 운영자가 같은 말을 본다. */
-const NO_TOKEN_REASON = "geo data_token 없음 — 지문 backfill/복구 필요";
+const MISSING_FINGERPRINT_TEXT = "geo data_token 없음 — 지문 backfill/복구 필요";
 const UNAVAILABLE_REASON = "kor-travel-geo가 현재 데이터셋을 답하지 않았다 — 감지할 수 없다";
 
 const DETECT_OUTCOME_TEXT: Record<GeoReleaseDetectResponse["data"]["outcome"], string> = {
@@ -123,7 +123,7 @@ function CurrentDatasetCard({ data }: { data: GeoReleaseListResponse["data"] | u
         <Alert variant="destructive">
           <AlertTitle>계획을 만들 수 없음</AlertTitle>
           <AlertDescription>
-            <p data-testid="geo-release-skip-reason">센서 Skip 사유: {NO_TOKEN_REASON}</p>
+            <p data-testid="geo-release-skip-reason">센서 Skip 사유: {MISSING_FINGERPRINT_TEXT}</p>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -154,15 +154,16 @@ function CoverageGauge({ coverage }: { coverage: GeoCoverageRecord }) {
             {percent === null ? "" : ` (${percent}%)`}
           </span>
         </div>
-        <div
+        <meter
           aria-label="현재 토큰 커버리지"
-          aria-valuemax={100}
-          aria-valuemin={0}
-          aria-valuenow={percent ?? 0}
-          aria-valuetext={percent === null ? "분모 없음" : `${percent}%`}
-          className="h-2 w-full overflow-hidden rounded-full bg-surface-muted"
-          role="meter"
+          className="sr-only"
+          max={100}
+          min={0}
+          value={percent ?? 0}
         >
+          {percent === null ? "분모 없음" : `${percent}%`}
+        </meter>
+        <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-full bg-surface-muted">
           <div
             className="h-full rounded-full bg-success"
             style={{ width: `${percent ?? 0}%` }}
