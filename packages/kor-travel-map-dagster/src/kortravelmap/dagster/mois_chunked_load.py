@@ -75,7 +75,7 @@ from .etl import (
     load_feature_bundles_for_dagster,
 )
 from .geocode_ratio import GEOCODE_RATIO_MIN_SAMPLE, geocode_ratio_exceeded
-from .run_scope import map_owned_runs_filter
+from .run_scope import GEO_RELEASE_PLAN_ID_TAG, map_owned_runs_filter
 from .validation import validate_feature_bundles_address
 
 __all__ = [
@@ -1166,7 +1166,15 @@ def mois_load_continuation_sensor(
         filters=map_owned_runs_filter(job_name=MOIS_LOAD_JOB_NAME, tags=owned),
         limit=1,
     )
-    return mois_load_continuation_decision(runs[0] if runs else None)
+    last = runs[0] if runs else None
+    if last is not None and GEO_RELEASE_PLAN_ID_TAG in last.tags:
+        # geo 릴리스 센서(T-GR-05)가 낸 run이다 — 그 센서가 같은 판정
+        # (`mois_load_continuation_decision`)으로 직접 이어 달린다. 여기서도 이어 달리면
+        # 체인이 둘이 된다.
+        return SkipReason(
+            f"마지막 MOIS 적재 run {last.run_id}은 geo 릴리스 run이다 — 릴리스 센서가 이어 달린다"
+        )
+    return mois_load_continuation_decision(last)
 
 
 def _had_most_of_its_budget(tags: Mapping[str, str]) -> bool:

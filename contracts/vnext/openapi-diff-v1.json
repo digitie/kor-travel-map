@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "ce178a70dc6c6a5c32f1e4abef8b0b6186b39f1dff78317b534fd6647479878b"
+      "sha256": "acd3f0b11121f7bd057027203e73ebedd172311e280731cad9feb71c0c9d4814"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-10-16",
+      "task": "T-GR-05 geo release sensor",
+      "change": "admin baseline sha256 재고정 — geo 릴리스 항목 `state_reason` enum에 `superseded`·`canceled`를 더했다(migration 409). 경로·operation·다른 스키마와 user/service bytes는 불변이다."
+    },
     {
       "date": "2026-10-16",
       "task": "T-GR-04 geo release plan admin API",

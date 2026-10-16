@@ -42,7 +42,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1134,6 +1134,40 @@ class AsyncKorTravelMapClient:
         """계획 토큰 기준 커버리지(분모는 그 계획의 비-skip 항목 dataset). 읽기 전용."""
         async with self._session_factory() as session, session.begin():
             return await geo_release_repo.plan_coverage(session, plan)
+
+    async def mark_geo_release_item_requested(
+        self, plan_id: int, position: int, *, attempt_seq: int, run_key: str
+    ) -> bool:
+        """센서가 RunRequest를 내기 직전 — 대기 항목을 ``requested``로(한 transaction)."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.mark_item_requested(
+                session, plan_id, position, attempt_seq=attempt_seq, run_key=run_key
+            )
+
+    async def settle_geo_release_item(
+        self,
+        plan_id: int,
+        position: int,
+        *,
+        state: Literal["done", "failed"],
+        reason: geo_release_repo.ItemStateReason | None = None,
+        dagster_run_id: str | None = None,
+    ) -> bool:
+        """``requested`` 항목을 run 결과로 끝낸다(한 transaction)."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.settle_item(
+                session,
+                plan_id,
+                position,
+                state=state,
+                reason=reason,
+                dagster_run_id=dagster_run_id,
+            )
+
+    async def requeue_geo_release_item(self, plan_id: int, position: int) -> int | None:
+        """``requested`` 항목을 다음 ``attempt_seq``의 대기로(한 transaction)."""
+        async with self._session_factory() as session, session.begin():
+            return await geo_release_repo.requeue_item(session, plan_id, position)
 
     async def complete_geo_release_plan(
         self,

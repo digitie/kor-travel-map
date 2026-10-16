@@ -37,6 +37,11 @@ CODE_LOCATION_RUN_TAG: Final[str] = "dagster/code_location"
 MAP_RUN_TAG_PREFIX: Final[str] = "kor_travel_map."
 """Map만 다는 run tag의 접두사. 다른 프로젝트의 run에는 없다."""
 
+GEO_RELEASE_PLAN_ID_TAG: Final[str] = "kor_travel_map.geo_release_plan_id"
+"""geo 릴리스 센서(T-GR-05)가 낸 run의 유일한 판별자 — MOIS 이어 달리기 run도
+``trigger_kind=sensor``를 쓰므로 그것으로는 가를 수 없다. 이어 달리기 센서는 이 tag가 붙은 run을
+이어 달리지 않는다(릴리스 센서가 자기 run을 직접 이어 달린다 — 이중 체인 방지)."""
+
 
 class MapRunScopeMismatch(RuntimeError):
     """평가 중인 code location이 ``MAP_CODE_LOCATION_NAME``과 다르다.
@@ -101,6 +106,7 @@ def map_owned_runs_filter(
 
 __all__ = [
     "CODE_LOCATION_RUN_TAG",
+    "GEO_RELEASE_PLAN_ID_TAG",
     "MAP_CODE_LOCATION_NAME",
     "MAP_RUN_TAG_PREFIX",
     "MapRunScopeMismatch",

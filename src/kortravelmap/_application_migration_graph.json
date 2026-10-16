@@ -51,6 +51,12 @@
         "407_feature_geocode_stamps"
       ],
       "revision": "408_kor_travel_geo_releases"
+    },
+    {
+      "down_revision": [
+        "408_kor_travel_geo_releases"
+      ],
+      "revision": "409_geo_release_item_reasons"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -192,6 +192,9 @@ current_data_token: str | None = None)`(`:125-131`, additive kwarg) → `_item_t
 > 행), 항목 입력 kind는 `refresh`, **항목 1행 = run 1개**(`provider_dataset_ids` 배열 — MCST 13 dataset이 항목 1개),
 > 항목 UNIQUE에서 `attempt_seq` 제외(같은 행에서 단조 증가), 계획에 `sweep_started_at`, 최신 행이 이 토큰의 `done`이면
 > 재계획 없음, replay 항목은 `launch_blocked_reason`(core `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS` 게이트).
+> 센서(T-GR-05): `dagster/geo_release_sensor.py`, 기본 STOPPED, run_key `geo_release/{token}/{plan_seq}/{operation}/{position}/{attempt}`,
+> 한 번에 run 1개, CANCELED → `failed(canceled)`, supersede → 그 계획의 `requested` 항목 `failed(superseded)`(migration 409),
+> geo client는 `geocoding.open_geo_client`. **T-GR-08 전에는 replay 항목이 든 계획이 `running`으로 남는다.**
 > 판정은 `infra/geo_release_repo.py` `plan_geo_release`(센서·`/detect` 단일 정본), 완료는 `complete_plan`.
 
 **표** `ops.kor_travel_geo_releases(plan_id identity PK, geo_data_token NOT NULL, plan_seq int DEFAULT 1,

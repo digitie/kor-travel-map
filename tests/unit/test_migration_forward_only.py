@@ -34,6 +34,7 @@ FORWARD_ONLY_REVISIONS = (
     "400_schema_baseline",
     "407_feature_geocode_stamps",
     "408_kor_travel_geo_releases",
+    "409_geo_release_item_reasons",
 )
 
 

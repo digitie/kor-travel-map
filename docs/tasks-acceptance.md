@@ -35,6 +35,8 @@
 > | `T-VN-39` (완료) | [archive/tasks-acceptance-39.md](archive/tasks-acceptance-39.md) | 약 8 KB |
 > | `T-VN-DAGSTER-STORAGE` (완료) | [archive/tasks-acceptance-dagster-storage.md](archive/tasks-acceptance-dagster-storage.md) | 약 12 KB |
 > | `T-VN-QUOTA-ARITHMETIC` (완료) | [archive/tasks-acceptance-quota-arithmetic.md](archive/tasks-acceptance-quota-arithmetic.md) | 약 17 KB |
+> | `T-MAP-01` (완료) | [archive/tasks-acceptance-map-01.md](archive/tasks-acceptance-map-01.md) | 약 4 KB |
+> | `T-GR-00-LEDGER` (완료) | [archive/tasks-acceptance-gr-00-ledger.md](archive/tasks-acceptance-gr-00-ledger.md) | 약 3 KB |
 
 ## 지금 무엇이 사실인가 — `T-VN-FINAL-REBUILD`
 
@@ -2360,36 +2362,7 @@ PR은 머지 직전.
 
 ## T-MAP-01
 
-2026-10-13 Track 2 설계(geo·weather·transport의 odroid 이전)에서 열었다. 접두사 `T-MAP-`는 임시다(ADR-110 열린
-결정 5; 소유자가 `T-NNN` 정식화를 고르면 `T-MAP-01`·`02`를 재번호하되 journal·acceptance 참조도 함께). 문서만
-바꾸는 PR이다 — 브랜치 `docs/adr-110-geo-transport-on-odroid`(origin/main `f7affea8`에서).
-
-- 만든/고친 것: `docs/adr/110-geo-transport-hosts-move-to-odroid.md`(proposed), `docs/adr/README.md`(다음 후보 111,
-  110 행), `docs/integration-map.md` §1(geo·transport 행 '계획: 호스트 odroid' + Manager ADR-58 포인터)·§2(LAN
-  화살표·timeout)·§3(transport export 행 allow-list)·§4(geocoding 행 핀 금지 재확인), `CLAUDE.md` geocoding 정본 줄,
-  `docs/tasks.md`·이 절·journal·resume.
-- 하지 않은 것(범위 밖, 금지): `src`·`packages`·`alembic`·`tests`·`.env.example`·`docker/**`·CHANGELOG·`openapi.json`.
-  `.env.example:198,234`의 standalone 주석은 T-MAP-02 코드 PR에 싣는다.
-- 해제 조건: 문서 lint(`tests/unit/test_docs_archive_links.py` 225,280 B 상한 포함·`tests/lint/test_task_ledger_conventions.py`·
-  `scripts/check_task_ledger_deletions.py`·`scripts/check_prod_redaction.py` #508 — docs에 사설 IP 리터럴 0건, 호스트는
-  이름으로) 초록 + ADR README 카운터 연속(109 → 110 → 다음 111) + 인용 file:line이
-  head에 존재(`settings.py:150,159-164,165-176,364-374,388,509-519,537-542`; `route.ts:3-6`; `frontend.Dockerfile:57,62`;
-  `kor_travel_transport.py:104,435-452`; `assets.py:184`; geo client 8곳 `resources.py:1073-1076`·`app.py:709-712`·
-  `feature_update_service.py:527`·`api/routers/offline_uploads.py:1482`·`admin_issues.py:276,306`·
-  `dagster/offline_uploads.py:50-53`·`cli/main.py:447`) + 머지(doc-only — 소유자 지시(2026-07-28 이후 반복)로 pytest
-  세션은 생략하되 `lint.yml` 초록 뒤; CLAUDE.md §5-1의 "CI green"은 doc-only PR에서 lint.yml로 충족한다).
-- 종결 소유자: `[x]` 전환·`tasks-done.md` 이관은 머지가 조건이라 이 PR 안에서 할 수 없다 — **T-GR-00-LEDGER**가
-  단일 소유다(§T-GR-00-LEDGER 마지막 문장; T-MAP-02는 T-GR-00-LEDGER를 선행으로 두므로 닫을 경우가 없다 — '또는'은
-  두 PR이 서로 상대가 했다고 믿는 구멍이라 쓰지 않는다. T-GR-00 선례).
-- 설계와 달리 쓴 것: `frontend.Dockerfile` 인용을 `:56` → `:57`(ARG)·`:62`(ENV)로, preflight를 `:164-176` → `:165-176`로
-  정정(1차 리뷰가 초고의 `:165-177`·`:509-520` 한 줄 초과를 잡았다); geo client 생성 지점은 설계의 암묵 "4곳"이 아니라
-  **8곳**(1차 리뷰 HIGH — `admin_issues.py` 2곳은 timeout 인자 없음, `dagster/offline_uploads.py`·`cli/main.py`는
-  `10.0` 하드코딩); Map에는 회로차단을 두지 않는다(ADR-110 결정 3 — 설계 §9.1의 Map 행은 connect 분리만 요구한다);
-  설계 §14-19(전량 재계획 수용 vs 운영자 skip)는 결정이 아니라 추천으로 적고 열린 결정 2에 올렸다; 설계 §9.1·§5.6 ⑥의
-  "geo 키는 loopback 면제라 검증된 적 없다"는 **틀려서** 정정했다(geo 면제는 admin 프록시 컨텍스트만 — geo
-  `security.py:154-170`; Map 호출은 오늘도 대조된다, 08-13 사고 `settings.py:168-171`; ADR-110 컨텍스트 4·결정 4·열린
-  결정 3 — 2차 리뷰); LAN 주소 리터럴은 `scripts/check_prod_redaction.py`(#508) 때문에 호스트 이름으로 썼다; T-MAP-02
-  착수 순서는 설계 §13 사슬과 달리 병렬을 **제안**만 하고 열린 결정 6으로 올렸다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-map-01.md](archive/tasks-acceptance-map-01.md)로 옮겼다(2026-10-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-MAP-02
 
@@ -2449,25 +2422,7 @@ run이 호출마다 10 s를 소모한다. 규모 S.
 
 ## T-GR-00-LEDGER
 
-journal·tasks-done 다음 경계 분리(doc-only, PR-1 선행). 2026-10-13 실측 `journal.md` **≈224,0xx B**(ADR-110 doc PR
-`docs/adr-110-geo-transport-on-odroid` 3차 리뷰 반영 뒤 — 커밋 전 측정 223,970 B; T-GR-00 PR-0 시점 208,660 = HEAD 202,686
-+ PR-0 항목)·`tasks-done.md` 200,699 B — 상한 225,280 B까지 각각 **≈1.3 KB**·24,581 B라 journal 항목 한 건(≈7~12 KB)은
-물론 한 문단만 더해도 `tests/unit/test_every_docs_markdown_stays_within_readable_limit`가 빨개진다. **T-GR-01·T-MAP-02
-어느 코드 PR보다도, 그리고 어느 doc-only PR보다도 먼저 선행한다(여유 ≈1.3 KB) — tasks.md·resume의 T-MAP-02 의존도 같은
-말이다.** `tasks-rule.md` §8의 "200 KB 근접" 분리
-기준을 둘 다 이미 넘었다. 의존: T-GR-00 머지. 규모 S. T-GR-00·T-MAP-01의 `[x]` 전환·tasks-done 이관을 함께 싣는다.
-
-- journal 현행 창(2026-09-14~)에서 가장 오래된 묶음을 `docs/archive/journal-2026-09c.md`(이름은 §8 규약)로, `tasks-done.md`
-  가장 오래된 절 묶음을 `docs/archive/tasks-done-*.md`로 옮기고 각 파일 상단 "과거 기록 아카이브" 인덱스 표를 갱신한다.
-- 바이트 보존 검산(이동 전 원본 바이트 == 이동 후 잔여 + 아카이브 - stub)을 PR 본문에 적는다; 두 파일 모두 분리 뒤
-  ≤ 200,000 B.
-- `tests/unit/test_docs_archive_links.py`·`scripts/check_journal_update.py`·docs 크기 lint 초록. 즉시 머지(doc-only).
-- 실행(2026-10-15, 브랜치 `docs/t-gr-00-ledger`): journal 2026-09-20~25 8건 → `archive/journal-2026-09e.md`(위 첫 조문의
-  `09c`는 이미 쓰였고 09d도 #1319가 썼다 — 규약 §8의 다음 글자), tasks-done 2026-08-04~05 2절 → `archive/tasks-done-2026-08a.md`.
-  검산 journal 209,356 = 182,096 + 27,260, tasks-done 200,699 = 89,636 + 111,063(아카이브 본문 = 이동 바이트, 예외는 상대 링크
-  4개 `../` 재기준화 +12 B와 끝 빈 줄 1 B — journal 2026-10-15). T-GR-00·T-MAP-01 `[x]`·tasks-done 이관을 실었다.
-- 실측(커밋 직전 `wc -c`, 이 PR의 journal·resume 항목 포함): `journal.md` 184,071 B · `tasks-done.md` 91,029 B — 둘 다
-  ≤ 200,000 B. 이 절의 `[x]`·이관은 머지가 조건이라 다음 doc-only PR(ADR-110 사실 갱신)이 싣는다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-gr-00-ledger.md](archive/tasks-acceptance-gr-00-ledger.md)로 옮겼다(2026-10-16, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-GR-01
 
@@ -2746,6 +2701,36 @@ tests. 의존: T-GR-02·04. 규모 M.
   `replan` 뒤 RunRequest의 run_key가 유일해 실제 run이 생긴다.
 - 격리 스택 e2e: **첫 tick이 기준선을 기록한 뒤**(계획 0) `manual_rebuild` → RunRequest 0건; 소량 delta → 1 tick → 계획 1 → RunRequest 1
   → 커버리지 상승.
+- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-05-geo-release-sensor`): (1) 센서는 `dagster/geo_release_sensor.py`다
+  (`sensors.py`는 큐 센서 모듈이라 따로 뒀다). **판정은 공용 함수뿐** — 감지·계획은 `client.create_geo_release_plan`
+  (#1331 `plan_geo_release`, `/detect`와 같다), 기준선·멱등·끝난 토큰·롤백 정리는 그 함수 몫이라 센서 테스트는 그 결과를
+  따르는지만 본다(계획 규칙 자체는 통합 테스트). 커서는 쓰지 않는다 — 기준선은 DB 행이다. (2) **항목 = run 1개**(MCST는
+  run 1개·dataset 13개, 상태도 항목 하나). (3) **replay 게이트**: `launch_blocked_reason`이 있는 항목은 내지 않고 Skip
+  사유에 `위치:operation=사유`로 남긴다 — 지금은 replay 항목 전부(MOIS·datagokr fileData·standard_data)가 막혀 있어 그
+  항목이 남은 계획은 완료되지 않는다(T-GR-08이 `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`를 채우면 이어진다). (4) **상한**:
+  tick 300초, 진행 중 run 1개(`GEO_RELEASE_MAX_IN_FLIGHT`) — geo 의존 job은 전부 `GEO_HEAVY_POOL`(limit 1)이라 어차피
+  직렬이고, 여러 개를 내면 pool 줄만 길어진다. 새 pool·limit 태그 없음. 기본 STOPPED(소유자 지시). (5) **완료**:
+  `complete_geo_release_plan(…, sigungu_resolver=)` — resolver는 그 tick의 geo client(`resolve_sigungu_by_radius`)다.
+  sensor resource는 DB client 하나뿐이고(`reverse_geocoder` resource를 초기화하지 않는다) geo HTTP는 tick 안에서 연
+  짧은 client로 `dataset/version` 1회(완료 tick에만 sigungu 조회). (6) 전이: SUCCESS → done; MOIS `budget_exhausted`면
+  `mois_load_continuation_decision`(단일 정본)이 이어 달리라고 하면 다음 `attempt_seq`로 되돌리고(상한 12) 아니면
+  `failed(no_progress)`; 비-MOIS 실패는 1회 자동 재요청 뒤 `failed(run_failed)`; `requested` 900초(3 tick) 무run →
+  `failed(run_not_launched)`. run 조회 키는 RunRequest에 단 `kor_travel_map.geo_release_run_key`(`map_owned_runs_filter`),
+  run_key = `geo_release/{token}/{plan_seq}/{operation}/{position}/{attempt}` — replan은 `plan_seq`가 달라 유일하다.
+  (7) 범위 밖으로 남긴 것: PinVi에 링크 변경을 알리는 stream 이벤트(메모만), 열린 결정 6(geo-release run 한정 timeout
+  재시도 — 미승인이라 attempt 2로만 복구), 격리 스택 e2e(배포 뒤).
+- 구현 메모 2(2026-10-16, #1332 적대 리뷰 2인 반영): (8) **MOIS 이중 이어 달리기 차단** — `mois_load_continuation_sensor`는
+  마지막 run에 `kor_travel_map.geo_release_plan_id`(상수는 `run_scope.GEO_RELEASE_PLAN_ID_TAG`)가 있으면 Skip한다(ADR-109
+  5.5 문장 정정). 지금은 MOIS가 replay 게이트에 막혀 잠복이지만 T-GR-08부터 실제로 난다. (9) **supersede 고아 정리** — 계획이
+  닫힐 때 그 계획의 `requested` 항목은 `failed(superseded)`; **CANCELED는 재요청 없이 `failed(canceled)`**. 두 사유를
+  어휘에 더하느라 **migration 409**(`409_geo_release_item_reasons` — 408은 배포 경로에 있어 고치지 않았다)와 admin
+  OpenAPI의 `state_reason` enum이 바뀐다(**PinVi 재vendor 필요**). (10) **geo client 생성은 `geocoding.open_geo_client(settings)`
+  하나** — 운영 API와 센서가 쓴다. acceptance 머리의 `kor_travel_geo_client_resource`(센서용 경량 resource) 대신 이
+  helper다(소유자 위임 결정 — resource를 두면 센서가 tick마다 쓰지 않을 client를 초기화하고, helper는 tick 안에서만 산다).
+  (11) **replay가 막힌 계획은 T-GR-08 전까지 `running`으로 둔다**(소유자 위임 결정 — skip으로 바꾸지 않는다). 센서를 켜도
+  replay 항목(MOIS·datagokr fileData·standard_data)이 든 계획의 완료를 기대하지 말 것. (12) 운영 메모: `attempt_seq`는 단조라
+  sweep 뒤에도 재요청 상한(비-MOIS 2, MOIS 12)이 누적된다; `failed(run_not_launched)`·`failed(canceled)`는 최종 상태다(센서가
+  다시 내지 않는다 — 운영자 `replan`).
 
 ## T-GR-06
 

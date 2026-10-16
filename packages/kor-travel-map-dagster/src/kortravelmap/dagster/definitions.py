@@ -25,6 +25,7 @@ from .file_registry_scan import (
     FILE_REGISTRY_SCAN_JOBS,
     FILE_REGISTRY_SCAN_SCHEDULES,
 )
+from .geo_release_sensor import kor_travel_geo_release_sensor
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .manual_provider_dedup import (
     MANUAL_PROVIDER_DEDUP_JOBS,
@@ -209,6 +210,7 @@ defs = Definitions(
         *FEATURE_UPDATE_SENSORS,
         *FEATURE_OPERATION_TRACKING_SENSORS,
         mois_load_continuation_sensor,
+        kor_travel_geo_release_sensor,
     ],
     resources={
         key: (

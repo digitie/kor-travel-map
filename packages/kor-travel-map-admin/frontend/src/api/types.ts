@@ -9930,7 +9930,7 @@ export interface components {
              */
             state: "pending" | "requested" | "done" | "failed" | "skipped";
             /** State Reason */
-            state_reason: ("disabled" | "no_geo_dependency" | "queue_only" | "operator" | "sweep" | "run_not_launched" | "no_progress" | "run_failed") | null;
+            state_reason: ("disabled" | "no_geo_dependency" | "queue_only" | "operator" | "sweep" | "run_not_launched" | "no_progress" | "run_failed" | "superseded" | "canceled") | null;
         };
         /**
          * GeoReleaseListData

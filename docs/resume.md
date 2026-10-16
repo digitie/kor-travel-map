@@ -1,3 +1,16 @@
+## 2026-10-16 — geo 릴리스 센서(T-GR-05): 브랜치 `feat/t-gr-05-geo-release-sensor`
+
+**다음 한 작업: CI 초록 → 리뷰 → 머지 → 배포(센서는 STOPPED로 들어간다 — odroid geo mv_refresh 실측 뒤 켠다) →
+T-GR-06(admin UI) / T-GR-08(replay — 게이트를 연다).**
+
+- 바뀐 것: `dagster/geo_release_sensor.py`(센서·tick 규칙), definitions 등록, repo·client 항목 전이 셋, 테스트.
+- 바뀌지 않은 것: 계획 규칙(공용 함수), Manager `dagster.yaml`(새 pool·limit 없음).
+- 리뷰 반영으로 바뀐 것: migration 409(항목 사유 `superseded`·`canceled`), admin OpenAPI `state_reason` enum(**PinVi 재vendor
+  필요**), `geocoding.open_geo_client`, MOIS 이어 달리기 센서가 릴리스 run을 건너뛴다.
+- **운영 주의.** (1) **T-GR-08 전에는 replay 항목(MOIS·datagokr fileData·standard_data)이 든 계획이 `running`으로 남는다 —
+  센서를 켜도 완료를 기대하지 말 것.** (2) `attempt_seq`는 단조라 sweep 뒤에도 재요청 상한이 누적된다. (3)
+  `failed(run_not_launched)`·`failed(canceled)`는 최종 상태다 — 다시 돌리려면 운영자 `replan`.
+
 ## 2026-10-16 — geo 릴리스 계획 표·계획 함수·admin API(T-GR-04): 브랜치 `feat/t-gr-04-geo-release-plan`
 
 **다음 한 작업: CI 초록 → 적대 리뷰 → 머지 → PinVi admin 스냅샷 재vendor(Map API 배포 **전**) → 배포(408) → T-GR-05(센서).**

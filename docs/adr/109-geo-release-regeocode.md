@@ -193,7 +193,8 @@ None이면 인자를 생략한다. 30일 만료는 backstop으로 유지한다.
 
 ### 5. 재처리 기동 = 릴리스 센서 → 전용 job RunRequest (큐가 아니다; 열린 결정 11)
 
-`kor_travel_geo_release_sensor`(300 s, `default_status=RUNNING`(열린 결정 3), `jobs=` `FEATURE_LOAD_SCHEDULE_SPECS`
+`kor_travel_geo_release_sensor`(300 s, **`default_status=STOPPED`**(구현 T-GR-05 — 소유자 지시: odroid geo 스케줄을
+mv_refresh 실측 뒤 켜고 Map 센서도 그 뒤에 켠다; 열린 결정 3의 권장안 RUNNING을 대체), `jobs=` `FEATURE_LOAD_SCHEDULE_SPECS`
 (`dagster/schedules.py:208`)의 전 job)가 in-process client로 DB를 읽고 쓴다 — Map API를 호출하지 않는다
 (큐 센서 `dagster/sensors.py:123-147`과 같은 패턴). 큐(`feature_update_requests`)를 쓰지 않는 이유: 큐 run은
 dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으며(컨텍스트 6) 재시도 때 reverse를 전량
@@ -237,7 +238,7 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    이번 tick Skip(큐 run이 dataset 전체를 transaction 하나로 쥐는 동안 전용 job의 첫 chunk가 전역 잠금
    대기로 `GEO_HEAVY_POOL`을 점유한 채 멎어 21,600 s에 죽을 수 있다, 컨텍스트 6); 같은 `operation_key`의
    run이 돌면 Skip(`map_owned_runs_filter`, `dagster/run_scope.py:80`; MOIS `mois-continue:*` run 포함).
-   `RunRequest(job_name=operation_key, run_key=geo_release/{data_token}/{plan_seq}/{operation_key}/{provider_dataset_id}/{attempt_seq},
+   `RunRequest(job_name=operation_key, run_key=geo_release/{data_token}/{plan_seq}/{operation_key}/{position}/{attempt_seq},
    run_config, tags={"kor_travel_map.trigger_kind": "sensor", "kor_travel_map.geo_release_plan_id": str(plan_id)})`
    — `"sensor"`는 `TRIGGER_KIND_VALUES`에 이미 있다(`core/feature_operation.py:52-59`); `geo_release_plan_id`는
    전용 run의 유일한 판별자다(MOIS 이어 달리기 run도 `trigger_kind=sensor`를 쓴다, 결정 4). `attempt_seq`는 단조
@@ -249,7 +250,11 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    `attempt_seq`를 재요청한다(`converted==0` 정지 규칙까지 단일 정본; 정지면 `failed(no_progress)`; MOIS 상한
    12). 그 외 SUCCESS → `done`. `requested`인데 3 tick(15 min) 뒤에도 run이 없으면 `failed(run_not_launched)`.
    **릴리스 센서가 MOIS 이어 달리기를 대신한다** — 계획이 활성인 동안 continuation sensor(기본 STOPPED)를
-   켤 필요가 없고, 켜져 있어도 Skip 조건이 이중 요청을 막는다.
+   켤 필요가 없다. **켜져 있으면 이중 체인이 된다** — 이어 달리기 센서는 마지막 MOIS run만 보고 같은 판정을
+   하므로, 그 run이 릴리스 run이면 두 센서가 각자 다음 run을 낸다(Skip 조건은 진행 중 run만 막는다). 그래서 이어 달리기
+   센서는 마지막 run에 `kor_travel_map.geo_release_plan_id` tag가 있으면 Skip한다(구현 T-GR-05). CANCELED는 재요청하지
+   않고 `failed(canceled)`다(운영자의 취소 존중); 계획이 `superseded`될 때 그 계획의 `requested` 항목은
+   `failed(superseded)`다(migration 409 — 진행 중 고아가 없어야 한 번에 run 1개가 성립).
 6. **완료 판정은 비-skipped dataset만.** 모든 항목 terminal이면 `coverage(current, provider_dataset_ids=비-skipped)`의
    `stamped_other + unstamped(provider 기원) == 0`이면 완료 단계. 아니면 잔여가 있는 dataset마다 **1회
    sweep** 뒤 잔여 수를 `residual_stale`로 기록하고 완료 단계(비율 문턱 없음, 두 번째는 운영자 `replan`).
