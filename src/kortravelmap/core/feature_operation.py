@@ -159,7 +159,6 @@ KNPS는 job 하나에 dataset 다섯이 결박돼 있어 dataset마다 run이 �
 dagster 패키지 테스트가 schedule spec의 run_config resource 이름과 같음을 고정한다."""
 
 REPLAY_RECORDS_RESOURCES: dict[str, str] = {
-    "feature_place_mois_licenses_job": "mois_license_records",
     "feature_event_datagokr_cultural_festivals_job": "datagokr_cultural_festivals",
     "feature_place_standard_museums_job": "standard_museums",
     "feature_place_standard_tourist_attractions_job": "standard_tourist_attractions",
@@ -173,15 +172,33 @@ REPLAY_RECORDS_RESOURCES: dict[str, str] = {
     "feature_place_datagokr_jeju_local_restaurants_job": "datagokr_file_data_records",
 }
 """쿼터 민감 operation → ``source_mode=replay``를 받을 records resource(ADR-109 결정 7·열린 결정 4
-1단계 범위: MOIS·datagokr fileData·standard_data). **resource 쪽 ``source_mode``는 T-GR-08이
-더한다** — 그 전에 이 run_config로 run을 내면 Dagster config 검증이 거부한다(T-GR-05 센서는
-replay 항목을 T-GR-08 뒤에만 낸다)."""
+1단계 범위: datagokr fileData·standard_data). records resource가 config ``source_mode``(fetch |
+replay)를 받는다(T-GR-08, ``dagster/source_replay.py``).
 
-SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS: frozenset[str] = frozenset()
+**MOIS는 없다** — ``source_records.raw_data``가 ``MoisLicensePlaceRecord``와 1:1이 아니다
+(변환기가 쓰는 우편번호·건물관리번호·업종별 시설 필드 24개를 raw에 남기지 않는다).
+결정 7의 가정("golden으로 확인되는 provider만 켠다")대로 MOIS 항목은 fetch run_config로 낸다 —
+MOIS fetch는 data.go.kr 쿼터를 쓰지 않는다(로컬 SQLite 소스 DB 읽기, Phase A 내려받기는
+TTL 24h 게이트, acceptance §T-GR-08 구현 메모)."""
+
+SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS: frozenset[str] = frozenset(
+    {
+        "feature_event_datagokr_cultural_festivals_job",
+        "feature_place_standard_museums_job",
+        "feature_place_standard_tourist_attractions_job",
+        "feature_place_standard_parking_lots_job",
+        "feature_place_standard_special_streets_job",
+        "feature_place_datagokr_seoul_bookstores_job",
+        "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
+        "feature_place_datagokr_ansan_world_restaurants_job",
+        "feature_place_datagokr_jeju_local_restaurants_job",
+    }
+)
 """replay run_config로 센서가 **실제로 run을 내도 되는** operation — 그 records resource가
-``source_mode=replay``를 구현했다는 선언이다. T-GR-08이 resource를 구현하며 채운다. 여기 없는
-replay 항목은 계획에는 들어가되 ``launch_blocked_reason``이 붙고 센서(T-GR-05)는 내지 않는다
-(메모가 아니라 코드 게이트 — #1331 리뷰)."""
+``source_mode=replay``를 구현했고 golden(replay bundle == fetch bundle)이 확인됐다는 선언이다
+(T-GR-08). 여기 없는 replay 항목은 계획에는 들어가되 ``launch_blocked_reason``이 붙고 센서는
+내지 않는다(메모가 아니라 코드 게이트 — #1331 리뷰). dagster 패키지 테스트가 여기 든 operation의
+records resource가 ``source_mode=replay`` config를 실제로 받는지 확인한다."""
 C6C_CANCEL_PROBE_JOB_KIND = "c6c_cancel_probe"
 FEATURE_OPERATION_RESERVED_KINDS = frozenset(
     {

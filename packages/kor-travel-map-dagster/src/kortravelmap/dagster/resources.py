@@ -31,9 +31,18 @@ from kortravelmap.infra.file_store import (
     build_s3_object_store,
     create_s3_client,
 )
+from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_PROVIDER_NAME
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_POINT_DATASET_KEYS,
+)
+from kortravelmap.providers.standard_data import (
+    DATASET_KEY_CULTURAL_FESTIVALS,
+    DATASET_KEY_MUSEUMS,
+    DATASET_KEY_PARKING_LOTS,
+    DATASET_KEY_SPECIAL_STREETS,
+    DATASET_KEY_TOURIST_ATTRACTIONS,
+    STANDARD_DATA_PROVIDER_NAME,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -73,13 +82,23 @@ from .provider_fetchers import (
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
+from .source_replay import (
+    SOURCE_MODE_CONFIG_SCHEMA,
+    SOURCE_MODE_REPLAY,
+    ReplayRecordStream,
+    datagokr_model_from_raw,
+    raw_mapping_from_raw,
+    source_mode,
+)
 
 __all__ = [
     "PROVIDER_RECORD_RESOURCE_DEFINITIONS",
     "mois_license_records_resource",
     "mois_load_plan_resource",
     "PROVIDER_RECORD_RESOURCE_SPECS",
+    "REPLAY_FROM_RAW",
     "ProviderRecordResourceSpec",
+    "ReplaySource",
     "build_offline_upload_store_from_settings",
     "build_provider_record_guard_resource",
     "build_provider_record_live_resource",
@@ -387,9 +406,25 @@ def build_provider_record_guard_resource(
     return _resource
 
 
+@dataclass(frozen=True, slots=True)
+class ReplaySource:
+    """records resource의 ``source_mode=replay`` 입력(ADR-109 결정 7, T-GR-08).
+
+    ``provider``·``dataset_key``는 적재가 ``SourceRecord``에 쓰는 값(provider 변환 모듈 상수)이고,
+    ``from_raw``는 저장된 ``raw_data``를 fetch와 **같은 record 모델**로 되살린다. golden 테스트가
+    "replay bundle == fetch bundle"을 확인한 provider만 이것을 받는다.
+    """
+
+    provider: str
+    dataset_key: str
+    from_raw: Callable[[dict[str, Any]], Any]
+
+
 def build_provider_record_live_resource(
     spec: ProviderRecordResourceSpec,
     fetch: Callable[[KorTravelMapSettings], Iterable[Any] | AsyncIterator[Any]],
+    *,
+    replay: ReplaySource | None = None,
 ) -> ResourceDefinition:
     """provider public client live fetcher를 resource value로 노출한다.
 
@@ -398,6 +433,10 @@ def build_provider_record_live_resource(
     ``fetch(settings)``가 반환한 record iterable(sync ``Iterable`` 또는 async
     generator)을 asset이 소비할 resource value로 돌려준다(여기서 소비하지 않음 —
     asset의 ``_record_batches``가 sync/async 모두 lazy하게 iterate).
+
+    ``replay``를 주면 config ``source_mode``(fetch | replay)를 받는다. replay면 provider를 부르지
+    않고(자격증명도 읽지 않는다) 저장된 current 원본을 되살리는 :class:`ReplayRecordStream`을
+    돌려준다.
 
     주의: Dagster는 ``@resource`` 함수가 sync generator object를 반환하면 이를
     setup/teardown resource generator로 해석한다. 따라서 sync ``Iterator``는 얇은
@@ -410,16 +449,26 @@ def build_provider_record_live_resource(
             "feature_operation_guard",
             "kor_travel_map_client",
         },
+        config_schema=SOURCE_MODE_CONFIG_SCHEMA if replay is not None else None,
         description=(
             f"{spec.resource_key} provider record live fetcher "
             f"({spec.provider_package}, {spec.dataset_key})."
         )
     )
-    def _resource(context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
+    def _resource(
+        context: InitResourceContext,
+    ) -> Iterable[Any] | AsyncIterator[Any] | ReplayRecordStream:
         ensure_feature_operation_guard_for_provider(
             context,
             boundary=spec.resource_key,
         )
+        if replay is not None and source_mode(context.resource_config) == SOURCE_MODE_REPLAY:
+            return ReplayRecordStream(
+                cast(AsyncKorTravelMapClient, context.resources.kor_travel_map_client),
+                provider=replay.provider,
+                dataset_key=replay.dataset_key,
+                from_raw=replay.from_raw,
+            )
         settings = KorTravelMapSettings()
         has_required_settings = all(
             getattr(settings, setting_name) is not None for setting_name in spec.setting_names
@@ -527,6 +576,20 @@ def datagokr_file_data_dataset_key_resource(
     return _datagokr_file_data_dataset_key(context, KorTravelMapSettings())
 
 
+REPLAY_FROM_RAW: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "datagokr_cultural_festivals": datagokr_model_from_raw("PublicCulturalFestival"),
+    "standard_museums": datagokr_model_from_raw("PublicMuseumArtGallery"),
+    "standard_tourist_attractions": datagokr_model_from_raw("PublicTouristAttraction"),
+    "standard_parking_lots": datagokr_model_from_raw("PublicParkingLot"),
+    "standard_special_streets": datagokr_model_from_raw("PublicSpecialStreet"),
+    "datagokr_file_data_records": raw_mapping_from_raw,
+}
+"""``source_mode=replay``를 받는 records resource → 저장된 ``raw_data``를 fetch와 같은 record로
+되살리는 함수(ADR-109 결정 7, T-GR-08). core ``REPLAY_RECORDS_RESOURCES``의 resource 집합과 같다
+(테스트 고정). golden 테스트(``test_source_replay.py``)가 resource마다 "replay bundle == fetch
+bundle"을 확인한다 — 여기 넣는 것은 그 golden을 통과시키는 것과 한 묶음이다."""
+
+
 PROVIDER_RECORD_RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
     spec.resource_key: build_provider_record_guard_resource(spec)
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -548,6 +611,11 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
     build_provider_record_live_resource(
         _DATAGOKR_CULTURAL_FESTIVALS_SPEC,
         fetch_datagokr_cultural_festivals,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_CULTURAL_FESTIVALS,
+            REPLAY_FROM_RAW["datagokr_cultural_festivals"],
+        ),
     )
 )
 
@@ -824,6 +892,11 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_museums"] = (
     build_provider_record_live_resource(
         _STANDARD_MUSEUMS_SPEC,
         fetch_standard_museums,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_MUSEUMS,
+            REPLAY_FROM_RAW["standard_museums"],
+        ),
     )
 )
 
@@ -836,6 +909,11 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_tourist_attractions"] = (
     build_provider_record_live_resource(
         _STANDARD_TOURIST_SPEC,
         fetch_standard_tourist_attractions,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_TOURIST_ATTRACTIONS,
+            REPLAY_FROM_RAW["standard_tourist_attractions"],
+        ),
     )
 )
 
@@ -848,6 +926,11 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_parking_lots"] = (
     build_provider_record_live_resource(
         _STANDARD_PARKING_SPEC,
         fetch_standard_parking_lots,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_PARKING_LOTS,
+            REPLAY_FROM_RAW["standard_parking_lots"],
+        ),
     )
 )
 
@@ -860,6 +943,11 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_special_streets"] = (
     build_provider_record_live_resource(
         _STANDARD_SPECIAL_STREETS_SPEC,
         fetch_standard_special_streets,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_SPECIAL_STREETS,
+            REPLAY_FROM_RAW["standard_special_streets"],
+        ),
     )
 )
 
@@ -872,20 +960,27 @@ _DATAGOKR_FILE_DATA_SPEC: ProviderRecordResourceSpec = next(
 
 @resource(
     required_resource_keys={"feature_operation_guard", "kor_travel_map_client"},
-    config_schema=_DATAGOKR_FILE_DATA_CONFIG_SCHEMA,
+    config_schema={**_DATAGOKR_FILE_DATA_CONFIG_SCHEMA, **SOURCE_MODE_CONFIG_SCHEMA},
     description=(
         "datagokr_file_data_records provider record live fetcher "
-        "(python-datagokr-api, datagokr_file_data)."
+        "(python-datagokr-api, datagokr_file_data; source_mode=replay는 저장 원본)."
     ),
 )
 def _datagokr_file_data_records_resource(
     context: InitResourceContext,
-) -> Iterable[Any] | AsyncIterator[Any]:
+) -> Iterable[Any] | AsyncIterator[Any] | ReplayRecordStream:
     ensure_feature_operation_guard_for_provider(
         context,
         boundary="datagokr_file_data_records",
     )
     settings = KorTravelMapSettings()
+    if source_mode(context.resource_config) == SOURCE_MODE_REPLAY:
+        return ReplayRecordStream(
+            cast(AsyncKorTravelMapClient, context.resources.kor_travel_map_client),
+            provider=DATAGOKR_FILEDATA_PROVIDER_NAME,
+            dataset_key=_datagokr_file_data_dataset_key(context, settings),
+            from_raw=REPLAY_FROM_RAW["datagokr_file_data_records"],
+        )
     has_required_settings = all(
         getattr(settings, setting_name) is not None
         for setting_name in _DATAGOKR_FILE_DATA_SPEC.setting_names

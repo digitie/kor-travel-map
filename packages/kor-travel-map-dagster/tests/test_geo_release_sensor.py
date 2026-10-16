@@ -47,7 +47,14 @@ _KNPS_CONFIG = {
         "knps_point_records": {"config": {"dataset_key": "knps_restrooms"}},
     }
 }
-_MOIS_CONFIG = {"resources": {"mois_license_records": {"config": {"source_mode": "replay"}}}}
+_MOIS_CONFIG: dict[str, Any] | None = None  # MOIS는 fetch run_config다(T-GR-08 — raw가 1:1 아님)
+_FESTIVALS = "feature_event_datagokr_cultural_festivals_job"
+_FESTIVALS_REPLAY = {
+    "resources": {"datagokr_cultural_festivals": {"config": {"source_mode": "replay"}}}
+}
+# 게이트에 막힌 replay 항목의 예 — launchable 집합에 없는 operation이 replay config를 가진 경우.
+_UNLISTED = "feature_place_unlisted_quota_job"
+_UNLISTED_REPLAY = {"resources": {"unlisted_records": {"config": {"source_mode": "replay"}}}}
 
 
 def _item(
@@ -255,7 +262,7 @@ def test_created_plan_launches_the_first_launchable_item_with_release_tags() -> 
     client = _FakeClient(
         "created",
         items={
-            1: _item(1, MOIS_LOAD_JOB_NAME, run_config=_MOIS_CONFIG),  # replay — 게이트에 막힘
+            1: _item(1, _UNLISTED, run_config=_UNLISTED_REPLAY),  # replay — 게이트에 막힘
             2: _item(2, _MCST, datasets=13),
             3: _item(3, _KNPS, run_config=_KNPS_CONFIG),
         },
@@ -263,7 +270,7 @@ def test_created_plan_launches_the_first_launchable_item_with_release_tags() -> 
     result = _tick(client)
 
     assert isinstance(result, RunRequest)
-    assert result.job_name == _MCST  # MOIS(replay)는 건너뛰고, MCST 13 dataset이 run 1개
+    assert result.job_name == _MCST  # 막힌 replay는 건너뛰고, MCST 13 dataset이 run 1개
     assert result.run_key == f"geo_release/{_TOKEN}/2/{_MCST}/2/1"
     assert result.tags == {
         "kor_travel_map.trigger_kind": "sensor",
@@ -282,12 +289,27 @@ def test_knps_run_carries_its_dataset_run_config() -> None:
 
 
 def test_only_blocked_items_left_reports_the_reason() -> None:
-    client = _FakeClient(
-        "existing", items={1: _item(1, MOIS_LOAD_JOB_NAME, run_config=_MOIS_CONFIG)}
-    )
+    client = _FakeClient("existing", items={1: _item(1, _UNLISTED, run_config=_UNLISTED_REPLAY)})
     result = _tick(client)
     assert isinstance(result, SkipReason)
     assert "replay_not_launchable_before_t_gr_08" in (result.skip_message or "")
+
+
+def test_a_launchable_replay_item_runs_with_its_replay_config() -> None:
+    """T-GR-08 뒤 replay 항목(축제)은 게이트를 지나 replay run_config 그대로 나간다."""
+    client = _FakeClient("created", items={1: _item(1, _FESTIVALS, run_config=_FESTIVALS_REPLAY)})
+    result = _tick(client)
+    assert isinstance(result, RunRequest)
+    assert (result.job_name, result.run_config) == (_FESTIVALS, _FESTIVALS_REPLAY)
+
+
+def test_a_mois_item_runs_in_fetch_mode() -> None:
+    """MOIS는 replay가 아니다 — run_config 없이(fetch) 나간다."""
+    client = _FakeClient("created", items={1: _item(1, MOIS_LOAD_JOB_NAME)})
+    result = _tick(client)
+    assert isinstance(result, RunRequest)
+    assert result.job_name == MOIS_LOAD_JOB_NAME
+    assert not result.run_config
 
 
 def test_one_run_in_flight_at_a_time() -> None:
@@ -374,9 +396,7 @@ def _mois_run(*, converted: str, budget: str = "3600", available: str = "3600") 
     )
 
 
-# 아래 MOIS 이어 달리기 두 테스트는 **지금은 운영에서 도달하지 않는다** — MOIS 항목은
-# replay run_config라 게이트(`SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`가 비어 있다)에 막혀
-# `requested`가 되지 않는다. T-GR-08이 게이트를 열면 이 경로가 산다 — 그때를 위해 지금 고정한다.
+# MOIS 이어 달리기 — T-GR-08부터 MOIS 항목은 fetch run_config로 나가므로 운영 경로다.
 
 
 def test_mois_budget_exhausted_is_continued_not_done() -> None:

@@ -296,13 +296,11 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     )
     assert reasons["mois_license_incremental_update"] == ("skipped", "queue_only")
 
-    # 쿼터 민감 → replay run_config.
+    # MOIS는 fetch(T-GR-08 — raw가 record 1:1이 아니다); 쿼터 민감 datagokr → replay run_config,
+    # T-GR-08 뒤 게이트가 열려 있다.
     mois = by_op["feature_place_mois_licenses_job"][0]
-    assert mois.run_config == {
-        "resources": {"mois_license_records": {"config": {"source_mode": "replay"}}}
-    }
-    # replay 게이트 — T-GR-08 전에는 센서가 낼 수 없는 항목이다(코드 게이트).
-    assert mois.launch_blocked_reason == "replay_not_launchable_before_t_gr_08"
+    assert mois.run_config is None
+    assert mois.launch_blocked_reason is None
     bookstores = by_op["feature_place_datagokr_seoul_bookstores_job"][0]
     assert bookstores.run_config == {
         "resources": {
@@ -314,6 +312,7 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
             },
         }
     }
+    assert bookstores.launch_blocked_reason is None
 
     assert [item.position for item in items] == list(range(1, len(items) + 1))
 
@@ -352,15 +351,26 @@ def test_run_config_for_a_job_without_dataset_binding_is_none() -> None:
     assert geo_release_repo.run_config_for_dataset("feature_place_khoa_beaches_job", "x") is None
 
 
-def test_no_replay_operation_is_launchable_before_t_gr_08() -> None:
-    """replay records resource(``source_mode``)는 T-GR-08이 구현한다 — 그 전 게이트는 닫혀 있다."""
-    assert frozenset() == SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS
+def test_every_replay_operation_is_launchable_after_t_gr_08() -> None:
+    """T-GR-08이 records resource에 ``source_mode``를 구현했다 — 1단계 replay 전부가 열려 있고,
+    MOIS는 replay가 아니다(raw가 record 1:1이 아니다 — fetch run_config)."""
+    assert frozenset(REPLAY_RECORDS_RESOURCES) == SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS
+    assert "feature_place_mois_licenses_job" not in REPLAY_RECORDS_RESOURCES
     for operation_key in REPLAY_RECORDS_RESOURCES:
         config = geo_release_repo.run_config_for_dataset(operation_key, "any")
-        assert (
-            geo_release_repo.launch_blocked_reason(operation_key, config)
-            == "replay_not_launchable_before_t_gr_08"
+        assert geo_release_repo.launch_blocked_reason(operation_key, config) is None
+    assert (
+        geo_release_repo.run_config_for_dataset(
+            "feature_place_mois_licenses_job", "mois_license_features_bulk"
         )
+        is None
+    )
+    # 게이트는 남는다 — 목록에 없는 operation의 replay config는 막힌다.
+    unlisted = {"resources": {"x_records": {"config": {"source_mode": "replay"}}}}
+    assert (
+        geo_release_repo.launch_blocked_reason("feature_place_unlisted_job", unlisted)
+        == "replay_not_launchable_before_t_gr_08"
+    )
     assert geo_release_repo.launch_blocked_reason("feature_place_khoa_beaches_job", None) is None
 
 
@@ -611,11 +621,11 @@ def test_launch_gate_tolerates_malformed_run_config() -> None:
     """resource config가 dict가 아니어도 게이트가 죽지 않는다(#1331 재리뷰 F4)."""
     for config in (
         {"resources": "x"},
-        {"resources": {"mois_license_records": "replay"}},
-        {"resources": {"mois_license_records": {"config": "replay"}}},
+        {"resources": {"x_records": "replay"}},
+        {"resources": {"x_records": {"config": "replay"}}},
     ):
         assert (
-            geo_release_repo.launch_blocked_reason("feature_place_mois_licenses_job", config)
+            geo_release_repo.launch_blocked_reason("feature_place_unlisted_job", config)
             is None
         )
 

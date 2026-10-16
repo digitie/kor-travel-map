@@ -12,8 +12,9 @@ ADR-109 결정 5. geo가 새 데이터셋(새 ``data_token``)을 서빙하면 ge
   함수). 첫 관측 토큰은 기준선(계획 0), 같은 토큰 멱등, 끝난 토큰 재계획 없음.
 - 항목 = run 1개(``provider_dataset_ids`` — MCST는 run 1개에 dataset 13개). 상태도 항목 하나로
   본다.
-- replay 게이트: ``GeoReleaseItem.launch_blocked_reason``이 있는 항목은 내지 않는다(지금은 replay
-  전부 — ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``가 비어 있다, T-GR-08이 채운다).
+- replay 게이트: ``GeoReleaseItem.launch_blocked_reason``이 있는 항목은 내지 않는다(T-GR-08이
+  1단계 replay 전부를 ``SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS``에 넣었다 — 지금 막히는 항목은
+  없다. MOIS는 replay가 아니라 fetch run_config로 나간다).
 - 완료: ``client.complete_geo_release_plan(…, sigungu_resolver=)`` — resolver는 이 tick의 geo
   client로 만든다(``sigungu_by_radius`` cache target 링크 재동기화).
 
