@@ -148,7 +148,8 @@ def test_checker_goes_red(source: str, needle: str) -> None:
 
 
 def test_one_current_dataset_factory_for_four_paths() -> None:
-    """``fetch_current_dataset(`` 호출 = resource·offline upload·CLI(asset·runner는 resource)."""
+    """``fetch_current_dataset(`` 호출 = resource·offline upload·CLI(asset·runner는 resource)
+    + 운영 API ``/v1/ops/geo-releases``(감지·현재 토큰 표시 — T-GR-04)."""
     roots = (
         _REPO / "src",
         _REPO / "packages" / "kor-travel-map-api" / "src",
@@ -173,6 +174,7 @@ def test_one_current_dataset_factory_for_four_paths() -> None:
         "packages/kor-travel-map-dagster/src/kortravelmap/dagster/resources.py",
         "packages/kor-travel-map-dagster/src/kortravelmap/dagster/offline_uploads.py",
         "src/kortravelmap/cli/main.py",
+        "packages/kor-travel-map-api/src/kortravelmap/api/routers/ops_geo_releases.py",
     }
     assert direct_dataset_version == set(), "dataset_version()을 팩토리 밖에서 부른다"
 

@@ -15822,7 +15822,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -17010,6 +17010,75 @@ ALTER TABLE ops.integrity_observation_scopes OWNER TO ktm_feature_schema_owner;
 
 ALTER TABLE ops.integrity_observation_scopes ALTER COLUMN integrity_observation_scope_id ADD GENERATED ALWAYS AS IDENTITY (
     SEQUENCE NAME ops.integrity_observation_scopes_integrity_observation_scope_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: kor_travel_geo_release_items; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.kor_travel_geo_release_items (
+    plan_id bigint NOT NULL,
+    "position" integer NOT NULL,
+    operation_key text NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    run_config jsonb,
+    attempt_seq integer DEFAULT 1 NOT NULL,
+    state text DEFAULT 'pending'::text NOT NULL,
+    state_reason text,
+    run_key text,
+    dagster_run_id text,
+    requested_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_kor_travel_geo_release_items_attempt CHECK ((attempt_seq >= 1)),
+    CONSTRAINT ck_kor_travel_geo_release_items_position CHECK (("position" >= 1)),
+    CONSTRAINT ck_kor_travel_geo_release_items_run_config CHECK (((run_config IS NULL) OR (jsonb_typeof(run_config) = 'object'::text))),
+    CONSTRAINT ck_kor_travel_geo_release_items_skip_reason CHECK (((state <> 'skipped'::text) OR (state_reason IS NOT NULL))),
+    CONSTRAINT ck_kor_travel_geo_release_items_state CHECK ((state = ANY (ARRAY['pending'::text, 'requested'::text, 'done'::text, 'failed'::text, 'skipped'::text])))
+);
+
+
+ALTER TABLE ops.kor_travel_geo_release_items OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: kor_travel_geo_releases; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.kor_travel_geo_releases (
+    plan_id bigint NOT NULL,
+    geo_data_token text NOT NULL,
+    plan_seq integer DEFAULT 1 NOT NULL,
+    geo_version_token text NOT NULL,
+    activated_at timestamp with time zone,
+    reference_months jsonb,
+    state text NOT NULL,
+    residual_stale integer,
+    sweep_started_at timestamp with time zone,
+    observed_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_kor_travel_geo_releases_data_token CHECK ((geo_data_token ~ '^dd1-[0-9a-f]{32}$'::text)),
+    CONSTRAINT ck_kor_travel_geo_releases_plan_seq CHECK ((plan_seq >= 1)),
+    CONSTRAINT ck_kor_travel_geo_releases_reference_months CHECK (((reference_months IS NULL) OR (jsonb_typeof(reference_months) = 'object'::text))),
+    CONSTRAINT ck_kor_travel_geo_releases_residual CHECK (((residual_stale IS NULL) OR (residual_stale >= 0))),
+    CONSTRAINT ck_kor_travel_geo_releases_state CHECK ((state = ANY (ARRAY['baseline'::text, 'planned'::text, 'running'::text, 'done'::text, 'superseded'::text]))),
+    CONSTRAINT ck_kor_travel_geo_releases_version_token CHECK ((geo_version_token ~ '^dv1-[0-9a-f]{32}$'::text))
+);
+
+
+ALTER TABLE ops.kor_travel_geo_releases OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: kor_travel_geo_releases_plan_id_seq; Type: SEQUENCE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ops.kor_travel_geo_releases ALTER COLUMN plan_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME ops.kor_travel_geo_releases_plan_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -19042,6 +19111,22 @@ ALTER TABLE ONLY ops.integrity_observation_scopes
 
 
 --
+-- Name: kor_travel_geo_release_items pk_kor_travel_geo_release_items; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_release_items
+    ADD CONSTRAINT pk_kor_travel_geo_release_items PRIMARY KEY (plan_id, "position");
+
+
+--
+-- Name: kor_travel_geo_releases pk_kor_travel_geo_releases; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_releases
+    ADD CONSTRAINT pk_kor_travel_geo_releases PRIMARY KEY (plan_id);
+
+
+--
 -- Name: managed_file_events pk_managed_file_events; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -19583,6 +19668,22 @@ ALTER TABLE ONLY ops.integrity_observation_runs
 
 ALTER TABLE ONLY ops.integrity_observation_scopes
     ADD CONSTRAINT uq_integrity_observation_scopes_dataset UNIQUE (provider_dataset_id);
+
+
+--
+-- Name: kor_travel_geo_release_items uq_kor_travel_geo_release_items_dataset; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_release_items
+    ADD CONSTRAINT uq_kor_travel_geo_release_items_dataset UNIQUE (plan_id, operation_key, provider_dataset_id);
+
+
+--
+-- Name: kor_travel_geo_releases uq_kor_travel_geo_releases_token_seq; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_releases
+    ADD CONSTRAINT uq_kor_travel_geo_releases_token_seq UNIQUE (geo_data_token, plan_seq);
 
 
 --
@@ -20901,6 +21002,13 @@ CREATE UNIQUE INDEX uq_dagster_schedule_audit_terminal_command ON ops.dagster_sc
 --
 
 CREATE UNIQUE INDEX uq_import_jobs_feature_run ON ops.import_jobs USING btree (dagster_run_id) WHERE ((kind = 'provider_feature_load_run'::text) AND (parent_job_id IS NULL));
+
+
+--
+-- Name: uq_kor_travel_geo_releases_active_token; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_kor_travel_geo_releases_active_token ON ops.kor_travel_geo_releases USING btree (geo_data_token) WHERE (state = ANY (ARRAY['planned'::text, 'running'::text]));
 
 
 --
@@ -23758,6 +23866,22 @@ ALTER TABLE ONLY ops.integrity_observation_runs
 
 ALTER TABLE ONLY ops.integrity_observation_scopes
     ADD CONSTRAINT fk_integrity_observation_scopes_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
+
+
+--
+-- Name: kor_travel_geo_release_items fk_kor_travel_geo_release_items_dataset; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_release_items
+    ADD CONSTRAINT fk_kor_travel_geo_release_items_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
+
+
+--
+-- Name: kor_travel_geo_release_items fk_kor_travel_geo_release_items_plan; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.kor_travel_geo_release_items
+    ADD CONSTRAINT fk_kor_travel_geo_release_items_plan FOREIGN KEY (plan_id) REFERENCES ops.kor_travel_geo_releases(plan_id) ON DELETE CASCADE;
 
 
 --
