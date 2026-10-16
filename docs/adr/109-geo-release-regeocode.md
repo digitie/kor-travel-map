@@ -295,6 +295,13 @@ current `raw_data`를 **같은 record 모델**로 되살려 **같은 변환기**
 (geo 0회, 비용은 변환뿐). 그래야 롤아웃 첫 run이 그 행에 스탬프를 찍어 결정 5.6의 `unstamped == 0`이 성립한다.
 1단계 적용 범위는 MOIS + `datagokr_file_data` + `standard_data`(열린 결정 4).
 **가정**: `raw_data → record 모델` 복원이 provider마다 1:1 — golden으로 확인되는 provider만 켠다.
+**결과(T-GR-08, 2026-10-16)**: golden 통과 = datagokr 축제·standard_data 4종·fileData 4종(9 operation). **MOIS는
+실패** — `raw_data`가 변환기가 쓰는 record 필드 24개(우편번호 2·건물관리번호·업종별 시설 21)를 남기지 않아 되살린
+bundle의 `facility_info`·주소가 달라진다. 그래서 MOIS는 replay 목록(`REPLAY_RECORDS_RESOURCES`)에서 빠지고 fetch
+run_config로 나간다 — MOIS fetch는 data.go.kr 쿼터를 쓰지 않는다(로컬 SQLite 소스 DB, Phase A 내려받기는 TTL 24h 게이트).
+스탬프 없는 payload-bjd 행의 `not_called` 스탬프는 fetch run이 같은 술어로 찍는다(결정 4). replay 적재는 `fetched_at`과
+함께 head 관측 시각 입력(`imported_at`)도 저장값으로 되돌려 head를 전진시키지 않고, sync state를 쓰지 않으며, 변환
+payload hash가 저장값과 다르면 적재 전에 실패한다.
 
 ### 8. 운영 API는 admin 프로필만, 슬래시 동사
 

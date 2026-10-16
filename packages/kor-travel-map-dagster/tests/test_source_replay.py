@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, fields
@@ -76,9 +75,29 @@ async def _reverse(coord: Coordinate) -> Address:
     )
 
 
-def _datagokr(model: str, payload: dict[str, Any]) -> Any:
-    """provider API JSON(camelCase alias) → fetch가 받는 provider 모델."""
-    return getattr(importlib.import_module("datagokr"), model).model_validate(payload)
+@dataclass(frozen=True)
+class _Api:
+    """provider API JSON(camelCase alias) 한 행 — 테스트 안에서 provider 모델로 만든다.
+
+    provider 라이브러리는 ``providers`` extra라 CI에 없다(``test_provider_protocol_conformance``
+    머리말). 실모델 golden은 설치된 환경(Dagster 이미지·n150 providers venv)에서 돈다 — 없으면
+    skip하고, CI에서는 ``tests/lint/test_replay_raw_is_a_record_snapshot.py``가 같은 성질을
+    구조로 본다. fileData는 원본 row mapping이라 provider 없이도 돈다.
+    """
+
+    model: str
+    payload: dict[str, Any]
+
+
+def _datagokr(model: str, payload: dict[str, Any]) -> _Api:
+    return _Api(model, payload)
+
+
+def _materialize(record: Any) -> Any:
+    if isinstance(record, _Api):
+        datagokr = pytest.importorskip("datagokr")
+        return getattr(datagokr, record.model).model_validate(record.payload)
+    return record
 
 
 def _jsonb_round_trip(raw: dict[str, Any]) -> dict[str, Any]:
@@ -297,10 +316,9 @@ _GOLDEN: dict[str, list[tuple[_Convert, list[Any]]]] = {
 
 
 def _fetch_records(resource_key: str, records: list[Any]) -> list[Any]:
-    if resource_key != "datagokr_file_data_records":
-        return records
-    model = importlib.import_module("datagokr").PublicFileDataRecord
-    return [model(raw=row) for row in records]
+    """fetch가 변환기에 넘기는 record. fileData는 원본 row mapping(``PublicFileDataRecord.raw``)."""
+    del resource_key
+    return [_materialize(record) for record in records]
 
 
 def _by_key(bundles: Sequence[FeatureBundle]) -> dict[str, dict[str, Any]]:
@@ -450,6 +468,7 @@ def sends(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr(httpx.AsyncClient, "send", _send)
     monkeypatch.setenv("KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY", "test-key")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_SEOUL_OPEN_DATA_API_KEY", "test-key")
     return seen
 
 
@@ -516,9 +535,9 @@ def test_mois_job_rejects_a_replay_run_config() -> None:
 # -- provenance -------------------------------------------------------------------------------
 
 
-async def _festival_bundles() -> list[FeatureBundle]:
-    convert, records = _GOLDEN["datagokr_cultural_festivals"][0]
-    return cast(list[FeatureBundle], await convert(records))
+async def _bookstore_bundles() -> list[FeatureBundle]:
+    convert, rows = _GOLDEN["datagokr_file_data_records"][0]
+    return cast(list[FeatureBundle], await convert(rows))
 
 
 def _stream_with(bundles: Sequence[FeatureBundle], *, hash_of: Callable[[str], str]) -> Any:
@@ -543,7 +562,7 @@ def _stream_with(bundles: Sequence[FeatureBundle], *, hash_of: Callable[[str], s
 
 
 async def test_provenance_restores_the_stored_times() -> None:
-    bundles = await _festival_bundles()
+    bundles = await _bookstore_bundles()
     replayed = apply_replay_provenance(_stream_with(bundles, hash_of=lambda h: h), bundles)
     assert [b.source_record.fetched_at for b in replayed] == [_STORED_FETCHED] * len(bundles)
     assert [b.source_record.imported_at for b in replayed] == [_STORED_OBSERVED] * len(bundles)
@@ -553,7 +572,7 @@ async def test_provenance_restores_the_stored_times() -> None:
 
 
 async def test_a_payload_that_differs_from_the_stored_one_fails_before_loading() -> None:
-    bundles = await _festival_bundles()
+    bundles = await _bookstore_bundles()
     with pytest.raises(ReplayPayloadDrift, match="2건"):
         apply_replay_provenance(_stream_with(bundles, hash_of=lambda h: h[::-1]), bundles)
     with pytest.raises(ReplayPayloadDrift, match="1건"):
@@ -575,7 +594,7 @@ async def test_standard_asset_reads_before_loading_and_skips_sync_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     convert, records = _GOLDEN["standard_museums"][0]
-    fetched = await convert(records)
+    fetched = await convert(_fetch_records("standard_museums", records))
     stored = [
         CurrentSourceRecord(
             source_entity_key=f"se_{index}",

@@ -346,8 +346,9 @@ run 로그에 `MOIS 업종 <slug> 완료`가 남는다.
    이후 run은 sensor가 잇는다. 마지막 run이 `complete`(전 업종)면 봉인·sync 성공이 남는다.
 4. 실패 run이 나오면 sensor는 멈춘다. 원인을 본 뒤 같은 job을 다시 띄우면 이어서 적재한다.
 
-> **geo 릴리스 재지오코딩(ADR-109 proposed, 미구현).** geo 데이터 토큰이 바뀌면 릴리스 센서가 이 job을
-> `source_mode=replay`(원천 재fetch 없이 `source_records.raw_data`로 같은 변환기 실행; 제외는 `not_called`
-> **스탬프**가 있는 행뿐 — 스탬프 없는 payload-bjd 행은 변환되어 스탬프를 받는다)로
-> 띄우고 `budget_exhausted` 이어 달리기도 대신한다(ADR-109 결정 5). unchanged 판정에 "스탬프 토큰 == 현재
+> **geo 릴리스 재지오코딩(ADR-109 proposed).** geo 데이터 토큰이 바뀌면 릴리스 센서가 이 job을 **fetch
+> run_config로**(로컬 SQLite 소스 DB 읽기 — data.go.kr 쿼터 없음) 띄우고 `budget_exhausted` 이어 달리기도
+> 대신한다(ADR-109 결정 5). `source_mode=replay`는 MOIS에 **없다** — `source_records.raw_data`가 record 필드
+> 24개(우편번호·건물관리번호·업종별 시설)를 남기지 않아 golden이 실패했다(T-GR-08, ADR-109 결정 7 결과). 제외는
+> `not_called` **스탬프**가 있는 행뿐 — 스탬프 없는 payload-bjd 행은 변환되어 스탬프를 받는다. unchanged 판정에 "스탬프 토큰 == 현재
 > 토큰" 조건이, 표식 "알려진 불가" 조건에 토큰 일치가 더해진다. 상세는 [`address-geocoding.md`](address-geocoding.md).
