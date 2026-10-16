@@ -2677,6 +2677,34 @@ ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일
 - `POST /detect`가 센서와 같은 `plan_geo_release`를 호출한다(단일 정본 테스트 — 함수 identity).
 - 완료 단계가 활성 cache target 전부에 `sync_poi_cache_target_feature_links`를 1회 호출하고, `sigungu_code`가 바뀐
   feature 1건의 `same_sigungu` 링크가 새 target으로 옮겨진다. prod 활성 target 수를 PR 본문에 기록한다(가정 검증).
+- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-04-geo-release-plan`): (1) **기준선은 DB 행이다** — 처음 관측한 토큰은
+  `state='baseline'` 행 1개로 남고 항목이 없다(소유자 결정 2026-10-15). 센서 커서가 없는 `/detect`도 같은 판단을 해야
+  해서 상태값 `baseline`을 더했다(설계 표는 4상태). 판정 순서는 `plan_geo_release` docstring(no_token → existing →
+  첫 관측=baseline_recorded → 기준선 유지=baseline → 끝났고 잔여 0=already_complete → created). 기준선 행이 **최신 행**일
+  때만 "계획 없음"이다 — A→B→A의 두 번째 A는 기준선이 있어도 잔여가 있으면 `plan_seq=2`다. (2) **항목 입력의 kind는
+  `refresh`다** — DB에 `feature_load` kind 행이 0건이고 operation key(= job)를 dataset에 결박하는 kind가 `refresh`다(ADR-109
+  결정 5.3 표기와 다르다). (3) API 프로세스가 `kortravelmap.dagster`를 import하지 않으므로 계획이 읽는 job 사실을 core에
+  둔다 — `FEATURE_LOAD_JOB_OPERATION_KEYS`(job 없는 operation → `skipped(queue_only)`), `GEO_DEPENDENT_OPERATION_KEYS`,
+  `FEATURE_LOAD_DISABLED_OPERATION_KEYS`(→ `skipped(disabled)`), `DATASET_CONFIGURED_OPERATION_RESOURCES`(KNPS·datagokr
+  fileData의 dataset run_config), `REPLAY_RECORDS_RESOURCES`. 각 값이 Dagster 정의와 같다는 것은 lint
+  (`test_geo_heavy_assets_declare_the_pool.py`)가 고정한다 — geo 의존은 AST 유도(None 상수 제외·모듈 횡단·전이·데코레이터
+  제외)와의 집합 동등, 나머지는 schedule spec과의 동등. Dagster `DISABLED_FEATURE_LOAD_OPERATION_KEYS`는 그대로 두었다
+  (`test_c7_prod_live_runner_contract`가 그 소스 줄을 읽는다). (4) **replay run_config는 T-GR-08 전에는 실행 불가** — records
+  resource에 `source_mode`가 아직 없어 Dagster config 검증이 거부한다. T-GR-05 센서는 replay 항목(순서 ④·⑤)을 T-GR-08
+  뒤에만 내야 한다. (5) **MCST는 job 하나에 dataset 13개**인데 dataset run_config가 없다 — 항목은 dataset마다 13개지만 run은
+  operation 하나로 충분하다. T-GR-05는 같은 `(operation_key, run_config)` 항목을 한 run으로 묶어 낸다(run_key 설계도 그때).
+  (6) 항목 UNIQUE는 `(plan_id, operation_key, provider_dataset_id)` — `attempt_seq`는 같은 행에서 단조 증가(재요청·sweep)라
+  UNIQUE에 넣지 않았다(설계 표와 다르다). 완료의 "1회 sweep"은 계획의 `sweep_started_at`으로 한 번만 한다(열 추가).
+  (7) `coverage()`의 네 칸은 분할이다 — `stamped_current`(현재 토큰 `called|geocoded`) + `stamped_other`(다른 토큰 =
+  stale) + `not_called`(토큰 무관, `not_called_by_kind` 합) + `unstamped`. 완료 잔여 = `stamped_other + unstamped`.
+  `unstamped_non_provider`는 primary source_link가 없는 좌표 보유 활성 Feature 중 스탬프 없는 것. (8) 링크 재동기화는
+  활성 target(삭제 안 됨·update_enabled·refresh_policy≠disabled)을 external_system별로 `resolve_cache_target_keys` →
+  `sync_poi_cache_target_feature_links`. `sigungu_by_radius` target이 있으면 geo `sigungu_resolver`가 필요하다(센서가 넘긴다).
+  PinVi에 링크 변경을 알리는 stream 이벤트는 큐 executor처럼 request 단위로 남기지 않는다 — prod 활성 target이 0개라
+  (2026-10-16 실측: 전체 4·살아 있는 것 0) 지금은 영향이 없고, target이 생기면 T-GR-05에서 다시 본다. (9) `DatasetRef`에
+  관측용 `activated_at`·`reference_months`를 선택 필드로 더했다(`dataset_version()`의 `current`에서만 — 형식이 틀리면 버리고
+  토큰 판정은 그대로). (10) admin OpenAPI만 바뀌었다(5 operation·스키마 10개 추가, 기존 경로·스키마 불변, user·service
+  sha256 불변) — **PinVi admin 스냅샷 재vendor가 Map API 배포보다 먼저**다.
 
 ## T-GR-05
 

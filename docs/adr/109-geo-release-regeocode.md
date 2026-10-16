@@ -208,13 +208,16 @@ dataset 단위 all-or-nothing 한 transaction이고 pool을 claim하지 않으�
    토큰을 저장했다; ADR-110 "사실 갱신 (2026-10-15)" 절 5항 (ㄹ)) 그 토큰을 커서에 **기준선**으로 기록하고 계획을 만들지 않는다.
    재계획은 기준선 이후 토큰이 **바뀔 때**만이다. 스탬프 없는 행은 평소 적재가 채운다(결정 4 — 스탬프 부재 =
    stale은 적재 경로의 규칙이고 센서 계획의 근거가 아니다). 구현은 T-GR-04/05.
+   **구현(T-GR-04)**: 기준선은 계획 표의 `state='baseline'` 행이다(항목 없음) — 센서 커서가 없는 `/detect`도 같은
+   판단을 하게. 그 행이 **최신 행**일 때만 "계획 없음"이고, 그 뒤 다른 토큰 계획이 있었으면 일반 규칙(잔여 판정)을 탄다.
 2. **계획 identity = `plan_id` surrogate + `(data_token, plan_seq)`.** 표 `ops.kor_travel_geo_releases`
    (+ `ops.kor_travel_geo_release_items`, migration `408_kor_travel_geo_releases`, owner role·receipt CHECK).
    같은 토큰에 `planned|running` 계획이 있으면 그것(부분 UNIQUE, 멱등); 없으면 `plan_seq = max+1` 새 행 —
    롤백·재활성화(A→B→A)에서 두 번째 A도 새 계획이 되어 다시 돈다. 단 관측 토큰의 최신 계획이 terminal이고
    `coverage(token, 비-skipped datasets).stamped_other + unstamped == 0`이면 계획을 만들지 않는다(이미 그
    토큰으로 끝났다). `replan`은 `plan_seq+1`의 새 행이다. 진행 중 옛 계획은 `superseded`.
-3. **항목 입력은 DB 정본이다.** `provider_sync.provider_dataset_operations WHERE operation_kind='feature_load'
+3. **항목 입력은 DB 정본이다.**(구현 T-GR-04: kind는 `refresh` — `feature_load` 행은 DB에 없고 job을 dataset에 결박하는
+   kind가 `refresh`다. job 없는 operation은 `skipped(queue_only)`.) `provider_sync.provider_dataset_operations WHERE operation_kind='feature_load'
    AND is_enabled` ⋈ `provider_datasets.is_active`(`head-schema.sql:18458-18470`) → `(operation_key,
    provider_dataset_id)` 쌍. geo 의존 여부는 `GEO_DEPENDENT_OPERATION_KEYS`(결정 3 — pool lint의 AST 유도와 집합
    동등으로 고정된 core 상수)로 본다.
