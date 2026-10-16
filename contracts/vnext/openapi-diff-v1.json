@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "54dbc8b1c07cfc80662dd97c550438a5d97fb52d1349841546c236907a1be693"
+      "sha256": "c57ebdc60b29056267540b7fc9a60fb85a517580651e1598f6bbe7f5e133317c"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-10-16",
+      "task": "T-GR-04 geo release plan admin API",
+      "change": "admin baseline sha256 재고정 — admin 전용 `/v1/ops/geo-releases` 5 operation(GET 목록·GET 계획·POST detect·POST item skip·POST replan)과 응답 스키마 10개를 추가했다(ADR-109 결정 8). 기존 경로·스키마는 불변이고 user/service bytes와 목표 diff 항목·counts도 무변경이다."
+    },
     {
       "date": "2026-10-12",
       "task": "ADR-108 MOIS dedicated job",
