@@ -5,7 +5,9 @@
 - 바뀐 것: migration 408·head-schema, `infra/geo_release_repo.py`, `coverage()`, core 계획 상수, client 래퍼, admin
   `/v1/ops/geo-releases` 5 operation(`openapi.json`), lint·통합·API 테스트, `DatasetRef` 관측 필드.
 - 바뀌지 않은 것: 적재 경로, Dagster 정의(센서는 T-GR-05), user·service OpenAPI.
-- T-GR-05에 넘기는 것: replay 항목은 T-GR-08 뒤에만 실행, MCST 13 항목은 run 하나로 묶기, 링크 변경 stream 이벤트 재검토.
+- T-GR-05에 넘기는 것: `launch_blocked_reason`이 있는 항목은 내지 않는다(replay 게이트 — T-GR-08이
+  `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`를 채운다), `complete_plan`에 sigungu resolver를 넘긴다, 링크 변경 stream
+  이벤트 재검토. 항목은 이미 run 단위다(MCST 항목 1개).
 
 ## 2026-10-16 — 적재 경로의 geo 재해석(T-GR-03): 브랜치 `feat/t-gr-03-stale-stamps`
 

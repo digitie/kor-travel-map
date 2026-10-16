@@ -189,7 +189,9 @@ current_data_token: str | None = None)`(`:125-131`, additive kwarg) → `_item_t
 ## 5. 센서·계획·run_key·replay·완료 (계획 표·계획 함수·완료는 T-GR-04 구현, 센서는 T-GR-05)
 
 > T-GR-04 구현과 아래 계획의 차이(정본은 acceptance §T-GR-04 구현 메모): 계획 상태에 `baseline`(첫 관측 토큰의 기준선
-> 행), 항목 입력 kind는 `refresh`, 항목 UNIQUE에서 `attempt_seq` 제외(같은 행에서 단조 증가), 계획에 `sweep_started_at`.
+> 행), 항목 입력 kind는 `refresh`, **항목 1행 = run 1개**(`provider_dataset_ids` 배열 — MCST 13 dataset이 항목 1개),
+> 항목 UNIQUE에서 `attempt_seq` 제외(같은 행에서 단조 증가), 계획에 `sweep_started_at`, 최신 행이 이 토큰의 `done`이면
+> 재계획 없음, replay 항목은 `launch_blocked_reason`(core `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS` 게이트).
 > 판정은 `infra/geo_release_repo.py` `plan_geo_release`(센서·`/detect` 단일 정본), 완료는 `complete_plan`.
 
 **표** `ops.kor_travel_geo_releases(plan_id identity PK, geo_data_token NOT NULL, plan_seq int DEFAULT 1,

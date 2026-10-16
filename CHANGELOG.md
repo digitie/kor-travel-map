@@ -14,7 +14,7 @@
 
 - **ADDED (schema)**: migration `408_kor_travel_geo_releases` — `ops.kor_travel_geo_releases`(계획: 토큰·`plan_seq`·
   `baseline|planned|running|done|superseded`, 같은 토큰 활성 계획 1개) + `ops.kor_travel_geo_release_items`(dataset 항목·
-  run_config·`attempt_seq`·상태). forward-only.
+  run_config·`attempt_seq`·상태 — **1행 = Dagster run 1개**, `provider_dataset_ids` 배열). forward-only.
 - **ADDED (core/infra)**: `plan_geo_release`(센서와 운영 API의 단일 정본 — 첫 관측 토큰은 기준선, 같은 토큰 멱등,
   A→B→A 재계획, 끝났고 잔여 0이면 계획 없음), `build_release_items`(DB operation ⋈ 활성 dataset, core 상수로 job·geo
   의존·자동 적재 꺼짐 판정, KNPS dataset별 run_config, 쿼터 민감 replay run_config, 실행 순서), `coverage()`(분모를 인자

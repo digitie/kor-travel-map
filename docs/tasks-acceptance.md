@@ -2705,6 +2705,21 @@ ADR-109 결정 5(계획 표·항목·완료 단계)·8(admin API). 수정 파일
   관측용 `activated_at`·`reference_months`를 선택 필드로 더했다(`dataset_version()`의 `current`에서만 — 형식이 틀리면 버리고
   토큰 판정은 그대로). (10) admin OpenAPI만 바뀌었다(5 operation·스키마 10개 추가, 기존 경로·스키마 불변, user·service
   sha256 불변) — **PinVi admin 스냅샷 재vendor가 Map API 배포보다 먼저**다.
+- 구현 메모 2(2026-10-16, #1331 적대 리뷰 2인 반영 — 미배포라 408 안에서 바꿨다): (11) **항목 모양 = run 단위**
+  (소유자 위임 결정): 1행 = `(operation_key, run_config)` + `provider_dataset_ids bigint[]`. 위 (5)의 "MCST 13 항목을
+  run 하나로 묶기"는 이것으로 해소됐다(MCST 항목 1개·dataset 13). 배열이라 dataset FK가 없다 — dataset은 지우지 않고
+  비활성화만 한다(408 docstring). UNIQUE는 `(plan_id, operation_key, provider_dataset_ids)`. (12) `attempt_seq`는 UNIQUE
+  밖 그대로(결정 — 시도 이력은 Dagster tag). (13) **완료 후 무한 재계획 차단**: 계획 표 전체의 최신 행이 이 토큰의
+  `done`이면 잔여가 남았어도 `already_complete`(테스트: 잔여 1을 남기고 끝난 뒤 detect → 새 계획 0). (14) **롤백 전
+  계획 정리**: 잔여 0으로 `already_complete`를 낼 때 다른 토큰의 활성 계획을 먼저 `superseded`(테스트: A→B→A, 재스탬프
+  없음). (15) `replan`은 최신 관측 토큰의 기준선 아닌 계획만 — 그 외 409, 없음만 404(`GeoReleaseNotFound`).
+  (16) `complete_plan(…, sigungu_resolver=)`는 필수 인자이고, 활성 `sigungu_by_radius` target이 있는데 None이면 쓰기
+  전에 `GeoReleaseResolverRequired`(전에는 링크 재동기화 도중 실패해 transaction 전체가 되돌아갔다). 링크 테스트에
+  `center_radius` target(within_radius 링크 유지)을 더했다. (17) **replay 게이트는 코드다** — core
+  `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`(지금 빈 집합, T-GR-08이 채움); 항목·API에 `launch_blocked_reason =
+  replay_not_launchable_before_t_gr_08`. 위 (4)는 이것으로 대체된다. (18) API `state`·`state_reason`은 `Literal`이고
+  `state_reason`은 408 CHECK 어휘(disabled·no_geo_dependency·queue_only·operator·sweep·run_not_launched·no_progress·
+  run_failed)다. (19) lint docstring에 한계(이름 매칭·최상위 모듈만·replay resource 부분집합)를 적었다.
 
 ## T-GR-05
 
