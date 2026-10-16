@@ -1,17 +1,15 @@
 # address-geocoding.md — geo 유도 값·지오코딩 스탬프·릴리스 재지오코딩
 
-> **설계 스펙(ADR-109 proposed, 미구현).** §1의 "현재 사실"만 2026-10-13 `origin/main` 기준으로 확인한
-> 코드와 일치하고, §2 이후는 `T-GR-01`~`T-GR-08`이 구현할 계약이다. 결정과 근거는
-> [ADR-109](../adr/109-geo-release-regeocode.md)가 정본이고 이 문서는 코딩용 상세(표·판정 규칙·run_key·
-> 테스트 목록)만 갖는다 — 결정·상수를 여기서 다시 쓰지 않는다. geo 쪽 계약(`data_token`·응답 `dataset`)은
-> kor-travel-geo ADR-069(그 저장소, proposed).
+> **구현 정본(ADR-109 accepted, 2026-10-16).** `T-GR-01`~`T-GR-08`이 모두 머지됐다(#1326·#1327·#1328·#1331·#1332·#1333·
+> #1334). 결정과 근거는 [ADR-109](../adr/109-geo-release-regeocode.md)가 정본이고 이 문서는 코딩용 상세(표·판정 규칙·run_key·
+> 테스트 목록)만 갖는다 — 결정·상수를 여기서 다시 쓰지 않는다. 운영 절차는
+> [runbook `geo-release-regeocode.md`](../runbooks/geo-release-regeocode.md). geo 쪽 계약(`data_token`·응답 `dataset`)은
+> kor-travel-geo ADR-069(그 저장소, accepted).
 >
-> **구현 진척(2026-10-15)**: §2의 스탬프 표(migration 407)·`dto/geo_dataset.py`·`infra/feature_geocode_stamp_repo.py`
-> (`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`)와 §3 첫 항목(`dataset_version()`·
-> 응답 `dataset` 선택 파싱·`GeoCallStats.empty`/`observed_data_tokens`)은 T-GR-01로 구현됐다. 시그니처 차이와
-> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. §3의 resource·`geo_applied` 배선은 T-GR-02,
-> §4 전부(stale 분기·무쓰기·빈 답 가드 행/run·override finding·MOIS 토큰 조건·표식·concierge 규칙)는 T-GR-03이 구현했다 —
-> 차이는 acceptance §T-GR-03 "구현 메모"(특히 run 가드 분자 = 행 단위 최종 빈 답). 나머지(§5 이후)는 계획이다.
+> 설계와 구현이 달라진 자리는 각 절의 "구현" 메모와 acceptance §T-GR-0N "구현 메모"가 정본이다. 큰 것만 모으면: 항목 1행 =
+> Dagster run 1개(`provider_dataset_ids` 배열), 항목 입력 kind는 `refresh`, 기준선은 계획 표의 `baseline` 행, migration 409
+> (항목 사유 `superseded`·`canceled`), 센서 기본 STOPPED, run 빈 답 가드의 분자는 행 단위 최종 빈 답, chunk 단위 geo 사실,
+> **MOIS는 replay가 없고 센서가 내지 않는다**(운영자 수동 실행 뒤 skip), replay 범위는 9 operation.
 
 ## 1. 저장되는 geo 유도 값과 provider별 출처 (현재 사실)
 
@@ -60,7 +58,7 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 변환·지오코딩을 건너뛴다(`:3199-3231`). 역지오코딩 캐시(`cached_reverse_geocoder` `geocoding.py:233`,
 `PrefetchingReverseGeocoder` `:279`)는 None도 캐싱하고 예외는 올린다. 클라이언트에 건별 재시도는 없다.
 
-## 2. 스탬프 표와 outcome 판정 (계획)
+## 2. 스탬프 표와 outcome 판정 (구현 T-GR-01·03)
 
 `feature.feature_geocode_stamps(feature_id uuid PK FK CASCADE, geo_version_token text NOT NULL, geo_data_token text
 NOT NULL, reverse_outcome text CHECK IN (called, geocoded, not_called), stamped_at timestamptz NOT NULL)` +
@@ -121,14 +119,15 @@ AST 파싱·`tests/` import는 없다. asset별 `geo_applied` 값도 같은 AST 
 krforest·krheritage·opinet; §1 표)마다 "reverse None/빈 bjd 또는 좌표 없음 → geocode 1회"; krex는 받되 미사용이므로
 "geocode 0회"를 센다(유도 제외가 아니라 명시 단언 — 쓰기 시작하면 빨갛다).
 
-## 3. run-scoped 현재 토큰 (계획)
+## 3. run-scoped 현재 토큰 (구현 T-GR-01·02)
 
 - `KorTravelGeoRestClient.dataset_version()` 신규: `POST /v2/dataset/version` 본문 `{}` → `DatasetRef{version_token,
   data_token | None}`. `_RestReverseV2Response`(`geocoding.py:935`)에 `dataset` **선택 파싱**(없는 옛 응답 → None),
   `GeoCallStats`(`:1112`)에 `observed_data_tokens`와 `empty[endpoint]`(예외 없이 끝났는데 `Address` None 또는
   `bjd_code` None — §4 run 가드의 분자; 현재는 `calls`/`failures`(전송 실패)만 센다 `:1140-1146`),
   `ObservedReverseGeocoder`(`:1405`)가 기록.
-- Dagster resource `kor_travel_geo_client`(경량, `GeoCallStats`·teardown 로그 없음)·`kor_travel_geo_dataset`(run
+- (구현: 경량 `kor_travel_geo_client` resource는 만들지 않았다 — 센서·운영 API는 `geocoding.open_geo_client` helper 하나를
+  쓴다, 소유자 위임 결정 T-GR-05.) Dagster resource `kor_travel_geo_dataset`(run
   시작 1회 → `DatasetRef | None`; 실패·`available=false` → None + 경고 1건, run 계속). 같은 팩토리
   `fetch_current_dataset(client)`를 `feature_update_runner._COMMON_RESOURCE_KEYS`(`dagster/feature_update_runner.py:121-126`)·
   asset `required_resource_keys`·`offline_uploads.py`·CLI(`src/kortravelmap/cli/main.py:443-456`)가 쓴다.
@@ -139,7 +138,7 @@ krforest·krheritage·opinet; §1 표)마다 "reverse None/빈 bjd 또는 좌표
   `geo_dataset_mismatch=true`. 그 run의 스탬프는 옛 토큰 → 다음 tick이 새 토큰으로 재계획(안전 방향).
   **가정**: geo는 MV 교체/DB rename 뒤에 release 행을 넣으므로 "새 토큰, 옛 데이터"는 생기지 않는다.
 
-## 4. 적재 경로의 stale 분기·가드 (계획)
+## 4. 적재 경로의 stale 분기·가드 (구현 T-GR-03)
 
 `load_bundle(session, bundle, *, current_dataset: DatasetRef | None = None, geo_applied: GeoApplied)`
 (`feature_repo.py:3035`); `client.load_feature_bundles(bundles, current_dataset=, geo_applied=)`
@@ -186,7 +185,7 @@ current_data_token: str | None = None)`(`:125-131`, additive kwarg) → `_item_t
 좌표가 있어 reverse를 불렀으면 payload 코드를 썼어도 `called`(geo가 채운 빈칸이 비교 대상), 좌표 없는 payload 코드
 행만 `not_called`. 토큰만 바뀐 payload는 `became_current=False`·`row_revision` 불변·스탬프 current여야 한다.
 
-## 5. 센서·계획·run_key·replay·완료 (계획 표·계획 함수·완료는 T-GR-04 구현, 센서는 T-GR-05)
+## 5. 센서·계획·run_key·replay·완료 (구현 T-GR-04·05·08)
 
 > T-GR-04 구현과 아래 계획의 차이(정본은 acceptance §T-GR-04 구현 메모): 계획 상태에 `baseline`(첫 관측 토큰의 기준선
 > 행), 항목 입력 kind는 `refresh`, **항목 1행 = run 1개**(`provider_dataset_ids` 배열 — MCST 13 dataset이 항목 1개),
@@ -209,11 +208,11 @@ dagster_run_id, requested_at, PK (plan_id, position), UNIQUE (plan_id, operation
 attempt_seq))`. migration `408_kor_travel_geo_releases`(owner role·receipt CHECK, 407과 같은 규약).
 `state_reason ∈ disabled | no_geo_dependency | queue_only | run_not_launched | no_progress | …`.
 
-**센서** `kor_travel_geo_release_sensor`(`dagster/sensors.py`). tick 순서·Skip 조건·전이 규칙·완료 판정·주기·
+**센서** `kor_travel_geo_release_sensor`(구현 `dagster/geo_release_sensor.py`). tick 순서·Skip 조건·전이 규칙·완료 판정·주기·
 MOIS 이어 달리기 상한은 **ADR-109 결정 5가 정본**이다 — 여기서는 그 결정을 코드에 매는 이름만 둔다.
 
-- 선언: `required_resource_keys={"kor_travel_map_client", "kor_travel_geo_client"}`, `jobs=[FEATURE_LOAD_SCHEDULE_SPECS
-  전 job]`(`dagster/schedules.py:208`), 커서 = JSON(마지막으로 계획했거나 기준선으로 기록한 `data_token`).
+- 선언(구현): resource 없이 tick 안에서 in-process client와 `open_geo_client`를 연다, `jobs=FEATURE_LOAD_JOBS`, 기본
+  STOPPED·300초·진행 중 run 1개. **커서는 없다** — 기준선·멱등 판단은 계획 표 행(`baseline` 상태)이 갖는다(`/detect`와 공유).
 - 감지(결정 5.1): `dataset_version()` 실패/`available=false` → Skip(커서 불변); `data_token is None` →
   `SkipReason("geo data_token 없음 — 지문 backfill/복구 필요")`(계획 없음, 커서 불변; UI 상단 빨간 상태).
 - 계획(결정 5.2·5.3): `client.create_geo_release_plan(current)` → `plan_geo_release(session, dataset_ref)`
@@ -228,8 +227,10 @@ MOIS 이어 달리기 상한은 **ADR-109 결정 5가 정본**이다 — 여기�
   같은 `operation_key` run은 `map_owned_runs_filter(tags={"kor_travel_map.operation_key": job})`(`:80`).
 - 전이(결정 5.5)의 이름: run 조회는 `dagster_run_id`(없으면 `dagster/run_key` 태그); `MOIS_LOAD_OUTCOME_TAG ==
   budget_exhausted`(`mois_chunked_load.py:99-103`) → `mois_load_continuation_decision(last)`(`:1132-1154`) 재사용;
-  상한 상수 `MOIS_RELEASE_ATTEMPT_CAP`(값은 ADR-109 결정 5); `requested` 무run 판정 tick 수 상수 `RELEASE_RUN_LAUNCH_TICKS`.
-- RunRequest(결정 5.4): `RunRequest(job_name=operation_key, run_key=f"geo_release/{data_token}/{plan_seq}/{operation_key}/{provider_dataset_id}/{attempt_seq}",
+  상한 상수 `MOIS_RELEASE_ATTEMPT_CAP`(12); `requested` 무run 판정 `GEO_RELEASE_RUN_LAUNCH_TIMEOUT_SECONDS`(900초 = 3 tick),
+  비-MOIS 재요청 `NON_MOIS_RETRY_ATTEMPTS`(2). 구현에서 MOIS 항목은 `SENSOR_MANUAL_OPERATION_KEYS`라 센서가 내지 않으므로
+  MOIS 이어 달리기 전이는 운영에서 도달하지 않는다(규칙은 테스트로 고정).
+- RunRequest(결정 5.4): `RunRequest(job_name=operation_key, run_key=f"geo_release/{data_token}/{plan_seq}/{operation_key}/{position}/{attempt_seq}",
   run_config, tags={"kor_travel_map.trigger_kind": "sensor", "kor_travel_map.geo_release_plan_id": str(plan_id)})`
   — `geo_release_plan_id`가 전용 run의 유일한 판별자(§4 timeout 재시도). job 정의 태그(`operation_key`·RecoveryPolicy·
   `max_runtime`, `schedules.py:436-446`)는 상속.
@@ -262,7 +263,7 @@ backfill 전에 Map을 배포하면 `data_token` 없음으로 Skip만 하고(계
 backfill → PinVi 재vendor → Map pair → Manager `dagster.yaml` concierge lane(concierge ADR-49
 `concierge_admin_region_refresh` job용 — Map 변경 아님, ADR-109 결정 5.4) → concierge; 설계 §9)는 이 결과를 바꾸지 않는다.
 
-## 6. 운영 API·UI (계획)
+## 6. 운영 API·UI (구현 T-GR-04·06)
 
 admin 프로필(`require_ops_operator`, `api/auth.py:426`) `packages/kor-travel-map-api/src/kortravelmap/api/routers/ops_geo_releases.py`,
 prefix `/ops/geo-releases`: `GET /`(목록 + 현재 geo 토큰 + Skip 사유), `GET /{plan_id}`(항목·coverage),
@@ -276,7 +277,7 @@ UI `/admin/ops/geo-releases`(T-GR-06): 현재 `version_token/data_token/activate
 `state_reason`·attempt_seq·run 링크·skip), 버튼 "지금 감지"·"다시 계획". `docs/runbooks/admin-ui-screen-checklist.md`
 route 행은 구현 PR(T-GR-06)에서. `/admin/issues`·features 목록 변경 없음.
 
-## 7. 테스트 전략 요약과 의도적 빨강 (계획)
+## 7. 테스트 전략 요약과 의도적 빨강 (설계 당시 목록 — 실제 테스트는 각 acceptance 절)
 
 원칙(memory `detector-floors-count-what-was-seen`): 새 검사는 먼저 일부러 빨갛게 만든다; geo fake는 `dataset`
 **있음/없음** 둘 다 갖는다(Map은 geo 스펙을 vendoring하지 않는다 — ADR-106 방식, 자체 픽스처).
@@ -284,12 +285,12 @@ route 행은 구현 PR(T-GR-06)에서. `/admin/issues`·features 목록 변경 �
 | 층 | 케이스 |
 |---|---|
 | 단위 | `_RestReverseV2Response.dataset` 선택 파싱; `dataset_version()`; `is_stale`/`select_stale_feature_ids` 5분기(스탬프 없음·`not_called`·`geocoded` 다른 토큰·다른 토큰·같은 토큰) + 현재 None → stale 없음; `decide_outcome` 표 전부; 계획 항목 생성(`provider_dataset_operations` 입력, geo 의존 유도, DISABLED skip, KNPS 5 dataset → 5 항목·run_config 상이, 쿼터 민감 → replay, concierge·MOIS 마지막); `run_config_for_dataset`; run_key 조립 |
-| 통합(DB) | 407/408 + receipt CHECK + owner role lint 4종. CTE: 같은 payload+옛 토큰(`called`) → unchanged 아님; +현재 토큰 → unchanged; +`not_called` 옛 토큰 → unchanged; 토큰 None → 도입 전과 동일 집합. `load_bundle`: stale+값 동일 → `row_revision` 불변·스탬프만 전진; stale+값 변경 → UPDATE + alias(**`road_name_code`만 바뀐 행도 UPDATE** — 스냅샷 열 추가 결박); 현재 None → 쓰기 없음; `DatasetRef(data_token=None)` 픽스처 → 기존 스탬프 행 바이트 불변; **빈 답 가드**(저장 G non-NULL + 새 G 전부 None → `row_revision` 불변·스탬프 미전진·finding 1건 — knps 픽스처뿐 아니라 **krheritage·standard_data·concierge 픽스처(원문 `legal` 있음 + geo None)**에서도); run 비율 가드(좌표 있는 50건 중 빈 답 3건 > 5% → run 실패·그 chunk 스탬프 0; 좌표 없는 1,000건을 섞어도 분모 불변); **override**(불일치 → `row_revision` 불변·finding 1건, 두 번째 run 0건); price dataset 적재 뒤 스탬프 0·분모 불변; `geocoded` 행 토큰 변경 시 stale; MOIS 표식 토큰 조건; concierge payload 토큰 ≠ 현재 → geo bjd·`called`·스탬프 current, == 현재 → payload 코드·좌표 있으면 `called`(geo 빈칸 채움)·좌표 없으면 `not_called`, **토큰만 바뀐 payload → `became_current` False**, asset run에서 resource 토큰 ≠ payload 토큰 픽스처 → geo `bjd_code` 채택(전달 경로 결박); MOIS 비율 가드 조건에서 MOIS run은 FAILURE가 아니다(ADR-108 §3a-2 회귀); 스탬프 토큰 NULL 삽입은 NOT NULL이 거부; 큐 경로 적재도 스탬프; replay golden(3 provider) + provider HTTP 0회; MOIS replay: 스탬프 없는 payload-bjd N행 픽스처 → 1 run 뒤 `not_called` 스탬프 N·reverse 0회·`coverage.unstamped` 0; 완료 단계 `same_sigungu` 링크 이동 |
+| 통합(DB) | 407/408 + receipt CHECK + owner role lint 4종. CTE: 같은 payload+옛 토큰(`called`) → unchanged 아님; +현재 토큰 → unchanged; +`not_called` 옛 토큰 → unchanged; 토큰 None → 도입 전과 동일 집합. `load_bundle`: stale+값 동일 → `row_revision` 불변·스탬프만 전진; stale+값 변경 → UPDATE + alias(**`road_name_code`만 바뀐 행도 UPDATE** — 스냅샷 열 추가 결박); 현재 None → 쓰기 없음; `DatasetRef(data_token=None)` 픽스처 → 기존 스탬프 행 바이트 불변; **빈 답 가드**(저장 G non-NULL + 새 G 전부 None → `row_revision` 불변·스탬프 미전진·finding 1건 — knps 픽스처뿐 아니라 **krheritage·standard_data·concierge 픽스처(원문 `legal` 있음 + geo None)**에서도); run 비율 가드(좌표 있는 50건 중 빈 답 3건 > 5% → run 실패·그 chunk 스탬프 0; 좌표 없는 1,000건을 섞어도 분모 불변); **override**(불일치 → `row_revision` 불변·finding 1건, 두 번째 run 0건); price dataset 적재 뒤 스탬프 0·분모 불변; `geocoded` 행 토큰 변경 시 stale; MOIS 표식 토큰 조건; concierge payload 토큰 ≠ 현재 → geo bjd·`called`·스탬프 current, == 현재 → payload 코드·좌표 있으면 `called`(geo 빈칸 채움)·좌표 없으면 `not_called`, **토큰만 바뀐 payload → `became_current` False**, asset run에서 resource 토큰 ≠ payload 토큰 픽스처 → geo `bjd_code` 채택(전달 경로 결박); MOIS 비율 가드 조건에서 MOIS run은 FAILURE가 아니다(ADR-108 §3a-2 회귀); 스탬프 토큰 NULL 삽입은 NOT NULL이 거부; 큐 경로 적재도 스탬프; replay golden(축제·standard·fileData — MOIS는 실패로 제외) + provider HTTP 0회; MOIS(fetch): 스탬프 없는 payload-bjd N행 픽스처 → 1 run 뒤 `not_called` 스탬프 N·reverse 0회·`coverage.unstamped` 0; 완료 단계 `same_sigungu` 링크 이동 |
 | 계약 | `openapi.user.json`·`openapi.service.json` byte 불변; PinVi `_kor_travel_map_snapshot_pin.py` admin sha + `test_kor_travel_map_admin_contract.py` 이중 핀 + `test_m05_pair_contract_is_derived`; user/service 스냅샷 diff 0 |
 | 효과 lint | 센서 tick 외부 효과 = `dataset_version` HTTP 1회 + DB 조회(`reverse_geocoder` resource 미초기화, WARNING 0건); `jobs=` == `FEATURE_LOAD_SCHEDULE_SPECS` job 집합; 새 pool/limit 태그 없음; 변환 함수 단위 geo 호출 lint; `lint-imports`(`DatasetRef`·`GeoApplied`는 dto) |
 | 센서 | geo 실패 → Skip·커서 불변; `data_token` None → 계획 0·Skip 문구; **빈 커서 + 토큰 → 커서에 기준선 기록·계획 0행·RunRequest 0**(소유자 결정 2026-10-15); 기준선 뒤 토큰 변경 → 계획 1행; 두 번 → 1행; 재빌드 → 0; A→B→A → `plan_seq=2`·RunRequest ≥ 1; terminal+커버리지 0 → 계획 0; SUCCESS → done; FAILURE → attempt 2 한 번만; SUCCESS+`budget_exhausted` → 재요청(`converted==0` → `no_progress`); `replan` run_key 유일; 3 tick 무run → `run_not_launched`; 활성 worker run → Skip; DISABLED → `skipped`(센서·`/detect` 동일); DISABLED 1개 포함 계획이 sweep 없이 done; `trigger_kind=sensor` run이 Map 소유로 집계 |
 | e2e(n150 격리) | 첫 tick이 기준선을 기록한 뒤(계획 0) `manual_rebuild` → 요청 0; 소량 delta → 1 tick → 계획 → RunRequest 1 → 커버리지 상승; UI skip → badge, "지금 감지" → 계획 행 |
-| 실측 | 35,754행 전량 재처리 **p95 + 실패 run 수**(p50 순차 ≈ 51 min은 하한), concierge refresh 동시 실행 조건 1회; geo p95 변동 < 20%; MOIS replay 1 run 소요 |
+| 실측 | 35,754행 전량 재처리 **p95 + 실패 run 수**(p50 순차 ≈ 51 min은 하한), concierge refresh 동시 실행 조건 1회; geo p95 변동 < 20%; (MOIS replay 없음 — T-GR-08) |
 
 **의도적 빨강 3건(PR 본문 기록)**: 빈 답 가드를 빼면 주소 열이 NULL로 덮인다; override 열을 비교에 넣으면
 `row_revision`이 전진한다; 토큰을 `raw_payload_hash`에 넣으면 concierge 전 행이 `became_current`가 된다.

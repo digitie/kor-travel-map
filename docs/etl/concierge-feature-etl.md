@@ -103,11 +103,11 @@ bundles = await kor_travel_concierge_items_to_bundles(
   죽이던 경로 제거). payload가 선언한 코드는 버려지지 않고 `FeatureBundle.admin_evidence`로
   보존돼 **staleness 검출**에 쓰인다 — 이 코드는 concierge가 같은 kor-travel-geo reverse를
   같은 좌표로 호출해 캐시한 값이라 좌표 정확성의 독립 증거가 아니다.
-  **계획(ADR-109 proposed, 미구현)**: producer가 `place.address.geo_data_token`(concierge ADR-49)을 싣게
-  되면 소비자는 그 토큰이 run-scoped 현재 geo 데이터 토큰과 **같을 때만** payload 코드를 신뢰하고(아니면
+  **ADR-109(accepted, T-GR-03 구현)**: producer가 `place.address.geo_data_token`(concierge ADR-49)을 실으면
+  소비자는 그 토큰이 run-scoped 현재 geo 데이터 토큰과 **같을 때만** payload 코드를 신뢰하고(아니면
   geo `bjd_code` 우선; 토큰은 `kor_travel_concierge_items_to_bundles(…, current_data_token=)` additive kwarg로
   받는다), Map `raw_payload_hash`는 그 필드를 뺀 값으로 자체 계산한다(ADR-109 열린 결정 12; 릴리스마다 전 행
-  `row_revision` 전진 방지; 현재는 producer `payload_hash`를 그대로 채택, `kor_travel_concierge.py:278-290`).
+  `row_revision` 전진 방지; 토큰 없는 payload는 종전처럼 producer `payload_hash`를 그대로 채택한다).
   스탬프 outcome은 좌표가 있어 reverse를 불렀으면 payload 코드를 썼어도 `called`(geo가 채운 빈칸이 비교 대상),
   좌표 없는 payload 코드 행만 `not_called` — [`address-geocoding.md`](address-geocoding.md) §2.
   item 상위에 additive `schema_version`(현재 1)도 실린다 — raw_data 보존 외 소비

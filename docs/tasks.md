@@ -28,11 +28,11 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
 #1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
 
-**geo 릴리스 재지오코딩 묶음(ADR-109 proposed, 2026-10-13)** — `T-GR-01`~`08`, 의존 순서대로 아래에
-둔다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15 `tasks-done.md`로 이관). 접두사 `T-GR-`는 **임시**다(ADR-109 열린 결정 7, 소유자 결정 대기 — `tasks-rule.md` §3 묶음 prefix).
+**geo 릴리스 재지오코딩 묶음(ADR-109 accepted, 2026-10-16 구현)** — 남은 것은 `T-GR-07`(이 문서 PR, 머지가 조건이라 다음
+doc-only PR이 이관)뿐이다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15, `T-GR-01`~`06`·`08`은 2026-10-16 `tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
 
-**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관), `T-GR-08`
+**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관), `T-GR-07`
 바로 뒤에 둔다(목록 위치일 뿐 의존이 아니다). 접두사 `T-MAP-`는 **임시**다(ADR-110 열린 결정 5). 호스트 플립 자체는
 외부 저장소(Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed로 머지)의 일이라 여기 세지 않는다 — 실제 이전은
 2026-10-14~15 일어났다(ADR-110 사실 갱신 절). 의존:
@@ -49,48 +49,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
 
-- [ ] T-GR-01 — **지오코딩 스탬프 표·repo·DTO·geo 클라이언트** (migration 407)
-
-  `feature.feature_geocode_stamps`(세 outcome, 토큰 열 NOT NULL)·`dto/geo_dataset.py`·`dataset_version()`·응답
-  `dataset` 선택 파싱·`GeoCallStats.empty`. provider 모듈·`Address`·`ReverseGeocoder` diff 0. 선행 T-GR-00-LEDGER는 완료.
-
-- [ ] T-GR-02 — **run-scoped 현재 토큰 resource와 `geo_applied` 배선**
-
-  `kor_travel_geo_dataset` resource(실패 시 None·run 계속)를 asset·큐 runner·offline upload·CLI가 같은 팩토리로 쓴다.
-  price/notice asset은 둘 다 False.
-
-- [ ] T-GR-03 — **unchanged-skip 보강·빈 답 가드·무쓰기·스탬프·override finding·MOIS 표식·concierge 토큰 규칙**
-
-  `load_bundle` stale 분기·MOIS CTE 토큰 조건, 값 동일 무쓰기, 빈 답 가드(행·run), MOIS evidence, concierge 토큰
-  규칙·해시 제외. 의도적 빨강 3건. T-GR-02 이월(client·repo 전달, run 가드, MOIS 배선, price 스탬프 0)은
-  acceptance §T-GR-03 머리; T-GR-05 경량 client resource는 §T-GR-05.
-
-- [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 408)
-
-  `ops.kor_travel_geo_releases(+items)`, `plan_geo_release`(`plan_id`+`plan_seq`, DB 정본 항목, KNPS dataset별
-  run_config), `/v1/ops/geo-releases`(admin만, 슬래시 동사). 머지 뒤 PinVi admin 스냅샷 재vendor.
-
-- [ ] T-GR-05 — **`kor_travel_geo_release_sensor`**
-
-  감지 → 계획 → Skip 조건(큐 worker run·같은 operation run) → 전이(`budget_exhausted` 이어 달리기, `run_not_launched`)
-  → tick당 1건 RunRequest(태그 `geo_release_plan_id`) → 완료 판정. 효과 lint 포함. timeout 재시도 옵션은 열린 결정 6 승인 시.
-
-- [ ] T-GR-06 — **admin UI `/admin/ops/geo-releases`**
-
-  현재 토큰(없음=빨강)·커버리지 게이지·계획 항목 표·skip·지금 감지·다시 계획. `gen:types`는 T-GR-04 뒤.
-  Playwright(n150 우선) + 화면 체크리스트 route 행. 진행: 브랜치 `feat/t-gr-06-geo-releases-ui` — 머지 대기.
-
 - [ ] T-GR-07 — **구현 반영 문서** (doc-only)
 
-  구현 뒤 잔여만(ADR·etl·integration-map은 PR-0 선반영): ADR-109 accepted, runbook `docs/runbooks/geo-release-regeocode.md`
-  신규(§9 흐름·배포 순서·첫 토큰 기준선 FAQ), CHANGELOG, "계획" 표식 제거.
-
-- [ ] T-GR-08 — **replay 모드(쿼터 민감 dataset)**
-
-  records resource `source_mode=replay`로 entity head `source_records.raw_data`를 같은 record 모델·변환기에 넣는다.
-  1단계 datagokr 축제·fileData·standard_data(golden 통과). **MOIS는 golden 실패로 replay 없음 — 센서도 내지 않는다**
-  (운영자 수동 fetch, #1333 리뷰).
-  진행: 브랜치 `feat/t-gr-08-replay-mode` — 머지 대기.
+  ADR-109 accepted·구현 기록·열린 결정 결론, runbook `docs/runbooks/geo-release-regeocode.md` 신규, CHANGELOG, "계획" 표식
+  제거. 머지가 조건이라 `[x]`·이관은 다음 doc-only PR이 싣는다.
 
 - [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 배포는 가능한 한 빨리 — transport 플립이 2026-10-14 먼저 일어났다)
 

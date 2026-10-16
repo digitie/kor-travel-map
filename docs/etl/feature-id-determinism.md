@@ -75,7 +75,7 @@ natural_key 전역유일성·collision 분석이 동반돼 실데이터 운영 �
 "안정적"이 진짜 보장되는 케이스는 MOIS의 source-native `legal_dong_code`처럼 provider가 직접
 제공하는 행정코드 케이스에 한정된다.
 
-**geo 버전 drift는 관측 가능해질 예정이다(ADR-109 proposed, 미구현).** 행마다 "어느 geo 데이터 토큰으로
+**geo 버전 drift는 관측된다(ADR-109 accepted, T-GR-01~08 구현).** 행마다 "어느 geo 데이터 토큰으로
 해석됐나"를 `feature.feature_geocode_stamps`에 남기고, 릴리스 센서가 토큰이 다른 행만 다시 지오코딩한다
 ([`address-geocoding.md`](address-geocoding.md)). identity는 ADR-098 이후 claim이 쥐므로 bjd 변경은
 재키가 아니라 `f_{bjd}_` alias 1개 추가로 끝나고(`src/kortravelmap/core/ids.py:43-49`), `pv_` 가격 키는
