@@ -1,3 +1,13 @@
+## 2026-10-16 — geo 릴리스 센서(T-GR-05, ADR-109 결정 5): 브랜치 `feat/t-gr-05-geo-release-sensor`
+
+- **무엇.** `kor_travel_geo_release_sensor`(기본 STOPPED, 300초) — 공용 계획 함수로 감지·계획하고, 항목(run 단위)을
+  하나씩 전용 job으로 낸다. 전이(완료·MOIS 이어 달리기·1회 재요청·무run 3 tick)와 완료 호출(sigungu resolver는 tick의 geo
+  client). repo·client에 항목 전이 셋(`mark_item_requested`·`settle_item`·`requeue_item`).
+- **판정을 새로 만들지 않았다.** 기준선·멱등·끝난 토큰·롤백 정리는 #1331 함수 그대로라, 센서 테스트는 "공용 함수의 결과를
+  따르는가"만 본다. 커서도 쓰지 않는다(기준선이 DB 행).
+- **replay 게이트가 지금은 계획 완료를 막는다.** replay 항목(MOIS·datagokr fileData·standard_data)은 T-GR-08 전까지 내지
+  않으므로 그 항목이 남은 계획은 `running`으로 남는다 — Skip 사유가 막힌 항목과 이유를 말한다.
+
 ## 2026-10-16 — geo 릴리스 계획 표·계획 함수·admin API(T-GR-04, ADR-109 결정 5·8): 브랜치 `feat/t-gr-04-geo-release-plan`
 
 - **무엇.** migration 408(계획·항목 표), `plan_geo_release`(센서·`/detect` 단일 정본), 항목 생성(core 상수 + DB 정본),

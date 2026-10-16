@@ -618,3 +618,54 @@ def test_launch_gate_tolerates_malformed_run_config() -> None:
             geo_release_repo.launch_blocked_reason("feature_place_mois_licenses_job", config)
             is None
         )
+
+
+# -- 센서 전이(T-GR-05) --------------------------------------------------------------------------
+
+
+async def test_sensor_transitions_request_settle_and_requeue(
+    migrated_session: AsyncSession,
+) -> None:
+    plan = await _baseline_then(migrated_session, REF_B)
+    item = next(i for i in plan.items if i.state == "pending" and i.launch_blocked_reason is None)
+    key = f"geo_release/{TOKEN_B}/1/{item.operation_key}/{item.position}/1"
+
+    assert await geo_release_repo.mark_item_requested(
+        migrated_session, plan.plan_id, item.position, attempt_seq=1, run_key=key
+    )
+    # 같은 attempt를 다시 요청하지 않는다(다른 tick이 먼저 냈다).
+    assert not await geo_release_repo.mark_item_requested(
+        migrated_session, plan.plan_id, item.position, attempt_seq=1, run_key=key
+    )
+    running = await geo_release_repo.get_geo_release_plan(migrated_session, plan.plan_id)
+    assert running is not None
+    assert running.state == "running"
+    requested = next(i for i in running.items if i.position == item.position)
+    assert (requested.state, requested.run_key) == ("requested", key)
+    assert requested.requested_at is not None
+
+    assert await geo_release_repo.requeue_item(migrated_session, plan.plan_id, item.position) == 2
+    assert await geo_release_repo.mark_item_requested(
+        migrated_session, plan.plan_id, item.position, attempt_seq=2, run_key=key + "-2"
+    )
+    assert await geo_release_repo.settle_item(
+        migrated_session,
+        plan.plan_id,
+        item.position,
+        state="failed",
+        reason="run_failed",
+        dagster_run_id="run-x",
+    )
+    after = await geo_release_repo.get_geo_release_plan(migrated_session, plan.plan_id)
+    assert after is not None
+    settled = next(i for i in after.items if i.position == item.position)
+    assert (settled.state, settled.state_reason, settled.attempt_seq, settled.dagster_run_id) == (
+        "failed",
+        "run_failed",
+        2,
+        "run-x",
+    )
+    # 끝난 항목은 다시 끝내지 않는다.
+    assert not await geo_release_repo.settle_item(
+        migrated_session, plan.plan_id, item.position, state="done"
+    )

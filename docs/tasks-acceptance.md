@@ -2746,6 +2746,24 @@ tests. 의존: T-GR-02·04. 규모 M.
   `replan` 뒤 RunRequest의 run_key가 유일해 실제 run이 생긴다.
 - 격리 스택 e2e: **첫 tick이 기준선을 기록한 뒤**(계획 0) `manual_rebuild` → RunRequest 0건; 소량 delta → 1 tick → 계획 1 → RunRequest 1
   → 커버리지 상승.
+- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-05-geo-release-sensor`): (1) 센서는 `dagster/geo_release_sensor.py`다
+  (`sensors.py`는 큐 센서 모듈이라 따로 뒀다). **판정은 공용 함수뿐** — 감지·계획은 `client.create_geo_release_plan`
+  (#1331 `plan_geo_release`, `/detect`와 같다), 기준선·멱등·끝난 토큰·롤백 정리는 그 함수 몫이라 센서 테스트는 그 결과를
+  따르는지만 본다(계획 규칙 자체는 통합 테스트). 커서는 쓰지 않는다 — 기준선은 DB 행이다. (2) **항목 = run 1개**(MCST는
+  run 1개·dataset 13개, 상태도 항목 하나). (3) **replay 게이트**: `launch_blocked_reason`이 있는 항목은 내지 않고 Skip
+  사유에 `위치:operation=사유`로 남긴다 — 지금은 replay 항목 전부(MOIS·datagokr fileData·standard_data)가 막혀 있어 그
+  항목이 남은 계획은 완료되지 않는다(T-GR-08이 `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`를 채우면 이어진다). (4) **상한**:
+  tick 300초, 진행 중 run 1개(`GEO_RELEASE_MAX_IN_FLIGHT`) — geo 의존 job은 전부 `GEO_HEAVY_POOL`(limit 1)이라 어차피
+  직렬이고, 여러 개를 내면 pool 줄만 길어진다. 새 pool·limit 태그 없음. 기본 STOPPED(소유자 지시). (5) **완료**:
+  `complete_geo_release_plan(…, sigungu_resolver=)` — resolver는 그 tick의 geo client(`resolve_sigungu_by_radius`)다.
+  sensor resource는 DB client 하나뿐이고(`reverse_geocoder` resource를 초기화하지 않는다) geo HTTP는 tick 안에서 연
+  짧은 client로 `dataset/version` 1회(완료 tick에만 sigungu 조회). (6) 전이: SUCCESS → done; MOIS `budget_exhausted`면
+  `mois_load_continuation_decision`(단일 정본)이 이어 달리라고 하면 다음 `attempt_seq`로 되돌리고(상한 12) 아니면
+  `failed(no_progress)`; 비-MOIS 실패는 1회 자동 재요청 뒤 `failed(run_failed)`; `requested` 900초(3 tick) 무run →
+  `failed(run_not_launched)`. run 조회 키는 RunRequest에 단 `kor_travel_map.geo_release_run_key`(`map_owned_runs_filter`),
+  run_key = `geo_release/{token}/{plan_seq}/{operation}/{position}/{attempt}` — replan은 `plan_seq`가 달라 유일하다.
+  (7) 범위 밖으로 남긴 것: PinVi에 링크 변경을 알리는 stream 이벤트(메모만), 열린 결정 6(geo-release run 한정 timeout
+  재시도 — 미승인이라 attempt 2로만 복구), 격리 스택 e2e(배포 뒤).
 
 ## T-GR-06
 

@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### geo 릴리스 센서 `kor_travel_geo_release_sensor` (2026-10-16, ADR-109 결정 5, T-GR-05)
+
+- **ADDED (dagster)**: 센서(기본 STOPPED, tick 300초, 진행 중 run 1개) — 공용 `plan_geo_release`로 감지·계획(첫 토큰 기준선,
+  같은 토큰 멱등), 항목(run 단위)을 전용 job RunRequest로(`kor_travel_map.geo_release_plan_id`·`…geo_release_run_key` tag),
+  run 결과로 전이(done·MOIS 이어 달리기·1회 재요청·무run 3 tick → `run_not_launched`), 전부 끝나면 완료 판정(sigungu resolver는
+  tick의 geo client). replay 항목은 `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`(빈 집합) 게이트로 내지 않는다.
+- **ADDED (infra/client)**: 항목 전이 `mark_item_requested`·`settle_item`·`requeue_item`.
+
 ### geo 릴리스 재지오코딩 계획 표·계획 함수·admin API (2026-10-16, ADR-109 결정 5·8, T-GR-04)
 
 - **ADDED (schema)**: migration `408_kor_travel_geo_releases` — `ops.kor_travel_geo_releases`(계획: 토큰·`plan_seq`·
