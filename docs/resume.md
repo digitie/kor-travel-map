@@ -1,3 +1,11 @@
+## 2026-10-16 — geo 릴리스 구현 반영 문서(T-GR-07, doc-only): 브랜치 `docs/t-gr-07-geo-release-docs`
+
+**다음 한 작업: 즉시 머지(doc-only) → T-TEST-PLANNER-INDEX(통합 planner flake 결정화).**
+
+- 바뀐 것: ADR-109(accepted)·README, runbook 신규·runbooks 인덱스, `address-geocoding.md`·`integration-map.md`·MOIS/concierge
+  ETL·`feature-id-determinism.md`·ADR-108 표식, tasks/tasks-done, CHANGELOG.
+- 운영 메모: 센서 켜기 전 확인·MOIS 수동 실행 후 skip은 runbook §3·§4.
+
 ## 2026-10-16 — admin UI geo 릴리스 화면(T-GR-06): 브랜치 `feat/t-gr-06-geo-releases-ui`
 
 **다음 한 작업: CI 초록 → 리뷰 → 머지 → (배포는 coordinator) → T-GR-07(문서 마감).**

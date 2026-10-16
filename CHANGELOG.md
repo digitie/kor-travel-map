@@ -10,6 +10,15 @@
 
 ## [Unreleased]
 
+### geo 릴리스 재지오코딩 (2026-10-16, ADR-109)
+
+- **DOCS**: ADR-109 **accepted** — 구현 기록(T-GR-01~08, #1326~#1334)과 열린 결정 결론. 운영 runbook
+  [`docs/runbooks/geo-release-regeocode.md`](docs/runbooks/geo-release-regeocode.md) 신규(센서 켜기 전 확인, MOIS 수동 실행 후
+  skip, replan, replay 실패 대처, 롤백 A→B→A). `address-geocoding.md`·`integration-map.md`·MOIS/concierge ETL·
+  `feature-id-determinism.md`·ADR-108의 "계획/미구현" 표식을 구현 사실로 바꿨다.
+- 기능 요약(각 항목은 아래 T-GR 절): 지오코딩 스탬프(407)·계획 표(408·409)·적재 경로 재해석·릴리스 센서(기본 STOPPED)·
+  replay 9 operation·admin UI `/admin/ops/geo-releases`. MOIS는 운영자 수동.
+
 ### admin UI `/admin/ops/geo-releases` (2026-10-16, ADR-109 결정 8, T-GR-06)
 
 - **ADDED (admin UI)**: geo 릴리스 화면 — 현재 geo 데이터셋(`data_token` 없음은 빨간 상태 + 센서 Skip 사유), 계획 목록,

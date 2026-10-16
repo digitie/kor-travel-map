@@ -1,9 +1,10 @@
 # ADR-109 — geo 주소 데이터셋 릴리스는 데이터 토큰으로 감지하고, 적재 경로를 재사용해 다시 지오코딩한다
 
-- 상태: proposed (설계 2026-10-13, 2차 적대 리뷰 반영. **미구현** — 구현 task는 `T-GR-01`~`T-GR-08`,
-  아래 "열린 결정"은 소유자 판단 대기)
+- 상태: **accepted** (설계 2026-10-13, 구현 2026-10-16 — `T-GR-01`~`T-GR-08` 머지: #1326·#1327·#1328·#1331·#1332·
+  #1333·#1334. 열린 결정은 구현이 택한 안으로 닫았고 남은 것은 아래 "열린 결정 — 결론"에 백로그로 적었다. 배포는 별도 —
+  센서는 STOPPED로 들어간다. 운영 절차는 [runbook](../runbooks/geo-release-regeocode.md))
 - 날짜: 2026-10-13
-- 결정자: human(승인 대기), Claude
+- 결정자: human(설계 승인 2026-10-15 소유자 결정·구현 리뷰 위임 결정), Claude
 - 관계: **kor-travel-geo ADR-069**(데이터 토큰 `dd1-` = 서빙 내용 지문, 네 v2 응답의 `dataset` 필드 —
   geo 저장소의 ADR이며 본 저장소의 ADR-069와 다르다), ADR-080(finding generation), ADR-081(cache target
   generation), ADR-098(provider identity는 claim), ADR-106(transport export), ADR-108(MOIS 재개형 적재 —
@@ -15,6 +16,7 @@
   토큰으로 바뀌는 것(n150 geo는 토큰이 없었고 odroid dump 복원 뒤 처음 생겼다)은 **기준선**이지 재계획 사유가 아니다 —
   감지 규칙(결정 5)에 이 분기를 더하는 것은 T-GR-04/05 구현 몫이다.
 - 코딩용 상세(표·판정 표·run_key·테스트 목록): [`docs/etl/address-geocoding.md`](../etl/address-geocoding.md)
+- 운영: [`docs/runbooks/geo-release-regeocode.md`](../runbooks/geo-release-regeocode.md)
 
 ## 컨텍스트
 
@@ -33,7 +35,7 @@ geo가 주소 DB를 새 릴리스로 바꿔도 Map은 알지 못하고, 알아�
 3. **geo의 `version_token`은 데이터의 함수가 아니다.** 릴리스 행마다 바뀌어 같은 데이터의 재빌드도
    "변경"으로 읽힌다 — 소비자가 그것으로 전량 재처리를 돌리면 헛돈다. geo ADR-069가 서빙 내용 지문
    `data_token`(`dd1-` + 32 hex)을 네 v2 응답과 `POST /v2/dataset/version`에 실어 이를 푼다(geo 측,
-   proposed).
+   설계 당시 proposed → 2026-10-13 accepted).
 4. **값이 안 바뀐 재해석이 `row_revision`을 흔들면 안 된다.** 프로시저 `apply_provider_feature_field_patch`
    (`alembic/head-schema.sql:677`)는 값이 같아도 `row_revision + 1`이다(`:738`). `row_revision`은 ETag·`If-Match`
    412·curation seal·PinVi cache target generation의 입력이다.
@@ -348,7 +350,43 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
 - **잃는 것.** 행 단위 "어느 토큰으로 해석됐나"의 정밀도(run 단위로 대체; 불일치는 WARNING·재계획으로
   보상). 큐(`feature_update_requests`)로 재지오코딩을 돌리는 길(큐가 돌린 적재도 스탬프는 찍는다).
 
-## 열린 결정 (소유자)
+## 구현 기록 (2026-10-16)
+
+| task | PR | 내용 |
+|---|---|---|
+| T-GR-01 | #1326 | migration 407 스탬프 표, `DatasetRef`, `dataset_version()`, 응답 `dataset` 선택 파싱, 빈 답 계수 |
+| T-GR-02 | #1327 | run-scoped 현재 토큰 resource `kor_travel_geo_dataset`, `geo_applied` 배선 |
+| T-GR-03 | #1328 | 적재 경로 stale 분기·값 동일 무쓰기·빈 답 가드(행·run)·override finding·MOIS 토큰 조건·concierge 토큰 규칙, chunk 단위 geo 사실 |
+| T-GR-04 | #1331 | migration 408 계획 표, `plan_geo_release`(센서·`/detect` 단일 정본), 항목 = run 1개, coverage, admin API 5개 |
+| T-GR-05 | #1332 | `kor_travel_geo_release_sensor`(STOPPED), migration 409(`superseded`·`canceled`), `open_geo_client`, 이어 달리기 센서의 릴리스 run Skip |
+| T-GR-08 | #1333 | records resource `source_mode=replay`(9 operation), MOIS 제외·센서 수동(`SENSOR_MANUAL_OPERATION_KEYS`), 부분 replay 실패, replay는 seal·sync state 미기록 |
+| T-GR-06 | #1334 | admin UI `/admin/ops/geo-releases`, MOIS 항목 "수동 실행 후 skip 필요", 화면 ⇔ core 값 묶음 테스트 |
+
+설계와 달라진 자리(정본은 각 결정의 "구현" 문장과 acceptance §T-GR-0N 구현 메모): 항목 입력 kind `refresh`; 항목 1행 = run
+1개; 기준선은 커서가 아니라 계획 표의 `baseline` 행; 센서 기본 STOPPED; 경량 geo client resource 대신 `open_geo_client`
+helper; run 빈 답 가드의 분자는 행 단위 최종 빈 답; MOIS는 replay도 센서 기동도 없다(운영자 수동 → skip).
+
+## 열린 결정 — 결론 (2026-10-16)
+
+1. `not_called` 행 재검증(`dead_admin_code`) — **백로그로 남김.** geo `POST /v2/dataset/changes`가 생기면 착수.
+   그때까지 `coverage.not_called_by_kind`가 수를 노출한다.
+2. provider 기원이 아닌 feature — **(i) 범위 밖**으로 구현(`unstamped_non_provider` 표시만, `/admin/issues` 수동).
+3. 센서 기본 상태 — **STOPPED**(소유자 지시: odroid geo mv_refresh 실측 뒤 켠다). UI "지금 감지"는 같은 함수.
+4. replay 범위 — **datagokr 축제·standard_data 4종·fileData 4종**(golden 통과). MOIS는 golden 실패로 제외, 센서도 내지
+   않는다(결정 7 결과). MOIS replay(로컬 SQLite 무다운로드)는 릴리스가 TTL 뒤에 자주 온다는 것이 확인되면 추가.
+5. `same_sigungu` 링크 재동기화 — **활성 target 전부 1회**(권장안) 구현. PinVi stream 이벤트는 범위 밖(활성 target 0개).
+6. geo-release run 한정 reverse timeout 재시도 — **미승인, 미적용**(attempt 2로만 복구). 재론은 실측 뒤.
+7. task 접두사 — **`T-GR-NN` 그대로**(묶음 prefix, `tasks-rule.md` §3).
+8. 해소(소유자 결정 2026-10-15 — 첫 토큰은 기준선).
+9. 완료 판정 — 권장안대로 구현(비-skipped `stamped_other + unstamped == 0`, 아니면 sweep 1회 뒤 `residual_stale`).
+10. override — **finding만**(`address_override_geo_stale`) 구현.
+11. 재처리 경로 — **전용 job RunRequest** 구현(큐 아님).
+12. concierge 토큰 해시 제외 — 구현(토큰이 실린 payload만 Map이 해시를 직접 잰다).
+13. 범위 밖 drift(`admin_code_stale_*` grade, `admin_dong_code`·`road_address_management_no` NULL, 시도 표) — **백로그로
+    남김.**
+
+## 열린 결정 (소유자) — 설계 당시 원문
+
 
 1. **`not_called` 행(provider 코드만 쓴 MOIS payload-bjd·concierge payload 코드, 좌표 없이 geocode를 시도해
    실패한 행)은 법정동 폐지·geo 데이터 보강 뒤에도 재검증하지 않는다** — 폐지 코드가 공개 필터·클러스터에 남을 수
@@ -377,5 +415,4 @@ Map API 배포 **전에** 머지돼야 한다(2026-10-12 t1013b 회전 preflight
 13. 범위 밖 drift를 백로그로 보낼지: `admin_code_stale_*`가 `dual` grade에서만 발화, Map `admin_dong_code`·
     `road_address_management_no`가 전부 NULL, 하드코딩 시도 표 3개(설계 §12 #8).
 
-열린 결정이 미결인 동안 구현 task는 ADR의 권장안을 기준으로 한다 — 결정별 영향 조문은
-`docs/tasks-acceptance.md` §T-GR-00.
+(위 결론 절이 정본이다 — 이 원문은 설계 당시 선택지를 보존한다. 결정별 영향 조문은 `docs/tasks-acceptance.md` §T-GR-00.)
