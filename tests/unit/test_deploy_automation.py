@@ -318,24 +318,36 @@ def test_buildx_rejects_removed_single_oci_path(
     assert not docker_log.exists()
 
 
-@pytest.mark.unit
-def test_buildx_cleans_partial_archive_when_materialization_is_terminated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    revision = "0123456789abcdef0123456789abcdef01234567"
+_FAKE_REVISION = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _fake_build_tools(tmp_path: Path) -> tuple[dict[str, str], Path, Path, Path]:
+    """materialize 도중 끊기는 상황의 가짜 ``git``·``docker``와 그 env.
+
+    가짜 ``git archive``는 자기 pid를 남기고 tar를 쓰기 시작한다. **스스로 끝난다** — 부모
+    (``docker-buildx.sh``)가 사라지거나 30초가 지나면 멈춘다. 예전 가짜는 무한 루프라, 스크립트의
+    정리가 writer를 놓친 날(``$!`` 경주) 고아가 되어 n150에서 몇 시간 CPU를 썼다.
+    """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     temp_dir = tmp_path / "tmp"
     temp_dir.mkdir()
     docker_log = tmp_path / "docker.log"
+    writer_pid = tmp_path / "writer.pid"
     git = fake_bin / "git"
     git.write_text(
         "#!/usr/bin/env bash\n"
         "case \"$*\" in\n"
-        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{_FAKE_REVISION}' ;;\n"
         "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
-        f"  'archive --format=tar {revision}') "
-        "while :; do printf x; for ((i=0; i<10000; i++)); do :; done; done ;;\n"
+        f"  'archive --format=tar {_FAKE_REVISION}')\n"
+        f"    printf '%s' \"$$\" > '{writer_pid}'\n"
+        "    parent=$PPID\n"
+        "    while (( SECONDS < 30 )) && kill -0 \"$parent\" 2>/dev/null; do\n"
+        "      printf x; for ((i=0; i<10000; i++)); do :; done\n"
+        "    done\n"
+        # 여기 닿았다면 아무도 이 writer를 죽이지 않았다(부모가 사라졌거나 시간 초과) — 고아였다.
+        f"    printf orphaned > '{writer_pid}.orphaned' ;;\n"
         "  *) exit 64 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -352,30 +364,114 @@ def test_buildx_cleans_partial_archive_when_materialization_is_terminated(
     env["DOCKER_LOG"] = str(docker_log)
     env["KOR_TRAVEL_MAP_ENV_FILE"] = str(tmp_path / "missing.env")
     env["TMPDIR"] = str(temp_dir)
+    return env, temp_dir, docker_log, writer_pid
 
+
+def _writer_was_killed(writer_pid: Path) -> bool:
+    """가짜 writer가 스크립트의 정리로 **죽었는가** — 스스로 끝났으면(고아였다) 표식이 남는다.
+
+    writer가 끝나기를 잠깐(최대 5초) 기다린 뒤 표식을 본다. 그때까지 살아 있으면 테스트가 죽인다
+    (고아를 남기지 않는다).
+    """
+    pid = int(writer_pid.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(pid, signal.SIGKILL)
+        return False
+    return not Path(f"{writer_pid}.orphaned").exists()
+
+
+def _run_until_terminated(
+    script: Path, env: dict[str, str], temp_dir: Path
+) -> tuple[int, str, str]:
     process = subprocess.Popen(
-        ["bash", "scripts/docker-buildx.sh"],
+        ["bash", str(script)],
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
-    deadline = time.monotonic() + 5
-    while not any(
-        path.stat().st_size > 0
-        for path in temp_dir.glob("kor-travel-map-buildx.*.tar")
-    ):
-        assert time.monotonic() < deadline
-        time.sleep(0.01)
-    os.kill(process.pid, signal.SIGTERM)
-    stdout, stderr = process.communicate(timeout=5)
+    try:
+        deadline = time.monotonic() + 10
+        while process.poll() is None and not any(
+            path.stat().st_size > 0 for path in temp_dir.glob("kor-travel-map-buildx.*.tar")
+        ):
+            assert time.monotonic() < deadline, "가짜 writer가 tar를 쓰기 시작하지 않았다"
+            time.sleep(0.01)
+        if process.poll() is None:
+            os.kill(process.pid, signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=10)
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+    return process.returncode, stdout, stderr
 
-    assert process.returncode == 143
-    assert stdout == ""
-    assert stderr == ""
+
+@pytest.mark.unit
+@pytest.mark.timeout(60)
+def test_buildx_cleans_partial_archive_when_materialization_is_terminated(
+    tmp_path: Path,
+) -> None:
+    env, temp_dir, docker_log, writer_pid = _fake_build_tools(tmp_path)
+
+    status, stdout, stderr = _run_until_terminated(
+        ROOT / "scripts" / "docker-buildx.sh", env, temp_dir
+    )
+
+    assert status == 143
+    assert (stdout, stderr) == ("", "")
     assert list(temp_dir.iterdir()) == []
     assert not docker_log.exists()
+    assert _writer_was_killed(writer_pid), "TERM 뒤에 tar writer가 정리되지 않았다"
+
+
+@pytest.mark.unit
+@pytest.mark.timeout(60)
+def test_buildx_reaps_the_writer_even_when_term_lands_before_the_pid_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """``git archive … &`` 직후, writer pid를 적기도 전에 TERM이 오는 경주를 결정적으로 만든다.
+
+    스크립트 사본에서 그 줄 바로 뒤에 ``kill -TERM $$``를 넣는다 — 부하 중 n150에서 우연히 나던 창을
+    매번 연다. 정리가 ``$!``를 담은 변수에 기대면 그 변수가 아직 비어 writer가 고아가 된다.
+    """
+    env, temp_dir, docker_log, writer_pid = _fake_build_tools(tmp_path)
+    scripts = tmp_path / "repo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "load-env.sh").write_text(
+        (ROOT / "scripts" / "load-env.sh").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    original = (ROOT / "scripts" / "docker-buildx.sh").read_text(encoding="utf-8")
+    lines = original.splitlines(keepends=True)
+    fork = [i for i, line in enumerate(lines) if line.startswith("git archive --format=tar ")]
+    assert len(fork) == 1, "writer를 띄우는 줄을 찾지 못했다"
+    lines.insert(fork[0] + 1, "kill -TERM $$\n")
+    script = scripts / "docker-buildx.sh"
+    script.write_text("".join(lines), encoding="utf-8")
+
+    # 빨강이 **결정적인** 이유: writer는 스크립트의 stdout(=tar)만 바꾸고 stderr는
+    # 부모와 같은 pipe를 물려받는다. 정리가 writer를 놓치면 그 고아가 stderr pipe를 쥔 채
+    # 남으므로 ``communicate``는 고아가 스스로 끝날 때까지 기다린다(부모가 사라진 것을 보고
+    # ``*.orphaned`` 표식을 쓴 뒤). 그래서 아래 단언 시점에는 표식이 **반드시** 있다 — 타이밍에
+    # 기대지 않는다. writer는 archive 분기의 첫 명령으로 pid를 남기므로 pid 파일이 없으면
+    # writer가 그 전에 죽은 것이고(정리가 이겼다) 그때는 고아도 없다.
+    status, stdout, stderr = _run_until_terminated(script, env, temp_dir)
+
+    assert status == 143
+    assert (stdout, stderr) == ("", "")
+    assert list(temp_dir.iterdir()) == []
+    assert not docker_log.exists()
+    if writer_pid.exists():  # writer가 pid를 남기기 전에 죽었으면 살아 남을 것도 없다
+        assert _writer_was_killed(writer_pid), "pid 기록 전 TERM에 tar writer가 고아로 남았다"
 
 
 @pytest.mark.unit

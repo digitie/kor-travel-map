@@ -7,6 +7,13 @@
   run 빈 답 가드(행 단위 최종 빈 답), 토큰 선행 감싸개, 변환 함수 lint, 테스트, ADR-109 결정 2 보강, acceptance 구현 메모.
 - 바뀌지 않은 것: 스키마(407 그대로), OpenAPI, price 경로(geo 없음 → 스탬프 0).
 
+## 2026-10-16 — `docker-buildx.sh` `$!` 경주 수정: 브랜치 `fix/buildx-archive-pid-race`
+
+**다음 한 작업: CI 초록 → 리뷰 → 머지.** 이 수정은 Track 1/2와 독립이다(T-GR-03 #1328의 "다음 한 작업"은 그대로).
+
+- 바뀐 것: `scripts/docker-buildx.sh` 정리(`jobs -p`), `tests/unit/test_deploy_automation.py`(스스로 끝나는 가짜 writer·
+  고아 단언·결정적 경주 재현), dev 의존성 `pytest-timeout`.
+
 ## 2026-10-16 — run-scoped geo 현재 토큰 resource·`geo_applied` 배선(T-GR-02): 브랜치 `feat/t-gr-02-geo-dataset-resource`
 
 **다음 한 작업: CI 초록 → 적대 리뷰 반영 → 머지 → T-GR-03(stale 분기·스탬프·

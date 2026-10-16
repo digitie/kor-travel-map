@@ -31,6 +31,13 @@
 - **ADDED (tests)**: 적재 경로 통합(무쓰기·`road_name_code`만 바뀐 행·토큰 없음·전환 run·빈 답 가드 standard_data/krheritage/
   concierge·override·CTE 6분기·표식 토큰·concierge 토큰/해시), 변환 함수 단위 geo 소비 lint, 토큰 선행·run 가드 단위.
 
+### `docker-buildx.sh` — materialize 취소 시 tar writer 고아 경주 수정 (2026-10-16)
+
+- **FIXED (scripts)**: `git archive … &` 직후 `$!`를 변수에 담기 전에 TERM이 오면 정리가 writer를 놓쳐 고아로 남던 경주를
+  닫았다 — 정리는 bash job 표(`jobs -p`)로 writer를 찾는다.
+- **CHANGED (tests)**: 가짜 writer는 스스로 끝나고 고아였는지 표식을 남긴다; fork 직후 TERM을 결정적으로 재현하는 테스트
+  추가; dev 의존성 `pytest-timeout`과 `timeout(60)` marker.
+
 ### run-scoped geo 현재 토큰 resource·`geo_applied` 배선 (2026-10-16, ADR-109 결정 2·3, T-GR-02)
 
 - **ADDED (geocoding)**: `fetch_current_dataset(client, *, logger=None)` — `POST /v2/dataset/version`을 한 번 읽는다. 실패·
