@@ -41,7 +41,8 @@ import { hrefFor } from "@/lib/entity-href";
 import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
 
-/** 센서 Skip 사유와 같은 문장(`dagster/geo_release_sensor.py`) — 운영자가 같은 말을 본다. */
+/** 센서 Skip 사유 `NO_DATA_TOKEN_SKIP_REASON`(`dagster/geo_release_sensor.py`)과 같은 문장 — 운영자가 같은 말을
+ * 본다. `tests/unit/test_geo_release_ui_mirrors_core.py`가 고정한다. */
 const MISSING_FINGERPRINT_TEXT = "geo data_token 없음 — 지문 backfill/복구 필요";
 const UNAVAILABLE_REASON = "kor-travel-geo가 현재 데이터셋을 답하지 않았다 — 감지할 수 없다";
 
@@ -142,33 +143,37 @@ function CurrentDatasetCard({ data }: { data: GeoReleaseListResponse["data"] | u
 
 function CoverageGauge({ coverage }: { coverage: GeoCoverageRecord }) {
   const ratio = coverageRatio(coverage);
-  const percent = ratio === null ? null : Math.round(ratio * 1000) / 10;
+  // 내림 — 99.96%를 100%로 보이면 "다 끝났다"로 읽힌다.
+  const percent = ratio === null ? null : Math.floor(ratio * 1000) / 10;
   const notCalled = notCalledTotal(coverage);
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-baseline justify-between gap-2 text-xs text-text-secondary">
-          <span>현재 토큰 스탬프</span>
+          <span>계획 토큰 스탬프</span>
           <span className="font-mono tabular-nums text-text-primary" data-testid="geo-coverage-ratio">
             {formatCount(coverage.stamped_current)} / {formatCount(coverage.total_provider_with_coord)}
             {percent === null ? "" : ` (${percent}%)`}
           </span>
         </div>
-        <meter
-          aria-label="현재 토큰 커버리지"
-          className="sr-only"
-          max={100}
-          min={0}
-          value={percent ?? 0}
-        >
-          {percent === null ? "분모 없음" : `${percent}%`}
-        </meter>
-        <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-full bg-surface-muted">
-          <div
-            className="h-full rounded-full bg-success"
-            style={{ width: `${percent ?? 0}%` }}
-          />
-        </div>
+        {percent === null ? (
+          <p className="text-2xs text-text-tertiary">분모 없음 — 이 계획 dataset에 좌표 보유 Feature가 없다.</p>
+        ) : (
+          <>
+            <meter
+              aria-label="계획 토큰 커버리지"
+              className="sr-only"
+              max={100}
+              min={0}
+              value={percent}
+            >
+              {`${percent}%`}
+            </meter>
+            <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-full bg-surface-muted">
+              <div className="h-full rounded-full bg-success" style={{ width: `${percent}%` }} />
+            </div>
+          </>
+        )}
       </div>
       <StatStrip
         ariaLabel="커버리지 상세"
@@ -216,7 +221,7 @@ function CoverageGauge({ coverage }: { coverage: GeoCoverageRecord }) {
 function useItemColumns(
   plan: GeoReleasePlanRecord,
   onSkip: (item: GeoReleaseItemRecord) => void,
-  skipping: number | null,
+  isSkipping: (item: GeoReleaseItemRecord) => boolean,
 ): ColumnDef<GeoReleaseItemRecord, unknown>[] {
   return useMemo<ColumnDef<GeoReleaseItemRecord, unknown>[]>(
     () => [
@@ -238,13 +243,21 @@ function useItemColumns(
                 {row.original.datasets.map((dataset) => dataset.dataset_key).join(", ")}
               </span>
               {note ? (
-                <Badge
-                  className="w-fit"
-                  title={note.detail}
-                  variant={note.tone}
-                >
-                  {note.label}
-                </Badge>
+                <>
+                  <Badge
+                    aria-describedby={`geo-release-note-${row.original.position}`}
+                    className="w-fit"
+                    variant={note.tone}
+                  >
+                    {note.label}
+                  </Badge>
+                  <span
+                    className="text-2xs text-text-secondary"
+                    id={`geo-release-note-${row.original.position}`}
+                  >
+                    {note.detail}
+                  </span>
+                </>
               ) : null}
             </div>
           );
@@ -292,12 +305,12 @@ function useItemColumns(
       },
       {
         id: "actions",
-        header: "",
+        header: () => <span className="sr-only">작업</span>,
         cell: ({ row }) =>
           canSkip(plan, row.original) ? (
             <Button
               aria-label={`항목 ${row.original.position} 건너뛰기`}
-              loading={skipping === row.original.position}
+              loading={isSkipping(row.original)}
               size="sm"
               type="button"
               variant="outline"
@@ -311,16 +324,21 @@ function useItemColumns(
           ) : null,
       },
     ],
-    [plan, onSkip, skipping],
+    [plan, onSkip, isSkipping],
   );
 }
 
-function PlanDetail({ planId }: { planId: number | null }) {
+function PlanDetail({
+  planId,
+  onReplanned,
+}: {
+  planId: number | null;
+  onReplanned: (planId: number) => void;
+}) {
   const detail = useGeoRelease(planId);
   const skip = useSkipGeoReleaseItemMutation();
   const replan = useReplanGeoReleaseMutation();
   const confirm = useConfirm();
-  const [skipping, setSkipping] = useState<number | null>(null);
   const plan = detail.data?.data.plan ?? null;
 
   const onSkip = async (item: GeoReleaseItemRecord) => {
@@ -332,16 +350,15 @@ function PlanDetail({ planId }: { planId: number | null }) {
       confirmLabel: "건너뛰기",
     });
     if (!ok) return;
-    setSkipping(item.position);
-    skip.mutate(
-      { planId: plan.plan_id, position: item.position },
-      { onSettled: () => setSkipping(null) },
-    );
+    skip.mutate({ planId: plan.plan_id, position: item.position });
   };
   const columns = useItemColumns(
     plan ?? ({ state: "done" } as GeoReleasePlanRecord),
     (item) => void onSkip(item),
-    skipping,
+    (item) =>
+      skip.isPending &&
+      skip.variables?.planId === plan?.plan_id &&
+      skip.variables?.position === item.position,
   );
 
   if (planId === null) {
@@ -359,7 +376,11 @@ function PlanDetail({ planId }: { planId: number | null }) {
         "같은 토큰으로 plan_seq + 1 새 계획을 만들고 지금 활성 계획은 대체된다. 누를 때마다 계획이 하나 더 생긴다.",
       confirmLabel: "다시 계획",
     });
-    if (ok) replan.mutate(plan.plan_id);
+    if (ok) {
+      replan.mutate(plan.plan_id, {
+        onSuccess: (response) => onReplanned(response.data.plan.plan_id),
+      });
+    }
   };
   const errors = [
     detail.error ? `상세: ${detail.error.message}` : null,
@@ -540,7 +561,12 @@ export function GeoReleasesClient() {
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
           <div className="flex min-w-0 flex-col gap-6">
-            <PlanDetail planId={selected?.plan_id ?? null} />
+            {/* key: 계획을 바꾸면 이전 계획의 mutation 오류·상태를 버린다. */}
+            <PlanDetail
+              key={selected?.plan_id ?? "none"}
+              planId={selected?.plan_id ?? null}
+              onReplanned={setSelectedId}
+            />
           </div>
           <div className="flex min-w-0 flex-col gap-6">
             <CurrentDatasetCard data={list.data?.data} />

@@ -79,6 +79,9 @@ type Mock = {
   status: ListResponse["data"]["current_status"];
   plans: Plan[];
   calls: string[];
+  coverage?: Coverage;
+  /** 이 계획의 skip은 409로 거절한다(오류 표시·계획 전환 시 정리 검사). */
+  rejectSkipFor?: number;
 };
 
 async function fulfill(route: Route, body: unknown, status = 200) {
@@ -114,6 +117,9 @@ async function mockGeoReleases(page: Page, mock: Mock): Promise<void> {
     const skip = path.match(/^\/v1\/ops\/geo-releases\/(\d+)\/items\/(\d+)\/skip$/);
     if (request.method() === "POST" && skip) {
       const [planId, position] = [Number(skip[1]), Number(skip[2])];
+      if (mock.rejectSkipFor === planId) {
+        return fulfill(route, { detail: "건너뛸 수 없는 항목" }, 409);
+      }
       mock.plans = mock.plans.map((value) =>
         value.plan_id !== planId
           ? value
@@ -139,7 +145,10 @@ async function mockGeoReleases(page: Page, mock: Mock): Promise<void> {
     if (detail) {
       const found = mock.plans.find((value) => value.plan_id === Number(detail[1]));
       if (!found) return fulfill(route, { detail: "없는 계획" }, 404);
-      const body: DetailResponse = { data: { plan: found, coverage: COVERAGE }, meta: META };
+      const body: DetailResponse = {
+        data: { plan: found, coverage: mock.coverage ?? COVERAGE },
+        meta: META,
+      };
       return fulfill(route, body);
     }
     throw new Error(`unmocked geo-releases call: ${request.method()} ${path}`);
@@ -180,9 +189,10 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
     await page.goto(ROUTE);
 
     await expect(page.getByRole("heading", { level: 1, name: "geo 릴리스" })).toBeVisible();
-    await expect(page.getByTestId("geo-coverage-ratio")).toHaveText("12,001 / 35,754 (33.6%)");
-    const meter = page.getByRole("meter", { name: "현재 토큰 커버리지" });
-    await expect(meter).toHaveAttribute("value", "33.6");
+    // 12,001 / 35,754 = 33.565…% → 내림 33.5(반올림이면 33.6).
+    await expect(page.getByTestId("geo-coverage-ratio")).toHaveText("12,001 / 35,754 (33.5%)");
+    const meter = page.getByRole("meter", { name: "계획 토큰 커버리지" });
+    await expect(meter).toHaveAttribute("value", "33.5");
     for (const [testId, value] of [
       ["geo-coverage-stamped-other", "20,500"],
       ["geo-coverage-unstamped", "3,253"],
@@ -190,9 +200,12 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
       ["geo-coverage-excluded", "41"],
       ["geo-coverage-non-provider", "7"],
     ] as const) {
-      await expect(page.getByTestId(testId)).toContainText(value);
+      // 값 칸만, 정확히 — 부분 일치("7")는 다른 숫자 안의 7에도 맞는다.
+      await expect(page.getByTestId(testId).locator("dd > span").first()).toHaveText(value);
     }
-    await expect(page.getByTestId("geo-coverage-not-called")).toContainText("place 977 · event 3");
+    await expect(
+      page.getByTestId("geo-coverage-not-called").locator("dd > span").nth(1),
+    ).toHaveText("place 977 · event 3");
     await page.screenshot({ fullPage: true, path: test.info().outputPath("geo-releases-desktop.png") });
     // 현재 토큰은 정상 — 빨간 상태가 없다.
     await expect(page.getByTestId("geo-release-skip-reason")).toHaveCount(0);
@@ -231,6 +244,15 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
 
     const mois = page.getByTestId("geo-release-item-2");
     await expect(mois).toContainText("수동 실행 후 skip 필요");
+    // 터치 환경(375px)에서도 읽히게 tooltip이 아니라 보이는 글로 — 배지가 그 글을 가리킨다.
+    const detail = mois.getByText("센서가 자동으로 내지 않는다", { exact: false });
+    await expect(detail).toBeVisible();
+    const detailId = await detail.getAttribute("id");
+    expect(detailId).toBeTruthy();
+    await expect(mois.getByText("수동 실행 후 skip 필요")).toHaveAttribute(
+      "aria-describedby",
+      detailId ?? "",
+    );
     await expect(mois).not.toContainText("replay_not_launchable_before_t_gr_08");
     await expect(page.getByTestId("geo-release-item-1")).not.toContainText("수동 실행 후 skip 필요");
   });
@@ -260,6 +282,7 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
 
     const alert = page.getByRole("alert").filter({ hasText: "계획을 만들 수 없음" });
     await expect(alert).toBeVisible();
+    await expect(alert).toHaveAttribute("data-variant", "destructive");
     await expect(page.getByTestId("geo-release-skip-reason")).toHaveText(
       "센서 Skip 사유: geo data_token 없음 — 지문 backfill/복구 필요",
     );
@@ -284,6 +307,44 @@ test.describe(`${ROUTE} (T-GR-06)`, () => {
     await page.getByRole("alertdialog").getByRole("button", { name: "다시 계획" }).click();
     await expect(page.getByTestId("geo-release-plan-11")).toBeVisible();
     expect(mock.calls.filter((call) => call === "POST /v1/ops/geo-releases/7/replan")).toHaveLength(1);
+    // 새 계획이 선택된다(#1334 리뷰 M1).
+    await expect(page.getByText("#11 · seq 2", { exact: false }).first()).toBeVisible();
+    await expect(page.getByTestId("geo-release-plan-11")).toHaveAttribute("data-state", "selected");
+  });
+
+  test("분모 0이면 게이지를 숨긴다", async ({ page }) => {
+    const mock: Mock = {
+      current: CURRENT,
+      status: "ok",
+      plans: [runningPlan()],
+      calls: [],
+      coverage: { ...COVERAGE, total_provider_with_coord: 0, stamped_current: 0 },
+    };
+    await mockGeoReleases(page, mock);
+    await page.goto(ROUTE);
+
+    await expect(page.getByText("분모 없음", { exact: false })).toBeVisible();
+    await expect(page.getByRole("meter")).toHaveCount(0);
+  });
+
+  test("계획을 바꾸면 이전 계획의 오류가 사라진다", async ({ page }) => {
+    const mock: Mock = {
+      current: CURRENT,
+      status: "ok",
+      plans: [runningPlan(), plan(6, [item(1)], { state: "superseded", plan_seq: 1 })],
+      calls: [],
+      rejectSkipFor: 7,
+    };
+    await mockGeoReleases(page, mock);
+    await page.goto(ROUTE);
+
+    await page.getByTestId("geo-release-item-1").getByRole("button", { name: "항목 1 건너뛰기" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "건너뛰기", exact: true }).click();
+    const failure = page.getByRole("alert").filter({ hasText: "건너뛰기:" });
+    await expect(failure).toBeVisible();
+    await page.getByTestId("geo-release-plan-6").click();
+    await expect(page.getByText("#6 · seq 1", { exact: false }).first()).toBeVisible();
+    await expect(failure).toHaveCount(0);
   });
 
   test("모바일 375px — 가로 스크롤 없이 핵심 영역이 보인다", async ({ page }) => {

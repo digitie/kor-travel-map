@@ -541,7 +541,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 19개 — source NAV_GROUPS 기준.
+    // nav 링크는 정확히 21개 — source NAV_GROUPS 기준.
     await expect(navigation.getByRole("link")).toHaveCount(21);
 
     // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
