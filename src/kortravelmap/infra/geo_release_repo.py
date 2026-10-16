@@ -70,11 +70,14 @@ __all__ = [
     "complete_plan",
     "get_geo_release_plan",
     "launch_blocked_reason",
+    "mark_item_requested",
     "list_geo_release_plans",
     "plan_geo_release",
     "plan_coverage",
     "replan",
+    "requeue_item",
     "run_config_for_dataset",
+    "settle_item",
     "skip_item",
 ]
 
@@ -785,6 +788,108 @@ async def replan(session: AsyncSession, plan_id: int) -> GeoReleasePlan:
     specs = await build_release_items(session, source.geo_data_token)
     plan, _ = await _create_plan(session, current, specs)
     return plan
+
+
+# -- 센서 전이(T-GR-05) ---------------------------------------------------------------------------
+
+_MARK_REQUESTED_SQL: Final = text(
+    """
+UPDATE ops.kor_travel_geo_release_items
+   SET state = 'requested', state_reason = NULL, run_key = :run_key, dagster_run_id = NULL,
+       requested_at = now(), updated_at = now()
+ WHERE plan_id = :plan_id AND "position" = :position AND state = 'pending'
+   AND attempt_seq = :attempt_seq
+RETURNING plan_id
+"""
+)
+_START_PLAN_SQL: Final = text(
+    """
+UPDATE ops.kor_travel_geo_releases
+   SET state = 'running', updated_at = now()
+ WHERE plan_id = :plan_id AND state = 'planned'
+"""
+)
+_SETTLE_ITEM_SQL: Final = text(
+    """
+UPDATE ops.kor_travel_geo_release_items
+   SET state = :state, state_reason = :reason,
+       dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id), updated_at = now()
+ WHERE plan_id = :plan_id AND "position" = :position AND state = 'requested'
+RETURNING plan_id
+"""
+)
+_REQUEUE_ITEM_SQL: Final = text(
+    """
+UPDATE ops.kor_travel_geo_release_items
+   SET state = 'pending', state_reason = NULL, attempt_seq = attempt_seq + 1, run_key = NULL,
+       dagster_run_id = NULL, requested_at = NULL, updated_at = now()
+ WHERE plan_id = :plan_id AND "position" = :position AND state = 'requested'
+RETURNING attempt_seq
+"""
+)
+
+
+async def mark_item_requested(
+    session: AsyncSession, plan_id: int, position: int, *, attempt_seq: int, run_key: str
+) -> bool:
+    """대기 항목을 ``requested``로 — 센서가 RunRequest를 내기 직전. 계획은 ``running``이 된다.
+
+    ``attempt_seq``가 다르거나 이미 대기가 아니면 False(다른 tick이 먼저 냈다 — 내지 않는다).
+    """
+    await session.execute(_PLAN_LOCK_SQL)
+    marked = (
+        await session.execute(
+            _MARK_REQUESTED_SQL,
+            {
+                "plan_id": plan_id,
+                "position": position,
+                "attempt_seq": attempt_seq,
+                "run_key": run_key,
+            },
+        )
+    ).first()
+    if marked is None:
+        return False
+    await session.execute(_START_PLAN_SQL, {"plan_id": plan_id})
+    return True
+
+
+async def settle_item(
+    session: AsyncSession,
+    plan_id: int,
+    position: int,
+    *,
+    state: Literal["done", "failed"],
+    reason: ItemStateReason | None = None,
+    dagster_run_id: str | None = None,
+) -> bool:
+    """``requested`` 항목을 run 결과로 끝낸다(``done`` 또는 ``failed(reason)``)."""
+    await session.execute(_PLAN_LOCK_SQL)
+    settled = (
+        await session.execute(
+            _SETTLE_ITEM_SQL,
+            {
+                "plan_id": plan_id,
+                "position": position,
+                "state": state,
+                "reason": reason,
+                "dagster_run_id": dagster_run_id,
+            },
+        )
+    ).first()
+    return settled is not None
+
+
+async def requeue_item(session: AsyncSession, plan_id: int, position: int) -> int | None:
+    """``requested`` 항목을 다음 ``attempt_seq``의 대기로 되돌린다(자동 재요청·MOIS 이어 달리기).
+
+    돌려주는 것은 새 ``attempt_seq``(이미 ``requested``가 아니면 None).
+    """
+    await session.execute(_PLAN_LOCK_SQL)
+    row = (
+        await session.execute(_REQUEUE_ITEM_SQL, {"plan_id": plan_id, "position": position})
+    ).first()
+    return None if row is None else int(row[0])
 
 
 # -- 완료 -------------------------------------------------------------------------------------
