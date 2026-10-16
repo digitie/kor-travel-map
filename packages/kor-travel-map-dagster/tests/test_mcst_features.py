@@ -67,6 +67,7 @@ class _FakeBundleLoadClient:
         bundles: Any,
         *,
         curation_dataset: tuple[str, str] | None = None,
+        geo: Any = None,
     ) -> FeatureLoadResult:
         materialized = list(bundles)
         self.loaded.extend(materialized)

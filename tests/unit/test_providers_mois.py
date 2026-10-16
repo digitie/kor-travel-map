@@ -545,3 +545,49 @@ async def test_reverse_coordinate_helper_matches_what_the_converter_geocodes() -
     assert predicted[1] is None
     assert predicted[2] is None
     assert [c for c in predicted if c is not None] == seen
+
+
+# -- 행 evidence(ADR-109 결정 3 ②, T-GR-03) ---------------------------------------------------
+
+
+async def _resolver_with(code: str | None) -> Any:
+    async def _resolver(address: Address) -> Address | None:
+        return None if code is None else Address(bjd_code=code, sigungu_code=code[:5])
+
+    return _resolver
+
+
+@pytest.mark.parametrize(
+    ("record", "reverse", "resolver_code", "expected"),
+    [
+        # payload 법정동코드 — geo를 부르지 않는다.
+        (
+            {"legal_dong_code": "1111010100", "lon": 126.97, "lat": 37.56},
+            True,
+            None,
+            (False, False),
+        ),
+        # 좌표 + reverse — 불렀다.
+        ({"lon": 126.97, "lat": 37.56}, True, None, (True, False)),
+        # 좌표 없음 + geocode가 코드를 받았다.
+        ({"road_address": "서울특별시 중구 세종대로 110"}, False, "1114010100", (False, True)),
+        # 좌표 없음 + geocode를 시도했지만 코드를 못 받았다 — 받은 것만 센다.
+        ({"road_address": "서울특별시 중구 세종대로 110"}, False, None, (False, False)),
+    ],
+    ids=["payload-code", "reverse", "geocode-obtained", "geocode-missed"],
+)
+async def test_bundle_carries_the_geo_attempt_evidence(
+    record: dict[str, Any],
+    reverse: bool,
+    resolver_code: str | None,
+    expected: tuple[bool, bool],
+) -> None:
+    kwargs: dict[str, Any] = {"address_resolver": await _resolver_with(resolver_code)}
+    if reverse:
+        kwargs["reverse_geocoder"] = _FakeGeocoder(Address(bjd_code="1111010100"))
+    [bundle] = await _bundles([_Record(service_slug="bakeries", **record)], **kwargs)
+    assert bundle.geo_attempt is not None
+    assert (
+        bundle.geo_attempt.reverse_attempted,
+        bundle.geo_attempt.geocode_obtained_code,
+    ) == expected

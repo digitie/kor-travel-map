@@ -32,6 +32,7 @@ from .area import AreaDetail
 from .event import EventDetail
 from .feature import Feature
 from .file import FeatureFileSource
+from .geo_dataset import GeoAttemptEvidence
 from .notice import NoticeDetail
 from .place import PlaceDetail
 from .route import RouteDetail
@@ -83,6 +84,15 @@ class FeatureBundle(BaseModel):
             "값이 어느 출처인지 알 수 없어 좌표-주소 교차검증이 불가능해진다. 채우지 않은 "
             "provider는 ``None``이며, 검증은 그 provider에 대해 침묵한다 — 침묵을 통과로 "
             "착각하지 않도록 커버리지는 metadata에 별도 집계된다."
+        ),
+    )
+    geo_attempt: GeoAttemptEvidence | None = Field(
+        default=None,
+        description=(
+            "행 단위 geo 시도 증거(ADR-109 결정 3 ②). 변환 단계에서 행마다 reverse를 "
+            "시도했는지·geocode로 코드를 받았는지를 아는 provider(MOIS)만 채운다. 채워져 "
+            "있으면 지오코딩 스탬프 outcome을 이 증거로 정한다 — 없으면 run 신호와 좌표 "
+            "유무로 정한다."
         ),
     )
 

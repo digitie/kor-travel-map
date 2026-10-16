@@ -61,9 +61,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-GR-03 — **unchanged-skip 보강·빈 답 가드·무쓰기·스탬프·override finding·MOIS 표식·concierge 토큰 규칙**
 
-  `load_bundle` stale 분기와 MOIS CTE 토큰 조건, 값 동일 무쓰기(override 열 제외, 스냅샷 열 2개 추가), 빈 답
-  가드(행 집합 G·run), `mois.py` evidence 1필드, concierge 토큰 kwarg·신뢰 규칙·해시 제외. 의도적 빨강 3건.
-  T-GR-02 이월: client·repo로 `current_dataset`/`geo_applied` 전달, run 빈 답 비율 가드, MOIS 배선(acceptance §T-GR-03 머리).
+  `load_bundle` stale 분기·MOIS CTE 토큰 조건, 값 동일 무쓰기, 빈 답 가드(행·run), MOIS evidence, concierge 토큰
+  규칙·해시 제외. 의도적 빨강 3건. T-GR-02 이월(client·repo 전달, run 가드, MOIS 배선, price 스탬프 0)은
+  acceptance §T-GR-03 머리; T-GR-05 경량 client resource는 §T-GR-05.
 
 - [ ] T-GR-04 — **릴리스 계획 표·core 함수·admin API·링크 재동기화** (migration 408)
 

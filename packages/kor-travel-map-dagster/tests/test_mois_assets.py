@@ -98,6 +98,8 @@ async def test_mois_asset_delegates_and_records_success_only_for_a_full_finished
     monkeypatch.setattr(assets, "_resource_value", _resource_value)
     monkeypatch.setattr(assets, "_resource_object", lambda *_args, **_kwargs: client)
     monkeypatch.setattr(assets, "_reverse_geocoder", lambda *_args: geocoder)
+    current_dataset = object()
+    monkeypatch.setattr(assets, "_current_geo_dataset", lambda *_args: _async(current_dataset))
     monkeypatch.setattr(
         assets, "_fetched_at", lambda *_args: _async(datetime(2026, 10, 12, tzinfo=UTC))
     )
@@ -108,6 +110,8 @@ async def test_mois_asset_delegates_and_records_success_only_for_a_full_finished
 
     assert result is outcome.result
     assert seen["records"] is records
+    # run 시작에 읽은 현재 geo 토큰이 MOIS 적재로 간다(ADR-109 결정 2·4).
+    assert seen["current_dataset"] is current_dataset
     assert seen["plan"] is _PLAN
     assert seen["reverse_geocoder"] is geocoder
     assert seen["strict_address"] == "drop"

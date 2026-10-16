@@ -19,7 +19,7 @@ from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
-from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
@@ -661,7 +661,9 @@ async def _run_feature_notice_transport_highway_incidents_locked(
 
     async def load_snapshot_atomically(
         validated_bundles: Sequence[Any],
+        _geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
+        # notice 활성 집합은 geo를 쓰지 않는다(geo_applied 전부 False) — 스탬프 대상이 아니다.
         nonlocal reconciled
         atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
         if not callable(atomic_load):
@@ -835,6 +837,7 @@ async def run_feature_place_krheritage_items(
 
     async def _load_and_retire(
         snapshot_bundles: Sequence[Any],
+        geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
         nonlocal retired
         load, retired = await client.load_authoritative_feature_snapshot(
@@ -843,6 +846,7 @@ async def run_feature_place_krheritage_items(
             dataset_key=KRHERITAGE_DATASET_KEY,
             source_entity_type="heritage",
             retire_geometryless_areas=True,
+            geo=geo,
         )
         return load
 
@@ -945,6 +949,8 @@ async def run_feature_place_mois_licenses(
         dataset_key=dataset_key,
         strict_address=strict_address,
         reverse_geocoder=_reverse_geocoder(context),
+        # 첫 지오코딩·"그대로" 판정 **전에** 읽는다(ADR-109 결정 2·4).
+        current_dataset=await _current_geo_dataset(context),
     )
     # 봉인과 같은 조건이다 — 본 record가 0건인 "완료"는 sync 성공이 아니다.
     if outcome.authoritative:
@@ -1223,7 +1229,9 @@ async def run_feature_notice_krforest_landslide_forecast_issues(
 
     async def load_snapshot_atomically(
         validated_bundles: Sequence[Any],
+        _geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
+        # notice 활성 집합은 geo를 쓰지 않는다(geo_applied 전부 False) — 스탬프 대상이 아니다.
         nonlocal reconciled
         atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
         if not callable(atomic_load):
@@ -1534,11 +1542,15 @@ async def run_feature_place_kor_travel_concierge_youtube(
     # T-VN-H28B: 건별 격리를 실제로 결선한다. 결선하지 않으면 item 1건의 구성 실패가
     # batch 전체를 죽인다(concierge export는 1회 1,477건 전량 재생이라 손실이 전부다).
     quarantined: list[KorTravelConciergeQuarantine] = []
+    # ADR-109 결정 6(a): run-scoped 현재 토큰(첫 지오코딩 전에 읽는다)과 payload 토큰이 같을 때만
+    # payload 행정코드를 믿는다.
+    current_dataset = await _current_geo_dataset(context)
     bundles = await kor_travel_concierge_items_to_bundles(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
         quarantine=quarantined,
+        current_data_token=current_dataset.data_token if current_dataset is not None else None,
     )
     upsert_count = kor_travel_concierge_upsert_count(records)
     accounted_count = len(bundles) + len(quarantined)
@@ -1571,6 +1583,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
 
     async def _load_and_retire(
         snapshot_bundles: Sequence[Any],
+        geo: GeoLoadContext | None,
     ) -> FeatureLoadResult:
         nonlocal retired
         load, retired = await client.load_authoritative_feature_snapshot(
@@ -1579,6 +1592,7 @@ async def run_feature_place_kor_travel_concierge_youtube(
             dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
             source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
             retired_source_entity_ids=retired_entity_ids,
+            geo=geo,
         )
         return load
 
@@ -1700,9 +1714,11 @@ async def _load_snapshot_batches(
         "bool | str", await _resource_value(context, "strict_address", default="strict")
     )
 
-    async def _load_all(items: AsyncIterable[Sequence[Any]]) -> FeatureLoadResult:
+    async def _load_all(
+        items: AsyncIterable[Sequence[Any]], geo: GeoLoadContext | None
+    ) -> FeatureLoadResult:
         return await client.load_feature_bundle_batches(
-            items, curation_dataset=(provider, dataset_key)
+            items, curation_dataset=(provider, dataset_key), geo=geo
         )
 
     result = await load_feature_bundle_batches_for_dagster(
@@ -1736,7 +1752,8 @@ async def _load(
     source_entity_type: str | None = None,
     retire_absent_from_snapshot: bool = False,
     record_sync_state: bool = True,
-    load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
+    load_all: Callable[[Sequence[Any], GeoLoadContext | None], Awaitable[FeatureLoadResult]]
+    | None = None,
     geo_applied: GeoApplied,
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
@@ -1994,24 +2011,76 @@ async def _geo_run_inputs(
     """
     current: DatasetRef | None = None
     if geo_applied.reverse or geo_applied.geocode:
-        handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
-        if handle is None:
-            context.log.warning(
-                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — "
-                "현재 토큰 None으로 진행"
-            )
-        else:
-            current = await cast("GeoDatasetHandle", handle).current()
+        current = await _current_geo_dataset(context)
     stats: GeoCallStats | None = None
     if geo_applied.reverse:
         stats = cast("GeoCallStats | None", getattr(_reverse_geocoder(context), "stats", None))
     return {"geo_applied": geo_applied, "current_dataset": current, "geo_stats": stats}
 
 
+async def _current_geo_dataset(context: AssetExecutionContext) -> DatasetRef | None:
+    """run-scoped 현재 토큰 — resource handle이 처음 읽은 값(이후 같은 값). 키 미배선은 WARNING."""
+    handle = _resource_object(context, "kor_travel_geo_dataset", default=None)
+    if handle is None:
+        log = getattr(context, "log", None)  # 직접 호출 테스트 대역에는 log가 없을 수 있다
+        if log is not None:
+            log.warning(
+                "resource kor_travel_geo_dataset가 이 context에 없다(배선 누락) — 현재 토큰 "
+                "None으로 진행"
+            )
+        return None
+    return await cast("GeoDatasetHandle", handle).current()
+
+
+class _TokenFirstReverseGeocoder:
+    """첫 역지오코딩 **전에** run의 현재 토큰을 읽게 하는 감싸개(ADR-109 결정 2, #1327 최종 리뷰).
+
+    ``_load`` 경로는 변환(지오코딩)이 끝난 뒤에야 적재 wrapper로 들어가므로, 현재 토큰을 거기서 처음
+    읽으면 run 도중 geo가 데이터셋을 바꿨을 때 옛 데이터로 해석한 행이 **새** 토큰으로 봉인될 수
+    있다 (위험한 방향). 이 감싸개는 처음 불릴 때 handle을 먼저 읽고 그 뒤에 지오코딩한다 — handle이
+    값을 기억하므로 적재 wrapper가 나중에 읽는 값은 지오코딩 **전** 값이다. 계수(``stats``)는 그대로
+    보인다.
+    """
+
+    def __init__(self, inner: Any, before: Callable[[], Awaitable[object]]) -> None:
+        self._inner = inner
+        self._before = before
+        self._ready = False
+
+    @property
+    def stats(self) -> GeoCallStats | None:
+        return cast("GeoCallStats | None", getattr(self._inner, "stats", None))
+
+    async def _ensure_token(self) -> None:
+        if not self._ready:
+            await self._before()
+            self._ready = True
+
+    async def __call__(self, coord: Any) -> Any:
+        await self._ensure_token()
+        return await self._inner(coord)
+
+
+class _TokenFirstObservedReverseGeocoder(_TokenFirstReverseGeocoder):
+    """``observe``가 있는 역지오코더용(``ObservedReverseGeocoder`` 프로토콜을 유지한다)."""
+
+    async def observe(self, coord: Any) -> Any:
+        await self._ensure_token()
+        return await self._inner.observe(coord)
+
+
 def _reverse_geocoder(context: AssetExecutionContext) -> ReverseGeocoder | None:
+    inner = _resource_object(context, "reverse_geocoder", default=None)
+    if inner is None or _resource_object(context, "kor_travel_geo_dataset", default=None) is None:
+        return cast("ReverseGeocoder | None", inner)
+    wrapper_type = (
+        _TokenFirstObservedReverseGeocoder
+        if callable(getattr(inner, "observe", None))
+        else _TokenFirstReverseGeocoder
+    )
     return cast(
-        "ReverseGeocoder | None",
-        _resource_object(context, "reverse_geocoder", default=None),
+        "ReverseGeocoder",
+        wrapper_type(inner, lambda: _current_geo_dataset(context)),
     )
 
 

@@ -243,7 +243,8 @@ async def test_empty_answers_are_counted_apart_from_failures() -> None:
     assert stats.observed_data_tokens == {DATA, OTHER_DATA}
     metadata = stats.as_metadata()
     assert metadata["geo_empty_reverse"] == 2
-    assert metadata["geo_empty_total"] == 2
+    # 행 단위 최종 빈 답(region fallback 없음 — endpoint 빈 답과 같다, T-GR-03 run 가드의 분자).
+    assert metadata["geo_empty_reverse_result"] == 2
 
 
 # -- DTO ---------------------------------------------------------------------------------
@@ -380,3 +381,145 @@ def test_decide_outcome_table(label: str, kwargs: dict[str, Any], expected: str 
     arguments.update(kwargs)
     geo_applied = arguments.pop("geo_applied")
     assert decide_outcome(geo_applied, **arguments) == expected, label
+
+
+# -- GeoLoadContext.effective_token (T-GR-03) ---------------------------------------------
+
+
+def test_effective_token_is_none_when_the_run_crossed_a_dataset_switch() -> None:
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
+
+    current = DatasetRef(version_token=VERSION, data_token=DATA)
+    applied = GeoApplied(reverse=True, geocode=False)
+    observed: set[str] = set()
+    assert (
+        GeoLoadContext(
+            geo_applied=applied, current_dataset=current, observed_data_tokens=observed
+        ).effective_token()
+        == DATA
+    )
+    observed.add(DATA)
+    context = GeoLoadContext(
+        geo_applied=applied, current_dataset=current, observed_data_tokens=observed
+    )
+    assert context.effective_token() == DATA
+    observed.add(OTHER_DATA)  # 살아 있는 참조 — 적재 시점의 관측이 반영된다
+    assert context.effective_token() is None
+    assert GeoLoadContext(geo_applied=applied).effective_token() is None
+    assert (
+        GeoLoadContext(
+            geo_applied=applied, current_dataset=DatasetRef(version_token=VERSION)
+        ).effective_token()
+        is None
+    )
+
+
+def test_effective_token_fails_closed_without_a_live_observation_set() -> None:
+    """geo를 쓰는 run이 관측 집합을 넘기지 않으면 전환을 볼 수 없다 — 토큰을 쓰지 않는다."""
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
+
+    current = DatasetRef(version_token=VERSION, data_token=DATA)
+    for applied in (
+        GeoApplied(reverse=True, geocode=False),
+        GeoApplied(reverse=False, geocode=True),
+    ):
+        context = GeoLoadContext(geo_applied=applied, current_dataset=current)
+        assert context.effective_token() is None
+    # geo를 전혀 쓰지 않는 run은 관측할 것이 없다 — 없는 집합이 빈 집합과 같다.
+    unused = GeoApplied(reverse=False, geocode=False)
+    assert GeoLoadContext(geo_applied=unused, current_dataset=current).effective_token() == DATA
+
+
+# -- 부분 퇴행 유지(#1328 M2) ------------------------------------------------------------------
+
+
+def _stored(address: dict[str, object], *, overrides: dict[str, object] | None = None) -> object:
+    from kortravelmap.infra.feature_geocode_load import StoredGeoColumns
+
+    return StoredGeoColumns(
+        values={"address": address, "legal_dong_code": address.get("bjd_code")},
+        overrides=overrides or {},
+    )
+
+
+def test_partial_regression_keeps_only_geo_only_fields_under_the_same_legal_dong() -> None:
+    from kortravelmap.dto import Address
+    from kortravelmap.infra.feature_geocode_load import keep_partially_regressed_fields
+
+    stored = _stored(
+        {
+            "bjd_code": "1156011000",
+            "road_name_code": "115603118001",
+            "admin_dong_code": "1156054000",
+            "zipcode": "07237",
+            "sido_name": "서울특별시",
+        }
+    )
+    new = Address(bjd_code="1156011000", sido_name=None)
+    kept, fields = keep_partially_regressed_fields(stored, new)  # type: ignore[arg-type]
+    # 도로명 텍스트도 관리번호도 없는 답 — 도로명코드는 짝을 확인할 수 없어 지키지 않는다.
+    assert fields == ("admin_dong_code", "zipcode")
+    assert (kept.road_name_code, kept.admin_dong_code, kept.zipcode) == (
+        None,
+        "1156054000",
+        "07237",
+    )
+    assert kept.sido_name is None  # 대상 밖 필드는 새 답 그대로
+
+    moved, moved_fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011100")
+    )
+    assert moved_fields == ()
+    assert moved.road_name_code is None
+
+    overridden = _stored(
+        {"bjd_code": "1156011000", "road_name_code": "115603118001"},
+        overrides={"core.road_name_code": "115603118001"},
+    )
+    _, override_fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        overridden, Address(bjd_code="1156011000")
+    )
+    assert override_fields == ()
+
+
+def test_road_name_code_is_kept_only_with_its_road_text_or_its_management_number() -> None:
+    """도로명코드는 도로명주소와 짝 — 서로 다른 릴리스의 코드를 섞지 않는다(#1328 3차 리뷰)."""
+    from kortravelmap.dto import Address
+    from kortravelmap.infra.feature_geocode_load import keep_partially_regressed_fields
+
+    road = "서울특별시 영등포구 여의공원로 120"
+    mgmt = "11560110100100008000000001"[:25]
+    stored = _stored(
+        {
+            "bjd_code": "1156011000",
+            "road": road,
+            "road_name_code": "115603118001",
+            "road_address_management_no": mgmt,
+        }
+    )
+
+    # 같은 도로명 텍스트 — 코드만 지킨다.
+    same_road, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011000", road=road, road_address_management_no=mgmt)
+    )
+    assert fields == ("road_name_code",)
+    assert same_road.road_name_code == "115603118001"
+
+    # 도로명 텍스트가 다르고 관리번호도 함께 사라졌다 — 둘을 짝으로 지킨다.
+    pair, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored, Address(bjd_code="1156011000", road="서울특별시 영등포구 다른로 1")
+    )
+    assert fields == ("road_address_management_no", "road_name_code")
+    assert (pair.road_name_code, pair.road_address_management_no) == ("115603118001", mgmt)
+
+    # 도로명 텍스트가 다르고 새 답이 자기 관리번호를 냈다 — 옛 코드를 섞지 않는다.
+    mixed, fields = keep_partially_regressed_fields(  # type: ignore[arg-type]
+        stored,
+        Address(
+            bjd_code="1156011000",
+            road="서울특별시 영등포구 다른로 1",
+            road_address_management_no="1156011010010000900000000",
+        ),
+    )
+    assert fields == ()
+    assert mixed.road_name_code is None

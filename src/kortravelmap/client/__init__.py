@@ -344,6 +344,7 @@ if TYPE_CHECKING:
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
     from kortravelmap.dto import Address, FeatureBundle, SourceRecord
+    from kortravelmap.dto.geo_dataset import GeoLoadContext
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
@@ -1060,15 +1061,17 @@ class AsyncKorTravelMapClient:
         bundles: Iterable[FeatureBundle],
         *,
         curation_dataset: tuple[str, str] | None = None,
+        geo: GeoLoadContext | None = None,
     ) -> FeatureLoadResult:
         """``FeatureBundle`` 다수를 한 transaction으로 적재 (commit/rollback).
 
         feature → source_record → source_link 순 idempotent upsert
-        (``infra.load_bundles``). 하나라도 실패하면 전체 rollback.
+        (``infra.load_bundles``). 하나라도 실패하면 전체 rollback. ``geo``는 지오코딩 스탬프·stale
+        분기 입력이다(ADR-109) — None이면 geo 재해석이 없다(옛 동작).
         """
         materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
-            result = await load_bundles(session, materialized)
+            result = await load_bundles(session, materialized, geo=geo)
             if curation_dataset is not None:
                 provider, dataset_key = curation_dataset
                 result = result.merge(
@@ -1085,6 +1088,7 @@ class AsyncKorTravelMapClient:
         dataset_key: str,
         source_entity_type: str,
         payload_hashes: Mapping[str, str],
+        current_data_token: str | None = None,
     ) -> frozenset[str]:
         """이미 같은 payload로 적재돼 있고 primary feature가 active인 entity id (ADR-108).
 
@@ -1099,6 +1103,7 @@ class AsyncKorTravelMapClient:
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
                 payload_hashes=payload_hashes,
+                current_data_token=current_data_token,
             )
 
     async def load_feature_bundles_reobserving(
@@ -1110,6 +1115,7 @@ class AsyncKorTravelMapClient:
         source_entity_type: str,
         reobserved_payload_hashes: Mapping[str, str],
         observed_at: datetime,
+        geo: GeoLoadContext | None = None,
     ) -> FeatureLoadResult:
         """chunk 하나를 **한 transaction**으로 닫는다 — 미변경 재관측 + 변경분 적재 (ADR-108).
 
@@ -1127,14 +1133,16 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 payload_hashes=reobserved_payload_hashes,
                 observed_at=observed_at,
+                current_data_token=geo.effective_token() if geo is not None else None,
             )
-            return await load_bundles(session, materialized)
+            return await load_bundles(session, materialized, geo=geo)
 
     async def load_feature_bundle_batches(
         self,
         batches: AsyncIterable[Sequence[FeatureBundle]],
         *,
         curation_dataset: tuple[str, str] | None = None,
+        geo: GeoLoadContext | None = None,
     ) -> FeatureLoadResult:
         """async batch stream을 한 transaction으로 적재한다.
 
@@ -1148,7 +1156,7 @@ class AsyncKorTravelMapClient:
             async for batch in batches:
                 if not batch:
                     continue
-                result = result.merge(await load_bundles(session, batch))
+                result = result.merge(await load_bundles(session, batch, geo=geo))
             if curation_dataset is not None:
                 provider, dataset_key = curation_dataset
                 result = result.merge(
@@ -1168,6 +1176,7 @@ class AsyncKorTravelMapClient:
         retired_source_entity_ids: set[str] | None = None,
         retire_geometryless_areas: bool = False,
         retire_absent_from_snapshot: bool = False,
+        geo: GeoLoadContext | None = None,
     ) -> tuple[FeatureLoadResult, int]:
         """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
 
@@ -1181,7 +1190,7 @@ class AsyncKorTravelMapClient:
             raise ValueError("retirement mode는 하나만 선택해야 합니다")
         materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
-            result = await load_bundles(session, materialized)
+            result = await load_bundles(session, materialized, geo=geo)
             retired = 0
             if retired_source_entity_ids is not None:
                 retired = await retire_features_by_source_entity_ids(
@@ -2657,6 +2666,7 @@ class AsyncKorTravelMapClient:
         violation_type: str,
         expected_source_record_keys: Mapping[str, str],
         max_age_days: int,
+        expected_payload_fields: Mapping[str, str] | None = None,
     ) -> frozenset[str]:
         """같은 payload로 최근 열려 있는 finding의 dedupe key(ADR-108 역지오코딩 불가 표식)."""
         async with self._session_factory() as session, session.begin():
@@ -2665,6 +2675,7 @@ class AsyncKorTravelMapClient:
                 violation_type=violation_type,
                 expected_source_record_keys=expected_source_record_keys,
                 max_age_days=max_age_days,
+                expected_payload_fields=expected_payload_fields,
             )
 
     async def resolve_open_findings_by_key(

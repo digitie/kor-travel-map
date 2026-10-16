@@ -9,7 +9,9 @@
 > **구현 진척(2026-10-15)**: §2의 스탬프 표(migration 407)·`dto/geo_dataset.py`·`infra/feature_geocode_stamp_repo.py`
 > (`upsert_stamps`·`get_stamp`·`is_stale`·`select_stale_feature_ids`·`decide_outcome`)와 §3 첫 항목(`dataset_version()`·
 > 응답 `dataset` 선택 파싱·`GeoCallStats.empty`/`observed_data_tokens`)은 T-GR-01로 구현됐다. 시그니처 차이와
-> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. 나머지는 계획이다.
+> `coverage()` 이월은 acceptance §T-GR-01 "구현 메모"가 정본이다. §3의 resource·`geo_applied` 배선은 T-GR-02,
+> §4 전부(stale 분기·무쓰기·빈 답 가드 행/run·override finding·MOIS 토큰 조건·표식·concierge 규칙)는 T-GR-03이 구현했다 —
+> 차이는 acceptance §T-GR-03 "구현 메모"(특히 run 가드 분자 = 행 단위 최종 빈 답). 나머지(§5 이후)는 계획이다.
 
 ## 1. 저장되는 geo 유도 값과 provider별 출처 (현재 사실)
 
@@ -164,10 +166,10 @@ AND EXISTS (SELECT 1 FROM feature.feature_geocode_stamps st
 
 | 규칙 | 내용 |
 |---|---|
-| 값 동일 무쓰기 | stale & not `became_current` → `get_feature_address_snapshot`(`infra/feature_address_repo.py:120`)으로 주소 유도 컬럼 **6개** + `address` jsonb 비교 — `FeatureAddressSnapshot`(`:104-117`)에 `road_name_code`·`admin_dong_code`를 **더한다**(현재 없음). `feature.has_active_feature_override(feature_id,'core.<col>')`(정의 `head-schema.sql:5147`, patch masking 호출 `:829-883`)가 참인 열은 비교 집합에서 **제외**. 전부 같으면 features UPDATE 생략, 스탬프만 upsert |
+| 값 동일 무쓰기 | stale & not `became_current` → 주소 유도 컬럼 **6개** + `address` jsonb를 저장값과 비교한다. 저장값은 `infra/feature_geocode_load.py`의 `read_stored_geo_columns`(chunk에서는 `read_stored_geo_columns_many` 한 문장)가 active override(`ops.feature_overrides`, `core.<col>`)와 함께 읽는다 — `FeatureAddressSnapshot`은 넓히지 않았다(T-GR-03 구현 메모). override가 있는 열은 비교 집합에서 **제외**. 전부 같으면 features UPDATE 생략, 스탬프만 upsert. **부분 퇴행 유지**: 새 답의 `bjd_code`가 저장값과 같은데 `admin_dong_code`·`zipcode`가 새 답에서만 비었으면 저장값을 지킨다. `road_name_code`는 도로명주소와 짝이라 새 도로명 텍스트가 저장값과 같을 때만, 아니면 `road_address_management_no`와 함께 사라졌을 때만 둘을 짝으로 지킨다(서로 다른 릴리스의 코드를 섞지 않는다). 메타 `geo_partial_kept` |
 | 빈 답 가드(행) | 판정 집합 **G** = `address.sido_name/sigungu_name/admin_dong_code/road_name_code/zipcode` + `legal_dong_code`·`sigungu_code`(bundle payload에 provider 코드가 있으면 두 코드 열 제외). `road/legal/admin`은 제외(krheritage `:483`·standard_data `:296-297`·concierge `:548`·khoa·krairport·mcst가 원문으로 채운다 — §1 표). 저장 G에 non-NULL이 있는데 새 bundle의 G가 전부 None → features UPDATE·스탬프 모두 쓰지 않고 `reverse_geocode_failed`(`dagster/validation.py:205`) 1건. `became_current` 행도 주소 열은 보존, 나머지 패치만 |
-| 빈 답 가드(run) | `GEOCODE_RATIO_MIN_SAMPLE=50`·`plan.geocode_degraded_ratio`(`mois_chunked_load.py:131, 663-678`)의 **상수·비율 계산만** 공통 모듈로 올려 `dagster/etl.py:436-439` 공통 chunk 루프가 쓴다. 비-MOIS 분모 = `GeoCallStats.calls['reverse']`, 분자 = `empty['reverse']`(§3, chunk 간 누적; 좌표 없는 행은 분모에 없다). 행동은 호출처가 정한다: 비-MOIS(공통 루프) = 표본 ≥ 50 & 비율 초과 → run **실패**(그 chunk 스탬프는 commit 전); MOIS 자기 루프 = ADR-108 §3a-2 그대로 **degraded, 실패 아님**(회귀 테스트로 고정) |
-| 스탬프 쓰기 | `load_bundle` 끝, `current_dataset is not None and current_dataset.data_token is not None`이고 `geo_applied` 하나라도 True면 항상(가드 행 제외) `upsert_stamps` 1행; 토큰이 없으면 **쓰지도 덮지도 않는다**(기존 스탬프 바이트 불변); MOIS는 chunk commit 안 bulk |
+| 빈 답 가드(run) | `GEOCODE_RATIO_MIN_SAMPLE=50`·`plan.geocode_degraded_ratio`(`mois_chunked_load.py:131, 663-678`)의 **상수·비율 계산만** 공통 모듈로 올려 `dagster/etl.py:436-439` 공통 chunk 루프가 쓴다. 비-MOIS 분모 = `GeoCallStats.calls['reverse']`, 분자 = **행 단위 최종 빈 답** `empty['reverse_result']`(`REVERSE_RESULT_EMPTY_KEY` — region fallback까지 거친 최종 `Address`가 None이거나 `bjd_code`가 없는 행; endpoint 빈 답 `empty['reverse']`가 아니다 — 산악 centroid처럼 reverse가 늘 비고 fallback이 채우는 dataset이 정상 run에서 실패하지 않게. run 전체 누적; 좌표 없는 행은 분모에 없다). 행동은 호출처가 정한다: 비-MOIS(공통 루프) = 표본 ≥ 50 & 비율 초과 → run **실패**(그 chunk 스탬프는 commit 전); MOIS 자기 루프 = ADR-108 §3a-2 그대로 **degraded, 실패 아님**(회귀 테스트로 고정) |
+| 스탬프 쓰기 | 유효 토큰(`GeoLoadContext.effective_token()` — 토큰이 있고, 관측 집합이 있고, 그 안에 다른 토큰이 없다)이 있으면 가드 행을 뺀 전 행. `load_bundles`(MOIS 포함 모든 적재 경로)는 chunk 단위다 — stale 판정·저장값은 chunk 시작에 각각 한 문장, 스탬프는 chunk 끝 한 문장(그 transaction 안). 토큰이 없으면 **쓰지도 덮지도 않는다**(기존 스탬프 바이트 불변) |
 | timeout 재시도 | run 태그 `kor_travel_map.geo_release_plan_id`가 있는 run에서만 reverse timeout 1회 재시도(backoff 1건) — ADR-108 예외, **ADR-109 열린 결정 6 승인 전에는 적용하지 않는다**(`trigger_kind=sensor`는 MOIS 이어 달리기 run에도 붙어 판별자가 아니다, `mois_chunked_load.py:1071-1075`) |
 | override | override 값 ≠ 새 geo 값 → finding `address_override_geo_stale`(info, payload `{override_values, geo_values, geo_data_token}`), `(feature_id, geo_data_token)` dedupe; 같으면 무동작. 해소는 `apply_kor_travel_geo_address`(`admin_issues.py:576`) |
 | MOIS 표식 | `_record_marker_batch`(`mois_chunked_load.py:905-944`) payload에 `geo_data_token`; `_known_unresolvable`(`:853-882`)이 `expected_payload_fields={"geo_data_token": current}` 전달(None이면 생략) |
@@ -176,9 +178,11 @@ AND EXISTS (SELECT 1 FROM feature.feature_geocode_stamps st
 **concierge provider(ADR-109 결정 6)**: `_address(payload, geo=)`(`kor_travel_concierge.py:523`)는 payload
 `geo_data_token`이 있고 run-scoped `data_token`과 같을 때만 payload 코드. 토큰 전달 경로: `kor_travel_concierge_items_to_bundles(…,
 current_data_token: str | None = None)`(`:125-131`, additive kwarg) → `_item_to_bundle` → `_address`; 호출처
-`dagster/assets.py:1508`이 `kor_travel_geo_dataset` resource의 `data_token`을 넘긴다(기본 None = 옛 동작 = payload
-코드 불신·geo 우선). `raw_payload_hash`는
-`address.geo_data_token`을 뺀 `make_payload_hash(raw_data)` 자체 계산(`:278-290` 대체). 스탬프는 §2 표 그대로다 —
+`dagster/assets.py:1508`이 `kor_travel_geo_dataset` resource의 `data_token`을 넘긴다(기본 None = 옛 동작 = **payload
+코드 우선**, ADR-109 결정 6과 같다). 토큰을 넘기면 payload 토큰이 그것과 같을 때만 payload 코드, 아니면 geo 우선.
+`raw_payload_hash`는 payload가 `geo_data_token`을 실어 올 때만 Map이 직접 잰다 — `address.geo_data_token`·producer
+해시·export 상태 필드(최상위 `updated_at`·`operation` — producer `_serialize_item`이 토큰만 바뀌어도 `updated_at`을
+새로 찍는다)를 뺀 `make_payload_hash(raw_data)`. 토큰 없는 payload는 종전 producer 해시 그대로다. 스탬프는 §2 표 그대로다 —
 좌표가 있어 reverse를 불렀으면 payload 코드를 썼어도 `called`(geo가 채운 빈칸이 비교 대상), 좌표 없는 payload 코드
 행만 `not_called`. 토큰만 바뀐 payload는 `became_current=False`·`row_revision` 불변·스탬프 current여야 한다.
 

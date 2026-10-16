@@ -26,7 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.types import Text
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +43,7 @@ __all__ = [
     "get_stamp",
     "is_stale",
     "select_stale_feature_ids",
+    "stale_among",
     "upsert_stamps",
 ]
 
@@ -142,6 +143,17 @@ SELECT {_STALE_PREDICATE} AS stale
 """
 )
 
+#: 여러 Feature 중 stale인 것 — chunk 단위 적재가 행마다 묻지 않도록 한 번에 판정한다.
+_STALE_AMONG_SQL: Final = text(
+    f"""
+SELECT target.feature_id::text AS feature_id
+  FROM unnest(CAST(:feature_ids AS uuid[])) AS target(feature_id)
+  LEFT JOIN feature.feature_geocode_stamps AS stamp
+    ON stamp.feature_id = target.feature_id
+ WHERE {_STALE_PREDICATE}
+"""
+).bindparams(bindparam("feature_ids", type_=ARRAY(Text)))
+
 #: provider dataset에 **primary** source_link를 가진 활성 Feature 중 stale인 것.
 #: 첫 페이지와 다음 페이지를 **다른 문장**으로 둔다 — ``(:after IS NULL OR id > :after)``
 #: 한 문장은 재사용된 prepared statement의 generic plan에서 ``feature_id`` 범위 스캔을
@@ -232,6 +244,26 @@ async def is_stale(
         )
     ).scalar_one()
     return bool(value)
+
+
+async def stale_among(
+    session: AsyncSession,
+    feature_ids: Collection[str],
+    current_data_token: str | None,
+) -> frozenset[str]:
+    """``feature_ids`` 중 stale인 것 — :func:`is_stale`의 chunk 판(한 번의 왕복).
+
+    현재 토큰이 None이면 빈 집합이다(fail-to-current).
+    """
+    if current_data_token is None or not feature_ids:
+        return frozenset()
+    rows = (
+        await session.execute(
+            _STALE_AMONG_SQL,
+            {"feature_ids": list(feature_ids), "current_data_token": current_data_token},
+        )
+    ).scalars().all()
+    return frozenset(str(row) for row in rows)
 
 
 async def select_stale_feature_ids(

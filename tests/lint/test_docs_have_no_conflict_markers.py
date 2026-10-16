@@ -40,7 +40,7 @@ def _read(path: Path) -> str:
 
 def offenders(text: str) -> list[int]:
     """마커 줄 번호(1부터). BOM을 떼고 CRLF·CR 줄끝을 LF로 맞춘 뒤 본다."""
-    text = text.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     hits = [match.start() for match in _EDGE_MARKER.finditer(text)]
     if hits:
         hits += [match.start() for match in _SEPARATOR.finditer(text)]
@@ -68,7 +68,7 @@ def test_no_conflict_markers_in_markdown() -> None:
         ("<<<<<<< HEAD\nx\n=======\n", [1, 3]),
         ("text ======= text\n", []),
         ("a\r\n||||||| parent of abc (x)\r\nb\r\n", [2]),  # CRLF
-        ("﻿<<<<<<< HEAD\nx\n", [1]),  # 첫 줄의 UTF-8 BOM
+        ("\ufeff<<<<<<< HEAD\nx\n", [1]),  # 첫 줄의 UTF-8 BOM
     ],
 )
 def test_marker_matcher(text: str, lines: list[int]) -> None:

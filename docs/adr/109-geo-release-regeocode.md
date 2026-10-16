@@ -84,6 +84,12 @@ run**(지문 backfill 전·fail-open 창)도 같은 취급이다 — stale 분�
 run-scoped 값과 다른 토큰이 관측되면 WARNING + op 메타 `geo_dataset_mismatch=true`만 남긴다 — 그 run의
 스탬프는 옛 토큰이므로 다음 센서 tick이 다시 계획한다(안전 방향).
 
+**현재 토큰은 첫 지오코딩 전에 읽는다(2026-10-16, #1327 최종 리뷰 — T-GR-03 구현).** run 도중 geo가 데이터셋을
+바꿨을 때 옛 데이터로 해석한 행이 **새** 토큰으로 봉인되면 다시 계획되지 않는다(위험한 방향). 그래서 asset의
+역지오코더는 처음 불릴 때 run-scoped handle을 먼저 읽고, MOIS·concierge는 run 시작에 읽는다. 덧붙여 응답에서 run
+토큰과 다른 `data_token`을 보면 그 적재는 stale 분기·스탬프를 하지 않는다(`GeoLoadContext.effective_token()`) —
+위의 "그 run의 스탬프는 옛 토큰"보다 한 걸음 더 보수적이다(스탬프 없음 = stale이라 다음 계획이 고른다).
+
 `DatasetRef`·`GeoApplied`는 **`src/kortravelmap/dto/geo_dataset.py`**에 둔다. `infra`가 import하므로
 `geocoding` 층에 두면 `infra → geocoding` 역행이다(`CLAUDE.md` §5 4항, `lint-imports`).
 
@@ -92,7 +98,8 @@ run-scoped 값과 다른 토큰이 관측되면 WARNING + op 메타 `geo_dataset
 `load_feature_bundles(bundles, *, current_dataset, geo_applied: GeoApplied{reverse, geocode})`로 호출자가
 "이 run이 `reverse_geocoder=`/`address_resolver=`를 실제로 넘겼는가"를 넘긴다(컨텍스트 5). 행 규칙은
 **순서가 규칙이다** — 처음 맞는 것이 답이다: ① `geo_applied` 둘 다 False인 run(price/notice)은 **스탬프를
-쓰지 않는다**; ② MOIS는 **행별** 변환 evidence로 outcome을 정하고 chunk commit 안에서 bulk upsert한다
+쓰지 않는다**; ② MOIS는 **행별** 변환 evidence로 outcome을 정하고 chunk commit 안에서 bulk upsert한다(구현은
+모든 적재 경로의 `load_bundles`가 chunk 단위다 — stale 판정·저장값 읽기 각 한 문장, 스탬프 한 문장)
 (`AdminEvidence.reverse_attempted`(`dto/admin_evidence.py:102`, `mois.py:817`) → `called`, 아니고 geocode로
 `bjd_code`를 **받았으면**(`GeoAttemptEvidence.geocode_obtained_code`, T-GR-01) → `geocoded`, 그 외 `not_called` —
 ④와 같은 결과 기준; '받았다'가 '시도했다'를 함의하므로 시도 여부 필드는 두지 않는다);
@@ -138,7 +145,9 @@ kwarg·기본 None = 옛 동작)를 유일한 호출처 `dagster/assets.py:1508`
 - **값 동일 시 무쓰기 — override 열은 비교에서 뺀다.** stale이지만 `became_current`가 아니면
   `get_feature_address_snapshot`(`infra/feature_address_repo.py:120`)으로 주소 유도 컬럼 **6개**(컨텍스트) +
   `address` jsonb를 비교한다 — 현재 `FeatureAddressSnapshot`(`:104-117`)은 `road_name_code`·`admin_dong_code`를
-  담지 않으므로 T-GR-03이 두 열을 더한다(빠지면 그 열만 바뀐 행이 "값 동일"로 오판된다). 비교에서
+  담지 않으므로 T-GR-03이 두 열을 더한다(빠지면 그 열만 바뀐 행이 "값 동일"로 오판된다). **구현(T-GR-03)은
+  `FeatureAddressSnapshot`을 넓히지 않고** 6열 + `address` + active override를 한 번에 읽는 전용 함수
+  `read_stored_geo_columns`(`infra/feature_geocode_load.py`, chunk 판 `_many`)를 썼다. 비교에서
   `feature.has_active_feature_override(feature_id, 'core.<col>')`(정의 `head-schema.sql:5147`, patch의 masking
   호출 `:829-883`)가 참인 열은 **제외**한다 — 그 열은 patch가 어차피 건너뛰므로 비교에 넣으면 "항상 다름"이
   되어 값은 그대로인데 매 릴리스 `row_revision + 1`이다. 남은 열이 전부 같으면 features UPDATE를 생략하고
@@ -158,7 +167,9 @@ kwarg·기본 None = 옛 동작)를 유일한 호출처 `dagster/assets.py:1508`
   **한 곳**에서 잰다 — `GeoCallStats`(`geocoding.py:1112`)에 `empty[endpoint]`(응답이 예외 없이 끝났는데 `Address`
   None 또는 `bjd_code` None) 카운터를 더해 `ObservedReverseGeocoder`(`:1405`)가 기록하고, 공통 루프는 분모
   `calls['reverse']`·분자 `empty['reverse']`를 chunk 간 누적한다(현재 `GeoCallStats`는 `calls`/`failures`(전송
-  실패)만 센다 `:1140-1146`; 좌표 없는 행은 분모에 들지 않는다). 행동은 호출처가 정한다 — 비-MOIS(공통 루프)는
+  실패)만 센다 `:1140-1146`; 좌표 없는 행은 분모에 들지 않는다). **구현(T-GR-03)에서 분자를 바꿨다** — endpoint 빈 답
+  `empty['reverse']`가 아니라 **행 단위 최종 빈 답** `empty['reverse_result']`(region fallback까지 거친 최종 답이 비었을
+  때)다. reverse가 늘 비고 fallback이 채우는 dataset(산악 centroid)이 정상 run에서 실패하지 않게. 행동은 호출처가 정한다 — 비-MOIS(공통 루프)는
   문턱을 넘으면 run을 **실패**로 끝내고(그 chunk의 스탬프는 commit 전이라 남지 않는다), MOIS는 자기 chunk
   루프에서 ADR-108 §3a-2의 **degraded(실패 아님)** 의미를 그대로 둔다(영구 정지를 다시 만들지 않는다; ADR-108은
   이 점에서 amend되지 않는다). 규칙이 둘이 아니라 행동이 둘이다 — 판정은 한 곳.
@@ -247,7 +258,9 @@ concierge export `place.address.geo_data_token`(concierge ADR-49, 계획)은 Map
 1차 문서 리뷰에서 `called`로 바꿨다. concierge refresh가 Map 계획보다 늦어도 stale payload 코드가 현재 토큰으로
 봉인되지 않는다.
 (b) Map `raw_payload_hash`는 concierge의 `payload_hash`를
-채택하는 대신(`:278-290`) `address.geo_data_token`을 뺀 `make_payload_hash`로 자체 계산한다 — 토큰이
+채택하는 대신(`:278-290`) `address.geo_data_token`을 뺀 `make_payload_hash`로 자체 계산한다(구현: payload가 토큰을
+실어 올 때만; producer가 export 행에 덧붙이는 최상위 `updated_at`·`operation`도 뺀다 — producer는 토큰만 바뀌어도
+`updated_at`을 새로 찍는다) — 토큰이
 들어가면 릴리스마다 concierge feature 전부가 `became_current`가 되어 값 동일에도 `row_revision + 1`이고
 "payload hash는 geo 산출을 제외한다"는 불변식이 깨진다. concierge 쪽 `payload_hash`에는 포함되므로 토큰만
 바뀐 장소도 재발행된다.

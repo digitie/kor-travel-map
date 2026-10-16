@@ -201,6 +201,7 @@ __all__ = [
     "GeoCallStats",
     # REST client + 콜러블 팩토리
     "KorTravelGeoRestClient",
+    "REVERSE_RESULT_EMPTY_KEY",
     "fetch_current_dataset",
     "geo_dataset_mismatch",
     "geo_http_timeout",
@@ -1182,6 +1183,16 @@ def _regions_within_radius_response_to_address(
 # -- kor-travel-geo REST 클라이언트 -----------------------------------------------
 
 
+REVERSE_RESULT_EMPTY_KEY: Final[str] = "reverse_result"
+"""``GeoCallStats.empty``의 **행 단위 최종** 빈 답 키(reverse·region fallback 둘 다 빈 결과).
+
+endpoint 키(``reverse``·``regions_within_radius``)와 달리 이것은 역지오코더가 돌려준 결과가
+비었는가다. run 빈 답 가드(ADR-109 결정 4)의 분자다 — 분모는 ``calls['reverse']``(좌표 있는 행 수).
+산악 centroid처럼 reverse가 거의 늘 비고 fallback이 채우는 dataset에서 endpoint 키를 쓰면 정상 run이
+실패한다.
+"""
+
+
 @dataclass
 class GeoCallStats:
     """geo 경계를 **몇 번 넘었는지**를 endpoint별로 센다.
@@ -1526,6 +1537,14 @@ class _KorTravelGeoObservedReverseGeocoder:
         return self._client._stats
 
     async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
+        observation = await self._observe(coord)
+        address = observation.address
+        if address is None or address.bjd_code is None:
+            # 행 단위 최종 빈 답 — region fallback까지 거친 결과다(run 빈 답 가드의 분자).
+            self._client._note_empty(REVERSE_RESULT_EMPTY_KEY)
+        return observation
+
+    async def _observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
         response = await self._client.reverse(
             float(coord.lon), float(coord.lat), radius_m=self._radius_m
         )

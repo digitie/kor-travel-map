@@ -87,7 +87,7 @@ class _Client:
         self.state_calls.append(membership)
         return None
 
-    async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
+    async def load_feature_bundles(self, bundles: Any, geo: Any = None) -> FeatureLoadResult:
         materialized = list(bundles)
         self.events.append("load")
         return FeatureLoadResult(bundles_total=len(materialized))

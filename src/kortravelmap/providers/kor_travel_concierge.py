@@ -16,6 +16,7 @@ ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045 / ADR-050 / ADR-053 
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
@@ -128,8 +129,14 @@ async def kor_travel_concierge_items_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     quarantine: list[KorTravelConciergeQuarantine] | None = None,
+    current_data_token: str | None = None,
 ) -> list[FeatureBundle]:
     """kor-travel-concierge feature export items → ``list[FeatureBundle]``.
+
+    ``current_data_token``(ADR-109 결정 6)은 run-scoped geo 데이터 토큰이다. 주면 payload
+    ``place.address.geo_data_token``이 그것과 **같을 때만** payload 행정코드를 믿고, 다르거나 없으면
+    geo ``bjd_code``를 먼저 쓴다(geo가 비면 payload로 대체). 생략(None)하면 종전과 같다(payload 코드
+    우선).
 
     ``quarantine``을 주면 구성에 실패한 item을 예외와 함께 담고 나머지를 계속 변환한다
     (T-VN-H28B 건별 격리). 주지 않으면 종전대로 예외를 그대로 올린다 — 호출자가 명시적으로
@@ -154,6 +161,7 @@ async def kor_travel_concierge_items_to_bundles(
                 item,
                 fetched_at=fetched_at,
                 reverse_geocoder=geocoder,
+                current_data_token=current_data_token,
             )
         except (PydanticValidationError, DomainValidationError) as exc:
             # T-VN-H28B: 건별 격리. 이전에는 item 1건의 구성 실패가 batch 전체를 죽였다
@@ -237,6 +245,7 @@ async def _item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ObservedReverseGeocoder | None,
+    current_data_token: str | None = None,
 ) -> FeatureBundle:
     place = _mapping(item.get("place"))
     source_record_payload = _mapping(item.get("source_record"))
@@ -272,16 +281,22 @@ async def _item_to_bundle(
         observation = await reverse_geocoder.observe(coord)
         geo = observation.address
         obs_sigungu_names = observation.sigungu_names
-    address = _address(address_payload, geo=geo)
+    address = _address(address_payload, geo=geo, current_data_token=current_data_token)
 
     raw_data = _plain_json_dict(item)
-    # concierge는 ``sha256:<hex>`` 형태로 보낸다. 저장 정본은 접두 없는 lowercase
-    # hex이므로(T-VN-33, `ck_source_records_payload_hash_canonical`) 받는 자리에서
-    # 벗긴다 — 안 벗기면 prod에 비정본 해시가 쌓이고 제약 validate가 막힌다
-    # (alembic 0089가 기존 1,481행을 같은 규칙으로 정규화한다).
-    payload_hash = _canonical_payload_hash(
-        _text(source_record_payload, "raw_payload_hash")
-    ) or make_payload_hash(raw_data)
+    # concierge는 ``sha256:<hex>`` 형태로 보낸다. 저장 정본은 접두 없는 lowercase hex이므로(T-VN-33,
+    # `ck_source_records_payload_hash_canonical`) 받는 자리에서 벗긴다 — 안 벗기면 prod에 비정본
+    # 해시가 쌓이고 제약 validate가 막힌다 (alembic 0089가 기존 1,481행을 같은 규칙으로 정규화한다).
+    # ADR-109 결정 6(b): payload가 geo 데이터 토큰을 실어 오면 Map이 해시를 **직접** 잰다 — 토큰과
+    # (토큰을 포함한) producer 해시를 뺀 원문으로. 그러지 않으면 토큰만 바뀐 장소가 릴리스마다
+    # ``became_current``가 되어 값이 같아도 ``row_revision``이 전진한다. 토큰이 없는 payload는
+    # 종전대로 producer 해시를 쓴다(롤아웃이 전 행을 한 번 흔들지 않게).
+    payload_hash = (
+        make_payload_hash(_hash_input_without_geo_token(raw_data))
+        if _text(address_payload, "geo_data_token")
+        else _canonical_payload_hash(_text(source_record_payload, "raw_payload_hash"))
+        or make_payload_hash(raw_data)
+    )
     source_record_key = make_source_record_key(
         provider=provider,
         dataset_key=dataset_key,
@@ -520,7 +535,34 @@ def _decimal_or_none(value: Any) -> Decimal | None:
         return None
 
 
-def _address(payload: Mapping[str, Any], *, geo: Address | None) -> Address:
+#: producer(``feature_export_service._serialize_item``)가 export 행에서 덧붙이는 최상위 필드 중
+#: 원문 내용이 아닌 것. ``updated_at``은 payload가 바뀔 때마다(토큰만 바뀌어도) 새 시각이라 넣으면
+#: 릴리스마다 전 행이 "바뀜"이 된다. ``operation``은 Map이 변환하는 행에서는 늘 ``upsert``다 —
+#: 내용이 아니라 export 상태라 뺀다(tombstone은 변환 전에 걸러진다).
+_HASH_EXCLUDED_TOP_LEVEL: Final[tuple[str, ...]] = ("updated_at", "operation")
+
+
+def _hash_input_without_geo_token(raw_data: Mapping[str, Any]) -> dict[str, Any]:
+    """해시 입력에서 geo 산출(``place.address.geo_data_token``)·그것을 담은 producer 해시·export
+    상태 필드(:data:`_HASH_EXCLUDED_TOP_LEVEL`)를 뺀다."""
+    trimmed: dict[str, Any] = json.loads(json.dumps(raw_data))
+    for key in _HASH_EXCLUDED_TOP_LEVEL:
+        trimmed.pop(key, None)
+    place = trimmed.get("place")
+    if isinstance(place, dict) and isinstance(place.get("address"), dict):
+        place["address"].pop("geo_data_token", None)
+    source_record = trimmed.get("source_record")
+    if isinstance(source_record, dict):
+        source_record.pop("raw_payload_hash", None)
+    return trimmed
+
+
+def _address(
+    payload: Mapping[str, Any],
+    *,
+    geo: Address | None,
+    current_data_token: str | None = None,
+) -> Address:
     """payload/geo를 하나의 ``Address``로 병합한다.
 
     T-VN-H28B: ``bjd_code``가 있으면 시군구·시도를 **bjd에서만 유도**한다. 이전에는
@@ -531,10 +573,18 @@ def _address(payload: Mapping[str, Any], *, geo: Address | None) -> Address:
     죽였다**. bjd에서만 유도하면 불일치가 구조적으로 불가능하다.
 
     payload가 주장한 코드는 버리지 않는다 — ``_admin_evidence``가 교차검증용으로 보존한다.
+
+    ADR-109 결정 6(a): ``current_data_token``이 있으면 payload ``geo_data_token``이 그것과 같을 때만
+    payload 코드를 믿는다. 다르거나 없으면 geo ``bjd_code``가 먼저이고 geo가 비었을 때만 payload로
+    대체한다 — concierge refresh가 Map 계획보다 늦어도 낡은 payload 코드가 새 토큰으로 봉인되지
+    않는다. ``current_data_token``이 None이면 종전과 같다(payload 코드 우선).
     """
-    bjd_code = _ten_digit_code(_text(payload, "legal_dong_code"))
-    if bjd_code is None and geo is not None:
-        bjd_code = geo.bjd_code
+    payload_bjd = _ten_digit_code(_text(payload, "legal_dong_code"))
+    geo_bjd = geo.bjd_code if geo is not None else None
+    trust_payload = current_data_token is None or (
+        _text(payload, "geo_data_token") == current_data_token
+    )
+    bjd_code = (payload_bjd or geo_bjd) if trust_payload else (geo_bjd or payload_bjd)
     if bjd_code is not None:
         sigungu_code = extract_sigungu_code(bjd_code)
         sido_code = extract_sido_code(bjd_code)

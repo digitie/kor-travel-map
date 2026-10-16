@@ -184,3 +184,117 @@ def test_geo_run_inputs_warns_when_the_resource_is_not_wired() -> None:
     assert inputs["current_dataset"] is None
     assert len(context.log.warnings) == 1
     assert "배선" in context.log.warnings[0]
+
+
+# -- T-GR-03: 토큰 선행·run 빈 답 가드·log 비접촉 ------------------------------------
+
+
+def test_reverse_geocoder_reads_the_token_before_the_first_geocode() -> None:
+    """현재 토큰은 **첫 지오코딩 전에** 읽힌다(#1327 최종 리뷰 — 전환 run의 새 토큰 봉인 방지)."""
+
+    order: list[str] = []
+
+    class _Inner:
+        stats = GeoCallStats()
+
+        async def __call__(self, coord: object) -> None:
+            order.append("geocode")
+
+        async def observe(self, coord: object) -> object:
+            order.append("geocode")
+            return None
+
+    class _OrderedHandle:
+        async def current(self) -> DatasetRef | None:
+            order.append("token")
+            return CURRENT
+
+    context = _context(reverse_geocoder=_Inner(), kor_travel_geo_dataset=_OrderedHandle())
+    geocoder = assets._reverse_geocoder(context)
+    assert geocoder is not None
+
+    async def run() -> None:
+        await geocoder(object())  # type: ignore[arg-type]
+        await geocoder.observe(object())  # type: ignore[union-attr]
+
+    asyncio.run(run())
+    assert order[0] == "token"
+    assert order.count("token") == 1
+    assert getattr(geocoder, "stats", None) is _Inner.stats
+
+
+def test_reverse_geocoder_is_unwrapped_without_the_dataset_resource() -> None:
+    inner = object()
+    assert assets._reverse_geocoder(_context(reverse_geocoder=inner)) is inner
+
+
+def _stats(*, calls: int, empty: int) -> GeoCallStats:
+    from kortravelmap.geocoding import REVERSE_RESULT_EMPTY_KEY
+
+    stats = GeoCallStats()
+    stats.calls["reverse"] = calls
+    stats.empty[REVERSE_RESULT_EMPTY_KEY] = empty
+    return stats
+
+
+def test_run_empty_answer_guard_fails_over_the_threshold() -> None:
+    from dagster import Failure
+
+    from kortravelmap.dagster.etl import _raise_if_empty_answers_exceeded
+
+    # 좌표 있는 50건 중 빈 답 3건(6% > 5%) — 실패.
+    with pytest.raises(Failure):
+        _raise_if_empty_answers_exceeded(_REVERSE, _stats(calls=50, empty=3), dataset_key="d")
+    # 2건(4%)·표본 미달(49건 중 49건)은 통과.
+    _raise_if_empty_answers_exceeded(_REVERSE, _stats(calls=50, empty=2), dataset_key="d")
+    _raise_if_empty_answers_exceeded(_REVERSE, _stats(calls=49, empty=49), dataset_key="d")
+    # geo를 쓰지 않은 run·계수를 넘기지 않은 경로(MOIS)는 판정하지 않는다.
+    _raise_if_empty_answers_exceeded(_NONE, _stats(calls=50, empty=50), dataset_key="d")
+    _raise_if_empty_answers_exceeded(_REVERSE, None, dataset_key="d")
+
+
+def test_endpoint_empties_filled_by_fallback_do_not_trip_the_guard() -> None:
+    """산악 centroid처럼 reverse가 비고 region fallback이 채운 행은 행 단위 빈 답이 아니다."""
+    from kortravelmap.dagster.etl import _raise_if_empty_answers_exceeded
+
+    stats = _stats(calls=60, empty=0)
+    stats.empty["reverse"] = 60  # endpoint 키는 전량 빈 답이지만 최종 결과는 채워졌다
+    _raise_if_empty_answers_exceeded(_REVERSE, stats, dataset_key="d")
+
+
+async def test_load_wrapper_never_touches_context_log_without_geo_applied() -> None:
+    """``geo_applied``가 None이면 wrapper는 ``context.log``를 읽지 않는다(#1327 리뷰 nit)."""
+    from kortravelmap.infra.feature_repo import FeatureLoadResult
+
+    from kortravelmap.dagster.etl import load_feature_bundles_for_dagster
+
+    class _NoLogContext:
+        @property
+        def log(self) -> object:
+            raise AssertionError("context.log를 읽었다")
+
+        def add_output_metadata(self, metadata: object) -> None:
+            return None
+
+    async def _load_all(bundles: object, geo: object) -> FeatureLoadResult:
+        assert geo is None
+        return FeatureLoadResult()
+
+    class _FindingClient:
+        async def record_address_validation_findings(
+            self, *args: object, **kwargs: object
+        ) -> object:
+            from kortravelmap.client import IntegrityFindingSyncResult
+
+            return IntegrityFindingSyncResult(observed_count=0, unique_count=0, upserted_count=0)
+
+    await load_feature_bundles_for_dagster(
+        context=_NoLogContext(),  # type: ignore[arg-type]
+        client=_FindingClient(),  # type: ignore[arg-type]
+        bundles=[],
+        provider="p",
+        dataset_key="d",
+        strict_address="off",
+        load_all=_load_all,
+        enforce_loss_guard=False,
+    )

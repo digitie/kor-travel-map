@@ -12,10 +12,16 @@ from typing import TYPE_CHECKING, Any, Final, NoReturn
 from kortravelmap.client import AddressValidationFinding
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.ids import make_integrity_finding_key
-from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied
-from kortravelmap.geocoding import GeoCallStats, geo_dataset_mismatch
+from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
+from kortravelmap.geocoding import (
+    REVERSE_RESULT_EMPTY_KEY,
+    GeoCallStats,
+    geo_dataset_mismatch,
+)
+from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import Failure
+from kortravelmap.dagster.geocode_ratio import geocode_ratio_exceeded
 from kortravelmap.dagster.validation import (
     FeatureAddressValidationSummary,
     validate_feature_bundles_address,
@@ -144,6 +150,17 @@ class DagsterFeatureLoadResult:
         }
         metadata.update(self.address_validation.as_metadata())
         metadata.update(self.observation_receipt.as_metadata())
+        # 지오코딩 스탬프·geo 재해석 계수(ADR-109) — geo를 배선한 적재에서만 0이 아니다.
+        geo_counts = {
+            "geo_stamps_written": self.load.geo_stamps_written,
+            "geo_stale_rewritten": self.load.geo_stale_rewritten,
+            "geo_stale_unchanged": self.load.geo_stale_unchanged,
+            "geo_empty_guarded": self.load.geo_empty_guarded,
+            "geo_override_stale_findings": self.load.geo_override_stale_findings,
+            "geo_partial_kept": self.load.geo_partial_kept,
+        }
+        if any(geo_counts.values()):
+            metadata.update(geo_counts)
         if not self.feature_ids_complete:
             metadata["feature_ids_truncated"] = True
         return metadata
@@ -319,7 +336,9 @@ async def load_feature_bundles_for_dagster(
     source_entity_type: str | None = None,
     retire_absent_from_snapshot: bool = False,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
-    load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
+    load_all: Callable[
+        [Sequence[FeatureBundle], GeoLoadContext | None], Awaitable[FeatureLoadResult]
+    ]
     | None = None,
     enforce_loss_guard: bool = True,
     geo_applied: GeoApplied | None = None,
@@ -415,8 +434,12 @@ async def load_feature_bundles_for_dagster(
                 ),
             )
 
+    geo_load = _geo_load_context(geo_applied, current_dataset, geo_stats)
+    # run 빈 답 가드(ADR-109 결정 4) — 적재 **전**에 본다. 문턱을 넘으면 아무것도 쓰지 않고
+    # 실패한다.
+    _raise_if_empty_answers_exceeded(geo_applied, geo_stats, dataset_key=dataset_key)
     if load_all is not None:
-        load = await load_all(bundles)
+        load = await load_all(bundles, geo_load)
     elif authoritative_snapshot_complete:
         # Curation child receipt must be causally tied to one committed DB image.
         # Chunk transactions would allow another run to interleave and make the
@@ -432,19 +455,20 @@ async def load_feature_bundles_for_dagster(
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
                 retire_absent_from_snapshot=True,
+                geo=geo_load,
             )
         else:
             load = await client.load_feature_bundles(
-                bundles, curation_dataset=(provider, dataset_key)
+                bundles, curation_dataset=(provider, dataset_key), geo=geo_load
             )
     else:
         load = None
         for start in range(0, len(bundles), chunk_size):
             chunk = bundles[start : start + chunk_size]
-            chunk_load = await client.load_feature_bundles(chunk)
+            chunk_load = await client.load_feature_bundles(chunk, geo=geo_load)
             load = chunk_load if load is None else load.merge(chunk_load)
         if load is None:
-            load = await client.load_feature_bundles(bundles)
+            load = await client.load_feature_bundles(bundles, geo=geo_load)
     assert load is not None
 
     result = DagsterFeatureLoadResult(
@@ -585,7 +609,8 @@ async def load_feature_bundle_batches_for_dagster(
     dataset_key: str,
     strict_address: bool | str,
     load_all: Callable[
-        [AsyncIterable[Sequence[FeatureBundle]]], Awaitable[FeatureLoadResult]
+        [AsyncIterable[Sequence[FeatureBundle]], GeoLoadContext | None],
+        Awaitable[FeatureLoadResult],
     ],
     geo_applied: GeoApplied | None = None,
     current_dataset: DatasetRef | None = None,
@@ -699,6 +724,8 @@ async def load_feature_bundle_batches_for_dagster(
             # batch를 다 흘린 **뒤**, 그러나 loader가 commit하기 **전**이다. 여기서
             # 던져야 transaction이 열린 채로 되감긴다 — `load_all`이 돌아온 뒤에
             # 세면 이미 commit된 소실을 뒤늦게 신고하는 꼴이 된다.
+            # run 빈 답 가드(ADR-109 결정 4) — 같은 자리(전부 흘린 뒤, commit 전)에서 본다.
+            _raise_if_empty_answers_exceeded(geo_applied, geo_stats, dataset_key=dataset_key)
             if _dataset_was_lost(
                 dropped=dropped_feature_count, observed=validation.total
             ):
@@ -718,7 +745,9 @@ async def load_feature_bundle_batches_for_dagster(
                 )
 
         try:
-            load = await load_all(_validated_batches())
+            load = await load_all(
+                _validated_batches(), _geo_load_context(geo_applied, current_dataset, geo_stats)
+            )
         except Failure:
             if strict_failure or dataset_lost:
                 finding_spool.seek(0)
@@ -887,6 +916,56 @@ def _merge_validation_summaries(
         name_state_counts=dict(merged_name_states),
         issues=(left.issues + right.issues)[:ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT],
     )
+
+
+def _geo_load_context(
+    geo_applied: GeoApplied | None,
+    current_dataset: DatasetRef | None,
+    geo_stats: GeoCallStats | None,
+) -> GeoLoadContext | None:
+    """적재 경로에 넘길 geo 입력. 관측 토큰은 stats의 집합을 **그대로** 가리킨다(배치 경로에서
+    적재 시점까지 본 토큰이 다 보이게)."""
+    if geo_applied is None:
+        return None
+    return GeoLoadContext(
+        geo_applied=geo_applied,
+        current_dataset=current_dataset,
+        # 계수가 없으면 None — geo를 쓰는 run이면 effective_token이 닫힌다(fail closed).
+        observed_data_tokens=geo_stats.observed_data_tokens if geo_stats is not None else None,
+    )
+
+
+def _raise_if_empty_answers_exceeded(
+    geo_applied: GeoApplied | None,
+    geo_stats: GeoCallStats | None,
+    *,
+    dataset_key: str,
+) -> None:
+    """비-MOIS run의 역지오코딩 빈 답 비율이 문턱을 넘으면 run을 실패시킨다(ADR-109 결정 4).
+
+    분모는 ``calls['reverse']``(좌표 있는 행만 reverse로 간다), 분자는 행 단위 최종 빈 답
+    ``empty[REVERSE_RESULT_EMPTY_KEY]``(region fallback까지 비었을 때) — 둘 다
+    run 전체 누적이다. 문턱·표본 하한은 MOIS와 같은 :mod:`.geocode_ratio`다. MOIS는 이 wrapper에
+    ``geo_stats``를 넘기지 않으므로 여기 걸리지 않는다 — 자기 루프에서 degraded로 끝낸다.
+    """
+    if geo_applied is None or not geo_applied.reverse or geo_stats is None:
+        return
+    total = geo_stats.calls.get("reverse", 0)
+    empty = geo_stats.empty.get(REVERSE_RESULT_EMPTY_KEY, 0)
+    ratio = KorTravelMapSettings().mois_geocode_degraded_ratio
+    if geocode_ratio_exceeded(empty=empty, total=total, ratio=ratio):
+        raise Failure(
+            description=(
+                f"{dataset_key}: kor-travel-geo 역지오코딩 빈 답 {empty}/{total}건 — 문턱 "
+                f"{ratio:.0%} 초과. geo 부분장애로 보고 적재하지 않는다(주소 열을 비우고 현재 "
+                "토큰으로 봉인하지 않도록 — ADR-109 결정 4)."
+            ),
+            metadata={
+                "geo_reverse_calls": total,
+                "geo_reverse_empty": empty,
+                "geo_empty_ratio_threshold": ratio,
+            },
+        )
 
 
 def geo_run_metadata(
