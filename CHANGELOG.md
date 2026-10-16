@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### records resource `source_mode=replay` (2026-10-16, ADR-109 결정 7, T-GR-08)
+
+- **ADDED (dagster)**: datagokr 축제·standard_data 4종·fileData 4종 records resource가 config `source_mode`(fetch | replay)를
+  받는다. replay는 provider를 부르지 않고 entity head의 current `source_records.raw_data`(primary Feature `active`만)를 같은
+  record 모델로 되살려 같은 변환기에 넣는다(`dagster/source_replay.py`, `resources.REPLAY_FROM_RAW`). bundle에는 저장된
+  `fetched_at`·head `observed_at`을 되돌려 head가 전진하지 않고, sync state를 쓰지 않으며, payload hash가 저장값과 다르면
+  적재 전에 `ReplayPayloadDrift`로 실패한다.
+- **ADDED (infra/client)**: `infra/source_replay_repo.read_current_source_records`(keyset), `client.read_current_source_records`.
+- **CHANGED (core)**: `SENSOR_LAUNCHABLE_REPLAY_OPERATION_KEYS`에 9 operation — 릴리스 센서가 replay 항목을 낸다. **MOIS는
+  replay 목록에서 빠졌다**(raw가 record 1:1이 아니다 — golden 실패) — 계획 항목 run_config가 없어지고 fetch로 나간다.
+  OpenAPI 변경 없음.
+
 ### geo 릴리스 센서 `kor_travel_geo_release_sensor` (2026-10-16, ADR-109 결정 5, T-GR-05)
 
 - **ADDED (dagster)**: 센서(기본 STOPPED, tick 300초, 진행 중 run 1개) — 공용 `plan_geo_release`로 감지·계획(첫 토큰 기준선,
