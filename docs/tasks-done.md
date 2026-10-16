@@ -16,6 +16,9 @@
   기본 STOPPED, migration 409. [acceptance §T-GR-05](tasks-acceptance.md#t-gr-05).
 - [x] T-GR-08 — **replay 모드.** [#1333](https://github.com/digitie/kor-travel-map/pull/1333)(`dcdfa532`) — 9 operation,
   MOIS는 golden 실패로 제외·센서 수동. [acceptance §T-GR-08](tasks-acceptance.md#t-gr-08).
+- [x] T-GR-07 — **구현 반영 문서(doc-only).** [#1335](https://github.com/digitie/kor-travel-map/pull/1335)(`4e120563`) —
+  ADR-109 accepted·구현 기록·열린 결정 결론, runbook `geo-release-regeocode.md` 신규, "계획/미구현" 표식 제거. 머지가 조건이라
+  T-TEST-PLANNER-INDEX PR(#1336)이 이관을 싣는다. [acceptance §T-GR-07](tasks-acceptance.md#t-gr-07).
 - [x] T-GR-06 — **admin UI `/admin/ops/geo-releases`.** [#1334](https://github.com/digitie/kor-travel-map/pull/1334)
   (`391b0d94`) — mock·격리 스택 live Playwright. [acceptance §T-GR-06](tasks-acceptance.md#t-gr-06).
 

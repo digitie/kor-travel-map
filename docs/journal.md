@@ -7,7 +7,6 @@
   CI 실패와 같은 `Index Scan using idx_features_admin_updated_keyset … Filter`).
 - **고정.** 테스트 transaction 안 `REINDEX`(keyset 쌍 두 벌, 롤백) + 같은 수의 비공개 행(더 새 `updated_at`, 일부 같은
   이름) + 실패 시 plan 전문. 재시도·skip 없음. 고정을 되돌리면 같은 순서에서 2/2 빨강, 고정 판은 20회 연속 초록.
-||||||| 391b0d94c
 
 ## 2026-10-16 — geo 릴리스 재지오코딩 구현 반영 문서(T-GR-07, doc-only): 브랜치 `docs/t-gr-07-geo-release-docs`
 

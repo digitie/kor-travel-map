@@ -693,8 +693,12 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
         # admin 인덱스만 훑은 쿼리는 죽은 항목에 LP_DEAD 표시를 남겨 다음 insert가 **admin
         # 쪽에서만** 그 자리를 다시 쓰고, partial 쪽은 page를 쪼갠다. 그러면 partial이 더 커져
         # 3축 술어 몫의 비용 이점(약 0.19)을 넘고 planner가 admin 인덱스를 고른다(n150 재현:
-        # 25 000행 commit→delete→admin 순회를 반복하면 partial 523 page > admin 489 page). 이
-        # transaction 안의 REINDEX는 롤백되므로 DB에 흔적이 남지 않는다.
+        # 25 000행 commit→delete→admin 순회 ×4를 앞에 두면 partial 622~744 page vs admin 127
+        # page에서 admin을 골랐다; 고정 판 20회는 partial 372~745 vs admin 127~333 page에서도
+        # partial을 골랐다). 이 transaction 안의 REINDEX는 롤백되므로 DB에 흔적이 남지 않는다.
+        # REINDEX는 SHARE 잠금을 기다린다 — 앞 테스트가 idle-in-transaction 연결을 남겼으면
+        # 영원히 멈추는 대신 30초 뒤 실패로 끝나게 한다.
+        await migrated_session.execute(text("SET LOCAL lock_timeout = '30s'"))
         for index_name in (
             "idx_features_updated_keyset",
             "idx_features_admin_updated_keyset",
