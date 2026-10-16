@@ -2752,6 +2752,17 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
   되살리지 않는다.
 - MOIS replay 1 run 소요(격리 스택, 업종 하나)를 PR 본문에 기록한다.
 
+## T-TEST-PLANNER-INDEX
+
+- 대상: `tests/integration/test_tvn34_public_projection_spine.py::test_public_partial_indexes_have_exact_state_predicate_and_explain_proof`.
+  `enable_seqscan=off`인데도 플래너가 `idx_features_updated_keyset` 대신 다른 경로를 고르는 실행이 있다 — #1328
+  브랜치 GitHub CI glibc job 2/3 실패(2026-10-15~16, run 38802087146·38826531437), n150 CI-parity 1회 실패, 격리 재실행은
+  매번 초록. 같은 세션 앞쪽 통합 테스트가 롤백으로 남긴 dead tuple·자동 ANALYZE 시점에 따라 통계가 달라지는 것으로 본다.
+- 해제 조건: (1) 원인을 실측으로 확정한다(실패 실행의 전체 plan 기록 — 지금 단언 메시지는 plan을 잘라 낸다).
+  (2) 시드 뒤 대상 표 `ANALYZE` 또는 쿼리별 플래너 설정 고정 등으로 **결정적으로** 만든다 — 재시도·skip 금지.
+  (3) 앞쪽에 대량 적재·롤백 테스트를 둔 순서로 20회 연속 초록(n150), 그리고 고정을 되돌리면 같은 순서에서 빨강이
+  재현됨을 보인다. (4) 단언이 실패할 때 plan 전문을 남긴다.
+
 ## T-RECONCILE-RETRY
 
 배경: ADR-111 결과 §"reconcile sensor 재시도 설계는 후속". 406이 2026-10-12 고착(53200)의 원인을 없앴으므로 급하지
