@@ -31,6 +31,14 @@ _PUBLIC_PREDICATE = (
 _PERF_ROW_COUNT = 25000
 _PERF_ROUTE_ORDINAL = _PERF_ROW_COUNT + 1
 _PERF_AREA_ORDINAL = _PERF_ROW_COUNT + 2
+#: 비공개(`draft`) 행 — 공개 seed와 같은 수를, 그보다 **새** `updated_at`으로 심는다
+#: (T-TEST-PLANNER-INDEX). 공개 행만 있으면 3축 술어의 선택도가 1이라 partial
+#: `idx_features_updated_keyset`과 술어 없는 admin `idx_features_admin_updated_keyset`(같은 열)의
+#: 추정 비용이 몇 % 안쪽에서 맞붙고, 앞 테스트들이 남긴 사본·dead tuple에 따라 planner가 어느 쪽이든
+#: 고른다(n150 실측). 비공개 행이 반을 차지하면 admin 경로는 그것을 거르며 걸어야 해 추정 비용이
+#: 약 두 배가 된다 — 판정이 데이터 분포로 결정된다.
+_PERF_HIDDEN_FIRST = _PERF_AREA_ORDINAL + 1
+_PERF_HIDDEN_LAST = _PERF_AREA_ORDINAL + _PERF_ROW_COUNT
 
 #: SQL이 같은 값을 만드는 식. Python과 두 벌이 되면 심은 행과 지우는 행이 갈라진다.
 _PERF_FEATURE_ID_SQL = "CAST(CAST(:run AS text) || lpad(to_hex(g), 16, '0') AS uuid)"
@@ -634,6 +642,34 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
             ),
             {"run": run, "row_count": _PERF_ROW_COUNT},
         )
+        await migrated_session.execute(
+            text(
+                f"""
+                INSERT INTO feature.features (
+                    feature_id, kind, name, category, coord, lifecycle_state,
+                    publication_state, quality_state, updated_at
+                )
+                SELECT
+                    {_PERF_FEATURE_ID_SQL}, 'place',
+                    -- 이름 keyset 쌍(partial/admin `lower(name)`)도 갈라 둔다 —
+                    -- 같은 이름의 비공개 행이 있으면 admin 경로는 그것을 걸러야 한다.
+                    CASE
+                        WHEN g % 1000 = 0 THEN 'tvn34 needle place'
+                        ELSE 'hidden draft station'
+                    END,
+                    '06020000',
+                    x_extension.st_setsrid(
+                        x_extension.st_makepoint(126.80 + g * 0.000001, 37.40 + g * 0.000001),
+                        4326
+                    ),
+                    'active', 'draft', 'valid', now() + (g || ' seconds')::interval
+                FROM generate_series(
+                    CAST(:first AS integer), CAST(:last AS integer)
+                ) AS g
+                """
+            ),
+            {"run": run, "first": _PERF_HIDDEN_FIRST, "last": _PERF_HIDDEN_LAST},
+        )
         route_id = _perf_feature_id(run, _PERF_ROUTE_ORDINAL)
         area_id = _perf_feature_id(run, _PERF_AREA_ORDINAL)
         await _insert_feature(
@@ -652,6 +688,24 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
         )
         await _insert_subtype(migrated_session, table="feature_routes", feature_id=route_id)
         await _insert_subtype(migrated_session, table="feature_areas", feature_id=area_id)
+        # 크기를 이 테스트의 데이터로만 정한다(T-TEST-PLANNER-INDEX 실측). 같은 열의
+        # partial/admin 인덱스 쌍은 앞 테스트들의 이력에 따라 크기가 갈린다 — 운영 admin 목록처럼
+        # admin 인덱스만 훑은 쿼리는 죽은 항목에 LP_DEAD 표시를 남겨 다음 insert가 **admin
+        # 쪽에서만** 그 자리를 다시 쓰고, partial 쪽은 page를 쪼갠다. 그러면 partial이 더 커져
+        # 3축 술어 몫의 비용 이점(약 0.19)을 넘고 planner가 admin 인덱스를 고른다(n150 재현:
+        # 25 000행 commit→delete→admin 순회 ×4를 앞에 두면 partial 622~744 page vs admin 127
+        # page에서 admin을 골랐다; 고정 판 20회는 partial 372~745 vs admin 127~333 page에서도
+        # partial을 골랐다). 이 transaction 안의 REINDEX는 롤백되므로 DB에 흔적이 남지 않는다.
+        # REINDEX는 SHARE 잠금을 기다린다 — 앞 테스트가 idle-in-transaction 연결을 남겼으면
+        # 영원히 멈추는 대신 30초 뒤 실패로 끝나게 한다.
+        await migrated_session.execute(text("SET LOCAL lock_timeout = '30s'"))
+        for index_name in (
+            "idx_features_updated_keyset",
+            "idx_features_admin_updated_keyset",
+            "idx_features_lower_name_keyset",
+            "idx_features_admin_lower_name_keyset",
+        ):
+            await migrated_session.execute(text(f"REINDEX INDEX feature.{index_name}"))
         await migrated_session.execute(text("ANALYZE feature.features"))
         await migrated_session.execute(text("ANALYZE feature.feature_routes"))
         await migrated_session.execute(text("ANALYZE feature.feature_areas"))
@@ -762,10 +816,12 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                     text(f"EXPLAIN (ANALYZE, BUFFERS) {query}")
                 )
             )
-            assert index_name in plan, (index_name, plan)
+            if index_name not in plan:
+                # plan 전문을 남긴다 — assert repr는 잘려 원인(어느 인덱스를 골랐나)이 사라진다.
+                pytest.fail(f"{index_name}을 쓰지 않았다. plan 전문:\n{plan}", pytrace=False)
     finally:
         # uuid에는 LIKE가 없다 — seed와 같은 유도 규칙으로 같은 집합을 되짚는다
-        # (route/area는 일련번호 뒤 두 자리라 이 한 문장이 셋을 다 데려간다).
+        # (route/area·비공개 행은 일련번호 뒤 자리라 이 한 문장이 전부 데려간다).
         await migrated_session.execute(
             text(
                 f"""
@@ -776,5 +832,5 @@ async def test_public_partial_indexes_have_exact_state_predicate_and_explain_pro
                 )
                 """
             ),
-            {"run": run, "last_ordinal": _PERF_AREA_ORDINAL},
+            {"run": run, "last_ordinal": _PERF_HIDDEN_LAST},
         )

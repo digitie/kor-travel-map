@@ -1,3 +1,13 @@
+## 2026-10-17 — 통합 planner flake 결정화(T-TEST-PLANNER-INDEX): 브랜치 `fix/t-test-planner-index`
+
+- **원인(실측).** keyset 쿼리에 같은 열의 인덱스가 둘이다 — partial `idx_features_updated_keyset`과 술어 없는 admin
+  `idx_features_admin_updated_keyset`. 공개 행만 있는 seed에서 partial의 이점은 Filter 비용 하나(약 0.19)라, 인덱스 크기가
+  갈리면 뒤집힌다. 크기를 가르는 것은 **LP_DEAD 비대칭**이었다 — admin 목록처럼 admin 인덱스만 훑은 쿼리가 죽은 항목에
+  표시를 남기면 다음 insert가 admin 쪽에서만 자리를 다시 쓴다(n150 재현 partial 622~744 page vs admin 127 page, plan은
+  CI 실패와 같은 `Index Scan using idx_features_admin_updated_keyset … Filter`).
+- **고정.** 테스트 transaction 안 `REINDEX`(keyset 쌍 두 벌, 롤백) + 같은 수의 비공개 행(더 새 `updated_at`, 일부 같은
+  이름) + 실패 시 plan 전문. 재시도·skip 없음. 고정을 되돌리면 같은 순서에서 2/2 빨강, 고정 판은 20회 연속 초록.
+
 ## 2026-10-16 — geo 릴리스 재지오코딩 구현 반영 문서(T-GR-07, doc-only): 브랜치 `docs/t-gr-07-geo-release-docs`
 
 - **무엇.** ADR-109 accepted(구현 기록 표·열린 결정 13개 결론), runbook `geo-release-regeocode.md` 신규, 정본 문서의

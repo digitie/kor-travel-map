@@ -2801,6 +2801,16 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
   (2) 시드 뒤 대상 표 `ANALYZE` 또는 쿼리별 플래너 설정 고정 등으로 **결정적으로** 만든다 — 재시도·skip 금지.
   (3) 앞쪽에 대량 적재·롤백 테스트를 둔 순서로 20회 연속 초록(n150), 그리고 고정을 되돌리면 같은 순서에서 빨강이
   재현됨을 보인다. (4) 단언이 실패할 때 plan 전문을 남긴다.
+- 구현 메모(2026-10-17, `fix/t-test-planner-index`): **원인** — 같은 열 `(updated_at DESC, feature_id DESC)`의 partial
+  `idx_features_updated_keyset`과 술어 없는 `idx_features_admin_updated_keyset`이 경쟁한다. seed가 전부 공개 행이라 3축
+  술어 선택도가 1이고 partial의 이점은 Filter 비용(약 0.19)뿐이다. 앞 테스트가 공개 행을 commit→delete하고 admin 목록처럼
+  admin 인덱스만 훑으면 죽은 항목의 LP_DEAD 표시가 admin 쪽에만 남아 다음 insert가 admin에서만 자리를 다시 쓰고 partial은
+  page를 쪼갠다 — n150 재현 partial 622~744 page vs admin 127 page, 그때 plan: `Limit (cost=0.29..6.91) -> Index Scan using
+  idx_features_admin_updated_keyset ... Filter: (lifecycle_state = 'active' ...)`(CI 실패 `0.41..6.79`와 같은 꼴). **고정**:
+  (a) 테스트 transaction 안에서 keyset 인덱스 쌍 두 벌(updated·lower name)을 `REINDEX`(롤백되어 흔적 없음) — 크기가 이
+  테스트의 데이터로만 정해진다; (b) 같은 수의 비공개(`draft`) 행을 더 새 `updated_at`으로 심고(그중 25행은 같은 이름) —
+  admin 경로가 반을 걸러야 해 추정 비용 차가 18% 이상(시나리오 실측); (c) 실패하면 plan 전문을 남긴다. 재시도·skip 없음.
+  재현 하네스는 n150 전용 scratch(커밋 안 함): 앞 테스트가 25 000행 commit→delete→admin 순회 ×4.
 
 ## T-RECONCILE-RETRY
 

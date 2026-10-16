@@ -28,12 +28,12 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
 #1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
 
-**geo 릴리스 재지오코딩 묶음(ADR-109 accepted, 2026-10-16 구현)** — 남은 것은 `T-GR-07`(이 문서 PR, 머지가 조건이라 다음
-doc-only PR이 이관)뿐이다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15, `T-GR-01`~`06`·`08`은 2026-10-16 `tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
+**geo 릴리스 재지오코딩 묶음(ADR-109 accepted, 2026-10-16 구현)** — 전부 닫혔다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15, `T-GR-01`~`08`은 2026-10-16~17
+`tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
 
-**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관), `T-GR-07`
-바로 뒤에 둔다(목록 위치일 뿐 의존이 아니다). 접두사 `T-MAP-`는 **임시**다(ADR-110 열린 결정 5). 호스트 플립 자체는
+**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관) — 목록 위치일 뿐
+의존이 아니다. 접두사 `T-MAP-`는 **임시**다(ADR-110 열린 결정 5). 호스트 플립 자체는
 외부 저장소(Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed로 머지)의 일이라 여기 세지 않는다 — 실제 이전은
 2026-10-14~15 일어났다(ADR-110 사실 갱신 절). 의존:
 T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
@@ -48,11 +48,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
-
-- [ ] T-GR-07 — **구현 반영 문서** (doc-only)
-
-  ADR-109 accepted·구현 기록·열린 결정 결론, runbook `docs/runbooks/geo-release-regeocode.md` 신규, CHANGELOG, "계획" 표식
-  제거. 머지가 조건이라 `[x]`·이관은 다음 doc-only PR이 싣는다.
 
 - [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 배포는 가능한 한 빨리 — transport 플립이 2026-10-14 먼저 일어났다)
 
@@ -132,7 +127,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-TEST-PLANNER-INDEX — **public partial index EXPLAIN 테스트의 플래너 흔들림 고정**
 
   `test_public_partial_indexes_have_exact_state_predicate_and_explain_proof`가 `idx_features_updated_keyset`을 못 보고
-  간헐 실패한다(#1328 CI 2/3). 시드 뒤 `ANALYZE` 또는 플래너 설정 고정으로 결정적으로 만든다.
+  간헐 실패한다(#1328 CI 2/3). 원인은 LP_DEAD 비대칭(admin 인덱스만 압축) — 테스트 안 REINDEX·비공개 행으로 고정.
+  진행: 브랜치 `fix/t-test-planner-index` — 머지 대기.
 
 - [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
 
