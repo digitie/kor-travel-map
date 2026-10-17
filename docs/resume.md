@@ -1,3 +1,10 @@
+## 2026-10-17 — T-MAP-02 timeout 문서 정합: 브랜치 docs/track2-http-timeout-contract-20261017
+
+**다음 한 작업: 문서 독립 리뷰·CI 후 머지 → coordinator가 T-MAP-02 첫 prod 배포 generation 근거 확인.**
+
+- connect 기본 4 s·geo/transport read 기본 10/30 s와 재시도/전체 deadline의 차이를 현행 소스에 맞췄다.
+- 구현 523d98cc는 main e937b38d에 포함됐다. 제품·운영 상태는 변경하지 않았으며 배포 완료로 닫지 않았다.
+
 ## 2026-10-17 — 통합 planner flake 결정화(T-TEST-PLANNER-INDEX): 브랜치 `fix/t-test-planner-index`
 
 **다음 한 작업: CI 초록 → 리뷰 → 머지.**

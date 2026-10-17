@@ -1,3 +1,13 @@
+## 2026-10-17 — T-MAP-02 timeout 설명 정합(문서만): 브랜치 docs/track2-http-timeout-contract-20261017
+
+- tasks.md의 낡은 connect 2 s를 실제 기본 4 s로 정정했다. read·write·pool 기본은 geo 10 s·transport 30 s다
+  (settings.py, geocoding.geo_http_timeout, dagster/provider_fetchers.transport_http_timeout).
+- transport의 요청 재시도는 upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS=2·
+  PROVIDER_BOUNDARY_BASE_DELAY_SECONDS=15.0 및 run 예산을 따르며, 이 숫자들은 요청 전체 deadline이 아니다.
+- 구현 커밋 523d98ccf36f90aaead9ac33ab353a0839293621(#1325)은 최신 main
+  e937b38d176cfeb759daca629395f51c1a6a4d5f(#1336)의 조상이다. 제품 중복 패치는 하지 않았다.
+- 실제 배포·장애 drill은 수행하지 않았다. T-MAP-02는 acceptance의 첫 prod 배포 generation 근거를 확인할 때까지 열린다.
+
 ## 2026-10-17 — 통합 planner flake 결정화(T-TEST-PLANNER-INDEX): 브랜치 `fix/t-test-planner-index`
 
 - **원인(실측).** keyset 쿼리에 같은 열의 인덱스가 둘이다 — partial `idx_features_updated_keyset`과 술어 없는 admin
