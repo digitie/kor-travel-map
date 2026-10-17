@@ -51,9 +51,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 배포는 가능한 한 빨리 — transport 플립이 2026-10-14 먼저 일어났다)
 
-  `httpx.Timeout(<기존>, connect=<connect 필드>)`(`Timeout(connect=, read=)` 둘만은 httpx 0.28.1에서 ValueError) +
-  설정 필드 2개, 팩토리 하나로 geo 8곳·transport 3곳. 무응답 호스트에 2 s 안 예외; `timeout=`이 팩토리 호출이 아니면
-  lint 빨강. 문구 동반(`GEO_HEAVY_POOL`·동시성·transport URL). T-GR-01과 `geocoding.py` 공유 — 늦은 PR이 리베이스.
+  connect 기본 4 s, read·write·pool 기본 geo 10 s·transport 30 s를 설정 팩토리로 전달한다.
+  transport의 재시도 대상 오류는 예산 안에서 최대 2회 시도·15 s backoff이며, 호출 전체 deadline이 아니다.
+  구현은 머지됐고 남은 해제 조건은 [acceptance §T-MAP-02](tasks-acceptance.md#t-map-02)의 첫 prod 배포 generation 기록이다.
 
 
 
