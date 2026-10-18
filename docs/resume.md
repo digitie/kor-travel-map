@@ -1,3 +1,7 @@
+## 2026-10-19 MOIS 장애 격리 수용
+
+PR1340: 실제 SYN DROP/native retry 기본값으로 FAILURE308.365초(<1440), 복구500행·재수집HTTP0 PASS. REST/prefetch/loader173검사와 namespace4검사 PASS. 운영 전체job/실DB 검증은 아니며 daemonOFF 유지. [범위와 한계](reports/2026-10-19-mois-network-drill.md).
+
 ## 2026-10-19 — MOIS 연결 실패 조기 전파
 
 - 500행 typed 오류 선조회 지연을 재현하고 실행중 task 취소·회수를 보강했다. 관련89회귀 PASS이며 실제 네트워크/native retry 수용은 준비 중이다. [근거](reports/2026-10-19-mois-network-drill.md).

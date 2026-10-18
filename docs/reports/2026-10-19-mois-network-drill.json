@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "native_status": "FAILURE",
+  "native_retries": 1,
+  "elapsed_failure_seconds": 308.36488134693354,
+  "run_budget_seconds": 14400,
+  "failure_limit_seconds": 1440,
+  "records": 500,
+  "chunk_size": 500,
+  "concurrency": 2,
+  "connect_timeout_seconds": 4,
+  "drop_packets": 16,
+  "failed_chunk_commits": 0,
+  "recovered_commits": 1,
+  "recovered_unique_entities": 500,
+  "replay_http_calls": 0,
+  "geocoding_sha256": "9682b7ac42d30b888b2659d20d7cc8c1dad307d428356eb488dba53dbb8549b8",
+  "scope": "real HTTP/native retry/MOIS loader; synthetic records and transaction-semantics DB fixture; no provider fetch",
+  "raw_log_sha256": "e2e5dbf3aee7d1a38a9fd3a8e9b05f2bd704f1a6455caeb9b22165024b4e8f7b",
+  "runtime": "WSL Python3.12 / Dagster1.13.24 owned user+network namespace"
+}

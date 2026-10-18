@@ -196,3 +196,60 @@ async def test_cancellation_drains_prefetch_tasks() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert active == 0
+
+
+@pytest.mark.parametrize("failure", [400, 404, 429, 500, 503, "read_timeout"])
+async def test_rest_errors_abort_prefetch_without_caching_missing_address(failure) -> None:
+    import httpx
+    from pydantic import SecretStr
+
+    from kortravelmap.core.exceptions import GeoRequestError
+    from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
+
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        if failure == "read_timeout":
+            raise httpx.ReadTimeout("synthetic timeout", request=request)
+        return httpx.Response(failure, json={"detail": "synthetic unavailable"})
+
+    async with httpx.AsyncClient(
+        base_url="http://geo.test", transport=httpx.MockTransport(handler)
+    ) as http:
+        reverse = kor_travel_geo_reverse_geocoder(
+            KorTravelGeoRestClient(http, api_key=SecretStr("synthetic-fixture-only"))
+        )
+        geocoder = PrefetchingReverseGeocoder(reverse, concurrency=2)
+        with pytest.raises(GeoRequestError):
+            await geocoder.prefetch([_coord(i) for i in range(500)])
+        assert 1 <= calls <= 2
+
+
+async def test_http_not_found_response_is_a_normal_cacheable_result() -> None:
+    import httpx
+    from pydantic import SecretStr
+
+    from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
+
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"status": "NOT_FOUND", "candidates": []})
+
+    async with httpx.AsyncClient(
+        base_url="http://geo.test", transport=httpx.MockTransport(handler)
+    ) as http:
+        reverse = kor_travel_geo_reverse_geocoder(
+            KorTravelGeoRestClient(http, api_key=SecretStr("synthetic-fixture-only"))
+        )
+        geocoder = PrefetchingReverseGeocoder(reverse, concurrency=2)
+        assert await geocoder.prefetch([_coord(i) for i in range(5)]) == 5
+        before = calls
+        assert await geocoder(_coord(0)) is None
+        assert calls == before
+        assert geocoder.prefetch_failures == 0
