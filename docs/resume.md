@@ -1,3 +1,10 @@
+## 2026-10-18 — Geo 기준점 실제 UI 수용
+
+- 실제 관리자 UI 8/8 PASS: 최초 baseline plan 1/상세 items 0, 동일 토큰 감지에서 같은 기준점 유지.
+- 실행 중 세 이미지의 revision label e937b38d와 DB head 409를 관찰했다.
+- daemon OFF·현재 run/물리 worker 0·컨테이너 lifecycle 유지. 실제 변경 토큰 replay/resume·자동 실행은 미검증.
+- [검증 기록](reports/2026-10-18-geo-baseline-live.md). 문서만 변경하며 사용자 지시로 CI를 생략한다.
+
 ## 2026-10-17 — T-MAP-02 timeout 문서 정합: 브랜치 docs/track2-http-timeout-contract-20261017
 
 **다음 한 작업: 문서 독립 리뷰·CI 후 머지 → coordinator가 T-MAP-02 첫 prod 배포 generation 근거 확인.**
