@@ -150,3 +150,49 @@ async def test_probe_falls_back_to_the_reference_and_reports_empty() -> None:
 
     assert await geocoder.probe_healthy(reference) is False
     assert seen == [reference]
+
+
+async def test_typed_transport_failure_stops_pending_chunk_and_drains_inflight() -> None:
+    from kortravelmap.core.exceptions import GeoRequestError
+
+    calls = 0
+    active = 0
+
+    async def unavailable(_coord: Coordinate) -> Address | None:
+        nonlocal calls, active
+        calls += 1
+        active += 1
+        try:
+            await asyncio.sleep(0)
+            raise GeoRequestError("synthetic connection timeout")
+        finally:
+            active -= 1
+
+    geocoder = PrefetchingReverseGeocoder(unavailable, concurrency=2)
+    with pytest.raises(GeoRequestError, match="synthetic"):
+        await geocoder.prefetch([_coord(i) for i in range(500)])
+    assert calls <= 2
+    assert active == 0
+    assert geocoder.prefetch_failures >= 1
+
+
+async def test_cancellation_drains_prefetch_tasks() -> None:
+    active = 0
+    entered = asyncio.Event()
+
+    async def stalled(_coord: Coordinate) -> Address | None:
+        nonlocal active
+        active += 1
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    geocoder = PrefetchingReverseGeocoder(stalled, concurrency=2)
+    task = asyncio.create_task(geocoder.prefetch([_coord(i) for i in range(50)]))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert active == 0

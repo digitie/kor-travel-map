@@ -1,3 +1,7 @@
+## 2026-10-19 — MOIS 연결 실패 조기 전파
+
+- 500행 typed 오류 선조회 지연을 재현하고 실행중 task 취소·회수를 보강했다. 관련89회귀 PASS이며 실제 네트워크/native retry 수용은 준비 중이다. [근거](reports/2026-10-19-mois-network-drill.md).
+
 ## 2026-10-19 — T-MAP-02 현재 설치 세대 수용
 
 - T-MAP-02 — timeout 구현523d98cc가 포함된 e937b38d의 API/CS 설치3파일 hash와
