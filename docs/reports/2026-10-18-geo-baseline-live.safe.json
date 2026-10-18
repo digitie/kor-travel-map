@@ -1,0 +1,66 @@
+{
+  "started_at": "2026-10-18T08:19:38.952Z",
+  "finished_at": "2026-10-18T08:19:43.061Z",
+  "cases": [
+    {
+      "name": "real-login",
+      "status": "PASS"
+    },
+    {
+      "name": "initial-stable-token-no-plans",
+      "status": "PASS"
+    },
+    {
+      "name": "layout-1365",
+      "status": "PASS"
+    },
+    {
+      "name": "layout-390",
+      "status": "PASS"
+    },
+    {
+      "name": "baseline_recorded",
+      "status": "PASS",
+      "plan_id": 1,
+      "items": 0
+    },
+    {
+      "name": "baseline",
+      "status": "PASS",
+      "plan_id": 1,
+      "items": 0
+    },
+    {
+      "name": "same-token-one-baseline-zero-detail-items",
+      "status": "PASS",
+      "plan_id": 1
+    },
+    {
+      "name": "logout",
+      "status": "PASS"
+    }
+  ],
+  "detect_requests": 2,
+  "unexpected_writes": 0,
+  "status": "PASS",
+  "runtime": "n150 Chromium1228",
+  "before": {
+    "daemon_off": true,
+    "current_runs": 0,
+    "physical_run_workers": 0
+  },
+  "after": {
+    "daemon_off": true,
+    "current_runs": 0,
+    "physical_run_workers": 0
+  },
+  "lifecycle_unchanged": true,
+  "store_proof_sha256": "0df67a0ce58fca6167c19546b2e1d129c60383e5a644ec87e642cdfec5f046b3",
+  "original_proof_sha256": "79ea138b5a0927e9caa0b867068f4a874328cbfadcf57efe4e94caaca094b71a",
+  "harness_sha256": "21cd92a9f97048095aba4ce25390a0479dd1e5aced866605c54e368e926ca132",
+  "limits": [
+    "changed_token_and_resume_not_exercised",
+    "automatic_dispatch_not_exercised",
+    "collector_performance_not_measured"
+  ]
+}
