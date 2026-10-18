@@ -32,7 +32,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
 설계 정본은 ADR-109 + `docs/etl/address-geocoding.md`, PR 묶음은 acceptance §T-GR-00.
 
-**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관) — 목록 위치일 뿐
+**geo·transport 호스트 odroid 이전 묶음(ADR-110 proposed, 2026-10-13, Track 2)** — 2026-10-19 T-MAP-02 현재 설치 수용은 tasks-done으로 이관했다. 아래 계획은 이력이다. `T-MAP-02`(`T-MAP-01`은 2026-10-15 이관) — 목록 위치일 뿐
 의존이 아니다. 접두사 `T-MAP-`는 **임시**다(ADR-110 열린 결정 5). 호스트 플립 자체는
 외부 저장소(Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed로 머지)의 일이라 여기 세지 않는다 — 실제 이전은
 2026-10-14~15 일어났다(ADR-110 사실 갱신 절). 의존:
@@ -48,14 +48,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
   정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
   요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
-
-- [ ] T-MAP-02 — **geo·transport client connect timeout 분리** (코드, 배포는 가능한 한 빨리 — transport 플립이 2026-10-14 먼저 일어났다)
-
-  connect 기본 4 s, read·write·pool 기본 geo 10 s·transport 30 s를 설정 팩토리로 전달한다.
-  transport의 재시도 대상 오류는 예산 안에서 최대 2회 시도·15 s backoff이며, 호출 전체 deadline이 아니다.
-  구현은 머지됐고 남은 해제 조건은 [acceptance §T-MAP-02](tasks-acceptance.md#t-map-02)의 첫 prod 배포 generation 기록이다.
-
-
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 

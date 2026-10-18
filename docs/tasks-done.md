@@ -1,5 +1,14 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-19 — T-MAP-02 현재 설치 세대 수용
+
+- [x] T-MAP-02 — timeout 구현523d98cc가 포함된 e937b38d의 API/CS 설치3파일 hash와
+  현재 image/CID/StartedAt을 확인했다. 과거 첫 generation UUID는 미회수이며
+  현재 설치세대 묶음으로 수용한다. 불필요 재배포·운영 변경0.
+  Map API/CS·PinVi API 실제 기존 키 reverse3/3 PASS, PinVi CS 직접 역할은 제외.
+  [범위와 증거](reports/2026-10-19-installed-timeout-acceptance.md).
+  전원단절 drill·자동 실행·운영 변경토큰 전량 수용은 별도다.
+
 ## 2026-10-16 — geo 릴리스 재지오코딩 구현(ADR-109)
 
 - [x] T-GR-01 — **지오코딩 스탬프 표·DTO·geo 클라이언트.** [#1326](https://github.com/digitie/kor-travel-map/pull/1326)

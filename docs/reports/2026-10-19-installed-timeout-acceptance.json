@@ -1,0 +1,115 @@
+{
+  "scope": "current installed generation and existing credential read-only verification",
+  "historical_first_generation_uuid": "NOT_RECOVERED",
+  "new_generation_created": false,
+  "deployment_changes": 0,
+  "source_revision": "e937b38d176cfeb759daca629395f51c1a6a4d5f",
+  "implementation_merge": "523d98ccf36f90aaead9ac33ab353a0839293621",
+  "runtime": [
+    {
+      "name": "pinvi-dagster-code-server-latest",
+      "id": "7ed8e9c4378a6257e50e2922310539bb8c40dffc6c2d815f5e74a18e0ea15876",
+      "image": "sha256:2d4880e2f8fb6e244c6f7b3bee92a5015e51292ad76dcd9ae460e20512bfa365",
+      "running": true,
+      "restarting": false,
+      "started": "2026-10-17T01:01:13.678676466Z",
+      "pid": 1329695,
+      "restart": 0,
+      "labels": {
+        "org.opencontainers.image.revision": "907c86f718caff3d5de6e49393b3138178a12bb7"
+      }
+    },
+    {
+      "name": "pinvi-api-latest",
+      "id": "56620abf9963f881c85f8e3d2049f1e1accb8d72b9405b19617cf57d7a0006d7",
+      "image": "sha256:48781415ace93dd5bc9b646dab078d4c83b9870e87056b891870cd72cd013080",
+      "running": true,
+      "restarting": false,
+      "started": "2026-10-17T01:01:07.023339239Z",
+      "pid": 1329011,
+      "restart": 0,
+      "labels": {
+        "org.opencontainers.image.revision": "907c86f718caff3d5de6e49393b3138178a12bb7"
+      }
+    },
+    {
+      "name": "kor-travel-map-dagster-code-server-latest",
+      "id": "51fee00241ab191c5fbab91d0d4f3e65e2e24ab196b822624ef354d5ff1e92b7",
+      "image": "sha256:2386699e7cb8e1be9bc4fea04420bc72d2708adbcaab35f47d292a05a12f1597",
+      "running": true,
+      "restarting": false,
+      "started": "2026-10-17T01:00:51.291295732Z",
+      "pid": 1327023,
+      "restart": 0,
+      "labels": {
+        "org.opencontainers.image.revision": "e937b38d176cfeb759daca629395f51c1a6a4d5f"
+      }
+    },
+    {
+      "name": "kor-travel-map-api-latest",
+      "id": "b7145483673884487a8c72e1e746768dc752ead21401644938e7e88a6725e7f2",
+      "image": "sha256:71db4abf19c66fd500592857c03104ad0f05fe154c4d3e9fe803991ac8195d34",
+      "running": true,
+      "restarting": false,
+      "started": "2026-10-17T01:00:39.277910995Z",
+      "pid": 1326037,
+      "restart": 0,
+      "labels": {
+        "org.opencontainers.image.revision": "e937b38d176cfeb759daca629395f51c1a6a4d5f"
+      }
+    }
+  ],
+  "installed_sources": {
+    "kor-travel-map-dagster-code-server-latest": {
+      "geocoding.py": "be44ce0ae09cfc864f6db9f891b17b9508b541fb2e2984cacee08220e26516ab",
+      "settings.py": "95a10825a90d6692c7f7d09948c7d29aad2fb2f3507c7076cddfb48218e0b6e7",
+      "kor_travel_transport.py": "01042b9a6759148dd4daf60a5d3bccf3ad21f12b75c38c647ba9a2be14098ba9"
+    },
+    "kor-travel-map-api-latest": {
+      "geocoding.py": "be44ce0ae09cfc864f6db9f891b17b9508b541fb2e2984cacee08220e26516ab",
+      "settings.py": "95a10825a90d6692c7f7d09948c7d29aad2fb2f3507c7076cddfb48218e0b6e7",
+      "kor_travel_transport.py": "01042b9a6759148dd4daf60a5d3bccf3ad21f12b75c38c647ba9a2be14098ba9"
+    }
+  },
+  "requests": [
+    {
+      "role": "pinvi-api-latest",
+      "http": 200,
+      "status": "OK",
+      "elapsed_ms": 673.1585161760449,
+      "runtime_unchanged": true,
+      "credential_present": true,
+      "configured_geo_origin_verified": true
+    },
+    {
+      "role": "kor-travel-map-dagster-code-server-latest",
+      "http": 200,
+      "status": "OK",
+      "elapsed_ms": 53.28542832285166,
+      "runtime_unchanged": true,
+      "credential_present": true,
+      "configured_geo_origin_verified": true
+    },
+    {
+      "role": "kor-travel-map-api-latest",
+      "http": 200,
+      "status": "OK",
+      "elapsed_ms": 53.758176043629646,
+      "runtime_unchanged": true,
+      "credential_present": true,
+      "configured_geo_origin_verified": true
+    }
+  ],
+  "pinvi_cs": "NO_DIRECT_GEO_ROLE_IN_INSPECTED_ETL_SOURCE; no Geo env; request NOT_RUN",
+  "limitations": [
+    "current installed generation replaces missing historical receipt; no historical UUID fabricated",
+    "requests use existing env credential, not application route E2E",
+    "no MOIS full run, timeout outage drill, or scheduler activation"
+  ],
+  "evidence_sha256": {
+    "inventory.safe.json": "8504aae562760ef9445560e542185265fb6eed4c29c8018cc4543e24bf50a5e6",
+    "config-source.safe.json": "3f10fad376fb9386d4e1169617f296fb199b9cb3051f6392c1afc15aab1852d6",
+    "source-equality.safe.json": "ef233ed608990ac18201680e5fcebe94d43fc4e183510cb52439a1021fc94f54",
+    "reverse.safe.json": "0e0cdc1b28c30fdf26eb0c9fca6bcfc9f487c74e4458780fc93129c7d9941f58"
+  }
+}
