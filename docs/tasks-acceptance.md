@@ -2366,6 +2366,14 @@ PR은 머지 직전.
 
 ## T-MAP-02
 
+**2026-10-19 현재 설치 수용 완료.** 과거 첫 배포 generation UUID는 미회수다.
+현 source e937b38d + API/CS image digest/CID/StartedAt과 실제 설치 timeout 관련3파일
+hash를 배포세대 증거로 채택했다. 새 UUID 생성·재배포는 없다.
+[직접 인증3건과 수용 범위](reports/2026-10-19-installed-timeout-acceptance.md)를 따른다.
+아래 원래 해제 조건 중 첫 시점 UUID의 소급 증명은 하지 않으며 현재 설치 수용으로 대체한다.
+장애 drill은 아래 기존 규정대로 외부 운영 추적이다.
+
+
 geo·transport REST client의 단일 float timeout을 connect/read로 분리한다(ADR-110 결정 3). 의존: 설계 §13은 MGR →
 (TRN/WEA/GEO) → MAP 순서이나 Map의 connect 분리는 Manager·Track 1 변경과 코드 의존이 없어 병렬 착수를 **제안**한다
 (ADR-110 열린 결정 6, 소유자 확인 — 본 문서가 확정하지 않는다). 실제 선행은 **T-GR-00-LEDGER**(journal 분리 —
