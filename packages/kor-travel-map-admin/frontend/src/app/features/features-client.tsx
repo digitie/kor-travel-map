@@ -369,6 +369,8 @@ function useFeaturesClientController() {
       {
         accessorKey: "name",
         header: "이름",
+        // 빈 viewport에서도 기본 오름차순 정렬의 다음 클릭은 내림차순이어야 한다.
+        sortDescFirst: false,
         sortingFn: (rowA, rowB) =>
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (

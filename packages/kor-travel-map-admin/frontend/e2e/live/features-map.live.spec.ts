@@ -27,6 +27,7 @@ const KINDS = WEATHERLESS_KINDS.length > 0 ? WEATHERLESS_KINDS : ["place"];
 const DEFAULT_KINDS: ReadonlySet<string> = new Set(DEFAULT_FEATURE_MAP_KINDS);
 const NON_DEFAULT_KINDS = KINDS.filter((kind) => !DEFAULT_KINDS.has(kind));
 const MAP_VIEWS = F.MAP_VIEWS;
+const MAP_CONTAINER = '[data-testid="map-canvas-container"]';
 const VIEWPORTS = [
   { name: "desktop-1280", width: 1280, height: 800 },
   { name: "tablet-768", width: 768, height: 1024 },
@@ -46,6 +47,71 @@ async function expectFeaturesPageReady(
   await expect(page.getByTestId("map-canvas-container")).toBeAttached({
     timeout: 15000,
   });
+}
+
+async function expectTableTabContent(
+  page: import("@playwright/test").Page,
+): Promise<void> {
+  const featureTable = page.getByRole("table", { name: "이름순 feature" });
+  const clusterZoomHint = page.getByText(
+    /지도를 확대\(zoom \d+\+\)하면 개별 feature 목록이 표시됩니다\./,
+  );
+  // 저확대 클러스터 모드에서는 안내 문구가 정상 콘텐츠다.
+  await expect(featureTable.or(clusterZoomHint)).toBeVisible({
+    timeout: 15000,
+  });
+}
+
+/** feature 표시 경계(zoom 14 초과)로 이동한다. */
+async function jumpMapToFeatureZoom(
+  page: import("@playwright/test").Page,
+  center?: { lon: number; lat: number },
+): Promise<void> {
+  await page.waitForFunction(
+    (selector) => {
+      const container = document.querySelector(selector) as
+        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+        | null;
+      return container?._maplibreMap !== undefined;
+    },
+    MAP_CONTAINER,
+    { timeout: 15000 },
+  );
+  const mapCenter =
+    center ??
+    (await page.evaluate((selector) => {
+      const container = document.querySelector(selector) as
+        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+        | null;
+      const current = container?._maplibreMap?.getCenter();
+      return current ? { lon: current.lng, lat: current.lat } : null;
+    }, MAP_CONTAINER));
+  expect(mapCenter).not.toBeNull();
+  const lon = Number(mapCenter?.lon);
+  const lat = Number(mapCenter?.lat);
+  expect(Number.isFinite(lon) && Number.isFinite(lat)).toBe(true);
+  await page.evaluate(
+    ({ selector, lon, lat, zoom }) => {
+      const container = document.querySelector(selector) as
+        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+        | null;
+      container?._maplibreMap?.jumpTo({ center: [lon, lat], zoom });
+    },
+    { selector: MAP_CONTAINER, lon, lat, zoom: 14.5 },
+  );
+  await expect
+    .poll(
+      async () => {
+        const readout = await page
+          .getByText(/center .*· z\s/)
+          .first()
+          .textContent();
+        const zoom = readout?.match(/·\s*z\s*([\d.]+)/)?.[1];
+        return Number(zoom ?? 0);
+      },
+      { timeout: 15000 },
+    )
+    .toBeGreaterThanOrEqual(14);
 }
 
 /** 기본 `notice`가 현재 뷰포트에서 비어 있을 수 있으므로 데이터가 있는 kind를 고른다. */
@@ -152,9 +218,7 @@ test.describe("/features live — page load + core controls", () => {
     await expect(tableTab).toHaveAttribute("aria-selected", "true", {
       timeout: 15000,
     });
-    await expect(
-      page.getByRole("table", { name: "이름순 feature" }),
-    ).toBeVisible({ timeout: 15000 });
+    await expectTableTabContent(page);
   });
 
   test("탭 전환 — 테이블 → 지도 복귀", async ({ page }) => {
@@ -180,10 +244,11 @@ test.describe("/features live — page load + core controls", () => {
   }) => {
     await page.goto(ROUTE);
     await expectFeaturesPageReady(page);
+    await jumpMapToFeatureZoom(page);
     await page.getByRole("tab", { name: "테이블" }).click();
     const table = page.getByRole("table", { name: "이름순 feature" });
     await expect(table).toBeVisible({ timeout: 15000 });
-    for (const column of ["이름", "종류", "상태", "좌표"]) {
+    for (const column of ["이름", "종류", "상태 축", "좌표"]) {
       await expect(
         table.getByRole("columnheader", { name: column }),
       ).toBeVisible({ timeout: 15000 });
@@ -293,10 +358,11 @@ test.describe("/features live — map-view deep links (center/zoom query)", () =
         )}`,
       );
       await expectFeaturesPageReady(page);
-      await page.getByRole("tab", { name: "테이블" }).click();
-      await expect(
-        page.getByRole("table", { name: "이름순 feature" }),
-      ).toBeVisible({ timeout: 15000 });
+      const tableTab = page.getByRole("tab", { name: "테이블" });
+      await tableTab.click();
+      await expect(tableTab).toHaveAttribute("aria-selected", "true");
+      // 쿼리의 center/zoom은 카메라를 바꾸지 않으므로 현재 뷰의 콘텐츠를 확인한다.
+      await expectTableTabContent(page);
     });
   }
 });
@@ -345,42 +411,114 @@ test.describe("/features live — responsive viewports", () => {
 });
 
 test.describe("/features live — sort headers (table tab)", () => {
-  // Only name/kind/status are sortable (coord enableSorting:false).
-  const SORTABLE = ["이름", "종류", "상태"] as const;
+  // 이름과 종류만 정렬할 수 있다(상태 축·좌표는 enableSorting:false).
+  // live viewport에 행이 없더라도 aria-sort 상태 전이로 실제 정렬 제어를 검증한다.
+  const SORTABLE = ["이름", "종류"] as const;
+
+  async function readSortDirection(
+    header: import("@playwright/test").Locator,
+  ): Promise<string> {
+    const direction = await header.getAttribute("aria-sort");
+    expect(direction).toMatch(/^(ascending|descending|none)$/);
+    return direction ?? "none";
+  }
+
+  async function expectSortDirectionToChange(
+    header: import("@playwright/test").Locator,
+    previousDirection: string,
+  ): Promise<string> {
+    await expect
+      .poll(() => header.getAttribute("aria-sort"), { timeout: 5000 })
+      .not.toBe(previousDirection);
+    return readSortDirection(header);
+  }
+
   for (const column of SORTABLE) {
     test(`정렬 헤더 클릭 — "${column}" (1회)`, async ({ page }) => {
       await page.goto(ROUTE);
       await expectFeaturesPageReady(page);
+      await jumpMapToFeatureZoom(page);
       await page.getByRole("tab", { name: "테이블" }).click();
       const table = page.getByRole("table", { name: "이름순 feature" });
       await expect(table).toBeVisible({ timeout: 15000 });
-      const headerButton = table
-        .getByRole("columnheader", { name: column })
-        .getByRole("button", { name: column, exact: true });
+      const columnHeader = table.getByRole("columnheader", { name: column });
+      const headerButton = columnHeader.getByRole("button", {
+        name: column,
+        exact: true,
+      });
+      const initialDirection = await readSortDirection(columnHeader);
       await headerButton.click();
+      const nextDirection = await expectSortDirectionToChange(
+        columnHeader,
+        initialDirection,
+      );
+      if (column === "이름") {
+        expect(nextDirection).toBe("descending");
+      } else {
+        expect(nextDirection).toMatch(/^(ascending|descending)$/);
+      }
       await expect(table).toBeVisible({ timeout: 15000 });
     });
   }
 
   for (const column of SORTABLE) {
-    test(`정렬 헤더 클릭 — "${column}" (토글 2회)`, async ({ page }) => {
+    test(`정렬 헤더 클릭 — "${column}" (방향 순환)`, async ({ page }) => {
       await page.goto(ROUTE);
       await expectFeaturesPageReady(page);
+      await jumpMapToFeatureZoom(page);
       await page.getByRole("tab", { name: "테이블" }).click();
       const table = page.getByRole("table", { name: "이름순 feature" });
       await expect(table).toBeVisible({ timeout: 15000 });
-      const headerButton = table
-        .getByRole("columnheader", { name: column })
-        .getByRole("button", { name: column, exact: true });
-      await headerButton.click();
-      await headerButton.click();
+      const columnHeader = table.getByRole("columnheader", { name: column });
+      const headerButton = columnHeader.getByRole("button", {
+        name: column,
+        exact: true,
+      });
+      const initialDirection = await readSortDirection(columnHeader);
+      if (column === "이름") {
+        expect(initialDirection).toBe("ascending");
+        await headerButton.click();
+        let direction = await expectSortDirectionToChange(
+          columnHeader,
+          initialDirection,
+        );
+        expect(direction).toBe("descending");
+        await headerButton.click();
+        direction = await expectSortDirectionToChange(columnHeader, direction);
+        expect(direction).toBe("none");
+        await headerButton.click();
+        direction = await expectSortDirectionToChange(columnHeader, direction);
+        expect(direction).toBe("ascending");
+      } else {
+        expect(initialDirection).toBe("none");
+        await headerButton.click();
+        const firstDirection = await expectSortDirectionToChange(
+          columnHeader,
+          initialDirection,
+        );
+        expect(firstDirection).toMatch(/^(ascending|descending)$/);
+        await headerButton.click();
+        const secondDirection = await expectSortDirectionToChange(
+          columnHeader,
+          firstDirection,
+        );
+        expect(secondDirection).toBe(
+          firstDirection === "ascending" ? "descending" : "ascending",
+        );
+        await headerButton.click();
+        const clearedDirection = await expectSortDirectionToChange(
+          columnHeader,
+          secondDirection,
+        );
+        expect(clearedDirection).toBe("none");
+      }
       await expect(table).toBeVisible({ timeout: 15000 });
     });
   }
 });
 
 test.describe("/features live — header nav links present", () => {
-  const NAV_LINKS = ["홈", "Jobs", "Update", "POI 캐시 대상", "중복 검토", "작업 자동화"];
+  const NAV_LINKS = ["홈", "Feature 지도", "파이프라인", "POI 캐시 대상", "중복 검토", "설정"];
   for (const linkName of NAV_LINKS) {
     test(`헤더 링크 노출 — "${linkName}"`, async ({ page }) => {
       await page.goto(ROUTE);
@@ -405,6 +543,7 @@ test.describe("/features live — kind chip + view combinations", () => {
       await expect(chip).toHaveAttribute("aria-pressed", "true", {
         timeout: 15000,
       });
+      await jumpMapToFeatureZoom(page);
       const tableTab = page.getByRole("tab", { name: "테이블" });
       await tableTab.click();
       await expect(tableTab).toHaveAttribute("aria-selected", "true", {
