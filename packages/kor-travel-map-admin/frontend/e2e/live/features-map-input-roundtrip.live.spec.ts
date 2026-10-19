@@ -39,7 +39,8 @@ const COMBINED_KINDS_PARAM = COMBINED_KINDS.join(",");
  *     app/features/features-client.tsx FeatureDetailPanel.
  */
 
-type FeaturesInBboxResponse = components["schemas"]["FeaturesInBboxResponse"];
+type AdminFeaturesListResponse =
+  components["schemas"]["AdminFeaturesListResponse"];
 type AdminFeatureMapItem = components["schemas"]["AdminFeatureMapItem"];
 type AdminFeatureMapCluster = components["schemas"]["AdminFeatureCluster"];
 type AdminFeaturesInBoundsResponse =
@@ -119,6 +120,33 @@ async function browserFetch<T>(
       path,
     },
   );
+}
+
+/** 서울 등 특정 지역에 고정하지 않고 DB에서 좌표가 있는 place를 찾는다. */
+async function firstPlaceCoordinate(
+  page: Page,
+): Promise<{ featureId: string; lon: number; lat: number }> {
+  const response = await browserFetch<AdminFeaturesListResponse>(
+    page,
+    "/v1/admin/features?page_size=20&kind=place&has_coord=true",
+  );
+  expect(response.status).toBe(200);
+  expect(response.body).not.toBeNull();
+  const feature = response.body?.data.items.find(
+    (item) =>
+      item.kind === "place" &&
+      typeof item.lon === "number" &&
+      typeof item.lat === "number",
+  );
+  expect(feature, "좌표가 있는 place가 live DB에 있어야 함").toBeTruthy();
+  if (
+    !feature ||
+    typeof feature.lon !== "number" ||
+    typeof feature.lat !== "number"
+  ) {
+    throw new Error("좌표가 있는 place를 찾지 못했습니다.");
+  }
+  return { featureId: feature.feature_id, lon: feature.lon, lat: feature.lat };
 }
 
 // ── features bbox/detail 쿼리 인식(파라미터-aware 술어) ─────────────────────
@@ -226,26 +254,25 @@ async function jumpMap(
   );
 }
 
-/** jump/query cache hit 모두에서 MapLibre source→DOM marker 동기화가 끝날 때까지 기다린다. */
-async function waitForMapIdle(page: Page): Promise<void> {
-  await page.evaluate(async (sel) => {
-    const container = document.querySelector(sel) as
-      | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
-      | null;
-    const map = container?._maplibreMap;
-    if (!map) throw new Error("MapLibre instance is not attached");
-
-    await new Promise<void>((resolve) => {
-      const settleAfterPaint = () => {
+/** 외부 VWorld 타일 전체가 idle이 될 때까지 기다리지 않고 카메라 변경만 마무리한다. */
+async function waitForViewportSettle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    (sel) => {
+      const container = document.querySelector(sel) as
+        | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+        | null;
+      const map = container?._maplibreMap;
+      return map !== undefined && !map.isMoving();
+    },
+    MAP_CONTAINER,
+    { timeout: 15_000 },
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      };
-      if (map.loaded() && !map.isMoving()) {
-        settleAfterPaint();
-        return;
-      }
-      map.once("idle", settleAfterPaint);
-    });
-  }, MAP_CONTAINER);
+      }),
+  );
 }
 
 function isFeatureCollectionRequest(request: Request): boolean {
@@ -387,7 +414,6 @@ async function waitForExactServerClusters(
   page: Page,
   clusters: readonly AdminFeatureMapCluster[],
 ): Promise<void> {
-  expect(clusters.length).toBeGreaterThan(0);
   await expect
     .poll(async () => serverClustersMatchRenderedState(page, clusters), {
       timeout: 30_000,
@@ -606,10 +632,9 @@ async function gotoFeaturesReady(page: Page): Promise<void> {
     page.getByRole("heading", { level: 1, name: "Feature 지도" }),
   ).toBeVisible(T);
   await expect(page.getByTestId("map-canvas-container")).toBeAttached(T);
-  // 마커가 떠야 지도 load + 기본(전국) 데이터 렌더 완료 → _maplibreMap 조작이 안전.
-  await expect(page.locator(".maplibregl-marker").first()).toBeVisible({
-    timeout: 30_000,
-  });
+  // 기본 notice가 현재 뷰포트에 없더라도 MapLibre 준비 상태는 idle로 판정한다.
+  // 이후 각 시나리오가 실제 응답·마커가 필요한 좌표와 kind를 직접 검증한다.
+  await waitForViewportSettle(page);
 }
 
 const EPS = 0.0005;
@@ -657,8 +682,8 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       (await initialResponse.json()) as AdminFeaturesInBoundsResponse;
     expect(initialBody.data.mode).toBe("clusters");
     expect(Array.isArray(initialBody.data.clusters)).toBe(true);
-    expect(initialBody.data.clusters.length).toBeGreaterThan(0);
-    await waitForMapIdle(page);
+    await waitForViewportSettle(page);
+    // 빈 기본 notice 결과도 유효하다. 마커 렌더링은 아래의 place 추가 응답에서 검증한다.
     await waitForExactServerClusters(page, initialBody.data.clusters);
 
     const filter = page.getByTestId("kind-filter");
@@ -691,11 +716,12 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     const placeBody =
       (await placeResponse.json()) as AdminFeaturesInBoundsResponse;
     expect(placeBody.data.mode).toBe("clusters");
+    expect(placeBody.data.clusters.length).toBeGreaterThan(0);
     expect(
       placeBody.data.clusters.map(serverClusterSignature).sort(),
       "place 추가 전후 server cluster 집합이 달라야 reset 수렴을 검증할 수 있음",
     ).not.toEqual(initialBody.data.clusters.map(serverClusterSignature).sort());
-    await waitForMapIdle(page);
+    await waitForViewportSettle(page);
     await waitForExactServerClusters(page, placeBody.data.clusters);
     await expect(reset).toBeEnabled(T);
 
@@ -708,7 +734,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         }
         await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
         await expect(reset).toBeDisabled(T);
-        await waitForMapIdle(page);
+        await waitForViewportSettle(page);
       },
     );
     for (const request of resetCapture.requests) {
@@ -748,7 +774,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
 
       // 멀리 떨어진 기준점으로 먼저 점프(초기 뷰가 타깃과 같아 moveend 누락되는 경우 방지).
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
 
       // 새 target은 신규 query key이므로 exact admin response를 반드시 받아야 한다.
       const responsePromise = page.waitForResponse(
@@ -775,7 +801,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       }
 
       // 백엔드 read 라운드트립: UI와 같은 admin items 계약을 현재 bounds로 직접 조회.
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
       const bounds = await readMapBounds(page);
       expect(bounds).not.toBeNull();
       expectRequestBoundsToMatchMap(requested, bounds!);
@@ -823,9 +849,10 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
-    const SEOUL = { lon: 126.978, lat: 37.566, zoom: 15 } as const;
+    const zoom = 15;
 
     await gotoFeaturesReady(page);
+    const target = await firstPlaceCoordinate(page);
     const filter = page.getByTestId("kind-filter");
     const defaultChips = DEFAULT_KINDS.map((kind) =>
       filter.getByRole("button", { name: kind, exact: true }),
@@ -836,22 +863,22 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     });
 
     try {
-      // place feature가 풍부한 서울로 이동(초기 데이터 확보).
+      // 특정 도시 데이터에 기대지 않고 실제 좌표가 있는 place로 이동한다.
       await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
       const defaultResponsePromise = page.waitForResponse(
         (response) =>
-          adminItemsContains(response, SEOUL.lon, SEOUL.lat) &&
+          adminItemsContains(response, target.lon, target.lat) &&
           inBoundsBbox(response).kinds.join(",") === DEFAULT_KINDS_PARAM,
         { timeout: FLOW_TIMEOUT },
       );
-      await jumpMap(page, SEOUL.lon, SEOUL.lat, SEOUL.zoom);
+      await jumpMap(page, target.lon, target.lat, zoom);
       const defaultResponse = await defaultResponsePromise;
       expect(defaultResponse.status()).toBe(200);
       const defaultBody =
         (await defaultResponse.json()) as AdminFeaturesInBoundsResponse;
       expect(defaultBody.data.mode).toBe("items");
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
       await waitForExactPointMarkers(page, defaultBody.data.items);
 
       await expect(placeChip).toHaveAttribute("aria-pressed", "false", T);
@@ -875,10 +902,15 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       const combinedBody =
         (await combinedResponse.json()) as AdminFeaturesInBoundsResponse;
       expect(combinedBody.data.mode).toBe("items");
+      expect(
+        combinedBody.data.items.some(
+          (item) => item.feature_id === target.featureId,
+        ),
+      ).toBe(true);
       for (const item of combinedBody.data.items) {
         expect(COMBINED_KINDS).toContain(item.kind);
       }
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
       await waitForExactPointMarkers(page, combinedBody.data.items);
       await expect
         .poll(async () => readFeatureCount(page), T)
@@ -903,7 +935,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           await expect(
             filter.getByRole("button", { name: "초기화" }),
           ).toBeDisabled(T);
-          await waitForMapIdle(page);
+          await waitForViewportSettle(page);
         },
       );
       for (const request of resetCapture.requests) {
@@ -939,18 +971,23 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       }
       const placeOnly = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, SEOUL.zoom, ["place"]),
+        adminInBoundsPath(bounds!, zoom, ["place"]),
       );
       expect(placeOnly.status).toBe(200);
       expect(placeOnly.body).not.toBeNull();
       expect(placeOnly.body!.data.mode).toBe("items");
       expect(placeOnly.body!.data.items.length).toBeGreaterThan(0);
+      expect(
+        placeOnly.body!.data.items.some(
+          (item) => item.feature_id === target.featureId,
+        ),
+      ).toBe(true);
       for (const item of placeOnly.body!.data.items) {
         expect(item.kind).toBe("place");
       }
       const combined = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, SEOUL.zoom, [...COMBINED_KINDS]),
+        adminInBoundsPath(bounds!, zoom, [...COMBINED_KINDS]),
       );
       expect(combined.status).toBe(200);
       expect(combined.body).not.toBeNull();
@@ -960,7 +997,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       ).toEqual(combinedBody.data.items.map((item) => item.feature_id).sort());
       const unfiltered = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, SEOUL.zoom, []),
+        adminInBoundsPath(bounds!, zoom, []),
       );
       expect(unfiltered.status).toBe(200);
       expect(unfiltered.body).not.toBeNull();
@@ -983,35 +1020,43 @@ test.describe("/features live — map input round-trip (read-only)", () => {
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
     await gotoFeaturesReady(page);
+    const target = await firstPlaceCoordinate(page);
     const panel = page.getByTestId("feature-detail-panel");
 
     try {
-      // 기본 필터(DEFAULT_FEATURE_MAP_KINDS)에 포함되는 feature를 직접 조회해 좌표 있는 실제 feature를 확인.
-      const seed = await browserFetch<FeaturesInBboxResponse>(
-        page,
-        "/v1/features?min_lon=126.96&min_lat=37.55&max_lon=127.02&max_lat=37.59&page_size=100" +
-          DEFAULT_KINDS.map((kind) => `&kind=${encodeURIComponent(kind)}`).join(""),
-      );
-      expect(seed.status).toBe(200);
-      expect(seed.body).not.toBeNull();
-      const target = seed.body!.data.items.find(
-        (item) => typeof item.lon === "number" && typeof item.lat === "number",
-      );
-      expect(
-        target,
-        "서울 도심 bbox에 좌표 있는 feature가 있어야 함",
-      ).toBeTruthy();
-      const targetLon = target!.lon as number;
-      const targetLat = target!.lat as number;
-
-      // 타깃은 신규 query key이므로 admin response를 반드시 받고 전체 marker ID를 맞춘다.
-      await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
-      await waitForMapIdle(page);
-      const mapResponsePromise = page.waitForResponse(
-        (response) => adminItemsContains(response, targetLon, targetLat),
+      const filter = page.getByTestId("kind-filter");
+      const placeChip = filter.getByRole("button", {
+        name: "place",
+        exact: true,
+      });
+      const placeClustersPromise = page.waitForResponse(
+        (response) =>
+          isAdminFeaturesInBounds(response) &&
+          inBoundsBbox(response).zoom !== null &&
+          (inBoundsBbox(response).zoom as number) <= 13 &&
+          inBoundsBbox(response).kinds.join(",") === COMBINED_KINDS_PARAM,
         { timeout: FLOW_TIMEOUT },
       );
-      await jumpMap(page, targetLon, targetLat, 16);
+      await placeChip.click();
+      await expect(placeChip).toHaveAttribute("aria-pressed", "true", T);
+      const placeClusters = await placeClustersPromise;
+      expect(placeClusters.status()).toBe(200);
+      const placeClustersBody =
+        (await placeClusters.json()) as AdminFeaturesInBoundsResponse;
+      expect(placeClustersBody.data.clusters.length).toBeGreaterThan(0);
+      await waitForViewportSettle(page);
+      await waitForExactServerClusters(page, placeClustersBody.data.clusters);
+
+      // live DB에서 찾은 좌표로 이동해 point marker를 확인한다.
+      await jumpMap(page, ANCHOR.lon, ANCHOR.lat, ANCHOR.zoom);
+      await waitForViewportSettle(page);
+      const mapResponsePromise = page.waitForResponse(
+        (response) =>
+          adminItemsContains(response, target.lon, target.lat) &&
+          inBoundsBbox(response).kinds.join(",") === COMBINED_KINDS_PARAM,
+        { timeout: FLOW_TIMEOUT },
+      );
+      await jumpMap(page, target.lon, target.lat, 16);
       const mapResponse = await mapResponsePromise;
       expect(mapResponse.status()).toBe(200);
       const mapBody =
@@ -1019,19 +1064,19 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       expect(mapBody.data.mode).toBe("items");
       expect(
         mapBody.data.items.some(
-          (item) => item.feature_id === target!.feature_id,
+          (item) => item.feature_id === target.featureId,
         ),
       ).toBe(true);
-      await waitForMapIdle(page);
+      await waitForViewportSettle(page);
       await waitForExactPointMarkers(page, mapBody.data.items);
 
-      // 현재 bounds를 같은 admin items 계약으로 직접 읽고 public seed와 동일한 marker를 찾는다.
+      // 현재 bounds를 같은 admin items 계약으로 직접 읽고 seed place marker를 찾는다.
       const bounds = await readMapBounds(page);
       expect(bounds).not.toBeNull();
       expectRequestBoundsToMatchMap(inBoundsBbox(mapResponse), bounds!);
       const direct = await browserFetch<AdminFeaturesInBoundsResponse>(
         page,
-        adminInBoundsPath(bounds!, 16, [...DEFAULT_KINDS]),
+        adminInBoundsPath(bounds!, 16, [...COMBINED_KINDS]),
       );
       expect(direct.status).toBe(200);
       expect(direct.body).not.toBeNull();
@@ -1040,11 +1085,11 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         direct.body!.data.items.map((item) => item.feature_id).sort(),
       ).toEqual(mapBody.data.items.map((item) => item.feature_id).sort());
       const adminTarget = direct.body!.data.items.find(
-        (item) => item.feature_id === target!.feature_id,
+        (item) => item.feature_id === target.featureId,
       );
       expect(
         adminTarget,
-        "public seed와 같은 admin map item이 있어야 함",
+        "live seed와 같은 admin map item이 있어야 함",
       ).toBeTruthy();
       const coincidentFeatureIds = await expectedCoincidentFeatureIds(
         page,

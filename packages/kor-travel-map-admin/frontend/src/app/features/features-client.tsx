@@ -369,6 +369,8 @@ function useFeaturesClientController() {
       {
         accessorKey: "name",
         header: "이름",
+        // 빈 viewport에서도 기본 오름차순 정렬의 다음 클릭은 내림차순이어야 한다.
+        sortDescFirst: false,
         sortingFn: (rowA, rowB) =>
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (
@@ -384,6 +386,8 @@ function useFeaturesClientController() {
       {
         accessorKey: "kind",
         header: "종류",
+        // 빈 결과와 데이터 로딩 전후에도 정렬 방향을 일관되게 유지한다.
+        sortDescFirst: false,
         cell: ({ row }) => <Badge variant="neutral">{row.original.kind}</Badge>,
       },
       {

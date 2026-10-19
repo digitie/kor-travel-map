@@ -453,17 +453,35 @@ class PrefetchingReverseGeocoder:
         if not pending:
             return 0
         gate = asyncio.Semaphore(self._concurrency)
+        failed = False
 
         async def _one(key: tuple[str, str], coord: Coordinate) -> None:
+            nonlocal failed
             async with gate:
+                if failed:
+                    return
                 try:
                     observation = await self._lookup(coord)
+                except (GeoRequestError, GeoAuthNotConfiguredError):
+                    # 변환에서 결국 전파할 typed I/O 실패를 500행 뒤까지 미루지 않는다.
+                    # 빈 후보(None)는 정상 응답이므로 이 분기에 들어오지 않는다.
+                    self.prefetch_failures += 1
+                    failed = True
+                    raise
                 except Exception:  # noqa: BLE001 — 캐시하지 않고 변환의 실시간 재시도에 맡긴다
                     self.prefetch_failures += 1
                     return
             self._remember(key, observation)
 
-        await asyncio.gather(*(_one(key, coord) for key, coord in pending.items()))
+        tasks = [asyncio.create_task(_one(key, coord)) for key, coord in pending.items()]
+        try:
+            await asyncio.gather(*tasks)
+        except BaseException:
+            # gather는 형제 실패 시 다른 요청을 자동 취소하지 않는다. 반환 전에 회수한다.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         return len(pending)
 
     async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
