@@ -452,11 +452,9 @@ test.describe("/features live — sort headers (table tab)", () => {
         columnHeader,
         initialDirection,
       );
-      if (column === "이름") {
-        expect(nextDirection).toBe("descending");
-      } else {
-        expect(nextDirection).toMatch(/^(ascending|descending)$/);
-      }
+      expect(nextDirection).toBe(
+        column === "이름" ? "descending" : "ascending",
+      );
       await expect(table).toBeVisible({ timeout: 15000 });
     });
   }
@@ -475,42 +473,16 @@ test.describe("/features live — sort headers (table tab)", () => {
         exact: true,
       });
       const initialDirection = await readSortDirection(columnHeader);
-      if (column === "이름") {
-        expect(initialDirection).toBe("ascending");
-        await headerButton.click();
-        let direction = await expectSortDirectionToChange(
-          columnHeader,
-          initialDirection,
-        );
-        expect(direction).toBe("descending");
-        await headerButton.click();
-        direction = await expectSortDirectionToChange(columnHeader, direction);
-        expect(direction).toBe("none");
+      const expectedCycle =
+        column === "이름"
+          ? ["ascending", "descending", "none", "ascending"]
+          : ["none", "ascending", "descending", "none"];
+      expect(initialDirection).toBe(expectedCycle[0]);
+      let direction = initialDirection;
+      for (const expectedDirection of expectedCycle.slice(1)) {
         await headerButton.click();
         direction = await expectSortDirectionToChange(columnHeader, direction);
-        expect(direction).toBe("ascending");
-      } else {
-        expect(initialDirection).toBe("none");
-        await headerButton.click();
-        const firstDirection = await expectSortDirectionToChange(
-          columnHeader,
-          initialDirection,
-        );
-        expect(firstDirection).toMatch(/^(ascending|descending)$/);
-        await headerButton.click();
-        const secondDirection = await expectSortDirectionToChange(
-          columnHeader,
-          firstDirection,
-        );
-        expect(secondDirection).toBe(
-          firstDirection === "ascending" ? "descending" : "ascending",
-        );
-        await headerButton.click();
-        const clearedDirection = await expectSortDirectionToChange(
-          columnHeader,
-          secondDirection,
-        );
-        expect(clearedDirection).toBe("none");
+        expect(direction).toBe(expectedDirection);
       }
       await expect(table).toBeVisible({ timeout: 15000 });
     });

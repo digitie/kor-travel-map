@@ -386,6 +386,8 @@ function useFeaturesClientController() {
       {
         accessorKey: "kind",
         header: "종류",
+        // 빈 결과와 데이터 로딩 전후에도 정렬 방향을 일관되게 유지한다.
+        sortDescFirst: false,
         cell: ({ row }) => <Badge variant="neutral">{row.original.kind}</Badge>,
       },
       {
