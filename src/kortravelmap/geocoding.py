@@ -462,7 +462,7 @@ class PrefetchingReverseGeocoder:
                     return
                 try:
                     observation = await self._lookup(coord)
-                except GeoRequestError:
+                except (GeoRequestError, GeoAuthNotConfiguredError):
                     # 변환에서 결국 전파할 typed I/O 실패를 500행 뒤까지 미루지 않는다.
                     # 빈 후보(None)는 정상 응답이므로 이 분기에 들어오지 않는다.
                     self.prefetch_failures += 1

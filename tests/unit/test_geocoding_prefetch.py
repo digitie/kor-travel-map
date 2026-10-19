@@ -228,6 +228,42 @@ async def test_rest_errors_abort_prefetch_without_caching_missing_address(failur
         assert 1 <= calls <= 2
 
 
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (400, {"code": "E0100", "field": "key"}),
+        (401, {"code": "E0401"}),
+    ],
+)
+async def test_public_key_rejection_aborts_prefetch_without_retrying_every_row(
+    status: int, error: dict[str, str]
+) -> None:
+    import httpx
+    from pydantic import SecretStr
+
+    from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
+    from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_reverse_geocoder
+
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(status, json={"error": error})
+
+    async with httpx.AsyncClient(
+        base_url="http://geo.test", transport=httpx.MockTransport(handler)
+    ) as http:
+        reverse = kor_travel_geo_reverse_geocoder(
+            KorTravelGeoRestClient(http, api_key=SecretStr("synthetic-fixture-only"))
+        )
+        geocoder = PrefetchingReverseGeocoder(reverse, concurrency=2)
+        with pytest.raises(GeoAuthNotConfiguredError):
+            await geocoder.prefetch([_coord(i) for i in range(500)])
+        assert 1 <= calls <= 2
+        assert geocoder.prefetch_failures >= 1
+
+
 async def test_http_not_found_response_is_a_normal_cacheable_result() -> None:
     import httpx
     from pydantic import SecretStr

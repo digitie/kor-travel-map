@@ -81,35 +81,62 @@ def inner(parent_net, parent_user, smoke):
             self.wfile.write(body)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    port = server.server_address[1]
-    rule = ["OUTPUT", "-o", "lo", "-p", "tcp", "--dport", str(port), "--syn", "-j", "DROP"]
     installed = False
-    settings = KorTravelMapSettings()
-    plan = resolve_mois_load_plan(settings, service_slugs=("bakeries",))
-    assert plan.run_budget_seconds == 14400
-    assert plan.geocode_concurrency == 2
-    assert geo_http_timeout(settings).connect == 4
-    assert MOIS_LOAD_CHUNK_SIZE == 500
-    assert MOIS_LOAD_RETRY_POLICY.max_retries == 1
-    assert MOIS_LOAD_RETRY_POLICY.delay == 300
-    records = [
-        fixture._Record(
-            service_slug="bakeries", mng_no=f"fixture-{i:04d}", lon=126.9 + i / 10000, lat=37.5
-        )
-        for i in range(500)
-    ]
 
-    async def load(db, context=None):
-        async with httpx.AsyncClient(
-            base_url=f"http://127.0.0.1:{port}", timeout=geo_http_timeout(settings)
-        ) as http:
-            client = KorTravelGeoRestClient(http, api_key=SecretStr("synthetic-fixture-only"))
-            geo = kor_travel_geo_reverse_geocoder(client, region_fallback_radius_km=0.1)
-            return await fixture._run(
-                records, db, geocoder=geo, plan=plan, context=context, strict_address="drop"
+    def close_server():
+        try:
+            server.shutdown()
+        finally:
+            server.server_close()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+    try:
+        port = server.server_address[1]
+        rule = [
+            "OUTPUT",
+            "-o",
+            "lo",
+            "-p",
+            "tcp",
+            "--dport",
+            str(port),
+            "--syn",
+            "-j",
+            "DROP",
+        ]
+        settings = KorTravelMapSettings()
+        plan = resolve_mois_load_plan(settings, service_slugs=("bakeries",))
+        assert plan.run_budget_seconds == 14400
+        assert plan.geocode_concurrency == 2
+        assert geo_http_timeout(settings).connect == 4
+        assert MOIS_LOAD_CHUNK_SIZE == 500
+        assert MOIS_LOAD_RETRY_POLICY.max_retries == 1
+        assert MOIS_LOAD_RETRY_POLICY.delay == 300
+        records = [
+            fixture._Record(
+                service_slug="bakeries",
+                mng_no=f"fixture-{i:04d}",
+                lon=126.9 + i / 10000,
+                lat=37.5,
             )
+            for i in range(500)
+        ]
+
+        async def load(db, context=None):
+            async with httpx.AsyncClient(
+                base_url=f"http://127.0.0.1:{port}", timeout=geo_http_timeout(settings)
+            ) as http:
+                client = KorTravelGeoRestClient(http, api_key=SecretStr("synthetic-fixture-only"))
+                geo = kor_travel_geo_reverse_geocoder(client, region_fallback_radius_km=0.1)
+                return await fixture._run(
+                    records, db, geocoder=geo, plan=plan, context=context, strict_address="drop"
+                )
+    except BaseException:
+        close_server()
+        raise
 
     try:
         baseline_db = fixture._FakeDb()
@@ -205,10 +232,7 @@ def inner(parent_net, parent_user, smoke):
             if installed:
                 subprocess.run(["iptables", "-D", *rule], check=True)
         finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=5)
-            assert not thread.is_alive()
+            close_server()
 
 
 def main():
