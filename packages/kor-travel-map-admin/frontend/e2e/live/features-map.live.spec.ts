@@ -48,7 +48,52 @@ async function expectFeaturesPageReady(
   });
 }
 
+/** 기본 `notice`가 현재 뷰포트에서 비어 있을 수 있으므로 데이터가 있는 kind를 고른다. */
+async function selectPopulatedMapKind(
+  page: import("@playwright/test").Page,
+  kind: string,
+): Promise<void> {
+  const chip = page
+    .getByTestId("kind-filter")
+    .getByRole("button", { name: kind, exact: true });
+  await expect(chip).toBeVisible({ timeout: 15000 });
+  if ((await chip.getAttribute("aria-pressed")) !== "true") {
+    await chip.click();
+  }
+  await expect(chip).toHaveAttribute("aria-pressed", "true", {
+    timeout: 15000,
+  });
+}
+
 test.describe("/features live — page load + core controls", () => {
+  test("MapLibre worker와 shared 모듈이 runtime에서 제공됨", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+    await expectFeaturesPageReady(page);
+
+    for (const path of [
+      "/maplibre/maplibre-gl-worker.mjs",
+      "/maplibre/maplibre-gl-shared.mjs",
+    ]) {
+      const asset = await page.evaluate(async (assetPath) => {
+        const response = await fetch(assetPath, { cache: "no-store" });
+        const body = await response.arrayBuffer();
+        return {
+          status: response.status,
+          contentType: response.headers.get("content-type") ?? "",
+          byteLength: body.byteLength,
+        };
+      }, path);
+
+      expect(asset.status, `${path} HTTP status`).toBe(200);
+      expect(asset.contentType, `${path} content type`).toMatch(
+        /javascript|ecmascript/i,
+      );
+      expect(asset.byteLength, `${path} must not be empty`).toBeGreaterThan(0);
+    }
+  });
+
   test("페이지 로드 — heading + map-canvas-container + 상태 텍스트", async ({
     page,
   }) => {
@@ -489,7 +534,9 @@ test.describe("/features live — map render verification", () => {
     await page.goto(ROUTE);
     await expectFeaturesPageReady(page);
 
-    // 라이브 데이터(~1.09M)면 기본 뷰(전국 근처)에 클러스터/점 마커가 나타난다.
+    // 기본 kind는 notice라 현재 대전 중심 뷰포트에서 결과가 0건일 수 있다.
+    // 실제 데이터가 있는 place를 선택해 이 테스트는 마커 렌더링을 검증한다.
+    await selectPopulatedMapKind(page, "place");
     await expect(page.locator(MARKER_SELECTOR).first()).toBeVisible({
       timeout: 30000,
     });
@@ -499,6 +546,9 @@ test.describe("/features live — map render verification", () => {
   test("클러스터 클릭 → zoom 증가(z 텍스트 상승)", async ({ page }) => {
     await page.goto(ROUTE);
     await expectFeaturesPageReady(page);
+
+    // 기본 notice 결과 유무와 무관하게 실제 클러스터를 렌더하는 kind를 고른다.
+    await selectPopulatedMapKind(page, "place");
 
     // 클러스터가 나타날 때까지 대기(점만 보이는 고배율 초기 뷰면 클러스터가 없을 수 있어
     // 명시적으로 클러스터 마커를 기다린다).

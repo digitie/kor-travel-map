@@ -85,6 +85,7 @@ RUN groupadd --system nodejs \
     && useradd --system --gid nodejs --home-dir /app --shell /usr/sbin/nologin nextjs
 
 COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/public ./packages/kor-travel-map-admin/frontend/public
 COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/static ./packages/kor-travel-map-admin/frontend/.next/static
 
 USER nextjs

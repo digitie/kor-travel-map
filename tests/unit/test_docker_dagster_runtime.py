@@ -6531,6 +6531,11 @@ def test_frontend_docker_image_uses_next_standalone_server() -> None:
     assert 'output: "standalone"' in next_config
     assert "outputFileTracingRoot: workspaceRoot" in next_config
     assert ".next/standalone" in dockerfile
+    assert (
+        "COPY --from=builder --chown=nextjs:nodejs "
+        "/app/packages/kor-travel-map-admin/frontend/public "
+        "./packages/kor-travel-map-admin/frontend/public"
+    ) in dockerfile
     assert 'CMD ["node", "packages/kor-travel-map-admin/frontend/server.js"]' in dockerfile
     assert "next start" not in dockerfile
 
