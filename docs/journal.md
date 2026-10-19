@@ -1,3 +1,9 @@
+## 2026-10-19 — production MapLibre worker asset 누락 복구 (PR #1340)
+
+- **실측 원인.** 인증된 live UI가 `/maplibre/maplibre-gl-worker.mjs`를 404 HTML로 받았다. Map 화면 코드는 worker가 없으면 GeoJSON source가 로드되지 않아 고배율 marker를 표시하지 못한다. Docker runtime stage가 `.next/standalone`과 `.next/static`만 복사하고 `public`은 누락했다.
+- **수정.** frontend image에 builder의 `public`을 같은 standalone package 경로로 복사하고, live UI가 worker/shared 두 파일의 HTTP 200·JavaScript content type·비어 있지 않은 본문을 검사한다. marker 시나리오는 데이터가 있는 좌표-bearing `place`에서 실행하고, viewport 안정화는 외부 타일의 무한 `idle` 대기를 피하도록 bounded로 바꿨다.
+- **검증.** `docker build -f docker/frontend.Dockerfile` 성공, 결과 이미지에서 worker 19 KB와 shared 502 KB 확인, E2E `tsc` 성공. 운영 UI 반영과 live 브라우저 검증은 PR CI 후 진행한다. Dagster를 import하는 Python unit test는 로컬 개발 환경에 Dagster가 없어 수집 단계에서 실행하지 못했으며, PR CI가 해당 게이트를 담당한다.
+
 ## 2026-10-19 MOIS 장애 격리 수용
 
 PR1340: 실제 SYN DROP/native retry 기본값으로 FAILURE308.365초(<1440), 복구500행·재수집HTTP0 PASS. REST/prefetch/loader173검사와 namespace4검사 PASS. 운영 전체job/실DB 검증은 아니며 daemonOFF 유지. [범위와 한계](reports/2026-10-19-mois-network-drill.md).

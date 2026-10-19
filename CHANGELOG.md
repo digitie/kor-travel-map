@@ -10,6 +10,10 @@
 
 ## [Unreleased]
 
+### MapLibre 관리자 지도 (2026-10-19)
+
+- production frontend 이미지에 MapLibre worker/shared 정적 파일을 포함해 고배율 feature marker가 표시되지 않던 문제를 수정했다. live UI 검사에 두 파일 제공 여부와 marker 렌더링 확인을 추가했다.
+
 ### geo 릴리스 재지오코딩 (2026-10-16, ADR-109)
 
 - **DOCS**: ADR-109 **accepted** — 구현 기록(T-GR-01~08, #1326~#1334)과 열린 결정 결론. 운영 runbook

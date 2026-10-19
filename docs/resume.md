@@ -1,3 +1,9 @@
+## 2026-10-19 — MapLibre production asset 복구 (PR #1340)
+
+- 원인: production frontend 이미지가 Next standalone와 static만 담고 `public/maplibre` worker/shared 모듈을 빠뜨려, 확대 뷰의 feature marker가 그려지지 않았다.
+- 수정 `7d100e3db`: runtime에 `public`을 복사하고 live UI 검사에 worker/shared HTTP 응답 확인을 추가했다. Docker production build·이미지 내부 asset 확인·E2E TypeScript 검사는 통과했다. PR CI와 운영 배포 후 live UI 검증은 진행 중이다.
+- **다음 한 작업: PR CI green 확인 → Manager가 관리하는 Map 전환으로 candidate 반영 → 인증된 read-only live UI E2E → PR #1340 머지.**
+
 ## 2026-10-19 MOIS 장애 격리 수용
 
 PR1340: 실제 SYN DROP/native retry 기본값으로 FAILURE308.365초(<1440), 복구500행·재수집HTTP0 PASS. REST/prefetch/loader173검사와 namespace4검사 PASS. 운영 전체job/실DB 검증은 아니며 daemonOFF 유지. [범위와 한계](reports/2026-10-19-mois-network-drill.md).
