@@ -1,6 +1,6 @@
 # Common Dagster 적용과 장애 복구
 
-Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/a960bdb114d99a2ac1b9608a77b240635806e551/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
+Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/c40da798ec06112373c96a101c2d305c476425ad/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
 
 - GraphQL 조회는 plain 응답 4 MiB와 전체 10초 상한을 갖고 압축 응답을 읽기 전에 거부한다. 요청별 HTTP client를 종료 시 폐기하므로 실패·취소된 연결을 다른 요청에 재사용하지 않는다. client 정리는 별도의 50 ms 예산이다.
 - 최근 30개와 별도의 활성 실행 최대 1,000개를 조회한다. 두 조회 모두 `DagsterUrls.runs_filter()`가 Map code location 태그를 주입한다. 활성 상한 도달·잘못된 응답은 정상 0건으로 바꾸지 않고 오류 상태로 표시한다. 같은 run의 terminal 상태가 활성 샘플보다 우선한다.
@@ -16,7 +16,7 @@ Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인�
 
 ## 고정 의존성과 검증 경계
 
-Python API `[http]`와 Dagster `[dagster]`는 Common `a960bdb114d99a2ac1b9608a77b240635806e551`에 고정한다. UI dev.6와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
+Python API `[http]`와 Dagster `[dagster]`는 Common `c40da798ec06112373c96a101c2d305c476425ad`에 고정한다. UI dev.6와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
 
 ## code-server 자식의 경량 건강 점검
 
