@@ -2841,6 +2841,4 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
 - 설계안: ADR-112(proposed, 2026-10-20). 위 조건 하나하나가 어디서 충족되는지는 그 ADR의 "해제 조건 대응" 표에 있다.
   닫으려면 ADR-112를 소유자가 승인하고(열린 결정 O1~O5), 그대로 구현하고, 조건마다 검사 하나씩 두어 변이로 빨개지는 것을
   확인해야 한다. 설계 문서만으로는 닫지 않는다.
-- 하위 단계 1(O1 수락, 2026-10-20, ADR-112 결정 0-1): SUCCESS root 완결을 sensor tick 밖 `feature_operation_completion`
-  sweep job으로 옮긴다. 이 단계의 확인은 (i) sensor 두 곳이 SUCCESS에 reconcile을 부르지 않음, (ii) DB page가 "SUCCESS인데
-  active" root를 보면 뒷받침 요청, (iii) 실제 DB에서 sweep 전 root `running`·sweep 뒤 `done`이다. 이 단계만으로 항목을 닫지 않는다.
+- 1단계(ADR-112 결정 0-1): 완결을 sweep job으로. 이것만으로 닫지 않는다.
