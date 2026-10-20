@@ -46,8 +46,10 @@ _STATEMENT_MARGIN_SECONDS: Final[float] = 3.0
 _LOCK_MARGIN_SECONDS: Final[float] = 4.0
 """lock_timeout = min(상한, 남은 시간 − 4초). lock 대기가 statement보다 먼저 끝난다."""
 _LOCK_TIMEOUT_CAP_SECONDS: Final[float] = 5.0
-"""lock_timeout 상한(ADR-112 결정 2, 2026-10-21 소유자 결정). lock 하나를 5초 넘게 기다리지 않고 다음
-tick·sweep에 다시 한다 — odroid tenant(geo·weather·transport)와 같은 값이다."""
+"""lock_timeout 상한(ADR-112 결정 2, 2026-10-21 소유자 결정).
+
+lock 하나를 5초 넘게 기다리지 않고 다음 tick에 다시 한다 — odroid tenant(geo·weather·transport)와
+같은 값이다."""
 _MIN_STATEMENT_SECONDS: Final[float] = 1.0
 _MIN_LOCK_SECONDS: Final[float] = 0.5
 """바닥값. 0은 Postgres에서 '상한 없음'이라 절대 그 값이 되지 않게 한다."""

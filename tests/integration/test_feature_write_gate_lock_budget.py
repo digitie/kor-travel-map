@@ -442,8 +442,8 @@ async def test_gate_busy_marker_is_bound_to_the_real_procedure(
     ``gate_busy``다. ``feature-curation-write``를 쥐고 ``lock_timeout``으로 끝나면 같은 55P03이라도
     ``lock_wait``다. procedure 문구가 바뀌면 이 검사가 빨개진다.
     """
-    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
     from kortravelcommon.pg_errors import pg_error_info
+    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
 
     suffix = uuid4().hex
     async with isolated_engine.begin() as connection:

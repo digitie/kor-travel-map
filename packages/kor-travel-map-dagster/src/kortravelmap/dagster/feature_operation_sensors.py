@@ -241,7 +241,8 @@ _CURSOR_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"head", "db_watch"})
 
 
 def _clock_to_cursor(clock: StallClock) -> dict[str, Any]:
-    """cursor의 시계 모양 — ADR-112 결정 3의 ``{run_id, first_failed_at, last_failure, alerted_at}``.
+    """cursor의 시계 모양 — ADR-112 결정 3의
+    ``{run_id, first_failed_at, last_failure, alerted_at}``.
 
     kor-travel-common ``StallClock``(시각은 epoch 초, 실패 서명은 200자 이하 문자열)을 그대로 싣되
     대상 key를 ``run_id``라 부른다. cursor 키는 Map이 정한다.
@@ -776,7 +777,8 @@ async def _reconcile_dagster_page(
     R에 대한 내구성 있는 기록을 commit했다. 셋 다 아니면 R에서 멈추고 R이 머리가 된다.
 
     읽기와 반영은 page 마감보다 ``_ACTION_RESERVE_SECONDS`` 일찍 끝나는 항목 마감 안에서 한다.
-    남긴 몫으로 머리의 닫기·알림을 한다 — 실패한 호출이 lock_timeout까지 기다려도 알림이 굶지 않는다.
+    남긴 몫으로 머리의 닫기·알림을 한다 — 실패한 호출이 lock_timeout까지 기다려도 알림이
+    굶지 않는다.
     """
     deadline = tick.dagster_deadline
     item_deadline = deadline - _ACTION_RESERVE_SECONDS
@@ -815,7 +817,8 @@ async def _reconcile_dagster_page(
         or not records
         or records[0].dagster_run.run_id != current.key
     ):
-        # storage만 실패하던 시계이거나, 머리였던 run이 page 맨 앞에 없으면(지워졌다) 그 시계는 끝났다.
+        # storage만 실패하던 시계이거나, 머리였던 run이 page 맨 앞에 없으면(지워졌다)
+        # 그 시계는 끝났다.
         current = None
     for record in records:
         if not tick.has_time(item_deadline):
@@ -860,14 +863,17 @@ async def _reconcile_dagster_page(
             failure["category"],
             failure["error_type"],
         )
-        if failure["closable"] and _stalled(current, now):
-            # 닫기는 root가 없으면 기록 한 행(c)을, 있으면 그 root(b)를 남긴다. Dagster run이 아직
-            # 돌고 있어 닫지 않은 경우도 root는 있다(b) — 어느 쪽이든 지나간다(결정 4 표).
-            if await _abandon(tick, client, current, record=record, deadline=deadline):
-                current = None
-                result.watermark = DagsterRunWatermark(record.storage_id, run.run_id)
-                result.applied += 1
-                continue
+        # 닫기는 root가 없으면 기록 한 행(c)을, 있으면 그 root(b)를 남긴다. Dagster run이 아직
+        # 돌고 있어 닫지 않은 경우도 root는 있다(b) — 어느 쪽이든 지나간다(결정 4 표).
+        if (
+            failure["closable"]
+            and _stalled(current, now)
+            and await _abandon(tick, client, current, record=record, deadline=deadline)
+        ):
+            current = None
+            result.watermark = DagsterRunWatermark(record.storage_id, run.run_id)
+            result.applied += 1
+            continue
         current = await _alert_if_due(
             tick, client, current, scope="head", dagster_status=run.status.value, deadline=deadline
         )

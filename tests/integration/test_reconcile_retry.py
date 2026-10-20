@@ -23,12 +23,12 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
+from kortravelcommon.pg_errors import pg_error_info
 from kortravelmap.dagster.feature_operation_sensors import (
     FEATURE_OPERATION_TICK_BUDGET_SECONDS,
     _classify_failure,
     _Tick,
 )
-from kortravelcommon.pg_errors import pg_error_info
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession

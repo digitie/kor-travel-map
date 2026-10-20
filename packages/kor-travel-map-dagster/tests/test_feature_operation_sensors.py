@@ -2274,6 +2274,7 @@ def test_an_empty_cursor_is_byte_identical_to_the_previous_format() -> None:
 
 def test_a_full_cursor_round_trips_and_stays_small() -> None:
     from kortravelcommon.stall import StallClock
+
     from kortravelmap.dagster.feature_operation_sensors import _encode_failure, _failure
 
     long_id = "r" * 64

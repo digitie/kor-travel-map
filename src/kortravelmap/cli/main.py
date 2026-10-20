@@ -306,7 +306,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[*_ABANDON_DAGSTER_STATUSES, "missing"],
         help=(
             "Dagster UI에서 확인한 run 상태. run이 storage에 없을 때만 missing — 이 값은 확인하지 "
-            "않고 믿으므로, 아직 도는 run에 missing을 주면 그 root가 닫힌다. 도는 run이면 닫지 않는다."
+            "않고 믿으므로, 아직 도는 run에 missing을 주면 그 root가 닫힌다. "
+            "도는 run이면 닫지 않는다."
         ),
     )
     abandon_p.add_argument(
