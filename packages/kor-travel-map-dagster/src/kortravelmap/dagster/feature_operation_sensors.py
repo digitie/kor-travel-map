@@ -1000,7 +1000,7 @@ async def _alert_if_due(
     dagster_status: str | None,
     deadline: float,
 ) -> StallClock:
-    """멈춘 시계를 tick마다 요약 로그로, 한 시간에 한 번은 ``ops.system_logs`` 한 행으로 알린다.
+    """멈춘 시계를 tick마다 요약 로그로, 한 시간에 한 번은 ``ops.system_log`` 한 행으로 알린다.
 
     system log 쓰기가 실패해도 결정 1의 진행은 막지 않는다 — ``alerted_at``을 비워 둔 채 다음
     tick이 다시 시도한다.

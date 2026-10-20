@@ -17,7 +17,7 @@
   sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`·`lock_timeout`을 `set_config(..., true)`로 건다. 모든 분기에서
   cursor를 commit한다(DB page 목록 조회 실패 포함). cursor에 선택 키 `head`·`db_watch`가 생긴다 — 비어 있으면 앞 판과
   바이트가 같고 `version`은 1 그대로다. **되돌릴 때는 선택 키를 뺀 cursor를 `dagster sensor cursor --set`으로 먼저 쓴다.**
-- **ADDED (운영 로그)**: 처음 본 실패에서 15분이 지나면 `ops.system_logs`에 `feature_operation.reconcile_stalled`를 시계마다
+- **ADDED (운영 로그)**: 처음 본 실패에서 15분이 지나면 `ops.system_log`에 `feature_operation.reconcile_stalled`를 시계마다
   한 시간에 한 행 남긴다. 정한 실패(CLOSABLE — SQLSTATE 22xxx·23502·지정 23514 다섯·identity conflict·머리의 관측 오류·
   지워진 run)만 `feature_operation.reconcile_abandoned`로 닫는다. gate 바쁨(55P03 + 표지 문구)과 lock 대기는 따로 분류한다.
 - **ADDED (Python API)**: `AsyncKorTravelMapClient.abandon_dagster_feature_run`·`record_feature_operation_reconcile_stalled`·

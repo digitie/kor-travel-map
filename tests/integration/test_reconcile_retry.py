@@ -116,7 +116,7 @@ async def _abandoned_logs(engine: AsyncEngine, run_id: str) -> list[Any]:
             (
                 await probe.execute(
                     text(
-                        "SELECT level, source, event, message, detail FROM ops.system_logs "
+                        "SELECT level, source, event, message, detail FROM ops.system_log "
                         "WHERE event = 'feature_operation.reconcile_abandoned' "
                         "AND detail ->> 'dagster_run_id' = :run_id"
                     ),

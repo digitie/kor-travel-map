@@ -161,7 +161,7 @@ Dagster watermark는 run R이 다음 셋 중 하나일 때만 R을 지나간다.
   읽은 결과이므로 같이 친다. 뒤따른 호출이 실패해도 지나간다. active root는 DB page가 맡고, 취소 marker가
   붙은 root는 취소 coordinator가 맡는다. (0-1 뒤로 SUCCESS run의 Dagster page 반영은 ensure 하나뿐이다. 완결은
   completion sweep이 하고, 그동안 root는 active라 DB page와 sweep이 다시 집는다.)
-- (c) 결정 4의 닫기가 R에 대한 내구성 있는 기록, 곧 `ops.system_logs`의 `feature_operation.reconcile_abandoned` 한 행을
+- (c) 결정 4의 닫기가 R에 대한 내구성 있는 기록, 곧 `ops.system_log`의 `feature_operation.reconcile_abandoned` 한 행을
   commit했다.
 
 셋 다 아니면 Dagster page는 **R에서 멈춘다.** watermark는 R 바로 앞 run에 남고, R이 머리(head)가 된다. run을 미뤄 두는
@@ -228,7 +228,7 @@ DB page에서는 항목 하나가 실패하면 그 항목만 건너뛴다. 다�
 
 - **STALL_AFTER = 15분.** 실패 종류와 상관없이 같은 값이다. gate 바쁨, lock 대기 55P03, 53xxx, timeout이 모두 들어간다
   (B·H2). 그래서 55P03 같은 일시 실패도 15분 넘게 이어지면 알린다.
-- **알림.** 시계가 15분을 넘었고, 그 시계의 `alerted_at`이 비었거나 한 시간 넘게 지났으면 `ops.system_logs`에 한 행을 남기고
+- **알림.** 시계가 15분을 넘었고, 그 시계의 `alerted_at`이 비었거나 한 시간 넘게 지났으면 `ops.system_log`에 한 행을 남기고
   `alerted_at`을 갱신한다.
   - 행 내용은 `level=error`, `source=feature_operation`, `event=feature_operation.reconcile_stalled`다. detail에는 시계,
     `last_failure`, 조치 문구를 담는다.

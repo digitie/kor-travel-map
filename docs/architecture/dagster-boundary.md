@@ -480,7 +480,7 @@ reconcile sensor의 재시도·멈춤 알림·닫기는 ADR-112 결정 1~7이다
 sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`(남은 시간 − 3초)·`lock_timeout`(min(30초, 남은 시간 − 4초))을
 `set_config(..., true)`로 건다(SERIALIZABLE이면 isolation 문 다음). run storage 동기 읽기는 slot 하나짜리
 `call_with_deadline`에서 돈다. 멈춤 시계는 cursor 선택 키 `head`·`db_watch`(비면 cursor 바이트가 앞 판과 같다)이고,
-처음 본 실패에서 15분이 지나면 `ops.system_logs`에 `feature_operation.reconcile_stalled`를 시계마다 한 시간에 한 행
+처음 본 실패에서 15분이 지나면 `ops.system_log`에 `feature_operation.reconcile_stalled`를 시계마다 한 시간에 한 행
 남긴다. 정한 실패(CLOSABLE)만 `abandon_dagster_feature_run`으로 닫고, 나머지는 재시도·알림만 한다. 운영자 수동 닫기는
 `ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing>`이다.
 
