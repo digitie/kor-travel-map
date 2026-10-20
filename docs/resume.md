@@ -1,3 +1,7 @@
+## 2026-10-20 — weather 잔재 정리 2건: 브랜치 `chore/wx-notice-close-vnext-freeze` (PR #1343)
+
+- T-WX-NOTICE-CLOSE(`close_notice_features` 삭제)·T-WX-VNEXT-FREEZE(동결 계약은 rev 300 기록) 완료. 다음 한 작업은 아래 ADR-112 항목 그대로다.
+
 ## 2026-10-20 — T-RECONCILE-RETRY 설계안 ADR-112: 브랜치 `docs/t-reconcile-retry`
 
 - reconcile sensor의 재시도·멈춤 알림·root 닫기 설계를 ADR-112(proposed)로 냈다. doc-only이고 코드 변경은 없다.

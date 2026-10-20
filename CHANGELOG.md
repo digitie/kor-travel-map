@@ -10,6 +10,12 @@
 
 ## [Unreleased]
 
+### weather 잔재 정리 (2026-10-20, ADR-105 후속)
+
+- **REMOVED (Python API)**: `AsyncKorTravelMapClient.close_notice_features`와 `infra.feature_repo.close_notice_features`.
+  유일한 호출자였던 KMA 특보 적재가 ADR-105로 사라져 production 호출자가 없었다(T-WX-NOTICE-CLOSE).
+- **DOCS**: vNext 동결 계약(`contracts/vnext/target-*-v1.*`)은 rev 300 당시 기록으로 남긴다(T-WX-VNEXT-FREEZE).
+
 ### MapLibre 관리자 지도 (2026-10-19)
 
 - production frontend 이미지에 MapLibre worker/shared 정적 파일을 포함해 고배율 feature marker가 표시되지 않던 문제를 수정했다. live UI 검사에 두 파일 제공 여부와 marker 렌더링 확인을 추가했다.

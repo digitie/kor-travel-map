@@ -20,6 +20,10 @@
 5. ``tvn33-reference-ownership-v1.sql``이 선언한 제약·트리거·함수가
    ``alembic upgrade head``의 DB에도 같은 정의로 있다
    (``test_frozen_contract_matches_alembic_head``).
+
+범위: 동결 계약은 rev 300 당시 기록이다(ADR-105 후속, T-WX-VNEXT-FREEZE). 402가 DROP한
+weather 표·함수를 여전히 선언하며, 1~4는 그것을 잡지 않는다. head와의 대조는 5의
+reference-ownership 범위뿐이다.
 """
 
 from __future__ import annotations

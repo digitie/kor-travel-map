@@ -1,5 +1,12 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-20 — weather 잔재 정리 2건
+
+- [x] T-WX-NOTICE-CLOSE — **`close_notice_features` 삭제.** client 메서드·repo 함수·전용 통합 테스트 1건을
+  지웠다(production 호출자 0, ADR-105). [acceptance §T-WX-NOTICE-CLOSE](tasks-acceptance.md#t-wx-notice-close).
+- [x] T-WX-VNEXT-FREEZE — **기록 유지로 닫음.** vNext 동결 계약은 rev 300 당시 기록, ADR-105 후속과
+  `test_vnext_target_freeze.py` docstring에 범위를 적었다. [acceptance §T-WX-VNEXT-FREEZE](tasks-acceptance.md#t-wx-vnext-freeze).
+
 ## 2026-10-20 — 통합 planner flake 고정 이관(T-TEST-PLANNER-INDEX)
 
 - [x] T-TEST-PLANNER-INDEX — **public partial index EXPLAIN 테스트의 플래너 흔들림 고정.**

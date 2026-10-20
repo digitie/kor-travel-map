@@ -95,12 +95,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   vs region-total 의미 택일이 선행한다 — 후자는 ADR 개정과 PinVi 소비자 계약
   변경을 함께 부른다.
 
-- [ ] T-WX-VNEXT-FREEZE — **vNext target freeze 계약이 지워진 weather 표를 여전히 선언한다**
-
-  `contracts/vnext/target-schema-v1.sql`·invariants·violation fixtures가 402가 DROP한 weather
-  표·함수를 들고 있고, `test_vnext_target_freeze.py`는 계약↔계약 대조라 이를 못 잡는다.
-  재동결할지, 기록으로 둘지 정한다.
-
 - [ ] T-WX-SOURCEROLE — **`SourceRole.WEATHER_CONTEXT` 퇴역 migration(선택)**
 
   ADR-105 뒤 생산자가 없다. enum 값과 `source_links` CHECK를 함께 좁히는 migration이
@@ -110,11 +104,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   ADR-105가 정의 유지로 남겼고 API 재도입 방지 검사가 그 정의에 기댄다. 지우려면 그
   검사를 kind/provider 정체성만으로 다시 써야 한다.
-
-- [ ] T-WX-NOTICE-CLOSE — **production 호출자 없는 `close_notice_features` 정리**
-
-  유일한 호출자였던 KMA 특보 적재가 ADR-105로 사라졌다. client 메서드·repo 함수·통합 테스트를
-  지울지, 다른 event feed용으로 남길지 정한다.
 
 - [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
 
