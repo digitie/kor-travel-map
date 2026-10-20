@@ -1,3 +1,16 @@
+## 2026-10-20 — T-RECONCILE-RETRY 하위 단계 1: 완결을 sensor 밖으로(ADR-112 결정 0-1): 브랜치 `feat/finalize-out-of-sensor`
+
+- 소유자가 O1 권고를 수락했다(세대 0 root도 tick 6~8초, tick p99 12초). 그래서 결정 1~7보다 먼저 SUCCESS root 완결을
+  sensor tick 밖으로 뺐다. O2~O5는 열려 있다.
+- 자리는 별도 job `feature_operation_completion`의 sweep run이다. sensor는 SUCCESS에 ensure만 하고, 완결은 sweep이 기존
+  reconcile 함수로 한다. repo·SQL·migration·API는 그대로다. "SUCCESS인데 root가 active"가 곧 완결 대기이므로 새 상태가 없다.
+- 설계 적대 리뷰 1회에서 초안(root마다 run 하나, 대상 tag, 동시 상한 2, 5분 재시도)이 무너졌다. DB page만 요청하면
+  Dagster page 실패가 모든 완결을 세운다(H1). 동시 상한 2는 lineage lock 대기 실패만 만든다(M1). SERIALIZABLE 경쟁은
+  `blocked`가 아니라 40001이다(H2). 그래서 sweep 하나 + pool 직렬화 + success sensor 1차 요청 + DB page 15분 뒷받침으로
+  줄였다. 결과가 초안보다 단순하다.
+- 남는 것: 완결은 여전히 lineage lock을 쥔 채 돈다(큰 완결 동안 run 안 member 완료가 `lock_timeout`에 걸릴 수 있다).
+  고칠 수 없는 root의 알림·닫기는 결정 3·4 몫이다.
+
 ## 2026-10-20 — weather 잔재 정리 2건(T-WX-NOTICE-CLOSE·T-WX-VNEXT-FREEZE): 브랜치 `chore/wx-notice-close-vnext-freeze`
 
 - 소유자 지시("4 진행"). `close_notice_features`(client·repo)와 그 함수만 쓰던 통합 테스트 1건을 지웠다. 공유 헬퍼

@@ -10,6 +10,13 @@
 
 ## [Unreleased]
 
+### root 완결을 sensor 밖으로 (2026-10-20, ADR-112 결정 0-1)
+
+- **CHANGED (Dagster)**: Dagster SUCCESS run의 root 완결(`feature.finalize_provider_curation_root`)을 sensor tick에서
+  하지 않는다. 새 job `feature_operation_completion`(pool `kor_travel_map.feature_operation_completion`)의 sweep run이
+  한다. success 상태 sensor가 1차로 요청하고, reconcile sensor가 15분 간격으로 뒷받침한다. 완결 전까지 root는 `running`이다.
+  migration·API·OpenAPI 변화 없음(T-RECONCILE-RETRY 하위 단계 1).
+
 ### weather 잔재 정리 (2026-10-20, ADR-105 후속)
 
 - **REMOVED (Python API)**: `AsyncKorTravelMapClient.close_notice_features`와 `infra.feature_repo.close_notice_features`.

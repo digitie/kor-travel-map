@@ -464,6 +464,14 @@ pair 성공을 기록한다. MCST raw runner는 wrapper-owned pair completion ca
 active-root keyset scan은 매 sweep 끝에서 처음으로 wrap한다. main library는 Dagster enum을 import하지
 않고 자체 문자열 Literal과 짧은-transaction client method만 노출한다.
 
+Dagster SUCCESS run의 root 완결(`reconcile_dagster_feature_run` 안의 `feature.finalize_provider_curation_root`
+CALL)은 sensor tick에서 하지 않는다(ADR-112 결정 0-1). sensor는 SUCCESS run에 ensure만 하고, 완결은
+`feature_operation_completion` job의 run이 한다. 그 run 하나는 active root 목록을 한 번 훑어 Dagster SUCCESS인 root를
+차례로 완결하는 sweep이다. pool `kor_travel_map.feature_operation_completion`으로 인스턴스 전역에서 하나씩 돈다.
+1차 요청은 success 상태 sensor가 SUCCESS run마다 내고(아직 시작하지 않은 sweep이 있으면 생략), reconcile sensor의 DB
+page는 "SUCCESS인데 active"인 root를 보면 15분 간격으로 뒷받침 요청을 낸다. 완결 전까지 root는 `running`이고 `done`은
+완결과 같은 트랜잭션에서만 생긴다. FAILURE·CANCELED reconcile은 완결이 없어 sensor 안에 그대로 있다.
+
 root raw Dagster status와 engine create/start/finish timestamp는 DB lifecycle과 별도로 보존한다.
 root progress는 완료 pair 비율이고 pair별 결과는 `provider_datasets[]`가 정본이다. C3d marker가
 먼저면 sensor는 base를 덮지 않고 cancellation coordinator가 same-marker CAS로 raw terminal과
