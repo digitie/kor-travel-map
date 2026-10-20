@@ -402,3 +402,107 @@ async def test_root_finalize_over_a_dataset_larger_than_the_lock_table(
         )
     # 중첩 materialize가 같은 규모를 실제로 훑었다(규칙이 아무것도 안 봤다면 위 잠금 수도 공허하다).
     assert observed == feature_count
+
+
+async def _finalize_failure(
+    dagster: AsyncEngine, root_job_id: str, *, lock_timeout: str | None
+) -> Any:
+    """실제 procedure를 SERIALIZABLE로 불러 난 오류를 돌려준다."""
+    from sqlalchemy.exc import DBAPIError
+
+    try:
+        async with dagster.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            if lock_timeout is not None:
+                await connection.execute(
+                    text("SELECT set_config('lock_timeout', :value, true)"),
+                    {"value": lock_timeout},
+                )
+            await connection.execute(
+                text(
+                    """
+                    CALL feature.finalize_provider_curation_root(
+                      CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {"root_job_id": root_job_id},
+            )
+    except DBAPIError as exc:
+        return exc
+    raise AssertionError("finalize did not fail while the lock was held")
+
+
+async def test_gate_busy_marker_is_bound_to_the_real_procedure(
+    isolated_engine: AsyncEngine,
+) -> None:
+    """ADR-112 결정 5 — gate 경합은 표지로, 다른 55P03은 lock 대기로 가른다(효과에 결박).
+
+    다른 연결이 ``feature-write-all`` gate를 배타로 쥔 채 실제 완결 procedure를 부르면 분류가
+    ``gate_busy``다. ``feature-curation-write``를 쥐고 ``lock_timeout``으로 끝나면 같은 55P03이라도
+    ``lock_wait``다. procedure 문구가 바뀌면 이 검사가 빨개진다.
+    """
+    from kortravelcommon.pg_errors import pg_error_info
+    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
+
+    suffix = uuid4().hex
+    async with isolated_engine.begin() as connection:
+        dataset_id = await _seed_dataset(connection, suffix=suffix, feature_count=3)
+        root_job_id, source_job_id = await _seed_root(
+            connection,
+            dataset_id=dataset_id,
+            run_id=f"adr112-gate-{suffix}",
+            root_status="done",
+            rows=3,
+        )
+    async with isolated_engine.begin() as connection:
+        await connection.execute(text("SET LOCAL ROLE ktm_curation_command_owner"))
+        await connection.execute(
+            text(
+                """
+                INSERT INTO ops.curation_provider_snapshot_receipts (
+                  source_job_id, root_job_id, provider_dataset_id, sync_scope, operation_key,
+                  observed_at, source_entity_count, input_member_count,
+                  last_source_modified_at, source_input_set_hash
+                )
+                SELECT CAST(:job_id AS uuid), CAST(:root_job_id AS uuid),
+                       :dataset_id, 'dataset_wide', 'load', job.finished_at,
+                       input.source_entity_count, input.input_member_count,
+                       input.last_source_modified_at, input.source_input_set_hash
+                FROM ops.import_jobs AS job
+                CROSS JOIN LATERAL feature.current_provider_curation_input_set(:dataset_id) AS input
+                WHERE job.job_id = CAST(:job_id AS uuid)
+                """
+            ),
+            {"dataset_id": dataset_id, "job_id": source_job_id, "root_job_id": root_job_id},
+        )
+
+    dagster = _runtime_engine(isolated_engine)
+    try:
+        for lock_name, lock_timeout, expected in (
+            ("feature-write-all", None, "gate_busy"),
+            ("feature-curation-write", "1s", "lock_wait"),
+        ):
+            async with isolated_engine.connect() as holder:
+                await holder.execute(
+                    text("SELECT pg_advisory_lock(hashtextextended(:name, 0))"),
+                    {"name": lock_name},
+                )
+                try:
+                    error = await _finalize_failure(
+                        dagster, root_job_id, lock_timeout=lock_timeout
+                    )
+                finally:
+                    await holder.execute(
+                        text("SELECT pg_advisory_unlock(hashtextextended(:name, 0))"),
+                        {"name": lock_name},
+                    )
+                    await holder.commit()
+            info = pg_error_info(error)
+            assert info is not None
+            assert info.sqlstate == "55P03", lock_name
+            failure = _classify_failure(error, at_head=False)
+            assert failure["category"] == expected, (lock_name, pg_error_info(error))
+            assert failure["closable"] is False
+    finally:
+        await dagster.dispose()

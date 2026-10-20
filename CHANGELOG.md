@@ -10,6 +10,26 @@
 
 ## [Unreleased]
 
+### reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기 (2026-10-21, ADR-112 결정 1~7)
+
+- **CHANGED (Dagster)**: `feature_operation_reconciliation_sensor`의 Dagster page는 root가 생긴 run(또는 abandon 기록을
+  남긴 run)만 지나간다. 아니면 그 run에서 멈추고 머리(head) 시계를 돌린다. tick 본문은 고정 40초(page별 20/40초)이고,
+  sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`(남은 − 3초)·`lock_timeout`(min(5초, 남은 − 4초))을
+  `set_config(..., true)`로 건다. 모든 분기에서
+  cursor를 commit한다(DB page 목록 조회 실패 포함). cursor에 선택 키 `head`·`db_watch`가 생긴다 — 비어 있으면 앞 판과
+  바이트가 같고 `version`은 1 그대로다. **되돌릴 때는 선택 키를 뺀 cursor를 `dagster sensor cursor --set`으로 먼저 쓴다.**
+- **ADDED (운영 로그)**: 처음 본 실패에서 15분이 지나면 `ops.system_log`에 `feature_operation.reconcile_stalled`를 시계마다
+  한 시간에 한 행 남긴다. 정한 실패(CLOSABLE — SQLSTATE 22xxx·23502·지정 23514 다섯·identity conflict·머리의 관측 오류·
+  지워진 run)만 `feature_operation.reconcile_abandoned`로 닫는다. gate 바쁨(55P03 + 표지 문구)과 lock 대기는 따로 분류한다.
+- **ADDED (Python API)**: `AsyncKorTravelMapClient.abandon_dagster_feature_run`·`record_feature_operation_reconcile_stalled`·
+  `is_reconcilable_dagster_feature_run`, `kortravelmap.infra.transaction_limits`. `DagsterFeatureOperation.dagster_run_status`는
+  `None`일 수 있다(지워진 run을 abandon으로 닫은 root).
+- **ADDED (CLI)**: `ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing>` 운영자 수동 닫기.
+- **CHANGED (Dagster)**: completion sweep 트랜잭션에 `client_connection_check_interval=10s`.
+- **CHANGED (deps)**: kor-travel-common 핀 `a960bdb1` → `e746e4b8`(#42·#43 — `call_with_deadline` slots, `pg_error_info`,
+  `StallClock`). sensor는 이 셋을 common에서 쓴다.
+- migration·API·OpenAPI 변화 없음.
+
 ### root 완결을 sensor 밖으로 (2026-10-20, ADR-112 결정 0-1)
 
 - **CHANGED (Dagster)**: Dagster SUCCESS run의 root 완결(`feature.finalize_provider_curation_root`)을 sensor tick에서

@@ -1,9 +1,9 @@
 # ADR-112 — reconcile sensor는 root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다
 
-- 상태: proposed (설계만. 구현은 소유자가 승인한 뒤 같은 항목 `T-RECONCILE-RETRY`에서 한다. 아래 "열린 결정"이 승인 대상이다).
-  O1만 2026-10-20 소유자가 수락했다 — 완결을 sensor 밖으로 먼저 옮긴다(결정 0-1, 같은 항목의 첫 하위 단계). O2~O5는 열려 있다
-- 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다)
-- 결정자: Claude (소유자 승인 대기)
+- 상태: accepted (2026-10-21). O1은 2026-10-20, O2~O5는 2026-10-21 소유자가 권고대로 수락했다. 결정 0-1은 #1345로,
+  결정 1~7은 같은 항목 `T-RECONCILE-RETRY`의 둘째 하위 단계로 구현했다(맨 아래 "구현 결과").
+- 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다), 2026-10-21 수락·구현
+- 결정자: Claude (소유자 수락 2026-10-20·21)
 - 관계: ADR-111 결정 4(이 설계를 후속으로 넘겼다), ADR-107(공용 Dagster 런타임), ADR-021(forward-only)
 - 설계 입력: PR #1319의 세 판과 그 리뷰(ADR-111 결정 4의 목록, journal 2026-10-13 ADR-111 항목). 마지막 판 코드는 커밋
   `6d0ebfc98`에 있고 `294f744f8`이 되돌렸다. 최종 리뷰의 L1~L4는 저장소 어디에도 내용이 적혀 있지 않아 대응 표에 넣지 못했다.
@@ -34,6 +34,10 @@ main의 동작은 이렇다. run 하나의 반영이 예외를 내면 tick 전�
 
 ### 0. 구현 전제 — 큰 완결이 sensor tick 안에 들어가야 한다
 
+> 2026-10-21 갱신: 이 전제는 결정 0-1(#1345)로 풀렸다. sensor tick 안에서는 더 이상 완결 CALL이 일어나지 않는다. 그래서
+> 결정 2의 서버 쪽 상한은 sensor의 ensure·FAILURE/CANCELED reconcile·abandon·알림처럼 짧은 트랜잭션에만 걸리고, 완결은
+> completion sweep run이 statement_timeout(600초) 아래에서 한다. 아래 본문은 결정 당시의 기록이다.
+
 결정 2는 sensor 안에서 도는 완결 한 번에 서버 쪽 상한을 건다. 머리에서는 약 15초, DB page에서는 약 30초다.
 
 main은 다르다. sensor 평가가 timeout으로 끝나도 서버의 완결은 최대 600초까지 돌아 commit될 수 있다. 이 설계에서는 상한에
@@ -49,6 +53,8 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
 실측(O1)이 조건에 해당해 소유자가 "완결을 sensor 밖으로 먼저"를 수락했다. 이 절은 그 하위 단계만 정한다. 결정 1~7은
 여기서 구현하지 않는다(O2~O5 열림). 아래는 설계 적대 리뷰 1회를 반영한 판이다(절 끝 "0-1 리뷰 반영").
 
+- **근거 하나 더.** kor-travel-common `address_dagster.py`(31행)의 원칙 "sensor 안에서 provider 호출·무거운 트랜잭션을
+  하지 않는다"와 같은 방향이다.
 - **어디서.** 별도 job `feature_operation_completion`(op 하나, config 없음). run 하나는 **sweep 한 번**이다. reconcile
   sensor의 DB page와 같은 목록(`list_reconcilable_dagster_feature_runs` — active, 취소 marker·quarantine 없음)을 끝까지
   한 번 훑고, Dagster run이 SUCCESS인 root마다 지금 sensor가 하던 terminal 반영(ensure → `reconcile_dagster_feature_run`, 그
@@ -151,9 +157,11 @@ Dagster watermark는 run R이 다음 셋 중 하나일 때만 R을 지나간다.
 
 - (a) R에 operation key가 없다(panel-only). main과 같다.
 - (b) **이번 tick이 끝났을 때 R의 root가 있다.** ensure·reconcile·닫기 중 어느 호출이든 R에 대해 mutation(`applied`·
-  `noop`·`blocked/*`)을 돌려줬다는 뜻이다. 뒤따른 호출이 실패해도 지나간다. active root는 DB page가 맡고, 취소 marker가
-  붙은 root는 취소 coordinator가 맡는다.
-- (c) 결정 4의 닫기가 R에 대한 내구성 있는 기록, 곧 `ops.system_logs`의 `feature_operation.reconcile_abandoned` 한 행을
+  `noop`·`blocked/*`)을 돌려줬다는 뜻이다. root를 가리키는 identity conflict(`root_job_id`가 있다)도 그 root를 잠근 채
+  읽은 결과이므로 같이 친다. 뒤따른 호출이 실패해도 지나간다. active root는 DB page가 맡고, 취소 marker가
+  붙은 root는 취소 coordinator가 맡는다. (0-1 뒤로 SUCCESS run의 Dagster page 반영은 ensure 하나뿐이다. 완결은
+  completion sweep이 하고, 그동안 root는 active라 DB page와 sweep이 다시 집는다.)
+- (c) 결정 4의 닫기가 R에 대한 내구성 있는 기록, 곧 `ops.system_log`의 `feature_operation.reconcile_abandoned` 한 행을
   commit했다.
 
 셋 다 아니면 Dagster page는 **R에서 멈춘다.** watermark는 R 바로 앞 run에 남고, R이 머리(head)가 된다. run을 미뤄 두는
@@ -173,10 +181,13 @@ DB page에서는 항목 하나가 실패하면 그 항목만 건너뛴다. 다�
 
 - **예산.** sensor 본문이 시작한 때부터 **고정 40초**다. Dagster의 평가 timeout은 60초이고, 남는 20초는 code server
   thread 대기와 resource 초기화 몫이다. 이 값을 환경 변수에서 끌어내지 않는다. 그 변수는 daemon 쪽에 있다.
+  공용 plane에서는 모든 tenant의 sensor가 thread `num_workers: 4`를 나눠 쓴다(Manager
+  `config/dagster-shared/dagster.yaml` 154·157행). 긴 tick 하나가 다른 tenant의 sensor를 막으므로 상한이 짧아야 한다.
 - **page별 마감.** Dagster page는 시작 + 20초, DB page는 시작 + 40초에 마감한다. 호출 하나의 상한은 **그 page의 마감**까지
   남은 시간이다. 남은 시간이 5초보다 적으면 새 호출을 시작하지 않는다.
 - **서버 쪽 timeout.** sensor가 여는 DB 트랜잭션마다 `set_config('statement_timeout', 남은 − 3초, true)`와
-  `set_config('lock_timeout', min(30초, 남은 − 4초), true)`를 건다. SERIALIZABLE 트랜잭션에서는 **`SET TRANSACTION
+  `set_config('lock_timeout', min(5초, 남은 − 4초), true)`를 건다(5초 상한은 2026-10-21 소유자 결정. 초안은 30초였다 —
+  odroid tenant와 같은 5초로 낮춰, lock 하나를 오래 기다리지 않고 다음 tick에 다시 한다). SERIALIZABLE 트랜잭션에서는 **`SET TRANSACTION
   ISOLATION LEVEL` 바로 다음**에 건다. 그보다 먼저 쿼리를 보내면 25001이 난다. client가 같은 호출 안에서 따로 여는
   트랜잭션(invariant conflict 기록 등)에도 같은 값을 넘긴다. 시간이 넘으면 **Postgres가 statement를 취소**한다. client 쪽
   `asyncio.timeout`(남은 시간 + 3초)은 그 뒤를 받치는 보조 장치일 뿐이다.
@@ -218,7 +229,7 @@ DB page에서는 항목 하나가 실패하면 그 항목만 건너뛴다. 다�
 
 - **STALL_AFTER = 15분.** 실패 종류와 상관없이 같은 값이다. gate 바쁨, lock 대기 55P03, 53xxx, timeout이 모두 들어간다
   (B·H2). 그래서 55P03 같은 일시 실패도 15분 넘게 이어지면 알린다.
-- **알림.** 시계가 15분을 넘었고, 그 시계의 `alerted_at`이 비었거나 한 시간 넘게 지났으면 `ops.system_logs`에 한 행을 남기고
+- **알림.** 시계가 15분을 넘었고, 그 시계의 `alerted_at`이 비었거나 한 시간 넘게 지났으면 `ops.system_log`에 한 행을 남기고
   `alerted_at`을 갱신한다.
   - 행 내용은 `level=error`, `source=feature_operation`, `event=feature_operation.reconcile_stalled`다. detail에는 시계,
     `last_failure`, 조치 문구를 담는다.
@@ -263,7 +274,7 @@ SQLSTATE가 없는 예외, timeout, storage 읽기 실패가 여기에 든다. c
 | root 없음 | `reconcile_abandoned` system log 한 행. 이것이 내구성 있는 기록이다 | 지나간다(1c). 닫을 수 있는 머리는 root가 없어도 영구히 잡히지 않는다(H1) |
 | root에 취소 marker | 아무것도 하지 않는다(취소 coordinator 몫) | 지나간다(1b) / `db_watch`를 지운다 |
 | root가 이미 terminal | 아무것도 하지 않는다 | 지나간다 / `db_watch`를 지운다 |
-| root active, Dagster terminal 또는 run 없음 | 기존 `_TERMINAL_OPERATION_COMMAND_SQL`로 root와 끝나지 않은 member를 `failed`로 둔다. `dagster_run_status`에는 Dagster의 실제 값을 넣고, run이 없으면 손대지 않는다. error_message와 `reconcile_abandoned` 로그를 남긴다(provider_dataset_ids, 조치 "dataset을 다시 실행") | `db_watch`를 지운다 |
+| root active, Dagster terminal 또는 run 없음 | 기존 `_TERMINAL_OPERATION_COMMAND_SQL`로 root와 끝나지 않은 member를 `failed`로 둔다. `dagster_run_status`에는 Dagster의 실제 값을 넣고, run이 없으면 NULL을 넣는다(procedure가 이 열을 늘 쓰므로 "손대지 않기"는 migration 없이 할 수 없다. NULL은 CHECK가 허용하고, repo의 operation 읽기도 받는다). Dagster 종료 시각이 root·member 시작보다 앞서면(시각이 어긋난 run) 그 시각은 버린다. error_message와 `reconcile_abandoned` 로그를 남긴다(provider_dataset_ids, 조치 "dataset을 다시 실행") | `db_watch`를 지운다 |
 | root active, Dagster active | 아무것도 하지 않는다. 돌고 있는 run의 root는 닫지 않는다 | 지나간다(1b). run이 끝난 뒤 다시 판단한다 |
 
 이 함수는 #1319 마지막 판의 `abandon_dagster_feature_run`(`6d0ebfc98`)을 되살린 것이다. 그 판에서 conflict로 끝났던
@@ -272,7 +283,8 @@ SQLSTATE가 없는 예외, timeout, storage 읽기 실패가 여기에 든다. c
 **CLOSABLE이 아닌 실패가 머리에서 계속될 때**(42xxx, P0001, 53xxx, storage 실패 등): 이 설계는 머리를 잡아 두고 한 시간마다
 알린다. 진척보다 잃지 않는 쪽을 앞에 두는 선택이다. 그동안에도 그 뒤 run들의 status sensor와 run 안의 guard는 그대로
 돈다. 막히는 것은 놓친 이벤트를 메우는 일뿐이다. 운영자는 원인을 고치거나, 같은 abandon 함수를 `failure="operator"`로
-부르는 수동 명령을 쓴다. acceptance의 괄호 문구 "닫을 수 없는 머리를 영구히 잡지 않는다"를 이렇게 읽어도 되는지는 → O5.
+부르는 수동 명령(`ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing>`)을 쓴다. acceptance의 괄호 문구는
+O5(i) 수락에 따라 "알리고 수동으로 넘길 경로가 있다"로 고쳤다.
 
 ### 5. gate 경합은 표지로 가른다(migration 없음)
 
@@ -296,6 +308,8 @@ SQLSTATE `55P03`으로 끝난다. 406 SQL과 head-schema의 문구가 같다. se
   완결은 ensure가 끝난 뒤에 오고, 그때는 root가 있으니 이미 지나간다.
 - DB page의 실패 root는 sweep마다 다시 해 본다. 비용은 결정 2의 서버 쪽 상한이 묶고, 큰 완결은 결정 0이 미리 sensor 밖으로 뺀다.
 
+geo #590의 lock 재시도(물러섬 없이 경과 시간으로만 상한을 둔다)와 같은 모양이다.
+
 그래서 `retry_after` 필드가 없다. acceptance의 "retry_after는 실패 시각 기준"에는 해당하는 필드가 없는 셈이다. 그 취지는
 시계가 지킨다. `first_failed_at`은 실패한 호출이 돌아온 시각이지 tick이 시작한 시각이 아니다(M3) → O2.
 
@@ -315,7 +329,7 @@ migration이 없다.
 
 | 조건 | 이 설계에서 맡는 곳 |
 |---|---|
-| 잃지 않는다(root 없는 run, 넘침, 재시작 포함) | 결정 1. 지나가는 경우는 (a)(b)(c)뿐이고 넘칠 표가 없다. 관측 오류도 머리 시계를 탄 뒤 (c) 기록을 남기고서야 지나간다. 시계는 cursor에 있어 재시작해도 남는다. 내구성 있는 log 한 행을 "잃지 않음"으로 쳐도 되는지는 O5 |
+| 잃지 않는다(root 없는 run, 넘침, 재시작 포함) | 결정 1. 지나가는 경우는 (a)(b)(c)뿐이고 넘칠 표가 없다. 관측 오류도 머리 시계를 탄 뒤 (c) 기록을 남기고서야 지나간다. 시계는 cursor에 있어 재시작해도 남는다. 내구성 있는 log 한 행을 "잃지 않음"으로 친다(O5(ii) 수락) |
 | tick 시간 유계, cursor commit이 DB page 목록 조회에 결박되지 않음 | 결정 0·2. 고정 40초, page별 마감, 서버 쪽 statement·lock timeout, executor 하나, 모든 분기에서 commit |
 | 경과 시간 알림, 서명이 바뀌어도 초기화 안 됨, 55P03도 지속되면 알림 | 결정 3 |
 | gate 경합과 lock_timeout 구별 | 결정 5(효과에 결박한 표지) |
@@ -367,13 +381,17 @@ migration이 없다.
   root는 더 길다고 봐야 한다. 그래서 "최대가 15 s에 가깝게라도 나오면" 조건에 해당한다고 보고 **완결을 sensor 밖으로 옮기는
   항목부터** 하는 쪽을 권한다(소유자 결정).
   **결론(2026-10-20 소유자 수락).** 완결을 sensor 밖으로 먼저 옮긴다. 모양은 결정 0-1이다.
-- **O2 값과 물러섬.** STALL_AFTER 15분, 예산 40초(page별 20/40초), 시계마다 알림 한 시간에 한 행. 물러섬 없이 sweep마다 재시도하는 것도
-  여기서 정한다.
-- **O3 표지 대 전용 SQLSTATE.** 이 설계는 표지(migration 없음)를 고른다.
-- **O4 Dagster SUCCESS인 root를 `failed`로 닫기.** 그 run의 큐레이션 완결은 버려지고 다음 run이 다시 한다. 이래도 되는지.
-- **O5 acceptance 읽기 둘.** (i) CLOSABLE이 아닌 실패로 계속 막힌 머리를 이 설계는 잡아 두고 알리며 수동 abandon에
-  맡긴다. 괄호 문구 "닫을 수 없는 머리를 영구히 잡지 않는다"가 자동으로 지나가기를 뜻한다면 acceptance나 이 설계를
-  고친다. (ii) root 없이 닫은 run을 `reconcile_abandoned` log 한 행으로 "잃지 않음"이라 쳐도 되는지 정한다.
+- **O2 값과 물러섬 — 수락 2026-10-21.** STALL_AFTER 15분, 예산 40초 고정(Dagster page 마감 +20초, DB page +40초), 시계마다
+  알림 한 시간에 한 행, 물러섬 없이 tick·sweep마다 재시도, `retry_after` 필드 없음. 같은 날 sensor 트랜잭션의
+  `lock_timeout` 상한을 30초에서 **5초**로 낮췄다(min(5초, 남은 − 4초), 소유자 결정).
+- **O3 표지 대 전용 SQLSTATE — 수락 2026-10-21.** 표지(55P03이면서 message가 `feature-write-all gate is busy`로 시작)로
+  가른다. migration도 전용 SQLSTATE도 없다. 효과는 통합 검사가 실제 procedure로 결박한다.
+- **O4 Dagster SUCCESS인 root를 `failed`로 닫기 — 수락 2026-10-21.** CLOSABLE 실패가 15분 이어지면 Dagster SUCCESS여도
+  `failed`로 닫는다. 그 run의 큐레이션 완결은 버려지고 다음 run이 다시 한다.
+- **O5 acceptance 읽기 둘 — 수락 2026-10-21.** (i) 설계를 유지한다. CLOSABLE이 아닌 실패로 막힌 머리는 잡아 두고 한
+  시간마다 알리며, 수동 abandon(`failure="operator"`)으로 넘긴다. acceptance 괄호 문구를 "닫을 수 없는 머리를 영구히
+  잡지 않는다"에서 "알리고 수동으로 넘길 경로가 있다"로 고쳤다. (ii) root 없이 닫은 run은 `reconcile_abandoned`
+  system log 한 행을 "잃지 않음"으로 친다.
 
 ## 구현 범위 (승인 뒤 같은 항목)
 
@@ -412,3 +430,57 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
 상한을 잰다. 알림 throttle은 시계마다 `alerted_at`으로 둔다(`last_stall_alert_at`은 없앴다). liveness 읽기는 active-root
 술어를 쓴다. 표지는 asyncpg 오류의 message·sqlstate에서 읽는다. 보조 트랜잭션에도 timeout을 건다. storage worker가 걸린
 경우의 한계를 적었다. 실패 횟수 예산은 없앴다.
+
+## 구현 결과 (2026-10-21, `T-RECONCILE-RETRY` 둘째 하위 단계)
+
+- **sensor** `packages/kor-travel-map-dagster/.../feature_operation_sensors.py`: 결정 1(`_reconcile_dagster_page`,
+  `_RootSeen`), 2(`_Tick` — page별 마감, 호출마다 `transaction_deadline` + `asyncio.timeout(남은+3초)`, storage 읽기는
+  slot 하나짜리 `call_with_deadline`, 모든 분기 commit, 실패 로그 3줄), 3(`head`·`db_watch` 시계, `_alert_if_due`,
+  `db_watch`는 알림 뒤 슬롯을 넘긴다), 5(`_classify_failure`의 표지), 6(물러섬 없음), 7(cursor 선택 키).
+- **client·repo**: `kortravelmap.infra.transaction_limits`(트랜잭션 범위 `set_config` — SERIALIZABLE이면 isolation 문
+  다음, 보조 트랜잭션 포함), `abandon_dagster_feature_run`(다섯 분기 + run 없음 → `dagster_run_status` NULL),
+  `record_feature_operation_reconcile_stalled`, `is_reconcilable_dagster_feature_run`(`_ACTIVE_ROOTS_PAGE_SQL`과 같은
+  술어로 root 하나). migration 없음, API·OpenAPI 변화 없음(PinVi 재vendor 불필요).
+- **수동 닫기**: `ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing> [--finished-at ISO]`
+  (`failure="operator"`). 같은 run의 ensure와는 DB lineage advisory lock이 직렬화한다(ADR-039, 별도 CLI mutex 없음).
+  DSN은 provider executor(Dagster runtime 로그인)여야 한다.
+- **completion sweep**: 트랜잭션마다 `client_connection_check_interval=10s`(geo #591과 같은 자리) — sweep worker가 죽으면
+  서버가 완결 CALL을 ~10초 안에 취소해 lineage lock을 600초까지 붙들지 않는다. sensor 트랜잭션은 statement_timeout이
+  묶으므로 걸지 않는다.
+- **kor-travel-common 경계**: 범용 도구는 kor-travel-common #42·#43(`e746e4b8`)의 것을 쓴다 — `deadline.call_with_deadline`
+  (Map 전용 1-slot semaphore), `pg_errors.pg_error_info`(asyncpg 오류의 sqlstate·constraint·message, `str(exc)`는 읽지
+  않는다), `stall.StallClock`·`observe_failure`·`due_alert`·`mark_alerted`. Map 두 패키지의 common 핀을 그 SHA로 올렸다(#43은 wall clock 역행 시 시계 재시작).
+  common 시계는 시각을 epoch 초로, 실패 서명을 200자 이하 문자열로 들므로 cursor의 시계는
+  `{run_id, first_failed_at(epoch 초), last_failure("category|closable|sqlstate|constraint|error_type"), alerted_at}`이다.
+  트랜잭션 SQL(`transaction_limits`)·CLOSABLE 목록·gate 표지·abandon·cursor 키는 소비자(Map) 몫이라 Map에 둔다.
+- **run-status sensor**: 상태 sensor 7개의 반영도 같은 서버 쪽 상한(예산 20초)을 건다 — 공용 sensor thread를 오래
+  붙들지 않는다(코드 리뷰 B M2).
+- **gate 표지가 쓰이는 자리**: 0-1 뒤로 sensor는 완결을 부르지 않는다. completion sweep의 완결 실패 로그가
+  `_classify_failure`의 분류(`gate_busy`·`lock_wait`)를 싣는다(리뷰 B L3).
+- **수동 닫기 명령의 방어**: 시작 전에 DSN이 provider executor인지(`pg_has_role`) 확인하고, 입력·DB 오류는 원문 없이
+  sqlstate만 찍고 끝낸다. `--dagster-status missing`은 확인하지 않고 믿는다(help에 적었다).
+- **닫기·알림 몫**: 머리의 닫기·알림은 Dagster page 마감이 아니라 tick 예산(+40초)에서 한다. DB page 항목은 마감보다
+  13초(=2×5초+3초) 일찍 끊고, 남긴 몫으로 `db_watch`의 닫기(마감 − 5초에서 끊는다)와 알림을 차례로 한다. 실패한 호출이나
+  닫기가 자기 상한까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지 않는다(코드 리뷰 A H1, delta M1).
+- **cursor 시계가 깨졌을 때**: 선택 키의 시계 모양이 틀리면(옛 판의 ISO 시각·dict 서명 등) 그 시계만 버리고 watermark·
+  keyset은 그대로 읽는다. 시계를 잃으면 15분 시계가 다시 돌 뿐이고, tick을 실패시키면 cursor가 영영 commit되지 않는다
+  (delta M2).
+- **넘길 데가 없는 `db_watch`**: 알림을 낸 root 말고 이번 tick에 실패한 root가 없으면 알린 시계를 그대로 둔다 — 그
+  root는 한 시간마다 다시 알린다(delta L3). 실패 root가 여럿이면 슬롯이 돌며 root마다 시계가 새로 시작한다.
+- **알려진 성질**: 머리 시계는 storage 실패 시간도 잰다. 머리 run이 정한 실패로 한 번 실패한 뒤 storage가 15분 넘게
+  읽히지 않았다가 돌아오면, 그 run의 다음 정한 실패에서 곧바로 닫힐 수 있다. 정한 실패는 다시 해도 같은 답이라
+  받아들인다(delta L4).
+- **`db_watch` 넘기기**: 알림을 낸 root는 슬롯을 이번 tick에 실패한 root 가운데 그다음 것(없으면 처음으로 돌아가 다른 첫
+  것)에게 넘기고, 넘겨받은 root의 시계는 그 실패 시각에서 시작한다. 넘길 데가 없으면 비운다(리뷰 H2 — 비우기만 하면 다음
+  tick에 같은 root가 첫 실패로 도로 잡았다).
+- **머리의 `run_active`**: Dagster run이 아직 돌아 닫지 않은 머리도 root가 있으므로 지나간다(결정 4 표, 리뷰 M4).
+  active run의 ensure가 root를 가리키는 conflict로 끝나도 root가 있다고 친다(리뷰 H3).
+- **storage 실패와 머리 시계**: 머리 run의 시계가 이미 있으면 storage 실패는 그 시계를 잇는다(key 그대로). storage가
+  오락가락해도 시계가 처음으로 돌아가지 않는다(리뷰 M5). quarantine된 root만 있는 run을 닫으면 로그가 그 사실을 적는다.
+- **한계(문서화)**: `statement_timeout`·`lock_timeout`은 statement·lock 대기마다 걸린다(PG16에는 `transaction_timeout`이
+  없다). 트랜잭션을 열 때의 남은 시간으로 정하므로, 여러 statement로 된 트랜잭션 전체의 상한은 client 쪽
+  `asyncio.timeout`(남은 + 3초)이다. 그때 asyncpg가 서버에 취소 요청을 보내므로 서버 작업도 멈춘다. 그래서 "서버 쪽
+  상한만이 정본"은 statement 하나 단위로만 참이다(리뷰 A M7·B M1).
+- **lock_timeout**: min(5초, 남은 − 4초)(2026-10-21 소유자 결정, odroid tenant와 같은 값).
+- **되돌릴 때**: main parser는 선택 키(`head`·`db_watch`)를 거부한다. 되돌리기 전에 선택 키를 뺀 cursor를
+  `dagster sensor cursor --set`으로 써 둔다(`--delete` 금지, 결정 7).

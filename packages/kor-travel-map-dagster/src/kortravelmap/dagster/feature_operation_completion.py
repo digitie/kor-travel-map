@@ -21,6 +21,7 @@ sensor는 이 run 자체를 ``panel_only``로 본다. 자동 재시도는 두지
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelcommon.dagster import RecoveryPolicy
+from kortravelmap.infra.transaction_limits import connection_check_interval
 
 from dagster import DagsterRunStatus, Failure, OpExecutionContext, job, op
 
@@ -47,6 +48,9 @@ FEATURE_OPERATION_COMPLETION_POOL: Final[str] = f"{MAP_POOL_PREFIX}feature_opera
 
 FEATURE_OPERATION_COMPLETION_PAGE_SIZE: Final[int] = 200
 """sweep이 active root 목록을 읽는 page 크기(reconcile sensor DB page와 같다)."""
+
+_CONNECTION_CHECK_SECONDS: Final[int] = 10
+"""sweep 트랜잭션의 ``client_connection_check_interval``(초)."""
 
 _COMPLETION_MAX_RUNTIME_SECONDS: Final[int] = 3_600
 """run 상한. 완결 하나는 statement timeout(600초) 안에 끝나야 한다. 넘기면 run monitoring이
@@ -95,8 +99,21 @@ async def sweep_succeeded_feature_operations(
     ``applied``만 완결로 센다(경쟁으로 이미 끝났거나 막힌 root는 세지 않는다).
     """
     # 순환 import 회피: sensor 모듈이 이 job을 요청 대상으로 import한다.
-    from .feature_operation_sensors import apply_completion_record
+    from .feature_operation_sensors import _classify_failure, apply_completion_record
 
+    # 이 run이 죽으면(worker kill·OOM) 들고 있던 완결 CALL은 서버가 ~10초 안에 스스로 취소한다 —
+    # lineage lock을 statement_timeout(600초)까지 붙들지 않는다(geo #591과 같은 자리).
+    with connection_check_interval(_CONNECTION_CHECK_SECONDS):
+        return await _sweep(instance, client, log, apply_completion_record, _classify_failure)
+
+
+async def _sweep(
+    instance: Any,
+    client: "AsyncKorTravelMapClient",
+    log: Any,
+    apply_completion_record: Any,
+    classify_failure: Any,
+) -> tuple[int, list[str]]:
     completed = 0
     failed: list[str] = []
     cursor = None
@@ -119,9 +136,11 @@ async def sweep_succeeded_feature_operations(
                 outcome = await apply_completion_record(record, client)
             except Exception as exc:
                 failed.append(run_id)
+                # gate 바쁨(55P03 + 표지)과 lock 대기를 가른 분류를 남긴다(ADR-112 결정 5).
+                category = classify_failure(exc, at_head=False)["category"]
                 log.error(
                     f"operation root 완결 실패: run_id={run_id} "
-                    f"error_type={type(exc).__name__}"
+                    f"error_type={type(exc).__name__} category={category}"
                 )
                 continue
             if outcome == "applied":

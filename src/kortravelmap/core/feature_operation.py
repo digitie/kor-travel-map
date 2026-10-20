@@ -284,7 +284,8 @@ class DagsterFeatureOperation:
     root_job_id: str
     dagster_run_id: str
     status: ExecutionState
-    dagster_run_status: DagsterFeatureRunStatus
+    dagster_run_status: DagsterFeatureRunStatus | None
+    """``None``은 Dagster에서 run이 지워진 뒤 abandon으로 닫은 root뿐이다(ADR-112 결정 4)."""
     progress: int
     current_stage: str | None
     created_at: datetime
@@ -300,6 +301,25 @@ class DagsterFeatureOperationMutation:
     outcome: DagsterFeatureOperationOutcome
     operation: DagsterFeatureOperation
     block_reason: DagsterFeatureOperationBlockReason | None = None
+
+
+FeatureOperationAbandonOutcome: TypeAlias = Literal[
+    "recorded_without_root", "cancellation", "terminal", "run_active", "closed"
+]
+"""``abandon_dagster_feature_run``가 DB 상태를 보고 한 일(ADR-112 결정 4 표).
+
+- ``recorded_without_root`` — root가 없어 ``reconcile_abandoned`` 로그 한 행만 남겼다.
+- ``cancellation`` — root에 취소 marker가 있어 아무것도 하지 않았다(취소 coordinator 몫).
+- ``terminal`` — root가 이미 terminal이라 아무것도 하지 않았다.
+- ``run_active`` — Dagster run이 아직 돌고 있어 닫지 않았다.
+- ``closed`` — root와 끝나지 않은 member를 ``failed``로 닫고 로그를 남겼다.
+"""
+
+
+@dataclass(frozen=True)
+class FeatureOperationAbandonResult:
+    outcome: FeatureOperationAbandonOutcome
+    root_job_id: str | None
 
 
 @dataclass(frozen=True, order=True)
@@ -349,6 +369,8 @@ __all__ = [
     "DagsterFeatureOperationBlockReason",
     "DagsterFeatureOperationCursor",
     "DagsterFeatureOperationMember",
+    "FeatureOperationAbandonOutcome",
+    "FeatureOperationAbandonResult",
     "DagsterFeatureOperationMutation",
     "DagsterFeatureOperationOutcome",
     "DagsterFeatureOperationPage",

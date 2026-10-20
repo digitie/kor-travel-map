@@ -1,5 +1,11 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-21 — reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기(ADR-112)
+
+- [x] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기.** ADR-112 accepted(O1~O5 수락).
+  결정 0-1은 #1345, 결정 1~7은 브랜치 `feat/reconcile-retry-alert-close` — 조건마다 검사와 변이 증거는 journal
+  2026-10-21. [acceptance §T-RECONCILE-RETRY](tasks-acceptance.md#t-reconcile-retry).
+
 ## 2026-10-20 — weather 잔재 정리 2건
 
 - [x] T-WX-NOTICE-CLOSE — **`close_notice_features` 삭제.** client 메서드·repo 함수·전용 통합 테스트 1건을

@@ -186,15 +186,20 @@ def _order_violations(
     return violations
 
 
+_GATE_BUSY_MESSAGE = "feature-write-all gate is busy"
+"""root 완결이 gate를 잡지 못했을 때 procedure가 내는 오류 문구의 머리(ADR-112 결정 5).
+
+reconcile 분류가 이 문구를 표지로 읽는다 — 잠금을 잡는 코드가 아니므로 이름 검사에서 뺀다."""
+
+
 def _python_feature_write_takers() -> list[str]:
     takers: list[str] = []
     for base in (_ROOT / "src", _ROOT / "packages"):
         for path in sorted(base.rglob("*.py")):
             if "tests" in path.parts:
                 continue
-            if "feature-write:" in path.read_text(encoding="utf-8") or (
-                "feature-write-all" in path.read_text(encoding="utf-8")
-            ):
+            source = path.read_text(encoding="utf-8").replace(_GATE_BUSY_MESSAGE, "")
+            if "feature-write:" in source or "feature-write-all" in source:
                 takers.append(str(path.relative_to(_ROOT)))
     return takers
 
