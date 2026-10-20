@@ -2,7 +2,7 @@
 
 - reconcile sensor의 재시도·멈춤 알림·root 닫기 설계를 ADR-112(proposed)로 냈다. doc-only이고 코드 변경은 없다.
   항목은 열려 있다.
-- **다음 한 작업: 소유자가 ADR-112 열린 결정 O1~O4를 승인한다(O1 전에 prod root 완결 소요를 읽기 전용으로 잰다) →
+- **다음 한 작업: 소유자가 ADR-112 열린 결정 O1~O5를 승인한다(O1 전에 prod root 완결 소요를 읽기 전용으로 잰다) →
   같은 항목에서 구현하고 적대 리뷰를 받는다.** n150 공용 Dagster daemon은 소유자가 일부러 멈춰 둔 상태다. sensor를 켜지 않는다.
 
 ## 2026-10-19 — MapLibre production asset 복구 (PR #1340)
