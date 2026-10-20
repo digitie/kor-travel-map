@@ -447,9 +447,9 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
 - **completion sweep**: 트랜잭션마다 `client_connection_check_interval=10s`(geo #591과 같은 자리) — sweep worker가 죽으면
   서버가 완결 CALL을 ~10초 안에 취소해 lineage lock을 600초까지 붙들지 않는다. sensor 트랜잭션은 statement_timeout이
   묶으므로 걸지 않는다.
-- **kor-travel-common 경계**: 범용 도구는 kor-travel-common #42(`6c275a04`)의 것을 쓴다 — `deadline.call_with_deadline`
+- **kor-travel-common 경계**: 범용 도구는 kor-travel-common #42·#43(`e746e4b8`)의 것을 쓴다 — `deadline.call_with_deadline`
   (Map 전용 1-slot semaphore), `pg_errors.pg_error_info`(asyncpg 오류의 sqlstate·constraint·message, `str(exc)`는 읽지
-  않는다), `stall.StallClock`·`observe_failure`·`due_alert`·`mark_alerted`. Map 두 패키지의 common 핀을 그 SHA로 올렸다.
+  않는다), `stall.StallClock`·`observe_failure`·`due_alert`·`mark_alerted`. Map 두 패키지의 common 핀을 그 SHA로 올렸다(#43은 wall clock 역행 시 시계 재시작).
   common 시계는 시각을 epoch 초로, 실패 서명을 200자 이하 문자열로 들므로 cursor의 시계는
   `{run_id, first_failed_at(epoch 초), last_failure("category|closable|sqlstate|constraint|error_type"), alerted_at}`이다.
   트랜잭션 SQL(`transaction_limits`)·CLOSABLE 목록·gate 표지·abandon·cursor 키는 소비자(Map) 몫이라 Map에 둔다.

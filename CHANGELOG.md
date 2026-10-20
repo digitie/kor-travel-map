@@ -26,7 +26,7 @@
   `None`일 수 있다(지워진 run을 abandon으로 닫은 root).
 - **ADDED (CLI)**: `ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing>` 운영자 수동 닫기.
 - **CHANGED (Dagster)**: completion sweep 트랜잭션에 `client_connection_check_interval=10s`.
-- **CHANGED (deps)**: kor-travel-common 핀 `a960bdb1` → `6c275a04`(#42 — `call_with_deadline` slots, `pg_error_info`,
+- **CHANGED (deps)**: kor-travel-common 핀 `a960bdb1` → `e746e4b8`(#42·#43 — `call_with_deadline` slots, `pg_error_info`,
   `StallClock`). sensor는 이 셋을 common에서 쓴다.
 - migration·API·OpenAPI 변화 없음.
 

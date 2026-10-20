@@ -1,3 +1,10 @@
+## 2026-10-21 — T-RECONCILE-RETRY 하위 단계 2(ADR-112 결정 1~7): 브랜치 `feat/reconcile-retry-alert-close`
+
+- ADR-112 accepted. 결정 1~7 구현·적대 리뷰 2회 반영·변이 검사 완료, 원장은 `tasks-done.md`로 이관했다. migration 없음,
+  OpenAPI 변화 없음(PinVi 재vendor 불필요). common 핀 `e746e4b8`.
+- **다음 한 작업: PR CI green → 소유자 머지 판단 → Map Dagster code location·API 재배포(daemon은 소유자가 켤 때까지
+  멈춘 채).** 되돌릴 때는 cursor 선택 키를 먼저 뺀다(ADR-112 결정 7).
+
 ## 2026-10-20 — T-RECONCILE-RETRY 하위 단계 1(ADR-112 결정 0-1): 브랜치 `feat/finalize-out-of-sensor`
 
 - SUCCESS root 완결을 sensor tick 밖 `feature_operation_completion` sweep job으로 옮겼다. migration·API·OpenAPI 변화 없음.
