@@ -6,7 +6,8 @@ timeout(60초)에 묶이지 않는다.
 
 run 하나는 **sweep 한 번**이다. reconcile sensor의 DB page와 같은 목록(active, 취소 marker·
 quarantine 없음)을 처음부터 끝까지 훑고, Dagster run이 SUCCESS인 root를 하나씩 완결한다. 반영
-함수는 sensor가 FAILURE·CANCELED에 쓰는 것과 같다(``feature_operation_sensors.apply_completion_record``).
+함수는 sensor가 FAILURE·CANCELED에 쓰는 것과 같다
+(``feature_operation_sensors.apply_completion_record``).
 완결은 어차피 lineage lock 하나로 직렬화되므로 run도 pool 하나로 한 번에 하나만 돈다 — 여분의
 요청은 QUEUED로 기다렸다가 할 일이 없으면 바로 끝난다.
 

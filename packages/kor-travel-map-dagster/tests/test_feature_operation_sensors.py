@@ -1252,7 +1252,7 @@ async def test_sensor_success_conflict_on_existing_root_is_left_to_the_sweep() -
 
 
 async def test_sensor_success_conflict_without_root_still_raises_like_before() -> None:
-    """root를 가리키지 않는 conflict(quarantine)는 종전 reconcile처럼 올린다 — 조용히 지나가지 않는다."""
+    """root를 가리키지 않는 conflict(quarantine)는 종전 reconcile처럼 올린다."""
 
     conflict = FeatureOperationInvariantConflict(
         "quarantined",
@@ -1453,7 +1453,6 @@ async def test_sweep_completes_only_success_roots_and_survives_one_failure() -> 
 
 def test_completion_job_is_registered_pooled_and_requested_by_both_sensors() -> None:
     from kortravelmap.dagster.definitions import defs
-
     from kortravelmap.dagster.feature_operation_sensors import feature_operation_success_sensor
 
     job = defs.get_job_def(FEATURE_OPERATION_COMPLETION_JOB_NAME)

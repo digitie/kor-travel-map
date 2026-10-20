@@ -652,7 +652,8 @@ async def _apply_run_record(
     assert finished_at is not None
     if status == DagsterRunStatus.SUCCESS and not completion:
         # sensor tick에서는 SUCCESS의 root 완결(무거운 CALL)을 하지 않는다. root가 있게만 하고
-        # 완결은 completion run에 넘긴다(ADR-112 결정 0-1). FAILURE·CANCELED는 완결이 없어 아래로 간다.
+        # 완결은 completion sweep에 넘긴다(ADR-112 결정 0-1).
+        # FAILURE·CANCELED는 완결이 없어 아래로 간다.
         return await _ensure_success_root(
             record,
             client,
