@@ -251,6 +251,19 @@ migration이 없다.
 ## 열린 결정 (소유자)
 
 - **O1 결정 0의 전제.** prod 완결 소요를 잰 결과로, 그대로 구현할지 먼저 완결을 sensor 밖으로 옮길지 정한다.
+  **실측(2026-10-20, n150 공용 PG `11000`, 읽기 전용).** `pg_stat_statements`에는 `CALL
+  feature.finalize_provider_curation_root` 항목이 없다(통계 2026-09-28 reset 뒤 dealloc 1,058회 — 밀려났거나,
+  n150 daemon이 멈춘 뒤(마지막 sensor tick 2026-10-17 08:18Z) 호출이 없다). `log_min_duration_statement=-1`이라 PG 로그도 없다. 대신
+  - prod root는 `ops.curation_provider_root_receipts` **4건뿐**이고 모두 `generation_count=0`(child receipt 1개)이다
+    (2026-10-12~13). 무거운 root의 완결 소요는 prod에서 잴 수 없다.
+  - 그중 2건은 reconcile tick 안에서 commit됐다. tick 시작→commit **6.06 s·7.67 s**(tick 전체 6.31·7.69 s) — 완결만의
+    시간은 이보다 작다. 나머지 2건은 reconcile tick 밖에서 commit됐다(어느 경로인지는 확인하지 않았다).
+  - `feature_operation_reconciliation_sensor` tick 소요(2026-10-01~17, `dagster_shared.job_ticks`): SKIPPED 17,225건
+    평균 1.60 s·p99 12.07 s·최대 127.25 s, FAILURE 18건 최대 62.94 s(60 s 평가 timeout 부근).
+
+  판단 근거로는 상한만 준다: 세대 0인 root도 tick 기준 6~8 s로 머리 예산 15 s의 절반에 닿고, tick p99가 12 s다. 세대가 있는
+  root는 더 길다고 봐야 한다. 그래서 "최대가 15 s에 가깝게라도 나오면" 조건에 해당한다고 보고 **완결을 sensor 밖으로 옮기는
+  항목부터** 하는 쪽을 권한다(소유자 결정).
 - **O2 값과 물러섬.** STALL_AFTER 15분, 예산 40초(page별 20/40초), 시계마다 알림 한 시간에 한 행. 물러섬 없이 sweep마다 재시도하는 것도
   여기서 정한다.
 - **O3 표지 대 전용 SQLSTATE.** 이 설계는 표지(migration 없음)를 고른다.
