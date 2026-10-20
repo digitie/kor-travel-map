@@ -470,7 +470,8 @@ CALL)은 sensor tick에서 하지 않는다(ADR-112 결정 0-1). sensor는 SUCCE
 차례로 완결하는 sweep이다. pool `kor_travel_map.feature_operation_completion`으로 인스턴스 전역에서 하나씩 돈다.
 1차 요청은 success 상태 sensor가 SUCCESS run마다 내고(아직 시작하지 않은 sweep이 있으면 생략), reconcile sensor의 DB
 page는 "SUCCESS인데 active"인 root를 보면 15분 간격으로 뒷받침 요청을 낸다. 완결 전까지 root는 `running`이고 `done`은
-완결과 같은 트랜잭션에서만 생긴다. FAILURE·CANCELED reconcile은 완결이 없어 sensor 안에 그대로 있다.
+완결과 같은 트랜잭션에서만 생긴다. root 하나의 완결 실패는 sweep run을 실패시키지 않는다(error 로그·metadata, 다음 sweep이
+재시도). FAILURE·CANCELED reconcile은 완결이 없어 sensor 안에 그대로 있다.
 
 root raw Dagster status와 engine create/start/finish timestamp는 DB lifecycle과 별도로 보존한다.
 root progress는 완료 pair 비율이고 pair별 결과는 `provider_datasets[]`가 정본이다. C3d marker가
