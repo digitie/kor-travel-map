@@ -358,7 +358,9 @@ async def _evaluate_status_event(
         )
         context.log.error(message)
         return SkipReason(message)
-    if outcome == _COMPLETION_PENDING and not _completion_sweep_queued(context.instance):
+    if outcome == _COMPLETION_PENDING and not _completion_sweep_queued(
+        cast(_DagsterInstance, context.instance)
+    ):
         # 1차 요청: SUCCESS run마다 sweep 하나. 아직 시작하지 않은 sweep이 있으면 그것이 이
         # root를 볼 것이므로 내지 않는다. 시작한 sweep은 이미 지나쳤을 수 있어 새로 낸다.
         return _completion_run_request(f"success:{record.dagster_run.run_id}")
