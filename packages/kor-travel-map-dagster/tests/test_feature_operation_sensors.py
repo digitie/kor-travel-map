@@ -1973,7 +1973,10 @@ async def test_db_watch_hands_the_slot_on_after_alerting_a_non_closable_root(
     assert len(client.stalled_calls) == 1
     assert client.stalled_calls[0]["scope"] == "db_watch"
     assert client.abandon_calls == []
-    assert _committed(context).db_watch is None
+    # 넘길 다른 실패 root가 없다 — 알린 시계를 그대로 둔다(넘기기는 다른 검사가 본다).
+    kept = _committed(context).db_watch
+    assert kept is not None
+    assert kept.alerted_at is not None
 
 
 async def test_db_watch_is_cleared_when_the_root_is_no_longer_reconcilable(
@@ -2369,8 +2372,10 @@ async def test_a_single_failing_root_keeps_its_alerted_clock_and_realerts_hourly
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
     await tick()
     assert len(client.stalled_calls) == 1
-    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS * 2)
-    await tick()
+    # 첫 알림 뒤 한 시간 안에는 15분이 몇 번 지나도 다시 알리지 않는다.
+    for _ in range(3):
+        clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS + 60)
+        await tick()
     assert len(client.stalled_calls) == 1
     clock.advance(FEATURE_OPERATION_REALERT_SECONDS)
     await tick()

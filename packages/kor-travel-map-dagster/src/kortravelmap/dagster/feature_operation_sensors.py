@@ -272,7 +272,9 @@ def _clock_from_cursor(raw: object, *, name: str) -> StallClock:
 
 
 def _optional_clock(raw: Mapping[str, object], name: str) -> StallClock | None:
-    """선택 키의 시계를 읽는다. 모양이 틀리면 버린다 — 시계 하나를 잃으면 15분 시계가 다시 돌 뿐이다.
+    """선택 키의 시계를 읽는다. 모양이 틀리면 버린다.
+
+    시계 하나를 잃으면 15분 시계가 다시 돌 뿐이다.
 
     watermark·keyset cursor와 달리 시계가 깨졌다고 tick을 실패시키면 cursor가 영영 commit되지 않아
     sensor 전체가 선다(코드 리뷰 delta M2).

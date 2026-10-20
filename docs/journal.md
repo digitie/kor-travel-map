@@ -13,7 +13,14 @@
   root 없음으로 봄. MED: 머리 `run_active`는 지나감, storage 실패가 머리 시계를 재시작, quarantine root 로그 문구,
   다중 statement 상한(문서화). B(DB/client) MED: 상태 sensor에 상한 없음(→ 20초 예산), 다중 statement 상한; LOW: gate 표지가
   sweep에서만 쓰임(→ sweep 실패 로그에 분류), 검사 보강(client 메서드별 상한 단위 검사, NULL root 재읽기), CLI 방어.
-- 검사: 해제 조건 줄마다 단위·통합 검사, 변이 __MUT__건이 모두 맞는 검사를 빨갛게 만들었다(n150 일회용 컨테이너).
+- delta 리뷰(수정분만): MED — 닫기 실패 뒤 알림이 다시 굶음(→ 머리 닫기·알림은 tick 예산, DB page 몫 13초, 닫기는
+  마감 − 5초), 깨진 cursor 시계가 sensor를 영구히 세움(→ 시계만 버림). LOW — 혼자 실패하는 root가 15분마다 알림(→ 시계
+  유지), CLI 연결 오류.
+- 검사: 해제 조건 줄마다 단위·통합 검사. 변이 21종(22검사)이 모두 결박한 검사를 빨갛게 만들었다 — (b) 느슨하게,
+  statement_timeout 제거, isolation 앞 상한, reconcile 상한 누락, lock 상한 30초, 모든 55P03을 gate로(단위·통합), 서명
+  변경 시 시계 리셋, 빈 키 쓰기, tick 시작 시각, DB 목록 실패 시 commit 생략, membership 닫기, root 없음 conflict, NULL
+  상태 엄격 읽기, storage가 머리 시계 리셋, active conflict, 넘기기 없음, 머리 알림 page 마감, 닫기 전체 마감, 혼자 root
+  시계 버림, 깨진 시계 엄격, 상태 sensor 상한 없음(n150 일회용 컨테이너).
 - **배포 영향**: Map Dagster code location·API 이미지 재배포(common 핀 변경). migration 없음, Map admin OpenAPI 변화 없음 →
   PinVi 재vendor 불필요. 되돌릴 때는 선택 키(`head`·`db_watch`)를 뺀 cursor를 `dagster sensor cursor --set`으로 먼저 쓴다.
   n150 공용 Dagster daemon은 소유자가 멈춰 둔 상태 그대로다(켜지 않았다).
