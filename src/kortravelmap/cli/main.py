@@ -8,6 +8,10 @@ Sprint 4 §2.8 CLI. read-only ``status`` + mutate ``import``(MOIS Step A bulk �
 - ``ktmctl status`` — 운영 현황 카운트 출력 (read-only, mutex 없음).
 - ``ktmctl consistency-report`` — ADR-033 F1~F9 정합성 dry-run Markdown/JSON
   리포트 출력 (read-only 기본, mutex 없음).
+- ``ktmctl reconcile-abandon <dagster-run-id> --dagster-status <STATUS|missing>`` — reconcile
+  sensor가 넘기지 못하는 run을 운영자가 넘긴다(ADR-112 결정 4, ``failure="operator"``). 무엇을
+  할지는 DB 상태가 정한다. 같은 run의 ensure·reconcile과는 DB lineage advisory lock이 직렬화하므로
+  CLI에서 별도 mutex를 다시 감싸지 않는다(ADR-039).
 - ``ktmctl import mois <records-file>`` — provider가 export한 NDJSON snapshot을
   읽어 MOIS 인허가 feature를 적재한다 (Step A bulk). ``run_mois_license_bulk_job``이
   ``import:python-mois-api:<dataset>`` advisory lock으로 단일 워커 직렬화(ADR-039)
@@ -285,6 +289,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="병합 사유(선택). history.reason + 큐 decision_reason 기록.",
     )
     merge_p.set_defaults(func=_cmd_dedup_merge)
+
+    abandon_p = sub.add_parser(
+        "reconcile-abandon",
+        help=(
+            "reconcile sensor가 넘기지 못하는 Dagster run을 수동으로 닫는다(mutate; ADR-112). "
+            "DSN은 Dagster runtime 로그인(provider executor)이어야 한다."
+        ),
+    )
+    abandon_p.add_argument("dagster_run_id", help="닫을 Dagster run id.")
+    abandon_p.add_argument(
+        "--dagster-status",
+        required=True,
+        choices=[*_ABANDON_DAGSTER_STATUSES, "missing"],
+        help=(
+            "Dagster UI에서 확인한 run 상태. run이 storage에 없으면 missing. 아직 도는 run이면 "
+            "root를 닫지 않는다."
+        ),
+    )
+    abandon_p.add_argument(
+        "--finished-at",
+        default=None,
+        help="Dagster run 종료 시각(ISO 8601, timezone 포함). 모르면 생략.",
+    )
+    abandon_p.set_defaults(func=_cmd_reconcile_abandon)
 
     return parser
 
@@ -639,6 +667,50 @@ async def _cmd_dedup_merge(args: argparse.Namespace) -> int:
             return 0
     finally:
         await engine.dispose()
+
+
+_ABANDON_DAGSTER_STATUSES = (
+    "QUEUED",
+    "NOT_STARTED",
+    "MANAGED",
+    "STARTING",
+    "STARTED",
+    "CANCELING",
+    "SUCCESS",
+    "FAILURE",
+    "CANCELED",
+)
+
+
+async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
+    finished_at: datetime | None = None
+    if args.finished_at is not None:
+        try:
+            finished_at = datetime.fromisoformat(args.finished_at)
+        except ValueError:
+            print("reconcile-abandon: --finished-at은 ISO 8601이어야 합니다.", file=sys.stderr)
+            return _EXIT_INVALID
+        if finished_at.tzinfo is None or finished_at.utcoffset() is None:
+            print("reconcile-abandon: --finished-at에 timezone이 필요합니다.", file=sys.stderr)
+            return _EXIT_INVALID
+    status = None if args.dagster_status == "missing" else str(args.dagster_status)
+    engine = make_async_engine(_resolve_dsn(args))
+    try:
+        async with AsyncKorTravelMapClient(engine) as client:
+            result = await client.abandon_dagster_feature_run(
+                dagster_run_id=args.dagster_run_id,
+                dagster_status=status,
+                engine_finished_at=finished_at,
+                failure="operator",
+                first_failed_at=None,
+            )
+    finally:
+        await engine.dispose()
+    print(
+        f"reconcile-abandon: outcome={result.outcome} "
+        f"root_job_id={result.root_job_id or '-'}"
+    )
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

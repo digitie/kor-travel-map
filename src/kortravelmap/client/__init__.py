@@ -53,6 +53,7 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationMutation,
     DagsterFeatureOperationPage,
+    FeatureOperationAbandonResult,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationKey,
     ProviderDatasetOperationMembership,
@@ -135,6 +136,9 @@ from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
 from kortravelmap.infra.feature_operation_repo import (
+    abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
+)
+from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event as repo_append_dagster_feature_attempt_event,
 )
 from kortravelmap.infra.feature_operation_repo import (
@@ -142,6 +146,9 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_operation_repo import (
     finish_dagster_feature_membership as repo_finish_dagster_feature_membership,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    is_reconcilable_dagster_feature_run as repo_is_reconcilable_dagster_feature_run,
 )
 from kortravelmap.infra.feature_operation_repo import (
     list_feature_operation_memberships as repo_list_feature_operation_memberships,
@@ -156,11 +163,15 @@ from kortravelmap.infra.feature_operation_repo import (
     record_feature_operation_invariant_conflict,
 )
 from kortravelmap.infra.feature_operation_repo import (
+    record_feature_operation_reconcile_stalled as repo_record_reconcile_stalled,
+)
+from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_dataset_membership as repo_resolve_operation_dataset_member,
 )
 from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_memberships as repo_resolve_feature_operation_memberships,
 )
+from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.infra.feature_repo import (
     EnrichmentLoadResult,
     FeatureLoadResult,
@@ -889,6 +900,7 @@ class AsyncKorTravelMapClient:
         self, conflict: FeatureOperationInvariantConflict
     ) -> None:
         async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
             await record_feature_operation_invariant_conflict(session, conflict)
 
     async def ensure_dagster_feature_operation(
@@ -905,6 +917,7 @@ class AsyncKorTravelMapClient:
         """Dagster run root와 exact canonical member 전체를 ensure한다."""
         try:
             async with self._session_factory() as session, session.begin():
+                await apply_transaction_limits(session)
                 return await repo_ensure_dagster_feature_operation(
                     session,
                     dagster_run_id=dagster_run_id,
@@ -991,6 +1004,8 @@ class AsyncKorTravelMapClient:
                     await session.execute(
                         text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                     )
+                # isolation 문 다음이어야 한다 — 먼저 쿼리를 보내면 25001(ADR-112 결정 2).
+                await apply_transaction_limits(session)
                 return await repo_reconcile_dagster_feature_run(
                     session,
                     dagster_run_id=dagster_run_id,
@@ -1015,8 +1030,66 @@ class AsyncKorTravelMapClient:
     ) -> DagsterFeatureOperationPage:
         """DB→Dagster sweep용 active unmarked root page를 반환한다."""
         async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
             return await repo_list_reconcilable_feature_runs(
                 session, cursor=cursor, page_size=page_size
+            )
+
+    async def is_reconcilable_dagster_feature_run(self, *, dagster_run_id: str) -> bool:
+        """run의 root가 아직 DB page 대상(active, 취소 marker·quarantine 없음)인가 — 짧은 읽기."""
+        async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
+            return await repo_is_reconcilable_dagster_feature_run(
+                session, dagster_run_id=dagster_run_id
+            )
+
+    async def abandon_dagster_feature_run(
+        self,
+        *,
+        dagster_run_id: str,
+        dagster_status: str | None,
+        engine_finished_at: datetime | None,
+        failure: Mapping[str, Any] | str,
+        first_failed_at: datetime | None,
+    ) -> FeatureOperationAbandonResult:
+        """reconcile이 넘기지 못하는 run을 DB 상태에 맞게 닫는다(ADR-112 결정 4).
+
+        운영자 수동 닫기는 ``failure="operator"``로 부른다(``ktmctl reconcile-abandon``).
+        """
+        async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
+            return await repo_abandon_dagster_feature_run(
+                session,
+                dagster_run_id=dagster_run_id,
+                dagster_status=dagster_status,
+                engine_finished_at=engine_finished_at,
+                failure=failure,
+                first_failed_at=first_failed_at,
+            )
+
+    async def record_feature_operation_reconcile_stalled(
+        self,
+        *,
+        scope: str,
+        dagster_run_id: str,
+        dagster_status: str | None,
+        first_failed_at: datetime,
+        last_failure: Mapping[str, Any],
+        alerted_at: datetime | None,
+        action: str,
+    ) -> None:
+        """reconcile 멈춤을 ``feature_operation.reconcile_stalled`` 운영 로그로 남긴다(ADR-112)."""
+        async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
+            await repo_record_reconcile_stalled(
+                session,
+                scope=scope,
+                dagster_run_id=dagster_run_id,
+                dagster_status=dagster_status,
+                first_failed_at=first_failed_at,
+                last_failure=last_failure,
+                alerted_at=alerted_at,
+                action=action,
             )
 
     async def list_feature_operation_memberships(
@@ -1026,6 +1099,7 @@ class AsyncKorTravelMapClient:
     ) -> tuple[ProviderDatasetOperationMembership, ...]:
         """DB operation key의 현재 enabled canonical member를 읽는다."""
         async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
             return await repo_list_feature_operation_memberships(
                 session,
                 operation_key=operation_key,
@@ -1038,6 +1112,7 @@ class AsyncKorTravelMapClient:
     ) -> tuple[ProviderDatasetOperationMembership, ...]:
         """schedule dispatch 전 enabled exact operation membership을 조회한다."""
         async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
             return await repo_resolve_feature_operation_memberships(
                 session,
                 operation_key=operation_key,
@@ -1057,6 +1132,7 @@ class AsyncKorTravelMapClient:
         ``sync_scope``까지 주어야 exact 해석이 된다.
         """
         async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
             return await repo_resolve_operation_dataset_member(
                 session,
                 operation_key=operation_key,

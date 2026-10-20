@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from dagster import (
     RunRequest,
 )
 from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.infra.transaction_limits import remaining_seconds
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationPage,
@@ -29,8 +31,12 @@ from kortravelmap.dagster.feature_operation_completion import (
 )
 from kortravelmap.dagster.feature_operation_sensors import (
     FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS,
+    FEATURE_OPERATION_DAGSTER_PAGE_SECONDS,
+    FEATURE_OPERATION_REALERT_SECONDS,
     FEATURE_OPERATION_RECONCILE_PAGE_SIZE,
     FEATURE_OPERATION_SETTLE_LAG_SECONDS,
+    FEATURE_OPERATION_STALL_AFTER_SECONDS,
+    FEATURE_OPERATION_TICK_BUDGET_SECONDS,
     FEATURE_OPERATION_TRACKING_SENSORS,
     DagsterRunWatermark,
     FeatureOperationObservationError,
@@ -88,9 +94,33 @@ class _Client:
     list_error: Exception | None = None
     page: object = field(default_factory=lambda: DagsterFeatureOperationPage((), None))
     pages: list[object] = field(default_factory=list)
+    alive: bool = True
+    alive_calls: list[dict[str, Any]] = field(default_factory=list)
+    abandon_calls: list[dict[str, Any]] = field(default_factory=list)
+    abandon_outcome: str = "recorded_without_root"
+    abandon_error: Exception | None = None
+    stalled_calls: list[dict[str, Any]] = field(default_factory=list)
+    stalled_error: Exception | None = None
+    deadlines: list[float | None] = field(default_factory=list)
+
+    async def is_reconcilable_dagster_feature_run(self, **kwargs: Any) -> bool:
+        self.alive_calls.append(kwargs)
+        return self.alive
+
+    async def abandon_dagster_feature_run(self, **kwargs: Any) -> object:
+        self.abandon_calls.append(kwargs)
+        if self.abandon_error is not None:
+            raise self.abandon_error
+        return SimpleNamespace(outcome=self.abandon_outcome, root_job_id=None)
+
+    async def record_feature_operation_reconcile_stalled(self, **kwargs: Any) -> None:
+        self.stalled_calls.append(kwargs)
+        if self.stalled_error is not None:
+            raise self.stalled_error
 
     async def ensure_dagster_feature_operation(self, **kwargs: Any) -> object:
         self.ensure_calls.append(kwargs)
+        self.deadlines.append(remaining_seconds())
         if self.ensure_errors:
             error = self.ensure_errors.pop(0)
             if error is not None:
@@ -111,6 +141,7 @@ class _Client:
 
     async def list_reconcilable_dagster_feature_runs(self, **kwargs: Any) -> object:
         self.list_calls.append(kwargs)
+        self.deadlines.append(remaining_seconds())
         if self.list_error is not None:
             raise self.list_error
         if self.pages:
@@ -699,9 +730,9 @@ async def test_database_dagster_unavailable_and_not_found_preserve_base_rows() -
     assert client.ensure_calls == []
     assert client.reconcile_calls == []
     assert len(context.log.errors) == 2
-    assert "관측 실패" in context.log.errors[0]
+    assert "category=storage" in context.log.errors[0]
     assert "Dagster unavailable" not in context.log.errors[0]
-    assert "찾지 못함" in context.log.errors[1]
+    assert "category=run_missing" in context.log.errors[1]
     assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[0]).database is None
 
 
@@ -743,7 +774,8 @@ async def test_event_database_write_error_is_redacted() -> None:
     assert "secret" not in context.log.errors[0]
 
 
-async def test_dagster_scan_error_is_redacted_without_cursor_advance() -> None:
+async def test_dagster_scan_error_is_redacted_holds_the_head_and_still_commits() -> None:
+    """storage 읽기 실패는 머리 시계(key=watermark run)를 타고, cursor는 그래도 commit된다."""
     context = _Context(
         instance=_Instance(
             [],
@@ -756,7 +788,13 @@ async def test_dagster_scan_error_is_redacted_without_cursor_advance() -> None:
 
     await _evaluate_reconciliation_sensor(context, _Client())
 
-    assert context.updated_cursors == []
+    assert len(context.updated_cursors) == 1
+    committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert committed.dagster == DagsterRunWatermark(1, "previous")
+    assert committed.head is not None
+    assert committed.head.key == "previous"
+    assert committed.head.last_failure["category"] == "storage"
+    assert committed.head.last_failure["closable"] is False
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -783,15 +821,18 @@ async def test_deleted_dagster_cursor_anchor_fails_loud_without_advancing() -> N
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert context.updated_cursors == []
+    # watermark는 제자리, 머리 시계가 돈다. DB page는 그와 상관없이 돈다(결정 2).
+    committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert committed.dagster == DagsterRunWatermark(2, "deleted-anchor")
+    assert committed.head is not None and committed.head.key == "deleted-anchor"
     assert client.ensure_calls == []
-    assert client.list_calls == []
+    assert len(client.list_calls) == 1
     assert context.log.errors == [
-        "provider feature operation reconcile 실패: error_type=FeatureOperationObservationError"
+        "Dagster run storage 읽기 실패(머리 시계): error_type=FeatureOperationObservationError"
     ]
 
 
-async def test_dagster_write_failure_is_redacted_and_does_not_advance_cursor() -> None:
+async def test_dagster_write_failure_is_redacted_and_holds_the_watermark_at_that_run() -> None:
     context = _Context(
         instance=_Instance([_record(DagsterRunStatus.STARTED)]),
         cursor=FeatureOperationReconcileCursor(
@@ -802,25 +843,33 @@ async def test_dagster_write_failure_is_redacted_and_does_not_advance_cursor() -
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert context.updated_cursors == []
-    assert client.list_calls == []
+    committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert committed.dagster == DagsterRunWatermark(1, "previous")
+    assert committed.head is not None and committed.head.key == "run-1"
+    assert len(client.list_calls) == 1
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
 
 
-async def test_database_page_list_error_is_redacted_without_cursor_advance() -> None:
+async def test_database_page_list_error_keeps_db_cursor_but_commits_dagster_progress() -> None:
+    """M2: DB page 목록 조회 실패가 Dagster 쪽 진척 commit을 막지 않는다."""
+    database_cursor = DagsterFeatureOperationCursor(
+        created_at=_NOW, root_job_id="11111111-1111-4111-8111-111111111111"
+    )
     context = _Context(
-        instance=_Instance([]),
+        instance=_Instance([_record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)]),
         cursor=FeatureOperationReconcileCursor(
-            dagster=DagsterRunWatermark(1, "previous")
+            dagster=DagsterRunWatermark(1, "previous"), database=database_cursor
         ).to_json(),
     )
     client = _Client(list_error=RuntimeError("postgresql://admin:secret@database/internal"))
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert context.updated_cursors == []
+    committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert committed.dagster == DagsterRunWatermark(2, "run-1")
+    assert committed.database == database_cursor
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -842,24 +891,24 @@ async def test_partial_dagster_page_failure_restarts_and_replays_committed_prefi
     context = _Context(instance=_Instance(records), cursor=initial_cursor)
     first_client = _Client(ensure_errors=[None, RuntimeError("second write failed")])
 
-    with pytest.raises(RuntimeError, match="second write failed"):
-        await _reconcile_tick(context, first_client)
+    await _reconcile_tick(context, first_client)
 
     assert [call["dagster_run_id"] for call in first_client.ensure_calls] == [
         "run-1",
         "run-2",
     ]
-    assert context.updated_cursors == []
+    first = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert first.dagster == DagsterRunWatermark(2, "run-1")
+    assert first.head is not None and first.head.key == "run-2"
 
-    replay_context = _Context(instance=_Instance(records), cursor=initial_cursor)
+    replay_context = _Context(instance=_Instance(records), cursor=context.updated_cursors[0])
     replay_client = _Client()
     await _reconcile_tick(replay_context, replay_client)
 
-    assert [call["dagster_run_id"] for call in replay_client.ensure_calls] == [
-        "run-1",
-        "run-2",
-    ]
-    assert len(replay_context.updated_cursors) == 1
+    assert [call["dagster_run_id"] for call in replay_client.ensure_calls] == ["run-2"]
+    replayed = FeatureOperationReconcileCursor.from_json(replay_context.updated_cursors[0])
+    assert replayed.dagster == DagsterRunWatermark(3, "run-2")
+    assert replayed.head is None
 
 
 async def test_database_keyset_restart_continues_then_wraps_and_revisits_start() -> None:
@@ -896,7 +945,7 @@ async def test_database_keyset_restart_continues_then_wraps_and_revisits_start()
     assert FeatureOperationReconcileCursor.from_json(context.updated_cursors[1]).database is None
 
 
-async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -> None:
+async def test_database_page_write_failure_skips_the_item_and_watches_it() -> None:
     record = _record(DagsterRunStatus.CANCELED, run_id="db-active-run")
     database_cursor = DagsterFeatureOperationCursor(
         created_at=_NOW - timedelta(minutes=2),
@@ -920,7 +969,9 @@ async def test_database_page_write_failure_keeps_both_watermarks_uncommitted() -
 
     await _evaluate_reconciliation_sensor(context, client)
 
-    assert context.updated_cursors == []
+    committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
+    assert committed.database is None  # page 끝 - 처음으로 돌아간다
+    assert committed.db_watch is not None and committed.db_watch.key == "db-active-run"
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -1545,3 +1596,581 @@ def test_completion_job_has_no_automatic_retry() -> None:
     )
 
     assert feature_operation_completion_job.tags["dagster/max_retries"] == "0"
+
+
+# -- ADR-112 결정 1~7: 재시도·멈춤 알림·정한 실패만 닫기 ---------------------------------------
+#
+# 해제 조건(tasks-acceptance §T-RECONCILE-RETRY) 한 줄마다 아래 검사가 하나 이상 맞물린다.
+# 서버 쪽 상한(statement_timeout/lock_timeout)과 gate 표지의 실제 procedure 효과는
+# tests/integration/test_reconcile_retry.py가 본다.
+
+
+class _Clock:
+    """``_utcnow``와 ``_monotonic``을 함께 움직이는 시계."""
+
+    def __init__(self) -> None:
+        self.wall = _NOW + timedelta(days=1)
+        # 실제 monotonic에서 시작한다 — 서버 쪽 상한(``remaining_seconds``)은 실제 시계로 잰다.
+        self.mono = time.monotonic()
+
+    def advance(self, seconds: float) -> None:
+        self.wall += timedelta(seconds=seconds)
+        self.mono += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    from kortravelmap.dagster import feature_operation_sensors as sensors
+
+    fake = _Clock()
+    monkeypatch.setattr(sensors, "_utcnow", lambda: fake.wall)
+    monkeypatch.setattr(sensors, "_monotonic", lambda: fake.mono)
+    return fake
+
+
+def _held_context(*records: _Record, cursor: FeatureOperationReconcileCursor | None = None) -> _Context:
+    return _Context(
+        instance=_Instance(list(records)),
+        cursor=(
+            cursor
+            if cursor is not None
+            else FeatureOperationReconcileCursor(dagster=DagsterRunWatermark(1, "previous"))
+        ).to_json(),
+    )
+
+
+def _committed(context: _Context) -> FeatureOperationReconcileCursor:
+    return FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
+
+
+class _PgError(Exception):
+    """asyncpg ``PostgresError`` 모양(sqlstate·constraint_name·message)."""
+
+    def __init__(self, sqlstate: str, message: str, constraint_name: str | None = None) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
+        self.message = message
+        self.constraint_name = constraint_name
+
+
+def _sqlalchemy_error(sqlstate: str, message: str, constraint: str | None = None) -> Exception:
+    """SQLAlchemy가 asyncpg 오류를 감싼 모양 — ``exc.orig.__cause__``가 asyncpg 오류다."""
+    from sqlalchemy.exc import DBAPIError
+
+    cause = _PgError(sqlstate, message, constraint)
+    orig = RuntimeError(f"<class 'asyncpg.exceptions'>: {message}")
+    orig.__cause__ = cause
+    return DBAPIError("CALL ...", {}, orig)
+
+
+# --- 잃지 않는다 -------------------------------------------------------------------------
+
+
+async def test_a_run_whose_root_was_never_created_holds_the_watermark(clock: _Clock) -> None:
+    """(b)는 "root가 있다"이지 "ensure를 시도했다"가 아니다 — root 없는 run은 머리가 된다.
+
+    변이: (b)를 ensure 시도로 느슨하게 하면 watermark가 run-1을 지나가 이 검사가 빨개진다.
+    """
+    records = [
+        _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2),
+        _record(DagsterRunStatus.STARTED, run_id="run-2", storage_id=3),
+    ]
+    context = _held_context(*records)
+    client = _Client(ensure_errors=[RuntimeError("could not serialize")])
+
+    await _reconcile_tick(context, client)
+
+    committed = _committed(context)
+    assert committed.dagster == DagsterRunWatermark(1, "previous")
+    assert committed.head is not None and committed.head.key == "run-1"
+    # 머리 뒤의 run은 이번 tick에 손대지 않는다.
+    assert [call["dagster_run_id"] for call in client.ensure_calls] == ["run-1"]
+
+
+async def test_a_run_whose_root_exists_passes_even_if_the_next_call_fails(clock: _Clock) -> None:
+    """ensure가 root를 돌려줬으면 뒤따른 reconcile이 실패해도 지나간다 — DB page가 맡는다."""
+    record = _record(DagsterRunStatus.FAILURE, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(reconcile_error=_sqlalchemy_error("40001", "could not serialize"))
+
+    await _reconcile_tick(context, client)
+
+    committed = _committed(context)
+    assert committed.dagster == DagsterRunWatermark(2, "run-1")
+    assert committed.head is None
+
+
+async def test_an_observation_error_waits_out_the_clock_then_leaves_a_durable_record(
+    clock: _Clock,
+) -> None:
+    """관측 오류는 바로 지나가지 않는다. 15분 뒤 (c) 기록을 남기고서야 지나간다(결정 1·4)."""
+    broken = _record(DagsterRunStatus.FAILURE, run_id="run-1", storage_id=2)
+    broken.end_time = None  # terminal인데 종료 시각이 없다 — 관측 오류
+    context = _held_context(broken)
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+    first = _committed(context)
+    assert first.dagster == DagsterRunWatermark(1, "previous")
+    assert first.head is not None and first.head.last_failure["category"] == "observation"
+    assert client.abandon_calls == []
+
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS - 1)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+    assert client.abandon_calls == []
+    assert _committed(context).dagster == DagsterRunWatermark(1, "previous")
+
+    clock.advance(1)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert len(client.abandon_calls) == 1
+    call = client.abandon_calls[0]
+    assert call["dagster_run_id"] == "run-1"
+    assert call["dagster_status"] == "FAILURE"
+    assert call["engine_finished_at"] is None
+    assert call["first_failed_at"] == first.head.first_failed_at
+    passed = _committed(context)
+    assert passed.dagster == DagsterRunWatermark(2, "run-1")
+    assert passed.head is None
+
+
+async def test_the_head_clock_survives_a_restart_and_a_changing_signature(clock: _Clock) -> None:
+    """시계는 cursor에 있다. 실패 서명이 바뀌어도 같은 run이면 처음으로 돌아가지 않는다(H3)."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(
+        ensure_errors=[
+            _sqlalchemy_error("53200", "out of shared memory"),
+            _sqlalchemy_error("55P03", "canceling statement due to lock timeout"),
+        ]
+    )
+
+    await _reconcile_tick(context, client)
+    first = _committed(context).head
+    assert first is not None
+    clock.advance(120)
+    # 재시작: 새 context, 같은 cursor 바이트.
+    restarted = _Context(instance=context.instance, cursor=context.updated_cursors[-1])
+    await _reconcile_tick(restarted, client)
+    second = _committed(restarted).head
+
+    assert second is not None
+    assert second.first_failed_at == first.first_failed_at
+    assert first.last_failure["sqlstate"] == "53200"
+    assert second.last_failure["sqlstate"] == "55P03"
+
+
+async def test_the_clock_starts_when_the_failed_call_returns_not_at_tick_start(
+    clock: _Clock,
+) -> None:
+    """M3: 시계 시작은 실패한 호출이 돌아온 시각이다(tick 시작이 아니다)."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    tick_started = clock.wall
+
+    class _SlowFailingClient(_Client):
+        async def ensure_dagster_feature_operation(self, **kwargs: Any) -> object:
+            clock.advance(7)
+            raise RuntimeError("slow failure")
+
+    await _reconcile_tick(context, _SlowFailingClient())
+
+    head = _committed(context).head
+    assert head is not None
+    assert head.first_failed_at == tick_started + timedelta(seconds=7)
+
+
+# --- tick 시간이 유계다 --------------------------------------------------------------------
+
+
+async def test_pages_stop_starting_calls_at_their_deadlines(clock: _Clock) -> None:
+    """Dagster page는 시작+20초, DB page는 시작+40초. 5초 미만이면 새 호출을 시작하지 않는다."""
+    records = [
+        _record(DagsterRunStatus.STARTED, run_id=f"run-{index}", storage_id=index + 1)
+        for index in range(1, 6)
+    ]
+    roots = [_active_root(f"db-{index}") for index in range(1, 6)]
+    db_records = [
+        _record(DagsterRunStatus.STARTED, run_id=f"db-{index}", storage_id=100 + index)
+        for index in range(1, 6)
+    ]
+
+    class _SlowClient(_Client):
+        async def ensure_dagster_feature_operation(self, **kwargs: Any) -> object:
+            clock.advance(8)
+            return await super().ensure_dagster_feature_operation(**kwargs)
+
+    context = _held_context(*records, *db_records)
+    context.instance.scan_records = records
+    client = _SlowClient(page=DagsterFeatureOperationPage(tuple(roots), None))  # type: ignore[arg-type]
+    started = clock.mono
+
+    await _reconcile_tick(context, client)
+
+    committed = _committed(context)
+    # Dagster page: t=0 → 8 → 16, 남은 4초 < 5초라 run-3은 시작하지 않는다.
+    assert committed.dagster == DagsterRunWatermark(3, "run-2")
+    # DB page: t=16 목록, 16→24→32, 남은 8초 → 40, 남은 0초라 db-4는 시작하지 않는다.
+    dagster_ids = {f"run-{index}" for index in range(1, 6)}
+    db_calls = [c["dagster_run_id"] for c in client.ensure_calls if c["dagster_run_id"] not in dagster_ids]
+    assert db_calls == ["db-1", "db-2", "db-3"]
+    # 일찍 멈춘 DB page는 마지막으로 방문한 항목에 cursor를 둔다.
+    assert committed.database == DagsterFeatureOperationCursor(
+        created_at=_NOW, root_job_id="11111111-1111-4111-8111-111111111111"
+    )
+    assert clock.mono - started <= 40
+    assert len(context.updated_cursors) == 1
+
+
+async def test_every_client_call_carries_its_page_deadline(clock: _Clock) -> None:
+    """client 호출 안의 트랜잭션은 page 마감에서 유도한 서버 쪽 상한을 받는다(결정 2)."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+
+    # sensor의 시계를 멈춰 두었으므로 남은 시간은 page 마감에서 실제 경과만큼만 줄었다.
+    dagster_page, database_page = client.deadlines
+    assert dagster_page is not None and database_page is not None
+    assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - 5 < dagster_page <= (
+        FEATURE_OPERATION_DAGSTER_PAGE_SECONDS
+    )
+    assert FEATURE_OPERATION_TICK_BUDGET_SECONDS - 5 < database_page <= (
+        FEATURE_OPERATION_TICK_BUDGET_SECONDS
+    )
+
+
+async def test_a_busy_storage_worker_counts_as_a_storage_failure_without_a_new_thread(
+    clock: _Clock,
+) -> None:
+    """앞 tick의 storage 읽기가 worker를 잡고 있으면 이번 tick은 읽지 않는다(결정 2)."""
+    from kortravelmap.dagster import feature_operation_sensors as sensors
+
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client()
+    assert sensors._STORAGE_SLOTS.acquire(blocking=False)
+    try:
+        await _reconcile_tick(context, client)
+    finally:
+        sensors._STORAGE_SLOTS.release()
+
+    committed = _committed(context)
+    assert client.ensure_calls == []
+    assert committed.head is not None
+    assert committed.head.last_failure == {
+        "category": "storage",
+        "closable": False,
+        "constraint": None,
+        "error_type": "DeadlineExceeded",
+        "sqlstate": None,
+    }
+
+
+# --- 알림은 경과 시간으로 ----------------------------------------------------------------
+
+
+async def test_a_lock_wait_at_the_head_alerts_after_15_minutes_hourly_and_never_closes(
+    clock: _Clock,
+) -> None:
+    """55P03 같은 일시 실패도 15분 이어지면 알린다. 닫지 않고 머리를 잡는다(O5 (i))."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(
+        ensure_error=_sqlalchemy_error("55P03", "canceling statement due to lock timeout")
+    )
+
+    async def tick() -> None:
+        await _reconcile_tick(context, client)
+        context.cursor = context.updated_cursors[-1]
+
+    await tick()
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS - 30)
+    await tick()
+    assert client.stalled_calls == []
+
+    clock.advance(30)
+    await tick()
+    assert len(client.stalled_calls) == 1
+    alert = client.stalled_calls[0]
+    assert alert["scope"] == "head"
+    assert alert["dagster_run_id"] == "run-1"
+    assert alert["last_failure"]["category"] == "lock_wait"
+    assert "ktmctl reconcile-abandon run-1" in alert["action"]
+
+    clock.advance(FEATURE_OPERATION_REALERT_SECONDS - 1)
+    await tick()
+    assert len(client.stalled_calls) == 1
+    clock.advance(1)
+    await tick()
+    assert len(client.stalled_calls) == 2
+    assert client.abandon_calls == []
+    assert _committed(context).dagster == DagsterRunWatermark(1, "previous")
+
+
+async def test_a_failed_alert_write_does_not_block_progress_and_retries(clock: _Clock) -> None:
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(ensure_error=RuntimeError("down"), stalled_error=RuntimeError("log down"))
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    head = _committed(context).head
+    assert head is not None and head.alerted_at is None
+    client.stalled_error = None
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+    head = _committed(context).head
+    assert head is not None and head.alerted_at == clock.wall
+    assert len(client.stalled_calls) == 2
+
+
+async def test_db_watch_hands_the_slot_on_after_alerting_a_non_closable_root(
+    clock: _Clock,
+) -> None:
+    """고칠 수 없는 root 하나가 슬롯을 영영 잡지 않는다(2차 리뷰 H2)."""
+    stuck = _record(DagsterRunStatus.FAILURE, run_id="stuck", storage_id=10)
+    context = _db_page_context(stuck)
+    client = _db_page_client("stuck")
+    client.reconcile_error = _sqlalchemy_error("42883", "function does not exist")
+
+    async def tick() -> None:
+        await _reconcile_tick(context, client)
+        context.cursor = context.updated_cursors[-1]
+
+    await tick()
+    watch = _committed(context).db_watch
+    assert watch is not None and watch.key == "stuck"
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    await tick()
+
+    assert len(client.stalled_calls) == 1
+    assert client.stalled_calls[0]["scope"] == "db_watch"
+    assert client.abandon_calls == []
+    assert _committed(context).db_watch is None
+
+
+async def test_db_watch_is_cleared_when_the_root_is_no_longer_reconcilable(
+    clock: _Clock,
+) -> None:
+    """매 tick 시작의 짧은 읽기(active-root 술어)에서 더는 대상이 아니면 시계를 지운다."""
+    stuck = _record(DagsterRunStatus.FAILURE, run_id="stuck", storage_id=10)
+    context = _db_page_context(stuck)
+    client = _db_page_client("stuck")
+    client.reconcile_error = RuntimeError("boom")
+    await _reconcile_tick(context, client)
+    context.cursor = context.updated_cursors[-1]
+    assert _committed(context).db_watch is not None
+
+    client.alive = False
+    client.page = DagsterFeatureOperationPage((), None)
+    await _reconcile_tick(context, client)
+
+    assert client.alive_calls == [{"dagster_run_id": "stuck"}]
+    assert _committed(context).db_watch is None
+
+
+# --- gate 경합과 lock_timeout을 가른다 ---------------------------------------------------
+
+
+def test_gate_busy_is_recognized_only_by_its_marker_not_by_every_55p03() -> None:
+    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
+
+    gate = _sqlalchemy_error(
+        "55P03", "feature-write-all gate is busy; provider curation root retries later"
+    )
+    lock = _sqlalchemy_error("55P03", "canceling statement due to lock timeout")
+
+    assert _classify_failure(gate, at_head=True)["category"] == "gate_busy"
+    assert _classify_failure(lock, at_head=True)["category"] == "lock_wait"
+    assert _classify_failure(gate, at_head=True)["closable"] is False
+    # 표지는 message에서 읽는다. str(exc)에만 있는 문구는 표지가 아니다.
+    disguised = _sqlalchemy_error("55P03", "lock timeout")
+    disguised.args = ("feature-write-all gate is busy",)
+    assert _classify_failure(disguised, at_head=True)["category"] == "lock_wait"
+
+
+# --- 닫기는 명시 목록만 ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "constraint", "closable"),
+    [
+        ("22023", None, True),
+        ("22P02", None, True),
+        ("23502", None, True),
+        ("23514", "ck_tvn40_provider_curation_root", True),
+        ("23514", "ck_tvn40_provider_curation_child_set", True),
+        ("23514", "ck_tvn40_provider_curation_root_replay", True),
+        ("23514", "ck_tvn40_provider_terminal_members", True),
+        ("23514", "ck_tvn40_provider_terminal_receipts", True),
+        ("23514", "ck_tvn40_provider_operation_membership", False),
+        ("23505", None, False),
+        ("P0001", None, False),
+        ("42501", None, False),
+        ("53200", None, False),
+        ("55P03", None, False),
+        ("40001", None, False),
+        ("57014", None, False),
+        ("08006", None, False),
+    ],
+)
+def test_only_the_named_failures_are_closable(
+    sqlstate: str, constraint: str | None, closable: bool
+) -> None:
+    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
+
+    failure = _classify_failure(_sqlalchemy_error(sqlstate, "x", constraint), at_head=True)
+
+    assert failure["closable"] is closable
+    assert failure["sqlstate"] == sqlstate
+
+
+def test_non_database_failures_close_only_as_named() -> None:
+    from kortravelmap.dagster.feature_operation_sensors import _classify_failure
+
+    conflict = FeatureOperationInvariantConflict("x", dagster_run_id="run-1")
+    observation = FeatureOperationObservationError("x")
+    assert _classify_failure(conflict, at_head=False)["closable"] is True
+    assert _classify_failure(observation, at_head=True)["closable"] is True
+    # 관측 오류는 머리에서만 닫는다.
+    assert _classify_failure(observation, at_head=False)["closable"] is False
+    assert _classify_failure(TimeoutError(), at_head=True)["closable"] is False
+    assert _classify_failure(RuntimeError("x"), at_head=True)["closable"] is False
+
+
+async def test_a_closable_head_with_a_root_is_closed_and_passed(clock: _Clock) -> None:
+    record = _record(DagsterRunStatus.SUCCESS, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(
+        ensure_error=_sqlalchemy_error("23502", "null value"), abandon_outcome="closed"
+    )
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert [call["dagster_status"] for call in client.abandon_calls] == ["SUCCESS"]
+    assert client.abandon_calls[0]["engine_finished_at"] == _NOW + timedelta(minutes=1)
+    assert _committed(context).dagster == DagsterRunWatermark(2, "run-1")
+
+
+async def test_a_head_whose_run_is_still_active_is_not_passed_by_closing(clock: _Clock) -> None:
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(
+        ensure_error=FeatureOperationInvariantConflict("x", dagster_run_id="run-1"),
+        abandon_outcome="run_active",
+    )
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert len(client.abandon_calls) == 1
+    committed = _committed(context)
+    assert committed.dagster == DagsterRunWatermark(1, "previous")
+    assert committed.head is not None and committed.head.key == "run-1"
+
+
+async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_status(
+    clock: _Clock,
+) -> None:
+    context = _db_page_context()
+    client = _db_page_client("gone")
+    client.abandon_outcome = "closed"
+
+    await _reconcile_tick(context, client)
+    context.cursor = context.updated_cursors[-1]
+    watch = _committed(context).db_watch
+    assert watch is not None and watch.last_failure["category"] == "run_missing"
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    await _reconcile_tick(context, client)
+
+    assert client.abandon_calls == [
+        {
+            "dagster_run_id": "gone",
+            "dagster_status": None,
+            "engine_finished_at": None,
+            "failure": dict(watch.last_failure),
+            "first_failed_at": watch.first_failed_at,
+        }
+    ]
+    assert _committed(context).db_watch is None
+
+
+async def test_a_storage_failure_at_the_head_is_never_closed(clock: _Clock) -> None:
+    context = _held_context()
+    context.instance.records_error = RuntimeError("storage down")
+    client = _Client()
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS * 4)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert client.abandon_calls == []
+    assert len(client.stalled_calls) == 1
+    assert "storage" in client.stalled_calls[0]["action"]
+
+
+# --- cursor는 비면 같은 바이트, 커져도 유계 ----------------------------------------------
+
+
+def test_an_empty_cursor_is_byte_identical_to_the_previous_format() -> None:
+    cursor = FeatureOperationReconcileCursor(
+        dagster=DagsterRunWatermark(7, "run-7"),
+        database=DagsterFeatureOperationCursor(
+            created_at=_NOW, root_job_id="11111111-1111-4111-8111-111111111111"
+        ),
+    )
+
+    assert cursor.to_json() == (
+        '{"dagster":{"run_id":"run-7","storage_id":7},'
+        '"database":{"created_at":"2026-07-01T08:00:00+00:00",'
+        '"root_job_id":"11111111-1111-4111-8111-111111111111"},"version":1}'
+    )
+    assert FeatureOperationReconcileCursor().to_json() == (
+        '{"dagster":null,"database":null,"version":1}'
+    )
+
+
+def test_a_full_cursor_round_trips_and_stays_small() -> None:
+    from kortravelmap.dagster.feature_operation_sensors import _failure
+    from kortravelmap.dagster.retry_common import StallClock
+
+    long_id = "r" * 64
+    failure = _failure(
+        category="closable_sqlstate",
+        closable=True,
+        error_type="IntegrityError" * 4,
+        sqlstate="23514",
+        constraint="c" * 63,
+    )
+    head = StallClock(key=long_id, first_failed_at=_NOW, last_failure=failure, alerted_at=_NOW)
+    cursor = FeatureOperationReconcileCursor(
+        dagster=DagsterRunWatermark(2**40, long_id),
+        database=DagsterFeatureOperationCursor(created_at=_NOW, root_job_id=long_id),
+        head=head,
+        db_watch=head,
+    )
+
+    encoded = cursor.to_json()
+    assert FeatureOperationReconcileCursor.from_json(encoded) == cursor
+    assert '"version":1' in encoded
+    assert len(encoded.encode()) < 2_000
+
+
+def test_cursor_parser_rejects_unknown_keys() -> None:
+    with pytest.raises(ValueError, match="shape"):
+        FeatureOperationReconcileCursor.from_json(
+            '{"dagster":null,"database":null,"version":1,"head_failure":null}'
+        )

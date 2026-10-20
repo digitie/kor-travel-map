@@ -25,6 +25,7 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationPage,
     DagsterFeatureRunStatus,
     ExecutionState,
+    FeatureOperationAbandonResult,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
     TriggerKind,
@@ -42,15 +43,18 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "abandon_dagster_feature_run",
     "append_dagster_feature_attempt_event",
     "ensure_dagster_feature_operation",
     "finish_dagster_feature_membership",
+    "is_reconcilable_dagster_feature_run",
     "list_reconcilable_dagster_feature_runs",
     "list_feature_operation_memberships",
     "resolve_feature_operation_memberships",
     "resolve_feature_operation_dataset_membership",
     "reconcile_dagster_feature_run",
     "record_feature_operation_invariant_conflict",
+    "record_feature_operation_reconcile_stalled",
 ]
 
 _RUNNING_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset(
@@ -429,7 +433,11 @@ def _operation(rows: Sequence[Any]) -> DagsterFeatureOperation:
         root_job_id=str(root.root_job_id),
         dagster_run_id=str(root.dagster_run_id),
         status=cast(ExecutionState, str(root.root_status)),
-        dagster_run_status=_validate_run_status(str(root.dagster_run_status)),
+        dagster_run_status=(
+            _validate_run_status(str(root.dagster_run_status))
+            if root.dagster_run_status is not None
+            else None
+        ),
         progress=int(root.root_progress),
         current_stage=root.root_stage,
         created_at=root.root_created_at,
@@ -1134,6 +1142,223 @@ async def reconcile_dagster_feature_run(
         outcome="applied",
         operation=await _load_operation(session, normalized_run_id),
     )
+
+
+_RECONCILE_ABANDONED_EVENT: Final[str] = "feature_operation.reconcile_abandoned"
+_RECONCILE_STALLED_EVENT: Final[str] = "feature_operation.reconcile_stalled"
+
+
+def _failure_detail(failure: Mapping[str, Any] | str) -> dict[str, Any] | str:
+    if isinstance(failure, str):
+        if not failure or failure != failure.strip():
+            raise ValueError("failure must be a trimmed non-empty string or a mapping")
+        return failure
+    if not failure:
+        raise ValueError("failure mapping must not be empty")
+    return dict(failure)
+
+
+def _closing_finished_at(
+    operation: DagsterFeatureOperation, engine_finished_at: datetime | None
+) -> datetime | None:
+    """Dagster 종료 시각을 쓸 수 있으면 쓴다. root·member 시작보다 앞서면 쓰지 않는다.
+
+    닫는 대상은 불변식이 깨진 run일 수 있다(시각이 어긋나서 conflict가 난 run 등). 그 시각을
+    그대로 넣으면 engine timeline 검사(23514)에 걸려 닫기가 실패하므로 그때는 비워 둔다.
+    """
+    if engine_finished_at is None:
+        return None
+    floor = [operation.created_at]
+    floor.extend(value for value in (operation.started_at,) if value is not None)
+    floor.extend(
+        member.started_at for member in operation.members if member.started_at is not None
+    )
+    return engine_finished_at if engine_finished_at >= max(floor) else None
+
+
+async def abandon_dagster_feature_run(
+    session: AsyncSession,
+    *,
+    dagster_run_id: str,
+    dagster_status: str | None,
+    engine_finished_at: datetime | None,
+    failure: Mapping[str, Any] | str,
+    first_failed_at: datetime | None,
+) -> FeatureOperationAbandonResult:
+    """reconcile이 넘기지 못하는 run을 닫는다. 무엇을 할지는 DB 상태가 정한다(ADR-112 결정 4).
+
+    - root 없음 → ``reconcile_abandoned`` system log 한 행. 이 행이 그 run의 내구성 있는 기록이다.
+    - root에 취소 marker → 아무것도 하지 않는다(취소 coordinator 몫).
+    - root가 이미 terminal → 아무것도 하지 않는다.
+    - root active, Dagster active → 아무것도 하지 않는다(돌고 있는 run의 root는 닫지 않는다).
+    - root active, Dagster terminal 또는 run 없음(``dagster_status=None``) → 기존 terminal 전이로
+      root와 끝나지 않은 member를 ``failed``로 두고 ``reconcile_abandoned`` 로그를 남긴다.
+      ``dagster_run_status``에는 Dagster의 실제 값을, run이 없으면 NULL을 넣는다.
+
+    sensor는 정한 실패(CLOSABLE)가 15분 넘게 이어진 run에만 부르고, 운영자는
+    ``failure="operator"``로 부른다(``ktmctl reconcile-abandon``). lineage lock 안에서 한
+    트랜잭션으로 돈다 — 같은 run의 ensure와 겹치지 않는다.
+    """
+    normalized_run_id = _run_id(dagster_run_id)
+    status = _validate_run_status(dagster_status) if dagster_status is not None else None
+    finished_at = (
+        _aware(engine_finished_at, name="engine_finished_at", dagster_run_id=normalized_run_id)
+        if engine_finished_at is not None
+        else None
+    )
+    detail_failure = _failure_detail(failure)
+    first_failed = (
+        _aware(first_failed_at, name="first_failed_at", dagster_run_id=normalized_run_id)
+        if first_failed_at is not None
+        else None
+    )
+    base_detail: dict[str, Any] = {
+        "dagster_run_id": normalized_run_id,
+        "dagster_status": status,
+        "failure": detail_failure,
+        "first_failed_at": first_failed.isoformat() if first_failed is not None else None,
+    }
+
+    await lock_pipeline_lineage_mutation(session)
+    root = (
+        await session.execute(
+            text(_LOCK_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
+        )
+    ).one_or_none()
+    if root is None:
+        action = "no operation root was recorded for this run; re-run the dataset if it matters"
+        await record_system_log(
+            session,
+            level="error",
+            source="feature_operation",
+            event=_RECONCILE_ABANDONED_EVENT,
+            message=(
+                f"{_RECONCILE_ABANDONED_EVENT}: run {normalized_run_id} has no operation root "
+                f"and reconcile gave up; {action}"
+            ),
+            detail={**base_detail, "root_job_id": None, "action": action},
+        )
+        return FeatureOperationAbandonResult(outcome="recorded_without_root", root_job_id=None)
+    root_job_id = str(root.root_job_id)
+    await lock_pipeline_cancellation_root(
+        session, root_kind="import_job", root_id=root_job_id
+    )
+    operation = await _load_operation(session, normalized_run_id)
+    if root.root_cancellation_id is not None:
+        return FeatureOperationAbandonResult(outcome="cancellation", root_job_id=root_job_id)
+    if operation.status in {"done", "failed", "cancelled"}:
+        return FeatureOperationAbandonResult(outcome="terminal", root_job_id=root_job_id)
+    if status is not None and status not in DAGSTER_FEATURE_TERMINAL_STATUS_VALUES:
+        return FeatureOperationAbandonResult(outcome="run_active", root_job_id=root_job_id)
+    provider_dataset_ids = sorted(
+        {member.membership.provider_dataset_id for member in operation.members}
+    )
+    action = f"curation is not finalized; re-run the dataset(s) {provider_dataset_ids}"
+    message = (
+        f"{_RECONCILE_ABANDONED_EVENT}: run {normalized_run_id} "
+        f"({status or 'missing from Dagster'}) was closed as failed after reconcile gave up; "
+        f"{action}"
+    )
+    await session.execute(
+        text(_TERMINAL_OPERATION_COMMAND_SQL),
+        {
+            "target_status": "failed",
+            "dagster_run_status": status,
+            "stage": "failed",
+            "error_message": message,
+            "started_at": None,
+            "finished_at": _closing_finished_at(operation, finished_at),
+            "root_job_id": root_job_id,
+            "update_members": True,
+        },
+    )
+    await record_system_log(
+        session,
+        level="error",
+        source="feature_operation",
+        event=_RECONCILE_ABANDONED_EVENT,
+        message=message,
+        detail={
+            **base_detail,
+            "root_job_id": root_job_id,
+            "provider_dataset_ids": provider_dataset_ids,
+            "action": "re-run the dataset",
+        },
+    )
+    return FeatureOperationAbandonResult(outcome="closed", root_job_id=root_job_id)
+
+
+async def record_feature_operation_reconcile_stalled(
+    session: AsyncSession,
+    *,
+    scope: str,
+    dagster_run_id: str,
+    dagster_status: str | None,
+    first_failed_at: datetime,
+    last_failure: Mapping[str, Any],
+    alerted_at: datetime | None,
+    action: str,
+) -> None:
+    """reconcile이 한 run을 오래 넘기지 못한다는 사실을 운영 로그 한 행으로 남긴다(ADR-112 결정 3).
+
+    message는 이벤트 이름으로 시작한다 — admin 로그의 ``q`` 검색에 걸리게 하려는 것이다.
+    sensor가 cursor를 쓰기 전에 tick이 버려지면 다음 tick이 한 번 더 남길 수 있다(적어도 한 번).
+    """
+    if scope not in {"head", "db_watch"}:
+        raise ValueError("scope must be 'head' or 'db_watch'")
+    normalized_run_id = _run_id(dagster_run_id)
+    status = _validate_run_status(dagster_status) if dagster_status is not None else None
+    first_failed = _aware(
+        first_failed_at, name="first_failed_at", dagster_run_id=normalized_run_id
+    )
+    if not action or action != action.strip():
+        raise ValueError("action must be a trimmed non-empty string")
+    failure = dict(last_failure)
+    await record_system_log(
+        session,
+        level="error",
+        source="feature_operation",
+        event=_RECONCILE_STALLED_EVENT,
+        message=(
+            f"{_RECONCILE_STALLED_EVENT}: reconcile has not passed run {normalized_run_id} "
+            f"({status or 'status unknown'}) since {first_failed.isoformat()}; "
+            f"last failure {failure.get('category', 'unknown')}; {action}"
+        ),
+        detail={
+            "scope": scope,
+            "dagster_run_id": normalized_run_id,
+            "dagster_status": status,
+            "first_failed_at": first_failed.isoformat(),
+            "last_failure": failure,
+            "previous_alerted_at": alerted_at.isoformat() if alerted_at is not None else None,
+            "action": action,
+        },
+    )
+
+
+_RECONCILABLE_ROOT_SQL = f"""
+SELECT 1
+FROM ops.import_jobs AS root
+WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
+  AND root.parent_job_id IS NULL
+  AND root.dagster_run_id = :dagster_run_id
+  AND root.status IN ('queued','running')
+  AND root.cancellation_id IS NULL
+  AND root.quarantined_at IS NULL
+"""
+"""``_ACTIVE_ROOTS_PAGE_SQL``과 같은 술어로 root 하나만 본다(keyset 조건 없음)."""
+
+
+async def is_reconcilable_dagster_feature_run(
+    session: AsyncSession, *, dagster_run_id: str
+) -> bool:
+    """이 run의 root가 아직 DB page 대상(active, 취소 marker·quarantine 없음)인가."""
+    row = (
+        await session.execute(
+            text(_RECONCILABLE_ROOT_SQL), {"dagster_run_id": _run_id(dagster_run_id)}
+        )
+    ).first()
+    return row is not None
 
 
 async def list_reconcilable_dagster_feature_runs(
