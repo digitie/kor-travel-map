@@ -26,7 +26,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
 **reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
-#1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다.
+#1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다. 설계안은 ADR-112(proposed, 소유자 승인 대기).
 
 **geo 릴리스 재지오코딩 묶음(ADR-109 accepted, 2026-10-16 구현)** — 전부 닫혔다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15, `T-GR-01`~`08`은 2026-10-16~17
 `tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
@@ -118,6 +118,5 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
 
-  `feature_operation_reconciliation_sensor`는 한 run의 반영 실패가 tick 전체를 멈추고 30초마다 같은 일을 다시 한다.
-  #1319가 세 판을 시도했다가 되돌렸다 — 리뷰 결과(H1–H3·M1–M3·L1–L4, parking 표 결함)를 설계 입력으로
-  해제 조건을 만족하는 한 판을 낸다. 조건은 tasks-acceptance §T-RECONCILE-RETRY.
+  한 run의 반영 실패가 tick 전체를 멈추고 30초마다 되풀이한다. #1319의 세 판은 되돌렸다.
+  설계안 ADR-112(proposed, O1~O5 소유자 승인 대기) → 승인 뒤 같은 항목으로 구현. 조건은 acceptance.
