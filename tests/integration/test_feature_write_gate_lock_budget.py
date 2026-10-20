@@ -404,7 +404,9 @@ async def test_root_finalize_over_a_dataset_larger_than_the_lock_table(
     assert observed == feature_count
 
 
-async def _finalize_failure(dagster: AsyncEngine, root_job_id: str, *, lock_timeout: str | None) -> Any:
+async def _finalize_failure(
+    dagster: AsyncEngine, root_job_id: str, *, lock_timeout: str | None
+) -> Any:
     """실제 procedure를 SERIALIZABLE로 불러 난 오류를 돌려준다."""
     from sqlalchemy.exc import DBAPIError
 

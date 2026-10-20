@@ -9,6 +9,7 @@ import time
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 
 from kortravelmap.core.feature_operation import (
@@ -754,7 +755,7 @@ async def _reconcile_dagster_page(
         try:
             outcome = await tick.call(
                 deadline,
-                lambda record=record, seen=seen: _apply_run_record(record, client, seen=seen),
+                partial(_apply_run_record, record, client, seen=seen),
             )
         except _OutOfTime:
             break
@@ -868,7 +869,7 @@ async def _reconcile_database_page(
         record: _RunRecord | None = None
         try:
             record = tick.read_storage(
-                lambda run_id=run_id: tick.context.instance.get_run_record_by_id(run_id),
+                partial(tick.context.instance.get_run_record_by_id, run_id),
                 deadline,
             )
         except DeadlineExceeded:
@@ -889,7 +890,7 @@ async def _reconcile_database_page(
                     result.watch = None
                 continue
             try:
-                await tick.call(deadline, lambda record=record: _apply_run_record(record, client))
+                await tick.call(deadline, partial(_apply_run_record, record, client))
             except _OutOfTime:
                 next_cursor = _database_cursor_of(visited)
                 break

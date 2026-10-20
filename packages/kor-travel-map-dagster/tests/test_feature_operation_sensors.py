@@ -824,7 +824,8 @@ async def test_deleted_dagster_cursor_anchor_fails_loud_without_advancing() -> N
     # watermark는 제자리, 머리 시계가 돈다. DB page는 그와 상관없이 돈다(결정 2).
     committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
     assert committed.dagster == DagsterRunWatermark(2, "deleted-anchor")
-    assert committed.head is not None and committed.head.key == "deleted-anchor"
+    assert committed.head is not None
+    assert committed.head.key == "deleted-anchor"
     assert client.ensure_calls == []
     assert len(client.list_calls) == 1
     assert context.log.errors == [
@@ -845,7 +846,8 @@ async def test_dagster_write_failure_is_redacted_and_holds_the_watermark_at_that
 
     committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
     assert committed.dagster == DagsterRunWatermark(1, "previous")
-    assert committed.head is not None and committed.head.key == "run-1"
+    assert committed.head is not None
+    assert committed.head.key == "run-1"
     assert len(client.list_calls) == 1
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
@@ -899,7 +901,8 @@ async def test_partial_dagster_page_failure_restarts_and_replays_committed_prefi
     ]
     first = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
     assert first.dagster == DagsterRunWatermark(2, "run-1")
-    assert first.head is not None and first.head.key == "run-2"
+    assert first.head is not None
+    assert first.head.key == "run-2"
 
     replay_context = _Context(instance=_Instance(records), cursor=context.updated_cursors[0])
     replay_client = _Client()
@@ -971,7 +974,8 @@ async def test_database_page_write_failure_skips_the_item_and_watches_it() -> No
 
     committed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[0])
     assert committed.database is None  # page 끝 - 처음으로 돌아간다
-    assert committed.db_watch is not None and committed.db_watch.key == "db-active-run"
+    assert committed.db_watch is not None
+    assert committed.db_watch.key == "db-active-run"
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -1682,7 +1686,8 @@ async def test_a_run_whose_root_was_never_created_holds_the_watermark(clock: _Cl
 
     committed = _committed(context)
     assert committed.dagster == DagsterRunWatermark(1, "previous")
-    assert committed.head is not None and committed.head.key == "run-1"
+    assert committed.head is not None
+    assert committed.head.key == "run-1"
     # 머리 뒤의 run은 이번 tick에 손대지 않는다.
     assert [call["dagster_run_id"] for call in client.ensure_calls] == ["run-1"]
 
@@ -1712,7 +1717,8 @@ async def test_an_observation_error_waits_out_the_clock_then_leaves_a_durable_re
     await _reconcile_tick(context, client)
     first = _committed(context)
     assert first.dagster == DagsterRunWatermark(1, "previous")
-    assert first.head is not None and first.head.last_failure["category"] == "observation"
+    assert first.head is not None
+    assert first.head.last_failure["category"] == "observation"
     assert client.abandon_calls == []
 
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS - 1)
@@ -1834,7 +1840,8 @@ async def test_every_client_call_carries_its_page_deadline(clock: _Clock) -> Non
 
     # sensor의 시계를 멈춰 두었으므로 남은 시간은 page 마감에서 실제 경과만큼만 줄었다.
     dagster_page, database_page = client.deadlines
-    assert dagster_page is not None and database_page is not None
+    assert dagster_page is not None
+    assert database_page is not None
     assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - 5 < dagster_page <= (
         FEATURE_OPERATION_DAGSTER_PAGE_SECONDS
     )
@@ -1922,12 +1929,14 @@ async def test_a_failed_alert_write_does_not_block_progress_and_retries(clock: _
     await _reconcile_tick(context, client)
 
     head = _committed(context).head
-    assert head is not None and head.alerted_at is None
+    assert head is not None
+    assert head.alerted_at is None
     client.stalled_error = None
     context.cursor = context.updated_cursors[-1]
     await _reconcile_tick(context, client)
     head = _committed(context).head
-    assert head is not None and head.alerted_at == clock.wall
+    assert head is not None
+    assert head.alerted_at == clock.wall
     assert len(client.stalled_calls) == 2
 
 
@@ -1946,7 +1955,8 @@ async def test_db_watch_hands_the_slot_on_after_alerting_a_non_closable_root(
 
     await tick()
     watch = _committed(context).db_watch
-    assert watch is not None and watch.key == "stuck"
+    assert watch is not None
+    assert watch.key == "stuck"
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
     await tick()
 
@@ -2078,7 +2088,8 @@ async def test_a_head_whose_run_is_still_active_is_not_passed_by_closing(clock: 
     assert len(client.abandon_calls) == 1
     committed = _committed(context)
     assert committed.dagster == DagsterRunWatermark(1, "previous")
-    assert committed.head is not None and committed.head.key == "run-1"
+    assert committed.head is not None
+    assert committed.head.key == "run-1"
 
 
 async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_status(
@@ -2091,7 +2102,8 @@ async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_statu
     await _reconcile_tick(context, client)
     context.cursor = context.updated_cursors[-1]
     watch = _committed(context).db_watch
-    assert watch is not None and watch.last_failure["category"] == "run_missing"
+    assert watch is not None
+    assert watch.last_failure["category"] == "run_missing"
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
     await _reconcile_tick(context, client)
 
