@@ -81,6 +81,7 @@ class _Client:
     list_calls: list[dict[str, Any]] = field(default_factory=list)
     membership_calls: list[dict[str, Any]] = field(default_factory=list)
     ensure_outcomes: list[str] = field(default_factory=list)
+    ensure_block_reasons: list[str | None] = field(default_factory=list)
     ensure_errors: list[Exception | None] = field(default_factory=list)
     ensure_error: Exception | None = None
     reconcile_error: Exception | None = None
@@ -97,7 +98,10 @@ class _Client:
         if self.ensure_error is not None:
             raise self.ensure_error
         outcome = self.ensure_outcomes.pop(0) if self.ensure_outcomes else "applied"
-        return SimpleNamespace(outcome=outcome)
+        block_reason = self.ensure_block_reasons.pop(0) if self.ensure_block_reasons else (
+            "terminal" if outcome == "blocked" else None
+        )
+        return SimpleNamespace(outcome=outcome, block_reason=block_reason)
 
     async def reconcile_dagster_feature_run(self, **kwargs: Any) -> object:
         self.reconcile_calls.append(kwargs)
@@ -1485,3 +1489,59 @@ class _CompletionLookupFailingInstance(_Instance):
         if getattr(filters, "job_name", None) == FEATURE_OPERATION_COMPLETION_JOB_NAME:
             raise RuntimeError("secret storage detail")
         return super().get_run_records(filters=filters, **kwargs)
+
+
+async def test_sensor_success_on_child_cancellation_still_requests_completion() -> None:
+    """ensure는 child marker로도 막히지만 reconcile은 root marker로만 막힌다 — sweep이 완결한다."""
+
+    client = _Client(ensure_outcomes=["blocked"], ensure_block_reasons=["cancellation"])
+
+    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert outcome == "completion_pending"
+    assert client.reconcile_calls == []
+
+
+async def test_status_event_for_a_panel_only_run_yields_to_the_next_event() -> None:
+    """operation key 없는 run(sweep 자신)은 None — Dagster가 같은 tick에서 다음 이벤트로 간다."""
+
+    record = _completion_run(run_id="sweep-a", status=DagsterRunStatus.SUCCESS, storage_id=3)
+    client = _Client()
+
+    assert await _evaluate_status_event(_status_context(record), client) is None
+    assert client.ensure_calls == []
+
+
+async def test_backstop_fires_after_a_sweep_cancelled_before_it_started() -> None:
+    cancelled = _completion_run(run_id="sweep-a", status=DagsterRunStatus.CANCELED, storage_id=3)
+    context = _db_page_context(_record(DagsterRunStatus.SUCCESS, run_id="run-1"), cancelled)
+
+    result = await _reconcile_tick(context, _db_page_client("run-1"))
+
+    assert isinstance(result, list)
+    assert [request.run_key for request in result] == [
+        "feature-operation-completion:backstop:after:sweep-a"
+    ]
+
+
+async def test_sweep_list_failure_fails_the_run_without_raw_text() -> None:
+    from kortravelmap.dagster.feature_operation_completion import (
+        _SweepListUnavailable,
+        sweep_succeeded_feature_operations,
+    )
+
+    client = _Client(list_error=RuntimeError("postgresql://secret@db"))
+
+    with pytest.raises(_SweepListUnavailable) as caught:
+        await sweep_succeeded_feature_operations(_Instance([]), client, _Log())
+
+    assert "RuntimeError" in str(caught.value)
+    assert "secret" not in str(caught.value)
+
+
+def test_completion_job_has_no_automatic_retry() -> None:
+    from kortravelmap.dagster.feature_operation_completion import (
+        feature_operation_completion_job,
+    )
+
+    assert feature_operation_completion_job.tags["dagster/max_retries"] == "0"

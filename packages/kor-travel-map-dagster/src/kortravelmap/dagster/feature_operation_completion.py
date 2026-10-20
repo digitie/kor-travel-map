@@ -60,19 +60,28 @@ _COMPLETION_MAX_RUNTIME_SECONDS: Final[int] = 3_600
     description="Dagster SUCCESS인데 아직 active인 operation root를 하나씩 완결한다.",
 )
 async def complete_succeeded_feature_operations_op(context: OpExecutionContext) -> int:
-    """active root를 한 바퀴 훑어 SUCCESS run의 root를 완결하고 완결한 수를 돌려준다."""
+    """active root를 한 바퀴 훑어 SUCCESS run의 root를 완결하고 완결한 수를 돌려준다.
+
+    root 하나의 완결 실패는 run을 FAILURE로 만들지 않는다. 고칠 수 없는 root 하나가 SUCCESS run마다
+    FAILURE run을 쌓아 진짜 실패를 묻지 않게 하기 위해서다. 실패는 root마다 error 로그와 output
+    metadata(`failed_run_ids`)에 남고, 그 root는 active로 남아 다음 sweep이 다시 시도한다. 멈춤 알림은
+    ADR-112 결정 3의 몫이다. 목록 조회 자체가 실패하면 run을 실패시킨다.
+    """
     client = cast("AsyncKorTravelMapClient", context.resources.kor_travel_map_client)
-    completed, failed = await sweep_succeeded_feature_operations(
-        context.instance, client, context.log
-    )
-    if failed:
-        raise Failure(
-            description=(
-                f"operation root 완결 {len(failed)}건 실패(다음 sweep에 다시 시도): "
-                + ", ".join(failed[:10])
-            )
+    try:
+        completed, failed = await sweep_succeeded_feature_operations(
+            context.instance, client, context.log
         )
+    except _SweepListUnavailable as exc:
+        raise Failure(description=str(exc)) from None
+    context.add_output_metadata(
+        {"completed": completed, "failed": len(failed), "failed_run_ids": ", ".join(failed[:20])}
+    )
     return completed
+
+
+class _SweepListUnavailable(RuntimeError):
+    """active root 목록을 읽지 못했다(원문 없이 오류 종류만 싣는다)."""
 
 
 async def sweep_succeeded_feature_operations(
@@ -80,9 +89,10 @@ async def sweep_succeeded_feature_operations(
     client: "AsyncKorTravelMapClient",
     log: Any,
 ) -> tuple[int, list[str]]:
-    """active root 목록을 끝까지 한 번 훑는다. (완결한 수, 실패한 run id)를 돌려준다.
+    """active root 목록을 끝까지 한 번 훑는다. (완결한 root 수, 실패한 run id)를 돌려준다.
 
     한 root의 실패는 다음 root를 막지 않는다. 실패한 root는 active로 남아 다음 sweep이 다시 집는다.
+    ``applied``만 완결로 센다(경쟁으로 이미 끝났거나 막힌 root는 세지 않는다).
     """
     # 순환 import 회피: sensor 모듈이 이 job을 요청 대상으로 import한다.
     from .feature_operation_sensors import apply_completion_record
@@ -91,9 +101,15 @@ async def sweep_succeeded_feature_operations(
     failed: list[str] = []
     cursor = None
     while True:
-        page = await client.list_reconcilable_dagster_feature_runs(
-            cursor=cursor, page_size=FEATURE_OPERATION_COMPLETION_PAGE_SIZE
-        )
+        try:
+            page = await client.list_reconcilable_dagster_feature_runs(
+                cursor=cursor, page_size=FEATURE_OPERATION_COMPLETION_PAGE_SIZE
+            )
+        except Exception as exc:
+            # 원문은 남기지 않는다(DSN·SQL 조각이 섞일 수 있다).
+            raise _SweepListUnavailable(
+                f"active root 목록 조회 실패: error_type={type(exc).__name__}"
+            ) from None
         for operation in page.items:
             run_id = operation.dagster_run_id
             try:
@@ -102,15 +118,15 @@ async def sweep_succeeded_feature_operations(
                     continue
                 outcome = await apply_completion_record(record, client)
             except Exception as exc:
-                # 원문은 남기지 않는다(DSN·SQL 조각이 섞일 수 있다).
                 failed.append(run_id)
                 log.error(
                     f"operation root 완결 실패: run_id={run_id} "
                     f"error_type={type(exc).__name__}"
                 )
                 continue
-            completed += 1
-            log.info(f"operation root 완결: run_id={run_id} outcome={outcome}")
+            if outcome == "applied":
+                completed += 1
+            log.info(f"operation root 완결 시도: run_id={run_id} outcome={outcome}")
         if page.next_cursor is None:
             break
         cursor = page.next_cursor

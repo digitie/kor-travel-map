@@ -52,8 +52,9 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
 - **어디서.** 별도 job `feature_operation_completion`(op 하나, config 없음). run 하나는 **sweep 한 번**이다. reconcile
   sensor의 DB page와 같은 목록(`list_reconcilable_dagster_feature_runs` — active, 취소 marker·quarantine 없음)을 끝까지
   한 번 훑고, Dagster run이 SUCCESS인 root마다 지금 sensor가 하던 terminal 반영(ensure → `reconcile_dagster_feature_run`, 그
-  안의 SUCCESS 완결 CALL)을 **같은 함수로** 한다. 한 root의 실패는 다음 root를 막지 않고, 실패가 있으면 run은 FAILURE로
-  끝난다. repo·SQL·procedure·client는 바꾸지 않는다. migration도, API·OpenAPI 변화도 없다.
+  안의 SUCCESS 완결 CALL)을 **같은 함수로** 한다. 한 root의 실패는 다음 root를 막지 않고 run도 실패시키지 않는다(root마다
+  error 로그와 output metadata `failed_run_ids`). 목록 조회 자체가 실패할 때만 run이 FAILURE다. repo·SQL·procedure·client는
+  바꾸지 않는다. migration도, API·OpenAPI 변화도 없다.
 - **sensor가 하는 일.** run-status sensor(success)와 reconcile sensor의 Dagster page는 SUCCESS run에 ensure만 한다(root가
   있게 하는 짧은 트랜잭션). reconcile sensor의 DB page는 SUCCESS인 active root에 아무 DB 호출도 하지 않는다(root는 이미
   있다). FAILURE·CANCELED는 지금처럼 sensor 안에서 reconcile한다 — 그 경로는 완결을 부르지 않는다(target이 `done`일 때만
@@ -69,8 +70,11 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
 - **직렬화.** op가 pool `kor_travel_map.feature_operation_completion`을 선언한다. `concurrency.pools.default_limit: 1`·
   `granularity: run`이므로 sweep은 인스턴스 전역에서 하나씩 돈다. 여분 요청은 QUEUED로 기다렸다가 할 일이 없으면 곧 끝난다.
   완결은 어차피 lineage advisory lock 하나로 직렬화되므로 동시에 여럿 돌려도 빨라지지 않는다. 이 직렬화는 기존 Map
-  pool(`GEO_HEAVY_POOL` 등)과 같은 instance 설정에 기댄다. 그 설정이 없는 instance에서는 sweep이 겹칠 수 있다. 그래도
-  데이터는 안전하고, 겹친 쪽이 lock 대기나 40001로 실패할 뿐이며 다음 sweep이 다시 집는다.
+  pool(`GEO_HEAVY_POOL` 등)과 같은 instance 설정에 기댄다. n150 공용 plane의 설정(Manager
+  `config/dagster-shared/dagster.yaml`)을 2026-10-20 읽기 전용으로 확인했다: `pools.default_limit: 1`·`granularity: run`이고,
+  전역 `max_concurrent_runs: 2`다. 그래서 pool을 기다리는 sweep은 QUEUED로 남아 슬롯을 먹지 않지만, 도는 sweep은 전역 슬롯
+  둘 중 하나를 잠깐 쓴다. 그 설정이 없는 instance에서는 sweep이 겹칠 수 있다. 그래도 데이터는 안전하고, 겹친 쪽이 lock 대기나
+  40001로 실패할 뿐이며 다음 sweep이 다시 집는다.
 - **경쟁은 실패로 끝날 수 있다(무해하지만 조용하지는 않다).** SUCCESS reconcile은 SERIALIZABLE이다. 첫 문장(lineage lock
   대기) 시점에 snapshot을 잡으므로, 그 사이 다른 트랜잭션(취소 coordinator 등)이 root를 바꿨다면 `blocked/*`가 아니라
   40001로 끝난다. 데이터는 롤백되고 아무것도 쓰이지 않는다. root가 terminal이 되었거나 marker가 붙었으면 다음 sweep 목록에서
@@ -87,9 +91,14 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
   catalog drift가 `tracking_invariant`로 끝나는 경우가 늘 수 있다.
 - **SUCCESS ensure의 identity conflict.** client가 이미 `feature_operation.invariant_conflict` 행을 남긴다. conflict가 root를
   가리키면(`root_job_id`가 있다) sensor는 삼키고, sweep이 지금과 같은 reconcile로 `tracking_invariant`를 닫는다. root를
-  가리키지 않는 conflict(quarantine 등)는 지금처럼 올린다 — 지금의 reconcile도 그 경우 같은 conflict로 끝났다.
-- **고칠 수 없는 root.** sweep마다 실패하고 run이 FAILURE로 남는다. 뒷받침은 15분에 한 번만 다시 낸다. 그 사이 다른 SUCCESS
-  run이 낸 sweep도 같은 root를 다시 시도한다. 멈춤 알림과 닫기는 결정 3·4(O2·O5)의 몫이다.
+  가리키지 않는 conflict(quarantine 등)는 지금처럼 올린다 — 지금의 reconcile도 그 경우 같은 conflict로 끝났다. ensure가
+  `blocked`를 돌려줘도 이유가 `terminal`일 때만 요청을 생략한다. ensure는 child marker로도 막히지만 reconcile은 root marker로만
+  막히므로, child marker만 있는 root는 지금처럼 sweep이 완결한다.
+- **고칠 수 없는 root.** sweep마다 그 root만 실패하고(error 로그), sweep run은 SUCCESS로 끝난다. 1차 요청은 SUCCESS run마다
+  나가므로 그 root는 SUCCESS run 빈도로 다시 시도된다(뒷받침 15분은 SUCCESS run이 없을 때의 하한이다). root 하나가 FAILURE
+  run을 쌓아 진짜 실패를 묻지 않게 하려고 run을 실패시키지 않았다. 멈춤 알림과 닫기는 결정 3·4(O2·O5)의 몫이다.
+- **operation key 없는 run의 상태 이벤트.** 상태 sensor는 그런 run(sweep 자신 포함)에 `None`을 돌려준다. Dagster가 같은
+  tick에서 다음 이벤트로 넘어가므로 sweep 이벤트가 success sensor의 tick을 하나씩 먹지 않는다.
 - **sweep run의 성질.** `kor_travel_map.operation_key` tag를 달지 않는다. 그래서 두 sensor는 이 run을 `panel_only`로 본다.
   실행 상한은 1시간(`RecoveryPolicy`)이다. 넘기면 run monitoring이 슬롯을 돌려주고 남은 root는 다음 sweep이 집는다. 자동
   재시도는 두지 않는다.
@@ -122,6 +131,19 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
 - L2 6시간 상한은 길다 → 1시간. L3 manifest 재해석 → 적었다. L4 대상 location 검사 → sweep은 DB 목록에서 대상을 고르므로
   해당 없음. L5 run_key는 sensor별로만 dedupe된다 → 두 요청자의 key 접두사를 나누고 겹침은 pool이 막는다. L6 daemon 재기동
   때 밀린 root → sweep 하나가 차례로 처리한다.
+
+#### 0-1 코드 리뷰 반영 (2026-10-20, 적대 리뷰 2회)
+
+- child marker만 있는 root가 1차 요청에서 빠졌다(ensure는 child marker로도 `blocked`) → `block_reason == "terminal"`일 때만
+  생략한다.
+- operation key 없는 run의 상태 이벤트가 SkipReason을 돌려 sensor tick을 하나씩 먹었다 → `None`을 돌려준다.
+- 고칠 수 없는 root 하나가 SUCCESS run마다 FAILURE sweep을 쌓는다 → root 실패는 로그·metadata로 남기고 run은 SUCCESS.
+- 시작 전에 취소된 sweep(`end_time` 없음)이 뒷받침을 영영 막는다 → 그때는 바로 낸다.
+- sweep 목록 조회 오류 원문이 Dagster 로그에 남는다 → 오류 종류만 싣는다. `applied`만 완결로 센다. 뒷받침을 낼 때도 tick
+  요약을 로그로 남긴다.
+- 공용 plane의 pool 설정이 확인되지 않았다 → 읽기 전용으로 확인해 위 "직렬화"에 적었다.
+- 한 tick에서 sweep 여럿을 낼 수 있다는 지적은, run-status sensor가 값을 돌려준 이벤트 하나에서 tick을 끝내므로 해당하지
+  않는다(다른 리뷰가 Dagster 소스로 확인).
 
 ### 1. watermark가 run을 지나가는 규칙(잃지 않는다)
 

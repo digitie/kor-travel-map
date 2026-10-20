@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 from kortravelmap.core.feature_operation import (
     TRIGGER_KIND_VALUES,
     DagsterFeatureOperationCursor,
+    DagsterFeatureOperationMutation,
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
@@ -140,6 +141,8 @@ class _DagsterInstance(Protocol):
 
 class _SensorLog(Protocol):
     def error(self, message: str, *args: object) -> None: ...
+
+    def info(self, message: str, *args: object) -> None: ...
 
 
 class _CodeLocationOrigin(Protocol):
@@ -270,7 +273,7 @@ def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     def _status_sensor(
         context: RunStatusSensorContext,
         kor_travel_map_client: ResourceParam[object],
-    ) -> SkipReason | RunRequest:
+    ) -> SkipReason | RunRequest | None:
         return _run_async(
             _evaluate_status_event(
                 context,
@@ -326,7 +329,7 @@ FEATURE_OPERATION_TRACKING_SENSORS: Final = [
 async def _evaluate_status_event(
     context: RunStatusSensorContext,
     client: AsyncKorTravelMapClient,
-) -> SkipReason | RunRequest:
+) -> SkipReason | RunRequest | None:
     try:
         record = cast(
             "_RunRecord | None",
@@ -358,6 +361,10 @@ async def _evaluate_status_event(
         )
         context.log.error(message)
         return SkipReason(message)
+    if outcome == "panel_only":
+        # operation key가 없는 run(completion sweep 자신 등)에는 할 일이 없다. None을 돌려주면
+        # Dagster가 같은 tick에서 다음 이벤트로 넘어간다 — 그런 run이 tick을 하나씩 먹지 않는다.
+        return None
     if outcome == _COMPLETION_PENDING and not _completion_sweep_queued(
         cast(_DagsterInstance, context.instance)
     ):
@@ -444,9 +451,7 @@ async def _reconcile_tick(
         database=database_page.next_cursor,
     )
     context.update_cursor(next_cursor.to_json())
-    if backstop is not None:
-        return [backstop]
-    return SkipReason(
+    summary = (
         "provider feature operation reconcile 완료: "
         f"dagster_applied={dagster_applied} "
         f"dagster_panel_only={dagster_panel_only} "
@@ -454,6 +459,10 @@ async def _reconcile_tick(
         f"database_observation_errors={database_observation_errors} "
         f"completion_pending={len(completion_pending)}"
     )
+    if backstop is not None:
+        context.log.info(summary)
+        return [backstop]
+    return SkipReason(summary)
 
 
 async def _evaluate_reconciliation_sensor(
@@ -568,12 +577,12 @@ def _completion_backstop_request(context: _ReconcileContext) -> RunRequest | Non
         return None
     if latest is None:
         return _completion_run_request("backstop:first")
-    if latest.dagster_run.status not in _TERMINAL_STATUSES or latest.end_time is None:
+    if latest.dagster_run.status not in _TERMINAL_STATUSES:
         return None
-    finished_at = datetime.fromtimestamp(latest.end_time, tz=UTC)
-    if datetime.now(tz=UTC) - finished_at < timedelta(
-        seconds=FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS
-    ):
+    # 시작 전에 취소된 run은 end_time이 없을 수 있다 — 그때는 기다릴 기준이 없으니 바로 낸다.
+    if latest.end_time is not None and datetime.now(tz=UTC) - datetime.fromtimestamp(
+        latest.end_time, tz=UTC
+    ) < timedelta(seconds=FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS):
         return None
     return _completion_run_request(f"backstop:after:{latest.dagster_run.run_id}")
 
@@ -686,8 +695,8 @@ async def _ensure_terminal_root(
     trigger_kind: TriggerKind,
     created_at: datetime,
     started_at: datetime | None,
-) -> str:
-    """terminal run의 root를 ensure한다. 결과 outcome을 돌려주고 identity conflict는 올린다."""
+) -> DagsterFeatureOperationMutation:
+    """terminal run의 root를 ensure한다. identity conflict는 올린다."""
     mutation = await client.ensure_dagster_feature_operation(
         dagster_run_id=record.dagster_run.run_id,
         trigger_kind=trigger_kind,
@@ -701,7 +710,7 @@ async def _ensure_terminal_root(
             else DagsterRunStatus.NOT_STARTED.value
         ),
     )
-    return mutation.outcome
+    return mutation
 
 
 async def _ensure_success_root(
@@ -720,10 +729,12 @@ async def _ensure_success_root(
     가리키는 root가 있으면 completion sweep이 종전과 같은 reconcile로 ``tracking_invariant``를
     닫으므로 여기서는 삼키고 completion 대기로 돌려준다. root를 가리키지 않는 conflict(quarantine
     등)는 종전처럼 올린다 — 종전 reconcile도 root가 없으면 같은 conflict로 끝났다.
-    ``blocked``(취소 marker·이미 terminal)는 completion이 필요 없다.
+    이미 terminal인 root만 completion이 필요 없다. 취소로 막힌 root도 sweep을 요청한다 — root
+    marker면 sweep 목록에 오지 않아 무해하고, child marker만 있으면 종전 reconcile처럼 sweep이
+    완결한다(ensure는 child marker로도 막히지만 reconcile은 root marker로만 막힌다).
     """
     try:
-        outcome = await _ensure_terminal_root(
+        mutation = await _ensure_terminal_root(
             record,
             client,
             operation_key=operation_key,
@@ -736,7 +747,9 @@ async def _ensure_success_root(
         if exc.root_job_id is None:
             raise
         return _COMPLETION_PENDING
-    return outcome if outcome == "blocked" else _COMPLETION_PENDING
+    if mutation.outcome == "blocked" and mutation.block_reason == "terminal":
+        return mutation.outcome
+    return _COMPLETION_PENDING
 
 
 async def _apply_terminal_record(
