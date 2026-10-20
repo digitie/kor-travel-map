@@ -471,7 +471,18 @@ CALL)은 sensor tick에서 하지 않는다(ADR-112 결정 0-1). sensor는 SUCCE
 1차 요청은 success 상태 sensor가 SUCCESS run마다 내고(아직 시작하지 않은 sweep이 있으면 생략), reconcile sensor의 DB
 page는 "SUCCESS인데 active"인 root를 보면 15분 간격으로 뒷받침 요청을 낸다. 완결 전까지 root는 `running`이고 `done`은
 완결과 같은 트랜잭션에서만 생긴다. root 하나의 완결 실패는 sweep run을 실패시키지 않는다(error 로그·metadata, 다음 sweep이
-재시도). FAILURE·CANCELED reconcile은 완결이 없어 sensor 안에 그대로 있다.
+재시도). FAILURE·CANCELED reconcile은 완결이 없어 sensor 안에 그대로 있다. sweep의 트랜잭션은
+`client_connection_check_interval=10s`를 걸어, sweep worker가 죽으면 서버가 그 완결 CALL을 스스로 취소한다.
+
+reconcile sensor의 재시도·멈춤 알림·닫기는 ADR-112 결정 1~7이다. Dagster page는 run R을 (a) operation key 없음,
+(b) 이번 tick에 R의 root가 있음을 확인함, (c) abandon이 R의 `reconcile_abandoned` 기록을 commit함 중 하나일 때만
+지나가고, 아니면 R에서 멈춰 R을 머리(head)로 둔다. tick 본문은 고정 40초(Dagster page 마감 +20초, DB page +40초)이고,
+sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`(남은 시간 − 3초)·`lock_timeout`(min(30초, 남은 시간 − 4초))을
+`set_config(..., true)`로 건다(SERIALIZABLE이면 isolation 문 다음). run storage 동기 읽기는 slot 하나짜리
+`call_with_deadline`에서 돈다. 멈춤 시계는 cursor 선택 키 `head`·`db_watch`(비면 cursor 바이트가 앞 판과 같다)이고,
+처음 본 실패에서 15분이 지나면 `ops.system_logs`에 `feature_operation.reconcile_stalled`를 시계마다 한 시간에 한 행
+남긴다. 정한 실패(CLOSABLE)만 `abandon_dagster_feature_run`으로 닫고, 나머지는 재시도·알림만 한다. 운영자 수동 닫기는
+`ktmctl reconcile-abandon <run_id> --dagster-status <STATUS|missing>`이다.
 
 root raw Dagster status와 engine create/start/finish timestamp는 DB lifecycle과 별도로 보존한다.
 root progress는 완료 pair 비율이고 pair별 결과는 `provider_datasets[]`가 정본이다. C3d marker가

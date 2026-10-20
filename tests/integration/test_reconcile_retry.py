@@ -148,7 +148,7 @@ async def test_the_server_cancels_a_slow_statement_within_the_page_budget(
     남아 오류가 57014가 아니게 되고, 서버의 statement는 계속 돈다 — 이 검사가 빨개진다.
     """
     run_id = f"run-adr112-statement-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 1, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 1, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, memberships = await _started_root(client, run_id=run_id, created_at=created_at)
     function = f"adr112_slow_{uuid4().hex}"
@@ -220,7 +220,7 @@ async def test_a_lock_wait_ends_at_the_server_lock_timeout_as_lock_wait(
 ) -> None:
     """lineage lock을 다른 연결이 쥐고 있으면 lock_timeout(남은 시간 − 4초)에 55P03으로 끝난다."""
     run_id = f"run-adr112-lock-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 2, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 2, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     memberships = await client.resolve_feature_operation_memberships(
         operation_key=SINGLE_MEMBER_OPERATION
@@ -267,7 +267,7 @@ async def test_a_serializable_success_reconcile_accepts_the_budget_after_isolati
     변이: 상한을 isolation 문 앞에 두면 ``SET TRANSACTION ISOLATION LEVEL``이 25001로 거부된다.
     """
     run_id = f"run-adr112-serializable-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 3, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 3, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, memberships = await _started_root(client, run_id=run_id, created_at=created_at)
     try:
@@ -306,7 +306,7 @@ async def test_abandon_without_a_root_leaves_one_durable_log_row(
 ) -> None:
     run_id = f"run-adr112-noroot-{uuid4()}"
     client = AsyncKorTravelMapClient(migrated_engine)
-    first_failed_at = datetime(2026, 10, 21, 4, tzinfo=UTC)
+    first_failed_at = datetime(2026, 7, 21, 4, tzinfo=UTC)
 
     result = await client.abandon_dagster_feature_run(
         dagster_run_id=run_id,
@@ -330,7 +330,7 @@ async def test_abandon_leaves_a_root_under_cancellation_to_the_coordinator(
     migrated_engine: AsyncEngine,
 ) -> None:
     run_id = f"run-adr112-marker-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 5, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 5, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, _ = await _started_root(client, run_id=run_id, created_at=created_at)
     async with AsyncSession(migrated_engine) as marker_session, marker_session.begin():
@@ -362,7 +362,7 @@ async def test_abandon_does_nothing_to_a_terminal_root_or_a_running_run(
     migrated_engine: AsyncEngine,
 ) -> None:
     run_id = f"run-adr112-terminal-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 6, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 6, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, memberships = await _started_root(client, run_id=run_id, created_at=created_at)
     try:
@@ -406,7 +406,7 @@ async def test_abandon_closes_an_active_root_whose_run_ended_or_vanished(
 ) -> None:
     """Dagster SUCCESS여도 ``failed``로 닫는다(O4). run이 없으면 dagster_run_status는 NULL."""
     run_id = f"run-adr112-close-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 7, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 7, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, _ = await _started_root(client, run_id=run_id, created_at=created_at)
     finished_at = created_at + timedelta(minutes=3)
@@ -440,7 +440,7 @@ async def test_a_closed_root_with_a_mistimed_finish_is_still_closed(
 ) -> None:
     """종료 시각이 시작보다 앞서면(불변식이 깨진 run) 그 시각은 버리고 닫는다."""
     run_id = f"run-adr112-mistimed-{uuid4()}"
-    created_at = datetime(2026, 10, 21, 8, tzinfo=UTC)
+    created_at = datetime(2026, 7, 21, 8, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, _ = await _started_root(client, run_id=run_id, created_at=created_at)
     try:
