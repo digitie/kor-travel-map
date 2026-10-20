@@ -443,7 +443,7 @@ async def test_gate_busy_marker_is_bound_to_the_real_procedure(
     ``lock_wait``다. procedure 문구가 바뀌면 이 검사가 빨개진다.
     """
     from kortravelmap.dagster.feature_operation_sensors import _classify_failure
-    from kortravelmap.dagster.retry_common import pg_error_info
+    from kortravelcommon.pg_errors import pg_error_info
 
     suffix = uuid4().hex
     async with isolated_engine.begin() as connection:
@@ -498,7 +498,9 @@ async def test_gate_busy_marker_is_bound_to_the_real_procedure(
                         {"name": lock_name},
                     )
                     await holder.commit()
-            assert pg_error_info(error).sqlstate == "55P03", lock_name
+            info = pg_error_info(error)
+            assert info is not None
+            assert info.sqlstate == "55P03", lock_name
             failure = _classify_failure(error, at_head=False)
             assert failure["category"] == expected, (lock_name, pg_error_info(error))
             assert failure["closable"] is False

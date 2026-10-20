@@ -477,7 +477,7 @@ page는 "SUCCESS인데 active"인 root를 보면 15분 간격으로 뒷받침 �
 reconcile sensor의 재시도·멈춤 알림·닫기는 ADR-112 결정 1~7이다. Dagster page는 run R을 (a) operation key 없음,
 (b) 이번 tick에 R의 root가 있음을 확인함, (c) abandon이 R의 `reconcile_abandoned` 기록을 commit함 중 하나일 때만
 지나가고, 아니면 R에서 멈춰 R을 머리(head)로 둔다. tick 본문은 고정 40초(Dagster page 마감 +20초, DB page +40초)이고,
-sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`(남은 시간 − 3초)·`lock_timeout`(min(30초, 남은 시간 − 4초))을
+sensor가 여는 트랜잭션마다 서버 쪽 `statement_timeout`(남은 시간 − 3초)·`lock_timeout`(min(5초, 남은 시간 − 4초))을
 `set_config(..., true)`로 건다(SERIALIZABLE이면 isolation 문 다음). run storage 동기 읽기는 slot 하나짜리
 `call_with_deadline`에서 돈다. 멈춤 시계는 cursor 선택 키 `head`·`db_watch`(비면 cursor 바이트가 앞 판과 같다)이고,
 처음 본 실패에서 15분이 지나면 `ops.system_log`에 `feature_operation.reconcile_stalled`를 시계마다 한 시간에 한 행

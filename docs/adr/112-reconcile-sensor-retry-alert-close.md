@@ -186,7 +186,8 @@ DB page에서는 항목 하나가 실패하면 그 항목만 건너뛴다. 다�
 - **page별 마감.** Dagster page는 시작 + 20초, DB page는 시작 + 40초에 마감한다. 호출 하나의 상한은 **그 page의 마감**까지
   남은 시간이다. 남은 시간이 5초보다 적으면 새 호출을 시작하지 않는다.
 - **서버 쪽 timeout.** sensor가 여는 DB 트랜잭션마다 `set_config('statement_timeout', 남은 − 3초, true)`와
-  `set_config('lock_timeout', min(30초, 남은 − 4초), true)`를 건다. SERIALIZABLE 트랜잭션에서는 **`SET TRANSACTION
+  `set_config('lock_timeout', min(5초, 남은 − 4초), true)`를 건다(5초 상한은 2026-10-21 소유자 결정. 초안은 30초였다 —
+  odroid tenant와 같은 5초로 낮춰, lock 하나를 오래 기다리지 않고 다음 tick에 다시 한다). SERIALIZABLE 트랜잭션에서는 **`SET TRANSACTION
   ISOLATION LEVEL` 바로 다음**에 건다. 그보다 먼저 쿼리를 보내면 25001이 난다. client가 같은 호출 안에서 따로 여는
   트랜잭션(invariant conflict 기록 등)에도 같은 값을 넘긴다. 시간이 넘으면 **Postgres가 statement를 취소**한다. client 쪽
   `asyncio.timeout`(남은 시간 + 3초)은 그 뒤를 받치는 보조 장치일 뿐이다.
@@ -381,7 +382,8 @@ migration이 없다.
   항목부터** 하는 쪽을 권한다(소유자 결정).
   **결론(2026-10-20 소유자 수락).** 완결을 sensor 밖으로 먼저 옮긴다. 모양은 결정 0-1이다.
 - **O2 값과 물러섬 — 수락 2026-10-21.** STALL_AFTER 15분, 예산 40초 고정(Dagster page 마감 +20초, DB page +40초), 시계마다
-  알림 한 시간에 한 행, 물러섬 없이 tick·sweep마다 재시도, `retry_after` 필드 없음.
+  알림 한 시간에 한 행, 물러섬 없이 tick·sweep마다 재시도, `retry_after` 필드 없음. 같은 날 sensor 트랜잭션의
+  `lock_timeout` 상한을 30초에서 **5초**로 낮췄다(min(5초, 남은 − 4초), 소유자 결정).
 - **O3 표지 대 전용 SQLSTATE — 수락 2026-10-21.** 표지(55P03이면서 message가 `feature-write-all gate is busy`로 시작)로
   가른다. migration도 전용 SQLSTATE도 없다. 효과는 통합 검사가 실제 procedure로 결박한다.
 - **O4 Dagster SUCCESS인 root를 `failed`로 닫기 — 수락 2026-10-21.** CLOSABLE 실패가 15분 이어지면 Dagster SUCCESS여도
@@ -445,11 +447,20 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
 - **completion sweep**: 트랜잭션마다 `client_connection_check_interval=10s`(geo #591과 같은 자리) — sweep worker가 죽으면
   서버가 완결 CALL을 ~10초 안에 취소해 lineage lock을 600초까지 붙들지 않는다. sensor 트랜잭션은 statement_timeout이
   묶으므로 걸지 않는다.
-- **kor-travel-common 경계**: 범용 도구(`call_with_deadline`(slots), `pg_error_info`, `StallClock`·`observe_failure`·
-  `due_alert`·`mark_alerted`)는 `kortravelmap.dagster.retry_common` 한 모듈에 같은 이름·의미로 두었다. common에 같은 API가
-  머지되면 그 import로 바꾸고 핀을 올린다. 트랜잭션 SQL·CLOSABLE 목록·gate 표지·abandon·cursor 키는 소비자(Map) 몫이다.
+- **kor-travel-common 경계**: 범용 도구는 kor-travel-common #42(`6c275a04`)의 것을 쓴다 — `deadline.call_with_deadline`
+  (Map 전용 1-slot semaphore), `pg_errors.pg_error_info`(asyncpg 오류의 sqlstate·constraint·message, `str(exc)`는 읽지
+  않는다), `stall.StallClock`·`observe_failure`·`due_alert`·`mark_alerted`. Map 두 패키지의 common 핀을 그 SHA로 올렸다.
+  common 시계는 시각을 epoch 초로, 실패 서명을 200자 이하 문자열로 들므로 cursor의 시계는
+  `{run_id, first_failed_at(epoch 초), last_failure("category|closable|sqlstate|constraint|error_type"), alerted_at}`이다.
+  트랜잭션 SQL(`transaction_limits`)·CLOSABLE 목록·gate 표지·abandon·cursor 키는 소비자(Map) 몫이라 Map에 둔다.
+- **run-status sensor**: 상태 sensor 7개의 반영도 같은 서버 쪽 상한(예산 20초)을 건다 — 공용 sensor thread를 오래
+  붙들지 않는다(코드 리뷰 B M2).
+- **gate 표지가 쓰이는 자리**: 0-1 뒤로 sensor는 완결을 부르지 않는다. completion sweep의 완결 실패 로그가
+  `_classify_failure`의 분류(`gate_busy`·`lock_wait`)를 싣는다(리뷰 B L3).
+- **수동 닫기 명령의 방어**: 시작 전에 DSN이 provider executor인지(`pg_has_role`) 확인하고, 입력·DB 오류는 원문 없이
+  sqlstate만 찍고 끝낸다. `--dagster-status missing`은 확인하지 않고 믿는다(help에 적었다).
 - **닫기·알림 몫**: 항목 반영(읽기·ensure·reconcile)은 page 마감보다 6초 일찍 끊는다. 남긴 몫으로 머리·`db_watch`의
-  닫기와 알림을 한다 — 실패한 호출이 lock_timeout(남은 − 4초)까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지
+  닫기와 알림을 한다 — 실패한 호출이 lock_timeout(min(5초, 남은 − 4초))까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지
   않는다(코드 적대 리뷰 H1).
 - **`db_watch` 넘기기**: 알림을 낸 root는 슬롯을 이번 tick에 실패한 root 가운데 그다음 것(없으면 처음으로 돌아가 다른 첫
   것)에게 넘기고, 넘겨받은 root의 시계는 그 실패 시각에서 시작한다. 넘길 데가 없으면 비운다(리뷰 H2 — 비우기만 하면 다음
@@ -458,10 +469,11 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
   active run의 ensure가 root를 가리키는 conflict로 끝나도 root가 있다고 친다(리뷰 H3).
 - **storage 실패와 머리 시계**: 머리 run의 시계가 이미 있으면 storage 실패는 그 시계를 잇는다(key 그대로). storage가
   오락가락해도 시계가 처음으로 돌아가지 않는다(리뷰 M5). quarantine된 root만 있는 run을 닫으면 로그가 그 사실을 적는다.
-- **한계(문서화)**: `statement_timeout`은 statement마다 걸린다. 트랜잭션을 열 때의 남은 시간으로 정하므로, 여러 statement로
-  된 트랜잭션은 client가 포기한(남은 + 3초) 뒤에도 서버에서 마지막 statement가 자기 상한까지 돌 수 있다. sensor
-  트랜잭션은 짧아서 받아들인다(리뷰 M7).
-- **lock_timeout**: min(30초, 남은 − 4초)를 그대로 둔다. odroid tenant의 5초로 낮출지는 소유자 확인 대기다.
+- **한계(문서화)**: `statement_timeout`·`lock_timeout`은 statement·lock 대기마다 걸린다(PG16에는 `transaction_timeout`이
+  없다). 트랜잭션을 열 때의 남은 시간으로 정하므로, 여러 statement로 된 트랜잭션 전체의 상한은 client 쪽
+  `asyncio.timeout`(남은 + 3초)이다. 그때 asyncpg가 서버에 취소 요청을 보내므로 서버 작업도 멈춘다. 그래서 "서버 쪽
+  상한만이 정본"은 statement 하나 단위로만 참이다(리뷰 A M7·B M1).
+- **lock_timeout**: min(5초, 남은 − 4초)(2026-10-21 소유자 결정, odroid tenant와 같은 값).
 - **알려진 성질**: 슬롯을 넘겨받은 root가 다시 첫 실패 root로 슬롯을 잡으면 시계가 처음부터 돈다. 그래서 같은 root의
   `db_watch` 알림은 15분+α 주기로 되풀이될 수 있다(시계마다는 한 시간에 한 행). 설계가 받아들인 대가다(결정 3).
 - **되돌릴 때**: main parser는 선택 키(`head`·`db_watch`)를 거부한다. 되돌리기 전에 선택 키를 뺀 cursor를

@@ -4,7 +4,8 @@
 client가 여는 트랜잭션마다 ``apply_transaction_limits``가 ``set_config(..., true)``(트랜잭션
 범위)로 서버 쪽 상한을 건다.
 
-- ``statement_timeout`` = 마감까지 남은 시간 − 3초, ``lock_timeout`` = min(30초, 남은 시간 − 4초).
+- ``statement_timeout`` = 마감까지 남은 시간 − 3초, ``lock_timeout`` = min(5초, 남은 시간 − 4초)
+  (5초 상한은 2026-10-21 소유자 결정 — odroid tenant와 같은 값).
   시간이 넘으면 **Postgres가 statement를 취소**한다(57014 / 55P03). client 쪽 ``asyncio.timeout``은
   그 뒤를 받치는 보조 장치일 뿐이다.
 - ``client_connection_check_interval`` — 연결 저편(worker)이 죽었을 때 서버가 그 statement를
@@ -44,8 +45,9 @@ _STATEMENT_MARGIN_SECONDS: Final[float] = 3.0
 """statement_timeout = 남은 시간 − 3초. 취소 응답이 돌아올 여유."""
 _LOCK_MARGIN_SECONDS: Final[float] = 4.0
 """lock_timeout = min(상한, 남은 시간 − 4초). lock 대기가 statement보다 먼저 끝난다."""
-_LOCK_TIMEOUT_CAP_SECONDS: Final[float] = 30.0
-"""lock_timeout 상한. client 기본값(30초)과 같다."""
+_LOCK_TIMEOUT_CAP_SECONDS: Final[float] = 5.0
+"""lock_timeout 상한(ADR-112 결정 2, 2026-10-21 소유자 결정). lock 하나를 5초 넘게 기다리지 않고 다음
+tick·sweep에 다시 한다 — odroid tenant(geo·weather·transport)와 같은 값이다."""
 _MIN_STATEMENT_SECONDS: Final[float] = 1.0
 _MIN_LOCK_SECONDS: Final[float] = 0.5
 """바닥값. 0은 Postgres에서 '상한 없음'이라 절대 그 값이 되지 않게 한다."""

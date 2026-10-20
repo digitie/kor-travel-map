@@ -46,6 +46,7 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
     _evaluate_status_event,
+    _failure_of,
     _map_run_count,
     _reconcile_tick,
     apply_completion_record,
@@ -794,8 +795,8 @@ async def test_dagster_scan_error_is_redacted_holds_the_head_and_still_commits()
     assert committed.dagster == DagsterRunWatermark(1, "previous")
     assert committed.head is not None
     assert committed.head.key == "previous"
-    assert committed.head.last_failure["category"] == "storage"
-    assert committed.head.last_failure["closable"] is False
+    assert _failure_of(committed.head)["category"] == "storage"
+    assert _failure_of(committed.head)["closable"] is False
     assert len(context.log.errors) == 1
     assert "RuntimeError" in context.log.errors[0]
     assert "secret" not in context.log.errors[0]
@@ -1721,7 +1722,7 @@ async def test_an_observation_error_waits_out_the_clock_then_leaves_a_durable_re
     first = _committed(context)
     assert first.dagster == DagsterRunWatermark(1, "previous")
     assert first.head is not None
-    assert first.head.last_failure["category"] == "observation"
+    assert _failure_of(first.head)["category"] == "observation"
     assert client.abandon_calls == []
 
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS - 1)
@@ -1739,7 +1740,7 @@ async def test_an_observation_error_waits_out_the_clock_then_leaves_a_durable_re
     assert call["dagster_run_id"] == "run-1"
     assert call["dagster_status"] == "FAILURE"
     assert call["engine_finished_at"] is None
-    assert call["first_failed_at"] == first.head.first_failed_at
+    assert call["first_failed_at"] == datetime.fromtimestamp(first.head.first_failed_at, tz=UTC)
     passed = _committed(context)
     assert passed.dagster == DagsterRunWatermark(2, "run-1")
     assert passed.head is None
@@ -1767,8 +1768,8 @@ async def test_the_head_clock_survives_a_restart_and_a_changing_signature(clock:
 
     assert second is not None
     assert second.first_failed_at == first.first_failed_at
-    assert first.last_failure["sqlstate"] == "53200"
-    assert second.last_failure["sqlstate"] == "55P03"
+    assert _failure_of(first)["sqlstate"] == "53200"
+    assert _failure_of(second)["sqlstate"] == "55P03"
 
 
 async def test_the_clock_starts_when_the_failed_call_returns_not_at_tick_start(
@@ -1788,7 +1789,7 @@ async def test_the_clock_starts_when_the_failed_call_returns_not_at_tick_start(
 
     head = _committed(context).head
     assert head is not None
-    assert head.first_failed_at == tick_started + timedelta(seconds=7)
+    assert head.first_failed_at == (tick_started + timedelta(seconds=7)).timestamp()
 
 
 # --- tick 시간이 유계다 --------------------------------------------------------------------
@@ -1876,7 +1877,7 @@ async def test_a_busy_storage_worker_counts_as_a_storage_failure_without_a_new_t
     committed = _committed(context)
     assert client.ensure_calls == []
     assert committed.head is not None
-    assert committed.head.last_failure == {
+    assert _failure_of(committed.head) == {
         "category": "storage",
         "closable": False,
         "constraint": None,
@@ -1944,7 +1945,7 @@ async def test_a_failed_alert_write_does_not_block_progress_and_retries(clock: _
     await _reconcile_tick(context, client)
     head = _committed(context).head
     assert head is not None
-    assert head.alerted_at == clock.wall
+    assert head.alerted_at == clock.wall.timestamp()
     assert len(client.stalled_calls) == 2
 
 
@@ -2219,7 +2220,7 @@ async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_statu
     context.cursor = context.updated_cursors[-1]
     watch = _committed(context).db_watch
     assert watch is not None
-    assert watch.last_failure["category"] == "run_missing"
+    assert _failure_of(watch)["category"] == "run_missing"
     clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
     await _reconcile_tick(context, client)
 
@@ -2228,8 +2229,8 @@ async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_statu
             "dagster_run_id": "gone",
             "dagster_status": None,
             "engine_finished_at": None,
-            "failure": dict(watch.last_failure),
-            "first_failed_at": watch.first_failed_at,
+            "failure": _failure_of(watch),
+            "first_failed_at": datetime.fromtimestamp(watch.first_failed_at, tz=UTC),
         }
     ]
     assert _committed(context).db_watch is None
@@ -2272,8 +2273,8 @@ def test_an_empty_cursor_is_byte_identical_to_the_previous_format() -> None:
 
 
 def test_a_full_cursor_round_trips_and_stays_small() -> None:
-    from kortravelmap.dagster.feature_operation_sensors import _failure
-    from kortravelmap.dagster.retry_common import StallClock
+    from kortravelcommon.stall import StallClock
+    from kortravelmap.dagster.feature_operation_sensors import _encode_failure, _failure
 
     long_id = "r" * 64
     failure = _failure(
@@ -2283,7 +2284,13 @@ def test_a_full_cursor_round_trips_and_stays_small() -> None:
         sqlstate="23514",
         constraint="c" * 63,
     )
-    head = StallClock(key=long_id, first_failed_at=_NOW, last_failure=failure, alerted_at=_NOW)
+    head = StallClock(
+        key=long_id,
+        first_failed_at=_NOW.timestamp(),
+        last_failure=_encode_failure(failure),
+        alerted_at=_NOW.timestamp(),
+    )
+    assert _failure_of(head) == failure
     cursor = FeatureOperationReconcileCursor(
         dagster=DagsterRunWatermark(2**40, long_id),
         database=DagsterFeatureOperationCursor(created_at=_NOW, root_job_id=long_id),
@@ -2302,3 +2309,15 @@ def test_cursor_parser_rejects_unknown_keys() -> None:
         FeatureOperationReconcileCursor.from_json(
             '{"dagster":null,"database":null,"version":1,"head_failure":null}'
         )
+
+
+async def test_status_events_also_carry_a_server_side_deadline() -> None:
+    """run-status sensor도 공용 sensor thread를 쓴다 — 반영 트랜잭션에 상한이 걸린다(결정 2)."""
+    record = _record(DagsterRunStatus.STARTED)
+    client = _Client()
+
+    await _evaluate_status_event(_status_context(record), client)
+
+    (deadline,) = client.deadlines
+    assert deadline is not None
+    assert 0 < deadline <= 20

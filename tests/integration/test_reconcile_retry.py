@@ -7,7 +7,8 @@
 - ``abandon_dagster_feature_run``은 DB 상태(root 없음·취소 marker·terminal·Dagster active·
   Dagster terminal/없음)에 따라 다르게 움직인다.
 
-gate 표지(결정 5)의 실제 procedure 검사는 같은 isolated DB를 쓰는
+이 모듈은 세션 공유 DB(``migrated_engine``)를 쓴다. 만든 trigger·tree는 ``finally``에서 지우고,
+run id는 매번 새로 만든다. gate 표지(결정 5)의 실제 procedure 검사는 isolated DB를 쓰는
 ``test_feature_write_gate_lock_budget.py``에 있다.
 """
 
@@ -27,7 +28,7 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _classify_failure,
     _Tick,
 )
-from kortravelmap.dagster.retry_common import pg_error_info
+from kortravelcommon.pg_errors import pg_error_info
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +77,11 @@ class _Log:
 
     def info(self, message: str, *args: object) -> None:
         pass
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    info = pg_error_info(error)
+    return info.sqlstate if info is not None else None
 
 
 def _tick_with_remaining(seconds: float) -> _Tick:
@@ -139,15 +145,17 @@ async def _abandoned_logs(engine: AsyncEngine, run_id: str) -> list[Any]:
 # --- 결정 2: 서버 쪽 상한 -----------------------------------------------------------------
 
 
+@pytest.mark.parametrize("terminal_status", ["FAILURE", "SUCCESS"])
 async def test_the_server_cancels_a_slow_statement_within_the_page_budget(
-    migrated_engine: AsyncEngine,
+    migrated_engine: AsyncEngine, terminal_status: str
 ) -> None:
     """statement가 오래 돌면 Postgres가 page 마감 안에서 취소한다(57014).
 
     변이: ``set_config('statement_timeout', …, true)``를 빼면 client 쪽 timeout(남은 시간+3초)만
     남아 오류가 57014가 아니게 되고, 서버의 statement는 계속 돈다 — 이 검사가 빨개진다.
+    SUCCESS reconcile은 SERIALIZABLE 트랜잭션이다 — 그 호출에서 상한 적용을 빼도 빨개진다.
     """
-    run_id = f"run-adr112-statement-{uuid4()}"
+    run_id = f"run-adr112-statement-{uuid4()}-{terminal_status.lower()}"
     created_at = datetime(2026, 7, 21, 1, tzinfo=UTC)
     client = AsyncKorTravelMapClient(migrated_engine)
     root_id, memberships = await _started_root(client, run_id=run_id, created_at=created_at)
@@ -183,7 +191,7 @@ async def test_the_server_cancels_a_slow_statement_within_the_page_budget(
                 lambda: client.reconcile_dagster_feature_run(
                     dagster_run_id=run_id,
                     trigger_kind="schedule",
-                    terminal_status="FAILURE",
+                    terminal_status=terminal_status,
                     selected_memberships=memberships,
                     operation_key=SINGLE_MEMBER_OPERATION,
                     engine_created_at=created_at,
@@ -194,7 +202,7 @@ async def test_the_server_cancels_a_slow_statement_within_the_page_budget(
             )
         elapsed = time.monotonic() - began
 
-        assert pg_error_info(caught.value).sqlstate == "57014"
+        assert _sqlstate(caught.value) == "57014"
         assert _classify_failure(caught.value, at_head=False)["closable"] is False
         assert elapsed < _REMAINING_SECONDS
         # 서버에 남아 도는 statement가 없다.
@@ -202,7 +210,8 @@ async def test_the_server_cancels_a_slow_statement_within_the_page_budget(
             lingering = await probe.scalar(
                 text(
                     "SELECT count(*) FROM pg_catalog.pg_stat_activity "
-                    "WHERE state = 'active' AND query LIKE '%provider_feature_operation_terminal%' "
+                    "WHERE state = 'active' AND datname = current_database() "
+                    "AND query LIKE '%provider_feature_operation_terminal%' "
                     "AND pid <> pg_backend_pid()"
                 )
             )
@@ -254,7 +263,7 @@ async def test_a_lock_wait_ends_at_the_server_lock_timeout_as_lock_wait(
             )
             await holder.commit()
 
-    assert pg_error_info(caught.value).sqlstate == "55P03"
+    assert _sqlstate(caught.value) == "55P03"
     assert _classify_failure(caught.value, at_head=True)["category"] == "lock_wait"
     assert elapsed < _REMAINING_SECONDS - 2
 
@@ -431,6 +440,15 @@ async def test_abandon_closes_an_active_root_whose_run_ended_or_vanished(
         assert row.detail["action"] == "re-run the dataset"
         # 닫은 root는 DB page 대상이 아니다(짧은 읽기도 같은 술어).
         assert await client.is_reconcilable_dagster_feature_run(dagster_run_id=run_id) is False
+        # 다시 부르면 이미 terminal이다 — NULL dagster_run_status인 root도 operation으로 읽힌다.
+        again = await client.abandon_dagster_feature_run(
+            dagster_run_id=run_id,
+            dagster_status=dagster_status,
+            engine_finished_at=None,
+            failure="operator",
+            first_failed_at=None,
+        )
+        assert again.outcome == "terminal"
     finally:
         await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
 

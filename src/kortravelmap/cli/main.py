@@ -44,6 +44,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.cli.consistency_report import (
@@ -303,8 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=[*_ABANDON_DAGSTER_STATUSES, "missing"],
         help=(
-            "Dagster UI에서 확인한 run 상태. run이 storage에 없으면 missing. 아직 도는 run이면 "
-            "root를 닫지 않는다."
+            "Dagster UI에서 확인한 run 상태. run이 storage에 없을 때만 missing — 이 값은 확인하지 "
+            "않고 믿으므로, 아직 도는 run에 missing을 주면 그 root가 닫힌다. 도는 run이면 닫지 않는다."
         ),
     )
     abandon_p.add_argument(
@@ -696,6 +698,20 @@ async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
     status = None if args.dagster_status == "missing" else str(args.dagster_status)
     engine = make_async_engine(_resolve_dsn(args))
     try:
+        # 닫기 분기는 provider executor만 실행할 수 있다. 다른 로그인이면 root 없음 분기만 기록되고
+        # 닫기는 42501로 죽는다 — 시작 전에 거부한다.
+        async with AsyncSession(engine) as probe:
+            executor = await probe.scalar(
+                text(
+                    "SELECT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')"
+                )
+            )
+        if not executor:
+            print(
+                "reconcile-abandon: DSN이 provider executor(Dagster runtime 로그인)가 아닙니다.",
+                file=sys.stderr,
+            )
+            return _EXIT_INVALID
         async with AsyncKorTravelMapClient(engine) as client:
             result = await client.abandon_dagster_feature_run(
                 dagster_run_id=args.dagster_run_id,
@@ -704,6 +720,17 @@ async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
                 failure="operator",
                 first_failed_at=None,
             )
+    except ValueError as exc:
+        print(f"reconcile-abandon: {exc}", file=sys.stderr)
+        return _EXIT_INVALID
+    except DBAPIError as exc:
+        # 원문(SQL·DSN 조각)은 싣지 않는다.
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        print(
+            f"reconcile-abandon: DB 오류 {type(exc).__name__} sqlstate={sqlstate}",
+            file=sys.stderr,
+        )
+        return 1
     finally:
         await engine.dispose()
     print(

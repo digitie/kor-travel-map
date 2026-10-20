@@ -12,6 +12,9 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 
+from kortravelcommon.deadline import DeadlineExceeded, call_with_deadline
+from kortravelcommon.pg_errors import pg_error_info
+from kortravelcommon.stall import StallClock, due_alert, mark_alerted, observe_failure
 from kortravelmap.core.feature_operation import (
     TRIGGER_KIND_VALUES,
     DagsterFeatureOperation,
@@ -44,15 +47,6 @@ from .feature_operation_tracking import (
     FeatureOperationGuardUnavailable,
     declared_execution_scopes,
     resolve_run_execution_manifest,
-)
-from .retry_common import (
-    DeadlineExceeded,
-    StallClock,
-    call_with_deadline,
-    due_alert,
-    mark_alerted,
-    observe_failure,
-    pg_error_info,
 )
 from .run_scope import MapRunScopeMismatch, map_runs_filter, require_map_code_location
 
@@ -95,6 +89,9 @@ FEATURE_OPERATION_REALERT_SECONDS: Final[int] = 3_600
 
 _CLIENT_TIMEOUT_GRACE_SECONDS: Final[float] = 3.0
 """client 쪽 ``asyncio.timeout`` = 남은 시간 + 3초. 서버 쪽 상한 뒤를 받치는 보조 장치다."""
+
+_STATUS_EVENT_BUDGET_SECONDS: Final[float] = 20.0
+"""run-status sensor 평가 하나의 DB 반영 예산(서버 쪽 상한의 기준)."""
 
 _MAX_FAILURE_LOG_LINES: Final[int] = 3
 """한 tick의 실패 로그 줄 수 상한. 나머지는 요약의 개수로만 남긴다."""
@@ -246,7 +243,8 @@ _CURSOR_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"head", "db_watch"})
 def _clock_to_cursor(clock: StallClock) -> dict[str, Any]:
     """cursor의 시계 모양 — ADR-112 결정 3의 ``{run_id, first_failed_at, last_failure, alerted_at}``.
 
-    common의 ``StallClock``은 대상을 ``key``라 부른다. cursor 키는 Map이 정한다.
+    kor-travel-common ``StallClock``(시각은 epoch 초, 실패 서명은 200자 이하 문자열)을 그대로 싣되
+    대상 key를 ``run_id``라 부른다. cursor 키는 Map이 정한다.
     """
     value = clock.to_dict()
     value["run_id"] = value.pop("key")
@@ -264,9 +262,11 @@ def _clock_from_cursor(raw: object, *, name: str) -> StallClock:
     value = dict(raw)
     value["key"] = value.pop("run_id")
     try:
-        return StallClock.from_dict(value)
+        clock = StallClock.from_dict(value)
+        _decode_failure(clock.last_failure)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"reconcile cursor {name} is invalid") from exc
+    return clock
 
 
 @dataclass(frozen=True)
@@ -463,7 +463,14 @@ async def _evaluate_status_event(
         context.log.error(message)
         return SkipReason(message)
     try:
-        outcome = await _apply_run_record(record, client)
+        # 상태 sensor도 공용 code server의 sensor thread를 나눠 쓴다 — reconcile tick과 같은 서버 쪽
+        # 상한을 건다(ADR-112 결정 2). 반영은 다음 이벤트·reconcile이 다시 하므로 짧게 끊어도 된다.
+        deadline = _monotonic() + _STATUS_EVENT_BUDGET_SECONDS
+        with transaction_deadline(deadline):
+            async with asyncio.timeout(
+                _STATUS_EVENT_BUDGET_SECONDS + _CLIENT_TIMEOUT_GRACE_SECONDS
+            ):
+                outcome = await _apply_run_record(record, client)
     except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
         return SkipReason(str(exc))
@@ -571,6 +578,58 @@ def _failure(
     }
 
 
+_FAILURE_FIELDS: Final[tuple[str, ...]] = (
+    "category",
+    "closable",
+    "sqlstate",
+    "constraint",
+    "error_type",
+)
+
+
+def _encode_failure(failure: Mapping[str, Any]) -> str:
+    """시계의 실패 서명 — ``category|closable|sqlstate|constraint|error_type``(200자 이하).
+
+    값은 모두 식별자다(SQLSTATE·constraint 이름·예외 class 이름). 오류 원문은 싣지 않는다.
+    """
+    parts = [
+        str(failure["category"]),
+        "1" if failure["closable"] else "0",
+        failure["sqlstate"] or "-",
+        (failure["constraint"] or "-")[:63],
+        str(failure["error_type"])[:60],
+    ]
+    return "|".join(part.replace("|", "/") for part in parts)
+
+
+def _decode_failure(signature: str) -> dict[str, Any]:
+    parts = signature.split("|")
+    if len(parts) != len(_FAILURE_FIELDS) or parts[1] not in {"0", "1"}:
+        raise ValueError("stall clock failure signature is invalid")
+    category, closable, sqlstate, constraint, error_type = parts
+    return _failure(
+        category=category,
+        closable=closable == "1",
+        error_type=error_type,
+        sqlstate=None if sqlstate == "-" else sqlstate,
+        constraint=None if constraint == "-" else constraint,
+    )
+
+
+def _failure_of(clock: StallClock) -> dict[str, Any]:
+    return _decode_failure(clock.last_failure)
+
+
+def _observe(
+    clock: StallClock | None, *, key: str, failure: Mapping[str, Any], now: datetime
+) -> StallClock:
+    return observe_failure(clock, key=key, failure=_encode_failure(failure), now=now.timestamp())
+
+
+def _clock_time(value: float) -> datetime:
+    return datetime.fromtimestamp(value, tz=UTC)
+
+
 def _classify_failure(error: BaseException, *, at_head: bool) -> dict[str, Any]:
     """실패를 닫을 수 있는 것(CLOSABLE)과 재시도·알림만 할 것으로 가른다(ADR-112 결정 4·5).
 
@@ -585,9 +644,9 @@ def _classify_failure(error: BaseException, *, at_head: bool) -> dict[str, Any]:
     if isinstance(error, (_OutOfTime, DeadlineExceeded, TimeoutError)):
         return _failure(category="timeout", closable=False, error_type=error_type)
     info = pg_error_info(error)
-    sqlstate = info.sqlstate
-    if sqlstate is None:
+    if info is None:
         return _failure(category="exception", closable=False, error_type=error_type)
+    sqlstate = info.sqlstate
     if sqlstate == "55P03":
         gate_busy = (info.message or "").startswith(_GATE_BUSY_MARKER)
         return _failure(
@@ -615,7 +674,7 @@ def _storage_failure(error: BaseException) -> dict[str, Any]:
 
 
 def _stalled(clock: StallClock, now: datetime) -> bool:
-    return now - clock.first_failed_at >= timedelta(seconds=FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    return now.timestamp() - clock.first_failed_at >= FEATURE_OPERATION_STALL_AFTER_SECONDS
 
 
 async def _reconcile_tick(
@@ -740,7 +799,7 @@ async def _reconcile_dagster_page(
         tick.log_failure(
             "Dagster run storage 읽기 실패(머리 시계): error_type=%s", type(exc).__name__
         )
-        storage_head = observe_failure(
+        storage_head = _observe(
             head,
             key=head.key if head is not None else storage_key,
             failure=_storage_failure(exc),
@@ -794,7 +853,7 @@ async def _reconcile_dagster_page(
             continue
         failure = _classify_failure(error, at_head=True)
         now = _utcnow()
-        current = observe_failure(current, key=run.run_id, failure=failure, now=now)
+        current = _observe(current, key=run.run_id, failure=failure, now=now)
         tick.log_failure(
             "operation run 반영 실패(머리): run_id=%s category=%s error_type=%s",
             run.run_id,
@@ -940,9 +999,7 @@ async def _reconcile_database_page(
             _ItemFailure(run_id=run_id, failure=failure, record=record, failed_at=failed_at)
         )
         if result.watch is None or result.watch.key == run_id:
-            result.watch = observe_failure(
-                result.watch, key=run_id, failure=failure, now=failed_at
-            )
+            result.watch = _observe(result.watch, key=run_id, failure=failure, now=failed_at)
     result.cursor = next_cursor
     watched = next(
         (item for item in failures if result.watch is not None and item.run_id == result.watch.key),
@@ -970,7 +1027,7 @@ async def _settle_watch(
     now = _utcnow()
     if not _stalled(watch, now):
         return watch
-    if watch.last_failure.get("closable") and await _abandon(
+    if _failure_of(watch)["closable"] and await _abandon(
         tick, client, watch, record=watched.record, deadline=deadline, pass_on_active=False
     ):
         return None
@@ -999,9 +1056,7 @@ async def _settle_watch(
     )
     if successor is None:
         return None
-    return observe_failure(
-        None, key=successor.run_id, failure=successor.failure, now=successor.failed_at
-    )
+    return _observe(None, key=successor.run_id, failure=successor.failure, now=successor.failed_at)
 
 
 async def _abandon(
@@ -1034,8 +1089,8 @@ async def _abandon(
                 dagster_run_id=clock.key,
                 dagster_status=status,
                 engine_finished_at=finished_at,
-                failure=dict(clock.last_failure),
-                first_failed_at=clock.first_failed_at,
+                failure=_failure_of(clock),
+                first_failed_at=_clock_time(clock.first_failed_at),
             ),
         )
     except Exception as exc:
@@ -1070,12 +1125,12 @@ async def _alert_if_due(
         "provider feature operation reconcile 멈춤: scope=%s run_id=%s since=%s category=%s",
         scope,
         clock.key,
-        clock.first_failed_at.isoformat(),
-        clock.last_failure.get("category"),
+        _clock_time(clock.first_failed_at).isoformat(),
+        _failure_of(clock)["category"],
     )
     if not due_alert(
         clock,
-        now=now,
+        now=now.timestamp(),
         stall_after=FEATURE_OPERATION_STALL_AFTER_SECONDS,
         realert_after=FEATURE_OPERATION_REALERT_SECONDS,
     ):
@@ -1087,9 +1142,9 @@ async def _alert_if_due(
                 scope=scope,
                 dagster_run_id=clock.key,
                 dagster_status=dagster_status,
-                first_failed_at=clock.first_failed_at,
-                last_failure=dict(clock.last_failure),
-                alerted_at=clock.alerted_at,
+                first_failed_at=_clock_time(clock.first_failed_at),
+                last_failure=_failure_of(clock),
+                alerted_at=_clock_time(clock.alerted_at) if clock.alerted_at is not None else None,
                 action=_stall_action(scope, clock),
             ),
         )
@@ -1098,11 +1153,11 @@ async def _alert_if_due(
             "reconcile 멈춤 알림 기록 실패(다음 tick에 다시): error_type=%s", type(exc).__name__
         )
         return clock
-    return mark_alerted(clock, now=now)
+    return mark_alerted(clock, now.timestamp())
 
 
 def _stall_action(scope: str, clock: StallClock) -> str:
-    category = clock.last_failure.get("category")
+    category = _failure_of(clock)["category"]
     if category == "storage":
         return (
             "Dagster run storage cannot be read; the Dagster page is paused - check the code "

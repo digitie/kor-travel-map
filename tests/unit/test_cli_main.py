@@ -403,3 +403,17 @@ def test_format_merge_outcome() -> None:
     assert "loser:  f_l (soft-deleted)" in out
     assert "moved=2 dropped=1" in out
     assert "queue: merged" in out
+
+
+def test_parser_reconcile_abandon() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["reconcile-abandon", "run-1", "--dagster-status", "missing"]
+    )
+    assert args.dagster_run_id == "run-1"
+    assert args.dagster_status == "missing"
+    assert args.finished_at is None
+    with pytest.raises(SystemExit):
+        parser.parse_args(["reconcile-abandon", "run-1"])
+    with pytest.raises(SystemExit):
+        parser.parse_args(["reconcile-abandon", "run-1", "--dagster-status", "BOGUS"])
