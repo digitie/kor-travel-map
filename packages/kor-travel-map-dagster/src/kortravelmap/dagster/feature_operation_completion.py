@@ -64,8 +64,8 @@ async def complete_succeeded_feature_operations_op(context: OpExecutionContext) 
 
     root 하나의 완결 실패는 run을 FAILURE로 만들지 않는다. 고칠 수 없는 root 하나가 SUCCESS run마다
     FAILURE run을 쌓아 진짜 실패를 묻지 않게 하기 위해서다. 실패는 root마다 error 로그와 output
-    metadata(`failed_run_ids`)에 남고, 그 root는 active로 남아 다음 sweep이 다시 시도한다. 멈춤 알림은
-    ADR-112 결정 3의 몫이다. 목록 조회 자체가 실패하면 run을 실패시킨다.
+    metadata(`failed_run_ids`)에 남고, 그 root는 active로 남아 다음 sweep이 다시 시도한다.
+    멈춤 알림은 ADR-112 결정 3의 몫이다. 목록 조회 자체가 실패하면 run을 실패시킨다.
     """
     client = cast("AsyncKorTravelMapClient", context.resources.kor_travel_map_client)
     try:

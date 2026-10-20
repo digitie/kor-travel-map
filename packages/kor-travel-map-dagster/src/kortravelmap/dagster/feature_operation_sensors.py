@@ -697,7 +697,7 @@ async def _ensure_terminal_root(
     started_at: datetime | None,
 ) -> DagsterFeatureOperationMutation:
     """terminal run의 root를 ensure한다. identity conflict는 올린다."""
-    mutation = await client.ensure_dagster_feature_operation(
+    return await client.ensure_dagster_feature_operation(
         dagster_run_id=record.dagster_run.run_id,
         trigger_kind=trigger_kind,
         selected_memberships=memberships,
@@ -710,7 +710,6 @@ async def _ensure_terminal_root(
             else DagsterRunStatus.NOT_STARTED.value
         ),
     )
-    return mutation
 
 
 async def _ensure_success_root(
