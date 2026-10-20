@@ -1206,7 +1206,7 @@ def _active_root(run_id: str) -> object:
 
 def _db_page_context(*records: _Record) -> _Context:
     return _Context(
-        instance=_Instance(list(records)),
+        instance=_Instance(list(records), cursor_storage_ids={"previous": 100}),
         # Dagster page는 비우고(watermark가 이미 끝) DB page만 본다.
         cursor=FeatureOperationReconcileCursor(
             dagster=DagsterRunWatermark(100, "previous")
@@ -1397,7 +1397,9 @@ async def test_db_page_without_success_roots_requests_nothing() -> None:
 
 async def test_backstop_lookup_failure_requests_nothing_but_commits_cursor() -> None:
     context = _db_page_context(_record(DagsterRunStatus.SUCCESS, run_id="run-1"))
-    context.instance.records_error = RuntimeError("secret storage detail")
+    context.instance = _CompletionLookupFailingInstance(
+        context.instance.records, cursor_storage_ids={"previous": 100}
+    )
     client = _db_page_client("run-1")
 
     result = await _reconcile_tick(context, client)
@@ -1451,6 +1453,9 @@ async def test_sweep_completes_only_success_roots_and_survives_one_failure() -> 
     assert "FeatureOperationObservationError" in log.errors[0]
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Parameter `owners` of initializer `SensorDefinition.__init__` is currently in beta"
+)
 def test_completion_job_is_registered_pooled_and_requested_by_both_sensors() -> None:
     from kortravelmap.dagster.definitions import defs
     from kortravelmap.dagster.feature_operation_sensors import feature_operation_success_sensor
@@ -1470,3 +1475,13 @@ def test_completion_job_is_registered_pooled_and_requested_by_both_sensors() -> 
         ]
     # 나머지 상태 sensor는 run을 내지 않는다.
     assert not defs.resolve_sensor_def("feature_operation_failure_sensor").targets
+
+
+@dataclass
+class _CompletionLookupFailingInstance(_Instance):
+    """completion sweep 이력 조회만 실패한다(Dagster page 조회는 성공)."""
+
+    def get_run_records(self, filters: object | None = None, **kwargs: Any) -> list[_Record]:
+        if getattr(filters, "job_name", None) == FEATURE_OPERATION_COMPLETION_JOB_NAME:
+            raise RuntimeError("secret storage detail")
+        return super().get_run_records(filters=filters, **kwargs)
