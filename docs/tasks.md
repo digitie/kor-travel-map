@@ -118,7 +118,5 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
 
-  `feature_operation_reconciliation_sensor`는 한 run의 반영 실패가 tick 전체를 멈추고 30초마다 같은 일을 다시 한다.
-  #1319가 세 판을 시도했다가 되돌렸다 — 리뷰 결과(H1–H3·M1–M3·L1–L4, parking 표 결함)를 설계 입력으로
-  해제 조건을 만족하는 한 판을 낸다. 조건은 tasks-acceptance §T-RECONCILE-RETRY.
-  **2026-10-20 설계안 ADR-112(proposed)** — 열린 결정 O1~O4 소유자 승인 대기. 승인 뒤 같은 항목으로 구현한다.
+  한 run의 반영 실패가 tick 전체를 멈추고 30초마다 되풀이한다. #1319의 세 판은 되돌렸다.
+  설계안 ADR-112(proposed, O1~O4 소유자 승인 대기) → 승인 뒤 같은 항목으로 구현. 조건은 acceptance.
