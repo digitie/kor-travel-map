@@ -590,7 +590,7 @@ item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 
 ## 2. `provider_sync.source_entities` / `provider_sync.source_records` (legacy, T-VN-33 이전)
 
 > 아래 SQL은 Alembic 0087까지의 historical model이다. T-VN-33 cutover 뒤의 정본은
-> ADR-088 및 `contracts/vnext/target-schema-v1.sql`이다. 최종형은
+> ADR-088과 alembic head다(`contracts/vnext/target-schema-v1.sql`은 rev 300 당시 동결 기록, ADR-105 후속). 최종형은
 > `provider_datasets` FK identity, immutable `source_records`,
 > `source_entity_heads(observed_at, expires_at)`, role-only `source_links`를 사용하며
 > provider/dataset·current pointer·raw-derived·legacy primary boolean 열은
