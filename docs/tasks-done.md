@@ -1,5 +1,11 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-20 — 통합 planner flake 고정 이관(T-TEST-PLANNER-INDEX)
+
+- [x] T-TEST-PLANNER-INDEX — **public partial index EXPLAIN 테스트의 플래너 흔들림 고정.**
+  Fixed by PR #1336, merge e937b38d; REINDEX in test txn + 25k draft rows + lock_timeout 30s; 20/20 n150 passes.
+  [acceptance §T-TEST-PLANNER-INDEX](tasks-acceptance.md#t-test-planner-index).
+
 ## 2026-10-19 — T-MAP-02 현재 설치 세대 수용
 
 - [x] T-MAP-02 — timeout 구현523d98cc가 포함된 e937b38d의 API/CS 설치3파일 hash와
