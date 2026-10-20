@@ -19,6 +19,7 @@ from dagster import (
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
+from .feature_operation_completion import FEATURE_OPERATION_COMPLETION_JOBS
 from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
 from .feature_update_runner import feature_update_runner_resource
 from .file_registry_scan import (
@@ -197,6 +198,7 @@ defs = Definitions(
             *FILE_REGISTRY_SCAN_JOBS,
             *MANUAL_PROVIDER_DEDUP_JOBS,
             *RUN_HEARTBEAT_JOBS,
+            *FEATURE_OPERATION_COMPLETION_JOBS,
         ],
     ),
     schedules=[

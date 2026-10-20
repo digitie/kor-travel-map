@@ -8,7 +8,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from dagster import DagsterInstance, DagsterRun, DagsterRunStatus, DefaultSensorStatus
+from dagster import (
+    DagsterInstance,
+    DagsterRun,
+    DagsterRunStatus,
+    DefaultSensorStatus,
+    RunRequest,
+)
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
@@ -17,7 +23,12 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationMembership,
 )
 
+from kortravelmap.dagster.feature_operation_completion import (
+    FEATURE_OPERATION_COMPLETION_JOB_NAME,
+    FEATURE_OPERATION_COMPLETION_POOL,
+)
 from kortravelmap.dagster.feature_operation_sensors import (
+    FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS,
     FEATURE_OPERATION_RECONCILE_PAGE_SIZE,
     FEATURE_OPERATION_SETTLE_LAG_SECONDS,
     FEATURE_OPERATION_TRACKING_SENSORS,
@@ -30,6 +41,7 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _evaluate_status_event,
     _map_run_count,
     _reconcile_tick,
+    apply_completion_record,
     feature_operation_reconciliation_sensor,
 )
 from kortravelmap.dagster.run_scope import (
@@ -131,6 +143,9 @@ class _Log:
     def warning(self, message: str, *args: object) -> None:
         self.warnings.append(message % args if args else message)
 
+    def info(self, message: str, *args: object) -> None:
+        pass
+
 
 @dataclass
 class _Instance:
@@ -183,6 +198,12 @@ class _Instance:
             selected = [
                 record for record in selected if record.dagster_run.tags.get(key) == value
             ]
+        job_name = getattr(filters, "job_name", None)
+        if job_name is not None:
+            selected = [record for record in selected if record.dagster_run.job_name == job_name]
+        statuses = getattr(filters, "statuses", None)
+        if statuses:
+            selected = [record for record in selected if record.dagster_run.status in statuses]
         created_after = getattr(filters, "created_after", None)
         created_before = getattr(filters, "created_before", None)
         if created_after is not None:
@@ -403,7 +424,7 @@ async def test_terminal_selection_mismatch_bypasses_ensure_conflict_to_close_roo
     )
     client = _Client(ensure_error=conflict)
 
-    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+    outcome = await apply_completion_record(_record(DagsterRunStatus.SUCCESS), client)
 
     assert outcome == "applied"
     assert len(client.reconcile_calls) == 1
@@ -420,7 +441,7 @@ async def test_trigger_mismatch_is_delegated_to_atomic_terminal_reconcile() -> N
     )
     client = _Client(ensure_error=conflict)
 
-    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+    outcome = await apply_completion_record(_record(DagsterRunStatus.SUCCESS), client)
 
     assert outcome == "applied"
     assert len(client.reconcile_calls) == 1
@@ -430,7 +451,7 @@ async def test_trigger_mismatch_is_delegated_to_atomic_terminal_reconcile() -> N
 async def test_success_delegates_partial_child_decision_to_atomic_reconcile() -> None:
     client = _Client()
 
-    await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+    await apply_completion_record(_record(DagsterRunStatus.SUCCESS), client)
 
     assert len(client.reconcile_calls) == 1
     call = client.reconcile_calls[0]
@@ -953,8 +974,10 @@ async def test_at_most_one_page_without_cursor_seeds_null_and_replays_from_start
     await _reconcile_tick(context, client)
 
     assert context.log.errors == []
-    reconciled = [call["dagster_run_id"] for call in client.reconcile_calls]
-    assert reconciled == [record.dagster_run.run_id for record in runs]
+    # SUCCESS run은 sensor에서 ensure만 한다 — 완결(reconcile)은 completion run 몫이다.
+    ensured = [call["dagster_run_id"] for call in client.ensure_calls]
+    assert ensured == [record.dagster_run.run_id for record in runs]
+    assert client.reconcile_calls == []
     resumed = FeatureOperationReconcileCursor.from_json(context.updated_cursors[-1])
     expected = DagsterRunWatermark(count, f"map-run-{count - 1}") if count else None
     assert resumed.dagster == expected
@@ -1143,3 +1166,308 @@ async def test_admin_manual_run_is_recorded_as_manual_not_schedule() -> None:
     await _apply_run_record(schedule_record, schedule_client)
 
     assert schedule_client.ensure_calls[0]["trigger_kind"] == "schedule"
+
+
+# -- ADR-112 결정 0-1: SUCCESS 완결은 sensor 밖 completion sweep이 한다 -------------------
+
+
+def _completion_run(
+    *,
+    run_id: str,
+    status: DagsterRunStatus,
+    storage_id: int,
+    ended_ago: timedelta | None = None,
+) -> _Record:
+    end_time = (
+        (datetime.now(tz=UTC) - ended_ago).timestamp() if ended_ago is not None else None
+    )
+    return _Record(
+        storage_id=storage_id,
+        dagster_run=_Run(
+            run_id=run_id,
+            job_name=FEATURE_OPERATION_COMPLETION_JOB_NAME,
+            status=status,
+            run_config={},
+            tags={CODE_LOCATION_RUN_TAG: MAP_CODE_LOCATION_NAME},
+            asset_selection=None,
+        ),
+        create_timestamp=datetime.now(tz=UTC) - timedelta(hours=1),
+        end_time=end_time,
+    )
+
+
+def _active_root(run_id: str) -> object:
+    return SimpleNamespace(
+        dagster_run_id=run_id,
+        created_at=_NOW,
+        root_job_id="11111111-1111-4111-8111-111111111111",
+    )
+
+
+def _db_page_context(*records: _Record) -> _Context:
+    return _Context(
+        instance=_Instance(list(records)),
+        # Dagster page는 비우고(watermark가 이미 끝) DB page만 본다.
+        cursor=FeatureOperationReconcileCursor(
+            dagster=DagsterRunWatermark(100, "previous")
+        ).to_json(),
+    )
+
+
+def _db_page_client(*run_ids: str) -> _Client:
+    return _Client(
+        page=DagsterFeatureOperationPage(
+            tuple(_active_root(run_id) for run_id in run_ids),  # type: ignore[misc]
+            None,
+        )
+    )
+
+
+async def test_sensor_success_only_ensures_and_never_reconciles() -> None:
+    """sensor 경로의 SUCCESS는 root를 ensure만 한다 — 완결 CALL을 품은 reconcile을 부르지 않는다."""
+
+    client = _Client()
+
+    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert outcome == "completion_pending"
+    assert len(client.ensure_calls) == 1
+    assert client.ensure_calls[0]["observed_status"] == "STARTED"
+    assert client.reconcile_calls == []
+
+
+async def test_sensor_success_conflict_on_existing_root_is_left_to_the_sweep() -> None:
+    conflict = FeatureOperationInvariantConflict(
+        "trigger changed",
+        dagster_run_id="run-1",
+        root_job_id="11111111-1111-4111-8111-111111111111",
+        details={"trigger_kind": {"expected": "schedule", "actual": "manual"}},
+    )
+    client = _Client(ensure_error=conflict)
+
+    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert outcome == "completion_pending"
+    assert client.reconcile_calls == []
+
+
+async def test_sensor_success_conflict_without_root_still_raises_like_before() -> None:
+    """root를 가리키지 않는 conflict(quarantine)는 종전 reconcile처럼 올린다 — 조용히 지나가지 않는다."""
+
+    conflict = FeatureOperationInvariantConflict(
+        "quarantined",
+        dagster_run_id="run-1",
+        details={"reason": "quarantined"},
+    )
+    client = _Client(ensure_error=conflict)
+
+    with pytest.raises(FeatureOperationInvariantConflict):
+        await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert client.reconcile_calls == []
+
+
+async def test_sensor_success_on_blocked_root_needs_no_completion() -> None:
+    client = _Client(ensure_outcomes=["blocked"])
+
+    outcome = await _apply_run_record(_record(DagsterRunStatus.SUCCESS), client)
+
+    assert outcome == "blocked"
+    assert client.reconcile_calls == []
+
+
+def _status_context(record: _Record, *extra: _Record) -> Any:
+    return SimpleNamespace(
+        instance=_Instance([record, *extra]),
+        dagster_run=record.dagster_run,
+        log=_Log(),
+    )
+
+
+async def test_success_event_requests_a_sweep_instead_of_reconciling() -> None:
+    record = _record(DagsterRunStatus.SUCCESS)
+    client = _Client()
+
+    result = await _evaluate_status_event(_status_context(record), client)
+
+    assert isinstance(result, RunRequest)
+    assert result.run_key == "feature-operation-completion:success:run-1"
+    assert client.reconcile_calls == []
+
+
+async def test_success_event_skips_when_a_sweep_has_not_started_yet() -> None:
+    record = _record(DagsterRunStatus.SUCCESS)
+    queued = _completion_run(run_id="sweep-a", status=DagsterRunStatus.QUEUED, storage_id=3)
+    client = _Client()
+
+    result = await _evaluate_status_event(_status_context(record, queued), client)
+
+    assert not isinstance(result, RunRequest)
+    assert "completion_pending" in (result.skip_message or "")
+
+
+async def test_success_event_requests_again_when_the_sweep_already_started() -> None:
+    """시작한 sweep은 이 root를 이미 지나쳤을 수 있다 — 새 sweep을 낸다(pool이 줄 세운다)."""
+
+    record = _record(DagsterRunStatus.SUCCESS)
+    started = _completion_run(run_id="sweep-a", status=DagsterRunStatus.STARTED, storage_id=3)
+
+    result = await _evaluate_status_event(_status_context(record, started), _Client())
+
+    assert isinstance(result, RunRequest)
+
+
+async def test_failure_event_still_reconciles_inline() -> None:
+    record = _record(DagsterRunStatus.FAILURE)
+    client = _Client()
+
+    result = await _evaluate_status_event(_status_context(record), client)
+
+    assert not isinstance(result, RunRequest)
+    assert [call["terminal_status"] for call in client.reconcile_calls] == ["FAILURE"]
+
+
+async def test_completion_record_requires_a_terminal_run() -> None:
+    client = _Client()
+
+    with pytest.raises(FeatureOperationObservationError, match="terminal"):
+        await apply_completion_record(_record(DagsterRunStatus.STARTED), client)
+
+    assert client.ensure_calls == []
+    assert client.reconcile_calls == []
+
+
+async def test_db_page_success_root_requests_a_backstop_sweep_without_db_writes() -> None:
+    context = _db_page_context(_record(DagsterRunStatus.SUCCESS, run_id="run-1"))
+    client = _db_page_client("run-1")
+
+    result = await _reconcile_tick(context, client)
+
+    assert isinstance(result, list)
+    assert [request.run_key for request in result] == [
+        "feature-operation-completion:backstop:first"
+    ]
+    # root는 이미 있다 — ensure도 reconcile도 하지 않는다.
+    assert client.ensure_calls == []
+    assert client.reconcile_calls == []
+    assert len(context.updated_cursors) == 1
+    assert context.log.errors == []
+
+
+async def test_db_page_backstop_waits_for_an_active_or_recent_sweep() -> None:
+    success = _record(DagsterRunStatus.SUCCESS, run_id="run-1")
+    sweep = _completion_run(
+        run_id="sweep-a",
+        status=DagsterRunStatus.FAILURE,
+        storage_id=3,
+        ended_ago=timedelta(seconds=FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS - 60),
+    )
+    context = _db_page_context(success, sweep)
+    client = _db_page_client("run-1")
+
+    first = await _reconcile_tick(context, client)
+    assert not isinstance(first, list)
+    assert "completion_pending=1" in (first.skip_message or "")
+
+    sweep.end_time = (
+        datetime.now(tz=UTC)
+        - timedelta(seconds=FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS + 1)
+    ).timestamp()
+    second = await _reconcile_tick(context, client)
+
+    assert isinstance(second, list)
+    assert [request.run_key for request in second] == [
+        "feature-operation-completion:backstop:after:sweep-a"
+    ]
+
+    sweep.dagster_run.status = DagsterRunStatus.STARTED
+    sweep.end_time = None
+    assert not isinstance(await _reconcile_tick(context, client), list)
+
+
+async def test_db_page_without_success_roots_requests_nothing() -> None:
+    context = _db_page_context(_record(DagsterRunStatus.STARTED, run_id="run-1"))
+    client = _db_page_client("run-1")
+
+    result = await _reconcile_tick(context, client)
+
+    assert not isinstance(result, list)
+    assert len(client.ensure_calls) == 1
+
+
+async def test_backstop_lookup_failure_requests_nothing_but_commits_cursor() -> None:
+    context = _db_page_context(_record(DagsterRunStatus.SUCCESS, run_id="run-1"))
+    context.instance.records_error = RuntimeError("secret storage detail")
+    client = _db_page_client("run-1")
+
+    result = await _reconcile_tick(context, client)
+
+    assert not isinstance(result, list)
+    assert len(context.updated_cursors) == 1
+    assert len(context.log.errors) == 1
+    assert "RuntimeError" in context.log.errors[0]
+    assert "secret" not in context.log.errors[0]
+
+
+async def test_sweep_completes_only_success_roots_and_survives_one_failure() -> None:
+    from kortravelmap.dagster.feature_operation_completion import (
+        sweep_succeeded_feature_operations,
+    )
+
+    records = [
+        _record(DagsterRunStatus.SUCCESS, run_id="ok-1", storage_id=2),
+        _record(DagsterRunStatus.STARTED, run_id="running", storage_id=3),
+        _record(DagsterRunStatus.SUCCESS, run_id="broken", storage_id=4),
+        _record(DagsterRunStatus.SUCCESS, run_id="ok-2", storage_id=5),
+    ]
+    records[2].end_time = None  # 관측 오류 — 이 root만 실패하고 다음 root는 계속한다.
+
+    class _PagedClient(_Client):
+        async def list_reconcilable_dagster_feature_runs(self, **kwargs: Any) -> object:
+            self.list_calls.append(kwargs)
+            if kwargs["cursor"] is None:
+                return DagsterFeatureOperationPage(
+                    (_active_root("ok-1"), _active_root("running")),  # type: ignore[arg-type]
+                    DagsterFeatureOperationCursor(created_at=_NOW, root_job_id="r"),
+                )
+            return DagsterFeatureOperationPage(
+                (_active_root("broken"), _active_root("ok-2"), _active_root("gone")),  # type: ignore[arg-type]
+                None,
+            )
+
+    client = _PagedClient()
+    log = _Log()
+
+    completed, failed = await sweep_succeeded_feature_operations(
+        _Instance(records), client, log
+    )
+
+    assert completed == 2
+    assert failed == ["broken"]
+    assert [call["dagster_run_id"] for call in client.reconcile_calls] == ["ok-1", "ok-2"]
+    assert {call["terminal_status"] for call in client.reconcile_calls} == {"SUCCESS"}
+    assert len(client.list_calls) == 2
+    assert len(log.errors) == 1
+    assert "FeatureOperationObservationError" in log.errors[0]
+
+
+def test_completion_job_is_registered_pooled_and_requested_by_both_sensors() -> None:
+    from kortravelmap.dagster.definitions import defs
+
+    from kortravelmap.dagster.feature_operation_sensors import feature_operation_success_sensor
+
+    job = defs.get_job_def(FEATURE_OPERATION_COMPLETION_JOB_NAME)
+    (op_def,) = list(job.graph.iterate_op_defs())
+    # pool이 run을 하나씩 돌린다 — 완결은 lineage lock 하나로 직렬화된다.
+    assert op_def.pool == FEATURE_OPERATION_COMPLETION_POOL
+    # operation key가 없어야 두 sensor가 이 run을 panel-only로 본다.
+    assert "kor_travel_map.operation_key" not in job.tags
+    for sensor_def in (
+        defs.resolve_sensor_def("feature_operation_reconciliation_sensor"),
+        defs.resolve_sensor_def(feature_operation_success_sensor.name),
+    ):
+        assert [target.job_name for target in sensor_def.targets] == [
+            FEATURE_OPERATION_COMPLETION_JOB_NAME
+        ]
+    # 나머지 상태 sensor는 run을 내지 않는다.
+    assert not defs.resolve_sensor_def("feature_operation_failure_sensor").targets
