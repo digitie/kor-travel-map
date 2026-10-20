@@ -171,7 +171,6 @@ from kortravelmap.infra.feature_operation_repo import (
 from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_memberships as repo_resolve_feature_operation_memberships,
 )
-from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.infra.feature_repo import (
     EnrichmentLoadResult,
     FeatureLoadResult,
@@ -306,6 +305,7 @@ from kortravelmap.infra.sync_state_repo import (
 from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
 )
+from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
     MoisBulkJobResult,

@@ -17,13 +17,13 @@ from dagster import (
     RunRequest,
 )
 from kortravelmap.client import IntegrityFindingSyncResult
-from kortravelmap.infra.transaction_limits import remaining_seconds
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
 )
+from kortravelmap.infra.transaction_limits import remaining_seconds
 
 from kortravelmap.dagster.feature_operation_completion import (
     FEATURE_OPERATION_COMPLETION_JOB_NAME,
@@ -1632,7 +1632,9 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     return fake
 
 
-def _held_context(*records: _Record, cursor: FeatureOperationReconcileCursor | None = None) -> _Context:
+def _held_context(
+    *records: _Record, cursor: FeatureOperationReconcileCursor | None = None
+) -> _Context:
     return _Context(
         instance=_Instance(list(records)),
         cursor=(
@@ -1820,7 +1822,11 @@ async def test_pages_stop_starting_calls_at_their_deadlines(clock: _Clock) -> No
     assert committed.dagster == DagsterRunWatermark(3, "run-2")
     # DB page: t=16 목록, 16→24→32, 남은 8초 → 40, 남은 0초라 db-4는 시작하지 않는다.
     dagster_ids = {f"run-{index}" for index in range(1, 6)}
-    db_calls = [c["dagster_run_id"] for c in client.ensure_calls if c["dagster_run_id"] not in dagster_ids]
+    db_calls = [
+        call["dagster_run_id"]
+        for call in client.ensure_calls
+        if call["dagster_run_id"] not in dagster_ids
+    ]
     assert db_calls == ["db-1", "db-2", "db-3"]
     # 일찍 멈춘 DB page는 마지막으로 방문한 항목에 cursor를 둔다.
     assert committed.database == DagsterFeatureOperationCursor(

@@ -17,7 +17,6 @@ from kortravelmap.core.feature_operation import (
     DagsterFeatureOperation,
     DagsterFeatureOperationCursor,
     DagsterFeatureOperationMutation,
-    DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
     TriggerKind,
@@ -241,7 +240,10 @@ _CURSOR_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"head", "db_watch"})
 
 
 def _clock_to_cursor(clock: StallClock) -> dict[str, Any]:
-    """cursor의 시계 모양은 ADR-112 결정 3의 ``{run_id, first_failed_at, last_failure, alerted_at}``."""
+    """cursor의 시계 모양 — ADR-112 결정 3의 ``{run_id, first_failed_at, last_failure, alerted_at}``.
+
+    common의 ``StallClock``은 대상을 ``key``라 부른다. cursor 키는 Map이 정한다.
+    """
     value = clock.to_dict()
     value["run_id"] = value.pop("key")
     return value
@@ -313,7 +315,7 @@ class FeatureOperationReconcileCursor:
             raise ValueError("feature operation reconcile cursor is not valid JSON") from exc
         if (
             not isinstance(raw, dict)
-            or not _CURSOR_REQUIRED_KEYS <= set(raw)
+            or not set(raw) >= _CURSOR_REQUIRED_KEYS
             or not set(raw) <= _CURSOR_REQUIRED_KEYS | _CURSOR_OPTIONAL_KEYS
         ):
             raise ValueError("feature operation reconcile cursor shape is invalid")
