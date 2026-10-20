@@ -448,6 +448,19 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
 - **kor-travel-common 경계**: 범용 도구(`call_with_deadline`(slots), `pg_error_info`, `StallClock`·`observe_failure`·
   `due_alert`·`mark_alerted`)는 `kortravelmap.dagster.retry_common` 한 모듈에 같은 이름·의미로 두었다. common에 같은 API가
   머지되면 그 import로 바꾸고 핀을 올린다. 트랜잭션 SQL·CLOSABLE 목록·gate 표지·abandon·cursor 키는 소비자(Map) 몫이다.
+- **닫기·알림 몫**: 항목 반영(읽기·ensure·reconcile)은 page 마감보다 6초 일찍 끊는다. 남긴 몫으로 머리·`db_watch`의
+  닫기와 알림을 한다 — 실패한 호출이 lock_timeout(남은 − 4초)까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지
+  않는다(코드 적대 리뷰 H1).
+- **`db_watch` 넘기기**: 알림을 낸 root는 슬롯을 이번 tick에 실패한 root 가운데 그다음 것(없으면 처음으로 돌아가 다른 첫
+  것)에게 넘기고, 넘겨받은 root의 시계는 그 실패 시각에서 시작한다. 넘길 데가 없으면 비운다(리뷰 H2 — 비우기만 하면 다음
+  tick에 같은 root가 첫 실패로 도로 잡았다).
+- **머리의 `run_active`**: Dagster run이 아직 돌아 닫지 않은 머리도 root가 있으므로 지나간다(결정 4 표, 리뷰 M4).
+  active run의 ensure가 root를 가리키는 conflict로 끝나도 root가 있다고 친다(리뷰 H3).
+- **storage 실패와 머리 시계**: 머리 run의 시계가 이미 있으면 storage 실패는 그 시계를 잇는다(key 그대로). storage가
+  오락가락해도 시계가 처음으로 돌아가지 않는다(리뷰 M5). quarantine된 root만 있는 run을 닫으면 로그가 그 사실을 적는다.
+- **한계(문서화)**: `statement_timeout`은 statement마다 걸린다. 트랜잭션을 열 때의 남은 시간으로 정하므로, 여러 statement로
+  된 트랜잭션은 client가 포기한(남은 + 3초) 뒤에도 서버에서 마지막 statement가 자기 상한까지 돌 수 있다. sensor
+  트랜잭션은 짧아서 받아들인다(리뷰 M7).
 - **lock_timeout**: min(30초, 남은 − 4초)를 그대로 둔다. odroid tenant의 5초로 낮출지는 소유자 확인 대기다.
 - **알려진 성질**: 슬롯을 넘겨받은 root가 다시 첫 실패 root로 슬롯을 잡으면 시계가 처음부터 돈다. 그래서 같은 root의
   `db_watch` 알림은 15분+α 주기로 되풀이될 수 있다(시계마다는 한 시간에 한 행). 설계가 받아들인 대가다(결정 3).

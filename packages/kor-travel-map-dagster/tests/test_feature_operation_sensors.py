@@ -23,6 +23,7 @@ from kortravelmap.core.feature_operation import (
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
 )
+from kortravelmap.infra import transaction_limits
 from kortravelmap.infra.transaction_limits import remaining_seconds
 
 from kortravelmap.dagster.feature_operation_completion import (
@@ -1818,16 +1819,16 @@ async def test_pages_stop_starting_calls_at_their_deadlines(clock: _Clock) -> No
     await _reconcile_tick(context, client)
 
     committed = _committed(context)
-    # Dagster page: t=0 → 8 → 16, 남은 4초 < 5초라 run-3은 시작하지 않는다.
+    # Dagster page 항목 마감은 20 − 6(닫기·알림 몫) = 14초: t=0 → 8 → 16, run-3은 시작하지 않는다.
     assert committed.dagster == DagsterRunWatermark(3, "run-2")
-    # DB page: t=16 목록, 16→24→32, 남은 8초 → 40, 남은 0초라 db-4는 시작하지 않는다.
+    # DB page 항목 마감은 40 − 6 = 34초: t=16 목록, 16 → 24 → 32, 남은 2초라 db-3은 시작하지 않는다.
     dagster_ids = {f"run-{index}" for index in range(1, 6)}
     db_calls = [
         call["dagster_run_id"]
         for call in client.ensure_calls
         if call["dagster_run_id"] not in dagster_ids
     ]
-    assert db_calls == ["db-1", "db-2", "db-3"]
+    assert db_calls == ["db-1", "db-2"]
     # 일찍 멈춘 DB page는 마지막으로 방문한 항목에 cursor를 둔다.
     assert committed.database == DagsterFeatureOperationCursor(
         created_at=_NOW, root_job_id="11111111-1111-4111-8111-111111111111"
@@ -1848,11 +1849,12 @@ async def test_every_client_call_carries_its_page_deadline(clock: _Clock) -> Non
     dagster_page, database_page = client.deadlines
     assert dagster_page is not None
     assert database_page is not None
-    assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - 5 < dagster_page <= (
-        FEATURE_OPERATION_DAGSTER_PAGE_SECONDS
+    reserve = 6
+    assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - reserve - 5 < dagster_page <= (
+        FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - reserve
     )
-    assert FEATURE_OPERATION_TICK_BUDGET_SECONDS - 5 < database_page <= (
-        FEATURE_OPERATION_TICK_BUDGET_SECONDS
+    assert FEATURE_OPERATION_TICK_BUDGET_SECONDS - reserve - 5 < database_page <= (
+        FEATURE_OPERATION_TICK_BUDGET_SECONDS - reserve
     )
 
 
@@ -2078,7 +2080,8 @@ async def test_a_closable_head_with_a_root_is_closed_and_passed(clock: _Clock) -
     assert _committed(context).dagster == DagsterRunWatermark(2, "run-1")
 
 
-async def test_a_head_whose_run_is_still_active_is_not_passed_by_closing(clock: _Clock) -> None:
+async def test_a_head_whose_run_is_still_active_passes_without_closing(clock: _Clock) -> None:
+    """결정 4 표 "root active, Dagster active": 닫지 않고 지나간다(1b) — root가 있다."""
     record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
     context = _held_context(record)
     client = _Client(
@@ -2093,9 +2096,116 @@ async def test_a_head_whose_run_is_still_active_is_not_passed_by_closing(clock: 
 
     assert len(client.abandon_calls) == 1
     committed = _committed(context)
-    assert committed.dagster == DagsterRunWatermark(1, "previous")
-    assert committed.head is not None
-    assert committed.head.key == "run-1"
+    assert committed.dagster == DagsterRunWatermark(2, "run-1")
+    assert committed.head is None
+
+
+async def test_an_active_run_whose_ensure_conflict_points_at_its_root_passes(
+    clock: _Clock,
+) -> None:
+    """root를 가리키는 identity conflict는 root가 있다는 증거다(1b) — 머리를 잡지 않는다."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(
+        ensure_error=FeatureOperationInvariantConflict(
+            "Dagster engine start time changed during ensure",
+            dagster_run_id="run-1",
+            root_job_id="11111111-1111-4111-8111-111111111111",
+        )
+    )
+
+    await _reconcile_tick(context, client)
+
+    committed = _committed(context)
+    assert committed.dagster == DagsterRunWatermark(2, "run-1")
+    assert committed.head is None
+
+
+async def test_a_lock_wait_that_uses_up_the_call_budget_still_gets_its_alert(
+    clock: _Clock,
+) -> None:
+    """실패한 호출이 lock_timeout(남은 시간 − 4초)까지 기다려도 알림 쓸 시간이 남는다(결정 2·3)."""
+
+    class _LockWaitClient(_Client):
+        async def ensure_dagster_feature_operation(self, **kwargs: Any) -> object:
+            # 서버가 lock_timeout(마감 − 4초)에서 끊을 때까지 기다린 것처럼 sensor 시계를 옮긴다.
+            deadline = transaction_limits._DEADLINE.get()
+            assert deadline is not None
+            clock.advance(deadline - clock.mono - 4)
+            raise _sqlalchemy_error("55P03", "canceling statement due to lock timeout")
+
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _LockWaitClient()
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert [call["scope"] for call in client.stalled_calls] == ["head"]
+    head = _committed(context).head
+    assert head is not None
+    assert head.alerted_at is not None
+
+
+async def test_db_watch_handoff_rotates_to_another_failing_root(clock: _Clock) -> None:
+    """알림을 낸 root는 슬롯을 다음 실패 root에게 넘긴다 — 같은 root가 도로 잡지 않는다(H2)."""
+    stuck = _record(DagsterRunStatus.FAILURE, run_id="stuck", storage_id=10)
+    context = _db_page_context(stuck)
+    client = _db_page_client("stuck", "gone")
+    client.reconcile_error = _sqlalchemy_error("42883", "function does not exist")
+    client.abandon_outcome = "closed"
+
+    async def tick() -> None:
+        await _reconcile_tick(context, client)
+        context.cursor = context.updated_cursors[-1]
+
+    await tick()
+    first = _committed(context).db_watch
+    assert first is not None
+    assert first.key == "stuck"
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    await tick()
+
+    assert [call["dagster_run_id"] for call in client.stalled_calls] == ["stuck"]
+    handed = _committed(context).db_watch
+    assert handed is not None
+    assert handed.key == "gone"
+    await tick()
+    assert _committed(context).db_watch == handed  # stuck가 첫 실패여도 슬롯을 도로 잡지 않는다
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    await tick()
+
+    assert [call["dagster_run_id"] for call in client.abandon_calls] == ["gone"]
+    assert client.abandon_calls[0]["dagster_status"] is None
+
+
+async def test_flapping_storage_does_not_restart_the_head_clock(clock: _Clock) -> None:
+    """storage 실패와 머리 run 실패가 번갈아도 같은 자리의 시계는 처음으로 돌아가지 않는다."""
+    record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
+    context = _held_context(record)
+    client = _Client(ensure_error=RuntimeError("down"))
+
+    async def tick() -> None:
+        await _reconcile_tick(context, client)
+        context.cursor = context.updated_cursors[-1]
+
+    await tick()
+    started = _committed(context).head
+    assert started is not None
+    for _ in range(3):
+        clock.advance(300)
+        context.instance.records_error = RuntimeError("storage slow")
+        await tick()
+        context.instance.records_error = None
+        await tick()
+
+    head = _committed(context).head
+    assert head is not None
+    assert head.key == "run-1"
+    assert head.first_failed_at == started.first_failed_at
+    assert len(client.stalled_calls) == 1
 
 
 async def test_a_watched_root_whose_run_vanished_is_closed_with_no_dagster_status(

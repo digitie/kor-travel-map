@@ -25,8 +25,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
-**reconcile sensor 재시도(ADR-111 후속, 2026-10-13)** — `T-RECONCILE-RETRY`, 목록 맨 끝. 다른 항목과 의존이 없다.
-#1319가 세 판을 시도했다가 되돌렸고, 해제 조건은 acceptance §T-RECONCILE-RETRY다. 설계안은 ADR-112(proposed). O1 수락(2026-10-20) — 첫 하위 단계(결정 0-1, 완결을 sensor 밖으로) 진행 중, O2~O5 승인 대기.
+**reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
+2026-10-21 `tasks-done.md`로 이관했다.
 
 **geo 릴리스 재지오코딩 묶음(ADR-109 accepted, 2026-10-16 구현)** — 전부 닫혔다(`T-GR-00`·`T-GR-00-LEDGER`는 2026-10-15, `T-GR-01`~`08`은 2026-10-16~17
 `tasks-done.md`로 이관). 접두사 `T-GR-`는 그대로 쓴다(ADR-109 열린 결정 7 결론 — `tasks-rule.md` §3 묶음 prefix). 운영은 runbook `geo-release-regeocode.md`.
@@ -104,8 +104,3 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   ADR-105가 정의 유지로 남겼고 API 재도입 방지 검사가 그 정의에 기댄다. 지우려면 그
   검사를 kind/provider 정체성만으로 다시 써야 한다.
-
-- [~] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기 설계** (ADR-111 후속)
-
-  한 run의 반영 실패가 tick 전체를 멈추고 30초마다 되풀이한다. #1319의 세 판은 되돌렸다.
-  ADR-112: O1 수락 → 하위 단계 "완결을 sensor 밖 sweep job으로"(결정 0-1) 진행 중. O2~O5 승인 대기. 조건은 acceptance.

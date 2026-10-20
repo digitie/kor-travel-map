@@ -1144,6 +1144,15 @@ async def reconcile_dagster_feature_run(
     )
 
 
+_QUARANTINED_ROOT_BY_RUN_SQL = f"""
+SELECT 1
+FROM ops.import_jobs AS root
+WHERE root.kind = '{FEATURE_OPERATION_ROOT_KIND}'
+  AND root.dagster_run_id = :dagster_run_id
+  AND root.quarantined_at IS NOT NULL
+LIMIT 1
+"""
+
 _RECONCILE_ABANDONED_EVENT: Final[str] = "feature_operation.reconcile_abandoned"
 _RECONCILE_STALLED_EVENT: Final[str] = "feature_operation.reconcile_stalled"
 
@@ -1226,17 +1235,32 @@ async def abandon_dagster_feature_run(
         )
     ).one_or_none()
     if root is None:
-        action = "no operation root was recorded for this run; re-run the dataset if it matters"
+        quarantined = (
+            await session.execute(
+                text(_QUARANTINED_ROOT_BY_RUN_SQL), {"dagster_run_id": normalized_run_id}
+            )
+        ).first() is not None
+        if quarantined:
+            state = "has only a quarantined operation root"
+            action = "the root was quarantined; nothing to close — re-run the dataset if it matters"
+        else:
+            state = "has no operation root"
+            action = "no operation root was recorded for this run; re-run the dataset if it matters"
         await record_system_log(
             session,
             level="error",
             source="feature_operation",
             event=_RECONCILE_ABANDONED_EVENT,
             message=(
-                f"{_RECONCILE_ABANDONED_EVENT}: run {normalized_run_id} has no operation root "
+                f"{_RECONCILE_ABANDONED_EVENT}: run {normalized_run_id} {state} "
                 f"and reconcile gave up; {action}"
             ),
-            detail={**base_detail, "root_job_id": None, "action": action},
+            detail={
+                **base_detail,
+                "root_job_id": None,
+                "root_quarantined": quarantined,
+                "action": action,
+            },
         )
         return FeatureOperationAbandonResult(outcome="recorded_without_root", root_job_id=None)
     root_job_id = str(root.root_job_id)
