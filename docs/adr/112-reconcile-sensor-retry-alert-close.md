@@ -1,6 +1,7 @@
 # ADR-112 — reconcile sensor는 root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다
 
-- 상태: proposed (설계만. 구현은 소유자가 승인한 뒤 같은 항목 `T-RECONCILE-RETRY`에서 한다. 아래 "열린 결정"이 승인 대상이다)
+- 상태: proposed (설계만. 구현은 소유자가 승인한 뒤 같은 항목 `T-RECONCILE-RETRY`에서 한다. 아래 "열린 결정"이 승인 대상이다).
+  O1만 2026-10-20 소유자가 수락했다 — 완결을 sensor 밖으로 먼저 옮긴다(결정 0-1, 같은 항목의 첫 하위 단계). O2~O5는 열려 있다
 - 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다)
 - 결정자: Claude (소유자 승인 대기)
 - 관계: ADR-111 결정 4(이 설계를 후속으로 넘겼다), ADR-107(공용 Dagster 런타임), ADR-021(forward-only)
@@ -42,6 +43,51 @@ main은 다르다. sensor 평가가 timeout으로 끝나도 서버의 완결은 
 feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에 가깝게라도 나오면, 완결을 sensor 밖(run의 마지막
 단계나 별도 job)으로 옮기는 항목부터 끝내고 이 설계를 구현한다. 이 전제가 서지 않으면 이 설계는 main보다 나쁘다(2차
 리뷰 H1). → O1
+
+### 0-1. O1 결론 — 완결은 별도 completion run이 한다 (소유자 수락 2026-10-20)
+
+실측(O1)이 조건에 해당해 소유자가 "완결을 sensor 밖으로 먼저"를 수락했다. 이 절은 그 하위 단계만 정한다. 결정 1~7은
+여기서 구현하지 않는다(O2~O5 열림).
+
+- **어디서.** 별도 job `feature_operation_completion` 하나(op 하나, config는 대상 `dagster_run_id`). op는 대상 run record를
+  다시 읽고, 지금 sensor가 하는 terminal 반영(ensure → `reconcile_dagster_feature_run`, 그 안의 SUCCESS 완결 CALL)을
+  **같은 함수로 그대로** 한다. repo·SQL·procedure·client는 바꾸지 않는다. migration도, API·OpenAPI 변화도 없다.
+- **sensor가 하는 일.** Dagster SUCCESS run에는 ensure만 한다(root가 있게 하는 짧은 트랜잭션). reconcile을 부르지 않는다.
+  run-status sensor(success)와 reconcile sensor 두 page 모두 그렇다. FAILURE·CANCELED는 지금처럼 sensor 안에서 reconcile한다
+  — 그 경로는 완결을 부르지 않는다(target이 `done`일 때만 부른다).
+- **누가 completion run을 내나.** reconcile sensor의 **DB page 하나뿐**이다. DB page가 훑는 root는 active이고 취소 marker·
+  quarantine이 없는 root다. 그러니 "Dagster는 SUCCESS인데 DB root가 아직 active"가 곧 "완결이 아직 없다"이다. 새 상태·열·표가
+  필요 없다. run이 끝난 뒤 완결 전에 무엇이 죽어도(sensor·code server 재시작, completion run의 실패·취소·프로세스 사망)
+  root는 active로 남고 다음 sweep이 다시 집는다.
+- **중복과 재시도.** completion run은 tag `kor_travel_map.completes_run_id=<대상>`을 단다. DB page는 대상마다 가장 최근
+  completion run 하나를 읽고, 그것이 진행 중이거나 끝난 지 5분이 안 됐으면 내지 않는다. 그 밖이면 run_key
+  `feature-operation-completion:<대상>:<직전 completion run id 또는 first>`로 낸다. 실패한 시도 뒤에는 key가 바뀌므로 다시 낼
+  수 있고, 같은 시도는 Dagster가 run_key로 한 번만 띄운다. 동시에 진행 중인 completion run은 둘까지만 둔다. 완결은
+  `feature-curation-write` 하나로 직렬화되므로 그보다 많이 띄워도 빨라지지 않고 큐 슬롯(10)만 먹는다. 그래도 중복이 생기면
+  무해하다. reconcile은 lineage lock과 root lock을 잡은 뒤 root가 terminal이면 `blocked/terminal`로 끝나고, 완결은 root
+  receipt가 있으면 `o_replayed`로 재생만 한다.
+- **취소 coordinator.** 바꾸지 않는다. marker가 붙은 root는 DB page에 오지 않으므로 completion run을 내지 않는다. 이미 떠
+  있던 completion run은 reconcile이 같은 lock 순서로 marker를 보고 `blocked/cancellation`으로 끝난다. 지금 sensor와
+  coordinator 사이의 경쟁과 같은 모양이다. coordinator의 `already_terminal`·SUCCESS 완결(API 트랜잭션 안)은 이 단계 밖이다.
+- **"Dagster SUCCESS, 완결 없음" 구간.** 그동안 root는 `running`이다. `done`은 지금처럼 완결과 같은 트랜잭션에서만 생긴다.
+  그래서 "root가 done이면 완결됐다"는 불변식이 그대로다. 대가는 지연이다. root가 done으로 보이기까지 DB page 한 바퀴와
+  run 기동 시간이 더해진다.
+- **SUCCESS ensure의 identity conflict.** client가 이미 `feature_operation.invariant_conflict` 행을 남긴다. sensor는 그
+  conflict를 삼키고 다음 run으로 간다. root가 있으면 DB page가 completion run을 내고, 그 run이 지금과 같은 reconcile로
+  `tracking_invariant`를 닫는다. root가 없으면(quarantine) main은 tick을 영구히 실패시켰다. 이 단계 뒤에는 conflict 행만
+  남기고 지나간다. 이 차이는 결정 1(머리 시계)을 구현할 때 다시 본다.
+- **completion run의 성질.** `kor_travel_map.operation_key` tag를 달지 않는다. 그래서 두 sensor는 이 run을 `panel_only`로
+  본다. 실행 상한은 다른 Map job과 같은 `RecoveryPolicy` 6시간이다. 자동 재시도는 두지 않는다. 재시도는 위의 5분 규칙이 한다.
+
+기각한 자리는 셋이다.
+
+- **run의 마지막 step.** Map operation run은 asset job 여럿에 MOIS 이어 달리기와 geo 릴리스 run까지 있고, asset 부분
+  선택 실행도 있다. 그래서 모든 job에 마지막 step을 끼워야 한다. 게다가 step 안에서는 Dagster SUCCESS가 아직 없다. procedure가
+  `dagster_run_status='SUCCESS'`를 요구하므로 migration으로 그 조건을 풀어야 하고, 그 step 뒤에 run이 실패하면 DB에 거짓
+  `done/SUCCESS`가 남는다.
+- **root를 먼저 done으로 두고 완결만 뒤로.** `done`의 뜻이 바뀐다. stale input이면 `done`이 `failed`로 뒤집혀 보인다.
+  완결이 빠진 done root를 찾을 새 술어도 필요하다.
+- **고정 run_key.** 첫 completion run이 실패하면 같은 sensor가 다시 낼 수 없다.
 
 ### 1. watermark가 run을 지나가는 규칙(잃지 않는다)
 
@@ -264,6 +310,7 @@ migration이 없다.
   판단 근거로는 상한만 준다: 세대 0인 root도 tick 기준 6~8 s로 머리 예산 15 s의 절반에 닿고, tick p99가 12 s다. 세대가 있는
   root는 더 길다고 봐야 한다. 그래서 "최대가 15 s에 가깝게라도 나오면" 조건에 해당한다고 보고 **완결을 sensor 밖으로 옮기는
   항목부터** 하는 쪽을 권한다(소유자 결정).
+  **결론(2026-10-20 소유자 수락).** 완결을 sensor 밖으로 먼저 옮긴다. 모양은 결정 0-1이다.
 - **O2 값과 물러섬.** STALL_AFTER 15분, 예산 40초(page별 20/40초), 시계마다 알림 한 시간에 한 행. 물러섬 없이 sweep마다 재시도하는 것도
   여기서 정한다.
 - **O3 표지 대 전용 SQLSTATE.** 이 설계는 표지(migration 없음)를 고른다.
