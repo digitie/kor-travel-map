@@ -30,12 +30,16 @@ from uuid import uuid4
 import pytest
 from dagster import AssetKey, DagsterRunStatus
 from kortravelmap.dagster.assets import _exact_sync_membership
+from kortravelmap.dagster.feature_operation_completion import (
+    sweep_succeeded_feature_operations,
+)
 from kortravelmap.dagster.feature_operation_sensors import (
     _OPERATION_KEY_TAG,
     _TRIGGER_KIND_TAG,
     FeatureOperationReconcileCursor,
     _apply_run_record,
     _reconcile_tick,
+    apply_completion_record,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
     _ADMIN_MANUAL_TRIGGER_TAG,
@@ -513,6 +517,9 @@ class _PeriodicDagsterInstance:
     def get_run_records(self, **_kwargs: Any) -> list[Any]:
         return []
 
+    def get_runs_count(self, **_kwargs: Any) -> int:
+        return 0
+
 
 class _PeriodicLog:
     def __init__(self) -> None:
@@ -520,6 +527,9 @@ class _PeriodicLog:
 
     def error(self, message: str, *args: object) -> None:
         self.errors.append(message % args if args else message)
+
+    def info(self, message: str, *args: object) -> None:
+        pass
 
 
 class _PeriodicContext:
@@ -979,7 +989,7 @@ async def test_b2_single_wrapper_success_is_closed_by_b3_terminal_record(
         assert member_before.finished_at is not None
         terminal_finished_at = member_before.finished_at + timedelta(seconds=1)
 
-        outcome = await _apply_run_record(
+        outcome = await apply_completion_record(
             _tracking_record(
                 operation_key=operation_key,
                 run_id=run_id,
@@ -1798,6 +1808,96 @@ async def test_periodic_reconcile_real_client_closes_partial_active_page_and_com
         await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
 
 
+async def test_success_root_stays_active_in_the_sensor_and_the_sweep_completes_it(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """ADR-112 결정 0-1: sensor tick은 SUCCESS root를 닫지 않고 completion sweep을 요청한다.
+
+    root는 sweep 전까지 active이고(그래서 DB page가 다시 집는다), sweep이 같은 reconcile로
+    root를 ``done``에 둔다. 끝난 root는 DB page에서 빠져 다음 sweep이 건드리지 않는다.
+    """
+
+    operation_key = SINGLE_MEMBER_OPERATION
+    run_id = f"run-c3e-completion-sweep-{uuid4()}"
+    created_at = datetime(2026, 7, 15, 7, tzinfo=UTC)
+    started_at = created_at + timedelta(seconds=1)
+    client = AsyncKorTravelMapClient(migrated_engine)
+    memberships = await client.resolve_feature_operation_memberships(
+        operation_key=operation_key
+    )
+    started = await client.ensure_dagster_feature_operation(
+        dagster_run_id=run_id,
+        trigger_kind="schedule",
+        selected_memberships=memberships,
+        operation_key=operation_key,
+        engine_created_at=created_at,
+        engine_started_at=started_at,
+        observed_status="STARTED",
+    )
+    root_id = started.operation.root_job_id
+    try:
+        finished = None
+        for membership in memberships:
+            finished = await client.finish_dagster_feature_membership(
+                dagster_run_id=run_id,
+                membership=membership,
+            )
+        assert finished is not None
+        member_finished_at = max(
+            member.finished_at
+            for member in finished.operation.members
+            if member.finished_at is not None
+        )
+        context = _PeriodicContext(
+            [
+                _tracking_record(
+                    operation_key=operation_key,
+                    run_id=run_id,
+                    status=DagsterRunStatus.SUCCESS,
+                    created_at=created_at,
+                    started_at=started_at,
+                    finished_at=member_finished_at + timedelta(seconds=1),
+                )
+            ]
+        )
+
+        result = await _reconcile_tick(context, client)
+
+        assert isinstance(result, list)
+        assert [request.run_key for request in result] == [
+            "feature-operation-completion:backstop:first"
+        ]
+        async with AsyncSession(migrated_engine) as probe:
+            before = (
+                await probe.execute(text(_TREE_WITH_MEMBERS_SQL), {"root_id": root_id})
+            ).all()
+        assert before[0].status == "running"
+        assert before[0].dagster_run_status != "SUCCESS"
+
+        completed, failed = await sweep_succeeded_feature_operations(
+            context.instance, client, context.log
+        )
+
+        assert failed == []
+        assert completed >= 1
+        async with AsyncSession(migrated_engine) as probe:
+            after = (
+                await probe.execute(text(_TREE_WITH_MEMBERS_SQL), {"root_id": root_id})
+            ).all()
+        assert after[0].status == "done"
+        assert after[0].dagster_run_status == "SUCCESS"
+        assert after[0].current_stage == "completed"
+
+        again, again_failed = await sweep_succeeded_feature_operations(
+            context.instance, client, context.log
+        )
+        assert again_failed == []
+        assert again == 0
+        assert context.log.errors == []
+    finally:
+        await _delete_committed_feature_tree(migrated_engine, root_id=root_id)
+
+
 async def test_periodic_reconcile_marker_after_page_read_preserves_base(
     migrated_engine: AsyncEngine,
 ) -> None:
@@ -2044,7 +2144,7 @@ async def test_terminal_sensor_selection_mismatch_closes_active_tree(
     )
     root_id = stored.operation.root_job_id
 
-    outcome = await _apply_run_record(
+    outcome = await apply_completion_record(
         _tracking_record(
             operation_key=operation_key,
             run_id=run_id,
@@ -3254,7 +3354,7 @@ async def test_reconcile_sensor_uses_the_same_manifest_as_the_run(
         end_time=(created_at + timedelta(seconds=5)).timestamp(),
     )
 
-    outcome = await _apply_run_record(record, client)
+    outcome = await apply_completion_record(record, client)
 
     assert outcome == "applied"
     async with AsyncSession(migrated_engine) as check:

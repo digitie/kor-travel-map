@@ -1,3 +1,11 @@
+## 2026-10-20 — T-RECONCILE-RETRY 하위 단계 1(ADR-112 결정 0-1): 브랜치 `feat/finalize-out-of-sensor`
+
+- SUCCESS root 완결을 sensor tick 밖 `feature_operation_completion` sweep job으로 옮겼다. migration·API·OpenAPI 변화 없음.
+- 배포 영향: Map Dagster code location 재배포만 필요하다. 새 job·pool이 생긴다. n150 공용 Dagster daemon은 소유자가
+  멈춰 둔 상태라 다시 켜기 전까지 효과가 없다. 켜면 밀린 SUCCESS root를 sweep 하나가 차례로 완결한다. daemon·sensor를
+  임의로 켜지 않는다.
+- **다음 한 작업: 이 PR CI green → 소유자 머지 판단 → 소유자가 ADR-112 O2~O5를 승인하면 같은 항목에서 결정 1~7 구현.**
+
 ## 2026-10-20 — weather 잔재 정리 2건: 브랜치 `chore/wx-notice-close-vnext-freeze` (PR #1343)
 
 - T-WX-NOTICE-CLOSE(`close_notice_features` 삭제)·T-WX-VNEXT-FREEZE(동결 계약은 rev 300 기록) 완료. 다음 한 작업은 아래 ADR-112 항목 그대로다.

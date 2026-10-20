@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
 from kortravelmap.core.feature_operation import (
     TRIGGER_KIND_VALUES,
     DagsterFeatureOperationCursor,
+    DagsterFeatureOperationMutation,
     DagsterFeatureOperationPage,
     FeatureOperationInvariantConflict,
     ProviderDatasetOperationMembership,
@@ -22,6 +23,7 @@ from dagster import (
     DagsterRunStatus,
     DefaultSensorStatus,
     ResourceParam,
+    RunRequest,
     RunStatusSensorContext,
     SensorDefinition,
     SensorEvaluationContext,
@@ -30,6 +32,10 @@ from dagster import (
     sensor,
 )
 
+from .feature_operation_completion import (
+    FEATURE_OPERATION_COMPLETION_JOB_NAME,
+    feature_operation_completion_job,
+)
 from .feature_operation_tracking import (
     FeatureOperationGuardUnavailable,
     declared_execution_scopes,
@@ -52,6 +58,12 @@ FEATURE_OPERATION_SETTLE_LAG_SECONDS: Final[int] = 300
 
 FEATURE_OPERATION_RECONCILE_CURSOR_VERSION: Final[int] = 1
 
+FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS: Final[int] = 900
+"""reconcile sensor가 완결 대기 root를 보고 completion sweep을 다시 내기까지의 최소 간격.
+
+1차 요청은 success 상태 sensor가 SUCCESS run마다 낸다. 이 간격은 그 요청을 놓쳤거나 sweep이
+실패한 root의 뒷받침 재시도 주기다(고칠 수 없는 root도 이 주기로만 다시 시도한다)."""
+
 _ACTIVE_STATUSES: Final[frozenset[DagsterRunStatus]] = frozenset(
     {
         DagsterRunStatus.QUEUED,
@@ -69,6 +81,15 @@ _TERMINAL_STATUSES: Final[frozenset[DagsterRunStatus]] = frozenset(
         DagsterRunStatus.CANCELED,
     }
 )
+_QUEUED_STATUSES: Final[frozenset[DagsterRunStatus]] = frozenset(
+    {
+        DagsterRunStatus.QUEUED,
+        DagsterRunStatus.NOT_STARTED,
+        DagsterRunStatus.MANAGED,
+        DagsterRunStatus.STARTING,
+    }
+)
+"""step을 아직 실행하지 않은 run — completion sweep이면 앞으로 active root 목록을 새로 읽는다."""
 _EVENT_STATUSES: Final[tuple[DagsterRunStatus, ...]] = (
     DagsterRunStatus.QUEUED,
     DagsterRunStatus.STARTING,
@@ -82,6 +103,8 @@ _T = TypeVar("_T")
 _OPERATION_KEY_TAG: Final[str] = "kor_travel_map.operation_key"
 _TRIGGER_KIND_TAG: Final[str] = "kor_travel_map.trigger_kind"
 _ADMIN_MANUAL_TRIGGER_TAG: Final[str] = "kor_travel_map.admin_manual_trigger"
+_COMPLETION_PENDING: Final[str] = "completion_pending"
+"""sensor가 SUCCESS run의 root를 ensure만 하고 완결을 completion run에 넘겼다는 outcome."""
 
 
 class _DagsterRun(Protocol):
@@ -118,6 +141,8 @@ class _DagsterInstance(Protocol):
 
 class _SensorLog(Protocol):
     def error(self, message: str, *args: object) -> None: ...
+
+    def info(self, message: str, *args: object) -> None: ...
 
 
 class _CodeLocationOrigin(Protocol):
@@ -235,15 +260,20 @@ def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     # remote origin(location·repository)을 이 sensor의 것과 대조해 Map run에서만 평가한다.
     # Map의 feature-load job은 전부 이 code location 하나에 있으므로 오늘 배포에서는
     # 평가 대상이 바뀌지 않는다.
+    #
+    # success sensor만 completion sweep job을 요청 대상으로 둔다(ADR-112 결정 0-1).
     @run_status_sensor(
         run_status=status,
         name=sensor_name,
         default_status=DefaultSensorStatus.RUNNING,
+        request_job=(
+            feature_operation_completion_job if status == DagsterRunStatus.SUCCESS else None
+        ),
     )
     def _status_sensor(
         context: RunStatusSensorContext,
         kor_travel_map_client: ResourceParam[object],
-    ) -> SkipReason:
+    ) -> SkipReason | RunRequest | None:
         return _run_async(
             _evaluate_status_event(
                 context,
@@ -268,11 +298,12 @@ feature_operation_canceled_sensor: Final = _build_status_sensor(_EVENT_STATUSES[
     minimum_interval_seconds=FEATURE_OPERATION_RECONCILE_INTERVAL_SECONDS,
     default_status=DefaultSensorStatus.RUNNING,
     required_resource_keys={"kor_travel_map_client"},
+    job_name=FEATURE_OPERATION_COMPLETION_JOB_NAME,
 )
 def feature_operation_reconciliation_sensor(
     context: SensorEvaluationContext,
     kor_travel_map_client: object | None = None,
-) -> SkipReason:
+) -> SkipReason | list[RunRequest]:
     client = cast(
         "AsyncKorTravelMapClient",
         kor_travel_map_client
@@ -298,7 +329,7 @@ FEATURE_OPERATION_TRACKING_SENSORS: Final = [
 async def _evaluate_status_event(
     context: RunStatusSensorContext,
     client: AsyncKorTravelMapClient,
-) -> SkipReason:
+) -> SkipReason | RunRequest | None:
     try:
         record = cast(
             "_RunRecord | None",
@@ -330,6 +361,16 @@ async def _evaluate_status_event(
         )
         context.log.error(message)
         return SkipReason(message)
+    if outcome == "panel_only":
+        # operation key가 없는 run(completion sweep 자신 등)에는 할 일이 없다. None을 돌려주면
+        # Dagster가 같은 tick에서 다음 이벤트로 넘어간다 — 그런 run이 tick을 하나씩 먹지 않는다.
+        return None
+    if outcome == _COMPLETION_PENDING and not _completion_sweep_queued(
+        cast(_DagsterInstance, context.instance)
+    ):
+        # 1차 요청: SUCCESS run마다 sweep 하나. 아직 시작하지 않은 sweep이 있으면 그것이 이
+        # root를 볼 것이므로 내지 않는다. 시작한 sweep은 이미 지나쳤을 수 있어 새로 낸다.
+        return _completion_run_request(f"success:{record.dagster_run.run_id}")
     return SkipReason(
         "provider feature operation 상태 반영: "
         f"run_id={record.dagster_run.run_id} outcome={outcome}"
@@ -339,7 +380,7 @@ async def _evaluate_status_event(
 async def _reconcile_tick(
     context: _ReconcileContext,
     client: AsyncKorTravelMapClient,
-) -> SkipReason:
+) -> SkipReason | list[RunRequest]:
     # run 조회는 ``MAP_CODE_LOCATION_NAME``으로 좁힌다. 배포된 location 이름이 다르면 좁힌
     # 조회가 조용히 0건을 돌려 reconcile이 아무것도 하지 않는다 — tick을 실패로 올린다
     # (``_evaluate_reconciliation_sensor``가 이 예외만은 삼키지 않는다).
@@ -394,30 +435,40 @@ async def _reconcile_tick(
         cursor=cursor.database,
         page_size=FEATURE_OPERATION_RECONCILE_PAGE_SIZE,
     )
-    database_applied, database_observation_errors = await _reconcile_database_page(
+    (
+        database_applied,
+        database_observation_errors,
+        completion_pending,
+    ) = await _reconcile_database_page(
         context,
         client,
         database_page,
     )
+    backstop = _completion_backstop_request(context) if completion_pending else None
 
     next_cursor = FeatureOperationReconcileCursor(
         dagster=next_dagster_cursor,
         database=database_page.next_cursor,
     )
     context.update_cursor(next_cursor.to_json())
-    return SkipReason(
+    summary = (
         "provider feature operation reconcile 완료: "
         f"dagster_applied={dagster_applied} "
         f"dagster_panel_only={dagster_panel_only} "
         f"database_applied={database_applied} "
-        f"database_observation_errors={database_observation_errors}"
+        f"database_observation_errors={database_observation_errors} "
+        f"completion_pending={len(completion_pending)}"
     )
+    if backstop is not None:
+        context.log.info(summary)
+        return [backstop]
+    return SkipReason(summary)
 
 
 async def _evaluate_reconciliation_sensor(
     context: _ReconcileContext,
     client: AsyncKorTravelMapClient,
-) -> SkipReason:
+) -> SkipReason | list[RunRequest]:
     try:
         return await _reconcile_tick(context, client)
     except MapRunScopeMismatch as exc:
@@ -434,9 +485,16 @@ async def _reconcile_database_page(
     context: _ReconcileContext,
     client: AsyncKorTravelMapClient,
     page: DagsterFeatureOperationPage,
-) -> tuple[int, int]:
+) -> tuple[int, int, tuple[str, ...]]:
+    """active root를 반영하고, Dagster SUCCESS인데 아직 active인 root의 run id를 모은다.
+
+    DB page는 취소 marker·quarantine이 없는 active root만 훑는다. 그런 root의 Dagster run이
+    SUCCESS면 완결이 아직 없다는 뜻이다 — completion sweep이 맡는다(ADR-112 결정 0-1). root가
+    이미 있으므로 ensure도 하지 않는다(identity conflict 행을 sweep마다 다시 쓰지 않는다).
+    """
     applied = 0
     observation_errors = 0
+    completion_pending: list[str] = []
     for operation in page.items:
         try:
             record = context.instance.get_run_record_by_id(operation.dagster_run_id)
@@ -455,6 +513,9 @@ async def _reconcile_database_page(
             )
             observation_errors += 1
             continue
+        if record.dagster_run.status == DagsterRunStatus.SUCCESS:
+            completion_pending.append(record.dagster_run.run_id)
+            continue
         try:
             outcome = await _apply_run_record(record, client)
         except FeatureOperationObservationError as exc:
@@ -467,12 +528,86 @@ async def _reconcile_database_page(
             continue
         if outcome != "panel_only":
             applied += 1
-    return applied, observation_errors
+    return applied, observation_errors, tuple(completion_pending)
+
+
+def _completion_run_request(key: str) -> RunRequest:
+    return RunRequest(run_key=f"feature-operation-completion:{key}")
+
+
+def _completion_sweep_queued(instance: _DagsterInstance) -> bool:
+    """아직 시작하지 않은 completion sweep이 있는가. 읽기 실패면 없다고 본다(여분 요청은 무해)."""
+    try:
+        return (
+            instance.get_runs_count(
+                filters=map_runs_filter(
+                    job_name=FEATURE_OPERATION_COMPLETION_JOB_NAME,
+                    statuses=list(_QUEUED_STATUSES),
+                )
+            )
+            > 0
+        )
+    except Exception:
+        return False
+
+
+def _completion_backstop_request(context: _ReconcileContext) -> RunRequest | None:
+    """완결 대기 root가 보일 때의 뒷받침 요청.
+
+    가장 최근 completion sweep이 진행 중이거나 끝난 지
+    ``FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS``가 안 됐으면 내지 않는다. run_key에 그
+    sweep의 run id를 넣어, 한 sweep 뒤에는 많아야 한 번만 낸다. run storage 읽기가 실패하면 이번
+    tick은 내지 않는다 — root는 active로 남고 다음 tick이 다시 본다.
+    """
+    try:
+        latest = next(
+            iter(
+                context.instance.get_run_records(
+                    filters=map_runs_filter(job_name=FEATURE_OPERATION_COMPLETION_JOB_NAME),
+                    limit=1,
+                )
+            ),
+            None,
+        )
+    except Exception as exc:
+        context.log.error(
+            "completion sweep 이력 조회 실패(다음 tick에 다시 본다): error_type=%s",
+            type(exc).__name__,
+        )
+        return None
+    if latest is None:
+        return _completion_run_request("backstop:first")
+    if latest.dagster_run.status not in _TERMINAL_STATUSES:
+        return None
+    # 시작 전에 취소된 run은 end_time이 없을 수 있다 — 그때는 기다릴 기준이 없으니 바로 낸다.
+    if latest.end_time is not None and datetime.now(tz=UTC) - datetime.fromtimestamp(
+        latest.end_time, tz=UTC
+    ) < timedelta(seconds=FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS):
+        return None
+    return _completion_run_request(f"backstop:after:{latest.dagster_run.run_id}")
+
+
+async def apply_completion_record(
+    record: _RunRecord,
+    client: AsyncKorTravelMapClient,
+) -> str:
+    """completion run이 쓰는 반영 — terminal run을 root에 반영하고 SUCCESS면 완결까지 한다.
+
+    sensor가 FAILURE·CANCELED에 쓰는 것과 같은 함수다. 완결 CALL은 이 경로에서만 일어난다.
+    """
+    if record.dagster_run.status not in _TERMINAL_STATUSES:
+        raise FeatureOperationObservationError(
+            "completion 대상 Dagster run이 terminal이 아님: "
+            f"run_id={record.dagster_run.run_id} status={record.dagster_run.status.value}"
+        )
+    return await _apply_run_record(record, client, completion=True)
 
 
 async def _apply_run_record(
     record: _RunRecord,
     client: AsyncKorTravelMapClient,
+    *,
+    completion: bool = False,
 ) -> str:
     run = record.dagster_run
     operation_key = _operation_key(run.tags)
@@ -526,6 +661,19 @@ async def _apply_run_record(
             f"지원하지 않는 Dagster run status: run_id={run.run_id} status={status.value}"
         )
     assert finished_at is not None
+    if status == DagsterRunStatus.SUCCESS and not completion:
+        # sensor tick에서는 SUCCESS의 root 완결(무거운 CALL)을 하지 않는다. root가 있게만 하고
+        # 완결은 completion sweep에 넘긴다(ADR-112 결정 0-1).
+        # FAILURE·CANCELED는 완결이 없어 아래로 간다.
+        return await _ensure_success_root(
+            record,
+            client,
+            operation_key=operation_key,
+            memberships=memberships,
+            trigger_kind=trigger_kind,
+            created_at=created_at,
+            started_at=started_at,
+        )
     return await _apply_terminal_record(
         record,
         client,
@@ -536,6 +684,71 @@ async def _apply_run_record(
         started_at=started_at,
         finished_at=finished_at,
     )
+
+
+async def _ensure_terminal_root(
+    record: _RunRecord,
+    client: AsyncKorTravelMapClient,
+    *,
+    operation_key: str,
+    memberships: Sequence[ProviderDatasetOperationMembership],
+    trigger_kind: TriggerKind,
+    created_at: datetime,
+    started_at: datetime | None,
+) -> DagsterFeatureOperationMutation:
+    """terminal run의 root를 ensure한다. identity conflict는 올린다."""
+    return await client.ensure_dagster_feature_operation(
+        dagster_run_id=record.dagster_run.run_id,
+        trigger_kind=trigger_kind,
+        selected_memberships=memberships,
+        operation_key=operation_key,
+        engine_created_at=created_at,
+        engine_started_at=started_at,
+        observed_status=(
+            DagsterRunStatus.STARTED.value
+            if started_at is not None
+            else DagsterRunStatus.NOT_STARTED.value
+        ),
+    )
+
+
+async def _ensure_success_root(
+    record: _RunRecord,
+    client: AsyncKorTravelMapClient,
+    *,
+    operation_key: str,
+    memberships: Sequence[ProviderDatasetOperationMembership],
+    trigger_kind: TriggerKind,
+    created_at: datetime,
+    started_at: datetime | None,
+) -> str:
+    """sensor의 SUCCESS 반영 — ensure만 하고 완결은 completion run에 넘긴다.
+
+    identity conflict는 client가 이미 ``feature_operation.invariant_conflict``로 남겼다. conflict가
+    가리키는 root가 있으면 completion sweep이 종전과 같은 reconcile로 ``tracking_invariant``를
+    닫으므로 여기서는 삼키고 completion 대기로 돌려준다. root를 가리키지 않는 conflict(quarantine
+    등)는 종전처럼 올린다 — 종전 reconcile도 root가 없으면 같은 conflict로 끝났다.
+    이미 terminal인 root만 completion이 필요 없다. 취소로 막힌 root도 sweep을 요청한다 — root
+    marker면 sweep 목록에 오지 않아 무해하고, child marker만 있으면 종전 reconcile처럼 sweep이
+    완결한다(ensure는 child marker로도 막히지만 reconcile은 root marker로만 막힌다).
+    """
+    try:
+        mutation = await _ensure_terminal_root(
+            record,
+            client,
+            operation_key=operation_key,
+            memberships=memberships,
+            trigger_kind=trigger_kind,
+            created_at=created_at,
+            started_at=started_at,
+        )
+    except FeatureOperationInvariantConflict as exc:
+        if exc.root_job_id is None:
+            raise
+        return _COMPLETION_PENDING
+    if mutation.outcome == "blocked" and mutation.block_reason == "terminal":
+        return mutation.outcome
+    return _COMPLETION_PENDING
 
 
 async def _apply_terminal_record(
@@ -552,18 +765,14 @@ async def _apply_terminal_record(
     run = record.dagster_run
     ensure_conflict: FeatureOperationInvariantConflict | None = None
     try:
-        await client.ensure_dagster_feature_operation(
-            dagster_run_id=run.run_id,
-            trigger_kind=trigger_kind,
-            selected_memberships=memberships,
+        await _ensure_terminal_root(
+            record,
+            client,
             operation_key=operation_key,
-            engine_created_at=created_at,
-            engine_started_at=started_at,
-            observed_status=(
-                DagsterRunStatus.STARTED.value
-                if started_at is not None
-                else DagsterRunStatus.NOT_STARTED.value
-            ),
+            memberships=memberships,
+            trigger_kind=trigger_kind,
+            created_at=created_at,
+            started_at=started_at,
         )
     except FeatureOperationInvariantConflict as exc:
         ensure_conflict = exc
@@ -714,6 +923,7 @@ def _run_async(awaitable: Coroutine[Any, Any, _T]) -> _T:
 
 
 __all__ = [
+    "FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS",
     "FEATURE_OPERATION_RECONCILE_CURSOR_VERSION",
     "FEATURE_OPERATION_RECONCILE_INTERVAL_SECONDS",
     "FEATURE_OPERATION_RECONCILE_PAGE_SIZE",
@@ -722,6 +932,7 @@ __all__ = [
     "DagsterRunWatermark",
     "FeatureOperationObservationError",
     "FeatureOperationReconcileCursor",
+    "apply_completion_record",
     "feature_operation_canceled_sensor",
     "feature_operation_canceling_sensor",
     "feature_operation_failure_sensor",

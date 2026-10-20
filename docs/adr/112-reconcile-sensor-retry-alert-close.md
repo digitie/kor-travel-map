@@ -1,6 +1,7 @@
 # ADR-112 — reconcile sensor는 root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다
 
-- 상태: proposed (설계만. 구현은 소유자가 승인한 뒤 같은 항목 `T-RECONCILE-RETRY`에서 한다. 아래 "열린 결정"이 승인 대상이다)
+- 상태: proposed (설계만. 구현은 소유자가 승인한 뒤 같은 항목 `T-RECONCILE-RETRY`에서 한다. 아래 "열린 결정"이 승인 대상이다).
+  O1만 2026-10-20 소유자가 수락했다 — 완결을 sensor 밖으로 먼저 옮긴다(결정 0-1, 같은 항목의 첫 하위 단계). O2~O5는 열려 있다
 - 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다)
 - 결정자: Claude (소유자 승인 대기)
 - 관계: ADR-111 결정 4(이 설계를 후속으로 넘겼다), ADR-107(공용 Dagster 런타임), ADR-021(forward-only)
@@ -42,6 +43,107 @@ main은 다르다. sensor 평가가 timeout으로 끝나도 서버의 완결은 
 feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에 가깝게라도 나오면, 완결을 sensor 밖(run의 마지막
 단계나 별도 job)으로 옮기는 항목부터 끝내고 이 설계를 구현한다. 이 전제가 서지 않으면 이 설계는 main보다 나쁘다(2차
 리뷰 H1). → O1
+
+### 0-1. O1 결론 — 완결은 별도 completion sweep run이 한다 (소유자 수락 2026-10-20)
+
+실측(O1)이 조건에 해당해 소유자가 "완결을 sensor 밖으로 먼저"를 수락했다. 이 절은 그 하위 단계만 정한다. 결정 1~7은
+여기서 구현하지 않는다(O2~O5 열림). 아래는 설계 적대 리뷰 1회를 반영한 판이다(절 끝 "0-1 리뷰 반영").
+
+- **어디서.** 별도 job `feature_operation_completion`(op 하나, config 없음). run 하나는 **sweep 한 번**이다. reconcile
+  sensor의 DB page와 같은 목록(`list_reconcilable_dagster_feature_runs` — active, 취소 marker·quarantine 없음)을 끝까지
+  한 번 훑고, Dagster run이 SUCCESS인 root마다 지금 sensor가 하던 terminal 반영(ensure → `reconcile_dagster_feature_run`, 그
+  안의 SUCCESS 완결 CALL)을 **같은 함수로** 한다. 한 root의 실패는 다음 root를 막지 않고 run도 실패시키지 않는다(root마다
+  error 로그와 output metadata `failed_run_ids`). 목록 조회 자체가 실패할 때만 run이 FAILURE다. repo·SQL·procedure·client는
+  바꾸지 않는다. migration도, API·OpenAPI 변화도 없다.
+- **sensor가 하는 일.** run-status sensor(success)와 reconcile sensor의 Dagster page는 SUCCESS run에 ensure만 한다(root가
+  있게 하는 짧은 트랜잭션). reconcile sensor의 DB page는 SUCCESS인 active root에 아무 DB 호출도 하지 않는다(root는 이미
+  있다). FAILURE·CANCELED는 지금처럼 sensor 안에서 reconcile한다 — 그 경로는 완결을 부르지 않는다(target이 `done`일 때만
+  부른다). 그래서 sensor tick 안에서 완결 CALL이 일어나는 자리가 없다.
+- **요청은 둘.**
+  - 1차 — success sensor가 SUCCESS run마다 sweep 하나를 낸다(run_key `feature-operation-completion:success:<run>`).
+    아직 step을 시작하지 않은 sweep(QUEUED·NOT_STARTED·MANAGED·STARTING)이 있으면 그 sweep이 이 root를 볼 것이므로 내지
+    않는다. 이미 시작한 sweep은 이 root를 지나쳤을 수 있으므로 새로 낸다.
+  - 뒷받침 — reconcile sensor의 DB page가 "Dagster SUCCESS인데 root가 active"를 하나라도 보면, 가장 최근 sweep이 진행 중이
+    아니고 끝난 지 15분이 지났을 때 sweep 하나를 낸다(run_key `feature-operation-completion:backstop:after:<직전 sweep>`).
+    "SUCCESS인데 active"가 곧 "완결이 없다"이므로 새 상태·열·표가 필요 없다. run이 끝난 뒤 완결 전에 무엇이 죽어도(sensor·
+    code server 재시작, 놓친 이벤트, sweep의 실패·취소·프로세스 사망) root는 active로 남고 이 뒷받침이 다시 집는다.
+- **직렬화.** op가 pool `kor_travel_map.feature_operation_completion`을 선언한다. `concurrency.pools.default_limit: 1`·
+  `granularity: run`이므로 sweep은 인스턴스 전역에서 하나씩 돈다. 여분 요청은 QUEUED로 기다렸다가 할 일이 없으면 곧 끝난다.
+  완결은 어차피 lineage advisory lock 하나로 직렬화되므로 동시에 여럿 돌려도 빨라지지 않는다. 이 직렬화는 기존 Map
+  pool(`GEO_HEAVY_POOL` 등)과 같은 instance 설정에 기댄다. n150 공용 plane의 설정(Manager
+  `config/dagster-shared/dagster.yaml`)을 2026-10-20 읽기 전용으로 확인했다: `pools.default_limit: 1`·`granularity: run`이고,
+  전역 `max_concurrent_runs: 2`다. 그래서 pool을 기다리는 sweep은 QUEUED로 남아 슬롯을 먹지 않지만, 도는 sweep은 전역 슬롯
+  둘 중 하나를 잠깐 쓴다. 그 설정이 없는 instance에서는 sweep이 겹칠 수 있다. 그래도 데이터는 안전하고, 겹친 쪽이 lock 대기나
+  40001로 실패할 뿐이며 다음 sweep이 다시 집는다.
+- **경쟁은 실패로 끝날 수 있다(무해하지만 조용하지는 않다).** SUCCESS reconcile은 SERIALIZABLE이다. 첫 문장(lineage lock
+  대기) 시점에 snapshot을 잡으므로, 그 사이 다른 트랜잭션(취소 coordinator 등)이 root를 바꿨다면 `blocked/*`가 아니라
+  40001로 끝난다. 데이터는 롤백되고 아무것도 쓰이지 않는다. root가 terminal이 되었거나 marker가 붙었으면 다음 sweep 목록에서
+  빠지므로 다시 시도되지 않는다. sweep 둘이 겹치지 않는 것은 pool이 맡는다.
+- **취소 coordinator.** 바꾸지 않는다. marker가 붙은 root는 목록에 오지 않으므로 sweep이 손대지 않는다. coordinator의
+  `already_terminal`·SUCCESS 완결(API 트랜잭션 안)은 이 단계 밖이다. 다만 SUCCESS와 완결 사이 구간이 길어진 만큼 그 경로를
+  타는 경우가 늘 수 있다.
+- **"Dagster SUCCESS, 완결 없음" 구간.** 그동안 root는 `running`이다. `done`은 지금처럼 완결과 같은 트랜잭션에서만 생긴다.
+  그래서 "root가 done이면 완결됐다"는 불변식이 그대로다. 대가는 지연이다. root가 done으로 보이기까지 run 큐 대기와 기동
+  시간이 더해진다. 그 구간에 입력이 바뀌면 `stale_input`으로 끝날 가능성도 그만큼 는다(지금도 있는 경로다).
+- **이 단계가 풀지 않는 것.** 완결은 여전히 lineage lock을 잡은 채 돈다. 큰 완결 동안 run 안의 member 완료·ensure·취소가
+  그 lock을 기다리고 `lock_timeout`(30초)에 걸릴 수 있다. 이 단계가 없애는 것은 "sensor 평가 timeout 안에 완결을 끝내야
+  한다"는 제약뿐이다. sweep도 대상 run의 manifest를 **지금** catalog로 다시 해석한다(sensor와 같다). 구간이 길어진 만큼
+  catalog drift가 `tracking_invariant`로 끝나는 경우가 늘 수 있다.
+- **SUCCESS ensure의 identity conflict.** client가 이미 `feature_operation.invariant_conflict` 행을 남긴다. conflict가 root를
+  가리키면(`root_job_id`가 있다) sensor는 삼키고, sweep이 지금과 같은 reconcile로 `tracking_invariant`를 닫는다. root를
+  가리키지 않는 conflict(quarantine 등)는 지금처럼 올린다 — 지금의 reconcile도 그 경우 같은 conflict로 끝났다. ensure가
+  `blocked`를 돌려줘도 이유가 `terminal`일 때만 요청을 생략한다. ensure는 child marker로도 막히지만 reconcile은 root marker로만
+  막히므로, child marker만 있는 root는 지금처럼 sweep이 완결한다.
+- **고칠 수 없는 root.** sweep마다 그 root만 실패하고(error 로그), sweep run은 SUCCESS로 끝난다. 1차 요청은 SUCCESS run마다
+  나가므로 그 root는 SUCCESS run 빈도로 다시 시도된다(뒷받침 15분은 SUCCESS run이 없을 때의 하한이다). root 하나가 FAILURE
+  run을 쌓아 진짜 실패를 묻지 않게 하려고 run을 실패시키지 않았다. 멈춤 알림과 닫기는 결정 3·4(O2·O5)의 몫이다.
+- **operation key 없는 run의 상태 이벤트.** 상태 sensor는 그런 run(sweep 자신 포함)에 `None`을 돌려준다. Dagster가 같은
+  tick에서 다음 이벤트로 넘어가므로 sweep 이벤트가 success sensor의 tick을 하나씩 먹지 않는다.
+- **sweep run의 성질.** `kor_travel_map.operation_key` tag를 달지 않는다. 그래서 두 sensor는 이 run을 `panel_only`로 본다.
+  실행 상한은 1시간(`RecoveryPolicy`)이다. 넘기면 run monitoring이 슬롯을 돌려주고 남은 root는 다음 sweep이 집는다. 자동
+  재시도는 두지 않는다.
+
+기각한 자리는 넷이다.
+
+- **run의 마지막 step.** Map operation run은 asset job 여럿에 MOIS 이어 달리기와 geo 릴리스 run까지 있고, asset 부분
+  선택 실행도 있다. 그래서 모든 job에 마지막 step을 끼워야 한다. 게다가 step 안에서는 Dagster SUCCESS가 아직 없다. procedure가
+  `dagster_run_status='SUCCESS'`를 요구하므로 migration으로 그 조건을 풀어야 하고, 그 step 뒤에 run이 실패하면 DB에 거짓
+  `done/SUCCESS`가 남는다.
+- **root를 먼저 done으로 두고 완결만 뒤로.** `done`의 뜻이 바뀐다. stale input이면 `done`이 `failed`로 뒤집혀 보인다.
+  완결이 빠진 done root를 찾을 새 술어도 필요하다.
+- **root마다 completion run 하나(대상 tag·run_key·동시 상한).** 초안이었다. run 수가 operation run 수만큼 늘고, 대상별 이력
+  조회·재시도 규칙·동시 상한을 sensor가 들고 있어야 한다. 완결이 lock 하나로 직렬화되므로 동시 상한 2는 둘째 run을
+  `lock_timeout` 실패로 만들 뿐이었다(리뷰 M1).
+- **DB page만 요청.** DB page는 Dagster page 뒤에 돈다. Dagster page가 tick을 실패시키면(anchor 삭제 등) 모든 완결이 선다
+  (리뷰 H1). success sensor를 1차 요청자로 두고 DB page는 뒷받침으로만 둔다.
+
+#### 0-1 리뷰 반영 (2026-10-20, 설계 적대 리뷰 1회)
+
+- H1 Dagster page 실패가 모든 완결을 세운다 → success sensor를 1차 요청자로 했다.
+- H2 중복·coordinator 경쟁은 `blocked`가 아니라 40001로 끝난다 → 문구를 고치고, pool로 sweep 겹침을 없앴다.
+- M1 동시 상한 2는 lock 대기 실패만 만든다, 대상별 기제는 과결박 → root별 run을 버리고 sweep 하나 + pool로 바꿨다.
+- M2 고칠 수 없는 root가 5분마다 run을 띄운다 → 뒷받침 간격 15분, 알림은 결정 3 몫으로 적었다.
+- M3 구간이 길어져 stale_input·coordinator 완결이 는다 → success sensor 1차 요청으로 구간을 줄이고 남는 위험을 적었다.
+  `dagster/priority`는 넣지 않았다(필요하면 실측 뒤).
+- M4 lineage lock은 그대로다 → "이 단계가 풀지 않는 것"에 적었다.
+- M5 DB page가 SUCCESS root에 ensure를 되풀이해 conflict 행을 쌓는다 → DB page는 SUCCESS root에 DB 호출을 하지 않는다.
+- L1 conflict를 다 삼키면 앞으로 생길 root 없는 conflict를 잃는다 → root를 가리키는 conflict만 삼킨다.
+- L2 6시간 상한은 길다 → 1시간. L3 manifest 재해석 → 적었다. L4 대상 location 검사 → sweep은 DB 목록에서 대상을 고르므로
+  해당 없음. L5 run_key는 sensor별로만 dedupe된다 → 두 요청자의 key 접두사를 나누고 겹침은 pool이 막는다. L6 daemon 재기동
+  때 밀린 root → sweep 하나가 차례로 처리한다.
+
+#### 0-1 코드 리뷰 반영 (2026-10-20, 적대 리뷰 2회)
+
+- child marker만 있는 root가 1차 요청에서 빠졌다(ensure는 child marker로도 `blocked`) → `block_reason == "terminal"`일 때만
+  생략한다.
+- operation key 없는 run의 상태 이벤트가 SkipReason을 돌려 sensor tick을 하나씩 먹었다 → `None`을 돌려준다.
+- 고칠 수 없는 root 하나가 SUCCESS run마다 FAILURE sweep을 쌓는다 → root 실패는 로그·metadata로 남기고 run은 SUCCESS.
+- 시작 전에 취소된 sweep(`end_time` 없음)이 뒷받침을 영영 막는다 → 그때는 바로 낸다.
+- sweep 목록 조회 오류 원문이 Dagster 로그에 남는다 → 오류 종류만 싣는다. `applied`만 완결로 센다. 뒷받침을 낼 때도 tick
+  요약을 로그로 남긴다.
+- 공용 plane의 pool 설정이 확인되지 않았다 → 읽기 전용으로 확인해 위 "직렬화"에 적었다.
+- 한 tick에서 sweep 여럿을 낼 수 있다는 지적은, run-status sensor가 값을 돌려준 이벤트 하나에서 tick을 끝내므로 해당하지
+  않는다(다른 리뷰가 Dagster 소스로 확인).
 
 ### 1. watermark가 run을 지나가는 규칙(잃지 않는다)
 
@@ -264,6 +366,7 @@ migration이 없다.
   판단 근거로는 상한만 준다: 세대 0인 root도 tick 기준 6~8 s로 머리 예산 15 s의 절반에 닿고, tick p99가 12 s다. 세대가 있는
   root는 더 길다고 봐야 한다. 그래서 "최대가 15 s에 가깝게라도 나오면" 조건에 해당한다고 보고 **완결을 sensor 밖으로 옮기는
   항목부터** 하는 쪽을 권한다(소유자 결정).
+  **결론(2026-10-20 소유자 수락).** 완결을 sensor 밖으로 먼저 옮긴다. 모양은 결정 0-1이다.
 - **O2 값과 물러섬.** STALL_AFTER 15분, 예산 40초(page별 20/40초), 시계마다 알림 한 시간에 한 행. 물러섬 없이 sweep마다 재시도하는 것도
   여기서 정한다.
 - **O3 표지 대 전용 SQLSTATE.** 이 설계는 표지(migration 없음)를 고른다.
