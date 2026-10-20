@@ -1,3 +1,9 @@
+## 2026-10-20 — T-TEST-PLANNER-INDEX 원장 이관(doc-only)
+
+- PR #1336(`e937b38d`, main 반영 완료)이 통합 planner flake 고정(REINDEX in test txn + 25k draft rows + lock_timeout 30s,
+  20/20 n150 연속 통과)을 실었으나 `tasks.md`→`tasks-done.md` 이관이 그 PR을 못 탔다. 이번 doc-only PR이 그 이관을
+  싣는다 — 코드 변경 없음, acceptance §T-TEST-PLANNER-INDEX는 그대로 둔다.
+
 ## 2026-10-19 — production MapLibre worker asset 누락 복구 (PR #1340)
 
 - **실측 원인.** 인증된 live UI가 `/maplibre/maplibre-gl-worker.mjs`를 404 HTML로 받았다. Map 화면 코드는 worker가 없으면 GeoJSON source가 로드되지 않아 고배율 marker를 표시하지 못한다. Docker runtime stage가 `.next/standalone`과 `.next/static`만 복사하고 `public`은 누락했다.
