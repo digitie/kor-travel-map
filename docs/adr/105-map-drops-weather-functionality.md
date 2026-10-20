@@ -80,5 +80,9 @@
   `feature_repo._notice_lineage_sql`과 `provider_sync.notice_lineage_key`의 KMA 분기(migration `403_drop_kma_notice_lineage`).
   frozen H35 replay 함수(`_frozen_h35_*`)의 KMA 텍스트는 해시로 고정된 과거 replay라 남긴다.
 - Manager compose `KOR_TRAVEL_MAP_KMA_WEATHER_*` env 제거(Manager PR).
+- (2026-10-20, T-WX-VNEXT-FREEZE) `contracts/vnext/target-*-v1.*` 동결 계약은 **rev 300 당시 기록**으로 남긴다 —
+  402가 DROP한 weather 표(`feature.feature_weather_values`·`feature.current_weather_summary`)와
+  `feature.reject_weather_value_mutation()`을 계속 선언한다. 재동결하지 않는다: 계약은 Wave 2 도착점의 기록이고
+  현재 스키마 정본은 alembic head다. `test_vnext_target_freeze.py` docstring이 이 범위를 밝힌다.
 - 운영자: pair 회전 전 매분 schedule stop, 회전 뒤 `.d2-live.env`(`E2E_C7_SCHEDULE`, `E2E_C7_UPDATE_REQUEST_*`,
   `E2E_DAGSTER_BASIC_AUTH_FILE`) 갱신.

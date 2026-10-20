@@ -141,7 +141,6 @@ __all__ = [
     "retire_geometryless_area_features_by_source",
     "NoticeReconcileResult",
     "NoticeFeatureLoadResult",
-    "close_notice_features",
     "get_notice_snapshot_watermark",
     "supersede_stale_notice_features",
     "purge_expired_notices",
@@ -4934,55 +4933,6 @@ async def get_notice_snapshot_watermark(
     )
     row = result.mappings().one_or_none()
     return None if row is None else row["applied_at"]
-
-
-async def close_notice_features(
-    session: AsyncSession,
-    *,
-    provider: str,
-    dataset_key: str,
-    source_entity_type: str,
-    closures: Mapping[str, datetime],
-    announcements: Mapping[str, datetime] | None = None,
-) -> int:
-    """계보별 발표/해제를 영속화하고 공유 notice Feature lifecycle을 재계산한다.
-
-    key는 모두 사건 ``lineage_key``다. 최신 announcement는 ``present=true``,
-    lift는 ``present=false`` 전이이며, 같은 Feature의 다른 scope winner가
-    present면 실제 close를 미룬다. commit은 호출자 책임.
-    """
-    await lock_feature_curation_write(session)
-    lineage_events: dict[str, tuple[bool, datetime, datetime | None]] = {}
-    for present, events in ((True, announcements or {}), (False, closures)):
-        for lineage_key, changed_at in events.items():
-            current = lineage_events.get(lineage_key)
-            if current is None or changed_at > current[1]:
-                lineage_events[lineage_key] = (present, changed_at, None)
-            elif changed_at == current[1] and present != current[0]:
-                raise ValueError("conflicting notice lineage event at equal event time")
-    if not lineage_events:
-        return 0
-    await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
-    await _persist_notice_lineage_events(
-        session,
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type=source_entity_type,
-        lineage_events=lineage_events,
-        observed_at=max(
-            changed_at for _, changed_at, _ in lineage_events.values()
-        ),
-    )
-    result = await _reconcile_persisted_notice_scope(
-        session,
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type=source_entity_type,
-        closed_at=max(
-            changed_at for _, changed_at, _ in lineage_events.values()
-        ),
-    )
-    return result.closed
 
 
 async def supersede_stale_notice_features(

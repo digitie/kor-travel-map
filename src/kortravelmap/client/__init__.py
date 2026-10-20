@@ -169,7 +169,6 @@ from kortravelmap.infra.feature_repo import (
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
     capture_provider_curation_input,
-    close_notice_features,
     features_in_bbox,
     get_feature_row,
     get_feature_rows_by_ids,
@@ -1450,31 +1449,6 @@ class AsyncKorTravelMapClient:
                 provider=provider,
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
-            )
-
-    async def close_notice_features(
-        self,
-        *,
-        provider: str,
-        dataset_key: str,
-        source_entity_type: str,
-        closures: Mapping[str, datetime],
-        announcements: Mapping[str, datetime] | None = None,
-    ) -> int:
-        """notice 발표/해제 계보 상태를 반영하고 닫힌 Feature 수를 반환한다.
-
-        발표/해제가 있는 event feed 경계 — mapping key는 사건 ``lineage_key``다.
-        (원래 호출자였던 KMA 특보 적재는 ADR-105로 제거됐다 — 현재 production 호출자 없음.)
-        ``infra.feature_repo.close_notice_features`` 위임. 한 transaction.
-        """
-        async with self._session_factory() as session, session.begin():
-            return await close_notice_features(
-                session,
-                provider=provider,
-                dataset_key=dataset_key,
-                source_entity_type=source_entity_type,
-                closures=closures,
-                announcements=announcements,
             )
 
     async def reconcile_notice_features(

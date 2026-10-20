@@ -1,7 +1,7 @@
 """``test_notice_lifecycle`` — notice 사건 단위 identity 라이프사이클 (#632).
 
-``close_notice_features``(특보 해제) / ``supersede_stale_notice_features``
-(계보 중복 soft-delete + feed 소멸 닫기) / ``purge_expired_notices``(§9 보존) /
+``supersede_stale_notice_features``(계보 중복 soft-delete + feed 소멸 닫기) /
+``purge_expired_notices``(§9 보존) /
 사용자 활성 read 필터(계보 latest만 + 종료 notice 숨김)를 testcontainers
 PostGIS로 끝까지 검증한다. 정리 마이그레이션(0040)의 KREX 술어는
 ``supersede_stale_notice_features``와 동일 계보/최신 판정이라 본 테스트가
@@ -2187,27 +2187,6 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     assert lifecycle == "retired"
     assert lifecycle != "active"
     assert valid_end == expired_at
-
-
-async def test_close_ignores_older_lift_after_reannouncement(
-    migrated_session: AsyncSession,
-) -> None:
-    """해제 시각보다 나중에 재발표된 feature는 닫지 않는다 (순서 역전 방어)."""
-    bundle = _krex_notice_bundle(
-        source_entity_id="reannounce::계보",
-        raw_data={"occurred_date": "2026.07.03"},
-        valid_start=_NOW,  # 발표(=valid_start)가 해제 시각보다 나중.
-    )
-    await feature_repo.load_bundles(migrated_session, [bundle])
-    closed = await feature_repo.close_notice_features(
-        migrated_session,
-        provider=_KREX,
-        dataset_key=_KREX_DS,
-        source_entity_type=_KREX_ET,
-        closures={bundle.source_record.source_entity_id: _NOW - timedelta(hours=1)},
-        announcements={bundle.source_record.source_entity_id: _NOW},
-    )
-    assert closed == 0
 
 
 async def test_bbox_read_hides_non_latest_and_ended(

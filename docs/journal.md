@@ -1,3 +1,9 @@
+## 2026-10-20 — weather 잔재 정리 2건(T-WX-NOTICE-CLOSE·T-WX-VNEXT-FREEZE): 브랜치 `chore/wx-notice-close-vnext-freeze`
+
+- 소유자 지시("4 진행"). `close_notice_features`(client·repo)와 그 함수만 쓰던 통합 테스트 1건을 지웠다. 공유 헬퍼
+  `_persist_notice_lineage_events`·`_reconcile_persisted_notice_scope`는 event-bundle 경로가 계속 쓴다.
+- vNext 동결 계약은 재동결하지 않고 rev 300 당시 기록으로 둔다(ADR-105 후속 한 줄, freeze 테스트 docstring 범위 절).
+
 ## 2026-10-20 — T-RECONCILE-RETRY 설계안 ADR-112(doc-only): 브랜치 `docs/t-reconcile-retry`
 
 - 항목 이름이 "설계"이고 #1319가 세 판의 코드에서 매번 새 구멍을 냈다. 그래서 이번에는 코드보다 설계를 먼저 냈다. 이
