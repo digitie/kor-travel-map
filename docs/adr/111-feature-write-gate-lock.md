@@ -105,7 +105,7 @@ PR #1319는 재시도·물러섬·멈춤 알림·root 닫기를 세 판에 걸�
   조회 성공에 결박된다(M2); `retry_after`가 실패 시각이 아니라 tick 시작 기준이다(M3); 그 밖 L1~L4.
 
 후속 설계의 조건(잃지 않음·tick 시간 유계·경과 시간 기준 알림·gate 경합 전용 SQLSTATE·명시 목록만 닫기)은
-`docs/tasks-acceptance.md` §T-RECONCILE-RETRY가 소유한다.
+`docs/tasks-acceptance.md` §T-RECONCILE-RETRY가 소유한다. 설계안은 ADR-112(proposed, 2026-10-20)다.
 
 한 가지는 이 PR에 남긴다 — 실행 manifest 해석(`resolve_run_execution_manifest`)이 카탈로그 부재
 (`FeatureOperationInvariantConflict`)만 guard 거부로 바꾼다. 종전에는 연결 끊김 같은 일시 실패까지 거부로

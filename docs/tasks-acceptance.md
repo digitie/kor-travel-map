@@ -2838,3 +2838,6 @@ provider record 모델 `from_raw(raw_data)`, tests. MOIS의 replay 제외는 **�
 - **retry_after는 실패 시각 기준**, tick 시작 기준이 아니다. cursor는 비면 앞 판과 바이트가 같고, 커져도 tick body
   크기가 유계다.
 - 설계 입력: #1319 리뷰 3회(parking 표 A-H1·A-H2·A-M1~M3·A-L3·B, 최종 H1~H3·M1~M3·L1~L4)와 journal 2026-10-13 ADR-111 항목.
+- 설계안: ADR-112(proposed, 2026-10-20). 위 조건 하나하나가 어디서 충족되는지는 그 ADR의 "해제 조건 대응" 표에 있다.
+  닫으려면 ADR-112를 소유자가 승인하고(열린 결정 O1~O4), 그대로 구현하고, 조건마다 검사 하나씩 두어 변이로 빨개지는 것을
+  확인해야 한다. 설계 문서만으로는 닫지 않는다.

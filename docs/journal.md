@@ -1,3 +1,16 @@
+## 2026-10-20 — T-RECONCILE-RETRY 설계안 ADR-112(doc-only): 브랜치 `docs/t-reconcile-retry`
+
+- 항목 이름이 "설계"이고 #1319가 세 판의 코드에서 매번 새 구멍을 냈다. 그래서 이번에는 코드보다 설계를 먼저 냈다. 이
+  PR은 ADR-112(proposed)만 싣고 코드는 바꾸지 않는다. 항목은 열린 채로 둔다. 소유자가 O1~O4를 승인한 뒤 같은 항목에서 구현한다.
+- 핵심은 지나가는 규칙 하나다. Dagster watermark는 panel-only·관측 오류이거나, **이번 tick에 ensure가 commit된**(root가
+  생긴) run이거나, 닫기가 내구성 있는 기록을 남긴 run만 지나간다. 그 밖이면 머리에서 멈춘다. 원래 있던 DB page sweep이
+  root 있는 run의 재시도 큐 노릇을 하므로 parking 표가 필요 없다.
+- 멈춤은 횟수가 아니라 시계로 잰다. 머리는 cursor `head.first_failed_at`, terminal root는 Dagster `end_time`을 쓴다.
+  15분이 지나면 알리고, 닫을 수 있는 실패(class 22·23·invariant conflict)면 그때 닫는다. root 없는 머리는 system log
+  한 행을 남기고 지나간다. gate 경합에는 전용 SQLSTATE `KMG01`(migration 410)을 쓴다. tick 예산 40초를 두고 호출마다 timeout을 건다.
+- 열린 결정 O1이 가장 무겁다. sensor 안의 root 완결이 약 35초 상한을 갖게 된다. 구현 전에 prod 완결 소요를 읽기 전용으로 잰다.
+- #1319 최종 리뷰의 L1~L4는 저장소 어디에도 내용이 적혀 있지 않아 대응 표에서 뺐다.
+
 ## 2026-10-20 — T-TEST-PLANNER-INDEX 원장 이관(doc-only)
 
 - PR #1336(`e937b38d`, main 반영 완료)이 통합 planner flake 고정(REINDEX in test txn + 25k draft rows + lock_timeout 30s,
