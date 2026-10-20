@@ -100,9 +100,10 @@ _STORAGE_SLOTS: Final = threading.BoundedSemaphore(1)
 """Dagster run storage 동기 읽기의 worker 하나. 앞 tick의 읽기가 아직 돌아오지 않았으면 이번
 tick은 storage를 읽지 않고 storage 실패로 센다 — thread가 쌓이지 않는다(결정 2)."""
 
-_ACTION_RESERVE_SECONDS: Final[float] = 6.0
-"""page 마감 앞에 남겨 두는 몫. 항목 반영은 그만큼 일찍 끊고, 남은 몫으로 닫기·알림을 한다 —
-실패한 호출이 lock_timeout까지 기다려도 멈춤 알림이 시간 부족으로 굶지 않는다."""
+_ACTION_RESERVE_SECONDS: Final[float] = 2 * FEATURE_OPERATION_MIN_CALL_SECONDS + 3.0
+"""DB page 마감 앞에 남겨 두는 몫(13초). 항목 반영은 그만큼 일찍 끊고, 남은 몫으로 ``db_watch``의
+닫기와 알림을 차례로 한다. 닫기는 마감 − 5초에서 끊으므로 닫기가 lock 대기로 실패해도 알림 쓸
+5초가 남는다. 머리의 닫기·알림은 Dagster page 마감이 아니라 tick 예산(DB page 마감)을 쓴다."""
 
 _STORAGE_START_KEY: Final[str] = "dagster-storage-start"
 """watermark가 아직 없을 때 storage 실패 시계의 key."""
@@ -270,6 +271,20 @@ def _clock_from_cursor(raw: object, *, name: str) -> StallClock:
     return clock
 
 
+def _optional_clock(raw: Mapping[str, object], name: str) -> StallClock | None:
+    """선택 키의 시계를 읽는다. 모양이 틀리면 버린다 — 시계 하나를 잃으면 15분 시계가 다시 돌 뿐이다.
+
+    watermark·keyset cursor와 달리 시계가 깨졌다고 tick을 실패시키면 cursor가 영영 commit되지 않아
+    sensor 전체가 선다(코드 리뷰 delta M2).
+    """
+    if name not in raw:
+        return None
+    try:
+        return _clock_from_cursor(raw[name], name=name)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class FeatureOperationReconcileCursor:
     """Dagster→DB watermark와 DB→Dagster keyset cursor, 두 멈춤 시계의 단일 commit 단위.
@@ -355,10 +370,8 @@ class FeatureOperationReconcileCursor:
         return cls(
             dagster=dagster_cursor,
             database=database_cursor,
-            head=_clock_from_cursor(raw["head"], name="head") if "head" in raw else None,
-            db_watch=(
-                _clock_from_cursor(raw["db_watch"], name="db_watch") if "db_watch" in raw else None
-            ),
+            head=_optional_clock(raw, "head"),
+            db_watch=_optional_clock(raw, "db_watch"),
         )
 
 
@@ -776,12 +789,11 @@ async def _reconcile_dagster_page(
     (a) operation key가 없다, (b) 이번 tick에 R의 root가 있음을 확인했다, (c) 결정 4의 닫기가
     R에 대한 내구성 있는 기록을 commit했다. 셋 다 아니면 R에서 멈추고 R이 머리가 된다.
 
-    읽기와 반영은 page 마감보다 ``_ACTION_RESERVE_SECONDS`` 일찍 끝나는 항목 마감 안에서 한다.
-    남긴 몫으로 머리의 닫기·알림을 한다 — 실패한 호출이 lock_timeout까지 기다려도 알림이
-    굶지 않는다.
+    읽기와 반영은 Dagster page 마감(+20초)까지 한다. 머리의 닫기·알림은 tick 예산(DB page 마감,
+    +40초)에서 한다 — 실패한 호출이 page 마감까지 기다려도 알림이 시간 부족으로 굶지 않는다.
     """
-    deadline = tick.dagster_deadline
-    item_deadline = deadline - _ACTION_RESERVE_SECONDS
+    item_deadline = tick.dagster_deadline
+    deadline = tick.database_deadline
     result = _DagsterPageResult(watermark=watermark, head=head)
     if not tick.has_time(item_deadline):
         return result
@@ -868,7 +880,13 @@ async def _reconcile_dagster_page(
         if (
             failure["closable"]
             and _stalled(current, now)
-            and await _abandon(tick, client, current, record=record, deadline=deadline)
+            and await _abandon(
+                tick,
+                client,
+                current,
+                record=record,
+                deadline=deadline - FEATURE_OPERATION_MIN_CALL_SECONDS,
+            )
         ):
             current = None
             result.watermark = DagsterRunWatermark(record.storage_id, run.run_id)
@@ -911,7 +929,7 @@ async def _reconcile_database_page(
     SUCCESS면 완결이 아직 없다는 뜻이다 — completion sweep이 맡는다(ADR-112 결정 0-1). root가
     이미 있으므로 ensure도 하지 않는다(identity conflict 행을 sweep마다 다시 쓰지 않는다).
     항목 하나가 실패하면 그 항목만 건너뛴다 — 다음 sweep이 다시 집는다. 항목은 page 마감보다
-    ``_ACTION_RESERVE_SECONDS`` 일찍 끊고, 남긴 몫으로 ``db_watch``의 닫기·알림을 한다.
+    ``_ACTION_RESERVE_SECONDS`` 일찍 끊고, 남긴 몫으로 ``db_watch``의 닫기와 알림을 차례로 한다.
     """
     deadline = tick.database_deadline
     item_deadline = deadline - _ACTION_RESERVE_SECONDS
@@ -1034,7 +1052,12 @@ async def _settle_watch(
     if not _stalled(watch, now):
         return watch
     if _failure_of(watch)["closable"] and await _abandon(
-        tick, client, watch, record=watched.record, deadline=deadline, pass_on_active=False
+        tick,
+        client,
+        watch,
+        record=watched.record,
+        deadline=deadline - FEATURE_OPERATION_MIN_CALL_SECONDS,
+        pass_on_active=False,
     ):
         return None
     alerted = await _alert_if_due(
@@ -1061,7 +1084,9 @@ async def _settle_watch(
         None,
     )
     if successor is None:
-        return None
+        # 넘길 root가 없으면 알린 시계를 그대로 둔다 — 같은 root가 새 시계로 15분마다 다시 알리지
+        # 않고 한 시간 간격(``realert``)을 지킨다.
+        return alerted
     return _observe(None, key=successor.run_id, failure=successor.failure, now=successor.failed_at)
 
 

@@ -459,9 +459,17 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
   `_classify_failure`의 분류(`gate_busy`·`lock_wait`)를 싣는다(리뷰 B L3).
 - **수동 닫기 명령의 방어**: 시작 전에 DSN이 provider executor인지(`pg_has_role`) 확인하고, 입력·DB 오류는 원문 없이
   sqlstate만 찍고 끝낸다. `--dagster-status missing`은 확인하지 않고 믿는다(help에 적었다).
-- **닫기·알림 몫**: 항목 반영(읽기·ensure·reconcile)은 page 마감보다 6초 일찍 끊는다. 남긴 몫으로 머리·`db_watch`의
-  닫기와 알림을 한다 — 실패한 호출이 lock_timeout(min(5초, 남은 − 4초))까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지
-  않는다(코드 적대 리뷰 H1).
+- **닫기·알림 몫**: 머리의 닫기·알림은 Dagster page 마감이 아니라 tick 예산(+40초)에서 한다. DB page 항목은 마감보다
+  13초(=2×5초+3초) 일찍 끊고, 남긴 몫으로 `db_watch`의 닫기(마감 − 5초에서 끊는다)와 알림을 차례로 한다. 실패한 호출이나
+  닫기가 자기 상한까지 기다려도 알림이 "남은 시간 5초 미만"으로 굶지 않는다(코드 리뷰 A H1, delta M1).
+- **cursor 시계가 깨졌을 때**: 선택 키의 시계 모양이 틀리면(옛 판의 ISO 시각·dict 서명 등) 그 시계만 버리고 watermark·
+  keyset은 그대로 읽는다. 시계를 잃으면 15분 시계가 다시 돌 뿐이고, tick을 실패시키면 cursor가 영영 commit되지 않는다
+  (delta M2).
+- **넘길 데가 없는 `db_watch`**: 알림을 낸 root 말고 이번 tick에 실패한 root가 없으면 알린 시계를 그대로 둔다 — 그
+  root는 한 시간마다 다시 알린다(delta L3). 실패 root가 여럿이면 슬롯이 돌며 root마다 시계가 새로 시작한다.
+- **알려진 성질**: 머리 시계는 storage 실패 시간도 잰다. 머리 run이 정한 실패로 한 번 실패한 뒤 storage가 15분 넘게
+  읽히지 않았다가 돌아오면, 그 run의 다음 정한 실패에서 곧바로 닫힐 수 있다. 정한 실패는 다시 해도 같은 답이라
+  받아들인다(delta L4).
 - **`db_watch` 넘기기**: 알림을 낸 root는 슬롯을 이번 tick에 실패한 root 가운데 그다음 것(없으면 처음으로 돌아가 다른 첫
   것)에게 넘기고, 넘겨받은 root의 시계는 그 실패 시각에서 시작한다. 넘길 데가 없으면 비운다(리뷰 H2 — 비우기만 하면 다음
   tick에 같은 root가 첫 실패로 도로 잡았다).
@@ -474,7 +482,5 @@ MED·LOW는 다음과 같이 반영했다. 취소 marker root가 DB page에서 �
   `asyncio.timeout`(남은 + 3초)이다. 그때 asyncpg가 서버에 취소 요청을 보내므로 서버 작업도 멈춘다. 그래서 "서버 쪽
   상한만이 정본"은 statement 하나 단위로만 참이다(리뷰 A M7·B M1).
 - **lock_timeout**: min(5초, 남은 − 4초)(2026-10-21 소유자 결정, odroid tenant와 같은 값).
-- **알려진 성질**: 슬롯을 넘겨받은 root가 다시 첫 실패 root로 슬롯을 잡으면 시계가 처음부터 돈다. 그래서 같은 root의
-  `db_watch` 알림은 15분+α 주기로 되풀이될 수 있다(시계마다는 한 시간에 한 행). 설계가 받아들인 대가다(결정 3).
 - **되돌릴 때**: main parser는 선택 키(`head`·`db_watch`)를 거부한다. 되돌리기 전에 선택 키를 뺀 cursor를
   `dagster sensor cursor --set`으로 써 둔다(`--delete` 금지, 결정 7).

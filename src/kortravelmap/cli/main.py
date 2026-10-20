@@ -724,6 +724,9 @@ async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"reconcile-abandon: {exc}", file=sys.stderr)
         return _EXIT_INVALID
+    except OSError as exc:
+        print(f"reconcile-abandon: DB 연결 실패 {type(exc).__name__}", file=sys.stderr)
+        return 1
     except DBAPIError as exc:
         # 원문(SQL·DSN 조각)은 싣지 않는다.
         sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)

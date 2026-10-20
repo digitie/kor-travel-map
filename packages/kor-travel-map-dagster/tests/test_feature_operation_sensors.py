@@ -1820,16 +1820,17 @@ async def test_pages_stop_starting_calls_at_their_deadlines(clock: _Clock) -> No
     await _reconcile_tick(context, client)
 
     committed = _committed(context)
-    # Dagster page 항목 마감은 20 − 6(닫기·알림 몫) = 14초: t=0 → 8 → 16, run-3은 시작하지 않는다.
+    # Dagster page 마감 20초: t=0 → 8 → 16, 남은 4초 < 5초라 run-3은 시작하지 않는다.
     assert committed.dagster == DagsterRunWatermark(3, "run-2")
-    # DB page 항목 마감은 40 − 6 = 34초: t=16 목록, 16 → 24 → 32, 남은 2초라 db-3은 시작하지 않는다.
+    # DB page 항목 마감은 40 − 13(닫기·알림 몫) = 27초: t=16 목록, 16 → 24, 남은 3초라 db-2는
+    # 시작하지 않는다.
     dagster_ids = {f"run-{index}" for index in range(1, 6)}
     db_calls = [
         call["dagster_run_id"]
         for call in client.ensure_calls
         if call["dagster_run_id"] not in dagster_ids
     ]
-    assert db_calls == ["db-1", "db-2"]
+    assert db_calls == ["db-1"]
     # 일찍 멈춘 DB page는 마지막으로 방문한 항목에 cursor를 둔다.
     assert committed.database == DagsterFeatureOperationCursor(
         created_at=_NOW, root_job_id="11111111-1111-4111-8111-111111111111"
@@ -1850,9 +1851,9 @@ async def test_every_client_call_carries_its_page_deadline(clock: _Clock) -> Non
     dagster_page, database_page = client.deadlines
     assert dagster_page is not None
     assert database_page is not None
-    reserve = 6
-    assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - reserve - 5 < dagster_page <= (
-        FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - reserve
+    reserve = 13
+    assert FEATURE_OPERATION_DAGSTER_PAGE_SECONDS - 5 < dagster_page <= (
+        FEATURE_OPERATION_DAGSTER_PAGE_SECONDS
     )
     assert FEATURE_OPERATION_TICK_BUDGET_SECONDS - reserve - 5 < database_page <= (
         FEATURE_OPERATION_TICK_BUDGET_SECONDS - reserve
@@ -2129,10 +2130,10 @@ async def test_a_lock_wait_that_uses_up_the_call_budget_still_gets_its_alert(
 
     class _LockWaitClient(_Client):
         async def ensure_dagster_feature_operation(self, **kwargs: Any) -> object:
-            # 서버가 lock_timeout(마감 − 4초)에서 끊을 때까지 기다린 것처럼 sensor 시계를 옮긴다.
+            # 최악: 여러 statement로 된 트랜잭션이 client 쪽 상한(page 마감 + 3초)까지 간다.
             deadline = transaction_limits._DEADLINE.get()
             assert deadline is not None
-            clock.advance(deadline - clock.mono - 4)
+            clock.advance(deadline - clock.mono + 3)
             raise _sqlalchemy_error("55P03", "canceling statement due to lock timeout")
 
     record = _record(DagsterRunStatus.STARTED, run_id="run-1", storage_id=2)
@@ -2322,3 +2323,69 @@ async def test_status_events_also_carry_a_server_side_deadline() -> None:
     (deadline,) = client.deadlines
     assert deadline is not None
     assert 0 < deadline <= 20
+
+
+async def test_a_watched_root_whose_close_fails_on_a_lock_still_gets_its_alert(
+    clock: _Clock,
+) -> None:
+    """닫기가 lock 대기로 자기 상한까지 가서 실패해도 같은 tick에 알림 쓸 시간이 남는다."""
+
+    class _BlockedAbandonClient(_Client):
+        async def abandon_dagster_feature_run(self, **kwargs: Any) -> object:
+            self.abandon_calls.append(kwargs)
+            deadline = transaction_limits._DEADLINE.get()
+            assert deadline is not None
+            clock.advance(deadline - clock.mono - 0.5)  # 자기 상한 직전까지 lock을 기다렸다
+            raise _sqlalchemy_error("55P03", "canceling statement due to lock timeout")
+
+    context = _db_page_context()
+    client = _BlockedAbandonClient(
+        page=DagsterFeatureOperationPage((_active_root("gone"),), None)  # type: ignore[arg-type]
+    )
+
+    await _reconcile_tick(context, client)
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    context.cursor = context.updated_cursors[-1]
+    await _reconcile_tick(context, client)
+
+    assert len(client.abandon_calls) == 1
+    assert [call["scope"] for call in client.stalled_calls] == ["db_watch"]
+
+
+async def test_a_single_failing_root_keeps_its_alerted_clock_and_realerts_hourly(
+    clock: _Clock,
+) -> None:
+    """넘길 root가 없으면 알린 시계를 둔다 — 15분마다가 아니라 한 시간마다 알린다."""
+    stuck = _record(DagsterRunStatus.FAILURE, run_id="stuck", storage_id=10)
+    context = _db_page_context(stuck)
+    client = _db_page_client("stuck")
+    client.reconcile_error = _sqlalchemy_error("42883", "function does not exist")
+
+    async def tick() -> None:
+        await _reconcile_tick(context, client)
+        context.cursor = context.updated_cursors[-1]
+
+    await tick()
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS)
+    await tick()
+    assert len(client.stalled_calls) == 1
+    clock.advance(FEATURE_OPERATION_STALL_AFTER_SECONDS * 2)
+    await tick()
+    assert len(client.stalled_calls) == 1
+    clock.advance(FEATURE_OPERATION_REALERT_SECONDS)
+    await tick()
+    assert len(client.stalled_calls) == 2
+
+
+def test_a_malformed_clock_is_dropped_instead_of_stalling_the_sensor() -> None:
+    """옛 모양(ISO 시각·dict 서명)이나 깨진 시계는 버린다 — watermark와 keyset은 그대로 읽는다."""
+    raw = (
+        '{"dagster":{"run_id":"run-7","storage_id":7},"database":null,'
+        '"head":{"alerted_at":null,"first_failed_at":"2026-10-21T00:00:00+00:00",'
+        '"last_failure":{"category":"storage"},"run_id":"run-8"},"version":1}'
+    )
+
+    cursor = FeatureOperationReconcileCursor.from_json(raw)
+
+    assert cursor.dagster == DagsterRunWatermark(7, "run-7")
+    assert cursor.head is None
