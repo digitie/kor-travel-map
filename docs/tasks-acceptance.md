@@ -42,7 +42,7 @@
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
-선행: Weather·Transport의 진행 중 동시성 개선 완료. 설계 정본은 ADR-114다. 아직 측정하지 않은
+선행: Weather·Transport의 진행 중 동시성 개선 완료. 설계 정본은 ADR-115다. 아직 측정하지 않은
 값을 목표 달성 수치로 적지 않는다.
 
 - [ ] `feature-curation-write`·`feature-write-all`·`curation-catalog-write`와 관련 session lock,
@@ -50,11 +50,15 @@
   호출 그래프로 나열한다. 각각 새 shared gate 가능/배타 fallback 사유·권한 소유자를 명시한다.
 - [ ] ADR-113 spool 경로/ADR-108 MOIS 및 notice·price projection의 별도 잠금을 구분하고
   현재 schema head·image revision·active run·pool/timeout·NVMe 경로를 기록한다.
+- [ ] ADR-114 Valkey 이행의 실제 구현/퇴역 상태를 고정하고 PG 잔존·퇴역 writer와 Valkey-only
+  경로를 분류한다. 본 task의 PG protocol을 Valkey pointer/식별자에 자동 적용하지 않으며, 이행 후
+  퇴역한 Transport dataset 대신 PG에 유지되는 독립 dataset을 재현·실측 fixture로 선택한다.
+  PG/Valkey 동시 commit을 보장한다고 문서화하지 않는다.
 - [ ] 동일 원천 artifact의 독립 dataset 2개, 공유 Feature dataset 2개, 같은 dataset 지역 2개,
   geometry 대량 1개를 확보한다. 수집 키/비밀/개인 payload를 문서에 노출하지 않는다.
-- [ ] ADR-114 §9 기준선(3회, cold/warm 구분)을 보관하고 API/UI p50/p95·PG 포함 CPU/RAM·
+- [ ] ADR-115 §9 기준선(3회, cold/warm 구분)을 보관하고 API/UI p50/p95·PG 포함 CPU/RAM·
   lock wait/hold·WAL/temp·rows/s를 분리한다. 기존 상태를 고의로 운영 장애로 만들지 않는다.
-- [ ] 다중 SELECT 응답 inventory를 router/함수/실제 SQL 호출 순서별로 만든다. ADR-114 §6의
+- [ ] 다중 SELECT 응답 inventory를 router/함수/실제 SQL 호출 순서별로 만든다. ADR-115 §6의
   상세·batch·target nearby·price snapshot부터 admin/curation 등 전체 관련 경로로 확장하고,
   각 경로의 현 isolation과 단일 SQL/최초 SELECT 전 REPEATABLE READ 전환 방식을 명시한다.
 
@@ -150,7 +154,7 @@
 
 ## T-CWRITE-06 — curation·root·관리·병합 전수 전환
 
-선행: T-CWRITE-05. 최종 완료 범위는 ADR-114 §5.3의 모든 경로다.
+선행: T-CWRITE-05. 최종 완료 범위는 ADR-115 §5.3의 모든 경로다.
 
 - [ ] `_406_*.sql`의 source/theme/rule·collection/item/candidate anchor와 catalog revision을
   도입해 서로 무관한 bulk root가 실제로 동시 DML한다. source/theme 공유는 계속 직렬화한다.
@@ -187,7 +191,7 @@
   통과시킨다. 실제 PG 다중 세션과 row 수·geometry 크기 확대한 검사를 포함한다.
 - [ ] live API/UI에서 목록·지도·상세·페이지 이동·override/revoke·수동 갱신·root 상태·실패 후
   재시도·모바일을 확인한다. 실제로 쓴 격리 fixture만 복구/정리하고 운영 데이터를 임의 삭제하지 않는다.
-- [ ] ADR-114 §9 전후 3회 실측과 독립 2작업의 총 시간 단축, 정확성/무한 정지 0을 증명한다.
+- [ ] ADR-115 §9 전후 3회 실측과 독립 2작업의 총 시간 단축, 정확성/무한 정지 0을 증명한다.
   CPU core-seconds/row·peak RAM·API p95의 10% 초과 악화는 원인 해결 전 확대를 막는다.
   결과에는 병행 개수·host·artifact/hash·schema/image generation·다른 collector 부하를 붙인다.
 
@@ -203,7 +207,7 @@
 - [ ] 운영 수용 fixture에서 상위 A winner→하위 B 배타 fallback→flag OFF→B refresh를 재현해
   값·lineage·Geo stamp 유지와 후보 갱신을 확인한다. 직접 base legacy 루틴은 OFF에서도 거부되며,
   의미 경로 장애 시 쓰기 정지/forward repair를 검증한다. 잘못된 writer 허용으로 복구하지 않는다.
-- [ ] ADR-114의 구현된 결정만 accepted/현행 관계로 갱신하고 ADR-111의 supersede 범위를 정확히
+- [ ] ADR-115의 구현된 결정만 accepted/현행 관계로 갱신하고 ADR-111의 supersede 범위를 정확히
   적는다. runtime/schema·설정·복구·측정 문서, tasks/resume/journal을 일치시킨다.
 - [ ] 각 task를 실제 완료된 운영 generation·증거 링크와 함께 tasks-done으로 이동한다. 문서 설계
   머지만으로 구현/배포/실측 task를 닫지 않는다.

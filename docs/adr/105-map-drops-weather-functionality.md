@@ -1,6 +1,6 @@
 # ADR-105: Map에서 날씨 feature와 날씨 notice 기능을 지운다 — 정의는 남긴다
 
-- 상태: accepted (2026-10-01, 소유자 결정) · 확장 대상: ADR-104(Map은 KMA를 적재하지 않는다)
+- 상태: accepted (2026-10-01, 소유자 결정) · 확장 대상: ADR-104(Map은 KMA를 적재하지 않는다) · **2026-10-23 ADR-114가 부분 대체** — weather가 Map에 다시 들어오되 DB 스키마가 아니라 메모리 DB(Valkey)로 들어온다. 이 ADR의 삭제 결정(옛 스키마·데이터)은 그대로다
 - 관련: ADR-010(weather 두 축, 이관 문서), ADR-104(KMA·날씨는 kor-travel-weather가 소유), ADR-088(operation 카탈로그
   정본), ADR-089(weather fact·summary receipt), ADR-102(migration 전진 배포)
 

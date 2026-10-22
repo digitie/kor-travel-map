@@ -1,4 +1,4 @@
-## 2026-10-23 — Map 실제 동시 쓰기 설계(ADR-114, 문서만)
+## 2026-10-23 — Map 실제 동시 쓰기 설계(ADR-115, 문서만)
 
 - 최신 main `cdd2614007a86e8627949cd1176c61eb14c0ce3e`의 전역 3종 gate, source/Feature
   병합·base/effective·seal·Geo token 경계를 대조하고 proposed 설계와 T-CWRITE-01~09를 작성했다.

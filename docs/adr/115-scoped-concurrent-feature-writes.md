@@ -1,13 +1,24 @@
-# ADR-114 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌을 분리한다
+# ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌을 분리한다
 
 - 상태: proposed — 설계·문서만. 이 PR은 잠금을 제거하거나 동시 실행 수를 바꾸지 않는다.
 - 날짜: 2026-10-23
 - 결정자: 사용자(설계·문서화·후속 구현 요청), Codex(설계)
 - 근거 코드: `cdd2614007a86e8627949cd1176c61eb14c0ce3e`(main, PR #1350).
-- 관계: ADR-074·091·097·098·099·108·109·111·112·113.
+- 원격 main 재확인: `952ceb659`(PR #1352)는 문서 4개만 변경하며 기능 코드는 동일하다.
+  ADR-114가 먼저 배정되어 본 설계를 ADR-115로 변경했다.
+- 관계: ADR-074·091·097·098·099·108·109·111·112·113 및 ADR-114(Weather·Transport Valkey 이행).
 - 구현 착수 순서: 진행 중인 Weather·Transport 동시성 개선을 마친 다음 Map 구현.
 
 ## 1. 컨텍스트와 현재 보장
+
+이 설계의 쓰기·identity·후보·seal 프로토콜은 **PostgreSQL에 유지되는 Feature**가 범위다.
+최신 main의 [ADR-114](114-weather-transport-state-in-memory-db.md)는 Weather·Transport의
+현재/예보를 Valkey 세대 교체로 옮기는 별도 proposed 설계다. 그 경로의 키·pointer·메모리 예산은
+본 ADR이 재설계하지 않으며 PG/Valkey 간 원자적 transaction을 약속하지 않는다. 이행 전에 남아
+있는 PG Transport writer와 이후 퇴역 명령은 PG 불변식·protocol gate를 지켜야 하고, 이행 뒤에는
+퇴역 dataset을 동시 쓰기 실측 대상으로 사용하지 않는다. Valkey-only Feature에 PG의 UUID claim·
+base/override·seal을 자동 적용하거나 ADR-114의 식별자 계약을 이 문서로 바꾸지 않는다. 경계의
+구현·퇴역 상태는 T-CWRITE-01에서 다시 고정한다.
 
 단순히 전역 잠금 이름에 dataset ID를 붙이면 안전하지 않다. 서로 다른 dataset의 source가
 같은 Feature에 연결되면 필드·상태·큐레이션·seal의 읽기/쓰기 집합이 겹친다. 지역도 좌표 이동,
@@ -226,7 +237,7 @@ collection revision 하나를 공유하는 명령끼리는 계속 충돌하는 �
 
 ## 6. 원자적 공개·seal·Geo 토큰
 
-초기 구현은 staging 전체 복사나 새 active release pointer를 추가하지 않는다. 일반 dataset/정당한
+초기 **PG 동시 쓰기 구현**은 staging 전체 복사나 새 active release pointer를 추가하지 않는다. 일반 dataset/정당한
 지역 snapshot은 기존 한 transaction을 유지하므로 API reader는 commit 전/후 image만 본다.
 현재 READ COMMITTED에서 같은 transaction을 쓰더라도 SELECT마다 snapshot이 달라진다.
 따라서 관련 조회를 단일 SQL로 합치거나, **첫 SELECT 이전**에 read-only REPEATABLE READ
@@ -261,7 +272,8 @@ MOIS의 기존 chunk 공개 의미는 ADR-108을 유지한다.
 - `geo_data_token`/`DatasetRef`는 Geo의 활성 데이터 지문이지 Map 쓰기 세대가 아니다. run의 Geo
   토큰 관측이 섞이면 ADR-109/113대로 stale 재해석·stamp를 보류한다. 후보별 해석 증거와
   effective 그룹 winner의 stamp는 §4.1 규약으로 일치시킨다. 새 epoch를 Geo 지문처럼 쓰지 않는다.
-- Map에는 이 설계가 전환할 공개용 active release pointer가 현재 없다. 기존 Geo release 계획과
+- 이 설계가 대상으로 하는 **PG Feature**에는 전환할 공개용 active release pointer가 현재 없다.
+  ADR-114의 제안 Valkey 세대 pointer는 별도다. 기존 Geo release 계획과
   theme candidate generation을 Map 전체 release로 부르지 않는다. cache target generation/outbox,
   ETag/row_revision·공개 `public_ready`/공간 인덱스가 commit과 함께 일치해야 한다.
 
