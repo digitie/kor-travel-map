@@ -35,6 +35,9 @@ LogFormat = Literal["json", "console"]
 # 기본값과 env 기본값을 각자 적으면 갈라지고, 갈라진 뒤에는 조용한 쪽이 이긴다.
 BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT: Final[int] = 48
 
+# ``feature_load_curation_lock_wait_seconds`` 기본값 — settings 없이 만든 client도 같은 값을 쓴다.
+FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT: Final[int] = 900
+
 
 class KorTravelMapSettings(BaseSettings):
     """본 라이브러리 런타임 설정.
@@ -320,6 +323,19 @@ class KorTravelMapSettings(BaseSettings):
             "다건 provider run 재시도 예산 하한(T-VN-H45 후속). 작은 시도/페이지 "
             "순회도 기존 8회 허용량을 유지하며 hard cap은 32다. env "
             "``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM``."
+        ),
+    )
+    feature_load_curation_lock_wait_seconds: int = Field(
+        default=FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT,
+        ge=0,
+        le=3_600,
+        description=(
+            "provider 적재 transaction이 ``feature-curation-write`` fence를 처음 잡을 때 "
+            "기다리는 상한(초). Dagster 엔진의 ``lock_timeout=30000``은 다른 적재의 쓰기 "
+            "단계(분 단위) 뒤에서 30초 만에 55P03으로 실패했다(2026-10-22). 그 한 문장만 "
+            "늘리고 직후 되돌린다 — API 단건 writer·reconcile sensor·completion sweep은 "
+            "영향 없음. ``0``은 끈다(엔진 값 그대로). 상한 1시간 — run 상한 2~6시간 안. "
+            "env ``KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS``."
         ),
     )
     dagster_address_validation: Literal["strict", "drop", "off"] = Field(

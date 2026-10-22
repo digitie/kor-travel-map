@@ -54,6 +54,7 @@ import json
 import logging
 import math
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -170,10 +171,101 @@ SELECT pg_catalog.pg_advisory_xact_lock(
 """
 
 
-async def lock_feature_curation_write(session: AsyncSession) -> None:
-    """Feature/source/link/curation 의미 writer의 공통 transaction fence."""
+FEATURE_CURATION_WRITE_WAIT_INFO_KEY: Final[str] = (
+    "kortravelmap.feature_curation_write_wait_ms"
+)
+"""``session.info`` 키 — provider 적재 transaction이 fence를 **처음** 잡을 때 기다릴 상한(ms).
 
+:func:`arm_feature_curation_write_wait`만 쓴다. 값은 그 session의 첫
+:func:`lock_feature_curation_write` 호출이 꺼내 쓰고 지운다(한 번)."""
+
+_FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS: Final[int] = 60_000
+"""긴 대기 동안 ``statement_timeout``을 ``대기 + 이 여유``까지 올린다 — lock 대기가 먼저 끝나
+statement 취소(57014)가 아니라 종전과 같은 55P03으로 실패하게."""
+
+_SESSION_LOCK_TIMEOUTS_SQL: Final[str] = """
+SELECT name, setting
+FROM pg_catalog.pg_settings
+WHERE name IN ('lock_timeout', 'statement_timeout')
+"""
+
+_SET_LOCAL_LOCK_TIMEOUTS_SQL: Final[str] = """
+SELECT pg_catalog.set_config('lock_timeout', :lock_timeout, true),
+       pg_catalog.set_config('statement_timeout', :statement_timeout, true)
+"""
+
+
+def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None:
+    """이 session의 **첫** ``feature-curation-write`` 획득이 ``wait_ms``까지 기다리게 한다.
+
+    provider 적재 transaction 전용이다(client의 적재 메서드가 session을 연 직후 부른다).
+    Dagster 엔진의 ``lock_timeout=30000``은 다른 적재의 쓰기 단계(분 단위) 뒤에서 30초만
+    기다리고 55P03으로 죽었다(2026-10-22). 잠금 의미·순서(ADR-111 §2)는 그대로이고, 대기
+    상한만 그 한 문장에서 늘어난다. API/관리 단건 writer·reconcile sensor·completion sweep은
+    이 함수를 부르지 않으므로 종전 상한(5s·ADR-112 예산)을 그대로 쓴다. ``0``은 끈다.
+    """
+    if wait_ms < 0:
+        raise ValueError("wait_ms는 0 이상이어야 합니다.")
+    session.info[FEATURE_CURATION_WRITE_WAIT_INFO_KEY] = wait_ms
+
+
+async def lock_feature_curation_write(session: AsyncSession) -> None:
+    """Feature/source/link/curation 의미 writer의 공통 transaction fence.
+
+    session이 :func:`arm_feature_curation_write_wait`로 무장돼 있으면 첫 획득만 긴 대기로
+    잡는다(:func:`_lock_feature_curation_write_waiting`). 같은 transaction의 다음 호출은
+    이미 쥔 xact lock을 다시 잡는 것이라 즉시 돌아온다.
+    """
+
+    info = getattr(session, "info", None)
+    wait_ms = (
+        info.pop(FEATURE_CURATION_WRITE_WAIT_INFO_KEY, None)
+        if isinstance(info, dict)
+        else None
+    )
+    if isinstance(wait_ms, int) and wait_ms > 0:
+        await _lock_feature_curation_write_waiting(session, wait_ms)
+        return
     await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+
+
+async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: int) -> None:
+    """``lock_timeout``(필요하면 ``statement_timeout``도)을 그 한 문장 동안만 늘려 fence를 잡는다.
+
+    늘리기만 한다 — 현재 ``lock_timeout``이 0(무한)이거나 이미 ``wait_ms`` 이상이면 그대로
+    잡는다. 잡은 뒤에는 두 값을 직전 값으로 되돌려(``SET LOCAL``) 이 transaction의 다른
+    잠금(행 잠금·다른 advisory)은 종전 짧은 상한을 그대로 쓴다. 대기가 55P03으로 끝나면
+    transaction이 abort되므로 되돌릴 필요가 없다(rollback이 ``SET LOCAL``을 지운다).
+    """
+    rows = (await session.execute(text(_SESSION_LOCK_TIMEOUTS_SQL), {})).all()
+    current = {str(name): int(setting) for name, setting in rows}
+    prior_lock_ms = current["lock_timeout"]
+    prior_statement_ms = current["statement_timeout"]
+    if prior_lock_ms == 0 or prior_lock_ms >= wait_ms:
+        await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+        return
+    statement_ms = prior_statement_ms
+    floor_ms = wait_ms + _FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS
+    if statement_ms != 0 and statement_ms < floor_ms:
+        statement_ms = floor_ms
+    await session.execute(
+        text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
+        {"lock_timeout": str(wait_ms), "statement_timeout": str(statement_ms)},
+    )
+    started = time.monotonic()
+    await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+    waited = time.monotonic() - started
+    await session.execute(
+        text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
+        {"lock_timeout": str(prior_lock_ms), "statement_timeout": str(prior_statement_ms)},
+    )
+    if waited >= 1.0:
+        _LOG.info(
+            "feature-curation-write fence를 %.1f초 기다려 잡았다 (상한 %dms, 종전 %dms)",
+            waited,
+            wait_ms,
+            prior_lock_ms,
+        )
 
 
 @dataclass(frozen=True)

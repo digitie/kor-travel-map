@@ -178,6 +178,7 @@ from kortravelmap.infra.feature_repo import (
     NearbyFeaturePage,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
+    arm_feature_curation_write_wait,
     capture_provider_curation_input,
     features_in_bbox,
     get_feature_row,
@@ -307,6 +308,7 @@ from kortravelmap.infra.sync_state_repo import (
 )
 from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
+from kortravelmap.settings import FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT
 from kortravelmap.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
@@ -565,6 +567,13 @@ class AsyncKorTravelMapClient:
         self._engine = engine
         self._session_factory = make_async_session_factory(engine)
         self._settings = settings
+        #: provider 적재 transaction이 ``feature-curation-write``를 처음 잡을 때 기다릴 상한(ms).
+        #: :meth:`_feature_load_transaction`만 쓴다(T-LOAD-LOCK-WAIT).
+        self._feature_load_lock_wait_ms = 1000 * (
+            settings.feature_load_curation_lock_wait_seconds
+            if settings is not None
+            else FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT
+        )
         #: 이 client의 session이 **바깥 transaction에 결합돼 있는가.**
         #:
         #: dagster feature-update runner가 `_bind_client_to_session`으로 복제본을
@@ -584,6 +593,19 @@ class AsyncKorTravelMapClient:
     ) -> None:
         # engine 수명은 호출자 소유 (ADR-004 infra/db.py) — 여기서 dispose 안 함.
         return None
+
+    @asynccontextmanager
+    async def _feature_load_transaction(self) -> AsyncIterator[AsyncSession]:
+        """provider 적재 쓰기 transaction — 첫 ``feature-curation-write`` 획득만 길게 기다린다.
+
+        다른 적재의 쓰기 단계가 fence를 몇 분 쥐는 동안 Dagster 엔진의 ``lock_timeout``
+        (30초)으로는 55P03으로 죽는다(2026-10-22, 다섯 dataset). 대기 상한은
+        ``feature_load_curation_lock_wait_seconds``이고 그 한 문장만 늘린 뒤 되돌린다
+        (:func:`~kortravelmap.infra.feature_repo.arm_feature_curation_write_wait`).
+        """
+        async with self._session_factory() as session, session.begin():
+            arm_feature_curation_write_wait(session, self._feature_load_lock_wait_ms)
+            yield session
 
     @asynccontextmanager
     async def provider_run_lock(self, key: str) -> AsyncIterator[None]:
@@ -1155,7 +1177,7 @@ class AsyncKorTravelMapClient:
         분기 입력이다(ADR-109) — None이면 geo 재해석이 없다(옛 동작).
         """
         materialized = list(bundles)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             result = await load_bundles(session, materialized, geo=geo)
             if curation_dataset is not None:
                 provider, dataset_key = curation_dataset
@@ -1322,7 +1344,7 @@ class AsyncKorTravelMapClient:
         commit된 chunk는 그 안의 행이 전부 있고, 되돌린 chunk는 하나도 없다.
         """
         materialized = list(bundles)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             await repo_reobserve_unchanged_source_entities(
                 session,
                 provider=provider,
@@ -1349,7 +1371,7 @@ class AsyncKorTravelMapClient:
         """
 
         result = FeatureLoadResult()
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             async for batch in batches:
                 if not batch:
                     continue
@@ -1386,7 +1408,7 @@ class AsyncKorTravelMapClient:
         ) or (retire_geometryless_areas and retire_absent_from_snapshot):
             raise ValueError("retirement mode는 하나만 선택해야 합니다")
         materialized = list(bundles)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             result = await load_bundles(session, materialized, geo=geo)
             retired = 0
             if retired_source_entity_ids is not None:
@@ -1433,7 +1455,7 @@ class AsyncKorTravelMapClient:
         observed_at: datetime,
     ) -> NoticeFeatureLoadResult:
         """full notice snapshot 적재와 lifecycle 반영을 한 transaction으로 수행."""
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             result = await repo_load_authoritative_notice_snapshot(
                 session,
                 bundles=bundles,
@@ -1461,7 +1483,7 @@ class AsyncKorTravelMapClient:
         observed_at: datetime,
     ) -> NoticeFeatureLoadResult:
         """event notice 적재와 member lifecycle 반영을 한 transaction으로 수행."""
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             result = await repo_load_notice_event_bundles(
                 session,
                 bundles=bundles,
@@ -1495,7 +1517,7 @@ class AsyncKorTravelMapClient:
         유지, ADR-050 #4). 빈 집합이면 no-op(0). 한 transaction.
         D-12: 전환된 feature는 batch/단건 read의 ``found``에 status와 함께 남는다.
         """
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             return await retire_features_by_source_entity_ids(
                 session,
                 provider=provider,
@@ -1519,7 +1541,7 @@ class AsyncKorTravelMapClient:
         (ADR-086 이후 geometry 정본은 area subtype이고 core ``geom``은 없다).
         한 transaction.
         """
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             return await retire_geometryless_area_features_by_source(
                 session,
                 provider=provider,
@@ -1616,7 +1638,7 @@ class AsyncKorTravelMapClient:
         이미 적재돼 있어야 한다(FK). 하나라도 실패하면 전체 rollback.
         """
         pairs = [(e.source_record, e.source_link) for e in enrichments]
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             return await load_source_record_links(session, pairs)
 
     async def load_festival_enrichment(
@@ -1636,7 +1658,7 @@ class AsyncKorTravelMapClient:
         실패 item은 제외. 1차 festival이 아직 없으면 candidate가 비어 enrichment도 0.
         """
         items_list = list(items)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             candidate_rows = await list_dedup_refresh_features(
                 session,
                 DedupRefreshScope(
@@ -1674,7 +1696,7 @@ class AsyncKorTravelMapClient:
         ``load_festival_enrichment``과 동치(임계값만 명시적). commit/rollback 소유.
         """
         items_list = list(items)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             candidate_rows = await list_dedup_refresh_features(
                 session,
                 DedupRefreshScope(
@@ -2782,7 +2804,7 @@ class AsyncKorTravelMapClient:
         """price anchor와 exact-response immutable facts를 한 transaction으로 적재한다."""
         bundles = list(price_bundles)
         values = list(price_values)
-        async with self._session_factory() as session, session.begin():
+        async with self._feature_load_transaction() as session:
             features = await load_bundles(session, bundles)
             value_count = await repo_load_price_values(
                 session,
