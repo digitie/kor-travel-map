@@ -55,9 +55,9 @@ pydantic 객체를 **다시 검증하지 않고** 바이트 그대로 되살린�
 |---|---|---|
 | 원자성 | stream·쓰기 중 어디서 실패해도 전부 rollback | 받기 실패는 transaction 없음(쓴 것 없음), 쓰기 실패는 rollback — 둘 다 "아무것도 commit 안 됨" |
 | 한 DB image에 대한 seal | seal을 같은 transaction 끝에서 읽음 | 같음. 쓰기·seal 사이에 다른 writer가 끼지 못한다(fence를 쓰기 시작부터 commit까지 쥠) |
-| absent-row retire | 이 경로는 하지 않는다(asset 8개 모두 `retire_absent_from_snapshot` 없음) — root 완결의 membership/seal이 맡는다 | 같음 |
+| absent-row retire | 이 경로는 하지 않는다(asset 8개 모두 `retire_absent_from_snapshot` 없음) | 그대로 — 이 결정과 무관하다 |
 | 멱등성 | `load_bundle`의 payload hash 비교·upsert | 같음(같은 bundle을 같은 순서로) |
-| `provider_run_lock` | 받기·쓰기 전체를 session-level lock이 덮음 | 같음 — 같은 provider의 두 실행은 여전히 겹치지 않는다 |
+| 같은 dataset의 동시 실행 | 이 8개는 `provider_run_lock`을 쓰지 않는다(고속도로 돌발만 쓴다). 예약·수동 run은 `GEO_HEAVY_POOL`(1)이 묶고, 큐 경로는 pool을 거치지 않는다. 겹치면 둘째가 첫 batch에서 fence에 막혀 실패했다 — 우연한 직렬화 | 둘 다 끝까지 받은 뒤 차례로 쓴다(결정 5) |
 | 잠금 순서(ADR-111 §2) | `feature-curation-write`는 첫 `load_bundles`에서 | 같음. 새 잠금 없음 |
 | receipt·root·sync cursor | 적재 뒤 별도 transaction | 같음 |
 | 대기 상한(1안) | 첫 fence 획득만 900초 | 같음 |
@@ -67,9 +67,10 @@ pydantic 객체를 **다시 검증하지 않고** 바이트 그대로 되살린�
 - **fence 보유 = 쓰기 시간.** 받기 동안 이 적재는 fence도 transaction도 쥐지 않는다. 다른 적재·root 완결·단건 writer가
   그 사이에 들어간다.
 - **geo 관측 토큰은 받기가 끝난 뒤 한 번에 본다(ADR-109).** `GeoLoadContext.observed_data_tokens`는 run의
-  `GeoCallStats` 집합을 가리키므로, 종전에는 앞 batch가 "그때까지 본 토큰"으로 스탬프됐고 뒤에서 전환을 만나면 뒤 batch만
-  스탬프를 건너뛰었다. 이제 모든 batch가 run 전체의 관측을 본다 — 전환을 가로지른 run은 어떤 batch도 새 토큰으로 봉인하지
-  않는다. ADR-109의 의도(옛 데이터로 해석한 행이 새 토큰으로 봉인되지 않게)와 같은 쪽으로 더 엄격해진다.
+  `GeoCallStats` 집합을 가리키므로, 종전에는 앞 batch가 "그때까지 본 토큰"으로 stale 판정·스탬프됐고 뒤에서 전환을 만나면
+  뒤 batch만 건너뛰었다. 이제 모든 batch가 run 전체의 관측을 본다 — 전환을 가로지른 run은 **어느 batch에서도** stale
+  재정렬(`stale_among(..., None)`은 빈 집합)과 스탬프를 하지 않는다. 그 행들은 다음 run이나 geo 릴리스 계획이 다시 고른다.
+  ADR-109의 의도(옛 데이터로 해석한 행이 새 토큰으로 봉인되지 않게)와 같은 쪽으로 더 엄격해진다(단위 검사가 이 순서를 센다).
 
 ### 3. 쓰기를 묶음으로 쪼개 fence를 중간에 놓지는 않는다
 
@@ -78,27 +79,55 @@ pydantic 객체를 **다시 검증하지 않고** 바이트 그대로 되살린�
 - 묶음 commit은 "snapshot 하나 = 한 DB image" 계약을 깬다. 중간 상태가 보이고, 다른 writer가 묶음 사이에 끼면 마지막
   묶음 뒤의 seal이 섞인 image를 봉인한다(etl의 기존 주석이 이 이유로 한 transaction을 고집한다). 이를 지키려면 staging
   표·세대 번호·재개 지점 같은 장치가 필요하고, 그것이 ADR-108이 MOIS 하나에만 감수한 복잡도다.
-- 필요가 없다. 이 경로의 가장 큰 dataset(주차장 약 1.9만 건)의 쓰기는 batch 190개 × 몇 초 = 분 단위로 예상되고(구현 뒤
-  n150 일회용 PostGIS 실측을 "결과"에 적는다), 이미 한 transaction으로 쓰는 다른 경로(유가·주유소 각 1.18만 건,
-  `_load`)와 같은 크기다. 1안의 900초 대기 상한 안에 들어온다.
+- 실측으로는 필요가 없다 — "결과"의 쓰기 처리량(n150 일회용 PostGIS)으로 이 경로의 가장 큰 dataset(주차장 약 1.9만 건,
+  batch 189개)의 쓰기 단계를 추정했다. 다만 prod n150은 디스크 대기가 커서(load가 CPU가 아니라 I/O) 일회용 실측보다 느릴
+  수 있다. 그래서 숫자를 단정하지 않고 **재는 장치**를 둔다: 쓰기 단계 시간(= 이 적재의 fence 보유 상한)과 spool 크기를
+  client가 매 적재 INFO 로그로 남긴다. 배포 뒤 8개 asset의 첫 실측을 journal에 남기고, 그때 이 ADR을 accepted로 올린다.
 - jsonb seal 천장(등산로 5.7만 건, 256 MB)은 seal 계산의 문제이고 이 경로를 쓰지 않는다 — 쪼개기로 풀리지도 않는다.
 
-다시 볼 조건: 이 경로의 쓰기 단계가 실측으로 900초에 가까워지면(dataset이 수만 건으로 커지면) ADR-108식 재개형 chunk로
-옮긴다. 그때까지는 가장 단순한 모양을 둔다.
+실측(n150 일회용 PostGIS, 2026-10-22, 축제 bundle 3,000건, 100건 batch, Dagster와 같은 엔진 설정): **첫 적재(전부
+insert) 32.4건/초, 같은 snapshot 재적재(변경 없음) 140건/초.** 주차장 1.9만 건으로 옮기면 쓰기 단계는 첫 적재 약 580초,
+정상 주기 재적재(대부분 변경 없음) 약 135초다. 첫 적재는 dataset마다 한 번(주차장은 prod에서 아직 성공한 적이 없어 다음
+run이 그것이다)이고, 그 한 번도 종전 2.5시간+보다 짧고 900초 대기 상한 안이다. 나머지는 공항 15·휴양림 182·해수욕장 275·특화거리 403·관광지
+897·박물관 1,076건(`docs/etl/upstream-quota.md`·prod 실측)이라 첫 적재도 1분 안쪽이다(수목원 SHP 건수는 미측정 — 로그로 본다).
 
-### 4. 큐 경로
+다시 볼 조건: **재적재**(첫 적재가 아닌) 쓰기 단계 로그가 **300초**를 넘으면(1안 대기 상한 900초의 1/3 — 적재 셋이 줄을
+서면 셋째가 상한에 닿는다) ADR-108식 재개형 chunk나 쓰기 재시도(결정 6)를 다시 연다. 그때까지는 가장 단순한 모양을 둔다.
 
-`_bind_client_to_session`이 만든 client도 같은 메서드를 부르므로 받기 동안 fence를 쥐지 않는다. 다만 executor의 scope
-transaction(heartbeat·요청 행 갱신)은 runner 호출 전체를 덮고 있으므로 **열린 transaction 자체**는 종전처럼 받기 동안에도
-열려 있다 — 그 transaction이 쥔 것은 요청·job 행 잠금과 rate gate이고 전역 fence는 아니다. 그 transaction을 쪼개는 것은
-executor의 원자성(scope 결과와 적재를 한 commit에) 설계를 바꾸는 일이라 이 ADR 범위가 아니다.
+### 4. 큐 경로 — fence는 고쳐지고, `idle in transaction`은 남는다
+
+`_bind_client_to_session`이 만든 client도 같은 메서드를 부르므로 받기 동안 fence를 쥐지 않는다. 그러나 executor의 scope
+transaction은 runner 호출 전체를 덮으므로(`_execute_feature_update_request_locked`) 받기 동안에도 `idle in transaction`으로
+열려 있다. 그 transaction은 `_guard_execution_phase`·`_heartbeat_request_job`이 갱신한 요청·job 행을 잠근 채라 그 요청의
+취소·종결 writer를 막고, 그 heartbeat는 commit 전이라 다른 연결에는 낡아 보이고, vacuum xmin을 붙든다. 이것은 종전부터의
+성질이고 전역 fence와 달리 **그 요청 하나**에 국한된다. 고치려면 받기를 `session.begin()` 앞으로 옮겨야 하는데, 그것은
+executor의 원자성(scope 결과와 적재를 한 commit에) 설계를 바꾸는 일이라 이 ADR 범위가 아니다 — 후속 항목으로 남긴다
+(`docs/tasks.md` T-LOAD-LOCK-WAIT 아래 기록). 따라서 "`idle in transaction`인 fence 보유가 없어진다"는 두 경로 모두 참이고,
+"`idle in transaction` 자체가 없어진다"는 Dagster asset 경로에서만 참이다.
+
+### 5. 같은 dataset이 동시에 돌면 둘 다 받는다 — 받아들인다
+
+종전에는 fence가 우연히 같은 dataset의 두 실행을 직렬화했다(둘째가 첫 batch에서 막혀 싸게 실패). 이제 둘 다 끝까지
+받고(upstream 쿼터와 역지오코딩 두 배) 쓰기만 차례로 한다. 결과는 맞다 — 늦게 쓰는 쪽의 관측이 더 오래된 경우에도 head는
+뒤로 가지 않는다(`feature_repo` head 갱신의 `WHERE` 가드). 겹침 자체는 드물다: 예약·수동 run은 `GEO_HEAVY_POOL`(1)이 묶고,
+큐 경로의 이 8개는 사람이 `provider_dataset` scope로 넣는 일회성이다. 막으려면 `provider_run_lock`을 두 경로에 거는 것이
+자연스럽지만(고속도로 돌발이 선례), 그것은 새 잠금·새 실패 모양(둘째가 30초 뒤 55P03)을 들이는 별도 결정이라 하지 않는다.
+쿼터 소진이나 geo 과부하로 실제 겹침이 관측되면 그때 건다.
+
+### 6. 쓰기 단계의 fence 대기 실패를 그 자리에서 다시 하지 않는다
+
+1안의 900초 대기가 실패하면 이제 긴 받기 **뒤에** 실패하고, retry policy가 받기부터 다시 한다. spool은 다시 읽을 수
+있으므로 쓰기만 다시 하는 것이 가능하지만 하지 않는다 — fence 보유가 쓰기 시간(분 단위)으로 줄어 900초 대기가 실패하려면
+큰 적재 여럿이 연달아 줄을 서야 한다. 결정 3의 300초 조건과 함께 다시 본다.
 
 ## 결과
 
 - 스트리밍 snapshot 8개 asset의 fence 보유가 "fetch + 지오코딩 + 쓰기"(실측 2.5시간+)에서 "쓰기"로 준다. `idle in
-  transaction`인 fence 보유가 없어진다.
+  transaction`인 fence 보유가 없어진다(큐 경로의 executor transaction은 결정 4).
 - 실패한 받기는 DB에 아무것도 남기지 않고 transaction도 열지 않는다.
 - migration 없음, OpenAPI·PinVi 계약 변경 없음, 설정 추가 없음. 배포는 Map Dagster code location 재배포.
+- 기대 fence 보유: 주차장 첫 적재 약 10분, 재적재 약 2~3분(일회용 실측의 환산 — prod 디스크 대기로 더 길 수 있다, 로그로 잰다),
+  나머지는 1분 안쪽. 종전 실측 9,141초+.
 - 검사: 통합 — 느린 stream이 받기 중에 멈춰 있는 동안 다른 연결이 fence를 몇 초 안에 잡는다, 그 연결이 fence를 쥐는 동안
   쓰기는 기다린다, 적재 결과·seal은 commit된 image의 seal과 같다, 큐 경로 결합 client도 같다. 단위 — stream이 끝나기 전에
   transaction이 열리지 않는다.
@@ -106,3 +135,12 @@ executor의 원자성(scope 결과와 적재를 한 commit에) 설계를 바꾸�
 ### 되돌릴 때
 
 코드만 되돌리면 된다(스키마·데이터 변경 없음).
+
+## 설계 리뷰 반영(2026-10-22, 적대 리뷰 1회)
+
+- H1(쓰기 단계가 900초를 넘을 수 있다, 근거 없는 비교): 결정 3을 실측·로그·300초 재검토 조건으로 바꿨다.
+- H2(`provider_run_lock` 행이 사실과 다름): 표를 고치고 동시 실행의 비용을 결정 5로 명시했다(잠금은 걸지 않는다).
+- M1(늦은 실패): 결정 6 — 쓰기 재시도는 하지 않고 재검토 조건에 묶었다.
+- M2(큐 경로 `idle in transaction`): 결정 4를 고쳐 남는 것을 적었다.
+- M3(geo 토큰은 스탬프만이 아니라 stale 재정렬도): 결정 2 문구와 단위 검사.
+- L1 etl 주석 갱신, L2 빈 stream도 seal(단위 검사), L4 spool 크기 로그, L5 absent-row 문구.

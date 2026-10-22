@@ -1,3 +1,20 @@
+## 2026-10-22 — T-LOAD-LOCK-WAIT 2안(ADR-113): 스트리밍 snapshot은 다 받은 뒤 짧게 쓴다: 브랜치 `fix/short-curation-lock-hold`
+
+- 원인(1안 PR 실측): `load_feature_bundle_batches`가 transaction을 먼저 열고 stream을 당겨, 첫 batch가 잡은
+  `feature-curation-write`를 나머지 fetch·역지오코딩 내내 쥐었다(주차장 run `71f21b6a` 9,141초+, 대부분 `idle in transaction`).
+- 수정: stream을 DB session 없이 끝까지 받아 pickle spool(임시 파일, 메모리는 batch 하나)에 쌓고, 그 뒤 쓰기 transaction
+  하나로 같은 batch·같은 순서로 쓰고 같은 transaction에서 seal을 읽는다. 받기 실패는 transaction을 열지 않는다. client 한
+  곳이라 Dagster asset 8개와 큐 경로가 함께 고쳐진다. 쓰기 시간·spool 크기는 INFO 로그.
+- 설계 리뷰(적대 1회): H1 쓰기 단계 근거 → 실측·로그·재적재 300초 재검토 조건, H2 `provider_run_lock` 표 오류 → 고치고
+  같은 dataset 동시 실행 비용을 결정 5로 받아들임, M1 쓰기 재시도 안 함(결정 6), M2 큐 경로 executor transaction은 받는
+  동안 `idle in transaction`으로 남음(결정 4·tasks 기록), M3 geo 토큰은 run 전체 관측으로 판정(단위 검사).
+- 실측(n150 일회용 PostGIS, 축제 3,000건): 첫 적재 32.4건/초, 재적재 140건/초 → 주차장 1.9만 건 쓰기 약 580초(첫 적재)·
+  약 135초(재적재). 그 밖 7개 dataset은 1분 안쪽.
+- 검사(n150 일회용 컨테이너): 단위 5(사건 순서·실패 시 transaction 없음·빈 stream seal·geo 토큰·spool), 통합 2(받기가 멈춘
+  동안 다른 연결이 fence를 2초 안에 잡고 그 연결이 쥐는 동안 쓰기는 기다림·seal = commit된 image seal, 큐 결합 client).
+  변이(stream을 transaction 안으로 되돌림): 관련 5건 전부 빨강(통합은 다른 writer 55P03 → 대기 timeout, 큐는 fence 보유).
+- 문서 한도: acceptance §T-GR-04를 도구로 아카이브(체크박스 53건 보존, 214,915 → 205,558 bytes).
+
 ## 2026-10-22 — T-LOAD-LOCK-WAIT 1안: 적재가 fence를 길게 기다린다: 브랜치 `fix/load-curation-lock-wait`
 
 - 증상: n150에서 동시 적재 다섯(seoul_bookstores·krforest_arboretums·standard_tourist_attractions·krforest_dulle_trails·

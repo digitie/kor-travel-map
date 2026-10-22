@@ -10,6 +10,17 @@
 
 ## [Unreleased]
 
+### 스트리밍 snapshot은 다 받은 뒤 짧게 쓴다 (2026-10-22, ADR-113, T-LOAD-LOCK-WAIT 2안)
+
+- **CHANGED (Python API)**: `AsyncKorTravelMapClient.load_feature_bundle_batches`는 batch stream을 DB session 없이 끝까지
+  받아 임시 파일(pickle spool)에 쌓은 **뒤** 쓰기 transaction 하나를 열어 같은 batch를 같은 순서로 쓰고, 같은 transaction
+  끝에서 curation seal을 읽는다. 전역 `feature-curation-write` fence는 쓰기 단계에만 쥔다 — 종전에는 upstream fetch·역지오코딩
+  내내 쥐었다(prod 주차장 2.5시간+). 대상: krforest 휴양림·수목원, 표준데이터 박물관·관광지·주차장·특화거리, khoa 해수욕장,
+  transport 공항(Dagster·큐 두 경로). stream이 실패하면 transaction을 열지 않는다. 쓰기 시간·spool 크기를 INFO 로그로 남긴다.
+- **CHANGED (geo 스탬프)**: 이 경로의 geo 관측 토큰은 받기가 끝난 뒤의 run 전체 관측으로 판정한다 — 데이터셋 전환을
+  가로지른 run은 어느 batch도 stale 재정렬·스탬프를 하지 않는다(ADR-109 방향으로 더 엄격).
+- migration·OpenAPI·설정 변화 없음(PinVi 재vendor 불필요).
+
 ### provider 적재의 fence 대기 상한 (2026-10-22, T-LOAD-LOCK-WAIT)
 
 - **CHANGED (Python API)**: `AsyncKorTravelMapClient`의 provider 적재 메서드(`load_feature_bundles`·`_reobserving`·
