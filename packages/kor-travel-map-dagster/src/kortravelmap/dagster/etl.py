@@ -624,7 +624,9 @@ async def load_feature_bundle_batches_for_dagster(
 
     변환된 bundle은 현재 batch만 보유한다. validation summary와 durable finding,
     경량 feature id만 누적하고, ``load_all``은 모든 batch를 동일 session/transaction에
-    흘려 넣어 authoritative curation seal과 같은 DB image를 보게 한다.
+    흘려 넣어 authoritative curation seal과 같은 DB image를 보게 한다. client는 이 stream을
+    쓰기 transaction **전에** 끝까지 받아 둔다(ADR-113) — 아래 가드가 던지면 transaction은
+    열리지도 않는다.
     """
 
     mode = _normalize_address_validation_mode(strict_address)
@@ -725,10 +727,11 @@ async def load_feature_bundle_batches_for_dagster(
                 if findings:
                     pickle.dump(tuple(findings), finding_spool)
                 yield batch
-            # batch를 다 흘린 **뒤**, 그러나 loader가 commit하기 **전**이다. 여기서
-            # 던져야 transaction이 열린 채로 되감긴다 — `load_all`이 돌아온 뒤에
-            # 세면 이미 commit된 소실을 뒤늦게 신고하는 꼴이 된다.
-            # run 빈 답 가드(ADR-109 결정 4) — 같은 자리(전부 흘린 뒤, commit 전)에서 본다.
+            # batch를 다 흘린 **뒤**, 그러나 loader가 쓰기 transaction을 열기 **전**이다
+            # (client가 stream을 먼저 다 받는다, ADR-113). 여기서 던지면 아무것도 쓰지
+            # 않는다 — `load_all`이 돌아온 뒤에 세면 이미 commit된 소실을 뒤늦게 신고하는
+            # 꼴이 된다.
+            # run 빈 답 가드(ADR-109 결정 4) — 같은 자리(전부 흘린 뒤, 쓰기 전)에서 본다.
             _raise_if_empty_answers_exceeded(geo_applied, geo_stats, dataset_key=dataset_key)
             if _dataset_was_lost(
                 dropped=dropped_feature_count, observed=validation.total

@@ -1,3 +1,10 @@
+## 2026-10-22 — T-LOAD-LOCK-WAIT 2안(ADR-113): 브랜치 `fix/short-curation-lock-hold`
+
+- 스트리밍 snapshot 적재(8개 asset·큐 경로)는 stream을 다 받은 뒤 쓰기 transaction을 연다 — fence 보유가 fetch·지오코딩
+  시간(2.5시간+)에서 쓰기 시간(주차장 첫 적재 약 10분·재적재 약 2~3분 추정)으로 준다. migration·OpenAPI·설정 변화 없음
+  (PinVi 재vendor 불필요). 배포 영향: Map Dagster code location 재배포.
+- **다음 한 작업: PR CI green → 소유자 머지·배포 판단 → 배포 뒤 8개 asset 쓰기 시간 로그를 journal에 남기고 ADR-113 accepted.**
+
 ## 2026-10-22 — T-LOAD-LOCK-WAIT 1안: 브랜치 `fix/load-curation-lock-wait`
 
 - provider 적재의 첫 `feature-curation-write` 획득만 900초까지 기다린다(env `KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS`).
