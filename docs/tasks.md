@@ -42,6 +42,13 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 §11.2 4a) 전**이었으나 플립이 먼저 일어나 이제 **가능한 한 빨리**다(acceptance §T-MAP-02 2026-10-15 소유자 결정 — 머지 뒤 첫 prod 배포).
 
 
+- [ ] **prod Map/PinVi outage — pinned-rebuild journal이 pinset `3705983b`에서 영구 고착** — **보류**(소유자 지시 2026-09-20, weather/concierge/geo/pinvi/map DB 통합을 먼저 진행)
+
+  회전·rebuild는 돌았으나 compose-up 단계 반복 실패로 prod의 map-api/ui/dagster·
+  pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
+  정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
+  요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
+
 **weather·transport 메모리 상태(ADR-114, proposed)** — 이행 순서 3을 transport(1단계)·weather(2단계)로 나눴다. 키·교체·REST 설계 정본은 ADR-114 "구현 설계 — 1단계", 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-STATE-01 — **transport 현재 상태 Valkey 적재·service REST(1단계)**
@@ -93,13 +100,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 - [ ] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감**
 
   drain·호환 검사·flag 전환·롤백 훈련 후 실제 운영 generation 증거로 닫는다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] **prod Map/PinVi outage — pinned-rebuild journal이 pinset `3705983b`에서 영구 고착** — **보류**(소유자 지시 2026-09-20, weather/concierge/geo/pinvi/map DB 통합을 먼저 진행)
-
-  회전·rebuild는 돌았으나 compose-up 단계 반복 실패로 prod의 map-api/ui/dagster·
-  pinvi-api/web/dagster가 전부 내려가 있다(DB는 안전, `312_route_geometry_sidecar`로
-  정확히 재생성됨). 원인·해제 조건은 `docs/resume.md` 2026-09-20 (2) 항목 참조 —
-  요약: PinVi에 실제 커밋 하나 → 새 pinset → `chain17.sh` 재실행.
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 
