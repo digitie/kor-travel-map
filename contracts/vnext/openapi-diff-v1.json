@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "acd3f0b11121f7bd057027203e73ebedd172311e280731cad9feb71c0c9d4814"
+      "sha256": "996e7c9e5ef385f160b1a06836430c3f27d1222122b12b60ded9a9bbb5089bd3"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "6677d41f572fe53b24269fc7d0a1f6a216ee774ce6744be0590959d8f8f2ddfb"
+      "sha256": "14f56255a863d20ea9fc18cc44ea026fe31067ac5b7ffb18717768e61ca11a45"
     }
   },
   "revisions": [
@@ -186,6 +186,11 @@
       "date": "2026-08-07",
       "task": "T-VN-33",
       "change": "baseline sha256 재고정(admin/user). 실행 membership identity가 provider_dataset_id+sync_scope+operation_key triple이 되면서(ADR-088) OpsDatasetProviderDataset에 operation_key가 추가되고 sync_scope가 non-null이 됐다. 공개 /v1/providers/{provider}/last-sync의 SyncStateSummary에도 operation_key를 노출하고 동명 query 필터를 더했다 — 없으면 operation만 다른 두 state가 같은 항목으로 보인다. service spec은 무변경."
+    },
+    {
+      "date": "2026-10-23",
+      "task": "T-STATE-01",
+      "change": "baseline sha256 재고정(service·admin). ADR-114 1단계 `/v1/service/transport/*` 10 operation을 추가했다(기존 경로·스키마 불변, user spec 무변경). full/admin spec도 같은 operation이 더해져 PinVi admin 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -364,7 +369,7 @@
     },
     "service": {
       "counts": {
-        "added": 3,
+        "added": 13,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 1,
@@ -393,6 +398,76 @@
           "target_operation": "GET /v1/service/curation-cutover/identity-mappings",
           "detail": "maintenance fence 중 legacy curated identity→canonical collection/item UUID mapping의 immutable keyset/checksum export다.",
           "basis": "T-VN-40C",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/fuel-stations",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/fuel-stations/{feature_id}",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/fuel-stations/{feature_id}/price-history",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/rest-areas",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/rest-areas/{feature_id}",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/highway-incidents",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/highway-incidents/{feature_id}",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/airports",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/airports/{feature_id}",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/transport/status",
+          "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
           "applied": true
         }
       ],

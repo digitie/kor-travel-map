@@ -29549,6 +29549,18 @@
             "title": "Dataset",
             "type": "string"
           },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 데이터셋만 읽지 못했을 때 이유(나머지는 그대로 보인다).",
+            "title": "Error"
+          },
           "freshness": {
             "anyOf": [
               {
@@ -50937,8 +50949,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -50994,8 +51006,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51030,8 +51042,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51249,8 +51261,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51306,8 +51318,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51342,8 +51354,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51713,8 +51725,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51770,8 +51782,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -51806,8 +51818,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -52025,8 +52037,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -52082,8 +52094,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
@@ -52118,8 +52130,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "maximum": 90,
-                  "minimum": -90,
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
                   "type": "number"
                 },
                 {
