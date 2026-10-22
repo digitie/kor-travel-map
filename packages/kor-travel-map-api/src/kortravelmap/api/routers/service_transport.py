@@ -378,11 +378,11 @@ def _decode_cursor(cursor: str) -> tuple[str, str]:
         generation, after = base64.urlsafe_b64decode(padded.encode("ascii")).decode().split("|", 1)
     except (ValueError, binascii.Error, UnicodeError) as exc:
         raise _problem(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "cursor가 올바르지 않다."
+            422, "VALIDATION_ERROR", "cursor가 올바르지 않다."
         ) from exc
     if not generation or not after:
         raise _problem(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", "cursor가 올바르지 않다."
+            422, "VALIDATION_ERROR", "cursor가 올바르지 않다."
         )
     return generation, after
 

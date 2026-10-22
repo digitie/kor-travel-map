@@ -23,19 +23,20 @@ Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 �
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import secrets
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Final, cast
+from typing import Any, Final, TypeVar, cast
 
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import RedisError, ResponseError
+from redis.exceptions import OutOfMemoryError, RedisError, ResponseError
 
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -89,6 +90,19 @@ GEO_LAT_LIMIT: Final[float] = 85.05112878
 """Valkey GEO가 받는 위도 절댓값 상한. 넘는 좌표는 GEO에 넣지 않는다(값에는 남는다)."""
 
 _GEN_KEY_NAMES: Final[tuple[str, ...]] = ("meta", "items", "ids", "geo", "lookup")
+
+
+_T = TypeVar("_T")
+
+
+async def _resolve(value: Awaitable[_T] | _T) -> _T:
+    """redis-py 일부 명령은 sync·async 겸용 타입(``Awaitable[T] | T``)으로 선언돼 있다.
+
+    async client에서는 언제나 awaitable이지만 타입이 그것을 말하지 않아 ``await``를 거부한다.
+    """
+    if inspect.isawaitable(value):
+        return cast("_T", await value)
+    return value
 
 
 # -- 오류 ----------------------------------------------------------------------
@@ -365,7 +379,8 @@ async def _unavailable_on_error(what: str) -> AsyncIterator[None]:
     try:
         yield
     except ResponseError as exc:
-        if str(exc).startswith("OOM"):
+        # redis-py는 "OOM …" 응답을 OutOfMemoryError로 올리며 접두사를 떼어 낸다.
+        if isinstance(exc, OutOfMemoryError) or str(exc).startswith("OOM"):
             raise StateStoreOutOfMemory(
                 f"Valkey {what} 실패: maxmemory 도달(noeviction 쓰기 거부)"
             ) from exc
@@ -399,7 +414,7 @@ class ValkeyStateStore:
     async def ping(self) -> None:
         """연결·인증 확인. 실패하면 :class:`StateStoreUnavailable`."""
         async with _unavailable_on_error("ping"):
-            await self._client.ping()
+            await _resolve(self._client.ping())
 
     # -- 읽기 ------------------------------------------------------------------
 
@@ -416,7 +431,7 @@ class ValkeyStateStore:
         async with _unavailable_on_error("메타 읽기"):
             raw = cast(
                 "dict[Any, Any]",
-                await self._client.hgetall(state_key(dataset, generation, "meta")),
+                await _resolve(self._client.hgetall(state_key(dataset, generation, "meta"))),
             )
         if not raw:
             raise StateGenerationExpired(f"{dataset} 세대 {generation}가 없다.")
@@ -458,7 +473,9 @@ class ValkeyStateStore:
         async with _unavailable_on_error("값 읽기"):
             return cast(
                 "list[bytes | None]",
-                await self._client.hmget(state_key(dataset, generation, "items"), list(ids)),
+                await _resolve(
+                    self._client.hmget(state_key(dataset, generation, "items"), list(ids))
+                ),
             )
 
     async def page_ids(
@@ -542,7 +559,9 @@ class ValkeyStateStore:
         async with _unavailable_on_error("보조 키 읽기"):
             raw = cast(
                 "list[bytes | None]",
-                await self._client.hmget(state_key(dataset, generation, "lookup"), list(keys)),
+                await _resolve(
+                    self._client.hmget(state_key(dataset, generation, "lookup"), list(keys))
+                ),
             )
         return [_text(value) if value is not None else None for value in raw]
 
@@ -550,7 +569,7 @@ class ValkeyStateStore:
         async with _unavailable_on_error("최근 개수 읽기"):
             raw = cast(
                 "list[bytes]",
-                await self._client.lrange(state_key(dataset, "recent_counts"), 0, -1),
+                await _resolve(self._client.lrange(state_key(dataset, "recent_counts"), 0, -1)),
             )
         try:
             return [int(_text(value)) for value in raw]
@@ -572,7 +591,7 @@ class ValkeyStateStore:
             if acquired:
                 try:
                     async with _unavailable_on_error("잠금 해제"):
-                        await self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token)
+                        await _resolve(self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token))
                 except StateStoreError:
                     _LOGGER.warning("%s 적재 잠금을 풀지 못했다 — TTL로 풀린다.", dataset)
 
@@ -669,14 +688,16 @@ class ValkeyStateStore:
         async with _unavailable_on_error("포인터 교체"):
             outcome = cast(
                 "list[Any]",
-                await self._client.eval(
-                    _FLIP_SCRIPT,
-                    len(flip_keys),
-                    *flip_keys,
-                    previous_generation or "",
-                    generation,
-                    self._grace,
-                    RECENT_COUNTS_WINDOW,
+                await _resolve(
+                    self._client.eval(
+                        _FLIP_SCRIPT,
+                        len(flip_keys),
+                        *flip_keys,
+                        previous_generation or "",
+                        generation,
+                        self._grace,
+                        RECENT_COUNTS_WINDOW,
+                    )
                 ),
             )
         status = int(outcome[0])
