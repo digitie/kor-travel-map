@@ -54,7 +54,7 @@
 - 지속성: RDB 스냅샷과 AOF(`everysec`). 재시작하면 디스크에서 복원한다. 백업 대상은 아니다 — 원천(weather·transport)에서
   다시 받을 수 있다.
 - 키는 값마다가 아니라 묶음 단위로 둔다(예: 지점×provider 하나에 예보 배열 하나, 주유소 하나에 위치+최신 유가). 근처
-  검색은 Valkey GEO 인덱스로 한다. 세부 키 설계는 구현 PR에서 정하고 이 문서에 적는다.
+  검색은 Valkey GEO 인덱스로 한다. 세부 키 설계는 아래 "구현 설계 — 1단계" D2가 정본이다.
 
 ### 3. 쓰기 — Map Dagster 적재 job
 
@@ -113,8 +113,116 @@
 4. PinVi: Map REST로 전환, odroid weather 직접 호출 제거
 5. Map: 기존 PG transport feature 퇴역
 
+## 구현 설계 — 1단계: transport (2026-10-23, 이행 순서 3의 transport 부분)
+
+weather는 weather 저장소의 Map용 API가 생긴 뒤 2단계로 같은 틀에 얹는다. 1단계는 Map이 **지금 이미 쓰는**
+transport export(`/v1/service/exports/{fuel-stations,rest-areas,rest-area-fuel-prices,highway-incidents/active,
+airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
+
+### D1. 데이터셋과 식별자
+
+| 데이터셋(`{ds}`) | 원천 export | 값 하나 | GEO | 교체 거부 기준(아래 D4) |
+| --- | --- | --- | --- | --- |
+| `transport.fuel_stations` | fuel-stations | 주유소 1곳 + 유종별 최신가 | 좌표 있는 것 | 0건, 직전의 90% 미만(직전 100곳 이상일 때) |
+| `transport.rest_areas` | rest-areas | 휴게소 1곳 | 좌표 있는 것 | 0건, 직전의 90% 미만(직전 20곳 이상) |
+| `transport.rest_area_fuel_prices` | rest-area-fuel-prices | 휴게소 주유소 1곳의 최신가 | 없음(휴게소에 붙여 읽는다) | 0건, 직전의 80% 미만(직전 20곳 이상) |
+| `transport.highway_incidents` | highway-incidents/active | 활성 돌발 1건 | 좌표 있는 것 | 직전 20건 이상인데 0건이거나 직전의 25% 미만 |
+| `transport.airports` | airports | 공항 1곳 | 좌표 있는 것 | 0건, 직전의 80% 미만(직전 5곳 이상) |
+
+- `feature_id`는 PG 변환과 **같은 입력**으로 `make_feature_id`를 부르되 `bjd_code=None`(`f_global_…`)으로 고정한다.
+  kind·category·`source_type`(`kor-travel-transport:{dataset_key}`)·자연키는 `providers/opinet.py`·`krex.py`·
+  `krairport.py`와 같다. 돌발·유가 feature는 PG에서도 이미 `bjd_code=None`이라 legacy id가 같다. 주유소·휴게소·
+  공항 place는 PG가 역지오코딩한 bjd를 id에 넣지만, 여기서는 넣지 않는다 — 결정 6의 VWorld 블록이 export에 실려도
+  id가 바뀌지 않게 하려는 것이다(bjd는 값 안의 주소 속성으로만 둔다). 1단계는 geo를 부르지 않으므로 bjd는 비어
+  있다. PG feature는 rev 309 이후 UUID가 정본이라 어차피 같은 문자열이 아니다 — PinVi는 이 표면의 id를 별도
+  네임스페이스로 다룬다.
+- 휴게소 유가는 휴게소에 `name::route::direction` 정규화 키(`krex._fuel_price_match_key`와 PG의 휴게소 자연키
+  규칙)로 **읽을 때** 붙인다. 두 export의 세대는 따로 돈다(유가 export가 죽어도 휴게소 위치는 갱신된다).
+
+### D2. 키
+
+접두사 `ktm:state:v1:`(값 스키마 버전 포함 — 값 모양이 바뀌면 `v2` 키를 새로 쓰고 옛 키는 아래 TTL로 사라진다).
+
+| 키 | 형 | 내용 |
+| --- | --- | --- |
+| `ktm:state:v1:{ds}:current` | STRING | 지금 읽을 세대 id. 만료 없음. 세대를 바꾸는 유일한 자리 |
+| `ktm:state:v1:{ds}:{gen}:meta` | HASH | `count`·`geo_count`·`source_collected_at`·`loaded_at`·`run_id`·`guard_override` |
+| `ktm:state:v1:{ds}:{gen}:items` | HASH | `feature_id` → 값 JSON(엔티티 하나 = 필드 하나, "묶음 단위") |
+| `ktm:state:v1:{ds}:{gen}:ids` | ZSET(score 0) | `feature_id` 사전순 — 목록 keyset 페이지(`ZRANGE … BYLEX`) |
+| `ktm:state:v1:{ds}:{gen}:geo` | GEO | 좌표 있는 `feature_id` — 근처·bbox 검색 |
+| `ktm:state:v1:{ds}:{gen}:lookup` | HASH | 보조 키 → `feature_id`(휴게소 유가 매칭 키) |
+
+- `{gen}` = `YYYYMMDDTHHMMSSZ-{run id 앞 8자 또는 난수 8 hex}`. 세대 키는 쓰고 나면 바꾸지 않는다(불변).
+- 값은 Pydantic 모델(`kortravelmap.dto.transport_state`)의 JSON이고 REST 응답이 같은 모델을 쓴다(정본 하나).
+
+### D3. 쓰기 — 세대 교체 순서
+
+1. `current`와 그 세대의 `meta.count`를 읽는다(직전 세대).
+2. 원천을 끝까지 받는다(기존 fetcher 그대로 — 수집 이력 없음·실패·stale·계약 위반·0건 페이지 export는 여기서
+   실패하고 Valkey에는 아무것도 쓰지 않는다).
+3. 교체 거부 검사(D4). 거부면 쓰지 않고 실패한다.
+4. 새 세대 키를 pipeline으로 나눠 쓴다. **쓰는 동안 새 키마다 build TTL(기본 2시간)을 건다** — 적재가 도중에
+   죽으면 아무도 가리키지 않는 키가 TTL로 사라진다(`noeviction`이라 스스로 지워야 한다).
+5. 쓴 개수를 다시 센다(`HLEN`·`ZCARD`). 기대와 다르면 교체하지 않고 실패한다.
+6. Lua 스크립트 하나로 원자 교체: `current`가 1의 값과 같을 때만(compare-and-set) 새 키의 TTL을 지우고(`PERSIST`)
+   `current`를 새 세대로 바꾸고, 직전 세대 키에 grace TTL(기본 15분)을 건다. `current`가 그 사이 바뀌었으면(동시
+   적재) 아무것도 바꾸지 않고 실패한다. 새 세대의 `meta`가 이미 없으면(build TTL 초과) 역시 실패한다.
+
+읽는 쪽은 `current` → 그 세대 키 순서로 읽는다. 교체 전에는 옛 세대, 교체 후에는 새 세대 전체가 보이며 섞인
+상태는 없다. 옛 세대는 grace 동안 살아 있어 진행 중인 페이지 순회가 같은 세대로 끝난다.
+
+### D4. 비정상 집합 거부
+
+- 직전 세대가 기준 크기 이상이고 새 집합이 0건이거나 직전×비율 미만이면 교체하지 않고 run을 실패시킨다
+  (`failure_kind=state_swap_refused`, step 재시도 없음 — 다음 schedule tick이 다시 본다). 기준은 D1 표.
+- 돌발만 "0건"이 정상일 수 있다: 직전이 기준(20건) 미만이면 0건도 받아들인다.
+- 진짜로 줄었으면 운영자가 run config `allow_shrink: true`로 한 번 통과시킨다(`meta.guard_override=true`로 남는다).
+- 거부가 이어지면 옛 세대가 남고 나이가 늘어난다 — 읽기 응답의 `stale`이 그것을 드러낸다(D5).
+
+### D5. 신선도
+
+- `meta.source_collected_at` = 원천 수집 시각(페이지 export는 페이지들의 `collection.last_success_at` 중 가장 이른
+  값, 돌발은 집합의 `collected_at`, 공항은 원천 수집 시각이 없어 비어 있다). `meta.loaded_at` = Map 교체 시각.
+- 응답마다 `freshness{dataset, generation, source_collected_at, loaded_at, age_seconds, max_age_seconds, stale,
+  item_count}`를 싣는다. `age`는 `source_collected_at`(없으면 `loaded_at`) 기준이다. 상한: 주유소·휴게소 유가
+  48시간, 돌발 30분(`INCIDENT_SET_MAX_AGE`와 같다), 휴게소·공항 8일.
+- 응답은 stale이어도 값을 준다(판단은 소비자). 다만 돌발은 소비자가 `stale=true`면 표시하지 않는 것을 권한다.
+
+### D6. 읽기 — Map REST(service 표면)
+
+`/v1/service/transport/…`, `X-Kor-Travel-Map-Service-Token`(기존 `require_service_token`). 목록은
+`fuel-stations`·`rest-areas`·`highway-incidents`·`airports` 넷이고 각각 `/{feature_id}` 상세가 있다. 그 밖에
+`fuel-stations/{feature_id}/price-history`와 `status`(데이터셋별 신선도 + Valkey 연결).
+
+- 목록: 조건 없으면 `feature_id` 사전순 keyset(`cursor`, `limit` ≤ 500). cursor에 세대가 들어 있어 순회 도중
+  교체돼도 같은 세대로 끝난다. 그 세대가 grace를 넘겨 사라졌으면 409 `TRANSPORT_STATE_GENERATION_EXPIRED`(처음부터
+  다시).
+- 근처: `lon`·`lat`·`radius_m`(≤ 50 km) → 가까운 순 `limit`건(`GEOSEARCH … BYRADIUS … ASC COUNT`). bbox:
+  `min_lon,min_lat,max_lon,max_lat` → 중심 기준 `BYBOX`로 뽑은 뒤 정확한 bbox로 다시 거른다. 둘 다 cursor 없이
+  `truncated`로 상한 도달을 알린다. 좌표 없는 돌발은 근처·bbox에 나오지 않는다(목록에는 나온다).
+- 휴게소 응답은 `fuel_prices`(매칭된 휴게소 유가, 없으면 null)와 그 데이터셋의 신선도를 함께 싣는다.
+- Valkey 미설정·연결 실패·timeout → 이 표면만 503 `TRANSPORT_STATE_UNAVAILABLE`. 아직 한 번도 적재되지 않은
+  데이터셋 → 503 `TRANSPORT_STATE_NOT_LOADED`. 다른 Map 기능과 `/ops/health-deep`은 Valkey를 보지 않는다.
+- 가격 추이: Valkey의 현재가와 함께 transport `GET /v1/service/exports/fuel-stations/{uni_id}/price-history`
+  (transport ADR-013 2026-10-23 추가)를 요청 시 그대로 전한다. 설정 플래그
+  `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`(기본 꺼짐)가 꺼졌거나, transport 주소·토큰이 없거나, transport가
+  404(옛 버전·fence)·5xx·timeout·계약 위반이면 200으로 현재가를 주고 `history.status=unavailable`과 이유를 싣는다.
+- Map **admin** OpenAPI(`openapi.json`)에는 모든 표면이 들어가므로 이 route가 추가되면 PinVi 재vendor가 필요하다.
+
+### D7. 운영 값
+
+- env: `KOR_TRAVEL_MAP_VALKEY_URL`(`redis://:password@host:port/0`, 비밀), `KOR_TRAVEL_MAP_VALKEY_CONNECT_TIMEOUT_SECONDS`
+  (기본 1), `KOR_TRAVEL_MAP_VALKEY_SOCKET_TIMEOUT_SECONDS`(기본 2), `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`,
+  `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_TIMEOUT_SECONDS`(기본 5). API는 가격 추이 때문에 transport 주소·토큰
+  (`KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_{BASE_URL,SERVICE_TOKEN}`)도 받아야 한다.
+- 클라이언트 라이브러리: `redis`(redis-py 7.x, `redis.asyncio`, `py.typed` 포함, MIT). Valkey는 RESP 호환이다.
+  `valkey`(valkey-py) 포크도 같은 타입 정보를 갖지만 유지 인력이 더 큰 쪽을 골랐다.
+- Dagster job 5개(`transport_state_*`)와 schedule 5개는 **기본 STOPPED**다. 켜는 법: Valkey가 배포된 뒤 Dagster UI의
+  Schedules에서 켜거나 `dagster schedule start transport_state_<ds>_schedule`. 첫 적재 전에는 REST가 503
+  `TRANSPORT_STATE_NOT_LOADED`다.
+
 ## 열린 결정
 
-- Valkey 키 설계와 GEO 인덱스 범위
-- weather에서 Map이 들고 있을 provider·항목의 범위
+- weather에서 Map이 들고 있을 provider·항목의 범위(2단계)
 - 기존 PG transport feature 퇴역 시점과 방법
+- 결정 6의 VWorld 블록이 export에 실릴 때 bjd를 값 주소에 넣는 일(id는 D1대로 바뀌지 않는다)
