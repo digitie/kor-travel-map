@@ -298,7 +298,8 @@ def _iso(value: datetime) -> str:
 
 
 def _text(value: Any) -> str:
-    return value.decode("utf-8") if isinstance(value, bytes) else str(value)
+    # 깨진 바이트도 예외 없이 문자열로 — 없는 세대 이름이 되어 정상 경로(409·503)로 떨어진다.
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
 
 
 def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> GenerationMeta:
@@ -306,6 +307,12 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
     try:
         source = fields.get("source_collected_at") or ""
         run_id = fields.get("run_id") or ""
+        loaded_at = datetime.fromisoformat(fields["loaded_at"])
+        source_at = datetime.fromisoformat(source) if source else None
+        if any(
+            value is not None and value.utcoffset() is None for value in (loaded_at, source_at)
+        ):
+            raise ValueError("timezone이 없는 시각")
         return GenerationMeta(
             dataset=dataset,
             generation=generation,
@@ -313,8 +320,8 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
             geo_count=int(fields["geo_count"]),
             lookup_count=int(fields["lookup_count"]),
             duplicates=int(fields.get("duplicates", "0")),
-            source_collected_at=datetime.fromisoformat(source) if source else None,
-            loaded_at=datetime.fromisoformat(fields["loaded_at"]),
+            source_collected_at=source_at,
+            loaded_at=loaded_at,
             run_id=run_id or None,
             guard_override=fields.get("guard_override") == "1",
         )
@@ -376,13 +383,19 @@ def make_valkey_client(settings: KorTravelMapSettings) -> Redis:
         raise StateStoreNotConfigured(
             "상태 저장소에는 KOR_TRAVEL_MAP_VALKEY_URL이 필요하다(ADR-114)."
         )
-    return Redis.from_url(
-        url,
-        socket_connect_timeout=settings.valkey_connect_timeout_seconds,
-        socket_timeout=settings.valkey_socket_timeout_seconds,
-        decode_responses=False,
-        retry=Retry(NoBackoff(), 0),
-    )
+    try:
+        return Redis.from_url(
+            url,
+            socket_connect_timeout=settings.valkey_connect_timeout_seconds,
+            socket_timeout=settings.valkey_socket_timeout_seconds,
+            decode_responses=False,
+            retry=Retry(NoBackoff(), 0),
+        )
+    except ValueError:
+        # 파서 메시지에 URL 조각(비밀번호 일부)이 실릴 수 있다 — 원 예외를 잇지 않는다.
+        raise StateStoreNotConfigured(
+            "KOR_TRAVEL_MAP_VALKEY_URL 형식이 올바르지 않다(redis://:password@host:port/db)."
+        ) from None
 
 
 @asynccontextmanager
@@ -796,8 +809,12 @@ class ValkeyStateStore:
                     await pipe.execute()
         return geo_count, len(lookup_seen)
 
-    async def retire_other_versions(self) -> int:
-        """다른 스키마 버전의 만료 없는 키에 grace TTL을 건다(D2). 건 개수를 돌려준다.
+    async def retire_other_versions(self, dataset: str) -> int:
+        """이 데이터셋의 **옛** 스키마 버전 만료 없는 키에 grace TTL을 건다(D2). 건 개수를 돌려준다.
+
+        데이터셋마다 자기 교체가 성공한 뒤에만 자기 옛 키를 거둔다 — 한 데이터셋의 첫 새 버전 교체가
+        아직 새 버전으로 적재되지 않은 다른 데이터셋의 옛 키까지 거두면 그 데이터셋이 다음 적재까지
+        비어 보인다.
 
         새 버전의 교체가 성공한 뒤에 부른다 — 옛 버전 ``current``와 교체된 세대는 만료가 없어 이
         정리가 없으면 ``noeviction`` 아래 영구히 남는다.
@@ -806,7 +823,8 @@ class ValkeyStateStore:
         assert own_version is not None  # STATE_KEY_PREFIX는 ktm:state:v{N} 꼴이다.
         retired = 0
         async with _unavailable_on_error("옛 버전 정리"):
-            async for raw in self._client.scan_iter(match=f"{STATE_KEY_NAMESPACE}:*", count=500):
+            pattern = f"{STATE_KEY_NAMESPACE}:v*:{dataset}:*"
+            async for raw in self._client.scan_iter(match=pattern, count=500):
                 key = _text(raw)
                 version = _key_version(key)
                 # 옛 버전만 거둔다 — 새 버전과 옛 버전이 잠시 함께 돌 때(롤링·롤백) 서로의 키를

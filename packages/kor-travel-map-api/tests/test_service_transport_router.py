@@ -84,6 +84,7 @@ def test_missing_valkey_url_is_503_for_this_surface_only(
         {"limit": 501},
         {"lon": 127.0, "lat": 89.0, "radius_m": 10},
         {"min_lon": 127.0, "min_lat": 37.0, "max_lon": 128.0, "max_lat": 86.0},
+        {"min_lon": 120.0, "min_lat": 30.0, "max_lon": 135.0, "max_lat": 45.0},
     ],
 )
 def test_query_shape_is_validated_before_touching_the_store(
@@ -230,3 +231,17 @@ async def test_price_history_flag_and_configuration_gate_the_call() -> None:
     assert (await _fetch(_never, blank)).reason == "not_configured"
     no_url = _ENABLED.model_copy(update={"kor_travel_transport_base_url": None})
     assert (await _fetch(_never, no_url)).reason == "not_configured"
+
+
+async def test_price_history_bad_configuration_and_path_keys_never_raise() -> None:
+    def _never(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("요청하면 안 된다")
+
+    bad_url = _ENABLED.model_copy(update={"kor_travel_transport_base_url": "http://[x"})
+    assert (await _fetch(_never, bad_url)).reason == "not_configured"
+    for key in ("..", ".", "a/b"):
+        outcome = await fetch_price_history(
+            _ENABLED, key, params={}, transport=httpx.MockTransport(_never)
+        )
+        assert outcome.reason == "upstream_contract", key
+

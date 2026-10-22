@@ -425,15 +425,20 @@ async def test_load_lock_admits_one_loader(store: ValkeyStateStore) -> None:
 
 
 async def test_other_schema_versions_are_retired(store: ValkeyStateStore) -> None:
-    await store.client.set("ktm:state:v0:transport.airports:current", "old")
-    await store.client.set("ktm:state:v2:transport.airports:current", "newer")
+    await store.client.set("ktm:state:v0:t.version:current", "old")
+    await store.client.set("ktm:state:v0:t.version:20250101T000000Z-aa:items", "old")
+    await store.client.set("ktm:state:v0:t.other:current", "old-other")
+    await store.client.set("ktm:state:v2:t.version:current", "newer")
     await store.client.set("unrelated:key", "keep")
     await _swap(store, "t.version", _items(1))
-    assert await store.retire_other_versions() == 1
-    assert 0 < await _ttl(store, "ktm:state:v0:transport.airports:current") <= 60
+    assert await store.retire_other_versions("t.version") == 2
+    assert 0 < await _ttl(store, "ktm:state:v0:t.version:current") <= 60
+    assert 0 < await _ttl(store, "ktm:state:v0:t.version:20250101T000000Z-aa:items") <= 60
+    # 다른 데이터셋의 옛 키는 그 데이터셋이 새 버전으로 교체될 때까지 둔다.
+    assert await _ttl(store, "ktm:state:v0:t.other:current") == -1
     assert await _ttl(store, "unrelated:key") == -1
     # 더 새 버전은 건드리지 않는다(롤링·롤백 중 서로 만료시키지 않게).
-    assert await _ttl(store, "ktm:state:v2:transport.airports:current") == -1
+    assert await _ttl(store, "ktm:state:v2:t.version:current") == -1
     assert await _ttl(store, state_key("t.version", "current")) == -1
 
 
@@ -825,3 +830,75 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     assert excinfo.value.allow_retries is False
     assert str(excinfo.value.metadata["failure_kind"].value) == "state_swap_refused"
     assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30
+
+
+async def test_rest_cursor_whose_generation_vanishes_mid_read_is_409(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``readable_meta`` 뒤·값 읽기 전에 grace가 끝나도 빈 "끝" 페이지가 아니라 409다."""
+    items = [to_state_item(highway_incident_state(_incident(i))) for i in range(3)]
+    await store.swap(
+        DATASET_HIGHWAY_INCIDENTS.name,
+        items,
+        guard=LENIENT,
+        source_collected_at=None,
+        loaded_at=datetime.now(UTC),
+    )
+    first = await api.get("/v1/service/transport/highway-incidents", params={"limit": 1})
+    cursor = first.json()["meta"]["page"]["next_cursor"]
+    original = store.page_ids
+
+    async def _page_then_expire(dataset: str, generation: str, **kwargs: Any) -> Any:
+        page = await original(dataset, generation, **kwargs)
+        await store.client.delete(
+            *(state_key(dataset, generation, name) for name in ("meta", "items", "ids", "geo"))
+        )
+        return page
+
+    monkeypatch.setattr(store, "page_ids", _page_then_expire)
+    gone = await api.get(
+        "/v1/service/transport/highway-incidents", params={"limit": 1, "cursor": cursor}
+    )
+    assert gone.status_code == 409, gone.text
+    assert gone.json()["code"] == "TRANSPORT_STATE_GENERATION_EXPIRED"
+
+
+async def test_one_broken_dataset_does_not_take_down_status_or_rest_areas(
+    store: ValkeyStateStore, api: httpx.AsyncClient
+) -> None:
+    area = rest_area_state(
+        TransportRestArea(
+            natural_key="행담도휴게소::서해안고속도로::목포방향",
+            name="행담도휴게소",
+            route_name="서해안고속도로",
+            direction="목포방향",
+            lon=126.8,
+            lat=36.9,
+            phone_number=None,
+            has_gas_station=True,
+            has_lpg_station=False,
+            has_ev_charger=True,
+            raw={},
+        )
+    )
+    await store.swap(
+        DATASET_REST_AREAS.name,
+        [to_state_item(area)],
+        guard=LENIENT,
+        source_collected_at=None,
+        loaded_at=datetime.now(UTC),
+    )
+    # 휴게소 유가 포인터가 없는 세대를 가리킨다(깨진 데이터셋).
+    await store.client.set(
+        state_key(DATASET_REST_AREA_FUEL_PRICES.name, "current"), "20260101T000000Z-dead"
+    )
+    areas = await api.get("/v1/service/transport/rest-areas")
+    assert areas.status_code == 200, areas.text
+    assert areas.json()["data"]["items"][0]["fuel_prices"] is None
+    status_body = (await api.get("/v1/service/transport/status")).json()["data"]
+    by_name = {d["dataset"]: d for d in status_body["datasets"]}
+    assert by_name[DATASET_REST_AREAS.name]["loaded"] is True
+    broken = by_name[DATASET_REST_AREA_FUEL_PRICES.name]
+    assert broken["loaded"] is False
+    assert broken["error"]
+

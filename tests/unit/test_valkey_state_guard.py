@@ -126,3 +126,18 @@ def test_client_does_not_retry_and_uses_the_configured_timeouts() -> None:
     for retry in (kwargs.get("retry"), client.get_retry()):
         assert retry is not None
         assert retry.get_retries() == 0
+
+
+def test_malformed_url_is_not_configured_and_does_not_echo_the_password() -> None:
+    from pydantic import SecretStr
+
+    settings = KorTravelMapSettings.model_construct(
+        valkey_url=SecretStr("redis://:se/cret@127.0.0.1:6379/0"),
+        valkey_connect_timeout_seconds=1.0,
+        valkey_socket_timeout_seconds=1.0,
+    )
+    with pytest.raises(StateStoreNotConfigured) as excinfo:
+        make_valkey_client(settings)
+    assert "cret" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+

@@ -9,7 +9,12 @@
 - 구현: `infra/valkey_state.py`·`dto/transport_state.py`·`providers/kor_travel_transport_state.py`·Dagster
   `transport_state.py`(job·schedule 5쌍, 기본 STOPPED)·API `routers/service_transport.py`·`transport_state_service.py`.
   의존성 `redis>=7,<8`(이미지 핀 7.4.1). transport fetcher에 `on_collected_at`. 기존 PG transport 적재는 그대로.
-- OpenAPI: service·admin 재생성(user 불변) — **PinVi admin 재vendor 필요**.
+- 코드 적대 리뷰 2회(ADR-114 "코드 리뷰" 절): 1차 HIGH 1(override 한 번으로 거부가 끝나지 않음)·MED 3·LOW 8, 2차 HIGH 0·
+  MED 4·LOW 9 — 하한 추정치 실측(배포 시 acceptance) 외 전부 반영.
+- OpenAPI: service·admin 재생성(user 불변), vnext `openapi-diff-v1`·`consumer-rollout-v1` receipt 재핀 — **PinVi admin·
+  service 재vendor 필요**.
+- 원장: acceptance §T-GR-05·T-GR-06을 도구로 아카이브(체크박스 100건 보존). `tasks.md`의 번호 없는 outage 보류 항목이
+  T-CWRITE-09 본문으로 세어져 main CI가 빨갰다 — entry 앞으로 옮겼다.
 - 배포 의존: Manager Map Valkey 서비스 PR(`feat/map-valkey`, 포트 12704, `KOR_TRAVEL_MAP_VALKEY_URL`), API에 transport
   주소·토큰, transport `price-history` export(브랜치 `feat/service-price-history`) 배포 뒤 플래그 켜기.
 

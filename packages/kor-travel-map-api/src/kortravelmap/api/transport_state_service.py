@@ -142,6 +142,9 @@ async def fetch_price_history(
     if connection is None:
         return PriceHistoryOutcome(history=None, reason="not_configured")
     base_url, headers = connection
+    if natural_key in {"", ".", ".."} or "/" in natural_key:
+        # 경로 정규화로 다른 transport route를 가리키게 되는 키는 보내지 않는다.
+        return PriceHistoryOutcome(history=None, reason="upstream_contract")
     path = EXPORT_PATH_FUEL_STATION_PRICE_HISTORY.format(natural_key=quote(natural_key, safe=""))
     try:
         async with httpx.AsyncClient(
@@ -154,6 +157,10 @@ async def fetch_price_history(
     except httpx.HTTPError as exc:
         _LOGGER.info("transport 가격 이력 요청 실패: %s", type(exc).__name__)
         return PriceHistoryOutcome(history=None, reason="upstream_unavailable")
+    except (httpx.InvalidURL, ValueError) as exc:
+        # 주소·토큰 형식이 틀렸다(InvalidURL은 HTTPError가 아니다, 비ASCII 토큰은 ValueError).
+        _LOGGER.warning("transport 가격 이력 설정이 올바르지 않다: %s", type(exc).__name__)
+        return PriceHistoryOutcome(history=None, reason="not_configured")
     if response.status_code == 404:
         # 옛 transport(경로 없음)·토큰 불일치·peer fence 셋 중 하나다 — 설정 문제일 수 있어
         # 경고한다.

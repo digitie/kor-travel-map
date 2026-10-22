@@ -29,6 +29,7 @@ from kortravelmap.dagster.transport_state import (
     TRANSPORT_STATE_SPECS,
     TransportStateJobSpec,
     load_transport_state,
+    lock_ttl_seconds,
 )
 
 
@@ -54,7 +55,10 @@ class _FakeStore:
 
     @asynccontextmanager
     async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
-        assert ttl_seconds <= TRANSPORT_STATE_SPECS[0].max_runtime_seconds + 60
+        # run 상한 + 취소 유예(600초) + 60초 — 상한보다 짧으면 실행 중에 풀리고,
+        # 2시간이면 죽은 run이 다음 tick들을 막는다.
+        assert ttl_seconds == lock_ttl_seconds(TRANSPORT_STATE_SPECS[0])
+        assert ttl_seconds == TRANSPORT_STATE_SPECS[0].max_runtime_seconds + 660
         yield not self.locked
 
     async def swap(self, dataset: str, items: list[Any], **kwargs: Any) -> SwapResult:

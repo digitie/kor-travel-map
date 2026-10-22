@@ -2819,6 +2819,8 @@ D1~D7, 설계 적대 리뷰 반영은 같은 절 끝.
 - [ ] Manager PR(Map Valkey 서비스, Map API·Dagster code-server에 `KOR_TRAVEL_MAP_VALKEY_URL`)과 Map API에 transport
   주소·토큰 env가 배포됐다.
 - [ ] PinVi admin 스냅샷 재vendor(admin `openapi.json`이 바뀌었다 — Map API 배포 **전** 머지).
+- [ ] schedule을 켜기 전에 데이터셋별 절대 하한(ADR-114 D1 표 — 휴게소·휴게소 유가·공항은 추정치)을 transport
+  live 개수와 대조했다.
 - [ ] schedule 5개를 켜고 데이터셋마다 첫 교체가 성공했다(`/v1/service/transport/status` 전부 `loaded=true`,
   `stale=false`). 그 수치·세대 크기·Valkey 메모리 사용량을 journal에 적는다.
 - [ ] transport `price-history` export 배포 뒤 `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED=true`에서 실제 이력이

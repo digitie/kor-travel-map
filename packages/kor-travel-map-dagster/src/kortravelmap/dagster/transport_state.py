@@ -85,6 +85,7 @@ __all__ = [
     "TransportStateJobSpec",
     "collect_transport_state_items",
     "load_transport_state",
+    "lock_ttl_seconds",
 ]
 
 TRANSPORT_STATE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
@@ -231,6 +232,15 @@ async def collect_transport_state_items(
     return items, (min(collected) if collected else None)
 
 
+_CANCEL_GRACE_SECONDS: Final[int] = 600
+"""``docker/dagster.yaml``의 run 취소 유예(``cancel_timeout_seconds``)."""
+
+
+def lock_ttl_seconds(spec: TransportStateJobSpec) -> int:
+    """적재 잠금 TTL — run 상한 + 취소 유예 + 60초."""
+    return spec.max_runtime_seconds + _CANCEL_GRACE_SECONDS + 60
+
+
 def _terminal(exc: StateStoreError) -> Failure:
     return Failure(
         description=f"Valkey 상태 적재 실패({exc.failure_kind}) — step 재시도를 끈다: {exc}",
@@ -261,9 +271,10 @@ async def load_transport_state(
     except StateStoreError as exc:
         raise _terminal(exc) from exc
     try:
-        # 잠금 TTL은 run 상한에 맞춘다 — 죽은 run의 잠금이 다음 tick들을 오래 막지 않게.
+        # 잠금 TTL = run 상한 + 취소 유예 + 여유 — 죽은 run의 잠금이 다음 tick들을 오래 막지
+        # 않으면서, 취소 중인 run보다 먼저 풀리지도 않게.
         async with active.load_lock(
-            spec.dataset.name, ttl_seconds=spec.max_runtime_seconds + 60
+            spec.dataset.name, ttl_seconds=lock_ttl_seconds(spec)
         ) as acquired:
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
@@ -286,7 +297,7 @@ async def load_transport_state(
                 allow_shrink=allow_shrink,
             )
             try:
-                retired = await active.retire_other_versions()
+                retired = await active.retire_other_versions(spec.dataset.name)
             except StateStoreError:
                 retired = -1
         metadata: dict[str, Any] = {

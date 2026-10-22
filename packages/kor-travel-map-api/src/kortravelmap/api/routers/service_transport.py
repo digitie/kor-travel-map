@@ -447,6 +447,10 @@ def _query(
         assert max_lat is not None
         if min_lon > max_lon or min_lat > max_lat:
             raise _problem(422, "VALIDATION_ERROR", "영역은 min ≤ max여야 한다.")
+        # 크기 검사도 store를 건드리기 전에 한다 — Valkey가 꺼져 있어도 잘못된 요청은 422다.
+        _, _, width, height = bbox_search_box(min_lon, min_lat, max_lon, max_lat)
+        if width > MAX_BBOX_SIDE_M * _BOX_MARGIN or height > MAX_BBOX_SIDE_M * _BOX_MARGIN:
+            raise _problem(422, "VALIDATION_ERROR", "영역 한 변은 1,000 km 이하여야 한다.")
     return _Query(cursor, limit, lon, lat, radius_m, min_lon, min_lat, max_lon, max_lat)
 
 
@@ -553,8 +557,6 @@ async def _list(
             center_lon, center_lat, width, height = bbox_search_box(
                 query.min_lon, query.min_lat, query.max_lon, query.max_lat
             )
-            if width > MAX_BBOX_SIDE_M * _BOX_MARGIN or height > MAX_BBOX_SIDE_M * _BOX_MARGIN:
-                raise _problem(422, "VALIDATION_ERROR", "영역 한 변은 1,000 km 이하여야 한다.")
             ids = await store.within_box(
                 dataset.name,
                 generation,
@@ -571,10 +573,12 @@ async def _list(
         ids, has_more = await store.page_ids(
             dataset.name, generation, after=after or None, limit=query.limit
         )
-        items = _parse_values(model, ids, await store.get_values(dataset.name, generation, ids))
+        raw_values = await store.get_values(dataset.name, generation, ids)
         if query.cursor is not None:
-            # 읽는 사이 grace가 끝나 세대가 사라졌으면 빈 페이지가 "끝"으로 보인다 — 409로 알린다.
+            # 읽는 사이 grace가 끝나 세대가 사라졌으면 빈 페이지가 "끝"으로, 빠진 값이 "저장소 깨짐"
+            # 으로 보인다 — 값을 풀기 전에 세대를 다시 확인해 409로 알린다.
             await store.generation_meta(dataset.name, generation)
+        items = _parse_values(model, ids, raw_values)
         next_cursor = (
             _encode_cursor(dataset.name, generation, ids[-1]) if has_more and ids else None
         )
@@ -643,7 +647,7 @@ FeatureIdPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[A-
     responses=_ERROR_RESPONSES,
 )
 async def list_fuel_stations(
-    request: Request, store: StoreDep, query: QueryDep
+    request: Request, query: QueryDep, store: StoreDep
 ) -> FuelStationListResponse:
     started_at = perf_counter()
     listing = await _list(store, DATASET_FUEL_STATIONS, FuelStationOut, query)
@@ -761,7 +765,7 @@ async def get_fuel_station_price_history(
     responses=_ERROR_RESPONSES,
 )
 async def list_rest_areas(
-    request: Request, store: StoreDep, query: QueryDep
+    request: Request, query: QueryDep, store: StoreDep
 ) -> RestAreaListResponse:
     started_at = perf_counter()
     listing = await _list(store, DATASET_REST_AREAS, RestAreaOut, query)
@@ -811,7 +815,7 @@ async def get_rest_area(
     responses=_ERROR_RESPONSES,
 )
 async def list_highway_incidents(
-    request: Request, store: StoreDep, query: QueryDep
+    request: Request, query: QueryDep, store: StoreDep
 ) -> HighwayIncidentListResponse:
     started_at = perf_counter()
     listing = await _list(store, DATASET_HIGHWAY_INCIDENTS, HighwayIncidentOut, query)
@@ -855,7 +859,7 @@ async def get_highway_incident(
     summary="국내 운영 공항 (목록·근처·영역)",
     responses=_ERROR_RESPONSES,
 )
-async def list_airports(request: Request, store: StoreDep, query: QueryDep) -> AirportListResponse:
+async def list_airports(request: Request, query: QueryDep, store: StoreDep) -> AirportListResponse:
     started_at = perf_counter()
     listing = await _list(store, DATASET_AIRPORTS, AirportOut, query)
     return AirportListResponse(
