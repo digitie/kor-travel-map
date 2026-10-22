@@ -38,6 +38,7 @@
 2. effective 값은 현재 유효한 provider 후보의 결정적 winner에 active override를 적용한 결과다.
    winner의 dataset/entity/값 원문·검증 head/raw hash와 typed 값·Geo 증거가 같은 transaction에서 바뀐다.
    정책은 활성화된 revision만 적용하며, 그 revision과 영향 Feature 재계산은 원자적으로 전환한다.
+   이 규칙은 배타 fallback과 세분화 flag OFF에서도 같다. 잠금 mode는 winner 의미를 바꾸지 않는다.
 3. source 하나의 소실은 다른 활성 source·수동 보정·publication/quality 상태를 지우지 않는다.
 4. 일반 snapshot은 적재·정당한 absent retire·seal까지 한 transaction이다. 지역으로 분할한
    full snapshot의 중간 결과를 새로운 전체 snapshot인 것처럼 공개하지 않는다.
@@ -65,7 +66,15 @@
 표명은 구현 PR에서 코드와 함께 확정한다. 후보 원장은 기존 `feature_base_field_values`를
 대체하는 또 다른 effective 표가 아니다. 후보가 원천별 정본, 기존 base는 winner projection,
 effective typed storage는 override 적용 projection이다. 셋을 **동일 transaction**에서 갱신한다.
-원문은 immutable source record를 참조하고 복제하지 않는다. geometry는 PostGIS typed 값/기존
+원문은 immutable source record를 참조하고 복제하지 않는다. **정책 활성화 scope의 모든 writer**는
+후보 원장 갱신→active policy winner→base/effective projection·Geo 증거라는 동일 경로만 쓴다.
+배타 gate는 그 의미를 구현하지 못한 legacy writer에게 쓰기 권한을 주는 우회로가 아니다.
+기존 `apply_provider_feature_field_patch`가 base를 직접 갱신하는 동작은 이 scope에서 금지한다.
+동일 프로시저를 후보/winner 경로로 전환하거나, DB에서 해당 legacy 호출을 거부한다. runtime의
+projection 직접 DML 권한뿐 아니라 SECURITY DEFINER 루틴의 EXECUTE와 내부 호출도 검사해
+우회가 없도록 한다. 후보 갱신·완전성/Geo 증거를 보장하지 못하는 writer가 필요하면 그 scope의
+첫 policy cutover 자체를 막는다. gate만 배선됐다는 이유로 활성화하지 않는다.
+geometry는 PostGIS typed 값/기존
 geometry 참조를 쓰며 JSON 문자열로 큰 payload를 이중 보관하지 않는다.
 
 기존 base 한 행은 마지막 winner만 담으므로 그것만 복사해 backfill 완료로 보지 않는다. 대상 scope의
@@ -172,8 +181,11 @@ identity를 만들지 않는다. 초기 opt-in은 provider가 완전성을 보�
 2. **계획**: read-only 조회로 mutation closure를 manifest에 작성한다. source head뿐 아니라
    retire 대상의 기존 link, merge의 canonical closure, rule/candidate/collection, seal 의존을 포함한다.
    전체 UUID 목록을 Python list로 올리지 않고 임시 표/정렬 커서·COPY를 이용한다.
-3. **진입**: 모든 writer가 공통 protocol gate를 잡는다. 새 규약 writer는 공유, 구형/미지원
-   경로·restore·DDL은 배타다. 이는 호환성/유지보수 gate이며 정상 쓰기끼리 직렬화하지 않는다.
+3. **진입**: 모든 writer가 공통 protocol gate를 잡는다. 새 규약 writer는 공유, 잠금 세분화가
+   미지원인 경로·restore·DDL은 배타다. 단, policy 활성 scope의 의미 writer는 공유/배타 모두
+   §3의 후보/winner 프로토콜을 구현해야 한다. 구형 직접 base writer는 gate mode와 무관하게
+   DB에서 거부한다. 유지보수 restore도 활성 정책과 후보/projection의 일치 검증을 통과하기
+   전에는 일반 쓰기를 재개하지 않는다. gate는 정상 쓰기끼리 직렬화하지 않는 잠금 경계다.
 4. **정렬 잠금**: 아래 전체 순서를 모든 Python 호출·SQL procedure·trigger에 동일하게 적용한다.
    늦게 발견한 의존을 순서 밖에서 추가로 잡지 않고 rollback 후 manifest를 새로 만든다.
 5. **재검증**: head/current record·claim/redirect·membership revision·정책 revision·rule revision·
@@ -204,8 +216,10 @@ Feature별 advisory와 동일한 shared lock table 항목을 만들지 않는다
 직렬화된다. source/theme/rule별 anchor 행을 정렬해 catalog 범위를 잠그고, root가 영향을 주는
 모든 rule의 변경을 manifest에 포함한다. rule 신설/삭제 phantom은 해당 source/theme anchor와
 catalog revision으로 막는다. trigger가 다른 theme을 발견하면 같은 closure 규약을 따르거나
-명시적으로 지원 제외되어 배타 protocol gate로 돌아간다. 지원 제외 경로가 남은 범위를 완료로
-표현하지 않는다. collection revision 하나를 공유하는 명령끼리는 계속 충돌하는 것이 맞다.
+**전체 rollback 후** 배타 protocol gate로 다시 진입한다(공유→배타 승격 금지). 그 경로도 후보와
+active policy winner 의미를 유지해야 한다. 의미가 미지원인 경로는 DB 거부/해당 scope의 policy
+cutover 차단 대상이다. 잠금 세분화 지원 제외 경로가 남은 범위를 완료로 표현하지 않는다.
+collection revision 하나를 공유하는 명령끼리는 계속 충돌하는 것이 맞다.
 
 `tests/lint/test_feature_write_lock_order.py`가 SQL 호출과 trigger까지 펼치던 보호를 새 순서로
 갱신한다. 무관한 두 bulk root의 실제 DML 중첩 및 같은 root의 replay 결과가 최종 완료 조건이다.
@@ -277,18 +291,24 @@ fence다. claim은 짧은 transaction으로 epoch를 발급한다. 적용 transa
 1. 측정/호출·trigger 전수 목록, 재현 fixture, field winner 정책을 먼저 만든다.
 2. 후보 원장·정책·redirect·scope 원장을 additive migration으로 넣고 **기존 전역 잠금 아래에서**
    backfill·winner 비교·회복 테스트를 끝낸다. shadow 계산은 공개값을 바꾸지 않는다.
-3. **정책 활성화 전** 모든 writer에 protocol gate를 먼저 배포한다. 기존 전역 경로도 배타 gate를 잡는다. 구 binary가
-   남아 gate를 우회하면 세분화 mode 진입을 DB에서 거부한다. drain 후 API/CS/CLI 코드와 DB head를 확인한다.
+3. **정책 활성화 전** 모든 writer에 protocol gate와 후보/winner 의미 경로를 배포한다.
+   전역 잠금 경로도 같은 의미를 쓰며 잠금만 배타다. 미변환 legacy 직접 base 호출은 DB에서
+   거부한다. 필요한 writer가 의미 프로토콜을 지원하지 않거나 구 binary가 gate를 우회하면
+   scope의 policy cutover와 세분화 enable을 모두 막는다. drain 후 API/CS/CLI·DB head를 확인한다.
 4. 새 프로토콜은 feature flag 기본 OFF로 배포한다. §3의 완전성 검증·배타 gate 아래 원자적
    policy cutover를 통과시킨 뒤 독립 dataset 2개를 opt-in한다. 두 세션으로
    실제 쓰기 중첩을 확인한다. 공통 Feature/수동 명령은 이어서 충돌 시험한다.
-5. 지역 opt-in, root/catalog·notice/merge/admin/cancel 경로 순으로 넓힌다. 미지원 경로는 배타 gate라
-   안전하지만 느리다. 최종 수용에서 범위와 남은 배타 경로를 전수 공개한다.
+5. 지역 opt-in, root/catalog·notice/merge/admin/cancel 경로 순으로 넓힌다. 잠금 세분화 미지원
+   경로는 **동일 후보/active winner 의미를 구현한 경우에만** 배타 gate로 실행한다. 의미 미지원은
+   쓰기 거부 또는 scope cutover 차단이다. 최종 수용에서 배타/거부/미전환 범위를 전수 공개한다.
 6. live E2E/API/UI·복구·장애 주입·실측을 두 독립 적대 리뷰와 함께 통과한 구현 PR만 머지·배포한다.
    문서 PR의 CI 생략 지시는 구현 PR 검증 생략 권한이 아니다.
 
 되돌림은 먼저 새 claim을 멈추고 진행 중 attempt를 drain/취소 후 commit 여부를 판정한다. 세분화
-flag를 끄면 **새 코드의 배타 protocol gate+전역 경로**로 돌아간다. 후보 원장/receipt는 보존하고
+flag를 끄면 **후보 갱신·active policy winner→projection·Geo stamp 의미는 유지한 채**, 새 코드의
+배타 protocol gate+전역 잠금만 사용한다. policy 비활성화나 legacy 직접 base 갱신으로 돌아가지
+않는다. 후보 원장·active revision·receipt를 보존하고, 기존 직접 base 루틴 거부도 유지한다.
+이 의미 경로가 고장 나면 쓰기를 정지하고 forward repair하며 legacy writer를 허용하지 않는다.
 schema downgrade나 gate를 모르는 옛 binary로 롤백하지 않는다. 이상한 winner는 source 증거와
 policy revision을 이용해 forward 재계산한다. 중단 전/후 run·epoch·image revision·schema head와
 롤백 결과를 기록한다. Dagster daemon·다른 서비스 상태는 운영 지시 범위 안에서만 바꾼다.

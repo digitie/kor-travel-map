@@ -88,7 +88,12 @@
 선행: T-CWRITE-02. 이 단계에서는 세분화 flag OFF를 기본으로 둔다.
 
 - [ ] dataset/region/attempt anchor와 manifest의 키·인덱스·idempotency·bounded 청소를 구현한다.
-  새 writer 공유/기존·restore·DDL writer 배타의 protocol gate를 모든 진입점에 배선한다.
+  새 writer 공유/잠금 세분화 미지원·restore·DDL 경로 배타의 protocol gate를 모든 진입점에 배선한다.
+- [ ] policy 활성 scope의 공유/배타/flag OFF writer 모두 후보 갱신→active policy winner→
+  projection/Geo 증거 의미를 유지한다. 기존 `apply_provider_feature_field_patch`의 직접 base
+  갱신은 DB에서 거부하거나 동일 의미로 교체하고 SECURITY DEFINER 호출·EXECUTE 우회까지
+  검사한다. 후보 갱신/완전성을 보장 못 하는 필수 legacy writer가 있으면 scope cutover를 막는다.
+  상위 A winner 뒤 하위 B 배타 fallback으로 갱신해도 A 값·lineage·Geo stamp가 유지되는 fixture를 둔다.
 - [ ] 구 binary/CLI가 우회하는 혼합 배포는 enable preflight가 거부한다. 지원 제외 trigger는
   진입 전 배타 mode로 계획하며 공유 gate를 잡은 뒤 배타 승격하지 않는다.
 - [ ] dataset 전체 배타/지역 공유 계층, anchor 정렬, claim→source→link→Feature→catalog→
@@ -106,6 +111,9 @@
   transaction으로 바꾼다. writer 경쟁·계획 뒤 head 변경·절반 재계산 시 장애를 주입해 성공 전환
   또는 기존 revision/공개값 유지 중 하나임을 검증한다. 비동기 등록만으로 선활성화하지 않는다.
   이전 정책 child seal은 stale로 판정하며, 후보 불완전 scope는 활성화하지 않는다.
+- [ ] 상위 A winner→하위 B 배타 fallback→세분화 flag OFF→B refresh 순서에서 후보는 갱신되지만
+  winner/base/effective·lineage·Geo stamp는 A로 유지된다. flag OFF와 policy 활성화는 독립 축이다.
+  legacy 직접 patch 호출은 배타 gate를 잡아도 DB 거부되며 우회가 있으면 cutover하지 않는다.
 - [ ] 동일 입력의 두 독립 dataset은 서로의 commit을 기다리지 않고 DML 구간이 겹친다.
   공유 Feature가 있으면 정확히 해당 충돌에서 직렬화하며 A/B 순서와 retry 횟수에 관계없이
   T-CWRITE-02의 동일 결과를 얻는다. lost update·분열 identity·잘못된 source head는 0이다.
@@ -150,7 +158,8 @@
   trigger가 concierge catalog/materializer를 부르는 경로를 두 세션으로 반증한다.
 - [ ] provider load 중 단건 admin override·수동 생성·승인·promotion·archive·merge·purge·
   notice reconcile·취소/completion sweep를 교차 실행한다. 지원 제외는 배타 gate로 안전하게
-  처리하고 남은 전역 gate·경로·제한을 명시한다. 전수 전환 완료로 허위 표시하지 않는다.
+  처리하되 후보/active winner 의미는 모든 실행 경로가 지킨다. 의미 미지원은 DB 쓰기 거부 또는
+  scope cutover 차단이며, 남은 전역 gate·거부 경로·제한을 명시한다. 전수 전환 완료로 허위 표시하지 않는다.
 - [ ] seal 입력 변경은 formula 세대를 올려 과거 receipt와 구별한다. 큰 geometry/수십만
   member의 digest는 O(행수×고정폭)이며, 다른 dataset winner/override 변경을 seal이 감지한다.
   Geo token 전환 시 stamp 보류와 재선택, public/PinVi 소비자 cache/outbox가 유지된다.
@@ -189,7 +198,11 @@
 - [ ] Manager 공식 배포 경로, NVMe artifact/spool/이미지 경로를 확인한다. API/CS/CLI를 drain하고
   schema migrate-forward·protocol 호환 preflight 후 배포한다. 불필요한 daemon/다른 서비스 재시작은 없다.
 - [ ] flag OFF → 독립 dataset 2개 → 완전 지역 → 나머지 순서로 검증·확대한다. 아직 배타 fallback인
-  경로와 이유를 공개한다. 새 claim 중단→drain→배타 경로 복귀 훈련과 receipt 무손상을 증명한다.
+  경로와 이유를 공개한다. 새 claim 중단→drain→**동일 후보/winner 의미의 배타 잠금 경로** 복귀
+  훈련과 receipt 무손상을 증명한다. legacy base 쓰기나 policy 비활성화로 돌아가지 않는다.
+- [ ] 운영 수용 fixture에서 상위 A winner→하위 B 배타 fallback→flag OFF→B refresh를 재현해
+  값·lineage·Geo stamp 유지와 후보 갱신을 확인한다. 직접 base legacy 루틴은 OFF에서도 거부되며,
+  의미 경로 장애 시 쓰기 정지/forward repair를 검증한다. 잘못된 writer 허용으로 복구하지 않는다.
 - [ ] ADR-114의 구현된 결정만 accepted/현행 관계로 갱신하고 ADR-111의 supersede 범위를 정확히
   적는다. runtime/schema·설정·복구·측정 문서, tasks/resume/journal을 일치시킨다.
 - [ ] 각 task를 실제 완료된 운영 generation·증거 링크와 함께 tasks-done으로 이동한다. 문서 설계
