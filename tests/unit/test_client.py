@@ -87,7 +87,14 @@ def _read_client(monkeypatch: pytest.MonkeyPatch) -> AsyncKorTravelMapClient:
 
 
 class _FakeTxSession:
-    """``session.begin()``까지 흉내내는 sentinel session (write 위임 테스트용)."""
+    """``session.begin()``까지 흉내내는 sentinel session (write 위임 테스트용).
+
+    ``info``는 실제 ``AsyncSession``처럼 dict다 — 적재 메서드가 fence 대기를 거기 무장한다
+    (T-LOAD-LOCK-WAIT).
+    """
+
+    def __init__(self) -> None:
+        self.info: dict[str, object] = {}
 
     def begin(self) -> _FakeSessionCM:
         return _FakeSessionCM()
