@@ -107,6 +107,5 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-LOAD-LOCK-WAIT — **동시 provider 적재가 `feature-curation-write`를 30초만 기다리고 55P03으로 죽는다**
 
-  2026-10-22 n150에서 다섯 dataset이 3회 재시도 끝에 실패했다. 1안(대기 상한)은 #1348로 머지됐고, 2안(스트리밍 snapshot은
-  다 받은 뒤 쓰기 transaction을 짧게 연다)은 ADR-113으로 `fix/short-curation-lock-hold`에서 진행한다. 해제 조건은 acceptance §T-LOAD-LOCK-WAIT.
-  남는 것: 큐 경로 executor scope transaction이 받는 동안 `idle in transaction`(ADR-113 결정 4, 요청 하나 국한).
+  1안(대기 상한)은 #1348로 머지됐고 2안(스트리밍 snapshot은 다 받은 뒤 짧게 쓴다)은 ADR-113이다. 해제 조건은 acceptance
+  §T-LOAD-LOCK-WAIT. 큐 경로 executor transaction의 받는 동안 `idle in transaction`은 남는다(ADR-113 결정 4).

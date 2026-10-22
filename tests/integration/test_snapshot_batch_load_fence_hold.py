@@ -148,6 +148,25 @@ async def _finish(*tasks: asyncio.Task[Any]) -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
+_FENCE_WAITERS_SQL = text(
+    "SELECT count(*) FROM pg_catalog.pg_locks "
+    "WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1 "
+    "AND ((classid::bigint << 32) | objid::bigint) = "
+    "pg_catalog.hashtextextended('feature-curation-write', 0)"
+)
+
+
+async def _a_fence_waiter_appears(engine: AsyncEngine, within_seconds: float = 30.0) -> bool:
+    """``feature-curation-write`` 미부여 대기가 ``within_seconds`` 안에 보이는가."""
+    deadline = time.monotonic() + within_seconds
+    while time.monotonic() < deadline:
+        async with AsyncSession(engine) as session:
+            if int((await session.execute(_FENCE_WAITERS_SQL)).scalar_one()):
+                return True
+        await asyncio.sleep(0.2)
+    return False
+
+
 async def _seal_of_committed_image(engine: AsyncEngine, provider: str, dataset_key: str) -> str:
     async with AsyncSession(engine) as session, session.begin():
         sealed = await capture_provider_curation_input(
@@ -180,14 +199,21 @@ async def test_fence_is_free_while_the_stream_is_fetching_and_held_while_writing
         await asyncio.wait_for(stream.paused.wait(), timeout=30)
         # 받기가 첫 batch 뒤에서 멈춰 있다. 종전 코드는 여기서 이미 첫 batch를 쓰며 fence를 쥐었다.
         other_task = asyncio.create_task(other.run())
-        await asyncio.wait_for(other.holding.wait(), timeout=15)
+        holding = asyncio.create_task(other.holding.wait())
+        await asyncio.wait({holding, other_task}, timeout=15, return_when=asyncio.FIRST_COMPLETED)
+        if other_task.done():
+            # 종전 코드: 첫 batch를 쓴 적재가 fence를 쥐어 다른 writer가 3초 만에 55P03.
+            other_task.result()
+        holding.cancel()
+        assert other.holding.is_set(), "다른 writer가 15초 안에 fence를 잡지 못했다"
         assert other.waited is not None
         assert other.waited < 2.0, f"받는 동안 다른 writer가 fence를 {other.waited:.1f}초 기다렸다"
 
-        # 받기를 끝낸다. 쓰기는 다른 writer가 fence를 놓을 때까지 기다려야 한다.
+        # 받기를 끝낸다. 쓰기는 다른 writer가 fence를 놓을 때까지 기다려야 한다 — "아직 안 끝났다"가
+        # 아니라 **잠금 대기 중**임을 pg_locks에서 본다(느린 runner에서의 거짓 초록 방지).
         stream.proceed.set()
-        await asyncio.sleep(3)
-        assert not load_task.done(), "쓰기 단계가 fence 없이 진행됐다"
+        assert await _a_fence_waiter_appears(migrated_engine), "쓰기 단계가 fence를 기다리지 않았다"
+        assert not load_task.done()
 
         other.release.set()
         await other_task
@@ -198,7 +224,8 @@ async def test_fence_is_free_while_the_stream_is_fetching_and_held_while_writing
     assert result.bundles_total == 3
     for bundle in bundles:
         assert await _canonical_uuid_for_alias(migrated_engine, bundle.feature.feature_id)
-    # seal은 commit된 image의 seal과 같다 — 쓰기와 seal 사이에 아무것도 끼지 않았다.
+    # seal은 commit된 image의 seal과 같다(일관성 확인).
+    # 끼어들기 차단 자체는 위의 잠금 대기가 보인다.
     assert result.curation_input_set_hash == await _seal_of_committed_image(
         migrated_engine, record.provider, record.dataset_key
     )

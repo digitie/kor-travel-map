@@ -187,6 +187,7 @@ from kortravelmap.infra.feature_repo import (
     get_feature_rows_by_ids,
     load_bundles,
     load_source_record_links,
+    lock_feature_curation_write,
     resolve_active_provider_dataset_id,
     retire_features_absent_from_snapshot,
     retire_features_by_source_entity_ids,
@@ -1379,29 +1380,48 @@ class AsyncKorTravelMapClient:
         전부 rollback한다 — 어느 쪽이든 아무것도 commit되지 않는다.
         """
 
+        drain_began = monotonic()
         with BundleSpool() as spool:
             async for batch in batches:
                 spool.append(batch)
+            drained = monotonic() - drain_began
             result = FeatureLoadResult()
-            began = monotonic()
-            async with self._feature_load_transaction() as session:
-                for spooled in spool.batches():
-                    result = result.merge(await load_bundles(session, spooled, geo=geo))
-                if curation_dataset is not None:
-                    provider, dataset_key = curation_dataset
-                    result = result.merge(
-                        await capture_provider_curation_input(
-                            session, provider=provider, dataset_key=dataset_key
+            waited: float | None = None
+            held_from: float | None = None
+            outcome = "rollback"
+            try:
+                async with self._feature_load_transaction() as session:
+                    if spool.batch_count:
+                        # fence를 여기서 먼저 잡는다(같은 transaction의 다음 획득은 재진입) — 대기와
+                        # 보유를 따로 재기 위해서다. 잠금 순서(ADR-111 §2)는 같다: 이 transaction이
+                        # 잡는 첫 전역 잠금이 이것이다.
+                        await lock_feature_curation_write(session)
+                        held_from = monotonic()
+                        waited = held_from - drained - drain_began
+                    # spool 되살리기(unpickle)도 fence 아래지만 upsert에 비해 무시할 만하다. 받기
+                    # 루프를 이 transaction 안으로 다시 들이지 말 것(ADR-113).
+                    for spooled in spool.batches():
+                        result = result.merge(await load_bundles(session, spooled, geo=geo))
+                    if curation_dataset is not None:
+                        provider, dataset_key = curation_dataset
+                        result = result.merge(
+                            await capture_provider_curation_input(
+                                session, provider=provider, dataset_key=dataset_key
+                            )
                         )
-                    )
-            _LOG.info(
-                "스트리밍 snapshot 쓰기 %.1f초(fence 보유 상한): "
-                "batch %d · bundle %d · spool %d bytes",
-                monotonic() - began,
-                spool.batch_count,
-                spool.bundle_count,
-                spool.byte_count,
-            )
+                outcome = "commit"
+            finally:
+                _LOG.info(
+                    "스트리밍 snapshot 적재 %s: 받기 %.1f초, fence 대기 %s초, fence 보유 %s초 "
+                    "(batch %d · bundle %d · spool %d bytes)",
+                    outcome,
+                    drained,
+                    "-" if waited is None else f"{waited:.1f}",
+                    "-" if held_from is None else f"{monotonic() - held_from:.1f}",
+                    spool.batch_count,
+                    spool.bundle_count,
+                    spool.byte_count,
+                )
             return result
 
     async def load_authoritative_feature_snapshot(
