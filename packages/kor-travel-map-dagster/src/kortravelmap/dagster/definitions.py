@@ -50,6 +50,7 @@ from .run_heartbeat import RUN_HEARTBEAT_JOBS
 from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
+from .transport_state import TRANSPORT_STATE_JOBS, TRANSPORT_STATE_SCHEDULES
 
 REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kor_travel_map_client",
@@ -199,6 +200,7 @@ defs = Definitions(
             *MANUAL_PROVIDER_DEDUP_JOBS,
             *RUN_HEARTBEAT_JOBS,
             *FEATURE_OPERATION_COMPLETION_JOBS,
+            *TRANSPORT_STATE_JOBS,
         ],
     ),
     schedules=[
@@ -207,6 +209,7 @@ defs = Definitions(
         *MOIS_SOURCE_SYNC_SCHEDULES,
         *MANUAL_PROVIDER_DEDUP_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
+        *TRANSPORT_STATE_SCHEDULES,
     ],
     sensors=[
         *FEATURE_UPDATE_SENSORS,
