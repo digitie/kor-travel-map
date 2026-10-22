@@ -5,6 +5,9 @@
 - 문서: dataset/지역 scope와 Feature 행 충돌 분리, 결정적 provider 후보 winner, override/retire/merge,
   manifest 재검증·epoch fencing·SERIALIZABLE root·호환 gate·원자적 snapshot·롤백·실측 수용을 작성했다.
 - 원장: T-CWRITE-01~09 및 각 acceptance를 등록했다. Map 코딩은 진행 중 Weather·Transport 작업 뒤다.
+- 독립 적대 리뷰 반영: partial head carry-forward의 값 원문/검증 head 분리, 전체 활성 후보 복원,
+  원자적 정책 활성화, 지역 누락과 전역 소실 구분, 다중 SELECT snapshot, Geo 그룹 winner/stamp
+  lineage를 설계·해당 acceptance에 함께 보강했다. ADR 색인의 다음 번호를 115로 맞췄다.
 - 검증: 문서/코드 근거·링크·원장 정합만 점검한다. 사용자 지시대로 CI를 실행하거나 기다리지 않는다.
   실제 코드·schema·서비스 변경과 성능 실측은 아직 없으며 문서 PR 완료와 구분한다.
 

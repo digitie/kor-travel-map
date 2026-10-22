@@ -36,7 +36,8 @@
 
 1. 같은 identity는 하나의 정본 UUID에 귀속한다. 재시도·지역 이동으로 새 Feature를 만들지 않는다.
 2. effective 값은 현재 유효한 provider 후보의 결정적 winner에 active override를 적용한 결과다.
-   winner의 dataset/entity/record/raw hash와 typed 값이 같은 transaction에서 바뀐다.
+   winner의 dataset/entity/값 원문·검증 head/raw hash와 typed 값·Geo 증거가 같은 transaction에서 바뀐다.
+   정책은 활성화된 revision만 적용하며, 그 revision과 영향 Feature 재계산은 원자적으로 전환한다.
 3. source 하나의 소실은 다른 활성 source·수동 보정·publication/quality 상태를 지우지 않는다.
 4. 일반 snapshot은 적재·정당한 absent retire·seal까지 한 transaction이다. 지역으로 분할한
    full snapshot의 중간 결과를 새로운 전체 snapshot인 것처럼 공개하지 않는다.
@@ -57,8 +58,8 @@
 | `ops.feature_write_dataset_scopes` | dataset 자연키를 DB ID로 해석한 anchor, protocol version | dataset당 1행, PK; 전체 snapshot과 지역 작업의 계층 gate |
 | `ops.feature_write_region_scopes` | `(dataset_id, scope_version, region_key)`, epoch·owner·lease·완료 상태 | PK; owner/lease 청소용 partial index, 무한 attempt 행 누적 금지 |
 | `ops.feature_write_attempts` 및 manifest | idempotency key, run/root/attempt, scope, frozen input hash, source/claim/Feature/curation 의존 ID와 예상 revision | 고유 idempotency; 상태·updated_at, manifest는 정렬 stream/COPY |
-| provider field 후보 원장 | `(feature_id, field_path, dataset_id, source_entity_key)`별 current record/hash·typed 값·유효 상태 | 이 키 UNIQUE, `(feature_id, field_path)` winner 조회 인덱스 |
-| provider field 정책 | `field_path + dataset 자연키`, 명시 rank·null 정책·policy revision | 유일 정책 키; policy 변경은 해당 Feature 재계산 작업을 영속 등록 |
+| provider field 후보 원장 | `(feature_id, field_path, dataset_id, source_entity_key)`별 값 원문 record/hash·validated-through head·typed 값·Geo 해석 증거·유효 상태 | 이 키 UNIQUE, `(feature_id, field_path)` winner 조회 인덱스 |
+| provider field 정책 | `field_path + dataset 자연키`, 명시 rank·null 정책·policy revision | 유일 정책 키; pending/active revision을 구분하고 배타 gate 아래 영향 closure와 원자 활성화 |
 | 병합 정본 redirect | loser UUID→master UUID, merge receipt/revision | loser UNIQUE, 순환 금지; 기존 identity claim을 보존한 채 canonical 해석 |
 
 표명은 구현 PR에서 코드와 함께 확정한다. 후보 원장은 기존 `feature_base_field_values`를
@@ -67,8 +68,23 @@ effective typed storage는 override 적용 projection이다. 셋을 **동일 tra
 원문은 immutable source record를 참조하고 복제하지 않는다. geometry는 PostGIS typed 값/기존
 geometry 참조를 쓰며 JSON 문자열로 큰 payload를 이중 보관하지 않는다.
 
-기존 base backfill은 lineage를 실제 source record와 대조한다. 어느 후보인지 입증할 수 없는
-행은 추측하지 않고 preflight를 실패시킨다. 처음부터 모든 과거 원문을 후보로 부활시키지 않는다.
+기존 base 한 행은 마지막 winner만 담으므로 그것만 복사해 backfill 완료로 보지 않는다. 대상 scope의
+**모든 활성 source membership**을 열거하고 각 current head별로 provider typed 변환·field 정책을
+적용해 후보를 재구성한다. omitted carry-forward에 필요한 과거 원문은 그 필드의 마지막 검증된
+값을 찾는 데만 사용하며, 임의의 과거 record를 독립 활성 후보로 부활시키지 않는다. membership
+열거 digest·head revision과 필드별 복원/정당한 무값 사유를 보관해 후보 완전성을 검증한다.
+원문/변환 revision/Geo 증거가 없어 복원할 수 없으면 해당 scope의 policy cutover와 세분화 enable을
+거부한다. 값/lineage를 추측하거나 활성 상위 provider 후보를 생략한 채 하위 base만 확정하지 않는다.
+
+초기 backfill은 shadow 계산이며 기존 공개값/정책을 바꾸지 않는다. 모든 writer에 protocol gate를
+배선한 뒤에만 첫 정책을 활성화한다(§8 순서). 이후 정책 변경도 새 revision을 pending으로 저장하고
+영향 closure를 미리 산정한다. **배타 protocol gate를 잡고** head/membership/policy revision을 다시
+검증한 다음 영향 Feature의 winner/base/effective/Geo stamp·seal 의존 revision·cache/outbox를
+전부 재계산하고 active policy revision을 **한 transaction으로** 바꾼다. 실패하면 기존 active revision과
+공개값을 함께 유지한다. 재계산을 비동기 작업으로 등록한 것만으로 정책을 먼저 활성화하지 않는다.
+큰 closure는 NVMe artifact/임시 표로 준비하되 이 원자적 전환을 감당 못 하면 enable하지 않는다.
+일반 writer와 root는 active revision만 읽고 manifest/receipt에 봉인한다. gate 밖에서 준비한 낡은
+revision은 적용 전 거부하며, 정책 변경 뒤 기존 child seal은 stale로 판정한다.
 
 ## 4. winner·삭제·병합의 정확성
 
@@ -76,7 +92,12 @@ geometry 참조를 쓰며 JSON 문자열로 큰 payload를 이중 보관하지 �
 
 - active override가 있으면 effective에는 override가 우선한다. base winner는 계속 갱신하며
   revoke 때 최신 winner를 적용한다. lifecycle override는 ADR-090의 독립 규칙을 유지한다.
-- provider 후보는 current source head와 유효 membership가 입증된 것만 선택한다.
+- provider 후보는 유효한 **dataset 전체 entity membership**와 current source head까지의 검증이
+  입증된 것만 선택한다. `value_source_record_key/hash`는 값을 실제 제공한 immutable 원문이고,
+  `validated_through_head_key/revision`은 그 값을 여전히 인정한 현재 head다. 둘은 다를 수 있다.
+  R1 `{name, phone}` 뒤 partial R2 `{name}`면 phone 값 원문은 R1에 남기고, provider의 omitted
+  유지 계약에 따라 R2까지 carry-forward했음을 같은 transaction에서 기록한다. head가 R2라는
+  이유만으로 phone을 탈락시키지 않는다. 명시 null/tombstone은 정책대로 후보를 제거한다.
 - 순서는 **명시된 필드별 provider rank → 그 provider가 보장하는 관측 최신성 → 안정된
   dataset 자연키/source entity key**다. 서로 다른 provider 시계를 직접 비교해 우선순위를
   뒤집지 않는다. `clock_timestamp()`·DB-local dataset ID·commit 도착 순서는 tie-break가 아니다.
@@ -87,13 +108,32 @@ geometry 참조를 쓰며 JSON 문자열로 큰 payload를 이중 보관하지 �
   초기 정책은 실제 provider별 필드 계약·기존 canonical source fixture와 대조해 검토한다.
 - omitted는 후보 변경 없음, explicit null은 field registry와 해당 정책이 허용할 때만 지우기다.
   빈 주소/geo partial 응답 보호(ADR-109)는 winner 이전의 후보 검증에서도 유지한다.
+- Geo로 만든 후보에는 입력 좌표/주소의 digest, 실제 관측 `data_token`, transform revision과
+  결과를 제공한 원문/호출 증거를 둔다. 같은 raw/head도 Geo token이 다르면 다른 해석이다.
+  주소·행정코드·Geo 유도 필드와 Geo stamp는 **하나의 일관 그룹**으로 같은 해석 후보에서
+  선택하며 필드별로 A/B를 섞지 않는다. 그룹 정책/완전성이 없으면 cutover를 거부한다.
+  stamp는 수집을 방금 실행한 B의 run token이 아니라 실제 effective 그룹 winner의 검증 증거로
+  쓴다. A(T1)가 winner인 상태에서 B(T2)가 들어오면 주소/stamp는 A/T1로 유지되고 Geo의 현행
+  T2 기준 stale로 남는다. 그룹의 일부 active override가 있으면 provider 후보를 사람 값의 Geo
+  증거로 사용하지 않는다. effective 입력과 해석 증거가 정확히 일치하는 경우에만 stamp를 두며,
+  그렇지 않으면 stamp를 제거/보류한다. revoke 후 최신 그룹 winner와 그 증거를 원자 적용한다.
 
 ### 4.2 retire와 원천 소실
 
-full/authoritative 및 정확한 coverage 증거가 있는 scope에서만 absent membership을 비활성화한다.
+**지역 coverage membership**와 **dataset 전체 entity 유효성**을 분리한다. 지역 A의 완전 snapshot에서
+누락되면 A coverage만 absent로 표시할 수 있다. 그것은 A→B 이동인지 dataset 전체 소실인지
+증명하지 못하므로 전역 entity membership·필드 후보·Feature를 그 이유만으로 비활성화하지 않는다.
+전체 dataset의 완전 snapshot, provider의 global tombstone, 또는 해당 identity에 대한 authoritative
+entity lookup의 명시적 소실 답변이 있을 때만 전역 소실을 확정한다. 조회 timeout/불명확한 404는
+소실 증거로 채택하지 않는다. 이동은 source identity의 monotonic 관측으로 B membership를 확정하고
+A와 원자 재결합한다. A만 먼저 완료되거나 B가 실패하면 `pending-not-retire`로 남겨 마지막 검증된
+후보/effective를 유지하고 bounded reconciliation을 예약한다. 이 프로토콜을 provider가 지원하지
+못하면 지역 absent retire를 enable하지 않고 dataset 전체 authoritative 경로를 쓴다.
+
+full/authoritative 및 정확한 coverage 증거가 있는 scope에서만 그 **coverage** membership을 비활성화한다.
 증분·실패·부분 fetch·타임아웃·개수 하한 미달은 absent를 의미하지 않는다. 마지막 활성 source가
 사라져도 user lifecycle override·manual origin을 검토한 typed state procedure만 retire할 수 있다.
-다른 source가 남으면 후보를 제거하고 winner를 재계산하며 Feature 자체를 무조건 retire하지 않는다.
+다른 source가 남으면 **전역 소실이 입증된 source의** 후보만 제거하고 winner를 재계산하며 Feature 자체를 무조건 retire하지 않는다.
 재관측은 같은 identity를 복구하고 명시적인 사용자 비활성화를 되돌리지 않는다.
 
 ### 4.3 명시 병합
@@ -174,8 +214,25 @@ catalog revision으로 막는다. trigger가 다른 theme을 발견하면 같은
 
 초기 구현은 staging 전체 복사나 새 active release pointer를 추가하지 않는다. 일반 dataset/정당한
 지역 snapshot은 기존 한 transaction을 유지하므로 API reader는 commit 전/후 image만 본다.
-여러 SQL로 한 응답을 만들면 같은 read transaction/snapshot을 써야 하며, 별도 HTTP 페이지는
-서로 다른 commit을 볼 수 있다는 기존 계약을 과장하지 않는다.
+현재 READ COMMITTED에서 같은 transaction을 쓰더라도 SELECT마다 snapshot이 달라진다.
+따라서 관련 조회를 단일 SQL로 합치거나, **첫 SELECT 이전**에 read-only REPEATABLE READ
+transaction을 시작해 응답 전체(참조 해석·본문·추가 조회)를 감싼다. 이미 autobegin된 READ COMMITTED
+session의 중간에서 isolation만 올리는 방법은 금지한다. 이 규약의 구현·검증 전에는 다중 SELECT
+응답이 단일 image를 보장한다고 주장하지 않는다. 별도 HTTP 페이지는 서로 다른 commit을 볼 수 있다.
+
+현재 `packages/kor-travel-map-api/src/kortravelmap/api/routers/features.py`에서 확인한 검사 대상은
+다음과 같다. 단일 SELECT로 끝나는 경로도 구현 단계에 확인해 분류한다.
+
+| 경로/함수 | 서로 다른 SELECT가 섞일 수 있는 경계 |
+|---|---|
+| `get_feature` | `resolve_feature_ref_or_error` → `_public_feature_row_or_404` 및 상세 보조 조회 |
+| `get_features_batch` | `resolve_feature_identities_bulk` → `get_service_feature_batch_items` |
+| `list_features_nearby_by_target` | `get_poi_cache_target_by_key` → `features_nearby_poi_cache_target` |
+| `get_feature_price_snapshot` | identity/공개성 조회 → 가격 current/history 조회 |
+
+전체 inventory는 T-CWRITE-01에서 admin/curation·다른 router까지 확장하고, 실제 함수명을 코드와
+대조한다. T-CWRITE-04에서 각 경로의 SELECT 사이 writer commit을 주입해 old/old 또는 new/new만
+허용하고 old identity/새 본문·이전 total/새 items·주소/다른 Geo stamp 혼합을 거부한다.
 
 지역 snapshot 여러 개를 하나의 전국 release로 공개해야 하는 provider는 지역별 commit으로
 바꾸지 않는다. 이번 방식에서 제외해 전체 dataset anchor와 한 transaction을 유지한다. 향후
@@ -188,7 +245,8 @@ MOIS의 기존 chunk 공개 의미는 ADR-108을 유지한다.
 - 기존 seal 입력 정의를 바꾸면 `input_set_formula` 세대를 올리고 구 receipt를 재해석하지 않는다.
   전체 payload `jsonb_agg` 대신 ADR-099의 정렬된 고정폭 member digest fold를 유지한다.
 - `geo_data_token`/`DatasetRef`는 Geo의 활성 데이터 지문이지 Map 쓰기 세대가 아니다. run의 Geo
-  토큰 관측이 섞이면 ADR-109/113대로 stale 재해석·stamp를 보류한다. 새 epoch를 Geo 지문처럼 쓰지 않는다.
+  토큰 관측이 섞이면 ADR-109/113대로 stale 재해석·stamp를 보류한다. 후보별 해석 증거와
+  effective 그룹 winner의 stamp는 §4.1 규약으로 일치시킨다. 새 epoch를 Geo 지문처럼 쓰지 않는다.
 - Map에는 이 설계가 전환할 공개용 active release pointer가 현재 없다. 기존 Geo release 계획과
   theme candidate generation을 Map 전체 release로 부르지 않는다. cache target generation/outbox,
   ETag/row_revision·공개 `public_ready`/공간 인덱스가 commit과 함께 일치해야 한다.
@@ -219,9 +277,10 @@ fence다. claim은 짧은 transaction으로 epoch를 발급한다. 적용 transa
 1. 측정/호출·trigger 전수 목록, 재현 fixture, field winner 정책을 먼저 만든다.
 2. 후보 원장·정책·redirect·scope 원장을 additive migration으로 넣고 **기존 전역 잠금 아래에서**
    backfill·winner 비교·회복 테스트를 끝낸다. shadow 계산은 공개값을 바꾸지 않는다.
-3. 모든 writer에 protocol gate를 먼저 배포한다. 기존 전역 경로도 배타 gate를 잡는다. 구 binary가
+3. **정책 활성화 전** 모든 writer에 protocol gate를 먼저 배포한다. 기존 전역 경로도 배타 gate를 잡는다. 구 binary가
    남아 gate를 우회하면 세분화 mode 진입을 DB에서 거부한다. drain 후 API/CS/CLI 코드와 DB head를 확인한다.
-4. 새 프로토콜을 feature flag 기본 OFF로 배포하고, 독립 dataset 2개를 opt-in한다. 두 세션으로
+4. 새 프로토콜은 feature flag 기본 OFF로 배포한다. §3의 완전성 검증·배타 gate 아래 원자적
+   policy cutover를 통과시킨 뒤 독립 dataset 2개를 opt-in한다. 두 세션으로
    실제 쓰기 중첩을 확인한다. 공통 Feature/수동 명령은 이어서 충돌 시험한다.
 5. 지역 opt-in, root/catalog·notice/merge/admin/cancel 경로 순으로 넓힌다. 미지원 경로는 배타 gate라
    안전하지만 느리다. 최종 수용에서 범위와 남은 배타 경로를 전수 공개한다.

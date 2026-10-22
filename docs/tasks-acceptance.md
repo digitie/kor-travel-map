@@ -54,18 +54,32 @@
   geometry 대량 1개를 확보한다. 수집 키/비밀/개인 payload를 문서에 노출하지 않는다.
 - [ ] ADR-114 §9 기준선(3회, cold/warm 구분)을 보관하고 API/UI p50/p95·PG 포함 CPU/RAM·
   lock wait/hold·WAL/temp·rows/s를 분리한다. 기존 상태를 고의로 운영 장애로 만들지 않는다.
+- [ ] 다중 SELECT 응답 inventory를 router/함수/실제 SQL 호출 순서별로 만든다. ADR-114 §6의
+  상세·batch·target nearby·price snapshot부터 admin/curation 등 전체 관련 경로로 확장하고,
+  각 경로의 현 isolation과 단일 SQL/최초 SELECT 전 REPEATABLE READ 전환 방식을 명시한다.
 
 ## T-CWRITE-02 — 공유 Feature의 후보·필드 winner·병합 정본
 
 선행: T-CWRITE-01. 전역 fence 아래에서 먼저 정확성을 검증한다.
 
 - [ ] additive migration·runtime ACL·typed procedure로 후보/정책/redirect를 구현한다.
-  base backfill provenance 대조와 예외 입력 fail-closed, fresh/기존 DB migration을 검증한다.
+  **모든 활성 membership의 current head**에서 field 후보를 재구성한다. membership/head digest와
+  필드별 복원/정당한 무값 이유로 완전성을 검증하며, 원문·변환·Geo 증거가 부족하면 scope enable과
+  policy cutover를 거부한다. legacy base가 하위 B만 가진 채 활성 상위 A/B가 존재하는 fixture에서
+  양쪽 재수집 순서를 반전해 A가 동일 winner가 되는지 검증한다. fresh/기존 DB migration도 검증한다.
 - [ ] 실제 provider 계약으로 초기 field rank/null 정책을 정한다. 복수 소유 필드의 미설정은
   세분화 enable을 거부한다. A→B/B→A·동시 시작·동시 timestamp·상이 payload로 실행해
   winner/base/effective/raw hash가 모두 동일함을 증명한다.
 - [ ] omitted/null/빈 geo/partial 응답, override 설정 중 수집·revoke, lifecycle/publication/quality
   독립성, 마지막 source 소실/다른 source 잔존/수동 origin/재활성화 금지 사례를 검증한다.
+- [ ] R1 `{name, phone}` → partial R2 `{name}`에서 phone 원문은 R1, validated-through head는
+  R2로 유지하고 명시 null은 별도 처리한다. phone override 설정→R2 수집→revoke 후에도 검증된
+  R1 phone이 복원되며 current-head 조건 때문에 후보가 탈락하지 않는지 검증한다.
+- [ ] 주소/행정코드/Geo 유도 필드·stamp의 일관 그룹 정책과 후보 입력 digest/token/transform
+  증거를 검증한다. 상위 A(T1) winner 중 하위 B(T2) 수집 시 effective와 stamp는 A/T1이며
+  T2 기준 stale다. 그룹 일부 override와 revoke에서 잘못된 B/T2 stamp·섞인 그룹 결과는 0이다.
+- [ ] 초기 backfill은 shadow이며 policy 활성화가 아니다. T-CWRITE-03의 gate 전수 배선 후
+  T-CWRITE-04에서 활성화한다. 정책 revision 전환 함수의 성공/실패 원자성 반증 fixture를 준비한다.
 - [ ] merge의 claim·redirect·link·후보·override 충돌·curation·ADR-097 소비자 재결합을 검증한다.
   loser의 늦은 수집, A↔B 동시 merge, 사슬/순환, purge된 정본, kind 차이를 반증한다.
 
@@ -87,13 +101,23 @@
 
 선행: T-CWRITE-03. 수집 concurrency만 바꾸어 완료하지 않는다.
 
+- [ ] 첫 policy 활성화 및 이후 변경은 배타 protocol gate 아래 영향 closure와 head/membership를
+  재검증하고 winner/base/effective/Geo stamp·seal 의존·cache/outbox 및 active revision을 한
+  transaction으로 바꾼다. writer 경쟁·계획 뒤 head 변경·절반 재계산 시 장애를 주입해 성공 전환
+  또는 기존 revision/공개값 유지 중 하나임을 검증한다. 비동기 등록만으로 선활성화하지 않는다.
+  이전 정책 child seal은 stale로 판정하며, 후보 불완전 scope는 활성화하지 않는다.
 - [ ] 동일 입력의 두 독립 dataset은 서로의 commit을 기다리지 않고 DML 구간이 겹친다.
   공유 Feature가 있으면 정확히 해당 충돌에서 직렬화하며 A/B 순서와 retry 횟수에 관계없이
   T-CWRITE-02의 동일 결과를 얻는다. lost update·분열 identity·잘못된 source head는 0이다.
 - [ ] 계획 뒤 새 link/identity/redirect 발생을 주입하면 재검증이 실패하고 전체 재계획한다.
   동일 identity의 동시 최초 생성·source entity N:1 Feature·legacy alias 충돌도 검증한다.
 - [ ] 일반 snapshot 적재·retire·seal은 한 commit이다. 중간 실패 후 API에는 기존 image만
-  보이며, 다중 SQL 응답·public_ready·geometry sidecar·ETag/cache generation이 일치한다.
+  보이며 public_ready·geometry sidecar·ETag/cache generation이 일치한다.
+- [ ] T-CWRITE-01의 다중 SELECT API inventory 전부를 단일 SQL 또는 첫 SELECT 전 read-only
+  REPEATABLE READ로 구현한다. READ COMMITTED의 같은 transaction만으로 수용하지 않는다.
+  `get_feature`, `get_features_batch`, `list_features_nearby_by_target`, `get_feature_price_snapshot`
+  및 audit에서 추가된 경로 각각의 SELECT 사이 writer commit을 주입해 하나의 응답에는 old/old
+  또는 new/new만 나오고 참조/본문·total/items·주소/Geo stamp의 mixed image가 0임을 검증한다.
 - [ ] read/write 혼합·두 dataset 역순 입력·세 writer 순환 조건으로 deadlock/SSI를 주입해
   bounded rollback/replan으로 수렴하고 advisory 개수가 Feature 수에 비례하지 않음을 보인다.
 
@@ -101,6 +125,12 @@
 
 선행: T-CWRITE-04. 전국 snapshot을 임의로 쪼개지 않는다.
 
+- [ ] 지역 coverage membership와 dataset 전체 entity 유효성을 분리한다. A full snapshot의
+  누락만으로 전역 후보/Feature를 retire하지 않는다. A 완료→B 시작, A 완료→B 실패·timeout,
+  B 관측→A 완료 순서를 검증해 이동 source의 같은 UUID/후보/effective가 유지됨을 증명한다.
+  증거 없는 소실은 pending-not-retire로 남기고 bounded reconciliation 또는 dataset 전체 경로로
+  처리한다. global tombstone/authoritative entity 소실 lookup/완전 전국 snapshot일 때만 전역
+  비활성화하며 불명확한 404와 timeout은 그 근거가 아니다.
 - [ ] provider가 완전성을 보장하는 coverage와 scope_version을 근거로 opt-in한다. 불완전
   지역·증분·failed/empty 응답은 absent retire하지 않는다. `unknown`이 전역 의미가 아님을 검증한다.
 - [ ] 같은 dataset의 서로 다른 지역 DML 중첩, 같은 지역 직렬화, 전체 dataset snapshot과
