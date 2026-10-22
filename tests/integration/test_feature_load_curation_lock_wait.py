@@ -44,7 +44,8 @@ _DAGSTER_SERVER_SETTINGS = {"statement_timeout": "600000", "lock_timeout": "3000
 """``kortravelmap.dagster.resources.kor_travel_map_client_resource``와 같은 값."""
 
 _CURRENT_TIMEOUTS_SQL = (
-    "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')"
+    "SELECT current_setting('lock_timeout'), current_setting('statement_timeout'),"
+    " current_setting('client_connection_check_interval')"
 )
 
 _HOLD_SECONDS = 40.0
@@ -109,13 +110,19 @@ async def test_a_load_waits_past_the_engine_lock_timeout_and_api_writers_do_not(
             await lock_feature_curation_write(session)
 
     hold_task = asyncio.create_task(_hold())
-    await asyncio.wait_for(holding.wait(), timeout=30)
-    armed, control, api = await asyncio.gather(
-        _timed(_client(armed_engine, 120).load_enrichment_links([])),
-        _timed(_client(control_engine, 0).load_enrichment_links([])),
-        _timed(_api_single_writer()),
-    )
-    await hold_task
+    try:
+        await asyncio.wait_for(holding.wait(), timeout=30)
+        armed, control, api = await asyncio.gather(
+            _timed(_client(armed_engine, 120).load_enrichment_links([])),
+            _timed(_client(control_engine, 0).load_enrichment_links([])),
+            _timed(_api_single_writer()),
+        )
+        await hold_task
+    finally:
+        # 어디서 실패하든 holder를 끝내야 세션 공유 DB에 fence가 남지 않는다.
+        if not hold_task.done():
+            hold_task.cancel()
+        await asyncio.gather(hold_task, return_exceptions=True)
 
     armed_elapsed, armed_error = armed
     assert armed_error is None, f"무장한 적재가 실패했다: {armed_error!r}"
@@ -177,6 +184,6 @@ async def test_after_acquiring_the_short_timeouts_come_back(
                 await holder.commit()
     finally:
         await short.dispose()
-    assert observed == [("2s", "10min")]
+    assert observed == [("2s", "10min", "0")]
     assert _sqlstate(caught.value) == "55P03"
     assert elapsed < 10.0

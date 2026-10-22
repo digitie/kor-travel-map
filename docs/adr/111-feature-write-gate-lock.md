@@ -140,3 +140,7 @@ PR #1319는 재시도·물러섬·멈춤 알림·root 닫기를 세 판에 걸�
 30초 만에 55P03으로 실패했다. client의 적재 transaction은 이제 `feature-curation-write`를 **처음 잡는 한 문장만**
 `lock_timeout`을 설정값(기본 900초)으로, 필요하면 `statement_timeout`을 그 + 60초로 늘리고 직후 되돌린다. 잠금 의미·
 순서(§2)는 그대로이고, 단건 writer(5초·503)·reconcile sensor(ADR-112 예산)·completion sweep은 무장하지 않는다.
+절충: PostgreSQL 잠금 줄은 먼저 온 순서라, 적재 여럿이 줄을 서면 fence가 쉬지 않고 이어져 단건 writer(503)와 root
+완결(다음 tick)이 끼어들 틈이 줄어든다. 또 상한보다 오래 쥐는 적재 — 스트리밍 snapshot은 fetch·역지오코딩을 열린
+transaction 안에서 해 1시간 넘게 쥐었다(2026-10-22 실측) — 뒤에서는 여전히 실패한다. 보유 시간 자체를 줄이는 것이
+후속 2안이다.

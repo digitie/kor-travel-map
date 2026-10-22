@@ -332,9 +332,12 @@ class KorTravelMapSettings(BaseSettings):
         description=(
             "provider 적재 transaction이 ``feature-curation-write`` fence를 처음 잡을 때 "
             "기다리는 상한(초). Dagster 엔진의 ``lock_timeout=30000``은 다른 적재의 쓰기 "
-            "단계(분 단위) 뒤에서 30초 만에 55P03으로 실패했다(2026-10-22). 그 한 문장만 "
-            "늘리고 직후 되돌린다 — API 단건 writer·reconcile sensor·completion sweep은 "
-            "영향 없음. ``0``은 끈다(엔진 값 그대로). 상한 1시간 — run 상한 2~6시간 안. "
+            "단계 뒤에서 30초 만에 55P03으로 실패했다(2026-10-22). 그 한 문장만 늘리고 직후 "
+            "되돌린다. 이 상한보다 오래 쥐는 적재(실측: 스트리밍 snapshot이 fetch·역지오코딩을 "
+            "transaction 안에서 하며 1시간 넘게) 뒤에서는 여전히 실패한다 — 그것은 후속 2안. "
+            "API 단건 writer·reconcile sensor·completion sweep의 자기 상한은 그대로지만, 줄 선 "
+            "적재들이 fence를 이어 잡으면 그들이 끼어들 틈은 줄어든다. ``0``은 끈다(엔진 값 "
+            "그대로). 상한 1시간 — run 상한 2~6시간 안. "
             "env ``KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS``."
         ),
     )

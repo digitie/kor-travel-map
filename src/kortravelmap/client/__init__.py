@@ -598,10 +598,11 @@ class AsyncKorTravelMapClient:
     async def _feature_load_transaction(self) -> AsyncIterator[AsyncSession]:
         """provider 적재 쓰기 transaction — 첫 ``feature-curation-write`` 획득만 길게 기다린다.
 
-        다른 적재의 쓰기 단계가 fence를 몇 분 쥐는 동안 Dagster 엔진의 ``lock_timeout``
-        (30초)으로는 55P03으로 죽는다(2026-10-22, 다섯 dataset). 대기 상한은
+        다른 적재의 쓰기 단계가 fence를 쥐는 동안 Dagster 엔진의 ``lock_timeout``(30초)으로는
+        55P03으로 죽는다(2026-10-22, 다섯 dataset). 대기 상한은
         ``feature_load_curation_lock_wait_seconds``이고 그 한 문장만 늘린 뒤 되돌린다
-        (:func:`~kortravelmap.infra.feature_repo.arm_feature_curation_write_wait`).
+        (:func:`~kortravelmap.infra.feature_repo.arm_feature_curation_write_wait`). 어느 메서드가
+        무장되는지는 ``tests/unit/test_feature_load_curation_lock_wait.py``의 분류표가 정본이다.
         """
         async with self._session_factory() as session, session.begin():
             arm_feature_curation_write_wait(session, self._feature_load_lock_wait_ms)

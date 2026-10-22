@@ -17,8 +17,11 @@
   `load_price_features`)는 `feature-curation-write`를 처음 잡을 때 엔진 `lock_timeout`(Dagster 30초) 대신 설정값까지
   기다린다. 그 한 문장만 `SET LOCAL`로 늘리고 직후 되돌린다(늘리기만 한다 — 0/더 긴 값은 그대로).
 - **ADDED (설정)**: `KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS`(기본 900, 0=끔, 최대 3600).
-- **ADDED (infra)**: `feature_repo.arm_feature_curation_write_wait`. API 단건 writer·reconcile sensor·completion sweep은
-  바뀌지 않는다. migration·OpenAPI 변화 없음.
+- **ADDED (infra)**: `feature_repo.arm_feature_curation_write_wait`. 긴 대기 동안 `client_connection_check_interval`이
+  꺼져 있으면 10초로 켜고, 대기가 실패하면 WARNING을 남긴다. API 단건 writer·reconcile sensor·completion sweep의
+  상한은 그대로지만, 줄 선 적재들이 fence를 이어 잡는 동안 그들이 끼어들 틈은 줄어든다. 900초보다 오래 쥐는 적재
+  (스트리밍 snapshot 실측 1시간+) 뒤에서는 여전히 실패한다 — 후속 2안. offline upload·정리 job은 무장하지 않는다.
+  migration·OpenAPI 변화 없음.
 
 ### prod 첫 적재 실패 2건 (2026-10-22)
 

@@ -9,11 +9,13 @@ Dagster 엔진의 ``lock_timeout=30000``이 다른 적재의 쓰기 단계 뒤�
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.infra.feature_repo import (
@@ -36,10 +38,22 @@ class _Result:
 class _Session:
     """실행한 SQL을 순서대로 적고, ``pg_settings``에는 주어진 현재 값을 돌려준다."""
 
-    def __init__(self, *, lock_timeout: int = 30_000, statement_timeout: int = 600_000) -> None:
+    def __init__(
+        self,
+        *,
+        lock_timeout: int = 30_000,
+        statement_timeout: int = 600_000,
+        connection_check: int = 0,
+        lock_error: BaseException | None = None,
+    ) -> None:
         self.info: dict[str, Any] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
-        self._settings = {"lock_timeout": lock_timeout, "statement_timeout": statement_timeout}
+        self._lock_error = lock_error
+        self._settings = {
+            "lock_timeout": lock_timeout,
+            "statement_timeout": statement_timeout,
+            "client_connection_check_interval": connection_check,
+        }
 
     async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
         sql = str(statement)
@@ -47,10 +61,9 @@ class _Session:
         if "pg_settings" in sql:
             return _Result([(name, str(value)) for name, value in self._settings.items()])
         if "set_config" in sql:
-            self._settings = {
-                "lock_timeout": int(params["lock_timeout"]),
-                "statement_timeout": int(params["statement_timeout"]),
-            }
+            self._settings = {name: int(params[name]) for name in self._settings}
+        if "feature-curation-write" in sql and self._lock_error is not None:
+            raise self._lock_error
         return _Result([])
 
     def kinds(self) -> list[str]:
@@ -59,7 +72,10 @@ class _Session:
             if "pg_settings" in sql:
                 out.append("read")
             elif "set_config" in sql:
-                out.append(f"set({params['lock_timeout']},{params['statement_timeout']})")
+                out.append(
+                    f"set({params['lock_timeout']},{params['statement_timeout']},"
+                    f"{params['client_connection_check_interval']})"
+                )
             elif "feature-curation-write" in sql:
                 out.append("lock")
             else:  # pragma: no cover - 방어
@@ -86,9 +102,9 @@ async def test_armed_first_acquisition_extends_both_timeouts_then_restores() -> 
     # statement_timeout은 대기 + 60초 여유 — lock 대기가 먼저 끝나 종전과 같은 55P03이 된다.
     assert session.kinds() == [
         "read",
-        "set(900000,960000)",
+        "set(900000,960000,10000)",
         "lock",
-        "set(30000,600000)",
+        "set(30000,600000,0)",
         "lock",
     ]
     assert FEATURE_CURATION_WRITE_WAIT_INFO_KEY not in session.info
@@ -99,7 +115,12 @@ async def test_statement_timeout_already_large_enough_is_kept() -> None:
     session = _Session(lock_timeout=30_000, statement_timeout=7_200_000)
     arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
     await lock_feature_curation_write(session)  # type: ignore[arg-type]
-    assert session.kinds() == ["read", "set(900000,7200000)", "lock", "set(30000,7200000)"]
+    assert session.kinds() == [
+        "read",
+        "set(900000,7200000,10000)",
+        "lock",
+        "set(30000,7200000,0)",
+    ]
 
 
 @pytest.mark.asyncio
@@ -107,7 +128,38 @@ async def test_unbounded_statement_timeout_stays_unbounded() -> None:
     session = _Session(lock_timeout=30_000, statement_timeout=0)
     arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
     await lock_feature_curation_write(session)  # type: ignore[arg-type]
-    assert session.kinds() == ["read", "set(900000,0)", "lock", "set(30000,0)"]
+    assert session.kinds() == ["read", "set(900000,0,10000)", "lock", "set(30000,0,0)"]
+
+
+@pytest.mark.asyncio
+async def test_configured_connection_check_is_kept() -> None:
+    """``client_connection_check_interval``은 꺼져 있을 때만 10초로 켠다."""
+    session = _Session(connection_check=3_000)
+    arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
+    await lock_feature_curation_write(session)  # type: ignore[arg-type]
+    assert session.kinds() == [
+        "read",
+        "set(900000,960000,3000)",
+        "lock",
+        "set(30000,600000,3000)",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_long_wait_is_logged_and_reraised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """15분 뒤의 55P03이 왜 늦었는지 남긴다 — 성공만 로그하면 실패한 긴 대기가 보이지 않는다."""
+    error = DBAPIError("SELECT pg_advisory_xact_lock", {}, Exception("55P03"))
+    session = _Session(lock_error=error)
+    arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
+    with (
+        caplog.at_level(logging.WARNING, logger="kortravelmap.infra.feature_repo"),
+        pytest.raises(DBAPIError),
+    ):
+        await lock_feature_curation_write(session)  # type: ignore[arg-type]
+    assert session.kinds() == ["read", "set(900000,960000,10000)", "lock"]
+    assert any("기다리다 실패" in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.parametrize("prior_lock_ms", [0, 900_000, 1_800_000])
@@ -214,3 +266,90 @@ async def test_maintenance_purge_is_not_armed(
     await client.purge_expired_notices()
     assert seen == [None]
 
+
+
+# ── 어느 client 메서드가 fence에 닿고, 그중 어느 것이 무장되는가 ─────────────────
+
+_ARMED: frozenset[str] = frozenset(
+    {
+        "load_feature_bundles",
+        "load_feature_bundles_reobserving",
+        "load_feature_bundle_batches",
+        "load_authoritative_feature_snapshot",
+        "load_authoritative_notice_snapshot",
+        "load_notice_event_bundles",
+        "retire_features_by_source",
+        "retire_geometryless_area_features_by_source",
+        "load_enrichment_links",
+        "load_festival_enrichment",
+        "refresh_festival_enrichment_reviews",
+        "load_price_features",
+    }
+)
+"""provider 적재 쓰기 — 다른 적재 뒤에서 길게 기다린다."""
+
+_UNARMED_BY_DECISION: frozenset[str] = frozenset(
+    {
+        # 정리(maintenance) job — 하루 한 번, 실패하면 다음 날 다시 한다.
+        "reconcile_notice_features",
+        "purge_expired_notices",
+        # 관리 단건/병합 — 짧게 기다리는 쪽이 맞다.
+        "resolve_enrichment_review",
+        "merge_dedup_review",
+        "enrich_place_phone",
+        # offline upload는 fence 앞에서 upload별 advisory·job 행 잠금을 먼저 쥔다 — 길게 기다리면
+        # 그것들도 그만큼 쥔다. 적재 경로지만 이번 범위 밖(T-LOAD-LOCK-WAIT 절충).
+        "run_offline_upload_load_job",
+        # MOIS CLI 경로 — CLI 엔진에는 lock_timeout이 없다(무장해도 아무것도 안 바뀐다).
+        "load_mois_license_features_bulk",
+        "sync_mois_license_features_bulk",
+        "run_mois_license_bulk_job",
+        "run_mois_license_incremental_job",
+        "run_mois_license_closed_job",
+    }
+)
+
+
+def _reaches_fence(fn: object, depth: int, seen: set[object]) -> bool:
+    """함수 본문(중첩 code 포함)이 참조하는 전역을 따라가 fence 함수에 닿는가."""
+    import inspect
+    import types
+
+    from kortravelmap.infra import feature_repo
+
+    target = inspect.unwrap(fn)  # type: ignore[arg-type]
+    if not isinstance(target, types.FunctionType) or target in seen:
+        return False
+    seen.add(target)
+    if not target.__module__.startswith("kortravelmap"):
+        return False
+    names: set[str] = set(target.__code__.co_names)
+    for const in target.__code__.co_consts:
+        if isinstance(const, types.CodeType):
+            names |= set(const.co_names)
+    for name in names:
+        value = target.__globals__.get(name)
+        if value is feature_repo.lock_feature_curation_write:
+            return True
+        if depth and isinstance(value, types.FunctionType) and _reaches_fence(
+            value, depth - 1, seen
+        ):
+            return True
+    return False
+
+
+def test_every_fence_reaching_client_method_is_classified() -> None:
+    """새 메서드가 fence에 닿으면 무장할지 정하게 만든다 — 빠진 무장도, 잘못된 무장도 빨갛다."""
+    import inspect
+
+    armed: set[str] = set()
+    unarmed: set[str] = set()
+    for name, member in vars(AsyncKorTravelMapClient).items():
+        if not inspect.isfunction(member) or not _reaches_fence(member, 4, set()):
+            continue
+        if "_feature_load_transaction" in member.__code__.co_names:
+            armed.add(name)
+        else:
+            unarmed.add(name)
+    assert armed == _ARMED
+    assert unarmed == _UNARMED_BY_DECISION

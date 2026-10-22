@@ -183,15 +183,22 @@ _FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS: Final[int] = 60_000
 """긴 대기 동안 ``statement_timeout``을 ``대기 + 이 여유``까지 올린다 — lock 대기가 먼저 끝나
 statement 취소(57014)가 아니라 종전과 같은 55P03으로 실패하게."""
 
+_FEATURE_CURATION_WRITE_WAIT_CONNECTION_CHECK_MS: Final[int] = 10_000
+"""긴 대기 동안 ``client_connection_check_interval``(꺼져 있을 때만). run worker가 죽으면 그
+backend가 최대 대기 내내 줄에 남지 않고 10초 안에 빠진다(completion sweep과 같은 값)."""
+
 _SESSION_LOCK_TIMEOUTS_SQL: Final[str] = """
 SELECT name, setting
 FROM pg_catalog.pg_settings
-WHERE name IN ('lock_timeout', 'statement_timeout')
+WHERE name IN ('lock_timeout', 'statement_timeout', 'client_connection_check_interval')
 """
 
 _SET_LOCAL_LOCK_TIMEOUTS_SQL: Final[str] = """
 SELECT pg_catalog.set_config('lock_timeout', :lock_timeout, true),
-       pg_catalog.set_config('statement_timeout', :statement_timeout, true)
+       pg_catalog.set_config('statement_timeout', :statement_timeout, true),
+       pg_catalog.set_config(
+         'client_connection_check_interval', :client_connection_check_interval, true
+       )
 """
 
 
@@ -199,10 +206,11 @@ def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None
     """이 session의 **첫** ``feature-curation-write`` 획득이 ``wait_ms``까지 기다리게 한다.
 
     provider 적재 transaction 전용이다(client의 적재 메서드가 session을 연 직후 부른다).
-    Dagster 엔진의 ``lock_timeout=30000``은 다른 적재의 쓰기 단계(분 단위) 뒤에서 30초만
-    기다리고 55P03으로 죽었다(2026-10-22). 잠금 의미·순서(ADR-111 §2)는 그대로이고, 대기
-    상한만 그 한 문장에서 늘어난다. API/관리 단건 writer·reconcile sensor·completion sweep은
-    이 함수를 부르지 않으므로 종전 상한(5s·ADR-112 예산)을 그대로 쓴다. ``0``은 끈다.
+    Dagster 엔진의 ``lock_timeout=30000``은 다른 적재의 쓰기 단계 뒤에서 30초만 기다리고
+    55P03으로 죽었다(2026-10-22). 잠금 의미·순서(ADR-111 §2)는 그대로이고, 대기 상한만 그 한
+    문장에서 늘어난다. API/관리 단건 writer·reconcile sensor·completion sweep은 이 함수를 부르지
+    않으므로 **자기 상한**(5s·ADR-112 예산)은 그대로다 — 다만 줄 선 적재들이 fence를 쉬지 않고
+    이어 잡으면 그들이 fence를 얻을 틈이 줄어든다(T-LOAD-LOCK-WAIT 절충). ``0``은 끈다.
     """
     if wait_ms < 0:
         raise ValueError("wait_ms는 0 이상이어야 합니다.")
@@ -230,7 +238,8 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
 
 
 async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: int) -> None:
-    """``lock_timeout``(필요하면 ``statement_timeout``도)을 그 한 문장 동안만 늘려 fence를 잡는다.
+    """``lock_timeout``(필요하면 ``statement_timeout``·``client_connection_check_interval``도)을
+    그 한 문장 동안만 바꿔 fence를 잡는다.
 
     늘리기만 한다 — 현재 ``lock_timeout``이 0(무한)이거나 이미 ``wait_ms`` 이상이면 그대로
     잡는다. 잡은 뒤에는 두 값을 직전 값으로 되돌려(``SET LOCAL``) 이 transaction의 다른
@@ -241,6 +250,7 @@ async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: i
     current = {str(name): int(setting) for name, setting in rows}
     prior_lock_ms = current["lock_timeout"]
     prior_statement_ms = current["statement_timeout"]
+    prior_check_ms = current["client_connection_check_interval"]
     if prior_lock_ms == 0 or prior_lock_ms >= wait_ms:
         await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
         return
@@ -248,16 +258,35 @@ async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: i
     floor_ms = wait_ms + _FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS
     if statement_ms != 0 and statement_ms < floor_ms:
         statement_ms = floor_ms
+    check_ms = prior_check_ms or _FEATURE_CURATION_WRITE_WAIT_CONNECTION_CHECK_MS
     await session.execute(
         text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
-        {"lock_timeout": str(wait_ms), "statement_timeout": str(statement_ms)},
+        {
+            "lock_timeout": str(wait_ms),
+            "statement_timeout": str(statement_ms),
+            "client_connection_check_interval": str(check_ms),
+        },
     )
     started = time.monotonic()
-    await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+    try:
+        await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+    except DBAPIError:
+        # 성공만 남기면 15분 뒤의 맨 55P03이 왜 그렇게 늦었는지 아무도 모른다.
+        _LOG.warning(
+            "feature-curation-write fence를 %.1f초 기다리다 실패했다 (상한 %dms, 종전 %dms)",
+            time.monotonic() - started,
+            wait_ms,
+            prior_lock_ms,
+        )
+        raise
     waited = time.monotonic() - started
     await session.execute(
         text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
-        {"lock_timeout": str(prior_lock_ms), "statement_timeout": str(prior_statement_ms)},
+        {
+            "lock_timeout": str(prior_lock_ms),
+            "statement_timeout": str(prior_statement_ms),
+            "client_connection_check_interval": str(prior_check_ms),
+        },
     )
     if waited >= 1.0:
         _LOG.info(
