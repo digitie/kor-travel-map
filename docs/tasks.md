@@ -42,6 +42,44 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 §11.2 4a) 전**이었으나 플립이 먼저 일어나 이제 **가능한 한 빨리**다(acceptance §T-MAP-02 2026-10-15 소유자 결정 — 머지 뒤 첫 prod 배포).
 
 
+**동시 쓰기 설계(ADR-114, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
+
+- [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
+
+  ADR-114의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-02 — **공유 Feature의 후보·필드 winner·병합 정본**
+
+  기존 전역 잠금 아래에서 후보 원장과 결정적 winner를 먼저 완성한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-03 — **scope·epoch·manifest와 protocol gate**
+
+  기존 writer가 우회할 수 없는 계층 scope와 복구 fence를 추가한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
+
+  일반 snapshot의 원자성을 유지하며 독립 dataset DML을 병행한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동**
+
+  coverage가 입증된 지역만 나누고 이동·unknown·전체 snapshot 충돌을 처리한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-06 — **curation·root·관리·병합 전수 전환**
+
+  catalog 전역 병목과 trigger closure를 함께 처리한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-07 — **실패·취소·worker 사망 복구**
+
+  idempotency·epoch fencing·artifact 재사용과 bounded retry를 완성한다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용**
+
+  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감**
+
+  drain·호환 검사·flag 전환·롤백 훈련 후 실제 운영 generation 증거로 닫는다. 설계는 [ADR-114](adr/114-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+
 - [ ] **prod Map/PinVi outage — pinned-rebuild journal이 pinset `3705983b`에서 영구 고착** — **보류**(소유자 지시 2026-09-20, weather/concierge/geo/pinvi/map DB 통합을 먼저 진행)
 
   회전·rebuild는 돌았으나 compose-up 단계 반복 실패로 prod의 map-api/ui/dagster·

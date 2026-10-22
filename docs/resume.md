@@ -1,3 +1,11 @@
+## 2026-10-23 — Map 실제 동시 쓰기 설계(ADR-114, 문서만)
+
+- 최신 main `cdd2614007a86e8627949cd1176c61eb14c0ce3e`의 전역 3종 gate, source/Feature
+  병합·base/effective·seal·Geo token 경계를 대조하고 proposed 설계와 T-CWRITE-01~09를 작성했다.
+- 코드·migration·운영 설정 변경/CI 실행 없음. 사용자 요청으로 독립 적대 리뷰 2인 후 doc-only PR을 CI 검토 없이 머지한다.
+- **다음 한 작업: 문서 리뷰 지적 반영·머지. Map 구현은 현재 Weather·Transport 작업 완료 뒤
+  T-CWRITE-01부터 시작하며, 기존 다른 열린 작업의 상태를 이 설계로 완료 처리하지 않는다.**
+
 ## 2026-10-22 — T-LOAD-LOCK-WAIT 2안(ADR-113): 브랜치 `fix/short-curation-lock-hold`
 
 - 스트리밍 snapshot 적재(8개 asset·큐 경로)는 stream을 다 받은 뒤 쓰기 transaction을 연다 — fence 보유가 fetch·지오코딩

@@ -1,3 +1,13 @@
+## 2026-10-23 — ADR-114 실제 동시 쓰기 설계·작업 원장
+
+- 근거: main `cdd2614007a86e8627949cd1176c61eb14c0ce3e`. 단순 dataset별 advisory 교체로는
+  공유 Feature·source/link 역순 잠금·root/candidate seal·과거 lock table 고갈 문제가 해결되지 않음을 반영했다.
+- 문서: dataset/지역 scope와 Feature 행 충돌 분리, 결정적 provider 후보 winner, override/retire/merge,
+  manifest 재검증·epoch fencing·SERIALIZABLE root·호환 gate·원자적 snapshot·롤백·실측 수용을 작성했다.
+- 원장: T-CWRITE-01~09 및 각 acceptance를 등록했다. Map 코딩은 진행 중 Weather·Transport 작업 뒤다.
+- 검증: 문서/코드 근거·링크·원장 정합만 점검한다. 사용자 지시대로 CI를 실행하거나 기다리지 않는다.
+  실제 코드·schema·서비스 변경과 성능 실측은 아직 없으며 문서 PR 완료와 구분한다.
+
 ## 2026-10-22 — T-LOAD-LOCK-WAIT 2안(ADR-113): 스트리밍 snapshot은 다 받은 뒤 짧게 쓴다: 브랜치 `fix/short-curation-lock-hold`
 
 - 원인(1안 PR 실측): `load_feature_bundle_batches`가 transaction을 먼저 열고 stream을 당겨, 첫 batch가 잡은

@@ -137,6 +137,8 @@
 | ADR-112 | reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다 (proposed, 설계만) | [112-reconcile-sensor-retry-alert-close.md](112-reconcile-sensor-retry-alert-close.md) |
 | ADR-113 | 스트리밍 snapshot 적재는 먼저 다 받아 두고(spool), 쓰기 transaction은 그 뒤에 짧게 연다 (proposed) | [113-snapshot-load-spool-then-write.md](113-snapshot-load-spool-then-write.md) |
 
+| ADR-114 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (proposed, 설계만) | [114-scoped-concurrent-feature-writes.md](114-scoped-concurrent-feature-writes.md) |
+
 ## 새 ADR 작성 규약
 
 > 새 ADR을 추가할 때는 위 포맷을 따른다:

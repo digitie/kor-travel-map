@@ -40,6 +40,131 @@
 > | `T-GR-03` (완료) | [archive/tasks-acceptance-gr-03.md](archive/tasks-acceptance-gr-03.md) | 약 12 KB |
 > | `T-GR-04` (완료) | [archive/tasks-acceptance-gr-04.md](archive/tasks-acceptance-gr-04.md) | 약 10 KB |
 
+## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
+
+선행: Weather·Transport의 진행 중 동시성 개선 완료. 설계 정본은 ADR-114다. 아직 측정하지 않은
+값을 목표 달성 수치로 적지 않는다.
+
+- [ ] `feature-curation-write`·`feature-write-all`·`curation-catalog-write`와 관련 session lock,
+  head/claim/link/Feature·FK·job·receipt의 모든 Python/CLI/API/Dagster/SQL/trigger writer를
+  호출 그래프로 나열한다. 각각 새 shared gate 가능/배타 fallback 사유·권한 소유자를 명시한다.
+- [ ] ADR-113 spool 경로/ADR-108 MOIS 및 notice·price projection의 별도 잠금을 구분하고
+  현재 schema head·image revision·active run·pool/timeout·NVMe 경로를 기록한다.
+- [ ] 동일 원천 artifact의 독립 dataset 2개, 공유 Feature dataset 2개, 같은 dataset 지역 2개,
+  geometry 대량 1개를 확보한다. 수집 키/비밀/개인 payload를 문서에 노출하지 않는다.
+- [ ] ADR-114 §9 기준선(3회, cold/warm 구분)을 보관하고 API/UI p50/p95·PG 포함 CPU/RAM·
+  lock wait/hold·WAL/temp·rows/s를 분리한다. 기존 상태를 고의로 운영 장애로 만들지 않는다.
+
+## T-CWRITE-02 — 공유 Feature의 후보·필드 winner·병합 정본
+
+선행: T-CWRITE-01. 전역 fence 아래에서 먼저 정확성을 검증한다.
+
+- [ ] additive migration·runtime ACL·typed procedure로 후보/정책/redirect를 구현한다.
+  base backfill provenance 대조와 예외 입력 fail-closed, fresh/기존 DB migration을 검증한다.
+- [ ] 실제 provider 계약으로 초기 field rank/null 정책을 정한다. 복수 소유 필드의 미설정은
+  세분화 enable을 거부한다. A→B/B→A·동시 시작·동시 timestamp·상이 payload로 실행해
+  winner/base/effective/raw hash가 모두 동일함을 증명한다.
+- [ ] omitted/null/빈 geo/partial 응답, override 설정 중 수집·revoke, lifecycle/publication/quality
+  독립성, 마지막 source 소실/다른 source 잔존/수동 origin/재활성화 금지 사례를 검증한다.
+- [ ] merge의 claim·redirect·link·후보·override 충돌·curation·ADR-097 소비자 재결합을 검증한다.
+  loser의 늦은 수집, A↔B 동시 merge, 사슬/순환, purge된 정본, kind 차이를 반증한다.
+
+## T-CWRITE-03 — scope·epoch·manifest와 protocol gate
+
+선행: T-CWRITE-02. 이 단계에서는 세분화 flag OFF를 기본으로 둔다.
+
+- [ ] dataset/region/attempt anchor와 manifest의 키·인덱스·idempotency·bounded 청소를 구현한다.
+  새 writer 공유/기존·restore·DDL writer 배타의 protocol gate를 모든 진입점에 배선한다.
+- [ ] 구 binary/CLI가 우회하는 혼합 배포는 enable preflight가 거부한다. 지원 제외 trigger는
+  진입 전 배타 mode로 계획하며 공유 gate를 잡은 뒤 배타 승격하지 않는다.
+- [ ] dataset 전체 배타/지역 공유 계층, anchor 정렬, claim→source→link→Feature→catalog→
+  job/receipt 순서를 SQL 호출·trigger까지 검사한다. 새 manifest에서 기존 source/link 전체 closure,
+  관련 parent/sibling·canonical redirect·retire·catalog phantom 검증이 빠지지 않는다.
+- [ ] source/Feature 다수 목록은 stream/COPY·임시 표로 처리하고 count/bytes·temp/spool 디스크
+  상한을 강제한다. 대량 Feature별 advisory 잠금 0 및 rows 증가에 따른 lock table 예산을 증명한다.
+
+## T-CWRITE-04 — 독립 데이터셋 동시 쓰기
+
+선행: T-CWRITE-03. 수집 concurrency만 바꾸어 완료하지 않는다.
+
+- [ ] 동일 입력의 두 독립 dataset은 서로의 commit을 기다리지 않고 DML 구간이 겹친다.
+  공유 Feature가 있으면 정확히 해당 충돌에서 직렬화하며 A/B 순서와 retry 횟수에 관계없이
+  T-CWRITE-02의 동일 결과를 얻는다. lost update·분열 identity·잘못된 source head는 0이다.
+- [ ] 계획 뒤 새 link/identity/redirect 발생을 주입하면 재검증이 실패하고 전체 재계획한다.
+  동일 identity의 동시 최초 생성·source entity N:1 Feature·legacy alias 충돌도 검증한다.
+- [ ] 일반 snapshot 적재·retire·seal은 한 commit이다. 중간 실패 후 API에는 기존 image만
+  보이며, 다중 SQL 응답·public_ready·geometry sidecar·ETag/cache generation이 일치한다.
+- [ ] read/write 혼합·두 dataset 역순 입력·세 writer 순환 조건으로 deadlock/SSI를 주입해
+  bounded rollback/replan으로 수렴하고 advisory 개수가 Feature 수에 비례하지 않음을 보인다.
+
+## T-CWRITE-05 — 완전 지역의 동시 쓰기·경계 이동
+
+선행: T-CWRITE-04. 전국 snapshot을 임의로 쪼개지 않는다.
+
+- [ ] provider가 완전성을 보장하는 coverage와 scope_version을 근거로 opt-in한다. 불완전
+  지역·증분·failed/empty 응답은 absent retire하지 않는다. `unknown`이 전역 의미가 아님을 검증한다.
+- [ ] 같은 dataset의 서로 다른 지역 DML 중첩, 같은 지역 직렬화, 전체 dataset snapshot과
+  지역 작업의 상호 배제, 두 지역 역순 예약의 deadlock 회피를 검증한다.
+- [ ] 좌표/행정코드 변경의 old/new 지역, route/area 경계 횡단, 경계의 점, 좌표 null↔값,
+  지역코드 개편 중 재시도를 검증한다. source/Feature UUID는 유지한다.
+- [ ] 전국 원자성이 필요한 provider는 전체 dataset transaction을 유지한다. MOIS의 기존
+  chunk 계약과 혼동하지 않고 지역 분할 지원/제외 목록을 기록한다.
+
+## T-CWRITE-06 — curation·root·관리·병합 전수 전환
+
+선행: T-CWRITE-05. 최종 완료 범위는 ADR-114 §5.3의 모든 경로다.
+
+- [ ] `_406_*.sql`의 source/theme/rule·collection/item/candidate anchor와 catalog revision을
+  도입해 서로 무관한 bulk root가 실제로 동시 DML한다. source/theme 공유는 계속 직렬화한다.
+- [ ] root SERIALIZABLE·immutable child 검증·stale_input·root replay·rule 신설/삭제 phantom,
+  trigger가 concierge catalog/materializer를 부르는 경로를 두 세션으로 반증한다.
+- [ ] provider load 중 단건 admin override·수동 생성·승인·promotion·archive·merge·purge·
+  notice reconcile·취소/completion sweep를 교차 실행한다. 지원 제외는 배타 gate로 안전하게
+  처리하고 남은 전역 gate·경로·제한을 명시한다. 전수 전환 완료로 허위 표시하지 않는다.
+- [ ] seal 입력 변경은 formula 세대를 올려 과거 receipt와 구별한다. 큰 geometry/수십만
+  member의 digest는 O(행수×고정폭)이며, 다른 dataset winner/override 변경을 seal이 감지한다.
+  Geo token 전환 시 stamp 보류와 재선택, public/PinVi 소비자 cache/outbox가 유지된다.
+
+## T-CWRITE-07 — 실패·취소·worker 사망 복구
+
+선행: T-CWRITE-06. 실패 시점별 실행 기록과 DB 결과를 보관한다.
+
+- [ ] fetch/plan/anchor wait/최초 DML/retire/seal/commit 직전·직후 응답 유실에 kill·네트워크
+  단절·cancel을 주입한다. 부분 snapshot 노출·orphan 권한·중복 receipt·영구 running은 0이다.
+- [ ] lease 만료 뒤 stale worker 복귀, epoch 교체 경쟁, cancel-vs-commit, janitor-vs-publish를
+  검증한다. 새 owner는 옛 transaction 종료 전 epoch를 빼앗지 않으며 옛 owner는 재진입을 거부한다.
+- [ ] 55P03/40P01/40001의 제한 retry/backoff/deadline·artifact hash 검증·idempotent receipt
+  조회를 검증한다. transient DB 장애에서 불필요한 upstream fetch 재실행은 0이다.
+- [ ] 소유 attempt의 orphan query만 종료하고 unrelated PG 세션/서비스는 유지한다. pool/PG
+  connection·tmp artifact·epoch/lease 정리가 수렴한다. ADR-112 알림·sweep 시간 예산이 유지된다.
+
+## T-CWRITE-08 — 적대 리뷰 2인·실부하·UI 수용
+
+선행: T-CWRITE-07. 구현 PR에는 이 문서 PR의 CI 생략 예외를 적용하지 않는다.
+
+- [ ] 독립 리뷰어 2인이 병합/데이터 정합성, 실패/잠금·운영/메모리 관점으로 최종 HEAD를
+  적대 검토한다. 모든 지적은 수정·재검증 또는 근거 있는 비해당으로 결론 내며 미해결 P0/P1/P2는 0이다.
+- [ ] 필요한 Python/통합·lint/type/import/DTO/OpenAPI·frontend 게이트를 구현 변경 범위에 맞게
+  통과시킨다. 실제 PG 다중 세션과 row 수·geometry 크기 확대한 검사를 포함한다.
+- [ ] live API/UI에서 목록·지도·상세·페이지 이동·override/revoke·수동 갱신·root 상태·실패 후
+  재시도·모바일을 확인한다. 실제로 쓴 격리 fixture만 복구/정리하고 운영 데이터를 임의 삭제하지 않는다.
+- [ ] ADR-114 §9 전후 3회 실측과 독립 2작업의 총 시간 단축, 정확성/무한 정지 0을 증명한다.
+  CPU core-seconds/row·peak RAM·API p95의 10% 초과 악화는 원인 해결 전 확대를 막는다.
+  결과에는 병행 개수·host·artifact/hash·schema/image generation·다른 collector 부하를 붙인다.
+
+## T-CWRITE-09 — 배포·확대·되돌림과 문서 마감
+
+선행: T-CWRITE-08. source/doc merge와 실제 운영 수용을 구분한다.
+
+- [ ] Manager 공식 배포 경로, NVMe artifact/spool/이미지 경로를 확인한다. API/CS/CLI를 drain하고
+  schema migrate-forward·protocol 호환 preflight 후 배포한다. 불필요한 daemon/다른 서비스 재시작은 없다.
+- [ ] flag OFF → 독립 dataset 2개 → 완전 지역 → 나머지 순서로 검증·확대한다. 아직 배타 fallback인
+  경로와 이유를 공개한다. 새 claim 중단→drain→배타 경로 복귀 훈련과 receipt 무손상을 증명한다.
+- [ ] ADR-114의 구현된 결정만 accepted/현행 관계로 갱신하고 ADR-111의 supersede 범위를 정확히
+  적는다. runtime/schema·설정·복구·측정 문서, tasks/resume/journal을 일치시킨다.
+- [ ] 각 task를 실제 완료된 운영 generation·증거 링크와 함께 tasks-done으로 이동한다. 문서 설계
+  머지만으로 구현/배포/실측 task를 닫지 않는다.
+
 ## 지금 무엇이 사실인가 — `T-VN-FINAL-REBUILD`
 
 원문 규칙은 이렇다.
