@@ -5,19 +5,20 @@ transport(이후 weather)의 **현재 상태**를 Valkey(Redis 호환)에 데이
 키 설계·교체 순서·거부 기준의 정본은 ADR-114 "구현 설계 — 1단계" D2~D5이고, 이 모듈은 그 구현이다.
 
 - 세대 키는 쓰고 나면 바꾸지 않는다. 바꾸는 것은 ``{ds}:current`` 포인터이고, 그것은 Lua 스크립트
-  하나(:data:`_FLIP_SCRIPT`)가 compare-and-set과 개수 검사를 한 뒤에만 바꾼다. 읽는 쪽은 포인터를 한 번
-  읽고 그 세대의 키만 읽으므로 옛 세대와 새 세대가 섞여 보이는 순간이 없다.
+  하나(:data:`_FLIP_SCRIPT`)가 compare-and-set과 개수 검사를 한 뒤에만 바꾼다. 읽는 쪽은 포인터를
+  한 번 읽고 그 세대의 키만 읽으므로 옛 세대와 새 세대가 섞여 보이는 순간이 없다.
 - **세대가 있다는 표지는 ``meta`` 하나다.** 0건·좌표 없는 세대에는 ``items``·``geo`` 키가 없다.
 - 쓰는 동안의 새 키는 build TTL을 단다 — 적재가 죽으면 아무도 가리키지 않는 키가 저절로 사라진다
-  (Valkey는 ``noeviction``이라 스스로 치워야 한다). 교체 때 새 키의 TTL을 지우고 옛 세대 키에 grace TTL을
-  건다. grace 동안 진행 중인 페이지 순회는 옛 세대로 끝난다.
+  (Valkey는 ``noeviction``이라 스스로 치워야 한다). 교체 때 새 키의 TTL을 지우고 옛 세대 키에
+  grace TTL을 건다. grace 동안 진행 중인 페이지 순회는 옛 세대로 끝난다.
 - 원천이 비정상적으로 작은 집합을 주면 교체하지 않는다(:func:`evaluate_shrink_guard`) — 2026-10-23
   KREX 빈 응답이 돌발 106건을 한 번에 닫은 사고가 출처다.
-- 값은 이미 직렬화된 문자열(JSON)이다. 이 모듈은 값의 모양을 모른다(``dto.transport_state``가 안다).
+- 값은 이미 직렬화된 문자열(JSON)이다. 이 모듈은 값의 모양을 모른다(``dto.transport_state``가
+  안다).
 
 Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 가능)과
-:class:`StateStoreOutOfMemory`(``noeviction`` 쓰기 거부 — 재시도로 안 풀림)로 올린다. 읽는 쪽은 둘 다 503이다.
-메시지에 URL·비밀번호를 싣지 않는다.
+:class:`StateStoreOutOfMemory`(``noeviction`` 쓰기 거부 — 재시도로 안 풀림)로 올린다. 읽는 쪽은 둘
+다 503이다. 메시지에 URL·비밀번호를 싣지 않는다.
 """
 
 from __future__ import annotations
@@ -66,7 +67,8 @@ __all__ = [
 _LOGGER = logging.getLogger(__name__)
 
 STATE_KEY_NAMESPACE: Final[str] = "ktm:state"
-"""모든 버전의 상태 키가 공유하는 이름공간. 다른 버전 정리(:meth:`ValkeyStateStore.retire_other_versions`)의 범위."""
+"""모든 버전의 상태 키가 공유하는 이름공간. 다른 버전
+정리(:meth:`ValkeyStateStore.retire_other_versions`)의 범위."""
 
 STATE_KEY_PREFIX: Final[str] = f"{STATE_KEY_NAMESPACE}:v1"
 """지금 버전의 키 접두사. ``v1``은 값 스키마 버전이다 — 값 모양이 바뀌면 올린다(ADR-114 D2)."""
@@ -93,7 +95,8 @@ _GEN_KEY_NAMES: Final[tuple[str, ...]] = ("meta", "items", "ids", "geo", "lookup
 
 
 class StateStoreError(RuntimeError):
-    """상태 저장소 실패의 공통 부모. ``failure_kind``·``retryable``은 provider 예외와 같은 규약이다."""
+    """상태 저장소 실패의 공통 부모. ``failure_kind``·``retryable``은 provider 예외와 같은
+    규약이다."""
 
     failure_kind: str = "state_store_error"
     retryable: bool = False
@@ -180,9 +183,9 @@ def evaluate_shrink_guard(
 ) -> str | None:
     """교체를 거부할 이유를 돌려준다. 받아들이면 ``None``.
 
-    ``recent_counts``는 최근 교체된 세대들의 개수다(비면 첫 적재). 기준은 그 **최대값**이다 — 직전 하나와만
-    비교하면 106 → 27 → 7 → 0처럼 나눠 줄어드는 것을 막지 못한다. ``allow_shrink``(운영자 run config)는
-    모든 거부를 넘긴다.
+    ``recent_counts``는 최근 교체된 세대들의 개수다(비면 첫 적재). 기준은 그 **최대값**이다 — 직전
+    하나와만 비교하면 106 → 27 → 7 → 0처럼 나눠 줄어드는 것을 막지 못한다. ``allow_shrink``(운영자
+    run config)는 모든 거부를 넘긴다.
     """
     if new_count < 0:
         raise ValueError("new_count는 음수일 수 없다.")
@@ -301,7 +304,8 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
 # KEYS[1]=current KEYS[2]=previous KEYS[3]=recent_counts
 # KEYS[4..8]=새 세대 meta·items·ids·geo·lookup, KEYS[9..]=물러날 직전 세대 키.
 # ARGV[1]=기대하는 지금 세대(''=없음) ARGV[2]=새 세대 ARGV[3]=grace 초 ARGV[4]=recent 창 크기.
-# 반환: {1, 직전} 교체됨 · {0, 지금 포인터} 포인터가 바뀌었다 · {-1, 어긋난 키 이름} 새 세대 검사 실패.
+# 반환: {1, 직전} 교체됨 · {0, 지금 포인터} 포인터가 바뀌었다 · {-1, 어긋난 키 이름} 새 세대 검사
+# 실패.
 _FLIP_SCRIPT: Final[str] = """
 local current = redis.call('GET', KEYS[1])
 if not current then current = '' end
@@ -336,8 +340,9 @@ return 0
 def make_valkey_client(settings: KorTravelMapSettings) -> Redis:
     """settings로 async client를 만든다. 연결은 첫 명령 때 맺는다(지연).
 
-    URL이 비어 있으면 :class:`StateStoreNotConfigured`. 재시도는 끈다 — redis-py 기본 재시도는 연결 상한을
-    몇 배로 늘려 "Valkey가 꺼지면 곧바로 503"을 깬다(ADR-114 D6). 응답은 bytes로 받는다.
+    URL이 비어 있으면 :class:`StateStoreNotConfigured`. 재시도는 끈다 — redis-py 기본 재시도는
+    연결 상한을 몇 배로 늘려 "Valkey가 꺼지면 곧바로 503"을 깬다(ADR-114 D6). 응답은 bytes로
+    받는다.
     """
     secret = settings.valkey_url
     url = secret.get_secret_value().strip() if secret is not None else ""
@@ -431,7 +436,8 @@ class ValkeyStateStore:
             ) from exc
 
     async def readable_meta(self, dataset: str, generation: str) -> GenerationMeta:
-        """cursor가 가리키는 세대의 메타. ``current``나 ``previous``가 아닌 세대는 받지 않는다(D6)."""
+        """cursor가 가리키는 세대의 메타. ``current``나 ``previous``가 아닌 세대는 받지
+        않는다(D6)."""
         try:
             state_key(dataset, generation)
         except ValueError as exc:
@@ -583,8 +589,9 @@ class ValkeyStateStore:
     ) -> SwapResult:
         """새 세대를 쓰고 포인터를 원자적으로 바꾼다(ADR-114 D3).
 
-        거부(:class:`StateSwapRefused`)·충돌(:class:`StateSwapConflict`)·Valkey 실패 어느 경우에도 포인터는
-        그대로다. 같은 id는 원천 순서의 첫 엔티티만 남기고 나머지 수를 ``meta.duplicates``에 적는다.
+        거부(:class:`StateSwapRefused`)·충돌(:class:`StateSwapConflict`)·Valkey 실패 어느 경우에도
+        포인터는 그대로다. 같은 id는 원천 순서의 첫 엔티티만 남기고 나머지 수를
+        ``meta.duplicates``에 적는다.
         """
         unique: dict[str, StateItem] = {}
         for item in items:
@@ -623,11 +630,13 @@ class ValkeyStateStore:
                 "run_id": run_id or "",
                 "guard_override": "1" if allow_shrink else "0",
             }
-            async with _unavailable_on_error("메타 쓰기"):
-                async with self._client.pipeline(transaction=False) as pipe:
-                    pipe.hset(keys["meta"], mapping=meta_fields)
-                    pipe.expire(keys["meta"], self._build_ttl)
-                    await pipe.execute()
+            async with (
+                _unavailable_on_error("메타 쓰기"),
+                self._client.pipeline(transaction=False) as pipe,
+            ):
+                pipe.hset(keys["meta"], mapping=meta_fields)
+                pipe.expire(keys["meta"], self._build_ttl)
+                await pipe.execute()
             await self._flip(dataset, keys, previous_generation, generation)
         except BaseException:
             await self._discard_unless_current(dataset, keys, generation)
@@ -738,8 +747,8 @@ class ValkeyStateStore:
     async def retire_other_versions(self) -> int:
         """다른 스키마 버전의 만료 없는 키에 grace TTL을 건다(D2). 건 개수를 돌려준다.
 
-        새 버전의 교체가 성공한 뒤에 부른다 — 옛 버전 ``current``와 교체된 세대는 만료가 없어 이 정리가
-        없으면 ``noeviction`` 아래 영구히 남는다.
+        새 버전의 교체가 성공한 뒤에 부른다 — 옛 버전 ``current``와 교체된 세대는 만료가 없어 이
+        정리가 없으면 ``noeviction`` 아래 영구히 남는다.
         """
         own = f"{STATE_KEY_PREFIX}:"
         retired = 0

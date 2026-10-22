@@ -1,11 +1,13 @@
-"""``kortravelmap.api.transport_state_service`` — Valkey 상태 store 의존성과 가격 추이 프록시 (ADR-114).
+"""``kortravelmap.api.transport_state_service`` — Valkey 상태 store 의존성과 가격 추이 프록시
+(ADR-114).
 
-- :func:`get_state_store` — API 프로세스 하나에 store 하나(connection pool 핸들). ``db.py``의 engine
-  singleton과 같은 부류다(데이터 캐시가 아니다). Valkey URL이 없으면 503이다 — 나머지 Map 표면과
-  ``/ops/health-deep``은 Valkey를 보지 않는다(ADR-114 D6).
-- :func:`fetch_price_history` — transport ``/v1/service/exports/fuel-stations/{uni_id}/price-history``를
-  요청 시 그대로 읽는다. 어떤 실패도 예외로 올리지 않고 ``unavailable``과 이유로 돌려준다 — 현재가는
-  그대로 주고 추이만 "없음"이다(ADR-114 결정 4).
+- :func:`get_state_store` — API 프로세스 하나에 store 하나(connection pool 핸들). ``db.py``의
+  engine singleton과 같은 부류다(데이터 캐시가 아니다). Valkey URL이 없으면 503이다 — 나머지 Map
+  표면과 ``/ops/health-deep``은 Valkey를 보지 않는다(ADR-114 D6).
+- :func:`fetch_price_history` — transport
+  ``/v1/service/exports/fuel-stations/{uni_id}/price-history``를 요청 시 그대로 읽는다. 어떤
+  실패도 예외로 올리지 않고 ``unavailable``과 이유로 돌려준다 — 현재가는 그대로 주고 추이만
+  "없음"이다(ADR-114 결정 4).
 """
 
 from __future__ import annotations
@@ -113,7 +115,9 @@ def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str
 
 
 def transport_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
-    """가격 추이 프록시의 timeout — read는 사용자 요청 경로라 짧게, 연결 수립은 transport 공통 상한."""
+    """가격 추이 프록시의 timeout — read는 사용자 요청 경로라 짧게, 연결 수립은 transport 공통
+    상한.
+    """
     return httpx.Timeout(
         settings.transport_price_history_timeout_seconds,
         connect=settings.kor_travel_transport_connect_timeout_seconds,
@@ -147,7 +151,8 @@ async def fetch_price_history(
         _LOGGER.info("transport 가격 이력 요청 실패: %s", type(exc).__name__)
         return PriceHistoryOutcome(history=None, reason="upstream_unavailable")
     if response.status_code == 404:
-        # 옛 transport(경로 없음)·토큰 불일치·peer fence 셋 중 하나다 — 설정 문제일 수 있어 경고한다.
+        # 옛 transport(경로 없음)·토큰 불일치·peer fence 셋 중 하나다 — 설정 문제일 수 있어
+        # 경고한다.
         _LOGGER.warning(
             "transport 가격 이력이 404다 — 경로가 없는 버전이거나 토큰·접속 주소가 맞지 않는다."
         )

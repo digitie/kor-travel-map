@@ -48,14 +48,19 @@ class StateAddress(_StateModel):
     jibun: str | None = None
     bjd_code: str | None = Field(
         default=None,
-        description="법정동 코드 10자리. transport VWorld 블록이 실릴 때만 채워진다(ADR-114 결정 6).",
+        description=(
+            "법정동 코드 10자리. transport VWorld 블록이 실릴 때만 채워진다"
+            "(ADR-114 결정 6)."
+        ),
     )
 
 
 class FuelPriceState(_StateModel):
     """주유소 유종 하나의 최신 가격."""
 
-    product_key: str = Field(description="표준 유종 키(gasoline·diesel·premium_gasoline·kerosene·lpg).")
+    product_key: str = Field(
+        description="표준 유종 키(gasoline·diesel·premium_gasoline·kerosene·lpg)."
+    )
     product_code: str = Field(description="오피넷 유종 코드(B027·D047·B034·C004·K015).")
     product_name: str | None = None
     price: float | None = Field(description="원/L. null이면 지금 판매하지 않는다.")

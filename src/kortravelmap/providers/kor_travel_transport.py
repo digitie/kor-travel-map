@@ -106,8 +106,10 @@ EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
 EXPORT_PATH_FUEL_STATION_PRICE_HISTORY: Final[str] = (
     "/v1/service/exports/fuel-stations/{natural_key}/price-history"
 )
-"""주유소 한 곳의 가격 이력(transport ADR-013 2026-10-23 추가, Map ADR-114 결정 4). Map은 저장하지 않고
-요청 시 전한다. ``{natural_key}``는 오피넷 uni_id다(경로 성분으로 escape해 넣는다)."""
+"""주유소 한 곳의 가격 이력(transport ADR-013 2026-10-23 추가, Map ADR-114 결정 4).
+
+Map은 저장하지 않고 요청 시 전한다. ``{natural_key}``는 오피넷 uni_id다(경로 성분으로 escape해
+넣는다)."""
 
 
 INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
@@ -639,7 +641,10 @@ class TransportFuelPriceHistoryPoint:
 
 @dataclass(frozen=True, slots=True)
 class TransportFuelPriceHistory:
-    """``GET …/fuel-stations/{natural_key}/price-history`` 응답. ``items``는 ``observed_at`` 내림차순."""
+    """``GET …/fuel-stations/{natural_key}/price-history`` 응답.
+
+    ``items``는 ``observed_at`` 내림차순이다.
+    """
 
     generated_at: datetime
     natural_key: str

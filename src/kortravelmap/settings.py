@@ -600,7 +600,8 @@ class KorTravelMapSettings(BaseSettings):
         description=(
             "transport·weather 현재 상태를 담는 Valkey(Redis 호환) URL(ADR-114). "
             "``redis://:password@host:port/0`` 형식이고 비밀번호가 들어 있어 비밀로 다룬다. "
-            "비어 있으면 상태 적재 job은 실패하고 상태 REST는 503이다(나머지 Map 기능은 영향 없음). "
+            "비어 있으면 상태 적재 job은 실패하고 상태 REST는 503이다(나머지 Map 기능은 영향 "
+            "없음). "
             "env ``KOR_TRAVEL_MAP_VALKEY_URL``."
         ),
     )
@@ -618,14 +619,17 @@ class KorTravelMapSettings(BaseSettings):
         ge=0.1,
         le=60.0,
         description=(
-            "Valkey 명령 하나의 응답 상한(초). env ``KOR_TRAVEL_MAP_VALKEY_SOCKET_TIMEOUT_SECONDS``."
+            "Valkey 명령 하나의 응답 상한(초). env "
+            "``KOR_TRAVEL_MAP_VALKEY_SOCKET_TIMEOUT_SECONDS``."
         ),
     )
     transport_price_history_enabled: bool = Field(
         default=False,
         description=(
-            "주유소 가격 추이를 transport ``/v1/service/exports/fuel-stations/{uni_id}/price-history``"
-            "에서 읽어 전할지(ADR-114 결정 4). 꺼져 있으면 추이는 ``unavailable``(``disabled``)이고 "
+            "주유소 가격 추이를 transport "
+            "``/v1/service/exports/fuel-stations/{uni_id}/price-history``"
+            "에서 읽어 전할지(ADR-114 결정 4). 꺼져 있으면 추이는 "
+            "``unavailable``(``disabled``)이고 "
             "현재가만 준다. transport에 그 경로가 배포된 뒤 켠다. "
             "env ``KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED``."
         ),

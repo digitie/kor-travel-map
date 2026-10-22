@@ -1,13 +1,15 @@
-"""``kortravelmap.providers.kor_travel_transport_state`` — transport export → Valkey 상태 값 (ADR-114).
+"""``kortravelmap.providers.kor_travel_transport_state`` — transport export → Valkey 상태 값
+(ADR-114).
 
-``providers.kor_travel_transport``가 엄격히 파싱한 transport export 행을 ``dto.transport_state`` 값과
-:class:`~kortravelmap.infra.valkey_state.StateItem`으로 바꾼다. HTTP는 Dagster fetcher가, 저장은
-``infra.valkey_state``가 한다 — 이 모듈은 변환과 데이터셋 정의(이름·교체 거부 기준·신선도 상한)만 갖는다.
+``providers.kor_travel_transport``가 엄격히 파싱한 transport export 행을 ``dto.transport_state``
+값과 :class:`~kortravelmap.infra.valkey_state.StateItem`으로 바꾼다. HTTP는 Dagster fetcher가,
+저장은 ``infra.valkey_state``가 한다 — 이 모듈은 변환과 데이터셋 정의(이름·교체 거부 기준·신선도
+상한)만 갖는다.
 
 **식별자는 PG 변환과 같은 규칙이다**(ADR-114 D1). kind·category·``source_type``·자연키는
-``providers.opinet``·``krex``·``krairport``와 같고, ``bjd_code``만 ``None``으로 고정한다 — transport
-export에 VWorld 행정 블록(ADR-114 결정 6)이 실려도 id가 바뀌지 않게 하려는 것이다. 자연키·제목 규칙은
-``krex``의 공개 함수를 그대로 부른다(복제하지 않는다).
+``providers.opinet``·``krex``·``krairport``와 같고, ``bjd_code``만 ``None``으로 고정한다 —
+transport export에 VWorld 행정 블록(ADR-114 결정 6)이 실려도 id가 바뀌지 않게 하려는 것이다.
+자연키·제목 규칙은 ``krex``의 공개 함수를 그대로 부른다(복제하지 않는다).
 
 이 모듈은 geo를 부르지 않는다. 행정 코드는 export가 실어 줄 때까지 비어 있다.
 """
@@ -18,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import Final
+from typing import TYPE_CHECKING, Final, cast
 
 from pydantic import BaseModel
 
@@ -74,6 +76,15 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
 )
+
+if TYPE_CHECKING:
+    # 이 frozen dataclass들은 krex Protocol의 shape이다. Protocol이 settable 속성·Decimal 좌표를
+    # 선언해 mypy가 구조 일치를 거부하므로 PG 경로(Dagster asset)처럼 cast로 넘긴다.
+    from kortravelmap.providers.krex import (
+        KrexRestAreaFuelPriceRecord,
+        KrexRestAreaItem,
+        KrexTrafficNoticeItem,
+    )
 
 __all__ = [
     "AIRPORT_MARKER_ICON",
@@ -173,7 +184,8 @@ def _phone(value: str | None) -> str | None:
 
 
 def fuel_station_state(station: TransportFuelStation) -> FuelStationState:
-    """주유소 + 유종별 최신가. id는 PG의 주유소 **place** feature와 같은 입력(``bjd_code=None``)."""
+    """주유소 + 유종별 최신가. id는 PG의 주유소 **place** feature와 같은
+    입력(``bjd_code=None``)."""
     feature_id = make_feature_id(
         bjd_code=None,
         kind=FeatureKind.PLACE.value,
@@ -223,7 +235,7 @@ def fuel_station_state(station: TransportFuelStation) -> FuelStationState:
 
 def rest_area_state(area: TransportRestArea) -> RestAreaState:
     """휴게소. transport 자연키가 Map 규칙과 다르면 계약 위반이다(PG 경로와 같은 검사)."""
-    natural_key = rest_area_natural_key(area)
+    natural_key = rest_area_natural_key(cast("KrexRestAreaItem", area))
     if area.natural_key != natural_key:
         raise TransportExportContractError(
             f"rest-areas.item.natural_key: 휴게소 자연키 불일치 "
@@ -273,7 +285,7 @@ def rest_area_fuel_price_state(record: TransportRestAreaFuelPrice) -> RestAreaFu
         service_area_code=service_area_code,
         service_area_name=normalize_korean_text(record.service_area_name)
         or record.service_area_name,
-        match_key=fuel_price_match_key(record),
+        match_key=fuel_price_match_key(cast("KrexRestAreaFuelPriceRecord", record)),
         route_name=record.route_name,
         direction=record.direction,
         oil_company=record.oil_company,
@@ -288,7 +300,8 @@ def rest_area_fuel_price_state(record: TransportRestAreaFuelPrice) -> RestAreaFu
 
 def highway_incident_state(incident: TransportHighwayIncident) -> HighwayIncidentState:
     """활성 돌발. 자연키·제목·유형은 PG 변환(``krex``)과 같은 함수로 만든다."""
-    natural_key = traffic_notice_natural_key(incident)
+    notice_item = cast("KrexTrafficNoticeItem", incident)
+    natural_key = traffic_notice_natural_key(notice_item)
     feature_id = make_feature_id(
         bjd_code=None,
         kind=FeatureKind.NOTICE.value,
@@ -296,7 +309,7 @@ def highway_incident_state(incident: TransportHighwayIncident) -> HighwayInciden
         source_type=_source_type(DATASET_KEY_HIGHWAY_INCIDENTS),
         source_natural_key=natural_key,
     )
-    title = synthesize_notice_title(incident)
+    title = synthesize_notice_title(notice_item)
     return HighwayIncidentState(
         feature_id=feature_id,
         category=TRAFFIC_NOTICE_CATEGORY,

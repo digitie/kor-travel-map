@@ -120,8 +120,8 @@ from kortravelmap.api.routers import (
 from kortravelmap.api.routers.admin_features import (
     AdminManualFeatureCanonicalJSONResponse,
 )
-from kortravelmap.api.transport_state_service import close_state_store
 from kortravelmap.api.settings import ApiSettings
+from kortravelmap.api.transport_state_service import close_state_store
 
 __all__ = ["app", "create_app"]
 

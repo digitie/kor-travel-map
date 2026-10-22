@@ -1,15 +1,18 @@
 """``/v1/service/transport/*`` — Valkey의 transport 현재 상태 읽기 (ADR-114 1단계).
 
-PinVi 같은 service 소비자가 주유소(최신 유가)·휴게소(휴게소 유가)·고속도로 활성 돌발·공항을 읽는다. 값은
-Map Dagster ``transport_state_*`` job이 Valkey에 세대 단위로 교체해 둔 것이고(``infra.valkey_state``), 여기서는
-지금 세대를 읽기만 한다. 키·교체·신선도의 정본은 ADR-114 "구현 설계 — 1단계" D2~D6이다.
+PinVi 같은 service 소비자가 주유소(최신 유가)·휴게소(휴게소 유가)·고속도로 활성 돌발·공항을
+읽는다. 값은 Map Dagster ``transport_state_*`` job이 Valkey에 세대 단위로 교체해 둔
+것이고(``infra.valkey_state``), 여기서는 지금 세대를 읽기만 한다. 키·교체·신선도의 정본은 ADR-114
+"구현 설계 — 1단계" D2~D6이다.
 
-- 목록: 조건이 없으면 ``feature_id`` 사전순 keyset(``cursor``). cursor는 세대를 품어 순회 도중 교체돼도 같은
-  세대로 끝난다. 근처(``lon``·``lat``·``radius_m``)·영역(``min_lon``…``max_lat``)은 가까운 순 ``limit``건이고
-  ``truncated``로 상한 도달을 알린다.
-- 응답마다 ``freshness``(원천 수집 시각·Map 반영 시각·나이·``stale``)를 싣는다. stale이어도 값은 준다.
+- 목록: 조건이 없으면 ``feature_id`` 사전순 keyset(``cursor``). cursor는 세대를 품어 순회 도중
+  교체돼도 같은 세대로 끝난다. 근처(``lon``·``lat``·``radius_m``)·영역(``min_lon``…``max_lat``)은
+  가까운 순 ``limit``건이고 ``truncated``로 상한 도달을 알린다.
+- 응답마다 ``freshness``(원천 수집 시각·Map 반영 시각·나이·``stale``)를 싣는다. stale이어도 값은
+  준다.
 - Valkey 미설정·연결 실패는 이 표면만 503 ``TRANSPORT_STATE_UNAVAILABLE``, 아직 적재 전이면 503
-  ``TRANSPORT_STATE_NOT_LOADED``, cursor의 세대가 사라졌으면 409 ``TRANSPORT_STATE_GENERATION_EXPIRED``.
+  ``TRANSPORT_STATE_NOT_LOADED``, cursor의 세대가 사라졌으면 409
+  ``TRANSPORT_STATE_GENERATION_EXPIRED``.
 - 가격 추이는 transport에서 요청 시 읽어 전한다. transport가 응답하지 않으면 현재가는 주고 추이만
   ``unavailable``이다(결정 4).
 """
@@ -252,8 +255,10 @@ class PriceHistoryBlock(BaseModel):
     status: Literal["available", "unavailable"]
     reason: PriceHistoryUnavailableReason | None = Field(
         description=(
-            "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음)·"
-            "upstream_not_found(transport 404 — 옛 버전·토큰·접속 주소)·upstream_unavailable(5xx·연결·"
+            "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 "
+            "없음)·"
+            "upstream_not_found(transport 404 — 옛 버전·토큰·접속 "
+            "주소)·upstream_unavailable(5xx·연결·"
             "timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름)."
         )
     )
@@ -302,7 +307,9 @@ class TransportStatusResponse(BaseModel):
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {
         "model": ProblemDetail,
-        "description": "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시.",
+        "description": (
+            "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+        ),
     },
     503: {
         "model": ProblemDetail,
@@ -414,13 +421,21 @@ def _query(
     if any(v is not None for v in near) and not all(v is not None for v in near):
         raise _problem(422, "VALIDATION_ERROR", "근처 검색에는 lon·lat·radius_m이 모두 필요하다.")
     if any(v is not None for v in box) and not all(v is not None for v in box):
-        raise _problem(422, "VALIDATION_ERROR", "영역 검색에는 min_lon·min_lat·max_lon·max_lat이 모두 필요하다.")
+        raise _problem(
+            422,
+            "VALIDATION_ERROR",
+            "영역 검색에는 min_lon·min_lat·max_lon·max_lat이 모두 필요하다.",
+        )
     if lon is not None and min_lon is not None:
         raise _problem(422, "VALIDATION_ERROR", "근처 검색과 영역 검색은 함께 쓸 수 없다.")
     if cursor is not None and (lon is not None or min_lon is not None):
-        raise _problem(422, "VALIDATION_ERROR", "cursor는 목록 순회에만 쓴다(근처·영역 검색은 cursor가 없다).")
+        raise _problem(
+            422, "VALIDATION_ERROR", "cursor는 목록 순회에만 쓴다(근처·영역 검색은 cursor가 없다)."
+        )
     if min_lon is not None:
-        assert min_lat is not None and max_lon is not None and max_lat is not None
+        assert min_lat is not None
+        assert max_lon is not None
+        assert max_lat is not None
         if min_lon > max_lon or min_lat > max_lat:
             raise _problem(422, "VALIDATION_ERROR", "영역은 min ≤ max여야 한다.")
     return _Query(cursor, limit, lon, lat, radius_m, min_lon, min_lat, max_lon, max_lat)
@@ -442,8 +457,8 @@ def bbox_search_box(
 ) -> tuple[float, float, float, float]:
     """bbox를 덮는 ``BYBOX`` 상자 ``(center_lon, center_lat, width_m, height_m)``(ADR-114 D6).
 
-    폭은 적도에 가장 가까운 bbox 위도에서 잰다(경도 1도가 그 위도에서 가장 넓다) — 중심 위도에서 재면
-    적도 쪽 모서리가 상자 밖으로 빠진다. 높이는 위도 차. 둘 다 2% 여유를 둔다.
+    폭은 적도에 가장 가까운 bbox 위도에서 잰다(경도 1도가 그 위도에서 가장 넓다) — 중심 위도에서
+    재면 적도 쪽 모서리가 상자 밖으로 빠진다. 높이는 위도 차. 둘 다 2% 여유를 둔다.
     """
     widest_lat = 0.0 if min_lat <= 0.0 <= max_lat else min(abs(min_lat), abs(max_lat))
     width = _haversine_m(min_lon, widest_lat, max_lon, widest_lat)
@@ -470,8 +485,10 @@ def _parse_values(
 
 def _in_box(item: _OutT, query: _Query) -> bool:
     coord = item.coord
-    assert query.min_lon is not None and query.max_lon is not None
-    assert query.min_lat is not None and query.max_lat is not None
+    assert query.min_lon is not None
+    assert query.max_lon is not None
+    assert query.min_lat is not None
+    assert query.max_lat is not None
     return (
         coord is not None
         and query.min_lon <= coord.lon <= query.max_lon
@@ -501,7 +518,8 @@ async def _list(
             meta = await store.current_meta(dataset.name)
             generation, after = meta.generation, ""
         if query.lon is not None:
-            assert query.lat is not None and query.radius_m is not None
+            assert query.lat is not None
+            assert query.radius_m is not None
             hits = await store.nearby(
                 dataset.name,
                 generation,
@@ -520,7 +538,8 @@ async def _list(
             ]
             return _Listing(items, truncated, None, meta)
         if query.min_lon is not None:
-            assert query.min_lat is not None and query.max_lon is not None
+            assert query.min_lat is not None
+            assert query.max_lon is not None
             assert query.max_lat is not None
             center_lon, center_lat, width, height = bbox_search_box(
                 query.min_lon, query.min_lat, query.max_lon, query.max_lat
@@ -649,7 +668,9 @@ async def get_fuel_station_price_history(
     feature_id: FeatureIdPath,
     product_code: Annotated[
         str | None,
-        Query(min_length=1, max_length=20, description="오피넷 유종 코드(B027·D047·B034·C004·K015)."),
+        Query(
+            min_length=1, max_length=20, description="오피넷 유종 코드(B027·D047·B034·C004·K015)."
+        ),
     ] = None,
     since: Annotated[AwareDatetime | None, Query(description="이 시각 이상(observed_at).")] = None,
     until: Annotated[AwareDatetime | None, Query(description="이 시각 이하(observed_at).")] = None,
@@ -669,7 +690,9 @@ async def get_fuel_station_price_history(
     if outcome.history is not None:
         points = [
             PriceHistoryPoint(
-                product_key=OPINET_PRODUCT_KEY_MAP.get(point.product_code, point.product_code.lower()),
+                product_key=OPINET_PRODUCT_KEY_MAP.get(
+                    point.product_code, point.product_code.lower()
+                ),
                 product_code=point.product_code,
                 product_name=OPINET_PRODUCT_NAME_KO.get(
                     OPINET_PRODUCT_KEY_MAP.get(point.product_code, "")
@@ -690,7 +713,11 @@ async def get_fuel_station_price_history(
         )
     else:
         history = PriceHistoryBlock(
-            status="unavailable", reason=outcome.reason, generated_at=None, truncated=False, items=[]
+            status="unavailable",
+            reason=outcome.reason,
+            generated_at=None,
+            truncated=False,
+            items=[],
         )
     return FuelStationPriceHistoryResponse(
         data=FuelStationPriceHistoryData(

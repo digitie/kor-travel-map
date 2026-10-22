@@ -8,11 +8,11 @@
 - **기존 PG transport 적재는 그대로다**(ADR-114 결정 7). 이 job은 PG를 읽지도 쓰지도 않는다 —
   ``kor_travel_map_client`` 같은 Map resource를 요구하지 않는다.
 - geo를 부르지 않는다. 행정 코드는 transport export가 실어 줄 때까지 비어 있다(결정 6).
-- schedule은 **기본 STOPPED**다. Valkey가 배포된 뒤 Dagster UI(Schedules)나
-  ``dagster schedule start <이름>``으로 켠다. 첫 교체 전에는 REST가 503 ``TRANSPORT_STATE_NOT_LOADED``다.
-- 실패 분류: transport 실패는 기존 규약(``raise_terminal_if_transport_unrecoverable``)을 따르고, 교체 거부
-  (``state_swap_refused``)·동시 교체(``state_swap_conflict``)·Valkey OOM·미설정은 step 재시도를 끈다
-  (다음 tick이 다시 본다). Valkey 연결 실패는 재시도한다.
+- schedule은 **기본 STOPPED**다. Valkey가 배포된 뒤 Dagster UI(Schedules)나 ``dagster schedule
+  start <이름>``으로 켠다. 첫 교체 전에는 REST가 503 ``TRANSPORT_STATE_NOT_LOADED``다.
+- 실패 분류: transport 실패는 기존 규약(``raise_terminal_if_transport_unrecoverable``)을 따르고,
+  교체 거부 (``state_swap_refused``)·동시 교체(``state_swap_conflict``)·Valkey OOM·미설정은 step
+  재시도를 끈다 (다음 tick이 다시 본다). Valkey 연결 실패는 재시도한다.
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
 """
 
@@ -333,7 +333,8 @@ _OP_CONFIG: Final[dict[str, Field]] = {
         default_value=False,
         is_required=False,
         description=(
-            "true면 비정상 집합 거부(ADR-114 D4)를 이번 한 번 넘긴다. 원천이 진짜로 줄었을 때만 쓴다 — "
+            "true면 비정상 집합 거부(ADR-114 D4)를 이번 한 번 넘긴다. 원천이 진짜로 줄었을 때만 "
+            "쓴다 — "
             "세대 meta에 guard_override=1로 남는다."
         ),
     ),

@@ -88,7 +88,6 @@ from kortravelmap.api.routers.poi_cache_targets import (
 from kortravelmap.api.routers.public_providers import router as public_providers_router
 from kortravelmap.api.routers.public_status import router as public_status_router
 from kortravelmap.api.routers.public_views import router as public_views_router
-
 from kortravelmap.api.routers.service_transport import (
     service_router as service_transport_router,
 )
