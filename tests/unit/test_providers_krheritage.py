@@ -345,9 +345,10 @@ async def test_event_bundle_mapping() -> None:
     assert feat.detail.starts_on == date(2026, 5, 1)
     assert feat.detail.ends_on == date(2026, 5, 3)
     assert feat.detail.venue_name == "종묘"
-    assert feat.detail.content_id == "EVT-2026-001"
+    # sn은 회차 id가 아니다 — 시작일을 붙인다.
+    assert feat.detail.content_id == "EVT-2026-001::2026-05-01"
     assert bundle.source_record.dataset_key == DATASET_KEY_EVENT
-    assert bundle.source_record.source_entity_id == "EVT-2026-001"
+    assert bundle.source_record.source_entity_id == "EVT-2026-001::2026-05-01"
     assert feat.feature_id.startswith("f_global_e_")
 
 
@@ -401,6 +402,100 @@ async def test_event_sn_without_title_uses_sn_as_name() -> None:
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.name == "EVT-NO-TITLE"
     assert bundle.source_record.source_entity_id == "EVT-NO-TITLE"
+
+
+# 2026-10 실 응답(``selectEventListOpenapi``) 한 행 — provider가 이 철자를 파싱하지 못해
+# ``sn``/``address``/``starts_on``이 전부 비던 shape(2026-10-22 prod 5306/5306 missing_address).
+_REAL_EVENT_RAW: dict[str, Any] = {
+    "seqNo": "15720",
+    "siteCode": "09",
+    "subTitle": "허선구 고가에서 나누는 특별한 하루",
+    "sDate": "20261017",
+    "eDate": "20261017",
+    "groupName": "불휘기픈남간",
+    "sido": "경상남도",
+    "gugun": "진주시",
+}
+
+
+@dataclass(frozen=True)
+class _EventWithRegion(_Event):
+    """provider 수정 후 shape — 시도/시군구명이 속성으로 온다."""
+
+    sido: str | None = None
+    gugun: str | None = None
+
+
+async def test_event_pre_fix_shape_uses_raw_region_and_seq_no() -> None:
+    """provider 수정 전: 속성은 비고 원 payload에만 값이 있다 → raw로 주소·자연키를 만든다."""
+    event = _Event(
+        sn=None, title="허선구 고가에서 나누는 특별한 하루", raw=dict(_REAL_EVENT_RAW)
+    )
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert bundle.feature.coord is None  # 좌표는 만들지 않는다.
+    assert bundle.feature.address.legal == "경상남도 진주시"
+    assert bundle.source_record.source_entity_id == "15720::2026-10-17"
+
+
+async def test_event_post_fix_shape_keeps_same_key_and_address() -> None:
+    """provider 수정 후(속성으로 옴)에도 자연키·주소가 같다 — bump 전후로 feature가 갈리지 않는다."""
+    before = _Event(
+        sn=None, title="허선구 고가에서 나누는 특별한 하루", raw=dict(_REAL_EVENT_RAW)
+    )
+    after = _EventWithRegion(
+        sn="15720",
+        title="허선구 고가에서 나누는 특별한 하루",
+        starts_on=date(2026, 10, 17),
+        ends_on=date(2026, 10, 17),
+        sido="경상남도",
+        gugun="진주시",
+        raw=dict(_REAL_EVENT_RAW),
+    )
+    [b1] = await heritage_events_to_bundles([before], fetched_at=_FETCHED)
+    [b2] = await heritage_events_to_bundles([after], fetched_at=_FETCHED)
+    assert b1.feature.feature_id == b2.feature.feature_id
+    assert b2.feature.address.legal == "경상남도 진주시"
+
+
+async def test_event_address_field_wins_over_region() -> None:
+    event = _EventWithRegion(
+        sn="1", title="행사", address="경상남도 진주시 본성동 1", sido="경상남도", gugun="진주시"
+    )
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert bundle.feature.address.legal == "경상남도 진주시 본성동 1"
+
+
+async def test_event_without_any_region_has_no_legal() -> None:
+    [bundle] = await heritage_events_to_bundles([_Event(sn="1", title="행사")], fetched_at=_FETCHED)
+    assert bundle.feature.address.legal is None
+
+
+async def test_event_same_seq_no_different_sessions_stay_distinct() -> None:
+    """``seqNo``는 회차마다 반복된다(실 응답 15720: 08-29~ 와 10-17) — 한 feature로 접히면 안 된다."""
+    span = _Event(
+        sn=None,
+        title="허선구 고가에서 나누는 특별한 하루",
+        raw={**_REAL_EVENT_RAW, "sDate": "20260829", "eDate": "20290829"},
+    )
+    session = _Event(
+        sn=None, title="허선구 고가에서 나누는 특별한 하루", raw=dict(_REAL_EVENT_RAW)
+    )
+    bundles = await heritage_events_to_bundles([span, session], fetched_at=_FETCHED)
+    assert len({b.feature.feature_id for b in bundles}) == 2
+    # 같은 회차가 다른 달 응답에 다시 나오면 같은 키로 접힌다.
+    again = await heritage_events_to_bundles([session], fetched_at=_FETCHED)
+    assert again[0].feature.feature_id == bundles[1].feature.feature_id
+
+
+async def test_event_empty_sn_titles_no_longer_collide_when_seq_no_present() -> None:
+    """종전 fallback ``title::"":""``은 같은 제목의 다른 행사를 한 키로 접었다."""
+    a = _Event(sn=None, title="정기 공연", raw={"seqNo": "100", "sDate": "20261001"})
+    b = _Event(sn=None, title="정기 공연", raw={"seqNo": "200", "sDate": "20261001"})
+    bundles = await heritage_events_to_bundles([a, b], fetched_at=_FETCHED)
+    assert [x.source_record.source_entity_id for x in bundles] == [
+        "100::2026-10-01",
+        "200::2026-10-01",
+    ]
 
 
 async def test_deterministic_ids() -> None:

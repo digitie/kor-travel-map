@@ -1,5 +1,13 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-22 — 첫 적재 실패 2건(고속도로 돌발·국가유산 행사)
+
+- [x] T-LOAD-HIGHWAY-EVIDENCE — **고속도로 돌발 10분 경로가 미시도 reverse를 실패로 drop.** bundle에
+  `AdminEvidence(reverse_attempted, obs_code)`를 실어 미시도는 warning으로 적재한다. 브랜치
+  `fix/highway-evidence-krheritage-address`, journal 2026-10-22.
+- [x] T-LOAD-KRHERITAGE-ADDRESS — **국가유산 행사 전량 `missing_address`.** `address`가 비면 `sido`/`gugun`을
+  `Address.legal`로 쓰고 자연키를 `seqNo::시작일`로 바꿨다(provider 수정 전후 동일). 같은 브랜치·journal.
+
 ## 2026-10-21 — reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기(ADR-112)
 
 - [x] T-RECONCILE-RETRY — **reconcile sensor 실패 재시도·멈춤 알림·root 닫기.** ADR-112 accepted(O1~O5 수락).

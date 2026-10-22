@@ -1,3 +1,20 @@
+## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
+
+- prod(Map `edffdc8a`)에서 한 번도 성공하지 못한 job 둘을 고쳤다. migration·API·OpenAPI 변화 없음.
+- **고속도로 돌발**(`feature_notice_transport_highway_incidents_job`, 10분): 317건 중 231건이 `reverse_geocode_failed`로
+  drop되고 손실 하한(#1253)이 run을 실패시켰다. 10분 경로는 일부러 geocoder를 결선하지 않는데(#667), krex 변환이
+  `admin_evidence`를 싣지 않아 validator가 "evidence 없음 + 좌표 + bjd 없음"을 reverse 실패로 봤다. mois 패턴대로
+  `AdminEvidence(obs_code=reverse bjd, reverse_attempted=좌표 있고 geocoder 결선)`을 싣는다. 미시도는
+  `reverse_geocode_not_attempted` warning으로 적재되고, geocoder가 결선됐는데 결과가 없으면 여전히 error다(대조군 검사).
+- **국가유산 행사**(`feature_event_krheritage_events_job`): 5306/5306 `missing_address`. provider가 실제 응답 필드
+  (`seqNo`·`sDate`·`sido`·`gugun` …) 대신 없는 이름을 파싱해 `sn`·`address`·`starts_on`이 전부 비었다(provider 수정은
+  python-krheritage-api에서 별도 진행). Map 쪽 보완: `address`가 비면 `sido`+`gugun`을 `Address.legal`로 쓴다(좌표는
+  만들지 않는다). 값은 속성(`getattr`)을 먼저, 없으면 원 payload 키를 본다 — provider bump 전후로 같은 값이 나온다.
+- 자연키: 종전 fallback `title::""::""`은 같은 제목의 다른 행사를 한 feature로 접었다. 실 응답에서 `seqNo`는 회차 id가
+  **아니다**(같은 응답에 `15720`이 08-29~와 10-17 두 행) — `sn` 단독이면 회차가 접힌다. 그래서 `sn::시작일`(시작일이
+  없으면 `sn`)로 바꿨다. `sn`·시작일도 원 payload `seqNo`·`sDate`로 보충하므로 provider bump 전후 키가 같다. 이 dataset은
+  한 번도 적재된 적이 없어 계보 이전이 필요 없다.
+
 ## 2026-10-21 — T-RECONCILE-RETRY 하위 단계 2: reconcile sensor 결정 1~7(ADR-112 accepted): 브랜치 `feat/reconcile-retry-alert-close`
 
 - 소유자가 O2~O5를 권고대로 수락했다(15분·40초 예산·시계당 한 시간 1행·물러섬 없음, 표지, SUCCESS root `failed` 닫기,
