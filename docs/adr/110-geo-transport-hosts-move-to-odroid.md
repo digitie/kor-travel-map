@@ -5,6 +5,7 @@
   **2026-10-14~15에 geo·weather·transport가 실제로 odroid로 옮겨졌고 소비자 포트가 바뀌었다** — 아래 "사실 갱신
   (2026-10-15)" 절이 그 뒤의 정본 사실이고, 본문의 2026-10-13 서술과 다르면 그 절이 이긴다. 결정·열린 결정은 그대로
   proposed다(소유자 승인 전)
+- 2026-10-23: ADR-114가 그 위에 "PinVi는 weather·transport를 Map REST로 읽는다"를 더한다(Map이 단일 진입점). 이 ADR의 결정은 그대로다
 - 날짜: 2026-10-13 (사실 갱신 2026-10-15)
 - 결정자: human(승인 대기), Claude
 - 관계: **Manager ADR-58**(두 번째 Docker 호스트 odroid — registry `hosts:`·호스트 프로필 Manager·호스트당 Dagster
