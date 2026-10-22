@@ -940,7 +940,7 @@ async def test_highway_incident_without_geocoder_is_warning_not_drop() -> None:
     assert ("reverse_geocode_not_attempted", "warning") in [
         (issue.code, issue.severity) for issue in result.issues
     ]
-    assert not result.has_blocking_errors
+    assert not validate_feature_bundles_address([bundle]).has_blocking_errors
 
 
 async def test_highway_incident_with_failing_geocoder_still_drops() -> None:
@@ -955,7 +955,7 @@ async def test_highway_incident_with_failing_geocoder_still_drops() -> None:
     )
     result = validate_feature_bundle_address(bundle)
     assert "reverse_geocode_failed" in result.issue_codes
-    assert result.has_blocking_errors
+    assert validate_feature_bundles_address([bundle]).has_blocking_errors
 
 
 async def test_heritage_event_region_fallback_resolves_missing_address() -> None:
@@ -984,4 +984,4 @@ async def test_heritage_event_region_fallback_resolves_missing_address() -> None
     )
     result = validate_feature_bundle_address(bundle)
     assert "missing_address" not in result.issue_codes
-    assert not result.has_blocking_errors
+    assert not validate_feature_bundles_address([bundle]).has_blocking_errors
