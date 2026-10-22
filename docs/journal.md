@@ -1,3 +1,21 @@
+## 2026-10-22 — T-LOAD-LOCK-WAIT 1안: 적재가 fence를 길게 기다린다: 브랜치 `fix/load-curation-lock-wait`
+
+- 증상: n150에서 동시 적재 다섯(seoul_bookstores·krforest_arboretums·standard_tourist_attractions·krforest_dulle_trails·
+  visitkorea_enrichment)이 `feature-curation-write`를 Dagster 엔진 `lock_timeout=30000` 안에 못 얻어 55P03으로 3회 재시도 끝에
+  실패했다. 매 재시도가 fetch·역지오코딩(약 5분)을 다시 하고 30초 만에 죽는다.
+- 1안(소유자 결정): client 적재 transaction의 **첫 fence 획득 한 문장만** `lock_timeout`을 900초(env, 0=끔)로, 필요하면
+  `statement_timeout`을 +60초로, `client_connection_check_interval`을 10초로 `SET LOCAL`하고 직후 되돌린다. 늘리기만 한다.
+  무장 대상은 단위 검사의 분류표가 정본이다(적재 12개 무장, 정리·관리·offline upload·MOIS CLI 11개 비무장).
+- 적대 리뷰 2명: HIGH 없음. MED — FIFO 잠금 줄이라 적재가 이어 잡으면 단건 writer·root 완결의 틈이 준다(문서화),
+  900초는 아래 실측 보유를 못 덮는다(문서화), 무장 범위 검사가 둘뿐(→ 분류표). LOW 반영: 실패 로그, 연결 확인, 통합 holder 회수.
+- 2안 입력(읽기 전용 실측, 공용 PG `pg_locks`·Dagster event log): 07:11~ 표본에서 fence 보유자는
+  `standard_parking_lots`(run `71f21b6a`) — transaction 06:06:05 시작, 80분 넘게 `idle in transaction`. 스트리밍 snapshot
+  경로(`_load_snapshot_batches` → `load_feature_bundle_batches`)가 100건 batch마다 upstream fetch와 역지오코딩을 **열린
+  transaction 안에서** 한다(batch 사이 공백 최대 85초, DB 쓰기는 몇 초). 같은 경로가 8개 asset. 그 동안
+  `finalize_provider_curation_root`가 30초마다 fence에서 55P03. 2안은 fetch·지오코딩을 transaction 밖으로 빼고 쓰기만 짧게.
+- 검사(n150 일회용 컨테이너): 새 단위·통합 초록(40초 holder: 무장 성공·끈 쪽 30초 55P03·5초 writer 5초), api 1251·dagster 826·
+  관련 통합 23 초록, mypy·lint-imports 초록. 변이 검사와 unit 세션 main 대조는 PR 본문.
+- 문서 한도: acceptance §T-GR-03을 아카이브로 옮겼다(도구 검산 53건 보존).
 ## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
 
 - prod(Map `edffdc8a`)에서 한 번도 성공하지 못한 job 둘을 고쳤다. migration·API·OpenAPI 변화 없음.

@@ -1,3 +1,9 @@
+## 2026-10-22 — T-LOAD-LOCK-WAIT 1안: 브랜치 `fix/load-curation-lock-wait`
+
+- provider 적재의 첫 `feature-curation-write` 획득만 900초까지 기다린다(env `KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS`).
+  migration·OpenAPI 변화 없음(PinVi 재vendor 불필요). 배포 영향: Map Dagster code location 재배포.
+- 한계: 스트리밍 snapshot 적재는 fence를 1시간 넘게 쥔다(실측) — 그 뒤의 적재는 15분 뒤 실패한다. 근본은 2안.
+- **다음 한 작업: PR CI green → 소유자 머지·배포 판단 → 2안(fetch·지오코딩을 쓰기 transaction 밖으로) 설계.**
 ## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
 
 - 고속도로 돌발 10분 경로에 `AdminEvidence`를 실어 미시도 reverse가 drop이 아니라 warning이 되게 했고, 국가유산 행사는
