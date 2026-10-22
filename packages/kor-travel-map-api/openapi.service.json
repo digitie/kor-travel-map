@@ -1,6 +1,182 @@
 {
   "components": {
     "schemas": {
+      "AirportDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "item": {
+            "$ref": "#/components/schemas/AirportOut"
+          }
+        },
+        "required": [
+          "item",
+          "freshness"
+        ],
+        "title": "AirportDetailData",
+        "type": "object"
+      },
+      "AirportDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AirportDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AirportDetailResponse",
+        "type": "object"
+      },
+      "AirportListData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AirportOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated",
+          "freshness"
+        ],
+        "title": "AirportListData",
+        "type": "object"
+      },
+      "AirportListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AirportListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AirportListResponse",
+        "type": "object"
+      },
+      "AirportOut": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/StateAddress"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateCoordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "근처 검색일 때 중심에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "iata_code": {
+            "title": "Iata Code",
+            "type": "string"
+          },
+          "icao_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icao Code"
+          },
+          "kind": {
+            "const": "place",
+            "default": "place",
+            "title": "Kind",
+            "type": "string"
+          },
+          "marker_color": {
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "municipality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Municipality"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "name_english": {
+            "title": "Name English",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "name",
+          "name_english",
+          "iata_code",
+          "coord",
+          "address"
+        ],
+        "title": "AirportOut",
+        "type": "object"
+      },
       "C6cCancelProbeCanonicalUnsafeOutcomeRecord": {
         "additionalProperties": false,
         "description": "response-loss retry도 다시 POST하지 않게 하는 Map canonical 증빙.",
@@ -4174,6 +4350,668 @@
         "title": "FeatureTripCard",
         "type": "object"
       },
+      "FuelPriceState": {
+        "additionalProperties": false,
+        "description": "주유소 유종 하나의 최신 가격.",
+        "properties": {
+          "collected_at": {
+            "description": "transport가 이 가격을 현재가로 마지막으로 확인한 수집 시각.",
+            "format": "date-time",
+            "title": "Collected At",
+            "type": "string"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원/L. null이면 지금 판매하지 않는다.",
+            "title": "Price"
+          },
+          "product_code": {
+            "description": "오피넷 유종 코드(B027·D047·B034·C004·K015).",
+            "title": "Product Code",
+            "type": "string"
+          },
+          "product_key": {
+            "description": "표준 유종 키(gasoline·diesel·premium_gasoline·kerosene·lpg).",
+            "title": "Product Key",
+            "type": "string"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
+          "provider_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "오피넷이 그 유종 가격을 마지막으로 바꾼 시각.",
+            "title": "Provider Updated At"
+          },
+          "unit": {
+            "const": "KRW/L",
+            "default": "KRW/L",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_key",
+          "product_code",
+          "price",
+          "collected_at"
+        ],
+        "title": "FuelPriceState",
+        "type": "object"
+      },
+      "FuelStationDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "item": {
+            "$ref": "#/components/schemas/FuelStationOut"
+          }
+        },
+        "required": [
+          "item",
+          "freshness"
+        ],
+        "title": "FuelStationDetailData",
+        "type": "object"
+      },
+      "FuelStationDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FuelStationDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FuelStationDetailResponse",
+        "type": "object"
+      },
+      "FuelStationListData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FuelStationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "description": "근처·영역 검색이 limit에 닿았다(더 있을 수 있다).",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated",
+          "freshness"
+        ],
+        "title": "FuelStationListData",
+        "type": "object"
+      },
+      "FuelStationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FuelStationListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FuelStationListResponse",
+        "type": "object"
+      },
+      "FuelStationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/StateAddress"
+          },
+          "brand_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Code"
+          },
+          "brand_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand Name"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateCoordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "근처 검색일 때 중심에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "has_carwash": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Carwash"
+          },
+          "has_cvs": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Cvs"
+          },
+          "has_maintenance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Maintenance"
+          },
+          "is_24h": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is 24H"
+          },
+          "is_self": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Self"
+          },
+          "kind": {
+            "const": "place",
+            "default": "place",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lpg_available": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lpg Available"
+          },
+          "marker_color": {
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "natural_key": {
+            "description": "오피넷 주유소 ID(uni_id).",
+            "title": "Natural Key",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "prices": {
+            "items": {
+              "$ref": "#/components/schemas/FuelPriceState"
+            },
+            "title": "Prices",
+            "type": "array"
+          },
+          "source_last_seen_at": {
+            "description": "transport가 이 주유소를 원천에서 마지막으로 본 시각.",
+            "format": "date-time",
+            "title": "Source Last Seen At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "name",
+          "natural_key",
+          "coord",
+          "address",
+          "prices",
+          "source_last_seen_at"
+        ],
+        "title": "FuelStationOut",
+        "type": "object"
+      },
+      "FuelStationPriceHistoryData": {
+        "additionalProperties": false,
+        "properties": {
+          "current_prices": {
+            "items": {
+              "$ref": "#/components/schemas/FuelPriceState"
+            },
+            "title": "Current Prices",
+            "type": "array"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "history": {
+            "$ref": "#/components/schemas/PriceHistoryBlock"
+          },
+          "natural_key": {
+            "title": "Natural Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "natural_key",
+          "current_prices",
+          "history",
+          "freshness"
+        ],
+        "title": "FuelStationPriceHistoryData",
+        "type": "object"
+      },
+      "FuelStationPriceHistoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FuelStationPriceHistoryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FuelStationPriceHistoryResponse",
+        "type": "object"
+      },
+      "HighwayIncidentDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "item": {
+            "$ref": "#/components/schemas/HighwayIncidentOut"
+          }
+        },
+        "required": [
+          "item",
+          "freshness"
+        ],
+        "title": "HighwayIncidentDetailData",
+        "type": "object"
+      },
+      "HighwayIncidentDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HighwayIncidentDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "HighwayIncidentDetailResponse",
+        "type": "object"
+      },
+      "HighwayIncidentListData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HighwayIncidentOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated",
+          "freshness"
+        ],
+        "title": "HighwayIncidentListData",
+        "type": "object"
+      },
+      "HighwayIncidentListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HighwayIncidentListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "HighwayIncidentListResponse",
+        "type": "object"
+      },
+      "HighwayIncidentOut": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "congestion_length": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Congestion Length"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateCoordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "근처 검색일 때 중심에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "incident_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type"
+          },
+          "incident_type_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Type Code"
+          },
+          "kind": {
+            "const": "notice",
+            "default": "notice",
+            "title": "Kind",
+            "type": "string"
+          },
+          "marker_color": {
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "natural_key": {
+            "title": "Natural Key",
+            "type": "string"
+          },
+          "notice_type": {
+            "title": "Notice Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원천 발생 일자·시각(KST). 읽을 수 없으면 null.",
+            "title": "Occurred At"
+          },
+          "point_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Point Name"
+          },
+          "process_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Status"
+          },
+          "process_status_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Status Code"
+          },
+          "route_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Name"
+          },
+          "route_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route No"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "title",
+          "notice_type",
+          "natural_key",
+          "coord"
+        ],
+        "title": "HighwayIncidentOut",
+        "type": "object"
+      },
       "Meta": {
         "additionalProperties": false,
         "description": "전 REST 표면에서 공유하는 성공 응답 metadata.",
@@ -4250,6 +5088,143 @@
           "page_size"
         ],
         "title": "PageMeta",
+        "type": "object"
+      },
+      "PriceHistoryBlock": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated At"
+          },
+          "items": {
+            "description": "observed_at 내림차순.",
+            "items": {
+              "$ref": "#/components/schemas/PriceHistoryPoint"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "disabled",
+                  "not_configured",
+                  "upstream_not_found",
+                  "upstream_unavailable",
+                  "upstream_rejected",
+                  "upstream_contract"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음)·upstream_not_found(transport 404 — 옛 버전·토큰·접속 주소)·upstream_unavailable(5xx·연결·timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름).",
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "generated_at",
+          "truncated",
+          "items"
+        ],
+        "title": "PriceHistoryBlock",
+        "type": "object"
+      },
+      "PriceHistoryPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "collected_at": {
+            "description": "같은 가격을 마지막으로 다시 확인한 수집 시각.",
+            "format": "date-time",
+            "title": "Collected At",
+            "type": "string"
+          },
+          "observed_at": {
+            "description": "오피넷 갱신시각(없으면 처음 본 수집 시각).",
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원/L. null이면 그때 판매하지 않았다.",
+            "title": "Price"
+          },
+          "product_code": {
+            "title": "Product Code",
+            "type": "string"
+          },
+          "product_key": {
+            "title": "Product Key",
+            "type": "string"
+          },
+          "product_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Name"
+          },
+          "provider_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Updated At"
+          }
+        },
+        "required": [
+          "product_key",
+          "product_code",
+          "product_name",
+          "price",
+          "provider_updated_at",
+          "observed_at",
+          "collected_at"
+        ],
+        "title": "PriceHistoryPoint",
         "type": "object"
       },
       "ProblemDetail": {
@@ -4338,6 +5313,605 @@
           }
         },
         "title": "ProblemDetailError",
+        "type": "object"
+      },
+      "RestAreaDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "fuel_price_freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransportFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "item": {
+            "$ref": "#/components/schemas/RestAreaOut"
+          }
+        },
+        "required": [
+          "item",
+          "freshness",
+          "fuel_price_freshness"
+        ],
+        "title": "RestAreaDetailData",
+        "type": "object"
+      },
+      "RestAreaDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RestAreaDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "RestAreaDetailResponse",
+        "type": "object"
+      },
+      "RestAreaFuelPriceState": {
+        "additionalProperties": false,
+        "description": "휴게소 주유소 1곳의 최신 유가(휴게소에 읽을 때 붙인다).",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "diesel_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diesel Price"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "gasoline_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gasoline Price"
+          },
+          "kind": {
+            "const": "price",
+            "default": "price",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lpg_price": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lpg Price"
+          },
+          "match_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "휴게소 ``natural_key``와 같은 규칙으로 정규화한 매칭 키. 이름이 없으면 null.",
+            "title": "Match Key"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "oil_company": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oil Company"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "route_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Name"
+          },
+          "service_area_code": {
+            "title": "Service Area Code",
+            "type": "string"
+          },
+          "service_area_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Area Name"
+          },
+          "unit": {
+            "const": "KRW/L",
+            "default": "KRW/L",
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "service_area_code",
+          "match_key",
+          "observed_at"
+        ],
+        "title": "RestAreaFuelPriceState",
+        "type": "object"
+      },
+      "RestAreaListData": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "$ref": "#/components/schemas/TransportFreshness"
+          },
+          "fuel_price_freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransportFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "휴게소 유가 데이터셋의 신선도. 아직 적재 전이면 null."
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RestAreaOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated",
+          "freshness",
+          "fuel_price_freshness"
+        ],
+        "title": "RestAreaListData",
+        "type": "object"
+      },
+      "RestAreaListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RestAreaListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "RestAreaListResponse",
+        "type": "object"
+      },
+      "RestAreaOut": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/StateAddress"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateCoordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "근처 검색일 때 중심에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "fuel_prices": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RestAreaFuelPriceState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "휴게소 주유소 최신 유가(매칭이 없거나 아직 적재 전이면 null)."
+          },
+          "has_ev_charger": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Ev Charger"
+          },
+          "has_gas_station": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Gas Station"
+          },
+          "has_lpg_station": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Lpg Station"
+          },
+          "kind": {
+            "const": "place",
+            "default": "place",
+            "title": "Kind",
+            "type": "string"
+          },
+          "marker_color": {
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "natural_key": {
+            "description": "``name::route_name::direction``(strip→lower).",
+            "title": "Natural Key",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "route_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Name"
+          }
+        },
+        "required": [
+          "feature_id",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "name",
+          "natural_key",
+          "coord",
+          "address"
+        ],
+        "title": "RestAreaOut",
+        "type": "object"
+      },
+      "StateAddress": {
+        "additionalProperties": false,
+        "description": "원천이 준 주소 문자열과(있으면) 행정 코드.",
+        "properties": {
+          "bjd_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 코드 10자리. transport VWorld 블록이 실릴 때만 채워진다(ADR-114 결정 6).",
+            "title": "Bjd Code"
+          },
+          "jibun": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jibun"
+          },
+          "road": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road"
+          }
+        },
+        "title": "StateAddress",
+        "type": "object"
+      },
+      "StateCoordinate": {
+        "additionalProperties": false,
+        "description": "WGS84 경위도.",
+        "properties": {
+          "lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "StateCoordinate",
+        "type": "object"
+      },
+      "TransportDatasetStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransportFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loaded": {
+            "title": "Loaded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dataset",
+          "loaded",
+          "freshness"
+        ],
+        "title": "TransportDatasetStatus",
+        "type": "object"
+      },
+      "TransportFreshness": {
+        "additionalProperties": false,
+        "description": "세대 하나의 신선도(ADR-114 D5).",
+        "properties": {
+          "age_seconds": {
+            "description": "source_collected_at(없으면 loaded_at)부터 지금까지.",
+            "title": "Age Seconds",
+            "type": "integer"
+          },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "loaded_at": {
+            "description": "Map이 이 세대로 교체한 시각.",
+            "format": "date-time",
+            "title": "Loaded At",
+            "type": "string"
+          },
+          "max_age_seconds": {
+            "title": "Max Age Seconds",
+            "type": "integer"
+          },
+          "source_collected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원천(transport) 수집 시각. 공항처럼 원천이 주지 않으면 null.",
+            "title": "Source Collected At"
+          },
+          "stale": {
+            "description": "age_seconds > max_age_seconds. stale이어도 값은 준다.",
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dataset",
+          "generation",
+          "source_collected_at",
+          "loaded_at",
+          "age_seconds",
+          "max_age_seconds",
+          "stale",
+          "item_count"
+        ],
+        "title": "TransportFreshness",
+        "type": "object"
+      },
+      "TransportStatusData": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/TransportDatasetStatus"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "store": {
+            "const": "ok",
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "datasets"
+        ],
+        "title": "TransportStatusData",
+        "type": "object"
+      },
+      "TransportStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TransportStatusData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "TransportStatusResponse",
         "type": "object"
       }
     },
@@ -7639,6 +9213,1452 @@
           "service-cache-target-streams"
         ],
         "x-required-service-scope": "cache-target:read"
+      }
+    },
+    "/v1/service/transport/airports": {
+      "get": {
+        "operationId": "list_airports_v1_service_transport_airports_get",
+        "parameters": [
+          {
+            "description": "직전 페이지 meta.page.next_cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "직전 페이지 meta.page.next_cursor.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "근처 검색 중심 경도.",
+            "in": "query",
+            "name": "lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 경도.",
+              "title": "Lon"
+            }
+          },
+          {
+            "description": "근처 검색 중심 위도.",
+            "in": "query",
+            "name": "lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 위도.",
+              "title": "Lat"
+            }
+          },
+          {
+            "description": "근처 검색 반경(m, 최대 50 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 50000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 반경(m, 최대 50 km).",
+              "title": "Radius M"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirportListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "국내 운영 공항 (목록·근처·영역)",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/airports/{feature_id}": {
+      "get": {
+        "operationId": "get_airport_v1_service_transport_airports__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirportDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "공항 한 곳",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/fuel-stations": {
+      "get": {
+        "operationId": "list_fuel_stations_v1_service_transport_fuel_stations_get",
+        "parameters": [
+          {
+            "description": "직전 페이지 meta.page.next_cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "직전 페이지 meta.page.next_cursor.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "근처 검색 중심 경도.",
+            "in": "query",
+            "name": "lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 경도.",
+              "title": "Lon"
+            }
+          },
+          {
+            "description": "근처 검색 중심 위도.",
+            "in": "query",
+            "name": "lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 위도.",
+              "title": "Lat"
+            }
+          },
+          {
+            "description": "근처 검색 반경(m, 최대 50 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 50000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 반경(m, 최대 50 km).",
+              "title": "Radius M"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuelStationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "주유소 + 유종별 최신가 (목록·근처·영역)",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/fuel-stations/{feature_id}": {
+      "get": {
+        "operationId": "get_fuel_station_v1_service_transport_fuel_stations__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuelStationDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "주유소 한 곳",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/fuel-stations/{feature_id}/price-history": {
+      "get": {
+        "operationId": "get_fuel_station_price_history_v1_service_transport_fuel_stations__feature_id__price_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "오피넷 유종 코드(B027·D047·B034·C004·K015).",
+            "in": "query",
+            "name": "product_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "오피넷 유종 코드(B027·D047·B034·C004·K015).",
+              "title": "Product Code"
+            }
+          },
+          {
+            "description": "이 시각 이상(observed_at).",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 시각 이상(observed_at).",
+              "title": "Since"
+            }
+          },
+          {
+            "description": "이 시각 이하(observed_at).",
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 시각 이하(observed_at).",
+              "title": "Until"
+            }
+          },
+          {
+            "description": "유종마다의 최대 행 수.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "유종마다의 최대 행 수.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FuelStationPriceHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "주유소 현재가 + 가격 추이(transport에서 요청 시 읽음)",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/highway-incidents": {
+      "get": {
+        "operationId": "list_highway_incidents_v1_service_transport_highway_incidents_get",
+        "parameters": [
+          {
+            "description": "직전 페이지 meta.page.next_cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "직전 페이지 meta.page.next_cursor.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "근처 검색 중심 경도.",
+            "in": "query",
+            "name": "lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 경도.",
+              "title": "Lon"
+            }
+          },
+          {
+            "description": "근처 검색 중심 위도.",
+            "in": "query",
+            "name": "lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 위도.",
+              "title": "Lat"
+            }
+          },
+          {
+            "description": "근처 검색 반경(m, 최대 50 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 50000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 반경(m, 최대 50 km).",
+              "title": "Radius M"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighwayIncidentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "고속도로 활성 돌발 (목록·근처·영역)",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/highway-incidents/{feature_id}": {
+      "get": {
+        "operationId": "get_highway_incident_v1_service_transport_highway_incidents__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HighwayIncidentDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "활성 돌발 한 건",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/rest-areas": {
+      "get": {
+        "operationId": "list_rest_areas_v1_service_transport_rest_areas_get",
+        "parameters": [
+          {
+            "description": "직전 페이지 meta.page.next_cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "직전 페이지 meta.page.next_cursor.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "근처 검색 중심 경도.",
+            "in": "query",
+            "name": "lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 경도.",
+              "title": "Lon"
+            }
+          },
+          {
+            "description": "근처 검색 중심 위도.",
+            "in": "query",
+            "name": "lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 위도.",
+              "title": "Lat"
+            }
+          },
+          {
+            "description": "근처 검색 반경(m, 최대 50 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 50000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 반경(m, 최대 50 km).",
+              "title": "Radius M"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestAreaListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "고속도로 휴게소 + 휴게소 유가 (목록·근처·영역)",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/rest-areas/{feature_id}": {
+      "get": {
+        "operationId": "get_rest_area_v1_service_transport_rest_areas__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestAreaDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "휴게소 한 곳",
+        "tags": [
+          "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/transport/status": {
+      "get": {
+        "operationId": "get_transport_state_status_v1_service_transport_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Valkey 연결과 데이터셋별 신선도",
+        "tags": [
+          "service-transport-state"
+        ]
       }
     }
   }
