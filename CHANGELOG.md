@@ -19,6 +19,8 @@
   (`missing_address` 해소, 좌표는 만들지 않음).
 - **CHANGED (자연키)**: 국가유산 행사 자연키가 `sn::시작일::종료일`(날짜가 없으면 `sn`, provider 수정본 `occurrence_key`와 같은 모양)이다. `sn`·시작일은 원 응답
   `seqNo`·`sDate`로 보충한다. 이 dataset은 아직 적재된 적이 없다. migration·API·OpenAPI 변화 없음.
+- **CHANGED (deps)**: python-krheritage-api 핀 `be3a1a28` → `e1b346f7`(provider #12, 0.1.1 — event 필드를 live 응답에
+  맞춤, `occurrence_key`·`sido`/`gugun`/`address` 파생). provider surface manifest 재생성.
 
 ### reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기 (2026-10-21, ADR-112 결정 1~7)
 

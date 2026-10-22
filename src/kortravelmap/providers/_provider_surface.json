@@ -2258,17 +2258,25 @@
             "contents",
             "display_title",
             "ends_on",
+            "fee",
+            "group_name",
+            "gugun",
             "heritage_name",
             "latitude",
             "longitude",
             "main_image",
             "model_config",
+            "occurrence_key",
             "place",
             "raw",
+            "schedule_text",
+            "sido",
+            "site_code",
             "sn",
             "starts_on",
             "sub_title",
             "sub_title2",
+            "target_audience",
             "tel_name",
             "title",
             "url"
@@ -2562,7 +2570,7 @@
         }
       },
       "package": "krheritage",
-      "pinned_sha": "be3a1a28a9bc5214b9349dcdc7ff7e1ad9b970ba"
+      "pinned_sha": "e1b346f70dd90f68247776fe14ad39b0a90db763"
     },
     "python-mois-api": {
       "classes": {

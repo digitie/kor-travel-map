@@ -21,6 +21,11 @@
   원 키)으로 채웠다. MED — `(seqNo, sDate)` 유일성 미확인, provider 수정본은 `(seqNo, sDate, eDate)`로 실측 유일 →
   자연키를 `occurrence_key`와 같은 `sn::시작일::종료일`로 맞췄다. LOW — fallback 키의 place가 bump 전후 달라짐(원
   `subDesc`를 쓰게 해 해소), 세종처럼 sido·gugun 중복 결합(provider와 같은 결합이라 일관, 무해).
+- provider 핀 bump: python-krheritage-api `be3a1a28` → `e1b346f7`(provider #12 머지, 0.1.1). provider는 `seqNo`를
+  프로그램 id로 보고(실측 2,006행 중 1,378행 공유) `occurrence_key = {sn}::{starts_on}::{ends_on}`을 낸다. Map 자연키를
+  그 정의와 글자 그대로 맞췄다 — 날짜가 비어도 `sn::::`(앞 판의 "날짜 없으면 `sn`"은 어긋났다). 표시명 fallback은
+  자연키 대신 `sn`. surface manifest 재생성(event 멤버 `occurrence_key`·`sido`·`gugun` 등 추가). n150에서 핀된 실제
+  provider 모델로 fixture XML을 파싱해 Map 자연키 == `occurrence_key`, `missing_address` 0을 확인했다.
 - 이 엔트리로 journal이 220 KiB를 넘어(`test_every_docs_markdown_stays_within_readable_limit`) 2026-09-26~27 14건을
   `archive/journal-2026-09f.md`로 옮겼다(tasks-rule §8). 섹션 본문은 바이트 그대로(원문 부분 문자열 대조), 상대 링크 없음.
 

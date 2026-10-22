@@ -841,7 +841,9 @@ def _event_address_text(event: KrHeritageEvent) -> str | None:
 
 
 def _event_natural_key(event: KrHeritageEvent) -> str | None:
-    """event 자연키 — ``sn::시작일::종료일``(날짜가 없으면 ``sn``).
+    """event 자연키 — provider ``HeritageEvent.occurrence_key``와 같은 ``sn::시작일::종료일``.
+
+    날짜가 비면 그 자리는 빈 문자열이다(``sn::::``) — provider 0.1.1(``e1b346f7``)의 정의 그대로다.
 
     ``sn``이 비면 ``title::starts_on::place``다.
 
@@ -862,8 +864,9 @@ def _event_natural_key(event: KrHeritageEvent) -> str | None:
     ends = ends_on.isoformat() if ends_on is not None else ""
     sn = _event_sn(event)
     if sn:
-        # provider 수정본 ``HeritageEvent.occurrence_key``와 같은 모양이다.
-        return f"{sn}::{starts}::{ends}" if (starts or ends) else sn
+        # provider ``occurrence_key``와 **글자 그대로** 같아야 한다 — 핀 전후 키가 갈리지 않도록
+        # 속성/원 키에서 직접 계산한다(raw만 있는 수정 전 shape에서도 같은 값).
+        return f"{sn}::{starts}::{ends}"
     title = normalize_korean_text(event.title)
     if not title:
         return None
@@ -917,7 +920,7 @@ async def _event_to_bundle(
     )
 
     # title이 비고 sn만 있는 row는 sn(=natural_key)을 표시명으로 강등.
-    name = normalize_korean_text(event.title) or natural_key
+    name = normalize_korean_text(event.title) or _event_sn(event) or natural_key
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=natural_key,
@@ -980,8 +983,8 @@ async def heritage_events_to_bundles(
     """무형유산/행사 events → event ``FeatureBundle`` 리스트.
 
     ``EventDetail.event_kind='heritage_event'``. 자연키는 provider 행사 번호
-    (`sn`/원 응답 ``seqNo``)와 날짜의 ``sn::starts_on::ends_on``이며(``seqNo``는 회차마다
-    반복된다), live 일부 row처럼 ``sn``이 빈 값이면
+    (`sn`/원 응답 ``seqNo``)와 날짜의 ``sn::starts_on::ends_on``(provider ``occurrence_key``와
+    동일)이며(``seqNo``는 회차마다 반복된다), live 일부 row처럼 ``sn``이 빈 값이면
     ``title::starts_on::place`` fallback을 파생한다 (#380, ADR-009 ``::``).
     주소는 ``address``, 비면 원 응답의 ``sido``/``gugun``으로 ``Address.legal``을 채운다.
     ``sn``도 행사명도 없는 row는 skip — 결과 길이가 입력보다 짧을 수 있다.

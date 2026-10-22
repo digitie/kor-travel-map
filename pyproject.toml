@@ -150,7 +150,7 @@ providers = [
   # 소진한다(`PaginatedResult.total`이 권위). 위임을 끊었으므로 보류 조건 자체가
   # 사라졌다. 상세 조회 규율(복합키 3요소 필수·결측 row 경고)은 provider의 것을
   # 그대로 따른다.
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@be3a1a28a9bc5214b9349dcdc7ff7e1ad9b970ba",
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@e1b346f70dd90f68247776fe14ad39b0a90db763",
   # python-krairport-api 핀은 제거했다(ADR-106) — 공항도 kor-travel-transport export에서 받는다.
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────

@@ -401,7 +401,8 @@ async def test_event_sn_without_title_uses_sn_as_name() -> None:
     event = _Event(sn="EVT-NO-TITLE", title=None)
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.name == "EVT-NO-TITLE"
-    assert bundle.source_record.source_entity_id == "EVT-NO-TITLE"
+    # provider ``occurrence_key`` 정의: 날짜가 비면 빈 자리.
+    assert bundle.source_record.source_entity_id == "EVT-NO-TITLE::::"
 
 
 # 2026-10 실 응답(``selectEventListOpenapi``) 한 행 — provider가 이 철자를 파싱하지 못해
@@ -511,6 +512,36 @@ async def test_event_empty_sn_titles_no_longer_collide_when_seq_no_present() -> 
         "100::2026-10-01::",
         "200::2026-10-01::",
     ]
+
+
+@dataclass(frozen=True)
+class _EventWithOccurrenceKey(_EventWithRegion):
+    """provider 0.1.1(``e1b346f7``) ``HeritageEvent`` shape — ``occurrence_key`` 속성 포함."""
+
+    occurrence_key: str | None = None
+
+
+@pytest.mark.parametrize(
+    ("sn", "starts_on", "ends_on", "expected"),
+    [
+        ("15720", date(2026, 10, 17), date(2026, 10, 17), "15720::2026-10-17::2026-10-17"),
+        ("15720", date(2026, 8, 29), None, "15720::2026-08-29::"),
+        ("15720", None, None, "15720::::"),
+    ],
+)
+async def test_event_natural_key_equals_provider_occurrence_key(
+    sn: str, starts_on: date | None, ends_on: date | None, expected: str
+) -> None:
+    """자연키는 provider ``occurrence_key``(``{sn}::{starts_on}::{ends_on}``)와 글자 그대로 같다."""
+    event = _EventWithOccurrenceKey(
+        sn=sn,
+        title="행사",
+        starts_on=starts_on,
+        ends_on=ends_on,
+        occurrence_key=expected,
+    )
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert bundle.source_record.source_entity_id == event.occurrence_key
 
 
 async def test_deterministic_ids() -> None:

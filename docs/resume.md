@@ -2,7 +2,8 @@
 
 - 고속도로 돌발 10분 경로에 `AdminEvidence`를 실어 미시도 reverse가 drop이 아니라 warning이 되게 했고, 국가유산 행사는
   `sido`/`gugun` 주소 fallback과 `seqNo::시작일::종료일` 자연키를 넣었다. migration·OpenAPI 변화 없음.
-- **다음 한 작업: PR CI green → python-krheritage-api 필드명 수정 핀이 오면 같은 PR에서 bump → 소유자 머지 판단 →
+- python-krheritage-api 핀을 `e1b346f7`(provider #12, 0.1.1)로 올렸다. 자연키는 provider `occurrence_key`와 글자 그대로 같다.
+- **다음 한 작업: PR CI green → 소유자 머지 판단 →
   Map Dagster code location 재배포 후 두 job 첫 적재 확인.**
 
 ## 2026-10-21 — T-RECONCILE-RETRY 하위 단계 2(ADR-112 결정 1~7): 브랜치 `feat/reconcile-retry-alert-close`
