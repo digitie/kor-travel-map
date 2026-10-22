@@ -38,6 +38,8 @@ from kortravelmap.geocoding import KorTravelGeoRestClient, kor_travel_geo_revers
 from kortravelmap.providers.kor_travel_concierge import (
     kor_travel_concierge_items_to_bundles,
 )
+from kortravelmap.providers.krex import traffic_notices_to_bundles
+from kortravelmap.providers.krheritage import heritage_events_to_bundles
 
 from kortravelmap.dagster.validation import (
     _RAW_ADDRESS_KEYS,
@@ -900,3 +902,86 @@ def test_name_states_separate_no_claim_from_no_token() -> None:
         "matched": 1,
         "no_observation": 1,
     }
+
+
+# -- 2026-10-22 prod 첫 적재 실패 회귀 (provider 변환 → validator 끝단) ----------------
+
+
+class _HighwayIncident:
+    """``KrexTrafficNoticeItem`` 최소 shape — 좌표가 있는 돌발 1건."""
+
+    occurred_date = "2026.10.22"
+    occurred_time = "09:00:00"
+    incident_type = "공사"
+    incident_type_code = "2"
+    direction = "부산방향"
+    message = "공사"
+    point_name = "서산나들목"
+    route_no = "0150"
+    route_name = "서해안고속도로"
+    process_status = None
+    process_status_code = None
+    latitude = 36.7
+    longitude = 126.5
+    congestion_length = None
+    series_no = None
+    raw: dict[str, object] = {"roadNM": "서해안고속도로", "accPointNM": "서산나들목"}
+
+
+async def test_highway_incident_without_geocoder_is_warning_not_drop() -> None:
+    """10분 경로(geocoder=None): 좌표+bjd 없음이 drop 사유가 아니라 미시도 warning이다."""
+    [bundle] = await traffic_notices_to_bundles(
+        [_HighwayIncident()],
+        fetched_at=datetime.fromisoformat(_FETCHED_AT),
+        reverse_geocoder=None,
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert "reverse_geocode_failed" not in result.issue_codes
+    assert ("reverse_geocode_not_attempted", "warning") in [
+        (issue.code, issue.severity) for issue in result.issues
+    ]
+    assert not validate_feature_bundles_address([bundle]).has_blocking_errors
+
+
+async def test_highway_incident_with_failing_geocoder_still_drops() -> None:
+    """대조군: geocoder가 결선됐는데 결과가 없으면 여전히 ``reverse_geocode_failed``(error)."""
+    async def _miss(coord: Coordinate) -> Address | None:
+        return None
+
+    [bundle] = await traffic_notices_to_bundles(
+        [_HighwayIncident()],
+        fetched_at=datetime.fromisoformat(_FETCHED_AT),
+        reverse_geocoder=_miss,
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert "reverse_geocode_failed" in result.issue_codes
+    assert validate_feature_bundles_address([bundle]).has_blocking_errors
+
+
+async def test_heritage_event_region_fallback_resolves_missing_address() -> None:
+    """행사 목록 실 응답(좌표·상세주소 없이 ``sido``/``gugun``만)은 ``missing_address``가 아니다."""
+    class _RealShapeEvent:
+        sn = None
+        title = "허선구 고가에서 나누는 특별한 하루"
+        starts_on = None
+        ends_on = None
+        place = None
+        tel_name = None
+        address = None
+        longitude = None
+        latitude = None
+        main_image = None
+        raw: dict[str, object] = {
+            "seqNo": "15720",
+            "subTitle": "허선구 고가에서 나누는 특별한 하루",
+            "sDate": "20261017",
+            "sido": "경상남도",
+            "gugun": "진주시",
+        }
+
+    [bundle] = await heritage_events_to_bundles(
+        [_RealShapeEvent()], fetched_at=datetime.fromisoformat(_FETCHED_AT)
+    )
+    result = validate_feature_bundle_address(bundle)
+    assert "missing_address" not in result.issue_codes
+    assert not validate_feature_bundles_address([bundle]).has_blocking_errors

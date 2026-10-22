@@ -731,24 +731,148 @@ async def heritage_items_to_bundles(
 # -- event 변환 ---------------------------------------------------------------
 
 
+def _event_text(
+    event: KrHeritageEvent, attrs: tuple[str, ...], raw_keys: tuple[str, ...]
+) -> str | None:
+    """event 문자열 필드 — provider 속성을 먼저, 비면 원천 row(``raw``)의 원 철자 키를 본다.
+
+    2026-10-22 prod 첫 적재(5306/5306 ``missing_address``)의 원인은 provider가 실제 응답
+    필드명(``seqNo``/``sDate``/``sido``/``gugun`` …)이 아닌 이름을 파싱해 ``sn``·
+    ``address``·``starts_on``이 전부 ``None``이었던 것이다. provider 수정 전후 모두에서 같은
+    값을 내도록 속성(``getattr`` — 수정 전에는 없다)과 원 payload 키를 함께 본다. 그래야
+    provider bump 전후로 자연키가 바뀌지 않는다(바뀌면 같은 행사가 두 feature가 된다).
+    """
+    for name in attrs:
+        value = getattr(event, name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    raw = getattr(event, "raw", None)
+    if isinstance(raw, Mapping):
+        for key in raw_keys:
+            value = raw.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return str(value)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _event_sn(event: KrHeritageEvent) -> str | None:
+    """provider 행사 번호 — ``sn``, 비면 원 응답의 ``seqNo``."""
+    return _event_text(event, ("sn",), ("sn", "seqNo"))
+
+
+def _parse_event_date(value: object) -> date | None:
+    """``YYYYMMDD``/ISO 날짜 → ``date``. provider 수정본의 파싱 규칙과 같다(불가능한 값은 None)."""
+    if isinstance(value, date):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        pass
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) != 8:
+        return None
+    try:
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except ValueError:
+        return None
+
+
+def _event_date(event: KrHeritageEvent, attr: str, raw_keys: tuple[str, ...]) -> date | None:
+    """행사 날짜 — provider 속성, 비면 원 응답 키(``sDate``/``eDate``)."""
+    value = getattr(event, attr, None)
+    if isinstance(value, date):
+        return value
+    raw = getattr(event, "raw", None)
+    if isinstance(raw, Mapping):
+        for key in raw_keys:
+            parsed = _parse_event_date(raw.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _event_starts_on(event: KrHeritageEvent) -> date | None:
+    return _event_date(event, "starts_on", ("sDate", "startDate"))
+
+
+def _event_ends_on(event: KrHeritageEvent) -> date | None:
+    return _event_date(event, "ends_on", ("eDate", "endDate"))
+
+
+def _event_place(event: KrHeritageEvent) -> str | None:
+    """개최 장소 — ``place``, 비면 원 응답 ``subDesc``(provider 수정본의 ``place``)."""
+    return _event_text(event, ("place",), ("subDesc", "siteName"))
+
+
+def _event_tel(event: KrHeritageEvent) -> str | None:
+    return _event_text(event, ("tel_name",), ("contact", "telName"))
+
+
+def _event_main_image(event: KrHeritageEvent) -> str | None:
+    return _event_text(event, ("main_image",), ("mainImageTemp", "mainImage"))
+
+
+def _event_address_text(event: KrHeritageEvent) -> str | None:
+    """행사 주소 텍스트 — ``address``, 비면 ``sido`` + ``gugun``(시도·시군구명).
+
+    실제 행사 목록 응답에는 상세 주소 필드가 없고 시도/시군구명만 있다. 좌표는 없으므로
+    만들지 않는다 — 이 텍스트는 ``Address.legal``(위치 단서)로만 쓰인다.
+    """
+    address = normalize_korean_text(event.address)
+    if address:
+        return address
+    parts = [
+        part
+        for part in (
+            normalize_korean_text(_event_text(event, ("sido",), ("sido",))),
+            normalize_korean_text(_event_text(event, ("gugun",), ("gugun",))),
+        )
+        if part
+    ]
+    return " ".join(parts) or None
+
+
 def _event_natural_key(event: KrHeritageEvent) -> str | None:
-    """event 자연키 — ``sn`` 우선, 비면 ``title::starts_on::place`` 파생.
+    """event 자연키 — provider ``HeritageEvent.occurrence_key``와 같은 ``sn::시작일::종료일``.
+
+    날짜가 비면 그 자리는 빈 문자열이다(``sn::::``) — provider 0.1.1(``e1b346f7``)의 정의 그대로다.
+
+    ``sn``이 비면 ``title::starts_on::place``다.
+
+    ``sn``(원 응답 ``seqNo``)은 **회차 id가 아니다** — 같은 응답 안에서 같은 ``seqNo``가
+    날짜가 다른 행으로 반복된다(2026-10 실 응답 2,006행 중 1,378행이 중복 ``seqNo``,
+    ``(seqNo, sDate, eDate)``는 유일 — 상류 보장은 아니다). provider 수정본의
+    ``occurrence_key``와 같은 모양으로 날짜 둘을 붙인다. 같은 회차가 여러 달 응답에 다시
+    나오는 것은 같은 키로 접히는 것이 맞다.
 
     live 일부 행사 row는 ``sn``이 빈 값이라(run ``bd92b726``, #380) ADR-009
     검증(빈 source_entity_id 금지)에 걸린다. 그 경우 행사명+시작일+장소(없으면
     주소)로 결정적 fallback 키를 파생한다 (ADR-009 ``::`` 구분자, #374 패턴).
     ``sn``도 행사명도 없으면 ``None`` — 호출측이 해당 row를 skip한다.
     """
-    sn = (event.sn or "").strip()
+    starts_on = _event_starts_on(event)
+    ends_on = _event_ends_on(event)
+    starts = starts_on.isoformat() if starts_on is not None else ""
+    ends = ends_on.isoformat() if ends_on is not None else ""
+    sn = _event_sn(event)
     if sn:
-        return sn
+        # provider ``occurrence_key``와 **글자 그대로** 같아야 한다 — 핀 전후 키가 갈리지 않도록
+        # 속성/원 키에서 직접 계산한다(raw만 있는 수정 전 shape에서도 같은 값).
+        return f"{sn}::{starts}::{ends}"
     title = normalize_korean_text(event.title)
     if not title:
         return None
-    starts = event.starts_on.isoformat() if event.starts_on is not None else ""
     place = (
-        normalize_korean_text(event.place)
-        or normalize_korean_text(event.address)
+        normalize_korean_text(_event_place(event))
+        or _event_address_text(event)
         or ""
     )
     return "::".join((title, starts, place))
@@ -771,11 +895,12 @@ async def _event_to_bundle(
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+    address_text = _event_address_text(event)
     if (geo is None or geo.bjd_code is None) and address_resolver is not None:
-        resolved = await address_resolver(Address(legal=normalize_korean_text(event.address)))
+        resolved = await address_resolver(Address(legal=address_text))
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
-    address = _merge_address(geo, event.address)
+    address = _merge_address(geo, address_text)
     bjd_code = address.bjd_code
 
     payload_hash = make_payload_hash(raw_data)
@@ -795,7 +920,7 @@ async def _event_to_bundle(
     )
 
     # title이 비고 sn만 있는 row는 sn(=natural_key)을 표시명으로 강등.
-    name = normalize_korean_text(event.title) or natural_key
+    name = normalize_korean_text(event.title) or _event_sn(event) or natural_key
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=natural_key,
@@ -809,10 +934,10 @@ async def _event_to_bundle(
         detail=EventDetail(
             feature_id=feature_id,
             event_kind="heritage_event",
-            starts_on=event.starts_on,
-            ends_on=event.ends_on,
-            venue_name=normalize_korean_text(event.place),
-            tel=normalize_phone_number(event.tel_name),
+            starts_on=_event_starts_on(event),
+            ends_on=_event_ends_on(event),
+            venue_name=normalize_korean_text(_event_place(event)),
+            tel=normalize_phone_number(_event_tel(event)),
             content_id=natural_key,
         ),
     )
@@ -837,7 +962,7 @@ async def _event_to_bundle(
         feature_id=feature_id,
         source_record_key=source_record_key,
         dataset_key=DATASET_KEY_EVENT,
-        image_url=getattr(event, "main_image", None),
+        image_url=_event_main_image(event),
         alt_text=name,
     )
     return FeatureBundle(
@@ -857,9 +982,11 @@ async def heritage_events_to_bundles(
 ) -> list[FeatureBundle]:
     """무형유산/행사 events → event ``FeatureBundle`` 리스트.
 
-    ``EventDetail.event_kind='heritage_event'``. 자연키는 provider event id
-    (`sn`)이며, live 일부 row처럼 ``sn``이 빈 값이면
+    ``EventDetail.event_kind='heritage_event'``. 자연키는 provider 행사 번호
+    (`sn`/원 응답 ``seqNo``)와 날짜의 ``sn::starts_on::ends_on``(provider ``occurrence_key``와
+    동일)이며(``seqNo``는 회차마다 반복된다), live 일부 row처럼 ``sn``이 빈 값이면
     ``title::starts_on::place`` fallback을 파생한다 (#380, ADR-009 ``::``).
+    주소는 ``address``, 비면 원 응답의 ``sido``/``gugun``으로 ``Address.legal``을 채운다.
     ``sn``도 행사명도 없는 row는 skip — 결과 길이가 입력보다 짧을 수 있다.
     좌표가 있으면 reverse_geocoder로 bjd_code 보강하고, 없거나 실패하면
     address_resolver로 소재지 기반 보강을 시도한다 (ADR-009).

@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### prod 첫 적재 실패 2건 (2026-10-22)
+
+- **FIXED (provider 변환)**: krex 고속도로 돌발 bundle이 `AdminEvidence(reverse_attempted, obs_code)`를 싣는다. geocoder를
+  결선하지 않는 10분 경로에서 좌표 있는 row가 `reverse_geocode_failed`로 drop되지 않고 `reverse_geocode_not_attempted`
+  warning으로 적재된다.
+- **FIXED (provider 변환)**: 국가유산 행사는 `address`가 비면 원 응답 `sido`/`gugun`으로 `Address.legal`을 채운다
+  (`missing_address` 해소, 좌표는 만들지 않음).
+- **CHANGED (자연키)**: 국가유산 행사 자연키가 `sn::시작일::종료일`(날짜가 없으면 `sn`, provider 수정본 `occurrence_key`와 같은 모양)이다. `sn`·시작일은 원 응답
+  `seqNo`·`sDate`로 보충한다. 이 dataset은 아직 적재된 적이 없다. migration·API·OpenAPI 변화 없음.
+- **CHANGED (deps)**: python-krheritage-api 핀 `be3a1a28` → `e1b346f7`(provider #12, 0.1.1 — event 필드를 live 응답에
+  맞춤, `occurrence_key`·`sido`/`gugun`/`address` 파생). provider surface manifest 재생성.
+
 ### reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기 (2026-10-21, ADR-112 결정 1~7)
 
 - **CHANGED (Dagster)**: `feature_operation_reconciliation_sensor`의 Dagster page는 root가 생긴 run(또는 abandon 기록을

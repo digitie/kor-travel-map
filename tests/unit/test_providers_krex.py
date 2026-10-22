@@ -728,6 +728,52 @@ def test_traffic_notice_with_coord_builds_coordinate() -> None:
 
 
 @pytest.mark.unit
+def test_traffic_notice_without_geocoder_marks_reverse_not_attempted() -> None:
+    """10분 경로(geocoder 미결선)는 좌표가 있어도 reverse를 **시도하지 않았다**고 실어야 한다.
+
+    evidence가 없으면 validator가 "좌표 있음 + bjd 없음"을 ``reverse_geocode_failed``로
+    drop했다(2026-10-22 prod 첫 적재 231/317).
+    """
+    [with_coord, without_coord] = traffic_notices_to_bundles(
+        [_N_ACCIDENT_ALIAS, _N_ROADWORK], fetched_at=_NOW
+    )
+    assert with_coord.feature.coord is not None
+    assert with_coord.admin_evidence is not None
+    assert with_coord.admin_evidence.reverse_attempted is False
+    assert with_coord.admin_evidence.obs_code is None
+    assert without_coord.admin_evidence is not None
+    assert without_coord.admin_evidence.reverse_attempted is False
+
+
+@pytest.mark.unit
+def test_traffic_notice_with_geocoder_records_attempt_and_obs() -> None:
+    async def _hit(coord: Any) -> Any:
+        return Address(bjd_code="4128110300", sigungu_code="41281", sido_code="41")
+
+    async def _miss(coord: Any) -> Any:
+        return None
+
+    [hit] = traffic_notices_to_bundles([_N_ACCIDENT_ALIAS], fetched_at=_NOW, reverse_geocoder=_hit)
+    assert hit.admin_evidence is not None
+    assert hit.admin_evidence.reverse_attempted is True
+    assert hit.admin_evidence.obs_code == "4128110300"
+
+    [miss] = traffic_notices_to_bundles(
+        [_N_ACCIDENT_ALIAS], fetched_at=_NOW, reverse_geocoder=_miss
+    )
+    assert miss.admin_evidence is not None
+    assert miss.admin_evidence.reverse_attempted is True
+    assert miss.admin_evidence.obs_code is None
+
+    # 좌표 없는 row는 geocoder가 있어도 시도하지 않는다.
+    [coordless] = traffic_notices_to_bundles(
+        [_N_ROADWORK], fetched_at=_NOW, reverse_geocoder=_hit
+    )
+    assert coordless.admin_evidence is not None
+    assert coordless.admin_evidence.reverse_attempted is False
+
+
+@pytest.mark.unit
 def test_traffic_notice_source_record_provider() -> None:
     [bundle] = traffic_notices_to_bundles([_N_ROADWORK], fetched_at=_NOW)
     src = bundle.source_record

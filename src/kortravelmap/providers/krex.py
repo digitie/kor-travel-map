@@ -56,6 +56,7 @@ from kortravelmap.core.ids import (
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
+    AdminEvidence,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -1003,7 +1004,18 @@ async def _traffic_notice_item_to_bundle(
         confidence=100,
     )
     return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        # 10분 freshness 경로는 geocoder를 결선하지 않는다(assets.py, #667). evidence가 없으면
+        # validator는 "좌표 있음 + bjd 없음"을 reverse **실패**(drop)로 본다 — 2026-10-22 prod
+        # 첫 적재에서 231/317건이 그렇게 사라졌다. 시도했는지를 실어 보내야 미시도가
+        # ``reverse_geocode_not_attempted`` warning으로 갈린다. obs는 좌표 reverse 결과만이다
+        # (``_reverse_geocode``는 geocoder 결과만 돌려준다).
+        admin_evidence=AdminEvidence(
+            obs_code=bjd_code,
+            reverse_attempted=coord is not None and reverse_geocoder is not None,
+        ),
     )
 
 
