@@ -40,6 +40,7 @@ __all__ = [
     "DATASET_KEY_REST_AREAS",
     "DATASET_KEY_REST_AREA_FUEL_PRICES",
     "EXPORT_PATH_AIRPORTS",
+    "EXPORT_PATH_FUEL_STATION_PRICE_HISTORY",
     "EXPORT_PATH_FUEL_STATIONS",
     "EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE",
     "EXPORT_PATH_REST_AREAS",
@@ -58,6 +59,8 @@ __all__ = [
     "TransportExportNotCurrent",
     "TransportExportPage",
     "TransportFuelPrice",
+    "TransportFuelPriceHistory",
+    "TransportFuelPriceHistoryPoint",
     "TransportFuelStation",
     "TransportHighwayIncident",
     "TransportIncidentActiveSet",
@@ -68,6 +71,7 @@ __all__ = [
     "parse_airports",
     "parse_collection",
     "parse_export_page",
+    "parse_fuel_price_history",
     "parse_fuel_station",
     "parse_rest_area",
     "parse_rest_area_fuel_price",
@@ -99,6 +103,12 @@ EXPORT_PATH_REST_AREAS: Final[str] = "/v1/service/exports/rest-areas"
 EXPORT_PATH_REST_AREA_FUEL_PRICES: Final[str] = "/v1/service/exports/rest-area-fuel-prices"
 EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-incidents/active"
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
+EXPORT_PATH_FUEL_STATION_PRICE_HISTORY: Final[str] = (
+    "/v1/service/exports/fuel-stations/{natural_key}/price-history"
+)
+"""주유소 한 곳의 유종별 가격 이력(transport ADR-013 추가 2026-10-23, Map ADR-114 결정 6).
+
+Map은 transport 출처 가격의 이력을 보관하지 않는다 — 추이는 API가 이 경로에서 읽는다."""
 
 
 INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
@@ -183,6 +193,30 @@ class TransportFuelPrice:
     collected_at: datetime
     """transport가 이 가격을 오피넷 현재가로 **마지막으로 확인한** 수집 시각."""
     raw: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class TransportFuelPriceHistoryPoint:
+    """transport ``fuel_price_snapshots`` 1행 — 키 ``(주유소, 유종, observed_at)``.
+
+    ``observed_at``은 오피넷 갱신시각(없으면 그 가격을 처음 본 수집 시각), ``collected_at``은 그 가격을
+    **마지막으로 다시 확인한** 수집 시각이다(재관측마다 앞으로 갱신된다 — knowledge time이 아니다).
+    """
+
+    product_code: str
+    price: Decimal | None
+    provider_updated_at: datetime | None
+    observed_at: datetime
+    collected_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TransportFuelPriceHistory:
+    """``/fuel-stations/{natural_key}/price-history`` 응답."""
+
+    natural_key: str
+    points: tuple[TransportFuelPriceHistoryPoint, ...]
+    truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,6 +439,40 @@ def _strict_bool(item: Mapping[str, Any], key: str, where: str) -> bool:
     if not isinstance(value, bool):
         raise TransportExportContractError(f"{where}.{key}: boolean이어야 한다.")
     return value
+
+
+def parse_fuel_price_history(payload: Any, *, natural_key: str) -> TransportFuelPriceHistory:
+    """가격 이력 응답을 엄격히 읽는다. 다른 주유소의 응답이면 계약 위반이다."""
+    where = "fuel-stations/price-history"
+    body = _mapping(payload, where)
+    returned_key = _required_text(body, "natural_key", where)
+    if returned_key != natural_key:
+        raise TransportExportContractError(
+            f"{where}: 요청한 주유소({natural_key!r})와 응답 주유소({returned_key!r})가 다르다."
+        )
+    items = body.get("items")
+    if not isinstance(items, list):
+        raise TransportExportContractError(f"{where}.items: 배열이어야 한다.")
+    points: list[TransportFuelPriceHistoryPoint] = []
+    for index, raw_item in enumerate(items):
+        item_where = f"{where}.items[{index}]"
+        item = _mapping(raw_item, item_where)
+        points.append(
+            TransportFuelPriceHistoryPoint(
+                product_code=_required_text(item, "product_code", item_where).strip(),
+                price=_decimal(item, "price", item_where),
+                provider_updated_at=_datetime(
+                    item, "provider_updated_at", item_where, required=False
+                ),
+                observed_at=_required_datetime(item, "observed_at", item_where),
+                collected_at=_required_datetime(item, "collected_at", item_where),
+            )
+        )
+    return TransportFuelPriceHistory(
+        natural_key=returned_key,
+        points=tuple(points),
+        truncated=_strict_bool(body, "truncated", where),
+    )
 
 
 def parse_collection(value: Any, *, where: str) -> TransportCollection:

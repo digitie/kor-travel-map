@@ -782,6 +782,23 @@ _CURATION_CANDIDATE_READ_ACL = tuple(
 )
 
 
+#: ADR-114(migration 410) latest-only 정리 세 길. 셋 다 schema owner 소유 SECURITY DEFINER이고 첫 줄에서
+#: dataset이 활성 kor-travel-transport인지 본다. runtime에 표 DELETE를 주는 대신 이 EXECUTE만 준다 —
+#: 참조 판정에 필요한 증거 표(``ops.manual_provider_dedup_cases`` 등)를 runtime은 읽을 수조차 없다.
+_LATEST_ONLY_RETENTION_FUNCTION_ACL = tuple(
+    statement
+    for routine in (
+        "feature.prune_transport_price_facts(...)",
+        "provider_sync.prune_latest_only_lineage(...)",
+        "feature.purge_ended_provider_notices(...)",
+    )
+    for statement in (
+        f"REVOKE ALL ON FUNCTION {routine} FROM PUBLIC",
+        f"GRANT EXECUTE ON FUNCTION {routine} TO ktm_feature_runtime",
+    )
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -792,7 +809,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
-        + _CURATION_CANDIDATE_READ_ACL,
+        + _CURATION_CANDIDATE_READ_ACL
+        + _LATEST_ONLY_RETENTION_FUNCTION_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",

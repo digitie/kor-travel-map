@@ -2079,6 +2079,14 @@ class FeatureLoadResult:
     geo_override_stale_findings: int = 0
     #: stale 행에서 같은 법정동인데 새 답이 잃은 geo 전용 필드를 저장값으로 지킨 행.
     geo_partial_kept: int = 0
+    #: latest-only 정리(ADR-114)가 같은 transaction에서 지운 비-head·orphan record.
+    retention_records_pruned: int = 0
+    #: latest-only 정리가 지운 orphan source entity.
+    retention_entities_pruned: int = 0
+    #: latest-only 정리가 지운 종료 notice Feature(돌발 1일 override).
+    retention_notices_purged: int = 0
+    #: 증거 참조가 붙들어 지우지 않은 record·entity·notice.
+    retention_held: int = 0
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -2107,6 +2115,16 @@ class FeatureLoadResult:
                 self.geo_override_stale_findings + other.geo_override_stale_findings
             ),
             geo_partial_kept=self.geo_partial_kept + other.geo_partial_kept,
+            retention_records_pruned=(
+                self.retention_records_pruned + other.retention_records_pruned
+            ),
+            retention_entities_pruned=(
+                self.retention_entities_pruned + other.retention_entities_pruned
+            ),
+            retention_notices_purged=(
+                self.retention_notices_purged + other.retention_notices_purged
+            ),
+            retention_held=self.retention_held + other.retention_held,
         )
 
 

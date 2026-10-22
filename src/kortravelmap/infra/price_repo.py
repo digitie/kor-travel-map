@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import CursorResult
 
 from kortravelmap.core.ids import make_price_value_key
+from kortravelmap.core.retention import is_latest_only
 from kortravelmap.dto._time import kst_now
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
@@ -38,11 +39,16 @@ __all__ = [
     "PriceCard",
     "PriceFeatureLoadResult",
     "PricePoint",
+    "FeaturePriceDataset",
     "PriceSummaryMaterializeResult",
+    "PriceValueLoadResult",
     "build_price_card",
     "build_price_snapshot",
+    "latest_only_price_datasets_for_feature",
     "load_price_values",
     "materialize_current_price_summary",
+    "prune_superseded_price_facts",
+    "sort_current_points",
 ]
 
 DEFAULT_PRICE_FRESHNESS_SECONDS: Final[int] = (
@@ -96,11 +102,24 @@ class PriceCard:
 
 
 @dataclass(frozen=True)
+class PriceValueLoadResult:
+    """한 raw response의 price fact 적재 결과.
+
+    ``pruned``는 latest-only dataset(ADR-114)에서 같은 transaction이 지운 superseded fact 수다.
+    다른 dataset은 항상 0이다.
+    """
+
+    inserted: int
+    pruned: int = 0
+
+
+@dataclass(frozen=True)
 class PriceFeatureLoadResult:
     """price anchor feature + ``PriceValue`` 적재 결과."""
 
     features: FeatureLoadResult
     price_values: int
+    price_values_pruned: int = 0
 
     def as_metadata(self) -> dict[str, object]:
         return {
@@ -111,7 +130,22 @@ class PriceFeatureLoadResult:
             "price_source_links_inserted": self.features.source_links_inserted,
             "price_source_links_updated": self.features.source_links_updated,
             "price_values_upserted": self.price_values,
+            "price_values_pruned": self.price_values_pruned,
+            "retention_records_pruned": self.features.retention_records_pruned,
+            "retention_entities_pruned": self.features.retention_entities_pruned,
+            "retention_held": self.features.retention_held,
         }
+
+
+@dataclass(frozen=True)
+class FeaturePriceDataset:
+    """feature의 현재 price series가 속한 dataset과 그 dataset의 자연키(identity claim)."""
+
+    provider_dataset_id: int
+    provider: str
+    dataset_key: str
+    display_name: str
+    natural_key: str | None
 
 
 @dataclass(frozen=True)
@@ -250,6 +284,40 @@ WHERE NOT EXISTS (
 
 _ACQUIRE_PRICE_CURRENT_SUMMARY_LOCK_SQL: Final[str] = """
 SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))
+"""
+
+#: ADR-114: latest-only dataset의 superseded fact를 지운다 — summary가 가리키지 않는 것만. 삭제는
+#: SECURITY DEFINER 함수(migration 410)가 한다: runtime에는 fact DELETE 권한이 없고, 함수가 dataset이 활성
+#: kor-travel-transport인지 먼저 본다. 트리거(``reject_price_value_mutation``)가 같은 조건을 행마다 다시 본다.
+_PRUNE_SUPERSEDED_PRICE_FACTS_SQL: Final[str] = """
+SELECT feature.prune_transport_price_facts(CAST(:provider_dataset_id AS bigint))
+"""
+
+_PRICE_DATASET_IDENTITY_SQL: Final[str] = """
+SELECT provider, dataset_key
+FROM provider_sync.provider_datasets
+WHERE provider_dataset_id = :provider_dataset_id
+"""
+
+#: price card가 원천 서비스에서 추이를 읽어야 하는지 판정할 재료 — feature의 summary series가 속한
+#: dataset과 그 dataset 안의 identity claim 자연키(ADR-114 결정 6).
+_FEATURE_PRICE_DATASETS_SQL: Final[str] = """
+SELECT DISTINCT
+    dataset.provider_dataset_id,
+    dataset.provider,
+    dataset.dataset_key,
+    dataset.display_name,
+    claim.natural_key
+FROM feature.current_price_summary AS summary
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = summary.provider_dataset_id
+ AND dataset.is_active
+LEFT JOIN provider_sync.provider_feature_identities AS claim
+  ON claim.feature_id = summary.feature_id
+ AND claim.provider_dataset_id = summary.provider_dataset_id
+ AND claim.feature_kind = 'price'
+WHERE summary.feature_id = CAST(:feature_id AS uuid)
+ORDER BY dataset.provider_dataset_id
 """
 
 _CURRENT_SQL: Final[str] = """
@@ -417,13 +485,17 @@ async def load_price_values(
     *,
     provider_dataset_id: int,
     source_record: SourceRecord,
-) -> int:
+) -> PriceValueLoadResult:
     """한 raw response의 price facts를 append-only로 적재한다.
 
     ``provider_dataset_id``는 exact operation membership이 전달한 canonical id이고,
     ``source_record``는 같은 response의 immutable 원문이다. source record 생성,
     fact append, current summary receipt/upsert를 같은 session transaction에서 묶어
     source-less price write와 current/history drift를 없앤다.
+
+    dataset이 latest-only(ADR-114, ``core.retention``)면 summary 물화 직후 **같은 transaction·같은
+    advisory lock** 안에서 superseded fact를 지운다 — commit 경계마다 "summary가 가리키는 fact만
+    남는다"가 참이다.
     """
     if provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id must be positive")
@@ -469,10 +541,87 @@ async def load_price_values(
         for v in materialized
     ]
     if not params:
-        return 0
+        return PriceValueLoadResult(inserted=0)
     await session.execute(text(_IMMUTABLE_INSERT_SQL), params)
     await materialize_current_price_summary(session, run_kind="ingest")
-    return len(params)
+    pruned = 0
+    if await _is_latest_only_dataset(session, provider_dataset_id):
+        pruned = await prune_superseded_price_facts(
+            session, provider_dataset_ids=[provider_dataset_id]
+        )
+    return PriceValueLoadResult(inserted=len(params), pruned=pruned)
+
+
+async def _is_latest_only_dataset(session: AsyncSession, provider_dataset_id: int) -> bool:
+    row = (
+        await session.execute(
+            text(_PRICE_DATASET_IDENTITY_SQL),
+            {"provider_dataset_id": provider_dataset_id},
+        )
+    ).mappings().one_or_none()
+    return row is not None and is_latest_only(str(row["provider"]), str(row["dataset_key"]))
+
+
+async def prune_superseded_price_facts(
+    session: AsyncSession,
+    *,
+    provider_dataset_ids: Sequence[int],
+) -> int:
+    """latest-only dataset의 superseded price fact를 지운다(ADR-114 결정 2).
+
+    ``feature.current_price_summary``가 가리키지 않는 fact만 지운다. summary를 바꾸는 writer와
+    겹치지 않도록 ``projection:current-price-summary`` transaction advisory lock을 잡는다 — 같은
+    transaction에서 이미 쥐었으면(물화 직후) 즉시 돌아온다. 호출자는 이 transaction에서 summary가
+    최신인 상태로 불러야 한다(적재 경로는 물화 직후, maintenance는 물화한 뒤).
+
+    정책 판정은 하지 않는다 — 어떤 dataset을 넘길지는 호출자가 ``core.retention``으로 정한다. DB
+    함수·트리거(migration 410)는 활성 kor-travel-transport dataset 밖이면 어떤 경우에도 거부한다.
+
+    잠금 순서(ADR-111 §2): 적재 경로는 이미 ``feature-curation-write``를 쥔 뒤 여기 온다. maintenance도
+    같은 순서로 부른다(gate → summary lock).
+    """
+    ids = sorted({int(value) for value in provider_dataset_ids})
+    if not ids:
+        return 0
+    await session.execute(
+        text(_ACQUIRE_PRICE_CURRENT_SUMMARY_LOCK_SQL),
+        {"lock_id": _PRICE_CURRENT_SUMMARY_LOCK_ID},
+    )
+    pruned = 0
+    for provider_dataset_id in ids:
+        pruned += int(
+            await session.scalar(
+                text(_PRUNE_SUPERSEDED_PRICE_FACTS_SQL),
+                {"provider_dataset_id": provider_dataset_id},
+            )
+            or 0
+        )
+    return pruned
+
+
+async def latest_only_price_datasets_for_feature(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+) -> list[FeaturePriceDataset]:
+    """feature의 summary series 중 latest-only dataset(ADR-114)에 속한 것.
+
+    이 dataset들의 이력은 Map DB에 없다 — 추이는 원천 서비스(transport)에서 읽는다.
+    """
+    rows = (
+        await session.execute(text(_FEATURE_PRICE_DATASETS_SQL), {"feature_id": feature_id})
+    ).mappings().all()
+    return [
+        FeaturePriceDataset(
+            provider_dataset_id=int(row["provider_dataset_id"]),
+            provider=str(row["provider"]),
+            dataset_key=str(row["dataset_key"]),
+            display_name=str(row["display_name"]),
+            natural_key=None if row["natural_key"] is None else str(row["natural_key"]),
+        )
+        for row in rows
+        if is_latest_only(str(row["provider"]), str(row["dataset_key"]))
+    ]
 
 
 async def materialize_current_price_summary(
@@ -597,7 +746,8 @@ def _price_point(row: RowMapping) -> PricePoint:
     )
 
 
-def _sort_current(points: list[PricePoint]) -> list[PricePoint]:
+def sort_current_points(points: list[PricePoint]) -> list[PricePoint]:
+    """price card current의 표시 순서(유종 고정 순서 → 이름 → 키 → dataset → domain)."""
     return sorted(
         points,
         key=lambda point: (
@@ -656,7 +806,7 @@ async def _build_price_card(
         )
     ).mappings().all()
 
-    current = _sort_current([_price_point(row) for row in current_rows])
+    current = sort_current_points([_price_point(row) for row in current_rows])
     history = [_price_point(row) for row in history_rows]
     latest_at = max((point.observed_at for point in history), default=None)
     reference = observed_at if observed_at is not None else kst_now()

@@ -161,6 +161,15 @@ class DagsterFeatureLoadResult:
         }
         if any(geo_counts.values()):
             metadata.update(geo_counts)
+        # latest-only 정리(ADR-114) — transport dataset 적재에서만 0이 아니다.
+        retention_counts = {
+            "retention_records_pruned": self.load.retention_records_pruned,
+            "retention_entities_pruned": self.load.retention_entities_pruned,
+            "retention_notices_purged": self.load.retention_notices_purged,
+            "retention_held": self.load.retention_held,
+        }
+        if any(retention_counts.values()):
+            metadata.update(retention_counts)
         if not self.feature_ids_complete:
             metadata["feature_ids_truncated"] = True
         return metadata

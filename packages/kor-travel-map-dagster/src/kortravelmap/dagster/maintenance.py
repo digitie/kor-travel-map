@@ -18,7 +18,9 @@ from dagster import (
     DefaultScheduleStatus,
     Failure,
     Field,
+    In,
     Int,
+    Nothing,
     OpExecutionContext,
     Permissive,
     RetryPolicy,
@@ -46,6 +48,7 @@ __all__ = [
     "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
+    "apply_latest_only_retention_op",
     "FINDING_PURGE_DEFAULT_RETENTION",
     "NOTICE_PURGE_DEFAULT_RETENTION",
     "consistency_dedup_refresh_job",
@@ -402,6 +405,28 @@ async def purge_expired_notices_op(context: OpExecutionContext) -> dict[str, obj
 
 
 @op(
+    name="apply_latest_only_retention",
+    required_resource_keys={"kor_travel_map_client"},
+    ins={"after_dedup_refresh": In(Nothing)},
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def apply_latest_only_retention_op(context: OpExecutionContext) -> dict[str, object]:
+    """transport 출처(latest-only, ADR-114) dataset의 이력을 정리한다.
+
+    적재 transaction이 매번 같은 정리를 하므로 이 op는 **따라잡기**다: 적재가 오래 멈춘 dataset의
+    superseded price fact·비-head record·orphan entity와 종료 1일이 지난 돌발 notice. 진행 중인 적재가
+    있는 dataset은 건너뛴다. dedup 후보 갱신 뒤에 돈다 — 그 op가 같은 Feature에 cascade 행을 쓴다.
+    """
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    results = await client.apply_latest_only_retention_maintenance()
+    metadata: dict[str, object] = {
+        f"{result.dataset_key}": result.as_metadata() for result in results
+    }
+    context.add_output_metadata(metadata)
+    return metadata
+
+
+@op(
     name="drain_expired_cache_target_snapshots",
     required_resource_keys={"kor_travel_map_client"},
     config_schema=_CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA,
@@ -614,14 +639,17 @@ async def drain_expired_cache_target_snapshots_op(
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
     description=(
         "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고, "
-        "보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
+        "보존 기간이 지난 notice와 resolved integrity finding, transport 출처(latest-only) 이력을 "
+        "정리한다."
     ),
 )
 def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
-    run_consistency_check_op(refresh_dedup_candidates_op())
+    refreshed = refresh_dedup_candidates_op()
+    run_consistency_check_op(refreshed)
     purge_expired_notices_op()
     purge_resolved_integrity_findings_op()
+    apply_latest_only_retention_op(after_dedup_refresh=refreshed)
 
 
 @job(

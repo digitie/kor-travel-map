@@ -274,6 +274,14 @@ from kortravelmap.infra.integrity_violation_repo import (
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget, ImportJobEvent
 from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.price_repo import PriceFeatureLoadResult
+from kortravelmap.infra.retention_repo import (
+    LatestOnlyRetentionResult,
+    apply_latest_only_retention,
+    apply_latest_only_retention_by_id,
+)
+from kortravelmap.infra.retention_repo import (
+    apply_latest_only_retention_maintenance as repo_apply_latest_only_retention_maintenance,
+)
 from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
 )
@@ -544,6 +552,24 @@ class CacheTargetSnapshotGcDrainResult:
     observation_growth_baseline_eligible: bool | None = None
     observation_growth_min_interval_seconds: int | None = None
 
+
+
+async def _retain_and_capture(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> FeatureLoadResult:
+    """적재 transaction 끝: latest-only 정리(ADR-114) 뒤 curation seal을 잡는다.
+
+    정리는 **seal보다 먼저, 같은 transaction에서** 해야 한다. seal은 이 dataset의 entity·head·link·
+    Feature 집합 hash이고 child 완료 때 다시 대조된다 — 다른 transaction에서 지우면 그 대조가 깨진다.
+    정책 밖 dataset이면 정리는 아무것도 하지 않는다.
+    """
+    retention = await apply_latest_only_retention(
+        session, provider=provider, dataset_key=dataset_key
+    )
+    seal = await capture_provider_curation_input(
+        session, provider=provider, dataset_key=dataset_key
+    )
+    return retention.as_load_result().merge(seal)
 
 class AsyncKorTravelMapClient:
     """라이브러리 진입점 — DB 적재/조회 + dedup 후보 동기화 오케스트레이션.
@@ -1188,7 +1214,7 @@ class AsyncKorTravelMapClient:
             if curation_dataset is not None:
                 provider, dataset_key = curation_dataset
                 result = result.merge(
-                    await capture_provider_curation_input(
+                    await _retain_and_capture(
                         session, provider=provider, dataset_key=dataset_key
                     )
                 )
@@ -1405,7 +1431,7 @@ class AsyncKorTravelMapClient:
                     if curation_dataset is not None:
                         provider, dataset_key = curation_dataset
                         result = result.merge(
-                            await capture_provider_curation_input(
+                            await _retain_and_capture(
                                 session, provider=provider, dataset_key=dataset_key
                             )
                         )
@@ -1477,7 +1503,7 @@ class AsyncKorTravelMapClient:
                     source_entity_type=source_entity_type,
                 )
             result = result.merge(
-                await capture_provider_curation_input(
+                await _retain_and_capture(
                     session, provider=provider, dataset_key=dataset_key
                 )
             )
@@ -1504,7 +1530,7 @@ class AsyncKorTravelMapClient:
                 active_lineage_keys=active_lineage_keys,
                 observed_at=observed_at,
             )
-            seal = await capture_provider_curation_input(
+            seal = await _retain_and_capture(
                 session, provider=provider, dataset_key=dataset_key
             )
             return NoticeFeatureLoadResult(
@@ -1532,7 +1558,7 @@ class AsyncKorTravelMapClient:
                 lineage_events=lineage_events,
                 observed_at=observed_at,
             )
-            seal = await capture_provider_curation_input(
+            seal = await _retain_and_capture(
                 session, provider=provider, dataset_key=dataset_key
             )
             return NoticeFeatureLoadResult(
@@ -1628,6 +1654,14 @@ class AsyncKorTravelMapClient:
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
             )
+
+    async def apply_latest_only_retention_maintenance(self) -> list[LatestOnlyRetentionResult]:
+        """latest-only dataset(ADR-114) 전부를 정리한다 — maintenance op용, 한 transaction.
+
+        진행 중인 provider 적재가 있는 dataset은 건너뛴다(그 적재의 seal을 깨지 않게).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_apply_latest_only_retention_maintenance(session)
 
     async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
         """보존 기간이 지난 notice를 soft-delete (§9 보관 정책, #632).
@@ -2823,14 +2857,19 @@ class AsyncKorTravelMapClient:
         provider_dataset_id: int,
         source_record: SourceRecord,
     ) -> int:
-        """exact response가 소유하는 immutable price facts를 append한다."""
+        """exact response가 소유하는 immutable price facts를 append한다.
+
+        latest-only dataset(ADR-114)이면 같은 transaction에서 superseded fact도 지운다. 반환값은
+        새로 쓴 fact 수다.
+        """
         async with self._session_factory() as session, session.begin():
-            return await repo_load_price_values(
+            written = await repo_load_price_values(
                 session,
                 values,
                 provider_dataset_id=provider_dataset_id,
                 source_record=source_record,
             )
+            return written.inserted
 
     async def load_price_features(
         self,
@@ -2845,13 +2884,22 @@ class AsyncKorTravelMapClient:
         values = list(price_values)
         async with self._feature_load_transaction() as session:
             features = await load_bundles(session, bundles)
-            value_count = await repo_load_price_values(
+            written = await repo_load_price_values(
                 session,
                 values,
                 provider_dataset_id=provider_dataset_id,
                 source_record=source_record,
             )
-        return PriceFeatureLoadResult(features=features, price_values=value_count)
+            # 가격 dataset의 비-head record·orphan 응답 entity(ADR-114). fact prune 뒤에 해야 fact를 다
+            # 잃은 옛 run 응답 entity가 orphan으로 보인다. 정책 밖 dataset이면 아무것도 하지 않는다.
+            retention = await apply_latest_only_retention_by_id(
+                session, provider_dataset_id=provider_dataset_id
+            )
+        return PriceFeatureLoadResult(
+            features=features.merge(retention.as_load_result()),
+            price_values=written.inserted,
+            price_values_pruned=written.pruned,
+        )
 
     async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:
         """Feature update request 단건 조회. 없으면 ``None``."""

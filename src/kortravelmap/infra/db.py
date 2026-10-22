@@ -123,6 +123,14 @@ _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(
 _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION = (
     "feature.resolve_provider_feature_id(bigint,text,text)"
 )
+#: ADR-114(migration 410) latest-only 정리 세 길. runtime이 지우는 유일한 통로다 — 표 DELETE 권한은 없다.
+_LATEST_ONLY_RETENTION_FUNCTIONS = frozenset(
+    {
+        "feature.prune_transport_price_facts(bigint)",
+        "provider_sync.prune_latest_only_lineage(bigint)",
+        "feature.purge_ended_provider_notices(bigint,interval)",
+    }
+)
 _M05_ACK_PROCEDURE = (
     "feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)"
 )
@@ -303,6 +311,7 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
     "ktm_feature_service": (
         _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
+        | _LATEST_ONLY_RETENTION_FUNCTIONS
         | frozenset(
             {
                 _MANUAL_FEATURE_PROVENANCE_FUNCTION,
