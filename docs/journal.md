@@ -1,3 +1,23 @@
+## 2026-10-23 — ADR-115 실제 동시 쓰기 설계·작업 원장
+
+- 근거: main `cdd2614007a86e8627949cd1176c61eb14c0ce3e`. 단순 dataset별 advisory 교체로는
+  공유 Feature·source/link 역순 잠금·root/candidate seal·과거 lock table 고갈 문제가 해결되지 않음을 반영했다.
+- 문서: dataset/지역 scope와 Feature 행 충돌 분리, 결정적 provider 후보 winner, override/retire/merge,
+  manifest 재검증·epoch fencing·SERIALIZABLE root·호환 gate·원자적 snapshot·롤백·실측 수용을 작성했다.
+- 원장: T-CWRITE-01~09 및 각 acceptance를 등록했다. Map 코딩은 진행 중 Weather·Transport 작업 뒤다.
+- 독립 적대 리뷰 반영: partial head carry-forward의 값 원문/검증 head 분리, 전체 활성 후보 복원,
+  원자적 정책 활성화, 지역 누락과 전역 소실 구분, 다중 SELECT snapshot, Geo 그룹 winner/stamp
+  lineage를 설계·해당 acceptance에 함께 보강했다. ADR 색인의 다음 번호를 처음 115로 맞췄고, 아래 main 동기화에서 116으로 갱신했다.
+- 재리뷰 반영: 배타 fallback/flag OFF는 잠금만 전역화하며 active 후보/winner 의미를 유지한다.
+  직접 base legacy writer는 DB 거부하거나 scope policy cutover를 차단하고 A winner/B fallback/OFF
+  fixture를 T-CWRITE-03·04·09에 명시했다. gate만으로 의미 안전성을 주장하던 문장을 제거했다.
+- main `952ceb659`(PR #1352, Valkey 설계 문서)와 merge 충돌을 해결하며 선점된 ADR-114를
+  보존하고 본 설계를 ADR-115/다음 후보 116으로 변경했다. main의 기능 코드 변경은 0이며
+  PG 잔존/퇴역 writer와 별도 Valkey 세대 경계를 설계·T-CWRITE-01 수용 조건에 명시했다.
+  후속 main `beec86812`(#1353)의 Weather 반나절 요약 문서도 추가 merge해 보존했다.
+- 검증: 문서/코드 근거·링크·원장 정합만 점검한다. 사용자 지시대로 CI를 실행하거나 기다리지 않는다.
+  실제 코드·schema·서비스 변경과 성능 실측은 아직 없으며 문서 PR 완료와 구분한다.
+
 ## 2026-10-22 — T-LOAD-LOCK-WAIT 2안(ADR-113): 스트리밍 snapshot은 다 받은 뒤 짧게 쓴다: 브랜치 `fix/short-curation-lock-hold`
 
 - 원인(1안 PR 실측): `load_feature_bundle_batches`가 transaction을 먼저 열고 stream을 당겨, 첫 batch가 잡은
